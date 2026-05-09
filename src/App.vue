@@ -218,12 +218,8 @@ async function confirmRename(conv) {
   const newTitle = renameText.value.trim();
   if (newTitle && newTitle !== conv.title) {
     conv.title = newTitle;
-    // Persist via existing updateConversationTitle IPC (reuse the title update mechanism)
-    await window.electronAPI.setConfig(`conv_title_${conv.id}`, newTitle);
-    // Also update in DB if we have a dedicated handler
-    try {
-      await window.electronAPI.addMessage(conv.id, 'system', `__rename__${newTitle}`, null);
-    } catch (e) { /* silently ignore if not supported */ }
+    // 持久化到 conversations 表
+    await window.electronAPI.renameConversation(conv.id, newTitle);
   }
   renamingId.value = null;
   renameText.value = '';

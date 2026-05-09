@@ -43,6 +43,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getConversations: () => ipcRenderer.invoke('db:conversations'),
   createConversation: (title, model) => ipcRenderer.invoke('db:conversation:create', title, model),
   deleteConversation: (id) => ipcRenderer.invoke('db:conversation:delete', id),
+  renameConversation: (id, title) => ipcRenderer.invoke('db:conversation:rename', id, title),
   getMessages: (conversationId) => ipcRenderer.invoke('db:messages', conversationId),
   addMessage: (conversationId, role, content, imageBase64) =>
     ipcRenderer.invoke('db:message:add', conversationId, role, content, imageBase64),

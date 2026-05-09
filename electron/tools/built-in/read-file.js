@@ -16,16 +16,16 @@ module.exports = {
   async execute({ path }) {
     try {
       if (!fs.existsSync(path)) {
-        return \`Error: File does not exist: \${path}\`;
+        return `Error: File does not exist: ${path}`;
       }
       const stat = fs.statSync(path);
       if (!stat.isFile()) {
-        return \`Error: Path is not a file: \${path}\`;
+        return `Error: Path is not a file: ${path}`;
       }
       const content = fs.readFileSync(path, { encoding: 'utf-8' });
       return content;
     } catch (err) {
-      return \`Error: \${err.message}\`;
+      return `Error: ${err.message}`;
     }
   }
 };

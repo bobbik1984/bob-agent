@@ -22,15 +22,18 @@
 
       <!-- 消息列表 -->
       <div
-        v-for="(msg, idx) in messages"
+        v-for="(msg, idx) in displayMessages"
         :key="msg.id || idx"
         class="message-row animate-slide-up"
         :class="[`message-${msg.role}`]"
       >
-        <div class="message-avatar">
-          <User v-if="msg.role === 'user'" :size="18" />
+        <!-- 头像 -->
+        <div class="message-avatar" :class="msg.role === 'user' ? 'avatar-user' : 'avatar-bob'">
+          <User v-if="msg.role === 'user'" :size="16" />
           <span v-else class="bob-avatar">B</span>
         </div>
+
+        <!-- 内容 -->
         <div class="message-body">
           <!-- 解析出的事件卡片 -->
           <template v-if="msg.type === 'confirm-card'">
@@ -62,7 +65,7 @@
 
       <!-- 流式输出中 -->
       <div v-if="isStreaming" class="message-row message-assistant animate-slide-up">
-        <div class="message-avatar"><span class="bob-avatar">B</span></div>
+        <div class="message-avatar avatar-bob"><span class="bob-avatar">B</span></div>
         <div class="message-body">
           <div v-if="streamThinking" class="thinking-card expanded">
             <button class="thinking-toggle">
@@ -223,6 +226,13 @@ const availableModels = ref([]);
 const sessionCost = ref(0);
 
 const canSend = ref(true);
+
+// 过滤掉系统消息（如 __rename__）
+const displayMessages = computed(() => {
+  return messages.value.filter(m =>
+    m.role !== 'system' && !(m.content && m.content.startsWith('__rename__'))
+  );
+});
 
 // ── 模型指示器 & 切换 ────────────────────────────────
 function getModelLogo(modelId) {
@@ -695,69 +705,81 @@ function scrollToBottom() {
   box-shadow: var(--shadow-glow);
 }
 
-/* ── 消息行 ─────────────────────────────────────────── */
+/* ── 消息行（聊天气泡布局）─────────────────────────── */
 .message-row {
   display: flex;
-  gap: var(--space-3);
+  gap: var(--space-2);
   max-width: 800px;
   width: 100%;
   margin: 0 auto;
+  align-items: flex-start;
 }
 
+/* 用户消息：头像在左，内容靠左 */
 .message-user {
+  flex-direction: row;
+}
+
+/* Bob 消息：头像在右，内容靠右 */
+.message-assistant {
   flex-direction: row-reverse;
 }
 
+/* 头像 */
 .message-avatar {
   width: 28px;
   height: 28px;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 50%;
-  background: transparent;
-  color: var(--text-tertiary);
+  border-radius: var(--radius-sm);
   flex-shrink: 0;
   margin-top: 4px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.avatar-user {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-secondary);
+}
+
+.avatar-bob {
+  background: rgba(255, 255, 255, 0.12);
+  color: var(--text-primary);
 }
 
 .bob-avatar {
   font-family: var(--font-sans);
   font-weight: 700;
-  font-size: 16px;
-  color: var(--text-primary);
-  opacity: 0.9;
+  font-size: 14px;
   letter-spacing: -0.5px;
 }
 
-.message-user .message-avatar {
-  background: rgba(255, 255, 255, 0.05);
-}
-
+/* 内容块：最宽占 80%，文字始终左对齐 */
 .message-body {
-  flex: 1;
+  max-width: 80%;
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
   min-width: 0;
+  text-align: left;
 }
 
 .message-content {
   padding: var(--space-2) 0;
-  border-radius: 0;
   line-height: 1.6;
   word-break: break-word;
-  color: var(--text-primary);
 }
 
+/* 用户消息稍暗 */
 .message-user .message-content {
-  background: transparent;
-  border: none;
+  color: var(--text-secondary);
 }
 
+/* Bob 回复正常亮度 */
 .message-assistant .message-content {
-  background: transparent;
-  border: none;
+  color: var(--text-primary);
 }
 
 .message-content :deep(code) {

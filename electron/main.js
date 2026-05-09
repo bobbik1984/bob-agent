@@ -7,6 +7,9 @@
  * - 初始化后端服务 (LLM / DB / Calendar 等)
  */
 
+// 加载项目根目录的 .env 文件（必须在其他 require 之前）
+require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') });
+
 const { app, BrowserWindow, ipcMain, dialog, clipboard, nativeImage, Notification } = require('electron');
 const path = require('path');
 const { LLMClient } = require('./services/llm-client');
@@ -58,7 +61,12 @@ function buildSystemPrompt() {
 1. **本地文件读取**：用户可以拖拽文件到对话窗口，或者通过粘贴操作分享文件，你能读取 txt/md/json/csv/py/js/docx/xlsx/pdf 等格式的文件内容。
 2. **图片识别 (Vision)**：用户可以粘贴截图或拖入图片，你可以识别并分析图片内容。
 3. **日程与待办管理**：你可以从用户的自然语言中提取日程和待办事项，保存到本地 SQLite 数据库，并在"智能收件箱"中展示周历和待办清单。
-4. **剪贴板访问**：你可以读取用户剪贴板中的图片。`;
+4. **剪贴板访问**：你可以读取用户剪贴板中的图片。
+5. **工具调用 (Function Calling)**：你拥有以下可直接调用的工具——
+   - **web_search**：搜索互联网获取实时信息。当用户询问最新新闻、价格、模型发布等需要联网的问题时，**必须主动调用此工具**，不要说"我无法联网"。
+   - **list_directory**：列出指定目录下的文件和文件夹。
+   - **read_file**：读取指定路径的文本文件内容。
+   当你判断需要使用工具时，直接调用即可，不需要用户授权。搜索到结果后，用中文为用户总结关键信息。`;
 
   if (workspaceDir) {
     const dirListing = scanDir(workspaceDir);
@@ -448,6 +456,11 @@ function registerIPCHandlers() {
 
   ipcMain.handle('db:conversation:delete', async (_event, id) => {
     db.deleteConversation(id);
+    return { ok: true };
+  });
+
+  ipcMain.handle('db:conversation:rename', async (_event, id, title) => {
+    db.updateConversationTitle(id, title);
     return { ok: true };
   });
 

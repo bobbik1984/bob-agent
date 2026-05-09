@@ -16,11 +16,11 @@ module.exports = {
   async execute({ path }) {
     try {
       if (!fs.existsSync(path)) {
-        return \`Error: Directory does not exist: \${path}\`;
+        return `Error: Directory does not exist: ${path}`;
       }
       const stat = fs.statSync(path);
       if (!stat.isDirectory()) {
-        return \`Error: Path is not a directory: \${path}\`;
+        return `Error: Path is not a directory: ${path}`;
       }
       const entries = fs.readdirSync(path, { withFileTypes: true });
       const items = entries.map(e => ({
@@ -29,7 +29,7 @@ module.exports = {
       }));
       return JSON.stringify({ path, items }, null, 2);
     } catch (err) {
-      return \`Error: \${err.message}\`;
+      return `Error: ${err.message}`;
     }
   }
 };

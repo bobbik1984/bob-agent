@@ -36,13 +36,13 @@ module.exports = {
       });
 
       if (!response.ok) {
-        return \`Error: API request failed with status \${response.status}\`;
+        return `Error: API request failed with status ${response.status}`;
       }
 
       const data = await response.json();
       return JSON.stringify(data, null, 2);
     } catch (err) {
-      return \`Error: \${err.message}\`;
+      return `Error: ${err.message}`;
     }
   }
 };
