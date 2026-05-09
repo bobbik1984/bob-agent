@@ -4,3 +4,6 @@ out/
 .env
 *.exe
 *.msi
+*.db
+*.db-journal
+*.db-wal
