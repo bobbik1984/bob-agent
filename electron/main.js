@@ -10,11 +10,13 @@
 const { app, BrowserWindow, ipcMain, dialog, clipboard, nativeImage, Notification } = require('electron');
 const path = require('path');
 const { LLMClient } = require('./services/llm-client');
+const { ToolRegistry } = require('./tools/registry');
 const { Database } = require('./services/db');
 
 // ─── 全局单例 ───────────────────────────────────────────
 let mainWindow = null;
 let llmClient = null;
+let toolRegistry = null;
 let db = null;
 
 const isDev = !app.isPackaged;
@@ -157,7 +159,10 @@ function initServices() {
   const apiKey = db.getConfig('apiKey') || '';
   const model = db.getConfig('model') || '';
 
-  llmClient = new LLMClient({ provider, apiKey, model });
+  toolRegistry = new ToolRegistry();
+  toolRegistry.init(path.join(__dirname, 'tools', 'built-in'));
+
+  llmClient = new LLMClient({ provider, apiKey, model, registry: toolRegistry });
 }
 
 // ─── IPC Handlers ───────────────────────────────────────
@@ -466,7 +471,7 @@ function registerIPCHandlers() {
       const provider = db.getConfig('provider') || 'deepseek';
       const apiKey = db.getConfig('apiKey') || '';
       const model = db.getConfig('model') || '';
-      llmClient = new LLMClient({ provider, apiKey, model });
+      llmClient = new LLMClient({ provider, apiKey, model, registry: toolRegistry });
     }
     return { ok: true };
   });

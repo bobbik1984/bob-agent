@@ -50,9 +50,32 @@ class ToolRegistry {
     try {
       const items = fs.readdirSync(dirPath, { withFileTypes: true });
       for (const item of items) {
-        // 这里只是一个骨架，Jules 会实现具体的扫描逻辑：
-        // 比如寻找 index.js 或 *.js， require 进来，并调用 this.register()
-        // 需要处理外部目录可能带来的安全性问题
+        const fullPath = path.join(dirPath, item.name);
+
+        if (item.isDirectory()) {
+          this.scanDirectory(fullPath);
+        } else if (item.isFile() && item.name.endsWith('.js')) {
+          try {
+            const mod = require(fullPath);
+            if (mod && mod.name && mod.execute) {
+              // Wrap simple exported objects into a BaseTool
+              class DynamicTool extends BaseTool {
+                constructor() {
+                  super();
+                  this.name = mod.name;
+                  this.description = mod.description || 'No description';
+                  this.input_schema = mod.parameters || { type: 'object', properties: {} };
+                }
+                async execute(params) {
+                  return await mod.execute(params);
+                }
+              }
+              this.register(new DynamicTool());
+            }
+          } catch (reqErr) {
+             console.error(`[ToolRegistry] Failed to load tool from ${fullPath}:`, reqErr);
+          }
+        }
       }
     } catch (err) {
       console.error(`[ToolRegistry] Error scanning directory ${dirPath}:`, err);

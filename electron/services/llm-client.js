@@ -57,7 +57,8 @@ class LLMClient {
    * @param {string} config.model - 模型 ID (可选，为空时用供应商默认)
    * @param {string} config.baseURL - 自定义 baseURL (仅 custom 供应商)
    */
-  constructor({ provider = 'deepseek', apiKey = '', model = '', baseURL = '' } = {}) {
+  constructor({ provider = 'deepseek', apiKey = '', model = '', baseURL = '', registry = null } = {}) {
+    this.registry = registry;
     this.provider = provider;
     this.apiKey = apiKey;
     this.modelId = model;
@@ -143,33 +144,89 @@ class LLMClient {
     let usageData = null;
 
     try {
-      const stream = await this._client.chat.completions.create(
-        {
+      let currentMessages = [...messages];
+      let iterationCount = 0;
+      const MAX_ITERATIONS = 5;
+
+      while (iterationCount < MAX_ITERATIONS) {
+        iterationCount++;
+
+        const params = {
           model: modelId,
-          messages,
+          messages: currentMessages,
           stream: true,
           stream_options: { include_usage: true },
-        },
-        { signal: this._abortController.signal }
-      );
+        };
 
-      for await (const chunk of stream) {
-        // 捕获最终的 usage 数据
-        if (chunk.usage) {
-          usageData = chunk.usage;
+        if (this.registry) {
+          const schemas = this.registry.getAllSchemas();
+          if (schemas && schemas.length > 0) {
+            params.tools = schemas;
+          }
         }
 
-        const delta = chunk.choices?.[0]?.delta;
-        if (!delta) continue;
+        const stream = await this._client.chat.completions.create(
+          params,
+          { signal: this._abortController.signal }
+        );
 
-        // DeepSeek reasoning_content (思维链)
-        if (delta.reasoning_content) {
-          yield { type: 'thinking', content: delta.reasoning_content };
+        let toolCallsMap = new Map();
+
+        for await (const chunk of stream) {
+          if (chunk.usage) {
+            usageData = chunk.usage;
+          }
+
+          const delta = chunk.choices?.[0]?.delta;
+          if (!delta) continue;
+
+          if (delta.tool_calls) {
+            for (const toolCall of delta.tool_calls) {
+              if (!toolCallsMap.has(toolCall.index)) {
+                toolCallsMap.set(toolCall.index, {
+                  id: toolCall.id,
+                  type: 'function',
+                  function: { name: toolCall.function?.name || '', arguments: '' }
+                });
+              }
+              const tc = toolCallsMap.get(toolCall.index);
+              if (toolCall.id) tc.id = toolCall.id;
+              if (toolCall.function?.name) tc.function.name += toolCall.function.name;
+              if (toolCall.function?.arguments) tc.function.arguments += toolCall.function.arguments;
+            }
+            continue;
+          }
+
+          if (delta.reasoning_content) {
+            yield { type: 'thinking', content: delta.reasoning_content };
+          }
+
+          if (delta.content) {
+            yield { type: 'text', content: delta.content };
+          }
         }
 
-        // 正常文本内容
-        if (delta.content) {
-          yield { type: 'text', content: delta.content };
+        if (toolCallsMap.size > 0) {
+          const toolCalls = Array.from(toolCallsMap.values());
+          currentMessages.push({ role: 'assistant', tool_calls: toolCalls, content: null });
+
+          for (const tc of toolCalls) {
+            let result = '';
+            try {
+              const args = JSON.parse(tc.function.arguments || '{}');
+              if (this.registry) {
+                const res = await this.registry.executeTool(tc.function.name, args);
+                result = typeof res === 'string' ? res : JSON.stringify(res);
+              } else {
+                result = 'ToolRegistry not available.';
+              }
+            } catch (e) {
+              result = e.toString();
+            }
+            currentMessages.push({ role: 'tool', tool_call_id: tc.id, content: result });
+          }
+        } else {
+          break;
         }
       }
 
