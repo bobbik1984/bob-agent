@@ -1,11 +1,17 @@
 <template>
   <div class="settings-view">
     <div class="settings-scroll">
-      <h2 class="settings-title">⚙️ 设置</h2>
+      <h2 class="settings-title">
+        <SettingsIcon :size="22" class="title-icon" />
+        设置
+      </h2>
 
       <!-- AI 模型配置 -->
       <section class="settings-section card">
-        <h3 class="section-title">🤖 AI 模型</h3>
+        <h3 class="section-title">
+          <Cpu :size="16" class="section-icon" />
+          AI 模型
+        </h3>
 
         <div class="form-group">
           <label class="form-label">服务商</label>
@@ -27,7 +33,8 @@
             @blur="saveConfig('apiKey', config.apiKey)"
           />
           <button class="btn-icon toggle-key" @click="showApiKey = !showApiKey">
-            {{ showApiKey ? '🙈' : '👁️' }}
+            <EyeOff v-if="showApiKey" :size="16" />
+            <Eye v-else :size="16" />
           </button>
         </div>
 
@@ -53,7 +60,9 @@
         <!-- 连接测试 -->
         <div class="test-section">
           <button class="btn btn-ghost" @click="testConnection" :disabled="isTesting">
-            {{ isTesting ? '测试中...' : '🔌 测试连接' }}
+            <Loader2 v-if="isTesting" :size="14" class="animate-spin" />
+            <Plug v-else :size="14" />
+            <span>{{ isTesting ? '测试中...' : '测试连接' }}</span>
           </button>
           <span v-if="testResult" class="test-result" :class="testResult.ok ? 'success' : 'error'">
             {{ testResult.message }}
@@ -63,19 +72,53 @@
 
       <!-- 外观 -->
       <section class="settings-section card">
-        <h3 class="section-title">🎨 外观</h3>
+        <h3 class="section-title">
+          <Palette :size="16" class="section-icon" />
+          外观
+        </h3>
         <div class="form-group">
           <label class="form-label">主题</label>
           <select v-model="config.theme" class="input" @change="saveConfig('theme', config.theme)">
-            <option value="dark">🌙 暗色</option>
-            <option value="light">☀️ 亮色 (开发中)</option>
+            <option value="dark">暗色</option>
+            <option value="light">亮色 (开发中)</option>
           </select>
         </div>
       </section>
 
+      <!-- 工作目录 -->
+      <section class="settings-section card">
+        <h3 class="section-title">
+          <FolderOpen :size="16" class="section-icon" />
+          工作目录
+        </h3>
+        <p class="section-desc">配置后，bob-agent 可以主动浏览和读取该目录下的文件</p>
+        <div class="form-group workspace-group">
+          <input
+            v-model="config.workspaceDir"
+            class="input"
+            placeholder="点击右侧按钮选择目录..."
+            readonly
+          />
+          <button class="btn btn-ghost browse-btn" @click="selectWorkspaceDir">
+            <FolderOpen :size="14" />
+            <span>浏览</span>
+          </button>
+        </div>
+        <button
+          v-if="config.workspaceDir"
+          class="btn-clear"
+          @click="clearWorkspaceDir"
+        >
+          清除工作目录
+        </button>
+      </section>
+
       <!-- 关于 -->
       <section class="settings-section card">
-        <h3 class="section-title">ℹ️ 关于</h3>
+        <h3 class="section-title">
+          <Info :size="16" class="section-icon" />
+          关于
+        </h3>
         <div class="about-info">
           <p>bob-agent v0.1.0</p>
           <p class="about-desc">AI 桌面私人秘书 — 智能对话 + 图片识别 + 日程管理 + 文件分析</p>
@@ -87,6 +130,7 @@
 
 <script setup>
 import { ref, onMounted, defineEmits } from 'vue';
+import { Settings as SettingsIcon, Cpu, Eye, EyeOff, Plug, Loader2, Palette, Info, FolderOpen } from 'lucide-vue-next';
 
 const emit = defineEmits(['config-changed']);
 
@@ -111,6 +155,7 @@ onMounted(async () => {
     model: allConfig.model || '',
     baseURL: allConfig.baseURL || '',
     theme: allConfig.theme || 'dark',
+    workspaceDir: allConfig.workspaceDir || '',
   };
   await loadModels();
 });
@@ -145,15 +190,28 @@ async function testConnection() {
     ]);
 
     if (result.error) {
-      testResult.value = { ok: false, message: `❌ ${result.error}` };
+      testResult.value = { ok: false, message: result.error };
     } else {
-      testResult.value = { ok: true, message: '✅ 连接成功！' };
+      testResult.value = { ok: true, message: '连接成功' };
     }
   } catch (err) {
-    testResult.value = { ok: false, message: `❌ ${err.message}` };
+    testResult.value = { ok: false, message: err.message };
   } finally {
     isTesting.value = false;
   }
+}
+
+async function selectWorkspaceDir() {
+  const dirPath = await window.electronAPI.selectWorkspaceDir();
+  if (dirPath) {
+    config.value.workspaceDir = dirPath;
+    await saveConfig('workspaceDir', dirPath);
+  }
+}
+
+async function clearWorkspaceDir() {
+  config.value.workspaceDir = '';
+  await saveConfig('workspaceDir', '');
 }
 </script>
 
@@ -172,9 +230,21 @@ async function testConnection() {
 }
 
 .settings-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
   font-size: var(--text-2xl);
   font-weight: 600;
   margin-bottom: var(--space-6);
+}
+
+.title-icon {
+  color: var(--text-secondary);
+}
+
+.section-icon {
+  color: var(--text-tertiary);
+  vertical-align: middle;
 }
 
 .settings-section {
@@ -243,5 +313,46 @@ select.input {
 .about-desc {
   color: var(--text-tertiary);
   margin-top: var(--space-1);
+}
+
+.section-desc {
+  font-size: var(--text-sm);
+  color: var(--text-tertiary);
+  margin-bottom: var(--space-4);
+}
+
+.workspace-group {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.workspace-group .input {
+  flex: 1;
+  cursor: default;
+}
+
+.browse-btn {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.btn-clear {
+  background: transparent;
+  border: none;
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  padding: var(--space-1) 0;
+  margin-top: var(--space-2);
+  font-family: var(--font-sans);
+  transition: color var(--duration-fast);
+}
+
+.btn-clear:hover {
+  color: var(--color-error);
 }
 </style>

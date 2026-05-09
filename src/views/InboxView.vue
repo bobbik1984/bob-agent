@@ -1,12 +1,16 @@
 <template>
   <div class="inbox-view">
     <div class="inbox-header">
-      <h2 class="inbox-title">📅 智能收件箱</h2>
+      <h2 class="inbox-title">
+        <Inbox :size="24" class="title-icon" />
+        智能收件箱
+      </h2>
       <p class="inbox-subtitle">日程管理 + 待办清单</p>
     </div>
 
     <div v-if="isLoading" class="loading-state">
-      ⏳ 加载中...
+      <Loader2 :size="24" class="animate-spin" />
+      <span>加载中...</span>
     </div>
 
     <div v-else class="inbox-content">
@@ -25,6 +29,7 @@
 
 <script setup>
 import { ref, onMounted } from 'vue';
+import { Inbox, Loader2 } from 'lucide-vue-next';
 import WeekTimeline from '../components/WeekTimeline.vue';
 import TodoList from '../components/TodoList.vue';
 
@@ -69,9 +74,16 @@ function onTodoStatusUpdate({ id, status }) {
 }
 
 .inbox-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
   font-size: var(--text-2xl);
   font-weight: 600;
   color: var(--text-primary);
+}
+
+.title-icon {
+  color: var(--text-secondary);
 }
 
 .inbox-subtitle {
@@ -80,7 +92,10 @@ function onTodoStatusUpdate({ id, status }) {
 }
 
 .loading-state {
-  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
   color: var(--text-tertiary);
   padding: var(--space-8);
 }

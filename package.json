@@ -20,7 +20,9 @@
       "output": "out"
     },
     "win": {
-      "target": ["nsis"],
+      "target": [
+        "nsis"
+      ],
       "icon": "assets/icon.ico"
     },
     "nsis": {
@@ -36,6 +38,7 @@
   "dependencies": {
     "better-sqlite3": "^11.0.0",
     "highlight.js": "^11.10.0",
+    "lucide-vue-next": "^1.0.0",
     "mammoth": "^1.8.0",
     "marked": "^14.0.0",
     "marked-highlight": "^2.2.0",

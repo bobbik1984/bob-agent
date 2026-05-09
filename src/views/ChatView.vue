@@ -4,18 +4,18 @@
     <div class="messages-area" ref="messagesArea">
       <!-- 空状态 -->
       <div v-if="messages.length === 0" class="empty-state animate-fade-in">
-        <div class="empty-icon">✨</div>
+        <Sparkles :size="48" class="empty-icon" />
         <h2 class="empty-title">你好，有什么可以帮你的？</h2>
         <p class="empty-subtitle">对话、粘贴图片、拖入文件 — 我都能处理</p>
         <div class="quick-actions">
           <button class="quick-action card" @click="insertPrompt('帮我总结一下这段文字')">
-            📝 文字总结
+            <FileText :size="16" /> 文字总结
           </button>
           <button class="quick-action card" @click="insertPrompt('帮我分析这张图片')">
-            📸 图片分析
+            <Camera :size="16" /> 图片分析
           </button>
           <button class="quick-action card" @click="insertPrompt('下周三下午3点和李总开会')">
-            📅 创建日程
+            <Calendar :size="16" /> 创建日程
           </button>
         </div>
       </div>
@@ -28,7 +28,8 @@
         :class="[`message-${msg.role}`]"
       >
         <div class="message-avatar">
-          {{ msg.role === 'user' ? '👤' : '🤖' }}
+          <User v-if="msg.role === 'user'" :size="18" />
+          <span v-else class="bob-avatar">B</span>
         </div>
         <div class="message-body">
           <!-- 解析出的事件卡片 -->
@@ -43,9 +44,8 @@
           <!-- 思维链折叠 -->
           <div v-else-if="msg.thinking" class="thinking-card" :class="{ expanded: msg._thinkingExpanded }">
             <button class="thinking-toggle" @click="msg._thinkingExpanded = !msg._thinkingExpanded">
-              <span class="thinking-icon">💭</span>
-              <span>思考过程</span>
-              <span class="thinking-arrow">{{ msg._thinkingExpanded ? '▾' : '▸' }}</span>
+              <ChevronRight :size="14" class="thinking-arrow" :class="{ 'expanded': msg._thinkingExpanded }" />
+              <span>Thought process</span>
             </button>
             <div v-if="msg._thinkingExpanded" class="thinking-content selectable">
               {{ msg.thinking }}
@@ -62,12 +62,12 @@
 
       <!-- 流式输出中 -->
       <div v-if="isStreaming" class="message-row message-assistant animate-slide-up">
-        <div class="message-avatar">🤖</div>
+        <div class="message-avatar"><span class="bob-avatar">B</span></div>
         <div class="message-body">
           <div v-if="streamThinking" class="thinking-card expanded">
             <button class="thinking-toggle">
-              <span class="thinking-icon">💭</span>
-              <span>思考中...</span>
+              <ChevronDown :size="14" class="thinking-arrow" />
+              <span>Thinking...</span>
             </button>
             <div class="thinking-content selectable">{{ streamThinking }}</div>
           </div>
@@ -83,7 +83,7 @@
     <div v-if="pendingImage" class="image-preview-bar animate-slide-up">
       <div class="image-preview-thumb">
         <img :src="'data:image/png;base64,' + pendingImage" alt="待发送图片" />
-        <button class="image-remove btn-icon" @click="pendingImage = null">✕</button>
+        <button class="image-remove btn-icon" @click="pendingImage = null"><X :size="12" /></button>
       </div>
       <span class="image-hint">图片已就绪，输入描述后发送</span>
     </div>
@@ -97,7 +97,7 @@
       @drop.prevent="handleDrop"
     >
       <div class="drop-content">
-        <span class="drop-icon">📁</span>
+        <FileUp :size="48" class="drop-icon" />
         <span>松开以分析文件</span>
       </div>
     </div>
@@ -106,11 +106,15 @@
     <div class="input-area">
       <div class="quick-actions-bar" v-if="inputText.trim().length > 0">
         <button class="btn-parse-event" @click="parseTextAsEvent" :disabled="isParsing">
-          {{ isParsing ? '⏳ 解析中...' : '📅 解析为日程' }}
+          <Calendar v-if="!isParsing" :size="14" />
+          <Loader2 v-else :size="14" class="animate-spin" />
+          <span>{{ isParsing ? '解析中...' : '解析为日程' }}</span>
         </button>
       </div>
       <div class="input-row">
-        <button class="btn-icon" title="粘贴图片 (Ctrl+V)" @click="pasteImage">📎</button>
+        <button class="btn-icon paste-btn" title="粘贴图片 (Ctrl+V)" @click="pasteImage">
+          <Paperclip :size="18" />
+        </button>
         <textarea
           ref="inputRef"
           v-model="inputText"
@@ -126,7 +130,7 @@
           class="btn btn-ghost stop-btn"
           @click="stopGeneration"
         >
-          ⏹ 停止
+          <Square :size="16" /> 停止
         </button>
         <button
           v-else
@@ -134,7 +138,7 @@
           :disabled="!canSend"
           @click="sendMessage"
         >
-          发送
+          <Send :size="16" /> 发送
         </button>
       </div>
     </div>
@@ -158,6 +162,7 @@ marked.setOptions({ breaks: true, gfm: true });
 
 <script setup>
 import { ref, watch, onMounted, onUnmounted, nextTick, defineProps, defineEmits } from 'vue';
+import { Sparkles, FileText, Camera, Calendar, User, ChevronRight, ChevronDown, X, FileUp, Paperclip, Square, Send, Loader2 } from 'lucide-vue-next';
 import ConfirmCard from '../components/ConfirmCard.vue';
 
 const props = defineProps({
@@ -190,7 +195,7 @@ async function parseTextAsEvent() {
     messages.value.push({ role: 'assistant', type: 'confirm-card', event: parsed });
     scrollToBottom();
   } catch (err) {
-    messages.value.push({ role: 'assistant', content: `⚠️ 解析日程失败: ${err.message}` });
+    messages.value.push({ role: 'assistant', content: `解析日程失败: ${err.message}` });
   } finally {
     isParsing.value = false;
     inputText.value = '';
@@ -202,10 +207,10 @@ async function handleConfirmEvent(event, msgObj) {
   try {
     const res = await window.electronAPI.confirmEvent(event);
     if (res.ok) {
-      msgObj.content = `✅ 已成功保存为${event.type === 'todo' ? '待办' : '日程'}：${event.title}`;
+      msgObj.content = `已成功保存为${event.type === 'todo' ? '待办' : '日程'}：${event.title}`;
       msgObj.type = 'text'; // 将卡片转化为普通文本消息
     } else {
-      msgObj.content = `⚠️ 保存失败: ${res.error}`;
+      msgObj.content = `保存失败: ${res.error}`;
       msgObj.type = 'text';
     }
   } catch (err) {
@@ -308,7 +313,7 @@ async function sendMessage() {
     if (result.error) {
       messages.value.push({
         role: 'assistant',
-        content: `⚠️ ${result.error}`,
+        content: `${result.error}`,
         _thinkingExpanded: false,
       });
     } else {
@@ -332,7 +337,7 @@ async function sendMessage() {
   } catch (err) {
     messages.value.push({
       role: 'assistant',
-      content: `⚠️ 发生错误: ${err.message}`,
+      content: `发生错误: ${err.message}`,
       _thinkingExpanded: false,
     });
   } finally {
@@ -419,12 +424,12 @@ async function handleDrop(event) {
   try {
     const result = await window.electronAPI.readFile(file.path);
     if (result.error) {
-      inputText.value = `⚠️ 文件读取失败: ${result.error}`;
+      inputText.value = `文件读取失败: ${result.error}`;
     } else {
       inputText.value = `请分析以下文件内容 (${result.name}):\n\n${result.content}`;
     }
   } catch (err) {
-    inputText.value = `⚠️ 文件处理失败: ${err.message}`;
+    inputText.value = `文件处理失败: ${err.message}`;
   }
 }
 
@@ -494,8 +499,9 @@ function scrollToBottom() {
 }
 
 .empty-icon {
-  font-size: 3rem;
   margin-bottom: var(--space-2);
+  color: var(--text-tertiary);
+  opacity: 0.5;
 }
 
 .empty-title {
@@ -519,7 +525,10 @@ function scrollToBottom() {
 }
 
 .quick-action {
-  padding: var(--space-3) var(--space-5);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
   font-size: var(--text-sm);
   color: var(--text-secondary);
   cursor: pointer;
@@ -551,19 +560,29 @@ function scrollToBottom() {
 }
 
 .message-avatar {
-  width: 32px;
-  height: 32px;
+  width: 28px;
+  height: 28px;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: var(--radius-sm);
-  background: var(--surface-card);
-  font-size: var(--text-lg);
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-tertiary);
   flex-shrink: 0;
+  margin-top: 4px;
+}
+
+.bob-avatar {
+  font-family: var(--font-sans);
+  font-weight: 700;
+  font-size: 16px;
+  color: var(--text-primary);
+  opacity: 0.9;
+  letter-spacing: -0.5px;
 }
 
 .message-user .message-avatar {
-  background: var(--gradient-subtle);
+  background: rgba(255, 255, 255, 0.05);
 }
 
 .message-body {
@@ -575,20 +594,21 @@ function scrollToBottom() {
 }
 
 .message-content {
-  padding: var(--space-3) var(--space-4);
-  border-radius: var(--radius-lg);
-  line-height: var(--leading-relaxed);
+  padding: var(--space-2) 0;
+  border-radius: 0;
+  line-height: 1.6;
   word-break: break-word;
+  color: var(--text-primary);
 }
 
 .message-user .message-content {
-  background: var(--gradient-subtle);
-  border: 1px solid rgba(99, 102, 241, 0.15);
+  background: transparent;
+  border: none;
 }
 
 .message-assistant .message-content {
-  background: var(--surface-card);
-  border: 1px solid var(--border-subtle);
+  background: transparent;
+  border: none;
 }
 
 .message-content :deep(code) {
@@ -606,36 +626,46 @@ function scrollToBottom() {
 
 /* ── 思维链折叠 ─────────────────────────────────────── */
 .thinking-card {
-  border-radius: var(--radius-md);
-  border: 1px solid rgba(251, 191, 36, 0.15);
-  background: rgba(251, 191, 36, 0.05);
-  overflow: hidden;
+  margin-top: var(--space-2);
+  border-radius: 0;
+  border: none;
+  background: transparent;
+  border-left: 2px solid var(--border-subtle);
+  margin-left: 2px;
 }
 
 .thinking-toggle {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  width: 100%;
-  padding: var(--space-2) var(--space-3);
+  width: auto;
+  padding: var(--space-1) var(--space-3);
   border: none;
   background: transparent;
-  color: var(--color-warning);
+  color: var(--text-muted);
   font-family: var(--font-sans);
   font-size: var(--text-sm);
   cursor: pointer;
-  opacity: 0.8;
+  transition: color var(--duration-fast);
+}
+
+.thinking-arrow {
+  transition: transform var(--duration-fast);
+}
+
+.thinking-arrow.expanded {
+  transform: rotate(90deg);
 }
 
 .thinking-toggle:hover {
-  opacity: 1;
+  color: var(--text-secondary);
 }
 
 .thinking-content {
-  padding: 0 var(--space-3) var(--space-3);
+  padding: var(--space-2) var(--space-4);
   font-size: var(--text-sm);
   color: var(--text-tertiary);
-  line-height: var(--leading-relaxed);
+  line-height: 1.6;
   white-space: pre-wrap;
   max-height: 300px;
   overflow-y: auto;
@@ -734,19 +764,20 @@ function scrollToBottom() {
 }
 
 .btn-parse-event {
-  background: var(--surface-glass);
-  color: var(--accent-tertiary);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  background: transparent;
+  color: var(--text-secondary);
+  border: none;
   padding: 4px 12px;
-  font-size: var(--text-sm);
+  font-size: var(--text-xs);
   cursor: pointer;
-  transition: all 0.2s;
+  transition: color 0.2s;
 }
 
 .btn-parse-event:hover:not(:disabled) {
-  background: var(--surface-hover);
-  border-color: var(--accent-primary);
+  color: var(--text-primary);
 }
 
 .btn-parse-event:disabled {
@@ -766,16 +797,23 @@ function scrollToBottom() {
   gap: var(--space-2);
   max-width: 800px;
   margin: 0 auto;
-  background: var(--surface-input);
+  background: var(--surface-card);
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-lg);
-  padding: var(--space-2);
+  border-radius: 20px;
+  padding: var(--space-2) var(--space-3);
   transition: border-color var(--duration-fast) var(--ease-out);
 }
 
 .input-row:focus-within {
-  border-color: var(--accent-primary);
-  box-shadow: 0 0 0 3px var(--accent-glow);
+  border-color: var(--border-default);
+}
+
+.paste-btn {
+  color: var(--text-tertiary);
+  margin-bottom: 2px;
+}
+.paste-btn:hover {
+  color: var(--text-primary);
 }
 
 .chat-input {
@@ -798,7 +836,11 @@ function scrollToBottom() {
 
 .send-btn {
   flex-shrink: 0;
-  padding: var(--space-2) var(--space-5);
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 8px 16px;
+  border-radius: 16px;
 }
 
 .send-btn:disabled {
@@ -808,6 +850,11 @@ function scrollToBottom() {
 
 .stop-btn {
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 8px 16px;
+  border-radius: 16px;
   color: var(--color-error);
   border-color: var(--color-error);
 }

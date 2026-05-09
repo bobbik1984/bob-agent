@@ -19,17 +19,17 @@ const PROVIDERS = {
     name: 'DeepSeek',
     baseURL: 'https://api.deepseek.com',
     models: [
-      { id: 'deepseek-chat', label: '🧠 深度思考', vision: true, default: true },
-      { id: 'deepseek-reasoner', label: '⚡ 推理', vision: false },
+      { id: 'deepseek-chat', label: 'DeepSeek Chat', vision: true, default: true },
+      { id: 'deepseek-reasoner', label: 'DeepSeek Reasoner', vision: false },
     ],
   },
   openai: {
     name: 'OpenAI',
     baseURL: 'https://api.openai.com/v1',
     models: [
-      { id: 'gpt-4.1', label: '🧠 GPT-4.1', vision: true },
-      { id: 'gpt-4.1-mini', label: '⚡ GPT-4.1 Mini', vision: true, default: true },
-      { id: 'gpt-4.1-nano', label: '💨 GPT-4.1 Nano', vision: true },
+      { id: 'gpt-4.1', label: 'GPT-4.1', vision: true },
+      { id: 'gpt-4.1-mini', label: 'GPT-4.1 Mini', vision: true, default: true },
+      { id: 'gpt-4.1-nano', label: 'GPT-4.1 Nano', vision: true },
     ],
   },
   ollama: {

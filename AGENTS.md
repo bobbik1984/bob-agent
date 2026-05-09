@@ -52,65 +52,97 @@ npm run lint
 ```
 bob-agent/
 ├── electron/                    # Electron 主进程 (Node.js)
-│   ├── main.js                  # 应用入口 + 窗口管理
+│   ├── main.js                  # 应用入口 + 窗口管理 + IPC 注册
 │   ├── preload.js               # IPC 安全桥接
-│   ├── tray.js                  # 系统托盘 + 全局快捷键
-│   └── services/                # 后端服务层
-│       ├── llm-client.js        # 多模型 LLM 引擎 (Chat + Vision)
-│       ├── parser.js            # 自然语言 → 结构化事件 (移植自 todolist)
-│       ├── calendar.js          # Microsoft 365 日历同步 (移植自 todolist)
-│       ├── file-reader.js       # 文件读取引擎 (txt/md/csv/docx/xlsx/pdf)
-│       ├── micro-compact.js     # 上下文截断中间件 (移植自 code_runner)
-│       └── db.js                # SQLite 持久化 (better-sqlite3)
+│   ├── services/                # 后端服务层
+│   │   ├── llm-client.js        # 多模型 LLM 引擎 (Chat + Vision + Tool Calling)
+│   │   ├── parser.js            # 自然语言 → 结构化事件
+│   │   ├── file-reader.js       # 文件读取引擎 (txt/md/csv/docx/xlsx/pdf)
+│   │   └── db.js                # SQLite 持久化 (better-sqlite3)
+│   └── tools/                   # 🔑 工具系统 (Sprint 6)
+│       ├── base.js              # BaseTool 抽象基类 (参照 CodeRunner)
+│       ├── registry.js          # ToolRegistry 工具注册表 + Schema 导出
+│       ├── executor.js          # Tool Execution Loop (tool_call → execute → 回传)
+│       ├── fs.js                # list_dir / read_file (沙箱化)
+│       ├── calendar.js          # create_event / search_events
+│       └── web.js               # web_search (可选)
 │
 ├── src/                         # Vue 3 前端 (Renderer 进程)
-│   ├── App.vue                  # 根组件 + 路由
+│   ├── App.vue                  # 根组件 + 侧栏导航
 │   ├── views/
-│   │   ├── ChatView.vue         # 对话 + 视觉（主界面）
+│   │   ├── ChatView.vue         # 对话 + 视觉 + 工具调用展示
 │   │   ├── InboxView.vue        # 智能收件箱（日程 + 待办）
-│   │   └── SettingsView.vue     # 设置面板
-│   ├── components/
-│   │   ├── MessageBubble.vue    # 消息气泡 (支持 Markdown + 图片)
-│   │   ├── ThinkingCard.vue     # 思维链折叠卡片
-│   │   ├── ConfirmCard.vue      # 事件确认卡片
-│   │   ├── WeekTimeline.vue     # 周时间轴 (移植自 todolist)
-│   │   ├── TodoList.vue         # 待办清单
-│   │   ├── FileDropZone.vue     # 文件/图片拖拽区
-│   │   └── SetupWizard.vue      # 首次启动向导
-│   └── composables/
-│       ├── useLLM.js            # LLM IPC 封装
-│       ├── useCalendar.js       # 日历 IPC 封装
-│       └── useTheme.js          # 主题切换
+│   │   └── SettingsView.vue     # 设置面板（含工作目录配置）
+│   └── components/
+│       ├── ConfirmCard.vue      # 事件确认卡片
+│       ├── WeekTimeline.vue     # 周时间轴
+│       ├── TodoList.vue         # 待办清单
+│       └── SetupWizard.vue      # 首次启动向导
+│
+├── skills/                      # 🔑 内置基础技能 (随项目分发)
+│   ├── daily_summary/
+│   │   └── SKILL.md             # 每日总结
+│   ├── file_organizer/
+│   │   └── SKILL.md             # 文件整理建议
+│   └── meeting_prep/
+│       └── SKILL.md             # 会议准备助手
+│   # 用户可在「设置→外部技能目录」配置额外的 skills 路径
+│   # 例如指向 Assistant/common/knowledge/skills/ (49 个共享技能)
+│   # 不同设备可指向各自的 Syncthing 同步路径
+│
+├── mcp/                         # 🔑 MCP 协议集成 (Sprint 6)
+│   ├── config.json              # MCP Server 配置
+│   └── client.js                # MCP 客户端
+│
+├── resources/                   # 静态资源
+│   └── logos/                   # 模型品牌 PNG Logo
+│       ├── deepseek.png
+│       ├── openai.png
+│       └── ollama.png
 │
 ├── docs/                        # 项目文档
-│   ├── REQUIREMENTS.md          # 产品需求文档
-│   ├── ARCHITECTURE.md          # 技术架构详解
-│   ├── DEVELOPMENT_PLAN.md      # 开发计划
-│   └── TODOLIST_INTEGRATION.md  # TodoList 集成指南
-│
 ├── tests/                       # 测试
 ├── todo.md                      # 开发待办
 ├── progress.yaml                # 进度追踪
 └── package.json
 ```
 
-### 数据流
+### 数据流（当前 — 纯文本管道）
 
 ```
 用户输入 (文字/图片/文件)
     ↓
 Vue 前端 (Renderer) ── IPC ──→ Electron Main Process
                                     ↓
+                            buildSystemPrompt() + 历史消息
+                                    ↓
                               ┌─────┴─────┐
-                              │ LLM Client │ ← OpenAI SDK
+                              │ LLM Client │ ← OpenAI SDK (chat only)
                               └─────┬─────┘
                                     ↓
-                            ┌───────┴────────┐
-                      纯对话回复          检测到事件
-                            ↓                ↓
-                      Markdown 渲染    Parser → ConfirmCard
-                                             ↓ (用户确认)
-                                    Calendar Sync + SQLite + 通知
+                             流式文本返回 → Markdown 渲染
+```
+
+### 数据流（Sprint 6 目标 — Agent 工具循环）
+
+```
+用户输入
+    ↓
+Main Process → buildSystemPrompt() + Tool Schemas
+    ↓
+LLM API (with tools=[list_dir, read_file, create_event, ...])
+    ↓
+┌─────────────────────────────────────────────┐
+│              Tool Execution Loop            │
+│                                             │
+│  LLM 返回 tool_call? ─── Yes ──→ ToolRegistry.execute()
+│       │                              ↓
+│       No                     结果追加到 messages
+│       ↓                              ↓
+│  最终文本回复              ←── 再次调用 LLM ──┘
+└─────────────────────────────────────────────┘
+    ↓
+ChatView 渲染（文本 + 工具执行状态 + 结果折叠）
 ```
 
 ---
@@ -206,6 +238,33 @@ Vue 前端 (Renderer) ── IPC ──→ Electron Main Process
 - 文件选择 → `dialog.showOpenDialog`
 
 **联动**：图片识别结果可自动触发 Parser 管线 → 提取事件 → 确认卡片 → 写入日历
+
+### D-006: 双目录技能系统
+
+**决策**：内置基础技能 + 外部可配置技能目录
+
+**架构**（参照 CodeRunner 的 `ToolRegistry._resolve_skills_dirs()`）：
+1. **内置目录** `skills/`：随项目打包分发，包含 3-5 个基础技能（每日总结、文件整理、会议准备等），保证开箱即用
+2. **外部目录**：用户在「设置」中配置一个或多个外部技能路径（如 `D:\OneDrive\...\skills\`），ToolRegistry 启动时自动扫描注册
+
+**跨设备场景**：
+- 本机开发时指向 `Assistant/common/knowledge/skills/`（49 个共享技能）
+- VPS 部署时指向各节点的 Syncthing 同步副本
+- 纯净安装时仅用内置的 `skills/` 目录
+
+**SKILL.md 规范**：完全复用现有 frontmatter 标准（name/description/parameters/entrypoint），不发明新格式。
+
+### D-007: Agent 化工具系统
+
+**决策**：通过 OpenAI Function Calling API + 工具执行循环，让模型拥有"手"
+
+**参照**：CodeRunner `src/tools/`（BaseTool + ToolRegistry + 18 工具 + ToolsetProfile）
+
+**关键差异**：
+- CodeRunner 是 Python 后端，bob-agent 是 Node.js（Electron 主进程）
+- CodeRunner 面向开发者（bash/file_edit/grep），bob-agent 面向普通用户（list_dir/create_event/web_search）
+- bob-agent 的工具数量更少（5-8 个），不需要 ToolsetProfile 分层过滤
+- bob-agent 增加 MCP 客户端层，可连接外部 MCP Server 扩展能力
 
 ---
 

@@ -36,13 +36,13 @@
   --text-tertiary:  #6a6a80;
   --text-inverse:   #0a0a0f;
 
-  /* 品牌色：冷蓝紫渐变 */
-  --accent-primary:    #6366f1;
-  --accent-secondary:  #818cf8;
-  --accent-tertiary:   #a5b4fc;
-  --accent-glow:       rgba(99, 102, 241, 0.3);
-  --gradient-brand:    linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #a78bfa 100%);
-  --gradient-subtle:   linear-gradient(135deg, rgba(99,102,241,0.15) 0%, rgba(139,92,246,0.08) 100%);
+  /* 品牌色：极简灰白 */
+  --accent-primary:    #e8e8f0;
+  --accent-secondary:  #a0a0b8;
+  --accent-tertiary:   #6a6a80;
+  --accent-glow:       rgba(255, 255, 255, 0.1);
+  --gradient-brand:    linear-gradient(135deg, #ffffff 0%, #a0a0b8 100%);
+  --gradient-subtle:   rgba(255, 255, 255, 0.03);
 
   /* 语义色 */
   --color-success:   #34d399;
@@ -223,14 +223,15 @@ html, body {
 }
 
 .btn-primary {
-  background: var(--gradient-brand);
-  color: white;
-  box-shadow: var(--shadow-sm), 0 0 12px var(--accent-glow);
+  background: var(--text-primary);
+  color: var(--bg-root);
+  font-weight: 600;
+  box-shadow: none;
 }
 
 .btn-primary:hover {
-  box-shadow: var(--shadow-md), 0 0 20px var(--accent-glow);
-  filter: brightness(1.1);
+  background: white;
+  transform: translateY(-1px);
 }
 
 .btn-ghost {
@@ -281,8 +282,8 @@ html, body {
 }
 
 .input:focus {
-  border-color: var(--accent-primary);
-  box-shadow: 0 0 0 3px var(--accent-glow);
+  border-color: var(--border-strong);
+  box-shadow: none;
 }
 
 .input::placeholder {
@@ -321,9 +322,9 @@ html, body {
 }
 
 .badge-accent {
-  background: var(--gradient-subtle);
-  color: var(--accent-tertiary);
-  border: 1px solid rgba(99, 102, 241, 0.2);
+  background: var(--surface-card);
+  color: var(--text-primary);
+  border: 1px solid var(--border-default);
 }
 
 /* Typing 指示器 */

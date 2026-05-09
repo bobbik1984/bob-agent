@@ -1,7 +1,10 @@
 <template>
   <div class="confirm-card">
     <div class="card-header">
-      <div class="card-icon">{{ isTodo ? '☑️' : '📅' }}</div>
+      <div class="card-icon">
+        <CheckSquare v-if="isTodo" :size="24" />
+        <Calendar v-else :size="24" />
+      </div>
       <div class="card-title-area">
         <div class="card-type">{{ isTodo ? '新增待办' : '新增日程' }}</div>
         <div class="card-title">{{ event.title || '无标题' }}</div>
@@ -36,6 +39,7 @@
 
 <script setup>
 import { computed } from 'vue';
+import { CheckSquare, Calendar } from 'lucide-vue-next';
 
 const props = defineProps({
   event: {
@@ -94,7 +98,7 @@ const priorityLabel = computed(() => {
 }
 
 .card-icon {
-  font-size: 1.5rem;
+  color: var(--text-secondary);
 }
 
 .card-title-area {

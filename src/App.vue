@@ -3,7 +3,7 @@
     <!-- 标题栏拖拽区域 -->
     <div class="titlebar titlebar-drag">
       <div class="titlebar-left titlebar-no-drag">
-        <span class="app-logo">🤖</span>
+        <Hexagon class="app-logo" :size="20" />
         <span class="app-name">bob-agent</span>
       </div>
       <div class="titlebar-center">
@@ -33,7 +33,7 @@
             :class="{ active: currentView === item.id }"
             @click="currentView = item.id"
           >
-            <span class="nav-icon">{{ item.icon }}</span>
+            <component :is="item.icon" class="nav-icon" :size="18" />
             <span class="nav-label">{{ item.label }}</span>
           </button>
         </nav>
@@ -41,7 +41,7 @@
         <!-- 对话列表 (仅对话视图) -->
         <div v-if="currentView === 'chat'" class="conversation-list">
           <button class="new-chat-btn btn btn-ghost" @click="createNewChat">
-            <span>＋</span>
+            <Plus :size="16" />
             <span>新对话</span>
           </button>
 
@@ -54,6 +54,9 @@
               @click="switchConversation(conv.id)"
             >
               <span class="conv-title">{{ conv.title }}</span>
+              <button class="delete-btn btn-icon" title="删除对话" @click.stop="deleteChat(conv.id)">
+                <X :size="14" />
+              </button>
             </button>
           </div>
         </div>
@@ -87,6 +90,7 @@ import ChatView from './views/ChatView.vue';
 import InboxView from './views/InboxView.vue';
 import SettingsView from './views/SettingsView.vue';
 import SetupWizard from './components/SetupWizard.vue';
+import { Hexagon, MessageSquare, Inbox, Settings, Plus, X } from 'lucide-vue-next';
 
 // ── 状态 ─────────────────────────────────────────────
 const isSetupComplete = ref(false);
@@ -96,18 +100,17 @@ const activeConversationId = ref(null);
 const currentModel = ref('');
 
 const navItems = [
-  { id: 'chat', icon: '💬', label: '对话' },
-  { id: 'inbox', icon: '📥', label: '智能收件箱' },
-  { id: 'settings', icon: '⚙️', label: '设置' },
+  { id: 'chat', icon: MessageSquare, label: '对话' },
+  { id: 'inbox', icon: Inbox, label: '智能收件箱' },
+  { id: 'settings', icon: Settings, label: '设置' },
 ];
 
 const modelLabel = computed(() => {
   if (!currentModel.value) return '未配置';
-  // 简化显示
   const name = currentModel.value;
-  if (name.includes('deepseek')) return '🧠 DeepSeek';
-  if (name.includes('gpt-4.1-mini')) return '⚡ GPT-4.1 Mini';
-  if (name.includes('gpt-4.1')) return '🧠 GPT-4.1';
+  if (name.includes('deepseek')) return 'DeepSeek';
+  if (name.includes('gpt-4.1-mini')) return 'GPT-4.1 Mini';
+  if (name.includes('gpt-4.1')) return 'GPT-4.1';
   return name;
 });
 
@@ -141,6 +144,20 @@ async function createNewChat() {
 
 function switchConversation(id) {
   activeConversationId.value = id;
+}
+
+async function deleteChat(id) {
+  if (!confirm('确定要删除这个对话吗？')) return;
+  await window.electronAPI.deleteConversation(id);
+  conversations.value = conversations.value.filter(c => c.id !== id);
+  
+  if (activeConversationId.value === id) {
+    if (conversations.value.length > 0) {
+      activeConversationId.value = conversations.value[0].id;
+    } else {
+      await createNewChat();
+    }
+  }
 }
 
 function updateConversationTitle(id, title) {
@@ -187,7 +204,8 @@ async function onConfigChanged() {
 }
 
 .app-logo {
-  font-size: var(--text-lg);
+  color: var(--text-primary);
+  opacity: 0.9;
 }
 
 .app-name {
@@ -259,9 +277,15 @@ async function onConfigChanged() {
 }
 
 .nav-icon {
-  font-size: var(--text-lg);
-  width: 24px;
-  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-tertiary);
+  transition: color var(--duration-fast);
+}
+
+.nav-item.active .nav-icon {
+  color: var(--accent-primary);
 }
 
 /* ── 对话列表 ───────────────────────────────────────── */
@@ -289,7 +313,9 @@ async function onConfigChanged() {
 }
 
 .conversation-item {
-  display: block;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   width: 100%;
   padding: var(--space-2) var(--space-3);
   border: none;
@@ -301,9 +327,30 @@ async function onConfigChanged() {
   text-align: left;
   cursor: pointer;
   transition: all var(--duration-fast) var(--ease-out);
+}
+
+.conv-title {
+  flex: 1;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  padding-right: var(--space-2);
+}
+
+.delete-btn {
+  opacity: 0;
+  padding: 2px;
+  color: var(--text-tertiary);
+  transition: all var(--duration-fast);
+}
+
+.conversation-item:hover .delete-btn {
+  opacity: 1;
+}
+
+.delete-btn:hover {
+  color: var(--error);
+  background: var(--surface-glass);
 }
 
 .conversation-item:hover {

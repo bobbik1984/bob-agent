@@ -33,6 +33,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   readFile: (filePath) => ipcRenderer.invoke('file:read', filePath),
   selectFile: () => ipcRenderer.invoke('file:select'),
 
+  // ── 工作目录 ─────────────────────────────────────────
+  listWorkspaceDir: (relativePath) => ipcRenderer.invoke('workspace:list-dir', relativePath),
+  readWorkspaceFile: (relativePath) => ipcRenderer.invoke('workspace:read-file', relativePath),
+  selectWorkspaceDir: () => ipcRenderer.invoke('workspace:select-dir'),
+
   // ── 对话历史 ───────────────────────────────────────
   getConversations: () => ipcRenderer.invoke('db:conversations'),
   createConversation: (title, model) => ipcRenderer.invoke('db:conversation:create', title, model),

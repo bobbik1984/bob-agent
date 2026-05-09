@@ -2,7 +2,7 @@
   <div class="setup-wizard animate-fade-in">
     <div class="wizard-card card">
       <div class="wizard-header">
-        <div class="wizard-logo">🤖</div>
+        <Hexagon :size="56" class="wizard-logo" />
         <h1 class="wizard-title">欢迎使用 bob-agent</h1>
         <p class="wizard-subtitle">只需两步即可开始使用</p>
       </div>
@@ -18,7 +18,7 @@
             :class="{ selected: selectedProvider === p.id }"
             @click="selectedProvider = p.id"
           >
-            <span class="provider-icon">{{ p.icon }}</span>
+            <component :is="p.icon" class="provider-icon" :size="28" />
             <span class="provider-name">{{ p.name }}</span>
             <span class="provider-desc">{{ p.desc }}</span>
           </button>
@@ -53,7 +53,7 @@
             :disabled="selectedProvider !== 'ollama' && !apiKey.trim()"
             @click="finish"
           >
-            🚀 开始使用
+            开始使用
           </button>
         </div>
       </div>
@@ -63,6 +63,7 @@
 
 <script setup>
 import { ref, computed, defineEmits } from 'vue';
+import { Hexagon, Brain, Globe, Laptop, Settings } from 'lucide-vue-next';
 
 const emit = defineEmits(['complete']);
 
@@ -71,10 +72,10 @@ const selectedProvider = ref('');
 const apiKey = ref('');
 
 const providers = [
-  { id: 'deepseek', icon: '🧠', name: 'DeepSeek', desc: '推荐 · 性价比最高' },
-  { id: 'openai', icon: '🌐', name: 'OpenAI', desc: 'GPT-4.1 系列' },
-  { id: 'ollama', icon: '💻', name: 'Ollama', desc: '本地模型 · 无需联网' },
-  { id: 'custom', icon: '🔧', name: '自定义', desc: 'OpenAI 兼容端点' },
+  { id: 'deepseek', icon: Brain, name: 'DeepSeek', desc: '推荐 · 性价比最高' },
+  { id: 'openai', icon: Globe, name: 'OpenAI', desc: 'GPT-4.1 系列' },
+  { id: 'ollama', icon: Laptop, name: 'Ollama', desc: '本地模型 · 无需联网' },
+  { id: 'custom', icon: Settings, name: '自定义', desc: 'OpenAI 兼容端点' },
 ];
 
 const providerName = computed(() => {
@@ -121,8 +122,9 @@ async function finish() {
 }
 
 .wizard-logo {
-  font-size: 3.5rem;
-  margin-bottom: var(--space-3);
+  margin: 0 auto var(--space-4);
+  color: var(--text-primary);
+  opacity: 0.9;
 }
 
 .wizard-title {
@@ -184,7 +186,11 @@ async function finish() {
 }
 
 .provider-icon {
-  font-size: 1.8rem;
+  margin-bottom: var(--space-1);
+  color: var(--text-secondary);
+}
+.provider-card.selected .provider-icon {
+  color: var(--accent-primary);
 }
 
 .provider-name {
