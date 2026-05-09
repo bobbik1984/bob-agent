@@ -8,8 +8,8 @@
 - [x] T-304: System Prompt 动态注入目录树摘要（让模型真正"看到"文件列表）
 - [x] T-305: Agent 头像改 "Bob" 文字标（替换 Cpu 图标）
 - [x] T-306: 对话列表添加删除按钮（hover 显示 X，调用 deleteConversation）
-- [ ] T-307: 模型品牌 PNG Logo（DeepSeek/OpenAI/Ollama → resources/logos/）
-- [ ] T-308: 自动日程意图检测（对话流自动识别→弹出 ConfirmCard）
+- [x] T-307: 模型品牌 PNG Logo（DeepSeek/OpenAI/Ollama → resources/logos/）
+- [x] T-308: 自动日程意图检测（对话流自动识别→弹出 ConfirmCard）
 
 ## Sprint 4: 文件分析 + 联动
 
@@ -50,8 +50,8 @@
 
 ### 6.3 技能系统（双目录架构，参照 CodeRunner ToolRegistry._resolve_skills_dirs）
 - [ ] T-609: 内置 skills/ 目录 — 随项目分发 3-5 个基础技能（每日总结/文件整理/会议准备）
-- [ ] T-610: ToolRegistry 扫描内置 skills/ — 自动发现 SKILL.md frontmatter 并注册
-- [ ] T-611: 设置→外部技能目录 — UI 配置 + 目录选择器（支持多路径）
+- [x] T-610: ToolRegistry 扫描内置 skills/ — 自动发现 SKILL.md frontmatter 并注册
+- [x] T-611: 设置→外部技能目录 — UI 配置 + 目录选择器（支持多路径）
 - [ ] T-612: ToolRegistry 扫描外部目录 — 启动时加载，如 Assistant/common/knowledge/skills/
 - [ ] T-613: 技能热重载 — 不重启应用即可刷新技能列表
 

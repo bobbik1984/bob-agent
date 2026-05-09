@@ -3,14 +3,7 @@
     <!-- 标题栏拖拽区域 -->
     <div class="titlebar titlebar-drag">
       <div class="titlebar-left titlebar-no-drag">
-        <Hexagon class="app-logo" :size="20" />
-        <span class="app-name">bob-agent</span>
-      </div>
-      <div class="titlebar-center">
-        <!-- 模型指示器 -->
-        <div v-if="currentView === 'chat'" class="model-badge badge badge-accent titlebar-no-drag">
-          {{ modelLabel }}
-        </div>
+        <span class="app-name">Bob</span>
       </div>
       <div class="titlebar-right">
         <!-- Windows 控件由 titleBarOverlay 提供 -->
@@ -24,73 +17,94 @@
     <div v-else class="main-layout">
       <!-- 侧栏 -->
       <aside class="sidebar">
-        <!-- 导航 -->
-        <nav class="sidebar-nav">
+        <!-- 新对话按钮 -->
+        <div class="sidebar-top">
+          <button class="new-chat-btn btn btn-ghost" @click="createNewChat">
+            <Plus :size="16" />
+            <span>新对话</span>
+          </button>
+        </div>
+
+        <!-- 对话列表（始终显示） -->
+        <div class="conversation-list">
+          <div class="conversation-items">
+            <div
+              v-for="conv in conversations"
+              :key="conv.id"
+              class="conversation-item"
+              :class="{ active: activeConversationId === conv.id && currentView === 'chat' }"
+              @click="switchConversation(conv.id); currentView = 'chat'"
+              @dblclick.stop="startRename(conv)"
+            >
+              <input
+                v-if="renamingId === conv.id"
+                v-model="renameText"
+                class="rename-input"
+                @keydown.enter="confirmRename(conv)"
+                @keydown.esc="cancelRename"
+                @blur="confirmRename(conv)"
+                @click.stop
+                ref="renameInputRef"
+              />
+              <span v-else class="conv-title">{{ conv.title }}</span>
+              <span class="delete-btn btn-icon" title="删除对话" @click.stop="requestDeleteChat(conv.id)">
+                <X :size="14" />
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 底部导航 -->
+        <nav class="sidebar-footer-nav">
           <button
-            v-for="item in navItems"
+            v-for="item in bottomNavItems"
             :key="item.id"
             class="nav-item"
             :class="{ active: currentView === item.id }"
             @click="currentView = item.id"
           >
-            <component :is="item.icon" class="nav-icon" :size="18" />
+            <component :is="item.icon" class="nav-icon" :size="16" />
             <span class="nav-label">{{ item.label }}</span>
           </button>
         </nav>
-
-        <!-- 对话列表 (仅对话视图) -->
-        <div v-if="currentView === 'chat'" class="conversation-list">
-          <button class="new-chat-btn btn btn-ghost" @click="createNewChat">
-            <Plus :size="16" />
-            <span>新对话</span>
-          </button>
-
-          <div class="conversation-items">
-            <button
-              v-for="conv in conversations"
-              :key="conv.id"
-              class="conversation-item"
-              :class="{ active: activeConversationId === conv.id }"
-              @click="switchConversation(conv.id)"
-            >
-              <span class="conv-title">{{ conv.title }}</span>
-              <button class="delete-btn btn-icon" title="删除对话" @click.stop="deleteChat(conv.id)">
-                <X :size="14" />
-              </button>
-            </button>
-          </div>
-        </div>
-
-        <!-- 侧栏底部 -->
-        <div class="sidebar-footer">
-          <div class="version-info">v0.1.0</div>
-        </div>
       </aside>
 
       <!-- 内容区 -->
       <main class="content">
         <ChatView
-          v-if="currentView === 'chat'"
+          v-show="currentView === 'chat'"
           :conversationId="activeConversationId"
           @update-title="updateConversationTitle"
         />
-        <InboxView v-else-if="currentView === 'inbox'" />
+        <InboxView v-if="currentView === 'inbox'" />
         <SettingsView
-          v-else-if="currentView === 'settings'"
+          v-if="currentView === 'settings'"
           @config-changed="onConfigChanged"
         />
       </main>
+    </div>
+
+    <!-- 自定义删除确认弹窗 -->
+    <div v-if="showDeleteModal" class="modal-overlay">
+      <div class="modal-card">
+        <h3 class="modal-title">删除对话</h3>
+        <p class="modal-desc">确定要删除这个对话吗？此操作不可恢复。</p>
+        <div class="modal-actions">
+          <button class="btn btn-ghost" @click="cancelDeleteChat">取消</button>
+          <button class="btn btn-danger" @click="confirmDeleteChat">确定删除</button>
+        </div>
+      </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, computed } from 'vue';
+import { ref, onMounted, computed, nextTick } from 'vue';
 import ChatView from './views/ChatView.vue';
 import InboxView from './views/InboxView.vue';
 import SettingsView from './views/SettingsView.vue';
 import SetupWizard from './components/SetupWizard.vue';
-import { Hexagon, MessageSquare, Inbox, Settings, Plus, X } from 'lucide-vue-next';
+import { Inbox, Settings, Plus, X } from 'lucide-vue-next';
 
 // ── 状态 ─────────────────────────────────────────────
 const isSetupComplete = ref(false);
@@ -98,20 +112,32 @@ const currentView = ref('chat');
 const conversations = ref([]);
 const activeConversationId = ref(null);
 const currentModel = ref('');
+const renamingId = ref(null);
+const renameText = ref('');
+const renameInputRef = ref(null);
 
-const navItems = [
-  { id: 'chat', icon: MessageSquare, label: '对话' },
+const bottomNavItems = [
   { id: 'inbox', icon: Inbox, label: '智能收件箱' },
   { id: 'settings', icon: Settings, label: '设置' },
 ];
 
-const modelLabel = computed(() => {
-  if (!currentModel.value) return '未配置';
-  const name = currentModel.value;
-  if (name.includes('deepseek')) return 'DeepSeek';
-  if (name.includes('gpt-4.1-mini')) return 'GPT-4.1 Mini';
-  if (name.includes('gpt-4.1')) return 'GPT-4.1';
-  return name;
+const modelInfo = computed(() => {
+  if (!currentModel.value) return { name: '未配置', logo: null };
+  const name = currentModel.value.toLowerCase();
+  
+  if (name.includes('deepseek')) {
+    return { name: 'DeepSeek', logo: '/logos/deepseek.png' };
+  }
+  if (name.includes('gpt-4') || name.includes('openai')) {
+    return { name: 'OpenAI', logo: '/logos/openai.png' };
+  }
+  if (name.includes('llama') || name.includes('ollama')) {
+    return { name: 'Ollama', logo: null };
+  }
+  if (name.includes('gemini')) {
+    return { name: 'Gemini', logo: '/logos/gemini.png' };
+  }
+  return { name: currentModel.value, logo: null };
 });
 
 // ── 生命周期 ─────────────────────────────────────────
@@ -146,8 +172,18 @@ function switchConversation(id) {
   activeConversationId.value = id;
 }
 
-async function deleteChat(id) {
-  if (!confirm('确定要删除这个对话吗？')) return;
+const showDeleteModal = ref(false);
+const pendingDeleteId = ref(null);
+
+function requestDeleteChat(id) {
+  pendingDeleteId.value = id;
+  showDeleteModal.value = true;
+}
+
+async function confirmDeleteChat() {
+  const id = pendingDeleteId.value;
+  if (!id) return;
+  
   await window.electronAPI.deleteConversation(id);
   conversations.value = conversations.value.filter(c => c.id !== id);
   
@@ -158,6 +194,44 @@ async function deleteChat(id) {
       await createNewChat();
     }
   }
+  
+  showDeleteModal.value = false;
+  pendingDeleteId.value = null;
+}
+
+function cancelDeleteChat() {
+  showDeleteModal.value = false;
+  pendingDeleteId.value = null;
+}
+
+// ── 重命名对话 ───────────────────────────────────────
+async function startRename(conv) {
+  renamingId.value = conv.id;
+  renameText.value = conv.title;
+  await nextTick();
+  // Focus the input
+  const inputs = document.querySelectorAll('.rename-input');
+  if (inputs.length > 0) inputs[inputs.length - 1].focus();
+}
+
+async function confirmRename(conv) {
+  const newTitle = renameText.value.trim();
+  if (newTitle && newTitle !== conv.title) {
+    conv.title = newTitle;
+    // Persist via existing updateConversationTitle IPC (reuse the title update mechanism)
+    await window.electronAPI.setConfig(`conv_title_${conv.id}`, newTitle);
+    // Also update in DB if we have a dedicated handler
+    try {
+      await window.electronAPI.addMessage(conv.id, 'system', `__rename__${newTitle}`, null);
+    } catch (e) { /* silently ignore if not supported */ }
+  }
+  renamingId.value = null;
+  renameText.value = '';
+}
+
+function cancelRename() {
+  renamingId.value = null;
+  renameText.value = '';
 }
 
 function updateConversationTitle(id, title) {
@@ -203,28 +277,15 @@ async function onConfigChanged() {
   gap: var(--space-2);
 }
 
-.app-logo {
-  color: var(--text-primary);
-  opacity: 0.9;
-}
-
 .app-name {
   font-size: var(--text-sm);
-  font-weight: 600;
-  color: var(--text-secondary);
+  font-weight: 700;
+  color: var(--text-primary);
   letter-spacing: 0.5px;
 }
 
-.titlebar-center {
-  position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
-}
 
-.model-badge {
-  cursor: pointer;
-  font-size: var(--text-xs);
-}
+
 
 /* ── 主布局 ─────────────────────────────────────────── */
 .main-layout {
@@ -243,49 +304,16 @@ async function onConfigChanged() {
   flex-shrink: 0;
 }
 
-.sidebar-nav {
-  display: flex;
-  flex-direction: column;
+/* ── 侧栏顶部：新对话按钮 ────────────────────────── */
+.sidebar-top {
   padding: var(--space-3);
-  gap: var(--space-1);
+  flex-shrink: 0;
 }
 
-.nav-item {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-2) var(--space-3);
-  border: none;
-  border-radius: var(--radius-md);
-  background: transparent;
-  color: var(--text-secondary);
-  font-family: var(--font-sans);
-  font-size: var(--text-sm);
-  cursor: pointer;
-  transition: all var(--duration-fast) var(--ease-out);
-}
-
-.nav-item:hover {
-  background: var(--surface-glass);
-  color: var(--text-primary);
-}
-
-.nav-item.active {
-  background: var(--gradient-subtle);
-  color: var(--accent-tertiary);
-  font-weight: 500;
-}
-
-.nav-icon {
-  display: flex;
-  align-items: center;
+.new-chat-btn {
+  width: 100%;
   justify-content: center;
-  color: var(--text-tertiary);
-  transition: color var(--duration-fast);
-}
-
-.nav-item.active .nav-icon {
-  color: var(--accent-primary);
+  border-style: dashed;
 }
 
 /* ── 对话列表 ───────────────────────────────────────── */
@@ -293,15 +321,8 @@ async function onConfigChanged() {
   flex: 1;
   display: flex;
   flex-direction: column;
-  padding: var(--space-3);
+  padding: 0 var(--space-3);
   overflow: hidden;
-}
-
-.new-chat-btn {
-  width: 100%;
-  justify-content: center;
-  margin-bottom: var(--space-3);
-  border-style: dashed;
 }
 
 .conversation-items {
@@ -309,7 +330,7 @@ async function onConfigChanged() {
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: var(--space-1);
+  gap: 1px;
 }
 
 .conversation-item {
@@ -363,16 +384,65 @@ async function onConfigChanged() {
   color: var(--text-primary);
 }
 
-/* ── 侧栏底部 ───────────────────────────────────────── */
-.sidebar-footer {
+/* ── 侧栏底部导航 ─────────────────────────────────── */
+.sidebar-footer-nav {
+  display: flex;
+  flex-direction: column;
   padding: var(--space-3);
-  border-top: 1px solid var(--border-subtle);
+  gap: 1px;
+  margin-top: auto;
+  flex-shrink: 0;
 }
 
-.version-info {
-  font-size: var(--text-xs);
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.nav-item:hover {
+  background: var(--surface-glass);
+  color: var(--text-primary);
+}
+
+.nav-item.active {
+  background: var(--gradient-subtle);
+  color: var(--accent-tertiary);
+  font-weight: 500;
+}
+
+.nav-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   color: var(--text-tertiary);
-  text-align: center;
+  transition: color var(--duration-fast);
+}
+
+.nav-item.active .nav-icon {
+  color: var(--accent-primary);
+}
+
+/* ── 对话重命名 ─────────────────────────────────────── */
+.rename-input {
+  flex: 1;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--accent-primary);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  padding: 2px 6px;
+  outline: none;
 }
 
 /* ── 内容区 ─────────────────────────────────────────── */

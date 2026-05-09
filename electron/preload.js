@@ -28,6 +28,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   listEvents: (start, end) => ipcRenderer.invoke('calendar:list', start, end),
   deleteEvent: (id) => ipcRenderer.invoke('calendar:delete', id),
   updateEventStatus: (id, status) => ipcRenderer.invoke('calendar:update-status', id, status),
+  updateEventTime: (id, startTime, endTime) => ipcRenderer.invoke('calendar:update-time', id, startTime, endTime),
 
   // ── 文件 ───────────────────────────────────────────
   readFile: (filePath) => ipcRenderer.invoke('file:read', filePath),
@@ -55,4 +56,5 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getClipboardImage: () => ipcRenderer.invoke('system:clipboard-image'),
   showNotification: (title, body) => ipcRenderer.invoke('system:notify', title, body),
   isSetupComplete: () => ipcRenderer.invoke('system:is-setup-complete'),
+  selectDir: () => ipcRenderer.invoke('system:select-dir'),
 });

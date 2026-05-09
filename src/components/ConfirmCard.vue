@@ -178,11 +178,13 @@ const priorityLabel = computed(() => {
 }
 
 .btn-primary {
-  background: var(--accent-primary);
-  color: white;
+  background: transparent;
+  color: var(--text-primary);
+  border: 1px solid var(--border-default);
 }
 
 .btn-primary:hover {
-  background: var(--accent-hover);
+  border-color: var(--text-secondary);
+  background: var(--surface-hover);
 }
 </style>

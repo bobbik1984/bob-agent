@@ -79,15 +79,6 @@
       </div>
     </div>
 
-    <!-- 图片预览条 -->
-    <div v-if="pendingImage" class="image-preview-bar animate-slide-up">
-      <div class="image-preview-thumb">
-        <img :src="'data:image/png;base64,' + pendingImage" alt="待发送图片" />
-        <button class="image-remove btn-icon" @click="pendingImage = null"><X :size="12" /></button>
-      </div>
-      <span class="image-hint">图片已就绪，输入描述后发送</span>
-    </div>
-
     <!-- 文件拖拽遮罩 -->
     <div
       v-if="isDragging"
@@ -105,41 +96,86 @@
     <!-- 输入区 -->
     <div class="input-area">
       <div class="quick-actions-bar" v-if="inputText.trim().length > 0">
-        <button class="btn-parse-event" @click="parseTextAsEvent" :disabled="isParsing">
+        <div class="actions-spacer"></div>
+        <button
+          class="btn-parse-event"
+          @click="parseTextAsEvent"
+          :disabled="isParsing"
+        >
           <Calendar v-if="!isParsing" :size="14" />
           <Loader2 v-else :size="14" class="animate-spin" />
           <span>{{ isParsing ? '解析中...' : '解析为日程' }}</span>
         </button>
       </div>
       <div class="input-row">
-        <button class="btn-icon paste-btn" title="粘贴图片 (Ctrl+V)" @click="pasteImage">
-          <Paperclip :size="18" />
-        </button>
+        <!-- 图片预览 -->
+        <div v-if="pendingImage" class="inline-image-preview">
+          <img :src="'data:image/png;base64,' + pendingImage" alt="待发送图片" />
+          <button class="image-remove-inline btn-icon" @click="pendingImage = null"><X :size="10" /></button>
+        </div>
+        <!-- 文本输入 -->
         <textarea
           ref="inputRef"
           v-model="inputText"
           class="chat-input"
-          placeholder="输入消息... (Ctrl+V 粘贴图片)"
-          rows="1"
+          placeholder="输入消息..."
+          rows="3"
           @keydown="handleKeydown"
           @input="autoResize"
           @paste="handlePaste"
         ></textarea>
-        <button
-          v-if="isStreaming"
-          class="btn btn-ghost stop-btn"
-          @click="stopGeneration"
-        >
-          <Square :size="16" /> 停止
-        </button>
-        <button
-          v-else
-          class="btn btn-primary send-btn"
-          :disabled="!canSend"
-          @click="sendMessage"
-        >
-          <Send :size="16" /> 发送
-        </button>
+        <!-- 底部工具栏 -->
+        <div class="input-toolbar">
+          <button class="btn-icon attach-btn" title="附件 / 粘贴图片" @click="handleAttach">
+            <Paperclip :size="16" />
+          </button>
+          <!-- 模型切换器 -->
+          <div class="model-switcher-wrap" v-if="currentModelName">
+            <button class="model-indicator" @click="toggleModelSwitcher">
+              <img v-if="currentModelLogo" :src="currentModelLogo" class="model-logo-sm" @error="(e) => e.target.style.display = 'none'" />
+              <span>{{ currentModelName }}</span>
+              <ChevronUp :size="12" />
+            </button>
+            <!-- 弹出选择面板 -->
+            <div v-if="showModelSwitcher" class="model-popup">
+              <button
+                v-for="m in availableModels"
+                :key="m.id"
+                class="model-option"
+                :class="{ active: currentModelRaw === m.id }"
+                @click="switchModel(m.id)"
+              >
+                <img v-if="getModelLogo(m.id)" :src="getModelLogo(m.id)" class="model-logo-sm" @error="(e) => e.target.style.display = 'none'" />
+                <span class="model-option-label">{{ m.label }}</span>
+              </button>
+              <div v-if="availableModels.length === 0" class="model-option-empty">
+                暂无可用模型
+              </div>
+            </div>
+          </div>
+          <div class="toolbar-spacer"></div>
+          <!-- 计费指示器 -->
+          <span v-if="sessionCost > 0" class="cost-indicator" title="本次对话累计费用">
+            ¥{{ sessionCost.toFixed(4) }}
+          </span>
+          <button
+            v-if="isStreaming"
+            class="action-btn stop-btn"
+            @click="stopGeneration"
+            title="停止生成"
+          >
+            <span class="icon-stop"></span>
+          </button>
+          <button
+            v-else
+            class="action-btn send-btn"
+            :disabled="!canSend"
+            @click="sendMessage"
+            title="发送"
+          >
+            <span class="icon-send"></span>
+          </button>
+        </div>
       </div>
     </div>
   </div>
@@ -161,8 +197,8 @@ marked.setOptions({ breaks: true, gfm: true });
 </script>
 
 <script setup>
-import { ref, watch, onMounted, onUnmounted, nextTick, defineProps, defineEmits } from 'vue';
-import { Sparkles, FileText, Camera, Calendar, User, ChevronRight, ChevronDown, X, FileUp, Paperclip, Square, Send, Loader2 } from 'lucide-vue-next';
+import { ref, computed, watch, onMounted, onUnmounted, nextTick, defineProps, defineEmits } from 'vue';
+import { Sparkles, FileText, Camera, Calendar, User, ChevronRight, ChevronDown, ChevronUp, X, FileUp, Paperclip, Loader2 } from 'lucide-vue-next';
 import ConfirmCard from '../components/ConfirmCard.vue';
 
 const props = defineProps({
@@ -181,8 +217,49 @@ const isDragging = ref(false);
 const isParsing = ref(false);
 const messagesArea = ref(null);
 const inputRef = ref(null);
+const currentModelRaw = ref('');
+const showModelSwitcher = ref(false);
+const availableModels = ref([]);
+const sessionCost = ref(0);
 
 const canSend = ref(true);
+
+// ── 模型指示器 & 切换 ────────────────────────────────
+function getModelLogo(modelId) {
+  const name = (modelId || '').toLowerCase();
+  if (name.includes('deepseek')) return '/logos/deepseek.png';
+  if (name.includes('gpt') || name.includes('openai')) return '/logos/openai.png';
+  if (name.includes('gemini')) return '/logos/gemini.png';
+  return null;
+}
+
+const currentModelName = computed(() => {
+  const found = availableModels.value.find(m => m.id === currentModelRaw.value);
+  if (found) return found.label;
+  return currentModelRaw.value || '';
+});
+
+const currentModelLogo = computed(() => {
+  return getModelLogo(currentModelRaw.value);
+});
+
+async function toggleModelSwitcher() {
+  if (!showModelSwitcher.value) {
+    try {
+      const models = await window.electronAPI.getModels();
+      availableModels.value = models || [];
+    } catch (e) {
+      availableModels.value = [];
+    }
+  }
+  showModelSwitcher.value = !showModelSwitcher.value;
+}
+
+async function switchModel(modelId) {
+  await window.electronAPI.setConfig('model', modelId);
+  currentModelRaw.value = modelId;
+  showModelSwitcher.value = false;
+}
 
 // ── 日程解析 ─────────────────────────────────────────
 async function parseTextAsEvent() {
@@ -205,7 +282,9 @@ async function parseTextAsEvent() {
 
 async function handleConfirmEvent(event, msgObj) {
   try {
-    const res = await window.electronAPI.confirmEvent(event);
+    // 使用 JSON 序列化去除 Vue Proxy，否则 Electron IPC 无法 clone
+    const plainEvent = JSON.parse(JSON.stringify(event));
+    const res = await window.electronAPI.confirmEvent(plainEvent);
     if (res.ok) {
       msgObj.content = `已成功保存为${event.type === 'todo' ? '待办' : '日程'}：${event.title}`;
       msgObj.type = 'text'; // 将卡片转化为普通文本消息
@@ -227,9 +306,14 @@ function handleCancelEvent(msgObj) {
 // ── 流式监听 ─────────────────────────────────────────
 let cleanupStreamListener = null;
 
-onMounted(() => {
+onMounted(async () => {
   cleanupStreamListener = window.electronAPI.onStreamChunk(handleStreamChunk);
   loadMessages();
+
+  // 预加载模型列表用于显示 label
+  try {
+    availableModels.value = await window.electronAPI.getModels() || [];
+  } catch (e) { /* ignore */ }
 
   // 拖拽监听
   document.addEventListener('dragenter', onDragEnter);
@@ -241,9 +325,11 @@ onUnmounted(() => {
 });
 
 // 切换对话时重新加载消息
-watch(() => props.conversationId, () => {
+watch(() => props.conversationId, async () => {
   loadMessages();
-});
+  sessionCost.value = 0;
+  currentModelRaw.value = await window.electronAPI.getConfig('model') || '';
+}, { immediate: true });
 
 // ── 消息加载 ─────────────────────────────────────────
 async function loadMessages() {
@@ -291,10 +377,10 @@ async function sendMessage() {
 
   // 构建 API 消息格式
   const apiMessages = messages.value
-    .filter(m => m.role !== 'system')
+    .filter(m => m.role !== 'system' && m.type !== 'confirm-card')
     .map(m => ({
       role: m.role,
-      content: m.content,
+      content: m.content || '',
     }));
 
   // 开始流式响应
@@ -304,40 +390,69 @@ async function sendMessage() {
 
   try {
     let result;
+    console.log('[sendMessage] image_base64 present:', !!userMessage.image_base64, 'apiMessages count:', apiMessages.length);
     if (userMessage.image_base64) {
       result = await window.electronAPI.sendVision(apiMessages, userMessage.image_base64);
     } else {
       result = await window.electronAPI.sendChat(apiMessages);
     }
+    console.log('[sendMessage] result:', JSON.stringify(result).slice(0, 300));
+
+    // 计算本次费用
+    if (result.usage && result.pricing) {
+      const inputCost = (result.usage.prompt_tokens || 0) / 1_000_000 * result.pricing.input;
+      const outputCost = (result.usage.completion_tokens || 0) / 1_000_000 * result.pricing.output;
+      sessionCost.value += inputCost + outputCost;
+    }
 
     if (result.error) {
       messages.value.push({
         role: 'assistant',
-        content: `${result.error}`,
+        content: `⚠️ ${result.error}`,
         _thinkingExpanded: false,
       });
     } else {
-      // 流式完成 — 结果已通过 chunk 推送
+      let finalContent = streamContent.value || result.content || '';
+      let finalThinking = streamThinking.value || result.thinking || null;
+      let eventObj = null;
+
+      // 自动日程意图检测
+      const eventRegex = /<calendar_event>\s*({[\s\S]*?})\s*<\/calendar_event>/i;
+      const match = finalContent.match(eventRegex);
+      if (match) {
+        try {
+          eventObj = JSON.parse(match[1]);
+          finalContent = finalContent.replace(eventRegex, '').trim();
+        } catch (e) {
+          console.error("Failed to parse automatic calendar event:", e);
+        }
+      }
+
+      // 始终显示回复，即使内容为空也给出提示
       const assistantMsg = {
         role: 'assistant',
-        content: streamContent.value || result.content,
-        thinking: streamThinking.value || result.thinking || null,
+        content: finalContent || '（模型未返回内容，请检查 API 配置或重试）',
+        thinking: finalThinking,
         _thinkingExpanded: false,
       };
+      
       messages.value.push(assistantMsg);
-
-      // 持久化
       await window.electronAPI.addMessage(
         props.conversationId,
         'assistant',
         assistantMsg.content,
         null
       );
+
+      if (eventObj) {
+        messages.value.push({ role: 'assistant', type: 'confirm-card', event: eventObj });
+      }
     }
   } catch (err) {
+    console.error('[sendMessage] exception:', err);
     messages.value.push({
       role: 'assistant',
-      content: `发生错误: ${err.message}`,
+      content: `⚠️ 发生错误: ${err.message}`,
       _thinkingExpanded: false,
     });
   } finally {
@@ -365,10 +480,44 @@ async function stopGeneration() {
 // ── Markdown 渲染 ───────────────────────────────────
 function renderMarkdown(text) {
   if (!text) return '';
-  return marked.parse(text);
+  // 隐藏流式输出过程中的日历块
+  const cleaned = text.replace(/<calendar_event>[\s\S]*?(?:<\/calendar_event>|$)/gi, '');
+  return marked.parse(cleaned);
 }
 
-// ── 图片处理 ────────────────────────────────────────
+// ── 附件/图片处理 ────────────────────────────────────
+async function handleAttach() {
+  try {
+    const result = await window.electronAPI.selectFile();
+    if (!result) return; // User cancelled
+
+    // New structured return: { name, type, content }
+    if (typeof result === 'object' && result.type === 'image' && result.content) {
+      pendingImage.value = result.content;
+      return;
+    }
+    if (typeof result === 'object' && result.type === 'text' && result.content) {
+      inputText.value = `请分析以下文件内容 (${result.name}):\n\n${result.content}`;
+      return;
+    }
+    // Old fallback: result is just a file path string (shouldn't happen now)
+    if (typeof result === 'string') {
+      inputText.value = `用户选择了文件: ${result}`;
+      return;
+    }
+  } catch (e) {
+    console.error('[handleAttach]', e);
+  }
+
+  // Fallback: try clipboard image
+  const base64 = await window.electronAPI.getClipboardImage();
+  if (base64) {
+    pendingImage.value = base64;
+  }
+}
+
+
+
 async function pasteImage() {
   const base64 = await window.electronAPI.getClipboardImage();
   if (base64) {
@@ -675,13 +824,16 @@ function scrollToBottom() {
 .message-image {
   border-radius: var(--radius-md);
   overflow: hidden;
-  max-width: 300px;
 }
 
 .message-image img {
-  width: 100%;
+  width: auto;
   height: auto;
+  max-width: 300px;
+  max-height: 240px;
   display: block;
+  object-fit: contain;
+  border-radius: var(--radius-sm);
 }
 
 /* ── 图片预览条 ─────────────────────────────────────── */
@@ -757,10 +909,104 @@ function scrollToBottom() {
 .quick-actions-bar {
   display: flex;
   justify-content: flex-end;
+  align-items: center;
   margin-bottom: var(--space-2);
   max-width: 800px;
   margin-left: auto;
   margin-right: auto;
+}
+
+.actions-spacer {
+  flex: 1;
+}
+
+.model-switcher-wrap {
+  position: relative;
+}
+
+.model-indicator {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  transition: all var(--duration-fast);
+  font-family: var(--font-sans);
+}
+
+.model-indicator:hover {
+  color: var(--text-secondary);
+  background: var(--surface-glass);
+}
+
+.model-logo-sm {
+  width: 12px;
+  height: 12px;
+  object-fit: contain;
+  border-radius: 2px;
+}
+
+/* ── 模型切换弹窗 ─────────────────────────────────── */
+.model-popup {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  min-width: 200px;
+  background: #1c1c1c;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  padding: var(--space-1);
+  z-index: 200;
+}
+
+.model-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 10px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  text-align: left;
+  cursor: pointer;
+  transition: all var(--duration-fast);
+}
+
+.model-option:hover {
+  background: var(--surface-glass);
+  color: var(--text-primary);
+}
+
+.model-option.active {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.model-option-label {
+  font-weight: 500;
+}
+
+.model-option-id {
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+}
+
+.model-option-empty {
+  padding: 8px 10px;
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+  text-align: center;
 }
 
 .btn-parse-event {
@@ -774,6 +1020,7 @@ function scrollToBottom() {
   font-size: var(--text-xs);
   cursor: pointer;
   transition: color 0.2s;
+  margin-left: auto;
 }
 
 .btn-parse-event:hover:not(:disabled) {
@@ -787,19 +1034,16 @@ function scrollToBottom() {
 
 .input-area {
   padding: var(--space-4) var(--space-8) var(--space-6);
-  border-top: 1px solid var(--border-subtle);
-  background: var(--bg-primary);
 }
 
 .input-row {
   display: flex;
-  align-items: flex-end;
-  gap: var(--space-2);
+  flex-direction: column;
   max-width: 800px;
   margin: 0 auto;
   background: var(--surface-card);
   border: 1px solid var(--border-subtle);
-  border-radius: 20px;
+  border-radius: var(--radius-md);
   padding: var(--space-2) var(--space-3);
   transition: border-color var(--duration-fast) var(--ease-out);
 }
@@ -808,16 +1052,42 @@ function scrollToBottom() {
   border-color: var(--border-default);
 }
 
-.paste-btn {
-  color: var(--text-tertiary);
-  margin-bottom: 2px;
+/* ── 内联图片预览 ─────────────────────────────────── */
+.inline-image-preview {
+  position: relative;
+  display: inline-block;
+  padding: 4px 0 6px 0;
 }
-.paste-btn:hover {
-  color: var(--text-primary);
+
+.inline-image-preview img {
+  width: auto;
+  height: auto;
+  max-width: 64px;
+  max-height: 48px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-subtle);
+  object-fit: contain;
+}
+
+.image-remove-inline {
+  position: absolute;
+  top: 0;
+  right: -8px;
+  width: 16px;
+  height: 16px;
+  font-size: 8px;
+  background: var(--color-error);
+  color: white;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  border: none;
 }
 
 .chat-input {
-  flex: 1;
+  width: 100%;
   border: none;
   background: transparent;
   color: var(--text-primary);
@@ -826,7 +1096,8 @@ function scrollToBottom() {
   line-height: var(--leading-normal);
   resize: none;
   outline: none;
-  padding: var(--space-2);
+  padding: var(--space-1) 0;
+  min-height: 56px;
   max-height: 160px;
 }
 
@@ -834,28 +1105,89 @@ function scrollToBottom() {
   color: var(--text-tertiary);
 }
 
-.send-btn {
+/* ── 底部工具栏 ───────────────────────────────────── */
+.input-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding-top: var(--space-1);
+}
+
+.toolbar-spacer {
+  flex: 1;
+}
+
+.attach-btn {
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+}
+.attach-btn:hover {
+  color: var(--text-primary);
+}
+
+/* ── 发送/停止按钮（统一方形） ────────────────────── */
+.action-btn {
   flex-shrink: 0;
   display: flex;
   align-items: center;
-  gap: var(--space-1);
-  padding: 8px 16px;
-  border-radius: 16px;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-default);
+  background: transparent;
+  cursor: pointer;
+  transition: all var(--duration-fast);
+}
+
+.action-btn:hover {
+  border-color: var(--text-secondary);
 }
 
 .send-btn:disabled {
-  opacity: 0.4;
+  opacity: 0.3;
   cursor: not-allowed;
 }
 
+/* CSS 实心三角形 ▶ */
+.icon-send {
+  display: block;
+  width: 0;
+  height: 0;
+  border-style: solid;
+  border-width: 4px 0 4px 7px;
+  border-color: transparent transparent transparent var(--text-primary);
+  margin-left: 2px;
+}
+
+.send-btn:disabled .icon-send {
+  border-left-color: var(--text-tertiary);
+}
+
+/* 红色实心方块 ■ */
+.icon-stop {
+  display: block;
+  width: 6px;
+  height: 6px;
+  border-radius: 1px;
+  background: var(--color-error);
+}
+
 .stop-btn {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  gap: var(--space-1);
-  padding: 8px 16px;
-  border-radius: 16px;
-  color: var(--color-error);
-  border-color: var(--color-error);
+  border: 1px solid var(--color-error);
+}
+
+.stop-btn:hover {
+  border: 1px solid var(--color-error);
+  background: rgba(248, 113, 113, 0.1);
+}
+
+/* ── 计费指示器 ───────────────────────────────────── */
+.cost-indicator {
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+  padding: 0 var(--space-2);
 }
 </style>

@@ -169,6 +169,12 @@ class Database {
     ).run(status, id);
   }
 
+  updateEventTime(id, startTime, endTime) {
+    this.db.prepare(
+      'UPDATE events SET start_time = ?, end_time = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?'
+    ).run(startTime, endTime, id);
+  }
+
   // ── 配置管理 ─────────────────────────────────────────
 
   getConfig(key) {

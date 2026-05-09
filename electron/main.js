@@ -22,8 +22,36 @@ const isDev = !app.isPackaged;
 // ─── System Prompt ──────────────────────────────────────
 function buildSystemPrompt() {
   const workspaceDir = db?.getConfig('workspaceDir') || '';
+  const externalSkillsDir = db?.getConfig('externalSkillsDir') || '';
+
+  const now = new Date();
+  const timeString = now.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' });
+
+  // 通用的目录摘要工具函数
+  function scanDir(dirPath, maxItems = 50) {
+    const fs = require('fs');
+    try {
+      if (!fs.existsSync(dirPath)) return '(目录不存在)';
+      const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+      const items = entries
+        .filter(e => !e.name.startsWith('.'))
+        .slice(0, maxItems)
+        .map(e => {
+          if (e.isDirectory()) return `  [DIR]  ${e.name}/`;
+          const size = fs.statSync(path.join(dirPath, e.name)).size;
+          const kb = (size / 1024).toFixed(1);
+          return `  [FILE] ${e.name} (${kb}KB)`;
+        });
+      return items.join('\n') || '(目录为空)';
+    } catch (err) {
+      console.error(`[SystemPrompt] Failed to read dir ${dirPath}:`, err.message);
+      return '(无法读取)';
+    }
+  }
 
   let prompt = `你是 bob-agent，一个运行在用户 Windows 桌面上的 AI 私人秘书。
+当前系统时间：${timeString}
+
 你拥有以下能力（通过 Electron 后端实现）：
 1. **本地文件读取**：用户可以拖拽文件到对话窗口，或者通过粘贴操作分享文件，你能读取 txt/md/json/csv/py/js/docx/xlsx/pdf 等格式的文件内容。
 2. **图片识别 (Vision)**：用户可以粘贴截图或拖入图片，你可以识别并分析图片内容。
@@ -31,36 +59,27 @@ function buildSystemPrompt() {
 4. **剪贴板访问**：你可以读取用户剪贴板中的图片。`;
 
   if (workspaceDir) {
-    // 动态读取目录树摘要注入到 Prompt 中，让模型真正"看到"文件
-    let dirListing = '';
-    try {
-      const fs = require('fs');
-      if (fs.existsSync(workspaceDir)) {
-        const entries = fs.readdirSync(workspaceDir, { withFileTypes: true });
-        const items = entries
-          .filter(e => !e.name.startsWith('.'))
-          .slice(0, 50) // 最多 50 项，避免 Prompt 过长
-          .map(e => {
-            if (e.isDirectory()) return `  [DIR]  ${e.name}/`;
-            const size = fs.statSync(path.join(workspaceDir, e.name)).size;
-            const kb = (size / 1024).toFixed(1);
-            return `  [FILE] ${e.name} (${kb}KB)`;
-          });
-        dirListing = items.join('\n');
-      }
-    } catch (err) {
-      console.error('[SystemPrompt] Failed to read workspace dir:', err.message);
-    }
-
+    const dirListing = scanDir(workspaceDir);
     prompt += `
 5. **工作目录浏览**：用户已配置工作目录为 \`${workspaceDir}\`。你可以直接看到该目录下的内容。
 
 当前工作目录文件列表：
 \`\`\`
-${dirListing || '(目录为空或无法读取)'}
+${dirListing}
 \`\`\`
 
 当用户问"文件夹里有什么"时，直接根据上面的列表回答。当用户要求读取某个文件时，告诉他们可以把文件拖进对话窗口，你就能分析内容。`;
+  }
+
+  if (externalSkillsDir) {
+    const skillsListing = scanDir(externalSkillsDir, 30);
+    prompt += `
+6. **外部技能目录**：用户已配置外部技能目录为 \`${externalSkillsDir}\`。这个目录包含可扩展的 Agent 技能模块，你也可以浏览和引用其中的内容。
+
+外部技能目录内容：
+\`\`\`
+${skillsListing}
+\`\`\``;
   }
 
   prompt += `
@@ -68,15 +87,23 @@ ${dirListing || '(目录为空或无法读取)'}
 重要行为准则：
 - 你是一个桌面原生应用内的助手，不是网页聊天机器人。`;
 
-  if (workspaceDir) {
-    prompt += `当用户提到"文件"、"文件夹"时，你可以直接帮他们浏览工作目录中的内容，也可以引导他们拖拽文件到对话窗口。`;
+  const accessibleDirs = [];
+  if (workspaceDir) accessibleDirs.push(`工作目录(${workspaceDir})`);
+  if (externalSkillsDir) accessibleDirs.push(`外部技能目录(${externalSkillsDir})`);
+
+  if (accessibleDirs.length > 0) {
+    prompt += `你可以直接访问以下目录：${accessibleDirs.join('、')}。当用户提到"文件"、"文件夹"、"技能"时，你可以直接帮他们浏览这些目录中的内容，也可以引导他们拖拽文件到对话窗口。`;
   } else {
     prompt += `当用户提到"文件"、"文件夹"时，引导他们通过拖拽文件到对话窗口来分享，或者建议他们在"设置"中配置工作目录以获得文件浏览能力。`;
   }
 
   prompt += `
 - 保持专业、简洁、有帮助。使用用户的语言（中文）回答。
-- 当识别到用户消息中包含日程或待办信息时，主动提示可以使用"解析为日程"功能。
+- 【强制规则 — 日程/待办自动检测】任何时候，只要用户消息中同时包含"时间"和"活动/事件/地点"两个要素（例如："明天下午3点开会"、"周六去深圳湾"、"提醒我买牛奶"），你 **必须** 在回复文字之后、消息最末尾附上如下 XML 标签。没有任何例外，即使你已经用文字确认了也必须输出此标签：
+  <calendar_event>
+  {"type": "event", "title": "活动标题", "start_time": "YYYY-MM-DD HH:mm:ss", "end_time": "YYYY-MM-DD HH:mm:ss"}
+  </calendar_event>
+  如果没有明确结束时间，默认持续 1 小时。如果是待办事项（没有具体时间段），type 改为 "todo"。
 - 你的名字是 bob-agent，是用户的私人 AI 桌面助理。`;
 
   return prompt;
@@ -90,11 +117,11 @@ function createWindow() {
     minWidth: 800,
     minHeight: 600,
     title: 'bob-agent',
-    backgroundColor: '#0a0a0f',
+    backgroundColor: '#0c0c0c',
     titleBarStyle: 'hidden',
     titleBarOverlay: {
-      color: '#0a0a0f',
-      symbolColor: '#a0a0b0',
+      color: '#141414',
+      symbolColor: '#a0a0a0',
       height: 36,
     },
     webPreferences: {
@@ -143,7 +170,6 @@ function registerIPCHandlers() {
     }
 
     try {
-      // 注入 System Prompt（如果消息列表中没有）
       const hasSystemMsg = messages.some(m => m.role === 'system');
       const fullMessages = hasSystemMsg
         ? messages
@@ -152,19 +178,30 @@ function registerIPCHandlers() {
       const stream = llmClient.chatStream(fullMessages);
       let fullContent = '';
       let thinkingContent = '';
+      let usageData = null;
+      let modelId = null;
 
       for await (const chunk of stream) {
-        // 推送流式 chunk 到渲染进程
         mainWindow?.webContents.send('llm:chunk', chunk);
 
         if (chunk.type === 'text') {
           fullContent += chunk.content;
         } else if (chunk.type === 'thinking') {
           thinkingContent += chunk.content;
+        } else if (chunk.type === 'done') {
+          usageData = chunk.usage || null;
+          modelId = chunk.model || null;
         }
       }
 
-      return { content: fullContent, thinking: thinkingContent || null };
+      const pricing = llmClient.getPricing(modelId);
+      return {
+        content: fullContent,
+        thinking: thinkingContent || null,
+        usage: usageData,
+        model: modelId,
+        pricing,
+      };
     } catch (err) {
       console.error('[LLM] Chat error:', err.message);
       return { error: err.message };
@@ -177,7 +214,6 @@ function registerIPCHandlers() {
     }
 
     try {
-      // Vision 也注入 System Prompt
       const hasSystemMsg = messages.some(m => m.role === 'system');
       const fullMessages = hasSystemMsg
         ? messages
@@ -186,14 +222,27 @@ function registerIPCHandlers() {
       const stream = llmClient.visionStream(fullMessages, imageBase64);
       let fullContent = '';
       let thinkingContent = '';
+      let usageData = null;
+      let modelId = null;
 
       for await (const chunk of stream) {
         mainWindow?.webContents.send('llm:chunk', chunk);
         if (chunk.type === 'text') fullContent += chunk.content;
         else if (chunk.type === 'thinking') thinkingContent += chunk.content;
+        else if (chunk.type === 'done') {
+          usageData = chunk.usage || null;
+          modelId = chunk.model || null;
+        }
       }
 
-      return { content: fullContent, thinking: thinkingContent || null };
+      const pricing = llmClient.getPricing(modelId);
+      return {
+        content: fullContent,
+        thinking: thinkingContent || null,
+        usage: usageData,
+        model: modelId,
+        pricing,
+      };
     } catch (err) {
       console.error('[LLM] Vision error:', err.message);
       return { error: err.message };
@@ -259,6 +308,16 @@ function registerIPCHandlers() {
     }
   });
 
+  ipcMain.handle('calendar:update-time', async (_event, id, startTime, endTime) => {
+    try {
+      db.updateEventTime(id, startTime, endTime);
+      return { ok: true };
+    } catch (err) {
+      console.error('[Calendar] Update time error:', err.message);
+      return { error: err.message };
+    }
+  });
+
   // ── 文件 ─────────────────────────────────────────────
   ipcMain.handle('file:read', async (_event, filePath) => {
     try {
@@ -274,12 +333,30 @@ function registerIPCHandlers() {
     const result = await dialog.showOpenDialog(mainWindow, {
       properties: ['openFile'],
       filters: [
-        { name: '支持的文件', extensions: ['txt', 'md', 'csv', 'json', 'yaml', 'log', 'py', 'js', 'ts', 'java', 'go', 'sql', 'docx', 'xlsx', 'pdf'] },
+        { name: '图片', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'] },
+        { name: '文档', extensions: ['txt', 'md', 'csv', 'json', 'yaml', 'log', 'py', 'js', 'ts', 'java', 'go', 'sql', 'docx', 'xlsx', 'pdf'] },
         { name: '所有文件', extensions: ['*'] },
       ],
     });
     if (result.canceled || result.filePaths.length === 0) return null;
-    return result.filePaths[0];
+
+    const filePath = result.filePaths[0];
+    const fileName = path.basename(filePath);
+    const ext = path.extname(filePath).toLowerCase();
+    const imageExts = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp'];
+
+    if (imageExts.includes(ext)) {
+      // Read image as base64
+      const fs = require('fs');
+      const buffer = fs.readFileSync(filePath);
+      const base64 = buffer.toString('base64');
+      return { name: fileName, type: 'image', content: base64 };
+    } else {
+      // Use file-reader for text files
+      const { readFile } = require('./services/file-reader');
+      const textResult = await readFile(filePath);
+      return { name: fileName, type: 'text', content: textResult.content, error: textResult.error };
+    }
   });
 
   // ── 工作目录（沙箱化文件浏览）─────────────────────
@@ -415,6 +492,17 @@ function registerIPCHandlers() {
   ipcMain.handle('system:is-setup-complete', async () => {
     const apiKey = db.getConfig('apiKey');
     return !!apiKey;
+  });
+
+  ipcMain.handle('system:select-dir', async () => {
+    const { dialog } = require('electron');
+    const result = await dialog.showOpenDialog(mainWindow, {
+      properties: ['openDirectory'],
+    });
+    if (!result.canceled && result.filePaths.length > 0) {
+      return result.filePaths[0];
+    }
+    return null;
   });
 }
 

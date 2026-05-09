@@ -15,12 +15,11 @@
 
         <div class="form-group">
           <label class="form-label">服务商</label>
-          <select v-model="config.provider" class="input" @change="onProviderChange">
-            <option value="deepseek">DeepSeek</option>
-            <option value="openai">OpenAI</option>
-            <option value="ollama">Ollama (本地)</option>
-            <option value="custom">自定义</option>
-          </select>
+          <CustomSelect
+            v-model="config.provider"
+            :options="providerOptions"
+            @change="onProviderChange"
+          />
         </div>
 
         <div class="form-group" v-if="config.provider !== 'ollama'">
@@ -50,11 +49,11 @@
 
         <div class="form-group">
           <label class="form-label">默认模型</label>
-          <select v-model="config.model" class="input" @change="saveConfig('model', config.model)">
-            <option v-for="m in availableModels" :key="m.id" :value="m.id">
-              {{ m.label }} ({{ m.id }})
-            </option>
-          </select>
+          <CustomSelect
+            v-model="config.model"
+            :options="computedModelOptions"
+            @change="saveConfig('model', config.model)"
+          />
         </div>
 
         <!-- 连接测试 -->
@@ -78,10 +77,11 @@
         </h3>
         <div class="form-group">
           <label class="form-label">主题</label>
-          <select v-model="config.theme" class="input" @change="saveConfig('theme', config.theme)">
-            <option value="dark">暗色</option>
-            <option value="light">亮色 (开发中)</option>
-          </select>
+          <CustomSelect
+            v-model="config.theme"
+            :options="themeOptions"
+            @change="saveConfig('theme', config.theme)"
+          />
         </div>
       </section>
 
@@ -113,6 +113,34 @@
         </button>
       </section>
 
+      <!-- 工具与扩展 -->
+      <section class="settings-section card">
+        <h3 class="section-title">
+          <Puzzle :size="16" class="section-icon" />
+          工具与扩展 (Skills)
+        </h3>
+        <p class="section-desc">配置外部技能所在的目录，Agent 会在启动时自动加载它们。</p>
+        <div class="form-group workspace-group">
+          <input
+            v-model="config.externalSkillsDir"
+            class="input"
+            placeholder="点击右侧按钮选择外部技能目录..."
+            readonly
+          />
+          <button class="btn btn-ghost browse-btn" @click="selectExternalSkillsDir">
+            <FolderOpen :size="14" />
+            <span>浏览</span>
+          </button>
+        </div>
+        <button
+          v-if="config.externalSkillsDir"
+          class="btn-clear"
+          @click="clearExternalSkillsDir"
+        >
+          清除技能目录
+        </button>
+      </section>
+
       <!-- 关于 -->
       <section class="settings-section card">
         <h3 class="section-title">
@@ -129,10 +157,23 @@
 </template>
 
 <script setup>
-import { ref, onMounted, defineEmits } from 'vue';
-import { Settings as SettingsIcon, Cpu, Eye, EyeOff, Plug, Loader2, Palette, Info, FolderOpen } from 'lucide-vue-next';
+import { ref, computed, onMounted, defineEmits } from 'vue';
+import { Settings as SettingsIcon, Cpu, Eye, EyeOff, Plug, Loader2, Palette, Info, FolderOpen, Puzzle } from 'lucide-vue-next';
+import CustomSelect from '../components/CustomSelect.vue';
 
 const emit = defineEmits(['config-changed']);
+
+const providerOptions = [
+  { label: 'DeepSeek', value: 'deepseek' },
+  { label: 'OpenAI', value: 'openai' },
+  { label: 'Ollama (本地)', value: 'ollama' },
+  { label: '自定义', value: 'custom' },
+];
+
+const themeOptions = [
+  { label: '暗色', value: 'dark' },
+  { label: '亮色 (开发中)', value: 'light' },
+];
 
 const config = ref({
   provider: 'deepseek',
@@ -140,9 +181,18 @@ const config = ref({
   model: '',
   baseURL: '',
   theme: 'dark',
+  workspaceDir: '',
+  externalSkillsDir: '',
 });
 
 const availableModels = ref([]);
+const computedModelOptions = computed(() => {
+  return availableModels.value.map(m => ({
+    label: `${m.label} (${m.id})`,
+    value: m.id
+  }));
+});
+
 const showApiKey = ref(false);
 const isTesting = ref(false);
 const testResult = ref(null);
@@ -156,6 +206,7 @@ onMounted(async () => {
     baseURL: allConfig.baseURL || '',
     theme: allConfig.theme || 'dark',
     workspaceDir: allConfig.workspaceDir || '',
+    externalSkillsDir: allConfig.externalSkillsDir || '',
   };
   await loadModels();
 });
@@ -212,6 +263,19 @@ async function selectWorkspaceDir() {
 async function clearWorkspaceDir() {
   config.value.workspaceDir = '';
   await saveConfig('workspaceDir', '');
+}
+
+async function selectExternalSkillsDir() {
+  const dirPath = await window.electronAPI.selectDir();
+  if (dirPath) {
+    config.value.externalSkillsDir = dirPath;
+    await saveConfig('externalSkillsDir', dirPath);
+  }
+}
+
+async function clearExternalSkillsDir() {
+  config.value.externalSkillsDir = '';
+  await saveConfig('externalSkillsDir', '');
 }
 </script>
 

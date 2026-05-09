@@ -13,23 +13,28 @@
 
 const OpenAI = require('openai');
 
-// ─── 供应商配置 ─────────────────────────────────────────
+// ─── 供应商配置（pricing 单位：CNY / 1M tokens，来源 model-registry）─────
 const PROVIDERS = {
   deepseek: {
     name: 'DeepSeek',
     baseURL: 'https://api.deepseek.com',
     models: [
-      { id: 'deepseek-chat', label: 'DeepSeek Chat', vision: true, default: true },
-      { id: 'deepseek-reasoner', label: 'DeepSeek Reasoner', vision: false },
+      { id: 'deepseek-v4-flash', label: 'DeepSeek V4 Flash', vision: true, default: true,
+        pricing: { input: 1.0, output: 2.0 } },
+      { id: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro', vision: false,
+        pricing: { input: 3.0, output: 6.0 } },
     ],
   },
   openai: {
     name: 'OpenAI',
     baseURL: 'https://api.openai.com/v1',
     models: [
-      { id: 'gpt-4.1', label: 'GPT-4.1', vision: true },
-      { id: 'gpt-4.1-mini', label: 'GPT-4.1 Mini', vision: true, default: true },
-      { id: 'gpt-4.1-nano', label: 'GPT-4.1 Nano', vision: true },
+      { id: 'gpt-4.1', label: 'GPT-4.1', vision: true,
+        pricing: { input: 14.0, output: 56.0 } },
+      { id: 'gpt-4.1-mini', label: 'GPT-4.1 Mini', vision: true, default: true,
+        pricing: { input: 2.8, output: 11.2 } },
+      { id: 'gpt-4.1-nano', label: 'GPT-4.1 Nano', vision: true,
+        pricing: { input: 0.7, output: 2.8 } },
     ],
   },
   ollama: {
@@ -95,7 +100,17 @@ class LLMClient {
       label: m.label,
       vision: m.vision,
       default: m.default || false,
+      pricing: m.pricing || null,
     }));
+  }
+
+  /** 获取指定模型的价格 (CNY / 1M tokens) */
+  getPricing(modelId) {
+    const id = modelId || this._getModelId();
+    const providerConfig = PROVIDERS[this.provider];
+    if (!providerConfig) return null;
+    const model = providerConfig.models.find(m => m.id === id);
+    return model?.pricing || null;
   }
 
   /** 获取当前使用的模型 ID */
@@ -125,6 +140,7 @@ class LLMClient {
 
     this._abortController = new AbortController();
     const modelId = this._getModelId();
+    let usageData = null;
 
     try {
       const stream = await this._client.chat.completions.create(
@@ -132,11 +148,17 @@ class LLMClient {
           model: modelId,
           messages,
           stream: true,
+          stream_options: { include_usage: true },
         },
         { signal: this._abortController.signal }
       );
 
       for await (const chunk of stream) {
+        // 捕获最终的 usage 数据
+        if (chunk.usage) {
+          usageData = chunk.usage;
+        }
+
         const delta = chunk.choices?.[0]?.delta;
         if (!delta) continue;
 
@@ -151,10 +173,10 @@ class LLMClient {
         }
       }
 
-      yield { type: 'done', content: '' };
+      yield { type: 'done', content: '', usage: usageData, model: modelId };
     } catch (err) {
       if (err.name === 'AbortError') {
-        yield { type: 'done', content: '' };
+        yield { type: 'done', content: '', usage: usageData, model: modelId };
         return;
       }
       yield { type: 'error', content: this._friendlyError(err) };
