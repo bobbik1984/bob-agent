@@ -38,26 +38,33 @@
 
 ### 6.1 工具系统 (`electron/tools/`)
 - [ ] T-601: BaseTool 基类 (name/description/parameters/execute + get_schema)
-- [ ] T-602: ToolRegistry 工具注册表（内置工具 + skills/ 外挂扫描）
-- [ ] T-603: 内置工具 — list_dir / read_file（沙箱化，限工作目录）
+- [x] T-602: ToolRegistry 工具注册表（内置工具 + skills/ 外挂扫描）
+- [x] T-603: 内置工具 — list_dir / read_file / write_file 等（沙箱化，受工作目录/全局权限控制）
 - [ ] T-604: 内置工具 — create_event / search_events / update_event
-- [ ] T-605: 内置工具 — web_search（可选，联网搜索）
+- [x] T-605: 内置工具 — web_search（可选，联网搜索）
 
 ### 6.2 LLM 调用链改造
-- [ ] T-606: LLM Client 改造 — chatStream 支持 tools 参数 + tool_call 解析
-- [ ] T-607: Tool Execution Loop（LLM 返回 tool_call → 执行 → 结果回传 → 继续推理）
+- [x] T-606: LLM Client 改造 — chatStream 支持 tools 参数 + tool_call 解析
+- [x] T-607: Tool Execution Loop（LLM 返回 tool_call → 执行 → 结果回传 → 继续推理）
 - [ ] T-608: ChatView 工具调用 UI（执行中 spinner + 工具名称 + 结果折叠展示）
 
 ### 6.3 技能系统（双目录架构，参照 CodeRunner ToolRegistry._resolve_skills_dirs）
-- [ ] T-609: 内置 skills/ 目录 — 随项目分发 3-5 个基础技能（每日总结/文件整理/会议准备）
+- [x] T-609: 内置 skills/ 目录 — 随项目分发 15+ 个基础纯大脑技能
 - [x] T-610: ToolRegistry 扫描内置 skills/ — 自动发现 SKILL.md frontmatter 并注册
 - [x] T-611: 设置→外部技能目录 — UI 配置 + 目录选择器（支持多路径）
-- [ ] T-612: ToolRegistry 扫描外部目录 — 启动时加载，如 Assistant/common/knowledge/skills/
+- [x] T-612: ToolRegistry 扫描外部目录 — 启动时加载外部技能
 - [ ] T-613: 技能热重载 — 不重启应用即可刷新技能列表
 
 ### 6.4 MCP 协议
 - [ ] T-614: MCP 客户端接入（连接外部 MCP Server）
 - [ ] T-615: MCP 配置 UI（mcp/config.json 管理）
+
+### 6.5 资产迁移与基元能力
+- [x] T-616: 原生读写基元支持 (write_file)
+- [x] T-617: 网络代理基元支持 (tinyfish_fetch, weather 等)
+- [x] T-618: 纯大脑技能全量迁移 (15 个 Markdown 技能导入)
+- [x] T-619: 会话级全局文件授权 (Global File Access Toggle)
+- [x] T-620: AKP_Link_Harvester 改造为 LLM Wiki 双链格式
 
 ## Sprint 7: 打包发布
 

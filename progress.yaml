@@ -45,8 +45,8 @@ phases:
       - { text: "T-304: System Prompt 动态注入目录树摘要", status: done }
       - { text: "T-305: Agent 头像改 Bob 文字标", status: done }
       - { text: "T-306: 对话列表添加删除按钮", status: done }
-      - { text: "T-307: 模型品牌 PNG Logo（DeepSeek/OpenAI/Ollama）", status: todo }
-      - { text: "T-308: 自动日程意图检测（对话流自动识别）", status: todo }
+      - { text: "T-307: 模型品牌 PNG Logo（DeepSeek/OpenAI/Ollama）", status: done }
+      - { text: "T-308: 自动日程意图检测（对话流自动识别）", status: done }
 
   - name: "Sprint 4 · 文件分析 + 联动"
     status: todo
@@ -90,6 +90,12 @@ phases:
       # 6.4 MCP 协议
       - { text: "T-614: MCP 客户端接入", status: todo }
       - { text: "T-615: MCP 配置 UI", status: todo }
+      # 6.5 资产迁移与基元能力
+      - { text: "T-616: 原生读写基元支持 (write_file)", status: done }
+      - { text: "T-617: 网络代理基元支持 (tinyfish_fetch, weather 等)", status: done }
+      - { text: "T-618: 纯大脑技能全量迁移 (15 个 Markdown 技能导入)", status: done }
+      - { text: "T-619: 会话级全局文件授权 (Global File Access Toggle)", status: done }
+      - { text: "T-620: AKP_Link_Harvester 改造为 LLM Wiki 双链格式", status: done }
 
   - name: "Sprint 7 · 打包发布"
     status: todo

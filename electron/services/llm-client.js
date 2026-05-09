@@ -162,6 +162,7 @@ class LLMClient {
           const schemas = this.registry.getAllSchemas();
           if (schemas && schemas.length > 0) {
             params.tools = schemas;
+            console.log('[LLMClient] Sending tools to API:', schemas.map(s => s.function.name).join(', '));
           }
         }
 
@@ -171,10 +172,12 @@ class LLMClient {
         );
 
         let toolCallsMap = new Map();
+        let currentUsage = null;
+        let assistantMessageContent = '';
 
         for await (const chunk of stream) {
           if (chunk.usage) {
-            usageData = chunk.usage;
+            currentUsage = chunk.usage;
           }
 
           const delta = chunk.choices?.[0]?.delta;
@@ -186,12 +189,15 @@ class LLMClient {
                 toolCallsMap.set(toolCall.index, {
                   id: toolCall.id,
                   type: 'function',
-                  function: { name: toolCall.function?.name || '', arguments: '' }
+                  function: { name: '', arguments: '' }
                 });
               }
               const tc = toolCallsMap.get(toolCall.index);
               if (toolCall.id) tc.id = toolCall.id;
-              if (toolCall.function?.name) tc.function.name += toolCall.function.name;
+              // name 只 set 不 append（防止重复拼接）
+              if (toolCall.function?.name) {
+                if (!tc.function.name) tc.function.name = toolCall.function.name;
+              }
               if (toolCall.function?.arguments) tc.function.arguments += toolCall.function.arguments;
             }
             continue;
@@ -202,25 +208,40 @@ class LLMClient {
           }
 
           if (delta.content) {
+            assistantMessageContent += delta.content;
             yield { type: 'text', content: delta.content };
           }
+        }
+        
+        // 累加所有迭代的 token 消耗
+        if (currentUsage) {
+          if (!usageData) {
+            usageData = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
+          }
+          usageData.prompt_tokens += currentUsage.prompt_tokens || 0;
+          usageData.completion_tokens += currentUsage.completion_tokens || 0;
+          usageData.total_tokens += currentUsage.total_tokens || 0;
         }
 
         if (toolCallsMap.size > 0) {
           const toolCalls = Array.from(toolCallsMap.values());
-          currentMessages.push({ role: 'assistant', tool_calls: toolCalls, content: null });
+          console.log('[LLMClient] Tool calls received:', toolCalls.map(tc => `${tc.function.name}(${tc.function.arguments})`).join(', '));
+          currentMessages.push({ role: 'assistant', tool_calls: toolCalls, content: assistantMessageContent || null });
 
           for (const tc of toolCalls) {
             let result = '';
             try {
               const args = JSON.parse(tc.function.arguments || '{}');
+              console.log(`[LLMClient] Executing tool: ${tc.function.name}`, args);
               if (this.registry) {
                 const res = await this.registry.executeTool(tc.function.name, args);
                 result = typeof res === 'string' ? res : JSON.stringify(res);
+                console.log(`[LLMClient] Tool result (first 200 chars):`, result.substring(0, 200));
               } else {
                 result = 'ToolRegistry not available.';
               }
             } catch (e) {
+              console.error(`[LLMClient] Tool execution error:`, e);
               result = e.toString();
             }
             currentMessages.push({ role: 'tool', tool_call_id: tc.id, content: result });

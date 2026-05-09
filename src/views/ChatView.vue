@@ -157,8 +157,16 @@
             </div>
           </div>
           <div class="toolbar-spacer"></div>
+          <!-- 全局权限开关 -->
+          <label class="global-access-toggle" :class="{ active: globalFileAccess }" title="开启后，允许AI读取或修改工作目录外的系统文件 (仅限当前对话有效)">
+            <input type="checkbox" v-model="globalFileAccess" style="display: none;" />
+            <span v-if="!globalFileAccess" style="font-size: 12px; margin-right: 4px;">🔒</span>
+            <span v-else style="font-size: 12px; margin-right: 4px; color: var(--accent);">🔓</span>
+            <span style="font-size: 11px; opacity: 0.8; cursor: pointer;">全局文件访问</span>
+          </label>
+          <div style="width: 12px;"></div>
           <!-- 计费指示器 -->
-          <span v-if="sessionCost > 0" class="cost-indicator" title="本次对话累计费用">
+          <span class="cost-indicator" title="本次对话累计费用">
             ¥{{ sessionCost.toFixed(4) }}
           </span>
           <button
@@ -224,6 +232,7 @@ const currentModelRaw = ref('');
 const showModelSwitcher = ref(false);
 const availableModels = ref([]);
 const sessionCost = ref(0);
+const globalFileAccess = ref(false);
 
 const canSend = ref(true);
 
@@ -338,6 +347,7 @@ onUnmounted(() => {
 watch(() => props.conversationId, async () => {
   loadMessages();
   sessionCost.value = 0;
+  globalFileAccess.value = false;
   currentModelRaw.value = await window.electronAPI.getConfig('model') || '';
 }, { immediate: true });
 
@@ -402,9 +412,9 @@ async function sendMessage() {
     let result;
     console.log('[sendMessage] image_base64 present:', !!userMessage.image_base64, 'apiMessages count:', apiMessages.length);
     if (userMessage.image_base64) {
-      result = await window.electronAPI.sendVision(apiMessages, userMessage.image_base64);
+      result = await window.electronAPI.sendVision(apiMessages, userMessage.image_base64, globalFileAccess.value);
     } else {
-      result = await window.electronAPI.sendChat(apiMessages);
+      result = await window.electronAPI.sendChat(apiMessages, globalFileAccess.value);
     }
     console.log('[sendMessage] result:', JSON.stringify(result).slice(0, 300));
 

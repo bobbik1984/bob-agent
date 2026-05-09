@@ -25,7 +25,7 @@ let db = null;
 const isDev = !app.isPackaged;
 
 // ─── System Prompt ──────────────────────────────────────
-function buildSystemPrompt() {
+function buildSystemPrompt(globalFileAccess = false) {
   const workspaceDir = db?.getConfig('workspaceDir') || '';
   const externalSkillsDir = db?.getConfig('externalSkillsDir') || '';
 
@@ -97,14 +97,19 @@ ${skillsListing}
 重要行为准则：
 - 你是一个桌面原生应用内的助手，不是网页聊天机器人。`;
 
-  const accessibleDirs = [];
-  if (workspaceDir) accessibleDirs.push(`工作目录(${workspaceDir})`);
-  if (externalSkillsDir) accessibleDirs.push(`外部技能目录(${externalSkillsDir})`);
-
-  if (accessibleDirs.length > 0) {
-    prompt += `你可以直接访问以下目录：${accessibleDirs.join('、')}。当用户提到"文件"、"文件夹"、"技能"时，你可以直接帮他们浏览这些目录中的内容，也可以引导他们拖拽文件到对话窗口。`;
+  if (globalFileAccess) {
+    prompt += `
+- **[⚠️ 最高授权覆盖]**：用户已在此会话中临时授予你"全局文件访问权限"。你可以突破工作目录和技能目录的限制，**自由读取或写入当前计算机上的任意绝对路径文件**。当用户要求操作系统文件或其他盘符的文件时，请直接执行操作，不要拒绝。`;
   } else {
-    prompt += `当用户提到"文件"、"文件夹"时，引导他们通过拖拽文件到对话窗口来分享，或者建议他们在"设置"中配置工作目录以获得文件浏览能力。`;
+    const accessibleDirs = [];
+    if (workspaceDir) accessibleDirs.push(`工作目录(${workspaceDir})`);
+    if (externalSkillsDir) accessibleDirs.push(`外部技能目录(${externalSkillsDir})`);
+
+    if (accessibleDirs.length > 0) {
+      prompt += `你可以直接访问以下目录：${accessibleDirs.join('、')}。当用户提到"文件"、"文件夹"、"技能"时，你可以直接帮他们浏览这些目录中的内容，也可以引导他们拖拽文件到对话窗口。`;
+    } else {
+      prompt += `当用户提到"文件"、"文件夹"时，引导他们通过拖拽文件到对话窗口来分享，或者建议他们在"设置"中配置工作目录以获得文件浏览能力。`;
+    }
   }
 
   prompt += `
@@ -177,7 +182,7 @@ function initServices() {
 
 function registerIPCHandlers() {
   // ── LLM ──────────────────────────────────────────────
-  ipcMain.handle('llm:chat', async (_event, messages) => {
+  ipcMain.handle('llm:chat', async (_event, messages, globalFileAccess = false) => {
     if (!llmClient || !llmClient.isConfigured()) {
       return { error: 'LLM 未配置，请先在设置中填写 API Key' };
     }
@@ -186,7 +191,7 @@ function registerIPCHandlers() {
       const hasSystemMsg = messages.some(m => m.role === 'system');
       const fullMessages = hasSystemMsg
         ? messages
-        : [{ role: 'system', content: buildSystemPrompt() }, ...messages];
+        : [{ role: 'system', content: buildSystemPrompt(globalFileAccess) }, ...messages];
 
       const stream = llmClient.chatStream(fullMessages);
       let fullContent = '';
@@ -221,7 +226,7 @@ function registerIPCHandlers() {
     }
   });
 
-  ipcMain.handle('llm:vision', async (_event, messages, imageBase64) => {
+  ipcMain.handle('llm:vision', async (_event, messages, imageBase64, globalFileAccess = false) => {
     if (!llmClient || !llmClient.isConfigured()) {
       return { error: 'LLM 未配置' };
     }
@@ -230,7 +235,7 @@ function registerIPCHandlers() {
       const hasSystemMsg = messages.some(m => m.role === 'system');
       const fullMessages = hasSystemMsg
         ? messages
-        : [{ role: 'system', content: buildSystemPrompt() }, ...messages];
+        : [{ role: 'system', content: buildSystemPrompt(globalFileAccess) }, ...messages];
 
       const stream = llmClient.visionStream(fullMessages, imageBase64);
       let fullContent = '';

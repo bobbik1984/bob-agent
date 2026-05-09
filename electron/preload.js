@@ -9,8 +9,8 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('electronAPI', {
   // ── LLM ────────────────────────────────────────────
-  sendChat: (messages) => ipcRenderer.invoke('llm:chat', messages),
-  sendVision: (messages, imageBase64) => ipcRenderer.invoke('llm:vision', messages, imageBase64),
+  sendChat: (messages, globalFileAccess) => ipcRenderer.invoke('llm:chat', messages, globalFileAccess),
+  sendVision: (messages, imageBase64, globalFileAccess) => ipcRenderer.invoke('llm:vision', messages, imageBase64, globalFileAccess),
   stopGeneration: () => ipcRenderer.invoke('llm:stop'),
   getModels: () => ipcRenderer.invoke('llm:models'),
 
