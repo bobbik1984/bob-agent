@@ -27,6 +27,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   confirmEvent: (event) => ipcRenderer.invoke('calendar:confirm', event),
   listEvents: (start, end) => ipcRenderer.invoke('calendar:list', start, end),
   deleteEvent: (id) => ipcRenderer.invoke('calendar:delete', id),
+  updateEventStatus: (id, status) => ipcRenderer.invoke('calendar:update-status', id, status),
 
   // ── 文件 ───────────────────────────────────────────
   readFile: (filePath) => ipcRenderer.invoke('file:read', filePath),

@@ -97,7 +97,7 @@ const currentModel = ref('');
 
 const navItems = [
   { id: 'chat', icon: '💬', label: '对话' },
-  { id: 'inbox', icon: '📅', label: '日程' },
+  { id: 'inbox', icon: '📥', label: '智能收件箱' },
   { id: 'settings', icon: '⚙️', label: '设置' },
 ];
 

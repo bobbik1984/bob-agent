@@ -31,8 +31,17 @@
           {{ msg.role === 'user' ? '👤' : '🤖' }}
         </div>
         <div class="message-body">
+          <!-- 解析出的事件卡片 -->
+          <template v-if="msg.type === 'confirm-card'">
+            <ConfirmCard
+              :event="msg.event"
+              @confirm="(e) => handleConfirmEvent(e, msg)"
+              @cancel="() => handleCancelEvent(msg)"
+            />
+          </template>
+
           <!-- 思维链折叠 -->
-          <div v-if="msg.thinking" class="thinking-card" :class="{ expanded: msg._thinkingExpanded }">
+          <div v-else-if="msg.thinking" class="thinking-card" :class="{ expanded: msg._thinkingExpanded }">
             <button class="thinking-toggle" @click="msg._thinkingExpanded = !msg._thinkingExpanded">
               <span class="thinking-icon">💭</span>
               <span>思考过程</span>
@@ -95,6 +104,11 @@
 
     <!-- 输入区 -->
     <div class="input-area">
+      <div class="quick-actions-bar" v-if="inputText.trim().length > 0">
+        <button class="btn-parse-event" @click="parseTextAsEvent" :disabled="isParsing">
+          {{ isParsing ? '⏳ 解析中...' : '📅 解析为日程' }}
+        </button>
+      </div>
       <div class="input-row">
         <button class="btn-icon" title="粘贴图片 (Ctrl+V)" @click="pasteImage">📎</button>
         <textarea
@@ -144,6 +158,7 @@ marked.setOptions({ breaks: true, gfm: true });
 
 <script setup>
 import { ref, watch, onMounted, onUnmounted, nextTick, defineProps, defineEmits } from 'vue';
+import ConfirmCard from '../components/ConfirmCard.vue';
 
 const props = defineProps({
   conversationId: String,
@@ -158,10 +173,51 @@ const streamContent = ref('');
 const streamThinking = ref('');
 const pendingImage = ref(null);
 const isDragging = ref(false);
+const isParsing = ref(false);
 const messagesArea = ref(null);
 const inputRef = ref(null);
 
 const canSend = ref(true);
+
+// ── 日程解析 ─────────────────────────────────────────
+async function parseTextAsEvent() {
+  const text = inputText.value.trim();
+  if (!text) return;
+
+  isParsing.value = true;
+  try {
+    const parsed = await window.electronAPI.parseEvent(text);
+    messages.value.push({ role: 'assistant', type: 'confirm-card', event: parsed });
+    scrollToBottom();
+  } catch (err) {
+    messages.value.push({ role: 'assistant', content: `⚠️ 解析日程失败: ${err.message}` });
+  } finally {
+    isParsing.value = false;
+    inputText.value = '';
+    resetTextareaHeight();
+  }
+}
+
+async function handleConfirmEvent(event, msgObj) {
+  try {
+    const res = await window.electronAPI.confirmEvent(event);
+    if (res.ok) {
+      msgObj.content = `✅ 已成功保存为${event.type === 'todo' ? '待办' : '日程'}：${event.title}`;
+      msgObj.type = 'text'; // 将卡片转化为普通文本消息
+    } else {
+      msgObj.content = `⚠️ 保存失败: ${res.error}`;
+      msgObj.type = 'text';
+    }
+  } catch (err) {
+    msgObj.content = `⚠️ 保存失败: ${err.message}`;
+    msgObj.type = 'text';
+  }
+}
+
+function handleCancelEvent(msgObj) {
+  msgObj.content = '已取消保存';
+  msgObj.type = 'text';
+}
 
 // ── 流式监听 ─────────────────────────────────────────
 let cleanupStreamListener = null;
@@ -668,6 +724,36 @@ function scrollToBottom() {
 }
 
 /* ── 输入区 ─────────────────────────────────────────── */
+.quick-actions-bar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: var(--space-2);
+  max-width: 800px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.btn-parse-event {
+  background: var(--surface-glass);
+  color: var(--accent-tertiary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 4px 12px;
+  font-size: var(--text-sm);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-parse-event:hover:not(:disabled) {
+  background: var(--surface-hover);
+  border-color: var(--accent-primary);
+}
+
+.btn-parse-event:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .input-area {
   padding: var(--space-4) var(--space-8) var(--space-6);
   border-top: 1px solid var(--border-subtle);

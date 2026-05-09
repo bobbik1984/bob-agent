@@ -174,6 +174,16 @@ function registerIPCHandlers() {
     }
   });
 
+  ipcMain.handle('calendar:update-status', async (_event, id, status) => {
+    try {
+      db.updateEventStatus(id, status);
+      return { ok: true };
+    } catch (err) {
+      console.error('[Calendar] Update status error:', err.message);
+      return { error: err.message };
+    }
+  });
+
   // ── 文件 ─────────────────────────────────────────────
   ipcMain.handle('file:read', async (_event, filePath) => {
     try {
