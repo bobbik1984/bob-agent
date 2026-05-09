@@ -40,7 +40,10 @@ async function readFile(filePath) {
 
   // 纯文本
   if (PLAIN_TEXT_EXTENSIONS.has(ext)) {
-    const content = fs.readFileSync(filePath, 'utf-8');
+    let content = fs.readFileSync(filePath, 'utf-8');
+    if (content.charCodeAt(0) === 0xFEFF) {
+      content = content.slice(1);
+    }
     return { content, type: ext, size: stat.size, name };
   }
 
@@ -62,8 +65,8 @@ async function readDocx(filePath, size, name) {
     const mammoth = require('mammoth');
     const result = await mammoth.extractRawText({ path: filePath });
     return { content: result.value, type: '.docx', size, name };
-  } catch {
-    throw new Error('Word 文档读取失败，文件可能已损坏');
+  } catch (error) {
+    throw new Error(`Word 文档读取失败: ${error.message || '文件可能已损坏'}`);
   }
 }
 
@@ -74,12 +77,18 @@ async function readXlsx(filePath, size, name) {
     const sheets = [];
     for (const sheetName of workbook.SheetNames) {
       const sheet = workbook.Sheets[sheetName];
-      const csv = XLSX.utils.sheet_to_csv(sheet);
-      sheets.push(`=== Sheet: ${sheetName} ===\n${csv}`);
+      const range = XLSX.utils.decode_range(sheet['!ref'] || 'A1');
+      if (range.e.r > 500) {
+        range.e.r = 499; // limit to 500 rows (0-indexed)
+        sheet['!ref'] = XLSX.utils.encode_range(range);
+      }
+      const csv = XLSX.utils.sheet_to_csv(sheet, { FS: ',', blankrows: false });
+      const lines = csv.split('\n').slice(0, 500); // safety net
+      sheets.push(`=== Sheet: ${sheetName} ===\n${lines.join('\n')}`);
     }
     return { content: sheets.join('\n\n'), type: '.xlsx', size, name };
-  } catch {
-    throw new Error('Excel 文件读取失败');
+  } catch (error) {
+    throw new Error(`Excel 文件读取失败: ${error.message || '未知错误'}`);
   }
 }
 
@@ -89,8 +98,8 @@ async function readPdf(filePath, size, name) {
     const buffer = fs.readFileSync(filePath);
     const data = await pdfParse(buffer);
     return { content: data.text, type: '.pdf', size, name };
-  } catch {
-    throw new Error('PDF 文件读取失败');
+  } catch (error) {
+    throw new Error(`PDF 文件读取失败: ${error.message || '未知错误'}`);
   }
 }
 

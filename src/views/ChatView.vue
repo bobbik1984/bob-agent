@@ -127,6 +127,21 @@
   </div>
 </template>
 
+<script>
+import { marked } from 'marked';
+import hljs from 'highlight.js';
+import { markedHighlight } from 'marked-highlight';
+
+marked.use(markedHighlight({
+  langPrefix: 'hljs language-',
+  highlight(code, lang) {
+    const language = hljs.getLanguage(lang) ? lang : 'plaintext';
+    return hljs.highlight(code, { language }).value;
+  }
+}));
+marked.setOptions({ breaks: true, gfm: true });
+</script>
+
 <script setup>
 import { ref, watch, onMounted, onUnmounted, nextTick, defineProps, defineEmits } from 'vue';
 
@@ -289,14 +304,7 @@ async function stopGeneration() {
 // ── Markdown 渲染 ───────────────────────────────────
 function renderMarkdown(text) {
   if (!text) return '';
-  // 基础渲染 — 完整版由 Jules 实现 (marked + highlight.js)
-  return text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/\n/g, '<br>')
-    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-    .replace(/`([^`]+)`/g, '<code>$1</code>');
+  return marked.parse(text);
 }
 
 // ── 图片处理 ────────────────────────────────────────
