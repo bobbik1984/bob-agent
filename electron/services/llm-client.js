@@ -136,7 +136,7 @@ class LLMClient {
    * @param {Array} messages - OpenAI 格式的消息数组
    * @yields {{ type: 'text'|'thinking'|'done'|'error', content: string }}
    */
-  async *chatStream(messages) {
+  async *chatStream(messages, agentMode = 'yolo') {
     if (!this._client) throw new Error('LLM 未初始化');
 
     this._abortController = new AbortController();
@@ -156,10 +156,22 @@ class LLMClient {
           messages: currentMessages,
           stream: true,
           stream_options: { include_usage: true },
+          max_tokens: 8192
         };
 
+        // 针对 DeepSeek 官方模型的特殊优化 (参考最新 API 文档)
+        if (this._provider === 'deepseek' && (modelId.includes('pro') || modelId.includes('reasoner'))) {
+          params.thinking = { type: 'enabled' };
+          params.reasoning_effort = 'high';
+        }
+
         if (this.registry) {
-          const schemas = this.registry.getAllSchemas();
+          let schemas = this.registry.getAllSchemas();
+          if (agentMode === 'insight') {
+            const readonlyTools = ['list_dir', 'read_file', 'web_search', 'browser_automation', 'link_extractor', 'system_time', 'system_info', 'weather', 'wechat_reader'];
+            schemas = schemas.filter(s => readonlyTools.includes(s.function.name));
+            console.log(`[LLMClient] Insight Mode: Restricting to read-only tools: ${schemas.map(s => s.function.name).join(', ')}`);
+          }
           if (schemas && schemas.length > 0) {
             params.tools = schemas;
             console.log('[LLMClient] Sending tools to API:', schemas.map(s => s.function.name).join(', '));
@@ -269,7 +281,7 @@ class LLMClient {
    * @param {string} imageBase64 - Base64 编码的图片数据（不含 data:image 前缀）
    * @yields {{ type: 'text'|'thinking'|'done'|'error', content: string }}
    */
-  async *visionStream(messages, imageBase64) {
+  async *visionStream(messages, imageBase64, agentMode = 'yolo') {
     // 构建带图片的消息
     const lastUserMsg = messages[messages.length - 1];
     const textContent = lastUserMsg?.content || '请分析这张图片';
@@ -291,7 +303,7 @@ class LLMClient {
       },
     ];
 
-    yield* this.chatStream(visionMessages);
+    yield* this.chatStream(visionMessages, agentMode);
   }
 
   /**

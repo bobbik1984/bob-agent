@@ -67,25 +67,28 @@ phases:
       - { text: "T-504: 主题切换", status: todo }
       - { text: "T-505: 模型切换 UI", status: todo }
       - { text: "T-506: Cost 追踪", status: todo }
+      - { text: "T-507: 对话导出 (.md)", status: todo }
+      - { text: "T-508: 错误处理美化", status: todo }
+      - { text: "T-509: 产物文件卡片与外接打开", status: todo }
 
   - name: "Sprint 6 · Agent 化（Function Calling + 工具 + 技能 + MCP）"
-    status: todo
+    status: in_progress
     tasks:
       # 6.1 工具系统
       - { text: "T-601: BaseTool 基类 (参照 CodeRunner)", status: todo }
-      - { text: "T-602: ToolRegistry 工具注册表", status: todo }
-      - { text: "T-603: 内置工具 — list_dir / read_file", status: todo }
+      - { text: "T-602: ToolRegistry 工具注册表", status: done }
+      - { text: "T-603: 内置工具 — list_dir / read_file 等", status: done }
       - { text: "T-604: 内置工具 — create_event / search_events", status: todo }
-      - { text: "T-605: 内置工具 — web_search", status: todo }
+      - { text: "T-605: 内置工具 — web_search", status: done }
       # 6.2 LLM 调用链改造
-      - { text: "T-606: LLM Client 支持 tools 参数 + tool_call 解析", status: todo }
-      - { text: "T-607: Tool Execution Loop", status: todo }
+      - { text: "T-606: LLM Client 支持 tools 参数 + tool_call 解析", status: done }
+      - { text: "T-607: Tool Execution Loop", status: done }
       - { text: "T-608: ChatView 工具调用 UI", status: todo }
       # 6.3 技能系统（双目录）
-      - { text: "T-609: 内置 skills/ 目录（3-5 基础技能随项目分发）", status: todo }
-      - { text: "T-610: ToolRegistry 扫描内置 skills/", status: todo }
-      - { text: "T-611: 设置→外部技能目录（UI + 目录选择）", status: todo }
-      - { text: "T-612: ToolRegistry 扫描外部目录", status: todo }
+      - { text: "T-609: 内置 skills/ 目录（15+ 基础技能随项目分发）", status: done }
+      - { text: "T-610: ToolRegistry 扫描内置 skills/", status: done }
+      - { text: "T-611: 设置→外部技能目录（UI + 目录选择）", status: done }
+      - { text: "T-612: ToolRegistry 扫描外部目录", status: done }
       - { text: "T-613: 技能热重载", status: todo }
       # 6.4 MCP 协议
       - { text: "T-614: MCP 客户端接入", status: todo }

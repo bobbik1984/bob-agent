@@ -156,13 +156,35 @@
               </div>
             </div>
           </div>
+          
+          <!-- 代理模式切换器 -->
+          <div class="model-switcher-wrap" style="margin-left: 8px;">
+            <button class="model-indicator" @click="showAgentModeSwitcher = !showAgentModeSwitcher">
+              <Shield v-if="agentMode === 'insight'" :size="12" style="margin-right: 4px; color: var(--text-tertiary);" />
+              <Zap v-else :size="12" style="margin-right: 4px; color: var(--accent-primary);" />
+              <span>{{ agentMode === 'insight' ? '问答' : '干活' }}</span>
+              <ChevronUp :size="12" />
+            </button>
+            <div v-if="showAgentModeSwitcher" class="model-popup">
+              <button class="model-option" :class="{ active: agentMode === 'insight' }" @click="agentMode = 'insight'; showAgentModeSwitcher = false">
+                <Shield :size="14" style="margin-right: 8px;" />
+                <span class="model-option-label">问答 (只读防误触)</span>
+              </button>
+              <button class="model-option" :class="{ active: agentMode === 'yolo' }" @click="agentMode = 'yolo'; showAgentModeSwitcher = false">
+                <Zap :size="14" style="margin-right: 8px;" />
+                <span class="model-option-label">干活 (允许执行)</span>
+              </button>
+            </div>
+          </div>
+
           <div class="toolbar-spacer"></div>
+          
           <!-- 全局权限开关 -->
           <label class="global-access-toggle" :class="{ active: globalFileAccess }" title="开启后，允许AI读取或修改工作目录外的系统文件 (仅限当前对话有效)">
             <input type="checkbox" v-model="globalFileAccess" style="display: none;" />
-            <span v-if="!globalFileAccess" style="font-size: 12px; margin-right: 4px;">🔒</span>
-            <span v-else style="font-size: 12px; margin-right: 4px; color: var(--accent);">🔓</span>
-            <span style="font-size: 11px; opacity: 0.8; cursor: pointer;">全局文件访问</span>
+            <Unlock v-if="globalFileAccess" :size="14" style="margin-right: 4px; color: var(--accent-primary);" />
+            <Lock v-else :size="14" style="margin-right: 4px; opacity: 0.5;" />
+            <span class="global-access-text">全局文件</span>
           </label>
           <div style="width: 12px;"></div>
           <!-- 计费指示器 -->
@@ -209,7 +231,7 @@ marked.setOptions({ breaks: true, gfm: true });
 
 <script setup>
 import { ref, computed, watch, onMounted, onUnmounted, nextTick, defineProps, defineEmits } from 'vue';
-import { Sparkles, FileText, Camera, Calendar, User, ChevronRight, ChevronDown, ChevronUp, X, FileUp, Paperclip, Loader2 } from 'lucide-vue-next';
+import { Sparkles, FileText, Camera, Calendar, User, ChevronRight, ChevronDown, ChevronUp, X, FileUp, Paperclip, Loader2, Shield, Zap, Lock, Unlock } from 'lucide-vue-next';
 import ConfirmCard from '../components/ConfirmCard.vue';
 
 const props = defineProps({
@@ -233,6 +255,8 @@ const showModelSwitcher = ref(false);
 const availableModels = ref([]);
 const sessionCost = ref(0);
 const globalFileAccess = ref(false);
+const agentMode = ref('insight');
+const showAgentModeSwitcher = ref(false);
 
 const canSend = ref(true);
 
@@ -412,9 +436,9 @@ async function sendMessage() {
     let result;
     console.log('[sendMessage] image_base64 present:', !!userMessage.image_base64, 'apiMessages count:', apiMessages.length);
     if (userMessage.image_base64) {
-      result = await window.electronAPI.sendVision(apiMessages, userMessage.image_base64, globalFileAccess.value);
+      result = await window.electronAPI.sendVision(apiMessages, userMessage.image_base64, globalFileAccess.value, agentMode.value);
     } else {
-      result = await window.electronAPI.sendChat(apiMessages, globalFileAccess.value);
+      result = await window.electronAPI.sendChat(apiMessages, globalFileAccess.value, agentMode.value);
     }
     console.log('[sendMessage] result:', JSON.stringify(result).slice(0, 300));
 
@@ -1221,5 +1245,34 @@ function scrollToBottom() {
   font-family: var(--font-mono);
   white-space: nowrap;
   padding: 0 var(--space-2);
+}
+
+/* ── 全局权限开关 ─────────────────────────────────── */
+.global-access-toggle {
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  transition: all var(--duration-fast);
+  opacity: 0.6;
+}
+
+.global-access-toggle:hover {
+  background: rgba(255, 255, 255, 0.05);
+  opacity: 1;
+}
+
+.global-access-toggle.active {
+  opacity: 1;
+}
+
+.global-access-text {
+  font-size: 11px;
+  color: inherit;
+  font-weight: 500;
+}
+.global-access-toggle.active .global-access-text {
+  color: var(--accent-primary);
 }
 </style>

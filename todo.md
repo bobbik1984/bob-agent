@@ -30,6 +30,7 @@
 - [ ] T-506: Cost 追踪
 - [ ] T-507: 对话导出 (.md)
 - [ ] T-508: 错误处理美化
+- [ ] T-509: 产物文件卡片与外接打开（对话中强化展示 Agent 生成的文件，点击直接调用系统默认应用如浏览器/Notepad/Word打开）
 
 ## Sprint 6: Agent 化（Function Calling + 工具系统）🔑 关键里程碑
 
@@ -64,7 +65,12 @@
 - [x] T-617: 网络代理基元支持 (tinyfish_fetch, weather 等)
 - [x] T-618: 纯大脑技能全量迁移 (15 个 Markdown 技能导入)
 - [x] T-619: 会话级全局文件授权 (Global File Access Toggle)
-- [x] T-620: AKP_Link_Harvester 改造为 LLM Wiki 双链格式
+### 6.6 高级代理能力与浏览器自动化
+- [x] T-621: Obscura 隐身浏览器底层集成 (WebSocket CDP, DOM 提取)
+- [x] T-622: browser_automation 内部工具 (navigate, get_html, click, type, evaluate)
+- [x] T-623: 修复打包后 obscura.exe 的动态路径解析与自动捆绑
+- [ ] T-624: 代理模式切换 UI (问答只读模式 vs 一步到位自动模式)
+- [ ] T-625: 全局文件授权 UI 优化 (移除 Emoji，与项目整体开关风格对齐)
 
 ## Sprint 7: 打包发布
 

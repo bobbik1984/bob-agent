@@ -182,7 +182,7 @@ function initServices() {
 
 function registerIPCHandlers() {
   // ── LLM ──────────────────────────────────────────────
-  ipcMain.handle('llm:chat', async (_event, messages, globalFileAccess = false) => {
+  ipcMain.handle('llm:chat', async (_event, messages, globalFileAccess = false, agentMode = 'yolo') => {
     if (!llmClient || !llmClient.isConfigured()) {
       return { error: 'LLM 未配置，请先在设置中填写 API Key' };
     }
@@ -193,7 +193,7 @@ function registerIPCHandlers() {
         ? messages
         : [{ role: 'system', content: buildSystemPrompt(globalFileAccess) }, ...messages];
 
-      const stream = llmClient.chatStream(fullMessages);
+      const stream = llmClient.chatStream(fullMessages, agentMode);
       let fullContent = '';
       let thinkingContent = '';
       let usageData = null;
@@ -226,7 +226,7 @@ function registerIPCHandlers() {
     }
   });
 
-  ipcMain.handle('llm:vision', async (_event, messages, imageBase64, globalFileAccess = false) => {
+  ipcMain.handle('llm:vision', async (_event, messages, imageBase64, globalFileAccess = false, agentMode = 'yolo') => {
     if (!llmClient || !llmClient.isConfigured()) {
       return { error: 'LLM 未配置' };
     }
@@ -237,7 +237,7 @@ function registerIPCHandlers() {
         ? messages
         : [{ role: 'system', content: buildSystemPrompt(globalFileAccess) }, ...messages];
 
-      const stream = llmClient.visionStream(fullMessages, imageBase64);
+      const stream = llmClient.visionStream(fullMessages, imageBase64, agentMode);
       let fullContent = '';
       let thinkingContent = '';
       let usageData = null;
