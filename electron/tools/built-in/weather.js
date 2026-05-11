@@ -1,17 +1,23 @@
-module.exports = {
-  name: 'weather',
-  description: '查询指定城市的实时天气和未来几天预报。当用户询问天气信息时使用。',
-  parameters: {
-    type: 'object',
-    properties: {
-      city: {
-        type: 'string',
-        description: '城市名称（可以使用拼音或英文，如 "Beijing", "Shanghai", "London"）'
-      }
-    },
-    required: ['city']
-  },
-  execute: async (args) => {
+const { BaseTool } = require('../base');
+
+class WeatherTool extends BaseTool {
+  constructor() {
+    super();
+    this.name = 'weather';
+    this.description = '查询指定城市的实时天气和未来几天预报。当用户询问天气信息时使用。';
+    this.input_schema = {
+      type: 'object',
+      properties: {
+        city: {
+          type: 'string',
+          description: '城市名称（可以使用拼音或英文，如 "Beijing", "Shanghai", "London"）'
+        }
+      },
+      required: ['city']
+    };
+  }
+
+  async execute(args) {
     const city = encodeURIComponent(args.city);
     const url = `https://wttr.in/${city}?format=j1`;
     
@@ -49,4 +55,6 @@ module.exports = {
       return `查询天气请求发生错误: ${err.message}`;
     }
   }
-};
+}
+
+module.exports = new WeatherTool();

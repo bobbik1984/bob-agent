@@ -1,25 +1,30 @@
 const cheerio = require('cheerio');
+const { BaseTool } = require('../base');
 
-module.exports = {
-  name: 'link_extractor',
-  description: '提取目标网页中的所有链接（支持按文件类型过滤）。比 LLM 直接解析更可靠。当用户要求提取网页链接、下载页面文件时使用。',
-  parameters: {
-    type: 'object',
-    properties: {
-      url: {
-        type: 'string',
-        description: '目标网页 URL'
+class LinkExtractorTool extends BaseTool {
+  constructor() {
+    super();
+    this.name = 'link_extractor';
+    this.description = '提取目标网页中的所有链接（支持按文件类型过滤）。比 LLM 直接解析更可靠。当用户要求提取网页链接、下载页面文件时使用。';
+    this.input_schema = {
+      type: 'object',
+      properties: {
+        url: {
+          type: 'string',
+          description: '目标网页 URL'
+        },
+        filter: {
+          type: 'string',
+          enum: ['all', 'pdf', 'doc', 'img', 'video', 'external'],
+          description: '过滤类型 (默认 all)',
+          default: 'all'
+        }
       },
-      filter: {
-        type: 'string',
-        enum: ['all', 'pdf', 'doc', 'img', 'video', 'external'],
-        description: '过滤类型 (默认 all)',
-        default: 'all'
-      }
-    },
-    required: ['url']
-  },
-  execute: async (args) => {
+      required: ['url']
+    };
+  }
+
+  async execute(args) {
     const url = args.url;
     const filter = args.filter || 'all';
     
@@ -44,7 +49,6 @@ module.exports = {
         
         if (!href || href.startsWith('javascript:') || href.startsWith('#')) return;
         
-        // 补全绝对路径
         try {
           href = new URL(href, url).href;
         } catch(e) {
@@ -54,10 +58,8 @@ module.exports = {
         links.push({ text, href });
       });
       
-      // 去重
       links = Array.from(new Map(links.map(item => [item.href, item])).values());
       
-      // 过滤
       if (filter !== 'all') {
         const parsedUrl = new URL(url);
         const host = parsedUrl.hostname;
@@ -86,4 +88,6 @@ module.exports = {
       return `提取链接失败: ${err.message}`;
     }
   }
-};
+}
+
+module.exports = new LinkExtractorTool();

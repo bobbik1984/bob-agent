@@ -1,24 +1,29 @@
 const fs = require('fs');
 const path = require('path');
+const { BaseTool } = require('../base');
 
-module.exports = {
-  name: 'write_file',
-  description: '将文本内容写入到本地文件中（如果文件存在则覆盖，如果目录不存在会自动创建）。当你需要保存剪报、生成 HTML 报告、或输出任何代码文件时使用。',
-  parameters: {
-    type: 'object',
-    properties: {
-      absolutePath: {
-        type: 'string',
-        description: '文件的绝对路径'
+class WriteFileTool extends BaseTool {
+  constructor() {
+    super();
+    this.name = 'write_file';
+    this.description = '将文本内容写入到本地文件中（如果文件存在则覆盖，如果目录不存在会自动创建）。当你需要保存剪报、生成 HTML 报告、或输出任何代码文件时使用。';
+    this.input_schema = {
+      type: 'object',
+      properties: {
+        absolutePath: {
+          type: 'string',
+          description: '文件的绝对路径'
+        },
+        content: {
+          type: 'string',
+          description: '要写入的文件完整内容'
+        }
       },
-      content: {
-        type: 'string',
-        description: '要写入的文件完整内容'
-      }
-    },
-    required: ['absolutePath', 'content']
-  },
-  execute: async (args) => {
+      required: ['absolutePath', 'content']
+    };
+  }
+
+  async execute(args) {
     try {
       const resolvedPath = path.resolve(args.absolutePath);
 
@@ -43,4 +48,6 @@ module.exports = {
       return `写入文件失败: ${err.message}`;
     }
   }
-};
+}
+
+module.exports = new WriteFileTool();

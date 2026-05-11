@@ -1,18 +1,23 @@
 const fs = require('fs');
+const { BaseTool } = require('../base');
 
-module.exports = {
-  name: 'list_directory',
-  description: 'Lists all files and directories under the given directory.',
-  parameters: {
-    type: 'object',
-    properties: {
-      path: {
-        type: 'string',
-        description: 'The directory path to list files from.'
-      }
-    },
-    required: ['path']
-  },
+class ListDirectoryTool extends BaseTool {
+  constructor() {
+    super();
+    this.name = 'list_directory';
+    this.description = 'Lists all files and directories under the given directory.';
+    this.input_schema = {
+      type: 'object',
+      properties: {
+        path: {
+          type: 'string',
+          description: 'The directory path to list files from.'
+        }
+      },
+      required: ['path']
+    };
+  }
+
   async execute({ path }) {
     try {
       if (!fs.existsSync(path)) {
@@ -32,4 +37,6 @@ module.exports = {
       return `Error: ${err.message}`;
     }
   }
-};
+}
+
+module.exports = new ListDirectoryTool();

@@ -161,6 +161,39 @@
       <!-- 插件管理弹窗 -->
       <PluginManager :isOpen="showPluginManager" @close="showPluginManager = false" />
 
+      <!-- 关注的文件夹 -->
+      <section class="settings-section card">
+        <h3 class="section-title">
+          <FolderHeart :size="16" class="section-icon" />
+          关注的文件夹
+        </h3>
+        <p class="section-desc">Bob 会记住这些文件夹的内容，以便你随时询问。你也可以直接把文件夹拖入聊天窗口来添加。</p>
+
+        <div v-if="trackedFolders.length > 0" class="tracked-folders-list">
+          <div
+            v-for="folder in trackedFolders"
+            :key="folder.id"
+            class="tracked-folder-item"
+          >
+            <div class="folder-info">
+              <span class="folder-name">{{ folder.name }}</span>
+              <span class="folder-path">{{ folder.path }}</span>
+            </div>
+            <button class="btn-icon btn-remove-folder" @click="removeFolder(folder.path)" title="取消关注">
+              <X :size="14" />
+            </button>
+          </div>
+        </div>
+        <div v-else class="empty-folders">
+          <span>还没有关注的文件夹</span>
+        </div>
+
+        <button class="btn btn-ghost" @click="addFolder" style="margin-top: 12px;">
+          <Plus :size="14" />
+          <span>添加本地目录</span>
+        </button>
+      </section>
+
       <!-- 关于 -->
       <section class="settings-section card">
         <h3 class="section-title">
@@ -179,7 +212,7 @@
 
 <script setup>
 import { ref, computed, onMounted, defineEmits } from 'vue';
-import { Settings as SettingsIcon, Cpu, Eye, EyeOff, Plug, Loader2, Palette, Info, FolderOpen, Puzzle, Layers } from 'lucide-vue-next';
+import { Settings as SettingsIcon, Cpu, Eye, EyeOff, Plug, Loader2, Palette, Info, FolderOpen, FolderHeart, Puzzle, Layers, X, Plus } from 'lucide-vue-next';
 import CustomSelect from '../components/CustomSelect.vue';
 import PluginManager from '../components/PluginManager.vue';
 
@@ -239,6 +272,7 @@ const showApiKey = ref(false);
 const isTesting = ref(false);
 const testResult = ref(null);
 const showPluginManager = ref(false);
+const trackedFolders = ref([]);
 
 onMounted(async () => {
   const allConfig = await window.electronAPI.getAllConfig();
@@ -254,6 +288,7 @@ onMounted(async () => {
   };
   applyUiScale(config.value.uiScale, false);
   await loadModels();
+  await loadTrackedFolders();
 });
 
 async function loadModels() {
@@ -321,6 +356,24 @@ async function selectExternalSkillsDir() {
 async function clearExternalSkillsDir() {
   config.value.externalSkillsDir = '';
   await saveConfig('externalSkillsDir', '');
+}
+
+// ── 文件夹跟踪 ────────────────────────────────────────
+async function loadTrackedFolders() {
+  trackedFolders.value = await window.electronAPI.getTrackedFolders();
+}
+
+async function addFolder() {
+  const dirPath = await window.electronAPI.selectFolderToTrack();
+  if (dirPath) {
+    await window.electronAPI.addTrackedFolder(dirPath);
+    await loadTrackedFolders();
+  }
+}
+
+async function removeFolder(folderPath) {
+  await window.electronAPI.removeTrackedFolder(folderPath);
+  await loadTrackedFolders();
 }
 </script>
 
@@ -473,5 +526,70 @@ select.input {
 
 .btn-clear:hover {
   color: var(--color-error);
+}
+
+/* ── 关注的文件夹 ── */
+.tracked-folders-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.tracked-folder-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  background: var(--bg-secondary);
+  border-radius: 8px;
+  border: 1px solid var(--border-subtle);
+  transition: border-color var(--duration-fast);
+}
+
+.tracked-folder-item:hover {
+  border-color: var(--border-default);
+}
+
+.folder-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.folder-name {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.folder-path {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.btn-remove-folder {
+  flex-shrink: 0;
+  opacity: 0.4;
+  transition: opacity var(--duration-fast), color var(--duration-fast);
+}
+
+.btn-remove-folder:hover {
+  opacity: 1;
+  color: var(--color-error);
+}
+
+.empty-folders {
+  padding: 16px;
+  text-align: center;
+  color: var(--text-tertiary);
+  font-size: 13px;
+  border: 1px dashed var(--border-subtle);
+  border-radius: 8px;
+  margin-top: 12px;
 }
 </style>

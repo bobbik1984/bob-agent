@@ -100,6 +100,16 @@ bob-agent/
 │       ├── openai.png
 │       └── ollama.png
 │
+├── data/                        # ⛔ .gitignore 已忽略，不提交到 GitHub
+│   ├── memory/                  # 主观记忆池
+│   │   ├── SOUL.md              # Tier 1: 静态人格与偏好
+│   │   └── sessions/            # Tier 2: 对话压缩总结 (≤ 7天自动注入)
+│   │       └── <conv-id>.md
+│   └── wiki/                    # 客观知识池 (Tier 3: 工具检索)
+│       ├── sessions/            # 沉淀的旧对话总结 (> 7天自动迁移)
+│       ├── projects/            # 工作区项目摘要
+│       └── clippings/           # 外部知识剪报
+│
 ├── docs/                        # 项目文档
 ├── tests/                       # 测试
 ├── todo.md                      # 开发待办
@@ -265,6 +275,44 @@ ChatView 渲染（文本 + 工具执行状态 + 结果折叠）
 - CodeRunner 面向开发者（bash/file_edit/grep），bob-agent 面向普通用户（list_dir/create_event/web_search）
 - bob-agent 的工具数量更少（5-8 个），不需要 ToolsetProfile 分层过滤
 - bob-agent 增加 MCP 客户端层，可连接外部 MCP Server 扩展能力
+
+### D-008: 三层记忆引擎 (Memory Engine)
+
+**决策**：模拟人类记忆的三层衰减模型，实现跨会话的上下文连贯性
+
+**架构（严格遵守，不得违反）：**
+
+| 层级 | 存储位置 | 注入方式 | 触发时机 |
+|:---|:---|:---|:---|
+| **Tier 1: 灵魂** | `data/memory/SOUL.md` | 每次全文注入 System Prompt | 每次对话开始 |
+| **Tier 2: 短期记忆** | `data/memory/sessions/<id>.md` (mtime ≤7天) | 自动压缩注入 System Prompt | 每次对话开始 |
+| **Tier 3: 长期记忆** | `data/wiki/sessions/<id>.md` + `data/wiki/projects/` + `data/wiki/clippings/` | 通过 `brain_search` 工具检索 | Bob 主动调用 |
+
+**Session 总结生命周期：**
+1. 用户切换/新建对话时，后台静默调用廉价 LLM 压缩旧对话为 ≤100 字总结
+2. 总结写入 `memory/sessions/<conv-id>.md`（热记忆）
+3. 超过 7 天未被访问的总结自动迁移到 `wiki/sessions/`（冷记忆）
+4. 用户删除对话时，级联删除 `memory/sessions/<id>.md` 和 `wiki/sessions/<id>.md`
+
+**Session .md 文件必须包含元数据头：**
+```markdown
+---
+conversation_id: <UUID>
+title: <对话标题>
+created: <YYYY-MM-DD>
+---
+<压缩总结内容>
+```
+
+**安全网：**
+- 第一层：每条消息实时写入 SQLite（保证原始数据永不丢失）
+- 第二层：切换对话时后台生成压缩总结
+- 第三层：启动时补偿扫描（处理崩溃/强关导致的未总结对话）
+
+**禁止事项：**
+- 绝对不要把完整的原始对话记录注入 System Prompt（Token 爆炸）
+- 绝对不要使用 XML 标签注入规则代替 Function Calling（已废弃）
+- `data/` 目录绝不提交到版本控制（含用户私人记忆）
 
 ---
 

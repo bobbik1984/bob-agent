@@ -3,7 +3,7 @@
     <!-- 消息区域 -->
     <div class="messages-area" ref="messagesArea">
       <!-- 统一的页面标题 -->
-      <div v-if="messages.length > 0" class="view-header">
+      <div v-if="messages.length > 0" class="view-header" :style="{ opacity: logoOpacity }">
         <h2 class="view-title">
           <img src="/bob_logo.svg" class="title-bob-logo" alt="Bob" />
         </h2>
@@ -50,8 +50,16 @@
               {{ msg.thinking }}
             </div>
           </div>
+          <!-- 错误卡片 -->
+          <div v-if="msg._isError" class="error-card">
+            <div class="error-icon">!</div>
+            <div class="error-body">
+              <div class="error-title">请求失败</div>
+              <div class="error-detail">{{ msg.content }}</div>
+            </div>
+          </div>
           <!-- 消息内容 -->
-          <div class="message-content selectable" v-html="renderMarkdown(msg.content)"></div>
+          <div v-else class="message-content selectable" v-html="renderMarkdown(msg.content)"></div>
           <!-- 图片预览 -->
           <div v-if="msg.image_base64" class="message-image">
             <img :src="'data:image/png;base64,' + msg.image_base64" alt="用户图片" />
@@ -70,8 +78,26 @@
             </button>
             <div class="thinking-content selectable">{{ streamThinking }}</div>
           </div>
+          <!-- 工具调用状态 -->
+          <div v-if="activeTools.length > 0" class="tool-calls-panel">
+            <div
+              v-for="(tool, idx) in activeTools"
+              :key="idx"
+              class="tool-call-item"
+              :class="{ 'is-running': tool.status === 'running' }"
+            >
+              <div class="tool-call-header" @click="tool._expanded = !tool._expanded">
+                <span class="tool-dot" :class="tool.status === 'running' ? 'dot-running' : 'dot-done'"></span>
+                <span class="tool-name">{{ tool.name }}</span>
+                <ChevronRight v-if="tool.result" :size="12" class="tool-expand-icon" :class="{ 'rotate-90': tool._expanded }" />
+              </div>
+              <div v-if="tool._expanded && tool.result" class="tool-result-preview">
+                {{ tool.result }}
+              </div>
+            </div>
+          </div>
           <div v-if="streamContent" class="message-content selectable" v-html="renderMarkdown(streamContent)"></div>
-          <div v-if="!streamContent && !streamThinking" class="typing-indicator">
+          <div v-if="!streamContent && !streamThinking && activeTools.length === 0" class="typing-indicator">
             <span></span><span></span><span></span>
           </div>
         </div>
@@ -88,7 +114,7 @@
     >
       <div class="drop-content">
         <FileUp :size="48" class="drop-icon" />
-        <span>松开以分析文件</span>
+        <span>添加附件 / 关注文件夹</span>
       </div>
     </div>
 
@@ -182,6 +208,10 @@
           </label>
 
           <div class="toolbar-spacer"></div>
+          <!-- 导出按钮 -->
+          <button class="toolbar-item" @click="exportConversation" title="导出对话为 Markdown">
+            <Download :size="13" />
+          </button>
           <!-- 计费指示器 -->
           <span class="toolbar-item cost-indicator" title="本次对话累计费用">
             ¥{{ sessionCost.toFixed(4) }}
@@ -215,6 +245,17 @@ import hljs from 'highlight.js';
 import { markedHighlight } from 'marked-highlight';
 import DOMPurify from 'dompurify';
 
+// 允许渲染 file:// 和本地磁盘路径
+DOMPurify.addHook('uponSanitizeAttribute', function (node, data) {
+  if (data.attrName === 'href') {
+    const href = data.attrValue;
+    if (href.startsWith('file://') || /^[A-Za-z]:[\\/]/.test(href)) {
+      data.keepAttr = true;
+      data.forceKeepAttr = true;
+    }
+  }
+});
+
 marked.use(markedHighlight({
   langPrefix: 'hljs language-',
   highlight(code, lang) {
@@ -227,7 +268,7 @@ marked.setOptions({ breaks: true, gfm: true });
 
 <script setup>
 import { ref, computed, watch, onMounted, onUnmounted, nextTick, defineProps, defineEmits } from 'vue';
-import { Sparkles, FileText, Camera, Calendar, User, ChevronRight, ChevronDown, ChevronUp, X, FileUp, Paperclip, Loader2, Shield, Zap, Lock, Unlock } from 'lucide-vue-next';
+import { Sparkles, FileText, Camera, Calendar, User, ChevronRight, ChevronDown, ChevronUp, X, FileUp, Paperclip, Loader2, Shield, Zap, Lock, Unlock, Download } from 'lucide-vue-next';
 import ConfirmCard from '../components/ConfirmCard.vue';
 
 const props = defineProps({
@@ -243,6 +284,8 @@ const streamContent = ref('');
 const streamThinking = ref('');
 const pendingImage = ref(null);
 const isDragging = ref(false);
+const logoOpacity = ref(1);
+const activeTools = ref([]);
 const isParsing = ref(false);
 const messagesArea = ref(null);
 const inputRef = ref(null);
@@ -356,11 +399,21 @@ onMounted(async () => {
 
   // 拖拽监听
   document.addEventListener('dragenter', onDragEnter);
+
+  // Logo 滚动视差
+  if (messagesArea.value) {
+    messagesArea.value.addEventListener('scroll', onMessagesScroll);
+    messagesArea.value.addEventListener('click', onMessageLinkClick);
+  }
 });
 
 onUnmounted(() => {
   if (cleanupStreamListener) cleanupStreamListener();
   document.removeEventListener('dragenter', onDragEnter);
+  if (messagesArea.value) {
+    messagesArea.value.removeEventListener('scroll', onMessagesScroll);
+    messagesArea.value.removeEventListener('click', onMessageLinkClick);
+  }
 });
 
 // 切换对话时重新加载消息
@@ -427,6 +480,7 @@ async function sendMessage() {
   isStreaming.value = true;
   streamContent.value = '';
   streamThinking.value = '';
+  activeTools.value = [];
 
   try {
     let result;
@@ -448,25 +502,13 @@ async function sendMessage() {
     if (result.error) {
       messages.value.push({
         role: 'assistant',
-        content: `⚠️ ${result.error}`,
+        content: result.error,
+        _isError: true,
         _thinkingExpanded: false,
       });
     } else {
       let finalContent = streamContent.value || result.content || '';
       let finalThinking = streamThinking.value || result.thinking || null;
-      let eventObj = null;
-
-      // 自动日程意图检测
-      const eventRegex = /<calendar_event>\s*({[\s\S]*?})\s*<\/calendar_event>/i;
-      const match = finalContent.match(eventRegex);
-      if (match) {
-        try {
-          eventObj = JSON.parse(match[1]);
-          finalContent = finalContent.replace(eventRegex, '').trim();
-        } catch (e) {
-          console.error("Failed to parse automatic calendar event:", e);
-        }
-      }
 
       // 始终显示回复，即使内容为空也给出提示
       const assistantMsg = {
@@ -483,22 +525,20 @@ async function sendMessage() {
         assistantMsg.content,
         null
       );
-
-      if (eventObj) {
-        messages.value.push({ role: 'assistant', type: 'confirm-card', event: eventObj });
-      }
     }
   } catch (err) {
     console.error('[sendMessage] exception:', err);
     messages.value.push({
       role: 'assistant',
-      content: `⚠️ 发生错误: ${err.message}`,
+      content: err.message,
+      _isError: true,
       _thinkingExpanded: false,
     });
   } finally {
     isStreaming.value = false;
     streamContent.value = '';
     streamThinking.value = '';
+    activeTools.value = [];
     scrollToBottom();
   }
 }
@@ -508,6 +548,14 @@ function handleStreamChunk(chunk) {
     streamContent.value += chunk.content;
   } else if (chunk.type === 'thinking') {
     streamThinking.value += chunk.content;
+  } else if (chunk.type === 'tool_start') {
+    activeTools.value.push({ name: chunk.name, status: 'running', result: null, _expanded: false });
+  } else if (chunk.type === 'tool_end') {
+    const tool = activeTools.value.find(t => t.name === chunk.name && t.status === 'running');
+    if (tool) {
+      tool.status = 'done';
+      tool.result = chunk.result;
+    }
   }
   scrollToBottom();
 }
@@ -515,6 +563,27 @@ function handleStreamChunk(chunk) {
 async function stopGeneration() {
   await window.electronAPI.stopGeneration();
   isStreaming.value = false;
+}
+
+// ── 对话导出 ─────────────────────────────────────────
+async function exportConversation() {
+  if (messages.value.length === 0) return;
+  const lines = [];
+  const title = messages.value.find(m => m.role === 'user')?.content?.slice(0, 30) || '对话';
+  const date = new Date().toLocaleDateString('zh-CN');
+  lines.push(`# ${title}`);
+  lines.push(`> 导出时间: ${date}\n`);
+
+  for (const msg of messages.value) {
+    if (msg.role === 'system' || msg.type === 'confirm-card') continue;
+    const role = msg.role === 'user' ? '👤 用户' : '🤖 Bob';
+    lines.push(`## ${role}\n`);
+    lines.push(msg.content || '');
+    lines.push('');
+  }
+  const md = lines.join('\n');
+  const safeName = title.replace(/[<>:"/\\|?*]/g, '_');
+  await window.electronAPI.exportMarkdown(md, `${safeName}.md`);
 }
 
 // ── Markdown 渲染 ───────────────────────────────────
@@ -592,6 +661,39 @@ function onDragEnter(e) {
   }
 }
 
+// ── Logo 滚动视差 ────────────────────────────────────
+function onMessagesScroll() {
+  const el = messagesArea.value;
+  if (!el) return;
+  // 在 0~100px 滚动范围内，从 1 平滑衰减到 0
+  const scrollY = el.scrollTop;
+  const fadeDistance = 100;
+  logoOpacity.value = Math.max(0, 1 - scrollY / fadeDistance);
+}
+
+// ── 拦截消息链接点击 ─────────────────────────────────
+function onMessageLinkClick(e) {
+  const a = e.target.closest('a');
+  if (!a || !a.href) return;
+  
+  e.preventDefault();
+  const href = a.getAttribute('href');
+  
+  if (href.startsWith('file://') || /^[A-Za-z]:[\\/]/.test(href)) {
+    let filePath = href.replace('file:///', '');
+    // 兼容可能残留的 url 编码
+    try { filePath = decodeURIComponent(filePath); } catch(e){}
+    window.electronAPI.openFile(filePath).catch(err => {
+      console.error('打开文件失败:', err);
+    });
+  } else {
+    // 调用系统浏览器打开其他网址 (如果没实现openExternal，可以以后再加)
+    if (window.electronAPI.openExternal) {
+      window.electronAPI.openExternal(href);
+    }
+  }
+}
+
 async function handleDrop(event) {
   isDragging.value = false;
   const files = event.dataTransfer?.files;
@@ -599,7 +701,28 @@ async function handleDrop(event) {
 
   const file = files[0];
 
-  // 图片文件 → Vision
+  // ── 路由 1: 文件夹 → 触发 Bob 的 track_folder 流程 ──
+  // Electron 环境下，拖入文件夹时 file.path 指向目录
+  if (file.path) {
+    try {
+      const fs = window.require?.('fs');
+      // 在 Renderer sandbox 下无法直接 require，走 IPC 判断
+      // 用 file.type 为空 + 无扩展名 来推断文件夹（Electron 特征）
+    } catch (e) { /* expected in sandbox mode */ }
+  }
+
+  // Electron 中拖入文件夹的特征：type 为空、size 为 0
+  if (file.type === '' && file.size === 0 && file.path) {
+    // 注入自然语言消息，让 Bob 通过 track_folder 工具来处理
+    const folderPath = file.path;
+    const folderName = folderPath.split('\\').pop() || folderPath.split('/').pop();
+    inputText.value = `我想让你关注一下这个文件夹：${folderPath}\n请帮我看看里面有什么，并加入你的备忘录。`;
+    await nextTick();
+    sendMessage();
+    return;
+  }
+
+  // ── 路由 2: 图片 → Vision 附件 ──
   if (file.type.startsWith('image/')) {
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -610,7 +733,7 @@ async function handleDrop(event) {
     return;
   }
 
-  // 其他文件 → FileReader
+  // ── 路由 3: 文档/其他文件 → 上下文附件 ──
   try {
     const result = await window.electronAPI.readFile(file.path);
     if (result.error) {
@@ -681,7 +804,12 @@ function scrollToBottom() {
 }
 
 .view-header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
   text-align: left;
+  padding-bottom: var(--space-2);
+  pointer-events: none;
 }
 
 .view-title {
@@ -861,6 +989,46 @@ function scrollToBottom() {
   overflow-y: auto;
 }
 
+/* ── 文件卡片 ───────────────────────────────────────── */
+.message-content a[href^="file://"],
+.message-content a[href^="C:\\"],
+.message-content a[href^="D:\\"],
+.message-content a[href^="E:\\"],
+.message-content a[href^="F:\\"] {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  background: color-mix(in srgb, var(--accent-primary) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent-primary) 30%, transparent);
+  border-radius: 6px;
+  text-decoration: none;
+  color: var(--accent-primary);
+  font-weight: 500;
+  font-size: 13px;
+  margin: 4px 0;
+  transition: all 0.2s;
+}
+.message-content a[href^="file://"]:hover,
+.message-content a[href^="C:\\"]:hover,
+.message-content a[href^="D:\\"]:hover,
+.message-content a[href^="E:\\"]:hover,
+.message-content a[href^="F:\\"]:hover {
+  background: color-mix(in srgb, var(--accent-primary) 20%, transparent);
+}
+.message-content a[href^="file://"]::before,
+.message-content a[href^="C:\\"]::before,
+.message-content a[href^="D:\\"]::before,
+.message-content a[href^="E:\\"]::before,
+.message-content a[href^="F:\\"]::before {
+  content: "";
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="%236366f1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>');
+  background-size: cover;
+}
+
 /* ── 消息图片 ───────────────────────────────────────── */
 .message-image {
   border-radius: var(--radius-md);
@@ -919,18 +1087,141 @@ function scrollToBottom() {
   color: var(--text-tertiary);
 }
 
+/* ── 错误卡片 ─────────────────────────────────────── */
+.error-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 16px;
+  background: color-mix(in srgb, var(--color-error, #ef4444) 8%, var(--bg-secondary));
+  border: 1px solid color-mix(in srgb, var(--color-error, #ef4444) 20%, transparent);
+  border-radius: 8px;
+  margin: 4px 0;
+}
+
+.error-icon {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--color-error, #ef4444);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  font-size: 13px;
+  flex-shrink: 0;
+  line-height: 1;
+}
+
+.error-title {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--text-primary);
+  margin-bottom: 2px;
+}
+
+.error-detail {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+/* ── 工具调用面板 ─────────────────────────────────────── */
+.tool-calls-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 8px 0;
+}
+
+.tool-call-item {
+  border-left: 2px solid var(--border-subtle);
+  padding: 4px 0 4px 12px;
+  font-size: 12px;
+  transition: border-color 0.2s ease;
+}
+
+.tool-call-item.is-running {
+  border-left-color: var(--accent-primary);
+}
+
+.tool-call-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.tool-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.dot-running {
+  background: transparent;
+  border: 1.5px solid var(--accent-primary);
+  animation: dot-pulse 1.2s ease-in-out infinite;
+}
+
+.dot-done {
+  background: var(--accent-primary);
+  border: 1.5px solid var(--accent-primary);
+}
+
+@keyframes dot-pulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}
+
+.tool-name {
+  color: var(--text-secondary);
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+}
+
+.tool-expand-icon {
+  color: var(--text-tertiary);
+  transition: transform 0.15s ease;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.tool-expand-icon.rotate-90 {
+  transform: rotate(90deg);
+}
+
+.tool-result-preview {
+  margin-top: 6px;
+  padding: 8px 10px;
+  background: var(--bg-secondary);
+  border-radius: 6px;
+  font-size: 11px;
+  font-family: var(--font-mono, monospace);
+  color: var(--text-tertiary);
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 120px;
+  overflow-y: auto;
+  line-height: 1.4;
+}
+
 /* ── 拖拽遮罩 ───────────────────────────────────────── */
 .drop-overlay {
   position: absolute;
   inset: 0;
-  background: rgba(10, 10, 15, 0.85);
+  background: color-mix(in srgb, var(--bg-primary) 80%, transparent);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 100;
-  border: 3px dashed var(--accent-primary);
-  border-radius: var(--radius-lg);
-  margin: var(--space-4);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-primary) 30%, transparent),
+              inset 0 0 50px color-mix(in srgb, var(--accent-primary) 20%, transparent);
+  backdrop-filter: blur(4px);
 }
 
 .drop-content {

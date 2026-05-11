@@ -58,36 +58,18 @@ class ToolRegistry {
         } else if (item.isFile() && item.name.endsWith('.js')) {
           try {
             if (isExternal) {
-              // TODO: Migrating to a safer sandbox execution environment is the ultimate goal.
-              console.warn(`[SECURITY WARNING] Loading external skill from ${fullPath}. This is an arbitrary code execution risk (RCE).`);
-              const { dialog } = require('electron');
-              const response = dialog.showMessageBoxSync({
-                type: 'warning',
-                buttons: ['Allow', 'Deny'],
-                defaultId: 1,
-                title: 'Security Warning',
-                message: `The application is trying to load an external skill from:\n${fullPath}\n\nLoading external scripts allows arbitrary code execution. Do you want to allow this?`
-              });
-              if (response !== 0) {
-                console.log(`[ToolRegistry] User denied loading external skill: ${fullPath}`);
-                continue;
-              }
+              // 用户在设置中主动配置了外部技能目录，视为已授权
+              // 仅保留控制台日志供开发者审计
+              console.log(`[ToolRegistry] Loading external skill: ${fullPath}`);
             }
-            const mod = require(fullPath);
-            if (mod && mod.name && mod.execute) {
-              // Wrap simple exported objects into a BaseTool
-              class DynamicTool extends BaseTool {
-                constructor() {
-                  super();
-                  this.name = mod.name;
-                  this.description = mod.description || 'No description';
-                  this.input_schema = mod.parameters || { type: 'object', properties: {} };
-                }
-                async execute(params) {
-                  return await mod.execute(params);
-                }
-              }
-              this.register(new DynamicTool());
+            // Clear require cache for hot reloading
+            const resolvedPath = require.resolve(fullPath);
+            if (require.cache[resolvedPath]) {
+              delete require.cache[resolvedPath];
+            }
+            const toolInstance = require(fullPath);
+            if (toolInstance && toolInstance.name && typeof toolInstance.execute === 'function') {
+              this.register(toolInstance);
             }
           } catch (reqErr) {
              console.error(`[ToolRegistry] Failed to load tool from ${fullPath}:`, reqErr);

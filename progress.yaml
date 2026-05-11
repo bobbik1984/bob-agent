@@ -65,6 +65,9 @@ phases:
       - { text: "T-512: 日程时间轴重写 (0/6/12/18/24 + 今天居中 + 窄屏降级 + 详情弹窗)", status: done }
       - { text: "T-513: 对话列表项等高修复", status: done }
       - { text: "T-514: 设计规范文档化 (design_principles.md)", status: done }
+      - { text: "T-515: 启动画面 (Splash Screen)", status: todo }
+      - { text: "T-516: 全局多语言支持 (i18n)", status: todo }
+      - { text: "T-517: 品牌 Logo 滚动视差动效 (Scroll-Driven Animation)", status: todo }
 
   - name: "Sprint 4 · 文件分析 + 联动"
     status: todo
@@ -75,6 +78,7 @@ phases:
       - { text: "T-404: Vision→Parser 管线", status: todo }
       - { text: "T-405: 全局截图", status: todo }
       - { text: "T-406: 日历同步移植", status: todo }
+      - { text: "T-407: 剪贴板图片粘贴支持", status: todo }
 
   - name: "Sprint 5 · 体验打磨"
     status: todo

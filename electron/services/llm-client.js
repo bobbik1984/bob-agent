@@ -255,6 +255,7 @@ class LLMClient {
             try {
               const args = JSON.parse(tc.function.arguments || '{}');
               console.log(`[LLMClient] Executing tool: ${tc.function.name}`, args);
+              yield { type: 'tool_start', name: tc.function.name, args };
               if (this.registry) {
                 const res = await this.registry.executeTool(tc.function.name, args);
                 result = typeof res === 'string' ? res : JSON.stringify(res);
@@ -266,6 +267,7 @@ class LLMClient {
               console.error(`[LLMClient] Tool execution error:`, e);
               result = e.toString();
             }
+            yield { type: 'tool_end', name: tc.function.name, result: result.substring(0, 500) };
             currentMessages.push({ role: 'tool', tool_call_id: tc.id, content: result });
           }
         } else {

@@ -1,20 +1,26 @@
-module.exports = {
-  name: 'web_search',
-  description: 'Searches the web using Tavily API to get up-to-date information.',
-  parameters: {
-    type: 'object',
-    properties: {
-      query: {
-        type: 'string',
-        description: 'The query to search for.'
+const { BaseTool } = require('../base');
+
+class WebSearchTool extends BaseTool {
+  constructor() {
+    super();
+    this.name = 'web_search';
+    this.description = 'Searches the web using Tavily API to get up-to-date information.';
+    this.input_schema = {
+      type: 'object',
+      properties: {
+        query: {
+          type: 'string',
+          description: 'The query to search for.'
+        },
+        max_results: {
+          type: 'number',
+          description: 'The maximum number of results to return. Defaults to 5.'
+        }
       },
-      max_results: {
-        type: 'number',
-        description: 'The maximum number of results to return. Defaults to 5.'
-      }
-    },
-    required: ['query']
-  },
+      required: ['query']
+    };
+  }
+
   async execute({ query, max_results = 5 }) {
     try {
       const apiKey = process.env.TAVILY_API_KEY;
@@ -40,9 +46,12 @@ module.exports = {
       }
 
       const data = await response.json();
-      return JSON.stringify(data, null, 2);
+      const rawContent = JSON.stringify(data, null, 2);
+      return `<untrusted_web_content source="tavily_search">\n${rawContent}\n</untrusted_web_content>`;
     } catch (err) {
       return `Error: ${err.message}`;
     }
   }
-};
+}
+
+module.exports = new WebSearchTool();

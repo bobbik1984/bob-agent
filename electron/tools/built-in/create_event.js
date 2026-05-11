@@ -1,5 +1,4 @@
 const { BaseTool } = require('../base');
-const Database = require('../../database');
 
 /**
  * T-601 / T-604: 使用 BaseTool 的标准工具类示例

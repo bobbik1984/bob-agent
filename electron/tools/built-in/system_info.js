@@ -1,14 +1,19 @@
 const os = require('os');
+const { BaseTool } = require('../base');
 
-module.exports = {
-  name: 'system_info',
-  description: '获取当前操作系统的基础硬件、内存、平台和 Node.js 运行环境信息。',
-  parameters: {
-    type: 'object',
-    properties: {},
-    required: []
-  },
-  execute: async () => {
+class SystemInfoTool extends BaseTool {
+  constructor() {
+    super();
+    this.name = 'system_info';
+    this.description = '获取当前操作系统的基础硬件、内存、平台和 Node.js 运行环境信息。';
+    this.input_schema = {
+      type: 'object',
+      properties: {},
+      required: []
+    };
+  }
+
+  async execute() {
     const totalMem = (os.totalmem() / (1024 ** 3)).toFixed(2) + ' GB';
     const freeMem = (os.freemem() / (1024 ** 3)).toFixed(2) + ' GB';
     const cpus = os.cpus();
@@ -32,4 +37,6 @@ module.exports = {
       uptime_seconds: os.uptime()
     };
   }
-};
+}
+
+module.exports = new SystemInfoTool();

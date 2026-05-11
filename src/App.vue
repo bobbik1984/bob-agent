@@ -1,5 +1,14 @@
 <template>
   <div class="app-shell">
+    <!-- 启动画面 Splash Screen -->
+    <Transition name="splash-fade">
+      <div v-if="showSplash" class="splash-overlay">
+        <div class="splash-content">
+          <img src="/bob_logo.svg" class="splash-logo" alt="Bob" />
+          <div class="splash-loader"></div>
+        </div>
+      </div>
+    </Transition>
     <!-- 标题栏拖拽区域 -->
     <div class="titlebar titlebar-drag">
       <div class="titlebar-left titlebar-no-drag">
@@ -156,6 +165,7 @@ const renamingId = ref(null);
 const renameText = ref('');
 const renameInputRef = ref(null);
 const currentTheme = ref('dark');
+const showSplash = ref(true);
 
 const sidebarWidth = ref(260);
 const isSidebarCollapsed = ref(false);
@@ -248,6 +258,9 @@ onMounted(async () => {
       }
     }
   }
+
+  // 启动画面淡出 — 保证至少展示 1.2 秒
+  setTimeout(() => { showSplash.value = false; }, 1200);
 });
 
 // ── 对话管理 ─────────────────────────────────────────
@@ -262,12 +275,21 @@ async function loadConversations() {
 }
 
 async function createNewChat() {
+  if (activeConversationId.value) {
+    window.electronAPI.summarizeSession(activeConversationId.value).catch(e => console.error(e));
+  }
   const conv = await window.electronAPI.createConversation('新对话', currentModel.value);
   conversations.value.unshift(conv);
   activeConversationId.value = conv.id;
 }
 
 function switchConversation(id) {
+  if (activeConversationId.value && activeConversationId.value !== id) {
+    // Trigger background summarization for the old conversation
+    window.electronAPI.summarizeSession(activeConversationId.value).catch(err => {
+      console.error('Background session summarization failed:', err);
+    });
+  }
   activeConversationId.value = id;
 }
 
@@ -287,6 +309,7 @@ async function confirmDeleteChat() {
   conversations.value = conversations.value.filter(c => c.id !== id);
   
   if (activeConversationId.value === id) {
+    // If we are deleting the active chat, we don't need to summarize it.
     if (conversations.value.length > 0) {
       activeConversationId.value = conversations.value[0].id;
     } else {
@@ -705,5 +728,68 @@ async function onConfigChanged() {
   flex: 1;
   overflow: hidden;
   background: var(--bg-root);
+}
+
+/* ── 启动画面 ──────────────────────────────────────── */
+.splash-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: var(--bg-root, #0c0c0c);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.splash-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 32px;
+}
+
+.splash-logo {
+  width: 120px;
+  height: auto;
+  opacity: 0.6;
+  filter: var(--logo-filter, brightness(0.8));
+  animation: splash-breathe 2s ease-in-out infinite;
+}
+
+@keyframes splash-breathe {
+  0%, 100% { opacity: 0.4; transform: scale(1); }
+  50% { opacity: 0.7; transform: scale(1.03); }
+}
+
+.splash-loader {
+  width: 48px;
+  height: 2px;
+  background: var(--border-subtle, #333);
+  border-radius: 1px;
+  overflow: hidden;
+  position: relative;
+}
+
+.splash-loader::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  width: 50%;
+  background: var(--accent-primary, #6366f1);
+  border-radius: 1px;
+  animation: splash-slide 1.2s ease-in-out infinite;
+}
+
+@keyframes splash-slide {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(300%); }
+}
+
+/* Splash 淡出过渡 */
+.splash-fade-leave-active {
+  transition: opacity 0.5s ease;
+}
+.splash-fade-leave-to {
+  opacity: 0;
 }
 </style>

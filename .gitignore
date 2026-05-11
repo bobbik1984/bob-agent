@@ -7,3 +7,4 @@ out/
 *.db
 *.db-journal
 *.db-wal
+data/

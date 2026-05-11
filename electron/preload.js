@@ -56,6 +56,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
   addMessage: (conversationId, role, content, imageBase64) =>
     ipcRenderer.invoke('db:message:add', conversationId, role, content, imageBase64),
 
+  // ── 记忆引擎 ───────────────────────────────────────
+  summarizeSession: (conversationId) => ipcRenderer.invoke('memory:summarize-session', conversationId),
+
+  // ── 文件夹跟踪 ─────────────────────────────────────
+  getTrackedFolders: () => ipcRenderer.invoke('folders:list'),
+  addTrackedFolder: (folderPath) => ipcRenderer.invoke('folders:add', folderPath),
+  removeTrackedFolder: (folderPath) => ipcRenderer.invoke('folders:remove', folderPath),
+  selectFolderToTrack: () => ipcRenderer.invoke('folders:select-dir'),
+
   // ── 配置 ───────────────────────────────────────────
   getConfig: (key) => ipcRenderer.invoke('config:get', key),
   setConfig: (key, value) => ipcRenderer.invoke('config:set', key, value),
@@ -67,6 +76,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   isSetupComplete: () => ipcRenderer.invoke('system:is-setup-complete'),
   selectDir: () => ipcRenderer.invoke('system:select-dir'),
   updateTheme: (theme) => ipcRenderer.invoke('system:update-theme', theme),
+  exportMarkdown: (content, defaultName) => ipcRenderer.invoke('system:export-md', content, defaultName),
+  openFile: (filePath) => ipcRenderer.invoke('system:open-file', filePath),
 
   // ── Plugins ────────────────────────────────────────
   getPlugins: () => ipcRenderer.invoke('plugin:get-list'),
@@ -76,4 +87,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('plugin:progress', handler);
     return () => ipcRenderer.removeListener('plugin:progress', handler);
   },
+  onPluginUpdated: (callback) => {
+    const handler = (_event, data) => callback(data);
+    ipcRenderer.on('plugin:updated', handler);
+    return () => ipcRenderer.removeListener('plugin:updated', handler);
+  }
 });

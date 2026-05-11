@@ -1,18 +1,23 @@
 const fs = require('fs');
+const { BaseTool } = require('../base');
 
-module.exports = {
-  name: 'read_file',
-  description: 'Reads the content of the specified text file.',
-  parameters: {
-    type: 'object',
-    properties: {
-      path: {
-        type: 'string',
-        description: 'The path of the file to read.'
-      }
-    },
-    required: ['path']
-  },
+class ReadFileTool extends BaseTool {
+  constructor() {
+    super();
+    this.name = 'read_file';
+    this.description = 'Reads the content of the specified text file.';
+    this.input_schema = {
+      type: 'object',
+      properties: {
+        path: {
+          type: 'string',
+          description: 'The path of the file to read.'
+        }
+      },
+      required: ['path']
+    };
+  }
+
   async execute({ path }) {
     try {
       const p = require('path');
@@ -42,4 +47,6 @@ module.exports = {
       return `Error: ${err.message}`;
     }
   }
-};
+}
+
+module.exports = new ReadFileTool();

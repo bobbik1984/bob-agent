@@ -73,6 +73,14 @@ class Database {
         key TEXT PRIMARY KEY,
         value TEXT
       );
+
+      -- 关注的文件夹
+      CREATE TABLE IF NOT EXISTS tracked_folders (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        path TEXT NOT NULL UNIQUE,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
     `);
   }
 
@@ -181,6 +189,29 @@ class Database {
     this.db.prepare(
       'UPDATE events SET start_time = ?, end_time = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?'
     ).run(startTime, endTime, id);
+  }
+
+  // ── 文件夹跟踪管理 ────────────────────────────────────
+
+  addTrackedFolder(name, folderPath) {
+    const id = crypto.randomUUID();
+    this.db.prepare(
+      'INSERT OR IGNORE INTO tracked_folders (id, name, path) VALUES (?, ?, ?)'
+    ).run(id, name, folderPath);
+    return { id, name, path: folderPath };
+  }
+
+  removeTrackedFolder(folderPath) {
+    this.db.prepare('DELETE FROM tracked_folders WHERE path = ?').run(folderPath);
+  }
+
+  getTrackedFolders() {
+    return this.db.prepare('SELECT * FROM tracked_folders ORDER BY created_at DESC').all();
+  }
+
+  isTrackedFolder(folderPath) {
+    const row = this.db.prepare('SELECT id FROM tracked_folders WHERE path = ?').get(folderPath);
+    return !!row;
   }
 
   // ── 配置管理 ─────────────────────────────────────────
