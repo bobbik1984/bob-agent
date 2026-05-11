@@ -1,6 +1,7 @@
 <template>
   <div class="settings-view">
     <div class="settings-scroll">
+      <div class="settings-content">
       <h2 class="settings-title">
         <SettingsIcon :size="22" class="title-icon" />
         设置
@@ -80,7 +81,15 @@
           <CustomSelect
             v-model="config.theme"
             :options="themeOptions"
-            @change="saveConfig('theme', config.theme)"
+            @change="applyTheme(config.theme)"
+          />
+        </div>
+        <div class="form-group">
+          <label class="form-label">界面大小</label>
+          <CustomSelect
+            v-model="config.uiScale"
+            :options="uiScaleOptions"
+            @change="applyUiScale(config.uiScale)"
           />
         </div>
       </section>
@@ -139,7 +148,18 @@
         >
           清除技能目录
         </button>
+
+        <div class="plugin-manager-entry" style="margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border-subtle);">
+          <p class="section-desc" style="margin-bottom: 12px;">查看所有已注册技能并按需安装高级底层引擎（如本地文档解析）。</p>
+          <button class="btn btn-secondary" @click="showPluginManager = true" style="display: flex; align-items: center; gap: 8px;">
+            <Layers :size="16" />
+            <span>打开技能与插件中心</span>
+          </button>
+        </div>
       </section>
+
+      <!-- 插件管理弹窗 -->
+      <PluginManager :isOpen="showPluginManager" @close="showPluginManager = false" />
 
       <!-- 关于 -->
       <section class="settings-section card">
@@ -152,14 +172,16 @@
           <p class="about-desc">AI 桌面私人秘书 — 智能对话 + 图片识别 + 日程管理 + 文件分析</p>
         </div>
       </section>
+      </div>
     </div>
   </div>
 </template>
 
 <script setup>
 import { ref, computed, onMounted, defineEmits } from 'vue';
-import { Settings as SettingsIcon, Cpu, Eye, EyeOff, Plug, Loader2, Palette, Info, FolderOpen, Puzzle } from 'lucide-vue-next';
+import { Settings as SettingsIcon, Cpu, Eye, EyeOff, Plug, Loader2, Palette, Info, FolderOpen, Puzzle, Layers } from 'lucide-vue-next';
 import CustomSelect from '../components/CustomSelect.vue';
+import PluginManager from '../components/PluginManager.vue';
 
 const emit = defineEmits(['config-changed']);
 
@@ -172,8 +194,27 @@ const providerOptions = [
 
 const themeOptions = [
   { label: '暗色', value: 'dark' },
-  { label: '亮色 (开发中)', value: 'light' },
+  { label: '亮色', value: 'light' },
 ];
+
+const uiScaleOptions = [
+  { label: '紧凑', value: 'compact' },
+  { label: '舒适', value: 'comfortable' },
+];
+
+function applyUiScale(scale, persist = true) {
+  document.documentElement.setAttribute('data-ui-scale', scale);
+  if (persist) {
+    saveConfig('uiScale', scale);
+  }
+}
+
+function applyTheme(theme, persist = true) {
+  document.documentElement.setAttribute('data-theme', theme);
+  if (persist) {
+    saveConfig('theme', theme);
+  }
+}
 
 const config = ref({
   provider: 'deepseek',
@@ -181,6 +222,7 @@ const config = ref({
   model: '',
   baseURL: '',
   theme: 'dark',
+  uiScale: 'compact',
   workspaceDir: '',
   externalSkillsDir: '',
 });
@@ -196,6 +238,7 @@ const computedModelOptions = computed(() => {
 const showApiKey = ref(false);
 const isTesting = ref(false);
 const testResult = ref(null);
+const showPluginManager = ref(false);
 
 onMounted(async () => {
   const allConfig = await window.electronAPI.getAllConfig();
@@ -205,9 +248,11 @@ onMounted(async () => {
     model: allConfig.model || '',
     baseURL: allConfig.baseURL || '',
     theme: allConfig.theme || 'dark',
+    uiScale: allConfig.uiScale || 'compact',
     workspaceDir: allConfig.workspaceDir || '',
     externalSkillsDir: allConfig.externalSkillsDir || '',
   };
+  applyUiScale(config.value.uiScale, false);
   await loadModels();
 });
 
@@ -281,16 +326,26 @@ async function clearExternalSkillsDir() {
 
 <style scoped>
 .settings-view {
+  flex: 1;
+  min-width: 0;
   height: 100%;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .settings-scroll {
   height: 100%;
   overflow-y: auto;
-  padding: var(--space-8);
-  max-width: 600px;
+  padding: var(--space-6) var(--space-8);
+}
+
+.settings-content {
+  padding: 0;
+  max-width: 1000px;
+  width: 100%;
   margin: 0 auto;
+  box-sizing: border-box;
 }
 
 .settings-title {

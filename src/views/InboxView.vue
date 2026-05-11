@@ -1,27 +1,28 @@
 <template>
   <div class="inbox-view">
-    <div class="inbox-header">
-      <h2 class="inbox-title">
-        <Inbox :size="24" class="title-icon" />
-        智能收件箱
-      </h2>
-      <p class="inbox-subtitle">日程管理 + 待办清单</p>
-    </div>
-
-    <div v-if="isLoading" class="loading-state">
-      <Loader2 :size="24" class="animate-spin" />
-      <span>加载中...</span>
-    </div>
-
-    <div v-else class="inbox-content">
-      <div class="section">
-        <h3 class="section-title">本周日程</h3>
-        <WeekTimeline :weekEvents="events" />
+    <div class="inbox-content-wrapper">
+      <div class="inbox-header">
+        <h2 class="inbox-title">
+          <Calendar :size="24" class="title-icon" />
+          日程
+        </h2>
       </div>
 
-      <div class="section">
-        <h3 class="section-title">待办清单</h3>
-        <TodoList :todos="todos" @update-status="onTodoStatusUpdate" />
+      <div v-if="isLoading" class="loading-state">
+        <Loader2 :size="24" class="animate-spin" />
+        <span>加载中...</span>
+      </div>
+
+      <div v-else class="inbox-content">
+        <div class="section">
+          <h3 class="section-title">本周日程</h3>
+          <WeekTimeline :weekEvents="events" />
+        </div>
+
+        <div class="section">
+          <h3 class="section-title">待办清单</h3>
+          <TodoList :todos="todos" @update-status="onTodoStatusUpdate" />
+        </div>
       </div>
     </div>
   </div>
@@ -29,7 +30,7 @@
 
 <script setup>
 import { ref, onMounted } from 'vue';
-import { Inbox, Loader2 } from 'lucide-vue-next';
+import { Calendar, Loader2 } from 'lucide-vue-next';
 import WeekTimeline from '../components/WeekTimeline.vue';
 import TodoList from '../components/TodoList.vue';
 
@@ -61,12 +62,22 @@ function onTodoStatusUpdate({ id, status }) {
 
 <style scoped>
 .inbox-view {
+  flex: 1;
+  min-width: 0;
   height: 100%;
+  overflow-y: auto;
+  padding: var(--space-6) var(--space-8);
+}
+
+.inbox-content-wrapper {
+  max-width: 1000px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 0;
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  padding: var(--space-6);
   gap: var(--space-6);
-  overflow-y: auto;
 }
 
 .inbox-header {

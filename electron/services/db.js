@@ -87,9 +87,17 @@ class Database {
   }
 
   getConversations() {
-    return this.db.prepare(
-      'SELECT * FROM conversations ORDER BY updated_at DESC'
-    ).all();
+    return this.db.prepare(`
+      SELECT c.*,
+        (SELECT SUBSTR(m.content, 1, 80) FROM messages m
+         WHERE m.conversation_id = c.id
+         ORDER BY m.created_at DESC LIMIT 1) AS last_message,
+        (SELECT m.role FROM messages m
+         WHERE m.conversation_id = c.id
+         ORDER BY m.created_at DESC LIMIT 1) AS last_role
+      FROM conversations c
+      ORDER BY c.updated_at DESC
+    `).all();
   }
 
   deleteConversation(id) {

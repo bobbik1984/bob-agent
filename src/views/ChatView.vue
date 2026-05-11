@@ -2,21 +2,17 @@
   <div class="chat-view">
     <!-- 消息区域 -->
     <div class="messages-area" ref="messagesArea">
+      <!-- 统一的页面标题 -->
+      <div v-if="messages.length > 0" class="view-header">
+        <h2 class="view-title">
+          <img src="/bob_logo.svg" class="title-bob-logo" alt="Bob" />
+        </h2>
+      </div>
+
       <!-- 空状态 -->
       <div v-if="messages.length === 0" class="empty-state animate-fade-in">
-        <Sparkles :size="48" class="empty-icon" />
-        <h2 class="empty-title">你好，有什么可以帮你的？</h2>
-        <p class="empty-subtitle">对话、粘贴图片、拖入文件 — 我都能处理</p>
-        <div class="quick-actions">
-          <button class="quick-action card" @click="insertPrompt('帮我总结一下这段文字')">
-            <FileText :size="16" /> 文字总结
-          </button>
-          <button class="quick-action card" @click="insertPrompt('帮我分析这张图片')">
-            <Camera :size="16" /> 图片分析
-          </button>
-          <button class="quick-action card" @click="insertPrompt('下周三下午3点和李总开会')">
-            <Calendar :size="16" /> 创建日程
-          </button>
+        <div class="empty-logo-wrapper">
+          <img src="/bob_logo.svg" class="empty-bob-logo" alt="Bob" />
         </div>
       </div>
 
@@ -30,7 +26,7 @@
         <!-- 头像 -->
         <div class="message-avatar" :class="msg.role === 'user' ? 'avatar-user' : 'avatar-bob'">
           <User v-if="msg.role === 'user'" :size="16" />
-          <span v-else class="bob-avatar">B</span>
+          <img v-else src="/bob_logo.svg" class="bob-avatar-img" alt="Bob" />
         </div>
 
         <!-- 内容 -->
@@ -65,7 +61,7 @@
 
       <!-- 流式输出中 -->
       <div v-if="isStreaming" class="message-row message-assistant animate-slide-up">
-        <div class="message-avatar avatar-bob"><span class="bob-avatar">B</span></div>
+        <div class="message-avatar avatar-bob"><img src="/bob_logo.svg" class="bob-avatar-img" alt="Bob" /></div>
         <div class="message-body">
           <div v-if="streamThinking" class="thinking-card expanded">
             <button class="thinking-toggle">
@@ -129,15 +125,15 @@
         ></textarea>
         <!-- 底部工具栏 -->
         <div class="input-toolbar">
-          <button class="btn-icon attach-btn" title="附件 / 粘贴图片" @click="handleAttach">
-            <Paperclip :size="16" />
+          <button class="toolbar-item attach-btn" title="附件 / 粘贴图片" @click="handleAttach">
+            <Paperclip :size="14" />
           </button>
           <!-- 模型切换器 -->
           <div class="model-switcher-wrap" v-if="currentModelName">
-            <button class="model-indicator" @click="toggleModelSwitcher">
+            <button class="toolbar-item model-indicator" @click="toggleModelSwitcher">
               <img v-if="currentModelLogo" :src="currentModelLogo" class="model-logo-sm" @error="(e) => e.target.style.display = 'none'" />
               <span>{{ currentModelName }}</span>
-              <ChevronUp :size="12" />
+              <ChevronUp :size="10" class="chevron-icon" />
             </button>
             <!-- 弹出选择面板 -->
             <div v-if="showModelSwitcher" class="model-popup">
@@ -158,12 +154,12 @@
           </div>
           
           <!-- 代理模式切换器 -->
-          <div class="model-switcher-wrap" style="margin-left: 8px;">
-            <button class="model-indicator" @click="showAgentModeSwitcher = !showAgentModeSwitcher">
-              <Shield v-if="agentMode === 'insight'" :size="12" style="margin-right: 4px; color: var(--text-tertiary);" />
-              <Zap v-else :size="12" style="margin-right: 4px; color: var(--accent-primary);" />
+          <div class="model-switcher-wrap">
+            <button class="toolbar-item model-indicator" @click="showAgentModeSwitcher = !showAgentModeSwitcher">
+              <Shield v-if="agentMode === 'insight'" :size="12" style="color: var(--text-tertiary);" />
+              <Zap v-else :size="12" style="color: var(--accent-primary);" />
               <span>{{ agentMode === 'insight' ? '问答' : '干活' }}</span>
-              <ChevronUp :size="12" />
+              <ChevronUp :size="10" class="chevron-icon" />
             </button>
             <div v-if="showAgentModeSwitcher" class="model-popup">
               <button class="model-option" :class="{ active: agentMode === 'insight' }" @click="agentMode = 'insight'; showAgentModeSwitcher = false">
@@ -177,18 +173,17 @@
             </div>
           </div>
 
-          <div class="toolbar-spacer"></div>
-          
           <!-- 全局权限开关 -->
-          <label class="global-access-toggle" :class="{ active: globalFileAccess }" title="开启后，允许AI读取或修改工作目录外的系统文件 (仅限当前对话有效)">
+          <label class="toolbar-item global-access-toggle" :class="{ active: globalFileAccess }" title="开启后，允许AI读取或修改工作目录外的系统文件 (仅限当前对话有效)">
             <input type="checkbox" v-model="globalFileAccess" style="display: none;" />
-            <Unlock v-if="globalFileAccess" :size="14" style="margin-right: 4px; color: var(--accent-primary);" />
-            <Lock v-else :size="14" style="margin-right: 4px; opacity: 0.5;" />
+            <Unlock v-if="globalFileAccess" :size="12" style="color: var(--accent-primary);" />
+            <Lock v-else :size="12" style="opacity: 0.5;" />
             <span class="global-access-text">全局文件</span>
           </label>
-          <div style="width: 12px;"></div>
+
+          <div class="toolbar-spacer"></div>
           <!-- 计费指示器 -->
-          <span class="cost-indicator" title="本次对话累计费用">
+          <span class="toolbar-item cost-indicator" title="本次对话累计费用">
             ¥{{ sessionCost.toFixed(4) }}
           </span>
           <button
@@ -218,6 +213,7 @@
 import { marked } from 'marked';
 import hljs from 'highlight.js';
 import { markedHighlight } from 'marked-highlight';
+import DOMPurify from 'dompurify';
 
 marked.use(markedHighlight({
   langPrefix: 'hljs language-',
@@ -526,7 +522,8 @@ function renderMarkdown(text) {
   if (!text) return '';
   // 隐藏流式输出过程中的日历块
   const cleaned = text.replace(/<calendar_event>[\s\S]*?(?:<\/calendar_event>|$)/gi, '');
-  return marked.parse(cleaned);
+  const rawHtml = marked.parse(cleaned);
+  return DOMPurify.sanitize(rawHtml);
 }
 
 // ── 附件/图片处理 ────────────────────────────────────
@@ -665,6 +662,8 @@ function scrollToBottom() {
 
 <style scoped>
 .chat-view {
+  flex: 1;
+  min-width: 0;
   height: 100%;
   display: flex;
   flex-direction: column;
@@ -681,69 +680,55 @@ function scrollToBottom() {
   gap: var(--space-5);
 }
 
+.view-header {
+  text-align: left;
+}
+
+.view-title {
+  display: flex;
+  align-items: center;
+  height: 36px;
+}
+
+.title-bob-logo {
+  height: 24px;
+  width: auto;
+  filter: var(--logo-filter);
+}
+
 /* ── 空状态 ─────────────────────────────────────────── */
 .empty-state {
   flex: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: flex-end;
+  padding-bottom: 0;
+  width: 100%;
+}
+
+.empty-logo-wrapper {
+  max-width: 1000px;
+  width: 100%;
+  margin: 0 auto;
+  display: flex;
   justify-content: center;
-  gap: var(--space-3);
+  pointer-events: none;
 }
 
-.empty-icon {
-  margin-bottom: var(--space-2);
-  color: var(--text-tertiary);
-  opacity: 0.5;
-}
-
-.empty-title {
-  font-size: var(--text-2xl);
-  font-weight: 600;
-  background: var(--gradient-brand);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-}
-
-.empty-subtitle {
-  color: var(--text-tertiary);
-  font-size: var(--text-base);
-}
-
-.quick-actions {
-  display: flex;
-  gap: var(--space-3);
-  margin-top: var(--space-6);
-}
-
-.quick-action {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-2) var(--space-4);
-  font-size: var(--text-sm);
-  color: var(--text-secondary);
-  cursor: pointer;
-  transition: all var(--duration-normal) var(--ease-out);
-  border: 1px solid var(--border-subtle);
-  background: var(--surface-card);
-  font-family: var(--font-sans);
-  border-radius: var(--radius-lg);
-}
-
-.quick-action:hover {
-  border-color: var(--accent-primary);
-  color: var(--text-primary);
-  transform: translateY(-2px);
-  box-shadow: var(--shadow-glow);
+.empty-bob-logo {
+  width: 100%;
+  height: auto;
+  opacity: 0.05;
+  filter: var(--logo-filter);
+  display: block;
 }
 
 /* ── 消息行（聊天气泡布局）─────────────────────────── */
 .message-row {
   display: flex;
   gap: var(--space-2);
-  max-width: 800px;
+  max-width: 1000px;
   width: 100%;
   margin: 0 auto;
   align-items: flex-start;
@@ -779,15 +764,15 @@ function scrollToBottom() {
 }
 
 .avatar-bob {
-  background: rgba(255, 255, 255, 0.12);
-  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.05);
 }
 
-.bob-avatar {
-  font-family: var(--font-sans);
-  font-weight: 700;
-  font-size: 14px;
-  letter-spacing: -0.5px;
+.bob-avatar-img {
+  width: 60%;
+  height: 60%;
+  object-fit: contain;
+  filter: var(--logo-filter);
 }
 
 /* 内容块：最宽占 80%，文字始终左对齐 */
@@ -961,13 +946,31 @@ function scrollToBottom() {
   font-size: 3rem;
 }
 
+/* ── 聊天头部 ───────────────────────────────────────── */
+.view-header {
+  max-width: 1000px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 0 0 var(--space-6) 0;
+  text-align: left;
+}
+
+.view-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-2xl);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
 /* ── 输入区 ─────────────────────────────────────────── */
 .quick-actions-bar {
   display: flex;
   justify-content: flex-end;
   align-items: center;
   margin-bottom: var(--space-2);
-  max-width: 800px;
+  max-width: 1000px;
   margin-left: auto;
   margin-right: auto;
 }
@@ -980,24 +983,32 @@ function scrollToBottom() {
   position: relative;
 }
 
-.model-indicator {
+/* ── 统一工具栏项基线 ────────────────────────────── */
+.toolbar-item {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 4px;
+  height: 22px;
+  padding: 0 6px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
   color: var(--text-tertiary);
   font-size: var(--text-xs);
-  background: none;
-  border: none;
-  cursor: pointer;
-  padding: 2px 6px;
-  border-radius: var(--radius-sm);
-  transition: all var(--duration-fast);
   font-family: var(--font-sans);
+  cursor: pointer;
+  transition: all var(--duration-fast);
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
-.model-indicator:hover {
+.toolbar-item:hover {
   color: var(--text-secondary);
   background: var(--surface-glass);
+}
+
+.chevron-icon {
+  opacity: 0.5;
 }
 
 .model-logo-sm {
@@ -1013,10 +1024,10 @@ function scrollToBottom() {
   bottom: calc(100% + 6px);
   left: 0;
   min-width: 200px;
-  background: #1c1c1c;
+  background: var(--bg-primary);
   border: 1px solid var(--border-default);
   border-radius: var(--radius-md);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--shadow-lg);
   padding: var(--space-1);
   z-index: 200;
 }
@@ -1095,8 +1106,10 @@ function scrollToBottom() {
 .input-row {
   display: flex;
   flex-direction: column;
-  max-width: 800px;
+  max-width: 1000px;
+  width: 100%;
   margin: 0 auto;
+  box-sizing: border-box;
   background: var(--surface-card);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
@@ -1165,7 +1178,7 @@ function scrollToBottom() {
 .input-toolbar {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
+  gap: 2px;
   padding-top: var(--space-1);
 }
 
@@ -1173,10 +1186,6 @@ function scrollToBottom() {
   flex: 1;
 }
 
-.attach-btn {
-  color: var(--text-tertiary);
-  flex-shrink: 0;
-}
 .attach-btn:hover {
   color: var(--text-primary);
 }
@@ -1187,9 +1196,9 @@ function scrollToBottom() {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
-  border-radius: var(--radius-sm);
+  width: 17px;
+  height: 17px;
+  border-radius: 2px;
   border: 1px solid var(--border-default);
   background: transparent;
   cursor: pointer;
@@ -1211,9 +1220,9 @@ function scrollToBottom() {
   width: 0;
   height: 0;
   border-style: solid;
-  border-width: 4px 0 4px 7px;
+  border-width: 3.5px 0 3.5px 6px;
   border-color: transparent transparent transparent var(--text-primary);
-  margin-left: 2px;
+  margin-left: 1px;
 }
 
 .send-btn:disabled .icon-send {
@@ -1223,43 +1232,33 @@ function scrollToBottom() {
 /* 红色实心方块 ■ */
 .icon-stop {
   display: block;
-  width: 6px;
-  height: 6px;
-  border-radius: 1px;
+  width: 5px;
+  height: 5px;
+  border-radius: 0.5px;
   background: var(--color-error);
 }
 
 .stop-btn {
-  border: 1px solid var(--color-error);
+  border-color: var(--border-default);
 }
 
 .stop-btn:hover {
-  border: 1px solid var(--color-error);
-  background: rgba(248, 113, 113, 0.1);
+  border-color: var(--text-secondary);
+  background: rgba(248, 113, 113, 0.08);
 }
 
 /* ── 计费指示器 ───────────────────────────────────── */
 .cost-indicator {
-  font-size: var(--text-xs);
-  color: var(--text-tertiary);
   font-family: var(--font-mono);
-  white-space: nowrap;
-  padding: 0 var(--space-2);
+  cursor: default;
 }
 
 /* ── 全局权限开关 ─────────────────────────────────── */
 .global-access-toggle {
-  display: flex;
-  align-items: center;
-  cursor: pointer;
-  padding: 2px 6px;
-  border-radius: var(--radius-sm);
-  transition: all var(--duration-fast);
   opacity: 0.6;
 }
 
 .global-access-toggle:hover {
-  background: rgba(255, 255, 255, 0.05);
   opacity: 1;
 }
 
@@ -1268,7 +1267,7 @@ function scrollToBottom() {
 }
 
 .global-access-text {
-  font-size: 11px;
+  font-size: inherit;
   color: inherit;
   font-weight: 500;
 }

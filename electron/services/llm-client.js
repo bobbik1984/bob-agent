@@ -156,19 +156,22 @@ class LLMClient {
           messages: currentMessages,
           stream: true,
           stream_options: { include_usage: true },
-          max_tokens: 8192
         };
 
         // 针对 DeepSeek 官方模型的特殊优化 (参考最新 API 文档)
-        if (this._provider === 'deepseek' && (modelId.includes('pro') || modelId.includes('reasoner'))) {
+        if (this.provider === 'deepseek') {
           params.thinking = { type: 'enabled' };
-          params.reasoning_effort = 'high';
+          params.reasoning_effort = modelId.includes('pro') || modelId.includes('reasoner') ? 'high' : 'low';
+          // DeepSeek thinking 模式必须用 max_completion_tokens（包含思考+输出），不能用 max_tokens
+          params.max_completion_tokens = 16384;
+        } else {
+          params.max_tokens = 8192;
         }
 
         if (this.registry) {
           let schemas = this.registry.getAllSchemas();
           if (agentMode === 'insight') {
-            const readonlyTools = ['list_dir', 'read_file', 'web_search', 'browser_automation', 'link_extractor', 'system_time', 'system_info', 'weather', 'wechat_reader'];
+            const readonlyTools = ['list_directory', 'read_file', 'web_search', 'browser_automation', 'link_extractor', 'system_time', 'system_info', 'weather', 'wechat_reader'];
             schemas = schemas.filter(s => readonlyTools.includes(s.function.name));
             console.log(`[LLMClient] Insight Mode: Restricting to read-only tools: ${schemas.map(s => s.function.name).join(', ')}`);
           }
@@ -186,6 +189,7 @@ class LLMClient {
         let toolCallsMap = new Map();
         let currentUsage = null;
         let assistantMessageContent = '';
+        let assistantReasoningContent = '';
 
         for await (const chunk of stream) {
           if (chunk.usage) {
@@ -216,6 +220,7 @@ class LLMClient {
           }
 
           if (delta.reasoning_content) {
+            assistantReasoningContent += delta.reasoning_content;
             yield { type: 'thinking', content: delta.reasoning_content };
           }
 
@@ -238,7 +243,12 @@ class LLMClient {
         if (toolCallsMap.size > 0) {
           const toolCalls = Array.from(toolCallsMap.values());
           console.log('[LLMClient] Tool calls received:', toolCalls.map(tc => `${tc.function.name}(${tc.function.arguments})`).join(', '));
-          currentMessages.push({ role: 'assistant', tool_calls: toolCalls, content: assistantMessageContent || null });
+          currentMessages.push({
+            role: 'assistant',
+            tool_calls: toolCalls,
+            content: assistantMessageContent || null,
+            ...(assistantReasoningContent ? { reasoning_content: assistantReasoningContent } : {})
+          });
 
           for (const tc of toolCalls) {
             let result = '';

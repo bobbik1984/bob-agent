@@ -44,6 +44,47 @@
   --gradient-brand:    linear-gradient(135deg, #ffffff 0%, #a0a0a0 100%);
   --gradient-subtle:   rgba(255, 255, 255, 0.03);
 
+  --logo-filter:       brightness(0) invert(1);
+  --logo-color:        var(--text-primary);
+  --bg-code-block:     #0d1117;
+  --bg-code-inline:    rgba(255, 255, 255, 0.08);
+}
+
+:root[data-theme="light"] {
+  --bg-root:        #f3f4f6;
+  --bg-primary:     #ffffff;
+  --bg-secondary:   #f9fafb;
+  --bg-tertiary:    #f3f4f6;
+  --bg-hover:       #e5e7eb;
+  --bg-active:      #d1d5db;
+
+  --surface-glass:  rgba(0, 0, 0, 0.04);
+  --surface-card:   rgba(0, 0, 0, 0.02);
+  --surface-input:  rgba(0, 0, 0, 0.05);
+
+  --border-subtle:  rgba(0, 0, 0, 0.08);
+  --border-default: rgba(0, 0, 0, 0.12);
+  --border-strong:  rgba(0, 0, 0, 0.2);
+
+  --text-primary:   #111827;
+  --text-secondary: #4b5563;
+  --text-tertiary:  #6b7280;
+  --text-inverse:   #ffffff;
+
+  --accent-primary:    #111827;
+  --accent-secondary:  #4b5563;
+  --accent-tertiary:   #6b7280;
+  --accent-glow:       rgba(0, 0, 0, 0.1);
+  --gradient-brand:    linear-gradient(135deg, #111827 0%, #4b5563 100%);
+  --gradient-subtle:   rgba(0, 0, 0, 0.03);
+
+  --logo-filter:       none;
+  --logo-color:        #2776bb;
+  --bg-code-block:     #e5e7eb;
+  --bg-code-inline:    rgba(0, 0, 0, 0.06);
+}
+
+:root {
   /* 语义色 */
   --color-success:   #34d399;
   --color-warning:   #fbbf24;
@@ -116,6 +157,13 @@ html, body {
   -moz-osx-font-smoothing: grayscale;
   overflow: hidden;
   user-select: none;
+}
+/* -- UI Scale ---------------------------------------------- */
+html[data-ui-scale="compact"] {
+  font-size: 16px;
+}
+html[data-ui-scale="comfortable"] {
+  font-size: 18px;
 }
 
 #app {
@@ -354,7 +402,7 @@ html, body {
 .message-content pre {
   margin: var(--space-3) 0;
   border-radius: var(--radius-md);
-  background: #0d1117; /* GitHub Dark background */
+  background: var(--bg-code-block);
   overflow-x: auto;
 }
 
@@ -373,7 +421,7 @@ html, body {
   font-size: 0.9em;
   padding: 0.2em 0.4em;
   border-radius: 4px;
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--bg-code-inline);
 }
 
 .message-content table {

@@ -107,7 +107,7 @@ class ToolRegistry {
     this.tools.clear();
     
     // 1. 加载内置基础工具 (如文件读写、事件管理等)
-    const builtInDir = path.join(__dirname, '..', '..', 'skills');
+    const builtInDir = path.join(__dirname, 'built-in');
     this.scanDirectory(builtInDir, false);
 
     // 2. 加载外部扩展工具

@@ -16,10 +16,13 @@ const { LLMClient } = require('./services/llm-client');
 const { ToolRegistry } = require('./tools/registry');
 const { Database } = require('./services/db');
 
+const { PluginManager } = require('./services/plugin-manager');
+
 // ─── 全局单例 ───────────────────────────────────────────
 let mainWindow = null;
 let llmClient = null;
 let toolRegistry = null;
+let pluginManager = null;
 let db = null;
 
 const isDev = !app.isPackaged;
@@ -179,8 +182,11 @@ function initServices() {
   const apiKey = db.getConfig('apiKey') || '';
   const model = db.getConfig('model') || '';
 
+  const externalSkillsDir = db.getConfig('externalSkillsDir') || null;
   toolRegistry = new ToolRegistry();
-  toolRegistry.init(path.join(__dirname, 'tools', 'built-in'));
+  toolRegistry.init(externalSkillsDir);
+
+  pluginManager = new PluginManager(toolRegistry);
 
   llmClient = new LLMClient({ provider, apiKey, model, registry: toolRegistry });
 }
@@ -199,6 +205,17 @@ function registerIPCHandlers() {
       global.securityState.agentMode = mode;
     }
     return true;
+  });
+
+  // ── Plugin Manager ───────────────────────────────────────
+  ipcMain.handle('plugin:get-list', () => {
+    return pluginManager.getPlugins();
+  });
+
+  ipcMain.handle('plugin:install', async (event, id) => {
+    return await pluginManager.installPlugin(id, (msg) => {
+      mainWindow?.webContents.send('plugin:progress', { id, msg });
+    });
   });
 
   // ── LLM ──────────────────────────────────────────────
@@ -230,6 +247,8 @@ function registerIPCHandlers() {
         } else if (chunk.type === 'done') {
           usageData = chunk.usage || null;
           modelId = chunk.model || null;
+        } else if (chunk.type === 'error') {
+          return { error: chunk.content };
         }
       }
 
@@ -272,6 +291,8 @@ function registerIPCHandlers() {
         else if (chunk.type === 'done') {
           usageData = chunk.usage || null;
           modelId = chunk.model || null;
+        } else if (chunk.type === 'error') {
+          return { error: chunk.content };
         }
       }
 
@@ -557,6 +578,16 @@ function registerIPCHandlers() {
     }
     return null;
   });
+
+  ipcMain.handle('system:update-theme', async (_event, theme) => {
+    if (mainWindow) {
+      mainWindow.setTitleBarOverlay({
+        color: theme === 'light' ? '#f3f4f6' : '#141414',
+        symbolColor: theme === 'light' ? '#111827' : '#a0a0a0',
+      });
+    }
+    return { ok: true };
+  });
 }
 
 // ─── App 生命周期 ───────────────────────────────────────
@@ -572,4 +603,11 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
+});
+
+app.on('before-quit', () => {
+  // 确保数据库连接关闭
+  if (db && db.close) {
+    try { db.close(); } catch (e) {}
+  }
 });

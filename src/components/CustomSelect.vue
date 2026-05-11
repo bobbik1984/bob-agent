@@ -104,10 +104,10 @@ onUnmounted(() => {
   top: calc(100% + 4px);
   left: 0;
   width: 100%;
-  background: #1c1c1c;
-  border: 1px solid var(--border-color);
+  background: var(--bg-primary);
+  border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
-  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.6);
+  box-shadow: var(--shadow-lg);
   padding: 4px;
   margin: 0;
   list-style: none;
@@ -131,7 +131,7 @@ onUnmounted(() => {
 }
 
 .custom-select-option.is-selected {
-  background: var(--bg-accent);
+  background: var(--bg-active);
   color: var(--text-primary);
   font-weight: 500;
 }

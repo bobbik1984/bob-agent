@@ -66,4 +66,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   showNotification: (title, body) => ipcRenderer.invoke('system:notify', title, body),
   isSetupComplete: () => ipcRenderer.invoke('system:is-setup-complete'),
   selectDir: () => ipcRenderer.invoke('system:select-dir'),
+  updateTheme: (theme) => ipcRenderer.invoke('system:update-theme', theme),
+
+  // ── Plugins ────────────────────────────────────────
+  getPlugins: () => ipcRenderer.invoke('plugin:get-list'),
+  installPlugin: (id) => ipcRenderer.invoke('plugin:install', id),
+  onPluginProgress: (callback) => {
+    const handler = (_event, data) => callback(data);
+    ipcRenderer.on('plugin:progress', handler);
+    return () => ipcRenderer.removeListener('plugin:progress', handler);
+  },
 });
