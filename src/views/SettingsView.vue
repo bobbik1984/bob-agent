@@ -290,7 +290,7 @@ const currentLocale = ref('zh-CN');
 
 const languageOptions = [
   { label: '简体中文', value: 'zh-CN' },
-  { label: 'English', value: 'en' },
+  { label: 'English', value: 'en-US' },
 ];
 
 function switchLanguage(val) {
