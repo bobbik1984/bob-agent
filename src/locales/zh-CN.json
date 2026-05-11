@@ -1,0 +1,81 @@
+{
+  "app": {
+    "name": "bob-agent"
+  },
+  "nav": {
+    "chat": "对话",
+    "inbox": "收件箱",
+    "settings": "设置"
+  },
+  "settings": {
+    "title": "设置",
+    "ai_model": "AI 模型",
+    "provider": "服务商",
+    "api_key": "API Key",
+    "api_url": "API 地址",
+    "default_model": "默认模型",
+    "test_connection": "测试连接",
+    "testing": "测试中...",
+    "connection_ok": "连接成功",
+    "appearance": "外观",
+    "theme": "主题",
+    "theme_dark": "暗色",
+    "theme_light": "亮色",
+    "ui_scale": "界面大小",
+    "scale_compact": "紧凑",
+    "scale_comfortable": "舒适",
+    "language": "语言",
+    "workspace": "工作目录",
+    "workspace_desc": "配置后，bob-agent 可以主动浏览和读取该目录下的文件",
+    "workspace_placeholder": "点击右侧按钮选择目录...",
+    "browse": "浏览",
+    "clear_workspace": "清除工作目录",
+    "skills": "工具与扩展 (Skills)",
+    "skills_desc": "配置外部技能所在的目录，Agent 会在启动时自动加载它们。",
+    "skills_placeholder": "点击右侧按钮选择外部技能目录...",
+    "clear_skills": "清除技能目录",
+    "plugin_center_desc": "查看所有已注册技能并按需安装高级底层引擎（如本地文档解析）。",
+    "open_plugin_center": "打开技能与插件中心",
+    "mcp_servers": "MCP Servers",
+    "mcp_desc": "通过 Model Context Protocol 连接外部工具服务器，让 Bob 获得更多能力。",
+    "mcp_empty": "尚未配置 MCP Server",
+    "mcp_name": "名称",
+    "mcp_command": "命令",
+    "mcp_args": "参数 (空格分隔)",
+    "mcp_save": "保存",
+    "mcp_cancel": "取消",
+    "mcp_add": "添加 MCP Server",
+    "tracked_folders": "关注的文件夹",
+    "tracked_folders_desc": "Bob 会记住这些文件夹的内容，以便你随时询问。你也可以直接把文件夹拖入聊天窗口来添加。",
+    "tracked_folders_empty": "还没有关注的文件夹",
+    "add_folder": "添加本地目录",
+    "about": "关于",
+    "about_desc": "AI 桌面私人秘书 — 智能对话 + 图片识别 + 日程管理 + 文件分析"
+  },
+  "chat": {
+    "new_conversation": "新对话",
+    "input_placeholder": "输入消息...(Shift+Enter 换行)",
+    "send": "发送",
+    "stop": "停止",
+    "export": "导出",
+    "thinking": "正在思考...",
+    "tool_calling": "正在调用工具",
+    "drop_hint": "拖放文件到这里",
+    "empty_title": "你好，我是 Bob",
+    "empty_subtitle": "有什么可以帮你的？"
+  },
+  "plugin": {
+    "title": "技能与插件中心",
+    "loading": "加载中...",
+    "engines": "下载引擎 (Engines)",
+    "native_tools": "内置能力 (Native Tools)",
+    "external_skills": "外部认知技能 (External Skills)",
+    "install": "安装",
+    "installing": "安装中",
+    "ready": "已就绪"
+  },
+  "tray": {
+    "show": "显示 bob-agent",
+    "quit": "退出"
+  }
+}

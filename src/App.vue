@@ -154,6 +154,9 @@ import InboxView from './views/InboxView.vue';
 import SettingsView from './views/SettingsView.vue';
 import SetupWizard from './components/SetupWizard.vue';
 import { Inbox, Settings, Plus, X, Sun, Moon, ChevronLeft, ChevronRight } from 'lucide-vue-next';
+import { useI18n } from 'vue-i18n';
+
+const { locale } = useI18n();
 
 // ── 状态 ─────────────────────────────────────────────
 const isSetupComplete = ref(false);
@@ -257,6 +260,9 @@ onMounted(async () => {
         window.electronAPI.updateTheme(theme);
       }
     }
+    // 恢复用户语言偏好
+    const savedLang = await window.electronAPI.getConfig('language');
+    if (savedLang) locale.value = savedLang;
   }
 
   // 启动画面淡出 — 保证至少展示 1.2 秒

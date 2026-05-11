@@ -1,0 +1,81 @@
+{
+  "app": {
+    "name": "bob-agent"
+  },
+  "nav": {
+    "chat": "Chat",
+    "inbox": "Inbox",
+    "settings": "Settings"
+  },
+  "settings": {
+    "title": "Settings",
+    "ai_model": "AI Model",
+    "provider": "Provider",
+    "api_key": "API Key",
+    "api_url": "API URL",
+    "default_model": "Default Model",
+    "test_connection": "Test Connection",
+    "testing": "Testing...",
+    "connection_ok": "Connected",
+    "appearance": "Appearance",
+    "theme": "Theme",
+    "theme_dark": "Dark",
+    "theme_light": "Light",
+    "ui_scale": "UI Scale",
+    "scale_compact": "Compact",
+    "scale_comfortable": "Comfortable",
+    "language": "Language",
+    "workspace": "Workspace",
+    "workspace_desc": "Once configured, bob-agent can browse and read files in this directory.",
+    "workspace_placeholder": "Click the button to select a directory...",
+    "browse": "Browse",
+    "clear_workspace": "Clear Workspace",
+    "skills": "Tools & Extensions (Skills)",
+    "skills_desc": "Configure the directory for external skills. The Agent will auto-load them on startup.",
+    "skills_placeholder": "Click the button to select the external skills directory...",
+    "clear_skills": "Clear Skills Directory",
+    "plugin_center_desc": "View all registered skills and install advanced engines (e.g., local document parsing) on demand.",
+    "open_plugin_center": "Open Skills & Plugin Center",
+    "mcp_servers": "MCP Servers",
+    "mcp_desc": "Connect to external tool servers via Model Context Protocol to extend Bob's capabilities.",
+    "mcp_empty": "No MCP Server configured",
+    "mcp_name": "Name",
+    "mcp_command": "Command",
+    "mcp_args": "Arguments (space-separated)",
+    "mcp_save": "Save",
+    "mcp_cancel": "Cancel",
+    "mcp_add": "Add MCP Server",
+    "tracked_folders": "Tracked Folders",
+    "tracked_folders_desc": "Bob remembers the contents of these folders so you can ask about them anytime. You can also drag folders into the chat window to add.",
+    "tracked_folders_empty": "No tracked folders yet",
+    "add_folder": "Add Local Directory",
+    "about": "About",
+    "about_desc": "AI Desktop Assistant — Chat + Vision + Calendar + File Analysis"
+  },
+  "chat": {
+    "new_conversation": "New Chat",
+    "input_placeholder": "Type a message... (Shift+Enter for new line)",
+    "send": "Send",
+    "stop": "Stop",
+    "export": "Export",
+    "thinking": "Thinking...",
+    "tool_calling": "Calling tool",
+    "drop_hint": "Drop files here",
+    "empty_title": "Hi, I'm Bob",
+    "empty_subtitle": "How can I help you?"
+  },
+  "plugin": {
+    "title": "Skills & Plugin Center",
+    "loading": "Loading...",
+    "engines": "Engines",
+    "native_tools": "Native Tools",
+    "external_skills": "External Skills",
+    "install": "Install",
+    "installing": "Installing",
+    "ready": "Ready"
+  },
+  "tray": {
+    "show": "Show bob-agent",
+    "quit": "Quit"
+  }
+}

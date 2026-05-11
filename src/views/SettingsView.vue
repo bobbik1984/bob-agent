@@ -4,18 +4,18 @@
       <div class="settings-content">
       <h2 class="settings-title">
         <SettingsIcon :size="22" class="title-icon" />
-        设置
+        {{ $t('settings.title') }}
       </h2>
 
       <!-- AI 模型配置 -->
       <section class="settings-section card">
         <h3 class="section-title">
           <Cpu :size="16" class="section-icon" />
-          AI 模型
+          {{ $t('settings.ai_model') }}
         </h3>
 
         <div class="form-group">
-          <label class="form-label">服务商</label>
+          <label class="form-label">{{ $t('settings.provider') }}</label>
           <CustomSelect
             v-model="config.provider"
             :options="providerOptions"
@@ -24,7 +24,7 @@
         </div>
 
         <div class="form-group" v-if="config.provider !== 'ollama'">
-          <label class="form-label">API Key</label>
+          <label class="form-label">{{ $t('settings.api_key') }}</label>
           <input
             v-model="config.apiKey"
             :type="showApiKey ? 'text' : 'password'"
@@ -39,7 +39,7 @@
         </div>
 
         <div class="form-group" v-if="config.provider === 'custom'">
-          <label class="form-label">API 地址</label>
+          <label class="form-label">{{ $t('settings.api_url') }}</label>
           <input
             v-model="config.baseURL"
             class="input"
@@ -49,7 +49,7 @@
         </div>
 
         <div class="form-group">
-          <label class="form-label">默认模型</label>
+          <label class="form-label">{{ $t('settings.default_model') }}</label>
           <CustomSelect
             v-model="config.model"
             :options="computedModelOptions"
@@ -62,7 +62,7 @@
           <button class="btn btn-ghost" @click="testConnection" :disabled="isTesting">
             <Loader2 v-if="isTesting" :size="14" class="animate-spin" />
             <Plug v-else :size="14" />
-            <span>{{ isTesting ? '测试中...' : '测试连接' }}</span>
+            <span>{{ isTesting ? $t('settings.testing') : $t('settings.test_connection') }}</span>
           </button>
           <span v-if="testResult" class="test-result" :class="testResult.ok ? 'success' : 'error'">
             {{ testResult.message }}
@@ -74,10 +74,10 @@
       <section class="settings-section card">
         <h3 class="section-title">
           <Palette :size="16" class="section-icon" />
-          外观
+          {{ $t('settings.appearance') }}
         </h3>
         <div class="form-group">
-          <label class="form-label">主题</label>
+          <label class="form-label">{{ $t('settings.theme') }}</label>
           <CustomSelect
             v-model="config.theme"
             :options="themeOptions"
@@ -85,7 +85,7 @@
           />
         </div>
         <div class="form-group">
-          <label class="form-label">界面大小</label>
+          <label class="form-label">{{ $t('settings.ui_scale') }}</label>
           <CustomSelect
             v-model="config.uiScale"
             :options="uiScaleOptions"
@@ -94,23 +94,38 @@
         </div>
       </section>
 
+      <!-- 语言 (直接嵌入外观区后面) -->
+      <section class="settings-section card">
+        <h3 class="section-title">
+          <Globe :size="16" class="section-icon" />
+          {{ $t('settings.language') }}
+        </h3>
+        <div class="form-group">
+          <CustomSelect
+            v-model="currentLocale"
+            :options="languageOptions"
+            @change="switchLanguage"
+          />
+        </div>
+      </section>
+
       <!-- 工作目录 -->
       <section class="settings-section card">
         <h3 class="section-title">
           <FolderOpen :size="16" class="section-icon" />
-          工作目录
+          {{ $t('settings.workspace') }}
         </h3>
-        <p class="section-desc">配置后，bob-agent 可以主动浏览和读取该目录下的文件</p>
+        <p class="section-desc">{{ $t('settings.workspace_desc') }}</p>
         <div class="form-group workspace-group">
           <input
             v-model="config.workspaceDir"
             class="input"
-            placeholder="点击右侧按钮选择目录..."
+            :placeholder="$t('settings.workspace_placeholder')"
             readonly
           />
           <button class="btn btn-ghost browse-btn" @click="selectWorkspaceDir">
             <FolderOpen :size="14" />
-            <span>浏览</span>
+            <span>{{ $t('settings.browse') }}</span>
           </button>
         </div>
         <button
@@ -118,7 +133,7 @@
           class="btn-clear"
           @click="clearWorkspaceDir"
         >
-          清除工作目录
+          {{ $t('settings.clear_workspace') }}
         </button>
       </section>
 
@@ -126,19 +141,19 @@
       <section class="settings-section card">
         <h3 class="section-title">
           <Puzzle :size="16" class="section-icon" />
-          工具与扩展 (Skills)
+          {{ $t('settings.skills') }}
         </h3>
-        <p class="section-desc">配置外部技能所在的目录，Agent 会在启动时自动加载它们。</p>
+        <p class="section-desc">{{ $t('settings.skills_desc') }}</p>
         <div class="form-group workspace-group">
           <input
             v-model="config.externalSkillsDir"
             class="input"
-            placeholder="点击右侧按钮选择外部技能目录..."
+            :placeholder="$t('settings.skills_placeholder')"
             readonly
           />
           <button class="btn btn-ghost browse-btn" @click="selectExternalSkillsDir">
             <FolderOpen :size="14" />
-            <span>浏览</span>
+            <span>{{ $t('settings.browse') }}</span>
           </button>
         </div>
         <button
@@ -146,14 +161,14 @@
           class="btn-clear"
           @click="clearExternalSkillsDir"
         >
-          清除技能目录
+          {{ $t('settings.clear_skills') }}
         </button>
 
         <div class="plugin-manager-entry" style="margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border-subtle);">
-          <p class="section-desc" style="margin-bottom: 12px;">查看所有已注册技能并按需安装高级底层引擎（如本地文档解析）。</p>
+          <p class="section-desc" style="margin-bottom: 12px;">{{ $t('settings.plugin_center_desc') }}</p>
           <button class="btn btn-secondary" @click="showPluginManager = true" style="display: flex; align-items: center; gap: 8px;">
             <Layers :size="16" />
-            <span>打开技能与插件中心</span>
+            <span>{{ $t('settings.open_plugin_center') }}</span>
           </button>
         </div>
       </section>
@@ -165,9 +180,9 @@
       <section class="settings-section card">
         <h3 class="section-title">
           <Unplug :size="16" class="section-icon" />
-          MCP Servers
+          {{ $t('settings.mcp_servers') }}
         </h3>
-        <p class="section-desc">通过 Model Context Protocol 连接外部工具服务器，让 Bob 获得更多能力。</p>
+        <p class="section-desc">{{ $t('settings.mcp_desc') }}</p>
 
         <div v-if="Object.keys(mcpServers).length > 0" class="tracked-folders-list">
           <div
@@ -185,31 +200,31 @@
           </div>
         </div>
         <div v-else class="empty-folders">
-          <span>尚未配置 MCP Server</span>
+          <span>{{ $t('settings.mcp_empty') }}</span>
         </div>
 
         <!-- 添加 MCP Server -->
         <div v-if="showAddMcp" class="mcp-add-form">
           <div class="form-group">
-            <label class="form-label">名称</label>
+            <label class="form-label">{{ $t('settings.mcp_name') }}</label>
             <input v-model="newMcp.name" class="input" placeholder="例如 filesystem" />
           </div>
           <div class="form-group">
-            <label class="form-label">命令</label>
+            <label class="form-label">{{ $t('settings.mcp_command') }}</label>
             <input v-model="newMcp.command" class="input" placeholder="npx" />
           </div>
           <div class="form-group">
-            <label class="form-label">参数 (空格分隔)</label>
+            <label class="form-label">{{ $t('settings.mcp_args') }}</label>
             <input v-model="newMcp.args" class="input" placeholder="-y @modelcontextprotocol/server-filesystem /path" />
           </div>
           <div style="display: flex; gap: 8px; margin-top: 8px;">
-            <button class="btn btn-primary" @click="addMcpServer" :disabled="!newMcp.name || !newMcp.command">保存</button>
-            <button class="btn btn-ghost" @click="showAddMcp = false">取消</button>
+            <button class="btn btn-primary" @click="addMcpServer" :disabled="!newMcp.name || !newMcp.command">{{ $t('settings.mcp_save') }}</button>
+            <button class="btn btn-ghost" @click="showAddMcp = false">{{ $t('settings.mcp_cancel') }}</button>
           </div>
         </div>
         <button v-else class="btn btn-ghost" @click="showAddMcp = true" style="margin-top: 12px;">
           <Plus :size="14" />
-          <span>添加 MCP Server</span>
+          <span>{{ $t('settings.mcp_add') }}</span>
         </button>
       </section>
 
@@ -217,9 +232,9 @@
       <section class="settings-section card">
         <h3 class="section-title">
           <FolderHeart :size="16" class="section-icon" />
-          关注的文件夹
+          {{ $t('settings.tracked_folders') }}
         </h3>
-        <p class="section-desc">Bob 会记住这些文件夹的内容，以便你随时询问。你也可以直接把文件夹拖入聊天窗口来添加。</p>
+        <p class="section-desc">{{ $t('settings.tracked_folders_desc') }}</p>
 
         <div v-if="trackedFolders.length > 0" class="tracked-folders-list">
           <div
@@ -237,12 +252,12 @@
           </div>
         </div>
         <div v-else class="empty-folders">
-          <span>还没有关注的文件夹</span>
+          <span>{{ $t('settings.tracked_folders_empty') }}</span>
         </div>
 
         <button class="btn btn-ghost" @click="addFolder" style="margin-top: 12px;">
           <Plus :size="14" />
-          <span>添加本地目录</span>
+          <span>{{ $t('settings.add_folder') }}</span>
         </button>
       </section>
 
@@ -250,11 +265,11 @@
       <section class="settings-section card">
         <h3 class="section-title">
           <Info :size="16" class="section-icon" />
-          关于
+          {{ $t('settings.about') }}
         </h3>
         <div class="about-info">
           <p>bob-agent v0.1.0</p>
-          <p class="about-desc">AI 桌面私人秘书 — 智能对话 + 图片识别 + 日程管理 + 文件分析</p>
+          <p class="about-desc">{{ $t('settings.about_desc') }}</p>
         </div>
       </section>
       </div>
@@ -264,11 +279,24 @@
 
 <script setup>
 import { ref, computed, onMounted, defineEmits } from 'vue';
-import { Settings as SettingsIcon, Cpu, Eye, EyeOff, Plug, Loader2, Palette, Info, FolderOpen, FolderHeart, Puzzle, Layers, X, Plus, Unplug } from 'lucide-vue-next';
+import { Settings as SettingsIcon, Cpu, Eye, EyeOff, Plug, Loader2, Palette, Info, FolderOpen, FolderHeart, Puzzle, Layers, X, Plus, Unplug, Globe } from 'lucide-vue-next';
+import { useI18n } from 'vue-i18n';
 import CustomSelect from '../components/CustomSelect.vue';
 import PluginManager from '../components/PluginManager.vue';
 
 const emit = defineEmits(['config-changed']);
+const { locale, t } = useI18n();
+const currentLocale = ref('zh-CN');
+
+const languageOptions = [
+  { label: '简体中文', value: 'zh-CN' },
+  { label: 'English', value: 'en' },
+];
+
+function switchLanguage(val) {
+  locale.value = val || currentLocale.value;
+  saveConfig('language', locale.value);
+}
 
 const providerOptions = [
   { label: 'DeepSeek', value: 'deepseek' },
@@ -277,15 +305,15 @@ const providerOptions = [
   { label: '自定义', value: 'custom' },
 ];
 
-const themeOptions = [
-  { label: '暗色', value: 'dark' },
-  { label: '亮色', value: 'light' },
-];
+const themeOptions = computed(() => [
+  { label: t('settings.theme_dark'), value: 'dark' },
+  { label: t('settings.theme_light'), value: 'light' },
+]);
 
-const uiScaleOptions = [
-  { label: '紧凑', value: 'compact' },
-  { label: '舒适', value: 'comfortable' },
-];
+const uiScaleOptions = computed(() => [
+  { label: t('settings.scale_compact'), value: 'compact' },
+  { label: t('settings.scale_comfortable'), value: 'comfortable' },
+]);
 
 function applyUiScale(scale, persist = true) {
   document.documentElement.setAttribute('data-ui-scale', scale);
@@ -337,7 +365,11 @@ onMounted(async () => {
     uiScale: allConfig.uiScale || 'compact',
     workspaceDir: allConfig.workspaceDir || '',
     externalSkillsDir: allConfig.externalSkillsDir || '',
+    language: allConfig.language || 'zh-CN',
   };
+  // 恢复用户选择的语言
+  currentLocale.value = config.value.language;
+  locale.value = config.value.language;
   applyUiScale(config.value.uiScale, false);
   await loadModels();
   await loadTrackedFolders();
