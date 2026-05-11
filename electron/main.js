@@ -143,7 +143,7 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false, // better-sqlite3 需要
+      sandbox: true, // better-sqlite3 需要
     },
     show: false,
   });
@@ -162,10 +162,17 @@ function createWindow() {
   }
 }
 
+// ─── 安全状态 ───────────────────────────────────────────
+global.securityState = {
+  globalFileAccess: false,
+  agentMode: 'insight'
+};
+
 // ─── 初始化后端服务 ─────────────────────────────────────
 function initServices() {
   // 数据库
   db = new Database(app.getPath('userData'));
+  global.db = db;
 
   // LLM Client — 从数据库配置加载
   const provider = db.getConfig('provider') || 'deepseek';
@@ -181,8 +188,22 @@ function initServices() {
 // ─── IPC Handlers ───────────────────────────────────────
 
 function registerIPCHandlers() {
+  // ── 安全与权限 ───────────────────────────────────────
+  ipcMain.handle('security:toggle-global-access', async (_event, value) => {
+    global.securityState.globalFileAccess = !!value;
+    return true;
+  });
+
+  ipcMain.handle('security:set-agent-mode', async (_event, mode) => {
+    if (['insight', 'yolo'].includes(mode)) {
+      global.securityState.agentMode = mode;
+    }
+    return true;
+  });
+
   // ── LLM ──────────────────────────────────────────────
-  ipcMain.handle('llm:chat', async (_event, messages, globalFileAccess = false, agentMode = 'yolo') => {
+  ipcMain.handle('llm:chat', async (_event, messages) => {
+    const { globalFileAccess, agentMode } = global.securityState;
     if (!llmClient || !llmClient.isConfigured()) {
       return { error: 'LLM 未配置，请先在设置中填写 API Key' };
     }
@@ -226,7 +247,8 @@ function registerIPCHandlers() {
     }
   });
 
-  ipcMain.handle('llm:vision', async (_event, messages, imageBase64, globalFileAccess = false, agentMode = 'yolo') => {
+  ipcMain.handle('llm:vision', async (_event, messages, imageBase64) => {
+    const { globalFileAccess, agentMode } = global.securityState;
     if (!llmClient || !llmClient.isConfigured()) {
       return { error: 'LLM 未配置' };
     }
@@ -387,7 +409,9 @@ function registerIPCHandlers() {
       const targetPath = path.resolve(workspaceRoot, relativePath);
 
       // 安全检查：防止路径遍历越界
-      if (!targetPath.startsWith(path.resolve(workspaceRoot))) {
+      const normalizedWorkspace = path.resolve(workspaceRoot);
+      const normalizedTarget = path.resolve(targetPath);
+      if (normalizedTarget !== normalizedWorkspace && !normalizedTarget.startsWith(normalizedWorkspace + path.sep)) {
         return { error: '禁止访问工作目录之外的路径' };
       }
 
@@ -429,7 +453,9 @@ function registerIPCHandlers() {
       const targetPath = path.resolve(workspaceRoot, relativePath);
 
       // 安全检查
-      if (!targetPath.startsWith(path.resolve(workspaceRoot))) {
+      const normalizedWorkspace = path.resolve(workspaceRoot);
+      const normalizedTarget = path.resolve(targetPath);
+      if (normalizedTarget !== normalizedWorkspace && !normalizedTarget.startsWith(normalizedWorkspace + path.sep)) {
         return { error: '禁止访问工作目录之外的文件' };
       }
 
@@ -495,7 +521,11 @@ function registerIPCHandlers() {
   });
 
   ipcMain.handle('config:all', async () => {
-    return db.getAllConfig();
+    const config = db.getAllConfig();
+    if (!config) return config;
+    const safeConfig = { ...config };
+    delete safeConfig.apiKey;
+    return safeConfig;
   });
 
   // ── 系统 ─────────────────────────────────────────────
