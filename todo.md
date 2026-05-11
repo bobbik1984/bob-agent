@@ -66,8 +66,8 @@
 - [x] T-613: 技能热重载 — 不重启应用即可刷新技能列表
 
 ### 6.4 MCP 协议
-- [ ] T-614: MCP 客户端接入（连接外部 MCP Server）
-- [ ] T-615: MCP 配置 UI（mcp/config.json 管理）
+- [x] T-614: MCP 客户端接入（连接外部 MCP Server）
+- [x] T-615: MCP 配置 UI（mcp/config.json 管理）
 
 ### 6.5 资产迁移与基元能力
 - [x] T-616: 原生读写基元支持 (write_file)
@@ -104,7 +104,7 @@
 
 ### 6.8 安全加固（Audit 驱动）
 - [x] T-630: XSS 消毒 — ChatView Markdown 渲染接入 DOMPurify
-- [ ] T-631: 启用 Renderer Sandbox (`sandbox: true`)
+- [x] T-631: 启用 Renderer Sandbox (`sandbox: true`)
 - [x] T-632: config:all IPC 过滤 apiKey 等敏感字段 (Jules 已修复)
 - [x] T-633: globalFileAccess/agentMode 状态锁定到 Main 进程 (Jules 已修复)
 - [x] T-634: read_file/write_file 路径穿越修复 (Jules 已修复)

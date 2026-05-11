@@ -19,6 +19,7 @@ const { Database } = require('./services/db');
 const { PluginManager } = require('./services/plugin-manager');
 const { MemoryEngine } = require('./services/memory-engine');
 const { FolderTracker } = require('./services/folder-tracker');
+const { MCPClientManager } = require('./services/mcp-client');
 
 // ─── 全局单例 ───────────────────────────────────────────
 let mainWindow = null;
@@ -27,6 +28,7 @@ let toolRegistry = null;
 let pluginManager = null;
 let memoryEngine = null;
 let folderTracker = null;
+let mcpManager = null;
 let db = null;
 
 let tray = null;
@@ -219,6 +221,13 @@ function initServices() {
 
   folderTracker = new FolderTracker(path.join(__dirname, '..', 'data', 'wiki'), llmClient, db);
   global.folderTracker = folderTracker;
+
+  // MCP Client — 连接外部 MCP Servers
+  const mcpConfigPath = path.join(app.getPath('userData'), 'mcp_config.json');
+  mcpManager = new MCPClientManager(mcpConfigPath);
+  mcpManager.startAll(toolRegistry).catch(err => {
+    console.error('[Main] MCP startup error (non-fatal):', err.message);
+  });
 }
 
 // ─── IPC Handlers ───────────────────────────────────────
@@ -673,6 +682,22 @@ function registerIPCHandlers() {
     });
     if (result.canceled || result.filePaths.length === 0) return null;
     return result.filePaths[0];
+  });
+
+  // ── MCP 配置管理 ─────────────────────────────────────
+  ipcMain.handle('mcp:config:get', async () => {
+    if (!mcpManager) return { mcpServers: {} };
+    return mcpManager.loadConfig();
+  });
+
+  ipcMain.handle('mcp:config:set', async (_event, config) => {
+    if (!mcpManager) return false;
+    mcpManager.saveConfig(config);
+    // 重新加载所有 MCP 连接
+    await mcpManager.reload(toolRegistry);
+    // 刷新插件列表 UI
+    if (pluginManager) pluginManager.refreshPlugins();
+    return true;
   });
 }
 

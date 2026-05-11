@@ -91,5 +91,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     const handler = (_event, data) => callback(data);
     ipcRenderer.on('plugin:updated', handler);
     return () => ipcRenderer.removeListener('plugin:updated', handler);
-  }
+  },
+
+  // ── MCP ─────────────────────────────────────────────
+  getMcpConfig: () => ipcRenderer.invoke('mcp:config:get'),
+  setMcpConfig: (config) => ipcRenderer.invoke('mcp:config:set', config),
 });

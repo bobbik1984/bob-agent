@@ -161,6 +161,58 @@
       <!-- 插件管理弹窗 -->
       <PluginManager :isOpen="showPluginManager" @close="showPluginManager = false" />
 
+      <!-- MCP Servers -->
+      <section class="settings-section card">
+        <h3 class="section-title">
+          <Unplug :size="16" class="section-icon" />
+          MCP Servers
+        </h3>
+        <p class="section-desc">通过 Model Context Protocol 连接外部工具服务器，让 Bob 获得更多能力。</p>
+
+        <div v-if="Object.keys(mcpServers).length > 0" class="tracked-folders-list">
+          <div
+            v-for="(cfg, name) in mcpServers"
+            :key="name"
+            class="tracked-folder-item"
+          >
+            <div class="folder-info">
+              <span class="folder-name">{{ name }}</span>
+              <span class="folder-path">{{ cfg.command }} {{ (cfg.args || []).join(' ') }}</span>
+            </div>
+            <button class="btn-icon btn-remove-folder" @click="removeMcpServer(name)" title="删除">
+              <X :size="14" />
+            </button>
+          </div>
+        </div>
+        <div v-else class="empty-folders">
+          <span>尚未配置 MCP Server</span>
+        </div>
+
+        <!-- 添加 MCP Server -->
+        <div v-if="showAddMcp" class="mcp-add-form">
+          <div class="form-group">
+            <label class="form-label">名称</label>
+            <input v-model="newMcp.name" class="input" placeholder="例如 filesystem" />
+          </div>
+          <div class="form-group">
+            <label class="form-label">命令</label>
+            <input v-model="newMcp.command" class="input" placeholder="npx" />
+          </div>
+          <div class="form-group">
+            <label class="form-label">参数 (空格分隔)</label>
+            <input v-model="newMcp.args" class="input" placeholder="-y @modelcontextprotocol/server-filesystem /path" />
+          </div>
+          <div style="display: flex; gap: 8px; margin-top: 8px;">
+            <button class="btn btn-primary" @click="addMcpServer" :disabled="!newMcp.name || !newMcp.command">保存</button>
+            <button class="btn btn-ghost" @click="showAddMcp = false">取消</button>
+          </div>
+        </div>
+        <button v-else class="btn btn-ghost" @click="showAddMcp = true" style="margin-top: 12px;">
+          <Plus :size="14" />
+          <span>添加 MCP Server</span>
+        </button>
+      </section>
+
       <!-- 关注的文件夹 -->
       <section class="settings-section card">
         <h3 class="section-title">
@@ -212,7 +264,7 @@
 
 <script setup>
 import { ref, computed, onMounted, defineEmits } from 'vue';
-import { Settings as SettingsIcon, Cpu, Eye, EyeOff, Plug, Loader2, Palette, Info, FolderOpen, FolderHeart, Puzzle, Layers, X, Plus } from 'lucide-vue-next';
+import { Settings as SettingsIcon, Cpu, Eye, EyeOff, Plug, Loader2, Palette, Info, FolderOpen, FolderHeart, Puzzle, Layers, X, Plus, Unplug } from 'lucide-vue-next';
 import CustomSelect from '../components/CustomSelect.vue';
 import PluginManager from '../components/PluginManager.vue';
 
@@ -289,6 +341,7 @@ onMounted(async () => {
   applyUiScale(config.value.uiScale, false);
   await loadModels();
   await loadTrackedFolders();
+  await loadMcpConfig();
 });
 
 async function loadModels() {
@@ -374,6 +427,38 @@ async function addFolder() {
 async function removeFolder(folderPath) {
   await window.electronAPI.removeTrackedFolder(folderPath);
   await loadTrackedFolders();
+}
+
+// ── MCP 配置管理 ─────────────────────────────────────
+const mcpServers = ref({});
+const showAddMcp = ref(false);
+const newMcp = ref({ name: '', command: '', args: '' });
+
+async function loadMcpConfig() {
+  if (!window.electronAPI.getMcpConfig) return;
+  const config = await window.electronAPI.getMcpConfig();
+  mcpServers.value = config.mcpServers || {};
+}
+
+async function addMcpServer() {
+  const name = newMcp.value.name.trim();
+  if (!name) return;
+  const updated = { ...mcpServers.value };
+  updated[name] = {
+    command: newMcp.value.command.trim(),
+    args: newMcp.value.args.trim().split(/\s+/).filter(Boolean),
+  };
+  await window.electronAPI.setMcpConfig({ mcpServers: updated });
+  mcpServers.value = updated;
+  newMcp.value = { name: '', command: '', args: '' };
+  showAddMcp.value = false;
+}
+
+async function removeMcpServer(name) {
+  const updated = { ...mcpServers.value };
+  delete updated[name];
+  await window.electronAPI.setMcpConfig({ mcpServers: updated });
+  mcpServers.value = updated;
 }
 </script>
 
@@ -591,5 +676,13 @@ select.input {
   border: 1px dashed var(--border-subtle);
   border-radius: 8px;
   margin-top: 12px;
+}
+
+.mcp-add-form {
+  margin-top: 16px;
+  padding: 12px;
+  background: var(--surface-glass);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
 }
 </style>
