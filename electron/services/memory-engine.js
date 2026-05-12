@@ -253,6 +253,7 @@ class MemoryEngine {
     if (scope === 'wiki' || scope === 'all') {
       searchDirs.push({ dir: path.join(this.wikiDir, 'projects'), label: '项目知识' });
       searchDirs.push({ dir: path.join(this.wikiDir, 'clippings'), label: '知识剪报' });
+      searchDirs.push({ dir: path.join(this.wikiDir, 'folders'), label: '追踪文件夹' });
     }
 
     const queryLower = query.toLowerCase();
@@ -260,9 +261,32 @@ class MemoryEngine {
     for (const { dir, label } of searchDirs) {
       if (!fs.existsSync(dir)) continue;
 
-      const files = fs.readdirSync(dir).filter(f => f.endsWith('.md'));
-      for (const file of files) {
-        const filePath = path.join(dir, file);
+      let filesToSearch = [];
+      
+      if (label === '追踪文件夹') {
+        // 对于 folders，文件保存在嵌套目录下的 README.md (或者 index.md 等)
+        const subDirs = fs.readdirSync(dir, { withFileTypes: true })
+          .filter(dirent => dirent.isDirectory())
+          .map(dirent => dirent.name);
+        for (const subDir of subDirs) {
+           const subDirPath = path.join(dir, subDir);
+           const possibleFiles = ['README.md', 'index.md', 'tree.md'];
+           for (const pf of possibleFiles) {
+              const pfPath = path.join(subDirPath, pf);
+              if (fs.existsSync(pfPath)) {
+                 filesToSearch.push({ path: pfPath, name: `${subDir}/${pf}` });
+              }
+           }
+        }
+      } else {
+        filesToSearch = fs.readdirSync(dir)
+          .filter(f => f.endsWith('.md'))
+          .map(f => ({ path: path.join(dir, f), name: f }));
+      }
+
+      for (const fileObj of filesToSearch) {
+        const filePath = fileObj.path;
+        const file = fileObj.name;
         const content = fs.readFileSync(filePath, 'utf-8');
 
         if (content.toLowerCase().includes(queryLower)) {
