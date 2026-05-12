@@ -26,7 +26,7 @@
 - [x] T-501: 系统托盘
 - [ ] T-502: 全局快捷键 (Ctrl+Shift+Space)
 - [ ] T-503: 桌面通知提醒
-- [x] T-504: 暗色/亮色主题（含 Electron titleBarOverlay 实时同步）
+- [x] T-504: 暗色/亮色主题（含 Electron titleBarOverlay 实时同步 + did-finish-load 初始化 + Settings applyTheme 联动）
 - [x] T-505: 模型切换 UI（品牌 Logo + 弹出选择器）
 - [x] T-506: Cost 追踪（会话级累计费用指示器）
 - [x] T-507: 对话导出 (.md)
@@ -38,8 +38,14 @@
 - [x] T-513: 对话列表项等高修复（新对话无消息时占位）
 - [x] T-514: 设计规范文档化（design_principles.md 9 节完整规范）
 - [x] T-515: 启动画面 (Splash Screen) — 在应用启动加载资源时显示，缓解长时间等待的焦虑
-- [ ] T-516: 全局多语言支持 (i18n) — 引入 vue-i18n，支持中英等语言一键切换
+- [x] T-516: 全局多语言支持 (i18n) — vue-i18n 框架 + zh-CN/en-US 双语包 + Settings 语言切换 + 导航 computed 响应 + WeekTimeline tm() 数组解析
 - [x] T-517: 品牌 Logo 滚动视差动效 (Scroll-Driven Animation) — 新对话的背景 Logo 在输入首条消息后，平滑缩小悬浮至顶部作为 Section 标题；向下滚动对话时，Logo 相对位置固定但根据滚动距离平滑渐隐 (Fade-out)，回滚至顶部时重新渐显，实现类似 Apple 官网的高级互动感
+- [ ] T-518: 对话内文件引用富卡片 (FileCard) — 将 LLM 回复中的本地文件路径从裸链接升级为带图标/缩略图的交互式卡片
+  - [ ] T-518a: FileCard.vue 基础组件 — 文件类型图标 + 文件名 + 大小/修改时间 + 打开/在文件夹中显示
+  - [ ] T-518b: system:file-meta IPC — fs.stat() 元数据 + system:show-in-folder
+  - [ ] T-518c: ChatView Markdown 后处理 — 识别 file:// 链接并替换为 FileCard block
+  - [ ] T-518d: 图片/视频缩略图 — nativeImage 缩略图生成替代文件类型图标
+  - [ ] T-518e: LLM System Prompt 格式引导 — 引导模型输出标准 file:// Markdown 链接
 
 ## Sprint 6: Agent 化（Function Calling + 工具系统）🔑 关键里程碑
 

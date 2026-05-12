@@ -261,6 +261,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // 系统
   captureScreen: () => ipcRenderer.invoke('system:capture'),
   showNotification: (title, body) => ipcRenderer.invoke('system:notify', title, body),
+  updateTheme: (theme) => ipcRenderer.invoke('system:update-theme', theme),
+  getFileMeta: (path) => ipcRenderer.invoke('system:file-meta', path),
+  showInFolder: (path) => ipcRenderer.invoke('system:show-in-folder', path),
 });
 ```
 

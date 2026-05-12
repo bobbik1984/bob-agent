@@ -75,9 +75,15 @@ bob-agent/
 │   │   └── SettingsView.vue     # 设置面板（含工作目录配置）
 │   └── components/
 │       ├── ConfirmCard.vue      # 事件确认卡片
+│       ├── FileCard.vue         # 📎 对话内文件引用富卡片 (Sprint 5 T-518)
 │       ├── WeekTimeline.vue     # 周时间轴
 │       ├── TodoList.vue         # 待办清单
+│       ├── CustomSelect.vue     # 自定义下拉选择器
 │       └── SetupWizard.vue      # 首次启动向导
+│
+├── locales/                     # 🌐 i18n 语言包 (Sprint 5 T-516)
+│   ├── zh-CN.json               # 简体中文
+│   └── en-US.json               # American English
 │
 ├── skills/                      # 🔑 内置基础技能 (随项目分发)
 │   ├── daily_summary/
