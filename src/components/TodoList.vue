@@ -1,8 +1,6 @@
 <template>
   <div class="todo-list">
-    <div v-if="todos.length === 0" class="empty-state">
-      还没有待办事项，快去对我说添加任务吧！
-    </div>
+    <div v-if="todos.length === 0" class="empty-state">{{ $t('todo.empty') }}</div>
     <div
       v-for="todo in sortedTodos"
       :key="todo.id"
@@ -27,6 +25,9 @@
 
 <script setup>
 import { computed } from 'vue';
+import { useI18n } from 'vue-i18n';
+
+const { t } = useI18n();
 
 const props = defineProps({
   todos: {
@@ -56,8 +57,8 @@ async function toggleStatus(todo) {
 }
 
 function getPriorityLabel(priority) {
-  const map = { low: '低', medium: '中', high: '高' };
-  return map[priority] || '中';
+  const map = { low: t('confirm_card.low'), medium: t('confirm_card.medium'), high: t('confirm_card.high') };
+  return map[priority] || t('confirm_card.medium');
 }
 </script>
 

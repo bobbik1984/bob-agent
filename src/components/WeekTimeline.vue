@@ -97,6 +97,9 @@
 
 <script setup>
 import { ref, computed, reactive, onMounted, onUnmounted } from 'vue';
+import { useI18n } from 'vue-i18n';
+
+const { t } = useI18n();
 
 const props = defineProps({
   weekEvents: { type: Array, default: () => [] }
@@ -320,7 +323,7 @@ function formatTimeRange(event) {
 }
 
 // ── 以今天为中心的 7 天 ──────────────────────────
-const weekdayNames = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+const weekdayNames = computed(() => t('timeline.days'));
 
 const days = computed(() => {
   const today = new Date();
@@ -341,7 +344,7 @@ const days = computed(() => {
 
     result.push({
       dateStr,
-      name: offset === 0 ? '今天' : weekdayNames[d.getDay()],
+      name: offset === 0 ? t('timeline.today') : weekdayNames.value[d.getDay()],
       dateLabel: `${d.getMonth()+1}/${d.getDate()}`,
       isToday: offset === 0,
       events: dayEvents,

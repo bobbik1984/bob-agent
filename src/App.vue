@@ -44,9 +44,9 @@
         <div class="sidebar-top">
           <button class="new-chat-btn btn btn-ghost" @click="createNewChat">
             <Plus :size="16" />
-            <span>新对话</span>
+            <span>{{ $t('chat.new_conversation') }}</span>
           </button>
-          <button class="theme-toggle-btn btn-icon" @click="toggleTheme" :title="currentTheme === 'dark' ? '切换到亮色模式' : '切换到暗色模式'">
+          <button class="theme-toggle-btn btn-icon" @click="toggleTheme" :title="currentTheme === 'dark' ? $t('nav.theme_to_light') : $t('nav.theme_to_dark')">
             <Sun v-if="currentTheme === 'dark'" :size="16" />
             <Moon v-else :size="16" />
           </button>
@@ -82,7 +82,7 @@
                   {{ conv.last_message ? (conv.last_role === 'assistant' ? 'Bob: ' : '') + conv.last_message : '\u00A0' }}
                 </div>
               </div>
-              <span class="delete-btn btn-icon" title="删除对话" @click.stop="requestDeleteChat(conv.id)">
+              <span class="delete-btn btn-icon" :title="$t('nav.delete_chat')" @click.stop="requestDeleteChat(conv.id)">
                 <X :size="12" />
               </span>
             </div>
@@ -156,7 +156,7 @@ import SetupWizard from './components/SetupWizard.vue';
 import { Inbox, Settings, Plus, X, Sun, Moon, ChevronLeft, ChevronRight } from 'lucide-vue-next';
 import { useI18n } from 'vue-i18n';
 
-const { locale } = useI18n();
+const { locale, t } = useI18n();
 
 // ── 状态 ─────────────────────────────────────────────
 const isSetupComplete = ref(false);
@@ -370,7 +370,7 @@ function timeAgo(dateStr) {
   const then = new Date(dateStr + 'Z').getTime(); // SQLite stores UTC
   const diff = Math.max(0, now - then);
   const mins = Math.floor(diff / 60000);
-  if (mins < 1) return '刚刚';
+  if (mins < 1) return t('app.just_now');
   if (mins < 60) return `${mins}m`;
   const hours = Math.floor(mins / 60);
   if (hours < 24) return `${hours}h`;

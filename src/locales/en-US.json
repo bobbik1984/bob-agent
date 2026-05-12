@@ -1,11 +1,16 @@
 {
   "app": {
-    "name": "bob-agent"
+    "name": "bob-agent",
+    "just_now": "just now"
   },
   "nav": {
     "chat": "Chat",
     "inbox": "Inbox",
-    "settings": "Settings"
+    "settings": "Settings",
+    "theme_to_light": "Switch to light mode",
+    "theme_to_dark": "Switch to dark mode",
+    "rename": "Rename",
+    "delete_chat": "Delete Chat"
   },
   "settings": {
     "title": "Settings",
@@ -62,7 +67,22 @@
     "tool_calling": "Calling tool",
     "drop_hint": "Drop files here",
     "empty_title": "Hi, I'm Bob",
-    "empty_subtitle": "How can I help you?"
+    "empty_subtitle": "How can I help you?",
+    "export_success": "Chat exported to: ",
+    "error_title": "Request Failed",
+    "drop_hint_full": "Drop files here / Track folder",
+    "parsing": "Parsing...",
+    "parse_event": "Parse as Event",
+    "attach_tooltip": "Attach / Paste Image",
+    "no_models": "No models available",
+    "mode_qa": "Q&A",
+    "mode_act": "Act",
+    "mode_qa_desc": "Q&A (Read-only for safety)",
+    "mode_act_desc": "Act (Allow execution)",
+    "global_access_tooltip": "When enabled, allows AI to read/modify system files outside the workspace (valid for current chat only)",
+    "global_access": "Global Files",
+    "export_tooltip": "Export Chat as Markdown",
+    "cost_tooltip": "Session Accumulated Cost"
   },
   "plugin": {
     "title": "Skills & Plugin Center",
@@ -77,5 +97,59 @@
   "tray": {
     "show": "Show bob-agent",
     "quit": "Quit"
+  },
+  "inbox": {
+    "title": "Calendar",
+    "loading": "Loading...",
+    "this_week": "This Week",
+    "todo_list": "To-Do List"
+  },
+  "setup": {
+    "welcome": "Welcome to bob-agent",
+    "subtitle": "Get started in just 2 steps",
+    "step1": "Step 1: Choose AI Provider",
+    "next": "Next →",
+    "step2": "Step 2: Enter API Key",
+    "ollama_desc": "Ollama local model does not require an API Key. Just ensure Ollama is running locally.",
+    "get_key_prefix": "Get your API Key from the ",
+    "get_key_suffix": " website and paste it below:",
+    "back": "← Back",
+    "finish": "Finish Setup"
+  },
+  "confirm_card": {
+    "new_todo": "New To-Do",
+    "new_event": "New Event",
+    "no_title": "Untitled",
+    "time": "Time: ",
+    "location": "Location: ",
+    "note": "Note: ",
+    "priority": "Priority: ",
+    "cancel": "Cancel",
+    "confirm": "Confirm & Save",
+    "no_time": "No time specified",
+    "to": "to",
+    "low": "Low",
+    "medium": "Medium",
+    "high": "High"
+  },
+  "todo": {
+    "empty": "No to-dos yet. Tell me to add a task!"
+  },
+  "timeline": {
+    "today": "Today",
+    "days": [
+      "Sun",
+      "Mon",
+      "Tue",
+      "Wed",
+      "Thu",
+      "Fri",
+      "Sat"
+    ],
+    "delete_event": "Delete Event",
+    "update_time_failed": "Failed to update time"
+  },
+  "common": {
+    "please_select": "Please select"
   }
 }

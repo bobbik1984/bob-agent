@@ -3,24 +3,22 @@
     <div class="inbox-content-wrapper">
       <div class="inbox-header">
         <h2 class="inbox-title">
-          <Calendar :size="24" class="title-icon" />
-          日程
-        </h2>
+          <Calendar :size="24" class="title-icon" />{{ $t('inbox.title') }}</h2>
       </div>
 
       <div v-if="isLoading" class="loading-state">
         <Loader2 :size="24" class="animate-spin" />
-        <span>加载中...</span>
+        <span>{{ $t('inbox.loading') }}</span>
       </div>
 
       <div v-else class="inbox-content">
         <div class="section">
-          <h3 class="section-title">本周日程</h3>
+          <h3 class="section-title">{{ $t('inbox.this_week') }}</h3>
           <WeekTimeline :weekEvents="events" />
         </div>
 
         <div class="section">
-          <h3 class="section-title">待办清单</h3>
+          <h3 class="section-title">{{ $t('inbox.todo_list') }}</h3>
           <TodoList :todos="todos" @update-status="onTodoStatusUpdate" />
         </div>
       </div>
@@ -30,9 +28,12 @@
 
 <script setup>
 import { ref, onMounted } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { Calendar, Loader2 } from 'lucide-vue-next';
 import WeekTimeline from '../components/WeekTimeline.vue';
 import TodoList from '../components/TodoList.vue';
+
+const { t } = useI18n();
 
 const isLoading = ref(true);
 const events = ref([]);

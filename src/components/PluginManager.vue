@@ -2,14 +2,14 @@
   <div v-if="isOpen" class="modal-overlay" @click.self="close">
     <div class="pm-modal">
       <div class="pm-header">
-        <h2>技能与插件中心</h2>
+        <h2>{{ $t('plugin.title') }}</h2>
         <button class="pm-close" @click="close"><X :size="16" /></button>
       </div>
 
       <div class="pm-body">
         <div v-if="loading" class="pm-loading">
           <Loader2 class="pm-spinner" :size="18" />
-          <span>加载中...</span>
+          <span>{{ $t('plugin.loading') }}</span>
         </div>
 
         <template v-else>
@@ -37,11 +37,11 @@
                   v-if="plugin.type === 'engine' && !plugin.installed && !installing[plugin.id]"
                   class="pm-install-btn"
                   @click.stop="installPlugin(plugin.id)"
-                >安装</button>
+                >{{ $t('plugin.install') }}</button>
                 <span v-else-if="installing[plugin.id]" class="pm-status installing">
-                  <Loader2 class="pm-spinner" :size="12" /> 安装中
+                  <Loader2 class="pm-spinner" :size="12" /> {{ $t('plugin.installing') }}
                 </span>
-                <span v-else class="pm-status ready">已就绪</span>
+                <span v-else class="pm-status ready">{{ $t('plugin.ready') }}</span>
                 
                 <ChevronRight :size="14" class="pm-chevron" />
               </div>
@@ -67,6 +67,8 @@
 <script setup>
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import { X, Loader2, ChevronRight } from 'lucide-vue-next';
+
+const { t } = useI18n();
 
 const props = defineProps({ isOpen: Boolean });
 const emit = defineEmits(['close']);

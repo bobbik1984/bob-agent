@@ -712,9 +712,9 @@ app.whenReady().then(() => {
   tray = new Tray(nativeImage.createFromPath(iconPath).resize({ width: 16, height: 16 }));
   
   const contextMenu = Menu.buildFromTemplate([
-    { label: '显示 bob-agent', click: () => mainWindow.show() },
+    { label: 'Show bob-agent', click: () => mainWindow.show() },
     { type: 'separator' },
-    { label: '退出', click: () => {
+    { label: 'Quit', click: () => {
         isQuitting = true;
         app.quit();
       }

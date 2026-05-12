@@ -6,40 +6,43 @@
         <Calendar v-else :size="24" />
       </div>
       <div class="card-title-area">
-        <div class="card-type">{{ isTodo ? '新增待办' : '新增日程' }}</div>
-        <div class="card-title">{{ event.title || '无标题' }}</div>
+        <div class="card-type">{{ isTodo ? $t('confirm_card.new_todo') : $t('confirm_card.new_event') }}</div>
+        <div class="card-title">{{ event.title || $t('confirm_card.no_title') }}</div>
       </div>
     </div>
 
     <div class="card-body">
       <div class="info-row" v-if="!isTodo && event.start_time">
-        <span class="info-label">时间：</span>
+        <span class="info-label">{{ $t('confirm_card.time') }}</span>
         <span class="info-value">{{ formattedTime }}</span>
       </div>
       <div class="info-row" v-if="event.location">
-        <span class="info-label">地点：</span>
+        <span class="info-label">{{ $t('confirm_card.location') }}</span>
         <span class="info-value">{{ event.location }}</span>
       </div>
       <div class="info-row" v-if="event.description">
-        <span class="info-label">备注：</span>
+        <span class="info-label">{{ $t('confirm_card.note') }}</span>
         <span class="info-value">{{ event.description }}</span>
       </div>
       <div class="info-row" v-if="event.priority">
-        <span class="info-label">优先级：</span>
+        <span class="info-label">{{ $t('confirm_card.priority') }}</span>
         <span class="info-value priority-badge" :class="event.priority">{{ priorityLabel }}</span>
       </div>
     </div>
 
     <div class="card-footer">
-      <button class="btn btn-ghost" @click="$emit('cancel')">取消</button>
-      <button class="btn btn-primary" @click="$emit('confirm', event)">确认保存</button>
+      <button class="btn btn-ghost" @click="$emit('cancel')">{{ $t('confirm_card.cancel') }}</button>
+      <button class="btn btn-primary" @click="$emit('confirm', event)">{{ $t('confirm_card.confirm') }}</button>
     </div>
   </div>
 </template>
 
 <script setup>
 import { computed } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { CheckSquare, Calendar } from 'lucide-vue-next';
+
+const { t } = useI18n();
 
 const props = defineProps({
   event: {
@@ -53,7 +56,7 @@ defineEmits(['confirm', 'cancel']);
 const isTodo = computed(() => props.event.type === 'todo');
 
 const formattedTime = computed(() => {
-  if (!props.event.start_time) return '未指定时间';
+  if (!props.event.start_time) return t('confirm_card.no_time');
   const start = new Date(props.event.start_time);
   let timeStr = start.toLocaleString('zh-CN', {
     month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
@@ -64,15 +67,15 @@ const formattedTime = computed(() => {
     if (start.toDateString() === end.toDateString()) {
       timeStr += ` - ${end.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}`;
     } else {
-      timeStr += ` 至 ${end.toLocaleString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}`;
+      timeStr += ` ${t('confirm_card.to')} ${end.toLocaleString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}`;
     }
   }
   return timeStr;
 });
 
 const priorityLabel = computed(() => {
-  const map = { low: '低', medium: '中', high: '高' };
-  return map[props.event.priority] || '中';
+  const map = { low: t('confirm_card.low'), medium: t('confirm_card.medium'), high: t('confirm_card.high') };
+  return map[props.event.priority] || t('confirm_card.medium');
 });
 </script>
 

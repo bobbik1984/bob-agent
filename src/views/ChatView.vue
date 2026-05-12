@@ -54,7 +54,7 @@
           <div v-if="msg._isError" class="error-card">
             <div class="error-icon">!</div>
             <div class="error-body">
-              <div class="error-title">请求失败</div>
+              <div class="error-title">{{ $t('chat.error_title') }}</div>
               <div class="error-detail">{{ msg.content }}</div>
             </div>
           </div>
@@ -114,7 +114,7 @@
     >
       <div class="drop-content">
         <FileUp :size="48" class="drop-icon" />
-        <span>添加附件 / 关注文件夹</span>
+        <span>{{ $t('chat.drop_hint_full') }}</span>
       </div>
     </div>
 
@@ -129,13 +129,13 @@
         >
           <Calendar v-if="!isParsing" :size="14" />
           <Loader2 v-else :size="14" class="animate-spin" />
-          <span>{{ isParsing ? '解析中...' : '解析为日程' }}</span>
+          <span>{{ isParsing ? $t('chat.parsing') : $t('chat.parse_event') }}</span>
         </button>
       </div>
       <div class="input-row">
         <!-- 图片预览 -->
         <div v-if="pendingImage" class="inline-image-preview">
-          <img :src="'data:image/png;base64,' + pendingImage" alt="待发送图片" />
+          <img :src="'data:image/png;base64,' + pendingImage" alt="Pending Image" />
           <button class="image-remove-inline btn-icon" @click="pendingImage = null"><X :size="10" /></button>
         </div>
         <!-- 文本输入 -->
@@ -143,7 +143,7 @@
           ref="inputRef"
           v-model="inputText"
           class="chat-input"
-          placeholder="输入消息..."
+          :placeholder="$t('chat.input_placeholder')"
           rows="3"
           @keydown="handleKeydown"
           @input="autoResize"
@@ -151,7 +151,7 @@
         ></textarea>
         <!-- 底部工具栏 -->
         <div class="input-toolbar">
-          <button class="toolbar-item attach-btn" title="附件 / 粘贴图片" @click="handleAttach">
+          <button class="toolbar-item attach-btn" :title="$t('chat.attach_tooltip')" @click="handleAttach">
             <Paperclip :size="14" />
           </button>
           <!-- 模型切换器 -->
@@ -174,7 +174,7 @@
                 <span class="model-option-label">{{ m.label }}</span>
               </button>
               <div v-if="availableModels.length === 0" class="model-option-empty">
-                暂无可用模型
+                {{ $t('chat.no_models') }}
               </div>
             </div>
           </div>
@@ -184,43 +184,43 @@
             <button class="toolbar-item model-indicator" @click="showAgentModeSwitcher = !showAgentModeSwitcher">
               <Shield v-if="agentMode === 'insight'" :size="12" style="color: var(--text-tertiary);" />
               <Zap v-else :size="12" style="color: var(--accent-primary);" />
-              <span>{{ agentMode === 'insight' ? '问答' : '干活' }}</span>
+              <span>{{ agentMode === 'insight' ? $t('chat.mode_qa') : $t('chat.mode_act') }}</span>
               <ChevronUp :size="10" class="chevron-icon" />
             </button>
             <div v-if="showAgentModeSwitcher" class="model-popup">
               <button class="model-option" :class="{ active: agentMode === 'insight' }" @click="agentMode = 'insight'; showAgentModeSwitcher = false">
                 <Shield :size="14" style="margin-right: 8px;" />
-                <span class="model-option-label">问答 (只读防误触)</span>
+                <span class="model-option-label">{{ $t('chat.mode_qa_desc') }}</span>
               </button>
               <button class="model-option" :class="{ active: agentMode === 'yolo' }" @click="agentMode = 'yolo'; showAgentModeSwitcher = false">
                 <Zap :size="14" style="margin-right: 8px;" />
-                <span class="model-option-label">干活 (允许执行)</span>
+                <span class="model-option-label">{{ $t('chat.mode_act_desc') }}</span>
               </button>
             </div>
           </div>
 
           <!-- 全局权限开关 -->
-          <label class="toolbar-item global-access-toggle" :class="{ active: globalFileAccess }" title="开启后，允许AI读取或修改工作目录外的系统文件 (仅限当前对话有效)">
+          <label class="toolbar-item global-access-toggle" :class="{ active: globalFileAccess }" :title="$t('chat.global_access_tooltip')">
             <input type="checkbox" v-model="globalFileAccess" style="display: none;" />
             <Unlock v-if="globalFileAccess" :size="12" style="color: var(--accent-primary);" />
             <Lock v-else :size="12" style="opacity: 0.5;" />
-            <span class="global-access-text">全局文件</span>
+            <span class="global-access-text">{{ $t('chat.global_access') }}</span>
           </label>
 
           <div class="toolbar-spacer"></div>
           <!-- 导出按钮 -->
-          <button class="toolbar-item" @click="exportConversation" title="导出对话为 Markdown">
+          <button class="toolbar-item" @click="exportConversation" :title="$t('chat.export_tooltip')">
             <Download :size="13" />
           </button>
           <!-- 计费指示器 -->
-          <span class="toolbar-item cost-indicator" title="本次对话累计费用">
+          <span class="toolbar-item cost-indicator" :title="$t('chat.cost_tooltip')">
             ¥{{ sessionCost.toFixed(4) }}
           </span>
           <button
             v-if="isStreaming"
             class="action-btn stop-btn"
             @click="stopGeneration"
-            title="停止生成"
+            :title="$t('chat.stop')"
           >
             <span class="icon-stop"></span>
           </button>
@@ -229,7 +229,7 @@
             class="action-btn send-btn"
             :disabled="!canSend"
             @click="sendMessage"
-            title="发送"
+            :title="$t('chat.send')"
           >
             <span class="icon-send"></span>
           </button>

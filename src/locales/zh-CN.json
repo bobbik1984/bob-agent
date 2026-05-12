@@ -1,11 +1,16 @@
 {
   "app": {
-    "name": "bob-agent"
+    "name": "bob-agent",
+    "just_now": "刚刚"
   },
   "nav": {
     "chat": "对话",
     "inbox": "收件箱",
-    "settings": "设置"
+    "settings": "设置",
+    "theme_to_light": "切换到亮色模式",
+    "theme_to_dark": "切换到暗色模式",
+    "rename": "重命名",
+    "delete_chat": "删除对话"
   },
   "settings": {
     "title": "设置",
@@ -62,7 +67,22 @@
     "tool_calling": "正在调用工具",
     "drop_hint": "拖放文件到这里",
     "empty_title": "你好，我是 Bob",
-    "empty_subtitle": "有什么可以帮你的？"
+    "empty_subtitle": "有什么可以帮你的？",
+    "export_success": "对话已导出到：",
+    "error_title": "请求失败",
+    "drop_hint_full": "添加附件 / 关注文件夹",
+    "parsing": "解析中...",
+    "parse_event": "解析为日程",
+    "attach_tooltip": "附件 / 粘贴图片",
+    "no_models": "暂无可用模型",
+    "mode_qa": "问答",
+    "mode_act": "干活",
+    "mode_qa_desc": "问答 (只读防误触)",
+    "mode_act_desc": "干活 (允许执行)",
+    "global_access_tooltip": "开启后，允许AI读取或修改工作目录外的系统文件 (仅限当前对话有效)",
+    "global_access": "全局文件",
+    "export_tooltip": "导出对话为 Markdown",
+    "cost_tooltip": "本次对话累计费用"
   },
   "plugin": {
     "title": "技能与插件中心",
@@ -77,5 +97,59 @@
   "tray": {
     "show": "显示 bob-agent",
     "quit": "退出"
+  },
+  "inbox": {
+    "title": "日程",
+    "loading": "加载中...",
+    "this_week": "本周日程",
+    "todo_list": "待办清单"
+  },
+  "setup": {
+    "welcome": "欢迎使用 bob-agent",
+    "subtitle": "只需两步即可开始使用",
+    "step1": "第一步：选择 AI 服务商",
+    "next": "下一步 →",
+    "step2": "第二步：填写 API Key",
+    "ollama_desc": "Ollama 本地模型无需 API Key，确保 Ollama 已在本机运行即可。",
+    "get_key_prefix": "请到 ",
+    "get_key_suffix": " 官网获取 API Key，粘贴到下方：",
+    "back": "← 返回",
+    "finish": "完成设置"
+  },
+  "confirm_card": {
+    "new_todo": "新增待办",
+    "new_event": "新增日程",
+    "no_title": "无标题",
+    "time": "时间：",
+    "location": "地点：",
+    "note": "备注：",
+    "priority": "优先级：",
+    "cancel": "取消",
+    "confirm": "确认保存",
+    "no_time": "未指定时间",
+    "to": "至",
+    "low": "低",
+    "medium": "中",
+    "high": "高"
+  },
+  "todo": {
+    "empty": "还没有待办事项，快去对我说添加任务吧！"
+  },
+  "timeline": {
+    "today": "今天",
+    "days": [
+      "周日",
+      "周一",
+      "周二",
+      "周三",
+      "周四",
+      "周五",
+      "周六"
+    ],
+    "delete_event": "删除事件",
+    "update_time_failed": "更新时间失败"
+  },
+  "common": {
+    "please_select": "请选择"
   }
 }

@@ -3,13 +3,13 @@
     <div class="wizard-card card">
       <div class="wizard-header">
         <Hexagon :size="56" class="wizard-logo" />
-        <h1 class="wizard-title">欢迎使用 bob-agent</h1>
-        <p class="wizard-subtitle">只需两步即可开始使用</p>
+        <h1 class="wizard-title">{{ $t('setup.welcome') }}</h1>
+        <p class="wizard-subtitle">{{ $t('setup.subtitle') }}</p>
       </div>
 
       <!-- Step 1: 选择服务商 -->
       <div v-if="step === 1" class="wizard-step animate-slide-up">
-        <h3 class="step-title">第一步：选择 AI 服务商</h3>
+        <h3 class="step-title">{{ $t('setup.step1') }}</h3>
         <div class="provider-grid">
           <button
             v-for="p in providers"
@@ -23,21 +23,15 @@
             <span class="provider-desc">{{ p.desc }}</span>
           </button>
         </div>
-        <button class="btn btn-primary wizard-next" :disabled="!selectedProvider" @click="step = 2">
-          下一步 →
-        </button>
+        <button class="btn btn-primary wizard-next" :disabled="!selectedProvider" @click="step = 2">{{ $t('setup.next') }}</button>
       </div>
 
       <!-- Step 2: 填写 API Key -->
       <div v-if="step === 2" class="wizard-step animate-slide-up">
-        <h3 class="step-title">第二步：填写 API Key</h3>
-        <p class="step-desc" v-if="selectedProvider === 'ollama'">
-          Ollama 本地模型无需 API Key，确保 Ollama 已在本机运行即可。
-        </p>
+        <h3 class="step-title">{{ $t('setup.step2') }}</h3>
+        <p class="step-desc" v-if="selectedProvider === 'ollama'">{{ $t('setup.ollama_desc') }}</p>
         <template v-else>
-          <p class="step-desc">
-            请到 {{ providerName }} 官网获取 API Key，粘贴到下方：
-          </p>
+          <p class="step-desc">{{ $t('setup.get_key_prefix') }}{{ providerName }}{{ $t('setup.get_key_suffix') }}</p>
           <input
             v-model="apiKey"
             type="password"
@@ -47,7 +41,7 @@
           />
         </template>
         <div class="wizard-actions">
-          <button class="btn btn-ghost" @click="step = 1">← 返回</button>
+          <button class="btn btn-ghost" @click="step = 1">{{ $t('setup.back') }}</button>
           <button
             class="btn btn-primary"
             :disabled="selectedProvider !== 'ollama' && !apiKey.trim()"
@@ -66,6 +60,7 @@ import { ref, computed, defineEmits } from 'vue';
 import { Hexagon, Brain, Globe, Laptop, Settings } from 'lucide-vue-next';
 
 const emit = defineEmits(['complete']);
+const { t } = useI18n();
 
 const step = ref(1);
 const selectedProvider = ref('');
