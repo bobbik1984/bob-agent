@@ -58,8 +58,13 @@
               <div class="error-detail">{{ msg.content }}</div>
             </div>
           </div>
-          <!-- 消息内容 -->
-          <div v-else class="message-content selectable" v-html="renderMarkdown(msg.content)"></div>
+          <!-- 消息内容（block 数组渲染：text + file-card 交替）-->
+          <div v-else class="message-content selectable" @click="onMessageLinkClick">
+            <template v-for="(block, bi) in renderMessageBlocks(msg.content)" :key="bi">
+              <div v-if="block.type === 'html'" v-html="block.content"></div>
+              <FileCard v-else-if="block.type === 'file'" :filePath="block.path" />
+            </template>
+          </div>
           <!-- 图片预览 -->
           <div v-if="msg.image_base64" class="message-image">
             <img :src="'data:image/png;base64,' + msg.image_base64" alt="用户图片" />
@@ -270,6 +275,7 @@ marked.setOptions({ breaks: true, gfm: true });
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue';
 import { Sparkles, FileText, Camera, Calendar, User, ChevronRight, ChevronDown, ChevronUp, X, FileUp, Paperclip, Loader2, Shield, Zap, Lock, Unlock, Download } from 'lucide-vue-next';
 import ConfirmCard from '../components/ConfirmCard.vue';
+import FileCard from '../components/FileCard.vue';
 
 const props = defineProps({
   conversationId: String,
@@ -593,6 +599,52 @@ function renderMarkdown(text) {
   const cleaned = text.replace(/<calendar_event>[\s\S]*?(?:<\/calendar_event>|$)/gi, '');
   const rawHtml = marked.parse(cleaned);
   return DOMPurify.sanitize(rawHtml);
+}
+
+// ── 消息 Block 渲染（拆分文件链接为 FileCard）────────
+// 正则匹配 file:// 链接或 Windows 绝对路径的 <a> 标签
+const FILE_LINK_RE = /<a\s+[^>]*href="((?:file:\/\/\/[^"]+)|(?:[A-Za-z]:[\\][^"]+))"[^>]*>[^<]*<\/a>/gi;
+
+function renderMessageBlocks(text) {
+  if (!text) return [{ type: 'html', content: '' }];
+  const html = renderMarkdown(text);
+
+  // 如果没有文件链接，直接返回单个 HTML block（快速路径）
+  FILE_LINK_RE.lastIndex = 0;
+  if (!FILE_LINK_RE.test(html)) {
+    return [{ type: 'html', content: html }];
+  }
+
+  // 拆分 HTML 为 text blocks 和 file-card blocks
+  const blocks = [];
+  let lastIndex = 0;
+  FILE_LINK_RE.lastIndex = 0;
+  let match;
+
+  while ((match = FILE_LINK_RE.exec(html)) !== null) {
+    // 匹配前的 HTML 文本
+    if (match.index > lastIndex) {
+      blocks.push({ type: 'html', content: html.slice(lastIndex, match.index) });
+    }
+    // 文件卡片 block
+    let filePath = match[1];
+    // 清理 file:/// 前缀
+    if (filePath.startsWith('file:///')) {
+      filePath = filePath.replace('file:///', '');
+    }
+    try { filePath = decodeURIComponent(filePath); } catch(e) {}
+    // 把正斜杠转成反斜杠（Windows 路径）
+    filePath = filePath.replace(/\//g, '\\');
+    blocks.push({ type: 'file', path: filePath });
+    lastIndex = match.index + match[0].length;
+  }
+
+  // 剩余的 HTML 文本
+  if (lastIndex < html.length) {
+    blocks.push({ type: 'html', content: html.slice(lastIndex) });
+  }
+
+  return blocks;
 }
 
 // ── 附件/图片处理 ────────────────────────────────────

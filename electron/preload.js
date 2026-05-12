@@ -78,6 +78,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   updateTheme: (theme) => ipcRenderer.invoke('system:update-theme', theme),
   exportMarkdown: (content, defaultName) => ipcRenderer.invoke('system:export-md', content, defaultName),
   openFile: (filePath) => ipcRenderer.invoke('system:open-file', filePath),
+  showInFolder: (filePath) => ipcRenderer.invoke('system:show-in-folder', filePath),
+  getFileMeta: (filePath) => ipcRenderer.invoke('system:file-meta', filePath),
 
   // ── Plugins ────────────────────────────────────────
   getPlugins: () => ipcRenderer.invoke('plugin:get-list'),

@@ -126,6 +126,7 @@ phases:
       - { text: "T-634: 语义化文件夹速读 (folder-tracker.js)", status: done }
       - { text: "T-635-mem: tracked_folders 持久化 — SQLite", status: done }
       - { text: "T-636: Settings 文件夹管理面板", status: done }
+      - { text: "T-637: 知识库初始化向导 (成本估算与免费模型推荐)", status: todo }
       # 6.8 安全加固
       - { text: "T-630-sec: XSS 消毒 (DOMPurify 接入 ChatView)", status: done }
       - { text: "T-631-sec: 启用 Renderer Sandbox", status: done, assignee: jules }
