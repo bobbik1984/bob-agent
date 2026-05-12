@@ -157,7 +157,7 @@ function createWindow() {
     titleBarOverlay: {
       color: '#141414',
       symbolColor: '#a0a0a0',
-      height: 36,
+      height: 35, // Changed from 36 to 35 to prevent covering the 1px bottom border
     },
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -657,6 +657,18 @@ function registerIPCHandlers() {
     const { shell } = require('electron');
     const err = await shell.openPath(filePath);
     if (err) throw new Error(err);
+    return true;
+  });
+
+  // ── 主题动态更新 ─────────────────────────────────────
+  ipcMain.handle('system:update-theme', async (_event, theme) => {
+    if (mainWindow) {
+      if (theme === 'dark') {
+        mainWindow.setTitleBarOverlay({ color: '#141414', symbolColor: '#a0a0a0' });
+      } else {
+        mainWindow.setTitleBarOverlay({ color: '#ffffff', symbolColor: '#4b5563' });
+      }
+    }
     return true;
   });
 

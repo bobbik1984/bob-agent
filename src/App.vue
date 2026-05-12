@@ -212,10 +212,10 @@ async function toggleTheme() {
   }
 }
 
-const bottomNavItems = [
-  { id: 'inbox', icon: Inbox, label: '日程' },
-  { id: 'settings', icon: Settings, label: '设置' },
-];
+const bottomNavItems = computed(() => [
+  { id: 'inbox', icon: Inbox, label: t('nav.inbox') },
+  { id: 'settings', icon: Settings, label: t('nav.settings') },
+]);
 
 const modelInfo = computed(() => {
   if (!currentModel.value) return { name: '未配置', logo: null };

@@ -99,7 +99,7 @@
 import { ref, computed, reactive, onMounted, onUnmounted } from 'vue';
 import { useI18n } from 'vue-i18n';
 
-const { t } = useI18n();
+const { t, tm } = useI18n();
 
 const props = defineProps({
   weekEvents: { type: Array, default: () => [] }
@@ -323,7 +323,7 @@ function formatTimeRange(event) {
 }
 
 // ── 以今天为中心的 7 天 ──────────────────────────
-const weekdayNames = computed(() => t('timeline.days'));
+const weekdayNames = computed(() => tm('timeline.days'));
 
 const days = computed(() => {
   const today = new Date();
