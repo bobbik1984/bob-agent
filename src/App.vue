@@ -299,10 +299,6 @@ function switchConversation(id) {
   activeConversationId.value = id;
 }
 
-function onConfigChanged(newConfig) {
-  currentModel.value = newConfig.model || '';
-}
-
 const showDeleteModal = ref(false);
 const pendingDeleteId = ref(null);
 

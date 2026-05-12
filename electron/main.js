@@ -642,16 +642,6 @@ function registerIPCHandlers() {
     return null;
   });
 
-  ipcMain.handle('system:update-theme', async (_event, theme) => {
-    if (mainWindow) {
-      mainWindow.setTitleBarOverlay({
-        color: theme === 'light' ? '#f3f4f6' : '#141414',
-        symbolColor: theme === 'light' ? '#111827' : '#a0a0a0',
-      });
-    }
-    return { ok: true };
-  });
-
   // ── 对话导出 (.md) ────────────────────────────────────
   ipcMain.handle('system:export-md', async (_event, content, defaultName) => {
     const { dialog } = require('electron');
