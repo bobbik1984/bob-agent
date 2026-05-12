@@ -327,6 +327,9 @@ function applyTheme(theme, persist = true) {
   if (persist) {
     saveConfig('theme', theme);
   }
+  if (window.electronAPI.updateTheme) {
+    window.electronAPI.updateTheme(theme);
+  }
 }
 
 const config = ref({

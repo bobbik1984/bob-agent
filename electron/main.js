@@ -189,6 +189,20 @@ function createWindow() {
   } else {
     mainWindow.loadFile(path.join(__dirname, '..', 'dist', 'index.html'));
   }
+
+  // 窗口加载完成后，根据数据库里的主题强制设置一次 titleBarOverlay
+  mainWindow.webContents.on('did-finish-load', async () => {
+    try {
+      const theme = await db.getConfig('theme') || 'dark';
+      if (theme === 'dark') {
+        mainWindow.setTitleBarOverlay({ color: '#141414', symbolColor: '#a0a0a0' });
+      } else {
+        mainWindow.setTitleBarOverlay({ color: '#ffffff', symbolColor: '#4b5563' });
+      }
+    } catch (err) {
+      console.error('[Main] Failed to init titlebar overlay color', err);
+    }
+  });
 }
 
 // ─── 安全状态 ───────────────────────────────────────────
@@ -662,10 +676,13 @@ function registerIPCHandlers() {
 
   // ── 主题动态更新 ─────────────────────────────────────
   ipcMain.handle('system:update-theme', async (_event, theme) => {
+    console.log('[ThemeUpdate] Received request to update theme:', theme);
     if (mainWindow) {
       if (theme === 'dark') {
+        console.log('[ThemeUpdate] Setting titleBarOverlay to dark (#141414)');
         mainWindow.setTitleBarOverlay({ color: '#141414', symbolColor: '#a0a0a0' });
       } else {
+        console.log('[ThemeUpdate] Setting titleBarOverlay to light (#ffffff)');
         mainWindow.setTitleBarOverlay({ color: '#ffffff', symbolColor: '#4b5563' });
       }
     }
