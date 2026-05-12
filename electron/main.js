@@ -24,6 +24,7 @@ const { MCPClientManager } = require('./services/mcp-client');
 // ─── 全局单例 ───────────────────────────────────────────
 let mainWindow = null;
 let llmClient = null;
+let clerkClient = null; // T-519 新增：文员模型
 let toolRegistry = null;
 let pluginManager = null;
 let memoryEngine = null;
@@ -225,6 +226,12 @@ function initServices() {
   const provider = db.getConfig('provider') || 'deepseek';
   const apiKey = db.getConfig('apiKey') || '';
   const model = db.getConfig('model') || '';
+  const baseURL = db.getConfig('baseURL') || '';
+
+  const clerkProvider = db.getConfig('clerkProvider') || 'deepseek';
+  const clerkApiKey = db.getConfig('clerkApiKey') || '';
+  const clerkModel = db.getConfig('clerkModel') || '';
+  const clerkBaseURL = db.getConfig('clerkBaseURL') || '';
 
   const externalSkillsDir = db.getConfig('externalSkillsDir') || null;
   toolRegistry = new ToolRegistry();
@@ -232,12 +239,15 @@ function initServices() {
 
   pluginManager = new PluginManager(toolRegistry);
 
-  llmClient = new LLMClient({ provider, apiKey, model, registry: toolRegistry });
+  llmClient = new LLMClient({ provider, apiKey, model, baseURL, registry: toolRegistry });
+  clerkClient = new LLMClient({ provider: clerkProvider, apiKey: clerkApiKey, model: clerkModel, baseURL: clerkBaseURL, registry: toolRegistry });
   
-  memoryEngine = new MemoryEngine(path.join(__dirname, '..'), llmClient, db);
+  const workerClient = clerkClient.isConfigured() ? clerkClient : llmClient;
+
+  memoryEngine = new MemoryEngine(path.join(__dirname, '..'), workerClient, db);
   global.memoryEngine = memoryEngine;
 
-  folderTracker = new FolderTracker(path.join(__dirname, '..', 'data', 'wiki'), llmClient, db);
+  folderTracker = new FolderTracker(path.join(__dirname, '..', 'data', 'wiki'), workerClient, db);
   global.folderTracker = folderTracker;
 
   // MCP Client — 连接外部 MCP Servers
@@ -284,9 +294,11 @@ function registerIPCHandlers() {
   });
 
   // ── LLM ──────────────────────────────────────────────
-  ipcMain.handle('llm:chat', async (_event, messages) => {
+  ipcMain.handle('llm:chat', async (_event, messages, options = {}) => {
     const { globalFileAccess, agentMode } = global.securityState;
-    if (!llmClient || !llmClient.isConfigured()) {
+    const client = options.useClerk ? clerkClient : llmClient;
+
+    if (!client || !client.isConfigured()) {
       return { error: 'LLM 未配置，请先在设置中填写 API Key' };
     }
 
@@ -296,7 +308,7 @@ function registerIPCHandlers() {
         ? messages
         : [{ role: 'system', content: buildSystemPrompt(globalFileAccess) }, ...messages];
 
-      const stream = llmClient.chatStream(fullMessages, agentMode);
+      const stream = client.chatStream(fullMessages, agentMode);
       let fullContent = '';
       let thinkingContent = '';
       let usageData = null;
@@ -380,7 +392,12 @@ function registerIPCHandlers() {
     return { ok: true };
   });
 
-  ipcMain.handle('llm:models', async () => {
+  ipcMain.handle('llm:models', async (_event, provider) => {
+    if (provider) {
+      // 临时创建一个无 apiKey 的实例，仅用于获取该 provider 下的模型列表
+      const tempClient = new LLMClient({ provider });
+      return tempClient.getAvailableModels();
+    }
     return llmClient?.getAvailableModels() || [];
   });
 
@@ -598,13 +615,33 @@ function registerIPCHandlers() {
 
   ipcMain.handle('config:set', async (_event, key, value) => {
     db.setConfig(key, value);
-    // 配置变更时重建 LLM Client
-    if (['provider', 'apiKey', 'model'].includes(key)) {
+    // 配置变更时重建对应的 LLM Client
+    if (['provider', 'apiKey', 'model', 'baseURL'].includes(key)) {
       const provider = db.getConfig('provider') || 'deepseek';
       const apiKey = db.getConfig('apiKey') || '';
       const model = db.getConfig('model') || '';
-      llmClient = new LLMClient({ provider, apiKey, model, registry: toolRegistry });
+      const baseURL = db.getConfig('baseURL') || '';
+      llmClient = new LLMClient({ provider, apiKey, model, baseURL, registry: toolRegistry });
+      
+      // 更新内存依赖
+      const workerClient = (clerkClient && clerkClient.isConfigured()) ? clerkClient : llmClient;
+      if (memoryEngine) memoryEngine.llmClient = workerClient;
+      if (folderTracker) folderTracker.llmClient = workerClient;
     }
+    
+    if (['clerkProvider', 'clerkApiKey', 'clerkModel', 'clerkBaseURL'].includes(key)) {
+      const provider = db.getConfig('clerkProvider') || 'deepseek';
+      const apiKey = db.getConfig('clerkApiKey') || '';
+      const model = db.getConfig('clerkModel') || '';
+      const baseURL = db.getConfig('clerkBaseURL') || '';
+      clerkClient = new LLMClient({ provider, apiKey, model, baseURL, registry: toolRegistry });
+      
+      // 更新内存依赖
+      const workerClient = clerkClient.isConfigured() ? clerkClient : llmClient;
+      if (memoryEngine) memoryEngine.llmClient = workerClient;
+      if (folderTracker) folderTracker.llmClient = workerClient;
+    }
+    
     return { ok: true };
   });
 
@@ -613,6 +650,7 @@ function registerIPCHandlers() {
     if (!config) return config;
     const safeConfig = { ...config };
     delete safeConfig.apiKey;
+    delete safeConfig.clerkApiKey;
     return safeConfig;
   });
 

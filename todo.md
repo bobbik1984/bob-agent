@@ -44,10 +44,10 @@
   - [x] T-518a: FileCard.vue 基础组件 + T-518b: system:file-meta IPC + T-518c: ChatView block 渲染
   - [x] T-518d: 图片缩略图 (nativeImage) + T-518e: LLM System Prompt 格式引导
 - [ ] T-519: 双模型架构 (主力 + 文员) — 后台杂活使用独立廉价模型（如 doubao-1.6），与对话模型解耦
-  - [ ] T-519a: SettingsView 新增"后台模型"选择器
-  - [ ] T-519b: main.js 初始化 clerkClient，注入到 folder-tracker / memory-engine
-  - [ ] T-519c: Model Registry 对齐 doubao-1.6 API 信息
-  - [ ] T-519d: 文件夹 Wiki 增强 — 文员模型可选读取文件前 2KB
+  - [x] T-519a: SettingsView 新增"后台模型"选择器
+  - [x] T-519b: main.js 初始化 clerkClient，注入到 folder-tracker / memory-engine
+  - [x] T-519c: Model Registry 对齐 doubao-1.6 API 信息
+  - [x] T-519d: 文件夹 Wiki 增强 — 文员模型可选读取文件前 2KB
 - [ ] T-520: 工具凭证管理 (Tool Credential Store) — 消灭 .env 硬依赖，打包前必须完成
   - [ ] T-520a: BaseTool 新增 requiredCredentials 声明
   - [ ] T-520b: Credential Store (db + safeStorage 加密)

@@ -7,12 +7,13 @@
         {{ $t('settings.title') }}
       </h2>
 
-      <!-- AI 模型配置 -->
+      <!-- AI 模型配置 - 常规动力 -->
       <section class="settings-section card">
         <h3 class="section-title">
-          <Cpu :size="16" class="section-icon" />
-          {{ $t('settings.ai_model') }}
+          <Monitor :size="16" class="section-icon" />
+          {{ $t('settings.ai_model') }} - 常规动力
         </h3>
+        <p class="section-desc" style="margin-bottom: 16px;">用于处理日常对话和高难度逻辑推理的主力模型。</p>
 
         <div class="form-group">
           <label class="form-label">{{ $t('settings.provider') }}</label>
@@ -59,13 +60,77 @@
 
         <!-- 连接测试 -->
         <div class="test-section">
-          <button class="btn btn-ghost" @click="testConnection" :disabled="isTesting">
+          <button class="btn btn-ghost" @click="testConnection('main')" :disabled="isTesting">
             <Loader2 v-if="isTesting" :size="14" class="animate-spin" />
             <Plug v-else :size="14" />
             <span>{{ isTesting ? $t('settings.testing') : $t('settings.test_connection') }}</span>
           </button>
           <span v-if="testResult" class="test-result" :class="testResult.ok ? 'success' : 'error'">
             {{ testResult.message }}
+          </span>
+        </div>
+      </section>
+
+      <!-- AI 模型配置 - 牛马之力 -->
+      <section class="settings-section card">
+        <h3 class="section-title">
+          <span style="font-size: 16px; margin-right: 6px; line-height: 1;">🐂</span>
+          {{ $t('settings.ai_model') }} - 牛马之力
+        </h3>
+        <p class="section-desc" style="margin-bottom: 16px;">用于后台处理杂活（如文件夹速读、Session 压缩）的极简模型（建议配置低价模型如 doubao-1.6-lite，全面降低成本）。</p>
+
+        <div class="form-group">
+          <label class="form-label">{{ $t('settings.provider') }}</label>
+          <CustomSelect
+            v-model="config.clerkProvider"
+            :options="providerOptions"
+            @change="onClerkProviderChange"
+          />
+        </div>
+
+        <div class="form-group" v-if="config.clerkProvider !== 'ollama'">
+          <label class="form-label">{{ $t('settings.api_key') }}</label>
+          <input
+            v-model="config.clerkApiKey"
+            :type="showClerkApiKey ? 'text' : 'password'"
+            class="input"
+            placeholder="sk-..."
+            @blur="saveConfig('clerkApiKey', config.clerkApiKey)"
+          />
+          <button class="btn-icon toggle-key" @click="showClerkApiKey = !showClerkApiKey">
+            <EyeOff v-if="showClerkApiKey" :size="16" />
+            <Eye v-else :size="16" />
+          </button>
+        </div>
+
+        <div class="form-group" v-if="config.clerkProvider === 'custom'">
+          <label class="form-label">{{ $t('settings.api_url') }}</label>
+          <input
+            v-model="config.clerkBaseURL"
+            class="input"
+            placeholder="https://your-api.com/v1"
+            @blur="saveConfig('clerkBaseURL', config.clerkBaseURL)"
+          />
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">{{ $t('settings.default_model') }}</label>
+          <CustomSelect
+            v-model="config.clerkModel"
+            :options="computedClerkModelOptions"
+            @change="saveConfig('clerkModel', config.clerkModel)"
+          />
+        </div>
+
+        <!-- 连接测试 -->
+        <div class="test-section">
+          <button class="btn btn-ghost" @click="testConnection('clerk')" :disabled="isClerkTesting">
+            <Loader2 v-if="isClerkTesting" :size="14" class="animate-spin" />
+            <Plug v-else :size="14" />
+            <span>{{ isClerkTesting ? $t('settings.testing') : $t('settings.test_connection') }}</span>
+          </button>
+          <span v-if="clerkTestResult" class="test-result" :class="clerkTestResult.ok ? 'success' : 'error'">
+            {{ clerkTestResult.message }}
           </span>
         </div>
       </section>
@@ -279,7 +344,7 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue';
-import { Settings as SettingsIcon, Cpu, Eye, EyeOff, Plug, Loader2, Palette, Info, FolderOpen, FolderHeart, Puzzle, Layers, X, Plus, Unplug, Globe } from 'lucide-vue-next';
+import { Settings as SettingsIcon, Monitor, Eye, EyeOff, Plug, Loader2, Palette, Info, FolderOpen, FolderHeart, Puzzle, Layers, X, Plus, Unplug, Globe } from 'lucide-vue-next';
 import { useI18n } from 'vue-i18n';
 import CustomSelect from '../components/CustomSelect.vue';
 import PluginManager from '../components/PluginManager.vue';
@@ -301,6 +366,7 @@ function switchLanguage(val) {
 const providerOptions = [
   { label: 'DeepSeek', value: 'deepseek' },
   { label: 'OpenAI', value: 'openai' },
+  { label: 'Doubao (豆包)', value: 'doubao' },
   { label: 'Ollama (本地)', value: 'ollama' },
   { label: '自定义', value: 'custom' },
 ];
@@ -337,6 +403,10 @@ const config = ref({
   apiKey: '',
   model: '',
   baseURL: '',
+  clerkProvider: 'deepseek',
+  clerkApiKey: '',
+  clerkModel: '',
+  clerkBaseURL: '',
   theme: 'dark',
   uiScale: 'compact',
   workspaceDir: '',
@@ -351,9 +421,20 @@ const computedModelOptions = computed(() => {
   }));
 });
 
+const availableClerkModels = ref([]);
+const computedClerkModelOptions = computed(() => {
+  return availableClerkModels.value.map(m => ({
+    label: `${m.label} (${m.id})`,
+    value: m.id
+  }));
+});
+
 const showApiKey = ref(false);
+const showClerkApiKey = ref(false);
 const isTesting = ref(false);
 const testResult = ref(null);
+const isClerkTesting = ref(false);
+const clerkTestResult = ref(null);
 const showPluginManager = ref(false);
 const trackedFolders = ref([]);
 
@@ -364,6 +445,10 @@ onMounted(async () => {
     apiKey: allConfig.apiKey || '',
     model: allConfig.model || '',
     baseURL: allConfig.baseURL || '',
+    clerkProvider: allConfig.clerkProvider || 'deepseek',
+    clerkApiKey: allConfig.clerkApiKey || '',
+    clerkModel: allConfig.clerkModel || '',
+    clerkBaseURL: allConfig.clerkBaseURL || '',
     theme: allConfig.theme || 'dark',
     uiScale: allConfig.uiScale || 'compact',
     workspaceDir: allConfig.workspaceDir || '',
@@ -380,7 +465,8 @@ onMounted(async () => {
 });
 
 async function loadModels() {
-  availableModels.value = await window.electronAPI.getModels();
+  availableModels.value = await window.electronAPI.getModels(config.value.provider);
+  availableClerkModels.value = await window.electronAPI.getModels(config.value.clerkProvider);
 }
 
 async function saveConfig(key, value) {
@@ -390,7 +476,7 @@ async function saveConfig(key, value) {
 
 async function onProviderChange() {
   await saveConfig('provider', config.value.provider);
-  await loadModels();
+  availableModels.value = await window.electronAPI.getModels(config.value.provider);
   // 自动选择默认模型
   const defaultModel = availableModels.value.find(m => m.default);
   if (defaultModel) {
@@ -399,24 +485,45 @@ async function onProviderChange() {
   }
 }
 
-async function testConnection() {
-  isTesting.value = true;
-  testResult.value = null;
+async function onClerkProviderChange() {
+  await saveConfig('clerkProvider', config.value.clerkProvider);
+  availableClerkModels.value = await window.electronAPI.getModels(config.value.clerkProvider);
+  // 自动选择默认模型
+  const defaultModel = availableClerkModels.value.find(m => m.default);
+  if (defaultModel) {
+    config.value.clerkModel = defaultModel.id;
+    await saveConfig('clerkModel', defaultModel.id);
+  }
+}
+
+async function testConnection(target = 'main') {
+  const isMain = target === 'main';
+  if (isMain) {
+    isTesting.value = true;
+    testResult.value = null;
+  } else {
+    isClerkTesting.value = true;
+    clerkTestResult.value = null;
+  }
 
   try {
     const result = await window.electronAPI.sendChat([
       { role: 'user', content: '你好，请回复"连接成功"' }
-    ]);
+    ], { useClerk: !isMain }); // 传一个标识给后端
 
     if (result.error) {
-      testResult.value = { ok: false, message: result.error };
+      if (isMain) testResult.value = { ok: false, message: result.error };
+      else clerkTestResult.value = { ok: false, message: result.error };
     } else {
-      testResult.value = { ok: true, message: '连接成功' };
+      if (isMain) testResult.value = { ok: true, message: '连接成功' };
+      else clerkTestResult.value = { ok: true, message: '连接成功' };
     }
   } catch (err) {
-    testResult.value = { ok: false, message: err.message };
+    if (isMain) testResult.value = { ok: false, message: err.message };
+    else clerkTestResult.value = { ok: false, message: err.message };
   } finally {
-    isTesting.value = false;
+    if (isMain) isTesting.value = false;
+    else isClerkTesting.value = false;
   }
 }
 

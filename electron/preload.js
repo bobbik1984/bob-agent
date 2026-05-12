@@ -20,7 +20,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return ipcRenderer.invoke('llm:vision', messages, imageBase64);
   },
   stopGeneration: () => ipcRenderer.invoke('llm:stop'),
-  getModels: () => ipcRenderer.invoke('llm:models'),
+  getModels: (provider) => ipcRenderer.invoke('llm:models', provider),
 
   // 流式 chunk 监听（主进程 → 渲染进程）
   onStreamChunk: (callback) => {

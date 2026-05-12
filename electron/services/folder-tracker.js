@@ -159,6 +159,24 @@ class FolderTracker {
   }
 
   /**
+   * 读取文件前缀（最多 maxBytes），避免读取大文件内存溢出
+   */
+  _readPartialFile(filePath, maxBytes = 2048) {
+    try {
+      const fd = fs.openSync(filePath, 'r');
+      const buffer = Buffer.alloc(maxBytes);
+      const bytesRead = fs.readSync(fd, buffer, 0, maxBytes, 0);
+      fs.closeSync(fd);
+      if (bytesRead > 0) {
+        return buffer.toString('utf8', 0, bytesRead).replace(/\0/g, '');
+      }
+    } catch (e) {
+      return '';
+    }
+    return '';
+  }
+
+  /**
    * 调用 LLM 生成语义摘要
    */
   async _generateSummary(folderName, folderPath, scan) {
@@ -169,6 +187,18 @@ class FolderTracker {
       .map(([k, v]) => `${k}: ${v}个`)
       .join('、');
 
+    // 尝试读取部分关键文件的内容（最多3个文本文件，每个最多读2KB）
+    let fileContents = '';
+    const textExts = ['.md', '.txt', '.json', '.js', '.py', '.csv', '.html', '.vue'];
+    const keyFiles = scan.files.filter(f => textExts.some(ext => f.toLowerCase().endsWith(ext))).slice(0, 3);
+    
+    for (const file of keyFiles) {
+      const content = this._readPartialFile(path.join(folderPath, file), 2048);
+      if (content) {
+        fileContents += `\n--- [片段截取] ${file} ---\n${content}\n`;
+      }
+    }
+
     const prompt = `用户让我关注了一个本地文件夹。请用不超过100字的中文，概括这个文件夹是关于什么的、包含哪些核心资料。只输出摘要内容，不要加标题。
 
 文件夹名称: ${folderName}
@@ -177,7 +207,8 @@ class FolderTracker {
 子目录:
 ${dirList || '(无子目录)'}
 文件列表:
-${fileList}`;
+${fileList}
+${fileContents ? '\n以下是部分文件的内容片段:\n' + fileContents : ''}`;
 
     try {
       const response = await this.llmClient.chat([{ role: 'user', content: prompt }]);
