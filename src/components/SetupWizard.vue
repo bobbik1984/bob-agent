@@ -56,7 +56,8 @@
 </template>
 
 <script setup>
-import { ref, computed, defineEmits } from 'vue';
+import { ref, computed } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { Hexagon, Brain, Globe, Laptop, Settings } from 'lucide-vue-next';
 
 const emit = defineEmits(['complete']);

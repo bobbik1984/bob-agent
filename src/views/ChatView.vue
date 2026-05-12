@@ -267,7 +267,7 @@ marked.setOptions({ breaks: true, gfm: true });
 </script>
 
 <script setup>
-import { ref, computed, watch, onMounted, onUnmounted, nextTick, defineProps, defineEmits } from 'vue';
+import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue';
 import { Sparkles, FileText, Camera, Calendar, User, ChevronRight, ChevronDown, ChevronUp, X, FileUp, Paperclip, Loader2, Shield, Zap, Lock, Unlock, Download } from 'lucide-vue-next';
 import ConfirmCard from '../components/ConfirmCard.vue';
 

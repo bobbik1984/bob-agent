@@ -26,7 +26,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, defineProps, defineEmits } from 'vue';
+import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { ChevronDown } from 'lucide-vue-next';
 
 const props = defineProps({

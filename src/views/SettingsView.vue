@@ -278,7 +278,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, defineEmits } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import { Settings as SettingsIcon, Cpu, Eye, EyeOff, Plug, Loader2, Palette, Info, FolderOpen, FolderHeart, Puzzle, Layers, X, Plus, Unplug, Globe } from 'lucide-vue-next';
 import { useI18n } from 'vue-i18n';
 import CustomSelect from '../components/CustomSelect.vue';
