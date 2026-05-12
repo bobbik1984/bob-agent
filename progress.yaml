@@ -2,9 +2,9 @@ project:
   name: bob-agent
   version: "0.1.0"
   status: in_progress
-  tech: [Electron, Vue 3, Vite, Node.js, SQLite, OpenAI SDK, Lucide]
-  updated: "2026-05-10"
-  current_sprint: "Sprint 5: 体验打磨 + Sprint 6.8: 安全加固"
+  tech: [Electron, Vue 3, Vite, Node.js, SQLite, OpenAI SDK, Lucide, vue-i18n]
+  updated: "2026-05-12"
+  current_sprint: "Sprint 5: 体验打磨（收尾） + Sprint 7: 打包发布（预热）"
 
 # ═══════════════════════════════════════════════════════════════
 # Sprint 1 · 骨架 + 对话 + Vision
@@ -37,7 +37,7 @@ phases:
       - { text: "T-208: 思维链折叠", status: done }
 
   - name: "Sprint 3 · UI 打磨 + 工作目录"
-    status: in_progress
+    status: done
     tasks:
       - { text: "T-301: Industrial Dark UI 重构（Emoji→Lucide 全量替换）", status: done }
       - { text: "T-302: System Prompt 注入", status: done }
@@ -48,29 +48,8 @@ phases:
       - { text: "T-307: 模型品牌 PNG Logo（DeepSeek/OpenAI/Ollama）", status: done }
       - { text: "T-308: 自动日程意图检测（对话流自动识别）", status: done }
 
-  - name: "Sprint 5 · 体验打磨"
-    status: in_progress
-    tasks:
-      - { text: "T-501: 系统托盘", status: todo }
-      - { text: "T-502: 全局快捷键", status: todo }
-      - { text: "T-503: 桌面通知", status: todo }
-      - { text: "T-504: 暗色/亮色主题（含 Electron titleBarOverlay 同步）", status: done }
-      - { text: "T-505: 模型切换 UI（品牌 Logo + 弹出选择器）", status: done }
-      - { text: "T-506: Cost 追踪（会话级累计费用指示器）", status: done }
-      - { text: "T-507: 对话导出 (.md)", status: todo }
-      - { text: "T-508: 错误处理美化", status: todo }
-      - { text: "T-509: 产物文件卡片与外接打开", status: todo }
-      - { text: "T-510: 侧边栏拖拽调宽 + Notion 风格折叠按钮", status: done }
-      - { text: "T-511: 空状态品牌水印 (5% Bob Logo)", status: done }
-      - { text: "T-512: 日程时间轴重写 (0/6/12/18/24 + 今天居中 + 窄屏降级 + 详情弹窗)", status: done }
-      - { text: "T-513: 对话列表项等高修复", status: done }
-      - { text: "T-514: 设计规范文档化 (design_principles.md)", status: done }
-      - { text: "T-515: 启动画面 (Splash Screen)", status: todo }
-      - { text: "T-516: 全局多语言支持 (i18n)", status: todo }
-      - { text: "T-517: 品牌 Logo 滚动视差动效 (Scroll-Driven Animation)", status: todo }
-
   - name: "Sprint 4 · 文件分析 + 联动"
-    status: todo
+    status: in_progress
     tasks:
       - { text: "T-401: FileReader 纯文本", status: done }
       - { text: "T-402: FileReader Office", status: done, assignee: jules }
@@ -78,17 +57,29 @@ phases:
       - { text: "T-404: Vision→Parser 管线", status: todo }
       - { text: "T-405: 全局截图", status: todo }
       - { text: "T-406: 日历同步移植", status: todo }
-      - { text: "T-407: 剪贴板图片粘贴支持", status: todo }
+      - { text: "T-407: 剪贴板图片粘贴支持", status: done }
 
   - name: "Sprint 5 · 体验打磨"
-    status: todo
+    status: in_progress
     tasks:
-      - { text: "T-501: 系统托盘", status: todo }
-      - { text: "T-502: 全局快捷键", status: todo }
-      - { text: "T-503: 桌面通知", status: todo }
-      - { text: "T-507: 对话导出 (.md)", status: todo }
-      - { text: "T-508: 错误处理美化", status: todo }
-      - { text: "T-509: 产物文件卡片与外接打开", status: todo }
+      - { text: "T-501: 系统托盘", status: done }
+      - { text: "T-502: 全局快捷键 (Ctrl+Shift+Space)", status: todo }
+      - { text: "T-503: 桌面通知提醒", status: todo }
+      - { text: "T-504: 暗色/亮色主题（含 titleBarOverlay 实时同步 + did-finish-load 初始化）", status: done }
+      - { text: "T-505: 模型切换 UI（品牌 Logo + 弹出选择器）", status: done }
+      - { text: "T-506: Cost 追踪（会话级累计费用指示器）", status: done }
+      - { text: "T-507: 对话导出 (.md)", status: done }
+      - { text: "T-508: 错误处理美化", status: done }
+      - { text: "T-509: 产物文件卡片与外接打开", status: done }
+      - { text: "T-510: 侧边栏拖拽调宽 + Notion 风格折叠按钮", status: done }
+      - { text: "T-511: 空状态品牌水印 (5% Bob Logo)", status: done }
+      - { text: "T-512: 日程时间轴重写 (0/6/12/18/24 + 今天居中 + 窄屏降级 + 详情弹窗)", status: done }
+      - { text: "T-513: 对话列表项等高修复", status: done }
+      - { text: "T-514: 设计规范文档化 (design_principles.md)", status: done }
+      - { text: "T-515: 启动画面 (Splash Screen)", status: done }
+      - { text: "T-516: 全局多语言支持 (i18n) — vue-i18n + zh-CN/en-US + computed 响应 + tm()", status: done }
+      - { text: "T-517: 品牌 Logo 滚动视差动效 (Scroll-Driven Animation)", status: done }
+      - { text: "T-518: 对话内文件引用富卡片 (FileCard)", status: todo }
 
   - name: "Sprint 6 · Agent 化（Function Calling + 工具 + 技能 + MCP）"
     status: in_progress
@@ -96,54 +87,61 @@ phases:
       # 6.1 工具系统
       - { text: "T-601: BaseTool 基类", status: done }
       - { text: "T-602: ToolRegistry 工具注册表", status: done }
-      - { text: "T-603: 内置工具 — list_dir / read_file 等", status: done }
-      - { text: "T-604: 内置工具 — create_event / search_events", status: todo }
+      - { text: "T-603: 内置工具 — list_dir / read_file / write_file 等", status: done }
+      - { text: "T-604: 内置工具 — create_event / search_events / update_event", status: done }
       - { text: "T-605: 内置工具 — web_search", status: done }
       # 6.2 LLM 调用链改造
       - { text: "T-606: LLM Client 支持 tools 参数 + tool_call 解析", status: done }
       - { text: "T-607: Tool Execution Loop", status: done }
-      - { text: "T-608: ChatView 工具调用 UI", status: todo }
+      - { text: "T-608: ChatView 工具调用 UI", status: done }
       # 6.3 技能系统（双目录）
       - { text: "T-609: 内置 skills/ 目录（15+ 基础技能随项目分发）", status: done }
       - { text: "T-610: ToolRegistry 扫描内置 skills/", status: done }
       - { text: "T-611: 设置→外部技能目录（UI + 目录选择）", status: done }
       - { text: "T-612: ToolRegistry 扫描外部目录", status: done }
-      - { text: "T-613: 技能热重载", status: todo }
+      - { text: "T-613: 技能热重载", status: done }
       # 6.4 MCP 协议
-      - { text: "T-614: MCP 客户端接入", status: todo }
-      - { text: "T-615: MCP 配置 UI", status: todo }
+      - { text: "T-614: MCP 客户端接入", status: done }
+      - { text: "T-615: MCP 配置 UI", status: done }
       # 6.5 资产迁移与基元能力
       - { text: "T-616: 原生读写基元支持 (write_file)", status: done }
       - { text: "T-617: 网络代理基元支持 (tinyfish_fetch, weather 等)", status: done }
       - { text: "T-618: 纯大脑技能全量迁移 (15 个 Markdown 技能导入)", status: done }
       - { text: "T-619: 会话级全局文件授权 (Global File Access Toggle)", status: done }
-      - { text: "T-620: AKP_Link_Harvester 改造为 LLM Wiki 双链格式", status: done }
       # 6.6 高级代理能力与浏览器自动化
       - { text: "T-621: Obscura 隐身浏览器底层集成", status: done }
       - { text: "T-622: browser_automation 内部工具", status: done }
       - { text: "T-623: 修复打包后 obscura.exe 的动态路径解析", status: done }
       - { text: "T-624: 代理模式切换 UI (问答/干活模式)", status: done }
       - { text: "T-625: 全局文件授权 UI 优化 (Lock/Unlock)", status: done }
+      # 6.7 三层记忆引擎
+      - { text: "T-626: data/ 目录初始化 (memory/sessions, wiki/sessions, wiki/folders)", status: done }
+      - { text: "T-627: SOUL.md 静态人格注入 + Session 总结", status: done }
+      - { text: "T-628: brain_search 工具 — 搜索冷记忆和 Wiki", status: done }
+      - { text: "T-629: 启动补偿扫描 — 处理未总结对话", status: done }
+      - { text: "T-630: 7天冷热迁移 — memory/sessions → wiki/sessions", status: done }
+      - { text: "T-631-mem: 级联删除 — 对话删除同步清除记忆文件", status: done }
+      - { text: "T-632: 全局智能拖拽分发 (Smart Drop Zone)", status: done }
+      - { text: "T-633: track_folder / untrack_folder 工具", status: done }
+      - { text: "T-634: 语义化文件夹速读 (folder-tracker.js)", status: done }
+      - { text: "T-635-mem: tracked_folders 持久化 — SQLite", status: done }
+      - { text: "T-636: Settings 文件夹管理面板", status: done }
       # 6.8 安全加固
-      - { text: "T-630: XSS 消毒 (DOMPurify 接入 ChatView)", status: done }
-      - { text: "T-631: 启用 Renderer Sandbox", status: in_progress, assignee: jules }
-      - { text: "T-632: config:all IPC 过滤敏感字段", status: in_progress, assignee: jules }
-      - { text: "T-633: globalFileAccess/agentMode 状态锁定 Main 进程", status: in_progress, assignee: jules }
-      - { text: "T-634: read_file/write_file 路径穿越修复", status: in_progress, assignee: jules }
-      - { text: "T-635: 外部技能目录 require() 安全隔离", status: todo }
-      # 6.7 本地工作区记忆引擎 (wiki/ + memory/ 双存储，等 Jules PR 合并后启动)
-      - { text: "T-626: data/ 目录初始化 (wiki/projects, wiki/clippings, memory/journal)", status: blocked, blocked_by: "Jules PR" }
-      - { text: "T-627: Wiki 扫描器 (Workspace Indexer → data/wiki/projects/)", status: blocked, blocked_by: "Jules PR" }
-      - { text: "T-628: Wiki 检索工具 (wiki_search 内置工具)", status: blocked, blocked_by: "Jules PR" }
-      - { text: "T-629: Memory 沉淀器 (对话→preferences.json + journal/)", status: blocked, blocked_by: "Jules PR" }
-      - { text: "T-630-mem: Memory 注入 (System Prompt 自动注入偏好+日志)", status: blocked, blocked_by: "Jules PR" }
-      - { text: "T-631-mem: 记忆自动刷新管线 (chokidar 文件监听)", status: todo }
+      - { text: "T-630-sec: XSS 消毒 (DOMPurify 接入 ChatView)", status: done }
+      - { text: "T-631-sec: 启用 Renderer Sandbox", status: done, assignee: jules }
+      - { text: "T-632-sec: config:all IPC 过滤敏感字段", status: done, assignee: jules }
+      - { text: "T-633-sec: globalFileAccess/agentMode 状态锁定 Main 进程", status: done, assignee: jules }
+      - { text: "T-634-sec: read_file/write_file 路径穿越修复", status: done, assignee: jules }
+      - { text: "T-635-sec: 外部 Web 内容防注入隔离 (XML 包裹)", status: done }
+
   - name: "Sprint 7 · 打包发布"
     status: todo
     tasks:
       - { text: "T-701: electron-builder 打包", status: todo }
-      - { text: "T-702: 自动更新", status: todo }
-      - { text: "T-703: 内测分发", status: todo }
+      - { text: "T-702: 自动更新 (electron-updater)", status: todo }
+      - { text: "T-703: 错误日志", status: todo }
+      - { text: "T-704: 内测分发", status: todo }
+      - { text: "T-705: 文档收尾", status: todo }
 
   - name: "Sprint 8 · 情绪价值与陪伴 (Desktop Pet)"
     status: todo
@@ -167,13 +165,20 @@ jules_sessions:
     tasks: [T-105, T-108, T-302]
     status: merged
     created: "2026-05-09"
+
   - id: "16745955317907370653"
     url: "https://jules.google.com/session/16745955317907370653"
     title: "Backend Security Hardening (P0/P1 Fixes)"
-    tasks: [T-631, T-632, T-633, T-634]
-    status: in_progress
+    tasks: [T-631-sec, T-632-sec, T-633-sec, T-634-sec]
+    status: merged
     created: "2026-05-10"
+
+  - id: "i18n-jules-session"
+    title: "[Sprint 5] i18n 多语言翻译补全"
+    tasks: [T-516]
+    status: merged
+    created: "2026-05-11"
 
 tests:
   total_passing: 11
-  updated: "2026-05-09"
+  updated: "2026-05-12"
