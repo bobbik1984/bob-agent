@@ -40,12 +40,30 @@
 - [x] T-515: 启动画面 (Splash Screen) — 在应用启动加载资源时显示，缓解长时间等待的焦虑
 - [x] T-516: 全局多语言支持 (i18n) — vue-i18n 框架 + zh-CN/en-US 双语包 + Settings 语言切换 + 导航 computed 响应 + WeekTimeline tm() 数组解析
 - [x] T-517: 品牌 Logo 滚动视差动效 (Scroll-Driven Animation) — 新对话的背景 Logo 在输入首条消息后，平滑缩小悬浮至顶部作为 Section 标题；向下滚动对话时，Logo 相对位置固定但根据滚动距离平滑渐隐 (Fade-out)，回滚至顶部时重新渐显，实现类似 Apple 官网的高级互动感
-- [ ] T-518: 对话内文件引用富卡片 (FileCard) — 将 LLM 回复中的本地文件路径从裸链接升级为带图标/缩略图的交互式卡片
-  - [ ] T-518a: FileCard.vue 基础组件 — 文件类型图标 + 文件名 + 大小/修改时间 + 打开/在文件夹中显示
-  - [ ] T-518b: system:file-meta IPC — fs.stat() 元数据 + system:show-in-folder
-  - [ ] T-518c: ChatView Markdown 后处理 — 识别 file:// 链接并替换为 FileCard block
-  - [ ] T-518d: 图片/视频缩略图 — nativeImage 缩略图生成替代文件类型图标
-  - [ ] T-518e: LLM System Prompt 格式引导 — 引导模型输出标准 file:// Markdown 链接
+- [x] T-518: 对话内文件引用富卡片 (FileCard) — LLM 回复中的文件路径自动渲染为带图标/缩略图的交互式卡片
+  - [x] T-518a: FileCard.vue 基础组件 + T-518b: system:file-meta IPC + T-518c: ChatView block 渲染
+  - [x] T-518d: 图片缩略图 (nativeImage) + T-518e: LLM System Prompt 格式引导
+- [ ] T-519: 双模型架构 (主力 + 文员) — 后台杂活使用独立廉价模型（如 doubao-1.6），与对话模型解耦
+  - [ ] T-519a: SettingsView 新增"后台模型"选择器
+  - [ ] T-519b: main.js 初始化 clerkClient，注入到 folder-tracker / memory-engine
+  - [ ] T-519c: Model Registry 对齐 doubao-1.6 API 信息
+  - [ ] T-519d: 文件夹 Wiki 增强 — 文员模型可选读取文件前 2KB
+- [ ] T-520: 工具凭证管理 (Tool Credential Store) — 消灭 .env 硬依赖，打包前必须完成
+  - [ ] T-520a: BaseTool 新增 requiredCredentials 声明
+  - [ ] T-520b: Credential Store (db + safeStorage 加密)
+  - [ ] T-520c: web-search / tinyfish_fetch 迁移到 Credential Store
+  - [ ] T-520d: Settings 工具凭证面板 — 未激活工具灰显 + inline Key 填入 + 获取链接
+  - [ ] T-520e: ToolRegistry 标记工具 isActive 状态
+- [ ] T-521: 文件夹拖拽确认流 — 先零成本扫描弹确认卡，用户同意后才调 LLM
+  - [ ] T-521a: IPC system:scan-folder (纯 fs)
+  - [ ] T-521b: FolderScanCard.vue 确认组件 (清单 + 类型 + 预估费用)
+  - [ ] T-521c: handleDrop 重构 — 文件夹路由改为弹确认卡
+  - [ ] T-521d: track_folder 支持 skipLLM 参数
+- [ ] T-522: Accent Color 用户自定义主题色
+  - [ ] T-522a: CSS 变量系统 — 所有 accent 值从单一 HSL 根变量派生
+  - [ ] T-522b: SettingsView 色盘选择器 (预设 6-8 色 + 自定义 HEX)
+  - [ ] T-522c: 全局联动验证 — Logo/日历/indicator/按钮统一跟随
+- [ ] T-523: 设置页 UI 扁平化 — 工具/技能列表直接展示在设置主页，取消二级入口
 
 ## Sprint 6: Agent 化（Function Calling + 工具系统）🔑 关键里程碑
 
@@ -118,6 +136,8 @@
 - [x] T-635: 外部 Web 内容防注入隔离 (XML `<untrusted_web_content>` 包裹 + System Prompt 约束)
 
 ## Sprint 7: 打包发布
+
+> T-520 (工具凭证管理) 和 T-519 (双模型) 是打包前的前置依赖。
 
 - [ ] T-701: electron-builder 打包配置
 - [ ] T-702: 自动更新 (electron-updater)
