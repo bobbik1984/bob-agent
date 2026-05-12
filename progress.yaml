@@ -80,6 +80,7 @@ phases:
       - { text: "T-516: 全局多语言支持 (i18n) — vue-i18n + zh-CN/en-US + computed 响应 + tm()", status: done }
       - { text: "T-517: 品牌 Logo 滚动视差动效 (Scroll-Driven Animation)", status: done }
       - { text: "T-518: 对话内文件引用富卡片 (FileCard)", status: todo }
+      - { text: "T-524: 自定义模型接入中心 (Dynamic Model Registry UI)", status: todo }
 
   - name: "Sprint 6 · Agent 化（Function Calling + 工具 + 技能 + MCP）"
     status: in_progress
@@ -135,14 +136,15 @@ phases:
       - { text: "T-634-sec: read_file/write_file 路径穿越修复", status: done, assignee: jules }
       - { text: "T-635-sec: 外部 Web 内容防注入隔离 (XML 包裹)", status: done }
 
-  - name: "Sprint 7 · 打包发布"
-    status: todo
+  - name: "Sprint 7 · 打包发布与绿色化 (OOBE)"
+    status: in_progress
     tasks:
-      - { text: "T-701: electron-builder 打包", status: todo }
-      - { text: "T-702: 自动更新 (electron-updater)", status: todo }
-      - { text: "T-703: 错误日志", status: todo }
-      - { text: "T-704: 内测分发", status: todo }
-      - { text: "T-705: 文档收尾", status: todo }
+      - { text: "T-701: electron-builder 打包配置 (Portable/ZIP 绿色软件化)", status: done }
+      - { text: "T-702: 底层数据管理与卸载自清空防线 (Factory Reset)", status: done }
+      - { text: "T-703: 首次启动引导向导 (OOBE - Theming/Workspace/API)", status: in_progress }
+      - { text: "T-704: 自动更新 (electron-updater)", status: todo }
+      - { text: "T-705: 内测分发", status: todo }
+      - { text: "T-706: 文档收尾", status: todo }
 
   - name: "Sprint 8 · 情绪价值与陪伴 (Desktop Pet)"
     status: todo

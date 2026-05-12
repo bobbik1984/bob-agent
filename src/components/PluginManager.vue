@@ -28,6 +28,7 @@
             >
               <!-- 主行：名称 + 类型 + 状态 -->
               <div class="pm-row-main">
+                <span class="pm-dot" :class="{ active: plugin.installed !== false }"></span>
                 <span class="pm-name">{{ plugin.name }}</span>
                 <span class="pm-type">{{ plugin.typeLabel }}</span>
                 <span class="pm-spacer"></span>
@@ -145,8 +146,11 @@ onUnmounted(() => {
 /* ── Modal Shell ─────────────────────────────────── */
 .modal-overlay {
   position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.55);
+  top: 35px;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  background: var(--overlay-bg);
   backdrop-filter: blur(4px);
   z-index: 1000;
   display: flex;
@@ -314,7 +318,7 @@ onUnmounted(() => {
   transition: all var(--duration-fast);
 }
 .pm-install-btn:hover {
-  background: #fff;
+  opacity: 0.85;
 }
 
 .pm-chevron {
@@ -371,5 +375,20 @@ onUnmounted(() => {
   color: var(--text-secondary);
   white-space: pre-wrap;
   line-height: 1.4;
+}
+
+.pm-dot {
+  width: 8px;
+  height: 8px;
+  min-width: 8px;
+  border-radius: 4px;
+  background-color: var(--text-tertiary);
+  opacity: 0.4;
+  transition: all 0.2s;
+}
+
+.pm-dot.active {
+  background-color: var(--user-accent);
+  opacity: 1;
 }
 </style>

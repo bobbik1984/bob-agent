@@ -59,7 +59,7 @@
   },
   "chat": {
     "new_conversation": "New Chat",
-    "input_placeholder": "Type a message... (Shift+Enter for new line)",
+    "input_placeholder": "",
     "send": "Send",
     "stop": "Stop",
     "export": "Export",

@@ -76,13 +76,27 @@ class PluginManager {
 
     if (fs.existsSync(externalSkillsDir)) {
       console.log(`[PluginManager] Watching skills directory: ${externalSkillsDir}`);
-      fs.watch(externalSkillsDir, { recursive: true }, (eventType, filename) => {
+      this.watcher = fs.watch(externalSkillsDir, { recursive: true }, (eventType, filename) => {
         if (this.watchTimer) clearTimeout(this.watchTimer);
         // 防抖：500ms 内的多次更改只触发一次
         this.watchTimer = setTimeout(() => {
           this.refreshPlugins();
         }, 500);
       });
+    }
+  }
+
+  /**
+   * 停止监听，清理资源
+   */
+  destroy() {
+    if (this.watcher) {
+      this.watcher.close();
+      this.watcher = null;
+    }
+    if (this.watchTimer) {
+      clearTimeout(this.watchTimer);
+      this.watchTimer = null;
     }
   }
 

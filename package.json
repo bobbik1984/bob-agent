@@ -4,7 +4,7 @@
   "description": "AI 桌面私人秘书 — 智能对话 + 图片识别 + 日程管理 + 文件分析",
   "main": "electron/main.js",
   "scripts": {
-    "dev": "concurrently \"npm run dev:vite\" \"npm run dev:electron\"",
+    "dev": "concurrently --kill-others \"npm run dev:vite\" \"npm run dev:electron\"",
     "dev:vite": "vite",
     "dev:electron": "node scripts/wait-for-vite.js && electron .",
     "build": "vite build",
@@ -21,13 +21,9 @@
     },
     "win": {
       "target": [
-        "nsis"
+        "portable"
       ],
       "icon": "assets/icon.ico"
-    },
-    "nsis": {
-      "oneClick": true,
-      "allowToChangeInstallationDirectory": false
     },
     "files": [
       "dist/**/*",

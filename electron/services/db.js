@@ -222,9 +222,14 @@ class Database {
   }
 
   setConfig(key, value) {
+    // SQLite only binds numbers, strings, bigints, buffers, and null.
+    // Convert booleans and objects to JSON strings.
+    let serialized = value;
+    if (typeof value === 'boolean') serialized = value ? '1' : '0';
+    else if (typeof value === 'object' && value !== null) serialized = JSON.stringify(value);
     this.db.prepare(
       'INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)'
-    ).run(key, value);
+    ).run(key, serialized);
   }
 
   getAllConfig() {

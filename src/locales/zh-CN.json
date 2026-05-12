@@ -59,7 +59,7 @@
   },
   "chat": {
     "new_conversation": "新对话",
-    "input_placeholder": "输入消息...(Shift+Enter 换行)",
+    "input_placeholder": "",
     "send": "发送",
     "stop": "停止",
     "export": "导出",

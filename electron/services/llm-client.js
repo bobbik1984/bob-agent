@@ -37,10 +37,57 @@ const PROVIDERS = {
         pricing: { input: 0.7, output: 2.8 } },
     ],
   },
-  ollama: {
-    name: 'Ollama (本地)',
-    baseURL: 'http://localhost:11434/v1',
-    models: [], // 动态检测
+  qwen: {
+    name: '通义千问 (Qwen)',
+    baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    models: [
+      { id: 'qwen3-max', label: 'Qwen3 Max', vision: false,
+        pricing: { input: 2.5, output: 10.0 } },
+      { id: 'qwen-plus', label: 'Qwen Plus', vision: true, default: true,
+        pricing: { input: 2.0, output: 12.0 } },
+      { id: 'qwen3.5', label: 'Qwen 3.5', vision: true,
+        pricing: { input: 0.4, output: 3.2 } },
+      { id: 'qwen3.5-flash', label: 'Qwen 3.5 Flash', vision: false,
+        pricing: { input: 0.2, output: 2.0 } },
+    ],
+  },
+  doubao: {
+    name: '豆包 (Doubao)',
+    baseURL: 'https://ark.cn-beijing.volces.com/api/v3',
+    models: [
+      { id: 'doubao-seed-1-6-flash-250828', label: 'Doubao Seed 1.6 Flash', vision: false, default: true,
+        pricing: { input: 0.15, output: 1.5 } },
+      { id: 'doubao-seed-2-0-mini-260215', label: 'Doubao Seed 2.0 Mini', vision: true,
+        pricing: { input: 0.2, output: 2.0 } },
+    ],
+  },
+  zhipu: {
+    name: '智谱 AI (GLM)',
+    baseURL: 'https://open.bigmodel.cn/api/paas/v4',
+    models: [
+      { id: 'GLM-5.1', label: 'GLM-5.1', vision: false,
+        pricing: { input: 6.0, output: 24.0 } },
+      { id: 'GLM-4.7', label: 'GLM-4.7', vision: false, default: true,
+        pricing: { input: 2.0, output: 8.0 } },
+      { id: 'GLM-4.7-FlashX', label: 'GLM-4.7 FlashX', vision: false,
+        pricing: { input: 0.5, output: 3.0 } },
+    ],
+  },
+  kimi: {
+    name: 'Kimi (Moonshot)',
+    baseURL: 'https://api.moonshot.cn/v1',
+    models: [
+      { id: 'kimi-k2.5', label: 'Kimi k2.5', vision: true, default: true,
+        pricing: { input: 4.0, output: 21.0 } },
+    ],
+  },
+  minimax: {
+    name: 'MiniMax',
+    baseURL: 'https://api.minimax.io/v1',
+    models: [
+      { id: 'MiniMax-M2.7', label: 'MiniMax M2.7', vision: false, default: true,
+        pricing: { input: 2.1, output: 8.4 } },
+    ],
   },
   custom: {
     name: '自定义',

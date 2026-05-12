@@ -48,6 +48,12 @@
   --logo-color:        var(--text-primary);
   --bg-code-block:     #0d1117;
   --bg-code-inline:    rgba(255, 255, 255, 0.08);
+
+  /* 用户专属强调色（默认纯白，运行时由 JS 覆写）
+     仅用于：logo, 联通 indicator, 日历事件点, step-dot 等点睛元素。
+     绝不能用它像 --accent-primary 一样刻给整个主题“染色”。 */
+  --user-accent:       #e8e8e8;
+  --user-accent-rgb:   232, 232, 232;
 }
 
 :root[data-theme="light"] {
@@ -79,17 +85,24 @@
   --gradient-subtle:   rgba(0, 0, 0, 0.03);
 
   --logo-filter:       none;
-  --logo-color:        #2776bb;
+  --logo-color:        var(--user-accent, #2776bb);
   --bg-code-block:     #e5e7eb;
   --bg-code-inline:    rgba(0, 0, 0, 0.06);
+
+  --user-accent:       #2776bb;
+  --user-accent-rgb:   39, 118, 187;
 }
 
 :root {
   /* 语义色 */
-  --color-success:   #34d399;
-  --color-warning:   #fbbf24;
-  --color-error:     #f87171;
-  --color-info:      #60a5fa;
+  --color-success:    #10b981;
+  --color-success-bg: rgba(16, 185, 129, 0.1);
+  --color-warning:    #f59e0b;
+  --color-warning-bg: rgba(245, 158, 11, 0.1);
+  --color-error:      #ef4444;
+  --color-error-bg:   rgba(239, 68, 68, 0.1);
+  --color-info:       #60a5fa;
+  --overlay-bg:       rgba(0, 0, 0, 0.5);
 
   /* ── 排版 ─────────────────────────────────────────── */
   --font-sans:  'Inter', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, sans-serif;
@@ -607,11 +620,11 @@ code.hljs {
 }
 
 .btn-danger {
-  background: #ef4444;
+  background: var(--color-error);
   color: white;
-  border-color: #ef4444;
+  border-color: var(--color-error);
 }
 
 .btn-danger:hover {
-  background: #dc2626;
+  filter: brightness(0.9);
 }

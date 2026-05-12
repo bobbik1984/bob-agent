@@ -260,6 +260,15 @@ onMounted(async () => {
         window.electronAPI.updateTheme(theme);
       }
     }
+    const accentColor = await window.electronAPI.getConfig('accentColor');
+    if (accentColor) {
+      document.documentElement.style.setProperty('--user-accent', accentColor);
+      const hex = accentColor.replace('#', '');
+      const r = parseInt(hex.substring(0, 2), 16);
+      const g = parseInt(hex.substring(2, 4), 16);
+      const b = parseInt(hex.substring(4, 6), 16);
+      document.documentElement.style.setProperty('--user-accent-rgb', `${r}, ${g}, ${b}`);
+    }
     // 恢复用户语言偏好
     const savedLang = await window.electronAPI.getConfig('language');
     if (savedLang) locale.value = savedLang;
@@ -382,6 +391,24 @@ function timeAgo(dateStr) {
 
 // ── 设置 ─────────────────────────────────────────────
 async function onSetupComplete() {
+  const theme = await window.electronAPI.getConfig('theme');
+  if (theme) {
+    currentTheme.value = theme;
+    document.documentElement.setAttribute('data-theme', theme);
+    if (window.electronAPI.updateTheme) {
+      window.electronAPI.updateTheme(theme);
+    }
+  }
+  const accentColor = await window.electronAPI.getConfig('accentColor');
+  if (accentColor) {
+    document.documentElement.style.setProperty('--user-accent', accentColor);
+    const hex = accentColor.replace('#', '');
+    const r = parseInt(hex.substring(0, 2), 16);
+    const g = parseInt(hex.substring(2, 4), 16);
+    const b = parseInt(hex.substring(4, 6), 16);
+    document.documentElement.style.setProperty('--user-accent-rgb', `${r}, ${g}, ${b}`);
+  }
+
   isSetupComplete.value = true;
   currentModel.value = await window.electronAPI.getConfig('model') || '';
   await loadConversations();

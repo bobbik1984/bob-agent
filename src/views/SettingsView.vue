@@ -12,6 +12,7 @@
         <h3 class="section-title">
           <Monitor :size="16" class="section-icon" />
           {{ $t('settings.ai_model') }} - 常规动力
+          <Plug :size="16" :class="isMainConnected ? 'icon-success' : 'icon-disabled'" style="margin-left: auto;" title="连接状态" />
         </h3>
         <p class="section-desc" style="margin-bottom: 16px;">用于处理日常对话和高难度逻辑推理的主力模型。</p>
 
@@ -24,27 +25,31 @@
           />
         </div>
 
-        <div class="form-group" v-if="config.provider !== 'ollama'">
+        <div class="form-group">
           <label class="form-label">{{ $t('settings.api_key') }}</label>
-          <input
-            v-model="config.apiKey"
-            :type="showApiKey ? 'text' : 'password'"
-            class="input"
-            placeholder="sk-..."
-            @blur="saveConfig('apiKey', config.apiKey)"
-          />
-          <button class="btn-icon toggle-key" @click="showApiKey = !showApiKey">
-            <EyeOff v-if="showApiKey" :size="16" />
-            <Eye v-else :size="16" />
-          </button>
+          <div style="position: relative;">
+            <input
+              v-model="config.apiKey"
+              :type="showApiKey ? 'text' : 'password'"
+              class="input"
+              :placeholder="config._hasApiKey ? '已配置 (点击修改)' : '请输入 API Key (留空使用环境默认)'"
+              style="padding-right: 36px;"
+              @focus="onApiKeyFocus('apiKey')"
+              @blur="onApiKeyBlur('apiKey')"
+            />
+            <button class="btn-icon toggle-key" @click="showApiKey = !showApiKey">
+              <EyeOff v-if="showApiKey" :size="16" />
+              <Eye v-else :size="16" />
+            </button>
+          </div>
         </div>
 
-        <div class="form-group" v-if="config.provider === 'custom'">
-          <label class="form-label">{{ $t('settings.api_url') }}</label>
+        <div class="form-group">
+          <label class="form-label">{{ $t('settings.api_url') }} (可选，留空使用默认)</label>
           <input
             v-model="config.baseURL"
             class="input"
-            placeholder="https://your-api.com/v1"
+            :placeholder="config._defaultBaseURL || '留空则使用服务商默认接口...'"
             @blur="saveConfig('baseURL', config.baseURL)"
           />
         </div>
@@ -74,8 +79,9 @@
       <!-- AI 模型配置 - 牛马之力 -->
       <section class="settings-section card">
         <h3 class="section-title">
-          <span style="font-size: 16px; margin-right: 6px; line-height: 1;">🐂</span>
+          <Tractor :size="16" class="section-icon" />
           {{ $t('settings.ai_model') }} - 牛马之力
+          <Plug :size="16" :class="isClerkConnected ? 'icon-success' : 'icon-disabled'" style="margin-left: auto;" title="连接状态" />
         </h3>
         <p class="section-desc" style="margin-bottom: 16px;">用于后台处理杂活（如文件夹速读、Session 压缩）的极简模型（建议配置低价模型如 doubao-1.6-lite，全面降低成本）。</p>
 
@@ -90,36 +96,44 @@
 
         <div class="form-group" v-if="config.clerkProvider !== 'ollama'">
           <label class="form-label">{{ $t('settings.api_key') }}</label>
-          <input
-            v-model="config.clerkApiKey"
-            :type="showClerkApiKey ? 'text' : 'password'"
-            class="input"
-            placeholder="sk-..."
-            @blur="saveConfig('clerkApiKey', config.clerkApiKey)"
-          />
-          <button class="btn-icon toggle-key" @click="showClerkApiKey = !showClerkApiKey">
-            <EyeOff v-if="showClerkApiKey" :size="16" />
-            <Eye v-else :size="16" />
-          </button>
+          <div style="position: relative;">
+            <input
+              v-model="config.clerkApiKey"
+              :type="showClerkApiKey ? 'text' : 'password'"
+              class="input"
+              placeholder="请输入 API Key (留空使用环境默认)"
+              style="padding-right: 36px;"
+              @blur="saveConfig('clerkApiKey', config.clerkApiKey)"
+            />
+            <button class="btn-icon toggle-key" @click="showClerkApiKey = !showClerkApiKey">
+              <EyeOff v-if="showClerkApiKey" :size="16" />
+              <Eye v-else :size="16" />
+            </button>
+          </div>
         </div>
 
-        <div class="form-group" v-if="config.clerkProvider === 'custom'">
-          <label class="form-label">{{ $t('settings.api_url') }}</label>
+        <div class="form-group">
+          <label class="form-label">{{ $t('settings.api_url') }} (可选，留空使用默认)</label>
           <input
             v-model="config.clerkBaseURL"
             class="input"
-            placeholder="https://your-api.com/v1"
+            placeholder="留空则使用服务商默认接口..."
             @blur="saveConfig('clerkBaseURL', config.clerkBaseURL)"
           />
         </div>
 
         <div class="form-group">
           <label class="form-label">{{ $t('settings.default_model') }}</label>
-          <CustomSelect
+          <input
             v-model="config.clerkModel"
-            :options="computedClerkModelOptions"
-            @change="saveConfig('clerkModel', config.clerkModel)"
+            class="input"
+            list="clerk-model-list"
+            placeholder="选择或手动输入模型名称..."
+            @blur="saveConfig('clerkModel', config.clerkModel)"
           />
+          <datalist id="clerk-model-list">
+            <option v-for="opt in computedClerkModelOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+          </datalist>
         </div>
 
         <!-- 连接测试 -->
@@ -156,6 +170,20 @@
             :options="uiScaleOptions"
             @change="applyUiScale(config.uiScale)"
           />
+        </div>
+        <div class="form-group" style="margin-top: 12px;">
+          <label class="form-label">专属强调色 (Accent Color)</label>
+          <div style="display: flex; gap: 12px; flex-wrap: wrap; margin-top: 8px;">
+            <button 
+              v-for="color in accentColors" 
+              :key="color.value"
+              class="accent-circle"
+              :class="{ active: config.accentColor === color.value }"
+              :style="{ backgroundColor: color.value }"
+              @click="applyAccentColor(color.value)"
+              :title="color.name"
+            ></button>
+          </div>
         </div>
       </section>
 
@@ -326,6 +354,29 @@
         </button>
       </section>
 
+      <!-- 数据管理 -->
+      <section class="settings-section card">
+        <h3 class="section-title">
+          <HardDrive :size="16" class="section-icon" />
+          {{ $t('settings.data_management') || '数据管理' }}
+        </h3>
+        <p class="section-desc" style="margin-bottom: 16px;">
+          所有内部配置及对话记录保存在系统的隐藏目录（AppData）中。绿色版卸载时可手动清理。
+        </p>
+
+        <div class="form-group" style="display: flex; gap: 12px; margin-top: 16px;">
+          <button class="btn btn-secondary" @click="openDataDir">
+            <FolderOpen :size="14" />
+            打开内部数据目录
+          </button>
+          
+          <button class="btn btn-ghost" style="color: var(--color-error); border-color: var(--color-error);" @click="factoryReset">
+            <Trash2 :size="14" />
+            清空所有内部数据
+          </button>
+        </div>
+      </section>
+
       <!-- 关于 -->
       <section class="settings-section card">
         <h3 class="section-title">
@@ -344,7 +395,7 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue';
-import { Settings as SettingsIcon, Monitor, Eye, EyeOff, Plug, Loader2, Palette, Info, FolderOpen, FolderHeart, Puzzle, Layers, X, Plus, Unplug, Globe } from 'lucide-vue-next';
+import { Settings as SettingsIcon, Monitor, Tractor, Eye, EyeOff, Plug, Loader2, Palette, Info, FolderOpen, FolderHeart, Puzzle, Layers, X, Plus, Unplug, Globe, HardDrive, Trash2 } from 'lucide-vue-next';
 import { useI18n } from 'vue-i18n';
 import CustomSelect from '../components/CustomSelect.vue';
 import PluginManager from '../components/PluginManager.vue';
@@ -366,9 +417,20 @@ function switchLanguage(val) {
 const providerOptions = [
   { label: 'DeepSeek', value: 'deepseek' },
   { label: 'OpenAI', value: 'openai' },
-  { label: 'Doubao (豆包)', value: 'doubao' },
-  { label: 'Ollama (本地)', value: 'ollama' },
+  { label: '通义千问 (Qwen)', value: 'qwen' },
+  { label: '豆包 (Doubao)', value: 'doubao' },
+  { label: '智谱 AI (GLM)', value: 'zhipu' },
+  { label: 'Kimi (Moonshot)', value: 'kimi' },
+  { label: 'MiniMax', value: 'minimax' },
   { label: '自定义', value: 'custom' },
+];
+
+const accentColors = [
+  { name: 'MallOS 蓝', value: '#2776bb' },
+  { name: '青灰', value: '#627C8C' },
+  { name: '淡紫灰', value: '#989398' },
+  { name: '淡灰蓝', value: '#B9C7D2' },
+  { name: '朱红', value: '#E93C35' },
 ];
 
 const themeOptions = computed(() => [
@@ -398,19 +460,34 @@ function applyTheme(theme, persist = true) {
   }
 }
 
+function applyAccentColor(color) {
+  config.value.accentColor = color;
+  document.documentElement.style.setProperty('--user-accent', color);
+  const hex = color.replace('#', '');
+  const r = parseInt(hex.substring(0, 2), 16);
+  const g = parseInt(hex.substring(2, 4), 16);
+  const b = parseInt(hex.substring(4, 6), 16);
+  document.documentElement.style.setProperty('--user-accent-rgb', `${r}, ${g}, ${b}`);
+  saveConfig('accentColor', color);
+  emit('config-changed');
+}
+
 const config = ref({
   provider: 'deepseek',
   apiKey: '',
   model: '',
   baseURL: '',
+  _defaultBaseURL: '',
   clerkProvider: 'deepseek',
   clerkApiKey: '',
   clerkModel: '',
   clerkBaseURL: '',
+  _defaultClerkBaseURL: '',
   theme: 'dark',
   uiScale: 'compact',
   workspaceDir: '',
   externalSkillsDir: '',
+  accentColor: '',
 });
 
 const availableModels = ref([]);
@@ -433,8 +510,18 @@ const showApiKey = ref(false);
 const showClerkApiKey = ref(false);
 const isTesting = ref(false);
 const testResult = ref(null);
+const isMainConnected = computed(() => {
+  if (testResult.value) return testResult.value.ok;
+  return config.value._hasApiKey || false;
+});
+
 const isClerkTesting = ref(false);
 const clerkTestResult = ref(null);
+const isClerkConnected = computed(() => {
+  if (clerkTestResult.value) return clerkTestResult.value.ok;
+  return config.value._hasClerkApiKey || false;
+});
+
 const showPluginManager = ref(false);
 const trackedFolders = ref([]);
 
@@ -445,15 +532,20 @@ onMounted(async () => {
     apiKey: allConfig.apiKey || '',
     model: allConfig.model || '',
     baseURL: allConfig.baseURL || '',
+    _defaultBaseURL: allConfig._defaultBaseURL || '',
+    _hasApiKey: allConfig._hasApiKey || false,
     clerkProvider: allConfig.clerkProvider || 'deepseek',
     clerkApiKey: allConfig.clerkApiKey || '',
     clerkModel: allConfig.clerkModel || '',
     clerkBaseURL: allConfig.clerkBaseURL || '',
+    _defaultClerkBaseURL: allConfig._defaultClerkBaseURL || '',
+    _hasClerkApiKey: allConfig._hasClerkApiKey || false,
     theme: allConfig.theme || 'dark',
     uiScale: allConfig.uiScale || 'compact',
     workspaceDir: allConfig.workspaceDir || '',
     externalSkillsDir: allConfig.externalSkillsDir || '',
     language: allConfig.language || 'zh-CN',
+    accentColor: allConfig.accentColor || '',
   };
   // 恢复用户选择的语言
   currentLocale.value = config.value.language;
@@ -472,6 +564,51 @@ async function loadModels() {
 async function saveConfig(key, value) {
   await window.electronAPI.setConfig(key, value);
   emit('config-changed');
+}
+
+// Track the masked key so we don't save it back by accident
+const apiKeyOriginalMask = ref('');
+const clerkApiKeyOriginalMask = ref('');
+
+function onApiKeyFocus(field) {
+  const mask = field === 'apiKey' ? config.value.apiKey : config.value.clerkApiKey;
+  if (field === 'apiKey') {
+    apiKeyOriginalMask.value = mask;
+    // If the current value is a masked key, clear it for fresh input
+    if (mask && mask.includes('...')) config.value.apiKey = '';
+  } else {
+    clerkApiKeyOriginalMask.value = mask;
+    if (mask && mask.includes('...')) config.value.clerkApiKey = '';
+  }
+}
+
+async function onApiKeyBlur(field) {
+  const val = field === 'apiKey' ? config.value.apiKey : config.value.clerkApiKey;
+  const original = field === 'apiKey' ? apiKeyOriginalMask.value : clerkApiKeyOriginalMask.value;
+
+  if (!val) {
+    // User cleared the field without entering new key — restore mask
+    if (field === 'apiKey') config.value.apiKey = original;
+    else config.value.clerkApiKey = original;
+    return;
+  }
+
+  // Only save if it's a new, non-masked value
+  if (val !== original && !val.includes('...')) {
+    await saveConfig(field, val);
+    // Update the _has flag and re-mask
+    if (field === 'apiKey') {
+      config.value._hasApiKey = true;
+      const masked = val.length > 8 ? val.substring(0, 5) + '...' + val.substring(val.length - 4) : '\u2022\u2022\u2022\u2022\u2022\u2022';
+      config.value.apiKey = masked;
+      apiKeyOriginalMask.value = masked;
+    } else {
+      config.value._hasClerkApiKey = true;
+      const masked = val.length > 8 ? val.substring(0, 5) + '...' + val.substring(val.length - 4) : '\u2022\u2022\u2022\u2022\u2022\u2022';
+      config.value.clerkApiKey = masked;
+      clerkApiKeyOriginalMask.value = masked;
+    }
+  }
 }
 
 async function onProviderChange() {
@@ -524,6 +661,20 @@ async function testConnection(target = 'main') {
   } finally {
     if (isMain) isTesting.value = false;
     else isClerkTesting.value = false;
+  }
+}
+
+function openDataDir() {
+  if (window.electronAPI.openDataDir) {
+    window.electronAPI.openDataDir();
+  }
+}
+
+async function factoryReset() {
+  if (confirm('警告：您确定要清空所有聊天记录、配置、记忆和临时技能吗？此操作无法撤销。程序清理后将自动重启。')) {
+    if (window.electronAPI.factoryReset) {
+      await window.electronAPI.factoryReset();
+    }
   }
 }
 
@@ -651,6 +802,9 @@ async function removeMcpServer(name) {
 }
 
 .section-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   font-size: var(--text-lg);
   font-weight: 500;
   margin-bottom: var(--space-4);
@@ -673,7 +827,8 @@ async function removeMcpServer(name) {
 .toggle-key {
   position: absolute;
   right: var(--space-2);
-  top: 28px;
+  top: 50%;
+  transform: translateY(-50%);
 }
 
 select.input {
@@ -697,7 +852,7 @@ select.input {
 }
 
 .test-result.success {
-  color: var(--color-success);
+  color: var(--user-accent);
 }
 
 .test-result.error {
@@ -826,5 +981,35 @@ select.input {
   background: var(--surface-glass);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
+}
+
+.icon-success {
+  color: var(--user-accent);
+  transition: color var(--duration-fast);
+}
+
+.icon-disabled {
+  color: var(--text-tertiary);
+  opacity: 0.4;
+  transition: color var(--duration-fast), opacity var(--duration-fast);
+}
+
+.accent-circle {
+  width: 24px;
+  height: 24px;
+  border-radius: 12px;
+  border: 2px solid transparent;
+  cursor: pointer;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.accent-circle:hover {
+  transform: scale(1.1);
+}
+
+.accent-circle.active {
+  border-color: var(--text-primary);
+  transform: scale(1.1);
+  box-shadow: 0 0 0 2px var(--bg-primary), 0 0 0 4px var(--text-primary);
 }
 </style>

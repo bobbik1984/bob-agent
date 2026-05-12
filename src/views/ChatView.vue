@@ -107,6 +107,30 @@
           </div>
         </div>
       </div>
+    <!-- Pending Folder Drop Card -->
+    <div v-if="pendingFolderInfo" class="message-row">
+      <div class="message-bubble system-bubble">
+        <FolderDropCard
+          :folder-path="pendingFolderInfo.path"
+          :folder-name="pendingFolderInfo.name"
+          :scan-result="pendingFolderInfo.scanResult"
+          @confirm="confirmFolderTrack"
+          @cancel="cancelFolderTrack"
+        />
+      </div>
+    </div>
+    
+    <!-- Pending KB Estimate Card -->
+    <div v-if="pendingKBEstimate" class="message-row">
+      <div class="message-bubble system-bubble">
+        <KBEstimateCard
+          :folder-name="pendingKBEstimate.name"
+          :estimate-result="pendingKBEstimate.result"
+          @confirm="(plan) => startKBBuild(pendingKBEstimate.path, plan)"
+          @cancel="cancelKBEstimate"
+        />
+      </div>
+    </div>
     </div>
 
     <!-- 文件拖拽遮罩 -->
@@ -276,6 +300,8 @@ import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue';
 import { Sparkles, FileText, Camera, Calendar, User, ChevronRight, ChevronDown, ChevronUp, X, FileUp, Paperclip, Loader2, Shield, Zap, Lock, Unlock, Download } from 'lucide-vue-next';
 import ConfirmCard from '../components/ConfirmCard.vue';
 import FileCard from '../components/FileCard.vue';
+import FolderDropCard from '../components/FolderDropCard.vue';
+import KBEstimateCard from '../components/KBEstimateCard.vue';
 
 const props = defineProps({
   conversationId: String,
@@ -289,9 +315,12 @@ const isStreaming = ref(false);
 const streamContent = ref('');
 const streamThinking = ref('');
 const pendingImage = ref(null);
+const pendingFolderInfo = ref(null);
+const pendingKBEstimate = ref(null);
 const isDragging = ref(false);
 const logoOpacity = ref(1);
 const activeTools = ref([]);
+const showScrollButton = ref(false);
 const isParsing = ref(false);
 const messagesArea = ref(null);
 const inputRef = ref(null);
@@ -752,26 +781,31 @@ async function handleDrop(event) {
   if (!files || files.length === 0) return;
 
   const file = files[0];
+  const filePath = window.electronAPI.getFilePath ? window.electronAPI.getFilePath(file) : file.path;
 
-  // ── 路由 1: 文件夹 → 触发 Bob 的 track_folder 流程 ──
-  // Electron 环境下，拖入文件夹时 file.path 指向目录
-  if (file.path) {
+  // ── 路由 1: 文件夹 → 弹确认卡 (P0 流) ──
+  if (filePath) {
     try {
-      const fs = window.require?.('fs');
-      // 在 Renderer sandbox 下无法直接 require，走 IPC 判断
-      // 用 file.type 为空 + 无扩展名 来推断文件夹（Electron 特征）
-    } catch (e) { /* expected in sandbox mode */ }
-  }
-
-  // Electron 中拖入文件夹的特征：type 为空、size 为 0
-  if (file.type === '' && file.size === 0 && file.path) {
-    // 注入自然语言消息，让 Bob 通过 track_folder 工具来处理
-    const folderPath = file.path;
-    const folderName = folderPath.split('\\').pop() || folderPath.split('/').pop();
-    inputText.value = `我想让你关注一下这个文件夹：${folderPath}\n请帮我看看里面有什么，并加入你的备忘录。`;
-    await nextTick();
-    sendMessage();
-    return;
+      const meta = await window.electronAPI.getFileMeta(filePath);
+      if (meta && meta.isDir) {
+        // 零成本扫描文件夹结构
+        const scanResult = await window.electronAPI.scanFolder(filePath);
+        if (scanResult && !scanResult.error) {
+           pendingFolderInfo.value = {
+             path: filePath,
+             name: meta.name,
+             scanResult
+           };
+           scrollToBottom();
+           return;
+        } else {
+           inputText.value = `文件夹扫描失败: ${scanResult?.message || '未知错误'}`;
+           return;
+        }
+      }
+    } catch (err) {
+      console.warn("Failed to check file meta", err);
+    }
   }
 
   // ── 路由 2: 图片 → Vision 附件 ──
@@ -786,8 +820,13 @@ async function handleDrop(event) {
   }
 
   // ── 路由 3: 文档/其他文件 → 上下文附件 ──
+  if (!filePath) {
+    inputText.value = `文件处理失败: 无法获取文件的本地路径。`;
+    return;
+  }
+
   try {
-    const result = await window.electronAPI.readFile(file.path);
+    const result = await window.electronAPI.readFile(filePath);
     if (result.error) {
       inputText.value = `文件读取失败: ${result.error}`;
     } else {
@@ -832,6 +871,77 @@ function scrollToBottom() {
       messagesArea.value.scrollTop = messagesArea.value.scrollHeight;
     }
   });
+}
+
+// ── 文件夹处理 ──────────────────────────────────────
+function cancelFolderTrack() {
+  pendingFolderInfo.value = null;
+}
+
+async function confirmFolderTrack() {
+  const folder = pendingFolderInfo.value;
+  pendingFolderInfo.value = null;
+  if (!folder) return;
+
+  // 添加用户消息
+  messages.value.push({ role: 'user', content: `我已经将文件夹「${folder.name}」拖入。` });
+  
+  // 插入系统处理中状态消息
+  const systemMsgId = Date.now().toString();
+  const systemMsg = { 
+    id: systemMsgId, 
+    role: 'assistant', 
+    content: '正在处理文件夹，请稍候...' 
+  };
+  messages.value.push(systemMsg);
+  scrollToBottom();
+
+  try {
+    // 实际调用内置工具 API 来处理 (这最终会调用 folderTracker.trackFolder)
+    const result = await window.electronAPI.sendChat([{
+      role: 'user',
+      content: `Please execute the "track_folder" tool on this path: ${folder.path}`
+    }], globalFileAccess.value, agentMode.value);
+
+    // 替换为简短成功提示
+    const index = messages.value.findIndex(m => m.id === systemMsgId);
+    if (index !== -1) {
+       messages.value[index].content = `✅ 已将「${folder.name}」收藏到目录列表。`;
+    }
+    
+    // 显示预估卡片
+    pendingKBEstimate.value = {
+      name: folder.name,
+      path: folder.path,
+      result: null // null 表示 loading
+    };
+    scrollToBottom();
+    
+    // 异步获取预估结果
+    const estimateResult = await window.electronAPI.estimateKB(folder.path);
+    if (pendingKBEstimate.value && pendingKBEstimate.value.path === folder.path) {
+       pendingKBEstimate.value.result = estimateResult;
+    }
+
+  } catch (err) {
+    const index = messages.value.findIndex(m => m.id === systemMsgId);
+    if (index !== -1) {
+       messages.value[index].content = `❌ 文件夹收藏失败: ${err.message}`;
+    }
+  }
+}
+
+function cancelKBEstimate() {
+  pendingKBEstimate.value = null;
+}
+
+function startKBBuild(folderPath, plan) {
+  pendingKBEstimate.value = null;
+  messages.value.push({ role: 'user', content: `请使用 ${plan === 'cheap' ? '基础模型' : '核心模型'} 为这个文件夹搭建语义知识库。` });
+  
+  // 这会触发 LLM 进而调用 kb_convert -> kb_index
+  inputText.value = `Please use the "kb_convert" and then "kb_index" tools (or the semantic index skill) to build a knowledge base for: ${folderPath}. I prefer the ${plan} model plan.`;
+  sendMessage();
 }
 </script>
 
@@ -939,13 +1049,13 @@ function scrollToBottom() {
 }
 
 .avatar-user {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--surface-input);
   color: var(--text-secondary);
 }
 
 .avatar-bob {
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.05);
+  background: var(--surface-glass);
+  border: 1px solid var(--border-subtle);
 }
 
 .bob-avatar-img {
@@ -986,7 +1096,7 @@ function scrollToBottom() {
   font-size: 0.9em;
   padding: 2px 6px;
   border-radius: 4px;
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--bg-code-inline);
 }
 
 .message-content :deep(strong) {
@@ -1587,7 +1697,7 @@ function scrollToBottom() {
 
 .stop-btn:hover {
   border-color: var(--text-secondary);
-  background: rgba(248, 113, 113, 0.08);
+  background: var(--color-error-bg);
 }
 
 /* ── 计费指示器 ───────────────────────────────────── */

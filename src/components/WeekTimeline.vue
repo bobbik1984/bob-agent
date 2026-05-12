@@ -410,7 +410,7 @@ const days = computed(() => {
 }
 
 .day-label.today .day-name {
-  color: #2776bb;
+  color: var(--user-accent);
   font-weight: 600;
 }
 
@@ -454,7 +454,7 @@ const days = computed(() => {
   top: 0;
   height: 100%;
   border-radius: 3px;
-  background: #2776bb;
+  background: var(--user-accent);
   color: white;
   display: flex;
   align-items: center;
@@ -492,7 +492,7 @@ const days = computed(() => {
 }
 .resize-handle.left { left: 0; }
 .resize-handle.right { right: 0; }
-.resize-handle:hover { background: rgba(255, 255, 255, 0.2); }
+.resize-handle:hover { background: var(--border-strong); }
 
 /* ═══════════════════════════════════════════════════
    竖向模式（窄屏）
@@ -518,7 +518,7 @@ const days = computed(() => {
 }
 
 .v-day-header.today {
-  color: #2776bb;
+  color: var(--user-accent);
   font-weight: 600;
 }
 
@@ -541,7 +541,7 @@ const days = computed(() => {
 }
 
 .v-event-item:hover {
-  border-color: #2776bb;
+  border-color: var(--user-accent);
 }
 
 .v-event-time {
@@ -566,7 +566,7 @@ const days = computed(() => {
 .detail-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.45);
+  background: var(--overlay-bg);
   z-index: 1000;
   display: flex;
   align-items: center;

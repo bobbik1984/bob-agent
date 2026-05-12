@@ -54,16 +54,56 @@
   - [ ] T-520c: web-search / tinyfish_fetch 迁移到 Credential Store
   - [ ] T-520d: Settings 工具凭证面板 — 未激活工具灰显 + inline Key 填入 + 获取链接
   - [ ] T-520e: ToolRegistry 标记工具 isActive 状态
-- [ ] T-521: 文件夹拖拽确认流 — 先零成本扫描弹确认卡，用户同意后才调 LLM
-  - [ ] T-521a: IPC system:scan-folder (纯 fs)
-  - [ ] T-521b: FolderScanCard.vue 确认组件 (清单 + 类型 + 预估费用)
-  - [ ] T-521c: handleDrop 重构 — 文件夹路由改为弹确认卡
-  - [ ] T-521d: track_folder 支持 skipLLM 参数
+- [ ] T-521: 🗂️ 文件夹知识库管线 (Folder KB Pipeline)
+  > 分步管线架构：拖拽→确认→收藏(manifest)→转换(MD)→语义索引(LLM)
+  > 每步独立，manifest.json 是步骤间的接口合同
+  > Step 4 语义索引同时存在 Bob 内置工具 + 独立 Skill 双轨
+
+  ### P0 · 基础交互改造（立即执行）
+  - [x] T-521a: folder-tracker.js 改造 — scanFolder() 增强收集 absolutePath/size/mtime
+  - [x] T-521b: folder-tracker.js 新增 `_buildManifest()` — 生成 `manifest.json`（完整文件清单，给程序读）
+  - [x] T-521c: folder-tracker.js 新增 `_buildTree()` — 生成 `tree.md`（分层目录树，给 LLM/人类渐进式读取）
+  - [x] T-521d: folder-tracker.js `trackFolder()` 移除 LLM 调用 — 收藏=纯 FS 操作，¥0
+  - [x] T-521e: folder-tracker.js 父子目录检测 — 收藏父目录时自动吸收已收藏子目录，反向阻止重复收藏
+  - [x] T-521f: main.js 新增 IPC `folders:scan` — 零成本快速预览（不写入 DB）
+  - [x] T-521g: preload.js 桥接 `scanFolder`
+  - [x] T-521h: FolderDropCard.vue — 极简确认卡片组件（📁名称 + 统计 + 收藏/取消）
+  - [x] T-521i: ChatView.vue handleDrop 改造 — 文件夹不再自动发消息，改为弹出 FolderDropCard
+  - [x] T-521j: ChatView.vue confirmFolderTrack() — 收藏后 Bob 回复简短确认 + "🧠 需要搭建知识库吗？" inline 提示
+  - [x] T-521k: package.json 修复 — concurrently 加 `--kill-others`，防 Vite 僵尸进程
+
+  ### P1 · 成本预估 + 文档转换（紧随 P0）
+  - [x] T-521l: kb_estimate.js (built-in tool) — 读 manifest.json，筛选可转换文件，按大小粗估 Token 量 × 模型单价
+  - [x] T-521m: KBEstimateCard.vue — 呈现预估结果（文件数/大小/Tokens/预估成本），提供 Cheap/Core 两种模型套餐选择
+  - [x] T-521n: ChatView.vue confirmKBBuild() — 将用户选择的 Plan 拼成 prompt 传给 LLM（如 "使用 kb_convert 和 kb_index 建立知识库"）
+  - [x] T-521o: kb_convert.js (built-in tool) — 遍历 manifest，调用 mammoth/pdf-parse/officeparser 批量转 MD
+  - [x] T-521p: 产出目录规范 — `data/wiki/folders/<id>/docs/目录名__文件名.md`（扁平化命名）
+  - [x] T-521q: main.js + preload.js 新增 IPC `kb:estimate` / `kb:build` / `kb:progress` 事件推送
+  - [x] T-521r: pipeline_status 状态追踪 — manifest.json 中记录每步完成状态，防重复处理
+
+  ### P2 · 语义索引（按需触发，双轨执行）
+  - [ ] T-521r: Wiki Entry Schema 设计 — frontmatter(source/size/type/tags/indexed_by/indexed_at) + ## 内容摘要(≤100字) + ## 关键数据点(≤5条)
+  - [ ] T-521s: kb_index.js (built-in tool) — 读 docs/*.md，按 Schema 调 clerkClient 生成条目，汇总为 index.md
+  - [ ] T-521t: 独立 Skill `kb-semantic-index` — 存放于 `Assistant/common/knowledge/skills/kb-semantic-index/SKILL.md`
+    > 包含完整 SOP + 输出模板，供 Gemini CLI / Claude / CodeRunner 等外部 Agent 使用免费/plan 额度执行
+    > 输入：manifest.json 路径；输出：同目录下 index.md
+  - [ ] T-521u: brain_search 增强 — 支持检索 `wiki/folders/<id>/index.md` 中的 frontmatter tags
+
+  ### 产出目录结构
+  ```
+  data/wiki/folders/<folder-id>/
+  ├── manifest.json     Step 1 · 给程序读 · 完整文件清单+绝对路径+管线状态
+  ├── tree.md           Step 1 · 给 LLM 读 · 分层目录树，渐进式阅读友好
+  ├── docs/             Step 3 · 给 LLM 读 · 每个文档的 Markdown 转换
+  └── index.md          Step 4 · 给所有人读 · 语义摘要索引
+  ```
+
 - [ ] T-522: Accent Color 用户自定义主题色
   - [ ] T-522a: CSS 变量系统 — 所有 accent 值从单一 HSL 根变量派生
   - [ ] T-522b: SettingsView 色盘选择器 (预设 6-8 色 + 自定义 HEX)
   - [ ] T-522c: 全局联动验证 — Logo/日历/indicator/按钮统一跟随
 - [ ] T-523: 设置页 UI 扁平化 — 工具/技能列表直接展示在设置主页，取消二级入口
+- [ ] T-524: 自定义模型接入中心 (Dynamic Model Registry UI) — 支持从外部文件自主读取和同步模型清单与 API 预设；在 Settings 提供交互添加功能（预设清单点选或自定义输入）；配置持久化保存。
 
 ## Sprint 6: Agent 化（Function Calling + 工具系统）🔑 关键里程碑
 
@@ -124,7 +164,7 @@
 - [x] T-634: 语义化文件夹速读 (folder-tracker.js) — 读取文件名列表 + 调用廉价 LLM 生成 ≤100字语义摘要 → 存入 `data/wiki/folders/<id>.md`
 - [x] T-635-mem: tracked_folders 持久化 — SQLite 存储关注列表，支持增删查
 - [x] T-636: Settings 文件夹管理面板 — 设置界面新增「关注的文件夹」专区，支持手动添加目录 + 查看/删除列表
-- [ ] T-637: 知识库初始化向导 (成本估算与防爆雷) — 拖入文件夹时弹出二次确认框，利用本地脚本遍历子目录与文件，估算梳理整个目录所需的总 Token 量、预计耗时及折算成本。向导需提供极低价/免费大模型（如 ModelScope/Gemma/GLM-4-Flash）的一键切换选项，避免使用贵价核心模型导致天价账单。
+- [x] T-637: ~~知识库初始化向导~~ → 已合并到 T-521 文件夹知识库管线
 
 
 ### 6.8 安全加固（Audit 驱动）

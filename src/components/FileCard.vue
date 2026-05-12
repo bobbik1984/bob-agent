@@ -162,10 +162,10 @@ onMounted(async () => {
 }
 
 .file-card:hover {
-  background: var(--bg-tertiary, rgba(255,255,255,0.06));
-  border-color: var(--border-default, rgba(255,255,255,0.12));
+  background: var(--bg-tertiary);
+  border-color: var(--border-default);
   transform: translateY(-1px);
-  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+  box-shadow: var(--shadow-sm);
 }
 
 .file-card--missing {
@@ -230,7 +230,7 @@ onMounted(async () => {
 }
 
 .file-card__meta--missing {
-  color: var(--danger, #e55);
+  color: var(--color-error);
 }
 
 .file-card__dot {

@@ -153,9 +153,9 @@ const priorityLabel = computed(() => {
   font-weight: 500;
 }
 
-.priority-badge.high { background: rgba(239, 68, 68, 0.1); color: #ef4444; }
-.priority-badge.medium { background: rgba(245, 158, 11, 0.1); color: #f59e0b; }
-.priority-badge.low { background: rgba(16, 185, 129, 0.1); color: #10b981; }
+.priority-badge.high { background: var(--color-error-bg); color: var(--color-error); }
+.priority-badge.medium { background: var(--color-warning-bg); color: var(--color-warning); }
+.priority-badge.low { background: var(--color-success-bg); color: var(--color-success); }
 
 .card-footer {
   display: flex;

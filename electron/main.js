@@ -12,7 +12,7 @@ require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') }
 
 const { app, BrowserWindow, ipcMain, dialog, clipboard, nativeImage, Notification, Tray, Menu } = require('electron');
 const path = require('path');
-const { LLMClient } = require('./services/llm-client');
+const { LLMClient, PROVIDERS } = require('./services/llm-client');
 const { ToolRegistry } = require('./tools/registry');
 const { Database } = require('./services/db');
 
@@ -185,6 +185,12 @@ function createWindow() {
       mainWindow.hide();
       return false;
     }
+  });
+
+  // 拦截最小化事件，使其隐藏到托盘而不是最小化到任务栏
+  mainWindow.on('minimize', (event) => {
+    event.preventDefault();
+    mainWindow.hide();
   });
 
   // 开发模式加载 Vite dev server，生产模式加载打包产物
@@ -609,6 +615,31 @@ function registerIPCHandlers() {
   });
 
   // ── 配置 ─────────────────────────────────────────────
+  ipcMain.handle('app:open-data-dir', () => {
+    const { shell } = require('electron');
+    shell.openPath(app.getPath('userData'));
+  });
+
+  ipcMain.handle('app:factory-reset', async () => {
+    try {
+      if (db && db.close) {
+        try { db.close(); } catch(e) {}
+      }
+      const fs = require('fs');
+      const dbPath = path.join(app.getPath('userData'), 'database.sqlite');
+      if (fs.existsSync(dbPath)) fs.unlinkSync(dbPath);
+      
+      const pluginsPath = path.join(app.getPath('userData'), 'plugins');
+      if (fs.existsSync(pluginsPath)) fs.rmSync(pluginsPath, { recursive: true, force: true });
+      
+      app.relaunch();
+      app.exit(0);
+    } catch (err) {
+      console.error('[Main] Factory reset failed:', err);
+      return { error: err.message };
+    }
+  });
+
   ipcMain.handle('config:get', async (_event, key) => {
     return db.getConfig(key);
   });
@@ -649,8 +680,26 @@ function registerIPCHandlers() {
     const config = db.getAllConfig();
     if (!config) return config;
     const safeConfig = { ...config };
-    delete safeConfig.apiKey;
-    delete safeConfig.clerkApiKey;
+    // Mask API keys: show existence but not full value
+    if (safeConfig.apiKey) {
+      const k = safeConfig.apiKey;
+      safeConfig.apiKey = k.length > 8 ? k.substring(0, 5) + '...' + k.substring(k.length - 4) : '••••••';
+      safeConfig._hasApiKey = true;
+    }
+    if (safeConfig.clerkApiKey) {
+      const k = safeConfig.clerkApiKey;
+      safeConfig.clerkApiKey = k.length > 8 ? k.substring(0, 5) + '...' + k.substring(k.length - 4) : '••••••';
+      safeConfig._hasClerkApiKey = true;
+    }
+    // Populate default baseURL from PROVIDERS if user hasn't set one
+    if (!safeConfig.baseURL && safeConfig.provider) {
+      const p = PROVIDERS[safeConfig.provider];
+      if (p) safeConfig._defaultBaseURL = p.baseURL;
+    }
+    if (!safeConfig.clerkBaseURL && safeConfig.clerkProvider) {
+      const p = PROVIDERS[safeConfig.clerkProvider];
+      if (p) safeConfig._defaultClerkBaseURL = p.baseURL;
+    }
     return safeConfig;
   });
 
@@ -669,8 +718,8 @@ function registerIPCHandlers() {
   });
 
   ipcMain.handle('system:is-setup-complete', async () => {
-    const apiKey = db.getConfig('apiKey');
-    return !!apiKey;
+    const val = db.getConfig('onboarded');
+    return val === '1' || val === true;
   });
 
   ipcMain.handle('system:select-dir', async () => {
@@ -793,6 +842,23 @@ function registerIPCHandlers() {
   });
 
   // ── 文件夹跟踪管理 ───────────────────────────────────
+  ipcMain.handle('folders:scan', async (_event, folderPath) => {
+    if (!folderTracker) return { success: false, message: '服务未初始化' };
+    const scan = folderTracker.scanFolder(folderPath, 4);
+    return {
+      name: pathMod.basename(folderPath),
+      path: folderPath,
+      fileCount: scan.files.length,
+      dirCount: scan.dirs.length,
+      stats: scan.stats
+    };
+  });
+
+  ipcMain.handle('kb:estimate', async (_event, folderPath) => {
+    const kbEstimateTool = require('./tools/built-in/kb_estimate');
+    return await kbEstimateTool.execute({ folder_path: folderPath });
+  });
+
   ipcMain.handle('folders:list', async () => {
     return db.getTrackedFolders();
   });
@@ -840,7 +906,7 @@ app.whenReady().then(() => {
   registerIPCHandlers();
 
   // 设置系统托盘
-  const iconPath = path.join(__dirname, '..', 'public', 'logos', 'deepseek.png'); // 临时使用一个圆角 icon
+  const iconPath = path.join(__dirname, '..', 'public', 'bob_logo.svg');
   tray = new Tray(nativeImage.createFromPath(iconPath).resize({ width: 16, height: 16 }));
   
   const contextMenu = Menu.buildFromTemplate([
@@ -856,10 +922,18 @@ app.whenReady().then(() => {
   tray.setToolTip('bob-agent');
   tray.setContextMenu(contextMenu);
   tray.on('click', () => {
-    if (mainWindow.isVisible()) {
-      mainWindow.hide();
+    if (mainWindow.isVisible() && !mainWindow.isMinimized()) {
+      if (mainWindow.isFocused()) {
+        mainWindow.hide();
+      } else {
+        mainWindow.focus();
+      }
     } else {
+      if (mainWindow.isMinimized()) {
+        mainWindow.restore();
+      }
       mainWindow.show();
+      mainWindow.focus();
     }
   });
 
@@ -877,6 +951,17 @@ app.whenReady().then(() => {
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
+  });
+
+  app.on('before-quit', () => {
+    isQuitting = true;
+    if (tray) {
+      tray.destroy();
+      tray = null;
+    }
+    if (pluginManager) {
+      pluginManager.destroy();
+    }
   });
 });
 

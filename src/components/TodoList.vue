@@ -130,7 +130,7 @@ function getPriorityLabel(priority) {
   border-radius: 4px;
 }
 
-.todo-priority.high { background: rgba(239, 68, 68, 0.1); color: #ef4444; }
-.todo-priority.medium { background: rgba(245, 158, 11, 0.1); color: #f59e0b; }
-.todo-priority.low { background: rgba(16, 185, 129, 0.1); color: #10b981; }
+.todo-priority.high { background: var(--color-error-bg); color: var(--color-error); }
+.todo-priority.medium { background: var(--color-warning-bg); color: var(--color-warning); }
+.todo-priority.low { background: var(--color-success-bg); color: var(--color-success); }
 </style>

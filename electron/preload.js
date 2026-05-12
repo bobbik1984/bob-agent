@@ -5,7 +5,7 @@
  * Renderer 进程绝不允许直接访问 Node.js API。
  */
 
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 contextBridge.exposeInMainWorld('electronAPI', {
   // ── LLM ────────────────────────────────────────────
@@ -41,11 +41,22 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // ── 文件 ───────────────────────────────────────────
   readFile: (filePath) => ipcRenderer.invoke('file:read', filePath),
   selectFile: () => ipcRenderer.invoke('file:select'),
+  getFilePath: (file) => {
+    try {
+      return webUtils ? webUtils.getPathForFile(file) : file.path;
+    } catch (e) {
+      return file.path;
+    }
+  },
 
   // ── 工作目录 ─────────────────────────────────────────
   listWorkspaceDir: (relativePath) => ipcRenderer.invoke('workspace:list-dir', relativePath),
   readWorkspaceFile: (relativePath) => ipcRenderer.invoke('workspace:read-file', relativePath),
   selectWorkspaceDir: () => ipcRenderer.invoke('workspace:select-dir'),
+
+  // ── 文件夹跟踪 ───────────────────────────────────────
+  scanFolder: (folderPath) => ipcRenderer.invoke('folders:scan', folderPath),
+  estimateKB: (folderPath) => ipcRenderer.invoke('kb:estimate', folderPath),
 
   // ── 对话历史 ───────────────────────────────────────
   getConversations: () => ipcRenderer.invoke('db:conversations'),
@@ -68,6 +79,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // ── 配置 ───────────────────────────────────────────
   getConfig: (key) => ipcRenderer.invoke('config:get', key),
   setConfig: (key, value) => ipcRenderer.invoke('config:set', key, value),
+  openDataDir: () => ipcRenderer.invoke('app:open-data-dir'),
+  factoryReset: () => ipcRenderer.invoke('app:factory-reset'),
   getAllConfig: () => ipcRenderer.invoke('config:all'),
 
   // ── 系统 ───────────────────────────────────────────
