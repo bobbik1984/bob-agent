@@ -82,12 +82,12 @@
   - [x] T-521r: pipeline_status 状态追踪 — manifest.json 中记录每步完成状态，防重复处理
 
   ### P2 · 语义索引（按需触发，双轨执行）
-  - [ ] T-521r: Wiki Entry Schema 设计 — frontmatter(source/size/type/tags/indexed_by/indexed_at) + ## 内容摘要(≤100字) + ## 关键数据点(≤5条)
-  - [ ] T-521s: kb_index.js (built-in tool) — 读 docs/*.md，按 Schema 调 clerkClient 生成条目，汇总为 index.md
-  - [ ] T-521t: 独立 Skill `kb-semantic-index` — 存放于 `Assistant/common/knowledge/skills/kb-semantic-index/SKILL.md`
+  - [x] T-521r: Wiki Entry Schema 设计 — frontmatter(source/size/type/tags/indexed_by/indexed_at) + ## 内容摘要(≤100字) + ## 关键数据点(≤5条)
+  - [x] T-521s: kb_index.js (built-in tool) — 读 docs/*.md，按 Schema 调 clerkClient 生成条目，汇总为 index.md
+  - [x] T-521t: 独立 Skill `kb-semantic-index` — 存放于 `Assistant/common/knowledge/skills/kb-semantic-index/SKILL.md`
     > 包含完整 SOP + 输出模板，供 Gemini CLI / Claude / CodeRunner 等外部 Agent 使用免费/plan 额度执行
     > 输入：manifest.json 路径；输出：同目录下 index.md
-  - [ ] T-521u: brain_search 增强 — 支持检索 `wiki/folders/<id>/index.md` 中的 frontmatter tags
+  - [x] T-521u: brain_search 增强 — 支持检索 `wiki/folders/<id>/index.md` 中的 frontmatter tags
 
   ### 产出目录结构
   ```
@@ -103,7 +103,7 @@
   - [ ] T-522b: SettingsView 色盘选择器 (预设 6-8 色 + 自定义 HEX)
   - [ ] T-522c: 全局联动验证 — Logo/日历/indicator/按钮统一跟随
 - [ ] T-523: 设置页 UI 扁平化 — 工具/技能列表直接展示在设置主页，取消二级入口
-- [ ] T-524: 自定义模型接入中心 (Dynamic Model Registry UI) — 支持从外部文件自主读取和同步模型清单与 API 预设；在 Settings 提供交互添加功能（预设清单点选或自定义输入）；配置持久化保存。
+- [ ] T-524: 统一模型接入中心 (Model Hub) — 摒弃设置页复杂的档次列举，提供一个完整的“添加模型”入口。用户可通过外部清单点选或完全自定义(名称/URL/API)添加模型。添加成功后，自动进入全局模型池：① 在主界面对话框下拉菜单中可随时切换为聊天模型；② 在设置中专门提供一个“指定为廉价牛马模型”的选择器用于后台杂活。
 
 ## Sprint 6: Agent 化（Function Calling + 工具系统）🔑 关键里程碑
 
