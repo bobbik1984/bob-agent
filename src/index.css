@@ -14,6 +14,27 @@
   box-sizing: border-box;
 }
 
+/* ── 注册 CSS 变量以支持动画 ── */
+@property --bg-root { syntax: '<color>'; inherits: true; initial-value: #0c0c0c; }
+@property --bg-primary { syntax: '<color>'; inherits: true; initial-value: #141414; }
+@property --bg-secondary { syntax: '<color>'; inherits: true; initial-value: #1c1c1c; }
+@property --bg-tertiary { syntax: '<color>'; inherits: true; initial-value: #242424; }
+@property --bg-hover { syntax: '<color>'; inherits: true; initial-value: #2c2c2c; }
+@property --bg-active { syntax: '<color>'; inherits: true; initial-value: #343434; }
+@property --border-subtle { syntax: '<color>'; inherits: true; initial-value: rgba(255, 255, 255, 0.08); }
+@property --border-default { syntax: '<color>'; inherits: true; initial-value: rgba(255, 255, 255, 0.12); }
+@property --border-strong { syntax: '<color>'; inherits: true; initial-value: rgba(255, 255, 255, 0.2); }
+@property --text-primary { syntax: '<color>'; inherits: true; initial-value: #e8e8e8; }
+@property --text-secondary { syntax: '<color>'; inherits: true; initial-value: #a0a0a0; }
+@property --text-tertiary { syntax: '<color>'; inherits: true; initial-value: #6a6a6a; }
+@property --text-inverse { syntax: '<color>'; inherits: true; initial-value: #0c0c0c; }
+@property --accent-primary { syntax: '<color>'; inherits: true; initial-value: #e8e8e8; }
+@property --accent-secondary { syntax: '<color>'; inherits: true; initial-value: #a0a0a0; }
+@property --accent-tertiary { syntax: '<color>'; inherits: true; initial-value: #6a6a6a; }
+@property --surface-glass { syntax: '<color>'; inherits: true; initial-value: rgba(255, 255, 255, 0.04); }
+@property --surface-card { syntax: '<color>'; inherits: true; initial-value: rgba(255, 255, 255, 0.06); }
+@property --surface-input { syntax: '<color>'; inherits: true; initial-value: rgba(255, 255, 255, 0.08); }
+
 :root {
   /* ── 色板（纯灰度，无蓝色） ────────────────────── */
   --bg-root:        #0c0c0c;
@@ -72,16 +93,16 @@
   --border-default: rgba(0, 0, 0, 0.12);
   --border-strong:  rgba(0, 0, 0, 0.2);
 
-  --text-primary:   #111827;
-  --text-secondary: #4b5563;
-  --text-tertiary:  #6b7280;
+  --text-primary:   #1a1a1a;
+  --text-secondary: #595959;
+  --text-tertiary:  #808080;
   --text-inverse:   #ffffff;
 
-  --accent-primary:    #111827;
-  --accent-secondary:  #4b5563;
-  --accent-tertiary:   #6b7280;
+  --accent-primary:    #1a1a1a;
+  --accent-secondary:  #595959;
+  --accent-tertiary:   #808080;
   --accent-glow:       rgba(0, 0, 0, 0.1);
-  --gradient-brand:    linear-gradient(135deg, #111827 0%, #4b5563 100%);
+  --gradient-brand:    linear-gradient(135deg, #1a1a1a 0%, #595959 100%);
   --gradient-subtle:   rgba(0, 0, 0, 0.03);
 
   --logo-filter:       none;
@@ -171,6 +192,15 @@ html, body {
   overflow: hidden;
   user-select: none;
 }
+
+/* ── 动态主题过渡 (仅在切换时激活，不影响日常Hover) ── */
+html.theme-transitioning {
+  transition: --bg-root 0.8s ease, --bg-primary 0.8s ease, --bg-secondary 0.8s ease, --bg-tertiary 0.8s ease,
+              --bg-hover 0.8s ease, --bg-active 0.8s ease, --surface-glass 0.8s ease, --surface-card 0.8s ease, --surface-input 0.8s ease,
+              --border-subtle 0.8s ease, --border-default 0.8s ease, --border-strong 0.8s ease,
+              --text-primary 0.8s ease, --text-secondary 0.8s ease, --text-tertiary 0.8s ease, --text-inverse 0.8s ease,
+              --accent-primary 0.8s ease, --accent-secondary 0.8s ease, --accent-tertiary 0.8s ease !important;
+}
 /* -- UI Scale ---------------------------------------------- */
 html[data-ui-scale="compact"] {
   font-size: 16px;
@@ -214,6 +244,37 @@ html[data-ui-scale="comfortable"] {
 
 .titlebar-no-drag {
   -webkit-app-region: no-drag;
+}
+
+/* ═══ Tauri 自定义窗口按钮 ═══════════════════════════ */
+.titlebar-right {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  margin-left: auto;
+}
+
+.win-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  height: 32px;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.win-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.win-btn.win-close:hover {
+  background: #e81123;
+  color: #fff;
 }
 
 /* ═══ 动画 keyframes ═════════════════════════════════ */
@@ -284,14 +345,14 @@ html[data-ui-scale="comfortable"] {
 }
 
 .btn-primary {
-  background: var(--text-primary);
+  background: var(--text-secondary);
   color: var(--bg-root);
   font-weight: 600;
   box-shadow: none;
 }
 
 .btn-primary:hover {
-  background: white;
+  background: var(--text-primary);
   transform: translateY(-1px);
 }
 
@@ -364,6 +425,147 @@ html[data-ui-scale="comfortable"] {
   border-color: var(--border-default);
 }
 
+/* ═══ 统一卡片基类 (Card Base) ═══════════════════════ */
+
+/* 1. 内联药丸式卡片 (FileCard, SearchCard) */
+.bob-card-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  margin: 4px 0;
+  border-radius: 6px;
+  background: var(--text-secondary);
+  color: var(--bg-root);
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  width: fit-content;
+}
+
+.bob-card-inline:hover {
+  background: var(--text-primary);
+  opacity: 1;
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-sm);
+}
+
+.bob-card-inline__icon {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  color: var(--bg-root);
+  opacity: 0.9;
+}
+
+.bob-card-inline__info {
+  flex: 1;
+  min-width: 0;
+}
+
+.bob-card-inline__title {
+  font-size: var(--text-base);
+  font-family: var(--font-sans);
+  font-weight: 600;
+  color: var(--bg-root);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.4;
+}
+
+/* 2. 块状确认卡片 (ConfirmCard, FolderDropCard) */
+.bob-card-block {
+  background: var(--surface-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  width: 100%;
+  max-width: 420px;
+  margin: var(--space-2) 0;
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+}
+
+.bob-card-block__header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--surface-glass);
+}
+
+.bob-card-block__icon {
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-md);
+  background: rgba(255,255,255,0.05);
+}
+
+.bob-card-block__icon--accent {
+  background: rgba(var(--accent-primary-rgb), 0.15);
+  color: var(--accent-primary);
+}
+
+.bob-card-block__title-area {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+
+.bob-card-block__type {
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.bob-card-block__title {
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.bob-card-block__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+}
+
+.bob-card-block__info-row {
+  display: flex;
+  font-size: var(--text-sm);
+}
+
+.bob-card-block__info-label {
+  color: var(--text-tertiary);
+  width: 70px;
+  flex-shrink: 0;
+}
+
+.bob-card-block__info-value {
+  color: var(--text-secondary);
+  flex: 1;
+}
+
+.bob-card-block__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--border-subtle);
+  background: var(--surface-glass);
+}
+
 /* 分割线 */
 .divider {
   height: 1px;
@@ -431,10 +633,10 @@ html[data-ui-scale="comfortable"] {
 
 .message-content code {
   font-family: var(--font-mono);
-  font-size: 0.9em;
-  padding: 0.2em 0.4em;
-  border-radius: 4px;
-  background: var(--bg-code-inline);
+  font-size: 0.95em;
+  padding: 0 0.2em;
+  color: var(--text-primary);
+  background: transparent;
 }
 
 .message-content table {

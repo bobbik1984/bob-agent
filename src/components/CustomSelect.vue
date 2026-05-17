@@ -28,6 +28,9 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { ChevronDown } from 'lucide-vue-next';
+import { useI18n } from 'vue-i18n';
+
+const { t } = useI18n();
 
 const props = defineProps({
   modelValue: {
@@ -48,7 +51,7 @@ const wrapperRef = ref(null);
 
 const selectedLabel = computed(() => {
   const selected = props.options.find(opt => opt.value === props.modelValue);
-  return selected ? selected.label : '请选择';
+  return selected ? selected.label : t('common.please_select');
 });
 
 function toggle() {

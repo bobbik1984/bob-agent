@@ -1,16 +1,24 @@
 {
   "app": {
     "name": "bob-agent",
-    "just_now": "just now"
+    "just_now": "just now",
+    "not_configured": "Not configured"
   },
   "nav": {
     "chat": "Chat",
-    "inbox": "Inbox",
+    "inbox": "Calendar",
     "settings": "Settings",
     "theme_to_light": "Switch to light mode",
     "theme_to_dark": "Switch to dark mode",
     "rename": "Rename",
     "delete_chat": "Delete Chat"
+  },
+  "modal": {
+    "delete_title": "Delete Chat",
+    "delete_desc": "Are you sure you want to delete this chat? This action cannot be undone.",
+    "cancel": "Cancel",
+    "confirm_delete": "Delete",
+    "factory_reset_warning": "Warning: Are you sure you want to clear all chat history, settings, memory, and temporary skills? This action cannot be undone. The app will restart after cleanup."
   },
   "settings": {
     "title": "Settings",
@@ -29,12 +37,19 @@
     "ui_scale": "UI Scale",
     "scale_compact": "Compact",
     "scale_comfortable": "Comfortable",
+    "accent_color": "Accent Color",
     "language": "Language",
     "workspace": "Workspace",
     "workspace_desc": "Once configured, bob-agent can browse and read files in this directory.",
     "workspace_placeholder": "Click the button to select a directory...",
     "browse": "Browse",
     "clear_workspace": "Clear Workspace",
+    "bob_workspace": "Bob's Workspace",
+    "bob_workspace_desc": "Configure Bob's core working paths. Set the Wiki directory before first use of the knowledge base.",
+    "wiki_dir": "Knowledge Base Directory",
+    "wiki_dir_desc": "Storage location for Wiki files. All ingestion, search, and tool calls point to this directory.",
+    "wiki_dir_placeholder": "Click the button to select a Wiki directory...",
+    "clear_wiki": "Clear Wiki Directory",
     "skills": "Tools & Extensions (Skills)",
     "skills_desc": "Configure the directory for external skills. The Agent will auto-load them on startup.",
     "skills_placeholder": "Click the button to select the external skills directory...",
@@ -55,7 +70,23 @@
     "tracked_folders_empty": "No tracked folders yet",
     "add_folder": "Add Local Directory",
     "about": "About",
-    "about_desc": "AI Desktop Assistant — Chat + Vision + Calendar + File Analysis"
+    "about_desc": "AI Desktop Assistant — Chat + Vision + Calendar + File Analysis",
+    "custom_model_override": "Manual Model Override",
+    "custom_model_override_desc": "Use this to configure API Keys or providers not in the .env file.",
+    "main_model": "Main Model",
+    "clerk_model": "Clerk Model",
+    "provider_model_id": "Provider / Model ID",
+    "base_url_optional": "Base URL (Optional)",
+    "placeholder_provider": "e.g. custom / my-model-id",
+    "placeholder_base_url": "Custom API URL",
+    "open_data_dir": "Open Data Directory",
+    "clear_all_data": "Clear All Data",
+    "color_mallos_blue": "MallOS Blue",
+    "color_slate_gray": "Slate Gray",
+    "color_lavender": "Lavender",
+    "color_powder_blue": "Powder Blue",
+    "color_vermilion": "Vermilion",
+    "custom_provider": "Custom"
   },
   "chat": {
     "new_conversation": "New Chat",
@@ -82,7 +113,85 @@
     "global_access_tooltip": "When enabled, allows AI to read/modify system files outside the workspace (valid for current chat only)",
     "global_access": "Global Files",
     "export_tooltip": "Export Chat as Markdown",
-    "cost_tooltip": "Session Accumulated Cost"
+    "cost_tooltip": "Session Accumulated Cost",
+    "parse_event_failed": "Failed to parse event",
+    "saved_todo": "Saved as to-do",
+    "saved_event": "Saved as event",
+    "save_failed": "Save failed",
+    "save_cancelled": "Save cancelled",
+    "analyze_image": "Please analyze this image",
+    "image_analysis": "Image Analysis",
+    "no_response": "(No response from model. Please check API configuration or try again.)",
+    "conversation": "Chat",
+    "export_time": "Exported at",
+    "user_label": "👤 User",
+    "bot_label": "🤖 Bob",
+    "analyze_file": "Please analyze the following file",
+    "user_selected_file": "User selected file",
+    "open_file_failed": "Failed to open file",
+    "folder_scan_failed": "Folder scan failed",
+    "unknown_error": "Unknown error",
+    "file_path_error": "File processing failed: unable to get local file path.",
+    "file_read_failed": "File read failed",
+    "file_process_failed": "File processing failed",
+    "folder_dropped": "I've dropped the folder \"{name}\" here.",
+    "processing_folder": "Processing folder, please wait...",
+    "folder_tracked": "Folder \"{name}\" has been added to tracked list.",
+    "folder_track_failed": "Failed to track folder",
+    "kb_build_request_cheap": "Please use the base model to build a semantic knowledge base for this folder.",
+    "kb_build_request_core": "Please use the core model to build a semantic knowledge base for this folder."
+  },
+  "model_hub": {
+    "title": "Model Hub",
+    "models_available": "{count} models available",
+    "rescan": "Rescan",
+    "desc": "Automatically discovers available models from .env keys and the model registry. No manual configuration needed.",
+    "main_model": "Main Model",
+    "clerk_model": "Clerk Model",
+    "select_provider": "Select Provider:",
+    "assign_hint_main": "Click a model below to set it as Main",
+    "assign_hint_clerk": "Click a model below to set it as Clerk",
+    "role_main": "Main",
+    "role_clerk": "Clerk",
+    "no_models": "No models found. Please check your API Key configuration in .env.",
+    "not_set": "Not set"
+  },
+  "file_card": {
+    "just_now": "just now",
+    "mins_ago": "{n} mins ago",
+    "hours_ago": "{n} hours ago",
+    "days_ago": "{n} days ago",
+    "file_missing": "File not found",
+    "label_name": "Name",
+    "label_path": "Path",
+    "label_modified": "Modified",
+    "label_size": "Size",
+    "unknown": "Unknown"
+  },
+  "folder_card": {
+    "folder_detected": "Folder Detected",
+    "label_path": "Path",
+    "files": "files",
+    "subdirs": "subdirectories",
+    "mainly_contains": "Mainly contains",
+    "cancel": "Cancel",
+    "save_to_kb": "Save to Knowledge Base"
+  },
+  "kb_estimate": {
+    "title": "KB Construction Estimate",
+    "unknown_folder": "Unknown Folder",
+    "analyzing": "Analyzing files and estimating costs...",
+    "convertable_files": "Convertable Files",
+    "data_size": "Data Size",
+    "estimated_tokens": "Est. Tokens",
+    "cost_title": "Estimated Model Cost (Semantic Analysis)",
+    "plan_cheap": "Base Model (Recommended)",
+    "plan_cheap_desc": "Use low-cost models (e.g., GLM-4-Flash, Doubao-lite) for quick summaries. Best for everyday documents.",
+    "plan_core": "Core Model",
+    "plan_core_desc": "Use the primary model (e.g., DeepSeek, GPT-4o) for deep understanding. Best for complex code or reports.",
+    "cost_warning": "Actual costs depend on document formatting and language. This is an estimate only. Markdown conversion (Phase 3) runs locally and incurs no cost.",
+    "later": "Later",
+    "start_build": "Start Build"
   },
   "plugin": {
     "title": "Skills & Plugin Center",
@@ -151,5 +260,14 @@
   },
   "common": {
     "please_select": "Please select"
+  },
+  "dream": {
+    "morning_title": "Good morning! Here's your weekly recap",
+    "dismiss": "Close",
+    "maintenance": "Memory Maintenance",
+    "archived": "Archived {count} expired memories",
+    "merged": "Merged {count} duplicate topics",
+    "continue_chat": "Continue this topic",
+    "got_it": "Got it"
   }
 }

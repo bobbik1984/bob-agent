@@ -7,147 +7,142 @@
         {{ $t('settings.title') }}
       </h2>
 
-      <!-- AI 模型配置 - 常规动力 -->
+      <!-- 模型中心 (ModelHub) — 自动发现，替代旧的手填配置 -->
+      <ModelHub ref="modelHubRef" @model-changed="emit('config-changed')" />
+
+      <!-- 离线推理引擎 (Offline Engine) -->
       <section class="settings-section card">
         <h3 class="section-title">
-          <Monitor :size="16" class="section-icon" />
-          {{ $t('settings.ai_model') }} - 常规动力
-          <Plug :size="16" :class="isMainConnected ? 'icon-success' : 'icon-disabled'" style="margin-left: auto;" title="连接状态" />
+          <Server :size="16" class="section-icon" />
+          {{ $te('settings.offline_engine') ? $t('settings.offline_engine') : '离线推理引擎 (本地模型)' }}
         </h3>
-        <p class="section-desc" style="margin-bottom: 16px;">用于处理日常对话和高难度逻辑推理的主力模型。</p>
-
-        <div class="form-group">
-          <label class="form-label">{{ $t('settings.provider') }}</label>
-          <CustomSelect
-            v-model="config.provider"
-            :options="providerOptions"
-            @change="onProviderChange"
-          />
-        </div>
-
-        <div class="form-group">
-          <label class="form-label">{{ $t('settings.api_key') }}</label>
-          <div style="position: relative;">
-            <input
-              v-model="config.apiKey"
-              :type="showApiKey ? 'text' : 'password'"
-              class="input"
-              :placeholder="config._hasApiKey ? '已配置 (点击修改)' : '请输入 API Key (留空使用环境默认)'"
-              style="padding-right: 36px;"
-              @focus="onApiKeyFocus('apiKey')"
-              @blur="onApiKeyBlur('apiKey')"
-            />
-            <button class="btn-icon toggle-key" @click="showApiKey = !showApiKey">
-              <EyeOff v-if="showApiKey" :size="16" />
-              <Eye v-else :size="16" />
-            </button>
-          </div>
-        </div>
-
-        <div class="form-group">
-          <label class="form-label">{{ $t('settings.api_url') }} (可选，留空使用默认)</label>
+        <p class="section-desc" style="margin-bottom: 12px;">启动内置的 llama-server 边车以运行本地 GGUF 模型，实现断网计算和绝对隐私。</p>
+        
+        <div class="form-group workspace-group">
           <input
-            v-model="config.baseURL"
+            v-model="config.offlineModelPath"
             class="input"
-            :placeholder="config._defaultBaseURL || '留空则使用服务商默认接口...'"
-            @blur="saveConfig('baseURL', config.baseURL)"
+            placeholder="请选择本地 .gguf 模型文件路径"
+            readonly
           />
-        </div>
-
-        <div class="form-group">
-          <label class="form-label">{{ $t('settings.default_model') }}</label>
-          <CustomSelect
-            v-model="config.model"
-            :options="computedModelOptions"
-            @change="saveConfig('model', config.model)"
-          />
-        </div>
-
-        <!-- 连接测试 -->
-        <div class="test-section">
-          <button class="btn btn-ghost" @click="testConnection('main')" :disabled="isTesting">
-            <Loader2 v-if="isTesting" :size="14" class="animate-spin" />
-            <Plug v-else :size="14" />
-            <span>{{ isTesting ? $t('settings.testing') : $t('settings.test_connection') }}</span>
+          <button class="btn btn-primary browse-btn" @click="selectOfflineModel">
+            <FolderOpen :size="14" />
+            <span>{{ $te('settings.browse') ? $t('settings.browse') : '浏览' }}</span>
           </button>
-          <span v-if="testResult" class="test-result" :class="testResult.ok ? 'success' : 'error'">
-            {{ testResult.message }}
+        </div>
+        
+        <div style="display: flex; gap: 8px; align-items: center; margin-top: 12px;">
+          <button 
+            class="btn" 
+            :class="offlineEngineStatus === 'running' ? 'btn-danger' : 'btn-primary'" 
+            @click="toggleOfflineEngine"
+            :disabled="!config.offlineModelPath"
+          >
+            <Server :size="14" />
+            <span>{{ offlineEngineStatus === 'running' ? '停止本地引擎' : '启动本地引擎' }}</span>
+          </button>
+          
+          <span style="font-size: 0.85em; display: flex; align-items: center; gap: 6px;" :style="{ color: offlineEngineStatus === 'running' ? 'var(--accent-primary)' : 'var(--text-tertiary)' }">
+            <span class="status-dot" :style="{ background: offlineEngineStatus === 'running' ? 'var(--accent-primary)' : 'var(--text-tertiary)' }" style="width: 8px; height: 8px; border-radius: 50%; display: inline-block;"></span>
+            {{ offlineEngineStatus === 'running' ? '正在运行 (端口: 8080)' : '已停止' }}
           </span>
         </div>
       </section>
 
-      <!-- AI 模型配置 - 牛马之力 -->
-      <section class="settings-section card">
-        <h3 class="section-title">
-          <Tractor :size="16" class="section-icon" />
-          {{ $t('settings.ai_model') }} - 牛马之力
-          <Plug :size="16" :class="isClerkConnected ? 'icon-success' : 'icon-disabled'" style="margin-left: auto;" title="连接状态" />
-        </h3>
-        <p class="section-desc" style="margin-bottom: 16px;">用于后台处理杂活（如文件夹速读、Session 压缩）的极简模型（建议配置低价模型如 doubao-1.6-lite，全面降低成本）。</p>
-
-        <div class="form-group">
-          <label class="form-label">{{ $t('settings.provider') }}</label>
-          <CustomSelect
-            v-model="config.clerkProvider"
-            :options="providerOptions"
-            @change="onClerkProviderChange"
-          />
+      <!-- API 密钥管理 (Credential Store) -->
+      <details class="settings-section card custom-model-override">
+        <summary class="section-title" style="cursor: pointer; display: flex; align-items: center; justify-content: space-between; margin-bottom: 0;">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <Key :size="16" class="section-icon" style="opacity: 0.6;" />
+            {{ $te('settings.api_keys_title') ? $t('settings.api_keys_title') : 'API 密钥管理 (安全存储)' }}
+          </div>
+          <ChevronDown :size="16" class="details-chevron" />
+        </summary>
+        <p class="section-desc" style="margin-top: 16px; margin-bottom: 16px;">{{ $te('settings.api_keys_desc') ? $t('settings.api_keys_desc') : '所有密钥都已通过操作系统级加密 (safeStorage) 存储在本地，防止未经授权的读取。' }}</p>
+        
+        <!-- T-821: Outbox 引导提示 -->
+        <div style="margin-bottom: 16px; padding: 10px 14px; border-radius: 8px; background: rgba(var(--user-accent-rgb, 99,102,241), 0.08); border: 1px solid rgba(var(--user-accent-rgb, 99,102,241), 0.2); font-size: 0.82em; color: var(--text-secondary); line-height: 1.5;">
+          💡 <strong>小提示</strong>：您也可以直接在对话中告诉 Bob "帮我配置这个 API Key"，或者把包含密钥的文件拖拽发送给他，Bob 会自动识别并安全地配置好。
         </div>
 
-        <div class="form-group" v-if="config.clerkProvider !== 'ollama'">
-          <label class="form-label">{{ $t('settings.api_key') }}</label>
-          <div style="position: relative;">
-            <input
-              v-model="config.clerkApiKey"
-              :type="showClerkApiKey ? 'text' : 'password'"
-              class="input"
-              placeholder="请输入 API Key (留空使用环境默认)"
-              style="padding-right: 36px;"
-              @blur="saveConfig('clerkApiKey', config.clerkApiKey)"
+        <!-- 模型供应商密钥 -->
+        <h4 style="margin-bottom: 8px; font-size: 0.85em; color: var(--text-secondary);">模型供应商密钥</h4>
+        <div style="display: flex; flex-direction: column; gap: 6px; margin-bottom: 20px;">
+          <div class="form-group" v-for="provider in modelProviders" :key="provider.id" style="display: flex; align-items: center; gap: 12px; border-bottom: 1px solid var(--border-subtle); padding-bottom: 6px;">
+            <label class="form-label" style="width: 160px; margin-bottom: 0; display: flex; align-items: center; gap: 8px;">
+              <img v-if="getProviderLogo(provider.id)" :src="getProviderLogo(provider.id)" style="width: 16px; height: 16px; object-fit: contain; border-radius: 2px;" @error="(e) => e.target.style.visibility = 'hidden'" />
+              <span style="flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" :title="provider.name">{{ provider.name }}</span>
+            </label>
+            <span class="status-dot" :style="{ background: provider.hasKey ? 'var(--user-accent)' : 'transparent', border: provider.hasKey ? '2px solid var(--user-accent)' : '2px solid var(--text-tertiary)' }" style="width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex-shrink: 0;"></span>
+            <input 
+              v-model="apiKeys[provider.id]" 
+              type="password" 
+              class="input" 
+              :placeholder="provider.hasKey ? ($te('settings.configured') ? $t('settings.configured') : '已配置') : ($te('settings.not_configured') ? $t('settings.not_configured') : '未配置')" 
+              style="flex: 1;" 
             />
-            <button class="btn-icon toggle-key" @click="showClerkApiKey = !showClerkApiKey">
-              <EyeOff v-if="showClerkApiKey" :size="16" />
-              <Eye v-else :size="16" />
-            </button>
+            <button class="btn btn-primary" @click="saveApiKey(provider.id)" style="padding: 4px 10px; font-size: 0.9em;">{{ $te('settings.save') ? $t('settings.save') : '保存' }}</button>
           </div>
         </div>
 
-        <div class="form-group">
-          <label class="form-label">{{ $t('settings.api_url') }} (可选，留空使用默认)</label>
-          <input
-            v-model="config.clerkBaseURL"
-            class="input"
-            placeholder="留空则使用服务商默认接口..."
-            @blur="saveConfig('clerkBaseURL', config.clerkBaseURL)"
-          />
+        <!-- 插件/外部服务密钥 -->
+        <h4 style="margin-bottom: 8px; font-size: 0.85em; color: var(--text-secondary);">插件/外部服务密钥</h4>
+        <div style="display: flex; flex-direction: column; gap: 12px;">
+          <div class="form-group" v-for="provider in toolProviders" :key="provider.id" style="display: flex; align-items: center; gap: 12px; border-bottom: 1px solid var(--border-subtle); padding-bottom: 8px;">
+            <label class="form-label" style="width: 140px; margin-bottom: 0;">{{ provider.name }}</label>
+            <span class="status-dot" :style="{ background: provider.hasKey ? 'var(--user-accent)' : 'transparent', border: provider.hasKey ? '2px solid var(--user-accent)' : '2px solid var(--text-tertiary)' }" style="width: 10px; height: 10px; border-radius: 50%; display: inline-block;"></span>
+            <input 
+              v-model="apiKeys[provider.id]" 
+              type="password" 
+              class="input" 
+              :placeholder="provider.hasKey ? ($te('settings.configured') ? $t('settings.configured') : '已配置') : ($te('settings.not_configured') ? $t('settings.not_configured') : '未配置')" 
+              style="flex: 1;" 
+            />
+            <button class="btn btn-primary" @click="saveApiKey(provider.id)" style="padding: 6px 12px;">{{ $te('settings.save') ? $t('settings.save') : '保存' }}</button>
+          </div>
         </div>
 
-        <div class="form-group">
-          <label class="form-label">{{ $t('settings.default_model') }}</label>
-          <input
-            v-model="config.clerkModel"
-            class="input"
-            list="clerk-model-list"
-            placeholder="选择或手动输入模型名称..."
-            @blur="saveConfig('clerkModel', config.clerkModel)"
-          />
-          <datalist id="clerk-model-list">
-            <option v-for="opt in computedClerkModelOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
-          </datalist>
+        <!-- 自定义模型配置 -->
+        <div style="margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border-subtle);">
+          <h4 style="margin-bottom: 8px; font-size: 0.85em; color: var(--text-secondary);">自定义模型 (兼容 OpenAI 格式)</h4>
+          
+          <div style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px;">
+            <div v-for="cm in customModels" :key="cm.id" style="display: flex; align-items: center; gap: 8px; padding: 6px 8px; background: var(--bg-tertiary); border-radius: 4px; border: 1px solid var(--border-subtle);">
+              <span style="font-weight: bold; width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ cm.displayName }}</span>
+              <span style="flex: 1; font-size: 0.85em; color: var(--text-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ cm.baseUrl }}</span>
+              <button class="btn-icon" style="color: var(--status-error); width: 24px; height: 24px;" @click="removeCustomModel(cm.id)" title="删除">
+                <Trash2 :size="14" />
+              </button>
+            </div>
+          </div>
+          
+          <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px;">
+            <input v-model="newCustomModel.name" class="input" placeholder="模型名称 (例: Gemini Pro)" style="font-size: 0.85em; padding: 4px 8px;" />
+            <input v-model="newCustomModel.id" class="input" placeholder="模型ID (例: gemini-2.5-pro)" style="font-size: 0.85em; padding: 4px 8px;" />
+            <input v-model="newCustomModel.url" class="input" placeholder="Base URL" style="font-size: 0.85em; padding: 4px 8px;" />
+            <input v-model="newCustomModel.key" class="input" type="password" placeholder="API Key" style="grid-column: span 2; font-size: 0.85em; padding: 4px 8px;" />
+            <button class="btn btn-primary" @click="addCustomModel" :disabled="!newCustomModel.name || !newCustomModel.url || !newCustomModel.key" style="padding: 4px; font-size: 0.85em;">添加自定义模型</button>
+          </div>
         </div>
 
-        <!-- 连接测试 -->
-        <div class="test-section">
-          <button class="btn btn-ghost" @click="testConnection('clerk')" :disabled="isClerkTesting">
-            <Loader2 v-if="isClerkTesting" :size="14" class="animate-spin" />
-            <Plug v-else :size="14" />
-            <span>{{ isClerkTesting ? $t('settings.testing') : $t('settings.test_connection') }}</span>
-          </button>
-          <span v-if="clerkTestResult" class="test-result" :class="clerkTestResult.ok ? 'success' : 'error'">
-            {{ clerkTestResult.message }}
-          </span>
+        <!-- 工具凭证状态 -->
+        <div v-if="toolStatuses.length > 0" style="margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border-subtle);">
+          <h4 style="margin-bottom: 8px; font-size: 0.85em; color: var(--text-secondary);">{{ $te('settings.tool_status_title') ? $t('settings.tool_status_title') : '🔧 工具激活状态' }}</h4>
+          <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+            <span v-for="tool in toolStatuses" :key="tool.name"
+              :title="tool.isActive ? tool.description : ('缺少: ' + tool.missingCredentials.join(', '))"
+              style="padding: 3px 10px; border-radius: 12px; font-size: 0.8em; display: inline-flex; align-items: center; gap: 6px;"
+              :style="{ 
+                background: tool.isActive ? 'color-mix(in srgb, var(--accent-primary) 10%, transparent)' : 'color-mix(in srgb, var(--text-tertiary) 10%, transparent)',
+                color: tool.isActive ? 'var(--text-primary)' : 'var(--text-tertiary)'
+              }"
+            >
+              <span class="status-dot" :style="{ background: tool.isActive ? 'var(--accent-primary)' : 'var(--text-tertiary)' }" style="width: 6px; height: 6px; border-radius: 50%; display: inline-block;"></span>
+              {{ tool.name }}
+            </span>
+          </div>
         </div>
-      </section>
+      </details>
 
       <!-- 外观 -->
       <section class="settings-section card">
@@ -172,7 +167,7 @@
           />
         </div>
         <div class="form-group" style="margin-top: 12px;">
-          <label class="form-label">专属强调色 (Accent Color)</label>
+          <label class="form-label">{{ $t('settings.accent_color') }}</label>
           <div style="display: flex; gap: 12px; flex-wrap: wrap; margin-top: 8px;">
             <button 
               v-for="color in accentColors" 
@@ -202,190 +197,226 @@
         </div>
       </section>
 
-      <!-- 工作目录 -->
-      <section class="settings-section card">
-        <h3 class="section-title">
-          <FolderOpen :size="16" class="section-icon" />
-          {{ $t('settings.workspace') }}
-        </h3>
-        <p class="section-desc">{{ $t('settings.workspace_desc') }}</p>
-        <div class="form-group workspace-group">
-          <input
-            v-model="config.workspaceDir"
-            class="input"
-            :placeholder="$t('settings.workspace_placeholder')"
-            readonly
-          />
-          <button class="btn btn-ghost browse-btn" @click="selectWorkspaceDir">
-            <FolderOpen :size="14" />
-            <span>{{ $t('settings.browse') }}</span>
-          </button>
-        </div>
-        <button
-          v-if="config.workspaceDir"
-          class="btn-clear"
-          @click="clearWorkspaceDir"
-        >
-          {{ $t('settings.clear_workspace') }}
-        </button>
-      </section>
+      <!-- Bob 的工作间（目录管理） -->
+      <details class="settings-section card custom-model-override">
+        <summary class="section-title" style="cursor: pointer; display: flex; align-items: center; justify-content: space-between; margin-bottom: 0;">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <HardDrive :size="16" class="section-icon" style="opacity: 0.6;" />
+            {{ $t('settings.bob_workspace') }}
+          </div>
+          <ChevronDown :size="16" class="details-chevron" />
+        </summary>
+        <p class="section-desc" style="margin-top: 16px; margin-bottom: 16px;">{{ $t('settings.bob_workspace_desc') }}</p>
 
-      <!-- 工具与扩展 -->
-      <section class="settings-section card">
-        <h3 class="section-title">
-          <Puzzle :size="16" class="section-icon" />
-          {{ $t('settings.skills') }}
-        </h3>
-        <p class="section-desc">{{ $t('settings.skills_desc') }}</p>
-        <div class="form-group workspace-group">
-          <input
-            v-model="config.externalSkillsDir"
-            class="input"
-            :placeholder="$t('settings.skills_placeholder')"
-            readonly
-          />
-          <button class="btn btn-ghost browse-btn" @click="selectExternalSkillsDir">
-            <FolderOpen :size="14" />
-            <span>{{ $t('settings.browse') }}</span>
+        <!-- 工作目录 (workspaceDir) -->
+        <div class="details-section">
+          <label class="form-label" style="font-size: 0.85em; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
+            <FolderOpen :size="14" style="opacity: 0.6;" />
+            {{ $t('settings.workspace') }}
+          </label>
+          <p class="section-desc" style="margin-bottom: 8px; font-size: 0.8em;">{{ $t('settings.workspace_desc') }}</p>
+          <div class="form-group workspace-group">
+            <input
+              v-model="config.workspaceDir"
+              class="input"
+              :placeholder="$t('settings.workspace_placeholder')"
+              readonly
+            />
+            <button class="btn btn-primary browse-btn" @click="selectWorkspaceDir">
+              <FolderOpen :size="14" />
+              <span>{{ $t('settings.browse') }}</span>
+            </button>
+          </div>
+          <button
+            v-if="config.workspaceDir"
+            class="btn-clear"
+            @click="clearWorkspaceDir"
+          >
+            {{ $t('settings.clear_workspace') }}
           </button>
         </div>
-        <button
-          v-if="config.externalSkillsDir"
-          class="btn-clear"
-          @click="clearExternalSkillsDir"
-        >
-          {{ $t('settings.clear_skills') }}
-        </button>
 
-        <div class="plugin-manager-entry" style="margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border-subtle);">
-          <p class="section-desc" style="margin-bottom: 12px;">{{ $t('settings.plugin_center_desc') }}</p>
-          <button class="btn btn-secondary" @click="showPluginManager = true" style="display: flex; align-items: center; gap: 8px;">
-            <Layers :size="16" />
-            <span>{{ $t('settings.open_plugin_center') }}</span>
+        <div class="details-section">
+          <!-- 关注的文件夹 -->
+          <label class="form-label" style="font-size: 0.85em; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
+            <FolderHeart :size="14" style="opacity: 0.6;" />
+            {{ $t('settings.tracked_folders') }}
+          </label>
+          <p class="section-desc" style="margin-bottom: 8px; font-size: 0.8em;">{{ $t('settings.tracked_folders_desc') }}</p>
+
+          <div v-if="trackedFolders.length > 0" class="tracked-folders-list">
+            <div
+              v-for="folder in trackedFolders"
+              :key="folder.id"
+              class="tracked-folder-item"
+            >
+              <div class="folder-info">
+                <span class="folder-name">{{ folder.name }}</span>
+                <span class="folder-path">{{ folder.path }}</span>
+              </div>
+              <button class="btn-icon btn-remove-folder" @click="removeFolder(folder.path)" title="取消关注">
+                <X :size="14" />
+              </button>
+            </div>
+          </div>
+          <div v-else class="empty-folders">
+            <span>{{ $t('settings.tracked_folders_empty') }}</span>
+          </div>
+
+          <button class="btn btn-primary" @click="addFolder" style="margin-top: 12px;">
+            <Plus :size="14" />
+            <span>{{ $t('settings.add_folder') }}</span>
           </button>
         </div>
-      </section>
+
+        <div class="details-section">
+          <!-- 知识库目录 (wikiDir) -->
+          <label class="form-label" style="font-size: 0.85em; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
+            <FileText :size="14" style="opacity: 0.6;" />
+            {{ $t('settings.wiki_dir') }}
+          </label>
+          <p class="section-desc" style="margin-bottom: 8px; font-size: 0.8em;">{{ $t('settings.wiki_dir_desc') }}</p>
+          <div class="form-group workspace-group">
+            <input
+              v-model="config.wikiDir"
+              class="input"
+              :placeholder="$t('settings.wiki_dir_placeholder')"
+              readonly
+            />
+            <button class="btn btn-primary browse-btn" @click="selectWikiDir">
+              <FolderOpen :size="14" />
+              <span>{{ $t('settings.browse') }}</span>
+            </button>
+          </div>
+          <button
+            v-if="config.wikiDir"
+            class="btn-clear"
+            @click="clearWikiDir"
+          >
+            {{ $t('settings.clear_wiki') }}
+          </button>
+        </div>
+
+        <div class="details-section">
+          <!-- MCP Servers -->
+          <label class="form-label" style="font-size: 0.85em; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
+            <Unplug :size="14" style="opacity: 0.6;" />
+            {{ $t('settings.mcp_servers') }}
+          </label>
+          <p class="section-desc" style="margin-bottom: 8px; font-size: 0.8em;">{{ $t('settings.mcp_desc') }}</p>
+
+          <div v-if="Object.keys(mcpServers).length > 0" class="tracked-folders-list">
+            <div
+              v-for="(cfg, name) in mcpServers"
+              :key="name"
+              class="tracked-folder-item"
+            >
+              <div class="folder-info">
+                <span class="folder-name">{{ name }}</span>
+                <span class="folder-path">{{ cfg.command }} {{ (cfg.args || []).join(' ') }}</span>
+              </div>
+              <button class="btn-icon btn-remove-folder" @click="removeMcpServer(name)" title="删除">
+                <X :size="14" />
+              </button>
+            </div>
+          </div>
+          <div v-else class="empty-folders">
+            <span>{{ $t('settings.mcp_empty') }}</span>
+          </div>
+
+          <!-- 添加 MCP Server -->
+          <div v-if="showAddMcp" class="mcp-add-form">
+            <div class="form-group">
+              <label class="form-label">{{ $t('settings.mcp_name') }}</label>
+              <input v-model="newMcp.name" class="input" placeholder="例如 filesystem" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">{{ $t('settings.mcp_command') }}</label>
+              <input v-model="newMcp.command" class="input" placeholder="npx" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">{{ $t('settings.mcp_args') }}</label>
+              <input v-model="newMcp.args" class="input" placeholder="-y @modelcontextprotocol/server-filesystem /path" />
+            </div>
+            <div style="display: flex; gap: 8px; margin-top: 8px;">
+              <button class="btn btn-primary" @click="addMcpServer" :disabled="!newMcp.name || !newMcp.command">{{ $t('settings.mcp_save') }}</button>
+              <button class="btn btn-primary" @click="showAddMcp = false">{{ $t('settings.mcp_cancel') }}</button>
+            </div>
+          </div>
+          <button v-else class="btn btn-primary" @click="showAddMcp = true" style="margin-top: 12px;">
+            <Plus :size="14" />
+            <span>{{ $t('settings.mcp_add') }}</span>
+          </button>
+        </div>
+
+        <div class="details-section">
+          <!-- 技能目录 (externalSkillsDir) -->
+          <label class="form-label" style="font-size: 0.85em; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
+            <Puzzle :size="14" style="opacity: 0.6;" />
+            {{ $t('settings.skills') }}
+          </label>
+          <p class="section-desc" style="margin-bottom: 8px; font-size: 0.8em;">{{ $t('settings.skills_desc') }}</p>
+          <div class="form-group workspace-group">
+            <input
+              v-model="config.externalSkillsDir"
+              class="input"
+              :placeholder="$t('settings.skills_placeholder')"
+              readonly
+            />
+            <button class="btn btn-primary browse-btn" @click="selectExternalSkillsDir">
+              <FolderOpen :size="14" />
+              <span>{{ $t('settings.browse') }}</span>
+            </button>
+          </div>
+          <button
+            v-if="config.externalSkillsDir"
+            class="btn-clear"
+            @click="clearExternalSkillsDir"
+          >
+            {{ $t('settings.clear_skills') }}
+          </button>
+
+          <div class="plugin-manager-entry details-section">
+            <p class="section-desc" style="margin-bottom: 12px;">{{ $t('settings.plugin_center_desc') }}</p>
+            <button class="btn btn-primary" @click="showPluginManager = true" style="display: flex; align-items: center; gap: 8px;">
+              <Layers :size="16" />
+              <span>{{ $t('settings.open_plugin_center') }}</span>
+            </button>
+          </div>
+        </div>
+      </details>
 
       <!-- 插件管理弹窗 -->
       <PluginManager :isOpen="showPluginManager" @close="showPluginManager = false" />
 
-      <!-- MCP Servers -->
-      <section class="settings-section card">
-        <h3 class="section-title">
-          <Unplug :size="16" class="section-icon" />
-          {{ $t('settings.mcp_servers') }}
-        </h3>
-        <p class="section-desc">{{ $t('settings.mcp_desc') }}</p>
 
-        <div v-if="Object.keys(mcpServers).length > 0" class="tracked-folders-list">
-          <div
-            v-for="(cfg, name) in mcpServers"
-            :key="name"
-            class="tracked-folder-item"
-          >
-            <div class="folder-info">
-              <span class="folder-name">{{ name }}</span>
-              <span class="folder-path">{{ cfg.command }} {{ (cfg.args || []).join(' ') }}</span>
-            </div>
-            <button class="btn-icon btn-remove-folder" @click="removeMcpServer(name)" title="删除">
-              <X :size="14" />
-            </button>
-          </div>
-        </div>
-        <div v-else class="empty-folders">
-          <span>{{ $t('settings.mcp_empty') }}</span>
-        </div>
 
-        <!-- 添加 MCP Server -->
-        <div v-if="showAddMcp" class="mcp-add-form">
-          <div class="form-group">
-            <label class="form-label">{{ $t('settings.mcp_name') }}</label>
-            <input v-model="newMcp.name" class="input" placeholder="例如 filesystem" />
-          </div>
-          <div class="form-group">
-            <label class="form-label">{{ $t('settings.mcp_command') }}</label>
-            <input v-model="newMcp.command" class="input" placeholder="npx" />
-          </div>
-          <div class="form-group">
-            <label class="form-label">{{ $t('settings.mcp_args') }}</label>
-            <input v-model="newMcp.args" class="input" placeholder="-y @modelcontextprotocol/server-filesystem /path" />
-          </div>
-          <div style="display: flex; gap: 8px; margin-top: 8px;">
-            <button class="btn btn-primary" @click="addMcpServer" :disabled="!newMcp.name || !newMcp.command">{{ $t('settings.mcp_save') }}</button>
-            <button class="btn btn-ghost" @click="showAddMcp = false">{{ $t('settings.mcp_cancel') }}</button>
-          </div>
-        </div>
-        <button v-else class="btn btn-ghost" @click="showAddMcp = true" style="margin-top: 12px;">
-          <Plus :size="14" />
-          <span>{{ $t('settings.mcp_add') }}</span>
-        </button>
-      </section>
-
-      <!-- 关注的文件夹 -->
-      <section class="settings-section card">
-        <h3 class="section-title">
-          <FolderHeart :size="16" class="section-icon" />
-          {{ $t('settings.tracked_folders') }}
-        </h3>
-        <p class="section-desc">{{ $t('settings.tracked_folders_desc') }}</p>
-
-        <div v-if="trackedFolders.length > 0" class="tracked-folders-list">
-          <div
-            v-for="folder in trackedFolders"
-            :key="folder.id"
-            class="tracked-folder-item"
-          >
-            <div class="folder-info">
-              <span class="folder-name">{{ folder.name }}</span>
-              <span class="folder-path">{{ folder.path }}</span>
-            </div>
-            <button class="btn-icon btn-remove-folder" @click="removeFolder(folder.path)" title="取消关注">
-              <X :size="14" />
-            </button>
-          </div>
-        </div>
-        <div v-else class="empty-folders">
-          <span>{{ $t('settings.tracked_folders_empty') }}</span>
-        </div>
-
-        <button class="btn btn-ghost" @click="addFolder" style="margin-top: 12px;">
-          <Plus :size="14" />
-          <span>{{ $t('settings.add_folder') }}</span>
-        </button>
-      </section>
-
-      <!-- 数据管理 -->
-      <section class="settings-section card">
-        <h3 class="section-title">
-          <HardDrive :size="16" class="section-icon" />
-          {{ $t('settings.data_management') || '数据管理' }}
-        </h3>
-        <p class="section-desc" style="margin-bottom: 16px;">
-          所有内部配置及对话记录保存在系统的隐藏目录（AppData）中。绿色版卸载时可手动清理。
-        </p>
-
-        <div class="form-group" style="display: flex; gap: 12px; margin-top: 16px;">
-          <button class="btn btn-secondary" @click="openDataDir">
-            <FolderOpen :size="14" />
-            打开内部数据目录
-          </button>
-          
-          <button class="btn btn-ghost" style="color: var(--color-error); border-color: var(--color-error);" @click="factoryReset">
-            <Trash2 :size="14" />
-            清空所有内部数据
-          </button>
-        </div>
-      </section>
-
-      <!-- 关于 -->
+      <!-- 关于 & 数据 -->
       <section class="settings-section card">
         <h3 class="section-title">
           <Info :size="16" class="section-icon" />
           {{ $t('settings.about') }}
         </h3>
         <div class="about-info">
-          <p>bob-agent v0.1.0</p>
+          <p>bob-agent v{{ appVersion }}</p>
           <p class="about-desc">{{ $t('settings.about_desc') }}</p>
+        </div>
+
+        <div style="margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border-subtle); display: flex; gap: 12px; flex-wrap: wrap;">
+          <button class="btn btn-primary" @click="openDataDir">
+            <FolderOpen :size="14" />
+            {{ $t('settings.open_data_dir') }}
+          </button>
+          
+          <button class="btn btn-primary" @click="openLogDir">
+            <FileText :size="14" />
+            {{ $te('settings.open_log_dir') ? $t('settings.open_log_dir') : '打开日志目录' }}
+          </button>
+          
+          <button class="btn btn-danger" @click="factoryReset">
+            <Trash2 :size="14" />
+            {{ $t('settings.clear_all_data') }}
+          </button>
         </div>
       </section>
       </div>
@@ -395,10 +426,11 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue';
-import { Settings as SettingsIcon, Monitor, Tractor, Eye, EyeOff, Plug, Loader2, Palette, Info, FolderOpen, FolderHeart, Puzzle, Layers, X, Plus, Unplug, Globe, HardDrive, Trash2 } from 'lucide-vue-next';
+import { Settings as SettingsIcon, Monitor, Tractor, Eye, EyeOff, Plug, Loader2, Palette, Info, FolderOpen, FolderHeart, Puzzle, Layers, X, Plus, Unplug, Globe, HardDrive, Trash2, Key, FileText, Server, ChevronDown } from 'lucide-vue-next';
 import { useI18n } from 'vue-i18n';
 import CustomSelect from '../components/CustomSelect.vue';
 import PluginManager from '../components/PluginManager.vue';
+import ModelHub from '../components/ModelHub.vue';
 
 const emit = defineEmits(['config-changed']);
 const { locale, t } = useI18n();
@@ -408,6 +440,8 @@ const languageOptions = [
   { label: '简体中文', value: 'zh-CN' },
   { label: 'English', value: 'en-US' },
 ];
+
+const appVersion = ref('0.1.0');
 
 function switchLanguage(val) {
   locale.value = val || currentLocale.value;
@@ -422,16 +456,16 @@ const providerOptions = [
   { label: '智谱 AI (GLM)', value: 'zhipu' },
   { label: 'Kimi (Moonshot)', value: 'kimi' },
   { label: 'MiniMax', value: 'minimax' },
-  { label: '自定义', value: 'custom' },
+  { label: t('settings.custom_provider'), value: 'custom' },
 ];
 
-const accentColors = [
-  { name: 'MallOS 蓝', value: '#2776bb' },
-  { name: '青灰', value: '#627C8C' },
-  { name: '淡紫灰', value: '#989398' },
-  { name: '淡灰蓝', value: '#B9C7D2' },
-  { name: '朱红', value: '#E93C35' },
-];
+const accentColors = computed(() => [
+  { name: t('settings.color_mallos_blue'), value: '#2776bb' },
+  { name: t('settings.color_slate_gray'), value: '#627C8C' },
+  { name: t('settings.color_lavender'), value: '#989398' },
+  { name: t('settings.color_powder_blue'), value: '#B9C7D2' },
+  { name: t('settings.color_vermilion'), value: '#E93C35' },
+]);
 
 const themeOptions = computed(() => [
   { label: t('settings.theme_dark'), value: 'dark' },
@@ -451,7 +485,17 @@ function applyUiScale(scale, persist = true) {
 }
 
 function applyTheme(theme, persist = true) {
-  document.documentElement.setAttribute('data-theme', theme);
+  document.documentElement.classList.add('theme-transitioning');
+  
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      document.documentElement.setAttribute('data-theme', theme);
+      setTimeout(() => {
+        document.documentElement.classList.remove('theme-transitioning');
+      }, 850);
+    });
+  });
+
   if (persist) {
     saveConfig('theme', theme);
   }
@@ -485,10 +529,47 @@ const config = ref({
   _defaultClerkBaseURL: '',
   theme: 'dark',
   uiScale: 'compact',
+  wikiDir: '',
   workspaceDir: '',
   externalSkillsDir: '',
   accentColor: '',
+  offlineModelPath: '',
 });
+
+const offlineEngineStatus = ref('stopped');
+
+async function selectOfflineModel() {
+  if (window.electronAPI.selectFile) {
+    const path = await window.electronAPI.selectFile();
+    if (path) {
+      config.value.offlineModelPath = path;
+      saveConfig('offlineModelPath', path);
+    }
+  }
+}
+
+async function toggleOfflineEngine() {
+  if (offlineEngineStatus.value === 'running') {
+    const res = await window.electronAPI.stopOfflineEngine();
+    if (res && res.status === 'stopped') {
+      offlineEngineStatus.value = 'stopped';
+    }
+  } else {
+    if (!config.value.offlineModelPath) return;
+    offlineEngineStatus.value = 'starting';
+    try {
+      const res = await window.electronAPI.startOfflineEngine(config.value.offlineModelPath);
+      if (res && res.status === 'running') {
+        offlineEngineStatus.value = 'running';
+      } else {
+        offlineEngineStatus.value = 'stopped';
+      }
+    } catch(err) {
+      offlineEngineStatus.value = 'stopped';
+      alert('启动离线引擎失败: ' + err);
+    }
+  }
+}
 
 const availableModels = ref([]);
 const computedModelOptions = computed(() => {
@@ -525,6 +606,99 @@ const isClerkConnected = computed(() => {
 const showPluginManager = ref(false);
 const trackedFolders = ref([]);
 
+// ── 凭证管理 (Credential Store) ──
+const modelProviders = ref([
+  { id: 'deepseek', name: 'DeepSeek', hasKey: false },
+  { id: 'openai', name: 'OpenAI', hasKey: false },
+  { id: 'qwen', name: '通义千问 (Qwen)', hasKey: false },
+  { id: 'doubao', name: '豆包 (Doubao)', hasKey: false },
+  { id: 'zhipu', name: '智谱 AI (GLM)', hasKey: false },
+  { id: 'kimi', name: 'Kimi (Moonshot)', hasKey: false },
+  { id: 'minimax', name: 'MiniMax', hasKey: false },
+]);
+const toolProviders = ref([
+  { id: 'TAVILY_API_KEY', name: 'Tavily (Web Search)', hasKey: false },
+  { id: 'TINYFISH_API_KEY', name: 'TinyFish (Fetch)', hasKey: false },
+]);
+const apiKeys = ref({});
+const toolStatuses = ref([]);
+
+const customModels = ref([]);
+const newCustomModel = ref({ name: '', url: '', key: '', id: '' });
+
+async function loadCustomModels() {
+  const allConfig = await window.electronAPI.getAllConfig();
+  customModels.value = allConfig.customModels || [];
+}
+
+async function addCustomModel() {
+  if (!newCustomModel.value.name || !newCustomModel.value.url || !newCustomModel.value.key) return;
+  const id = newCustomModel.value.id || ('custom-' + Date.now());
+  const provider = 'custom_' + id;
+  if (window.electronAPI.addCustomModel) {
+    await window.electronAPI.addCustomModel(id, newCustomModel.value.name, provider, newCustomModel.value.url, newCustomModel.value.key);
+    newCustomModel.value = { name: '', url: '', key: '', id: '' };
+    await loadCustomModels();
+    if (modelHubRef.value) modelHubRef.value.rescan();
+  }
+}
+
+async function removeCustomModel(id) {
+  if (window.electronAPI.removeCustomModel) {
+    await window.electronAPI.removeCustomModel(id);
+    await loadCustomModels();
+    if (modelHubRef.value) modelHubRef.value.rescan();
+  }
+}
+
+function getProviderLogo(providerId) {
+  const name = (providerId || '').toLowerCase();
+  if (name.includes('deepseek')) return '/logos/deepseek.png';
+  if (name.includes('openai')) return '/logos/openai.png';
+  if (name.includes('qwen') || name.includes('dashscope')) return '/logos/qwen.png';
+  if (name.includes('doubao')) return '/logos/doubao.png';
+  if (name.includes('zhipu')) return '/logos/glm.svg';
+  if (name.includes('kimi')) return '/logos/kimi.png';
+  if (name.includes('minimax')) return '/logos/minimax.png';
+  if (name.includes('gemini') || name.includes('google')) return '/logos/google.png';
+  if (name.includes('claude') || name.includes('anthropic')) return '/logos/claude.png';
+  return null;
+}
+
+async function fetchApiKeys() {
+  if (window.electronAPI.getApiKeys) {
+    const status = await window.electronAPI.getApiKeys();
+    [...modelProviders.value, ...toolProviders.value].forEach(p => {
+      p.hasKey = !!status[p.id];
+    });
+  }
+}
+
+async function fetchToolStatuses() {
+  if (window.electronAPI.getToolStatuses) {
+    const statuses = await window.electronAPI.getToolStatuses();
+    // 只显示有 requiredCredentials 的工具（其他都是无条件可用的）
+    toolStatuses.value = statuses.filter(t => t.missingCredentials.length > 0 || t.name === 'web_search' || t.name === 'tinyfish_fetch');
+  }
+}
+
+const modelHubRef = ref(null);
+
+async function saveApiKey(providerId) {
+  if (window.electronAPI.setApiKey) {
+    const key = apiKeys.value[providerId];
+    // 空字符串代表删除该 key
+    await window.electronAPI.setApiKey(providerId, key);
+    apiKeys.value[providerId] = ''; // clear input after save
+    await fetchApiKeys(); // refresh key status
+    await fetchToolStatuses(); // refresh tool activation states
+    if (modelHubRef.value) {
+      modelHubRef.value.refreshKeyStatus();
+    }
+    emit('config-changed'); // notify App to refresh
+  }
+}
+
 onMounted(async () => {
   const allConfig = await window.electronAPI.getAllConfig();
   config.value = {
@@ -542,6 +716,7 @@ onMounted(async () => {
     _hasClerkApiKey: allConfig._hasClerkApiKey || false,
     theme: allConfig.theme || 'dark',
     uiScale: allConfig.uiScale || 'compact',
+    wikiDir: allConfig.wikiDir || '',
     workspaceDir: allConfig.workspaceDir || '',
     externalSkillsDir: allConfig.externalSkillsDir || '',
     language: allConfig.language || 'zh-CN',
@@ -554,6 +729,20 @@ onMounted(async () => {
   await loadModels();
   await loadTrackedFolders();
   await loadMcpConfig();
+  await fetchApiKeys();
+  await loadCustomModels();
+  await fetchToolStatuses();
+  if (window.electronAPI.getVersion) {
+    appVersion.value = await window.electronAPI.getVersion();
+  }
+  if (window.electronAPI.getOfflineEngineStatus) {
+    try {
+      const res = await window.electronAPI.getOfflineEngineStatus();
+      if (res && res.status) {
+        offlineEngineStatus.value = res.status;
+      }
+    } catch(err) {}
+  }
 });
 
 async function loadModels() {
@@ -652,8 +841,8 @@ async function testConnection(target = 'main') {
       if (isMain) testResult.value = { ok: false, message: result.error };
       else clerkTestResult.value = { ok: false, message: result.error };
     } else {
-      if (isMain) testResult.value = { ok: true, message: '连接成功' };
-      else clerkTestResult.value = { ok: true, message: '连接成功' };
+      if (isMain) testResult.value = { ok: true, message: t('settings.connection_ok') };
+      else clerkTestResult.value = { ok: true, message: t('settings.connection_ok') };
     }
   } catch (err) {
     if (isMain) testResult.value = { ok: false, message: err.message };
@@ -670,8 +859,14 @@ function openDataDir() {
   }
 }
 
+function openLogDir() {
+  if (window.electronAPI.openLogDir) {
+    window.electronAPI.openLogDir();
+  }
+}
+
 async function factoryReset() {
-  if (confirm('警告：您确定要清空所有聊天记录、配置、记忆和临时技能吗？此操作无法撤销。程序清理后将自动重启。')) {
+  if (confirm(t('modal.factory_reset_warning'))) {
     if (window.electronAPI.factoryReset) {
       await window.electronAPI.factoryReset();
     }
@@ -689,6 +884,19 @@ async function selectWorkspaceDir() {
 async function clearWorkspaceDir() {
   config.value.workspaceDir = '';
   await saveConfig('workspaceDir', '');
+}
+
+async function selectWikiDir() {
+  const dirPath = await window.electronAPI.selectDir();
+  if (dirPath) {
+    config.value.wikiDir = dirPath;
+    await saveConfig('wikiDir', dirPath);
+  }
+}
+
+async function clearWikiDir() {
+  config.value.wikiDir = '';
+  await saveConfig('wikiDir', '');
 }
 
 async function selectExternalSkillsDir() {
@@ -822,6 +1030,32 @@ async function removeMcpServer(name) {
   color: var(--text-secondary);
   margin-bottom: var(--space-2);
   font-weight: 500;
+}
+
+/* 统一间距和折叠样式 */
+.details-section {
+  border-top: 1px solid var(--border-subtle);
+  padding-top: var(--space-4);
+  margin-top: var(--space-4);
+}
+.details-section:first-of-type {
+  border-top: none;
+  padding-top: 0;
+  margin-top: 0;
+}
+
+details > summary {
+  list-style: none;
+}
+details > summary::-webkit-details-marker {
+  display: none;
+}
+.details-chevron {
+  transition: transform 0.2s ease;
+  color: var(--text-tertiary);
+}
+details[open] > summary .details-chevron {
+  transform: rotate(180deg);
 }
 
 .toggle-key {

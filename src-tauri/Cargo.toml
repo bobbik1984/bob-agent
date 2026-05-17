@@ -1,0 +1,43 @@
+[package]
+name = "bob"
+version = "0.1.0"
+description = "A Tauri App"
+authors = ["you"]
+license = ""
+repository = ""
+edition = "2021"
+rust-version = "1.71"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+name = "app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.0.0-rc.13", features = [] }
+
+[dependencies]
+serde_json = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+log = "0.4"
+tauri = { version = "2.0.0-rc.17", features = ["tray-icon"] }
+tauri-plugin-log = "2.0.0-rc"
+dirs = "5.0"
+tauri-plugin-dialog = "2.0.0-beta.0"
+tauri-plugin-shell = "2.0.0-rc"
+rusqlite = { version = "0.39.0", features = ["bundled"] }
+tokio = { version = "1.52.3", features = ["full"] }
+futures-util = "0.3.32"
+reqwest = { version = "0.13.3", features = ["stream", "json"] }
+walkdir = "2.5.0"
+scraper = "0.22"
+chrono = "0.4"
+
+# LLM-Wiki 知识库引擎 — 本地文件解析
+pdf-extract = "0.10"
+calamine = "0.28"
+zip = "2.4"
+quick-xml = "0.37"
+tauri-plugin-single-instance = "2.0.0-rc"
+tauri-plugin-global-shortcut = "2.0.0-rc"

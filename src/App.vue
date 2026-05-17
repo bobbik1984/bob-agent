@@ -22,8 +22,17 @@
           </g>
         </svg>
       </div>
-      <div class="titlebar-right">
-        <!-- Windows 控件由 titleBarOverlay 提供 -->
+      <div data-tauri-drag-region style="flex: 1; height: 100%;"></div>
+      <div class="titlebar-right titlebar-no-drag">
+        <button class="win-btn" @click="minimizeWindow" title="最小化">
+          <svg width="10" height="1" viewBox="0 0 10 1"><rect fill="currentColor" width="10" height="1"/></svg>
+        </button>
+        <button class="win-btn" @click="toggleMaximize" title="最大化">
+          <svg width="10" height="10" viewBox="0 0 10 10"><rect fill="none" stroke="currentColor" stroke-width="1" x="0.5" y="0.5" width="9" height="9"/></svg>
+        </button>
+        <button class="win-btn win-close" @click="closeWindow" title="关闭">
+          <svg width="10" height="10" viewBox="0 0 10 10"><line stroke="currentColor" stroke-width="1.2" x1="0" y1="0" x2="10" y2="10"/><line stroke="currentColor" stroke-width="1.2" x1="10" y1="0" x2="0" y2="10"/></svg>
+        </button>
       </div>
     </div>
 
@@ -122,6 +131,7 @@
       <main class="content">
         <ChatView
           v-show="currentView === 'chat'"
+          ref="chatViewRef"
           :conversationId="activeConversationId"
           @update-title="updateConversationTitle"
         />
@@ -136,11 +146,11 @@
     <!-- 自定义删除确认弹窗 -->
     <div v-if="showDeleteModal" class="modal-overlay">
       <div class="modal-card">
-        <h3 class="modal-title">删除对话</h3>
-        <p class="modal-desc">确定要删除这个对话吗？此操作不可恢复。</p>
+        <h3 class="modal-title">{{ $t('modal.delete_title') }}</h3>
+        <p class="modal-desc">{{ $t('modal.delete_desc') }}</p>
         <div class="modal-actions">
-          <button class="btn btn-ghost" @click="cancelDeleteChat">取消</button>
-          <button class="btn btn-danger" @click="confirmDeleteChat">确定删除</button>
+          <button class="btn btn-ghost" @click="cancelDeleteChat">{{ $t('modal.cancel') }}</button>
+          <button class="btn btn-danger" @click="confirmDeleteChat">{{ $t('modal.confirm_delete') }}</button>
         </div>
       </div>
     </div>
@@ -156,11 +166,30 @@ import SetupWizard from './components/SetupWizard.vue';
 import { Inbox, Settings, Plus, X, Sun, Moon, ChevronLeft, ChevronRight } from 'lucide-vue-next';
 import { useI18n } from 'vue-i18n';
 
+import { getCurrentWindow } from '@tauri-apps/api/window';
+
+// Tauri Window API (用于自定义窗口按钮)
+const appWindow = getCurrentWindow();
+function minimizeWindow() { appWindow.minimize(); }
+function toggleMaximize() { appWindow.toggleMaximize(); }
+function closeWindow() { appWindow.hide(); } 
+
 const { locale, t } = useI18n();
 
 // ── 状态 ─────────────────────────────────────────────
 const isSetupComplete = ref(false);
 const currentView = ref('chat');
+const chatViewRef = ref(null);
+
+import { watch } from 'vue';
+watch(currentView, (newView) => {
+  if (newView === 'chat' && chatViewRef.value) {
+    // 当从设置页面返回聊天页面时，强制刷新模型选中状态
+    chatViewRef.value.refreshModel();
+    // 切回来后自动滚到底部，防止后台流式输出期间滚动位置丢失
+    chatViewRef.value.scrollToBottom();
+  }
+});
 const conversations = ref([]);
 const activeConversationId = ref(null);
 const currentModel = ref('');
@@ -205,7 +234,20 @@ function toggleSidebar() {
 
 async function toggleTheme() {
   currentTheme.value = currentTheme.value === 'dark' ? 'light' : 'dark';
-  document.documentElement.setAttribute('data-theme', currentTheme.value);
+  
+  // T-554 UX: 平滑过渡逻辑
+  // 必须先添加 class 并等待浏览器渲染该帧，再修改 data-theme，否则没有过渡效果
+  document.documentElement.classList.add('theme-transitioning');
+  
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      document.documentElement.setAttribute('data-theme', currentTheme.value);
+      setTimeout(() => {
+        document.documentElement.classList.remove('theme-transitioning');
+      }, 850);
+    });
+  });
+
   await window.electronAPI.setConfig('theme', currentTheme.value);
   if (window.electronAPI.updateTheme) {
     window.electronAPI.updateTheme(currentTheme.value);
@@ -218,7 +260,7 @@ const bottomNavItems = computed(() => [
 ]);
 
 const modelInfo = computed(() => {
-  if (!currentModel.value) return { name: '未配置', logo: null };
+  if (!currentModel.value) return { name: t('app.not_configured'), logo: null };
   const name = currentModel.value.toLowerCase();
   
   if (name.includes('deepseek')) {
@@ -276,6 +318,22 @@ onMounted(async () => {
 
   // 启动画面淡出 — 保证至少展示 1.2 秒
   setTimeout(() => { showSplash.value = false; }, 1200);
+
+  // ── Outbox Reconciler 事件监听 (T-813) ─────────────
+  if (window.electronAPI.onConfigReconciled) {
+    window.electronAPI.onConfigReconciled((payload) => {
+      const count = payload?.applied || 0;
+      console.log(`[Reconciler] ${count} 条配置已生效，刷新 UI...`);
+      // 刷新 ChatView 模型指示器
+      if (chatViewRef.value && chatViewRef.value.refreshModel) {
+        chatViewRef.value.refreshModel();
+      }
+      // 重新加载当前模型
+      window.electronAPI.getConfig('model').then(m => {
+        if (m) currentModel.value = m;
+      });
+    });
+  }
 });
 
 // ── 对话管理 ─────────────────────────────────────────
@@ -293,7 +351,7 @@ async function createNewChat() {
   if (activeConversationId.value) {
     window.electronAPI.summarizeSession(activeConversationId.value).catch(e => console.error(e));
   }
-  const conv = await window.electronAPI.createConversation('新对话', currentModel.value);
+  const conv = await window.electronAPI.createConversation(t('chat.new_conversation'), currentModel.value);
   conversations.value.unshift(conv);
   activeConversationId.value = conv.id;
 }
@@ -433,7 +491,7 @@ async function onConfigChanged() {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 var(--space-4) 0 var(--space-2);
+  padding: 0 0 0 var(--space-2);
   background: var(--bg-primary);
   border-bottom: 1px solid var(--border-subtle);
   flex-shrink: 0;

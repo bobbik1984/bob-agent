@@ -8,3 +8,7 @@ out/
 *.db-journal
 *.db-wal
 data/
+scratch/
+resources/llm-engine/
+*.gguf
+*.dll

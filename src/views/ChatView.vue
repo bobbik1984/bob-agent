@@ -14,6 +14,11 @@
         <div class="empty-logo-wrapper">
           <img src="/bob_logo.svg" class="empty-bob-logo" alt="Bob" />
         </div>
+        <!-- 晨间汇报卡片 -->
+        <MorningBriefing
+          @chat="onBriefingChat"
+          @dismiss="() => {}"
+        />
       </div>
 
       <!-- 消息列表 -->
@@ -69,6 +74,10 @@
           <div v-if="msg.image_base64" class="message-image">
             <img :src="'data:image/png;base64,' + msg.image_base64" alt="用户图片" />
           </div>
+          <!-- 模型标注 -->
+          <div v-if="msg.role === 'assistant' && msg._modelLabel" class="model-label">
+            {{ msg._modelLabel }}
+          </div>
         </div>
       </div>
 
@@ -76,12 +85,9 @@
       <div v-if="isStreaming" class="message-row message-assistant animate-slide-up">
         <div class="message-avatar avatar-bob"><img src="/bob_logo.svg" class="bob-avatar-img" alt="Bob" /></div>
         <div class="message-body">
-          <div v-if="streamThinking" class="thinking-card expanded">
-            <button class="thinking-toggle">
-              <ChevronDown :size="14" class="thinking-arrow" />
-              <span>Thinking...</span>
-            </button>
-            <div class="thinking-content selectable">{{ streamThinking }}</div>
+          <!-- 等待响应指示器：回车后立即出现，思考期间持续显示，直到正文开始流入才消失 -->
+          <div v-if="!streamContent && activeTools.length === 0" class="typing-indicator">
+            <span class="dot"></span><span class="dot"></span><span class="dot"></span>
           </div>
           <!-- 工具调用状态 -->
           <div v-if="activeTools.length > 0" class="tool-calls-panel">
@@ -97,14 +103,24 @@
                 <ChevronRight v-if="tool.result" :size="12" class="tool-expand-icon" :class="{ 'rotate-90': tool._expanded }" />
               </div>
               <div v-if="tool._expanded && tool.result" class="tool-result-preview">
-                {{ tool.result }}
+                <template v-if="tool._searchResults && tool._searchResults.length > 0">
+                  <SearchCard
+                    v-for="(sr, si) in tool._searchResults"
+                    :key="si"
+                    :title="sr.title"
+                    :url="sr.url"
+                    :snippet="sr.snippet"
+                  />
+                </template>
+                <template v-else>
+                  {{ tool.result }}
+                </template>
               </div>
             </div>
           </div>
           <div v-if="streamContent" class="message-content selectable" v-html="renderMarkdown(streamContent)"></div>
-          <div v-if="!streamContent && !streamThinking && activeTools.length === 0" class="typing-indicator">
-            <span></span><span></span><span></span>
-          </div>
+          <!-- 流式模型标注 -->
+          <div v-if="currentModelName" class="model-label">{{ currentModelName }}</div>
         </div>
       </div>
     <!-- Pending Folder Drop Card -->
@@ -167,6 +183,14 @@
           <img :src="'data:image/png;base64,' + pendingImage" alt="Pending Image" />
           <button class="image-remove-inline btn-icon" @click="pendingImage = null"><X :size="10" /></button>
         </div>
+        <!-- 待发送文件预览 -->
+        <div v-if="pendingFiles.length > 0" class="inline-files-preview">
+          <div v-for="(f, index) in pendingFiles" :key="index" class="pending-file-chip">
+            <FileText :size="12" />
+            <span class="pending-file-name" :title="f.name">{{ f.name }}</span>
+            <button class="file-remove-btn" @click="pendingFiles.splice(index, 1)"><X :size="10" /></button>
+          </div>
+        </div>
         <!-- 文本输入 -->
         <textarea
           ref="inputRef"
@@ -192,18 +216,37 @@
             </button>
             <!-- 弹出选择面板 -->
             <div v-if="showModelSwitcher" class="model-popup">
-              <button
-                v-for="m in availableModels"
-                :key="m.id"
-                class="model-option"
-                :class="{ active: currentModelRaw === m.id }"
-                @click="switchModel(m.id)"
-              >
-                <img v-if="getModelLogo(m.id)" :src="getModelLogo(m.id)" class="model-logo-sm" @error="(e) => e.target.style.display = 'none'" />
-                <span class="model-option-label">{{ m.label }}</span>
-              </button>
-              <div v-if="availableModels.length === 0" class="model-option-empty">
-                {{ $t('chat.no_models') }}
+              <div class="model-popup-cols">
+                <!-- 左：供应商列表 -->
+                <div class="model-popup-providers">
+                  <button
+                    v-for="p in modelProviderList"
+                    :key="p.id"
+                    class="model-provider-btn"
+                    :class="{ active: switcherProvider === p.id }"
+                    @mouseenter="switcherProvider = p.id"
+                    @click="switcherProvider = p.id"
+                  >
+                    <img v-if="getModelLogo(p.id)" :src="getModelLogo(p.id)" class="model-logo-sm" @error="(e) => e.target.style.visibility = 'hidden'" />
+                    <span class="model-provider-name" :title="p.name">{{ p.name }}</span>
+                    <span class="provider-count">{{ p.count }}</span>
+                  </button>
+                </div>
+                <!-- 右：当前供应商的模型 -->
+                <div class="model-popup-models">
+                  <button
+                    v-for="m in switcherModels"
+                    :key="m.id"
+                    class="model-option"
+                    :class="{ active: currentModelRaw === m.id }"
+                    @click="switchModel(m.id)"
+                  >
+                    <span class="model-option-label">{{ m.displayName }}</span>
+                  </button>
+                  <div v-if="switcherModels.length === 0" class="model-option-empty">
+                    {{ $t('chat.no_models') }}
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -300,8 +343,10 @@ import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue';
 import { Sparkles, FileText, Camera, Calendar, User, ChevronRight, ChevronDown, ChevronUp, X, FileUp, Paperclip, Loader2, Shield, Zap, Lock, Unlock, Download } from 'lucide-vue-next';
 import ConfirmCard from '../components/ConfirmCard.vue';
 import FileCard from '../components/FileCard.vue';
+import SearchCard from '../components/SearchCard.vue';
 import FolderDropCard from '../components/FolderDropCard.vue';
 import KBEstimateCard from '../components/KBEstimateCard.vue';
+import MorningBriefing from '../components/MorningBriefing.vue';
 
 const props = defineProps({
   conversationId: String,
@@ -315,6 +360,7 @@ const isStreaming = ref(false);
 const streamContent = ref('');
 const streamThinking = ref('');
 const pendingImage = ref(null);
+const pendingFiles = ref([]); // Array of { path, name, size }
 const pendingFolderInfo = ref(null);
 const pendingKBEstimate = ref(null);
 const isDragging = ref(false);
@@ -327,7 +373,31 @@ const inputRef = ref(null);
 const currentModelRaw = ref('');
 const showModelSwitcher = ref(false);
 const availableModels = ref([]);
+const switcherProvider = ref('');
 const sessionCost = ref(0);
+
+// 从 availableModels 分组出供应商列表
+const modelProviderList = computed(() => {
+  const map = {};
+  for (const m of availableModels.value) {
+    const prov = m.provider || 'unknown';
+    if (!map[prov]) map[prov] = { id: prov, name: m.providerName || prov, count: 0 };
+    map[prov].count++;
+  }
+  return Object.values(map);
+});
+
+// 当前供应商下的模型列表
+const switcherModels = computed(() => {
+  if (!switcherProvider.value) return [];
+  const models = availableModels.value.filter(m => (m.provider || 'unknown') === switcherProvider.value);
+  // 在 UI 层面强制按字母排序，确保同系列模型（如 Qwen3.5、GLM-5 等）在下拉列表里排列在一起
+  return models.sort((a, b) => {
+    const nameA = a.displayName || a.id || '';
+    const nameB = b.displayName || b.id || '';
+    return nameA.localeCompare(nameB);
+  });
+});
 const globalFileAccess = ref(false);
 const agentMode = ref('insight');
 const showAgentModeSwitcher = ref(false);
@@ -346,13 +416,27 @@ function getModelLogo(modelId) {
   const name = (modelId || '').toLowerCase();
   if (name.includes('deepseek')) return '/logos/deepseek.png';
   if (name.includes('gpt') || name.includes('openai')) return '/logos/openai.png';
-  if (name.includes('gemini')) return '/logos/gemini.png';
+  if (name.includes('gemini') || name.includes('google') || name.includes('gemma')) return '/logos/google.png';
+  if (name.includes('qwen') || name.includes('dashscope')) return '/logos/qwen.png';
+  if (name.includes('glm') || name.includes('zhipu')) return '/logos/glm.svg';
+  if (name.includes('kimi') || name.includes('moonshot')) return '/logos/kimi.png';
+  if (name.includes('doubao') || name.includes('seed')) return '/logos/doubao.png';
+  if (name.includes('minimax')) return '/logos/minimax.png';
+  if (name.includes('mimo')) return '/logos/mimo.png';
+  if (name.includes('modelscope')) return '/logos/modelscope.png';
+  if (name.includes('claude') || name.includes('anthropic')) return '/logos/claude.png';
+  if (name.includes('grok') || name.includes('xai')) return '/logos/grok.png';
+  if (name.includes('openrouter')) return '/logos/openrouter.png';
   return null;
 }
 
 const currentModelName = computed(() => {
   const found = availableModels.value.find(m => m.id === currentModelRaw.value);
-  if (found) return found.label;
+  if (found) return found.displayName || found.label;
+  // 尝试从 ID 中提取显示名 (如 'deepseek::deepseek-v4-flash' → 'deepseek-v4-flash')
+  if (currentModelRaw.value && currentModelRaw.value.includes('::')) {
+    return currentModelRaw.value.split('::')[1];
+  }
   return currentModelRaw.value || '';
 });
 
@@ -363,8 +447,26 @@ const currentModelLogo = computed(() => {
 async function toggleModelSwitcher() {
   if (!showModelSwitcher.value) {
     try {
-      const models = await window.electronAPI.getModels();
-      availableModels.value = models || [];
+      const pool = await window.electronAPI.getModelPool();
+      let keys = {};
+      if (window.electronAPI.getApiKeys) {
+        keys = await window.electronAPI.getApiKeys() || {};
+      }
+      
+      availableModels.value = (pool || [])
+        .filter(m => !!keys[m.provider]) // 只保留已配置 API Key 的模型
+        .map(m => ({
+          id: m.id,
+          provider: m.provider,
+          providerName: m.providerName,
+          displayName: m.displayName,
+        }));
+      // 默认选中当前模型所在的供应商
+      if (currentModelRaw.value && currentModelRaw.value.includes('::')) {
+        switcherProvider.value = currentModelRaw.value.split('::')[0];
+      } else if (modelProviderList.value.length > 0) {
+        switcherProvider.value = modelProviderList.value[0].id;
+      }
     } catch (e) {
       availableModels.value = [];
     }
@@ -373,7 +475,8 @@ async function toggleModelSwitcher() {
 }
 
 async function switchModel(modelId) {
-  await window.electronAPI.setConfig('model', modelId);
+  // 使用 ModelHub assign 替代旧的 config:set
+  await window.electronAPI.assignModelRole(modelId, 'main');
   currentModelRaw.value = modelId;
   showModelSwitcher.value = false;
 }
@@ -420,20 +523,75 @@ function handleCancelEvent(msgObj) {
   msgObj.type = 'text';
 }
 
+// ── 点击外部关闭模型弹窗 ──────────────────────────
+function onClickOutside(e) {
+  // 如果点击不在任何 model-switcher-wrap 内部，关闭所有弹窗
+  if (!e.target.closest('.model-switcher-wrap')) {
+    showModelSwitcher.value = false;
+    showAgentModeSwitcher.value = false;
+  }
+}
+
 // ── 流式监听 ─────────────────────────────────────────
 let cleanupStreamListener = null;
+let tauriDragUnlistens = [];
 
 onMounted(async () => {
   cleanupStreamListener = window.electronAPI.onStreamChunk(handleStreamChunk);
   loadMessages();
 
-  // 预加载模型列表用于显示 label
+  // 预加载模型列表 + 当前活跃模型
   try {
-    availableModels.value = await window.electronAPI.getModels() || [];
+    const pool = await window.electronAPI.getModelPool();
+    availableModels.value = (pool || []).map(m => ({
+      id: m.id,
+      provider: m.provider,
+      providerName: m.providerName,
+      displayName: m.displayName,
+    }));
+    const active = await window.electronAPI.getActiveModels();
+    currentModelRaw.value = active?.main || '';
   } catch (e) { /* ignore */ }
 
-  // 拖拽监听
+  // 拖拽监听 (DOM 回退)
   document.addEventListener('dragenter', onDragEnter);
+
+  // Tauri 原生拖拽监听
+  if (window.electronAPI.onDragEnter) {
+    let currentPreScanPath = null;
+    
+    window.electronAPI.onDragEnter(async (e) => { 
+      isDragging.value = true;
+      if (e.payload && e.payload.paths && e.payload.paths.length > 0) {
+        const filePath = e.payload.paths[0];
+        if (currentPreScanPath === filePath) return;
+        currentPreScanPath = filePath;
+        try {
+          const meta = await window.electronAPI.getFileMeta(filePath);
+          if (meta && meta.isDir) {
+            // 后台预处理文件夹
+            window.electronAPI.scanFolder(filePath).then(scanResult => {
+               if (scanResult && !scanResult.error) {
+                 window.__preScannedFolder = { path: filePath, name: meta.name, scanResult };
+               }
+            });
+          }
+        } catch(err) {}
+      }
+    }).then(u => tauriDragUnlistens.push(u));
+    
+    window.electronAPI.onDragLeave(async () => { isDragging.value = false; }).then(u => tauriDragUnlistens.push(u));
+    
+    window.electronAPI.onDragDrop(async (e) => {
+      isDragging.value = false;
+      if (e.payload && e.payload.paths && e.payload.paths.length > 0) {
+        await handleTauriDrop(e.payload.paths);
+      }
+    }).then(u => tauriDragUnlistens.push(u));
+  }
+
+  // 点击外部关闭弹窗
+  document.addEventListener('click', onClickOutside);
 
   // Logo 滚动视差
   if (messagesArea.value) {
@@ -445,18 +603,26 @@ onMounted(async () => {
 onUnmounted(() => {
   if (cleanupStreamListener) cleanupStreamListener();
   document.removeEventListener('dragenter', onDragEnter);
+  document.removeEventListener('click', onClickOutside);
   if (messagesArea.value) {
     messagesArea.value.removeEventListener('scroll', onMessagesScroll);
     messagesArea.value.removeEventListener('click', onMessageLinkClick);
   }
+  tauriDragUnlistens.forEach(u => typeof u === 'function' && u());
+  tauriDragUnlistens = [];
 });
 
 // 切换对话时重新加载消息
 watch(() => props.conversationId, async () => {
+  if (props.conversationId) {
+    const conv = await window.electronAPI.getConversation(props.conversationId);
+    sessionCost.value = conv?.cost || 0;
+  } else {
+    sessionCost.value = 0;
+  }
   loadMessages();
-  sessionCost.value = 0;
   globalFileAccess.value = false;
-  currentModelRaw.value = await window.electronAPI.getConfig('model') || '';
+  currentModelRaw.value = (await window.electronAPI.getActiveModels())?.main || '';
 }, { immediate: true });
 
 // ── 消息加载 ─────────────────────────────────────────
@@ -468,26 +634,58 @@ async function loadMessages() {
     _thinkingExpanded: false,
   }));
   scrollToBottom();
+  setTimeout(scrollToBottom, 150);
+  setTimeout(scrollToBottom, 500);
+}
+
+// ── 晨间汇报交互 ──────────────────────────────────────
+function onBriefingChat(briefingContent) {
+  inputText.value = `关于你刚才的晨间回顾，我想继续聊聊：\n\n${briefingContent}`;
+  nextTick(() => sendMessage());
 }
 
 // ── 发送消息 ─────────────────────────────────────────
 async function sendMessage() {
   const text = inputText.value.trim();
-  if (!text && !pendingImage.value) return;
+  if (!text && !pendingImage.value && pendingFiles.value.length === 0) return;
   if (isStreaming.value) return;
+
+  const filesToRead = [...pendingFiles.value];
+  const imageBase64 = pendingImage.value;
 
   const userMessage = {
     role: 'user',
-    content: text || (pendingImage.value ? '请分析这张图片' : ''),
-    image_base64: pendingImage.value || null,
+    content: text || (imageBase64 ? '请分析这张图片' : '请分析附件内容'),
+    image_base64: imageBase64 || null,
   };
 
-  // 添加到 UI
+  // 立即添加到 UI 并清空输入框
   messages.value.push(userMessage);
   inputText.value = '';
   pendingImage.value = null;
+  pendingFiles.value = [];
   resetTextareaHeight();
+  
+  // 立即激活打字机指示器
+  isStreaming.value = true;
+  streamContent.value = '';
+  streamThinking.value = '';
+  activeTools.value = [];
+
+  await nextTick();
   scrollToBottom();
+
+  // 后台异步读取文件并追加到内容中
+  if (filesToRead.length > 0) {
+    for (const f of filesToRead) {
+      const res = await window.electronAPI.readFile(f.path);
+      if (!res.error) {
+        userMessage.content += `\n\n--- 附件: ${res.name} ---\n${res.content}\n--- 文件结束 ---`;
+      } else {
+        userMessage.content += `\n\n[附件读取失败: ${res.name} (${res.error})]`;
+      }
+    }
+  }
 
   // 持久化
   await window.electronAPI.addMessage(
@@ -511,11 +709,8 @@ async function sendMessage() {
       content: m.content || '',
     }));
 
-  // 开始流式响应
-  isStreaming.value = true;
-  streamContent.value = '';
-  streamThinking.value = '';
-  activeTools.value = [];
+  await nextTick();
+  scrollToBottom();
 
   try {
     let result;
@@ -532,6 +727,11 @@ async function sendMessage() {
       const inputCost = (result.usage.prompt_tokens || 0) / 1_000_000 * result.pricing.input;
       const outputCost = (result.usage.completion_tokens || 0) / 1_000_000 * result.pricing.output;
       sessionCost.value += inputCost + outputCost;
+      
+      // 持久化保存到数据库
+      if (props.conversationId) {
+        window.electronAPI.updateConversationCost(props.conversationId, sessionCost.value);
+      }
     }
 
     if (result.error) {
@@ -545,12 +745,36 @@ async function sendMessage() {
       let finalContent = streamContent.value || result.content || '';
       let finalThinking = streamThinking.value || result.thinking || null;
 
+      // ── Outbox: 检测 bob-config 代码块 (T-812) ──────────
+      const configBlockRegex = /```bob-config\n([\s\S]*?)\n```/g;
+      let match;
+      const outboxOps = [];
+      while ((match = configBlockRegex.exec(finalContent)) !== null) {
+        try {
+          const op = JSON.parse(match[1]);
+          outboxOps.push(op);
+        } catch (e) {
+          console.warn('[Outbox] bob-config 块 JSON 解析失败:', e);
+        }
+      }
+      if (outboxOps.length > 0) {
+        try {
+          await window.electronAPI.writeOutbox(outboxOps);
+          console.log(`[Outbox] 已写入 ${outboxOps.length} 条配置操作`);
+        } catch (e) {
+          console.error('[Outbox] writeOutbox 失败:', e);
+        }
+        // 从显示内容中移除 bob-config 块 (用户不需要看到原始 JSON)
+        finalContent = finalContent.replace(configBlockRegex, '').trim();
+      }
+
       // 始终显示回复，即使内容为空也给出提示
       const assistantMsg = {
         role: 'assistant',
         content: finalContent || '（模型未返回内容，请检查 API 配置或重试）',
         thinking: finalThinking,
         _thinkingExpanded: false,
+        _modelLabel: currentModelName.value || result.model || '',
       };
       
       messages.value.push(assistantMsg);
@@ -579,7 +803,11 @@ async function sendMessage() {
 }
 
 function handleStreamChunk(chunk) {
-  if (chunk.type === 'text') {
+  if (chunk.type === 'clear') {
+    // 后端检测到 DSML 泄漏，清除已渲染的脏内容准备重试
+    streamContent.value = '';
+    return;
+  } else if (chunk.type === 'text') {
     streamContent.value += chunk.content;
   } else if (chunk.type === 'thinking') {
     streamThinking.value += chunk.content;
@@ -590,6 +818,16 @@ function handleStreamChunk(chunk) {
     if (tool) {
       tool.status = 'done';
       tool.result = chunk.result;
+      // 解析 web_search 结果为结构化卡片数据
+      if (chunk.name === 'web_search' && chunk.result) {
+        try {
+          const parsed = JSON.parse(chunk.result);
+          if (parsed.results && Array.isArray(parsed.results)) {
+            tool._searchResults = parsed.results;
+            tool._expanded = true; // 自动展开搜索结果
+          }
+        } catch (e) { /* 解析失败则显示原始文本 */ }
+      }
     }
   }
   scrollToBottom();
@@ -837,6 +1075,56 @@ async function handleDrop(event) {
   }
 }
 
+// ── Tauri 原生拖拽处理 ──
+async function handleTauriDrop(paths) {
+  if (!paths || paths.length === 0) return;
+  
+  // 支持多文件拖拽
+  for (const filePath of paths) {
+    // 忽略图片，因为 DOM 层的 HTML5 Drag-and-Drop 会生成 File 对象并通过 handleDrop 转成 Base64
+    // 为了防止冲突，我们在 Tauri 原生层静默忽略图片
+    if (filePath.match(/\.(png|jpg|jpeg|gif|webp)$/i)) {
+      continue;
+    }
+
+    try {
+      const meta = await window.electronAPI.getFileMeta(filePath);
+      if (meta && meta.isDir) {
+        // 使用后台预处理结果（如果就绪）
+        let scanResult;
+        if (window.__preScannedFolder && window.__preScannedFolder.path === filePath) {
+          scanResult = window.__preScannedFolder.scanResult;
+          window.__preScannedFolder = null; // 清除缓存
+        } else {
+          scanResult = await window.electronAPI.scanFolder(filePath);
+        }
+        
+        if (scanResult && !scanResult.error) {
+           pendingFolderInfo.value = {
+             path: filePath,
+             name: meta.name,
+             scanResult
+           };
+           scrollToBottom();
+        } else {
+           inputText.value = `文件夹扫描失败: ${scanResult?.message || '未知错误'}`;
+        }
+      } else {
+        // 放入待发送区
+        if (!pendingFiles.value.some(f => f.path === filePath)) {
+          pendingFiles.value.push({
+            path: filePath,
+            name: meta ? meta.name : filePath.split(/[/\\]/).pop(),
+            size: meta ? meta.size : 0
+          });
+        }
+      }
+    } catch (err) {
+      console.warn(`原生拖拽处理错误: ${err.message}`);
+    }
+  }
+}
+
 // ── 输入辅助 ────────────────────────────────────────
 function handleKeydown(event) {
   if (event.key === 'Enter' && !event.shiftKey) {
@@ -937,12 +1225,74 @@ function cancelKBEstimate() {
 
 function startKBBuild(folderPath, plan) {
   pendingKBEstimate.value = null;
-  messages.value.push({ role: 'user', content: `请使用 ${plan === 'cheap' ? '基础模型' : '核心模型'} 为这个文件夹搭建语义知识库。` });
-  
-  // 这会触发 LLM 进而调用 kb_convert -> kb_index
-  inputText.value = `Please use the "kb_convert" and then "kb_index" tools (or the semantic index skill) to build a knowledge base for: ${folderPath}. I prefer the ${plan} model plan.`;
-  sendMessage();
+
+  // 在聊天流中插入进度消息（不阻塞主聊天）
+  const progressMsgId = Date.now().toString();
+  messages.value.push({
+    id: progressMsgId,
+    role: 'assistant',
+    content: '📚 正在启动知识库构建...'
+  });
+  scrollToBottom();
+
+  // 监听 Rust 后台的进度事件
+  const unlistenProgress = window.electronAPI.onKBProgress?.((payload) => {
+    const idx = messages.value.findIndex(m => m.id === progressMsgId);
+    if (idx !== -1) {
+      messages.value[idx].content = `📚 ${payload.message} (${payload.current}/${payload.total})`;
+    }
+    scrollToBottom();
+  });
+
+  const unlistenComplete = window.electronAPI.onKBComplete?.((payload) => {
+    const idx = messages.value.findIndex(m => m.id === progressMsgId);
+    if (idx !== -1) {
+      if (payload.failed > 0) {
+        messages.value[idx].content = `⚠️ 知识库构建完成：${payload.success}/${payload.total} 成功，${payload.failed} 个文件处理失败。你现在可以向我提问关于「${payload.folder}」的内容。`;
+      } else {
+        messages.value[idx].content = `✅ 知识库构建完成！已成功处理 ${payload.total} 个文件。你现在可以向我提问关于「${payload.folder}」的内容。`;
+      }
+    }
+    scrollToBottom();
+    // 清理监听器
+    if (unlistenProgress) unlistenProgress();
+    if (unlistenComplete) unlistenComplete();
+  });
+
+  // 异步调用 Rust 后端（不 await，不阻塞）
+  window.electronAPI.buildKB?.(folderPath, plan).then((result) => {
+    if (result?.error) {
+      const idx = messages.value.findIndex(m => m.id === progressMsgId);
+      if (idx !== -1) {
+        messages.value[idx].content = `❌ ${result.message}`;
+      }
+      if (unlistenProgress) unlistenProgress();
+      if (unlistenComplete) unlistenComplete();
+    }
+  }).catch((err) => {
+    const idx = messages.value.findIndex(m => m.id === progressMsgId);
+    if (idx !== -1) {
+      messages.value[idx].content = `❌ 知识库构建失败: ${err.message || err}`;
+    }
+    if (unlistenProgress) unlistenProgress();
+    if (unlistenComplete) unlistenComplete();
+  });
 }
+
+// ── 暴露给父组件 ────────────────────────────────────────
+async function refreshModel() {
+  try {
+    const active = await window.electronAPI.getActiveModels();
+    if (active && active.main) {
+      currentModelRaw.value = active.main;
+    }
+  } catch (e) { /* ignore */ }
+}
+
+defineExpose({
+  refreshModel,
+  scrollToBottom,  // 从设置/日程切回时自动滚到底部
+});
 </script>
 
 <style scoped>
@@ -1093,10 +1443,11 @@ function startKBBuild(folderPath, plan) {
 
 .message-content :deep(code) {
   font-family: var(--font-mono);
-  font-size: 0.9em;
-  padding: 2px 6px;
-  border-radius: 4px;
-  background: var(--bg-code-inline);
+  font-size: 0.95em;
+  padding: 0 2px;
+  border-radius: 2px;
+  background: transparent;
+  color: var(--text-primary);
 }
 
 .message-content :deep(strong) {
@@ -1325,18 +1676,16 @@ function startKBBuild(folderPath, plan) {
 }
 
 .dot-running {
-  background: transparent;
-  border: 1.5px solid var(--accent-primary);
-  animation: dot-pulse 1.2s ease-in-out infinite;
+  background: var(--accent-primary);
+  animation: dot-blink 1s ease-in-out infinite;
 }
 
 .dot-done {
   background: var(--accent-primary);
-  border: 1.5px solid var(--accent-primary);
 }
 
-@keyframes dot-pulse {
-  0%, 100% { opacity: 0.4; }
+@keyframes dot-blink {
+  0%, 100% { opacity: 0.3; }
   50% { opacity: 1; }
 }
 
@@ -1476,13 +1825,85 @@ function startKBBuild(folderPath, plan) {
   position: absolute;
   bottom: calc(100% + 6px);
   left: 0;
-  min-width: 200px;
+  width: max-content;
+  max-width: 450px;
+  min-width: 300px;
   background: var(--bg-primary);
   border: 1px solid var(--border-default);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-lg);
-  padding: var(--space-1);
   z-index: 200;
+  overflow: hidden;
+}
+
+.model-popup-cols {
+  display: flex;
+  max-height: 320px;
+}
+
+/* 左侧：供应商列表 */
+.model-popup-providers {
+  width: max-content;
+  min-width: 120px;
+  max-width: 160px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--border-subtle);
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: var(--space-1);
+  background: var(--bg-secondary);
+}
+
+.model-provider-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 5px 8px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+  text-align: left;
+  cursor: pointer;
+  transition: all var(--duration-fast);
+  overflow: hidden;
+}
+
+.model-provider-name {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.model-provider-btn:hover {
+  background: var(--surface-glass);
+  color: var(--text-primary);
+}
+
+.model-provider-btn.active {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.provider-count {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--text-tertiary);
+}
+
+/* 右侧：模型列表 */
+.model-popup-models {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: var(--space-1);
+  min-width: 0;
 }
 
 .model-option {
@@ -1496,7 +1917,7 @@ function startKBBuild(folderPath, plan) {
   background: transparent;
   color: var(--text-secondary);
   font-family: var(--font-sans);
-  font-size: var(--text-sm);
+  font-size: var(--text-xs);
   text-align: left;
   cursor: pointer;
   transition: all var(--duration-fast);
@@ -1514,12 +1935,9 @@ function startKBBuild(folderPath, plan) {
 
 .model-option-label {
   font-weight: 500;
-}
-
-.model-option-id {
-  font-size: var(--text-xs);
-  color: var(--text-tertiary);
-  font-family: var(--font-mono);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .model-option-empty {
@@ -1579,6 +1997,49 @@ function startKBBuild(folderPath, plan) {
   position: relative;
   display: inline-block;
   padding: 4px 0 6px 0;
+}
+
+.inline-files-preview {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 4px 0 6px 0;
+}
+
+.pending-file-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--surface-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 4px 8px 4px 6px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.pending-file-name {
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-remove-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  padding: 2px;
+  border-radius: var(--radius-xs);
+}
+
+.file-remove-btn:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
 }
 
 .inline-image-preview img {
@@ -1726,5 +2187,49 @@ function startKBBuild(folderPath, plan) {
 }
 .global-access-toggle.active .global-access-text {
   color: var(--accent-primary);
+}
+
+/* ── 模型标注 ─────────────────────────────────────── */
+.model-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  opacity: 0.5;
+  margin-top: 2px;
+  font-family: var(--font-mono);
+  user-select: none;
+  letter-spacing: 0.02em;
+}
+
+/* ── 思考中动画 ───────────────────────────────────── */
+.typing-indicator {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: var(--space-2) 0;
+  height: 24px;
+}
+
+.typing-indicator .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  opacity: 0.4;
+  animation: typing-bounce 1.4s ease-in-out infinite;
+}
+
+.typing-indicator .dot:nth-child(1) { animation-delay: 0s; }
+.typing-indicator .dot:nth-child(2) { animation-delay: 0.2s; }
+.typing-indicator .dot:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes typing-bounce {
+  0%, 60%, 100% {
+    transform: translateY(0);
+    opacity: 0.4;
+  }
+  30% {
+    transform: translateY(-6px);
+    opacity: 1;
+  }
 }
 </style>

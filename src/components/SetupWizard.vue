@@ -123,7 +123,7 @@ const testResult = ref(null);
 
 const tempConfig = ref({
   theme: 'dark',
-  accentColor: '#10B981', // 翡翠绿 default
+  accentColor: '#2776bb', // MallOS 蓝 default
   workspaceDir: '',
   provider: 'deepseek',
   apiKey: ''

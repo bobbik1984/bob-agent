@@ -1,187 +1,237 @@
 project:
   name: bob-agent
-  version: "0.1.0"
+  version: "1.0.0-alpha"
   status: in_progress
-  tech: [Electron, Vue 3, Vite, Node.js, SQLite, OpenAI SDK, Lucide, vue-i18n]
-  updated: "2026-05-12"
-  current_sprint: "Sprint 5: 体验打磨（收尾） + Sprint 7: 打包发布（预热）"
+  tech: [Tauri V2, Rust, Vue 3, Vite, SQLite (rusqlite), reqwest, scraper, tauri-plugin-single-instance]
+  updated: "2026-05-16"
+  architecture: "Tauri (Rust backend) + Vue 3 (frontend) + tauri-bridge.js (adapter)"
+  current_focus: "里程碑 10: 认知与记忆引擎 (SOUL注入 + 热记忆) + 端到端测试"
 
 # ═══════════════════════════════════════════════════════════════
-# Sprint 1 · 骨架 + 对话 + Vision
+# Tauri 迁移后里程碑体系 (里程碑 1-9)
 # ═══════════════════════════════════════════════════════════════
 
-phases:
-  - name: "Sprint 1 · 骨架 + 对话 + Vision"
+milestones:
+  - name: "M1: Tauri 基础脚手架"
     status: done
+    completion: 100%
     tasks:
-      - { text: "T-101: 项目初始化 (Electron + Vue 3 + Vite)", status: done }
-      - { text: "T-102: LLM Client (Chat + Vision + 流式)", status: done }
-      - { text: "T-103: IPC 桥接", status: done }
-      - { text: "T-104: 基础对话界面", status: done }
-      - { text: "T-105: Markdown 渲染", status: done, assignee: jules }
-      - { text: "T-106: Vision 支持", status: done }
-      - { text: "T-107: 首次启动向导", status: done }
-      - { text: "T-108: Micro-compact 移植", status: done, assignee: jules }
-      - { text: "T-109: 对话持久化", status: done }
+      - { id: T-101, text: "初始化 Tauri V2 环境", status: done }
+      - { id: T-102, text: "配置 tauri.conf.json (无边框/透明/380x750)", status: done }
+      - { id: T-103, text: "前端热更新 (npm run dev:tauri)", status: done }
+      - { id: T-104, text: "国内 Cargo 镜像源 (清华 TUNA)", status: done }
+      - { id: T-105, text: "tauri-bridge.js 适配器层注入", status: done }
+      - { id: T-106, text: "dialog 插件安装与授权", status: done }
 
-  - name: "Sprint 2 · 智能收件箱"
+  - name: "M2: 前端完整性保障"
     status: done
+    completion: 98%
+    note: "T-291/T-292 导航验证待确认"
     tasks:
-      - { text: "T-201: Parser 移植", status: done }
-      - { text: "T-202: 事件确认卡片 ConfirmCard.vue", status: done }
-      - { text: "T-203: SQLite 事件表", status: done }
-      - { text: "T-204: 对话→事件检测(手动)", status: done }
-      - { text: "T-205: 周时间轴 WeekTimeline.vue", status: done }
-      - { text: "T-206: 待办清单 TodoList.vue", status: done }
-      - { text: "T-207: InboxView 组装", status: done }
-      - { text: "T-208: 思维链折叠", status: done }
+      - { id: T-201, text: "自定义窗口按钮 (最小化/最大化/关闭)", status: done }
+      - { id: T-202, text: "绑定 @tauri-apps/api/window 方法", status: done }
+      - { id: "T-211~290", text: "53 个 Bridge Mock 全量补齐", status: done }
+      - { id: T-291, text: "导航切换无报错验证", status: todo }
+      - { id: T-292, text: "侧栏对话列表操作验证", status: todo }
 
-  - name: "Sprint 3 · UI 打磨 + 工作目录"
+  - name: "M3: Rust 原生化 — 配置与凭证"
+    status: in_progress
+    completion: 50%
+    tasks:
+      - { id: T-301, text: "config_get/set 读写 config.json", status: done }
+      - { id: T-302, text: "config_get_all 返回完整配置", status: done }
+      - { id: T-303, text: "Stronghold 加密密钥存储", status: todo }
+      - { id: T-304, text: "全局快捷键 (Ctrl+Shift+B)", status: todo }
+
+  - name: "M4: Rust 原生化 — SQLite 引擎"
     status: done
+    completion: 75%
     tasks:
-      - { text: "T-301: Industrial Dark UI 重构（Emoji→Lucide 全量替换）", status: done }
-      - { text: "T-302: System Prompt 注入", status: done }
-      - { text: "T-303: 工作目录配置 + IPC 通道", status: done }
-      - { text: "T-304: System Prompt 动态注入目录树摘要", status: done }
-      - { text: "T-305: Agent 头像改 Bob 文字标", status: done }
-      - { text: "T-306: 对话列表添加删除按钮", status: done }
-      - { text: "T-307: 模型品牌 PNG Logo（DeepSeek/OpenAI/Ollama）", status: done }
-      - { text: "T-308: 自动日程意图检测（对话流自动识别）", status: done }
+      - { id: T-401, text: "rusqlite conversations/messages 表", status: done }
+      - { id: T-402, text: "CRUD 操作全量实现", status: done }
+      - { id: T-403, text: "db_messages/db_message_add", status: done }
+      - { id: T-404, text: "历史数据无损继承", status: todo }
 
-  - name: "Sprint 4 · 文件分析 + 联动"
+  - name: "M5: Rust 原生化 — LLM Engine"
+    status: done
+    completion: 100%
+    tasks:
+      - { id: T-501, text: "reqwest Chat 请求", status: done }
+      - { id: T-502, text: "SSE 流式解析 + app.emit", status: done }
+      - { id: T-503, text: "Vision Base64 传输", status: done }
+      - { id: T-504, text: "ModelHub 模型池 + 角色指派", status: done }
+      - { id: T-505, text: "Panic 防御加固 (13 处 unwrap 消除)", status: done }
+
+  - name: "M6: Rust 原生化 — 工具链与知识库"
+    status: done
+    completion: 100%
+    tasks:
+      - { id: T-601, text: "文件夹递归扫描 (walkdir)", status: done }
+      - { id: T-602, text: "网页抓取引擎 (web.rs)", status: done }
+      - { id: T-603, text: "技能插件扫描 (plugins.rs)", status: done }
+      - { id: T-604, text: "做梦引擎 V1 (dream.rs)", status: done }
+      - { id: T-605, text: "日程管理引擎 (calendar.rs)", status: done }
+      - { id: T-606, text: "文件读取引擎 (filesystem.rs)", status: done }
+      - { id: T-607, text: "文件夹跟踪系统", status: done }
+      - { id: T-608, text: "系统工具原生化", status: done }
+
+  - name: "M7: 收尾与发布"
     status: in_progress
+    completion: 33%
     tasks:
-      - { text: "T-401: FileReader 纯文本", status: done }
-      - { text: "T-402: FileReader Office", status: done, assignee: jules }
-      - { text: "T-403: FileDropZone 组件", status: done }
-      - { text: "T-404: Vision→Parser 管线", status: todo }
-      - { text: "T-405: 全局截图", status: todo }
-      - { text: "T-406: 日历同步移植", status: todo }
-      - { text: "T-407: 剪贴板图片粘贴支持", status: done }
+      - { id: T-701, text: "移除 Electron 遗留目录", status: done }
+      - { id: T-702, text: "集成 llama-cpp-rs 离线推理", status: todo }
+      - { id: T-703, text: "npm run tauri build 打包", status: todo }
 
-  - name: "Sprint 5 · 体验打磨"
-    status: in_progress
+  - name: "M8: 声明式配置 (Outbox/Reconciler)"
+    status: done
+    completion: 100%
+    date_completed: "2026-05-14"
+    summary: "AI 通过 bob-config 代码块声明配置变更 → Outbox 文件 → Reconciler 单向校验 → config.json 生效"
+    new_files: [outbox.rs]
     tasks:
-      - { text: "T-501: 系统托盘", status: done }
-      - { text: "T-502: 全局快捷键 (Ctrl+Shift+Space)", status: todo }
-      - { text: "T-503: 桌面通知提醒", status: todo }
-      - { text: "T-504: 暗色/亮色主题（含 titleBarOverlay 实时同步 + did-finish-load 初始化）", status: done }
-      - { text: "T-505: 模型切换 UI（品牌 Logo + 弹出选择器）", status: done }
-      - { text: "T-506: Cost 追踪（会话级累计费用指示器）", status: done }
-      - { text: "T-507: 对话导出 (.md)", status: done }
-      - { text: "T-508: 错误处理美化", status: done }
-      - { text: "T-509: 产物文件卡片与外接打开", status: done }
-      - { text: "T-510: 侧边栏拖拽调宽 + Notion 风格折叠按钮", status: done }
-      - { text: "T-511: 空状态品牌水印 (5% Bob Logo)", status: done }
-      - { text: "T-512: 日程时间轴重写 (0/6/12/18/24 + 今天居中 + 窄屏降级 + 详情弹窗)", status: done }
-      - { text: "T-513: 对话列表项等高修复", status: done }
-      - { text: "T-514: 设计规范文档化 (design_principles.md)", status: done }
-      - { text: "T-515: 启动画面 (Splash Screen)", status: done }
-      - { text: "T-516: 全局多语言支持 (i18n) — vue-i18n + zh-CN/en-US + computed 响应 + tm()", status: done }
-      - { text: "T-517: 品牌 Logo 滚动视差动效 (Scroll-Driven Animation)", status: done }
-      - { text: "T-518: 对话内文件引用富卡片 (FileCard)", status: todo }
-      - { text: "T-524: 自定义模型接入中心 (Dynamic Model Registry UI)", status: todo }
+      - { id: T-801, text: "outbox.rs 模块骨架 + 白名单", status: done }
+      - { id: T-802, text: "write_outbox() 写入", status: done }
+      - { id: T-803, text: "validate_operation() 6层校验防火墙", status: done }
+      - { id: T-804, text: "reconcile() 核心调谐逻辑", status: done }
+      - { id: T-805, text: "start_reconciler() 2秒轮询守护", status: done }
+      - { id: T-806, text: "IPC 注册 + tokio::spawn", status: done }
+      - { id: T-807, text: "审计日志 (reconciler.log)", status: done }
+      - { id: T-811, text: "tauri-bridge.js 新增接口", status: done }
+      - { id: T-812, text: "ChatView bob-config 检测器", status: done }
+      - { id: T-813, text: "App.vue config:reconciled 监听", status: done }
+      - { id: T-814, text: "System Prompt Outbox 指令注入", status: done }
+      - { id: T-821, text: "SettingsView 引导文案", status: done }
+      - { id: T-822, text: "SetupWizard 引导优化", status: todo }
+      - { id: T-823, text: "端到端集成测试", status: todo }
+      - { id: T-824, text: "防破坏测试", status: todo }
 
-  - name: "Sprint 6 · Agent 化（Function Calling + 工具 + 技能 + MCP）"
-    status: in_progress
+  - name: "M9: Tool Calling 引擎 (Agent 升级)"
+    status: done
+    completion: 95%
+    date_completed: "2026-05-16"
+    summary: "Rust 侧方案 A — 12 个原生工具 + Tool Calling 循环 (5 轮) + add_calendar_event 日程集成"
+    new_files: [tools.rs]
+    modified_files: [llm.rs (重写), lib.rs, outbox.rs, calendar.rs]
+    tools_available:
+      - { name: read_file, source: "复用 filesystem.rs", desc: "读取磁盘文本文件 (≤500KB)" }
+      - { name: list_dir, source: "tools.rs 原生", desc: "浏览目录内容" }
+      - { name: write_file, source: "tools.rs 原生", desc: "安全写入文件 (wiki/ 限定)" }
+      - { name: append_file, source: "tools.rs 原生", desc: "追加内容到文件" }
+      - { name: fetch_url, source: "复用 web.rs", desc: "抓取网页纯文本 (≤2MB)" }
+      - { name: web_search, source: "tools.rs 新增", desc: "Tavily (主) + TinyFish (降级) 双引擎搜索" }
+      - { name: list_skills, source: "tools.rs 原生", desc: "列出 49 个可用技能" }
+      - { name: read_skill, source: "tools.rs 原生", desc: "读取 SKILL.md 全文" }
+      - { name: system_time, source: "tools.rs 原生", desc: "当前时间+时区+星期" }
+      - { name: get_weather, source: "tools.rs 原生", desc: "wttr.in 天气查询" }
+      - { name: brain_search, source: "tools.rs 原生", desc: "知识库全文检索 (wiki/)" }
+      - { name: add_calendar_event, source: "tools.rs + calendar.rs", desc: "写入 SQLite events 表" }
     tasks:
-      # 6.1 工具系统
-      - { text: "T-601: BaseTool 基类", status: done }
-      - { text: "T-602: ToolRegistry 工具注册表", status: done }
-      - { text: "T-603: 内置工具 — list_dir / read_file / write_file 等", status: done }
-      - { text: "T-604: 内置工具 — create_event / search_events / update_event", status: done }
-      - { text: "T-605: 内置工具 — web_search", status: done }
-      # 6.2 LLM 调用链改造
-      - { text: "T-606: LLM Client 支持 tools 参数 + tool_call 解析", status: done }
-      - { text: "T-607: Tool Execution Loop", status: done }
-      - { text: "T-608: ChatView 工具调用 UI", status: done }
-      # 6.3 技能系统（双目录）
-      - { text: "T-609: 内置 skills/ 目录（15+ 基础技能随项目分发）", status: done }
-      - { text: "T-610: ToolRegistry 扫描内置 skills/", status: done }
-      - { text: "T-611: 设置→外部技能目录（UI + 目录选择）", status: done }
-      - { text: "T-612: ToolRegistry 扫描外部目录", status: done }
-      - { text: "T-613: 技能热重载", status: done }
-      # 6.4 MCP 协议
-      - { text: "T-614: MCP 客户端接入", status: done }
-      - { text: "T-615: MCP 配置 UI", status: done }
-      # 6.5 资产迁移与基元能力
-      - { text: "T-616: 原生读写基元支持 (write_file)", status: done }
-      - { text: "T-617: 网络代理基元支持 (tinyfish_fetch, weather 等)", status: done }
-      - { text: "T-618: 纯大脑技能全量迁移 (15 个 Markdown 技能导入)", status: done }
-      - { text: "T-619: 会话级全局文件授权 (Global File Access Toggle)", status: done }
-      # 6.6 高级代理能力与浏览器自动化
-      - { text: "T-621: Obscura 隐身浏览器底层集成", status: done }
-      - { text: "T-622: browser_automation 内部工具", status: done }
-      - { text: "T-623: 修复打包后 obscura.exe 的动态路径解析", status: done }
-      - { text: "T-624: 代理模式切换 UI (问答/干活模式)", status: done }
-      - { text: "T-625: 全局文件授权 UI 优化 (Lock/Unlock)", status: done }
-      # 6.7 三层记忆引擎
-      - { text: "T-626: data/ 目录初始化 (memory/sessions, wiki/sessions, wiki/folders)", status: done }
-      - { text: "T-627: SOUL.md 静态人格注入 + Session 总结", status: done }
-      - { text: "T-628: brain_search 工具 — 搜索冷记忆和 Wiki", status: done }
-      - { text: "T-629: 启动补偿扫描 — 处理未总结对话", status: done }
-      - { text: "T-630: 7天冷热迁移 — memory/sessions → wiki/sessions", status: done }
-      - { text: "T-631-mem: 级联删除 — 对话删除同步清除记忆文件", status: done }
-      - { text: "T-632: 全局智能拖拽分发 (Smart Drop Zone)", status: done }
-      - { text: "T-633: track_folder / untrack_folder 工具", status: done }
-      - { text: "T-634: 语义化文件夹速读 (folder-tracker.js)", status: done }
-      - { text: "T-635-mem: tracked_folders 持久化 — SQLite", status: done }
-      - { text: "T-636: Settings 文件夹管理面板", status: done }
-      - { text: "T-637: 知识库初始化向导 (成本估算与免费模型推荐)", status: todo }
-      # 6.8 安全加固
-      - { text: "T-630-sec: XSS 消毒 (DOMPurify 接入 ChatView)", status: done }
-      - { text: "T-631-sec: 启用 Renderer Sandbox", status: done, assignee: jules }
-      - { text: "T-632-sec: config:all IPC 过滤敏感字段", status: done, assignee: jules }
-      - { text: "T-633-sec: globalFileAccess/agentMode 状态锁定 Main 进程", status: done, assignee: jules }
-      - { text: "T-634-sec: read_file/write_file 路径穿越修复", status: done, assignee: jules }
-      - { text: "T-635-sec: 外部 Web 内容防注入隔离 (XML 包裹)", status: done }
+      - { id: T-901, text: "新建 tools.rs 工具注册表", status: done }
+      - { id: T-902, text: "暴露 12 个原生工具", status: done }
+      - { id: T-903, text: "llm.rs Tool Calling 循环 (5轮上限)", status: done }
+      - { id: T-904, text: "SSE delta.tool_calls 增量解析", status: done }
+      - { id: T-905, text: "编译验证 cargo check", status: done }
+      - { id: T-906, text: "web_search 双引擎 (Tavily+TinyFish)", status: done }
+      - { id: T-911, text: "System Prompt 工具列表 + 技能摘要注入", status: done }
+      - { id: T-912, text: "端到端测试 (npm run tauri dev)", status: todo }
+      - { id: T-913, text: "前端 Tool Calling UI (tool_start/tool_end)", status: done }
 
-  - name: "Sprint 7 · 打包发布与绿色化 (OOBE)"
-    status: in_progress
+  - name: "M10: 认知与记忆引擎 (Phase 2)"
+    status: done
+    completion: 100%
+    summary: "Bob 拥有灵魂(人设)、短期记忆(会话)、长期记忆(wiki)、异步压缩(Dream V2)、冷热迁移、安全沙箱和审计日志"
     tasks:
-      - { text: "T-701: electron-builder 打包配置 (Portable/ZIP 绿色软件化)", status: done }
-      - { text: "T-702: 底层数据管理与卸载自清空防线 (Factory Reset)", status: done }
-      - { text: "T-703: 首次启动引导向导 (OOBE - Theming/Workspace/API)", status: in_progress }
-      - { text: "T-704: 自动更新 (electron-updater)", status: todo }
-      - { text: "T-705: 内测分发", status: todo }
-      - { text: "T-706: 文档收尾", status: todo }
+      - { id: T-1001, text: "灵魂注入 (SOUL.md → system prompt)", status: done }
+      - { id: T-1002, text: "热记忆注入 (sessions/ → 上下文)", status: done }
+      - { id: T-1003, text: "异步记忆压缩 (Dream V2, Clerk 模型后台压缩)", status: done }
+      - { id: T-1004, text: "冷热记忆迁移 (7天自动归档 memory→wiki)", status: done }
+      - { id: T-1005, text: "记忆沙箱保护 (resolve_write_path 白名单引擎)", status: done }
 
-  - name: "Sprint 8 · 情绪价值与陪伴 (Desktop Pet)"
-    status: todo
-    tasks:
-      - { text: "T-801: 桌宠引擎预研 (透明微组件)", status: todo }
-      - { text: "T-802: 状态机联动 (Idle/Thinking/Working)", status: todo }
-      - { text: "T-803: 极简纯文本动效渲染 (CSS文字呼吸)", status: todo }
-      - { text: "T-804: 极简交互 (悬浮/打断)", status: todo }
+# ═══════════════════════════════════════════════════════════════
+# Rust 后端模块清单 (src-tauri/src/)
+# ═══════════════════════════════════════════════════════════════
+
+rust_modules:
+  - { file: lib.rs, desc: "Tauri 入口 + config 读写 + IPC 注册 + DB 初始化" }
+  - { file: llm.rs, desc: "LLM 引擎: SSE 流式 + Tool Calling 循环 + ModelHub" }
+  - { file: tools.rs, desc: "工具注册表 + 执行调度器 (12 个原生工具) + 审计日志 + 路径白名单" }
+  - { file: kb_extractor.rs, desc: "知识库文件提取 (PDF/DOCX/XLSX)" }
+  - { file: kb_indexer.rs, desc: "知识库索引构建" }
+  - { file: filesystem.rs, desc: "文件读取/扫描/跟踪" }
+  - { file: web.rs, desc: "网页抓取 (reqwest + scraper)" }
+  - { file: plugins.rs, desc: "技能/插件扫描 (SKILL.md frontmatter 解析)" }
+  - { file: dream.rs, desc: "做梦引擎 V2 (Clerk 异步压缩 + 7天冷热迁移 + 晨间简报)" }
+  - { file: calendar.rs, desc: "日程/待办管理 (SQLite)" }
+  - { file: sidecar.rs, desc: "Sidecar 进程管理 (llama-server)" }
+  - { file: outbox.rs, desc: "Outbox/Reconciler 声明式配置引擎" }
+
+# ═══════════════════════════════════════════════════════════════
+# API Key 配置状态
+# ═══════════════════════════════════════════════════════════════
+
+api_keys_configured:
+  - { provider: deepseek, status: active }
+  - { provider: doubao, status: active }
+  - { provider: tavily, status: active, note: "2026-05-15 新增" }
+  - { provider: tinyfish, status: active, note: "2026-05-15 新增" }
+
+# ═══════════════════════════════════════════════════════════════
+# 遗留: Electron 时代 Sprint 记录 (已归档)
+# ═══════════════════════════════════════════════════════════════
+
+legacy_electron_sprints:
+  note: "以下 Sprint 记录来自 Electron 时代，已在里程碑 7 (T-701) 中归档。Tauri 迁移后以上方里程碑体系为准。"
+  sprints:
+    - { name: "Sprint 1-3", status: done, note: "骨架+对话+UI打磨" }
+    - { name: "Sprint 4", status: partial, note: "文件分析 (部分迁移到 M6)" }
+    - { name: "Sprint 5", status: partial, note: "体验打磨 (部分迁移到 M7)" }
+    - { name: "Sprint 6", status: done, note: "Agent化 → 已在 Tauri 中重新实现为 M9" }
+    - { name: "Sprint 7", status: partial, note: "打包发布 → 对应 M7" }
 
 jules_sessions:
   - id: "2356204824243035896"
-    url: "https://jules.google.com/session/2356204824243035896"
     title: "[Sprint 2] 智能收件箱 (Inbox, Timeline, Parser UI)"
-    tasks: [T-202, T-204, T-205, T-206, T-207]
     status: merged
-    created: "2026-05-09"
-
   - id: "4992335793905143186"
-    url: "https://jules.google.com/session/4992335793905143186"
     title: "[Sprint 1] Markdown渲染 + 测试 + FileReader增强"
-    tasks: [T-105, T-108, T-302]
     status: merged
-    created: "2026-05-09"
-
   - id: "16745955317907370653"
-    url: "https://jules.google.com/session/16745955317907370653"
     title: "Backend Security Hardening (P0/P1 Fixes)"
-    tasks: [T-631-sec, T-632-sec, T-633-sec, T-634-sec]
     status: merged
-    created: "2026-05-10"
-
-  - id: "i18n-jules-session"
-    title: "[Sprint 5] i18n 多语言翻译补全"
-    tasks: [T-516]
-    status: merged
-    created: "2026-05-11"
 
 tests:
   total_passing: 11
-  updated: "2026-05-12"
+  updated: "2026-05-16"
+  note: "待端到端测试后更新"
+
+recent_fixes:
+  - { date: "2026-05-16", desc: "calendar.rs 字段名修复 (startTime→start_time)" }
+  - { date: "2026-05-16", desc: "tools.rs add_calendar_event 工具 + start_time 拼接" }
+  - { date: "2026-05-16", desc: "tauri-plugin-single-instance 防双开" }
+  - { date: "2026-05-16", desc: "dev 模式 prevent_close 改为真关闭" }
+  - { date: "2026-05-16", desc: "导航更名: 收件箱→日程" }
+recent_fixes:
+  - date: "2026-05-17"
+    items:
+      - "[Security] write_file/append_file 路径白名单升级 (resolve_write_path)"
+      - "[Security] read_file 路径穿越防御 (.. 检测)"
+      - "[Security] Tool Calling 审计日志 (audit_tool_call → logs/tools.log)"
+      - "[Security] TinyFish URL 编码安全 (RFC 3986 percent-encoding)"
+      - "[Feature] T-304 全局快捷键 Ctrl+Shift+B (tauri-plugin-global-shortcut)"
+      - "[Feature] SearchCard.vue 搜索结果卡片 (与 FileCard 统一设计语言)"
+      - "[UI] 工具调用圆点样式统一主题色"
+      - "[Engine] Restatement 尾部注意力重申 (llm.rs TC 第2轮起注入 system 消息防失焦)"
+      - "[Engine] T-1003 Dream V2 异步记忆压缩 (Clerk 模型后台提炼 session → Markdown)"
+      - "[Engine] T-1004 冷热记忆迁移 (>7天 memory/sessions → wiki/sessions, 跨盘安全)"
+      - "[Feature] T-304 全局快捷键确认 (Ctrl+Shift+B 沿用)"
+      - "[Milestone] M10 认知与记忆引擎 5/5 完成 → 100%"
+      - "[UX] 卡片CSS统一 (.bob-card-inline + .bob-card-block 共享基类)"
+      - "[Engine] 并行工具调用 (futures_util::join_all 替代逐个 for 循环)"
+      - "[Engine] 工具执行超时 (tokio::time::timeout 30秒保护)"
+  - date: "2026-05-16"
+    items:
+      - "[Feature] add_calendar_event 工具 (日程写入 SQLite)"
+      - "[Fix] calendar.rs 字段名不匹配 (startTime vs start_time)"
+      - "[Fix] 双窗口幽灵进程 + tauri-plugin-single-instance"
+      - "[Docs] 文档大扫除 (ARCHITECTURE/README/USER_GUIDE/AGENTS)"

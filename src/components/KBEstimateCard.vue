@@ -5,8 +5,8 @@
         <Calculator :size="24" />
       </div>
       <div class="card-title-area">
-        <div class="card-type">知识库构建预估</div>
-        <div class="card-title">{{ folderName || '未知文件夹' }}</div>
+        <div class="card-type">{{ $t('kb_estimate.title') }}</div>
+        <div class="card-title">{{ folderName || $t('kb_estimate.unknown_folder') }}</div>
       </div>
     </div>
 
@@ -14,7 +14,7 @@
       <div class="info-row" v-if="!estimateResult">
         <div class="loading-state">
           <Loader2 class="animate-spin" :size="20" />
-          <span>正在分析文件并预估成本...</span>
+          <span>{{ $t('kb_estimate.analyzing') }}</span>
         </div>
       </div>
 
@@ -29,54 +29,54 @@
         <div class="stats-grid">
           <div class="stat-item">
             <div class="stat-value">{{ estimateResult.convertable_files }}</div>
-            <div class="stat-label">可转换文件</div>
+            <div class="stat-label">{{ $t('kb_estimate.convertable_files') }}</div>
           </div>
           <div class="stat-item">
             <div class="stat-value">{{ formatSize(estimateResult.convertable_bytes) }}</div>
-            <div class="stat-label">数据量</div>
+            <div class="stat-label">{{ $t('kb_estimate.data_size') }}</div>
           </div>
           <div class="stat-item">
             <div class="stat-value">{{ formatTokens(estimateResult.estimated_tokens) }}</div>
-            <div class="stat-label">预估 Tokens</div>
+            <div class="stat-label">{{ $t('kb_estimate.estimated_tokens') }}</div>
           </div>
         </div>
 
         <div class="cost-section">
-          <div class="cost-title">预估模型成本 (语义分析)</div>
+          <div class="cost-title">{{ $t('kb_estimate.cost_title') }}</div>
           
           <div class="cost-option" :class="{ selected: selectedPlan === 'cheap' }" @click="selectedPlan = 'cheap'">
             <div class="cost-option-header">
-              <span class="plan-name"><Zap :size="14" /> 基础模型 (推荐)</span>
+              <span class="plan-name"><Zap :size="14" /> {{ $t('kb_estimate.plan_cheap') }}</span>
               <span class="plan-price">~ ¥{{ estimateResult.estimated_cost_cheap_rmb.toFixed(4) }}</span>
             </div>
-            <div class="cost-option-desc">使用廉价模型 (如 GLM-4-Flash, Doubao-lite) 进行快速摘要。适合普通日常文件。</div>
+            <div class="cost-option-desc">{{ $t('kb_estimate.plan_cheap_desc') }}</div>
           </div>
 
           <div class="cost-option" :class="{ selected: selectedPlan === 'core' }" @click="selectedPlan = 'core'">
             <div class="cost-option-header">
-              <span class="plan-name"><Cpu :size="14" /> 核心模型</span>
+              <span class="plan-name"><Cpu :size="14" /> {{ $t('kb_estimate.plan_core') }}</span>
               <span class="plan-price">~ ¥{{ estimateResult.estimated_cost_core_rmb.toFixed(4) }}</span>
             </div>
-            <div class="cost-option-desc">使用当前主力模型 (如 DeepSeek, GPT-4o) 进行深度理解。适合复杂代码或研报。</div>
+            <div class="cost-option-desc">{{ $t('kb_estimate.plan_core_desc') }}</div>
           </div>
         </div>
         
         <div class="warning-text">
           <Info :size="14" />
-          实际费用取决于文档排版和语言，此预估仅供参考。文件转 Markdown (Phase 3) 为本地执行，不产生费用。
+          {{ $t('kb_estimate.cost_warning') }}
         </div>
       </template>
     </div>
 
     <div class="card-footer">
-      <button class="btn btn-ghost" @click="$emit('cancel')">稍后处理</button>
+      <button class="btn btn-ghost" @click="$emit('cancel')">{{ $t('kb_estimate.later') }}</button>
       <button 
         class="btn btn-primary" 
         :disabled="!estimateResult || estimateResult.error || estimateResult.convertable_files === 0"
         @click="$emit('confirm', selectedPlan)"
       >
         <Play :size="16" />
-        开始构建
+        {{ $t('kb_estimate.start_build') }}
       </button>
     </div>
   </div>

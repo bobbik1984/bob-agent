@@ -1,34 +1,42 @@
 <template>
-  <div class="confirm-card folder-drop-card">
-    <div class="card-header">
-      <div class="card-icon folder-icon">
+  <div class="bob-card-block folder-drop-card">
+    <div class="bob-card-block__header">
+      <div class="bob-card-block__icon bob-card-block__icon--accent">
         <FolderDown :size="24" />
       </div>
-      <div class="card-title-area">
-        <div class="card-type">发现文件夹</div>
-        <div class="card-title">{{ folderName }}</div>
+      <div class="bob-card-block__title-area">
+        <div class="bob-card-block__type">{{ $t('folder_card.folder_detected') }}</div>
+        <div class="bob-card-block__title" :title="folderName">{{ folderName }}</div>
       </div>
     </div>
 
-    <div class="card-body">
-      <div class="info-row">
-        <span class="info-label">路径</span>
-        <span class="info-value path-value" :title="folderPath">{{ folderPath }}</span>
+    <div class="bob-card-block__body">
+      <div class="bob-card-block__info-row">
+        <span class="bob-card-block__info-label">{{ $t('folder_card.label_path') }}</span>
+        <span class="bob-card-block__info-value path-value" :title="folderPath">{{ folderPath }}</span>
       </div>
       
       <div class="stats-grid">
         <div class="stat-item">
           <div class="stat-value">{{ scanResult?.fileCount || 0 }}</div>
-          <div class="stat-label">个文件</div>
+          <div class="stat-label">{{ $t('folder_card.files') ? $t('folder_card.files') : '文件数' }}</div>
         </div>
         <div class="stat-item">
           <div class="stat-value">{{ scanResult?.dirCount || 0 }}</div>
-          <div class="stat-label">个子目录</div>
+          <div class="stat-label">{{ $t('folder_card.subdirs') ? $t('folder_card.subdirs') : '子目录' }}</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-value">{{ formatSize(scanResult?.totalSize || 0) }}</div>
+          <div class="stat-label">总大小</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-value">~${{ estimateCost(scanResult?.totalSize || 0) }}</div>
+          <div class="stat-label">预估费用</div>
         </div>
       </div>
 
-      <div class="info-row types-row" v-if="topCategories.length > 0">
-        <span class="info-label">主要包含</span>
+      <div class="bob-card-block__info-row types-row" v-if="topCategories.length > 0">
+        <span class="bob-card-block__info-label">{{ $t('folder_card.mainly_contains') }}</span>
         <div class="tags-list">
           <span v-for="cat in topCategories" :key="cat.name" class="type-tag">
             {{ cat.name }} ({{ cat.count }})
@@ -37,11 +45,11 @@
       </div>
     </div>
 
-    <div class="card-footer">
-      <button class="btn btn-ghost" @click="$emit('cancel')">取消</button>
+    <div class="bob-card-block__footer">
+      <button class="btn btn-ghost" @click="$emit('cancel')">{{ $t('folder_card.cancel') }}</button>
       <button class="btn btn-primary" @click="$emit('confirm')">
         <FolderPlus :size="16" />
-        收藏到知识库
+        {{ $t('folder_card.save_to_kb') }}
       </button>
     </div>
   </div>
@@ -74,85 +82,29 @@ const topCategories = computed(() => {
   entries.sort((a, b) => b[1] - a[1]);
   return entries.slice(0, 3).map(([name, count]) => ({ name, count }));
 });
+
+function formatSize(bytes) {
+  if (bytes === 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+}
+
+function estimateCost(bytes) {
+  // 经验系数：PPT、PDF 等文档经过提取纯文本后，实际文字的字节数通常只有原文件总大小的 1% ~ 5%。
+  // 我们这里采用一个保守的经验基数：2% (0.02)。
+  const estimatedTextBytes = bytes * 0.02;
+
+  // 1 token ~ 4 bytes (UTF-8 中文), 大约 $1.00 / 1M tokens (参考通用廉价模型)
+  const tokens = estimatedTextBytes / 4;
+  const cost = (tokens / 1_000_000) * 1.0;
+  
+  return cost < 0.01 ? '<0.01' : cost.toFixed(2);
+}
 </script>
 
 <style scoped>
-.confirm-card {
-  background-color: var(--bg-primary);
-  border: 1px solid var(--border-color);
-  border-radius: 12px;
-  overflow: hidden;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
-  width: 100%;
-  max-width: 400px;
-  margin: 10px 0;
-}
-
-.card-header {
-  display: flex;
-  align-items: center;
-  padding: 16px;
-  border-bottom: 1px solid var(--border-color);
-  background-color: var(--bg-secondary);
-}
-
-.card-icon.folder-icon {
-  background-color: rgba(var(--accent-primary-rgb), 0.15);
-  color: var(--accent-primary);
-  width: 48px;
-  height: 48px;
-  border-radius: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin-right: 16px;
-}
-
-.card-title-area {
-  flex: 1;
-  min-width: 0;
-}
-
-.card-type {
-  font-size: 12px;
-  color: var(--text-secondary);
-  margin-bottom: 4px;
-}
-
-.card-title {
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--text-primary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.card-body {
-  padding: 16px;
-}
-
-.info-row {
-  display: flex;
-  margin-bottom: 12px;
-  font-size: 13px;
-}
-
-.info-row:last-child {
-  margin-bottom: 0;
-}
-
-.info-label {
-  color: var(--text-secondary);
-  width: 64px;
-  flex-shrink: 0;
-}
-
-.info-value {
-  color: var(--text-primary);
-  flex: 1;
-}
-
 .path-value {
   white-space: nowrap;
   overflow: hidden;
@@ -162,28 +114,30 @@ const topCategories = computed(() => {
 }
 
 .stats-grid {
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
   background-color: var(--bg-secondary);
   border-radius: 8px;
   padding: 12px;
-  margin: 16px 0;
-  border: 1px solid var(--border-color);
+  margin: 12px 0;
+  border: 1px solid var(--border-color, var(--border-subtle));
 }
 
 .stat-item {
-  flex: 1;
   text-align: center;
+  padding: 4px 0;
 }
 
-.stat-item:first-child {
-  border-right: 1px solid var(--border-color);
+.stat-item:nth-child(odd) {
+  border-right: 1px solid var(--border-color, var(--border-subtle));
 }
 
 .stat-value {
-  font-size: 20px;
+  font-size: 16px;
   font-weight: 600;
   color: var(--text-primary);
-  line-height: 1;
+  line-height: 1.2;
   margin-bottom: 4px;
 }
 
@@ -201,51 +155,10 @@ const topCategories = computed(() => {
 
 .type-tag {
   background-color: var(--bg-secondary);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--border-color, var(--border-subtle));
   color: var(--text-secondary);
   padding: 2px 8px;
   border-radius: 12px;
   font-size: 11px;
-}
-
-.card-footer {
-  display: flex;
-  justify-content: flex-end;
-  gap: 12px;
-  padding: 16px;
-  border-top: 1px solid var(--border-color);
-  background-color: var(--bg-secondary);
-}
-
-.btn {
-  padding: 8px 16px;
-  border-radius: 8px;
-  font-size: 14px;
-  font-weight: 500;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  transition: all 0.2s;
-  border: none;
-}
-
-.btn-ghost {
-  background: transparent;
-  color: var(--text-secondary);
-}
-
-.btn-ghost:hover {
-  background-color: var(--bg-hover);
-  color: var(--text-primary);
-}
-
-.btn-primary {
-  background-color: var(--accent-primary);
-  color: white;
-}
-
-.btn-primary:hover {
-  background-color: var(--accent-hover);
 }
 </style>
