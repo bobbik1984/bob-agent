@@ -12,7 +12,7 @@ pub async fn start_offline_engine(app: AppHandle, model_path: String) -> Result<
     // 1. 杀掉旧进程 (使用独立作用域防止锁跨越 await)
     {
         let state: State<SidecarState> = app.state();
-        let mut child_lock = state.child.lock().unwrap();
+        let mut child_lock = state.child.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         if let Some(mut existing_child) = child_lock.take() {
             let _ = existing_child.kill();
         }
@@ -41,7 +41,7 @@ pub async fn start_offline_engine(app: AppHandle, model_path: String) -> Result<
     // 2. 保存新进程 (同样使用独立作用域)
     {
         let state: State<SidecarState> = app.state();
-        let mut child_lock = state.child.lock().unwrap();
+        let mut child_lock = state.child.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         *child_lock = Some(child);
     }
 
@@ -73,7 +73,7 @@ pub async fn start_offline_engine(app: AppHandle, model_path: String) -> Result<
 #[command]
 pub async fn stop_offline_engine(app: AppHandle) -> Result<Value, String> {
     let state: State<SidecarState> = app.state();
-    let mut child_lock = state.child.lock().unwrap();
+    let mut child_lock = state.child.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
 
     if let Some(mut existing_child) = child_lock.take() {
         let _ = existing_child.kill();
@@ -86,7 +86,7 @@ pub async fn stop_offline_engine(app: AppHandle) -> Result<Value, String> {
 #[command]
 pub async fn get_offline_engine_status(app: AppHandle) -> Result<Value, String> {
     let state: State<SidecarState> = app.state();
-    let child_lock = state.child.lock().unwrap();
+    let child_lock = state.child.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     
     if child_lock.is_some() {
         Ok(json!({ "status": "running" }))

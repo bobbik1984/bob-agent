@@ -57,7 +57,7 @@ pub fn get_model_pool() -> Value {
         { "id": "MiniMax-M2.7", "modelId": "MiniMax-M2.7", "displayName": "MiniMax M2.7", "label": "MiniMax M2.7", "provider": "minimax", "providerName": "MiniMax", "vision": false, "default": true, "pricing": { "input": 0.0, "output": 0.0 } }
     ]);
 
-    let mut pool_arr = static_pool.as_array().unwrap().clone();
+    let mut pool_arr = static_pool.as_array().cloned().unwrap_or_default();
     
     // 从配置中读取 customModels 并追加
     if let Some(custom_models) = super::read_config().get("customModels").and_then(|v| v.as_array()) {

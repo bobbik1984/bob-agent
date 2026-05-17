@@ -77,9 +77,19 @@ fn resolve_write_path(path: &str, global_file_access: bool) -> Result<PathBuf, S
     }
 
     let target = p.to_path_buf();
-    let target_str = target.to_string_lossy().to_lowercase();
+    
+    // 规范化目标路径的父目录（因为目标文件可能尚不存在），防范符号链接攻击
+    let target_check_path = if let Some(parent) = target.parent() {
+        std::fs::canonicalize(parent).unwrap_or_else(|_| parent.to_path_buf())
+    } else {
+        std::fs::canonicalize(&target).unwrap_or_else(|_| target.clone())
+    };
+    let target_str = target_check_path.to_string_lossy().to_lowercase();
+
     for dir in &allowed_dirs {
-        let dir_lower = dir.to_lowercase();
+        // 同样规范化白名单目录
+        let canon_dir = std::fs::canonicalize(dir).unwrap_or_else(|_| PathBuf::from(dir));
+        let dir_lower = canon_dir.to_string_lossy().to_lowercase();
         if target_str.starts_with(&dir_lower) {
             return Ok(target);
         }
@@ -698,11 +708,10 @@ async fn tool_get_weather(city: &str) -> Value {
     };
 
     let results = geo_json.get("results").and_then(|v| v.as_array());
-    if results.is_none() || results.unwrap().is_empty() {
-        return json!({ "error": format!("找不到城市: {}", city) });
-    }
-
-    let location = &results.unwrap()[0];
+    let location = match results.and_then(|arr| arr.first()) {
+        Some(loc) => loc,
+        None => return json!({ "error": format!("找不到城市: {}", city) }),
+    };
     let lat = location.get("latitude").and_then(|v| v.as_f64()).unwrap_or(0.0);
     let lon = location.get("longitude").and_then(|v| v.as_f64()).unwrap_or(0.0);
     let resolved_name = location.get("name").and_then(|v| v.as_str()).unwrap_or(city);
