@@ -18,7 +18,7 @@
         "resizable": true,
         "fullscreen": false,
         "decorations": false,
-        "visible": false,
+        "visible": true,
         "theme": "Dark"
       }
     ],
@@ -30,7 +30,9 @@
     "active": true,
     "targets": "all",
     "resources": {
-      "../resources/llm-engine/**/*": "llm-engine",
+      "../resources/llm-engine/*.exe": "llm-engine",
+      "../resources/llm-engine/*.dll": "llm-engine",
+      "../resources/llm-engine/*.disabled": "llm-engine",
       "pdfium.dll": "pdfium.dll"
     },
     "icon": [

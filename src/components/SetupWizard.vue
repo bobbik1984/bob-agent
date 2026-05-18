@@ -377,7 +377,9 @@ async function finishOnboarding() {
   font-family: monospace;
   font-size: 13px;
   color: var(--text-primary);
-  word-break: break-all;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .current-path.empty {

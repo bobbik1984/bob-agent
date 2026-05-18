@@ -156,7 +156,7 @@ onUnmounted(() => {
 }
 
 .briefing-body {
-  padding: 16px;
+  padding: 20px 24px;
   /* 内容超出时可滚动，保证 header 和 actions 始终可见 */
   overflow-y: auto;
   flex: 1;
@@ -169,8 +169,9 @@ onUnmounted(() => {
   line-height: 1.7;
 }
 
-.briefing-content :deep(ul) {
-  padding-left: 16px;
+.briefing-content :deep(ul),
+.briefing-content :deep(ol) {
+  padding-left: 20px;
   margin: 4px 0;
 }
 
@@ -179,7 +180,7 @@ onUnmounted(() => {
 }
 
 .briefing-content :deep(strong) {
-  color: var(--text-primary);
+  font-weight: 600;
 }
 
 .briefing-content :deep(p) {
@@ -228,9 +229,9 @@ onUnmounted(() => {
 }
 
 .briefing-action-btn.primary {
-  background: var(--accent);
+  background: var(--user-accent);
   color: #fff;
-  border-color: var(--accent);
+  border-color: var(--user-accent);
 }
 
 .briefing-action-btn.primary:hover {

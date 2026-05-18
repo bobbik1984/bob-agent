@@ -404,23 +404,27 @@
         </h3>
         <div class="about-info">
           <p>bob-agent v{{ appVersion }}</p>
-          <p class="about-desc">{{ $t('settings.about_desc') }}</p>
         </div>
 
-        <div style="margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border-subtle); display: flex; gap: 12px; flex-wrap: wrap;">
-          <button class="btn btn-primary" @click="openDataDir">
+        <div style="margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border-subtle); display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 12px;">
+          <button class="btn btn-primary" style="display: flex; align-items: center; justify-content: center; gap: 6px;" @click="openDocs">
+            <BookOpen :size="14" />
+            <span>{{ $t('settings.open_docs') }}</span>
+          </button>
+          
+          <button class="btn btn-primary" style="display: flex; align-items: center; justify-content: center; gap: 6px;" @click="openDataDir">
             <FolderOpen :size="14" />
-            {{ $t('settings.open_data_dir') }}
+            <span>{{ $t('settings.open_data_dir') }}</span>
           </button>
           
-          <button class="btn btn-primary" @click="openLogDir">
+          <button class="btn btn-primary" style="display: flex; align-items: center; justify-content: center; gap: 6px;" @click="openLogDir">
             <FileText :size="14" />
-            {{ $t('settings.open_log_dir') }}
+            <span>{{ $t('settings.open_log_dir') }}</span>
           </button>
           
-          <button class="btn btn-danger" @click="factoryReset">
+          <button class="btn btn-danger" style="display: flex; align-items: center; justify-content: center; gap: 6px;" @click="factoryReset">
             <Trash2 :size="14" />
-            {{ $t('settings.clear_all_data') }}
+            <span>{{ $t('settings.clear_all_data') }}</span>
           </button>
         </div>
       </section>
@@ -431,7 +435,7 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue';
-import { Settings as SettingsIcon, Monitor, Tractor, Eye, EyeOff, Plug, Loader2, Palette, Info, FolderOpen, FolderHeart, Puzzle, Layers, X, Plus, Unplug, Globe, HardDrive, Trash2, Key, FileText, Server, ChevronDown } from 'lucide-vue-next';
+import { Settings as SettingsIcon, Monitor, Tractor, Eye, EyeOff, Plug, Loader2, Palette, Info, FolderOpen, FolderHeart, Puzzle, Layers, X, Plus, Unplug, Globe, HardDrive, Trash2, Key, FileText, Server, ChevronDown, BookOpen } from 'lucide-vue-next';
 import { useI18n } from 'vue-i18n';
 import CustomSelect from '../components/CustomSelect.vue';
 import PluginManager from '../components/PluginManager.vue';
@@ -876,6 +880,12 @@ async function testConnection(target = 'main') {
   }
 }
 
+function openDocs() {
+  if (window.electronAPI.openFile) {
+    window.electronAPI.openFile("https://github.com/bobbik1984/bob-agent/wiki");
+  }
+}
+
 function openDataDir() {
   if (window.electronAPI.openDataDir) {
     window.electronAPI.openDataDir();
@@ -1140,6 +1150,8 @@ select.input {
 
 .workspace-group .input {
   flex: 1;
+  min-width: 0;
+  text-overflow: ellipsis;
   cursor: default;
 }
 
