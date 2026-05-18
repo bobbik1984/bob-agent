@@ -1,14 +1,6 @@
 <template>
   <div class="app-shell">
-    <!-- 启动画面 Splash Screen -->
-    <Transition name="splash-fade">
-      <div v-if="showSplash" class="splash-overlay">
-        <div class="splash-content">
-          <img src="/bob_logo.svg" class="splash-logo" alt="Bob" />
-          <div class="splash-loader"></div>
-        </div>
-      </div>
-    </Transition>
+    <!-- 启动画面已移至 index.html (Native Splash) -->
     <!-- 标题栏拖拽区域 -->
     <div class="titlebar titlebar-drag">
       <div class="titlebar-left titlebar-no-drag">
@@ -37,7 +29,7 @@
     </div>
 
     <!-- 首次启动向导 -->
-    <SetupWizard v-if="!isSetupComplete" @complete="onSetupComplete" />
+    <SetupWizard v-if="!isSetupComplete" :debug-mode="DEBUG_ONBOARDING === 0" @complete="onSetupComplete" />
 
     <!-- 主界面 -->
     <div v-else class="main-layout">
@@ -158,7 +150,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed, nextTick } from 'vue';
+import { ref, onMounted, onUnmounted, computed, nextTick } from 'vue';
 import ChatView from './views/ChatView.vue';
 import InboxView from './views/InboxView.vue';
 import SettingsView from './views/SettingsView.vue';
@@ -203,6 +195,11 @@ const sidebarWidth = ref(260);
 const isSidebarCollapsed = ref(false);
 const isResizing = ref(false);
 
+// ====== 调试开关：强制显示向导 ======
+// 1 = 正常运行
+// 0 = 强制进入初次设置页面（并且点击完成后不会修改实际的数据库状态，方便反复测试）
+const DEBUG_ONBOARDING = 0;
+
 function startResize(e) {
   isResizing.value = true;
   document.addEventListener('mousemove', handleResize);
@@ -236,7 +233,6 @@ async function toggleTheme() {
   currentTheme.value = currentTheme.value === 'dark' ? 'light' : 'dark';
   
   // T-554 UX: 平滑过渡逻辑
-  // 必须先添加 class 并等待浏览器渲染该帧，再修改 data-theme，否则没有过渡效果
   document.documentElement.classList.add('theme-transitioning');
   
   requestAnimationFrame(() => {
@@ -248,7 +244,8 @@ async function toggleTheme() {
     });
   });
 
-  await window.electronAPI.setConfig('theme', currentTheme.value);
+  localStorage.setItem('bob-theme', currentTheme.value); // 立即同步到 localStorage
+  window.electronAPI.setConfig('theme', currentTheme.value);
   if (window.electronAPI.updateTheme) {
     window.electronAPI.updateTheme(currentTheme.value);
   }
@@ -279,9 +276,30 @@ const modelInfo = computed(() => {
 });
 
 // ── 生命周期 ─────────────────────────────────────────
+let unlistenConfigReconciled = null;
+
 onMounted(async () => {
+  // ── 拦截 F5 / Ctrl+R：桌面应用不需要硬刷新，改为软重载 ──
+  document.addEventListener('keydown', async (e) => {
+    if (e.key === 'F5' || (e.ctrlKey && e.key === 'r')) {
+      e.preventDefault();
+      // 软重载：重新拉取对话列表和配置，等同于重新打开应用
+      await loadConversations();
+      currentModel.value = await window.electronAPI.getConfig('model') || '';
+      const theme = await window.electronAPI.getConfig('theme');
+      if (theme) {
+        currentTheme.value = theme;
+        document.documentElement.setAttribute('data-theme', theme);
+      }
+      console.log('[F5] 软重载完成');
+    }
+  });
+
   // 检查是否已配置
   isSetupComplete.value = await window.electronAPI.isSetupComplete();
+  if (DEBUG_ONBOARDING === 1) {
+    isSetupComplete.value = false;
+  }
 
   if (isSetupComplete.value) {
     await loadConversations();
@@ -316,12 +334,28 @@ onMounted(async () => {
     if (savedLang) locale.value = savedLang;
   }
 
-  // 启动画面淡出 — 保证至少展示 1.2 秒
-  setTimeout(() => { showSplash.value = false; }, 1200);
+  // 本地存储同步主题，供 index.html 启动瞬间读取
+  if (currentTheme.value) localStorage.setItem('bob-theme', currentTheme.value);
+
+  // 显示并聚焦原生窗口，防止藏在后台
+  // 注意：不要使用 await，否则任何调用失败（比如窗口并未最小化而引发的异常）都会阻塞后续的开屏动画移除
+  appWindow.unminimize().catch(() => {});
+  appWindow.show().catch(() => {});
+  appWindow.setFocus().catch(() => {});
+
+  // 启动画面淡出 — 原生 Splash 渐隐 1 秒
+  setTimeout(() => { 
+    showSplash.value = false;
+    const splash = document.getElementById('native-splash');
+    if (splash) {
+      splash.style.opacity = '0';
+      setTimeout(() => splash.remove(), 1000); // 等待 CSS 1s transition 结束
+    }
+  }, 1000);
 
   // ── Outbox Reconciler 事件监听 (T-813) ─────────────
   if (window.electronAPI.onConfigReconciled) {
-    window.electronAPI.onConfigReconciled((payload) => {
+    unlistenConfigReconciled = window.electronAPI.onConfigReconciled((payload) => {
       const count = payload?.applied || 0;
       console.log(`[Reconciler] ${count} 条配置已生效，刷新 UI...`);
       // 刷新 ChatView 模型指示器
@@ -334,6 +368,10 @@ onMounted(async () => {
       });
     });
   }
+});
+
+onUnmounted(() => {
+  if (unlistenConfigReconciled) unlistenConfigReconciled();
 });
 
 // ── 对话管理 ─────────────────────────────────────────
@@ -431,10 +469,14 @@ function updateConversationTitle(id, title) {
 }
 
 // ── 相对时间 ─────────────────────────────────────────
-function timeAgo(dateStr) {
-  if (!dateStr) return '';
+function timeAgo(dateVal) {
+  if (!dateVal) return '';
   const now = Date.now();
-  const then = new Date(dateStr + 'Z').getTime(); // SQLite stores UTC
+  // SQLite returns ms timestamp as Number, old configs might return strings
+  const then = typeof dateVal === 'number' ? dateVal : new Date(dateVal + (String(dateVal).includes('Z') ? '' : 'Z')).getTime();
+  
+  if (isNaN(then)) return '';
+  
   const diff = Math.max(0, now - then);
   const mins = Math.floor(diff / 60000);
   if (mins < 1) return t('app.just_now');
@@ -448,16 +490,20 @@ function timeAgo(dateStr) {
 }
 
 // ── 设置 ─────────────────────────────────────────────
-async function onSetupComplete() {
-  const theme = await window.electronAPI.getConfig('theme');
+async function onSetupComplete(payload) {
+  const startRect = payload?.startRect;
+
+  // 优先使用向导传来的值（debug 模式下后端没有保存）
+  const theme = payload?.theme || await window.electronAPI.getConfig('theme');
   if (theme) {
     currentTheme.value = theme;
     document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem('bob-theme', theme);
     if (window.electronAPI.updateTheme) {
       window.electronAPI.updateTheme(theme);
     }
   }
-  const accentColor = await window.electronAPI.getConfig('accentColor');
+  const accentColor = payload?.accentColor || await window.electronAPI.getConfig('accentColor');
   if (accentColor) {
     document.documentElement.style.setProperty('--user-accent', accentColor);
     const hex = accentColor.replace('#', '');
@@ -467,9 +513,71 @@ async function onSetupComplete() {
     document.documentElement.style.setProperty('--user-accent-rgb', `${r}, ${g}, ${b}`);
   }
 
+  // 切换到聊天界面
   isSetupComplete.value = true;
   currentModel.value = await window.electronAPI.getConfig('model') || '';
   await loadConversations();
+
+  // 如果有起始坐标，执行精确飞行动画
+  if (startRect) {
+    await nextTick();
+    requestAnimationFrame(() => {
+      const target = document.querySelector('.empty-bob-logo');
+      if (!target) return;
+
+      const endRect = target.getBoundingClientRect();
+
+      // 隐藏目标 logo，防止飞行过程中出现两个叠影
+      target.style.opacity = '0';
+
+      // 创建一个 div 飞行体，用 mask-image 确保颜色跟随主题
+      const flyer = document.createElement('div');
+      const logoColor = getComputedStyle(document.documentElement).getPropertyValue('--logo-color').trim();
+      const DURATION = 1200; // ms
+      flyer.style.cssText = `
+        position: fixed;
+        z-index: 5;
+        pointer-events: none;
+        left: ${startRect.left}px;
+        top: ${startRect.top}px;
+        width: ${startRect.width}px;
+        height: ${startRect.height}px;
+        opacity: 0.25;
+        background-color: ${logoColor};
+        -webkit-mask-image: url(/bob_bob.svg);
+        mask-image: url(/bob_bob.svg);
+        -webkit-mask-size: contain;
+        mask-size: contain;
+        -webkit-mask-repeat: no-repeat;
+        mask-repeat: no-repeat;
+        -webkit-mask-position: center;
+        mask-position: center;
+        transition: left ${DURATION}ms cubic-bezier(0.22, 1, 0.36, 1),
+                    top ${DURATION}ms cubic-bezier(0.22, 1, 0.36, 1),
+                    width ${DURATION}ms cubic-bezier(0.22, 1, 0.36, 1),
+                    height ${DURATION}ms cubic-bezier(0.22, 1, 0.36, 1),
+                    opacity ${DURATION}ms cubic-bezier(0.22, 1, 0.36, 1);
+      `;
+      document.body.appendChild(flyer);
+
+      // 强制回流后触发动画
+      flyer.offsetHeight;
+      flyer.style.left = `${endRect.left}px`;
+      flyer.style.top = `${endRect.top}px`;
+      flyer.style.width = `${endRect.width}px`;
+      flyer.style.height = `${endRect.height}px`;
+      flyer.style.opacity = '0.05';
+
+      // 等全部 transition 播完后（用 setTimeout 比 transitionend 更可靠）
+      // 先恢复目标 logo，再移除飞行体，保证无缝
+      setTimeout(() => {
+        target.style.opacity = '';  // 恢复为 CSS 默认的 0.05
+        requestAnimationFrame(() => {
+          flyer.remove();
+        });
+      }, DURATION + 50); // +50ms 安全余量
+    });
+  }
 }
 
 async function onConfigChanged() {

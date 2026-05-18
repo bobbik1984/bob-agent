@@ -132,24 +132,23 @@ pub fn system_read_file(file_path: String) -> Value {
         Err(_) => return json!({ "error": "无法读取文件元数据" }),
     };
 
-    // 500KB 安全上限，防止把巨型文件塞进 LLM 上下文
-    const MAX_SIZE: u64 = 512 * 1024;
-    if size > MAX_SIZE {
-        return json!({
-            "error": format!("文件过大 ({:.1}MB)，上限 500KB", size as f64 / 1024.0 / 1024.0),
-            "name": name,
-            "size": size
-        });
-    }
-
-    match fs::read_to_string(&file_path) {
-        Ok(content) => json!({
-            "name": name,
-            "content": content,
-            "size": size
-        }),
-        Err(_) => json!({
-            "error": "文件不是有效的 UTF-8 文本（可能是二进制文件）",
+    // 移除 500KB 的硬性物理大小限制，交由统一的解析引擎提取文本
+    match super::kb_extractor::extract_single_file(p) {
+        Ok(mut content) => {
+            let original_chars = content.chars().count();
+            let limit = 15000;
+            if original_chars > limit {
+                content = content.chars().take(limit).collect();
+                content.push_str("\n\n[⚠️ 系统提示：原文件过长，已截断显示前 15000 字以保护上下文窗口。如果需要对整份长文件进行深度分析检索，请将该文件放入一个独立文件夹，然后将文件夹拖入聊天框以建立知识库。]");
+            }
+            json!({
+                "name": name,
+                "content": content,
+                "size": size
+            })
+        },
+        Err(e) => json!({
+            "error": e,
             "name": name,
             "size": size
         }),

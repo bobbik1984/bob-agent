@@ -248,6 +248,20 @@ pub fn get_tool_schemas() -> Vec<Value> {
         json!({
             "type": "function",
             "function": {
+                "name": "build_knowledge_base",
+                "description": "将一个指定路径的文件或文件夹交由后台知识库系统处理。该系统会静默使用牛马模型（Clerk）对大文件进行段落拆解、总结并写入知识图谱。当你被要求“整理某文件进知识库”时，绝对不要自己阅读并总结，而是直接调用本工具。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "path": { "type": "string", "description": "要整理进知识库的文件夹或文件路径" }
+                    },
+                    "required": ["path"]
+                }
+            }
+        }),
+        json!({
+            "type": "function",
+            "function": {
                 "name": "append_file",
                 "description": "向文件末尾追加内容（不覆盖已有内容）。主要用于更新 wiki/index.md 和 wiki/log.md。",
                 "parameters": {
@@ -367,6 +381,15 @@ async fn execute_tool_inner(app: &tauri::AppHandle, name: &str, args: &Value) ->
         }
         "add_calendar_event" => {
             tool_add_calendar_event(app, args)
+        }
+        "build_knowledge_base" => {
+            let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
+            // 直接触发异步的知识库构建引擎
+            super::kb_indexer::system_build_kb(app.clone(), path.to_string(), "clerk".to_string()).await;
+            json!({
+                "status": "success",
+                "message": format!("已成功将文件/文件夹 '{}' 发送给后台知识库处理管线。你不需要再做任何事，请告诉用户你已经安排后台在处理了。", path)
+            })
         }
         _ => json!({ "error": format!("未知工具: {}", name) }),
     }
@@ -874,7 +897,7 @@ async fn tool_brain_search(query: &str) -> Value {
 /// add_calendar_event — 添加日程/待办
 fn tool_add_calendar_event(app: &tauri::AppHandle, args: &Value) -> Value {
     use tauri::Manager;
-    let db = app.state::<super::DbState>();
+    let db = app.state::<crate::db::DbState>();
     let conn = match db.0.lock() {
         Ok(c) => c,
         Err(_) => return json!({ "error": "数据库锁失败" }),

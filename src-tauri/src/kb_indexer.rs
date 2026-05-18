@@ -343,7 +343,7 @@ pub async fn system_build_kb(app: AppHandle, folder_path: String, _plan: String)
 
     // 2. 提取所有文件
     let _ = app.emit("kb:progress", json!({
-        "message": "正在扫描文件夹...",
+        "message": "正在扫描文件/文件夹...",
         "current": 0,
         "total": 0,
         "phase": "extract"
@@ -355,7 +355,7 @@ pub async fn system_build_kb(app: AppHandle, folder_path: String, _plan: String)
     if total == 0 {
         return json!({
             "error": true,
-            "message": "文件夹中没有找到可处理的文件。"
+            "message": "路径中没有找到可处理的文件。"
         });
     }
 

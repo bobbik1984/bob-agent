@@ -3,13 +3,66 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self' https://api.deepseek.com https://api.openai.com http://localhost:*; img-src 'self' data: blob:" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self' https://api.deepseek.com https://api.openai.com http://localhost:*; img-src 'self' data: blob:" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Noto+Sans+SC:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
   <title>bob-agent</title>
+  <style>
+    body {
+      margin: 0;
+      background-color: #0c0c0c;
+      overflow: hidden;
+    }
+    body[data-theme="light"] {
+      background-color: #ffffff;
+    }
+    #native-splash {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 99999;
+      background-color: #0c0c0c;
+      transition: opacity 1s ease-in-out;
+    }
+    body[data-theme="light"] #native-splash {
+      background-color: #ffffff;
+    }
+    #native-splash .splash-logo {
+      width: 80px;
+      height: 80px;
+      animation: pulse 2s infinite ease-in-out;
+    }
+    @keyframes pulse {
+      0% { transform: scale(0.95); opacity: 0.8; }
+      50% { transform: scale(1.05); opacity: 1; filter: drop-shadow(0 0 12px rgba(255,255,255,0.2)); }
+      100% { transform: scale(0.95); opacity: 0.8; }
+    }
+    body[data-theme="light"] #native-splash .splash-logo {
+      animation: pulse-light 2s infinite ease-in-out;
+    }
+    @keyframes pulse-light {
+      0% { transform: scale(0.95); opacity: 0.8; }
+      50% { transform: scale(1.05); opacity: 1; filter: drop-shadow(0 0 12px rgba(0,0,0,0.15)); }
+      100% { transform: scale(0.95); opacity: 0.8; }
+    }
+  </style>
+  <script>
+    (function() {
+      try {
+        var theme = localStorage.getItem('bob-theme') || 'dark';
+        document.documentElement.setAttribute('data-theme', theme);
+      } catch (e) {}
+    })();
+  </script>
 </head>
 <body>
+  <div id="native-splash">
+    <img src="/bob_logo.svg" class="splash-logo" alt="Bob" />
+  </div>
   <div id="app"></div>
   <script type="module" src="/src/main.js"></script>
 </body>

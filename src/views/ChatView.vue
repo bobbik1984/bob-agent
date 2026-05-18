@@ -9,11 +9,13 @@
         </h2>
       </div>
 
-      <!-- 空状态 -->
+      <!-- 空状态：背景 logo（绝对定位，不参与 flex 布局） -->
+      <div v-if="messages.length === 0" class="empty-logo-wrapper">
+        <div class="empty-bob-logo"></div>
+      </div>
+
+      <!-- 空状态：前景内容（晨间汇报等） -->
       <div v-if="messages.length === 0" class="empty-state animate-fade-in">
-        <div class="empty-logo-wrapper">
-          <img src="/bob_logo.svg" class="empty-bob-logo" alt="Bob" />
-        </div>
         <!-- 晨间汇报卡片 -->
         <MorningBriefing
           @chat="onBriefingChat"
@@ -227,7 +229,7 @@
                     @mouseenter="switcherProvider = p.id"
                     @click="switcherProvider = p.id"
                   >
-                    <img v-if="getModelLogo(p.id)" :src="getModelLogo(p.id)" class="model-logo-sm" @error="(e) => e.target.style.visibility = 'hidden'" />
+                    <img v-if="getModelLogo(p.id)" :src="getModelLogo(p.id)" class="model-logo-sm" />
                     <span class="model-provider-name" :title="p.name">{{ p.name }}</span>
                     <span class="provider-count">{{ p.count }}</span>
                   </button>
@@ -414,19 +416,19 @@ const displayMessages = computed(() => {
 // ── 模型指示器 & 切换 ────────────────────────────────
 function getModelLogo(modelId) {
   const name = (modelId || '').toLowerCase();
-  if (name.includes('deepseek')) return '/logos/deepseek.png';
-  if (name.includes('gpt') || name.includes('openai')) return '/logos/openai.png';
-  if (name.includes('gemini') || name.includes('google') || name.includes('gemma')) return '/logos/google.png';
-  if (name.includes('qwen') || name.includes('dashscope')) return '/logos/qwen.png';
-  if (name.includes('glm') || name.includes('zhipu')) return '/logos/glm.svg';
-  if (name.includes('kimi') || name.includes('moonshot')) return '/logos/kimi.png';
-  if (name.includes('doubao') || name.includes('seed')) return '/logos/doubao.png';
-  if (name.includes('minimax')) return '/logos/minimax.png';
-  if (name.includes('mimo')) return '/logos/mimo.png';
-  if (name.includes('modelscope')) return '/logos/modelscope.png';
-  if (name.includes('claude') || name.includes('anthropic')) return '/logos/claude.png';
-  if (name.includes('grok') || name.includes('xai')) return '/logos/grok.png';
-  if (name.includes('openrouter')) return '/logos/openrouter.png';
+  if (name.includes('deepseek')) return new URL('/logos/deepseek.png', import.meta.url).href;
+  if (name.includes('gpt') || name.includes('openai')) return new URL('/logos/openai.png', import.meta.url).href;
+  if (name.includes('gemini') || name.includes('google') || name.includes('gemma')) return new URL('/logos/google.png', import.meta.url).href;
+  if (name.includes('qwen') || name.includes('dashscope')) return new URL('/logos/qwen.png', import.meta.url).href;
+  if (name.includes('glm') || name.includes('zhipu')) return new URL('/logos/glm.svg', import.meta.url).href;
+  if (name.includes('kimi') || name.includes('moonshot')) return new URL('/logos/kimi.png', import.meta.url).href;
+  if (name.includes('doubao') || name.includes('seed')) return new URL('/logos/doubao.png', import.meta.url).href;
+  if (name.includes('minimax')) return new URL('/logos/minimax.png', import.meta.url).href;
+  if (name.includes('mimo')) return new URL('/logos/mimo.png', import.meta.url).href;
+  if (name.includes('modelscope')) return new URL('/logos/modelscope.png', import.meta.url).href;
+  if (name.includes('claude') || name.includes('anthropic')) return new URL('/logos/claude.png', import.meta.url).href;
+  if (name.includes('grok') || name.includes('xai')) return new URL('/logos/grok.png', import.meta.url).href;
+  if (name.includes('openrouter')) return new URL('/logos/openrouter.png', import.meta.url).href;
   return null;
 }
 
@@ -535,6 +537,7 @@ function onClickOutside(e) {
 // ── 流式监听 ─────────────────────────────────────────
 let cleanupStreamListener = null;
 let tauriDragUnlistens = [];
+let kbUnlistens = [];
 
 onMounted(async () => {
   cleanupStreamListener = window.electronAPI.onStreamChunk(handleStreamChunk);
@@ -610,6 +613,8 @@ onUnmounted(() => {
   }
   tauriDragUnlistens.forEach(u => typeof u === 'function' && u());
   tauriDragUnlistens = [];
+  kbUnlistens.forEach(u => typeof u === 'function' && u());
+  kbUnlistens = [];
 });
 
 // 切换对话时重新加载消息
@@ -633,9 +638,11 @@ async function loadMessages() {
     ...m,
     _thinkingExpanded: false,
   }));
+  await nextTick();
   scrollToBottom();
   setTimeout(scrollToBottom, 150);
   setTimeout(scrollToBottom, 500);
+  setTimeout(scrollToBottom, 1200);
 }
 
 // ── 晨间汇报交互 ──────────────────────────────────────
@@ -675,15 +682,10 @@ async function sendMessage() {
   await nextTick();
   scrollToBottom();
 
-  // 后台异步读取文件并追加到内容中
+  // 将附件路径展示在界面上
   if (filesToRead.length > 0) {
     for (const f of filesToRead) {
-      const res = await window.electronAPI.readFile(f.path);
-      if (!res.error) {
-        userMessage.content += `\n\n--- 附件: ${res.name} ---\n${res.content}\n--- 文件结束 ---`;
-      } else {
-        userMessage.content += `\n\n[附件读取失败: ${res.name} (${res.error})]`;
-      }
+      userMessage.content += `\n\n[📎 附件已就绪: ${f.path}]`;
     }
   }
 
@@ -708,6 +710,12 @@ async function sendMessage() {
       role: m.role,
       content: m.content || '',
     }));
+
+  // 在发给大模型的最终载荷里，偷偷塞入系统指令（不污染前端 UI 和数据库）
+  if (filesToRead.length > 0) {
+    const lastApiMsg = apiMessages[apiMessages.length - 1];
+    lastApiMsg.content += `\n\n（系统内部提示：如果用户要求分析或总结上述附件，请调用 read_file 工具阅读；如果用户要求“整理进知识库”，请绝对不要尝试自己阅读，直接调用 build_knowledge_base 工具将其发往后台 Clerk 引擎）`;
+  }
 
   await nextTick();
   scrollToBottom();
@@ -1172,7 +1180,9 @@ async function confirmFolderTrack() {
   if (!folder) return;
 
   // 添加用户消息
-  messages.value.push({ role: 'user', content: `我已经将文件夹「${folder.name}」拖入。` });
+  const userContent = `我已经将文件夹「${folder.name}」拖入。`;
+  messages.value.push({ role: 'user', content: userContent });
+  await window.electronAPI.addMessage(props.conversationId, 'user', userContent, null);
   
   // 插入系统处理中状态消息
   const systemMsgId = Date.now().toString();
@@ -1192,10 +1202,12 @@ async function confirmFolderTrack() {
     }], globalFileAccess.value, agentMode.value);
 
     // 替换为简短成功提示
+    const successContent = `✅ 已将「${folder.name}」收藏到目录列表。`;
     const index = messages.value.findIndex(m => m.id === systemMsgId);
     if (index !== -1) {
-       messages.value[index].content = `✅ 已将「${folder.name}」收藏到目录列表。`;
+       messages.value[index].content = successContent;
     }
+    await window.electronAPI.addMessage(props.conversationId, 'assistant', successContent, null);
     
     // 显示预估卡片
     pendingKBEstimate.value = {
@@ -1212,10 +1224,12 @@ async function confirmFolderTrack() {
     }
 
   } catch (err) {
+    const failContent = `❌ 文件夹收藏失败: ${err.message}`;
     const index = messages.value.findIndex(m => m.id === systemMsgId);
     if (index !== -1) {
-       messages.value[index].content = `❌ 文件夹收藏失败: ${err.message}`;
+       messages.value[index].content = failContent;
     }
+    await window.electronAPI.addMessage(props.conversationId, 'assistant', failContent, null);
   }
 }
 
@@ -1243,6 +1257,7 @@ function startKBBuild(folderPath, plan) {
     }
     scrollToBottom();
   });
+  if (unlistenProgress) kbUnlistens.push(unlistenProgress);
 
   const unlistenComplete = window.electronAPI.onKBComplete?.((payload) => {
     const idx = messages.value.findIndex(m => m.id === progressMsgId);
@@ -1252,12 +1267,15 @@ function startKBBuild(folderPath, plan) {
       } else {
         messages.value[idx].content = `✅ 知识库构建完成！已成功处理 ${payload.total} 个文件。你现在可以向我提问关于「${payload.folder}」的内容。`;
       }
+      // 持久化最终结果消息
+      window.electronAPI.addMessage(props.conversationId, 'assistant', messages.value[idx].content, null);
     }
     scrollToBottom();
     // 清理监听器
     if (unlistenProgress) unlistenProgress();
     if (unlistenComplete) unlistenComplete();
   });
+  if (unlistenComplete) kbUnlistens.push(unlistenComplete);
 
   // 异步调用 Rust 后端（不 await，不阻塞）
   window.electronAPI.buildKB?.(folderPath, plan).then((result) => {
@@ -1308,11 +1326,13 @@ defineExpose({
 /* ── 消息区域 ───────────────────────────────────────── */
 .messages-area {
   flex: 1;
+  min-height: 0;  /* flex 收缩链：允许消息区域缩到内容以下 */
   overflow-y: auto;
   padding: var(--space-6) var(--space-8);
   display: flex;
   flex-direction: column;
   gap: var(--space-5);
+  position: relative;  /* 为绝对定位的 logo 背景层提供锚点 */
 }
 
 .view-header {
@@ -1337,30 +1357,52 @@ defineExpose({
 }
 
 /* ── 空状态 ─────────────────────────────────────────── */
+
+/* 背景 logo：脱离文档流，锚定在 messages-area 底部 */
+.empty-logo-wrapper {
+  position: absolute;
+  bottom: 0;
+  left: var(--space-8);
+  right: var(--space-8);
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.empty-logo-wrapper .empty-bob-logo {
+  max-width: 1000px;
+  width: 100%;
+}
+
+/* 前景内容层（晨间汇报等） */
 .empty-state {
   flex: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: flex-end;
-  padding-bottom: 0;
+  padding-bottom: 8px;
   width: 100%;
-}
-
-.empty-logo-wrapper {
-  max-width: 1000px;
-  width: 100%;
-  margin: 0 auto;
-  display: flex;
-  justify-content: center;
-  pointer-events: none;
+  z-index: 1;  /* 在 logo 上方 */
+  min-height: 0;  /* 允许 flex 子项收缩到内容以下，防止溢出 */
+  overflow: hidden;  /* 裁剪超出容器的内容 */
 }
 
 .empty-bob-logo {
   width: 100%;
-  height: auto;
+  /* 保持 bob_bob.svg 的宽高比 152.9:99.9 */
+  aspect-ratio: 152.9 / 99.9;
   opacity: 0.05;
-  filter: var(--logo-filter);
+  background-color: var(--logo-color);
+  -webkit-mask-image: url(/bob_bob.svg);
+  mask-image: url(/bob_bob.svg);
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  mask-position: center;
   display: block;
 }
 

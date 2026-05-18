@@ -25,7 +25,7 @@ pub fn init_events_table(conn: &rusqlite::Connection) {
 
 /// 列出所有事件和待办
 #[tauri::command]
-pub fn system_list_events(db: tauri::State<'_, super::DbState>) -> Vec<Value> {
+pub fn system_list_events(db: tauri::State<'_, crate::db::DbState>) -> Vec<Value> {
     let conn = match db.0.lock() {
         Ok(c) => c,
         Err(_) => return vec![],
@@ -90,7 +90,7 @@ pub fn system_parse_event(text: String) -> Value {
 
 /// 确认并保存事件到数据库
 #[tauri::command]
-pub fn system_confirm_event(event: Value, db: tauri::State<'_, super::DbState>) -> Value {
+pub fn system_confirm_event(event: Value, db: tauri::State<'_, crate::db::DbState>) -> Value {
     let conn = match db.0.lock() {
         Ok(c) => c,
         Err(_) => return json!({ "ok": false, "error": "数据库锁失败" }),
@@ -117,7 +117,7 @@ pub fn system_confirm_event(event: Value, db: tauri::State<'_, super::DbState>) 
 
 /// 删除事件
 #[tauri::command]
-pub fn system_delete_event(id: String, db: tauri::State<'_, super::DbState>) -> bool {
+pub fn system_delete_event(id: String, db: tauri::State<'_, crate::db::DbState>) -> bool {
     let conn = match db.0.lock() {
         Ok(c) => c,
         Err(_) => return false,
@@ -128,7 +128,7 @@ pub fn system_delete_event(id: String, db: tauri::State<'_, super::DbState>) -> 
 
 /// 更新事件状态（pending/done/cancelled）
 #[tauri::command]
-pub fn system_update_event_status(id: String, status: String, db: tauri::State<'_, super::DbState>) -> bool {
+pub fn system_update_event_status(id: String, status: String, db: tauri::State<'_, crate::db::DbState>) -> bool {
     let conn = match db.0.lock() {
         Ok(c) => c,
         Err(_) => return false,
@@ -142,7 +142,7 @@ pub fn system_update_event_status(id: String, status: String, db: tauri::State<'
 
 /// 更新事件时间（拖拽调整）
 #[tauri::command]
-pub fn system_update_event_time(id: String, start_time: String, end_time: String, db: tauri::State<'_, super::DbState>) -> bool {
+pub fn system_update_event_time(id: String, start_time: String, end_time: String, db: tauri::State<'_, crate::db::DbState>) -> bool {
     let conn = match db.0.lock() {
         Ok(c) => c,
         Err(_) => return false,

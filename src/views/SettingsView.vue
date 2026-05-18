@@ -14,20 +14,20 @@
       <section class="settings-section card">
         <h3 class="section-title">
           <Server :size="16" class="section-icon" />
-          {{ $te('settings.offline_engine') ? $t('settings.offline_engine') : '离线推理引擎 (本地模型)' }}
+          {{ $t('settings.offline_engine') }}
         </h3>
-        <p class="section-desc" style="margin-bottom: 12px;">启动内置的 llama-server 边车以运行本地 GGUF 模型，实现断网计算和绝对隐私。</p>
+        <p class="section-desc" style="margin-bottom: 12px;">{{ $t('settings.offline_engine_desc') }}</p>
         
         <div class="form-group workspace-group">
           <input
             v-model="config.offlineModelPath"
             class="input"
-            placeholder="请选择本地 .gguf 模型文件路径"
+            :placeholder="$t('settings.offline_model_placeholder')"
             readonly
           />
           <button class="btn btn-primary browse-btn" @click="selectOfflineModel">
             <FolderOpen :size="14" />
-            <span>{{ $te('settings.browse') ? $t('settings.browse') : '浏览' }}</span>
+            <span>{{ $t('settings.browse') }}</span>
           </button>
         </div>
         
@@ -39,12 +39,12 @@
             :disabled="!config.offlineModelPath"
           >
             <Server :size="14" />
-            <span>{{ offlineEngineStatus === 'running' ? '停止本地引擎' : '启动本地引擎' }}</span>
+            <span>{{ offlineEngineStatus === 'running' ? $t('settings.offline_engine_stop') : $t('settings.offline_engine_start') }}</span>
           </button>
           
           <span style="font-size: 0.85em; display: flex; align-items: center; gap: 6px;" :style="{ color: offlineEngineStatus === 'running' ? 'var(--accent-primary)' : 'var(--text-tertiary)' }">
             <span class="status-dot" :style="{ background: offlineEngineStatus === 'running' ? 'var(--accent-primary)' : 'var(--text-tertiary)' }" style="width: 8px; height: 8px; border-radius: 50%; display: inline-block;"></span>
-            {{ offlineEngineStatus === 'running' ? '正在运行 (端口: 8080)' : '已停止' }}
+            {{ offlineEngineStatus === 'running' ? $t('settings.offline_engine_running') : $t('settings.offline_engine_stopped') }}
           </span>
         </div>
       </section>
@@ -54,23 +54,22 @@
         <summary class="section-title" style="cursor: pointer; display: flex; align-items: center; justify-content: space-between; margin-bottom: 0;">
           <div style="display: flex; align-items: center; gap: 8px;">
             <Key :size="16" class="section-icon" style="opacity: 0.6;" />
-            {{ $te('settings.api_keys_title') ? $t('settings.api_keys_title') : 'API 密钥管理 (安全存储)' }}
+            {{ $t('settings.api_keys_title') }}
           </div>
           <ChevronDown :size="16" class="details-chevron" />
         </summary>
-        <p class="section-desc" style="margin-top: 16px; margin-bottom: 16px;">{{ $te('settings.api_keys_desc') ? $t('settings.api_keys_desc') : '所有密钥都已通过操作系统级加密 (safeStorage) 存储在本地，防止未经授权的读取。' }}</p>
+        <p class="section-desc" style="margin-top: 16px; margin-bottom: 16px;">{{ $t('settings.api_keys_desc') }}</p>
         
         <!-- T-821: Outbox 引导提示 -->
-        <div style="margin-bottom: 16px; padding: 10px 14px; border-radius: 8px; background: rgba(var(--user-accent-rgb, 99,102,241), 0.08); border: 1px solid rgba(var(--user-accent-rgb, 99,102,241), 0.2); font-size: 0.82em; color: var(--text-secondary); line-height: 1.5;">
-          💡 <strong>小提示</strong>：您也可以直接在对话中告诉 Bob "帮我配置这个 API Key"，或者把包含密钥的文件拖拽发送给他，Bob 会自动识别并安全地配置好。
+        <div style="margin-bottom: 16px; padding: 10px 14px; border-radius: 8px; background: rgba(var(--user-accent-rgb, 99,102,241), 0.08); border: 1px solid rgba(var(--user-accent-rgb, 99,102,241), 0.2); font-size: 0.82em; color: var(--text-secondary); line-height: 1.5;" v-html="$t('settings.outbox_hint')">
         </div>
 
         <!-- 模型供应商密钥 -->
-        <h4 style="margin-bottom: 8px; font-size: 0.85em; color: var(--text-secondary);">模型供应商密钥</h4>
+        <h4 style="margin-bottom: 8px; font-size: 0.85em; color: var(--text-secondary);">{{ $t('settings.provider_keys_title') }}</h4>
         <div style="display: flex; flex-direction: column; gap: 6px; margin-bottom: 20px;">
           <div class="form-group" v-for="provider in modelProviders" :key="provider.id" style="display: flex; align-items: center; gap: 12px; border-bottom: 1px solid var(--border-subtle); padding-bottom: 6px;">
             <label class="form-label" style="width: 160px; margin-bottom: 0; display: flex; align-items: center; gap: 8px;">
-              <img v-if="getProviderLogo(provider.id)" :src="getProviderLogo(provider.id)" style="width: 16px; height: 16px; object-fit: contain; border-radius: 2px;" @error="(e) => e.target.style.visibility = 'hidden'" />
+              <img v-if="getProviderLogo(provider.id)" :src="getProviderLogo(provider.id)" style="width: 16px; height: 16px; object-fit: contain; border-radius: 2px;" />
               <span style="flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" :title="provider.name">{{ provider.name }}</span>
             </label>
             <span class="status-dot" :style="{ background: provider.hasKey ? 'var(--user-accent)' : 'transparent', border: provider.hasKey ? '2px solid var(--user-accent)' : '2px solid var(--text-tertiary)' }" style="width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex-shrink: 0;"></span>
@@ -78,15 +77,18 @@
               v-model="apiKeys[provider.id]" 
               type="password" 
               class="input" 
-              :placeholder="provider.hasKey ? ($te('settings.configured') ? $t('settings.configured') : '已配置') : ($te('settings.not_configured') ? $t('settings.not_configured') : '未配置')" 
+              :placeholder="provider.hasKey ? $t('settings.configured') : $t('settings.not_configured')" 
               style="flex: 1;" 
             />
-            <button class="btn btn-primary" @click="saveApiKey(provider.id)" style="padding: 4px 10px; font-size: 0.9em;">{{ $te('settings.save') ? $t('settings.save') : '保存' }}</button>
+            <button class="btn btn-primary" @click="saveApiKey(provider.id)" style="padding: 4px 10px; font-size: 0.9em;">{{ $t('settings.save') }}</button>
+            <button class="btn-icon btn-remove-key" :style="{ visibility: provider.hasKey ? 'visible' : 'hidden' }" @click="deleteApiKey(provider.id)" :title="$t('settings.delete_key')">
+              <X :size="14" />
+            </button>
           </div>
         </div>
 
         <!-- 插件/外部服务密钥 -->
-        <h4 style="margin-bottom: 8px; font-size: 0.85em; color: var(--text-secondary);">插件/外部服务密钥</h4>
+        <h4 style="margin-bottom: 8px; font-size: 0.85em; color: var(--text-secondary);">{{ $t('settings.plugin_keys_title') }}</h4>
         <div style="display: flex; flex-direction: column; gap: 12px;">
           <div class="form-group" v-for="provider in toolProviders" :key="provider.id" style="display: flex; align-items: center; gap: 12px; border-bottom: 1px solid var(--border-subtle); padding-bottom: 8px;">
             <label class="form-label" style="width: 140px; margin-bottom: 0;">{{ provider.name }}</label>
@@ -95,42 +97,45 @@
               v-model="apiKeys[provider.id]" 
               type="password" 
               class="input" 
-              :placeholder="provider.hasKey ? ($te('settings.configured') ? $t('settings.configured') : '已配置') : ($te('settings.not_configured') ? $t('settings.not_configured') : '未配置')" 
+              :placeholder="provider.hasKey ? $t('settings.configured') : $t('settings.not_configured')" 
               style="flex: 1;" 
             />
-            <button class="btn btn-primary" @click="saveApiKey(provider.id)" style="padding: 6px 12px;">{{ $te('settings.save') ? $t('settings.save') : '保存' }}</button>
+            <button class="btn btn-primary" @click="saveApiKey(provider.id)" style="padding: 6px 12px;">{{ $t('settings.save') }}</button>
+            <button class="btn-icon btn-remove-key" :style="{ visibility: provider.hasKey ? 'visible' : 'hidden' }" @click="deleteApiKey(provider.id)" :title="$t('settings.delete_key')">
+              <X :size="14" />
+            </button>
           </div>
         </div>
 
         <!-- 自定义模型配置 -->
         <div style="margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border-subtle);">
-          <h4 style="margin-bottom: 8px; font-size: 0.85em; color: var(--text-secondary);">自定义模型 (兼容 OpenAI 格式)</h4>
+          <h4 style="margin-bottom: 8px; font-size: 0.85em; color: var(--text-secondary);">{{ $t('settings.custom_model_title') }}</h4>
           
           <div style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px;">
             <div v-for="cm in customModels" :key="cm.id" style="display: flex; align-items: center; gap: 8px; padding: 6px 8px; background: var(--bg-tertiary); border-radius: 4px; border: 1px solid var(--border-subtle);">
               <span style="font-weight: bold; width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ cm.displayName }}</span>
               <span style="flex: 1; font-size: 0.85em; color: var(--text-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ cm.baseUrl }}</span>
-              <button class="btn-icon" style="color: var(--status-error); width: 24px; height: 24px;" @click="removeCustomModel(cm.id)" title="删除">
+              <button class="btn-icon" style="color: var(--status-error); width: 24px; height: 24px;" @click="removeCustomModel(cm.id)" :title="$t('settings.delete')">
                 <Trash2 :size="14" />
               </button>
             </div>
           </div>
           
           <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px;">
-            <input v-model="newCustomModel.name" class="input" placeholder="模型名称 (例: Gemini Pro)" style="font-size: 0.85em; padding: 4px 8px;" />
-            <input v-model="newCustomModel.id" class="input" placeholder="模型ID (例: gemini-2.5-pro)" style="font-size: 0.85em; padding: 4px 8px;" />
-            <input v-model="newCustomModel.url" class="input" placeholder="Base URL" style="font-size: 0.85em; padding: 4px 8px;" />
-            <input v-model="newCustomModel.key" class="input" type="password" placeholder="API Key" style="grid-column: span 2; font-size: 0.85em; padding: 4px 8px;" />
-            <button class="btn btn-primary" @click="addCustomModel" :disabled="!newCustomModel.name || !newCustomModel.url || !newCustomModel.key" style="padding: 4px; font-size: 0.85em;">添加自定义模型</button>
+            <input v-model="newCustomModel.name" class="input" :placeholder="$t('settings.custom_model_name')" style="font-size: 0.85em; padding: 4px 8px;" />
+            <input v-model="newCustomModel.id" class="input" :placeholder="$t('settings.custom_model_id')" style="font-size: 0.85em; padding: 4px 8px;" />
+            <input v-model="newCustomModel.url" class="input" :placeholder="$t('settings.custom_model_url')" style="font-size: 0.85em; padding: 4px 8px;" />
+            <input v-model="newCustomModel.key" class="input" type="password" :placeholder="$t('settings.custom_model_key')" style="grid-column: span 2; font-size: 0.85em; padding: 4px 8px;" />
+            <button class="btn btn-primary" @click="addCustomModel" :disabled="!newCustomModel.name || !newCustomModel.url || !newCustomModel.key" style="padding: 4px; font-size: 0.85em;">{{ $t('settings.custom_model_add') }}</button>
           </div>
         </div>
 
         <!-- 工具凭证状态 -->
         <div v-if="toolStatuses.length > 0" style="margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border-subtle);">
-          <h4 style="margin-bottom: 8px; font-size: 0.85em; color: var(--text-secondary);">{{ $te('settings.tool_status_title') ? $t('settings.tool_status_title') : '🔧 工具激活状态' }}</h4>
+          <h4 style="margin-bottom: 8px; font-size: 0.85em; color: var(--text-secondary);">{{ $t('settings.tool_status_title') }}</h4>
           <div style="display: flex; flex-wrap: wrap; gap: 8px;">
             <span v-for="tool in toolStatuses" :key="tool.name"
-              :title="tool.isActive ? tool.description : ('缺少: ' + tool.missingCredentials.join(', '))"
+              :title="tool.isActive ? tool.description : ($t('settings.tool_missing') + tool.missingCredentials.join(', '))"
               style="padding: 3px 10px; border-radius: 12px; font-size: 0.8em; display: inline-flex; align-items: center; gap: 6px;"
               :style="{ 
                 background: tool.isActive ? 'color-mix(in srgb, var(--accent-primary) 10%, transparent)' : 'color-mix(in srgb, var(--text-tertiary) 10%, transparent)',
@@ -410,7 +415,7 @@
           
           <button class="btn btn-primary" @click="openLogDir">
             <FileText :size="14" />
-            {{ $te('settings.open_log_dir') ? $t('settings.open_log_dir') : '打开日志目录' }}
+            {{ $t('settings.open_log_dir') }}
           </button>
           
           <button class="btn btn-danger" @click="factoryReset">
@@ -431,6 +436,7 @@ import { useI18n } from 'vue-i18n';
 import CustomSelect from '../components/CustomSelect.vue';
 import PluginManager from '../components/PluginManager.vue';
 import ModelHub from '../components/ModelHub.vue';
+import { ACCENT_COLORS, PREMIUM_THEMES } from '@/constants/theme.js';
 
 const emit = defineEmits(['config-changed']);
 const { locale, t } = useI18n();
@@ -459,18 +465,22 @@ const providerOptions = [
   { label: t('settings.custom_provider'), value: 'custom' },
 ];
 
-const accentColors = computed(() => [
-  { name: t('settings.color_mallos_blue'), value: '#2776bb' },
-  { name: t('settings.color_slate_gray'), value: '#627C8C' },
-  { name: t('settings.color_lavender'), value: '#989398' },
-  { name: t('settings.color_powder_blue'), value: '#B9C7D2' },
-  { name: t('settings.color_vermilion'), value: '#E93C35' },
-]);
+const accentColors = computed(() => ACCENT_COLORS.map(c => ({
+  value: c.value,
+  name: c.nameKey ? (t(c.nameKey) || c.name) : c.name,
+})));
 
-const themeOptions = computed(() => [
-  { label: t('settings.theme_dark'), value: 'dark' },
-  { label: t('settings.theme_light'), value: 'light' },
-]);
+const themeOptions = computed(() => {
+  const baseOptions = [
+    { label: t('settings.theme_dark'), value: 'dark' },
+    { label: t('settings.theme_light'), value: 'light' },
+  ];
+  const premiumOptions = PREMIUM_THEMES.map(theme => ({
+    label: theme.nameKey ? (t(theme.nameKey) || theme.name) : theme.name,
+    value: theme.id
+  }));
+  return [...baseOptions, ...premiumOptions];
+});
 
 const uiScaleOptions = computed(() => [
   { label: t('settings.scale_compact'), value: 'compact' },
@@ -653,15 +663,15 @@ async function removeCustomModel(id) {
 
 function getProviderLogo(providerId) {
   const name = (providerId || '').toLowerCase();
-  if (name.includes('deepseek')) return '/logos/deepseek.png';
-  if (name.includes('openai')) return '/logos/openai.png';
-  if (name.includes('qwen') || name.includes('dashscope')) return '/logos/qwen.png';
-  if (name.includes('doubao')) return '/logos/doubao.png';
-  if (name.includes('zhipu')) return '/logos/glm.svg';
-  if (name.includes('kimi')) return '/logos/kimi.png';
-  if (name.includes('minimax')) return '/logos/minimax.png';
-  if (name.includes('gemini') || name.includes('google')) return '/logos/google.png';
-  if (name.includes('claude') || name.includes('anthropic')) return '/logos/claude.png';
+  if (name.includes('deepseek')) return new URL('/logos/deepseek.png', import.meta.url).href;
+  if (name.includes('openai')) return new URL('/logos/openai.png', import.meta.url).href;
+  if (name.includes('qwen') || name.includes('dashscope')) return new URL('/logos/qwen.png', import.meta.url).href;
+  if (name.includes('doubao')) return new URL('/logos/doubao.png', import.meta.url).href;
+  if (name.includes('zhipu')) return new URL('/logos/glm.svg', import.meta.url).href;
+  if (name.includes('kimi')) return new URL('/logos/kimi.png', import.meta.url).href;
+  if (name.includes('minimax')) return new URL('/logos/minimax.png', import.meta.url).href;
+  if (name.includes('gemini') || name.includes('google')) return new URL('/logos/google.png', import.meta.url).href;
+  if (name.includes('claude') || name.includes('anthropic')) return new URL('/logos/claude.png', import.meta.url).href;
   return null;
 }
 
@@ -696,6 +706,19 @@ async function saveApiKey(providerId) {
       modelHubRef.value.refreshKeyStatus();
     }
     emit('config-changed'); // notify App to refresh
+  }
+}
+
+async function deleteApiKey(providerId) {
+  if (window.electronAPI.setApiKey) {
+    await window.electronAPI.setApiKey(providerId, '');
+    apiKeys.value[providerId] = '';
+    await fetchApiKeys();
+    await fetchToolStatuses();
+    if (modelHubRef.value) {
+      modelHubRef.value.refreshKeyStatus();
+    }
+    emit('config-changed');
   }
 }
 
@@ -1245,5 +1268,17 @@ select.input {
   border-color: var(--text-primary);
   transform: scale(1.1);
   box-shadow: 0 0 0 2px var(--bg-primary), 0 0 0 4px var(--text-primary);
+}
+
+.btn-remove-key {
+  flex-shrink: 0;
+  color: var(--text-tertiary);
+  opacity: 0.6;
+  transition: all 0.15s ease;
+}
+.btn-remove-key:hover {
+  color: var(--color-error);
+  opacity: 1;
+  background: var(--color-error-bg);
 }
 </style>

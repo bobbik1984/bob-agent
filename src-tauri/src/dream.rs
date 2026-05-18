@@ -37,7 +37,7 @@ fn get_cold_session_dir() -> PathBuf {
 
 /// 对话结束时，提取对话摘要并存为 session 日志
 #[tauri::command]
-pub fn system_summarize_session(conversation_id: String, db: tauri::State<'_, super::DbState>) -> bool {
+pub fn system_summarize_session(conversation_id: String, db: tauri::State<'_, crate::db::DbState>) -> bool {
     let conn = match db.0.lock() {
         Ok(c) => c,
         Err(_) => return false,

@@ -116,14 +116,14 @@ window.electronAPI = {
     listen('kb:progress', (event) => {
       callback(event.payload);
     }).then(fn => { unlisten = fn; });
-    return () => { if (unlisten) unlisten(); };
+    return () => { if (unlisten) { unlisten(); unlisten = null; } };
   },
   onKBComplete: (callback) => {
     let unlisten = null;
     listen('kb:complete', (event) => {
       callback(event.payload);
     }).then(fn => { unlisten = fn; });
-    return () => { if (unlisten) unlisten(); };
+    return () => { if (unlisten) { unlisten(); unlisten = null; } };
   },
 
   // Tauri 原生文件拖拽事件

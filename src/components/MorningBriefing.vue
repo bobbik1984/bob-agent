@@ -102,12 +102,18 @@ onUnmounted(() => {
 <style scoped>
 .morning-briefing {
   max-width: 480px;
-  margin: 0 auto 24px;
+  width: 100%;
+  margin: 0 auto;
   background: var(--bg-secondary);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-lg);
   overflow: hidden;
   box-shadow: var(--shadow-lg);
+  /* 高度由父容器 flex 约束，不使用 viewport 计算 */
+  display: flex;
+  flex-direction: column;
+  min-height: 0;  /* 允许收缩到内容以下 */
+  flex: 0 1 auto; /* 可收缩，不可膨胀 */
 }
 
 .briefing-header {
@@ -116,6 +122,7 @@ onUnmounted(() => {
   gap: 8px;
   padding: 12px 16px;
   border-bottom: 1px solid var(--border-subtle);
+  flex-shrink: 0;
 }
 
 .briefing-icon {
@@ -150,6 +157,10 @@ onUnmounted(() => {
 
 .briefing-body {
   padding: 16px;
+  /* 内容超出时可滚动，保证 header 和 actions 始终可见 */
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
 }
 
 .briefing-content {
@@ -202,6 +213,7 @@ onUnmounted(() => {
   display: flex;
   gap: 8px;
   padding: 0 16px 16px;
+  flex-shrink: 0;
 }
 
 .briefing-action-btn {

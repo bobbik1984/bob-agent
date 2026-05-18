@@ -1,7 +1,8 @@
 use serde_json::{json, Value};
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use walkdir::WalkDir;
+use pdfium_render::prelude::*;
 
 /// LLM-Wiki 知识库引擎 — Phase A: 原生文件解析器
 ///
@@ -72,13 +73,31 @@ fn extract_text(path: &Path) -> Result<String, String> {
         .map_err(|e| format!("读取文本失败: {}", e))
 }
 
-/// 提取 PDF 文本 (使用 pdf-extract crate)
+/// 提取 PDF 文本 (使用 pdfium-render, 工业级 Chrome 引擎)
+/// 支持所有奇葩 CMap 编码和复杂的中文字体子集
 fn extract_pdf(path: &Path) -> Result<String, String> {
-    let bytes = fs::read(path)
-        .map_err(|e| format!("读取 PDF 文件失败: {}", e))?;
+    match std::panic::catch_unwind(|| {
+        let bind = Pdfium::bind_to_library(Pdfium::pdfium_platform_library_name_at_path("./"))
+            .or_else(|_| Pdfium::bind_to_system_library())
+            .map_err(|e| format!("无法绑定 PDFium 引擎: {}", e))?;
 
-    pdf_extract::extract_text_from_mem(&bytes)
-        .map_err(|e| format!("PDF 解析失败: {}", e))
+        let pdfium = Pdfium::new(bind);
+        let document = pdfium.load_pdf_from_file(path, None)
+            .map_err(|e| format!("PDFium 加载文件失败: {}", e))?;
+
+        let mut full_text = String::new();
+        for page in document.pages().iter() {
+            if let Ok(text) = page.text() {
+                full_text.push_str(&text.all());
+                full_text.push('\n');
+            }
+        }
+        Ok(full_text)
+    }) {
+        Ok(Ok(text)) => Ok(text),
+        Ok(Err(e)) => Err(e),
+        Err(_) => Err("PDFium 解析时发生崩溃".to_string()),
+    }
 }
 
 /// 提取 DOCX 文本 (ZIP 解压 → XML 解析 → <w:t> 节点)
@@ -230,14 +249,59 @@ fn extract_xml_text_nodes(xml: &str, tag_name: &str) -> Result<String, String> {
 // 公开接口
 // ═══════════════════════════════════════════════════════════
 
+/// 提取单个文件的纯文本内容，复用各种格式的解析器
+pub fn extract_single_file(path: &Path) -> Result<String, String> {
+    if !path.exists() || !path.is_file() {
+        return Err("文件不存在或不是文件".to_string());
+    }
+
+    let ext = path.extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+
+    if is_text_ext(&ext) {
+        extract_text(path)
+    } else if is_pdf(&ext) {
+        extract_pdf(path)
+    } else if is_docx(&ext) {
+        extract_docx(path)
+    } else if is_pptx(&ext) {
+        extract_pptx(path)
+    } else if ext == "xlsx" || ext == "csv" {
+        extract_xlsx(path)
+    } else {
+        Err(format!("不支持直接提取此格式的纯文本: {}", ext))
+    }
+}
+
 /// 提取整个文件夹中所有可转换文件的纯文本
 pub fn extract_folder(folder_path: &str) -> Vec<ExtractedFile> {
     let root = Path::new(folder_path);
-    if !root.exists() || !root.is_dir() {
+    if !root.exists() {
         return Vec::new();
     }
 
     let mut results = Vec::new();
+
+    // 如果传入的本就是单文件，直接解析并返回
+    if root.is_file() {
+        if let Ok(content) = extract_single_file(root) {
+            let relative_path = root.file_name().unwrap_or_default().to_string_lossy().to_string();
+            let char_count = content.chars().count();
+            let byte_size = root.metadata().map(|m| m.len()).unwrap_or(0);
+            
+            results.push(ExtractedFile {
+                relative_path: relative_path.clone(),
+                file_name: relative_path,
+                file_type: "file".to_string(),
+                text_content: content,
+                char_count,
+                byte_size,
+            });
+        }
+        return results;
+    }
 
     for entry in WalkDir::new(folder_path)
         .max_depth(20)
@@ -279,7 +343,12 @@ pub fn extract_folder(folder_path: &str) -> Vec<ExtractedFile> {
         let (file_type, text_result) = if is_text_ext(&ext) {
             ("text".to_string(), extract_text(path))
         } else if is_pdf(&ext) {
-            ("pdf".to_string(), extract_pdf(path))
+            let pdf_path = path.to_path_buf();
+            let pdf_result = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| extract_pdf(&pdf_path))) {
+                Ok(r) => r,
+                Err(_) => Err(format!("PDF {} 解析崩溃，已跳过", file_name)),
+            };
+            ("pdf".to_string(), pdf_result)
         } else if is_docx(&ext) {
             ("docx".to_string(), extract_docx(path))
         } else if is_pptx(&ext) {

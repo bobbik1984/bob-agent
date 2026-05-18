@@ -18,5 +18,11 @@ export default defineConfig({
   server: {
     port: 5173,
     strictPort: true,
+    watch: {
+      ignored: ['**/src-tauri/**', '**/ignore_sync/**'],
+    },
+  },
+  optimizeDeps: {
+    entries: ['index.html'],
   },
 });

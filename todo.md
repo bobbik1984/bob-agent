@@ -348,10 +348,10 @@
 > 🛡️ **安全原则**: 消除 Rust 后端 Panic 隐患，彻底清理弃用的 Node.js 依赖，封堵路径穿越漏洞。
 
 ### 第一阶段: 高危漏洞与冗余清理 (Phase 1)
-- [ ] T-1001: **Rust 异常处理加固 (`unwrap` 消除)** — 扫描 `src-tauri/src/tools.rs` (Weather API 解析) 和 `sidecar.rs` (Mutex locks) 中的 `.unwrap()` 调用。将其替换为安全的 `if let`、`match` 或 `unwrap_or_else`，避免因外部 API 异常或线程锁毒化导致应用崩溃。
-- [ ] T-1002: **清理 Electron 依赖残留** — 从 `package.json` 彻底移除 `better-sqlite3`, `electron`, `electron-builder` 及冗余的 NPM scripts，净化打包环境，减少 Node_modules 体积。
-- [ ] T-1003: **路径穿越防范增强** — 修改 `src-tauri/src/tools.rs` 中的 `resolve_write_path` 方法。在处理软链接时，对目标路径的父目录应用 `std::fs::canonicalize()`，并强制校验其前缀是否符合白名单 (Workspace/Data dir)，以防高级越权写入攻击。
+- [x] T-1001: **Rust 异常处理加固 (`unwrap` 消除)** — 扫描 `src-tauri/src/tools.rs` (Weather API 解析) 和 `sidecar.rs` (Mutex locks) 中的 `.unwrap()` 调用。将其替换为安全的 `if let`、`match` 或 `unwrap_or_else`，避免因外部 API 异常或线程锁毒化导致应用崩溃。
+- [x] T-1002: **清理 Electron 依赖残留** — 从 `package.json` 彻底移除 `better-sqlite3`, `electron`, `electron-builder` 及冗余的 NPM scripts，净化打包环境，减少 Node_modules 体积。
+- [x] T-1003: **路径穿越防范增强** — 修改 `src-tauri/src/tools.rs` 中的 `resolve_write_path` 方法。在处理软链接时，对目标路径的父目录应用 `std::fs::canonicalize()`，并强制校验其前缀是否符合白名单 (Workspace/Data dir)，以防高级越权写入攻击。
 
 ### 第二阶段: 架构重构与性能优化 (Phase 2 - 延后执行)
-- [ ] T-1004: **数据库逻辑解耦** — 将 `src-tauri/src/lib.rs` 中的 `rusqlite` SQLite 相关逻辑抽离到独立的 `src-tauri/src/db.rs` 模块，规范化 Tauri State 在跨文件中的生命周期传递，给入口文件瘦身。
-- [ ] T-1005: **前端事件订阅内存泄露排查** — 在 Vue 组件（如 ChatView, SettingsView）中，审查所有 Tauri 事件的监听，确保在 `onUnmounted` 时正确调用 `unlisten()` 回调函数，避免重复渲染和内存消耗。
+- [x] T-1004: **数据库逻辑解耦** — 将 `src-tauri/src/lib.rs` 中的 `rusqlite` SQLite 相关逻辑抽离到独立的 `src-tauri/src/db.rs` 模块，规范化 Tauri State 在跨文件中的生命周期传递，给入口文件瘦身。
+- [x] T-1005: **前端事件订阅内存泄露排查** — 在 Vue 组件（如 ChatView, SettingsView）中，审查所有 Tauri 事件的监听，确保在 `onUnmounted` 时正确调用 `unlisten()` 回调函数，避免重复渲染和内存消耗。

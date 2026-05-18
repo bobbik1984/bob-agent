@@ -3,12 +3,12 @@ project:
   version: "1.0.0-alpha"
   status: in_progress
   tech: [Tauri V2, Rust, Vue 3, Vite, SQLite (rusqlite), reqwest, scraper, tauri-plugin-single-instance]
-  updated: "2026-05-16"
+  updated: "2026-05-17"
   architecture: "Tauri (Rust backend) + Vue 3 (frontend) + tauri-bridge.js (adapter)"
-  current_focus: "里程碑 10: 认知与记忆引擎 (SOUL注入 + 热记忆) + 端到端测试"
+  current_focus: "里程碑 11 完成 — 后续可进入 Epic 级功能迭代 (离线 Tool Calling / 排队纠偏 / Cron 自动化)"
 
 # ═══════════════════════════════════════════════════════════════
-# Tauri 迁移后里程碑体系 (里程碑 1-9)
+# Tauri 迁移后里程碑体系 (里程碑 1-11)
 # ═══════════════════════════════════════════════════════════════
 
 milestones:
@@ -41,7 +41,7 @@ milestones:
       - { id: T-301, text: "config_get/set 读写 config.json", status: done }
       - { id: T-302, text: "config_get_all 返回完整配置", status: done }
       - { id: T-303, text: "Stronghold 加密密钥存储", status: todo }
-      - { id: T-304, text: "全局快捷键 (Ctrl+Shift+B)", status: todo }
+      - { id: T-304, text: "全局快捷键 (Ctrl+Shift+B)", status: done }
 
   - name: "M4: Rust 原生化 — SQLite 引擎"
     status: done
@@ -148,14 +148,33 @@ milestones:
       - { id: T-1004, text: "冷热记忆迁移 (7天自动归档 memory→wiki)", status: done }
       - { id: T-1005, text: "记忆沙箱保护 (resolve_write_path 白名单引擎)", status: done }
 
+  - name: "M11: 架构审计与安全加固 (Post-Migration Audit)"
+    status: done
+    completion: 100%
+    date_completed: "2026-05-17"
+    summary: "Jules 审计驱动的全面加固：消除 Rust Panic、清理 Electron 技术债、路径穿越防御 canonicalize()、db.rs 模块解耦、Vue 事件生命周期泄漏修复"
+    new_files: [db.rs]
+    modified_files: [lib.rs, sidecar.rs, tools.rs, llm.rs, calendar.rs, dream.rs, package.json, tauri-bridge.js, ChatView.vue, App.vue, kb_extractor.rs]
+    tasks:
+      # Phase 1: 高危漏洞与冗余清理
+      - { id: T-1101, text: "Rust unwrap() 消除 (sidecar.rs Mutex + tools.rs Weather + llm.rs static_pool)", status: done }
+      - { id: T-1102, text: "清理 Electron 依赖残留 (better-sqlite3, electron, electron-builder)", status: done }
+      - { id: T-1103, text: "路径穿越防范 (canonicalize() + 白名单前缀校验)", status: done }
+      # Phase 2: 架构解耦与事件生命周期
+      - { id: T-1104, text: "数据库逻辑解耦 (DbState/init_db/CRUD → db.rs 独立模块)", status: done }
+      - { id: T-1105, text: "前端事件订阅泄漏修复 (kb:progress/kb:complete + config:reconciled unlisten)", status: done }
+      - { id: T-1106, text: "tauri-bridge.js unlisten 幂等性加固", status: done }
+      - { id: T-1107, text: "kb_extractor.rs 未使用 import 清理", status: done }
+
 # ═══════════════════════════════════════════════════════════════
 # Rust 后端模块清单 (src-tauri/src/)
 # ═══════════════════════════════════════════════════════════════
 
 rust_modules:
-  - { file: lib.rs, desc: "Tauri 入口 + config 读写 + IPC 注册 + DB 初始化" }
+  - { file: lib.rs, desc: "Tauri 入口 + config 读写 + IPC 注册 (DB 已解耦至 db.rs)" }
+  - { file: db.rs, desc: "SQLite 数据库引擎 (DbState + init_db + CRUD + factory_reset)" }
   - { file: llm.rs, desc: "LLM 引擎: SSE 流式 + Tool Calling 循环 + ModelHub" }
-  - { file: tools.rs, desc: "工具注册表 + 执行调度器 (12 个原生工具) + 审计日志 + 路径白名单" }
+  - { file: tools.rs, desc: "工具注册表 + 执行调度器 (12 个原生工具) + 审计日志 + 路径白名单 (canonicalize)" }
   - { file: kb_extractor.rs, desc: "知识库文件提取 (PDF/DOCX/XLSX)" }
   - { file: kb_indexer.rs, desc: "知识库索引构建" }
   - { file: filesystem.rs, desc: "文件读取/扫描/跟踪" }
@@ -202,18 +221,24 @@ jules_sessions:
 
 tests:
   total_passing: 11
-  updated: "2026-05-16"
+  updated: "2026-05-17"
   note: "待端到端测试后更新"
 
 recent_fixes:
-  - { date: "2026-05-16", desc: "calendar.rs 字段名修复 (startTime→start_time)" }
-  - { date: "2026-05-16", desc: "tools.rs add_calendar_event 工具 + start_time 拼接" }
-  - { date: "2026-05-16", desc: "tauri-plugin-single-instance 防双开" }
-  - { date: "2026-05-16", desc: "dev 模式 prevent_close 改为真关闭" }
-  - { date: "2026-05-16", desc: "导航更名: 收件箱→日程" }
-recent_fixes:
   - date: "2026-05-17"
     items:
+      - "[Arch] M11 架构审计全面完成 (Jules 审计报告驱动)"
+      - "[Security] sidecar.rs Mutex unwrap() → unwrap_or_else 防 Panic"
+      - "[Security] tools.rs Weather API unwrap() → unwrap_or_default 防崩溃"
+      - "[Security] llm.rs static_pool unwrap() → unwrap_or_default"
+      - "[Security] resolve_write_path 升级 canonicalize() 阻断符号链接攻击"
+      - "[Cleanup] package.json 清除 better-sqlite3/electron/electron-builder"
+      - "[Arch] 新建 db.rs — DbState/init_db/CRUD/factory_reset 从 lib.rs 完全解耦"
+      - "[Arch] calendar.rs/dream.rs/tools.rs 引用路径迁移 (super::DbState → crate::db::DbState)"
+      - "[Lifecycle] ChatView.vue kb:progress/kb:complete 事件加入 kbUnlistens 生命周期管理"
+      - "[Lifecycle] App.vue config:reconciled 监听存储 + onUnmounted 销毁"
+      - "[Lifecycle] tauri-bridge.js unlisten 闭包幂等化 (防二次调用)"
+      - "[Cleanup] kb_extractor.rs 移除未使用的 PathBuf import"
       - "[Security] write_file/append_file 路径白名单升级 (resolve_write_path)"
       - "[Security] read_file 路径穿越防御 (.. 检测)"
       - "[Security] Tool Calling 审计日志 (audit_tool_call → logs/tools.log)"
@@ -224,8 +249,8 @@ recent_fixes:
       - "[Engine] Restatement 尾部注意力重申 (llm.rs TC 第2轮起注入 system 消息防失焦)"
       - "[Engine] T-1003 Dream V2 异步记忆压缩 (Clerk 模型后台提炼 session → Markdown)"
       - "[Engine] T-1004 冷热记忆迁移 (>7天 memory/sessions → wiki/sessions, 跨盘安全)"
-      - "[Feature] T-304 全局快捷键确认 (Ctrl+Shift+B 沿用)"
       - "[Milestone] M10 认知与记忆引擎 5/5 完成 → 100%"
+      - "[Milestone] M11 架构审计与安全加固 7/7 完成 → 100%"
       - "[UX] 卡片CSS统一 (.bob-card-inline + .bob-card-block 共享基类)"
       - "[Engine] 并行工具调用 (futures_util::join_all 替代逐个 for 循环)"
       - "[Engine] 工具执行超时 (tokio::time::timeout 30秒保护)"
@@ -235,3 +260,37 @@ recent_fixes:
       - "[Fix] calendar.rs 字段名不匹配 (startTime vs start_time)"
       - "[Fix] 双窗口幽灵进程 + tauri-plugin-single-instance"
       - "[Docs] 文档大扫除 (ARCHITECTURE/README/USER_GUIDE/AGENTS)"
+
+# ═══════════════════════════════════════════════════════════════
+# 待推进 Epic (Backlog)
+# ═══════════════════════════════════════════════════════════════
+
+backlog_epics:
+  - name: "Epic: 离线模型 Tool Calling (Offline Function Calling)"
+    priority: P1
+    tasks:
+      - "调研本地 llama-server 的 function calling 输出格式"
+      - "llm.rs provider=='offline' 降级逻辑 (XML 标签包裹)"
+      - "离线模式 JSON 解析失败重试机制"
+  - name: "Epic: 排队纠偏 (Queue Correction)"
+    priority: P1
+    tasks:
+      - "前端 ChatView 打断执行按钮"
+      - "llm.rs tokio::sync::mpsc 中断信号监听"
+      - "stream_internal Tool Calling 循环中断逻辑"
+      - "纠正指令作为新一轮上下文"
+  - name: "Epic: 无人值守自动化 (Cron Automations)"
+    priority: P2
+    tasks:
+      - "引入 tokio-cron-scheduler"
+      - "SQLite 读取自动化日程"
+      - "后台无头唤醒 + 系统通知推送"
+  - name: "工具结果缓存"
+    priority: P3
+    note: "避免同一对话中重复读取同一文件"
+  - name: "工具结果折叠 UI"
+    priority: P3
+    note: "太长的结果折叠显示"
+  - name: "SetupWizard 统一体验提升"
+    priority: P3
+    note: "T-822: 计划整体重做向导流程"

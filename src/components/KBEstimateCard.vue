@@ -44,20 +44,12 @@
         <div class="cost-section">
           <div class="cost-title">{{ $t('kb_estimate.cost_title') }}</div>
           
-          <div class="cost-option" :class="{ selected: selectedPlan === 'cheap' }" @click="selectedPlan = 'cheap'">
-            <div class="cost-option-header">
+          <div class="cost-display">
+            <div class="cost-display-header">
               <span class="plan-name"><Zap :size="14" /> {{ $t('kb_estimate.plan_cheap') }}</span>
               <span class="plan-price">~ ¥{{ estimateResult.estimated_cost_cheap_rmb.toFixed(4) }}</span>
             </div>
             <div class="cost-option-desc">{{ $t('kb_estimate.plan_cheap_desc') }}</div>
-          </div>
-
-          <div class="cost-option" :class="{ selected: selectedPlan === 'core' }" @click="selectedPlan = 'core'">
-            <div class="cost-option-header">
-              <span class="plan-name"><Cpu :size="14" /> {{ $t('kb_estimate.plan_core') }}</span>
-              <span class="plan-price">~ ¥{{ estimateResult.estimated_cost_core_rmb.toFixed(4) }}</span>
-            </div>
-            <div class="cost-option-desc">{{ $t('kb_estimate.plan_core_desc') }}</div>
           </div>
         </div>
         
@@ -73,7 +65,7 @@
       <button 
         class="btn btn-primary" 
         :disabled="!estimateResult || estimateResult.error || estimateResult.convertable_files === 0"
-        @click="$emit('confirm', selectedPlan)"
+        @click="$emit('confirm', 'cheap')"
       >
         <Play :size="16" />
         {{ $t('kb_estimate.start_build') }}
@@ -83,8 +75,7 @@
 </template>
 
 <script setup>
-import { ref } from 'vue';
-import { Calculator, Loader2, AlertTriangle, Info, Zap, Cpu, Play } from 'lucide-vue-next';
+import { Calculator, Loader2, AlertTriangle, Info, Zap, Play } from 'lucide-vue-next';
 
 const props = defineProps({
   folderName: {
@@ -98,8 +89,6 @@ const props = defineProps({
 });
 
 defineEmits(['confirm', 'cancel']);
-
-const selectedPlan = ref('cheap');
 
 const formatSize = (bytes) => {
   if (bytes < 1024) return bytes + ' B';
@@ -222,26 +211,15 @@ const formatTokens = (tokens) => {
   font-weight: 500;
 }
 
-.cost-option {
-  border: 1px solid var(--border-color);
+.cost-display {
+  border: 1px solid var(--accent-primary);
   border-radius: 8px;
   padding: 12px;
   margin-bottom: 8px;
-  cursor: pointer;
-  transition: all 0.2s;
-  background-color: transparent;
-}
-
-.cost-option:hover {
-  background-color: var(--bg-hover);
-}
-
-.cost-option.selected {
-  border-color: var(--accent-primary);
   background-color: rgba(var(--accent-primary-rgb), 0.05);
 }
 
-.cost-option-header {
+.cost-display-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -287,42 +265,5 @@ const formatTokens = (tokens) => {
   padding: 16px;
   border-top: 1px solid var(--border-color);
   background-color: var(--bg-secondary);
-}
-
-.btn {
-  padding: 8px 16px;
-  border-radius: 8px;
-  font-size: 14px;
-  font-weight: 500;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  transition: all 0.2s;
-  border: none;
-}
-
-.btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.btn-ghost {
-  background: transparent;
-  color: var(--text-secondary);
-}
-
-.btn-ghost:not(:disabled):hover {
-  background-color: var(--bg-hover);
-  color: var(--text-primary);
-}
-
-.btn-primary {
-  background-color: var(--accent-primary);
-  color: white;
-}
-
-.btn-primary:not(:disabled):hover {
-  background-color: var(--accent-hover);
 }
 </style>

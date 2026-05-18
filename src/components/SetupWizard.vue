@@ -114,6 +114,7 @@
 import { ref, computed, onMounted } from 'vue';
 import { Palette, Moon, Sun, FolderOpen, FolderSearch, Monitor, Plug, Loader2, Rocket } from 'lucide-vue-next';
 import CustomSelect from './CustomSelect.vue';
+import { ACCENT_COLORS } from '@/constants/theme.js';
 
 const emit = defineEmits(['complete']);
 
@@ -129,13 +130,7 @@ const tempConfig = ref({
   apiKey: ''
 });
 
-const accentColors = [
-  { name: 'MallOS 蓝', value: '#2776bb' },
-  { name: '青灰', value: '#627C8C' },
-  { name: '淡紫灰', value: '#989398' },
-  { name: '淡灰蓝', value: '#B9C7D2' },
-  { name: '朱红', value: '#E93C35' },
-];
+const accentColors = ACCENT_COLORS;
 
 const providerOptions = [
   { label: 'DeepSeek', value: 'deepseek' },
