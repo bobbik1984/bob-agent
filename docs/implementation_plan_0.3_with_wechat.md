@@ -1,39 +1,54 @@
-# Bob-Agent × 微信接入开发文档 (V3 — 完整版)
+# Bob-Agent × 微信接入开发文档 (V4 — Rust 原生版)
 
-## 用户决策定稿
+## 用户决策定稿（完整）
 
 | # | 问题 | 决策 |
 |---|---|---|
-| 1 | 流式 vs 一次性回复 | **流式**：Bridge 先发 `sendTyping`，Bob 回复后立即 `sendMessage`。若回复过长则分段发送。 |
-| 2 | Tool Calling | **支持**：Bob 完整执行 tool calling 循环（最多 5 轮），Bridge 负责在等待期间持续刷新 `sendTyping` 状态。 |
-| 3 | 对话跨端共享 | **共享**：微信对话存入 Bob 的同一个 SQLite 数据库，桌面端可看到微信对话，反之亦然。 |
-| 4 | 会话(Session)管理 | **支持指令切换**：默认继承/维持当前活跃会话；支持发送 `/chat` 列出最近会话，回复序号实现无缝跨端切换。 |
-| 5 | 非文字消息 | **降级处理**：图片/语音/文件返回友好提示，不静默丢弃。 |
-| 6 | Session 状态持久化 | **持久化**：Bridge 重启后恢复用户绑定关系，不强制新建会话。 |
+| 1 | 流式 vs 一次性回复 | **流式**：先发 `sendTyping` 心跳，Bob 回复后 `sendMessage`。长文自动截断（3800字）并提示「继续」。|
+| 2 | Tool Calling | **支持**：Bob 完整执行 tool calling 循环（最多 5 轮），等待期间每 4 秒发 `sendTyping`。|
+| 3 | 对话跨端共享 | **共享**：微信对话存入 Bob 同一 SQLite 库，桌面端可见。|
+| 4 | 会话管理 | `/chat` 列出最近 5 条，60 秒内回复序号切换；`/new` 新建；`/status` 查当前；`/help` 显示帮助。|
+| 5 | 非文字消息 | **降级**：语音→「请用语音转文字后发文字」；图片/文件→「暂不支持此类型」。|
+| 6 | Session 持久化 | **持久化到 AppData**（bob-agent 数据目录），进程重启后自动恢复 wxid↔convId 绑定。|
+| 7 | **实现方式** | **Rust 原生**（Phase 5）：微信协议层内嵌 bob-agent，零 Node.js 依赖，发布包 ≤ 12 MB。|
+| 8 | **http_api.rs** | **保留**：作为外部 API 接口，供未来其他工具调用。|
+| 9 | **QR 登录入口** | Onboarding 第四页 + 设置页开关，详见 Phase 5 UI 规格。|
+| 10 | **选单 TTL** | 60 秒。|
 
 ---
 
 ## 总体架构
 
+### Phase 1~4（已完成）：Node.js Bridge 方案
+
 ```
-┌──────────┐   长轮询    ┌─────────────────────┐   SSE Stream    ┌─────────────────┐
-│ 微信 App │◄─────────►│ wechat-bot-bridge   │◄──────────────►│ Bob-Agent       │
-│ (手机)   │  腾讯云     │ (Node.js 微服务)    │ localhost:3721  │ (Tauri/Rust)    │
-└──────────┘            │                     │                 │                 │
-                        │ ① getUpdates 收消息  │                 │ ① /v1/chat SSE  │
-                        │ ② sendTyping 状态   │                 │ ② LLM + Tools   │
-                        │ ③ 分段 sendMessage  │                 │ ③ SQLite 存储   │
-                        │ ④ 指令状态机        │                 │ ④ 广播 UI 更新  │
-                        └─────────────────────┘                 └─────────────────┘
+微信 App ◄──长轮询──► wechat-bot-bridge (Node.js) ◄──SSE──► Bob-Agent (Rust/Tauri)
 ```
 
-### 项目拓扑 (3 个独立项目)
+### Phase 5（当前目标）：Rust 原生方案
 
-| 项目 | 路径 | 语言 | 职责 |
+```
+┌──────────┐   ilink 长轮询   ┌──────────────────────────────────────┐
+│ 微信 App │◄───────────────►│           bob-agent.exe              │
+│  (手机)  │  腾讯 ilink CDN  │                                      │
+└──────────┘                  │  wechat::monitor  (tokio::spawn)     │
+                              │    └── wechat::commands  (/help…)    │
+                              │        └── wechat::msg_queue         │
+                              │            └── llm::stream_chat      │
+                              │                └── db (SQLite)       │
+                              │  http_api (127.0.0.1:3721, 保留)     │
+                              └──────────────────────────────────────┘
+```
+
+**优势**：单一进程，零 Node.js，安装包从 85 MB → **≤ 12 MB**
+
+### 项目拓扑
+
+| 项目 | 状态 | 语言 | 职责 |
 |---|---|---|---|
-| `wechat-bot-core` | `Gemini/openclaw-weixin/` (改造后) | TypeScript | 微信 API 底层封装（收发消息、登录、CDN 加密） |
-| `wechat-bot-bridge` | `Gemini/wechat-bot-bridge/` (新建) | TypeScript | 桥接层：微信消息 ↔ Bob API 路由 + 指令状态机 |
-| `bob-agent` | `Gemini/bob-agent/` (扩展) | Rust | 新增 HTTP API 模块，暴露 SSE 流式端点 |
+| `wechat-bot-core` | ✅ Phase 1 完成 | TypeScript | 微信协议底层（过渡期参考实现）|
+| `wechat-bot-bridge` | ✅ Phase 3 完成 | TypeScript | Node.js 完整版桥接（过渡期可用）|
+| `bob-agent/src/wechat/` | 🔄 Phase 5 目标 | **Rust** | 原生内嵌微信网关（最终形态）|
 
 ---
 
@@ -448,15 +463,152 @@ cd wechat-bot-bridge && npx tsx src/index.ts
 | 微信会话在桌面端无标题 | 🟡 中 | 创建会话时取首条消息前 20 字作为标题 |
 | 桌面端无法实时感知微信新消息 | 🟡 中 | HTTP API 完成后发 `remote:new-message` Tauri 事件 |
 | 用户不知道有哪些指令 | 🟢 低 | `/help` 指令 |
+| QR 码过期用户无感知（Phase 5） | 🟡 中 | 设置页弹窗显示倒计时进度条 + 刷新按钮 |
 
 ---
 
-## 工作量评估
+## 工作量评估（完整）
 
-| Phase | 预计工作量 | 关键难点 |
-|---|---|---|
-| Phase 1 | 3-4h | 移除 `channelRuntime` 依赖链 |
-| Phase 2 | 5-7h | `OutputSink` 双通道 + SSE + Tauri 广播 + DB 扩展 |
-| Phase 3 | 3-4h | 持久化状态机 + 并发队列 + 完整指令路由 |
-| Phase 4 | 1h | 本地启动脚本 |
-| **总计** | **~13h** | |
+| Phase | 预计工作量 | 状态 | 关键难点 |
+|---|---|---|---|
+| Phase 1 — core 剥离 | 3-4h | ✅ 完成 | 移除 OpenClaw 依赖链 |
+| Phase 2 — Bob HTTP API | 5-7h | ✅ 完成 | SSE + Tauri 事件桥接 + DB 扩展 |
+| Phase 3 — Bridge | 3-4h | ✅ 完成 | 持久化状态机 + 队列 + 指令路由 |
+| Phase 4 — 部署 | 1h | ✅ 完成 | 本地启动脚本 |
+| **Phase 5 — Rust 原生化** | **9 天** | 🔄 规划中 | QR 登录 UI + Onboarding 第四页 |
+
+---
+
+## Phase 5: Rust 原生化实施规格
+
+### 5.1 新增模块文件结构
+
+```
+bob-agent/src-tauri/src/
+├── lib.rs                    ← 新增 mod wechat + 注册 5 个 Tauri 命令
+└── wechat/
+    ├── mod.rs                ← 模块入口 + 共享状态（Arc<WechatState>）
+    ├── types.rs              ← 协议结构体（WeixinMessage / SendMessageReq 等）
+    ├── api.rs                ← ilink HTTP 调用层（getUpdates / sendMessage / sendTyping）
+    ├── accounts.rs           ← 账号凭证持久化（AppData/bob-agent/wechat/）
+    ├── monitor.rs            ← 长轮询主循环（tokio::spawn + 断线重试）
+    ├── session_mgr.rs        ← wxid ↔ convId 状态机 + 60s 选单 TTL
+    ├── msg_queue.rs          ← 每 wxid 串行任务队列
+    ├── commands.rs           ← UX 指令路由（/help /new /chat /status）
+    └── login_qr.rs           ← QR 登录流程 + emit wechat:qr-code 事件
+```
+
+### 5.2 Tauri IPC 接口
+
+| 命令 / 事件 | 方向 | 说明 |
+|------------|------|------|
+| `wechat_get_status` | 前→Rust | 返回 `{connected, accountId, sessionCount}` |
+| `wechat_start_login` | 前→Rust | 启动 QR 登录流程，触发 `wechat:qr-code` 事件 |
+| `wechat_start_monitor` | 前→Rust | 开始长轮询监听 |
+| `wechat_stop_monitor` | 前→Rust | 停止监听 + 发送 notifyStop |
+| `wechat_get_sessions` | 前→Rust | 返回 wxid→convId 映射列表 |
+| `wechat:qr-code` 事件 | Rust→前 | `{data_uri: String, expires_at: i64}` |
+| `wechat:status` 事件 | Rust→前 | `{connected: bool, accountId: String}` |
+| `remote:new-message` 事件 | Rust→前 | 已有（Phase 2 实现）|
+
+### 5.3 UX 指令体系
+
+| 微信输入 | 行为 |
+|----------|------|
+| `/help` | 回复帮助文本（列出所有指令）|
+| `/new` | 新建会话，清空 wxid 绑定，回复确认 |
+| `/chat` | 回复最近 5 条会话列表，60s 内数字选择切换 |
+| `/chat 2` | 直接切换到列表中第 2 条会话 |
+| `/status` | 回复当前会话 ID 前 8 位 + 消息计数 |
+| 语音消息 | 「请使用微信语音转文字功能后发送文字」|
+| 图片 / 文件 | 「暂不支持此消息类型，请发送文字」|
+| 普通文字 | 进入串行队列 → LLM 推理 → sendTyping 心跳 → 回复 |
+
+**sendTyping 心跳**：LLM 推理期间每 4 秒自动发送，完成后停止。
+
+### 5.4 微信网关 UI 规格
+
+#### A. Onboarding 第四页「连接微信」
+
+```
+┌─────────────────────────────────────────────────┐
+│                                                 │
+│   🔗  连接微信                                  │
+│                                                 │
+│   让 Bob 通过微信与你随时沟通                    │
+│                                                 │
+│  ┌─────────────────────────────────────────┐   │
+│  │  微信机器人连接                    ○──●  │   │  ← Toggle（默认关闭）
+│  └─────────────────────────────────────────┘   │
+│                                                 │
+│  ┌──────────── 二维码区域（fade-in）─────────┐  │
+│  │                                           │  │  ← Toggle 开启后渐显
+│  │            [180×180 QR Code]              │  │
+│  │                                           │  │
+│  │    用手机微信扫描，确认登录               │  │
+│  └───────────────────────────────────────────┘  │
+│                                                 │
+│                              🚀  →（右下角）   │  ← 扫码成功后高亮可点
+└─────────────────────────────────────────────────┘
+```
+
+**状态机**：
+
+| 状态 | UI 表现 |
+|------|---------|
+| 默认 | Toggle 关闭，二维码区域不渲染 |
+| Toggle 打开 | 调用 `wechat_start_login`，二维码区 fade-in（0.5s），显示 QR |
+| 扫码成功 | 收到 `wechat:status {connected:true}`，二维码替换为 ✅ 已连接 + 账号 ID |
+| 🚀 高亮 | 可点击跳转到主界面，同时 `wechat_start_monitor` 开始监听 |
+
+#### B. 设置页「微信网关」区块（非首次）
+
+如果 Onboarding 时未开启，可通过**设置页**的开关激活，开关打开时弹出晨报式对话框：
+
+```
+╔═══════════════════════════════════════════════╗
+║  🔗  微信网关                         ●──○   ║  ← 已连接态
+║  账号：xxxxx@im.bot   活跃会话：3 个          ║
+╚═══════════════════════════════════════════════╝
+
+// 已断开或首次，点击开关 → 弹出对话框：
+
+┌──────────────────────────────────────────────┐
+│  🌅  连接微信                                │
+│  ────────────────────────────────────────    │
+│                                              │
+│           [180×180 QR Code]                  │
+│                                              │
+│   用手机微信扫描，确认登录                    │
+│                                              │
+│   二维码有效期：120 秒                       │
+│   ████████████████░░░░  倒计时进度条          │
+│                                              │
+│                    [取消]   [刷新二维码]      │
+└──────────────────────────────────────────────┘
+```
+
+### 5.5 新增 Cargo 依赖
+
+```toml
+# Cargo.toml 新增（其余依赖 bob-agent 已有）
+qrcode = "0.14"   # QR 码生成 → PNG data-URI  (+50 KB)
+base64  = "0.22"  # base64 编解码              (+20 KB)
+# reqwest / tokio / serde / serde_json / log / uuid ← 已有
+```
+
+**release binary 净增量**：约 **+400~600 KB**（发布包总大小 ≤ 12 MB）
+
+### 5.6 实施顺序
+
+| Day | 任务 | 产出文件 |
+|-----|------|---------|
+| 1 | `wechat/types.rs` 协议 structs | types.rs |
+| 2 | `wechat/api.rs` HTTP 调用层 | api.rs |
+| 3 | `wechat/accounts.rs` + `wechat/monitor.rs` | accounts.rs + monitor.rs |
+| 4 | `wechat/session_mgr.rs` + `wechat/msg_queue.rs` | 状态机 + 队列 |
+| 5 | `wechat/commands.rs` 指令路由 | commands.rs |
+| 6 | `wechat/login_qr.rs` QR 登录 | login_qr.rs |
+| 7 | `wechat/mod.rs` 装配 + `lib.rs` 注册命令 | mod.rs + lib.rs |
+| 8 | 前端：Onboarding 第四页 + 设置区块 + tauri-bridge.js | Vue + JS |
+| 9 | 集成测试 + e2e 验证 | — |

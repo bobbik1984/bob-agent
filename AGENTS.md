@@ -17,6 +17,22 @@
 
 ---
 
+## 🔴 新增 UI 内容预检清单（Pre-flight Checklist）
+
+**每次新增或修改任何用户可见的界面内容时**，Agent 必须逐项过检：
+
+| # | 检查项 | 规则来源 |
+|:--|:-------|:---------|
+| 1 | **架构归属**：新内容放在正确的模块/组件中？是否需要新增 Rust Command + Bridge 适配？ | §架构铁律 |
+| 2 | **配色语义**：使用了正确的 CSS 变量？Logo 用 `--logo-color`？图标/文字用 `--text-*`？交互用 `--accent-*`？**绝对不要**硬编码颜色或直接用 `--user-accent` 给文字/图标上色 | §Logo 配色 / §强调色 |
+| 3 | **图标对齐**：所有包含 Lucide 图标的容器都用了 `display: flex; align-items: center`？ | §图标对齐 |
+| 4 | **国际化**：所有用户可见文字都通过 `$t()` 调用？已在 `zh-CN.json` 和 `en-US.json` 中同步添加 key？ | §i18n 铁律 |
+| 5 | **权限声明**：如用到新的原生能力，已在 `capabilities/default.json` 中注册？ | §权限声明 |
+
+> **口诀**：架构 → 配色 → 对齐 → 多语种 → 权限
+
+---
+
 ## ⚠️ 架构铁律（每个 Agent 必读）
 
 ### 🔴 纯 Tauri 架构
@@ -165,6 +181,85 @@ bob-agent/
 1. **IPC 调用**：统一通过 `window.electronAPI.xxx()` 调用。**不要直接 import `@tauri-apps/api/core`**——这会破坏与 Electron 的兼容性。所有 Tauri 特有 API 仅在 `tauri-bridge.js` 中使用。
 2. **组件风格**：Vue 组件使用 `PascalCase`，JS 函数使用 `camelCase`，文件名使用 `kebab-case`。
 3. **响应式设计**：遵循 `frontend-design` Skill 中的响应式铁律（使用 `100dvh`，输入框 `≥16px` 防 iOS 缩放等）。
+
+### 🔴 Logo 配色铁律
+
+Bob Logo 在不同主题下的颜色由 CSS 变量 `--logo-color` 统一控制（定义在 `src/index.css`）：
+
+| 模式 | `--logo-color` 取值 | 视觉效果 |
+|:---|:---|:---|
+| **Dark** | `var(--text-primary)` (白色) | 白色 Logo，与文字融为一体 |
+| **Light** | `var(--user-accent)` (强调色) | 品牌色 Logo，形成视觉焦点 |
+
+**适用范围**：标题栏 Logo (App.vue)、对话头像 (ChatView.vue)、启动画面 (index.html)、引导页 (SetupWizard.vue)。
+
+**代码规则**：
+- SVG 内联 Logo：使用 `color: var(--logo-color)` + `fill="currentColor"`
+- CSS Mask Logo：使用 `background-color: var(--logo-color)`
+- **绝对禁止**在任何 Logo 元素上硬编码颜色值或直接使用 `var(--user-accent)`
+
+### 🔴 图标-文字垂直对齐铁律
+
+Lucide SVG 图标与相邻文字在视觉上必须严格垂直居中对齐。**所有包含图标的容器**都必须使用 Flex 对齐，禁止依赖 `vertical-align`。
+
+**标准写法**：
+```css
+/* ✅ 正确 — 图标容器用 flex 对齐 */
+.section-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.section-icon {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+/* ❌ 错误 — vertical-align 在 flex 容器中无效 */
+.section-icon {
+  vertical-align: middle;
+}
+```
+
+**适用范围**：设置页标题栏 (.section-title + .section-icon)、按钮内图标 (.btn)、弹窗标题 (.briefing-header + .briefing-icon)、所有行内图标+文字组合。
+
+### 🔴 强调色使用铁律
+
+`--user-accent` 是用户选择的品牌色（如 `#2776BB`），但**不应直接用于图标/文字颜色**，因为它在深色背景上可能对比度不足。
+
+| 用途 | 正确变量 | 说明 |
+|:---|:---|:---|
+| **Logo** | `var(--logo-color)` | 深色=白色，浅色=品牌色 |
+| **文字/图标** | `var(--text-primary)` 或 `var(--text-secondary)` | 语义化，自动适配主题 |
+| **交互高亮** | `var(--accent-primary)` | 按钮悬停、链接、选中状态 |
+| **背景/填充** | `var(--user-accent)` | 开关滑块、进度条等大面积填充 |
+
+**绝对禁止**在模板中写 `style="color: var(--user-accent);"` 来给图标上色。
+
+### 🔴 国际化 (i18n) 铁律
+
+所有用户可见的文字**必须**通过 `vue-i18n` 的 `$t()` 函数调用，**同步**在两个 locale 文件中添加对应 key：
+- `src/locales/zh-CN.json` — 简体中文
+- `src/locales/en-US.json` — English
+
+**禁止行为**：
+```vue
+<!-- ❌ 硬编码中文 -->
+<span>扫码绑定微信</span>
+
+<!-- ❌ fallback 兜底写法（说明 key 缺失） -->
+{{ $t('settings.wechat_bot') || '微信助理' }}
+
+<!-- ✅ 正确写法 -->
+{{ $t('settings.wechat_scan') }}
+```
+
+**检查清单**（每次新增/修改 UI 文字时）：
+1. 在 Vue 模板中使用 `$t('namespace.key_name')`
+2. 在 `zh-CN.json` 中添加中文值
+3. 在 `en-US.json` 中添加对应英文值
+4. 切换语言测试两种语言都正确显示
 
 ### 权限声明（Capabilities）
 

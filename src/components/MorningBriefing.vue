@@ -127,6 +127,8 @@ onUnmounted(() => {
 .briefing-icon {
   font-size: 18px;
   line-height: 1;
+  display: flex;
+  align-items: center;
 }
 
 .briefing-title {

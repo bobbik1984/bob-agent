@@ -350,7 +350,7 @@ import FolderDropCard from '../components/FolderDropCard.vue';
 import KBEstimateCard from '../components/KBEstimateCard.vue';
 import MorningBriefing from '../components/MorningBriefing.vue';
 
-const bobLogoUrl = new URL('/bob_logo.svg', import.meta.url).href;
+const bobLogoUrl = '/bob_logo.svg';
 
 const props = defineProps({
   conversationId: String,
@@ -540,9 +540,22 @@ function onClickOutside(e) {
 let cleanupStreamListener = null;
 let tauriDragUnlistens = [];
 let kbUnlistens = [];
+// Phase 2: remote:new-message 监听（微信 Bridge 完成回复后触发）
+let remoteMessageUnlisten = null;
 
 onMounted(async () => {
   cleanupStreamListener = window.electronAPI.onStreamChunk(handleStreamChunk);
+
+  // 监听来自 wechat-bot-bridge 的远程新消息通知，刷新当前会话消息列表
+  if (window.electronAPI.onRemoteNewMessage) {
+    remoteMessageUnlisten = await window.electronAPI.onRemoteNewMessage((event) => {
+      const convId = event?.payload?.conversation_id || event?.conversation_id;
+      if (convId && convId === props.conversationId) {
+        loadMessages();
+      }
+    });
+  }
+
   loadMessages();
 
   // 预加载模型列表 + 当前活跃模型
@@ -607,6 +620,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   if (cleanupStreamListener) cleanupStreamListener();
+  if (remoteMessageUnlisten) remoteMessageUnlisten();
   document.removeEventListener('dragenter', onDragEnter);
   document.removeEventListener('click', onClickOutside);
   if (messagesArea.value) {

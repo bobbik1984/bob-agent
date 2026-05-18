@@ -37,6 +37,11 @@ pub fn init_db(data_dir: &std::path::Path) -> Connection {
     conn.execute_batch("PRAGMA journal_mode=WAL;").unwrap_or_default();
     conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap_or_default();
 
+    // Phase 2 迁移：messages 表新增 from_channel 列（已存在则忽略）
+    conn.execute_batch(
+        "ALTER TABLE messages ADD COLUMN from_channel TEXT DEFAULT 'desktop';"
+    ).unwrap_or_default();
+
     // 初始化日程表
     crate::calendar::init_events_table(&conn);
 

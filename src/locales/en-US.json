@@ -126,7 +126,18 @@
     "theme_premium_denim": "Denim",
     "theme_premium_coral": "Coral",
     "theme_premium_ember": "Ember",
-    "theme_premium_lavender": "Lavender"
+    "theme_premium_lavender": "Lavender",
+    "wechat_bot": "WeChat Assistant",
+    "wechat_bot_desc": "Link WeChat to chat with Bob on your phone anytime. Generate a QR code to scan and bind.",
+    "wechat_scan": "Scan to Bind WeChat",
+    "wechat_rebind": "Rebind (Refresh)",
+    "wechat_connected": "WeChat connected",
+    "wechat_disconnected": "WeChat not connected",
+    "wechat_bind_title": "Bind WeChat Assistant",
+    "wechat_bind_success": "Bound successfully",
+    "wechat_bind_success_desc": "WeChat assistant is ready. You can start chatting from your phone.",
+    "wechat_scan_hint": "Scan with WeChat on your phone",
+    "wechat_loading_qr": "Loading QR code..."
   },
   "chat": {
     "new_conversation": "New Chat",

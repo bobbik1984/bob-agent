@@ -297,7 +297,7 @@ onMounted(async () => {
 
   // 检查是否已配置
   isSetupComplete.value = await window.electronAPI.isSetupComplete();
-  if (DEBUG_ONBOARDING === 1) {
+  if (DEBUG_ONBOARDING === 0) {
     isSetupComplete.value = false;
   }
 

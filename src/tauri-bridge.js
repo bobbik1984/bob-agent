@@ -79,6 +79,14 @@ window.electronAPI = {
     };
   },
 
+  // Phase 2: 微信 Bridge 完成回复后广播的通知事件
+  // 载荷: { conversation_id: string, from_user: string }
+  onRemoteNewMessage: (callback) => {
+    return listen('remote:new-message', (event) => {
+      callback(event);
+    });
+  },
+
   // ── Model Hub ──────────────────────────────────────────
   getModelPool: () => invoke('llm_get_model_pool'),
   assignModelRole: (modelId, role) => invoke('llm_assign_model_role', { modelId, role }),
@@ -196,6 +204,13 @@ window.electronAPI = {
   startOfflineEngine: async (modelPath) => invoke('start_offline_engine', { modelPath }),
   stopOfflineEngine: async () => invoke('stop_offline_engine'),
   getOfflineEngineStatus: async () => invoke('get_offline_engine_status'),
+
+  // ── 微信助理 (Rust 原生 WeChat Gateway) ─────────────────
+  wechatGetLoginQr: async () => invoke('wechat_get_login_qr'),
+  wechatCheckLoginStatus: async (qrcode) => invoke('wechat_check_login_status', { qrcode }),
+
+  // Generic invoke passthrough for components that call invoke directly
+  invoke: (cmd, args) => invoke(cmd, args || {}),
 };
 
-console.log('🚀 Tauri Bridge v5: 51 Rust-native IPC — only 4 lightweight mocks remain.');
+console.log('🚀 Tauri Bridge v5.2: 54 Rust-native IPC — WeChat QR login gateway registered.');

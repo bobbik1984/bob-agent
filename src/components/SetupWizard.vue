@@ -1,37 +1,27 @@
 <template>
-  <div class="onboarding-layout animate-fade-in">
-    <div class="onboarding-card card">
-      <div class="steps-indicator">
-        <div :class="['step-dot', { active: step >= 1 }]"></div>
-        <div :class="['step-dot', { active: step >= 2 }]"></div>
-        <div :class="['step-dot', { active: step >= 3 }]"></div>
+  <div class="onboarding-layout">
+    <div class="onboarding-card">
+      <div class="wizard-logo">
+        <div class="logo-layer" :class="{ visible: step >= 1 }" style="-webkit-mask-image: url(/bob_.svg); mask-image: url(/bob_.svg)"></div>
+        <div class="logo-layer" :class="{ visible: step >= 2 }" style="-webkit-mask-image: url(/bob_b.svg); mask-image: url(/bob_b.svg)"></div>
+        <div class="logo-layer" :class="{ visible: step >= 3 }" style="-webkit-mask-image: url(/bob_bo.svg); mask-image: url(/bob_bo.svg)"></div>
+        <div class="logo-layer" :class="{ visible: step >= 4 }" style="-webkit-mask-image: url(/bob_bob.svg); mask-image: url(/bob_bob.svg)"></div>
       </div>
 
-      <!-- Step 1: Welcome & Style -->
-      <div v-if="step === 1" class="step-content animate-slide-up">
-        <div class="step-header">
-          <Palette :size="48" class="step-icon" />
-          <h2 class="wizard-title">定义专属风格</h2>
-          <p class="wizard-subtitle">欢迎来到 Bob-Agent，请挑选您喜欢的主题与色彩。</p>
-        </div>
-
-        <div class="form-group">
-          <label class="form-label">主题模式</label>
+      <div class="wizard-body">
+        <!-- Page 1: Theme & Color -->
+        <div v-if="step === 1" class="page">
           <div class="theme-options">
             <button :class="['btn-theme', { active: tempConfig.theme === 'dark' }]" @click="setTheme('dark')">
-              <Moon :size="20" /> 深色模式 (Dark)
+              <Moon :size="20" /> 深色
             </button>
             <button :class="['btn-theme', { active: tempConfig.theme === 'light' }]" @click="setTheme('light')">
-              <Sun :size="20" /> 浅色模式 (Light)
+              <Sun :size="20" /> 浅色
             </button>
           </div>
-        </div>
-
-        <div class="form-group" style="margin-top: 24px;">
-          <label class="form-label">专属强调色 (Accent Color)</label>
           <div class="color-options">
-            <button 
-              v-for="color in accentColors" 
+            <button
+              v-for="color in accentColors"
               :key="color.value"
               class="color-circle"
               :class="{ active: tempConfig.accentColor === color.value }"
@@ -41,69 +31,58 @@
             ></button>
           </div>
         </div>
-      </div>
 
-      <!-- Step 2: Workspace -->
-      <div v-if="step === 2" class="step-content animate-slide-up">
-        <div class="step-header">
-          <FolderOpen :size="48" class="step-icon" />
-          <h2 class="wizard-title">设置工作资产库</h2>
-          <p class="wizard-subtitle">Bob-Agent 的知识库与资产将存储在您指定的文件夹中，完全归您所有。</p>
-        </div>
-
-        <div class="workspace-picker">
-          <div class="current-path" :class="{ 'empty': !tempConfig.workspaceDir }">
-            {{ tempConfig.workspaceDir || '尚未选择工作目录...' }}
+        <!-- Page 2: Workspace -->
+        <div v-if="step === 2" class="page page-center">
+          <div class="workspace-row">
+            <div class="workspace-input" :class="{ filled: tempConfig.workspaceDir }" @click="selectWorkspaceDir">
+              {{ tempConfig.workspaceDir || '设置工作文件夹' }}
+            </div>
+            <button class="workspace-btn" @click="selectWorkspaceDir">...</button>
           </div>
-          <button class="btn btn-secondary" @click="selectWorkspaceDir">
-            <FolderSearch :size="16" />
-            选择文件夹
-          </button>
-        </div>
-        <p class="section-desc" style="margin-top: 16px; text-align: center;">
-          推荐：您可以在“我的文档”中新建一个名为 <strong>Bob-Wiki</strong> 的文件夹。
-        </p>
-      </div>
-
-      <!-- Step 3: LLM Engine -->
-      <div v-if="step === 3" class="step-content animate-slide-up">
-        <div class="step-header">
-          <Monitor :size="48" class="step-icon" />
-          <h2 class="wizard-title">接入动力核心</h2>
-          <p class="wizard-subtitle">选择您的主力大模型，并提供 API Key 以激活助理的思考能力。</p>
         </div>
 
-        <div class="form-group">
-          <label class="form-label">服务商</label>
-          <CustomSelect
-            v-model="tempConfig.provider"
-            :options="providerOptions"
-          />
+        <!-- Page 3: LLM -->
+        <div v-if="step === 3" class="page page-center">
+          <div class="llm-form">
+            <CustomSelect v-model="tempConfig.provider" :options="providerOptions" placeholder="大模型" />
+            <input class="input" type="password" v-model="tempConfig.apiKey" placeholder="API Key" />
+          </div>
         </div>
 
-        <div class="form-group">
-          <label class="form-label">API Key</label>
-          <input class="input" type="password" v-model="tempConfig.apiKey" placeholder="sk-..." />
-        </div>
-
-        <div class="test-area">
-          <button class="btn btn-secondary" @click="testConnection" :disabled="isTesting || !tempConfig.apiKey">
-            <Loader2 v-if="isTesting" class="spin" :size="14" />
-            <Plug v-else :size="14" />
-            测试连接
-          </button>
-          <span v-if="testResult" :class="['test-badge', testResult.ok ? 'success' : 'error']">
-            {{ testResult.ok ? '连接成功' : testResult.message }}
-          </span>
+        <!-- Page 4: WeChat -->
+        <div v-if="step === 4" class="page page-top">
+          <div class="wechat-toggle" @click="toggleWechat">
+            <img src="/wechat.svg" class="wechat-icon" :class="{ active: enableWechat }" alt="" />
+            <label class="switch-label">
+              <input type="checkbox" v-model="enableWechat" @change="toggleWechat" @click.stop />
+              <span class="slider round"></span>
+            </label>
+          </div>
+          <div v-if="enableWechat" class="qr-area animate-fade-in">
+            <div v-if="!qrCodeUrl && !wechatConnected" class="qr-loading">
+              <Loader2 class="spin" :size="24" />
+            </div>
+            <div v-else-if="wechatConnected" class="qr-done">
+              <Check :size="32" />
+            </div>
+            <div v-else>
+              <img :src="qrCodeUrl" class="qr-image" alt="" />
+            </div>
+          </div>
         </div>
       </div>
 
-      <div class="step-footer">
-        <button class="btn btn-ghost" v-if="step > 1" @click="step--">上一步</button>
-        <div class="spacer"></div>
-        <button class="btn btn-primary wizard-next" v-if="step < 3" @click="step++">下一步</button>
-        <button class="btn btn-primary wizard-next" v-if="step === 3" @click="finishOnboarding" :disabled="!isReady">
-          <Rocket :size="16" /> 启动引擎
+      <div class="wizard-nav">
+        <button class="nav-arrow" v-if="step > 1" @click="step--">
+          <ChevronLeft :size="20" />
+        </button>
+        <div class="nav-spacer"></div>
+        <button class="nav-arrow" v-if="step < 4" @click="step++">
+          <ChevronRight :size="20" />
+        </button>
+        <button class="nav-arrow nav-launch" v-if="step === 4" @click="finishOnboarding">
+          <Rocket :size="20" />
         </button>
       </div>
     </div>
@@ -111,20 +90,25 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue';
-import { Palette, Moon, Sun, FolderOpen, FolderSearch, Monitor, Plug, Loader2, Rocket } from 'lucide-vue-next';
+import { ref, onMounted, onUnmounted } from 'vue';
+import { Moon, Sun, ChevronLeft, ChevronRight, Loader2, Rocket, Check } from 'lucide-vue-next';
 import CustomSelect from './CustomSelect.vue';
 import { ACCENT_COLORS } from '@/constants/theme.js';
 
 const emit = defineEmits(['complete']);
-
 const step = ref(1);
 const isTesting = ref(false);
 const testResult = ref(null);
 
+const enableWechat = ref(false);
+const qrCodeUrl = ref('');
+const wechatConnected = ref(false);
+const rawQrCode = ref('');
+let pollTimer = null;
+
 const tempConfig = ref({
   theme: 'dark',
-  accentColor: '#2776bb', // MallOS 蓝 default
+  accentColor: '#2776bb',
   workspaceDir: '',
   provider: 'deepseek',
   apiKey: ''
@@ -142,24 +126,55 @@ const providerOptions = [
   { label: 'MiniMax', value: 'minimax' }
 ];
 
-const isReady = computed(() => {
-  return tempConfig.value.workspaceDir && tempConfig.value.apiKey;
-});
-
 onMounted(async () => {
+  document.documentElement.setAttribute('data-theme', 'dark');
   if (window.electronAPI) {
     const sysConfig = await window.electronAPI.getAllConfig();
-    if (sysConfig.theme) tempConfig.value.theme = sysConfig.theme;
     if (sysConfig.accentColor) tempConfig.value.accentColor = sysConfig.accentColor;
     if (sysConfig.workspaceDir) tempConfig.value.workspaceDir = sysConfig.workspaceDir;
     if (sysConfig.provider) tempConfig.value.provider = sysConfig.provider;
     if (sysConfig.apiKey) tempConfig.value.apiKey = sysConfig.apiKey;
-
-    // Apply color and theme instantly for preview
-    setTheme(tempConfig.value.theme);
     setAccentColor(tempConfig.value.accentColor);
   }
 });
+
+onUnmounted(() => { if (pollTimer) clearTimeout(pollTimer); });
+
+async function toggleWechat() {
+  if (enableWechat.value) {
+    await loadQrCode();
+  } else {
+    if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
+    qrCodeUrl.value = '';
+  }
+}
+
+async function loadQrCode() {
+  if (!window.electronAPI) return;
+  try {
+    const res = await window.electronAPI.wechatGetLoginQr();
+    if (res && res.qrcode_img_content) {
+      qrCodeUrl.value = res.qrcode_img_content;
+      rawQrCode.value = res.qrcode;
+      pollQrStatus();
+    }
+  } catch (e) {
+    console.error('Failed to get QR code', e);
+  }
+}
+
+async function pollQrStatus() {
+  if (!enableWechat.value || wechatConnected.value) return;
+  try {
+    const res = await window.electronAPI.wechatCheckLoginStatus(rawQrCode.value);
+    if (res && (res.status === 'confirmed' || res.status === 'binded_redirect')) {
+      wechatConnected.value = true;
+      return;
+    }
+    if (res && res.status === 'expired') { await loadQrCode(); return; }
+  } catch (e) {}
+  pollTimer = setTimeout(pollQrStatus, 2000);
+}
 
 function setTheme(t) {
   tempConfig.value.theme = t;
@@ -168,11 +183,7 @@ function setTheme(t) {
 
 function setAccentColor(color) {
   tempConfig.value.accentColor = color;
-  // --user-accent: the user-chosen brand color, used ONLY for point elements
-  // (logos, indicators, calendar dots, step-dots, step-icons).
-  // It must NOT override --accent-primary which controls the full theme palette.
   document.documentElement.style.setProperty('--user-accent', color);
-  
   const hex = color.replace('#', '');
   const r = parseInt(hex.substring(0, 2), 16);
   const g = parseInt(hex.substring(2, 4), 16);
@@ -187,32 +198,6 @@ async function selectWorkspaceDir() {
   }
 }
 
-async function testConnection() {
-  isTesting.value = true;
-  testResult.value = null;
-  
-  if (window.electronAPI) {
-    // Temporary save to test
-    await window.electronAPI.setConfig('provider', tempConfig.value.provider);
-    await window.electronAPI.setConfig('apiKey', tempConfig.value.apiKey);
-    
-    try {
-      const result = await window.electronAPI.sendChat([
-        { role: 'user', content: 'hello' }
-      ], { useClerk: false });
-      
-      if (result.error) {
-        testResult.value = { ok: false, message: result.error };
-      } else {
-        testResult.value = { ok: true, message: '连接成功' };
-      }
-    } catch (e) {
-      testResult.value = { ok: false, message: e.message };
-    }
-  }
-  isTesting.value = false;
-}
-
 async function finishOnboarding() {
   if (window.electronAPI) {
     await window.electronAPI.setConfig('theme', tempConfig.value.theme);
@@ -221,13 +206,9 @@ async function finishOnboarding() {
     await window.electronAPI.setConfig('provider', tempConfig.value.provider);
     await window.electronAPI.setConfig('apiKey', tempConfig.value.apiKey);
     await window.electronAPI.setConfig('onboarded', true);
-
-    // Get default model and save
     const models = await window.electronAPI.getModels();
     const defaultModel = models.find(m => m.default) || models[0];
-    if (defaultModel) {
-      await window.electronAPI.setConfig('model', defaultModel.id);
-    }
+    if (defaultModel) await window.electronAPI.setConfig('model', defaultModel.id);
   }
   emit('complete');
 }
@@ -240,73 +221,74 @@ async function finishOnboarding() {
   align-items: center;
   justify-content: center;
   background-color: var(--bg-root);
-  padding: 20px;
 }
 
 .onboarding-card {
   width: 100%;
-  max-width: 540px;
-  min-height: 480px;
+  max-width: 420px;
   display: flex;
   flex-direction: column;
-  padding: 40px;
-  box-shadow: 0 20px 40px rgba(0,0,0,0.2);
-  border-radius: 12px;
-  background-color: var(--bg-primary);
+  align-items: center;
 }
 
-.steps-indicator {
+/* ── Logo ── */
+.wizard-logo {
+  position: relative;
+  width: 140px;
+  height: 92px;
+  margin: 0 auto 48px;
+}
+
+.logo-layer {
+  position: absolute;
+  inset: 0;
+  background-color: var(--logo-color);
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  mask-position: center;
+  opacity: 0;
+  transition: opacity 0.6s ease;
+}
+
+.logo-layer.visible {
+  opacity: 1;
+}
+
+/* ── Body ── */
+.wizard-body {
+  width: 100%;
+  min-height: 300px;
   display: flex;
+  flex-direction: column;
   justify-content: center;
-  gap: 12px;
-  margin-bottom: 40px;
 }
 
-.step-dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 5px;
-  background-color: var(--border-color);
-  transition: all 0.3s ease;
-}
-
-.step-dot.active {
-  background-color: var(--user-accent);
-  width: 24px;
-}
-
-.step-content {
-  flex: 1;
+.page {
+  width: 100%;
   display: flex;
   flex-direction: column;
+  gap: 24px;
 }
 
-.step-header {
-  text-align: center;
-  margin-bottom: 32px;
+.page-center {
+  justify-content: center;
+  align-items: center;
 }
 
-.step-icon {
-  color: var(--user-accent);
-  margin-bottom: 16px;
+.page-top {
+  justify-content: flex-start;
+  align-items: center;
+  padding-top: 20px;
 }
 
-.wizard-title {
-  font-size: 24px;
-  font-weight: 600;
-  color: var(--text-primary);
-  margin-bottom: 8px;
-}
-
-.wizard-subtitle {
-  color: var(--text-secondary);
-  font-size: 14px;
-  line-height: 1.5;
-}
-
+/* ── Page 1 ── */
 .theme-options {
   display: flex;
   gap: 16px;
+  width: 100%;
 }
 
 .btn-theme {
@@ -315,7 +297,7 @@ async function finishOnboarding() {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  padding: 16px;
+  padding: 14px;
   background-color: var(--bg-secondary);
   border: 2px solid var(--border-color);
   border-radius: 8px;
@@ -325,9 +307,7 @@ async function finishOnboarding() {
   font-weight: 500;
 }
 
-.btn-theme:hover {
-  background-color: var(--bg-hover);
-}
+.btn-theme:hover { background-color: var(--bg-hover); }
 
 .btn-theme.active {
   border-color: var(--user-accent);
@@ -337,10 +317,9 @@ async function finishOnboarding() {
 
 .color-options {
   display: flex;
-  gap: 16px;
+  gap: 14px;
   flex-wrap: wrap;
   justify-content: center;
-  margin-top: 8px;
 }
 
 .color-circle {
@@ -352,78 +331,209 @@ async function finishOnboarding() {
   transition: transform 0.2s, box-shadow 0.2s;
 }
 
-.color-circle:hover {
-  transform: scale(1.1);
-}
+.color-circle:hover { transform: scale(1.15); }
 
 .color-circle.active {
   border-color: var(--text-primary);
-  transform: scale(1.1);
-  box-shadow: 0 0 0 2px var(--bg-primary), 0 0 0 4px var(--text-primary);
+  transform: scale(1.15);
+  box-shadow: 0 0 0 2px var(--bg-root), 0 0 0 4px var(--text-primary);
 }
 
-.workspace-picker {
+/* ── Page 2 ── */
+.workspace-row {
   display: flex;
   align-items: center;
-  gap: 12px;
-  background-color: var(--bg-secondary);
-  padding: 16px;
-  border-radius: 8px;
-  border: 1px dashed var(--border-color);
+  gap: 8px;
+  width: 100%;
 }
 
-.current-path {
+.workspace-input {
   flex: 1;
-  font-family: monospace;
-  font-size: 13px;
-  color: var(--text-primary);
+  padding: 12px 16px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  color: var(--text-tertiary);
+  font-size: 14px;
+  cursor: pointer;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  transition: border-color 0.2s;
 }
 
-.current-path.empty {
-  color: var(--text-tertiary);
+.workspace-input.filled { color: var(--text-primary); }
+.workspace-input:hover { border-color: var(--user-accent); }
+
+.workspace-btn {
+  padding: 12px 16px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  color: var(--text-secondary);
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  cursor: pointer;
+  transition: all 0.2s;
 }
 
-.test-area {
+.workspace-btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--user-accent);
+  color: var(--user-accent);
+}
+
+/* ── Page 3 ── */
+.llm-form {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* ── Page 4 ── */
+.wechat-toggle {
   display: flex;
   align-items: center;
   gap: 16px;
+  cursor: pointer;
+}
+
+.wechat-icon {
+  width: 36px;
+  height: 36px;
+  opacity: 0.3;
+  filter: grayscale(1) brightness(1.5);
+  transition: all 0.3s ease;
+}
+
+.wechat-icon.active {
+  opacity: 1;
+  filter: grayscale(0) brightness(0) invert(1);
+}
+
+:root[data-theme="light"] .wechat-icon.active {
+  filter: grayscale(0) brightness(0);
+}
+
+.switch-label {
+  position: relative;
+  display: inline-block;
+  width: 44px;
+  height: 22px;
+  flex-shrink: 0;
+}
+
+.switch-label input { opacity: 0; width: 0; height: 0; }
+
+.slider {
+  position: absolute;
+  cursor: pointer;
+  inset: 0;
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  transition: .3s;
+}
+
+.slider:before {
+  position: absolute;
+  content: "";
+  height: 16px;
+  width: 16px;
+  left: 2px;
+  bottom: 2px;
+  background-color: var(--text-tertiary);
+  transition: .3s;
+}
+
+input:checked + .slider {
+  background-color: var(--user-accent);
+  border-color: var(--user-accent);
+}
+
+input:checked + .slider:before {
+  background-color: #fff;
+  transform: translateX(22px);
+}
+
+.slider.round { border-radius: 22px; }
+.slider.round:before { border-radius: 50%; }
+
+.qr-area {
   margin-top: 16px;
-}
-
-.test-badge {
-  font-size: 13px;
-  padding: 6px 12px;
-  border-radius: 4px;
-  font-weight: 500;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 250px;
-}
-
-.test-badge.success { background-color: rgba(var(--user-accent-rgb), 0.1); color: var(--user-accent); }
-.test-badge.error { background-color: var(--color-error-bg); color: var(--color-error); }
-
-.step-footer {
   display: flex;
-  margin-top: 40px;
-  padding-top: 20px;
-  border-top: 1px solid var(--border-color);
+  justify-content: center;
+  align-items: center;
+  min-height: 140px;
 }
 
-.spacer {
-  flex: 1;
+.qr-loading {
+  width: 140px;
+  height: 140px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-secondary);
+  border-radius: 12px;
 }
 
-.wizard-next {
-  min-width: 120px;
+.qr-done {
+  width: 140px;
+  height: 140px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--user-accent);
+  background: rgba(var(--user-accent-rgb), 0.1);
+  border-radius: 12px;
 }
 
-.spin {
-  animation: spin 1s linear infinite;
+.qr-image {
+  width: 140px;
+  height: 140px;
+  border-radius: 12px;
 }
+
+/* ── Nav ── */
+.wizard-nav {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  margin-top: 48px;
+}
+
+.nav-spacer { flex: 1; }
+
+.nav-arrow {
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid var(--border-color);
+  border-radius: 50%;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.nav-arrow:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  border-color: var(--user-accent);
+}
+
+.nav-launch {
+  color: var(--user-accent);
+  border-color: var(--user-accent);
+}
+
+.nav-launch:hover {
+  background: rgba(var(--user-accent-rgb), 0.15);
+}
+
+.spin { animation: spin 1s linear infinite; }
 @keyframes spin { 100% { transform: rotate(360deg); } }
 </style>

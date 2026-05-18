@@ -49,6 +49,31 @@
         </div>
       </section>
 
+      <!-- 微信助理 (WeChat Bot) -->
+      <section class="settings-section card">
+        <h3 class="section-title">
+          <MessageSquare :size="16" class="section-icon" />
+          {{ $t('settings.wechat_bot') }}
+        </h3>
+        <p class="section-desc" style="margin-bottom: 12px;">{{ $t('settings.wechat_bot_desc') }}</p>
+        
+        <div style="display: flex; gap: 8px; align-items: center; margin-top: 12px;">
+          <button 
+            class="btn" 
+            :class="wechatConnected ? 'btn-danger' : 'btn-primary'" 
+            @click="openWechatModal"
+          >
+            <MessageSquare :size="14" />
+            <span>{{ wechatConnected ? $t('settings.wechat_rebind') : $t('settings.wechat_scan') }}</span>
+          </button>
+          
+          <span style="font-size: 0.85em; display: flex; align-items: center; gap: 6px;" :style="{ color: wechatConnected ? 'var(--accent-primary)' : 'var(--text-tertiary)' }">
+            <span class="status-dot" :style="{ background: wechatConnected ? 'var(--accent-primary)' : 'var(--text-tertiary)' }" style="width: 8px; height: 8px; border-radius: 50%; display: inline-block;"></span>
+            {{ wechatConnected ? $t('settings.wechat_connected') : $t('settings.wechat_disconnected') }}
+          </span>
+        </div>
+      </section>
+
       <!-- API 密钥管理 (Credential Store) -->
       <details class="settings-section card custom-model-override">
         <summary class="section-title" style="cursor: pointer; display: flex; align-items: center; justify-content: space-between; margin-bottom: 0;">
@@ -430,12 +455,42 @@
       </section>
       </div>
     </div>
+
+    <!-- 微信扫码弹窗 -->
+    <Transition name="briefing-fade">
+      <div v-if="showWechatModal" class="wechat-modal-overlay">
+        <div class="morning-briefing wechat-qr-modal">
+          <div class="briefing-header">
+            <div class="briefing-icon"><MessageSquare :size="18" /></div>
+            <div class="briefing-title" style="flex: 1; font-size: 14px; font-weight: 600; color: var(--text-primary);">{{ $t('settings.wechat_bind_title') }}</div>
+            <button class="briefing-close" @click="closeWechatModal" title="关闭" style="background: none; border: none; color: var(--text-tertiary); cursor: pointer; padding: 4px; border-radius: 4px; display: flex; align-items: center; justify-content: center;">
+              <X :size="14" />
+            </button>
+          </div>
+          <div class="briefing-body" style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 32px;">
+            <div v-if="!qrCodeUrl && !wechatConnected" class="qr-placeholder" style="display: flex; flex-direction: column; align-items: center;">
+              <Loader2 class="spin" :size="32" style="color: var(--text-tertiary)" />
+              <p style="margin-top: 12px; font-size: 13px; color: var(--text-secondary);">{{ $t('settings.wechat_loading_qr') }}</p>
+            </div>
+            <div v-else-if="wechatConnected" class="qr-success" style="text-align: center; display: flex; flex-direction: column; align-items: center;">
+              <div style="width: 64px; height: 64px; border-radius: 32px; background-color: rgba(var(--user-accent-rgb, 39, 118, 187), 0.1); color: var(--user-accent); display: flex; align-items: center; justify-content: center;"><Check :size="32" /></div>
+              <h3 style="margin-top: 16px; color: var(--user-accent);">{{ $t('settings.wechat_bind_success') }}</h3>
+              <p style="color: var(--text-secondary); font-size: 13px; margin-top: 4px;">{{ $t('settings.wechat_bind_success_desc') }}</p>
+            </div>
+            <div v-else class="qr-box" style="text-align: center;">
+              <img :src="qrCodeUrl" style="width: 200px; height: 200px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);" alt="Wechat Login QR" />
+              <p style="margin-top: 16px; font-size: 14px; color: var(--text-secondary); font-weight: 500;">{{ $t('settings.wechat_scan_hint') }}</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Transition>
   </div>
 </template>
 
 <script setup>
 import { ref, computed, onMounted } from 'vue';
-import { Settings as SettingsIcon, Monitor, Tractor, Eye, EyeOff, Plug, Loader2, Palette, Info, FolderOpen, FolderHeart, Puzzle, Layers, X, Plus, Unplug, Globe, HardDrive, Trash2, Key, FileText, Server, ChevronDown, BookOpen } from 'lucide-vue-next';
+import { Settings as SettingsIcon, Monitor, Tractor, Eye, EyeOff, Plug, Loader2, Palette, Info, FolderOpen, FolderHeart, Puzzle, Layers, X, Plus, Unplug, Globe, HardDrive, Trash2, Key, FileText, Server, ChevronDown, BookOpen, MessageSquare, Check } from 'lucide-vue-next';
 import { useI18n } from 'vue-i18n';
 import CustomSelect from '../components/CustomSelect.vue';
 import PluginManager from '../components/PluginManager.vue';
@@ -584,6 +639,75 @@ async function toggleOfflineEngine() {
       alert('启动离线引擎失败: ' + err);
     }
   }
+}
+
+const showWechatModal = ref(false);
+const qrCodeUrl = ref('');
+const wechatConnected = ref(false);
+const rawQrCode = ref('');
+let wechatPollTimer = null;
+
+async function openWechatModal() {
+  showWechatModal.value = true;
+  wechatConnected.value = false;
+  await loadWechatQrCode();
+}
+
+function closeWechatModal() {
+  showWechatModal.value = false;
+  if (wechatPollTimer) {
+    clearTimeout(wechatPollTimer);
+    wechatPollTimer = null;
+  }
+  qrCodeUrl.value = '';
+}
+
+async function loadWechatQrCode() {
+  if (!window.electronAPI) return;
+  qrCodeUrl.value = '';
+  try {
+    const res = await window.electronAPI.wechatGetLoginQr();
+    if (res && res.qrcode_img_content) {
+      const content = res.qrcode_img_content;
+      if (content.startsWith('data:')) {
+        qrCodeUrl.value = content;
+      } else if (content.startsWith('http')) {
+        try {
+          const resp = await fetch(content);
+          const blob = await resp.blob();
+          const reader = new FileReader();
+          qrCodeUrl.value = await new Promise((resolve, reject) => {
+            reader.onloadend = () => resolve(reader.result);
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+          });
+        } catch { qrCodeUrl.value = content; }
+      } else {
+        qrCodeUrl.value = 'data:image/png;base64,' + content;
+      }
+      rawQrCode.value = res.qrcode;
+      pollWechatQrStatus();
+    }
+  } catch (e) {
+    console.error('Failed to get QR code', e);
+  }
+}
+
+async function pollWechatQrStatus() {
+  if (!showWechatModal.value || wechatConnected.value) return;
+  try {
+    const res = await window.electronAPI.wechatCheckLoginStatus(rawQrCode.value);
+    if (res && (res.status === 'confirmed' || res.status === 'binded_redirect')) {
+      wechatConnected.value = true;
+      if (wechatPollTimer) clearTimeout(wechatPollTimer);
+      return;
+    }
+    if (res && res.status === 'expired') {
+      await loadWechatQrCode();
+      return;
+    }
+  } catch (e) {}
+  wechatPollTimer = setTimeout(pollWechatQrStatus, 2000);
 }
 
 const availableModels = ref([]);
@@ -1036,7 +1160,9 @@ async function removeMcpServer(name) {
 
 .section-icon {
   color: var(--text-tertiary);
-  vertical-align: middle;
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
 }
 
 .settings-section {
@@ -1293,5 +1419,64 @@ select.input {
   color: var(--color-error);
   opacity: 1;
   background: var(--color-error-bg);
+}
+
+/* 微信二维码弹窗样式 */
+.wechat-modal-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.wechat-qr-modal {
+  width: 400px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  display: flex;
+  flex-direction: column;
+}
+
+.briefing-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.briefing-close:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.spin {
+  animation: spin 1s linear infinite;
+}
+@keyframes spin { 100% { transform: rotate(360deg); } }
+
+/* Transition */
+.briefing-fade-enter-active {
+  transition: all 0.3s ease;
+}
+.briefing-fade-leave-active {
+  transition: all 0.2s ease;
+}
+.briefing-fade-enter-from {
+  opacity: 0;
+  transform: scale(0.95);
+}
+.briefing-fade-leave-to {
+  opacity: 0;
+  transform: scale(0.95);
 }
 </style>

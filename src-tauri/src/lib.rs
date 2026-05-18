@@ -10,6 +10,8 @@ mod tools;
 mod kb_extractor;
 mod kb_indexer;
 mod db;
+mod http_api;
+mod wechat;
 
 use serde_json::{json, Value};
 use std::fs;
@@ -289,10 +291,12 @@ fn system_write_outbox(operations: Vec<Value>) -> Value {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let db = db::init_db(&get_data_dir());
+    let wechat_state = std::sync::Arc::new(wechat::WechatState::new());
 
     tauri::Builder::default()
         .manage(db::DbState(Mutex::new(db)))
         .manage(sidecar::SidecarState { child: Mutex::new(None) })
+        .manage(wechat_state.clone())
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             // 配置
@@ -363,6 +367,9 @@ pub fn run() {
             db::system_factory_reset,
             // Outbox (声明式配置)
             system_write_outbox,
+            // WeChat
+            wechat::login_qr::wechat_get_login_qr,
+            wechat::login_qr::wechat_check_login_status,
         ])
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             // 如果已经有一个实例在运行，就把已有窗口唤出来
@@ -424,6 +431,16 @@ pub fn run() {
                 tokio::time::sleep(std::time::Duration::from_secs(5)).await;
                 dream::compress_sessions_async(dream_handle).await;
             });
+
+            // ── Phase 2: 启动本地 HTTP API (127.0.0.1:3721) ──
+            http_api::start_http_server(app.handle().clone());
+
+            // ── 启动本地微信机器人 ──
+            {
+                let wechat_state = app.state::<std::sync::Arc<wechat::WechatState>>();
+                *wechat_state.app.write().unwrap() = Some(app.handle().clone());
+                wechat::monitor::start_monitor(wechat_state.inner().clone());
+            }
 
             // ── T-304: 全局快捷键 Ctrl+Shift+B 唤起窗口 ──
             {

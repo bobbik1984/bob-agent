@@ -1,6 +1,6 @@
 [package]
 name = "bob"
-version = "0.2.0"
+version = "0.3.0"
 description = "A Tauri App"
 authors = ["you"]
 license = ""
@@ -28,8 +28,10 @@ tauri-plugin-dialog = "2.0.0-beta.0"
 tauri-plugin-shell = "2.0.0-rc"
 rusqlite = { version = "0.39.0", features = ["bundled"] }
 tokio = { version = "1.52.3", features = ["full"] }
+tokio-stream = "0.1"
 futures-util = "0.3.32"
 reqwest = { version = "0.13.3", features = ["stream", "json"] }
+axum = { version = "0.8", features = ["http2"] }
 walkdir = "2.5.0"
 scraper = "0.22"
 chrono = "0.4"
@@ -43,6 +45,8 @@ zip = "2.4"
 quick-xml = "0.37"
 tauri-plugin-single-instance = "2.0.0-rc"
 tauri-plugin-global-shortcut = "2.0.0-rc"
+qrcode = "0.14"
+base64 = "0.22"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.52", features = ["Win32_System_JobObjects", "Win32_Foundation", "Win32_System_Threading", "Win32_Security"] }
