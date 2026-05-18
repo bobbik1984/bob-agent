@@ -5,7 +5,7 @@
       <!-- 统一的页面标题 -->
       <div v-if="messages.length > 0" class="view-header" :style="{ opacity: logoOpacity }">
         <h2 class="view-title">
-          <img src="/bob_logo.svg" class="title-bob-logo" alt="Bob" />
+          <img :src="bobLogoUrl" class="title-bob-logo" alt="Bob" />
         </h2>
       </div>
 
@@ -33,7 +33,7 @@
         <!-- 头像 -->
         <div class="message-avatar" :class="msg.role === 'user' ? 'avatar-user' : 'avatar-bob'">
           <User v-if="msg.role === 'user'" :size="16" />
-          <img v-else src="/bob_logo.svg" class="bob-avatar-img" alt="Bob" />
+          <img v-else :src="bobLogoUrl" class="bob-avatar-img" alt="Bob" />
         </div>
 
         <!-- 内容 -->
@@ -85,7 +85,7 @@
 
       <!-- 流式输出中 -->
       <div v-if="isStreaming" class="message-row message-assistant animate-slide-up">
-        <div class="message-avatar avatar-bob"><img src="/bob_logo.svg" class="bob-avatar-img" alt="Bob" /></div>
+        <div class="message-avatar avatar-bob"><img :src="bobLogoUrl" class="bob-avatar-img" alt="Bob" /></div>
         <div class="message-body">
           <!-- 等待响应指示器：回车后立即出现，思考期间持续显示，直到正文开始流入才消失 -->
           <div v-if="!streamContent && activeTools.length === 0" class="typing-indicator">
@@ -349,6 +349,8 @@ import SearchCard from '../components/SearchCard.vue';
 import FolderDropCard from '../components/FolderDropCard.vue';
 import KBEstimateCard from '../components/KBEstimateCard.vue';
 import MorningBriefing from '../components/MorningBriefing.vue';
+
+const bobLogoUrl = new URL('/bob_logo.svg', import.meta.url).href;
 
 const props = defineProps({
   conversationId: String,
