@@ -322,6 +322,7 @@ onMounted(async () => {
     }
     const accentColor = await window.electronAPI.getConfig('accentColor');
     if (accentColor) {
+      localStorage.setItem('bob-accent', accentColor);
       document.documentElement.style.setProperty('--user-accent', accentColor);
       const hex = accentColor.replace('#', '');
       const r = parseInt(hex.substring(0, 2), 16);
@@ -505,6 +506,7 @@ async function onSetupComplete(payload) {
   }
   const accentColor = payload?.accentColor || await window.electronAPI.getConfig('accentColor');
   if (accentColor) {
+    localStorage.setItem('bob-accent', accentColor);
     document.documentElement.style.setProperty('--user-accent', accentColor);
     const hex = accentColor.replace('#', '');
     const r = parseInt(hex.substring(0, 2), 16);

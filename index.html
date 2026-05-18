@@ -14,8 +14,8 @@
       background-color: #0c0c0c;
       overflow: hidden;
     }
-    body[data-theme="light"] {
-      background-color: #ffffff;
+    html[data-theme="light"] body {
+      background-color: #f3f4f6;
     }
     #native-splash {
       position: fixed;
@@ -28,12 +28,21 @@
       background-color: #0c0c0c;
       transition: opacity 1s ease-in-out;
     }
-    body[data-theme="light"] #native-splash {
-      background-color: #ffffff;
+    html[data-theme="light"] #native-splash {
+      background-color: #f3f4f6;
     }
     #native-splash .splash-logo {
       width: 80px;
       height: 80px;
+      background-color: #ffffff;
+      -webkit-mask-image: url(/bob_logo.svg);
+      mask-image: url(/bob_logo.svg);
+      -webkit-mask-size: contain;
+      mask-size: contain;
+      -webkit-mask-repeat: no-repeat;
+      mask-repeat: no-repeat;
+      -webkit-mask-position: center;
+      mask-position: center;
       animation: pulse 2s infinite ease-in-out;
     }
     @keyframes pulse {
@@ -41,7 +50,8 @@
       50% { transform: scale(1.05); opacity: 1; filter: drop-shadow(0 0 12px rgba(255,255,255,0.2)); }
       100% { transform: scale(0.95); opacity: 0.8; }
     }
-    body[data-theme="light"] #native-splash .splash-logo {
+    html[data-theme="light"] #native-splash .splash-logo {
+      background-color: var(--user-accent, #2776bb);
       animation: pulse-light 2s infinite ease-in-out;
     }
     @keyframes pulse-light {
@@ -55,13 +65,17 @@
       try {
         var theme = localStorage.getItem('bob-theme') || 'dark';
         document.documentElement.setAttribute('data-theme', theme);
+        var accent = localStorage.getItem('bob-accent');
+        if (accent) {
+          document.documentElement.style.setProperty('--user-accent', accent);
+        }
       } catch (e) {}
     })();
   </script>
 </head>
 <body>
   <div id="native-splash">
-    <img src="/bob_logo.svg" class="splash-logo" alt="Bob" />
+    <div class="splash-logo"></div>
   </div>
   <div id="app"></div>
   <script type="module" src="/src/main.js"></script>

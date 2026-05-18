@@ -107,7 +107,6 @@ onUnmounted(() => {
   background: var(--bg-secondary);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-lg);
-  overflow: hidden;
   box-shadow: var(--shadow-lg);
   /* 高度由父容器 flex 约束，不使用 viewport 计算 */
   display: flex;

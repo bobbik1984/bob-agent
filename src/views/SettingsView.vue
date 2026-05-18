@@ -520,6 +520,7 @@ function applyTheme(theme, persist = true) {
 
 function applyAccentColor(color) {
   config.value.accentColor = color;
+  localStorage.setItem('bob-accent', color);
   document.documentElement.style.setProperty('--user-accent', color);
   const hex = color.replace('#', '');
   const r = parseInt(hex.substring(0, 2), 16);

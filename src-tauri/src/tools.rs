@@ -31,8 +31,10 @@ fn audit_tool_call(name: &str, args: &Value, result_summary: &str) {
 /// - 相对路径 其他 → dataDir
 /// - 绝对路径 → 只有在 tracked_folders 或 workspaceDir 内才允许
 fn resolve_write_path(path: &str, global_file_access: bool) -> Result<PathBuf, String> {
-    // 1. 路径穿越防御
-    if path.contains("..") {
+    // 1. 路径穿越防御 — 使用多层检查防止编码绕过（如 %2e%2e）
+    //    先做快速的字符串拦截，再通过 canonicalize 做最终校验
+    let decoded_path = urlencoding::decode(path).unwrap_or(std::borrow::Cow::Borrowed(path));
+    if decoded_path.contains("..") || path.contains("..") {
         return Err("禁止使用 ../ 进行路径穿越".to_string());
     }
 
@@ -331,8 +333,9 @@ async fn execute_tool_inner(app: &tauri::AppHandle, name: &str, args: &Value) ->
     match name {
         "read_file" => {
             let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
-            // 路径穿越防御
-            if path.contains("..") {
+            // 路径穿越防御（含 URL 编码绕过防护）
+            let decoded = urlencoding::decode(path).unwrap_or(std::borrow::Cow::Borrowed(path));
+            if decoded.contains("..") || path.contains("..") {
                 return json!({ "error": "禁止使用 ../ 进行路径穿越" });
             }
             super::filesystem::system_read_file(path.to_string())
