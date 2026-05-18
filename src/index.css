@@ -120,18 +120,6 @@
    所有 Premium 主题均为深色系，不支持独立 accent color 选择。
    ═══════════════════════════════════════════════════════════════ */
 
-:root[data-theme="apple-glass"] {
-  --bg-root: #000000; --bg-primary: #1c1c1e; --bg-secondary: #2c2c2e;
-  --bg-tertiary: #3a3a3c; --bg-hover: #48484a; --bg-active: #545456;
-  --surface-glass: rgba(28,28,30,0.65); --surface-card: rgba(255,255,255,0.06); --surface-input: rgba(255,255,255,0.08);
-  --border-subtle: rgba(255,255,255,0.08); --border-default: rgba(255,255,255,0.12); --border-strong: rgba(255,255,255,0.2);
-  --text-primary: rgba(255,255,255,0.95); --text-secondary: rgba(255,255,255,0.55); --text-tertiary: rgba(255,255,255,0.35); --text-inverse: #000;
-  --accent-primary: #0a84ff; --accent-secondary: #409cff; --accent-tertiary: #6ab0ff;
-  --accent-glow: rgba(10,132,255,0.25); --gradient-brand: linear-gradient(135deg,#0a84ff,#409cff); --gradient-subtle: rgba(10,132,255,0.03);
-  --logo-filter: brightness(0) invert(1); --logo-color: var(--text-primary);
-  --bg-code-block: #000; --bg-code-inline: rgba(255,255,255,0.08);
-  --user-accent: #0a84ff; --user-accent-rgb: 10,132,255;
-}
 
 :root[data-theme="premium-plum"] {
   --bg-root: #1f233b; --bg-primary: #272c49; --bg-secondary: #343050;

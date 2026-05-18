@@ -11,7 +11,6 @@ export const ACCENT_COLORS = [
 ];
 
 export const PREMIUM_THEMES = [
-  { id: 'apple-glass', name: 'Apple Glass', nameKey: 'settings.theme_apple_glass', accent: '#0a84ff', bg: '#1c1c1e' },
   { id: 'premium-plum', name: 'Plum', nameKey: 'settings.theme_premium_plum', accent: '#e26858', bg: '#272c49' },
   { id: 'premium-pine', name: 'Pine', nameKey: 'settings.theme_premium_pine', accent: '#729969', bg: '#223125' },
   { id: 'premium-slate', name: 'Slate', nameKey: 'settings.theme_premium_slate', accent: '#4a99b2', bg: '#405267' },
