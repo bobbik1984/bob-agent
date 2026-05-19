@@ -144,7 +144,7 @@
         <KBEstimateCard
           :folder-name="pendingKBEstimate.name"
           :estimate-result="pendingKBEstimate.result"
-          @confirm="(plan) => startKBBuild(pendingKBEstimate.path, plan)"
+          @confirm="(plan) => onStartKBBuild(pendingKBEstimate.path, plan)"
           @cancel="cancelKBEstimate"
         />
       </div>
@@ -341,7 +341,7 @@ marked.setOptions({ breaks: true, gfm: true });
 </script>
 
 <script setup>
-import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue';
+import { ref, watch, onMounted, onUnmounted, nextTick } from 'vue';
 import { Sparkles, FileText, Camera, Calendar, User, ChevronRight, ChevronDown, ChevronUp, X, FileUp, Paperclip, Loader2, Shield, Zap, Lock, Unlock, Download } from 'lucide-vue-next';
 import ConfirmCard from '../components/ConfirmCard.vue';
 import FileCard from '../components/FileCard.vue';
@@ -350,6 +350,10 @@ import FolderDropCard from '../components/FolderDropCard.vue';
 import KBEstimateCard from '../components/KBEstimateCard.vue';
 import MorningBriefing from '../components/MorningBriefing.vue';
 
+import { useChat } from '../composables/useChat.js';
+import { useModelSwitcher } from '../composables/useModelSwitcher.js';
+import { useDragDrop } from '../composables/useDragDrop.js';
+
 const bobLogoUrl = '/bob_logo.svg';
 
 const props = defineProps({
@@ -357,196 +361,141 @@ const props = defineProps({
 });
 const emit = defineEmits(['update-title']);
 
-// ── 状态 ─────────────────────────────────────────────
-const messages = ref([]);
-const inputText = ref('');
-const isStreaming = ref(false);
-const streamContent = ref('');
-const streamThinking = ref('');
-const pendingImage = ref(null);
-const pendingFiles = ref([]); // Array of { path, name, size }
-const pendingFolderInfo = ref(null);
-const pendingKBEstimate = ref(null);
-const isDragging = ref(false);
-const logoOpacity = ref(1);
-const activeTools = ref([]);
-const showScrollButton = ref(false);
-const isParsing = ref(false);
+// ── DOM refs (留在组件层) ─────────────────────────────
 const messagesArea = ref(null);
 const inputRef = ref(null);
-const currentModelRaw = ref('');
-const showModelSwitcher = ref(false);
-const availableModels = ref([]);
-const switcherProvider = ref('');
-const sessionCost = ref(0);
+const logoOpacity = ref(1);
 
-// 从 availableModels 分组出供应商列表
-const modelProviderList = computed(() => {
-  const map = {};
-  for (const m of availableModels.value) {
-    const prov = m.provider || 'unknown';
-    if (!map[prov]) map[prov] = { id: prov, name: m.providerName || prov, count: 0 };
-    map[prov].count++;
-  }
-  return Object.values(map);
-});
-
-// 当前供应商下的模型列表
-const switcherModels = computed(() => {
-  if (!switcherProvider.value) return [];
-  const models = availableModels.value.filter(m => (m.provider || 'unknown') === switcherProvider.value);
-  // 在 UI 层面强制按字母排序，确保同系列模型（如 Qwen3.5、GLM-5 等）在下拉列表里排列在一起
-  return models.sort((a, b) => {
-    const nameA = a.displayName || a.id || '';
-    const nameB = b.displayName || b.id || '';
-    return nameA.localeCompare(nameB);
-  });
-});
+// ── 本地 UI 状态 ─────────────────────────────────────
 const globalFileAccess = ref(false);
 const agentMode = ref('insight');
 const showAgentModeSwitcher = ref(false);
 
-const canSend = ref(true);
+// ── 组合 Composables ─────────────────────────────────
 
-// 过滤掉系统消息（如 __rename__）
-const displayMessages = computed(() => {
-  return messages.value.filter(m =>
-    m.role !== 'system' && !(m.content && m.content.startsWith('__rename__'))
-  );
-});
-
-// ── 模型指示器 & 切换 ────────────────────────────────
-function getModelLogo(modelId) {
-  const name = (modelId || '').toLowerCase();
-  if (name.includes('deepseek')) return new URL('/logos/deepseek.png', import.meta.url).href;
-  if (name.includes('gpt') || name.includes('openai')) return new URL('/logos/openai.png', import.meta.url).href;
-  if (name.includes('gemini') || name.includes('google') || name.includes('gemma')) return new URL('/logos/google.png', import.meta.url).href;
-  if (name.includes('qwen') || name.includes('dashscope')) return new URL('/logos/qwen.png', import.meta.url).href;
-  if (name.includes('glm') || name.includes('zhipu')) return new URL('/logos/glm.svg', import.meta.url).href;
-  if (name.includes('kimi') || name.includes('moonshot')) return new URL('/logos/kimi.png', import.meta.url).href;
-  if (name.includes('doubao') || name.includes('seed')) return new URL('/logos/doubao.png', import.meta.url).href;
-  if (name.includes('minimax')) return new URL('/logos/minimax.png', import.meta.url).href;
-  if (name.includes('mimo')) return new URL('/logos/mimo.png', import.meta.url).href;
-  if (name.includes('modelscope')) return new URL('/logos/modelscope.png', import.meta.url).href;
-  if (name.includes('claude') || name.includes('anthropic')) return new URL('/logos/claude.png', import.meta.url).href;
-  if (name.includes('grok') || name.includes('xai')) return new URL('/logos/grok.png', import.meta.url).href;
-  if (name.includes('openrouter')) return new URL('/logos/openrouter.png', import.meta.url).href;
-  return null;
-}
-
-const currentModelName = computed(() => {
-  const found = availableModels.value.find(m => m.id === currentModelRaw.value);
-  if (found) return found.displayName || found.label;
-  // 尝试从 ID 中提取显示名 (如 'deepseek::deepseek-v4-flash' → 'deepseek-v4-flash')
-  if (currentModelRaw.value && currentModelRaw.value.includes('::')) {
-    return currentModelRaw.value.split('::')[1];
-  }
-  return currentModelRaw.value || '';
-});
-
-const currentModelLogo = computed(() => {
-  return getModelLogo(currentModelRaw.value);
-});
-
-async function toggleModelSwitcher() {
-  if (!showModelSwitcher.value) {
-    try {
-      const pool = await window.electronAPI.getModelPool();
-      let keys = {};
-      if (window.electronAPI.getApiKeys) {
-        keys = await window.electronAPI.getApiKeys() || {};
-      }
-      
-      availableModels.value = (pool || [])
-        .filter(m => !!keys[m.provider]) // 只保留已配置 API Key 的模型
-        .map(m => ({
-          id: m.id,
-          provider: m.provider,
-          providerName: m.providerName,
-          displayName: m.displayName,
-        }));
-      // 默认选中当前模型所在的供应商
-      if (currentModelRaw.value && currentModelRaw.value.includes('::')) {
-        switcherProvider.value = currentModelRaw.value.split('::')[0];
-      } else if (modelProviderList.value.length > 0) {
-        switcherProvider.value = modelProviderList.value[0].id;
-      }
-    } catch (e) {
-      availableModels.value = [];
+// 滚动辅助 (注入给 composables 使用)
+function scrollToBottom() {
+  nextTick(() => {
+    if (messagesArea.value) {
+      messagesArea.value.scrollTop = messagesArea.value.scrollHeight;
     }
+  });
+}
+
+// 模型切换
+const {
+  currentModelRaw, showModelSwitcher, availableModels, switcherProvider,
+  modelProviderList, switcherModels, currentModelName, currentModelLogo,
+  getModelLogo, toggleModelSwitcher, switchModel, initModels, refreshModel,
+} = useModelSwitcher();
+
+// 核心聊天
+const {
+  messages, displayMessages, inputText, isStreaming, streamContent, streamThinking,
+  activeTools, isParsing, sessionCost, canSend,
+  loadMessages, onBriefingChat, sendMessage: _sendMessage,
+  handleStreamChunk, stopGeneration, exportConversation,
+  renderMarkdown, renderMessageBlocks,
+  parseTextAsEvent: _parseTextAsEvent,
+  handleConfirmEvent, handleCancelEvent,
+} = useChat(props, emit, { scrollToBottom, currentModelName, globalFileAccess, agentMode });
+
+// 拖拽/附件
+const {
+  isDragging, pendingImage, pendingFiles, pendingFolderInfo, pendingKBEstimate,
+  handleAttach, handlePaste, onDragEnter, handleDrop, handleTauriDrop,
+  cancelFolderTrack, confirmFolderTrack, cancelKBEstimate, startKBBuild,
+  setupTauriDragListeners,
+} = useDragDrop({
+  messages, inputText, scrollToBottom, globalFileAccess, agentMode,
+  conversationId: () => props.conversationId,
+});
+
+// ── 模板绑定的包装函数 ──────────────────────────────
+// sendMessage 需要传入 pendingImage/pendingFiles/resetTextareaHeight
+function sendMessage() {
+  _sendMessage(pendingImage, pendingFiles, resetTextareaHeight);
+}
+
+function parseTextAsEvent() {
+  _parseTextAsEvent(resetTextareaHeight);
+}
+
+// ── 输入辅助 (依赖 DOM ref, 留在组件层) ──────────────
+function handleKeydown(event) {
+  if (event.key === 'Enter' && !event.shiftKey) {
+    event.preventDefault();
+    sendMessage();
   }
-  showModelSwitcher.value = !showModelSwitcher.value;
 }
 
-async function switchModel(modelId) {
-  // 使用 ModelHub assign 替代旧的 config:set
-  await window.electronAPI.assignModelRole(modelId, 'main');
-  currentModelRaw.value = modelId;
-  showModelSwitcher.value = false;
+function autoResize() {
+  const textarea = inputRef.value;
+  if (!textarea) return;
+  textarea.style.height = 'auto';
+  textarea.style.height = Math.min(textarea.scrollHeight, 160) + 'px';
 }
 
-// ── 日程解析 ─────────────────────────────────────────
-async function parseTextAsEvent() {
-  const text = inputText.value.trim();
-  if (!text) return;
-
-  isParsing.value = true;
-  try {
-    const parsed = await window.electronAPI.parseEvent(text);
-    messages.value.push({ role: 'assistant', type: 'confirm-card', event: parsed });
-    scrollToBottom();
-  } catch (err) {
-    messages.value.push({ role: 'assistant', content: `解析日程失败: ${err.message}` });
-  } finally {
-    isParsing.value = false;
-    inputText.value = '';
-    resetTextareaHeight();
-  }
-}
-
-async function handleConfirmEvent(event, msgObj) {
-  try {
-    // 使用 JSON 序列化去除 Vue Proxy，否则 Electron IPC 无法 clone
-    const plainEvent = JSON.parse(JSON.stringify(event));
-    const res = await window.electronAPI.confirmEvent(plainEvent);
-    if (res.ok) {
-      msgObj.content = `已成功保存为${event.type === 'todo' ? '待办' : '日程'}：${event.title}`;
-      msgObj.type = 'text'; // 将卡片转化为普通文本消息
-    } else {
-      msgObj.content = `保存失败: ${res.error}`;
-      msgObj.type = 'text';
+function resetTextareaHeight() {
+  nextTick(() => {
+    if (inputRef.value) {
+      inputRef.value.style.height = 'auto';
     }
-  } catch (err) {
-    msgObj.content = `⚠️ 保存失败: ${err.message}`;
-    msgObj.type = 'text';
-  }
-}
-
-function handleCancelEvent(msgObj) {
-  msgObj.content = '已取消保存';
-  msgObj.type = 'text';
+  });
 }
 
 // ── 点击外部关闭模型弹窗 ──────────────────────────
 function onClickOutside(e) {
-  // 如果点击不在任何 model-switcher-wrap 内部，关闭所有弹窗
   if (!e.target.closest('.model-switcher-wrap')) {
     showModelSwitcher.value = false;
     showAgentModeSwitcher.value = false;
   }
 }
 
-// ── 流式监听 ─────────────────────────────────────────
+// ── Logo 滚动视差 ────────────────────────────────────
+function onMessagesScroll() {
+  const el = messagesArea.value;
+  if (!el) return;
+  const scrollY = el.scrollTop;
+  const fadeDistance = 100;
+  logoOpacity.value = Math.max(0, 1 - scrollY / fadeDistance);
+}
+
+// ── 拦截消息链接点击 ─────────────────────────────────
+function onMessageLinkClick(e) {
+  const a = e.target.closest('a');
+  if (!a || !a.href) return;
+  e.preventDefault();
+  const href = a.getAttribute('href');
+  if (href.startsWith('file://') || /^[A-Za-z]:[\\\/]/.test(href)) {
+    let filePath = href.replace('file:///', '');
+    try { filePath = decodeURIComponent(filePath); } catch(e){}
+    window.electronAPI.openFile(filePath).catch(err => {
+      console.error('打开文件失败:', err);
+    });
+  } else {
+    if (window.electronAPI.openExternal) {
+      window.electronAPI.openExternal(href);
+    }
+  }
+}
+
+// ── 知识库构建 (需要 kbUnlistens 引用) ───────────────
+let kbUnlistens = [];
+
+function onStartKBBuild(folderPath, plan) {
+  startKBBuild(folderPath, plan, kbUnlistens);
+}
+
+// ── 生命周期 ─────────────────────────────────────────
 let cleanupStreamListener = null;
 let tauriDragUnlistens = [];
-let kbUnlistens = [];
-// Phase 2: remote:new-message 监听（微信 Bridge 完成回复后触发）
 let remoteMessageUnlisten = null;
 
 onMounted(async () => {
   cleanupStreamListener = window.electronAPI.onStreamChunk(handleStreamChunk);
 
-  // 监听来自 wechat-bot-bridge 的远程新消息通知，刷新当前会话消息列表
+  // 远程消息监听
   if (window.electronAPI.onRemoteNewMessage) {
     remoteMessageUnlisten = await window.electronAPI.onRemoteNewMessage((event) => {
       const convId = event?.payload?.conversation_id || event?.conversation_id;
@@ -557,56 +506,11 @@ onMounted(async () => {
   }
 
   loadMessages();
+  await initModels();
 
-  // 预加载模型列表 + 当前活跃模型
-  try {
-    const pool = await window.electronAPI.getModelPool();
-    availableModels.value = (pool || []).map(m => ({
-      id: m.id,
-      provider: m.provider,
-      providerName: m.providerName,
-      displayName: m.displayName,
-    }));
-    const active = await window.electronAPI.getActiveModels();
-    currentModelRaw.value = active?.main || '';
-  } catch (e) { /* ignore */ }
-
-  // 拖拽监听 (DOM 回退)
+  // 拖拽监听
   document.addEventListener('dragenter', onDragEnter);
-
-  // Tauri 原生拖拽监听
-  if (window.electronAPI.onDragEnter) {
-    let currentPreScanPath = null;
-    
-    window.electronAPI.onDragEnter(async (e) => { 
-      isDragging.value = true;
-      if (e.payload && e.payload.paths && e.payload.paths.length > 0) {
-        const filePath = e.payload.paths[0];
-        if (currentPreScanPath === filePath) return;
-        currentPreScanPath = filePath;
-        try {
-          const meta = await window.electronAPI.getFileMeta(filePath);
-          if (meta && meta.isDir) {
-            // 后台预处理文件夹
-            window.electronAPI.scanFolder(filePath).then(scanResult => {
-               if (scanResult && !scanResult.error) {
-                 window.__preScannedFolder = { path: filePath, name: meta.name, scanResult };
-               }
-            });
-          }
-        } catch(err) {}
-      }
-    }).then(u => tauriDragUnlistens.push(u));
-    
-    window.electronAPI.onDragLeave(async () => { isDragging.value = false; }).then(u => tauriDragUnlistens.push(u));
-    
-    window.electronAPI.onDragDrop(async (e) => {
-      isDragging.value = false;
-      if (e.payload && e.payload.paths && e.payload.paths.length > 0) {
-        await handleTauriDrop(e.payload.paths);
-      }
-    }).then(u => tauriDragUnlistens.push(u));
-  }
+  setupTauriDragListeners(tauriDragUnlistens);
 
   // 点击外部关闭弹窗
   document.addEventListener('click', onClickOutside);
@@ -646,687 +550,12 @@ watch(() => props.conversationId, async () => {
   currentModelRaw.value = (await window.electronAPI.getActiveModels())?.main || '';
 }, { immediate: true });
 
-// ── 消息加载 ─────────────────────────────────────────
-async function loadMessages() {
-  if (!props.conversationId) return;
-  const rawMessages = await window.electronAPI.getMessages(props.conversationId);
-  messages.value = rawMessages.map(m => ({
-    ...m,
-    _thinkingExpanded: false,
-  }));
-  await nextTick();
-  scrollToBottom();
-  setTimeout(scrollToBottom, 150);
-  setTimeout(scrollToBottom, 500);
-  setTimeout(scrollToBottom, 1200);
-}
-
-// ── 晨间汇报交互 ──────────────────────────────────────
-function onBriefingChat(briefingContent) {
-  inputText.value = `关于你刚才的晨间回顾，我想继续聊聊：\n\n${briefingContent}`;
-  nextTick(() => sendMessage());
-}
-
-// ── 发送消息 ─────────────────────────────────────────
-async function sendMessage() {
-  const text = inputText.value.trim();
-  if (!text && !pendingImage.value && pendingFiles.value.length === 0) return;
-  if (isStreaming.value) return;
-
-  const filesToRead = [...pendingFiles.value];
-  const imageBase64 = pendingImage.value;
-
-  const userMessage = {
-    role: 'user',
-    content: text || (imageBase64 ? '请分析这张图片' : '请分析附件内容'),
-    image_base64: imageBase64 || null,
-  };
-
-  // 立即添加到 UI 并清空输入框
-  messages.value.push(userMessage);
-  inputText.value = '';
-  pendingImage.value = null;
-  pendingFiles.value = [];
-  resetTextareaHeight();
-  
-  // 立即激活打字机指示器
-  isStreaming.value = true;
-  streamContent.value = '';
-  streamThinking.value = '';
-  activeTools.value = [];
-
-  await nextTick();
-  scrollToBottom();
-
-  // 将附件路径展示在界面上
-  if (filesToRead.length > 0) {
-    for (const f of filesToRead) {
-      userMessage.content += `\n\n[📎 附件已就绪: ${f.path}]`;
-    }
-  }
-
-  // 持久化
-  await window.electronAPI.addMessage(
-    props.conversationId,
-    'user',
-    userMessage.content,
-    userMessage.image_base64
-  );
-
-  // 自动更新对话标题（第一条消息）
-  if (messages.value.filter(m => m.role === 'user').length === 1) {
-    const title = userMessage.content.slice(0, 30) || '图片分析';
-    emit('update-title', props.conversationId, title);
-  }
-
-  // 构建 API 消息格式
-  const apiMessages = messages.value
-    .filter(m => m.role !== 'system' && m.type !== 'confirm-card')
-    .map(m => ({
-      role: m.role,
-      content: m.content || '',
-    }));
-
-  // 在发给大模型的最终载荷里，偷偷塞入系统指令（不污染前端 UI 和数据库）
-  if (filesToRead.length > 0) {
-    const lastApiMsg = apiMessages[apiMessages.length - 1];
-    lastApiMsg.content += `\n\n（系统内部提示：如果用户要求分析或总结上述附件，请调用 read_file 工具阅读；如果用户要求“整理进知识库”，请绝对不要尝试自己阅读，直接调用 build_knowledge_base 工具将其发往后台 Clerk 引擎）`;
-  }
-
-  await nextTick();
-  scrollToBottom();
-
-  try {
-    let result;
-    console.log('[sendMessage] image_base64 present:', !!userMessage.image_base64, 'apiMessages count:', apiMessages.length);
-    if (userMessage.image_base64) {
-      result = await window.electronAPI.sendVision(apiMessages, userMessage.image_base64, globalFileAccess.value, agentMode.value);
-    } else {
-      result = await window.electronAPI.sendChat(apiMessages, globalFileAccess.value, agentMode.value);
-    }
-    console.log('[sendMessage] result:', JSON.stringify(result).slice(0, 300));
-
-    // 计算本次费用
-    if (result.usage && result.pricing) {
-      const inputCost = (result.usage.prompt_tokens || 0) / 1_000_000 * result.pricing.input;
-      const outputCost = (result.usage.completion_tokens || 0) / 1_000_000 * result.pricing.output;
-      sessionCost.value += inputCost + outputCost;
-      
-      // 持久化保存到数据库
-      if (props.conversationId) {
-        window.electronAPI.updateConversationCost(props.conversationId, sessionCost.value);
-      }
-    }
-
-    if (result.error) {
-      messages.value.push({
-        role: 'assistant',
-        content: result.error,
-        _isError: true,
-        _thinkingExpanded: false,
-      });
-    } else {
-      let finalContent = streamContent.value || result.content || '';
-      let finalThinking = streamThinking.value || result.thinking || null;
-
-      // ── Outbox: 检测 bob-config 代码块 (T-812) ──────────
-      const configBlockRegex = /```bob-config\n([\s\S]*?)\n```/g;
-      let match;
-      const outboxOps = [];
-      while ((match = configBlockRegex.exec(finalContent)) !== null) {
-        try {
-          const op = JSON.parse(match[1]);
-          outboxOps.push(op);
-        } catch (e) {
-          console.warn('[Outbox] bob-config 块 JSON 解析失败:', e);
-        }
-      }
-      if (outboxOps.length > 0) {
-        try {
-          await window.electronAPI.writeOutbox(outboxOps);
-          console.log(`[Outbox] 已写入 ${outboxOps.length} 条配置操作`);
-        } catch (e) {
-          console.error('[Outbox] writeOutbox 失败:', e);
-        }
-        // 从显示内容中移除 bob-config 块 (用户不需要看到原始 JSON)
-        finalContent = finalContent.replace(configBlockRegex, '').trim();
-      }
-
-      // 始终显示回复，即使内容为空也给出提示
-      const assistantMsg = {
-        role: 'assistant',
-        content: finalContent || '（模型未返回内容，请检查 API 配置或重试）',
-        thinking: finalThinking,
-        _thinkingExpanded: false,
-        _modelLabel: currentModelName.value || result.model || '',
-      };
-      
-      messages.value.push(assistantMsg);
-      await window.electronAPI.addMessage(
-        props.conversationId,
-        'assistant',
-        assistantMsg.content,
-        null
-      );
-    }
-  } catch (err) {
-    console.error('[sendMessage] exception:', err);
-    messages.value.push({
-      role: 'assistant',
-      content: err.message,
-      _isError: true,
-      _thinkingExpanded: false,
-    });
-  } finally {
-    isStreaming.value = false;
-    streamContent.value = '';
-    streamThinking.value = '';
-    activeTools.value = [];
-    scrollToBottom();
-  }
-}
-
-function handleStreamChunk(chunk) {
-  if (chunk.type === 'clear') {
-    // 后端检测到 DSML 泄漏，清除已渲染的脏内容准备重试
-    streamContent.value = '';
-    return;
-  } else if (chunk.type === 'text') {
-    streamContent.value += chunk.content;
-  } else if (chunk.type === 'thinking') {
-    streamThinking.value += chunk.content;
-  } else if (chunk.type === 'tool_start') {
-    activeTools.value.push({ name: chunk.name, status: 'running', result: null, _expanded: false });
-  } else if (chunk.type === 'tool_end') {
-    const tool = activeTools.value.find(t => t.name === chunk.name && t.status === 'running');
-    if (tool) {
-      tool.status = 'done';
-      tool.result = chunk.result;
-      // 解析 web_search 结果为结构化卡片数据
-      if (chunk.name === 'web_search' && chunk.result) {
-        try {
-          const parsed = JSON.parse(chunk.result);
-          if (parsed.results && Array.isArray(parsed.results)) {
-            tool._searchResults = parsed.results;
-            tool._expanded = true; // 自动展开搜索结果
-          }
-        } catch (e) { /* 解析失败则显示原始文本 */ }
-      }
-    }
-  }
-  scrollToBottom();
-}
-
-async function stopGeneration() {
-  await window.electronAPI.stopGeneration();
-  isStreaming.value = false;
-}
-
-// ── 对话导出 ─────────────────────────────────────────
-async function exportConversation() {
-  if (messages.value.length === 0) return;
-  const lines = [];
-  const title = messages.value.find(m => m.role === 'user')?.content?.slice(0, 30) || '对话';
-  const date = new Date().toLocaleDateString('zh-CN');
-  lines.push(`# ${title}`);
-  lines.push(`> 导出时间: ${date}\n`);
-
-  for (const msg of messages.value) {
-    if (msg.role === 'system' || msg.type === 'confirm-card') continue;
-    const role = msg.role === 'user' ? '👤 用户' : '🤖 Bob';
-    lines.push(`## ${role}\n`);
-    lines.push(msg.content || '');
-    lines.push('');
-  }
-  const md = lines.join('\n');
-  const safeName = title.replace(/[<>:"/\\|?*]/g, '_');
-  await window.electronAPI.exportMarkdown(md, `${safeName}.md`);
-}
-
-// ── Markdown 渲染 ───────────────────────────────────
-function renderMarkdown(text) {
-  if (!text) return '';
-  // 隐藏流式输出过程中的日历块
-  const cleaned = text.replace(/<calendar_event>[\s\S]*?(?:<\/calendar_event>|$)/gi, '');
-  const rawHtml = marked.parse(cleaned);
-  return DOMPurify.sanitize(rawHtml);
-}
-
-// ── 消息 Block 渲染（拆分文件链接为 FileCard）────────
-// 正则匹配 file:// 链接或 Windows 绝对路径的 <a> 标签
-const FILE_LINK_RE = /<a\s+[^>]*href="((?:file:\/\/\/[^"]+)|(?:[A-Za-z]:[\\][^"]+))"[^>]*>[^<]*<\/a>/gi;
-
-function renderMessageBlocks(text) {
-  if (!text) return [{ type: 'html', content: '' }];
-  const html = renderMarkdown(text);
-
-  // 如果没有文件链接，直接返回单个 HTML block（快速路径）
-  FILE_LINK_RE.lastIndex = 0;
-  if (!FILE_LINK_RE.test(html)) {
-    return [{ type: 'html', content: html }];
-  }
-
-  // 拆分 HTML 为 text blocks 和 file-card blocks
-  const blocks = [];
-  let lastIndex = 0;
-  FILE_LINK_RE.lastIndex = 0;
-  let match;
-
-  while ((match = FILE_LINK_RE.exec(html)) !== null) {
-    // 匹配前的 HTML 文本
-    if (match.index > lastIndex) {
-      blocks.push({ type: 'html', content: html.slice(lastIndex, match.index) });
-    }
-    // 文件卡片 block
-    let filePath = match[1];
-    // 清理 file:/// 前缀
-    if (filePath.startsWith('file:///')) {
-      filePath = filePath.replace('file:///', '');
-    }
-    try { filePath = decodeURIComponent(filePath); } catch(e) {}
-    // 把正斜杠转成反斜杠（Windows 路径）
-    filePath = filePath.replace(/\//g, '\\');
-    blocks.push({ type: 'file', path: filePath });
-    lastIndex = match.index + match[0].length;
-  }
-
-  // 剩余的 HTML 文本
-  if (lastIndex < html.length) {
-    blocks.push({ type: 'html', content: html.slice(lastIndex) });
-  }
-
-  return blocks;
-}
-
-// ── 附件/图片处理 ────────────────────────────────────
-async function handleAttach() {
-  try {
-    const result = await window.electronAPI.selectFile();
-    if (!result) return; // User cancelled
-
-    // New structured return: { name, type, content }
-    if (typeof result === 'object' && result.type === 'image' && result.content) {
-      pendingImage.value = result.content;
-      return;
-    }
-    if (typeof result === 'object' && result.type === 'text' && result.content) {
-      inputText.value = `请分析以下文件内容 (${result.name}):\n\n${result.content}`;
-      return;
-    }
-    // Old fallback: result is just a file path string (shouldn't happen now)
-    if (typeof result === 'string') {
-      inputText.value = `用户选择了文件: ${result}`;
-      return;
-    }
-  } catch (e) {
-    console.error('[handleAttach]', e);
-  }
-
-  // Fallback: try clipboard image
-  const base64 = await window.electronAPI.getClipboardImage();
-  if (base64) {
-    pendingImage.value = base64;
-  }
-}
-
-
-
-async function pasteImage() {
-  const base64 = await window.electronAPI.getClipboardImage();
-  if (base64) {
-    pendingImage.value = base64;
-  }
-}
-
-function handlePaste(event) {
-  const items = event.clipboardData?.items;
-  if (!items) return;
-
-  for (const item of items) {
-    if (item.type.startsWith('image/')) {
-      event.preventDefault();
-      const file = item.getAsFile();
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const base64 = e.target.result.replace(/^data:image\/\w+;base64,/, '');
-        pendingImage.value = base64;
-      };
-      reader.readAsDataURL(file);
-      return;
-    }
-  }
-}
-
-// ── 文件拖拽 ────────────────────────────────────────
-function onDragEnter(e) {
-  if (e.dataTransfer?.types?.includes('Files')) {
-    isDragging.value = true;
-  }
-}
-
-// ── Logo 滚动视差 ────────────────────────────────────
-function onMessagesScroll() {
-  const el = messagesArea.value;
-  if (!el) return;
-  // 在 0~100px 滚动范围内，从 1 平滑衰减到 0
-  const scrollY = el.scrollTop;
-  const fadeDistance = 100;
-  logoOpacity.value = Math.max(0, 1 - scrollY / fadeDistance);
-}
-
-// ── 拦截消息链接点击 ─────────────────────────────────
-function onMessageLinkClick(e) {
-  const a = e.target.closest('a');
-  if (!a || !a.href) return;
-  
-  e.preventDefault();
-  const href = a.getAttribute('href');
-  
-  if (href.startsWith('file://') || /^[A-Za-z]:[\\/]/.test(href)) {
-    let filePath = href.replace('file:///', '');
-    // 兼容可能残留的 url 编码
-    try { filePath = decodeURIComponent(filePath); } catch(e){}
-    window.electronAPI.openFile(filePath).catch(err => {
-      console.error('打开文件失败:', err);
-    });
-  } else {
-    // 调用系统浏览器打开其他网址 (如果没实现openExternal，可以以后再加)
-    if (window.electronAPI.openExternal) {
-      window.electronAPI.openExternal(href);
-    }
-  }
-}
-
-async function handleDrop(event) {
-  isDragging.value = false;
-  const files = event.dataTransfer?.files;
-  if (!files || files.length === 0) return;
-
-  const file = files[0];
-  const filePath = window.electronAPI.getFilePath ? window.electronAPI.getFilePath(file) : file.path;
-
-  // ── 路由 1: 文件夹 → 弹确认卡 (P0 流) ──
-  if (filePath) {
-    try {
-      const meta = await window.electronAPI.getFileMeta(filePath);
-      if (meta && meta.isDir) {
-        // 零成本扫描文件夹结构
-        const scanResult = await window.electronAPI.scanFolder(filePath);
-        if (scanResult && !scanResult.error) {
-           pendingFolderInfo.value = {
-             path: filePath,
-             name: meta.name,
-             scanResult
-           };
-           scrollToBottom();
-           return;
-        } else {
-           inputText.value = `文件夹扫描失败: ${scanResult?.message || '未知错误'}`;
-           return;
-        }
-      }
-    } catch (err) {
-      console.warn("Failed to check file meta", err);
-    }
-  }
-
-  // ── 路由 2: 图片 → Vision 附件 ──
-  if (file.type.startsWith('image/')) {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const base64 = e.target.result.replace(/^data:image\/\w+;base64,/, '');
-      pendingImage.value = base64;
-    };
-    reader.readAsDataURL(file);
-    return;
-  }
-
-  // ── 路由 3: 文档/其他文件 → 上下文附件 ──
-  if (!filePath) {
-    inputText.value = `文件处理失败: 无法获取文件的本地路径。`;
-    return;
-  }
-
-  try {
-    const result = await window.electronAPI.readFile(filePath);
-    if (result.error) {
-      inputText.value = `文件读取失败: ${result.error}`;
-    } else {
-      inputText.value = `请分析以下文件内容 (${result.name}):\n\n${result.content}`;
-    }
-  } catch (err) {
-    inputText.value = `文件处理失败: ${err.message}`;
-  }
-}
-
-// ── Tauri 原生拖拽处理 ──
-async function handleTauriDrop(paths) {
-  if (!paths || paths.length === 0) return;
-  
-  // 支持多文件拖拽
-  for (const filePath of paths) {
-    // 忽略图片，因为 DOM 层的 HTML5 Drag-and-Drop 会生成 File 对象并通过 handleDrop 转成 Base64
-    // 为了防止冲突，我们在 Tauri 原生层静默忽略图片
-    if (filePath.match(/\.(png|jpg|jpeg|gif|webp)$/i)) {
-      continue;
-    }
-
-    try {
-      const meta = await window.electronAPI.getFileMeta(filePath);
-      if (meta && meta.isDir) {
-        // 使用后台预处理结果（如果就绪）
-        let scanResult;
-        if (window.__preScannedFolder && window.__preScannedFolder.path === filePath) {
-          scanResult = window.__preScannedFolder.scanResult;
-          window.__preScannedFolder = null; // 清除缓存
-        } else {
-          scanResult = await window.electronAPI.scanFolder(filePath);
-        }
-        
-        if (scanResult && !scanResult.error) {
-           pendingFolderInfo.value = {
-             path: filePath,
-             name: meta.name,
-             scanResult
-           };
-           scrollToBottom();
-        } else {
-           inputText.value = `文件夹扫描失败: ${scanResult?.message || '未知错误'}`;
-        }
-      } else {
-        // 放入待发送区
-        if (!pendingFiles.value.some(f => f.path === filePath)) {
-          pendingFiles.value.push({
-            path: filePath,
-            name: meta ? meta.name : filePath.split(/[/\\]/).pop(),
-            size: meta ? meta.size : 0
-          });
-        }
-      }
-    } catch (err) {
-      console.warn(`原生拖拽处理错误: ${err.message}`);
-    }
-  }
-}
-
-// ── 输入辅助 ────────────────────────────────────────
-function handleKeydown(event) {
-  if (event.key === 'Enter' && !event.shiftKey) {
-    event.preventDefault();
-    sendMessage();
-  }
-}
-
-function autoResize() {
-  const textarea = inputRef.value;
-  if (!textarea) return;
-  textarea.style.height = 'auto';
-  textarea.style.height = Math.min(textarea.scrollHeight, 160) + 'px';
-}
-
-function resetTextareaHeight() {
-  nextTick(() => {
-    if (inputRef.value) {
-      inputRef.value.style.height = 'auto';
-    }
-  });
-}
-
-function insertPrompt(text) {
-  inputText.value = text;
-  nextTick(() => inputRef.value?.focus());
-}
-
-function scrollToBottom() {
-  nextTick(() => {
-    if (messagesArea.value) {
-      messagesArea.value.scrollTop = messagesArea.value.scrollHeight;
-    }
-  });
-}
-
-// ── 文件夹处理 ──────────────────────────────────────
-function cancelFolderTrack() {
-  pendingFolderInfo.value = null;
-}
-
-async function confirmFolderTrack() {
-  const folder = pendingFolderInfo.value;
-  pendingFolderInfo.value = null;
-  if (!folder) return;
-
-  // 添加用户消息
-  const userContent = `我已经将文件夹「${folder.name}」拖入。`;
-  messages.value.push({ role: 'user', content: userContent });
-  await window.electronAPI.addMessage(props.conversationId, 'user', userContent, null);
-  
-  // 插入系统处理中状态消息
-  const systemMsgId = Date.now().toString();
-  const systemMsg = { 
-    id: systemMsgId, 
-    role: 'assistant', 
-    content: '正在处理文件夹，请稍候...' 
-  };
-  messages.value.push(systemMsg);
-  scrollToBottom();
-
-  try {
-    // 实际调用内置工具 API 来处理 (这最终会调用 folderTracker.trackFolder)
-    const result = await window.electronAPI.sendChat([{
-      role: 'user',
-      content: `Please execute the "track_folder" tool on this path: ${folder.path}`
-    }], globalFileAccess.value, agentMode.value);
-
-    // 替换为简短成功提示
-    const successContent = `✅ 已将「${folder.name}」收藏到目录列表。`;
-    const index = messages.value.findIndex(m => m.id === systemMsgId);
-    if (index !== -1) {
-       messages.value[index].content = successContent;
-    }
-    await window.electronAPI.addMessage(props.conversationId, 'assistant', successContent, null);
-    
-    // 显示预估卡片
-    pendingKBEstimate.value = {
-      name: folder.name,
-      path: folder.path,
-      result: null // null 表示 loading
-    };
-    scrollToBottom();
-    
-    // 异步获取预估结果
-    const estimateResult = await window.electronAPI.estimateKB(folder.path);
-    if (pendingKBEstimate.value && pendingKBEstimate.value.path === folder.path) {
-       pendingKBEstimate.value.result = estimateResult;
-    }
-
-  } catch (err) {
-    const failContent = `❌ 文件夹收藏失败: ${err.message}`;
-    const index = messages.value.findIndex(m => m.id === systemMsgId);
-    if (index !== -1) {
-       messages.value[index].content = failContent;
-    }
-    await window.electronAPI.addMessage(props.conversationId, 'assistant', failContent, null);
-  }
-}
-
-function cancelKBEstimate() {
-  pendingKBEstimate.value = null;
-}
-
-function startKBBuild(folderPath, plan) {
-  pendingKBEstimate.value = null;
-
-  // 在聊天流中插入进度消息（不阻塞主聊天）
-  const progressMsgId = Date.now().toString();
-  messages.value.push({
-    id: progressMsgId,
-    role: 'assistant',
-    content: '📚 正在启动知识库构建...'
-  });
-  scrollToBottom();
-
-  // 监听 Rust 后台的进度事件
-  const unlistenProgress = window.electronAPI.onKBProgress?.((payload) => {
-    const idx = messages.value.findIndex(m => m.id === progressMsgId);
-    if (idx !== -1) {
-      messages.value[idx].content = `📚 ${payload.message} (${payload.current}/${payload.total})`;
-    }
-    scrollToBottom();
-  });
-  if (unlistenProgress) kbUnlistens.push(unlistenProgress);
-
-  const unlistenComplete = window.electronAPI.onKBComplete?.((payload) => {
-    const idx = messages.value.findIndex(m => m.id === progressMsgId);
-    if (idx !== -1) {
-      if (payload.failed > 0) {
-        messages.value[idx].content = `⚠️ 知识库构建完成：${payload.success}/${payload.total} 成功，${payload.failed} 个文件处理失败。你现在可以向我提问关于「${payload.folder}」的内容。`;
-      } else {
-        messages.value[idx].content = `✅ 知识库构建完成！已成功处理 ${payload.total} 个文件。你现在可以向我提问关于「${payload.folder}」的内容。`;
-      }
-      // 持久化最终结果消息
-      window.electronAPI.addMessage(props.conversationId, 'assistant', messages.value[idx].content, null);
-    }
-    scrollToBottom();
-    // 清理监听器
-    if (unlistenProgress) unlistenProgress();
-    if (unlistenComplete) unlistenComplete();
-  });
-  if (unlistenComplete) kbUnlistens.push(unlistenComplete);
-
-  // 异步调用 Rust 后端（不 await，不阻塞）
-  window.electronAPI.buildKB?.(folderPath, plan).then((result) => {
-    if (result?.error) {
-      const idx = messages.value.findIndex(m => m.id === progressMsgId);
-      if (idx !== -1) {
-        messages.value[idx].content = `❌ ${result.message}`;
-      }
-      if (unlistenProgress) unlistenProgress();
-      if (unlistenComplete) unlistenComplete();
-    }
-  }).catch((err) => {
-    const idx = messages.value.findIndex(m => m.id === progressMsgId);
-    if (idx !== -1) {
-      messages.value[idx].content = `❌ 知识库构建失败: ${err.message || err}`;
-    }
-    if (unlistenProgress) unlistenProgress();
-    if (unlistenComplete) unlistenComplete();
-  });
-}
-
 // ── 暴露给父组件 ────────────────────────────────────────
-async function refreshModel() {
-  try {
-    const active = await window.electronAPI.getActiveModels();
-    if (active && active.main) {
-      currentModelRaw.value = active.main;
-    }
-  } catch (e) { /* ignore */ }
-}
-
 defineExpose({
   refreshModel,
-  scrollToBottom,  // 从设置/日程切回时自动滚到底部
+  scrollToBottom,
 });
+
 </script>
 
 <style scoped>
