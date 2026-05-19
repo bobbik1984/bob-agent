@@ -90,7 +90,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue';
+import { ref, watch, onMounted, onUnmounted } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { Moon, Sun, ChevronLeft, ChevronRight, Loader2, Rocket, Check } from 'lucide-vue-next';
 import CustomSelect from './CustomSelect.vue';
@@ -129,6 +129,13 @@ const providerOptions = [
   { label: 'MiniMax', value: 'minimax' }
 ];
 
+// 离开 Step 3 时立即保存 API Key 到 OS Keychain
+watch(step, async (newStep, oldStep) => {
+  if (oldStep === 3 && tempConfig.value.apiKey && window.electronAPI?.setApiKey) {
+    await window.electronAPI.setApiKey(tempConfig.value.provider, tempConfig.value.apiKey);
+  }
+});
+
 onMounted(async () => {
   document.documentElement.setAttribute('data-theme', 'dark');
   if (window.electronAPI) {
@@ -136,7 +143,7 @@ onMounted(async () => {
     if (sysConfig.accentColor) tempConfig.value.accentColor = sysConfig.accentColor;
     if (sysConfig.workspaceDir) tempConfig.value.workspaceDir = sysConfig.workspaceDir;
     if (sysConfig.provider) tempConfig.value.provider = sysConfig.provider;
-    if (sysConfig.apiKey) tempConfig.value.apiKey = sysConfig.apiKey;
+    // 不再回填 apiKey（keychain 中的密钥不应泄露到前端状态）
     setAccentColor(tempConfig.value.accentColor);
   }
 });
@@ -207,9 +214,12 @@ async function finishOnboarding() {
     await window.electronAPI.setConfig('accentColor', tempConfig.value.accentColor);
     await window.electronAPI.setConfig('workspaceDir', tempConfig.value.workspaceDir);
     await window.electronAPI.setConfig('provider', tempConfig.value.provider);
-    await window.electronAPI.setConfig('apiKey', tempConfig.value.apiKey);
+    // 通过 Keychain 安全通道保存 API Key（而非 config_set 明文写入）
+    if (tempConfig.value.apiKey && window.electronAPI.setApiKey) {
+      await window.electronAPI.setApiKey(tempConfig.value.provider, tempConfig.value.apiKey);
+    }
     await window.electronAPI.setConfig('onboarded', true);
-    const models = await window.electronAPI.getModels();
+    const models = await window.electronAPI.getModels(tempConfig.value.provider);
     const defaultModel = models.find(m => m.default) || models[0];
     if (defaultModel) await window.electronAPI.setConfig('model', defaultModel.id);
   }
