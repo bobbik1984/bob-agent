@@ -1,6 +1,6 @@
-﻿# Bob-Agent 开发全局路线图 (Roadmap)
+# Bob-Agent 开发全局路线图 (Roadmap)
 
-> 🎯 **当前版本**: `v0.3.0` — 微信接入完成、API Key Keychain 加密、ChatView 架构拆分、安全加固全量完成。
+> 🎯 **当前版本**: `v0.3.1-pre` — 微信接入完成、API Key Keychain 加密、ChatView 架构拆分、安全加固全量完成。
 > ♻️ **已完成**: Tauri 迁移、主题系统、记忆引擎、安全加固、IPC 防抖、僵尸进程修复、路径穿越修复、微信接入、HTTP API、Composable 架构拆分。
 > 📋 **下一目标**: v0.4 — 离线模型 Tool Calling / 排队纠偏 / Cron 自动化 / 生产打包发布。
 
@@ -364,7 +364,7 @@
 - [x] **T-1010: 启动画面主题匹配** — 启动 Logo 改为 CSS Mask 方案，深色主题白色/浅色主题强调色，`localStorage` 持久化 accent，消除闪白。
 - [x] **T-1011: Bob 头像资源纳入 Vite 管道** — `bob_logo.svg` 从硬编码绝对路径改为 `new URL('/bob_logo.svg', import.meta.url).href`，解决 WebView 缓存导致头像消失问题。
 - [x] **T-1012: Apple Glass 主题移除**
-- [x] **版本封版** — package.json / tauri.conf.json / Cargo.toml 统一升至 0.3.0。
+- [x] **版本封版** — package.json / tauri.conf.json / Cargo.toml 统一升至 0.3.1-pre。
 
 ---
 

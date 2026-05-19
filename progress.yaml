@@ -1,11 +1,11 @@
 project:
   name: bob-agent
-  version: "0.3.0"
+  version: "0.3.1-pre"
   status: stable
   tech: [Tauri V2, Rust, Vue 3, Vite, SQLite (rusqlite), reqwest, scraper, keyring, tauri-plugin-single-instance]
   updated: "2026-05-19"
   architecture: "Tauri (Rust backend) + Vue 3 (frontend) + tauri-bridge.js (adapter) + Composable 架构"
-  current_focus: "v0.3.0 发布就绪 — 后续可进入 v0.4 (离线 Tool Calling / 排队纠偏 / Cron 自动化 / 生产打包)"
+  current_focus: "v0.3.1-pre 发布就绪 — 后续可进入 v0.4 (离线 Tool Calling / 排队纠偏 / Cron 自动化 / 生产打包)"
 
 # ═══════════════════════════════════════════════════════════════
 # Tauri 迁移后里程碑体系 (里程碑 1-11)
@@ -234,7 +234,7 @@ recent_fixes:
       - "[Cleanup] P2: npm 清理 — 移除 263 个遗留包 (cheerio/mammoth/openai/pdf-parse/ws/xlsx 等)"
       - "[i18n] P3: SetupWizard i18n — 硬编码中文替换为 $t() 调用, zh-CN/en-US 新增 setup.* 系列 key"
       - "[Arch] P4: ChatView.vue 拆分 — 提取 useChat/useModelSwitcher/useDragDrop 三个 Composable (2293→1522行, -33%)"
-      - "[Docs] 版本号统一 v0.3.0 + todo.md/progress.yaml 全量刷新"
+      - "[Docs] 版本号统一 v0.3.1-pre + todo.md/progress.yaml 全量刷新"
   - date: "2026-05-17"
     items:
       - "[Arch] M11 架构审计全面完成 (Jules 审计报告驱动)"
