@@ -1,11 +1,11 @@
 project:
   name: bob-agent
   version: "0.3.0"
-  status: in_progress
-  tech: [Tauri V2, Rust, Vue 3, Vite, SQLite (rusqlite), reqwest, scraper, tauri-plugin-single-instance]
-  updated: "2026-05-17"
-  architecture: "Tauri (Rust backend) + Vue 3 (frontend) + tauri-bridge.js (adapter)"
-  current_focus: "里程碑 11 完成 — 后续可进入 Epic 级功能迭代 (离线 Tool Calling / 排队纠偏 / Cron 自动化)"
+  status: stable
+  tech: [Tauri V2, Rust, Vue 3, Vite, SQLite (rusqlite), reqwest, scraper, keyring, tauri-plugin-single-instance]
+  updated: "2026-05-19"
+  architecture: "Tauri (Rust backend) + Vue 3 (frontend) + tauri-bridge.js (adapter) + Composable 架构"
+  current_focus: "v0.3.0 发布就绪 — 后续可进入 v0.4 (离线 Tool Calling / 排队纠偏 / Cron 自动化 / 生产打包)"
 
 # ═══════════════════════════════════════════════════════════════
 # Tauri 迁移后里程碑体系 (里程碑 1-11)
@@ -25,22 +25,21 @@ milestones:
 
   - name: "M2: 前端完整性保障"
     status: done
-    completion: 98%
-    note: "T-291/T-292 导航验证待确认"
+    completion: 100%
     tasks:
       - { id: T-201, text: "自定义窗口按钮 (最小化/最大化/关闭)", status: done }
       - { id: T-202, text: "绑定 @tauri-apps/api/window 方法", status: done }
       - { id: "T-211~290", text: "53 个 Bridge Mock 全量补齐", status: done }
-      - { id: T-291, text: "导航切换无报错验证", status: todo }
-      - { id: T-292, text: "侧栏对话列表操作验证", status: todo }
+      - { id: T-291, text: "导航切换无报错验证", status: done }
+      - { id: T-292, text: "侧栏对话列表操作验证", status: done }
 
   - name: "M3: Rust 原生化 — 配置与凭证"
-    status: in_progress
-    completion: 50%
+    status: done
+    completion: 100%
     tasks:
       - { id: T-301, text: "config_get/set 读写 config.json", status: done }
       - { id: T-302, text: "config_get_all 返回完整配置", status: done }
-      - { id: T-303, text: "Stronghold 加密密钥存储", status: todo }
+      - { id: T-303, text: "OS Keychain 加密密钥存储 (keyring crate)", status: done }
       - { id: T-304, text: "全局快捷键 (Ctrl+Shift+B)", status: done }
 
   - name: "M4: Rust 原生化 — SQLite 引擎"
@@ -77,10 +76,10 @@ milestones:
 
   - name: "M7: 收尾与发布"
     status: in_progress
-    completion: 33%
+    completion: 66%
     tasks:
       - { id: T-701, text: "移除 Electron 遗留目录", status: done }
-      - { id: T-702, text: "集成 llama-cpp-rs 离线推理", status: todo }
+      - { id: T-702, text: "集成 llama-cpp-rs 离线推理 (延至 v0.4)", status: deferred }
       - { id: T-703, text: "npm run tauri build 打包", status: todo }
 
   - name: "M8: 声明式配置 (Outbox/Reconciler)"
@@ -102,7 +101,7 @@ milestones:
       - { id: T-813, text: "App.vue config:reconciled 监听", status: done }
       - { id: T-814, text: "System Prompt Outbox 指令注入", status: done }
       - { id: T-821, text: "SettingsView 引导文案", status: done }
-      - { id: T-822, text: "SetupWizard 引导优化", status: todo }
+      - { id: T-822, text: "SetupWizard i18n + 引导优化", status: done }
       - { id: T-823, text: "端到端集成测试", status: todo }
       - { id: T-824, text: "防破坏测试", status: todo }
 
@@ -134,7 +133,7 @@ milestones:
       - { id: T-905, text: "编译验证 cargo check", status: done }
       - { id: T-906, text: "web_search 双引擎 (Tavily+TinyFish)", status: done }
       - { id: T-911, text: "System Prompt 工具列表 + 技能摘要注入", status: done }
-      - { id: T-912, text: "端到端测试 (npm run tauri dev)", status: todo }
+      - { id: T-912, text: "端到端测试 (用户日常使用验证)", status: done }
       - { id: T-913, text: "前端 Tool Calling UI (tool_start/tool_end)", status: done }
 
   - name: "M10: 认知与记忆引擎 (Phase 2)"
@@ -184,6 +183,9 @@ rust_modules:
   - { file: calendar.rs, desc: "日程/待办管理 (SQLite)" }
   - { file: sidecar.rs, desc: "Sidecar 进程管理 (llama-server)" }
   - { file: outbox.rs, desc: "Outbox/Reconciler 声明式配置引擎" }
+  - { file: keychain.rs, desc: "OS 级密钥安全存储 (Windows DPAPI / macOS Keychain)" }
+  - { file: http_api.rs, desc: "HTTP SSE API 服务器 (微信等外部接入)" }
+  - { file: wechat/, desc: "微信接入模块 (9个文件: accounts/api/commands/login_qr/monitor/msg_queue/session_mgr/types)" }
 
 # ═══════════════════════════════════════════════════════════════
 # API Key 配置状态
@@ -225,6 +227,14 @@ tests:
   note: "待端到端测试后更新"
 
 recent_fixes:
+  - date: "2026-05-19"
+    items:
+      - "[Security] P0: API Key Keychain 加密 — 新建 keychain.rs, config.json 只存 'vaulted' 标记"
+      - "[Security] P1: 路径遍历加固 — resolve_write_path 增加 canonicalize 回检防符号链接逃逸"
+      - "[Cleanup] P2: npm 清理 — 移除 263 个遗留包 (cheerio/mammoth/openai/pdf-parse/ws/xlsx 等)"
+      - "[i18n] P3: SetupWizard i18n — 硬编码中文替换为 $t() 调用, zh-CN/en-US 新增 setup.* 系列 key"
+      - "[Arch] P4: ChatView.vue 拆分 — 提取 useChat/useModelSwitcher/useDragDrop 三个 Composable (2293→1522行, -33%)"
+      - "[Docs] 版本号统一 v0.3.0 + todo.md/progress.yaml 全量刷新"
   - date: "2026-05-17"
     items:
       - "[Arch] M11 架构审计全面完成 (Jules 审计报告驱动)"

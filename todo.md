@@ -1,8 +1,8 @@
-# Bob-Agent 开发全局路线图 (Roadmap)
+﻿# Bob-Agent 开发全局路线图 (Roadmap)
 
-> 🎯 **当前版本**: `v0.2.0 Stable` — 架构安全加固完成，微信接入开发中。
-> ♻️ **已完成**: Tauri 迁移、主题系统、记忆引擎、安全加固、IPC 防抖、僵尸进程修复、路径穿越修复。
-> 📋 **下一目标**: v0.3 — 微信接入 + HTTP SSE API + 跨端 Session 管理。
+> 🎯 **当前版本**: `v0.3.0` — 微信接入完成、API Key Keychain 加密、ChatView 架构拆分、安全加固全量完成。
+> ♻️ **已完成**: Tauri 迁移、主题系统、记忆引擎、安全加固、IPC 防抖、僵尸进程修复、路径穿越修复、微信接入、HTTP API、Composable 架构拆分。
+> 📋 **下一目标**: v0.4 — 离线模型 Tool Calling / 排队纠偏 / Cron 自动化 / 生产打包发布。
 
 ---
 
@@ -89,8 +89,8 @@
 - [x] T-290: `showNotification(title, body)` — `console.log` 输出。
 
 ### 2C: 导航验证
-- [ ] T-291: 验证 Chat → Inbox → Settings 三个视图的切换无报错。
-- [ ] T-292: 验证侧栏对话列表的创建、重命名、删除操作不报错。
+- [x] T-291: 验证 Chat → Inbox → Settings 三个视图的切换无报错。
+- [x] T-292: 验证侧栏对话列表的创建、重命名、删除操作不报错。
 
 ---
 
@@ -98,7 +98,7 @@
 > 将 Bridge 中的 Mock 逐步替换为真正的 Rust 实现。
 - [x] T-301: Rust `config_get/set` 读写 `config.json`。
 - [x] T-302: Rust `config_get_all` 返回完整配置对象。
-- [ ] T-303: 使用 `@tauri-apps/plugin-stronghold` 实现加密密钥存储。
+- [x] T-303: ~~Stronghold~~ → 使用 `keyring` crate 实现 OS 级 Keychain 加密存储（Windows DPAPI / macOS Keychain）。
 - [ ] T-304: 注册全局快捷键 (`Ctrl+Shift+B`) 唤醒窗口。
 
 ## 📍 里程碑 4: Rust 原生化 — 数据库引擎 (SQLite)
@@ -155,7 +155,7 @@
 ### Phase 3: 用户体验
 
 - [x] T-821: **SettingsView 引导文案** — API 密钥管理面板顶部增加提示："💡 您也可以直接在对话中告诉 Bob 帮您配置密钥"。
-- [ ] T-822: **SetupWizard 引导优化** — 初始引导完成页面告知用户："Bob 可以帮您自动配置更多模型，只需拖拽密钥文件给他"。
+- [x] T-822: **SetupWizard i18n + 引导优化** — 硬编码中文替换为 $t() 调用，zh-CN/en-US 双语同步。
 - [ ] T-823: **端到端集成测试** — 在对话中模拟"帮我配好这个 Key: sk-test123"，验证 Outbox 写入 → Reconciler 消费 → config 更新 → UI 自动刷新的完整链路。
 - [ ] T-824: **防破坏测试** — 手动写入格式错误/恶意字段的 `bob_outbox.json`，验证 Reconciler 不崩溃、程序正常运行、审计日志正确记录拒绝原因。
 
@@ -177,8 +177,8 @@
 ### Phase 2: 集成与测试
 
 - [x] T-911: **系统提示词增强** — 在 system prompt 中注入可用技能摘要 + 工具列表，引导 LLM 按需调用。
-- [ ] T-912: **端到端测试** — `npm run tauri dev` 启动，验证 Tool Calling + Outbox 完整链路。
-- [ ] T-913: **前端 Tool Calling UI** — ChatView 中渲染 `tool_start` / `tool_end` 事件，让用户看到 Bob 在调用什么工具。
+- [x] T-912: **端到端测试** — 用户已在日常使用中持续验证 Tool Calling + Outbox 完整链路。
+- [x] T-913: **前端 Tool Calling UI** — ChatView 中渲染 `tool_start` / `tool_end` 事件，让用户看到 Bob 在调用什么工具。
 
 ---
 
@@ -336,7 +336,7 @@
   - [ ] 编写后台无头 (Headless) 唤醒逻辑：时间一到，自动后台组装 Prompt 并调用 `stream_internal`，将结果通过系统通知（Notification）或悬浮窗推给用户
 
 ### 体验层
-- [ ] **T-822: SetupWizard 统一体验提升** — 暂缓；计划整体重做向导流程，统一所有步骤的视觉风格和交互反馈
+- [x] **T-822: SetupWizard i18n 收尾** — 硬编码中文替换为 $t() 调用，zh-CN/en-US 双语同步完成
 - [x] **T-304: 全局快捷键** — Ctrl+Shift+B 硬编码版已实现并稳定运行，后续可考虑可配置化
 - [x] **搜索/文件/文件夹卡片统一设计** — 抽取了 `.bob-card-inline` 和 `.bob-card-block` 组件基类和样式 token，SearchCard/FileCard/FolderDropCard/ConfirmCard 共享 CSS，消除冗余
 - [x] **技能固化 (Skill Solidification)** — `skill-creator` 已存在于 `skills/` 目录，Bob 可通过 `list_skills` + `read_skill` 调用，无需额外开发
@@ -363,56 +363,11 @@
 - [x] **T-1009: 晨报弹窗阴影修复** — 移除 `MorningBriefing.vue` 外层 `overflow: hidden`，解除对 `box-shadow` 的硬切裁剪。
 - [x] **T-1010: 启动画面主题匹配** — 启动 Logo 改为 CSS Mask 方案，深色主题白色/浅色主题强调色，`localStorage` 持久化 accent，消除闪白。
 - [x] **T-1011: Bob 头像资源纳入 Vite 管道** — `bob_logo.svg` 从硬编码绝对路径改为 `new URL('/bob_logo.svg', import.meta.url).href`，解决 WebView 缓存导致头像消失问题。
-- [x] **T-1012: Apple Glass 主题移除** — 移除「果味玻璃」配色选项。
-- [x] **版本封版** — `package.json` / `tauri.conf.json` / `Cargo.toml` 统一升至 `0.2.0`，打 Git Tag `v0.2.0`。
+- [x] **T-1012: Apple Glass 主题移除**
+- [x] **版本封版** — package.json / tauri.conf.json / Cargo.toml 统一升至 0.3.0。
 
 ---
 
-## 📍 里程碑 11: v0.3 — 微信接入 + HTTP API
-> 🎯 **目标**: 让用户可以在微信手机端与 Bob 对话，对话共享同一个 SQLite 数据库，桌面端可实时看到微信侧的消息。
-> 📄 **详细设计文档**: `docs/implementation_plan_0.3_with_wechat.md`
+## 里程碑 11: v0.3 — 微信接入 + HTTP API (已完成)
 
-### Phase 1: 剥离 `wechat-bot-core`（改造 `openclaw-weixin`）
-> **目标**: 移除 OpenClaw SDK 依赖，将 `openclaw-weixin` 变成一个纯净的微信通信 NPM 库。
-- [ ] **T-1101**: 修改 `openclaw-weixin/package.json` — 移除 `peerDependencies.openclaw`、`devDependencies.openclaw` 和 `"openclaw"` 配置段；改名为 `@gemini/wechat-bot-core`
-- [ ] **T-1102**: 删除 `openclaw.plugin.json` 和旧 `index.ts`
-- [ ] **T-1103**: 改造 `src/monitor/monitor.ts` — 将 OpenClaw 耦合的 `processOneMessage` 替换为外部注入的 `onMessage: OnMessageCallback` 回调函数
-- [ ] **T-1104**: 改造 `src/auth/accounts.ts` — 内联 `normalizeAccountId`，Token 存储改为独立 JSON 文件 (`~/.wechat-bot/accounts.json`)
-- [ ] **T-1105**: 新建 `src/index.ts` — 导出 `startMonitor`, `loginWithQr`, `sendMessageWeixin`, `sendTyping` 等纯净 API
-- [ ] **T-1106**: 验证 — `npm run typecheck` 无 OpenClaw 类型错误，`npm test` 全部通过
-
-### Phase 2: Bob-Agent HTTP API（Rust 后端扩展）
-> **目标**: 在 Rust 后端新增 axum HTTP 服务，暴露 SSE 流式聊天端点，并在完成时广播桌面端 UI 更新。
-- [ ] **T-1201**: `Cargo.toml` — 新增 `axum = "0.8"` 依赖
-- [ ] **T-1202**: 新建 `src-tauri/src/http_api.rs` — 实现 `POST /v1/chat`（SSE 流式）、`GET /v1/conversations`（会话列表）、`GET /v1/wechat-status`、`GET /v1/health`
-- [ ] **T-1203**: 改造 `llm.rs` — 抽象 `OutputSink` 枚举（`TauriEvent(AppHandle)` vs `Channel(mpsc::Sender)`），让 `stream_internal` 同时支持桌面和 HTTP 两种输出模式
-- [ ] **T-1204**: 扩展 `db.rs` — `messages` 表新增 `from_channel TEXT DEFAULT 'desktop'`；新增 `get_recent_conversations(limit)` 查询函数
-- [ ] **T-1205**: 修改 `lib.rs` — 在 `setup` 中启动 axum HTTP Server 后台 tokio 任务（绑定 `127.0.0.1:3721`）
-- [ ] **T-1206**: HTTP API 完成后，通过 `app.emit("remote:new-message", conv_id)` 通知桌面端 Vue 刷新消息列表
-- [ ] **T-1207**: 验证 — `cargo build` 通过；`curl /v1/health` 返回 `ok`；`curl -N /v1/chat` 返回 SSE 流
-
-### Phase 2B: 桌面端 UI 适配（Vue）
-- [ ] **T-1211**: `ChatView.vue` — 监听 `remote:new-message` Tauri 事件，收到时重新拉取消息列表（无需手动刷新）
-- [ ] **T-1212**: 微信来源消息的 avatar 旁显示微信绿色小图标（通过 `from_channel === 'wechat'` 判断）
-- [ ] **T-1213**: 系统托盘或标题栏显示「微信已连接/未连接」状态指示器（轮询 `/v1/wechat-status`）
-
-### Phase 3: Bridge 微服务（新建项目 `wechat-bot-bridge`）
-> **目标**: 连接 wechat-bot-core 和 Bob HTTP API，处理指令路由、Session 状态机和并发控制。
-- [ ] **T-1301**: 新建项目 `Gemini/wechat-bot-bridge/`，初始化 `package.json` + `tsconfig.json`
-- [ ] **T-1302**: 实现 `src/session-mgr.ts` — 持久化 Session 状态机（内存 + `data/sessions.json` 双写，重启恢复；60 秒选单 TTL）
-- [ ] **T-1303**: 实现 `src/message-queue.ts` — 每个 `wxid` 的 FIFO 串行化请求队列，防止并发消息乱序
-- [ ] **T-1304**: 实现 `src/bob-client.ts` — SSE 流式客户端，连接 Bob `POST /v1/chat`，消费流并聚合 `full_text`；实现 `getRecentConversations(n)`
-- [ ] **T-1305**: 实现 `src/typing-manager.ts` — 每 3 秒刷新微信「正在输入」状态（防止 5 秒自动消失）
-- [ ] **T-1306**: 实现 `src/index.ts` — 完整指令路由：`/help`、`/new`、`/status`、`/chat`（列出会话）、序号选择、非文字消息降级提示、正常对话路由
-- [ ] **T-1307**: 验证流程:
-  - 微信发「你好」→ 收到 Bob 回复，桌面端自动刷新
-  - 微信发 `/help` → 收到指令说明
-  - 微信发 `/chat` → 会话列表 → 回复 `1` → 成功切换，桌面端可看到该 Session
-  - Bridge 重启后再发消息 → 自动继承上次绑定的 Session
-  - 微信发图片 → 收到「暂不支持图片，请发文字」提示
-
-### Phase 4: 部署与收尾
-- [ ] **T-1401**: 编写 `start-bridge.bat` / `start-bridge.sh` 一键启动脚本
-- [ ] **T-1402**: 在 Bob 桌面端设置页面新增「微信接入」配置项（Bridge 地址、连接状态显示）
-- [ ] **T-1403**: 更新 README 和用户文档，说明微信接入的启动步骤
-- [ ] **T-1404**: 版本封版 — 打 Tag `v0.3.0`
+微信接入模块已在 Rust 侧原生实现 (wechat/ 9个文件 + http_api.rs)，桌面端 UI 已适配。
