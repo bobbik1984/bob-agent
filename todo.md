@@ -127,7 +127,7 @@
 ## 📍 里程碑 7: 收尾与发布
 - [x] T-701: **彻底移除 `electron/` 目录** — 42 个遗留文件已清除，Bridge 中的 Electron 引用注释已更新。
 - [ ] T-702: 集成 `llama-cpp-rs` 离线推理。
-- [ ] T-703: `npm run tauri build` 打包发布。
+- [x] T-703: 执行 `npm run tauri build`，验证打包流程，生成 `.msi` 或 `.exe` 安装包。
 
 ---
 

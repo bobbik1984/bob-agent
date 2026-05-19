@@ -75,12 +75,12 @@ milestones:
       - { id: T-608, text: "系统工具原生化", status: done }
 
   - name: "M7: 收尾与发布"
-    status: in_progress
-    completion: 66%
+    status: done
+    completion: 100%
     tasks:
       - { id: T-701, text: "移除 Electron 遗留目录", status: done }
       - { id: T-702, text: "集成 llama-cpp-rs 离线推理 (延至 v0.4)", status: deferred }
-      - { id: T-703, text: "npm run tauri build 打包", status: todo }
+      - { id: T-703, text: "npm run tauri build 打包", status: done }
 
   - name: "M8: 声明式配置 (Outbox/Reconciler)"
     status: done
