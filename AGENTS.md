@@ -70,6 +70,16 @@ npm test                 # 运行 Vitest 测试
 npm run lint             # ESLint 检查
 ```
 
+### 🔴 安装包编译工作流 (Bootstrapper Pipeline)
+
+本项目的安装器使用的是**双 Tauri 嵌套架构**（Bootstrapper 模式），以实现极其定制化的暗黑风格安装引导（无边框、无系统灰条）。**绝对禁止**使用默认的 Tauri Bundle (NSIS/MSI) 直接分发主程序。
+
+要生成最终分发给用户的 `bob-installer.exe`，必须严格按照以下三步执行：
+
+1. **编译主程序**：在根目录执行 `npm run tauri build`，生成优化的 `bob.exe`。
+2. **生成 Payload**：在根目录执行 `node scripts/build_payload.mjs`。此脚本会将 `bob.exe`、核心 DLL 和 `skills` 目录压缩打包，并自动移动到 `installer/src-tauri/payload.zip`。
+3. **编译安装器**：进入 `installer/` 目录执行 `npm run tauri build`。安装器的 `lib.rs` 会通过 `include_bytes!` 将 `payload.zip` 硬编码进自身二进制中，最终输出单文件安装器。
+
 ---
 
 ## 架构
@@ -181,6 +191,17 @@ bob-agent/
 1. **IPC 调用**：统一通过 `window.electronAPI.xxx()` 调用。**不要直接 import `@tauri-apps/api/core`**——这会破坏与 Electron 的兼容性。所有 Tauri 特有 API 仅在 `tauri-bridge.js` 中使用。
 2. **组件风格**：Vue 组件使用 `PascalCase`，JS 函数使用 `camelCase`，文件名使用 `kebab-case`。
 3. **响应式设计**：遵循 `frontend-design` Skill 中的响应式铁律（使用 `100dvh`，输入框 `≥16px` 防 iOS 缩放等）。
+
+### 🔴 静态资源加载铁律 (Vite Assets vs Public)
+
+在 Vue 模板和 JS 中加载图片时，必须严格区分存放目录和加载方式，否则打包为 Tauri 桌面端时必定报 404：
+
+- **`src/assets/` 目录**：用于静态写死的小图标、背景图。
+  - **加载方式**：可以使用相对路径 `../assets/icon.png` 或 Vite 专用的 `new URL('../../assets/icon.png', import.meta.url).href`。
+- **`public/` 目录**：用于**动态拼接路径**（如模型 Logo）或不需要被打包重命名的大文件。
+  - **加载方式**：**绝对禁止**使用 `new URL(..., import.meta.url)`。必须直接使用以 `/` 开头的绝对路径纯字符串。
+  - **正确示范**：`return '/logos/deepseek.png';`
+  - **错误示范**：`return new URL('/logos/deepseek.png', import.meta.url).href;` （这会在 Tauri 打包后引发路径解析崩溃）
 
 ### 🔴 Logo 配色铁律
 

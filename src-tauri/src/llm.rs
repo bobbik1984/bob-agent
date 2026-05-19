@@ -93,19 +93,14 @@ pub fn get_api_keys() -> Value {
     let config = super::read_config();
     let mut keys = serde_json::Map::new();
 
-    // 从 config.json 读取 provider 标记列表
+    // 直接从 config.json 读取所有 API Key（明文存储）
     if let Some(api_keys) = config.get("apiKeys").and_then(|v| v.as_object()) {
         for (provider, value) in api_keys {
-            if let Some(marker) = value.as_str() {
-                if marker == "vaulted" {
-                    // 从 OS Keychain 读取真实密钥
-                    if let Some(real_key) = super::keychain::load_key(provider) {
-                        keys.insert(provider.clone(), json!(real_key));
-                    }
-                } else if !marker.is_empty() {
-                    // 兼容尚未迁移的明文密钥（降级模式）
-                    keys.insert(provider.clone(), json!(marker));
+            if let Some(key_str) = value.as_str() {
+                if !key_str.is_empty() && key_str != "vaulted" {
+                    keys.insert(provider.clone(), json!(key_str));
                 }
+                // 兼容旧的 "vaulted" 标记：跳过，让用户重新输入
             }
         }
     }
@@ -127,54 +122,27 @@ pub fn get_api_keys() -> Value {
 pub fn set_api_key(provider_id: String, api_key: String) -> Value {
     let mut config = super::read_config();
 
-    if api_key.is_empty() {
-        // 删除密钥
-        if let Err(e) = super::keychain::delete_key(&provider_id) {
-            log::warn!("Keychain delete failed: {}", e);
+    // 确保 apiKeys 对象存在
+    if let Some(cfg_obj) = config.as_object_mut() {
+        if !cfg_obj.contains_key("apiKeys") {
+            cfg_obj.insert("apiKeys".to_string(), json!({}));
         }
-        // 从 config.json 移除标记
+    }
+
+    if api_key.is_empty() {
+        // 空字符串 = 删除该 Key
         if let Some(api_keys) = config.get_mut("apiKeys").and_then(|v| v.as_object_mut()) {
             api_keys.remove(&provider_id);
         }
     } else {
-        // 存入 OS Keychain
-        match super::keychain::store_key(&provider_id, &api_key) {
-            Ok(()) => {
-                // config.json 中只写 "vaulted" 标记
-                if let Some(cfg_obj) = config.as_object_mut() {
-                    if !cfg_obj.contains_key("apiKeys") {
-                        cfg_obj.insert("apiKeys".to_string(), json!({}));
-                    }
-                    if let Some(api_keys) = cfg_obj.get_mut("apiKeys").and_then(|v| v.as_object_mut()) {
-                        api_keys.insert(provider_id.clone(), json!("vaulted"));
-                    }
-                }
-            }
-            Err(e) => {
-                log::warn!("Keychain store failed, falling back to config.json: {}", e);
-                // 降级：直接写入 config.json（保证功能可用）
-                if let Some(cfg_obj) = config.as_object_mut() {
-                    if !cfg_obj.contains_key("apiKeys") {
-                        cfg_obj.insert("apiKeys".to_string(), json!({}));
-                    }
-                    if let Some(api_keys) = cfg_obj.get_mut("apiKeys").and_then(|v| v.as_object_mut()) {
-                        api_keys.insert(provider_id.clone(), json!(api_key));
-                    }
-                }
-            }
-        }
-    }
-
-    // 同步旧的 fallback 字段
-    if let Some(cfg_obj) = config.as_object_mut() {
-        if let Some(current_provider) = cfg_obj.get("provider").and_then(|v| v.as_str()).map(|s| s.to_string()) {
-            if current_provider == provider_id && !api_key.is_empty() {
-                cfg_obj.insert("apiKey".to_string(), json!("vaulted"));
-            }
+        // 直接明文写入 config.json
+        if let Some(api_keys) = config.get_mut("apiKeys").and_then(|v| v.as_object_mut()) {
+            api_keys.insert(provider_id.clone(), json!(api_key));
         }
     }
 
     super::write_config(&config);
+    log::info!("set_api_key: provider={} saved to config.json", provider_id);
     json!({ "ok": true })
 }
 
@@ -182,23 +150,10 @@ pub fn add_custom_model(model_id: String, display_name: String, provider: String
     let mut config = super::read_config();
     let mut custom_models = config.get("customModels").and_then(|v| v.as_array()).cloned().unwrap_or_default();
     
-    // 如果存在同名的，先移除（也清理 keychain）
+    // 如果存在同名的，先移除
     custom_models.retain(|m| m.get("id").and_then(|v| v.as_str()) != Some(&model_id));
-    let _ = super::keychain::delete_custom_model_key(&model_id);
     
-    // 将 API Key 存入 keychain
-    let api_key_marker = if !api_key.is_empty() {
-        match super::keychain::store_custom_model_key(&model_id, &api_key) {
-            Ok(()) => "vaulted".to_string(),
-            Err(e) => {
-                log::warn!("Custom model keychain store failed, falling back: {}", e);
-                api_key.clone() // 降级：直接存明文
-            }
-        }
-    } else {
-        String::new()
-    };
-    
+    // API Key 直接明文存入 config.json
     let model = json!({
         "id": model_id.clone(),
         "modelId": model_id,
@@ -207,7 +162,7 @@ pub fn add_custom_model(model_id: String, display_name: String, provider: String
         "provider": provider.clone(),
         "providerName": provider,
         "baseUrl": base_url,
-        "apiKey": api_key_marker,
+        "apiKey": api_key,
         "vision": true,
         "pricing": { "input": 0.0, "output": 0.0 }
     });
@@ -253,14 +208,10 @@ pub(crate) fn read_llm_config_for_model(model_id: &str) -> (String, String, Stri
             if let Some(url) = model_info.get("baseUrl").and_then(|v| v.as_str()) {
                 custom_base_url = Some(url.to_string());
             }
-            // 自定义模型的 apiKey: 优先从 keychain 读取，降级读 JSON
-            if let Some(key_marker) = model_info.get("apiKey").and_then(|v| v.as_str()) {
-                if key_marker == "vaulted" {
-                    if let Some(mid) = model_info.get("id").and_then(|v| v.as_str()) {
-                        custom_api_key = super::keychain::load_custom_model_key(mid);
-                    }
-                } else if !key_marker.is_empty() {
-                    custom_api_key = Some(key_marker.to_string());
+            // 自定义模型的 apiKey：直接从 config.json 读取明文
+            if let Some(key_str) = model_info.get("apiKey").and_then(|v| v.as_str()) {
+                if !key_str.is_empty() && key_str != "vaulted" {
+                    custom_api_key = Some(key_str.to_string());
                 }
             }
         }

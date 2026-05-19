@@ -2,7 +2,9 @@
   <Transition name="briefing-fade">
     <div v-if="visible" class="morning-briefing">
       <div class="briefing-header">
-        <div class="briefing-icon">☀️</div>
+        <div class="briefing-icon">
+          <Sun :size="18" />
+        </div>
         <div class="briefing-title">{{ t('dream.morning_title') }}</div>
         <button class="briefing-close" @click="dismiss" :title="t('dream.dismiss')">
           <X :size="14" />
@@ -13,7 +15,10 @@
         <div class="briefing-content" v-html="renderedBriefing"></div>
 
         <div v-if="stats.staled > 0 || stats.merged > 0" class="briefing-maintenance">
-          <span class="maintenance-label">🧹 {{ t('dream.maintenance') }}</span>
+          <span class="maintenance-label">
+            <Sparkles :size="12" style="margin-right: 4px;" />
+            {{ t('dream.maintenance') }}
+          </span>
           <span v-if="stats.staled > 0" class="maintenance-item">
             {{ t('dream.archived', { count: stats.staled }) }}
           </span>
@@ -38,7 +43,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { X } from 'lucide-vue-next';
+import { X, Sun, Sparkles } from 'lucide-vue-next';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 
@@ -199,6 +204,8 @@ onUnmounted(() => {
 }
 
 .maintenance-label {
+  display: flex;
+  align-items: center;
   font-size: 11px;
   color: var(--text-tertiary);
 }

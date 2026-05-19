@@ -28,11 +28,12 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": ["nsis"],
     "resources": {
       "../resources/llm-engine/*.exe": "llm-engine",
       "../resources/llm-engine/*.dll": "llm-engine",
       "../resources/llm-engine/*.disabled": "llm-engine",
+      "../skills/**/*": "skills",
       "pdfium.dll": "pdfium.dll"
     },
     "icon": [

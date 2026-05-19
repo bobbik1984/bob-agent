@@ -422,8 +422,101 @@ pub fn run() {
                 outbox::start_reconciler(reconciler_handle).await;
             });
 
-            // ── Keychain 迁移: 明文 API Key → OS 凭据管理器 ──
-            keychain::migrate_plaintext_keys();
+            // ── 清理遗留的 "vaulted" 标记 ──
+            // 架构已从 OS Keychain 迁回 config.json 明文存储。
+            // 旧版本中被标记为 "vaulted" 的 Key 实际上已从 config.json 中丢失，
+            // 这里将其清除，避免前端显示"已配置"但实际无法读取的幽灵状态。
+            {
+                let mut cfg = read_config();
+                let mut changed = false;
+                if let Some(api_keys) = cfg.get_mut("apiKeys").and_then(|v| v.as_object_mut()) {
+                    let to_remove: Vec<String> = api_keys.iter()
+                        .filter(|(_, v)| v.as_str() == Some("vaulted"))
+                        .map(|(k, _)| k.clone())
+                        .collect();
+                    for k in to_remove {
+                        log::info!("Clearing legacy 'vaulted' marker for provider: {}", k);
+                        api_keys.remove(&k);
+                        changed = true;
+                    }
+                }
+                // 清理旧的单一 apiKey 字段中的 vaulted 标记
+                if cfg.get("apiKey").and_then(|v| v.as_str()) == Some("vaulted") {
+                    if let Some(obj) = cfg.as_object_mut() {
+                        obj.insert("apiKey".to_string(), serde_json::json!(""));
+                        changed = true;
+                    }
+                }
+                if changed {
+                    write_config(&cfg);
+                    log::info!("Legacy 'vaulted' markers cleared from config.json");
+                }
+            }
+
+            // ── 内置技能库初始化 ──
+            // 将打包资源中的 skills/ 目录复制到 AppData，确保开箱即用。
+            // 仅在 externalSkillsDir 未配置或路径不存在时执行。
+            {
+                use tauri::Manager;
+                let mut cfg = read_config();
+                let skills_configured = cfg.get("externalSkillsDir")
+                    .and_then(|v| v.as_str())
+                    .map(|s| !s.is_empty() && std::path::Path::new(s).exists())
+                    .unwrap_or(false);
+
+                if !skills_configured {
+                    let dest_skills_dir = get_data_dir().join("skills");
+                    let bundled_skills = app.path().resource_dir()
+                        .map(|r| r.join("skills"));
+
+                    let copied = if let Ok(src) = bundled_skills {
+                        if src.exists() {
+                            fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<u32> {
+                                fs::create_dir_all(dst)?;
+                                let mut count = 0u32;
+                                for entry in fs::read_dir(src)? {
+                                    let entry = entry?;
+                                    let ft = entry.file_type()?;
+                                    let dst_path = dst.join(entry.file_name());
+                                    if ft.is_dir() {
+                                        count += copy_dir_recursive(&entry.path(), &dst_path)?;
+                                    } else {
+                                        fs::copy(entry.path(), &dst_path)?;
+                                        count += 1;
+                                    }
+                                }
+                                Ok(count)
+                            }
+                            match copy_dir_recursive(&src, &dest_skills_dir) {
+                                Ok(n) => {
+                                    log::info!("Skills initialized: {} files copied to {:?}", n, dest_skills_dir);
+                                    true
+                                }
+                                Err(e) => {
+                                    log::warn!("Skills copy failed: {}", e);
+                                    false
+                                }
+                            }
+                        } else {
+                            log::warn!("Bundled skills dir not found at {:?}", src);
+                            false
+                        }
+                    } else {
+                        false
+                    };
+
+                    if copied {
+                        if let Some(obj) = cfg.as_object_mut() {
+                            obj.insert(
+                                "externalSkillsDir".to_string(),
+                                serde_json::json!(dest_skills_dir.to_string_lossy().to_string()),
+                            );
+                        }
+                        write_config(&cfg);
+                        log::info!("externalSkillsDir set to {:?}", dest_skills_dir);
+                    }
+                }
+            }
 
             // ── T-1004: 冷热记忆迁移 (启动时同步执行，极快) ──
             dream::migrate_stale_sessions();

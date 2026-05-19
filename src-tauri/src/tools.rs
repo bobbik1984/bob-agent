@@ -42,9 +42,13 @@ fn resolve_write_path(path: &str, global_file_access: bool) -> Result<PathBuf, S
 
     // 2. 相对路径 — 直接映射到安全目录
     if !p.is_absolute() {
+        let config = super::read_config();
+        
         let target = if path.starts_with("wiki/") || path.starts_with("wiki\\") {
             let rel = &path[5..];
             super::get_wiki_dir().join(rel)
+        } else if let Some(ws) = config.get("workspaceDir").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+            PathBuf::from(ws).join(p)
         } else {
             super::get_data_dir().join(p)
         };
@@ -56,7 +60,16 @@ fn resolve_write_path(path: &str, global_file_access: bool) -> Result<PathBuf, S
         let canon = fs::canonicalize(&target).unwrap_or_else(|_| target.clone());
         let safe_wiki = fs::canonicalize(super::get_wiki_dir()).unwrap_or_else(|_| super::get_wiki_dir());
         let safe_data = fs::canonicalize(super::get_data_dir()).unwrap_or_else(|_| super::get_data_dir());
-        if !canon.starts_with(&safe_wiki) && !canon.starts_with(&safe_data) {
+        let safe_ws = config.get("workspaceDir")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(|s| fs::canonicalize(s).unwrap_or_else(|_| PathBuf::from(s)));
+            
+        let is_safe = canon.starts_with(&safe_wiki) 
+            || canon.starts_with(&safe_data) 
+            || safe_ws.map_or(false, |ws| canon.starts_with(&ws));
+
+        if !is_safe {
             return Err("路径解析后超出安全边界（可能存在符号链接逃逸）".to_string());
         }
 

@@ -792,15 +792,15 @@ async function removeCustomModel(id) {
 
 function getProviderLogo(providerId) {
   const name = (providerId || '').toLowerCase();
-  if (name.includes('deepseek')) return new URL('/logos/deepseek.png', import.meta.url).href;
-  if (name.includes('openai')) return new URL('/logos/openai.png', import.meta.url).href;
-  if (name.includes('qwen') || name.includes('dashscope')) return new URL('/logos/qwen.png', import.meta.url).href;
-  if (name.includes('doubao')) return new URL('/logos/doubao.png', import.meta.url).href;
-  if (name.includes('zhipu')) return new URL('/logos/glm.svg', import.meta.url).href;
-  if (name.includes('kimi')) return new URL('/logos/kimi.png', import.meta.url).href;
-  if (name.includes('minimax')) return new URL('/logos/minimax.png', import.meta.url).href;
-  if (name.includes('gemini') || name.includes('google')) return new URL('/logos/google.png', import.meta.url).href;
-  if (name.includes('claude') || name.includes('anthropic')) return new URL('/logos/claude.png', import.meta.url).href;
+  if (name.includes('deepseek')) return '/logos/deepseek.png';
+  if (name.includes('openai')) return '/logos/openai.png';
+  if (name.includes('qwen') || name.includes('dashscope')) return '/logos/qwen.png';
+  if (name.includes('doubao')) return '/logos/doubao.png';
+  if (name.includes('zhipu')) return '/logos/glm.svg';
+  if (name.includes('kimi')) return '/logos/kimi.png';
+  if (name.includes('minimax')) return '/logos/minimax.png';
+  if (name.includes('gemini') || name.includes('google')) return '/logos/google.png';
+  if (name.includes('claude') || name.includes('anthropic')) return '/logos/claude.png';
   return null;
 }
 
@@ -816,8 +816,8 @@ async function fetchApiKeys() {
 async function fetchToolStatuses() {
   if (window.electronAPI.getToolStatuses) {
     const statuses = await window.electronAPI.getToolStatuses();
-    // 只显示有 requiredCredentials 的工具（其他都是无条件可用的）
-    toolStatuses.value = statuses.filter(t => t.missingCredentials.length > 0 || t.name === 'web_search' || t.name === 'tinyfish_fetch');
+    // 后端返回的 statuses 已经只包含了需要凭证/配置的外部工具（Tavily, TinyFish, Skills 等），直接全量展示即可
+    toolStatuses.value = statuses;
   }
 }
 
@@ -826,10 +826,14 @@ const modelHubRef = ref(null);
 async function saveApiKey(providerId) {
   if (window.electronAPI.setApiKey) {
     const key = apiKeys.value[providerId];
+    if (key === undefined || key === null) return;
+    
     // 空字符串代表删除该 key
     await window.electronAPI.setApiKey(providerId, key);
-    apiKeys.value[providerId] = ''; // clear input after save
-    await fetchApiKeys(); // refresh key status
+    
+    await fetchApiKeys(); // refresh key status first
+    apiKeys.value[providerId] = ''; // clear input after status is refreshed
+    
     await fetchToolStatuses(); // refresh tool activation states
     if (modelHubRef.value) {
       modelHubRef.value.refreshKeyStatus();

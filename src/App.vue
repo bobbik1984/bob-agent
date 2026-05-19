@@ -198,7 +198,7 @@ const isResizing = ref(false);
 // ====== 调试开关：强制显示向导 ======
 // 1 = 正常运行
 // 0 = 强制进入初次设置页面（并且点击完成后不会修改实际的数据库状态，方便反复测试）
-const DEBUG_ONBOARDING = 0;
+const DEBUG_ONBOARDING = 1;
 
 function startResize(e) {
   isResizing.value = true;
