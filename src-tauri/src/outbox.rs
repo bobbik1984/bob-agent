@@ -259,6 +259,15 @@ fn apply_operation(config: &mut Value, op: &Value) {
             let provider = op.get("provider").and_then(|v| v.as_str()).unwrap_or("");
             let value = op.get("value").and_then(|v| v.as_str()).unwrap_or("");
             
+            // 存入 OS Keychain
+            let marker = match super::keychain::store_key(provider, value) {
+                Ok(()) => "vaulted",
+                Err(e) => {
+                    log::warn!("Outbox keychain store failed for {}: {} — falling back to plaintext", provider, e);
+                    value // 降级：直接存明文
+                }
+            };
+
             if let Some(cfg_obj) = config.as_object_mut() {
                 // 确保 apiKeys 对象存在
                 if !cfg_obj.contains_key("apiKeys") {
@@ -268,7 +277,7 @@ fn apply_operation(config: &mut Value, op: &Value) {
                     if value.is_empty() {
                         keys.remove(provider);
                     } else {
-                        keys.insert(provider.to_string(), json!(value));
+                        keys.insert(provider.to_string(), json!(marker));
                     }
                 }
             }

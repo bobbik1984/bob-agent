@@ -13,10 +13,10 @@
         <div v-if="step === 1" class="page">
           <div class="theme-options">
             <button :class="['btn-theme', { active: tempConfig.theme === 'dark' }]" @click="setTheme('dark')">
-              <Moon :size="20" /> 深色
+            <Moon :size="20" /> {{ $t('setup.theme_dark') }}
             </button>
             <button :class="['btn-theme', { active: tempConfig.theme === 'light' }]" @click="setTheme('light')">
-              <Sun :size="20" /> 浅色
+              <Sun :size="20" /> {{ $t('setup.theme_light') }}
             </button>
           </div>
           <div class="color-options">
@@ -36,7 +36,7 @@
         <div v-if="step === 2" class="page page-center">
           <div class="workspace-row">
             <div class="workspace-input" :class="{ filled: tempConfig.workspaceDir }" @click="selectWorkspaceDir">
-              {{ tempConfig.workspaceDir || '设置工作文件夹' }}
+              {{ tempConfig.workspaceDir || $t('setup.workspace_placeholder') }}
             </div>
             <button class="workspace-btn" @click="selectWorkspaceDir">...</button>
           </div>
@@ -45,7 +45,7 @@
         <!-- Page 3: LLM -->
         <div v-if="step === 3" class="page page-center">
           <div class="llm-form">
-            <CustomSelect v-model="tempConfig.provider" :options="providerOptions" placeholder="大模型" />
+            <CustomSelect v-model="tempConfig.provider" :options="providerOptions" :placeholder="$t('setup.provider_placeholder')" />
             <input class="input" type="password" v-model="tempConfig.apiKey" placeholder="API Key" />
           </div>
         </div>
@@ -91,9 +91,12 @@
 
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { Moon, Sun, ChevronLeft, ChevronRight, Loader2, Rocket, Check } from 'lucide-vue-next';
 import CustomSelect from './CustomSelect.vue';
 import { ACCENT_COLORS } from '@/constants/theme.js';
+
+const { t: $t } = useI18n();
 
 const emit = defineEmits(['complete']);
 const step = ref(1);

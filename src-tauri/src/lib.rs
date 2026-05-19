@@ -12,6 +12,7 @@ mod kb_indexer;
 mod db;
 mod http_api;
 mod wechat;
+mod keychain;
 
 use serde_json::{json, Value};
 use std::fs;
@@ -420,6 +421,9 @@ pub fn run() {
             tauri::async_runtime::spawn(async move {
                 outbox::start_reconciler(reconciler_handle).await;
             });
+
+            // ── Keychain 迁移: 明文 API Key → OS 凭据管理器 ──
+            keychain::migrate_plaintext_keys();
 
             // ── T-1004: 冷热记忆迁移 (启动时同步执行，极快) ──
             dream::migrate_stale_sessions();

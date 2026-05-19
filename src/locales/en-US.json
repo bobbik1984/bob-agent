@@ -320,5 +320,11 @@
     "merged": "Merged {count} duplicate topics",
     "continue_chat": "Continue this topic",
     "got_it": "Got it"
+  },
+  "setup": {
+    "theme_dark": "Dark",
+    "theme_light": "Light",
+    "workspace_placeholder": "Set workspace folder",
+    "provider_placeholder": "LLM Provider"
   }
 }

@@ -48,6 +48,18 @@ fn resolve_write_path(path: &str, global_file_access: bool) -> Result<PathBuf, S
         } else {
             super::get_data_dir().join(p)
         };
+
+        // 防御符号链接逃逸：确保解析后的路径仍在安全边界内
+        if let Some(parent) = target.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        let canon = fs::canonicalize(&target).unwrap_or_else(|_| target.clone());
+        let safe_wiki = fs::canonicalize(super::get_wiki_dir()).unwrap_or_else(|_| super::get_wiki_dir());
+        let safe_data = fs::canonicalize(super::get_data_dir()).unwrap_or_else(|_| super::get_data_dir());
+        if !canon.starts_with(&safe_wiki) && !canon.starts_with(&safe_data) {
+            return Err("路径解析后超出安全边界（可能存在符号链接逃逸）".to_string());
+        }
+
         return Ok(target);
     }
 

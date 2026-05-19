@@ -13,23 +13,14 @@
     "lint": "eslint src/ src-tauri/"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.29.0",
     "@tauri-apps/api": "^2.0.1",
     "@tauri-apps/plugin-dialog": "~2.0.0",
-    "cheerio": "^1.2.0",
     "dompurify": "^3.4.2",
-    "dotenv": "^17.4.2",
     "highlight.js": "^11.10.0",
     "lucide-vue-next": "^1.0.0",
-    "mammoth": "^1.12.0",
     "marked": "^14.0.0",
     "marked-highlight": "^2.2.0",
-    "officeparser": "^6.1.1",
-    "openai": "^4.80.0",
-    "pdf-parse": "^1.1.4",
-    "vue-i18n": "^11.4.2",
-    "ws": "^8.20.0",
-    "xlsx": "^0.18.5"
+    "vue-i18n": "^11.4.2"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.0.0-rc.18",
