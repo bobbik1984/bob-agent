@@ -134,3 +134,12 @@ pub async fn wechat_check_login_status(qrcode: String, state: State<'_, Arc<Wech
 
     Ok(data)
 }
+
+#[tauri::command]
+pub async fn wechat_get_current_status() -> Result<Value, String> {
+    let account = super::accounts::resolve_wechat_account(None);
+    match account {
+        Ok(acc) => Ok(json!({ "connected": acc.configured })),
+        Err(_) => Ok(json!({ "connected": false })),
+    }
+}

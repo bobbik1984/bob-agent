@@ -63,7 +63,7 @@ pub fn start_monitor(state: Arc<WechatState>) {
 
     // Spawn the inbound message consumer — routes to per-user serial queues
     let state_clone = state.clone();
-    tokio::spawn(async move {
+    tauri::async_runtime::spawn(async move {
         while let Some(msg) = msg_rx.recv().await {
             let wxid = msg.from_user_id.clone().unwrap_or_default();
             if wxid.is_empty() {
@@ -76,7 +76,7 @@ pub fn start_monitor(state: Arc<WechatState>) {
     // Spawn the long-poll monitor
     let base_url = account.base_url.clone();
     let token = account.token.clone();
-    tokio::spawn(async move {
+    tauri::async_runtime::spawn(async move {
         monitor_weixin_provider(account_id, base_url, token, stop_rx, msg_tx).await;
     });
 
@@ -181,7 +181,12 @@ pub async fn monitor_weixin_provider(
                 }
 
                 if let Some(msgs) = resp.msgs {
+                    if !msgs.is_empty() {
+                        info!("[wechat] getUpdates received {} message(s)", msgs.len());
+                    }
                     for msg in msgs {
+                        let from = msg.from_user_id.as_deref().unwrap_or("unknown");
+                        info!("[wechat] Dispatching message from {}", from);
                         if let Err(e) = message_tx.send(msg) {
                             error!("Failed to send message to processor queue: {}", e);
                         }

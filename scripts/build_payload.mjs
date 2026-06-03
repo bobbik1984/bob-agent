@@ -30,6 +30,12 @@ const TARGETS = [
     dest: 'skills', 
     type: 'dir',
     required: true
+  },
+  {
+    src: path.join(TAURI_DIR, 'resources', 'model_providers.json'),
+    dest: 'model_providers.json',
+    type: 'file',
+    required: true
   }
 ];
 

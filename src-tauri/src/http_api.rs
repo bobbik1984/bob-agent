@@ -276,7 +276,7 @@ async fn handle_chat(
         });
 
         // 调用 LLM（阻塞直到完成）
-        let result = crate::llm::stream_chat(app_clone.clone(), messages).await;
+        let result = crate::llm::stream_chat(app_clone.clone(), messages, Some(conv_id_clone.clone()), req.from_user.clone()).await;
 
         // 取消事件监听
         app_clone.unlisten(listener_id);

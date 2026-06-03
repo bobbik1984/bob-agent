@@ -48,5 +48,13 @@ tauri-plugin-global-shortcut = "2.0.0-rc"
 qrcode = "0.14"
 base64 = "0.22"
 
+# WeChat CDN 媒体上传 — AES-128-ECB 加密 + MD5 哈希
+aes = "0.8"
+md-5 = "0.10"
+rand = "0.8"
+
+# 浏览器增强 — CDP 控制本机 Edge/Chrome
+chromiumoxide = { version = "0.7", features = ["tokio-runtime"], default-features = false }
+
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.52", features = ["Win32_System_JobObjects", "Win32_Foundation", "Win32_System_Threading", "Win32_Security"] }

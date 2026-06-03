@@ -135,9 +135,9 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
       let result;
       console.log('[sendMessage] image_base64 present:', !!userMessage.image_base64, 'apiMessages count:', apiMessages.length);
       if (userMessage.image_base64) {
-        result = await window.electronAPI.sendVision(apiMessages, userMessage.image_base64, globalFileAccess.value, agentMode.value);
+        result = await window.electronAPI.sendVision(apiMessages, userMessage.image_base64, globalFileAccess.value, agentMode.value, props.conversationId);
       } else {
-        result = await window.electronAPI.sendChat(apiMessages, globalFileAccess.value, agentMode.value);
+        result = await window.electronAPI.sendChat(apiMessages, globalFileAccess.value, agentMode.value, props.conversationId);
       }
       console.log('[sendMessage] result:', JSON.stringify(result).slice(0, 300));
 
@@ -219,6 +219,10 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
 
   // ── 流式块处理 ─────────────────────────────────────
   function handleStreamChunk(chunk) {
+    // 跨会话隔离：忽略不属于当前对话的 chunk（WeChat 等远程通道产生的流）
+    if (chunk.conv_id && props.conversationId && chunk.conv_id !== props.conversationId) {
+      return;
+    }
     if (chunk.type === 'clear') {
       streamContent.value = '';
       return;
@@ -241,6 +245,21 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
               tool._expanded = true;
             }
           } catch (e) { /* 解析失败则显示原始文本 */ }
+        }
+        // 浏览器增强发现式 UX: browse_page 返回 action_required 时弹出确认卡片
+        if (chunk.name === 'browse_page' && chunk.result) {
+          try {
+            const parsed = JSON.parse(chunk.result);
+            if (parsed.action_required === 'browser_enable') {
+              tool._browserEnable = {
+                url: parsed.original_url || '',
+                browserPath: parsed.browser_path || '',
+                browserDetected: !!parsed.browser_detected,
+              };
+              tool._expanded = true;
+              tool.result = parsed.message || '需要启用浏览器增强';
+            }
+          } catch (e) { /* 非 JSON 则正常展示 */ }
         }
       }
     }

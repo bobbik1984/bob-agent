@@ -18,7 +18,7 @@ fn random_wechat_uin() -> String {
 
 pub fn build_base_info() -> BaseInfo {
     BaseInfo {
-        channel_version: Some("0.2.0".to_string()),
+        channel_version: Some("2.4.3".to_string()),
         bot_agent: Some("Bob-Agent (Rust)".to_string()),
     }
 }
@@ -55,8 +55,8 @@ impl WechatApi {
         }
 
         // Common headers
-        headers.insert("iLink-App-Id", header::HeaderValue::from_static(""));
-        headers.insert("iLink-App-ClientVersion", header::HeaderValue::from_static("0"));
+        headers.insert("iLink-App-Id", header::HeaderValue::from_static("bot"));
+        headers.insert("iLink-App-ClientVersion", header::HeaderValue::from_static("132099"));
 
         if let Some(token) = &self.token {
             let auth = format!("Bearer {}", token.trim());
@@ -132,7 +132,37 @@ impl WechatApi {
     pub async fn send_message(&self, mut req: SendMessageReq, timeout_ms: u64) -> Result<SendMessageResp, String> {
         let timeout = Duration::from_millis(timeout_ms);
         req.base_info = Some(build_base_info());
-        self.post("ilink/bot/sendmessage", &req, timeout).await
+
+        let mut url = self.base_url.clone();
+        if !url.ends_with('/') {
+            url.push('/');
+        }
+        url.push_str("ilink/bot/sendmessage");
+
+        let headers = self.build_headers();
+        let body_json = serde_json::to_string(&req).unwrap_or_default();
+
+        log::info!("[wechat-api] sendmessage POST {} body: {}", url, body_json);
+
+        let res = self.client
+            .post(&url)
+            .headers(headers)
+            .timeout(timeout)
+            .body(body_json)
+            .send()
+            .await
+            .map_err(|e| format!("Request failed: {}", e))?;
+
+        let status = res.status();
+        let text = res.text().await.unwrap_or_default();
+
+        log::info!("[wechat-api] sendmessage response: status={} body={}", status, text);
+
+        if !status.is_success() {
+            return Err(format!("HTTP {}: {}", status, text));
+        }
+
+        serde_json::from_str::<SendMessageResp>(&text).map_err(|e| format!("JSON parse error: {}", e))
     }
 
     pub async fn get_config(&self, mut req: GetConfigReq, timeout_ms: u64) -> Result<GetConfigResp, String> {
@@ -158,4 +188,12 @@ impl WechatApi {
         let req = NotifyStopReq { base_info: Some(build_base_info()) };
         self.post("ilink/bot/msg/notifystop", &req, timeout).await
     }
+
+    /// 获取 CDN 上传预签名 URL (用于文件/图片/视频上传)
+    pub async fn get_upload_url(&self, mut req: GetUploadUrlReq, timeout_ms: u64) -> Result<GetUploadUrlResp, String> {
+        let timeout = Duration::from_millis(timeout_ms);
+        req.base_info = Some(build_base_info());
+        self.post("ilink/bot/getuploadurl", &req, timeout).await
+    }
 }
+

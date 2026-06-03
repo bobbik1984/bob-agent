@@ -1,18 +1,49 @@
 use std::sync::Arc;
 use serde_json::json;
 use rusqlite::{params, Connection};
+use tauri::Emitter;
+use base64::Engine as _;
 
-use super::types::{WeixinMessage, SendMessageReq, MessageItem, TextItem};
+use super::types::*;
 use super::accounts::resolve_wechat_account;
 use super::WechatState;
 use super::api::WechatApi;
+use super::cdn;
 
-const HELP_TEXT: &str = "可用指令：\n/chat  — 列出最近会话，回复序号切换\n/new   — 开启全新会话\n/status — 查看当前会话 ID\n/help  — 显示此帮助\n\n直接发送文字即可与 Bob 对话 🤖";
+const HELP_TEXT: &str = "可用指令：\n/sessions — 列出最近会话，回复序号切换\n/new      — 开启全新会话\n/status   — 查看当前会话 ID\n/help     — 显示此帮助\n\n直接发送文字即可与 Bob 对话 🤖";
 
 // Helper to open DB
 fn open_db() -> Option<Connection> {
     let db_path = crate::get_data_dir().join("bob.db");
     Connection::open(db_path).ok()
+}
+
+/// 将 ms 时间戳转为人类友好的相对时间
+fn format_relative_time(timestamp_ms: i64) -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let now_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64;
+    let diff_secs = (now_ms - timestamp_ms) / 1000;
+
+    if diff_secs < 60 {
+        "刚刚".to_string()
+    } else if diff_secs < 3600 {
+        format!("{}分钟前", diff_secs / 60)
+    } else if diff_secs < 86400 {
+        format!("{}小时前", diff_secs / 3600)
+    } else if diff_secs < 172800 {
+        "昨天".to_string()
+    } else if diff_secs < 604800 {
+        format!("{}天前", diff_secs / 86400)
+    } else {
+        // 超过一周显示日期
+        let secs = (timestamp_ms / 1000) as u64;
+        let dt = UNIX_EPOCH + std::time::Duration::from_secs(secs);
+        let datetime: chrono::DateTime<chrono::Local> = dt.into();
+        datetime.format("%m月%d日").to_string()
+    }
 }
 
 async fn handle_message(
@@ -35,13 +66,13 @@ async fn handle_message(
     if text == "/status" {
         if let Some(conv_id) = state.session_mgr.get_conv_id(wxid) {
             let short = if conv_id.len() > 8 { &conv_id[..8] } else { &conv_id };
-            return format!("当前会话：{}…（发送 /chat 可切换）", short);
+            return format!("当前会话：{}…（发送 /sessions 可切换）", short);
         } else {
             return "当前无活跃会话（下条消息将自动新建）".to_string();
         }
     }
 
-    if text == "/chat" || text == "/list" {
+    if text == "/sessions" || text == "/chat" || text == "/list" {
         let conn = match open_db() {
             Some(c) => c,
             None => return "❌ 数据库连接失败".to_string(),
@@ -69,10 +100,12 @@ async fn handle_message(
             return "暂无历史会话，直接发消息开始吧 💬".to_string();
         }
         state.session_mgr.set_selecting(wxid, list.clone());
-        let mut reply = "请回复序号切换会话（60 秒内有效）：\n".to_string();
+        let mut reply = "📋 请回复序号切换会话（60 秒内有效）：\n".to_string();
         for (i, c) in list.iter().enumerate() {
             let title = if c.title.is_empty() { "未命名对话" } else { &c.title };
-            reply.push_str(&format!("[{}] {}\n", i + 1, title));
+            // 将 ms 时间戳转为人类可读的相对时间
+            let time_label = format_relative_time(c.updated_at);
+            reply.push_str(&format!("[{}] {} ({}）\n", i + 1, title, time_label));
         }
         reply.push_str("[0] 开启全新会话");
         return reply;
@@ -92,7 +125,7 @@ async fn handle_message(
                     let title = if target.title.is_empty() { "未命名对话" } else { &target.title };
                     return format!("✅ 已切换至「{}」，继续上下文吧。", title);
                 } else {
-                    return format!("❌ 序号无效，请回复 1-{} 之间的数字，或发送 /chat 重新列出。", list.len());
+                    return format!("❌ 序号无效，请回复 1-{} 之间的数字，或发送 /sessions 重新列出。", list.len());
                 }
             }
         } else {
@@ -176,7 +209,7 @@ async fn handle_message(
     // Call LLM
     // We will need to send typing heartbeats while waiting. 
     // For now we just call it.
-    let result = crate::llm::stream_chat(app_handle.clone(), messages).await;
+    let result = crate::llm::stream_chat(app_handle.clone(), messages, Some(conversation_id.clone()), Some(wxid.to_string())).await;
     
     let mut full_text = String::new();
     if let Some(content) = result.get("content").and_then(|v| v.as_str()) {
@@ -196,6 +229,12 @@ async fn handle_message(
         "INSERT INTO messages (conversation_id, role, content, created_at) VALUES (?1, ?2, ?3, ?4)",
         params![conversation_id, "assistant", full_text, ts2],
     );
+
+    // 通知桌面前端：有新的远程消息到达，刷新侧边栏和当前对话
+    let _ = app_handle.emit("remote:new-message", serde_json::json!({
+        "conversation_id": &conversation_id,
+        "from_channel": "wechat",
+    }));
 
     if full_text.chars().count() > 3800 {
         let truncated: String = full_text.chars().take(3800).collect();
@@ -239,8 +278,12 @@ pub async fn process_message(msg: WeixinMessage, state: Arc<WechatState>) -> Res
         return Ok(());
     }
 
+    log::info!("[wechat] process_message: from={} text=\"{}\"", from_user_id, text.chars().take(30).collect::<String>());
+
     let reply = handle_message(&from_user_id, &text, state.clone(), msg.context_token.clone()).await;
+    log::info!("[wechat] process_message: reply ready ({} chars), sending...", reply.chars().count());
     send_reply(&from_user_id, &reply, &state, msg.context_token).await?;
+    log::info!("[wechat] process_message: reply sent to {}", from_user_id);
 
     Ok(())
 }
@@ -258,17 +301,17 @@ async fn send_reply(to: &str, text: &str, state: &Arc<WechatState>, context_toke
     let reply_msg = WeixinMessage {
         seq: None,
         message_id: None,
-        from_user_id: None,
+        from_user_id: Some(String::new()),  // must be empty string, not None
         to_user_id: Some(to.to_string()),
-        client_id: None,
+        client_id: Some(format!("bob-{}", crate::now_ms())),  // unique client ID required
         create_time_ms: None,
         update_time_ms: None,
         delete_time_ms: None,
         session_id: None,
         group_id: None,
-        message_type: None,
-        message_state: None,
-        item_list: Some(vec![MessageItem {
+        message_type: Some(2),   // MESSAGE_TYPE_BOT = 2
+        message_state: Some(2),  // MESSAGE_STATE_FINISH = 2
+        item_list: if text.is_empty() { None } else { Some(vec![MessageItem {
             r#type: Some(1),
             create_time_ms: None,
             update_time_ms: None,
@@ -282,7 +325,7 @@ async fn send_reply(to: &str, text: &str, state: &Arc<WechatState>, context_toke
             voice_item: None,
             file_item: None,
             video_item: None,
-        }]),
+        }]) },
         context_token,
     };
 
@@ -291,5 +334,189 @@ async fn send_reply(to: &str, text: &str, state: &Arc<WechatState>, context_toke
         base_info: None,
     };
 
-    api.send_message(req, 15_000).await.map(|_| ()).map_err(|e| format!("send_message error: {}", e))
+    match api.send_message(req, 15_000).await {
+        Ok(resp) => {
+            let ret = resp.ret.unwrap_or(0);
+            let errmsg = resp.errmsg.as_deref().unwrap_or("");
+            if ret != 0 {
+                log::warn!("[wechat] sendmessage to {} returned ret={} errmsg={}", to, ret, errmsg);
+            } else {
+                log::info!("[wechat] sendmessage to {} OK (ret={})", to, ret);
+            }
+            Ok(())
+        }
+        Err(e) => {
+            log::error!("[wechat] sendmessage to {} failed: {}", to, e);
+            Err(format!("send_message error: {}", e))
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════
+// 媒体发送：图片 / 文件
+// ═══════════════════════════════════════════════════════════
+
+/// 发送媒体消息 (图片或文件) 到微信用户
+/// 
+/// 流程：上传到 CDN → 构造 ImageItem/FileItem → sendmessage API
+/// 
+/// 由 LLM tool `send_wechat_file` 和未来的 Tauri command 调用。
+pub async fn send_wechat_file(
+    wxid: &str,
+    file_path: &str,
+    caption: Option<&str>,
+) -> Result<String, String> {
+    // 1. 解析账户信息
+    let account = match resolve_wechat_account(None) {
+        Ok(acc) if acc.configured => acc,
+        Ok(_) => return Err("微信账户未配置 (无 token)，请先在设置中绑定微信 Bot".to_string()),
+        Err(e) => return Err(format!("微信账户解析失败: {}", e)),
+    };
+
+    let api = WechatApi::new(account.base_url, account.token);
+
+    // 2. 判断媒体类型
+    let is_image = cdn::is_image_file(file_path);
+    let media_type = if is_image {
+        UPLOAD_MEDIA_TYPE_IMAGE
+    } else {
+        UPLOAD_MEDIA_TYPE_FILE
+    };
+
+    let type_label = if is_image { "图片" } else { "文件" };
+    log::info!("[wechat] send_wechat_file: to={} path={} type={}", wxid, file_path, type_label);
+
+    // 3. 上传到 CDN
+    let uploaded = cdn::upload_media(&api, file_path, wxid, media_type).await?;
+    log::info!(
+        "[wechat] CDN upload done: filekey={} size={} ciphertext_size={}",
+        uploaded.filekey, uploaded.file_size, uploaded.file_size_ciphertext
+    );
+
+    // 4. 构造 CdnMedia (共用)
+    let cdn_media = CdnMedia {
+        encrypt_query_param: Some(uploaded.download_encrypted_query_param.clone()),
+        aes_key: Some(base64::engine::general_purpose::STANDARD.encode(uploaded.aeskey_hex.as_bytes())),
+        encrypt_type: Some(1),
+        full_url: None,
+    };
+
+    // 5. 构造 MessageItem
+    let media_item = if is_image {
+        MessageItem {
+            r#type: Some(MESSAGE_ITEM_TYPE_IMAGE),
+            create_time_ms: None,
+            update_time_ms: None,
+            is_completed: None,
+            msg_id: None,
+            ref_msg: None,
+            text_item: None,
+            image_item: Some(ImageItem {
+                media: Some(cdn_media),
+                thumb_media: None,
+                aeskey: None,
+                url: None,
+                mid_size: Some(uploaded.file_size_ciphertext as i32),
+                thumb_size: None,
+                thumb_height: None,
+                thumb_width: None,
+                hd_size: None,
+            }),
+            voice_item: None,
+            file_item: None,
+            video_item: None,
+        }
+    } else {
+        // 文件（含视频）
+        let file_name = std::path::Path::new(file_path)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("file")
+            .to_string();
+
+        MessageItem {
+            r#type: Some(MESSAGE_ITEM_TYPE_FILE),
+            create_time_ms: None,
+            update_time_ms: None,
+            is_completed: None,
+            msg_id: None,
+            ref_msg: None,
+            text_item: None,
+            image_item: None,
+            voice_item: None,
+            file_item: Some(FileItem {
+                media: Some(cdn_media),
+                file_name: Some(file_name),
+                md5: None,
+                len: Some(uploaded.file_size.to_string()),
+            }),
+            video_item: None,
+        }
+    };
+
+    // 6. 发送：先发 caption (如有)，再发媒体
+    let mut items_to_send: Vec<MessageItem> = Vec::new();
+
+    if let Some(text) = caption {
+        if !text.trim().is_empty() {
+            items_to_send.push(MessageItem {
+                r#type: Some(MESSAGE_ITEM_TYPE_TEXT),
+                create_time_ms: None,
+                update_time_ms: None,
+                is_completed: None,
+                msg_id: None,
+                ref_msg: None,
+                text_item: Some(TextItem {
+                    text: Some(text.to_string()),
+                }),
+                image_item: None,
+                voice_item: None,
+                file_item: None,
+                video_item: None,
+            });
+        }
+    }
+    items_to_send.push(media_item);
+
+    // 每个 item 单独发一条消息（与 Node.js 参考实现一致）
+    for item in items_to_send {
+        let msg = WeixinMessage {
+            seq: None,
+            message_id: None,
+            from_user_id: Some(String::new()),
+            to_user_id: Some(wxid.to_string()),
+            client_id: Some(format!("bob-media-{}", crate::now_ms())),
+            create_time_ms: None,
+            update_time_ms: None,
+            delete_time_ms: None,
+            session_id: None,
+            group_id: None,
+            message_type: Some(MESSAGE_TYPE_BOT),
+            message_state: Some(MESSAGE_STATE_FINISH),
+            item_list: Some(vec![item]),
+            context_token: None,
+        };
+
+        let req = SendMessageReq {
+            msg: Some(msg),
+            base_info: None,
+        };
+
+        api.send_message(req, 15_000).await
+            .map_err(|e| format!("发送{}消息失败: {}", type_label, e))?;
+    }
+
+    let file_name = std::path::Path::new(file_path)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("file");
+
+    let result_msg = format!("✅ 已成功发送{} \"{}\" ({}KB) 到微信用户 {}",
+        type_label,
+        file_name,
+        uploaded.file_size / 1024,
+        wxid,
+    );
+    log::info!("[wechat] {}", result_msg);
+    Ok(result_msg)
 }

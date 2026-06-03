@@ -44,6 +44,37 @@
             {{ p.name }} ({{ p.count }}) {{ (!apiKeys[p.id] && p.id !== 'offline') ? '(未配置密钥)' : '' }}
           </option>
         </select>
+        <button
+          v-if="currentProviderSupportsRefresh"
+          class="btn-icon refresh-provider-btn"
+          @click.stop="refreshProvider"
+          :disabled="isRefreshing"
+          :title="'刷新 ' + activeProvider + ' 的模型列表'"
+        >
+          <RefreshCw :size="13" :class="{ 'animate-spin': isRefreshing }" />
+          <span class="refresh-label">{{ isRefreshing ? '刷新中...' : '刷新模型' }}</span>
+        </button>
+      </div>
+      <!-- 供应商变体切换 -->
+      <div class="variant-bar" v-if="currentProviderVariants">
+        <template v-if="activeProvider === 'zhipu'">
+          <span class="variant-label">计费方案</span>
+          <label class="variant-option" :class="{ active: !providerVariant || providerVariant === 'default' }">
+            <input type="radio" v-model="providerVariant" value="default" @change="saveVariant" /> Token Plan
+          </label>
+          <label class="variant-option" :class="{ active: providerVariant === 'coding' }">
+            <input type="radio" v-model="providerVariant" value="coding" @change="saveVariant" /> Coding Plan
+          </label>
+        </template>
+        <template v-else>
+          <span class="variant-label">区域</span>
+          <label class="variant-option" :class="{ active: !providerVariant || providerVariant === 'default' }">
+            <input type="radio" v-model="providerVariant" value="default" @change="saveVariant" /> 国内
+          </label>
+          <label class="variant-option" :class="{ active: providerVariant === 'international' }">
+            <input type="radio" v-model="providerVariant" value="international" @change="saveVariant" /> 海外
+          </label>
+        </template>
       </div>
       <div class="model-list">
         <div
@@ -76,7 +107,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, watch } from 'vue';
 import { Cpu, RefreshCw, Monitor, Tractor } from 'lucide-vue-next';
 import { useI18n } from 'vue-i18n';
 
@@ -90,6 +121,27 @@ const activeClerk = ref('');
 const activeProvider = ref('');
 const expandedRole = ref(null);
 const isScanning = ref(false);
+const isRefreshing = ref(false);
+const providerVariant = ref('default');
+const registry = ref({ providers: [] });
+
+async function loadRegistry() {
+  try {
+    registry.value = await window.electronAPI.invoke('llm_get_registry');
+  } catch (e) {
+    console.error('Failed to load model registry in ModelHub:', e);
+  }
+}
+
+const currentProviderSupportsRefresh = computed(() => {
+  const p = registry.value.providers?.find(prov => prov.id === activeProvider.value);
+  return p ? (p.supports_model_list && !!apiKeys.value[activeProvider.value]) : false;
+});
+
+const currentProviderVariants = computed(() => {
+  const p = registry.value.providers?.find(prov => prov.id === activeProvider.value);
+  return p ? (!!p.base_url_variants && Object.keys(p.base_url_variants).length > 0) : false;
+});
 
 const groupedModels = computed(() => {
   const groups = {};
@@ -149,6 +201,7 @@ async function assign(modelId, role) {
 async function rescan() {
   isScanning.value = true;
   try {
+    await loadRegistry();
     await window.electronAPI.rescanModels();
     pool.value = await window.electronAPI.getModelPool();
     if (providerList.value.length > 0 && !activeProvider.value) {
@@ -157,6 +210,38 @@ async function rescan() {
   } finally {
     isScanning.value = false;
   }
+}
+
+async function refreshProvider() {
+  if (!activeProvider.value) return;
+  isRefreshing.value = true;
+  try {
+    const result = await window.electronAPI.refreshModels(activeProvider.value);
+    if (result?.ok) {
+      // 刷新成功，重新加载模型池
+      pool.value = await window.electronAPI.getModelPool();
+    } else if (result?.error) {
+      console.warn('刷新模型失败:', result.error);
+    }
+  } catch (e) {
+    console.error('refreshProvider error:', e);
+  } finally {
+    isRefreshing.value = false;
+  }
+}
+
+async function saveVariant() {
+  const key = `providerVariant_${activeProvider.value}`;
+  await window.electronAPI.setConfig(key, providerVariant.value);
+}
+
+async function loadVariant() {
+  const p = registry.value.providers?.find(prov => prov.id === activeProvider.value);
+  const hasVariants = p ? (!!p.base_url_variants && Object.keys(p.base_url_variants).length > 0) : false;
+  if (!hasVariants) return;
+  const key = `providerVariant_${activeProvider.value}`;
+  const val = await window.electronAPI.getConfig(key);
+  providerVariant.value = val || 'default';
 }
 
 const apiKeys = ref({});
@@ -169,10 +254,15 @@ async function refreshKeyStatus() {
 
 // Expose so SettingsView can call it if needed, though they already communicate via emit
 defineExpose({
-  refreshKeyStatus
+  refreshKeyStatus,
+  rescan
 });
 
+// 监听 activeProvider 变化以加载 variant
+watch(() => activeProvider.value, () => { loadVariant(); });
+
 onMounted(async () => {
+  await loadRegistry();
   pool.value = await window.electronAPI.getModelPool();
   const active = await window.electronAPI.getActiveModels();
   activeMain.value = active?.main || '';
@@ -184,6 +274,7 @@ onMounted(async () => {
     const mainEntry = getModelEntry(activeMain.value);
     activeProvider.value = mainEntry ? mainEntry.provider : providerList.value[0].id;
   }
+  await loadVariant();
 });
 </script>
 
@@ -417,4 +508,55 @@ onMounted(async () => {
   to { transform: rotate(360deg); }
 }
 .animate-spin { animation: spin 1s linear infinite; }
+
+/* ── Provider Refresh Button ─────────────────── */
+.refresh-provider-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 8px;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  transition: color 0.2s;
+  cursor: pointer;
+  background: none;
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-sm);
+  padding: 3px 8px;
+}
+.refresh-provider-btn:hover { color: var(--accent-primary); border-color: var(--accent-primary); }
+.refresh-provider-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.refresh-label { white-space: nowrap; }
+
+/* ── Variant Toggle Bar ──────────────────────── */
+.variant-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 6px 12px;
+  background: color-mix(in srgb, var(--accent-primary) 5%, var(--bg-tertiary));
+  border-bottom: 1px solid var(--border-primary);
+  font-size: var(--text-xs);
+}
+.variant-label {
+  color: var(--text-tertiary);
+  margin-right: 4px;
+  font-weight: 500;
+}
+.variant-option {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  color: var(--text-secondary);
+  transition: all 0.15s;
+}
+.variant-option:hover { color: var(--text-primary); }
+.variant-option.active {
+  background: var(--accent-primary);
+  color: #fff;
+}
+.variant-option input[type="radio"] { display: none; }
 </style>

@@ -187,7 +187,7 @@ pub fn db_messages(conversation_id: String, db: State<DbState>) -> Vec<Value> {
         Err(_) => return vec![],
     };
     let mut stmt = match conn.prepare(
-        "SELECT id, role, content, image_base64, created_at
+        "SELECT id, role, content, image_base64, created_at, from_channel
          FROM messages WHERE conversation_id = ?1 ORDER BY created_at ASC"
     ) {
         Ok(s) => s,
@@ -201,6 +201,7 @@ pub fn db_messages(conversation_id: String, db: State<DbState>) -> Vec<Value> {
             "content": row.get::<_, String>(2)?,
             "image_base64": row.get::<_, Option<String>>(3).unwrap_or(None),
             "created_at": row.get::<_, i64>(4)?,
+            "from_channel": row.get::<_, Option<String>>(5).unwrap_or(None),
         }))
     }) {
         Ok(r) => r,

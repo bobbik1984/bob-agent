@@ -174,6 +174,109 @@
         </div>
       </details>
 
+      <!-- 模型供应商注册表编辑器 (Registry Editor) -->
+      <details class="settings-section card custom-model-override">
+        <summary class="section-title" style="cursor: pointer; display: flex; align-items: center; justify-content: space-between; margin-bottom: 0;">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <Database :size="16" class="section-icon" style="opacity: 0.6;" />
+            {{ $t('settings.registry_title') }}
+          </div>
+          <ChevronDown :size="16" class="details-chevron" />
+        </summary>
+        <p class="section-desc" style="margin-top: 16px; margin-bottom: 16px;">{{ $t('settings.registry_desc') }}</p>
+
+        <div v-if="registryData && registryData.providers" style="display: flex; flex-direction: column; gap: 12px;">
+          <!-- 每个供应商 -->
+          <div v-for="(provider, pIdx) in registryData.providers" :key="provider.id"
+            style="border: 1px solid var(--border-subtle); border-radius: 8px; overflow: hidden;">
+            <!-- 供应商标题栏 -->
+            <div style="display: flex; align-items: center; gap: 8px; padding: 10px 14px; background: var(--bg-tertiary); cursor: pointer;"
+              @click="toggleProviderExpand(provider.id)">
+              <img v-if="getProviderLogo(provider.id)" :src="getProviderLogo(provider.id)" style="width: 16px; height: 16px; object-fit: contain; border-radius: 2px;" />
+              <span style="font-weight: 600; flex: 1;">{{ provider.name }}</span>
+              <span style="font-size: 0.78em; color: var(--text-tertiary); margin-right: 4px;">{{ provider.id }}</span>
+              <span style="font-size: 0.78em; color: var(--text-tertiary);">{{ (provider.models || []).length }} models</span>
+              <ChevronDown :size="14" :style="{ transform: expandedProviders[provider.id] ? 'rotate(180deg)' : 'rotate(0)', transition: 'transform 0.2s' }" />
+            </div>
+
+            <!-- 供应商详情（展开时显示） -->
+            <div v-if="expandedProviders[provider.id]" style="padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; border-top: 1px solid var(--border-subtle);">
+              <!-- 供应商名称 + Base URL -->
+              <div style="display: grid; grid-template-columns: 1fr 2fr; gap: 8px; align-items: center;">
+                <label style="font-size: 0.82em; color: var(--text-secondary);">{{ $t('settings.registry_provider_name') }}</label>
+                <input v-model="provider.name" class="input" @input="markRegistryDirty" style="font-size: 0.85em; padding: 4px 8px;" />
+              </div>
+              <div style="display: grid; grid-template-columns: 1fr 2fr; gap: 8px; align-items: center;">
+                <label style="font-size: 0.82em; color: var(--text-secondary);">{{ $t('settings.registry_base_url') }}</label>
+                <input v-model="provider.base_url" class="input" @input="markRegistryDirty" style="font-size: 0.85em; padding: 4px 8px;" />
+              </div>
+              <div style="display: grid; grid-template-columns: 1fr 2fr; gap: 8px; align-items: center;">
+                <label style="font-size: 0.82em; color: var(--text-secondary);">{{ $t('settings.registry_auto_discover') }}</label>
+                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                  <input type="checkbox" v-model="provider.supports_model_list" @change="markRegistryDirty" />
+                  <span style="font-size: 0.82em; color: var(--text-tertiary);">/v1/models</span>
+                </label>
+              </div>
+
+              <!-- 模型列表 -->
+              <div style="margin-top: 4px;">
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
+                  <span style="font-size: 0.82em; font-weight: 600; color: var(--text-secondary);">{{ $t('settings.registry_models') }}</span>
+                  <button class="btn btn-primary" @click="addModelToProvider(provider)" style="padding: 2px 8px; font-size: 0.78em;">
+                    <Plus :size="12" /> {{ $t('settings.registry_add_model') }}
+                  </button>
+                </div>
+                <div v-for="(model, mIdx) in (provider.models || [])" :key="mIdx"
+                  style="display: flex; gap: 6px; align-items: center; margin-bottom: 4px;">
+                  <input v-model="model.id" class="input" :placeholder="$t('settings.registry_model_id')" @input="markRegistryDirty" style="flex: 2; font-size: 0.82em; padding: 3px 6px;" />
+                  <input v-model="model.name" class="input" :placeholder="$t('settings.registry_model_name')" @input="markRegistryDirty" style="flex: 2; font-size: 0.82em; padding: 3px 6px;" />
+                  <label style="display: flex; align-items: center; gap: 3px; font-size: 0.78em; color: var(--text-tertiary); white-space: nowrap; cursor: pointer;">
+                    <input type="checkbox" v-model="model.vision" @change="markRegistryDirty" /> 👁
+                  </label>
+                  <button class="btn-icon" style="color: var(--status-error); width: 22px; height: 22px; flex-shrink: 0;" @click="removeModelFromProvider(provider, mIdx)" :title="$t('settings.registry_remove_model')">
+                    <X :size="12" />
+                  </button>
+                </div>
+                <div v-if="!provider.models || provider.models.length === 0" style="font-size: 0.8em; color: var(--text-tertiary); padding: 4px 0;">
+                  —
+                </div>
+              </div>
+
+              <!-- 删除供应商 -->
+              <div style="display: flex; justify-content: flex-end; padding-top: 6px; border-top: 1px solid var(--border-subtle);">
+                <button class="btn" style="padding: 3px 10px; font-size: 0.78em; color: var(--status-error); border: 1px solid color-mix(in srgb, var(--status-error) 30%, transparent);" @click="removeProvider(pIdx)">
+                  <Trash2 :size="12" /> {{ $t('settings.registry_remove_provider') }}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 添加新供应商 -->
+          <div style="border: 1px dashed var(--border-subtle); border-radius: 8px; padding: 10px 14px;">
+            <span style="font-size: 0.82em; font-weight: 600; color: var(--text-secondary); margin-bottom: 8px; display: block;">{{ $t('settings.registry_add_provider') }}</span>
+            <div style="display: grid; grid-template-columns: 1fr 1fr 2fr; gap: 8px;">
+              <input v-model="newProviderForm.id" class="input" :placeholder="$t('settings.registry_new_provider_id')" style="font-size: 0.82em; padding: 4px 8px;" />
+              <input v-model="newProviderForm.name" class="input" :placeholder="$t('settings.registry_new_provider_name')" style="font-size: 0.82em; padding: 4px 8px;" />
+              <div style="display: flex; gap: 6px;">
+                <input v-model="newProviderForm.base_url" class="input" :placeholder="$t('settings.registry_new_provider_url')" style="flex: 1; font-size: 0.82em; padding: 4px 8px;" />
+                <button class="btn btn-primary" @click="addNewProvider" :disabled="!newProviderForm.id || !newProviderForm.name || !newProviderForm.base_url" style="padding: 4px 10px; font-size: 0.82em; white-space: nowrap;">
+                  <Plus :size="12" /> {{ $t('settings.registry_add_provider') }}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 保存 / 重置 -->
+          <div style="display: flex; gap: 8px; align-items: center; justify-content: flex-end; padding-top: 8px;">
+            <span v-if="registrySaveMsg" style="font-size: 0.82em; color: var(--accent-primary); display: flex; align-items: center; gap: 4px;">
+              <Check :size="14" /> {{ registrySaveMsg }}
+            </span>
+            <button class="btn" @click="resetRegistry" style="padding: 4px 12px; font-size: 0.85em;">{{ $t('settings.registry_reset') }}</button>
+            <button class="btn btn-primary" @click="saveRegistry" :disabled="!registryDirty" style="padding: 4px 12px; font-size: 0.85em;">{{ $t('settings.registry_save') }}</button>
+          </div>
+        </div>
+      </details>
+
       <!-- 外观 -->
       <section class="settings-section card">
         <h3 class="section-title">
@@ -485,12 +588,31 @@
         </div>
       </div>
     </Transition>
+
+    <!-- 使用文档弹窗 -->
+    <Transition name="briefing-fade">
+      <div v-if="showHelpModal" class="wechat-modal-overlay" @click.self="showHelpModal = false">
+        <div class="help-modal">
+          <div class="briefing-header">
+            <div class="briefing-icon"><BookOpen :size="18" /></div>
+            <div class="briefing-title" style="flex: 1; font-size: 14px; font-weight: 600; color: var(--text-primary);">{{ $t('settings.open_docs') }}</div>
+            <button class="briefing-close" @click="showHelpModal = false" style="background: none; border: none; color: var(--text-tertiary); cursor: pointer; padding: 4px; border-radius: 4px; display: flex; align-items: center; justify-content: center;">
+              <X :size="14" />
+            </button>
+          </div>
+          <div class="help-body" v-html="renderedGuide"></div>
+        </div>
+      </div>
+    </Transition>
   </div>
 </template>
 
 <script setup>
+import { marked } from 'marked';
+import DOMPurify from 'dompurify';
+
 import { ref, computed, onMounted } from 'vue';
-import { Settings as SettingsIcon, Monitor, Tractor, Eye, EyeOff, Plug, Loader2, Palette, Info, FolderOpen, FolderHeart, Puzzle, Layers, X, Plus, Unplug, Globe, HardDrive, Trash2, Key, FileText, Server, ChevronDown, BookOpen, MessageSquare, Check } from 'lucide-vue-next';
+import { Settings as SettingsIcon, Monitor, Tractor, Eye, EyeOff, Plug, Loader2, Palette, Info, FolderOpen, FolderHeart, Puzzle, Layers, X, Plus, Unplug, Globe, HardDrive, Trash2, Key, FileText, Server, ChevronDown, BookOpen, MessageSquare, Check, Database } from 'lucide-vue-next';
 import { useI18n } from 'vue-i18n';
 import CustomSelect from '../components/CustomSelect.vue';
 import PluginManager from '../components/PluginManager.vue';
@@ -746,15 +868,107 @@ const showPluginManager = ref(false);
 const trackedFolders = ref([]);
 
 // ── 凭证管理 (Credential Store) ──
-const modelProviders = ref([
-  { id: 'deepseek', name: 'DeepSeek', hasKey: false },
-  { id: 'openai', name: 'OpenAI', hasKey: false },
-  { id: 'qwen', name: '通义千问 (Qwen)', hasKey: false },
-  { id: 'doubao', name: '豆包 (Doubao)', hasKey: false },
-  { id: 'zhipu', name: '智谱 AI (GLM)', hasKey: false },
-  { id: 'kimi', name: 'Kimi (Moonshot)', hasKey: false },
-  { id: 'minimax', name: 'MiniMax', hasKey: false },
-]);
+const modelProviders = ref([]); // 从 registry 动态加载
+
+// ── 注册表编辑器 ──
+const registryData = ref(null);
+const registryDirty = ref(false);
+const registrySaveMsg = ref('');
+const newProviderForm = ref({ id: '', name: '', base_url: '' });
+const expandedProviders = ref({});
+
+async function loadRegistryProviders() {
+  try {
+    const reg = await window.electronAPI.getRegistry();
+    registryData.value = reg;
+    if (reg && reg.providers) {
+      modelProviders.value = reg.providers
+        .filter(p => p.id !== 'offline')
+        .map(p => ({ id: p.id, name: p.name, hasKey: false }));
+    }
+  } catch (e) {
+    console.warn('Failed to load registry:', e);
+    modelProviders.value = [
+      { id: 'deepseek', name: 'DeepSeek', hasKey: false },
+      { id: 'openai', name: 'OpenAI', hasKey: false },
+      { id: 'qwen', name: '通义千问 (Qwen)', hasKey: false },
+      { id: 'doubao', name: '豆包 (Doubao)', hasKey: false },
+      { id: 'zhipu', name: '智谱 AI (GLM)', hasKey: false },
+      { id: 'kimi', name: 'Kimi (Moonshot)', hasKey: false },
+      { id: 'minimax', name: 'MiniMax', hasKey: false },
+    ];
+  }
+}
+
+function toggleProviderExpand(providerId) {
+  expandedProviders.value[providerId] = !expandedProviders.value[providerId];
+}
+
+function markRegistryDirty() {
+  registryDirty.value = true;
+  registrySaveMsg.value = '';
+}
+
+function addModelToProvider(provider) {
+  if (!provider.models) provider.models = [];
+  provider.models.push({ id: '', name: '', vision: false, pricing: { input: 0, output: 0 } });
+  markRegistryDirty();
+}
+
+function removeModelFromProvider(provider, index) {
+  provider.models.splice(index, 1);
+  markRegistryDirty();
+}
+
+function addNewProvider() {
+  const f = newProviderForm.value;
+  if (!f.id || !f.name || !f.base_url) return;
+  if (!registryData.value) return;
+  if (registryData.value.providers.some(p => p.id === f.id)) return;
+  registryData.value.providers.push({
+    id: f.id,
+    name: f.name,
+    base_url: f.base_url,
+    supports_model_list: false,
+    models: [],
+  });
+  newProviderForm.value = { id: '', name: '', base_url: '' };
+  markRegistryDirty();
+}
+
+function removeProvider(index) {
+  if (!registryData.value) return;
+  if (!confirm(t('settings.registry_confirm_remove'))) return;
+  registryData.value.providers.splice(index, 1);
+  markRegistryDirty();
+  modelProviders.value = registryData.value.providers
+    .filter(p => p.id !== 'offline')
+    .map(p => ({ id: p.id, name: p.name, hasKey: false }));
+  fetchApiKeys();
+}
+
+async function saveRegistry() {
+  if (!registryData.value) return;
+  try {
+    registryData.value.last_updated = new Date().toISOString().slice(0, 10);
+    await window.electronAPI.saveRegistry(registryData.value);
+    registryDirty.value = false;
+    registrySaveMsg.value = t('settings.registry_saved');
+    await loadRegistryProviders();
+    await fetchApiKeys();
+    if (modelHubRef.value) modelHubRef.value.rescan();
+    setTimeout(() => { registrySaveMsg.value = ''; }, 3000);
+  } catch (e) {
+    console.error('Failed to save registry:', e);
+  }
+}
+
+async function resetRegistry() {
+  await loadRegistryProviders();
+  registryDirty.value = false;
+  registrySaveMsg.value = '';
+}
+
 const toolProviders = ref([
   { id: 'TAVILY_API_KEY', name: 'Tavily (Web Search)', hasKey: false },
   { id: 'TINYFISH_API_KEY', name: 'TinyFish (Fetch)', hasKey: false },
@@ -885,6 +1099,7 @@ onMounted(async () => {
   await loadModels();
   await loadTrackedFolders();
   await loadMcpConfig();
+  await loadRegistryProviders();
   await fetchApiKeys();
   await loadCustomModels();
   await fetchToolStatuses();
@@ -896,6 +1111,14 @@ onMounted(async () => {
       const res = await window.electronAPI.getOfflineEngineStatus();
       if (res && res.status) {
         offlineEngineStatus.value = res.status;
+      }
+    } catch(err) {}
+  }
+  if (window.electronAPI.wechatGetCurrentStatus) {
+    try {
+      const res = await window.electronAPI.wechatGetCurrentStatus();
+      if (res && res.connected) {
+        wechatConnected.value = true;
       }
     } catch(err) {}
   }
@@ -1009,9 +1232,20 @@ async function testConnection(target = 'main') {
   }
 }
 
-function openDocs() {
-  if (window.electronAPI.openFile) {
-    window.electronAPI.openFile("https://github.com/bobbik1984/bob-agent/wiki");
+const showHelpModal = ref(false);
+const renderedGuide = ref('');
+
+async function openDocs() {
+  showHelpModal.value = true;
+  if (!renderedGuide.value) {
+    try {
+      const resp = await fetch('/guide.md');
+      const md = await resp.text();
+      const raw = marked.parse(md, { breaks: true });
+      renderedGuide.value = DOMPurify.sanitize(raw);
+    } catch (e) {
+      renderedGuide.value = '<p style="color: var(--text-secondary)">Failed to load guide.</p>';
+    }
   }
 }
 
@@ -1482,5 +1716,111 @@ select.input {
 .briefing-fade-leave-to {
   opacity: 0;
   transform: scale(0.95);
+}
+
+/* ── 使用文档弹窗 ── */
+.help-modal {
+  width: 580px;
+  max-height: 80vh;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  display: flex;
+  flex-direction: column;
+}
+
+.help-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px 28px;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  line-height: 1.8;
+}
+
+.help-body :deep(h1) {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0 0 8px;
+}
+
+.help-body :deep(h2) {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 20px 0 8px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.help-body :deep(h3) {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 14px 0 4px;
+}
+
+.help-body :deep(hr) {
+  border: none;
+  border-top: 1px solid var(--border-subtle);
+  margin: 12px 0;
+}
+
+.help-body :deep(ul),
+.help-body :deep(ol) {
+  padding-left: 20px;
+  margin: 4px 0;
+}
+
+.help-body :deep(li) {
+  margin: 2px 0;
+}
+
+.help-body :deep(strong) {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.help-body :deep(code) {
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: 12px;
+  background: var(--bg-hover);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.help-body :deep(table) {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 8px 0;
+  font-size: 13px;
+}
+
+.help-body :deep(th),
+.help-body :deep(td) {
+  padding: 6px 12px;
+  border: 1px solid var(--border-subtle);
+  text-align: left;
+}
+
+.help-body :deep(th) {
+  background: var(--bg-hover);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.help-body :deep(p) {
+  margin: 6px 0;
+}
+
+.help-body :deep(a) {
+  color: var(--user-accent);
+  text-decoration: none;
+}
+
+.help-body :deep(a:hover) {
+  text-decoration: underline;
 }
 </style>

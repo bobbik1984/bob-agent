@@ -1,20 +1,292 @@
 use futures_util::StreamExt;
 use serde_json::{json, Value};
+use std::path::PathBuf;
 use tauri::{AppHandle, Emitter};
 
+// ── 模型注册表路径 ─────────────────────────────────────
+fn get_registry_path() -> PathBuf {
+    super::get_data_dir().join("model_providers.json")
+}
 
-// ── 供应商默认模型 ─────────────────────────────────────
-fn get_default_model(provider: &str) -> &str {
-    match provider {
-        "deepseek" => "deepseek-v4-flash",
-        "openai" => "gpt-4.1-mini",
-        "qwen" => "qwen3.6-plus",
-        "doubao" => "doubao-seed-1-6-flash-250828",
-        "zhipu" => "GLM-4.7",
-        "kimi" => "kimi-k2.5",
-        "minimax" => "MiniMax-M2.7",
-        _ => "",
+/// 从外部 model_providers.json 读取注册表
+pub(crate) fn read_registry() -> Value {
+    let path = get_registry_path();
+    if let Ok(data) = std::fs::read_to_string(&path) {
+        if let Ok(json) = serde_json::from_str(&data) {
+            return json;
+        }
     }
+    // fallback: 返回空注册表
+    json!({ "$schema_version": 1, "providers": [] })
+}
+
+/// 写入注册表
+pub(crate) fn write_registry(registry: &Value) {
+    let path = get_registry_path();
+    if let Ok(data) = serde_json::to_string_pretty(registry) {
+        let _ = std::fs::write(path, data);
+    }
+}
+
+/// 初始化模型注册表：首次启动时将内嵌默认值写入 AppData
+pub fn init_model_registry(_app: &tauri::AppHandle) {
+    let dest = get_registry_path();
+    if dest.exists() {
+        log::info!("Model registry already exists at {:?}", dest);
+        return;
+    }
+    // 将编译时嵌入的默认注册表写入文件系统
+    let default_json = include_str!("../resources/model_providers.json");
+    match std::fs::write(&dest, default_json) {
+        Ok(_) => log::info!("Model registry initialized from embedded default"),
+        Err(e) => log::warn!("Failed to write model registry: {}", e),
+    }
+}
+
+/// 启动时后台刷新支持 /v1/models 的供应商
+pub async fn refresh_models_on_startup() {
+    let registry = read_registry();
+    let config = super::read_config();
+    let api_keys = config.get("apiKeys").cloned().unwrap_or(json!({}));
+    
+    let providers = match registry.get("providers").and_then(|v| v.as_array()) {
+        Some(p) => p.clone(),
+        None => return,
+    };
+    
+    let mut updated = false;
+    let mut new_registry = registry.clone();
+    
+    for (idx, provider) in providers.iter().enumerate() {
+        let supports = provider.get("supports_model_list").and_then(|v| v.as_bool()).unwrap_or(false);
+        if !supports { continue; }
+        
+        let provider_id = provider.get("id").and_then(|v| v.as_str()).unwrap_or("");
+        let api_key = api_keys.get(provider_id).and_then(|v| v.as_str()).unwrap_or("");
+        if api_key.is_empty() { continue; }
+        
+        // Determine base_url, considering user's variant selection
+        let base_url = resolve_provider_base_url(provider, &config);
+        
+        let models_url = format!("{}/models", base_url);
+        log::info!("Refreshing models for provider '{}' from {}", provider_id, models_url);
+        
+        let client = match reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(10))
+            .build() {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+        
+        let resp = match client.get(&models_url)
+            .header("Authorization", format!("Bearer {}", api_key))
+            .send().await {
+            Ok(r) if r.status().is_success() => r,
+            _ => {
+                log::info!("Failed to refresh models for '{}', using cached list", provider_id);
+                continue;
+            }
+        };
+        
+        let data: Value = match resp.json().await {
+            Ok(d) => d,
+            Err(_) => continue,
+        };
+        
+        // Parse /v1/models response (OpenAI format: { data: [{ id: "...", ... }] })
+        if let Some(model_list) = data.get("data").and_then(|v| v.as_array()) {
+            let existing_models = provider.get("models").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+            let mut new_models: Vec<Value> = Vec::new();
+            
+            for api_model in model_list {
+                let model_id = match api_model.get("id").and_then(|v| v.as_str()) {
+                    Some(id) => id,
+                    None => continue,
+                };
+                
+                // Skip internal/system models
+                if model_id.starts_with("ft:") || model_id.contains("instruct") { continue; }
+                
+                // Try to find existing model entry to preserve pricing/vision/default info
+                if let Some(existing) = existing_models.iter().find(|m| m.get("id").and_then(|v| v.as_str()) == Some(model_id)) {
+                    new_models.push(existing.clone());
+                } else {
+                    // New model discovered
+                    new_models.push(json!({
+                        "id": model_id,
+                        "name": model_id,
+                        "vision": false,
+                        "pricing": { "input": 0.0, "output": 0.0 }
+                    }));
+                }
+            }
+            
+            // Only update if we got meaningful results (at least 1 model)
+            if !new_models.is_empty() {
+                // Preserve models that were in the old list but not returned by API
+                // (they might be valid models not listed by the endpoint)
+                for existing in &existing_models {
+                    let eid = existing.get("id").and_then(|v| v.as_str()).unwrap_or("");
+                    if !new_models.iter().any(|m| m.get("id").and_then(|v| v.as_str()) == Some(eid)) {
+                        new_models.push(existing.clone());
+                    }
+                }
+                
+                if let Some(providers_arr) = new_registry.get_mut("providers").and_then(|v| v.as_array_mut()) {
+                    if let Some(p) = providers_arr.get_mut(idx) {
+                        p["models"] = json!(new_models);
+                        updated = true;
+                        log::info!("Updated models for '{}': {} models", provider_id, new_models.len());
+                    }
+                }
+            }
+        }
+    }
+    
+    if updated {
+        // Update last_updated timestamp
+        new_registry["last_updated"] = json!(chrono::Local::now().format("%Y-%m-%d").to_string());
+        write_registry(&new_registry);
+        log::info!("Model registry updated and saved");
+    }
+}
+
+/// Tauri command: 手动刷新指定供应商的模型列表
+pub async fn refresh_models_for_provider(provider_id: String) -> Value {
+    let registry = read_registry();
+    let config = super::read_config();
+    let api_keys = config.get("apiKeys").cloned().unwrap_or(json!({}));
+    
+    let api_key = match api_keys.get(&provider_id).and_then(|v| v.as_str()) {
+        Some(k) if !k.is_empty() => k.to_string(),
+        _ => return json!({ "error": format!("未配置 {} 的 API Key", provider_id) }),
+    };
+    
+    let providers = match registry.get("providers").and_then(|v| v.as_array()) {
+        Some(p) => p,
+        None => return json!({ "error": "注册表格式错误" }),
+    };
+    
+    let (idx, provider) = match providers.iter().enumerate().find(|(_, p)| p.get("id").and_then(|v| v.as_str()) == Some(&provider_id)) {
+        Some(found) => found,
+        None => return json!({ "error": format!("未找到供应商: {}", provider_id) }),
+    };
+    
+    let supports = provider.get("supports_model_list").and_then(|v| v.as_bool()).unwrap_or(false);
+    if !supports {
+        return json!({ "error": format!("供应商 {} 不支持 /v1/models 查询", provider_id) });
+    }
+    
+    let base_url = resolve_provider_base_url(provider, &config);
+    let models_url = format!("{}/models", base_url);
+    
+    let client = match reqwest::Client::builder().timeout(std::time::Duration::from_secs(10)).build() {
+        Ok(c) => c,
+        Err(e) => return json!({ "error": format!("HTTP client error: {}", e) }),
+    };
+    
+    let resp = match client.get(&models_url)
+        .header("Authorization", format!("Bearer {}", api_key))
+        .send().await {
+        Ok(r) if r.status().is_success() => r,
+        Ok(r) => return json!({ "error": format!("API 返回 {}", r.status()) }),
+        Err(e) => return json!({ "error": format!("请求失败: {}", e) }),
+    };
+    
+    let data: Value = match resp.json().await {
+        Ok(d) => d,
+        Err(e) => return json!({ "error": format!("解析失败: {}", e) }),
+    };
+    
+    if let Some(model_list) = data.get("data").and_then(|v| v.as_array()) {
+        let existing_models = provider.get("models").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+        let mut new_models: Vec<Value> = Vec::new();
+        
+        for api_model in model_list {
+            let model_id = match api_model.get("id").and_then(|v| v.as_str()) {
+                Some(id) => id,
+                None => continue,
+            };
+            if model_id.starts_with("ft:") || model_id.contains("instruct") { continue; }
+            
+            if let Some(existing) = existing_models.iter().find(|m| m.get("id").and_then(|v| v.as_str()) == Some(model_id)) {
+                new_models.push(existing.clone());
+            } else {
+                new_models.push(json!({
+                    "id": model_id,
+                    "name": model_id,
+                    "vision": false,
+                    "pricing": { "input": 0.0, "output": 0.0 }
+                }));
+            }
+        }
+        
+        for existing in &existing_models {
+            let eid = existing.get("id").and_then(|v| v.as_str()).unwrap_or("");
+            if !new_models.iter().any(|m| m.get("id").and_then(|v| v.as_str()) == Some(eid)) {
+                new_models.push(existing.clone());
+            }
+        }
+        
+        let mut new_registry = registry.clone();
+        if let Some(providers_arr) = new_registry.get_mut("providers").and_then(|v| v.as_array_mut()) {
+            if let Some(p) = providers_arr.get_mut(idx) {
+                p["models"] = json!(&new_models);
+            }
+        }
+        new_registry["last_updated"] = json!(chrono::Local::now().format("%Y-%m-%d").to_string());
+        write_registry(&new_registry);
+        
+        json!({ "ok": true, "models_count": new_models.len() })
+    } else {
+        json!({ "error": "API 返回格式不匹配" })
+    }
+}
+
+/// 解析供应商的 base_url（考虑 variants 和用户选择）
+fn resolve_provider_base_url(provider: &Value, config: &Value) -> String {
+    let base = provider.get("base_url").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let provider_id = provider.get("id").and_then(|v| v.as_str()).unwrap_or("");
+    
+    // Check if user has selected a variant
+    let variant_key = format!("providerVariant_{}", provider_id);
+    if let Some(variant) = config.get(&variant_key).and_then(|v| v.as_str()) {
+        if !variant.is_empty() && variant != "default" {
+            // Check for explicit api_base_{variant} field (e.g. api_base_coding)
+            let explicit_key = format!("api_base_{}", variant);
+            if let Some(explicit_url) = provider.get(&explicit_key).and_then(|v| v.as_str()) {
+                return explicit_url.to_string();
+            }
+            
+            if let Some(variants) = provider.get("base_url_variants").and_then(|v| v.as_object()) {
+                if let Some(variant_url) = variants.get(variant).and_then(|v| v.as_str()) {
+                    return variant_url.to_string();
+                }
+            }
+        }
+    }
+    
+    base
+}
+
+// ── 供应商默认模型 (从注册表动态读取) ───────────────────
+fn get_default_model(provider: &str) -> String {
+    let registry = read_registry();
+    if let Some(providers) = registry.get("providers").and_then(|v| v.as_array()) {
+        if let Some(p) = providers.iter().find(|p| p.get("id").and_then(|v| v.as_str()) == Some(provider)) {
+            if let Some(models) = p.get("models").and_then(|v| v.as_array()) {
+                // Find the model marked as default
+                if let Some(default_model) = models.iter().find(|m| m.get("default").and_then(|v| v.as_bool()).unwrap_or(false)) {
+                    return default_model.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                }
+                // Fallback: first model
+                if let Some(first) = models.first() {
+                    return first.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                }
+            }
+        }
+    }
+    String::new()
 }
 
 // ── ModelHub API ─────────────────────────────────────────
@@ -34,39 +306,51 @@ pub fn get_models(provider_opt: Option<String>) -> Value {
 }
 
 pub fn get_model_pool() -> Value {
-    let static_pool = json!([
-        { "id": "deepseek-v4-flash", "modelId": "deepseek-v4-flash", "displayName": "DeepSeek V4 Flash", "label": "DeepSeek V4 Flash", "provider": "deepseek", "providerName": "DeepSeek", "vision": true, "default": true, "pricing": { "input": 1.0, "output": 2.0 } },
-        { "id": "deepseek-v4-pro", "modelId": "deepseek-v4-pro", "displayName": "DeepSeek V4 Pro", "label": "DeepSeek V4 Pro", "provider": "deepseek", "providerName": "DeepSeek", "vision": false, "pricing": { "input": 3.0, "output": 6.0 } },
-        
-        { "id": "gpt-4.1", "modelId": "gpt-4.1", "displayName": "GPT-4.1", "label": "GPT-4.1", "provider": "openai", "providerName": "OpenAI", "vision": true, "pricing": { "input": 35.0, "output": 105.0 } },
-        { "id": "gpt-4.1-mini", "modelId": "gpt-4.1-mini", "displayName": "GPT-4.1 Mini", "label": "GPT-4.1 Mini", "provider": "openai", "providerName": "OpenAI", "vision": true, "default": true, "pricing": { "input": 1.05, "output": 4.2 } },
-        
-        { "id": "qwen3.6-plus", "modelId": "qwen3.6-plus", "displayName": "Qwen3.6 Plus", "label": "Qwen3.6 Plus", "provider": "qwen", "providerName": "阿里云百炼", "vision": true, "default": true, "pricing": { "input": 2.0, "output": 12.0 } },
-        { "id": "qwen3.6-max-preview", "modelId": "qwen3.6-max-preview", "displayName": "Qwen3.6 Max", "label": "Qwen3.6 Max", "provider": "qwen", "providerName": "阿里云百炼", "vision": true, "pricing": { "input": 2.4, "output": 9.6 } },
-        
-        { "id": "doubao-seed-1-6-flash-250828", "modelId": "doubao-seed-1-6-flash-250828", "displayName": "Doubao Seed 1.6 Flash", "label": "Doubao Seed 1.6 Flash", "provider": "doubao", "providerName": "字节火山", "vision": false, "default": true, "pricing": { "input": 0.8, "output": 2.0 } },
-        { "id": "doubao-seed-2-0-mini-260215", "modelId": "doubao-seed-2-0-mini-260215", "displayName": "Doubao Seed 2.0 Mini", "label": "Doubao Seed 2.0 Mini", "provider": "doubao", "providerName": "字节火山", "vision": true, "pricing": { "input": 0.8, "output": 2.0 } },
-        
-        { "id": "local-qwen2.5-1.5b", "modelId": "qwen2.5-1.5b", "displayName": "Qwen 2.5 1.5B (离线)", "label": "Qwen 2.5 1.5B (离线)", "provider": "offline", "providerName": "本地离线计算", "vision": false, "default": true, "pricing": { "input": 0.0, "output": 0.0 } },
-        { "id": "local-llama-3.2-1b", "modelId": "llama-3.2-1b", "displayName": "Llama 3.2 1B (离线)", "label": "Llama 3.2 1B (离线)", "provider": "offline", "providerName": "本地离线计算", "vision": false, "pricing": { "input": 0.0, "output": 0.0 } },
-
-        { "id": "GLM-4.7", "modelId": "GLM-4.7", "displayName": "GLM-4.7", "label": "GLM-4.7", "provider": "zhipu", "providerName": "智谱 (GLM)", "vision": false, "default": true, "pricing": { "input": 2.0, "output": 8.0 } },
-        
-        { "id": "kimi-k2.5", "modelId": "kimi-k2.5", "displayName": "Kimi k2.5", "label": "Kimi k2.5", "provider": "kimi", "providerName": "月之暗面", "vision": true, "default": true, "pricing": { "input": 4.0, "output": 21.0 } },
-        
-        { "id": "MiniMax-M2.7", "modelId": "MiniMax-M2.7", "displayName": "MiniMax M2.7", "label": "MiniMax M2.7", "provider": "minimax", "providerName": "MiniMax", "vision": false, "default": true, "pricing": { "input": 0.0, "output": 0.0 } }
-    ]);
-
-    let mut pool_arr = static_pool.as_array().cloned().unwrap_or_default();
+    let registry = read_registry();
+    let mut pool: Vec<Value> = Vec::new();
+    
+    if let Some(providers) = registry.get("providers").and_then(|v| v.as_array()) {
+        for provider in providers {
+            let provider_id = provider.get("id").and_then(|v| v.as_str()).unwrap_or("");
+            let provider_name = provider.get("name").and_then(|v| v.as_str()).unwrap_or("");
+            
+            if let Some(models) = provider.get("models").and_then(|v| v.as_array()) {
+                for model in models {
+                    let model_id = model.get("id").and_then(|v| v.as_str()).unwrap_or("");
+                    let model_name = model.get("name").and_then(|v| v.as_str()).unwrap_or(model_id);
+                    let vision = model.get("vision").and_then(|v| v.as_bool()).unwrap_or(false);
+                    let is_default = model.get("default").and_then(|v| v.as_bool()).unwrap_or(false);
+                    let pricing = model.get("pricing").cloned().unwrap_or(json!({ "input": 0.0, "output": 0.0 }));
+                    
+                    let mut entry = json!({
+                        "id": model_id,
+                        "modelId": model_id,
+                        "displayName": model_name,
+                        "label": model_name,
+                        "provider": provider_id,
+                        "providerName": provider_name,
+                        "vision": vision,
+                        "pricing": pricing
+                    });
+                    
+                    if is_default {
+                        entry["default"] = json!(true);
+                    }
+                    
+                    pool.push(entry);
+                }
+            }
+        }
+    }
     
     // 从配置中读取 customModels 并追加
     if let Some(custom_models) = super::read_config().get("customModels").and_then(|v| v.as_array()) {
         for cm in custom_models {
-            pool_arr.push(cm.clone());
+            pool.push(cm.clone());
         }
     }
     
-    json!(pool_arr)
+    json!(pool)
 }
 
 pub fn get_active_models() -> Value {
@@ -233,29 +517,33 @@ pub(crate) fn read_llm_config_for_model(model_id: &str) -> (String, String, Stri
         config.get("baseURL").and_then(|v| v.as_str()).unwrap_or("").to_string()
     });
     
-    // 如果没有配置自定义代理（即当前 baseURL 是某个官方域名或为空），则自动根据 provider 路由到对应的官方地址
-    let is_custom_proxy = !base_url.is_empty() && 
-        !base_url.contains("deepseek.com") && 
-        !base_url.contains("openai.com") && 
-        !base_url.contains("aliyuncs.com") && 
-        !base_url.contains("volces.com") && 
-        !base_url.contains("bigmodel.cn") && 
-        !base_url.contains("moonshot.cn") &&
-        !base_url.contains("minimax.chat");
-
+    // 从注册表动态解析 provider 的官方 base_url，替代硬编码
+    let registry = read_registry();
+    let config_for_variant = super::read_config();
+    let official_base_url = registry.get("providers").and_then(|v| v.as_array())
+        .and_then(|providers| {
+            providers.iter()
+                .find(|p| p.get("id").and_then(|v| v.as_str()) == Some(provider.as_str()))
+                .map(|p| resolve_provider_base_url(p, &config_for_variant))
+        })
+        .unwrap_or_default();
+    
+    // 判断当前 base_url 是否为用户自定义的代理（非官方域名）
+    let is_custom_proxy = !base_url.is_empty() && !official_base_url.is_empty() && {
+        // 提取域名部分进行比较
+        let base_domain = base_url.split("//").nth(1).unwrap_or("").split('/').next().unwrap_or("");
+        let official_domain = official_base_url.split("//").nth(1).unwrap_or("").split('/').next().unwrap_or("");
+        base_domain != official_domain
+    };
+    
     if !is_custom_proxy {
-        base_url = match provider.as_str() {
-            "minimax" => "https://api.minimax.chat/v1",
-            "deepseek" => "https://api.deepseek.com",
-            "openai" => "https://api.openai.com/v1",
-            "qwen" => "https://dashscope.aliyuncs.com/compatible-mode/v1",
-            "doubao" => "https://ark.cn-beijing.volces.com/api/v3",
-            "zhipu" => "https://open.bigmodel.cn/api/paas/v4",
-            "kimi" => "https://api.moonshot.cn/v1",
-            "offline" => "http://127.0.0.1:11434/v1",
-            _ => "https://api.openai.com/v1",
-        }.to_string();
+        if !official_base_url.is_empty() {
+            base_url = official_base_url;
+        } else if base_url.is_empty() {
+            base_url = "https://api.openai.com/v1".to_string();
+        }
     }
+    // else: 用户配置了非官方的自定义代理 URL，保持不变
     
     (provider, api_key, model_id.to_string(), base_url)
 }
@@ -396,7 +684,11 @@ fn build_wiki_status() -> String {
 async fn stream_internal(
     app: AppHandle,
     messages: Vec<Value>,
+    conv_id: Option<String>,
+    from_user: Option<String>,
 ) -> Value {
+    // conv_id 用于标记 llm:chunk 事件属于哪个会话，防止跨会话串流
+    let conv_id_for_emit = conv_id.clone().unwrap_or_default();
     // 1. 读取 LLM 配置
     let config = super::read_config();
     let config_model_id = config.get("model").and_then(|v| v.as_str()).unwrap_or("").to_string();
@@ -414,7 +706,7 @@ async fn stream_internal(
     }
 
     let model_id = if model_override.is_empty() {
-        get_default_model(&provider).to_string()
+        get_default_model(&provider)
     } else {
         model_override.clone()
     };
@@ -430,13 +722,18 @@ async fn stream_internal(
         let skills_summary = build_skills_summary();
         let memory_summary = build_memory_summary();
         let wiki_status = build_wiki_status();
+        let wxid_info = if let Some(u) = &from_user {
+            format!("当前对话的微信用户 ID (wxid) 是: {}\n", u)
+        } else {
+            String::new()
+        };
 
         let system_prompt = format!(
             "你是 Bob，一个友善、专业的桌面 AI 私人助手，由 Tauri (Rust) 和 Vue 3 构建。\n\
 你当前运行在用户的本地计算机上。\n\
 当前操作系统: {}\n\
 当前工作目录 (CWD): {}\n\
-\n\
+{}\n\
 请用中文回答用户的问题，并记住你是一个拥有本机访问能力的桌面助手，而不是一个受限的云端网页服务。\n\
 \n\
 ## 工具调用能力\n\
@@ -450,6 +747,9 @@ async fn stream_internal(
 - **brain_search**: 检索你维护的 Wiki 知识库\n\
 - **list_skills**: 查看可用的专业分析框架\n\
 - **read_skill**: 加载某个技能的详细指南（加载后请严格遵循其工作流程）\n\
+- **read_model_registry**: 读取当前 AI 模型注册表（查看/对比供应商模型列表）\n\
+- **test_model_endpoint**: 测试某个模型 ID 的 API 连通性（验证模型是否可用）\n\
+- **update_model_registry**: 更新指定供应商的模型列表（必须先 test 验证）\n\
 \n\
 当用户提到文件路径时，请主动调用 read_file 读取；当用户要求分析/规划时，先 read_skill 加载对应框架。\n\
 当用户提出事实性问题时，请先调用 brain_search 检索知识库。\n\
@@ -468,7 +768,7 @@ async fn stream_internal(
 - set_config: key 可选 model, clerkModel, theme, uiScale, language, workspaceDir\n\
 \n\
 如果用户发送了包含 API Key 的文件或文本，请提取密钥并使用上述格式帮用户配置好。",
-            os_info, current_dir, skills_summary, memory_summary, wiki_status
+            os_info, current_dir, wxid_info, skills_summary, memory_summary, wiki_status
         );
 
         full_messages.push(json!({
@@ -711,11 +1011,11 @@ async fn stream_internal(
             let elapsed = last_emit_time.elapsed().as_millis();
             if elapsed >= EMIT_INTERVAL_MS || text_emit_buf.len() >= EMIT_BUFFER_SIZE || thinking_emit_buf.len() >= EMIT_BUFFER_SIZE {
                 if !thinking_emit_buf.is_empty() {
-                    let _ = app.emit("llm:chunk", json!({ "type": "thinking", "content": &thinking_emit_buf }));
+                    let _ = app.emit("llm:chunk", json!({ "type": "thinking", "content": &thinking_emit_buf, "conv_id": &conv_id_for_emit }));
                     thinking_emit_buf.clear();
                 }
                 if !text_emit_buf.is_empty() {
-                    let _ = app.emit("llm:chunk", json!({ "type": "text", "content": &text_emit_buf }));
+                    let _ = app.emit("llm:chunk", json!({ "type": "text", "content": &text_emit_buf, "conv_id": &conv_id_for_emit }));
                     text_emit_buf.clear();
                 }
                 last_emit_time = std::time::Instant::now();
@@ -724,11 +1024,11 @@ async fn stream_internal(
 
         // ── 流结束: 刷出所有 buffer 残余 ────────────────
         if !thinking_emit_buf.is_empty() {
-            let _ = app.emit("llm:chunk", json!({ "type": "thinking", "content": &thinking_emit_buf }));
+            let _ = app.emit("llm:chunk", json!({ "type": "thinking", "content": &thinking_emit_buf, "conv_id": &conv_id_for_emit }));
             thinking_emit_buf.clear();
         }
         if !text_emit_buf.is_empty() {
-            let _ = app.emit("llm:chunk", json!({ "type": "text", "content": &text_emit_buf }));
+            let _ = app.emit("llm:chunk", json!({ "type": "text", "content": &text_emit_buf, "conv_id": &conv_id_for_emit }));
             text_emit_buf.clear();
         }
 
@@ -737,10 +1037,10 @@ async fn stream_internal(
             if inside_think_tag {
                 // 残留在 <think> 块中的内容，归入思考
                 thinking_content.push_str(&think_tag_buffer);
-                let _ = app.emit("llm:chunk", json!({ "type": "thinking", "content": &think_tag_buffer }));
+                let _ = app.emit("llm:chunk", json!({ "type": "thinking", "content": &think_tag_buffer, "conv_id": &conv_id_for_emit }));
             } else {
                 content.push_str(&think_tag_buffer);
-                let _ = app.emit("llm:chunk", json!({ "type": "text", "content": &think_tag_buffer }));
+                let _ = app.emit("llm:chunk", json!({ "type": "text", "content": &think_tag_buffer, "conv_id": &conv_id_for_emit }));
             }
             think_tag_buffer.clear();
         }
@@ -756,8 +1056,8 @@ async fn stream_internal(
         if dsml_leaked && !has_tool_calls && round < MAX_TOOL_ROUNDS {
             log::warn!("DSML token leakage detected in content (round {}), retrying...", round + 1);
             // 通知前端清除已渲染的脏内容
-            let _ = app.emit("llm:chunk", json!({ "type": "clear" }));
-            let _ = app.emit("llm:chunk", json!({ "type": "thinking", "content": "\n[检测到模型输出异常，自动重试中...]\n" }));
+            let _ = app.emit("llm:chunk", json!({ "type": "clear", "conv_id": &conv_id_for_emit }));
+            let _ = app.emit("llm:chunk", json!({ "type": "thinking", "content": "\n[检测到模型输出异常，自动重试中...]\n", "conv_id": &conv_id_for_emit }));
             // 插入提示，引导模型使用标准 function calling 格式
             full_messages.push(json!({
                 "role": "system",
@@ -783,20 +1083,22 @@ async fn stream_internal(
             full_messages.push(assistant_msg);
 
             // ── 并行执行工具 (tokio::join_all) ──────────────
+            let from_user_for_tools = from_user.clone();
             let tool_futures: Vec<_> = pending_tool_calls.iter().map(|tc| {
                 let app_clone = app.clone();
                 let name = tc.name.clone();
                 let args_str = tc.arguments.clone();
+                let fu = from_user_for_tools.clone();
                 async move {
                     let args: Value = serde_json::from_str(&args_str).unwrap_or(json!({}));
-                    let result = super::tools::execute_tool(&app_clone, &name, &args).await;
+                    let result = super::tools::execute_tool(&app_clone, &name, &args, fu.as_deref()).await;
                     (name, result)
                 }
             }).collect();
 
             // 发射所有 tool_start 事件
             for tc in &pending_tool_calls {
-                let _ = app.emit("llm:chunk", json!({ "type": "tool_start", "name": tc.name }));
+                let _ = app.emit("llm:chunk", json!({ "type": "tool_start", "name": tc.name, "conv_id": &conv_id_for_emit }));
             }
 
             // 并行等待所有工具完成
@@ -815,7 +1117,7 @@ async fn stream_internal(
                     result_str
                 };
 
-                let _ = app.emit("llm:chunk", json!({ "type": "tool_end", "name": name, "result": truncated }));
+                let _ = app.emit("llm:chunk", json!({ "type": "tool_end", "name": name, "result": truncated, "conv_id": &conv_id_for_emit }));
 
                 full_messages.push(json!({
                     "role": "tool",
@@ -868,7 +1170,7 @@ async fn stream_internal(
     }
 
     // 发送完成事件
-    let _ = app.emit("llm:chunk", json!({ "type": "done", "content": "" }));
+    let _ = app.emit("llm:chunk", json!({ "type": "done", "content": "", "conv_id": &conv_id_for_emit }));
 
     let mut pricing = json!({ "input": 0.0, "output": 0.0 });
     let pool = get_model_pool();
@@ -889,11 +1191,13 @@ async fn stream_internal(
     })
 }
 
-pub async fn stream_chat(app: AppHandle, messages: Vec<Value>) -> Value {
-    stream_internal(app, messages).await
+pub async fn stream_chat(app: AppHandle, messages: Vec<Value>, conv_id: Option<String>, from_user: Option<String>) -> Value {
+    stream_internal(app, messages, conv_id, from_user).await
 }
 
-pub async fn stream_vision(app: AppHandle, mut messages: Vec<Value>, image_base64: String) -> Value {
+
+
+pub async fn stream_vision(app: AppHandle, mut messages: Vec<Value>, image_base64: String, conv_id: Option<String>) -> Value {
     if let Some(last) = messages.last_mut() {
         if let Some(obj) = last.as_object_mut() {
             let text_content = obj.get("content").and_then(|v| v.as_str()).unwrap_or("请分析这张图片");
@@ -910,5 +1214,5 @@ pub async fn stream_vision(app: AppHandle, mut messages: Vec<Value>, image_base6
             ]));
         }
     }
-    stream_internal(app, messages).await
+    stream_internal(app, messages, conv_id, None).await
 }

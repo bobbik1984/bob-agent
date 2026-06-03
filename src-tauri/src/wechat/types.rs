@@ -291,3 +291,58 @@ pub struct NotifyStartResp {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub errmsg: Option<String>,
 }
+
+// ═══════════════════════════════════════════════════════════
+// CDN 上传协议类型
+// ═══════════════════════════════════════════════════════════
+
+/// 微信 CDN 基础 URL
+pub const CDN_BASE_URL: &str = "https://novac2c.cdn.weixin.qq.com/c2c";
+
+/// 上传文件大小上限 (100 MB)
+pub const MAX_FILE_SIZE: u64 = 100 * 1024 * 1024;
+
+/// proto: UploadMediaType
+pub const UPLOAD_MEDIA_TYPE_IMAGE: i32 = 1;
+pub const UPLOAD_MEDIA_TYPE_VIDEO: i32 = 2;
+pub const UPLOAD_MEDIA_TYPE_FILE: i32 = 3;
+pub const UPLOAD_MEDIA_TYPE_VOICE: i32 = 4;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GetUploadUrlReq {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub filekey: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub media_type: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub to_user_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rawsize: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rawfilemd5: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub filesize: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub no_need_thumb: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub aeskey: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub base_info: Option<BaseInfo>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GetUploadUrlResp {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ret: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub errcode: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub errmsg: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub upload_param: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thumb_upload_param: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub upload_full_url: Option<String>,
+}
+

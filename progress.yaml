@@ -1,9 +1,9 @@
 project:
   name: bob-agent
-  version: "0.3.1-pre"
+  version: "0.3.2"
   status: stable
   tech: [Tauri V2, Rust, Vue 3, Vite, SQLite (rusqlite), reqwest, scraper, keyring, tauri-plugin-single-instance]
-  updated: "2026-05-19"
+  updated: "2026-06-04"
   architecture: "Tauri (Rust backend) + Vue 3 (frontend) + tauri-bridge.js (adapter) + Composable 架构"
   current_focus: "v0.3.1-pre 发布就绪 — 后续可进入 v0.4 (离线 Tool Calling / 排队纠偏 / Cron 自动化 / 生产打包)"
 
@@ -173,7 +173,7 @@ rust_modules:
   - { file: lib.rs, desc: "Tauri 入口 + config 读写 + IPC 注册 (DB 已解耦至 db.rs)" }
   - { file: db.rs, desc: "SQLite 数据库引擎 (DbState + init_db + CRUD + factory_reset)" }
   - { file: llm.rs, desc: "LLM 引擎: SSE 流式 + Tool Calling 循环 + ModelHub" }
-  - { file: tools.rs, desc: "工具注册表 + 执行调度器 (12 个原生工具) + 审计日志 + 路径白名单 (canonicalize)" }
+  - { file: tools.rs, desc: "工具注册表 + 执行调度器 (12+ 原生工具) + 审计日志 + 路径白名单 (canonicalize) + 微信 from_user 上下文感知" }
   - { file: kb_extractor.rs, desc: "知识库文件提取 (PDF/DOCX/XLSX)" }
   - { file: kb_indexer.rs, desc: "知识库索引构建" }
   - { file: filesystem.rs, desc: "文件读取/扫描/跟踪" }
@@ -227,6 +227,11 @@ tests:
   note: "待端到端测试后更新"
 
 recent_fixes:
+  - date: "2026-06-04"
+    items:
+      - "[Fix] WeChat wxid 路由修复 — LLM 传明文微信号被自动覆盖为加密 wxid (tools.rs + llm.rs from_user 上下文透传)"
+      - "[Fix] 桌面图标裁切修复 — icon.png 四周加 12% 安全边距, 全部 16 个图标资产重新生成"
+      - "[Arch] execute_tool() 签名升级 — 新增 from_user: Option<&str> 参数, 支持微信会话上下文感知"
   - date: "2026-05-19"
     items:
       - "[Security] P0: API Key Keychain 加密 — 新建 keychain.rs, config.json 只存 'vaulted' 标记"

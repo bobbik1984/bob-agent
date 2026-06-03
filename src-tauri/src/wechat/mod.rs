@@ -10,6 +10,7 @@ pub mod session_mgr;
 pub mod msg_queue;
 pub mod commands;
 pub mod login_qr;
+pub mod cdn;
 
 use std::sync::{Arc, Mutex, RwLock};
 use session_mgr::SessionManager;

@@ -46,6 +46,52 @@
 
 ---
 
+## 目录结构
+
+```
+bob-agent/
+├── src-tauri/                       # Tauri 后端 (Rust) — 所有新代码写这里
+│   ├── src/
+│   │   ├── main.rs                  # Tauri 入口
+│   │   ├── lib.rs                   # 🔑 Config + DB 初始化 + IPC 注册 + 系统托盘
+│   │   ├── llm.rs                   # LLM 引擎 (SSE 流式 + Tool Calling 循环)
+│   │   ├── tools.rs                 # 🔑 12 个原生工具 + 执行调度器
+│   │   ├── calendar.rs              # 日程/待办管理 (SQLite)
+│   │   ├── outbox.rs                # Outbox/Reconciler 声明式配置
+│   │   ├── filesystem.rs            # 文件读取/扫描/跟踪
+│   │   ├── web.rs                   # 网页抓取 (reqwest + scraper)
+│   │   ├── plugins.rs               # 技能/插件扫描
+│   │   ├── dream.rs                 # 做梦引擎 V1
+│   │   ├── sidecar.rs               # Sidecar 子进程 (llama-server)
+│   │   ├── kb_extractor.rs          # 知识库文件提取
+│   │   └── kb_indexer.rs            # 知识库索引构建
+│   ├── capabilities/
+│   │   └── default.json             # 🔑 原生能力权限声明
+│   ├── Cargo.toml                   # Rust 依赖管理
+│   └── tauri.conf.json              # Tauri 应用配置
+│
+├── src/                             # Vue 3 前端 (Renderer) — 不直接改动 IPC 调用
+│   ├── tauri-bridge.js              # 🔑 适配器：拦截 electronAPI → invoke()
+│   ├── App.vue                      # 根组件 + 侧栏导航
+│   ├── views/
+│   │   ├── ChatView.vue             # 对话 + 视觉 + 工具调用展示
+│   │   ├── InboxView.vue            # 日程面板（时间轴 + 待办）
+│   │   └── SettingsView.vue         # 设置面板（含工作空间配置）
+│   └── components/
+│       ├── SetupWizard.vue          # 首次启动向导
+│       ├── WeekTimeline.vue         # 周时间轴（可拖拽）
+│       ├── SearchCard.vue           # 搜索结果卡片（与 FileCard 统一设计）
+│       └── ...
+│
+├── skills/                          # 内置基础技能
+├── data/                            # ⛔ .gitignore — 用户隐私数据
+├── docs/                            # 架构、用户手册、历史归档
+├── todo.md                          # 🔑 路线图（里程碑 1-10）
+└── progress.yaml                    # 进度追踪
+```
+
+---
+
 ## Rust 后端模块详解 (`src-tauri/src/`)
 
 ### 1. LLM Engine (`llm.rs`)
@@ -90,12 +136,15 @@ Restatement 机制 (防长线失焦):
 ```rust
 // 工具注册表
 pub fn get_tool_schemas() -> Vec<Value>    // OpenAI Function Calling 格式
-pub async fn execute_tool(app, name, args) -> Value  // 异步执行调度 + 审计日志
+pub async fn execute_tool(app, name, args, from_user) -> Value  // 异步执行调度 + 审计日志 + 微信上下文感知
 
 // 安全层
 fn resolve_write_path(path, global_file_access) -> Result<PathBuf, String>  // 路径白名单引擎
 fn audit_tool_call(name, args, result_summary)  // 写入 logs/tools.log
 ```
+
+> **from_user 上下文感知**：当工具调用源自微信会话时，`from_user` 携带消息发送者的加密 wxid。
+> `send_wechat_file` 会用它覆盖 LLM 传入的非加密 wxid，确保 ilink CDN API 收到正确的目标 ID。
 
 | 工具 | 来源 | 描述 |
 |------|------|------|
@@ -111,6 +160,7 @@ fn audit_tool_call(name, args, result_summary)  // 写入 logs/tools.log
 | `get_weather` | tools.rs 原生 | wttr.in 天气查询 |
 | `brain_search` | tools.rs 原生 | 知识库全文检索 (wiki/) |
 | `add_calendar_event` | tools.rs + calendar.rs | 写入 SQLite events 表 |
+| `send_wechat_file` | tools.rs + wechat/ | 发送图片/文件给微信用户 (CDN 上传 + 加密) |
 
 ### 3. Calendar Engine (`calendar.rs`)
 
@@ -172,6 +222,41 @@ window.electronAPI = {
 
 > **铁律**: Vue 组件统一调用 `window.electronAPI.xxx()`，不直接 import `@tauri-apps/api`。
 > 所有 Tauri 特有 API 仅在 `tauri-bridge.js` 中使用。
+
+---
+
+## IPC 实现状态速查表
+
+### 🟢 已用 Rust 实现（真实调用）
+
+| 分类 | 前端调用 | Rust Command | 说明 |
+|:---|:---|:---|:---|
+| 配置 | `isSetupComplete()` | `system_is_setup_complete` | config.json 判断 |
+| 配置 | `getConfig/setConfig/getAllConfig` | `config_get/set/get_all` | 键值 CRUD |
+| 对话 | `getConversations/create/delete/rename` | `db_conversation_*` | rusqlite CRUD |
+| 消息 | `getMessages/addMessage` | `db_messages/db_message_add` | rusqlite |
+| LLM | `sendChat/sendVision` | `llm_chat/llm_vision` | reqwest SSE + Tool Calling |
+| LLM | `getModelPool/getActiveModels/assignModelRole` | `llm_get_*` | ModelHub |
+| 凭证 | `getApiKeys/setApiKey` | `system_get/set_api_key` | config.json 存储 |
+| 日程 | `listEvents/confirmEvent/deleteEvent/...` | `system_list/confirm/delete_event` | calendar.rs SQLite |
+| 文件 | `readFile/scanFolder/getFileMeta` | `filesystem::system_*` | walkdir + fs |
+| 文件夹 | `getTrackedFolders/add/remove` | `filesystem::system_*_tracked_*` | config 持久化 |
+| 网页 | `fetchUrl` | `web::system_fetch_url` | reqwest + scraper |
+| 知识库 | `estimateKB/buildKB` | `kb_extractor/kb_indexer` | PDF/DOCX/XLSX 提取 |
+| 插件 | `getPlugins` | `plugins::system_get_plugins` | 技能扫描 |
+| 做梦 | `summarizeSession/getDreamReport/dismissDream` | `dream::system_*` | 记忆引擎 |
+| Outbox | `writeOutbox` | `system_write_outbox` | 声明式配置 |
+| 系统 | `openFile/showInFolder/getVersion/factoryReset/...` | `system_*` | Rust 原生 |
+
+### 🔴 仍为 Mock（Bridge 中硬编码）
+
+| 接口 | 说明 |
+|:---|:---|
+| `updateTheme` | 主题热切换（目前 console.log） |
+| `getClipboardImage` | 剪贴板图片读取（返回 null） |
+| `showNotification` | 桌面通知（console.log） |
+| `getMcpConfig/setMcpConfig` | MCP 服务器配置 |
+| `installPlugin` | 插件安装逻辑 |
 
 ---
 
@@ -271,3 +356,104 @@ cd src-tauri && cargo check
 # 前端测试
 npm test
 ```
+
+---
+
+## 模型生态扩展指南 (LLM Provider Extension)
+
+未来当需要在 `bob-agent` 中新增模型或全新大模型供应商时，必须遵循以下 Tauri 后端扩展规范：
+
+### 1. 新增现有厂商的模型
+若仅新增（如 `deepseek-v5` 或 `qwen-4`），只需修改 `src-tauri/src/llm.rs` 中的 `get_model_pool()`：
+- 在 JSON 数组中添加模型条目。
+- 必须包含 `provider`（如 `"deepseek"`）和 `pricing` 字段（如 `{"input": 1.0, "output": 2.0}`）。
+- 后端会自动依据 `provider` 将请求路由至官方 `baseURL`。
+
+### 2. 接入全新的大模型厂商 (Provider)
+若要接入如 `anthropic` 等全新厂商，需要修改 `src-tauri/src/llm.rs` 的 3 个位置：
+1. **模型池注册**：在 `get_model_pool()` 中添加模型，声明新的 `provider`（如 `"anthropic"`）。
+2. **防误判路由注册**：在 `read_llm_config_for_model` 方法的 `is_custom_proxy` 白名单中，将该厂商的官方域名（如 `!base_url.contains("anthropic.com")`）加入排除名单，以防止智能路由将其误判为用户的自定义反向代理。
+3. **官方 Base URL 映射**：在 `read_llm_config_for_model` 的 `match provider.as_str()` 块中，添加 `"anthropic" => "https://api.anthropic.com/v1"` 的映射分支。
+*(注意：如遇特殊厂商不支持标准参数，需在 `stream_internal` 构建请求体时添加特定的分支逻辑。)*
+
+---
+
+## 核心技术决策记录
+
+### D-001: 从 Electron 迁移至 Tauri（决策变更）
+
+**原决策**：使用 Electron（因为开发者不会 Rust）
+**新决策**：迁移至 Tauri v2 (Rust)
+
+**变更理由**：
+- 代码完全由 AI Agent 编写，Rust 不再是门槛
+- Rust 编译器的极致类型检查 = AI 最完美的反馈循环（编译通过 ≈ 无 Bug）
+- 打包体积从 ~120MB 骤降至 ~15MB
+- 内存占用从 ~300MB 降至 ~30MB
+- 彻底告别 `node_modules` 黑洞和 `better-sqlite3` 的 C++ 编译地狱
+
+**迁移策略**：Adapter 隔离法（`tauri-bridge.js`），前端零感知，后端逐模块替换。
+
+### D-002: 为什么不做 Web App？
+
+（不变）桌面原生应用。需要本地文件读取、系统托盘、全局快捷键、桌面通知。
+
+### D-003: 双目录技能系统
+
+（不变）内置 `skills/` + 用户可配置外部技能目录。SKILL.md 规范复用。
+
+### D-004: LLM 多模型支持
+
+**供应商优先级**：
+1. DeepSeek (deepseek-v4-pro / deepseek-v4-flash) — 默认
+2. ModelScope 免费层 (DeepSeek-V4-Flash / GLM-5.1) — Clerk 任务
+3. Qwen (qwen3.5-flash / qwen3.5) — 备选
+4. Ollama (本地模型) — 离线场景
+5. 自定义 (OpenAI 兼容端点) — 高级用户
+
+### D-005: 三层记忆引擎
+
+（不变）Tier 1 灵魂 (SOUL.md) → Tier 2 短期记忆 (sessions/) → Tier 3 长期记忆 (wiki/)。详见 `docs/agents_electron.md` 中 D-008 的完整描述。
+
+---
+
+## 依赖清单
+
+### Rust 后端 (`src-tauri/Cargo.toml`)
+
+| Crate | 用途 | 状态 |
+|:---|:---|:---|
+| `tauri` v2.0.0-rc | 桌面应用框架 | ✅ |
+| `serde` + `serde_json` | JSON 序列化 | ✅ |
+| `dirs` | 跨平台用户数据目录 | ✅ |
+| `rusqlite` (bundled) | SQLite 数据库 | ✅ |
+| `reqwest` (stream + json) | HTTP 客户端 (LLM/搜索/天气) | ✅ |
+| `tokio` (full) | 异步运行时 | ✅ |
+| `walkdir` | 文件夹递归扫描 | ✅ |
+| `scraper` | HTML DOM 解析 | ✅ |
+| `pdf-extract` + `calamine` + `quick-xml` + `zip` | 知识库文件解析 | ✅ |
+| `chrono` | 时间处理 | ✅ |
+| `tauri-plugin-dialog` | 原生文件对话框 | ✅ |
+| `tauri-plugin-log` | 日志 | ✅ |
+| `tauri-plugin-shell` | 打开外部文件/链接 | ✅ |
+| `tauri-plugin-single-instance` | 防双开 | ✅ |
+| `tauri-plugin-stronghold` | 加密凭据存储 | 🔜 计划中 |
+
+### 前端 (`package.json`)
+
+| 包 | 用途 |
+|:---|:---|
+| `vue` 3.x | 前端框架 |
+| `vite` 6.x | 构建工具 |
+| `@tauri-apps/api` | Tauri 前端 IPC SDK |
+| `@tauri-apps/plugin-dialog` | 对话框前端绑定 |
+| `marked` + `highlight.js` | Markdown 渲染 |
+| `lucide-vue-next` | 图标库 |
+| `vue-i18n` | 国际化 |
+
+### 待清理的 Electron 遗留依赖
+
+以下 `package.json` 中的依赖是 Electron 时代遗留，Tauri 不使用但尚未清理：
+`electron`, `electron-builder`, `electron-log`, `better-sqlite3`, `openai`, `mammoth`, `xlsx`, `pdf-parse`, `cheerio`, `concurrently`, `dotenv`, `ws`, `officeparser`
+
+> 在 M7 (T-703 打包发布) 时应彻底清理。

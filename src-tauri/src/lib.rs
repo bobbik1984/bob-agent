@@ -13,6 +13,7 @@ mod db;
 mod http_api;
 mod wechat;
 mod keychain;
+mod browser;
 
 use serde_json::{json, Value};
 use std::fs;
@@ -118,13 +119,13 @@ fn config_get_all() -> Value {
 // ═══════════════════════════════════════════════════════════
 
 #[tauri::command]
-async fn llm_chat(messages: Vec<Value>, app: tauri::AppHandle) -> Value {
-    llm::stream_chat(app, messages).await
+async fn llm_chat(messages: Vec<Value>, conversation_id: Option<String>, app: tauri::AppHandle) -> Value {
+    llm::stream_chat(app, messages, conversation_id, None).await
 }
 
 #[tauri::command]
-async fn llm_vision(messages: Vec<Value>, image_base64: String, app: tauri::AppHandle) -> Value {
-    llm::stream_vision(app, messages, image_base64).await
+async fn llm_vision(messages: Vec<Value>, image_base64: String, conversation_id: Option<String>, app: tauri::AppHandle) -> Value {
+    llm::stream_vision(app, messages, image_base64, conversation_id).await
 }
 
 #[tauri::command]
@@ -170,6 +171,22 @@ fn system_remove_custom_model(model_id: String) -> Value {
 #[tauri::command]
 fn llm_rescan_models() -> Value {
     llm::get_models(None) // currently static
+}
+
+#[tauri::command]
+async fn llm_refresh_models(provider_id: String) -> Value {
+    llm::refresh_models_for_provider(provider_id).await
+}
+
+#[tauri::command]
+fn llm_get_registry() -> Value {
+    llm::read_registry()
+}
+
+#[tauri::command]
+fn llm_save_registry(registry: Value) -> Value {
+    llm::write_registry(&registry);
+    json!({ "ok": true })
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -277,6 +294,27 @@ fn system_get_tool_statuses() -> Value {
 }
 
 // ═══════════════════════════════════════════════════════════
+// Tauri Commands — 浏览器增强
+// ═══════════════════════════════════════════════════════════
+
+#[tauri::command]
+fn system_browser_detect() -> Value {
+    let path = browser::detect_browser();
+    let enabled = browser::is_browser_enabled();
+    json!({
+        "detected": path.is_some(),
+        "path": path.map(|p| p.to_string_lossy().to_string()).unwrap_or_default(),
+        "enabled": enabled,
+    })
+}
+
+#[tauri::command]
+fn system_browser_enable() -> Value {
+    browser::enable_browser();
+    json!({ "ok": true })
+}
+
+// ═══════════════════════════════════════════════════════════
 // Tauri Commands — Outbox (声明式配置)
 // ═══════════════════════════════════════════════════════════
 
@@ -294,10 +332,13 @@ pub fn run() {
     let db = db::init_db(&get_data_dir());
     let wechat_state = std::sync::Arc::new(wechat::WechatState::new());
 
+    let browser_state = std::sync::Arc::new(browser::BrowserState::new());
+
     tauri::Builder::default()
         .manage(db::DbState(Mutex::new(db)))
         .manage(sidecar::SidecarState { child: Mutex::new(None) })
         .manage(wechat_state.clone())
+        .manage(browser_state.clone())
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             // 配置
@@ -323,6 +364,9 @@ pub fn run() {
             llm_get_active_models,
             llm_assign_model_role,
             llm_rescan_models,
+            llm_refresh_models,
+            llm_get_registry,
+            llm_save_registry,
             system_get_api_keys,
             system_set_api_key,
             system_add_custom_model,
@@ -371,6 +415,10 @@ pub fn run() {
             // WeChat
             wechat::login_qr::wechat_get_login_qr,
             wechat::login_qr::wechat_check_login_status,
+            wechat::login_qr::wechat_get_current_status,
+            // 浏览器增强
+            system_browser_detect,
+            system_browser_enable,
         ])
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             // 如果已经有一个实例在运行，就把已有窗口唤出来
@@ -453,6 +501,17 @@ pub fn run() {
                 }
             }
 
+            // ── 模型注册表初始化 ──
+            llm::init_model_registry(app.handle());
+            
+            // ── 后台刷新模型列表 ──
+            let _refresh_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                // 延迟 8 秒，让 UI 先加载完毕
+                tokio::time::sleep(std::time::Duration::from_secs(8)).await;
+                llm::refresh_models_on_startup().await;
+            });
+
             // ── 内置技能库初始化 ──
             // 将打包资源中的 skills/ 目录复制到 AppData，确保开箱即用。
             // 仅在 externalSkillsDir 未配置或路径不存在时执行。
@@ -531,6 +590,13 @@ pub fn run() {
 
             // ── Phase 2: 启动本地 HTTP API (127.0.0.1:3721) ──
             http_api::start_http_server(app.handle().clone());
+
+            // ── 浏览器增强空闲回收 ──
+            {
+                use tauri::Manager;
+                let bs = app.state::<std::sync::Arc<browser::BrowserState>>();
+                browser::start_idle_watcher(bs.inner().clone());
+            }
 
             // ── 启动本地微信机器人 ──
             {

@@ -2,6 +2,18 @@
 
 All notable changes to bob-agent will be documented in this file.
 
+## [0.3.2] - 2026-06-04
+
+### 🐛 Bug Fixes
+- **[WeChat] wxid 路由修复**：LLM 调用 `send_wechat_file` 时传入用户明文微信号（如 `wobushuai872834`），而 ilink CDN API 要求加密格式的 wxid（`xxx@im.wechat`），导致 CDN 上传失败。现在 `execute_tool` 接收 `from_user` 上下文，自动将非加密 wxid 覆盖为会话中的真实加密 ID。
+- **[Icon] 桌面图标裁切修复**：原始 `icon.png` 横向内容几乎撑满画布（左边距 1px/0.2%，右边距 0px），缩小至 32x32 后因像素舍入和 Windows 渲染内边距导致左右被截。现在四周统一保留 ~12% 安全边距（61px），所有衍生尺寸（png/ico/icns）已重新生成。
+
+### 🔧 Changes
+- `tools.rs`: `execute_tool()` 和 `execute_tool_inner()` 签名新增 `from_user: Option<&str>` 参数
+- `tools.rs`: `send_wechat_file` 分支增加 wxid 格式检测 + `from_user` 覆盖逻辑
+- `llm.rs`: `stream_internal()` 工具并行执行时透传 `from_user` 到每个工具调用
+- `src-tauri/icons/`: 全部 16 个图标资产（png/ico/icns）用加边距的源图重新生成
+
 ## [1.0.0-alpha] - Unreleased
 
 ### 🏗️ Architecture (Tauri Migration)

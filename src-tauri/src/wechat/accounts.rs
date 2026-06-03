@@ -5,6 +5,12 @@ use std::path::PathBuf;
 
 pub const DEFAULT_BASE_URL: &str = "https://ilinkai.weixin.qq.com";
 
+/// Normalize account ID: replace `@` and `.` with `-` so it's safe for filenames
+/// and consistent across save / load paths.
+pub fn normalize_account_id(raw: &str) -> String {
+    raw.replace(['@', '.'], "-")
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct WechatAccountData {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -65,9 +71,10 @@ pub fn list_wechat_account_ids() -> Vec<String> {
 }
 
 pub fn register_wechat_account_id(account_id: &str) {
+    let id = normalize_account_id(account_id);
     let mut ids = list_wechat_account_ids();
-    if !ids.contains(&account_id.to_string()) {
-        ids.push(account_id.to_string());
+    if !ids.contains(&id) {
+        ids.push(id);
         if let Ok(json) = serde_json::to_string_pretty(&ids) {
             let _ = fs::write(resolve_account_index_path(), json);
         }
@@ -75,8 +82,9 @@ pub fn register_wechat_account_id(account_id: &str) {
 }
 
 pub fn unregister_wechat_account_id(account_id: &str) {
+    let normalized = normalize_account_id(account_id);
     let ids = list_wechat_account_ids();
-    let new_ids: Vec<String> = ids.into_iter().filter(|id| id != account_id).collect();
+    let new_ids: Vec<String> = ids.into_iter().filter(|id| id != &normalized).collect();
     if let Ok(json) = serde_json::to_string_pretty(&new_ids) {
         let _ = fs::write(resolve_account_index_path(), json);
     }
@@ -114,7 +122,8 @@ pub fn load_wechat_account(account_id: &str) -> Option<WechatAccountData> {
 }
 
 pub fn save_wechat_account(account_id: &str, update: WechatAccountData) {
-    let mut existing = load_wechat_account(account_id).unwrap_or_default();
+    let id = normalize_account_id(account_id);
+    let mut existing = load_wechat_account(&id).unwrap_or_default();
     
     if let Some(token) = update.token {
         let trimmed = token.trim().to_string();
@@ -137,18 +146,19 @@ pub fn save_wechat_account(account_id: &str, update: WechatAccountData) {
             existing.user_id = None;
         }
     }
-    existing.account_id = Some(account_id.to_string());
+    existing.account_id = Some(id.clone());
 
-    let path = resolve_account_path(account_id);
+    let path = resolve_account_path(&id);
     if let Ok(json) = serde_json::to_string_pretty(&existing) {
         let _ = fs::write(path, json);
     }
 }
 
 pub fn clear_wechat_account(account_id: &str) {
+    let id = normalize_account_id(account_id);
     let dir = get_accounts_dir();
-    let _ = fs::remove_file(dir.join(format!("{}.json", account_id)));
-    let _ = fs::remove_file(dir.join(format!("{}.sync.json", account_id)));
+    let _ = fs::remove_file(dir.join(format!("{}.json", id)));
+    let _ = fs::remove_file(dir.join(format!("{}.sync.json", id)));
 }
 
 pub fn load_sync_buf(account_id: &str) -> Option<String> {
@@ -166,11 +176,15 @@ pub fn save_sync_buf(account_id: &str, buf: &str) {
 }
 
 pub fn resolve_wechat_account(account_id: Option<&str>) -> Result<ResolvedWechatAccount, String> {
-    let raw = account_id.unwrap_or("").trim();
+    let mut raw = account_id.unwrap_or("").trim().to_string();
     if raw.is_empty() {
-        return Err("wechat: accountId is required".to_string());
+        if let Some(def_id) = get_default_account_id() {
+            raw = def_id;
+        } else {
+            return Err("wechat: accountId is required and no default account found".to_string());
+        }
     }
-    let id = raw.replace(['@', '.'], "-");
+    let id = normalize_account_id(&raw);
 
     let account_data = load_wechat_account(&id);
     let token = account_data.as_ref().and_then(|a| a.token.clone());

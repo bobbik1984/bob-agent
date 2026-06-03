@@ -277,6 +277,7 @@ const modelInfo = computed(() => {
 
 // ── 生命周期 ─────────────────────────────────────────
 let unlistenConfigReconciled = null;
+let unlistenRemoteMessage = null;
 
 onMounted(async () => {
   // ── 拦截 F5 / Ctrl+R：桌面应用不需要硬刷新，改为软重载 ──
@@ -369,10 +370,21 @@ onMounted(async () => {
       });
     });
   }
+
+  // ── 远程消息通知：微信等通道产生新消息时刷新侧边栏 ──────
+  if (window.electronAPI.onRemoteNewMessage) {
+    unlistenRemoteMessage = await window.electronAPI.onRemoteNewMessage((event) => {
+      const convId = event?.payload?.conversation_id || event?.conversation_id;
+      console.log(`[Remote] 收到远程新消息通知, conv_id=${convId}`);
+      // 刷新侧边栏对话列表（新对话出现 / 时间戳更新）
+      loadConversations();
+    });
+  }
 });
 
 onUnmounted(() => {
   if (unlistenConfigReconciled) unlistenConfigReconciled();
+  if (unlistenRemoteMessage) unlistenRemoteMessage();
 });
 
 // ── 对话管理 ─────────────────────────────────────────

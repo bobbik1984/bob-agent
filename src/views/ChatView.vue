@@ -5,7 +5,7 @@
       <!-- 统一的页面标题 -->
       <div v-if="messages.length > 0" class="view-header" :style="{ opacity: logoOpacity }">
         <h2 class="view-title">
-          <img :src="bobLogoUrl" class="title-bob-logo" alt="Bob" />
+          <div class="title-bob-logo"></div>
         </h2>
       </div>
 
@@ -33,7 +33,7 @@
         <!-- 头像 -->
         <div class="message-avatar" :class="msg.role === 'user' ? 'avatar-user' : 'avatar-bob'">
           <User v-if="msg.role === 'user'" :size="16" />
-          <img v-else :src="bobLogoUrl" class="bob-avatar-img" alt="Bob" />
+          <div v-else class="bob-avatar-icon"></div>
         </div>
 
         <!-- 内容 -->
@@ -76,16 +76,23 @@
           <div v-if="msg.image_base64" class="message-image">
             <img :src="'data:image/png;base64,' + msg.image_base64" alt="用户图片" />
           </div>
-          <!-- 模型标注 -->
-          <div v-if="msg.role === 'assistant' && msg._modelLabel" class="model-label">
-            {{ msg._modelLabel }}
+          <!-- 元数据标注：模型 & 来源 -->
+          <div class="message-meta-row" v-if="(msg.role === 'assistant' && msg._modelLabel) || msg.from_channel">
+            <div v-if="msg.from_channel" class="source-label">
+              <Smartphone v-if="msg.from_channel === 'wechat'" :size="10" />
+              <Monitor v-else :size="10" />
+              <span>{{ msg.from_channel === 'wechat' ? 'WeChat' : 'Desktop' }}</span>
+            </div>
+            <div v-if="msg.role === 'assistant' && msg._modelLabel" class="model-label">
+              {{ msg._modelLabel }}
+            </div>
           </div>
         </div>
       </div>
 
       <!-- 流式输出中 -->
       <div v-if="isStreaming" class="message-row message-assistant animate-slide-up">
-        <div class="message-avatar avatar-bob"><img :src="bobLogoUrl" class="bob-avatar-img" alt="Bob" /></div>
+        <div class="message-avatar avatar-bob"><div class="bob-avatar-icon"></div></div>
         <div class="message-body">
           <!-- 等待响应指示器：回车后立即出现，思考期间持续显示，直到正文开始流入才消失 -->
           <div v-if="!streamContent && activeTools.length === 0" class="typing-indicator">
@@ -112,6 +119,15 @@
                     :title="sr.title"
                     :url="sr.url"
                     :snippet="sr.snippet"
+                  />
+                </template>
+                <template v-else-if="tool._browserEnable">
+                  <BrowserEnableCard
+                    :url="tool._browserEnable.url"
+                    :browser-path="tool._browserEnable.browserPath"
+                    :browser-detected="tool._browserEnable.browserDetected"
+                    @confirm="(data) => handleBrowserEnable(data, tool)"
+                    @cancel="() => { tool._browserEnable = null }"
                   />
                 </template>
                 <template v-else>
@@ -342,10 +358,11 @@ marked.setOptions({ breaks: true, gfm: true });
 
 <script setup>
 import { ref, watch, onMounted, onUnmounted, nextTick } from 'vue';
-import { Sparkles, FileText, Camera, Calendar, User, ChevronRight, ChevronDown, ChevronUp, X, FileUp, Paperclip, Loader2, Shield, Zap, Lock, Unlock, Download } from 'lucide-vue-next';
+import { Sparkles, FileText, Camera, Calendar, User, ChevronRight, ChevronDown, ChevronUp, X, FileUp, Paperclip, Loader2, Shield, Zap, Lock, Unlock, Download, Smartphone, Monitor } from 'lucide-vue-next';
 import ConfirmCard from '../components/ConfirmCard.vue';
 import FileCard from '../components/FileCard.vue';
 import SearchCard from '../components/SearchCard.vue';
+import BrowserEnableCard from '../components/BrowserEnableCard.vue';
 import FolderDropCard from '../components/FolderDropCard.vue';
 import KBEstimateCard from '../components/KBEstimateCard.vue';
 import MorningBriefing from '../components/MorningBriefing.vue';
@@ -354,7 +371,7 @@ import { useChat } from '../composables/useChat.js';
 import { useModelSwitcher } from '../composables/useModelSwitcher.js';
 import { useDragDrop } from '../composables/useDragDrop.js';
 
-const bobLogoUrl = '/bob_logo.svg';
+
 
 const props = defineProps({
   conversationId: String,
@@ -419,6 +436,18 @@ function sendMessage() {
 
 function parseTextAsEvent() {
   _parseTextAsEvent(resetTextareaHeight);
+}
+
+// ── 浏览器增强确认 ──────────────────────────────────
+async function handleBrowserEnable(data, tool) {
+  try {
+    await window.electronAPI.browserEnable();
+    tool._browserEnable = null;
+    tool.result = '✅ 浏览器已启用，正在重新加载页面...';
+  } catch (err) {
+    console.error('[browser] enable failed:', err);
+    tool.result = `浏览器启用失败: ${err.message}`;
+  }
 }
 
 // ── 输入辅助 (依赖 DOM ref, 留在组件层) ──────────────
@@ -597,8 +626,16 @@ defineExpose({
 
 .title-bob-logo {
   height: 24px;
-  width: auto;
-  filter: var(--logo-filter);
+  width: 80px;
+  background-color: var(--logo-color);
+  -webkit-mask-image: url(/bob_logo.svg);
+  mask-image: url(/bob_logo.svg);
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  mask-position: center;
 }
 
 /* ── 空状态 ─────────────────────────────────────────── */
@@ -695,11 +732,18 @@ defineExpose({
   border: 1px solid var(--border-subtle);
 }
 
-.bob-avatar-img {
+.bob-avatar-icon {
   width: 60%;
   height: 60%;
-  object-fit: contain;
-  filter: var(--logo-filter);
+  background-color: var(--logo-color);
+  -webkit-mask-image: url(/bob_logo.svg);
+  mask-image: url(/bob_logo.svg);
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  mask-position: center;
 }
 
 /* 内容块：最宽占 80%，文字始终左对齐 */
@@ -1476,15 +1520,27 @@ defineExpose({
   color: var(--accent-primary);
 }
 
-/* ── 模型标注 ─────────────────────────────────────── */
-.model-label {
+/* ── 消息元数据标注 ── */
+.message-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.model-label, .source-label {
   font-size: 11px;
   color: var(--text-muted);
   opacity: 0.5;
-  margin-top: 2px;
   font-family: var(--font-mono);
   user-select: none;
   letter-spacing: 0.02em;
+}
+
+.source-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 
 /* ── 思考中动画 ───────────────────────────────────── */

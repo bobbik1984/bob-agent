@@ -51,10 +51,10 @@ window.electronAPI = {
 
 
   // ── LLM 通信 (Rust 引擎) ─────────────────────────────
-  sendChat: (messages, globalFileAccess, agentMode) => 
-    invoke('llm_chat', { messages }),
-  sendVision: (messages, imageBase64, globalFileAccess, agentMode) => 
-    invoke('llm_vision', { messages, imageBase64 }),
+  sendChat: (messages, globalFileAccess, agentMode, conversationId) => 
+    invoke('llm_chat', { messages, conversationId }),
+  sendVision: (messages, imageBase64, globalFileAccess, agentMode, conversationId) => 
+    invoke('llm_vision', { messages, imageBase64, conversationId }),
   stopGeneration: async () => { /* 待实现 AbortController */ },
   getModels: async (provider) => {
     try {
@@ -92,6 +92,9 @@ window.electronAPI = {
   assignModelRole: (modelId, role) => invoke('llm_assign_model_role', { modelId, role }),
   getActiveModels: () => invoke('llm_get_active_models'),
   rescanModels: () => invoke('llm_rescan_models'),
+  refreshModels: (providerId) => invoke('llm_refresh_models', { providerId }),
+  getRegistry: () => invoke('llm_get_registry'),
+  saveRegistry: (registry) => invoke('llm_save_registry', { registry }),
 
   // ── 日历 / 日程 (Rust 原生 T-605) ──────────────────────
   listEvents: async () => invoke('system_list_events'),
@@ -208,9 +211,14 @@ window.electronAPI = {
   // ── 微信助理 (Rust 原生 WeChat Gateway) ─────────────────
   wechatGetLoginQr: async () => invoke('wechat_get_login_qr'),
   wechatCheckLoginStatus: async (qrcode) => invoke('wechat_check_login_status', { qrcode }),
+  wechatGetCurrentStatus: async () => invoke('wechat_get_current_status'),
+
+  // ── 浏览器增强 (CDP Browser Enhancement) ─────────────────
+  browserDetect: async () => invoke('system_browser_detect'),
+  browserEnable: async () => invoke('system_browser_enable'),
 
   // Generic invoke passthrough for components that call invoke directly
   invoke: (cmd, args) => invoke(cmd, args || {}),
 };
 
-console.log('🚀 Tauri Bridge v5.2: 54 Rust-native IPC — WeChat QR login gateway registered.');
+console.log('🚀 Tauri Bridge v5.3: 56 Rust-native IPC — Browser Enhancement registered.');
