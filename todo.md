@@ -371,3 +371,58 @@
 ## 里程碑 11: v0.3 — 微信接入 + HTTP API (已完成)
 
 微信接入模块已在 Rust 侧原生实现 (wechat/ 9个文件 + http_api.rs)，桌面端 UI 已适配。
+
+---
+
+## 📍 里程碑 12: v0.4 — Ghost Partner (幽灵副手)
+> 🎯 **目标**: 从"被动响应的聊天机器人"进化为"主动辅助的桌面幽灵副手"。
+> 📋 **来源**: `docs/20260606_AI 桌面助手竞品与差异化战略.docx` 竞品分析 + 差异化战略梳理。
+> 🏗️ **核心定位**: 「中国泛白领办公桌上的幽灵副手」— 极度轻量、原生体验、纯本地化，拒绝全能 IDE 叙事。
+
+### Phase 1: 低成本高感知
+
+- [ ] T-1201: **富文本剪贴板交接 (Rich-Text Clipboard Handoff)**
+  - [ ] Cargo.toml 引入 `tauri-plugin-clipboard-manager`
+  - [ ] lib.rs 注册插件，capabilities/default.json 增加 `clipboard-manager:default` 权限
+  - [ ] ChatView 消息气泡增加"复制为富文本"按钮（图标: `ClipboardCopy`）
+  - [ ] 实现 Markdown → HTML 序列化（复用 `marked` 渲染结果），写入 `text/html` 剪贴板格式
+  - [ ] 用户按 Ctrl+V 即可在 Outlook / 微信公众号编辑器 / WPS 中粘贴为带表格、高亮、加粗的富文本
+  - *设计理念: 拒绝视觉模拟 (GUI 自动化)，用优雅的"剪贴板交接"保留人类点击"发送"的安全控制感*
+
+### Phase 2: 核心调度基建
+
+- [ ] T-1211: **Cron 调度引擎 (Heartbeat Scheduler)**
+  - [ ] Cargo.toml 引入 `tokio-cron-scheduler`
+  - [ ] 新建 `scheduler.rs` 模块
+  - [ ] SQLite 新增 `schedules` 表 (id, cron_expr, prompt_template, enabled, last_run, created_at)
+  - [ ] lib.rs setup() 中初始化调度器，从 DB 恢复已有任务
+  - [ ] IPC 命令: `system_list_schedules`, `system_add_schedule`, `system_remove_schedule`, `system_toggle_schedule`
+  - [ ] 执行逻辑: 时间到 → 后台组装 Prompt → 调 `stream_internal` → 结果写入通知/Inbox
+  - *对齐 todo.md L333-336 原有的 Cron Automations Epic*
+
+- [ ] T-1212: **文件目录监控 (Micro-Heartbeat File Watch)**
+  - [ ] Cargo.toml 引入 `notify` crate（文件系统事件通知，比 walkdir 轮询更省电）
+  - [ ] 监控 tracked_folders + 微信下载目录
+  - [ ] 新文件出现时，通过系统托盘气泡或桌面通知轻提醒
+  - [ ] 可选: 自动触发 LLM-Wiki ingest（需用户在提醒中确认）
+
+### Phase 3: 交互升级
+
+- [ ] T-1221: **快速输入气泡窗 (Quick-Capture Bubble)**
+  - [ ] Tauri 多窗口: 新建一个透明无边框小窗口（约 400×60px），贴边悬浮 + 始终置顶
+  - [ ] 点击气泡展开单行输入框，回车后气泡立即收起
+  - [ ] 输入内容通过 Tauri IPC 发送给主窗口处理
+  - [ ] 后端语义路由: 结合现有 Tool Calling 和日历系统，判断输入是日历事件、待办、还是普通对话
+  - *注: 此功能在竞品分析中被称为"桌宠"，实际上是一个极简气泡 + 快速对话框，不需要动画宠物形象*
+
+### Phase 4: 高阶自治（延后 / 按需）
+
+- [ ] T-1231: **Outbox 预填提案 (Proactive Proposals)**
+  - [ ] 微心跳检测到新事务时，后台模型分析并预填 `bob_outbox.json` 草案
+  - [ ] 用户唤醒桌面时，弹出执行清单一键确认
+  - [ ] 将交互逻辑从"被动等待指令"升级为"主动提供执行提案"
+
+- [ ] T-1232: **过程记忆提取 (Procedural Memory / Skill Extraction)**
+  - [ ] Dream Engine 复盘近期重复操作模式，将高频操作固化为新的 Skill 定义
+  - [ ] 引入自学习循环，实现"越用越顺手"的正向演进
+  - *注: 这是研究课题，暂不排期，需先观察 dream.rs V2 的实际产出质量*

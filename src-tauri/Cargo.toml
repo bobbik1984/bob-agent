@@ -45,6 +45,7 @@ zip = "2.4"
 quick-xml = "0.37"
 tauri-plugin-single-instance = "2.0.0-rc"
 tauri-plugin-global-shortcut = "2.0.0-rc"
+tauri-plugin-clipboard-manager = "2.0.0-rc"
 qrcode = "0.14"
 base64 = "0.22"
 

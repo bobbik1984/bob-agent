@@ -410,6 +410,60 @@ pub fn get_tool_schemas() -> Vec<Value> {
                 }
             }
         }),
+        // ── T-1211: Cron 定时任务工具 ──────────────────────────
+        json!({
+            "type": "function",
+            "function": {
+                "name": "add_cron_job",
+                "description": "创建一个定时自动执行的任务。Bob 会在指定时间自动执行 prompt 并将结果记录到日程。适用场景：用户说'每天早上8点帮我播报新闻'、'每周一提醒我写周报'、'每隔5分钟检查一下服务器状态'等。cron_expr 是标准5字段格式：分 时 日 月 周。常见示例：'0 8 * * *'=每天8:00，'0 8 * * 1-5'=工作日8:00，'*/30 * * * *'=每30分钟，'0 9 * * 1'=每周一9:00。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "title": { "type": "string", "description": "任务的简短标题，如'早报播报'、'周报提醒'" },
+                        "cron_expr": { "type": "string", "description": "标准5字段cron表达式：分 时 日 月 周。例如 '0 8 * * *' 表示每天8:00" },
+                        "prompt": { "type": "string", "description": "到时间后 Bob 要执行的指令。写得详细一些，因为执行时没有上下文。例如：'请搜索今日科技新闻，整理出5条最重要的，用简洁的中文播报格式输出'" }
+                    },
+                    "required": ["title", "cron_expr", "prompt"]
+                }
+            }
+        }),
+        json!({
+            "type": "function",
+            "function": {
+                "name": "list_cron_jobs",
+                "description": "列出当前所有定时任务（包括已启用和已禁用的）。当用户询问'我有哪些定时任务'、'查看自动任务'时调用。",
+                "parameters": { "type": "object", "properties": {} }
+            }
+        }),
+        json!({
+            "type": "function",
+            "function": {
+                "name": "remove_cron_job",
+                "description": "删除指定的定时任务。需要提供任务 ID（从 list_cron_jobs 获取）。当用户说'取消那个定时任务'、'不要再每天播报了'时，先调用 list_cron_jobs 找到 ID，再调用此工具删除。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "id": { "type": "string", "description": "要删除的定时任务 ID" }
+                    },
+                    "required": ["id"]
+                }
+            }
+        }),
+        json!({
+            "type": "function",
+            "function": {
+                "name": "toggle_cron_job",
+                "description": "启用或暂停指定的定时任务。暂停后任务不会被删除，可以随时恢复。当用户说'暂停那个任务'或'恢复那个定时任务'时调用。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "id": { "type": "string", "description": "定时任务 ID" },
+                        "enabled": { "type": "boolean", "description": "true=启用, false=暂停" }
+                    },
+                    "required": ["id", "enabled"]
+                }
+            }
+        }),
     ]
 }
 
@@ -553,6 +607,25 @@ async fn execute_tool_inner(app: &tauri::AppHandle, name: &str, args: &Value, fr
                 Ok(msg) => json!({ "ok": msg }),
                 Err(e) => json!({ "error": e }),
             }
+        }
+        // ── T-1211: Cron 定时任务 ──
+        "add_cron_job" => {
+            let title = args.get("title").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let cron_expr = args.get("cron_expr").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let prompt = args.get("prompt").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            super::scheduler::system_add_cron_job(title, cron_expr, prompt).await
+        }
+        "list_cron_jobs" => {
+            super::scheduler::system_list_cron_jobs().await
+        }
+        "remove_cron_job" => {
+            let id = args.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            super::scheduler::system_remove_cron_job(id).await
+        }
+        "toggle_cron_job" => {
+            let id = args.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let enabled = args.get("enabled").and_then(|v| v.as_bool()).unwrap_or(true);
+            super::scheduler::system_toggle_cron_job(id, enabled).await
         }
         _ => json!({ "error": format!("未知工具: {}", name) }),
     }

@@ -6,6 +6,7 @@ mod dream;
 mod calendar;
 mod sidecar;
 mod outbox;
+mod scheduler;
 mod tools;
 mod kb_extractor;
 mod kb_indexer;
@@ -324,6 +325,30 @@ fn system_write_outbox(operations: Vec<Value>) -> Value {
 }
 
 // ═══════════════════════════════════════════════════════════
+// Tauri Commands — 闪念速记 (Quick Notes)
+// ═══════════════════════════════════════════════════════════
+
+#[tauri::command]
+fn system_append_quick_note(content: String) -> Value {
+    use std::io::Write;
+    let path = get_data_dir().join("quick_notes.md");
+    let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+    let entry = format!("\n- [{}] {}\n", timestamp, content.trim());
+    match std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+    {
+        Ok(mut f) => {
+            let _ = f.write_all(entry.as_bytes());
+            log::info!("[QuickNote] appended {} chars to {:?}", content.len(), path);
+            json!({ "ok": true, "path": path.to_string_lossy() })
+        }
+        Err(e) => json!({ "error": format!("写入速记失败: {}", e) }),
+    }
+}
+
+// ═══════════════════════════════════════════════════════════
 // Tauri App 启动
 // ═══════════════════════════════════════════════════════════
 
@@ -340,6 +365,7 @@ pub fn run() {
         .manage(wechat_state.clone())
         .manage(browser_state.clone())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .invoke_handler(tauri::generate_handler![
             // 配置
             system_is_setup_complete,
@@ -397,6 +423,11 @@ pub fn run() {
             calendar::system_delete_event,
             calendar::system_update_event_status,
             calendar::system_update_event_time,
+            // Cron 调度
+            scheduler::system_list_cron_jobs,
+            scheduler::system_add_cron_job,
+            scheduler::system_remove_cron_job,
+            scheduler::system_toggle_cron_job,
             // Sidecar
             sidecar::start_offline_engine,
             sidecar::stop_offline_engine,
@@ -412,6 +443,8 @@ pub fn run() {
             db::system_factory_reset,
             // Outbox (声明式配置)
             system_write_outbox,
+            // 闪念速记
+            system_append_quick_note,
             // WeChat
             wechat::login_qr::wechat_get_login_qr,
             wechat::login_qr::wechat_check_login_status,
@@ -468,6 +501,12 @@ pub fn run() {
             let reconciler_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 outbox::start_reconciler(reconciler_handle).await;
+            });
+
+            // 启动 Cron 调度引擎 (T-1211)
+            let scheduler_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                scheduler::start_scheduler(scheduler_handle).await;
             });
 
             // ── 清理遗留的 "vaulted" 标记 ──

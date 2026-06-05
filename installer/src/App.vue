@@ -1,5 +1,10 @@
 <template>
   <div class="installer-root" @mousedown="startDrag">
+    <!-- 关闭按钮 - 右上角，hover 时显示 -->
+    <button v-show="!showCancelDialog" class="close-btn" @mousedown.stop @click="handleClose">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+    </button>
+
     <div class="installer-card">
       <!-- Logo 区域 - 逐层显影动画 -->
       <div class="wizard-logo">
@@ -38,9 +43,6 @@
 
       <!-- 导航区域 -->
       <div class="wizard-nav">
-        <button class="nav-arrow nav-close" @click="closeWindow" v-if="step !== 2">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-        </button>
         <div class="nav-spacer"></div>
         <!-- Step 1: 开始安装 -->
         <button v-if="step === 1" class="nav-arrow nav-launch" @click="startInstall">
@@ -52,6 +54,20 @@
         </button>
       </div>
     </div>
+
+    <!-- 取消确认浮层 -->
+    <Transition name="fade">
+      <div v-if="showCancelDialog" class="cancel-overlay" @mousedown.stop>
+        <div class="cancel-dialog">
+          <p class="cancel-text">安装正在进行中，确定要退出吗？</p>
+          <p class="cancel-hint">已解压的文件不会被清理</p>
+          <div class="cancel-actions">
+            <button class="cancel-btn cancel-btn-continue" @click="dismissCancel">继续安装</button>
+            <button class="cancel-btn cancel-btn-quit" @click="confirmCancel">退出安装</button>
+          </div>
+        </div>
+      </div>
+    </Transition>
   </div>
 </template>
 
@@ -65,6 +81,7 @@ const step = ref(1);
 const installDir = ref('');
 const progress = ref(0);
 const statusText = ref('正在解压文件...');
+const showCancelDialog = ref(false);
 
 onMounted(async () => {
   installDir.value = await invoke('get_default_install_dir');
@@ -104,7 +121,24 @@ async function launchBob() {
   await win.close();
 }
 
+function handleClose() {
+  if (step.value === 2) {
+    showCancelDialog.value = true;
+  } else {
+    closeWindow();
+  }
+}
+
 async function closeWindow() {
+  const win = getCurrentWindow();
+  await win.close();
+}
+
+function dismissCancel() {
+  showCancelDialog.value = false;
+}
+
+async function confirmCancel() {
   const win = getCurrentWindow();
   await win.close();
 }
@@ -142,7 +176,7 @@ async function startDrag(e) {
 html, body {
   height: 100%;
   margin: 0;
-  background: var(--bg-root);
+  background: transparent;
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
   overflow: hidden;
@@ -159,7 +193,8 @@ html, body {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--bg-root);
+  background: transparent;
+  position: relative;
 }
 
 .installer-card {
@@ -362,16 +397,7 @@ html, body {
   border-color: var(--user-accent);
 }
 
-.nav-close {
-  color: var(--text-tertiary);
-  border-color: rgba(255, 255, 255, 0.06);
-}
 
-.nav-close:hover {
-  color: #ef4444;
-  border-color: #ef4444;
-  background: rgba(239, 68, 68, 0.08);
-}
 
 .nav-launch {
   color: var(--user-accent);
@@ -399,5 +425,115 @@ html, body {
 @keyframes fadeIn {
   from { opacity: 0; transform: translateY(8px); }
   to   { opacity: 1; transform: translateY(0); }
+}
+/* ── 关闭按钮 (右上角 hover 显示) ── */
+.close-btn {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 100;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  opacity: 0;
+  transition: all 0.25s ease;
+}
+
+.installer-root:hover .close-btn {
+  opacity: 0.35;
+}
+
+.close-btn:hover {
+  opacity: 1 !important;
+  background: rgba(239, 68, 68, 0.12);
+  color: #ef4444;
+}
+
+/* ── 取消确认浮层 ── */
+.cancel-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 200;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(6px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.cancel-dialog {
+  padding: 28px 32px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  text-align: center;
+}
+
+.cancel-text {
+  font-size: 14px;
+  color: var(--text-primary);
+  margin-bottom: 6px;
+}
+
+.cancel-hint {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  margin-bottom: 20px;
+}
+
+.cancel-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+}
+
+.cancel-btn {
+  padding: 8px 22px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-family: var(--font-sans);
+  cursor: pointer;
+  border: 1px solid var(--border-color);
+  transition: all 0.2s;
+}
+
+.cancel-btn-continue {
+  background: transparent;
+  color: var(--text-secondary);
+}
+
+.cancel-btn-continue:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  border-color: var(--user-accent);
+}
+
+.cancel-btn-quit {
+  background: rgba(239, 68, 68, 0.08);
+  color: #ef4444;
+  border-color: rgba(239, 68, 68, 0.25);
+}
+
+.cancel-btn-quit:hover {
+  background: rgba(239, 68, 68, 0.18);
+  border-color: rgba(239, 68, 68, 0.4);
+}
+
+/* ── 浮层过渡动画 ── */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.2s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
 }
 </style>

@@ -5,13 +5,13 @@
       <!-- 统一的页面标题 -->
       <div v-if="messages.length > 0" class="view-header" :style="{ opacity: logoOpacity }">
         <h2 class="view-title">
-          <div class="title-bob-logo"></div>
+          <div class="title-bob-logo bob-clickable" @click="openQuickNote"></div>
         </h2>
       </div>
 
       <!-- 空状态：背景 logo（绝对定位，不参与 flex 布局） -->
       <div v-if="messages.length === 0" class="empty-logo-wrapper">
-        <div class="empty-bob-logo"></div>
+        <div class="empty-bob-logo bob-clickable" @click="openQuickNote"></div>
       </div>
 
       <!-- 空状态：前景内容（晨间汇报等） -->
@@ -33,7 +33,7 @@
         <!-- 头像 -->
         <div class="message-avatar" :class="msg.role === 'user' ? 'avatar-user' : 'avatar-bob'">
           <User v-if="msg.role === 'user'" :size="16" />
-          <div v-else class="bob-avatar-icon"></div>
+          <div v-else class="bob-avatar-icon bob-clickable" @click="openQuickNote"></div>
         </div>
 
         <!-- 内容 -->
@@ -76,8 +76,8 @@
           <div v-if="msg.image_base64" class="message-image">
             <img :src="'data:image/png;base64,' + msg.image_base64" alt="用户图片" />
           </div>
-          <!-- 元数据标注：模型 & 来源 -->
-          <div class="message-meta-row" v-if="(msg.role === 'assistant' && msg._modelLabel) || msg.from_channel">
+          <!-- 元数据标注：模型 & 来源 & 复制 -->
+          <div class="message-meta-row" v-if="msg.role === 'assistant' || msg.from_channel">
             <div v-if="msg.from_channel" class="source-label">
               <Smartphone v-if="msg.from_channel === 'wechat'" :size="10" />
               <Monitor v-else :size="10" />
@@ -86,6 +86,16 @@
             <div v-if="msg.role === 'assistant' && msg._modelLabel" class="model-label">
               {{ msg._modelLabel }}
             </div>
+            <!-- T-1201: 富文本复制按钮 -->
+            <button
+              v-if="msg.role === 'assistant' && msg.content"
+              class="copy-rich-btn"
+              :title="msg._copyDone ? '已复制' : '复制为富文本'"
+              @click="copyRichText(msg)"
+            >
+              <Check v-if="msg._copyDone" :size="12" class="copy-done-icon" />
+              <ClipboardCopy v-else :size="12" />
+            </button>
           </div>
         </div>
       </div>
@@ -242,7 +252,6 @@
                     :key="p.id"
                     class="model-provider-btn"
                     :class="{ active: switcherProvider === p.id }"
-                    @mouseenter="switcherProvider = p.id"
                     @click="switcherProvider = p.id"
                   >
                     <img v-if="getModelLogo(p.id)" :src="getModelLogo(p.id)" class="model-logo-sm" />
@@ -357,8 +366,8 @@ marked.setOptions({ breaks: true, gfm: true });
 </script>
 
 <script setup>
-import { ref, watch, onMounted, onUnmounted, nextTick } from 'vue';
-import { Sparkles, FileText, Camera, Calendar, User, ChevronRight, ChevronDown, ChevronUp, X, FileUp, Paperclip, Loader2, Shield, Zap, Lock, Unlock, Download, Smartphone, Monitor } from 'lucide-vue-next';
+import { ref, watch, onMounted, onUnmounted, nextTick, inject } from 'vue';
+import { Sparkles, FileText, Camera, Calendar, User, ChevronRight, ChevronDown, ChevronUp, X, FileUp, Paperclip, Loader2, Shield, Zap, Lock, Unlock, Download, Smartphone, Monitor, ClipboardCopy, Check } from 'lucide-vue-next';
 import ConfirmCard from '../components/ConfirmCard.vue';
 import FileCard from '../components/FileCard.vue';
 import SearchCard from '../components/SearchCard.vue';
@@ -382,6 +391,9 @@ const emit = defineEmits(['update-title']);
 const messagesArea = ref(null);
 const inputRef = ref(null);
 const logoOpacity = ref(1);
+
+// ── 闪念速记入口 (从 App.vue provide) ─────────────────
+const openQuickNote = inject('openQuickNote', () => {});
 
 // ── 本地 UI 状态 ─────────────────────────────────────
 const globalFileAccess = ref(false);
@@ -436,6 +448,31 @@ function sendMessage() {
 
 function parseTextAsEvent() {
   _parseTextAsEvent(resetTextareaHeight);
+}
+
+// ── T-1201: 富文本复制 ──────────────────────────────
+async function copyRichText(msg) {
+  try {
+    const html = renderMarkdown(msg.content);
+    const plainText = msg.content;
+    // 优先使用 Tauri 剪贴板插件（writeHtml），fallback 到浏览器 Clipboard API
+    if (window.__TAURI_INTERNALS__) {
+      const { writeHtml } = await import('@tauri-apps/plugin-clipboard-manager');
+      await writeHtml(html, plainText);
+    } else {
+      // 浏览器环境 fallback（dev server 预览时）
+      const blob = new Blob([html], { type: 'text/html' });
+      const textBlob = new Blob([plainText], { type: 'text/plain' });
+      await navigator.clipboard.write([
+        new ClipboardItem({ 'text/html': blob, 'text/plain': textBlob })
+      ]);
+    }
+    // 短暂 ✓ 反馈
+    msg._copyDone = true;
+    setTimeout(() => { msg._copyDone = false; }, 1500);
+  } catch (err) {
+    console.error('[clipboard] copy rich text failed:', err);
+  }
 }
 
 // ── 浏览器增强确认 ──────────────────────────────────
@@ -655,6 +692,7 @@ defineExpose({
 .empty-logo-wrapper .empty-bob-logo {
   max-width: 1000px;
   width: 100%;
+  pointer-events: auto; /* 复原点击事件，允许点击触发闪念速记 */
 }
 
 /* 前景内容层（晨间汇报等） */
@@ -1169,7 +1207,7 @@ defineExpose({
 
 .model-popup-cols {
   display: flex;
-  max-height: 320px;
+  height: 280px;
 }
 
 /* 左侧：供应商列表 */
@@ -1543,6 +1581,36 @@ defineExpose({
   gap: 4px;
 }
 
+/* T-1201: 富文本复制按钮 */
+.copy-rich-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-muted);
+  opacity: 0;
+  padding: 2px;
+  border-radius: var(--radius-xs, 3px);
+  transition: opacity 0.2s, color 0.2s, background 0.2s;
+  margin-left: auto;
+}
+
+.message-body:hover .copy-rich-btn {
+  opacity: 0.5;
+}
+
+.copy-rich-btn:hover {
+  opacity: 1 !important;
+  color: var(--text-primary);
+  background: var(--surface-input);
+}
+
+.copy-done-icon {
+  color: var(--accent-primary);
+}
+
 /* ── 思考中动画 ───────────────────────────────────── */
 .typing-indicator {
   display: flex;
@@ -1574,5 +1642,17 @@ defineExpose({
     transform: translateY(-6px);
     opacity: 1;
   }
+}
+
+/* ── Bob 可点击元素：闪念速记入口 ── */
+.bob-clickable {
+  cursor: pointer;
+  transition: opacity 0.15s, transform 0.15s;
+}
+.bob-clickable:hover {
+  opacity: 0.7;
+}
+.bob-clickable:active {
+  transform: scale(0.93);
 }
 </style>

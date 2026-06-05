@@ -16,6 +16,8 @@
     "core:window:allow-unmaximize",
     "dialog:default",
     "global-shortcut:allow-register",
-    "global-shortcut:allow-unregister"
+    "global-shortcut:allow-unregister",
+    "clipboard-manager:allow-write-html",
+    "clipboard-manager:allow-write-text"
   ]
 }

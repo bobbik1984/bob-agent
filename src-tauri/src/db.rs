@@ -45,6 +45,9 @@ pub fn init_db(data_dir: &std::path::Path) -> Connection {
     // 初始化日程表
     crate::calendar::init_events_table(&conn);
 
+    // 初始化 Cron 调度表 (T-1211)
+    crate::scheduler::init_cron_table(&conn);
+
     // LLM-Wiki 知识库全文搜索索引 (FTS5)
     conn.execute_batch("
         CREATE VIRTUAL TABLE IF NOT EXISTS wiki_fts USING fts5(

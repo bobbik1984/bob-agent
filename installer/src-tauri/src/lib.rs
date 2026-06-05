@@ -3,6 +3,7 @@ use std::io::{self, Cursor};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use tauri::Emitter;
+use tauri::Manager;
 
 /// payload.zip 在编译时被硬编码进二进制
 /// 不再依赖任何外部文件——exe 自身就是完整的安装器

@@ -104,6 +104,19 @@ window.electronAPI = {
   updateEventStatus: async (id, status) => invoke('system_update_event_status', { id, status }),
   updateEventTime: async (id, startTime, endTime) => invoke('system_update_event_time', { id, startTime, endTime }),
 
+  // ── Cron 定时任务 (Rust 原生 T-1211) ───────────────
+  listCronJobs: async () => invoke('system_list_cron_jobs'),
+  addCronJob: async (title, cronExpr, prompt) => invoke('system_add_cron_job', { title, cronExpr, prompt }),
+  removeCronJob: async (id) => invoke('system_remove_cron_job', { id }),
+  toggleCronJob: async (id, enabled) => invoke('system_toggle_cron_job', { id, enabled }),
+  onSchedulerCompleted: (callback) => {
+    let unlisten = null;
+    listen('scheduler:completed', (event) => {
+      callback(event.payload);
+    }).then(fn => { unlisten = fn; });
+    return () => { if (unlisten) { unlisten(); unlisten = null; } };
+  },
+
   // ── 凭证管理 (Credential Store) ────────────────────────
   getApiKeys: async () => invoke('system_get_api_keys'),
   setApiKey: async (providerId, apiKey) => invoke('system_set_api_key', { providerId, apiKey }),
@@ -173,6 +186,9 @@ window.electronAPI = {
   openDataDir: async () => invoke('system_open_data_dir'),
   factoryReset: async () => invoke('system_factory_reset'),
 
+  // ── 闪念速记 (Quick Note) ──────────────────────────────
+  appendQuickNote: async (content) => invoke('system_append_quick_note', { content }),
+
   // ── Outbox (声明式配置 — AI 自主修改设置) ──────────────
   writeOutbox: async (operations) => invoke('system_write_outbox', { operations }),
   onConfigReconciled: (callback) => {
@@ -221,4 +237,4 @@ window.electronAPI = {
   invoke: (cmd, args) => invoke(cmd, args || {}),
 };
 
-console.log('🚀 Tauri Bridge v5.3: 56 Rust-native IPC — Browser Enhancement registered.');
+console.log('🚀 Tauri Bridge v5.4: 61 Rust-native IPC — Cron Scheduler registered.');

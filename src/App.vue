@@ -4,7 +4,7 @@
     <!-- 标题栏拖拽区域 -->
     <div class="titlebar titlebar-drag">
       <div class="titlebar-left titlebar-no-drag">
-        <svg class="app-logo" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 152.85 99.94">
+        <svg class="app-logo" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 152.85 99.94" @click="openQuickNote">
           <g>
             <path fill="currentColor" d="M166.3,82.45a29.91,29.91,0,0,1-52.92,19.11,29.91,29.91,0,0,1-46,0A29.91,29.91,0,0,1,14.45,82.45V15.72a2.3,2.3,0,0,1,2.3-2.3H26a2.3,2.3,0,0,1,2.3,2.3V57.24a29.92,29.92,0,0,1,39.12,6.09,29.91,29.91,0,0,1,39.11-6.09V15.72a2.3,2.3,0,0,1,2.3-2.3H118a2.3,2.3,0,0,1,2.3,2.3V57.24a29.92,29.92,0,0,1,46,25.21Zm-13.8,0a16.11,16.11,0,1,0-16.11,16.1A16.11,16.11,0,0,0,152.5,82.45Zm-46,0a16.11,16.11,0,1,0-16.1,16.1A16.1,16.1,0,0,0,106.48,82.45Zm-46,0a16.11,16.11,0,1,0-16.11,16.1A16.11,16.11,0,0,0,60.47,82.45Z" transform="translate(-13.95 -12.92)"/>
             <path fill="none" stroke="currentColor" stroke-miterlimit="10" d="M136.39,52.54a29.94,29.94,0,0,0-16.11,4.7V15.72a2.3,2.3,0,0,0-2.3-2.3h-9.2a2.3,2.3,0,0,0-2.3,2.3V57.24a29.91,29.91,0,0,0-39.11,6.09,29.92,29.92,0,0,0-39.12-6.09V15.72a2.3,2.3,0,0,0-2.3-2.3h-9.2a2.3,2.3,0,0,0-2.3,2.3V82.45a29.91,29.91,0,0,0,52.92,19.11,29.91,29.91,0,0,0,46,0,29.91,29.91,0,1,0,23-49Z" transform="translate(-13.95 -12.92)"/>
@@ -146,15 +146,19 @@
         </div>
       </div>
     </div>
+
+    <!-- 闪念速记浮层 -->
+    <QuickNoteOverlay ref="quickNoteRef" />
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, computed, nextTick } from 'vue';
+import { ref, onMounted, onUnmounted, computed, nextTick, provide } from 'vue';
 import ChatView from './views/ChatView.vue';
 import InboxView from './views/InboxView.vue';
 import SettingsView from './views/SettingsView.vue';
 import SetupWizard from './components/SetupWizard.vue';
+import QuickNoteOverlay from './components/QuickNoteOverlay.vue';
 import { Inbox, Settings, Plus, X, Sun, Moon, ChevronLeft, ChevronRight } from 'lucide-vue-next';
 import { useI18n } from 'vue-i18n';
 
@@ -172,6 +176,14 @@ const { locale, t } = useI18n();
 const isSetupComplete = ref(false);
 const currentView = ref('chat');
 const chatViewRef = ref(null);
+const quickNoteRef = ref(null);
+
+// ── 闪念速记：全局 provide，子组件 inject 后调用即可 ──
+function openQuickNote() {
+  quickNoteRef.value?.open();
+}
+provide('openQuickNote', openQuickNote);
+
 
 import { watch } from 'vue';
 watch(currentView, (newView) => {
@@ -639,6 +651,11 @@ async function onConfigChanged() {
   width: auto;
   color: var(--logo-color);
   margin-left: 0;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+.app-logo:hover {
+  opacity: 0.6;
 }
 
 
