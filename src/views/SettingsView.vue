@@ -140,7 +140,7 @@
             <div v-for="cm in customModels" :key="cm.id" style="display: flex; align-items: center; gap: 8px; padding: 6px 8px; background: var(--bg-tertiary); border-radius: 4px; border: 1px solid var(--border-subtle);">
               <span style="font-weight: bold; width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ cm.displayName }}</span>
               <span style="flex: 1; font-size: 0.85em; color: var(--text-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ cm.baseUrl }}</span>
-              <button class="btn-icon" style="color: var(--status-error); width: 24px; height: 24px;" @click="removeCustomModel(cm.id)" :title="$t('settings.delete')">
+              <button class="btn-icon" style="color: var(--color-error); width: 24px; height: 24px;" @click="removeCustomModel(cm.id)" :title="$t('settings.delete')">
                 <Trash2 :size="14" />
               </button>
             </div>
@@ -185,81 +185,79 @@
         </summary>
         <p class="section-desc" style="margin-top: 16px; margin-bottom: 16px;">{{ $t('settings.registry_desc') }}</p>
 
-        <div v-if="registryData && registryData.providers" style="display: flex; flex-direction: column; gap: 12px;">
-          <!-- 每个供应商 -->
-          <div v-for="(provider, pIdx) in registryData.providers" :key="provider.id"
-            style="border: 1px solid var(--border-subtle); border-radius: 8px; overflow: hidden;">
-            <!-- 供应商标题栏 -->
-            <div style="display: flex; align-items: center; gap: 8px; padding: 10px 14px; background: var(--bg-tertiary); cursor: pointer;"
-              @click="toggleProviderExpand(provider.id)">
-              <img v-if="getProviderLogo(provider.id)" :src="getProviderLogo(provider.id)" style="width: 16px; height: 16px; object-fit: contain; border-radius: 2px;" />
-              <span style="font-weight: 600; flex: 1;">{{ provider.name }}</span>
-              <span style="font-size: 0.78em; color: var(--text-tertiary); margin-right: 4px;">{{ provider.id }}</span>
-              <span style="font-size: 0.78em; color: var(--text-tertiary);">{{ (provider.models || []).length }} models</span>
-              <ChevronDown :size="14" :style="{ transform: expandedProviders[provider.id] ? 'rotate(180deg)' : 'rotate(0)', transition: 'transform 0.2s' }" />
-            </div>
-
-            <!-- 供应商详情（展开时显示） -->
-            <div v-if="expandedProviders[provider.id]" style="padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; border-top: 1px solid var(--border-subtle);">
-              <!-- 供应商名称 + Base URL -->
-              <div style="display: grid; grid-template-columns: 1fr 2fr; gap: 8px; align-items: center;">
-                <label style="font-size: 0.82em; color: var(--text-secondary);">{{ $t('settings.registry_provider_name') }}</label>
-                <input v-model="provider.name" class="input" @input="markRegistryDirty" style="font-size: 0.85em; padding: 4px 8px;" />
-              </div>
-              <div style="display: grid; grid-template-columns: 1fr 2fr; gap: 8px; align-items: center;">
-                <label style="font-size: 0.82em; color: var(--text-secondary);">{{ $t('settings.registry_base_url') }}</label>
-                <input v-model="provider.base_url" class="input" @input="markRegistryDirty" style="font-size: 0.85em; padding: 4px 8px;" />
-              </div>
-              <div style="display: grid; grid-template-columns: 1fr 2fr; gap: 8px; align-items: center;">
-                <label style="font-size: 0.82em; color: var(--text-secondary);">{{ $t('settings.registry_auto_discover') }}</label>
-                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
-                  <input type="checkbox" v-model="provider.supports_model_list" @change="markRegistryDirty" />
-                  <span style="font-size: 0.82em; color: var(--text-tertiary);">/v1/models</span>
-                </label>
+        <div v-if="registryData && registryData.providers">
+          <div class="registry-providers-grid">
+            <!-- 每个供应商 -->
+            <div v-for="(provider, pIdx) in registryData.providers" :key="provider.id"
+              class="registry-provider-card">
+              <!-- 供应商标题栏 -->
+              <div class="registry-provider-header" @click="toggleProviderExpand(provider.id)">
+                <img v-if="getProviderLogo(provider.id)" :src="getProviderLogo(provider.id)" class="registry-provider-logo" />
+                <span class="registry-provider-title">{{ provider.name }}</span>
+                <span class="registry-provider-meta-id">{{ provider.id }}</span>
+                <span class="registry-provider-meta-count">{{ (provider.models || []).length }} models</span>
+                <ChevronDown :size="14" class="registry-provider-chevron" :class="{ expanded: expandedProviders[provider.id] }" />
               </div>
 
-              <!-- 模型列表 -->
-              <div style="margin-top: 4px;">
-                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
-                  <span style="font-size: 0.82em; font-weight: 600; color: var(--text-secondary);">{{ $t('settings.registry_models') }}</span>
-                  <button class="btn btn-primary" @click="addModelToProvider(provider)" style="padding: 2px 8px; font-size: 0.78em;">
-                    <Plus :size="12" /> {{ $t('settings.registry_add_model') }}
-                  </button>
+              <!-- 供应商详情（展开时显示） -->
+              <div v-if="expandedProviders[provider.id]" class="registry-provider-details">
+                <!-- 供应商名称 + Base URL -->
+                <div class="registry-form-row">
+                  <label class="registry-form-label">{{ $t('settings.registry_provider_name') }}</label>
+                  <input v-model="provider.name" class="input" @input="markRegistryDirty" style="font-size: 0.85em; padding: 4px 8px;" />
                 </div>
-                <div v-for="(model, mIdx) in (provider.models || [])" :key="mIdx"
-                  style="display: flex; gap: 6px; align-items: center; margin-bottom: 4px;">
-                  <input v-model="model.id" class="input" :placeholder="$t('settings.registry_model_id')" @input="markRegistryDirty" style="flex: 2; font-size: 0.82em; padding: 3px 6px;" />
-                  <input v-model="model.name" class="input" :placeholder="$t('settings.registry_model_name')" @input="markRegistryDirty" style="flex: 2; font-size: 0.82em; padding: 3px 6px;" />
-                  <label style="display: flex; align-items: center; gap: 3px; font-size: 0.78em; color: var(--text-tertiary); white-space: nowrap; cursor: pointer;">
-                    <input type="checkbox" v-model="model.vision" @change="markRegistryDirty" /> 👁
+                <div class="registry-form-row">
+                  <label class="registry-form-label">{{ $t('settings.registry_base_url') }}</label>
+                  <input v-model="provider.base_url" class="input" @input="markRegistryDirty" style="font-size: 0.85em; padding: 4px 8px;" />
+                </div>
+                <div class="registry-form-row">
+                  <label class="registry-form-label">{{ $t('settings.registry_auto_discover') }}</label>
+                  <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                    <input type="checkbox" v-model="provider.supports_model_list" @change="markRegistryDirty" />
+                    <span style="font-size: 0.82em; color: var(--text-tertiary);">/v1/models</span>
                   </label>
-                  <button class="btn-icon" style="color: var(--status-error); width: 22px; height: 22px; flex-shrink: 0;" @click="removeModelFromProvider(provider, mIdx)" :title="$t('settings.registry_remove_model')">
-                    <X :size="12" />
+                </div>
+
+                <!-- 模型列表 -->
+                <div class="registry-models-section">
+                  <div class="registry-models-header">
+                    <span class="registry-models-title">{{ $t('settings.registry_models') }}</span>
+                    <button class="btn btn-primary" @click="addModelToProvider(provider)" style="padding: 2px 8px; font-size: 0.78em;">
+                      <Plus :size="12" /> {{ $t('settings.registry_add_model') }}
+                    </button>
+                  </div>
+                  <div v-for="(model, mIdx) in (provider.models || [])" :key="mIdx" class="registry-model-row">
+                    <input v-model="model.id" class="input" :placeholder="$t('settings.registry_model_id')" @input="markRegistryDirty" style="flex: 2; font-size: 0.82em; padding: 3px 6px;" />
+                    <input v-model="model.name" class="input" :placeholder="$t('settings.registry_model_name')" @input="markRegistryDirty" style="flex: 2; font-size: 0.82em; padding: 3px 6px;" />
+                    <label style="display: flex; align-items: center; gap: 3px; font-size: 0.78em; color: var(--text-tertiary); white-space: nowrap; cursor: pointer;">
+                      <input type="checkbox" v-model="model.vision" @change="markRegistryDirty" /> 👁
+                    </label>
+                    <button class="btn-icon" style="color: var(--color-error); width: 22px; height: 22px; flex-shrink: 0;" @click="removeModelFromProvider(provider, mIdx)" :title="$t('settings.registry_remove_model')">
+                      <X :size="12" />
+                    </button>
+                  </div>
+                  <div v-if="!provider.models || provider.models.length === 0" style="font-size: 0.8em; color: var(--text-tertiary); padding: 4px 0;">
+                    —
+                  </div>
+                </div>
+
+                <!-- 删除供应商 -->
+                <div style="display: flex; justify-content: flex-end; padding-top: 6px; border-top: 1px solid var(--border-subtle);">
+                  <button class="btn btn-danger-ghost" style="padding: 3px 10px; font-size: 0.78em;" @click="removeProvider(pIdx)">
+                    <Trash2 :size="12" /> {{ $t('settings.registry_remove_provider') }}
                   </button>
                 </div>
-                <div v-if="!provider.models || provider.models.length === 0" style="font-size: 0.8em; color: var(--text-tertiary); padding: 4px 0;">
-                  —
-                </div>
-              </div>
-
-              <!-- 删除供应商 -->
-              <div style="display: flex; justify-content: flex-end; padding-top: 6px; border-top: 1px solid var(--border-subtle);">
-                <button class="btn" style="padding: 3px 10px; font-size: 0.78em; color: var(--status-error); border: 1px solid color-mix(in srgb, var(--status-error) 30%, transparent);" @click="removeProvider(pIdx)">
-                  <Trash2 :size="12" /> {{ $t('settings.registry_remove_provider') }}
-                </button>
               </div>
             </div>
-          </div>
 
-          <!-- 添加新供应商 -->
-          <div style="border: 1px dashed var(--border-subtle); border-radius: 8px; padding: 10px 14px;">
-            <span style="font-size: 0.82em; font-weight: 600; color: var(--text-secondary); margin-bottom: 8px; display: block;">{{ $t('settings.registry_add_provider') }}</span>
-            <div style="display: grid; grid-template-columns: 1fr 1fr 2fr; gap: 8px;">
-              <input v-model="newProviderForm.id" class="input" :placeholder="$t('settings.registry_new_provider_id')" style="font-size: 0.82em; padding: 4px 8px;" />
-              <input v-model="newProviderForm.name" class="input" :placeholder="$t('settings.registry_new_provider_name')" style="font-size: 0.82em; padding: 4px 8px;" />
-              <div style="display: flex; gap: 6px;">
-                <input v-model="newProviderForm.base_url" class="input" :placeholder="$t('settings.registry_new_provider_url')" style="flex: 1; font-size: 0.82em; padding: 4px 8px;" />
-                <button class="btn btn-primary" @click="addNewProvider" :disabled="!newProviderForm.id || !newProviderForm.name || !newProviderForm.base_url" style="padding: 4px 10px; font-size: 0.82em; white-space: nowrap;">
+            <!-- 添加新供应商 -->
+            <div class="registry-add-provider-card">
+              <span class="registry-add-provider-title">{{ $t('settings.registry_add_provider') }}</span>
+              <div class="registry-add-provider-form">
+                <input v-model="newProviderForm.id" class="input" :placeholder="$t('settings.registry_new_provider_id')" style="font-size: 0.82em; padding: 4px 8px;" />
+                <input v-model="newProviderForm.name" class="input" :placeholder="$t('settings.registry_new_provider_name')" style="font-size: 0.82em; padding: 4px 8px;" />
+                <input v-model="newProviderForm.base_url" class="input" :placeholder="$t('settings.registry_new_provider_url')" style="font-size: 0.82em; padding: 4px 8px;" />
+                <button class="btn btn-primary" @click="addNewProvider" :disabled="!newProviderForm.id || !newProviderForm.name || !newProviderForm.base_url" style="padding: 6px; font-size: 0.82em; width: 100%;">
                   <Plus :size="12" /> {{ $t('settings.registry_add_provider') }}
                 </button>
               </div>
@@ -267,11 +265,11 @@
           </div>
 
           <!-- 保存 / 重置 -->
-          <div style="display: flex; gap: 8px; align-items: center; justify-content: flex-end; padding-top: 8px;">
+          <div style="display: flex; gap: 8px; align-items: center; justify-content: flex-end; padding-top: 12px; border-top: 1px solid var(--border-subtle);">
             <span v-if="registrySaveMsg" style="font-size: 0.82em; color: var(--accent-primary); display: flex; align-items: center; gap: 4px;">
               <Check :size="14" /> {{ registrySaveMsg }}
             </span>
-            <button class="btn" @click="resetRegistry" style="padding: 4px 12px; font-size: 0.85em;">{{ $t('settings.registry_reset') }}</button>
+            <button class="btn btn-ghost" @click="resetRegistry" style="padding: 4px 12px; font-size: 0.85em;">{{ $t('settings.registry_reset') }}</button>
             <button class="btn btn-primary" @click="saveRegistry" :disabled="!registryDirty" style="padding: 4px 12px; font-size: 0.85em;">{{ $t('settings.registry_save') }}</button>
           </div>
         </div>
@@ -522,7 +520,49 @@
       <!-- 插件管理弹窗 -->
       <PluginManager :isOpen="showPluginManager" @close="showPluginManager = false" />
 
+      <!-- T-1302: 记忆管理 -->
+      <section class="settings-section card">
+        <h3 class="section-title">
+          <Brain :size="16" class="section-icon" />
+          {{ $t('settings.memory_title') }}
+        </h3>
+        <p class="section-desc" style="margin-bottom: 12px;">{{ $t('settings.memory_desc') }}</p>
 
+        <div v-if="memoryLoading" style="display: flex; align-items: center; gap: 8px; color: var(--text-tertiary); padding: 12px 0;">
+          <Loader2 :size="16" class="spin" />
+          <span style="font-size: 0.85em;">{{ $t('inbox.loading') }}</span>
+        </div>
+
+        <div v-else-if="memoryEntries.length === 0" class="empty-folders">
+          <span>{{ $t('settings.memory_empty') }}</span>
+        </div>
+
+        <div v-else class="memory-list">
+          <div
+            v-for="entry in memoryEntries"
+            :key="entry.type + '/' + entry.id"
+            class="memory-entry"
+          >
+            <div class="memory-entry-info">
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <BookOpen v-if="entry.type === 'wiki'" :size="14" class="memory-entry-icon wiki" />
+                <Brain v-else :size="14" class="memory-entry-icon session" />
+                <span class="memory-entry-title" :title="entry.title || entry.id">{{ formatMemoryTitle(entry.title || entry.id) }}</span>
+              </div>
+              <div class="memory-entry-meta">
+                {{ formatMemoryTime(entry.modified) }}
+              </div>
+            </div>
+            <button
+              class="btn-icon btn-remove-folder"
+              @click="deleteMemoryEntry(entry)"
+              :title="$t('settings.delete')"
+            >
+              <Trash2 :size="14" />
+            </button>
+          </div>
+        </div>
+      </section>
 
       <!-- 关于 & 数据 -->
       <section class="settings-section card">
@@ -612,7 +652,7 @@ import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 
 import { ref, computed, onMounted } from 'vue';
-import { Settings as SettingsIcon, Monitor, Tractor, Eye, EyeOff, Plug, Loader2, Palette, Info, FolderOpen, FolderHeart, Puzzle, Layers, X, Plus, Unplug, Globe, HardDrive, Trash2, Key, FileText, Server, ChevronDown, BookOpen, MessageSquare, Check, Database } from 'lucide-vue-next';
+import { Settings as SettingsIcon, Monitor, Tractor, Eye, EyeOff, Plug, Loader2, Palette, Info, FolderOpen, FolderHeart, Puzzle, Layers, X, Plus, Unplug, Globe, HardDrive, Trash2, Key, FileText, Server, ChevronDown, BookOpen, MessageSquare, Check, Database, Brain } from 'lucide-vue-next';
 import { useI18n } from 'vue-i18n';
 import CustomSelect from '../components/CustomSelect.vue';
 import PluginManager from '../components/PluginManager.vue';
@@ -866,6 +906,57 @@ const isClerkConnected = computed(() => {
 
 const showPluginManager = ref(false);
 const trackedFolders = ref([]);
+
+// ── T-1302: 记忆管理 ──
+const memoryLoading = ref(false);
+const memoryEntries = ref([]);
+
+async function loadMemoryEntries() {
+  if (!window.electronAPI.getMemoryEntries) return;
+  memoryLoading.value = true;
+  try {
+    const entries = await window.electronAPI.getMemoryEntries();
+    memoryEntries.value = entries || [];
+  } catch (e) {
+    console.error('Failed to load memory entries', e);
+    memoryEntries.value = [];
+  } finally {
+    memoryLoading.value = false;
+  }
+}
+
+async function deleteMemoryEntry(entry) {
+  if (!confirm(t('settings.memory_delete_confirm'))) return;
+  try {
+    await window.electronAPI.deleteMemoryEntry(entry.type, entry.id);
+    memoryEntries.value = memoryEntries.value.filter(
+      e => !(e.type === entry.type && e.id === entry.id)
+    );
+  } catch (e) {
+    console.error('Failed to delete memory entry', e);
+  }
+}
+
+function formatMemorySize(bytes) {
+  if (!bytes || bytes < 1024) return `${bytes || 0} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function formatMemoryTitle(title) {
+  if (!title) return '';
+  let cleaned = title.replace(/^(对话摘要|对话记忆|知识条目|知识库)[:：]\s*/g, '');
+  if (cleaned.startsWith('conv-')) {
+    return t('chat.conversation') + ' ' + cleaned.replace('conv-', '');
+  }
+  return cleaned;
+}
+
+function formatMemoryTime(ts) {
+  if (!ts) return '';
+  const d = new Date(ts > 1e11 ? ts : ts * 1000);
+  return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
 
 // ── 凭证管理 (Credential Store) ──
 const modelProviders = ref([]); // 从 registry 动态加载
@@ -1122,6 +1213,7 @@ onMounted(async () => {
       }
     } catch(err) {}
   }
+  await loadMemoryEntries();
 });
 
 async function loadModels() {
@@ -1659,6 +1751,16 @@ select.input {
   background: var(--color-error-bg);
 }
 
+.btn-danger-ghost {
+  background: transparent;
+  color: var(--color-error);
+  border: 1px solid color-mix(in srgb, var(--color-error) 30%, transparent);
+}
+.btn-danger-ghost:hover {
+  background: var(--color-error-bg);
+  border-color: var(--color-error);
+}
+
 /* 微信二维码弹窗样式 */
 .wechat-modal-overlay {
   position: absolute;
@@ -1822,5 +1924,194 @@ select.input {
 
 .help-body :deep(a:hover) {
   text-decoration: underline;
+}
+
+/* ── T-1302: Memory Management ── */
+.memory-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.memory-entry {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-radius: var(--radius-lg);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-subtle);
+  transition: background 0.15s;
+}
+.memory-entry:hover {
+  background: var(--bg-tertiary);
+}
+.memory-entry-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.memory-entry-title {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.memory-entry-meta {
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+  margin-left: 22px;
+}
+.memory-entry-icon {
+  flex-shrink: 0;
+}
+.memory-entry-icon.wiki {
+  color: var(--user-accent);
+}
+.memory-entry-icon.session {
+  color: #a78bfa;
+}
+:root[data-theme="light"] .memory-entry-icon.session {
+  color: #6d28d9;
+}
+
+/* ── Model Provider Registry ── */
+.registry-providers-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16px;
+  margin-bottom: 16px;
+  align-items: start;
+}
+@media (max-width: 850px) {
+  .registry-providers-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.registry-provider-card {
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--bg-secondary);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+.registry-provider-card:hover {
+  border-color: var(--border-default);
+}
+
+.registry-provider-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  background: var(--bg-tertiary);
+  cursor: pointer;
+  user-select: none;
+}
+
+.registry-provider-logo {
+  width: 16px;
+  height: 16px;
+  object-fit: contain;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.registry-provider-title {
+  font-weight: 600;
+  flex: 1;
+  font-size: 0.9em;
+  color: var(--text-primary);
+}
+
+.registry-provider-meta-id {
+  font-size: 0.78em;
+  color: var(--text-tertiary);
+  margin-right: 4px;
+}
+
+.registry-provider-meta-count {
+  font-size: 0.78em;
+  color: var(--text-tertiary);
+}
+
+.registry-provider-chevron {
+  transition: transform 0.2s ease;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+.registry-provider-chevron.expanded {
+  transform: rotate(180deg);
+}
+
+.registry-provider-details {
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border-top: 1px solid var(--border-subtle);
+  background: var(--bg-primary);
+}
+
+.registry-form-row {
+  display: grid;
+  grid-template-columns: 1fr 2.2fr;
+  gap: 8px;
+  align-items: center;
+}
+
+.registry-form-label {
+  font-size: 0.82em;
+  color: var(--text-secondary);
+}
+
+.registry-models-section {
+  margin-top: 4px;
+}
+
+.registry-models-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.registry-models-title {
+  font-size: 0.82em;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.registry-model-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.registry-add-provider-card {
+  border: 1px dashed var(--border-default);
+  border-radius: 8px;
+  padding: 12px 14px;
+  background: var(--bg-secondary);
+  display: flex;
+  flex-direction: column;
+}
+
+.registry-add-provider-title {
+  font-size: 0.82em;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+  display: block;
+}
+
+.registry-add-provider-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 </style>

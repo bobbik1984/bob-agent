@@ -12,6 +12,21 @@
       </div>
 
       <div v-else class="inbox-content">
+        <!-- T-1307: 待办提醒横幅 -->
+        <div v-if="reminders.length > 0" class="reminder-section">
+          <div
+            v-for="(r, ri) in reminders"
+            :key="r.id || ri"
+            class="reminder-alert"
+          >
+            <Bell :size="14" class="reminder-icon" />
+            <span class="reminder-text">
+              <strong>{{ r.title }}</strong>
+              <span v-if="r.date" class="reminder-date">{{ r.date }}</span>
+            </span>
+            <button class="reminder-dismiss" @click="dismissReminder(ri)">&times;</button>
+          </div>
+        </div>
         <div class="section">
           <h3 class="section-title">{{ $t('inbox.this_week') }}</h3>
           <WeekTimeline :weekEvents="events" />
@@ -82,7 +97,7 @@
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { Calendar, Loader2, Timer, Clock, Pause, Play, Trash2 } from 'lucide-vue-next';
+import { Calendar, Loader2, Timer, Clock, Pause, Play, Trash2, Bell } from 'lucide-vue-next';
 import WeekTimeline from '../components/WeekTimeline.vue';
 import TodoList from '../components/TodoList.vue';
 
@@ -92,6 +107,7 @@ const isLoading = ref(true);
 const events = ref([]);
 const todos = ref([]);
 const cronJobs = ref([]);
+const reminders = ref([]);
 
 onMounted(async () => {
   try {
@@ -128,6 +144,24 @@ onMounted(() => {
 onUnmounted(() => {
   if (unlistenScheduler) unlistenScheduler();
 });
+
+// T-1307: 监听待办提醒事件
+let unlistenReminder = null;
+onMounted(() => {
+  unlistenReminder = window.electronAPI.onTodoReminder?.((payload) => {
+    // 避免重复
+    if (!reminders.value.find(r => r.id === payload.id)) {
+      reminders.value.push(payload);
+    }
+  });
+});
+onUnmounted(() => {
+  if (unlistenReminder) unlistenReminder();
+});
+
+function dismissReminder(index) {
+  reminders.value.splice(index, 1);
+}
 
 function onTodoStatusUpdate({ id, status }) {
   const todo = todos.value.find(t => t.id === id);
@@ -407,5 +441,59 @@ function describeCron(expr) {
   color: #e74c3c;
   border-color: #e74c3c;
   background: color-mix(in srgb, #e74c3c 8%, transparent);
+}
+
+/* ── T-1307: 待办提醒 ── */
+.reminder-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: var(--space-2);
+}
+
+.reminder-alert {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: color-mix(in srgb, var(--accent-primary) 6%, var(--surface-secondary));
+  border: 1px solid color-mix(in srgb, var(--accent-primary) 20%, var(--border-primary));
+  border-left: 3px solid var(--accent-primary);
+  border-radius: var(--radius-lg, 10px);
+  font-size: 13px;
+}
+
+.reminder-icon {
+  color: var(--accent-primary);
+  flex-shrink: 0;
+}
+
+.reminder-text {
+  flex: 1;
+  color: var(--text-primary);
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.reminder-date {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.reminder-dismiss {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 16px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+  opacity: 0.5;
+  transition: opacity 0.15s;
+}
+
+.reminder-dismiss:hover {
+  opacity: 1;
 }
 </style>

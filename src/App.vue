@@ -41,20 +41,62 @@
           minWidth: isSidebarCollapsed ? '0px' : '200px'
         }"
       >
-        <!-- 新对话按钮 -->
+        <!-- 侧栏顶部工具栏 -->
         <div class="sidebar-top">
-          <button class="new-chat-btn btn btn-ghost" @click="createNewChat">
+          <button class="new-chat-btn" :class="{ 'sr-compact': isSearchExpanded }" @click="createNewChat" :title="$t('chat.new_conversation')">
             <Plus :size="16" />
-            <span>{{ $t('chat.new_conversation') }}</span>
+            <span class="new-chat-label">{{ $t('chat.new_conversation') }}</span>
           </button>
-          <button class="theme-toggle-btn btn-icon" @click="toggleTheme" :title="currentTheme === 'dark' ? $t('nav.theme_to_light') : $t('nav.theme_to_dark')">
+
+          <div class="sidebar-search" :class="{ expanded: isSearchExpanded }">
+            <button v-if="!isSearchExpanded" class="sidebar-icon-btn search-trigger" @click="expandSearch" title="搜索">
+              <Search :size="16" />
+            </button>
+            <template v-else>
+              <Search :size="14" class="search-icon" />
+              <input
+                ref="searchInputRef"
+                v-model="searchQuery"
+                class="search-input"
+                :placeholder="$t('chat.search_placeholder')"
+                @input="onSearchInput"
+                @keydown.esc="collapseSearch"
+                @blur="onSearchBlur"
+              />
+              <button v-if="searchQuery" class="search-clear btn-icon" @click="clearSearch">
+                <X :size="12" />
+              </button>
+            </template>
+          </div>
+
+          <button class="sidebar-icon-btn" @click="toggleTheme" :title="currentTheme === 'dark' ? $t('nav.theme_to_light') : $t('nav.theme_to_dark')">
             <Sun v-if="currentTheme === 'dark'" :size="16" />
             <Moon v-else :size="16" />
           </button>
         </div>
 
-        <!-- 对话列表（始终显示） -->
-        <div class="conversation-list">
+        <!-- T-1301: 搜索结果列表 -->
+        <div v-if="searchQuery && searchResults.length > 0" class="search-results">
+          <div class="search-results-header">
+            {{ searchResults.length }} {{ $t('chat.search_results_count') }}
+          </div>
+          <div
+            v-for="result in searchResults"
+            :key="result.id"
+            class="search-result-item"
+            @click="jumpToSearchResult(result)"
+          >
+            <div class="search-result-title">{{ result.conv_title }}</div>
+            <div class="search-result-snippet" v-html="result.snippet"></div>
+            <div class="search-result-time">{{ timeAgo(result.created_at) }}</div>
+          </div>
+        </div>
+        <div v-else-if="searchQuery && searchResults.length === 0 && !isSearching" class="search-empty">
+          {{ $t('chat.search_no_results') }}
+        </div>
+
+        <!-- 对话列表（搜索时隐藏） -->
+        <div v-show="!searchQuery" class="conversation-list">
           <div class="conversation-items">
             <div
               v-for="conv in conversations"
@@ -97,9 +139,12 @@
             :key="item.id"
             class="nav-item"
             :class="{ active: currentView === item.id }"
-            @click="currentView = item.id"
+            @click="onNavClick(item.id)"
           >
-            <component :is="item.icon" class="nav-icon" :size="16" />
+            <div class="nav-icon-wrapper">
+              <component :is="item.icon" class="nav-icon" :size="16" />
+              <span v-if="item.id === 'inbox' && cronNotifCount > 0" class="nav-badge">{{ cronNotifCount > 9 ? '9+' : cronNotifCount }}</span>
+            </div>
             <span class="nav-label">{{ item.label }}</span>
           </button>
         </nav>
@@ -159,7 +204,7 @@ import InboxView from './views/InboxView.vue';
 import SettingsView from './views/SettingsView.vue';
 import SetupWizard from './components/SetupWizard.vue';
 import QuickNoteOverlay from './components/QuickNoteOverlay.vue';
-import { Inbox, Settings, Plus, X, Sun, Moon, ChevronLeft, ChevronRight } from 'lucide-vue-next';
+import { Inbox, Settings, Plus, X, Sun, Moon, ChevronLeft, ChevronRight, Search } from 'lucide-vue-next';
 import { useI18n } from 'vue-i18n';
 
 import { getCurrentWindow } from '@tauri-apps/api/window';
@@ -206,6 +251,18 @@ const showSplash = ref(true);
 const sidebarWidth = ref(260);
 const isSidebarCollapsed = ref(false);
 const isResizing = ref(false);
+
+// T-1301: 搜索状态
+const searchQuery = ref('');
+const searchResults = ref([]);
+const isSearching = ref(false);
+const isSearchExpanded = ref(false);
+const searchInputRef = ref(null);
+let searchDebounce = null;
+
+// T-1303: Cron 通知状态
+const cronNotifCount = ref(0);
+let unlistenSchedulerGlobal = null;
 
 // ====== 调试开关：强制显示向导 ======
 // 1 = 正常运行
@@ -392,11 +449,21 @@ onMounted(async () => {
       loadConversations();
     });
   }
+
+  // T-1303: 全局监听 Cron 任务完成事件，更新导航栏红点
+  if (window.electronAPI.onSchedulerCompleted) {
+    unlistenSchedulerGlobal = window.electronAPI.onSchedulerCompleted((payload) => {
+      console.log('[App] scheduler:completed', payload?.title);
+      cronNotifCount.value += 1;
+    });
+  }
 });
 
 onUnmounted(() => {
   if (unlistenConfigReconciled) unlistenConfigReconciled();
   if (unlistenRemoteMessage) unlistenRemoteMessage();
+  if (unlistenSchedulerGlobal) unlistenSchedulerGlobal();
+  if (searchDebounce) clearTimeout(searchDebounce);
 });
 
 // ── 对话管理 ─────────────────────────────────────────
@@ -609,6 +676,71 @@ async function onSetupComplete(payload) {
 async function onConfigChanged() {
   currentModel.value = await window.electronAPI.getConfig('model') || '';
 }
+
+// T-1301: 搜索逻辑 (300ms debounce)
+function onSearchInput() {
+  if (searchDebounce) clearTimeout(searchDebounce);
+  const q = searchQuery.value.trim();
+  if (!q) {
+    searchResults.value = [];
+    isSearching.value = false;
+    return;
+  }
+  isSearching.value = true;
+  searchDebounce = setTimeout(async () => {
+    try {
+      searchResults.value = await window.electronAPI.searchMessages(q);
+    } catch (err) {
+      console.error('[Search] FTS error:', err);
+      searchResults.value = [];
+    } finally {
+      isSearching.value = false;
+    }
+  }, 300);
+}
+
+function clearSearch() {
+  searchQuery.value = '';
+  searchResults.value = [];
+  isSearching.value = false;
+  isSearchExpanded.value = false;
+}
+
+async function expandSearch() {
+  isSearchExpanded.value = true;
+  await nextTick();
+  searchInputRef.value?.focus();
+}
+
+function collapseSearch() {
+  if (!searchQuery.value) {
+    isSearchExpanded.value = false;
+  }
+}
+
+function onSearchBlur() {
+  // 延迟收起，给点击搜索结果留出时间
+  setTimeout(() => {
+    if (!searchQuery.value) {
+      isSearchExpanded.value = false;
+    }
+  }, 200);
+}
+
+function jumpToSearchResult(result) {
+  // 跳转到搜索结果所在的对话
+  activeConversationId.value = result.conversation_id;
+  currentView.value = 'chat';
+  clearSearch();
+}
+
+// T-1303: 点击导航时清除通知计数
+function onNavClick(viewId) {
+  currentView.value = viewId;
+  if (viewId === 'inbox') {
+    cronNotifCount.value = 0;
+  }
+}
 </script>
 
 <style scoped>
@@ -741,37 +873,217 @@ async function onConfigChanged() {
   box-shadow: var(--shadow-sm);
 }
 
-/* ── 侧栏顶部：新对话按钮 ────────────────────────── */
+/* ── 侧栏顶部工具栏 ──────────────────────────────── */
 .sidebar-top {
-  padding: var(--space-3);
+  padding: var(--space-2) var(--space-3);
   flex-shrink: 0;
   display: flex;
-  gap: var(--space-2);
+  align-items: center;
+  gap: 6px;
 }
 
-.new-chat-btn {
-  flex: 1;
-  justify-content: center;
-  border-style: dashed;
-}
-
-.theme-toggle-btn {
-  height: auto;
-  aspect-ratio: 1 / 1;
+.sidebar-icon-btn {
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: center;
   border-radius: var(--radius-md);
-  color: var(--text-secondary);
-  background: transparent;
   border: 1px solid var(--border-subtle);
+  background: transparent;
+  color: var(--text-secondary);
   cursor: pointer;
   transition: all var(--duration-fast);
 }
 
-.theme-toggle-btn:hover {
+.sidebar-icon-btn:hover {
   background: var(--bg-hover);
   color: var(--text-primary);
+}
+
+/* 新对话按钮：默认长条，展开搜索时缩为图标 */
+.new-chat-btn {
+  flex: 1;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border-radius: var(--radius-md);
+  border: 1px dashed var(--border-subtle);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: var(--text-sm);
+  font-family: var(--font-sans);
+  transition: all var(--duration-fast) var(--ease-out);
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.new-chat-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.new-chat-btn.sr-compact {
+  flex: 0 0 34px;
+  width: 34px;
+  border-style: solid;
+}
+
+.new-chat-btn.sr-compact .new-chat-label {
+  display: none;
+}
+
+/* ── 搜索框（可展开） ─────────────────────────────── */
+.sidebar-search {
+  display: flex;
+  align-items: center;
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.sidebar-search.expanded {
+  flex: 1;
+  min-width: 0;
+  gap: 6px;
+  padding: 0 10px;
+  height: 34px;
+  background: var(--surface-input, var(--bg-tertiary));
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+}
+
+.sidebar-search.expanded:focus-within {
+  border-color: var(--accent-primary);
+}
+
+.search-icon {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.search-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  min-width: 0;
+}
+
+.search-input::placeholder {
+  color: var(--text-muted);
+}
+
+.search-clear {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
+}
+
+.search-clear:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+/* ── T-1301: 搜索结果 ───────────────────────────────── */
+.search-results {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 var(--space-3);
+}
+
+.search-results-header {
+  font-size: 11px;
+  color: var(--text-muted);
+  padding: var(--space-1) var(--space-2);
+  margin-bottom: var(--space-1);
+}
+
+.search-result-item {
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background var(--duration-fast);
+  margin-bottom: 2px;
+}
+
+.search-result-item:hover {
+  background: var(--surface-glass);
+}
+
+.search-result-title {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--text-primary);
+  margin-bottom: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.search-result-snippet {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.search-result-snippet :deep(mark) {
+  background: color-mix(in srgb, var(--accent-primary) 25%, transparent);
+  color: var(--accent-tertiary);
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
+.search-result-time {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.search-empty {
+  text-align: center;
+  padding: var(--space-6) var(--space-3);
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+/* ── T-1303: 导航通知红点 ────────────────────────────── */
+.nav-icon-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.nav-badge {
+  position: absolute;
+  top: -6px;
+  right: -8px;
+  min-width: 14px;
+  height: 14px;
+  line-height: 14px;
+  font-size: 9px;
+  font-weight: 600;
+  text-align: center;
+  background: var(--error, #e74c3c);
+  color: #fff;
+  border-radius: 7px;
+  padding: 0 3px;
 }
 
 /* ── 对话列表 ───────────────────────────────────────── */

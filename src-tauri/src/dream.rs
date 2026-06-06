@@ -347,6 +347,42 @@ fn generate_dream_report() {
         briefing.push_str(&format!("{}. **{}** ({} 条消息{})\n", i + 1, topics, msg_count, tag));
     }
 
+    // T-1308: 追加今日日程到简报
+    let db_path = super::get_data_dir().join("bob.db");
+    if let Ok(conn) = rusqlite::Connection::open(&db_path) {
+        let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+        if let Ok(mut stmt) = conn.prepare(
+            "SELECT title, type, status, start_time, end_time
+             FROM events
+             WHERE date = ?1 AND status != 'cancelled'
+             ORDER BY start_time ASC"
+        ) {
+            let mut has_schedule = false;
+            if let Ok(rows) = stmt.query_map(
+                rusqlite::params![today],
+                |row| Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                ))
+            ) {
+                for row in rows.flatten() {
+                    let (title, etype, status, start_time, _end_time) = row;
+                    if !has_schedule {
+                        briefing.push_str("\n## 今日日程\n\n");
+                        has_schedule = true;
+                    }
+                    let time_str = start_time.as_deref().unwrap_or("");
+                    let status_mark = if status == "done" { "[x]" } else { "[ ]" };
+                    let type_tag = if etype == "todo" { "待办" } else { "日程" };
+                    briefing.push_str(&format!("- {} **{}** {} {}\n", status_mark, title, type_tag, time_str));
+                }
+            }
+        }
+    }
+
     let stale_count = if sessions.len() > 10 { sessions.len() - 10 } else { 0 };
 
     let report = json!({
@@ -409,4 +445,219 @@ pub fn system_dismiss_dream() -> bool {
         }
     }
     true
+}
+
+// ═══════════════════════════════════════════════════════════
+// T-1302: 记忆透明化 — 列出 / 删除记忆条目
+// ═══════════════════════════════════════════════════════════
+
+/// 从 session 文件中提取可读标题
+/// - .md 文件: 读取首行 `# ...` 标题
+/// - .json 文件: 解析 JSON 中的 userTopics / conversationId 生成标题
+fn extract_session_title(path: &std::path::Path) -> String {
+    let filename = path.file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default();
+
+    let content = match fs::read_to_string(path) {
+        Ok(c) => c,
+        Err(_) => return filename,
+    };
+
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+
+    if ext == "md" {
+        // Markdown: 取首行去掉 # 前缀
+        return content.lines().next()
+            .map(|l| l.trim().trim_start_matches('#').trim().to_string())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| filename.clone());
+    }
+
+    if ext == "json" {
+        // JSON: 从 userTopics 和 conversationId 字段生成标题
+        if let Ok(obj) = serde_json::from_str::<Value>(&content) {
+            // 优先用 userTopics 第一条（截取前 40 字符）
+            if let Some(topics) = obj.get("userTopics").and_then(|v| v.as_array()) {
+                if let Some(first) = topics.first().and_then(|v| v.as_str()) {
+                    let trimmed: String = first.chars().take(40).collect();
+                    if !trimmed.is_empty() {
+                        let suffix = if first.chars().count() > 40 { "..." } else { "" };
+                        return format!("对话摘要: {}{}", trimmed, suffix);
+                    }
+                }
+            }
+            // 降级: 用 conversationId
+            if let Some(conv_id) = obj.get("conversationId").and_then(|v| v.as_str()) {
+                return format!("对话摘要: {}", conv_id);
+            }
+        }
+    }
+
+    filename
+}
+
+/// 收集指定目录中的 session 文件，返回 (filename, entry_json) 列表
+fn collect_session_entries(
+    dir: &std::path::Path,
+    entry_type: &str,
+    existing_md_set: Option<&std::collections::HashSet<String>>,
+) -> Vec<Value> {
+    let mut entries = Vec::new();
+    let rd = match fs::read_dir(dir) {
+        Ok(r) => r,
+        Err(_) => return entries,
+    };
+
+    for entry in rd.flatten() {
+        let path = entry.path();
+        if !path.is_file() { continue; }
+
+        let filename = path.file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
+
+        // 如果是 .json 且同名 .md 已存在（已压缩），则跳过
+        if let Some(md_set) = existing_md_set {
+            if filename.ends_with(".json") {
+                let md_name = filename.replace(".json", ".md");
+                if md_set.contains(&md_name) {
+                    continue;
+                }
+            }
+        }
+
+        let title = extract_session_title(&path);
+
+        let meta = fs::metadata(&path).ok();
+        let size = meta.as_ref().map(|m| m.len()).unwrap_or(0);
+        let modified = meta.and_then(|m| m.modified().ok())
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0);
+
+        entries.push(json!({
+            "type": entry_type,
+            "id": filename,
+            "title": title,
+            "size": size,
+            "modified": modified,
+        }));
+    }
+
+    entries
+}
+
+/// 列出所有记忆条目 (热 session + 冷 session + wiki 知识条目)
+#[tauri::command]
+pub fn system_get_memory_entries() -> Value {
+    let wiki_dir = super::get_wiki_dir();
+    let mut entries: Vec<Value> = Vec::new();
+
+    // 预扫描冷存储中的 .md 文件名集合，用于去重
+    let cold_sessions_dir = wiki_dir.join("sessions");
+    let cold_md_set: std::collections::HashSet<String> = if cold_sessions_dir.exists() {
+        fs::read_dir(&cold_sessions_dir)
+            .into_iter()
+            .flat_map(|rd| rd.flatten())
+            .filter_map(|e| {
+                let name = e.file_name().to_string_lossy().to_string();
+                if name.ends_with(".md") { Some(name) } else { None }
+            })
+            .collect()
+    } else {
+        std::collections::HashSet::new()
+    };
+
+    // 1. 扫描热存储 memory/sessions/ (最近 7 天内的活跃记忆)
+    let hot_dir = get_session_log_dir();
+    if hot_dir.exists() {
+        entries.extend(collect_session_entries(&hot_dir, "session_hot", None));
+    }
+
+    // 2. 扫描冷存储 wiki/sessions/ (已归档的记忆)
+    if cold_sessions_dir.exists() {
+        entries.extend(collect_session_entries(&cold_sessions_dir, "session", Some(&cold_md_set)));
+    }
+
+    // 3. 扫描 wiki/ 根目录下的 .md 文件 (知识条目)
+    if let Ok(rd) = fs::read_dir(&wiki_dir) {
+        for entry in rd.flatten() {
+            let path = entry.path();
+            if !path.is_file() { continue; }
+            if path.extension().map_or(true, |ext| ext != "md") { continue; }
+
+            let filename = path.file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default();
+
+            let title = fs::read_to_string(&path)
+                .ok()
+                .and_then(|c| c.lines().next().map(|l| l.trim().trim_start_matches('#').trim().to_string()))
+                .unwrap_or_else(|| filename.clone());
+
+            let meta = fs::metadata(&path).ok();
+            let size = meta.as_ref().map(|m| m.len()).unwrap_or(0);
+            let modified = meta.and_then(|m| m.modified().ok())
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_millis() as i64)
+                .unwrap_or(0);
+
+            entries.push(json!({
+                "type": "wiki",
+                "id": filename,
+                "title": title,
+                "size": size,
+                "modified": modified,
+            }));
+        }
+    }
+
+    // 按修改时间倒序排列
+    entries.sort_by(|a, b| {
+        let ma = a.get("modified").and_then(|v| v.as_i64()).unwrap_or(0);
+        let mb = b.get("modified").and_then(|v| v.as_i64()).unwrap_or(0);
+        mb.cmp(&ma)
+    });
+
+    json!(entries)
+}
+
+/// 删除指定的记忆条目
+#[tauri::command]
+pub fn system_delete_memory_entry(entry_type: String, entry_id: String) -> Value {
+    let wiki_dir = super::get_wiki_dir();
+
+    // 根据类型构建目标路径和安全校验根目录
+    let (target_path, safe_root) = match entry_type.as_str() {
+        "session" => (wiki_dir.join("sessions").join(&entry_id), wiki_dir.clone()),
+        "session_hot" => {
+            let mem_dir = get_memory_dir();
+            (mem_dir.join("sessions").join(&entry_id), mem_dir)
+        },
+        "wiki" => (wiki_dir.join(&entry_id), wiki_dir.clone()),
+        _ => return json!({"error": format!("unknown entry type: {}", entry_type)}),
+    };
+
+    // 安全校验: 规范化路径后确认仍在安全根目录内 (防止路径穿越)
+    let canonical_root = match fs::canonicalize(&safe_root) {
+        Ok(p) => p,
+        Err(e) => return json!({"error": format!("root dir resolve failed: {}", e)}),
+    };
+    let canonical_target = match fs::canonicalize(&target_path) {
+        Ok(p) => p,
+        Err(_) => return json!({"error": "file not found"}),
+    };
+    if !canonical_target.starts_with(&canonical_root) {
+        return json!({"error": "path traversal blocked"});
+    }
+
+    // 执行删除
+    match fs::remove_file(&canonical_target) {
+        Ok(_) => {
+            log::info!("T-1302: deleted memory entry {:?}", canonical_target);
+            json!({"ok": true})
+        }
+        Err(e) => json!({"error": format!("delete failed: {}", e)}),
+    }
 }

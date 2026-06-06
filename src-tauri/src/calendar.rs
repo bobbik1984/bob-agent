@@ -21,6 +21,11 @@ pub fn init_events_table(conn: &rusqlite::Connection) {
             created_at INTEGER NOT NULL
         );
     ").unwrap_or_default();
+
+    // T-1307: 添加 last_notified 列（存量数据库迁移）
+    conn.execute_batch("
+        ALTER TABLE events ADD COLUMN last_notified INTEGER DEFAULT 0;
+    ").unwrap_or_default();
 }
 
 /// 列出所有事件和待办

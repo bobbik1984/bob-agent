@@ -156,7 +156,14 @@
     "wechat_bind_success": "Bound successfully",
     "wechat_bind_success_desc": "WeChat assistant is ready. You can start chatting from your phone.",
     "wechat_scan_hint": "Scan with WeChat on your phone",
-    "wechat_loading_qr": "Loading QR code..."
+    "wechat_loading_qr": "Loading QR code...",
+    "memory_title": "Memory Management",
+    "memory_desc": "View and manage Bob's knowledge entries and conversation memories.",
+    "memory_type_session": "Session Memory",
+    "memory_type_wiki": "Knowledge Entry",
+    "memory_empty": "No memory entries yet",
+    "memory_delete_confirm": "Delete this memory entry? This cannot be undone.",
+    "memory_deleted": "Deleted"
   },
   "chat": {
     "new_conversation": "New Chat",
@@ -209,7 +216,10 @@
     "folder_tracked": "Folder \"{name}\" has been added to tracked list.",
     "folder_track_failed": "Failed to track folder",
     "kb_build_request_cheap": "Please use the base model to build a semantic knowledge base for this folder.",
-    "kb_build_request_core": "Please use the core model to build a semantic knowledge base for this folder."
+    "kb_build_request_core": "Please use the core model to build a semantic knowledge base for this folder.",
+    "search_placeholder": "Search conversations...",
+    "search_results_count": "results",
+    "search_no_results": "No matching content found"
   },
   "model_hub": {
     "title": "Model Hub",

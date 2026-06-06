@@ -61,6 +61,33 @@ pub fn init_db(data_dir: &std::path::Path) -> Connection {
         );
     ").unwrap_or_default();
 
+    // T-1301: 对话消息全文搜索索引 (FTS5)
+    conn.execute_batch("
+        CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
+            content,
+            content=messages,
+            content_rowid=id
+        );
+
+        -- 自动同步触发器
+        CREATE TRIGGER IF NOT EXISTS messages_ai AFTER INSERT ON messages BEGIN
+            INSERT INTO messages_fts(rowid, content) VALUES (new.id, new.content);
+        END;
+        CREATE TRIGGER IF NOT EXISTS messages_ad AFTER DELETE ON messages BEGIN
+            INSERT INTO messages_fts(messages_fts, rowid, content) VALUES('delete', old.id, old.content);
+        END;
+        CREATE TRIGGER IF NOT EXISTS messages_au AFTER UPDATE OF content ON messages BEGIN
+            INSERT INTO messages_fts(messages_fts, rowid, content) VALUES('delete', old.id, old.content);
+            INSERT INTO messages_fts(rowid, content) VALUES (new.id, new.content);
+        END;
+    ").unwrap_or_default();
+
+    // 回填存量消息到 FTS 索引
+    conn.execute_batch("
+        INSERT OR IGNORE INTO messages_fts(rowid, content)
+        SELECT id, content FROM messages;
+    ").unwrap_or_default();
+
     conn
 }
 
@@ -239,6 +266,50 @@ pub fn db_message_add(
     ).unwrap_or(0);
 
     true
+}
+
+#[tauri::command]
+pub fn db_search_messages(query: String, db: State<DbState>) -> Vec<Value> {
+    let conn = match db.0.lock() {
+        Ok(c) => c,
+        Err(_) => return vec![],
+    };
+    let search_query = query.trim().to_string();
+    if search_query.is_empty() {
+        return vec![];
+    }
+    let mut stmt = match conn.prepare(
+        "SELECT m.id, m.conversation_id, c.title as conv_title,
+                snippet(messages_fts, 0, '<mark>', '</mark>', '...', 32) as snippet,
+                m.created_at
+         FROM messages_fts fts
+         JOIN messages m ON m.id = fts.rowid
+         JOIN conversations c ON c.id = m.conversation_id
+         WHERE messages_fts MATCH ?1
+         ORDER BY rank
+         LIMIT 30"
+    ) {
+        Ok(s) => s,
+        Err(e) => {
+            log::warn!("FTS search error: {}", e);
+            return vec![];
+        }
+    };
+
+    let rows = match stmt.query_map(params![search_query], |row| {
+        Ok(serde_json::json!({
+            "id": row.get::<_, i64>(0)?,
+            "conversation_id": row.get::<_, String>(1)?,
+            "conv_title": row.get::<_, String>(2)?,
+            "snippet": row.get::<_, String>(3)?,
+            "created_at": row.get::<_, i64>(4)?,
+        }))
+    }) {
+        Ok(r) => r,
+        Err(_) => return vec![],
+    };
+
+    rows.filter_map(|r| r.ok()).collect()
 }
 
 #[tauri::command]

@@ -173,7 +173,70 @@ pub async fn start_scheduler(app: AppHandle) {
                 );
             }
         }
+
+        // T-1307: 每轮 tick 也检查即将到期的待办
+        check_upcoming_todos(&app, &db_path);
     }
+}
+
+/// T-1307: 检查即将到期的待办/事件，发射提醒通知
+fn check_upcoming_todos(app: &AppHandle, db_path: &std::path::Path) {
+    let conn = match rusqlite::Connection::open(db_path) {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+
+    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+    let now_ms = super::now_ms() as i64;
+    // 6 小时内未重复提醒 (21600000 ms)
+    let cooldown: i64 = 6 * 3600 * 1000;
+
+    let mut stmt = match conn.prepare(
+        "SELECT id, title, type, date, start_time
+         FROM events
+         WHERE status = 'pending'
+           AND date <= ?1
+           AND (last_notified IS NULL OR last_notified < ?2)
+         ORDER BY date ASC, start_time ASC
+         LIMIT 5"
+    ) {
+        Ok(s) => s,
+        Err(_) => return,
+    };
+
+    let rows: Vec<(String, String, String, Option<String>, Option<String>)> = match stmt.query_map(
+        params![today, now_ms - cooldown],
+        |row| Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, Option<String>>(3)?,
+            row.get::<_, Option<String>>(4)?,
+        ))
+    ) {
+        Ok(r) => r.filter_map(|r| r.ok()).collect(),
+        Err(_) => return,
+    };
+
+    if rows.is_empty() { return; }
+
+    for (id, title, etype, date, start_time) in &rows {
+        let _ = app.emit("todo:reminder", json!({
+            "id": id,
+            "title": title,
+            "type": etype,
+            "date": date,
+            "start_time": start_time,
+        }));
+
+        // 更新 last_notified 时间戳
+        let _ = conn.execute(
+            "UPDATE events SET last_notified = ?1 WHERE id = ?2",
+            params![now_ms, id],
+        );
+    }
+
+    log::info!("Scheduler T-1307: sent {} todo reminders", rows.len());
 }
 
 /// 从 DB 加载所有 enabled=1 的 cron 任务

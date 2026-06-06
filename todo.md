@@ -426,3 +426,91 @@
   - [ ] Dream Engine 复盘近期重复操作模式，将高频操作固化为新的 Skill 定义
   - [ ] 引入自学习循环，实现"越用越顺手"的正向演进
   - *注: 这是研究课题，暂不排期，需先观察 dream.rs V2 的实际产出质量*
+
+---
+
+## 里程碑 13: v0.4 — 体感/防御/主动性升级 (借鉴 Hermes Desktop)
+> **目标**: 把 Bob 已有的强大后端能力"浮出水面"，让用户真正感知到 Bob 在背后做了什么。
+> **来源**: Hermes Desktop 竞品分析 + `bob_optimization_plan.md` + `bob_v04_dev_guide.md`
+> **设计红线**: 14px 最大圆角 / 纯灰度 / 无蓝色 / **严禁 Emoji** / 无技术术语 / 所有通知可关闭
+
+### Phase 1: 体感升级 — 让用户"看得见" (1-2周)
+
+- [ ] T-1301: **对话历史全文搜索**
+  - [ ] `db.rs`: 新建 `messages_fts` FTS5 虚拟表，对 `messages.content` 建索引
+  - [ ] `db.rs`: 创建 INSERT/DELETE 触发器，自动同步 FTS 索引
+  - [ ] `db.rs`: 启动时回填存量消息到 FTS 索引 (INSERT OR IGNORE)
+  - [ ] `db.rs`: 新增 IPC 命令 `db_search_messages(query)` → 返回 `Vec<{id, conversation_id, conv_title, snippet, created_at}>`，LIMIT 30
+  - [ ] `lib.rs`: 注册 `db_search_messages` 命令
+  - [ ] `tauri-bridge.js`: 新增 `searchMessages(query)` 映射
+  - [ ] `ChatView.vue`: 侧边栏顶部新增搜索输入框 (32px高, bg-secondary, 300ms debounce)
+  - [ ] `ChatView.vue`: 搜索结果卡片列表 (单行标题 + 双行 snippet, `<mark>` 用 accent-primary 高亮)
+  - [ ] `ChatView.vue`: 点击搜索结果 → 加载对应对话并滚动到匹配消息
+  - [ ] `index.css`: 搜索结果样式 (`.search-result-item`, `.search-highlight`)
+  - *技术详情见 bob_v04_dev_guide.md T-1301*
+
+- [ ] T-1302: **记忆透明化 — "Bob 的记忆"**
+  - [ ] 新建 `memory.rs` (或在 `dream.rs` 中扩展): `system_get_memory_entries()` 读取 sessions/ 和 wiki/ 目录
+  - [ ] `memory.rs`: `system_delete_memory_entry(type, id)` 安全删除记忆文件
+  - [ ] `lib.rs`: 注册 `system_get_memory_entries`, `system_delete_memory_entry`
+  - [ ] `tauri-bridge.js`: 新增 `getMemoryEntries()`, `deleteMemoryEntry(type, id)`
+  - [ ] `SettingsView.vue`: 在主题区块之后新增"Bob 的记忆"区块 (卡片列表，每条一行 + X 删除按钮)
+  - [ ] `zh-CN.json` / `en-US.json`: 新增 `settings.bob_memory`, `settings.bob_memory_hint` 翻译 (严禁 Emoji)
+  - *技术详情见 bob_v04_dev_guide.md T-1302*
+
+- [ ] T-1303: **Cron 执行结果通知**
+  - [ ] `Cargo.toml`: 启用 `tauri` 的 `notification` feature
+  - [ ] `capabilities/default.json`: 添加 `notification:default` 权限
+  - [ ] `scheduler.rs`: `execute_cron_job()` Step 6 后追加 `app.notification().builder().title().body().show()`
+  - [ ] `InboxView.vue`: `scheduler:completed` 事件处理中为最新完成项添加 `.cron-result-new` 高亮类 (3s 后移除)
+  - [ ] `App.vue`: 全局监听 `scheduler:completed`，若当前不在 InboxView → 日程导航项显示红点 badge
+  - [ ] 通知文案: 直接使用任务 title，正文为结果前 100 字 (严禁 Emoji)
+  - *技术详情见 bob_v04_dev_guide.md T-1303*
+
+### Phase 2: 防御升级 — 让用户"不出错" (2-3周)
+
+- [ ] T-1304: **启动自检医生 (Bob Doctor)**
+  - [ ] 新建 `doctor.rs`: 定义 `CheckResult` 结构体 (code, severity, message, fixable)
+  - [ ] `doctor.rs`: `system_health_check()` 检查 config.json 可读性、bob.db 可读性、API Key 存在性、磁盘可写性
+  - [ ] `doctor.rs`: `system_auto_fix(code)` 自动修复逻辑 (CONFIG_CORRUPT → 从 bak 恢复)
+  - [ ] `lib.rs`: `mod doctor;` + 注册 `system_health_check`, `system_auto_fix`
+  - [ ] `tauri-bridge.js`: 新增 `healthCheck()`, `autoFix(code)`
+  - [ ] `App.vue`: `onMounted` 调用 `healthCheck()`，结果存入全局 reactive state
+  - [ ] `ChatView.vue`: 顶部 sticky 横幅 (32px高, warning=bg-tertiary, error=rgba(200,100,50,0.08))
+  - [ ] `ChatView.vue`: 横幅包含人话提示 + 可选"一键修复"按钮 + X 关闭 (localStorage 24h 内不重复)
+  - [ ] `index.css`: `.health-banner`, `.health-banner--warning`, `.health-banner--error`
+  - *技术详情见 bob_v04_dev_guide.md T-1304*
+
+- [ ] T-1305: **聊天就绪守卫 (Chat Readiness)**
+  - [ ] `llm.rs`: 新增 `system_validate_chat_ready()` — 检查 provider/model/apiKey 本地配置完整性 (不做网络探测)
+  - [ ] `lib.rs`: 注册 `system_validate_chat_ready`
+  - [ ] `tauri-bridge.js`: 新增 `validateChatReady()`
+  - [ ] `ChatView.vue`: `onMounted` 调用一次，缓存 60s
+  - [ ] `ChatView.vue`: 不就绪时发送按钮 `disabled` (opacity 0.4) + 输入框下方一行提示 + "前往设置"链接
+  - [ ] Fail-open: 任何超时/不确定情况返回 `ready: true`
+  - *技术详情见 bob_v04_dev_guide.md T-1305*
+
+### Phase 3: 主动性升级 — 让 Bob "动起来" (3-4周)
+
+- [ ] T-1306: **对话自动提取行动项** (0.5天, 纯 Prompt Engineering)
+  - [ ] `llm.rs`: system prompt 追加"行动项捕捉"指令段 — 识别时间+动作组合时主动调用 `add_calendar_event`
+  - [ ] `ChatView.vue`: `tool_end` 事件中 `tool_name === "add_calendar_event"` 时渲染 `.bob-card-inline` 日程卡片
+  - [ ] 卡片样式: 复用 ConfirmCard 设计 (一行标题 + 一行时间)，不新建组件
+  - *零后端代码改动，仅 Prompt + 前端渲染*
+  - *技术详情见 bob_v04_dev_guide.md T-1306*
+
+- [ ] T-1307: **智能待办跟进**
+  - [ ] `calendar.rs`: events 表新增 `last_notified INTEGER DEFAULT 0` 列 (ALTER TABLE)
+  - [ ] `scheduler.rs`: 主循环追加 `check_upcoming_todos()` — 查询今日到期 + pending 的事件
+  - [ ] `scheduler.rs`: 到期待办触发系统通知 (notification API) + emit `todo:reminder` 事件
+  - [ ] `scheduler.rs`: 提醒频率控制 — 同一待办 last_notified 当天不重复
+  - [ ] `InboxView.vue`: 监听 `todo:reminder`，今日到期项左侧边框变为 `var(--accent-primary)`
+  - *技术详情见 bob_v04_dev_guide.md T-1307*
+
+- [ ] T-1308: **晨间简报增强**
+  - [ ] `dream.rs`: `getDreamReport` 返回数据扩展 — 新增 `today_events`, `today_todos` 字段 (查询 events 表)
+  - [ ] `MorningBriefing.vue`: 对话回顾区块之前插入"今日日程"和"待完成事项"区块
+  - [ ] `zh-CN.json` / `en-US.json`: 新增 `briefing.today_schedule`, `briefing.today_todos` (严禁 Emoji)
+  - [ ] 简报总长度控制: 不超过一屏 (~300字)
+  - *技术详情见 bob_v04_dev_guide.md T-1308*
+

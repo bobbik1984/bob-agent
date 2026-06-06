@@ -15,6 +15,7 @@ mod http_api;
 mod wechat;
 mod keychain;
 mod browser;
+mod doctor;
 
 use serde_json::{json, Value};
 use std::fs;
@@ -382,6 +383,7 @@ pub fn run() {
             // 消息 (来自 db.rs)
             db::db_messages,
             db::db_message_add,
+            db::db_search_messages,
             // LLM & ModelHub
             llm_chat,
             llm_vision,
@@ -416,6 +418,8 @@ pub fn run() {
             dream::system_summarize_session,
             dream::system_get_dream_report,
             dream::system_dismiss_dream,
+            dream::system_get_memory_entries,
+            dream::system_delete_memory_entry,
             // 日程管理
             calendar::system_list_events,
             calendar::system_parse_event,
@@ -452,6 +456,11 @@ pub fn run() {
             // 浏览器增强
             system_browser_detect,
             system_browser_enable,
+            // Doctor 自检
+            doctor::system_health_check,
+            doctor::system_auto_fix,
+            // 聊天就绪校验
+            llm::system_validate_chat_ready,
         ])
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             // 如果已经有一个实例在运行，就把已有窗口唤出来

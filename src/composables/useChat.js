@@ -184,6 +184,24 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
           finalContent = finalContent.replace(configBlockRegex, '').trim();
         }
 
+        // ── T-1306: 行动项捕获 (bob-action-items 代码块) ──
+        const actionBlockRegex = /```bob-action-items\n([\s\S]*?)\n```/g;
+        const extractedItems = [];
+        let actionMatch;
+        while ((actionMatch = actionBlockRegex.exec(finalContent)) !== null) {
+          try {
+            const items = JSON.parse(actionMatch[1]);
+            if (Array.isArray(items)) {
+              extractedItems.push(...items);
+            }
+          } catch (e) {
+            console.warn('[ActionItems] bob-action-items JSON 解析失败:', e);
+          }
+        }
+        if (extractedItems.length > 0) {
+          finalContent = finalContent.replace(actionBlockRegex, '').trim();
+        }
+
         const assistantMsg = {
           role: 'assistant',
           content: finalContent || '（模型未返回内容，请检查 API 配置或重试）',
@@ -199,6 +217,19 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
           assistantMsg.content,
           null
         );
+
+        // T-1306: 将提取的行动项推入消息列表作为交互卡片
+        for (const item of extractedItems) {
+          messages.value.push({
+            role: 'assistant',
+            type: 'action-item-card',
+            actionItem: {
+              title: item.title || '',
+              type: item.type || 'todo',
+              date: item.date || null,
+            },
+          });
+        }
       }
     } catch (err) {
       console.error('[sendMessage] exception:', err);
@@ -369,6 +400,37 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
     msgObj.type = 'text';
   }
 
+  // ── T-1306: 行动项卡片交互 ─────────────────────────
+  async function handleSaveActionItem(item, msgObj) {
+    try {
+      const event = {
+        title: item.title,
+        type: item.type || 'todo',
+        status: 'pending',
+        date: item.date || null,
+        startTime: null,
+        endTime: null,
+        description: '',
+      };
+      const res = await window.electronAPI.confirmEvent(event);
+      if (res.ok) {
+        msgObj.content = `已保存${item.type === 'todo' ? '待办' : '日程'}: ${item.title}`;
+        msgObj.type = 'text';
+      } else {
+        msgObj.content = `保存失败: ${res.error}`;
+        msgObj.type = 'text';
+      }
+    } catch (err) {
+      msgObj.content = `保存失败: ${err.message}`;
+      msgObj.type = 'text';
+    }
+  }
+
+  function handleDismissActionItem(msgObj) {
+    msgObj.content = '已忽略';
+    msgObj.type = 'text';
+  }
+
   return {
     // 状态
     messages,
@@ -393,5 +455,7 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
     parseTextAsEvent,
     handleConfirmEvent,
     handleCancelEvent,
+    handleSaveActionItem,
+    handleDismissActionItem,
   };
 }

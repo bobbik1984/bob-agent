@@ -12,6 +12,47 @@ use super::cdn;
 
 const HELP_TEXT: &str = "可用指令：\n/sessions — 列出最近会话，回复序号切换\n/new      — 开启全新会话\n/status   — 查看当前会话 ID\n/help     — 显示此帮助\n\n直接发送文字即可与 Bob 对话 🤖";
 
+/// T-WX01: 从文本中提取所有 HTTP/HTTPS URL
+fn extract_urls(text: &str) -> Vec<String> {
+    // 简单但高效的 URL 匹配：https?:// 后跟非空白字符
+    let mut urls = Vec::new();
+    for word in text.split_whitespace() {
+        if word.starts_with("http://") || word.starts_with("https://") {
+            // 清理尾部标点
+            let clean = word.trim_end_matches(|c: char| {
+                matches!(c, ',' | '.' | '!' | '?' | ')' | ']' | '>' | '。' | '，' | '！' | '？')
+            });
+            if !clean.is_empty() {
+                urls.push(clean.to_string());
+            }
+        }
+    }
+    urls
+}
+
+/// T-WX01: 从微信 type=49 的卡片消息 XML 中提取 URL
+fn extract_url_from_card_xml(xml: &str) -> Option<String> {
+    // 微信卡片消息的 XML 结构中，URL 通常在 <url> 标签内
+    // 格式: <url><![CDATA[https://mp.weixin.qq.com/...]]></url>
+    if let Some(start) = xml.find("<url>") {
+        let after = &xml[start + 5..];
+        let content = if after.starts_with("<![CDATA[") {
+            // 提取 CDATA 包裹的内容
+            let inner = &after[9..];
+            inner.find("]]>").map(|end| &inner[..end])
+        } else {
+            after.find("</url>").map(|end| &after[..end])
+        };
+        if let Some(url) = content {
+            let url = url.trim();
+            if url.starts_with("http://") || url.starts_with("https://") {
+                return Some(url.to_string());
+            }
+        }
+    }
+    None
+}
+
 // Helper to open DB
 fn open_db() -> Option<Connection> {
     let db_path = crate::get_data_dir().join("bob.db");
@@ -206,6 +247,32 @@ async fn handle_message(
         }
     }
 
+    // ── T-WX01: URL 预抓取 ──────────────────────────────
+    // 检测用户消息中的链接，自动抓取内容注入上下文
+    let urls = extract_urls(text);
+    if !urls.is_empty() {
+        let mut url_context = String::new();
+        for url in urls.iter().take(2) { // 最多抓取 2 个链接
+            let result = crate::web::system_fetch_url(url.to_string()).await;
+            if result.get("error").is_none() {
+                let title = result.get("title").and_then(|v| v.as_str()).unwrap_or("");
+                let content = result.get("content").and_then(|v| v.as_str()).unwrap_or("");
+                let preview: String = content.chars().take(2000).collect();
+                url_context.push_str(&format!(
+                    "\n[来源: {}]\n标题: {}\n{}\n",
+                    url, title, preview
+                ));
+                log::info!("[wechat] T-WX01: pre-fetched URL {} ({} chars)", url, preview.len());
+            }
+        }
+        if !url_context.is_empty() {
+            messages.push(json!({
+                "role": "system",
+                "content": format!("用户消息中包含链接，以下是自动抓取的网页内容供你参考：\n{}", url_context)
+            }));
+        }
+    }
+
     // Call LLM
     // We will need to send typing heartbeats while waiting. 
     // For now we just call it.
@@ -261,16 +328,35 @@ pub async fn process_message(msg: WeixinMessage, state: Arc<WechatState>) -> Res
     let text = match text_item.and_then(|t| t.text) {
         Some(t) => t,
         None => {
-            let type_name = match msg_type {
-                3 => "图片",
-                34 => "语音",
-                43 => "视频",
-                49 => "文件",
-                _ => "该类型消息",
-            };
-            let reply = format!("暂不支持接收{}，请发送文字消息。", type_name);
-            send_reply(&from_user_id, &reply, &state, msg.context_token).await?;
-            return Ok(());
+            // T-WX01: 尝试从 type=49 卡片消息中提取 URL
+            if msg_type == 49 {
+                // type=49 的内容可能在 text_item 的 text 字段中以 XML 形式存在
+                // 也可能在其他 item 的 text 中
+                let card_xml = item_list.iter()
+                    .filter_map(|i| i.text_item.as_ref()?.text.as_ref())
+                    .next()
+                    .map(|s| s.to_string())
+                    .unwrap_or_default();
+                
+                if let Some(url) = extract_url_from_card_xml(&card_xml) {
+                    log::info!("[wechat] T-WX01: extracted URL from type=49 card: {}", url);
+                    format!("帮我看看这个链接的内容: {}", url)
+                } else {
+                    let reply = "收到了一个分享链接，但无法提取 URL。请直接发送链接地址。".to_string();
+                    send_reply(&from_user_id, &reply, &state, msg.context_token).await?;
+                    return Ok(());
+                }
+            } else {
+                let type_name = match msg_type {
+                    3 => "图片",
+                    34 => "语音",
+                    43 => "视频",
+                    _ => "该类型消息",
+                };
+                let reply = format!("暂不支持接收{}，请发送文字消息。", type_name);
+                send_reply(&from_user_id, &reply, &state, msg.context_token).await?;
+                return Ok(());
+            }
         }
     };
 

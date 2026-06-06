@@ -1,5 +1,12 @@
 <template>
   <div class="chat-view">
+    <!-- T-1304: 系统健康横幅 -->
+    <div v-if="healthBanner" class="health-banner" :class="healthBanner.severity">
+      <span class="health-icon">{{ healthBanner.severity === 'error' ? '!' : 'i' }}</span>
+      <span class="health-text">{{ healthBanner.message }}</span>
+      <button v-if="healthBanner.fixable" class="health-fix-btn" @click="handleAutoFix(healthBanner.code)">修复</button>
+      <button class="health-dismiss-btn" @click="healthBanner = null">&times;</button>
+    </div>
     <!-- 消息区域 -->
     <div class="messages-area" ref="messagesArea">
       <!-- 统一的页面标题 -->
@@ -44,6 +51,15 @@
               :event="msg.event"
               @confirm="(e) => handleConfirmEvent(e, msg)"
               @cancel="() => handleCancelEvent(msg)"
+            />
+          </template>
+
+          <!-- T-1306: 行动项卡片 -->
+          <template v-else-if="msg.type === 'action-item-card'">
+            <ActionItemCard
+              :item="msg.actionItem"
+              @save="(item) => handleSaveActionItem(item, msg)"
+              @dismiss="() => handleDismissActionItem(msg)"
             />
           </template>
 
@@ -326,9 +342,9 @@
           <button
             v-else
             class="action-btn send-btn"
-            :disabled="!canSend"
+            :disabled="!canSend || !chatReady"
             @click="sendMessage"
-            :title="$t('chat.send')"
+            :title="chatReadyMsg || $t('chat.send')"
           >
             <span class="icon-send"></span>
           </button>
@@ -375,6 +391,7 @@ import BrowserEnableCard from '../components/BrowserEnableCard.vue';
 import FolderDropCard from '../components/FolderDropCard.vue';
 import KBEstimateCard from '../components/KBEstimateCard.vue';
 import MorningBriefing from '../components/MorningBriefing.vue';
+import ActionItemCard from '../components/ActionItemCard.vue';
 
 import { useChat } from '../composables/useChat.js';
 import { useModelSwitcher } from '../composables/useModelSwitcher.js';
@@ -399,6 +416,13 @@ const openQuickNote = inject('openQuickNote', () => {});
 const globalFileAccess = ref(false);
 const agentMode = ref('insight');
 const showAgentModeSwitcher = ref(false);
+
+// ── T-1304: Doctor 健康横幅 ──────────────────────────
+const healthBanner = ref(null);
+
+// ── T-1305: 聊天就绪守卫 ─────────────────────────────
+const chatReady = ref(true);  // fail-open: 默认可发送
+const chatReadyMsg = ref('');
 
 // ── 组合 Composables ─────────────────────────────────
 
@@ -427,6 +451,7 @@ const {
   renderMarkdown, renderMessageBlocks,
   parseTextAsEvent: _parseTextAsEvent,
   handleConfirmEvent, handleCancelEvent,
+  handleSaveActionItem, handleDismissActionItem,
 } = useChat(props, emit, { scrollToBottom, currentModelName, globalFileAccess, agentMode });
 
 // 拖拽/附件
@@ -484,6 +509,21 @@ async function handleBrowserEnable(data, tool) {
   } catch (err) {
     console.error('[browser] enable failed:', err);
     tool.result = `浏览器启用失败: ${err.message}`;
+  }
+}
+
+// ── T-1304: 自动修复处理 ─────────────────────────────
+async function handleAutoFix(code) {
+  try {
+    const result = await window.electronAPI.autoFix(code);
+    if (result?.ok) {
+      healthBanner.value = null;
+    } else {
+      healthBanner.value.message = result?.message || '修复失败';
+      healthBanner.value.fixable = false;
+    }
+  } catch (e) {
+    console.error('[doctor] autoFix failed:', e);
   }
 }
 
@@ -574,6 +614,34 @@ onMounted(async () => {
   loadMessages();
   await initModels();
 
+  // T-1304: 启动健康检查
+  try {
+    const health = await window.electronAPI.healthCheck();
+    if (health && !health.healthy) {
+      const firstIssue = health.issues?.[0];
+      if (firstIssue) {
+        healthBanner.value = {
+          severity: firstIssue.severity,
+          message: firstIssue.message,
+          code: firstIssue.code,
+          fixable: firstIssue.fixable,
+        };
+      }
+    }
+  } catch (e) {
+    console.warn('[doctor] healthCheck failed:', e);
+  }
+
+  // T-1305: 聊天就绪校验
+  try {
+    const ready = await window.electronAPI.validateChatReady();
+    chatReady.value = ready?.ready !== false;  // fail-open
+    chatReadyMsg.value = ready?.message || '';
+  } catch (e) {
+    console.warn('[chatReady] validation failed:', e);
+    chatReady.value = true;  // fail-open
+  }
+
   // 拖拽监听
   document.addEventListener('dragenter', onDragEnter);
   setupTauriDragListeners(tauriDragUnlistens);
@@ -633,6 +701,71 @@ defineExpose({
   flex-direction: column;
   position: relative;
 }
+
+/* ── T-1304: 健康横幅 ─────────────────────────────── */
+.health-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  font-size: 12px;
+  line-height: 1.4;
+  border-bottom: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+}
+.health-banner.error {
+  background: rgba(220, 38, 38, 0.08);
+  color: #dc2626;
+}
+.health-banner.warning {
+  background: rgba(217, 119, 6, 0.08);
+  color: #d97706;
+}
+.health-icon {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.health-banner.error .health-icon {
+  background: #dc2626;
+  color: #fff;
+}
+.health-banner.warning .health-icon {
+  background: #d97706;
+  color: #fff;
+}
+.health-text {
+  flex: 1;
+}
+.health-fix-btn {
+  background: none;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 11px;
+  cursor: pointer;
+  color: inherit;
+  opacity: 0.8;
+  transition: opacity 0.15s;
+}
+.health-fix-btn:hover { opacity: 1; }
+.health-dismiss-btn {
+  background: none;
+  border: none;
+  font-size: 16px;
+  cursor: pointer;
+  color: inherit;
+  opacity: 0.5;
+  padding: 0 4px;
+  line-height: 1;
+}
+.health-dismiss-btn:hover { opacity: 1; }
 
 /* ── 消息区域 ───────────────────────────────────────── */
 .messages-area {

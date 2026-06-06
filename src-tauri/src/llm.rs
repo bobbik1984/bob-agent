@@ -43,7 +43,30 @@ pub fn init_model_registry(_app: &tauri::AppHandle) {
     }
 }
 
-/// 启动时后台刷新支持 /v1/models 的供应商
+/// 判断一个 model_id 是否为聊天/文本生成类模型（过滤掉 embedding, tts, asr, image, video, moderation 等）
+fn is_chat_model(model_id: &str) -> bool {
+    let id = model_id.to_lowercase();
+    // 前缀过滤
+    if id.starts_with("ft:") { return false; }
+    // 关键词黑名单
+    let blocklist = [
+        "embed", "embedding",
+        "whisper", "tts", "audio", "speech",
+        "dall-e", "dalle", "image", "stable-diffusion",
+        "video", "sora",
+        "moderation",
+        "text-davinci", "text-curie", "text-babbage", "text-ada",
+        "code-davinci", "code-cushman",
+        "instruct",
+        "realtime",
+        "transcription", "translation",
+    ];
+    for kw in &blocklist {
+        if id.contains(kw) { return false; }
+    }
+    true
+}
+
 pub async fn refresh_models_on_startup() {
     let registry = read_registry();
     let config = super::read_config();
@@ -104,8 +127,8 @@ pub async fn refresh_models_on_startup() {
                     None => continue,
                 };
                 
-                // Skip internal/system models
-                if model_id.starts_with("ft:") || model_id.contains("instruct") { continue; }
+                // Skip non-chat models (embedding, tts, image, video, etc.)
+                if !is_chat_model(model_id) { continue; }
                 
                 // Try to find existing model entry to preserve pricing/vision/default info
                 if let Some(existing) = existing_models.iter().find(|m| m.get("id").and_then(|v| v.as_str()) == Some(model_id)) {
@@ -207,7 +230,7 @@ pub async fn refresh_models_for_provider(provider_id: String) -> Value {
                 Some(id) => id,
                 None => continue,
             };
-            if model_id.starts_with("ft:") || model_id.contains("instruct") { continue; }
+            if !is_chat_model(model_id) { continue; }
             
             if let Some(existing) = existing_models.iter().find(|m| m.get("id").and_then(|v| v.as_str()) == Some(model_id)) {
                 new_models.push(existing.clone());
@@ -767,7 +790,21 @@ async fn stream_internal(
 - set_api_key: provider 可选 deepseek, openai, qwen, doubao, zhipu, kimi, minimax, tavily, tinyfish\n\
 - set_config: key 可选 model, clerkModel, theme, uiScale, language, workspaceDir\n\
 \n\
-如果用户发送了包含 API Key 的文件或文本，请提取密钥并使用上述格式帮用户配置好。",
+如果用户发送了包含 API Key 的文件或文本，请提取密钥并使用上述格式帮用户配置好。\n\
+\n\
+## 行动项捕获\n\
+在对话过程中，如果你发现用户提到了需要做的事情（待办、提醒、日程、承诺、计划），\n\
+请在回复的最末尾附加一个 bob-action-items JSON 代码块来提取它们。格式如下：\n\
+\n\
+```bob-action-items\n\
+[{{\\\"title\\\": \\\"事项标题\\\", \\\"type\\\": \\\"todo\\\", \\\"date\\\": \\\"YYYY-MM-DD\\\"}}]\n\
+```\n\
+\n\
+规则：\n\
+- type 可选 todo 或 event\n\
+- date 可以为 null（如果没有明确时间）\n\
+- 只在确实检测到行动项时才输出此代码块，不要强行捕获\n\
+- 不要在普通问答、闲聊中输出此代码块",
             os_info, current_dir, wxid_info, skills_summary, memory_summary, wiki_status
         );
 
@@ -1215,4 +1252,71 @@ pub async fn stream_vision(app: AppHandle, mut messages: Vec<Value>, image_base6
         }
     }
     stream_internal(app, messages, conv_id, None).await
+}
+
+// ═══════════════════════════════════════════════════════════
+// T-1305: 聊天就绪校验 (fail-open, 纯本地检测)
+// ═══════════════════════════════════════════════════════════
+
+/// 校验聊天所需的配置是否完整 (provider + model + apiKey)
+/// 不做网络探测，仅检查本地配置文件
+#[tauri::command]
+pub fn system_validate_chat_ready() -> Value {
+    let config = super::read_config();
+
+    // 1. 检查是否有任何 API Key
+    let api_keys = get_api_keys();
+    let has_any_key = api_keys.as_object()
+        .map(|m| m.values().any(|v| {
+            v.as_str().map_or(false, |s| !s.is_empty())
+        }))
+        .unwrap_or(false);
+
+    if !has_any_key {
+        return json!({
+            "ready": false,
+            "reason": "no_api_key",
+            "message": "未配置 API Key，请前往设置添加"
+        });
+    }
+
+    // 2. 检查模型配置
+    let model_id = config.get("model")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    if model_id.is_empty() {
+        // 没有显式选择模型，但如果有 API Key 则可能使用默认模型
+        // 这是 warning 级别，不阻断
+        return json!({
+            "ready": true,
+            "reason": "no_model_selected",
+            "message": "未选择主模型，将使用默认模型"
+        });
+    }
+
+    // 3. 验证选择的模型有对应的 API Key
+    let (provider, api_key, _, base_url) = read_llm_config_for_model(&model_id);
+    if api_key.is_empty() && provider != "offline" {
+        return json!({
+            "ready": false,
+            "reason": "model_no_key",
+            "message": format!("模型 {} 对应的供应商 {} 未配置 API Key", model_id, provider)
+        });
+    }
+
+    if base_url.is_empty() {
+        return json!({
+            "ready": false,
+            "reason": "no_base_url",
+            "message": format!("供应商 {} 缺少 API 地址配置", provider)
+        });
+    }
+
+    json!({
+        "ready": true,
+        "reason": "ok",
+        "message": ""
+    })
 }

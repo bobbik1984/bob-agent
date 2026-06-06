@@ -48,6 +48,7 @@ window.electronAPI = {
   getMessages: (conversationId) => invoke('db_messages', { conversationId }),
   addMessage: (conversationId, role, content, imageBase64) =>
     invoke('db_message_add', { conversationId, role, content: content || '', imageBase64: imageBase64 || null }),
+  searchMessages: (query) => invoke('db_search_messages', { query }),
 
 
   // ── LLM 通信 (Rust 引擎) ─────────────────────────────
@@ -116,6 +117,14 @@ window.electronAPI = {
     }).then(fn => { unlisten = fn; });
     return () => { if (unlisten) { unlisten(); unlisten = null; } };
   },
+  // T-1307: 待办提醒事件
+  onTodoReminder: (callback) => {
+    let unlisten = null;
+    listen('todo:reminder', (event) => {
+      callback(event.payload);
+    }).then(fn => { unlisten = fn; });
+    return () => { if (unlisten) { unlisten(); unlisten = null; } };
+  },
 
   // ── 凭证管理 (Credential Store) ────────────────────────
   getApiKeys: async () => invoke('system_get_api_keys'),
@@ -162,6 +171,8 @@ window.electronAPI = {
 
   // ── 记忆引擎 (Rust 原生) ────────────────────────────────
   summarizeSession: async (conversationId) => invoke('system_summarize_session', { conversationId }),
+  getMemoryEntries: async () => invoke('system_get_memory_entries'),
+  deleteMemoryEntry: async (entryType, entryId) => invoke('system_delete_memory_entry', { entryType, entryId }),
 
   // ── 做梦引擎 (Rust 原生) ───────────────────────────────
   getDreamReport: async () => invoke('system_get_dream_report'),
@@ -233,8 +244,15 @@ window.electronAPI = {
   browserDetect: async () => invoke('system_browser_detect'),
   browserEnable: async () => invoke('system_browser_enable'),
 
+  // ── Doctor 自检引擎 (T-1304) ────────────────────────────
+  healthCheck: async () => invoke('system_health_check'),
+  autoFix: async (code) => invoke('system_auto_fix', { code }),
+
+  // ── 聊天就绪校验 (T-1305) ──────────────────────────────
+  validateChatReady: async () => invoke('system_validate_chat_ready'),
+
   // Generic invoke passthrough for components that call invoke directly
   invoke: (cmd, args) => invoke(cmd, args || {}),
 };
 
-console.log('🚀 Tauri Bridge v5.4: 61 Rust-native IPC — Cron Scheduler registered.');
+console.log('Tauri Bridge v5.7: 69 Rust-native IPC — T-1306/1307/1308 P2.');
