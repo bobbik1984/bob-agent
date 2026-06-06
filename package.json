@@ -1,6 +1,6 @@
 {
   "name": "bob-agent",
-  "version": "0.3.1-0",
+  "version": "0.32.0",
   "description": "AI 桌面私人秘书 — 智能对话 + 图片识别 + 日程管理 + 文件分析",
   "scripts": {
     "dev": "vite",

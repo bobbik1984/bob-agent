@@ -2,16 +2,23 @@
   <div class="settings-view">
     <div class="settings-scroll">
       <div class="settings-content">
-      <h2 class="settings-title">
-        <SettingsIcon :size="22" class="title-icon" />
-        {{ $t('settings.title') }}
-      </h2>
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-4);">
+        <h2 class="settings-title" style="margin-bottom: 0;">
+          <SettingsIcon :size="22" class="title-icon" />
+          {{ $t('settings.title') }}
+        </h2>
+        <button class="btn btn-ghost" style="display: flex; align-items: center; gap: 6px; font-size: 0.85em; color: var(--text-tertiary);" @click="toggleAdvancedMode">
+          <Eye v-if="isAdvancedMode" :size="14" />
+          <EyeOff v-else :size="14" />
+          <span>{{ isAdvancedMode ? '简洁模式' : '高级模式' }}</span>
+        </button>
+      </div>
 
       <!-- 模型中心 (ModelHub) — 自动发现，替代旧的手填配置 -->
       <ModelHub ref="modelHubRef" @model-changed="emit('config-changed')" />
 
       <!-- 离线推理引擎 (Offline Engine) -->
-      <section class="settings-section card">
+      <section v-show="isAdvancedMode" class="settings-section card">
         <h3 class="section-title">
           <Server :size="16" class="section-icon" />
           {{ $t('settings.offline_engine') }}
@@ -75,7 +82,7 @@
       </section>
 
       <!-- API 密钥管理 (Credential Store) -->
-      <details class="settings-section card custom-model-override">
+      <details v-show="isAdvancedMode" class="settings-section card custom-model-override">
         <summary class="section-title" style="cursor: pointer; display: flex; align-items: center; justify-content: space-between; margin-bottom: 0;">
           <div style="display: flex; align-items: center; gap: 8px;">
             <Key :size="16" class="section-icon" style="opacity: 0.6;" />
@@ -97,7 +104,7 @@
               <img v-if="getProviderLogo(provider.id)" :src="getProviderLogo(provider.id)" style="width: 16px; height: 16px; object-fit: contain; border-radius: 2px;" />
               <span style="flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" :title="provider.name">{{ provider.name }}</span>
             </label>
-            <span class="status-dot" :style="{ background: provider.hasKey ? 'var(--user-accent)' : 'transparent', border: provider.hasKey ? '2px solid var(--user-accent)' : '2px solid var(--text-tertiary)' }" style="width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex-shrink: 0;"></span>
+            <span class="status-dot" :style="{ background: provider.hasKey ? 'var(--accent-primary)' : 'transparent', border: provider.hasKey ? '2px solid var(--accent-primary)' : '2px solid var(--text-tertiary)' }" style="width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex-shrink: 0;"></span>
             <input 
               v-model="apiKeys[provider.id]" 
               type="password" 
@@ -117,7 +124,7 @@
         <div style="display: flex; flex-direction: column; gap: 12px;">
           <div class="form-group" v-for="provider in toolProviders" :key="provider.id" style="display: flex; align-items: center; gap: 12px; border-bottom: 1px solid var(--border-subtle); padding-bottom: 8px;">
             <label class="form-label" style="width: 140px; margin-bottom: 0;">{{ provider.name }}</label>
-            <span class="status-dot" :style="{ background: provider.hasKey ? 'var(--user-accent)' : 'transparent', border: provider.hasKey ? '2px solid var(--user-accent)' : '2px solid var(--text-tertiary)' }" style="width: 10px; height: 10px; border-radius: 50%; display: inline-block;"></span>
+            <span class="status-dot" :style="{ background: provider.hasKey ? 'var(--accent-primary)' : 'transparent', border: provider.hasKey ? '2px solid var(--accent-primary)' : '2px solid var(--text-tertiary)' }" style="width: 10px; height: 10px; border-radius: 50%; display: inline-block;"></span>
             <input 
               v-model="apiKeys[provider.id]" 
               type="password" 
@@ -175,7 +182,7 @@
       </details>
 
       <!-- 模型供应商注册表编辑器 (Registry Editor) -->
-      <details class="settings-section card custom-model-override">
+      <details v-show="isAdvancedMode" class="settings-section card custom-model-override">
         <summary class="section-title" style="cursor: pointer; display: flex; align-items: center; justify-content: space-between; margin-bottom: 0;">
           <div style="display: flex; align-items: center; gap: 8px;">
             <Database :size="16" class="section-icon" style="opacity: 0.6;" />
@@ -521,12 +528,15 @@
       <PluginManager :isOpen="showPluginManager" @close="showPluginManager = false" />
 
       <!-- T-1302: 记忆管理 -->
-      <section class="settings-section card">
-        <h3 class="section-title">
-          <Brain :size="16" class="section-icon" />
-          {{ $t('settings.memory_title') }}
-        </h3>
-        <p class="section-desc" style="margin-bottom: 12px;">{{ $t('settings.memory_desc') }}</p>
+      <details class="settings-section card custom-model-override">
+        <summary class="section-title" style="cursor: pointer; display: flex; align-items: center; justify-content: space-between; margin-bottom: 0;">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <Brain :size="16" class="section-icon" />
+            {{ $t('settings.memory_title') }}
+          </div>
+          <ChevronDown :size="16" class="details-chevron" />
+        </summary>
+        <p class="section-desc" style="margin-top: 16px; margin-bottom: 12px;">{{ $t('settings.memory_desc') }}</p>
 
         <div v-if="memoryLoading" style="display: flex; align-items: center; gap: 8px; color: var(--text-tertiary); padding: 12px 0;">
           <Loader2 :size="16" class="spin" />
@@ -562,7 +572,7 @@
             </button>
           </div>
         </div>
-      </section>
+      </details>
 
       <!-- 关于 & 数据 -->
       <section class="settings-section card">
@@ -573,8 +583,8 @@
         <div class="about-info">
           <p>bob-agent v{{ appVersion }}</p>
         </div>
-
-        <div style="margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border-subtle); display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 12px;">
+        
+        <div v-show="isAdvancedMode" style="margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border-subtle); display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 12px;">
           <button class="btn btn-primary" style="display: flex; align-items: center; justify-content: center; gap: 6px;" @click="openDocs">
             <BookOpen :size="14" />
             <span>{{ $t('settings.open_docs') }}</span>
@@ -663,12 +673,18 @@ const emit = defineEmits(['config-changed']);
 const { locale, t } = useI18n();
 const currentLocale = ref('zh-CN');
 
+const isAdvancedMode = ref(localStorage.getItem('bob_advanced_mode') === 'true');
+const toggleAdvancedMode = () => {
+  isAdvancedMode.value = !isAdvancedMode.value;
+  localStorage.setItem('bob_advanced_mode', isAdvancedMode.value);
+};
+
 const languageOptions = [
   { label: '简体中文', value: 'zh-CN' },
   { label: 'English', value: 'en-US' },
 ];
 
-const appVersion = ref('0.1.0');
+const appVersion = ref('0.32.0');
 
 function switchLanguage(val) {
   locale.value = val || currentLocale.value;
@@ -1488,12 +1504,7 @@ async function removeMcpServer(name) {
   color: var(--text-secondary);
 }
 
-.section-icon {
-  color: var(--text-tertiary);
-  display: flex;
-  align-items: center;
-  flex-shrink: 0;
-}
+
 
 .settings-section {
   margin-bottom: var(--space-5);

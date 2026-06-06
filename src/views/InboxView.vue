@@ -301,9 +301,7 @@ function describeCron(expr) {
   gap: 6px;
 }
 
-.section-icon {
-  opacity: 0.6;
-}
+
 
 .cron-count {
   font-size: 11px;

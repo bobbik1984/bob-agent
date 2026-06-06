@@ -994,3 +994,10 @@ code.hljs {
 .btn-danger:hover {
   filter: brightness(0.9);
 }
+
+.section-icon {
+  color: var(--text-tertiary);
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
