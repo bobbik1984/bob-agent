@@ -381,24 +381,24 @@
 
 ### Phase 1: 低成本高感知
 
-- [ ] T-1201: **富文本剪贴板交接 (Rich-Text Clipboard Handoff)**
-  - [ ] Cargo.toml 引入 `tauri-plugin-clipboard-manager`
-  - [ ] lib.rs 注册插件，capabilities/default.json 增加 `clipboard-manager:default` 权限
-  - [ ] ChatView 消息气泡增加"复制为富文本"按钮（图标: `ClipboardCopy`）
-  - [ ] 实现 Markdown → HTML 序列化（复用 `marked` 渲染结果），写入 `text/html` 剪贴板格式
-  - [ ] 用户按 Ctrl+V 即可在 Outlook / 微信公众号编辑器 / WPS 中粘贴为带表格、高亮、加粗的富文本
+- [x] T-1201: **富文本剪贴板交接 (Rich-Text Clipboard Handoff)**
+  - [x] Cargo.toml 引入 `tauri-plugin-clipboard-manager`
+  - [x] lib.rs 注册插件，capabilities/default.json 增加 `clipboard-manager:default` 权限
+  - [x] ChatView 消息气泡增加"复制为富文本"按钮（图标: `ClipboardCopy`）
+  - [x] 实现 Markdown → HTML 序列化（复用 `marked` 渲染结果），写入 `text/html` 剪贴板格式
+  - [x] 用户按 Ctrl+V 即可在 Outlook / 微信公众号编辑器 / WPS 中粘贴为带表格、高亮、加粗的富文本
   - *设计理念: 拒绝视觉模拟 (GUI 自动化)，用优雅的"剪贴板交接"保留人类点击"发送"的安全控制感*
 
 ### Phase 2: 核心调度基建
 
-- [ ] T-1211: **Cron 调度引擎 (Heartbeat Scheduler)**
-  - [ ] Cargo.toml 引入 `tokio-cron-scheduler`
+- [ ] T-1211: **桌面微心跳引擎 (Micro-Heartbeat Scheduler)**
+  - [ ] Cargo.toml 引入 `tokio-cron-scheduler` 或类似轻量定时器
   - [ ] 新建 `scheduler.rs` 模块
-  - [ ] SQLite 新增 `schedules` 表 (id, cron_expr, prompt_template, enabled, last_run, created_at)
+  - [ ] SQLite 新增 `schedules` 表 (id, trigger_type, prompt_template, enabled, last_run)
   - [ ] lib.rs setup() 中初始化调度器，从 DB 恢复已有任务
-  - [ ] IPC 命令: `system_list_schedules`, `system_add_schedule`, `system_remove_schedule`, `system_toggle_schedule`
-  - [ ] 执行逻辑: 时间到 → 后台组装 Prompt → 调 `stream_internal` → 结果写入通知/Inbox
-  - *对齐 todo.md L333-336 原有的 Cron Automations Epic*
+  - [ ] IPC 命令: `system_list_schedules`, `system_add_schedule` 等
+  - [ ] 执行逻辑: **触发条件不依赖绝对时间（如早8点），而是基于“应用首次启动”、“闲置后再次激活”或“相对间隔”**。触发后 → 后台组装 Prompt → 调 `stream_internal` → 结果写入通知/Inbox
+  - *对齐 todo.md 原有的自动化需求，更适合桌面单机环境*
 
 - [ ] T-1212: **文件目录监控 (Micro-Heartbeat File Watch)**
   - [ ] Cargo.toml 引入 `notify` crate（文件系统事件通知，比 walkdir 轮询更省电）
@@ -449,13 +449,13 @@
   - [ ] `index.css`: 搜索结果样式 (`.search-result-item`, `.search-highlight`)
   - *技术详情见 bob_v04_dev_guide.md T-1301*
 
-- [ ] T-1302: **记忆透明化 — "Bob 的记忆"**
-  - [ ] 新建 `memory.rs` (或在 `dream.rs` 中扩展): `system_get_memory_entries()` 读取 sessions/ 和 wiki/ 目录
-  - [ ] `memory.rs`: `system_delete_memory_entry(type, id)` 安全删除记忆文件
-  - [ ] `lib.rs`: 注册 `system_get_memory_entries`, `system_delete_memory_entry`
-  - [ ] `tauri-bridge.js`: 新增 `getMemoryEntries()`, `deleteMemoryEntry(type, id)`
-  - [ ] `SettingsView.vue`: 在主题区块之后新增"Bob 的记忆"区块 (卡片列表，每条一行 + X 删除按钮)
-  - [ ] `zh-CN.json` / `en-US.json`: 新增 `settings.bob_memory`, `settings.bob_memory_hint` 翻译 (严禁 Emoji)
+- [x] T-1302: **记忆透明化 — "Bob 的记忆"**
+  - [x] 新建 `memory.rs` (或在 `dream.rs` 中扩展): `system_get_memory_entries()` 读取 sessions/ 和 wiki/ 目录
+  - [x] `memory.rs`: `system_delete_memory_entry(type, id)` 安全删除记忆文件
+  - [x] `lib.rs`: 注册 `system_get_memory_entries`, `system_delete_memory_entry`
+  - [x] `tauri-bridge.js`: 新增 `getMemoryEntries()`, `deleteMemoryEntry(type, id)`
+  - [x] `SettingsView.vue`: 在主题区块之后新增"Bob 的记忆"区块 (卡片列表，每条一行 + X 删除按钮)
+  - [x] `zh-CN.json` / `en-US.json`: 新增 `settings.bob_memory`, `settings.bob_memory_hint` 翻译 (严禁 Emoji)
   - *技术详情见 bob_v04_dev_guide.md T-1302*
 
 - [ ] T-1303: **Cron 执行结果通知**
@@ -469,16 +469,16 @@
 
 ### Phase 2: 防御升级 — 让用户"不出错" (2-3周)
 
-- [ ] T-1304: **启动自检医生 (Bob Doctor)**
-  - [ ] 新建 `doctor.rs`: 定义 `CheckResult` 结构体 (code, severity, message, fixable)
-  - [ ] `doctor.rs`: `system_health_check()` 检查 config.json 可读性、bob.db 可读性、API Key 存在性、磁盘可写性
-  - [ ] `doctor.rs`: `system_auto_fix(code)` 自动修复逻辑 (CONFIG_CORRUPT → 从 bak 恢复)
-  - [ ] `lib.rs`: `mod doctor;` + 注册 `system_health_check`, `system_auto_fix`
-  - [ ] `tauri-bridge.js`: 新增 `healthCheck()`, `autoFix(code)`
-  - [ ] `App.vue`: `onMounted` 调用 `healthCheck()`，结果存入全局 reactive state
-  - [ ] `ChatView.vue`: 顶部 sticky 横幅 (32px高, warning=bg-tertiary, error=rgba(200,100,50,0.08))
-  - [ ] `ChatView.vue`: 横幅包含人话提示 + 可选"一键修复"按钮 + X 关闭 (localStorage 24h 内不重复)
-  - [ ] `index.css`: `.health-banner`, `.health-banner--warning`, `.health-banner--error`
+- [x] T-1304: **启动自检医生 (Bob Doctor)**
+  - [x] 新建 `doctor.rs`: 定义 `CheckResult` 结构体 (code, severity, message, fixable)
+  - [x] `doctor.rs`: `system_health_check()` 检查 config.json 可读性、bob.db 可读性、API Key 存在性、磁盘可写性
+  - [x] `doctor.rs`: `system_auto_fix(code)` 自动修复逻辑 (CONFIG_CORRUPT → 从 bak 恢复)
+  - [x] `lib.rs`: `mod doctor;` + 注册 `system_health_check`, `system_auto_fix`
+  - [x] `tauri-bridge.js`: 新增 `healthCheck()`, `autoFix(code)`
+  - [x] `App.vue`: `onMounted` 调用 `healthCheck()`，结果存入全局 reactive state
+  - [x] `ChatView.vue`: 顶部 sticky 横幅 (32px高, warning=bg-tertiary, error=rgba(200,100,50,0.08))
+  - [x] `ChatView.vue`: 横幅包含人话提示 + 可选"一键修复"按钮 + X 关闭 (localStorage 24h 内不重复)
+  - [x] `index.css`: `.health-banner`, `.health-banner--warning`, `.health-banner--error`
   - *技术详情见 bob_v04_dev_guide.md T-1304*
 
 - [ ] T-1305: **聊天就绪守卫 (Chat Readiness)**

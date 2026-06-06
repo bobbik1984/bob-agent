@@ -556,7 +556,7 @@ onMounted(async () => {
 .variant-option:hover { color: var(--text-primary); }
 .variant-option.active {
   background: var(--accent-primary);
-  color: #fff;
+  color: var(--bg-primary);
 }
 .variant-option input[type="radio"] { display: none; }
 </style>

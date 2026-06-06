@@ -21,6 +21,7 @@ use serde_json::{json, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use percent_encoding::percent_decode_str;
 
 // ═══════════════════════════════════════════════════════════
 // 数据目录与配置管理
@@ -367,6 +368,53 @@ pub fn run() {
         .manage(browser_state.clone())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_notification::init())
+        // ── bob:// 本地文件协议：让聊天气泡原生渲染本地图片/视频 ──
+        .register_uri_scheme_protocol("bob", |_app, request| {
+            let uri = request.uri().to_string();
+            let raw_path = uri
+                .strip_prefix("bob://localhost/")
+                .or_else(|| uri.strip_prefix("bob://"))
+                .unwrap_or("");
+            // 去掉可能的 query string
+            let raw_path = raw_path.split('?').next().unwrap_or(raw_path);
+            let decoded = percent_decode_str(raw_path).decode_utf8_lossy().to_string();
+            let file_path = std::path::Path::new(&decoded);
+
+            if !file_path.exists() || !file_path.is_file() {
+                return tauri::http::Response::builder()
+                    .status(404)
+                    .body(b"Not Found".to_vec())
+                    .unwrap();
+            }
+
+            let mime = match file_path.extension().and_then(|e| e.to_str()).map(|s| s.to_lowercase()).as_deref() {
+                Some("png")          => "image/png",
+                Some("jpg" | "jpeg") => "image/jpeg",
+                Some("gif")          => "image/gif",
+                Some("webp")         => "image/webp",
+                Some("svg")          => "image/svg+xml",
+                Some("ico")          => "image/x-icon",
+                Some("bmp")          => "image/bmp",
+                Some("mp4")          => "video/mp4",
+                Some("webm")         => "video/webm",
+                Some("mov")          => "video/quicktime",
+                Some("pdf")          => "application/pdf",
+                _                    => "application/octet-stream",
+            };
+
+            match std::fs::read(file_path) {
+                Ok(data) => tauri::http::Response::builder()
+                    .status(200)
+                    .header("Content-Type", mime)
+                    .body(data)
+                    .unwrap(),
+                Err(_) => tauri::http::Response::builder()
+                    .status(500)
+                    .body(b"Read Error".to_vec())
+                    .unwrap(),
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             // 配置
             system_is_setup_complete,

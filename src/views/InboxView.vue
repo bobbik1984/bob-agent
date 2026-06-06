@@ -307,7 +307,7 @@ function describeCron(expr) {
   font-size: 11px;
   font-weight: 500;
   background: var(--accent-primary);
-  color: #fff;
+  color: var(--bg-primary);
   border-radius: 10px;
   padding: 0 7px;
   line-height: 18px;
@@ -436,9 +436,9 @@ function describeCron(expr) {
 }
 
 .cron-delete:hover {
-  color: #e74c3c;
-  border-color: #e74c3c;
-  background: color-mix(in srgb, #e74c3c 8%, transparent);
+  color: var(--color-error);
+  border-color: var(--color-error);
+  background: color-mix(in srgb, var(--color-error) 8%, transparent);
 }
 
 /* ── T-1307: 待办提醒 ── */

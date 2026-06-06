@@ -410,6 +410,14 @@ pub fn get_tool_schemas() -> Vec<Value> {
                 }
             }
         }),
+        json!({
+            "type": "function",
+            "function": {
+                "name": "enable_browser",
+                "description": "启用本机浏览器增强权限。当 browse_page 提示你需要询问用户开启权限，并且用户回复确认开启后，调用此工具来真正开启该功能。",
+                "parameters": { "type": "object", "properties": {} }
+            }
+        }),
         // ── T-1211: Cron 定时任务工具 ──────────────────────────
         json!({
             "type": "function",
@@ -607,6 +615,15 @@ async fn execute_tool_inner(app: &tauri::AppHandle, name: &str, args: &Value, fr
                 Ok(msg) => json!({ "ok": msg }),
                 Err(e) => json!({ "error": e }),
             }
+        }
+        "enable_browser" => {
+            super::browser::enable_browser();
+            let detected = super::browser::detect_browser();
+            json!({
+                "ok": true,
+                "message": "浏览器增强已启用",
+                "browser_detected": detected.is_some()
+            })
         }
         // ── T-1211: Cron 定时任务 ──
         "add_cron_job" => {

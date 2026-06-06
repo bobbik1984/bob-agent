@@ -349,7 +349,7 @@ pub fn is_browser_enabled() -> bool {
     let config = crate::read_config();
     config.get("browserEnhanced")
         .and_then(|v| v.as_bool())
-        .unwrap_or(false)
+        .unwrap_or(true)
 }
 
 /// 启用浏览器增强（写入 config）

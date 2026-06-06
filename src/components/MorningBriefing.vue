@@ -238,7 +238,7 @@ onUnmounted(() => {
 
 .briefing-action-btn.primary {
   background: var(--user-accent);
-  color: #fff;
+  color: var(--bg-primary);
   border-color: var(--user-accent);
 }
 

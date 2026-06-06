@@ -56,28 +56,68 @@
         </div>
       </section>
 
-      <!-- 微信助理 (WeChat Bot) -->
+      <!-- 移动助手 (Mobile Assistant) -->
       <section class="settings-section card">
         <h3 class="section-title">
-          <MessageSquare :size="16" class="section-icon" />
-          {{ $t('settings.wechat_bot') }}
+          <Smartphone :size="16" class="section-icon" />
+          {{ $t('settings.mobile_assistant') }}
         </h3>
-        <p class="section-desc" style="margin-bottom: 12px;">{{ $t('settings.wechat_bot_desc') }}</p>
+        <p class="section-desc" style="margin-bottom: 16px;">{{ $t('settings.mobile_assistant_desc') }}</p>
         
-        <div style="display: flex; gap: 8px; align-items: center; margin-top: 12px;">
-          <button 
-            class="btn" 
-            :class="wechatConnected ? 'btn-danger' : 'btn-primary'" 
-            @click="openWechatModal"
-          >
-            <MessageSquare :size="14" />
-            <span>{{ wechatConnected ? $t('settings.wechat_rebind') : $t('settings.wechat_scan') }}</span>
+        <div class="channel-selector" style="display: flex; gap: 8px; margin-bottom: 16px; background: var(--bg-secondary); padding: 4px; border-radius: 8px;">
+          <button class="channel-btn" :class="{ active: mobileChannel === 'wechat' }" @click="mobileChannel = 'wechat'">
+            <MessageSquare :size="14" /> {{ $t('settings.channel_wechat') }}
           </button>
-          
-          <span style="font-size: 0.85em; display: flex; align-items: center; gap: 6px;" :style="{ color: wechatConnected ? 'var(--accent-primary)' : 'var(--text-tertiary)' }">
-            <span class="status-dot" :style="{ background: wechatConnected ? 'var(--accent-primary)' : 'var(--text-tertiary)' }" style="width: 8px; height: 8px; border-radius: 50%; display: inline-block;"></span>
-            {{ wechatConnected ? $t('settings.wechat_connected') : $t('settings.wechat_disconnected') }}
-          </span>
+          <button class="channel-btn" :class="{ active: mobileChannel === 'telegram' }" @click="mobileChannel = 'telegram'">
+            <Send :size="14" /> {{ $t('settings.channel_telegram') }}
+          </button>
+          <button class="channel-btn" :class="{ active: mobileChannel === 'discord' }" @click="mobileChannel = 'discord'">
+            <MessageCircle :size="14" /> {{ $t('settings.channel_discord') }}
+          </button>
+        </div>
+
+        <div v-if="mobileChannel === 'wechat'" class="channel-content">
+          <div style="display: flex; gap: 8px; align-items: center;">
+            <button 
+              class="btn" 
+              :class="wechatConnected ? 'btn-danger' : 'btn-primary'" 
+              @click="openWechatModal"
+            >
+              <MessageSquare :size="14" />
+              <span>{{ wechatConnected ? $t('settings.wechat_rebind') : $t('settings.wechat_scan') }}</span>
+            </button>
+            
+            <span style="font-size: 0.85em; display: flex; align-items: center; gap: 6px;" :style="{ color: wechatConnected ? 'var(--accent-primary)' : 'var(--text-tertiary)' }">
+              <span class="status-dot" :style="{ background: wechatConnected ? 'var(--accent-primary)' : 'var(--text-tertiary)' }" style="width: 8px; height: 8px; border-radius: 50%; display: inline-block;"></span>
+              {{ wechatConnected ? $t('settings.wechat_connected') : $t('settings.wechat_disconnected') }}
+            </span>
+          </div>
+        </div>
+        
+        <div v-else-if="mobileChannel === 'telegram'" class="channel-content">
+          <div class="input-group">
+            <label>Bot Token</label>
+            <div style="display: flex; gap: 8px;">
+              <input type="password" v-model="tgToken" placeholder="123456789:ABCdefGHIjklMNO..." class="settings-input" style="flex: 1;" />
+              <button class="btn btn-primary" @click="activateMobileChannel('telegram')">
+                <Send :size="14" /> {{ $t('settings.channel_activate') }}
+              </button>
+            </div>
+            <p class="field-hint" style="margin-top: 8px;">{{ $t('settings.channel_tg_hint') }}</p>
+          </div>
+        </div>
+        
+        <div v-else-if="mobileChannel === 'discord'" class="channel-content">
+          <div class="input-group">
+            <label>Bot Token</label>
+            <div style="display: flex; gap: 8px;">
+              <input type="password" v-model="discordToken" placeholder="OTg3NjU0MzIx.ABC.defGHIjklMNO..." class="settings-input" style="flex: 1;" />
+              <button class="btn btn-primary" @click="activateMobileChannel('discord')">
+                <MessageCircle :size="14" /> {{ $t('settings.channel_activate') }}
+              </button>
+            </div>
+            <p class="field-hint" style="margin-top: 8px;">{{ $t('settings.channel_discord_hint') }}</p>
+          </div>
         </div>
       </section>
 
@@ -662,7 +702,7 @@ import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 
 import { ref, computed, onMounted } from 'vue';
-import { Settings as SettingsIcon, Monitor, Tractor, Eye, EyeOff, Plug, Loader2, Palette, Info, FolderOpen, FolderHeart, Puzzle, Layers, X, Plus, Unplug, Globe, HardDrive, Trash2, Key, FileText, Server, ChevronDown, BookOpen, MessageSquare, Check, Database, Brain } from 'lucide-vue-next';
+import { Settings as SettingsIcon, Monitor, Tractor, Eye, EyeOff, Plug, Loader2, Palette, Info, FolderOpen, FolderHeart, Puzzle, Layers, X, Plus, Unplug, Globe, HardDrive, Trash2, Key, FileText, Server, ChevronDown, BookOpen, MessageSquare, Check, Database, Brain, Smartphone, Send, MessageCircle } from 'lucide-vue-next';
 import { useI18n } from 'vue-i18n';
 import CustomSelect from '../components/CustomSelect.vue';
 import PluginManager from '../components/PluginManager.vue';
@@ -819,13 +859,27 @@ async function toggleOfflineEngine() {
   }
 }
 
-const showWechatModal = ref(false);
-const qrCodeUrl = ref('');
-const wechatConnected = ref(false);
-const rawQrCode = ref('');
-let wechatPollTimer = null;
+  const showWechatModal = ref(false);
+  const qrCodeUrl = ref('');
+  const wechatConnected = ref(false);
+  const rawQrCode = ref('');
+  let wechatPollTimer = null;
+  
+  const mobileChannel = ref('wechat');
+  const tgToken = ref('');
+  const discordToken = ref('');
+  
+  function activateMobileChannel(channel) {
+    if (channel === 'telegram') {
+      alert('已模拟绑定 Telegram。互斥逻辑生效，后台其他渠道的长连接将被自动踢出 (需后端实现)。');
+      wechatConnected.value = false;
+    } else if (channel === 'discord') {
+      alert('已模拟绑定 Discord。互斥逻辑生效，后台其他渠道的长连接将被自动踢出 (需后端实现)。');
+      wechatConnected.value = false;
+    }
+  }
 
-async function openWechatModal() {
+  async function openWechatModal() {
   showWechatModal.value = true;
   wechatConnected.value = false;
   await loadWechatQrCode();
@@ -1772,8 +1826,34 @@ select.input {
   border-color: var(--color-error);
 }
 
-/* 微信二维码弹窗样式 */
-.wechat-modal-overlay {
+  /* 微信二维码弹窗样式 */
+  .channel-btn {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 8px 12px;
+    background: transparent;
+    border: none;
+    border-radius: 6px;
+    color: var(--text-secondary);
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .channel-btn:hover {
+    background: rgba(0,0,0,0.05);
+    color: var(--text-primary);
+  }
+  .channel-btn.active {
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+  }
+
+  .wechat-modal-overlay {
   position: absolute;
   top: 0;
   left: 0;
@@ -1978,14 +2058,14 @@ select.input {
 .memory-entry-icon {
   flex-shrink: 0;
 }
-.memory-entry-icon.wiki {
-  color: var(--user-accent);
+.memory-entry-icon.wiki,
+.memory-entry-icon.wiki :deep(svg) {
+  color: var(--accent-secondary);
 }
-.memory-entry-icon.session {
-  color: #a78bfa;
-}
-:root[data-theme="light"] .memory-entry-icon.session {
-  color: #6d28d9;
+.memory-entry-icon.session,
+.memory-entry-icon.session :deep(svg) {
+  color: var(--accent-secondary);
+  opacity: 0.6;
 }
 
 /* ── Model Provider Registry ── */

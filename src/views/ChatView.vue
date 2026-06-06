@@ -360,11 +360,11 @@ import hljs from 'highlight.js';
 import { markedHighlight } from 'marked-highlight';
 import DOMPurify from 'dompurify';
 
-// 允许渲染 file:// 和本地磁盘路径
+// 允许渲染 file://, bob:// 和本地磁盘路径 (用于图片/视频/链接)
 DOMPurify.addHook('uponSanitizeAttribute', function (node, data) {
-  if (data.attrName === 'href') {
-    const href = data.attrValue;
-    if (href.startsWith('file://') || /^[A-Za-z]:[\\/]/.test(href)) {
+  if (data.attrName === 'href' || data.attrName === 'src') {
+    const val = data.attrValue;
+    if (val.startsWith('file://') || val.startsWith('bob://') || /^[A-Za-z]:[\\\/]/.test(val)) {
       data.keepAttr = true;
       data.forceKeepAttr = true;
     }
@@ -715,11 +715,11 @@ defineExpose({
 }
 .health-banner.error {
   background: rgba(220, 38, 38, 0.08);
-  color: #dc2626;
+  color: var(--color-error);
 }
 .health-banner.warning {
   background: rgba(217, 119, 6, 0.08);
-  color: #d97706;
+  color: var(--color-warning);
 }
 .health-icon {
   width: 16px;
@@ -733,12 +733,12 @@ defineExpose({
   flex-shrink: 0;
 }
 .health-banner.error .health-icon {
-  background: #dc2626;
-  color: #fff;
+  background: var(--color-error);
+  color: var(--bg-primary);
 }
 .health-banner.warning .health-icon {
-  background: #d97706;
-  color: #fff;
+  background: var(--color-warning);
+  color: var(--bg-primary);
 }
 .health-text {
   flex: 1;

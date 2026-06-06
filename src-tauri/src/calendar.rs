@@ -201,3 +201,41 @@ fn chrono_like_today() -> String {
 fn is_leap(y: i64) -> bool {
     (y % 4 == 0 && y % 100 != 0) || (y % 400 == 0)
 }
+
+/// T-1307: 供后台定时器调用的内部接口，获取今天尚未提醒过的待办/事件
+pub fn get_due_todos_for_scheduler(conn: &rusqlite::Connection) -> Vec<(String, String)> {
+    let today = chrono_like_today();
+    
+    // 把 today 转换为整数以便和 last_notified 比较 (2026-06-06 -> 20260606)
+    let today_int: i64 = today.replace("-", "").parse().unwrap_or(0);
+
+    let mut stmt = match conn.prepare(
+        "SELECT id, title FROM events 
+         WHERE date = ?1 
+         AND status != 'completed' 
+         AND last_notified != ?2"
+    ) {
+        Ok(s) => s,
+        Err(_) => return vec![],
+    };
+
+    let rows = match stmt.query_map(params![today, today_int], |row| {
+        Ok((row.get(0)?, row.get(1)?))
+    }) {
+        Ok(r) => r,
+        Err(_) => return vec![],
+    };
+
+    rows.filter_map(|r| r.ok()).collect()
+}
+
+/// T-1307: 标记指定事件在今天已提醒
+pub fn mark_todo_notified(conn: &rusqlite::Connection, id: &str) {
+    let today = chrono_like_today();
+    let today_int: i64 = today.replace("-", "").parse().unwrap_or(0);
+    
+    let _ = conn.execute(
+        "UPDATE events SET last_notified = ?1 WHERE id = ?2",
+        params![today_int, id],
+    );
+}

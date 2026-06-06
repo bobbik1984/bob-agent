@@ -1,11 +1,11 @@
-/*
- * bob-agent — 设计系统
+﻿/*
+ * bob-agent 鈥?璁捐绯荤粺
  *
- * 暗色优先 · Premium 质感 · 微动画
- * 字体：Inter (Latin) + Noto Sans SC (中文) + JetBrains Mono (代码)
+ * 鏆楄壊浼樺厛 路 Premium 璐ㄦ劅 路 寰姩鐢?
+ * 瀛椾綋锛欼nter (Latin) + Noto Sans SC (涓枃) + JetBrains Mono (浠ｇ爜)
  */
 
-/* ═══ Reset ═══════════════════════════════════════════ */
+/* 鈺愨晲鈺?Reset 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?*/
 *,
 *::before,
 *::after {
@@ -14,7 +14,17 @@
   box-sizing: border-box;
 }
 
-/* ── 注册 CSS 变量以支持动画 ── */
+a {
+  color: var(--user-accent);
+  text-decoration: none;
+  transition: opacity 0.2s;
+}
+
+a:hover {
+  opacity: 0.8;
+}
+
+/* 鈹€鈹€ 娉ㄥ唽 CSS 鍙橀噺浠ユ敮鎸佸姩鐢?鈹€鈹€ */
 @property --bg-root { syntax: '<color>'; inherits: true; initial-value: #0c0c0c; }
 @property --bg-primary { syntax: '<color>'; inherits: true; initial-value: #141414; }
 @property --bg-secondary { syntax: '<color>'; inherits: true; initial-value: #1c1c1c; }
@@ -36,13 +46,17 @@
 @property --surface-input { syntax: '<color>'; inherits: true; initial-value: rgba(255, 255, 255, 0.08); }
 
 :root {
-  /* ── 色板（纯灰度，无蓝色） ────────────────────── */
+  /* 鈹€鈹€ 鑹叉澘锛堢函鐏板害锛屾棤钃濊壊锛?鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€ */
   --bg-root:        #0c0c0c;
   --bg-primary:     #141414;
   --bg-secondary:   #1c1c1c;
   --bg-tertiary:    #242424;
   --bg-hover:       #2c2c2c;
   --bg-active:      #343434;
+
+  --color-error:    #dc2626;
+  --color-warning:  #d97706;
+  --color-success:  #10b981;
 
   --surface-glass:  rgba(255, 255, 255, 0.04);
   --surface-card:   rgba(255, 255, 255, 0.06);
@@ -57,7 +71,7 @@
   --text-tertiary:  #6a6a6a;
   --text-inverse:   #0c0c0c;
 
-  /* 品牌色：纯灰白 */
+  /* 鍝佺墝鑹诧細绾伆鐧?*/
   --accent-primary:    #e8e8e8;
   --accent-secondary:  #a0a0a0;
   --accent-tertiary:   #6a6a6a;
@@ -67,12 +81,11 @@
 
   --logo-filter:       brightness(0) invert(1);
   --logo-color:        var(--text-primary);
-  --bg-code-block:     #0d1117;
   --bg-code-inline:    rgba(255, 255, 255, 0.08);
 
-  /* 用户专属强调色（默认纯白，运行时由 JS 覆写）
-     仅用于：logo, 联通 indicator, 日历事件点, step-dot 等点睛元素。
-     绝不能用它像 --accent-primary 一样刻给整个主题“染色”。 */
+  /* 鐢ㄦ埛涓撳睘寮鸿皟鑹诧紙榛樿绾櫧锛岃繍琛屾椂鐢?JS 瑕嗗啓锛?
+     浠呯敤浜庯細logo, 鑱旈€?indicator, 鏃ュ巻浜嬩欢鐐? step-dot 绛夌偣鐫涘厓绱犮€?
+     缁濅笉鑳界敤瀹冨儚 --accent-primary 涓€鏍峰埢缁欐暣涓富棰樷€滄煋鑹测€濄€?*/
   --user-accent:       #e8e8e8;
   --user-accent-rgb:   232, 232, 232;
 }
@@ -84,6 +97,10 @@
   --bg-tertiary:    #f3f4f6;
   --bg-hover:       #e5e7eb;
   --bg-active:      #d1d5db;
+
+  --color-error:    #ef4444;
+  --color-warning:  #f59e0b;
+  --color-success:  #10b981;
 
   --surface-glass:  rgba(0, 0, 0, 0.04);
   --surface-card:   rgba(0, 0, 0, 0.02);
@@ -107,18 +124,17 @@
 
   --logo-filter:       none;
   --logo-color:        var(--user-accent, #2776bb);
-  --bg-code-block:     #e5e7eb;
   --bg-code-inline:    rgba(0, 0, 0, 0.06);
 
   --user-accent:       #2776bb;
   --user-accent-rgb:   39, 118, 187;
 }
 
-/* ═══════════════════════════════════════════════════════════════
+/* 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?
    Premium Themes (Apple Glass Series)
-   来源：style-ref-apple-glass.html
-   所有 Premium 主题均为深色系，不支持独立 accent color 选择。
-   ═══════════════════════════════════════════════════════════════ */
+   鏉ユ簮锛歴tyle-ref-apple-glass.html
+   鎵€鏈?Premium 涓婚鍧囦负娣辫壊绯伙紝涓嶆敮鎸佺嫭绔?accent color 閫夋嫨銆?
+   鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?*/
 
 
 :root[data-theme="premium-plum"] {
@@ -129,8 +145,7 @@
   --text-primary: rgba(255,255,255,0.92); --text-secondary: rgba(255,255,255,0.55); --text-tertiary: rgba(255,255,255,0.32); --text-inverse: #1f233b;
   --accent-primary: #e26858; --accent-secondary: #f27868; --accent-tertiary: #f49888;
   --accent-glow: rgba(226,104,88,0.25); --gradient-brand: linear-gradient(135deg,#e26858,#f27868); --gradient-subtle: rgba(226,104,88,0.03);
-  --logo-filter: brightness(0) invert(1); --logo-color: var(--text-primary);
-  --bg-code-block: #1a1e34; --bg-code-inline: rgba(255,255,255,0.07);
+  --logo-filter: brightness(0) invert(1); --logo-color: var(--text-primary); --bg-code-inline: rgba(255,255,255,0.07);
   --user-accent: #e26858; --user-accent-rgb: 226,104,88;
 }
 
@@ -142,8 +157,7 @@
   --text-primary: rgba(255,255,255,0.92); --text-secondary: rgba(255,255,255,0.55); --text-tertiary: rgba(255,255,255,0.32); --text-inverse: #172219;
   --accent-primary: #729969; --accent-secondary: #82a979; --accent-tertiary: #92b989;
   --accent-glow: rgba(114,153,105,0.25); --gradient-brand: linear-gradient(135deg,#729969,#82a979); --gradient-subtle: rgba(114,153,105,0.03);
-  --logo-filter: brightness(0) invert(1); --logo-color: var(--text-primary);
-  --bg-code-block: #121c14; --bg-code-inline: rgba(255,255,255,0.07);
+  --logo-filter: brightness(0) invert(1); --logo-color: var(--text-primary); --bg-code-inline: rgba(255,255,255,0.07);
   --user-accent: #729969; --user-accent-rgb: 114,153,105;
 }
 
@@ -155,8 +169,7 @@
   --text-primary: rgba(255,255,255,0.92); --text-secondary: rgba(255,255,255,0.55); --text-tertiary: rgba(255,255,255,0.35); --text-inverse: #2f3d4d;
   --accent-primary: #4a99b2; --accent-secondary: #5aa9c2; --accent-tertiary: #6ab9d2;
   --accent-glow: rgba(74,153,178,0.25); --gradient-brand: linear-gradient(135deg,#4a99b2,#5aa9c2); --gradient-subtle: rgba(74,153,178,0.03);
-  --logo-filter: brightness(0) invert(1); --logo-color: var(--text-primary);
-  --bg-code-block: #283544; --bg-code-inline: rgba(255,255,255,0.07);
+  --logo-filter: brightness(0) invert(1); --logo-color: var(--text-primary); --bg-code-inline: rgba(255,255,255,0.07);
   --user-accent: #4a99b2; --user-accent-rgb: 74,153,178;
 }
 
@@ -168,8 +181,7 @@
   --text-primary: rgba(255,255,255,0.92); --text-secondary: rgba(255,255,255,0.55); --text-tertiary: rgba(255,255,255,0.32); --text-inverse: #2a2728;
   --accent-primary: #895c20; --accent-secondary: #996c30; --accent-tertiary: #a97c40;
   --accent-glow: rgba(137,92,32,0.25); --gradient-brand: linear-gradient(135deg,#895c20,#996c30); --gradient-subtle: rgba(137,92,32,0.03);
-  --logo-filter: brightness(0) invert(1); --logo-color: var(--text-primary);
-  --bg-code-block: #221f20; --bg-code-inline: rgba(255,255,255,0.07);
+  --logo-filter: brightness(0) invert(1); --logo-color: var(--text-primary); --bg-code-inline: rgba(255,255,255,0.07);
   --user-accent: #895c20; --user-accent-rgb: 137,92,32;
 }
 
@@ -181,8 +193,7 @@
   --text-primary: rgba(255,255,255,0.92); --text-secondary: rgba(255,255,255,0.55); --text-tertiary: rgba(255,255,255,0.32); --text-inverse: #282c33;
   --accent-primary: #6498af; --accent-secondary: #74a8bf; --accent-tertiary: #84b8cf;
   --accent-glow: rgba(100,152,175,0.25); --gradient-brand: linear-gradient(135deg,#6498af,#74a8bf); --gradient-subtle: rgba(100,152,175,0.03);
-  --logo-filter: brightness(0) invert(1); --logo-color: var(--text-primary);
-  --bg-code-block: #20242a; --bg-code-inline: rgba(255,255,255,0.07);
+  --logo-filter: brightness(0) invert(1); --logo-color: var(--text-primary); --bg-code-inline: rgba(255,255,255,0.07);
   --user-accent: #6498af; --user-accent-rgb: 100,152,175;
 }
 
@@ -194,8 +205,7 @@
   --text-primary: rgba(255,255,255,0.92); --text-secondary: rgba(255,255,255,0.55); --text-tertiary: rgba(255,255,255,0.32); --text-inverse: #001524;
   --accent-primary: #57b5c3; --accent-secondary: #67c5d3; --accent-tertiary: #77d5e3;
   --accent-glow: rgba(87,181,195,0.25); --gradient-brand: linear-gradient(135deg,#57b5c3,#67c5d3); --gradient-subtle: rgba(87,181,195,0.03);
-  --logo-filter: brightness(0) invert(1); --logo-color: var(--text-primary);
-  --bg-code-block: #00101c; --bg-code-inline: rgba(255,255,255,0.07);
+  --logo-filter: brightness(0) invert(1); --logo-color: var(--text-primary); --bg-code-inline: rgba(255,255,255,0.07);
   --user-accent: #57b5c3; --user-accent-rgb: 87,181,195;
 }
 
@@ -207,8 +217,7 @@
   --text-primary: rgba(255,255,255,0.92); --text-secondary: rgba(255,255,255,0.55); --text-tertiary: rgba(255,255,255,0.32); --text-inverse: #1f1415;
   --accent-primary: #ac3539; --accent-secondary: #bc4549; --accent-tertiary: #cc5559;
   --accent-glow: rgba(172,53,57,0.25); --gradient-brand: linear-gradient(135deg,#ac3539,#bc4549); --gradient-subtle: rgba(172,53,57,0.03);
-  --logo-filter: brightness(0) invert(1); --logo-color: var(--text-primary);
-  --bg-code-block: #1a1010; --bg-code-inline: rgba(255,255,255,0.07);
+  --logo-filter: brightness(0) invert(1); --logo-color: var(--text-primary); --bg-code-inline: rgba(255,255,255,0.07);
   --user-accent: #ac3539; --user-accent-rgb: 172,53,57;
 }
 
@@ -220,8 +229,7 @@
   --text-primary: rgba(255,255,255,0.92); --text-secondary: rgba(255,255,255,0.55); --text-tertiary: rgba(255,255,255,0.32); --text-inverse: #212415;
   --accent-primary: #a51a43; --accent-secondary: #b52a53; --accent-tertiary: #c53a63;
   --accent-glow: rgba(165,26,67,0.25); --gradient-brand: linear-gradient(135deg,#a51a43,#b52a53); --gradient-subtle: rgba(165,26,67,0.03);
-  --logo-filter: brightness(0) invert(1); --logo-color: var(--text-primary);
-  --bg-code-block: #1a1d10; --bg-code-inline: rgba(255,255,255,0.07);
+  --logo-filter: brightness(0) invert(1); --logo-color: var(--text-primary); --bg-code-inline: rgba(255,255,255,0.07);
   --user-accent: #a51a43; --user-accent-rgb: 165,26,67;
 }
 
@@ -233,8 +241,7 @@
   --text-primary: rgba(255,255,255,0.92); --text-secondary: rgba(255,255,255,0.55); --text-tertiary: rgba(255,255,255,0.35); --text-inverse: #1a2b38;
   --accent-primary: #89acc6; --accent-secondary: #99bcd6; --accent-tertiary: #a9cce6;
   --accent-glow: rgba(137,172,198,0.25); --gradient-brand: linear-gradient(135deg,#89acc6,#99bcd6); --gradient-subtle: rgba(137,172,198,0.03);
-  --logo-filter: brightness(0) invert(1); --logo-color: var(--text-primary);
-  --bg-code-block: #142330; --bg-code-inline: rgba(255,255,255,0.07);
+  --logo-filter: brightness(0) invert(1); --logo-color: var(--text-primary); --bg-code-inline: rgba(255,255,255,0.07);
   --user-accent: #89acc6; --user-accent-rgb: 137,172,198;
 }
 
@@ -246,8 +253,7 @@
   --text-primary: rgba(255,255,255,0.92); --text-secondary: rgba(255,255,255,0.55); --text-tertiary: rgba(255,255,255,0.32); --text-inverse: #182025;
   --accent-primary: #c26f61; --accent-secondary: #d27f71; --accent-tertiary: #e28f81;
   --accent-glow: rgba(194,111,97,0.25); --gradient-brand: linear-gradient(135deg,#c26f61,#d27f71); --gradient-subtle: rgba(194,111,97,0.03);
-  --logo-filter: brightness(0) invert(1); --logo-color: var(--text-primary);
-  --bg-code-block: #121a1f; --bg-code-inline: rgba(255,255,255,0.07);
+  --logo-filter: brightness(0) invert(1); --logo-color: var(--text-primary); --bg-code-inline: rgba(255,255,255,0.07);
   --user-accent: #c26f61; --user-accent-rgb: 194,111,97;
 }
 
@@ -259,8 +265,7 @@
   --text-primary: rgba(255,255,255,0.92); --text-secondary: rgba(255,255,255,0.55); --text-tertiary: rgba(255,255,255,0.32); --text-inverse: #252b2f;
   --accent-primary: #fd6331; --accent-secondary: #fd7341; --accent-tertiary: #fd8351;
   --accent-glow: rgba(253,99,49,0.25); --gradient-brand: linear-gradient(135deg,#fd6331,#fd7341); --gradient-subtle: rgba(253,99,49,0.03);
-  --logo-filter: brightness(0) invert(1); --logo-color: var(--text-primary);
-  --bg-code-block: #1d2327; --bg-code-inline: rgba(255,255,255,0.07);
+  --logo-filter: brightness(0) invert(1); --logo-color: var(--text-primary); --bg-code-inline: rgba(255,255,255,0.07);
   --user-accent: #fd6331; --user-accent-rgb: 253,99,49;
 }
 
@@ -272,14 +277,13 @@
   --text-primary: rgba(255,255,255,0.92); --text-secondary: rgba(255,255,255,0.55); --text-tertiary: rgba(255,255,255,0.35); --text-inverse: #282f4e;
   --accent-primary: #f8d4c4; --accent-secondary: #ffe4d4; --accent-tertiary: #fff0e8;
   --accent-glow: rgba(248,212,196,0.25); --gradient-brand: linear-gradient(135deg,#f8d4c4,#ffe4d4); --gradient-subtle: rgba(248,212,196,0.03);
-  --logo-filter: brightness(0) invert(1); --logo-color: var(--text-primary);
-  --bg-code-block: #222844; --bg-code-inline: rgba(255,255,255,0.07);
+  --logo-filter: brightness(0) invert(1); --logo-color: var(--text-primary); --bg-code-inline: rgba(255,255,255,0.07);
   --user-accent: #f8d4c4; --user-accent-rgb: 248,212,196;
 }
 
 
 :root {
-  /* 语义色 */
+  /* 璇箟鑹?*/
   --color-success:    #10b981;
   --color-success-bg: rgba(16, 185, 129, 0.1);
   --color-warning:    #f59e0b;
@@ -289,7 +293,7 @@
   --color-info:       #60a5fa;
   --overlay-bg:       rgba(0, 0, 0, 0.5);
 
-  /* ── 排版 ─────────────────────────────────────────── */
+  /* 鈹€鈹€ 鎺掔増 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€ */
   --font-sans:  'Inter', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, sans-serif;
   --font-mono:  'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
 
@@ -305,7 +309,7 @@
   --leading-normal:  1.6;
   --leading-relaxed: 1.8;
 
-  /* ── 间距 ─────────────────────────────────────────── */
+  /* 鈹€鈹€ 闂磋窛 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€ */
   --space-1:  0.25rem;
   --space-2:  0.5rem;
   --space-3:  0.75rem;
@@ -316,20 +320,20 @@
   --space-10: 2.5rem;
   --space-12: 3rem;
 
-  /* ── 圆角 ─────────────────────────────────────────── */
+  /* 鈹€鈹€ 鍦嗚 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€ */
   --radius-sm:   4px;
   --radius-md:   8px;
   --radius-lg:   10px;
   --radius-xl:   14px;
   --radius-full: 9999px;
 
-  /* ── 阴影 ─────────────────────────────────────────── */
+  /* 鈹€鈹€ 闃村奖 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€ */
   --shadow-sm:   0 1px 3px rgba(0,0,0,0.3);
   --shadow-md:   0 4px 12px rgba(0,0,0,0.4);
   --shadow-lg:   0 8px 30px rgba(0,0,0,0.5);
   --shadow-glow: 0 0 20px var(--accent-glow);
 
-  /* ── 动画 ─────────────────────────────────────────── */
+  /* 鈹€鈹€ 鍔ㄧ敾 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€ */
   --ease-out:  cubic-bezier(0.22, 1, 0.36, 1);
   --ease-in:   cubic-bezier(0.55, 0, 1, 0.45);
   --ease-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
@@ -337,13 +341,13 @@
   --duration-normal: 250ms;
   --duration-slow:   400ms;
 
-  /* ── 布局 ─────────────────────────────────────────── */
+  /* 鈹€鈹€ 甯冨眬 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€ */
   --sidebar-width: 260px;
   --titlebar-height: 36px;
   --input-height: 56px;
 }
 
-/* ═══ 基础样式 ════════════════════════════════════════ */
+/* 鈺愨晲鈺?鍩虹鏍峰紡 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲 */
 html, body {
   height: 100%;
   font-family: var(--font-sans);
@@ -357,7 +361,7 @@ html, body {
   user-select: none;
 }
 
-/* ── 动态主题过渡 (仅在切换时激活，不影响日常Hover) ── */
+/* 鈹€鈹€ 鍔ㄦ€佷富棰樿繃娓?(浠呭湪鍒囨崲鏃舵縺娲伙紝涓嶅奖鍝嶆棩甯窰over) 鈹€鈹€ */
 html.theme-transitioning {
   transition: --bg-root 0.8s ease, --bg-primary 0.8s ease, --bg-secondary 0.8s ease, --bg-tertiary 0.8s ease,
               --bg-hover 0.8s ease, --bg-active 0.8s ease, --surface-glass 0.8s ease, --surface-card 0.8s ease, --surface-input 0.8s ease,
@@ -377,12 +381,12 @@ html[data-ui-scale="comfortable"] {
   height: 100%;
 }
 
-/* 可选中区域 */
+/* 鍙€変腑鍖哄煙 */
 .selectable {
   user-select: text;
 }
 
-/* ═══ 滚动条 ═════════════════════════════════════════ */
+/* 鈺愨晲鈺?婊氬姩鏉?鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?*/
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -401,7 +405,7 @@ html[data-ui-scale="comfortable"] {
   background: var(--border-strong);
 }
 
-/* ═══ 拖拽标题栏区域 ═════════════════════════════════ */
+/* 鈺愨晲鈺?鎷栨嫿鏍囬鏍忓尯鍩?鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?*/
 .titlebar-drag {
   -webkit-app-region: drag;
 }
@@ -410,7 +414,7 @@ html[data-ui-scale="comfortable"] {
   -webkit-app-region: no-drag;
 }
 
-/* ═══ Tauri 自定义窗口按钮 ═══════════════════════════ */
+/* 鈺愨晲鈺?Tauri 鑷畾涔夌獥鍙ｆ寜閽?鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?*/
 .titlebar-right {
   display: flex;
   align-items: center;
@@ -441,7 +445,7 @@ html[data-ui-scale="comfortable"] {
   color: #fff;
 }
 
-/* ═══ 动画 keyframes ═════════════════════════════════ */
+/* 鈺愨晲鈺?鍔ㄧ敾 keyframes 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?*/
 @keyframes fadeIn {
   from { opacity: 0; }
   to   { opacity: 1; }
@@ -485,9 +489,9 @@ html[data-ui-scale="comfortable"] {
   animation: slideInLeft var(--duration-slow) var(--ease-out);
 }
 
-/* ═══ 通用组件样式 ═══════════════════════════════════ */
+/* 鈺愨晲鈺?閫氱敤缁勪欢鏍峰紡 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?*/
 
-/* 按钮基础 */
+/* 鎸夐挳鍩虹 */
 .btn {
   display: inline-flex;
   align-items: center;
@@ -553,7 +557,7 @@ html[data-ui-scale="comfortable"] {
   color: var(--text-primary);
 }
 
-/* 输入框 */
+/* 杈撳叆妗?*/
 .input {
   width: 100%;
   padding: var(--space-3) var(--space-4);
@@ -576,7 +580,7 @@ html[data-ui-scale="comfortable"] {
   color: var(--text-tertiary);
 }
 
-/* 卡片 */
+/* 鍗＄墖 */
 .card {
   background: var(--surface-card);
   border: 1px solid var(--border-subtle);
@@ -589,9 +593,9 @@ html[data-ui-scale="comfortable"] {
   border-color: var(--border-default);
 }
 
-/* ═══ 统一卡片基类 (Card Base) ═══════════════════════ */
+/* 鈺愨晲鈺?缁熶竴鍗＄墖鍩虹被 (Card Base) 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?*/
 
-/* 1. 内联药丸式卡片 (FileCard, SearchCard) */
+/* 1. 鍐呰仈鑽父寮忓崱鐗?(FileCard, SearchCard) */
 .bob-card-inline {
   display: inline-flex;
   align-items: center;
@@ -638,7 +642,7 @@ html[data-ui-scale="comfortable"] {
   line-height: 1.4;
 }
 
-/* 2. 块状确认卡片 (ConfirmCard, FolderDropCard) */
+/* 2. 鍧楃姸纭鍗＄墖 (ConfirmCard, FolderDropCard) */
 .bob-card-block {
   background: var(--surface-card);
   border: 1px solid var(--border-subtle);
@@ -730,14 +734,14 @@ html[data-ui-scale="comfortable"] {
   background: var(--surface-glass);
 }
 
-/* 分割线 */
+/* 鍒嗗壊绾?*/
 .divider {
   height: 1px;
   background: var(--border-subtle);
   border: none;
 }
 
-/* 徽章 */
+/* 寰界珷 */
 .badge {
   display: inline-flex;
   align-items: center;
@@ -754,7 +758,7 @@ html[data-ui-scale="comfortable"] {
   border: 1px solid var(--border-default);
 }
 
-/* Typing 指示器 */
+/* Typing 鎸囩ず鍣?*/
 .typing-indicator {
   display: inline-flex;
   gap: 4px;
@@ -777,11 +781,11 @@ html[data-ui-scale="comfortable"] {
   animation-delay: 0.4s;
 }
 
-/* ═══ Markdown 样式 ═══════════════════════════════════ */
+/* 鈺愨晲鈺?Markdown 鏍峰紡 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?*/
 .message-content pre {
   margin: var(--space-3) 0;
   border-radius: var(--radius-md);
-  background: var(--bg-code-block);
+  background: var(--bg-tertiary);
   overflow-x: auto;
 }
 
@@ -854,7 +858,7 @@ html[data-ui-scale="comfortable"] {
   margin-bottom: var(--space-1);
 }
 
-/* ═══ Highlight.js GitHub Dark Theme ═════════════════ */
+/* 鈺愨晲鈺?Highlight.js GitHub Dark Theme 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?*/
 pre code.hljs {
   display: block;
   overflow-x: auto;
@@ -1001,3 +1005,6 @@ code.hljs {
   align-items: center;
   flex-shrink: 0;
 }
+
+
+

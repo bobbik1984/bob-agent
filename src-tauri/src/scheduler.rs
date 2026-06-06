@@ -3,6 +3,7 @@ use serde_json::{json, Value};
 use std::fs;
 use std::io::Write;
 use tauri::{AppHandle, Emitter};
+use tauri_plugin_notification::NotificationExt;
 
 /// T-1211: Cron 调度引擎
 ///
@@ -228,6 +229,13 @@ fn check_upcoming_todos(app: &AppHandle, db_path: &std::path::Path) {
             "date": date,
             "start_time": start_time,
         }));
+
+        // T-1307: 调用 Windows 原生弹窗
+        let _ = app.notification()
+            .builder()
+            .title("Bob 提醒：今日待办")
+            .body(title)
+            .show();
 
         // 更新 last_notified 时间戳
         let _ = conn.execute(

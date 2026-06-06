@@ -466,7 +466,7 @@ input:checked + .slider {
 }
 
 input:checked + .slider:before {
-  background-color: #fff;
+  background-color: var(--bg-primary);
   transform: translateX(22px);
 }
 

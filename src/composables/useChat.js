@@ -326,8 +326,22 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
   function renderMarkdown(text) {
     if (!text) return '';
     const cleaned = text.replace(/<calendar_event>[\s\S]*?(?:<\/calendar_event>|$)/gi, '');
-    const rawHtml = marked.parse(cleaned);
-    return DOMPurify.sanitize(rawHtml);
+    let rawHtml = marked.parse(cleaned);
+
+    // ── bob:// 本地文件协议桥接 ──
+    // 将 <img src="D:\...\file.png"> 或 <img src="file:///D:/..."> 
+    // 转换为 <img src="bob://localhost/D:/..."> 以触发 Rust 后端流式读取
+    rawHtml = rawHtml.replace(
+      /(<img\s+[^>]*src=")(?:file:\/\/\/)?([A-Za-z]:[\\\/][^"]+)(")/gi,
+      (_, pre, path, post) => pre + 'bob://localhost/' + path.replace(/\\/g, '/') + post
+    );
+    // 对 video / source 标签做同样处理
+    rawHtml = rawHtml.replace(
+      /(<(?:video|source)\s+[^>]*src=")(?:file:\/\/\/)?([A-Za-z]:[\\\/][^"]+)(")/gi,
+      (_, pre, path, post) => pre + 'bob://localhost/' + path.replace(/\\/g, '/') + post
+    );
+
+    return DOMPurify.sanitize(rawHtml, { ADD_TAGS: ['video', 'source'], ADD_ATTR: ['controls', 'autoplay', 'loop', 'muted'] });
   }
 
   function renderMessageBlocks(text) {

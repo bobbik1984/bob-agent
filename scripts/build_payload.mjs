@@ -62,11 +62,29 @@ function buildPayload() {
     }
 
     if (target.type === 'file') {
-      console.log(`➕ 添加文件: ${target.dest}`);
+      console.log(`📦 添加文件: ${target.dest}`);
       zip.addLocalFile(target.src);
     } else if (target.type === 'dir') {
-      console.log(`➕ 添加目录: ${target.dest}`);
-      zip.addLocalFolder(target.src, target.dest);
+      if (target.dest === 'skills') {
+        console.log(`📦 过滤并添加技能目录: ${target.dest}`);
+        const blacklist = ['cluster_ops', 'mcp-builder', 'invoke-jules', 'model-registry'];
+        const skillsDir = fs.readdirSync(target.src);
+        for (const skill of skillsDir) {
+          if (blacklist.includes(skill)) {
+            console.log(`⚠️ 过滤私有极客技能: ${skill}`);
+            continue;
+          }
+          const skillPath = path.join(target.src, skill);
+          if (fs.statSync(skillPath).isDirectory()) {
+             zip.addLocalFolder(skillPath, `skills/${skill}`);
+          } else {
+             zip.addLocalFile(skillPath, 'skills');
+          }
+        }
+      } else {
+        console.log(`📦 添加目录: ${target.dest}`);
+        zip.addLocalFolder(target.src, target.dest);
+      }
     }
   }
 
