@@ -75,11 +75,32 @@ npm run lint             # ESLint 检查
 
 本项目的安装器使用的是**双 Tauri 嵌套架构**（Bootstrapper 模式），以实现极其定制化的暗黑风格安装引导（无边框、无系统灰条）。**绝对禁止**使用默认的 Tauri Bundle (NSIS/MSI) 直接分发主程序。
 
-要生成最终分发给用户的 `bob-installer.exe`，必须严格按照以下三步执行：
+#### 一键发布（推荐）
 
-1. **编译主程序**：在根目录执行 `npm run tauri build`，生成优化的 `bob.exe`。
-2. **生成 Payload**：在根目录执行 `node scripts/build_payload.mjs`。此脚本会将 `bob.exe`、核心 DLL 和 `skills` 目录压缩打包，并自动移动到 `installer/src-tauri/payload.zip`。
-3. **编译安装器**：进入 `installer/` 目录执行 `npm run tauri build`。安装器的 `lib.rs` 会通过 `include_bytes!` 将 `payload.zip` 硬编码进自身二进制中，最终输出单文件安装器。
+```bash
+scripts\release.bat
+```
+
+运行后会**自动依次执行**以下 6 步，最终产物统一收集到 `dist-release/` 目录并自动打开文件夹：
+
+| 步骤 | 操作 | 说明 |
+|:---:|------|------|
+| 1/6 | `npm run tauri build` | 编译主程序 `bob.exe` (Release) |
+| 2/6 | `node scripts/build_payload.mjs` | 将 bob.exe + pdfium.dll + skills 打包为 payload.zip |
+| 3/6 | 复制 payload.zip → installer | 供安装器嵌入 |
+| 4/6 | `cd installer && npm run tauri build` | 编译带 Bob Logo 的独立安装器 |
+| 5/6 | 收集产物 → `dist-release/` | 归集最终可分发文件 |
+| 6/6 | 清理中间文件 | 删除 payload.zip、bundle 临时目录 |
+
+#### 最终产物
+
+```
+dist-release/
+├── bob-installer.exe          # 带 Bob Logo 的独立安装器（~25MB）
+└── bob-agent-portable.zip     # 绿色免安装版（~15MB）
+```
+
+> ⚠️ `dist-release/` 已被 `.gitignore` 排除，二进制产物不入版本控制。
 
 ---
 
