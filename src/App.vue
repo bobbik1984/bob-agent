@@ -246,6 +246,8 @@ const renamingId = ref(null);
 const renameText = ref('');
 const renameInputRef = ref(null);
 const currentTheme = ref('dark');
+provide('currentTheme', currentTheme);
+
 const showSplash = ref(true);
 
 const sidebarWidth = ref(260);
@@ -313,7 +315,8 @@ async function toggleTheme() {
     });
   });
 
-  localStorage.setItem('bob-theme', currentTheme.value); // 立即同步到 localStorage
+  localStorage.setItem('bob-theme', currentTheme.value);
+  window.dispatchEvent(new CustomEvent('bob-theme-changed', { detail: currentTheme.value }));
   window.electronAPI.setConfig('theme', currentTheme.value);
   if (window.electronAPI.updateTheme) {
     window.electronAPI.updateTheme(currentTheme.value);

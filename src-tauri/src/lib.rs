@@ -16,6 +16,8 @@ mod wechat;
 mod keychain;
 mod browser;
 mod doctor;
+mod gcp_auth;
+mod evolution;
 
 use serde_json::{json, Value};
 use std::fs;
@@ -206,6 +208,39 @@ fn llm_get_registry() -> Value {
 fn llm_save_registry(registry: Value) -> Value {
     llm::write_registry(&registry);
     json!({ "ok": true })
+}
+
+// ═══════════════════════════════════════════════════════════
+// Tauri Commands — GCP Vertex AI 凭证管理
+// ═══════════════════════════════════════════════════════════
+
+#[tauri::command]
+fn system_upload_gcp_credential(source_path: String) -> Value {
+    match gcp_auth::save_gcp_credential(&source_path) {
+        Ok(v) => v,
+        Err(e) => json!({ "error": e }),
+    }
+}
+
+#[tauri::command]
+async fn system_test_gcp_credential() -> Value {
+    match gcp_auth::test_gcp_credential().await {
+        Ok(v) => v,
+        Err(e) => json!({ "error": e }),
+    }
+}
+
+#[tauri::command]
+fn system_remove_gcp_credential() -> Value {
+    match gcp_auth::remove_gcp_credential() {
+        Ok(v) => v,
+        Err(e) => json!({ "error": e }),
+    }
+}
+
+#[tauri::command]
+fn system_get_gcp_credential_status() -> Value {
+    gcp_auth::get_gcp_credential_status()
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -668,9 +703,16 @@ pub fn run() {
             // 浏览器增强
             system_browser_detect,
             system_browser_enable,
+            // GCP Vertex AI 凭证
+            system_upload_gcp_credential,
+            system_test_gcp_credential,
+            system_remove_gcp_credential,
+            system_get_gcp_credential_status,
             // Doctor 自检
             doctor::system_health_check,
             doctor::system_auto_fix,
+            // 进化引擎
+            evolution::system_get_evolution_stats,
             // 聊天就绪校验
             llm::system_validate_chat_ready,
         ])

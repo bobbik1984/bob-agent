@@ -181,18 +181,36 @@
               <img v-if="getProviderLogo(provider.id)" :src="getProviderLogo(provider.id)" style="width: 16px; height: 16px; object-fit: contain; border-radius: 2px;" />
               <span style="flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" :title="$te('providers.' + provider.id) ? $t('providers.' + provider.id) : provider.name">{{ $te('providers.' + provider.id) ? $t('providers.' + provider.id) : provider.name }}</span>
             </label>
-            <span class="status-dot" :style="{ background: provider.hasKey ? 'var(--accent-primary)' : 'transparent', border: provider.hasKey ? '2px solid var(--accent-primary)' : '2px solid var(--text-tertiary)' }" style="width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex-shrink: 0;"></span>
-            <input 
-              v-model="apiKeys[provider.id]" 
-              type="password" 
-              class="input" 
-              :placeholder="provider.hasKey ? $t('settings.configured') : $t('settings.not_configured')" 
-              style="flex: 1;" 
-            />
-            <button class="btn btn-primary" @click="saveApiKey(provider.id)" style="padding: 4px 10px; font-size: 0.9em;">{{ $t('settings.save') }}</button>
-            <button class="btn-icon btn-remove-key" :style="{ visibility: provider.hasKey ? 'visible' : 'hidden' }" @click="deleteApiKey(provider.id)" :title="$t('settings.delete_key')">
-              <X :size="14" />
-            </button>
+
+            <!-- Vertex AI: 凭证文件上传模式 -->
+            <template v-if="provider.id === 'vertex_ai'">
+              <span class="status-dot" :style="{ background: gcpCredStatus.configured ? 'var(--accent-primary)' : 'transparent', border: gcpCredStatus.configured ? '2px solid var(--accent-primary)' : '2px solid var(--text-tertiary)' }" style="width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex-shrink: 0;"></span>
+              <span v-if="gcpCredStatus.configured" style="flex: 1; font-size: 0.82em; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" :title="gcpCredStatus.client_email">
+                ✅ {{ gcpCredStatus.project_id }} ({{ gcpCredStatus.client_email }})
+              </span>
+              <span v-else style="flex: 1; font-size: 0.82em; color: var(--text-tertiary);">{{ $t('settings.not_configured') }}</span>
+              <button class="btn btn-primary" @click="uploadGcpCredential" style="padding: 4px 10px; font-size: 0.9em; white-space: nowrap;">{{ gcpCredStatus.configured ? '更换凭证' : '上传凭证' }}</button>
+              <button v-if="gcpCredStatus.configured" class="btn" @click="testGcpCredential" style="padding: 4px 10px; font-size: 0.9em; white-space: nowrap;">测试</button>
+              <button class="btn-icon btn-remove-key" :style="{ visibility: gcpCredStatus.configured ? 'visible' : 'hidden' }" @click="removeGcpCredential" :title="$t('settings.delete_key')">
+                <X :size="14" />
+              </button>
+            </template>
+
+            <!-- 常规 API Key 输入模式 -->
+            <template v-else>
+              <span class="status-dot" :style="{ background: provider.hasKey ? 'var(--accent-primary)' : 'transparent', border: provider.hasKey ? '2px solid var(--accent-primary)' : '2px solid var(--text-tertiary)' }" style="width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex-shrink: 0;"></span>
+              <input 
+                v-model="apiKeys[provider.id]" 
+                type="password" 
+                class="input" 
+                :placeholder="provider.hasKey ? $t('settings.configured') : $t('settings.not_configured')" 
+                style="flex: 1;" 
+              />
+              <button class="btn btn-primary" @click="saveApiKey(provider.id)" style="padding: 4px 10px; font-size: 0.9em;">{{ $t('settings.save') }}</button>
+              <button class="btn-icon btn-remove-key" :style="{ visibility: provider.hasKey ? 'visible' : 'hidden' }" @click="deleteApiKey(provider.id)" :title="$t('settings.delete_key')">
+                <X :size="14" />
+              </button>
+            </template>
           </div>
         </div>
 
@@ -651,6 +669,67 @@
         </div>
       </details>
 
+      <!-- 进化引擎看板 -->
+      <details class="settings-section card custom-model-override">
+        <summary class="section-title" style="cursor: pointer; display: flex; align-items: center; justify-content: space-between; margin-bottom: 0;">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <Dna :size="16" class="section-icon" />
+            {{ $t('settings.evolution_title') || '进化引擎' }}
+          </div>
+          <ChevronDown :size="16" class="details-chevron" />
+        </summary>
+        <p class="section-desc" style="margin-top: 16px; margin-bottom: 12px;">{{ $t('settings.evolution_desc') || 'Bob 的自我进化系统：自动从对话中提取知识、定期整理记忆、精炼人格。' }}</p>
+
+        <div v-if="evoLoading" style="display: flex; align-items: center; gap: 8px; color: var(--text-tertiary); padding: 12px 0;">
+          <Loader2 :size="16" class="spin" />
+          <span style="font-size: 0.85em;">{{ $t('settings.evo_loading') }}</span>
+        </div>
+
+        <div v-else class="evo-dashboard">
+          <!-- 统计卡片行 -->
+          <div class="evo-stats-grid">
+            <div class="evo-stat-card">
+              <div class="evo-stat-value">{{ evoStats.observations?.total_conversations || 0 }}</div>
+              <div class="evo-stat-label">{{ $t('settings.evo_obs_conversations') }}</div>
+            </div>
+            <div class="evo-stat-card">
+              <div class="evo-stat-value">{{ evoStats.learned_facts_count || 0 }}</div>
+              <div class="evo-stat-label">{{ $t('settings.evo_learned_facts') }}</div>
+            </div>
+            <div class="evo-stat-card">
+              <div class="evo-stat-value">{{ evoStats.observations?.total_tool_calls || 0 }}</div>
+              <div class="evo-stat-label">{{ $t('settings.evo_tool_calls') }}</div>
+            </div>
+            <div class="evo-stat-card">
+              <div class="evo-stat-value">{{ formatTokenCount(evoStats.observations?.total_tokens_in, evoStats.observations?.total_tokens_out) }}</div>
+              <div class="evo-stat-label">{{ $t('settings.evo_token_usage') }}</div>
+            </div>
+          </div>
+
+          <!-- 最近做梦记录 -->
+          <div v-if="evoStats.dream_history?.length > 0" class="evo-dream-section">
+            <div class="evo-dream-header">
+              <Moon :size="14" style="color: var(--user-accent);" />
+              <span>{{ $t('settings.evo_dream_log') }}</span>
+              <span v-if="evoStats.last_dream_at" class="evo-dream-time">{{ $t('settings.evo_last_time') }}{{ formatEvoTime(evoStats.last_dream_at) }}</span>
+            </div>
+            <div class="evo-dream-timeline">
+              <div v-for="(dream, idx) in evoStats.dream_history.slice(0, 5)" :key="idx" class="evo-dream-entry">
+                <div class="evo-dream-dot" :class="{ refined: dream.soul_refined }"></div>
+                <div class="evo-dream-content">
+                  <span class="evo-dream-report">{{ dream.report || $t('settings.evo_no_update') }}</span>
+                  <span class="evo-dream-meta">{{ formatEvoTime(dream.created_at) }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div v-else class="empty-folders" style="margin-top: 8px;">
+            <span>{{ $t('settings.evo_empty') }}</span>
+          </div>
+        </div>
+      </details>
+
       <!-- 关于 & 数据 -->
       <section class="settings-section card">
         <h3 class="section-title">
@@ -801,8 +880,8 @@
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 
-import { ref, computed, onMounted } from 'vue';
-import { Settings as SettingsIcon, Monitor, Tractor, Eye, EyeOff, Plug, Loader2, Palette, Info, FolderOpen, FolderHeart, Puzzle, Layers, X, Plus, Unplug, Globe, HardDrive, Trash2, Key, FileText, Server, ChevronDown, BookOpen, MessageSquare, Check, Database, Brain, Smartphone, Send, MessageCircle } from 'lucide-vue-next';
+import { ref, computed, onMounted, inject, watch, onUnmounted } from 'vue';
+import { Settings as SettingsIcon, Monitor, Tractor, Eye, EyeOff, Plug, Loader2, Palette, Info, FolderOpen, FolderHeart, Puzzle, Layers, X, Plus, Unplug, Globe, HardDrive, Trash2, Key, FileText, Server, ChevronDown, BookOpen, MessageSquare, Check, Database, Brain, Smartphone, Send, MessageCircle, Dna, Moon } from 'lucide-vue-next';
 import { useI18n } from 'vue-i18n';
 import CustomSelect from '../components/CustomSelect.vue';
 import PluginManager from '../components/PluginManager.vue';
@@ -812,6 +891,7 @@ import { ACCENT_COLORS, PREMIUM_THEMES } from '@/constants/theme.js';
 const emit = defineEmits(['config-changed']);
 const { locale, t } = useI18n();
 const currentLocale = ref('zh-CN');
+const injectedTheme = inject('currentTheme', null);
 
 const isAdvancedMode = ref(localStorage.getItem('bob_advanced_mode') === 'true');
 const toggleAdvancedMode = () => {
@@ -1133,6 +1213,44 @@ function formatMemoryTime(ts) {
   return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
+// ── 进化引擎看板 ──
+const evoLoading = ref(false);
+const evoStats = ref({});
+
+async function loadEvolutionStats() {
+  if (!window.electronAPI.getEvolutionStats) return;
+  evoLoading.value = true;
+  try {
+    const data = await window.electronAPI.getEvolutionStats();
+    evoStats.value = data || {};
+  } catch (e) {
+    console.error('Failed to load evolution stats', e);
+    evoStats.value = {};
+  } finally {
+    evoLoading.value = false;
+  }
+}
+
+function formatTokenCount(tokIn, tokOut) {
+  const total = (tokIn || 0) + (tokOut || 0);
+  if (total < 1000) return String(total);
+  if (total < 1_000_000) return (total / 1000).toFixed(1) + 'K';
+  return (total / 1_000_000).toFixed(2) + 'M';
+}
+
+function formatEvoTime(ts) {
+  if (!ts) return '';
+  const d = new Date(ts > 1e11 ? ts : ts * 1000);
+  const now = new Date();
+  const diffMs = now - d;
+  const diffH = Math.floor(diffMs / 3_600_000);
+  if (diffH < 1) return '刚刚';
+  if (diffH < 24) return `${diffH}小时前`;
+  const diffD = Math.floor(diffH / 24);
+  if (diffD < 7) return `${diffD}天前`;
+  return d.toLocaleDateString();
+}
+
 // ── 凭证管理 (Credential Store) ──
 const modelProviders = ref([]); // 从 registry 动态加载
 
@@ -1335,6 +1453,47 @@ async function deleteApiKey(providerId) {
   }
 }
 
+// ── GCP Vertex AI 凭证管理 ──────────────────────────────
+const gcpCredStatus = ref({ configured: false });
+
+async function loadGcpCredentialStatus() {
+  if (window.electronAPI.getGcpCredentialStatus) {
+    gcpCredStatus.value = await window.electronAPI.getGcpCredentialStatus();
+  }
+}
+
+async function uploadGcpCredential() {
+  const { open } = await import('@tauri-apps/plugin-dialog');
+  const selected = await open({
+    multiple: false,
+    title: '选择 GCP Service Account JSON 凭证文件',
+    filters: [{ name: 'JSON', extensions: ['json'] }],
+  });
+  if (!selected) return;
+  const result = await window.electronAPI.uploadGcpCredential(selected);
+  if (result.error) {
+    alert('凭证上传失败: ' + result.error);
+  } else {
+    await loadGcpCredentialStatus();
+  }
+}
+
+async function testGcpCredential() {
+  const result = await window.electronAPI.testGcpCredential();
+  if (result.error) {
+    alert('❌ 连通性测试失败: ' + result.error);
+  } else {
+    alert('✅ 连通性测试成功！\nProject: ' + result.project_id + '\nToken: ' + result.token_preview);
+  }
+}
+
+async function removeGcpCredential() {
+  const result = await window.electronAPI.removeGcpCredential();
+  if (result.ok) {
+    await loadGcpCredentialStatus();
+  }
+}
+
 onMounted(async () => {
   const allConfig = await window.electronAPI.getAllConfig();
   config.value = {
@@ -1350,7 +1509,7 @@ onMounted(async () => {
     clerkBaseURL: allConfig.clerkBaseURL || '',
     _defaultClerkBaseURL: allConfig._defaultClerkBaseURL || '',
     _hasClerkApiKey: allConfig._hasClerkApiKey || false,
-    theme: allConfig.theme || 'dark',
+    theme: injectedTheme ? injectedTheme.value : (allConfig.theme || 'dark'),
     uiScale: allConfig.uiScale || 'compact',
     wikiDir: allConfig.wikiDir || '',
     workspaceDir: allConfig.workspaceDir || '',
@@ -1369,6 +1528,7 @@ onMounted(async () => {
   await fetchApiKeys();
   await loadCustomModels();
   await fetchToolStatuses();
+  await loadGcpCredentialStatus();
   if (window.electronAPI.getVersion) {
     appVersion.value = await window.electronAPI.getVersion();
   }
@@ -1389,6 +1549,7 @@ onMounted(async () => {
     } catch(err) {}
   }
   await loadMemoryEntries();
+  loadEvolutionStats();  // 不 await，后台加载不阻塞
 });
 
 async function loadModels() {
@@ -1663,6 +1824,17 @@ async function removeMcpServer(name) {
   await window.electronAPI.setMcpConfig({ mcpServers: updated });
   mcpServers.value = updated;
 }
+
+const handleThemeChange = (e) => {
+  if (config.value.theme !== e.detail) {
+    config.value.theme = e.detail;
+  }
+};
+window.addEventListener('bob-theme-changed', handleThemeChange);
+
+onUnmounted(() => {
+  window.removeEventListener('bob-theme-changed', handleThemeChange);
+});
 </script>
 
 <style scoped>
@@ -2210,6 +2382,102 @@ select.input {
 .memory-entry-icon.session :deep(svg) {
   color: var(--accent-secondary);
   opacity: 0.6;
+}
+
+/* ── Evolution Dashboard ── */
+.evo-dashboard {
+  margin-top: 8px;
+}
+.evo-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  margin-bottom: 16px;
+}
+@media (max-width: 600px) {
+  .evo-stats-grid { grid-template-columns: repeat(2, 1fr); }
+}
+.evo-stat-card {
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  text-align: center;
+  border: 1px solid var(--border-subtle);
+  transition: border-color 0.2s;
+}
+.evo-stat-card:hover {
+  border-color: var(--user-accent);
+}
+.evo-stat-value {
+  font-size: 1.3em;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: -0.02em;
+}
+.evo-stat-label {
+  font-size: 0.75em;
+  color: var(--text-tertiary);
+  margin-top: 4px;
+}
+.evo-dream-section {
+  margin-top: 4px;
+}
+.evo-dream-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85em;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 10px;
+}
+.evo-dream-time {
+  margin-left: auto;
+  font-weight: 400;
+  font-size: 0.85em;
+  color: var(--text-tertiary);
+}
+.evo-dream-timeline {
+  position: relative;
+  padding-left: 16px;
+  border-left: 2px solid var(--border-subtle);
+}
+.evo-dream-entry {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 6px 0;
+}
+.evo-dream-dot {
+  position: absolute;
+  left: -21px;
+  top: 10px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-tertiary);
+  border: 2px solid var(--bg-secondary);
+  flex-shrink: 0;
+}
+.evo-dream-dot.refined {
+  background: var(--user-accent);
+  box-shadow: 0 0 6px var(--user-accent);
+}
+.evo-dream-content {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.evo-dream-report {
+  font-size: 0.85em;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+.evo-dream-meta {
+  font-size: 0.75em;
+  color: var(--text-tertiary);
 }
 
 /* ── Model Provider Registry ── */

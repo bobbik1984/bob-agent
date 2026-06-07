@@ -85,6 +85,38 @@
         { "id": "local-qwen2.5-1.5b", "name": "Qwen2.5 1.5B (本地)", "vision": false, "default": true, "pricing": { "input": 0, "output": 0 } },
         { "id": "local-llama-3.2-1b", "name": "Llama 3.2 1B (本地)", "vision": false, "pricing": { "input": 0, "output": 0 } }
       ]
+    },
+    {
+      "id": "gemini",
+      "name": "Google Gemini",
+      "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
+      "supports_model_list": false,
+      "models": [
+        { "id": "gemini-2.5-pro", "name": "Gemini 2.5 Pro", "vision": true, "default": true, "pricing": { "input": 1.25, "output": 5.0 } },
+        { "id": "gemini-2.5-flash", "name": "Gemini 2.5 Flash", "vision": true, "pricing": { "input": 0.075, "output": 0.3 } }
+      ]
+    },
+    {
+      "id": "anthropic",
+      "name": "Anthropic Claude",
+      "base_url": "https://api.anthropic.com/v1",
+      "base_url_variants": { "proxy": "https://api.your-proxy.com/v1" },
+      "supports_model_list": false,
+      "models": [
+        { "id": "claude-3-7-sonnet-20250219", "name": "Claude 3.7 Sonnet", "vision": true, "default": true, "pricing": { "input": 3.0, "output": 15.0 } },
+        { "id": "claude-3-5-haiku-20241022", "name": "Claude 3.5 Haiku", "vision": true, "pricing": { "input": 0.8, "output": 4.0 } }
+      ]
+    },
+    {
+      "id": "vertex_ai",
+      "name": "Google Vertex AI",
+      "auth_type": "gcp_service_account",
+      "base_url": "https://us-central1-aiplatform.googleapis.com/v1beta1",
+      "supports_model_list": false,
+      "models": [
+        { "id": "gemini-2.5-pro", "name": "Gemini 2.5 Pro (Vertex)", "vision": true, "default": true, "pricing": { "input": 1.25, "output": 5.0 } },
+        { "id": "gemini-2.5-flash", "name": "Gemini 2.5 Flash (Vertex)", "vision": true, "pricing": { "input": 0.075, "output": 0.3 } }
+      ]
     }
   ]
 }

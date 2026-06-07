@@ -183,6 +183,9 @@ window.electronAPI = {
     return () => {};
   },
 
+  // ── 进化引擎 (Rust 原生) ───────────────────────────────
+  getEvolutionStats: async () => invoke('system_get_evolution_stats'),
+
   // ── 网页抓取 (Rust 原生 T-602) ─────────────────────────
   fetchUrl: async (url) => invoke('system_fetch_url', { url }),
 
@@ -245,6 +248,12 @@ window.electronAPI = {
   // ── 浏览器增强 (CDP Browser Enhancement) ─────────────────
   browserDetect: async () => invoke('system_browser_detect'),
   browserEnable: async () => invoke('system_browser_enable'),
+
+  // ── GCP Vertex AI 凭证管理 ─────────────────────────────
+  uploadGcpCredential: async (sourcePath) => invoke('system_upload_gcp_credential', { sourcePath }),
+  testGcpCredential: async () => invoke('system_test_gcp_credential'),
+  removeGcpCredential: async () => invoke('system_remove_gcp_credential'),
+  getGcpCredentialStatus: async () => invoke('system_get_gcp_credential_status'),
 
   // ── Doctor 自检引擎 (T-1304) ────────────────────────────
   healthCheck: async () => invoke('system_health_check'),

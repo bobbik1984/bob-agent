@@ -1092,7 +1092,10 @@ async fn tool_append_file(path: &str, content: &str) -> Value {
 }
 
 async fn tool_brain_search(query: &str) -> Value {
-    // 优先使用 FTS5 全文搜索（毫秒级，不受文件数量影响）
+    // ── RRF (Reciprocal Rank Fusion) 增强检索 ─────────────────
+    // Step 1: 从 FTS5 获取 Top 20 候选
+    // Step 2: 在 Rust 内存中叠加时间衰减 + 类型权重重排
+    // Step 3: 返回 Top 5 给 LLM
     if let Ok(db) = rusqlite::Connection::open(super::get_data_dir().join("bob.db")) {
         let fts_query = query.split_whitespace()
             .map(|w| format!("\"{}\"", w))
@@ -1100,23 +1103,78 @@ async fn tool_brain_search(query: &str) -> Value {
             .join(" OR ");
 
         if let Ok(mut stmt) = db.prepare(
-            "SELECT file_name, source_path, wiki_path, summary, keywords \
-             FROM wiki_fts WHERE wiki_fts MATCH ?1 ORDER BY rank LIMIT 10"
+            "SELECT file_name, source_path, wiki_path, summary, keywords, category, indexed_at, rank \
+             FROM wiki_fts WHERE wiki_fts MATCH ?1 ORDER BY rank LIMIT 20"
         ) {
             if let Ok(rows) = stmt.query_map(rusqlite::params![fts_query], |row| {
-                Ok(json!({
-                    "file_name": row.get::<_, String>(0).unwrap_or_default(),
-                    "source_path": row.get::<_, String>(1).unwrap_or_default(),
-                    "wiki_path": row.get::<_, String>(2).unwrap_or_default(),
-                    "summary": row.get::<_, String>(3).unwrap_or_default(),
-                    "keywords": row.get::<_, String>(4).unwrap_or_default(),
-                }))
+                Ok((
+                    row.get::<_, String>(0).unwrap_or_default(), // file_name
+                    row.get::<_, String>(1).unwrap_or_default(), // source_path
+                    row.get::<_, String>(2).unwrap_or_default(), // wiki_path
+                    row.get::<_, String>(3).unwrap_or_default(), // summary
+                    row.get::<_, String>(4).unwrap_or_default(), // keywords
+                    row.get::<_, String>(5).unwrap_or_default(), // category
+                    row.get::<_, String>(6).unwrap_or_default(), // indexed_at
+                    row.get::<_, f64>(7).unwrap_or(0.0),         // rank (negative = better)
+                ))
             }) {
-                let results: Vec<Value> = rows.filter_map(|r| r.ok()).collect();
-                if !results.is_empty() {
+                let mut candidates: Vec<(f64, serde_json::Value)> = Vec::new();
+                let now_ts = chrono::Local::now().timestamp() as f64;
+
+                for row_result in rows.flatten() {
+                    let (file_name, source_path, wiki_path, summary, keywords, category, indexed_at, fts_rank) = row_result;
+
+                    // ── RRF 基础分 (FTS5 rank 越负越好，取绝对值) ──
+                    let base_score = fts_rank.abs().max(0.001);
+
+                    // ── 类型权重 ──────────────────────────────
+                    let type_weight = if category.contains("feedback") {
+                        2.5  // 用户对 AI 错误的纠正 — 最高优先级
+                    } else if category.contains("learned") {
+                        1.5  // 自动提取的知识事实
+                    } else if wiki_path.contains("superseded") || summary.contains("superseded") {
+                        0.3  // 过时记忆 — 大幅降权
+                    } else {
+                        1.0  // 普通 wiki 内容
+                    };
+
+                    // ── 时间衰减 (越新越重要) ─────────────────
+                    let time_weight = if !indexed_at.is_empty() {
+                        if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(&indexed_at, "%Y-%m-%d %H:%M:%S") {
+                            let age_days = (now_ts - dt.and_utc().timestamp() as f64) / 86400.0;
+                            // 半衰期 30 天: 30天前的记忆权重约为 0.5
+                            (0.5_f64).powf(age_days / 30.0).max(0.1)
+                        } else {
+                            0.5 // 无法解析日期，给中等权重
+                        }
+                    } else {
+                        0.5
+                    };
+
+                    let final_score = base_score * type_weight * time_weight;
+
+                    candidates.push((final_score, json!({
+                        "file_name": file_name,
+                        "source_path": source_path,
+                        "wiki_path": wiki_path,
+                        "summary": summary,
+                        "keywords": keywords,
+                        "category": category,
+                        "relevance_score": format!("{:.3}", final_score),
+                    })));
+                }
+
+                if !candidates.is_empty() {
+                    // 按 RRF 得分降序排列，取 Top 5
+                    candidates.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+                    let top_results: Vec<Value> = candidates.into_iter()
+                        .take(5)
+                        .map(|(_, v)| v)
+                        .collect();
+
                     return json!({
-                        "source": "fts5",
-                        "results": results,
+                        "source": "fts5_rrf",
+                        "results": top_results,
                         "hint": "使用 read_file 读取 wiki_path 获取完整摘要页内容"
                     });
                 }

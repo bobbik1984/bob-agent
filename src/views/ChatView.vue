@@ -92,8 +92,11 @@
           <div v-if="msg.image_base64" class="message-image">
             <img :src="'data:image/png;base64,' + msg.image_base64" alt="用户图片" />
           </div>
-          <!-- 元数据标注：模型 & 来源 & 复制 -->
+          <!-- 元数据标注：模型 & 来源 & 复制 & 记忆标志 -->
           <div class="message-meta-row" v-if="msg.role === 'assistant' || msg.from_channel">
+            <div v-if="msg.content && msg.content.includes('<|mem|>')" class="memory-indicator" title="已自动提炼知识到脑库">
+              🧬
+            </div>
             <div v-if="msg.from_channel" class="source-label">
               <Smartphone v-if="msg.from_channel === 'wechat'" :size="10" />
               <Monitor v-else :size="10" />
@@ -163,8 +166,13 @@
             </div>
           </div>
           <div v-if="streamContent" class="message-content selectable" v-html="renderMarkdown(streamContent)"></div>
-          <!-- 流式模型标注 -->
-          <div v-if="currentModelName" class="model-label">{{ currentModelName }}</div>
+          <!-- 流式元数据：模型标注 + 记忆标志 -->
+          <div class="message-meta-row" v-if="currentModelName || streamContent.includes('<|mem|>')">
+            <div v-if="streamContent.includes('<|mem|>')" class="memory-indicator" title="已自动提炼知识到脑库">
+              🧬
+            </div>
+            <div v-if="currentModelName" class="model-label">{{ currentModelName }}</div>
+          </div>
         </div>
       </div>
     <!-- Pending Folder Drop Card -->
@@ -1706,6 +1714,18 @@ defineExpose({
   font-family: var(--font-mono);
   user-select: none;
   letter-spacing: 0.02em;
+}
+
+/* 进化引擎: 记忆提炼彩蛋标志 */
+.memory-indicator {
+  font-size: 12px;
+  opacity: 0.6;
+  cursor: default;
+  user-select: none;
+  transition: opacity 0.3s;
+}
+.memory-indicator:hover {
+  opacity: 1;
 }
 
 .source-label {

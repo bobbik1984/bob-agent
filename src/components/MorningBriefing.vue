@@ -26,6 +26,15 @@
             {{ t('dream.merged', { count: stats.merged }) }}
           </span>
         </div>
+
+        <!-- 进化引擎梦境报告 -->
+        <div v-if="evolutionReport" class="briefing-evolution">
+          <span class="maintenance-label">
+            <Dna :size="12" style="margin-right: 4px;" />
+            进化报告
+          </span>
+          <span class="maintenance-item evo-highlight">{{ evolutionReport }}</span>
+        </div>
       </div>
 
       <div class="briefing-actions">
@@ -43,7 +52,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { X, Sun, Sparkles } from 'lucide-vue-next';
+import { X, Sun, Sparkles, Dna } from 'lucide-vue-next';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 
@@ -53,6 +62,7 @@ const emit = defineEmits(['chat', 'dismiss']);
 const visible = ref(false);
 const briefingText = ref('');
 const stats = ref({ staled: 0, merged: 0 });
+const evolutionReport = ref('');
 let cleanupListener = null;
 
 const renderedBriefing = computed(() => {
@@ -68,6 +78,17 @@ async function loadDreamReport() {
       briefingText.value = report.briefing;
       stats.value = report.stats || {};
       visible.value = true;
+    }
+    // 进化引擎梦境报告
+    if (window.electronAPI.getEvolutionStats) {
+      const evo = await window.electronAPI.getEvolutionStats();
+      if (evo && evo.dream_history && evo.dream_history.length > 0) {
+        const latest = evo.dream_history[0];
+        if (latest.report && latest.report !== '无需更新') {
+          evolutionReport.value = latest.report;
+          visible.value = true;  // 即使没有晚报，有进化报告也展示
+        }
+      }
     }
   } catch (err) {
     console.error('[MorningBriefing] Failed to load dream report:', err);
@@ -270,5 +291,21 @@ onUnmounted(() => {
 .briefing-fade-leave-to {
   opacity: 0;
   transform: translateY(-8px);
+}
+
+/* 进化引擎梦境报告 */
+.briefing-evolution {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-subtle);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.evo-highlight {
+  background: color-mix(in srgb, var(--user-accent) 12%, var(--bg-hover));
+  color: var(--text-secondary);
+  border: 1px solid color-mix(in srgb, var(--user-accent) 20%, transparent);
 }
 </style>

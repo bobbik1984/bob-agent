@@ -531,6 +531,20 @@ pub(crate) fn read_llm_config_for_model(model_id: &str) -> (String, String, Stri
         config.get("provider").and_then(|v| v.as_str()).unwrap_or("deepseek").to_string()
     };
     
+    // ── Vertex AI 特殊处理 ──────────────────────────────────
+    if provider == "vertex_ai" {
+        let cred_path = super::gcp_auth::get_gcp_credential_path();
+        if !cred_path.exists() {
+            return (provider, String::new(), model_id.to_string(), String::new());
+        }
+        // 读取 project_id，构建动态 URL
+        let project_id = config.get("gcpProjectId").and_then(|v| v.as_str()).unwrap_or("");
+        let region = config.get("gcpVertexRegion").and_then(|v| v.as_str()).unwrap_or("us-central1");
+        let base_url = super::gcp_auth::build_vertex_gemini_url(project_id, region);
+        // 返回特殊标记 "__GCP_TOKEN__"，在 stream_internal 中动态换取真实 Token
+        return (provider, "__GCP_TOKEN__".to_string(), model_id.to_string(), base_url);
+    }
+    
     // 2. 从 apiKeys 对象中获取对应 provider 的 Key (优先使用自定义模型自带的 apiKey 和 baseUrl)
     let api_keys_map = get_api_keys();
     let api_key = custom_api_key.unwrap_or_else(|| {
@@ -679,8 +693,8 @@ fn build_memory_summary() -> String {
     }
 
     lines.push("\n## 知识库检索 (Tier 3: 长期记忆)".to_string());
-    lines.push("你有权限使用 brain_search 检索知识库，或者使用 write_file 写入 wiki/ 目录来保存新知识。".to_string());
-    lines.push("当你产出高质量的分析、对比或总结时，请主动调用 write_file 将其保存到 wiki/ 目录。知识应该不断积累而非消散在聊天记录中。".to_string());
+    lines.push("你有权限使用 brain_search 检索知识库中的文档和过往学到的知识。".to_string());
+    lines.push("注意：你现在拥有自动自进化记忆系统。当用户告知你一条重要的架构原则、个人偏好，或你认为非常有必要长期记住的知识时，请在你的回复末尾悄悄加上一个不可见的标记 `<|mem|>`。你依然只需要正常回复用户，但必须带上这个标记。后台会自动提取并永久保存，**绝不要尝试手动调用 write_file 去保存记忆！**".to_string());
 
     lines.join("\n")
 }
@@ -727,7 +741,25 @@ async fn stream_internal(
     // 1. 读取 LLM 配置
     let config = super::read_config();
     let config_model_id = config.get("model").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let (provider, api_key, model_override, custom_base_url) = read_llm_config_for_model(&config_model_id);
+    let (provider, mut api_key, model_override, custom_base_url) = read_llm_config_for_model(&config_model_id);
+
+    // ── Vertex AI: 动态换取 GCP Access Token ──────────────
+    if api_key == "__GCP_TOKEN__" {
+        let cred_path = super::gcp_auth::get_gcp_credential_path();
+        match super::gcp_auth::GcpTokenManager::from_file(&cred_path) {
+            Ok(manager) => {
+                match manager.get_access_token().await {
+                    Ok(token) => { api_key = token; }
+                    Err(e) => {
+                        return json!({ "error": format!("GCP Token 获取失败: {}", e) });
+                    }
+                }
+            }
+            Err(e) => {
+                return json!({ "error": format!("GCP 凭证加载失败: {}，请在设置中重新上传凭证文件", e) });
+            }
+        }
+    }
 
     if api_key.is_empty() && provider != "offline" {
         return json!({ "error": "API Key 未配置或被清空，请前往设置检查" });
@@ -852,6 +884,12 @@ async fn stream_internal(
     let mut final_content = String::new();
     let mut final_thinking = String::new();
     let mut final_usage: Option<Value> = None;
+
+    // ── 进化引擎: 遥测计数器 ──────────────────────────────
+    let start_time = std::time::Instant::now();
+    let mut tool_calls_total: i64 = 0;
+    let mut tool_failures_total: i64 = 0;
+    let mut rounds_completed: usize = 0;
 
     for round in 0..=MAX_TOOL_ROUNDS {
         // 构建请求体
@@ -1102,17 +1140,103 @@ async fn stream_internal(
             || content.contains("DSML")
             || content.contains("<|tool_calls|>")
             || content.contains("<|invoke");
-        if dsml_leaked && !has_tool_calls && round < MAX_TOOL_ROUNDS {
-            log::warn!("DSML token leakage detected in content (round {}), retrying...", round + 1);
-            // 通知前端清除已渲染的脏内容
-            let _ = app.emit("llm:chunk", json!({ "type": "clear", "conv_id": &conv_id_for_emit }));
-            let _ = app.emit("llm:chunk", json!({ "type": "thinking", "content": "\n[检测到模型输出异常，自动重试中...]\n", "conv_id": &conv_id_for_emit }));
-            // 插入提示，引导模型使用标准 function calling 格式
-            full_messages.push(json!({
-                "role": "system",
-                "content": "请使用标准的 function calling JSON 格式调用工具。不要在回复文本中直接输出工具调用标记。"
-            }));
-            continue; // 回到循环顶部重试
+
+        if dsml_leaked && !has_tool_calls {
+            let mut extracted = false;
+            let invoke_markers = ["<｜｜DSML｜｜invoke name=\"", "<|invoke name=\""];
+            
+            for marker in invoke_markers {
+                let mut start_idx = 0;
+                while let Some(idx) = content[start_idx..].find(marker) {
+                    let invoke_start = start_idx + idx;
+                    let name_start = invoke_start + marker.len();
+                    if let Some(name_end_offset) = content[name_start..].find("\">") {
+                        let name_end = name_start + name_end_offset;
+                        let tool_name = &content[name_start..name_end];
+                        
+                        let mut args_map = serde_json::Map::new();
+                        let mut param_start_idx = name_end + 2;
+                        
+                        let param_markers = ["<｜｜DSML｜｜parameter name=\"", "<|parameter name=\""];
+                        let param_end_markers = ["</｜｜DSML｜｜parameter>", "</|parameter>"];
+                        
+                        loop {
+                            let mut min_pos = usize::MAX;
+                            let mut best_marker_idx = 0;
+                            for (i, p_marker) in param_markers.iter().enumerate() {
+                                if let Some(pos) = content[param_start_idx..].find(p_marker) {
+                                    if pos < min_pos {
+                                        min_pos = pos;
+                                        best_marker_idx = i;
+                                    }
+                                }
+                            }
+                            if min_pos == usize::MAX { break; }
+                            
+                            // 检查是否在找 parameter 之前先遇到了 invoke 的结束标签
+                            if let Some(invoke_end) = content[param_start_idx..].find("</") {
+                                if invoke_end < min_pos && content[param_start_idx+invoke_end..].contains("invoke>") {
+                                    break;
+                                }
+                            }
+                            
+                            let p_start = param_start_idx + min_pos;
+                            let p_name_start = p_start + param_markers[best_marker_idx].len();
+                            if let Some(p_name_end_offset) = content[p_name_start..].find("\"") {
+                                let p_name_end = p_name_start + p_name_end_offset;
+                                let param_name = &content[p_name_start..p_name_end];
+                                
+                                if let Some(val_start_offset) = content[p_name_end..].find(">") {
+                                    let val_start = p_name_end + val_start_offset + 1;
+                                    if let Some(val_end_offset) = content[val_start..].find(param_end_markers[best_marker_idx]) {
+                                        let val_end = val_start + val_end_offset;
+                                        let param_value = &content[val_start..val_end];
+                                        args_map.insert(param_name.to_string(), json!(param_value));
+                                        param_start_idx = val_end + param_end_markers[best_marker_idx].len();
+                                        continue;
+                                    }
+                                }
+                            }
+                            break;
+                        }
+                        
+                        pending_tool_calls.push(PendingToolCall {
+                            id: format!("call_{}", super::now_ms() + pending_tool_calls.len() as i64),
+                            name: tool_name.to_string(),
+                            arguments: serde_json::to_string(&args_map).unwrap_or_default(),
+                        });
+                        has_tool_calls = true;
+                        extracted = true;
+                        start_idx = param_start_idx;
+                    } else {
+                        break;
+                    }
+                }
+            }
+
+            if extracted {
+                log::info!("Successfully parsed DSML internal format into standard tool calls (round {})", round + 1);
+                // 如果成功解析，把文本里的 DSML 标签清掉，让用户界面看起来干净
+                let clean_content = content.split("<｜").next().unwrap_or(&content).to_string();
+                let clean_content = clean_content.split("<|").next().unwrap_or(&clean_content).to_string();
+                content.clear();
+                content.push_str(&clean_content);
+                // 触发前端清屏并重发干净文本
+                let _ = app.emit("llm:chunk", json!({ "type": "clear", "conv_id": &conv_id_for_emit }));
+                if !content.is_empty() {
+                    let _ = app.emit("llm:chunk", json!({ "type": "text", "content": &content, "conv_id": &conv_id_for_emit }));
+                }
+            } else if round < MAX_TOOL_ROUNDS {
+                // 解析失败，退回到重试逻辑
+                log::warn!("DSML token leakage detected but parsing failed (round {}), retrying...", round + 1);
+                let _ = app.emit("llm:chunk", json!({ "type": "clear", "conv_id": &conv_id_for_emit }));
+                let _ = app.emit("llm:chunk", json!({ "type": "thinking", "content": "\n[检测到模型输出异常，自动重试中...]\n", "conv_id": &conv_id_for_emit }));
+                full_messages.push(json!({
+                    "role": "system",
+                    "content": "请使用标准的 function calling JSON 格式调用工具。不要在回复文本中直接输出工具调用标记。"
+                }));
+                continue;
+            }
         }
 
         // ── 判断: Tool Call 还是最终回复 ────────────────
@@ -1155,6 +1279,11 @@ async fn stream_internal(
 
             // 按顺序推送结果到 messages
             for (i, (name, result)) in results.into_iter().enumerate() {
+                // 进化引擎: 检测工具失败
+                if result.get("error").is_some() {
+                    tool_failures_total += 1;
+                }
+
                 let result_str = serde_json::to_string_pretty(&result).unwrap_or_default();
 
                 // 截断过长结果（防 context window 爆炸），使用 char 边界安全截断
@@ -1174,6 +1303,10 @@ async fn stream_internal(
                     "content": truncated
                 }));
             }
+
+            // ── 进化引擎: 累计工具调用统计 ──────────────
+            tool_calls_total += pending_tool_calls.len() as i64;
+            rounds_completed = round + 1;
 
             log::info!("Tool Calling round {}: executed {} tools", round + 1, pending_tool_calls.len());
 
@@ -1212,6 +1345,7 @@ async fn stream_internal(
         }
 
         // 没有 tool calls — 这是最终文本回复
+        rounds_completed = round;
         final_content = content;
         final_thinking = thinking_content;
         final_usage = usage_data;
@@ -1220,6 +1354,57 @@ async fn stream_internal(
 
     // 发送完成事件
     let _ = app.emit("llm:chunk", json!({ "type": "done", "content": "", "conv_id": &conv_id_for_emit }));
+
+    // ── 进化引擎: 零成本遥测 ────────────────────────────────
+    // 纯 Rust 计数器，不调用 LLM，不阻塞响应
+    {
+        let stop = if final_content.is_empty() && final_thinking.is_empty() {
+            "empty_response".to_string()
+        } else {
+            "completed".to_string()
+        };
+
+        // 从 usage 中提取 token 计数
+        let (toks_in, toks_out) = final_usage.as_ref()
+            .map(|u| {
+                let i = u.get("prompt_tokens").and_then(|v| v.as_i64()).unwrap_or(0);
+                let o = u.get("completion_tokens").and_then(|v| v.as_i64()).unwrap_or(0);
+                (i, o)
+            })
+            .unwrap_or((0, 0));
+
+        let obs = super::evolution::ObservationRecord {
+            conversation_id: conv_id_for_emit.clone(),
+            model_used: model_id.clone(),
+            tool_calls_count: tool_calls_total,
+            tool_failures: tool_failures_total,
+            total_rounds: rounds_completed as i64,
+            duration_ms: start_time.elapsed().as_millis() as i64,
+            tokens_in: toks_in,
+            tokens_out: toks_out,
+            stop_reason: stop,
+        };
+        super::evolution::capture_observation(&obs);
+    }
+
+    // ── 进化引擎: 异步知识提取 ──────────────────────────────
+    // tokio::spawn 后台执行，完全不阻塞主线程返回
+    {
+        let extract_app = app.clone();
+        let mut extract_messages = full_messages.clone();
+        // 追加当前最终回复，让进化引擎能看见 <|mem|> 标记和完整答复
+        extract_messages.push(json!({
+            "role": "assistant",
+            "content": final_content.clone()
+        }));
+        let extract_conv_id = conv_id_for_emit.clone();
+        let extract_rounds = rounds_completed as i64;
+        tokio::spawn(async move {
+            super::evolution::extract_learned_facts(
+                extract_app, extract_messages, extract_conv_id, extract_rounds
+            ).await;
+        });
+    }
 
     let mut pricing = json!({ "input": 0.0, "output": 0.0 });
     let pool = get_model_pool();

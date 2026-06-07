@@ -177,6 +177,17 @@ pub async fn start_scheduler(app: AppHandle) {
 
         // T-1307: 每轮 tick 也检查即将到期的待办
         check_upcoming_todos(&app, &db_path);
+
+        // ── 进化引擎: 防休眠补偿做梦 ──────────────────────
+        // 不依赖固定 Cron，而是检查距离上次做梦是否超过 24 小时。
+        // 即使笔记本合盖休眠一整夜，打开后第一个 tick 就会触发补梦。
+        {
+            let dream_app = app.clone();
+            // 使用 tokio::spawn 在后台异步执行，不阻塞 scheduler 主循环
+            tokio::spawn(async move {
+                crate::evolution::check_and_dream(dream_app).await;
+            });
+        }
     }
 }
 

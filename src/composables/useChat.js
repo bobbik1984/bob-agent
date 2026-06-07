@@ -119,7 +119,7 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
       .filter(m => m.role !== 'system' && m.type !== 'confirm-card')
       .map(m => ({
         role: m.role,
-        content: m.content || '',
+        content: (m.content || '').replace(/<\|mem\|>/g, '').trim(),
       }));
 
     // 在发给大模型的最终载荷里，偷偷塞入系统指令（不污染前端 UI 和数据库）
@@ -325,7 +325,8 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
   // ── Markdown 渲染 ─────────────────────────────────
   function renderMarkdown(text) {
     if (!text) return '';
-    const cleaned = text.replace(/<calendar_event>[\s\S]*?(?:<\/calendar_event>|$)/gi, '');
+    const cleaned = text.replace(/<calendar_event>[\s\S]*?(?:<\/calendar_event>|$)/gi, '')
+      .replace(/<\|mem\|>/g, ''); // 视觉过滤进化引擎隐式标记
     let rawHtml = marked.parse(cleaned);
 
     // ── bob:// 本地文件协议桥接 ──

@@ -55,6 +55,9 @@ aes = "0.8"
 md-5 = "0.10"
 rand = "0.8"
 
+# GCP Vertex AI 鉴权 — JWT RS256 签名
+jsonwebtoken = "9"
+
 # 浏览器增强 — CDP 控制本机 Edge/Chrome
 chromiumoxide = { version = "0.7", features = ["tokio-runtime"], default-features = false }
 tauri-plugin-notification = "2.0.0-beta.0"

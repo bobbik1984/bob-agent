@@ -95,6 +95,38 @@ pub fn init_db(data_dir: &std::path::Path) -> Connection {
         SELECT id, content FROM messages;
     ").unwrap_or_default();
 
+    // ── 进化引擎: 零成本遥测记录 ──────────────────────────
+    conn.execute_batch("
+        CREATE TABLE IF NOT EXISTS session_observations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            conversation_id TEXT NOT NULL,
+            model_used TEXT DEFAULT '',
+            tool_calls_count INTEGER DEFAULT 0,
+            tool_failures INTEGER DEFAULT 0,
+            total_rounds INTEGER DEFAULT 0,
+            duration_ms INTEGER DEFAULT 0,
+            tokens_in INTEGER DEFAULT 0,
+            tokens_out INTEGER DEFAULT 0,
+            stop_reason TEXT DEFAULT '',
+            created_at INTEGER NOT NULL
+        );
+    ").unwrap_or_default();
+
+    // ── 进化引擎: 做梦日志 ──────────────────────────────────
+    conn.execute_batch("
+        CREATE TABLE IF NOT EXISTS evolution_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            dream_type TEXT NOT NULL DEFAULT 'daily_catchup',
+            facts_extracted INTEGER DEFAULT 0,
+            stale_cleaned INTEGER DEFAULT 0,
+            memories_merged INTEGER DEFAULT 0,
+            soul_refined INTEGER DEFAULT 0,
+            report_text TEXT DEFAULT '',
+            soul_hash TEXT DEFAULT '',
+            created_at INTEGER NOT NULL
+        );
+    ").unwrap_or_default();
+
     conn
 }
 
