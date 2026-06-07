@@ -50,10 +50,14 @@ pub fn system_get_plugins() -> Value {
         "installed": true
     }));
 
-    // ── 2. 外部认知技能 (External Skills) ──────────────────
     let config = super::read_config();
-    if let Some(skills_dir) = config.get("externalSkillsDir").and_then(|v| v.as_str()) {
-        let dir_path = Path::new(skills_dir);
+    let bundled_dir = config.get("bundledSkillsDir").and_then(|v| v.as_str()).map(|s| Path::new(s).to_path_buf());
+    let external_dir = config.get("externalSkillsDir").and_then(|v| v.as_str()).map(|s| Path::new(s).to_path_buf());
+    
+    let mut added_external = std::collections::HashSet::new();
+
+    // ── 2. 外部自定义技能 (External Skills) ──────────────────
+    if let Some(dir_path) = &external_dir {
         if dir_path.exists() && dir_path.is_dir() {
             if let Ok(entries) = fs::read_dir(dir_path) {
                 for entry in entries.flatten() {
@@ -67,22 +71,69 @@ pub fn system_get_plugins() -> Value {
                         continue;
                     }
 
-                    // 读取 SKILL.md 并解析 YAML frontmatter
                     let folder_name = entry_path.file_name()
                         .and_then(|n| n.to_str())
                         .unwrap_or("unknown")
                         .to_string();
 
                     let (name, description) = match fs::read_to_string(&skill_md) {
-                        Ok(content) => parse_skill_frontmatter(&content, &folder_name),
+                        Ok(content) => crate::tools::parse_skill_frontmatter(&content, &folder_name),
                         Err(_) => (folder_name.clone(), String::new()),
                     };
 
+                    let is_overriding = bundled_dir.as_ref().map(|b| b.join(&folder_name).exists()).unwrap_or(false);
+
                     plugins.push(json!({
-                        "id": format!("skill-{}", folder_name),
+                        "id": format!("skill-external-{}", folder_name),
                         "name": name,
                         "type": "skill",
                         "typeLabel": "外部技能",
+                        "is_official": false,
+                        "is_overriding": is_overriding,
+                        "description": description,
+                        "installed": true,
+                        "path": entry_path.to_string_lossy()
+                    }));
+                    added_external.insert(folder_name);
+                }
+            }
+        }
+    }
+
+    // ── 3. 内置官方技能 (Bundled Skills) ──────────────────
+    if let Some(dir_path) = &bundled_dir {
+        if dir_path.exists() && dir_path.is_dir() {
+            if let Ok(entries) = fs::read_dir(dir_path) {
+                for entry in entries.flatten() {
+                    let entry_path = entry.path();
+                    if !entry_path.is_dir() {
+                        continue;
+                    }
+
+                    let skill_md = entry_path.join("SKILL.md");
+                    if !skill_md.exists() {
+                        continue;
+                    }
+
+                    let folder_name = entry_path.file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("unknown")
+                        .to_string();
+
+                    let (name, description) = match fs::read_to_string(&skill_md) {
+                        Ok(content) => crate::tools::parse_skill_frontmatter(&content, &folder_name),
+                        Err(_) => (folder_name.clone(), String::new()),
+                    };
+
+                    let is_overridden = added_external.contains(&folder_name);
+
+                    plugins.push(json!({
+                        "id": format!("skill-official-{}", folder_name),
+                        "name": name,
+                        "type": "skill",
+                        "typeLabel": "官方技能",
+                        "is_official": true,
+                        "is_overridden": is_overridden,
                         "description": description,
                         "installed": true,
                         "path": entry_path.to_string_lossy()
@@ -93,41 +144,4 @@ pub fn system_get_plugins() -> Value {
     }
 
     json!(plugins)
-}
-
-/// 解析 SKILL.md 中的 YAML frontmatter (--- ... --- 块)
-/// 提取 name 和 description 字段
-fn parse_skill_frontmatter(content: &str, fallback_name: &str) -> (String, String) {
-    let mut name = fallback_name.to_string();
-    let mut description = String::new();
-
-    // 检查是否以 --- 开头（YAML frontmatter 标记）
-    let trimmed = content.trim_start();
-    if !trimmed.starts_with("---") {
-        // 没有 frontmatter，尝试从第一行提取标题
-        if let Some(first_line) = trimmed.lines().next() {
-            let clean = first_line.trim_start_matches('#').trim();
-            if !clean.is_empty() {
-                name = clean.to_string();
-            }
-        }
-        return (name, description);
-    }
-
-    // 找到第二个 --- 的位置
-    let after_first = &trimmed[3..];
-    if let Some(end_pos) = after_first.find("\n---") {
-        let yaml_block = &after_first[..end_pos];
-
-        for line in yaml_block.lines() {
-            let line = line.trim();
-            if let Some(val) = line.strip_prefix("name:") {
-                name = val.trim().trim_matches('"').trim_matches('\'').to_string();
-            } else if let Some(val) = line.strip_prefix("description:") {
-                description = val.trim().trim_matches('"').trim_matches('\'').to_string();
-            }
-        }
-    }
-
-    (name, description)
 }

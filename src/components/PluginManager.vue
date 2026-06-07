@@ -29,8 +29,21 @@
               <!-- 主行：名称 + 类型 + 状态 -->
               <div class="pm-row-main">
                 <span class="pm-dot" :class="{ active: plugin.installed !== false }"></span>
-                <span class="pm-name">{{ plugin.name }}</span>
-                <span class="pm-type">{{ plugin.typeLabel }}</span>
+                <span class="pm-name">
+                  {{ plugin.name }}
+                  <span v-if="plugin.is_overridden" class="status-icon overridden-icon" :title="$t('plugin.overridden')">
+                    <AlertTriangle :size="12" style="pointer-events: none;" />
+                  </span>
+                  <span v-if="plugin.is_overriding" class="status-icon overriding-icon" :title="$t('plugin.overriding')">
+                    <Zap :size="12" style="pointer-events: none;" />
+                  </span>
+                </span>
+                
+                <span class="pm-type" :class="{ 'is-official': plugin.is_official }" :title="formatTypeLabel(plugin)">
+                  <Box v-if="plugin.type === 'skill' && plugin.is_official" :size="12" style="pointer-events: none;" />
+                  <User v-else-if="plugin.type === 'skill' && !plugin.is_official" :size="12" style="pointer-events: none;" />
+                  <Wrench v-else :size="12" style="pointer-events: none;" />
+                </span>
                 <span class="pm-spacer"></span>
                 
                 <!-- 安装按钮 / 状态 -->
@@ -68,7 +81,7 @@
 <script setup>
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { X, Loader2, ChevronRight } from 'lucide-vue-next';
+import { X, Loader2, ChevronRight, Box, User, Wrench, AlertTriangle, Zap } from 'lucide-vue-next';
 
 const { t } = useI18n();
 
@@ -84,13 +97,22 @@ let removeListener = null;
 let removeUpdatedListener = null;
 
 const pluginGroups = computed(() => {
+  // 隐藏被覆盖的官方技能，避免列表里出现重复的双份技能
+  const list = plugins.value.filter(plugin => !(plugin.is_official && plugin.is_overridden));
+
   const groups = [
-    { title: '下载引擎 (Engines)', items: plugins.value.filter(p => p.type === 'engine') },
-    { title: '内置能力 (Native Tools)', items: plugins.value.filter(p => p.type === 'tool') },
-    { title: '外部认知技能 (External Skills)', items: plugins.value.filter(p => p.type === 'skill') }
+    { title: '下载引擎 (Engines)', items: list.filter(p => p.type === 'engine') },
+    { title: '内置能力 (Native Tools)', items: list.filter(p => p.type === 'tool') },
+    { title: t('plugin.external') || '外部认知技能 (External Skills)', items: list.filter(p => p.type === 'skill') }
   ];
   return groups.filter(g => g.items.length > 0);
 });
+
+const formatTypeLabel = (p) => {
+  if (p.type === 'tool') return t('plugin.type_native') || '内置能力';
+  if (p.type === 'skill') return p.is_official ? (t('plugin.type_official') || '官方技能') : (t('plugin.type_custom') || '自定义技能');
+  return p.typeLabel;
+};
 
 const close = () => emit('close');
 
@@ -280,14 +302,38 @@ onUnmounted(() => {
 }
 
 .pm-type {
-  font-size: 10px;
-  padding: 1px 5px;
-  border-radius: 3px;
-  font-weight: 500;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
   background: var(--surface-card);
   color: var(--text-tertiary);
   border: 1px solid var(--border-subtle);
   flex-shrink: 0;
+  cursor: help;
+}
+
+.pm-type.is-official {
+  color: var(--accent-primary);
+  border-color: var(--accent-primary);
+  opacity: 0.8;
+  background: var(--bg-root);
+}
+
+.status-icon {
+  margin-left: 6px;
+  cursor: help;
+  flex-shrink: 0;
+}
+
+.overridden-icon {
+  color: var(--color-warning, #f59e0b);
+}
+
+.overriding-icon {
+  color: var(--color-success, #10b981);
 }
 
 .pm-spacer { flex: 1; }

@@ -41,7 +41,7 @@
         <label>{{ $t('model_hub.select_provider') }}</label>
         <select class="input provider-select" v-model="activeProvider">
           <option v-for="p in providerList" :key="p.id" :value="p.id" :disabled="!apiKeys[p.id] && p.id !== 'offline'">
-            {{ p.name }} ({{ p.count }}) {{ (!apiKeys[p.id] && p.id !== 'offline') ? '(未配置密钥)' : '' }}
+            {{ $te('providers.' + p.id) ? $t('providers.' + p.id) : p.name }} ({{ p.count }}) {{ (!apiKeys[p.id] && p.id !== 'offline') ? `(${$t('model_hub.unconfigured')})` : '' }}
           </option>
         </select>
         <button
@@ -49,16 +49,16 @@
           class="btn-icon refresh-provider-btn"
           @click.stop="refreshProvider"
           :disabled="isRefreshing"
-          :title="'刷新 ' + activeProvider + ' 的模型列表'"
+          :title="$t('model_hub.refresh')"
         >
           <RefreshCw :size="13" :class="{ 'animate-spin': isRefreshing }" />
-          <span class="refresh-label">{{ isRefreshing ? '刷新中...' : '刷新模型' }}</span>
+          <span class="refresh-label">{{ isRefreshing ? $t('model_hub.refreshing') : $t('model_hub.refresh') }}</span>
         </button>
       </div>
       <!-- 供应商变体切换 -->
       <div class="variant-bar" v-if="currentProviderVariants">
         <template v-if="activeProvider === 'zhipu'">
-          <span class="variant-label">计费方案</span>
+          <span class="variant-label">{{ $t('model_hub.billing_plan') }}</span>
           <label class="variant-option" :class="{ active: !providerVariant || providerVariant === 'default' }">
             <input type="radio" v-model="providerVariant" value="default" @change="saveVariant" /> Token Plan
           </label>
@@ -67,12 +67,12 @@
           </label>
         </template>
         <template v-else>
-          <span class="variant-label">区域</span>
+          <span class="variant-label">{{ $t('model_hub.region') }}</span>
           <label class="variant-option" :class="{ active: !providerVariant || providerVariant === 'default' }">
-            <input type="radio" v-model="providerVariant" value="default" @change="saveVariant" /> 国内
+            <input type="radio" v-model="providerVariant" value="default" @change="saveVariant" /> {{ $t('model_hub.variant_default') }}
           </label>
           <label class="variant-option" :class="{ active: providerVariant === 'international' }">
-            <input type="radio" v-model="providerVariant" value="international" @change="saveVariant" /> 海外
+            <input type="radio" v-model="providerVariant" value="international" @change="saveVariant" /> {{ $t('model_hub.variant_intl') }}
           </label>
         </template>
       </div>

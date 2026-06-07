@@ -142,6 +142,7 @@ window.electronAPI = {
   scanFolder: async (folderPath) => invoke('system_scan_folder', { folderPath }),
   estimateKB: async (folderPath) => invoke('system_estimate_kb', { folderPath }),
   buildKB: async (folderPath, plan) => invoke('system_build_kb', { folderPath, plan }),
+  migrateWikiDir: async (oldDir, newDir, mode) => invoke('system_migrate_wiki_dir', { oldDir, newDir, mode }),
   
   // LLM-Wiki 知识库引擎事件
   onKBProgress: (callback) => {
@@ -234,6 +235,7 @@ window.electronAPI = {
   startOfflineEngine: async (modelPath) => invoke('start_offline_engine', { modelPath }),
   stopOfflineEngine: async () => invoke('stop_offline_engine'),
   getOfflineEngineStatus: async () => invoke('get_offline_engine_status'),
+  openLlamaEngineDir: () => invoke('system_open_llm_engine_dir'),
 
   // ── 微信助理 (Rust 原生 WeChat Gateway) ─────────────────
   wechatGetLoginQr: async () => invoke('wechat_get_login_qr'),

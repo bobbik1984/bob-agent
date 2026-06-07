@@ -559,9 +559,7 @@ fn write_scheduler_audit(message: &str) {
     let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
     let line = format!("[{}] {}\n", timestamp, message);
 
-    if let Ok(mut f) = fs::OpenOptions::new().create(true).append(true).open(&log_path) {
-        let _ = f.write_all(line.as_bytes());
-    }
+    super::write_log_with_rotation(&log_path, &line, 5 * 1024 * 1024);
 }
 
 // ═══════════════════════════════════════════════════════════

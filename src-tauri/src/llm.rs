@@ -578,31 +578,43 @@ pub(crate) fn read_llm_config_for_model(model_id: &str) -> (String, String, Stri
 /// 构建可用技能的简要列表，供 System Prompt 使用
 fn build_skills_summary() -> String {
     let config = super::read_config();
-    let skills_dir = match config.get("externalSkillsDir").and_then(|v| v.as_str()) {
-        Some(dir) => dir.to_string(),
-        None => return String::new(),
+    let bundled_dir = config.get("bundledSkillsDir").and_then(|v| v.as_str()).map(|s| std::path::Path::new(s).to_path_buf());
+    let external_dir = config.get("externalSkillsDir").and_then(|v| v.as_str()).map(|s| std::path::Path::new(s).to_path_buf());
+
+    let mut skills_map = std::collections::HashMap::new();
+
+    let mut load_from_dir = |dir_opt: Option<&std::path::PathBuf>| {
+        if let Some(dir_path) = dir_opt {
+            if dir_path.exists() && dir_path.is_dir() {
+                if let Ok(entries) = std::fs::read_dir(dir_path) {
+                    for entry in entries.flatten() {
+                        let p = entry.path();
+                        if !p.is_dir() { continue; }
+                        let skill_md = p.join("SKILL.md");
+                        if !skill_md.exists() { continue; }
+
+                        let folder = p.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
+                        if let Ok(content) = std::fs::read_to_string(&skill_md) {
+                            let (name, desc) = super::tools::parse_skill_frontmatter(&content, &folder);
+                            let short_desc: String = desc.chars().take(80).collect();
+                            skills_map.insert(folder.clone(), format!("- **{}** ({}): {}", name, folder, short_desc));
+                        }
+                    }
+                }
+            }
+        }
     };
 
-    let dir_path = std::path::Path::new(&skills_dir);
-    if !dir_path.exists() { return String::new(); }
+    // 先加载内置，再加载外部（外部覆盖内置同名技能）
+    load_from_dir(bundled_dir.as_ref());
+    load_from_dir(external_dir.as_ref());
+
+    if skills_map.is_empty() { return String::new(); }
 
     let mut lines: Vec<String> = Vec::new();
     lines.push("\n## 可用技能库（可通过 read_skill 加载详细说明）".to_string());
-
-    if let Ok(entries) = std::fs::read_dir(dir_path) {
-        for entry in entries.flatten() {
-            let p = entry.path();
-            if !p.is_dir() { continue; }
-            let skill_md = p.join("SKILL.md");
-            if !skill_md.exists() { continue; }
-
-            let folder = p.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
-            if let Ok(content) = std::fs::read_to_string(&skill_md) {
-                let (name, desc) = super::tools::parse_skill_frontmatter(&content, &folder);
-                let short_desc: String = desc.chars().take(80).collect();
-                lines.push(format!("- **{}** ({}): {}", name, folder, short_desc));
-            }
-        }
+    for summary in skills_map.values() {
+        lines.push(summary.clone());
     }
 
     if lines.len() <= 1 { return String::new(); }

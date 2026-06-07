@@ -699,39 +699,44 @@ fn tool_list_dir(path: &str, max_items: usize) -> Value {
 /// list_skills — 列出可用技能（从 externalSkillsDir 扫描）
 fn tool_list_skills() -> Value {
     let config = super::read_config();
-    let mut skills: Vec<Value> = Vec::new();
+    let bundled_dir = config.get("bundledSkillsDir").and_then(|v| v.as_str()).map(|s| Path::new(s).to_path_buf());
+    let external_dir = config.get("externalSkillsDir").and_then(|v| v.as_str()).map(|s| Path::new(s).to_path_buf());
 
-    if let Some(skills_dir) = config.get("externalSkillsDir").and_then(|v| v.as_str()) {
-        let dir_path = Path::new(skills_dir);
-        if dir_path.exists() && dir_path.is_dir() {
-            if let Ok(entries) = fs::read_dir(dir_path) {
-                for entry in entries.flatten() {
-                    let entry_path = entry.path();
-                    if !entry_path.is_dir() { continue; }
+    let mut skills_map = std::collections::HashMap::new();
 
-                    let skill_md = entry_path.join("SKILL.md");
-                    if !skill_md.exists() { continue; }
-
-                    let folder_name = entry_path.file_name()
-                        .and_then(|n| n.to_str())
-                        .unwrap_or("unknown")
-                        .to_string();
-
-                    let (name, description) = match fs::read_to_string(&skill_md) {
-                        Ok(content) => parse_skill_frontmatter(&content, &folder_name),
-                        Err(_) => (folder_name.clone(), String::new()),
-                    };
-
-                    skills.push(json!({
-                        "id": folder_name,
-                        "name": name,
-                        "description": description
-                    }));
+    let mut load_from_dir = |dir_opt: Option<&std::path::PathBuf>| {
+        if let Some(dir) = dir_opt {
+            if dir.exists() && dir.is_dir() {
+                if let Ok(entries) = fs::read_dir(dir) {
+                    for entry in entries.flatten() {
+                        let p = entry.path();
+                        if !p.is_dir() { continue; }
+                        let md = p.join("SKILL.md");
+                        if !md.exists() { continue; }
+                        let folder_name = p.file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap_or("unknown")
+                            .to_string();
+                        let (name, desc) = match fs::read_to_string(&md) {
+                            Ok(content) => parse_skill_frontmatter(&content, &folder_name),
+                            Err(_) => (folder_name.clone(), String::new()),
+                        };
+                        skills_map.insert(folder_name.clone(), json!({
+                            "id": folder_name,
+                            "name": name,
+                            "description": desc
+                        }));
+                    }
                 }
             }
         }
-    }
+    };
 
+    // 先加载内置，再加载外部（外部覆盖内置同名技能）
+    load_from_dir(bundled_dir.as_ref());
+    load_from_dir(external_dir.as_ref());
+
+    let skills: Vec<Value> = skills_map.into_values().collect();
     json!({ "skills": skills, "count": skills.len() })
 }
 
@@ -921,31 +926,45 @@ pub fn parse_skill_frontmatter(content: &str, fallback_name: &str) -> (String, S
     let mut name = fallback_name.to_string();
     let mut description = String::new();
 
+    let content = content.strip_prefix('\u{FEFF}').unwrap_or(content);
     let trimmed = content.trim_start();
     if !trimmed.starts_with("---") {
         if let Some(first_line) = trimmed.lines().next() {
             let clean = first_line.trim_start_matches('#').trim();
             if !clean.is_empty() { name = clean.to_string(); }
         }
-        return (name, description);
-    }
-
-    let after_first = &trimmed[3..];
-    if let Some(end_pos) = after_first.find("\n---") {
-        let yaml_block = &after_first[..end_pos];
-        for line in yaml_block.lines() {
-            let line = line.trim();
-            if let Some(val) = line.strip_prefix("name:") {
-                name = val.trim().trim_matches('"').trim_matches('\'').to_string();
-            } else if let Some(val) = line.strip_prefix("description:") {
-                description = val.trim().trim_matches('"').trim_matches('\'').to_string();
-                // 截断超长描述
-                if description.len() > 200 {
-                    let truncated: String = description.chars().take(200).collect();
-                    description = format!("{}...", truncated);
+    } else {
+        let after_first = &trimmed[3..];
+        if let Some(end_pos) = after_first.find("\n---") {
+            let yaml_block = &after_first[..end_pos];
+            for line in yaml_block.lines() {
+                let line = line.trim();
+                if let Some(val) = line.strip_prefix("name:") {
+                    name = val.trim().trim_matches('"').trim_matches('\'').to_string();
+                } else if let Some(val) = line.strip_prefix("description:") {
+                    description = val.trim().trim_matches('"').trim_matches('\'').to_string();
+                    // 截断超长描述
+                    if description.len() > 200 {
+                        let truncated: String = description.chars().take(200).collect();
+                        description = format!("{}...", truncated);
+                    }
                 }
             }
         }
+    }
+
+    // Strip common emoji ranges from the name
+    name = name.chars().filter(|c| {
+        let cp = *c as u32;
+        // Exclude common emoji blocks:
+        // 0x2600-0x27BF (Misc Symbols, Dingbats)
+        // 0x1F300-0x1FAFF (Pictographs, Emoticons, Symbols)
+        !( (cp >= 0x2600 && cp <= 0x27BF) || (cp >= 0x1F300 && cp <= 0x1FAFF) )
+    }).collect();
+    name = name.trim().to_string();
+
+    if name.to_uppercase().starts_with("SKILL:") {
+        name = name[6..].trim().to_string();
     }
 
     (name, description)

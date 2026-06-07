@@ -89,11 +89,20 @@ pub fn write_outbox(operations: Vec<Value>) -> Value {
     });
 
     let path = get_outbox_path();
+    let tmp_path = path.with_extension("tmp");
     match serde_json::to_string_pretty(&outbox) {
         Ok(data) => {
-            match fs::write(&path, data) {
-                Ok(_) => json!({ "ok": true, "path": path.to_string_lossy().to_string() }),
-                Err(e) => json!({ "ok": false, "error": format!("写入 Outbox 失败: {}", e) }),
+            match fs::write(&tmp_path, data) {
+                Ok(_) => {
+                    match fs::rename(&tmp_path, &path) {
+                        Ok(_) => json!({ "ok": true, "path": path.to_string_lossy().to_string() }),
+                        Err(e) => {
+                            let _ = fs::remove_file(&tmp_path);
+                            json!({ "ok": false, "error": format!("原子写入重命名失败: {}", e) })
+                        }
+                    }
+                }
+                Err(e) => json!({ "ok": false, "error": format!("写入临时 Outbox 失败: {}", e) }),
             }
         }
         Err(e) => json!({ "ok": false, "error": format!("序列化失败: {}", e) }),
@@ -374,18 +383,14 @@ pub async fn start_reconciler(app: AppHandle) {
 /// 追加审计日志条目
 fn write_audit_log(entries: &[String]) {
     let path = get_audit_log_path();
-    let mut content = if path.exists() {
-        fs::read_to_string(&path).unwrap_or_default()
-    } else {
-        String::new()
-    };
+    let mut content = String::new();
     
     for entry in entries {
         content.push_str(entry);
         content.push('\n');
     }
 
-    let _ = fs::write(&path, content);
+    super::write_log_with_rotation(&path, &content, 5 * 1024 * 1024);
 }
 
 /// 简易时间戳生成 (避免引入 chrono 依赖, 复用 calendar.rs 的方案)

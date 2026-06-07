@@ -10,7 +10,7 @@
         <button class="btn btn-ghost" style="display: flex; align-items: center; gap: 6px; font-size: 0.85em; color: var(--text-tertiary);" @click="toggleAdvancedMode">
           <Eye v-if="isAdvancedMode" :size="14" />
           <EyeOff v-else :size="14" />
-          <span>{{ isAdvancedMode ? '简洁模式' : '高级模式' }}</span>
+          <span>{{ isAdvancedMode ? $t('settings.simple_mode') : $t('settings.advanced_mode') }}</span>
         </button>
       </div>
 
@@ -37,6 +37,25 @@
             <span>{{ $t('settings.browse') }}</span>
           </button>
         </div>
+
+        <div style="margin-top: 8px; margin-bottom: 12px;">
+          <button class="btn btn-ghost" style="font-size: 0.85em; padding: 4px 0; color: var(--accent-primary); display: flex; align-items: center; gap: 4px;" @click="showLlamaGuide = !showLlamaGuide">
+            <Info :size="12" />
+            <span>{{ showLlamaGuide ? $t('settings.hide_llama_guide') : $t('settings.show_llama_guide') }}</span>
+          </button>
+        </div>
+
+        <Transition name="briefing-fade">
+          <div v-if="showLlamaGuide" class="card" style="background: var(--bg-secondary); border: 1px dashed var(--border-subtle); padding: 16px; border-radius: var(--radius-md); margin-bottom: 16px; font-size: 0.9em; box-shadow: none;">
+            <h4 style="font-size: 1.05em; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">{{ $t('settings.llama_guide_title') }}</h4>
+            <p style="color: var(--text-secondary); margin-bottom: 8px; line-height: 1.5;" v-html="$t('settings.llama_guide_desc')"></p>
+
+            <button class="btn btn-primary" style="display: flex; align-items: center; gap: 6px; font-size: 0.9em; padding: 6px 12px;" @click="openLlamaEngineDir">
+              <FolderOpen :size="14" />
+              <span>{{ $t('settings.open_llama_dir') }}</span>
+            </button>
+          </div>
+        </Transition>
         
         <div style="display: flex; gap: 8px; align-items: center; margin-top: 12px;">
           <button 
@@ -66,13 +85,25 @@
         
         <div class="channel-selector" style="display: flex; gap: 8px; margin-bottom: 16px; background: var(--bg-secondary); padding: 4px; border-radius: 8px;">
           <button class="channel-btn" :class="{ active: mobileChannel === 'wechat' }" @click="mobileChannel = 'wechat'">
-            <MessageSquare :size="14" /> {{ $t('settings.channel_wechat') }}
+            <svg viewBox="-51.45 -69.25 445.9 415.5" xmlns="http://www.w3.org/2000/svg" style="width: 14px; height: 14px; fill: currentColor; flex-shrink: 0; display: inline-block; vertical-align: middle; margin-right: 4px;">
+              <g fill="currentColor" fill-rule="evenodd">
+                <path d="M274 167c-7.778 0-14-6.222-14-14s6.222-14 14-14 14 6.222 14 14c0 7.389-6.222 14-14 14m-69 0c-7.778 0-14-6.222-14-14s6.222-14 14-14 14 6.222 14 14c0 7.389-6.222 14-14 14m102.39 78.581C329.216 229.871 343 206.5 343 180.827 343 133.316 297.052 95 240 95s-103 38.316-103 85.827c0 47.512 45.948 85.828 103 85.828 11.87 0 22.974-1.533 33.695-4.598.766-.383 1.915-.383 3.063-.383 1.915 0 3.83.766 5.361 1.532l22.591 13.028c.766.383 1.149.766 1.915.766a3.433 3.433 0 003.446-3.448c0-.767-.383-1.533-.383-2.683 0-.383-3.063-10.728-4.595-17.242-.383-.766-.383-1.532-.383-2.299-.383-2.682.766-4.597 2.68-5.747"/>
+                <path d="M164 86c-8.93 0-16-7.07-16-16s7.07-16 16-16 16 7.07 16 16c0 8.558-7.07 16-16 16m-82 0c-8.93 0-16-7.07-16-16s7.07-16 16-16 16 7.07 16 16c0 8.558-7.07 16-16 16m41.96-86C55.646 0 0 45.895 0 102.88c0 30.98 16.502 58.899 42.983 77.64 1.919 1.53 3.454 3.824 3.454 6.884 0 .764-.384 1.912-.384 2.677-1.919 7.649-5.373 20.27-5.757 20.652-.383 1.148-.767 1.913-.767 3.06 0 2.295 1.919 4.207 4.221 4.207.768 0 1.535-.382 2.303-.765l27.248-15.68c1.919-1.148 4.222-1.913 6.524-1.913 1.152 0 2.303 0 3.454.383 12.665 3.442 26.48 5.736 40.297 5.736h6.908c-2.687-8.031-4.222-16.445-4.222-25.242 0-51.631 50.658-93.701 112.83-93.701H246C237.173 37.48 185.747 0 123.96 0"/>
+              </g>
+            </svg>
+            {{ $t('settings.channel_wechat') }}
           </button>
           <button class="channel-btn" :class="{ active: mobileChannel === 'telegram' }" @click="mobileChannel = 'telegram'">
-            <Send :size="14" /> {{ $t('settings.channel_telegram') }}
+            <svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg" style="width: 14px; height: 14px; fill: currentColor; flex-shrink: 0; display: inline-block; vertical-align: middle; margin-right: 4px;">
+              <path d="M29.919 6.163l-4.225 19.925c-0.319 1.406-1.15 1.756-2.331 1.094l-6.438-4.744-3.106 2.988c-0.344 0.344-0.631 0.631-1.294 0.631l0.463-6.556 11.931-10.781c0.519-0.462-0.113-0.719-0.806-0.256l-14.75 9.288-6.35-1.988c-1.381-0.431-1.406-1.381 0.288-2.044l24.837-9.569c1.15-0.431 2.156 0.256 1.781 2.013z"/>
+            </svg>
+            {{ $t('settings.channel_telegram') }}
           </button>
           <button class="channel-btn" :class="{ active: mobileChannel === 'discord' }" @click="mobileChannel = 'discord'">
-            <MessageCircle :size="14" /> {{ $t('settings.channel_discord') }}
+            <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" style="width: 14px; height: 14px; fill: currentColor; flex-shrink: 0; display: inline-block; vertical-align: middle; margin-right: 4px;">
+              <path d="M18.59 5.88997C17.36 5.31997 16.05 4.89997 14.67 4.65997C14.5 4.95997 14.3 5.36997 14.17 5.69997C12.71 5.47997 11.26 5.47997 9.83001 5.69997C9.69001 5.36997 9.49001 4.95997 9.32001 4.65997C7.94001 4.89997 6.63001 5.31997 5.40001 5.88997C2.92001 9.62997 2.25001 13.28 2.58001 16.87C4.23001 18.1 5.82001 18.84 7.39001 19.33C7.78001 18.8 8.12001 18.23 8.42001 17.64C7.85001 17.43 7.31001 17.16 6.80001 16.85C6.94001 16.75 7.07001 16.64 7.20001 16.54C10.33 18 13.72 18 16.81 16.54C16.94 16.65 17.07 16.75 17.21 16.85C16.7 17.16 16.15 17.42 15.59 17.64C15.89 18.23 16.23 18.8 16.62 19.33C18.19 18.84 19.79 18.1 21.43 16.87C21.82 12.7 20.76 9.08997 18.61 5.88997H18.59ZM8.84001 14.67C7.90001 14.67 7.13001 13.8 7.13001 12.73C7.13001 11.66 7.88001 10.79 8.84001 10.79C9.80001 10.79 10.56 11.66 10.55 12.73C10.55 13.79 9.80001 14.67 8.84001 14.67ZM15.15 14.67C14.21 14.67 13.44 13.8 13.44 12.73C13.44 11.66 14.19 10.79 15.15 10.79C16.11 10.79 16.87 11.66 16.86 12.73C16.86 13.79 16.11 14.67 15.15 14.67Z"/>
+            </svg>
+            {{ $t('settings.channel_discord') }}
           </button>
         </div>
 
@@ -82,8 +113,14 @@
               class="btn" 
               :class="wechatConnected ? 'btn-danger' : 'btn-primary'" 
               @click="openWechatModal"
+              style="display: flex; align-items: center; gap: 6px;"
             >
-              <MessageSquare :size="14" />
+              <svg viewBox="-51.45 -69.25 445.9 415.5" xmlns="http://www.w3.org/2000/svg" style="width: 14px; height: 14px; fill: currentColor; flex-shrink: 0;">
+                <g fill="currentColor" fill-rule="evenodd">
+                  <path d="M274 167c-7.778 0-14-6.222-14-14s6.222-14 14-14 14 6.222 14 14c0 7.389-6.222 14-14 14m-69 0c-7.778 0-14-6.222-14-14s6.222-14 14-14 14 6.222 14 14c0 7.389-6.222 14-14 14m102.39 78.581C329.216 229.871 343 206.5 343 180.827 343 133.316 297.052 95 240 95s-103 38.316-103 85.827c0 47.512 45.948 85.828 103 85.828 11.87 0 22.974-1.533 33.695-4.598.766-.383 1.915-.383 3.063-.383 1.915 0 3.83.766 5.361 1.532l22.591 13.028c.766.383 1.149.766 1.915.766a3.433 3.433 0 003.446-3.448c0-.767-.383-1.533-.383-2.683 0-.383-3.063-10.728-4.595-17.242-.383-.766-.383-1.532-.383-2.299-.383-2.682.766-4.597 2.68-5.747"/>
+                  <path d="M164 86c-8.93 0-16-7.07-16-16s7.07-16 16-16 16 7.07 16 16c0 8.558-7.07 16-16 16m-82 0c-8.93 0-16-7.07-16-16s7.07-16 16-16 16 7.07 16 16c0 8.558-7.07 16-16 16m41.96-86C55.646 0 0 45.895 0 102.88c0 30.98 16.502 58.899 42.983 77.64 1.919 1.53 3.454 3.824 3.454 6.884 0 .764-.384 1.912-.384 2.677-1.919 7.649-5.373 20.27-5.757 20.652-.383 1.148-.767 1.913-.767 3.06 0 2.295 1.919 4.207 4.221 4.207.768 0 1.535-.382 2.303-.765l27.248-15.68c1.919-1.148 4.222-1.913 6.524-1.913 1.152 0 2.303 0 3.454.383 12.665 3.442 26.48 5.736 40.297 5.736h6.908c-2.687-8.031-4.222-16.445-4.222-25.242 0-51.631 50.658-93.701 112.83-93.701H246C237.173 37.48 185.747 0 123.96 0"/>
+                </g>
+              </svg>
               <span>{{ wechatConnected ? $t('settings.wechat_rebind') : $t('settings.wechat_scan') }}</span>
             </button>
             
@@ -100,7 +137,7 @@
             <div style="display: flex; gap: 8px;">
               <input type="password" v-model="tgToken" placeholder="123456789:ABCdefGHIjklMNO..." class="settings-input" style="flex: 1;" />
               <button class="btn btn-primary" @click="activateMobileChannel('telegram')">
-                <Send :size="14" /> {{ $t('settings.channel_activate') }}
+                <svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg" style="width: 14px; height: 14px; fill: currentColor; flex-shrink: 0;"><path d="M29.919 6.163l-4.225 19.925c-0.319 1.406-1.15 1.756-2.331 1.094l-6.438-4.744-3.106 2.988c-0.344 0.344-0.631 0.631-1.294 0.631l0.463-6.556 11.931-10.781c0.519-0.462-0.113-0.719-0.806-0.256l-14.75 9.288-6.35-1.988c-1.381-0.431-1.406-1.381 0.288-2.044l24.837-9.569c1.15-0.431 2.156 0.256 1.781 2.013z"/></svg> {{ $t('settings.channel_activate') }}
               </button>
             </div>
             <p class="field-hint" style="margin-top: 8px;">{{ $t('settings.channel_tg_hint') }}</p>
@@ -113,7 +150,7 @@
             <div style="display: flex; gap: 8px;">
               <input type="password" v-model="discordToken" placeholder="OTg3NjU0MzIx.ABC.defGHIjklMNO..." class="settings-input" style="flex: 1;" />
               <button class="btn btn-primary" @click="activateMobileChannel('discord')">
-                <MessageCircle :size="14" /> {{ $t('settings.channel_activate') }}
+                <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" style="width: 14px; height: 14px; fill: currentColor; flex-shrink: 0;"><path d="M18.59 5.88997C17.36 5.31997 16.05 4.89997 14.67 4.65997C14.5 4.95997 14.3 5.36997 14.17 5.69997C12.71 5.47997 11.26 5.47997 9.83001 5.69997C9.69001 5.36997 9.49001 4.95997 9.32001 4.65997C7.94001 4.89997 6.63001 5.31997 5.40001 5.88997C2.92001 9.62997 2.25001 13.28 2.58001 16.87C4.23001 18.1 5.82001 18.84 7.39001 19.33C7.78001 18.8 8.12001 18.23 8.42001 17.64C7.85001 17.43 7.31001 17.16 6.80001 16.85C6.94001 16.75 7.07001 16.64 7.20001 16.54C10.33 18 13.72 18 16.81 16.54C16.94 16.65 17.07 16.75 17.21 16.85C16.7 17.16 16.15 17.42 15.59 17.64C15.89 18.23 16.23 18.8 16.62 19.33C18.19 18.84 19.79 18.1 21.43 16.87C21.82 12.7 20.76 9.08997 18.61 5.88997H18.59ZM8.84001 14.67C7.90001 14.67 7.13001 13.8 7.13001 12.73C7.13001 11.66 7.88001 10.79 8.84001 10.79C9.80001 10.79 10.56 11.66 10.55 12.73C10.55 13.79 9.80001 14.67 8.84001 14.67ZM15.15 14.67C14.21 14.67 13.44 13.8 13.44 12.73C13.44 11.66 14.19 10.79 15.15 10.79C16.11 10.79 16.87 11.66 16.86 12.73C16.86 13.79 16.11 14.67 15.15 14.67Z"/></svg> {{ $t('settings.channel_activate') }}
               </button>
             </div>
             <p class="field-hint" style="margin-top: 8px;">{{ $t('settings.channel_discord_hint') }}</p>
@@ -142,7 +179,7 @@
           <div class="form-group" v-for="provider in modelProviders" :key="provider.id" style="display: flex; align-items: center; gap: 12px; border-bottom: 1px solid var(--border-subtle); padding-bottom: 6px;">
             <label class="form-label" style="width: 160px; margin-bottom: 0; display: flex; align-items: center; gap: 8px;">
               <img v-if="getProviderLogo(provider.id)" :src="getProviderLogo(provider.id)" style="width: 16px; height: 16px; object-fit: contain; border-radius: 2px;" />
-              <span style="flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" :title="provider.name">{{ provider.name }}</span>
+              <span style="flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" :title="$te('providers.' + provider.id) ? $t('providers.' + provider.id) : provider.name">{{ $te('providers.' + provider.id) ? $t('providers.' + provider.id) : provider.name }}</span>
             </label>
             <span class="status-dot" :style="{ background: provider.hasKey ? 'var(--accent-primary)' : 'transparent', border: provider.hasKey ? '2px solid var(--accent-primary)' : '2px solid var(--text-tertiary)' }" style="width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex-shrink: 0;"></span>
             <input 
@@ -240,7 +277,7 @@
               <!-- 供应商标题栏 -->
               <div class="registry-provider-header" @click="toggleProviderExpand(provider.id)">
                 <img v-if="getProviderLogo(provider.id)" :src="getProviderLogo(provider.id)" class="registry-provider-logo" />
-                <span class="registry-provider-title">{{ provider.name }}</span>
+                <span class="registry-provider-title">{{ $te('providers.' + provider.id) ? $t('providers.' + provider.id) : provider.name }}</span>
                 <span class="registry-provider-meta-id">{{ provider.id }}</span>
                 <span class="registry-provider-meta-count">{{ (provider.models || []).length }} models</span>
                 <ChevronDown :size="14" class="registry-provider-chevron" :class="{ expanded: expandedProviders[provider.id] }" />
@@ -694,6 +731,69 @@
         </div>
       </div>
     </Transition>
+
+    <!-- 知识库目录迁移向导弹窗 -->
+    <Transition name="briefing-fade">
+      <div v-if="showWikiMigrationModal" class="wechat-modal-overlay" @click.self="cancelWikiMigration">
+        <div class="help-modal" style="width: 500px;">
+          <div class="briefing-header">
+            <div class="briefing-icon"><Brain :size="18" /></div>
+            <div class="briefing-title" style="flex: 1; font-size: 14px; font-weight: 600; color: var(--text-primary);">{{ $t('settings.wiki_migrate_title') }}</div>
+            <button class="briefing-close" @click="cancelWikiMigration" style="background: none; border: none; color: var(--text-tertiary); cursor: pointer; padding: 4px; border-radius: 4px; display: flex; align-items: center; justify-content: center;">
+              <X :size="14" />
+            </button>
+          </div>
+          <div class="briefing-body" style="padding: 24px; display: flex; flex-direction: column; gap: 16px;">
+            <p style="font-size: 0.9em; color: var(--text-secondary); line-height: 1.5;">
+              {{ $t('settings.wiki_migrate_desc') }}<br/>
+              <code style="display: block; padding: 8px; background: var(--bg-primary); border-radius: var(--radius-sm); margin-top: 6px; font-size: 0.85em; border: 1px solid var(--border-subtle); word-break: break-all; color: var(--text-primary);">{{ pendingWikiDir }}</code>
+            </p>
+            
+            <div style="display: flex; flex-direction: column; gap: 10px;">
+              <label style="font-size: 0.95em; font-weight: 600; color: var(--text-primary);">{{ $t('settings.wiki_migrate_select_mode') }}</label>
+              
+              <div style="display: flex; flex-direction: column; gap: 8px;">
+                <label style="display: flex; align-items: flex-start; gap: 8px; padding: 12px; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); cursor: pointer; transition: all 0.2s;" :style="{ borderColor: migrationMode === 'copy_merge' ? 'var(--accent-primary)' : 'var(--border-subtle)', background: migrationMode === 'copy_merge' ? 'color-mix(in srgb, var(--accent-primary) 5%, transparent)' : 'transparent' }">
+                  <input type="radio" v-model="migrationMode" value="copy_merge" style="margin-top: 3px;" />
+                  <div>
+                    <div style="font-weight: 600; font-size: 0.9em; color: var(--text-primary);">{{ $t('settings.wiki_migrate_mode_merge') }}</div>
+                    <div style="font-size: 0.8em; color: var(--text-secondary); margin-top: 2px;">{{ $t('settings.wiki_migrate_mode_merge_desc') }}</div>
+                  </div>
+                </label>
+
+                <label style="display: flex; align-items: flex-start; gap: 8px; padding: 12px; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); cursor: pointer; transition: all 0.2s;" :style="{ borderColor: migrationMode === 'copy_overwrite' ? 'var(--accent-primary)' : 'var(--border-subtle)', background: migrationMode === 'copy_overwrite' ? 'color-mix(in srgb, var(--accent-primary) 5%, transparent)' : 'transparent' }">
+                  <input type="radio" v-model="migrationMode" value="copy_overwrite" style="margin-top: 3px;" />
+                  <div>
+                    <div style="font-weight: 600; font-size: 0.9em; color: var(--text-primary);">{{ $t('settings.wiki_migrate_mode_overwrite') }}</div>
+                    <div style="font-size: 0.8em; color: var(--text-secondary); margin-top: 2px;">{{ $t('settings.wiki_migrate_mode_overwrite_desc') }}</div>
+                  </div>
+                </label>
+
+                <label style="display: flex; align-items: flex-start; gap: 8px; padding: 12px; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); cursor: pointer; transition: all 0.2s;" :style="{ borderColor: migrationMode === 'link_only' ? 'var(--accent-primary)' : 'var(--border-subtle)', background: migrationMode === 'link_only' ? 'color-mix(in srgb, var(--accent-primary) 5%, transparent)' : 'transparent' }">
+                  <input type="radio" v-model="migrationMode" value="link_only" style="margin-top: 3px;" />
+                  <div>
+                    <div style="font-weight: 600; font-size: 0.9em; color: var(--text-primary);">{{ $t('settings.wiki_migrate_mode_link') }}</div>
+                    <div style="font-size: 0.8em; color: var(--text-secondary); margin-top: 2px;">{{ $t('settings.wiki_migrate_mode_link_desc') }}</div>
+                  </div>
+                </label>
+              </div>
+            </div>
+
+            <div v-if="migrationError" style="padding: 10px 12px; background: var(--color-error-bg); border: 1px solid var(--color-error); border-radius: var(--radius-sm); font-size: 0.85em; color: var(--color-error); line-height: 1.4;">
+              {{ migrationError }}
+            </div>
+
+            <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 8px;">
+              <button class="btn btn-ghost" :disabled="isMigrating" @click="cancelWikiMigration">{{ $t('modal.cancel') }}</button>
+              <button class="btn btn-primary" style="display: flex; align-items: center; gap: 6px;" :disabled="isMigrating" @click="confirmWikiMigration">
+                <Loader2 v-if="isMigrating" class="spin" :size="14" />
+                <span>{{ isMigrating ? $t('settings.wiki_migrate_processing') : $t('settings.wiki_migrate_confirm') }}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Transition>
   </div>
 </template>
 
@@ -825,6 +925,11 @@ const config = ref({
 });
 
 const offlineEngineStatus = ref('stopped');
+const showLlamaGuide = ref(false);
+
+async function openLlamaEngineDir() {
+  await window.electronAPI.openLlamaEngineDir();
+}
 
 async function selectOfflineModel() {
   if (window.electronAPI.selectFile) {
@@ -1444,11 +1549,50 @@ async function clearWorkspaceDir() {
   await saveConfig('workspaceDir', '');
 }
 
+const showWikiMigrationModal = ref(false);
+const pendingWikiDir = ref('');
+const migrationMode = ref('copy_merge');
+const isMigrating = ref(false);
+const migrationError = ref('');
+
+function cancelWikiMigration() {
+  if (isMigrating.value) return;
+  showWikiMigrationModal.value = false;
+  pendingWikiDir.value = '';
+  migrationError.value = '';
+}
+
+async function confirmWikiMigration() {
+  isMigrating.value = true;
+  migrationError.value = '';
+  try {
+    const res = await window.electronAPI.migrateWikiDir(
+      config.value.wikiDir || '',
+      pendingWikiDir.value,
+      migrationMode.value
+    );
+    if (res && res.ok) {
+      config.value.wikiDir = pendingWikiDir.value;
+      await saveConfig('wikiDir', pendingWikiDir.value);
+      showWikiMigrationModal.value = false;
+      pendingWikiDir.value = '';
+      alert(t('settings.wiki_migrate_success'));
+    } else {
+      migrationError.value = res?.error || t('settings.wiki_migrate_error_unknown');
+    }
+  } catch (err) {
+    migrationError.value = t('settings.wiki_migrate_failed') + err;
+  } finally {
+    isMigrating.value = false;
+  }
+}
+
 async function selectWikiDir() {
   const dirPath = await window.electronAPI.selectDir();
   if (dirPath) {
-    config.value.wikiDir = dirPath;
-    await saveConfig('wikiDir', dirPath);
+    if (dirPath === config.value.wikiDir) return;
+    pendingWikiDir.value = dirPath;
+    showWikiMigrationModal.value = true;
   }
 }
 

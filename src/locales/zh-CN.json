@@ -169,7 +169,31 @@
     "memory_type_wiki": "知识条目",
     "memory_empty": "暂无记忆条目",
     "memory_delete_confirm": "确定删除此记忆条目？此操作不可恢复。",
-    "memory_deleted": "已删除"
+    "memory_deleted": "已删除",
+    "simple_mode": "简洁模式",
+    "advanced_mode": "高级模式",
+    "show_llama_guide": "未安装本地服务器？查看安装指南",
+    "hide_llama_guide": "隐藏本地服务器配置指南",
+    "llama_guide_title": "本地大模型配置指南",
+    "llama_guide_desc": "如果需要本地大模型，那么请将 <code>llama-server.exe</code> 及相关的 <code>.dll</code> 依赖文件存到本程序的 <code>llm-engine</code> 目录即可。",
+    "llama_guide_step1": "",
+    "llama_guide_step2": "",
+    "llama_guide_step3": "",
+    "open_llama_dir": "打开 llm-engine 目录",
+    "wiki_migrate_title": "知识库存储位置迁移向导",
+    "wiki_migrate_desc": "你正在将知识库的存放目录修改为：",
+    "wiki_migrate_select_mode": "选择迁移模式：",
+    "wiki_migrate_mode_merge": "全部复制并组合 (Merge)",
+    "wiki_migrate_mode_merge_desc": "将旧知识库的文件复制到新目录。如果目标文件夹中有同名文件，将智能合并其内容。",
+    "wiki_migrate_mode_overwrite": "全部复制并覆盖 (Overwrite)",
+    "wiki_migrate_mode_overwrite_desc": "将旧知识库的文件复制到新目录。如果目标文件夹中有同名文件，将直接覆盖替换。",
+    "wiki_migrate_mode_link": "仅指定新路径 (Link Only)",
+    "wiki_migrate_mode_link_desc": "只将存储路径指向新文件夹，不复制旧文件（适用于已在新目录准备好数据的情况）。",
+    "wiki_migrate_confirm": "确认迁移",
+    "wiki_migrate_processing": "正在迁移...",
+    "wiki_migrate_success": "知识库存储目录迁移成功！",
+    "wiki_migrate_error_unknown": "迁移未知错误",
+    "wiki_migrate_failed": "迁移失败: "
   },
   "chat": {
     "new_conversation": "新对话",
@@ -239,8 +263,16 @@
     "assign_hint_clerk": "点击下方模型将其设为「牛马」",
     "role_main": "主力",
     "role_clerk": "牛马",
-    "no_models": "未发现可用模型。请检查 .env 中的 API Key 配置。",
-    "not_set": "未设置"
+    "no_models": "未发现可用模型，请检查 .env 的密钥配置",
+    "not_set": "未设置",
+    "unconfigured": "未配Key",
+    "refresh": "刷新模型",
+    "refreshing": "刷新中...",
+    "variant_default": "国内",
+    "variant_intl": "海外",
+    "variant_coding": "编程",
+    "billing_plan": "计费方案",
+    "region": "区域"
   },
   "file_card": {
     "just_now": "刚刚",
@@ -281,13 +313,22 @@
   },
   "plugin": {
     "title": "技能与插件中心",
-    "loading": "加载中...",
-    "engines": "下载引擎 (Engines)",
-    "native_tools": "内置能力 (Native Tools)",
-    "external_skills": "外部认知技能 (External Skills)",
+    "loading": "加载插件中...",
     "install": "安装",
-    "installing": "安装中",
-    "ready": "已就绪"
+    "installing": "安装中...",
+    "ready": "就绪",
+    "engine": "下载引擎",
+    "native": "内置能力",
+    "external": "外部认知技能",
+    "label_builtin": "内置",
+    "label_official": "官方技能",
+    "label_external": "外部技能",
+    "type_native": "内置能力",
+    "type_engine": "下载引擎",
+    "type_official": "官方技能",
+    "type_custom": "自定义技能",
+    "overridden": "被自定义技能覆盖",
+    "overriding": "覆盖了官方同名技能"
   },
   "tray": {
     "show": "显示 bob-agent",
@@ -297,7 +338,15 @@
     "title": "日程",
     "loading": "加载中...",
     "this_week": "本周日程",
-    "todo_list": "待办清单"
+    "todo_list": "待办清单",
+    "auto_tasks": "自动任务",
+    "empty_cron": "暂无定时任务",
+    "empty_cron_hint": "在对话中告诉 Bob「每天早上8点帮我播报新闻」即可创建",
+    "unnamed_task": "未命名任务",
+    "last_run": "上次执行：",
+    "pause": "暂停",
+    "resume": "恢复",
+    "delete": "删除"
   },
   "setup": {
     "welcome": "欢迎使用 bob-agent",
@@ -342,7 +391,21 @@
       "周六"
     ],
     "delete_event": "删除事件",
-    "update_time_failed": "更新时间失败"
+    "update_time_failed": "更新时间失败",
+    "no_events": "无日程",
+    "time": "时间",
+    "location": "地点",
+    "notes": "备注"
+  },
+  "providers": {
+    "qwen": "阿里云百炼",
+    "zhipu": "智谱 AI",
+    "doubao": "字节火山",
+    "kimi": "月之暗面",
+    "deepseek": "DeepSeek",
+    "openai": "OpenAI",
+    "minimax": "MiniMax",
+    "offline": "本地模型"
   },
   "common": {
     "please_select": "请选择"

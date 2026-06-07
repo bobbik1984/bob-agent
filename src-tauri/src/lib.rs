@@ -34,6 +34,22 @@ pub(crate) fn get_data_dir() -> PathBuf {
     path
 }
 
+/// 日志自动大小截断与轮询旋转写入助手 (T-1310)
+pub(crate) fn write_log_with_rotation(log_path: &Path, message: &str, max_size_bytes: u64) {
+    if log_path.exists() {
+        if let Ok(meta) = fs::metadata(log_path) {
+            if meta.len() > max_size_bytes {
+                let backup_path = log_path.with_extension("log.bak");
+                let _ = fs::rename(log_path, &backup_path);
+            }
+        }
+    }
+    use std::io::Write;
+    if let Ok(mut f) = fs::OpenOptions::new().create(true).append(true).open(log_path) {
+        let _ = f.write_all(message.as_bytes());
+    }
+}
+
 /// 知识库 Wiki 目录：优先读取用户在设置面板中配置的 wikiDir，
 /// 未配置时 fallback 到 AppData/bob-agent/wiki/
 pub(crate) fn get_wiki_dir() -> PathBuf {
@@ -351,6 +367,151 @@ fn system_append_quick_note(content: String) -> Value {
 }
 
 // ═══════════════════════════════════════════════════════════
+// Tauri Commands — 知识库与本地引擎路径定位/迁移 (T-1309/T-1310)
+// ═══════════════════════════════════════════════════════════
+
+#[tauri::command]
+fn system_open_llm_engine_dir(app: tauri::AppHandle) -> bool {
+    use tauri::Manager;
+    if let Ok(resource_dir) = app.path().resolve("llm-engine", tauri::path::BaseDirectory::Resource) {
+        let _ = fs::create_dir_all(&resource_dir);
+        open_path_in_explorer(resource_dir.to_string_lossy().as_ref())
+    } else {
+        false
+    }
+}
+
+#[tauri::command]
+async fn system_migrate_wiki_dir(old_dir: String, new_dir: String, mode: String) -> Result<Value, String> {
+    let old_path = if old_dir.is_empty() {
+        get_wiki_dir()
+    } else {
+        std::path::PathBuf::from(old_dir)
+    };
+    let new_path = std::path::PathBuf::from(new_dir);
+
+    if old_path == new_path {
+        return Ok(json!({ "ok": true, "message": "新旧目录相同，无需迁移" }));
+    }
+
+    if mode == "copy_merge" || mode == "copy_overwrite" {
+        if !new_path.exists() {
+            fs::create_dir_all(&new_path).map_err(|e| format!("无法创建目标目录: {}", e))?;
+        }
+        migrate_directory_recursive(&old_path, &new_path, &mode)?;
+    }
+
+    Ok(json!({ "ok": true }))
+}
+
+fn migrate_directory_recursive(src: &Path, dst: &Path, mode: &str) -> Result<(), String> {
+    if !src.exists() {
+        return Ok(());
+    }
+    for entry in fs::read_dir(src).map_err(|e| format!("无法读取目录 {:?}: {}", src, e))? {
+        let entry = entry.map_err(|e| format!("读取目录条目失败: {}", e))?;
+        let path = entry.path();
+        let file_name = entry.file_name();
+        let dest_path = dst.join(&file_name);
+
+        if path.is_dir() {
+            if !dest_path.exists() {
+                fs::create_dir_all(&dest_path)
+                    .map_err(|e| format!("无法创建目标目录 {:?}: {}", dest_path, e))?;
+            }
+            migrate_directory_recursive(&path, &dest_path, mode)?;
+        } else {
+            if dest_path.exists() {
+                if mode == "copy_merge" {
+                    let name_str = file_name.to_string_lossy().to_string();
+                    if name_str == "index.md" || name_str == "log.md" {
+                        merge_list_or_log_file(&path, &dest_path)?;
+                    } else if name_str.ends_with(".md") {
+                        let old_content = fs::read_to_string(&path)
+                            .map_err(|e| format!("无法读取源文件 {:?}: {}", path, e))?;
+                        let mut target_content = fs::read_to_string(&dest_path)
+                            .map_err(|e| format!("无法读取目标文件 {:?}: {}", dest_path, e))?;
+                        
+                        target_content.push_str("\n\n---\n\n# 合并的旧文件内容\n\n");
+                        target_content.push_str(&old_content);
+                        
+                        fs::write(&dest_path, target_content)
+                            .map_err(|e| format!("无法写入合并文件 {:?}: {}", dest_path, e))?;
+                    } else if name_str.ends_with(".json") {
+                        merge_json_file(&path, &dest_path)?;
+                    } else {
+                        fs::copy(&path, &dest_path)
+                            .map_err(|e| format!("无法覆盖文件 {:?}: {}", dest_path, e))?;
+                    }
+                } else {
+                    // copy_overwrite
+                    fs::copy(&path, &dest_path)
+                        .map_err(|e| format!("无法覆盖文件 {:?}: {}", dest_path, e))?;
+                }
+            } else {
+                fs::copy(&path, &dest_path)
+                    .map_err(|e| format!("无法复制文件 {:?}: {}", dest_path, e))?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn merge_list_or_log_file(src: &Path, dst: &Path) -> Result<(), String> {
+    let src_content = fs::read_to_string(src).map_err(|e| format!("无法读取源列表文件: {}", e))?;
+    let dst_content = fs::read_to_string(dst).map_err(|e| format!("无法读取目标列表文件: {}", e))?;
+
+    let mut lines: Vec<String> = dst_content.lines().map(|s| s.to_string()).collect();
+    for line in src_content.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("# ") || trimmed.starts_with("> ") || trimmed.is_empty() {
+            continue;
+        }
+        if !lines.iter().any(|l| l.trim() == trimmed) {
+            lines.push(line.to_string());
+        }
+    }
+
+    fs::write(dst, lines.join("\n")).map_err(|e| format!("无法写入合并后的列表文件: {}", e))?;
+    Ok(())
+}
+
+fn merge_json_file(src: &Path, dst: &Path) -> Result<(), String> {
+    let src_content = fs::read_to_string(src).map_err(|e| format!("无法读取源 JSON: {}", e))?;
+    let dst_content = fs::read_to_string(dst).map_err(|e| format!("无法读取目标 JSON: {}", e))?;
+
+    if let (Ok(mut src_val), Ok(mut dst_val)) = (
+        serde_json::from_str::<Value>(&src_content),
+        serde_json::from_str::<Value>(&dst_content),
+    ) {
+        if src_val.is_object() && dst_val.is_object() {
+            let src_obj = src_val.as_object_mut().unwrap();
+            let dst_obj = dst_val.as_object_mut().unwrap();
+            for (key, val) in src_obj.iter_mut() {
+                if !dst_obj.contains_key(key) {
+                    dst_obj.insert(key.clone(), val.clone());
+                }
+            }
+            if let Ok(merged) = serde_json::to_string_pretty(&dst_val) {
+                fs::write(dst, merged).map_err(|e| format!("无法写入合并后的 JSON: {}", e))?;
+            }
+        } else if src_val.is_array() && dst_val.is_array() {
+            let src_arr = src_val.as_array_mut().unwrap();
+            let dst_arr = dst_val.as_array_mut().unwrap();
+            dst_arr.extend(src_arr.clone());
+            if let Ok(merged) = serde_json::to_string_pretty(&dst_val) {
+                fs::write(dst, merged).map_err(|e| format!("无法写入合并后的 JSON: {}", e))?;
+            }
+        } else {
+            fs::copy(src, dst).map_err(|e| format!("无法覆盖 JSON 文件: {}", e))?;
+        }
+    } else {
+        fs::copy(src, dst).map_err(|e| format!("无法覆盖 JSON 文件: {}", e))?;
+    }
+    Ok(())
+}
+
+// ═══════════════════════════════════════════════════════════
 // Tauri App 启动
 // ═══════════════════════════════════════════════════════════
 
@@ -497,6 +658,9 @@ pub fn run() {
             system_write_outbox,
             // 闪念速记
             system_append_quick_note,
+            // 知识库与本地引擎路径定位/迁移 (T-1309/T-1310)
+            system_open_llm_engine_dir,
+            system_migrate_wiki_dir,
             // WeChat
             wechat::login_qr::wechat_get_login_qr,
             wechat::login_qr::wechat_check_login_status,
@@ -609,67 +773,20 @@ pub fn run() {
             });
 
             // ── 内置技能库初始化 ──
-            // 将打包资源中的 skills/ 目录复制到 AppData，确保开箱即用。
-            // 仅在 externalSkillsDir 未配置或路径不存在时执行。
+            // 记录安装包资源中 skills 目录的绝对路径，用于“双轨合并读取”架构
             {
                 use tauri::Manager;
                 let mut cfg = read_config();
-                let skills_configured = cfg.get("externalSkillsDir")
-                    .and_then(|v| v.as_str())
-                    .map(|s| !s.is_empty() && std::path::Path::new(s).exists())
-                    .unwrap_or(false);
-
-                if !skills_configured {
-                    let dest_skills_dir = get_data_dir().join("skills");
-                    let bundled_skills = app.path().resource_dir()
-                        .map(|r| r.join("skills"));
-
-                    let copied = if let Ok(src) = bundled_skills {
-                        if src.exists() {
-                            fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<u32> {
-                                fs::create_dir_all(dst)?;
-                                let mut count = 0u32;
-                                for entry in fs::read_dir(src)? {
-                                    let entry = entry?;
-                                    let ft = entry.file_type()?;
-                                    let dst_path = dst.join(entry.file_name());
-                                    if ft.is_dir() {
-                                        count += copy_dir_recursive(&entry.path(), &dst_path)?;
-                                    } else {
-                                        fs::copy(entry.path(), &dst_path)?;
-                                        count += 1;
-                                    }
-                                }
-                                Ok(count)
-                            }
-                            match copy_dir_recursive(&src, &dest_skills_dir) {
-                                Ok(n) => {
-                                    log::info!("Skills initialized: {} files copied to {:?}", n, dest_skills_dir);
-                                    true
-                                }
-                                Err(e) => {
-                                    log::warn!("Skills copy failed: {}", e);
-                                    false
-                                }
-                            }
-                        } else {
-                            log::warn!("Bundled skills dir not found at {:?}", src);
-                            false
-                        }
-                    } else {
-                        false
-                    };
-
-                    if copied {
-                        if let Some(obj) = cfg.as_object_mut() {
-                            obj.insert(
-                                "externalSkillsDir".to_string(),
-                                serde_json::json!(dest_skills_dir.to_string_lossy().to_string()),
-                            );
-                        }
-                        write_config(&cfg);
-                        log::info!("externalSkillsDir set to {:?}", dest_skills_dir);
+                let bundled_skills = app.path().resource_dir().map(|r| r.join("skills"));
+                if let Ok(src) = bundled_skills {
+                    if let Some(obj) = cfg.as_object_mut() {
+                        obj.insert(
+                            "bundledSkillsDir".to_string(),
+                            serde_json::json!(src.to_string_lossy().to_string()),
+                        );
                     }
+                    write_config(&cfg);
+                    log::info!("bundledSkillsDir updated to {:?}", src);
                 }
             }
 

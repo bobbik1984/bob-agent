@@ -7,6 +7,13 @@ pub struct DbState(pub Mutex<Connection>);
 
 pub fn init_db(data_dir: &std::path::Path) -> Connection {
     let db_path = data_dir.join("bob.db");
+
+    // 自动冷备份数据库 (T-1309)
+    if db_path.exists() {
+        let db_backup = data_dir.join("bob.db.bak");
+        let _ = std::fs::copy(&db_path, &db_backup);
+    }
+
     let conn = Connection::open(&db_path)
         .expect("Failed to open SQLite database");
 

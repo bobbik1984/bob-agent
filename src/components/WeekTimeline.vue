@@ -56,7 +56,7 @@
           <div class="v-day-header" :class="{ today: day.isToday }">
             {{ day.name }} · {{ day.dateLabel }}
           </div>
-          <div v-if="day.events.length === 0" class="v-empty">暂无日程</div>
+          <div v-if="day.events.length === 0" class="v-empty">{{ $t('timeline.no_events') || '无日程' }}</div>
           <div
             v-for="event in day.events"
             :key="event.id"
@@ -75,20 +75,20 @@
       <div class="detail-card">
         <h3 class="detail-title">{{ detailEvent.title }}</h3>
         <div class="detail-field">
-          <label>时间</label>
+          <label>{{ $t('timeline.time') || '时间' }}</label>
           <span>{{ formatTimeRange(detailEvent) }}</span>
         </div>
         <div v-if="detailEvent.location" class="detail-field">
-          <label>地点</label>
+          <label>{{ $t('timeline.location') || '地点' }}</label>
           <span>{{ detailEvent.location }}</span>
         </div>
         <div v-if="detailEvent.notes" class="detail-field">
-          <label>备注</label>
+          <label>{{ $t('timeline.notes') || '备注' }}</label>
           <span>{{ detailEvent.notes }}</span>
         </div>
         <div class="detail-actions">
-          <button class="btn btn-ghost" @click="detailEvent = null">关闭</button>
-          <button class="btn btn-danger" @click="handleDelete(detailEvent)">删除</button>
+          <button class="btn btn-ghost" @click="detailEvent = null">{{ $t('modal.cancel') }}</button>
+          <button class="btn btn-danger" @click="handleDelete(detailEvent)">{{ $t('modal.confirm_delete') }}</button>
         </div>
       </div>
     </div>

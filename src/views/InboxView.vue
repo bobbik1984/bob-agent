@@ -41,14 +41,14 @@
         <div class="section">
           <h3 class="section-title">
             <Timer :size="16" class="section-icon" />
-            自动任务
+            {{ $t('inbox.auto_tasks') }}
             <span class="cron-count" v-if="cronJobs.length">{{ cronJobs.length }}</span>
           </h3>
 
           <div v-if="cronJobs.length === 0" class="empty-cron">
             <Clock :size="32" class="empty-icon" />
-            <p>暂无定时任务</p>
-            <p class="empty-hint">在对话中告诉 Bob「每天早上8点帮我播报新闻」即可创建</p>
+            <p>{{ $t('inbox.empty_cron') }}</p>
+            <p class="empty-hint">{{ $t('inbox.empty_cron_hint') }}</p>
           </div>
 
           <div v-else class="cron-list">
@@ -60,19 +60,19 @@
             >
               <div class="cron-main">
                 <div class="cron-title-row">
-                  <span class="cron-title">{{ job.title || '未命名任务' }}</span>
+                  <span class="cron-title">{{ job.title || $t('inbox.unnamed_task') }}</span>
                   <code class="cron-expr">{{ job.cron_expr }}</code>
                 </div>
                 <div class="cron-desc">{{ describeCron(job.cron_expr) }}</div>
                 <div class="cron-prompt">{{ job.prompt_template }}</div>
                 <div class="cron-meta" v-if="job.last_run > 0">
-                  上次执行：{{ formatTime(job.last_run) }}
+                  {{ $t('inbox.last_run') }}{{ formatTime(job.last_run) }}
                 </div>
               </div>
               <div class="cron-actions">
                 <button
                   class="cron-toggle"
-                  :title="job.enabled ? '暂停' : '恢复'"
+                  :title="job.enabled ? $t('inbox.pause') : $t('inbox.resume')"
                   @click="toggleJob(job)"
                 >
                   <Pause v-if="job.enabled" :size="14" />
@@ -80,7 +80,7 @@
                 </button>
                 <button
                   class="cron-delete"
-                  title="删除"
+                  :title="$t('inbox.delete')"
                   @click="deleteJob(job)"
                 >
                   <Trash2 :size="14" />
@@ -101,7 +101,7 @@ import { Calendar, Loader2, Timer, Clock, Pause, Play, Trash2, Bell } from 'luci
 import WeekTimeline from '../components/WeekTimeline.vue';
 import TodoList from '../components/TodoList.vue';
 
-const { t } = useI18n();
+const { t, locale } = useI18n();
 
 const isLoading = ref(true);
 const events = ref([]);
@@ -200,12 +200,18 @@ function describeCron(expr) {
   const parts = expr.trim().split(/\s+/);
   if (parts.length !== 5) return expr;
   const [min, hour, dom, mon, dow] = parts;
+  const isZh = locale.value.startsWith('zh');
 
-  const weekdays = { '0': '周日', '1': '周一', '2': '周二', '3': '周三', '4': '周四', '5': '周五', '6': '周六' };
+  const weekdays = isZh
+    ? { '0': '周日', '1': '周一', '2': '周二', '3': '周三', '4': '周四', '5': '周五', '6': '周六' }
+    : { '0': 'Sun', '1': 'Mon', '2': 'Tue', '3': 'Wed', '4': 'Thu', '5': 'Fri', '6': 'Sat' };
 
-  // 常见模式匹配
-  if (min.startsWith('*/')) return `每 ${min.slice(2)} 分钟`;
-  if (hour.startsWith('*/')) return `每 ${hour.slice(2)} 小时`;
+  if (min.startsWith('*/')) {
+    return isZh ? `每 ${min.slice(2)} 分钟` : `Every ${min.slice(2)} minutes`;
+  }
+  if (hour.startsWith('*/')) {
+    return isZh ? `每 ${hour.slice(2)} 小时` : `Every ${hour.slice(2)} hours`;
+  }
 
   let timeStr = '';
   if (hour !== '*' && min !== '*') {
@@ -215,22 +221,25 @@ function describeCron(expr) {
   }
 
   if (dom === '*' && mon === '*' && dow === '*') {
-    return timeStr ? `每天 ${timeStr}` : '每分钟';
+    if (timeStr) {
+      return isZh ? `每天 ${timeStr}` : `Every day at ${timeStr}`;
+    }
+    return isZh ? '每分钟' : 'Every minute';
   }
   if (dom === '*' && mon === '*' && dow === '1-5') {
-    return `工作日 ${timeStr}`;
+    return isZh ? `工作日 ${timeStr}` : `Weekdays at ${timeStr}`;
   }
   if (dom === '*' && mon === '*' && dow === '0,6') {
-    return `周末 ${timeStr}`;
+    return isZh ? `周末 ${timeStr}` : `Weekends at ${timeStr}`;
   }
   if (dom === '*' && mon === '*' && dow !== '*') {
-    const days = dow.split(',').map(d => weekdays[d] || `周${d}`).join('、');
-    return `每${days} ${timeStr}`;
+    const days = dow.split(',').map(d => weekdays[d] || (isZh ? `周${d}` : `day ${d}`)).join(isZh ? '、' : ', ');
+    return isZh ? `每${days} ${timeStr}` : `Every ${days} at ${timeStr}`;
   }
   if (dom !== '*' && mon === '*') {
-    return `每月${dom}日 ${timeStr}`;
+    return isZh ? `每月${dom}日 ${timeStr}` : `Every month on day ${dom} at ${timeStr}`;
   }
-  return expr; // fallback: 原始表达式
+  return expr;
 }
 </script>
 

@@ -169,7 +169,31 @@
     "memory_type_wiki": "Knowledge Entry",
     "memory_empty": "No memory entries yet",
     "memory_delete_confirm": "Delete this memory entry? This cannot be undone.",
-    "memory_deleted": "Deleted"
+    "memory_deleted": "Deleted",
+    "simple_mode": "Simple Mode",
+    "advanced_mode": "Advanced Mode",
+    "show_llama_guide": "No local server installed? View Setup Guide",
+    "hide_llama_guide": "Hide Local Server Setup Guide",
+    "llama_guide_title": "Local Model Configuration Guide",
+    "llama_guide_desc": "If you need a local LLM, please save <code>llama-server.exe</code> and its <code>.dll</code> dependencies into the program's <code>llm-engine</code> directory.",
+    "llama_guide_step1": "",
+    "llama_guide_step2": "",
+    "llama_guide_step3": "",
+    "open_llama_dir": "Open llm-engine Directory",
+    "wiki_migrate_title": "Wiki Storage Migration Wizard",
+    "wiki_migrate_desc": "You are changing the knowledge base directory to:",
+    "wiki_migrate_select_mode": "Select Migration Mode:",
+    "wiki_migrate_mode_merge": "Copy & Merge",
+    "wiki_migrate_mode_merge_desc": "Copy files to the new directory. If a file with the same name exists, their contents will be merged intelligently.",
+    "wiki_migrate_mode_overwrite": "Copy & Overwrite",
+    "wiki_migrate_mode_overwrite_desc": "Copy files to the new directory. If a file with the same name exists, it will be directly overwritten.",
+    "wiki_migrate_mode_link": "Link Only",
+    "wiki_migrate_mode_link_desc": "Only point to the new directory without copying old files (useful if data is already prepared in the destination).",
+    "wiki_migrate_confirm": "Confirm Migration",
+    "wiki_migrate_processing": "Migrating...",
+    "wiki_migrate_success": "Knowledge base directory migrated successfully!",
+    "wiki_migrate_error_unknown": "Unknown migration error",
+    "wiki_migrate_failed": "Migration failed: "
   },
   "chat": {
     "new_conversation": "New Chat",
@@ -240,7 +264,15 @@
     "role_main": "Main",
     "role_clerk": "Clerk",
     "no_models": "No models found. Please check your API Key configuration in .env.",
-    "not_set": "Not set"
+    "not_set": "Not set",
+    "unconfigured": "No Key",
+    "refresh": "Refresh",
+    "refreshing": "Refreshing...",
+    "variant_default": "Default",
+    "variant_intl": "International",
+    "variant_coding": "Coding",
+    "billing_plan": "Plan",
+    "region": "Region"
   },
   "file_card": {
     "just_now": "just now",
@@ -281,13 +313,22 @@
   },
   "plugin": {
     "title": "Skills & Plugin Center",
-    "loading": "Loading...",
-    "engines": "Engines",
-    "native_tools": "Native Tools",
-    "external_skills": "External Skills",
+    "loading": "Loading plugins...",
     "install": "Install",
-    "installing": "Installing",
-    "ready": "Ready"
+    "installing": "Installing...",
+    "ready": "Ready",
+    "engine": "Engines",
+    "native": "Native Tools",
+    "external": "External Skills",
+    "label_builtin": "Built-in",
+    "label_official": "Official",
+    "label_external": "Custom",
+    "type_native": "Native Tool",
+    "type_engine": "Engine",
+    "type_official": "Official Skill",
+    "type_custom": "Custom Skill",
+    "overridden": "Overridden by custom skill",
+    "overriding": "Overrides official skill"
   },
   "tray": {
     "show": "Show bob-agent",
@@ -297,7 +338,15 @@
     "title": "Calendar",
     "loading": "Loading...",
     "this_week": "This Week",
-    "todo_list": "To-Do List"
+    "todo_list": "To-Do List",
+    "auto_tasks": "Automated Tasks",
+    "empty_cron": "No automated tasks yet",
+    "empty_cron_hint": "Tell Bob in the chat 'Help me broadcast the news every morning at 8 AM' to create one",
+    "unnamed_task": "Unnamed Task",
+    "last_run": "Last run: ",
+    "pause": "Pause",
+    "resume": "Resume",
+    "delete": "Delete"
   },
   "setup": {
     "welcome": "Welcome to bob-agent",
@@ -342,7 +391,21 @@
       "Sat"
     ],
     "delete_event": "Delete Event",
-    "update_time_failed": "Failed to update time"
+    "update_time_failed": "Failed to update time",
+    "no_events": "No events",
+    "time": "Time",
+    "location": "Location",
+    "notes": "Notes"
+  },
+  "providers": {
+    "qwen": "Alibaba Cloud",
+    "zhipu": "Zhipu AI",
+    "doubao": "Volcengine",
+    "kimi": "Moonshot",
+    "deepseek": "DeepSeek",
+    "openai": "OpenAI",
+    "minimax": "MiniMax",
+    "offline": "Local Model"
   },
   "common": {
     "please_select": "Please select"

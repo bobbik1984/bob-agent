@@ -35,7 +35,7 @@
       "../resources/llm-engine/*.exe": "llm-engine",
       "../resources/llm-engine/*.dll": "llm-engine",
       "../resources/llm-engine/*.disabled": "llm-engine",
-      "../skills/**/*": "skills",
+      "../skills": "skills",
       "pdfium.dll": "pdfium.dll"
     },
     "icon": [
