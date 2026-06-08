@@ -18,6 +18,11 @@ mod browser;
 mod doctor;
 mod gcp_auth;
 mod evolution;
+mod mcp;
+mod connector;
+mod lark;
+mod google_calendar;
+mod gmail;
 
 use serde_json::{json, Value};
 use std::fs;
@@ -713,6 +718,14 @@ pub fn run() {
             doctor::system_auto_fix,
             // 进化引擎
             evolution::system_get_evolution_stats,
+            // MCP 扩展引擎
+            mcp::mcp_get_config,
+            mcp::mcp_set_config,
+            // 连接器 (Connectors)
+            connector::connector_list,
+            connector::connector_start_oauth,
+            connector::connector_save_credentials,
+            connector::connector_disconnect,
             // 聊天就绪校验
             llm::system_validate_chat_ready,
         ])
@@ -845,6 +858,13 @@ pub fn run() {
 
             // ── Phase 2: 启动本地 HTTP API (127.0.0.1:3721) ──
             http_api::start_http_server(app.handle().clone());
+
+            // ── MCP 扩展引擎 ──
+            tauri::async_runtime::spawn(async {
+                // 延迟 3 秒，让核心服务先就绪
+                tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                mcp::init_from_saved_config().await;
+            });
 
             // ── 浏览器增强空闲回收 ──
             {

@@ -179,8 +179,11 @@ window.electronAPI = {
   getDreamReport: async () => invoke('system_get_dream_report'),
   dismissDream: async () => invoke('system_dismiss_dream'),
   onDreamCompleted: (callback) => {
-    // V2 将通过 Tauri Event 推送，目前 V1 同步生成不需要监听
-    return () => {};
+    let unlisten = null;
+    listen('dream:completed', (event) => {
+      callback(event.payload);
+    }).then(fn => { unlisten = fn; });
+    return () => { if (unlisten) { unlisten(); unlisten = null; } };
   },
 
   // ── 进化引擎 (Rust 原生) ───────────────────────────────
@@ -231,8 +234,14 @@ window.electronAPI = {
   },
 
   // ── MCP 配置 ──────────────────────────────────────────
-  getMcpConfig: async () => ({ mcpServers: {} }),      // TODO T-609
-  setMcpConfig: async (config) => true,                // TODO T-609
+  getMcpConfig: async () => invoke('mcp_get_config'),
+  setMcpConfig: async (config) => invoke('mcp_set_config', { config }),
+
+  // ── 连接器 (Connectors) ────────────────────────────────
+  connectorList: async () => invoke('connector_list'),
+  connectorStartOAuth: async (name) => invoke('connector_start_oauth', { name }),
+  connectorSaveCredentials: async (name, credentials) => invoke('connector_save_credentials', { name, credentials }),
+  connectorDisconnect: async (name) => invoke('connector_disconnect', { name }),
 
   // ── 离线引擎 (Sidecar) ─────────────────────────────────
   startOfflineEngine: async (modelPath) => invoke('start_offline_engine', { modelPath }),

@@ -3,9 +3,9 @@
     <div v-if="visible" class="morning-briefing">
       <div class="briefing-header">
         <div class="briefing-icon">
-          <Sun :size="18" />
+          <component :is="titleIcon" :size="18" />
         </div>
-        <div class="briefing-title">{{ t('dream.morning_title') }}</div>
+        <div class="briefing-title">{{ briefingTitleText }}</div>
         <button class="briefing-close" @click="dismiss" :title="t('dream.dismiss')">
           <X :size="14" />
         </button>
@@ -52,12 +52,26 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { X, Sun, Sparkles, Dna } from 'lucide-vue-next';
+import { X, Sun, Sunset, Moon, Sparkles, Dna } from 'lucide-vue-next';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 
 const { t } = useI18n();
 const emit = defineEmits(['chat', 'dismiss']);
+
+const currentHour = new Date().getHours();
+const titleIcon = computed(() => {
+  if (currentHour >= 5 && currentHour < 18) return Sun;
+  if (currentHour >= 18 && currentHour < 20) return Sunset;
+  return Moon;
+});
+
+const briefingTitleText = computed(() => {
+  if (currentHour >= 5 && currentHour < 12) return t('dream.morning_title');
+  if (currentHour >= 12 && currentHour < 18) return '午安！以下是我整理的近期动态';
+  if (currentHour >= 18 && currentHour < 22) return '晚上好！以下是我整理的近期动态';
+  return '夜深了，以下是我整理的近期动态';
+});
 
 const visible = ref(false);
 const briefingText = ref('');

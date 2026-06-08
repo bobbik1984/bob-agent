@@ -37,7 +37,7 @@ fn get_cold_session_dir() -> PathBuf {
 
 /// 对话结束时，提取对话摘要并存为 session 日志
 #[tauri::command]
-pub fn system_summarize_session(conversation_id: String, db: tauri::State<'_, crate::db::DbState>) -> bool {
+pub fn system_summarize_session(app: tauri::AppHandle, conversation_id: String, db: tauri::State<'_, crate::db::DbState>) -> bool {
     let conn = match db.0.lock() {
         Ok(c) => c,
         Err(_) => return false,
@@ -95,8 +95,10 @@ pub fn system_summarize_session(conversation_id: String, db: tauri::State<'_, cr
         let _ = fs::write(session_path, data);
     }
 
-    // 生成/更新晨间简报
-    generate_dream_report();
+    // 触发更新晨报 (放进后台线程避免网络请求阻塞 IPC)
+    std::thread::spawn(move || {
+        generate_dream_report(&app);
+    });
 
     true
 }
@@ -302,7 +304,73 @@ pub fn migrate_stale_sessions() {
 // ═══════════════════════════════════════════════════════════
 
 /// 从最近的 session 日志中聚合生成一份晨间简报
-fn generate_dream_report() {
+async fn fetch_morning_weather() -> Option<String> {
+    let cache_path = super::get_data_dir().join("weather_cache.json");
+    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+    
+    if let Ok(content) = std::fs::read_to_string(&cache_path) {
+        if let Ok(cache) = serde_json::from_str::<serde_json::Value>(&content) {
+            if cache.get("date").and_then(|v| v.as_str()) == Some(&today) {
+                if let Some(text) = cache.get("text").and_then(|v| v.as_str()) {
+                    return Some(text.to_string());
+                }
+            }
+        }
+    }
+
+    let client = reqwest::Client::builder().timeout(std::time::Duration::from_secs(5)).build().ok()?;
+    
+    // Check override in bob.db
+    let db_path = super::get_data_dir().join("bob.db");
+    let mut override_city: Option<String> = None;
+    if let Ok(conn) = rusqlite::Connection::open(&db_path) {
+        if let Ok(val) = conn.query_row("SELECT value FROM settings WHERE key = 'weatherCity'", [], |row| row.get::<_, String>(0)) {
+            if !val.trim().is_empty() {
+                override_city = Some(val.trim().to_string());
+            }
+        }
+    }
+
+    let (lat, lon, city_name) = if let Some(city) = override_city {
+        let geo_url = format!("https://geocoding-api.open-meteo.com/v1/search?name={}&count=1&language=zh", city);
+        let geo_json: Value = client.get(&geo_url).send().await.ok()?.json().await.ok()?;
+        let loc = geo_json.get("results")?.as_array()?.first()?;
+        let lat = loc.get("latitude")?.as_f64()?;
+        let lon = loc.get("longitude")?.as_f64()?;
+        (lat, lon, city)
+    } else {
+        let ip_json: Value = client.get("http://ip-api.com/json/?lang=zh-CN").send().await.ok()?.json().await.ok()?;
+        let lat = ip_json.get("lat")?.as_f64()?;
+        let lon = ip_json.get("lon")?.as_f64()?;
+        let city = ip_json.get("city")?.as_str()?.to_string();
+        (lat, lon, city)
+    };
+
+    let weather_url = format!("https://api.open-meteo.com/v1/forecast?latitude={}&longitude={}&current=weather_code&daily=temperature_2m_max,temperature_2m_min&timezone=Asia%2FShanghai", lat, lon);
+    let w_json: Value = client.get(&weather_url).send().await.ok()?.json().await.ok()?;
+    
+    let current = w_json.get("current")?;
+    let daily = w_json.get("daily")?;
+    
+    let code = current.get("weather_code")?.as_u64().unwrap_or(0);
+    let t_max = daily.get("temperature_2m_max")?.as_array()?.first()?.as_f64()?;
+    let t_min = daily.get("temperature_2m_min")?.as_array()?.first()?.as_f64()?;
+
+    let condition = match code {
+        0 => "晴",
+        1..=3 => "多云",
+        45..=48 => "雾",
+        51..=55 => "毛毛雨",
+        61..=65 => "雨",
+        71..=75 => "雪",
+        95..=99 => "雷暴",
+        _ => "未知",
+    };
+
+    Some(format!("{} {} {}°C ~ {}°C\n\n", city_name, condition, t_min.round() as i64, t_max.round() as i64))
+}
+
+fn generate_dream_report(app: &tauri::AppHandle) {
     let sessions_dir = get_session_log_dir();
     let mut sessions: Vec<Value> = Vec::new();
 
@@ -329,7 +397,13 @@ fn generate_dream_report() {
 
     // V1 简易简报: 列出最近的几个话题
     let recent = &sessions[..sessions.len().min(5)];
-    let mut briefing = String::from("## 最近对话回顾\n\n");
+    let mut briefing = String::new();
+    
+    if let Some(weather) = tauri::async_runtime::block_on(async { fetch_morning_weather().await }) {
+        briefing.push_str(&weather);
+    }
+    
+    briefing.push_str("## 对话回顾\n\n");
     
     for (i, session) in recent.iter().enumerate() {
         let topics = session.get("userTopics")
@@ -397,6 +471,7 @@ fn generate_dream_report() {
 
     if let Ok(data) = serde_json::to_string_pretty(&report) {
         let _ = fs::write(get_dream_path(), data);
+        let _ = app.emit("dream:completed", &report);
     }
 }
 

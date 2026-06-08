@@ -140,6 +140,25 @@ fn resolve_write_path(path: &str, global_file_access: bool) -> Result<PathBuf, S
 
 /// 返回所有可用工具的 OpenAI Function Calling 格式描述
 pub fn get_tool_schemas() -> Vec<Value> {
+    let tools = get_builtin_tool_schemas();
+    // MCP 工具在异步上下文中合并，这里先返回内建工具
+    tools
+}
+
+/// 合并 MCP + 原生连接器工具的异步版本
+pub async fn get_tool_schemas_with_mcp() -> Vec<Value> {
+    let mut tools = get_builtin_tool_schemas();
+    // MCP 扩展工具
+    let mcp_tools = super::mcp::get_manager().get_all_tool_schemas().await;
+    tools.extend(mcp_tools);
+    // 原生连接器工具（根据连接状态动态返回）
+    tools.extend(super::lark::get_tool_schemas());
+    tools.extend(super::google_calendar::get_tool_schemas());
+    tools.extend(super::gmail::get_tool_schemas());
+    tools
+}
+
+fn get_builtin_tool_schemas() -> Vec<Value> {
     vec![
         json!({
             "type": "function",
@@ -643,6 +662,20 @@ async fn execute_tool_inner(app: &tauri::AppHandle, name: &str, args: &Value, fr
             let id = args.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
             let enabled = args.get("enabled").and_then(|v| v.as_bool()).unwrap_or(true);
             super::scheduler::system_toggle_cron_job(id, enabled).await
+        }
+        // ── MCP 扩展工具路由 ──
+        name if name.starts_with("mcp_") => {
+            super::mcp::get_manager().call_tool(name, args).await
+        }
+        // ── 原生连接器工具路由 ──
+        name if name.starts_with("lark_") => {
+            super::lark::execute_tool(name, args).await
+        }
+        name if name.starts_with("google_calendar_") => {
+            super::google_calendar::execute_tool(name, args).await
+        }
+        name if name.starts_with("gmail_") => {
+            super::gmail::execute_tool(name, args).await
         }
         _ => json!({ "error": format!("未知工具: {}", name) }),
     }

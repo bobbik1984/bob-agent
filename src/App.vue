@@ -13,6 +13,10 @@
             <path fill="none" stroke="currentColor" stroke-miterlimit="10" d="M152.5,82.45a16.11,16.11,0,1,1-16.11-16.11A16.11,16.11,0,0,1,152.5,82.45Z" transform="translate(-13.95 -12.92)"/>
           </g>
         </svg>
+        <button class="titlebar-theme-btn" @click="toggleTheme" :title="currentTheme === 'dark' ? $t('nav.theme_to_light') : $t('nav.theme_to_dark')">
+          <Sun v-if="currentTheme === 'dark'" :size="14" />
+          <Moon v-else :size="14" />
+        </button>
       </div>
       <div data-tauri-drag-region style="flex: 1; height: 100%;"></div>
       <div class="titlebar-right titlebar-no-drag">
@@ -41,113 +45,142 @@
           minWidth: isSidebarCollapsed ? '0px' : '200px'
         }"
       >
-        <!-- 侧栏顶部工具栏 -->
-        <div class="sidebar-top">
-          <button class="new-chat-btn" :class="{ 'sr-compact': isSearchExpanded }" @click="createNewChat" :title="$t('chat.new_conversation')">
-            <Plus :size="16" />
-            <span class="new-chat-label">{{ $t('chat.new_conversation') }}</span>
-          </button>
-
-          <div class="sidebar-search" :class="{ expanded: isSearchExpanded }">
-            <button v-if="!isSearchExpanded" class="sidebar-icon-btn search-trigger" @click="expandSearch" title="搜索">
-              <Search :size="16" />
+        <!-- ═══ 抽屉 1: 对话 ═══ -->
+        <div class="drawer-header" :class="{ active: activeDrawer === 'chat' }" @click="activeDrawer = 'chat'">
+          <div class="drawer-header-left">
+            <MessageSquare :size="14" />
+            <span>{{ $t('nav.conversations') || '对话' }}</span>
+          </div>
+          <ChevronDown v-if="activeDrawer === 'chat'" :size="14" class="drawer-chevron" />
+          <ChevronRight v-else :size="14" class="drawer-chevron" />
+        </div>
+        <div v-show="activeDrawer === 'chat'" class="drawer-content">
+          <!-- 搜索 + 新对话工具栏 -->
+          <div class="sidebar-top">
+            <button class="new-chat-btn" :class="{ 'sr-compact': isSearchExpanded }" @click="createNewChat" :title="$t('chat.new_conversation')">
+              <Plus :size="16" />
+              <span class="new-chat-label">{{ $t('chat.new_conversation') }}</span>
             </button>
-            <template v-else>
-              <Search :size="14" class="search-icon" />
-              <input
-                ref="searchInputRef"
-                v-model="searchQuery"
-                class="search-input"
-                :placeholder="$t('chat.search_placeholder')"
-                @input="onSearchInput"
-                @keydown.esc="collapseSearch"
-                @blur="onSearchBlur"
-              />
-              <button v-if="searchQuery" class="search-clear btn-icon" @click="clearSearch">
-                <X :size="12" />
+            <div class="sidebar-search" :class="{ expanded: isSearchExpanded }">
+              <button v-if="!isSearchExpanded" class="sidebar-icon-btn search-trigger" @click="expandSearch" title="搜索">
+                <Search :size="16" />
               </button>
-            </template>
+              <template v-else>
+                <Search :size="14" class="search-icon" />
+                <input
+                  ref="searchInputRef"
+                  v-model="searchQuery"
+                  class="search-input"
+                  :placeholder="$t('chat.search_placeholder')"
+                  @input="onSearchInput"
+                  @keydown.esc="collapseSearch"
+                  @blur="onSearchBlur"
+                />
+                <button v-if="searchQuery" class="search-clear btn-icon" @click="clearSearch">
+                  <X :size="12" />
+                </button>
+              </template>
+            </div>
           </div>
 
-          <button class="sidebar-icon-btn" @click="toggleTheme" :title="currentTheme === 'dark' ? $t('nav.theme_to_light') : $t('nav.theme_to_dark')">
-            <Sun v-if="currentTheme === 'dark'" :size="16" />
-            <Moon v-else :size="16" />
-          </button>
-        </div>
-
-        <!-- T-1301: 搜索结果列表 -->
-        <div v-if="searchQuery && searchResults.length > 0" class="search-results">
-          <div class="search-results-header">
-            {{ searchResults.length }} {{ $t('chat.search_results_count') }}
-          </div>
-          <div
-            v-for="result in searchResults"
-            :key="result.id"
-            class="search-result-item"
-            @click="jumpToSearchResult(result)"
-          >
-            <div class="search-result-title">{{ result.conv_title }}</div>
-            <div class="search-result-snippet" v-html="result.snippet"></div>
-            <div class="search-result-time">{{ timeAgo(result.created_at) }}</div>
-          </div>
-        </div>
-        <div v-else-if="searchQuery && searchResults.length === 0 && !isSearching" class="search-empty">
-          {{ $t('chat.search_no_results') }}
-        </div>
-
-        <!-- 对话列表（搜索时隐藏） -->
-        <div v-show="!searchQuery" class="conversation-list">
-          <div class="conversation-items">
+          <!-- T-1301: 搜索结果列表 -->
+          <div v-if="searchQuery && searchResults.length > 0" class="search-results">
+            <div class="search-results-header">
+              {{ searchResults.length }} {{ $t('chat.search_results_count') }}
+            </div>
             <div
-              v-for="conv in conversations"
-              :key="conv.id"
-              class="conversation-item"
-              :class="{ active: activeConversationId === conv.id && currentView === 'chat' }"
-              @click="switchConversation(conv.id); currentView = 'chat'"
-              @dblclick.stop="startRename(conv)"
+              v-for="result in searchResults"
+              :key="result.id"
+              class="search-result-item"
+              @click="jumpToSearchResult(result)"
             >
-              <div class="conv-body">
-                <div class="conv-row-1">
-                  <input
-                    v-if="renamingId === conv.id"
-                    v-model="renameText"
-                    class="rename-input"
-                    @keydown.enter="confirmRename(conv)"
-                    @keydown.esc="cancelRename"
-                    @blur="confirmRename(conv)"
-                    @click.stop
-                    ref="renameInputRef"
-                  />
-                  <span v-else class="conv-title">{{ conv.title }}</span>
-                  <span class="conv-time">{{ timeAgo(conv.updated_at) }}</span>
+              <div class="search-result-title">{{ result.conv_title }}</div>
+              <div class="search-result-snippet" v-html="result.snippet"></div>
+              <div class="search-result-time">{{ timeAgo(result.created_at) }}</div>
+            </div>
+          </div>
+          <div v-else-if="searchQuery && searchResults.length === 0 && !isSearching" class="search-empty">
+            {{ $t('chat.search_no_results') }}
+          </div>
+
+          <!-- 对话列表（搜索时隐藏） -->
+          <div v-show="!searchQuery" class="conversation-list">
+            <div class="conversation-items">
+              <div
+                v-for="conv in conversations"
+                :key="conv.id"
+                class="conversation-item"
+                :class="{ active: activeConversationId === conv.id && activeDrawer === 'chat' }"
+                @click="switchConversation(conv.id); activeDrawer = 'chat'"
+                @dblclick.stop="startRename(conv)"
+              >
+                <div class="conv-body">
+                  <div class="conv-row-1">
+                    <input
+                      v-if="renamingId === conv.id"
+                      v-model="renameText"
+                      class="rename-input"
+                      @keydown.enter="confirmRename(conv)"
+                      @keydown.esc="cancelRename"
+                      @blur="confirmRename(conv)"
+                      @click.stop
+                      ref="renameInputRef"
+                    />
+                    <span v-else class="conv-title">{{ conv.title }}</span>
+                    <span class="conv-time">{{ timeAgo(conv.updated_at) }}</span>
+                  </div>
+                  <div class="conv-row-2">
+                    {{ conv.last_message ? (conv.last_role === 'assistant' ? 'Bob: ' : '') + conv.last_message : '\u00A0' }}
+                  </div>
                 </div>
-                <div class="conv-row-2">
-                  {{ conv.last_message ? (conv.last_role === 'assistant' ? 'Bob: ' : '') + conv.last_message : '\u00A0' }}
-                </div>
+                <span class="delete-btn btn-icon" :title="$t('nav.delete_chat')" @click.stop="requestDeleteChat(conv.id)">
+                  <X :size="12" />
+                </span>
               </div>
-              <span class="delete-btn btn-icon" :title="$t('nav.delete_chat')" @click.stop="requestDeleteChat(conv.id)">
-                <X :size="12" />
-              </span>
             </div>
           </div>
         </div>
 
-        <!-- 底部导航 -->
-        <nav class="sidebar-footer-nav">
-          <button
-            v-for="item in bottomNavItems"
-            :key="item.id"
-            class="nav-item"
-            :class="{ active: currentView === item.id }"
-            @click="onNavClick(item.id)"
-          >
-            <div class="nav-icon-wrapper">
-              <component :is="item.icon" class="nav-icon" :size="16" />
-              <span v-if="item.id === 'inbox' && cronNotifCount > 0" class="nav-badge">{{ cronNotifCount > 9 ? '9+' : cronNotifCount }}</span>
-            </div>
-            <span class="nav-label">{{ item.label }}</span>
-          </button>
-        </nav>
+        <!-- ═══ 抽屉 2: 日程 ═══ -->
+        <div class="drawer-header" :class="{ active: activeDrawer === 'schedule' }" @click="activeDrawer = 'schedule'">
+          <div class="drawer-header-left">
+            <CalendarDays :size="14" />
+            <span>{{ $t('nav.schedule') || '日程' }}</span>
+            <span v-if="cronNotifCount > 0" class="drawer-badge">{{ cronNotifCount > 9 ? '9+' : cronNotifCount }}</span>
+          </div>
+          <ChevronDown v-if="activeDrawer === 'schedule'" :size="14" class="drawer-chevron" />
+          <ChevronRight v-else :size="14" class="drawer-chevron" />
+        </div>
+        <div v-show="activeDrawer === 'schedule'" class="drawer-content">
+          <div class="drawer-placeholder">
+            <CalendarDays :size="24" style="opacity: 0.3;" />
+            <span>{{ $t('nav.schedule_hint') || '日程与待办事项' }}</span>
+          </div>
+        </div>
+
+        <!-- ═══ 抽屉 3: 设置 ═══ -->
+        <div class="drawer-header" :class="{ active: activeDrawer === 'settings' }" @click="activeDrawer = 'settings'">
+          <div class="drawer-header-left">
+            <Settings :size="14" />
+            <span>{{ $t('nav.settings') }}</span>
+          </div>
+          <ChevronDown v-if="activeDrawer === 'settings'" :size="14" class="drawer-chevron" />
+          <ChevronRight v-else :size="14" class="drawer-chevron" />
+        </div>
+        <div v-show="activeDrawer === 'settings'" class="drawer-content">
+          <nav class="settings-nav">
+            <button
+              v-for="item in settingsNavItems"
+              :key="item.id"
+              class="settings-nav-item"
+              :class="{ active: activeSettingsPanel === item.id }"
+              @click="activeSettingsPanel = item.id"
+            >
+              <component :is="item.icon" :size="14" />
+              <span>{{ item.label }}</span>
+            </button>
+          </nav>
+        </div>
       </aside>
 
       <!-- 拖拽把手 -->
@@ -167,14 +200,15 @@
       <!-- 内容区 -->
       <main class="content">
         <ChatView
-          v-show="currentView === 'chat'"
+          v-show="activeDrawer === 'chat'"
           ref="chatViewRef"
           :conversationId="activeConversationId"
           @update-title="updateConversationTitle"
         />
-        <InboxView v-if="currentView === 'inbox'" />
+        <InboxView v-if="activeDrawer === 'schedule'" />
         <SettingsView
-          v-if="currentView === 'settings'"
+          v-if="activeDrawer === 'settings'"
+          :activePanel="activeSettingsPanel"
           @config-changed="onConfigChanged"
         />
       </main>
@@ -204,7 +238,7 @@ import InboxView from './views/InboxView.vue';
 import SettingsView from './views/SettingsView.vue';
 import SetupWizard from './components/SetupWizard.vue';
 import QuickNoteOverlay from './components/QuickNoteOverlay.vue';
-import { Inbox, Settings, Plus, X, Sun, Moon, ChevronLeft, ChevronRight, Search } from 'lucide-vue-next';
+import { Inbox, Settings, Plus, X, Sun, Moon, ChevronLeft, ChevronRight, ChevronDown, Search, MessageSquare, CalendarDays, Brain, Plug, FolderOpen, Palette, Info } from 'lucide-vue-next';
 import { useI18n } from 'vue-i18n';
 
 import { getCurrentWindow } from '@tauri-apps/api/window';
@@ -219,7 +253,9 @@ const { locale, t } = useI18n();
 
 // ── 状态 ─────────────────────────────────────────────
 const isSetupComplete = ref(false);
-const currentView = ref('chat');
+const currentView = ref('chat');  // legacy — kept for backward compat during transition
+const activeDrawer = ref('chat');         // 'chat' | 'schedule' | 'settings'
+const activeSettingsPanel = ref('model'); // 'model' | 'connections' | 'workspace' | 'appearance' | 'about'
 const chatViewRef = ref(null);
 const quickNoteRef = ref(null);
 
@@ -233,10 +269,19 @@ provide('openQuickNote', openQuickNote);
 import { watch } from 'vue';
 watch(currentView, (newView) => {
   if (newView === 'chat' && chatViewRef.value) {
-    // 当从设置页面返回聊天页面时，强制刷新模型选中状态
     chatViewRef.value.refreshModel();
-    // 切回来后自动滚到底部，防止后台流式输出期间滚动位置丢失
     chatViewRef.value.scrollToBottom();
+  }
+});
+
+// 抽屉切换时同步刷新
+watch(activeDrawer, (newDrawer) => {
+  if (newDrawer === 'chat' && chatViewRef.value) {
+    chatViewRef.value.refreshModel();
+    chatViewRef.value.scrollToBottom();
+  }
+  if (newDrawer === 'schedule') {
+    cronNotifCount.value = 0;
   }
 });
 const conversations = ref([]);
@@ -328,22 +373,29 @@ const bottomNavItems = computed(() => [
   { id: 'settings', icon: Settings, label: t('nav.settings') },
 ]);
 
+// 设置抽屉导航菜单项
+const settingsNavItems = computed(() => [
+  { id: 'model', icon: Brain, label: t('settings.nav_model') || '模型基础设置' },
+  { id: 'connections', icon: Plug, label: t('settings.nav_connections') || '连接中心' },
+  { id: 'workspace', icon: FolderOpen, label: t('settings.nav_workspace') || '工作间' },
+  { id: 'appearance', icon: Palette, label: t('settings.nav_appearance') || '外观与语言' },
+  { id: 'about', icon: Info, label: t('settings.nav_about') || '关于' },
+]);
+
 const modelInfo = computed(() => {
   if (!currentModel.value) return { name: t('app.not_configured'), logo: null };
   const name = currentModel.value.toLowerCase();
   
-  if (name.includes('deepseek')) {
-    return { name: 'DeepSeek', logo: '/logos/deepseek.png' };
-  }
-  if (name.includes('gpt-4') || name.includes('openai')) {
-    return { name: 'OpenAI', logo: '/logos/openai.png' };
-  }
-  if (name.includes('llama') || name.includes('ollama')) {
-    return { name: 'Ollama', logo: null };
-  }
-  if (name.includes('gemini')) {
-    return { name: 'Gemini', logo: '/logos/gemini.png' };
-  }
+  if (name.includes('deepseek')) return { name: 'DeepSeek', logo: '/logos/deepseek.png' };
+  if (name.includes('gpt-') || name.includes('o3') || name.includes('o4')) return { name: 'OpenAI', logo: '/logos/openai.png' };
+  if (name.includes('claude')) return { name: 'Claude', logo: '/logos/claude.png' };
+  if (name.includes('gemini')) return { name: 'Gemini', logo: '/logos/google.png' };
+  if (name.includes('qwen')) return { name: 'Qwen', logo: '/logos/qwen.png' };
+  if (name.includes('doubao') || name.includes('seed')) return { name: 'Doubao', logo: '/logos/doubao.png' };
+  if (name.includes('glm')) return { name: 'GLM', logo: '/logos/glm.svg' };
+  if (name.includes('kimi')) return { name: 'Kimi', logo: '/logos/kimi.png' };
+  if (name.includes('minimax')) return { name: 'MiniMax', logo: '/logos/minimax.png' };
+  if (name.includes('llama') || name.includes('local-')) return { name: 'Local', logo: null };
   return { name: currentModel.value, logo: null };
 });
 
@@ -791,6 +843,25 @@ function onNavClick(viewId) {
 }
 .app-logo:hover {
   opacity: 0.6;
+}
+
+.titlebar-theme-btn {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition: all var(--duration-fast);
+}
+
+.titlebar-theme-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
 }
 
 
@@ -1336,5 +1407,117 @@ function onNavClick(viewId) {
 }
 .splash-fade-leave-to {
   opacity: 0;
+}
+
+/* ── 手风琴抽屉 ─────────────────────────────────────── */
+.drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-2) var(--space-3);
+  cursor: pointer;
+  color: var(--text-tertiary);
+  font-size: var(--text-sm);
+  font-family: var(--font-sans);
+  border-top: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+  transition: all var(--duration-fast) var(--ease-out);
+  user-select: none;
+}
+
+.drawer-header:first-child {
+  border-top: none;
+}
+
+.drawer-header:hover {
+  color: var(--text-primary);
+  background: var(--surface-glass);
+}
+
+.drawer-header.active {
+  color: var(--text-primary);
+  background: var(--bg-secondary);
+  font-weight: 500;
+}
+
+.drawer-header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.drawer-chevron {
+  opacity: 0.4;
+  transition: transform var(--duration-fast);
+}
+
+.drawer-badge {
+  min-width: 16px;
+  height: 16px;
+  line-height: 16px;
+  font-size: 10px;
+  font-weight: 600;
+  text-align: center;
+  background: var(--color-error, var(--error, #e74c3c));
+  color: var(--bg-root);
+  border-radius: 8px;
+  padding: 0 4px;
+}
+
+.drawer-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.drawer-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: var(--space-6) var(--space-3);
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+/* ── 设置导航菜单 ─────────────────────────────────── */
+.settings-nav {
+  display: flex;
+  flex-direction: column;
+  padding: var(--space-2) var(--space-3);
+  gap: 1px;
+}
+
+.settings-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: var(--space-2) var(--space-3);
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.settings-nav-item:hover {
+  background: var(--surface-glass);
+  color: var(--text-primary);
+}
+
+.settings-nav-item.active {
+  background: var(--gradient-subtle);
+  color: var(--accent-tertiary);
+  font-weight: 500;
+}
+
+.settings-nav-item.active svg {
+  color: var(--accent-primary);
 }
 </style>

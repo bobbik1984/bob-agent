@@ -28,26 +28,153 @@ pub(crate) fn write_registry(registry: &Value) {
     }
 }
 
-/// 初始化模型注册表：首次启动时将内嵌默认值写入 AppData
+/// 合并内置默认模型与现有配置，按默认模板顺序重构，并迁移可见性状态
+fn merge_registry_with_defaults(existing: &mut Value, defaults: &Value) -> bool {
+    let mut modified = false;
+    let default_version = defaults.get("$schema_version").and_then(|v| v.as_u64()).unwrap_or(1);
+    let existing_version = existing.get("$schema_version").and_then(|v| v.as_u64()).unwrap_or(0);
+
+    let default_providers = match defaults.get("providers").and_then(|v| v.as_array()) {
+        Some(p) => p,
+        None => return false,
+    };
+
+    // 构建推荐模型快速查找表: provider_id -> HashSet<model_id>
+    let mut default_model_ids: std::collections::HashMap<String, std::collections::HashSet<String>> = std::collections::HashMap::new();
+    for dp in default_providers {
+        let pid = dp.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        if let Some(models) = dp.get("models").and_then(|v| v.as_array()) {
+            let ids: std::collections::HashSet<String> = models.iter()
+                .filter_map(|m| m.get("id").and_then(|v| v.as_str()).map(|s| s.to_string()))
+                .collect();
+            default_model_ids.insert(pid, ids);
+        }
+    }
+
+    let mut existing_providers = existing.get("providers")
+        .and_then(|v| v.as_array()).cloned().unwrap_or_default();
+    let mut merged_providers: Vec<Value> = Vec::new();
+
+    for def_provider in default_providers {
+        let def_id = def_provider.get("id").and_then(|v| v.as_str()).unwrap_or("");
+        if def_id.is_empty() { continue; }
+
+        let existing_prov_idx = existing_providers.iter().position(|p| {
+            p.get("id").and_then(|v| v.as_str()) == Some(def_id)
+        });
+
+        match existing_prov_idx {
+            None => {
+                merged_providers.push(def_provider.clone());
+                modified = true;
+                log::info!("Merged new default provider '{}'", def_id);
+            }
+            Some(idx) => {
+                let mut ext_provider = existing_providers.remove(idx);
+
+                for key in &["base_url", "supports_model_list", "base_url_variants", "auth_type"] {
+                    if let Some(val) = def_provider.get(*key) {
+                        if ext_provider.get(*key) != Some(val) {
+                            ext_provider[key.to_string()] = val.clone();
+                            modified = true;
+                        }
+                    }
+                }
+
+                let def_models = match def_provider.get("models").and_then(|v| v.as_array()) {
+                    Some(m) => m,
+                    None => { merged_providers.push(ext_provider); continue; }
+                };
+
+                if ext_provider.get("models").is_none() || !ext_provider["models"].is_array() {
+                    ext_provider["models"] = json!([]);
+                    modified = true;
+                }
+                let ext_models = ext_provider["models"].as_array_mut().unwrap();
+
+                // 追加默认列表中有但本地没有的新模型
+                for def_model in def_models {
+                    let dmid = def_model.get("id").and_then(|v| v.as_str()).unwrap_or("");
+                    if dmid.is_empty() { continue; }
+                    let exists = ext_models.iter().any(|m| m.get("id").and_then(|v| v.as_str()) == Some(dmid));
+                    if !exists {
+                        let mut m = def_model.clone();
+                        if m.get("visible").is_none() {
+                            if let Some(o) = m.as_object_mut() { o.insert("visible".to_string(), json!(true)); }
+                        }
+                        ext_models.push(m);
+                        modified = true;
+                        log::info!("Merged default model '{}' into provider '{}'", dmid, def_id);
+                    }
+                }
+
+                // 可见性迁移：不在推荐列表中且没有 visible 字段的旧模型 -> hidden
+                let curated = default_model_ids.get(def_id);
+                for model in ext_models.iter_mut() {
+                    if model.get("visible").is_some() { continue; }
+                    let mid = model.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                    let is_curated = curated.map_or(false, |ids| ids.contains(&mid));
+                    if let Some(obj) = model.as_object_mut() {
+                        obj.insert("visible".to_string(), json!(is_curated));
+                        if !is_curated {
+                            log::info!("Auto-hiding non-curated model '{}' in '{}'", mid, def_id);
+                        }
+                        modified = true;
+                    }
+                }
+
+                merged_providers.push(ext_provider);
+            }
+        }
+    }
+
+    // 用户自定义供应商追加在最后
+    for custom_prov in existing_providers {
+        merged_providers.push(custom_prov);
+        modified = true;
+    }
+
+    if existing.get("providers").and_then(|v| v.as_array()) != Some(&merged_providers) {
+        existing["providers"] = json!(merged_providers);
+        modified = true;
+    }
+    if existing_version < default_version {
+        existing["$schema_version"] = json!(default_version);
+        modified = true;
+    }
+    modified
+}
+
+/// 初始化模型注册表：将内嵌默认值与本地文件合并
 pub fn init_model_registry(_app: &tauri::AppHandle) {
     let dest = get_registry_path();
+    let default_json = include_str!("../resources/model_providers.json");
+    let default_registry: Value = match serde_json::from_str(default_json) {
+        Ok(v) => v,
+        Err(e) => { log::error!("Failed to parse embedded model registry: {}", e); return; }
+    };
     if dest.exists() {
-        log::info!("Model registry already exists at {:?}", dest);
+        log::info!("Model registry exists at {:?}, merging defaults", dest);
+        let mut existing = read_registry();
+        if merge_registry_with_defaults(&mut existing, &default_registry) {
+            write_registry(&existing);
+            log::info!("Model registry merged with new defaults");
+        }
         return;
     }
-    // 将编译时嵌入的默认注册表写入文件系统
-    let default_json = include_str!("../resources/model_providers.json");
     match std::fs::write(&dest, default_json) {
         Ok(_) => log::info!("Model registry initialized from embedded default"),
         Err(e) => log::warn!("Failed to write model registry: {}", e),
     }
 }
 
-/// 判断一个 model_id 是否为聊天/文本生成类模型（过滤掉 embedding, tts, asr, image, video, moderation 等）
+/// 判断一个 model_id 是否为聊天/文本生成类模型
 fn is_chat_model(model_id: &str) -> bool {
     let id = model_id.to_lowercase();
-    // 前缀过滤
     if id.starts_with("ft:") { return false; }
+    // 精确匹配黑名单
+    let exact_blocklist = ["davinci-002", "babbage-002"];
+    if exact_blocklist.contains(&id.as_str()) { return false; }
     // 关键词黑名单
     let blocklist = [
         "embed", "embedding",
@@ -60,6 +187,7 @@ fn is_chat_model(model_id: &str) -> bool {
         "instruct",
         "realtime",
         "transcription", "translation",
+        "search", "codex",
     ];
     for kw in &blocklist {
         if id.contains(kw) { return false; }
@@ -134,11 +262,12 @@ pub async fn refresh_models_on_startup() {
                 if let Some(existing) = existing_models.iter().find(|m| m.get("id").and_then(|v| v.as_str()) == Some(model_id)) {
                     new_models.push(existing.clone());
                 } else {
-                    // New model discovered
+                    // New model discovered — 自动发现默认 visible: false
                     new_models.push(json!({
                         "id": model_id,
                         "name": model_id,
                         "vision": false,
+                        "visible": false,
                         "pricing": { "input": 0.0, "output": 0.0 }
                     }));
                 }
@@ -235,10 +364,12 @@ pub async fn refresh_models_for_provider(provider_id: String) -> Value {
             if let Some(existing) = existing_models.iter().find(|m| m.get("id").and_then(|v| v.as_str()) == Some(model_id)) {
                 new_models.push(existing.clone());
             } else {
+                // 手动刷新发现的新模型也默认 visible: false
                 new_models.push(json!({
                     "id": model_id,
                     "name": model_id,
                     "vision": false,
+                    "visible": false,
                     "pricing": { "input": 0.0, "output": 0.0 }
                 }));
             }
