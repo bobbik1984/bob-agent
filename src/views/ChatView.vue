@@ -160,7 +160,12 @@
                   />
                 </template>
                 <template v-else>
-                  {{ tool.result }}
+                  <div class="tool-result-text" :class="{ 'is-expanded': tool._resultExpanded }">
+                    {{ tool.result }}
+                  </div>
+                  <button v-if="tool.result && tool.result.length > 300" class="btn-ghost btn-expand-result" @click.stop="tool._resultExpanded = !tool._resultExpanded">
+                    {{ tool._resultExpanded ? '收起' : '展开更多' }}
+                  </button>
                 </template>
               </div>
             </div>
@@ -1226,9 +1231,40 @@ defineExpose({
   color: var(--text-tertiary);
   white-space: pre-wrap;
   word-break: break-all;
-  max-height: 120px;
-  overflow-y: auto;
   line-height: 1.4;
+}
+
+.tool-result-text {
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+}
+
+.tool-result-text.is-expanded {
+  display: block;
+  -webkit-line-clamp: unset;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.btn-expand-result {
+  margin-top: 6px;
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: transparent;
+  border: 1px solid var(--border-subtle);
+  color: var(--text-tertiary);
+  cursor: pointer;
+  display: inline-block;
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.btn-expand-result:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  border-color: var(--border-default);
 }
 
 /* ── 拖拽遮罩 ───────────────────────────────────────── */

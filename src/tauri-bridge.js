@@ -44,6 +44,7 @@ window.electronAPI = {
   createConversation: (title, model) => invoke('db_conversation_create', { title: title || '新对话', model: model || '' }),
   deleteConversation: (id) => invoke('db_conversation_delete', { id }),
   renameConversation: (id, title) => invoke('db_conversation_rename', { id, title }),
+  autoRenameConversation: (id) => invoke('system_auto_rename_conversation', { conversationId: id }),
   updateConversationCost: (id, cost) => invoke('db_conversation_update_cost', { id, cost }),
   getMessages: (conversationId) => invoke('db_messages', { conversationId }),
   addMessage: (conversationId, role, content, imageBase64) =>

@@ -8,7 +8,7 @@
       </div>
       <ChevronDown :size="16" class="details-chevron" />
     </summary>
-    <p class="section-desc" style="margin-top: 16px; margin-bottom: 16px;">{{ $t('settings.bob_workspace_desc') }}</p>
+
 
     <!-- 工作目录 (workspaceDir) -->
     <div class="details-section">
@@ -16,7 +16,7 @@
         <FolderOpen :size="14" style="opacity: 0.6;" />
         {{ $t('settings.workspace') }}
       </label>
-      <p class="section-desc" style="margin-bottom: 8px; font-size: 0.8em;">{{ $t('settings.workspace_desc') }}</p>
+
       <div class="form-group workspace-group">
         <input
           v-model="config.workspaceDir"
@@ -44,7 +44,7 @@
         <FolderHeart :size="14" style="opacity: 0.6;" />
         {{ $t('settings.tracked_folders') }}
       </label>
-      <p class="section-desc" style="margin-bottom: 8px; font-size: 0.8em;">{{ $t('settings.tracked_folders_desc') }}</p>
+
 
       <div v-if="trackedFolders.length > 0" class="tracked-folders-list">
         <div
@@ -77,7 +77,7 @@
         <Cloud :size="14" style="opacity: 0.6;" />
         晨报天气城市
       </label>
-      <p class="section-desc" style="margin-bottom: 8px; font-size: 0.8em;">晨报自动播报该城市的天气。留空则自动根据 IP 定位。</p>
+
       <div class="form-group workspace-group">
         <div class="path-display" style="display: flex; gap: 8px;">
           <input 
@@ -95,7 +95,7 @@
         <FileText :size="14" style="opacity: 0.6;" />
         {{ $t('settings.wiki_dir') }}
       </label>
-      <p class="section-desc" style="margin-bottom: 8px; font-size: 0.8em;">{{ $t('settings.wiki_dir_desc') }}</p>
+
       <div class="form-group workspace-group">
         <input
           v-model="config.wikiDir"
@@ -123,7 +123,7 @@
         <Puzzle :size="14" style="opacity: 0.6;" />
         {{ $t('settings.skills') }}
       </label>
-      <p class="section-desc" style="margin-bottom: 8px; font-size: 0.8em;">{{ $t('settings.skills_desc') }}</p>
+
       <div class="form-group workspace-group">
         <input
           v-model="config.externalSkillsDir"
@@ -145,7 +145,7 @@
       </button>
 
       <div class="plugin-manager-entry details-section">
-        <p class="section-desc" style="margin-bottom: 12px;">{{ $t('settings.plugin_center_desc') }}</p>
+
         <button class="btn btn-primary" @click="showPluginManager = true" style="display: flex; align-items: center; gap: 8px;">
           <Layers :size="16" />
           <span>{{ $t('settings.open_plugin_center') }}</span>
@@ -166,7 +166,7 @@
       </div>
       <ChevronDown :size="16" class="details-chevron" />
     </summary>
-    <p class="section-desc" style="margin-top: 16px; margin-bottom: 12px;">{{ $t('settings.memory_desc') }}</p>
+
 
     <div v-if="memoryLoading" style="display: flex; align-items: center; gap: 8px; color: var(--text-tertiary); padding: 12px 0;">
       <Loader2 :size="16" class="spin" />
@@ -213,7 +213,7 @@
       </div>
       <ChevronDown :size="16" class="details-chevron" />
     </summary>
-    <p class="section-desc" style="margin-top: 16px; margin-bottom: 12px;">{{ $t('settings.evolution_desc') || 'Bob 的自我进化系统：自动从对话中提取知识、定期整理记忆、精炼人格。' }}</p>
+
 
     <div v-if="evoLoading" style="display: flex; align-items: center; gap: 8px; color: var(--text-tertiary); padding: 12px 0;">
       <Loader2 :size="16" class="spin" />

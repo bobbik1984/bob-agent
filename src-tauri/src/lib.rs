@@ -622,6 +622,7 @@ pub fn run() {
             config_get,
             config_set,
             config_get_all,
+            llm::system_auto_rename_conversation,
             // 对话 (来自 db.rs)
             db::db_conversations,
             db::db_conversation_create,
@@ -847,6 +848,8 @@ pub fn run() {
 
             // ── T-1004: 冷热记忆迁移 (启动时同步执行，极快) ──
             dream::migrate_stale_sessions();
+            // ── T-1412: 记忆置信度衰减 (顺带处理) ──
+            dream::decay_stale_confidence();
 
             // ── T-1003: 异步记忆压缩 (后台 Clerk 模型提炼) ──
             let dream_handle = app.handle().clone();

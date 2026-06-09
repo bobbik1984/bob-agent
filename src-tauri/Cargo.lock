@@ -486,6 +486,7 @@ dependencies = [
  "log",
  "lopdf",
  "md-5",
+ "once_cell",
  "pdfium-render",
  "percent-encoding",
  "qrcode",

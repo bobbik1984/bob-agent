@@ -2,6 +2,102 @@ use serde_json::{json, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::io::Write;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
+
+// ═══════════════════════════════════════════════════════════
+// T-1401: 工具调用循环熔断器 (Circuit Breaker)
+// ═══════════════════════════════════════════════════════════
+
+/// 工具调用追踪器，用于检测并中止重复调用模式
+/// 理论依据: 论文命题 2 §3 "状态机异常探测"——在 Agent 推理回路之外引入确定性机制
+pub struct ToolCallTracker {
+    /// 滚动窗口：最近的 (tool_name, args_hash) 记录
+    history: Vec<(String, u64)>,
+    /// 总工具调用计数
+    total_calls: usize,
+    /// 连续相似调用的阈值（超过则熔断）
+    repeat_threshold: usize,
+    /// 单次对话工具调用总量上限
+    budget: usize,
+}
+
+impl ToolCallTracker {
+    pub fn new() -> Self {
+        Self {
+            history: Vec::new(),
+            total_calls: 0,
+            repeat_threshold: 3,
+            budget: 15,
+        }
+    }
+
+    /// 计算参数的哈希指纹
+    fn hash_args(args: &Value) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        // 序列化为规范化字符串后取哈希
+        let s = serde_json::to_string(args).unwrap_or_default();
+        s.hash(&mut hasher);
+        hasher.finish()
+    }
+
+    /// 检查即将执行的工具调用是否应被熔断
+    /// 返回 Ok(()) 表示放行，Err(reason) 表示应熔断
+    pub fn check(&self, name: &str, args: &Value) -> Result<(), String> {
+        // 1. 总预算检查
+        if self.total_calls >= self.budget {
+            return Err(format!(
+                "工具调用预算耗尽：本次对话已调用 {} 次工具（上限 {}）。请直接基于已有信息回答用户。",
+                self.total_calls, self.budget
+            ));
+        }
+
+        // 2. 连续重复模式检测
+        let current_hash = Self::hash_args(args);
+        let recent_same: usize = self.history.iter().rev()
+            .take_while(|(n, h)| n == name && *h == current_hash)
+            .count();
+
+        if recent_same >= self.repeat_threshold {
+            return Err(format!(
+                "循环检测：工具 '{}' 已连续调用 {} 次且参数完全相同，已自动中止。请换一种方式处理或直接告知用户结果。",
+                name, recent_same
+            ));
+        }
+
+        // 3. 同名工具连续调用检测（参数不完全相同但工具名相同）
+        let recent_same_name: usize = self.history.iter().rev()
+            .take_while(|(n, _)| n == name)
+            .count();
+
+        if recent_same_name >= self.repeat_threshold + 2 {
+            return Err(format!(
+                "循环检测：工具 '{}' 已连续调用 {} 次（尽管参数略有不同），疑似陷入重试循环，已自动中止。",
+                name, recent_same_name
+            ));
+        }
+
+        Ok(())
+    }
+
+    /// 记录一次工具调用
+    pub fn record(&mut self, name: &str, args: &Value) {
+        let hash = Self::hash_args(args);
+        self.history.push((name.to_string(), hash));
+        self.total_calls += 1;
+
+        // 保持窗口大小合理（最多 30 条历史）
+        if self.history.len() > 30 {
+            self.history.drain(..self.history.len() - 30);
+        }
+    }
+
+    /// 获取总调用次数
+    pub fn total(&self) -> usize {
+        self.total_calls
+    }
+}
+
 
 // ═══════════════════════════════════════════════════════════
 // 审计日志 — 记录每次工具调用

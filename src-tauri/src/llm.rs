@@ -857,8 +857,452 @@ fn build_wiki_status() -> String {
 }
 
 // ═══════════════════════════════════════════════════════════
+// T-1411: 上下文分级压缩 (Context Tiering)
+// ═══════════════════════════════════════════════════════════
+
+use std::sync::Mutex;
+use std::collections::HashMap;
+use once_cell::sync::Lazy;
+
+/// 摘要缓存: conversation_id → (messages_hash, summary_text)
+/// messages_hash 用于检测消息列表是否变化，变了则需要重新压缩
+static CONTEXT_SUMMARY_CACHE: Lazy<Mutex<HashMap<String, (u64, String)>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
+
+/// 用牛马模型做非流式单轮对话（通用工具函数）
+/// 失败时返回 None，不会 panic
+async fn call_clerk_oneshot(system_prompt: &str, user_prompt: &str, max_tokens: u32) -> Option<String> {
+    let config = super::read_config();
+    let clerk_model = config.get("clerkModel").and_then(|v| v.as_str()).unwrap_or("");
+    if clerk_model.is_empty() { return None; }
+
+    let (provider, api_key, model_id, base_url) = read_llm_config_for_model(clerk_model);
+    if api_key.is_empty() || base_url.is_empty() { return None; }
+
+    let url = format!("{}/chat/completions", base_url);
+    let body = json!({
+        "model": model_id,
+        "messages": [
+            { "role": "system", "content": system_prompt },
+            { "role": "user", "content": user_prompt }
+        ],
+        "max_tokens": max_tokens,
+        "stream": false,
+        "temperature": 0.2
+    });
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+        .ok()?;
+
+    // GCP Token 动态获取
+    let final_key = if provider == "google" || api_key == "__GCP_TOKEN__" {
+        let cred_path = super::gcp_auth::get_gcp_credential_path();
+        super::gcp_auth::GcpTokenManager::from_file(&cred_path).ok()?
+            .get_access_token().await.ok()?
+    } else {
+        api_key
+    };
+
+    let resp = client.post(&url)
+        .header("Content-Type", "application/json")
+        .header("Authorization", format!("Bearer {}", final_key))
+        .json(&body)
+        .send()
+        .await
+        .ok()?;
+
+    if !resp.status().is_success() { return None; }
+
+    let resp_json: Value = resp.json().await.ok()?;
+    resp_json.pointer("/choices/0/message/content")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+}
+
+/// 粗略估算消息的 Token 数（CJK 内容: ~2 chars/token, Latin: ~4 chars/token）
+fn estimate_tokens(messages: &[Value]) -> usize {
+    messages.iter()
+        .filter_map(|m| m.get("content").and_then(|c| c.as_str()))
+        .map(|s| {
+            // 粗略估算: CJK 字符占比高时用 2 chars/token, 否则 4
+            let cjk_count = s.chars().filter(|c| *c > '\u{2E80}').count();
+            let total = s.chars().count().max(1);
+            let ratio = cjk_count as f32 / total as f32;
+            let chars_per_token = if ratio > 0.3 { 2.0 } else { 4.0 };
+            (total as f32 / chars_per_token).ceil() as usize
+        })
+        .sum()
+}
+
+/// 计算消息列表的简易哈希指纹（用于缓存失效判断）
+fn hash_messages(messages: &[Value]) -> u64 {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    let mut hasher = DefaultHasher::new();
+    for m in messages {
+        if let Some(c) = m.get("content").and_then(|v| v.as_str()) {
+            // 只取前 100 字符做指纹，足够判断是否变化
+            let snippet: String = c.chars().take(100).collect();
+            snippet.hash(&mut hasher);
+        }
+    }
+    messages.len().hash(&mut hasher);
+    hasher.finish()
+}
+
+/// 对消息列表应用三层分级压缩:
+///   - 活跃层 (最近 6 轮 = 12 条 user/assistant): 原样保留
+///   - 摘要层 (7~20 轮): 由牛马模型压缩为摘要段落
+///   - 废弃层 (20 轮以上): 直接丢弃，不进入上下文
+///
+/// 返回压缩后的消息列表（system 消息保留在最前面）
+async fn apply_context_tiering(messages: Vec<Value>, conv_id: &str) -> Vec<Value> {
+    // 分离 system 消息和对话消息
+    let mut system_msgs: Vec<Value> = Vec::new();
+    let mut dialog_msgs: Vec<Value> = Vec::new();
+
+    for msg in &messages {
+        let role = msg.get("role").and_then(|r| r.as_str()).unwrap_or("");
+        if role == "system" {
+            system_msgs.push(msg.clone());
+        } else {
+            dialog_msgs.push(msg.clone());
+        }
+    }
+
+    // 计算对话轮次 (一个 user + 一个 assistant = 1 轮)
+    let user_count = dialog_msgs.iter()
+        .filter(|m| m.get("role").and_then(|r| r.as_str()) == Some("user"))
+        .count();
+
+    // 活跃窗口: 最近 6 轮 (约 12 条消息)
+    const ACTIVE_ROUNDS: usize = 6;
+    // 摘要窗口上限: 20 轮
+    const SUMMARY_MAX_ROUNDS: usize = 20;
+    // Token 触发阈值: 对话消息超过此值才启动压缩
+    const TOKEN_THRESHOLD: usize = 3000;
+
+    // 不够 6 轮或 Token 未超阈值 → 不压缩
+    if user_count <= ACTIVE_ROUNDS || estimate_tokens(&dialog_msgs) < TOKEN_THRESHOLD {
+        return messages;
+    }
+
+    // 找到活跃层的起始位置: 从尾部倒数 ACTIVE_ROUNDS 个 user 消息
+    let mut active_start_idx = dialog_msgs.len();
+    let mut user_seen = 0;
+    for (i, msg) in dialog_msgs.iter().enumerate().rev() {
+        if msg.get("role").and_then(|r| r.as_str()) == Some("user") {
+            user_seen += 1;
+            if user_seen == ACTIVE_ROUNDS {
+                active_start_idx = i;
+                break;
+            }
+        }
+    }
+
+    let active_msgs = dialog_msgs[active_start_idx..].to_vec();
+    let older_msgs = &dialog_msgs[..active_start_idx];
+
+    // 废弃层: 超过 SUMMARY_MAX_ROUNDS 轮的老消息直接丢弃
+    let mut summary_msgs: Vec<&Value> = Vec::new();
+    let mut summary_user_count = 0;
+    for msg in older_msgs.iter().rev() {
+        if msg.get("role").and_then(|r| r.as_str()) == Some("user") {
+            summary_user_count += 1;
+            if summary_user_count > SUMMARY_MAX_ROUNDS - ACTIVE_ROUNDS {
+                break;
+            }
+        }
+        summary_msgs.push(msg);
+    }
+    summary_msgs.reverse();
+
+    if summary_msgs.is_empty() {
+        // 没有需要摘要的消息
+        let mut result = system_msgs;
+        result.extend(active_msgs);
+        return result;
+    }
+
+    // 检查缓存: 如果摘要消息没变化，直接复用缓存
+    let msgs_hash = hash_messages(older_msgs);
+    if let Ok(cache) = CONTEXT_SUMMARY_CACHE.lock() {
+        if let Some((cached_hash, cached_summary)) = cache.get(conv_id) {
+            if *cached_hash == msgs_hash {
+                let mut result = system_msgs;
+                result.push(json!({
+                    "role": "system",
+                    "content": format!("[早期对话摘要]\n{}", cached_summary)
+                }));
+                result.extend(active_msgs);
+                log::info!("T-1411: context tiering cache hit for conv {}", conv_id);
+                return result;
+            }
+        }
+    }
+
+    // 构建待压缩内容
+    // T-1411-b: 检测用户否决模式，排除被否决的 assistant 回复
+    let rejection_patterns = ["不要", "换一个", "不行", "算了", "不用了", "不对", "错了", "重新", "别这样"];
+    let mut skip_indices: std::collections::HashSet<usize> = std::collections::HashSet::new();
+    for (i, msg) in summary_msgs.iter().enumerate() {
+        let role = msg.get("role").and_then(|r| r.as_str()).unwrap_or("");
+        if role == "user" {
+            let content = msg.get("content").and_then(|c| c.as_str()).unwrap_or("");
+            let is_rejection = rejection_patterns.iter().any(|p| content.contains(p));
+            if is_rejection && i > 0 {
+                // 跳过前一条 assistant 消息（被否决的方案）
+                let prev_role = summary_msgs[i - 1].get("role").and_then(|r| r.as_str()).unwrap_or("");
+                if prev_role == "assistant" {
+                    skip_indices.insert(i - 1);
+                    log::debug!("T-1411-b: skipping rejected proposal at index {}", i - 1);
+                }
+            }
+        }
+    }
+
+    let mut compress_input = String::new();
+    for (i, msg) in summary_msgs.iter().enumerate() {
+        if skip_indices.contains(&i) { continue; }
+        let role = msg.get("role").and_then(|r| r.as_str()).unwrap_or("?");
+        let content = msg.get("content").and_then(|c| c.as_str()).unwrap_or("");
+        // 每条消息最多取 300 字符
+        let snippet: String = content.chars().take(300).collect();
+        let ellipsis = if content.chars().count() > 300 { "..." } else { "" };
+        compress_input.push_str(&format!("[{}] {}{}\n", role, snippet, ellipsis));
+    }
+
+    // 调用牛马模型压缩
+    let summary = call_clerk_oneshot(
+        "你是一个对话历史压缩引擎。将用户提供的多轮对话记录压缩为简洁的摘要段落。\
+         保留：关键决策、用户偏好、事实性结论、待办承诺。\
+         丢弃：试探性讨论、被否决的方案、重复内容。\
+         输出纯文本，不超过 200 字。",
+        &compress_input,
+        300
+    ).await;
+
+    match summary {
+        Some(text) if !text.is_empty() => {
+            // 写入缓存
+            if let Ok(mut cache) = CONTEXT_SUMMARY_CACHE.lock() {
+                cache.insert(conv_id.to_string(), (msgs_hash, text.clone()));
+                // 缓存上限: 最多保留 20 个对话的摘要
+                if cache.len() > 20 {
+                    let oldest_key = cache.keys().next().cloned();
+                    if let Some(k) = oldest_key { cache.remove(&k); }
+                }
+            }
+
+            let discarded_count = dialog_msgs.len() - active_start_idx - summary_msgs.len();
+            log::info!(
+                "T-1411: compressed {} msgs into summary for conv {} (discarded {} oldest msgs)",
+                summary_msgs.len(), conv_id, discarded_count
+            );
+
+            let mut result = system_msgs;
+            result.push(json!({
+                "role": "system",
+                "content": format!("[早期对话摘要]\n{}", text)
+            }));
+            result.extend(active_msgs);
+            result
+        }
+        _ => {
+            // 压缩失败，降级: 保留系统消息 + 活跃消息，丢弃老消息
+            log::warn!("T-1411: clerk compression failed for conv {}, falling back to truncation", conv_id);
+            let mut result = system_msgs;
+            result.extend(active_msgs);
+            result
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════
+// T-1412-b: 即时纠错检测 (Correction Detection)
+// ═══════════════════════════════════════════════════════════
+
+/// 检测对话中用户是否纠正了 Bob 的错误认知，如果发现纠正：
+/// 1. 降低相关旧记忆的 confidence
+/// 2. 通过日志记录纠正事件（新记忆由正常的 session summarize 流程生成）
+fn detect_and_apply_corrections(messages: &[Value], conv_id: &str) {
+    let correction_patterns = [
+        "不对", "错了", "其实是", "应该是", "不是这样",
+        "你记错了", "不准确", "纠正一下", "更正",
+    ];
+
+    // 提取用户最后 3 条消息，检测是否包含纠正模式
+    let recent_user_msgs: Vec<&str> = messages.iter().rev()
+        .filter(|m| m.get("role").and_then(|r| r.as_str()) == Some("user"))
+        .take(3)
+        .filter_map(|m| m.get("content").and_then(|c| c.as_str()))
+        .collect();
+
+    let mut corrections_found = 0u32;
+    for user_msg in &recent_user_msgs {
+        let has_correction = correction_patterns.iter().any(|p| user_msg.contains(p));
+        if !has_correction { continue; }
+
+        corrections_found += 1;
+
+        // 提取纠正内容中的关键词（用于匹配旧记忆）
+        // 简易策略: 取纠正语句中的名词短语（>= 2 字的非停用词片段）
+        let keywords: Vec<&str> = user_msg.split(|c: char| !c.is_alphanumeric() && c < '\u{2E80}')
+            .filter(|w| w.len() >= 4 || w.chars().count() >= 2) // 2字中文或4字英文
+            .take(5)
+            .collect();
+
+        if keywords.is_empty() { continue; }
+
+        // 扫描 memory/sessions/ 目录中的 JSON 文件，查找匹配的旧记忆
+        let sessions_dir = super::get_data_dir().join("memory").join("sessions");
+        if !sessions_dir.exists() { continue; }
+
+        let entries: Vec<std::path::PathBuf> = match std::fs::read_dir(&sessions_dir) {
+            Ok(rd) => rd.flatten()
+                .map(|e| e.path())
+                .filter(|p| p.extension().map_or(false, |ext| ext == "json"))
+                .collect(),
+            Err(_) => continue,
+        };
+
+        for path in entries {
+            let content = match std::fs::read_to_string(&path) {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
+
+            // 检查 userTopics 是否包含纠正相关的关键词
+            let has_match = keywords.iter().any(|kw| content.contains(kw));
+            if !has_match { continue; }
+
+            // 降低该记忆的 confidence
+            if let Ok(mut session) = serde_json::from_str::<Value>(&content) {
+                let old_confidence = session.get("confidence")
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(0.8);
+
+                if let Some(obj) = session.as_object_mut() {
+                    obj.insert("confidence".to_string(), serde_json::json!(
+                        (old_confidence * 0.5).max(0.0) // 被纠正后 confidence 减半
+                    ));
+                    obj.insert("source".to_string(), serde_json::json!("corrected"));
+                    obj.insert("correctedBy".to_string(), serde_json::json!(conv_id));
+
+                    if let Ok(data) = serde_json::to_string_pretty(&session) {
+                        let _ = std::fs::write(&path, data);
+                        log::info!(
+                            "T-1412-b: corrected memory {:?} (confidence: {:.2} → {:.2})",
+                            path.file_name().unwrap_or_default(),
+                            old_confidence,
+                            old_confidence * 0.5
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    if corrections_found > 0 {
+        log::info!("T-1412-b: detected {} correction(s) in conv {}", corrections_found, conv_id);
+    }
+}
+
+// ═══════════════════════════════════════════════════════════
 // Tool Calling 引擎 (T-903/T-904)
 // ═══════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════
+// T-1431: 任务复杂度感知路由 (Complexity-Aware Routing)
+// ═══════════════════════════════════════════════════════════
+
+/// 复杂度等级
+#[derive(Debug, Clone, Copy)]
+enum Complexity {
+    /// 简单闲聊/查询 (score 0-30): 用默认模型
+    Simple,
+    /// 中等任务 (score 31-65): 用默认模型
+    Medium,
+    /// 复杂推理/多步任务 (score 66-100): 升级到 thinkModel
+    Complex,
+}
+
+/// 纯 Rust 复杂度估算器 — 不调用 LLM，零延迟
+/// 从用户最后一条消息中提取信号，综合评分
+fn estimate_complexity(messages: &[Value]) -> (Complexity, u32) {
+    // 提取用户最后一条消息
+    let last_user_msg = messages.iter().rev()
+        .find(|m| m.get("role").and_then(|r| r.as_str()) == Some("user"))
+        .and_then(|m| m.get("content").and_then(|c| c.as_str()))
+        .unwrap_or("");
+
+    if last_user_msg.is_empty() {
+        return (Complexity::Simple, 0);
+    }
+
+    let mut score: u32 = 0;
+
+    // 信号 1: 消息长度 (长消息通常意味着复杂需求)
+    let char_count = last_user_msg.chars().count();
+    score += match char_count {
+        0..=50 => 0,
+        51..=200 => 10,
+        201..=500 => 20,
+        _ => 30,
+    };
+
+    // 信号 2: 代码块存在 (技术任务)
+    if last_user_msg.contains("```") {
+        score += 15;
+    }
+
+    // 信号 3: 多步骤指示词
+    let multi_step_keywords = [
+        "然后", "接着", "首先", "其次", "最后",
+        "第一步", "第二步", "步骤",
+        "分析", "对比", "比较",
+        "帮我写", "帮我实现", "帮我设计",
+        "重构", "优化", "修改",
+        "then", "after that", "step by step",
+        "implement", "refactor", "design",
+    ];
+    let keyword_hits: u32 = multi_step_keywords.iter()
+        .filter(|kw| last_user_msg.contains(*kw))
+        .count() as u32;
+    score += (keyword_hits * 8).min(25);
+
+    // 信号 4: 推理/分析关键词
+    let reasoning_keywords = [
+        "为什么", "怎么办", "如何", "解释", "原因",
+        "推导", "证明", "评估", "权衡", "取舍",
+        "why", "how to", "explain", "evaluate",
+        "trade-off", "pros and cons",
+    ];
+    let reasoning_hits: u32 = reasoning_keywords.iter()
+        .filter(|kw| last_user_msg.contains(*kw))
+        .count() as u32;
+    score += (reasoning_hits * 5).min(15);
+
+    // 信号 5: 对话深度 (多轮对话意味着问题可能在深入)
+    let total_user_msgs = messages.iter()
+        .filter(|m| m.get("role").and_then(|r| r.as_str()) == Some("user"))
+        .count();
+    if total_user_msgs >= 5 {
+        score += 10;
+    }
+
+    score = score.min(100);
+
+    let complexity = match score {
+        0..=30 => Complexity::Simple,
+        31..=65 => Complexity::Medium,
+        _ => Complexity::Complex,
+    };
+
+    (complexity, score)
+}
 
 /// 内部通用流式处理 — 支持 Tool Calling 循环
 async fn stream_internal(
@@ -897,17 +1341,77 @@ async fn stream_internal(
     }
 
     // 使用 read_llm_config_for_model 返回的智能路由 base_url（已包含按 provider 自动匹配官方域名的逻辑）
-    let base_url = custom_base_url;
-
-    if base_url.is_empty() {
+    if custom_base_url.is_empty() {
         return json!({ "error": format!("未知的供应商: {}，请检查模型配置", provider) });
     }
 
-    let model_id = if model_override.is_empty() {
+    let mut model_id = if model_override.is_empty() {
         get_default_model(&provider)
     } else {
         model_override.clone()
     };
+
+    // ── T-1431: 复杂度感知路由 ──────────────────────────────
+    // 纯 Rust 启发式估算，零 LLM 开销。如果任务复杂且配置了 thinkModel，自动升级
+    let mut provider = provider;
+    let (complexity, complexity_score) = estimate_complexity(&messages);
+    let mut routed_to_think = false;
+    // T-1431-b: 配置开关 (默认 true)
+    let auto_upgrade_enabled = config.get("autoModelUpgrade")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
+    if auto_upgrade_enabled {
+        if let Complexity::Complex = complexity {
+            let think_model = config.get("thinkModel").and_then(|v| v.as_str()).unwrap_or("");
+            if !think_model.is_empty() && think_model != config_model_id {
+                let (tp, tk, tm, tb) = read_llm_config_for_model(think_model);
+                if !tk.is_empty() && !tb.is_empty() {
+                    log::info!(
+                        "T-1431: complexity={} (score={}), upgrading {} → {}",
+                        "Complex", complexity_score, model_id, tm
+                    );
+                    provider = tp;
+                    api_key = if tk == "__GCP_TOKEN__" {
+                        // 对 GCP thinkModel 也要动态换 token
+                        let cred_path = super::gcp_auth::get_gcp_credential_path();
+                        match super::gcp_auth::GcpTokenManager::from_file(&cred_path) {
+                            Ok(mgr) => match mgr.get_access_token().await {
+                                Ok(token) => token,
+                                Err(_) => api_key, // 降级回原 key
+                            },
+                            Err(_) => api_key,
+                        }
+                    } else {
+                        tk
+                    };
+                    model_id = tm.clone();
+                    routed_to_think = true;
+
+                    // T-1431-b: 通知前端模型已升级，前端可显示淡色提示
+                    let _ = app.emit("llm:model-routed", json!({
+                        "from": config_model_id,
+                        "to": tm,
+                        "reason": "complexity",
+                        "score": complexity_score,
+                        "conv_id": &conv_id_for_emit
+                    }));
+                }
+            }
+        }
+    }
+
+    // 重新计算 base_url（如果路由到 thinkModel，使用其 base_url）
+    let base_url = if routed_to_think {
+        let think_model = config.get("thinkModel").and_then(|v| v.as_str()).unwrap_or("");
+        let (_, _, _, tb) = read_llm_config_for_model(think_model);
+        tb
+    } else {
+        custom_base_url
+    };
+
+    if !routed_to_think {
+        log::debug!("T-1431: complexity score={}, using default model {}", complexity_score, model_id);
+    }
 
     // 2. 构建系统提示词 + 消息
     let has_system = messages.iter().any(|m| m.get("role").and_then(|r| r.as_str()) == Some("system"));
@@ -990,8 +1494,14 @@ async fn stream_internal(
     }
     full_messages.extend(messages);
 
+    // T-1411: 上下文分级压缩 — 如果对话过长，压缩旧消息为摘要
+    let tiering_conv_id = conv_id.clone().unwrap_or_default();
+    if !tiering_conv_id.is_empty() {
+        full_messages = apply_context_tiering(full_messages, &tiering_conv_id).await;
+    }
+
     // 3. 获取工具 Schema
-    let tool_schemas = super::tools::get_tool_schemas();
+    let tool_schemas = super::tools::get_tool_schemas_with_mcp().await;
 
     // 4. 构建 HTTP 客户端
     let url = format!("{}/chat/completions", base_url);
@@ -1021,6 +1531,9 @@ async fn stream_internal(
     let mut tool_calls_total: i64 = 0;
     let mut tool_failures_total: i64 = 0;
     let mut rounds_completed: usize = 0;
+
+    // ── T-1401: 循环熔断器 ──────────────────────────────────
+    let mut tool_tracker = super::tools::ToolCallTracker::new();
 
     for round in 0..=MAX_TOOL_ROUNDS {
         // 构建请求体
@@ -1386,30 +1899,64 @@ async fn stream_internal(
             }
             full_messages.push(assistant_msg);
 
-            // ── 并行执行工具 (tokio::join_all) ──────────────
+            // ── T-1401: 熔断器预检 + 并行执行工具 ──────────────
             let from_user_for_tools = from_user.clone();
-            let tool_futures: Vec<_> = pending_tool_calls.iter().map(|tc| {
+
+            // 先对每个工具做熔断检查，分为可执行和被熔断两组
+            let mut executable: Vec<(usize, Value)> = Vec::new(); // (index, parsed_args)
+            let mut circuit_broken: Vec<(usize, String)> = Vec::new(); // (index, error_msg)
+
+            for (i, tc) in pending_tool_calls.iter().enumerate() {
+                let args: Value = serde_json::from_str(&tc.arguments).unwrap_or(json!({}));
+                match tool_tracker.check(&tc.name, &args) {
+                    Ok(()) => executable.push((i, args)),
+                    Err(reason) => {
+                        log::warn!("Circuit breaker tripped for tool '{}': {}", tc.name, reason);
+                        circuit_broken.push((i, reason));
+                    }
+                }
+            }
+
+            // 构建可执行工具的 futures
+            let tool_futures: Vec<_> = executable.iter().map(|(i, args)| {
                 let app_clone = app.clone();
-                let name = tc.name.clone();
-                let args_str = tc.arguments.clone();
+                let name = pending_tool_calls[*i].name.clone();
+                let args = args.clone();
                 let fu = from_user_for_tools.clone();
+                let idx = *i;
                 async move {
-                    let args: Value = serde_json::from_str(&args_str).unwrap_or(json!({}));
                     let result = super::tools::execute_tool(&app_clone, &name, &args, fu.as_deref()).await;
-                    (name, result)
+                    (idx, name, args, result)
                 }
             }).collect();
 
-            // 发射所有 tool_start 事件
+            // 发射所有 tool_start 事件（包括被熔断的，前端需要显示状态）
             for tc in &pending_tool_calls {
                 let _ = app.emit("llm:chunk", json!({ "type": "tool_start", "name": tc.name, "conv_id": &conv_id_for_emit }));
             }
 
-            // 并行等待所有工具完成
-            let results = futures_util::future::join_all(tool_futures).await;
+            // 并行等待可执行的工具完成
+            let exec_results = futures_util::future::join_all(tool_futures).await;
+
+            // 合并执行结果和熔断结果，按原始索引排序
+            let mut all_results: Vec<(usize, String, Value)> = Vec::new();
+
+            for (idx, name, args, result) in exec_results {
+                // 记录到熔断追踪器
+                tool_tracker.record(&name, &args);
+                all_results.push((idx, name, result));
+            }
+
+            for (idx, reason) in circuit_broken {
+                let name = pending_tool_calls[idx].name.clone();
+                all_results.push((idx, name, json!({ "error": reason })));
+            }
+
+            // 按原始索引排序，确保 tool_call_id 对应正确
+            all_results.sort_by_key(|(idx, _, _)| *idx);
 
             // 按顺序推送结果到 messages
-            for (i, (name, result)) in results.into_iter().enumerate() {
+            for (i, (_, name, result)) in all_results.iter().enumerate() {
                 // 进化引擎: 检测工具失败
                 if result.get("error").is_some() {
                     tool_failures_total += 1;
@@ -1436,10 +1983,11 @@ async fn stream_internal(
             }
 
             // ── 进化引擎: 累计工具调用统计 ──────────────
-            tool_calls_total += pending_tool_calls.len() as i64;
+            tool_calls_total = tool_tracker.total() as i64;
             rounds_completed = round + 1;
 
-            log::info!("Tool Calling round {}: executed {} tools", round + 1, pending_tool_calls.len());
+            log::info!("Tool Calling round {}: executed {} tools (total: {}/{})",
+                round + 1, pending_tool_calls.len(), tool_tracker.total(), 15);
 
             // ── Restatement 注意力重申 (round >= 1) ──────────────────
             // 利用大模型 U 型注意力曲线：对上下文首尾关注度最高、中间最弱。
@@ -1537,6 +2085,16 @@ async fn stream_internal(
         });
     }
 
+    // ── T-1412-b: 即时纠错检测 (后台, 不阻塞) ────────────────
+    // 检测用户是否在对话中纠正了 Bob 的错误认知
+    {
+        let correction_msgs = full_messages.clone();
+        let correction_conv_id = conv_id_for_emit.clone();
+        tokio::spawn(async move {
+            detect_and_apply_corrections(&correction_msgs, &correction_conv_id);
+        });
+    }
+
     let mut pricing = json!({ "input": 0.0, "output": 0.0 });
     let pool = get_model_pool();
     if let Some(arr) = pool.as_array() {
@@ -1588,6 +2146,130 @@ pub async fn stream_vision(app: AppHandle, mut messages: Vec<Value>, image_base6
 
 /// 校验聊天所需的配置是否完整 (provider + model + apiKey)
 /// 不做网络探测，仅检查本地配置文件
+#[tauri::command]
+pub async fn system_auto_rename_conversation(
+    conversation_id: String,
+    db: tauri::State<'_, crate::db::DbState>
+) -> Result<String, String> {
+    let config = super::read_config();
+    let clerk_model = config.get("clerkModel").and_then(|v| v.as_str()).unwrap_or("");
+    if clerk_model.is_empty() {
+        return Err("No clerkModel configured".into());
+    }
+
+    let mut messages_json = Vec::new();
+    if let Ok(conn) = db.0.lock() {
+        let mut stmt = conn.prepare("SELECT role, content FROM messages WHERE conversation_id = ?1 ORDER BY created_at ASC LIMIT 4").map_err(|e| e.to_string())?;
+        let rows = stmt.query_map(rusqlite::params![conversation_id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        }).map_err(|e| e.to_string())?;
+        for row in rows {
+            if let Ok((role, content)) = row {
+                if !content.starts_with("__rename__") {
+                    messages_json.push(serde_json::json!({
+                        "role": role,
+                        "content": content
+                    }));
+                }
+            }
+        }
+    }
+
+    if messages_json.is_empty() {
+        return Err("No messages found".into());
+    }
+
+    messages_json.push(serde_json::json!({
+        "role": "user",
+        "content": "根据以上的对话内容，提取一个极简的标题（2-6个字，不要标点符号，不要书名号）。只输出标题内容即可。"
+    }));
+
+    let (provider, base_url, api_key, actual_model) = read_llm_config_for_model(clerk_model);
+    if base_url.is_empty() || api_key.is_empty() {
+        return Err("clerkModel config incomplete".into());
+    }
+
+    let url = if provider == "anthropic" {
+        format!("{}/messages", base_url)
+    } else {
+        format!("{}/chat/completions", base_url)
+    };
+
+    let body = serde_json::json!({
+        "model": actual_model,
+        "messages": messages_json,
+        "max_tokens": 20,
+        "temperature": 0.1
+    });
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let final_api_key = if provider == "google" {
+        let cred_path = crate::gcp_auth::get_gcp_credential_path();
+        match crate::gcp_auth::GcpTokenManager::from_file(&cred_path) {
+            Ok(manager) => match manager.get_access_token().await {
+                Ok(token) => token,
+                Err(e) => return Err(format!("GCP token fetch failed: {}", e)),
+            },
+            Err(e) => return Err(format!("GCP cred load failed: {}", e)),
+        }
+    } else {
+        api_key
+    };
+
+    let req = client.post(&url).header("Content-Type", "application/json");
+    let req = if provider == "anthropic" {
+        req.header("x-api-key", final_api_key)
+           .header("anthropic-version", "2023-06-01")
+    } else {
+        req.header("Authorization", format!("Bearer {}", final_api_key))
+    };
+
+    let resp = req.json(&body).send().await.map_err(|e| e.to_string())?;
+
+    if !resp.status().is_success() {
+        return Err(format!("API error: {}", resp.status()));
+    }
+
+    let resp_json: Value = resp.json().await.map_err(|e| e.to_string())?;
+    
+    let mut title = if provider == "anthropic" {
+        resp_json.get("content")
+            .and_then(|c| c.as_array())
+            .and_then(|c| c.first())
+            .and_then(|c| c.get("text"))
+            .and_then(|t| t.as_str())
+            .unwrap_or("")
+            .to_string()
+    } else {
+        resp_json.get("choices")
+            .and_then(|c| c.as_array())
+            .and_then(|c| c.first())
+            .and_then(|c| c.get("message"))
+            .and_then(|m| m.get("content"))
+            .and_then(|c| c.as_str())
+            .unwrap_or("")
+            .to_string()
+    };
+
+    title = title.replace("\"", "").replace("'", "").replace("《", "").replace("》", "").replace("\n", "").trim().to_string();
+    if title.is_empty() {
+        return Err("Generated title is empty".into());
+    }
+
+    if let Ok(conn) = db.0.lock() {
+        let _ = conn.execute(
+            "UPDATE conversations SET title = ?1, updated_at = ?2 WHERE id = ?3",
+            rusqlite::params![title, crate::now_ms(), conversation_id]
+        );
+    }
+
+    Ok(title)
+}
+
 #[tauri::command]
 pub fn system_validate_chat_ready() -> Value {
     let config = super::read_config();

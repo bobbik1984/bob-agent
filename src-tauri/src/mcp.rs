@@ -69,7 +69,16 @@ impl McpManager {
         log::info!("[MCP] Starting server '{}': {} {:?}", name, config.command, config.args);
 
         // 构建子进程
-        let mut cmd = Command::new(&config.command);
+        let actual_command = if cfg!(target_os = "windows") {
+            match config.command.as_str() {
+                "npx" => "npx.cmd".to_string(),
+                "npm" => "npm.cmd".to_string(),
+                _ => config.command.clone(),
+            }
+        } else {
+            config.command.clone()
+        };
+        let mut cmd = Command::new(&actual_command);
         cmd.args(&config.args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -271,8 +280,8 @@ impl McpManager {
             instance.stdin_tx.send(msg).await.map_err(|e| format!("Failed to send to stdin: {}", e))?;
         }
 
-        // 等待响应（10 秒超时）
-        match tokio::time::timeout(std::time::Duration::from_secs(10), rx).await {
+        // 等待响应（60 秒超时，预留 npx 安装时间）
+        match tokio::time::timeout(std::time::Duration::from_secs(60), rx).await {
             Ok(Ok(response)) => Ok(response),
             Ok(Err(_)) => Err(format!("MCP server '{}' response channel closed", server_name)),
             Err(_) => {
@@ -282,7 +291,7 @@ impl McpManager {
                     let mut pending = instance.pending.lock().await;
                     pending.remove(&id);
                 }
-                Err(format!("MCP server '{}' request timed out (10s)", server_name))
+                Err(format!("MCP server '{}' request timed out (60s)", server_name))
             }
         }
     }

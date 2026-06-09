@@ -161,7 +161,11 @@ pub async fn start_scheduler(app: AppHandle) {
             }
         };
 
+        // ── 标准 Cron 任务（排除 @daily_startup，它们由 Daily Routine 管理）──
         for (id, title, cron_expr, prompt) in &jobs {
+            if cron_expr == "@daily_startup" {
+                continue; // 跳过，由 run_daily_routine 统一调度
+            }
             if matches_cron(cron_expr) {
                 log::info!("Scheduler: cron matched for job '{}' ({})", title, id);
                 execute_cron_job(&app, id, title, prompt).await;
@@ -178,16 +182,141 @@ pub async fn start_scheduler(app: AppHandle) {
         // T-1307: 每轮 tick 也检查即将到期的待办
         check_upcoming_todos(&app, &db_path);
 
-        // ── 进化引擎: 防休眠补偿做梦 ──────────────────────
-        // 不依赖固定 Cron，而是检查距离上次做梦是否超过 24 小时。
-        // 即使笔记本合盖休眠一整夜，打开后第一个 tick 就会触发补梦。
+        // ── Daily Routine Pipeline ──────────────────────────
+        // 统一的每日例行流水线，取代原来零散的 check_and_dream 调用。
+        // 每天只执行一次，无论你何时打开电脑：
+        //   Phase 1 (Maintenance): 做梦 — 压缩记忆、清理知识库
+        //   Phase 2 (Agentic):     执行所有 @daily_startup 任务
+        //   Phase 3 (Commit):      记录时间戳防抖
         {
-            let dream_app = app.clone();
-            // 使用 tokio::spawn 在后台异步执行，不阻塞 scheduler 主循环
+            let routine_app = app.clone();
             tokio::spawn(async move {
-                crate::evolution::check_and_dream(dream_app).await;
+                run_daily_routine(routine_app).await;
             });
         }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════
+// Daily Routine Pipeline (每日例行流水线)
+// ═══════════════════════════════════════════════════════════
+
+/// 统一的每日例行流水线
+/// 每天只执行一次（基于日期防抖），无论用户何时打开电脑。
+/// 三阶段串行执行：
+///   1. Maintenance — Evolution Dream (记忆压缩 + 知识库清理)
+///   2. Agentic     — 执行所有 @daily_startup 任务 (日历同步、邮件检查等)
+///   3. Commit      — 记录今日已完成
+async fn run_daily_routine(app: AppHandle) {
+    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+    let db_path = super::get_data_dir().join("bob.db");
+
+    // ── 防抖判定：检查今天是否已经执行过 ──
+    {
+        let conn = match rusqlite::Connection::open(&db_path) {
+            Ok(c) => c,
+            Err(_) => return,
+        };
+        // 确保 settings 表存在
+        let _ = conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)"
+        );
+        let last_routine_date: String = conn.query_row(
+            "SELECT value FROM settings WHERE key = 'last_routine_date'",
+            [],
+            |row| row.get(0),
+        ).unwrap_or_default();
+
+        if last_routine_date == today {
+            return; // 今天已经跑过了，跳过
+        }
+    }
+
+    log::info!("[DailyRoutine] ══ Pipeline started for {} ══", today);
+    write_scheduler_audit(&format!("DAILY_ROUTINE started for {}", today));
+
+    // ── Phase 1: Maintenance — Evolution Dream ──
+    log::info!("[DailyRoutine] Phase 1: Maintenance (Evolution Dream)");
+    crate::evolution::check_and_dream(app.clone()).await;
+    log::info!("[DailyRoutine] Phase 1: Complete");
+
+    // ── Phase 2: Agentic — 执行所有 @daily_startup 任务 ──
+    log::info!("[DailyRoutine] Phase 2: Agentic (@daily_startup jobs)");
+    {
+        let conn = match rusqlite::Connection::open(&db_path) {
+            Ok(c) => c,
+            Err(e) => {
+                log::warn!("[DailyRoutine] Phase 2 skipped (DB error: {})", e);
+                // 即使 Phase 2 失败，也要标记今天已执行，避免无限重试
+                commit_routine_date(&db_path, &today);
+                return;
+            }
+        };
+        let startup_jobs = match load_daily_startup_jobs(&conn) {
+            Ok(j) => j,
+            Err(e) => {
+                log::warn!("[DailyRoutine] Failed to load @daily_startup jobs: {}", e);
+                vec![]
+            }
+        };
+
+        if startup_jobs.is_empty() {
+            log::info!("[DailyRoutine] Phase 2: No @daily_startup jobs configured, skipping");
+        } else {
+            log::info!("[DailyRoutine] Phase 2: Executing {} @daily_startup job(s)", startup_jobs.len());
+            for (id, title, _cron_expr, prompt) in &startup_jobs {
+                log::info!("[DailyRoutine]   → Running '{}' ({})", title, id);
+                execute_cron_job(&app, id, title, prompt).await;
+
+                // 更新 last_run
+                let now = super::now_ms();
+                let _ = conn.execute(
+                    "UPDATE cron_jobs SET last_run = ?1 WHERE id = ?2",
+                    params![now, id],
+                );
+            }
+        }
+    }
+    log::info!("[DailyRoutine] Phase 2: Complete");
+
+    // ── Phase 3: Commit — 记录今日已完成 ──
+    commit_routine_date(&db_path, &today);
+
+    log::info!("[DailyRoutine] ══ Pipeline completed for {} ══", today);
+    write_scheduler_audit(&format!("DAILY_ROUTINE completed for {}", today));
+
+    // 发射前端事件，通知 UI 流水线已完成
+    let _ = app.emit("daily-routine:completed", json!({
+        "date": today,
+        "timestamp": super::now_ms(),
+    }));
+}
+
+/// 从 DB 加载所有 enabled=1 且 cron_expr='@daily_startup' 的任务
+fn load_daily_startup_jobs(conn: &rusqlite::Connection) -> Result<Vec<(String, String, String, String)>, String> {
+    let mut stmt = conn.prepare(
+        "SELECT id, title, cron_expr, prompt_template FROM cron_jobs WHERE enabled = 1 AND cron_expr = '@daily_startup'"
+    ).map_err(|e| format!("{}", e))?;
+
+    let rows = stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, String>(3)?,
+        ))
+    }).map_err(|e| format!("{}", e))?;
+
+    Ok(rows.filter_map(|r| r.ok()).collect())
+}
+
+/// 将今日日期写入 settings 表，标记 Daily Routine 已完成
+fn commit_routine_date(db_path: &std::path::Path, date: &str) {
+    if let Ok(conn) = rusqlite::Connection::open(db_path) {
+        let _ = conn.execute(
+            "INSERT OR REPLACE INTO settings (key, value) VALUES ('last_routine_date', ?1)",
+            params![date],
+        );
     }
 }
 
@@ -480,9 +609,10 @@ pub async fn system_list_cron_jobs() -> Value {
 /// 添加新 cron 任务
 #[tauri::command]
 pub async fn system_add_cron_job(title: String, cron_expr: String, prompt: String) -> Value {
-    // 基础校验
-    if cron_expr.trim().split_whitespace().count() != 5 {
-        return json!({ "ok": false, "error": "cron 表达式必须包含 5 个字段 (分 时 日 月 周)" });
+    // 基础校验：允许标准 5 段式 cron 或特殊的 @daily_startup
+    let trimmed = cron_expr.trim();
+    if trimmed != "@daily_startup" && trimmed.split_whitespace().count() != 5 {
+        return json!({ "ok": false, "error": "cron 表达式必须是 '@daily_startup' 或标准 5 字段格式 (分 时 日 月 周)" });
     }
     if prompt.trim().is_empty() {
         return json!({ "ok": false, "error": "prompt 不能为空" });

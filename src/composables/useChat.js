@@ -218,6 +218,14 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
           null
         );
 
+        if (messages.value.filter(m => m.role === 'user').length === 1) {
+          window.electronAPI.autoRenameConversation(props.conversationId).then(title => {
+            if (title) {
+              emit('update-title', props.conversationId, title);
+            }
+          }).catch(console.error);
+        }
+
         // T-1306: 将提取的行动项推入消息列表作为交互卡片
         for (const item of extractedItems) {
           messages.value.push({

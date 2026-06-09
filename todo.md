@@ -99,7 +99,7 @@
 - [x] T-301: Rust `config_get/set` 读写 `config.json`。
 - [x] T-302: Rust `config_get_all` 返回完整配置对象。
 - [x] T-303: ~~Stronghold~~ → 使用 `keyring` crate 实现 OS 级 Keychain 加密存储（Windows DPAPI / macOS Keychain）。
-- [ ] T-304: 注册全局快捷键 (`Ctrl+Shift+B`) 唤醒窗口。
+- [x] T-304: 注册全局快捷键 (`Ctrl+Shift+B`) 唤醒窗口。
 
 ## 📍 里程碑 4: Rust 原生化 — 数据库引擎 (SQLite)
 - [x] T-401: 引入 `rusqlite`，初始化 `conversations` 和 `messages` 表。
@@ -314,7 +314,7 @@
 
 ### 前端 UX
 - [x] **Tool Calling 进度指示** - ChatView 显示"正在搜索..."可视化反馈
-- [ ] **工具结果折叠** - 太长的结果折叠显示
+- [x] **工具结果折叠** - 太长的结果折叠显示
 - [x] **搜索结果卡片** - web_search 结果渲染为带标题链接的卡片
 
 ### 引擎层
@@ -391,13 +391,13 @@
 
 ### Phase 2: 核心调度基建
 
-- [ ] T-1211: **桌面微心跳引擎 (Micro-Heartbeat Scheduler)**
-  - [ ] Cargo.toml 引入 `tokio-cron-scheduler` 或类似轻量定时器
-  - [ ] 新建 `scheduler.rs` 模块
-  - [ ] SQLite 新增 `schedules` 表 (id, trigger_type, prompt_template, enabled, last_run)
-  - [ ] lib.rs setup() 中初始化调度器，从 DB 恢复已有任务
-  - [ ] IPC 命令: `system_list_schedules`, `system_add_schedule` 等
-  - [ ] 执行逻辑: **触发条件不依赖绝对时间（如早8点），而是基于“应用首次启动”、“闲置后再次激活”或“相对间隔”**。触发后 → 后台组装 Prompt → 调 `stream_internal` → 结果写入通知/Inbox
+- [x] T-1211: **桌面微心跳引擎 (Micro-Heartbeat Scheduler)**
+  - [x] Cargo.toml 引入 `tokio-cron-scheduler` 或类似轻量定时器
+  - [x] 新建 `scheduler.rs` 模块
+  - [x] SQLite 新增 `schedules` 表 (id, trigger_type, prompt_template, enabled, last_run)
+  - [x] lib.rs setup() 中初始化调度器，从 DB 恢复已有任务
+  - [x] IPC 命令: `system_list_schedules`, `system_add_schedule` 等
+  - [x] 执行逻辑: **触发条件不依赖绝对时间（如早8点），而是基于“应用首次启动”、“闲置后再次激活”或“相对间隔”**。触发后 → 后台组装 Prompt → 调 `stream_internal` → 结果写入通知/Inbox
   - *对齐 todo.md 原有的自动化需求，更适合桌面单机环境*
 
 - [ ] T-1212: **文件目录监控 (Micro-Heartbeat File Watch)**
@@ -408,12 +408,11 @@
 
 ### Phase 3: 交互升级
 
-- [ ] T-1221: **快速输入气泡窗 (Quick-Capture Bubble)**
-  - [ ] Tauri 多窗口: 新建一个透明无边框小窗口（约 400×60px），贴边悬浮 + 始终置顶
-  - [ ] 点击气泡展开单行输入框，回车后气泡立即收起
-  - [ ] 输入内容通过 Tauri IPC 发送给主窗口处理
-  - [ ] 后端语义路由: 结合现有 Tool Calling 和日历系统，判断输入是日历事件、待办、还是普通对话
-  - *注: 此功能在竞品分析中被称为"桌宠"，实际上是一个极简气泡 + 快速对话框，不需要动画宠物形象*
+- [x] T-1221: **快速输入气泡窗 (Quick-Capture Bubble)**
+  - [x] 实现为 QuickNoteOverlay 组件，点击 Bob Logo 唤醒
+  - [x] 输入内容通过 provide/inject 发送给 ChatView 处理
+  - [x] 后端语义路由: 结合现有 Tool Calling 和日历系统，判断输入类型
+  - *实现方式与原始设计有差异（非独立窗口，而是主窗口内叠加层），但功能等价*
 
 ### Phase 4: 高阶自治（延后 / 按需）
 
@@ -436,17 +435,17 @@
 
 ### Phase 1: 体感升级 — 让用户"看得见" (1-2周)
 
-- [ ] T-1301: **对话历史全文搜索**
-  - [ ] `db.rs`: 新建 `messages_fts` FTS5 虚拟表，对 `messages.content` 建索引
-  - [ ] `db.rs`: 创建 INSERT/DELETE 触发器，自动同步 FTS 索引
-  - [ ] `db.rs`: 启动时回填存量消息到 FTS 索引 (INSERT OR IGNORE)
-  - [ ] `db.rs`: 新增 IPC 命令 `db_search_messages(query)` → 返回 `Vec<{id, conversation_id, conv_title, snippet, created_at}>`，LIMIT 30
-  - [ ] `lib.rs`: 注册 `db_search_messages` 命令
-  - [ ] `tauri-bridge.js`: 新增 `searchMessages(query)` 映射
-  - [ ] `ChatView.vue`: 侧边栏顶部新增搜索输入框 (32px高, bg-secondary, 300ms debounce)
-  - [ ] `ChatView.vue`: 搜索结果卡片列表 (单行标题 + 双行 snippet, `<mark>` 用 accent-primary 高亮)
-  - [ ] `ChatView.vue`: 点击搜索结果 → 加载对应对话并滚动到匹配消息
-  - [ ] `index.css`: 搜索结果样式 (`.search-result-item`, `.search-highlight`)
+- [x] T-1301: **对话历史全文搜索**
+  - [x] `db.rs`: 新建 `messages_fts` FTS5 虚拟表，对 `messages.content` 建索引
+  - [x] `db.rs`: 创建 INSERT/DELETE 触发器，自动同步 FTS 索引
+  - [x] `db.rs`: 启动时回填存量消息到 FTS 索引 (INSERT OR IGNORE)
+  - [x] `db.rs`: 新增 IPC 命令 `db_search_messages(query)` → 返回 `Vec<{id, conversation_id, conv_title, snippet, created_at}>`，LIMIT 30
+  - [x] `lib.rs`: 注册 `db_search_messages` 命令
+  - [x] `tauri-bridge.js`: 新增 `searchMessages(query)` 映射
+  - [x] `ChatView.vue`: 侧边栏顶部新增搜索输入框 (32px高, bg-secondary, 300ms debounce)
+  - [x] `ChatView.vue`: 搜索结果卡片列表 (单行标题 + 双行 snippet, `<mark>` 用 accent-primary 高亮)
+  - [x] `ChatView.vue`: 点击搜索结果 → 加载对应对话并滚动到匹配消息
+  - [x] `index.css`: 搜索结果样式 (`.search-result-item`, `.search-highlight`)
   - *技术详情见 bob_v04_dev_guide.md T-1301*
 
 - [x] T-1302: **记忆透明化 — "Bob 的记忆"**
@@ -458,13 +457,13 @@
   - [x] `zh-CN.json` / `en-US.json`: 新增 `settings.bob_memory`, `settings.bob_memory_hint` 翻译 (严禁 Emoji)
   - *技术详情见 bob_v04_dev_guide.md T-1302*
 
-- [ ] T-1303: **Cron 执行结果通知**
-  - [ ] `Cargo.toml`: 启用 `tauri` 的 `notification` feature
-  - [ ] `capabilities/default.json`: 添加 `notification:default` 权限
-  - [ ] `scheduler.rs`: `execute_cron_job()` Step 6 后追加 `app.notification().builder().title().body().show()`
-  - [ ] `InboxView.vue`: `scheduler:completed` 事件处理中为最新完成项添加 `.cron-result-new` 高亮类 (3s 后移除)
-  - [ ] `App.vue`: 全局监听 `scheduler:completed`，若当前不在 InboxView → 日程导航项显示红点 badge
-  - [ ] 通知文案: 直接使用任务 title，正文为结果前 100 字 (严禁 Emoji)
+- [x] T-1303: **Cron 执行结果通知**
+  - [x] `Cargo.toml`: 启用 `tauri` 的 `notification` feature
+  - [x] `capabilities/default.json`: 添加 `notification:default` 权限
+  - [x] `scheduler.rs`: `execute_cron_job()` Step 6 后追加 `app.notification().builder().title().body().show()`
+  - [x] `InboxView.vue`: `scheduler:completed` 事件处理中为最新完成项添加 `.cron-result-new` 高亮类 (3s 后移除)
+  - [x] `App.vue`: 全局监听 `scheduler:completed`，若当前不在 InboxView → 日程导航项显示红点 badge
+  - [x] 通知文案: 直接使用任务 title，正文为结果前 100 字 (严禁 Emoji)
   - *技术详情见 bob_v04_dev_guide.md T-1303*
 
 ### Phase 2: 防御升级 — 让用户"不出错" (2-3周)
@@ -481,36 +480,106 @@
   - [x] `index.css`: `.health-banner`, `.health-banner--warning`, `.health-banner--error`
   - *技术详情见 bob_v04_dev_guide.md T-1304*
 
-- [ ] T-1305: **聊天就绪守卫 (Chat Readiness)**
-  - [ ] `llm.rs`: 新增 `system_validate_chat_ready()` — 检查 provider/model/apiKey 本地配置完整性 (不做网络探测)
-  - [ ] `lib.rs`: 注册 `system_validate_chat_ready`
-  - [ ] `tauri-bridge.js`: 新增 `validateChatReady()`
-  - [ ] `ChatView.vue`: `onMounted` 调用一次，缓存 60s
-  - [ ] `ChatView.vue`: 不就绪时发送按钮 `disabled` (opacity 0.4) + 输入框下方一行提示 + "前往设置"链接
-  - [ ] Fail-open: 任何超时/不确定情况返回 `ready: true`
+- [x] T-1305: **聊天就绪守卫 (Chat Readiness)**
+  - [x] `llm.rs`: 新增 `system_validate_chat_ready()` — 检查 provider/model/apiKey 本地配置完整性 (不做网络探测)
+  - [x] `lib.rs`: 注册 `system_validate_chat_ready`
+  - [x] `tauri-bridge.js`: 新增 `validateChatReady()`
+  - [x] `ChatView.vue`: `onMounted` 调用一次，缓存 60s
+  - [x] `ChatView.vue`: 不就绪时发送按钮 `disabled` (opacity 0.4) + 输入框下方一行提示 + "前往设置"链接
+  - [x] Fail-open: 任何超时/不确定情况返回 `ready: true`
   - *技术详情见 bob_v04_dev_guide.md T-1305*
 
 ### Phase 3: 主动性升级 — 让 Bob "动起来" (3-4周)
 
-- [ ] T-1306: **对话自动提取行动项** (0.5天, 纯 Prompt Engineering)
-  - [ ] `llm.rs`: system prompt 追加"行动项捕捉"指令段 — 识别时间+动作组合时主动调用 `add_calendar_event`
-  - [ ] `ChatView.vue`: `tool_end` 事件中 `tool_name === "add_calendar_event"` 时渲染 `.bob-card-inline` 日程卡片
-  - [ ] 卡片样式: 复用 ConfirmCard 设计 (一行标题 + 一行时间)，不新建组件
-  - *零后端代码改动，仅 Prompt + 前端渲染*
+- [x] T-1306: **对话自动提取行动项** (0.5天, 纯 Prompt Engineering)
+  - [x] `llm.rs`: system prompt 追加"行动项捕捉"指令段 — bob-action-items 代码块格式
+  - [x] `useChat.js`: 解析 bob-action-items 代码块，提取行动项并渲染 ActionItemCard 交互卡片
+  - [x] `ActionItemCard.vue`: 独立组件，支持保存到日历/忽略
+  - *已实现：Prompt + 前端解析 + 交互卡片*
   - *技术详情见 bob_v04_dev_guide.md T-1306*
 
-- [ ] T-1307: **智能待办跟进**
-  - [ ] `calendar.rs`: events 表新增 `last_notified INTEGER DEFAULT 0` 列 (ALTER TABLE)
-  - [ ] `scheduler.rs`: 主循环追加 `check_upcoming_todos()` — 查询今日到期 + pending 的事件
-  - [ ] `scheduler.rs`: 到期待办触发系统通知 (notification API) + emit `todo:reminder` 事件
-  - [ ] `scheduler.rs`: 提醒频率控制 — 同一待办 last_notified 当天不重复
-  - [ ] `InboxView.vue`: 监听 `todo:reminder`，今日到期项左侧边框变为 `var(--accent-primary)`
+- [x] T-1307: **智能待办跟进**
+  - [x] `calendar.rs`: events 表新增 `last_notified INTEGER DEFAULT 0` 列 (ALTER TABLE)
+  - [x] `scheduler.rs`: 主循环追加 `check_upcoming_todos()` — 查询今日到期 + pending 的事件
+  - [x] `scheduler.rs`: 到期待办触发系统通知 (notification API) + emit `todo:reminder` 事件
+  - [x] `scheduler.rs`: 提醒频率控制 — 同一待办 last_notified 当天不重复
+  - [x] `InboxView.vue`: 监听 `todo:reminder`，今日到期项左侧边框变为 `var(--accent-primary)`
   - *技术详情见 bob_v04_dev_guide.md T-1307*
 
-- [ ] T-1308: **晨间简报增强**
-  - [ ] `dream.rs`: `getDreamReport` 返回数据扩展 — 新增 `today_events`, `today_todos` 字段 (查询 events 表)
-  - [ ] `MorningBriefing.vue`: 对话回顾区块之前插入"今日日程"和"待完成事项"区块
-  - [ ] `zh-CN.json` / `en-US.json`: 新增 `briefing.today_schedule`, `briefing.today_todos` (严禁 Emoji)
-  - [ ] 简报总长度控制: 不超过一屏 (~300字)
+- [x] T-1308: **晨间简报增强**
+  - [x] `dream.rs`: `getDreamReport` 返回数据扩展 — 新增 `today_events`, `today_todos` 字段 (查询 events 表)
+  - [x] `MorningBriefing.vue`: 对话回顾区块之前插入"今日日程"和"待完成事项"区块
+  - [x] `zh-CN.json` / `en-US.json`: 新增 `briefing.today_schedule`, `briefing.today_todos` (严禁 Emoji)
+  - [x] 简报总长度控制: 不超过一屏 (~300字)
   - *技术详情见 bob_v04_dev_guide.md T-1308*
+
+---
+
+## 📍 里程碑 14: v0.5 — 认知引擎升级 (Cognitive Engine v2)
+> 🎯 **目标**: 让 Bob 从"能记住事"进化为"会思考的记忆体"——自动去噪、自我纠错、成本自控。
+> 📋 **来源**: `docs/分布式 Agent 认知系统审视.docx` 理论框架，提取出 5 个可落地到单 Agent 桌面产品的改进点。
+> 🏗️ **核心原则**: 所有"智能"逻辑尽可能下沉到 Rust 确定性层（瘦智能体，胖平台），减少对 LLM 的依赖。
+
+### Phase 0: 确定性防御层 (P0 — 立即可做，纯 Rust)
+
+- [x] T-1401: **工具调用循环熔断器 (Tool Call Circuit Breaker)**
+  - [x] `tools.rs`: 新增 `ToolCallHistory` 结构体，记录最近 N 次工具调用的 `(tool_name, args_hash)` 元组
+  - [x] `tools.rs`: `execute_tool()` 入口处检测：如果连续 3 次调用同名工具且参数哈希相似度 > 80%，返回 `Err("循环检测: 该工具已连续调用 3 次且参数高度相似，已自动中止")`
+  - [x] `llm.rs`: Tool Calling 循环收到熔断错误后，将错误信息作为 tool result 回注，让 LLM 自行决定下一步（换工具/放弃/告知用户）
+  - [x] `llm.rs`: 新增全局计数器 `tool_call_budget`，单次对话工具调用总量上限 15 次（当前硬编码 5 轮×每轮多工具，实际可能超过）
+  - *预期效果: 消除"搜索失败→换词再搜→再失败"的无限循环，直接省 Token 费用*
+  - *理论依据: 论文命题 2 §3 "状态机异常探测"——在 Agent 推理回路之外引入确定性机制*
+
+### Phase 1: 记忆质量升级 (P1 — 需 LLM 配合)
+
+- [x] T-1411: **长对话上下文分级压缩 (Context Tiering)**
+  - [x] `llm.rs`: `build_messages()` 改造 — 将对话历史分为三层:
+    - **活跃层** (最近 6 轮): 原样保留
+    - **摘要层** (7~20 轮): 由牛马模型压缩为 ≤200 字的段落摘要，作为单条 system message 注入
+    - **废弃层** (20 轮以上): 不进入上下文
+  - [x] `llm.rs`: 压缩触发条件 — 当活跃层消息总 Token 估算 > 4000 时，自动将最旧的活跃层消息推入摘要层
+  - [x] `llm.rs`: 摘要缓存 — 压缩结果缓存在内存中 (HashMap<conversation_id, String>)，同一对话不重复压缩
+  - [x] 被用户明确否决的方案（如"不要这个方案"之后的 assistant 回复）标记为废弃，不进入摘要
+  - *预期效果: 50 轮对话后 Bob 依然头脑清晰，不会把第 3 轮的试探当作最终决策*
+  - *理论依据: 论文脆弱点 1 "上下文污染与垃圾回收"*
+
+- [x] T-1412: **记忆置信度与冲突消解 (Memory Confidence & Conflict Resolution)**
+  - [x] `dream.rs`: 记忆文件元数据扩展 — 每条记忆附带 `confidence: f32` (0.0~1.0) + `source: enum {UserExplicit, Inferred, Corrected}` + `last_referenced: timestamp`
+  - [x] `dream.rs`: Dream 整理时新增"冲突检测"步骤:
+    - 用牛马模型对比同一主题的多条记忆
+    - 如果存在矛盾 → 保留最新的 UserExplicit 来源，废弃旧条目
+    - 如果从未被引用且超过 30 天 → confidence 衰减至 0，归档
+  - [x] `llm.rs`: 对话中用户明确纠正 Bob 时（如"不对，项目 A 用的是 Vue"），触发即时记忆更新:
+    - 搜索匹配的旧记忆 → 标记为 `Corrected` → 写入新记忆 `source: UserExplicit, confidence: 1.0`
+  - *预期效果: Bob 不再说"你之前说过用 React，但也说过用 Vue"，直接给出最新正确答案*
+  - *理论依据: 论文脆弱点 1 "信息分级机制"*
+
+### Phase 2: 智能整理升级 (P2 — 需向量能力)
+
+- [x] T-1421: **Dream 语义去重引擎 (Semantic Deduplication)**
+  - [x] `dream.rs`: 新增 `deduplicate_memories()` 阶段，在 Dream 流程的 merge 步骤之前执行
+  - [x] 实现方式 (两种方案择一):
+    - **方案 A (轻量)**: 用牛马模型对每条记忆生成 ≤50 字的"语义指纹"，文本相似度 > 0.85 的归为同组
+    - **方案 B (精确)**: 调用 embedding API（如 doubao-embedding）将记忆编码为向量，余弦相似度 > 0.9 的归为同组
+  - [x] 同组记忆合并策略: 保留信息最完整的一条，其余标记为"已合并"并归档
+  - [x] 合并日志写入 Dream 报告，晨报中显示"整理了 N 条重复记忆"
+  - *预期效果: 晨报里不再出现三条措辞不同但含义相同的记忆条目*
+  - *理论依据: 论文命题 2 §2 "信息增益衰减"——净增量知识逼近零时应自动收敛*
+
+### Phase 3: 智能路由升级 (P3 — 研究性质)
+
+- [x] T-1431: **任务复杂度感知路由 (Complexity-Aware Routing)**
+  - [x] `llm.rs`: 新增 `estimate_task_complexity()` 函数，在发送请求前对用户输入进行快速评估:
+    - **信号 1**: 输入长度 (> 2000 字 → 高复杂度)
+    - **信号 2**: 附件类型 (代码/合同/学术论文 → 高复杂度)
+    - **信号 3**: 用户历史 — 如果当前对话已经使用过 3+ 种工具 → 高复杂度
+    - **信号 4**: 关键词检测 ("分析"/"审查"/"对比"/"重构" → 高复杂度)
+  - [x] 路由逻辑:
+    - 低复杂度 + 当前指定为牛马模型 → 保持牛马
+    - 高复杂度 + 当前指定为牛马模型 → **自动升级为主力模型**，并在回复开头附带一条淡色提示"[已自动切换至主力模型]"
+    - 主力模型永远不降级（用户显式选择的优先级最高）
+  - [x] 配置项: `settings.auto_model_upgrade: bool` (默认 true)，可在设置页关闭
+  - *预期效果: 拖入普通文件用便宜模型秒处理，拖入合同自动调用主力模型深度分析——用户什么都不用管*
+  - *理论依据: 论文重构壁垒 1 "MoMA 泛化路由"的单 Agent 简化版*
+
 

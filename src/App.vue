@@ -238,7 +238,7 @@ import InboxView from './views/InboxView.vue';
 import SettingsView from './views/SettingsView.vue';
 import SetupWizard from './components/SetupWizard.vue';
 import QuickNoteOverlay from './components/QuickNoteOverlay.vue';
-import { Inbox, Settings, Plus, X, Sun, Moon, ChevronLeft, ChevronRight, ChevronDown, Search, MessageSquare, CalendarDays, Brain, Plug, FolderOpen, Palette, Info } from 'lucide-vue-next';
+import { Inbox, Settings, Plus, X, Sun, Moon, ChevronLeft, ChevronRight, ChevronDown, Search, MessageSquare, CalendarDays, Brain, Plug, FolderOpen, Palette, Info, Sunrise } from 'lucide-vue-next';
 import { useI18n } from 'vue-i18n';
 
 import { getCurrentWindow } from '@tauri-apps/api/window';
@@ -255,7 +255,7 @@ const { locale, t } = useI18n();
 const isSetupComplete = ref(false);
 const currentView = ref('chat');  // legacy — kept for backward compat during transition
 const activeDrawer = ref('chat');         // 'chat' | 'schedule' | 'settings'
-const activeSettingsPanel = ref('model'); // 'model' | 'connections' | 'workspace' | 'appearance' | 'about'
+const activeSettingsPanel = ref('model'); // 'model' | 'connections' | 'workspace' | 'daily_routine' | 'appearance' | 'about'
 const chatViewRef = ref(null);
 const quickNoteRef = ref(null);
 
@@ -378,6 +378,7 @@ const settingsNavItems = computed(() => [
   { id: 'model', icon: Brain, label: t('settings.nav_model') || '模型基础设置' },
   { id: 'connections', icon: Plug, label: t('settings.nav_connections') || '连接中心' },
   { id: 'workspace', icon: FolderOpen, label: t('settings.nav_workspace') || '工作间' },
+  { id: 'daily_routine', icon: Sunrise, label: t('settings.nav_daily_routine') || '每日工作' },
   { id: 'appearance', icon: Palette, label: t('settings.nav_appearance') || '外观与语言' },
   { id: 'about', icon: Info, label: t('settings.nav_about') || '关于' },
 ]);

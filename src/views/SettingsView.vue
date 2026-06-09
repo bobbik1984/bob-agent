@@ -29,6 +29,11 @@
           :config="config"
           @config-changed="onConfigChanged"
         />
+        <SettingsDailyRoutine
+          v-else-if="activePanel === 'daily_routine'"
+          :config="config"
+          @config-changed="onConfigChanged"
+        />
       </div>
     </div>
   </div>
@@ -42,6 +47,7 @@ import SettingsConnections from './settings/SettingsConnections.vue';
 import SettingsWorkspace from './settings/SettingsWorkspace.vue';
 import SettingsAppearance from './settings/SettingsAppearance.vue';
 import SettingsAbout from './settings/SettingsAbout.vue';
+import SettingsDailyRoutine from './settings/SettingsDailyRoutine.vue';
 
 const props = defineProps({
   activePanel: { type: String, default: 'model' }

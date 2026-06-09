@@ -86,7 +86,11 @@ pub fn system_summarize_session(app: tauri::AppHandle, conversation_id: String, 
             s
         }),
         "messageCount": messages.len(),
-        "compressed": false
+        "compressed": false,
+        // T-1412: 记忆置信度元数据
+        "confidence": 0.8,  // 自动提取的摘要初始置信度 0.8 (非用户显式确认)
+        "source": "inferred",  // inferred | user_explicit | corrected
+        "lastReferenced": super::now_ms()
     });
 
     // 写入 session 日志
@@ -104,8 +108,61 @@ pub fn system_summarize_session(app: tauri::AppHandle, conversation_id: String, 
 }
 
 // ═══════════════════════════════════════════════════════════
-// T-1003: 异步记忆压缩 (Dream V2)
+// T-1003 + T-1421: 异步记忆压缩 + 语义去重 (Dream V2)
 // ═══════════════════════════════════════════════════════════
+
+/// T-1421: 从摘要文本中提取关键词指纹（CJK 按句分词，Latin 按空格分词）
+fn extract_topic_fingerprint(text: &str) -> std::collections::HashSet<String> {
+    let mut keywords = std::collections::HashSet::new();
+    // 移除标点和特殊字符
+    let cleaned: String = text.chars()
+        .map(|c| if c.is_alphanumeric() || c > '\u{2E80}' || c == ' ' { c } else { ' ' })
+        .collect();
+
+    for word in cleaned.split_whitespace() {
+        let trimmed = word.trim();
+        if trimmed.len() >= 2 { // 至少 2 字符/字
+            keywords.insert(trimmed.to_lowercase());
+        }
+    }
+
+    // 对中文文本按 2-gram 切分（简易 bigram）
+    let chars: Vec<char> = text.chars()
+        .filter(|c| *c > '\u{2E80}')
+        .collect();
+    for window in chars.windows(2) {
+        keywords.insert(window.iter().collect::<String>());
+    }
+
+    keywords
+}
+
+/// T-1421: 计算两个关键词集合的 Jaccard 相似度
+fn jaccard_similarity(a: &std::collections::HashSet<String>, b: &std::collections::HashSet<String>) -> f64 {
+    if a.is_empty() || b.is_empty() { return 0.0; }
+    let intersection = a.intersection(b).count();
+    let union = a.union(b).count();
+    if union == 0 { return 0.0; }
+    intersection as f64 / union as f64
+}
+
+/// T-1421: 加载所有已压缩的 .md 文件的关键词指纹
+fn load_existing_fingerprints(dir: &std::path::Path) -> Vec<(String, std::collections::HashSet<String>)> {
+    let mut fingerprints = Vec::new();
+    if let Ok(rd) = fs::read_dir(dir) {
+        for entry in rd.flatten() {
+            let path = entry.path();
+            if path.extension().map_or(true, |ext| ext != "md") { continue; }
+            if let Ok(content) = fs::read_to_string(&path) {
+                let filename = path.file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                fingerprints.push((filename, extract_topic_fingerprint(&content)));
+            }
+        }
+    }
+    fingerprints
+}
 
 /// 后台异步压缩：用 Clerk 模型将 V1 的简易摘要升级为高质量 Markdown 总结
 /// 在 setup 阶段由 tokio::spawn 调用，不阻塞主线程
@@ -120,6 +177,12 @@ pub async fn compress_sessions_async(app: tauri::AppHandle) {
             .collect(),
         Err(_) => return,
     };
+
+    // T-1421: 加载已有的 md 摘要指纹（用于去重检测）
+    let mut existing_fps = load_existing_fingerprints(&sessions_dir);
+    // 同时检查冷存储目录
+    existing_fps.extend(load_existing_fingerprints(&get_cold_session_dir()));
+    let mut dedup_count = 0u32;
 
     for path in entries {
         let content = match fs::read_to_string(&path) {
@@ -155,6 +218,34 @@ pub async fn compress_sessions_async(app: tauri::AppHandle) {
             .unwrap_or("");
         let msg_count = session.get("messageCount").and_then(|v| v.as_u64()).unwrap_or(0);
         let conv_id = session.get("conversationId").and_then(|v| v.as_str()).unwrap_or("unknown");
+
+        // ── T-1421: 语义去重检测 ──────────────────────────
+        let current_fp = extract_topic_fingerprint(&format!("{} {}", topics, highlight));
+        let mut dup_found = false;
+        for (existing_name, existing_fp) in &existing_fps {
+            let sim = jaccard_similarity(&current_fp, existing_fp);
+            if sim > 0.6 {
+                log::info!(
+                    "T-1421: session {} deduplicated (similarity {:.2} with {})",
+                    conv_id, sim, existing_name
+                );
+                // 标记为已去重合并，不重复压缩
+                if let Ok(mut obj) = serde_json::from_str::<Value>(&content) {
+                    if let Some(map) = obj.as_object_mut() {
+                        map.insert("compressed".to_string(), json!(true));
+                        map.insert("dedup_merged".to_string(), json!(existing_name));
+                        if let Ok(data) = serde_json::to_string_pretty(&obj) {
+                            let _ = fs::write(&path, data);
+                        }
+                    }
+                }
+                dup_found = true;
+                dedup_count += 1;
+                break;
+            }
+        }
+        if dup_found { continue; }
+        // ── T-1421 END ──────────────────────────────────
 
         let compress_prompt = format!(
             "请用中文将以下对话摘要压缩为一段简洁的 Markdown 总结（3-5 句话），\
@@ -226,6 +317,13 @@ pub async fn compress_sessions_async(app: tauri::AppHandle) {
         );
         let _ = fs::write(&md_path, &md_content);
 
+        // T-1421: 将新压缩的文件指纹加入已有集合（供后续 session 去重参考）
+        let new_fp = extract_topic_fingerprint(&md_content);
+        let new_name = md_path.file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
+        existing_fps.push((new_name, new_fp));
+
         // 更新原 JSON 标记为已压缩
         if let Ok(mut obj) = serde_json::from_str::<Value>(&content) {
             if let Some(map) = obj.as_object_mut() {
@@ -241,6 +339,10 @@ pub async fn compress_sessions_async(app: tauri::AppHandle) {
 
         // 避免对 API 造成突发压力，每次压缩后等 1 秒
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    }
+
+    if dedup_count > 0 {
+        log::info!("T-1421: deduplicated {} sessions (skipped compression)", dedup_count);
     }
 
     let _ = app.emit("dream:compress-done", json!({"status": "ok"}));
@@ -459,11 +561,31 @@ fn generate_dream_report(app: &tauri::AppHandle) {
 
     let stale_count = if sessions.len() > 10 { sessions.len() - 10 } else { 0 };
 
+    // T-1421-b: 统计去重记忆和纠正记忆数量
+    let dedup_count = sessions.iter()
+        .filter(|s| s.get("dedup_merged").is_some())
+        .count();
+    let corrected_count = sessions.iter()
+        .filter(|s| s.get("source").and_then(|v| v.as_str()) == Some("corrected"))
+        .count();
+
+    // T-1421-b + T-1412-b: 追加记忆整理统计到简报
+    if dedup_count > 0 || corrected_count > 0 {
+        briefing.push_str("\n## 记忆整理\n\n");
+        if dedup_count > 0 {
+            briefing.push_str(&format!("- 整理了 **{}** 条重复记忆（已自动合并）\n", dedup_count));
+        }
+        if corrected_count > 0 {
+            briefing.push_str(&format!("- 纠正了 **{}** 条过时记忆（置信度已降低）\n", corrected_count));
+        }
+    }
+
     let report = json!({
         "briefing": briefing,
         "stats": {
             "staled": stale_count,
-            "merged": 0
+            "merged": dedup_count,
+            "corrected": corrected_count
         },
         "generatedAt": super::now_ms(),
         "dismissed": false
@@ -736,3 +858,74 @@ pub fn system_delete_memory_entry(entry_type: String, entry_id: String) -> Value
         Err(e) => json!({"error": format!("delete failed: {}", e)}),
     }
 }
+
+// ═══════════════════════════════════════════════════════════
+// T-1412: 记忆置信度衰减与引用更新
+// ═══════════════════════════════════════════════════════════
+
+/// 置信度衰减: 扫描所有 session JSON，将超过 30 天未被引用的记忆的 confidence 衰减
+/// 在 `migrate_stale_sessions` 之后调用（冷迁移阶段顺带处理）
+pub fn decay_stale_confidence() {
+    let sessions_dir = get_session_log_dir();
+    if !sessions_dir.exists() { return; }
+
+    let thirty_days_ms: i64 = 30 * 24 * 3600 * 1000;
+    let now_ms = super::now_ms();
+    let mut decayed = 0u32;
+
+    let entries: Vec<PathBuf> = match fs::read_dir(&sessions_dir) {
+        Ok(rd) => rd.flatten()
+            .map(|e| e.path())
+            .filter(|p| p.extension().map_or(false, |ext| ext == "json"))
+            .collect(),
+        Err(_) => return,
+    };
+
+    for path in entries {
+        let content = match fs::read_to_string(&path) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+        let mut session: Value = match serde_json::from_str(&content) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+
+        let last_ref = session.get("lastReferenced").and_then(|v| v.as_i64()).unwrap_or(0);
+        let confidence = session.get("confidence").and_then(|v| v.as_f64()).unwrap_or(0.8);
+
+        // 如果超过 30 天未被引用且 confidence > 0.1，衰减 20%
+        if last_ref > 0 && (now_ms - last_ref) > thirty_days_ms && confidence > 0.1 {
+            let new_confidence = (confidence * 0.8).max(0.0);
+            if let Some(obj) = session.as_object_mut() {
+                obj.insert("confidence".to_string(), json!(new_confidence));
+                if let Ok(data) = serde_json::to_string_pretty(&session) {
+                    let _ = fs::write(&path, data);
+                    decayed += 1;
+                }
+            }
+        }
+    }
+
+    if decayed > 0 {
+        log::info!("T-1412: decayed confidence for {} stale memories", decayed);
+    }
+}
+
+/// 更新指定 session 的 lastReferenced 时间戳（当记忆被注入上下文时调用）
+pub fn touch_memory_reference(session_id: &str) {
+    let path = get_session_log_dir().join(format!("{}.json", session_id));
+    if !path.exists() { return; }
+
+    if let Ok(content) = fs::read_to_string(&path) {
+        if let Ok(mut session) = serde_json::from_str::<Value>(&content) {
+            if let Some(obj) = session.as_object_mut() {
+                obj.insert("lastReferenced".to_string(), json!(super::now_ms()));
+                if let Ok(data) = serde_json::to_string_pretty(&session) {
+                    let _ = fs::write(&path, data);
+                }
+            }
+        }
+    }
+}
+

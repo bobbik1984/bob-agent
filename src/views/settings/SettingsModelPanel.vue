@@ -8,7 +8,7 @@
       <Server :size="16" class="section-icon" />
       {{ $t('settings.offline_engine') }}
     </h3>
-    <p class="section-desc" style="margin-bottom: 12px;">{{ $t('settings.offline_engine_desc') }}</p>
+
     
     <div class="form-group workspace-group">
       <input
@@ -69,16 +69,12 @@
       </div>
       <ChevronDown :size="16" class="details-chevron" />
     </summary>
-    <p class="section-desc" style="margin-top: 16px; margin-bottom: 16px;">{{ $t('settings.api_keys_desc') }}</p>
-    
-    <!-- T-821: Outbox 引导提示 -->
-    <div style="margin-bottom: 16px; padding: 10px 14px; border-radius: 8px; background: rgba(var(--user-accent-rgb, 99,102,241), 0.08); border: 1px solid rgba(var(--user-accent-rgb, 99,102,241), 0.2); font-size: 0.82em; color: var(--text-secondary); line-height: 1.5;" v-html="$t('settings.outbox_hint')">
-    </div>
+
 
     <!-- 模型供应商密钥 -->
     <h4 style="margin-bottom: 8px; font-size: 0.85em; color: var(--text-secondary);">{{ $t('settings.provider_keys_title') }}</h4>
-    <div style="display: flex; flex-direction: column; gap: 6px; margin-bottom: 20px;">
-      <div class="form-group" v-for="provider in modelProviders" :key="provider.id" style="display: flex; align-items: center; gap: 12px; border-bottom: 1px solid var(--border-subtle); padding-bottom: 6px;">
+    <div style="display: flex; flex-direction: column; margin-bottom: 20px;">
+      <div class="form-group" v-for="provider in modelProviders" :key="provider.id" style="display: flex; align-items: center; gap: 12px; border-bottom: 1px solid var(--border-subtle); padding: 10px 0; margin-bottom: 0;">
         <label class="form-label" style="width: 160px; margin-bottom: 0; display: flex; align-items: center; gap: 8px;">
           <img v-if="getProviderLogo(provider.id)" :src="getProviderLogo(provider.id)" style="width: 16px; height: 16px; object-fit: contain; border-radius: 2px;" />
           <span style="flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" :title="$te('providers.' + provider.id) ? $t('providers.' + provider.id) : provider.name">{{ $te('providers.' + provider.id) ? $t('providers.' + provider.id) : provider.name }}</span>
@@ -87,10 +83,12 @@
         <!-- Vertex AI: 凭证文件上传模式 -->
         <template v-if="provider.id === 'vertex_ai'">
           <span class="status-dot" :style="{ background: gcpCredStatus.configured ? 'var(--accent-primary)' : 'transparent', border: gcpCredStatus.configured ? '2px solid var(--accent-primary)' : '2px solid var(--text-tertiary)' }" style="width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex-shrink: 0;"></span>
-          <span v-if="gcpCredStatus.configured" style="flex: 1; font-size: 0.82em; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" :title="gcpCredStatus.client_email">
-            ✅ {{ gcpCredStatus.project_id }} ({{ gcpCredStatus.client_email }})
-          </span>
-          <span v-else style="flex: 1; font-size: 0.82em; color: var(--text-tertiary);">{{ $t('settings.not_configured') }}</span>
+          <div class="input" style="flex: 1; display: flex; align-items: center; cursor: default; user-select: none;">
+            <span v-if="gcpCredStatus.configured" style="font-size: 0.9em; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" :title="gcpCredStatus.client_email">
+              ✅ {{ gcpCredStatus.project_id }} ({{ gcpCredStatus.client_email }})
+            </span>
+            <span v-else style="font-size: 0.9em; color: var(--text-tertiary);">{{ $t('settings.not_configured') }}</span>
+          </div>
           <button class="btn btn-primary" @click="uploadGcpCredential" style="padding: 4px 10px; font-size: 0.9em; white-space: nowrap;">{{ gcpCredStatus.configured ? '更换凭证' : '上传凭证' }}</button>
           <button v-if="gcpCredStatus.configured" class="btn" @click="testGcpCredential" style="padding: 4px 10px; font-size: 0.9em; white-space: nowrap;">测试</button>
           <button class="btn-icon btn-remove-key" :style="{ visibility: gcpCredStatus.configured ? 'visible' : 'hidden' }" @click="removeGcpCredential" :title="$t('settings.delete_key')">
@@ -118,9 +116,9 @@
 
     <!-- 插件/外部服务密钥 -->
     <h4 style="margin-bottom: 8px; font-size: 0.85em; color: var(--text-secondary);">{{ $t('settings.plugin_keys_title') }}</h4>
-    <div style="display: flex; flex-direction: column; gap: 12px;">
-      <div class="form-group" v-for="provider in toolProviders" :key="provider.id" style="display: flex; align-items: center; gap: 12px; border-bottom: 1px solid var(--border-subtle); padding-bottom: 8px;">
-        <label class="form-label" style="width: 140px; margin-bottom: 0;">{{ provider.name }}</label>
+    <div style="display: flex; flex-direction: column;">
+      <div class="form-group" v-for="provider in toolProviders" :key="provider.id" style="display: flex; align-items: center; gap: 12px; border-bottom: 1px solid var(--border-subtle); padding: 10px 0; margin-bottom: 0;">
+        <label class="form-label" style="width: 160px; margin-bottom: 0;">{{ provider.name }}</label>
         <span class="status-dot" :style="{ background: provider.hasKey ? 'var(--accent-primary)' : 'transparent', border: provider.hasKey ? '2px solid var(--accent-primary)' : '2px solid var(--text-tertiary)' }" style="width: 10px; height: 10px; border-radius: 50%; display: inline-block;"></span>
         <input 
           v-model="apiKeys[provider.id]" 
@@ -129,7 +127,7 @@
           :placeholder="provider.hasKey ? $t('settings.configured') : $t('settings.not_configured')" 
           style="flex: 1;" 
         />
-        <button class="btn btn-primary" @click="saveApiKey(provider.id)" style="padding: 6px 12px;">{{ $t('settings.save') }}</button>
+        <button class="btn btn-primary" @click="saveApiKey(provider.id)" style="padding: 4px 10px; font-size: 0.9em;">{{ $t('settings.save') }}</button>
         <button class="btn-icon btn-remove-key" :style="{ visibility: provider.hasKey ? 'visible' : 'hidden' }" @click="deleteApiKey(provider.id)" :title="$t('settings.delete_key')">
           <X :size="14" />
         </button>
@@ -187,7 +185,7 @@
       </div>
       <ChevronDown :size="16" class="details-chevron" />
     </summary>
-    <p class="section-desc" style="margin-top: 16px; margin-bottom: 16px;">{{ $t('settings.registry_desc') }}</p>
+
 
     <div v-if="registryData && registryData.providers">
       <div class="registry-providers-grid">

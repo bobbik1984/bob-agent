@@ -8,7 +8,7 @@
         <RefreshCw :size="14" :class="{ 'animate-spin': isScanning }" />
       </button>
     </h3>
-    <p class="section-desc">{{ $t('model_hub.desc') }}</p>
+
 
     <!-- 角色分配卡片 -->
     <div class="role-cards">
@@ -311,7 +311,6 @@ onMounted(async () => {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: var(--space-3);
-  margin-bottom: var(--space-4);
 }
 
 .role-card {
@@ -367,6 +366,7 @@ onMounted(async () => {
 
 /* ── Model List & Provider Selector ────────────────────── */
 .model-list-container {
+  margin-top: var(--space-4);
   border: 1px solid var(--border-primary);
   border-radius: var(--radius-md);
   overflow: hidden;

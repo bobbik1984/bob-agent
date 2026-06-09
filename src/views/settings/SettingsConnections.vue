@@ -5,7 +5,6 @@
       <Smartphone :size="16" class="section-icon" />
       {{ $t('settings.mobile_assistant') }}
     </h3>
-    <p class="section-desc" style="margin-bottom: 16px;">{{ $t('settings.mobile_assistant_desc') }}</p>
     
     <div class="service-cards-grid">
       <!-- WeChat -->
@@ -92,7 +91,6 @@
       <Building2 :size="16" class="section-icon" />
       {{ $t('settings.conn_office_services') }}
     </h3>
-    <p class="section-desc" style="margin-bottom: 16px;">{{ $t('settings.conn_office_services_desc') }}</p>
 
     <div class="service-cards-grid">
       <!-- 飞书 (Feishu / Lark) -->
@@ -177,54 +175,81 @@
       <Unplug :size="16" class="section-icon" />
       {{ $t('settings.mcp_servers') }}
     </h3>
-    <p class="section-desc" style="margin-bottom: 8px; font-size: 0.8em;">{{ $t('settings.mcp_desc') }}</p>
 
     <div class="service-cards-grid">
       <!-- 已配置的 MCP Servers -->
       <div
         v-for="(cfg, name) in mcpServers"
         :key="name"
-        class="service-card connected"
+        class="service-card active"
       >
-        <div class="service-card-header">
+        <div class="service-card-header" style="margin-bottom: 0;">
           <div class="service-icon" style="background: rgba(142, 142, 147, 0.1); color: var(--text-secondary); display: flex; align-items: center; justify-content: center;">
-            <Terminal :size="16" />
+            <img v-if="name.toLowerCase().includes('google')" src="/logos/google.svg" style="width: 20px; height: 20px; object-fit: contain;" />
+            <img v-else-if="name.toLowerCase().includes('outlook')" src="/logos/outlook.svg" style="width: 20px; height: 20px; object-fit: contain;" />
+            <Terminal v-else :size="18" />
           </div>
-          <div class="service-info">
-            <span class="service-name">{{ name }}</span>
-            <span class="service-sub" style="font-family: monospace; font-size: 0.75em; word-break: break-all; margin-top: 2px;">
-              {{ cfg.command }} {{ (cfg.args || []).join(' ') }}
+          <div class="service-info" style="min-width: 0; padding-right: 8px;">
+            <span class="service-name" style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block;" :title="name">{{ name === 'GoogleCalendar' ? 'Google Calendar' : (name === 'Outlook365' ? 'Outlook 365' : name) }}</span>
+            <span class="service-sub" style="font-size: 0.75em; color: var(--text-tertiary); display: flex; align-items: center; gap: 4px;">
+              {{ name.toLowerCase().includes('google') || name.toLowerCase().includes('outlook') ? '系统预设' : '自定义配置' }}
             </span>
           </div>
-          <span class="service-status-dot dot-connected"></span>
+          <label class="mcp-switch" title="断开连接">
+            <input type="checkbox" checked @change="removeMcpServer(name)" />
+            <span class="mcp-slider"></span>
+          </label>
         </div>
-        <div class="service-card-footer" style="margin-top: auto;">
-          <button class="btn btn-danger-outline btn-sm" @click="removeMcpServer(name)">
-            <Unlink :size="13" />
-            {{ $t('settings.conn_disconnect') }}
-          </button>
+        <div v-if="!name.toLowerCase().includes('google') && !name.toLowerCase().includes('outlook')" class="service-card-body" style="border-top: 1px solid var(--border-subtle); padding-top: 8px; margin-top: 8px; font-family: monospace; font-size: 0.7em; word-break: break-all; color: var(--text-secondary);">
+          {{ cfg.command }} {{ (cfg.args || []).join(' ') }}
         </div>
       </div>
 
       <!-- Quick Add Google Calendar MCP -->
-      <div v-if="!showAddMcp && !mcpServers['GoogleCalendar']" class="mcp-add-card" @click="addGoogleCalendarMcp" style="flex-direction: column; text-align: center;">
-        <img src="/logos/google.svg" style="width: 28px; height: 28px; margin-bottom: 8px; filter: grayscale(0.2);" alt="Google" />
-        <span style="color: var(--text-secondary); font-size: 0.9em; font-weight: 500;">Google Calendar</span>
-        <span style="color: var(--text-tertiary); font-size: 0.75em; margin-top: 4px;">快速接入</span>
+      <div v-if="!showAddMcp && !mcpServers['GoogleCalendar']" class="service-card preset-card" @click="addGoogleCalendarMcp">
+        <div class="service-card-header" style="margin-bottom: 0;">
+          <div class="service-icon" style="background: transparent;">
+            <img src="/logos/google.svg" style="width: 20px; height: 20px; filter: grayscale(1); opacity: 0.6;" alt="Google" />
+          </div>
+          <div class="service-info">
+            <span class="service-name" style="color: var(--text-secondary);">Google Calendar</span>
+            <span class="service-sub">快速接入</span>
+          </div>
+          <label class="mcp-switch" title="接入服务" @click.prevent>
+            <input type="checkbox" :checked="false" />
+            <span class="mcp-slider"></span>
+          </label>
+        </div>
       </div>
 
       <!-- Quick Add Outlook MCP -->
-      <div v-if="!showAddMcp && !mcpServers['Outlook365']" class="mcp-add-card" @click="addOutlookMcpPreset" style="flex-direction: column; text-align: center;">
-        <img src="/logos/outlook.svg" style="width: 28px; height: 28px; margin-bottom: 8px; filter: grayscale(0.2);" alt="Outlook" />
-        <span style="color: var(--text-secondary); font-size: 0.9em; font-weight: 500;">Outlook 365</span>
-        <span style="color: var(--text-tertiary); font-size: 0.75em; margin-top: 4px;">快速接入</span>
+      <div v-if="!showAddMcp && !mcpServers['Outlook365']" class="service-card preset-card" @click="addOutlookMcpPreset">
+        <div class="service-card-header" style="margin-bottom: 0;">
+          <div class="service-icon" style="background: transparent;">
+            <img src="/logos/outlook.svg" style="width: 20px; height: 20px; filter: grayscale(1); opacity: 0.6;" alt="Outlook" />
+          </div>
+          <div class="service-info">
+            <span class="service-name" style="color: var(--text-secondary);">Outlook 365</span>
+            <span class="service-sub">快速接入</span>
+          </div>
+          <label class="mcp-switch" title="接入服务" @click.prevent>
+            <input type="checkbox" :checked="false" />
+            <span class="mcp-slider"></span>
+          </label>
+        </div>
       </div>
 
       <!-- 添加自定义 MCP Server 卡片 -->
-      <div v-if="!showAddMcp" class="mcp-add-card" @click="showAddMcp = true" style="flex-direction: column; text-align: center;">
-        <Plus :size="28" style="color: var(--text-tertiary); margin-bottom: 8px;" />
-        <span style="color: var(--text-secondary); font-size: 0.9em; font-weight: 500;">{{ $t('settings.mcp_add') }}</span>
-        <span style="color: var(--text-tertiary); font-size: 0.75em; margin-top: 4px;">自定义配置</span>
+      <div v-if="!showAddMcp" class="service-card preset-card" @click="showAddMcp = true">
+        <div class="service-card-header" style="margin-bottom: 0;">
+          <div class="service-icon" style="background: transparent; color: var(--text-tertiary);">
+            <Plus :size="20" />
+          </div>
+          <div class="service-info">
+            <span class="service-name" style="color: var(--text-secondary);">{{ $t('settings.mcp_add') }}</span>
+            <span class="service-sub">自定义配置</span>
+          </div>
+        </div>
       </div>
       
       <!-- 添加表单卡片 -->
@@ -631,6 +656,61 @@ onUnmounted(() => {
   .service-cards-grid {
     grid-template-columns: minmax(0, 1fr);
   }
+}
+
+.preset-card {
+  cursor: pointer;
+  border-style: dashed;
+}
+.preset-card:hover {
+  border-color: var(--user-accent, var(--accent-primary, #4facfe));
+  background: color-mix(in srgb, var(--user-accent, var(--accent-primary, #4facfe)) 5%, transparent);
+}
+
+.mcp-switch {
+  position: relative;
+  display: inline-block;
+  width: 32px;
+  height: 18px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.mcp-switch input { 
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+.mcp-slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: color-mix(in srgb, var(--color-success) 80%, transparent);
+  transition: .3s;
+  border-radius: 34px;
+}
+.mcp-slider:before {
+  position: absolute;
+  content: "";
+  height: 14px;
+  width: 14px;
+  left: 2px;
+  bottom: 2px;
+  background-color: white;
+  transition: .3s;
+  border-radius: 50%;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.2);
+}
+.mcp-switch input:not(:checked) + .mcp-slider {
+  background-color: var(--border-strong);
+}
+.mcp-switch input:not(:checked) + .mcp-slider:before {
+  transform: translateX(0);
+}
+.mcp-switch input:checked + .mcp-slider:before {
+  transform: translateX(14px);
 }
 
 .service-card {
