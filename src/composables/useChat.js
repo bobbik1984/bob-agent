@@ -310,6 +310,10 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
           } catch (e) { /* 非 JSON 则正常展示 */ }
         }
       }
+    } else if (chunk.type === 'file_output' && chunk.path) {
+      // 导出工具生成的文件 → 追加为可点击链接，renderMessageBlocks 会将其渲染为 FileCard
+      const fileName = chunk.path.replace(/\\/g, '/').split('/').pop() || chunk.path;
+      streamContent.value += `\n\n[${fileName}](${chunk.path})`;
     }
     scrollToBottom();
   }

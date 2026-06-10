@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::io::Write;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
+use tauri::Emitter;
 
 // ═══════════════════════════════════════════════════════════
 // T-1401: 工具调用循环熔断器 (Circuit Breaker)
@@ -650,13 +651,27 @@ fn get_builtin_tool_schemas() -> Vec<Value> {
             "type": "function",
             "function": {
                 "name": "export_pptx",
-                "description": "生成 PowerPoint 演示文稿（注：当前为占位符工具，请引导用户先使用 export_html 生成网页版幻灯片）",
+                "description": "生成 PowerPoint 演示文稿(.pptx)。支持封面页、内容页、章节页和总结页。建议先通过 read_skill 加载 mckinsey-designer 技能来规划 Storyboard 结构。",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "filename": { "type": "string", "description": "输出文件名" },
-                        "template": { "type": "string", "description": "模板名称" },
-                        "slides": { "type": "array", "items": { "type": "object" }, "description": "Storyboard JSON 结构" }
+                        "filename": { "type": "string", "description": "输出文件名 (不含扩展名)" },
+                        "template": { "type": "string", "description": "配色主题: corporate-dark | corporate-light", "enum": ["corporate-dark", "corporate-light"] },
+                        "slides": {
+                            "type": "array",
+                            "description": "幻灯片数组，每页一个对象",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "type": { "type": "string", "description": "页面类型: cover | content | section | summary" },
+                                    "title": { "type": "string", "description": "页面标题" },
+                                    "subtitle": { "type": "string", "description": "副标题 (封面页/章节页可用)" },
+                                    "content": { "type": "string", "description": "正文段落 (用 \\n\\n 分隔多段)" },
+                                    "bullets": { "type": "array", "items": { "type": "string" }, "description": "要点列表" }
+                                },
+                                "required": ["type", "title"]
+                            }
+                        }
                     },
                     "required": ["filename", "template", "slides"]
                 }
@@ -877,7 +892,9 @@ async fn execute_tool_inner(app: &tauri::AppHandle, name: &str, args: &Value, fr
             match fs::write(&file_path, html) {
                 Ok(_) => {
                     let _ = open::that(&file_path);
-                    json!({ "ok": format!("HTML 报告已生成并打开: {:?}", file_path) })
+                    let path_str = file_path.to_string_lossy().to_string();
+                    let _ = app.emit("llm:chunk", json!({ "type": "file_output", "path": &path_str, "conv_id": "" }));
+                    json!({ "ok": format!("HTML 报告已生成: {}", path_str), "path": path_str })
                 },
                 Err(e) => json!({ "error": format!("无法写入文件: {}", e) }),
             }
@@ -907,7 +924,9 @@ async fn execute_tool_inner(app: &tauri::AppHandle, name: &str, args: &Value, fr
             match super::exports::xlsx::generate_xlsx(&file_path, &data) {
                 Ok(_) => {
                     let _ = open::that(&file_path);
-                    json!({ "ok": format!("Excel 表格已生成并打开: {:?}", file_path) })
+                    let path_str = file_path.to_string_lossy().to_string();
+                    let _ = app.emit("llm:chunk", json!({ "type": "file_output", "path": &path_str, "conv_id": "" }));
+                    json!({ "ok": format!("Excel 表格已生成: {}", path_str), "path": path_str })
                 },
                 Err(e) => json!({ "error": format!("无法生成 Excel: {}", e) }),
             }
@@ -929,7 +948,9 @@ async fn execute_tool_inner(app: &tauri::AppHandle, name: &str, args: &Value, fr
             match super::exports::docx::generate_docx(&file_path, content) {
                 Ok(_) => {
                     let _ = open::that(&file_path);
-                    json!({ "ok": format!("Word 文档已生成并打开: {:?}", file_path) })
+                    let path_str = file_path.to_string_lossy().to_string();
+                    let _ = app.emit("llm:chunk", json!({ "type": "file_output", "path": &path_str, "conv_id": "" }));
+                    json!({ "ok": format!("Word 文档已生成: {}", path_str), "path": path_str })
                 },
                 Err(e) => json!({ "error": format!("无法生成 Word: {}", e) }),
             }
@@ -952,9 +973,24 @@ async fn execute_tool_inner(app: &tauri::AppHandle, name: &str, args: &Value, fr
                 slides,
             };
             
-            match super::exports::pptx::generate_pptx(&data) {
-                Ok(_) => json!({ "ok": format!("PPTX 模板已生成") }),
-                Err(e) => json!({ "error": format!("PPTX 尚未完全实现: {}", e) }),
+            let config = super::read_config();
+            let exports_dir = config.get("exportsDir")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .map(PathBuf::from)
+                .unwrap_or_else(|| dirs::desktop_dir().unwrap_or_else(|| PathBuf::from(".")).join("Bob-Exports"));
+                
+            let _ = fs::create_dir_all(&exports_dir);
+            let file_path = exports_dir.join(format!("{}.pptx", filename));
+            
+            match super::exports::pptx::generate_pptx(&file_path, &data) {
+                Ok(_) => {
+                    let _ = open::that(&file_path);
+                    let path_str = file_path.to_string_lossy().to_string();
+                    let _ = app.emit("llm:chunk", json!({ "type": "file_output", "path": &path_str, "conv_id": "" }));
+                    json!({ "ok": format!("PowerPoint 演示文稿已生成: {}", path_str), "path": path_str })
+                },
+                Err(e) => json!({ "error": format!("无法生成 PPTX: {}", e) }),
             }
         }
         _ => json!({ "error": format!("未知工具: {}", name) }),
