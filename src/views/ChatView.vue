@@ -64,7 +64,7 @@
           </template>
 
           <!-- 思维链折叠 -->
-          <div v-else-if="msg.thinking" class="thinking-card" :class="{ expanded: msg._thinkingExpanded }">
+          <div v-if="msg.thinking && !msg._isError && msg.type !== 'confirm-card' && msg.type !== 'action-item-card'" class="thinking-card" :class="{ expanded: msg._thinkingExpanded }">
             <button class="thinking-toggle" @click="msg._thinkingExpanded = !msg._thinkingExpanded">
               <ChevronRight :size="14" class="thinking-arrow" :class="{ 'expanded': msg._thinkingExpanded }" />
               <span>Thought process</span>
@@ -82,12 +82,13 @@
             </div>
           </div>
           <!-- 消息内容（block 数组渲染：text + file-card 交替）-->
-          <div v-else class="message-content selectable" @click="onMessageLinkClick">
+          <div v-if="!msg._isError && msg.type !== 'confirm-card' && msg.type !== 'action-item-card' && msg.content" class="message-content selectable" @click="onMessageLinkClick">
             <template v-for="(block, bi) in renderMessageBlocks(msg.content)" :key="bi">
               <div v-if="block.type === 'html'" v-html="block.content"></div>
               <FileCard v-else-if="block.type === 'file'" :filePath="block.path" />
             </template>
           </div>
+
           <!-- 图片预览 -->
           <div v-if="msg.image_base64" class="message-image">
             <img :src="'data:image/png;base64,' + msg.image_base64" alt="用户图片" />

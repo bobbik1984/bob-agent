@@ -1456,7 +1456,7 @@ async fn stream_internal(
 ## 文档输出能力
 你能够为用户生成并导出专业级别的文档，请在以下场景主动调用对应的导出工具：
 - **export_html**: 生成精美排版的 HTML 分析报告/周报。这是你的**首选和主力**文档输出方式。用户可以通过浏览器原生的打印功能(Ctrl+P)将其完美导出为 PDF (已适配 @media print 分页规则)。
-- **export_xlsx**: 当用户让你"提取这些数据"、"整理成表格发我"时，生成结构化的 Excel 表格。
+- **export_xlsx**: 当用户让你\"提取这些数据\"、\"整理成表格发我\"时，生成结构化的 Excel 表格。
 - **export_docx**: 当用户需要一份正式的文字文档（带标题层级）时，生成 Word 文件。
 - **export_pptx**: 当用户要求生成 PPT 时调用。请注意你需要先通过 read_skill 加载 mckinsey-designer 等排版技能生成对应的 Storyboard JSON。
 

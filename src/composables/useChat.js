@@ -159,8 +159,17 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
           _thinkingExpanded: false,
         });
       } else {
-        let finalContent = streamContent.value || result.content || '';
-        let finalThinking = streamThinking.value || result.thinking || null;
+        // ── 竞态修复: 取 Rust 后端 result 与前端流式累积的较长者 ──
+        // Rust 的 result.content/result.thinking 是逐字符累积的完整内容（权威源），
+        // 但前端 streamContent 可能因 IPC 事件时序问题而缺失尾部 token。
+        // 取较长者可确保在任何时序下都不丢失数据。
+        const streamVal = (streamContent.value || '').trim();
+        const resultVal = (result.content || '').trim();
+        let finalContent = streamVal.length >= resultVal.length ? streamVal : resultVal;
+
+        const streamThinkVal = (streamThinking.value || '').trim();
+        const resultThinkVal = (result.thinking || '').trim();
+        let finalThinking = (streamThinkVal.length >= resultThinkVal.length ? streamThinkVal : resultThinkVal) || null;
 
         // ── Outbox: 检测 bob-config 代码块 (T-812) ──
         const configBlockRegex = /```bob-config\n([\s\S]*?)\n```/g;
@@ -204,7 +213,7 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
 
         const assistantMsg = {
           role: 'assistant',
-          content: finalContent || '（模型未返回内容，请检查 API 配置或重试）',
+          content: finalContent || (finalThinking ? '' : '（模型未返回内容，请检查 API 配置或重试）'),
           thinking: finalThinking,
           _thinkingExpanded: false,
           _modelLabel: currentModelName.value || result.model || '',
