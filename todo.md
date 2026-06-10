@@ -582,4 +582,73 @@
   - *预期效果: 拖入普通文件用便宜模型秒处理，拖入合同自动调用主力模型深度分析——用户什么都不用管*
   - *理论依据: 论文重构壁垒 1 "MoMA 泛化路由"的单 Agent 简化版*
 
+---
 
+## 📍 里程碑 15: v0.6 — 文档输出引擎 (Document Export Engine)
+> 让 Bob 从"只会说"进化为"能交付"——对话结束后导出精排版 HTML 报告、PDF、Excel、Word、PPT。
+> 核心策略: **HTML-first** — 精排 HTML 是主力输出，PDF 通过打印导出。
+> 设计来源: o2_analysis 项目 + guizang-ppt-skill + mckinsey-designer + frontend-design
+
+### Phase 0: 基建准备
+
+- [ ] T-1500: **输出目录与 Bridge 基建**
+  - [ ] `config.rs`: 新增 `exportsDir` 配置项 (默认 `~/Desktop/Bob-Exports/`)
+  - [ ] `lib.rs` + `tauri-bridge.js`: 注册所有新增 Rust Command
+  - [ ] `tools.rs`: 注册 `export_html`, `export_xlsx`, `export_docx`, `export_pptx` 为 Tool Calling 工具
+  - [ ] `llm.rs` system prompt: 追加文档导出能力描述段
+
+### Phase 1: HTML 报告 + PDF 导出 (Tier 1, 核心)
+
+- [ ] T-1501: **HTML 报告模板系统** (2-3 天)
+  - [ ] 新建 `report.rs` 模块
+  - [ ] 定义 `ReportData` 结构体 (title, sections: Heading/Paragraph/Table/Chart/Image/CodeBlock)
+  - [ ] 内置 3 套 HTML 报告模板 (内联 CSS, 单文件):
+    - Corporate — 商务简约 (o2_analysis 风格, 16:9 横版)
+    - Academic — 学术素雅 (A4 纵版)
+    - Dashboard — 数据仪表盘 (深色卡片)
+  - [ ] 模板含 `@media print` + `page-break-after` 确保 PDF 分页正确
+  - [ ] 模板存放 `src-tauri/resources/templates/`，编译时嵌入二进制
+
+- [ ] T-1502: **`export_html` Tool Calling 接口**
+  - [ ] 接收 Markdown 正文 + 模板名称 → 渲染为 HTML
+  - [ ] 生成后 `open::that()` 在默认浏览器打开
+
+- [ ] T-1503: **PDF 导出路径**
+  - [ ] 方案 A (推荐): HTML 内嵌 `window.print()` 按钮 + `@media print` CSS
+  - [ ] 方案 B (可选): 调用系统 Chrome/Edge `--print-to-pdf` 后台生成
+
+### Phase 2: XLSX 数据导出 (Tier 2, 数据刚需)
+
+- [ ] T-1511: **Rust XLSX 写入引擎** (1-2 天)
+  - [ ] 引入 `rust_xlsxwriter` crate
+  - [ ] 新建 `xlsx.rs`，支持: 表头加粗 + 冻结首行 + 列宽自适应 + 交替行底色 + UTF-8
+
+- [ ] T-1512: **`export_xlsx` Tool Calling 接口**
+  - [ ] 接收 headers[] + rows[][] → 生成 .xlsx → 系统默认程序打开
+
+### Phase 3: DOCX 文档导出 (Tier 3, 基础文字)
+
+- [ ] T-1521: **Rust DOCX 写入引擎** (1-2 天)
+  - [ ] 引入 `docx-rs` crate
+  - [ ] 新建 `docx.rs`，支持: H1-H4 + 正文 (加粗/斜体) + 列表 + 表格 + 分页符 + 页眉页脚
+  - [ ] 字体: 中文微软雅黑, 英文 Calibri
+
+- [ ] T-1522: **`export_docx` Tool Calling 接口**
+  - [ ] 接收 Markdown → 解析为 DOCX 结构 → 生成 .docx
+
+### Phase 4: PPTX 模板注入式生成 (Tier 4, 延后)
+
+- [ ] T-1531: **Skill 打包准备** (0.5 天)
+  - [ ] 将 `guizang-ppt-skill` 复制到 `bob-agent/skills/`
+  - [ ] 确认 `build_payload.mjs` blacklist 不含此 skill
+  - [ ] 验证 Bob 启动后可扫描到新增 skill
+
+- [ ] T-1532: **PPTX 模板库**
+  - [ ] 在 `src-tauri/resources/templates/pptx/` 预置 3 套精品模板
+  - [ ] 模板含占位符，**由设计师手工制作，绝不程序化生成排版**
+
+- [ ] T-1533: **PPTX 注入引擎**
+  - [ ] 方案 A (Rust ZIP/XML 替换) vs 方案 B (python-pptx) vs 方案 C (HTML-first 横版幻灯片)
+  - [ ] 输入契约: 复用 mckinsey-designer 的 Storyboard JSON Schema
+
+- [ ] T-1534: **`export_pptx` Tool Calling 接口**
