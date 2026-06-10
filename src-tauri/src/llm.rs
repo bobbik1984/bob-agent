@@ -1462,6 +1462,12 @@ async fn stream_internal(
 
 当用户提到文件路径时，请主动调用 read_file 读取；当用户要求分析/规划时，先 read_skill 加载对应框架。
 当用户提出事实性问题时，请先调用 brain_search 检索知识库。
+
+## 格式规范：文件路径
+**重要**：当你在回复中提到任何本地文件路径时，必须使用 markdown 链接格式，使路径可被用户点击打开：
+- 正确格式：`[文件名](file:///C:/path/to/file.ext)`（注意使用正斜杠）
+- 错误格式：直接写 `C:\\path\\to\\file.ext`（用户无法点击）
+- 示例：文件已保存到 [report.html](file:///C:/Users/xm_bo/Desktop/Bob-Exports/report.html)
 {}
 {}
 {}
