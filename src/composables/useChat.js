@@ -346,24 +346,56 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
   // ── Markdown 渲染 ─────────────────────────────────
   function renderMarkdown(text) {
     if (!text) return '';
-    const cleaned = text.replace(/<calendar_event>[\s\S]*?(?:<\/calendar_event>|$)/gi, '')
+    let cleaned = text.replace(/<calendar_event>[\s\S]*?(?:<\/calendar_event>|$)/gi, '')
       .replace(/<\|mem\|>/g, ''); // 视觉过滤进化引擎隐式标记
+
+    // ── 预处理: 自动链接原始 Windows 路径 ──
+    // 检测纯文本中的 "C:\path\to\file.ext" 并转为 [file.ext](C:\path\to\file.ext)
+    cleaned = cleaned.replace(
+      /(?<!\]\()(?<!\`)([A-Za-z]:\\(?:[^\s<>*?"|,\n\r]+\\)*[^\s<>*?"|,\n\r\\]+\.\w{1,10})(?!\))/g,
+      (full, path, offset) => {
+        // 跳过已在 markdown 链接 [...](...) 内部的路径
+        const before = cleaned.slice(Math.max(0, offset - 40), offset);
+        if (/\]\(\s*$/.test(before) || /\[[^\]]*$/.test(before)) return full;
+        const fileName = path.replace(/\\/g, '/').split('/').pop() || path;
+        return `[${fileName}](${path})`;
+      }
+    );
+
+    // ── 预处理: 自动链接裸 URL ──
+    cleaned = cleaned.replace(
+      /(?<!\]\()(?<!")(https?:\/\/[^\s<>)"\]]+)/g,
+      (full, url, offset) => {
+        const before = cleaned.slice(Math.max(0, offset - 15), offset);
+        if (/\]\(\s*$/.test(before) || /href=["']$/.test(before)) return full;
+        try {
+          const u = new URL(url);
+          let label = u.hostname.replace(/^www\./, '');
+          if (u.pathname && u.pathname !== '/') label += u.pathname.slice(0, 30);
+          return `[${label}](${url})`;
+        } catch { return `[${url.slice(0, 40)}](${url})`; }
+      }
+    );
+
     let rawHtml = marked.parse(cleaned);
 
     // ── bob:// 本地文件协议桥接 ──
-    // 将 <img src="D:\...\file.png"> 或 <img src="file:///D:/..."> 
-    // 转换为 <img src="bob://localhost/D:/..."> 以触发 Rust 后端流式读取
     rawHtml = rawHtml.replace(
       /(<img\s+[^>]*src=")(?:file:\/\/\/)?([A-Za-z]:[\\\/][^"]+)(")/gi,
       (_, pre, path, post) => pre + 'bob://localhost/' + path.replace(/\\/g, '/') + post
     );
-    // 对 video / source 标签做同样处理
     rawHtml = rawHtml.replace(
       /(<(?:video|source)\s+[^>]*src=")(?:file:\/\/\/)?([A-Za-z]:[\\\/][^"]+)(")/gi,
       (_, pre, path, post) => pre + 'bob://localhost/' + path.replace(/\\/g, '/') + post
     );
 
-    return DOMPurify.sanitize(rawHtml, { ADD_TAGS: ['video', 'source'], ADD_ATTR: ['controls', 'autoplay', 'loop', 'muted'] });
+    // ── 后处理: URL 链接新窗口打开 ──
+    rawHtml = rawHtml.replace(
+      /<a\s+href="(https?:\/\/[^"]+)"/g,
+      '<a href="$1" target="_blank" rel="noopener noreferrer"'
+    );
+
+    return DOMPurify.sanitize(rawHtml, { ADD_TAGS: ['video', 'source'], ADD_ATTR: ['controls', 'autoplay', 'loop', 'muted', 'target', 'rel'] });
   }
 
   function renderMessageBlocks(text) {
