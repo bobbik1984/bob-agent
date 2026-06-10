@@ -350,7 +350,8 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
       .replace(/<\|mem\|>/g, ''); // 视觉过滤进化引擎隐式标记
 
     // ── 预处理: 自动链接原始 Windows 路径 ──
-    // 检测纯文本中的 "C:\path\to\file.ext" 并转为 [file.ext](C:\path\to\file.ext)
+    // 检测纯文本 "C:\path\to\file.ext" 并转为 [file.ext](file:///C:/path/to/file.ext)
+    // 必须用 file:/// + 正斜杠, 否则 marked.js 会把 \ 当作 markdown 转义符吃掉
     cleaned = cleaned.replace(
       /(?<!\]\()(?<!\`)([A-Za-z]:\\(?:[^\s<>*?"|,\n\r\\]+\\)*[^\s<>*?"|,\n\r\\]+\.\w{1,10})(?!\))/g,
       (full, path, offset) => {
@@ -358,7 +359,8 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
         const before = cleaned.slice(Math.max(0, offset - 40), offset);
         if (/\]\(\s*$/.test(before) || /\[[^\]]*$/.test(before)) return full;
         const fileName = path.replace(/\\/g, '/').split('/').pop() || path;
-        return `[${fileName}](${path})`;
+        const fileUrl = 'file:///' + path.replace(/\\/g, '/');
+        return `[${fileName}](${fileUrl})`;
       }
     );
 
@@ -410,6 +412,12 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
     FILE_LINK_RE.lastIndex = 0;
     let match;
     while ((match = FILE_LINK_RE.exec(html)) !== null) {
+      // 跳过 <table> 内部的文件链接——拆分会破坏表格 HTML 结构
+      const before = html.slice(Math.max(0, match.index - 500), match.index);
+      const tableOpens = (before.match(/<table/gi) || []).length;
+      const tableCloses = (before.match(/<\/table/gi) || []).length;
+      if (tableOpens > tableCloses) continue; // 在表格内部，跳过
+
       if (match.index > lastIndex) {
         blocks.push({ type: 'html', content: html.slice(lastIndex, match.index) });
       }
