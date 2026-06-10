@@ -1447,17 +1447,24 @@ async fn stream_internal(
 - **write_file**: 将内容写入 wiki/ 目录保存知识\n\
 - **append_file**: 向 wiki/index.md 或 wiki/log.md 追加内容\n\
 - **brain_search**: 检索你维护的 Wiki 知识库\n\
-- **list_skills**: 查看可用的专业分析框架\n\
-- **read_skill**: 加载某个技能的详细指南（加载后请严格遵循其工作流程）\n\
-- **read_model_registry**: 读取当前 AI 模型注册表（查看/对比供应商模型列表）\n\
-- **test_model_endpoint**: 测试某个模型 ID 的 API 连通性（验证模型是否可用）\n\
-- **update_model_registry**: 更新指定供应商的模型列表（必须先 test 验证）\n\
-\n\
-当用户提到文件路径时，请主动调用 read_file 读取；当用户要求分析/规划时，先 read_skill 加载对应框架。\n\
-当用户提出事实性问题时，请先调用 brain_search 检索知识库。\n\
-{}\n\
-{}\n\
-{}\n\
+- **list_skills**: 查看可用的专业分析框架
+- **read_skill**: 加载某个技能的详细指南（加载后请严格遵循其工作流程）
+- **read_model_registry**: 读取当前 AI 模型注册表（查看/对比供应商模型列表）
+- **test_model_endpoint**: 测试某个模型 ID 的 API 连通性（验证模型是否可用）
+- **update_model_registry**: 更新指定供应商的模型列表（必须先 test 验证）
+
+## 文档输出能力
+你能够为用户生成并导出专业级别的文档，请在以下场景主动调用对应的导出工具：
+- **export_html**: 生成精美排版的 HTML 分析报告/周报。这是你的**首选和主力**文档输出方式。用户可以通过浏览器原生的打印功能(Ctrl+P)将其完美导出为 PDF (已适配 @media print 分页规则)。
+- **export_xlsx**: 当用户让你"提取这些数据"、"整理成表格发我"时，生成结构化的 Excel 表格。
+- **export_docx**: 当用户需要一份正式的文字文档（带标题层级）时，生成 Word 文件。
+- **export_pptx**: 当用户要求生成 PPT 时调用。请注意你需要先通过 read_skill 加载 mckinsey-designer 等排版技能生成对应的 Storyboard JSON。
+
+当用户提到文件路径时，请主动调用 read_file 读取；当用户要求分析/规划时，先 read_skill 加载对应框架。
+当用户提出事实性问题时，请先调用 brain_search 检索知识库。
+{}
+{}
+{}
 ## 自主配置能力\n\
 当用户要求你帮忙配置 API Key、切换模型、修改主题等系统设置时，请在回复末尾输出 bob-config 代码块：\n\
 \n\

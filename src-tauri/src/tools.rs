@@ -587,6 +587,81 @@ fn get_builtin_tool_schemas() -> Vec<Value> {
                 }
             }
         }),
+        json!({
+            "type": "function",
+            "function": {
+                "name": "export_html",
+                "description": "生成一份精排版的 HTML 报告文件，可直接在浏览器打开或打印为 PDF",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "filename": { "type": "string", "description": "输出文件名 (不含扩展名)" },
+                        "template": { "type": "string", "description": "模板名称: corporate | academic | dashboard", "enum": ["corporate", "academic", "dashboard"] },
+                        "title": { "type": "string", "description": "报告标题" },
+                        "content": { "type": "string", "description": "Markdown 格式的报告正文" }
+                    },
+                    "required": ["filename", "template", "title", "content"]
+                }
+            }
+        }),
+        json!({
+            "type": "function",
+            "function": {
+                "name": "export_xlsx",
+                "description": "将结构化数据导出为 Excel 表格文件",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "filename": { "type": "string", "description": "输出文件名 (不含扩展名)" },
+                        "sheets": {
+                            "type": "array",
+                            "description": "工作表数据",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "name": { "type": "string", "description": "工作表名称" },
+                                    "headers": { "type": "array", "items": { "type": "string" }, "description": "列标题数组" },
+                                    "rows": { "type": "array", "items": { "type": "array", "items": {} }, "description": "数据行的二维数组 (可以是数字或字符串)" }
+                                },
+                                "required": ["name", "headers", "rows"]
+                            }
+                        }
+                    },
+                    "required": ["filename", "sheets"]
+                }
+            }
+        }),
+        json!({
+            "type": "function",
+            "function": {
+                "name": "export_docx",
+                "description": "将文本内容导出为格式工整的 Word 文档",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "filename": { "type": "string", "description": "输出文件名 (不含扩展名)" },
+                        "content": { "type": "string", "description": "Markdown 格式的文档正文" }
+                    },
+                    "required": ["filename", "content"]
+                }
+            }
+        }),
+        json!({
+            "type": "function",
+            "function": {
+                "name": "export_pptx",
+                "description": "生成 PowerPoint 演示文稿（注：当前为占位符工具，请引导用户先使用 export_html 生成网页版幻灯片）",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "filename": { "type": "string", "description": "输出文件名" },
+                        "template": { "type": "string", "description": "模板名称" },
+                        "slides": { "type": "array", "items": { "type": "object" }, "description": "Storyboard JSON 结构" }
+                    },
+                    "required": ["filename", "template", "slides"]
+                }
+            }
+        }),
     ]
 }
 
@@ -772,6 +847,115 @@ async fn execute_tool_inner(app: &tauri::AppHandle, name: &str, args: &Value, fr
         }
         name if name.starts_with("gmail_") => {
             super::gmail::execute_tool(name, args).await
+        }
+        // ── 里程碑 15: 文档输出引擎 ──
+        "export_html" => {
+            let filename = args.get("filename").and_then(|v| v.as_str()).unwrap_or("report");
+            let template = args.get("template").and_then(|v| v.as_str()).unwrap_or("corporate");
+            let title = args.get("title").and_then(|v| v.as_str()).unwrap_or("Report");
+            let content = args.get("content").and_then(|v| v.as_str()).unwrap_or("");
+            
+            let data = super::exports::report::ReportData {
+                title: title.to_string(),
+                template: template.to_string(),
+                content: content.to_string(),
+            };
+            
+            let html = super::exports::report::generate_html_report(&data);
+            
+            // 写入默认 exports 目录
+            let config = super::read_config();
+            let exports_dir = config.get("exportsDir")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .map(PathBuf::from)
+                .unwrap_or_else(|| dirs::desktop_dir().unwrap_or_else(|| PathBuf::from(".")).join("Bob-Exports"));
+                
+            let _ = fs::create_dir_all(&exports_dir);
+            let file_path = exports_dir.join(format!("{}.html", filename));
+            
+            match fs::write(&file_path, html) {
+                Ok(_) => {
+                    let _ = open::that(&file_path);
+                    json!({ "ok": format!("HTML 报告已生成并打开: {:?}", file_path) })
+                },
+                Err(e) => json!({ "error": format!("无法写入文件: {}", e) }),
+            }
+        }
+        "export_xlsx" => {
+            let filename = args.get("filename").and_then(|v| v.as_str()).unwrap_or("data");
+            
+            let mut data = super::exports::xlsx::XlsxData { sheets: Vec::new() };
+            if let Some(sheets_array) = args.get("sheets").and_then(|v| v.as_array()) {
+                for sheet in sheets_array {
+                    if let Ok(sheet_data) = serde_json::from_value(sheet.clone()) {
+                        data.sheets.push(sheet_data);
+                    }
+                }
+            }
+            
+            let config = super::read_config();
+            let exports_dir = config.get("exportsDir")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .map(PathBuf::from)
+                .unwrap_or_else(|| dirs::desktop_dir().unwrap_or_else(|| PathBuf::from(".")).join("Bob-Exports"));
+                
+            let _ = fs::create_dir_all(&exports_dir);
+            let file_path = exports_dir.join(format!("{}.xlsx", filename));
+            
+            match super::exports::xlsx::generate_xlsx(&file_path, &data) {
+                Ok(_) => {
+                    let _ = open::that(&file_path);
+                    json!({ "ok": format!("Excel 表格已生成并打开: {:?}", file_path) })
+                },
+                Err(e) => json!({ "error": format!("无法生成 Excel: {}", e) }),
+            }
+        }
+        "export_docx" => {
+            let filename = args.get("filename").and_then(|v| v.as_str()).unwrap_or("document");
+            let content = args.get("content").and_then(|v| v.as_str()).unwrap_or("");
+            
+            let config = super::read_config();
+            let exports_dir = config.get("exportsDir")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .map(PathBuf::from)
+                .unwrap_or_else(|| dirs::desktop_dir().unwrap_or_else(|| PathBuf::from(".")).join("Bob-Exports"));
+                
+            let _ = fs::create_dir_all(&exports_dir);
+            let file_path = exports_dir.join(format!("{}.docx", filename));
+            
+            match super::exports::docx::generate_docx(&file_path, content) {
+                Ok(_) => {
+                    let _ = open::that(&file_path);
+                    json!({ "ok": format!("Word 文档已生成并打开: {:?}", file_path) })
+                },
+                Err(e) => json!({ "error": format!("无法生成 Word: {}", e) }),
+            }
+        }
+        "export_pptx" => {
+            let filename = args.get("filename").and_then(|v| v.as_str()).unwrap_or("presentation");
+            let template = args.get("template").and_then(|v| v.as_str()).unwrap_or("corporate-dark");
+            
+            let mut slides = Vec::new();
+            if let Some(slides_array) = args.get("slides").and_then(|v| v.as_array()) {
+                for slide in slides_array {
+                    if let Ok(slide_data) = serde_json::from_value(slide.clone()) {
+                        slides.push(slide_data);
+                    }
+                }
+            }
+            
+            let data = super::exports::pptx::PptxData {
+                template: template.to_string(),
+                slides,
+            };
+            
+            match super::exports::pptx::generate_pptx(&data) {
+                Ok(_) => json!({ "ok": format!("PPTX 模板已生成") }),
+                Err(e) => json!({ "error": format!("PPTX 尚未完全实现: {}", e) }),
+            }
         }
         _ => json!({ "error": format!("未知工具: {}", name) }),
     }
