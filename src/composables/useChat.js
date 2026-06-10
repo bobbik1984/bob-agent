@@ -311,9 +311,10 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
         }
       }
     } else if (chunk.type === 'file_output' && chunk.path) {
-      // 导出工具生成的文件 → 追加为可点击链接，renderMessageBlocks 会将其渲染为 FileCard
+      // 导出工具生成的文件 → 追加为 file:/// 链接，renderMessageBlocks 会将其渲染为 FileCard
       const fileName = chunk.path.replace(/\\/g, '/').split('/').pop() || chunk.path;
-      streamContent.value += `\n\n[${fileName}](${chunk.path})`;
+      const fileUrl = 'file:///' + chunk.path.replace(/\\/g, '/');
+      streamContent.value += `\n\n[${fileName}](${fileUrl})`;
     }
     scrollToBottom();
   }
@@ -349,20 +350,8 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
     let cleaned = text.replace(/<calendar_event>[\s\S]*?(?:<\/calendar_event>|$)/gi, '')
       .replace(/<\|mem\|>/g, ''); // 视觉过滤进化引擎隐式标记
 
-    // ── 预处理: 自动链接原始 Windows 路径 ──
-    // 检测纯文本 "C:\path\to\file.ext" 并转为 [file.ext](file:///C:/path/to/file.ext)
-    // 必须用 file:/// + 正斜杠, 否则 marked.js 会把 \ 当作 markdown 转义符吃掉
-    cleaned = cleaned.replace(
-      /(?<!\]\()(?<!\`)([A-Za-z]:\\(?:[^\s<>*?"|,\n\r\\]+\\)*[^\s<>*?"|,\n\r\\]+\.\w{1,10})(?!\))/g,
-      (full, path, offset) => {
-        // 跳过已在 markdown 链接 [...](...) 内部的路径
-        const before = cleaned.slice(Math.max(0, offset - 40), offset);
-        if (/\]\(\s*$/.test(before) || /\[[^\]]*$/.test(before)) return full;
-        const fileName = path.replace(/\\/g, '/').split('/').pop() || path;
-        const fileUrl = 'file:///' + path.replace(/\\/g, '/');
-        return `[${fileName}](${fileUrl})`;
-      }
-    );
+    // 注：纯文本路径的自动链接已移除（误伤率过高）
+    // 导出文件的链接由 Rust 后端 file_output 事件精确注入
 
     // ── 预处理: 自动链接裸 URL ──
     cleaned = cleaned.replace(
