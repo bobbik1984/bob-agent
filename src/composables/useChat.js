@@ -352,7 +352,7 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
     // ── 预处理: 自动链接原始 Windows 路径 ──
     // 检测纯文本中的 "C:\path\to\file.ext" 并转为 [file.ext](C:\path\to\file.ext)
     cleaned = cleaned.replace(
-      /(?<!\]\()(?<!\`)([A-Za-z]:\\(?:[^\s<>*?"|,\n\r]+\\)*[^\s<>*?"|,\n\r\\]+\.\w{1,10})(?!\))/g,
+      /(?<!\]\()(?<!\`)([A-Za-z]:\\(?:[^\s<>*?"|,\n\r\\]+\\)*[^\s<>*?"|,\n\r\\]+\.\w{1,10})(?!\))/g,
       (full, path, offset) => {
         // 跳过已在 markdown 链接 [...](...) 内部的路径
         const before = cleaned.slice(Math.max(0, offset - 40), offset);
