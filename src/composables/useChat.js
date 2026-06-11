@@ -355,18 +355,27 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
 
     // ── 预处理: 自动链接裸 URL（输出 markdown 语法供 marked 解析）──
     // 注意：不能输出 <a> HTML，因为 marked 会在表格 cell 内转义原始 HTML
-    // 排除反引号 ` 以防止破坏内联代码块 (e.g. `https://url`)
+    // 捕获可选的前后反引号，如果 URL 被反引号单独完全包裹，则剥离反引号使其成为真正的可点击链接
     cleaned = cleaned.replace(
-      /(?<!\]\()(?<!")(https?:\/\/[^\s<>)"\]`]+)/g,
-      (full, url, offset) => {
+      /(`)?(?<!\]\()(?<!["'])(https?:\/\/[^\s<>)"\]`]+)(`)?/g,
+      (full, b1, url, b2, offset) => {
         const before = cleaned.slice(Math.max(0, offset - 15), offset);
         if (/\]\(\s*$/.test(before) || /href=["']$/.test(before)) return full;
+        
+        let keepB1 = b1 || '';
+        let keepB2 = b2 || '';
+        // 剥离反引号以防止渲染为不可点击的代码块
+        if (b1 === '`' && b2 === '`') {
+          keepB1 = '';
+          keepB2 = '';
+        }
+
         try {
           const u = new URL(url);
           let label = u.hostname.replace(/^www\./, '');
           if (u.pathname && u.pathname !== '/') label += u.pathname.slice(0, 30);
-          return `[${label}](${url})`;
-        } catch { return `[${url.slice(0, 40)}](${url})`; }
+          return `${keepB1}[${label}](${url})${keepB2}`;
+        } catch { return `${keepB1}[${url.slice(0, 40)}](${url})${keepB2}`; }
       }
     );
 
