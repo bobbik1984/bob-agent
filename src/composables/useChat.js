@@ -424,9 +424,7 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
       /(<img\s+[^>]*src=")(?:file:\/\/\/)?([A-Za-z]:(?:[\\\/]|%5[Cc]|%2[Ff])[^"]+)(")/gi,
       (_, pre, rawPath, post) => {
         const cleaned = decodeURIComponent(rawPath).replace(/\\/g, '/');
-        const url = LOCAL_FILE_API + encodeURIComponent(cleaned);
-        console.log('[useChat] local file:', cleaned, '->', url);
-        return pre + url + post;
+        return pre + LOCAL_FILE_API + encodeURIComponent(cleaned) + post;
       }
     );
     rawHtml = rawHtml.replace(
