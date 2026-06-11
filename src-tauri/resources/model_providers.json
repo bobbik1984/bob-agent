@@ -33,7 +33,8 @@
         { "id": "qwen-plus", "name": "Qwen Plus", "vision": true, "pricing": { "input": 1.5, "output": 4.5 } },
         { "id": "qwen-turbo", "name": "Qwen Turbo", "vision": false, "pricing": { "input": 0.3, "output": 0.6 } },
         { "id": "qwen-vl-max", "name": "Qwen VL Max", "vision": true, "pricing": { "input": 3.0, "output": 9.0 } },
-        { "id": "qwen2.5-max", "name": "Qwen 2.5 Max", "vision": false, "pricing": { "input": 5.0, "output": 20.0 } }
+        { "id": "qwen2.5-max", "name": "Qwen 2.5 Max", "vision": false, "pricing": { "input": 5.0, "output": 20.0 } },
+        { "id": "wanx-v1", "name": "通义万相 (Wanx)", "vision": false, "pricing": { "input": 0.0, "output": 0.0 } }
       ]
     },
     {

@@ -92,6 +92,19 @@ fn merge_registry_with_defaults(existing: &mut Value, defaults: &Value) -> bool 
                 }
                 let ext_models = ext_provider["models"].as_array_mut().unwrap();
 
+                // 迁移清理：移除以前错误的 qwen3-xxx 模型
+                if def_id == "qwen" {
+                    let before_len = ext_models.len();
+                    ext_models.retain(|m| {
+                        let id = m.get("id").and_then(|v| v.as_str()).unwrap_or("");
+                        !id.starts_with("qwen3")
+                    });
+                    if ext_models.len() < before_len {
+                        modified = true;
+                        log::info!("Cleaned up old qwen3 models from qwen provider");
+                    }
+                }
+
                 // 追加默认列表中有但本地没有的新模型
                 for def_model in def_models {
                     let dmid = def_model.get("id").and_then(|v| v.as_str()).unwrap_or("");
