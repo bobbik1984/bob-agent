@@ -17,7 +17,6 @@
 import { ref, computed, nextTick } from 'vue';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
-import { convertFileSrc } from '@tauri-apps/api/core';
 
 // ── 文件链接正则 (拆分 FileCard) ──
 const FILE_LINK_RE = /\<a\s+[^>]*href="((?:file:\/\/\/[^"]+)|(?:[A-Za-z]:[\\][^"]+))"[^>]*>[^<]*<\/a>/gi;
@@ -417,14 +416,16 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
       '<a href="$1">$2</a>'
     );
 
-    // ── 本地文件协议桥接：使用 Tauri 官方 convertFileSrc API ──
-    // convertFileSrc 会自动处理 dev/production 模式和平台差异
+    // ── 本地文件协议桥接：通过 Bob HTTP API 提供文件 ──
+    // 使用已有的 127.0.0.1:3721 HTTP 服务来提供本地文件，
+    // 比 Tauri 自定义协议更可靠（dev/production 模式均可用）
+    const LOCAL_FILE_API = 'http://127.0.0.1:3721/v1/file?path=';
     rawHtml = rawHtml.replace(
       /(<img\s+[^>]*src=")(?:file:\/\/\/)?([A-Za-z]:(?:[\\\/]|%5[Cc]|%2[Ff])[^"]+)(")/gi,
       (_, pre, rawPath, post) => {
         const cleaned = decodeURIComponent(rawPath).replace(/\\/g, '/');
-        const url = convertFileSrc(cleaned, 'bob');
-        console.log('[useChat] convertFileSrc:', cleaned, '->', url);
+        const url = LOCAL_FILE_API + encodeURIComponent(cleaned);
+        console.log('[useChat] local file:', cleaned, '->', url);
         return pre + url + post;
       }
     );
@@ -432,7 +433,7 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
       /(<(?:video|source)\s+[^>]*src=")(?:file:\/\/\/)?([A-Za-z]:(?:[\\\/]|%5[Cc]|%2[Ff])[^"]+)(")/gi,
       (_, pre, rawPath, post) => {
         const cleaned = decodeURIComponent(rawPath).replace(/\\/g, '/');
-        return pre + convertFileSrc(cleaned, 'bob') + post;
+        return pre + LOCAL_FILE_API + encodeURIComponent(cleaned) + post;
       }
     );
 

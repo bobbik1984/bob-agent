@@ -340,6 +340,73 @@ async fn handle_health() -> impl IntoResponse {
 }
 
 // ═══════════════════════════════════════════════════════════
+// Handler: GET /v1/file?path=...  — 本地文件服务
+// ═══════════════════════════════════════════════════════════
+
+/// 通过 HTTP 提供本地文件，供前端 `<img>` / `<video>` 标签加载。
+/// 比 Tauri 自定义协议更可靠，在 dev 和 production 模式下均可用。
+async fn handle_file(
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> impl IntoResponse {
+    let path = match params.get("path") {
+        Some(p) => p.clone(),
+        None => {
+            return axum::response::Response::builder()
+                .status(400)
+                .header("Access-Control-Allow-Origin", "*")
+                .body(axum::body::Body::from("Missing 'path' query parameter"))
+                .unwrap();
+        }
+    };
+
+    let file_path = std::path::Path::new(&path);
+    if !file_path.exists() || !file_path.is_file() {
+        log::warn!("[http_api] /v1/file 404: {}", path);
+        return axum::response::Response::builder()
+            .status(404)
+            .header("Access-Control-Allow-Origin", "*")
+            .body(axum::body::Body::from("File not found"))
+            .unwrap();
+    }
+
+    let mime = match file_path.extension().and_then(|e| e.to_str()).map(|s| s.to_lowercase()).as_deref() {
+        Some("png")          => "image/png",
+        Some("jpg" | "jpeg") => "image/jpeg",
+        Some("gif")          => "image/gif",
+        Some("webp")         => "image/webp",
+        Some("svg")          => "image/svg+xml",
+        Some("ico")          => "image/x-icon",
+        Some("bmp")          => "image/bmp",
+        Some("mp4")          => "video/mp4",
+        Some("webm")         => "video/webm",
+        Some("mov")          => "video/quicktime",
+        Some("pdf")          => "application/pdf",
+        _                    => "application/octet-stream",
+    };
+
+    match std::fs::read(file_path) {
+        Ok(data) => {
+            log::info!("[http_api] /v1/file 200: {} ({} bytes)", path, data.len());
+            axum::response::Response::builder()
+                .status(200)
+                .header("Content-Type", mime)
+                .header("Access-Control-Allow-Origin", "*")
+                .header("Cache-Control", "public, max-age=3600")
+                .body(axum::body::Body::from(data))
+                .unwrap()
+        }
+        Err(e) => {
+            log::error!("[http_api] /v1/file 500: {} - {}", path, e);
+            axum::response::Response::builder()
+                .status(500)
+                .header("Access-Control-Allow-Origin", "*")
+                .body(axum::body::Body::from(format!("Read error: {}", e)))
+                .unwrap()
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════
 // 路由组装 & 服务启动
 // ═══════════════════════════════════════════════════════════
 
@@ -349,6 +416,7 @@ pub fn create_router(app: AppHandle) -> Router {
         .route("/v1/chat", post(handle_chat))
         .route("/v1/conversations", get(handle_get_conversations))
         .route("/v1/health", get(handle_health))
+        .route("/v1/file", get(handle_file))
         .with_state(state)
 }
 
