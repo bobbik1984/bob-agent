@@ -372,6 +372,7 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
 
     // ── 安全网: 兜底未被 marked 解析的 markdown 链接 ──
     // 极长 OAuth URL 等边缘情况下，marked 有时会将 [text](url) 原样输出
+    // 此时 marked 已将 & 编码为 &amp;，放入 href 前需解码一层防止 &amp;amp; 双重转义
     rawHtml = rawHtml.replace(
       /\[([^\]<>]+)\]\((https?:\/\/[^)]+)\)/g,
       (match, text, url, offset) => {
@@ -382,7 +383,9 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
         const preOpens = (before.match(/<pre/gi) || []).length;
         const preCloses = (before.match(/<\/pre/gi) || []).length;
         if (codeOpens > codeCloses || preOpens > preCloses) return match;
-        return `<a href="${url}">${text}</a>`;
+        // 解码 marked 对原始文本的 HTML 转义 (& → &amp; 需还原)
+        const cleanUrl = url.replace(/&amp;/g, '&');
+        return `<a href="${cleanUrl}">${text}</a>`;
       }
     );
 
