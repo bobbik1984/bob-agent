@@ -431,7 +431,10 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
     if (lastIndex < html.length) {
       blocks.push({ type: 'html', content: html.slice(lastIndex) });
     }
-    return blocks;
+    // 将所有 FileCard 统一沉底到消息末尾，用户无需滚屏回翻即可点击
+    const htmlBlocks = blocks.filter(b => b.type === 'html');
+    const fileBlocks = blocks.filter(b => b.type === 'file');
+    return [...htmlBlocks, ...fileBlocks];
   }
 
   // ── 日程解析 ─────────────────────────────────────
