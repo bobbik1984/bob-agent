@@ -420,6 +420,17 @@ fn get_builtin_tool_schemas() -> Vec<Value> {
         json!({
             "type": "function",
             "function": {
+                "name": "list_calendar_events",
+                "description": "列出用户的本地日程表（日历）和待办事项（未完成的）。当用户问'我今天有什么事'、'我的待办事项有哪些'时调用此工具。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {}
+                }
+            }
+        }),
+        json!({
+            "type": "function",
+            "function": {
                 "name": "add_calendar_event",
                 "description": "向用户的日程表（日历）中添加一条新的日程或待办事项。当用户要求你记录日程、安排时间、提醒某事或去某个地方时调用此工具。",
                 "parameters": {
@@ -768,6 +779,9 @@ async fn execute_tool_inner(app: &tauri::AppHandle, name: &str, args: &Value, fr
             let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
             let content = args.get("content").and_then(|v| v.as_str()).unwrap_or("");
             tool_append_file(path, content).await
+        }
+        "list_calendar_events" => {
+            tool_list_calendar_events(app)
         }
         "add_calendar_event" => {
             tool_add_calendar_event(app, args)
@@ -1570,6 +1584,47 @@ async fn tool_brain_search(query: &str) -> Value {
         json!({ "message": format!("未在知识库中找到包含 '{}' 的内容。", query) })
     } else {
         json!({ "source": "file_scan", "results": results })
+    }
+}
+
+/// list_calendar_events — 列出本地日程/待办
+fn tool_list_calendar_events(app: &tauri::AppHandle) -> Value {
+    use tauri::Manager;
+    let db = app.state::<crate::db::DbState>();
+    let conn = match db.0.lock() {
+        Ok(c) => c,
+        Err(_) => return json!({ "error": "数据库锁失败" }),
+    };
+
+    let mut stmt = match conn.prepare(
+        "SELECT id, title, type, status, date, start_time, end_time, description 
+         FROM events WHERE status != 'done' AND status != 'cancelled' ORDER BY date ASC, start_time ASC"
+    ) {
+        Ok(s) => s,
+        Err(e) => return json!({ "error": format!("查询失败: {}", e) }),
+    };
+
+    let rows = match stmt.query_map([], |row| {
+        Ok(json!({
+            "id": row.get::<_, String>(0)?,
+            "title": row.get::<_, String>(1)?,
+            "type": row.get::<_, String>(2)?,
+            "status": row.get::<_, String>(3)?,
+            "date": row.get::<_, Option<String>>(4).unwrap_or(None),
+            "start_time": row.get::<_, Option<String>>(5).unwrap_or(None),
+            "end_time": row.get::<_, Option<String>>(6).unwrap_or(None),
+            "description": row.get::<_, Option<String>>(7).unwrap_or(None),
+        }))
+    }) {
+        Ok(r) => r,
+        Err(e) => return json!({ "error": format!("解析查询结果失败: {}", e) }),
+    };
+
+    let events: Vec<Value> = rows.filter_map(|r| r.ok()).collect();
+    if events.is_empty() {
+        json!({ "message": "目前没有任何未完成的日程或待办事项。" })
+    } else {
+        json!({ "events": events })
     }
 }
 
