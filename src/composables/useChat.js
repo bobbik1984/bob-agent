@@ -355,8 +355,9 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
 
     // ── 预处理: 自动链接裸 URL（输出 markdown 语法供 marked 解析）──
     // 注意：不能输出 <a> HTML，因为 marked 会在表格 cell 内转义原始 HTML
+    // 排除反引号 ` 以防止破坏内联代码块 (e.g. `https://url`)
     cleaned = cleaned.replace(
-      /(?<!\]\()(?<!")(https?:\/\/[^\s<>)"\]]+)/g,
+      /(?<!\]\()(?<!")(https?:\/\/[^\s<>)"\]`]+)/g,
       (full, url, offset) => {
         const before = cleaned.slice(Math.max(0, offset - 15), offset);
         if (/\]\(\s*$/.test(before) || /href=["']$/.test(before)) return full;
