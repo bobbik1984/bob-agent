@@ -92,16 +92,16 @@ fn merge_registry_with_defaults(existing: &mut Value, defaults: &Value) -> bool 
                 }
                 let ext_models = ext_provider["models"].as_array_mut().unwrap();
 
-                // 迁移清理：移除以前错误的 qwen3-xxx 模型
+                // 迁移清理：移除刚才误加的旧版本/无版本号模型
                 if def_id == "qwen" {
                     let before_len = ext_models.len();
                     ext_models.retain(|m| {
                         let id = m.get("id").and_then(|v| v.as_str()).unwrap_or("");
-                        !id.starts_with("qwen3")
+                        !["qwen-max", "qwen-plus", "qwen-turbo", "qwen2.5-max"].contains(&id)
                     });
                     if ext_models.len() < before_len {
                         modified = true;
-                        log::info!("Cleaned up old qwen3 models from qwen provider");
+                        log::info!("Cleaned up mistakenly added Qwen 2.5/legacy models");
                     }
                 }
 
