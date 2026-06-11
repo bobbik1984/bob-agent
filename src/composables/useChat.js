@@ -398,6 +398,7 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
     }
     const blocks = [];
     let lastIndex = 0;
+    const seenFilePaths = new Set(); // 去重：同一文件路径只渲染一个 FileCard
     FILE_LINK_RE.lastIndex = 0;
     let match;
     while ((match = FILE_LINK_RE.exec(html)) !== null) {
@@ -407,15 +408,23 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
       const tableCloses = (before.match(/<\/table/gi) || []).length;
       if (tableOpens > tableCloses) continue; // 在表格内部，跳过
 
-      if (match.index > lastIndex) {
-        blocks.push({ type: 'html', content: html.slice(lastIndex, match.index) });
-      }
       let filePath = match[1];
       if (filePath.startsWith('file:///')) {
         filePath = filePath.replace('file:///', '');
       }
       try { filePath = decodeURIComponent(filePath); } catch(e) {}
       filePath = filePath.replace(/\//g, '\\');
+
+      // 去重：如果已有相同路径的 FileCard，则将此链接保留为普通 HTML 而非拆分
+      const normalizedKey = filePath.toLowerCase();
+      if (seenFilePaths.has(normalizedKey)) {
+        continue; // 跳过重复的，保留原始 <a> 标签在 HTML 中
+      }
+      seenFilePaths.add(normalizedKey);
+
+      if (match.index > lastIndex) {
+        blocks.push({ type: 'html', content: html.slice(lastIndex, match.index) });
+      }
       blocks.push({ type: 'file', path: filePath });
       lastIndex = match.index + match[0].length;
     }
