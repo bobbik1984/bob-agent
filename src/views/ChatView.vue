@@ -618,9 +618,16 @@ onMounted(async () => {
   // 远程消息监听
   if (window.electronAPI.onRemoteNewMessage) {
     remoteMessageUnlisten = await window.electronAPI.onRemoteNewMessage((event) => {
-      const convId = event?.payload?.conversation_id || event?.conversation_id;
+      const payload = event?.payload || event;
+      const convId = payload?.conversation_id || event?.conversation_id;
       if (convId && convId === props.conversationId) {
-        isStreaming.value = false;
+        if (payload?.status === 'thinking') {
+          isStreaming.value = true;
+          streamContent.value = '';
+          streamThinking.value = '';
+        } else {
+          isStreaming.value = false;
+        }
         loadMessages();
       }
     });

@@ -231,6 +231,14 @@ async fn handle_message(
         params![preview, "user", ts, conversation_id],
     );
 
+    // 通知桌面前端：用户发来新消息，准备进入思考状态
+    let _ = app_handle.emit("remote:new-message", serde_json::json!({
+        "conversation_id": &conversation_id,
+        "from_channel": "wechat",
+        "status": "thinking"
+    }));
+
+
     // Load history
     let mut messages = Vec::new();
     if let Ok(mut stmt) = conn.prepare("SELECT role, content FROM messages WHERE conversation_id = ?1 ORDER BY created_at ASC") {

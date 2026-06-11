@@ -575,7 +575,9 @@ pub fn run() {
         .register_uri_scheme_protocol("bob", |_app, request| {
             let uri = request.uri().to_string();
             let raw_path = uri
-                .strip_prefix("bob://localhost/")
+                .strip_prefix("http://bob.localhost/")
+                .or_else(|| uri.strip_prefix("https://bob.localhost/"))
+                .or_else(|| uri.strip_prefix("bob://localhost/"))
                 .or_else(|| uri.strip_prefix("bob://"))
                 .unwrap_or("");
             // 去掉可能的 query string
@@ -609,10 +611,12 @@ pub fn run() {
                 Ok(data) => tauri::http::Response::builder()
                     .status(200)
                     .header("Content-Type", mime)
+                    .header("Access-Control-Allow-Origin", "*")
                     .body(data)
                     .unwrap(),
                 Err(_) => tauri::http::Response::builder()
                     .status(500)
+                    .header("Access-Control-Allow-Origin", "*")
                     .body(b"Read Error".to_vec())
                     .unwrap(),
             }
