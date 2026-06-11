@@ -3,7 +3,7 @@ project:
   version: "0.3.2"
   status: stable
   tech: [Tauri V2, Rust, Vue 3, Vite, SQLite (rusqlite), reqwest, scraper, keyring, tauri-plugin-single-instance]
-  updated: "2026-06-04"
+  updated: "2026-06-11"
   architecture: "Tauri (Rust backend) + Vue 3 (frontend) + tauri-bridge.js (adapter) + Composable 架构"
   current_focus: "v0.3.1-pre 发布就绪 — 后续可进入 v0.4 (离线 Tool Calling / 排队纠偏 / Cron 自动化 / 生产打包)"
 
@@ -227,6 +227,11 @@ tests:
   note: "待端到端测试后更新"
 
 recent_fixes:
+  - date: "2026-06-11"
+    items:
+      - "[Fix] Content-Security-Policy (CSP) 限制解除 — 允许加载 127.0.0.1 资源，修复本地图片/图标无法渲染的重大拦截问题"
+      - "[Cleanup] 移除前端 useChat.js 中用于调试渲染管道的 console.log，净化生产环境日志输出"
+      - "[Build] 执行 release.bat 全量重新编译安装器和便携版产物"
   - date: "2026-06-04"
     items:
       - "[Fix] WeChat wxid 路由修复 — LLM 传明文微信号被自动覆盖为加密 wxid (tools.rs + llm.rs from_user 上下文透传)"

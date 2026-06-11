@@ -289,6 +289,19 @@
 - [ ] T-912: 端到端测试
 - [ ] T-822: SetupWizard 体验统一提升（暂缓，计划整体重做）
 
+### 2026-06-11
+
+**主题**: 本地文件服务 CSP 放行与生产环境发布打包
+
+**完成**:
+1. [Fix] **CSP 安全策略修复** — 修改 `index.html` 的 Content-Security-Policy 头部，添加 `http://127.0.0.1:*` 到 `img-src` 白名单，解决 WebView2 静默拦截本地图片请求导致图标/本地图片无法显示的问题。
+2. [Cleanup] **移除前端冗余日志** — 移除 `useChat.js` 在渲染管道中为了调试路径正则替换及 DOMPurify 的调试语句。
+3. [Build] **自动化发布构建** — 执行 `scripts/release.bat`，完成 Tauri 双重编译（主程序+引导安装器），打包产出 `dist-release/bob-installer.exe` 和 `dist-release/bob-agent-portable.zip`。
+4. [Docs] 全面更新开发文档、Changelog 及 progress 记录。
+
+**未完成**:
+- [ ] 思考状态 (streamThinking) 的前端流式动态加载动画。
+
 ## 📍 里程碑 10: 认知与记忆引擎升级 (Phase 2)
 > 🎯 **目标**: 让 Bob 拥有长期记忆能力，理解自己的“人设”，并能主动维护和检索知识库。
 
