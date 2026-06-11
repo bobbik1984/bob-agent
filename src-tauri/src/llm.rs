@@ -1114,7 +1114,7 @@ async fn apply_context_tiering(messages: Vec<Value>, conv_id: &str) -> Vec<Value
                 }
             }
 
-            let discarded_count = dialog_msgs.len() - active_start_idx - summary_msgs.len();
+            let discarded_count = active_start_idx - summary_msgs.len();
             log::info!(
                 "T-1411: compressed {} msgs into summary for conv {} (discarded {} oldest msgs)",
                 summary_msgs.len(), conv_id, discarded_count
