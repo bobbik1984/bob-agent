@@ -370,6 +370,22 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
 
     let rawHtml = marked.parse(cleaned);
 
+    // ── 安全网: 兜底未被 marked 解析的 markdown 链接 ──
+    // 极长 OAuth URL 等边缘情况下，marked 有时会将 [text](url) 原样输出
+    rawHtml = rawHtml.replace(
+      /\[([^\]<>]+)\]\((https?:\/\/[^)]+)\)/g,
+      (match, text, url, offset) => {
+        // 跳过 <code>/<pre> 内部的内容
+        const before = rawHtml.slice(Math.max(0, offset - 300), offset);
+        const codeOpens = (before.match(/<code/gi) || []).length;
+        const codeCloses = (before.match(/<\/code/gi) || []).length;
+        const preOpens = (before.match(/<pre/gi) || []).length;
+        const preCloses = (before.match(/<\/pre/gi) || []).length;
+        if (codeOpens > codeCloses || preOpens > preCloses) return match;
+        return `<a href="${url}">${text}</a>`;
+      }
+    );
+
     // ── bob:// 本地文件协议桥接 ──
     rawHtml = rawHtml.replace(
       /(<img\s+[^>]*src=")(?:file:\/\/\/)?([A-Za-z]:[\\\/][^"]+)(")/gi,
