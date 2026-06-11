@@ -2,9 +2,9 @@
   <div class="week-timeline">
     <!-- ========== 导航控制栏 ========== -->
     <div class="timeline-controls">
-      <button class="btn btn-ghost btn-sm" @click="weekOffset--">&larr; 上一周</button>
-      <button class="btn btn-ghost btn-sm" @click="weekOffset = 0" :disabled="weekOffset === 0">本周</button>
-      <button class="btn btn-ghost btn-sm" @click="weekOffset++">下一周 &rarr;</button>
+      <button class="nav-btn" @click="weekOffset--">&larr; 上一周</button>
+      <button class="nav-btn" @click="weekOffset = 0" :disabled="weekOffset === 0">本周</button>
+      <button class="nav-btn" @click="weekOffset++">下一周 &rarr;</button>
     </div>
 
     <!-- ========== 横向模式（宽屏） ========== -->
@@ -417,6 +417,32 @@ const days = computed(() => {
   margin-bottom: var(--space-3);
   padding-bottom: var(--space-2);
   border-bottom: 1px solid var(--border-subtle);
+}
+
+.nav-btn {
+  font-size: 11px;
+  padding: 0 12px;
+  height: 24px;
+  border-radius: 12px;
+  background: var(--surface-primary);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.nav-btn:hover:not(:disabled) {
+  border-color: var(--accent-primary);
+  color: var(--accent-primary);
+  background: color-mix(in srgb, var(--accent-primary) 8%, transparent);
+}
+
+.nav-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 
 /* ═══════════════════════════════════════════════════
