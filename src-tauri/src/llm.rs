@@ -474,8 +474,13 @@ pub fn get_model_pool() -> Value {
                     let model_name = model.get("name").and_then(|v| v.as_str()).unwrap_or(model_id);
                     let vision = model.get("vision").and_then(|v| v.as_bool()).unwrap_or(false);
                     let is_default = model.get("default").and_then(|v| v.as_bool()).unwrap_or(false);
+                    let visible = model.get("visible").and_then(|v| v.as_bool()).unwrap_or(true);
                     let pricing = model.get("pricing").cloned().unwrap_or(json!({ "input": 0.0, "output": 0.0 }));
                     
+                    if !visible {
+                        continue;
+                    }
+
                     let mut entry = json!({
                         "id": model_id,
                         "modelId": model_id,
