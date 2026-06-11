@@ -353,19 +353,57 @@ pub fn create_router(app: AppHandle) -> Router {
 }
 
 /// 在后台 Task 中启动 HTTP 服务，绑定 127.0.0.1:3721
+///
+/// 使用 socket2 创建不可继承的 TCP socket，防止 WebView2 / MCP 等子进程
+/// 继承 socket handle 导致端口在主进程退出后仍被幽灵占用。
 pub fn start_http_server(app: AppHandle) {
     let router = create_router(app);
     tauri::async_runtime::spawn(async move {
-        let listener = match tokio::net::TcpListener::bind("127.0.0.1:3721").await {
+        let listener = match create_non_inheritable_listener("127.0.0.1:3721") {
             Ok(l) => l,
             Err(e) => {
                 log::error!("[http_api] 无法绑定 127.0.0.1:3721: {}", e);
                 return;
             }
         };
-        log::info!("[http_api] Bob HTTP API 启动成功，监听 127.0.0.1:3721");
+        log::info!("[http_api] Bob HTTP API 启动成功，监听 127.0.0.1:3721 (non-inheritable)");
         if let Err(e) = axum::serve(listener, router).await {
             log::error!("[http_api] 服务异常退出: {}", e);
         }
     });
+}
+
+/// 使用 socket2 创建一个不可继承的 TCP 监听器。
+/// 在 Windows 上，这会通过 SetHandleInformation 清除 HANDLE_FLAG_INHERIT，
+/// 确保子进程（WebView2、MCP node.exe 等）不会继承此 socket handle。
+fn create_non_inheritable_listener(addr: &str) -> Result<tokio::net::TcpListener, String> {
+    use socket2::{Domain, Protocol, Socket, Type};
+
+    let addr: std::net::SocketAddr = addr.parse().map_err(|e| format!("地址解析失败: {}", e))?;
+
+    let socket = Socket::new(Domain::IPV4, Type::STREAM, Some(Protocol::TCP))
+        .map_err(|e| format!("创建 socket 失败: {}", e))?;
+
+    // 关键：设置 socket 为不可继承（Windows 上清除 HANDLE_FLAG_INHERIT）
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::io::AsRawSocket;
+        unsafe {
+            // SetHandleInformation(handle, HANDLE_FLAG_INHERIT, 0) → 清除继承标志
+            windows_sys::Win32::Foundation::SetHandleInformation(
+                socket.as_raw_socket() as _,
+                windows_sys::Win32::Foundation::HANDLE_FLAG_INHERIT,
+                0,
+            );
+        }
+    }
+
+    socket.set_reuse_address(true).map_err(|e| format!("SO_REUSEADDR 失败: {}", e))?;
+    socket.set_nonblocking(true).map_err(|e| format!("非阻塞设置失败: {}", e))?;
+    socket.bind(&addr.into()).map_err(|e| format!("绑定失败: {}", e))?;
+    socket.listen(128).map_err(|e| format!("listen 失败: {}", e))?;
+
+    let std_listener: std::net::TcpListener = socket.into();
+    tokio::net::TcpListener::from_std(std_listener)
+        .map_err(|e| format!("转换为 tokio listener 失败: {}", e))
 }

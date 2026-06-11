@@ -571,9 +571,10 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_notification::init())
-        // ── bob:// 本地文件协议：让聊天气泡原生渲染本地图片/视频 ──
+        // ── bob 本地文件协议：让聊天气泡原生渲染本地图片/视频 ──
         .register_uri_scheme_protocol("bob", |_app, request| {
             let uri = request.uri().to_string();
+            println!("[bob-protocol] Incoming URI: {}", uri);
             let raw_path = uri
                 .strip_prefix("http://bob.localhost/")
                 .or_else(|| uri.strip_prefix("https://bob.localhost/"))
@@ -583,6 +584,7 @@ pub fn run() {
             // 去掉可能的 query string
             let raw_path = raw_path.split('?').next().unwrap_or(raw_path);
             let decoded = percent_decode_str(raw_path).decode_utf8_lossy().to_string();
+            println!("[bob-protocol] Parsed path: {}", decoded);
             let file_path = std::path::Path::new(&decoded);
 
             if !file_path.exists() || !file_path.is_file() {
