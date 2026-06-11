@@ -1,5 +1,12 @@
 <template>
   <div class="week-timeline">
+    <!-- ========== 导航控制栏 ========== -->
+    <div class="timeline-controls">
+      <button class="btn btn-ghost btn-sm" @click="weekOffset--">&larr; 上一周</button>
+      <button class="btn btn-ghost btn-sm" @click="weekOffset = 0" :disabled="weekOffset === 0">本周</button>
+      <button class="btn btn-ghost btn-sm" @click="weekOffset++">下一周 &rarr;</button>
+    </div>
+
     <!-- ========== 横向模式（宽屏） ========== -->
     <template v-if="!isNarrow">
       <div class="timeline-header">
@@ -18,7 +25,7 @@
             <span class="day-name">{{ day.name }}</span>
             <span class="day-date">{{ day.dateLabel }}</span>
           </div>
-          <div class="day-track" ref="trackRefs">
+          <div class="day-track" ref="trackRefs" @click.self="onTrackClick(day, $event)">
             <!-- 网格线 -->
             <div
               v-for="h in allHours"
@@ -105,7 +112,9 @@ const props = defineProps({
   weekEvents: { type: Array, default: () => [] }
 });
 
-const emit = defineEmits(['update-time', 'delete-event']);
+const emit = defineEmits(['update-time', 'delete-event', 'create-event']);
+
+const weekOffset = ref(0);
 
 // ── 响应式宽度检测 ────────────────────────────────
 const isNarrow = ref(false);
@@ -264,6 +273,38 @@ onUnmounted(() => {
   document.removeEventListener('mouseup', onMouseUp);
 });
 
+// ── 添加事件 ──────────────────────────────────────
+function onTrackClick(day, e) {
+  const trackEl = e.currentTarget;
+  const rect = trackEl.getBoundingClientRect();
+  const px = e.clientX - rect.left;
+  let clickedHour = snapToQuarter((px / rect.width) * totalHours);
+  
+  const title = prompt(t('timeline.new_event_title') || '请输入新日程的标题：', '新日程');
+  if (!title) return;
+  
+  // Create Date object in local time using the date string correctly (avoid timezone shift from YYYY-MM-DD string)
+  const parts = day.dateStr.split('-');
+  const start = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+  start.setHours(Math.floor(clickedHour), Math.round((clickedHour % 1) * 60), 0, 0);
+  
+  const end = new Date(start);
+  end.setHours(start.getHours() + 1); // 默认 1 小时
+  
+  const fmt = (d) => {
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:00`;
+  };
+
+  emit('create-event', {
+    title,
+    type: 'event',
+    date: day.dateStr,
+    startTime: fmt(start),
+    endTime: fmt(end)
+  });
+}
+
 // ── 事件位置计算 ─────────────────────────────────
 function parseEventHours(event) {
   const s = new Date(event.start_time);
@@ -329,9 +370,12 @@ const days = computed(() => {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const result = [];
+  
+  const baseDate = new Date(today);
+  baseDate.setDate(baseDate.getDate() + (weekOffset.value * 7));
 
   for (let offset = -3; offset <= 3; offset++) {
-    const d = new Date(today);
+    const d = new Date(baseDate);
     d.setDate(d.getDate() + offset);
     const dateStr = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
     const dayEvents = props.weekEvents.filter(ev => {
@@ -342,11 +386,13 @@ const days = computed(() => {
         && evDate.getDate() === d.getDate();
     });
 
+    const isToday = d.getTime() === today.getTime();
+
     result.push({
       dateStr,
-      name: offset === 0 ? t('timeline.today') : weekdayNames.value[d.getDay()],
+      name: isToday ? t('timeline.today') : (weekdayNames.value[d.getDay()] || `周${d.getDay()}`),
       dateLabel: `${d.getMonth()+1}/${d.getDate()}`,
-      isToday: offset === 0,
+      isToday: isToday,
       events: dayEvents,
     });
   }
@@ -362,6 +408,15 @@ const days = computed(() => {
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-lg);
   padding: var(--space-4);
+}
+
+.timeline-controls {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--border-subtle);
 }
 
 /* ═══════════════════════════════════════════════════

@@ -27,9 +27,18 @@
             <button class="reminder-dismiss" @click="dismissReminder(ri)">&times;</button>
           </div>
         </div>
+        <!-- 过期事件区域 -->
+        <div v-if="overdueEvents.length > 0" class="section">
+          <h3 class="section-title" style="color: var(--color-error)">
+            <AlertTriangle :size="16" class="section-icon" />
+            {{ $t('inbox.overdue_events') || '过期的日程' }}
+          </h3>
+          <TodoList :todos="overdueEvents" @update-status="onTodoStatusUpdate" />
+        </div>
+
         <div class="section">
           <h3 class="section-title">{{ $t('inbox.this_week') }}</h3>
-          <WeekTimeline :weekEvents="events" />
+          <WeekTimeline :weekEvents="events" @create-event="onCreateEvent" />
         </div>
 
         <div class="section">
@@ -95,9 +104,9 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue';
+import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { Calendar, Loader2, Timer, Clock, Pause, Play, Trash2, Bell } from 'lucide-vue-next';
+import { AlertTriangle, Calendar, Loader2, Timer, Clock, Pause, Play, Trash2, Bell } from 'lucide-vue-next';
 import WeekTimeline from '../components/WeekTimeline.vue';
 import TodoList from '../components/TodoList.vue';
 
@@ -108,6 +117,14 @@ const events = ref([]);
 const todos = ref([]);
 const cronJobs = ref([]);
 const reminders = ref([]);
+
+const overdueEvents = computed(() => {
+  const today = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  const todayStr = `${today.getFullYear()}-${pad(today.getMonth()+1)}-${pad(today.getDate())}`;
+
+  return events.value.filter(e => e.status === 'pending' && e.date && e.date < todayStr);
+});
 
 onMounted(async () => {
   try {
@@ -164,9 +181,24 @@ function dismissReminder(index) {
 }
 
 function onTodoStatusUpdate({ id, status }) {
-  const todo = todos.value.find(t => t.id === id);
-  if (todo) {
-    todo.status = status;
+  let item = todos.value.find(t => t.id === id);
+  if (!item) item = events.value.find(e => e.id === id);
+  if (item) {
+    item.status = status;
+  }
+}
+
+async function onCreateEvent(payload) {
+  try {
+    const res = await window.electronAPI.confirmEvent(payload);
+    if (res?.ok) {
+      // reload events
+      const allEvents = await window.electronAPI.listEvents();
+      events.value = allEvents.filter(e => e.type === 'event');
+      todos.value = allEvents.filter(e => e.type === 'todo');
+    }
+  } catch (e) {
+    console.error('Failed to create event', e);
   }
 }
 
