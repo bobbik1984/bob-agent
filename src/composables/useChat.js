@@ -353,18 +353,30 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
     // 注：纯文本路径的自动链接已移除（误伤率过高）
     // 导出文件的链接由 Rust 后端 file_output 事件精确注入
 
-    // ── 预处理: 自动链接裸 URL ──
+    // ── 预处理 1: 将 markdown HTTP 链接直接转为 <a> HTML ──
+    // marked 在表格、超长 URL 等边缘情况下偶尔解析失败，预转为 HTML 可确保稳健
+    // 必须在裸 URL 自动链接之前运行，避免互相干扰
     cleaned = cleaned.replace(
-      /(?<!\]\()(?<!")(https?:\/\/[^\s<>)"\]]+)/g,
+      /\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g,
+      (match, text, url) => {
+        const safeText = text.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        return `<a href="${url}">${safeText}</a>`;
+      }
+    );
+
+    // ── 预处理 2: 自动链接裸 URL ──
+    cleaned = cleaned.replace(
+      /(?<!href=")(https?:\/\/[^\s<>)"\]]+)/g,
       (full, url, offset) => {
         const before = cleaned.slice(Math.max(0, offset - 15), offset);
-        if (/\]\(\s*$/.test(before) || /href=["']$/.test(before)) return full;
+        // 跳过已在 <a> 标签内的 URL（预处理 1 已转换的）
+        if (/href=["']\s*$/.test(before) || /">\s*$/.test(before)) return full;
         try {
           const u = new URL(url);
           let label = u.hostname.replace(/^www\./, '');
           if (u.pathname && u.pathname !== '/') label += u.pathname.slice(0, 30);
-          return `[${label}](${url})`;
-        } catch { return `[${url.slice(0, 40)}](${url})`; }
+          return `<a href="${url}">${label}</a>`;
+        } catch { return `<a href="${url}">${url.slice(0, 50)}</a>`; }
       }
     );
 
