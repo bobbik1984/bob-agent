@@ -378,7 +378,7 @@ import DOMPurify from 'dompurify';
 DOMPurify.addHook('uponSanitizeAttribute', function (node, data) {
   if (data.attrName === 'href' || data.attrName === 'src') {
     const val = data.attrValue;
-    if (val.startsWith('file://') || val.startsWith('bob://') || /^[A-Za-z]:[\\\/]/.test(val)) {
+    if (val.startsWith('file://') || val.startsWith('bob://') || val.startsWith('asset://') || val.startsWith('http://bob.localhost/') || val.startsWith('https://bob.localhost/') || val.startsWith('http://asset.localhost/') || /^[A-Za-z]:[\\\/]/.test(val)) {
       data.keepAttr = true;
       data.forceKeepAttr = true;
     }
