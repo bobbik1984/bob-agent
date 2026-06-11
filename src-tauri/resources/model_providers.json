@@ -29,11 +29,11 @@
       "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
       "supports_model_list": false,
       "models": [
-        { "id": "qwen3.6-plus", "name": "Qwen 3.6 Plus", "vision": true, "default": true, "pricing": { "input": 2.0, "output": 6.0 } },
-        { "id": "qwen3-max", "name": "Qwen 3 Max", "vision": true, "pricing": { "input": 5.0, "output": 20.0 } },
-        { "id": "qwen3-plus", "name": "Qwen 3 Plus", "vision": true, "pricing": { "input": 1.5, "output": 4.5 } },
-        { "id": "qwen3-turbo", "name": "Qwen 3 Turbo", "vision": false, "pricing": { "input": 0.3, "output": 0.6 } },
-        { "id": "qwen-vl-max", "name": "Qwen VL Max", "vision": true, "pricing": { "input": 3.0, "output": 9.0 } }
+        { "id": "qwen-max", "name": "Qwen Max", "vision": true, "default": true, "pricing": { "input": 5.0, "output": 20.0 } },
+        { "id": "qwen-plus", "name": "Qwen Plus", "vision": true, "pricing": { "input": 1.5, "output": 4.5 } },
+        { "id": "qwen-turbo", "name": "Qwen Turbo", "vision": false, "pricing": { "input": 0.3, "output": 0.6 } },
+        { "id": "qwen-vl-max", "name": "Qwen VL Max", "vision": true, "pricing": { "input": 3.0, "output": 9.0 } },
+        { "id": "qwen2.5-max", "name": "Qwen 2.5 Max", "vision": false, "pricing": { "input": 5.0, "output": 20.0 } }
       ]
     },
     {
