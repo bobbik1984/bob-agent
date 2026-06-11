@@ -418,11 +418,11 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
 
     // ── bob 本地文件协议桥接 (Tauri v2 兼容 Windows WebView2 的 http://bob.localhost) ──
     rawHtml = rawHtml.replace(
-      /(<img\s+[^>]*src=")(?:file:\/\/\/)?([A-Za-z]:[\\\/][^"]+)(")/gi,
+      /(<img\s+[^>]*src=")(?:file:\/\/\/)?([A-Za-z]:(?:[\\\/]|%5[Cc]|%2[Ff])[^"]+)(")/gi,
       (_, pre, path, post) => pre + 'http://bob.localhost/' + path.replace(/\\/g, '/') + post
     );
     rawHtml = rawHtml.replace(
-      /(<(?:video|source)\s+[^>]*src=")(?:file:\/\/\/)?([A-Za-z]:[\\\/][^"]+)(")/gi,
+      /(<(?:video|source)\s+[^>]*src=")(?:file:\/\/\/)?([A-Za-z]:(?:[\\\/]|%5[Cc]|%2[Ff])[^"]+)(")/gi,
       (_, pre, path, post) => pre + 'http://bob.localhost/' + path.replace(/\\/g, '/') + post
     );
 
