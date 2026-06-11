@@ -353,38 +353,27 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
     // 注：纯文本路径的自动链接已移除（误伤率过高）
     // 导出文件的链接由 Rust 后端 file_output 事件精确注入
 
-    // ── 预处理 1: 将 markdown HTTP 链接直接转为 <a> HTML ──
-    // marked 在表格、超长 URL 等边缘情况下偶尔解析失败，预转为 HTML 可确保稳健
-    // 必须在裸 URL 自动链接之前运行，避免互相干扰
+    // ── 预处理: 自动链接裸 URL（输出 markdown 语法供 marked 解析）──
+    // 注意：不能输出 <a> HTML，因为 marked 会在表格 cell 内转义原始 HTML
     cleaned = cleaned.replace(
-      /\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g,
-      (match, text, url) => {
-        const safeText = text.replace(/</g, '&lt;').replace(/>/g, '&gt;');
-        return `<a href="${url}">${safeText}</a>`;
-      }
-    );
-
-    // ── 预处理 2: 自动链接裸 URL ──
-    cleaned = cleaned.replace(
-      /(?<!href=")(https?:\/\/[^\s<>)"\]]+)/g,
+      /(?<!\]\()(?<!")(https?:\/\/[^\s<>)"\]]+)/g,
       (full, url, offset) => {
         const before = cleaned.slice(Math.max(0, offset - 15), offset);
-        // 跳过已在 <a> 标签内的 URL（预处理 1 已转换的）
-        if (/href=["']\s*$/.test(before) || /">\s*$/.test(before)) return full;
+        if (/\]\(\s*$/.test(before) || /href=["']$/.test(before)) return full;
         try {
           const u = new URL(url);
           let label = u.hostname.replace(/^www\./, '');
           if (u.pathname && u.pathname !== '/') label += u.pathname.slice(0, 30);
-          return `<a href="${url}">${label}</a>`;
-        } catch { return `<a href="${url}">${url.slice(0, 50)}</a>`; }
+          return `[${label}](${url})`;
+        } catch { return `[${url.slice(0, 40)}](${url})`; }
       }
     );
 
     let rawHtml = marked.parse(cleaned);
 
     // ── 安全网: 兜底未被 marked 解析的 markdown 链接 ──
-    // 极长 OAuth URL 等边缘情况下，marked 有时会将 [text](url) 原样输出
-    // 此时 marked 已将 & 编码为 &amp;，放入 href 前需解码一层防止 &amp;amp; 双重转义
+    // marked 偶尔对表格内、超长 OAuth URL 等边缘情况解析失败
+    // 此时 marked 已将 & 编码为 &amp;，href 需解码一层防止双重转义
     rawHtml = rawHtml.replace(
       /\[([^\]<>]+)\]\((https?:\/\/[^)]+)\)/g,
       (match, text, url, offset) => {
@@ -395,10 +384,17 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
         const preOpens = (before.match(/<pre/gi) || []).length;
         const preCloses = (before.match(/<\/pre/gi) || []).length;
         if (codeOpens > codeCloses || preOpens > preCloses) return match;
-        // 解码 marked 对原始文本的 HTML 转义 (& → &amp; 需还原)
         const cleanUrl = url.replace(/&amp;/g, '&');
-        return `<a href="${cleanUrl}">${text}</a>`;
+        const cleanText = text.replace(/&amp;/g, '&');
+        return `<a href="${cleanUrl}">${cleanText}</a>`;
       }
+    );
+
+    // ── 安全网 2: 清理被 marked HTML 转义过的残留 <a> 标签 ──
+    // 旧消息可能因之前的 bug 存储了含 &lt;a href=&quot;...&quot;&gt; 的文本
+    rawHtml = rawHtml.replace(
+      /&lt;a\s+href=&quot;(https?:\/\/[^&]+)&quot;&gt;([^&]*?)&lt;\/a&gt;/gi,
+      '<a href="$1">$2</a>'
     );
 
     // ── bob:// 本地文件协议桥接 ──
