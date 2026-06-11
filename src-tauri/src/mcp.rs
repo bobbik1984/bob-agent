@@ -9,7 +9,8 @@ use std::collections::HashMap;
 use std::process::Stdio;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::process::{Child, Command};
+use tokio::process::Command;
+use command_group::{AsyncCommandGroup, AsyncGroupChild};
 use tokio::sync::{Mutex, RwLock};
 use tokio::sync::mpsc;
 
@@ -26,7 +27,7 @@ pub struct McpServerConfig {
 /// 一个运行中的 MCP Server 实例
 struct McpServerInstance {
     #[allow(dead_code)]
-    child: Child,
+    child: AsyncGroupChild,
     stdin_tx: mpsc::Sender<String>,
     /// 缓存的工具 schema 列表（OpenAI function calling 格式）
     tools: Vec<Value>,
@@ -82,8 +83,7 @@ impl McpManager {
         cmd.args(&config.args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .kill_on_drop(true);
+            .stderr(Stdio::piped());
 
         // 注入环境变量
         for (k, v) in &config.env {
@@ -97,11 +97,11 @@ impl McpManager {
             cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
         }
 
-        let mut child = cmd.spawn().map_err(|e| format!("Failed to spawn '{}': {}", config.command, e))?;
+        let mut child = cmd.group_spawn().map_err(|e| format!("Failed to spawn '{}': {}", config.command, e))?;
 
-        let stdin = child.stdin.take().ok_or("Failed to capture stdin")?;
-        let stdout = child.stdout.take().ok_or("Failed to capture stdout")?;
-        let stderr = child.stderr.take().ok_or("Failed to capture stderr")?;
+        let stdin = child.inner().stdin.take().ok_or("Failed to capture stdin")?;
+        let stdout = child.inner().stdout.take().ok_or("Failed to capture stdout")?;
+        let stderr = child.inner().stderr.take().ok_or("Failed to capture stderr")?;
 
         // stdin 写入通道
         let (stdin_tx, mut stdin_rx) = mpsc::channel::<String>(64);
