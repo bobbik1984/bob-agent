@@ -620,6 +620,7 @@ onMounted(async () => {
     remoteMessageUnlisten = await window.electronAPI.onRemoteNewMessage((event) => {
       const convId = event?.payload?.conversation_id || event?.conversation_id;
       if (convId && convId === props.conversationId) {
+        isStreaming.value = false;
         loadMessages();
       }
     });

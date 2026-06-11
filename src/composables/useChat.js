@@ -271,6 +271,15 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
     if (chunk.conv_id && props.conversationId && chunk.conv_id !== props.conversationId) {
       return;
     }
+    
+    // 如果当前并未处于流状态（例如后台或远端微信触发的生成），则自动唤醒流状态
+    if (!isStreaming.value) {
+      isStreaming.value = true;
+      streamContent.value = '';
+      streamThinking.value = '';
+      activeTools.value = [];
+    }
+
     if (chunk.type === 'clear') {
       streamContent.value = '';
       return;
