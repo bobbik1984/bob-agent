@@ -274,7 +274,7 @@
           <button class="toolbar-item attach-btn" :title="$t('chat.attach_tooltip')" @click="handleAttach">
             <Paperclip :size="14" />
           </button>
-          <button class="toolbar-item attach-btn" title="截取屏幕" @click="handleScreenshot">
+          <button class="toolbar-item attach-btn" title="截取屏幕" @click="handleScreenshot" :disabled="isScreenshotting">
             <Camera :size="14" />
           </button>
           <!-- 模型切换器 -->
@@ -581,22 +581,61 @@ async function handleMentionSelect() {
   }
 }
 
+const isScreenshotting = ref(false);
+
 async function handleScreenshot() {
+  if (isScreenshotting.value) return; // 防止重复点击
+  isScreenshotting.value = true;
+  const { getCurrentWindow } = window.__TAURI__.window;
   try {
-    const { getCurrentWindow } = window.__TAURI__.window;
+    // 记录截图前的剪贴板状态，用于检测用户是否取消了截图
+    let prevClipHash = '';
+    try {
+      const { readImage } = await import('@tauri-apps/plugin-clipboard-manager');
+      const prevImg = await readImage();
+      const prevBytes = await prevImg.rgba();
+      prevClipHash = prevBytes.length.toString();
+    } catch (_) { /* 剪贴板可能为空 */ }
+
     await getCurrentWindow().hide();
     await window.electronAPI.takeScreenshot();
-    
-    await getCurrentWindow().show();
-    await getCurrentWindow().unminimize();
-    await getCurrentWindow().setFocus();
-    
-    const base64 = await window.electronAPI.getClipboardImage();
+
+    // 使用 Tauri 原生插件读取剪贴板图片（而非 navigator.clipboard.read）
+    const { readImage } = await import('@tauri-apps/plugin-clipboard-manager');
+    const img = await readImage();
+    const rgbaBytes = await img.rgba();
+
+    // 检测用户是否取消了截图（剪贴板内容未改变）
+    const newClipHash = rgbaBytes.length.toString();
+    if (newClipHash === prevClipHash) {
+      console.log('Screenshot cancelled by user (clipboard unchanged)');
+      return;
+    }
+
+    // 将 RGBA 转为 PNG base64
+    const canvas = document.createElement('canvas');
+    const width = img.width || Math.sqrt(rgbaBytes.length / 4);
+    const height = img.height || Math.sqrt(rgbaBytes.length / 4);
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    const imageData = new ImageData(new Uint8ClampedArray(rgbaBytes), width, height);
+    ctx.putImageData(imageData, 0, 0);
+    const dataUrl = canvas.toDataURL('image/png');
+    const base64 = dataUrl.replace(/^data:image\/png;base64,/, '');
     if (base64) {
       pendingImage.value = base64;
     }
   } catch (e) {
     console.error('Screenshot failed:', e);
+  } finally {
+    // 无论成功或失败，确保窗口恢复
+    try {
+      await getCurrentWindow().show();
+      await getCurrentWindow().unminimize();
+      await getCurrentWindow().setFocus();
+    } catch (_) {}
+    isScreenshotting.value = false;
   }
 }
 

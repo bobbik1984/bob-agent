@@ -142,23 +142,25 @@ const providerOptions = [
 ];
 
 onMounted(async () => {
-  // 读取已有配置，用其填充 tempConfig（避免走完向导覆盖已有数据）
+  // 先拍快照：从已有配置（而非 tempConfig）直接拍摄，防止用户在加载期间修改 tempConfig 导致快照被污染
+  const snapshotBase = { ...tempConfig.value };
   if (window.electronAPI) {
     const saved = await window.electronAPI.getConfig('all');
     if (saved) {
-      if (saved.language) { tempConfig.value.language = saved.language; locale.value = saved.language; }
-      if (saved.theme) tempConfig.value.theme = saved.theme;
-      if (saved.accentColor) tempConfig.value.accentColor = saved.accentColor;
-      if (saved.workspaceDir) tempConfig.value.workspaceDir = saved.workspaceDir;
-      if (saved.provider) tempConfig.value.provider = saved.provider;
+      // 用已有配置覆盖 snapshotBase 和 tempConfig
+      if (saved.language) { snapshotBase.language = saved.language; tempConfig.value.language = saved.language; locale.value = saved.language; }
+      if (saved.theme) { snapshotBase.theme = saved.theme; tempConfig.value.theme = saved.theme; }
+      if (saved.accentColor) { snapshotBase.accentColor = saved.accentColor; tempConfig.value.accentColor = saved.accentColor; }
+      if (saved.workspaceDir) { snapshotBase.workspaceDir = saved.workspaceDir; tempConfig.value.workspaceDir = saved.workspaceDir; }
+      if (saved.provider) { snapshotBase.provider = saved.provider; tempConfig.value.provider = saved.provider; }
       // apiKey 不从配置回填（安全考虑，存在 apiKeys 子对象中）
     }
   }
   // 将主题和色彩应用到 DOM（使用已有配置或默认值）
   document.documentElement.setAttribute('data-theme', tempConfig.value.theme);
   setAccentColor(tempConfig.value.accentColor);
-  // 拍快照：记录加载后的初始状态，用于 finishOnboarding 差量写入
-  initialSnapshot = JSON.parse(JSON.stringify(tempConfig.value));
+  // 快照来自 saved config 原始值，不受用户在 await 期间的点击影响
+  initialSnapshot = JSON.parse(JSON.stringify(snapshotBase));
 });
 
 // 离开 Step 3 时立即保存 API Key 到 OS Keychain
