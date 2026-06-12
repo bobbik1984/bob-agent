@@ -67,7 +67,12 @@ function buildPayload() {
     } else if (target.type === 'dir') {
       if (target.dest === 'skills') {
         console.log(`📦 过滤并添加技能目录: ${target.dest}`);
-        const blacklist = ['cluster_ops', 'mcp-builder', 'invoke-jules', 'model-registry'];
+        const blacklist = [
+          // 私有/底层技能
+          'cluster_ops', 'mcp-builder', 'invoke-jules', 'model-registry',
+          // 需要 Python/外部依赖的重型技能
+          'AKP_Link_Harvester', 'note_graphify', 'pptx-translate', 'skill-creator', 'mckinsey-designer'
+        ];
         const skillsDir = fs.readdirSync(target.src);
         for (const skill of skillsDir) {
           if (blacklist.includes(skill)) {
