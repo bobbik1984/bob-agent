@@ -22,9 +22,13 @@ pub fn init_events_table(conn: &rusqlite::Connection) {
         );
     ").unwrap_or_default();
 
-    // T-1307: 添加 last_notified 列（存量数据库迁移）
+    // T-1307: 向 last_notified 迁移（数据库兼容）
     conn.execute_batch("
         ALTER TABLE events ADD COLUMN last_notified INTEGER DEFAULT 0;
+    ").unwrap_or_default();
+    
+    conn.execute_batch("
+        ALTER TABLE events ADD COLUMN completed_at INTEGER DEFAULT 0;
     ").unwrap_or_default();
 }
 
@@ -37,7 +41,7 @@ pub fn system_list_events(db: tauri::State<'_, crate::db::DbState>) -> Vec<Value
     };
 
     let mut stmt = match conn.prepare(
-        "SELECT id, title, type, status, date, start_time, end_time, description, created_at
+        "SELECT id, title, type, status, date, start_time, end_time, description, created_at, completed_at
          FROM events ORDER BY created_at DESC"
     ) {
         Ok(s) => s,
@@ -55,6 +59,7 @@ pub fn system_list_events(db: tauri::State<'_, crate::db::DbState>) -> Vec<Value
             "end_time": row.get::<_, Option<String>>(6).unwrap_or(None),
             "description": row.get::<_, Option<String>>(7).unwrap_or(None),
             "created_at": row.get::<_, i64>(8)?,
+            "completed_at": row.get::<_, Option<i64>>(9).unwrap_or(Some(0)).unwrap_or(0),
         }))
     }) {
         Ok(r) => r,
@@ -138,9 +143,16 @@ pub fn system_update_event_status(id: String, status: String, db: tauri::State<'
         Ok(c) => c,
         Err(_) => return false,
     };
+    
+    let completed_at = if status == "done" {
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64
+    } else {
+        0
+    };
+    
     conn.execute(
-        "UPDATE events SET status = ?1 WHERE id = ?2",
-        params![status, id],
+        "UPDATE events SET status = ?1, completed_at = ?2 WHERE id = ?3",
+        params![status, completed_at, id],
     ).unwrap_or(0);
     true
 }

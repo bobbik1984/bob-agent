@@ -195,7 +195,26 @@ window.electronAPI = {
 
   // ── 系统工具 (Rust 原生) ───────────────────────────────
   updateTheme: (theme) => console.log('Mock: updateTheme', theme), // TODO T-608
-  getClipboardImage: async () => null,                 // TODO T-608
+  getClipboardImage: async () => {
+    try {
+      const items = await navigator.clipboard.read();
+      for (const item of items) {
+        for (const type of item.types) {
+          if (type.startsWith('image/')) {
+            const blob = await item.getType(type);
+            return new Promise((resolve) => {
+              const reader = new FileReader();
+              reader.onload = (e) => resolve(e.target.result.replace(/^data:image\/\w+;base64,/, ''));
+              reader.readAsDataURL(blob);
+            });
+          }
+        }
+      }
+    } catch (e) {
+      console.error('getClipboardImage error:', e);
+    }
+    return null;
+  },
   showNotification: async (title, body) => console.log('Mock: notification', title, body), // TODO T-608
   openFile: async (filePath) => invoke('system_open_file', { filePath }),
   showInFolder: async (filePath) => invoke('system_show_in_folder', { filePath }),
@@ -279,6 +298,7 @@ window.electronAPI = {
 
   // ── 聊天就绪校验 (T-1305) ──────────────────────────────
   validateChatReady: async () => invoke('system_validate_chat_ready'),
+  takeScreenshot: async () => invoke('system_take_screenshot'),
 
   // Generic invoke passthrough for components that call invoke directly
   invoke: (cmd, args) => invoke(cmd, args || {}),

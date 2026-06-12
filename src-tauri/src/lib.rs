@@ -113,6 +113,18 @@ pub(crate) fn now_ms() -> i64 {
 // ═══════════════════════════════════════════════════════════
 
 #[tauri::command]
+async fn system_take_screenshot() -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("SnippingTool.exe")
+            .arg("/clip")
+            .status()
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
 fn system_is_setup_complete() -> bool {
     let config = read_config();
     config.get("onboarded").and_then(|v| v.as_bool()).unwrap_or(false)
@@ -738,6 +750,7 @@ pub fn run() {
             connector::connector_disconnect,
             // 聊天就绪校验
             llm::system_validate_chat_ready,
+            system_take_screenshot,
             // Telegram Bot
             telegram::system_save_telegram_token,
             telegram::system_get_telegram_token,

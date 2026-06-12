@@ -353,6 +353,8 @@
 - [x] **T-304: 全局快捷键** — Ctrl+Shift+B 硬编码版已实现并稳定运行，后续可考虑可配置化
 - [x] **搜索/文件/文件夹卡片统一设计** — 抽取了 `.bob-card-inline` 和 `.bob-card-block` 组件基类和样式 token，SearchCard/FileCard/FolderDropCard/ConfirmCard 共享 CSS，消除冗余
 - [x] **技能固化 (Skill Solidification)** — `skill-creator` 已存在于 `skills/` 目录，Bob 可通过 `list_skills` + `read_skill` 调用，无需额外开发
+- [ ] **视觉感知：截屏分析按钮** — 在聊天框添加截屏按钮，点击隐藏主窗口并调用原生截屏（如 `SnippingTool /clip`），截取后用户重新唤醒粘贴即可分析。
+- [ ] **上下文感知：@唤起本地文件** — 在聊天框输入 `@` 加空格时，悬浮软提示"📁 浏览本地文件..."，回车后调起原生文件选择器，并将选中文件加入待发送附件区。
 
 ---
 

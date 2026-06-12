@@ -250,20 +250,32 @@
           </div>
         </div>
         <!-- 文本输入 -->
-        <textarea
-          ref="inputRef"
-          v-model="inputText"
-          class="chat-input"
-          :placeholder="$t('chat.input_placeholder')"
-          rows="3"
-          @keydown="handleKeydown"
-          @input="autoResize"
-          @paste="handlePaste"
-        ></textarea>
+        <div class="input-wrapper" style="position: relative;">
+          <!-- 悬浮 @ 菜单 -->
+          <div v-if="showMentionMenu" class="mention-menu">
+            <div class="mention-menu-item" @click="handleMentionSelect">
+              <span>📁 浏览本地文件...</span>
+              <span class="mention-shortcut">Enter</span>
+            </div>
+          </div>
+          <textarea
+            ref="inputRef"
+            v-model="inputText"
+            class="chat-input"
+            :placeholder="$t('chat.input_placeholder')"
+            rows="3"
+            @keydown="handleKeydown"
+            @input="handleInput"
+            @paste="handlePaste"
+          ></textarea>
+        </div>
         <!-- 底部工具栏 -->
         <div class="input-toolbar">
           <button class="toolbar-item attach-btn" :title="$t('chat.attach_tooltip')" @click="handleAttach">
             <Paperclip :size="14" />
+          </button>
+          <button class="toolbar-item attach-btn" title="截取屏幕" @click="handleScreenshot">
+            <Camera :size="14" />
           </button>
           <!-- 模型切换器 -->
           <div class="model-switcher-wrap" v-if="currentModelName">
@@ -423,6 +435,9 @@ const messagesArea = ref(null);
 const inputRef = ref(null);
 const logoOpacity = ref(1);
 
+const showMentionMenu = ref(false);
+let mentionTriggerIndex = -1;
+
 // ── 闪念速记入口 (从 App.vue provide) ─────────────────
 const openQuickNote = inject('openQuickNote', () => {});
 
@@ -542,7 +557,63 @@ async function handleAutoFix(code) {
 }
 
 // ── 输入辅助 (依赖 DOM ref, 留在组件层) ──────────────
+function handleInput(event) {
+  autoResize();
+  const text = inputText.value;
+  const cursorIndex = inputRef.value?.selectionStart || 0;
+  const textBeforeCursor = text.substring(0, cursorIndex);
+  
+  if (/(?:^|\s)@$/.test(textBeforeCursor)) {
+    showMentionMenu.value = true;
+    mentionTriggerIndex = cursorIndex - 1;
+  } else {
+    showMentionMenu.value = false;
+  }
+}
+
+async function handleMentionSelect() {
+  showMentionMenu.value = false;
+  await handleAttach();
+  if (mentionTriggerIndex >= 0) {
+    const text = inputText.value;
+    inputText.value = text.substring(0, mentionTriggerIndex) + text.substring(mentionTriggerIndex + 1);
+    mentionTriggerIndex = -1;
+  }
+}
+
+async function handleScreenshot() {
+  try {
+    const { getCurrentWindow } = window.__TAURI__.window;
+    await getCurrentWindow().hide();
+    await window.electronAPI.takeScreenshot();
+    
+    await getCurrentWindow().show();
+    await getCurrentWindow().unminimize();
+    await getCurrentWindow().setFocus();
+    
+    const base64 = await window.electronAPI.getClipboardImage();
+    if (base64) {
+      pendingImage.value = base64;
+    }
+  } catch (e) {
+    console.error('Screenshot failed:', e);
+  }
+}
+
 function handleKeydown(event) {
+  if (showMentionMenu.value) {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      handleMentionSelect();
+      return;
+    }
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      showMentionMenu.value = false;
+      return;
+    }
+  }
+
   if (event.key === 'Enter' && !event.shiftKey) {
     event.preventDefault();
     sendMessage();
@@ -1852,5 +1923,39 @@ defineExpose({
 }
 .bob-clickable:active {
   transform: scale(0.93);
+}
+
+.mention-menu {
+  position: absolute;
+  bottom: 100%;
+  left: 16px;
+  margin-bottom: 8px;
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  padding: 4px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+  z-index: 100;
+  min-width: 200px;
+}
+.mention-menu-item {
+  padding: 8px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+.mention-menu-item:hover, .mention-menu-item.active {
+  background-color: var(--bg-tertiary);
+}
+.mention-shortcut {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  background-color: var(--bg-root);
+  padding: 2px 6px;
+  border-radius: 4px;
 }
 </style>
