@@ -1328,6 +1328,8 @@ async fn stream_internal(
     messages: Vec<Value>,
     conv_id: Option<String>,
     from_user: Option<String>,
+    global_file_access: bool,
+    agent_mode: String,
 ) -> Value {
     // conv_id 用于标记 llm:chunk 事件属于哪个会话，防止跨会话串流
     let conv_id_for_emit = conv_id.clone().unwrap_or_default();
@@ -1448,6 +1450,12 @@ async fn stream_internal(
             String::new()
         };
 
+        let agent_mode_info = if agent_mode == "yolo" {
+            "\n## 工作模式：干活模式 (YOLO)\n你当前处于高度授权的“干活模式”。你可以大胆使用文件操作等工具完成用户的请求，无需反复向用户确认。\n"
+        } else {
+            ""
+        };
+
         let system_prompt = format!(
             "你是 Bob，一个友善、专业的桌面 AI 私人助手，由 Tauri (Rust) 和 Vue 3 构建。\n\
 你当前运行在用户的本地计算机上。\n\
@@ -1470,7 +1478,12 @@ async fn stream_internal(
 - **read_model_registry**: 读取当前 AI 模型注册表（查看/对比供应商模型列表）
 - **test_model_endpoint**: 测试某个模型 ID 的 API 连通性（验证模型是否可用）
 - **update_model_registry**: 更新指定供应商的模型列表（必须先 test 验证）
-
+- **create_directory**: 创建新文件夹（仅在干活模式可用）
+- **move_file**: 移动文件或文件夹（仅在干活模式可用）
+- **copy_file**: 复制文件（仅在干活模式可用）
+- **delete_file**: 安全删除文件或目录到系统回收站（仅在干活模式可用）
+- **rename_file**: 重命名文件或目录（仅在干活模式可用）
+{}
 ## 文档输出能力
 你能够为用户生成并导出专业级别的文档，请在以下场景主动调用对应的导出工具：
 - **export_html**: 生成精美排版的 HTML 分析报告/周报。这是你的**首选和主力**文档输出方式。用户可以通过浏览器原生的打印功能(Ctrl+P)将其完美导出为 PDF (已适配 @media print 分页规则)。
@@ -1520,7 +1533,7 @@ async fn stream_internal(
 - date 可以为 null（如果没有明确时间）\n\
 - 只在确实检测到行动项时才输出此代码块，不要强行捕获\n\
 - 不要在普通问答、闲聊中输出此代码块",
-            os_info, current_dir, wxid_info, skills_summary, memory_summary, wiki_status
+            os_info, current_dir, wxid_info, agent_mode_info, skills_summary, memory_summary, wiki_status
         );
 
         full_messages.push(json!({
@@ -1961,7 +1974,7 @@ async fn stream_internal(
                 let fu = from_user_for_tools.clone();
                 let idx = *i;
                 async move {
-                    let result = super::tools::execute_tool(&app_clone, &name, &args, fu.as_deref()).await;
+                    let result = super::tools::execute_tool(&app_clone, &name, &args, fu.as_deref(), global_file_access).await;
                     (idx, name, args, result)
                 }
             }).collect();
@@ -2150,13 +2163,13 @@ async fn stream_internal(
     })
 }
 
-pub async fn stream_chat(app: AppHandle, messages: Vec<Value>, conv_id: Option<String>, from_user: Option<String>) -> Value {
-    stream_internal(app, messages, conv_id, from_user).await
+pub async fn stream_chat(app: AppHandle, messages: Vec<Value>, conv_id: Option<String>, from_user: Option<String>, global_file_access: bool, agent_mode: String) -> Value {
+    stream_internal(app, messages, conv_id, from_user, global_file_access, agent_mode).await
 }
 
 
 
-pub async fn stream_vision(app: AppHandle, mut messages: Vec<Value>, image_base64: String, conv_id: Option<String>) -> Value {
+pub async fn stream_vision(app: AppHandle, mut messages: Vec<Value>, image_base64: String, conv_id: Option<String>, global_file_access: bool, agent_mode: String) -> Value {
     if let Some(last) = messages.last_mut() {
         if let Some(obj) = last.as_object_mut() {
             let text_content = obj.get("content").and_then(|v| v.as_str()).unwrap_or("请分析这张图片");
@@ -2173,7 +2186,7 @@ pub async fn stream_vision(app: AppHandle, mut messages: Vec<Value>, image_base6
             ]));
         }
     }
-    stream_internal(app, messages, conv_id, None).await
+    stream_internal(app, messages, conv_id, None, global_file_access, agent_mode).await
 }
 
 // ═══════════════════════════════════════════════════════════

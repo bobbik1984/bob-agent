@@ -284,7 +284,7 @@ async fn handle_message(
     // Call LLM
     // We will need to send typing heartbeats while waiting. 
     // For now we just call it.
-    let result = crate::llm::stream_chat(app_handle.clone(), messages, Some(conversation_id.clone()), Some(wxid.to_string())).await;
+    let result = crate::llm::stream_chat(app_handle.clone(), messages, Some(conversation_id.clone()), Some(wxid.to_string()), false, "default".to_string()).await;
     
     let mut full_text = String::new();
     if let Some(content) = result.get("content").and_then(|v| v.as_str()) {

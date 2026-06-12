@@ -54,9 +54,9 @@ window.electronAPI = {
 
   // ── LLM 通信 (Rust 引擎) ─────────────────────────────
   sendChat: (messages, globalFileAccess, agentMode, conversationId) => 
-    invoke('llm_chat', { messages, conversationId }),
+    invoke('llm_chat', { messages, conversationId, globalFileAccess, agentMode }),
   sendVision: (messages, imageBase64, globalFileAccess, agentMode, conversationId) => 
-    invoke('llm_vision', { messages, imageBase64, conversationId }),
+    invoke('llm_vision', { messages, imageBase64, conversationId, globalFileAccess, agentMode }),
   stopGeneration: async () => { /* 待实现 AbortController */ },
   getModels: async (provider) => {
     try {
@@ -254,6 +254,14 @@ window.electronAPI = {
   wechatGetLoginQr: async () => invoke('wechat_get_login_qr'),
   wechatCheckLoginStatus: async (qrcode) => invoke('wechat_check_login_status', { qrcode }),
   wechatGetCurrentStatus: async () => invoke('wechat_get_current_status'),
+
+  // Telegram API
+  telegramSaveToken: async (token) => invoke('system_save_telegram_token', { token }),
+  telegramGetToken: async () => invoke('system_get_telegram_token'),
+
+  // Discord API
+  discordSaveToken: async (token) => invoke('system_save_discord_token', { token }),
+  discordGetToken: async () => invoke('system_get_discord_token'),
 
   // ── 浏览器增强 (CDP Browser Enhancement) ─────────────────
   browserDetect: async () => invoke('system_browser_detect'),

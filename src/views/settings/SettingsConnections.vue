@@ -367,13 +367,29 @@ async function copyUrl(url) {
   }
 }
 
-function activateMobileChannel(channel) {
+async function activateMobileChannel(channel) {
   if (channel === 'telegram') {
-    alert('已模拟绑定 Telegram。互斥逻辑生效，后台其他渠道的长连接将被自动踢出 (需后端实现)。');
-    wechatConnected.value = false;
+    if (!tgToken.value) {
+      alert('请填写 Telegram Bot Token');
+      return;
+    }
+    try {
+      await window.electronAPI.telegramSaveToken(tgToken.value);
+      alert('Telegram 绑定成功！机器人已在后台启动。');
+    } catch(e) {
+      alert('绑定失败: ' + e);
+    }
   } else if (channel === 'discord') {
-    alert('已模拟绑定 Discord。互斥逻辑生效，后台其他渠道的长连接将被自动踢出 (需后端实现)。');
-    wechatConnected.value = false;
+    if (!discordToken.value) {
+      alert('请填写 Discord Bot Token');
+      return;
+    }
+    try {
+      await window.electronAPI.discordSaveToken(discordToken.value);
+      alert('Discord 绑定成功！机器人已在后台启动。');
+    } catch(e) {
+      alert('绑定失败: ' + e);
+    }
   }
 }
 
@@ -588,6 +604,24 @@ onMounted(async () => {
       const res = await window.electronAPI.wechatGetCurrentStatus();
       if (res && res.connected) {
         wechatConnected.value = true;
+      }
+    } catch(err) {}
+  }
+  
+  if (window.electronAPI.telegramGetToken) {
+    try {
+      const res = await window.electronAPI.telegramGetToken();
+      if (res && res.token) {
+        tgToken.value = res.token;
+      }
+    } catch(err) {}
+  }
+
+  if (window.electronAPI.discordGetToken) {
+    try {
+      const res = await window.electronAPI.discordGetToken();
+      if (res && res.token) {
+        discordToken.value = res.token;
       }
     } catch(err) {}
   }

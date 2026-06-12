@@ -67,6 +67,9 @@ docx-rs = "0.4.20"
 open = "5.3.5"
 command-group = { version = "5.0.1", features = ["with-tokio"] }
 socket2 = "0.6.4"
+trash = "5.2.3"
+lazy_static = "1.5.0"
+tokio-tungstenite = { version = "0.29.0", features = ["rustls-tls-native-roots"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.52", features = ["Win32_System_JobObjects", "Win32_Foundation", "Win32_System_Threading", "Win32_Security"] }

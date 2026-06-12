@@ -665,3 +665,87 @@
   - [ ] 输入契约: 复用 mckinsey-designer 的 Storyboard JSON Schema
 
 - [ ] T-1534: **`export_pptx` Tool Calling 接口**
+
+---
+
+## 📍 里程碑 16: v0.4.1 — Shell 执行引擎 + 通讯渠道接入
+> 🎯 **目标**: 补齐白领场景的"文件整理"与"移动端通讯"两个关键能力缺口。
+> 📋 **来源**: 用户反馈 — 基础文件操作 + Telegram/Discord 后端接入。
+> 🏗️ **预估工作量**: 2-3 天。
+
+### Phase 0: 架构断裂修复 (Bug Fix — 最高优先级)
+
+- [ ] T-1601: **agentMode/globalFileAccess 透传修复**
+  - [ ] `tauri-bridge.js`: sendChat/sendVision 将 `globalFileAccess`, `agentMode` 透传给 Rust invoke
+  - [ ] `lib.rs`: llm_chat/llm_vision 命令签名新增 `global_file_access: bool`, `agent_mode: String`
+  - [ ] `llm.rs`: stream_internal() 接收并使用这两个参数:
+    - `global_file_access` → 传给 execute_tool() → resolve_write_path()
+    - `agent_mode == "yolo"` → system prompt 附加"干活模式"指令
+  - [ ] `tools.rs`: 移除 L1419-1420 的 TODO 硬编码 `let global_file_access = false`
+
+### Phase 1: 文件操作工具集 (Shell-Lite, 5 个新工具)
+
+- [ ] T-1611: **create_directory 工具**
+  - [ ] `tools.rs`: Schema + execute 分支, 使用 `std::fs::create_dir_all()`
+  - [ ] 安全: 复用 `resolve_write_path()` 白名单
+
+- [ ] T-1612: **move_file 工具**
+  - [ ] `tools.rs`: Schema + execute 分支, 使用 `std::fs::rename()` + 跨盘降级 copy+delete
+  - [ ] 安全: 源路径需在 tracked_folders 内, 目标路径走 `resolve_write_path()`
+
+- [ ] T-1613: **copy_file 工具**
+  - [ ] `tools.rs`: Schema + execute 分支, 使用 `std::fs::copy()`
+  - [ ] 安全: 同 move_file
+
+- [ ] T-1614: **delete_file 工具 (回收站优先)**
+  - [ ] `Cargo.toml`: 引入 `trash = "5"` 跨平台回收站 crate
+  - [ ] `tools.rs`: Schema + execute 分支, 优先 `trash::delete()`, 降级 `std::fs::remove_file()`
+  - [ ] 安全: 仅允许删除 tracked_folders / workspaceDir 内的文件
+
+- [ ] T-1615: **rename_file 工具**
+  - [ ] `tools.rs`: Schema + execute 分支, 使用 `std::fs::rename()` 同目录内
+  - [ ] 安全: 复用 `resolve_write_path()`
+
+- [ ] T-1616: **System Prompt 更新**
+  - [ ] `llm.rs`: 工具列表注释区追加 5 个文件操作工具的描述
+
+### Phase 2: Telegram Bot 后端
+
+- [ ] T-1621: **新建 `telegram.rs` 模块**
+  - [ ] `TelegramBot` 结构体: token, chat_id, running (Arc<AtomicBool>)
+  - [ ] `start_polling()`: tokio::spawn 后台循环, 每 2s 调用 getUpdates API
+  - [ ] 消息接收: 解析 message.text → 调用 stream_internal() → sendMessage 回复
+  - [ ] 绑定机制: 首条消息的 chat_id 自动绑定为唯一用户
+  - [ ] `stop_polling()`: 设置 running = false 优雅退出
+
+- [ ] T-1622: **IPC 命令注册**
+  - [ ] `lib.rs`: mod telegram + 注册 telegram_activate, telegram_deactivate, telegram_status
+  - [ ] `tauri-bridge.js`: 新增 telegramActivate/Deactivate/Status 映射
+  - [ ] setup(): 检查 config 中已有 Token 时自动启动 polling
+
+- [ ] T-1623: **前端 UI 对接**
+  - [ ] `SettingsConnections.vue`: activateMobileChannel('telegram') 调用真实后端
+  - [ ] 成功后更新 UI 状态为"已连接" + 显示 Bot username
+
+### Phase 3: Discord Bot 后端
+
+- [ ] T-1631: **新建 `discord.rs` 模块**
+  - [ ] `Cargo.toml`: 引入 `tokio-tungstenite = "0.24"` WebSocket 客户端
+  - [ ] WebSocket 连接 Discord Gateway + 心跳维持
+  - [ ] 监听 MESSAGE_CREATE 事件 (DM + @mention)
+  - [ ] 调用 REST API sendMessage 回复
+  - [ ] 首条 DM 的 author.id 自动绑定
+
+- [ ] T-1632: **IPC 命令注册**
+  - [ ] `lib.rs`: mod discord + 注册 discord_activate, discord_deactivate, discord_status
+  - [ ] `tauri-bridge.js`: 新增 discordActivate/Deactivate/Status 映射
+
+- [ ] T-1633: **前端 UI 对接**
+  - [ ] `SettingsConnections.vue`: activateMobileChannel('discord') 调用真实后端
+
+### Phase 4: 验证
+
+- [ ] T-1641: cargo check + cargo clippy 编译通过
+- [ ] T-1642: 端到端测试 — 对话中"帮我建个文件夹"/"移动文件" 验证
+- [ ] T-1643: Telegram Bot 测试 — Token 激活 → 手机发消息 → Bob 回复
+- [ ] T-1644: Discord Bot 测试 — Token 激活 → DM 发消息 → Bob 回复

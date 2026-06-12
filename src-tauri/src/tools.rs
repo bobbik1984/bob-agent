@@ -260,6 +260,79 @@ fn get_builtin_tool_schemas() -> Vec<Value> {
         json!({
             "type": "function",
             "function": {
+                "name": "create_directory",
+                "description": "创建新文件夹（目录）。如果父目录不存在会自动创建。如果目录已存在，不会报错。需要干活模式授权。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "path": { "type": "string", "description": "要创建的目录的绝对路径" }
+                    },
+                    "required": ["path"]
+                }
+            }
+        }),
+        json!({
+            "type": "function",
+            "function": {
+                "name": "move_file",
+                "description": "移动文件或文件夹到新位置。也可用于跨目录移动。如果目标已存在，将被覆盖。需要干活模式授权。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "source": { "type": "string", "description": "源文件或文件夹的绝对路径" },
+                        "destination": { "type": "string", "description": "目标路径的绝对路径" }
+                    },
+                    "required": ["source", "destination"]
+                }
+            }
+        }),
+        json!({
+            "type": "function",
+            "function": {
+                "name": "copy_file",
+                "description": "复制文件到新位置。如果目标已存在，将被覆盖。仅支持复制单个文件。需要干活模式授权。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "source": { "type": "string", "description": "源文件的绝对路径" },
+                        "destination": { "type": "string", "description": "目标文件的绝对路径" }
+                    },
+                    "required": ["source", "destination"]
+                }
+            }
+        }),
+        json!({
+            "type": "function",
+            "function": {
+                "name": "delete_file",
+                "description": "安全删除文件或目录（移动到系统回收站）。如果可能，请首选此工具而非直接覆盖。需要干活模式授权。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "path": { "type": "string", "description": "要删除的文件或目录的绝对路径" }
+                    },
+                    "required": ["path"]
+                }
+            }
+        }),
+        json!({
+            "type": "function",
+            "function": {
+                "name": "rename_file",
+                "description": "重命名文件或目录。必须在同一个目录下进行操作（不能跨目录，跨目录请用 move_file）。需要干活模式授权。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "path": { "type": "string", "description": "要重命名的原绝对路径" },
+                        "new_name": { "type": "string", "description": "新的名称（仅文件名，不是完整路径）" }
+                    },
+                    "required": ["path", "new_name"]
+                }
+            }
+        }),
+        json!({
+            "type": "function",
+            "function": {
                 "name": "read_file",
                 "description": "读取指定路径的文本文件内容。支持 txt/md/json/yaml/csv 等文本格式，上限 500KB。用于查看用户提到的文件、读取配置文件、提取密钥等。",
                 "parameters": {
@@ -697,7 +770,7 @@ fn get_builtin_tool_schemas() -> Vec<Value> {
 
 /// 执行指定工具并返回结果
 /// `from_user`: 当工具调用源自微信会话时，传入消息发送者的加密 wxid
-pub async fn execute_tool(app: &tauri::AppHandle, name: &str, args: &Value, from_user: Option<&str>) -> Value {
+pub async fn execute_tool(app: &tauri::AppHandle, name: &str, args: &Value, from_user: Option<&str>, global_file_access: bool) -> Value {
     // 工具级超时控制：媒体上传类工具给 120 秒，其他给 30 秒
     let timeout_secs = match name {
         "send_wechat_file" => 120,
@@ -706,7 +779,7 @@ pub async fn execute_tool(app: &tauri::AppHandle, name: &str, args: &Value, from
     let timeout_duration = std::time::Duration::from_secs(timeout_secs);
     let result = match tokio::time::timeout(
         timeout_duration,
-        execute_tool_inner(app, name, args, from_user)
+        execute_tool_inner(app, name, args, from_user, global_file_access)
     ).await {
         Ok(r) => r,
         Err(_) => {
@@ -727,7 +800,7 @@ pub async fn execute_tool(app: &tauri::AppHandle, name: &str, args: &Value, from
     result
 }
 
-async fn execute_tool_inner(app: &tauri::AppHandle, name: &str, args: &Value, from_user: Option<&str>) -> Value {
+async fn execute_tool_inner(app: &tauri::AppHandle, name: &str, args: &Value, from_user: Option<&str>, global_file_access: bool) -> Value {
     match name {
         "read_file" => {
             let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
@@ -737,6 +810,29 @@ async fn execute_tool_inner(app: &tauri::AppHandle, name: &str, args: &Value, fr
                 return json!({ "error": "禁止使用 ../ 进行路径穿越" });
             }
             super::filesystem::system_read_file(path.to_string())
+        }
+        "create_directory" => {
+            let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
+            tool_create_directory(path, global_file_access).await
+        }
+        "move_file" => {
+            let source = args.get("source").and_then(|v| v.as_str()).unwrap_or("");
+            let destination = args.get("destination").and_then(|v| v.as_str()).unwrap_or("");
+            tool_move_file(source, destination, global_file_access).await
+        }
+        "copy_file" => {
+            let source = args.get("source").and_then(|v| v.as_str()).unwrap_or("");
+            let destination = args.get("destination").and_then(|v| v.as_str()).unwrap_or("");
+            tool_copy_file(source, destination, global_file_access).await
+        }
+        "delete_file" => {
+            let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
+            tool_delete_file(path, global_file_access).await
+        }
+        "rename_file" => {
+            let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
+            let new_name = args.get("new_name").and_then(|v| v.as_str()).unwrap_or("");
+            tool_rename_file(path, new_name, global_file_access).await
         }
         "list_dir" => {
             let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
@@ -769,7 +865,7 @@ async fn execute_tool_inner(app: &tauri::AppHandle, name: &str, args: &Value, fr
         "write_file" => {
             let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
             let content = args.get("content").and_then(|v| v.as_str()).unwrap_or("");
-            tool_write_file(path, content).await
+            tool_write_file(path, content, global_file_access).await
         }
         "brain_search" => {
             let query = args.get("query").and_then(|v| v.as_str()).unwrap_or("");
@@ -778,7 +874,7 @@ async fn execute_tool_inner(app: &tauri::AppHandle, name: &str, args: &Value, fr
         "append_file" => {
             let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
             let content = args.get("content").and_then(|v| v.as_str()).unwrap_or("");
-            tool_append_file(path, content).await
+            tool_append_file(path, content, global_file_access).await
         }
         "list_calendar_events" => {
             tool_list_calendar_events(app)
@@ -1415,9 +1511,7 @@ async fn tool_get_weather(city: &str) -> Value {
     })
 }
 
-async fn tool_write_file(path: &str, content: &str) -> Value {
-    // TODO: global_file_access 应从调用链传入，目前默认 false
-    let global_file_access = false;
+async fn tool_write_file(path: &str, content: &str, global_file_access: bool) -> Value {
     let target_path = match resolve_write_path(path, global_file_access) {
         Ok(p) => p,
         Err(e) => return json!({ "error": e }),
@@ -1433,8 +1527,7 @@ async fn tool_write_file(path: &str, content: &str) -> Value {
     }
 }
 
-async fn tool_append_file(path: &str, content: &str) -> Value {
-    let global_file_access = false;
+async fn tool_append_file(path: &str, content: &str, global_file_access: bool) -> Value {
     let target_path = match resolve_write_path(path, global_file_access) {
         Ok(p) => p,
         Err(e) => return json!({ "error": e }),
@@ -1451,6 +1544,80 @@ async fn tool_append_file(path: &str, content: &str) -> Value {
     match fs::write(&target_path, &new_content) {
         Ok(_) => json!({ "ok": true, "path": target_path.to_string_lossy().to_string(), "bytes_appended": content.len() }),
         Err(e) => json!({ "error": format!("追加文件失败: {}", e) })
+    }
+}
+
+async fn tool_create_directory(path: &str, global_file_access: bool) -> Value {
+    let target_path = match resolve_write_path(path, global_file_access) {
+        Ok(p) => p,
+        Err(e) => return json!({ "error": e }),
+    };
+    match fs::create_dir_all(&target_path) {
+        Ok(_) => json!({ "ok": true, "path": target_path.to_string_lossy().to_string() }),
+        Err(e) => json!({ "error": format!("创建文件夹失败: {}", e) })
+    }
+}
+
+async fn tool_move_file(source: &str, destination: &str, global_file_access: bool) -> Value {
+    let src_path = match resolve_write_path(source, global_file_access) {
+        Ok(p) => p,
+        Err(e) => return json!({ "error": format!("源路径: {}", e) }),
+    };
+    let dst_path = match resolve_write_path(destination, global_file_access) {
+        Ok(p) => p,
+        Err(e) => return json!({ "error": format!("目标路径: {}", e) }),
+    };
+    if let Some(parent) = dst_path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    match fs::rename(&src_path, &dst_path) {
+        Ok(_) => json!({ "ok": true, "source": src_path.to_string_lossy().to_string(), "destination": dst_path.to_string_lossy().to_string() }),
+        Err(e) => json!({ "error": format!("移动文件失败: {}", e) })
+    }
+}
+
+async fn tool_copy_file(source: &str, destination: &str, global_file_access: bool) -> Value {
+    let src_path = match resolve_write_path(source, global_file_access) {
+        Ok(p) => p,
+        Err(e) => return json!({ "error": format!("源路径: {}", e) }),
+    };
+    let dst_path = match resolve_write_path(destination, global_file_access) {
+        Ok(p) => p,
+        Err(e) => return json!({ "error": format!("目标路径: {}", e) }),
+    };
+    if let Some(parent) = dst_path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    match fs::copy(&src_path, &dst_path) {
+        Ok(bytes) => json!({ "ok": true, "bytes_copied": bytes, "destination": dst_path.to_string_lossy().to_string() }),
+        Err(e) => json!({ "error": format!("复制文件失败: {}", e) })
+    }
+}
+
+async fn tool_delete_file(path: &str, global_file_access: bool) -> Value {
+    let target_path = match resolve_write_path(path, global_file_access) {
+        Ok(p) => p,
+        Err(e) => return json!({ "error": e }),
+    };
+    match trash::delete(&target_path) {
+        Ok(_) => json!({ "ok": true, "path": target_path.to_string_lossy().to_string() }),
+        Err(e) => json!({ "error": format!("放入回收站失败: {}", e) })
+    }
+}
+
+async fn tool_rename_file(path: &str, new_name: &str, global_file_access: bool) -> Value {
+    let target_path = match resolve_write_path(path, global_file_access) {
+        Ok(p) => p,
+        Err(e) => return json!({ "error": e }),
+    };
+    if let Some(parent) = target_path.parent() {
+        let new_path = parent.join(new_name);
+        match fs::rename(&target_path, &new_path) {
+            Ok(_) => json!({ "ok": true, "path": new_path.to_string_lossy().to_string() }),
+            Err(e) => json!({ "error": format!("重命名失败: {}", e) })
+        }
+    } else {
+        json!({ "error": "无法确定父目录" })
     }
 }
 

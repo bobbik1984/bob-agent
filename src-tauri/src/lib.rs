@@ -24,6 +24,8 @@ mod lark;
 mod google_calendar;
 mod gmail;
 mod exports;
+mod telegram;
+mod discord;
 
 use serde_json::{json, Value};
 use std::fs;
@@ -146,13 +148,13 @@ fn config_get_all() -> Value {
 // ═══════════════════════════════════════════════════════════
 
 #[tauri::command]
-async fn llm_chat(messages: Vec<Value>, conversation_id: Option<String>, app: tauri::AppHandle) -> Value {
-    llm::stream_chat(app, messages, conversation_id, None).await
+async fn llm_chat(messages: Vec<Value>, conversation_id: Option<String>, global_file_access: bool, agent_mode: String, app: tauri::AppHandle) -> Value {
+    llm::stream_chat(app, messages, conversation_id, None, global_file_access, agent_mode).await
 }
 
 #[tauri::command]
-async fn llm_vision(messages: Vec<Value>, image_base64: String, conversation_id: Option<String>, app: tauri::AppHandle) -> Value {
-    llm::stream_vision(app, messages, image_base64, conversation_id).await
+async fn llm_vision(messages: Vec<Value>, image_base64: String, conversation_id: Option<String>, global_file_access: bool, agent_mode: String, app: tauri::AppHandle) -> Value {
+    llm::stream_vision(app, messages, image_base64, conversation_id, global_file_access, agent_mode).await
 }
 
 #[tauri::command]
@@ -736,6 +738,12 @@ pub fn run() {
             connector::connector_disconnect,
             // 聊天就绪校验
             llm::system_validate_chat_ready,
+            // Telegram Bot
+            telegram::system_save_telegram_token,
+            telegram::system_get_telegram_token,
+            // Discord Bot
+            discord::system_save_discord_token,
+            discord::system_get_discord_token,
         ])
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             // 如果已经有一个实例在运行，就把已有窗口唤出来
@@ -791,6 +799,18 @@ pub fn run() {
             let scheduler_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 scheduler::start_scheduler(scheduler_handle).await;
+            });
+
+            // 启动 Telegram Bot (T-1500)
+            let tg_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                telegram::init(tg_handle).await;
+            });
+
+            // 启动 Discord Bot (T-1501)
+            let discord_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                discord::init(discord_handle).await;
             });
 
             // ── 清理遗留的 "vaulted" 标记 ──
