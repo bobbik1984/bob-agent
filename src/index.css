@@ -1,4 +1,4 @@
-﻿/*
+/*
  * bob-agent 鈥?璁捐绯荤粺
  *
  * 鏆楄壊浼樺厛 路 Premium 璐ㄦ劅 路 寰姩鐢?
@@ -294,7 +294,7 @@ a:hover {
   --overlay-bg:       rgba(0, 0, 0, 0.5);
 
   /* 鈹€鈹€ 鎺掔増 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€ */
-  --font-sans:  'Inter', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-sans:  system-ui, -apple-system, 'Segoe UI', Roboto, 'Microsoft YaHei', 'PingFang SC', sans-serif;
   --font-mono:  'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
 
   --text-xs:    0.75rem;   /* 12px */
@@ -370,6 +370,9 @@ html.theme-transitioning {
               --accent-primary 0.8s ease, --accent-secondary 0.8s ease, --accent-tertiary 0.8s ease !important;
 }
 /* -- UI Scale ---------------------------------------------- */
+html {
+  font-size: 16px; /* 默认基准，与 compact 一致 */
+}
 html[data-ui-scale="compact"] {
   font-size: 16px;
 }

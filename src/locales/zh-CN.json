@@ -424,7 +424,9 @@
     "high": "高"
   },
   "todo": {
-    "empty": "还没有待办事项，快去对我说添加任务吧！"
+    "empty": "还没有待办事项，快去对我说添加任务吧！",
+    "show_completed": "显示已完成",
+    "completed_at": "完成于 {time}"
   },
   "timeline": {
     "today": "今天",

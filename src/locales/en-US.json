@@ -424,7 +424,9 @@
     "high": "High"
   },
   "todo": {
-    "empty": "No to-dos yet. Tell me to add a task!"
+    "empty": "No to-dos yet. Tell me to add a task!",
+    "show_completed": "Show completed",
+    "completed_at": "Done at {time}"
   },
   "timeline": {
     "today": "Today",

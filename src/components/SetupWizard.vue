@@ -9,8 +9,16 @@
       </div>
 
       <div class="wizard-body">
-        <!-- Page 1: Theme & Color -->
+        <!-- Page 1: Language, Theme & Color -->
         <div v-if="step === 1" class="page">
+          <div class="theme-options">
+            <button :class="['btn-theme', { active: tempConfig.language === 'zh-CN' }]" @click="setLanguage('zh-CN')">
+              简体中文
+            </button>
+            <button :class="['btn-theme', { active: tempConfig.language === 'en-US' }]" @click="setLanguage('en-US')">
+              English
+            </button>
+          </div>
           <div class="theme-options">
             <button :class="['btn-theme', { active: tempConfig.theme === 'dark' }]" @click="setTheme('dark')">
             <Moon :size="20" /> {{ $t('setup.theme_dark') }}
@@ -96,7 +104,7 @@ import { Moon, Sun, ChevronLeft, ChevronRight, Loader2, Rocket, Check } from 'lu
 import CustomSelect from './CustomSelect.vue';
 import { ACCENT_COLORS } from '@/constants/theme.js';
 
-const { t: $t } = useI18n();
+const { locale, t: $t } = useI18n();
 
 const emit = defineEmits(['complete']);
 const step = ref(1);
@@ -110,12 +118,16 @@ const rawQrCode = ref('');
 let pollTimer = null;
 
 const tempConfig = ref({
+  language: locale.value,
   theme: 'dark',
   accentColor: '#2776bb',
   workspaceDir: '',
   provider: 'deepseek',
   apiKey: ''
 });
+
+// 记录初始快照，用于 finishOnboarding 时只写入用户实际修改过的字段
+let initialSnapshot = {};
 
 const accentColors = ACCENT_COLORS;
 
@@ -129,22 +141,30 @@ const providerOptions = [
   { label: 'MiniMax', value: 'minimax' }
 ];
 
+onMounted(async () => {
+  // 读取已有配置，用其填充 tempConfig（避免走完向导覆盖已有数据）
+  if (window.electronAPI) {
+    const saved = await window.electronAPI.getConfig('all');
+    if (saved) {
+      if (saved.language) { tempConfig.value.language = saved.language; locale.value = saved.language; }
+      if (saved.theme) tempConfig.value.theme = saved.theme;
+      if (saved.accentColor) tempConfig.value.accentColor = saved.accentColor;
+      if (saved.workspaceDir) tempConfig.value.workspaceDir = saved.workspaceDir;
+      if (saved.provider) tempConfig.value.provider = saved.provider;
+      // apiKey 不从配置回填（安全考虑，存在 apiKeys 子对象中）
+    }
+  }
+  // 将主题和色彩应用到 DOM（使用已有配置或默认值）
+  document.documentElement.setAttribute('data-theme', tempConfig.value.theme);
+  setAccentColor(tempConfig.value.accentColor);
+  // 拍快照：记录加载后的初始状态，用于 finishOnboarding 差量写入
+  initialSnapshot = JSON.parse(JSON.stringify(tempConfig.value));
+});
+
 // 离开 Step 3 时立即保存 API Key 到 OS Keychain
 watch(step, async (newStep, oldStep) => {
   if (oldStep === 3 && tempConfig.value.apiKey && window.electronAPI?.setApiKey) {
     await window.electronAPI.setApiKey(tempConfig.value.provider, tempConfig.value.apiKey);
-  }
-});
-
-onMounted(async () => {
-  document.documentElement.setAttribute('data-theme', 'dark');
-  if (window.electronAPI) {
-    const sysConfig = await window.electronAPI.getAllConfig();
-    if (sysConfig.accentColor) tempConfig.value.accentColor = sysConfig.accentColor;
-    if (sysConfig.workspaceDir) tempConfig.value.workspaceDir = sysConfig.workspaceDir;
-    if (sysConfig.provider) tempConfig.value.provider = sysConfig.provider;
-    // 不再回填 apiKey（keychain 中的密钥不应泄露到前端状态）
-    setAccentColor(tempConfig.value.accentColor);
   }
 });
 
@@ -186,6 +206,11 @@ async function pollQrStatus() {
   pollTimer = setTimeout(pollQrStatus, 2000);
 }
 
+function setLanguage(lang) {
+  tempConfig.value.language = lang;
+  locale.value = lang;
+}
+
 function setTheme(t) {
   tempConfig.value.theme = t;
   document.documentElement.setAttribute('data-theme', t);
@@ -210,18 +235,24 @@ async function selectWorkspaceDir() {
 
 async function finishOnboarding() {
   if (window.electronAPI) {
-    await window.electronAPI.setConfig('theme', tempConfig.value.theme);
-    await window.electronAPI.setConfig('accentColor', tempConfig.value.accentColor);
-    await window.electronAPI.setConfig('workspaceDir', tempConfig.value.workspaceDir);
-    await window.electronAPI.setConfig('provider', tempConfig.value.provider);
-    // 通过 Keychain 安全通道保存 API Key（而非 config_set 明文写入）
+    // 只写入用户在向导中实际修改过的字段，不动已有配置
+    const fieldsToCheck = ['language', 'theme', 'accentColor', 'workspaceDir', 'provider'];
+    for (const key of fieldsToCheck) {
+      if (tempConfig.value[key] !== initialSnapshot[key]) {
+        await window.electronAPI.setConfig(key, tempConfig.value[key]);
+      }
+    }
+    // API Key：仅当用户在向导里输入了新 Key 时才写入
     if (tempConfig.value.apiKey && window.electronAPI.setApiKey) {
       await window.electronAPI.setApiKey(tempConfig.value.provider, tempConfig.value.apiKey);
     }
     await window.electronAPI.setConfig('onboarded', true);
-    const models = await window.electronAPI.getModels(tempConfig.value.provider);
-    const defaultModel = models.find(m => m.default) || models[0];
-    if (defaultModel) await window.electronAPI.setConfig('model', defaultModel.id);
+    // 仅当 provider 发生了变更时，才重新绑定默认模型
+    if (tempConfig.value.provider !== initialSnapshot.provider) {
+      const models = await window.electronAPI.getModels(tempConfig.value.provider);
+      const defaultModel = models.find(m => m.default) || models[0];
+      if (defaultModel) await window.electronAPI.setConfig('model', defaultModel.id);
+    }
   }
   emit('complete');
 }
