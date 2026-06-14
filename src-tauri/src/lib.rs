@@ -782,12 +782,18 @@ pub fn run() {
         })
         .setup(|app| {
             app.handle().plugin(tauri_plugin_shell::init())?;
-            if cfg!(debug_assertions) {
-                app.handle().plugin(
-                    tauri_plugin_log::Builder::default()
-                        .level(log::LevelFilter::Info)
-                        .build(),
-                )?;
+            // 日志：debug 输出到终端 + 文件，release 仅输出到文件
+            {
+                use tauri_plugin_log::{Target, TargetKind};
+                let mut log_builder = tauri_plugin_log::Builder::default()
+                    .level(log::LevelFilter::Info)
+                    .max_file_size(2_000_000) // 单文件最大 2MB，自动轮转
+                    .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepAll)
+                    .target(Target::new(TargetKind::LogDir { file_name: Some("bob".into()) }));
+                if cfg!(debug_assertions) {
+                    log_builder = log_builder.target(Target::new(TargetKind::Stdout));
+                }
+                app.handle().plugin(log_builder.build())?;
             }
 
             // 读取用户上次保存的主题，动态设置原生窗口底色，防止在亮色模式下启动闪黑屏

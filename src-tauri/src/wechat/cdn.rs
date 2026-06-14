@@ -100,17 +100,21 @@ async fn upload_buffer_to_cdn(
         return Err("CDN upload URL missing (need upload_full_url or upload_param)".to_string());
     };
 
-    log::debug!("[cdn] POST to CDN url (len={}), ciphertext_size={}", cdn_url.len(), ciphertext.len());
+    // 根据文件大小动态计算超时：每 MB 给 30 秒，最低 120 秒
+    let size_mb = (ciphertext.len() as u64 + 1_048_575) / 1_048_576; // 向上取整
+    let timeout_secs = std::cmp::max(120, size_mb * 30);
+    log::info!("[cdn] POST to CDN (size={}MB, timeout={}s)", size_mb, timeout_secs);
 
     let client = reqwest::Client::new();
     let mut last_error: Option<String> = None;
 
     for attempt in 1..=UPLOAD_MAX_RETRIES {
+        log::info!("[cdn] upload attempt {}/{} ...", attempt, UPLOAD_MAX_RETRIES);
         let res = client
             .post(&cdn_url)
             .header("Content-Type", "application/octet-stream")
             .body(ciphertext.to_vec())
-            .timeout(std::time::Duration::from_secs(120)) // 大文件上传可能需要较长时间
+            .timeout(std::time::Duration::from_secs(timeout_secs))
             .send()
             .await;
 
