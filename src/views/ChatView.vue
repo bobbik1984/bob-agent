@@ -125,8 +125,19 @@
         <div class="message-avatar avatar-bob"><div class="bob-avatar-icon"></div></div>
         <div class="message-body">
           <!-- 等待响应指示器：回车后立即出现，思考期间持续显示，直到正文开始流入才消失 -->
-          <div v-if="!streamContent && activeTools.length === 0" class="typing-indicator">
+          <div v-if="!streamContent && activeTools.length === 0 && !streamThinking" class="typing-indicator">
             <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+          </div>
+          <!-- 流式思考过程（实时） -->
+          <div v-if="streamThinking" class="thinking-card stream-thinking" :class="{ expanded: streamThinkingExpanded }">
+            <button class="thinking-toggle" @click="streamThinkingExpanded = !streamThinkingExpanded">
+              <span class="thinking-pulse"></span>
+              <ChevronRight :size="14" class="thinking-arrow" :class="{ 'expanded': streamThinkingExpanded }" />
+              <span>{{ $t('chat.thinking') || 'Thinking...' }}</span>
+            </button>
+            <div v-if="streamThinkingExpanded" ref="streamThinkingRef" class="thinking-content stream-thinking-content selectable">
+              {{ streamThinking }}
+            </div>
           </div>
           <!-- 工具调用状态 -->
           <div v-if="activeTools.length > 0" class="tool-calls-panel">
@@ -466,6 +477,10 @@ const healthBanner = ref(null);
 // ── T-1305: 聊天就绪守卫 ─────────────────────────────
 const chatReady = ref(true);  // fail-open: 默认可发送
 const chatReadyMsg = ref('');
+
+// ── streamThinking 流式思考 ──────────────────────────
+const streamThinkingExpanded = ref(true);  // 默认展开，用户可折叠
+const streamThinkingRef = ref(null);
 
 // ── 组合 Composables ─────────────────────────────────
 
@@ -862,10 +877,20 @@ watch(() => props.conversationId, async () => {
   } else {
     sessionCost.value = 0;
   }
+
   loadMessages();
   globalFileAccess.value = false;
   currentModelRaw.value = (await window.electronAPI.getActiveModels())?.main || '';
 }, { immediate: true });
+
+// streamThinking 自动滚动到底部
+watch(streamThinking, () => {
+  nextTick(() => {
+    if (streamThinkingRef.value) {
+      streamThinkingRef.value.scrollTop = streamThinkingRef.value.scrollHeight;
+    }
+  });
+});
 
 // ── 暴露给父组件 ────────────────────────────────────────
 defineExpose({
@@ -1185,6 +1210,30 @@ defineExpose({
   white-space: pre-wrap;
   max-height: 300px;
   overflow-y: auto;
+}
+
+/* ── 流式思考动画 ──────────────────────────────────── */
+.stream-thinking {
+  border-left-color: var(--accent-primary);
+}
+
+.thinking-pulse {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent-primary);
+  animation: pulse-thinking 1.4s ease-in-out infinite;
+}
+
+@keyframes pulse-thinking {
+  0%, 100% { opacity: 0.3; transform: scale(0.85); }
+  50% { opacity: 1; transform: scale(1.15); }
+}
+
+.stream-thinking-content {
+  max-height: 200px;
+  scroll-behavior: smooth;
 }
 
 /* ── 文件卡片 ───────────────────────────────────────── */

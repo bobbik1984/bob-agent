@@ -1584,6 +1584,17 @@ async fn stream_internal(
     // ── T-1401: 循环熔断器 ──────────────────────────────────
     let mut tool_tracker = super::tools::ToolCallTracker::new();
 
+    // ── 工具结果缓存 (会话级) ────────────────────────────────
+    // 避免同一对话中重复读取同一文件/目录，节省 Token 和时间
+    let mut tool_cache: std::collections::HashMap<String, Value> = std::collections::HashMap::new();
+    let cacheable_tools: std::collections::HashSet<&str> = [
+        "read_file", "list_dir", "list_skills", "read_skill", "system_time",
+    ].iter().copied().collect();
+    let cache_invalidating_tools: std::collections::HashSet<&str> = [
+        "write_file", "append_file", "create_directory", "move_file",
+        "copy_file", "delete_file", "rename_file",
+    ].iter().copied().collect();
+
     for round in 0..=MAX_TOOL_ROUNDS {
         // 构建请求体
         let mut body = json!({
@@ -1966,8 +1977,24 @@ async fn stream_internal(
                 }
             }
 
-            // 构建可执行工具的 futures
-            let tool_futures: Vec<_> = executable.iter().map(|(i, args)| {
+            // 构建可执行工具的 futures（含缓存命中检测）
+            let mut cached_results: Vec<(usize, String, Value, Value)> = Vec::new();
+            let mut uncached: Vec<(usize, Value)> = Vec::new();
+
+            for (i, args) in &executable {
+                let name = &pending_tool_calls[*i].name;
+                if cacheable_tools.contains(name.as_str()) {
+                    let cache_key = format!("{}:{}", name, serde_json::to_string(args).unwrap_or_default());
+                    if let Some(cached) = tool_cache.get(&cache_key) {
+                        log::info!("Tool cache HIT: {} ({})", name, cache_key.chars().take(60).collect::<String>());
+                        cached_results.push((*i, name.clone(), args.clone(), cached.clone()));
+                        continue;
+                    }
+                }
+                uncached.push((*i, args.clone()));
+            }
+
+            let tool_futures: Vec<_> = uncached.iter().map(|(i, args)| {
                 let app_clone = app.clone();
                 let name = pending_tool_calls[*i].name.clone();
                 let args = args.clone();
@@ -1987,11 +2014,26 @@ async fn stream_internal(
             // 并行等待可执行的工具完成
             let exec_results = futures_util::future::join_all(tool_futures).await;
 
-            // 合并执行结果和熔断结果，按原始索引排序
+            // 合并执行结果、缓存命中结果和熔断结果，按原始索引排序
             let mut all_results: Vec<(usize, String, Value)> = Vec::new();
 
             for (idx, name, args, result) in exec_results {
+                // 写入缓存（仅可缓存工具 + 无错误结果）
+                if cacheable_tools.contains(name.as_str()) && result.get("error").is_none() {
+                    let cache_key = format!("{}:{}", name, serde_json::to_string(&args).unwrap_or_default());
+                    tool_cache.insert(cache_key, result.clone());
+                }
+                // 写操作清空缓存（文件可能已变更）
+                if cache_invalidating_tools.contains(name.as_str()) {
+                    tool_cache.clear();
+                }
                 // 记录到熔断追踪器
+                tool_tracker.record(&name, &args);
+                all_results.push((idx, name, result));
+            }
+
+            // 缓存命中的结果直接加入
+            for (idx, name, args, result) in cached_results {
                 tool_tracker.record(&name, &args);
                 all_results.push((idx, name, result));
             }

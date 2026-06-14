@@ -1,11 +1,11 @@
 project:
   name: bob-agent
-  version: "0.3.2"
+  version: "0.32.1"
   status: stable
-  tech: [Tauri V2, Rust, Vue 3, Vite, SQLite (rusqlite), reqwest, scraper, keyring, tauri-plugin-single-instance]
-  updated: "2026-06-11"
+  tech: [Tauri V2, Rust, Vue 3, Vite, SQLite (rusqlite), reqwest, scraper, keyring, tauri-plugin-single-instance, futures, bytes]
+  updated: "2026-06-14"
   architecture: "Tauri (Rust backend) + Vue 3 (frontend) + tauri-bridge.js (adapter) + Composable 架构"
-  current_focus: "v0.3.1-pre 发布就绪 — 后续可进入 v0.4 (离线 Tool Calling / 排队纠偏 / Cron 自动化 / 生产打包)"
+  current_focus: "v0.32.1 热修复发布 — CDN 进度条 + 日志修复 + 超时优化。下一步: v0.33 (streamThinking + 文件工具 + 工具缓存)"
 
 # ═══════════════════════════════════════════════════════════════
 # Tauri 迁移后里程碑体系 (里程碑 1-11)
@@ -49,7 +49,7 @@ milestones:
       - { id: T-401, text: "rusqlite conversations/messages 表", status: done }
       - { id: T-402, text: "CRUD 操作全量实现", status: done }
       - { id: T-403, text: "db_messages/db_message_add", status: done }
-      - { id: T-404, text: "历史数据无损继承", status: todo }
+      - { id: T-404, text: "历史数据无损继承 (不再需要)", status: cancelled }
 
   - name: "M5: Rust 原生化 — LLM Engine"
     status: done
@@ -186,6 +186,12 @@ rust_modules:
   - { file: keychain.rs, desc: "OS 级密钥安全存储 (Windows DPAPI / macOS Keychain)" }
   - { file: http_api.rs, desc: "HTTP SSE API 服务器 (微信等外部接入)" }
   - { file: wechat/, desc: "微信接入模块 (9个文件: accounts/api/commands/login_qr/monitor/msg_queue/session_mgr/types)" }
+  - { file: telegram.rs, desc: "Telegram Bot 接入 (长轮询 + 自动回复)" }
+  - { file: discord.rs, desc: "Discord Bot 接入 (WebSocket Gateway + REST API)" }
+  - { file: exports/, desc: "文档导出引擎 (4个文件: docx.rs, xlsx.rs, pptx.rs, report.rs)" }
+  - { file: scheduler.rs, desc: "微心跳调度器 (tokio-cron-scheduler)" }
+  - { file: doctor.rs, desc: "启动自检健康监控" }
+  - { file: memory.rs, desc: "记忆透明化 (列出/删除记忆条目)" }
 
 # ═══════════════════════════════════════════════════════════════
 # API Key 配置状态
@@ -227,6 +233,17 @@ tests:
   note: "待端到端测试后更新"
 
 recent_fixes:
+  - date: "2026-06-14"
+    items:
+      - "[Feature] CDN 实时上传进度条 — stream-based 分块上传 (64KB/chunk) + Tauri 事件推送 + 前端进度条 UI"
+      - "[Fix] Release 版日志修复 — 移除 debug_assertions 守卫，确保生产版输出日志"
+      - "[Fix] CDN 动态超时 — max(120s, size_in_MB * 30s) 替代固定 120s"
+      - "[Arch] send_wechat_file 外层 tokio timeout 120s → 600s"
+      - "[Deps] 新增 futures + bytes crate 支持流式上传"
+      - "[Feature] streamThinking 流式思考动画 — ChatView 脉冲圆点 + 可折叠面板 + 自动滚动 + zh-CN/en-US i18n"
+      - "[Feature] 工具结果缓存 — llm.rs 会话级 HashMap, 缓存 read_file/list_dir/list_skills/read_skill/system_time, 写操作自动清空"
+      - "[Verify] T-1601 agentMode/globalFileAccess 透传已确认全链路连通"
+      - "[Verify] T-1611~1616 文件操作 5 工具已确认完整实现"
   - date: "2026-06-11"
     items:
       - "[Fix] Content-Security-Policy (CSP) 限制解除 — 允许加载 127.0.0.1 资源，修复本地图片/图标无法渲染的重大拦截问题"

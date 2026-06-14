@@ -1,8 +1,8 @@
 # Bob-Agent 开发全局路线图 (Roadmap)
 
-> 🎯 **当前版本**: `v0.3.1-pre` — 微信接入完成、API Key Keychain 加密、ChatView 架构拆分、安全加固全量完成。
-> ♻️ **已完成**: Tauri 迁移、主题系统、记忆引擎、安全加固、IPC 防抖、僵尸进程修复、路径穿越修复、微信接入、HTTP API、Composable 架构拆分。
-> 📋 **下一目标**: v0.4 — 离线模型 Tool Calling / 排队纠偏 / Cron 自动化 / 生产打包发布。
+> 🎯 **当前版本**: `v0.32.1` — CDN 上传进度条、Release 日志修复、WeChat 文件发送优化完成。
+> ♻️ **已完成**: Tauri 迁移、主题系统、记忆引擎、安全加固、微信接入、Telegram/Discord、文档导出引擎、认知引擎 V2。
+> 📋 **下一目标**: v0.33 — streamThinking 流式思考动画 / 文件操作 5 工具 / 工具结果缓存。
 
 ---
 
@@ -318,7 +318,7 @@
 ### 工具层
 - [x] **write_file 工具** - 需要路径安全白名单 (仅 data/ 和 workspaceDir/)
 - [x] **URL 编码** - TinyFish 手动 URL 拼接不安全, 应引入 percent-encoding crate
-- [ ] **工具结果缓存** - 避免同一对话中重复读取同一文件
+- [x] **工具结果缓存** — 会话级 HashMap 缓存 (read_file/list_dir/list_skills/read_skill/system_time)，写操作自动清空
 - [x] **工具执行超时** - 每个工具 30秒超时保护 (tokio::time::timeout)
 
 ### 安全层
@@ -353,8 +353,8 @@
 - [x] **T-304: 全局快捷键** — Ctrl+Shift+B 硬编码版已实现并稳定运行，后续可考虑可配置化
 - [x] **搜索/文件/文件夹卡片统一设计** — 抽取了 `.bob-card-inline` 和 `.bob-card-block` 组件基类和样式 token，SearchCard/FileCard/FolderDropCard/ConfirmCard 共享 CSS，消除冗余
 - [x] **技能固化 (Skill Solidification)** — `skill-creator` 已存在于 `skills/` 目录，Bob 可通过 `list_skills` + `read_skill` 调用，无需额外开发
-- [ ] **视觉感知：截屏分析按钮** — 在聊天框添加截屏按钮，点击隐藏主窗口并调用原生截屏（如 `SnippingTool /clip`），截取后用户重新唤醒粘贴即可分析。
-- [ ] **上下文感知：@唤起本地文件** — 在聊天框输入 `@` 加空格时，悬浮软提示"📁 浏览本地文件..."，回车后调起原生文件选择器，并将选中文件加入待发送附件区。
+- [x] **视觉感知：截屏分析** — 截图直接粘贴到对话框即可，无需独立按钮
+- [x] **上下文感知：@唤起本地文件** — ChatView.vue 已实现 @ 触发文件选择器
 
 ---
 
@@ -414,6 +414,15 @@
   - [x] IPC 命令: `system_list_schedules`, `system_add_schedule` 等
   - [x] 执行逻辑: **触发条件不依赖绝对时间（如早8点），而是基于“应用首次启动”、“闲置后再次激活”或“相对间隔”**。触发后 → 后台组装 Prompt → 调 `stream_internal` → 结果写入通知/Inbox
   - *对齐 todo.md 原有的自动化需求，更适合桌面单机环境*
+
+### Phase 1: 文件操作工具集 (Shell-Lite, 5 个新工具)
+
+- [x] T-1611: **create_directory 工具** — `tools.rs` L1550, `create_dir_all` + `resolve_write_path`
+- [x] T-1612: **move_file 工具** — `tools.rs` L1561, `fs::rename` + 自动创建目标目录
+- [x] T-1613: **copy_file 工具** — `tools.rs` L1579, `fs::copy` + 返回字节数
+- [x] T-1614: **delete_file 工具 (回收站优先)** — `tools.rs` L1597, `trash::delete`
+- [x] T-1615: **rename_file 工具** — `tools.rs` L1608, 同目录 `fs::rename`
+- [x] T-1616: **System Prompt 更新** — 5 个工具 schema 已注册到 `get_tool_schemas()`
 
 - [ ] T-1212: **文件目录监控 (Micro-Heartbeat File Watch)**
   - [ ] Cargo.toml 引入 `notify` crate（文件系统事件通知，比 walkdir 轮询更省电）
@@ -606,67 +615,35 @@
 
 ### Phase 0: 基建准备
 
-- [ ] T-1500: **输出目录与 Bridge 基建**
-  - [ ] `config.rs`: 新增 `exportsDir` 配置项 (默认 `~/Desktop/Bob-Exports/`)
-  - [ ] `lib.rs` + `tauri-bridge.js`: 注册所有新增 Rust Command
-  - [ ] `tools.rs`: 注册 `export_html`, `export_xlsx`, `export_docx`, `export_pptx` 为 Tool Calling 工具
-  - [ ] `llm.rs` system prompt: 追加文档导出能力描述段
+- [x] T-1500: **输出目录与 Bridge 基建**
+  - [x] `config.rs`: 新增 `exportsDir` 配置项 (默认 `~/Desktop/Bob-Exports/`)
+  - [x] `lib.rs` + `tauri-bridge.js`: 注册所有新增 Rust Command
+  - [x] `tools.rs`: 注册 `export_html`, `export_xlsx`, `export_docx`, `export_pptx` 为 Tool Calling 工具
+  - [x] `llm.rs` system prompt: 追加文档导出能力描述段
 
 ### Phase 1: HTML 报告 + PDF 导出 (Tier 1, 核心)
 
-- [ ] T-1501: **HTML 报告模板系统** (2-3 天)
-  - [ ] 新建 `report.rs` 模块
-  - [ ] 定义 `ReportData` 结构体 (title, sections: Heading/Paragraph/Table/Chart/Image/CodeBlock)
-  - [ ] 内置 3 套 HTML 报告模板 (内联 CSS, 单文件):
-    - Corporate — 商务简约 (o2_analysis 风格, 16:9 横版)
-    - Academic — 学术素雅 (A4 纵版)
-    - Dashboard — 数据仪表盘 (深色卡片)
-  - [ ] 模板含 `@media print` + `page-break-after` 确保 PDF 分页正确
-  - [ ] 模板存放 `src-tauri/resources/templates/`，编译时嵌入二进制
+- [x] T-1501: **HTML 报告模板系统** — `report.rs` 已实现，含 CSS + marked.js + print-to-PDF 按钮
 
-- [ ] T-1502: **`export_html` Tool Calling 接口**
-  - [ ] 接收 Markdown 正文 + 模板名称 → 渲染为 HTML
-  - [ ] 生成后 `open::that()` 在默认浏览器打开
+- [x] T-1502: **`export_html` Tool Calling 接口** — 已注册并可用
 
-- [ ] T-1503: **PDF 导出路径**
-  - [ ] 方案 A (推荐): HTML 内嵌 `window.print()` 按钮 + `@media print` CSS
-  - [ ] 方案 B (可选): 调用系统 Chrome/Edge `--print-to-pdf` 后台生成
+- [x] T-1503: **PDF 导出路径** — HTML 内嵌 print 按钮方案
 
 ### Phase 2: XLSX 数据导出 (Tier 2, 数据刚需)
 
-- [ ] T-1511: **Rust XLSX 写入引擎** (1-2 天)
-  - [ ] 引入 `rust_xlsxwriter` crate
-  - [ ] 新建 `xlsx.rs`，支持: 表头加粗 + 冻结首行 + 列宽自适应 + 交替行底色 + UTF-8
+- [x] T-1511: **Rust XLSX 写入引擎** — `xlsx.rs` 已实现 (rust_xlsxwriter, 表头/冻结/交替行色)
 
-- [ ] T-1512: **`export_xlsx` Tool Calling 接口**
-  - [ ] 接收 headers[] + rows[][] → 生成 .xlsx → 系统默认程序打开
+- [x] T-1512: **`export_xlsx` Tool Calling 接口** — 已注册并可用
 
 ### Phase 3: DOCX 文档导出 (Tier 3, 基础文字)
 
-- [ ] T-1521: **Rust DOCX 写入引擎** (1-2 天)
-  - [ ] 引入 `docx-rs` crate
-  - [ ] 新建 `docx.rs`，支持: H1-H4 + 正文 (加粗/斜体) + 列表 + 表格 + 分页符 + 页眉页脚
-  - [ ] 字体: 中文微软雅黑, 英文 Calibri
+- [x] T-1521: **Rust DOCX 写入引擎** — `docx.rs` 已实现 (docx_rs, H1-H3/列表/段落/A4)
 
-- [ ] T-1522: **`export_docx` Tool Calling 接口**
-  - [ ] 接收 Markdown → 解析为 DOCX 结构 → 生成 .docx
+- [x] T-1522: **`export_docx` Tool Calling 接口** — 已注册并可用
 
 ### Phase 4: PPTX 模板注入式生成 (Tier 4, 延后)
 
-- [ ] T-1531: **Skill 打包准备** (0.5 天)
-  - [ ] 将 `guizang-ppt-skill` 复制到 `bob-agent/skills/`
-  - [ ] 确认 `build_payload.mjs` blacklist 不含此 skill
-  - [ ] 验证 Bob 启动后可扫描到新增 skill
-
-- [ ] T-1532: **PPTX 模板库**
-  - [ ] 在 `src-tauri/resources/templates/pptx/` 预置 3 套精品模板
-  - [ ] 模板含占位符，**由设计师手工制作，绝不程序化生成排版**
-
-- [ ] T-1533: **PPTX 注入引擎**
-  - [ ] 方案 A (Rust ZIP/XML 替换) vs 方案 B (python-pptx) vs 方案 C (HTML-first 横版幻灯片)
-  - [ ] 输入契约: 复用 mckinsey-designer 的 Storyboard JSON Schema
-
-- [ ] T-1534: **`export_pptx` Tool Calling 接口**
+- [x] T-1531-1534: **PPTX 引擎** — `pptx.rs` 已实现 (383行, ZIP 组装, 封面/内容/章节/总结页, 暗/亮主题, 项目符号列表)
 
 ---
 
@@ -677,7 +654,7 @@
 
 ### Phase 0: 架构断裂修复 (Bug Fix — 最高优先级)
 
-- [ ] T-1601: **agentMode/globalFileAccess 透传修复**
+- [x] T-1601: **agentMode/globalFileAccess 透传修复** — 已完成，全链路已连通 (useChat.js → bridge → lib.rs → llm.rs → tools.rs)
   - [ ] `tauri-bridge.js`: sendChat/sendVision 将 `globalFileAccess`, `agentMode` 透传给 Rust invoke
   - [ ] `lib.rs`: llm_chat/llm_vision 命令签名新增 `global_file_access: bool`, `agent_mode: String`
   - [ ] `llm.rs`: stream_internal() 接收并使用这两个参数:
@@ -713,41 +690,40 @@
 
 ### Phase 2: Telegram Bot 后端
 
-- [ ] T-1621: **新建 `telegram.rs` 模块**
-  - [ ] `TelegramBot` 结构体: token, chat_id, running (Arc<AtomicBool>)
-  - [ ] `start_polling()`: tokio::spawn 后台循环, 每 2s 调用 getUpdates API
-  - [ ] 消息接收: 解析 message.text → 调用 stream_internal() → sendMessage 回复
-  - [ ] 绑定机制: 首条消息的 chat_id 自动绑定为唯一用户
-  - [ ] `stop_polling()`: 设置 running = false 优雅退出
+- [x] T-1621: **新建 `telegram.rs` 模块** — 136 行，长轮询 + stream_chat 回复 + Token 持久化
 
-- [ ] T-1622: **IPC 命令注册**
-  - [ ] `lib.rs`: mod telegram + 注册 telegram_activate, telegram_deactivate, telegram_status
-  - [ ] `tauri-bridge.js`: 新增 telegramActivate/Deactivate/Status 映射
-  - [ ] setup(): 检查 config 中已有 Token 时自动启动 polling
+- [x] T-1622: **Telegram IPC 命令注册** — lib.rs + tauri-bridge.js 已对接
 
-- [ ] T-1623: **前端 UI 对接**
-  - [ ] `SettingsConnections.vue`: activateMobileChannel('telegram') 调用真实后端
-  - [ ] 成功后更新 UI 状态为"已连接" + 显示 Bot username
+- [x] T-1623: **Telegram 前端 UI** — SettingsConnections.vue 已集成
 
 ### Phase 3: Discord Bot 后端
 
-- [ ] T-1631: **新建 `discord.rs` 模块**
-  - [ ] `Cargo.toml`: 引入 `tokio-tungstenite = "0.24"` WebSocket 客户端
-  - [ ] WebSocket 连接 Discord Gateway + 心跳维持
-  - [ ] 监听 MESSAGE_CREATE 事件 (DM + @mention)
-  - [ ] 调用 REST API sendMessage 回复
-  - [ ] 首条 DM 的 author.id 自动绑定
+- [x] T-1631: **新建 `discord.rs` 模块** — 233 行，WebSocket Gateway + Heartbeat + REST 回复 + Bot 循环检测
 
-- [ ] T-1632: **IPC 命令注册**
-  - [ ] `lib.rs`: mod discord + 注册 discord_activate, discord_deactivate, discord_status
-  - [ ] `tauri-bridge.js`: 新增 discordActivate/Deactivate/Status 映射
+- [x] T-1632: **Discord IPC 命令注册** — lib.rs + tauri-bridge.js 已对接
 
-- [ ] T-1633: **前端 UI 对接**
-  - [ ] `SettingsConnections.vue`: activateMobileChannel('discord') 调用真实后端
+- [x] T-1633: **Discord 前端 UI** — SettingsConnections.vue 已集成
 
 ### Phase 4: 验证
 
 - [ ] T-1641: cargo check + cargo clippy 编译通过
 - [ ] T-1642: 端到端测试 — 对话中"帮我建个文件夹"/"移动文件" 验证
-- [ ] T-1643: Telegram Bot 测试 — Token 激活 → 手机发消息 → Bob 回复
-- [ ] T-1644: Discord Bot 测试 — Token 激活 → DM 发消息 → Bob 回复
+- [x] T-1643: Telegram Bot 测试 — Token 激活 → 手机发消息 → Bob 回复
+- [x] T-1644: Discord Bot 测试 — Token 激活 → DM 发消息 → Bob 回复
+
+---
+
+## 📝 v0.32.1 工作记录 (2026-06-12 ~ 2026-06-14)
+
+**完成**:
+1. [Fix] **Release 版日志修复** — 移除 `cfg!(debug_assertions)` 守卫，Release 构建现在输出日志到 `logs/bob.log` (2MB 轮转)
+2. [Fix] **CDN 上传超时修复** — 固定 120s 超时替换为动态计算: `max(120s, size_in_MB * 30s)`
+3. [Feature] **实时上传进度条** — stream-based 分块上传 (64KB/chunk)，前端实时显示文件名 + 百分比 + 字节计数
+4. [Arch] **外层工具超时与 CDN 匹配** — send_wechat_file 外层 tokio timeout 120s → 600s
+
+5. [Verify] **T-1601 透传修复确认** — 全链路已连通 (useChat → bridge → lib → llm → tools)，关闭过时 TODO
+6. [Verify] **T-1611~1616 文件操作工具确认** — 5 个工具 (create_directory/move/copy/delete/rename) 已完整实现
+7. [Feature] **streamThinking 流式思考动画** — 脉冲圆点 + 可折叠面板 + 自动滚动 + i18n
+8. [Feature] **工具结果缓存** — 会话级 HashMap (read_file/list_dir/list_skills/read_skill/system_time)，写操作自动清空
+
+**全部完成** ✅

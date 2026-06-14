@@ -1,0 +1,86 @@
+Part 1:
+Here is the requested read-only audit report for src/components/SetupWizard.vue based on your checklist.
+
+Audit Report
+1. Is there exactly ONE onMounted hook?
+
+[PASS]: There is exactly one onMounted hook defined on line 125. The previous issue with duplicate hooks has been resolved.
+2. Does onMounted correctly apply the saved theme to DOM (not force 'dark')?
+
+[PASS]: The hook loads the saved theme (if any) into tempConfig.value.theme, and then correctly applies tempConfig.value.theme to the DOM using document.documentElement.setAttribute('data-theme', tempConfig.value.theme); rather than forcing 'dark'.
+3. Is initialSnapshot taken AFTER config loading completes?
+
+[PASS]: initialSnapshot is populated after await window.electronAPI.getConfig('all') finishes, ensuring the snapshot contains the loaded configuration.
+4. Does finishOnboarding correctly skip unchanged fields?
+
+[PASS]: It iterates over fieldsToCheck and only calls setConfig when tempConfig.value[key] !== initialSnapshot[key], effectively skipping unchanged fields.
+5. Is the watch(step) for API Key saving present and correct?
+
+[PASS]: A watch(step) is present and correctly checks if oldStep === 3 and tempConfig.value.apiKey exists before calling window.electronAPI.setApiKey.
+6. Could any race condition cause initialSnapshot to be empty?
+
+[FAIL] / [WARN]: Yes. Because await window.electronAPI.getConfig('all') does not block the initial Vue rendering, the user can see and interact with Step 1 while the config is still loading.
+If getConfig hangs or is delayed, initialSnapshot remains {}. If the user somehow races to the end before the promise resolves, it would evaluate against an empty object.
+More realistically, if the user clicks a theme or color before the config finishes loading, their change will be applied to tempConfig. When getConfig resolves, it will capture tempConfig (including the user's premature choice) into initialSnapshot. Consequently, finishOnboarding won't perceive the user's choice as a modification because it matches the compromised snapshot, causing the user's selection to never be saved.
+7. Are there any hardcoded Chinese strings that should use i18n?
+
+[WARN]: The providerOptions array contains several hardcoded Chinese strings for model providers (e.g., '通义千问 (Qwen)', '豆包 (Doubao)', '智谱 AI (GLM)'). While these are product names and might intentionally not be translated, they bypass the i18n system. (Strings like "简体中文" in the language selector are appropriately hardcoded).
+
+Part 2:
+Audit Report
+1. In SettingsAppearance: Can locale.value still be accidentally overwritten to 'zh-CN' when config hasn't loaded yet? [PASS] No. The assignment to locale.value is now protected by an explicit if (props.config.language) check. This ensures that locale.value is only mutated if a valid language preference has actually been loaded from the configuration.
+
+2. In SettingsAppearance: Is the fallback chain props.config.language || locale.value || 'zh-CN' correct? [PASS] Yes. This correctly sets the local reference (currentLocale.value) for the UI dropdown by prioritizing the saved config, falling back to the current app locale, and defaulting to 'zh-CN' as a last resort to establish the initial UI state without erroneously mutating the global locale state.
+
+3. In index.css: Does the new font stack cover Windows, macOS, and Linux adequately? [PASS] Yes. The stack (system-ui, -apple-system, 'Segoe UI', Roboto, 'Microsoft YaHei', 'PingFang SC', sans-serif) is comprehensive. It covers Apple devices (-apple-system, PingFang SC), Windows (Segoe UI, Microsoft YaHei), and Linux/Android (Roboto), providing robust native font rendering across all target platforms.
+
+4. In index.css: Is the default html { font-size: 16px } consistent with the compact scale? Does it conflict with the html, body rule that sets font-size: var(--text-base)? [WARN] The 16px default is fully consistent with the compact scale option (html[data-ui-scale="compact"] { font-size: 16px; }). However, it technically conflicts with the html, body { font-size: var(--text-base); } rule earlier in the file, which also targets the html element.
+
+5. Could the html font-size rule and the html, body font-size rule create a cascade conflict? [FAIL] Yes, this creates a dangerous CSS cascade conflict. The html, body selector sets html to var(--text-base) (0.875rem), while the later html selector overrides it to 16px. Because both html selectors share the same specificity (0,0,1), the correct behavior relies entirely on CSS source order. If the CSS is minified or reordered by Vite/PostCSS, html might end up receiving 0.875rem. If that happens, 1rem evaluates to 14px, and body text shrinks recursively to 12.25px (0.875 * 14). It is highly recommended to separate html and body in the base rules to avoid this fragility.
+
+Part 3:
+Hello! I am Jules, your AI coding agent. I have reviewed the files and prepared this report for you:
+
+Read-Only Audit Report
+Scope: src/components/TodoList.vue, src-tauri/src/calendar.rs, src/locales/zh-CN.json, and src/locales/en-US.json.
+
+Here are the results of the code audit for the feature/document-export branch:
+
+PASS - Is the ALTER TABLE migration safe for existing databases? (It uses unwrap_or_default, but check for edge cases)
+
+Reasoning: The code utilizes conn.execute_batch along with unwrap_or_default(). If the column completed_at already exists (e.g., from a previous migration failure), SQLite will throw an error, which is caught and ignored gracefully by unwrap_or_default().
+PASS - Does the SELECT query column index (9) correctly map to completed_at?
+
+Reasoning: The SELECT statement queries SELECT id, title, type, status, date, start_time, end_time, description, created_at, completed_at FROM events ORDER BY created_at DESC. completed_at is the 10th column selected, which matches index 9.
+PASS - Is completed_at correctly returned as 0 (not null) for old records that don't have the column yet?
+
+Reasoning: In calendar.rs, the row getter is row.get::<_, Option<i64>>(9).unwrap_or(Some(0)).unwrap_or(0). This handles errors retrieving the column, and properly unwraps NULL into 0.
+PASS - In TodoList.vue: Does the filter logic correctly show all todos when showCompleted is true?
+
+Reasoning: The logic evaluates whether showCompleted.value is true or if todo.status does not equal the completed status string. When showCompleted is true, the left side of the OR is true, meaning all items bypass the filter regardless of status.
+PASS - In TodoList.vue: Is the formatTime function correct? (unix seconds * 1000 for JS Date)
+
+Reasoning: The code correctly multiplies by 1000: const d = new Date(timestamp * 1000); before formatting.
+PASS - Are the i18n interpolation formats {time} consistent between template usage and locale definitions?
+
+Reasoning: The template calls $t('todo.completed_at', { time: formatTime(todo.completed_at) }). Both zh-CN.json and en-US.json correctly expect and consume {time} in their translation strings.
+PASS - Does unchecking a completed todo correctly reset completed_at to 0?
+
+Reasoning: In calendar.rs inside system_update_event_status, there is an explicit check to see if the status is currently marked as completed. If it is any other status, 0 is assigned to completed_at.
+All items have been verified. No code was modified during this audit.
+
+Part 4:
+Audit Report
+[PASS] Does the @ regex /(?:^|\s)@$/ correctly trigger only when @ is typed at start or after whitespace? Could it interfere with typing email addresses? The regex correctly ensures that @ is either at the beginning of the text input or preceded by a whitespace character. It will not trigger for email addresses like user@domain.com because the @ is preceded by an alphanumeric character.
+
+[PASS] After selecting a file from the @ menu, is the @ character properly removed from the input? Yes. In handleMentionSelect, the code uses the saved mentionTriggerIndex to slice the string and remove the @ symbol before attaching the file (text.substring(0, mentionTriggerIndex) + text.substring(mentionTriggerIndex + 1)).
+
+[FAIL] In the screenshot flow: Is there a timeout/fallback if the user cancels the snipping tool without capturing? There is no fallback or verification that a new image was captured. If the user cancels the Snipping Tool without taking a screenshot, the program continues executing and calls getClipboardImage(). This will silently read and attach whatever old image was already sitting in the user's system clipboard.
+
+[FAIL] Is navigator.clipboard.read() reliable in Tauri's WebView context? Are permissions handled? navigator.clipboard.read() is highly unreliable in Tauri webviews (such as WebView2 on Windows) without explicit permission policies, and typically throws a NotAllowedError. No permissions are handled. Since the project already uses @tauri-apps/plugin-clipboard-manager (as seen in the copyRichText function), that native plugin should be used to read the clipboard instead.
+
+[FAIL] Does the window correctly show/hide during the screenshot flow? While the happy path works, it is structurally flawed. The getCurrentWindow().show() logic is placed inside the try block after the await window.electronAPI.takeScreenshot() call. If the screenshot IPC call fails for any reason, the execution jumps straight to the catch block, leaving the main window permanently hidden and soft-locking the application. Window restoration must be placed inside a finally block.
+
+[FAIL] Is there error handling if SnippingTool.exe is not available on the user's Windows version? The Rust backend handles the missing executable properly by returning an Err, which translates to a rejected Promise in JavaScript. However, as noted above, this causes the frontend to enter the catch block without ever calling .show() on the window. The user is left with a vanished application, requiring a force-quit.
+
+[WARN] Could rapid repeated clicks on the screenshot button cause issues? Yes. There is no disabled state (e.g., :disabled="isScreenshotting") or debounce protection on the screenshot button. If a user double-clicks the button rapidly before the window completely hides, it will trigger the handler twice, attempting to hide the window twice and launching multiple concurrent instances of SnippingTool.exe.

@@ -254,6 +254,7 @@
     "empty_title": "你好，我是 Bob",
     "empty_subtitle": "有什么可以帮你的？",
     "export_success": "对话已导出到：",
+    "thinking": "思考中...",
     "error_title": "请求失败",
     "drop_hint_full": "添加附件 / 关注文件夹",
     "parsing": "解析中...",

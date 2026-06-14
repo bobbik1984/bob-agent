@@ -254,6 +254,7 @@
     "empty_title": "Hi, I'm Bob",
     "empty_subtitle": "How can I help you?",
     "export_success": "Chat exported to: ",
+    "thinking": "Thinking...",
     "error_title": "Request Failed",
     "drop_hint_full": "Drop files here / Track folder",
     "parsing": "Parsing...",
