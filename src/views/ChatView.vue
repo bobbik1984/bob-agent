@@ -171,6 +171,20 @@
               </div>
             </div>
           </div>
+          <!-- CDN 上传进度条 -->
+          <div v-if="cdnUpload.active" class="cdn-upload-progress">
+            <div class="cdn-upload-info">
+              <FileUp :size="14" />
+              <span class="cdn-upload-name">{{ cdnUpload.fileName }}</span>
+              <span class="cdn-upload-percent">{{ cdnUpload.percent }}%</span>
+            </div>
+            <div class="cdn-upload-bar-track">
+              <div class="cdn-upload-bar-fill" :style="{ width: cdnUpload.percent + '%' }"></div>
+            </div>
+            <div class="cdn-upload-detail">
+              {{ formatBytes(cdnUpload.bytesSent) }} / {{ formatBytes(cdnUpload.totalBytes) }}
+            </div>
+          </div>
           <div v-if="streamContent" class="message-content selectable" v-html="renderMarkdown(streamContent)"></div>
           <!-- 流式元数据：模型标注 + 记忆标志 -->
           <div class="message-meta-row" v-if="currentModelName || streamContent.includes('<|mem|>')">
@@ -717,6 +731,22 @@ function onStartKBBuild(folderPath, plan) {
   startKBBuild(folderPath, plan, kbUnlistens);
 }
 
+// -- CDN 上传进度状态 --
+const cdnUpload = ref({
+  active: false,
+  fileName: '',
+  percent: 0,
+  bytesSent: 0,
+  totalBytes: 0,
+});
+function formatBytes(bytes) {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / 1048576).toFixed(1) + ' MB';
+}
+
+let cdnUnlistens = [];
+
 // ── 生命周期 ─────────────────────────────────────────
 let cleanupStreamListener = null;
 let tauriDragUnlistens = [];
@@ -741,6 +771,25 @@ onMounted(async () => {
         loadMessages();
       }
     });
+  }
+
+  // CDN 上传进度监听
+  if (window.__TAURI_INTERNALS__) {
+    const { listen } = await import('@tauri-apps/api/event');
+    cdnUnlistens.push(await listen('cdn:upload-start', (e) => {
+      cdnUpload.value = { active: true, fileName: e.payload.file_name, percent: 0, bytesSent: 0, totalBytes: e.payload.total_bytes };
+    }));
+    cdnUnlistens.push(await listen('cdn:upload-progress', (e) => {
+      cdnUpload.value.percent = e.payload.percent;
+      cdnUpload.value.bytesSent = e.payload.bytes_sent;
+    }));
+    cdnUnlistens.push(await listen('cdn:upload-done', () => {
+      cdnUpload.value.percent = 100;
+      setTimeout(() => { cdnUpload.value.active = false; }, 1500);
+    }));
+    cdnUnlistens.push(await listen('cdn:upload-error', () => {
+      cdnUpload.value.active = false;
+    }));
   }
 
   loadMessages();
@@ -801,6 +850,8 @@ onUnmounted(() => {
   tauriDragUnlistens = [];
   kbUnlistens.forEach(u => typeof u === 'function' && u());
   kbUnlistens = [];
+  cdnUnlistens.forEach(u => typeof u === 'function' && u());
+  cdnUnlistens = [];
 });
 
 // 切换对话时重新加载消息
@@ -1281,6 +1332,62 @@ defineExpose({
   flex-direction: column;
   gap: 6px;
   margin: 8px 0;
+}
+
+/* CDN 上传进度条 */
+.cdn-upload-progress {
+  margin: 8px 0;
+  padding: 10px 14px;
+  background: var(--bg-secondary);
+  border-radius: 8px;
+  border-left: 2px solid var(--accent-primary);
+  animation: fadeIn 0.2s ease;
+}
+.cdn-upload-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+}
+.cdn-upload-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-primary);
+  font-weight: 500;
+}
+.cdn-upload-percent {
+  font-variant-numeric: tabular-nums;
+  color: var(--accent-primary);
+  font-weight: 600;
+  min-width: 36px;
+  text-align: right;
+}
+.cdn-upload-bar-track {
+  width: 100%;
+  height: 4px;
+  background: var(--bg-tertiary);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.cdn-upload-bar-fill {
+  height: 100%;
+  background: var(--accent-primary);
+  border-radius: 2px;
+  transition: width 0.15s ease;
+}
+.cdn-upload-detail {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  margin-top: 4px;
+  font-variant-numeric: tabular-nums;
+}
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 .tool-call-item {

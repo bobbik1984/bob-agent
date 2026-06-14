@@ -459,6 +459,7 @@ pub async fn send_wechat_file(
     wxid: &str,
     file_path: &str,
     caption: Option<&str>,
+    app: &tauri::AppHandle,
 ) -> Result<String, String> {
     // 1. 解析账户信息
     let account = match resolve_wechat_account(None) {
@@ -480,8 +481,8 @@ pub async fn send_wechat_file(
     let type_label = if is_image { "图片" } else { "文件" };
     log::info!("[wechat] send_wechat_file: to={} path={} type={}", wxid, file_path, type_label);
 
-    // 3. 上传到 CDN
-    let uploaded = cdn::upload_media(&api, file_path, wxid, media_type).await?;
+    // 3. 上传到 CDN（带实时进度推送）
+    let uploaded = cdn::upload_media(&api, file_path, wxid, media_type, app).await?;
     log::info!(
         "[wechat] CDN upload done: filekey={} size={} ciphertext_size={}",
         uploaded.filekey, uploaded.file_size, uploaded.file_size_ciphertext

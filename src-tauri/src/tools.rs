@@ -773,7 +773,7 @@ fn get_builtin_tool_schemas() -> Vec<Value> {
 pub async fn execute_tool(app: &tauri::AppHandle, name: &str, args: &Value, from_user: Option<&str>, global_file_access: bool) -> Value {
     // 工具级超时控制：媒体上传类工具给 120 秒，其他给 30 秒
     let timeout_secs = match name {
-        "send_wechat_file" => 120,
+        "send_wechat_file" => 600, // 大文件上传可能耗时很长，与 CDN 动态超时匹配
         _ => 30,
     };
     let timeout_duration = std::time::Duration::from_secs(timeout_secs);
@@ -926,7 +926,7 @@ async fn execute_tool_inner(app: &tauri::AppHandle, name: &str, args: &Value, fr
             };
             let file_path = args.get("file_path").and_then(|v| v.as_str()).unwrap_or("");
             let caption = args.get("caption").and_then(|v| v.as_str());
-            match super::wechat::commands::send_wechat_file(wxid, file_path, caption).await {
+            match super::wechat::commands::send_wechat_file(wxid, file_path, caption, app).await {
                 Ok(msg) => json!({ "ok": msg }),
                 Err(e) => json!({ "error": e }),
             }

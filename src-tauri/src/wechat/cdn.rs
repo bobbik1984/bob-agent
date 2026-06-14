@@ -9,6 +9,7 @@ use base64::{Engine as _, engine::general_purpose::STANDARD};
 use md5::{Md5, Digest};
 use rand::Rng;
 use std::path::Path;
+use tauri::Emitter;
 
 use super::api::WechatApi;
 use super::types::*;
@@ -78,12 +79,49 @@ fn build_cdn_upload_url(cdn_base_url: &str, upload_param: &str, filekey: &str) -
 
 const UPLOAD_MAX_RETRIES: u32 = 3;
 
+/// 构建带进度回调的 reqwest Body：将 ciphertext 按 CHUNK_SIZE 分块，每块发送后通过 AppHandle emit 进度事件
+const UPLOAD_CHUNK_SIZE: usize = 65_536; // 64KB per chunk
+
+fn build_progress_body(
+    ciphertext: Vec<u8>,
+    app: tauri::AppHandle,
+    file_name: String,
+) -> reqwest::Body {
+    let total = ciphertext.len();
+    let stream = futures::stream::unfold(
+        (ciphertext, 0usize),
+        move |(data, offset)| {
+            let app = app.clone();
+            let file_name = file_name.clone();
+            async move {
+                if offset >= data.len() {
+                    return None;
+                }
+                let end = std::cmp::min(offset + UPLOAD_CHUNK_SIZE, data.len());
+                let chunk = data[offset..end].to_vec();
+                let sent = end;
+                let percent = (sent as f64 / total as f64 * 100.0).round() as u32;
+                let _ = app.emit("cdn:upload-progress", serde_json::json!({
+                    "file_name": &file_name,
+                    "bytes_sent": sent,
+                    "total_bytes": total,
+                    "percent": percent,
+                }));
+                Some((Ok::<_, std::io::Error>(bytes::Bytes::from(chunk)), (data, end)))
+            }
+        },
+    );
+    reqwest::Body::wrap_stream(stream)
+}
+
 /// POST 加密后的文件到微信 CDN, 返回 download_encrypted_query_param
 async fn upload_buffer_to_cdn(
     ciphertext: &[u8],
     upload_full_url: Option<&str>,
     upload_param: Option<&str>,
     filekey: &str,
+    app: &tauri::AppHandle,
+    file_name: &str,
 ) -> Result<String, String> {
     let cdn_url = if let Some(full_url) = upload_full_url {
         let trimmed = full_url.trim();
@@ -101,19 +139,33 @@ async fn upload_buffer_to_cdn(
     };
 
     // 根据文件大小动态计算超时：每 MB 给 30 秒，最低 120 秒
-    let size_mb = (ciphertext.len() as u64 + 1_048_575) / 1_048_576; // 向上取整
+    let size_mb = (ciphertext.len() as u64 + 1_048_575) / 1_048_576;
     let timeout_secs = std::cmp::max(120, size_mb * 30);
     log::info!("[cdn] POST to CDN (size={}MB, timeout={}s)", size_mb, timeout_secs);
+
+    // 通知前端上传开始
+    let _ = app.emit("cdn:upload-start", serde_json::json!({
+        "file_name": file_name,
+        "total_bytes": ciphertext.len(),
+    }));
 
     let client = reqwest::Client::new();
     let mut last_error: Option<String> = None;
 
     for attempt in 1..=UPLOAD_MAX_RETRIES {
         log::info!("[cdn] upload attempt {}/{} ...", attempt, UPLOAD_MAX_RETRIES);
+
+        // 每次重试都需要重新构建 body（stream 只能消费一次）
+        let body = build_progress_body(
+            ciphertext.to_vec(),
+            app.clone(),
+            file_name.to_string(),
+        );
+
         let res = client
             .post(&cdn_url)
             .header("Content-Type", "application/octet-stream")
-            .body(ciphertext.to_vec())
+            .body(body)
             .timeout(std::time::Duration::from_secs(timeout_secs))
             .send()
             .await;
@@ -127,6 +179,9 @@ async fn upload_buffer_to_cdn(
                         .and_then(|v| v.to_str().ok())
                         .unwrap_or("client error")
                         .to_string();
+                    let _ = app.emit("cdn:upload-error", serde_json::json!({
+                        "file_name": file_name, "error": &err_msg,
+                    }));
                     return Err(format!("CDN upload client error {}: {}", status, err_msg));
                 }
                 if status != 200 {
@@ -144,6 +199,9 @@ async fn upload_buffer_to_cdn(
 
                 if let Some(param) = download_param {
                     log::info!("[cdn] upload success on attempt {}", attempt);
+                    let _ = app.emit("cdn:upload-done", serde_json::json!({
+                        "file_name": file_name, "attempt": attempt,
+                    }));
                     return Ok(param);
                 } else {
                     last_error = Some("CDN response missing x-encrypted-param header".to_string());
@@ -158,7 +216,11 @@ async fn upload_buffer_to_cdn(
         }
     }
 
-    Err(last_error.unwrap_or_else(|| format!("CDN upload failed after {} attempts", UPLOAD_MAX_RETRIES)))
+    let final_err = last_error.unwrap_or_else(|| format!("CDN upload failed after {} attempts", UPLOAD_MAX_RETRIES));
+    let _ = app.emit("cdn:upload-error", serde_json::json!({
+        "file_name": file_name, "error": &final_err,
+    }));
+    Err(final_err)
 }
 
 /// 完整的媒体上传管线：读取文件 → 计算 MD5 → 生成 AES key → getUploadUrl → 加密上传 → 返回结果
@@ -173,6 +235,7 @@ pub async fn upload_media(
     file_path: &str,
     to_user_id: &str,
     media_type: i32,
+    app: &tauri::AppHandle,
 ) -> Result<UploadedFileInfo, String> {
     let path = Path::new(file_path);
 
@@ -255,12 +318,19 @@ pub async fn upload_media(
     let ciphertext = encrypt_aes_128_ecb(&plaintext, &aeskey);
     log::debug!("[cdn] encrypted: plaintext={} ciphertext={}", plaintext.len(), ciphertext.len());
 
-    // 7. POST 到 CDN
+    // 7. POST 到 CDN（带实时进度推送）
+    let display_name = Path::new(file_path)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("file")
+        .to_string();
     let download_encrypted_query_param = upload_buffer_to_cdn(
         &ciphertext,
         upload_full_url,
         upload_param,
         &filekey,
+        app,
+        &display_name,
     ).await?;
 
     Ok(UploadedFileInfo {
