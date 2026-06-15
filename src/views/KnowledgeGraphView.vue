@@ -667,6 +667,37 @@ function onDragLeave() {
   isDragOver.value = false;
 }
 
+async function confirmExtract(path) {
+  try {
+    const est = await window.electronAPI.invoke('system_estimate_kb', { folderPath: path });
+    
+    let msg = `是否要从该路径提取知识点并加入图谱？\n\n路径: ${path}`;
+    if (est) {
+      msg += `\n\n【成本估算】`;
+      msg += `\n有效文件: ${est.convertable_files} 个`;
+      msg += `\n有效容量: ${(est.convertable_bytes / 1024).toFixed(2)} KB`;
+      msg += `\n预估消耗: ${est.estimated_tokens} Tokens`;
+      msg += `\n预估费用: 约 ￥${est.estimated_cost_core_rmb.toFixed(4)}`;
+    }
+
+    const { ask } = await import('@tauri-apps/plugin-dialog');
+    const yes = await ask(msg, {
+      title: '提取前确认及成本预估',
+      type: 'info'
+    });
+    
+    if (yes) {
+      await buildKBAndRefresh(path);
+    }
+  } catch (err) {
+    console.error(err);
+    const yes = window.confirm(`是否要从该路径提取知识点并加入图谱？\n\n${path}`);
+    if (yes) {
+      await buildKBAndRefresh(path);
+    }
+  }
+}
+
 async function onDrop(e) {
   isDragOver.value = false;
   const files = e.dataTransfer?.files;
@@ -674,20 +705,7 @@ async function onDrop(e) {
   // 获取第一个拖入的路径
   const path = files[0].path || files[0].name;
   if (path) {
-    let yes = false;
-    try {
-      const { ask } = await import('@tauri-apps/plugin-dialog');
-      yes = await ask(`是否要从该路径提取知识点并加入图谱？\n\n${path}`, {
-        title: '提取知识点',
-        type: 'info'
-      });
-    } catch (err) {
-      yes = window.confirm(`是否要从该路径提取知识点并加入图谱？\n\n${path}`);
-    }
-    
-    if (yes) {
-      await buildKBAndRefresh(path);
-    }
+    await confirmExtract(path);
   }
 }
 
@@ -696,7 +714,7 @@ async function openFolderPicker() {
     const { open } = await import('@tauri-apps/plugin-dialog');
     const selected = await open({ directory: true, multiple: false, title: '选择知识库文件夹' });
     if (selected) {
-      await buildKBAndRefresh(selected);
+      await confirmExtract(selected);
     }
   } catch (e) {
     // 降级: 使用 invoke 直接调用
