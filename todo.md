@@ -1,8 +1,8 @@
 # Bob-Agent 开发全局路线图 (Roadmap)
 
-> 🎯 **当前版本**: `v0.32.1` — CDN 上传进度条、Release 日志修复、WeChat 文件发送优化完成。
+> 🎯 **当前版本**: `v0.32.1` — CDN 上传进度条、Release 日志修复、streamThinking 流式思考动画、工具结果缓存完成。
 > ♻️ **已完成**: Tauri 迁移、主题系统、记忆引擎、安全加固、微信接入、Telegram/Discord、文档导出引擎、认知引擎 V2。
-> 📋 **下一目标**: v0.33 — streamThinking 流式思考动画 / 文件操作 5 工具 / 工具结果缓存。
+> 📋 **下一目标**: v0.33 — M17 知识图谱融合（SQLite 图存储 + LLM 实体提取 + vis.js 可视化）。
 
 ---
 
@@ -710,6 +710,46 @@
 - [ ] T-1642: 端到端测试 — 对话中"帮我建个文件夹"/"移动文件" 验证
 - [x] T-1643: Telegram Bot 测试 — Token 激活 → 手机发消息 → Bob 回复
 - [x] T-1644: Discord Bot 测试 — Token 激活 → DM 发消息 → Bob 回复
+
+---
+
+## 📍 里程碑 17: v0.33 — 知识图谱融合 (Knowledge Graph)
+
+> 核心目标：把 iknow 的语义图谱能力原生化到 Bob 中，闭合“拖拽文件夹 → 知识提取 → 图谱展示”的完整 UX 循环。
+
+### Phase 0: 数据层 — SQLite 图存储 + Rust 图引擎
+
+- [ ] T-1701: `bob.db` 新增 `kg_nodes` + `kg_edges` 两张表
+- [ ] T-1702: Rust 模块 `kg.rs` — Node/Edge CRUD（insert, upsert, delete）
+- [ ] T-1703: `kg.rs` — BFS 子图查询 `kg_query(term, max_hops)` → 返回 JSON
+- [ ] T-1704: `kg.rs` — 图统计 `kg_get_stats()` → 节点数/边数/类型分布
+
+### Phase 1: 提取层 — LLM 实体+关系提取
+
+- [ ] T-1711: `kb_indexer.rs` 扩展 — Prompt 追加 relations 字段
+- [ ] T-1712: 索引完成后调用 `kg.rs` 写入节点和边（去重 upsert）
+- [ ] T-1713: `brain_search` 升级 — FTS5 + 图谱子图 RRF 混合
+
+### Phase 2: 前端 — KnowledgeGraphView
+
+- [ ] T-1721: 安装 `vis-network` npm 依赖
+- [ ] T-1722: `KnowledgeGraphView.vue` — vis.js 力导向图主画布
+- [ ] T-1723: 顶部工具栏 — 搜索框 + 类型筛选 chips + 节点统计
+- [ ] T-1724: 右侧 Inspector 面板 — 节点详情 + 摘要 + 关联列表
+- [ ] T-1725: 侧边栏新增“知识图谱”导航入口
+
+### Phase 3: 流程串联 — 闭合 UX 循环
+
+- [ ] T-1731: KB 构建完成消息添加“查看知识图谱” CTA 按钮
+- [ ] T-1732: 进度消息分三阶段：提取文本 → 生成摘要 → 构建图谱
+- [ ] T-1733: Tool Calling 新增 `query_knowledge_graph` 工具
+- [ ] T-1734: 对话中右键 → “提取到知识图谱”
+
+### Phase 4: 图谱维护
+
+- [ ] T-1741: Dream V3 — 检测孤立/重复节点，标记 superseded
+- [ ] T-1742: Inspector 支持手动编辑关系
+- [ ] T-1743: 图谱导出（JSON / Markdown）
 
 ---
 

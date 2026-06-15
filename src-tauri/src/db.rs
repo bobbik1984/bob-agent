@@ -127,6 +127,29 @@ pub fn init_db(data_dir: &std::path::Path) -> Connection {
         );
     ").unwrap_or_default();
 
+    // ── M17: 知识图谱 ──────────────────────────────────────
+    conn.execute_batch("
+        CREATE TABLE IF NOT EXISTS kg_nodes (
+            id          TEXT PRIMARY KEY,
+            label       TEXT NOT NULL,
+            node_type   TEXT NOT NULL DEFAULT 'concept',
+            summary     TEXT DEFAULT '',
+            source      TEXT DEFAULT '',
+            metadata    TEXT DEFAULT '{}',
+            created_at  TEXT DEFAULT (datetime('now'))
+        );
+        CREATE TABLE IF NOT EXISTS kg_edges (
+            source_id   TEXT NOT NULL,
+            target_id   TEXT NOT NULL,
+            relation    TEXT NOT NULL DEFAULT 'related_to',
+            confidence  REAL DEFAULT 0.8,
+            created_at  TEXT DEFAULT (datetime('now')),
+            PRIMARY KEY (source_id, target_id, relation)
+        );
+        CREATE INDEX IF NOT EXISTS idx_kg_edges_source ON kg_edges(source_id);
+        CREATE INDEX IF NOT EXISTS idx_kg_edges_target ON kg_edges(target_id);
+    ").unwrap_or_default();
+
     conn
 }
 

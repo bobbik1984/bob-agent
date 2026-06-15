@@ -300,8 +300,15 @@ window.electronAPI = {
   validateChatReady: async () => invoke('system_validate_chat_ready'),
   takeScreenshot: async () => invoke('system_take_screenshot'),
 
+  // ── M17: 知识图谱 (Knowledge Graph) ────────────────
+  kgGetFullGraph: async () => invoke('kg_get_full_graph'),
+  kgQuery: async (term, maxHops) => invoke('kg_query', { term, maxHops }),
+  kgStats: async () => invoke('kg_stats'),
+  kgDeleteNode: async (nodeId) => invoke('kg_delete_node_cmd', { nodeId }),
+  kgBackfill: async () => invoke('kg_backfill'),
+
   // Generic invoke passthrough for components that call invoke directly
   invoke: (cmd, args) => invoke(cmd, args || {}),
 };
 
-console.log('Tauri Bridge v5.7: 69 Rust-native IPC — T-1306/1307/1308 P2.');
+console.log('Tauri Bridge v5.8: 73 Rust-native IPC — M17 Knowledge Graph.');

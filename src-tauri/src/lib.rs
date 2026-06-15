@@ -26,6 +26,7 @@ mod gmail;
 mod exports;
 mod telegram;
 mod discord;
+mod kg;
 
 use serde_json::{json, Value};
 use std::fs;
@@ -757,6 +758,12 @@ pub fn run() {
             // Discord Bot
             discord::system_save_discord_token,
             discord::system_get_discord_token,
+            // M17: 知识图谱
+            kg::kg_get_full_graph,
+            kg::kg_query,
+            kg::kg_stats,
+            kg::kg_delete_node_cmd,
+            kg::kg_backfill,
         ])
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             // 如果已经有一个实例在运行，就把已有窗口唤出来
