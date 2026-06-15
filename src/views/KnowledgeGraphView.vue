@@ -51,8 +51,8 @@
       <!-- Inspector 面板 -->
       <aside v-if="selectedNode" class="kg-inspector">
         <div class="inspector-header">
-          <span class="inspector-type-badge" :style="{ background: nodeColors[selectedNode.type] || 'var(--text-muted)' }">
-            {{ selectedNode.type }}
+          <span class="inspector-type-badge" :style="{ background: kgColors[selectedNode.type] || 'var(--text-muted)' }">
+            {{ getTypeShapeIcon(selectedNode.type) }} {{ selectedNode.type }}
           </span>
           <button class="btn-icon inspector-close" @click="selectedNode = null">
             <X :size="14" />
@@ -67,15 +67,14 @@
 
         <div class="inspector-section">
           <h4>关联节点</h4>
-          <div
-            v-for="rel in selectedRelations"
-            :key="rel.id + rel.relation"
-            class="relation-item"
-            @click="focusNode(rel.id)"
-          >
-            <span class="relation-dot" :style="{ background: nodeColors[rel.type] || 'var(--text-muted)' }"></span>
-            <span class="relation-label">{{ rel.label }}</span>
-            <span class="relation-type">{{ rel.relation }}</span>
+          <div class="relation-item" v-for="rel in selectedRelations" :key="rel.id" @click="focusNode(rel.id)">
+            <div class="relation-icon" :style="{ color: kgColors[rel.type] || 'var(--text-muted)' }">
+              {{ getTypeShapeIcon(rel.type) }}
+            </div>
+            <div class="relation-info">
+              <span class="relation-label">{{ rel.label }}</span>
+              <span class="relation-type">{{ rel.relation }}</span>
+            </div>
           </div>
           <div v-if="selectedRelations.length === 0" class="inspector-empty">
             暂无关联
@@ -770,11 +769,21 @@ async function buildKBAndRefresh(folderPath) {
   background: var(--bg-tertiary);
 }
 
-.relation-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
+.relation-icon {
+  font-size: 10px;
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+}
+
+.relation-info {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
 
 .relation-label {
