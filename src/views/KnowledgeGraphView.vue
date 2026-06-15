@@ -49,7 +49,12 @@
       ></div>
 
       <!-- Inspector 面板 -->
-      <div v-show="selectedNode" class="inspector-resizer" @mousedown="startResizeInspector"></div>
+      <div 
+        v-show="selectedNode" 
+        class="inspector-resizer" 
+        @mousedown="startResizeInspector"
+        :style="{ right: inspectorWidth + 'px' }"
+      ></div>
       <aside v-if="selectedNode" class="kg-inspector" :style="{ width: inspectorWidth + 'px' }">
         <div class="inspector-header">
           <span class="inspector-type-badge" :style="{ background: kgColors[selectedNode.type] || 'var(--text-muted)' }">
@@ -611,25 +616,26 @@ function doSearch() {
     filter: (item) => item.label?.toLowerCase().includes(term),
   });
   if (matchIds.length > 0) {
-    network.selectNodes(matchIds);
-    network.focus(matchIds[0], { scale: 1.2, animation: true });
-    // 显示第一个匹配节点的 Inspector
-    const node = nodesDataSet.get(matchIds[0]);
-    if (node?._raw) {
-      selectedNode.value = node._raw;
-      loadRelations(matchIds[0]);
-    }
+    focusNode(matchIds[0]);
   }
 }
 
 function focusNode(nodeId) {
   if (!network) return;
   network.selectNodes([nodeId]);
-  network.focus(nodeId, { scale: 1.2, animation: true });
+  
+  // 考虑到 Inspector 使用了 absolute 定位会遮挡右侧，相机往左偏移 inspector 宽度的一半
+  network.focus(nodeId, { 
+    scale: 1.2, 
+    offset: { x: -(inspectorWidth.value / 2), y: 0 },
+    animation: true 
+  });
+  
   const node = nodesDataSet.get(nodeId);
   if (node?._raw) {
     selectedNode.value = node._raw;
     loadRelations(nodeId);
+    focusNeighbors(nodeId);
   }
 }
 
@@ -917,23 +923,28 @@ async function buildKBAndRefresh(folderPath) {
 
 /* ── Inspector ──────────────────────────────── */
 .kg-inspector {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 5;
   border-left: 1px solid var(--border-subtle);
   padding: var(--space-4);
   overflow-y: auto;
   background: var(--bg-secondary);
   animation: slideInRight var(--duration-normal) ease;
-  flex-shrink: 0;
+  box-shadow: -4px 0 24px rgba(0, 0, 0, 0.15);
 }
 
 .inspector-resizer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
   width: 6px;
   background: transparent;
   cursor: col-resize;
-  flex-shrink: 0;
   z-index: 10;
-  margin-right: -3px;
-  margin-left: -3px;
-  position: relative;
+  transform: translateX(3px);
 }
 
 .inspector-resizer::after {
