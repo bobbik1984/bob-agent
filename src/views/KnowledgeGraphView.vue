@@ -28,13 +28,23 @@
             {{ t.type }} ({{ t.count }})
           </button>
         </div>
+        <button class="kg-add-btn" @click="openFolderPicker" :title="$t('kg.add_folder') || '添加知识库'">
+          <Plus :size="16" />
+        </button>
       </div>
     </header>
 
     <!-- 主体：图谱画布 + Inspector -->
     <div class="kg-body">
-      <!-- vis.js 画布 -->
-      <div ref="networkContainer" class="kg-canvas"></div>
+      <!-- vis.js 画布 + 拖拽覆盖层 -->
+      <div
+        ref="networkContainer"
+        class="kg-canvas"
+        @dragover.prevent="onDragOver"
+        @dragleave="onDragLeave"
+        @drop.prevent="onDrop"
+        :class="{ 'drag-over': isDragOver }"
+      ></div>
 
       <!-- Inspector 面板 -->
       <aside v-if="selectedNode" class="kg-inspector">
@@ -89,7 +99,7 @@
 import { ref, onMounted, onBeforeUnmount, watch, computed } from 'vue';
 import { Network } from 'vis-network';
 import { DataSet } from 'vis-data';
-import { Waypoints, Search, X, FileText, RefreshCw } from 'lucide-vue-next';
+import { Waypoints, Search, X, FileText, RefreshCw, Plus } from 'lucide-vue-next';
 
 // ── 状态 ────────────────────────────────────────────────
 const networkContainer = ref(null);
@@ -100,6 +110,7 @@ const selectedRelations = ref([]);
 const loading = ref(true);
 const activeTypes = ref(new Set());
 const backfilling = ref(false);
+const isDragOver = ref(false);
 
 let network = null;
 let nodesDataSet = null;
@@ -124,38 +135,55 @@ const typeFilters = computed(() => {
   return stats.value.type_distribution;
 });
 
-// ── vis.js 网络配置 ──────────────────────────────────────
-const networkOptions = {
-  nodes: {
-    shape: 'dot',
-    size: 16,
-    font: {
-      size: 12,
-      color: 'var(--text-secondary)',
-      face: 'Inter, system-ui, sans-serif',
+// ── 主题感知边颜色 ───────────────────────────────────
+function getThemeColors() {
+  const isDark = document.documentElement.getAttribute('data-theme') === 'dark'
+    || document.body.classList.contains('dark')
+    || window.matchMedia('(prefers-color-scheme: dark)').matches;
+  return {
+    edgeColor: isDark ? 'rgba(148, 163, 184, 0.3)' : 'rgba(100, 116, 139, 0.25)',
+    edgeHighlight: isDark ? '#818cf8' : '#6366f1',
+    fontColor: isDark ? '#94a3b8' : '#64748b',
+    fontMuted: isDark ? '#64748b' : '#94a3b8',
+  };
+}
+
+function buildNetworkOptions() {
+  const theme = getThemeColors();
+  return {
+    nodes: {
+      shape: 'dot',
+      size: 14,
+      font: { size: 11, color: theme.fontColor, face: 'Inter, system-ui, sans-serif' },
+      borderWidth: 1.5,
+      shadow: false,
     },
-    borderWidth: 2,
-    shadow: { enabled: true, size: 4, x: 0, y: 2, color: 'rgba(0,0,0,0.15)' },
-  },
-  edges: {
-    width: 1.5,
-    color: { color: 'var(--border-subtle)', highlight: 'var(--accent-primary)', hover: 'var(--accent-primary)' },
-    font: { size: 9, color: 'var(--text-muted)', strokeWidth: 0, align: 'middle' },
-    arrows: { to: { enabled: true, scaleFactor: 0.5 } },
-    smooth: { type: 'continuous' },
-  },
-  physics: {
-    solver: 'forceAtlas2Based',
-    forceAtlas2Based: { gravitationalConstant: -40, centralGravity: 0.005, springLength: 120, springConstant: 0.05 },
-    stabilization: { iterations: 150 },
-  },
-  interaction: {
-    hover: true,
-    tooltipDelay: 200,
-    zoomView: true,
-    dragView: true,
-  },
-};
+    edges: {
+      width: 0.6,
+      color: { color: theme.edgeColor, highlight: theme.edgeHighlight, hover: theme.edgeHighlight, opacity: 0.8 },
+      font: { size: 0, color: 'transparent' },
+      arrows: { to: { enabled: true, scaleFactor: 0.35 } },
+      smooth: { enabled: true, type: 'continuous', roundness: 0.5 },
+      hoverWidth: 0.3,
+    },
+    physics: {
+      solver: 'barnesHut',
+      barnesHut: { gravitationalConstant: -3000, centralGravity: 0.15, springLength: 100, springConstant: 0.02, damping: 0.3 },
+      stabilization: { iterations: 80, fit: true },
+      maxVelocity: 50,
+      minVelocity: 0.75,
+      timestep: 0.5,
+    },
+    interaction: {
+      hover: true,
+      tooltipDelay: 300,
+      zoomView: true,
+      dragView: true,
+      zoomSpeed: 0.3,
+      multiselect: false,
+    },
+  };
+}
 
 // ── 初始化 ──────────────────────────────────────────────
 onMounted(async () => {
@@ -214,7 +242,7 @@ function renderNetwork(data) {
     _raw: e,
   })));
 
-  network = new Network(networkContainer.value, { nodes: nodesDataSet, edges: edgesDataSet }, networkOptions);
+  network = new Network(networkContainer.value, { nodes: nodesDataSet, edges: edgesDataSet }, buildNetworkOptions());
 
   // 点击节点 → 显示 Inspector
   network.on('selectNode', (params) => {
@@ -341,6 +369,63 @@ async function doBackfill() {
     backfilling.value = false;
   }
 }
+
+// ── 拖拽添加 + 文件夹选择 ────────────────────────────────
+function onDragOver(e) {
+  isDragOver.value = true;
+}
+
+function onDragLeave() {
+  isDragOver.value = false;
+}
+
+async function onDrop(e) {
+  isDragOver.value = false;
+  const files = e.dataTransfer?.files;
+  if (!files || files.length === 0) return;
+  // 获取第一个拖入的路径
+  const path = files[0].path || files[0].name;
+  if (path) {
+    await buildKBAndRefresh(path);
+  }
+}
+
+async function openFolderPicker() {
+  try {
+    const { open } = await import('@tauri-apps/plugin-dialog');
+    const selected = await open({ directory: true, multiple: false, title: '选择知识库文件夹' });
+    if (selected) {
+      await buildKBAndRefresh(selected);
+    }
+  } catch (e) {
+    // 降级: 使用 invoke 直接调用
+    console.error('Folder picker failed:', e);
+  }
+}
+
+async function buildKBAndRefresh(folderPath) {
+  backfilling.value = true;
+  try {
+    // 调用现有的 KB 构建管线
+    await window.electronAPI.invoke('system_build_kb', { folderPath, plan: '' });
+    // KB 构建完成后回填图谱并刷新
+    await window.electronAPI.kgBackfill();
+    const [graphData, statsData] = await Promise.all([
+      window.electronAPI.kgGetFullGraph(),
+      window.electronAPI.kgStats(),
+    ]);
+    stats.value = statsData;
+    allGraphData = graphData;
+    if (graphData.nodes?.length > 0) {
+      if (network) network.destroy();
+      renderNetwork(graphData);
+    }
+  } catch (e) {
+    console.error('KB build from KG view failed:', e);
+  } finally {
+    backfilling.value = false;
+  }
+}
 </script>
 
 <style scoped>
@@ -451,6 +536,34 @@ async function doBackfill() {
 .kg-canvas {
   flex: 1;
   min-height: 400px;
+  transition: outline var(--duration-fast);
+}
+
+.kg-canvas.drag-over {
+  outline: 2px dashed var(--accent-primary);
+  outline-offset: -4px;
+  background: color-mix(in srgb, var(--accent-primary) 5%, transparent);
+}
+
+.kg-add-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-subtle);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all var(--duration-fast);
+  flex-shrink: 0;
+}
+
+.kg-add-btn:hover {
+  background: var(--accent-primary);
+  color: #fff;
+  border-color: var(--accent-primary);
 }
 
 /* ── Inspector ──────────────────────────────── */
