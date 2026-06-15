@@ -201,11 +201,45 @@ function buildNetworkOptions() {
   };
 }
 
+let tauriDragUnlistens = [];
+
 // ── 初始化 ──────────────────────────────────────────────
 onMounted(async () => {
   updateKgColors();
   await loadGraph();
   loading.value = false;
+
+  // 注册 Tauri 原生拖拽监听 (因为全局已接管 native OS drop)
+  if (window.electronAPI.onDragEnter) {
+    window.electronAPI.onDragEnter(async () => {
+      isDragOver.value = true;
+    }).then(u => tauriDragUnlistens.push(u));
+
+    window.electronAPI.onDragLeave(async () => {
+      isDragOver.value = false;
+    }).then(u => tauriDragUnlistens.push(u));
+
+    window.electronAPI.onDragDrop(async (e) => {
+      isDragOver.value = false;
+      if (e.payload && e.payload.paths && e.payload.paths.length > 0) {
+        const path = e.payload.paths[0];
+        let yes = false;
+        try {
+          const { ask } = await import('@tauri-apps/plugin-dialog');
+          yes = await ask(`是否要从该路径提取知识点并加入图谱？\n\n${path}`, {
+            title: '提取知识点',
+            type: 'info'
+          });
+        } catch (err) {
+          yes = window.confirm(`是否要从该路径提取知识点并加入图谱？\n\n${path}`);
+        }
+        
+        if (yes) {
+          await buildKBAndRefresh(path);
+        }
+      }
+    }).then(u => tauriDragUnlistens.push(u));
+  }
 });
 
 onBeforeUnmount(() => {
@@ -213,6 +247,7 @@ onBeforeUnmount(() => {
     network.destroy();
     network = null;
   }
+  tauriDragUnlistens.forEach(u => typeof u === 'function' && u());
 });
 
 async function loadGraph() {
@@ -678,8 +713,9 @@ async function buildKBAndRefresh(folderPath) {
 
 .kg-canvas.drag-over {
   outline: 2px dashed var(--accent-primary);
-  outline-offset: -4px;
-  background: color-mix(in srgb, var(--accent-primary) 5%, transparent);
+  outline-offset: -12px;
+  background: color-mix(in srgb, var(--bg-primary) 80%, transparent);
+  backdrop-filter: blur(4px);
 }
 
 .kg-add-btn {

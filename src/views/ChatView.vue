@@ -1551,9 +1551,9 @@ defineExpose({
   align-items: center;
   justify-content: center;
   z-index: 100;
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-primary) 30%, transparent),
-              inset 0 0 50px color-mix(in srgb, var(--accent-primary) 20%, transparent);
   backdrop-filter: blur(4px);
+  outline: 2px dashed var(--accent-primary);
+  outline-offset: -12px;
 }
 
 .drop-content {
