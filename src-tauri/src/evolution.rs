@@ -130,7 +130,7 @@ fn should_extract(messages: &[Value], total_rounds: i64) -> bool {
 
 /// 从对话尾部提取持久性事实，写入 wiki/learned/
 /// 使用 clerkModel (最便宜的模型) 执行提取
-pub async fn extract_learned_facts(app: AppHandle, messages: Vec<Value>, conv_id: String, total_rounds: i64) {
+pub async fn extract_learned_facts(_app: AppHandle, messages: Vec<Value>, conv_id: String, total_rounds: i64) {
     // ── Step 1: 只读检查冷却 (不占位) ────────────────────
     let now_instant = std::time::Instant::now();
     let cache = LAST_EXTRACTION.get_or_init(|| Mutex::new(HashMap::new()));
@@ -637,7 +637,7 @@ fn title_similarity(a: &str, b: &str) -> f64 {
 
 /// Phase 3: SOUL 精炼 — 结合新记忆重写 SOUL.md
 /// 附带 hash 防冲突保护：如果用户手动编辑过 SOUL，跳过重写
-async fn phase_soul_refinement(app: &AppHandle) -> (bool, String) {
+async fn phase_soul_refinement(_app: &AppHandle) -> (bool, String) {
     let memory_dir = super::get_data_dir().join("memory");
     let soul_path = memory_dir.join("SOUL.md");
 
