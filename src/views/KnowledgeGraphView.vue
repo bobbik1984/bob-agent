@@ -200,8 +200,10 @@ async function confirmMerge() {
   
   try {
     const res = await window.electronAPI.invoke('kg_merge_nodes', {
-      primary_id: targetNode.id,
-      alias_id: selectedNode.value.id
+      payload: {
+        primary_id: targetNode.id,
+        alias_id: selectedNode.value.id
+      }
     });
     if (!res.ok) throw new Error(res.error || 'Unknown error');
     
