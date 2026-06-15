@@ -289,6 +289,53 @@ function renderNetwork(data) {
     selectedRelations.value = [];
     resetFocus();
   });
+
+  // CAD-like 缩放：保持连线视觉粗细一致
+  network.on('zoom', () => {
+    updateEdgeWidths();
+  });
+
+  // 初始时调整一次
+  setTimeout(() => updateEdgeWidths(), 500);
+}
+
+function updateEdgeWidths() {
+  if (!network || !edgesDataSet) return;
+  const scale = network.getScale();
+  // 当画布缩小 (scale < 1) 时，增加基础线宽；当画布放大 (scale > 1) 时，减小基础线宽
+  const normalWidth = Math.max(0.6 / scale, 0.1);
+  const highlightWidth = Math.max(1.5 / scale, 0.2);
+  const dimWidth = Math.max(0.3 / scale, 0.05);
+
+  // 更新全局配置
+  network.setOptions({
+    edges: {
+      width: normalWidth,
+      hoverWidth: normalWidth * 0.5,
+    }
+  });
+
+  // 如果有选中的节点，或者之前有独立设置过线宽，需要同步更新
+  const edgeUpdates = [];
+  edgesDataSet.forEach(edge => {
+    if (selectedNode.value) {
+      edgeUpdates.push({
+        id: edge.id,
+        width: edge._isRelevant ? highlightWidth : dimWidth
+      });
+    } else {
+      // 没选中节点时，如果曾经被高亮/淡化过，重置回基础缩放宽度
+      if (edge.width !== undefined && Math.abs(edge.width - normalWidth) > 0.001) {
+         edgeUpdates.push({
+           id: edge.id,
+           width: normalWidth
+         });
+      }
+    }
+  });
+  if (edgeUpdates.length > 0) {
+    edgesDataSet.update(edgeUpdates);
+  }
 }
 
 function focusNeighbors(nodeId) {
@@ -303,6 +350,10 @@ function focusNeighbors(nodeId) {
   });
   nodesDataSet.update(nodeUpdates);
 
+  const scale = network.getScale();
+  const highlightWidth = Math.max(1.5 / scale, 0.2);
+  const dimWidth = Math.max(0.3 / scale, 0.05);
+
   const edgeUpdates = [];
   const edgeHl = kgColors.value.edgeHl;
   const edgeBase = kgColors.value.edge;
@@ -310,8 +361,9 @@ function focusNeighbors(nodeId) {
     const isRelevant = edge.from === nodeId || edge.to === nodeId;
     edgeUpdates.push({
       id: edge.id,
+      _isRelevant: isRelevant,
       color: { color: isRelevant ? edgeHl : edgeBase, opacity: isRelevant ? 1.0 : 0.08 },
-      width: isRelevant ? 1.5 : 0.3,
+      width: isRelevant ? highlightWidth : dimWidth,
     });
   });
   edgesDataSet.update(edgeUpdates);
@@ -324,13 +376,17 @@ function resetFocus() {
   });
   nodesDataSet.update(nodeUpdates);
 
+  const scale = network.getScale();
+  const normalWidth = Math.max(0.6 / scale, 0.1);
+
   const edgeUpdates = [];
   const edgeBase = kgColors.value.edge;
   edgesDataSet.forEach(edge => {
     edgeUpdates.push({
       id: edge.id,
+      _isRelevant: false,
       color: { color: edgeBase, opacity: 1.0 },
-      width: 0.6,
+      width: normalWidth,
     });
   });
   edgesDataSet.update(edgeUpdates);
