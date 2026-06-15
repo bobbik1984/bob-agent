@@ -84,7 +84,7 @@ export function useModelSwitcher() {
             id: m.id,
             provider: m.provider,
             providerName: m.providerName,
-            displayName: m.displayName,
+            displayName: m.displayName || m.id,
           }));
         if (currentModelRaw.value && currentModelRaw.value.includes('::')) {
           switcherProvider.value = currentModelRaw.value.split('::')[0];
@@ -112,7 +112,7 @@ export function useModelSwitcher() {
         id: m.id,
         provider: m.provider,
         providerName: m.providerName,
-        displayName: m.displayName,
+        displayName: m.displayName || m.id,
       }));
       const active = await window.electronAPI.getActiveModels();
       currentModelRaw.value = active?.main || '';

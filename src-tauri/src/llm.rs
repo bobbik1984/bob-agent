@@ -484,7 +484,10 @@ pub fn get_model_pool() -> Value {
             if let Some(models) = provider.get("models").and_then(|v| v.as_array()) {
                 for model in models {
                     let model_id = model.get("id").and_then(|v| v.as_str()).unwrap_or("");
-                    let model_name = model.get("name").and_then(|v| v.as_str()).unwrap_or(model_id);
+                    let mut model_name = model.get("name").and_then(|v| v.as_str()).unwrap_or(model_id);
+                    if model_name.trim().is_empty() {
+                        model_name = model_id;
+                    }
                     let vision = model.get("vision").and_then(|v| v.as_bool()).unwrap_or(false);
                     let is_default = model.get("default").and_then(|v| v.as_bool()).unwrap_or(false);
                     let visible = model.get("visible").and_then(|v| v.as_bool()).unwrap_or(true);
