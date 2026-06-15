@@ -77,12 +77,29 @@
             <p>将当前节点(被删除)合并至目标节点。</p>
             <p>请在下方选择，或在图谱上点击目标：</p>
           </div>
-          <select v-model="mergeTargetId" class="merge-select">
-            <option value="">-- 请选择目标节点 --</option>
-            <option v-for="node in allNodesList" :key="node.id" :value="node.id">
-              {{ node.label }} ({{ node.type }})
-            </option>
-          </select>
+          <div class="merge-filters">
+            <input type="text" v-model="mergeSearchTerm" placeholder="搜索目标节点..." class="merge-search-input" />
+            <label class="merge-checkbox">
+              <input type="checkbox" v-model="mergeFilterSameType" />
+              仅同类型 ({{ selectedNode.type }})
+            </label>
+          </div>
+          
+          <div class="merge-list">
+            <div 
+              v-for="node in filteredMergeNodes" 
+              :key="node.id"
+              class="merge-list-item"
+              :class="{ selected: mergeTargetId === node.id }"
+              @click="mergeTargetId = node.id"
+            >
+              <span class="merge-item-icon" :style="{ color: kgColors[node.type] || 'var(--text-muted)' }">
+                {{ getTypeShapeIcon(node.type) }}
+              </span>
+              <span class="merge-item-label">{{ node.label }}</span>
+            </div>
+            <div v-if="filteredMergeNodes.length === 0" class="merge-list-empty">无匹配节点</div>
+          </div>
           <div class="merge-actions">
             <button class="btn-primary" :disabled="!mergeTargetId" @click="confirmMerge">确认合并</button>
             <button class="btn-secondary" @click="mergeMode = false">取消</button>
@@ -139,6 +156,8 @@ const isDragOver = ref(false);
 
 const mergeMode = ref(false);
 const mergeTargetId = ref('');
+const mergeSearchTerm = ref('');
+const mergeFilterSameType = ref(true);
 
 let network = null;
 let nodesDataSet = null;
@@ -152,9 +171,23 @@ const allNodesList = computed(() => {
     .sort((a,b) => a.label.localeCompare(b.label));
 });
 
+const filteredMergeNodes = computed(() => {
+  let list = allNodesList.value;
+  if (mergeFilterSameType.value && selectedNode.value) {
+    list = list.filter(n => n.type === selectedNode.value.type);
+  }
+  if (mergeSearchTerm.value) {
+    const term = mergeSearchTerm.value.toLowerCase();
+    list = list.filter(n => n.label.toLowerCase().includes(term));
+  }
+  return list;
+});
+
 function toggleMergeMode() {
   mergeMode.value = !mergeMode.value;
   mergeTargetId.value = '';
+  mergeSearchTerm.value = '';
+  mergeFilterSameType.value = true;
 }
 
 async function confirmMerge() {
@@ -882,7 +915,7 @@ async function buildKBAndRefresh(folderPath) {
   line-height: 1.4;
 }
 
-.merge-select {
+.merge-search-input {
   width: 100%;
   padding: 6px;
   border-radius: var(--radius-sm);
@@ -890,8 +923,62 @@ async function buildKBAndRefresh(folderPath) {
   background: var(--bg-primary);
   color: var(--text-primary);
   font-size: var(--text-sm);
-  margin-bottom: var(--space-3);
   outline: none;
+  margin-bottom: var(--space-2);
+}
+
+.merge-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  margin-bottom: var(--space-3);
+  cursor: pointer;
+}
+
+.merge-list {
+  max-height: 150px;
+  overflow-y: auto;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-primary);
+  margin-bottom: var(--space-3);
+}
+
+.merge-list-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+  cursor: pointer;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.merge-list-item:last-child {
+  border-bottom: none;
+}
+
+.merge-list-item:hover {
+  background: var(--bg-tertiary);
+}
+
+.merge-list-item.selected {
+  background: var(--user-accent);
+  color: white;
+}
+
+.merge-item-icon {
+  font-size: 10px;
+}
+
+.merge-list-empty {
+  padding: 10px;
+  text-align: center;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
 }
 
 .merge-actions {
