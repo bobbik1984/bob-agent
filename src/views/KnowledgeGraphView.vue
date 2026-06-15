@@ -24,7 +24,9 @@
             :class="{ active: activeTypes.has(t.type) }"
             @click="toggleType(t.type)"
           >
-            <span class="chip-dot" :style="{ background: nodeColors[t.type] || 'var(--text-muted)' }"></span>
+            <span class="chip-shape" :style="{ color: kgColors[t.type] || 'var(--text-muted)' }">
+              {{ getTypeShapeIcon(t.type) }}
+            </span>
             {{ t.type }} ({{ t.count }})
           </button>
         </div>
@@ -117,50 +119,59 @@ let nodesDataSet = null;
 let edgesDataSet = null;
 let allGraphData = null;
 
-// ── 节点类型颜色映射 ────────────────────────────────────
-const nodeColors = {
-  concept: '#6366f1',    // indigo
-  project: '#22c55e',    // green
-  person: '#f59e0b',     // amber
-  topic: '#a855f7',      // purple
-  file: '#64748b',       // slate
-  tag: '#06b6d4',        // cyan
-  device: '#ef4444',     // red
-  skill: '#ec4899',      // pink
-  infrastructure: '#78716c', // stone
-};
+// ── 颜色与形状定义 ─────────────────────────────────────
+const kgColors = ref({});
+
+function updateKgColors() {
+  const s = getComputedStyle(document.documentElement);
+  const get = (v) => s.getPropertyValue(v).trim();
+  kgColors.value = {
+    tag: get('--kg-node-tag') || '#0891b2',
+    project: get('--kg-node-project') || '#16a34a',
+    file: get('--kg-node-file') || '#64748b',
+    concept: get('--kg-node-concept') || '#4f46e5',
+    person: get('--kg-node-person') || '#d97706',
+    topic: get('--kg-node-topic') || '#9333ea',
+    edge: get('--kg-edge') || 'rgba(100, 116, 139, 0.25)',
+    edgeHl: get('--kg-edge-highlight') || get('--accent-primary') || '#6366f1',
+    font: get('--kg-font') || '#64748b',
+  };
+}
 
 const typeFilters = computed(() => {
   if (!stats.value?.type_distribution) return [];
   return stats.value.type_distribution;
 });
 
-// ── 主题感知边颜色 ───────────────────────────────────
-function getThemeColors() {
-  const isDark = document.documentElement.getAttribute('data-theme') === 'dark'
-    || document.body.classList.contains('dark')
-    || window.matchMedia('(prefers-color-scheme: dark)').matches;
-  return {
-    edgeColor: isDark ? 'rgba(148, 163, 184, 0.3)' : 'rgba(100, 116, 139, 0.25)',
-    edgeHighlight: isDark ? '#818cf8' : '#6366f1',
-    fontColor: isDark ? '#94a3b8' : '#64748b',
-    fontMuted: isDark ? '#64748b' : '#94a3b8',
-  };
+const typeShapes = {
+  concept: { vis: 'dot', icon: '●' },
+  project: { vis: 'star', icon: '★' },
+  file: { vis: 'square', icon: '■' },
+  tag: { vis: 'diamond', icon: '◆' },
+  person: { vis: 'triangleDown', icon: '▼' },
+  topic: { vis: 'hexagon', icon: '⬢' },
+};
+
+function getTypeShapeIcon(type) {
+  return typeShapes[type]?.icon || '●';
+}
+
+function getTypeVisShape(type) {
+  return typeShapes[type]?.vis || 'dot';
 }
 
 function buildNetworkOptions() {
-  const theme = getThemeColors();
+  const colors = kgColors.value;
   return {
     nodes: {
-      shape: 'dot',
       size: 14,
-      font: { size: 11, color: theme.fontColor, face: 'Inter, system-ui, sans-serif' },
+      font: { size: 11, color: colors.font, face: 'Inter, system-ui, sans-serif' },
       borderWidth: 1.5,
       shadow: false,
     },
     edges: {
       width: 0.6,
-      color: { color: theme.edgeColor, highlight: theme.edgeHighlight, hover: theme.edgeHighlight, opacity: 0.8 },
+      color: { color: colors.edge, highlight: colors.edgeHl, hover: colors.edgeHl, opacity: 1.0 },
       font: { size: 0, color: 'transparent' },
       arrows: { to: { enabled: true, scaleFactor: 0.35 } },
       smooth: { enabled: true, type: 'continuous', roundness: 0.5 },
@@ -169,7 +180,7 @@ function buildNetworkOptions() {
     physics: {
       solver: 'barnesHut',
       barnesHut: { gravitationalConstant: -3000, centralGravity: 0.15, springLength: 100, springConstant: 0.02, damping: 0.3 },
-      stabilization: { iterations: 80, fit: true },
+      stabilization: { enabled: true, iterations: 80, fit: true },
       maxVelocity: 50,
       minVelocity: 0.75,
       timestep: 0.5,
@@ -179,7 +190,7 @@ function buildNetworkOptions() {
       tooltipDelay: 300,
       zoomView: true,
       dragView: true,
-      zoomSpeed: 0.3,
+      zoomSpeed: 1.0, // 加大缩放速度，去除迟滞感
       multiselect: false,
     },
   };
@@ -187,6 +198,7 @@ function buildNetworkOptions() {
 
 // ── 初始化 ──────────────────────────────────────────────
 onMounted(async () => {
+  updateKgColors();
   await loadGraph();
   loading.value = false;
 });
@@ -222,29 +234,41 @@ async function loadGraph() {
 function renderNetwork(data) {
   if (!networkContainer.value) return;
 
-  nodesDataSet = new DataSet(data.nodes.map(n => ({
-    id: n.id,
-    label: n.label,
-    color: {
-      background: nodeColors[n.type] || '#64748b',
-      border: nodeColors[n.type] || '#64748b',
-      highlight: { background: nodeColors[n.type] || '#64748b', border: '#fff' },
-    },
-    title: `${n.label} (${n.type})${n.summary ? '\n' + n.summary : ''}`,
-    _raw: n,
-  })));
+  nodesDataSet = new DataSet(data.nodes.map(n => {
+    const color = kgColors.value[n.type] || '#64748b';
+    return {
+      id: n.id,
+      label: n.label,
+      shape: getTypeVisShape(n.type),
+      color: {
+        background: color,
+        border: color,
+        highlight: { background: color, border: '#fff' },
+      },
+      title: `${n.label} (${n.type})${n.summary ? '\n' + n.summary : ''}`,
+      opacity: 1.0,
+      hidden: false,
+      _raw: n,
+    };
+  }));
 
   edgesDataSet = new DataSet(data.edges.map((e, i) => ({
     id: `e${i}`,
     from: e.source,
     to: e.target,
     label: e.relation,
+    hidden: false,
     _raw: e,
   })));
 
   network = new Network(networkContainer.value, { nodes: nodesDataSet, edges: edgesDataSet }, buildNetworkOptions());
 
-  // 点击节点 → 显示 Inspector
+  // 物理引擎布局完成后停止，优化交互性能
+  network.on('stabilizationIterationsDone', () => {
+    network.setOptions({ physics: { enabled: false } });
+  });
+
+  // 点击节点 → 显示 Inspector，并高亮邻居
   network.on('selectNode', (params) => {
     if (params.nodes.length > 0) {
       const nodeId = params.nodes[0];
@@ -252,6 +276,7 @@ function renderNetwork(data) {
       if (node?._raw) {
         selectedNode.value = node._raw;
         loadRelations(nodeId);
+        focusNeighbors(nodeId);
       }
     }
   });
@@ -259,7 +284,53 @@ function renderNetwork(data) {
   network.on('deselectNode', () => {
     selectedNode.value = null;
     selectedRelations.value = [];
+    resetFocus();
   });
+}
+
+function focusNeighbors(nodeId) {
+  if (!network) return;
+  const neighborIds = new Set(network.getConnectedNodes(nodeId));
+  neighborIds.add(nodeId);
+
+  const nodeUpdates = [];
+  nodesDataSet.forEach(node => {
+    const isRelevant = neighborIds.has(node.id);
+    nodeUpdates.push({ id: node.id, opacity: isRelevant ? 1.0 : 0.2 });
+  });
+  nodesDataSet.update(nodeUpdates);
+
+  const edgeUpdates = [];
+  const edgeHl = kgColors.value.edgeHl;
+  const edgeBase = kgColors.value.edge;
+  edgesDataSet.forEach(edge => {
+    const isRelevant = edge.from === nodeId || edge.to === nodeId;
+    edgeUpdates.push({
+      id: edge.id,
+      color: { color: isRelevant ? edgeHl : edgeBase, opacity: isRelevant ? 1.0 : 0.08 },
+      width: isRelevant ? 1.5 : 0.3,
+    });
+  });
+  edgesDataSet.update(edgeUpdates);
+}
+
+function resetFocus() {
+  const nodeUpdates = [];
+  nodesDataSet.forEach(node => {
+    nodeUpdates.push({ id: node.id, opacity: 1.0 });
+  });
+  nodesDataSet.update(nodeUpdates);
+
+  const edgeUpdates = [];
+  const edgeBase = kgColors.value.edge;
+  edgesDataSet.forEach(edge => {
+    edgeUpdates.push({
+      id: edge.id,
+      color: { color: edgeBase, opacity: 1.0 },
+      width: 0.6,
+    });
+  });
+  edgesDataSet.update(edgeUpdates);
 }
 
 function loadRelations(nodeId) {
@@ -319,33 +390,29 @@ function toggleType(type) {
 }
 
 function applyTypeFilter() {
-  if (!nodesDataSet || !allGraphData) return;
-  if (activeTypes.value.size === 0) {
-    // 显示全部
-    nodesDataSet.clear();
-    nodesDataSet.add(allGraphData.nodes.map(n => ({
-      id: n.id, label: n.label,
-      color: { background: nodeColors[n.type] || '#64748b', border: nodeColors[n.type] || '#64748b',
-               highlight: { background: nodeColors[n.type] || '#64748b', border: '#fff' } },
-      title: `${n.label} (${n.type})`, _raw: n,
-    })));
-  } else {
-    const filtered = allGraphData.nodes.filter(n => activeTypes.value.has(n.type));
-    const filteredIds = new Set(filtered.map(n => n.id));
-    nodesDataSet.clear();
-    nodesDataSet.add(filtered.map(n => ({
-      id: n.id, label: n.label,
-      color: { background: nodeColors[n.type] || '#64748b', border: nodeColors[n.type] || '#64748b',
-               highlight: { background: nodeColors[n.type] || '#64748b', border: '#fff' } },
-      title: `${n.label} (${n.type})`, _raw: n,
-    })));
-    // 只保留两端都在过滤结果中的边
-    edgesDataSet.clear();
-    edgesDataSet.add(allGraphData.edges
-      .filter(e => filteredIds.has(e.source) && filteredIds.has(e.target))
-      .map((e, i) => ({ id: `e${i}`, from: e.source, to: e.target, label: e.relation, _raw: e }))
-    );
-  }
+  if (!nodesDataSet || !edgesDataSet) return;
+
+  const showAll = activeTypes.value.size === 0;
+  
+  const nodeUpdates = [];
+  nodesDataSet.forEach(node => {
+    const shouldHide = !showAll && !activeTypes.value.has(node._raw.type);
+    if (node.hidden !== shouldHide) {
+      nodeUpdates.push({ id: node.id, hidden: shouldHide });
+    }
+  });
+  if (nodeUpdates.length > 0) nodesDataSet.update(nodeUpdates);
+
+  const edgeUpdates = [];
+  edgesDataSet.forEach(edge => {
+    const srcHidden = nodesDataSet.get(edge.from)?.hidden;
+    const tgtHidden = nodesDataSet.get(edge.to)?.hidden;
+    const shouldHide = srcHidden || tgtHidden;
+    if (edge.hidden !== shouldHide) {
+      edgeUpdates.push({ id: edge.id, hidden: shouldHide });
+    }
+  });
+  if (edgeUpdates.length > 0) edgesDataSet.update(edgeUpdates);
 }
 
 async function doBackfill() {
@@ -519,10 +586,9 @@ async function buildKBAndRefresh(folderPath) {
   color: var(--text-primary);
 }
 
-.chip-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
+.chip-shape {
+  font-size: 10px;
+  line-height: 1;
 }
 
 /* ── 主体 ──────────────────────────────────── */

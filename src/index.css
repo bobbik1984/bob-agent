@@ -58,6 +58,17 @@ a:hover {
   --color-warning:  #d97706;
   --color-success:  #10b981;
 
+  /* 知识图谱主题色 (Dark) */
+  --kg-node-tag:       #22d3ee;
+  --kg-node-project:   #4ade80;
+  --kg-node-file:      #94a3b8;
+  --kg-node-concept:   #818cf8;
+  --kg-node-person:    #fbbf24;
+  --kg-node-topic:     #c084fc;
+  --kg-edge:           rgba(148, 163, 184, 0.45);
+  --kg-edge-highlight: var(--accent-primary);
+  --kg-font:           #94a3b8;
+
   --surface-glass:  rgba(255, 255, 255, 0.04);
   --surface-card:   rgba(255, 255, 255, 0.06);
   --surface-input:  rgba(255, 255, 255, 0.08);
@@ -101,6 +112,17 @@ a:hover {
   --color-error:    #ef4444;
   --color-warning:  #f59e0b;
   --color-success:  #10b981;
+
+  /* 知识图谱主题色 (Light) */
+  --kg-node-tag:       #0891b2;
+  --kg-node-project:   #16a34a;
+  --kg-node-file:      #64748b;
+  --kg-node-concept:   #4f46e5;
+  --kg-node-person:    #d97706;
+  --kg-node-topic:     #9333ea;
+  --kg-edge:           rgba(71, 85, 105, 0.3);
+  --kg-edge-highlight: var(--accent-primary);
+  --kg-font:           #64748b;
 
   --surface-glass:  rgba(0, 0, 0, 0.04);
   --surface-card:   rgba(0, 0, 0, 0.02);
