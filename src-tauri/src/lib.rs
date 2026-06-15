@@ -763,6 +763,7 @@ pub fn run() {
             kg::kg_query,
             kg::kg_stats,
             kg::kg_delete_node_cmd,
+            kg::kg_merge_nodes,
             kg::kg_backfill,
         ])
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {

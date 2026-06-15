@@ -54,9 +54,14 @@
           <span class="inspector-type-badge" :style="{ background: kgColors[selectedNode.type] || 'var(--text-muted)' }">
             {{ getTypeShapeIcon(selectedNode.type) }} {{ selectedNode.type }}
           </span>
-          <button class="btn-icon inspector-close" @click="selectedNode = null">
-            <X :size="14" />
-          </button>
+          <div style="display:flex; gap: 4px;">
+            <button class="btn-icon inspector-merge" :class="{ active: mergeMode }" @click="toggleMergeMode" title="关联/合并至...">
+              <Link :size="14" />
+            </button>
+            <button class="btn-icon inspector-close" @click="selectedNode = null">
+              <X :size="14" />
+            </button>
+          </div>
         </div>
         <h3 class="inspector-title">{{ selectedNode.label }}</h3>
         <p v-if="selectedNode.summary" class="inspector-summary">{{ selectedNode.summary }}</p>
@@ -64,6 +69,25 @@
           <FileText :size="12" />
           {{ selectedNode.source }}
         </p>
+
+        <!-- 合并操作区 -->
+        <div v-if="mergeMode" class="inspector-merge-panel">
+          <div class="merge-prompt">
+            <strong>关联/合并节点</strong>
+            <p>将当前节点(被删除)合并至目标节点。</p>
+            <p>请在下方选择，或在图谱上点击目标：</p>
+          </div>
+          <select v-model="mergeTargetId" class="merge-select">
+            <option value="">-- 请选择目标节点 --</option>
+            <option v-for="node in allNodesList" :key="node.id" :value="node.id">
+              {{ node.label }} ({{ node.type }})
+            </option>
+          </select>
+          <div class="merge-actions">
+            <button class="btn-primary" :disabled="!mergeTargetId" @click="confirmMerge">确认合并</button>
+            <button class="btn-secondary" @click="mergeMode = false">取消</button>
+          </div>
+        </div>
 
         <div class="inspector-section">
           <h4>关联节点</h4>
@@ -100,7 +124,7 @@
 import { ref, onMounted, onBeforeUnmount, watch, computed } from 'vue';
 import { Network } from 'vis-network';
 import { DataSet } from 'vis-data';
-import { Waypoints, Search, X, FileText, RefreshCw, Plus } from 'lucide-vue-next';
+import { Waypoints, Search, X, FileText, RefreshCw, Plus, Link } from 'lucide-vue-next';
 
 // ── 状态 ────────────────────────────────────────────────
 const networkContainer = ref(null);
@@ -113,10 +137,48 @@ const activeTypes = ref(new Set());
 const backfilling = ref(false);
 const isDragOver = ref(false);
 
+const mergeMode = ref(false);
+const mergeTargetId = ref('');
+
 let network = null;
 let nodesDataSet = null;
 let edgesDataSet = null;
 let allGraphData = null;
+
+const allNodesList = computed(() => {
+  if (!allGraphData) return [];
+  return allGraphData.nodes
+    .filter(n => n.id !== selectedNode.value?.id)
+    .sort((a,b) => a.label.localeCompare(b.label));
+});
+
+function toggleMergeMode() {
+  mergeMode.value = !mergeMode.value;
+  mergeTargetId.value = '';
+}
+
+async function confirmMerge() {
+  if (!mergeTargetId.value || !selectedNode.value) return;
+  const targetNode = allNodesList.value.find(n => n.id === mergeTargetId.value);
+  if (!targetNode) return;
+  
+  const yes = window.confirm(`确定要将【${selectedNode.value.label}】合并至【${targetNode.label}】吗？\n\n合并后，当前节点将被删除，其所有关联关系将转移到目标节点上。`);
+  if (!yes) return;
+  
+  try {
+    const res = await window.electronAPI.invoke('kg_merge_nodes', {
+      primary_id: targetNode.id,
+      alias_id: selectedNode.value.id
+    });
+    if (!res.ok) throw new Error(res.error || 'Unknown error');
+    
+    mergeMode.value = false;
+    selectedNode.value = null;
+    await loadGraph();
+  } catch (e) {
+    alert("合并失败: " + e);
+  }
+}
 
 // ── 颜色与形状定义 ─────────────────────────────────────
 const kgColors = ref({});
@@ -318,12 +380,20 @@ function renderNetwork(data) {
 
   network = new Network(networkContainer.value, { nodes: nodesDataSet, edges: edgesDataSet }, buildNetworkOptions());
 
-  // 移除了关闭 physics 的代码，保留节点的弹簧互动特性
-  
   // 点击节点 → 显示 Inspector，并高亮邻居
   network.on('selectNode', (params) => {
     if (params.nodes.length > 0) {
       const nodeId = params.nodes[0];
+      
+      if (mergeMode.value) {
+        if (nodeId !== selectedNode.value?.id) {
+          mergeTargetId.value = nodeId;
+          // 恢复之前选中的主节点视觉效果
+          network.setSelection({ nodes: [selectedNode.value.id, nodeId] });
+        }
+        return;
+      }
+
       const node = nodesDataSet.get(nodeId);
       if (node?._raw) {
         selectedNode.value = node._raw;
@@ -334,6 +404,14 @@ function renderNetwork(data) {
   });
 
   network.on('deselectNode', () => {
+    if (mergeMode.value) {
+      // 如果在合并模式下取消选择，保留主节点的选择状态
+      if (selectedNode.value) {
+        network.setSelection({ nodes: [selectedNode.value.id] });
+      }
+      return;
+    }
+    
     selectedNode.value = null;
     selectedRelations.value = [];
     resetFocus();
@@ -774,6 +852,82 @@ async function buildKBAndRefresh(folderPath) {
   align-items: center;
   justify-content: space-between;
   margin-bottom: var(--space-2);
+}
+
+.inspector-merge.active {
+  color: var(--user-accent);
+  background: var(--bg-tertiary);
+}
+
+.inspector-merge-panel {
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  margin-bottom: var(--space-4);
+  border: 1px solid var(--border-subtle);
+  animation: slideDown var(--duration-fast) ease;
+}
+
+.merge-prompt strong {
+  display: block;
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+  margin-bottom: var(--space-1);
+}
+
+.merge-prompt p {
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  margin: 0 0 var(--space-1) 0;
+  line-height: 1.4;
+}
+
+.merge-select {
+  width: 100%;
+  padding: 6px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  margin-bottom: var(--space-3);
+  outline: none;
+}
+
+.merge-actions {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.merge-actions button {
+  flex: 1;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  border: none;
+  font-weight: 500;
+}
+
+.merge-actions .btn-primary {
+  background: var(--user-accent);
+  color: white;
+}
+
+.merge-actions .btn-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.merge-actions .btn-secondary {
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-subtle);
+}
+
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 .inspector-type-badge {

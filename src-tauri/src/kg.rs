@@ -34,6 +34,28 @@ pub fn upsert_node(
     Ok(())
 }
 
+/// 根据实体名称和类型，解析出应该使用的 node_id
+/// 能够自动处理已被合并的 alias 映射
+pub fn resolve_node_id(conn: &rusqlite::Connection, name: &str, etype: &str) -> String {
+    let query = "
+        SELECT id FROM kg_nodes 
+        WHERE label = ?1 
+           OR EXISTS (SELECT 1 FROM json_each(kg_nodes.metadata, '$.aliases') WHERE value = ?1)
+        LIMIT 1
+    ";
+    if let Ok(mut stmt) = conn.prepare(query) {
+        if let Ok(mut rows) = stmt.query(params![name]) {
+            if let Ok(Some(row)) = rows.next() {
+                if let Ok(id) = row.get::<_, String>(0) {
+                    return id;
+                }
+            }
+        }
+    }
+    // 默认回退：生成基于类型和名称的标准化 ID
+    format!("{}_{}", etype, name.to_lowercase().replace(' ', "_").replace('.', "_").chars().take(60).collect::<String>())
+}
+
 /// 插入一条关系边 (忽略重复)
 pub fn insert_edge(
     conn: &rusqlite::Connection,
@@ -57,6 +79,66 @@ pub fn delete_node(conn: &rusqlite::Connection, id: &str) -> Result<usize, Strin
     let deleted = conn.execute("DELETE FROM kg_nodes WHERE id = ?1", params![id])
         .map_err(|e| format!("delete node failed: {}", e))?;
     Ok(deleted)
+}
+
+/// 合并两个节点 (将 alias_id 合并到 primary_id)
+pub fn merge_nodes(conn: &rusqlite::Connection, primary_id: &str, alias_id: &str) -> Result<(), String> {
+    if primary_id == alias_id {
+        return Ok(());
+    }
+
+    // 1. 将所有 source_id 为 alias_id 的边更新为 primary_id
+    conn.execute(
+        "UPDATE OR IGNORE kg_edges SET source_id = ?1 WHERE source_id = ?2",
+        params![primary_id, alias_id],
+    ).map_err(|e| format!("update source edges failed: {}", e))?;
+
+    // 2. 将所有 target_id 为 alias_id 的边更新为 primary_id
+    conn.execute(
+        "UPDATE OR IGNORE kg_edges SET target_id = ?1 WHERE target_id = ?2",
+        params![primary_id, alias_id],
+    ).map_err(|e| format!("update target edges failed: {}", e))?;
+
+    // 3. 删除残留冲突边
+    conn.execute(
+        "DELETE FROM kg_edges WHERE source_id = ?1 OR target_id = ?1",
+        params![alias_id],
+    ).map_err(|e| format!("delete residual edges failed: {}", e))?;
+
+    // 4. 将 alias_id 的 label 加入 primary_id 的 metadata.aliases
+    let alias_label: String = conn.query_row(
+        "SELECT label FROM kg_nodes WHERE id = ?1",
+        params![alias_id],
+        |row| row.get(0),
+    ).map_err(|e| format!("get alias label failed: {}", e))?;
+
+    let primary_meta: String = conn.query_row(
+        "SELECT metadata FROM kg_nodes WHERE id = ?1",
+        params![primary_id],
+        |row| row.get(0),
+    ).unwrap_or_else(|_| "{}".to_string());
+
+    let mut meta_val: Value = serde_json::from_str(&primary_meta).unwrap_or(json!({}));
+    if let Some(obj) = meta_val.as_object_mut() {
+        let aliases = obj.entry("aliases").or_insert(json!([]));
+        if let Some(arr) = aliases.as_array_mut() {
+            let label_val = json!(alias_label);
+            if !arr.contains(&label_val) {
+                arr.push(label_val);
+            }
+        }
+    }
+    
+    conn.execute(
+        "UPDATE kg_nodes SET metadata = ?1 WHERE id = ?2",
+        params![meta_val.to_string(), primary_id],
+    ).map_err(|e| format!("update primary metadata failed: {}", e))?;
+
+    // 5. 删除 alias 节点
+    conn.execute("DELETE FROM kg_nodes WHERE id = ?1", params![alias_id])
+        .map_err(|e| format!("delete alias node failed: {}", e))?;
+
+    Ok(())
 }
 
 /// 删除一条边
@@ -403,4 +485,22 @@ pub fn kg_backfill(db: State<DbState>) -> Value {
         "edges_created": edge_count,
         "source_entries": entries.len()
     })
+}
+
+#[derive(serde::Deserialize)]
+pub struct MergeNodesPayload {
+    pub primary_id: String,
+    pub alias_id: String,
+}
+
+#[tauri::command]
+pub fn kg_merge_nodes(
+    state: State<'_, DbState>,
+    payload: MergeNodesPayload,
+) -> Result<Value, String> {
+    let conn = state.conn.lock().unwrap();
+    if let Err(e) = merge_nodes(&conn, &payload.primary_id, &payload.alias_id) {
+        return Ok(json!({ "ok": false, "error": e }));
+    }
+    Ok(json!({ "ok": true }))
 }

@@ -460,7 +460,7 @@ pub async fn system_build_kb(app: AppHandle, folder_path: String, _plan: String)
                     if let Ok(conn) = db_state.0.lock() {
                         // 写入实体节点
                         for (name, etype, desc) in &entity_names_for_kg {
-                            let node_id = format!("{}_{}", etype, name.to_lowercase().replace(' ', "_"));
+                            let node_id = crate::kg::resolve_node_id(&conn, name, etype);
                             let _ = crate::kg::upsert_node(&conn, &node_id, name, etype, desc, &file.file_name);
                         }
                         // 写入文件节点（文件本身也是一个节点）
@@ -468,7 +468,7 @@ pub async fn system_build_kb(app: AppHandle, folder_path: String, _plan: String)
                         let _ = crate::kg::upsert_node(&conn, &file_node_id, &file.file_name, "file", &summary, &file.file_name);
                         // 文件 -> 实体 边 (contains)
                         for (name, etype, _) in &entity_names_for_kg {
-                            let node_id = format!("{}_{}", etype, name.to_lowercase().replace(' ', "_"));
+                            let node_id = crate::kg::resolve_node_id(&conn, name, etype);
                             let _ = crate::kg::insert_edge(&conn, &file_node_id, &node_id, "contains", 0.9);
                         }
                         // 写入 LLM 提取的 relations
