@@ -17,6 +17,14 @@
     "rename": "重命名",
     "delete_chat": "删除对话"
   },
+  "kg": {
+    "title": "知识图谱",
+    "search_placeholder": "搜索知识点...",
+    "empty": "知识图谱为空",
+    "empty_hint": "拖拽文件夹到对话窗口，构建知识库后将自动生成图谱",
+    "generating": "正在生成知识图谱...",
+    "generate_btn": "从知识库生成图谱"
+  },
   "modal": {
     "delete_title": "删除对话",
     "delete_desc": "确定要删除这个对话吗？此操作不可恢复。",

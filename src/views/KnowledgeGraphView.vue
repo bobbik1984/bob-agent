@@ -72,15 +72,15 @@
       </aside>
     </div>
 
-    <!-- 空状态 -->
-    <div v-if="!loading && stats && stats.node_count === 0" class="kg-empty">
+    <!-- 空状态 / 生成中 -->
+    <div v-if="!loading && stats && stats.node_count === 0 && !backfilling" class="kg-empty">
       <Waypoints :size="48" style="opacity: 0.2;" />
-      <p>{{ $t('kg.empty') || '知识图谱为空' }}</p>
-      <p class="kg-empty-hint">{{ $t('kg.empty_hint') || '拖拽文件夹到对话窗口，构建知识库后将自动生成图谱' }}</p>
-      <button class="kg-backfill-btn" @click="doBackfill" :disabled="backfilling">
-        <RefreshCw :size="14" :class="{ 'spin': backfilling }" />
-        {{ backfilling ? '正在回填...' : '从现有知识库回填图谱' }}
-      </button>
+      <p>{{ $t('kg.empty') }}</p>
+      <p class="kg-empty-hint">{{ $t('kg.empty_hint') }}</p>
+    </div>
+    <div v-if="backfilling" class="kg-empty">
+      <RefreshCw :size="32" class="spin" style="opacity: 0.4;" />
+      <p>{{ $t('kg.generating') }}</p>
     </div>
   </div>
 </template>
@@ -182,6 +182,9 @@ async function loadGraph() {
 
     if (graphData.nodes?.length > 0) {
       renderNetwork(graphData);
+    } else {
+      // 图谱为空，自动从现有 wiki_fts 生成
+      await doBackfill();
     }
   } catch (e) {
     console.error('KG load failed:', e);
@@ -322,8 +325,16 @@ async function doBackfill() {
   try {
     const result = await window.electronAPI.kgBackfill();
     console.log('KG backfill result:', result);
-    // 重新加载图谱
-    await loadGraph();
+    // 直接获取并渲染，不调 loadGraph (避免递归)
+    const [graphData, statsData] = await Promise.all([
+      window.electronAPI.kgGetFullGraph(),
+      window.electronAPI.kgStats(),
+    ]);
+    stats.value = statsData;
+    allGraphData = graphData;
+    if (graphData.nodes?.length > 0) {
+      renderNetwork(graphData);
+    }
   } catch (e) {
     console.error('KG backfill failed:', e);
   } finally {
