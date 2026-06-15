@@ -498,7 +498,10 @@ pub fn kg_merge_nodes(
     state: State<'_, DbState>,
     payload: MergeNodesPayload,
 ) -> Result<Value, String> {
-    let conn = state.conn.lock().unwrap();
+    let conn = match state.0.lock() {
+        Ok(c) => c,
+        Err(_) => return Ok(json!({ "ok": false, "error": "DB lock failed" })),
+    };
     if let Err(e) = merge_nodes(&conn, &payload.primary_id, &payload.alias_id) {
         return Ok(json!({ "ok": false, "error": e }));
     }
