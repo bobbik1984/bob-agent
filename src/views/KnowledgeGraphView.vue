@@ -269,11 +269,8 @@ function renderNetwork(data) {
 
   network = new Network(networkContainer.value, { nodes: nodesDataSet, edges: edgesDataSet }, buildNetworkOptions());
 
-  // 物理引擎布局完成后停止，优化交互性能
-  network.on('stabilizationIterationsDone', () => {
-    network.setOptions({ physics: { enabled: false } });
-  });
-
+  // 移除了关闭 physics 的代码，保留节点的弹簧互动特性
+  
   // 点击节点 → 显示 Inspector，并高亮邻居
   network.on('selectNode', (params) => {
     if (params.nodes.length > 0) {
