@@ -179,7 +179,13 @@ function buildNetworkOptions() {
     },
     physics: {
       solver: 'barnesHut',
-      barnesHut: { gravitationalConstant: -3000, centralGravity: 0.15, springLength: 100, springConstant: 0.02, damping: 0.3 },
+      barnesHut: { 
+        gravitationalConstant: -12000, // 更强的节点斥力 (默认是 -2000)
+        centralGravity: 0.05,          // 较弱的中心引力
+        springLength: 250,             // 更长的边距 (默认 100)
+        springConstant: 0.04,
+        damping: 0.2 
+      },
       stabilization: { enabled: true, iterations: 80, fit: true },
       maxVelocity: 50,
       minVelocity: 0.75,
