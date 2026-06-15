@@ -226,8 +226,23 @@ onMounted(async () => {
         let yes = false;
         try {
           const { ask } = await import('@tauri-apps/plugin-dialog');
-          yes = await ask(`是否要从该路径提取知识点并加入图谱？\n\n${path}`, {
-            title: '提取知识点',
+          
+          // 先预估成本
+          const estimate = await window.electronAPI.estimateKB(path);
+          let msg = `是否要从该路径提取知识点并加入图谱？\n\n${path}\n\n`;
+          
+          if (estimate && !estimate.error) {
+            msg += `【扫描结果】\n`;
+            msg += `- 支持的文件: ${estimate.convertable_files} 个\n`;
+            msg += `- Token 规模: 约 ${estimate.estimated_tokens}\n`;
+            msg += `- 预计耗时: 约 ${estimate.estimated_minutes} 分钟\n`;
+            msg += `- 预估成本: 约 ¥${(estimate.estimated_cost_cheap_rmb || 0).toFixed(4)} (基础模型)\n`;
+          } else if (estimate && estimate.error) {
+            msg += `【预估失败】\n${estimate.error}\n`;
+          }
+
+          yes = await ask(msg, {
+            title: '提取前确认 (包含成本预估)',
             type: 'info'
           });
         } catch (err) {

@@ -287,6 +287,10 @@ export function useDragDrop({ messages, inputText, scrollToBottom, globalFileAcc
     window.electronAPI.onDragLeave(async () => { isDragging.value = false; }).then(u => tauriDragUnlistens.push(u));
 
     window.electronAPI.onDragDrop(async (e) => {
+      // 避免在非 Chat 视图时意外触发 (因为 ChatView 是 v-show 并非 unmounted)
+      const chatView = document.querySelector('.chat-view');
+      if (chatView && chatView.offsetParent === null) return;
+
       isDragging.value = false;
       if (e.payload && e.payload.paths && e.payload.paths.length > 0) {
         await handleTauriDrop(e.payload.paths);
