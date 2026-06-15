@@ -511,7 +511,20 @@ async function onDrop(e) {
   // 获取第一个拖入的路径
   const path = files[0].path || files[0].name;
   if (path) {
-    await buildKBAndRefresh(path);
+    let yes = false;
+    try {
+      const { ask } = await import('@tauri-apps/plugin-dialog');
+      yes = await ask(`是否要从该路径提取知识点并加入图谱？\n\n${path}`, {
+        title: '提取知识点',
+        type: 'info'
+      });
+    } catch (err) {
+      yes = window.confirm(`是否要从该路径提取知识点并加入图谱？\n\n${path}`);
+    }
+    
+    if (yes) {
+      await buildKBAndRefresh(path);
+    }
   }
 }
 
