@@ -49,7 +49,8 @@
       ></div>
 
       <!-- Inspector 面板 -->
-      <aside v-if="selectedNode" class="kg-inspector">
+      <div v-show="selectedNode" class="inspector-resizer" @mousedown="startResizeInspector"></div>
+      <aside v-if="selectedNode" class="kg-inspector" :style="{ width: inspectorWidth + 'px' }">
         <div class="inspector-header">
           <span class="inspector-type-badge" :style="{ background: kgColors[selectedNode.type] || 'var(--text-muted)' }">
             {{ getTypeShapeIcon(selectedNode.type) }} {{ selectedNode.type }}
@@ -159,6 +160,9 @@ const mergeTargetId = ref('');
 const mergeSearchTerm = ref('');
 const mergeFilterSameType = ref(true);
 
+const inspectorWidth = ref(280);
+const isResizingInspector = ref(false);
+
 let network = null;
 let nodesDataSet = null;
 let edgesDataSet = null;
@@ -188,6 +192,32 @@ function toggleMergeMode() {
   mergeTargetId.value = '';
   mergeSearchTerm.value = '';
   mergeFilterSameType.value = true;
+}
+
+// ── Inspector Resizing ──
+function startResizeInspector(e) {
+  isResizingInspector.value = true;
+  document.addEventListener('mousemove', handleResizeInspector);
+  document.addEventListener('mouseup', stopResizeInspector);
+  document.body.style.cursor = 'col-resize';
+  document.body.style.userSelect = 'none';
+}
+
+function handleResizeInspector(e) {
+  if (!isResizingInspector.value) return;
+  // Panel is on the right, so width is (screen width - mouse X)
+  let newWidth = window.innerWidth - e.clientX;
+  if (newWidth < 280) newWidth = 280;
+  if (newWidth > 800) newWidth = 800;
+  inspectorWidth.value = newWidth;
+}
+
+function stopResizeInspector() {
+  isResizingInspector.value = false;
+  document.removeEventListener('mousemove', handleResizeInspector);
+  document.removeEventListener('mouseup', stopResizeInspector);
+  document.body.style.cursor = '';
+  document.body.style.userSelect = '';
 }
 
 async function confirmMerge() {
@@ -887,12 +917,39 @@ async function buildKBAndRefresh(folderPath) {
 
 /* ── Inspector ──────────────────────────────── */
 .kg-inspector {
-  width: 280px;
   border-left: 1px solid var(--border-subtle);
   padding: var(--space-4);
   overflow-y: auto;
   background: var(--bg-secondary);
   animation: slideInRight var(--duration-normal) ease;
+  flex-shrink: 0;
+}
+
+.inspector-resizer {
+  width: 6px;
+  background: transparent;
+  cursor: col-resize;
+  flex-shrink: 0;
+  z-index: 10;
+  margin-right: -3px;
+  margin-left: -3px;
+  position: relative;
+}
+
+.inspector-resizer::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 3px;
+  width: 1px;
+  background: transparent;
+  transition: background var(--duration-fast);
+}
+
+.inspector-resizer:hover::after, .inspector-resizer:active::after {
+  background: var(--accent-primary);
+  width: 2px;
 }
 
 @keyframes slideInRight {
