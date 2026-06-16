@@ -5,7 +5,9 @@
       <div class="kg-toolbar-left">
         <Waypoints :size="18" />
         <h2>{{ $t('kg.title') || '知识图谱' }}</h2>
-        <span v-if="stats" class="kg-stat-badge">{{ stats.node_count }} 节点 · {{ stats.edge_count }} 关系</span>
+        <span v-if="stats" class="kg-stat-badge">
+          {{ $t('kg.stats_summary', { nodes: stats.node_count, edges: stats.edge_count }) }}
+        </span>
       </div>
       <div class="kg-toolbar-right">
         <div class="kg-search-box">
@@ -27,7 +29,7 @@
             <span class="chip-shape" :style="{ color: kgColors[t.type] || 'var(--text-muted)' }">
               {{ getTypeShapeIcon(t.type) }}
             </span>
-            {{ t.type }} ({{ t.count }})
+            {{ getTypeName(t.type) }} ({{ t.count }})
           </button>
         </div>
         <button class="kg-add-btn" @click="openFolderPicker" :title="$t('kg.add_folder') || '添加知识库'">
@@ -71,10 +73,15 @@
         </div>
         <h3 class="inspector-title">{{ selectedNode.label }}</h3>
         <p v-if="selectedNode.summary" class="inspector-summary">{{ selectedNode.summary }}</p>
-        <p v-if="selectedNode.source" class="inspector-source">
-          <FileText :size="12" />
-          {{ selectedNode.source }}
-        </p>
+        <div v-if="selectedNode.source" style="display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; margin-bottom: var(--space-4);">
+          <p class="inspector-source" style="margin: 0; flex: 1;">
+            <FileText :size="12" style="flex-shrink: 0; margin-top: 2px;" />
+            <span :title="selectedNode.source">{{ selectedNode.source }}</span>
+          </p>
+          <button class="btn btn-ghost" style="padding: 2px 6px; font-size: 0.8em; flex-shrink: 0; display: flex; align-items: center; gap: 4px;" @click="openSourceFile(selectedNode.source)" title="打开原始文件">
+            <ExternalLink :size="12" /> 打开
+          </button>
+        </div>
 
         <!-- 合并操作区 -->
         <div v-if="mergeMode" class="inspector-merge-panel">
@@ -145,11 +152,14 @@
 
 <script setup>
 import { ref, onMounted, onBeforeUnmount, watch, computed } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { Network } from 'vis-network';
 import { DataSet } from 'vis-data';
-import { Waypoints, Search, X, FileText, RefreshCw, Plus, Link } from 'lucide-vue-next';
+import { Waypoints, Search, X, FileText, RefreshCw, Plus, Link, ExternalLink } from 'lucide-vue-next';
 
 // ── 状态 ────────────────────────────────────────────────
+const { t, te } = useI18n();
+
 const networkContainer = ref(null);
 const stats = ref(null);
 const searchTerm = ref('');
@@ -291,6 +301,11 @@ function getTypeVisShape(type) {
   return typeShapes[type]?.vis || 'dot';
 }
 
+function getTypeName(type) {
+  const key = `kg.type_${type}`;
+  return te(key) ? t(key) : type;
+}
+
 function buildNetworkOptions() {
   const colors = kgColors.value;
   return {
@@ -334,6 +349,15 @@ function buildNetworkOptions() {
 }
 
 let tauriDragUnlistens = [];
+
+function openSourceFile(path) {
+  if (!path) return;
+  if (window.electronAPI && window.electronAPI.openFile) {
+    window.electronAPI.openFile(path).catch(err => {
+      console.error('Failed to open file:', err);
+    });
+  }
+}
 
 // ── 初始化 ──────────────────────────────────────────────
 onMounted(async () => {

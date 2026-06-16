@@ -433,11 +433,26 @@ pub async fn system_build_kb(app: AppHandle, folder_path: String, _plan: String)
                 // 处理实体
                 if let Some(entities) = result.get("entities").and_then(|v| v.as_array()) {
                     for entity in entities {
-                        if let (Some(name), Some(etype), Some(desc)) = (
+                        if let (Some(name), Some(raw_etype), Some(desc)) = (
                             entity.get("name").and_then(|v| v.as_str()),
                             entity.get("type").and_then(|v| v.as_str()),
                             entity.get("description").and_then(|v| v.as_str()),
                         ) {
+                            let etype = match raw_etype.to_lowercase().as_str() {
+                                "concept" | "概念" | "名词" => "concept",
+                                "project" | "项目" => "project",
+                                "person" | "人物" | "人名" | "author" | "作者" => "person",
+                                "organization" | "组织" | "机构" | "公司" => "organization",
+                                "location" | "地点" | "位置" => "location",
+                                "event" | "事件" => "event",
+                                "technology" | "技术" => "technology",
+                                "file" | "文件" => "file",
+                                "tag" | "标签" => "tag",
+                                "topic" | "主题" => "topic",
+                                "entity" | "实体" => "entity",
+                                _ => "concept"
+                            };
+
                             // TODO: 未来可以合并同名实体页
                             let entity_path = super::get_wiki_dir().join("entities").join(format!("{}.md", name));
                             if !entity_path.exists() {

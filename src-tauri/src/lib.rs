@@ -114,13 +114,48 @@ pub(crate) fn now_ms() -> i64 {
 // ═══════════════════════════════════════════════════════════
 
 #[tauri::command]
-async fn system_take_screenshot() -> Result<(), String> {
+async fn system_take_screenshot(app_handle: tauri::AppHandle) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
+        use windows_sys::Win32::System::DataExchange::GetClipboardSequenceNumber;
+        use std::time::Duration;
+        use tauri::Manager;
+
+        // 获取主窗口
+        let window = app_handle.get_webview_window("main");
+        
+        // 记录截图前的剪贴板序列号
+        let initial_seq = unsafe { GetClipboardSequenceNumber() };
+
+        // 隐藏主窗口
+        if let Some(w) = &window {
+            let _ = w.hide();
+        }
+
         std::process::Command::new("SnippingTool.exe")
             .arg("/clip")
             .status()
             .map_err(|e| e.to_string())?;
+
+        // 轮询剪贴板变化，最多等待 15 秒（60 * 250ms）
+        for _ in 0..60 {
+            std::thread::sleep(Duration::from_millis(250));
+            let current_seq = unsafe { GetClipboardSequenceNumber() };
+            // 如果剪贴板序列号发生变化，说明系统截图已经将图片塞进剪贴板了
+            if current_seq != initial_seq {
+                break;
+            }
+        }
+
+        // 额外给剪贴板一点时间确保写入完成
+        std::thread::sleep(Duration::from_millis(300));
+
+        // 截图结束（或等待超时），恢复主窗口
+        if let Some(w) = &window {
+            let _ = w.show();
+            let _ = w.unminimize();
+            let _ = w.set_focus();
+        }
     }
     Ok(())
 }

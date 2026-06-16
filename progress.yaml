@@ -233,6 +233,15 @@ tests:
   note: "待端到端测试后更新"
 
 recent_fixes:
+  - date: "2026-06-15"
+    items:
+      - "[Feature] M17 知识图谱 — SQLite 双表 (kg_nodes + kg_edges) + Rust 图引擎 kg.rs (CRUD/BFS/统计/全图)"
+      - "[Feature] vis.js 力导向图前端面板 — KnowledgeGraphView.vue (搜索/类型筛选/Inspector/侧边栏入口)"
+      - "[Feature] kb_indexer Prompt 扩展 — 新增 relations 字段，LLM 同时提取实体+关系"
+      - "[Feature] kb_indexer → kg 自动写入 — 索引完成后自动 upsert 节点+边到图谱"
+      - "[Feature] 一键回填 kg_backfill — 从现有 73 条 wiki_fts 生成图谱测试数据"
+      - "[Arch] Tauri Bridge v5.8 — 新增 5 个 KG IPC 方法 (kgGetFullGraph/kgQuery/kgStats/kgDeleteNode/kgBackfill)"
+      - "[i18n] zh-CN/en-US 新增 nav.knowledge 键"
   - date: "2026-06-14"
     items:
       - "[Feature] CDN 实时上传进度条 — stream-based 分块上传 (64KB/chunk) + Tauri 事件推送 + 前端进度条 UI"

@@ -1,5 +1,11 @@
 <template>
   <div class="chat-view">
+    <!-- Lightbox for Image Zoom -->
+    <div v-if="zoomedImage" class="image-lightbox" @click="zoomedImage = null; imageScale = 1; imageTranslateX = 0; imageTranslateY = 0;" @wheel.prevent="handleImageWheel" @mousemove="handleImageMouseMove" @mouseup="handleImageMouseUp" @mouseleave="handleImageMouseUp">
+      <img :src="zoomedImage" :style="{ transform: `translate(${imageTranslateX}px, ${imageTranslateY}px) scale(${imageScale})` }" @click.stop @mousedown="handleImageMouseDown" />
+      <button class="lightbox-close" @click="zoomedImage = null; imageScale = 1; imageTranslateX = 0; imageTranslateY = 0;">&times;</button>
+    </div>
+
     <!-- T-1304: 系统健康横幅 -->
     <div v-if="healthBanner" class="health-banner" :class="healthBanner.severity">
       <span class="health-icon">{{ healthBanner.severity === 'error' ? '!' : 'i' }}</span>
@@ -91,7 +97,12 @@
 
           <!-- 图片预览 -->
           <div v-if="msg.image_base64" class="message-image">
-            <img :src="'data:image/png;base64,' + msg.image_base64" alt="用户图片" />
+            <img 
+              :src="'data:image/png;base64,' + msg.image_base64" 
+              alt="用户图片" 
+              @click="zoomedImage = 'data:image/png;base64,' + msg.image_base64; imageScale = 1; imageTranslateX = 0; imageTranslateY = 0;"
+              style="cursor: zoom-in;"
+            />
           </div>
           <!-- 元数据标注：模型 & 来源 & 复制 & 记忆标志 -->
           <div class="message-meta-row" v-if="msg.role === 'assistant' || msg.from_channel">
@@ -460,6 +471,44 @@ const messagesArea = ref(null);
 const inputRef = ref(null);
 const logoOpacity = ref(1);
 
+const zoomedImage = ref(null);
+const imageScale = ref(1);
+const imageTranslateX = ref(0);
+const imageTranslateY = ref(0);
+let isDraggingImage = false;
+let startDragX = 0;
+let startDragY = 0;
+
+function handleImageWheel(e) {
+  if (!zoomedImage.value) return;
+  // zoom speed
+  const zoomFactor = 0.1;
+  if (e.deltaY < 0) {
+    // scroll up -> zoom in
+    imageScale.value = Math.min(imageScale.value + zoomFactor, 5); // max 5x
+  } else {
+    // scroll down -> zoom out
+    imageScale.value = Math.max(imageScale.value - zoomFactor, 0.2); // min 0.2x
+  }
+}
+
+function handleImageMouseDown(e) {
+  e.preventDefault();
+  isDraggingImage = true;
+  startDragX = e.clientX - imageTranslateX.value;
+  startDragY = e.clientY - imageTranslateY.value;
+}
+
+function handleImageMouseMove(e) {
+  if (!isDraggingImage) return;
+  imageTranslateX.value = e.clientX - startDragX;
+  imageTranslateY.value = e.clientY - startDragY;
+}
+
+function handleImageMouseUp(e) {
+  isDraggingImage = false;
+}
+
 const showMentionMenu = ref(false);
 let mentionTriggerIndex = -1;
 
@@ -524,10 +573,24 @@ const {
 });
 
 // ── 模板绑定的包装函数 ──────────────────────────────
-// sendMessage 需要传入 pendingImage/pendingFiles/resetTextareaHeight
-function sendMessage() {
-  _sendMessage(pendingImage, pendingFiles, resetTextareaHeight);
-}
+  // sendMessage 需要传入 pendingImage/pendingFiles/resetTextareaHeight
+  function sendMessage() {
+    if (pendingImage.value) {
+      const currentModelObj = availableModels.value.find(m => m.id === currentModelRaw.value);
+      const hasVision = currentModelObj && currentModelObj.vision;
+      if (!hasVision) {
+        messages.value.push({
+          role: 'assistant',
+          content: '当前选定的模型不支持视觉（图像识别）能力，无法处理截图。请切换至支持 vision 的模型（如 GPT-4o, Gemini 1.5 Pro 等）后再试。',
+          _isError: true,
+          _thinkingExpanded: false,
+        });
+        scrollToBottom();
+        return;
+      }
+    }
+    _sendMessage(pendingImage, pendingFiles, resetTextareaHeight);
+  }
 
 function parseTextAsEvent() {
   _parseTextAsEvent(resetTextareaHeight);
@@ -615,8 +678,10 @@ const isScreenshotting = ref(false);
 async function handleScreenshot() {
   if (isScreenshotting.value) return; // 防止重复点击
   isScreenshotting.value = true;
-  const { getCurrentWindow } = window.__TAURI__.window;
   try {
+    const { getCurrentWindow } = await import('@tauri-apps/api/window');
+    const appWindow = getCurrentWindow();
+    
     // 记录截图前的剪贴板状态，用于检测用户是否取消了截图
     let prevClipHash = '';
     try {
@@ -626,44 +691,41 @@ async function handleScreenshot() {
       prevClipHash = prevBytes.length.toString();
     } catch (_) { /* 剪贴板可能为空 */ }
 
-    await getCurrentWindow().hide();
+    // 截图期间的窗口隐藏、等待和恢复逻辑已经全部移到了 Rust 后端
     await window.electronAPI.takeScreenshot();
 
-    // 使用 Tauri 原生插件读取剪贴板图片（而非 navigator.clipboard.read）
-    const { readImage } = await import('@tauri-apps/plugin-clipboard-manager');
-    const img = await readImage();
-    const rgbaBytes = await img.rgba();
+    // 彻底抛弃 Tauri 官方的 readImage 插件！
+    // 它在处理部分 Windows Snipping Tool 的 DIB 图像时，会导致 Rust 线程死锁或 IPC 序列化永久挂起。
+    // 我们强制使用原生 HTML5 navigator.clipboard.read()，并且增加一个 Race 超时机制，防止权限弹窗无人点击导致假死。
+    try {
+      const clipboardItems = await Promise.race([
+        navigator.clipboard.read(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Permission prompt timeout or clipboard locked')), 15000))
+      ]);
 
-    // 检测用户是否取消了截图（剪贴板内容未改变）
-    const newClipHash = rgbaBytes.length.toString();
-    if (newClipHash === prevClipHash) {
-      console.log('Screenshot cancelled by user (clipboard unchanged)');
-      return;
-    }
-
-    // 将 RGBA 转为 PNG base64
-    const canvas = document.createElement('canvas');
-    const width = img.width || Math.sqrt(rgbaBytes.length / 4);
-    const height = img.height || Math.sqrt(rgbaBytes.length / 4);
-    canvas.width = width;
-    canvas.height = height;
-    const ctx = canvas.getContext('2d');
-    const imageData = new ImageData(new Uint8ClampedArray(rgbaBytes), width, height);
-    ctx.putImageData(imageData, 0, 0);
-    const dataUrl = canvas.toDataURL('image/png');
-    const base64 = dataUrl.replace(/^data:image\/png;base64,/, '');
-    if (base64) {
-      pendingImage.value = base64;
+      for (const item of clipboardItems) {
+        const imageType = item.types.find(t => t.startsWith('image/'));
+        if (imageType) {
+          const blob = await item.getType(imageType);
+          const base64Result = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = (e) => resolve(e.target.result.replace(/^data:image\/\w+;base64,/, ''));
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+          });
+          if (base64Result) {
+            pendingImage.value = base64Result;
+            return; // 成功粘贴！
+          }
+        }
+      }
+      console.log('No image found in native clipboard');
+    } catch (err) {
+      console.warn("Native clipboard read failed (permission denied, timed out, or unreadable):", err);
     }
   } catch (e) {
     console.error('Screenshot failed:', e);
   } finally {
-    // 无论成功或失败，确保窗口恢复
-    try {
-      await getCurrentWindow().show();
-      await getCurrentWindow().unminimize();
-      await getCurrentWindow().setFocus();
-    } catch (_) {}
     isScreenshotting.value = false;
   }
 }
@@ -1817,6 +1879,7 @@ defineExpose({
 .inline-image-preview {
   position: relative;
   display: inline-block;
+  width: max-content;
   padding: 4px 0 6px 0;
 }
 
@@ -1876,7 +1939,7 @@ defineExpose({
 .image-remove-inline {
   position: absolute;
   top: 0;
-  right: -8px;
+  right: -6px;
   width: 16px;
   height: 16px;
   font-size: 8px;
@@ -1888,6 +1951,14 @@ defineExpose({
   justify-content: center;
   cursor: pointer;
   border: none;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  pointer-events: none;
+}
+
+.inline-image-preview:hover .image-remove-inline {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .chat-input {
@@ -2152,5 +2223,50 @@ defineExpose({
   background-color: var(--bg-root);
   padding: 2px 6px;
   border-radius: 4px;
+}
+
+/* Image Lightbox */
+.image-lightbox {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background-color: rgba(0, 0, 0, 0.85);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 9999;
+  cursor: zoom-out;
+  backdrop-filter: blur(4px);
+}
+.image-lightbox img {
+  max-width: 90vw;
+  max-height: 90vh;
+  object-fit: contain;
+  border-radius: 8px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+  cursor: grab;
+  transition: transform 0.1s ease-out;
+}
+.image-lightbox img:active {
+  cursor: grabbing;
+  transition: none; /* smooth tracking while dragging */
+}
+.lightbox-close {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  background: transparent;
+  border: none;
+  color: white;
+  font-size: 40px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.7;
+  transition: opacity 0.2s;
+}
+.lightbox-close:hover {
+  opacity: 1;
 }
 </style>

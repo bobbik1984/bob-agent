@@ -72,7 +72,7 @@
 
 
     <!-- 模型供应商密钥 -->
-    <h4 style="margin-bottom: 8px; font-size: 0.85em; color: var(--text-secondary);">{{ $t('settings.provider_keys_title') }}</h4>
+    <h4 style="margin-top: 16px; margin-bottom: 8px; font-size: 0.85em; color: var(--text-secondary);">{{ $t('settings.provider_keys_title') }}</h4>
     <div style="display: flex; flex-direction: column; margin-bottom: 20px;">
       <div class="form-group" v-for="provider in modelProviders" :key="provider.id" style="display: flex; align-items: center; gap: 12px; border-bottom: 1px solid var(--border-subtle); padding: 10px 0; margin-bottom: 0;">
         <label class="form-label" style="width: 160px; margin-bottom: 0; display: flex; align-items: center; gap: 8px;">
@@ -187,7 +187,7 @@
     </summary>
 
 
-    <div v-if="registryData && registryData.providers">
+    <div v-if="registryData && registryData.providers" style="margin-top: 16px;">
       <div class="registry-providers-grid">
         <!-- 每个供应商 -->
         <div v-for="(provider, pIdx) in registryData.providers" :key="provider.id"

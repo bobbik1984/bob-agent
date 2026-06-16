@@ -167,6 +167,12 @@
           <ChevronDown v-if="activeDrawer === 'knowledge'" :size="14" class="drawer-chevron" />
           <ChevronRight v-else :size="14" class="drawer-chevron" />
         </div>
+        <div v-show="activeDrawer === 'knowledge'" class="drawer-content">
+          <div class="drawer-placeholder">
+            <Waypoints :size="24" style="opacity: 0.3;" />
+            <span>{{ $t('nav.knowledge_hint') || '实体与关联网络' }}</span>
+          </div>
+        </div>
 
         <!-- ═══ 抽屉 3: 设置 ═══ -->
         <div class="drawer-header" :class="{ active: activeDrawer === 'settings' }" @click="activeDrawer = 'settings'">

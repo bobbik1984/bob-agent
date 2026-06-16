@@ -11,6 +11,7 @@
     "schedule": "Schedule",
     "schedule_hint": "Schedule & Tasks",
     "knowledge": "Knowledge Graph",
+    "knowledge_hint": "Entities & Relationships",
     "settings": "Settings",
     "theme_to_light": "Switch to light mode",
     "theme_to_dark": "Switch to dark mode",
@@ -23,7 +24,19 @@
     "empty": "Knowledge graph is empty",
     "empty_hint": "Drag a folder into the chat to build a knowledge base — the graph will be generated automatically",
     "generating": "Generating knowledge graph...",
-    "generate_btn": "Generate from knowledge base"
+    "generate_btn": "Generate from knowledge base",
+    "type_concept": "Concept",
+    "type_project": "Project",
+    "type_file": "File",
+    "type_tag": "Tag",
+    "type_person": "Person",
+    "type_topic": "Topic",
+    "type_entity": "Entity",
+    "type_organization": "Organization",
+    "type_location": "Location",
+    "type_event": "Event",
+    "type_technology": "Technology",
+    "stats_summary": "{nodes} Nodes · {edges} Edges"
   },
   "modal": {
     "delete_title": "Delete Chat",
