@@ -233,6 +233,12 @@ tests:
   note: "待端到端测试后更新"
 
 recent_fixes:
+  - date: "2026-06-16"
+    items:
+      - "[Feature] ChatView 图片预览 Lightbox (支持鼠标拖拽平移、滚轮缩放、点击重置)"
+      - "[Fix] LLM 视觉能力(Vision)鉴权拦截器修复 (支持判断模型内置 Vision 能力)"
+      - "[i18n] 知识图谱节点类型中英文显示适配及数据库历史数据迁移"
+      - "[Skill] 新增 project_portal 专属本地入口跳转技能"
   - date: "2026-06-15"
     items:
       - "[Feature] M17 知识图谱 — SQLite 双表 (kg_nodes + kg_edges) + Rust 图引擎 kg.rs (CRUD/BFS/统计/全图)"
