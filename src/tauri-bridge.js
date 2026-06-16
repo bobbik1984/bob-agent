@@ -143,7 +143,9 @@ window.electronAPI = {
   scanFolder: async (folderPath) => invoke('system_scan_folder', { folderPath }),
   estimateKB: async (folderPath) => invoke('system_estimate_kb', { folderPath }),
   buildKB: async (folderPath, plan) => invoke('system_build_kb', { folderPath, plan }),
-  migrateWikiDir: async (oldDir, newDir, mode) => invoke('system_migrate_wiki_dir', { oldDir, newDir, mode }),
+  openLlmEngineDir: () => invoke('system_open_llm_engine_dir'),
+  migrateWikiDir: (oldDir, newDir, mode) => invoke('system_migrate_wiki_dir', { oldDir, newDir, mode }),
+  checkProjectIndex: (projectName) => invoke('system_check_project_index', { projectName }),
   
   // LLM-Wiki 知识库引擎事件
   onKBProgress: (callback) => {

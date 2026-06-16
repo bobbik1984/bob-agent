@@ -1,0 +1,15 @@
+{
+    "name": "daily_review",
+    "description": "每日工作晚间总结与晨间启动（读写 daily 目录和共享笔记）",
+    "version": "1.0.0",
+    "capabilities": {
+        "morning_kickoff": {
+            "description": "晨间启动：执行 scripts/morning_kickoff.sh 读取昨日工作总结（summary）、项目蓝图和最新任务列表，并要求你根据这些上下文生成今天的计划（today_plan.md）",
+            "script": "scripts/morning_kickoff.sh"
+        },
+        "evening_review": {
+            "description": "晚间总结：通过标准输入（stdin）将今日完成的事项和遇到问题以Markdown内容传入 scripts/evening_review.sh，保存为当天的全局总结",
+            "script": "scripts/evening_review.sh"
+        }
+    }
+}

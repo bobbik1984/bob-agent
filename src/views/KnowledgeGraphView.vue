@@ -83,6 +83,12 @@
           </button>
         </div>
 
+        <div v-if="projectIndexPath" style="margin-bottom: var(--space-4);">
+          <button class="btn" style="width: 100%; display: flex; justify-content: center; align-items: center; gap: 6px; background-color: var(--user-accent); color: white; border: none;" @click="openProjectPortal">
+            <ExternalLink :size="14" /> 进入项目协作门户
+          </button>
+        </div>
+
         <!-- 合并操作区 -->
         <div v-if="mergeMode" class="inspector-merge-panel">
           <div class="merge-prompt">
@@ -165,10 +171,25 @@ const stats = ref(null);
 const searchTerm = ref('');
 const selectedNode = ref(null);
 const selectedRelations = ref([]);
+const projectIndexPath = ref(null);
 const loading = ref(true);
 const activeTypes = ref(new Set());
 const backfilling = ref(false);
 const isDragOver = ref(false);
+
+watch(() => selectedNode.value, async (newVal) => {
+  projectIndexPath.value = null;
+  if (newVal && (newVal.type === 'Project' || newVal.type === 'project')) {
+    try {
+      const path = await window.electronAPI.checkProjectIndex(newVal.label);
+      if (path) {
+        projectIndexPath.value = path;
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  }
+});
 
 const mergeMode = ref(false);
 const mergeTargetId = ref('');
@@ -356,6 +377,14 @@ function openSourceFile(path) {
     window.electronAPI.openFile(path).catch(err => {
       console.error('Failed to open file:', err);
     });
+  } else {
+    alert(`无法直接打开文件: ${path}`);
+  }
+}
+
+function openProjectPortal() {
+  if (projectIndexPath.value) {
+    window.electronAPI.openFile(projectIndexPath.value);
   }
 }
 
