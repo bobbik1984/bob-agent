@@ -14,7 +14,7 @@ import { ref } from 'vue';
 
 export function useDragDrop({ messages, inputText, scrollToBottom, globalFileAccess, agentMode, conversationId }) {
   const isDragging = ref(false);
-  const pendingImage = ref(null);
+  const pendingImages = ref([]);
   const pendingFiles = ref([]);
   const pendingFolderInfo = ref(null);
   const pendingKBEstimate = ref(null);
@@ -25,7 +25,7 @@ export function useDragDrop({ messages, inputText, scrollToBottom, globalFileAcc
       const result = await window.electronAPI.selectFile();
       if (!result) return;
       if (typeof result === 'object' && result.type === 'image' && result.content) {
-        pendingImage.value = result.content;
+        pendingImages.value.push(result.content);
         return;
       }
       if (typeof result === 'object' && result.type === 'text' && result.content) {
@@ -41,7 +41,7 @@ export function useDragDrop({ messages, inputText, scrollToBottom, globalFileAcc
     }
     const base64 = await window.electronAPI.getClipboardImage();
     if (base64) {
-      pendingImage.value = base64;
+      pendingImages.value.push(base64);
     }
   }
 
@@ -56,7 +56,7 @@ export function useDragDrop({ messages, inputText, scrollToBottom, globalFileAcc
         const reader = new FileReader();
         reader.onload = (e) => {
           const base64 = e.target.result.replace(/^data:image\/\w+;base64,/, '');
-          pendingImage.value = base64;
+          pendingImages.value.push(base64);
         };
         reader.readAsDataURL(file);
         return;
@@ -105,7 +105,7 @@ export function useDragDrop({ messages, inputText, scrollToBottom, globalFileAcc
       const reader = new FileReader();
       reader.onload = (e) => {
         const base64 = e.target.result.replace(/^data:image\/\w+;base64,/, '');
-        pendingImage.value = base64;
+        pendingImages.value.push(base64);
       };
       reader.readAsDataURL(file);
       return;
@@ -300,7 +300,7 @@ export function useDragDrop({ messages, inputText, scrollToBottom, globalFileAcc
 
   return {
     isDragging,
-    pendingImage,
+    pendingImages,
     pendingFiles,
     pendingFolderInfo,
     pendingKBEstimate,

@@ -63,24 +63,24 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
   }
 
   // ── 发送消息 ─────────────────────────────────────
-  async function sendMessage(pendingImage, pendingFiles, resetTextareaHeight) {
+  async function sendMessage(pendingImages, pendingFiles, resetTextareaHeight, beforeApiCallHook = null) {
     const text = inputText.value.trim();
-    if (!text && !pendingImage.value && pendingFiles.value.length === 0) return;
+    if (!text && pendingImages.value.length === 0 && pendingFiles.value.length === 0) return;
     if (isStreaming.value) return;
 
     const filesToRead = [...pendingFiles.value];
-    const imageBase64 = pendingImage.value;
+    const imageBase64s = [...pendingImages.value];
 
     const userMessage = {
       role: 'user',
-      content: text || (imageBase64 ? '请分析这张图片' : '请分析附件内容'),
-      image_base64: imageBase64 || null,
+      content: text || (imageBase64s.length > 0 ? '请分析图片' : '请分析附件内容'),
+      image_base64s: imageBase64s.length > 0 ? imageBase64s : null,
     };
 
     // 立即添加到 UI 并清空输入框
     messages.value.push(userMessage);
     inputText.value = '';
-    pendingImage.value = null;
+    pendingImages.value = [];
     pendingFiles.value = [];
     resetTextareaHeight();
 
@@ -92,6 +92,17 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
 
     await nextTick();
     scrollToBottom();
+
+    if (beforeApiCallHook) {
+      try {
+        await beforeApiCallHook({ userMessage, filesToRead, streamThinking });
+      } catch (err) {
+        console.error('[beforeApiCallHook error]', err);
+        isStreaming.value = false;
+        messages.value.push({ role: 'assistant', content: err.message || String(err), _isError: true });
+        return;
+      }
+    }
 
     // 将附件路径展示在界面上
     if (filesToRead.length > 0) {
@@ -133,9 +144,9 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
 
     try {
       let result;
-      console.log('[sendMessage] image_base64 present:', !!userMessage.image_base64, 'apiMessages count:', apiMessages.length);
-      if (userMessage.image_base64) {
-        result = await window.electronAPI.sendVision(apiMessages, userMessage.image_base64, globalFileAccess.value, agentMode.value, props.conversationId);
+      console.log('[sendMessage] image_base64s present:', !!userMessage.image_base64s, 'apiMessages count:', apiMessages.length);
+      if (userMessage.image_base64s) {
+        result = await window.electronAPI.sendVision(apiMessages, userMessage.image_base64s, globalFileAccess.value, agentMode.value, props.conversationId);
       } else {
         result = await window.electronAPI.sendChat(apiMessages, globalFileAccess.value, agentMode.value, props.conversationId);
       }

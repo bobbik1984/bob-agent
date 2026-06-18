@@ -273,9 +273,11 @@
       </div>
       <div class="input-row">
         <!-- 图片预览 -->
-        <div v-if="pendingImage" class="inline-image-preview">
-          <img :src="'data:image/png;base64,' + pendingImage" alt="Pending Image" />
-          <button class="image-remove-inline btn-icon" @click="pendingImage = null"><X :size="10" /></button>
+        <div v-if="pendingImages.length > 0" class="inline-images-preview" style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px;">
+          <div v-for="(img, idx) in pendingImages" :key="idx" class="inline-image-preview" style="position: relative;">
+            <img :src="'data:image/png;base64,' + img" alt="Pending Image" style="max-height: 100px; border-radius: 4px;" />
+            <button class="image-remove-inline btn-icon" @click="pendingImages.splice(idx, 1)" style="position: absolute; top: 0; right: 0; background: rgba(0,0,0,0.5); color: white; padding: 2px; border-radius: 50%;"><X :size="10" /></button>
+          </div>
         </div>
         <!-- 待发送文件预览 -->
         <div v-if="pendingFiles.length > 0" class="inline-files-preview">
@@ -563,7 +565,7 @@ const {
 
 // 拖拽/附件
 const {
-  isDragging, pendingImage, pendingFiles, pendingFolderInfo, pendingKBEstimate,
+  isDragging, pendingImages, pendingFiles, pendingFolderInfo, pendingKBEstimate,
   handleAttach, handlePaste, onDragEnter, handleDrop, handleTauriDrop,
   cancelFolderTrack, confirmFolderTrack, cancelKBEstimate, startKBBuild,
   setupTauriDragListeners,
@@ -574,14 +576,29 @@ const {
 
 // ── 模板绑定的包装函数 ──────────────────────────────
   // sendMessage 需要传入 pendingImage/pendingFiles/resetTextareaHeight
-  function sendMessage() {
-    if (pendingImage.value) {
-      const currentModelObj = availableModels.value.find(m => m.id === currentModelRaw.value);
-      const hasVision = currentModelObj && currentModelObj.vision;
+  async function sendMessage() {
+    // 自动探测文本中的绝对路径，转为附件
+    const txt = inputText.value || '';
+    const pathRegex = /([a-zA-Z]:\\[^"'<>|*?]+?\.(?:pdf|txt|md|csv|json|yaml|yml|log|py|js|rs|ts|vue|html|css|docx|xlsx|png|jpg|jpeg|gif|webp))/gi;
+    let match;
+    while ((match = pathRegex.exec(txt)) !== null) {
+      const pathStr = match[1];
+      if (!pendingFiles.value.find(f => f.path === pathStr)) {
+        pendingFiles.value.push({
+          name: pathStr.substring(pathStr.lastIndexOf('\\') + 1),
+          path: pathStr
+        });
+      }
+    }
+
+    const currentModelObj = availableModels.value.find(m => m.id === currentModelRaw.value);
+    const hasVision = currentModelObj && currentModelObj.vision;
+
+    if (pendingImages.value.length > 0) {
       if (!hasVision) {
         messages.value.push({
           role: 'assistant',
-          content: '当前选定的模型不支持视觉（图像识别）能力，无法处理截图。请切换至支持 vision 的模型（如 GPT-4o, Gemini 1.5 Pro 等）后再试。',
+          content: '当前选定的模型不支持视觉（图像识别）能力，无法处理截图/图像。请切换至支持 vision 的模型（如 GPT-4o, Gemini 等）后再试。',
           _isError: true,
           _thinkingExpanded: false,
         });
@@ -589,7 +606,36 @@ const {
         return;
       }
     }
-    _sendMessage(pendingImage, pendingFiles, resetTextareaHeight);
+
+    _sendMessage(pendingImages, pendingFiles, resetTextareaHeight, async ({ userMessage, filesToRead, streamThinking }) => {
+      // 检查是否有 pdf 需要走 vision 通道渲染为图片
+      if (hasVision && filesToRead.length > 0) {
+        const pdfFiles = filesToRead.filter(f => f.path && f.path.toLowerCase().endsWith('.pdf'));
+        if (pdfFiles.length > 0) {
+          streamThinking.value = `正在使用 PDFium 引擎将 ${pdfFiles.length} 个 PDF 渲染为高清图片流，请稍候...`;
+
+          for (const pdfFile of pdfFiles) {
+            const pdfPath = pdfFile.path;
+            try {
+              const b64Array = await window.electronAPI.invoke('system_render_pdf_to_images', { path: pdfPath });
+              if (b64Array && b64Array.length > 0) {
+                if (!userMessage.image_base64s) userMessage.image_base64s = [];
+                userMessage.image_base64s.push(...b64Array);
+              }
+            } catch (e) {
+              console.error('PDF 渲染失败', e);
+              throw new Error(`PDF ${pdfPath} 渲染图片失败: ${e}`);
+            }
+
+            // 从 filesToRead 中剔除，因为已经转成了图片，不走纯文本读取通道
+            const idx = filesToRead.findIndex(f => f.path === pdfPath);
+            if (idx !== -1) filesToRead.splice(idx, 1);
+          }
+          
+          streamThinking.value = ''; // 渲染完成，清空思考状态让位于大模型
+        }
+      }
+    });
   }
 
 function parseTextAsEvent() {
@@ -714,8 +760,8 @@ async function handleScreenshot() {
             reader.readAsDataURL(blob);
           });
           if (base64Result) {
-            pendingImage.value = base64Result;
-            return; // 成功粘贴！
+            pendingImages.value.push(base64Result);
+            return; // 成功粘贴图
           }
         }
       }
@@ -1998,6 +2044,7 @@ defineExpose({
 
 /* ── 发送/停止按钮（统一方形） ────────────────────── */
 .action-btn {
+  position: relative;
   flex-shrink: 0;
   display: flex;
   align-items: center;
@@ -2009,6 +2056,16 @@ defineExpose({
   background: transparent;
   cursor: pointer;
   transition: all var(--duration-fast);
+}
+
+/* 扩展点击热区，保持视觉大小不变但更容易被点中 */
+.action-btn::after {
+  content: "";
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  bottom: -6px;
+  left: -6px;
 }
 
 .action-btn:hover {

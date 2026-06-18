@@ -334,7 +334,7 @@ fn get_builtin_tool_schemas() -> Vec<Value> {
             "type": "function",
             "function": {
                 "name": "read_file",
-                "description": "读取指定路径的文本文件内容。支持 txt/md/json/yaml/csv 等文本格式，上限 500KB。用于查看用户提到的文件、读取配置文件、提取密钥等。",
+                "description": "读取指定路径的文件内容。支持 txt/md/json/yaml/csv 等纯文本格式，以及 pdf/docx/pptx/xlsx 等文档格式，文本自动提取，上限 500KB。用于查看用户提到的文件、读取配置文件、提取密钥、解析文档等。",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -809,7 +809,18 @@ async fn execute_tool_inner(app: &tauri::AppHandle, name: &str, args: &Value, fr
             if decoded.contains("..") || path.contains("..") {
                 return json!({ "error": "禁止使用 ../ 进行路径穿越" });
             }
-            super::filesystem::system_read_file(path.to_string())
+            match crate::kb_extractor::extract_single_file(std::path::Path::new(path)) {
+                Ok(text) => json!({ "content": text }),
+                Err(e) => {
+                    // Fallback to system_read_file if extraction fails (though extract_single_file already uses it internally for text)
+                    let fallback = super::filesystem::system_read_file(path.to_string());
+                    if fallback.get("error").is_some() {
+                        json!({ "error": format!("文件解析失败: {}", e) })
+                    } else {
+                        fallback
+                    }
+                }
+            }
         }
         "create_directory" => {
             let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");

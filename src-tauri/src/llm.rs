@@ -1616,10 +1616,29 @@ async fn stream_internal(
             body["tools"] = json!(tool_schemas);
         }
 
+        // 检查是否包含图片 (T-1422 DeepSeek Vision 兼容)
+        let mut has_image = false;
+        for msg in &full_messages {
+            if let Some(content) = msg.get("content") {
+                if let Some(arr) = content.as_array() {
+                    for item in arr {
+                        if item.get("type").and_then(|v| v.as_str()) == Some("image_url") {
+                            has_image = true;
+                            break;
+                        }
+                    }
+                }
+            }
+            if has_image { break; }
+        }
+
         // DeepSeek 专有参数
         if provider == "deepseek" {
-            body["thinking"] = json!({ "type": "enabled" });
-            body["reasoning_effort"] = json!("low");
+            // 如果包含图片，则不传入 thinking 参数，否则 DeepSeek 的 API 会尝试使用 Reasoner schema 验证导致报错 (unknown variant 'image_url', expected 'text')
+            if !has_image {
+                body["thinking"] = json!({ "type": "enabled" });
+                body["reasoning_effort"] = json!("low");
+            }
             body["max_completion_tokens"] = json!(16384);
         } else {
             body["max_tokens"] = json!(8192);
@@ -1658,7 +1677,7 @@ async fn stream_internal(
         let mut buffer = String::new();
 
         // T-904: Tool call 增量累加器
-        struct PendingToolCall { id: String, name: String, arguments: String }
+        struct PendingToolCall { id: String, name: String, arguments: String, thought_signature: String }
         let mut pending_tool_calls: Vec<PendingToolCall> = Vec::new();
         let mut has_tool_calls = false;
 
@@ -1779,7 +1798,7 @@ async fn stream_internal(
                                         let idx = tc.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
                                         while pending_tool_calls.len() <= idx {
                                             pending_tool_calls.push(PendingToolCall {
-                                                id: String::new(), name: String::new(), arguments: String::new(),
+                                                id: String::new(), name: String::new(), arguments: String::new(), thought_signature: String::new()
                                             });
                                         }
                                         if let Some(id) = tc.get("id").and_then(|v| v.as_str()) {
@@ -1791,6 +1810,14 @@ async fn stream_internal(
                                             }
                                             if let Some(args) = func.get("arguments").and_then(|v| v.as_str()) {
                                                 pending_tool_calls[idx].arguments.push_str(args);
+                                            }
+                                        }
+                                        // 提取 Google 的 thought_signature (Gemini 3.5+ 需要在后续请求带上)
+                                        if let Some(extra) = tc.get("extra_content") {
+                                            if let Some(google) = extra.get("google") {
+                                                if let Some(sig) = google.get("thought_signature").and_then(|v| v.as_str()) {
+                                                    pending_tool_calls[idx].thought_signature = sig.to_string();
+                                                }
                                             }
                                         }
                                     }
@@ -1911,6 +1938,7 @@ async fn stream_internal(
                             id: format!("call_{}", super::now_ms() + pending_tool_calls.len() as i64),
                             name: tool_name.to_string(),
                             arguments: serde_json::to_string(&args_map).unwrap_or_default(),
+                            thought_signature: String::new(),
                         });
                         has_tool_calls = true;
                         extracted = true;
@@ -1947,12 +1975,24 @@ async fn stream_internal(
         }
 
         // ── 判断: Tool Call 还是最终回复 ────────────────
+        if !pending_tool_calls.is_empty() {
+            has_tool_calls = true;
+        }
         if has_tool_calls && !pending_tool_calls.is_empty() {
             // 构建 assistant 消息 (含 tool_calls)
-            let tc_json: Vec<Value> = pending_tool_calls.iter().map(|tc| json!({
-                "id": tc.id, "type": "function",
-                "function": { "name": tc.name, "arguments": tc.arguments }
-            })).collect();
+            let tc_json: Vec<Value> = pending_tool_calls.iter().map(|tc| {
+                let mut call_obj = json!({
+                    "id": tc.id,
+                    "type": "function",
+                    "function": { "name": tc.name, "arguments": tc.arguments }
+                });
+                if !tc.thought_signature.is_empty() {
+                    call_obj["extra_content"] = json!({
+                        "google": { "thought_signature": tc.thought_signature }
+                    });
+                }
+                call_obj
+            }).collect();
 
             let mut assistant_msg = json!({ "role": "assistant", "tool_calls": tc_json });
             if !content.is_empty() { assistant_msg["content"] = json!(content); }
@@ -2214,21 +2254,24 @@ pub async fn stream_chat(app: AppHandle, messages: Vec<Value>, conv_id: Option<S
 
 
 
-pub async fn stream_vision(app: AppHandle, mut messages: Vec<Value>, image_base64: String, conv_id: Option<String>, global_file_access: bool, agent_mode: String) -> Value {
+pub async fn stream_vision(app: AppHandle, mut messages: Vec<Value>, image_base64s: Vec<String>, conv_id: Option<String>, global_file_access: bool, agent_mode: String) -> Value {
     if let Some(last) = messages.last_mut() {
         if let Some(obj) = last.as_object_mut() {
-            let text_content = obj.get("content").and_then(|v| v.as_str()).unwrap_or("请分析这张图片");
+            let text_content = obj.get("content").and_then(|v| v.as_str()).unwrap_or("请分析图片").to_string();
             
-            obj.insert("content".to_string(), json!([
-                { "type": "text", "text": text_content },
-                {
+            let mut content_array = vec![json!({ "type": "text", "text": text_content })];
+            
+            for b64 in image_base64s {
+                content_array.push(json!({
                     "type": "image_url",
                     "image_url": {
-                        "url": format!("data:image/png;base64,{}", image_base64),
+                        "url": format!("data:image/png;base64,{}", b64),
                         "detail": "auto"
                     }
-                }
-            ]));
+                }));
+            }
+            
+            obj.insert("content".to_string(), Value::Array(content_array));
         }
     }
     stream_internal(app, messages, conv_id, None, global_file_access, agent_mode).await

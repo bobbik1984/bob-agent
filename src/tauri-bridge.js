@@ -55,8 +55,8 @@ window.electronAPI = {
   // ── LLM 通信 (Rust 引擎) ─────────────────────────────
   sendChat: (messages, globalFileAccess, agentMode, conversationId) => 
     invoke('llm_chat', { messages, conversationId, globalFileAccess, agentMode }),
-  sendVision: (messages, imageBase64, globalFileAccess, agentMode, conversationId) => 
-    invoke('llm_vision', { messages, imageBase64, conversationId, globalFileAccess, agentMode }),
+  sendVision: (messages, imageBase64s, globalFileAccess, agentMode, conversationId) => 
+    invoke('llm_vision', { messages, imageBase64s, conversationId, globalFileAccess, agentMode }),
   stopGeneration: async () => { /* 待实现 AbortController */ },
   getModels: async (provider) => {
     try {
