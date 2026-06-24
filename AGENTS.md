@@ -138,3 +138,4 @@ dist-release/
 - **UI 设计铁律 (配色/对齐/i18n)**：详见 [design_principles.md](design_principles.md)
 - **灵魂定义**：详见 [data/memory/SOUL.md](data/memory/SOUL.md)
 - **路线图**：详见 [todo.md](todo.md)
+- **开源发布工作流**：详见 [OPEN_SOURCE_WORKFLOW.md](OPEN_SOURCE_WORKFLOW.md)
