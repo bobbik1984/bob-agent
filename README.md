@@ -11,6 +11,7 @@
 | 💬 **Multi-Model Chat** | 40+ models auto-discovered (DeepSeek, OpenAI, Qwen, Doubao, GLM, Kimi, MiniMax...) with SSE streaming & Markdown rendering |
 | 🤖 **Agent + Tool Calling** | 12 Rust-native tools (file I/O, web search, weather, calendar, knowledge base...) with 5-round auto-invocation |
 | 🟢 **WeChat Integration** | Monitor and interact via WeChat. Automatic context routing and file transfer to the local chat |
+| 🔗 **Web Drop** | P2P E2EE file transfer with WebRTC and TURN relay for secure cross-device sharing (PC to Mobile) |
 | 🌐 **HTTP API Server** | Local SSE API server (`127.0.0.1:3721`) for serving local files and external integrations |
 | 📸 **Vision** | Paste/drop images for AI analysis |
 | 📅 **Calendar** | Natural language → event creation, drag-and-drop scheduling on weekly timeline |

@@ -105,7 +105,6 @@
 - [x] T-401: 引入 `rusqlite`，初始化 `conversations` 和 `messages` 表。
 - [x] T-402: 实现 `db_conversations`, `db_conversation_create/delete/rename/get`。
 - [x] T-403: 实现 `db_messages`, `db_message_add`。
-- [ ] T-404: 历史数据无损继承 (读取 `%APPDATA%/bob-agent/db`)。
 
 ## 📍 里程碑 5: Rust 原生化 — 大模型通信 (LLM Engine)
 - [x] T-501: 用 Rust `reqwest` 发送 Chat 请求。
@@ -155,7 +154,6 @@
 ### Phase 3: 用户体验
 
 - [x] T-821: **SettingsView 引导文案** — API 密钥管理面板顶部增加提示："💡 您也可以直接在对话中告诉 Bob 帮您配置密钥"。
-- [x] T-822: **SetupWizard i18n + 引导优化** — 硬编码中文替换为 $t() 调用，zh-CN/en-US 双语同步。
 - [ ] T-823: **端到端集成测试** — 在对话中模拟"帮我配好这个 Key: sk-test123"，验证 Outbox 写入 → Reconciler 消费 → config 更新 → UI 自动刷新的完整链路。
 - [ ] T-824: **防破坏测试** — 手动写入格式错误/恶意字段的 `bob_outbox.json`，验证 Reconciler 不崩溃、程序正常运行、审计日志正确记录拒绝原因。
 
@@ -287,7 +285,6 @@
 
 **未完成**:
 - [ ] T-912: 端到端测试
-- [ ] T-822: SetupWizard 体验统一提升（暂缓，计划整体重做）
 
 ### 2026-06-11
 
@@ -756,14 +753,66 @@
 ## 📝 v0.32.1 工作记录 (2026-06-12 ~ 2026-06-14)
 
 **完成**:
-1. [Fix] **Release 版日志修复** — 移除 `cfg!(debug_assertions)` 守卫，Release 构建现在输出日志到 `logs/bob.log` (2MB 轮转)
-2. [Fix] **CDN 上传超时修复** — 固定 120s 超时替换为动态计算: `max(120s, size_in_MB * 30s)`
-3. [Feature] **实时上传进度条** — stream-based 分块上传 (64KB/chunk)，前端实时显示文件名 + 百分比 + 字节计数
-4. [Arch] **外层工具超时与 CDN 匹配** — send_wechat_file 外层 tokio timeout 120s → 600s
+1. [Fix] **Release 版日志修复**: 移除 `cfg!(debug_assertions)` 守卫，Release 构建现在输出日志至 `logs/bob.log` (2MB 轮转)
+2. [Fix] **CDN 上传超时修复**: 固定 120s 超时替换为动态计算: `max(120s, size_in_MB * 30s)`
+3. [Feature] **实时上传进度条**: stream-based 分块上传 (64KB/chunk)，前端实时显示文件名 + 百分比 + 字节计数
+4. [Arch] **外层工具超时与 CDN 匹配**: send_wechat_file 外层 tokio timeout 120s -> 600s
+5. [Verify] **T-1601 透传修复确认**: 全链路已连通 (useChat -> bridge -> lib -> llm -> tools)，关闭过期 TODO
+6. [Verify] **T-1611~1616 文件操作工具确认**: 5 个工具 (create_directory/move/copy/delete/rename) 已完整实现
+7. [Feature] **streamThinking 流式思考动画**: 脉冲圆点 + 可折叠面板 + 自动滚动 + i18n
+8. [Feature] **工具结果缓存**: 会话级 HashMap (read_file/list_dir/list_skills/read_skill/system_time)，写操作自动清空
 
-5. [Verify] **T-1601 透传修复确认** — 全链路已连通 (useChat → bridge → lib → llm → tools)，关闭过时 TODO
-6. [Verify] **T-1611~1616 文件操作工具确认** — 5 个工具 (create_directory/move/copy/delete/rename) 已完整实现
-7. [Feature] **streamThinking 流式思考动画** — 脉冲圆点 + 可折叠面板 + 自动滚动 + i18n
-8. [Feature] **工具结果缓存** — 会话级 HashMap (read_file/list_dir/list_skills/read_skill/system_time)，写操作自动清空
+**全部完成** 🎉
 
-**全部完成** ✅
+## 🚀 T-1800: Bob 联邦网络与 Web Drop 引擎
+- [x] **阶段一：信令层与基础设施 (bob-relay + coturn)**
+  - [x] 使用 Node.js 编写 `bob-relay` WebSocket 中继服务，实现无落盘的内存管线（双向信令+数据盲传）。
+  - [x] 在 VPS1 安装配置 `coturn` 作为 WebRTC STUN/TURN 服务器。
+  - [x] 编写 `bob-services.sh` 脚本统管 `bob-relay` 和 `coturn` 的生命周期（setup/reset/status）。
+  - [x] 在 VPS1 的 Caddy 中配置反向代理和静态目录。
+- [x] **阶段二：Web Drop MVP (三级渐进式传输)**
+  - [x] 前端 (`index.html`)：实现 WebRTC P2P (DTLS加密) 接收逻辑，并包含 AES-GCM 降级中继逻辑。
+  - [x] Bob 桌面端 (`web_drop.rs`)：生成 URL，创建房间，尝试建立 DataChannel 传输，如果超时 10 秒无响应则自动触发回退协议。
+- [ ] **阶段二 (Bug 修复 & 部署测试)**
+  - [ ] **[高优]** Cloudflare 代理拦截了 WebSocket 握手，需将 DNS 的橙色云朵改成灰色 (DNS Only)，然后让 Caddy 自动申请证书。
+  - [ ] **[UI]** 修复 URL 中分隔符 `|` 导致手机微信无法点击的问题（替换为 `.`）。
+  - [ ] **[运维]** 修复 `bob-services.sh` 中 sudo 下执行 node 找不到命令的环境变量问题。
+- [ ] **阶段三：联邦身份与 Agent Swarm (远景)**
+  - [ ] 在 `SettingsView` 新增【联邦网络】面板，生成本地私有的 `Swarm Key` (AES 密钥种子)。
+  - [ ] `bob.db` 新增 `pending_transfers` SQLite 队列表，实现设备异步离线传输。
+  - [ ] 增加 LLM `send_to_device` 工具，实现跨设备大模型指令接力交互。
+
+## 🚀 T-1801: 日程交互重构 (Calendar Interaction Refactor)
+- [ ] **拖拽事件 (Drag & Drop)**: 允许在 `.event-card` 上拖拽修改日程发生的日期和时间（吸附到 15 分钟间隔）。
+- [ ] **拖拽时长 (Resize Event)**: 在卡片上下边缘增加拖拽手柄，改变事件的开始/结束时间。
+- [ ] **自定义事件弹窗 (Custom Event Modal)**: 废弃原始的 `prompt()` 弹窗，新增一个符合暗色毛玻璃风格的精致模态框，用于点击空白处添加新事件。
+- [ ] 确保前端交互能够正确回调后端 `updateEventTime` 并持久化。
+
+## ⚠️ 待修复缺陷与待办事项 (Pending Bug Fixes & Action Items)
+
+### 1. 微信 CDN 文件传输缺陷（无法发送较大文件，甚至低于 25MB 的文件）
+- [ ] **现状与缺陷**: PC 端发送文件到手机端依然不稳定，连微信官方限制的 25MB 大小也无法满足，尽管目前代码里设置的 MAX_FILE_SIZE 限制为 100MB。
+- [ ] **技术分析与排查要点**:
+  - **分块流缓冲 (reqwest Stream)**: 检查 `src-tauri/src/wechat/cdn.rs` 中的分块流式上传逻辑 `build_progress_body`（默认 64KB 一分块）。当传输大文件时，可能会因 TCP 阻塞、客户端上传流缓冲区未及时消费或底层 tokio 异步管道被挤压而发生连接重置/中断。
+  - **API 侧限制**: 微信 `ilink/bot/getuploadurl` 接口返回的上传 URL 是否针对单个文件存在更低的大小上限，或大文件计算 AES/MD5 导致参数的临时签名过快超时失效。
+  - **降级机制**: 需测试在超过 25MB（微信官限）或上传失败时，是否能平滑降级至 T-1800 (使用内建 HTTP Server 发送安全 Token 链接，供手机微信直接拉取)。
+
+### 2. PDF 转图片功能失效（PDFium 动态载入失败）
+- [ ] **现状与缺陷**: 虽然包里已经携带了 `pdfium.dll` 引擎，但 PDF 转图片（以及 KB 文字提取）在打包运行（Release 状态）时依然报错“无法绑定 PDFium 引擎”或无响应。
+- [ ] **技术分析与排查要点**:
+  - **路径硬编码**: 在 `src-tauri/src/pdf_renderer.rs` 与 `kb_extractor.rs` 中，绑定引擎时硬编码使用了 `./`（即当前工作目录）去查找 DLL：`let bind = Pdfium::bind_to_library(Pdfium::pdfium_platform_library_name_at_path("./"))`
+  - **打包位置偏差**: 开发模式下，工作目录为 `src-tauri`，DLL 加载正常。但 Tauri 生产环境打包后，`pdfium.dll` 是作为 Resource 被打包进资源的专属目录（`resources/` 目录下），此时通过 `./` 将无法查找到 DLL 从而导致绑定失败。
+  - **解决方案**: 需要修改后端 Rust 接口，使其接收 `tauri::AppHandle`，使用 `app_handle.path().resource_dir()`（Tauri V2 资源路径解析器）动态拼接定位到真实的 `pdfium.dll` 进行绑定，如：
+    ```rust
+    let resource_dir = app_handle.path().resource_dir()?;
+    let pdfium_path = resource_dir.join("pdfium.dll");
+    let bind = Pdfium::bind_to_library(pdfium_path.to_str().unwrap());
+    ```
+
+## 🚀 T-1802: WebRTC Web Drop & 微信文件分享深度修复 (已完成)
+- [x] 修复 ob-agent WebRTC 传输时 ustls 报 
+o CryptoProvider 导致发送端 Panic 断开的问题。
+- [x] 更新 web-drop 前端 index.html 的 hash 解析逻辑，兼容 . 和 | 作为分隔符。
+- [x] web_drop.rs 生成链接强制附加 ?v=2 防止手机端微信内置浏览器缓存旧版页面。
+- [x] 修复了 LLM 在处理 share_file 工具调用时产生的链接格式化幻觉，通过双端排版（PC 超链接 + Mobile 纯文本代码块）兼容微信客户端的渲染差异。
+- [x] 验证了 P2P 穿透与 TURN Server 降级逻辑（双重 VPN/对称 NAT 环境下稳定 Fallback 至 VPS 中继节点）。

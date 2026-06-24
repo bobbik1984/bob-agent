@@ -165,6 +165,18 @@ milestones:
       - { id: T-1106, text: "tauri-bridge.js unlisten 幂等性加固", status: done }
       - { id: T-1107, text: "kb_extractor.rs 未使用 import 清理", status: done }
 
+  - name: "M12: WebRTC Web Drop & 微信跨设备文件互传加固"
+    status: done
+    completion: 100%
+    date_completed: "2026-06-23"
+    summary: "修复了跨网络双重VPN下的WebRTC Symmetric NAT穿透与TURN降级，增强了LLM链接格式化以适配微信渲染，修复了rustls底层CryptoProvider报错。"
+    modified_files: [web_drop.rs, index.html, tools.rs, todo.md]
+    tasks:
+      - { id: T-1802-1, text: "修复 rustls CryptoProvider 缺失导致的发送端 Panic", status: done }
+      - { id: T-1802-2, text: "web-drop/index.html hash 解析强化兼容点和竖线分隔符", status: done }
+      - { id: T-1802-3, text: "强制附加 ?v=2 绕过手机微信浏览器缓存", status: done }
+      - { id: T-1802-4, text: "重构 LLM tools.rs 生成的双排版链接，兼容 PC 超链接与移动端复制", status: done }
+
 # ═══════════════════════════════════════════════════════════════
 # Rust 后端模块清单 (src-tauri/src/)
 # ═══════════════════════════════════════════════════════════════

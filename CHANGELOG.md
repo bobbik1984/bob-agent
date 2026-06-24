@@ -2,6 +2,15 @@
 
 All notable changes to bob-agent will be documented in this file.
 
+## [0.32.2] - 2026-06-23
+
+### 🐛 Bug Fixes & Improvements
+- **[WebRTC] rustls CryptoProvider Panic 修复**：为 `rustls` 添加了 `rustls::crypto::ring::default_provider().install_default()` 初始化，防止在创建 `WebRtcTransport` 阶段由于未指定默认加密算法导致的进程崩溃。
+- **[Web Drop] 前端哈希提取兼容性**：强化了 `index.html` 中的 hash 解析逻辑，能够安全地处理带有 `.`、`|` 的锚点参数，防止错误切分导致解密密钥遗失。
+- **[Web Drop] 强缓存绕过**：在生成的分享链接后附加 `?v=2` 参数，强制使得微信内置浏览器和其他移动端浏览器跳过强缓存，加载最新版前端页面。
+- **[UX/WeChat] 双排版兼容链接输出**：重构了 `tools.rs` 中文件分享工具生成的提示词逻辑。现在 AI 会提供纯净的 URL 超链接供电脑端直接点击，同时提供纯文本代码块内的 URL 供移动端无损长按复制，彻底解决了微信自动对带有标点符号的 Markdown URL 错误截断导致手机端无法打开的问题。
+- **[Network] 双向对称NAT穿透与中继验证**：成功验证了在跨越多重代理隧道（发送端 Oracle VPN，接收端 Proton VPN）所产生的极端双重对称 NAT 网络环境下，底层传输通道能够稳定并自动 Fallback 到 VPS 部署的 TURN Server 中继（Coturn），保障了极端网络连通性。
+
 ## [0.3.2] - 2026-06-11
 
 ### 🐛 Bug Fixes
