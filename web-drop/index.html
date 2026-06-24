@@ -1,0 +1,627 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Bob Web Drop</title>
+  <style>
+    :root {
+      --bg-root: #0c0c0c;
+      --bg-primary: #141414;
+      --bg-secondary: #1c1c1c;
+      --surface-card: rgba(255, 255, 255, 0.06);
+      --border-subtle: rgba(255, 255, 255, 0.08);
+      --border-default: rgba(255, 255, 255, 0.12);
+      --text-primary: #e8e8e8;
+      --text-secondary: #a0a0a0;
+      --text-tertiary: #6a6a6a;
+      --accent-primary: #e8e8e8;
+      --color-success: #10b981;
+      --color-error: #ef4444;
+      --color-p2p: #38bdf8;
+      --font-sans: system-ui, -apple-system, 'Segoe UI', Roboto, 'Microsoft YaHei', sans-serif;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    
+    body {
+      background-color: var(--bg-root);
+      color: var(--text-primary);
+      font-family: var(--font-sans);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      overflow: hidden;
+      background-image: radial-gradient(circle at top, var(--bg-primary) 0%, var(--bg-root) 100%);
+    }
+
+    .drop-container {
+      width: 90%;
+      max-width: 380px;
+      padding: 32px 24px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+    }
+
+    .file-icon {
+      width: 28px; height: 28px;
+      color: var(--text-tertiary);
+      margin-bottom: 12px;
+    }
+
+    .file-name {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--text-primary);
+      margin-bottom: 4px;
+      word-break: break-all;
+      line-height: 1.4;
+    }
+
+    .file-meta {
+      font-size: 12px;
+      color: var(--text-tertiary);
+      margin-bottom: 24px;
+    }
+
+    .progress-info {
+      width: 100%;
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 8px;
+    }
+
+    .status-text {
+      font-size: 12px;
+      color: var(--text-secondary);
+    }
+
+    .progress-pct {
+      font-size: 12px;
+      color: var(--text-secondary);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .progress-bg {
+      width: 100%;
+      height: 3px;
+      background: var(--border-subtle);
+      border-radius: 2px;
+      overflow: hidden;
+    }
+
+    .progress-fill {
+      height: 100%;
+      background: var(--accent-primary);
+      border-radius: 2px;
+      transition: width 0.15s ease;
+    }
+
+    .speed-text {
+      width: 100%;
+      text-align: right;
+      font-size: 11px;
+      color: var(--text-tertiary);
+      margin-top: 6px;
+      font-variant-numeric: tabular-nums;
+      min-height: 16px;
+    }
+
+    .e2ee-badge {
+      position: fixed;
+      bottom: 24px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      color: var(--text-tertiary);
+    }
+    .e2ee-badge svg { width: 12px; height: 12px; }
+
+    /* P2P 模式下的 badge 高亮 */
+    .e2ee-badge.p2p {
+      color: var(--color-p2p);
+    }
+
+    .error-text {
+      font-size: 13px;
+      color: var(--color-error);
+      margin-top: 16px;
+      line-height: 1.5;
+    }
+
+    .done-text {
+      color: var(--color-success);
+      font-weight: 600;
+      font-size: 14px;
+      margin-top: 16px;
+    }
+
+    /* 传输模式状态指示点 */
+    .mode-dot {
+      display: inline-block;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      margin-right: 4px;
+      vertical-align: middle;
+      background: var(--text-tertiary);
+    }
+    .mode-dot.p2p { background: var(--color-p2p); }
+    .mode-dot.relay { background: var(--accent-primary); }
+  </style>
+</head>
+<body>
+
+<div class="drop-container" id="app">
+  <!-- File Icon -->
+  <svg class="file-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/>
+    <polyline points="13 2 13 9 20 9"/>
+  </svg>
+
+  <div class="file-name" id="fileName">等待连接...</div>
+  <div class="file-meta" id="fileMeta"></div>
+
+  <div id="progressSection">
+    <div class="progress-info">
+      <span class="status-text" id="statusText">正在连接中继...</span>
+      <span class="progress-pct" id="progressPct">0%</span>
+    </div>
+    <div class="progress-bg">
+      <div class="progress-fill" id="progressFill" style="width: 0%"></div>
+    </div>
+    <div class="speed-text" id="speedText"></div>
+  </div>
+
+  <div id="errorSection" style="display:none">
+    <div class="error-text" id="errorText"></div>
+  </div>
+
+  <div id="doneSection" style="display:none">
+    <div class="done-text" id="doneText">端到端解密成功，已自动保存</div>
+  </div>
+</div>
+
+<div class="e2ee-badge" id="e2eeBadge">
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+  <span id="e2eeBadgeText">连接已通过 E2EE 强加密保护</span>
+</div>
+
+<script>
+  // ─── 全局 DOM 引用 ───
+  const $fileName     = document.getElementById('fileName')
+  const $fileMeta     = document.getElementById('fileMeta')
+  const $statusText   = document.getElementById('statusText')
+  const $progressPct  = document.getElementById('progressPct')
+  const $progressFill = document.getElementById('progressFill')
+  const $speedText    = document.getElementById('speedText')
+  const $e2eeBadge    = document.getElementById('e2eeBadge')
+  const $e2eeBadgeText = document.getElementById('e2eeBadgeText')
+  const $doneText     = document.getElementById('doneText')
+
+  // ─── Parse URL fragment: #roomId.base64Key (or legacy #roomId|base64Key) ───
+  let hash = location.hash.slice(1)
+  try { hash = decodeURIComponent(hash) } catch (e) {}
+  
+  // 优先用 . 分隔，兼容旧的 | 分隔
+  let sepIdx = hash.indexOf('.')
+  if (sepIdx === -1) sepIdx = hash.indexOf('|')
+  if (sepIdx === -1) {
+    showError('无效的分享链接')
+  } else {
+    const roomId = hash.slice(0, sepIdx)
+    const keyB64 = hash.slice(sepIdx + 1)
+    startReceive(roomId, keyB64)
+  }
+
+  function showError(msg) {
+    document.getElementById('progressSection').style.display = 'none'
+    document.getElementById('errorSection').style.display = 'block'
+    document.getElementById('errorText').textContent = msg
+  }
+
+  function formatBytes(bytes) {
+    if (bytes === 0) return '0 B'
+    const k = 1024
+    const sizes = ['B', 'KB', 'MB', 'GB']
+    const i = Math.floor(Math.log(bytes) / Math.log(k))
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i]
+  }
+
+  // ─── Base64URL decode (no padding) ───
+  function base64UrlDecode(b64) {
+    let s = b64.replace(/-/g, '+').replace(/_/g, '/')
+    while (s.length % 4) s += '='
+    const bin = atob(s)
+    const bytes = new Uint8Array(bin.length)
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+    return bytes
+  }
+
+  // ─── AES-128-GCM Decrypt (保留，用于 fallback relay 模式) ───
+  async function decryptChunk(keyBytes, payload) {
+    // payload = nonce (12 bytes) + ciphertext + tag (16 bytes, appended by GCM)
+    const nonce = payload.slice(0, 12)
+    const ciphertext = payload.slice(12) // includes 16-byte GCM tag at end
+
+    const key = await crypto.subtle.importKey(
+      'raw', keyBytes, { name: 'AES-GCM' }, false, ['decrypt']
+    )
+
+    const plaintext = await crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv: nonce }, key, ciphertext
+    )
+    return new Uint8Array(plaintext)
+  }
+
+  function finishDownload(fileName, chunks) {
+    // 合并所有分块为 Blob
+    const blob = new Blob(chunks, { type: 'application/octet-stream' })
+    
+    // 自动下载
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = fileName
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+
+    // 显示完成状态
+    document.getElementById('progressSection').style.display = 'none'
+    document.getElementById('doneSection').style.display = 'block'
+  }
+
+  // ─── 更新 badge 显示传输模式 ───
+  function setBadgeMode(mode) {
+    if (mode === 'p2p') {
+      $e2eeBadge.classList.add('p2p')
+      $e2eeBadgeText.textContent = 'P2P 直连 (DTLS 加密)'
+      $doneText.textContent = 'P2P 直连传输完成，已自动保存'
+    } else {
+      $e2eeBadge.classList.remove('p2p')
+      $e2eeBadgeText.textContent = '中继传输 (E2EE 加密)'
+      $doneText.textContent = '端到端解密成功，已自动保存'
+    }
+  }
+
+  // ─── ICE 配置 ───
+  const iceConfig = {
+    iceServers: [
+      { urls: 'stun:bob.bobbik.org:3478' },
+      { urls: 'turn:bob.bobbik.org:3478', username: 'bob', credential: 'T3zytkYeHfLiHPXu1lJratBZZFIsYH+DhnUjscxlBHI=' }
+    ]
+  }
+
+  // ─── 主接收流程 ───
+  async function startReceive(roomId, keyB64) {
+    const keyBytes = base64UrlDecode(keyB64)
+    
+    // 构建 WebSocket URL
+    const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
+    const wsUrl = `${wsProtocol}//${location.host}/transfer/api/ws/recv/${roomId}`
+
+    $statusText.textContent = '正在连接中继...'
+
+    let ws
+    try {
+      ws = new WebSocket(wsUrl)
+    } catch (e) {
+      showError('无法连接中继服务器: ' + e.message)
+      return
+    }
+
+    // ─── 共享传输状态 ───
+    let fileName = 'download'
+    let totalBytes = 0
+    let receivedBytes = 0
+    const chunks = []
+    let startTime = 0
+    let lastSpeedUpdate = 0
+    let lastReceivedForSpeed = 0
+    let transferDone = false
+
+    // ─── 模式状态机 ───
+    // 'waiting'  → 已连接 WS，等待 offer 或 fallback 信号
+    // 'p2p'      → WebRTC DataChannel 已建立，通过 P2P 接收
+    // 'relay'    → 降级到 AES-GCM WebSocket 中继模式
+    let mode = 'waiting'
+
+    // ─── WebRTC 对象 ───
+    let pc = null     // RTCPeerConnection
+    let dc = null     // DataChannel (由发送方创建，接收方监听)
+    let offerTimer = null  // 5 秒无 offer 超时计时器
+
+    // ─── 通用：更新进度 UI ───
+    function updateProgress(newBytes) {
+      receivedBytes += newBytes
+
+      if (totalBytes > 0) {
+        const pct = Math.min(100, (receivedBytes / totalBytes) * 100)
+        $progressPct.textContent = pct.toFixed(1) + '%'
+        $progressFill.style.width = pct + '%'
+      }
+
+      // 速度更新（每 300ms 节流）
+      const now = performance.now()
+      if (now - lastSpeedUpdate > 300) {
+        const elapsed = (now - lastSpeedUpdate) / 1000
+        const bytesInInterval = receivedBytes - lastReceivedForSpeed
+        const speed = bytesInInterval / elapsed
+        $speedText.textContent = formatBytes(speed) + '/s'
+        lastSpeedUpdate = now
+        lastReceivedForSpeed = receivedBytes
+      }
+    }
+
+    // ─── 收到文件元信息 ───
+    function handleMeta(meta) {
+      fileName = meta.name || 'download'
+      totalBytes = meta.size || 0
+      startTime = performance.now()
+      lastSpeedUpdate = startTime
+      lastReceivedForSpeed = 0
+
+      $fileName.textContent = fileName
+      $fileMeta.textContent = formatBytes(totalBytes)
+    }
+
+    // ─── 激活 relay 降级模式 ───
+    function activateRelayMode() {
+      if (mode === 'relay' || mode === 'p2p') return
+      mode = 'relay'
+      setBadgeMode('relay')
+      $statusText.textContent = '流式解密接收中...'
+
+      // 清理 WebRTC 资源（如果有）
+      cleanupWebRTC()
+    }
+
+    // ─── 清理 WebRTC ───
+    function cleanupWebRTC() {
+      if (offerTimer) {
+        clearTimeout(offerTimer)
+        offerTimer = null
+      }
+      if (pc) {
+        pc.close()
+        pc = null
+      }
+      dc = null
+    }
+
+    // ─── 处理 WebRTC offer ───
+    async function handleOffer(sdp) {
+      if (mode !== 'waiting') return
+
+      // 取消 5 秒超时
+      if (offerTimer) {
+        clearTimeout(offerTimer)
+        offerTimer = null
+      }
+
+      $statusText.textContent = '正在建立 P2P 连接...'
+
+      try {
+        pc = new RTCPeerConnection(iceConfig)
+
+        // ICE candidate → 通过 WS 转发给发送方
+        pc.onicecandidate = (event) => {
+          if (event.candidate && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({
+              type: 'ice',
+              candidate: event.candidate
+            }))
+          }
+        }
+
+        // 监听发送方创建的 DataChannel
+        pc.ondatachannel = (event) => {
+          dc = event.channel
+          dc.binaryType = 'arraybuffer'
+          setupDataChannel()
+        }
+
+        // 连接状态监控
+        pc.onconnectionstatechange = () => {
+          if (pc && (pc.connectionState === 'failed' || pc.connectionState === 'disconnected')) {
+            // P2P 连接失败，但如果还在 waiting 模式可以回退
+            if (mode === 'waiting') {
+              activateRelayMode()
+            }
+          }
+        }
+
+        // 设置远端 Offer，创建 Answer
+        await pc.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp }))
+        const answer = await pc.createAnswer()
+        await pc.setLocalDescription(answer)
+
+        // 发送 Answer 给发送方
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({
+            type: 'answer',
+            sdp: answer.sdp
+          }))
+        }
+      } catch (e) {
+        console.error('WebRTC 协商失败:', e)
+        activateRelayMode()
+      }
+    }
+
+    // ─── 配置 DataChannel 事件 ───
+    function setupDataChannel() {
+      let metaReceived = false
+
+      dc.onopen = () => {
+        mode = 'p2p'
+        setBadgeMode('p2p')
+        $statusText.textContent = 'P2P 直连接收中...'
+      }
+
+      dc.onmessage = (event) => {
+        const data = event.data
+
+        // 字符串消息 = 元信息 JSON
+        if (typeof data === 'string') {
+          try {
+            const meta = JSON.parse(data)
+            if (meta.type === 'meta') {
+              metaReceived = true
+              handleMeta(meta)
+              $statusText.textContent = 'P2P 直连接收中...'
+            }
+          } catch (e) { /* 忽略非 JSON 文本 */ }
+          return
+        }
+
+        // ArrayBuffer 二进制消息
+        if (data instanceof ArrayBuffer) {
+          // 空 ArrayBuffer = EOF
+          if (data.byteLength === 0) {
+            transferDone = true
+            finishDownload(fileName, chunks)
+            cleanupWebRTC()
+            ws.close()
+            return
+          }
+
+          // 原始二进制分块（P2P 模式无需解密，DTLS 已提供加密）
+          const chunk = new Uint8Array(data)
+          chunks.push(chunk)
+          updateProgress(chunk.length)
+        }
+      }
+
+      dc.onerror = (e) => {
+        console.error('DataChannel error:', e)
+        if (!transferDone) {
+          showError('P2P 数据通道错误')
+        }
+      }
+
+      dc.onclose = () => {
+        // DataChannel 正常关闭，如果传输未完成且有足够数据则尝试保存
+        if (!transferDone && receivedBytes > 0 && receivedBytes >= totalBytes) {
+          transferDone = true
+          finishDownload(fileName, chunks)
+        }
+      }
+    }
+
+    // ─── WebSocket 事件处理 ───
+    ws.onopen = () => {
+      $statusText.textContent = '等待发送方...'
+
+      // 5 秒内未收到 WebRTC offer → 认为是旧版发送方，直接走 relay
+      offerTimer = setTimeout(() => {
+        if (mode === 'waiting') {
+          activateRelayMode()
+        }
+      }, 5000)
+    }
+
+    ws.onmessage = async (event) => {
+      const data = event.data
+
+      // ─── 文本消息处理 ───
+      if (typeof data === 'string') {
+        let msg = null
+        try { msg = JSON.parse(data) } catch (e) { /* 忽略非 JSON */ return }
+        if (!msg || !msg.type) return
+
+        switch (msg.type) {
+          // ─── WebRTC 信令：Offer ───
+          case 'offer':
+            await handleOffer(msg.sdp)
+            return
+
+          // ─── WebRTC 信令：ICE Candidate ───
+          case 'ice':
+            if (pc && msg.candidate) {
+              try {
+                await pc.addIceCandidate(new RTCIceCandidate(msg.candidate))
+              } catch (e) {
+                console.warn('添加 ICE candidate 失败:', e)
+              }
+            }
+            return
+
+          // ─── 发送方显式请求降级 ───
+          case 'fallback':
+            activateRelayMode()
+            return
+
+          // ─── 文件元信息（relay 模式） ───
+          case 'meta':
+            // 如果还在 waiting，收到 meta 说明发送方直接用 relay，不会发 offer
+            if (mode === 'waiting') {
+              activateRelayMode()
+            }
+            if (mode === 'relay') {
+              handleMeta(msg)
+              $statusText.textContent = '流式解密接收中...'
+            }
+            return
+        }
+        return
+      }
+
+      // ─── 二进制消息处理（仅在 relay 模式下） ───
+      if (data instanceof Blob) {
+        // 如果还在 waiting 模式收到二进制，切换到 relay
+        if (mode === 'waiting') {
+          activateRelayMode()
+        }
+
+        // P2P 模式下忽略 WS 二进制（数据走 DataChannel）
+        if (mode !== 'relay') return
+
+        const arrayBuf = await data.arrayBuffer()
+        const payload = new Uint8Array(arrayBuf)
+
+        // 空二进制 = EOF
+        if (payload.length === 0) {
+          transferDone = true
+          finishDownload(fileName, chunks)
+          return
+        }
+
+        // AES-128-GCM 解密
+        try {
+          const plaintext = await decryptChunk(keyBytes, payload)
+          chunks.push(plaintext)
+          updateProgress(plaintext.length)
+        } catch (e) {
+          showError('解密失败: ' + e.message)
+          ws.close()
+        }
+      }
+    }
+
+    ws.onerror = () => {
+      showError('WebSocket 连接错误')
+    }
+
+    ws.onclose = () => {
+      // 如果 P2P 模式正在传输，WS 关闭不影响
+      if (mode === 'p2p' && !transferDone) return
+
+      if (transferDone) {
+        // 正常关闭
+      } else if (receivedBytes > 0 && receivedBytes >= totalBytes) {
+        // 数据已收完，正常
+      } else if (receivedBytes === 0 && mode !== 'p2p') {
+        showError('连接已关闭（发送方可能不在线）')
+      }
+    }
+  }
+</script>
+</body>
+</html>

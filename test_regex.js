@@ -1,1 +1,0 @@
-const rawHtml = `<img src="file:///D:%5COneDrive%5CLearning%5CCode%5CGemini%5Cbob-agent%5Csrc-tauri%5Cicons%5Cicon.png" alt="icon">`; const result = rawHtml.replace(/(<img\s+[^>]*src=")(?:file:\/\/\/)?([A-Za-z]:(?:[\/\\\\]|%5[Cc]|%2[Ff])[^"]+)(")/gi, (_, pre, path, post) => pre + "http://bob.localhost/" + path.replace(/\\\\|%5[Cc]/gi, "/") + post); console.log(result);

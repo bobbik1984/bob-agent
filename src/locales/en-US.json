@@ -262,7 +262,18 @@
     "conn_outlook_desc": "Calendar · Mail",
     "conn_lark_app_id": "App ID",
     "conn_lark_app_secret": "App Secret",
-    "conn_save_connect": "Save & Connect"
+    "conn_save_connect": "Save & Connect",
+    "channel_wechat_rebind": "Click to rebind",
+    "channel_wechat_scan": "Click to scan QR code",
+    "channel_wechat_desc": "WeChat Official / Personal",
+    "mcp_preset": "System Preset",
+    "mcp_custom": "Custom Configuration",
+    "conn_native_integration": "Native Integration",
+    "conn_quick_connect": "Quick Connect",
+    "conn_select_credential": "Select Credentials",
+    "mcp_outlook_guide": "Configuration Guide (Open in Browser)",
+    "mcp_outlook_step1": "1. Register app:",
+    "mcp_outlook_step2": "2. Detailed tutorial:"
   },
   "chat": {
     "new_conversation": "New Chat",
@@ -276,7 +287,6 @@
     "empty_title": "Hi, I'm Bob",
     "empty_subtitle": "How can I help you?",
     "export_success": "Chat exported to: ",
-    "thinking": "Thinking...",
     "error_title": "Request Failed",
     "drop_hint_full": "Drop files here / Track folder",
     "parsing": "Parsing...",
@@ -287,6 +297,8 @@
     "mode_act": "Act",
     "mode_qa_desc": "Q&A (Read-only for safety)",
     "mode_act_desc": "Act (Allow execution)",
+    "mode_goal": "Goal",
+    "mode_goal_desc": "Auto-Loop (Until Done)",
     "global_access_tooltip": "When enabled, allows AI to read/modify system files outside the workspace (valid for current chat only)",
     "global_access": "Global Files",
     "export_tooltip": "Export Chat as Markdown",
@@ -408,6 +420,7 @@
     "title": "Calendar",
     "loading": "Loading...",
     "this_week": "This Week",
+    "overdue_events": "Overdue Events",
     "todo_list": "To-Do List",
     "auto_tasks": "Automated Tasks",
     "empty_cron": "No automated tasks yet",
@@ -419,16 +432,10 @@
     "delete": "Delete"
   },
   "setup": {
-    "welcome": "Welcome to bob-agent",
-    "subtitle": "Get started in just 2 steps",
-    "step1": "Step 1: Choose AI Provider",
-    "next": "Next →",
-    "step2": "Step 2: Enter API Key",
-    "ollama_desc": "Ollama local model does not require an API Key. Just ensure Ollama is running locally.",
-    "get_key_prefix": "Get your API Key from the ",
-    "get_key_suffix": " website and paste it below:",
-    "back": "← Back",
-    "finish": "Finish Setup"
+    "theme_dark": "Dark",
+    "theme_light": "Light",
+    "workspace_placeholder": "Set workspace folder",
+    "provider_placeholder": "LLM Provider"
   },
   "confirm_card": {
     "new_todo": "New To-Do",
@@ -467,7 +474,11 @@
     "no_events": "No events",
     "time": "Time",
     "location": "Location",
-    "notes": "Notes"
+    "notes": "Notes",
+    "prev_week": "Prev Week",
+    "this_week": "This Week",
+    "next_week": "Next Week",
+    "new_event_title": "Enter title for new event:"
   },
   "providers": {
     "qwen": "Alibaba Cloud",
@@ -490,11 +501,5 @@
     "merged": "Merged {count} duplicate topics",
     "continue_chat": "Continue this topic",
     "got_it": "Got it"
-  },
-  "setup": {
-    "theme_dark": "Dark",
-    "theme_light": "Light",
-    "workspace_placeholder": "Set workspace folder",
-    "provider_placeholder": "LLM Provider"
   }
 }

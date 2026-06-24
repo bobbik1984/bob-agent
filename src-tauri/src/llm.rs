@@ -892,7 +892,7 @@ static CONTEXT_SUMMARY_CACHE: Lazy<Mutex<HashMap<String, (u64, String)>>> =
 
 /// 用牛马模型做非流式单轮对话（通用工具函数）
 /// 失败时返回 None，不会 panic
-async fn call_clerk_oneshot(system_prompt: &str, user_prompt: &str, max_tokens: u32) -> Option<String> {
+pub(crate) async fn call_clerk_oneshot(system_prompt: &str, user_prompt: &str, max_tokens: u32) -> Option<String> {
     let config = super::read_config();
     let clerk_model = config.get("clerkModel").and_then(|v| v.as_str()).unwrap_or("");
     if clerk_model.is_empty() { return None; }
@@ -1326,7 +1326,7 @@ fn estimate_complexity(messages: &[Value]) -> (Complexity, u32) {
 }
 
 /// 内部通用流式处理 — 支持 Tool Calling 循环
-async fn stream_internal(
+pub(crate) async fn stream_internal(
     app: AppHandle,
     messages: Vec<Value>,
     conv_id: Option<String>,
@@ -1440,9 +1440,18 @@ async fn stream_internal(
     let has_system = messages.iter().any(|m| m.get("role").and_then(|r| r.as_str()) == Some("system"));
     let mut full_messages: Vec<Value> = Vec::new();
     if !has_system {
-        let current_dir = std::env::current_dir()
-            .map(|d| d.to_string_lossy().into_owned())
-            .unwrap_or_else(|_| "未知".to_string());
+        let config = super::read_config();
+        let configured_workspace = config.get("workspaceDir").and_then(|v| v.as_str()).unwrap_or("");
+        let current_dir = if !configured_workspace.is_empty() {
+            configured_workspace.to_string()
+        } else {
+            std::env::current_exe()
+                .ok()
+                .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+                .unwrap_or_else(|| std::env::current_dir().unwrap_or_default())
+                .to_string_lossy()
+                .into_owned()
+        };
         let os_info = std::env::consts::OS;
         let skills_summary = build_skills_summary();
         let memory_summary = build_memory_summary();
@@ -1459,11 +1468,18 @@ async fn stream_internal(
             ""
         };
 
+        let file_access_info = if global_file_access {
+            "当前开启了【全局文件访问权限】，你可以访问操作系统上的任何文件。"
+        } else {
+            "当前受限于【沙盒安全机制】，你仅被允许访问 CWD 工作目录及通过 UI 显式授权的目录。对其他绝对路径的文件操作将被拒绝。"
+        };
+
         let system_prompt = format!(
             "你是 Bob，一个友善、专业的桌面 AI 私人助手，由 Tauri (Rust) 和 Vue 3 构建。\n\
 你当前运行在用户的本地计算机上。\n\
 当前操作系统: {}\n\
 当前工作目录 (CWD): {}\n\
+{}\n\
 {}\n\
 请用中文回答用户的问题，并记住你是一个拥有本机访问能力的桌面助手，而不是一个受限的云端网页服务。\n\
 \n\
@@ -1536,7 +1552,7 @@ async fn stream_internal(
 - date 可以为 null（如果没有明确时间）\n\
 - 只在确实检测到行动项时才输出此代码块，不要强行捕获\n\
 - 不要在普通问答、闲聊中输出此代码块",
-            os_info, current_dir, wxid_info, agent_mode_info, skills_summary, memory_summary, wiki_status
+            os_info, current_dir, wxid_info, agent_mode_info, file_access_info, skills_summary, memory_summary, wiki_status
         );
 
         full_messages.push(json!({
@@ -1585,7 +1601,7 @@ async fn stream_internal(
     let mut rounds_completed: usize = 0;
 
     // ── T-1401: 循环熔断器 ──────────────────────────────────
-    let mut tool_tracker = super::tools::ToolCallTracker::new();
+    let mut tool_tracker = super::tools::ToolCallTracker::with_budget(if agent_mode == "goal" { 50 } else { 15 });
 
     // ── 工具结果缓存 (会话级) ────────────────────────────────
     // 避免同一对话中重复读取同一文件/目录，节省 Token 和时间
@@ -2249,6 +2265,9 @@ async fn stream_internal(
 }
 
 pub async fn stream_chat(app: AppHandle, messages: Vec<Value>, conv_id: Option<String>, from_user: Option<String>, global_file_access: bool, agent_mode: String) -> Value {
+    if agent_mode == "goal" {
+        return crate::goal::execute_goal_loop(app, messages, conv_id).await;
+    }
     stream_internal(app, messages, conv_id, from_user, global_file_access, agent_mode).await
 }
 

@@ -86,6 +86,7 @@ fn build_progress_body(
     ciphertext: Vec<u8>,
     app: tauri::AppHandle,
     file_name: String,
+    attempt: u32,
 ) -> reqwest::Body {
     let total = ciphertext.len();
     let stream = futures::stream::unfold(
@@ -106,6 +107,7 @@ fn build_progress_body(
                     "bytes_sent": sent,
                     "total_bytes": total,
                     "percent": percent,
+                    "attempt": attempt,
                 }));
                 Some((Ok::<_, std::io::Error>(bytes::Bytes::from(chunk)), (data, end)))
             }
@@ -160,6 +162,7 @@ async fn upload_buffer_to_cdn(
             ciphertext.to_vec(),
             app.clone(),
             file_name.to_string(),
+            attempt,
         );
 
         let res = client
@@ -290,9 +293,12 @@ pub async fn upload_media(
         file_path, rawsize, filesize, rawfilemd5, media_type
     );
 
+    let fileext = path.extension().and_then(|e| e.to_str()).unwrap_or("bin").to_string();
+
     // 5. 调用 getUploadUrl API
     let upload_url_req = GetUploadUrlReq {
         filekey: Some(filekey.clone()),
+        fileext: Some(fileext),
         media_type: Some(media_type),
         to_user_id: Some(to_user_id.to_string()),
         rawsize: Some(rawsize),

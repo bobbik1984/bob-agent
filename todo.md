@@ -764,6 +764,24 @@
 
 **全部完成** 🎉
 
+## 📍 里程碑 18: Goal Mode (闭环执行引擎)
+> 🎯 **目标**: 让 Bob 具备以结果为导向的闭环执行能力，在遇到复杂任务时自主拆解、评估和重试，直至任务完全成功。
+
+- [x] T-1901: **Rust 后端: Core Setup**
+  - [x] 修改 `tools.rs` 的 `ToolCallTracker` 增加 `with_budget(budget)`，支持 Goal 模式下调高 Token 预算（例如 50 轮）。
+  - [x] 将 `llm.rs` 的 `stream_internal` 与 `call_clerk_oneshot` 提升为 `pub(crate)` 供跨文件调用。
+- [x] T-1902: **Rust 后端: Evaluator Engine (Maker/Checker 架构)**
+  - [x] 新建 `goal.rs` 模块并实现 `execute_goal_loop` 外层闭环。
+  - [x] 引入独立评估器：执行后使用 Clerk 模型根据初始目标独立验证结果 (PASS / FAIL / PARTIAL)。
+  - [x] 自动重试与上下文注回：若验证失败，将反馈无缝附加至消息流继续尝试（最多 3 次大循环）。
+- [x] T-1903: **Rust 后端: 路由调度**
+  - [x] 修改 `http_api.rs` 的 `ChatRequest` 注入 `agent_mode` 字段。
+  - [x] 拦截 `stream_chat` 调用，若 `agent_mode == "goal"` 则路由给 `goal::execute_goal_loop` 引擎。
+- [x] T-1904: **前端集成 (UI 与事件绑定)**
+  - [x] 在 `ChatView.vue` 消息引擎模式选择器中增加 "目标 (Goal)" 选项卡。
+  - [x] 引入 `Target` (靶心) 样式及文案 (`zh-CN.json` / `en-US.json`) 翻译。
+  - [x] 前端天然继承 `llm:chunk` 事件，实现过程反馈文本无缝流式加载呈现。
+
 ## 🚀 T-1800: Bob 联邦网络与 Web Drop 引擎
 - [x] **阶段一：信令层与基础设施 (bob-relay + coturn)**
   - [x] 使用 Node.js 编写 `bob-relay` WebSocket 中继服务，实现无落盘的内存管线（双向信令+数据盲传）。

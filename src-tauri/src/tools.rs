@@ -25,11 +25,15 @@ pub struct ToolCallTracker {
 
 impl ToolCallTracker {
     pub fn new() -> Self {
+        Self::with_budget(15)
+    }
+
+    pub fn with_budget(budget: usize) -> Self {
         Self {
             history: Vec::new(),
             total_calls: 0,
             repeat_threshold: 3,
-            budget: 15,
+            budget,
         }
     }
 
@@ -598,7 +602,7 @@ fn get_builtin_tool_schemas() -> Vec<Value> {
             "type": "function",
             "function": {
                 "name": "send_wechat_file",
-                "description": "通过微信发送文件或图片给指定用户。支持图片(jpg/png/gif/webp等)和任意文件(pdf/doc/mp4/zip等)，上限 100MB。图片会以图片消息发送，其余格式以文件消息发送。当用户要求你把某个文件发到微信时调用此工具。",
+                "description": "通过微信发送文件或图片给指定用户。支持图片(jpg/png/gif/webp等)和任意文件(pdf/doc/mp4/zip等)。图片以图片消息发送，其余格式以文件消息发送。超过 25MB 的文件会自动生成 HTTP 下载链接并以文本形式发送（无需手动调用 share_file）。",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -607,6 +611,20 @@ fn get_builtin_tool_schemas() -> Vec<Value> {
                         "caption": { "type": "string", "description": "可选：随文件一起发送的文字说明" }
                     },
                     "required": ["wxid", "file_path"]
+                }
+            }
+        }),
+        json!({
+            "type": "function",
+            "function": {
+                "name": "share_file",
+                "description": "为一个本地文件生成公网可访问的下载链接（通过 Web Drop 加密中继）。适用于需要分享文件、生成外链、或者绕过微信/IM平台大小限制的场景。链接在发送方 Bob 运行期间持续有效。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "file_path": { "type": "string", "description": "要分享的文件的绝对路径" }
+                    },
+                    "required": ["file_path"]
                 }
             }
         }),
@@ -939,6 +957,24 @@ async fn execute_tool_inner(app: &tauri::AppHandle, name: &str, args: &Value, fr
             let caption = args.get("caption").and_then(|v| v.as_str());
             match super::wechat::commands::send_wechat_file(wxid, file_path, caption, app).await {
                 Ok(msg) => json!({ "ok": msg }),
+                Err(e) => json!({ "error": e }),
+            }
+        }
+        "share_file" => {
+            let file_path = args.get("file_path").and_then(|v| v.as_str()).unwrap_or("");
+            match super::web_drop::start_web_drop(file_path.to_string()).await {
+                Ok(url) => {
+                    let size_mb = std::fs::metadata(file_path)
+                        .map(|m| m.len() as f64 / 1024.0 / 1024.0)
+                        .unwrap_or(0.0);
+                    json!({
+                        "ok": true,
+                        "download_url": url,
+                        "file_path": file_path,
+                        "size_mb": format!("{:.2}", size_mb),
+                        "note": "请将 download_url 的完整内容以下面的格式展示给用户，不要自创 Markdown 链接，直接输出纯文本 URL：\n\n💻 电脑/可点击端：直接点击打开下方链接：\n[此处填入完全原生的 download_url]\n\n📱 手机端：如果上方链接无法在微信中直接点击或被截断，请长按复制下方框内的完整内容到浏览器打开：\n```text\n[此处填入完全原生的 download_url]\n```\n\n禁止篡改链接的任何部分（包括 ?v=2 和 #号）。"
+                    })
+                }
                 Err(e) => json!({ "error": e }),
             }
         }

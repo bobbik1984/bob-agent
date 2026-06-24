@@ -67,7 +67,7 @@ const modelPanelRef = ref(null);
 
 onMounted(async () => {
   // 加载配置
-  const savedConfig = await window.electronAPI.getConfig('all');
+  const savedConfig = await window.electronAPI.getAllConfig();
   if (savedConfig) {
     Object.assign(config, savedConfig);
   }

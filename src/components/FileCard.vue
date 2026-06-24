@@ -15,6 +15,11 @@
     <div class="bob-card-inline__info">
       <div class="bob-card-inline__title">{{ meta.name || fileName }}</div>
     </div>
+
+    <!-- 最右侧：Web Drop 按钮 -->
+    <div class="bob-card-inline__actions" v-if="!meta.isDir && meta.exists" @click.stop="handleWebDrop" title="Web Drop 端到端分享">
+      <Send :size="16" class="action-icon web-drop-icon" />
+    </div>
   </div>
 </template>
 
@@ -22,7 +27,7 @@
 import { ref, computed, onMounted, markRaw } from 'vue';
 import {
   File, FileText, FileCode, FileSpreadsheet, FileArchive,
-  Folder, FolderOpen, Image, Film, ExternalLink
+  Folder, FolderOpen, Image, Film, ExternalLink, Send
 } from 'lucide-vue-next';
 import { useI18n } from 'vue-i18n';
 
@@ -119,6 +124,18 @@ function openFile() {
   });
 }
 
+async function handleWebDrop() {
+  try {
+    const url = await window.electronAPI.startWebDrop(props.filePath);
+    // 复制到剪贴板并打开浏览器
+    navigator.clipboard.writeText(url);
+    window.open(url, '_blank');
+  } catch (err) {
+    console.error('[FileCard] Web Drop 失败:', err);
+    alert('Web Drop 失败: ' + err);
+  }
+}
+
 onMounted(async () => {
   try {
     const result = await window.electronAPI.getFileMeta(props.filePath);
@@ -161,6 +178,31 @@ onMounted(async () => {
 
 .file-card__type-icon {
   opacity: 0.85;
+}
+
+.bob-card-inline__actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px;
+  margin-left: 8px;
+  border-radius: 8px;
+  color: var(--text-tertiary);
+  transition: all 0.2s ease;
+  cursor: pointer;
+}
+
+.bob-card-inline__actions:hover {
+  color: var(--user-accent);
+  background: var(--bg-secondary);
+}
+
+.web-drop-icon {
+  transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.bob-card-inline__actions:hover .web-drop-icon {
+  transform: translateY(-2px) scale(1.1);
 }
 </style>
 

@@ -20,8 +20,8 @@
           </div>
           <div class="service-info">
             <span class="service-name">{{ $t('settings.channel_wechat') }}</span>
-            <span class="service-sub" v-if="mobileChannel === 'wechat'" style="color: var(--user-accent);">{{ wechatConnected ? '点击重新绑定' : '点击扫描二维码' }}</span>
-            <span class="service-sub" v-else>微信公众号/个人号</span>
+            <span class="service-sub" v-if="mobileChannel === 'wechat'" style="color: var(--user-accent);">{{ wechatConnected ? $t('settings.channel_wechat_rebind') : $t('settings.channel_wechat_scan') }}</span>
+            <span class="service-sub" v-else>{{ $t('settings.channel_wechat_desc') }}</span>
           </div>
           <span class="service-status-dot" :class="mobileChannel === 'wechat' ? 'dot-connected' : 'dot-disconnected'"></span>
         </div>
@@ -165,6 +165,51 @@
         </div>
       </div>
 
+      <!-- Google Calendar (Native) -->
+      <div class="service-card" :class="{ connected: isConnected('google') }">
+        <div class="service-card-header">
+          <div class="service-icon" style="background: transparent;">
+            <img src="/logos/google.svg" style="width: 22px; height: 22px; object-fit: contain;" alt="Google" />
+          </div>
+          <div class="service-info">
+            <span class="service-name">Google Calendar</span>
+            <span class="service-sub">{{ $t('settings.conn_native_integration') }}</span>
+          </div>
+          <span class="service-status-dot" :class="isConnected('google') ? 'dot-connected' : 'dot-disconnected'"></span>
+        </div>
+
+        <div class="service-card-body">
+          <span class="service-status-text">
+            <template v-if="isConnected('google')">
+              {{ $t('settings.conn_connected') }}
+              <span v-if="connectorStatuses['google']?.connected_at" class="connected-time">
+                · {{ connectorStatuses['google'].connected_at }}
+              </span>
+            </template>
+            <template v-else>{{ $t('settings.conn_not_configured') }}</template>
+          </span>
+        </div>
+
+        <div class="service-card-footer">
+          <button
+            v-if="isConnected('google')"
+            class="btn btn-danger-outline btn-sm"
+            @click="disconnectService('google')"
+          >
+            <Unlink :size="13" />
+            {{ $t('settings.conn_disconnect') }}
+          </button>
+          <button
+            v-else
+            class="btn btn-primary btn-sm"
+            @click="connectGoogleNative"
+            :disabled="connectingService === 'google'"
+          >
+            <KeyRound :size="13" />
+            {{ $t('settings.conn_select_credential') }}
+          </button>
+        </div>
+      </div>
 
     </div>
   </section>
@@ -192,7 +237,7 @@
           <div class="service-info" style="min-width: 0; padding-right: 8px;">
             <span class="service-name" style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block;" :title="name">{{ name === 'GoogleCalendar' ? 'Google Calendar' : (name === 'Outlook365' ? 'Outlook 365' : name) }}</span>
             <span class="service-sub" style="font-size: 0.75em; color: var(--text-tertiary); display: flex; align-items: center; gap: 4px;">
-              {{ name.toLowerCase().includes('google') || name.toLowerCase().includes('outlook') ? '系统预设' : '自定义配置' }}
+              {{ name.toLowerCase().includes('google') || name.toLowerCase().includes('outlook') ? $t('settings.mcp_preset') : $t('settings.mcp_custom') }}
             </span>
           </div>
           <label class="mcp-switch" title="断开连接">
@@ -205,23 +250,6 @@
         </div>
       </div>
 
-      <!-- Quick Add Google Calendar MCP -->
-      <div v-if="!showAddMcp && !mcpServers['GoogleCalendar']" class="service-card preset-card" @click="addGoogleCalendarMcp">
-        <div class="service-card-header" style="margin-bottom: 0;">
-          <div class="service-icon" style="background: transparent;">
-            <img src="/logos/google.svg" style="width: 20px; height: 20px; filter: grayscale(1); opacity: 0.6;" alt="Google" />
-          </div>
-          <div class="service-info">
-            <span class="service-name" style="color: var(--text-secondary);">Google Calendar</span>
-            <span class="service-sub">快速接入</span>
-          </div>
-          <label class="mcp-switch" title="接入服务" @click.prevent>
-            <input type="checkbox" :checked="false" />
-            <span class="mcp-slider"></span>
-          </label>
-        </div>
-      </div>
-
       <!-- Quick Add Outlook MCP -->
       <div v-if="!showAddMcp && !mcpServers['Outlook365']" class="service-card preset-card" @click="addOutlookMcpPreset">
         <div class="service-card-header" style="margin-bottom: 0;">
@@ -230,7 +258,7 @@
           </div>
           <div class="service-info">
             <span class="service-name" style="color: var(--text-secondary);">Outlook 365</span>
-            <span class="service-sub">快速接入</span>
+            <span class="service-sub">{{ $t('settings.conn_quick_connect') }}</span>
           </div>
           <label class="mcp-switch" title="接入服务" @click.prevent>
             <input type="checkbox" :checked="false" />
@@ -247,7 +275,7 @@
           </div>
           <div class="service-info">
             <span class="service-name" style="color: var(--text-secondary);">{{ $t('settings.mcp_add') }}</span>
-            <span class="service-sub">自定义配置</span>
+            <span class="service-sub">{{ $t('settings.mcp_custom') }}</span>
           </div>
         </div>
       </div>
@@ -268,10 +296,10 @@
             <input v-model="newMcp.args" class="input" placeholder="-y @modelcontextprotocol/server-filesystem /path" style="padding: 4px 8px; font-size: 0.85em;" />
             <div v-if="newMcp.name === 'Outlook365'" style="margin-top: 6px; font-size: 0.75em; color: var(--text-tertiary); line-height: 1.5; background: var(--bg-root); padding: 8px; border-radius: 6px;">
               <div style="display: flex; align-items: center; margin-bottom: 4px; color: var(--text-secondary);">
-                <Info :size="14" style="margin-right: 4px;" /> <b>配置指南 (请复制链接至浏览器打开)</b>
+                <Info :size="14" style="margin-right: 4px;" /> <b>{{ $t('settings.mcp_outlook_guide') }}</b>
               </div>
               <div style="display: flex; align-items: center; gap: 6px; margin-top: 4px;">
-                <span>1. 注册应用：</span>
+                <span>{{ $t('settings.mcp_outlook_step1') }}</span>
                 <span style="user-select: text; color: var(--color-primary);">https://portal.azure.com/</span>
                 <button class="btn btn-sm" style="padding: 4px; border: none; background: transparent; cursor: pointer; color: var(--text-tertiary);" @click.stop="copyUrl('https://portal.azure.com/')">
                   <Check v-if="copiedUrl === 'https://portal.azure.com/'" :size="14" style="color: var(--color-success);" />
@@ -279,7 +307,7 @@
                 </button>
               </div>
               <div style="display: flex; align-items: center; gap: 6px; margin-top: 4px;">
-                <span>2. 详细教程：</span>
+                <span>{{ $t('settings.mcp_outlook_step2') }}</span>
                 <span style="user-select: text; color: var(--color-primary);">https://github.com/smithery-ai/mcp-server-outlook</span>
                 <button class="btn btn-sm" style="padding: 4px; border: none; background: transparent; cursor: pointer; color: var(--text-tertiary);" @click.stop="copyUrl('https://github.com/smithery-ai/mcp-server-outlook')">
                   <Check v-if="copiedUrl === 'https://github.com/smithery-ai/mcp-server-outlook'" :size="14" style="color: var(--color-success);" />
@@ -485,7 +513,7 @@ async function connectOAuth(name) {
     const res = await window.electronAPI.connectorStartOAuth(name);
     if (res && res.url) {
       // 使用默认浏览器打开 OAuth 授权页面
-      window.open(res.url, '_blank');
+      window.electronAPI.openExternal(res.url);
     } else if (res && res.error) {
       alert('OAuth Error: ' + res.error);
     }
@@ -553,7 +581,7 @@ async function addMcpServer() {
   showAddMcp.value = false;
 }
 
-async function addGoogleCalendarMcp() {
+async function connectGoogleNative() {
   try {
     const selectedPath = await open({
       multiple: false,
@@ -562,20 +590,22 @@ async function addGoogleCalendarMcp() {
     });
     
     if (selectedPath) {
-      const name = 'GoogleCalendar';
-      const updated = { ...mcpServers.value };
-      updated[name] = {
-        command: 'npx',
-        args: ['-y', '@cocal/google-calendar-mcp'],
-        env: {
-          'GOOGLE_OAUTH_CREDENTIALS': selectedPath
-        }
-      };
-      await window.electronAPI.setMcpConfig({ mcpServers: updated });
-      mcpServers.value = updated;
+      connectingService.value = 'google';
+      const res = await window.electronAPI.connectorSaveCredentials('google', {
+        file_path: selectedPath
+      });
+      if (res && res.error) {
+        alert('配置失败: ' + res.error);
+        connectingService.value = '';
+        return;
+      }
+      await loadConnectorStatuses();
+      await connectOAuth('google');
     }
   } catch (err) {
-    console.error('Failed to add Google Calendar MCP', err);
+    console.error('Failed to configure Google Calendar natively', err);
+    alert('配置失败: ' + err);
+    connectingService.value = '';
   }
 }
 

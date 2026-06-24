@@ -1,0 +1,212 @@
+# 1. OpenClaw Node Gateway (WebSocket 核心节点接入)
+
+http://openclaw.bobbik.org {
+
+    reverse_proxy 127.0.0.1:18789 {
+
+        header_up Host {host}
+
+        header_up X-Forwarded-Proto https
+
+    }
+
+}
+
+
+
+# 2. Headscale UI & API (网络控制??
+
+http://hs.bobbik.org, http://115.190.248.194 {
+
+    # Headscale 后端 API 接口 (宿主??41641 端口)
+
+    handle /api/* {
+
+        reverse_proxy 127.0.0.1:41641
+
+    }
+
+    handle /machine/* {
+
+        reverse_proxy 127.0.0.1:41641
+
+    }
+
+    # 其它 headscale 必要的路??
+    handle /ts2021* { 
+
+        reverse_proxy 127.0.0.1:41641 
+
+    }
+
+    handle /register/* { 
+
+        reverse_proxy 127.0.0.1:41641 
+
+    }
+
+    
+
+    # 静??Web UI 页面 (转发回阉割后??headscale-ui 容器新开??8001 端口)
+
+    handle {
+
+        reverse_proxy 127.0.0.1:8001
+
+    }
+
+}
+
+
+
+# 3. Dify (Project Brain 网页界面) - Temporarily Disabled via User Request
+
+# http://work.bobbik.org {
+
+#     reverse_proxy 127.0.0.1:3000
+
+# }
+
+
+
+# 4. WeChat Bridge (微信互通接??
+
+http://wechat.bobbik.org {
+
+     reverse_proxy 127.0.0.1:8088
+
+}
+
+
+
+# 5. Monitoring (Beszel 全局监控面板)
+
+http://monitor.bobbik.org {
+
+    reverse_proxy 127.0.0.1:8090
+
+}
+
+
+
+# 6. File Sync (Syncthing 文件同步)
+
+http://sync.bobbik.org {
+
+    reverse_proxy 127.0.0.1:8384
+
+}
+
+
+
+# 7. Home Panel (家庭智能显示??
+
+http://panel.bobbik.org {
+
+    root * /opt/home-panel
+
+    file_server
+
+}
+
+
+
+# 8. Test Sites (测试网站聚合入口 ??静态文??
+
+http://test.bobbik.org {
+
+    root * /opt/test
+
+    file_server
+
+}
+
+
+
+# 9. Village Dashboard (Agent 村庄看板)
+
+http://village.bobbik.org {
+
+    reverse_proxy 127.0.0.1:3080
+
+}
+
+
+
+# 10. 时空华夏 (历史地图 ??纯静??
+
+http://history.bobbik.org {
+
+    root * /opt/history
+
+    # 根路径重定向到地图页
+
+    redir / /frontend/index.html
+
+    file_server
+
+}
+
+
+
+# 11. Test Sites (Openclaw测试网站 ??静态文??
+
+http://t.bobbik.org {
+
+    root * /opt/t
+
+    file_server
+
+}
+# 12. Bedtime Story (Dashboard)
+http://bedtime.bobbik.org {
+    # Backend API requests
+    handle /api/* {
+        reverse_proxy 127.0.0.1:8000
+    }
+    
+    # Static Assets serving
+    handle /assets/* {
+        reverse_proxy 127.0.0.1:8000
+    }
+    
+    # Frontend Next.js rendering
+    handle {
+        reverse_proxy 127.0.0.1:3000
+    }
+}
+
+# 13. Mall Coordination (公开脱敏地图)
+http://map.bobbik.org {
+    root * /opt/map
+    file_server
+}
+
+# 14. iKnow (Knowledge Graph self-evolving engine)
+http://iknow.bobbik.org {
+    # Backend API requests
+    handle /api/* {
+        reverse_proxy 127.0.0.1:8100
+    }
+    
+    # Static Assets serving (Frontend Vue.js)
+    handle {
+        root * /opt/iknow/iknow-viz/dist
+        try_files {path} /index.html
+        file_server
+    }
+}
+
+# 15. Bob Web Drop (bob.bobbik.org/transfer)
+http://bob.bobbik.org {
+    handle /transfer/api/ws/* {
+        uri strip_prefix /transfer/api
+        reverse_proxy 127.0.0.1:3900
+    }
+        handle_path /transfer* {
+        root * /opt/test/drop
+        try_files {path} /index.html
+        file_server
+    }
+}
+

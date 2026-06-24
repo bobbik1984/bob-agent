@@ -245,6 +245,13 @@ tests:
   note: "待端到端测试后更新"
 
 recent_fixes:
+  - date: "2026-06-24"
+    items:
+      - "[Feature] Goal Mode 闭环执行引擎 — Rust 后端新增 goal.rs 评估引擎，Maker/Checker 架构"
+      - "[Arch] ToolCallTracker 支持 with_budget 动态扩容（Goal模式默认 50 轮上限）"
+      - "[Arch] HTTP API (/v1/chat) 和 stream_chat 透明支持 agent_mode: 'goal'"
+      - "[UI] ChatView.vue 代理模式切换器新增 '目标 (Goal)' 选项与 Target 图标"
+      - "[i18n] 多语言补充 chat.mode_goal 及 chat.mode_goal_desc"
   - date: "2026-06-16"
     items:
       - "[Feature] ChatView 图片预览 Lightbox (支持鼠标拖拽平移、滚轮缩放、点击重置)"

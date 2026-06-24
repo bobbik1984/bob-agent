@@ -164,7 +164,15 @@ pub fn system_read_file(file_path: String) -> Value {
         Err(_) => return json!({ "error": "无法读取文件元数据" }),
     };
 
-    // 移除 500KB 的硬性物理大小限制，交由统一的解析引擎提取文本
+    if size > 5 * 1024 * 1024 { // 5MB 限制
+        return json!({
+            "name": name,
+            "content": format!("[大文件 {} ({:.2} MB)，为防止内存溢出，已忽略内容提取。]", name, size as f64 / 1024.0 / 1024.0),
+            "size": size
+        });
+    }
+
+    // 交由统一的解析引擎提取文本
     match super::kb_extractor::extract_single_file(p) {
         Ok(mut content) => {
             let original_chars = content.chars().count();

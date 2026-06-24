@@ -271,7 +271,11 @@ pub fn extract_single_file(path: &Path) -> Result<String, String> {
     } else if ext == "xlsx" || ext == "csv" {
         extract_xlsx(path)
     } else {
-        Err(format!("不支持直接提取此格式的纯文本: {}", ext))
+        // Fallback: 尝试作为 UTF-8 纯文本读取
+        match extract_text(path) {
+            Ok(content) => Ok(content),
+            Err(_) => Err(format!("不支持直接提取此格式的纯文本: {}", ext)),
+        }
     }
 }
 

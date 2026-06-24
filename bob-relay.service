@@ -1,0 +1,13 @@
+﻿[Unit]
+Description=Bob Web Drop Relay
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/opt/bob/bob-relay
+Restart=on-failure
+User=ubuntu
+Environment="RUST_LOG=info"
+
+[Install]
+WantedBy=multi-user.target

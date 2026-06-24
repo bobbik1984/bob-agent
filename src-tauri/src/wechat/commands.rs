@@ -470,7 +470,89 @@ pub async fn send_wechat_file(
 
     let api = WechatApi::new(account.base_url, account.token);
 
-    // 2. 判断媒体类型
+    // 2. 判断媒体类型和大小
+    let file_meta = std::fs::metadata(file_path).map_err(|e| format!("无法读取文件元数据: {}", e))?;
+    let file_size_mb = file_meta.len() as f64 / 1024.0 / 1024.0;
+    
+    if file_size_mb > 25.0 {
+        // ── 大文件降级：通过 Web Drop 中继，生成公网可达的下载链接 ──
+        log::info!(
+            "[wechat] send_wechat_file: file too large ({:.1}MB), fallback to Web Drop",
+            file_size_mb
+        );
+        let download_url = crate::web_drop::start_web_drop(file_path.to_string())
+            .await
+            .map_err(|e| format!("生成 Web Drop 链接失败: {}", e))?;
+
+        let file_name = std::path::Path::new(file_path)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("file");
+
+        let link_text = format!(
+            "📎 文件 \"{}\" ({:.1}MB) 体积较大，请通过以下链接下载：\n{}",
+            file_name, file_size_mb, download_url
+        );
+
+        // 如果有 caption，合并发送
+        let full_text = if let Some(cap) = caption {
+            if !cap.trim().is_empty() {
+                format!("{}\n\n{}", cap.trim(), link_text)
+            } else {
+                link_text
+            }
+        } else {
+            link_text
+        };
+
+        // 以纯文本消息发送链接
+        let text_item = MessageItem {
+            r#type: Some(MESSAGE_ITEM_TYPE_TEXT),
+            create_time_ms: None,
+            update_time_ms: None,
+            is_completed: None,
+            msg_id: None,
+            ref_msg: None,
+            text_item: Some(TextItem {
+                text: Some(full_text),
+            }),
+            image_item: None,
+            voice_item: None,
+            file_item: None,
+            video_item: None,
+        };
+
+        let msg = WeixinMessage {
+            seq: None,
+            message_id: None,
+            from_user_id: Some(String::new()),
+            to_user_id: Some(wxid.to_string()),
+            client_id: Some(format!("bob-link-{}", crate::now_ms())),
+            create_time_ms: None,
+            update_time_ms: None,
+            delete_time_ms: None,
+            session_id: None,
+            group_id: None,
+            message_type: Some(MESSAGE_TYPE_BOT),
+            message_state: Some(MESSAGE_STATE_FINISH),
+            item_list: Some(vec![text_item]),
+            context_token: None,
+        };
+
+        let req = SendMessageReq {
+            msg: Some(msg),
+            base_info: None,
+        };
+
+        api.send_message(req, 15_000).await
+            .map_err(|e| format!("发送下载链接消息失败: {}", e))?;
+
+        return Ok(format!(
+            "✅ 文件 \"{}\" ({:.1}MB) 超过微信 CDN 限制，已通过 Web Drop 生成公网链接并发送给用户：{}",
+            file_name, file_size_mb, download_url
+        ));
+    }
+
     let is_image = cdn::is_image_file(file_path);
     let media_type = if is_image {
         UPLOAD_MEDIA_TYPE_IMAGE

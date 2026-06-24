@@ -88,7 +88,7 @@
             </div>
           </div>
           <!-- 消息内容（block 数组渲染：text + file-card 交替）-->
-          <div v-if="!msg._isError && msg.type !== 'confirm-card' && msg.type !== 'action-item-card' && msg.content" class="message-content selectable" @click="onMessageLinkClick">
+          <div v-if="!msg._isError && msg.type !== 'confirm-card' && msg.type !== 'action-item-card' && msg.content" class="message-content selectable">
             <template v-for="(block, bi) in renderMessageBlocks(msg.content)" :key="bi">
               <div v-if="block.type === 'html'" v-html="block.content"></div>
               <FileCard v-else-if="block.type === 'file'" :filePath="block.path" />
@@ -147,7 +147,7 @@
               <span>{{ $t('chat.thinking') || 'Thinking...' }}</span>
             </button>
             <div v-if="streamThinkingExpanded" ref="streamThinkingRef" class="thinking-content stream-thinking-content selectable">
-              {{ streamThinking }}
+              {{ streamThinking }}<span class="typing-cursor"></span>
             </div>
           </div>
           <!-- 工具调用状态 -->
@@ -197,7 +197,7 @@
           <div v-if="cdnUpload.active" class="cdn-upload-progress">
             <div class="cdn-upload-info">
               <FileUp :size="14" />
-              <span class="cdn-upload-name">{{ cdnUpload.fileName }}</span>
+              <span class="cdn-upload-name">{{ cdnUpload.fileName }} <span v-if="cdnUpload.attempt && cdnUpload.attempt > 1" style="color: var(--user-accent); font-size: 0.9em;">(重试 {{ cdnUpload.attempt }}/3)</span></span>
               <span class="cdn-upload-percent">{{ cdnUpload.percent }}%</span>
             </div>
             <div class="cdn-upload-bar-track">
@@ -362,8 +362,9 @@
           <div class="model-switcher-wrap">
             <button class="toolbar-item model-indicator" @click="showAgentModeSwitcher = !showAgentModeSwitcher">
               <Shield v-if="agentMode === 'insight'" :size="12" style="color: var(--text-tertiary);" />
-              <Zap v-else :size="12" style="color: var(--accent-primary);" />
-              <span>{{ agentMode === 'insight' ? $t('chat.mode_qa') : $t('chat.mode_act') }}</span>
+              <Zap v-else-if="agentMode === 'yolo'" :size="12" style="color: var(--accent-primary);" />
+              <Target v-else :size="12" style="color: #ff9800;" />
+              <span>{{ agentMode === 'insight' ? $t('chat.mode_qa') : (agentMode === 'yolo' ? $t('chat.mode_act') : $t('chat.mode_goal')) }}</span>
               <ChevronUp :size="10" class="chevron-icon" />
             </button>
             <div v-if="showAgentModeSwitcher" class="model-popup">
@@ -374,6 +375,10 @@
               <button class="model-option" :class="{ active: agentMode === 'yolo' }" @click="agentMode = 'yolo'; showAgentModeSwitcher = false">
                 <Zap :size="14" style="margin-right: 8px;" />
                 <span class="model-option-label">{{ $t('chat.mode_act_desc') }}</span>
+              </button>
+              <button class="model-option" :class="{ active: agentMode === 'goal' }" @click="agentMode = 'goal'; showAgentModeSwitcher = false">
+                <Target :size="14" style="margin-right: 8px;" />
+                <span class="model-option-label">{{ $t('chat.mode_goal_desc') }}</span>
               </button>
             </div>
           </div>
@@ -447,7 +452,7 @@ marked.setOptions({ breaks: true, gfm: true });
 
 <script setup>
 import { ref, watch, onMounted, onUnmounted, nextTick, inject } from 'vue';
-import { Sparkles, FileText, Camera, Calendar, User, ChevronRight, ChevronDown, ChevronUp, X, FileUp, Paperclip, Loader2, Shield, Zap, Lock, Unlock, Download, Smartphone, Monitor, ClipboardCopy, Check } from 'lucide-vue-next';
+import { Sparkles, FileText, Camera, Calendar, User, ChevronRight, ChevronDown, ChevronUp, X, FileUp, Paperclip, Loader2, Shield, Zap, Target, Lock, Unlock, Download, Smartphone, Monitor, ClipboardCopy, Check } from 'lucide-vue-next';
 import ConfirmCard from '../components/ConfirmCard.vue';
 import FileCard from '../components/FileCard.vue';
 import SearchCard from '../components/SearchCard.vue';
@@ -900,7 +905,7 @@ onMounted(async () => {
   if (window.__TAURI_INTERNALS__) {
     const { listen } = await import('@tauri-apps/api/event');
     cdnUnlistens.push(await listen('cdn:upload-start', (e) => {
-      cdnUpload.value = { active: true, fileName: e.payload.file_name, percent: 0, bytesSent: 0, totalBytes: e.payload.total_bytes };
+      cdnUpload.value = { active: true, fileName: e.payload.file_name, percent: 0, bytesSent: 0, totalBytes: e.payload.total_bytes, attempt: 1 };
     }));
     cdnUnlistens.push(await listen('cdn:upload-progress', (e) => {
       cdnUpload.value.percent = e.payload.percent;
@@ -1342,6 +1347,22 @@ defineExpose({
 .stream-thinking-content {
   max-height: 200px;
   scroll-behavior: smooth;
+}
+
+/* 思考状态输入光标动画 */
+.typing-cursor {
+  display: inline-block;
+  width: 6px;
+  height: 14px;
+  background-color: var(--accent-primary);
+  margin-left: 4px;
+  vertical-align: middle;
+  animation: blink-cursor 1s step-end infinite;
+}
+
+@keyframes blink-cursor {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
 }
 
 /* ── 文件卡片 ───────────────────────────────────────── */

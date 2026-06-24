@@ -10,6 +10,7 @@ import { listen } from '@tauri-apps/api/event';
 window.electronAPI = {
 
   // ── 系统 & 配置 (Mapped to Rust) ─────────────────────
+  openExternal: (url) => invoke('plugin:shell|open', { path: url }),
   isSetupComplete: () => invoke('system_is_setup_complete'),
   getConfig: (key) => invoke('config_get', { key }),
   setConfig: (key, value) => invoke('config_set', { key, value: JSON.parse(JSON.stringify(value)) }),
@@ -220,6 +221,7 @@ window.electronAPI = {
   showNotification: async (title, body) => console.log('Mock: notification', title, body), // TODO T-608
   openFile: async (filePath) => invoke('system_open_file', { filePath }),
   showInFolder: async (filePath) => invoke('system_show_in_folder', { filePath }),
+  startWebDrop: async (filePath) => invoke('start_web_drop', { filePath }),
   getVersion: async () => invoke('system_get_version'),
   getLogPath: async () => invoke('system_get_log_path'),
   openLogDir: async () => invoke('system_open_log_dir'),

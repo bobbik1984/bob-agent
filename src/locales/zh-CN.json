@@ -262,7 +262,18 @@
     "conn_outlook_desc": "日历 · 邮件",
     "conn_lark_app_id": "App ID",
     "conn_lark_app_secret": "App Secret",
-    "conn_save_connect": "保存并连接"
+    "conn_save_connect": "保存并连接",
+    "channel_wechat_rebind": "点击重新绑定",
+    "channel_wechat_scan": "点击扫描二维码",
+    "channel_wechat_desc": "微信公众号/个人号",
+    "mcp_preset": "系统预设",
+    "mcp_custom": "自定义配置",
+    "conn_native_integration": "原生接入",
+    "conn_quick_connect": "快速接入",
+    "conn_select_credential": "选取凭证并连接",
+    "mcp_outlook_guide": "配置指南 (请复制链接至浏览器打开)",
+    "mcp_outlook_step1": "1. 注册应用：",
+    "mcp_outlook_step2": "2. 详细教程："
   },
   "chat": {
     "new_conversation": "新对话",
@@ -270,13 +281,12 @@
     "send": "发送",
     "stop": "停止",
     "export": "导出",
-    "thinking": "正在思考...",
+    "thinking": "思考中...",
     "tool_calling": "正在调用工具",
     "drop_hint": "拖放文件到这里",
     "empty_title": "你好，我是 Bob",
     "empty_subtitle": "有什么可以帮你的？",
     "export_success": "对话已导出到：",
-    "thinking": "思考中...",
     "error_title": "请求失败",
     "drop_hint_full": "添加附件 / 关注文件夹",
     "parsing": "解析中...",
@@ -286,8 +296,10 @@
     "mode_qa": "问答",
     "mode_act": "干活",
     "mode_qa_desc": "问答 (只读防误触)",
-    "mode_act_desc": "干活 (允许执行)",
-    "global_access_tooltip": "开启后，允许AI读取或修改工作目录外的系统文件 (仅限当前对话有效)",
+    "mode_act_desc": "执行 (可执行)",
+    "mode_goal": "目标",
+    "mode_goal_desc": "闭环 (直至完成)",
+    "global_access_tooltip": "开启后，允许 AI 读取/修改工作区以外的系统文件 (仅当前对话有效)",
     "global_access": "全局文件",
     "export_tooltip": "导出对话为 Markdown",
     "cost_tooltip": "本次对话累计费用",
@@ -408,6 +420,7 @@
     "title": "日程",
     "loading": "加载中...",
     "this_week": "本周日程",
+    "overdue_events": "过期提醒",
     "todo_list": "待办清单",
     "auto_tasks": "自动任务",
     "empty_cron": "暂无定时任务",
@@ -419,16 +432,10 @@
     "delete": "删除"
   },
   "setup": {
-    "welcome": "欢迎使用 bob-agent",
-    "subtitle": "只需两步即可开始使用",
-    "step1": "第一步：选择 AI 服务商",
-    "next": "下一步 →",
-    "step2": "第二步：填写 API Key",
-    "ollama_desc": "Ollama 本地模型无需 API Key，确保 Ollama 已在本机运行即可。",
-    "get_key_prefix": "请到 ",
-    "get_key_suffix": " 官网获取 API Key，粘贴到下方：",
-    "back": "← 返回",
-    "finish": "完成设置"
+    "theme_dark": "深色",
+    "theme_light": "浅色",
+    "workspace_placeholder": "设置工作文件夹",
+    "provider_placeholder": "大模型"
   },
   "confirm_card": {
     "new_todo": "新增待办",
@@ -467,7 +474,11 @@
     "no_events": "无日程",
     "time": "时间",
     "location": "地点",
-    "notes": "备注"
+    "notes": "备注",
+    "prev_week": "上一周",
+    "this_week": "本周",
+    "next_week": "下一周",
+    "new_event_title": "请输入新日程的标题："
   },
   "providers": {
     "qwen": "阿里云百炼",
@@ -490,11 +501,5 @@
     "merged": "已合并 {count} 组重复话题",
     "continue_chat": "继续聊这个话题",
     "got_it": "知道了"
-  },
-  "setup": {
-    "theme_dark": "深色",
-    "theme_light": "浅色",
-    "workspace_placeholder": "设置工作文件夹",
-    "provider_placeholder": "大模型"
   }
 }

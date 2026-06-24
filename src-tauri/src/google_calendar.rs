@@ -1,4 +1,4 @@
-//! Google Calendar 连接器
+﻿//! Google Calendar 连接器
 //!
 //! OAuth 2.0 Desktop App flow + Calendar API v3
 
@@ -20,12 +20,22 @@ const SCOPES: &str = "https://www.googleapis.com/auth/calendar.readonly \
 
 /// 启动 Google OAuth 流程
 pub async fn start_google_oauth() -> Value {
+    let creds = match super::connector::load_credentials("google") {
+        Some(c) => c,
+        None => return json!({"error": "请先在设置中配置 Google OAuth 凭据 (Client ID/Secret)"})
+    };
+    
+    let client_id = creds.client_id.as_deref().unwrap_or(GOOGLE_CLIENT_ID);
+    if client_id == GOOGLE_CLIENT_ID {
+        return json!({"error": "请先配置真实的 Google OAuth 凭据，当前的默认凭据无效。"});
+    }
+
     let (redirect_uri, code_rx) = super::connector::prepare_oauth_callback();
 
     let auth_url = format!(
         "{}?client_id={}&redirect_uri={}&response_type=code&scope={}&access_type=offline&prompt=consent",
         GOOGLE_AUTH_URL,
-        GOOGLE_CLIENT_ID,
+        client_id,
         urlencoding::encode(&redirect_uri),
         urlencoding::encode(SCOPES)
     );
@@ -49,12 +59,20 @@ pub async fn start_google_oauth() -> Value {
 
 /// 用授权码换取 token
 async fn exchange_code_for_token(code: &str, redirect_uri: &str) -> Result<(), String> {
+    let creds = super::connector::load_credentials("google").ok_or("No credentials found for Google")?;
+    let client_id = creds.client_id.as_deref().unwrap_or(GOOGLE_CLIENT_ID);
+    let client_secret = creds.client_secret.as_deref().unwrap_or(GOOGLE_CLIENT_SECRET);
+
+    if client_id == GOOGLE_CLIENT_ID {
+        return Err("Please configure real Google OAuth credentials first.".to_string());
+    }
+
     let client = reqwest::Client::new();
     let form_body = format!(
         "code={}&client_id={}&client_secret={}&redirect_uri={}&grant_type=authorization_code",
         urlencoding::encode(code),
-        urlencoding::encode(GOOGLE_CLIENT_ID),
-        urlencoding::encode(GOOGLE_CLIENT_SECRET),
+        urlencoding::encode(client_id),
+        urlencoding::encode(client_secret),
         urlencoding::encode(redirect_uri),
     );
     let resp = client
@@ -87,8 +105,8 @@ async fn exchange_code_for_token(code: &str, redirect_uri: &str) -> Result<(), S
         access_token: Some(access_token),
         refresh_token,
         expires_at: Some(now + expires_in),
-        client_id: Some(GOOGLE_CLIENT_ID.to_string()),
-        client_secret: Some(GOOGLE_CLIENT_SECRET.to_string()),
+        client_id: Some(client_id.to_string()),
+        client_secret: Some(client_secret.to_string()),
         connected_at: Some(now),
         ..Default::default()
     };
@@ -308,5 +326,70 @@ async fn tool_create_event(args: &Value) -> Value {
             json!({"error": format!("创建事件失败: {}", &text[..text.len().min(200)])})
         }
         Err(e) => json!({"error": format!("请求失败: {}", e)}),
+    }
+}
+
+
+// ── 后台静默同步 ──
+pub async fn start_background_sync(app_handle: tauri::AppHandle) {
+    use std::time::Duration;
+    use tokio::time;
+    use tauri::Manager;
+
+    let mut interval = time::interval(Duration::from_secs(3600)); // 每小时执行一次
+    
+    loop {
+        interval.tick().await;
+
+        // 检查是否配置了 Google OAuth
+        let creds = match super::connector::load_credentials("google") {
+            Some(c) => c,
+            None => continue,
+        };
+        let client_id = creds.client_id.as_deref().unwrap_or(GOOGLE_CLIENT_ID);
+        if client_id == GOOGLE_CLIENT_ID {
+            continue; // 未配置真实的凭据
+        }
+
+        // 获取过去一周到未来一个月的事件
+        let now = chrono::Utc::now();
+        let one_week_ago = now - chrono::Duration::days(7);
+        let one_month_later = now + chrono::Duration::days(30);
+        let time_min = one_week_ago.format("%Y-%m-%dT%H:%M:%SZ").to_string();
+        let time_max = one_month_later.format("%Y-%m-%dT%H:%M:%SZ").to_string();
+
+        let events_value = tool_list_events(&time_min, &time_max, 100).await;
+        
+        // 将事件写入 SQLite DB
+        if let Some(events_arr) = events_value.as_array() {
+            let db_state = app_handle.state::<crate::db::DbState>();
+            let conn = match db_state.0.lock() {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
+
+            for ev in events_arr {
+                let summary = ev.get("summary").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let start_time = ev.get("start").and_then(|v| v.as_str()).map(|s| s.to_string());
+                let end_time = ev.get("end").and_then(|v| v.as_str()).map(|s| s.to_string());
+                let location = ev.get("location").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let event_id = ev.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+
+                if event_id.is_empty() { continue; }
+                let local_id = format!("gcal-{}", event_id);
+
+                // Upsert
+                let _ = conn.execute(
+                    "INSERT INTO events (id, title, type, status, start_time, end_time, description, created_at)
+                     VALUES (?1, ?2, 'event', 'pending', ?3, ?4, ?5, ?6)
+                     ON CONFLICT(id) DO UPDATE SET
+                        title = excluded.title,
+                        start_time = excluded.start_time,
+                        end_time = excluded.end_time,
+                        description = excluded.description",
+                    rusqlite::params![local_id, summary, start_time, end_time, location, super::now_ms()],
+                );
+            }
+        }
     }
 }

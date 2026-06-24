@@ -145,7 +145,7 @@ onMounted(async () => {
   // 先拍快照：从已有配置（而非 tempConfig）直接拍摄，防止用户在加载期间修改 tempConfig 导致快照被污染
   const snapshotBase = { ...tempConfig.value };
   if (window.electronAPI) {
-    const saved = await window.electronAPI.getConfig('all');
+    const saved = await window.electronAPI.getAllConfig();
     if (saved) {
       // 用已有配置覆盖 snapshotBase 和 tempConfig
       if (saved.language) { snapshotBase.language = saved.language; tempConfig.value.language = saved.language; locale.value = saved.language; }

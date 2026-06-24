@@ -313,6 +313,8 @@ pub struct GetUploadUrlReq {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub filekey: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub fileext: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub media_type: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub to_user_id: Option<String>,

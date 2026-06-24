@@ -1,0 +1,9 @@
+﻿[package]
+name = "bob-relay"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokio = { version = "1.0", features = ["full"] }
+axum = { version = "0.8", features = ["http2", "ws"] }
+futures-util = "0.3"

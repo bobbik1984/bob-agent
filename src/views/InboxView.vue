@@ -70,7 +70,6 @@
               <div class="cron-main">
                 <div class="cron-title-row">
                   <span class="cron-title">{{ job.title || $t('inbox.unnamed_task') }}</span>
-                  <code class="cron-expr">{{ job.cron_expr }}</code>
                 </div>
                 <div class="cron-desc">{{ describeCron(job.cron_expr) }}</div>
                 <div class="cron-prompt">{{ job.prompt_template }}</div>

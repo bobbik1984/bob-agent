@@ -229,6 +229,44 @@ pub async fn connector_start_oauth(name: String) -> Value {
 #[tauri::command]
 pub async fn connector_save_credentials(name: String, credentials: Value) -> Value {
     match name.as_str() {
+        "google" => {
+            let file_path = credentials.get("file_path").and_then(|v| v.as_str()).unwrap_or("");
+            if file_path.is_empty() {
+                return json!({"error": "file_path is required for google credentials"});
+            }
+            
+            let content = match std::fs::read_to_string(file_path) {
+                Ok(c) => c,
+                Err(e) => return json!({"error": format!("Failed to read credentials file: {}", e)})
+            };
+            
+            let parsed: Value = match serde_json::from_str(&content) {
+                Ok(v) => v,
+                Err(e) => return json!({"error": format!("Invalid JSON: {}", e)})
+            };
+            
+            let (client_id, client_secret) = if let Some(installed) = parsed.get("installed") {
+                (installed.get("client_id").and_then(|v| v.as_str()), installed.get("client_secret").and_then(|v| v.as_str()))
+            } else if let Some(web) = parsed.get("web") {
+                (web.get("client_id").and_then(|v| v.as_str()), web.get("client_secret").and_then(|v| v.as_str()))
+            } else {
+                (None, None)
+            };
+            
+            if let (Some(id), Some(secret)) = (client_id, client_secret) {
+                let creds = StoredCredentials {
+                    client_id: Some(id.to_string()),
+                    client_secret: Some(secret.to_string()),
+                    ..Default::default()
+                };
+                match save_credentials("google", &creds) {
+                    Ok(()) => json!({"ok": true}),
+                    Err(e) => json!({"error": e})
+                }
+            } else {
+                json!({"error": "Invalid credentials.json format (missing installed/web client_id or client_secret)"})
+            }
+        }
         "lark" => {
             let app_id = credentials.get("app_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
             let app_secret = credentials.get("app_secret").and_then(|v| v.as_str()).unwrap_or("").to_string();

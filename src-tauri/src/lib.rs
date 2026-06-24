@@ -28,6 +28,9 @@ mod exports;
 mod telegram;
 mod discord;
 mod kg;
+mod file_share;
+mod web_drop;
+mod goal;
 
 use serde_json::{json, Value};
 use std::fs;
@@ -750,8 +753,9 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
-            // 配置
+            // 系统状态
             system_is_setup_complete,
+            web_drop::start_web_drop,
             config_get,
             config_set,
             config_get_all,
@@ -1035,6 +1039,14 @@ pub fn run() {
                 // 延迟 3 秒，让核心服务先就绪
                 tokio::time::sleep(std::time::Duration::from_secs(3)).await;
                 mcp::init_from_saved_config().await;
+            });
+
+            // ── Google Calendar 后台同步 ──
+            let gcal_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                // 延迟 10 秒，等主界面就绪后开始跑
+                tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+                google_calendar::start_background_sync(gcal_handle).await;
             });
 
             // ── 浏览器增强空闲回收 ──
