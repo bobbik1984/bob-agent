@@ -1,28 +1,90 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Bob Agent 官方用户使用手册，包含快速上手、核心功能、Goal Mode、MCP 配置及故障排查自愈指导。" />
+  <title>Bob Agent 用户手册 — 详细操作指南与配置手册</title>
+  <link rel="stylesheet" href="style.css?v=1.0.7" />
+  
+  <!-- Code Highlighting Stylesheet (Dynamically toggles between dark/light) -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/github-dark.min.css" id="hljs-theme" />
+  
+  <!-- 🔑 Theme Initializer Script: Prevent any light/dark flashes on load -->
+  <script>
+    (function() {
+      try {
+        var theme = localStorage.getItem('bob-theme') || 'light';
+        document.documentElement.setAttribute('data-theme', theme);
+      } catch (e) {}
+    })();
+  </script>
+</head>
+<body>
+
+  <!-- Floating Sticky Header -->
+  <header>
+    <div class="nav-container">
+      <a href="index.html" class="logo-wrapper" id="nav-logo">
+        <div class="logo-image-mask"></div>
+        <span class="logo-text">Agent<span class="logo-dot">.</span></span>
+      </a>
+      
+      <nav class="nav-links">
+        <a href="index.html#features" class="nav-link" id="link-features">核心实力</a>
+        <a href="index.html#tech-stack" class="nav-link" id="link-tech">技术架构</a>
+        <a href="index.html#roadmap" class="nav-link" id="link-roadmap">新增功能</a>
+        <a href="#" class="nav-link active" id="link-docs">用户指南</a>
+      </nav>
+      
+      <div class="nav-actions">
+        <a href="https://github.com/bobbik1984/bob-agent" class="github-btn" target="_blank" title="GitHub 仓库">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4"/><path d="M9 18c-4.51 2-5-2-7-2"/></svg>
+        </a>
+        <button class="theme-toggle-btn" id="theme-toggle" title="切换明暗模式">
+          <!-- Sun Icon (for light mode toggle) -->
+          <svg class="sun-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
+          <!-- Moon Icon (for dark mode toggle) -->
+          <svg class="moon-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <div class="main-wrapper">
+    
+    <!-- Documentation Layout Grid -->
+    <div class="docs-layout">
+      
+      <!-- Sticky Sidebar Menu -->
+      <aside class="docs-sidebar">
+        <div class="sidebar-title">用户指南目录</div>
+        <ul class="sidebar-menu" id="sidebar-menu">
+          <!-- Dynamically populated via JavaScript -->
+        </ul>
+      </aside>
+      
+      <!-- Main Content Panel -->
+      <main class="docs-content markdown-body" id="docs-content">
+        <!-- Rendered markdown goes here -->
+      </main>
+      
+    </div>
+    
+  </div>
+
+  <!-- Markdown Parser CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <!-- Code Highlighter CDN -->
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/highlight.min.js"></script>
+
+  <!-- 📖 Embedded USER_GUIDE.md Source: Allows zero-CORS dynamic parsing even in local file:// setups -->
+  <script id="markdown-source" type="text/markdown">
 # Bob Agent 用户手册 / User Guide
 
 > **Version v0.4 (Tauri v2)**
 >
 > 你的桌面幽灵副手，隐于系统托盘，使命必达。
-
----
-
-## 目录 / Table of Contents
-
-1. [快速上手 / Getting Started](#1-快速上手--getting-started)
-2. [核心对话 / Smart Chat](#2-核心对话--smart-chat)
-3. [目标模式 / Goal Mode](#3-目标模式--goal-mode)
-4. [模型管理 / Model Hub](#4-模型管理--model-hub)
-5. [MCP 服务器 / MCP Servers](#5-mcp-服务器--mcp-servers)
-6. [知识库与知识图谱 / Knowledge Base & Graph](#6-知识库与知识图谱--knowledge-base--graph)
-7. [日程与定时任务 / Calendar & Scheduling](#7-日程与定时任务--calendar--scheduling)
-8. [微信互联 / WeChat Integration](#8-微信互联--wechat-integration)
-9. [Web Drop / 文件极传](#9-web-drop--文件极传)
-10. [连接器 / Connectors](#10-连接器--connectors)
-11. [记忆与自进化 / Memory & Evolution](#11-记忆与自进化--memory--evolution)
-12. [设置详解 / Settings Reference](#12-设置详解--settings-reference)
-13. [快捷键 / Keyboard Shortcuts](#13-快捷键--keyboard-shortcuts)
-14. [故障排查 / Troubleshooting](#14-故障排查--troubleshooting)
-15. [数据与隐私 / Data & Privacy](#15-数据与隐私--data--privacy)
 
 ---
 
@@ -492,3 +554,111 @@ Bob 拥有一个精心设计的三层记忆系统，让他真正"记住"你：
 ---
 
 > **Bob Agent — 隐于桌面，使命必达。**
+  </script>
+
+  <!-- Main JavaScript Controller -->
+  <script>
+    // Theme Switch Logic
+    const themeToggleBtn = document.getElementById('theme-toggle');
+    themeToggleBtn.addEventListener('click', () => {
+      let currentTheme = document.documentElement.getAttribute('data-theme');
+      let targetTheme = currentTheme === 'dark' ? 'light' : 'dark';
+      
+      document.documentElement.setAttribute('data-theme', targetTheme);
+      localStorage.setItem('bob-theme', targetTheme);
+      updateHljsTheme(targetTheme);
+    });
+
+    // Update HighlightJS style block depending on active theme
+    function updateHljsTheme(theme) {
+      const hljsLink = document.getElementById('hljs-theme');
+      if (theme === 'dark') {
+        hljsLink.href = 'https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/github-dark.min.css';
+      } else {
+        hljsLink.href = 'https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/github.min.css';
+      }
+    }
+
+    // Parse and Render Markdown Content on Load
+    window.addEventListener('DOMContentLoaded', () => {
+      const markdown = document.getElementById('markdown-source').textContent;
+      const contentPanel = document.getElementById('docs-content');
+      
+      // Parse markdown into HTML using marked.js
+      contentPanel.innerHTML = marked.parse(markdown);
+      
+      // Sync HighlightJS theme
+      const currentTheme = document.documentElement.getAttribute('data-theme') || 'dark';
+      updateHljsTheme(currentTheme);
+      
+      // Highlight code blocks
+      hljs.highlightAll();
+      
+      // Generate Sticky Sidebar Menu dynamically based on H2 tags
+      const headings = contentPanel.querySelectorAll('h2');
+      const menu = document.getElementById('sidebar-menu');
+      
+      headings.forEach((heading, index) => {
+        const text = heading.textContent;
+        // Strip numbers from label for a cleaner visual representation if preferred,
+        // but keeping it matches user guide structure.
+        const id = heading.id || `section-${index + 1}`;
+        heading.id = id;
+        
+        const li = document.createElement('li');
+        li.className = 'sidebar-item';
+        li.id = `sidebar-item-${id}`;
+        
+        const a = document.createElement('a');
+        a.href = `#${id}`;
+        a.textContent = text;
+        
+        // Prevent default jump and do smooth scroll manually
+        a.addEventListener('click', (e) => {
+          e.preventDefault();
+          const target = document.getElementById(id);
+          if (target) {
+            window.scrollTo({
+              top: target.offsetTop - 120, // offset header height
+              behavior: 'smooth'
+            });
+            // Update URL hash
+            history.pushState(null, null, `#${id}`);
+          }
+        });
+        
+        li.appendChild(a);
+        menu.appendChild(li);
+      });
+      
+      // Scroll Spy Logic: Highlighting active sidebar menu items on scroll
+      window.addEventListener('scroll', () => {
+        let currentSectionId = '';
+        headings.forEach(heading => {
+          const rect = heading.getBoundingClientRect();
+          // Offset near the sticky header (150px)
+          if (rect.top <= 150) {
+            currentSectionId = heading.id;
+          }
+        });
+        
+        // Clear all active classes
+        document.querySelectorAll('.sidebar-item').forEach(item => {
+          item.classList.remove('active');
+        });
+        
+        // Apply active class to current visible section item
+        if (currentSectionId) {
+          const activeItem = document.getElementById(`sidebar-item-${currentSectionId}`);
+          if (activeItem) {
+            activeItem.classList.add('active');
+          }
+        }
+      });
+      
+      // Initial trigger for Scroll Spy
+      window.dispatchEvent(new Event('scroll'));
+    });
+  </script>
+</body>
+</html>

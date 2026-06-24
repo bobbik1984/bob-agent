@@ -1,3 +1,4 @@
+// Force rebuild to embed latest dist assets
 mod llm;
 mod filesystem;
 mod plugins;

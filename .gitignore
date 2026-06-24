@@ -12,7 +12,32 @@ scratch/
 resources/llm-engine/
 *.gguf
 *.dll
+*.zip
 
 dist-release/
 
-keyring_test/target/
+# Temporary test and utility directories
+keyring_test/
+references/
+temp_zip_extract/
+
+# AI Agent workspace guides and guidelines
+AGENTS.md
+
+# Security/Jules audit and review files
+*AUDIT_REPORT*.md
+invoke_jules_*.py
+check_jules_*.py
+
+# Development progress logs
+progress.yaml
+
+# Temporary python & javascript debugging and scratch files
+check_*.py
+fix_*.py
+fix.py
+read_*.py
+test_*.js
+*.tmp
+db_output.txt
+implementation_plan.md

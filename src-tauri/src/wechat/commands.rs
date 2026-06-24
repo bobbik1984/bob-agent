@@ -382,7 +382,7 @@ pub async fn process_message(msg: WeixinMessage, state: Arc<WechatState>) -> Res
     Ok(())
 }
 
-async fn send_reply(to: &str, text: &str, state: &Arc<WechatState>, context_token: Option<String>) -> Result<(), String> {
+pub async fn send_reply(to: &str, text: &str, state: &Arc<WechatState>, context_token: Option<String>) -> Result<(), String> {
     let account_id = state.account_id.read().unwrap().clone();
     let account = match resolve_wechat_account(account_id.as_deref()) {
         Ok(acc) if acc.configured => acc,

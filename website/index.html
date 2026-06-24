@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Bob Agent 是一款隐私优先、极致原生、可自进化的 AI 桌面私人秘书与本地知识底座，基于 Tauri V2 + Rust + Vue 3 构建。" />
+  <title>Bob Agent — 隐私优先、极致原生、自进化的 AI 桌面私人秘书</title>
+  <link rel="stylesheet" href="style.css?v=1.0.7" />
+  
+  <!-- 🔑 Theme Initializer Script: Prevent any light/dark flashes on load -->
+  <script>
+    (function() {
+      try {
+        var theme = localStorage.getItem('bob-theme') || 'light';
+        document.documentElement.setAttribute('data-theme', theme);
+      } catch (e) {}
+    })();
+  </script>
+</head>
+<body>
+
+  <!-- Floating Sticky Header -->
+  <header>
+    <div class="nav-container">
+      <a href="#" class="logo-wrapper" id="nav-logo">
+        <div class="logo-image-mask"></div>
+        <span class="logo-text">Agent<span class="logo-dot">.</span></span>
+      </a>
+      
+      <nav class="nav-links">
+        <a href="#features" class="nav-link" id="link-features">核心实力</a>
+        <a href="#tech-stack" class="nav-link" id="link-tech">技术架构</a>
+        <a href="#roadmap" class="nav-link" id="link-roadmap">新增功能</a>
+        <a href="guide.html" class="nav-link" id="link-docs">用户指南</a>
+      </nav>
+      
+      <div class="nav-actions">
+        <a href="https://github.com/bobbik1984/bob-agent" class="github-btn" target="_blank" title="GitHub 仓库">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4"/><path d="M9 18c-4.51 2-5-2-7-2"/></svg>
+        </a>
+        <button class="theme-toggle-btn" id="theme-toggle" title="切换明暗模式">
+          <!-- Sun Icon (for light mode toggle) -->
+          <svg class="sun-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
+          <!-- Moon Icon (for dark mode toggle) -->
+          <svg class="moon-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <div class="main-wrapper">
+    
+    <!-- Hero Section -->
+    <section class="hero-section" id="hero">
+      <div class="bg-logo" id="hero-bg-logo"></div>
+      <h1 class="hero-main-text">
+        你的桌面上，<br>还缺一个真正懂你的本地幽灵副手。
+      </h1>
+      <p class="hero-description">
+        认识 <strong>Bob Agent</strong> — 潜伏在 Windows 系统托盘中的原生 AI 私人秘书。基于 Tauri V2 + Rust 构建，集成了多模型智能协作、本地 SQLite 知识图谱、安全微信穿透及端到端加密极传。
+      </p>
+      <div class="hero-ctas">
+        <a href="downloads/bob-installer.exe" class="btn-primary btn-large" id="btn-download-hero">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+          下载安装版 (Installer)
+        </a>
+        <a href="downloads/bob-agent-portable.zip" class="btn-secondary btn-large" id="btn-download-portable-hero">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8M16 6l-4-4-4 4M12 2v13"/></svg>
+          下载绿色版 (Portable ZIP)
+        </a>
+        <a href="#features" class="btn-text-link" id="btn-explore">
+          探索硬实力
+          <svg class="arrow-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+        </a>
+      </div>
+    </section>
+
+    <!-- 10 Core Features Section -->
+    <section class="section" id="features">
+      <div class="section-header">
+        <span class="section-label">Features</span>
+        <h2 class="section-title">10 大核心硬实力</h2>
+        <p class="section-desc">抛弃快餐式的套壳网页与重型框架，我们只用极简、实用的日常功能雕琢真正融入你日常办公的生产力底座。</p>
+      </div>
+
+      <div class="features-grid">
+        <!-- Feature 1: Interaction -->
+        <div class="feature-card" id="feat-interaction">
+          <div class="feature-icon-wrapper">
+            <i data-lucide="sparkles"></i>
+          </div>
+          <h3 class="feature-title">极简交互与随时唤醒</h3>
+          <p class="feature-body">
+            灵感闪存气泡隐藏于屏幕边缘，支持使用快捷键 <code>Ctrl+Shift+B</code> 随时在脑海中闪现想法时快速记录。支持直接拖拽任意文件或截图给 AI，让它瞬间理解你当前的工作。
+          </p>
+          <div class="feature-tags">
+            <span class="feature-tag">极速唤醒</span>
+            <span class="feature-tag">文件拖拽</span>
+          </div>
+        </div>
+
+        <!-- Feature 2: Model Hub -->
+        <div class="feature-card" id="feat-modelhub">
+          <div class="feature-icon-wrapper">
+            <i data-lucide="cpu"></i>
+          </div>
+          <h3 class="feature-title">智能分工与降本增效</h3>
+          <p class="feature-body">
+            自动管理并合理使用不同的大模型。核心“专家大模型”负责高难度的决策与写作，“助手小模型”在后台默默处理日常会话整理、生成晨报等繁杂琐事，为你最大化节省费用。
+          </p>
+          <div class="feature-tags">
+            <span class="feature-tag">智能分工</span>
+            <span class="feature-tag">省时降本</span>
+          </div>
+        </div>
+
+        <!-- Feature 3: MCP Client -->
+        <div class="feature-card" id="feat-mcp">
+          <div class="feature-icon-wrapper">
+            <i data-lucide="plug"></i>
+          </div>
+          <h3 class="feature-title">可扩展的外接工具库</h3>
+          <p class="feature-body">
+            让 AI 能够像人类一样操作外部工具。支持连接第三方应用、搜索实时网页信息、或者运行办公脚本，帮助你自动化完成跨软件的日常繁琐操作。
+          </p>
+          <div class="feature-tags">
+            <span class="feature-tag">外接工具</span>
+            <span class="feature-tag">自动执行</span>
+          </div>
+        </div>
+
+        <!-- Feature 4: Memory -->
+        <div class="feature-card" id="feat-memory">
+          <div class="feature-icon-wrapper">
+            <i data-lucide="brain"></i>
+          </div>
+          <h3 class="feature-title">记忆进化与自动整理</h3>
+          <p class="feature-body">
+            拥有聪明的记忆管理体系。小助理模型会在后台默默分析并提取你们聊天中的事实，自动帮你整理并归档到长期知识库中，让软件随着你的使用越用越聪明、越来越懂你。
+          </p>
+          <div class="feature-tags">
+            <span class="feature-tag">长期记忆</span>
+            <span class="feature-tag">自动整理</span>
+          </div>
+        </div>
+
+        <!-- Feature 5: Knowledge Graph -->
+        <div class="feature-card" id="feat-graph">
+          <div class="feature-icon-wrapper">
+            <i data-lucide="git-graph"></i>
+          </div>
+          <h3 class="feature-title">可视化本地知识脑图</h3>
+          <p class="feature-body">
+            把你的想法、日常笔记、文件关系编织成一张精美的知识连线图。支持在画布上拖拽节点、修改关系，通过可视化的连线帮你理清复杂项目的思路，实现“顺藤摸瓜”的网状联想。
+          </p>
+          <div class="feature-tags">
+            <span class="feature-tag">脑图看板</span>
+            <span class="feature-tag">联想探索</span>
+          </div>
+        </div>
+
+        <!-- Feature 6: Goal Mode -->
+        <div class="feature-card" id="feat-goal">
+          <div class="feature-icon-wrapper">
+            <i data-lucide="target"></i>
+          </div>
+          <h3 class="feature-title">目标闭环执行（Goal Mode）</h3>
+          <p class="feature-body">
+            死磕任务的闭环解决。你只需给出一个模糊的目标（如“收集竞争对手信息”），AI 就会自主拆解任务、自行调用工具搜索与分析、检查结果，如果发现不符合标准会自动重试，直到交出满意答卷。
+          </p>
+          <div class="feature-tags">
+            <span class="feature-tag">任务拆解</span>
+            <span class="feature-tag">自主校对</span>
+          </div>
+        </div>
+
+        <!-- Feature 7: WeChat Gateway -->
+        <div class="feature-card" id="feat-wechat">
+          <div class="feature-icon-wrapper">
+            <i data-lucide="message-square"></i>
+          </div>
+          <h3 class="feature-title">微信助手远程操作</h3>
+          <p class="feature-body">
+            扫码配对即可让微信成为控制电脑 AI 的桥梁。在手机上发送指令即可随时查询日程、传输办公文档给电脑，或者把文章链接发给微信，由电脑端的 AI 帮你快速阅读和总结。
+          </p>
+          <div class="feature-tags">
+            <span class="feature-tag">手机端联动</span>
+            <span class="feature-tag">微信远程控制</span>
+          </div>
+        </div>
+
+        <!-- Feature 8: Web Drop -->
+        <div class="feature-card" id="feat-webdrop">
+          <div class="feature-icon-wrapper">
+            <i data-lucide="share-2"></i>
+          </div>
+          <h3 class="feature-title">安全免登跨端秒传</h3>
+          <p class="feature-body">
+            电脑、手机、平板之间互传大文件的绝佳选择。无需登录或下载软件，在浏览器中扫码即可在多设备间极速点对点传输大文件，数据在本地设备间流转而不经过云端，极致隐私安全。
+          </p>
+          <div class="feature-tags">
+            <span class="feature-tag">免登秒传</span>
+            <span class="feature-tag">隐私加密</span>
+          </div>
+        </div>
+
+        <!-- Feature 9: Doctor -->
+        <div class="feature-card" id="feat-doctor">
+          <div class="feature-icon-wrapper">
+            <i data-lucide="shield-alert"></i>
+          </div>
+          <h3 class="feature-title">自动体检与故障自愈</h3>
+          <p class="feature-body">
+            系统自带全方位健康状态体检。如果软件出现网络连接异常、API 密钥失效或数据冲突，自检模块会在不影响你个人重要数据的前提下，自动尝试修复并重置故障状态，免去维护的烦恼。
+          </p>
+          <div class="feature-tags">
+            <span class="feature-tag">一键体检</span>
+            <span class="feature-tag">故障自愈</span>
+          </div>
+        </div>
+
+        <!-- Feature 10: Calendar -->
+        <div class="feature-card" id="feat-calendar">
+          <div class="feature-icon-wrapper">
+            <i data-lucide="calendar"></i>
+          </div>
+          <h3 class="feature-title">AI 日程与微信强提醒</h3>
+          <p class="feature-body">
+            内置本地个人日程看板，支持用大白话安排时间（例如“提醒我明天下午3点和张经理开会”）。当日程临近或有新任务安排时，AI 会在微信上给你推送强提醒，实现日程的完美同步。
+          </p>
+          <div class="feature-tags">
+            <span class="feature-tag">口语记日程</span>
+            <span class="feature-tag">微信强提醒</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Tech Stack Section -->
+    <section class="section" id="tech-stack">
+      <div class="tech-section">
+        <div class="tech-left">
+          <span class="section-label">Architecture</span>
+          <h2 class="section-title">极致高效的<br>运行底座</h2>
+          <p class="section-desc">抛弃臃肿的传统后台与网络依赖，我们在本地搭建了一套极致快速、低功耗且完全加密的数据运行底座，只为保障你日常办公的流畅与隐私安全。</p>
+        </div>
+        
+        <div class="tech-right">
+          <div class="tech-grid">
+            <div class="tech-item" id="tech-tauri">
+              <h3 class="tech-name">执行高效，体积轻便</h3>
+              <p class="tech-desc">使用系统级原生底层重构，彻底舍弃传统软件的臃肿与内存负担，仅占用约 50MB 内存。运行时极速响应，操作丝滑不卡顿。</p>
+            </div>
+            
+            <div class="tech-item" id="tech-vue">
+              <h3 class="tech-name">界面简洁，视觉清晰</h3>
+              <p class="tech-desc">前台界面设计遵循克制、高级的极简主义美学。数据响应灵敏，排版清晰舒适，支持一键切换明暗主题，长时间使用不易疲劳。</p>
+            </div>
+            
+            <div class="tech-item" id="tech-sqlite">
+              <h3 class="tech-name">本地存储，高效检索</h3>
+              <p class="tech-desc">不依赖任何云端数据库，你的所有笔记、日程与思维导图关系均在本地加密存储。支持毫秒级全文检索，帮你顺藤摸瓜瞬间找回所有记忆。</p>
+            </div>
+            
+            <div class="tech-item" id="tech-webrtc">
+              <h3 class="tech-name">安全可靠，加密传输</h3>
+              <p class="tech-desc">在手机、电脑与平板等多设备间极速互传大文件时，建立点对点直连通道。数据完全在本地设备间流转，不经过云端服务器，极致安全。</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Timeline / Roadmap Section -->
+    <section class="section" id="roadmap">
+      <div class="section-header" id="roadmap-header">
+        <span class="section-label">Milestones</span>
+        <h2 class="section-title" style="display: inline-flex; align-items: center; gap: 12px;">
+          新增功能
+          <svg class="section-toggle-arrow" width="20" height="20" style="width: 20px; height: 20px;" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+        </h2>
+        <p class="section-desc">我们正在按计划一步一步夯实本地桌面的 AI 体验，构建更加互联的个人助理节点。</p>
+      </div>
+
+      <div class="roadmap-container" id="roadmap-container" style="max-height: 0; overflow: hidden; opacity: 0;">
+        <div class="roadmap-line"></div>
+        
+        <!-- Milestone 14 -->
+        <div class="roadmap-item completed">
+          <div class="roadmap-dot"></div>
+          <div class="roadmap-meta">
+            <span class="roadmap-version">Milestone 14 — 认知图谱与记忆机制</span>
+            <span class="roadmap-status stable">已交付 (Stable)</span>
+          </div>
+          <div class="roadmap-content">
+            <p>打通了 SQLite 原生图谱画布，Vis.js 前端渲染上线；完成了 Soul-Session-Wiki 三层记忆漏斗及 Clerk 模型后台静默 Dream 自谐调机制。</p>
+            <ul>
+              <li>SQLite 存储引擎与别名合并功能 (`kg_merge_nodes`)</li>
+              <li>梦境引擎 24 小时 facts 清理与 `SOUL.md` 重写更新</li>
+              <li>脑图搜索组件与 BFS 跳跃关系游历组件</li>
+            </ul>
+          </div>
+        </div>
+
+        <!-- Milestone 15 -->
+        <div class="roadmap-item active">
+          <div class="roadmap-dot"></div>
+          <div class="roadmap-meta">
+            <span class="roadmap-version">Milestone 15 — 专业文档输出引擎</span>
+            <span class="roadmap-status current">当前迭代 (In Progress)</span>
+          </div>
+          <div class="roadmap-content">
+            <p>专注于在本地生成专业级别、自带优美排版的报表与报告文件，实现与企业级办公流的无缝连接。</p>
+            <ul>
+              <li><strong>Tier 1 (PDF)</strong>: 支持基于静态模板渲染富媒体 PDF 报告。</li>
+              <li><strong>Tier 2 (XLSX)</strong>: 本地生成 Excel 数据报表与透视表。</li>
+              <li><strong>Tier 3 (DOCX)</strong>: 自动把 Wiki 整理为带标准目录大纲的 Word 报告。</li>
+              <li><strong>Tier 4 (PPTX)</strong>: 基于大纲 of PPT 幻灯片自动渲染与样式配置。</li>
+            </ul>
+          </div>
+        </div>
+
+        <!-- Milestone 16 -->
+        <div class="roadmap-item">
+          <div class="roadmap-dot"></div>
+          <div class="roadmap-meta">
+            <span class="roadmap-version">Milestone 16 — 跨平台 Bot 联动矩阵</span>
+            <span class="roadmap-status backlog">待办 (Backlog)</span>
+          </div>
+          <div class="roadmap-content">
+            <p>继续向外扩展 Bob 的接入渠道，让处于任意终端的你均能安全、即时地远程唤醒位于本地 of AI 大脑。</p>
+            <ul>
+              <li>接入 Telegram Bot 服务与远程命令通道</li>
+              <li>接入 Discord Bot 集成与群组协同调用</li>
+              <li>优化跨地域 WebRTC 穿透成功率与信令转发延迟</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Pitch Banner (CTA) -->
+    <section class="pitch-banner" id="banner-cta">
+      <h2 class="pitch-title">"你的办公桌上，还缺一个真正懂你的本地幽灵副手。"</h2>
+      <p class="pitch-text">
+        轻轻一按 <code>Ctrl+Shift+B</code>，灵感秒速闪存；拖入繁杂的文件，在本地织出脉络清晰的思维脑图与知识关联；自主拆解复杂目标并死磕任务闭环；用微信即可查日程、传文档、总结链接。数据永不出本地，极致安全。
+      </p>
+      <div class="pitch-ctas">
+        <a href="downloads/bob-installer.exe" class="btn-primary btn-large" id="btn-download-bottom">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+          下载安装版 (v0.4.0)
+        </a>
+        <a href="downloads/bob-agent-portable.zip" class="btn-secondary btn-large" id="btn-download-portable-bottom">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8M16 6l-4-4-4 4M12 2v13"/></svg>
+          下载绿色版
+        </a>
+        <a href="guide.html" class="btn-secondary btn-large" id="btn-guide-bottom">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2zM22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+          阅读用户手册
+        </a>
+      </div>
+    </section>
+
+    <!-- Footer -->
+    <footer>
+      <div class="footer-left">
+        <p>&copy; 2026 Bob Agent</p>
+      </div>
+      <div class="footer-links">
+        <a href="https://github.com/bobbik1984/bob-agent/blob/main/README.md" class="footer-link" target="_blank">README</a>
+        <a href="guide.html" class="footer-link">User Guide</a>
+      </div>
+    </footer>
+
+  </div>
+
+  <!-- Lucide Icons CDN -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <script>
+    // Initialize Lucide Icons
+    lucide.createIcons();
+
+    // Theme Switch Logic
+    const themeToggleBtn = document.getElementById('theme-toggle');
+    if (themeToggleBtn) {
+      themeToggleBtn.addEventListener('click', () => {
+        let currentTheme = document.documentElement.getAttribute('data-theme');
+        let targetTheme = currentTheme === 'dark' ? 'light' : 'dark';
+        
+        document.documentElement.setAttribute('data-theme', targetTheme);
+        localStorage.setItem('bob-theme', targetTheme);
+      });
+    }
+
+    // Scroll Docking Animation & Parallax background logo
+    const heroSection = document.getElementById('hero');
+    const bgLogo = document.getElementById('hero-bg-logo');
+    const navLogo = document.querySelector('.logo-image-mask');
+
+    if (heroSection && bgLogo && navLogo) {
+      // 1. Initialize states - nav logo is constant
+      navLogo.style.opacity = '1';
+      navLogo.style.pointerEvents = 'auto';
+
+      // 2. Cache coordinates and dimensions to avoid layout thrashing on scroll
+      let navCenterX = 0;
+      let navCenterY = 0;
+      let bgCenterX0 = 0;
+      let bgCenterY0 = 0;
+      let bgWidth = 0;
+      let bgHeight = 0;
+
+      function initCoordinates() {
+        // Temporarily reset styles to initial layout state to get clean baseline measurements
+        const prevTransform = bgLogo.style.transform;
+        const prevTransition = bgLogo.style.transition;
+        const prevOpacity = bgLogo.style.opacity;
+
+        bgLogo.style.transform = 'translate(-50%, -50%) scale(1)';
+        bgLogo.style.transition = 'none';
+        bgLogo.style.opacity = '1';
+
+        // Measure nav logo center
+        navRect = navLogo.getBoundingClientRect();
+        navCenterX = navRect.left + navRect.width / 2;
+        navCenterY = navRect.top + navRect.height / 2;
+
+        // Measure background logo center and dimensions relative to scroll
+        const heroRect = heroSection.getBoundingClientRect();
+        const scrollY = window.scrollY;
+        
+        bgCenterX0 = heroRect.left + heroRect.width / 2;
+        bgCenterY0 = heroRect.top + heroRect.height / 2 + scrollY;
+
+        const bgRect = bgLogo.getBoundingClientRect();
+        bgWidth = bgRect.width;
+        bgHeight = bgRect.height;
+
+        // Restore current state
+        bgLogo.style.transform = prevTransform;
+        bgLogo.style.transition = prevTransition;
+        bgLogo.style.opacity = prevOpacity;
+      }
+
+      // Initialize coordinates
+      initCoordinates();
+      window.addEventListener('load', initCoordinates);
+
+      // Recalculate on window resize
+      window.addEventListener('resize', () => {
+        initCoordinates();
+        handleScroll();
+      });
+
+      // 3. Scroll Handler
+      function handleScroll() {
+        const scrollY = window.scrollY;
+        // Dynamically compute threshold so animation completes when logo naturally reaches header level
+        const threshold = Math.max(bgCenterY0 - navCenterY, 350);
+        const t = Math.min(scrollY / threshold, 1);
+        
+        // Linear curve for gradual and natural speed
+        const easeT = t;
+
+        if (t === 0) {
+          // At scroll top: let mousemove handle alignment, reset state
+          bgLogo.style.opacity = '1';
+          
+          if (!heroSection.matches(':hover')) {
+            bgLogo.style.transform = 'translate(-50%, -50%) scale(1)';
+          }
+          return;
+        }
+
+        // Viewport position of background logo at scrollY if not translated
+        const bgCurrentX = bgCenterX0;
+        const bgCurrentY = bgCenterY0 - scrollY;
+
+        // Target translation to align centers
+        const targetOffsetX = navCenterX - bgCurrentX;
+        const targetOffsetY = navCenterY - bgCurrentY;
+
+        const tx = targetOffsetX * easeT;
+        const ty = targetOffsetY * easeT;
+
+        // Target scale factor
+        const targetScale = navRect.width / bgWidth;
+        const scale = 1 + (targetScale - 1) * easeT;
+
+        // Apply scale & translate
+        bgLogo.style.transform = `translate(calc(-50% + ${tx}px), calc(-50% + ${ty}px)) scale(${scale})`;
+
+        // Fade out background logo
+        bgLogo.style.opacity = (1 - easeT).toString();
+      }
+
+      window.addEventListener('scroll', handleScroll, { passive: true });
+
+      // Run initial scroll evaluation
+      handleScroll();
+
+      // 4. Parallax background logo on mouse movement (only if scrollY <= 5)
+      heroSection.addEventListener('mousemove', (e) => {
+        if (window.scrollY > 5) return;
+        
+        const rect = heroSection.getBoundingClientRect();
+        const x = e.clientX - rect.left - (rect.width / 2);
+        const y = e.clientY - rect.top - (rect.height / 2);
+        
+        const dx = x * 0.03;
+        const dy = y * 0.03;
+        
+        bgLogo.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+      });
+      
+      heroSection.addEventListener('mouseleave', () => {
+        if (window.scrollY > 5) return;
+        
+        bgLogo.style.transition = 'transform 0.5s cubic-bezier(0.25, 0.1, 0.25, 1)';
+        bgLogo.style.transform = 'translate(-50%, -50%)';
+        setTimeout(() => {
+          bgLogo.style.transition = '';
+        }, 500);
+      });
+    }
+
+    // Collapsible Roadmap Section
+    const roadmapHeader = document.getElementById('roadmap-header');
+    const roadmapContainer = document.getElementById('roadmap-container');
+    if (roadmapHeader && roadmapContainer) {
+      roadmapHeader.addEventListener('click', () => {
+        roadmapHeader.classList.toggle('active');
+        roadmapContainer.classList.toggle('expanded');
+      });
+    }
+  </script>
+</body>
+</html>

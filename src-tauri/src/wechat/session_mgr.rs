@@ -129,4 +129,9 @@ impl SessionManager {
         let sessions = self.sessions.lock().unwrap();
         sessions.get(wxid).and_then(|s| s.conv_id.clone())
     }
+
+    pub fn get_all_wxids(&self) -> Vec<String> {
+        let sessions = self.sessions.lock().unwrap();
+        sessions.keys().cloned().collect()
+    }
 }

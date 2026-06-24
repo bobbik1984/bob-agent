@@ -2,7 +2,7 @@ use rusqlite::params;
 use serde_json::{json, Value};
 use std::fs;
 use std::io::Write;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_notification::NotificationExt;
 
 /// T-1211: Cron 调度引擎
@@ -376,6 +376,21 @@ fn check_upcoming_todos(app: &AppHandle, db_path: &std::path::Path) {
             .title("Bob 提醒：今日待办")
             .body(title)
             .show();
+
+        // 绑定并发送到已配对的微信端进行主动提醒
+        if let Some(wechat_state) = app.try_state::<std::sync::Arc<crate::wechat::WechatState>>() {
+            if *wechat_state.connected.read().unwrap() {
+                let wxids = wechat_state.session_mgr.get_all_wxids();
+                for wxid in wxids {
+                    let msg_text = format!("【📅 Bob 日程提醒】今日待办：{}", title);
+                    let state_clone = wechat_state.inner().clone();
+                    let wxid_clone = wxid.clone();
+                    tauri::async_runtime::spawn(async move {
+                        let _ = crate::wechat::commands::send_reply(&wxid_clone, &msg_text, &state_clone, None).await;
+                    });
+                }
+            }
+        }
 
         // 更新 last_notified 时间戳
         let _ = conn.execute(
