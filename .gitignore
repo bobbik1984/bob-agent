@@ -41,3 +41,12 @@ test_*.js
 *.tmp
 db_output.txt
 implementation_plan.md
+# Removed from tracking to shrink repo size
+/docs/
+/website/
+/references/
+/resources/
+*.bin
+*.b64
+tauri.conf.json.bak
+test_group.rs
