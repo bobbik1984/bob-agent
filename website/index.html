@@ -463,150 +463,124 @@
                   </tr>
                 </thead>
                 <tbody>
-                  <tr>
-                    <td class="feature-name">客户端体积</td>
-                    <td class="highlight">约15MB</td>
-                    <td>约200MB</td>
-                    <td>约100MB+</td>
-                    <td>依赖 Node 环境</td>
-                    <td>较重型工作台</td>
-                    <td>IDE 插件区</td>
-                    <td>服务端运行</td>
-                    <td>数GB 权重</td>
-                    <td>系统级整合(重型)</td>
-                    <td>无本地客户端(云端)</td>
-                  </tr>
-                  <tr>
-                    <td class="feature-name">外部环境依赖</td>
-                    <td class="highlight">完全无依赖</td>
-                    <td>中依赖(需部署 Ollama)</td>
-                    <td>高依赖(需 Node.js 环境)</td>
-                    <td>高依赖(需 Node/Python)</td>
-                    <td>无依赖</td>
-                    <td>中依赖(需 IDE 环境)</td>
-                    <td>高依赖(需 Node.js 环境)</td>
-                    <td>极高依赖 (需配置 CUDA)</td>
-                    <td>强绑定腾讯生态</td>
-                    <td>全云端隔离沙盒</td>
-                  </tr>
-                  <tr>
-                    <td class="feature-name">目标受众</td>
-                    <td class="highlight">泛白领 / 非技术群体</td>
-                    <td>AI 极客</td>
-                    <td>高阶程序员</td>
-                    <td>终端开发者</td>
-                    <td>企业员工</td>
-                    <td>IDE 程序员</td>
-                    <td>Agent 开发者</td>
-                    <td>大模型研究者</td>
-                    <td>普通电脑用户</td>
-                    <td>复杂任务分包者</td>
-                  </tr>
-                  <tr>
-                    <td class="feature-name">上手门槛</td>
-                    <td class="highlight">极低 (零配置开箱即用)</td>
-                    <td>中等 (需 Ollama 基础)</td>
-                    <td>极高 (纯命令行)</td>
-                    <td>极高 (命令行)</td>
-                    <td>低 (企业统一下发)</td>
-                    <td>高 (需 IDE 熟练度)</td>
-                    <td>极高 (服务端运维)</td>
-                    <td>极高 (模型部署)</td>
-                    <td>低 (预装开箱即用)</td>
-                    <td>低 (简单对话，但需抢号)</td>
-                  </tr>
-                  <tr>
-                    <td class="feature-name">离线断网可用性</td>
-                    <td class="highlight">完全支持 (本地大模型)</td>
-                    <td>完全支持</td>
-                    <td>不支持 (强依赖云端)</td>
-                    <td>不支持</td>
-                    <td>不支持</td>
-                    <td>不支持</td>
-                    <td>支持</td>
-                    <td>完全支持</td>
-                    <td>仅特定隐私模式</td>
-                    <td>不支持 (纯云端生态)</td>
-                  </tr>
-                  <tr>
-                    <td class="feature-name">首次运行大文件下载</td>
-                    <td class="highlight">无强制下载</td>
-                    <td>极重 (提示下载 2GB+ 本地模型)</td>
-                    <td>高(需下载 Node.js 环境包)</td>
-                    <td>高(需下载依赖包)</td>
-                    <td>无</td>
-                    <td>无</td>
-                    <td>无</td>
-                    <td>极重 (需下载数GB 权重)</td>
-                    <td>重 (系统级更新与模型)</td>
-                    <td>无 (网页端)</td>
-                  </tr>
-                  <tr>
-                    <td class="feature-name">计费与额度模式</td>
-                    <td class="highlight">BYOK 自备 Key / 本地免费</td>
-                    <td>自备 Key / 本地免费</td>
-                    <td>按Token 计费</td>
-                    <td>按Token 计费</td>
-                    <td>额度扣点制(Token 包)</td>
-                    <td>固定订阅制(月付/年付)</td>
-                    <td>免费 (私有部署)</td>
-                    <td>免费 (本地运行)</td>
-                    <td>绑定云端生态</td>
-                    <td>高昂月费订阅制</td>
-                  </tr>
-                  <tr>
-                    <td class="feature-name">本地 GGUF 模型支持</td>
-                    <td class="highlight">支持 (内置边车一键导入)</td>
-                    <td>支持 (需配置 Ollama 接口)</td>
-                    <td>不支持(强绑定云端API)</td>
-                    <td>不支持(强绑定云端API)</td>
-                    <td>有限支持 (仅支持外部接口)</td>
-                    <td>不支持(强绑定云端API)</td>
-                    <td>支持 (可调用远程节点)</td>
-                    <td>本身即为大模型</td>
-                    <td>支持 (本地 NPU 引擎)</td>
-                    <td>不支持 (纯云端)</td>
-                  </tr>
-                  <tr>
-                    <td class="feature-name">本地知识库与脑图</td>
-                    <td class="highlight">有(sqlite-vec + Vis.js 图谱)</td>
-                    <td>无(需手动编写 RAG)</td>
-                    <td>无(数据上传云端)</td>
-                    <td>无</td>
-                    <td>有(企业云端数据库)</td>
-                    <td>有(代码向量检索)</td>
-                    <td>无(需外部挂载)</td>
-                    <td>无(无检索机制)</td>
-                    <td>全局物理文件检索</td>
-                    <td>单次会话临时空间</td>
-                  </tr>
-                  <tr>
-                    <td class="feature-name">日常办公专属技能</td>
-                    <td class="highlight">预装微信联动/日程时间轴/Web Drop</td>
-                    <td>无</td>
-                    <td>无(纯开发工具)</td>
-                    <td>无(纯开发工具)</td>
-                    <td>有(企业办公套件)</td>
-                    <td>无(纯开发工具)</td>
-                    <td>部分支持 (提供微信 Bot 桥接)</td>
-                    <td>无(纯大模型)</td>
-                    <td>跨端可视化控制</td>
-                    <td>爬虫与代码编写</td>
-                  </tr>
-                  <tr>
-                    <td class="feature-name">安全确权机制</td>
-                    <td class="highlight">强安全(Outbox + 剪贴板富文本)</td>
-                    <td>中等 (本地终端直接执行)</td>
-                    <td>中等 (终端直接执行/键鼠劫持)</td>
-                    <td>中等 (终端代码生成)</td>
-                    <td>较高 (云端企业安全机制)</td>
-                    <td>强安全(仅限代码沙盒)</td>
-                    <td>中等 (基于节点权限)</td>
-                    <td>安全 (数据不出本地)</td>
-                    <td>极高风险(直连系统底层)</td>
-                    <td>数据出境风险(云端黑盒)</td>
-                  </tr>
-                </tbody>
+  <tr>
+    <td class="feature-name">上手门槛</td>
+    <td class="highlight"><div class="rating-stars">★★★</div><div class="rating-text">零配置开箱即用</div></td>
+    <td><div class="rating-stars">★★☆</div><div class="rating-text">需一定 Ollama 基础</div></td>
+    <td><div class="rating-stars">★☆☆</div><div class="rating-text">极高(纯命令行)</div></td>
+    <td><div class="rating-stars">★☆☆</div><div class="rating-text">极高(纯命令行)</div></td>
+    <td><div class="rating-stars">★★☆</div><div class="rating-text">低(企业下发配置)</div></td>
+    <td><div class="rating-stars">★★☆</div><div class="rating-text">需 IDE 熟练度</div></td>
+    <td><div class="rating-stars">★☆☆</div><div class="rating-text">极高(服务端运维)</div></td>
+    <td><div class="rating-stars">★☆☆</div><div class="rating-text">极高(模型部署)</div></td>
+    <td><div class="rating-stars">★★★</div><div class="rating-text">预装开箱即用</div></td>
+    <td><div class="rating-stars">★★☆</div><div class="rating-text">交互简单，一号难求</div></td>
+  </tr>
+  <tr>
+    <td class="feature-name">离线断网可用</td>
+    <td class="highlight"><div class="rating-stars">★★★</div><div class="rating-text">完全支持(本地大模型)</div></td>
+    <td><div class="rating-stars">★★★</div><div class="rating-text">完全支持</div></td>
+    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">不支持(强依赖云)</div></td>
+    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">不支持</div></td>
+    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">不支持</div></td>
+    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">不支持</div></td>
+    <td><div class="rating-stars">★★☆</div><div class="rating-text">依赖本地算力节点</div></td>
+    <td><div class="rating-stars">★★★</div><div class="rating-text">完全支持</div></td>
+    <td><div class="rating-stars">★☆☆</div><div class="rating-text">仅特定隐私模式</div></td>
+    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">不支持(纯云端生态)</div></td>
+  </tr>
+  <tr>
+    <td class="feature-name">客户端负担(体积与依赖)</td>
+    <td class="highlight"><div class="rating-stars">★★★</div><div class="rating-text">极轻(~15MB/无依赖)</div></td>
+    <td><div class="rating-stars">★★☆</div><div class="rating-text">中等(~200MB/依赖Ollama)</div></td>
+    <td><div class="rating-stars">★☆☆</div><div class="rating-text">较重(依赖Node环境)</div></td>
+    <td><div class="rating-stars">★☆☆</div><div class="rating-text">较重(依赖Node/Python)</div></td>
+    <td><div class="rating-stars">★★☆</div><div class="rating-text">较轻(无额外依赖)</div></td>
+    <td><div class="rating-stars">★★☆</div><div class="rating-text">较轻(依赖IDE)</div></td>
+    <td><div class="rating-stars">★☆☆</div><div class="rating-text">重(依赖Node环境)</div></td>
+    <td><div class="rating-stars">★☆☆</div><div class="rating-text">极重(强依赖CUDA)</div></td>
+    <td><div class="rating-stars">★☆☆</div><div class="rating-text">极重(系统级重型整合)</div></td>
+    <td><div class="rating-stars">★★★</div><div class="rating-text">无负担(纯网页云端)</div></td>
+  </tr>
+  <tr>
+    <td class="feature-name">大文件强制下载</td>
+    <td class="highlight"><div class="rating-stars">★★★</div><div class="rating-text">无(随时按需)</div></td>
+    <td><div class="rating-stars">★☆☆</div><div class="rating-text">极重(提示下2GB+模型)</div></td>
+    <td><div class="rating-stars">★★☆</div><div class="rating-text">需下载一定依赖包</div></td>
+    <td><div class="rating-stars">★★☆</div><div class="rating-text">需下载环境包</div></td>
+    <td><div class="rating-stars">★★★</div><div class="rating-text">无</div></td>
+    <td><div class="rating-stars">★★★</div><div class="rating-text">无</div></td>
+    <td><div class="rating-stars">★★★</div><div class="rating-text">无</div></td>
+    <td><div class="rating-stars">★☆☆</div><div class="rating-text">极重(几十GB模型)</div></td>
+    <td><div class="rating-stars">★☆☆</div><div class="rating-text">重(系统级更新包)</div></td>
+    <td><div class="rating-stars">★★★</div><div class="rating-text">无(云端运行)</div></td>
+  </tr>
+  <tr>
+    <td class="feature-name">计费与财务成本</td>
+    <td class="highlight"><div class="rating-stars">★★★</div><div class="rating-text">本地免费 / 自备Key</div></td>
+    <td><div class="rating-stars">★★★</div><div class="rating-text">本地免费 / 自备Key</div></td>
+    <td><div class="rating-stars">★☆☆</div><div class="rating-text">按 Token 高昂计费</div></td>
+    <td><div class="rating-stars">★☆☆</div><div class="rating-text">按 Token 计费</div></td>
+    <td><div class="rating-stars">★★☆</div><div class="rating-text">企业版额度扣点制</div></td>
+    <td><div class="rating-stars">★☆☆</div><div class="rating-text">个人/企业高昂月付</div></td>
+    <td><div class="rating-stars">★★★</div><div class="rating-text">免费(私有部署)</div></td>
+    <td><div class="rating-stars">★★★</div><div class="rating-text">免费(本地部署)</div></td>
+    <td><div class="rating-stars">★★☆</div><div class="rating-text">免费基础版+VIP</div></td>
+    <td><div class="rating-stars">★☆☆</div><div class="rating-text">极难排队且高昂</div></td>
+  </tr>
+  <tr>
+    <td class="feature-name">本地 GGUF 支持</td>
+    <td class="highlight"><div class="rating-stars">★★★</div><div class="rating-text">自带边车一键导入</div></td>
+    <td><div class="rating-stars">★★☆</div><div class="rating-text">需手动配置 Ollama</div></td>
+    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">强绑云端 API</div></td>
+    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">强绑云端 API</div></td>
+    <td><div class="rating-stars">★☆☆</div><div class="rating-text">仅限企业外部接口</div></td>
+    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">强绑云端 API</div></td>
+    <td><div class="rating-stars">★★☆</div><div class="rating-text">需配置远程节点</div></td>
+    <td><div class="rating-stars">★★☆</div><div class="rating-text">需本地推理引擎</div></td>
+    <td><div class="rating-stars">★★☆</div><div class="rating-text">调用本地 NPU 引擎</div></td>
+    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">无(纯云端大模型)</div></td>
+  </tr>
+  <tr>
+    <td class="feature-name">本地私有知识库</td>
+    <td class="highlight"><div class="rating-stars">★★★</div><div class="rating-text">有(向量库+可视化脑图)</div></td>
+    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">无(需手动编写RAG)</div></td>
+    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">无(必须传云端)</div></td>
+    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">无</div></td>
+    <td><div class="rating-stars">★★☆</div><div class="rating-text">有(企业云端数据库)</div></td>
+    <td><div class="rating-stars">★★☆</div><div class="rating-text">有(依赖代码向量检索)</div></td>
+    <td><div class="rating-stars">★☆☆</div><div class="rating-text">无(需高成本挂载)</div></td>
+    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">无检索机制</div></td>
+    <td><div class="rating-stars">★★☆</div><div class="rating-text">全局文件物理检索</div></td>
+    <td><div class="rating-stars">★☆☆</div><div class="rating-text">仅限单次会话记忆</div></td>
+  </tr>
+  <tr>
+    <td class="feature-name">日常办公专属技能</td>
+    <td class="highlight"><div class="rating-stars">★★★</div><div class="rating-text">微信互通/日程/传档</div></td>
+    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">无</div></td>
+    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">无(纯开发工具)</div></td>
+    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">无(纯开发工具)</div></td>
+    <td><div class="rating-stars">★★★</div><div class="rating-text">打通企业办公套件</div></td>
+    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">无(纯开发工具)</div></td>
+    <td><div class="rating-stars">★★☆</div><div class="rating-text">支持编写 Bot 桥接</div></td>
+    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">无(纯大模型底座)</div></td>
+    <td><div class="rating-stars">★★★</div><div class="rating-text">跨端控制系统助手</div></td>
+    <td><div class="rating-stars">★★☆</div><div class="rating-text">网页代办/网络爬虫</div></td>
+  </tr>
+  <tr>
+    <td class="feature-name">安全与隐私确权</td>
+    <td class="highlight"><div class="rating-stars">★★★</div><div class="rating-text">强(审核+富文本剪贴)</div></td>
+    <td><div class="rating-stars">★★☆</div><div class="rating-text">中(本地终端执行)</div></td>
+    <td><div class="rating-stars">★☆☆</div><div class="rating-text">弱(盲目执行风险大)</div></td>
+    <td><div class="rating-stars">★★☆</div><div class="rating-text">中(终端代码生成)</div></td>
+    <td><div class="rating-stars">★★★</div><div class="rating-text">强(沙盒物理隔离)</div></td>
+    <td><div class="rating-stars">★★☆</div><div class="rating-text">中(局限于 IDE)</div></td>
+    <td><div class="rating-stars">★★★</div><div class="rating-text">强(Docker容器隔离)</div></td>
+    <td><div class="rating-stars">★★☆</div><div class="rating-text">中(纯本地终端)</div></td>
+    <td><div class="rating-stars">★★☆</div><div class="rating-text">中(获取系统高权限)</div></td>
+    <td><div class="rating-stars">★★★</div><div class="rating-text">强(云端容器绝对隔离)</div></td>
+  </tr>
+</tbody>
               </table>
             </div>
             
