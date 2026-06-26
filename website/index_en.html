@@ -445,140 +445,153 @@
             <!-- 1. 竞品对比大表 -->
             <div class="table-responsive">
               <table class="comparison-table">
-                <thead>
+                                <thead>
                   <tr>
-                    <th>Dimension</th>
-                    <th><img src="./assets/bob_logo.svg" alt="bob" style="height: 19px; vertical-align: middle;"></th>
+                    <th>Dimensions</th>
+                    <th class="highlight">
+                      <div class="header-logo"><img src="assets/bob_logo.svg" alt="bob agent" /></div>
+                      bob (本产品)
+                    </th>
                     <th>Hermes Desktop</th>
-                    <th>Claude Code / Desktop</th>
-                    <th>Codex Desktop</th>
-                    <th>Workbuddy (Tencent)</th>
-                    <th>GitHub Copilot</th>
                     <th>OpenClaw</th>
-                    <th>DeepSeek (Local)</th>
+                    <th>Claude Code</th>
+                    <th>Codex Desktop</th>
+                    <th>GitHub Copilot</th>
+                    <th>Tencent Workbuddy</th>
                     <th>Tencent Marvis</th>
+                    <th>Trae</th>
+                    <th>Deepseek Desktop</th>
                     <th>Manus (Cloud)</th>
                   </tr>
                 </thead>
-                <tbody>
-  <tr>
-    <td class="feature-name">Onboarding</td>
-    <td class="highlight"><div class="rating-stars">★★★</div><div class="rating-text">Zero setup</div></td>
-    <td><div class="rating-stars">★★☆</div><div class="rating-text">Needs Ollama</div></td>
-    <td><div class="rating-stars">★☆☆</div><div class="rating-text">CLI only</div></td>
-    <td><div class="rating-stars">★★☆</div><div class="rating-text">Needs setup</div></td>
-    <td><div class="rating-stars">★★☆</div><div class="rating-text">Enterprise managed</div></td>
-    <td><div class="rating-stars">★★☆</div><div class="rating-text">Needs IDE</div></td>
-    <td><div class="rating-stars">★☆☆</div><div class="rating-text">Needs DevOps</div></td>
-    <td><div class="rating-stars">★☆☆</div><div class="rating-text">Needs deploy</div></td>
-    <td><div class="rating-stars">★★★</div><div class="rating-text">Out-of-box</div></td>
-    <td><div class="rating-stars">★★☆</div><div class="rating-text">Waitlist</div></td>
-  </tr>
-  <tr>
-    <td class="feature-name">Lightweight Install</td>
-    <td class="highlight"><div class="rating-stars">★★★</div><div class="rating-text">Light (~15MB)</div></td>
-    <td><div class="rating-stars">★★☆</div><div class="rating-text">Medium (~200MB)</div></td>
-    <td><div class="rating-stars">★☆☆</div><div class="rating-text">Heavy (Node.js)</div></td>
-    <td><div class="rating-stars">★★☆</div><div class="rating-text">Medium (Electron)</div></td>
-    <td><div class="rating-stars">★★☆</div><div class="rating-text">Light</div></td>
-    <td><div class="rating-stars">★★☆</div><div class="rating-text">IDE dependent</div></td>
-    <td><div class="rating-stars">★☆☆</div><div class="rating-text">Heavy (Node.js)</div></td>
-    <td><div class="rating-stars">★☆☆</div><div class="rating-text">Heavy (CUDA)</div></td>
-    <td><div class="rating-stars">★☆☆</div><div class="rating-text">Heavy (System)</div></td>
-    <td><div class="rating-stars">★★★</div><div class="rating-text">None (Web)</div></td>
-  </tr>
-  <tr>
-    <td class="feature-name">Local Models</td>
-    <td class="highlight"><div class="rating-stars">★★★</div><div class="rating-text">Built-in, fully offline</div></td>
-    <td><div class="rating-stars">★★☆</div><div class="rating-text">Needs Ollama</div></td>
-    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">Cloud only</div></td>
-    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">Cloud only</div></td>
-    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">Cloud only</div></td>
-    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">Cloud only</div></td>
-    <td><div class="rating-stars">★★☆</div><div class="rating-text">Remote nodes</div></td>
-    <td><div class="rating-stars">★★☆</div><div class="rating-text">Needs Engine</div></td>
-    <td><div class="rating-stars">★★☆</div><div class="rating-text">NPU Calls</div></td>
-    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">Cloud only</div></td>
-  </tr>
-  <tr>
-    <td class="feature-name">Billing Model</td>
-    <td class="highlight"><div class="rating-stars">★★★</div><div class="rating-text">Free / BYOK</div></td>
-    <td><div class="rating-stars">★★★</div><div class="rating-text">Free / BYOK</div></td>
-    <td><div class="rating-stars">★☆☆</div><div class="rating-text">Token billing</div></td>
-    <td><div class="rating-stars">★☆☆</div><div class="rating-text">Token / Sub</div></td>
-    <td><div class="rating-stars">★★☆</div><div class="rating-text">Enterprise quota</div></td>
-    <td><div class="rating-stars">★☆☆</div><div class="rating-text">Costly Sub</div></td>
-    <td><div class="rating-stars">★★★</div><div class="rating-text">Free (Self-hosted)</div></td>
-    <td><div class="rating-stars">★★★</div><div class="rating-text">Free (Local run)</div></td>
-    <td><div class="rating-stars">★★☆</div><div class="rating-text">Base + VIP</div></td>
-    <td><div class="rating-stars">★☆☆</div><div class="rating-text">Costly Sub</div></td>
-  </tr>
-  <tr>
-    <td class="feature-name">Web Search</td>
-    <td class="highlight"><div class="rating-stars">★★★</div><div class="rating-text">Built-in Fast</div></td>
-    <td><div class="rating-stars">★★★</div><div class="rating-text">Built-in</div></td>
-    <td><div class="rating-stars">★★☆</div><div class="rating-text">Via MCP</div></td>
-    <td><div class="rating-stars">★☆☆</div><div class="rating-text">Weak</div></td>
-    <td><div class="rating-stars">★★☆</div><div class="rating-text">Internal Search</div></td>
-    <td><div class="rating-stars">★★☆</div><div class="rating-text">Bing Integration</div></td>
-    <td><div class="rating-stars">★★★</div><div class="rating-text">Search Plugin</div></td>
-    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">No</div></td>
-    <td><div class="rating-stars">★★★</div><div class="rating-text">Built-in Engine</div></td>
-    <td><div class="rating-stars">★★★</div><div class="rating-text">Auto Crawler</div></td>
-  </tr>
-  <tr>
-    <td class="feature-name">Local Knowledge</td>
-    <td class="highlight"><div class="rating-stars">★★★</div><div class="rating-text">Vector + Graph</div></td>
-    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">No</div></td>
-    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">Cloud upload</div></td>
-    <td><div class="rating-stars">★★☆</div><div class="rating-text">Code Index</div></td>
-    <td><div class="rating-stars">★★☆</div><div class="rating-text">Cloud DB</div></td>
-    <td><div class="rating-stars">★★☆</div><div class="rating-text">Code Index</div></td>
-    <td><div class="rating-stars">★☆☆</div><div class="rating-text">Volumes needed</div></td>
-    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">No</div></td>
-    <td><div class="rating-stars">★★☆</div><div class="rating-text">File Search</div></td>
-    <td><div class="rating-stars">★☆☆</div><div class="rating-text">Session only</div></td>
-  </tr>
-  <tr>
-    <td class="feature-name">Daily Office</td>
-    <td class="highlight"><div class="rating-stars">★★★</div><div class="rating-text">WeChat/Calendar</div></td>
-    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">No</div></td>
-    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">No</div></td>
-    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">No</div></td>
-    <td><div class="rating-stars">★★★</div><div class="rating-text">Enterprise Suite</div></td>
-    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">No</div></td>
-    <td><div class="rating-stars">★★☆</div><div class="rating-text">Bot Bridge</div></td>
-    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">No</div></td>
-    <td><div class="rating-stars">★★★</div><div class="rating-text">System Assistant</div></td>
-    <td><div class="rating-stars">★★☆</div><div class="rating-text">Web crawler</div></td>
-  </tr>
-  <tr>
-    <td class="feature-name">Sandbox Dev</td>
-    <td class="highlight"><div class="rating-stars">☆☆☆</div><div class="rating-text">Office focus, no sandbox</div></td>
-    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">No</div></td>
-    <td><div class="rating-stars">★★★</div><div class="rating-text">Strong Execution</div></td>
-    <td><div class="rating-stars">★★★</div><div class="rating-text">Pro Sandbox & Git</div></td>
-    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">No</div></td>
-    <td><div class="rating-stars">★★★</div><div class="rating-text">VSCode Ecosystem</div></td>
-    <td><div class="rating-stars">★★★</div><div class="rating-text">Container Workflow</div></td>
-    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">No</div></td>
-    <td><div class="rating-stars">★☆☆</div><div class="rating-text">Weak</div></td>
-    <td><div class="rating-stars">★★★</div><div class="rating-text">Cloud Containers</div></td>
-  </tr>
-  <tr>
-    <td class="feature-name">Security & Privacy</td>
-    <td class="highlight"><div class="rating-stars">★★★</div><div class="rating-text">Strong (Sandbox)</div></td>
-    <td><div class="rating-stars">★★☆</div><div class="rating-text">Medium (Local run)</div></td>
-    <td><div class="rating-stars">★☆☆</div><div class="rating-text">Weak (Blind run)</div></td>
-    <td><div class="rating-stars">★★☆</div><div class="rating-text">Medium (Audit)</div></td>
-    <td><div class="rating-stars">★★★</div><div class="rating-text">Strong (Isolated)</div></td>
-    <td><div class="rating-stars">★★☆</div><div class="rating-text">Medium (IDE)</div></td>
-    <td><div class="rating-stars">★★★</div><div class="rating-text">Strong (Containers)</div></td>
-    <td><div class="rating-stars">★★☆</div><div class="rating-text">Medium (Local run)</div></td>
-    <td><div class="rating-stars">★★☆</div><div class="rating-text">Medium (High Priv)</div></td>
-    <td><div class="rating-stars">★★★</div><div class="rating-text">Strong (Cloud Iso)</div></td>
-  </tr>
-</tbody>
+                                <tbody>
+                  <tr>
+                    <td class="feature-name">Onboarding</td>
+                    <td class="highlight"><div class="rating-stars">★★★</div><div class="rating-text">Zero setup</div></td>
+                    <td><div class="rating-stars">★★☆</div><div class="rating-text">Needs Ollama</div></td>
+                    <td><div class="rating-stars">★☆☆</div><div class="rating-text">Needs DevOps</div></td>
+                    <td><div class="rating-stars">★☆☆</div><div class="rating-text">CLI only</div></td>
+                    <td><div class="rating-stars">★★☆</div><div class="rating-text">Needs setup</div></td>
+                    <td><div class="rating-stars">★★☆</div><div class="rating-text">Needs IDE</div></td>
+                    <td><div class="rating-stars">★★☆</div><div class="rating-text">Enterprise managed</div></td>
+                    <td><div class="rating-stars">★★★</div><div class="rating-text">Out-of-box</div></td>
+                    <td><div class="rating-stars">★★☆</div><div class="rating-text">Needs IDE</div></td>
+                    <td><div class="rating-stars">★★★</div><div class="rating-text">Out-of-box</div></td>
+                    <td><div class="rating-stars">★★☆</div><div class="rating-text">Waitlist</div></td>
+                  </tr>
+                  <tr>
+                    <td class="feature-name">Lightweight Install</td>
+                    <td class="highlight"><div class="rating-stars">★★★</div><div class="rating-text">Light (~15MB)</div></td>
+                    <td><div class="rating-stars">★★☆</div><div class="rating-text">Medium (~200MB)</div></td>
+                    <td><div class="rating-stars">★☆☆</div><div class="rating-text">Heavy (Node.js)</div></td>
+                    <td><div class="rating-stars">★☆☆</div><div class="rating-text">Heavy (Node.js)</div></td>
+                    <td><div class="rating-stars">★★☆</div><div class="rating-text">Medium (Electron)</div></td>
+                    <td><div class="rating-stars">★★☆</div><div class="rating-text">IDE dependent</div></td>
+                    <td><div class="rating-stars">★★☆</div><div class="rating-text">Light</div></td>
+                    <td><div class="rating-stars">★☆☆</div><div class="rating-text">Heavy (System)</div></td>
+                    <td><div class="rating-stars">★★☆</div><div class="rating-text">Medium (IDE)</div></td>
+                    <td><div class="rating-stars">★★☆</div><div class="rating-text">Light (Desktop)</div></td>
+                    <td><div class="rating-stars">★★★</div><div class="rating-text">None (Web)</div></td>
+                  </tr>
+                  <tr>
+                    <td class="feature-name">Local Models</td>
+                    <td class="highlight"><div class="rating-stars">★★★</div><div class="rating-text">Built-in, offline</div></td>
+                    <td><div class="rating-stars">★★☆</div><div class="rating-text">Needs Ollama</div></td>
+                    <td><div class="rating-stars">★★☆</div><div class="rating-text">Remote nodes</div></td>
+                    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">Cloud only</div></td>
+                    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">Cloud only</div></td>
+                    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">Cloud only</div></td>
+                    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">Cloud only</div></td>
+                    <td><div class="rating-stars">★★☆</div><div class="rating-text">NPU Calls</div></td>
+                    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">Cloud API</div></td>
+                    <td><div class="rating-stars">★☆☆</div><div class="rating-text">Cloud API focus</div></td>
+                    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">Cloud only</div></td>
+                  </tr>
+                  <tr>
+                    <td class="feature-name">Billing Model</td>
+                    <td class="highlight"><div class="rating-stars">★★★</div><div class="rating-text">Free / BYOK</div></td>
+                    <td><div class="rating-stars">★★★</div><div class="rating-text">Free / BYOK</div></td>
+                    <td><div class="rating-stars">★★★</div><div class="rating-text">Self-hosted Free</div></td>
+                    <td><div class="rating-stars">★☆☆</div><div class="rating-text">Token billing</div></td>
+                    <td><div class="rating-stars">★☆☆</div><div class="rating-text">Token / Sub</div></td>
+                    <td><div class="rating-stars">★☆☆</div><div class="rating-text">Costly Sub</div></td>
+                    <td><div class="rating-stars">★★☆</div><div class="rating-text">Enterprise quota</div></td>
+                    <td><div class="rating-stars">★★☆</div><div class="rating-text">Base + VIP</div></td>
+                    <td><div class="rating-stars">★★★</div><div class="rating-text">Free for now</div></td>
+                    <td><div class="rating-stars">★★★</div><div class="rating-text">Free / BYOK</div></td>
+                    <td><div class="rating-stars">★☆☆</div><div class="rating-text">Costly Sub</div></td>
+                  </tr>
+                  <tr>
+                    <td class="feature-name">Web Search</td>
+                    <td class="highlight"><div class="rating-stars">★★★</div><div class="rating-text">Built-in Fast</div></td>
+                    <td><div class="rating-stars">★★★</div><div class="rating-text">Built-in</div></td>
+                    <td><div class="rating-stars">★★★</div><div class="rating-text">Search Plugin</div></td>
+                    <td><div class="rating-stars">★★☆</div><div class="rating-text">Via MCP</div></td>
+                    <td><div class="rating-stars">★☆☆</div><div class="rating-text">Weak</div></td>
+                    <td><div class="rating-stars">★★☆</div><div class="rating-text">Bing Integration</div></td>
+                    <td><div class="rating-stars">★★☆</div><div class="rating-text">Internal Search</div></td>
+                    <td><div class="rating-stars">★★★</div><div class="rating-text">Built-in Engine</div></td>
+                    <td><div class="rating-stars">★★☆</div><div class="rating-text">Code context</div></td>
+                    <td><div class="rating-stars">★☆☆</div><div class="rating-text">Via Cloud API</div></td>
+                    <td><div class="rating-stars">★★★</div><div class="rating-text">Auto Crawler</div></td>
+                  </tr>
+                  <tr>
+                    <td class="feature-name">Local Knowledge</td>
+                    <td class="highlight"><div class="rating-stars">★★★</div><div class="rating-text">Vector + Graph</div></td>
+                    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">No</div></td>
+                    <td><div class="rating-stars">★☆☆</div><div class="rating-text">Volumes needed</div></td>
+                    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">Cloud upload</div></td>
+                    <td><div class="rating-stars">★★☆</div><div class="rating-text">Code Index</div></td>
+                    <td><div class="rating-stars">★★☆</div><div class="rating-text">Code Index</div></td>
+                    <td><div class="rating-stars">★★☆</div><div class="rating-text">Cloud DB</div></td>
+                    <td><div class="rating-stars">★★☆</div><div class="rating-text">File Search</div></td>
+                    <td><div class="rating-stars">★★☆</div><div class="rating-text">Code Index</div></td>
+                    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">No</div></td>
+                    <td><div class="rating-stars">★☆☆</div><div class="rating-text">Session only</div></td>
+                  </tr>
+                  <tr>
+                    <td class="feature-name">Daily Office</td>
+                    <td class="highlight"><div class="rating-stars">★★★</div><div class="rating-text">WeChat/Calendar</div></td>
+                    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">No</div></td>
+                    <td><div class="rating-stars">★★☆</div><div class="rating-text">Bot Bridge</div></td>
+                    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">No</div></td>
+                    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">No</div></td>
+                    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">No</div></td>
+                    <td><div class="rating-stars">★★★</div><div class="rating-text">Enterprise Suite</div></td>
+                    <td><div class="rating-stars">★★★</div><div class="rating-text">System Assistant</div></td>
+                    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">No</div></td>
+                    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">No</div></td>
+                    <td><div class="rating-stars">★★☆</div><div class="rating-text">Web crawler</div></td>
+                  </tr>
+                  <tr>
+                    <td class="feature-name">Sandbox Dev</td>
+                    <td class="highlight"><div class="rating-stars">☆☆☆</div><div class="rating-text">Office focus, no sandbox</div></td>
+                    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">No</div></td>
+                    <td><div class="rating-stars">★★★</div><div class="rating-text">Container Workflow</div></td>
+                    <td><div class="rating-stars">★★★</div><div class="rating-text">Strong Execution</div></td>
+                    <td><div class="rating-stars">★★★</div><div class="rating-text">Pro Sandbox & Git</div></td>
+                    <td><div class="rating-stars">★★★</div><div class="rating-text">VSCode Ecosystem</div></td>
+                    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">No</div></td>
+                    <td><div class="rating-stars">★☆☆</div><div class="rating-text">Weak</div></td>
+                    <td><div class="rating-stars">★★★</div><div class="rating-text">Pro IDE</div></td>
+                    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">No</div></td>
+                    <td><div class="rating-stars">★★★</div><div class="rating-text">Cloud Containers</div></td>
+                  </tr>
+                  <tr>
+                    <td class="feature-name">Security & Privacy</td>
+                    <td class="highlight"><div class="rating-stars">★★★</div><div class="rating-text">Strong (Sandbox)</div></td>
+                    <td><div class="rating-stars">★★☆</div><div class="rating-text">Medium (Local run)</div></td>
+                    <td><div class="rating-stars">★★★</div><div class="rating-text">Strong (Containers)</div></td>
+                    <td><div class="rating-stars">★☆☆</div><div class="rating-text">Weak (Blind run)</div></td>
+                    <td><div class="rating-stars">★★☆</div><div class="rating-text">Medium (Audit)</div></td>
+                    <td><div class="rating-stars">★★☆</div><div class="rating-text">Medium (IDE)</div></td>
+                    <td><div class="rating-stars">★★★</div><div class="rating-text">Strong (Isolated)</div></td>
+                    <td><div class="rating-stars">★★☆</div><div class="rating-text">Medium (High Priv)</div></td>
+                    <td><div class="rating-stars">★★☆</div><div class="rating-text">Medium (IDE)</div></td>
+                    <td><div class="rating-stars">★★☆</div><div class="rating-text">Medium (OSS)</div></td>
+                    <td><div class="rating-stars">★★★</div><div class="rating-text">Strong (Cloud Iso)</div></td>
+                  </tr>
+                </tbody>
               </table>
             </div>
             
