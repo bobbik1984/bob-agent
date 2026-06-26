@@ -453,7 +453,7 @@
                     <th><img src="./assets/bob_logo.svg" alt="bob" style="height: 19px; vertical-align: middle;"></th>
                     <th>Hermes Desktop</th>
                     <th>Claude Code / Desktop</th>
-                    <th>Codex CLI</th>
+                    <th>Codex Desktop</th>
                     <th>Workbuddy (腾讯)</th>
                     <th>GitHub Copilot</th>
                     <th>OpenClaw</th>
@@ -468,7 +468,7 @@
     <td class="highlight"><div class="rating-stars">★★★</div><div class="rating-text">零配置开箱即用</div></td>
     <td><div class="rating-stars">★★☆</div><div class="rating-text">需一定 Ollama 基础</div></td>
     <td><div class="rating-stars">★☆☆</div><div class="rating-text">极高(纯命令行)</div></td>
-    <td><div class="rating-stars">★☆☆</div><div class="rating-text">极高(纯命令行)</div></td>
+    <td><div class="rating-stars">★★☆</div><div class="rating-text">需登录与基础配置</div></td>
     <td><div class="rating-stars">★★☆</div><div class="rating-text">低(企业下发配置)</div></td>
     <td><div class="rating-stars">★★☆</div><div class="rating-text">需 IDE 熟练度</div></td>
     <td><div class="rating-stars">★☆☆</div><div class="rating-text">极高(服务端运维)</div></td>
@@ -481,7 +481,7 @@
     <td class="highlight"><div class="rating-stars">★★★</div><div class="rating-text">完全支持(本地大模型)</div></td>
     <td><div class="rating-stars">★★★</div><div class="rating-text">完全支持</div></td>
     <td><div class="rating-stars">☆☆☆</div><div class="rating-text">不支持(强依赖云)</div></td>
-    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">不支持</div></td>
+    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">不支持(强依赖云)</div></td>
     <td><div class="rating-stars">☆☆☆</div><div class="rating-text">不支持</div></td>
     <td><div class="rating-stars">☆☆☆</div><div class="rating-text">不支持</div></td>
     <td><div class="rating-stars">★★☆</div><div class="rating-text">依赖本地算力节点</div></td>
@@ -494,7 +494,7 @@
     <td class="highlight"><div class="rating-stars">★★★</div><div class="rating-text">极轻(~15MB/无依赖)</div></td>
     <td><div class="rating-stars">★★☆</div><div class="rating-text">中等(~200MB/依赖Ollama)</div></td>
     <td><div class="rating-stars">★☆☆</div><div class="rating-text">较重(依赖Node环境)</div></td>
-    <td><div class="rating-stars">★☆☆</div><div class="rating-text">较重(依赖Node/Python)</div></td>
+    <td><div class="rating-stars">★★☆</div><div class="rating-text">中等(Electron架构)</div></td>
     <td><div class="rating-stars">★★☆</div><div class="rating-text">较轻(无额外依赖)</div></td>
     <td><div class="rating-stars">★★☆</div><div class="rating-text">较轻(依赖IDE)</div></td>
     <td><div class="rating-stars">★☆☆</div><div class="rating-text">重(依赖Node环境)</div></td>
@@ -503,30 +503,56 @@
     <td><div class="rating-stars">★★★</div><div class="rating-text">无负担(纯网页云端)</div></td>
   </tr>
   <tr>
-    <td class="feature-name">大文件强制下载</td>
-    <td class="highlight"><div class="rating-stars">★★★</div><div class="rating-text">无(随时按需)</div></td>
-    <td><div class="rating-stars">★☆☆</div><div class="rating-text">极重(提示下2GB+模型)</div></td>
-    <td><div class="rating-stars">★★☆</div><div class="rating-text">需下载一定依赖包</div></td>
-    <td><div class="rating-stars">★★☆</div><div class="rating-text">需下载环境包</div></td>
-    <td><div class="rating-stars">★★★</div><div class="rating-text">无</div></td>
-    <td><div class="rating-stars">★★★</div><div class="rating-text">无</div></td>
-    <td><div class="rating-stars">★★★</div><div class="rating-text">无</div></td>
-    <td><div class="rating-stars">★☆☆</div><div class="rating-text">极重(几十GB模型)</div></td>
-    <td><div class="rating-stars">★☆☆</div><div class="rating-text">重(系统级更新包)</div></td>
-    <td><div class="rating-stars">★★★</div><div class="rating-text">无(云端运行)</div></td>
+    <td class="feature-name">原生网页实时搜索</td>
+    <td class="highlight"><div class="rating-stars">★★★</div><div class="rating-text">自带(无感极速搜索)</div></td>
+    <td><div class="rating-stars">★★★</div><div class="rating-text">自带</div></td>
+    <td><div class="rating-stars">★★☆</div><div class="rating-text">可通过 MCP 扩展</div></td>
+    <td><div class="rating-stars">★☆☆</div><div class="rating-text">弱</div></td>
+    <td><div class="rating-stars">★★☆</div><div class="rating-text">有(内外网检索)</div></td>
+    <td><div class="rating-stars">★★☆</div><div class="rating-text">整合 Bing 搜索</div></td>
+    <td><div class="rating-stars">★★★</div><div class="rating-text">自带专属检索组件</div></td>
+    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">无(纯模型引擎)</div></td>
+    <td><div class="rating-stars">★★★</div><div class="rating-text">自带搜索引擎</div></td>
+    <td><div class="rating-stars">★★★</div><div class="rating-text">极强(全自动爬虫过滤)</div></td>
   </tr>
   <tr>
-    <td class="feature-name">计费与财务成本</td>
-    <td class="highlight"><div class="rating-stars">★★★</div><div class="rating-text">本地免费 / 自备Key</div></td>
-    <td><div class="rating-stars">★★★</div><div class="rating-text">本地免费 / 自备Key</div></td>
-    <td><div class="rating-stars">★☆☆</div><div class="rating-text">按 Token 高昂计费</div></td>
-    <td><div class="rating-stars">★☆☆</div><div class="rating-text">按 Token 计费</div></td>
-    <td><div class="rating-stars">★★☆</div><div class="rating-text">企业版额度扣点制</div></td>
-    <td><div class="rating-stars">★☆☆</div><div class="rating-text">个人/企业高昂月付</div></td>
-    <td><div class="rating-stars">★★★</div><div class="rating-text">免费(私有部署)</div></td>
-    <td><div class="rating-stars">★★★</div><div class="rating-text">免费(本地部署)</div></td>
-    <td><div class="rating-stars">★★☆</div><div class="rating-text">免费基础版+VIP</div></td>
-    <td><div class="rating-stars">★☆☆</div><div class="rating-text">极难排队且高昂</div></td>
+    <td class="feature-name">日常办公辅助(Office等)</td>
+    <td class="highlight"><div class="rating-stars">★★★</div><div class="rating-text">微信互通/日程/Office辅助/传档</div></td>
+    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">无</div></td>
+    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">无(纯开发工具)</div></td>
+    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">无(纯开发工具)</div></td>
+    <td><div class="rating-stars">★★★</div><div class="rating-text">深度打通企业办公套件</div></td>
+    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">无(纯开发工具)</div></td>
+    <td><div class="rating-stars">★★☆</div><div class="rating-text">支持编写 Bot 桥接</div></td>
+    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">无(纯大模型底座)</div></td>
+    <td><div class="rating-stars">★★★</div><div class="rating-text">跨端控制系统助手</div></td>
+    <td><div class="rating-stars">★★☆</div><div class="rating-text">网页代办/网络爬虫</div></td>
+  </tr>
+  <tr>
+    <td class="feature-name">沙盒开发与 Worktree 管理</td>
+    <td class="highlight"><div class="rating-stars">☆☆☆</div><div class="rating-text">大方承认：专注日常办公，无专业工程管理</div></td>
+    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">无</div></td>
+    <td><div class="rating-stars">★★★</div><div class="rating-text">原生支持，强代码执行</div></td>
+    <td><div class="rating-stars">★★★</div><div class="rating-text">专业级代码沙盒/Git工程管理</div></td>
+    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">无</div></td>
+    <td><div class="rating-stars">★★★</div><div class="rating-text">依托 VSCode 强工程管理</div></td>
+    <td><div class="rating-stars">★★★</div><div class="rating-text">强大沙盒工作流与并发</div></td>
+    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">无</div></td>
+    <td><div class="rating-stars">★☆☆</div><div class="rating-text">弱(仅系统终端)</div></td>
+    <td><div class="rating-stars">★★★</div><div class="rating-text">云端隔离容器开发</div></td>
+  </tr>
+  <tr>
+    <td class="feature-name">本地私有知识库</td>
+    <td class="highlight"><div class="rating-stars">★★★</div><div class="rating-text">有(向量库+可视化脑图)</div></td>
+    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">无(需手动编写RAG)</div></td>
+    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">无(必须传云端)</div></td>
+    <td><div class="rating-stars">★★☆</div><div class="rating-text">有(本地代码检索引擎)</div></td>
+    <td><div class="rating-stars">★★☆</div><div class="rating-text">有(企业云端数据库)</div></td>
+    <td><div class="rating-stars">★★☆</div><div class="rating-text">有(依赖代码向量检索)</div></td>
+    <td><div class="rating-stars">★☆☆</div><div class="rating-text">无(需高成本挂载)</div></td>
+    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">无检索机制</div></td>
+    <td><div class="rating-stars">★★☆</div><div class="rating-text">全局文件物理检索</div></td>
+    <td><div class="rating-stars">★☆☆</div><div class="rating-text">仅限单次会话记忆</div></td>
   </tr>
   <tr>
     <td class="feature-name">本地 GGUF 支持</td>
@@ -542,37 +568,37 @@
     <td><div class="rating-stars">☆☆☆</div><div class="rating-text">无(纯云端大模型)</div></td>
   </tr>
   <tr>
-    <td class="feature-name">本地私有知识库</td>
-    <td class="highlight"><div class="rating-stars">★★★</div><div class="rating-text">有(向量库+可视化脑图)</div></td>
-    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">无(需手动编写RAG)</div></td>
-    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">无(必须传云端)</div></td>
-    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">无</div></td>
-    <td><div class="rating-stars">★★☆</div><div class="rating-text">有(企业云端数据库)</div></td>
-    <td><div class="rating-stars">★★☆</div><div class="rating-text">有(依赖代码向量检索)</div></td>
-    <td><div class="rating-stars">★☆☆</div><div class="rating-text">无(需高成本挂载)</div></td>
-    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">无检索机制</div></td>
-    <td><div class="rating-stars">★★☆</div><div class="rating-text">全局文件物理检索</div></td>
-    <td><div class="rating-stars">★☆☆</div><div class="rating-text">仅限单次会话记忆</div></td>
+    <td class="feature-name">计费与财务成本</td>
+    <td class="highlight"><div class="rating-stars">★★★</div><div class="rating-text">本地免费 / 自备Key</div></td>
+    <td><div class="rating-stars">★★★</div><div class="rating-text">本地免费 / 自备Key</div></td>
+    <td><div class="rating-stars">★☆☆</div><div class="rating-text">按 Token 高昂计费</div></td>
+    <td><div class="rating-stars">★☆☆</div><div class="rating-text">高昂订阅制/Token计费</div></td>
+    <td><div class="rating-stars">★★☆</div><div class="rating-text">企业版额度扣点制</div></td>
+    <td><div class="rating-stars">★☆☆</div><div class="rating-text">个人/企业高昂月付</div></td>
+    <td><div class="rating-stars">★★★</div><div class="rating-text">免费(私有部署)</div></td>
+    <td><div class="rating-stars">★★★</div><div class="rating-text">免费(本地部署)</div></td>
+    <td><div class="rating-stars">★★☆</div><div class="rating-text">免费基础版+VIP</div></td>
+    <td><div class="rating-stars">★☆☆</div><div class="rating-text">极难排队且高昂</div></td>
   </tr>
   <tr>
-    <td class="feature-name">日常办公专属技能</td>
-    <td class="highlight"><div class="rating-stars">★★★</div><div class="rating-text">微信互通/日程/传档</div></td>
-    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">无</div></td>
-    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">无(纯开发工具)</div></td>
-    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">无(纯开发工具)</div></td>
-    <td><div class="rating-stars">★★★</div><div class="rating-text">打通企业办公套件</div></td>
-    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">无(纯开发工具)</div></td>
-    <td><div class="rating-stars">★★☆</div><div class="rating-text">支持编写 Bot 桥接</div></td>
-    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">无(纯大模型底座)</div></td>
-    <td><div class="rating-stars">★★★</div><div class="rating-text">跨端控制系统助手</div></td>
-    <td><div class="rating-stars">★★☆</div><div class="rating-text">网页代办/网络爬虫</div></td>
+    <td class="feature-name">大文件强制下载</td>
+    <td class="highlight"><div class="rating-stars">★★★</div><div class="rating-text">无(随时按需)</div></td>
+    <td><div class="rating-stars">★☆☆</div><div class="rating-text">极重(提示下2GB+模型)</div></td>
+    <td><div class="rating-stars">★★☆</div><div class="rating-text">需下载一定依赖包</div></td>
+    <td><div class="rating-stars">★★★</div><div class="rating-text">无(纯客户端下载)</div></td>
+    <td><div class="rating-stars">★★★</div><div class="rating-text">无</div></td>
+    <td><div class="rating-stars">★★★</div><div class="rating-text">无</div></td>
+    <td><div class="rating-stars">★★★</div><div class="rating-text">无</div></td>
+    <td><div class="rating-stars">★☆☆</div><div class="rating-text">极重(几十GB模型)</div></td>
+    <td><div class="rating-stars">★☆☆</div><div class="rating-text">重(系统级更新包)</div></td>
+    <td><div class="rating-stars">★★★</div><div class="rating-text">无(云端运行)</div></td>
   </tr>
   <tr>
     <td class="feature-name">安全与隐私确权</td>
     <td class="highlight"><div class="rating-stars">★★★</div><div class="rating-text">强(审核+富文本剪贴)</div></td>
     <td><div class="rating-stars">★★☆</div><div class="rating-text">中(本地终端执行)</div></td>
     <td><div class="rating-stars">★☆☆</div><div class="rating-text">弱(盲目执行风险大)</div></td>
-    <td><div class="rating-stars">★★☆</div><div class="rating-text">中(终端代码生成)</div></td>
+    <td><div class="rating-stars">★★☆</div><div class="rating-text">中(云端审计但需传代码)</div></td>
     <td><div class="rating-stars">★★★</div><div class="rating-text">强(沙盒物理隔离)</div></td>
     <td><div class="rating-stars">★★☆</div><div class="rating-text">中(局限于 IDE)</div></td>
     <td><div class="rating-stars">★★★</div><div class="rating-text">强(Docker容器隔离)</div></td>

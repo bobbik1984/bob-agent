@@ -451,7 +451,7 @@
                     <th><img src="./assets/bob_logo.svg" alt="bob" style="height: 19px; vertical-align: middle;"></th>
                     <th>Hermes Desktop</th>
                     <th>Claude Code / Desktop</th>
-                    <th>Codex CLI</th>
+                    <th>Codex Desktop</th>
                     <th>Workbuddy (Tencent)</th>
                     <th>GitHub Copilot</th>
                     <th>OpenClaw</th>
@@ -466,7 +466,7 @@
     <td class="highlight"><div class="rating-stars">★★★</div><div class="rating-text">Zero setup, Out-of-box</div></td>
     <td><div class="rating-stars">★★☆</div><div class="rating-text">Ollama basics needed</div></td>
     <td><div class="rating-stars">★☆☆</div><div class="rating-text">Extreme (CLI only)</div></td>
-    <td><div class="rating-stars">★☆☆</div><div class="rating-text">Extreme (CLI only)</div></td>
+    <td><div class="rating-stars">★★☆</div><div class="rating-text">Requires Login & Setup</div></td>
     <td><div class="rating-stars">★★☆</div><div class="rating-text">Low (Enterprise managed)</div></td>
     <td><div class="rating-stars">★★☆</div><div class="rating-text">IDE proficiency needed</div></td>
     <td><div class="rating-stars">★☆☆</div><div class="rating-text">Extreme (Server DevOps)</div></td>
@@ -479,7 +479,7 @@
     <td class="highlight"><div class="rating-stars">★★★</div><div class="rating-text">Full Support (Local LLM)</div></td>
     <td><div class="rating-stars">★★★</div><div class="rating-text">Full Support</div></td>
     <td><div class="rating-stars">☆☆☆</div><div class="rating-text">No (Cloud dependent)</div></td>
-    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">No</div></td>
+    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">No (Cloud dependent)</div></td>
     <td><div class="rating-stars">☆☆☆</div><div class="rating-text">No</div></td>
     <td><div class="rating-stars">☆☆☆</div><div class="rating-text">No</div></td>
     <td><div class="rating-stars">★★☆</div><div class="rating-text">Depends on local nodes</div></td>
@@ -492,7 +492,7 @@
     <td class="highlight"><div class="rating-stars">★★★</div><div class="rating-text">Ultra-light (~15MB/0 Deps)</div></td>
     <td><div class="rating-stars">★★☆</div><div class="rating-text">Medium (~200MB/Ollama)</div></td>
     <td><div class="rating-stars">★☆☆</div><div class="rating-text">Heavy (Node.js required)</div></td>
-    <td><div class="rating-stars">★☆☆</div><div class="rating-text">Heavy (Node/Python)</div></td>
+    <td><div class="rating-stars">★★☆</div><div class="rating-text">Medium (Electron App)</div></td>
     <td><div class="rating-stars">★★☆</div><div class="rating-text">Light (No extra deps)</div></td>
     <td><div class="rating-stars">★★☆</div><div class="rating-text">Light (IDE dependent)</div></td>
     <td><div class="rating-stars">★☆☆</div><div class="rating-text">Heavy (Node.js required)</div></td>
@@ -501,30 +501,56 @@
     <td><div class="rating-stars">★★★</div><div class="rating-text">Zero (Web browser)</div></td>
   </tr>
   <tr>
-    <td class="feature-name">Initial Large Downloads</td>
-    <td class="highlight"><div class="rating-stars">★★★</div><div class="rating-text">None (On-demand)</div></td>
-    <td><div class="rating-stars">★☆☆</div><div class="rating-text">Extreme (2GB+ models)</div></td>
-    <td><div class="rating-stars">★★☆</div><div class="rating-text">Requires env packages</div></td>
-    <td><div class="rating-stars">★★☆</div><div class="rating-text">Requires env packages</div></td>
-    <td><div class="rating-stars">★★★</div><div class="rating-text">None</div></td>
-    <td><div class="rating-stars">★★★</div><div class="rating-text">None</div></td>
-    <td><div class="rating-stars">★★★</div><div class="rating-text">None</div></td>
-    <td><div class="rating-stars">★☆☆</div><div class="rating-text">Extreme (Multi-GB models)</div></td>
-    <td><div class="rating-stars">★☆☆</div><div class="rating-text">Heavy (System updates)</div></td>
-    <td><div class="rating-stars">★★★</div><div class="rating-text">None (Cloud)</div></td>
+    <td class="feature-name">Native Web Search</td>
+    <td class="highlight"><div class="rating-stars">★★★</div><div class="rating-text">Built-in (Fast & Invisible)</div></td>
+    <td><div class="rating-stars">★★★</div><div class="rating-text">Built-in Search</div></td>
+    <td><div class="rating-stars">★★☆</div><div class="rating-text">Expandable via MCP</div></td>
+    <td><div class="rating-stars">★☆☆</div><div class="rating-text">Weak</div></td>
+    <td><div class="rating-stars">★★☆</div><div class="rating-text">Yes (Internal/External)</div></td>
+    <td><div class="rating-stars">★★☆</div><div class="rating-text">Bing Integration</div></td>
+    <td><div class="rating-stars">★★★</div><div class="rating-text">Custom Search Component</div></td>
+    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">No (Pure engine)</div></td>
+    <td><div class="rating-stars">★★★</div><div class="rating-text">Built-in Engine</div></td>
+    <td><div class="rating-stars">★★★</div><div class="rating-text">Extreme (Auto crawler)</div></td>
   </tr>
   <tr>
-    <td class="feature-name">Billing & Quota Model</td>
-    <td class="highlight"><div class="rating-stars">★★★</div><div class="rating-text">Local Free / BYOK</div></td>
-    <td><div class="rating-stars">★★★</div><div class="rating-text">Local Free / BYOK</div></td>
-    <td><div class="rating-stars">★☆☆</div><div class="rating-text">Expensive Pay-per-Token</div></td>
-    <td><div class="rating-stars">★☆☆</div><div class="rating-text">Pay-per-Token</div></td>
-    <td><div class="rating-stars">★★☆</div><div class="rating-text">Enterprise Credits</div></td>
-    <td><div class="rating-stars">★☆☆</div><div class="rating-text">Expensive Subscriptions</div></td>
-    <td><div class="rating-stars">★★★</div><div class="rating-text">Free (Self-hosted)</div></td>
-    <td><div class="rating-stars">★★★</div><div class="rating-text">Free (Local deployment)</div></td>
-    <td><div class="rating-stars">★★☆</div><div class="rating-text">Free Base + VIP Sub</div></td>
-    <td><div class="rating-stars">★☆☆</div><div class="rating-text">Costly Sub / Long Waitlist</div></td>
+    <td class="feature-name">Daily Office Skills</td>
+    <td class="highlight"><div class="rating-stars">★★★</div><div class="rating-text">WeChat/Office/Calendar/Drop</div></td>
+    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">None</div></td>
+    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">None (Dev tool only)</div></td>
+    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">None (Dev tool only)</div></td>
+    <td><div class="rating-stars">★★★</div><div class="rating-text">Deep Enterprise Suite Integration</div></td>
+    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">None (Dev tool only)</div></td>
+    <td><div class="rating-stars">★★☆</div><div class="rating-text">Supports WeChat Bot bridge</div></td>
+    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">None (Raw Model)</div></td>
+    <td><div class="rating-stars">★★★</div><div class="rating-text">Cross-device System Assistant</div></td>
+    <td><div class="rating-stars">★★☆</div><div class="rating-text">Web automation / Scrapers</div></td>
+  </tr>
+  <tr>
+    <td class="feature-name">Sandbox Dev & Worktree</td>
+    <td class="highlight"><div class="rating-stars">☆☆☆</div><div class="rating-text">None (Focuses on daily office tasks, not pro dev)</div></td>
+    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">None</div></td>
+    <td><div class="rating-stars">★★★</div><div class="rating-text">Native, strong execution</div></td>
+    <td><div class="rating-stars">★★★</div><div class="rating-text">Pro Sandbox & Git Management</div></td>
+    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">None</div></td>
+    <td><div class="rating-stars">★★★</div><div class="rating-text">VSCode Ecosystem</div></td>
+    <td><div class="rating-stars">★★★</div><div class="rating-text">Strong Workflow Sandbox</div></td>
+    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">None</div></td>
+    <td><div class="rating-stars">★☆☆</div><div class="rating-text">Weak (System terminal)</div></td>
+    <td><div class="rating-stars">★★★</div><div class="rating-text">Cloud Isolated Containers</div></td>
+  </tr>
+  <tr>
+    <td class="feature-name">Local Knowledge Graph</td>
+    <td class="highlight"><div class="rating-stars">★★★</div><div class="rating-text">Yes (Vector + Visual Graph)</div></td>
+    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">No (Manual RAG needed)</div></td>
+    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">No (Must upload to cloud)</div></td>
+    <td><div class="rating-stars">★★☆</div><div class="rating-text">Yes (Local code indexing)</div></td>
+    <td><div class="rating-stars">★★☆</div><div class="rating-text">Yes (Enterprise Cloud DB)</div></td>
+    <td><div class="rating-stars">★★☆</div><div class="rating-text">Yes (Code Vectors)</div></td>
+    <td><div class="rating-stars">★☆☆</div><div class="rating-text">No (Expensive to mount)</div></td>
+    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">No retrieval mechanism</div></td>
+    <td><div class="rating-stars">★★☆</div><div class="rating-text">Global system file search</div></td>
+    <td><div class="rating-stars">★☆☆</div><div class="rating-text">Single-session memory only</div></td>
   </tr>
   <tr>
     <td class="feature-name">Local GGUF Support</td>
@@ -540,37 +566,37 @@
     <td><div class="rating-stars">☆☆☆</div><div class="rating-text">No (Pure Cloud)</div></td>
   </tr>
   <tr>
-    <td class="feature-name">Local Knowledge Graph</td>
-    <td class="highlight"><div class="rating-stars">★★★</div><div class="rating-text">Yes (Vector + Visual Graph)</div></td>
-    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">No (Manual RAG needed)</div></td>
-    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">No (Must upload to cloud)</div></td>
-    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">No</div></td>
-    <td><div class="rating-stars">★★☆</div><div class="rating-text">Yes (Enterprise Cloud DB)</div></td>
-    <td><div class="rating-stars">★★☆</div><div class="rating-text">Yes (Code Vectors)</div></td>
-    <td><div class="rating-stars">★☆☆</div><div class="rating-text">No (Expensive to mount)</div></td>
-    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">No retrieval mechanism</div></td>
-    <td><div class="rating-stars">★★☆</div><div class="rating-text">Global system file search</div></td>
-    <td><div class="rating-stars">★☆☆</div><div class="rating-text">Single-session memory only</div></td>
+    <td class="feature-name">Billing & Quota Model</td>
+    <td class="highlight"><div class="rating-stars">★★★</div><div class="rating-text">Local Free / BYOK</div></td>
+    <td><div class="rating-stars">★★★</div><div class="rating-text">Local Free / BYOK</div></td>
+    <td><div class="rating-stars">★☆☆</div><div class="rating-text">Expensive Pay-per-Token</div></td>
+    <td><div class="rating-stars">★☆☆</div><div class="rating-text">Costly Sub / Pay-per-Token</div></td>
+    <td><div class="rating-stars">★★☆</div><div class="rating-text">Enterprise Credits</div></td>
+    <td><div class="rating-stars">★☆☆</div><div class="rating-text">Expensive Subscriptions</div></td>
+    <td><div class="rating-stars">★★★</div><div class="rating-text">Free (Self-hosted)</div></td>
+    <td><div class="rating-stars">★★★</div><div class="rating-text">Free (Local deployment)</div></td>
+    <td><div class="rating-stars">★★☆</div><div class="rating-text">Free Base + VIP Sub</div></td>
+    <td><div class="rating-stars">★☆☆</div><div class="rating-text">Costly Sub / Long Waitlist</div></td>
   </tr>
   <tr>
-    <td class="feature-name">Daily Office Skills</td>
-    <td class="highlight"><div class="rating-stars">★★★</div><div class="rating-text">WeChat/Calendar/Web Drop</div></td>
-    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">None</div></td>
-    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">None (Dev tool only)</div></td>
-    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">None (Dev tool only)</div></td>
-    <td><div class="rating-stars">★★★</div><div class="rating-text">Deep Enterprise Suite Integration</div></td>
-    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">None (Dev tool only)</div></td>
-    <td><div class="rating-stars">★★☆</div><div class="rating-text">Supports WeChat Bot bridge</div></td>
-    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">None (Raw Model)</div></td>
-    <td><div class="rating-stars">★★★</div><div class="rating-text">Cross-device System Assistant</div></td>
-    <td><div class="rating-stars">★★☆</div><div class="rating-text">Web automation / Scrapers</div></td>
+    <td class="feature-name">Initial Large Downloads</td>
+    <td class="highlight"><div class="rating-stars">★★★</div><div class="rating-text">None (On-demand)</div></td>
+    <td><div class="rating-stars">★☆☆</div><div class="rating-text">Extreme (2GB+ models)</div></td>
+    <td><div class="rating-stars">★★☆</div><div class="rating-text">Requires env packages</div></td>
+    <td><div class="rating-stars">★★★</div><div class="rating-text">None</div></td>
+    <td><div class="rating-stars">★★★</div><div class="rating-text">None</div></td>
+    <td><div class="rating-stars">★★★</div><div class="rating-text">None</div></td>
+    <td><div class="rating-stars">★★★</div><div class="rating-text">None</div></td>
+    <td><div class="rating-stars">★☆☆</div><div class="rating-text">Extreme (Multi-GB models)</div></td>
+    <td><div class="rating-stars">★☆☆</div><div class="rating-text">Heavy (System updates)</div></td>
+    <td><div class="rating-stars">★★★</div><div class="rating-text">None (Cloud)</div></td>
   </tr>
   <tr>
     <td class="feature-name">Security & Privacy Rights</td>
     <td class="highlight"><div class="rating-stars">★★★</div><div class="rating-text">Strong (Sandbox + Outbox)</div></td>
     <td><div class="rating-stars">★★☆</div><div class="rating-text">Medium (Local execution)</div></td>
     <td><div class="rating-stars">★☆☆</div><div class="rating-text">Weak (Blind terminal risks)</div></td>
-    <td><div class="rating-stars">★★☆</div><div class="rating-text">Medium (Code Gen)</div></td>
+    <td><div class="rating-stars">★★☆</div><div class="rating-text">Medium (Cloud code audit)</div></td>
     <td><div class="rating-stars">★★★</div><div class="rating-text">Strong (Enterprise Sandbox)</div></td>
     <td><div class="rating-stars">★★☆</div><div class="rating-text">Medium (IDE context limits)</div></td>
     <td><div class="rating-stars">★★★</div><div class="rating-text">Strong (Docker Isolation)</div></td>
