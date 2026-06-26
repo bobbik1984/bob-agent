@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="website/assets/bob_logo.svg" alt="Bob Agent Logo" width="120" style="margin-bottom: 10px;" />
+  <img src="resources/bob_logo.svg" alt="Bob Agent Logo" width="120" style="margin-bottom: 10px;" />
   <h1 align="center">Bob Agent</h1>
   <p align="center">
     <strong>Your Ghost Co-Pilot on the Desktop</strong><br/>
