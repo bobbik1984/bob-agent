@@ -6,19 +6,16 @@ pub mod types;
 pub mod api;
 pub mod monitor;
 pub mod accounts;
-pub mod session_mgr;
 pub mod msg_queue;
 pub mod commands;
 pub mod login_qr;
 pub mod cdn;
 
 use std::sync::{Arc, Mutex, RwLock};
-use session_mgr::SessionManager;
 use msg_queue::MessageQueue;
 use tokio::sync::watch;
 
 pub struct WechatState {
-    pub session_mgr: Arc<SessionManager>,
     pub msg_queue: Arc<MessageQueue>,
     pub account_id: RwLock<Option<String>>,
     pub connected: RwLock<bool>,
@@ -30,7 +27,6 @@ pub struct WechatState {
 impl WechatState {
     pub fn new() -> Self {
         Self {
-            session_mgr: Arc::new(SessionManager::new()),
             msg_queue: Arc::new(MessageQueue::new()),
             account_id: RwLock::new(None),
             connected: RwLock::new(false),

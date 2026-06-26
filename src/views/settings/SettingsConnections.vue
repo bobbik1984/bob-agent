@@ -670,6 +670,12 @@ onUnmounted(() => {
   margin-bottom: var(--space-5);
 }
 
+.field-hint {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  line-height: 1.4;
+}
+
 .section-title {
   display: flex;
   align-items: center;

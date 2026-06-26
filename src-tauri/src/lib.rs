@@ -29,6 +29,7 @@ mod exports;
 mod telegram;
 mod discord;
 mod kg;
+pub mod im_sessions;
 mod file_share;
 mod web_drop;
 mod goal;

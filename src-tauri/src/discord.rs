@@ -201,8 +201,19 @@ async fn handle_message(app: &AppHandle, client: &reqwest::Client, token: &str, 
         let channel_id = message.get("channel_id").and_then(|v| v.as_str()).unwrap_or("");
         if channel_id.is_empty() || text.is_empty() { return; }
 
-        let conv_id = format!("discord-{}", channel_id);
+        let user_id = format!("discord-{}", channel_id);
         log::info!("Discord received message from {}: {}", channel_id, text);
+
+        // 拦截全局 /sessions 等指令
+        if let Some(reply_text) = crate::im_sessions::handle_im_command(&user_id, text) {
+            let _ = client.post(&format!("https://discord.com/api/v10/channels/{}/messages", channel_id))
+                .header("Authorization", format!("Bot {}", token))
+                .json(&serde_json::json!({ "content": reply_text }))
+                .send().await;
+            return;
+        }
+
+        let conv_id = crate::im_sessions::get_or_create_conv_id(&user_id);
 
         // Send typing action
         let _ = client.post(&format!("https://discord.com/api/v10/channels/{}/typing", channel_id))

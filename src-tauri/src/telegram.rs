@@ -103,9 +103,19 @@ pub async fn start_telegram_bot(app: AppHandle, token: String) {
 async fn handle_message(app: &AppHandle, client: &reqwest::Client, token: &str, message: &Value) {
     if let Some(text) = message.get("text").and_then(|v| v.as_str()) {
         let chat_id = message.get("chat").and_then(|c| c.get("id")).and_then(|v| v.as_i64()).unwrap_or(0);
-        let conv_id = format!("tg-{}", chat_id);
+        let user_id = format!("tg-{}", chat_id);
         
         log::info!("Telegram received message from {}: {}", chat_id, text);
+
+        // 拦截全局 /sessions 等指令
+        if let Some(reply_text) = crate::im_sessions::handle_im_command(&user_id, text) {
+            let _ = client.post(&format!("https://api.telegram.org/bot{}/sendMessage", token))
+                .json(&serde_json::json!({ "chat_id": chat_id, "text": reply_text }))
+                .send().await;
+            return;
+        }
+
+        let conv_id = crate::im_sessions::get_or_create_conv_id(&user_id);
 
         // Send typing action
         let _ = client.post(&format!("https://api.telegram.org/bot{}/sendChatAction", token))

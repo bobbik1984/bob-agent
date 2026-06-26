@@ -380,7 +380,13 @@ fn check_upcoming_todos(app: &AppHandle, db_path: &std::path::Path) {
         // 绑定并发送到已配对的微信端进行主动提醒
         if let Some(wechat_state) = app.try_state::<std::sync::Arc<crate::wechat::WechatState>>() {
             if *wechat_state.connected.read().unwrap() {
-                let wxids = wechat_state.session_mgr.get_all_wxids();
+                let wxids: Vec<String> = crate::im_sessions::SESSION_MANAGER.get_all_user_ids().into_iter().filter_map(|id| {
+                    if id.starts_with("wechat-") {
+                        Some(id.strip_prefix("wechat-").unwrap().to_string())
+                    } else {
+                        None
+                    }
+                }).collect();
                 for wxid in wxids {
                     let msg_text = format!("【📅 Bob 日程提醒】今日待办：{}", title);
                     let state_clone = wechat_state.inner().clone();
