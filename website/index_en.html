@@ -693,14 +693,15 @@
         <div class="roadmap-item completed">
           <div class="roadmap-dot"></div>
           <div class="roadmap-meta">
-            <span class="roadmap-version">Milestone 14 — Cognitive Graph & Memory</span>
+            <span class="roadmap-version">Milestone 14 — Cognitive Graph & Memory Mechanism</span>
           </div>
           <div class="roadmap-content">
-            <p>Integrated SQLite native graph canvas with Vis.js frontend rendering; completed Soul-Session-Wiki 3-tier memory funnel and Clerk model background silent Dream self-tuning.</p>
+            <p>Connected SQLite native graph canvas with Vis.js frontend rendering; completed the Soul-Session-Wiki three-layer memory funnel and Clerk model backend silent Dream auto-tuning mechanism.</p>
             <ul>
               <li>SQLite storage engine & alias merging (`kg_merge_nodes`)</li>
               <li>Dream Engine 24h facts cleanup & `SOUL.md` rewrite</li>
               <li>Graph Search & BFS relationship traverse components</li>
+              <li><strong>[Infrastructure Ready]</strong> Telegram & Discord Bot underlying communication and event routing framework</li>
             </ul>
           </div>
         </div>
@@ -729,9 +730,8 @@
             <span class="roadmap-version">Milestone 16 — Cross-Platform Bot Matrix</span>
           </div>
           <div class="roadmap-content">
-            <p>Building upon the completed underlying communication framework, we continue expanding Bob's access channels to allow secure and instant remote wake-up of the local AI brain from any terminal.</p>
+            <p>Building upon the completed communication framework, we continue expanding Bob's access channels to allow secure and instant remote wake-up of the local AI brain from any terminal.</p>
             <ul>
-              <li><strong>[Infrastructure Ready]</strong> Telegram / Discord Bot underlying communication and event routing framework</li>
               <li>Develop full-featured remote command channels and group collaborative invocation logic</li>
               <li>Optimize cross-region WebRTC penetration success rate and signaling forwarding latency</li>
             </ul>
@@ -946,8 +946,21 @@
     const roadmapContainer = document.getElementById('roadmap-container');
     if (roadmapHeader && roadmapContainer) {
       roadmapHeader.addEventListener('click', () => {
-        roadmapHeader.classList.toggle('active');
+        const isExpanded = roadmapHeader.classList.toggle('active');
         roadmapContainer.classList.toggle('expanded');
+        
+        if (isExpanded) {
+          // Auto-scroll to active item
+          setTimeout(() => {
+            const activeItem = roadmapContainer.querySelector('.roadmap-item.active');
+            if (activeItem) {
+              roadmapContainer.scrollTo({
+                top: activeItem.offsetTop - 20,
+                behavior: 'smooth'
+              });
+            }
+          }, 350);
+        }
       });
     }
   </script>
