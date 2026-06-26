@@ -458,6 +458,8 @@
                     <th>GitHub Copilot</th>
                     <th>OpenClaw</th>
                     <th>DeepSeek (Local)</th>
+                    <th>腾讯 Marvis</th>
+                    <th>Manus (云端)</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -471,6 +473,8 @@
                     <td>IDE 插件区</td>
                     <td>服务端运行</td>
                     <td>数GB 权重</td>
+                    <td>系统级整合(重型)</td>
+                    <td>无本地客户端(云端)</td>
                   </tr>
                   <tr>
                     <td class="feature-name">外部环境依赖</td>
@@ -482,6 +486,8 @@
                     <td>中依赖(需 IDE 环境)</td>
                     <td>高依赖(需 Node.js 环境)</td>
                     <td>极高依赖 (需配置 CUDA)</td>
+                    <td>强绑定腾讯生态</td>
+                    <td>全云端隔离沙盒</td>
                   </tr>
                   <tr>
                     <td class="feature-name">首次运行大文件下载</td>
@@ -493,6 +499,8 @@
                     <td>无</td>
                     <td>无</td>
                     <td>极重 (需下载数GB 权重)</td>
+                    <td>重 (系统级更新与模型)</td>
+                    <td>无 (网页端)</td>
                   </tr>
                   <tr>
                     <td class="feature-name">计费与额度模式</td>
@@ -504,6 +512,8 @@
                     <td>固定订阅制(月付/年付)</td>
                     <td>免费 (私有部署)</td>
                     <td>免费 (本地运行)</td>
+                    <td>绑定云端生态</td>
+                    <td>高昂月费订阅制</td>
                   </tr>
                   <tr>
                     <td class="feature-name">本地 GGUF 模型支持</td>
@@ -515,6 +525,8 @@
                     <td>不支按(强绑定云端API)</td>
                     <td>支持 (可调用远程节点</td>
                     <td>本身即为大模型</td>
+                    <td>支持 (本地 NPU 引擎)</td>
+                    <td>不支持 (纯云端)</td>
                   </tr>
                   <tr>
                     <td class="feature-name">本地知识库与脑图</td>
@@ -526,6 +538,8 @@
                     <td>有(代码向量检索</td>
                     <td>无(需外部挂载)</td>
                     <td>无(无检索机制</td>
+                    <td>全局物理文件检索</td>
+                    <td>单次会话临时空间</td>
                   </tr>
                   <tr>
                     <td class="feature-name">日常办公专属技能</td>
@@ -537,6 +551,8 @@
                     <td>无(纯开发工全</td>
                     <td>部分支持 (提供微信 Bot 桥</td>
                     <td>无(纯大模型)</td>
+                    <td>跨端可视化控制</td>
+                    <td>爬虫与代码编写</td>
                   </tr>
                   <tr>
                     <td class="feature-name">安全确权机制</td>
@@ -548,6 +564,8 @@
                     <td>强安全(仅限代码沙盒)</td>
                     <td>中等 (基于节点权限)</td>
                     <td>安全 (数据不出本地)</td>
+                    <td>极高风险(直连系统底层)</td>
+                    <td>数据出境风险(云端黑盒)</td>
                   </tr>
                 </tbody>
               </table>
@@ -573,6 +591,11 @@
               <div class="advantage-block">
                 <h5>四、本地办公特化：开箱即用的白领日常技能</h5>
                 <p>Claude Code、Codex 或Copilot 是专为程序员编写代码而生的IDE 插件或终端黑窗口；而bob 开箱即自带了专为泛白领办公定制的实用工具链。它支持用大白话安排日程并生或WeekTimeline 提醒，支持利用手机微信扫码直连，在外用微信即可给电脑发链接抓取或传送文档，并在局域网内提供零知识端到端加密的大文件极速共享（Web Drop）。所有的日常法门，bob 都已为您封装完毕。</p>
+              </div>
+              
+              <div class="advantage-block">
+                <h5>五、Agent 技术路线：拒绝接管系统与盲目云端黑盒</h5>
+                <p>近期如腾讯 Marvis 试图直接获取最高权限操控物理系统，这在带来遍历文件便利的同时，也带来了无法估量的本地安全隐患；而 Manus 则走向另一个极端，将所有任务（爬虫、执行代码）抛在极不可控的云端异步沙盒中，导致纠错成本极高。bob 始终坚守“人机共驾”边界，只做你桌面上的数字大脑，绝不越权替你点击，绝不擅自让数据离开本地设备。人类指挥，bob 提供决策，安全与高效完美统一。</p>
               </div>
             </div>
           </div>
