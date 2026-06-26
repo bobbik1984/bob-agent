@@ -32,6 +32,48 @@
     </div>
   </section>
 
+  <!-- 系统自检 -->
+  <section class="settings-section card">
+    <h3 class="section-title">
+      <Stethoscope :size="16" class="section-icon" />
+      {{ $t('settings.diagnostics') || '系统自检' }}
+    </h3>
+    <div class="about-info">
+      <p>一键扫描配置、数据库完整性与模型连通性。</p>
+    </div>
+    
+    <div style="margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border-subtle);">
+      <button class="btn btn-primary" style="display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%;" @click="runDiagnostics" :disabled="isDiagnosing">
+        <Activity :size="14" v-if="!isDiagnosing" />
+        <Loader2 :size="14" class="spin" v-else />
+        <span>{{ isDiagnosing ? '检测中...' : '开始检测' }}</span>
+      </button>
+    </div>
+
+    <!-- 诊断结果 -->
+    <div v-if="diagnosticResult" style="margin-top: 16px; padding: 12px; border-radius: 8px; background: var(--bg-hover);">
+      <div v-if="diagnosticResult.healthy" style="display: flex; align-items: center; gap: 8px; color: var(--color-success, #10b981);">
+        <CheckCircle2 :size="16" />
+        <span style="font-size: 13px; font-weight: 500;">系统运行完美，未发现异常</span>
+      </div>
+      <div v-else>
+        <div style="font-size: 13px; font-weight: 500; margin-bottom: 8px; color: var(--text-primary);">发现以下异常：</div>
+        <div v-for="issue in diagnosticResult.issues" :key="issue.code" style="display: flex; align-items: flex-start; gap: 8px; margin-bottom: 8px; font-size: 13px; color: var(--text-secondary);">
+          <div :style="{ color: issue.severity === 'error' ? 'var(--color-error)' : 'var(--color-warning)' }">
+            <AlertCircle :size="14" v-if="issue.severity === 'error'" />
+            <AlertTriangle :size="14" v-else />
+          </div>
+          <div style="flex: 1;">
+            <div style="font-weight: 500; color: var(--text-primary);">{{ issue.message }}</div>
+            <div style="font-size: 12px; margin-top: 6px;" v-if="issue.fixable">
+              <button class="btn btn-primary" style="padding: 4px 10px; font-size: 12px; height: 26px;" @click="fixIssue(issue.code)">一键自愈修复</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <!-- 使用文档弹窗 -->
   <Transition name="briefing-fade">
     <div v-if="showHelpModal" class="wechat-modal-overlay" @click.self="showHelpModal = false">
@@ -54,7 +96,7 @@ import { ref, onMounted } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
-import { Info, BookOpen, FolderOpen, FileText, Trash2, X } from 'lucide-vue-next';
+import { Info, BookOpen, FolderOpen, FileText, Trash2, X, Stethoscope, Activity, Loader2, CheckCircle2, AlertCircle, AlertTriangle } from 'lucide-vue-next';
 
 const props = defineProps({
   config: { type: Object, required: true },
@@ -105,6 +147,38 @@ onMounted(async () => {
     appVersion.value = await window.electronAPI.getVersion();
   }
 });
+
+// Diagnostics Logic
+const isDiagnosing = ref(false);
+const diagnosticResult = ref(null);
+
+async function runDiagnostics() {
+  if (isDiagnosing.value) return;
+  isDiagnosing.value = true;
+  diagnosticResult.value = null;
+  try {
+    const res = await window.electronAPI.healthCheck();
+    diagnosticResult.value = res;
+  } catch (e) {
+    console.error("Diagnostics failed", e);
+  } finally {
+    isDiagnosing.value = false;
+  }
+}
+
+async function fixIssue(code) {
+  try {
+    const res = await window.electronAPI.autoFix(code);
+    if (res?.ok) {
+      alert("自愈修复成功：" + res.message);
+      await runDiagnostics(); // re-run diagnostics after fix
+    } else {
+      alert("修复失败：" + (res?.message || '未知错误'));
+    }
+  } catch (e) {
+    console.error("AutoFix failed", e);
+  }
+}
 </script>
 
 <style scoped>
@@ -274,5 +348,13 @@ onMounted(async () => {
 .briefing-fade-leave-to {
   opacity: 0;
   transform: scale(0.95);
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+.spin {
+  animation: spin 1s linear infinite;
 }
 </style>

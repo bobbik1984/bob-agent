@@ -11,7 +11,7 @@
       <span class="health-icon">{{ healthBanner.severity === 'error' ? '!' : 'i' }}</span>
       <span class="health-text">{{ healthBanner.message }}</span>
       <button v-if="healthBanner.fixable" class="health-fix-btn" @click="handleAutoFix(healthBanner.code)">修复</button>
-      <button class="health-dismiss-btn" @click="healthBanner = null">&times;</button>
+      <button class="health-dismiss-btn" @click="dismissHealthBanner(healthBanner.code)">&times;</button>
     </div>
     <!-- 消息区域 -->
     <div class="messages-area" ref="messagesArea">
@@ -530,6 +530,13 @@ const showAgentModeSwitcher = ref(false);
 // ── T-1304: Doctor 健康横幅 ──────────────────────────
 const healthBanner = ref(null);
 
+function dismissHealthBanner(code) {
+  healthBanner.value = null;
+  if (code) {
+    localStorage.setItem('dismissed_banner_' + code, Date.now().toString());
+  }
+}
+
 // ── T-1305: 聊天就绪守卫 ─────────────────────────────
 const chatReady = ref(true);  // fail-open: 默认可发送
 const chatReadyMsg = ref('');
@@ -929,6 +936,12 @@ onMounted(async () => {
     if (health && !health.healthy) {
       const firstIssue = health.issues?.[0];
       if (firstIssue) {
+        const lastDismissed = localStorage.getItem('dismissed_banner_' + firstIssue.code);
+        if (lastDismissed) {
+          const hoursPassed = (Date.now() - parseInt(lastDismissed, 10)) / (1000 * 60 * 60);
+          if (hoursPassed < 24) return;
+        }
+
         healthBanner.value = {
           severity: firstIssue.severity,
           message: firstIssue.message,

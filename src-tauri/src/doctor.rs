@@ -73,22 +73,50 @@ pub fn system_health_check() -> Value {
         });
     }
 
-    // 3. API Key 检查 — 必须至少有一个 provider 配置了 key
+    // 3. API Key 检查 — 校验当前选中模型对应的 Provider 是否配了 Key
     let config = super::read_config();
-    let has_any_key = config.get("apiKeys")
-        .and_then(|v| v.as_object())
-        .map(|m| m.values().any(|v| {
-            v.as_str().map_or(false, |s| !s.is_empty() && s != "vaulted")
-        }))
-        .unwrap_or(false);
+    let current_model = config.get("model")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
 
-    if !has_any_key {
-        results.push(CheckResult {
-            code: "NO_API_KEY".into(),
-            severity: "error".into(),
-            message: "未配置任何 API Key，Bob 无法与大模型对话".into(),
-            fixable: false,
-        });
+    let current_provider = if current_model.contains(':') {
+        current_model.split(':').next().unwrap_or("")
+    } else {
+        ""
+    };
+
+    if !current_provider.is_empty() && current_provider != "ollama" && current_provider != "custom" {
+        let provider_key = config.get("apiKeys")
+            .and_then(|v| v.as_object())
+            .and_then(|m| m.get(current_provider))
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+
+        if provider_key.is_empty() || provider_key == "vaulted" {
+            results.push(CheckResult {
+                code: "API_KEY_MISSING".into(),
+                severity: "error".into(),
+                message: format!("当前选中的服务商 [{}] 未配置 API Key，无法进行对话", current_provider),
+                fixable: false,
+            });
+        }
+    } else if current_provider.is_empty() {
+        // 如果连 provider 都解析不出，再走全盘保底检查
+        let has_any_key = config.get("apiKeys")
+            .and_then(|v| v.as_object())
+            .map(|m| m.values().any(|v| {
+                v.as_str().map_or(false, |s| !s.is_empty() && s != "vaulted")
+            }))
+            .unwrap_or(false);
+
+        if !has_any_key {
+            results.push(CheckResult {
+                code: "NO_API_KEY".into(),
+                severity: "error".into(),
+                message: "未配置任何 API Key，Bob 无法与大模型对话".into(),
+                fixable: false,
+            });
+        }
     }
 
     // 4. 主模型配置

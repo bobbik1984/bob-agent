@@ -313,10 +313,8 @@ const days = computed(() => {
   const result = [];
   
   const baseDate = new Date(today);
-  // 默认周一为起点 (如果是周日，d.getDay()是0，周一是1)
-  const dayOfWeek = baseDate.getDay() === 0 ? 7 : baseDate.getDay();
-  // 倒退到本周一
-  baseDate.setDate(baseDate.getDate() - dayOfWeek + 1 + (weekOffset.value * 7));
+  // 以今天为中心（往过去推 3 天，往未来推 3 天）
+  baseDate.setDate(baseDate.getDate() - 3 + (weekOffset.value * 7));
 
   for (let offset = 0; offset < 7; offset++) {
     const d = new Date(baseDate);

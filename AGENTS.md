@@ -102,6 +102,21 @@ dist-release/
 
 > ⚠️ `dist-release/` 已被 `.gitignore` 排除，二进制产物不入版本控制。
 
+### 🌐 官网部署工作流 (Marketing Website Pipeline)
+
+`bob-agent/website/` 目录存放的是 `bob.bobbik.org` 的着陆页（Landing Page）和静态资源。
+> **⚠️ 严禁假定自动同步**：该目录**没有**包含在 Syncthing 的同步范围内，必须通过脚本手动推送到 VPS1 节点。
+
+#### 部署方式：
+在项目根目录运行一键部署脚本：
+```bash
+deploy_website.bat
+```
+执行过程说明：
+1. **打包**：将 `website/` 目录压缩为 `.zip`。
+2. **传输**：通过 `pscp` 和预配置的 `Huoshan` SSH Session 将文件推送到 VPS1 (115.190.248.194) 的 `/tmp/` 目录。
+3. **部署**：通过 `plink` 远程执行 `sudo unzip` 解压到 Caddy 的目标目录 `/opt/bob/`。
+
 ---
 
 ## 编码规范
@@ -134,6 +149,7 @@ dist-release/
 
 ## JIT 指针
 
+- **全量功能与逻辑字典 (LLM-Wiki)**：详见 [LLM_WIKI.md](LLM_WIKI.md) (当需要修改、查找或调试具体功能如“闪念速记”时，请优先阅读此字典)
 - **架构/目录树/IPC/依赖**：详见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 - **UI 设计铁律 (配色/对齐/i18n)**：详见 [design_principles.md](design_principles.md)
 - **灵魂定义**：详见 [data/memory/SOUL.md](data/memory/SOUL.md)

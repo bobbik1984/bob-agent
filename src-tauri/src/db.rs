@@ -8,14 +8,55 @@ pub struct DbState(pub Mutex<Connection>);
 pub fn init_db(data_dir: &std::path::Path) -> Connection {
     let db_path = data_dir.join("bob.db");
 
-    // 自动冷备份数据库 (T-1309)
+    let db_backup = data_dir.join("bob.db.bak");
+
+    // ==========================================
+    // 1. 无感自检与自愈 (Self-Healing)
+    // ==========================================
     if db_path.exists() {
-        let db_backup = data_dir.join("bob.db.bak");
-        let _ = std::fs::copy(&db_path, &db_backup);
+        let is_healthy = match Connection::open(&db_path) {
+            Ok(probe) => {
+                let mut healthy = false;
+                if let Ok(mut stmt) = probe.prepare("PRAGMA quick_check;") {
+                    if let Ok(mut rows) = stmt.query([]) {
+                        if let Ok(Some(row)) = rows.next() {
+                            let result: String = row.get(0).unwrap_or_default();
+                            if result.to_lowercase() == "ok" {
+                                healthy = true;
+                            }
+                        }
+                    }
+                }
+                // 显式释放 probe，解除 SQLite 文件占用锁
+                drop(probe);
+                healthy
+            }
+            Err(_) => false,
+        };
+
+        if is_healthy {
+            // 健康：更新冷备份文件，保证备份池 100% 纯净
+            let _ = std::fs::copy(&db_path, &db_backup);
+        } else {
+            // 损坏：尝试从备份安全回滚
+            log::warn!("T-1304: Database corruption detected during startup. Attempting self-healing...");
+            if db_backup.exists() {
+                if std::fs::copy(&db_backup, &db_path).is_err() {
+                    // 如果连恢复都失败，干脆重命名坏库，触发降级创建空库
+                    let _ = std::fs::rename(&db_path, data_dir.join("bob.db.corrupted"));
+                }
+            } else {
+                // 没有备份可用，直接重命名坏库隔离
+                let _ = std::fs::rename(&db_path, data_dir.join("bob.db.corrupted"));
+            }
+        }
     }
 
+    // ==========================================
+    // 2. 正式开辟全局连接
+    // ==========================================
     let conn = Connection::open(&db_path)
-        .expect("Failed to open SQLite database");
+        .expect("Failed to open SQLite database even after self-healing attempts");
 
     conn.execute_batch("
         CREATE TABLE IF NOT EXISTS conversations (
