@@ -459,8 +459,8 @@ pub async fn check_and_dream(app: AppHandle) {
         );
     }
 
-    log::info!("[Evolution] Dream complete: stale={}, merged={}, soul_refined={}",
-        report.stale_cleaned, report.memories_merged, report.soul_refined);
+    log::info!("[Evolution] Dream complete: stale={}, merged={}, soul_refined={}, failure_insights={}",
+        report.stale_cleaned, report.memories_merged, report.soul_refined, report.failure_insights);
 }
 
 struct DreamReport {
@@ -468,6 +468,7 @@ struct DreamReport {
     stale_cleaned: i64,
     memories_merged: i64,
     soul_refined: bool,
+    failure_insights: i64,
     summary: String,
     soul_hash: String,
 }
@@ -479,6 +480,7 @@ async fn run_dream_pipeline(_app: &AppHandle) -> DreamReport {
         stale_cleaned: 0,
         memories_merged: 0,
         soul_refined: false,
+        failure_insights: 0,
         summary: String::new(),
         soul_hash: String::new(),
     };
@@ -494,6 +496,9 @@ async fn run_dream_pipeline(_app: &AppHandle) -> DreamReport {
     report.soul_refined = refined;
     report.soul_hash = hash;
 
+    // ── Phase 4: 失败模式分析 (目标 19) ────────────────
+    report.failure_insights = phase_failure_analysis().await;
+
     // 构建摘要
     let mut summary_parts = Vec::new();
     if report.stale_cleaned > 0 {
@@ -505,6 +510,9 @@ async fn run_dream_pipeline(_app: &AppHandle) -> DreamReport {
     if report.soul_refined {
         summary_parts.push("SOUL.md 已精炼".to_string());
     }
+    if report.failure_insights > 0 {
+        summary_parts.push(format!("从执行失败中提炼了 {} 条避坑指南", report.failure_insights));
+    }
     report.summary = if summary_parts.is_empty() {
         "无需更新".to_string()
     } else {
@@ -512,6 +520,114 @@ async fn run_dream_pipeline(_app: &AppHandle) -> DreamReport {
     };
 
     report
+}
+
+/// Phase 4 (目标 19): 失败模式分析 — 扫描 execution_errors, 提炼避坑指南并追加到 SOUL.md
+async fn phase_failure_analysis() -> i64 {
+    let db_path = super::get_data_dir().join("bob.db");
+    let conn = match rusqlite::Connection::open(&db_path) {
+        Ok(c) => c,
+        Err(_) => return 0,
+    };
+
+    // 读取未分析的错误记录 (48h 窗口)
+    let errors = crate::db::get_unanalyzed_errors(&conn, 48);
+    if errors.is_empty() {
+        return 0;
+    }
+
+    log::info!("[Evolution] Phase 4: Analyzing {} execution errors", errors.len());
+
+    // 按 (tool_name, error_type) 分组统计
+    let mut groups: HashMap<String, usize> = HashMap::new();
+    let mut error_details = Vec::new();
+    let mut ids_to_mark: Vec<i64> = Vec::new();
+
+    for err in &errors {
+        let tool = err.get("tool_name").and_then(|v| v.as_str()).unwrap_or("unknown");
+        let etype = err.get("error_type").and_then(|v| v.as_str()).unwrap_or("unknown");
+        let msg = err.get("error_message").and_then(|v| v.as_str()).unwrap_or("");
+        let key = format!("{}/{}", tool, etype);
+        *groups.entry(key.clone()).or_insert(0) += 1;
+
+        // 取每组最多 2 条详情
+        if groups[&key] <= 2 {
+            let msg_short: String = msg.chars().take(200).collect();
+            error_details.push(format!("- [{}] {}: {}", tool, etype, msg_short));
+        }
+
+        if let Some(id) = err.get("id").and_then(|v| v.as_i64()) {
+            ids_to_mark.push(id);
+        }
+    }
+
+    // 构建摘要
+    let group_summary: Vec<String> = groups.iter()
+        .map(|(k, v)| format!("  {} (×{})", k, v))
+        .collect();
+
+    let analysis_prompt = format!(
+        "分析以下 Bob Agent 过去 48 小时的执行失败记录，提炼出 3-5 条最有价值的避坑指南。\n\
+         每条格式: '⚠️ 当 [场景] 时，应 [正确做法]，避免 [错误做法]。'\n\
+         只输出真正高频或严重的模式，不要列举琐碎错误。如果错误记录全是偶发的，可以只输出 1-2 条或不输出。\n\n\
+         失败模式统计 ({} 条记录, {} 个模式):\n{}\n\n\
+         具体错误详情 (每组取样):\n{}",
+        errors.len(), groups.len(),
+        group_summary.join("\n"),
+        error_details.join("\n")
+    );
+
+    // 调用 Clerk 分析
+    let insights = crate::llm::call_clerk_oneshot(
+        "你是 Bob Agent 的执行诊断引擎。只输出避坑指南条目，不要输出其他内容。",
+        &analysis_prompt,
+        512
+    ).await;
+
+    let insights_text = match insights {
+        Some(text) if !text.trim().is_empty() => text.trim().to_string(),
+        _ => {
+            log::info!("[Evolution] Phase 4: Clerk returned empty insights, marking as analyzed");
+            // 即使 Clerk 没返回内容，也标记已分析避免重复处理
+            let _ = crate::db::mark_errors_analyzed(&conn, &ids_to_mark);
+            return 0;
+        }
+    };
+
+    // 统计提炼出的条目数
+    let insight_count = insights_text.lines()
+        .filter(|l| l.trim().starts_with('⚠') || l.trim().starts_with('-') || l.trim().starts_with('*'))
+        .count() as i64;
+
+    // 追加到 SOUL.md 的避坑区
+    let memory_dir = super::get_data_dir().join("memory");
+    let soul_path = memory_dir.join("SOUL.md");
+    let _ = std::fs::create_dir_all(&memory_dir);
+
+    let current_soul = std::fs::read_to_string(&soul_path).unwrap_or_default();
+    let now_str = chrono::Local::now().format("%Y-%m-%d").to_string();
+    let avoidance_section = format!(
+        "\n\n## 🚫 避坑指南 (Dream Engine 自动提炼)\n> 最后更新: {}\n\n{}",
+        now_str, insights_text
+    );
+
+    // 如果已有避坑区，替换；否则追加
+    let new_soul = if let Some(pos) = current_soul.find("## 🚫 避坑指南") {
+        format!("{}{}", &current_soul[..pos].trim_end(), avoidance_section)
+    } else {
+        format!("{}{}", current_soul.trim_end(), avoidance_section)
+    };
+
+    if let Err(e) = std::fs::write(&soul_path, &new_soul) {
+        log::warn!("[Evolution] Phase 4: Failed to write SOUL.md: {}", e);
+    } else {
+        log::info!("[Evolution] Phase 4: Appended {} avoidance tips to SOUL.md", insight_count);
+    }
+
+    // 标记已分析
+    let _ = crate::db::mark_errors_analyzed(&conn, &ids_to_mark);
+
+    insight_count.max(1) // 至少返回 1 表示执行了分析
 }
 
 /// Phase 1: 过时淘汰 — 清理 30 天未更新且未被引用的 learned 记忆

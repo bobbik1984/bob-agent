@@ -500,6 +500,8 @@
     "archived": "已清理 {count} 条过期记忆",
     "merged": "已合并 {count} 组重复话题",
     "continue_chat": "继续聊这个话题",
-    "got_it": "知道了"
+    "got_it": "知道了",
+    "failureLabel": "失败学习",
+    "failureLearned": "从 {n} 条失败记录中提炼了避坑指南"
   }
 }

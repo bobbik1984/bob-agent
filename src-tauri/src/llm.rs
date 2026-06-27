@@ -1600,6 +1600,9 @@ pub(crate) async fn stream_internal(
     let mut tool_failures_total: i64 = 0;
     let mut rounds_completed: usize = 0;
 
+    // ── 目标 19: 工具调用详细日志 (供 Goal Mode Layer 1 断言) ──
+    let mut tool_call_log: Vec<Value> = Vec::new();
+
     // ── T-1401: 循环熔断器 ──────────────────────────────────
     let mut tool_tracker = super::tools::ToolCallTracker::with_budget(if agent_mode == "goal" { 50 } else { 15 });
 
@@ -2108,9 +2111,15 @@ pub(crate) async fn stream_internal(
             // 按顺序推送结果到 messages
             for (i, (_, name, result)) in all_results.iter().enumerate() {
                 // 进化引擎: 检测工具失败
-                if result.get("error").is_some() {
+                let is_error = result.get("error").is_some();
+                if is_error {
                     tool_failures_total += 1;
                 }
+                // 目标 19: 记录工具调用详情 (供断言引擎)
+                tool_call_log.push(json!({
+                    "name": name,
+                    "success": !is_error,
+                }));
 
                 let result_str = serde_json::to_string_pretty(&result).unwrap_or_default();
 
@@ -2261,6 +2270,11 @@ pub(crate) async fn stream_internal(
         "usage": final_usage,
         "pricing": pricing,
         "model": model_id,
+        "tool_summary": {
+            "total_calls": tool_calls_total,
+            "total_failures": tool_failures_total,
+            "calls": tool_call_log,
+        },
     })
 }
 

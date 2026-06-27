@@ -500,6 +500,8 @@
     "archived": "Archived {count} expired memories",
     "merged": "Merged {count} duplicate topics",
     "continue_chat": "Continue this topic",
-    "got_it": "Got it"
+    "got_it": "Got it",
+    "failureLabel": "Lessons Learned",
+    "failureLearned": "Extracted avoidance tips from {n} failures"
   }
 }

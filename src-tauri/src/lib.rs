@@ -33,6 +33,7 @@ pub mod im_sessions;
 mod file_share;
 mod web_drop;
 mod goal;
+mod assertions;
 
 use serde_json::{json, Value};
 use std::fs;

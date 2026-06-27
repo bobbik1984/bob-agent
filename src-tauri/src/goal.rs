@@ -38,8 +38,26 @@ fn emit_progress(app: &AppHandle, attempt: usize, max_rounds: usize, feedback: &
     let _ = app.emit("goal:progress", payload);
 }
 
+/// 持久化执行错误到 execution_errors 表 (目标 19)
+fn persist_error(
+    conv_id: Option<&str>,
+    goal: &str,
+    tool_name: &str,
+    error_type: &str,
+    error_msg: &str,
+    context: Option<&str>,
+) {
+    let db_path = super::get_data_dir().join("bob.db");
+    if let Ok(conn) = rusqlite::Connection::open(&db_path) {
+        let _ = crate::db::log_execution_error(
+            &conn, conv_id, goal, tool_name, error_type, error_msg, context,
+        );
+    }
+}
+
 /// Goal Mode 外层闭环评估引擎
 /// 执行内部 stream_internal，并用 call_clerk_oneshot 进行评估。若失败则重试。
+/// 目标 19 增强：Layer 1 确定性断言 + 失败错误持久化
 pub async fn execute_goal_loop(
     app: AppHandle,
     mut messages: Vec<Value>,
@@ -66,6 +84,13 @@ pub async fn execute_goal_loop(
                 "type": "text",
                 "content": format!("\n\n> ⚠️ [系统提示] 已达最大评估轮数 ({})，任务已强制终止。以下是最终执行结果。", max_goal_rounds)
             }));
+            // 目标 19: 持久化预算耗尽错误
+            persist_error(
+                conv_id.as_deref(), &goal_text,
+                "goal_loop", "budget_exhausted",
+                &format!("{} 轮尝试均未达标", max_goal_rounds),
+                None,
+            );
             break;
         }
 
@@ -96,16 +121,54 @@ pub async fn execute_goal_loop(
 
         let final_content = final_result.get("content").and_then(|v| v.as_str()).unwrap_or("");
 
-        // 评估：用 Clerk 模型独立判断
+        // ══════════════════════════════════════════════════════════
+        // 目标 19: Layer 1 — 确定性断言 (零 Token 消耗)
+        // ══════════════════════════════════════════════════════════
+        let tool_summary = final_result.get("tool_summary").cloned().unwrap_or(Value::Null);
+        let assertion = crate::assertions::run_assertions(&tool_summary);
+
+        if assertion.has_fatal() {
+            // Fatal 断言失败：跳过昂贵的 Clerk 调用，直接重试
+            log::warn!("[Goal] Layer 1 assertion failed: {} fatal(s), {} warning(s)",
+                assertion.failures.len(), assertion.warnings.len());
+
+            // 持久化断言失败
+            for f in &assertion.failures {
+                persist_error(
+                    conv_id.as_deref(), &goal_text,
+                    "assertion", &f.rule, &f.description,
+                    None,
+                );
+            }
+
+            let feedback_text = assertion.format_feedback();
+            let _ = app.emit("llm:chunk", json!({
+                "type": "text",
+                "content": format!("\n\n> 🛡️ [Layer 1 断言] {}", feedback_text)
+            }));
+            feedback = Some(feedback_text);
+            continue; // 跳回循环顶部重试，不调用 Checker
+        }
+
+        // 如有 Warning，附加到 Checker 的评估上下文中
+        let warning_ctx = if assertion.warnings.is_empty() {
+            String::new()
+        } else {
+            format!("\n\n注意事项（来自确定性检查）：\n{}", assertion.warnings.join("\n"))
+        };
+
+        // ══════════════════════════════════════════════════════════
+        // Layer 2: Checker — Clerk LLM 独立评估
+        // ══════════════════════════════════════════════════════════
         let eval_prompt = format!(
             "你是一个严格的目标执行评估器（Evaluator）。\n\n\
             用户的原始目标是：「{}」\n\n\
-            AI 助手的执行结果及回复是：\n{}\n\n\
+            AI 助手的执行结果及回复是：\n{}\n{}\n\n\
             请判断目标是否已经完全达成。\n\
             - 如果已完全达成，输出 JSON: {{\"verdict\": \"PASS\"}}\n\
             - 如果未达成或部分达成，输出 JSON: {{\"verdict\": \"FAIL\", \"feedback\": \"具体的缺失项或错误，指示 AI 下一步该怎么做...\"}}\n\n\
             注意：默认立场为 FAIL，只有在确定目标完成时才输出 PASS。",
-            goal_text, final_content
+            goal_text, final_content, warning_ctx
         );
 
         let eval_result = crate::llm::call_clerk_oneshot(
@@ -123,6 +186,12 @@ pub async fn execute_goal_loop(
                 break;
             }
             Verdict::Fail(fb) => {
+                // 目标 19: 持久化 Checker 拒绝反馈
+                persist_error(
+                    conv_id.as_deref(), &goal_text,
+                    "checker", "checker_rejection", &fb,
+                    Some(&final_content.chars().take(500).collect::<String>()),
+                );
                 feedback = Some(fb.clone());
                 let _ = app.emit("llm:chunk", json!({
                     "type": "text",

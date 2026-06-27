@@ -750,6 +750,39 @@
 
 ---
 
+## 📍 目标 19: Goal Mode V2 — 双层裁判 + 自进化失败闭环
+
+> 🎯 **核心理念**: "失败不是日志，而是进化请求"。为 Goal Mode 注入 Layer 1 确定性断言（零 Token 预筛）和 Dream Engine 失败模式分析（夜间自动提炼避坑指南写入 SOUL.md）。
+> 📖 **设计来源**: [AI智能体深度分析与产品优化.docx](references/AI智能体深度分析与产品优化.docx) + [朋友的务实建议](references/20260627_bob_next_step_with_coderunner.txt)
+
+### Phase 1: 数据层 — execution_errors 表
+- [x] T-1901: `db.rs` — 新增 `execution_errors` 表建表语句 + 索引
+- [x] T-1902: `db.rs` — 新增 `log_execution_error()` 写入函数
+- [x] T-1903: `db.rs` — 新增 `get_unanalyzed_errors()` 查询函数
+- [x] T-1904: `db.rs` — 新增 `mark_errors_analyzed()` 标记函数
+
+### Phase 2: 断言引擎 + stream_internal 扩展
+- [x] T-1911: `assertions.rs` — 新建模块，实现 6 条断言规则 (NO_EMPTY_EXECUTION / ERROR_RATIO / NO_ANALYSIS_PARALYSIS / FILE_WRITE_SUCCESS / COMMAND_EXIT_CODE / BUDGET_EFFICIENCY)
+- [x] T-1912: `assertions.rs` — 7 个单元测试全部通过
+- [x] T-1913: `llm.rs` — stream_internal 返回值新增 `tool_summary` 字段 (total_calls / total_failures / calls[])
+- [x] T-1914: `lib.rs` — 注册 `mod assertions;` 模块
+
+### Phase 3: Goal Mode 改造 + Dream Pipeline Phase 4
+- [x] T-1921: `goal.rs` — 在 Maker 与 Checker 之间插入 Layer 1 断言层
+- [x] T-1922: `goal.rs` — Checker Fail 时持久化错误到 execution_errors
+- [x] T-1923: `goal.rs` — 3 轮耗尽时持久化 budget_exhausted 错误
+- [x] T-1924: `evolution.rs` — 新增 `phase_failure_analysis()` 函数
+- [x] T-1925: `evolution.rs` — 在 `run_dream_pipeline()` 中调用 Phase 4
+- [x] T-1926: `evolution.rs` — SOUL.md 避坑区追加逻辑（已有则替换，无则追加）
+- [x] T-1927: `evolution.rs` — 更新 DreamReport 结构体增加 failure_insights 字段
+
+### Phase 4: 验证
+- [x] T-1941: `cargo check` 编译通过 (57 warnings 全为预存, 无新 error)
+- [x] T-1942: `cargo test assertions` 7 个单元测试全部通过
+
+---
+
+
 ## 📝 v0.32.2 工作记录 (2026-06-26)
 
 **完成**:

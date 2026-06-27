@@ -35,6 +35,15 @@
           </span>
           <span class="maintenance-item evo-highlight">{{ evolutionReport }}</span>
         </div>
+
+        <!-- 目标 19: 失败模式学习提示 -->
+        <div v-if="failureInsightsText" class="briefing-evolution">
+          <span class="maintenance-label">
+            <ShieldCheck :size="12" style="margin-right: 4px;" />
+            {{ t('dream.failureLabel') }}
+          </span>
+          <span class="maintenance-item evo-failure">{{ failureInsightsText }}</span>
+        </div>
       </div>
 
       <div class="briefing-actions">
@@ -52,7 +61,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { X, Sun, Sunset, Moon, Sparkles, Dna } from 'lucide-vue-next';
+import { X, Sun, Sunset, Moon, Sparkles, Dna, ShieldCheck } from 'lucide-vue-next';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 
@@ -77,6 +86,7 @@ const visible = ref(false);
 const briefingText = ref('');
 const stats = ref({ staled: 0, merged: 0 });
 const evolutionReport = ref('');
+const failureInsightsText = ref('');
 let cleanupListener = null;
 
 const renderedBriefing = computed(() => {
@@ -99,7 +109,21 @@ async function loadDreamReport() {
       if (evo && evo.dream_history && evo.dream_history.length > 0) {
         const latest = evo.dream_history[0];
         if (latest.report && latest.report !== '无需更新') {
-          evolutionReport.value = latest.report;
+          // 目标 19: 分离失败学习文本与普通进化报告
+          const parts = latest.report.split('; ');
+          const failurePart = parts.find(p => p.includes('避坑') || p.includes('failure'));
+          const otherParts = parts.filter(p => p !== failurePart);
+          
+          if (otherParts.length > 0) {
+            evolutionReport.value = otherParts.join('; ');
+          }
+          if (failurePart) {
+            failureInsightsText.value = failurePart;
+          }
+          // 如果只有 failurePart 没有其他进化报告，也把 evolutionReport 设为原文
+          if (!evolutionReport.value && failurePart) {
+            evolutionReport.value = '';
+          }
           visible.value = true;  // 即使没有晚报，有进化报告也展示
         }
       }
@@ -321,5 +345,10 @@ onUnmounted(() => {
   background: color-mix(in srgb, var(--user-accent) 12%, var(--bg-hover));
   color: var(--text-secondary);
   border: 1px solid color-mix(in srgb, var(--user-accent) 20%, transparent);
+}
+.evo-failure {
+  background: color-mix(in srgb, var(--color-warning, #f59e0b) 12%, var(--bg-hover));
+  color: var(--text-secondary);
+  border: 1px solid color-mix(in srgb, var(--color-warning, #f59e0b) 20%, transparent);
 }
 </style>

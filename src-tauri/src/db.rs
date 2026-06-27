@@ -191,6 +191,23 @@ pub fn init_db(data_dir: &std::path::Path) -> Connection {
         CREATE INDEX IF NOT EXISTS idx_kg_edges_target ON kg_edges(target_id);
     ").unwrap_or_default();
 
+    // ── 目標 19: Goal Mode V2 执行错误记录 ────────────────────
+    conn.execute_batch("
+        CREATE TABLE IF NOT EXISTS execution_errors (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            conv_id TEXT,
+            goal_description TEXT,
+            tool_name TEXT NOT NULL,
+            error_type TEXT NOT NULL,
+            error_message TEXT NOT NULL,
+            context_summary TEXT,
+            analyzed INTEGER NOT NULL DEFAULT 0,
+            created_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_exec_errors_analyzed ON execution_errors(analyzed);
+        CREATE INDEX IF NOT EXISTS idx_exec_errors_created ON execution_errors(created_at);
+    ").unwrap_or_default();
+
     // 数据迁移: 标准化知识图谱节点类型 (修复中英文混杂的问题)
     conn.execute_batch("
         UPDATE kg_nodes SET node_type = 'concept' WHERE node_type IN ('Concept', '概念', '名词');
@@ -428,6 +445,77 @@ pub fn db_search_messages(query: String, db: State<DbState>) -> Vec<Value> {
     };
 
     rows.filter_map(|r| r.ok()).collect()
+}
+
+// ═══════════════════════════════════════════════════════════
+// 目标 19: Goal Mode V2 — 执行错误记录与查询
+// ═══════════════════════════════════════════════════════════
+
+/// 记录一条执行错误到 execution_errors 表
+pub fn log_execution_error(
+    conn: &Connection,
+    conv_id: Option<&str>,
+    goal: &str,
+    tool_name: &str,
+    error_type: &str,
+    error_msg: &str,
+    context: Option<&str>,
+) -> Result<i64, String> {
+    let ts = crate::now_ms();
+    conn.execute(
+        "INSERT INTO execution_errors (conv_id, goal_description, tool_name, error_type, error_message, context_summary, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![conv_id, goal, tool_name, error_type, error_msg, context, ts],
+    ).map_err(|e| format!("log_execution_error: {}", e))?;
+    Ok(conn.last_insert_rowid())
+}
+
+/// 查询未被 Dream Engine 分析过的错误记录
+pub fn get_unanalyzed_errors(
+    conn: &Connection,
+    since_hours: u64,
+) -> Vec<Value> {
+    let cutoff = crate::now_ms() as i64 - (since_hours as i64 * 3_600_000);
+    let mut stmt = match conn.prepare(
+        "SELECT id, conv_id, goal_description, tool_name, error_type, error_message, context_summary, created_at
+         FROM execution_errors
+         WHERE analyzed = 0 AND created_at > ?1
+         ORDER BY created_at DESC
+         LIMIT 100"
+    ) {
+        Ok(s) => s,
+        Err(_) => return vec![],
+    };
+
+    let rows = match stmt.query_map(params![cutoff], |row| {
+        Ok(serde_json::json!({
+            "id": row.get::<_, i64>(0)?,
+            "conv_id": row.get::<_, Option<String>>(1).unwrap_or(None),
+            "goal": row.get::<_, Option<String>>(2).unwrap_or(None),
+            "tool_name": row.get::<_, String>(3)?,
+            "error_type": row.get::<_, String>(4)?,
+            "error_message": row.get::<_, String>(5)?,
+            "context": row.get::<_, Option<String>>(6).unwrap_or(None),
+            "created_at": row.get::<_, i64>(7)?,
+        }))
+    }) {
+        Ok(r) => r,
+        Err(_) => return vec![],
+    };
+
+    rows.filter_map(|r| r.ok()).collect()
+}
+
+/// 标记指定错误记录为已分析（Dream Engine 处理后调用）
+pub fn mark_errors_analyzed(conn: &Connection, ids: &[i64]) -> Result<(), String> {
+    if ids.is_empty() { return Ok(()); }
+    for id in ids {
+        conn.execute(
+            "UPDATE execution_errors SET analyzed = 1 WHERE id = ?1",
+            params![id],
+        ).map_err(|e| format!("mark_errors_analyzed: {}", e))?;
+    }
+    Ok(())
 }
 
 #[tauri::command]

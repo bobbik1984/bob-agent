@@ -228,6 +228,17 @@ milestones:
       - { id: T-1901, text: "Goal Mode Evaluator Engine (Maker-Checker)", status: done }
       - { id: T-1800, text: "Web Drop 极传 P2P + 信令中继与 E2EE", status: done }
 
+  - name: "目标 19: Goal Mode V2 (双层裁判 + 自进化失败闭环)"
+    status: done
+    completion: 100%
+    summary: "Layer 1 确定性断言 (零 Token 预筛) + Dream Engine Phase 4 失败模式分析与避坑指南"
+    tasks:
+      - { id: T-1901, text: "db.rs execution_errors 表与持久化", status: done }
+      - { id: T-1911, text: "assertions.rs 层 1 确定性断言引擎", status: done }
+      - { id: T-1921, text: "goal.rs 双层判定与 budget_exhausted 错误捕获", status: done }
+      - { id: T-1924, text: "evolution.rs Dream Phase 4 (失败模式分析)", status: done }
+      - { id: T-1931, text: "前端 MorningBriefing.vue 失败学习展示", status: done }
+
 # ═══════════════════════════════════════════════════════════════
 # Rust 后端模块清单 (src-tauri/src/)
 # ═══════════════════════════════════════════════════════════════
