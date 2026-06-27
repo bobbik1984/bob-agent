@@ -1,12 +1,12 @@
 # Bob-Agent 开发全局路线图 (Roadmap)
 
-> 🎯 **当前版本**: `v0.32.1` — CDN 上传进度条、Release 日志修复、streamThinking 流式思考动画、工具结果缓存完成。
-> ♻️ **已完成**: Tauri 迁移、主题系统、记忆引擎、安全加固、微信接入、Telegram/Discord、文档导出引擎、认知引擎 V2。
-> 📋 **下一目标**: v0.33 — M17 知识图谱融合（SQLite 图存储 + LLM 实体提取 + vis.js 可视化）。
+> 🎯 **当前版本**: `v0.4.0` — Ghost Partner (幽灵副手) 阶段正式版。
+> ♻️ **已完成**: Tauri 迁移、主体模式、微信/TG/Discord 通道、文档输出引擎、Goal 闭环执行引擎、Web Drop P2P 极传。
+> 📋 **下一目标**: v0.4.1 — 目标 17 知识图谱融合（SQLite 图存储 + LLM 实体提取 + vis.js 可视化）。
 
 ---
 
-## 📍 里程碑 1: Tauri 基础脚手架 ✅
+## 📍 目标 1: Tauri 基础脚手架 ✅
 - [x] T-101: 初始化 Tauri V2 环境 (`tauri init`)。
 - [x] T-102: 配置 `tauri.conf.json`（无边框、透明、380x750）。
 - [x] T-103: 跑通 `npm run dev:tauri` 前端热更新。
@@ -16,7 +16,7 @@
 
 ---
 
-## 📍 里程碑 2: 前端完整性保障 (让所有页面能正常渲染) ✅
+## 📍 目标 2: 前端完整性保障 (让所有页面能正常渲染) ✅
 > ⚠️ 本阶段**不写任何 Rust 代码**，只在 `tauri-bridge.js` 中补全 Mock，以及在 `App.vue` 中添加窗口按钮。
 
 ### 2A: 窗口外壳修复 (Window Chrome)
@@ -94,26 +94,26 @@
 
 ---
 
-## 📍 里程碑 3: Rust 原生化 — 配置与凭证
+## 📍 目标 3: Rust 原生化 — 配置与凭证
 > 将 Bridge 中的 Mock 逐步替换为真正的 Rust 实现。
 - [x] T-301: Rust `config_get/set` 读写 `config.json`。
 - [x] T-302: Rust `config_get_all` 返回完整配置对象。
 - [x] T-303: ~~Stronghold~~ → 使用 `keyring` crate 实现 OS 级 Keychain 加密存储（Windows DPAPI / macOS Keychain）。
 - [x] T-304: 注册全局快捷键 (`Ctrl+Shift+B`) 唤醒窗口。
 
-## 📍 里程碑 4: Rust 原生化 — 数据库引擎 (SQLite)
+## 📍 目标 4: Rust 原生化 — 数据库引擎 (SQLite)
 - [x] T-401: 引入 `rusqlite`，初始化 `conversations` 和 `messages` 表。
 - [x] T-402: 实现 `db_conversations`, `db_conversation_create/delete/rename/get`。
 - [x] T-403: 实现 `db_messages`, `db_message_add`。
 
-## 📍 里程碑 5: Rust 原生化 — 大模型通信 (LLM Engine)
+## 📍 目标 5: Rust 原生化 — 大模型通信 (LLM Engine)
 - [x] T-501: 用 Rust `reqwest` 发送 Chat 请求。
 - [x] T-502: 实现 SSE 流式解析，通过 `app.emit("llm:chunk")` 推送。
 - [x] T-503: 图片视觉请求 (`sendVision`) 的 Base64 传输。
 - [x] T-504: ModelHub 模型池扫描与角色指派的 Rust 实现。
 - [x] T-505: **Panic 防御加固** — 消除 `lib.rs` 中 13 处裸 `.unwrap()` 和 `llm.rs` 中 2 处 UTF-8 字节切片越界，改用 `match` 优雅降级，防止中文/Emoji 内容导致整个 Tauri 进程崩溃退出。
 
-## 📍 里程碑 6: Rust 原生化 — 工具链与知识库 ✅
+## 📍 目标 6: Rust 原生化 — 工具链与知识库 ✅
 - [x] T-601: 文件夹递归扫描 (`walkdir`)。
 - [x] T-602: **网页抓取引擎** — 新建 `web.rs`，`reqwest` + `scraper` 实现 HTML 获取与 DOM 解析，智能提取 `<article>/<main>` 正文（2MB/10s 安全限制）。
 - [x] T-603: **技能与插件扫描引擎** — 新建 `plugins.rs`，原生扫描 `externalSkillsDir`，解析 SKILL.md YAML frontmatter，注册内置系统能力。
@@ -123,14 +123,14 @@
 - [x] T-607: **文件夹跟踪** — `system_get/add/remove_tracked_folders` 持久化到 config.json。
 - [x] T-608: **系统工具原生化** — `openFile`, `showInFolder`, `getVersion`, `getLogPath`, `openLogDir`, `openDataDir`, `getToolStatuses`, `factoryReset` 全部 Rust 原生。剩余 Mock: `updateTheme`, `getClipboardImage`, `showNotification`。
 
-## 📍 里程碑 7: 收尾与发布
+## 📍 目标 7: 收尾与发布
 - [x] T-701: **彻底移除 `electron/` 目录** — 42 个遗留文件已清除，Bridge 中的 Electron 引用注释已更新。
 - [ ] T-702: 集成 `llama-cpp-rs` 离线推理。
 - [x] T-703: 执行 `npm run tauri build`，验证打包流程，生成 `.msi` 或 `.exe` 安装包。
 
 ---
 
-## 📍 里程碑 8: 声明式配置 + 单向调谐 (Outbox/Reconciler 架构) ✅
+## 📍 目标 8: 声明式配置 + 单向调谐 (Outbox/Reconciler 架构) ✅
 > 🎯 **目标**: 让 Bob 在获得第一个 API Key（点火）后，具备自主配置系统的能力。
 > 🛡️ **安全原则**: AI 只写 Outbox 文件（"办公桌"），Rust 内部守护者单向读取、校验、生效，AI 永远碰不到核心配置的"保险柜"。
 
@@ -159,7 +159,7 @@
 
 ---
 
-## 📍 里程碑 9: Tool Calling 引擎 (Agent 升级) ✅
+## 📍 目标 9: Tool Calling 引擎 (Agent 升级) ✅
 > 🎯 **目标**: 让 Bob 从 ChatBot 升级为 Agent——能够主动调用工具（读文件、抓网页、查技能），而非仅靠用户拖拽喂数据。
 > 🏗️ **方案**: Rust 侧实现（方案 A），全部在进程内完成，不依赖 Python/Node。
 
@@ -299,7 +299,7 @@
 **未完成**:
 - [ ] 思考状态 (streamThinking) 的前端流式动态加载动画。
 
-## 📍 里程碑 10: 认知与记忆引擎升级 (Phase 2)
+## 📍 目标 10: 认知与记忆引擎升级 (Phase 2)
 > 🎯 **目标**: 让 Bob 拥有长期记忆能力，理解自己的“人设”，并能主动维护和检索知识库。
 
 - [x] T-1001: **灵魂注入 (SOUL)** — 创建 `data/memory/SOUL.md` 并在 `llm.rs` 组装系统提示词时将其全文注入。
@@ -355,7 +355,7 @@
 
 ---
 
-## 📍 里程碑 10: 架构审计与安全加固 (Post-Migration Audit)
+## 📍 目标 10: 架构审计与安全加固 (Post-Migration Audit)
 > 🎯 **目标**: 根据 Jules 提供的 Electron 到 Tauri 迁移审计报告，全面清理技术债并加固系统安全性。
 > 🛡️ **安全原则**: 消除 Rust 后端 Panic 隐患，彻底清理弃用的 Node.js 依赖，封堵路径穿越漏洞。
 
@@ -380,13 +380,13 @@
 
 ---
 
-## 里程碑 11: v0.3 — 微信接入 + HTTP API (已完成)
+## 目标 11: v0.3 — 微信接入 + HTTP API (已完成)
 
 微信接入模块已在 Rust 侧原生实现 (wechat/ 9个文件 + http_api.rs)，桌面端 UI 已适配。
 
 ---
 
-## 📍 里程碑 12: v0.4 — Ghost Partner (幽灵副手)
+## 📍 目标 12: v0.4 — Ghost Partner (幽灵副手)
 > 🎯 **目标**: 从"被动响应的聊天机器人"进化为"主动辅助的桌面幽灵副手"。
 > 📋 **来源**: `docs/20260606_AI 桌面助手竞品与差异化战略.docx` 竞品分析 + 差异化战略梳理。
 > 🏗️ **核心定位**: 「中国泛白领办公桌上的幽灵副手」— 极度轻量、原生体验、纯本地化，拒绝全能 IDE 叙事。
@@ -449,7 +449,7 @@
 
 ---
 
-## 里程碑 13: v0.4 — 体感/防御/主动性升级 (借鉴 Hermes Desktop)
+## 目标 13: v0.4 — 体感/防御/主动性升级 (借鉴 Hermes Desktop)
 > **目标**: 把 Bob 已有的强大后端能力"浮出水面"，让用户真正感知到 Bob 在背后做了什么。
 > **来源**: Hermes Desktop 竞品分析 + `bob_optimization_plan.md` + `bob_v04_dev_guide.md`
 > **设计红线**: 14px 最大圆角 / 纯灰度 / 无蓝色 / **严禁 Emoji** / 无技术术语 / 所有通知可关闭
@@ -536,7 +536,7 @@
 
 ---
 
-## 📍 里程碑 14: v0.5 — 认知引擎升级 (Cognitive Engine v2)
+## 📍 目标 14: v0.5 — 认知引擎升级 (Cognitive Engine v2)
 > 🎯 **目标**: 让 Bob 从"能记住事"进化为"会思考的记忆体"——自动去噪、自我纠错、成本自控。
 > 📋 **来源**: `docs/分布式 Agent 认知系统审视.docx` 理论框架，提取出 5 个可落地到单 Agent 桌面产品的改进点。
 > 🏗️ **核心原则**: 所有"智能"逻辑尽可能下沉到 Rust 确定性层（瘦智能体，胖平台），减少对 LLM 的依赖。
@@ -605,7 +605,7 @@
 
 ---
 
-## 📍 里程碑 15: v0.6 — 文档输出引擎 (Document Export Engine)
+## 📍 目标 15: v0.6 — 文档输出引擎 (Document Export Engine)
 > 让 Bob 从"只会说"进化为"能交付"——对话结束后导出精排版 HTML 报告、PDF、Excel、Word、PPT。
 > 核心策略: **HTML-first** — 精排 HTML 是主力输出，PDF 通过打印导出。
 > 设计来源: o2_analysis 项目 + guizang-ppt-skill + mckinsey-designer + frontend-design
@@ -644,7 +644,7 @@
 
 ---
 
-## 📍 里程碑 16: v0.4.1 — Shell 执行引擎 + 通讯渠道接入
+## 📍 目标 16: v0.4.1 — Shell 执行引擎 + 通讯渠道接入
 > 🎯 **目标**: 补齐白领场景的"文件整理"与"移动端通讯"两个关键能力缺口。
 > 📋 **来源**: 用户反馈 — 基础文件操作 + Telegram/Discord 后端接入。
 > 🏗️ **预估工作量**: 2-3 天。
@@ -710,7 +710,7 @@
 
 ---
 
-## 📍 里程碑 17: v0.33 — 知识图谱融合 (Knowledge Graph)
+## 📍 目标 17: v0.33 — 知识图谱融合 (Knowledge Graph)
 
 > 核心目标：把 iknow 的语义图谱能力原生化到 Bob 中，闭合“拖拽文件夹 → 知识提取 → 图谱展示”的完整 UX 循环。
 
@@ -776,7 +776,7 @@
 
 **全部完成** 🎉
 
-## 📍 里程碑 18: Goal Mode (闭环执行引擎)
+## 📍 目标 18: Goal Mode (闭环执行引擎)
 > 🎯 **目标**: 让 Bob 具备以结果为导向的闭环执行能力，在遇到复杂任务时自主拆解、评估和重试，直至任务完全成功。
 
 - [x] T-1901: **Rust 后端: Core Setup**
@@ -840,7 +840,8 @@
     ```
 
 ## 🚀 T-1802: WebRTC Web Drop & 微信文件分享深度修复 (已完成)
-- [x] 修复 ob-agent WebRTC 传输时 ustls 报 
+- [x] 修复 ob-agent WebRTC 传输时 
+ustls 报 
 o CryptoProvider 导致发送端 Panic 断开的问题。
 - [x] 更新 web-drop 前端 index.html 的 hash 解析逻辑，兼容 . 和 | 作为分隔符。
 - [x] web_drop.rs 生成链接强制附加 ?v=2 防止手机端微信内置浏览器缓存旧版页面。

@@ -27,11 +27,11 @@
 ## ⚡ 1. 闪念速记 / 灵光一现 (Quick Notes)
 
 ### 1.1 功能概述
-用户通过全局快捷键 `Ctrl+Shift+N` 唤起悬浮闪念框（Quick Capture Bubble），输入闪念回车后，系统通过 Rust 后端无缝写入本地速记 Markdown 文件。主打**极速、轻量、无干扰**。
+用户通过全局快捷键 `Ctrl+Shift+B` 唤起主窗口后，在窗口内点击 Bob Logo 唤起悬浮闪念框（Quick Capture Bubble），输入闪念回车后，系统通过 Rust 后端无缝写入本地速记 Markdown 文件。主打**极速、轻量、无干扰**。
 
 ### 1.2 核心逻辑流
 ```
-[用户按下 Ctrl+Shift+N] 或 [点击 Bubble]
+[用户按下 Ctrl+Shift+B 唤起主窗口] ──► [在窗口内点击 Logo 唤起 Bubble]
   │
   ▼
 [Vue 渲染 QuickNoteOverlay.vue] ───── 输入内容, 回车确认
@@ -48,7 +48,7 @@
 
 ### 1.3 关键代码位置
 - **前端 UI**: [QuickNoteOverlay.vue](file:///d:/OneDrive/Learning/Code/Gemini/bob-agent/src/components/QuickNoteOverlay.vue)
-  - 监听全局快捷键 `onGlobalKey()`，调用 `open()` 激活输入框并聚焦。
+  - 点击 Bob Logo，调用 `open()` 激活输入框并聚焦。
   - `submit()` 读取输入文本，执行 IPC 请求并淡入“已记录”提示，800ms 后自动关闭。
 - **Bridge 垫片**: [tauri-bridge.js](file:///d:/OneDrive/Learning/Code/Gemini/bob-agent/src/tauri-bridge.js)
   - `appendQuickNote: async (content) => invoke('system_append_quick_note', { content })`
