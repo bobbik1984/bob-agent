@@ -1,0 +1,924 @@
+{
+  "_schema_version": "2.1.0",
+  "_last_global_verified": "2026-04-23",
+  "google": {
+    "display_name": "Google (Gemini / Gemma)",
+    "official_pricing_url": "https://ai.google.dev/pricing",
+    "api_base": "https://generativelanguage.googleapis.com/v1beta",
+    "api_base_openai_compat": "https://generativelanguage.googleapis.com/v1beta/openai/",
+    "api_key_env": "GOOGLE_API_KEY",
+    "models": {
+      "gemini-2.5-pro": {
+        "api_string": "gemini-2.5-pro",
+        "context_window": 1048576,
+        "max_output_tokens": 65536,
+        "input_price_cny_per_1m": 8.75,
+        "output_price_cny_per_1m": 70.0,
+        "tier": "heavy",
+        "capabilities": [
+          "chat",
+          "code",
+          "reasoning",
+          "vision"
+        ],
+        "free_tier": true,
+        "_note": "免费版有速率限制但不计费",
+        "logo_asset": "assets/gemini.svg"
+      },
+      "gemini-2.5-flash": {
+        "api_string": "gemini-2.5-flash",
+        "context_window": 1048576,
+        "max_output_tokens": 65536,
+        "input_price_cny_per_1m": 2.1,
+        "output_price_cny_per_1m": 17.5,
+        "tier": "medium",
+        "capabilities": [
+          "chat",
+          "code",
+          "reasoning",
+          "vision"
+        ],
+        "free_tier": true,
+        "logo_asset": "assets/gemini.svg"
+      },
+      "gemma-4-31b-it": {
+        "api_string": "gemma-4-31b-it",
+        "context_window": 131072,
+        "max_output_tokens": 8192,
+        "input_price_cny_per_1m": 0.0,
+        "output_price_cny_per_1m": 0.0,
+        "tier": "medium",
+        "capabilities": [
+          "chat",
+          "code",
+          "vision"
+        ],
+        "free_tier": true,
+        "free_tier_limit": "~500 RPD",
+        "_note": "免费开源模型，通过 Google AI Studio 免费调用，每日约 500 次"
+      },
+      "gemini-2.5-flash-lite": {
+        "api_string": "gemini-2.5-flash-lite",
+        "context_window": 1048576,
+        "max_output_tokens": 65536,
+        "input_price_cny_per_1m": 0.7,
+        "output_price_cny_per_1m": 2.8,
+        "tier": "light",
+        "capabilities": [
+          "chat",
+          "code"
+        ],
+        "free_tier": true,
+        "logo_asset": "assets/gemini.svg"
+      }
+    },
+    "logo_asset": "assets/google.png"
+  },
+  "openai": {
+    "display_name": "OpenAI",
+    "official_pricing_url": "https://openai.com/api/pricing",
+    "api_base": "https://api.openai.com/v1",
+    "api_key_env": "OPENAI_API_KEY",
+    "_note": "当前使用免费版 key，无自动试用额度。需充值 $5 才能使用高级模型。免费版仅可使用有限模型。",
+    "models": {
+      "gpt-4o-mini": {
+        "api_string": "gpt-4o-mini",
+        "context_window": 128000,
+        "max_output_tokens": 16384,
+        "input_price_cny_per_1m": 1.05,
+        "output_price_cny_per_1m": 4.2,
+        "tier": "light",
+        "capabilities": [
+          "chat",
+          "code",
+          "vision"
+        ],
+        "_note": "免费版 key 可用的主力模型"
+      },
+      "gpt-4.1-nano": {
+        "api_string": "gpt-4.1-nano",
+        "context_window": 1047576,
+        "max_output_tokens": 32768,
+        "input_price_cny_per_1m": 0.7,
+        "output_price_cny_per_1m": 2.8,
+        "tier": "light",
+        "capabilities": [
+          "chat",
+          "code"
+        ],
+        "_note": "免费版 key 可用"
+      }
+    },
+    "logo_asset": "assets/openai.png"
+  },
+  "anthropic": {
+    "display_name": "Anthropic (Claude)",
+    "official_pricing_url": "https://docs.anthropic.com/en/docs/about-claude/pricing",
+    "api_base": "https://api.anthropic.com",
+    "api_key_env": "ANTHROPIC_API_KEY",
+    "models": {
+      "claude-sonnet-4": {
+        "api_string": "claude-sonnet-4-20250514",
+        "context_window": 200000,
+        "max_output_tokens": 16000,
+        "input_price_cny_per_1m": 21.0,
+        "output_price_cny_per_1m": 105.0,
+        "tier": "heavy",
+        "capabilities": [
+          "chat",
+          "code",
+          "vision",
+          "reasoning"
+        ]
+      },
+      "claude-3.5-haiku": {
+        "api_string": "claude-3-5-haiku-20241022",
+        "context_window": 200000,
+        "max_output_tokens": 8192,
+        "input_price_cny_per_1m": 5.6,
+        "output_price_cny_per_1m": 28.0,
+        "tier": "medium",
+        "capabilities": [
+          "chat",
+          "code"
+        ]
+      }
+    },
+    "logo_asset": "assets/claude.png"
+  },
+  "deepseek": {
+    "display_name": "DeepSeek",
+    "official_pricing_url": "https://api-docs.deepseek.com/quick_start/pricing",
+    "api_base": "https://api.deepseek.com",
+    "api_base_openai_compat": "https://api.deepseek.com",
+    "api_key_env": "DEEPSEEK_API_KEY",
+    "models": {
+      "deepseek-v4-pro": {
+        "api_string": "deepseek-v4-pro",
+        "context_window": 1048576,
+        "max_output_tokens": 8192,
+        "input_price_cny_per_1m": 3.0,
+        "output_price_cny_per_1m": 6.0,
+        "tier": "heavy",
+        "capabilities": [
+          "chat",
+          "code",
+          "reasoning",
+          "tool_use"
+        ],
+        "_note": "当前价格为2.5折优惠价（原价 12/24），支持非思考与思考模式切换，支持 FIM，1M上下文"
+      },
+      "deepseek-v4-flash": {
+        "api_string": "deepseek-v4-flash",
+        "context_window": 1048576,
+        "max_output_tokens": 8192,
+        "input_price_cny_per_1m": 1.0,
+        "output_price_cny_per_1m": 2.0,
+        "tier": "medium",
+        "capabilities": [
+          "chat",
+          "code",
+          "reasoning",
+          "tool_use"
+        ],
+        "_note": "支持非思考与思考模式切换，支持 FIM，1M上下文"
+      }
+    },
+    "logo_asset": "assets/deepseek.png"
+  },
+  "qwen": {
+    "display_name": "阿里云百炼 / 通义千问 (Qwen)",
+    "official_pricing_url": "https://help.aliyun.com/zh/model-studio/getting-started/models",
+    "api_base": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    "api_key_env": "DASHSCOPE_API_KEY",
+    "models": {
+      "qwen3.6-max-preview": {
+        "display_name": "Qwen3.6 Max (Preview)",
+        "api_string": "qwen3.6-max-preview",
+        "context_window": 32768,
+        "max_output_tokens": 8192,
+        "input_price_cny_per_1m": 2.4,
+        "output_price_cny_per_1m": 9.6,
+        "tier": "heavy",
+        "capabilities": [
+          "chat",
+          "code",
+          "reasoning",
+          "vision"
+        ],
+        "_note": "Qwen3.6 Max 预览版"
+      },
+      "happyhorse-1.0-i2v": {
+        "api_string": "happyhorse-1.0-i2v",
+        "price_cny_per_second": 0.9,
+        "tier": "heavy",
+        "capabilities": [
+          "video-generation",
+          "vision"
+        ],
+        "supported_resolutions": [
+          "720P",
+          "1080P"
+        ],
+        "invocation": {
+          "protocol": "dashscope-native",
+          "api_base": "https://dashscope.aliyuncs.com/api/v1",
+          "sdk_class": "dashscope.VideoSynthesis",
+          "method": "async_call + wait"
+        },
+        "_note": "支持图生视频。1080P原价1.6元/秒"
+      },
+      "happyhorse-1.0-r2v": {
+        "api_string": "happyhorse-1.0-r2v",
+        "price_cny_per_second": 0.9,
+        "tier": "heavy",
+        "capabilities": [
+          "video-generation",
+          "vision"
+        ],
+        "supported_resolutions": [
+          "720P",
+          "1080P"
+        ],
+        "invocation": {
+          "protocol": "dashscope-native",
+          "api_base": "https://dashscope.aliyuncs.com/api/v1",
+          "sdk_class": "dashscope.VideoSynthesis",
+          "method": "async_call + wait"
+        },
+        "_note": "支持参考生视频（最多9张图）。1080P原价1.6元/秒"
+      },
+      "happyhorse-1.0-t2v": {
+        "api_string": "happyhorse-1.0-t2v",
+        "price_cny_per_second": 0.9,
+        "tier": "heavy",
+        "capabilities": [
+          "video-generation"
+        ],
+        "supported_resolutions": [
+          "720P",
+          "1080P"
+        ],
+        "invocation": {
+          "protocol": "dashscope-native",
+          "api_base": "https://dashscope.aliyuncs.com/api/v1",
+          "sdk_class": "dashscope.VideoSynthesis",
+          "method": "async_call + wait"
+        },
+        "_note": "支持文生视频。1080P原价1.6元/秒"
+      },
+      "happyhorse-1.0-video-edit": {
+        "api_string": "happyhorse-1.0-video-edit",
+        "price_cny_per_second": 0.9,
+        "tier": "heavy",
+        "capabilities": [
+          "video-generation",
+          "vision"
+        ],
+        "supported_resolutions": [
+          "720P",
+          "1080P"
+        ],
+        "invocation": {
+          "protocol": "dashscope-native",
+          "api_base": "https://dashscope.aliyuncs.com/api/v1",
+          "sdk_class": "dashscope.VideoSynthesis",
+          "method": "async_call + wait"
+        },
+        "_note": "支持视频编辑。1080P原价1.6元/秒"
+      },
+      "qwen-image-2.0-pro": {
+        "api_string": "qwen-image-2.0-pro",
+        "price_cny_per_image": 0.5,
+        "tier": "heavy",
+        "capabilities": [
+          "image-generation"
+        ],
+        "invocation": {
+          "protocol": "dashscope-native",
+          "api_base": "https://dashscope.aliyuncs.com/api/v1",
+          "sdk_class": "dashscope.aigc.image_generation.ImageGeneration",
+          "method": "async_call + wait",
+          "api_docs": "https://help.aliyun.com/zh/model-studio/qwen-image-api"
+        },
+        "_note": "千问文生图，中文文本渲染能力突出。不走 OpenAI 兼容协议。"
+      },
+      "qwen3.6-plus": {
+        "display_name": "Qwen3.6 Plus",
+        "api_string": "qwen3.6-plus",
+        "context_window": 131072,
+        "max_output_tokens": 8192,
+        "input_price_cny_per_1m": 2.0,
+        "output_price_cny_per_1m": 12.0,
+        "tier": "medium",
+        "capabilities": [
+          "chat",
+          "code",
+          "reasoning",
+          "vision"
+        ]
+      },
+      "qwen3.6": {
+        "display_name": "Qwen3.6 (35B-A3B)",
+        "api_string": "qwen3.6",
+        "context_window": 131072,
+        "max_output_tokens": 8192,
+        "input_price_cny_per_1m": 1.8,
+        "output_price_cny_per_1m": 10.8,
+        "tier": "medium",
+        "capabilities": [
+          "chat",
+          "code",
+          "reasoning",
+          "vision",
+          "tool_use"
+        ],
+        "tool_calling_prices": {
+          "web_search": "4 CNY/千次",
+          "web_extractor": "限时免费",
+          "code_interpreter": "限时免费",
+          "t2i_search": "24 CNY/千次",
+          "i2i_search": "48 CNY/千次"
+        },
+        "_note": "35B-A3B 原生视觉语言模型，混合架构。相较3.5，显著提升了agentic coding、数学推理、代码推理、空间智能、物体定位与目标检测能力。支持结构化输出、联网搜索、前缀续写、cache缓存、批量推理、模型调优。"
+      },
+      "qwen-image-2.0": {
+        "api_string": "qwen-image-2.0",
+        "price_cny_per_image": 0.2,
+        "tier": "medium",
+        "capabilities": [
+          "image-generation"
+        ],
+        "invocation": {
+          "protocol": "dashscope-native",
+          "api_base": "https://dashscope.aliyuncs.com/api/v1",
+          "sdk_class": "dashscope.aigc.image_generation.ImageGeneration",
+          "method": "async_call + wait"
+        }
+      },
+      "qwen3.5-plus": {
+        "display_name": "Qwen3.5 Plus",
+        "api_string": "qwen3.5-plus",
+        "context_window": 131072,
+        "max_output_tokens": 8192,
+        "input_price_cny_per_1m": 0.8,
+        "output_price_cny_per_1m": 2.0,
+        "tier": "light",
+        "capabilities": [
+          "chat",
+          "code"
+        ],
+        "_note": "性价比极高的旧一代 Plus，价格便宜 (0.8元/2元)"
+      },
+      "qwen3.5": {
+        "display_name": "Qwen3.5 (35B-A3B)",
+        "api_string": "qwen3.5",
+        "context_window": 131072,
+        "max_output_tokens": 8192,
+        "input_price_cny_per_1m": 0.4,
+        "output_price_cny_per_1m": 3.2,
+        "tier": "light",
+        "capabilities": [
+          "chat",
+          "code",
+          "reasoning",
+          "vision",
+          "tool_use"
+        ],
+        "tool_calling_prices": {
+          "web_search": "4 CNY/千次",
+          "web_extractor": "限时免费",
+          "code_interpreter": "限时免费",
+          "t2i_search": "24 CNY/千次",
+          "i2i_search": "48 CNY/千次"
+        },
+        "_note": "35B-A3B 原生视觉语言模型，混合架构（线性注意力+稀疏MoE），推理效率高，综合表现接近 Qwen3.5-27B。支持结构化输出、联网搜索、前缀续写、cache缓存、批量推理、模型调优。阶梯计费。"
+      },
+      "qwen3.5-flash": {
+        "display_name": "Qwen3.5 Flash",
+        "api_string": "qwen3.5-flash",
+        "context_window": 1000000,
+        "max_output_tokens": 8192,
+        "input_price_cny_per_1m": 0.2,
+        "output_price_cny_per_1m": 2.0,
+        "tier": "light",
+        "capabilities": [
+          "chat",
+          "code"
+        ],
+        "_note": "千问Flash已升级至Qwen3.5。速度快、成本低。"
+      },
+      "qwen3.6-flash": {
+        "display_name": "Qwen3.6 Flash",
+        "api_string": "qwen3.6-flash",
+        "context_window": 131072,
+        "max_output_tokens": 8192,
+        "input_price_cny_per_1m": 0.2,
+        "output_price_cny_per_1m": 2.0,
+        "tier": "light",
+        "capabilities": [
+          "chat",
+          "code",
+          "vision"
+        ]
+      }
+    },
+    "logo_asset": "assets/qwen.png"
+  },
+  "modelscope": {
+    "display_name": "ModelScope (魔搭社区)",
+    "official_pricing_url": "https://modelscope.cn/docs/model-service/API-Inference/intro",
+    "api_base": "https://api-inference.modelscope.cn/v1",
+    "api_key_env": "MODELSCOPE_API_KEY",
+    "_note": "ModelScope 免费推理，每天总共可调用 2000 次，每种模型每天最多 500 次。",
+    "models": {
+      "DeepSeek-V4-Pro": {
+        "api_string": "deepseek-ai/DeepSeek-V4-Pro",
+        "context_window": 1048576,
+        "max_output_tokens": 8192,
+        "input_price_cny_per_1m": 0.0,
+        "output_price_cny_per_1m": 0.0,
+        "tier": "heavy",
+        "capabilities": [
+          "chat",
+          "code",
+          "reasoning"
+        ],
+        "free_tier": true,
+        "free_tier_limit": "500 RPD"
+      },
+      "GLM-5": {
+        "api_string": "ZhipuAI/GLM-5",
+        "context_window": 131072,
+        "max_output_tokens": 8192,
+        "input_price_cny_per_1m": 0.0,
+        "output_price_cny_per_1m": 0.0,
+        "tier": "heavy",
+        "capabilities": [
+          "chat",
+          "code"
+        ],
+        "free_tier": true,
+        "free_tier_limit": "500 RPD"
+      },
+      "GLM-5.1": {
+        "api_string": "ZhipuAI/GLM-5.1",
+        "context_window": 131072,
+        "max_output_tokens": 8192,
+        "input_price_cny_per_1m": 0.0,
+        "output_price_cny_per_1m": 0.0,
+        "tier": "heavy",
+        "capabilities": [
+          "chat",
+          "code",
+          "reasoning"
+        ],
+        "free_tier": true,
+        "free_tier_limit": "500 RPD"
+      },
+      "HY-World-2.0": {
+        "api_string": "Tencent-Hunyuan/HY-World-2.0",
+        "context_window": 131072,
+        "max_output_tokens": 8192,
+        "input_price_cny_per_1m": 0.0,
+        "output_price_cny_per_1m": 0.0,
+        "tier": "heavy",
+        "capabilities": [
+          "chat",
+          "code",
+          "reasoning"
+        ],
+        "free_tier": true,
+        "free_tier_limit": "500 RPD"
+      },
+      "Kimi-K2.5": {
+        "api_string": "moonshotai/Kimi-K2.5",
+        "context_window": 131072,
+        "max_output_tokens": 8192,
+        "input_price_cny_per_1m": 0.0,
+        "output_price_cny_per_1m": 0.0,
+        "tier": "heavy",
+        "capabilities": [
+          "chat",
+          "code"
+        ],
+        "free_tier": true,
+        "free_tier_limit": "500 RPD"
+      },
+      "Kimi-K2.6": {
+        "api_string": "moonshotai/Kimi-K2.6",
+        "context_window": 131072,
+        "max_output_tokens": 8192,
+        "input_price_cny_per_1m": 0.0,
+        "output_price_cny_per_1m": 0.0,
+        "tier": "heavy",
+        "capabilities": [
+          "chat",
+          "code",
+          "reasoning"
+        ],
+        "free_tier": true,
+        "free_tier_limit": "500 RPD"
+      },
+      "MiMo-V2.5-Pro": {
+        "api_string": "XiaomiMiMo/MiMo-V2.5-Pro",
+        "context_window": 131072,
+        "max_output_tokens": 8192,
+        "input_price_cny_per_1m": 0.0,
+        "output_price_cny_per_1m": 0.0,
+        "tier": "heavy",
+        "capabilities": [
+          "chat",
+          "code",
+          "reasoning"
+        ],
+        "free_tier": true,
+        "free_tier_limit": "500 RPD"
+      },
+      "MiniMax-M2.5": {
+        "api_string": "MiniMax/MiniMax-M2.5",
+        "context_window": 131072,
+        "max_output_tokens": 8192,
+        "input_price_cny_per_1m": 0.0,
+        "output_price_cny_per_1m": 0.0,
+        "tier": "heavy",
+        "capabilities": [
+          "chat",
+          "code"
+        ],
+        "free_tier": true,
+        "free_tier_limit": "500 RPD"
+      },
+      "MiniMax-M2.7": {
+        "api_string": "MiniMax/MiniMax-M2.7",
+        "context_window": 131072,
+        "max_output_tokens": 8192,
+        "input_price_cny_per_1m": 0.0,
+        "output_price_cny_per_1m": 0.0,
+        "tier": "heavy",
+        "capabilities": [
+          "chat",
+          "code",
+          "reasoning"
+        ],
+        "free_tier": true,
+        "free_tier_limit": "500 RPD"
+      },
+      "Qwen3.5-397B": {
+        "api_string": "Qwen/Qwen3.5-397B-A17B",
+        "context_window": 131072,
+        "max_output_tokens": 8192,
+        "input_price_cny_per_1m": 0.0,
+        "output_price_cny_per_1m": 0.0,
+        "tier": "heavy",
+        "capabilities": [
+          "chat",
+          "code",
+          "reasoning"
+        ],
+        "free_tier": true,
+        "free_tier_limit": "500 RPD"
+      },
+      "DeepSeek-V4-Flash": {
+        "api_string": "deepseek-ai/DeepSeek-V4-Flash",
+        "context_window": 1048576,
+        "max_output_tokens": 8192,
+        "input_price_cny_per_1m": 0.0,
+        "output_price_cny_per_1m": 0.0,
+        "tier": "medium",
+        "capabilities": [
+          "chat",
+          "code",
+          "reasoning"
+        ],
+        "free_tier": true,
+        "free_tier_limit": "500 RPD"
+      },
+      "MiMo-V2.5": {
+        "api_string": "XiaomiMiMo/MiMo-V2.5",
+        "context_window": 131072,
+        "max_output_tokens": 8192,
+        "input_price_cny_per_1m": 0.0,
+        "output_price_cny_per_1m": 0.0,
+        "tier": "medium",
+        "capabilities": [
+          "chat",
+          "code"
+        ],
+        "free_tier": true,
+        "free_tier_limit": "500 RPD"
+      },
+      "Qwen3.6-27B": {
+        "api_string": "Qwen/Qwen3.6-27B",
+        "context_window": 131072,
+        "max_output_tokens": 8192,
+        "input_price_cny_per_1m": 0.0,
+        "output_price_cny_per_1m": 0.0,
+        "tier": "medium",
+        "capabilities": [
+          "chat",
+          "code",
+          "reasoning",
+          "vision"
+        ],
+        "free_tier": true,
+        "free_tier_limit": "500 RPD"
+      }
+    }
+  },
+  "kimi": {
+    "display_name": "Kimi (月之暗面)",
+    "_aliases": [
+      "moonshot",
+      "月之暗面",
+      "Moonshot AI"
+    ],
+    "_note": "Kimi 和 Moonshot 是同一个供应商（月之暗面科技），品牌已统一为 Kimi。API 域名仍为 moonshot.cn。",
+    "official_pricing_url": "https://platform.kimi.com/docs/pricing/chat-k25",
+    "api_base": "https://api.moonshot.cn/v1",
+    "api_key_env": "KIMI_API_KEY",
+    "_last_verified": "2026-04-23",
+    "models": {
+      "kimi-k2.6": {
+        "api_string": "kimi-k2.6",
+        "context_window": 262144,
+        "max_output_tokens": 8192,
+        "input_price_cny_per_1m": 6.0,
+        "output_price_cny_per_1m": 24.0,
+        "tier": "heavy",
+        "capabilities": [
+          "chat",
+          "code",
+          "reasoning",
+          "vision"
+        ],
+        "_note": "Kimi 最新旗舰模型。"
+      },
+      "kimi-k2.5": {
+        "api_string": "kimi-k2.5",
+        "context_window": 262144,
+        "max_output_tokens": 8192,
+        "input_price_cny_per_1m": 4.0,
+        "output_price_cny_per_1m": 21.0,
+        "tier": "heavy",
+        "capabilities": [
+          "chat",
+          "code",
+          "reasoning",
+          "vision"
+        ],
+        "_note": "Cache Hit Price: 0.7 CNY / 1M. 支持图片理解（base64编码）。"
+      }
+    },
+    "logo_asset": "assets/kimi.png"
+  },
+  "zhipu": {
+    "display_name": "智谱 AI (GLM)",
+    "official_pricing_url": "https://bigmodel.cn/pricing",
+    "api_base": "https://open.bigmodel.cn/api/paas/v4",
+    "api_key_env": "ZHIPU_API_KEY",
+    "_note": "价格根据上下文长度分阶梯，此处列出 ≤32K 档位的基础价格。",
+    "models": {
+      "GLM-5.1": {
+        "api_string": "GLM-5.1",
+        "context_window": 32768,
+        "max_output_tokens": 8192,
+        "input_price_cny_per_1m": 6.0,
+        "output_price_cny_per_1m": 24.0,
+        "tier": "heavy",
+        "capabilities": [
+          "chat",
+          "code",
+          "reasoning"
+        ],
+        "_note": "最新旗舰。长时任务(Long Horizon)。32K+: 8/28元"
+      },
+      "GLM-5-Turbo": {
+        "api_string": "GLM-5-Turbo",
+        "context_window": 32768,
+        "max_output_tokens": 8192,
+        "input_price_cny_per_1m": 5.0,
+        "output_price_cny_per_1m": 22.0,
+        "tier": "heavy",
+        "capabilities": [
+          "chat",
+          "code",
+          "reasoning"
+        ],
+        "_note": "32K+: 7/26元"
+      },
+      "GLM-5V-Turbo": {
+        "api_string": "GLM-5V-Turbo",
+        "context_window": 32768,
+        "max_output_tokens": 8192,
+        "input_price_cny_per_1m": 5.0,
+        "output_price_cny_per_1m": 22.0,
+        "tier": "heavy",
+        "capabilities": [
+          "chat",
+          "vision"
+        ],
+        "_note": "视觉理解旗舰"
+      },
+      "GLM-5": {
+        "api_string": "GLM-5",
+        "context_window": 32768,
+        "max_output_tokens": 8192,
+        "input_price_cny_per_1m": 4.0,
+        "output_price_cny_per_1m": 18.0,
+        "tier": "heavy",
+        "capabilities": [
+          "chat",
+          "code",
+          "reasoning"
+        ],
+        "_note": "32K+: 6/22元"
+      },
+      "GLM-4.7": {
+        "api_string": "GLM-4.7",
+        "context_window": 32768,
+        "max_output_tokens": 8192,
+        "input_price_cny_per_1m": 2.0,
+        "output_price_cny_per_1m": 8.0,
+        "tier": "medium",
+        "capabilities": [
+          "chat",
+          "code"
+        ]
+      },
+      "GLM-4.5": {
+        "api_string": "GLM-4.5",
+        "context_window": 128000,
+        "max_output_tokens": 8192,
+        "input_price_cny_per_1m": 0.8,
+        "output_price_cny_per_1m": 2.0,
+        "tier": "medium",
+        "capabilities": [
+          "chat",
+          "code"
+        ],
+        "_note": "原 GLM-4.5-Air"
+      },
+      "GLM-4.7-FlashX": {
+        "api_string": "GLM-4.7-FlashX",
+        "context_window": 200000,
+        "max_output_tokens": 8192,
+        "input_price_cny_per_1m": 0.5,
+        "output_price_cny_per_1m": 3.0,
+        "tier": "light",
+        "capabilities": [
+          "chat",
+          "code"
+        ]
+      },
+      "GLM-4.6V-Flash": {
+        "api_string": "GLM-4.6V-Flash",
+        "context_window": 128000,
+        "max_output_tokens": 8192,
+        "input_price_cny_per_1m": 0.0,
+        "output_price_cny_per_1m": 0.0,
+        "tier": "light",
+        "capabilities": [
+          "chat",
+          "vision"
+        ],
+        "free_tier": true,
+        "_note": "免费视觉理解模型"
+      },
+      "GLM-4.7-Flash": {
+        "api_string": "GLM-4.7-Flash",
+        "context_window": 200000,
+        "max_output_tokens": 8192,
+        "input_price_cny_per_1m": 0.0,
+        "output_price_cny_per_1m": 0.0,
+        "tier": "light",
+        "capabilities": [
+          "chat"
+        ],
+        "free_tier": true,
+        "_note": "完全免费模型"
+      }
+    },
+    "logo_asset": "assets/glm.svg"
+  },
+  "xai": {
+    "display_name": "xAI (Grok)",
+    "official_pricing_url": "https://docs.x.ai/developers/models",
+    "api_base": "https://api.x.ai/v1",
+    "api_key_env": "XAI_API_KEY",
+    "models": {
+      "grok-3": {
+        "api_string": "grok-3",
+        "context_window": 131072,
+        "max_output_tokens": 131072,
+        "input_price_cny_per_1m": 21.0,
+        "output_price_cny_per_1m": 105.0,
+        "tier": "heavy",
+        "capabilities": [
+          "chat",
+          "code",
+          "reasoning"
+        ]
+      },
+      "grok-3-mini": {
+        "api_string": "grok-3-mini",
+        "context_window": 131072,
+        "max_output_tokens": 131072,
+        "input_price_cny_per_1m": 2.1,
+        "output_price_cny_per_1m": 3.5,
+        "tier": "light",
+        "capabilities": [
+          "chat",
+          "code"
+        ]
+      }
+    },
+    "logo_asset": "assets/grok.png"
+  },
+  "openrouter": {
+    "display_name": "OpenRouter (聚合网关)",
+    "official_pricing_url": "https://openrouter.ai/models",
+    "api_base": "https://openrouter.ai/api/v1",
+    "api_key_env": "OPENROUTER_API_KEY",
+    "models": {},
+    "_note": "OpenRouter 是模型聚合网关，通过它可调用多家模型。具体价格随模型而异，请查看官网。"
+  },
+  "mimo": {
+    "display_name": "小米 MiMo",
+    "official_pricing_url": "https://platform.xiaomimimo.com/#/docs/pricing",
+    "api_base": "https://api.xiaomimimo.com/v1",
+    "api_key_env": "MIMO_API_KEY",
+    "models": {
+      "MiMo-V2-Flash": {
+        "api_string": "MiMo-V2-Flash",
+        "context_window": 131072,
+        "max_output_tokens": 8192,
+        "input_price_cny_per_1m": 0.7,
+        "output_price_cny_per_1m": 2.1,
+        "tier": "light",
+        "capabilities": [
+          "chat",
+          "reasoning"
+        ]
+      }
+    }
+  },
+  "minimax": {
+    "display_name": "MiniMax",
+    "official_pricing_url": "https://platform.minimax.io/",
+    "api_base": "https://api.minimax.io/v1",
+    "api_key_env": "MINIMAX_API_KEY",
+    "models": {
+      "MiniMax-M2.7": {
+        "api_string": "MiniMax-M2.7",
+        "context_window": 204800,
+        "max_output_tokens": 8192,
+        "input_price_cny_per_1m": 2.1,
+        "output_price_cny_per_1m": 8.4,
+        "tier": "heavy",
+        "capabilities": [
+          "chat",
+          "code",
+          "reasoning"
+        ]
+      }
+    },
+    "logo_asset": "assets/minimax.png"
+  },
+  "doubao": {
+    "display_name": "Doubao (豆包)",
+    "official_pricing_url": "https://www.volcengine.com/docs/82379/1099320",
+    "api_base": "https://ark.cn-beijing.volces.com/api/v3",
+    "api_key_env": "DOUBAO_API_KEY",
+    "models": {
+      "Doubao-Seed-2.0-mini": {
+        "api_string": "doubao-seed-2-0-mini-260215",
+        "context_window": 262144,
+        "max_output_tokens": 131072,
+        "input_price_cny_per_1m": 0.2,
+        "output_price_cny_per_1m": 2.0,
+        "tier": "light",
+        "capabilities": [
+          "chat",
+          "reasoning",
+          "tool_use",
+          "vision"
+        ],
+        "_note": "支持 vision 视觉能力，以及通过 reasoning_effort (minimal/low/medium/high) 动态调节思维链长度（minimal可完全关闭思考）。"
+      },
+      "Doubao-Seed-1.6-flash": {
+        "api_string": "doubao-seed-1-6-flash-250828",
+        "context_window": 262144,
+        "max_output_tokens": 32768,
+        "input_price_cny_per_1m": 0.15,
+        "output_price_cny_per_1m": 1.5,
+        "tier": "light",
+        "capabilities": [
+          "chat",
+          "tool_use"
+        ]
+      }
+    },
+    "logo_asset": "assets/doubao.png"
+  }
+}

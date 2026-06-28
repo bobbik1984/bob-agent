@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self' https://api.deepseek.com https://api.openai.com http://localhost:* https://*.weixin.qq.com; img-src 'self' data: blob: https://*.weixin.qq.com http://127.0.0.1:*" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Noto+Sans+SC:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <title>bob-agent</title>
+  <!-- 🔑 主题初始化：必须在所有 CSS 之前执行，从第一帧就用正确配色 -->
+  <script>
+    (function() {
+      // 主题 → 背景色 / accent 色映射（与 index.css + theme.js 保持同步）
+      var THEME_MAP = {
+        'dark':              { bg: '#0c0c0c', accent: '#e8e8e8', logoColor: '#ffffff' },
+        'light':             { bg: '#f3f4f6', accent: null,      logoColor: null },
+        'premium-plum':      { bg: '#1f233b', accent: '#e26858', logoColor: '#ffffff' },
+        'premium-pine':      { bg: '#172219', accent: '#729969', logoColor: '#ffffff' },
+        'premium-slate':     { bg: '#2f3d4d', accent: '#4a99b2', logoColor: '#ffffff' },
+        'premium-earth':     { bg: '#2a2728', accent: '#895c20', logoColor: '#ffffff' },
+        'premium-steel':     { bg: '#282c33', accent: '#6498af', logoColor: '#ffffff' },
+        'premium-ocean':     { bg: '#001524', accent: '#57b5c3', logoColor: '#ffffff' },
+        'premium-ruby':      { bg: '#1f1415', accent: '#ac3539', logoColor: '#ffffff' },
+        'premium-olive':     { bg: '#212415', accent: '#a51a43', logoColor: '#ffffff' },
+        'premium-denim':     { bg: '#1a2b38', accent: '#89acc6', logoColor: '#ffffff' },
+        'premium-coral':     { bg: '#182025', accent: '#c26f61', logoColor: '#ffffff' },
+        'premium-ember':     { bg: '#252b2f', accent: '#fd6331', logoColor: '#ffffff' },
+        'premium-lavender':  { bg: '#282f4e', accent: '#f8d4c4', logoColor: '#ffffff' },
+      };
+
+      try {
+        var theme = localStorage.getItem('bob-theme') || 'dark';
+        var accent = localStorage.getItem('bob-accent');
+        var info = THEME_MAP[theme] || THEME_MAP['dark'];
+
+        document.documentElement.setAttribute('data-theme', theme);
+
+        // 设置用户自选 accent（light/dark 模式可自选，premium 主题固定）
+        if (accent) {
+          document.documentElement.style.setProperty('--user-accent', accent);
+        }
+
+        // 将背景和 logo 色直接写入 CSS 变量，splash 通过 var() 引用
+        document.documentElement.style.setProperty('--splash-bg', info.bg);
+        // logo 色优先级：亮色模式用 accent，其他用白色
+        var logoC = (theme === 'light') ? (accent || info.accent || '#2776bb') : (info.logoColor || '#ffffff');
+        document.documentElement.style.setProperty('--splash-logo', logoC);
+      } catch (e) {}
+    })();
+  </script>
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+      background-color: var(--splash-bg, #0c0c0c);
+    }
+
+    #native-splash {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 99999;
+      background-color: var(--splash-bg, #0c0c0c);
+      transition: opacity 1s ease-in-out;
+    }
+
+    #native-splash .splash-logo {
+      width: 80px;
+      height: 80px;
+      background-color: var(--splash-logo, #ffffff);
+      -webkit-mask-image: url(/bob_logo.svg);
+      mask-image: url(/bob_logo.svg);
+      -webkit-mask-size: contain;
+      mask-size: contain;
+      -webkit-mask-repeat: no-repeat;
+      mask-repeat: no-repeat;
+      -webkit-mask-position: center;
+      mask-position: center;
+      animation: splash-pulse 2s infinite ease-in-out;
+    }
+
+    @keyframes splash-pulse {
+      0%   { transform: scale(0.95); opacity: 0.8; }
+      50%  { transform: scale(1.05); opacity: 1; filter: drop-shadow(0 0 12px rgba(255,255,255,0.15)); }
+      100% { transform: scale(0.95); opacity: 0.8; }
+    }
+  </style>
+</head>
+<body>
+  <div id="native-splash">
+    <div class="splash-logo"></div>
+  </div>
+  <div id="app"></div>
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

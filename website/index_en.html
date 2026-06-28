@@ -1,0 +1,985 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="bob agent is a privacy-first, natively compiled, self-evolving AI desktop assistant and local knowledge base, built with Tauri V2 + Rust + Vue 3." />
+  <title>bob your work partner</title>
+  <link rel="stylesheet" href="style.css?v=1.5.3" />
+  
+  <!-- 🔑 Theme Initializer Script: Prevent any light/dark flashes on load -->
+  <script>
+    (function() {
+      try {
+        var theme = localStorage.getItem('bob-theme') || 'light';
+        document.documentElement.setAttribute('data-theme', theme);
+      } catch (e) {}
+    })();
+  </script>
+</head>
+<body>
+
+  <!-- Floating Sticky Header -->
+  <header>
+    <div class="nav-container">
+      <a href="#" class="logo-wrapper" id="nav-logo">
+        <div class="logo-image-mask"></div>
+        <span class="logo-text">Agent<span class="logo-dot">.</span></span>
+      </a>
+      
+      <nav class="nav-links">
+        <a href="#features" class="nav-link" id="link-features">Core Features</a>
+        <a href="#tech-stack" class="nav-link" id="link-tech">Architecture</a>
+        <a href="#roadmap" class="nav-link" id="link-roadmap">Roadmap</a>
+        <a href="guide_en.html" class="nav-link" id="link-docs">User Guide</a>
+      </nav>
+      
+      <div class="nav-actions">
+        <!-- Language Switcher -->
+        <a href="index.html" class="theme-toggle-btn lang-switcher" title="切换到中文">
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>
+          <span class="lang-text">中</span>
+        </a>
+        
+        <a href="https://github.com/bobbik1984/bob-agent" class="github-btn" target="_blank" title="GitHub Repository">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4"/><path d="M9 18c-4.51 2-5-2-7-2"/></svg>
+        </a>
+        <button class="theme-toggle-btn" id="theme-toggle" title="Toggle Theme">
+          <!-- Sun Icon (for light mode toggle) -->
+          <svg class="sun-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
+          <!-- Moon Icon (for dark mode toggle) -->
+          <svg class="moon-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <div class="main-wrapper">
+    
+    <!-- Hero Section -->
+    <section class="hero-section" id="hero">
+      <div class="bg-logo" id="hero-bg-logo"></div>
+      <h1 class="hero-main-text">
+        Out-of-the-Box, Ultra-Secure<br>Local AI Desktop Secretary
+      </h1>
+      <p class="hero-description">
+        Meet <strong>bob agent</strong> — a lightning-fast AI assistant living quietly in your system tray. Designed for professionals with zero setup required. It features seamless WeChat integration, cross-device file drop, and a local knowledge base that works even offline. Supercharge your workflow while keeping 100% of your data locked in your own PC.
+      </p>
+      <div class="hero-ctas">
+        <a href="downloads/bob-installer.exe?v=0.4.2" class="btn-primary btn-large" id="btn-download-hero">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+          Download Installer
+        </a>
+        <a href="downloads/bob-agent-portable.zip?v=0.4.2" class="btn-secondary btn-large" id="btn-download-portable-hero">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8M16 6l-4-4-4 4M12 2v13"/></svg>
+          Download Portable(Portable ZIP)
+        </a>
+        <a href="#features" class="btn-text-link" id="btn-explore">Features<svg class="arrow-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+        </a>
+      </div>
+      <div class="hero-metrics-bar">
+        <div class="metric-item">
+          <span class="metric-item-name">Installer Size</span>~ 15MB
+        </div>
+        <span class="metric-divider">|</span>
+        <div class="metric-item">
+          <span class="metric-item-name">Memory Footprint:</span>~ 30MB
+        </div>
+        <span class="metric-divider">|</span>
+        <div class="metric-item">
+          <span class="metric-item-name">Dependencies:</span>Zero
+        </div>
+        <span class="metric-divider">|</span>
+        <div class="metric-item">
+          <span class="metric-item-name">Setup Time:</span>< 1 min
+        </div>
+      </div>
+    </section>
+
+    <!-- 10 Core Features Section -->
+    <section class="section" id="features">
+      <div class="section-header">
+        <span class="section-label">Features</span>
+        <h2 class="section-title">10 Core Features</h2>
+        <p class="section-desc">Discarding bloated web wrappers and heavy frameworks, we craft a true productivity foundation with minimalist, practical features that seamlessly integrate into your daily workflow.</p>
+      </div>
+
+      <div class="features-grid">
+        <!-- Feature 1: Interaction -->
+        <div class="feature-card" id="feat-interaction">
+          <div class="card-front">
+            <div class="feature-icon-wrapper">
+              <i data-lucide="sparkles"></i>
+            </div>
+            <h3 class="feature-title">Instant Inspiration Capture</h3>
+            <p class="feature-body">
+              Use a hotkey to instantly summon a lightweight input box at the edge of your screen. Share files or screenshots with bob anytime, as easily as messaging a friend.
+            </p>
+            <div class="feature-tags">
+              <span class="feature-tag">Quick Summon</span>
+              <span class="feature-tag">Drag & Drop</span>
+            </div>
+          </div>
+          <div class="card-overlay">
+            
+            <div class="overlay-content">
+              <div class="tab-pane active" id="interaction-guide">
+                <ol class="step-list">
+                  <li>Press Ctrl+Shift+B to instantly summon the edge input bubble.</li>
+                  <li>Type your inspiration directly, or drag and drop files and screenshots.</li>
+                  <li>Press Enter, and bob automatically analyzes or smartly stores it in the background.</li>
+                </ol>
+              </div>
+              
+            </div>
+          </div>
+        </div>
+
+        <!-- Feature 2: Model Hub -->
+        <div class="feature-card" id="feat-modelhub">
+          <div class="card-front">
+            <div class="feature-icon-wrapper">
+              <i data-lucide="cpu"></i>
+            </div>
+            <h3 class="feature-title">Smart Multi-Model Routing</h3>
+            <p class="feature-body">
+              bob automatically assigns models based on task complexity. Complex creations go to expert models, while background tasks and memory organization run on low-cost models, saving you money.
+            </p>
+            <div class="feature-tags">
+              <span class="feature-tag">Smart Delegation</span>
+              <span class="feature-tag">Cost Effective</span>
+            </div>
+          </div>
+          <div class="card-overlay">
+            
+            <div class="overlay-content">
+              <div class="tab-pane active" id="modelhub-guide">
+                <ol class="step-list">
+                  <li>Enter any third-party API keys in the settings panel.</li>
+                  <li>For complex text polishing or analysis, bob auto-routes to expert models.</li>
+                  <li>Memory organization, dream compression, or self-healing checkups are handled silently by low-cost models.</li>
+                </ol>
+              </div>
+              
+            </div>
+          </div>
+        </div>
+
+        <!-- Feature 3: MCP Client -->
+        <div class="feature-card" id="feat-mcp">
+          <div class="card-front">
+            <div class="feature-icon-wrapper">
+              <i data-lucide="plug"></i>
+            </div>
+            <h3 class="feature-title">MCP Tool Assistant</h3>
+            <p class="feature-body">
+              bob does more than chat—he uses tools. Whether searching the web, scraping links, or running scripts, he automates the heavy lifting for you.
+            </p>
+            <div class="feature-tags">
+              <span class="feature-tag">External Tools</span>
+              <span class="feature-tag">Auto Execution</span>
+            </div>
+          </div>
+          <div class="card-overlay">
+            
+            <div class="overlay-content">
+              <div class="tab-pane active" id="mcp-guide">
+                <ol class="step-list">
+                  <li>Follow the wizard in settings to connect your MCP standard plugin services.</li>
+                  <li>Ask bob, e.g.: "Search for the top 3 tech news from last night".</li>
+                  <li>bob silently invokes search tools, scrapes links, and presents the summary.</li>
+                </ol>
+              </div>
+              
+            </div>
+          </div>
+        </div>
+
+        <!-- Feature 4: Memory -->
+        <div class="feature-card" id="feat-memory">
+          <div class="card-front">
+            <div class="feature-icon-wrapper">
+              <i data-lucide="brain"></i>
+            </div>
+            <h3 class="feature-title">Long-term Memory</h3>
+            <p class="feature-body">
+              After every interaction, bob silently extracts facts and preferences in the background, consolidating them into long-term memory. Over time, he understands you better.
+            </p>
+            <div class="feature-tags">
+              <span class="feature-tag">Long-term Memory</span>
+              <span class="feature-tag">Auto Organize</span>
+            </div>
+          </div>
+          <div class="card-overlay">
+            
+            <div class="overlay-content">
+              <div class="tab-pane active" id="memory-guide">
+                <ol class="step-list">
+                  <li>Mention your project names, tech stack, or writing habits in normal chats.</li>
+                  <li>bob silently extracts facts and archives them into the local knowledge base.</li>
+                  <li>In future chats, bob automatically integrates long-term memory into his responses.</li>
+                </ol>
+              </div>
+              
+            </div>
+          </div>
+        </div>
+
+        <!-- Feature 5: Knowledge Graph -->
+        <div class="feature-card" id="feat-graph">
+          <div class="card-front">
+            <div class="feature-icon-wrapper">
+              <i data-lucide="git-graph"></i>
+            </div>
+            <h3 class="feature-title">Local Knowledge Graph</h3>
+            <p class="feature-body">
+              Give him your files or quick notes, and bob weaves them into a clear, local knowledge graph. Use visual connections to trace back and retrieve your memories instantly.
+            </p>
+            <div class="feature-tags">
+              <span class="feature-tag">Graph View</span>
+              <span class="feature-tag">Associative Search</span>
+            </div>
+          </div>
+          <div class="card-overlay">
+            
+            <div class="overlay-content">
+              <div class="tab-pane active" id="graph-guide">
+                <ol class="step-list">
+                  <li>Drag a folder with Markdown notes into the chat box.</li>
+                  <li>Open the Graph View menu, bob renders the connections with a force-directed graph.</li>
+                  <li>Double-click any node to instantly jump to the related note and retrieve memories.</li>
+                </ol>
+              </div>
+              
+            </div>
+          </div>
+        </div>
+
+        <!-- Feature 6: Goal Mode -->
+        <div class="feature-card" id="feat-goal">
+          <div class="card-front">
+            <div class="feature-icon-wrapper">
+              <i data-lucide="target"></i>
+            </div>
+            <h3 class="feature-title">Goal-Oriented Execution</h3>
+            <p class="feature-body">
+              Enable Goal Mode to delegate vague objectives to bob. He breaks down steps, uses tools, and continuously verifies quality in the background until he delivers satisfactory results.
+            </p>
+            <div class="feature-tags">
+              <span class="feature-tag">Task Breakdown</span>
+              <span class="feature-tag">Self-Verification</span>
+            </div>
+          </div>
+          <div class="card-overlay">
+            
+            <div class="overlay-content">
+              <div class="tab-pane active" id="goal-guide">
+                <ol class="step-list">
+                  <li>Give bob a task objective and toggle on Goal Mode.</li>
+                  <li>The model decomposes the task (Maker) and invokes tools sequentially.</li>
+                  <li>The Clerk model (Checker) strictly verifies results, auto-retrying if failed.</li>
+                </ol>
+              </div>
+              
+            </div>
+          </div>
+        </div>
+
+        <!-- Feature 7: WeChat Gateway -->
+        <div class="feature-card" id="feat-wechat">
+          <div class="card-front">
+            <div class="feature-icon-wrapper">
+              <i data-lucide="message-square"></i>
+            </div>
+            <h3 class="feature-title">WeChat Remote Control</h3>
+            <p class="feature-body">
+              Away from your desk? Send a WeChat message to bob to check your PC's schedule, transfer files, or forward article links for quick AI summaries.
+            </p>
+            <div class="feature-tags">
+              <span class="feature-tag">Mobile Sync</span>
+              <span class="feature-tag">WeChat Bridge</span>
+            </div>
+          </div>
+          <div class="card-overlay">
+            
+            <div class="overlay-content">
+              <div class="tab-pane active" id="wechat-guide">
+                <ol class="step-list">
+                  <li>Click the WeChat icon in settings, and scan the QR code with your phone for secure pairing.</li>
+                  <li>Send an article or link to bob's WeChat account via your phone.</li>
+                  <li>bob extracts the first 2000 words locally and pushes an AI summary back to your phone.</li>
+                </ol>
+              </div>
+              
+            </div>
+          </div>
+        </div>
+
+        <!-- Feature 8: Web Drop -->
+        <div class="feature-card" id="feat-webdrop">
+          <div class="card-front">
+            <div class="feature-icon-wrapper">
+              <i data-lucide="share-2"></i>
+            </div>
+            <h3 class="feature-title">End-to-End Encrypted Web Drop</h3>
+            <p class="feature-body">
+              When transferring large files between phone and PC, bob establishes a secure peer-to-peer channel. Data flows only between your devices—never touching cloud servers. Ultimate security.
+            </p>
+            <div class="feature-tags">
+              <span class="feature-tag">No Login Transfer</span>
+              <span class="feature-tag">Encrypted Privacy</span>
+            </div>
+          </div>
+          <div class="card-overlay">
+            
+            <div class="overlay-content">
+              <div class="tab-pane active" id="webdrop-guide">
+                <ol class="step-list">
+                  <li>Click to share a large local file, bob auto-generates an AES key in memory.</li>
+                  <li>Scan the QR code with a phone or tablet on the same LAN to establish a WebRTC direct connection.</li>
+                  <li>Enjoy gigabit transfer speeds and instantly decrypt the file on the receiving end.</li>
+                </ol>
+              </div>
+              
+            </div>
+          </div>
+        </div>
+
+        <!-- Feature 9: Doctor -->
+        <div class="feature-card" id="feat-doctor">
+          <div class="card-front">
+            <div class="feature-icon-wrapper">
+              <i data-lucide="shield-alert"></i>
+            </div>
+            <h3 class="feature-title">Self-Healing Doctor</h3>
+            <p class="feature-body">
+              bob has self-diagnostics and self-healing capabilities. If the network fluctuates, Keys expire, or configs conflict, he troubleshoots and attempts to fix it himself.
+            </p>
+            <div class="feature-tags">
+              <span class="feature-tag">One-Click Checkup</span>
+              <span class="feature-tag">Self-Healing</span>
+            </div>
+          </div>
+          <div class="card-overlay">
+            
+            <div class="overlay-content">
+              <div class="tab-pane active" id="doctor-guide">
+                <ol class="step-list">
+                  <li>If the system feels abnormal, click the one-click Doctor checkup button in settings.</li>
+                  <li>The system automatically scans configs, database integrity, and API blockers.</li>
+                  <li>If data locks or conflicts occur, trigger self-healing to safely rollback from backups.</li>
+                </ol>
+              </div>
+              
+            </div>
+          </div>
+        </div>
+
+        <!-- Feature 10: Calendar -->
+        <div class="feature-card" id="feat-calendar">
+          <div class="card-front">
+            <div class="feature-icon-wrapper">
+              <i data-lucide="calendar"></i>
+            </div>
+            <h3 class="feature-title">Smart Calendar & Reminders</h3>
+            <p class="feature-body">
+              Schedule time using natural language. bob organizes your weekly calendar locally and sends gentle reminders to your phone via WeChat when meetings or tasks approach.
+            </p>
+            <div class="feature-tags">
+              <span class="feature-tag">Natural Language</span>
+              <span class="feature-tag">WeChat Alerts</span>
+            </div>
+          </div>
+          <div class="card-overlay">
+            
+            <div class="overlay-content">
+              <div class="tab-pane active" id="calendar-guide">
+                <ol class="step-list">
+                  <li>Casually say: "Check accounts with Lee from admin tomorrow at 3 PM".</li>
+                  <li>bob automatically extracts time and events and records them in the local calendar.</li>
+                  <li>As the schedule approaches, bob auto-dispatches a WeChat notification to your phone.</li>
+                </ol>
+              </div>
+              
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Comparison Section (Clean UI, Expandable) -->
+    <section class="section comparison-section" id="comparison">
+      <div class="section-header">
+          <span class="section-label">PK Competitors</span>
+          <h2 class="section-title">Why choose bob?</h2>
+          <p class="section-desc">Shatter complex configurations with hardcore technical strength and refreshing zero-dependency design. True invisible companionship.</p>
+        </div>
+        
+        <!-- CSS 极简对比条形图-->
+        <div class="charts-container">
+          <div class="chart-box">
+            <h4 class="chart-label">Installer Size Comparison</h4>
+            <div class="bar-wrapper"><span class="bar-name">bob</span><div class="bar-track"><div class="bar-fill bob-bar" style="width: 7.5%;"></div></div><span class="bar-value">15MB</span></div>
+            <div class="bar-wrapper"><span class="bar-name">Claude Desktop</span><div class="bar-track"><div class="bar-fill" style="width: 50%;"></div></div><span class="bar-value">100MB</span></div>
+            <div class="bar-wrapper"><span class="bar-name">Trae / Cursor</span><div class="bar-track"><div class="bar-fill" style="width: 75%;"></div></div><span class="bar-value">150MB</span></div>
+            <div class="bar-wrapper"><span class="bar-name">Hermes Desktop</span><div class="bar-track"><div class="bar-fill" style="width: 100%;"></div></div><span class="bar-value">200MB</span></div>
+          </div>
+          
+          <div class="chart-box">
+            <h4 class="chart-label">Memory Footprint Comparison</h4>
+            <div class="bar-wrapper"><span class="bar-name">bob</span><div class="bar-track"><div class="bar-fill bob-bar" style="width: 6%;"></div></div><span class="bar-value">30MB</span></div>
+            <div class="bar-wrapper"><span class="bar-name">Claude Desktop</span><div class="bar-track"><div class="bar-fill" style="width: 60%;"></div></div><span class="bar-value">300MB</span></div>
+            <div class="bar-wrapper"><span class="bar-name">GitHub Copilot</span><div class="bar-track"><div class="bar-fill" style="width: 80%;"></div></div><span class="bar-value">400MB</span></div>
+            <div class="bar-wrapper"><span class="bar-name">Hermes Desktop</span><div class="bar-track"><div class="bar-fill" style="width: 100%;"></div></div><span class="bar-value">500MB</span></div>
+          </div>
+        </div>
+
+        <!-- 可折叠的对比表与深度优势分析 -->
+        <details class="comparison-details">
+          <summary class="comparison-summary">
+            <span class="summary-text">Differences from other products</span>
+            <span class="summary-icon"></span>
+          </summary>
+          
+          <div class="details-content">
+            <!-- 1. 竞品对比大表 -->
+            <div class="table-responsive">
+              <table class="comparison-table">
+                                                                                                                                <thead>
+                  <tr>
+                    <th>Dimensions</th>
+                    <th class="highlight">
+                      <div class="header-logo" style="text-align: center;"><img src="assets/bob_logo.svg" alt="bob agent" style="height: 40px; width: auto; margin-bottom: 0px;" /></div>
+                    </th>
+                    <th>
+                      <div class="header-logo" style="text-align: center; margin-bottom: 4px;"><img src="assets/hermes.png" alt="Hermes" class="invert-on-dark" style="height: 24px; object-fit: contain;" /></div>
+                      Hermes Desktop
+                    </th>
+                    <th>
+                      <div class="header-logo" style="text-align: center; margin-bottom: 4px;"><img src="assets/openclaw.png" alt="OpenClaw" style="height: 24px; object-fit: contain;" /></div>
+                      OpenClaw
+                    </th>
+                    <th>
+                      <div class="header-logo" style="text-align: center; margin-bottom: 4px;"><img src="assets/claude.png" alt="Claude Code" style="height: 24px; object-fit: contain;" /></div>
+                      Claude Code
+                    </th>
+                    <th>
+                      <div class="header-logo" style="text-align: center; margin-bottom: 4px;"><img src="assets/codex.png" alt="Codex Desktop" class="invert-on-dark" style="height: 24px; object-fit: contain;" /></div>
+                      Codex Desktop
+                    </th>
+                    <th>
+                      <div class="header-logo" style="text-align: center; margin-bottom: 4px;"><img src="assets/Copilot.png" alt="GitHub Copilot" class="invert-on-dark" style="height: 24px; object-fit: contain;" /></div>
+                      GitHub Copilot
+                    </th>
+                    <th>
+                      <div class="header-logo" style="text-align: center; margin-bottom: 4px;"><img src="assets/workbuddy.png" alt="Tencent Workbuddy" style="height: 24px; object-fit: contain;" /></div>
+                      Tencent Workbuddy
+                    </th>
+                    <th>
+                      <div class="header-logo" style="text-align: center; margin-bottom: 4px;"><img src="assets/Marvis.png" alt="Tencent Marvis" class="invert-on-dark" style="height: 24px; object-fit: contain;" /></div>
+                      Tencent Marvis
+                    </th>
+                    <th>
+                      <div class="header-logo" style="text-align: center; margin-bottom: 4px;"><img src="assets/trae.png" alt="Trae" style="height: 24px; object-fit: contain;" /></div>
+                      Trae
+                    </th>
+                    <th>
+                      <div class="header-logo" style="text-align: center; margin-bottom: 4px;"><img src="assets/Manus.png" alt="Manus" class="invert-on-dark" style="height: 24px; object-fit: contain;" /></div>
+                      Manus (Cloud)
+                    </th>
+                  </tr>
+                </thead>
+                                                                                                                                <tbody>
+                  <tr>
+                    <td class="feature-name">Onboarding</td>
+                    <td class="highlight"><div class="rating-stars">★★★</div><div class="rating-text">Zero setup</div></td>
+                    <td><div class="rating-stars">★★☆</div><div class="rating-text">Needs Ollama</div></td>
+                    <td><div class="rating-stars">★☆☆</div><div class="rating-text">Needs DevOps</div></td>
+                    <td><div class="rating-stars">★☆☆</div><div class="rating-text">CLI only</div></td>
+                    <td><div class="rating-stars">★★☆</div><div class="rating-text">Needs setup</div></td>
+                    <td><div class="rating-stars">★★☆</div><div class="rating-text">Needs IDE</div></td>
+                    <td><div class="rating-stars">★★☆</div><div class="rating-text">Enterprise managed</div></td>
+                    <td><div class="rating-stars">★★★</div><div class="rating-text">Out-of-box</div></td>
+                    <td><div class="rating-stars">★★☆</div><div class="rating-text">Needs IDE</div></td>
+                    <td><div class="rating-stars">★★☆</div><div class="rating-text">Waitlist</div></td>
+                  </tr>
+                  <tr>
+                    <td class="feature-name">Lightweight Install</td>
+                    <td class="highlight"><div class="rating-stars">★★★</div><div class="rating-text">Light (~15MB)</div></td>
+                    <td><div class="rating-stars">★★☆</div><div class="rating-text">Medium (~200MB)</div></td>
+                    <td><div class="rating-stars">★☆☆</div><div class="rating-text">Heavy (Node.js)</div></td>
+                    <td><div class="rating-stars">★☆☆</div><div class="rating-text">Heavy (Node.js)</div></td>
+                    <td><div class="rating-stars">★★☆</div><div class="rating-text">Medium (Electron)</div></td>
+                    <td><div class="rating-stars">★★☆</div><div class="rating-text">IDE dependent</div></td>
+                    <td><div class="rating-stars">★★☆</div><div class="rating-text">Light</div></td>
+                    <td><div class="rating-stars">★☆☆</div><div class="rating-text">Heavy (System)</div></td>
+                    <td><div class="rating-stars">★★☆</div><div class="rating-text">Medium (IDE)</div></td>
+                    <td><div class="rating-stars">★★★</div><div class="rating-text">None (Web)</div></td>
+                  </tr>
+                  <tr>
+                    <td class="feature-name">Local Models</td>
+                    <td class="highlight"><div class="rating-stars">★★★</div><div class="rating-text">Built-in sidecar</div></td>
+                    <td><div class="rating-stars">★★☆</div><div class="rating-text">Needs Ollama</div></td>
+                    <td><div class="rating-stars">★★☆</div><div class="rating-text">Remote nodes</div></td>
+                    <td><div class="rating-stars">★☆☆</div><div class="rating-text">Needs proxy hack</div></td>
+                    <td><div class="rating-stars">★☆☆</div><div class="rating-text">Needs API proxy</div></td>
+                    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">Locked to MS Cloud</div></td>
+                    <td><div class="rating-stars">★☆☆</div><div class="rating-text">Enterprise API config</div></td>
+                    <td><div class="rating-stars">★★☆</div><div class="rating-text">NPU Calls</div></td>
+                    <td><div class="rating-stars">★☆☆</div><div class="rating-text">Needs proxy hack</div></td>
+                    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">Cloud only</div></td>
+                  </tr>
+                  <tr>
+                    <td class="feature-name">Billing Model</td>
+                    <td class="highlight"><div class="rating-stars">★★★</div><div class="rating-text">Free / BYOK</div></td>
+                    <td><div class="rating-stars">★★★</div><div class="rating-text">Free / BYOK</div></td>
+                    <td><div class="rating-stars">★★★</div><div class="rating-text">Self-hosted Free</div></td>
+                    <td><div class="rating-stars">★☆☆</div><div class="rating-text">Token billing</div></td>
+                    <td><div class="rating-stars">★☆☆</div><div class="rating-text">Token / Sub</div></td>
+                    <td><div class="rating-stars">★☆☆</div><div class="rating-text">Costly Sub</div></td>
+                    <td><div class="rating-stars">★★☆</div><div class="rating-text">Enterprise quota</div></td>
+                    <td><div class="rating-stars">★★☆</div><div class="rating-text">Base + VIP</div></td>
+                    <td><div class="rating-stars">★★★</div><div class="rating-text">Free for now</div></td>
+                    <td><div class="rating-stars">★☆☆</div><div class="rating-text">Costly Sub</div></td>
+                  </tr>
+                  <tr>
+                    <td class="feature-name">Web Search</td>
+                    <td class="highlight"><div class="rating-stars">★★★</div><div class="rating-text">Built-in Fast</div></td>
+                    <td><div class="rating-stars">★★★</div><div class="rating-text">Built-in</div></td>
+                    <td><div class="rating-stars">★★★</div><div class="rating-text">Search Plugin</div></td>
+                    <td><div class="rating-stars">★★☆</div><div class="rating-text">Via MCP</div></td>
+                    <td><div class="rating-stars">★☆☆</div><div class="rating-text">Weak</div></td>
+                    <td><div class="rating-stars">★★☆</div><div class="rating-text">Bing Integration</div></td>
+                    <td><div class="rating-stars">★★☆</div><div class="rating-text">Internal Search</div></td>
+                    <td><div class="rating-stars">★★★</div><div class="rating-text">Built-in Engine</div></td>
+                    <td><div class="rating-stars">★★☆</div><div class="rating-text">Code context</div></td>
+                    <td><div class="rating-stars">★★★</div><div class="rating-text">Auto Crawler</div></td>
+                  </tr>
+                  <tr>
+                    <td class="feature-name">Local Knowledge</td>
+                    <td class="highlight"><div class="rating-stars">★★★</div><div class="rating-text">Vector + Graph</div></td>
+                    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">No</div></td>
+                    <td><div class="rating-stars">★☆☆</div><div class="rating-text">Volumes needed</div></td>
+                    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">Cloud upload</div></td>
+                    <td><div class="rating-stars">★★☆</div><div class="rating-text">Code Index</div></td>
+                    <td><div class="rating-stars">★★☆</div><div class="rating-text">Code Index</div></td>
+                    <td><div class="rating-stars">★★☆</div><div class="rating-text">Cloud DB</div></td>
+                    <td><div class="rating-stars">★★☆</div><div class="rating-text">File Search</div></td>
+                    <td><div class="rating-stars">★★☆</div><div class="rating-text">Code Index</div></td>
+                    <td><div class="rating-stars">★☆☆</div><div class="rating-text">Session only</div></td>
+                  </tr>
+                  <tr>
+                    <td class="feature-name">Daily Office</td>
+                    <td class="highlight"><div class="rating-stars">★★★</div><div class="rating-text">WeChat/Calendar</div></td>
+                    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">No</div></td>
+                    <td><div class="rating-stars">★★☆</div><div class="rating-text">Bot Bridge</div></td>
+                    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">No</div></td>
+                    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">No</div></td>
+                    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">No</div></td>
+                    <td><div class="rating-stars">★★★</div><div class="rating-text">Enterprise Suite</div></td>
+                    <td><div class="rating-stars">★★★</div><div class="rating-text">System Assistant</div></td>
+                    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">No</div></td>
+                    <td><div class="rating-stars">★★☆</div><div class="rating-text">Web crawler</div></td>
+                  </tr>
+                  <tr>
+                    <td class="feature-name">Sandbox Dev</td>
+                    <td class="highlight"><div class="rating-stars">☆☆☆</div><div class="rating-text">Office focus, no sandbox</div></td>
+                    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">No</div></td>
+                    <td><div class="rating-stars">★★★</div><div class="rating-text">Container Workflow</div></td>
+                    <td><div class="rating-stars">★★★</div><div class="rating-text">Strong Execution</div></td>
+                    <td><div class="rating-stars">★★★</div><div class="rating-text">Pro Sandbox & Git</div></td>
+                    <td><div class="rating-stars">★★★</div><div class="rating-text">VSCode Ecosystem</div></td>
+                    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">No</div></td>
+                    <td><div class="rating-stars">★☆☆</div><div class="rating-text">Weak</div></td>
+                    <td><div class="rating-stars">★★★</div><div class="rating-text">Pro IDE</div></td>
+                    <td><div class="rating-stars">★★★</div><div class="rating-text">Cloud Containers</div></td>
+                  </tr>
+                  <tr>
+                    <td class="feature-name">Security & Privacy</td>
+                    <td class="highlight"><div class="rating-stars">★★★</div><div class="rating-text">Strong (Sandbox)</div></td>
+                    <td><div class="rating-stars">★★☆</div><div class="rating-text">Medium (Local run)</div></td>
+                    <td><div class="rating-stars">★★★</div><div class="rating-text">Strong (Containers)</div></td>
+                    <td><div class="rating-stars">★☆☆</div><div class="rating-text">Weak (Blind run)</div></td>
+                    <td><div class="rating-stars">★★☆</div><div class="rating-text">Medium (Audit)</div></td>
+                    <td><div class="rating-stars">★★☆</div><div class="rating-text">Medium (IDE)</div></td>
+                    <td><div class="rating-stars">★★★</div><div class="rating-text">Strong (Isolated)</div></td>
+                    <td><div class="rating-stars">★★☆</div><div class="rating-text">Medium (High Priv)</div></td>
+                    <td><div class="rating-stars">★★☆</div><div class="rating-text">Medium (IDE)</div></td>
+                    <td><div class="rating-stars">★★★</div><div class="rating-text">Strong (Cloud Iso)</div></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            
+            <!-- 2. 深度优势阐述 -->
+            <div class="advantages-elaboration">
+              <div class="advantage-block">
+                <h5>1. Deployment & Runtime: Zero Dependency & Invisible</h5>
+                <p>Many Agents claiming to "run locally" are geek-driven tools requiring manual deployment of Node.js, Python, or CUDA. Some even force multi-GB downloads on first launch (e.g. Hermes Desktop downloading 2GB+ models). bob runs on Tauri v2 and Rust, statically compiling the core and local model sidecar into a single native binary of ~15MB, using only ~30MB memory. True zero-dependency installation and invisible presence.</p>
+              </div>
+              
+              <div class="advantage-block">
+                <h5>2. Billing & Usage: Transparent & Autonomous, No Credit Traps</h5>
+                <p>Enterprise workspaces often use closed Credit systems or expensive subscriptions. bob insists on the Bring Your Own Key (BYOK) open standard, charging zero markup. Freely configure raw API keys from DeepSeek, OpenAI, etc. to enjoy the lowest original Token pricing, or simply one-click import your own local models, completely eliminating quota anxiety.</p>
+              </div>
+              
+              <div class="advantage-block">
+                <h5>3. Security & Control: No Overstepping, User Has Final Say</h5>
+                <p>Visual Agents like Claude Computer Use constantly screenshot and hijack your physical mouse/keyboard, often executing erroneous commands due to slight UI shifts and causing file security panic. bob NEVER hijacks inputs. It restricts file writing through a visual Outbox sandbox and uses the system clipboard for rich text drafts. A human reviews and clicks "Send"—the perfect balance of efficiency and security.</p>
+              </div>
+              
+              <div class="advantage-block">
+                <h5>4. Office-Specialized: Out-of-the-Box Skills for Professionals</h5>
+                <p>Claude Code and Copilot are IDE plugins or terminal tools for programmers. bob comes with a practical toolchain specially tailored for general office professionals. Arrange schedules naturally, generate reminders, use WeChat remote control to send links/files to your PC, and enjoy Zero-Knowledge End-to-End encrypted large file sharing (Web Drop) on your local network. All daily routines wrapped up for you.</p>
+              </div>
+              
+              <div class="advantage-block">
+                <h5>5. Agent Philosophy: Rejecting OS Hijacking and Blind Cloud Execution</h5>
+                <p>Recent products like Tencent Marvis attempt to gain root-level permissions to directly control physical systems, which introduces immeasurable local security vulnerabilities despite the convenience. On the other extreme, Manus delegates all tasks (like scraping and coding) to an uncontrollable cloud sandbox, resulting in extremely high error-correction costs. bob strictly adheres to the "Human-in-the-Loop" boundary. It acts merely as your desktop's digital brain—never overstepping to click on your behalf, and never letting your sensitive data leave the local device. Human command, bob decision: the perfect unity of security and efficiency.</p>
+              </div>
+            </div>
+          </div>
+        </details>
+    </section>
+
+    <!-- Tech Stack Section -->
+    <section class="section" id="tech-stack">
+      <div class="tech-section">
+        <div class="tech-left">
+          <span class="section-label">Architecture</span>
+          <h2 class="section-title">Ultra-Efficient<br>Runtime Foundation</h2>
+          <p class="section-desc">Discarding bloated traditional backends and network dependencies, we built a lightning-fast, low-power, fully encrypted local data runtime—just to ensure your daily workflow is smooth and your privacy is secure.</p>
+        </div>
+        
+        <div class="tech-right">
+          <div class="tech-grid">
+            <div class="tech-item" id="tech-tauri">
+              <h3 class="tech-name">High Performance, Lightweight</h3>
+              <p class="tech-desc">Rebuilt with system-level native code, shedding the bloat and memory burden of traditional software. Uses only ~50MB memory. Blazing fast response and buttery smooth operation.</p>
+            </div>
+            
+            <div class="tech-item" id="tech-vue">
+              <h3 class="tech-name">Clean UI, Clear Vision</h3>
+              <p class="tech-desc">Frontend design follows a restrained, premium minimalist aesthetic. Responsive data, comfortable typography, one-click dark/light mode toggle. Prevents fatigue during long sessions.</p>
+            </div>
+            
+            <div class="tech-item" id="tech-sqlite">
+              <h3 class="tech-name">Local Storage, Fast Retrieval</h3>
+              <p class="tech-desc">No reliance on cloud databases. All notes, schedules, and mind map relations are encrypted locally. Millisecond full-text search helps you instantly trace and retrieve any memory.</p>
+            </div>
+            
+            <div class="tech-item" id="tech-webrtc">
+              <h3 class="tech-name">Secure & Encrypted Transfer</h3>
+              <p class="tech-desc">Establish peer-to-peer direct channels when transferring large files across phones, PCs, and tablets. Data flows entirely between local devices, bypassing cloud servers. Ultimate security.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Timeline / Roadmap Section -->
+    <section class="section" id="roadmap">
+      <div class="section-header" id="roadmap-header">
+        <span class="section-label">Milestones</span>
+        <h2 class="section-title" style="display: inline-flex; align-items: center; gap: 12px;">Milestones<svg class="section-toggle-arrow" width="20" height="20" style="width: 20px; height: 20px;" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+        </h2>
+        <p class="section-desc">We are steadily solidifying the local desktop AI experience, building a more interconnected personal assistant node step by step.</p>
+      </div>
+
+      <div class="roadmap-container" id="roadmap-container">
+        <div class="roadmap-line"></div>
+        
+        <!-- Milestone 1-13 -->
+        <div class="roadmap-item completed">
+          <div class="roadmap-dot"></div>
+          <div class="roadmap-meta">
+            <span class="roadmap-version">Milestone 1 ~ 13 — Foundation Architecture Iterations</span>
+          </div>
+          <div class="roadmap-content">
+            <p>Completed the full construction and iterative refinement from early Proof of Concept (PoC) to the minimalist local core infrastructure.</p>
+            <ul>
+              <li>Deep integration of Tauri V2 framework and cross-platform compilation adaptations</li>
+              <li>Development of Rust-based high-performance, zero-dependency local model sidecar engine</li>
+              <li>Launch of Outbox interception sandbox mechanism and secure isolation gateway</li>
+              <li>... and hundreds of other core capability and user experience optimizations</li>
+            </ul>
+          </div>
+        </div>
+
+        <!-- Milestone 14 -->
+        <div class="roadmap-item completed">
+          <div class="roadmap-dot"></div>
+          <div class="roadmap-meta">
+            <span class="roadmap-version">Milestone 14 — Cognitive Graph & Memory Mechanism</span>
+          </div>
+          <div class="roadmap-content">
+            <p>Connected SQLite native graph canvas with Vis.js frontend rendering; completed the Soul-Session-Wiki three-layer memory funnel and Clerk model backend silent Dream auto-tuning mechanism.</p>
+            <ul>
+              <li>SQLite storage engine & alias merging (`kg_merge_nodes`)</li>
+              <li>Dream Engine 24h facts cleanup & `SOUL.md` rewrite</li>
+              <li>Graph Search & BFS relationship traverse components</li>
+              <li><strong>[Infrastructure Ready]</strong> Telegram & Discord Bot underlying communication and event routing framework</li>
+            </ul>
+          </div>
+        </div>
+
+        <!-- Milestone 15 -->
+        <div class="roadmap-item active">
+          <div class="roadmap-dot"></div>
+          <div class="roadmap-meta">
+            <span class="roadmap-version">Milestone 15 — Pro Document Engine</span>
+          </div>
+          <div class="roadmap-content">
+            <p>Focused on generating professional-grade, beautifully formatted reports locally, seamlessly connecting with enterprise workflows.</p>
+            <ul>
+              <li><strong>Tier 1 (PDF)</strong>: Support static template-based rich media PDF rendering.</li>
+              <li><strong>Tier 2 (XLSX)</strong>: Locally generate Excel data reports and pivot tables.</li>
+              <li><strong>Tier 3 (DOCX)</strong>Automatically organize Wiki into Word reports with standard outlines.</li>
+              <li><strong>Tier 4 (PPTX)</strong>: Auto-render and style PPT slides based on outlines.</li>
+            </ul>
+          </div>
+        </div>
+
+        <!-- Milestone 16 -->
+        <div class="roadmap-item">
+          <div class="roadmap-dot"></div>
+          <div class="roadmap-meta">
+            <span class="roadmap-version">Milestone 16 — Cross-Platform Bot Matrix</span>
+          </div>
+          <div class="roadmap-content">
+            <p>Building upon the completed communication framework, we continue expanding Bob's access channels to allow secure and instant remote wake-up of the local AI brain from any terminal.</p>
+            <ul>
+              <li>Develop full-featured remote command channels and group collaborative invocation logic</li>
+              <li>Optimize cross-region WebRTC penetration success rate and signaling forwarding latency</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Pitch Banner (CTA) -->
+    <section class="pitch-banner" id="banner-cta">
+      <h2 class="pitch-title">"Your desk is missing a true local phantom assistant who understands you."</h2>
+      <p class="pitch-text">
+        Press <code>Ctrl+Shift+B</code> for instant inspiration capture; drag in messy files to weave clear local mind maps and knowledge connections; autonomously break down complex goals and close the execution loop; check schedules, transfer files, and summarize links via WeChat. Data never leaves your machine. Ultimate security.
+      </p>
+      <div class="pitch-ctas">
+        <a href="downloads/bob-installer.exe?v=0.4.2" class="btn-primary btn-large" id="btn-download-bottom">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+          Download Installer (v0.4.2)
+        </a>
+        <a href="downloads/bob-agent-portable.zip?v=0.4.2" class="btn-secondary btn-large" id="btn-download-portable-bottom">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8M16 6l-4-4-4 4M12 2v13"/></svg>
+          Download Portable
+        </a>
+        <a href="guide_en.html" class="btn-secondary btn-large" id="btn-guide-bottom">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2zM22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+          Read User Guide
+        </a>
+      </div>
+    </section>
+
+    <!-- Footer -->
+    <footer>
+      <div class="footer-left">
+        <p>&copy; 2026 bob agent</p>
+      </div>
+      <div class="footer-links">
+        <a href="https://github.com/bobbik1984/bob-agent/blob/main/README.md" class="footer-link" target="_blank">README</a>
+        <a href="guide_en.html" class="footer-link">User Guide</a>
+      </div>
+    </footer>
+
+  </div>
+
+  <!-- Lucide Icons CDN -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <script>
+    // Initialize Lucide Icons
+    lucide.createIcons();
+
+    // Theme Switch Logic
+    const themeToggleBtn = document.getElementById('theme-toggle');
+    if (themeToggleBtn) {
+      themeToggleBtn.addEventListener('click', () => {
+        let currentTheme = document.documentElement.getAttribute('data-theme');
+        let targetTheme = currentTheme === 'dark' ? 'light' : 'dark';
+        
+        document.documentElement.setAttribute('data-theme', targetTheme);
+        localStorage.setItem('bob-theme', targetTheme);
+      });
+    }
+
+    // Scroll Docking Animation & Parallax background logo
+    const heroSection = document.getElementById('hero');
+    const bgLogo = document.getElementById('hero-bg-logo');
+    const navLogo = document.querySelector('.logo-image-mask');
+
+    if (heroSection && bgLogo && navLogo) {
+      // 1. Initialize states - nav logo is constant
+      navLogo.style.opacity = '1';
+      navLogo.style.pointerEvents = 'auto';
+
+      // 2. Cache coordinates and dimensions to avoid layout thrashing on scroll
+      let navCenterX = 0;
+      let navCenterY = 0;
+      let bgCenterX0 = 0;
+      let bgCenterY0 = 0;
+      let bgWidth = 0;
+      let bgHeight = 0;
+
+      function initCoordinates() {
+        // Temporarily reset styles to initial layout state to get clean baseline measurements
+        const prevTransform = bgLogo.style.transform;
+        const prevTransition = bgLogo.style.transition;
+        const prevOpacity = bgLogo.style.opacity;
+
+        bgLogo.style.transform = 'translate(-50%, -50%) scale(1)';
+        bgLogo.style.transition = 'none';
+        bgLogo.style.opacity = '1';
+
+        // Measure nav logo center
+        navRect = navLogo.getBoundingClientRect();
+        navCenterX = navRect.left + navRect.width / 2;
+        navCenterY = navRect.top + navRect.height / 2;
+
+        // Measure background logo center and dimensions relative to scroll
+        const heroRect = heroSection.getBoundingClientRect();
+        const scrollY = window.scrollY;
+        
+        bgCenterX0 = heroRect.left + heroRect.width / 2;
+        bgCenterY0 = heroRect.top + heroRect.height / 2 + scrollY;
+
+        const bgRect = bgLogo.getBoundingClientRect();
+        bgWidth = bgRect.width;
+        bgHeight = bgRect.height;
+
+        // Restore current state
+        bgLogo.style.transform = prevTransform;
+        bgLogo.style.transition = prevTransition;
+        bgLogo.style.opacity = prevOpacity;
+      }
+
+      // Initialize coordinates
+      initCoordinates();
+      window.addEventListener('load', initCoordinates);
+
+      // Recalculate on window resize
+      window.addEventListener('resize', () => {
+        initCoordinates();
+        handleScroll();
+      });
+
+      // 3. Scroll Handler
+      function handleScroll() {
+        const scrollY = window.scrollY;
+        // Dynamically compute threshold so animation completes when logo naturally reaches header level
+        const threshold = Math.max(bgCenterY0 - navCenterY, 350);
+        const t = Math.min(scrollY / threshold, 1);
+        
+        // Linear curve for gradual and natural speed
+        const easeT = t;
+
+        if (t === 0) {
+          // At scroll top: let mousemove handle alignment, reset state
+          bgLogo.style.opacity = '1';
+          
+          if (!heroSection.matches(':hover')) {
+            bgLogo.style.transform = 'translate(-50%, -50%) scale(1)';
+          }
+          return;
+        }
+
+        // Viewport position of background logo at scrollY if not translated
+        const bgCurrentX = bgCenterX0;
+        const bgCurrentY = bgCenterY0 - scrollY;
+
+        // Target translation to align centers
+        const targetOffsetX = navCenterX - bgCurrentX;
+        const targetOffsetY = navCenterY - bgCurrentY;
+
+        const tx = targetOffsetX * easeT;
+        const ty = targetOffsetY * easeT;
+
+        // Target scale factor
+        const targetScale = navRect.width / bgWidth;
+        const scale = 1 + (targetScale - 1) * easeT;
+
+        // Apply scale & translate
+        bgLogo.style.transform = `translate(calc(-50% + ${tx}px), calc(-50% + ${ty}px)) scale(${scale})`;
+
+        // Fade out background logo
+        bgLogo.style.opacity = (1 - easeT).toString();
+      }
+
+      window.addEventListener('scroll', handleScroll, { passive: true });
+
+      // Run initial scroll evaluation
+      handleScroll();
+
+      // 4. Parallax background logo on mouse movement (only if scrollY <= 5)
+      heroSection.addEventListener('mousemove', (e) => {
+        if (window.scrollY > 5) return;
+        
+        const rect = heroSection.getBoundingClientRect();
+        const x = e.clientX - rect.left - (rect.width / 2);
+        const y = e.clientY - rect.top - (rect.height / 2);
+        
+        const dx = x * 0.03;
+        const dy = y * 0.03;
+        
+        bgLogo.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+      });
+      
+      heroSection.addEventListener('mouseleave', () => {
+        if (window.scrollY > 5) return;
+        
+        bgLogo.style.transition = 'transform 0.5s cubic-bezier(0.25, 0.1, 0.25, 1)';
+        bgLogo.style.transform = 'translate(-50%, -50%)';
+        setTimeout(() => {
+          bgLogo.style.transition = '';
+        }, 500);
+      });
+    }
+
+    // Tab switching inside feature cards
+    window.switchTab = function(event, tabId) {
+      event.stopPropagation();
+      const btn = event.target.closest('.tab-btn');
+      if (!btn) return;
+      const card = btn.closest('.feature-card');
+      if (!card) return;
+
+      card.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      card.querySelectorAll('.tab-pane').forEach(pane => pane.classList.remove('active'));
+
+      btn.classList.add('active');
+      const pane = card.querySelector('#' + tabId);
+      if (pane) pane.classList.add('active');
+    };
+
+    // Collapsible Roadmap Section
+    const roadmapHeader = document.getElementById('roadmap-header');
+    const roadmapContainer = document.getElementById('roadmap-container');
+    if (roadmapHeader && roadmapContainer) {
+      roadmapHeader.addEventListener('click', () => {
+        const isExpanded = roadmapHeader.classList.toggle('active');
+        roadmapContainer.classList.toggle('expanded');
+        
+        if (isExpanded) {
+          // Auto-scroll to active item
+          setTimeout(() => {
+            const activeItem = roadmapContainer.querySelector('.roadmap-item.active');
+            if (activeItem) {
+              roadmapContainer.scrollTo({
+                top: activeItem.offsetTop - 20,
+                behavior: 'smooth'
+              });
+            }
+          }, 350);
+        }
+      });
+    }
+  </script>
+</body>
+</html>
