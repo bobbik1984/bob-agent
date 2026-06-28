@@ -405,15 +405,15 @@ const modelInfo = computed(() => {
   if (!currentModel.value) return { name: t('app.not_configured'), logo: null };
   const name = currentModel.value.toLowerCase();
   
-  if (name.includes('deepseek')) return { name: 'DeepSeek', logo: '/logos/deepseek.png' };
-  if (name.includes('gpt-') || name.includes('o3') || name.includes('o4')) return { name: 'OpenAI', logo: '/logos/openai.png' };
-  if (name.includes('claude')) return { name: 'Claude', logo: '/logos/claude.png' };
-  if (name.includes('gemini')) return { name: 'Gemini', logo: '/logos/google.png' };
-  if (name.includes('qwen')) return { name: 'Qwen', logo: '/logos/qwen.png' };
-  if (name.includes('doubao') || name.includes('seed')) return { name: 'Doubao', logo: '/logos/doubao.png' };
-  if (name.includes('glm')) return { name: 'GLM', logo: '/logos/glm.svg' };
-  if (name.includes('kimi')) return { name: 'Kimi', logo: '/logos/kimi.png' };
-  if (name.includes('minimax')) return { name: 'MiniMax', logo: '/logos/minimax.png' };
+  if (name.includes('deepseek')) return { name: 'DeepSeek', logo: './logos/deepseek.png' };
+  if (name.includes('gpt-') || name.includes('o3') || name.includes('o4')) return { name: 'OpenAI', logo: './logos/openai.png' };
+  if (name.includes('claude')) return { name: 'Claude', logo: './logos/claude.png' };
+  if (name.includes('gemini')) return { name: 'Gemini', logo: './logos/google.png' };
+  if (name.includes('qwen')) return { name: 'Qwen', logo: './logos/qwen.png' };
+  if (name.includes('doubao') || name.includes('seed')) return { name: 'Doubao', logo: './logos/doubao.png' };
+  if (name.includes('glm')) return { name: 'GLM', logo: './logos/glm.svg' };
+  if (name.includes('kimi')) return { name: 'Kimi', logo: './logos/kimi.png' };
+  if (name.includes('minimax')) return { name: 'MiniMax', logo: './logos/minimax.png' };
   if (name.includes('llama') || name.includes('local-')) return { name: 'Local', logo: null };
   return { name: currentModel.value, logo: null };
 });

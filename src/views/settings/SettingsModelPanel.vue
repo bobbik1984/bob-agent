@@ -518,16 +518,16 @@ async function resetRegistry() {
 
 function getProviderLogo(providerId) {
   const name = (providerId || '').toLowerCase();
-  if (name.includes('deepseek')) return '/logos/deepseek.png';
-  if (name.includes('openai')) return '/logos/openai.png';
-  if (name.includes('qwen') || name.includes('dashscope')) return '/logos/qwen.png';
-  if (name.includes('doubao')) return '/logos/doubao.png';
-  if (name.includes('zhipu')) return '/logos/glm.svg';
-  if (name.includes('kimi')) return '/logos/kimi.png';
-  if (name.includes('minimax')) return '/logos/minimax.png';
-  if (name.includes('vertex')) return '/logos/google.png';
-  if (name.includes('gemini') || name.includes('google')) return '/logos/google.png';
-  if (name.includes('claude') || name.includes('anthropic')) return '/logos/claude.png';
+  if (name.includes('deepseek')) return './logos/deepseek.png';
+  if (name.includes('openai')) return './logos/openai.png';
+  if (name.includes('qwen') || name.includes('dashscope') || name.includes('aliyun')) return './logos/qwen.png';
+  if (name.includes('doubao') || name.includes('volcengine')) return './logos/doubao.png';
+  if (name.includes('zhipu')) return './logos/glm.svg';
+  if (name.includes('kimi') || name.includes('moonshot')) return './logos/kimi.png';
+  if (name.includes('minimax')) return './logos/minimax.png';
+  if (name.includes('vertex')) return './logos/google.png';
+  if (name.includes('gemini') || name.includes('google')) return './logos/google.png';
+  if (name.includes('claude') || name.includes('anthropic')) return './logos/claude.png';
   return null;
 }
 

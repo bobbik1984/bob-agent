@@ -97,7 +97,7 @@
       <div class="service-card" :class="{ connected: isConnected('lark') }">
         <div class="service-card-header">
           <div class="service-icon lark-icon">
-            <img src="/logos/feishu.svg" style="width: 22px; height: 22px; object-fit: contain;" alt="Feishu" />
+            <img :src="'./logos/feishu.svg'" style="width: 22px; height: 22px; object-fit: contain;" alt="Feishu" />
           </div>
           <div class="service-info">
             <span class="service-name">{{ $t('settings.conn_lark_name') }}</span>
@@ -169,7 +169,7 @@
       <div class="service-card" :class="{ connected: isConnected('google') }">
         <div class="service-card-header">
           <div class="service-icon" style="background: transparent;">
-            <img src="/logos/google.svg" style="width: 22px; height: 22px; object-fit: contain;" alt="Google" />
+            <img :src="'./logos/google.svg'" style="width: 22px; height: 22px; object-fit: contain;" alt="Google" />
           </div>
           <div class="service-info">
             <span class="service-name">Google Calendar</span>
@@ -254,7 +254,7 @@
       <div v-if="!showAddMcp && !mcpServers['Outlook365']" class="service-card preset-card" @click="addOutlookMcpPreset">
         <div class="service-card-header" style="margin-bottom: 0;">
           <div class="service-icon" style="background: transparent;">
-            <img src="/logos/outlook.svg" style="width: 20px; height: 20px; filter: grayscale(1); opacity: 0.6;" alt="Outlook" />
+            <img :src="'./logos/outlook.svg'" style="width: 20px; height: 20px; filter: grayscale(1); opacity: 0.6;" alt="Outlook" />
           </div>
           <div class="service-info">
             <span class="service-name" style="color: var(--text-secondary);">Outlook 365</span>

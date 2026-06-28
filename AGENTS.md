@@ -104,8 +104,9 @@ dist-release/
 
 ### 🌐 官网部署工作流 (Marketing Website Pipeline)
 
-`bob-agent/website/` 目录存放的是 `bob.bobbik.org` 的着陆页（Landing Page）和静态资源。
-> **⚠️ 严禁假定自动同步**：该目录**没有**包含在 Syncthing 的同步范围内，必须通过脚本手动推送到 VPS1 节点。
+`bob-agent/website/` 目录存放的是着陆页（Landing Page）和静态资源。
+> **⚠️ 严禁假定自动同步**：该目录**没有**包含在 Syncthing 的同步范围内，必须通过脚本手动推送到指定的云端节点。
+> *具体的部署节点 IP、外网域名映射以及 SSH Session 名称，请查阅 `Assistant/common/knowledge/skills/cluster_ops/references/node_inventory.md` 和 `service_map.md` 获取最新映射。*
 
 #### 部署方式：
 在项目根目录运行一键部署脚本：
@@ -114,7 +115,7 @@ deploy_website.bat
 ```
 执行过程说明：
 1. **打包**：将 `website/` 目录压缩为 `.zip`。
-2. **传输**：通过 `pscp` 和预配置的 `Huoshan` SSH Session 将文件推送到 VPS1 (115.190.248.194) 的 `/tmp/` 目录。
+2. **传输**：通过 `pscp` 和预配置的 SSH Session 将文件推送到目标节点的 `/tmp/` 目录。
 3. **部署**：通过 `plink` 远程执行 `sudo unzip` 解压到 Caddy 的目标目录 `/opt/bob/`。
 
 ---

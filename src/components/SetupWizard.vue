@@ -61,7 +61,7 @@
         <!-- Page 4: WeChat -->
         <div v-if="step === 4" class="page page-top">
           <div class="wechat-toggle" @click="toggleWechat">
-            <img src="/wechat.svg" class="wechat-icon" :class="{ active: enableWechat }" alt="" />
+            <img :src="'./wechat.svg'" class="wechat-icon" :class="{ active: enableWechat }" alt="" />
             <label class="switch-label">
               <input type="checkbox" v-model="enableWechat" @change="toggleWechat" @click.stop />
               <span class="slider round"></span>
