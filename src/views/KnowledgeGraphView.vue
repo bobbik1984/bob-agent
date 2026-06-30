@@ -755,9 +755,6 @@ async function loadGraph() {
 
     if (graphData.nodes?.length > 0) {
       renderNetwork(graphData);
-    } else {
-      // 图谱为空，自动从现有 wiki_fts 生成
-      await doBackfill();
     }
   } catch (e) {
     console.error('KG load failed:', e);

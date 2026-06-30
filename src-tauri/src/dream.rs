@@ -1,4 +1,4 @@
-﻿use serde_json::{json, Value};
+use serde_json::{json, Value};
 use std::fs;
 use std::path::PathBuf;
 use tauri::Emitter;
@@ -1158,6 +1158,8 @@ pub async fn generate_notebook_digest() -> (usize, usize) {
                         if name.is_empty() { continue; }
                         
                         let target_id = crate::kg::resolve_node_id(&conn, name, etype);
+                        let note_label = path.file_name().unwrap_or_default().to_string_lossy();
+                        let _ = crate::kg::upsert_node(&conn, &note_id, &note_label, "file", "", "dream_digest");
                         let _ = crate::kg::upsert_node(&conn, &target_id, name, etype, "", "dream_digest");
                         let _ = crate::kg::insert_edge(&conn, &note_id, &target_id, relation, 0.7);
                         entities_extracted += 1;
