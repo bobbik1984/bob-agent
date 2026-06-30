@@ -45,7 +45,7 @@
     <div style="margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border-subtle);">
       <button class="btn btn-primary" style="display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%;" @click="runDiagnostics" :disabled="isDiagnosing">
         <Activity :size="14" v-if="!isDiagnosing" />
-        <Loader2 :size="14" class="spin" v-else />
+        <Loader2 :size="14" class="animate-spin" v-else />
         <span>{{ isDiagnosing ? $t('settings.diagnostics_running') : $t('settings.diagnostics_start') }}</span>
       </button>
     </div>
@@ -94,8 +94,7 @@
 <script setup>
 import { ref, onMounted } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { marked } from 'marked';
-import DOMPurify from 'dompurify';
+import { renderMarkdownSimple } from '@/utils/markdown';
 import { Info, BookOpen, FolderOpen, FileText, Trash2, X, Stethoscope, Activity, Loader2, CheckCircle2, AlertCircle, AlertTriangle } from 'lucide-vue-next';
 
 const props = defineProps({
@@ -114,8 +113,7 @@ async function openDocs() {
     try {
       const resp = await fetch('/guide.md');
       const md = await resp.text();
-      const raw = marked.parse(md, { breaks: true });
-      renderedGuide.value = DOMPurify.sanitize(raw);
+      renderedGuide.value = renderMarkdownSimple(md);
     } catch (e) {
       renderedGuide.value = '<p style="color: var(--text-secondary)">Failed to load guide.</p>';
     }
@@ -350,11 +348,4 @@ async function fixIssue(code) {
   transform: scale(0.95);
 }
 
-@keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
-.spin {
-  animation: spin 1s linear infinite;
-}
 </style>

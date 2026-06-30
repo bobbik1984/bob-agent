@@ -18,6 +18,7 @@ use pdfium_render::prelude::*;
 #[derive(Debug, Clone)]
 pub struct ExtractedFile {
     pub relative_path: String,
+    pub absolute_path: String,
     pub file_name: String,
     pub file_type: String,      // "text", "pdf", "docx", "pptx", "xlsx", "image", "other"
     pub text_content: String,
@@ -89,7 +90,7 @@ fn extract_pdf(path: &Path) -> Result<String, String> {
         for page in document.pages().iter() {
             if let Ok(text) = page.text() {
                 full_text.push_str(&text.all());
-                full_text.push('\n');
+                full_text.push_str("\n\n---\n\n");
             }
         }
         Ok(full_text)
@@ -292,11 +293,13 @@ pub fn extract_folder(folder_path: &str) -> Vec<ExtractedFile> {
     if root.is_file() {
         if let Ok(content) = extract_single_file(root) {
             let relative_path = root.file_name().unwrap_or_default().to_string_lossy().to_string();
+            let absolute_path = root.to_string_lossy().to_string();
             let char_count = content.chars().count();
             let byte_size = root.metadata().map(|m| m.len()).unwrap_or(0);
             
             results.push(ExtractedFile {
                 relative_path: relative_path.clone(),
+                absolute_path,
                 file_name: relative_path,
                 file_type: "file".to_string(),
                 text_content: content,
@@ -336,6 +339,8 @@ pub fn extract_folder(folder_path: &str) -> Vec<ExtractedFile> {
             .unwrap_or(path)
             .to_string_lossy()
             .to_string();
+            
+        let absolute_path = path.to_string_lossy().to_string();
 
         let byte_size = fs::metadata(path).map(|m| m.len()).unwrap_or(0);
 
@@ -379,6 +384,7 @@ pub fn extract_folder(folder_path: &str) -> Vec<ExtractedFile> {
 
         results.push(ExtractedFile {
             relative_path,
+            absolute_path,
             file_name,
             file_type,
             text_content,

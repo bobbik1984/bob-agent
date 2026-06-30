@@ -305,6 +305,12 @@ tests:
   note: "待端到端测试后更新"
 
 recent_fixes:
+  - date: "2026-07-01"
+    items:
+      - "[Feature] 待办行动项完全后台静默落盘化 (移除二次确认卡片)"
+      - "[UI] API配置面板供应商 Logo 图标加载路径修复 (Static import)"
+      - "[Clean] 前端代码统一化与硬编码颜色、日期处理重构 (T-1306)"
+      - "[Release] v0.4.4 版本全量打包与部署配置"
   - date: "2026-06-27"
     items:
       - "[Docs] 版本号与目标体系对齐 — 统一全量文件版本为 v0.4.0, 将内部研发步骤规范命名为目标(Goals)以区分宣发主页 Milestone"

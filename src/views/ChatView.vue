@@ -60,17 +60,10 @@
             />
           </template>
 
-          <!-- T-1306: 行动项卡片 -->
-          <template v-else-if="msg.type === 'action-item-card'">
-            <ActionItemCard
-              :item="msg.actionItem"
-              @save="(item) => handleSaveActionItem(item, msg)"
-              @dismiss="() => handleDismissActionItem(msg)"
-            />
-          </template>
+
 
           <!-- 思维链折叠 -->
-          <div v-if="msg.thinking && !msg._isError && msg.type !== 'confirm-card' && msg.type !== 'action-item-card'" class="thinking-card" :class="{ expanded: msg._thinkingExpanded }">
+          <div v-if="msg.thinking && !msg._isError && msg.type !== 'confirm-card'" class="thinking-card" :class="{ expanded: msg._thinkingExpanded }">
             <button class="thinking-toggle" @click="msg._thinkingExpanded = !msg._thinkingExpanded">
               <ChevronRight :size="14" class="thinking-arrow" :class="{ 'expanded': msg._thinkingExpanded }" />
               <span>Thought process</span>
@@ -284,7 +277,7 @@
         <div v-if="pendingImages.length > 0" class="inline-images-preview" style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px;">
           <div v-for="(img, idx) in pendingImages" :key="idx" class="inline-image-preview" style="position: relative;">
             <img :src="'data:image/png;base64,' + img" alt="Pending Image" style="max-height: 100px; border-radius: 4px;" />
-            <button class="image-remove-inline btn-icon" @click="pendingImages.splice(idx, 1)" style="position: absolute; top: 0; right: 0; background: rgba(0,0,0,0.5); color: white; padding: 2px; border-radius: 50%;"><X :size="10" /></button>
+            <button class="image-remove-inline btn-icon" @click="pendingImages.splice(idx, 1)" style="position: absolute; top: 0; right: 0; background: var(--shadow-lg); color: var(--text-inverse); padding: 2px; border-radius: 50%;"><X :size="10" /></button>
           </div>
         </div>
         <!-- 待发送文件预览 -->
@@ -443,30 +436,7 @@
 </template>
 
 <script>
-import { marked } from 'marked';
-import hljs from 'highlight.js';
-import { markedHighlight } from 'marked-highlight';
-import DOMPurify from 'dompurify';
-
-// 允许渲染 file://, bob:// 和本地磁盘路径 (用于图片/视频/链接)
-DOMPurify.addHook('uponSanitizeAttribute', function (node, data) {
-  if (data.attrName === 'href' || data.attrName === 'src') {
-    const val = data.attrValue;
-    if (val.startsWith('file://') || val.startsWith('bob://') || val.startsWith('asset://') || val.startsWith('http://bob.localhost/') || val.startsWith('https://bob.localhost/') || val.startsWith('http://asset.localhost/') || /^[A-Za-z]:[\\\/]/.test(val)) {
-      data.keepAttr = true;
-      data.forceKeepAttr = true;
-    }
-  }
-});
-
-marked.use(markedHighlight({
-  langPrefix: 'hljs language-',
-  highlight(code, lang) {
-    const language = hljs.getLanguage(lang) ? lang : 'plaintext';
-    return hljs.highlight(code, { language }).value;
-  }
-}));
-marked.setOptions({ breaks: true, gfm: true });
+import '@/utils/markdown';
 </script>
 
 <script setup>
@@ -480,7 +450,7 @@ import BrowserEnableCard from '../components/BrowserEnableCard.vue';
 import FolderDropCard from '../components/FolderDropCard.vue';
 import KBEstimateCard from '../components/KBEstimateCard.vue';
 import MorningBriefing from '../components/MorningBriefing.vue';
-import ActionItemCard from '../components/ActionItemCard.vue';
+
 
 import { useChat } from '../composables/useChat.js';
 import { useModelSwitcher } from '../composables/useModelSwitcher.js';
@@ -654,7 +624,6 @@ const {
   renderMarkdown, renderMessageBlocks,
   parseTextAsEvent: _parseTextAsEvent,
   handleConfirmEvent, handleCancelEvent,
-  handleSaveActionItem, handleDismissActionItem,
   clipMessageToNote,
 } = useChat(props, emit, { scrollToBottom, currentModelName, globalFileAccess, agentMode });
 
@@ -838,8 +807,6 @@ async function handleScreenshot() {
   if (isScreenshotting.value) return; // 防止重复点击
   isScreenshotting.value = true;
   try {
-    const { getCurrentWindow } = await import('@tauri-apps/api/window');
-    const appWindow = getCurrentWindow();
     
     // 记录截图前的剪贴板状态，用于检测用户是否取消了截图
     let prevClipHash = '';
@@ -1021,19 +988,18 @@ onMounted(async () => {
 
   // CDN 上传进度监听
   if (window.__TAURI_INTERNALS__) {
-    const { listen } = await import('@tauri-apps/api/event');
-    cdnUnlistens.push(await listen('cdn:upload-start', (e) => {
+    cdnUnlistens.push(await window.electronAPI.listenEvent('cdn:upload-start', (e) => {
       cdnUpload.value = { active: true, fileName: e.payload.file_name, percent: 0, bytesSent: 0, totalBytes: e.payload.total_bytes, attempt: 1 };
     }));
-    cdnUnlistens.push(await listen('cdn:upload-progress', (e) => {
+    cdnUnlistens.push(await window.electronAPI.listenEvent('cdn:upload-progress', (e) => {
       cdnUpload.value.percent = e.payload.percent;
       cdnUpload.value.bytesSent = e.payload.bytes_sent;
     }));
-    cdnUnlistens.push(await listen('cdn:upload-done', () => {
+    cdnUnlistens.push(await window.electronAPI.listenEvent('cdn:upload-done', () => {
       cdnUpload.value.percent = 100;
       setTimeout(() => { cdnUpload.value.active = false; }, 1500);
     }));
-    cdnUnlistens.push(await listen('cdn:upload-error', () => {
+    cdnUnlistens.push(await window.electronAPI.listenEvent('cdn:upload-error', () => {
       cdnUpload.value.active = false;
     }));
   }
@@ -1578,7 +1544,7 @@ defineExpose({
   height: 20px;
   font-size: 10px;
   background: var(--color-error);
-  color: white;
+  color: var(--text-inverse);
   border-radius: 50%;
 }
 
@@ -1604,7 +1570,7 @@ defineExpose({
   height: 22px;
   border-radius: 50%;
   background: var(--color-error, #ef4444);
-  color: white;
+  color: var(--text-inverse);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2137,7 +2103,7 @@ defineExpose({
   height: 16px;
   font-size: 8px;
   background: var(--color-error);
-  color: white;
+  color: var(--text-inverse);
   border-radius: 50%;
   display: flex;
   align-items: center;
@@ -2404,7 +2370,7 @@ defineExpose({
   border: 1px solid var(--border-light);
   border-radius: 8px;
   padding: 4px;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+  box-shadow: 0 4px 12px var(--shadow-color, rgba(0,0,0,0.1));
   z-index: 100;
   min-width: 200px;
 }
@@ -2436,7 +2402,7 @@ defineExpose({
   left: 0;
   width: 100vw;
   height: 100vh;
-  background-color: rgba(0, 0, 0, 0.85);
+  background-color: var(--overlay-bg);
   display: flex;
   justify-content: center;
   align-items: center;
@@ -2449,7 +2415,7 @@ defineExpose({
   max-height: 90vh;
   object-fit: contain;
   border-radius: 8px;
-  box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+  box-shadow: 0 10px 30px var(--shadow-lg);
   cursor: grab;
   transition: transform 0.1s ease-out;
 }
@@ -2463,7 +2429,7 @@ defineExpose({
   right: 20px;
   background: transparent;
   border: none;
-  color: white;
+  color: var(--text-inverse);
   font-size: 40px;
   line-height: 1;
   cursor: pointer;

@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { open, save } from '@tauri-apps/plugin-dialog';
 import { listen } from '@tauri-apps/api/event';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 
 // ═══════════════════════════════════════════════════════════
 // Bob-Agent Tauri Bridge — 完整适配器层
@@ -8,6 +9,14 @@ import { listen } from '@tauri-apps/api/event';
 // ═══════════════════════════════════════════════════════════
 
 window.electronAPI = {
+  // ── 窗口与事件控制 ──────────────────────────────────
+  minimizeWindow: () => getCurrentWindow().minimize(),
+  toggleMaximize: () => getCurrentWindow().toggleMaximize(),
+  hideWindow: () => getCurrentWindow().hide(),
+  showWindow: () => getCurrentWindow().show(),
+  focusWindow: () => getCurrentWindow().setFocus(),
+  unminimizeWindow: () => getCurrentWindow().unminimize(),
+  listenEvent: (event, handler) => listen(event, handler),
 
   // ── 系统 & 配置 (Mapped to Rust) ─────────────────────
   openExternal: (url) => invoke('plugin:shell|open', { path: url }),

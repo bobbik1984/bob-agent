@@ -66,7 +66,7 @@ fn ensure_wiki_structure() {
 // ═══════════════════════════════════════════════════════════
 
 /// 写入一个 source 摘要页，同时同步到 FTS5 搜索索引
-fn write_source_page(file_name: &str, file_type: &str, summary: &str, keywords: &[String], data_points: &[String]) {
+fn write_source_page(file_name: &str, absolute_path: &str, file_type: &str, summary: &str, keywords: &[String], data_points: &[String], entities: &[(String, String, String)]) {
     let wiki = super::get_wiki_dir();
     // 清理文件名中的特殊字符
     let safe_name: String = file_name.replace(['/', '\\', ':', '*', '?', '"', '<', '>', '|'], "_");
@@ -80,12 +80,24 @@ fn write_source_page(file_name: &str, file_type: &str, summary: &str, keywords: 
 
     let now = chrono::Local::now().format("%Y-%m-%d %H:%M").to_string();
     let tags = keywords.join(", ");
+    let safe_path = absolute_path.replace('\\', "/");
+    let markdown_link = if safe_path.starts_with("http://") || safe_path.starts_with("https://") {
+        format!("[{}]({})", file_name, safe_path)
+    } else {
+        format!("[{}](file:///{})", file_name, safe_path)
+    };
 
     let content = format!(
-        "---\nsource: {}\ntype: {}\ntags: [{}]\nindexed_at: {}\n---\n\n# {}\n\n## 摘要\n\n{}\n\n## 关键数据点\n\n{}\n",
-        file_name, file_type, tags, now, page_name,
+        "---\nsource: {}\nsource_path: {}\ntype: {}\ntags: [{}]\nindexed_at: {}\n---\n\n# {}\n\n> 📎 原文来源：{}\n\n## 摘要\n\n{}\n\n## 核心实体\n\n| 实体 | 类型 | 说明 |\n|------|------|------|\n{}\n\n## 关键数据点\n\n{}\n",
+        file_name, absolute_path, file_type, tags, now, page_name,
+        markdown_link,
         summary,
-        data_points.iter().map(|d| format!("- {}", d)).collect::<Vec<_>>().join("\n")
+        if entities.is_empty() { String::from("（无提取到实体）") } else {
+            entities.iter().map(|(n, t, d)| format!("| {} | {} | {} |", n, t, d.replace('\n', " "))).collect::<Vec<_>>().join("\n")
+        },
+        if data_points.is_empty() { String::from("（无关键数据点）") } else {
+            data_points.iter().map(|d| format!("- {}", d)).collect::<Vec<_>>().join("\n")
+        }
     );
 
     let _ = fs::write(&page_path, content);
@@ -98,7 +110,7 @@ fn write_source_page(file_name: &str, file_type: &str, summary: &str, keywords: 
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             rusqlite::params![
                 file_name,
-                file_name,     // source_path: 后续由调用方传入绝对路径
+                absolute_path,     // source_path
                 wiki_rel_path,
                 summary,
                 tags,
@@ -202,6 +214,22 @@ fn write_project_page(folder_name: &str, file_count: usize, summaries: &[(String
 // ═══════════════════════════════════════════════════════════
 // Clerk 模型调用 (复用 llm.rs 的 HTTP 逻辑)
 // ═══════════════════════════════════════════════════════════
+
+
+fn split_into_chunks(text: &str, chunk_size: usize, overlap: usize) -> Vec<String> {
+    let chars: Vec<char> = text.chars().collect();
+    let mut chunks = Vec::new();
+    let mut i = 0;
+    while i < chars.len() {
+        let end = (i + chunk_size).min(chars.len());
+        let chunk: String = chars[i..end].iter().collect();
+        chunks.push(chunk);
+        if end == chars.len() { break; }
+        i += chunk_size - overlap;
+        if chunks.len() >= 8 { break; }
+    }
+    chunks
+}
 
 /// 对文本片段调用 Clerk 模型获取结构化摘要
 async fn call_clerk_for_summary(file_name: &str, text_chunk: &str) -> Result<Value, String> {
@@ -311,14 +339,46 @@ async fn call_clerk_for_summary(file_name: &str, text_chunk: &str) -> Result<Val
             .and_then(|s| s.split("```").next())
             .unwrap_or(&content)
     } else {
-        &content
+        if let (Some(start), Some(end)) = (content.find('{'), content.rfind('}')) {
+            if start < end {
+                &content[start..=end]
+            } else {
+                &content
+            }
+        } else {
+            &content
+        }
     };
 
-    serde_json::from_str(json_str.trim())
-        .map_err(|_| {
-            // 如果 JSON 解析失败，回退为简单摘要
-            log::warn!("Clerk 返回了非 JSON 格式，回退为纯文本摘要");
-            format!("FALLBACK:{}", content)
+    let mut cleaned = json_str.trim().replace('\n', " ").replace('\r', " ").replace('\t', " ");
+    if let Ok(re) = regex::Regex::new(r",\s*\}") { cleaned = re.replace_all(&cleaned, "}").to_string(); }
+    if let Ok(re) = regex::Regex::new(r",\s*\]") { cleaned = re.replace_all(&cleaned, "]").to_string(); }
+
+    serde_json::from_str(&cleaned)
+        .map_err(|e| {
+            log::warn!("Clerk 返回了非 JSON 格式 ({})，尝试启发式提取", e);
+            let mut extracted_summary = String::new();
+            if let Ok(re) = regex::Regex::new(r#""summary"\s*:\s*"([^"]+)""#) {
+                if let Some(caps) = re.captures(&content) {
+                    if let Some(m) = caps.get(1) {
+                        extracted_summary = m.as_str().to_string();
+                    }
+                }
+            }
+            if extracted_summary.is_empty() {
+                if let Ok(re) = regex::Regex::new(r#""data_points"\s*:\s*\[(.*?)\]"#) {
+                    if let Some(caps) = re.captures(&content) {
+                        if let Some(m) = caps.get(1) {
+                            extracted_summary = format!("提取的数据点:\n{}", m.as_str());
+                        }
+                    }
+                }
+            }
+            if extracted_summary.is_empty() {
+                let text: String = content.chars().take(500).collect();
+                extracted_summary = format!("> ⚠️ 以下内容由 AI 自动生成，结构化解析失败。\n\n{}", text);
+            }
+            format!("FALLBACK:{}", extracted_summary)
         })
 }
 
@@ -393,144 +453,168 @@ pub async fn system_build_kb(app: AppHandle, folder_path: String, _plan: String)
             continue;
         }
 
-        // 发送进度
-        let _ = app.emit("kb:progress", json!({
-            "message": format!("正在阅读 {}", file.file_name),
-            "current": i + 1,
-            "total": total,
-            "phase": "ingest"
-        }));
+        let chunks = if file.text_content.len() > 8000 {
+            split_into_chunks(&file.text_content, 6000, 500)
+        } else {
+            vec![file.text_content.clone()]
+        };
 
-        // 调用 Clerk 模型
-        match call_clerk_for_summary(&file.file_name, &file.text_content).await {
-            Ok(result) => {
-                let summary = result.get("summary")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("（无摘要）")
-                    .to_string();
+        let mut final_summary = String::new();
+        let mut final_keywords = std::collections::HashSet::new();
+        let mut final_data_points = Vec::new();
+        let mut final_entities_raw = Vec::new();
+        let mut final_relations_raw = Vec::new();
+        
+        let mut has_fallback = false;
+        let mut fallback_text = String::new();
+        let mut failed_chunks = 0;
 
-                let keywords: Vec<String> = result.get("keywords")
-                    .and_then(|v| v.as_array())
-                    .map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
-                    .unwrap_or_default();
+        for (c_idx, chunk) in chunks.iter().enumerate() {
+            let msg = if chunks.len() > 1 {
+                format!("正在阅读 {} (片段 {}/{})", file.file_name, c_idx + 1, chunks.len())
+            } else {
+                format!("正在阅读 {}", file.file_name)
+            };
+            let _ = app.emit("kb:progress", json!({
+                "message": msg,
+                "current": i + 1,
+                "total": total,
+                "phase": "ingest"
+            }));
 
-                let data_points: Vec<String> = result.get("data_points")
-                    .and_then(|v| v.as_array())
-                    .map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
-                    .unwrap_or_default();
-
-                // M17: 收集实体信息用于图谱写入
-                let mut entity_names_for_kg: Vec<(String, String, String)> = Vec::new();
-
-                // 写入 Wiki
-                write_source_page(&file.file_name, &file.file_type, &summary, &keywords, &data_points);
-
-                // 生成一行摘要用于 index
-                let oneliner: String = summary.chars().take(80).collect();
-                append_index_entry(&file.file_name, &oneliner);
-                summaries.push((file.file_name.clone(), oneliner.clone()));
-
-                // 处理实体
-                if let Some(entities) = result.get("entities").and_then(|v| v.as_array()) {
-                    for entity in entities {
-                        if let (Some(name), Some(raw_etype), Some(desc)) = (
-                            entity.get("name").and_then(|v| v.as_str()),
-                            entity.get("type").and_then(|v| v.as_str()),
-                            entity.get("description").and_then(|v| v.as_str()),
-                        ) {
-                            let etype = match raw_etype.to_lowercase().as_str() {
-                                "concept" | "概念" | "名词" => "concept",
-                                "project" | "项目" => "project",
-                                "person" | "人物" | "人名" | "author" | "作者" => "person",
-                                "organization" | "组织" | "机构" | "公司" => "organization",
-                                "location" | "地点" | "位置" => "location",
-                                "event" | "事件" => "event",
-                                "technology" | "技术" => "technology",
-                                "file" | "文件" => "file",
-                                "tag" | "标签" => "tag",
-                                "topic" | "主题" => "topic",
-                                "entity" | "实体" => "entity",
-                                _ => "concept"
-                            };
-
-                            // TODO: 未来可以合并同名实体页
-                            let entity_path = super::get_wiki_dir().join("entities").join(format!("{}.md", name));
-                            if !entity_path.exists() {
-                                let entity_content = format!(
-                                    "# {}\n\n**类型**: {}\n\n{}\n\n## 相关文件\n\n- [{}](../sources/{}.md)\n",
-                                    name, etype, desc, file.file_name,
-                                    file.file_name.rsplit_once('.').map(|(n, _)| n).unwrap_or(&file.file_name)
-                                );
-                                let _ = fs::write(&entity_path, entity_content);
-                            }
-
-                            // M17: 写入知识图谱节点
-                            entity_names_for_kg.push((name.to_string(), etype.to_string(), desc.to_string()));
-                        }
+            match call_clerk_for_summary(&file.file_name, chunk).await {
+                Ok(result) => {
+                    let summary = result.get("summary").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                    if chunks.len() > 1 && !summary.is_empty() {
+                        final_summary.push_str(&format!("### 第 {} 部分\n{}\n\n", c_idx + 1, summary));
+                    } else if !summary.is_empty() {
+                        final_summary = summary;
                     }
-                }
 
-                // M17: 写入知识图谱 (kg_nodes + kg_edges)
-                if let Some(db_state) = app.try_state::<DbState>() {
-                    if let Ok(conn) = db_state.0.lock() {
-                        // 写入实体节点
-                        for (name, etype, desc) in &entity_names_for_kg {
-                            let node_id = crate::kg::resolve_node_id(&conn, name, etype);
-                            let _ = crate::kg::upsert_node(&conn, &node_id, name, etype, desc, &file.file_name);
-                        }
-                        // 写入文件节点（文件本身也是一个节点）
-                        let file_node_id = format!("file_{}", file.file_name.to_lowercase().replace(' ', "_").replace('.', "_"));
-                        let _ = crate::kg::upsert_node(&conn, &file_node_id, &file.file_name, "file", &summary, &file.file_name);
-                        // 文件 -> 实体 边 (contains)
-                        for (name, etype, _) in &entity_names_for_kg {
-                            let node_id = crate::kg::resolve_node_id(&conn, name, etype);
-                            let _ = crate::kg::insert_edge(&conn, &file_node_id, &node_id, "contains", 0.9);
-                        }
-                        // 写入 LLM 提取的 relations
-                        if let Some(relations) = result.get("relations").and_then(|v| v.as_array()) {
-                            for rel in relations {
-                                if let (Some(src_name), Some(tgt_name), Some(relation)) = (
-                                    rel.get("source").and_then(|v| v.as_str()),
-                                    rel.get("target").and_then(|v| v.as_str()),
-                                    rel.get("relation").and_then(|v| v.as_str()),
-                                ) {
-                                    let confidence = rel.get("confidence").and_then(|v| v.as_f64()).unwrap_or(0.8);
-                                    // 尝试匹配已有实体 ID
-                                    let src_id = entity_names_for_kg.iter()
-                                        .find(|(n, _, _)| n == src_name)
-                                        .map(|(n, t, _)| format!("{}_{}", t, n.to_lowercase().replace(' ', "_")))
-                                        .unwrap_or_else(|| format!("concept_{}", src_name.to_lowercase().replace(' ', "_")));
-                                    let tgt_id = entity_names_for_kg.iter()
-                                        .find(|(n, _, _)| n == tgt_name)
-                                        .map(|(n, t, _)| format!("{}_{}", t, n.to_lowercase().replace(' ', "_")))
-                                        .unwrap_or_else(|| format!("concept_{}", tgt_name.to_lowercase().replace(' ', "_")));
-                                    let _ = crate::kg::insert_edge(&conn, &src_id, &tgt_id, relation, confidence);
-                                }
-                            }
-                        }
+                    if let Some(kws) = result.get("keywords").and_then(|v| v.as_array()) {
+                        for k in kws { if let Some(ks) = k.as_str() { final_keywords.insert(ks.to_string()); } }
                     }
-                }
-
-                success_count += 1;
-                append_log_entry("ingest", &format!("{} → ✅ {}", file.file_name, oneliner));
-            }
-            Err(e) => {
-                if e.starts_with("FALLBACK:") {
-                    // 模型返回了非 JSON，但有文本，用作简单摘要
-                    let fallback_text = &e[9..];
-                    let oneliner: String = fallback_text.chars().take(80).collect();
-                    write_source_page(&file.file_name, &file.file_type, fallback_text, &[], &[]);
-                    append_index_entry(&file.file_name, &oneliner);
-                    summaries.push((file.file_name.clone(), oneliner));
-                    success_count += 1;
-                    append_log_entry("ingest", &format!("{} → ⚠️ fallback", file.file_name));
-                } else {
-                    failed_count += 1;
-                    append_log_entry("ingest", &format!("{} → ❌ {}", file.file_name, e));
-                    log::error!("KB Ingest 失败 {}: {}", file.file_name, e);
+                    if let Some(dps) = result.get("data_points").and_then(|v| v.as_array()) {
+                        for d in dps { if let Some(ds) = d.as_str() { final_data_points.push(ds.to_string()); } }
+                    }
+                    if let Some(ents) = result.get("entities").and_then(|v| v.as_array()) {
+                        for ent in ents { final_entities_raw.push(ent.clone()); }
+                    }
+                    if let Some(rels) = result.get("relations").and_then(|v| v.as_array()) {
+                        for rel in rels { final_relations_raw.push(rel.clone()); }
+                    }
+                },
+                Err(e) => {
+                    if e.starts_with("FALLBACK:") {
+                        has_fallback = true;
+                        fallback_text.push_str(&e[9..]);
+                        fallback_text.push_str("\n\n");
+                    } else {
+                        failed_chunks += 1;
+                        log::error!("KB Ingest 失败 (片段 {}) {}: {}", c_idx, file.file_name, e);
+                    }
                 }
             }
         }
+
+        if failed_chunks == chunks.len() {
+            failed_count += 1;
+            append_log_entry("ingest", &format!("{} → ❌ 所有片段均解析失败", file.file_name));
+            continue;
+        }
+
+        let summary = if final_summary.is_empty() && has_fallback { fallback_text } else { final_summary };
+        let keywords: Vec<String> = final_keywords.into_iter().take(10).collect();
+        let data_points = final_data_points;
+        let oneliner: String = summary.chars().take(80).collect();
+        
+        let mut entity_names_for_kg: Vec<(String, String, String)> = Vec::new();
+
+        // 处理实体并去重
+        let mut seen_entities = std::collections::HashSet::new();
+        for entity in final_entities_raw {
+            if let (Some(name), Some(raw_etype), Some(desc)) = (
+                entity.get("name").and_then(|v| v.as_str()),
+                entity.get("type").and_then(|v| v.as_str()),
+                entity.get("description").and_then(|v| v.as_str()),
+            ) {
+                if !seen_entities.insert(name.to_string()) { continue; } // 去重
+                let etype = match raw_etype.to_lowercase().as_str() {
+                    "concept" | "概念" | "名词" => "concept",
+                    "project" | "项目" => "project",
+                    "person" | "人物" | "人名" | "author" | "作者" => "person",
+                    "organization" | "组织" | "机构" | "公司" => "organization",
+                    "location" | "地点" | "位置" => "location",
+                    "event" | "事件" => "event",
+                    "technology" | "技术" => "technology",
+                    "file" | "文件" => "file",
+                    "tag" | "标签" => "tag",
+                    "topic" | "主题" => "topic",
+                    "entity" | "实体" => "entity",
+                    _ => "concept"
+                };
+
+                let entity_path = super::get_wiki_dir().join("entities").join(format!("{}.md", name.replace(['/', '\\', ':', '*', '?', '"', '<', '>', '|'], "_")));
+                if !entity_path.exists() {
+                    let entity_content = format!(
+                        "# {}\n\n**类型**: {}\n\n{}\n\n## 相关文件\n\n- [{}](../sources/{}.md)\n",
+                        name, etype, desc, file.file_name,
+                        file.file_name.rsplit_once('.').map(|(n, _)| n).unwrap_or(&file.file_name).replace(['/', '\\', ':', '*', '?', '"', '<', '>', '|'], "_")
+                    );
+                    let _ = fs::write(&entity_path, entity_content);
+                }
+                entity_names_for_kg.push((name.to_string(), etype.to_string(), desc.to_string()));
+            }
+        }
+
+        // 写入 Wiki 和 Index
+        write_source_page(&file.file_name, &file.absolute_path, &file.file_type, &summary, &keywords, &data_points, &entity_names_for_kg);
+        append_index_entry(&file.file_name, &oneliner);
+        summaries.push((file.file_name.clone(), oneliner.clone()));
+
+        // M17: 写入知识图谱 (kg_nodes + kg_edges)
+        if let Some(db_state) = app.try_state::<DbState>() {
+            if let Ok(conn) = db_state.0.lock() {
+                // 写入实体节点
+                for (name, etype, desc) in &entity_names_for_kg {
+                    let node_id = crate::kg::resolve_node_id(&conn, name, etype);
+                    let _ = crate::kg::upsert_node(&conn, &node_id, name, etype, desc, &file.file_name);
+                }
+                // 写入文件节点
+                let file_node_id = format!("file_{}", file.file_name.to_lowercase().replace(' ', "_").replace('.', "_"));
+                let _ = crate::kg::upsert_node(&conn, &file_node_id, &file.file_name, "file", &summary, &file.file_name);
+                // 文件 -> 实体 边
+                for (name, etype, _) in &entity_names_for_kg {
+                    let node_id = crate::kg::resolve_node_id(&conn, name, etype);
+                    let _ = crate::kg::insert_edge(&conn, &file_node_id, &node_id, "contains", 0.9);
+                }
+                // 写入 relations (带模糊匹配)
+                for rel in final_relations_raw {
+                    if let (Some(src_name), Some(tgt_name), Some(relation)) = (
+                        rel.get("source").and_then(|v| v.as_str()),
+                        rel.get("target").and_then(|v| v.as_str()),
+                        rel.get("relation").and_then(|v| v.as_str()),
+                    ) {
+                        let confidence = rel.get("confidence").and_then(|v| v.as_f64()).unwrap_or(0.8);
+                        
+                        let src_id = entity_names_for_kg.iter()
+                            .find(|(n, _, _)| n.to_lowercase().replace(' ', "") == src_name.to_lowercase().replace(' ', ""))
+                            .map(|(n, t, _)| format!("{}_{}", t, n.to_lowercase().replace(' ', "_")))
+                            .unwrap_or_else(|| format!("concept_{}", src_name.to_lowercase().replace(' ', "_")));
+                            
+                        let tgt_id = entity_names_for_kg.iter()
+                            .find(|(n, _, _)| n.to_lowercase().replace(' ', "") == tgt_name.to_lowercase().replace(' ', ""))
+                            .map(|(n, t, _)| format!("{}_{}", t, n.to_lowercase().replace(' ', "_")))
+                            .unwrap_or_else(|| format!("concept_{}", tgt_name.to_lowercase().replace(' ', "_")));
+                            
+                        let _ = crate::kg::insert_edge(&conn, &src_id, &tgt_id, relation, confidence);
+                    }
+                }
+            }
+        }
+        success_count += 1;
+        append_log_entry("ingest", &format!("{} → ✅ {}", file.file_name, oneliner));
+
     }
 
     // 5. 生成项目综述页

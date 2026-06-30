@@ -66,6 +66,7 @@
 <script setup>
 import { ref, onMounted } from 'vue';
 import { useI18n } from 'vue-i18n';
+import { formatRelativeTime as formatTime } from '@/utils/date';
 import { Sunrise, Loader2, CalendarCheck, Zap, Trash2 } from 'lucide-vue-next';
 
 const { t } = useI18n();
@@ -113,21 +114,6 @@ async function deleteJob(job) {
   }
 }
 
-function formatTime(ts) {
-  if (!ts) return '';
-  const date = new Date(ts);
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-
-  if (diffDays === 0) {
-    return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
-  } else if (diffDays === 1) {
-    return '昨天 ' + date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
-  } else {
-    return date.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' });
-  }
-}
 
 onMounted(() => {
   loadJobs();

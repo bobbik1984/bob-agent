@@ -292,6 +292,7 @@ import { ref, onMounted } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { Server, FolderOpen, Info, Key, ChevronDown, X, Plus, Trash2, Database, Check, Image as ImageIcon } from 'lucide-vue-next';
 import ModelHub from '../../components/ModelHub.vue';
+import { getModelMeta } from '@/composables/useModelSwitcher';
 
 const props = defineProps({
   config: { type: Object, required: true },
@@ -517,18 +518,7 @@ async function resetRegistry() {
 }
 
 function getProviderLogo(providerId) {
-  const name = (providerId || '').toLowerCase();
-  if (name.includes('deepseek')) return new URL('../../assets/logos/deepseek.png', import.meta.url).href;
-  if (name.includes('openai')) return new URL('../../assets/logos/openai.png', import.meta.url).href;
-  if (name.includes('qwen') || name.includes('dashscope') || name.includes('aliyun')) return new URL('../../assets/logos/qwen.png', import.meta.url).href;
-  if (name.includes('doubao') || name.includes('volcengine')) return new URL('../../assets/logos/doubao.png', import.meta.url).href;
-  if (name.includes('zhipu')) return new URL('../../assets/logos/glm.svg', import.meta.url).href;
-  if (name.includes('kimi') || name.includes('moonshot')) return new URL('../../assets/logos/kimi.png', import.meta.url).href;
-  if (name.includes('minimax')) return new URL('../../assets/logos/minimax.png', import.meta.url).href;
-  if (name.includes('vertex')) return new URL('../../assets/logos/google.png', import.meta.url).href;
-  if (name.includes('gemini') || name.includes('google')) return new URL('../../assets/logos/google.png', import.meta.url).href;
-  if (name.includes('claude') || name.includes('anthropic')) return new URL('../../assets/logos/claude.png', import.meta.url).href;
-  return null;
+  return getModelMeta(providerId).logo;
 }
 
 async function fetchApiKeys() {

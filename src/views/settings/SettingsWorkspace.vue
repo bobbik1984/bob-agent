@@ -332,6 +332,7 @@
 <script setup>
 import { ref, onMounted } from 'vue';
 import { useI18n } from 'vue-i18n';
+import { formatDateTime as formatMemoryTime, formatFuzzyTime as formatEvoTime } from '@/utils/date';
 import { HardDrive, FolderOpen, FolderHeart, FileText, Puzzle, Layers, X, Plus, ChevronDown, Trash2, Brain, BookOpen, Loader2, Dna, Moon, Cloud } from 'lucide-vue-next';
 import PluginManager from '../../components/PluginManager.vue';
 
@@ -487,11 +488,7 @@ function formatMemoryTitle(title) {
   return cleaned;
 }
 
-function formatMemoryTime(ts) {
-  if (!ts) return '';
-  const d = new Date(ts > 1e11 ? ts : ts * 1000);
-  return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-}
+
 
 // ── 进化引擎看板 ──
 const evoLoading = ref(false);
@@ -518,18 +515,7 @@ function formatTokenCount(tokIn, tokOut) {
   return (total / 1_000_000).toFixed(2) + 'M';
 }
 
-function formatEvoTime(ts) {
-  if (!ts) return '';
-  const d = new Date(ts > 1e11 ? ts : ts * 1000);
-  const now = new Date();
-  const diffMs = now - d;
-  const diffH = Math.floor(diffMs / 3_600_000);
-  if (diffH < 1) return '刚刚';
-  if (diffH < 24) return `${diffH}小时前`;
-  const diffD = Math.floor(diffH / 24);
-  if (diffD < 7) return `${diffD}天前`;
-  return d.toLocaleDateString();
-}
+
 
 // ── Init ──
 onMounted(async () => {

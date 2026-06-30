@@ -299,8 +299,8 @@ const onDrop = async (e) => {
 }
 
 .editor-toolbar button.is-active {
-  background-color: var(--user-accent, #3b82f6);
-  color: white;
+  background-color: var(--user-accent);
+  color: var(--text-inverse);
 }
 
 .save-indicator {
@@ -381,7 +381,7 @@ const onDrop = async (e) => {
 
 /* ── Wikilinks ── */
 :deep(.wikilink) {
-  color: var(--user-accent, #3b82f6);
+  color: var(--user-accent);
   cursor: pointer;
   border-bottom: 1px solid transparent;
   transition: all 0.15s;
@@ -389,7 +389,7 @@ const onDrop = async (e) => {
   border-radius: 2px;
 }
 :deep(.wikilink:hover) {
-  border-bottom-color: var(--user-accent, #3b82f6);
-  background-color: rgba(59, 130, 246, 0.08);
+  border-bottom-color: var(--user-accent);
+  background-color: color-mix(in srgb, var(--user-accent) 8%, transparent);
 }
 </style>

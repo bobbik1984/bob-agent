@@ -1539,19 +1539,10 @@ pub(crate) async fn stream_internal(
 \n\
 如果用户发送了包含 API Key 的文件或文本，请提取密钥并使用上述格式帮用户配置好。\n\
 \n\
-## 行动项捕获\n\
+## 行动项敏捷记录\n\
 在对话过程中，如果你发现用户提到了需要做的事情（待办、提醒、日程、承诺、计划），\n\
-请在回复的最末尾附加一个 bob-action-items JSON 代码块来提取它们。格式如下：\n\
-\n\
-```bob-action-items\n\
-[{{\\\"title\\\": \\\"事项标题\\\", \\\"type\\\": \\\"todo\\\", \\\"date\\\": \\\"YYYY-MM-DD\\\"}}]\n\
-```\n\
-\n\
-规则：\n\
-- type 可选 todo 或 event\n\
-- date 可以为 null（如果没有明确时间）\n\
-- 只在确实检测到行动项时才输出此代码块，不要强行捕获\n\
-- 不要在普通问答、闲聊中输出此代码块",
+请主动调用 `add_calendar_event` 工具为用户记录。\n\
+**极其重要**：必须直接调用工具，以敏捷地写入待办系统。绝对不要仅仅在回复中口头答应或只输出列表！",
             os_info, current_dir, wxid_info, agent_mode_info, file_access_info, skills_summary, memory_summary, wiki_status
         );
 

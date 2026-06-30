@@ -547,5 +547,12 @@
     "tag_placeholder": "输入标签名...",
     "select_category": "选择分类",
     "select_category_hint": "选择笔记保存位置"
+  },
+  "date": {
+    "today": "今天",
+    "yesterday": "昨天",
+    "just_now": "刚刚",
+    "hours_ago": "{n}小时前",
+    "days_ago": "{n}天前"
   }
 }

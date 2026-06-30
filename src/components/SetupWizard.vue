@@ -69,7 +69,7 @@
           </div>
           <div v-if="enableWechat" class="qr-area animate-fade-in">
             <div v-if="!qrCodeUrl && !wechatConnected" class="qr-loading">
-              <Loader2 class="spin" :size="24" />
+              <Loader2 class="animate-spin" :size="24" />
             </div>
             <div v-else-if="wechatConnected" class="qr-done">
               <Check :size="32" />
@@ -580,6 +580,4 @@ input:checked + .slider:before {
   background: rgba(var(--user-accent-rgb), 0.15);
 }
 
-.spin { animation: spin 1s linear infinite; }
-@keyframes spin { 100% { transform: rotate(360deg); } }
 </style>

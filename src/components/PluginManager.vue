@@ -236,7 +236,6 @@ onUnmounted(() => {
 }
 
 .pm-spinner { animation: spin 1s linear infinite; }
-@keyframes spin { 100% { transform: rotate(360deg); } }
 
 /* ── Grouping ────────────────────────────────────── */
 .pm-group {

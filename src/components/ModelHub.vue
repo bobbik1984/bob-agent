@@ -503,11 +503,6 @@ onMounted(async () => {
   font-size: var(--text-sm);
 }
 
-@keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
-.animate-spin { animation: spin 1s linear infinite; }
 
 /* ── Provider Refresh Button ─────────────────── */
 .refresh-provider-btn {

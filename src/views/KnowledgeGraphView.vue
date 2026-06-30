@@ -135,7 +135,7 @@
         </div>
 
         <div v-if="projectIndexPath" style="margin-bottom: var(--space-4);">
-          <button class="btn" style="width: 100%; display: flex; justify-content: center; align-items: center; gap: 6px; background-color: var(--user-accent); color: white; border: none;" @click="openProjectPortal">
+          <button class="btn" style="width: 100%; display: flex; justify-content: center; align-items: center; gap: 6px; background-color: var(--user-accent); color: var(--text-inverse); border: none;" @click="openProjectPortal">
             <ExternalLink :size="14" /> 进入项目协作门户
           </button>
         </div>
@@ -216,7 +216,7 @@
         </div>
         <template v-else>
           <div v-if="isLoadingNote" class="notebook-empty-state">
-            <RefreshCw :size="32" class="spin" style="opacity: 0.4; margin-bottom: 12px;" />
+            <RefreshCw :size="32" class="animate-spin" style="opacity: 0.4; margin-bottom: 12px;" />
             <p style="color: var(--text-secondary); font-size: 14px;">正在全速解析，请稍候...</p>
           </div>
           <TiptapEditor 
@@ -253,7 +253,7 @@
       <p class="kg-empty-hint">{{ $t('kg.empty_hint') }}</p>
     </div>
     <div v-if="backfilling" class="kg-empty">
-      <RefreshCw :size="32" class="spin" style="opacity: 0.4;" />
+      <RefreshCw :size="32" class="animate-spin" style="opacity: 0.4;" />
       <p>{{ $t('kg.generating') }}</p>
     </div>
     </main>
@@ -773,7 +773,7 @@ function renderNetwork(data) {
       color: {
         background: color,
         border: color,
-        highlight: { background: color, border: '#fff' },
+        highlight: { background: color, border: 'var(--text-inverse)' },
       },
       title: `${n.label} (${n.type})${n.summary ? '\n' + n.summary : ''}`,
       opacity: 1.0,
@@ -1369,7 +1369,7 @@ async function buildKBAndRefresh(folderPath) {
 
 .kg-add-btn:hover {
   background: var(--accent-primary);
-  color: #fff;
+  color: var(--text-inverse);
   border-color: var(--accent-primary);
 }
 
@@ -1507,7 +1507,7 @@ async function buildKBAndRefresh(folderPath) {
 
 .merge-list-item.selected {
   background: var(--user-accent);
-  color: white;
+  color: var(--text-inverse);
 }
 
 .merge-item-icon {
@@ -1538,7 +1538,7 @@ async function buildKBAndRefresh(folderPath) {
 
 .merge-actions .btn-primary {
   background: var(--user-accent);
-  color: white;
+  color: var(--text-inverse);
 }
 
 .merge-actions .btn-primary:disabled {
@@ -1559,7 +1559,7 @@ async function buildKBAndRefresh(folderPath) {
 
 .inspector-type-badge {
   font-size: var(--text-xs);
-  color: #fff;
+  color: var(--text-inverse);
   padding: 2px 10px;
   border-radius: 99px;
   font-weight: 500;
@@ -1689,7 +1689,7 @@ async function buildKBAndRefresh(folderPath) {
 
 .kg-backfill-btn:hover:not(:disabled) {
   background: var(--accent-primary);
-  color: #fff;
+  color: var(--text-inverse);
 }
 
 .kg-backfill-btn:disabled {
@@ -1697,14 +1697,7 @@ async function buildKBAndRefresh(folderPath) {
   cursor: not-allowed;
 }
 
-.spin {
-  animation: spin 1s linear infinite;
-}
 
-@keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
 
 .mode-toggle {
   display: flex;
@@ -1733,7 +1726,7 @@ async function buildKBAndRefresh(folderPath) {
 }
 .mode-toggle button.active {
   background-color: var(--bg-primary);
-  color: var(--user-accent, #3b82f6);
+  color: var(--user-accent);
   box-shadow: 0 1px 3px rgba(0,0,0,0.1);
 }
 

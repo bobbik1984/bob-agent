@@ -83,8 +83,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { X, Sun, Sunset, Moon, Sparkles, Dna, ShieldCheck } from 'lucide-vue-next';
-import { marked } from 'marked';
-import DOMPurify from 'dompurify';
+import { renderMarkdownSimple } from '@/utils/markdown';
 
 const { t } = useI18n();
 const emit = defineEmits(['chat', 'dismiss']);
@@ -111,9 +110,7 @@ const failureInsightsText = ref('');
 let cleanupListener = null;
 
 const renderedBriefing = computed(() => {
-  if (!briefingText.value) return '';
-  const raw = marked.parse(briefingText.value, { breaks: true });
-  return DOMPurify.sanitize(raw);
+  return renderMarkdownSimple(briefingText.value);
 });
 
 async function loadDreamReport() {
@@ -462,7 +459,7 @@ onUnmounted(() => {
 }
 .prop-btn.accept:hover {
   background: var(--user-accent);
-  color: #fff;
+  color: var(--text-inverse);
 }
 .prop-btn.reject {
   background: var(--bg-tertiary);

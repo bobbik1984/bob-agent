@@ -15,8 +15,8 @@
  */
 
 import { ref, computed, nextTick } from 'vue';
-import { marked } from 'marked';
-import DOMPurify from 'dompurify';
+import { marked, DOMPurify } from '@/utils/markdown';
+import { formatDate } from '@/utils/date';
 
 // ── 文件链接正则 (拆分 FileCard) ──
 const FILE_LINK_RE = /\<a\s+[^>]*href="((?:file:\/\/\/[^"]+)|(?:[A-Za-z]:[\\][^"]+))"[^>]*>[^<]*<\/a>/gi;
@@ -325,24 +325,6 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
           finalContent = finalContent.replace(configBlockRegex, '').trim();
         }
 
-        // ── T-1306: 行动项捕获 (bob-action-items 代码块) ──
-        const actionBlockRegex = /```bob-action-items\s*\n([\s\S]*?)\n```/gi;
-        const extractedItems = [];
-        let actionMatch;
-        while ((actionMatch = actionBlockRegex.exec(finalContent)) !== null) {
-          try {
-            const items = JSON.parse(actionMatch[1]);
-            if (Array.isArray(items)) {
-              extractedItems.push(...items);
-            }
-          } catch (e) {
-            console.warn('[ActionItems] bob-action-items JSON 解析失败:', e);
-          }
-        }
-        if (extractedItems.length > 0) {
-          finalContent = finalContent.replace(actionBlockRegex, '').trim();
-        }
-
         const assistantMsg = {
           role: 'assistant',
           content: finalContent || (finalThinking ? '' : '（模型未返回内容，请检查 API 配置或重试）'),
@@ -365,19 +347,6 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
               emit('update-title', props.conversationId, title);
             }
           }).catch(console.error);
-        }
-
-        // T-1306: 将提取的行动项推入消息列表作为交互卡片
-        for (const item of extractedItems) {
-          messages.value.push({
-            role: 'assistant',
-            type: 'action-item-card',
-            actionItem: {
-              title: item.title || '',
-              type: item.type || 'todo',
-              date: item.date || null,
-            },
-          });
         }
       }
     } catch (err) {
@@ -470,7 +439,7 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
     if (messages.value.length === 0) return;
     const lines = [];
     const title = messages.value.find(m => m.role === 'user')?.content?.slice(0, 30) || '对话';
-    const date = new Date().toLocaleDateString('zh-CN');
+    const date = formatDate(Date.now());
     lines.push(`# ${title}`);
     lines.push(`> 导出时间: ${date}\n`);
     for (const msg of messages.value) {
@@ -489,8 +458,7 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
   function renderMarkdown(text) {
     if (!text) return '';
     let cleaned = text.replace(/<calendar_event>[\s\S]*?(?:<\/calendar_event>|$)/gi, '')
-      .replace(/<\|mem\|>/g, '') // 视觉过滤进化引擎隐式标记
-      .replace(/```bob-action-items\s*\n[\s\S]*?(?:```|$)/gi, ''); // 清理隐藏的行动项块
+      .replace(/<\|mem\|>/g, ''); // 视觉过滤进化引擎隐式标记
 
     // 注：纯文本路径的自动链接已移除（误伤率过高）
     // 导出文件的链接由 Rust 后端 file_output 事件精确注入
@@ -665,36 +633,7 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
     msgObj.type = 'text';
   }
 
-  // ── T-1306: 行动项卡片交互 ─────────────────────────
-  async function handleSaveActionItem(item, msgObj) {
-    try {
-      const event = {
-        title: item.title,
-        type: item.type || 'todo',
-        status: 'pending',
-        date: item.date || null,
-        startTime: null,
-        endTime: null,
-        description: '',
-      };
-      const res = await window.electronAPI.confirmEvent(event);
-      if (res.ok) {
-        msgObj.content = `已保存${item.type === 'todo' ? '待办' : '日程'}: ${item.title}`;
-        msgObj.type = 'text';
-      } else {
-        msgObj.content = `保存失败: ${res.error}`;
-        msgObj.type = 'text';
-      }
-    } catch (err) {
-      msgObj.content = `保存失败: ${err.message}`;
-      msgObj.type = 'text';
-    }
-  }
 
-  function handleDismissActionItem(msgObj) {
-    msgObj.content = '已忽略';
-    msgObj.type = 'text';
-  }
 
 
   const clipMessageToNote = async (msg) => {
@@ -744,7 +683,6 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
     parseTextAsEvent,
     handleConfirmEvent,
     handleCancelEvent,
-    handleSaveActionItem,
-    handleDismissActionItem,
+
   };
 }

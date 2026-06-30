@@ -105,6 +105,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { useI18n } from 'vue-i18n';
+import { formatRelativeTime as formatTime } from '@/utils/date';
 import { AlertTriangle, Calendar, Loader2, Timer, Clock, Pause, Play, Trash2, Bell } from 'lucide-vue-next';
 import WeekTimeline from '../components/WeekTimeline.vue';
 import TodoList from '../components/TodoList.vue';
@@ -216,14 +217,6 @@ async function deleteJob(job) {
   }
 }
 
-function formatTime(ms) {
-  if (!ms) return '';
-  const d = new Date(ms);
-  const now = new Date();
-  const isToday = d.toDateString() === now.toDateString();
-  const time = d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
-  return isToday ? `今天 ${time}` : d.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' }) + ' ' + time;
-}
 
 // 将 cron 表达式翻译为人类可读描述
 function describeCron(expr) {

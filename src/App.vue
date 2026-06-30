@@ -254,14 +254,12 @@ import SetupWizard from './components/SetupWizard.vue';
 import QuickNoteOverlay from './components/QuickNoteOverlay.vue';
 import { Inbox, Settings, Plus, X, Sun, Moon, ChevronLeft, ChevronRight, ChevronDown, Search, MessageSquare, CalendarDays, Brain, Plug, FolderOpen, Palette, Info, Sunrise, Waypoints } from 'lucide-vue-next';
 import { useI18n } from 'vue-i18n';
-
-import { getCurrentWindow } from '@tauri-apps/api/window';
+import { getModelMeta } from '@/composables/useModelSwitcher';
 
 // Tauri Window API (用于自定义窗口按钮)
-const appWindow = getCurrentWindow();
-function minimizeWindow() { appWindow.minimize(); }
-function toggleMaximize() { appWindow.toggleMaximize(); }
-function closeWindow() { appWindow.hide(); } 
+function minimizeWindow() { window.electronAPI.minimizeWindow(); }
+function toggleMaximize() { window.electronAPI.toggleMaximize(); }
+function closeWindow() { window.electronAPI.hideWindow(); } 
 
 const { locale, t } = useI18n();
 
@@ -387,6 +385,16 @@ const bottomNavItems = computed(() => [
   { id: 'settings', icon: Settings, label: t('nav.settings') },
 ]);
 
+const modelInfo = computed(() => {
+  if (!currentModel.value) return { name: t('app.not_configured'), logo: null };
+  const meta = getModelMeta(currentModel.value);
+  if (!meta.name || meta.name.toLowerCase() === currentModel.value.toLowerCase()) {
+    // Keep raw name if getModelMeta returns raw id
+    return { name: currentModel.value, logo: meta.logo };
+  }
+  return meta;
+});
+
 // 设置抽屉导航菜单项
 const settingsNavItems = computed(() => [
   { id: 'model', icon: Brain, label: t('settings.nav_model') || '模型基础设置' },
@@ -397,22 +405,6 @@ const settingsNavItems = computed(() => [
   { id: 'about', icon: Info, label: t('settings.nav_about') || '关于' },
 ]);
 
-const modelInfo = computed(() => {
-  if (!currentModel.value) return { name: t('app.not_configured'), logo: null };
-  const name = currentModel.value.toLowerCase();
-  
-  if (name.includes('deepseek')) return { name: 'DeepSeek', logo: new URL('./assets/logos/deepseek.png', import.meta.url).href };
-  if (name.includes('gpt-') || name.includes('o3') || name.includes('o4')) return { name: 'OpenAI', logo: new URL('./assets/logos/openai.png', import.meta.url).href };
-  if (name.includes('claude')) return { name: 'Claude', logo: new URL('./assets/logos/claude.png', import.meta.url).href };
-  if (name.includes('gemini')) return { name: 'Gemini', logo: new URL('./assets/logos/google.png', import.meta.url).href };
-  if (name.includes('qwen')) return { name: 'Qwen', logo: new URL('./assets/logos/qwen.png', import.meta.url).href };
-  if (name.includes('doubao') || name.includes('seed')) return { name: 'Doubao', logo: new URL('./assets/logos/doubao.png', import.meta.url).href };
-  if (name.includes('glm')) return { name: 'GLM', logo: new URL('./assets/logos/glm.svg', import.meta.url).href };
-  if (name.includes('kimi')) return { name: 'Kimi', logo: new URL('./assets/logos/kimi.png', import.meta.url).href };
-  if (name.includes('minimax')) return { name: 'MiniMax', logo: new URL('./assets/logos/minimax.png', import.meta.url).href };
-  if (name.includes('llama') || name.includes('local-')) return { name: 'Local', logo: null };
-  return { name: currentModel.value, logo: null };
-});
 
 // ── 生命周期 ─────────────────────────────────────────
 let unlistenConfigReconciled = null;
@@ -480,9 +472,9 @@ onMounted(async () => {
 
   // 显示并聚焦原生窗口，防止藏在后台
   // 注意：不要使用 await，否则任何调用失败（比如窗口并未最小化而引发的异常）都会阻塞后续的开屏动画移除
-  appWindow.unminimize().catch(() => {});
-  appWindow.show().catch(() => {});
-  appWindow.setFocus().catch(() => {});
+  window.electronAPI.unminimizeWindow().catch(() => {});
+  window.electronAPI.showWindow().catch(() => {});
+  window.electronAPI.focusWindow().catch(() => {});
 
   // 启动画面淡出 — 原生 Splash 渐隐 1 秒
   setTimeout(() => { 
@@ -1170,7 +1162,7 @@ function onNavClick(viewId) {
   font-weight: 600;
   text-align: center;
   background: var(--error, #e74c3c);
-  color: #fff;
+  color: var(--text-inverse);
   border-radius: 7px;
   padding: 0 3px;
 }
@@ -1473,7 +1465,7 @@ function onNavClick(viewId) {
   font-size: 10px;
   font-weight: 600;
   text-align: center;
-  background: var(--color-error, var(--error, #e74c3c));
+  background: var(--color-error);
   color: var(--bg-root);
   border-radius: 8px;
   padding: 0 4px;

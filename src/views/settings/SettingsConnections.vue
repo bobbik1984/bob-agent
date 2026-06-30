@@ -342,7 +342,7 @@
         </div>
         <div class="briefing-body" style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 32px;">
           <div v-if="!qrCodeUrl && !wechatConnected" class="qr-placeholder" style="display: flex; flex-direction: column; align-items: center;">
-            <Loader2 class="spin" :size="32" style="color: var(--text-tertiary)" />
+            <Loader2 class="animate-spin" :size="32" style="color: var(--text-tertiary)" />
             <p style="margin-top: 12px; font-size: 13px; color: var(--text-secondary);">{{ $t('settings.wechat_loading_qr') }}</p>
           </div>
           <div v-else-if="wechatConnected" class="qr-success" style="text-align: center; display: flex; flex-direction: column; align-items: center;">
@@ -708,8 +708,8 @@ onUnmounted(() => {
 
 /* ── Service Card Active State (For Mutually Exclusive Cards) ── */
 .service-card.active {
-  border-color: var(--user-accent, var(--accent-primary, #4facfe));
-  box-shadow: 0 0 0 1px var(--user-accent, var(--accent-primary, #4facfe));
+  border-color: var(--user-accent, var(--accent-primary));
+  box-shadow: 0 0 0 1px var(--user-accent, var(--accent-primary));
 }
 
 /* ── Office service cards grid ── */
@@ -735,8 +735,8 @@ onUnmounted(() => {
   border-style: dashed;
 }
 .preset-card:hover {
-  border-color: var(--user-accent, var(--accent-primary, #4facfe));
-  background: color-mix(in srgb, var(--user-accent, var(--accent-primary, #4facfe)) 5%, transparent);
+  border-color: var(--user-accent, var(--accent-primary));
+  background: color-mix(in srgb, var(--user-accent, var(--accent-primary)) 5%, transparent);
 }
 
 .mcp-switch {
@@ -770,7 +770,7 @@ onUnmounted(() => {
   width: 14px;
   left: 2px;
   bottom: 2px;
-  background-color: white;
+  background-color: var(--text-inverse);
   transition: .3s;
   border-radius: 50%;
   box-shadow: 0 1px 2px rgba(0,0,0,0.2);
@@ -962,10 +962,6 @@ onUnmounted(() => {
   color: var(--text-primary);
 }
 
-.spin {
-  animation: spin 1s linear infinite;
-}
-@keyframes spin { 100% { transform: rotate(360deg); } }
 
 /* Transition */
 .briefing-fade-enter-active {

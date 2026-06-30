@@ -146,7 +146,7 @@ a:hover {
   --gradient-subtle:   rgba(0, 0, 0, 0.03);
 
   --logo-filter:       none;
-  --logo-color:        var(--user-accent, #2776bb);
+  --logo-color:        var(--user-accent);
   --bg-code-inline:    rgba(0, 0, 0, 0.06);
 
   --user-accent:       #2776bb;
@@ -1037,3 +1037,35 @@ code.hljs {
 
 
 
+
+
+/* --- Global List Delete Button --- */
+.btn-delete-item {
+  height: 16px;
+  width: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  padding: 0 !important;
+  flex-shrink: 0;
+  color: var(--text-tertiary);
+  transition: all 0.2s;
+  background: var(--bg-secondary) !important;
+  border-radius: 2px !important;
+  border: none;
+  cursor: pointer;
+}
+
+.btn-delete-item:hover {
+  color: var(--error) !important;
+  background: var(--surface-glass) !important;
+}
+
+.hover-show-btn-delete:hover .btn-delete-item {
+  opacity: 1 !important;
+}
+
+/* ── 全局工具类 ── */
+@keyframes spin { to { transform: rotate(360deg); } }
+.animate-spin { animation: spin 1s linear infinite; }

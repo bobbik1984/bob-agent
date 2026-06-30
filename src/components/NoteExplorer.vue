@@ -29,12 +29,12 @@
         </div>
         <ul v-show="expanded.daily" class="note-list">
           <li v-for="note in notes.daily" :key="note.id" 
-              :class="{ active: selectedNoteId === note.id }"
+              class="hover-show-btn-delete" :class="{ active: selectedNoteId === note.id }"
               @click="selectNote(note)">
             <CalendarDays :size="14" class="icon" /> {{ note.title || formatDailyName(note.id) }}
             <div class="note-actions">
               <button class="action-btn promote-btn" @click.stop="promoteDailyNote(note)" :title="$t('notebook.promote') || '提升为独立笔记'"><ArrowUpFromLine :size="14" /></button>
-              <button class="action-btn del-btn" @click.stop="deleteNote(note)" title="删除"><Trash2 :size="14" /></button>
+              <button class="btn-delete-item" @click.stop="deleteNote(note)" title="删除"><X :size="12" /></button>
             </div>
           </li>
           <li v-if="(notes.daily || []).length === 0" class="empty-text">{{ $t('notebook.empty_daily') }}</li>
@@ -51,11 +51,11 @@
           <li v-for="note in notes.topics" :key="note.id" 
               draggable="true"
               @dragstart="onDragStart($event, note, 'topics')"
-              :class="{ active: selectedNoteId === note.id }"
+              class="hover-show-btn-delete" :class="{ active: selectedNoteId === note.id }"
               @click="selectNote(note)">
             <FileText :size="14" class="icon" /> 
             <span class="title-text">{{ note.title || formatTopicName(note.id) }}</span>
-            <button class="del-btn" @click.stop="deleteNote(note)" title="删除"><Trash2 :size="14" /></button>
+            <button class="btn-delete-item" @click.stop="deleteNote(note)" title="删除"><X :size="12" /></button>
           </li>
           <li v-if="(notes.topics || []).length === 0" class="empty-text">{{ $t('notebook.empty_topics') }}</li>
         </ul>
@@ -81,11 +81,11 @@
                 <li v-for="note in items" :key="note.id"
                     draggable="true"
                     @dragstart="onDragStart($event, note, 'projects/' + subdir)"
-                    :class="{ active: selectedNoteId === note.id }"
+                    class="hover-show-btn-delete" :class="{ active: selectedNoteId === note.id }"
                     @click="selectNote(note)">
                   <FileText :size="14" class="icon" />
                   <span class="title-text">{{ note.title || formatAnyName(note.id) }}</span>
-                  <button class="del-btn" @click.stop="deleteNote(note)" title="删除"><Trash2 :size="14" /></button>
+                  <button class="btn-delete-item" @click.stop="deleteNote(note)" title="删除"><X :size="12" /></button>
                 </li>
               </ul>
             </div>
@@ -94,10 +94,10 @@
           <ul v-if="notes.projects && notes.projects._root" class="note-list">
             <li v-for="note in notes.projects._root" :key="note.id"
                 draggable="true" @dragstart="onDragStart($event, note, 'projects')"
-                :class="{ active: selectedNoteId === note.id }" @click="selectNote(note)">
+                class="hover-show-btn-delete" :class="{ active: selectedNoteId === note.id }" @click="selectNote(note)">
               <FileText :size="14" class="icon" />
               <span class="title-text">{{ note.title || formatAnyName(note.id) }}</span>
-              <button class="del-btn" @click.stop="deleteNote(note)" title="删除"><Trash2 :size="14" /></button>
+              <button class="btn-delete-item" @click.stop="deleteNote(note)" title="删除"><X :size="12" /></button>
             </li>
           </ul>
           <div v-if="projectNoteCount === 0" class="empty-text" style="padding: 4px 24px;">{{ $t('notebook.empty_projects') }}</div>
@@ -114,11 +114,11 @@
           <li v-for="note in notes.sources" :key="note.id" 
               draggable="true"
               @dragstart="onDragStart($event, note, 'wiki/sources')"
-              :class="{ active: selectedNoteId === note.id }"
+              class="hover-show-btn-delete" :class="{ active: selectedNoteId === note.id }"
               @click="selectNote(note)">
             <FileText :size="14" class="icon" /> 
             <span class="title-text">{{ note.title || formatTopicName(note.id.replace('wiki/sources/', '')) }}</span>
-            <button class="del-btn" @click.stop="deleteNote(note)" title="删除"><Trash2 :size="14" /></button>
+            <button class="btn-delete-item" @click.stop="deleteNote(note)" title="删除"><X :size="12" /></button>
           </li>
           <li v-if="!notes.sources || notes.sources.length === 0" class="empty-text">{{ $t('notebook.empty_sources') }}</li>
         </ul>
@@ -134,10 +134,10 @@
           <ul v-show="expanded['custom_' + folderName]" class="note-list">
             <li v-for="note in items" :key="note.id"
                 draggable="true" @dragstart="onDragStart($event, note, folderName)"
-                :class="{ active: selectedNoteId === note.id }" @click="selectNote(note)">
+                class="hover-show-btn-delete" :class="{ active: selectedNoteId === note.id }" @click="selectNote(note)">
               <FileText :size="14" class="icon" />
               <span class="title-text">{{ note.title || formatAnyName(note.id) }}</span>
-              <button class="del-btn" @click.stop="deleteNote(note)" title="删除"><Trash2 :size="14" /></button>
+              <button class="btn-delete-item" @click.stop="deleteNote(note)" title="删除"><X :size="12" /></button>
             </li>
           </ul>
         </div>
@@ -148,8 +148,7 @@
     <div v-else-if="viewMode === 'timeline'" class="explorer-content">
       <div class="timeline-list">
         <div v-for="note in sortedTimelineNotes" :key="note.id" 
-             class="timeline-item"
-             :class="{ active: selectedNoteId === note.id }"
+             class="timeline-item hover-show-btn-delete" :class="{ active: selectedNoteId === note.id }"
              @click="selectNote(note)">
           <div class="timeline-meta" v-if="formatTimelineDate(note)">{{ formatTimelineDate(note) }}</div>
           <div class="timeline-title">{{ note.title || formatAnyName(note.id) }}</div>
@@ -172,7 +171,7 @@
       <!-- 筛选结果 -->
       <ul v-if="selectedTag" class="note-list tag-results">
         <li v-for="note in tagFilteredNotes" :key="note.id"
-            :class="{ active: selectedNoteId === note.id }"
+            class="hover-show-btn-delete" :class="{ active: selectedNoteId === note.id }"
             @click="selectNote(note)">
           <FileText :size="14" class="icon" />
           <span class="title-text">{{ note.title || formatAnyName(note.id) }}</span>
@@ -184,7 +183,7 @@
 
 <script setup>
 import { ref, onMounted, computed, defineEmits, defineProps } from 'vue';
-import { Folder, FolderPlus, CalendarDays, ChevronRight, FileText, Plus, Trash2, RefreshCw, Tag, ArrowUpFromLine } from 'lucide-vue-next';
+import { Folder, FolderPlus, CalendarDays, ChevronRight, FileText, Plus, X, RefreshCw, Tag, ArrowUpFromLine } from 'lucide-vue-next';
 import { useI18n } from 'vue-i18n';
 
 const { t } = useI18n();
@@ -583,8 +582,8 @@ defineExpose({ refresh: loadNotes });
 
 .note-list li.active {
   background-color: var(--user-accent);
-  color: #ffffff;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+  color: var(--text-inverse);
+  box-shadow: 0 2px 6px var(--shadow-sm);
 }
 .note-list li .icon {
   color: var(--text-tertiary);
@@ -593,7 +592,7 @@ defineExpose({ refresh: loadNotes });
   color: var(--text-secondary);
 }
 .note-list li.active .icon {
-  color: rgba(255, 255, 255, 0.8);
+  color: var(--text-inverse);
 }
 
 .title-text {
@@ -625,27 +624,21 @@ defineExpose({ refresh: loadNotes });
 }
 
 .note-list li.active .action-btn,
-.note-list li.active .del-btn {
-  color: rgba(255, 255, 255, 0.7);
-}
+.note-list li.active 
 .note-list li.active:hover .action-btn,
-.note-list li.active:hover .del-btn {
-  color: rgba(255, 255, 255, 1);
-}
+.note-list li.active:hover 
 
 .note-list li:hover .action-btn,
-.note-list li:hover .del-btn {
-  opacity: 0.7;
-}
+.note-list li:hover 
 
 .action-btn:hover {
   opacity: 1 !important;
-  background-color: rgba(255, 255, 255, 0.1);
+  background-color: var(--surface-input);
 }
-.del-btn:hover {
-  opacity: 1 !important;
-  background-color: rgba(239, 68, 68, 0.1);
-}
+
+
+
+
 
 .empty-text {
   color: var(--text-tertiary);
@@ -684,18 +677,18 @@ defineExpose({ refresh: loadNotes });
 }
 .tag-chip.active {
   background-color: var(--user-accent);
-  color: #ffffff;
+  color: var(--text-inverse);
   border-color: var(--user-accent);
 }
 .tag-count {
   font-size: 10px;
   opacity: 0.7;
   padding: 1px 5px;
-  background-color: rgba(0,0,0,0.08);
+  background-color: var(--surface-glass);
   border-radius: 999px;
 }
 .tag-chip.active .tag-count {
-  background-color: rgba(255,255,255,0.2);
+  background-color: var(--surface-input);
 }
 .tag-results {
   margin-top: 0;
@@ -740,11 +733,11 @@ defineExpose({ refresh: loadNotes });
 }
 
 .timeline-item.active {
-  background-color: var(--user-accent, #3b82f6);
+  background-color: var(--user-accent);
 }
 .timeline-item.active .timeline-title,
 .timeline-item.active .timeline-meta {
-  color: #ffffff;
+  color: var(--text-inverse);
 }
 
 .timeline-dot {
@@ -759,8 +752,8 @@ defineExpose({ refresh: loadNotes });
 }
 
 .timeline-item.active .timeline-dot {
-  background-color: #ffffff;
-  border-color: #ffffff;
+  background-color: var(--text-inverse);
+  border-color: var(--text-inverse);
 }
 
 .timeline-list::before {

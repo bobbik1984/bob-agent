@@ -10,6 +10,40 @@
 
 import { ref, computed } from 'vue';
 
+import deepseekLogo from '@/assets/logos/deepseek.png';
+import openaiLogo from '@/assets/logos/openai.png';
+import googleLogo from '@/assets/logos/google.png';
+import qwenLogo from '@/assets/logos/qwen.png';
+import glmLogo from '@/assets/logos/glm.svg';
+import kimiLogo from '@/assets/logos/kimi.png';
+import doubaoLogo from '@/assets/logos/doubao.png';
+import minimaxLogo from '@/assets/logos/minimax.png';
+import mimoLogo from '@/assets/logos/mimo.png';
+import modelscopeLogo from '@/assets/logos/modelscope.png';
+import claudeLogo from '@/assets/logos/claude.png';
+import grokLogo from '@/assets/logos/grok.png';
+
+// ── 静态资源与名称映射 SSOT (供整个项目复用) ──
+export function getModelMeta(id) {
+  const name = (id || '').toLowerCase();
+  
+  if (name.includes('deepseek')) return { name: 'DeepSeek', logo: deepseekLogo };
+  if (name.includes('gpt') || name.includes('o3') || name.includes('o4') || name.includes('openai')) return { name: 'OpenAI', logo: openaiLogo };
+  if (name.includes('gemini') || name.includes('google') || name.includes('gemma') || name.includes('vertex')) return { name: 'Gemini', logo: googleLogo };
+  if (name.includes('qwen') || name.includes('dashscope') || name.includes('aliyun')) return { name: 'Qwen', logo: qwenLogo };
+  if (name.includes('glm') || name.includes('zhipu')) return { name: 'GLM', logo: glmLogo };
+  if (name.includes('kimi') || name.includes('moonshot')) return { name: 'Kimi', logo: kimiLogo };
+  if (name.includes('doubao') || name.includes('seed') || name.includes('volcengine')) return { name: 'Doubao', logo: doubaoLogo };
+  if (name.includes('minimax')) return { name: 'MiniMax', logo: minimaxLogo };
+  if (name.includes('mimo')) return { name: 'Mimo', logo: mimoLogo };
+  if (name.includes('modelscope')) return { name: 'ModelScope', logo: modelscopeLogo };
+  if (name.includes('claude') || name.includes('anthropic')) return { name: 'Claude', logo: claudeLogo };
+  if (name.includes('grok') || name.includes('xai')) return { name: 'Grok', logo: grokLogo };
+  if (name.includes('llama') || name.includes('local-')) return { name: 'Local', logo: null };
+  
+  return { name: id, logo: null };
+}
+
 export function useModelSwitcher() {
   const currentModelRaw = ref('');
   const showModelSwitcher = ref(false);
@@ -40,20 +74,7 @@ export function useModelSwitcher() {
 
   // ── Logo 匹配 ──
   function getModelLogo(modelId) {
-    const name = (modelId || '').toLowerCase();
-    if (name.includes('deepseek')) return new URL('../assets/logos/deepseek.png', import.meta.url).href;
-    if (name.includes('gpt') || name.includes('openai')) return new URL('../assets/logos/openai.png', import.meta.url).href;
-    if (name.includes('gemini') || name.includes('google') || name.includes('gemma')) return new URL('../assets/logos/google.png', import.meta.url).href;
-    if (name.includes('qwen') || name.includes('dashscope')) return new URL('../assets/logos/qwen.png', import.meta.url).href;
-    if (name.includes('glm') || name.includes('zhipu')) return new URL('../assets/logos/glm.svg', import.meta.url).href;
-    if (name.includes('kimi') || name.includes('moonshot')) return new URL('../assets/logos/kimi.png', import.meta.url).href;
-    if (name.includes('doubao') || name.includes('seed')) return new URL('../assets/logos/doubao.png', import.meta.url).href;
-    if (name.includes('minimax')) return new URL('../assets/logos/minimax.png', import.meta.url).href;
-    if (name.includes('mimo')) return new URL('../assets/logos/mimo.png', import.meta.url).href;
-    if (name.includes('modelscope')) return new URL('../assets/logos/modelscope.png', import.meta.url).href;
-    if (name.includes('claude') || name.includes('anthropic')) return new URL('../assets/logos/claude.png', import.meta.url).href;
-    if (name.includes('grok') || name.includes('xai')) return new URL('../assets/logos/grok.png', import.meta.url).href;
-    return null;
+    return getModelMeta(modelId).logo;
   }
 
   const currentModelName = computed(() => {
