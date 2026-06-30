@@ -8,7 +8,7 @@
  * - 加载 Markdown 时自动识别 [[]] 并转换为节点
  * - 点击时触发自定义事件供父组件处理导航
  */
-import { Node, mergeAttributes, inputRules } from '@tiptap/core';
+import { Node, mergeAttributes, nodeInputRule } from '@tiptap/core';
 import { Plugin, PluginKey } from '@tiptap/pm/state';
 
 const WIKILINK_INPUT_REGEX = /\[\[([^\[\]]+)\]\]$/;
@@ -31,9 +31,13 @@ export const WikilinkExtension = Node.create({
   addAttributes() {
     return {
       target: {
-        default: null,
-        parseHTML: (element) => element.getAttribute('data-wikilink'),
-        renderHTML: (attributes) => ({ 'data-wikilink': attributes.target }),
+        default: '',
+        parseHTML: element => element.getAttribute('data-target'),
+        renderHTML: attributes => {
+          return {
+            'data-target': attributes.target,
+          };
+        },
       },
     };
   },
@@ -46,33 +50,19 @@ export const WikilinkExtension = Node.create({
     ];
   },
 
-  renderHTML({ node, HTMLAttributes }) {
-    return [
-      'span',
-      mergeAttributes(HTMLAttributes, {
-        class: 'wikilink',
-        'data-wikilink': node.attrs.target,
-        title: node.attrs.target,
-      }),
-      `[[${node.attrs.target}]]`,
-    ];
+  renderHTML({ HTMLAttributes }) {
+    return ['span', mergeAttributes(HTMLAttributes, { 'data-wikilink': '' }), `[[${HTMLAttributes.target}]]`];
   },
 
   addInputRules() {
     return [
-      {
+      nodeInputRule({
         find: WIKILINK_INPUT_REGEX,
-        handler: ({ state, range, match }) => {
-          const target = match[1].trim();
-          if (!target) return;
-          const { tr } = state;
-          tr.replaceWith(
-            range.from,
-            range.to,
-            this.type.create({ target })
-          );
+        type: this.type,
+        getAttributes: match => {
+          return { target: match[1].trim() };
         },
-      },
+      }),
     ];
   },
 

@@ -111,7 +111,7 @@
       <aside v-if="selectedNode" class="kg-inspector" :style="{ width: inspectorWidth + 'px' }">
         <div class="inspector-header">
           <span class="inspector-type-badge" :style="{ background: kgColors[selectedNode.type] || 'var(--text-muted)' }">
-            {{ getTypeShapeIcon(selectedNode.type) }} {{ selectedNode.type }}
+            {{ getTypeShapeIcon(selectedNode.type) }} {{ getTypeName(selectedNode.type) }}
           </span>
           <div style="display:flex; gap: 4px;">
             <button class="btn-icon inspector-merge" :class="{ active: mergeMode }" @click="toggleMergeMode" title="关联/合并至...">
@@ -151,7 +151,7 @@
             <input type="text" v-model="mergeSearchTerm" placeholder="搜索目标节点..." class="merge-search-input" />
             <label class="merge-checkbox">
               <input type="checkbox" v-model="mergeFilterSameType" />
-              仅同类型 ({{ selectedNode.type }})
+              仅同类型 ({{ getTypeName(selectedNode.type) }})
             </label>
           </div>
           
@@ -604,7 +604,7 @@ const typeShapes = {
   tag: { vis: 'diamond', icon: '◆' },
   person: { vis: 'triangleDown', icon: '▼' },
   topic: { vis: 'hexagon', icon: '⬢' },
-  note: { vis: 'box', icon: '📝' },
+  note: { vis: 'box', icon: '▤' },
 };
 
 function getTypeShapeIcon(type) {

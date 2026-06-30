@@ -64,13 +64,13 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
 
   // ── 发送消息 ─────────────────────────────────────
   async function sendMessage(pendingImages, pendingFiles, resetTextareaHeight, beforeApiCallHook = null) {
-    const text = inputText.value.trim();
+    let text = inputText.value.trim();
     if (!text && pendingImages.value.length === 0 && pendingFiles.value.length === 0) return;
     if (isStreaming.value) return;
 
-    // T-1920: 拦截 /memo 和 @note 存入笔记
-    if (text.startsWith('/memo ') || text.startsWith('@note ')) {
-      const noteContent = text.replace(/^(\/memo|@note)\s+/, '').trim();
+    // T-1920: /memo 快捷记事
+    if (text.startsWith('/memo ')) {
+      const noteContent = text.replace(/^\/memo\s+/, '').trim();
       if (noteContent) {
         try {
           const res = await window.electronAPI.notebookAppendDaily(noteContent);
@@ -78,7 +78,7 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
             messages.value.push({ role: 'user', content: text });
             messages.value.push({ 
               role: 'system', 
-              content: `✅ 已记录到今日闪念。您可以在左侧边栏的 [知识图谱 -> 笔记] 中查看。` 
+              content: `✅ 已记录速记。[知识图谱 -> 速记] 中可查看。` 
             });
             inputText.value = '';
             resetTextareaHeight();
@@ -86,9 +86,43 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
             return;
           }
         } catch (e) {
-          console.error('Failed to append daily note', e);
+          console.error('Failed to memo', e);
         }
       }
+      return;
+    }
+
+    let systemContextMsg = null;
+    if (text.startsWith('@note ')) {
+      const keyword = text.replace(/^@note\s+/, '').split(' ')[0].trim();
+      if (keyword) {
+        try {
+          const searchRes = await window.electronAPI.notebookSearch(keyword);
+          if (searchRes && searchRes.ok && searchRes.results && searchRes.results.length > 0) {
+            const topHit = searchRes.results[0];
+            const readRes = await window.electronAPI.notebookReadNote(topHit.id);
+            if (readRes && readRes.ok) {
+              systemContextMsg = {
+                role: 'system',
+                content: `【隐式笔记上下文注入 - 笔记：${topHit.title || topHit.id}】\n${readRes.content}\n`
+              };
+              messages.value.push({
+                role: 'system',
+                content: `🔍 已挂载笔记上下文: ${topHit.title || topHit.id}`
+              });
+            }
+          } else {
+             messages.value.push({
+                role: 'system',
+                content: `❌ 未找到关联笔记: ${keyword}`
+              });
+          }
+        } catch (e) {
+          console.error('Failed to search note', e);
+        }
+      }
+      text = text.replace(/^@note\s+[^\s]+/, '').trim();
+      if (!text) text = "请根据我挂载的笔记上下文，提取核心内容并生成一份总结。";
     }
 
     // P3-3: 拦截 /note — 新建独立笔记
@@ -157,12 +191,15 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
 
     const userMessage = {
       role: 'user',
-      content: text || (imageBase64s.length > 0 ? '请分析图片' : '请分析附件内容'),
+      content: text || (imageBase64s.length > 0 ? '看图片' : '继续'),
       image_base64s: imageBase64s.length > 0 ? imageBase64s : null,
     };
 
-    // 立即添加到 UI 并清空输入框
+    // 存到 UI 中
     messages.value.push(userMessage);
+    if (systemContextMsg) {
+      messages.value.push(systemContextMsg);
+    }
     inputText.value = '';
     pendingImages.value = [];
     pendingFiles.value = [];
@@ -659,9 +696,34 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
     msgObj.type = 'text';
   }
 
+
+  const clipMessageToNote = async (msg) => {
+    if (!msg || !msg.content) return;
+    try {
+      const clipContent = typeof msg.content === 'string'
+        ? msg.content.replace(/<\|mem\|>/g, '').trim()
+        : '';
+      const defaultTitle = clipContent.substring(0, 40).replace(/[#
+*]/g, '').trim() || 'AI片段';
+      const clipTitle = prompt('请输入笔记标题:', defaultTitle);
+      if (!clipTitle) return;
+
+      const res = await window.electronAPI.notebookCreateNote(clipTitle, ['ai-clip'], 'sources');
+      if (res && res.ok && res.path) {
+        await window.electronAPI.notebookSaveNote(res.path, clipContent);
+        if (window.electronAPI.showNotification) {
+          window.electronAPI.showNotification('已存为笔记', '标题: ' + clipTitle);
+        }
+      }
+    } catch (e) {
+      console.error('Failed to clip note', e);
+    }
+  };
+
   return {
     // 状态
     messages,
+    clipMessageToNote,
     displayMessages,
     inputText,
     isStreaming,

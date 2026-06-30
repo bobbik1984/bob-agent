@@ -1,4 +1,4 @@
-use serde_json::{json, Value};
+﻿use serde_json::{json, Value};
 use std::fs;
 use std::path::PathBuf;
 use tauri::Emitter;
@@ -505,8 +505,9 @@ fn generate_dream_report(app: &tauri::AppHandle) {
         briefing.push_str(&weather);
     }
     
-    tauri::async_runtime::block_on(async {
+    let digest_stats = tauri::async_runtime::block_on(async {
         let _ = generate_tag_merge_proposals().await;
+        generate_notebook_digest().await
     });
     
     briefing.push_str("## 对话回顾\n\n");
@@ -584,12 +585,19 @@ fn generate_dream_report(app: &tauri::AppHandle) {
         }
     }
 
+    if digest_stats.0 > 0 {
+        briefing.push_str("\n## 📓 昨日笔记洞察\n\n");
+        briefing.push_str(&format!("- 昨夜 AI 帮您重新索引了 **{}** 篇笔记，提取了 **{}** 个关键实体关系并入库图谱。\n", digest_stats.0, digest_stats.1));
+    }
+
     let report = json!({
         "briefing": briefing,
         "stats": {
             "staled": stale_count,
             "merged": dedup_count,
-            "corrected": corrected_count
+            "corrected": corrected_count,
+            "digest_notes": digest_stats.0,
+            "digest_entities": digest_stats.1
         },
         "generatedAt": super::now_ms(),
         "dismissed": false
@@ -1062,4 +1070,103 @@ pub fn system_clear_tag_proposals() -> bool {
         let _ = fs::remove_file(&path);
     }
     true
+}
+
+
+pub async fn generate_notebook_digest() -> (usize, usize) {
+    let notes_dir = crate::notebook::get_notes_dir();
+    let topics_dir = notes_dir.join("topics");
+    let projects_dir = notes_dir.join("projects");
+    
+    let mut files_to_process = Vec::new();
+    let threshold = std::time::SystemTime::now() - std::time::Duration::from_secs(48 * 3600);
+    
+    for dir in &[topics_dir, projects_dir] {
+        if !dir.exists() { continue; }
+        for entry in walkdir::WalkDir::new(dir).into_iter().filter_map(|e| e.ok()) {
+            if entry.path().is_file() && entry.path().extension().and_then(|s| s.to_str()) == Some("md") {
+                if let Ok(meta) = entry.metadata() {
+                    if let Ok(modified) = meta.modified() {
+                        if modified > threshold {
+                            files_to_process.push(entry.path().to_path_buf());
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    if files_to_process.is_empty() { return (0, 0); }
+    
+    let (_, api_key, model_id, base_url) = crate::llm::read_llm_config_for_model("clerk");
+    if api_key.is_empty() { return (0, 0); }
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(60))
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new());
+    
+    let mut processed = 0;
+    let mut entities_extracted = 0;
+    
+    let db_path = crate::get_data_dir().join("bob.db");
+    let conn = match rusqlite::Connection::open(&db_path) {
+        Ok(c) => c,
+        Err(_) => return (0, 0),
+    };
+    
+    let prompt_system = "你是一个专业的信息提取员。请从我提供的笔记内容中，提取出最重要的实体（如：人物、技术名词、书籍、概念、项目等），并简要概括它们与该笔记的关系。必须严格返回 JSON 数组格式，例如：[{\"entity\": \"Elon Musk\", \"type\": \"person\", \"relation\": \"提到了\"}]。允许的 type 包括: person, topic, concept, project, tag。如果没有明显的实体，请返回空数组 []。";
+    
+    for path in files_to_process.iter().take(5) { // max 5 notes per dream to save tokens
+        let content = fs::read_to_string(path).unwrap_or_default();
+        if content.len() < 50 { continue; }
+        let rel_path = path.strip_prefix(&notes_dir).unwrap_or(path).to_string_lossy().replace("\\", "/");
+        let note_id = format!("note_{}", rel_path);
+        
+        let prompt_user = format!("笔记内容：\n\n{}", content.chars().take(2000).collect::<String>());
+        let body = serde_json::json!({
+            "model": model_id,
+            "messages": [
+                { "role": "system", "content": prompt_system },
+                { "role": "user", "content": prompt_user }
+            ],
+            "max_tokens": 1024,
+            "temperature": 0.1,
+            "stream": false
+        });
+        
+        let url = format!("{}/chat/completions", base_url);
+        let resp = match client.post(&url)
+            .header("Content-Type", "application/json")
+            .header("Authorization", format!("Bearer {}", api_key))
+            .json(&body)
+            .send()
+            .await
+        {
+            Ok(r) => r,
+            Err(_) => continue,
+        };
+        
+        if let Ok(json) = resp.json::<serde_json::Value>().await {
+            if let Some(content) = json.get("choices").and_then(|c| c.as_array()).and_then(|arr| arr.get(0)).and_then(|c| c.get("message")).and_then(|m| m.get("content")).and_then(|c| c.as_str()) {
+                let cleaned = content.replace("```json", "").replace("```", "").trim().to_string();
+                if let Ok(entities) = serde_json::from_str::<Vec<serde_json::Value>>(&cleaned) {
+                    for entity in entities {
+                        let name = entity.get("entity").and_then(|v| v.as_str()).unwrap_or("").trim();
+                        let etype = entity.get("type").and_then(|v| v.as_str()).unwrap_or("topic").trim();
+                        let relation = entity.get("relation").and_then(|v| v.as_str()).unwrap_or("mentions").trim();
+                        
+                        if name.is_empty() { continue; }
+                        
+                        let target_id = crate::kg::resolve_node_id(&conn, name, etype);
+                        let _ = crate::kg::upsert_node(&conn, &target_id, name, etype, "", "dream_digest");
+                        let _ = crate::kg::insert_edge(&conn, &note_id, &target_id, relation, 0.7);
+                        entities_extracted += 1;
+                    }
+                    processed += 1;
+                }
+            }
+        }
+    }
+    
+    (processed, entities_extracted)
 }

@@ -32,7 +32,10 @@
               :class="{ active: selectedNoteId === note.id }"
               @click="selectNote(note)">
             <CalendarDays :size="14" class="icon" /> {{ note.title || formatDailyName(note.id) }}
-            <button class="del-btn" @click.stop="deleteNote(note)" title="删除"><Trash2 :size="14" /></button>
+            <div class="note-actions">
+              <button class="action-btn promote-btn" @click.stop="promoteDailyNote(note)" :title="$t('notebook.promote') || '提升为独立笔记'"><ArrowUpFromLine :size="14" /></button>
+              <button class="action-btn del-btn" @click.stop="deleteNote(note)" title="删除"><Trash2 :size="14" /></button>
+            </div>
           </li>
           <li v-if="(notes.daily || []).length === 0" class="empty-text">{{ $t('notebook.empty_daily') }}</li>
         </ul>
@@ -181,7 +184,7 @@
 
 <script setup>
 import { ref, onMounted, computed, defineEmits, defineProps } from 'vue';
-import { Folder, FolderPlus, CalendarDays, ChevronRight, FileText, Plus, Trash2, RefreshCw, Tag } from 'lucide-vue-next';
+import { Folder, FolderPlus, CalendarDays, ChevronRight, FileText, Plus, Trash2, RefreshCw, Tag, ArrowUpFromLine } from 'lucide-vue-next';
 import { useI18n } from 'vue-i18n';
 
 const { t } = useI18n();
@@ -336,6 +339,34 @@ const createNewNote = async () => {
     }
   } catch (e) {
     alert(t('notebook.new_note') + ' failed: ' + e.message);
+  }
+};
+
+const promoteDailyNote = async (note) => {
+  const title = prompt(t('notebook.promote_title') || '请输入新笔记的标题 (将会移动到 topics 分类):', '从速记提取');
+  if (!title) return;
+  
+  try {
+    const readRes = await window.electronAPI.notebookReadNote(note.id);
+    if (!readRes.ok) throw new Error('无法读取原始速记');
+    const originalContent = readRes.content || '';
+    
+    const newNoteRes = await window.electronAPI.notebookCreateNote(title, [], 'topics');
+    if (!newNoteRes.ok) throw new Error('创建新笔记失败');
+    
+    await window.electronAPI.notebookSaveNote(newNoteRes.path, originalContent);
+    
+    const appendText = `\n\n> 📍 已提取至 [[${title}]]`;
+    await window.electronAPI.notebookSaveNote(note.id, originalContent + appendText);
+    
+    await loadNotes();
+    emit('select', newNoteRes.path);
+    if (window.electronAPI.showNotification) {
+      window.electronAPI.showNotification('速记提升成功', `已提升为: ${title}`);
+    }
+  } catch (err) {
+    console.error('提升失败:', err);
+    alert('提升失败: ' + err.message);
   }
 };
 
@@ -572,30 +603,45 @@ defineExpose({ refresh: loadNotes });
   text-overflow: ellipsis;
 }
 
-.del-btn {
+.note-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+}
+
+.action-btn {
   background: transparent;
   border: none;
   color: var(--text-tertiary);
   cursor: pointer;
   opacity: 0;
-  padding: 6px;
+  padding: 4px;
   border-radius: 4px;
   display: flex;
   align-items: center;
   justify-content: center;
   transition: all 0.2s;
 }
+
+.note-list li.active .action-btn,
 .note-list li.active .del-btn {
   color: rgba(255, 255, 255, 0.7);
 }
+.note-list li.active:hover .action-btn,
 .note-list li.active:hover .del-btn {
   color: rgba(255, 255, 255, 1);
 }
 
+.note-list li:hover .action-btn,
 .note-list li:hover .del-btn {
   opacity: 0.7;
 }
 
+.action-btn:hover {
+  opacity: 1 !important;
+  background-color: rgba(255, 255, 255, 0.1);
+}
 .del-btn:hover {
   opacity: 1 !important;
   background-color: rgba(239, 68, 68, 0.1);

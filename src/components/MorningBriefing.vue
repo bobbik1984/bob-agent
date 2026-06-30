@@ -14,16 +14,19 @@
       <div class="briefing-body">
         <div class="briefing-content" v-html="renderedBriefing"></div>
 
-        <div v-if="stats.staled > 0 || stats.merged > 0" class="briefing-maintenance">
+        <div v-if="stats.staled > 0 || stats.merged > 0 || stats.digest_notes > 0" class="briefing-maintenance">
           <span class="maintenance-label">
             <Sparkles :size="12" style="margin-right: 4px;" />
-            {{ t('dream.maintenance') }}
+            {{ t('dream.maintenance') || '整理报告' }}
           </span>
           <span v-if="stats.staled > 0" class="maintenance-item">
             {{ t('dream.archived', { count: stats.staled }) }}
           </span>
           <span v-if="stats.merged > 0" class="maintenance-item">
             {{ t('dream.merged', { count: stats.merged }) }}
+          </span>
+          <span v-if="stats.digest_notes > 0" class="maintenance-item" style="color: var(--user-accent); font-weight: 500;">
+            📓 深度阅读了 {{ stats.digest_notes }} 篇笔记，提取 {{ stats.digest_entities }} 个图谱实体
           </span>
         </div>
 

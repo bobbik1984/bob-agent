@@ -117,6 +117,14 @@
             <div v-if="msg.role === 'assistant' && msg._modelLabel" class="model-label">
               {{ msg._modelLabel }}
             </div>
+            <button
+              v-if="msg.role === 'assistant' && msg.content"
+              class="copy-rich-btn"
+              title="存为笔记"
+              @click="clipMessageToNote(msg)"
+            >
+              <BookmarkPlus :size="12" />
+            </button>
             <!-- T-1201: 富文本复制按钮 -->
             <button
               v-if="msg.role === 'assistant' && msg.content"
@@ -464,7 +472,7 @@ marked.setOptions({ breaks: true, gfm: true });
 <script setup>
 import { ref, watch, onMounted, onUnmounted, nextTick, inject, computed } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { Sparkles, FileText, Camera, Calendar, User, ChevronRight, ChevronDown, ChevronUp, X, FileUp, Paperclip, Bookmark, Loader2, Shield, Zap, Target, Lock, Unlock, Download, Smartphone, Monitor, ClipboardCopy, Check } from 'lucide-vue-next';
+import { Sparkles, FileText, Camera, Calendar, User, ChevronRight, ChevronDown, ChevronUp, X, FileUp, Paperclip, Bookmark, Loader2, Shield, Zap, Target, Lock, Unlock, Download, Smartphone, Monitor, ClipboardCopy, Check, BookmarkPlus } from 'lucide-vue-next';
 import ConfirmCard from '../components/ConfirmCard.vue';
 import FileCard from '../components/FileCard.vue';
 import SearchCard from '../components/SearchCard.vue';
@@ -647,12 +655,13 @@ const {
   parseTextAsEvent: _parseTextAsEvent,
   handleConfirmEvent, handleCancelEvent,
   handleSaveActionItem, handleDismissActionItem,
+  clipMessageToNote,
 } = useChat(props, emit, { scrollToBottom, currentModelName, globalFileAccess, agentMode });
 
 // 拖拽/附件
 const {
   isDragging, pendingImages, pendingFiles, pendingFolderInfo, pendingKBEstimate,
-  handleAttach, handlePaste, onDragEnter, handleDrop, handleTauriDrop,
+  handleAction, handleAttach, handlePaste, onDragEnter, handleDrop, handleTauriDrop,
   cancelFolderTrack, confirmFolderTrack, cancelKBEstimate, startKBBuild,
   setupTauriDragListeners,
 } = useDragDrop({

@@ -1,11 +1,11 @@
 project:
   name: bob-agent
-  version: "0.4.0"
+  version: "0.4.3"
   status: stable
   tech: [Tauri V2, Rust, Vue 3, Vite, SQLite (rusqlite), reqwest, scraper, keyring, tauri-plugin-single-instance, tauri-plugin-clipboard-manager, tokio-cron-scheduler, trash, vis-network]
   updated: "2026-06-30"
   architecture: "Tauri (Rust backend) + Vue 3 (frontend) + tauri-bridge.js (adapter) + Composable 架构"
-  current_focus: "v0.4.0 (Ghost Partner 阶段正式版已发布) — 下一目标 v0.4.1 (目标 17 知识图谱融合 vis.js)"
+  current_focus: "v0.4.3 (Ghost Partner 阶段正式版) — 包含知识图谱融合等最新特性"
 
 # ═══════════════════════════════════════════════════════════════
 # Tauri 迁移后目标体系 (目标 1-18)
@@ -213,12 +213,16 @@ milestones:
       - { id: T-1631, text: "Discord Bot 后端 WebSocket Gateway", status: done }
 
   - name: "目标 17: 知识图谱融合 (Knowledge Graph)"
-    status: in_progress
-    completion: 20%
-    summary: "把 iknow 的语义图谱能力原生化到 Bob 中"
+    status: done
+    completion: 100%
+    summary: "把 iknow 的语义图谱能力原生化到 Bob 中，包括知识图谱画布、Dream 标签语义去重、速记提升与 @note 深度上下文集成"
     tasks:
-      - { id: T-1701, text: "bob.db 新增 kg_nodes + kg_edges 表", status: todo }
-      - { id: T-1721, text: "vis-network 前端交互画布", status: todo }
+      - { id: T-1701, text: "bob.db 新增 kg_nodes + kg_edges 表", status: done }
+      - { id: T-1721, text: "vis-network 前端交互画布", status: done }
+      - { id: T-1731, text: "Phase 2.5: Dream 标签语义去重引擎 (LLM 聚类 + 晨间简报合并提案)", status: done }
+      - { id: T-1741, text: "Phase 3-1: 笔记 Promote 提升为独立长笔记", status: done }
+      - { id: T-1742, text: "Phase 3-2: Dream 笔记扫描集成 (Notebook Digest)", status: done }
+      - { id: T-1743, text: "Phase 3-3: 气泡直接存为笔记与 @note 隐式上下文注入", status: done }
 
   - name: "目标 18: Goal Mode (闭环执行引擎) 与 Web Drop"
     status: done

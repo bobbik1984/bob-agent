@@ -231,7 +231,12 @@
 
 **未完成**:
 - [ ] T-2001: 实现 Slash/Mention Command 的智能悬浮补全菜单 (方案 A)
-- [ ] T-2002: 在 Chat 界面增加显性的“📌 作为笔记速记”按钮 (方案 B)
+
+**已完成 (Phase 2.5 & Phase 3)**:
+- [x] T-1731: Phase 2.5: Dream 标签语义去重引擎 (LLM 聚类 + 晨间简报合并提案)
+- [x] T-1741: Phase 3-1: 笔记 Promote 提升为独立长笔记
+- [x] T-1742: Phase 3-2: Dream 笔记扫描集成 (Notebook Digest)
+- [x] T-1743: Phase 3-3: 气泡直接存为笔记与 @note 隐式上下文注入 (即 T-2002 对应的方案 B)
 
 
 ### 2026-05-15 (今天)
