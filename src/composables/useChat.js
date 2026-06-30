@@ -703,8 +703,7 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
       const clipContent = typeof msg.content === 'string'
         ? msg.content.replace(/<\|mem\|>/g, '').trim()
         : '';
-      const defaultTitle = clipContent.substring(0, 40).replace(/[#
-*]/g, '').trim() || 'AI片段';
+      const defaultTitle = clipContent.substring(0, 40).replace(/[#\n*]/g, '').trim() || 'AI片段';
       const clipTitle = prompt('请输入笔记标题:', defaultTitle);
       if (!clipTitle) return;
 
