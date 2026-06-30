@@ -350,7 +350,9 @@
     "cmd_file": "引用本地文件/图片",
     "cmd_save_note": "📌 作为笔记速记",
     "cmd_save_note_tooltip": "直接将输入内容保存为笔记，不发给AI",
-    "cmd_note_empty": "请先输入内容再保存为笔记"
+    "cmd_note_empty": "请先输入内容再保存为笔记",
+    "cmd_note_desc": "新建独立笔记并可在笔记视图编辑",
+    "cmd_clip_desc": "将AI最近一条回复保存为笔记"
   },
   "model_hub": {
     "title": "模型中心",
@@ -526,13 +528,24 @@
   "notebook": {
     "daily": "速记",
     "topics": "笔记",
+    "projects": "项目",
     "sources": "知识库",
+    "custom": "自定义",
     "empty_daily": "暂无速记",
     "empty_topics": "暂无笔记",
+    "empty_projects": "暂无项目笔记",
     "empty_sources": "暂无知识库",
     "tree_view": "目录视图",
     "timeline_view": "时间线视图",
+    "tags_view": "标签视图",
     "refresh": "刷新列表",
-    "new_note": "新建笔记"
+    "new_note": "新建笔记",
+    "new_folder": "新建分组",
+    "new_folder_prompt": "请输入新分组名称",
+    "tags": "标签",
+    "add_tag": "添加标签",
+    "tag_placeholder": "输入标签名...",
+    "select_category": "选择分类",
+    "select_category_hint": "选择笔记保存位置"
   }
 }

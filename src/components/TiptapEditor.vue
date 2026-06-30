@@ -30,13 +30,28 @@
       <div v-if="saveStatus" class="save-indicator">{{ saveStatus }}</div>
     </div>
 
+    <!-- Tag Bar -->
+    <div v-if="tags && tags.length > 0 || showTagInput" class="tag-bar">
+      <span v-for="(tag, idx) in tags" :key="tag" class="tag-chip">
+        {{ tag }}
+        <button class="tag-remove" @click="removeTag(idx)">&times;</button>
+      </span>
+      <input v-if="showTagInput" ref="tagInputRef" v-model="newTagText"
+             class="tag-input" :placeholder="$t('notebook.tag_placeholder')"
+             @keydown.enter.prevent="addTag" @keydown.escape="showTagInput = false"
+             @blur="addTag" />
+      <button v-else class="tag-add-btn" @click="showTagInput = true" :title="$t('notebook.add_tag')">
+        + {{ $t('notebook.tags') }}
+      </button>
+    </div>
+
     <!-- Editor Content -->
     <editor-content :editor="editor" class="editor-content" />
   </div>
 </template>
 
 <script setup>
-import { ref, watch, onMounted, onBeforeUnmount, defineProps, defineEmits } from 'vue';
+import { ref, watch, onMounted, onBeforeUnmount, nextTick, defineProps, defineEmits } from 'vue';
 import { Editor, EditorContent } from '@tiptap/vue-3';
 import StarterKit from '@tiptap/starter-kit';
 import TaskList from '@tiptap/extension-task-list';
@@ -45,6 +60,10 @@ import Image from '@tiptap/extension-image';
 import Link from '@tiptap/extension-link';
 import Placeholder from '@tiptap/extension-placeholder';
 import { Markdown } from 'tiptap-markdown';
+import { WikilinkExtension, preprocessWikilinks } from '../extensions/WikilinkExtension.js';
+import { useI18n } from 'vue-i18n';
+
+const { t } = useI18n();
 
 const props = defineProps({
   modelValue: {
@@ -58,10 +77,37 @@ const props = defineProps({
   saveStatus: {
     type: String,
     default: ''
+  },
+  tags: {
+    type: Array,
+    default: () => []
   }
 });
 
-const emit = defineEmits(['update:modelValue', 'save']);
+const emit = defineEmits(['update:modelValue', 'save', 'update:tags', 'wikilink-click']);
+
+const showTagInput = ref(false);
+const newTagText = ref('');
+const tagInputRef = ref(null);
+
+const addTag = () => {
+  const tag = newTagText.value.trim();
+  if (tag && !props.tags.includes(tag)) {
+    emit('update:tags', [...props.tags, tag]);
+  }
+  newTagText.value = '';
+  showTagInput.value = false;
+};
+
+const removeTag = (idx) => {
+  const updated = [...props.tags];
+  updated.splice(idx, 1);
+  emit('update:tags', updated);
+};
+
+watch(showTagInput, (val) => {
+  if (val) nextTick(() => tagInputRef.value?.focus());
+});
 
 const editor = ref(null);
 let internalUpdate = false;
@@ -82,13 +128,15 @@ onMounted(() => {
         placeholder: props.placeholder,
       }),
       Markdown.configure({
-        // Optional configuration for markdown serialization/parsing
-        html: false,
+        html: true,  // Allow HTML for wikilink span tags
         transformPastedText: true,
         transformCopiedText: true,
       }),
+      WikilinkExtension.configure({
+        onWikilinkClick: (target) => emit('wikilink-click', target),
+      }),
     ],
-    content: props.modelValue,
+    content: preprocessWikilinks(props.modelValue),
     onUpdate: ({ editor }) => {
       if (window._ignoreNextTiptapUpdate) return;
       internalUpdate = true;
@@ -106,7 +154,7 @@ watch(() => props.modelValue, (newVal) => {
   }
   if (editor.value) {
     window._ignoreNextTiptapUpdate = true;
-    editor.value.commands.setContent(newVal, false);
+    editor.value.commands.setContent(preprocessWikilinks(newVal), false);
     // Reset flag immediately and also on nextTick in case of async updates
     window._ignoreNextTiptapUpdate = false;
     setTimeout(() => { window._ignoreNextTiptapUpdate = false; }, 0);
@@ -171,6 +219,67 @@ const onDrop = async (e) => {
   border-bottom: 1px solid var(--border-subtle);
   flex-wrap: wrap;
   align-items: center;
+}
+
+/* ── Tag Bar ── */
+.tag-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 16px;
+  border-bottom: 1px solid var(--border-subtle);
+  min-height: 32px;
+}
+.tag-bar .tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  background-color: var(--bg-tertiary);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-family: var(--font-sans);
+}
+.tag-remove {
+  background: none;
+  border: none;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0 2px;
+  line-height: 1;
+  transition: color 0.15s;
+}
+.tag-remove:hover {
+  color: var(--color-error, #ef4444);
+}
+.tag-input {
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-family: var(--font-sans);
+  padding: 2px 4px;
+  min-width: 80px;
+  max-width: 160px;
+}
+.tag-add-btn {
+  background: none;
+  border: 1px dashed var(--border-subtle);
+  border-radius: 999px;
+  padding: 2px 10px;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  font-family: var(--font-sans);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.tag-add-btn:hover {
+  color: var(--user-accent);
+  border-color: var(--user-accent);
 }
 
 .editor-toolbar button {
@@ -268,5 +377,19 @@ const onDrop = async (e) => {
 :deep(img) {
   max-width: 100%;
   border-radius: 4px;
+}
+
+/* ── Wikilinks ── */
+:deep(.wikilink) {
+  color: var(--user-accent, #3b82f6);
+  cursor: pointer;
+  border-bottom: 1px solid transparent;
+  transition: all 0.15s;
+  padding: 0 1px;
+  border-radius: 2px;
+}
+:deep(.wikilink:hover) {
+  border-bottom-color: var(--user-accent, #3b82f6);
+  background-color: rgba(59, 130, 246, 0.08);
 }
 </style>

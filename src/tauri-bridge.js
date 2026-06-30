@@ -182,6 +182,8 @@ window.electronAPI = {
   // ── 做梦引擎 (Rust 原生) ───────────────────────────────
   getDreamReport: async () => invoke('system_get_dream_report'),
   dismissDream: async () => invoke('system_dismiss_dream'),
+  getTagProposals: async () => invoke('system_get_tag_proposals'),
+  clearTagProposals: async () => invoke('system_clear_tag_proposals'),
   onDreamCompleted: (callback) => {
     let unlisten = null;
     listen('dream:completed', (event) => {
@@ -228,8 +230,6 @@ window.electronAPI = {
   openDataDir: async () => invoke('system_open_data_dir'),
   factoryReset: async () => invoke('system_factory_reset'),
 
-  // ── 闪念速记 (Quick Note) ──────────────────────────────
-  appendQuickNote: async (content) => invoke('system_append_quick_note', { content }),
 
   // ── Outbox (声明式配置 — AI 自主修改设置) ──────────────
   writeOutbox: async (operations) => invoke('system_write_outbox', { operations }),
@@ -315,13 +315,19 @@ window.electronAPI = {
   notebookListNotes:   async () => invoke('notebook_list_notes'),
   notebookReadNote:    async (path) => invoke('notebook_read_note', { path }),
   notebookSaveNote:    async (path, content) => invoke('notebook_save_note', { path, content }),
-  notebookCreateNote:  async (title, tags) => invoke('notebook_create_note', { title, tags }),
+  notebookCreateNote:  async (title, tags, category) => invoke('notebook_create_note', { title, tags, category: category || null }),
   notebookDeleteNote:  async (path) => invoke('notebook_delete_note', { path }),
   notebookMoveNote:    async (path, targetCategory) => invoke('notebook_move_note', { path, targetCategory }),
   notebookRenameNote:  async (oldPath, newTitle) => invoke('notebook_rename_note', { oldPath, newTitle }),
   notebookSearch:      async (query) => invoke('notebook_search', { query }),
   notebookAppendDaily: async (content) => invoke('notebook_append_daily', { content }),
   notebookSaveAsset:   async (fileName, data) => invoke('notebook_save_asset', { fileName, data }),
+  notebookCreateFolder: async (name) => invoke('notebook_create_folder', { name }),
+  notebookListAllTags: async () => invoke('notebook_list_all_tags'),
+  notebookUpdateTags:  async (path, tags) => invoke('notebook_update_tags', { path, tags }),
+  notebookGetBacklinks: async (path) => invoke('notebook_get_backlinks', { path }),
+  notebookMergeTags: async (canonical, aliases) => invoke('notebook_merge_tags', { canonical, aliases }),
+  notebookRejectTagMerge: async (tagA, tagB) => invoke('notebook_reject_tag_merge', { tagA, tagB }),
 
   // Generic invoke passthrough for components that call invoke directly
   invoke: (cmd, args) => invoke(cmd, args || {}),

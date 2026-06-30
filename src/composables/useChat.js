@@ -91,6 +91,67 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
       }
     }
 
+    // P3-3: 拦截 /note — 新建独立笔记
+    if (text.startsWith('/note ')) {
+      const noteTitle = text.replace(/^\/note\s+/, '').trim();
+      if (noteTitle) {
+        try {
+          const res = await window.electronAPI.notebookCreateNote(noteTitle, []);
+          if (res && res.ok) {
+            messages.value.push({ role: 'user', content: text });
+            messages.value.push({
+              role: 'system',
+              content: `📓 笔记「${noteTitle}」已创建。请切换到 [笔记] 视图查看。`
+            });
+            inputText.value = '';
+            resetTextareaHeight();
+            setTimeout(scrollToBottom, 100);
+            return;
+          }
+        } catch (e) {
+          console.error('Failed to create note', e);
+        }
+      }
+    }
+
+    // P3-3: 拦截 /clip — 将AI最近回复保存为笔记
+    if (text.startsWith('/clip')) {
+      const lastAssistant = [...messages.value].reverse().find(m => m.role === 'assistant' && m.content);
+      if (lastAssistant) {
+        try {
+          const clipContent = typeof lastAssistant.content === 'string' 
+            ? lastAssistant.content.replace(/<\|mem\|>/g, '').trim() 
+            : '';
+          const clipTitle = clipContent.substring(0, 40).replace(/[#\n*]/g, '').trim() || 'AI剪报';
+          const res = await window.electronAPI.notebookCreateNote(clipTitle, ['ai-clip'], 'sources');
+          if (res && res.ok && res.path) {
+            await window.electronAPI.notebookSaveNote(res.path, clipContent);
+          }
+          messages.value.push({ role: 'user', content: text });
+          messages.value.push({
+            role: 'system',
+            content: `📌 AI回复已保存为笔记「${clipTitle}」。`
+          });
+          inputText.value = '';
+          resetTextareaHeight();
+          setTimeout(scrollToBottom, 100);
+          return;
+        } catch (e) {
+          console.error('Failed to clip note', e);
+        }
+      } else {
+        messages.value.push({ role: 'user', content: text });
+        messages.value.push({
+          role: 'system',
+          content: '⚠️ 没有找到可以保存的 AI 回复。'
+        });
+        inputText.value = '';
+        resetTextareaHeight();
+        setTimeout(scrollToBottom, 100);
+        return;
+      }
+    }
+
     const filesToRead = [...pendingFiles.value];
     const imageBase64s = [...pendingImages.value];
 

@@ -782,6 +782,25 @@ fn get_builtin_tool_schemas() -> Vec<Value> {
                 }
             }
         }),
+        // P3-4: save_to_notes — AI可调用的笔记保存工具
+        json!({
+            "type": "function",
+            "function": {
+                "name": "save_to_notes",
+                "description": "将内容保存为笔记。可用于保存网页摘要、搜索结果精华、AI分析报告等到用户的笔记系统。自动创建带有完整元数据的Markdown笔记。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "title": { "type": "string", "description": "笔记标题" },
+                        "content": { "type": "string", "description": "笔记正文内容 (Markdown格式)" },
+                        "source_url": { "type": "string", "description": "来源URL (可选)" },
+                        "source_type": { "type": "string", "enum": ["web_clip", "ai_summary", "research", "reference"], "description": "来源类型" },
+                        "tags": { "type": "array", "items": { "type": "string" }, "description": "标签列表" }
+                    },
+                    "required": ["title", "content"]
+                }
+            }
+        }),
     ]
 }
 
@@ -1151,6 +1170,53 @@ async fn execute_tool_inner(app: &tauri::AppHandle, name: &str, args: &Value, fr
                     json!({ "ok": format!("PowerPoint 演示文稿已生成: {}", path_str), "path": path_str })
                 },
                 Err(e) => json!({ "error": format!("无法生成 PPTX: {}", e) }),
+            }
+        }
+        // P3-4: save_to_notes — 将内容保存为笔记
+        "save_to_notes" => {
+            let title = args["title"].as_str().unwrap_or("Untitled");
+            let content = args["content"].as_str().unwrap_or("");
+            let source_url = args["source_url"].as_str().unwrap_or("");
+            let source_type = args["source_type"].as_str().unwrap_or("reference");
+            let tags: Vec<String> = args["tags"].as_array()
+                .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                .unwrap_or_else(|| vec![source_type.to_string()]);
+
+            // Create the note via notebook module
+            match super::notebook::notebook_create_note(
+                title.to_string(),
+                tags.clone(),
+                Some("sources".to_string()),
+            ) {
+                Ok(res) => {
+                    if let Some(path) = res["path"].as_str() {
+                        // Build enriched content with source metadata
+                        let mut body = String::new();
+                        if !source_url.is_empty() {
+                            body.push_str(&format!("> 来源: [{}]({})\n\n", source_url, source_url));
+                        }
+                        body.push_str(content);
+
+                        // Save content (notebook_save_note needs DbState, use file-based approach)
+                        let notes_dir = super::notebook::get_notes_dir();
+                        let full_path = notes_dir.join(path);
+                        if let Ok(existing) = fs::read_to_string(&full_path) {
+                            // Append body after frontmatter
+                            if existing.starts_with("---") {
+                                if let Some(end_idx) = existing[3..].find("---") {
+                                    let fm = &existing[..3 + end_idx + 3];
+                                    let new_content = format!("{}\n\n{}", fm, body);
+                                    let _ = fs::write(&full_path, new_content);
+                                }
+                            }
+                        }
+
+                        json!({ "ok": format!("笔记「{}」已保存到 sources/", title), "path": path })
+                    } else {
+                        json!({ "error": "创建笔记失败" })
+                    }
+                }
+                Err(e) => json!({ "error": format!("创建笔记失败: {}", e) }),
             }
         }
         _ => json!({ "error": format!("未知工具: {}", name) }),

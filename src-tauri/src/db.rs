@@ -109,7 +109,17 @@ pub fn init_db(data_dir: &std::path::Path) -> Connection {
         );
     ").unwrap_or_default();
 
-    // T-1301: 对话消息全文搜索索引 (FTS5)
+    // P0-2: 笔记专用全文搜索索引 (FTS5)
+    conn.execute_batch("
+        CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(
+            note_path,
+            title,
+            content,
+            tags,
+            tokenize='unicode61'
+        );
+    ").unwrap_or_default();
+
     conn.execute_batch("
         CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
             content,

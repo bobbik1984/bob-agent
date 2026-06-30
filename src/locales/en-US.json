@@ -350,7 +350,9 @@
     "cmd_file": "Attach local file/image",
     "cmd_save_note": "📌 Save as Note",
     "cmd_save_note_tooltip": "Save input as a note directly, do not send to AI",
-    "cmd_note_empty": "Please enter content before saving"
+    "cmd_note_empty": "Please enter content before saving",
+    "cmd_note_desc": "Create a new note and open in editor",
+    "cmd_clip_desc": "Save AI's last reply as a note"
   },
   "model_hub": {
     "title": "Model Hub",
@@ -526,13 +528,24 @@
   "notebook": {
     "daily": "Quick Notes",
     "topics": "Notes",
+    "projects": "Projects",
     "sources": "Knowledge Base",
+    "custom": "Custom",
     "empty_daily": "No Quick Notes",
     "empty_topics": "No Notes",
+    "empty_projects": "No Project Notes",
     "empty_sources": "No Knowledge Base",
     "tree_view": "Tree View",
     "timeline_view": "Timeline View",
+    "tags_view": "Tags View",
     "refresh": "Refresh",
-    "new_note": "New Note"
+    "new_note": "New Note",
+    "new_folder": "New Folder",
+    "new_folder_prompt": "Enter a name for the new folder",
+    "tags": "Tags",
+    "add_tag": "Add Tag",
+    "tag_placeholder": "Enter tag name...",
+    "select_category": "Select Category",
+    "select_category_hint": "Choose where to save this note"
   }
 }

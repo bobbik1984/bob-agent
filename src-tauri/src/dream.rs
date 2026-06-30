@@ -505,6 +505,10 @@ fn generate_dream_report(app: &tauri::AppHandle) {
         briefing.push_str(&weather);
     }
     
+    tauri::async_runtime::block_on(async {
+        let _ = generate_tag_merge_proposals().await;
+    });
+    
     briefing.push_str("## 对话回顾\n\n");
     
     for (i, session) in recent.iter().enumerate() {
@@ -929,3 +933,133 @@ pub fn touch_memory_reference(session_id: &str) {
     }
 }
 
+// ═══════════════════════════════════════════════════════════
+// Phase 2.5: Tag Deduplication Pipeline
+// ═══════════════════════════════════════════════════════════
+
+pub async fn generate_tag_merge_proposals() {
+    let res = match crate::notebook::notebook_list_all_tags() {
+        Ok(v) => v,
+        Err(_) => return,
+    };
+    
+    let tags_list = match res.get("tags").and_then(|v| v.as_array()) {
+        Some(arr) => arr,
+        None => return,
+    };
+    
+    if tags_list.len() < 2 {
+        return;
+    }
+    
+    let tag_names: Vec<String> = tags_list.iter()
+        .filter_map(|v| v.get("tag").and_then(|t| t.as_str()).map(|s| s.to_string()))
+        .collect();
+        
+    let mut exclusions: Vec<Vec<String>> = Vec::new();
+    let parent_dir = match crate::notebook::get_notes_dir().parent() {
+        Some(p) => p.to_path_buf(),
+        None => return,
+    };
+    let exclusions_path = parent_dir.join("tag_merge_exclusions.json");
+    if let Ok(content) = fs::read_to_string(&exclusions_path) {
+        if let Ok(json_arr) = serde_json::from_str::<Vec<Vec<String>>>(&content) {
+            exclusions = json_arr;
+        }
+    }
+    
+    let exclusions_str = serde_json::to_string(&exclusions).unwrap_or_else(|_| "[]".to_string());
+    let tags_str = serde_json::to_string(&tag_names).unwrap_or_else(|_| "[]".to_string());
+    
+    let (_, api_key, model_id, base_url) = crate::llm::read_llm_config_for_model("clerk");
+    if api_key.is_empty() {
+        return;
+    }
+    
+    let prompt_system = "你是一个标签整理助手。你的任务是从以下标签列表中，找出语义相同或极度相似的标签（如 'js' 和 'javascript'，'ai' 和 '人工智能'，'llm' 和 '大模型'，或是单复数、大小写不同），并将它们归类。如果没有任何相似的标签，请返回空数组。必须返回合法的JSON数组，格式为: `[{\"canonical\": \"主标签名称\", \"aliases\": [\"需要被合并的标签1\", \"需要被合并的标签2\"]}]`。注意：不要将只是宽泛相关的标签合并（比如不要把 javascript 和 typescript 合并，它们是两门独立语言）。";
+    let prompt_user = format!("标签列表：{}\n\n排除列表（这些是用户明确拒绝合并的，绝对不要把它们合并）：{}", tags_str, exclusions_str);
+    
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(45))
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new());
+        
+    let body = json!({
+        "model": model_id,
+        "messages": [
+            { "role": "system", "content": prompt_system },
+            { "role": "user", "content": prompt_user }
+        ],
+        "max_tokens": 1024,
+        "temperature": 0.1,
+        "stream": false
+    });
+    
+    let url = format!("{}/chat/completions", base_url);
+    let resp = match client.post(&url)
+        .header("Content-Type", "application/json")
+        .header("Authorization", format!("Bearer {}", api_key))
+        .json(&body)
+        .send()
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            log::warn!("Failed to request Clerk for tag proposals: {}", e);
+            return;
+        }
+    };
+    
+    if !resp.status().is_success() {
+        log::warn!("Tag proposal API error: {}", resp.status());
+        return;
+    }
+    
+    let resp_json: Value = match resp.json().await {
+        Ok(v) => v,
+        Err(_) => return,
+    };
+    
+    let mut content = resp_json
+        .pointer("/choices/0/message/content")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+        
+    let start_idx = content.find('[');
+    let end_idx = content.rfind(']');
+    if let (Some(s), Some(e)) = (start_idx, end_idx) {
+        if e > s {
+            content = content[s..e+1].to_string();
+        }
+    }
+    
+    if let Ok(parsed) = serde_json::from_str::<Value>(&content) {
+        if parsed.is_array() {
+            let proposals_path = get_memory_dir().join("tag_merge_proposals.json");
+            if let Ok(data) = serde_json::to_string_pretty(&parsed) {
+                let _ = fs::write(&proposals_path, data);
+            }
+        }
+    }
+}
+
+#[tauri::command]
+pub fn system_get_tag_proposals() -> Value {
+    let path = get_memory_dir().join("tag_merge_proposals.json");
+    if let Ok(content) = fs::read_to_string(&path) {
+        if let Ok(val) = serde_json::from_str::<Value>(&content) {
+            return val;
+        }
+    }
+    json!([])
+}
+
+#[tauri::command]
+pub fn system_clear_tag_proposals() -> bool {
+    let path = get_memory_dir().join("tag_merge_proposals.json");
+    if path.exists() {
+        let _ = fs::remove_file(&path);
+    }
+    true
+}

@@ -800,6 +800,8 @@ pub fn run() {
             dream::system_dismiss_dream,
             dream::system_get_memory_entries,
             dream::system_delete_memory_entry,
+            dream::system_get_tag_proposals,
+            dream::system_clear_tag_proposals,
             // 日程管理
             calendar::system_list_events,
             calendar::system_parse_event,
@@ -884,6 +886,12 @@ pub fn run() {
             notebook::notebook_append_daily,
             notebook::notebook_save_asset,
             notebook::notebook_search,
+            notebook::notebook_create_folder,
+            notebook::notebook_list_all_tags,
+            notebook::notebook_update_tags,
+            notebook::notebook_get_backlinks,
+            notebook::notebook_merge_tags,
+            notebook::notebook_reject_tag_merge,
         ])
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             // 如果已经有一个实例在运行，就把已有窗口唤出来

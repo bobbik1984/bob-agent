@@ -191,6 +191,19 @@
             暂无关联
           </div>
         </div>
+
+        <!-- P1-4: 相关笔记 -->
+        <div class="inspector-section" v-if="inspectorRelatedNotes.length > 0">
+          <h4>📓 {{ $t('kg.notebook_view') }}</h4>
+          <div class="relation-item" v-for="note in inspectorRelatedNotes" :key="note.path"
+               @click="openRelatedNote(note.path)">
+            <div class="relation-icon" style="color: var(--user-accent);">📄</div>
+            <div class="relation-info">
+              <span class="relation-label">{{ note.title || note.path }}</span>
+              <span class="relation-type" v-if="note.snippet">{{ note.snippet }}</span>
+            </div>
+          </div>
+        </div>
       </aside>
     </div>
 
@@ -210,9 +223,26 @@
             v-show="!isLoadingNote"
             v-model="currentNoteContent"
             :saveStatus="saveStatus"
+            :tags="currentNoteTags"
             @save="saveCurrentNote"
+            @update:tags="handleTagsUpdate"
+            @wikilink-click="handleWikilinkClick"
           />
         </template>
+
+        <!-- P2-2: 反向链接面板 -->
+        <div v-if="selectedNoteId && backlinks.length > 0" class="backlinks-panel">
+          <div class="backlinks-header" @click="showBacklinks = !showBacklinks">
+            <ChevronRight :size="14" class="caret" :class="{ open: showBacklinks }" />
+            🔗 {{ t('notebook.tags') === 'Tags' ? 'Backlinks' : '反向链接' }} ({{ backlinks.length }})
+          </div>
+          <div v-show="showBacklinks" class="backlinks-list">
+            <div v-for="bl in backlinks" :key="bl.path" class="backlink-item" @click="handleNoteSelect(bl.path)">
+              <span class="backlink-title">{{ bl.title }}</span>
+              <span class="backlink-context" v-if="bl.context">{{ bl.context }}</span>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -261,6 +291,8 @@ async function handleNoteSelect(id) {
   selectedNoteId.value = id;
   if (!id) {
     currentNoteContent.value = '';
+    currentNoteTags.value = [];
+    backlinks.value = [];
     currentNoteFrontmatter = null;
     return;
   }
@@ -286,6 +318,9 @@ async function handleNoteSelect(id) {
     if (res.ok) {
       currentNoteContent.value = res.content;
       currentNoteFrontmatter = res.frontmatter;
+      currentNoteTags.value = res.frontmatter?.tags || [];
+      // P2-2: Load backlinks asynchronously
+      loadBacklinks(id);
       // Yield to browser one more time so Vue updates Tiptap editor props and Tiptap parses it
       // BEFORE we remove the loading spinner. This ensures the spinner stays ON while Tiptap parses!
       await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
@@ -329,6 +364,53 @@ async function saveCurrentNote(markdown) {
   }, 1000);
 }
 
+async function handleTagsUpdate(newTags) {
+  if (!selectedNoteId.value) return;
+  currentNoteTags.value = newTags;
+  try {
+    await window.electronAPI.notebookUpdateTags(selectedNoteId.value, newTags);
+  } catch (e) {
+    console.error('Failed to update tags:', e);
+  }
+}
+
+// P2-2: Backlinks
+const backlinks = ref([]);
+const showBacklinks = ref(true);
+
+async function loadBacklinks(notePath) {
+  try {
+    const res = await window.electronAPI.notebookGetBacklinks(notePath);
+    if (res && res.ok) {
+      backlinks.value = res.backlinks || [];
+    }
+  } catch (e) {
+    console.error('Failed to load backlinks:', e);
+    backlinks.value = [];
+  }
+}
+
+// P2-1: Wikilink click → navigate to target note
+async function handleWikilinkClick(targetTitle) {
+  // Search for the note by title
+  try {
+    const res = await window.electronAPI.notebookSearch(targetTitle);
+    if (res && res.ok && res.results && res.results.length > 0) {
+      // Found existing note — navigate to it
+      handleNoteSelect(res.results[0].path);
+    } else {
+      // Note doesn't exist — create it
+      const createRes = await window.electronAPI.notebookCreateNote(targetTitle, []);
+      if (createRes.ok) {
+        if (noteExplorerRef.value) noteExplorerRef.value.refresh();
+        handleNoteSelect(createRes.path);
+      }
+    }
+  } catch (e) {
+    console.error('Wikilink navigate failed:', e);
+  }
+}
+
 // ── 状态 ────────────────────────────────────────────────
 const { t, te } = useI18n();
 
@@ -336,6 +418,7 @@ const currentMode = ref('graph'); // 'graph' or 'notebook'
 const noteExplorerRef = ref(null);
 const selectedNoteId = ref(null);
 const currentNoteContent = ref('');
+const currentNoteTags = ref([]);
 const isLoadingNote = ref(false);
 const saveStatus = ref('');
 let currentNoteFrontmatter = null;
@@ -351,19 +434,34 @@ const activeTypes = ref(new Set());
 const backfilling = ref(false);
 const isDragOver = ref(false);
 
+const inspectorRelatedNotes = ref([]);
+
 watch(() => selectedNode.value, async (newVal) => {
   projectIndexPath.value = null;
-  if (newVal && (newVal.type === 'Project' || newVal.type === 'project')) {
+  inspectorRelatedNotes.value = [];
+  if (!newVal) return;
+
+  // Check project index
+  if (newVal.type === 'Project' || newVal.type === 'project') {
     try {
       const path = await window.electronAPI.checkProjectIndex(newVal.label);
-      if (path) {
-        projectIndexPath.value = path;
-      }
-    } catch (e) {
-      console.error(e);
-    }
+      if (path) projectIndexPath.value = path;
+    } catch (e) { console.error(e); }
   }
+
+  // P1-4: Search for related notes by node label
+  try {
+    const res = await window.electronAPI.notebookSearch(newVal.label);
+    if (res && res.ok && res.results) {
+      inspectorRelatedNotes.value = res.results.slice(0, 5);
+    }
+  } catch (e) { console.error('Related notes search failed:', e); }
 });
+
+function openRelatedNote(notePath) {
+  currentMode.value = 'notebook';
+  handleNoteSelect(notePath);
+}
 
 const mergeMode = ref(false);
 const mergeTargetId = ref('');
@@ -1666,6 +1764,60 @@ async function buildKBAndRefresh(folderPath) {
   flex: 1;
   color: var(--text-muted);
   font-size: 1.1em;
+}
+
+/* ── P2-2: Backlinks Panel ── */
+.backlinks-panel {
+  border-top: 1px solid var(--border-subtle);
+  padding: 8px 16px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+.backlinks-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-family: var(--font-sans);
+  color: var(--text-tertiary);
+  cursor: pointer;
+  padding: 4px 0;
+  user-select: none;
+}
+.backlinks-header:hover { color: var(--text-secondary); }
+.backlinks-header .caret {
+  transition: transform 0.2s;
+}
+.backlinks-header .caret.open {
+  transform: rotate(90deg);
+}
+.backlinks-list {
+  margin-top: 6px;
+}
+.backlink-item {
+  display: flex;
+  flex-direction: column;
+  padding: 6px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s;
+  margin-bottom: 2px;
+}
+.backlink-item:hover {
+  background-color: var(--bg-tertiary);
+}
+.backlink-title {
+  font-size: 13px;
+  color: var(--user-accent);
+  font-family: var(--font-sans);
+}
+.backlink-context {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 </style>

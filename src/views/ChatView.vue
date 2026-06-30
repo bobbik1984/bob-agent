@@ -538,7 +538,9 @@ const activeCommandIndex = ref(0);
 const commandList = computed(() => {
   if (commandType.value === 'slash') {
     return [
-      { id: 'memo', icon: '📝', label: t('chat.cmd_memo') || '/memo', description: t('chat.cmd_memo_desc') || '作为闪念笔记保存，不发给AI', action: () => insertSlashCommand('/memo ') }
+      { id: 'memo', icon: '📝', label: t('chat.cmd_memo') || '/memo', description: t('chat.cmd_memo_desc') || '作为闪念笔记保存，不发给AI', action: () => insertSlashCommand('/memo ') },
+      { id: 'note', icon: '📓', label: '/note', description: t('chat.cmd_note_desc') || '新建笔记并打开编辑器', action: () => insertSlashCommand('/note ') },
+      { id: 'clip', icon: '📌', label: '/clip', description: t('chat.cmd_clip_desc') || '将AI最近回复保存为笔记', action: () => handleClipCommand() },
     ];
   } else {
     return [
@@ -581,6 +583,13 @@ function handleSaveToNote() {
   }
   // 在原本内容前强制加上 /memo 并触发发送
   inputText.value = '/memo ' + text;
+  sendMessage();
+}
+
+// P3-3: /clip 命令按钮处理
+function handleClipCommand() {
+  showCommandMenu.value = false;
+  inputText.value = '/clip';
   sendMessage();
 }
 

@@ -44,6 +44,24 @@
           </span>
           <span class="maintenance-item evo-failure">{{ failureInsightsText }}</span>
         </div>
+
+        <!-- P2.5: 标签合并提案 -->
+        <div v-if="tagProposals.length > 0" class="tag-proposals-section">
+          <div class="maintenance-label">
+            <Sparkles :size="12" style="margin-right: 4px;" />
+            标签整理建议
+          </div>
+          <div v-for="(proposal, index) in tagProposals" :key="index" class="tag-proposal-card">
+            <div class="proposal-info">
+              将 <span class="tag-alias" v-for="alias in proposal.aliases" :key="alias">#{{ alias }}</span> 
+              合并为 <span class="tag-canonical">#{{ proposal.canonical }}</span>
+            </div>
+            <div class="proposal-actions">
+              <button class="prop-btn accept" @click="acceptTagMerge(index)">合并</button>
+              <button class="prop-btn reject" @click="rejectTagMerge(index)">忽略</button>
+            </div>
+          </div>
+        </div>
       </div>
 
       <div class="briefing-actions">
@@ -131,18 +149,60 @@ async function loadDreamReport() {
   } catch (err) {
     console.error('[MorningBriefing] Failed to load dream report:', err);
   }
+
+  // P2.5: 加载标签合并提案
+  try {
+    const tpRes = await window.electronAPI.getTagProposals();
+    if (tpRes && Array.isArray(tpRes) && tpRes.length > 0) {
+      tagProposals.value = tpRes;
+      visible.value = true;
+    }
+  } catch (e) {
+    console.error('Failed to load tag proposals:', e);
+  }
+}
+
+// P2.5: Tag Proposal Handlers
+const tagProposals = ref([]);
+
+async function acceptTagMerge(index) {
+  const proposal = tagProposals.value[index];
+  try {
+    await window.electronAPI.notebookMergeTags(proposal.canonical, proposal.aliases);
+    tagProposals.value.splice(index, 1);
+  } catch (e) {
+    console.error('Accept tag merge failed:', e);
+  }
+}
+
+async function rejectTagMerge(index) {
+  const proposal = tagProposals.value[index];
+  try {
+    for (const alias of proposal.aliases) {
+      await window.electronAPI.notebookRejectTagMerge(proposal.canonical, alias);
+    }
+    tagProposals.value.splice(index, 1);
+  } catch (e) {
+    console.error('Reject tag merge failed:', e);
+  }
 }
 
 function startChat() {
   emit('chat', briefingText.value);
   visible.value = false;
   window.electronAPI.dismissDream();
+  if (tagProposals.value.length === 0) {
+    window.electronAPI.clearTagProposals().catch(e => {});
+  }
 }
 
 function dismiss() {
   visible.value = false;
   emit('dismiss');
   window.electronAPI.dismissDream();
+  if (tagProposals.value.length === 0) {
+    window.electronAPI.clearTagProposals().catch(e => {});
+  }
 }
 
 onMounted(() => {
@@ -350,5 +410,63 @@ onUnmounted(() => {
   background: color-mix(in srgb, var(--color-warning, #f59e0b) 12%, var(--bg-hover));
   color: var(--text-secondary);
   border: 1px solid color-mix(in srgb, var(--color-warning, #f59e0b) 20%, transparent);
+}
+
+/* P2.5 标签整理提案 */
+.tag-proposals-section {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--border-subtle);
+}
+.tag-proposal-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  padding: 8px 12px;
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.tag-alias {
+  color: var(--color-warning, #f59e0b);
+  font-weight: 500;
+  margin: 0 2px;
+}
+.tag-canonical {
+  color: var(--user-accent);
+  font-weight: 500;
+  margin: 0 2px;
+}
+.proposal-actions {
+  display: flex;
+  gap: 6px;
+}
+.prop-btn {
+  background: none;
+  border: 1px solid transparent;
+  padding: 4px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 11px;
+  transition: all 0.2s;
+}
+.prop-btn.accept {
+  background: color-mix(in srgb, var(--user-accent) 15%, transparent);
+  color: var(--user-accent);
+}
+.prop-btn.accept:hover {
+  background: var(--user-accent);
+  color: #fff;
+}
+.prop-btn.reject {
+  background: var(--bg-tertiary);
+  color: var(--text-tertiary);
+}
+.prop-btn.reject:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
 }
 </style>

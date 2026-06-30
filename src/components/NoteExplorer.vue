@@ -4,10 +4,14 @@
       <div class="view-toggles">
         <button :class="{ active: viewMode === 'tree' }" @click="viewMode = 'tree'" :title="$t('notebook.tree_view')"><Folder :size="16" /></button>
         <button :class="{ active: viewMode === 'timeline' }" @click="viewMode = 'timeline'" :title="$t('notebook.timeline_view')"><CalendarDays :size="16" /></button>
+        <button :class="{ active: viewMode === 'tags' }" @click="viewMode = 'tags'; loadTags()" :title="$t('notebook.tags_view')"><Tag :size="16" /></button>
       </div>
       <div class="header-actions">
         <button class="new-note-btn" @click="loadNotes" :title="$t('notebook.refresh')">
           <RefreshCw :size="16" />
+        </button>
+        <button class="new-note-btn" @click="createNewFolder" :title="$t('notebook.new_folder')">
+          <FolderPlus :size="16" />
         </button>
         <button class="new-note-btn" @click="createNewNote" :title="$t('notebook.new_note')">
           <Plus :size="16" />
@@ -17,9 +21,11 @@
 
     <!-- 树状视图 -->
     <div v-if="viewMode === 'tree'" class="explorer-content">
+      <!-- 速记 -->
       <div class="section">
         <div class="section-title" @click="toggleSection('daily')">
           <ChevronRight :size="16" class="caret" :class="{ open: expanded.daily }" /> {{ $t('notebook.daily') }}
+          <span class="section-count">{{ (notes.daily || []).length }}</span>
         </div>
         <ul v-show="expanded.daily" class="note-list">
           <li v-for="note in notes.daily" :key="note.id" 
@@ -28,13 +34,15 @@
             <CalendarDays :size="14" class="icon" /> {{ note.title || formatDailyName(note.id) }}
             <button class="del-btn" @click.stop="deleteNote(note)" title="删除"><Trash2 :size="14" /></button>
           </li>
-          <li v-if="notes.daily.length === 0" class="empty-text">{{ $t('notebook.empty_daily') }}</li>
+          <li v-if="(notes.daily || []).length === 0" class="empty-text">{{ $t('notebook.empty_daily') }}</li>
         </ul>
       </div>
 
+      <!-- 笔记 -->
       <div class="section" @dragover.prevent @dragenter.prevent @drop="onDrop($event, 'topics')">
         <div class="section-title" @click="toggleSection('topics')">
           <ChevronRight :size="16" class="caret" :class="{ open: expanded.topics }" /> {{ $t('notebook.topics') }}
+          <span class="section-count">{{ (notes.topics || []).length }}</span>
         </div>
         <ul v-show="expanded.topics" class="note-list">
           <li v-for="note in notes.topics" :key="note.id" 
@@ -46,14 +54,58 @@
             <span class="title-text">{{ note.title || formatTopicName(note.id) }}</span>
             <button class="del-btn" @click.stop="deleteNote(note)" title="删除"><Trash2 :size="14" /></button>
           </li>
-          <li v-if="notes.topics.length === 0" class="empty-text">{{ $t('notebook.empty_topics') }}</li>
+          <li v-if="(notes.topics || []).length === 0" class="empty-text">{{ $t('notebook.empty_topics') }}</li>
         </ul>
+      </div>
+
+      <!-- 项目 -->
+      <div class="section" @dragover.prevent @dragenter.prevent @drop="onDrop($event, 'projects')">
+        <div class="section-title" @click="toggleSection('projects')">
+          <ChevronRight :size="16" class="caret" :class="{ open: expanded.projects }" /> {{ $t('notebook.projects') }}
+          <span class="section-count">{{ projectNoteCount }}</span>
+        </div>
+        <div v-show="expanded.projects">
+          <!-- projects 下的子目录 -->
+          <template v-for="(items, subdir) in (notes.projects || {})" :key="subdir">
+            <div v-if="subdir !== '_root'" class="sub-section">
+              <div class="sub-section-title" @click="toggleSection('proj_' + subdir)">
+                <ChevronRight :size="14" class="caret" :class="{ open: expanded['proj_' + subdir] }" />
+                <Folder :size="14" class="icon" /> {{ subdir }}
+                <span class="section-count">{{ items.length }}</span>
+              </div>
+              <ul v-show="expanded['proj_' + subdir]" class="note-list sub-list"
+                  @dragover.prevent @dragenter.prevent @drop.stop="onDrop($event, 'projects/' + subdir)">
+                <li v-for="note in items" :key="note.id"
+                    draggable="true"
+                    @dragstart="onDragStart($event, note, 'projects/' + subdir)"
+                    :class="{ active: selectedNoteId === note.id }"
+                    @click="selectNote(note)">
+                  <FileText :size="14" class="icon" />
+                  <span class="title-text">{{ note.title || formatAnyName(note.id) }}</span>
+                  <button class="del-btn" @click.stop="deleteNote(note)" title="删除"><Trash2 :size="14" /></button>
+                </li>
+              </ul>
+            </div>
+          </template>
+          <!-- projects 根目录的文件 -->
+          <ul v-if="notes.projects && notes.projects._root" class="note-list">
+            <li v-for="note in notes.projects._root" :key="note.id"
+                draggable="true" @dragstart="onDragStart($event, note, 'projects')"
+                :class="{ active: selectedNoteId === note.id }" @click="selectNote(note)">
+              <FileText :size="14" class="icon" />
+              <span class="title-text">{{ note.title || formatAnyName(note.id) }}</span>
+              <button class="del-btn" @click.stop="deleteNote(note)" title="删除"><Trash2 :size="14" /></button>
+            </li>
+          </ul>
+          <div v-if="projectNoteCount === 0" class="empty-text" style="padding: 4px 24px;">{{ $t('notebook.empty_projects') }}</div>
+        </div>
       </div>
 
       <!-- 知识文献 -->
       <div class="section" @dragover.prevent @dragenter.prevent @drop="onDrop($event, 'wiki/sources')">
         <div class="section-title" @click="toggleSection('sources')">
           <ChevronRight :size="16" class="caret" :class="{ open: expanded.sources }" /> {{ $t('notebook.sources') }}
+          <span class="section-count">{{ (notes.sources || []).length }}</span>
         </div>
         <ul v-show="expanded.sources" class="note-list">
           <li v-for="note in notes.sources" :key="note.id" 
@@ -68,12 +120,30 @@
           <li v-if="!notes.sources || notes.sources.length === 0" class="empty-text">{{ $t('notebook.empty_sources') }}</li>
         </ul>
       </div>
+
+      <!-- 自定义分组 -->
+      <template v-for="(items, folderName) in (notes.custom || {})" :key="folderName">
+        <div class="section" @dragover.prevent @dragenter.prevent @drop="onDrop($event, folderName)">
+          <div class="section-title" @click="toggleSection('custom_' + folderName)">
+            <ChevronRight :size="16" class="caret" :class="{ open: expanded['custom_' + folderName] }" /> {{ folderName }}
+            <span class="section-count">{{ items.length }}</span>
+          </div>
+          <ul v-show="expanded['custom_' + folderName]" class="note-list">
+            <li v-for="note in items" :key="note.id"
+                draggable="true" @dragstart="onDragStart($event, note, folderName)"
+                :class="{ active: selectedNoteId === note.id }" @click="selectNote(note)">
+              <FileText :size="14" class="icon" />
+              <span class="title-text">{{ note.title || formatAnyName(note.id) }}</span>
+              <button class="del-btn" @click.stop="deleteNote(note)" title="删除"><Trash2 :size="14" /></button>
+            </li>
+          </ul>
+        </div>
+      </template>
     </div>
 
     <!-- 时间线视图 -->
-    <div v-else class="explorer-content">
+    <div v-else-if="viewMode === 'timeline'" class="explorer-content">
       <div class="timeline-list">
-        <!-- 将所有笔记按照修改/创建时间排序显示 -->
         <div v-for="note in sortedTimelineNotes" :key="note.id" 
              class="timeline-item"
              :class="{ active: selectedNoteId === note.id }"
@@ -84,12 +154,34 @@
         </div>
       </div>
     </div>
+
+    <!-- 标签云视图 -->
+    <div v-else class="explorer-content">
+      <div class="tags-cloud">
+        <div v-if="allTags.length === 0" class="empty-text" style="padding: 16px;">{{ $t('notebook.empty_topics') }}</div>
+        <button v-for="tag in allTags" :key="tag.tag"
+                class="tag-chip"
+                :class="{ active: selectedTag === tag.tag }"
+                @click="filterByTag(tag.tag)">
+          {{ tag.tag }} <span class="tag-count">{{ tag.count }}</span>
+        </button>
+      </div>
+      <!-- 筛选结果 -->
+      <ul v-if="selectedTag" class="note-list tag-results">
+        <li v-for="note in tagFilteredNotes" :key="note.id"
+            :class="{ active: selectedNoteId === note.id }"
+            @click="selectNote(note)">
+          <FileText :size="14" class="icon" />
+          <span class="title-text">{{ note.title || formatAnyName(note.id) }}</span>
+        </li>
+      </ul>
+    </div>
   </div>
 </template>
 
 <script setup>
 import { ref, onMounted, computed, defineEmits, defineProps } from 'vue';
-import { Folder, CalendarDays, ChevronRight, FileText, Plus, Trash2, RefreshCw } from 'lucide-vue-next';
+import { Folder, FolderPlus, CalendarDays, ChevronRight, FileText, Plus, Trash2, RefreshCw, Tag } from 'lucide-vue-next';
 import { useI18n } from 'vue-i18n';
 
 const { t } = useI18n();
@@ -104,20 +196,49 @@ const props = defineProps({
 
 const emit = defineEmits(['select', 'create']);
 
-const viewMode = ref('tree'); // 'tree' or 'timeline'
-const notes = ref({ daily: [], topics: [] });
-const expanded = ref({ daily: true, topics: true,
-  sources: true });
+const viewMode = ref('tree'); // 'tree', 'timeline', or 'tags'
+const notes = ref({ daily: [], topics: [], sources: [], projects: {}, custom: {} });
+const expanded = ref({ daily: true, topics: true, projects: true, sources: true });
+const allTags = ref([]);
+const selectedTag = ref(null);
 
 const loadNotes = async () => {
   try {
     const res = await window.electronAPI.notebookListNotes();
     if (res && res.daily) {
-      notes.value = res;
-    if (!notes.value.sources) notes.value.sources = [];
+      notes.value = {
+        daily: res.daily || [],
+        topics: res.topics || [],
+        sources: res.sources || [],
+        projects: res.projects || {},
+        custom: res.custom || {},
+      };
+      // Auto-expand project subdirs
+      for (const subdir of Object.keys(notes.value.projects)) {
+        if (subdir !== '_root' && expanded.value['proj_' + subdir] === undefined) {
+          expanded.value['proj_' + subdir] = true;
+        }
+      }
+      // Auto-expand custom folders
+      for (const folderName of Object.keys(notes.value.custom)) {
+        if (expanded.value['custom_' + folderName] === undefined) {
+          expanded.value['custom_' + folderName] = true;
+        }
+      }
     }
   } catch (e) {
     console.error("Failed to load notes", e);
+  }
+};
+
+const loadTags = async () => {
+  try {
+    const res = await window.electronAPI.notebookListAllTags();
+    if (res && res.ok) {
+      allTags.value = res.tags || [];
+    }
+  } catch (e) {
+    console.error("Failed to load tags", e);
   }
 };
 
@@ -129,65 +250,81 @@ const toggleSection = (sec) => {
   expanded.value[sec] = !expanded.value[sec];
 };
 
-const formatDailyName = (id) => {
-  return id.replace('daily/', '').replace('.md', '');
-};
-
-const formatTopicName = (id) => {
-  return id.replace('topics/', '').replace('.md', '');
-};
-
-const formatAnyName = (id) => {
-  return id.split('/').pop().replace('.md', '');
-};
-
-const formatTimelineDate = (note) => {
-  const t = note.updated || note.created;
-  
-  if (!t) {
-    const name = note.title || note.id || '';
-    const match = name.match(/(\d{4})[-_]?(\d{2})[-_]?(\d{2})/);
-    if (match) {
-      return `${match[1]}-${match[2]}-${match[3]}`;
-    }
-    return '';
+// ── 计算属性 ─────────────────────────────────────
+const projectNoteCount = computed(() => {
+  const proj = notes.value.projects || {};
+  let count = 0;
+  for (const items of Object.values(proj)) {
+    count += Array.isArray(items) ? items.length : 0;
   }
+  return count;
+});
 
-  // Attempt to parse '2026-06-29 15:30:00' to '06-29 15:30'
-  try {
-    const parts = t.split(' ');
-    if (parts.length === 2) {
-      const dateParts = parts[0].split('-');
-      const datePart = dateParts.length === 3 ? `${dateParts[1]}-${dateParts[2]}` : parts[0];
-      const timePart = parts[1].substring(0, 5); // '15:30'
-      return `${datePart} ${timePart}`;
-    }
-    return t;
-  } catch (e) {
-    return t;
-  }
-};
-
-const sortedTimelineNotes = computed(() => {
-  const allNotes = [
+const allNotesFlat = computed(() => {
+  const result = [
     ...(notes.value.daily || []),
     ...(notes.value.topics || []),
-    ...(notes.value.sources || [])
+    ...(notes.value.sources || []),
   ];
-  return allNotes.sort((a, b) => {
-    // If we have updated or created fields, use them for sorting
+  // Flatten projects
+  for (const items of Object.values(notes.value.projects || {})) {
+    if (Array.isArray(items)) result.push(...items);
+  }
+  // Flatten custom
+  for (const items of Object.values(notes.value.custom || {})) {
+    if (Array.isArray(items)) result.push(...items);
+  }
+  return result;
+});
+
+const sortedTimelineNotes = computed(() => {
+  return [...allNotesFlat.value].sort((a, b) => {
     const timeA = a.updated || a.created || a.id;
     const timeB = b.updated || b.created || b.id;
     return timeB.localeCompare(timeA);
   });
 });
 
-const selectNote = (note) => {
-  emit('select', note.id);
+const tagFilteredNotes = computed(() => {
+  if (!selectedTag.value) return [];
+  return allNotesFlat.value.filter(note => {
+    const tags = note.tags || [];
+    return tags.includes(selectedTag.value);
+  });
+});
+
+// ── 格式化工具 ────────────────────────────────────
+const formatDailyName = (id) => id.replace('daily/', '').replace('.md', '');
+const formatTopicName = (id) => id.replace('topics/', '').replace('.md', '');
+const formatAnyName = (id) => id.split('/').pop().replace('.md', '');
+
+const formatTimelineDate = (note) => {
+  const ts = note.updated || note.created;
+  if (!ts) {
+    const name = note.title || note.id || '';
+    const match = name.match(/(\d{4})[-_]?(\d{2})[-_]?(\d{2})/);
+    return match ? `${match[1]}-${match[2]}-${match[3]}` : '';
+  }
+  try {
+    const parts = ts.split(' ');
+    if (parts.length === 2) {
+      const dateParts = parts[0].split('-');
+      const datePart = dateParts.length === 3 ? `${dateParts[1]}-${dateParts[2]}` : parts[0];
+      return `${datePart} ${parts[1].substring(0, 5)}`;
+    }
+    return ts;
+  } catch { return ts; }
+};
+
+// ── 操作 ───────────────────────────────────────
+const selectNote = (note) => emit('select', note.id);
+
+const filterByTag = (tagName) => {
+  selectedTag.value = selectedTag.value === tagName ? null : tagName;
 };
 
 const createNewNote = async () => {
-  const title = prompt("请输入新笔记标题:");
+  const title = prompt(t('notebook.new_note') + ':');
   if (!title) return;
   try {
     const res = await window.electronAPI.notebookCreateNote(title, []);
@@ -195,27 +332,40 @@ const createNewNote = async () => {
       await loadNotes();
       emit('select', res.path);
     } else {
-      alert("创建失败: " + res.error);
+      alert(t('notebook.new_note') + ' failed: ' + res.error);
     }
   } catch (e) {
-    alert("创建失败: " + e.message);
+    alert(t('notebook.new_note') + ' failed: ' + e.message);
+  }
+};
+
+const createNewFolder = async () => {
+  const name = prompt(t('notebook.new_folder_prompt'));
+  if (!name) return;
+  try {
+    const res = await window.electronAPI.notebookCreateFolder(name);
+    if (res.ok) {
+      await loadNotes();
+    } else {
+      alert(res.error);
+    }
+  } catch (e) {
+    alert(e.message);
   }
 };
 
 const deleteNote = async (note) => {
-  if (!confirm(`确定要删除笔记 "${formatTopicName(note.id) || formatDailyName(note.id)}" 吗？`)) return;
+  if (!confirm(`${t('notebook.new_note')}: "${formatAnyName(note.id)}" ?`)) return;
   try {
     const res = await window.electronAPI.notebookDeleteNote(note.id);
     if (res.ok) {
       await loadNotes();
-      if (props.selectedNoteId === note.id) {
-        emit('select', null);
-      }
+      if (props.selectedNoteId === note.id) emit('select', null);
     } else {
-      alert("删除失败: " + res.error);
+      alert(res.error);
     }
   } catch (e) {
-    alert("删除失败: " + e.message);
+    alert(e.message);
   }
 };
 
@@ -228,28 +378,22 @@ const onDragStart = (e, note, category) => {
 const onDrop = async (e, targetCategory) => {
   const noteId = e.dataTransfer.getData('noteId');
   const sourceCategory = e.dataTransfer.getData('category');
-  
   if (!noteId || !sourceCategory || sourceCategory === targetCategory) return;
-  
   try {
     const res = await window.electronAPI.notebookMoveNote(noteId, targetCategory);
     if (res.ok) {
       await loadNotes();
-      if (props.selectedNoteId === noteId) {
-        emit('select', res.new_id); // update selected note to the new path
-      }
+      if (props.selectedNoteId === noteId) emit('select', res.new_id);
     } else {
-      alert("移动失败: " + res.error);
+      alert(res.error);
     }
   } catch (err) {
-    alert("移动失败: " + err.message);
+    alert(err.message);
   }
 };
 
 // 暴露刷新方法给父组件
-defineExpose({
-  refresh: loadNotes
-});
+defineExpose({ refresh: loadNotes });
 </script>
 
 <style scoped>
@@ -339,11 +483,36 @@ defineExpose({
   transition: color 0.2s;
 }
 .section-title:hover {
-  color: var(--text-secondary);
+  color: var(--text-primary);
 }
 
-.section-title:hover {
+.section-count {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  opacity: 0.7;
+}
+
+.sub-section {
+  margin-left: 8px;
+}
+.sub-section-title {
+  padding: 6px 16px;
+  font-size: 12px;
+  font-family: var(--font-sans);
+  font-weight: 500;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: color 0.2s;
+}
+.sub-section-title:hover {
   color: var(--text-primary);
+}
+.sub-list {
+  margin-left: 8px !important;
 }
 
 .caret {
@@ -441,6 +610,54 @@ defineExpose({
   pointer-events: none;
 }
 
+/* ── Tags Cloud ── */
+.tags-cloud {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px 16px;
+}
+.tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  background-color: var(--bg-tertiary);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-family: var(--font-sans);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.tag-chip:hover {
+  background-color: var(--bg-secondary);
+  color: var(--text-primary);
+  border-color: var(--user-accent);
+}
+.tag-chip.active {
+  background-color: var(--user-accent);
+  color: #ffffff;
+  border-color: var(--user-accent);
+}
+.tag-count {
+  font-size: 10px;
+  opacity: 0.7;
+  padding: 1px 5px;
+  background-color: rgba(0,0,0,0.08);
+  border-radius: 999px;
+}
+.tag-chip.active .tag-count {
+  background-color: rgba(255,255,255,0.2);
+}
+.tag-results {
+  margin-top: 0;
+  border-top: 1px solid var(--border-subtle);
+  padding-top: 8px;
+}
+
+/* ── Timeline ── */
 .timeline-list {
   padding: 12px;
   position: relative;
