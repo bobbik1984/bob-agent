@@ -61,7 +61,7 @@ async function submit() {
 
   try {
     // 通过 IPC 写入速记文件
-    await window.electronAPI.appendQuickNote(content);
+    await window.electronAPI.notebookAppendDaily(content);
   } catch (err) {
     console.warn('[QuickNote] IPC fallback:', err);
   }

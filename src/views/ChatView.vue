@@ -289,11 +289,19 @@
         </div>
         <!-- 文本输入 -->
         <div class="input-wrapper" style="position: relative;">
-          <!-- 悬浮 @ 菜单 -->
-          <div v-if="showMentionMenu" class="mention-menu">
-            <div class="mention-menu-item" @click="handleMentionSelect">
-              <span>📁 浏览本地文件...</span>
-              <span class="mention-shortcut">Enter</span>
+          <!-- 悬浮指令菜单 (Slash/Mention) -->
+          <div v-if="showCommandMenu" class="mention-menu">
+            <div 
+              v-for="(cmd, index) in commandList" 
+              :key="cmd.id"
+              class="mention-menu-item"
+              :class="{ active: index === activeCommandIndex }"
+              @click="executeCommand(index)"
+              @mouseenter="activeCommandIndex = index"
+            >
+              <span>{{ cmd.icon }} {{ cmd.label }}</span>
+              <span v-if="cmd.description" style="color: var(--text-tertiary); font-size: 0.85em; margin-left: 8px;">{{ cmd.description }}</span>
+              <span class="mention-shortcut" v-if="index === activeCommandIndex">Enter</span>
             </div>
           </div>
           <textarea
@@ -311,6 +319,9 @@
         <div class="input-toolbar">
           <button class="toolbar-item attach-btn" :title="$t('chat.attach_tooltip')" @click="handleAttach">
             <Paperclip :size="14" />
+          </button>
+          <button class="toolbar-item attach-btn" :title="$t('chat.cmd_save_note_tooltip') || '作为笔记速记'" @click="handleSaveToNote">
+            <Bookmark :size="14" />
           </button>
           <button class="toolbar-item attach-btn" title="截取屏幕" @click="handleScreenshot" :disabled="isScreenshotting">
             <Camera :size="14" />
@@ -451,8 +462,9 @@ marked.setOptions({ breaks: true, gfm: true });
 </script>
 
 <script setup>
-import { ref, watch, onMounted, onUnmounted, nextTick, inject } from 'vue';
-import { Sparkles, FileText, Camera, Calendar, User, ChevronRight, ChevronDown, ChevronUp, X, FileUp, Paperclip, Loader2, Shield, Zap, Target, Lock, Unlock, Download, Smartphone, Monitor, ClipboardCopy, Check } from 'lucide-vue-next';
+import { ref, watch, onMounted, onUnmounted, nextTick, inject, computed } from 'vue';
+import { useI18n } from 'vue-i18n';
+import { Sparkles, FileText, Camera, Calendar, User, ChevronRight, ChevronDown, ChevronUp, X, FileUp, Paperclip, Bookmark, Loader2, Shield, Zap, Target, Lock, Unlock, Download, Smartphone, Monitor, ClipboardCopy, Check } from 'lucide-vue-next';
 import ConfirmCard from '../components/ConfirmCard.vue';
 import FileCard from '../components/FileCard.vue';
 import SearchCard from '../components/SearchCard.vue';
@@ -467,6 +479,8 @@ import { useModelSwitcher } from '../composables/useModelSwitcher.js';
 import { useDragDrop } from '../composables/useDragDrop.js';
 
 
+
+const { t } = useI18n();
 
 const props = defineProps({
   conversationId: String,
@@ -516,8 +530,59 @@ function handleImageMouseUp(e) {
   isDraggingImage = false;
 }
 
-const showMentionMenu = ref(false);
-let mentionTriggerIndex = -1;
+const showCommandMenu = ref(false);
+const commandTriggerIndex = ref(-1);
+const commandType = ref(''); // 'slash' or 'mention'
+const activeCommandIndex = ref(0);
+
+const commandList = computed(() => {
+  if (commandType.value === 'slash') {
+    return [
+      { id: 'memo', icon: '📝', label: t('chat.cmd_memo') || '/memo', description: t('chat.cmd_memo_desc') || '作为闪念笔记保存，不发给AI', action: () => insertSlashCommand('/memo ') }
+    ];
+  } else {
+    return [
+      { id: 'file', icon: '📎', label: t('chat.cmd_file') || '引用本地文件/图片', description: '', action: async () => { 
+          await handleAttach(); 
+          if (commandTriggerIndex.value >= 0) {
+            inputText.value = inputText.value.substring(0, commandTriggerIndex.value) + inputText.value.substring(commandTriggerIndex.value + 1);
+          }
+      } }
+    ];
+  }
+});
+
+function executeCommand(index) {
+  if (index >= 0 && index < commandList.value.length) {
+    commandList.value[index].action();
+    showCommandMenu.value = false;
+    commandTriggerIndex.value = -1;
+  }
+}
+
+function insertSlashCommand(cmdStr) {
+  const text = inputText.value;
+  const triggerIdx = commandTriggerIndex.value;
+  inputText.value = text.substring(0, triggerIdx) + cmdStr + text.substring(triggerIdx + 1);
+  nextTick(() => {
+    if (inputRef.value) {
+      inputRef.value.focus();
+      const newPos = triggerIdx + cmdStr.length;
+      inputRef.value.setSelectionRange(newPos, newPos);
+    }
+  });
+}
+
+function handleSaveToNote() {
+  const text = inputText.value.trim();
+  if (!text) {
+    window.electronAPI?.showNotification(t('app.notification_title') || '提示', t('chat.cmd_note_empty') || '请先输入内容再保存为笔记');
+    return;
+  }
+  // 在原本内容前强制加上 /memo 并触发发送
+  inputText.value = '/memo ' + text;
+  sendMessage();
+}
 
 // ── 闪念速记入口 (从 App.vue provide) ─────────────────
 const openQuickNote = inject('openQuickNote', () => {});
@@ -655,6 +720,24 @@ function parseTextAsEvent() {
 }
 
 // ── T-1201: 富文本复制 ──────────────────────────────
+async function saveToNote(msg) {
+  if (!msg.content) return;
+  try {
+    const noteText = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
+    // 过滤掉内部标签，如 <|mem|>
+    const cleanText = noteText.replace(/<\|mem\|>/g, '').trim();
+    if (!cleanText) return;
+    
+    const res = await window.electronAPI.notebookAppendDaily(cleanText);
+    if (res && res.ok) {
+      msg._savedToNote = true;
+      // 可以在此处弹出全局 notification，但最简单的是 UI 响应
+    }
+  } catch (e) {
+    console.error('Save to note failed:', e);
+  }
+}
+
 async function copyRichText(msg) {
   try {
     const html = renderMarkdown(msg.content);
@@ -713,21 +796,21 @@ function handleInput(event) {
   const cursorIndex = inputRef.value?.selectionStart || 0;
   const textBeforeCursor = text.substring(0, cursorIndex);
   
-  if (/(?:^|\s)@$/.test(textBeforeCursor)) {
-    showMentionMenu.value = true;
-    mentionTriggerIndex = cursorIndex - 1;
-  } else {
-    showMentionMenu.value = false;
-  }
-}
+  const slashMatch = /(?:^|\n|\s)\/$/.test(textBeforeCursor);
+  const mentionMatch = /(?:^|\n|\s)@$/.test(textBeforeCursor);
 
-async function handleMentionSelect() {
-  showMentionMenu.value = false;
-  await handleAttach();
-  if (mentionTriggerIndex >= 0) {
-    const text = inputText.value;
-    inputText.value = text.substring(0, mentionTriggerIndex) + text.substring(mentionTriggerIndex + 1);
-    mentionTriggerIndex = -1;
+  if (slashMatch) {
+    showCommandMenu.value = true;
+    commandType.value = 'slash';
+    commandTriggerIndex.value = cursorIndex - 1;
+    activeCommandIndex.value = 0;
+  } else if (mentionMatch) {
+    showCommandMenu.value = true;
+    commandType.value = 'mention';
+    commandTriggerIndex.value = cursorIndex - 1;
+    activeCommandIndex.value = 0;
+  } else {
+    showCommandMenu.value = false;
   }
 }
 
@@ -789,15 +872,25 @@ async function handleScreenshot() {
 }
 
 function handleKeydown(event) {
-  if (showMentionMenu.value) {
+  if (showCommandMenu.value) {
     if (event.key === 'Enter') {
       event.preventDefault();
-      handleMentionSelect();
+      executeCommand(activeCommandIndex.value);
       return;
     }
     if (event.key === 'Escape') {
       event.preventDefault();
-      showMentionMenu.value = false;
+      showCommandMenu.value = false;
+      return;
+    }
+    if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      activeCommandIndex.value = (activeCommandIndex.value > 0) ? activeCommandIndex.value - 1 : commandList.value.length - 1;
+      return;
+    }
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      activeCommandIndex.value = (activeCommandIndex.value < commandList.value.length - 1) ? activeCommandIndex.value + 1 : 0;
       return;
     }
   }
@@ -2218,7 +2311,7 @@ defineExpose({
   border: none;
   cursor: pointer;
   color: var(--text-muted);
-  opacity: 0;
+  opacity: 0.3;
   padding: 2px;
   border-radius: var(--radius-xs, 3px);
   transition: opacity 0.2s, color 0.2s, background 0.2s;
@@ -2226,7 +2319,7 @@ defineExpose({
 }
 
 .message-body:hover .copy-rich-btn {
-  opacity: 0.5;
+  opacity: 0.6;
 }
 
 .copy-rich-btn:hover {

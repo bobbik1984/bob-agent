@@ -469,6 +469,7 @@ struct DreamReport {
     memories_merged: i64,
     soul_refined: bool,
     failure_insights: i64,
+    notebook_notes_digested: i64,
     summary: String,
     soul_hash: String,
 }
@@ -481,6 +482,7 @@ async fn run_dream_pipeline(_app: &AppHandle) -> DreamReport {
         memories_merged: 0,
         soul_refined: false,
         failure_insights: 0,
+        notebook_notes_digested: 0,
         summary: String::new(),
         soul_hash: String::new(),
     };
@@ -499,6 +501,9 @@ async fn run_dream_pipeline(_app: &AppHandle) -> DreamReport {
     // ── Phase 4: 失败模式分析 (目标 19) ────────────────
     report.failure_insights = phase_failure_analysis().await;
 
+    // ── Phase 5: 笔记语义消化 (Phase 3) ────────────────
+    report.notebook_notes_digested = phase_notebook_digest(_app).await;
+
     // 构建摘要
     let mut summary_parts = Vec::new();
     if report.stale_cleaned > 0 {
@@ -512,6 +517,9 @@ async fn run_dream_pipeline(_app: &AppHandle) -> DreamReport {
     }
     if report.failure_insights > 0 {
         summary_parts.push(format!("从执行失败中提炼了 {} 条避坑指南", report.failure_insights));
+    }
+    if report.notebook_notes_digested > 0 {
+        summary_parts.push(format!("语义消化了 {} 篇笔记", report.notebook_notes_digested));
     }
     report.summary = if summary_parts.is_empty() {
         "无需更新".to_string()
@@ -1020,4 +1028,149 @@ pub fn system_get_evolution_stats() -> Value {
         "learned_facts_count": learned_count,
         "last_dream_at": last_dream_at,
     })
+}
+
+
+// ═══════════════════════════════════════════════════════════
+// Phase 5 (目标 19 Phase 3): 笔记语义消化 (Notebook Digest)
+// ═══════════════════════════════════════════════════════════
+async fn phase_notebook_digest(_app: &AppHandle) -> i64 {
+    let last_dream = get_last_dream_timestamp();
+    let notes_dir = super::get_data_dir().join("notes");
+    
+    // 我们扫描 notes/daily 和 notes/topics
+    let mut files_to_digest = Vec::new();
+    let dirs = vec![notes_dir.join("daily"), notes_dir.join("topics")];
+    for d in dirs {
+        if let Ok(entries) = std::fs::read_dir(&d) {
+            for entry in entries.flatten() {
+                if let Ok(meta) = entry.metadata() {
+                    // 如果文件是以 .md 结尾且修改时间大于上次做梦时间
+                    if entry.path().extension().and_then(|s| s.to_str()) == Some("md") {
+                        if let Ok(mtime) = meta.modified() {
+                            let mtime_ms = mtime.duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as i64;
+                            if mtime_ms > last_dream {
+                                files_to_digest.push(entry.path());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if files_to_digest.is_empty() {
+        return 0;
+    }
+
+    log::info!("[Evolution] Phase 5: {} notes to digest", files_to_digest.len());
+    let mut digested_count = 0;
+
+    let prompt = r#"你是一个高智能知识分拣引擎 (Dream Engine)。
+你将阅读用户在今天写下的笔记 (可能包含碎碎念、灵感、或者是具体的待办事项)。
+你需要将这篇笔记的内容，进行意图识别和结构化提取。
+请严格按照以下 JSON 格式输出，不要输出任何其他解释性文字：
+
+{
+  "intents": [
+    {
+      "type": "action",
+      "title": "具体的待办事项标题"
+    },
+    {
+      "type": "seed",
+      "title": "规划某个新项目或新思考主题的文件名",
+      "tags": ["seed", "具体的领域标签"]
+    },
+    {
+      "type": "knowledge",
+      "target_entity": "关联的现有主题或项目名称",
+      "entity_type": "concept|project|person|topic|technology",
+      "summary": "一句话精华总结"
+    }
+  ]
+}
+
+- 如果是具体待办 (Action)，比如“打电话给老王”，提取为 action。
+- 如果是极具扩展性的新灵感 (Seed)，比如“构思一款盖楼游戏”，提取为 seed。
+- 如果是纯粹的知识点或随想 (Knowledge)，比如“发现RAG在长文本下容易丢失焦点”，提取为 knowledge，并归类到相关实体下。"#;
+
+    let db_path = super::get_data_dir().join("bob.db");
+    
+    for path in files_to_digest {
+        let content = match std::fs::read_to_string(&path) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+        
+        let title = path.file_stem().and_then(|s| s.to_str()).unwrap_or("untitled");
+        let note_text = format!("笔记标题: {}\n内容: {}", title, content);
+
+        if let Some(resp) = crate::llm::call_clerk_oneshot(prompt, &note_text, 1024).await {
+            // 解析 JSON
+            let json_start = resp.find('{').unwrap_or(0);
+            let json_end = resp.rfind('}').unwrap_or(resp.len() - 1) + 1;
+            let json_str = &resp[json_start..json_end];
+            
+            if let Ok(parsed) = serde_json::from_str::<Value>(json_str) {
+                if let Some(intents) = parsed.get("intents").and_then(|v| v.as_array()) {
+                    let conn = rusqlite::Connection::open(&db_path).unwrap();
+                    for intent in intents {
+                        let itype = intent.get("type").and_then(|v| v.as_str()).unwrap_or("");
+                        match itype {
+                            "action" => {
+                                if let Some(title) = intent.get("title").and_then(|v| v.as_str()) {
+                                    // 添加到 events 表中
+                                    let _ = conn.execute(
+                                        "INSERT INTO events (title, event_type, status, created_at, date) VALUES (?1, 'todo', 'pending', ?2, ?3)",
+                                        rusqlite::params![title, super::now_ms(), chrono::Local::now().format("%Y-%m-%d").to_string()]
+                                    );
+                                }
+                            }
+                            "seed" => {
+                                if let Some(title) = intent.get("title").and_then(|v| v.as_str()) {
+                                    // 在 topics 目录下新建文件
+                                    let new_path = notes_dir.join("topics").join(format!("{}.md", title.replace('/', "_").replace('\\', "_")));
+                                    if !new_path.exists() {
+                                        let _ = std::fs::write(&new_path, format!("# {}\n\n", title));
+                                        
+                                        // 添加到 KG 节点并打上 seed metadata
+                                        let tags = intent.get("tags").unwrap_or(&json!(["seed"])).clone();
+                                        let node_id = format!("note_{}", title);
+                                        let metadata = json!({"is_seed": true, "tags": tags, "source_note": path.to_string_lossy()});
+                                        let _ = conn.execute(
+                                            "INSERT OR REPLACE INTO kg_nodes (id, label, node_type, summary, metadata) VALUES (?1, ?2, 'note', ?3, ?4)",
+                                            rusqlite::params![node_id, title, "灵感种子", metadata.to_string()]
+                                        );
+                                    }
+                                }
+                            }
+                            "knowledge" => {
+                                if let (Some(target), Some(etype), Some(summary)) = (
+                                    intent.get("target_entity").and_then(|v| v.as_str()),
+                                    intent.get("entity_type").and_then(|v| v.as_str()),
+                                    intent.get("summary").and_then(|v| v.as_str())
+                                ) {
+                                    // 确保目标节点存在
+                                    let target_id = crate::kg::resolve_node_id(&conn, target, etype);
+                                    let _ = crate::kg::upsert_node(&conn, &target_id, target, etype, "", "");
+                                    
+                                    // 创建当前笔记的 note 节点
+                                    let note_id = format!("note_{}", title);
+                                    let _ = crate::kg::upsert_node(&conn, &note_id, title, "note", summary, &path.to_string_lossy());
+                                    
+                                    // 建立关系
+                                    let _ = crate::kg::insert_edge(&conn, &note_id, &target_id, "mentions", 1.0);
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+        }
+        digested_count += 1;
+    }
+
+    digested_count
 }

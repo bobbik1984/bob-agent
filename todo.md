@@ -1,6 +1,6 @@
 # Bob-Agent 开发全局路线图 (Roadmap)
 
-> 🎯 **当前版本**: `v0.4.0` — Ghost Partner (幽灵副手) 阶段正式版。
+> 🎯 **当前版本**: `v0.4.3` — Ghost Partner (幽灵副手) 阶段正式版。
 > ♻️ **已完成**: Tauri 迁移、主体模式、微信/TG/Discord 通道、文档输出引擎、Goal 闭环执行引擎、Web Drop P2P 极传。
 > 📋 **下一目标**: v0.4.1 — 目标 17 知识图谱融合（SQLite 图存储 + LLM 实体提取 + vis.js 可视化）。
 
@@ -219,6 +219,21 @@
 
 ## 📅 开发日志
 
+### 2026-06-30 (今天)
+
+**主题**: UI 体验清债 + Slash Command 显性化重构准备
+
+**完成**:
+1. [Fix] **知识图谱布局重构** — 图例面板左下角单列排布，搜索框浮层化，清除无效的 `unknow` 文本。
+2. [Fix] **笔记侧边栏 (Note Explorer) 一致性** — 时间轴文本单行截断，暗色模式下 `timeline-dot` 颜色对比度修复。
+3. [Audit] **全局状态审计** — 确认 Tauri V2 后端的 `tokio-cron-scheduler` 引擎 (无人值守自动化) 已完全实装并在运行中，清理了旧版冗余的 todo 检查项。
+4. [Audit] **Slash Commands 摸底** — 梳理了当前仅存的 `/memo`、`@note` 和 `@` 命令，发现极度隐蔽的 UX 问题。
+
+**未完成**:
+- [ ] T-2001: 实现 Slash/Mention Command 的智能悬浮补全菜单 (方案 A)
+- [ ] T-2002: 在 Chat 界面增加显性的“📌 作为笔记速记”按钮 (方案 B)
+
+
 ### 2026-05-15 (今天)
 
 **主题**: Agent 化升级 - Tool Calling 引擎 + Web Search
@@ -340,8 +355,11 @@
   - [ ] 在 `llm.rs` 中引入 `tokio::sync::mpsc` 监听前端中断信号
   - [ ] 修改 `stream_internal` 的 Tool Calling 循环：一旦收到中断信号，立刻跳出循环并丢弃挂起的工具
   - [ ] 将用户新输入的“纠正指令”作为新一轮上下文直接喂给 LLM 重新规划
-- [ ] **Epic: 无人值守自动化 (Cron Automations)**
-  - [ ] 引入 `tokio-cron-scheduler` 库，在 `lib.rs` 的后台守护线程中初始化
+- [x] **Epic: 无人值守自动化 (Cron Automations)**
+  - [x] 引入 `tokio-cron-scheduler` 库，在 `lib.rs` 的后台守护线程中初始化
+  - [x] 在应用启动时，从 SQLite 读取用户的自动化日程
+  - [x] 编写后台无头 (Headless) 唤醒逻辑
+- [ ] 引入 `tokio-cron-scheduler` 库，在 `lib.rs` 的后台守护线程中初始化
   - [ ] 在应用启动时，从 SQLite 读取用户的自动化日程（如每天 08:00 播报新闻）
   - [ ] 编写后台无头 (Headless) 唤醒逻辑：时间一到，自动后台组装 Prompt 并调用 `stream_internal`，将结果通过系统通知（Notification）或悬浮窗推给用户
 
@@ -880,3 +898,64 @@ o CryptoProvider 导致发送端 Panic 断开的问题。
 - [x] web_drop.rs 生成链接强制附加 ?v=2 防止手机端微信内置浏览器缓存旧版页面。
 - [x] 修复了 LLM 在处理 share_file 工具调用时产生的链接格式化幻觉，通过双端排版（PC 超链接 + Mobile 纯文本代码块）兼容微信客户端的渲染差异。
 - [x] 验证了 P2P 穿透与 TURN Server 降级逻辑（双重 VPN/对称 NAT 环境下稳定 Fallback 至 VPS 中继节点）。
+
+---
+
+## 📍 目标 19: 智能笔记模块 Bob Notebook (T-1900)
+> 📋 **详细设计文档**: `docs/note_taking_implementation_plan_20260629.md`
+> 🎯 将 Bob 升级为"第二大脑"，在知识图谱视图内增加笔记/知识点模式，与 Chat、QuickNote、Todo、iKnow 图谱深度串联。
+
+### Phase 1: 后端基础设施 (Rust Backend)
+- [ ] T-1901: 创建 `src-tauri/src/notebook.rs` 模块，实现笔记目录初始化
+- [ ] T-1902: 实现 6 个核心 CRUD IPC (`notebook_list/read/save/create/delete/rename`)
+- [ ] T-1903: 实现 `notebook_append_daily` 替代旧的 `system_append_quick_note`
+- [ ] T-1904: 实现 `notebook_save_asset`（图片拖入保存至 `notes/assets/`）
+- [ ] T-1905: 实现 `notebook_search`（全文搜索）
+- [ ] T-1906: 在 `notebook_save_note` 内实现即时层副作用：
+  - Markdown checkbox 正则扫描 → 自动同步到 `events` 表
+  - `[[双链]]` 正则解析 → 自动同步到 KG 图谱
+- [ ] T-1907: 实现旧 `quick_notes.md` → `notes/daily/*.md` 一次性数据迁移
+- [ ] T-1908: 在 `lib.rs` 中注册所有新 IPC 命令
+
+### Phase 2: 前端编辑器与 UI (Frontend)
+- [ ] T-1910: 安装 Tiptap 及 `tiptap-markdown` 等依赖
+- [ ] T-1911: 封装 `TiptapEditor.vue`（WYSIWYG + Markdown 序列化 + 图片拖拽 + 自动保存）
+- [ ] T-1912: 封装 `NoteExplorer.vue`（文件夹/日期/标签三种视角 + 右键菜单）
+- [ ] T-1913: 改造 `KnowledgeGraphView.vue`（工具栏 图谱/笔记 Toggle + 条件渲染）
+- [ ] T-1914: 更新 `tauri-bridge.js` 注册所有 `notebook_*` IPC
+- [ ] T-1915: 修改 `QuickNoteOverlay.vue` 调用新的 `notebookAppendDaily`
+- [ ] T-1916: 更新 i18n 翻译文件
+- [ ] T-1917: KG 图谱类型枚举新增 `note` 类型 (📝) 及对应配色
+
+### Phase 3: 生态血管打通与 OKF 安全网 (Ecosystem + Safety)
+- [ ] T-1920: Chat `/memo` 指令 → 从聊天创建主题笔记
+- [ ] T-1921: Chat `@note` 引用 → 笔记内容作为 LLM Context 注入
+- [ ] T-1922: LLM 回复消息气泡增加"📌 存为笔记"按钮
+- [ ] T-1923: 图谱 Inspector 增加"相关笔记"区块
+- [ ] T-1924: Todo 双向回写（TodoList 勾选 → 回写源笔记 `- [x]`）
+- [ ] T-1925: Dream 流水线集成 `phase_notebook_digest()`（每日 LLM 语义摘要）
+- [ ] T-1926: Dream Linter 校验层（幻觉链接检测 + 模糊去重 + 格式合法性校验）
+- [ ] T-1927: 实体类型本体硬约束（Dream LLM Prompt 中强制声明合法类型枚举，拒绝自创类型）
+- [ ] T-1928: 知识过期看门狗（>90 天未更新笔记标记 `stale: true`，图谱中以虚线/半透明显示）
+
+---
+
+## 💡 T-1930: 基于文件同步的内网穿透通信通道
+> 🎯 利用 Syncthing 文件同步路径作为消息传输载体，穿透公司内网防火墙限制。
+> 📋 **背景**: 部分公司内网不仅封锁 Telegram，甚至连微信都无法使用。
+> 但 Syncthing 基于 relay 和局域网发现的文件同步往往不受 HTTP 代理限制。
+
+- [ ] T-1930-A: 设计"文件信箱"协议：Bob 在 Syncthing 同步目录下维护一个 `inbox/` 和 `outbox/` 文件夹，
+  每条消息以带时间戳的 `.msg.yaml` 文件落盘，对端 Bob 实例监听目录变化后自动读取并投递到本地消息队列。
+- [ ] T-1930-B: 实现 Rust 后台的 `file_channel.rs` 模块：
+  - `fs::watch` 监听 inbox 目录
+  - 新文件到达后解析 YAML → 注入本地消息流（和 Telegram/微信通道并列）
+  - 发送消息时写入 outbox → Syncthing 自动同步到对端
+- [ ] T-1930-C: 前端 SettingsConnections.vue 增加"文件同步通道"配置卡片，
+  允许用户指定 Syncthing 共享目录路径。
+- [ ] T-1930-D: 支持多媒体消息：图片/文件直接以原始二进制落盘在共享目录下，
+  `.msg.yaml` 中只记录相对路径引用。
+
+### 3. 微信内网穿墙模式 (WeChat Tunnel Mode)
+- [ ] **需求说明**: 在“连接中心”菜单里添加一个“穿墙模式”，借用 `bob.bobbik.org/transfer` 路径来打通 本地PC -- VPS -- 用户手机端微信 的通信路径，避免被公司内网屏蔽微信端口。
+- [ ] **实现思路**: 需要在前端 `SettingsConnections.vue` 增加 UI 开关，并在 Rust 后端网络请求层 (`wechat` 模块) 增加代理/中继路由逻辑。

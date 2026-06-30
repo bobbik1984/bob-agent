@@ -97,7 +97,7 @@
       <div class="service-card" :class="{ connected: isConnected('lark') }">
         <div class="service-card-header">
           <div class="service-icon lark-icon">
-            <img :src="'/logos/feishu.svg'" style="width: 22px; height: 22px; object-fit: contain;" alt="Feishu" />
+            <img :src="getAssetUrl('feishu.svg')" style="width: 22px; height: 22px; object-fit: contain;" alt="Feishu" />
           </div>
           <div class="service-info">
             <span class="service-name">{{ $t('settings.conn_lark_name') }}</span>
@@ -169,7 +169,7 @@
       <div class="service-card" :class="{ connected: isConnected('google') }">
         <div class="service-card-header">
           <div class="service-icon" style="background: transparent;">
-            <img :src="'/logos/google.svg'" style="width: 22px; height: 22px; object-fit: contain;" alt="Google" />
+            <img :src="getAssetUrl('google.svg')" style="width: 22px; height: 22px; object-fit: contain;" alt="Google" />
           </div>
           <div class="service-info">
             <span class="service-name">Google Calendar</span>
@@ -230,8 +230,8 @@
       >
         <div class="service-card-header" style="margin-bottom: 0;">
           <div class="service-icon" style="background: rgba(142, 142, 147, 0.1); color: var(--text-secondary); display: flex; align-items: center; justify-content: center;">
-            <img v-if="name.toLowerCase().includes('google')" src="/logos/google.svg" style="width: 20px; height: 20px; object-fit: contain;" />
-            <img v-else-if="name.toLowerCase().includes('outlook')" src="/logos/outlook.svg" style="width: 20px; height: 20px; object-fit: contain;" />
+            <img v-if="name.toLowerCase().includes('google')" :src="getAssetUrl('google.svg')" style="width: 20px; height: 20px; object-fit: contain;" />
+            <img v-else-if="name.toLowerCase().includes('outlook')" :src="getAssetUrl('outlook.svg')" style="width: 20px; height: 20px; object-fit: contain;" />
             <Terminal v-else :size="18" />
           </div>
           <div class="service-info" style="min-width: 0; padding-right: 8px;">
@@ -254,7 +254,7 @@
       <div v-if="!showAddMcp && !mcpServers['Outlook365']" class="service-card preset-card" @click="addOutlookMcpPreset">
         <div class="service-card-header" style="margin-bottom: 0;">
           <div class="service-icon" style="background: transparent;">
-            <img :src="'/logos/outlook.svg'" style="width: 20px; height: 20px; filter: grayscale(1); opacity: 0.6;" alt="Outlook" />
+            <img :src="getAssetUrl('outlook.svg')" style="width: 20px; height: 20px; filter: grayscale(1); opacity: 0.6;" alt="Outlook" />
           </div>
           <div class="service-info">
             <span class="service-name" style="color: var(--text-secondary);">Outlook 365</span>
@@ -361,6 +361,7 @@
 </template>
 
 <script setup>
+const getAssetUrl = (name) => new URL(`../../assets/logos/${name}`, import.meta.url).href;
 import { ref, onMounted, onUnmounted } from 'vue';
 import { open } from '@tauri-apps/plugin-dialog';
 import {

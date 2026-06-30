@@ -34,6 +34,7 @@ mod file_share;
 mod web_drop;
 mod goal;
 mod assertions;
+mod notebook;
 
 use serde_json::{json, Value};
 use std::fs;
@@ -77,6 +78,13 @@ pub(crate) fn get_wiki_dir() -> PathBuf {
             let p = PathBuf::from(wiki_dir);
             let _ = fs::create_dir_all(&p);
             return p;
+        }
+    }
+    if let Some(workspace_dir) = config.get("workspaceDir").and_then(|v| v.as_str()) {
+        if !workspace_dir.is_empty() {
+            let dir = PathBuf::from(workspace_dir).join("wiki");
+            let _ = fs::create_dir_all(&dir);
+            return dir;
         }
     }
     let dir = get_data_dir().join("wiki");
@@ -513,25 +521,6 @@ fn system_write_outbox(operations: Vec<Value>) -> Value {
 // Tauri Commands — 闪念速记 (Quick Notes)
 // ═══════════════════════════════════════════════════════════
 
-#[tauri::command]
-fn system_append_quick_note(content: String) -> Value {
-    use std::io::Write;
-    let path = get_data_dir().join("quick_notes.md");
-    let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
-    let entry = format!("\n- [{}] {}\n", timestamp, content.trim());
-    match std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path)
-    {
-        Ok(mut f) => {
-            let _ = f.write_all(entry.as_bytes());
-            log::info!("[QuickNote] appended {} chars to {:?}", content.len(), path);
-            json!({ "ok": true, "path": path.to_string_lossy() })
-        }
-        Err(e) => json!({ "error": format!("写入速记失败: {}", e) }),
-    }
-}
 
 // ═══════════════════════════════════════════════════════════
 // Tauri Commands — 知识库与本地引擎路径定位/迁移 (T-1309/T-1310)
@@ -691,6 +680,7 @@ fn system_render_pdf_to_images(path: String) -> Result<Vec<String>, String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let db = db::init_db(&get_data_dir());
+    notebook::init_notebook_dirs();
     let wechat_state = std::sync::Arc::new(wechat::WechatState::new());
 
     let browser_state = std::sync::Arc::new(browser::BrowserState::new());
@@ -840,7 +830,6 @@ pub fn run() {
             // Outbox (声明式配置)
             system_write_outbox,
             // 闪念速记
-            system_append_quick_note,
             // 知识库与本地引擎路径定位/迁移 (T-1309/T-1310)
             system_open_llm_engine_dir,
             system_migrate_wiki_dir,
@@ -885,6 +874,16 @@ pub fn run() {
             kg::kg_delete_node_cmd,
             kg::kg_merge_nodes,
             kg::kg_backfill,
+            notebook::notebook_list_notes,
+            notebook::notebook_read_note,
+            notebook::notebook_save_note,
+            notebook::notebook_create_note,
+            notebook::notebook_delete_note,
+            notebook::notebook_move_note,
+            notebook::notebook_rename_note,
+            notebook::notebook_append_daily,
+            notebook::notebook_save_asset,
+            notebook::notebook_search,
         ])
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             // 如果已经有一个实例在运行，就把已有窗口唤出来

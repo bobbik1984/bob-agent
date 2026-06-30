@@ -10,7 +10,7 @@
     "inbox": "日程",
     "schedule": "日程",
     "schedule_hint": "日程与待办事项",
-    "knowledge": "知识图谱",
+    "knowledge": "知识",
     "knowledge_hint": "实体与关联网络",
     "settings": "设置",
     "theme_to_light": "切换到亮色模式",
@@ -36,7 +36,14 @@
     "type_location": "地点",
     "type_event": "事件",
     "type_technology": "技术",
-    "stats_summary": "{nodes} 节点 · {edges} 关系"
+    "type_note": "笔记",
+    "stats_summary": "{nodes} 节点 · {edges} 关系",
+    "graph_view": "图谱",
+    "notebook_view": "笔记",
+    "top_projects": "主要项目",
+    "no_projects": "暂无项目节点",
+    "loading": "加载中...",
+    "add_folder": "添加知识库"
   },
   "modal": {
     "delete_title": "删除对话",
@@ -337,7 +344,13 @@
     "kb_build_request_core": "请使用核心模型为这个文件夹搭建语义知识库。",
     "search_placeholder": "搜索对话记录...",
     "search_results_count": "条结果",
-    "search_no_results": "未找到匹配内容"
+    "search_no_results": "未找到匹配内容",
+    "cmd_memo": "速记 /memo",
+    "cmd_memo_desc": "将当前内容存为笔记，不发送给AI",
+    "cmd_file": "引用本地文件/图片",
+    "cmd_save_note": "📌 作为笔记速记",
+    "cmd_save_note_tooltip": "直接将输入内容保存为笔记，不发给AI",
+    "cmd_note_empty": "请先输入内容再保存为笔记"
   },
   "model_hub": {
     "title": "模型中心",
@@ -509,5 +522,17 @@
     "got_it": "知道了",
     "failureLabel": "失败学习",
     "failureLearned": "从 {n} 条失败记录中提炼了避坑指南"
+  },
+  "notebook": {
+    "daily": "速记",
+    "topics": "笔记",
+    "sources": "知识库",
+    "empty_daily": "暂无速记",
+    "empty_topics": "暂无笔记",
+    "empty_sources": "暂无知识库",
+    "tree_view": "目录视图",
+    "timeline_view": "时间线视图",
+    "refresh": "刷新列表",
+    "new_note": "新建笔记"
   }
 }

@@ -155,10 +155,13 @@ fn resolve_write_path(path: &str, global_file_access: bool) -> Result<PathBuf, S
         };
 
         // 防御符号链接逃逸：确保解析后的路径仍在安全边界内
-        if let Some(parent) = target.parent() {
+        let canon_parent = if let Some(parent) = target.parent() {
             let _ = fs::create_dir_all(parent);
-        }
-        let canon = fs::canonicalize(&target).unwrap_or_else(|_| target.clone());
+            fs::canonicalize(parent).unwrap_or_else(|_| parent.to_path_buf())
+        } else {
+            target.clone()
+        };
+
         let safe_wiki = fs::canonicalize(super::get_wiki_dir()).unwrap_or_else(|_| super::get_wiki_dir());
         let safe_data = fs::canonicalize(super::get_data_dir()).unwrap_or_else(|_| super::get_data_dir());
         let safe_ws = config.get("workspaceDir")
@@ -166,9 +169,9 @@ fn resolve_write_path(path: &str, global_file_access: bool) -> Result<PathBuf, S
             .filter(|s| !s.is_empty())
             .map(|s| fs::canonicalize(s).unwrap_or_else(|_| PathBuf::from(s)));
             
-        let is_safe = canon.starts_with(&safe_wiki) 
-            || canon.starts_with(&safe_data) 
-            || safe_ws.map_or(false, |ws| canon.starts_with(&ws));
+        let is_safe = canon_parent.starts_with(&safe_wiki) 
+            || canon_parent.starts_with(&safe_data) 
+            || safe_ws.map_or(false, |ws| canon_parent.starts_with(&ws));
 
         if !is_safe {
             return Err("路径解析后超出安全边界（可能存在符号链接逃逸）".to_string());
@@ -440,7 +443,7 @@ fn get_builtin_tool_schemas() -> Vec<Value> {
             "type": "function",
             "function": {
                 "name": "write_file",
-                "description": "将文本内容安全地写入到指定文件。主要用于整理知识到 wiki/ 目录。例如 path='wiki/projects/万象龙华.md'。",
+                "description": "将文本内容安全地写入到指定文件。主要用于整理知识到 wiki/ 目录。例如 path='wiki/projects/万象龙华.md'。（会自动创建不存在的父文件夹，无需预先 create_directory）",
                 "parameters": {
                     "type": "object",
                     "properties": {

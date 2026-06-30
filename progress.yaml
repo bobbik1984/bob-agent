@@ -3,7 +3,7 @@ project:
   version: "0.4.0"
   status: stable
   tech: [Tauri V2, Rust, Vue 3, Vite, SQLite (rusqlite), reqwest, scraper, keyring, tauri-plugin-single-instance, tauri-plugin-clipboard-manager, tokio-cron-scheduler, trash, vis-network]
-  updated: "2026-06-27"
+  updated: "2026-06-30"
   architecture: "Tauri (Rust backend) + Vue 3 (frontend) + tauri-bridge.js (adapter) + Composable 架构"
   current_focus: "v0.4.0 (Ghost Partner 阶段正式版已发布) — 下一目标 v0.4.1 (目标 17 知识图谱融合 vis.js)"
 
@@ -389,3 +389,12 @@ backlog_epics:
   - name: "SetupWizard 统一体验提升"
     priority: P3
     note: "T-822: 计划整体重做向导流程"
+
+  - name: "目标 12.1: 界面体验清债与输入指令重构"
+    status: in_progress
+    completion: 50%
+    date_started: "2026-06-30"
+    tasks:
+      - { id: T-2000, text: "知识图谱与笔记视图 UI 修复与一致性", status: done }
+      - { id: T-2001, text: "实现 Slash/Mention Command 智能悬浮补全菜单 (方案 A)", status: todo }
+      - { id: T-2002, text: "在 Chat 界面增加显性的'📌 作为笔记速记'按钮 (方案 B)", status: todo }

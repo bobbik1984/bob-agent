@@ -1,6 +1,6 @@
 {
   "name": "bob-agent",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "description": "AI 桌面私人秘书 — 智能对话 + 图片识别 + 日程管理 + 文件分析",
   "scripts": {
     "dev": "vite",
@@ -17,11 +17,20 @@
     "@tauri-apps/plugin-clipboard-manager": "~2.0.0",
     "@tauri-apps/plugin-dialog": "~2.0.0",
     "@tauri-apps/plugin-notification": "^2.3.3",
+    "@tiptap/extension-image": "^3.27.1",
+    "@tiptap/extension-link": "^3.27.1",
+    "@tiptap/extension-placeholder": "^3.27.1",
+    "@tiptap/extension-task-item": "^3.27.1",
+    "@tiptap/extension-task-list": "^3.27.1",
+    "@tiptap/pm": "^3.27.1",
+    "@tiptap/starter-kit": "^3.27.1",
+    "@tiptap/vue-3": "^3.27.1",
     "dompurify": "^3.4.2",
     "highlight.js": "^11.10.0",
     "lucide-vue-next": "^1.0.0",
     "marked": "^14.0.0",
     "marked-highlight": "^2.2.0",
+    "tiptap-markdown": "^0.9.0",
     "vis-data": "^8.0.4",
     "vis-network": "^10.1.0",
     "vue-i18n": "^11.4.2"

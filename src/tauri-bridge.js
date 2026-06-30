@@ -311,6 +311,18 @@ window.electronAPI = {
   kgDeleteNode: async (nodeId) => invoke('kg_delete_node_cmd', { nodeId }),
   kgBackfill: async () => invoke('kg_backfill'),
 
+  // ── 智能笔记 (Notebook) ──────────────────────────────
+  notebookListNotes:   async () => invoke('notebook_list_notes'),
+  notebookReadNote:    async (path) => invoke('notebook_read_note', { path }),
+  notebookSaveNote:    async (path, content) => invoke('notebook_save_note', { path, content }),
+  notebookCreateNote:  async (title, tags) => invoke('notebook_create_note', { title, tags }),
+  notebookDeleteNote:  async (path) => invoke('notebook_delete_note', { path }),
+  notebookMoveNote:    async (path, targetCategory) => invoke('notebook_move_note', { path, targetCategory }),
+  notebookRenameNote:  async (oldPath, newTitle) => invoke('notebook_rename_note', { oldPath, newTitle }),
+  notebookSearch:      async (query) => invoke('notebook_search', { query }),
+  notebookAppendDaily: async (content) => invoke('notebook_append_daily', { content }),
+  notebookSaveAsset:   async (fileName, data) => invoke('notebook_save_asset', { fileName, data }),
+
   // Generic invoke passthrough for components that call invoke directly
   invoke: (cmd, args) => invoke(cmd, args || {}),
 };

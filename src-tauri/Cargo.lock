@@ -724,6 +724,7 @@ dependencies = [
  "qrcode",
  "quick-xml 0.37.5",
  "rand 0.8.6",
+ "regex",
  "reqwest 0.13.3",
  "rusqlite",
  "rust_xlsxwriter",

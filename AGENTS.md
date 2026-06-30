@@ -133,7 +133,18 @@ deploy_website.bat
 1. **IPC 调用**：统一通过 `window.electronAPI.xxx()` 调用。**不要直接 import `@tauri-apps/api/core`**——这会破坏与 Electron 的兼容性。所有 Tauri 特有 API 仅在 `tauri-bridge.js` 中使用。
 2. **组件风格**：Vue 组件使用 `PascalCase`，JS 函数使用 `camelCase`，文件名使用 `kebab-case`。
 3. **响应式设计**：遵循 `frontend-design` Skill 中的响应式铁律（使用 `100dvh`，输入框 `≥16px` 防 iOS 缩放等）。
-4. **静态资源路径（防止 tauri dev 裂图）**：存放在 `public/` 目录下的静态资源（如 logo 图片），在 Vue/JS 中引用时**必须永远使用绝对路径**（如 `<img src="/logos/icon.png">`，千万不能写 `./`）。且 `vite.config.js` 中**绝对禁止**配置 `base: './'`，必须保持默认，否则将导致本地 `tauri dev` 路由解析报错。
+4. **🔴 静态资源 SSOT（唯一真相源）**：所有第三方图标/Logo **只允许**存放在 `src/assets/logos/` 目录中。`public/logos/` **已被删除且禁止重建**。引用方式**必须**使用 Vite 的 `new URL()` 模式，确保开发、Tauri dev、Tauri 打包三种场景路径完全一致：
+   ```javascript
+   // ✅ 正确 — Vite 编译时解析，路径写死进 JS，永不丢失
+   new URL('../assets/logos/deepseek.png', import.meta.url).href
+   // 在 Vue 模板中可封装为辅助函数：
+   const getAssetUrl = (name) => new URL(`../../assets/logos/${name}`, import.meta.url).href;
+
+   // ❌ 错误 — 运行时解析，Tauri 协议下大概率裂图
+   '/logos/deepseek.png'
+   './logos/deepseek.png'
+   ```
+   > **核心优势**：如果引用了一个不存在的文件，`vite build` 会**直接编译报错**，绝不会让破损图标偷偷上线。
 
 ---
 

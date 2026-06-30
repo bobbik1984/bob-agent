@@ -1,47 +1,98 @@
 <template>
-  <div class="kg-view">
-    <!-- 顶部工具栏 -->
-    <header class="kg-toolbar">
-      <div class="kg-toolbar-left">
-        <Waypoints :size="18" />
-        <h2>{{ $t('kg.title') || '知识图谱' }}</h2>
-        <span v-if="stats" class="kg-stat-badge">
-          {{ $t('kg.stats_summary', { nodes: stats.node_count, edges: stats.edge_count }) }}
-        </span>
-      </div>
-      <div class="kg-toolbar-right">
-        <div class="kg-search-box">
-          <Search :size="14" />
-          <input
-            v-model="searchTerm"
-            :placeholder="$t('kg.search_placeholder') || '搜索节点...'"
-            @keyup.enter="doSearch"
+  <div class="kg-view layout-row">
+    <!-- 侧边栏传送门 -->
+    <Teleport to="#kg-sidebar-portal" v-if="isMounted">
+      <div class="kg-sidebar-wrapper">
+        <div class="kg-sidebar-header">
+          <div class="mode-toggle">
+            <button :class="{ active: currentMode === 'graph' }" @click="currentMode = 'graph'">
+              <Waypoints :size="16" /> {{ $t('kg.graph_view') }}
+            </button>
+            <button :class="{ active: currentMode === 'notebook' }" @click="currentMode = 'notebook'">
+              <FileText :size="16" /> {{ $t('kg.notebook_view') }}
+            </button>
+          </div>
+        </div>
+
+        <!-- 图谱侧边栏内容 -->
+        <div v-show="currentMode === 'graph'" class="kg-sidebar-content graph-sidebar">
+          <div v-if="topProjects.length > 0" class="kg-project-list">
+            <h3 class="kg-project-list-title">{{ $t('kg.top_projects') || '主要项目' }}</h3>
+            <button
+              v-for="proj in topProjects"
+              :key="proj.id"
+              class="kg-project-item"
+              :class="{ active: selectedNode?.id === proj.id }"
+              @click="focusNode(proj.id)"
+            >
+              <span class="project-icon" :style="{ color: kgColors['project'] || kgColors['Project'] || '#6366f1' }">★</span>
+              <span class="project-name">{{ proj.label }}</span>
+              <span class="project-degree">{{ proj.degree }}</span>
+            </button>
+          </div>
+          <div v-else class="kg-project-list-empty">
+            <span v-if="loading">{{ te('kg.loading') ? t('kg.loading') : '加载中...' }}</span>
+            <span v-else>{{ te('kg.no_projects') ? t('kg.no_projects') : '暂无项目节点' }}</span>
+          </div>
+          
+          <div class="kg-sidebar-footer">
+            <span v-if="stats" class="kg-stat-badge">
+              {{ $t('kg.stats_summary', { nodes: stats.node_count, edges: stats.edge_count }) }}
+            </span>
+            <button class="kg-add-btn" @click="openFolderPicker" :title="$t('kg.add_folder') || '添加知识库'">
+              <Plus :size="16" />
+            </button>
+          </div>
+        </div>
+
+        <!-- 笔记侧边栏内容 -->
+        <div v-show="currentMode === 'notebook'" class="kg-sidebar-content notebook-sidebar-content">
+          <NoteExplorer 
+            ref="noteExplorerRef"
+            :selectedNoteId="selectedNoteId"
+            @select="handleNoteSelect"
           />
         </div>
-        <div class="kg-type-filters">
-          <button
-            v-for="t in typeFilters"
-            :key="t.type"
-            class="kg-filter-chip"
-            :class="{ active: activeTypes.has(t.type) }"
-            @click="toggleType(t.type)"
-          >
-            <span class="chip-shape" :style="{ color: kgColors[t.type] || 'var(--text-muted)' }">
-              {{ getTypeShapeIcon(t.type) }}
-            </span>
-            {{ getTypeName(t.type) }} ({{ t.count }})
-          </button>
-        </div>
-        <button class="kg-add-btn" @click="openFolderPicker" :title="$t('kg.add_folder') || '添加知识库'">
-          <Plus :size="16" />
-        </button>
       </div>
-    </header>
+    </Teleport>
 
-    <!-- 主体：图谱画布 + Inspector -->
-    <div class="kg-body">
-      <!-- vis.js 画布 + 拖拽覆盖层 -->
-      <div
+    <!-- 右侧主体区域 -->
+    <main class="kg-main-content">
+      <!-- 主体：图谱画布 + Inspector -->
+      <div v-show="currentMode === 'graph'" class="kg-body">
+        
+        <!-- Search Overlay -->
+        <div class="kg-overlay-search">
+          <div class="kg-search-box">
+            <Search :size="14" />
+            <input
+              v-model="searchTerm"
+              :placeholder="$t('kg.search_placeholder') || '搜索节点...'"
+              @keyup.enter="doSearch"
+            />
+          </div>
+        </div>
+
+        <!-- Legend Overlay -->
+        <div class="kg-overlay-legend">
+          <div class="kg-type-filters">
+            <button
+              v-for="t in typeFilters"
+              :key="t.type"
+              class="kg-filter-chip"
+              :class="{ active: activeTypes.has(t.type) }"
+              @click="toggleType(t.type)"
+            >
+              <span class="chip-shape" :style="{ color: kgColors[t.type] || 'var(--text-muted)' }">
+                {{ getTypeShapeIcon(t.type) }}
+              </span>
+              {{ getTypeName(t.type) }} ({{ t.count }})
+            </button>
+          </div>
+        </div>
+
+        <!-- vis.js 画布 + 拖拽覆盖层 -->
+        <div
         ref="networkContainer"
         class="kg-canvas"
         @dragover.prevent="onDragOver"
@@ -143,6 +194,28 @@
       </aside>
     </div>
 
+
+    <!-- 笔记工作台 -->
+    <div v-if="currentMode === 'notebook'" class="notebook-body">
+      <div class="notebook-editor-area">
+        <div v-if="!selectedNoteId" class="notebook-empty-state">
+          请在左侧选择或新建一篇笔记
+        </div>
+        <template v-else>
+          <div v-if="isLoadingNote" class="notebook-empty-state">
+            <RefreshCw :size="32" class="spin" style="opacity: 0.4; margin-bottom: 12px;" />
+            <p style="color: var(--text-secondary); font-size: 14px;">正在全速解析，请稍候...</p>
+          </div>
+          <TiptapEditor 
+            v-show="!isLoadingNote"
+            v-model="currentNoteContent"
+            :saveStatus="saveStatus"
+            @save="saveCurrentNote"
+          />
+        </template>
+      </div>
+    </div>
+
     <!-- 空状态 / 生成中 -->
     <div v-if="!loading && stats && stats.node_count === 0 && !backfilling" class="kg-empty">
       <Waypoints :size="48" style="opacity: 0.2;" />
@@ -153,18 +226,119 @@
       <RefreshCw :size="32" class="spin" style="opacity: 0.4;" />
       <p>{{ $t('kg.generating') }}</p>
     </div>
+    </main>
   </div>
 </template>
 
 <script setup>
 import { ref, onMounted, onBeforeUnmount, watch, computed } from 'vue';
+import NoteExplorer from '../components/NoteExplorer.vue';
+import TiptapEditor from '../components/TiptapEditor.vue';
 import { useI18n } from 'vue-i18n';
 import { Network } from 'vis-network';
 import { DataSet } from 'vis-data';
 import { Waypoints, Search, X, FileText, RefreshCw, Plus, Link, ExternalLink } from 'lucide-vue-next';
 
+
+// ── 笔记模式逻辑 ─────────────────────────────────────
+const isMounted = ref(false);
+
+onMounted(() => {
+  isMounted.value = true;
+});
+
+let saveTimeout = null;
+let pendingSaveFn = null;
+
+async function handleNoteSelect(id) {
+  // Flush any pending save for the previous note synchronously
+  if (saveTimeout && pendingSaveFn) {
+    clearTimeout(saveTimeout);
+    saveTimeout = null;
+    await pendingSaveFn();
+  }
+
+  selectedNoteId.value = id;
+  if (!id) {
+    currentNoteContent.value = '';
+    currentNoteFrontmatter = null;
+    return;
+  }
+  
+  try {
+    isLoadingNote.value = true;
+    currentNoteContent.value = '';
+    
+    // Let Vue and browser update the UI (highlight the clicked note and show loader immediately)
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    
+    // Abort if user clicked another note while yielding
+    if (selectedNoteId.value !== id) {
+      if (selectedNoteId.value === id) isLoadingNote.value = false; // only reset if we are the last one, wait, actually let the new click handle it
+      return;
+    }
+
+    const res = await window.electronAPI.notebookReadNote(id);
+    
+    // Abort if user clicked another note while reading from disk
+    if (selectedNoteId.value !== id) return;
+
+    if (res.ok) {
+      currentNoteContent.value = res.content;
+      currentNoteFrontmatter = res.frontmatter;
+      // Yield to browser one more time so Vue updates Tiptap editor props and Tiptap parses it
+      // BEFORE we remove the loading spinner. This ensures the spinner stays ON while Tiptap parses!
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    } else {
+      console.error("Read note failed:", res.error);
+    }
+  } catch (e) {
+    console.error("Read note error:", e);
+  } finally {
+    if (selectedNoteId.value === id) {
+      isLoadingNote.value = false;
+    }
+  }
+}
+
+async function saveCurrentNote(markdown) {
+  if (!selectedNoteId.value) return;
+  const id = selectedNoteId.value;
+  
+  if (saveTimeout) clearTimeout(saveTimeout);
+  saveStatus.value = '保存中...';
+
+  pendingSaveFn = async () => {
+    try {
+      await window.electronAPI.notebookSaveNote(id, markdown);
+      saveStatus.value = '已自动保存';
+      setTimeout(() => {
+        if (saveStatus.value === '已自动保存') saveStatus.value = '';
+      }, 3000);
+    } catch (e) {
+      console.error("Save note failed:", e);
+      saveStatus.value = '保存出错';
+    }
+  };
+
+  saveTimeout = setTimeout(async () => {
+    if (pendingSaveFn) {
+      await pendingSaveFn();
+      pendingSaveFn = null;
+    }
+  }, 1000);
+}
+
 // ── 状态 ────────────────────────────────────────────────
 const { t, te } = useI18n();
+
+const currentMode = ref('graph'); // 'graph' or 'notebook'
+const noteExplorerRef = ref(null);
+const selectedNoteId = ref(null);
+const currentNoteContent = ref('');
+const isLoadingNote = ref(false);
+const saveStatus = ref('');
+let currentNoteFrontmatter = null;
 
 const networkContainer = ref(null);
 const stats = ref(null);
@@ -202,13 +376,32 @@ const isResizingInspector = ref(false);
 let network = null;
 let nodesDataSet = null;
 let edgesDataSet = null;
-let allGraphData = null;
+import { shallowRef } from 'vue';
+const allGraphData = shallowRef(null);
 
 const allNodesList = computed(() => {
-  if (!allGraphData) return [];
-  return allGraphData.nodes
+  const _trigger = stats.value;
+  if (!allGraphData.value) return [];
+  return allGraphData.value.nodes
     .filter(n => n.id !== selectedNode.value?.id)
     .sort((a,b) => a.label.localeCompare(b.label));
+});
+
+const topProjects = computed(() => {
+  const _trigger = stats.value; // Force reactivity since allGraphData is not a ref
+  if (!allGraphData.value || !allGraphData.value.nodes) return [];
+  const projectNodes = allGraphData.value.nodes.filter(n => n.type === 'Project' || n.type === 'project');
+  const degreeMap = new Map();
+  if (allGraphData.value.edges) {
+    allGraphData.value.edges.forEach(edge => {
+      degreeMap.set(edge.source, (degreeMap.get(edge.source) || 0) + 1);
+      degreeMap.set(edge.target, (degreeMap.get(edge.target) || 0) + 1);
+    });
+  }
+  return projectNodes
+    .map(n => ({ ...n, degree: degreeMap.get(n.id) || 0 }))
+    .sort((a, b) => b.degree - a.degree)
+    .slice(0, 10); // Display top 10 projects
 });
 
 const filteredMergeNodes = computed(() => {
@@ -294,6 +487,7 @@ function updateKgColors() {
     concept: get('--kg-node-concept') || '#4f46e5',
     person: get('--kg-node-person') || '#d97706',
     topic: get('--kg-node-topic') || '#9333ea',
+    note: get('--kg-node-note') || '#eab308',
     edge: get('--kg-edge') || 'rgba(100, 116, 139, 0.25)',
     edgeHl: get('--kg-edge-highlight') || get('--accent-primary') || '#6366f1',
     font: get('--kg-font') || '#64748b',
@@ -312,6 +506,7 @@ const typeShapes = {
   tag: { vis: 'diamond', icon: '◆' },
   person: { vis: 'triangleDown', icon: '▼' },
   topic: { vis: 'hexagon', icon: '⬢' },
+  note: { vis: 'box', icon: '📝' },
 };
 
 function getTypeShapeIcon(type) {
@@ -458,7 +653,7 @@ async function loadGraph() {
       window.electronAPI.kgStats(),
     ]);
     stats.value = statsData;
-    allGraphData = graphData;
+    allGraphData.value = graphData;
 
     if (graphData.nodes?.length > 0) {
       renderNetwork(graphData);
@@ -643,12 +838,12 @@ function resetFocus() {
 }
 
 function loadRelations(nodeId) {
-  if (!allGraphData) return;
+  if (!allGraphData.value) return;
   const rels = [];
-  for (const e of allGraphData.edges) {
+  for (const e of allGraphData.value.edges) {
     const neighborId = e.source === nodeId ? e.target : e.target === nodeId ? e.source : null;
     if (!neighborId) continue;
-    const neighborNode = allGraphData.nodes.find(n => n.id === neighborId);
+    const neighborNode = allGraphData.value.nodes.find(n => n.id === neighborId);
     if (neighborNode) {
       rels.push({
         id: neighborNode.id,
@@ -736,7 +931,7 @@ async function doBackfill() {
       window.electronAPI.kgStats(),
     ]);
     stats.value = statsData;
-    allGraphData = graphData;
+    allGraphData.value = graphData;
     if (graphData.nodes?.length > 0) {
       renderNetwork(graphData);
     }
@@ -823,7 +1018,7 @@ async function buildKBAndRefresh(folderPath) {
       window.electronAPI.kgStats(),
     ]);
     stats.value = statsData;
-    allGraphData = graphData;
+    allGraphData.value = graphData;
     if (graphData.nodes?.length > 0) {
       if (network) network.destroy();
       renderNetwork(graphData);
@@ -839,33 +1034,57 @@ async function buildKBAndRefresh(folderPath) {
 <style scoped>
 .kg-view {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   height: 100%;
   background: var(--bg-primary);
+  overflow: hidden;
 }
 
-/* ── 工具栏 ──────────────────────────────────── */
-.kg-toolbar {
+/* ── 侧边栏 (Sidebar) ──────────────────────────────────── */
+.kg-sidebar-wrapper {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  background: transparent;
+  height: 100%;
+}
+
+.kg-sidebar-header {
+  padding: 16px 16px 12px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.kg-sidebar-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+
+.graph-sidebar {
+  padding: 16px;
+  gap: 16px;
+}
+
+.notebook-sidebar-content {
+  padding: 0;
+}
+
+.kg-sidebar-footer {
+  margin-top: auto;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: var(--space-3) var(--space-4);
-  border-bottom: 1px solid var(--border-subtle);
-  gap: var(--space-3);
-  flex-wrap: wrap;
+  padding: 16px;
+  border-top: 1px dashed var(--border-subtle);
 }
 
-.kg-toolbar-left {
+.kg-main-content {
+  flex: 1;
   display: flex;
-  align-items: center;
-  gap: var(--space-2);
-}
-
-.kg-toolbar-left h2 {
-  font-size: var(--text-base);
-  font-weight: 600;
-  color: var(--text-primary);
-  margin: 0;
+  flex-direction: column;
+  min-width: 0;
+  height: 100%;
 }
 
 .kg-stat-badge {
@@ -876,20 +1095,32 @@ async function buildKBAndRefresh(folderPath) {
   border-radius: 99px;
 }
 
-.kg-toolbar-right {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
+.kg-overlay-search {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  z-index: 10;
+}
+
+.kg-overlay-legend {
+  position: absolute;
+  bottom: 16px;
+  left: 16px;
+  z-index: 10;
+  max-width: 400px;
 }
 
 .kg-search-box {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  background: var(--bg-secondary);
+  background: var(--surface-glass);
+  backdrop-filter: blur(8px);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
   padding: var(--space-1) var(--space-3);
+  box-shadow: var(--shadow-sm);
+  width: 240px;
 }
 
 .kg-search-box input {
@@ -898,33 +1129,106 @@ async function buildKBAndRefresh(folderPath) {
   color: var(--text-primary);
   font-size: var(--text-sm);
   outline: none;
-  width: 160px;
+  flex: 1;
+  min-width: 0;
 }
 
 .kg-type-filters {
   display: flex;
+  flex-direction: column;
+  align-items: flex-start;
   gap: var(--space-1);
-  flex-wrap: wrap;
 }
 
 .kg-filter-chip {
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 2px 10px;
+  padding: 4px 10px;
   border-radius: 99px;
   border: 1px solid var(--border-subtle);
-  background: transparent;
+  background: var(--surface-glass);
+  backdrop-filter: blur(4px);
   color: var(--text-secondary);
   font-size: var(--text-xs);
   cursor: pointer;
   transition: all var(--duration-fast);
+  box-shadow: var(--shadow-sm);
+}
+
+.kg-filter-chip:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
 }
 
 .kg-filter-chip.active {
-  background: var(--bg-tertiary);
+  background: var(--surface-input);
   border-color: var(--accent-primary);
   color: var(--text-primary);
+}
+
+/* Project List in Sidebar */
+.kg-project-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.kg-project-list-title {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  margin-bottom: 8px;
+  padding-left: 8px;
+  font-weight: 600;
+}
+
+.kg-project-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border: none;
+  background: transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+  text-align: left;
+}
+
+.kg-project-item:hover {
+  background: var(--bg-hover);
+}
+
+.kg-project-item.active {
+  background: var(--surface-input);
+}
+
+.project-icon {
+  font-size: 14px;
+}
+
+.project-name {
+  flex: 1;
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-degree {
+  font-size: 10px;
+  color: var(--text-muted);
+  background: var(--bg-tertiary);
+  padding: 2px 6px;
+  border-radius: 12px;
+}
+
+.kg-project-list-empty {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  padding: 16px 8px;
 }
 
 .chip-shape {
@@ -1306,4 +1610,62 @@ async function buildKBAndRefresh(folderPath) {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
 }
+
+.mode-toggle {
+  display: flex;
+  background-color: var(--bg-tertiary);
+  border-radius: 6px;
+  padding: 2px;
+  gap: 2px;
+}
+.mode-toggle button {
+  flex: 1;
+  background: transparent;
+  border: none;
+  padding: 6px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border-radius: 4px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-weight: 500;
+  transition: all 0.2s;
+}
+.mode-toggle button:hover {
+  color: var(--text-primary);
+}
+.mode-toggle button.active {
+  background-color: var(--bg-primary);
+  color: var(--user-accent, #3b82f6);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+
+.notebook-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+.notebook-editor-area {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 0;
+  background-color: var(--bg-primary);
+}
+
+.notebook-empty-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  color: var(--text-muted);
+  font-size: 1.1em;
+}
+
 </style>

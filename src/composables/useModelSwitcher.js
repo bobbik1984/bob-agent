@@ -41,19 +41,18 @@ export function useModelSwitcher() {
   // ── Logo 匹配 ──
   function getModelLogo(modelId) {
     const name = (modelId || '').toLowerCase();
-    if (name.includes('deepseek')) return '/logos/deepseek.png';
-    if (name.includes('gpt') || name.includes('openai')) return '/logos/openai.png';
-    if (name.includes('gemini') || name.includes('google') || name.includes('gemma')) return '/logos/google.png';
-    if (name.includes('qwen') || name.includes('dashscope')) return '/logos/qwen.png';
-    if (name.includes('glm') || name.includes('zhipu')) return '/logos/glm.svg';
-    if (name.includes('kimi') || name.includes('moonshot')) return '/logos/kimi.png';
-    if (name.includes('doubao') || name.includes('seed')) return '/logos/doubao.png';
-    if (name.includes('minimax')) return '/logos/minimax.png';
-    if (name.includes('mimo')) return '/logos/mimo.png';
-    if (name.includes('modelscope')) return '/logos/modelscope.png';
-    if (name.includes('claude') || name.includes('anthropic')) return '/logos/claude.png';
-    if (name.includes('grok') || name.includes('xai')) return '/logos/grok.png';
-    if (name.includes('openrouter')) return '/logos/openrouter.png';
+    if (name.includes('deepseek')) return new URL('../assets/logos/deepseek.png', import.meta.url).href;
+    if (name.includes('gpt') || name.includes('openai')) return new URL('../assets/logos/openai.png', import.meta.url).href;
+    if (name.includes('gemini') || name.includes('google') || name.includes('gemma')) return new URL('../assets/logos/google.png', import.meta.url).href;
+    if (name.includes('qwen') || name.includes('dashscope')) return new URL('../assets/logos/qwen.png', import.meta.url).href;
+    if (name.includes('glm') || name.includes('zhipu')) return new URL('../assets/logos/glm.svg', import.meta.url).href;
+    if (name.includes('kimi') || name.includes('moonshot')) return new URL('../assets/logos/kimi.png', import.meta.url).href;
+    if (name.includes('doubao') || name.includes('seed')) return new URL('../assets/logos/doubao.png', import.meta.url).href;
+    if (name.includes('minimax')) return new URL('../assets/logos/minimax.png', import.meta.url).href;
+    if (name.includes('mimo')) return new URL('../assets/logos/mimo.png', import.meta.url).href;
+    if (name.includes('modelscope')) return new URL('../assets/logos/modelscope.png', import.meta.url).href;
+    if (name.includes('claude') || name.includes('anthropic')) return new URL('../assets/logos/claude.png', import.meta.url).href;
+    if (name.includes('grok') || name.includes('xai')) return new URL('../assets/logos/grok.png', import.meta.url).href;
     return null;
   }
 

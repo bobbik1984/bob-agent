@@ -162,16 +162,12 @@
         <div class="drawer-header" :class="{ active: activeDrawer === 'knowledge' }" @click="activeDrawer = 'knowledge'">
           <div class="drawer-header-left">
             <Waypoints :size="14" />
-            <span>{{ $t('nav.knowledge') || '知识图谱' }}</span>
+            <span>{{ $t('nav.knowledge') || '知识' }}</span>
           </div>
           <ChevronDown v-if="activeDrawer === 'knowledge'" :size="14" class="drawer-chevron" />
           <ChevronRight v-else :size="14" class="drawer-chevron" />
         </div>
-        <div v-show="activeDrawer === 'knowledge'" class="drawer-content">
-          <div class="drawer-placeholder">
-            <Waypoints :size="24" style="opacity: 0.3;" />
-            <span>{{ $t('nav.knowledge_hint') || '实体与关联网络' }}</span>
-          </div>
+        <div v-show="activeDrawer === 'knowledge'" class="drawer-content" id="kg-sidebar-portal" style="display: flex; flex-direction: column; height: 100%;">
         </div>
 
         <!-- ═══ 抽屉 3: 设置 ═══ -->
@@ -405,15 +401,15 @@ const modelInfo = computed(() => {
   if (!currentModel.value) return { name: t('app.not_configured'), logo: null };
   const name = currentModel.value.toLowerCase();
   
-  if (name.includes('deepseek')) return { name: 'DeepSeek', logo: './logos/deepseek.png' };
-  if (name.includes('gpt-') || name.includes('o3') || name.includes('o4')) return { name: 'OpenAI', logo: './logos/openai.png' };
-  if (name.includes('claude')) return { name: 'Claude', logo: './logos/claude.png' };
-  if (name.includes('gemini')) return { name: 'Gemini', logo: './logos/google.png' };
-  if (name.includes('qwen')) return { name: 'Qwen', logo: './logos/qwen.png' };
-  if (name.includes('doubao') || name.includes('seed')) return { name: 'Doubao', logo: './logos/doubao.png' };
-  if (name.includes('glm')) return { name: 'GLM', logo: './logos/glm.svg' };
-  if (name.includes('kimi')) return { name: 'Kimi', logo: './logos/kimi.png' };
-  if (name.includes('minimax')) return { name: 'MiniMax', logo: './logos/minimax.png' };
+  if (name.includes('deepseek')) return { name: 'DeepSeek', logo: new URL('./assets/logos/deepseek.png', import.meta.url).href };
+  if (name.includes('gpt-') || name.includes('o3') || name.includes('o4')) return { name: 'OpenAI', logo: new URL('./assets/logos/openai.png', import.meta.url).href };
+  if (name.includes('claude')) return { name: 'Claude', logo: new URL('./assets/logos/claude.png', import.meta.url).href };
+  if (name.includes('gemini')) return { name: 'Gemini', logo: new URL('./assets/logos/google.png', import.meta.url).href };
+  if (name.includes('qwen')) return { name: 'Qwen', logo: new URL('./assets/logos/qwen.png', import.meta.url).href };
+  if (name.includes('doubao') || name.includes('seed')) return { name: 'Doubao', logo: new URL('./assets/logos/doubao.png', import.meta.url).href };
+  if (name.includes('glm')) return { name: 'GLM', logo: new URL('./assets/logos/glm.svg', import.meta.url).href };
+  if (name.includes('kimi')) return { name: 'Kimi', logo: new URL('./assets/logos/kimi.png', import.meta.url).href };
+  if (name.includes('minimax')) return { name: 'MiniMax', logo: new URL('./assets/logos/minimax.png', import.meta.url).href };
   if (name.includes('llama') || name.includes('local-')) return { name: 'Local', logo: null };
   return { name: currentModel.value, logo: null };
 });

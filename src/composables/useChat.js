@@ -68,6 +68,29 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
     if (!text && pendingImages.value.length === 0 && pendingFiles.value.length === 0) return;
     if (isStreaming.value) return;
 
+    // T-1920: 拦截 /memo 和 @note 存入笔记
+    if (text.startsWith('/memo ') || text.startsWith('@note ')) {
+      const noteContent = text.replace(/^(\/memo|@note)\s+/, '').trim();
+      if (noteContent) {
+        try {
+          const res = await window.electronAPI.notebookAppendDaily(noteContent);
+          if (res && res.ok) {
+            messages.value.push({ role: 'user', content: text });
+            messages.value.push({ 
+              role: 'system', 
+              content: `✅ 已记录到今日闪念。您可以在左侧边栏的 [知识图谱 -> 笔记] 中查看。` 
+            });
+            inputText.value = '';
+            resetTextareaHeight();
+            setTimeout(scrollToBottom, 100);
+            return;
+          }
+        } catch (e) {
+          console.error('Failed to append daily note', e);
+        }
+      }
+    }
+
     const filesToRead = [...pendingFiles.value];
     const imageBase64s = [...pendingImages.value];
 

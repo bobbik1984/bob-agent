@@ -36,7 +36,14 @@
     "type_location": "Location",
     "type_event": "Event",
     "type_technology": "Technology",
-    "stats_summary": "{nodes} Nodes · {edges} Edges"
+    "type_note": "Note",
+    "stats_summary": "{nodes} Nodes · {edges} Edges",
+    "graph_view": "Graph",
+    "notebook_view": "Notes",
+    "top_projects": "Top Projects",
+    "no_projects": "No projects found",
+    "loading": "Loading...",
+    "add_folder": "Add Knowledge Base"
   },
   "modal": {
     "delete_title": "Delete Chat",
@@ -337,7 +344,13 @@
     "kb_build_request_core": "Please use the core model to build a semantic knowledge base for this folder.",
     "search_placeholder": "Search conversations...",
     "search_results_count": "results",
-    "search_no_results": "No matching content found"
+    "search_no_results": "No matching content found",
+    "cmd_memo": "Quick Note /memo",
+    "cmd_memo_desc": "Save content as a note, do not send to AI",
+    "cmd_file": "Attach local file/image",
+    "cmd_save_note": "📌 Save as Note",
+    "cmd_save_note_tooltip": "Save input as a note directly, do not send to AI",
+    "cmd_note_empty": "Please enter content before saving"
   },
   "model_hub": {
     "title": "Model Hub",
@@ -509,5 +522,17 @@
     "got_it": "Got it",
     "failureLabel": "Lessons Learned",
     "failureLearned": "Extracted avoidance tips from {n} failures"
+  },
+  "notebook": {
+    "daily": "Quick Notes",
+    "topics": "Notes",
+    "sources": "Knowledge Base",
+    "empty_daily": "No Quick Notes",
+    "empty_topics": "No Notes",
+    "empty_sources": "No Knowledge Base",
+    "tree_view": "Tree View",
+    "timeline_view": "Timeline View",
+    "refresh": "Refresh",
+    "new_note": "New Note"
   }
 }

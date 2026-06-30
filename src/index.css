@@ -80,6 +80,7 @@ a:hover {
   --text-primary:   #e8e8e8;
   --text-secondary: #a0a0a0;
   --text-tertiary:  #6a6a6a;
+  --text-muted:     var(--text-tertiary);
   --text-inverse:   #0c0c0c;
 
   /* 鍝佺墝鑹诧細绾伆鐧?*/

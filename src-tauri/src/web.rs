@@ -45,7 +45,7 @@ pub async fn system_fetch_url(url: String) -> Value {
     }
 
     // 读取响应体（2MB 上限）
-    let body = match response.text().await {
+    let mut body = match response.text().await {
         Ok(text) => {
             if text.len() > 2 * 1024 * 1024 {
                 text[..2 * 1024 * 1024].to_string()
@@ -55,6 +55,12 @@ pub async fn system_fetch_url(url: String) -> Value {
         }
         Err(e) => return json!({ "error": format!("读取响应失败: {}", e) }),
     };
+
+    // 粗暴移除 script 和 style 标签，防止污染文本提取
+    let script_re = regex::Regex::new(r"(?is)<script.*?>.*?</script>").unwrap();
+    body = script_re.replace_all(&body, "").to_string();
+    let style_re = regex::Regex::new(r"(?is)<style.*?>.*?</style>").unwrap();
+    body = style_re.replace_all(&body, "").to_string();
 
     // 解析 HTML
     let document = Html::parse_document(&body);
@@ -85,7 +91,7 @@ pub async fn system_fetch_url(url: String) -> Value {
 /// 跳过 script, style, nav, footer, header, aside 等噪声区域
 fn extract_text_content(document: &Html) -> String {
     // 尝试优先从 <article> 或 <main> 中提取
-    let priority_selectors = ["article", "main", "[role=\"main\"]", ".content", "#content"];
+    let priority_selectors = ["article", "main", "[role=\"main\"]", ".content", "#content", "#js_content", ".rich_media_content"];
     
     for selector_str in priority_selectors {
         if let Ok(sel) = Selector::parse(selector_str) {
