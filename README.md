@@ -8,7 +8,7 @@
   <p align="center">
     <img src="https://img.shields.io/badge/version-v0.4.0-blue?style=flat-square" alt="Version" />
     <img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="License" />
-    <img src="https://img.shields.io/badge/platform-Windows-0078D6?style=flat-square&logo=windows" alt="Platform" />
+    <img src="https://img.shields.io/badge/platform-Windows_|_Android-0078D6?style=flat-square&logo=windows" alt="Platform" />
     <img src="https://img.shields.io/badge/Tauri-v2-FFC131?style=flat-square&logo=tauri" alt="Tauri v2" />
     <img src="https://img.shields.io/badge/Rust-%23000000?style=flat-square&logo=rust" alt="Rust" />
     <img src="https://img.shields.io/badge/Vue_3-4FC08D?style=flat-square&logo=vuedotjs&logoColor=white" alt="Vue 3" />
@@ -19,9 +19,9 @@
 
 ## 📖 Introduction / 项目简介
 
-**Bob Agent** is a privacy-first, self-evolving AI desktop secretary built on **Tauri v2 + Rust**. Bob lives in your system tray, responds to a single hotkey (`Ctrl+Shift+B`), and weaves AI into your daily workflow—local file access, multi-model orchestration, extensible MCP tools, WeChat bridge, E2EE file transfer, and a native SQLite knowledge graph—all without a single byte of your private data leaving your machine.
+**Bob Agent** is a privacy-first, self-evolving AI desktop & mobile secretary built on **Tauri v2 + Rust**. Bob lives in your system tray on PC and runs natively on your Android device. He weaves AI into your daily workflow—local file access, multi-model orchestration, extensible MCP tools, WeChat bridge, E2EE file transfer, and a native SQLite knowledge graph—all without a single byte of your private data leaving your machine.
 
-**Bob Agent** 是基于 **Tauri v2 + Rust** 构建的「隐私优先、智能演化」Windows 桌面私人秘书。他常驻系统托盘，通过闪电快捷键（`Ctrl+Shift+B`）一键唤起，打通本地文件、多模型协作、MCP 协议扩展、微信双向穿透、端到端加密极传与本地 SQLite 知识图谱——所有敏感数据永不出本地，极致安全。
+**Bob Agent** 是基于 **Tauri v2 + Rust** 构建的「隐私优先、智能演化」跨端私人秘书。在 PC 端他常驻系统托盘，在手机端他是轻量前哨站。通过打通本地文件、多模型协作、MCP 协议扩展、极传与本地 SQLite 知识图谱——所有敏感数据永不出本地，极致安全。
 
 ---
 
