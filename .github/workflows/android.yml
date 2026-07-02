@@ -41,7 +41,7 @@ jobs:
         run: |
           if [ ! -d "src-tauri/gen/android" ]; then
             echo "Android project not found. Initializing..."
-            npx tauri android init
+            npx tauri android init --ci
             
             echo "Injecting native permissions..."
             MANIFEST="src-tauri/gen/android/app/src/main/AndroidManifest.xml"
