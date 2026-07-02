@@ -1715,9 +1715,25 @@ async fn tool_delete_file(path: &str, global_file_access: bool) -> Value {
         Ok(p) => p,
         Err(e) => return json!({ "error": e }),
     };
+    #[cfg(not(target_os = "android"))]
     match trash::delete(&target_path) {
         Ok(_) => json!({ "ok": true, "path": target_path.to_string_lossy().to_string() }),
         Err(e) => json!({ "error": format!("放入回收站失败: {}", e) })
+    }
+
+    #[cfg(target_os = "android")]
+    {
+        if target_path.is_dir() {
+            match std::fs::remove_dir_all(&target_path) {
+                Ok(_) => json!({ "ok": true, "path": target_path.to_string_lossy().to_string() }),
+                Err(e) => json!({ "error": format!("直接删除文件夹失败: {}", e) })
+            }
+        } else {
+            match std::fs::remove_file(&target_path) {
+                Ok(_) => json!({ "ok": true, "path": target_path.to_string_lossy().to_string() }),
+                Err(e) => json!({ "error": format!("直接删除文件失败: {}", e) })
+            }
+        }
     }
 }
 
