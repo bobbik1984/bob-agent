@@ -896,29 +896,29 @@
 ---
 
 ## 📍 目标 22: Bob-Mobile 手机端 MVP (T-2200)
-> 🎯 **目标**: 在同一个 bob-agent 仓库中，基于 Tauri V2 的 Mobile 支持，构建手机端极简入口。
-> 📋 **核心定位**: 手机是"独立前哨站"——能独立调用云端 API 产出知识点和管理日程，但不跑图谱编织和重计算。
+> 🎯 **目标**: 在同一个 bob-agent 仓库中，基于 Tauri V2 的 Mobile 支持，构建手机端极简入口，并最终进化为端侧 LLM 离线节点。
+> 📋 **核心定位**: 手机是"独立前哨站"和"便携式离线推理节点"。
 > 📖 **详细蓝图**: `docs/MOBILE_BLUEPRINT.md`
 
-### Phase 0: 升级基建
-- [ ] T-2201: 将 Tauri 从 RC (2.0.0-rc.17) 升级到正式版 2.x stable。
-- [ ] T-2202: 运行 `tauri android init`，生成 Android 移动端脚手架。
-- [ ] T-2203: 验证空白 WebView 在安卓模拟器上能正常打开。
+### Phase 0 & 1: 升级基建与底层跑通 (✅ 已完成)
+- [x] T-2201: 将 Tauri 升级到正式版 2.x stable。
+- [x] T-2202: 运行 `tauri android init`，生成 Android 移动端脚手架。
+- [x] T-2203: 验证 Android 编译与调试部署流程。
+- [x] T-2211: 解决 Android 沙盒隔离下的 `rusqlite` 初始化和目录挂载路径问题。
+- [x] T-2212: 在真机验证完整的 App 启动与数据表创建流程。
 
-### Phase 1: 代码重构——分层
-- [ ] T-2211: 将现有 `src/views/` 和 `src/components/` 拆分到 `desktop/` 和 `shared/`。
-- [ ] T-2212: 将现有 `src-tauri/src/*.rs` 拆分到 `core/` 和 `desktop/` 子目录。
-- [ ] T-2213: 在 `Cargo.toml` 中引入 `desktop` / `mobile` features 条件编译。
-- [ ] T-2214: 实现 `router.js` 的平台检测与动态路由 (Desktop Shell / Mobile Shell)。
-- [ ] T-2215: **回归测试**：确保 PC 版所有功能不受分层重构影响。
+### Phase 2: 手机端 UI 适配与裁剪 (M2 Sprint)
+- [ ] T-2221: (M2-01) 移动端响应式布局重构 (CSS 媒体查询 / Tailwind 适配)
+- [ ] T-2222: (M2-02) 避开手机顶部状态栏（沉浸式处理 / SafeAreaPadding）
+- [ ] T-2223: (M2-03) 移除或折叠微信、Telegram、Discord 等桌面端专属通道入口
+- [ ] T-2224: (M2-04) 替换 Tauri 默认 Android 图标为专属 Bob Logo
+- [ ] T-2225: (M2-05) SVG 图片和加载动画的移动端比例缩放修复
+- [ ] T-2226: (M2-06) Touch 交互事件优化（滑动抽屉、防误触）
+- [ ] T-2227: (M2-07) Onboarding 流程逻辑修剪（无需选工作目录）
 
-### Phase 2: 手机端 MVP
-- [ ] T-2221: 实现 `MobileShell.vue` (底部 TabBar + 基础导航 + 安全区域适配)。
-- [ ] T-2222: 实现 `CaptureView.vue` (文字输入 + 语音按钮 + 主界面)。
-- [ ] T-2223: 实现 `mobile/ChatView.vue` (轻量聊天，复用 `core/llm.rs`，无 Tool Calling 可视化)。
-- [ ] T-2224: 实现 `PairView.vue` + `qr_scanner.rs` (扫码绑定 + Ed25519 密钥交换)。
-- [ ] T-2225: 实现手机端 SQLite 缓存 (SyncPacket 表 + config 存储)。
-- [ ] T-2226: 在安卓真机上跑通一次完整的"语音输入 → 云端 API 调用 → 收到回复"流程。
+### Phase 3: 端侧本地大模型集成 (llama.cpp)
+- [ ] T-2231: (M2-21) 调研 Tauri Mobile 下打包与拉起 `llama-server` Native 二进制的 Sidecar 方案
+- [ ] T-2232: (M2-22) 集成 Gemma 4B / Qwen 等轻便开源模型至手机本地推理引擎
 
 ---
 
