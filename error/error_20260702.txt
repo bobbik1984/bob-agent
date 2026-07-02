@@ -1,96 +1,30 @@
 
-   Compiling tokio-stream v0.1.18
-   Compiling urlencoding v2.1.3
-warning: unused import: `std::io::Write`
- --> src/scheduler.rs:4:5
-  |
-4 | use std::io::Write;
-  |     ^^^^^^^^^^^^^^
-  |
-  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
-warning: unused import: `Client`
- --> src/wechat/api.rs:1:15
-  |
-1 | use reqwest::{Client, header};
-  |               ^^^^^^
-warning: unused import: `error`
- --> src/wechat/api.rs:6:18
-  |
-6 | use log::{debug, error};
-  |                  ^^^^^
-warning: unused import: `reqwest::Client`
- --> src/wechat/login_qr.rs:3:5
-  |
-3 | use reqwest::Client;
-  |     ^^^^^^^^^^^^^^^
-warning: unused imports: `Engine as _` and `engine::general_purpose::STANDARD`
- --> src/wechat/cdn.rs:8:14
-  |
-8 | use base64::{Engine as _, engine::general_purpose::STANDARD};
-  |              ^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-warning: unused imports: `debug` and `error`
- --> src/tunnel.rs:6:11
-  |
-6 | use log::{debug, error};
-  |           ^^^^^  ^^^^^
-warning: unused import: `std::sync::Arc`
- --> src/tunnel.rs:7:5
-  |
-7 | use std::sync::Arc;
-  |     ^^^^^^^^^^^^^^
-warning: use of deprecated method `pdfium_render::prelude::PdfBitmap::<'a>::as_bytes`: This function has been renamed to better reflect its purpose. Use the PdfBitmap::as_raw_bytes() function instead.
-  --> src/pdf_renderer.rs:36:29
-   |
-36 |         for pixel in bitmap.as_bytes().chunks_exact(4) {
-   |                             ^^^^^^^^
-   |
-   = note: `#[warn(deprecated)]` on by default
-error[E0599]: no method named `get_webview_window` found for mutable reference `&mut tauri::App` in the current scope
-   --> src/lib.rs:948:39
-    |
-948 |             if let Some(window) = app.get_webview_window("main") {
-    |                                       ^^^^^^^^^^^^^^^^^^
-    |
-    = help: items from traits can only be used if the trait is in scope
-help: there is a method `webview_windows` with a similar name, but with different arguments
-   --> /home/runner/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/tauri-2.11.1/src/lib.rs:588:3
-    |
-588 |   fn webview_windows(&self) -> HashMap<String, WebviewWindow<R>> {
-    |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-help: trait `Manager` which provides `get_webview_window` is implemented but not in scope; perhaps you want to import it
-    |
-  2 + use tauri::Manager;
-    |
-error[E0599]: no method named `state` found for mutable reference `&mut tauri::App` in the current scope
-    --> src/lib.rs:1083:40
-     |
-1083 |                 let wechat_state = app.state::<std::sync::Arc<wechat::WechatState>>();
-     |                                        ^^^^^
-     |
-     = help: items from traits can only be used if the trait is in scope
-help: trait `Manager` which provides `state` is implemented but not in scope; perhaps you want to import it
-     |
-   2 + use tauri::Manager;
-     |
-help: there is a method `try_state` with a similar name
-     |
-1083 |                 let wechat_state = app.try_state::<std::sync::Arc<wechat::WechatState>>();
-     |                                        ++++
-warning: unused variable: `app_handle`
-   --> src/lib.rs:133:33
-    |
-133 | async fn system_take_screenshot(app_handle: tauri::AppHandle) -> Result<(), String> {
-    |                                 ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_app_handle`
-    |
-    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
-warning: unused variable: `path`
-   --> src/lib.rs:432:26
-    |
-432 | fn open_path_in_explorer(path: &str) -> bool {
-    |                          ^^^^ help: if this is intentional, prefix it with an underscore: `_path`
-For more information about this error, try `rustc --explain E0599`.
-warning: `bob` (lib) generated 10 warnings
-error: could not compile `bob` (lib) due to 2 previous errors; 10 warnings emitted
-failed to build Android app: `Failed to run `cargo build`: command ["cargo", "build", "--package", "bob", "--manifest-path", "/home/runner/work/bob-agent/bob-agent/src-tauri/Cargo.toml", "--target", "aarch64-linux-android", "--features", "tauri/custom-protocol tauri/custom-protocol", "--lib", "--release"] exited with code 101
-       Error failed to build Android app: `Failed to run `cargo build`: command ["cargo", "build", "--package", "bob", "--manifest-path", "/home/runner/work/bob-agent/bob-agent/src-tauri/Cargo.toml", "--target", "aarch64-linux-android", "--features", "tauri/custom-protocol tauri/custom-protocol", "--lib", "--release"] exited with code 101
+   Compiling webrtc-srtp v0.14.0
+error: failed to build archive at `/home/runner/work/bob-agent/bob-agent/src-tauri/target/i686-linux-android/debug/deps/libimage-2f537eb9e6b80121.rlib`: No space left on device (os error 28)
+error: could not compile `image` (lib) due to 1 previous error
+warning: build failed, waiting for other jobs to finish...
+error: failed to build archive at `/home/runner/work/bob-agent/bob-agent/src-tauri/target/i686-linux-android/debug/deps/librcgen-eeca032984d73555.rlib`: No space left on device (os error 28)
+error: could not compile `rcgen` (lib) due to 1 previous error
+error: failed to write /home/runner/work/bob-agent/bob-agent/src-tauri/target/i686-linux-android/debug/deps/rustcVOKTCX/lib.rmeta: No space left on device (os error 28)
+error: could not compile `rustix` (lib) due to 1 previous error
+error: failed to build archive at `/home/runner/work/bob-agent/bob-agent/src-tauri/target/i686-linux-android/debug/deps/libwebrtc_srtp-23a856fde0841f02.rlib`: No space left on device (os error 28)
+error: could not compile `webrtc-srtp` (lib) due to 1 previous error
+failed to build Android app: `Failed to run `cargo build`: command ["cargo", "build", "--package", "bob", "--manifest-path", "/home/runner/work/bob-agent/bob-agent/src-tauri/Cargo.toml", "--target", "i686-linux-android", "--features", "tauri/custom-protocol tauri/custom-protocol", "--lib"] exited with code 101
+       Error failed to build Android app: `Failed to run `cargo build`: command ["cargo", "build", "--package", "bob", "--manifest-path", "/home/runner/work/bob-agent/bob-agent/src-tauri/Cargo.toml", "--target", "i686-linux-android", "--features", "tauri/custom-protocol tauri/custom-protocol", "--lib"] exited with code 101
+FAILURE: Build failed with an exception.
+[Incubating] Problems report is available at: file:///home/runner/work/bob-agent/bob-agent/src-tauri/gen/android/build/reports/problems/problems-report.html
+Deprecated Gradle features were used in this build, making it incompatible with Gradle 9.0.
+You can use '--warning-mode all' to show the individual deprecation warnings and determine if they come from your own scripts or plugins.
+For more on this, please refer to https://docs.gradle.org/8.14.3/userguide/command_line_interface.html#sec:command_line_warnings in the Gradle documentation.
+* What went wrong:
+Execution failed for task ':app:rustBuildX86Debug'.
+> Process 'command 'npm'' finished with non-zero exit value 1
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights.
+> Get more help at https://help.gradle.org.
+BUILD FAILED in 8m 1s
+failed to build APK: Failed to assemble APK with Io(BeforeSpawn(<closure>), Io(StderrFile(OwnedFd { fd: 24 }), Io(StdoutFile(OwnedFd { fd: 23 }), Io(StdinFile(OwnedFd { fd: 22 }), Io(Env("CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER", "/usr/local/lib/android/sdk/ndk/27.0.12077973/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android24-clang"), Io(Env("CARGO_TARGET_ARMV7_LINUX_ANDROIDEABI_RUSTFLAGS", "-Clink-arg=-landroid -Clink-arg=-llog -Clink-arg=-lOpenSLES"), Io(Env("NDK_HOME", "/usr/local/lib/android/sdk/ndk/27.0.12077973"), Io(Env("ANDROID_HOME", "/usr/local/lib/android/sdk"), Io(Env("CARGO_TARGET_X86_64_LINUX_ANDROID_RUSTFLAGS", "-Clink-arg=-landroid -Clink-arg=-llog -Clink-arg=-lOpenSLES"), Io(Env("WRY_ANDROID_PACKAGE", "com.bob.agent"), Io(Env("WRY_ANDROID_LIBRARY", "app_lib"), Io(Env("WRY_ANDROID_KOTLIN_FILES_OUT_DIR", "/home/runner/work/bob-agent/bob-agent/src-tauri/gen/android/app/src/main/java/com/bob/agent/generated"), Io(Env("PATH", "/home/runner/work/bob-agent/bob-agent/node_modules/.bin
+       Error failed to build APK: Failed to assemble APK with Io(BeforeSpawn(<closure>), Io(StderrFile(OwnedFd { fd: 24 }), Io(StdoutFile(OwnedFd { fd: 23 }), Io(StdinFile(OwnedFd { fd: 22 }), Io(Env("CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER", "/usr/local/lib/android/sdk/ndk/27.0.12077973/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android24-clang"), Io(Env("CARGO_TARGET_ARMV7_LINUX_ANDROIDEABI_RUSTFLAGS", "-Clink-arg=-landroid -Clink-arg=-llog -Clink-arg=-lOpenSLES"), Io(Env("NDK_HOME", "/usr/local/lib/android/sdk/ndk/27.0.12077973"), Io(Env("ANDROID_HOME", "/usr/local/lib/android/sdk"), Io(Env("CARGO_TARGET_X86_64_LINUX_ANDROID_RUSTFLAGS", "-Clink-arg=-landroid -Clink-arg=-llog -Clink-arg=-lOpenSLES"), Io(Env("WRY_ANDROID_PACKAGE", "com.bob.agent"), Io(Env("WRY_ANDROID_LIBRARY", "app_lib"), Io(Env("WRY_ANDROID_KOTLIN_FILES_OUT_DIR", "/home/runner/work/bob-agent/bob-agent/src-tauri/gen/android/app/src/main/java/com/bob/agent/generated"), Io(Env("PATH", "/home/runner/work/bob-agent/bob-agent/node
 Error: Process completed with exit code 1.

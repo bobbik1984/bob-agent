@@ -29,10 +29,16 @@ jobs:
       - name: Install NDK
         run: sdkmanager "ndk;27.0.12077973"
 
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android/sdk/platforms /usr/local/lib/android/sdk/build-tools/33* /usr/local/lib/android/sdk/build-tools/34* /opt/ghc /usr/local/share/boost
+          sudo apt-get clean
+          df -h
+
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+          targets: aarch64-linux-android
 
       - name: Install dependencies
         run: npm install
@@ -60,7 +66,7 @@ jobs:
           touch resources/llm-engine/dummy.exe resources/llm-engine/dummy.dll resources/llm-engine/dummy.disabled
           mkdir -p skills
           touch src-tauri/pdfium.dll
-          npx tauri android build --debug
+          npx tauri android build --debug --target aarch64
         env:
           NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/27.0.12077973
 
