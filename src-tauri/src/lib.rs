@@ -47,7 +47,12 @@ use percent_encoding::percent_decode_str;
 // 数据目录与配置管理
 // ═══════════════════════════════════════════════════════════
 
+static DATA_DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
 pub(crate) fn get_data_dir() -> PathBuf {
+    if let Some(dir) = DATA_DIR.get() {
+        return dir.clone();
+    }
     let mut path = dirs::data_dir().unwrap_or_else(|| PathBuf::from("."));
     path.push("bob-agent");
     fs::create_dir_all(&path).unwrap_or_default();
@@ -684,14 +689,11 @@ fn system_render_pdf_to_images(path: String) -> Result<Vec<String>, String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let db = db::init_db(&get_data_dir());
-    notebook::init_notebook_dirs();
     let wechat_state = std::sync::Arc::new(wechat::WechatState::new());
 
     let browser_state = std::sync::Arc::new(browser::BrowserState::new());
 
     let mut builder = tauri::Builder::default()
-        .manage(db::DbState(Mutex::new(db)))
         .manage(sidecar::SidecarState { child: Mutex::new(None) })
         .manage(wechat_state.clone())
         .manage(browser_state.clone())
@@ -928,6 +930,21 @@ pub fn run() {
         })
         .setup(|app| {
             use tauri::Manager;
+            
+            // 解决移动端 Sandbox 路径问题
+            #[cfg(any(target_os = "android", target_os = "ios"))]
+            {
+                if let Ok(app_dir) = app.path().app_data_dir() {
+                    let _ = fs::create_dir_all(&app_dir);
+                    let _ = DATA_DIR.set(app_dir);
+                }
+            }
+
+            // 在获得 Context 后初始化本地数据
+            let db_conn = db::init_db(&get_data_dir());
+            app.manage(db::DbState(Mutex::new(db_conn)));
+            notebook::init_notebook_dirs();
+
             app.handle().plugin(tauri_plugin_shell::init())?;
             // 日志：debug 输出到终端 + 文件，release 仅输出到文件
             {
