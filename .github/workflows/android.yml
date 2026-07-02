@@ -1,0 +1,66 @@
+name: Bob-Mobile Android CI
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build-android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install NDK
+        run: sdkmanager "ndk;27.0.12077973"
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Initialize Android Project & Inject Permissions
+        run: |
+          if [ ! -d "src-tauri/gen/android" ]; then
+            echo "Android project not found. Initializing..."
+            npx tauri android init
+            
+            echo "Injecting native permissions..."
+            MANIFEST="src-tauri/gen/android/app/src/main/AndroidManifest.xml"
+            sed -i '/<\/manifest>/i \
+            <uses-permission android:name="android.permission.INTERNET"/>\n\
+            <uses-permission android:name="android.permission.RECORD_AUDIO"/>\n\
+            <uses-permission android:name="android.permission.CAMERA"/>\n\
+            <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>' $MANIFEST
+          else
+            echo "Android project already initialized."
+          fi
+
+      - name: Build APK
+        run: npx tauri android build
+        env:
+          NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/27.0.12077973
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bob-mobile-apk
+          path: src-tauri/gen/android/app/build/outputs/apk/**/*.apk
