@@ -55,7 +55,12 @@ jobs:
           fi
 
       - name: Build APK
-        run: npx tauri android build
+        run: |
+          mkdir -p resources/llm-engine
+          touch resources/llm-engine/dummy.exe resources/llm-engine/dummy.dll resources/llm-engine/dummy.disabled
+          mkdir -p skills
+          touch src-tauri/pdfium.dll
+          npx tauri android build
         env:
           NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/27.0.12077973
 
