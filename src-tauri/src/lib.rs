@@ -442,7 +442,7 @@ fn open_path_in_explorer(path: &str) -> bool {
     {
         std::process::Command::new("xdg-open").arg(path).spawn().is_ok()
     }
-    #[cfg(target_os = "android")]
+    #[cfg(any(target_os = "android", target_os = "ios"))]
     {
         false
     }
@@ -904,7 +904,6 @@ pub fn run() {
     {
         builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             // 如果已经有一个实例在运行，就把已有窗口唤出来
-            use tauri::Manager;
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.show();
                 let _ = window.unminimize();
@@ -928,6 +927,7 @@ pub fn run() {
             _ => {}
         })
         .setup(|app| {
+            use tauri::Manager;
             app.handle().plugin(tauri_plugin_shell::init())?;
             // 日志：debug 输出到终端 + 文件，release 仅输出到文件
             {
@@ -1089,7 +1089,6 @@ pub fn run() {
             #[cfg(desktop)]
             {
                 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
-                use tauri::Manager;
                 let shortcut: Shortcut = "Ctrl+Shift+B".parse().expect("invalid shortcut");
                 app.handle().plugin(
                     tauri_plugin_global_shortcut::Builder::new()
@@ -1112,7 +1111,6 @@ pub fn run() {
             {
                 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
                 use tauri::menu::{Menu, MenuItem};
-                use tauri::Manager;
 
                 let quit_i = MenuItem::with_id(app, "quit", "退出 Bob", true, None::<&str>)?;
                 let show_i = MenuItem::with_id(app, "show", "显示面板", true, None::<&str>)?;
