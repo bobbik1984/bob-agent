@@ -14,8 +14,8 @@
   },
   "dependencies": {
     "@tauri-apps/api": "^2.0.1",
-    "@tauri-apps/plugin-clipboard-manager": "~2.0.0",
-    "@tauri-apps/plugin-dialog": "~2.0.0",
+    "@tauri-apps/plugin-clipboard-manager": "^2.0.0",
+    "@tauri-apps/plugin-dialog": "^2.0.0",
     "@tauri-apps/plugin-notification": "^2.3.3",
     "@tiptap/extension-image": "^3.27.1",
     "@tiptap/extension-link": "^3.27.1",
