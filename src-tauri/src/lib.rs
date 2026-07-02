@@ -35,6 +35,7 @@ mod web_drop;
 mod goal;
 mod assertions;
 mod notebook;
+pub mod tunnel;
 
 use serde_json::{json, Value};
 use std::fs;
@@ -96,11 +97,11 @@ fn get_config_path() -> PathBuf {
     get_data_dir().join("config.json")
 }
 
-fn read_config() -> Value {
+pub fn read_config() -> Value {
     let path = get_config_path();
     if let Ok(data) = fs::read_to_string(path) {
-        if let Ok(json) = serde_json::from_str(&data) {
-            return json;
+        if let Ok(config) = serde_json::from_str(&data) {
+            return config;
         }
     }
     serde_json::json!({})
@@ -790,6 +791,7 @@ pub fn run() {
             // LLM-Wiki 知识库引擎
             kb_extractor::system_estimate_kb,
             kb_indexer::system_build_kb,
+            kb_indexer::system_remove_source,
             // 插件/技能
             plugins::system_get_plugins,
             // 网页抓取

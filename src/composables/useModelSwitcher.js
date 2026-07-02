@@ -10,35 +10,22 @@
 
 import { ref, computed } from 'vue';
 
-import deepseekLogo from '@/assets/logos/deepseek.png';
-import openaiLogo from '@/assets/logos/openai.png';
-import googleLogo from '@/assets/logos/google.png';
-import qwenLogo from '@/assets/logos/qwen.png';
-import glmLogo from '@/assets/logos/glm.svg';
-import kimiLogo from '@/assets/logos/kimi.png';
-import doubaoLogo from '@/assets/logos/doubao.png';
-import minimaxLogo from '@/assets/logos/minimax.png';
-import mimoLogo from '@/assets/logos/mimo.png';
-import modelscopeLogo from '@/assets/logos/modelscope.png';
-import claudeLogo from '@/assets/logos/claude.png';
-import grokLogo from '@/assets/logos/grok.png';
-
 // ── 静态资源与名称映射 SSOT (供整个项目复用) ──
 export function getModelMeta(id) {
   const name = (id || '').toLowerCase();
   
-  if (name.includes('deepseek')) return { name: 'DeepSeek', logo: deepseekLogo };
-  if (name.includes('gpt') || name.includes('o3') || name.includes('o4') || name.includes('openai')) return { name: 'OpenAI', logo: openaiLogo };
-  if (name.includes('gemini') || name.includes('google') || name.includes('gemma') || name.includes('vertex')) return { name: 'Gemini', logo: googleLogo };
-  if (name.includes('qwen') || name.includes('dashscope') || name.includes('aliyun')) return { name: 'Qwen', logo: qwenLogo };
-  if (name.includes('glm') || name.includes('zhipu')) return { name: 'GLM', logo: glmLogo };
-  if (name.includes('kimi') || name.includes('moonshot')) return { name: 'Kimi', logo: kimiLogo };
-  if (name.includes('doubao') || name.includes('seed') || name.includes('volcengine')) return { name: 'Doubao', logo: doubaoLogo };
-  if (name.includes('minimax')) return { name: 'MiniMax', logo: minimaxLogo };
-  if (name.includes('mimo')) return { name: 'Mimo', logo: mimoLogo };
-  if (name.includes('modelscope')) return { name: 'ModelScope', logo: modelscopeLogo };
-  if (name.includes('claude') || name.includes('anthropic')) return { name: 'Claude', logo: claudeLogo };
-  if (name.includes('grok') || name.includes('xai')) return { name: 'Grok', logo: grokLogo };
+  if (name.includes('deepseek')) return { name: 'DeepSeek', logo: '/logos/deepseek.png' };
+  if (name.includes('gpt') || name.includes('o3') || name.includes('o4') || name.includes('openai')) return { name: 'OpenAI', logo: '/logos/openai.png' };
+  if (name.includes('gemini') || name.includes('google') || name.includes('gemma') || name.includes('vertex')) return { name: 'Gemini', logo: '/logos/google.png' };
+  if (name.includes('qwen') || name.includes('dashscope') || name.includes('aliyun')) return { name: 'Qwen', logo: '/logos/qwen.png' };
+  if (name.includes('glm') || name.includes('zhipu')) return { name: 'GLM', logo: '/logos/glm.svg' };
+  if (name.includes('kimi') || name.includes('moonshot')) return { name: 'Kimi', logo: '/logos/kimi.png' };
+  if (name.includes('doubao') || name.includes('seed') || name.includes('volcengine')) return { name: 'Doubao', logo: '/logos/doubao.png' };
+  if (name.includes('minimax')) return { name: 'MiniMax', logo: '/logos/minimax.png' };
+  if (name.includes('mimo')) return { name: 'Mimo', logo: '/logos/mimo.png' };
+  if (name.includes('modelscope')) return { name: 'ModelScope', logo: '/logos/modelscope.png' };
+  if (name.includes('claude') || name.includes('anthropic')) return { name: 'Claude', logo: '/logos/claude.png' };
+  if (name.includes('grok') || name.includes('xai')) return { name: 'Grok', logo: '/logos/grok.png' };
   if (name.includes('llama') || name.includes('local-')) return { name: 'Local', logo: null };
   
   return { name: id, logo: null };

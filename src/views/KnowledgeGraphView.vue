@@ -34,6 +34,22 @@
             <span v-if="loading">{{ te('kg.loading') ? t('kg.loading') : '加载中...' }}</span>
             <span v-else>{{ te('kg.no_projects') ? t('kg.no_projects') : '暂无项目节点' }}</span>
           </div>
+
+          <!-- 来源批次列表 -->
+          <div v-if="stats && stats.source_batches && stats.source_batches.length > 0" class="kg-project-list" style="margin-top: 16px;">
+            <h3 class="kg-project-list-title">来源批次</h3>
+            <button
+              v-for="batch in stats.source_batches"
+              :key="batch.batch_id"
+              class="kg-project-item"
+              :class="{ active: selectedNode?.id === 'source_' + batch.batch_id }"
+              @click="focusNode('source_' + batch.batch_id)"
+            >
+              <span class="project-icon" :style="{ color: kgColors['source'] || '#a855f7' }">📦</span>
+              <span class="project-name" :title="batch.folder_path">{{ batch.folder_name }}</span>
+              <span class="project-degree">{{ batch.file_count }}</span>
+            </button>
+          </div>
           
           <div class="kg-sidebar-footer">
             <span v-if="stats" class="kg-stat-badge">
@@ -137,6 +153,12 @@
         <div v-if="projectIndexPath" style="margin-bottom: var(--space-4);">
           <button class="btn" style="width: 100%; display: flex; justify-content: center; align-items: center; gap: 6px; background-color: var(--user-accent); color: var(--text-inverse); border: none;" @click="openProjectPortal">
             <ExternalLink :size="14" /> 进入项目协作门户
+          </button>
+        </div>
+
+        <div v-if="selectedNode.type === 'source'" style="margin-bottom: var(--space-4);">
+          <button class="btn btn-danger" style="width: 100%; display: flex; justify-content: center; align-items: center; gap: 6px;" @click="removeSourceBatch(selectedNode)">
+            <Trash2 :size="14" /> 彻底清除该来源批次
           </button>
         </div>
 
@@ -247,12 +269,12 @@
     </div>
 
     <!-- 空状态 / 生成中 -->
-    <div v-if="!loading && stats && stats.node_count === 0 && !backfilling" class="kg-empty">
+    <div v-if="currentMode === 'graph' && !loading && stats && stats.node_count === 0 && !backfilling" class="kg-empty">
       <Waypoints :size="48" style="opacity: 0.2;" />
       <p>{{ $t('kg.empty') }}</p>
       <p class="kg-empty-hint">{{ $t('kg.empty_hint') }}</p>
     </div>
-    <div v-if="backfilling" class="kg-empty">
+    <div v-if="currentMode === 'graph' && backfilling" class="kg-empty">
       <RefreshCw :size="32" class="animate-spin" style="opacity: 0.4;" />
       <p>{{ $t('kg.generating') }}</p>
     </div>
@@ -267,7 +289,7 @@ import TiptapEditor from '../components/TiptapEditor.vue';
 import { useI18n } from 'vue-i18n';
 import { Network } from 'vis-network';
 import { DataSet } from 'vis-data';
-import { Waypoints, Search, X, FileText, RefreshCw, Plus, Link, ExternalLink } from 'lucide-vue-next';
+import { Waypoints, Search, X, FileText, RefreshCw, Plus, Link, ExternalLink, Trash2 } from 'lucide-vue-next';
 
 
 // ── 笔记模式逻辑 ─────────────────────────────────────
@@ -1122,6 +1144,47 @@ async function buildKBAndRefresh(folderPath) {
     console.error('KB build from KG view failed:', e);
   } finally {
     backfilling.value = false;
+  }
+}
+
+async function removeSourceBatch(node) {
+  if (!node || node.type !== 'source') return;
+  // 从 source 节点取出 batch_id (通常是 node.source_batches 的内容之一，或者可以直接通过 node.id 的 source_ 前缀后获取)
+  // 如果是 source 节点，它的 id 形式是 source_<batch_id>
+  const batchId = node.id.replace('source_', '');
+  
+  if (confirm(`确定要彻底清除来源批次 "${node.label}" 及其相关联的所有知识点吗？\n警告：此操作不可逆！`)) {
+    try {
+      loading.value = true;
+      const res = await window.electronAPI.systemRemoveSource(batchId);
+      if (res && res.ok) {
+        console.log(`Successfully deleted ${res.nodes_deleted} nodes and ${res.edges_deleted} edges.`);
+        selectedNode.value = null;
+        // 刷新图谱
+        const [graphData, statsData] = await Promise.all([
+          window.electronAPI.kgGetFullGraph(),
+          window.electronAPI.kgStats(),
+        ]);
+        stats.value = statsData;
+        allGraphData.value = graphData;
+        if (graphData.nodes?.length > 0) {
+          if (network) network.destroy();
+          renderNetwork(graphData);
+        } else {
+          if (network) {
+            network.destroy();
+            network = null;
+          }
+        }
+      } else {
+        alert(res?.message || '删除失败');
+      }
+    } catch (e) {
+      console.error('Failed to remove source batch:', e);
+      alert('删除发生错误');
+    } finally {
+      loading.value = false;
+    }
   }
 }
 </script>

@@ -1,0 +1,10 @@
+D:\OneDrive\Learning\Code\Gemini\bob-agent\temp_build\target\x86_64-unknown-linux-musl\release\deps\lock_api-f133a0e8bd17733f.d: C:\Users\xm_bo\.cargo\registry\src\mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda\lock_api-0.4.14\src\lib.rs C:\Users\xm_bo\.cargo\registry\src\mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda\lock_api-0.4.14\src\mutex.rs C:\Users\xm_bo\.cargo\registry\src\mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda\lock_api-0.4.14\src\remutex.rs C:\Users\xm_bo\.cargo\registry\src\mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda\lock_api-0.4.14\src\rwlock.rs
+
+D:\OneDrive\Learning\Code\Gemini\bob-agent\temp_build\target\x86_64-unknown-linux-musl\release\deps\liblock_api-f133a0e8bd17733f.rlib: C:\Users\xm_bo\.cargo\registry\src\mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda\lock_api-0.4.14\src\lib.rs C:\Users\xm_bo\.cargo\registry\src\mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda\lock_api-0.4.14\src\mutex.rs C:\Users\xm_bo\.cargo\registry\src\mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda\lock_api-0.4.14\src\remutex.rs C:\Users\xm_bo\.cargo\registry\src\mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda\lock_api-0.4.14\src\rwlock.rs
+
+D:\OneDrive\Learning\Code\Gemini\bob-agent\temp_build\target\x86_64-unknown-linux-musl\release\deps\liblock_api-f133a0e8bd17733f.rmeta: C:\Users\xm_bo\.cargo\registry\src\mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda\lock_api-0.4.14\src\lib.rs C:\Users\xm_bo\.cargo\registry\src\mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda\lock_api-0.4.14\src\mutex.rs C:\Users\xm_bo\.cargo\registry\src\mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda\lock_api-0.4.14\src\remutex.rs C:\Users\xm_bo\.cargo\registry\src\mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda\lock_api-0.4.14\src\rwlock.rs
+
+C:\Users\xm_bo\.cargo\registry\src\mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda\lock_api-0.4.14\src\lib.rs:
+C:\Users\xm_bo\.cargo\registry\src\mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda\lock_api-0.4.14\src\mutex.rs:
+C:\Users\xm_bo\.cargo\registry\src\mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda\lock_api-0.4.14\src\remutex.rs:
+C:\Users\xm_bo\.cargo\registry\src\mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda\lock_api-0.4.14\src\rwlock.rs:

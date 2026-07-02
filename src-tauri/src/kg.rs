@@ -20,16 +20,24 @@ pub fn upsert_node(
     node_type: &str,
     summary: &str,
     source: &str,
+    batch_id: &str,
 ) -> Result<(), String> {
+    let source_batches_init = if batch_id.is_empty() { "[]".to_string() } else { format!("[\"{}\"]", batch_id) };
+    
     conn.execute(
-        "INSERT INTO kg_nodes (id, label, node_type, summary, source)
-         VALUES (?1, ?2, ?3, ?4, ?5)
+        "INSERT INTO kg_nodes (id, label, node_type, summary, source, source_batches)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)
          ON CONFLICT(id) DO UPDATE SET
             label = COALESCE(NULLIF(?2, ''), kg_nodes.label),
             node_type = ?3,
             summary = CASE WHEN LENGTH(?4) > LENGTH(kg_nodes.summary) THEN ?4 ELSE kg_nodes.summary END,
-            source = COALESCE(NULLIF(?5, ''), kg_nodes.source)",
-        params![id, label, node_type, summary, source],
+            source = COALESCE(NULLIF(?5, ''), kg_nodes.source),
+            source_batches = CASE
+                WHEN ?7 = '' THEN kg_nodes.source_batches
+                WHEN INSTR(kg_nodes.source_batches, ?7) > 0 THEN kg_nodes.source_batches
+                ELSE JSON_INSERT(kg_nodes.source_batches, '$[#]', ?7)
+            END",
+        params![id, label, node_type, summary, source, source_batches_init, batch_id],
     ).map_err(|e| format!("upsert_node failed: {}", e))?;
     Ok(())
 }
@@ -147,6 +155,47 @@ pub fn delete_edge(conn: &rusqlite::Connection, source_id: &str, target_id: &str
         "DELETE FROM kg_edges WHERE source_id = ?1 AND target_id = ?2 AND relation = ?3",
         params![source_id, target_id, relation],
     ).map_err(|e| format!("delete edge failed: {}", e))
+}
+
+/// 按来源批次智能清除知识图谱节点
+pub fn remove_source_batch(conn: &rusqlite::Connection, batch_id: &str) -> Result<(usize, usize), String> {
+    let mut stmt = conn.prepare(
+        "SELECT id, source_batches FROM kg_nodes WHERE INSTR(source_batches, ?1) > 0"
+    ).map_err(|e| format!("prepare failed: {}", e))?;
+    
+    let mut rows = stmt.query(params![batch_id]).map_err(|e| format!("query failed: {}", e))?;
+    
+    let mut to_update = Vec::new();
+    let mut to_delete = Vec::new();
+    
+    while let Ok(Some(row)) = rows.next() {
+        let id: String = row.get(0).unwrap_or_default();
+        let batches_str: String = row.get(1).unwrap_or_else(|_| "[]".to_string());
+        
+        let mut batches: Vec<String> = serde_json::from_str(&batches_str).unwrap_or_default();
+        batches.retain(|b| b != batch_id);
+        
+        if batches.is_empty() {
+            to_delete.push(id);
+        } else {
+            let new_batches_str = serde_json::to_string(&batches).unwrap_or_else(|_| "[]".to_string());
+            to_update.push((id, new_batches_str));
+        }
+    }
+    
+    let mut nodes_deleted = 0;
+    let mut edges_deleted = 0;
+    
+    for id in &to_delete {
+        edges_deleted += conn.execute("DELETE FROM kg_edges WHERE source_id = ?1 OR target_id = ?1", params![id]).unwrap_or(0);
+        nodes_deleted += conn.execute("DELETE FROM kg_nodes WHERE id = ?1", params![id]).unwrap_or(0);
+    }
+    
+    for (id, new_batches) in to_update {
+        let _ = conn.execute("UPDATE kg_nodes SET source_batches = ?1 WHERE id = ?2", params![new_batches, id]);
+    }
+    
+    Ok((nodes_deleted, edges_deleted))
 }
 
 // ── BFS 子图查询 ────────────────────────────────────────────
@@ -311,12 +360,28 @@ pub fn get_stats(conn: &rusqlite::Connection) -> Value {
         }
     }
 
+    // Source batches
+    let mut source_batches: Vec<Value> = Vec::new();
+    if let Ok(mut stmt) = conn.prepare("SELECT batch_id, folder_name, folder_path, file_count FROM kg_source_batches ORDER BY created_at DESC") {
+        if let Ok(rows) = stmt.query_map([], |row| {
+            Ok(json!({
+                "batch_id": row.get::<_, String>(0)?,
+                "folder_name": row.get::<_, String>(1)?,
+                "folder_path": row.get::<_, String>(2)?,
+                "file_count": row.get::<_, i64>(3)?
+            }))
+        }) {
+            source_batches = rows.filter_map(|r| r.ok()).collect();
+        }
+    }
+
     json!({
         "node_count": node_count,
         "edge_count": edge_count,
         "type_distribution": type_dist,
         "relation_distribution": rel_dist,
-        "top_connected_nodes": top_nodes
+        "top_connected_nodes": top_nodes,
+        "source_batches": source_batches
     })
 }
 
@@ -447,14 +512,14 @@ pub fn kg_backfill(db: State<DbState>) -> Value {
         );
 
         let source = if source_path.is_empty() { file_name } else { source_path };
-        let _ = upsert_node(&conn, &node_id, file_name, node_type, summary, source);
+        let _ = upsert_node(&conn, &node_id, file_name, node_type, summary, source, "");
         node_count += 1;
 
         // 从 keywords 创建 tag 节点 + 边
         if !keywords.is_empty() {
             for kw in keywords.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()) {
                 let tag_id = format!("tag_{}", kw.to_lowercase().replace(' ', "_"));
-                let _ = upsert_node(&conn, &tag_id, kw, "tag", "", "");
+                let _ = upsert_node(&conn, &tag_id, kw, "tag", "", "", "");
                 let _ = insert_edge(&conn, &node_id, &tag_id, "tagged_as", 0.7);
                 edge_count += 1;
             }

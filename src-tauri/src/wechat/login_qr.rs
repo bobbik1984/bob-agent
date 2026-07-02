@@ -12,11 +12,6 @@ const BOT_TYPE: &str = "3";
 
 #[tauri::command]
 pub async fn wechat_get_login_qr() -> Result<Value, String> {
-    let client = Client::builder()
-        .timeout(Duration::from_secs(10))
-        .build()
-        .map_err(|e| e.to_string())?;
-
     let url = format!("{}/ilink/bot/get_bot_qrcode?bot_type={}", QR_API_BASE, BOT_TYPE);
 
     let tokens: Vec<String> = {
@@ -28,11 +23,17 @@ pub async fn wechat_get_login_qr() -> Result<Value, String> {
             .collect()
     };
 
-    let res = client.post(&url)
-        .json(&json!({ "local_token_list": tokens }))
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
+    let payload = json!({ "local_token_list": tokens });
+    let mut headers = reqwest::header::HeaderMap::new();
+    headers.insert(reqwest::header::CONTENT_TYPE, reqwest::header::HeaderValue::from_static("application/json"));
+
+    let res = crate::tunnel::send_request(
+        reqwest::Method::POST,
+        &url,
+        headers,
+        Some(reqwest::Body::from(serde_json::to_vec(&payload).unwrap())),
+        Duration::from_secs(10)
+    ).await.map_err(|e| e.to_string())?;
 
     if !res.status().is_success() {
         return Err(format!("QR API Error: {}", res.status()));
@@ -78,20 +79,21 @@ fn generate_qr_base64(content: &str) -> Result<String, String> {
 
 #[tauri::command]
 pub async fn wechat_check_login_status(qrcode: String, state: State<'_, Arc<WechatState>>) -> Result<Value, String> {
-    let client = Client::builder()
-        .timeout(Duration::from_secs(35))
-        .build()
-        .map_err(|e| e.to_string())?;
-
     let url = format!("{}/ilink/bot/get_qrcode_status?qrcode={}", QR_API_BASE, urlencoding::encode(&qrcode));
 
-    let res = match client.get(&url).send().await {
+    let res = match crate::tunnel::send_request(
+        reqwest::Method::GET,
+        &url,
+        reqwest::header::HeaderMap::new(),
+        None,
+        Duration::from_secs(35)
+    ).await {
         Ok(r) => r,
         Err(e) => {
-            if e.is_timeout() {
+            if e.contains("timeout") || e.contains("deadline") || e.contains("Timeout") {
                 return Ok(json!({ "status": "wait" }));
             }
-            return Err(e.to_string());
+            return Err(e);
         }
     };
 

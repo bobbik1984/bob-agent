@@ -431,6 +431,19 @@ pub async fn system_build_kb(app: AppHandle, folder_path: String, _plan: String)
         .unwrap_or("Unknown")
         .to_string();
 
+    let batch_id = format!("{}_{}", 
+        folder_name.to_lowercase().replace(' ', "_"),
+        chrono::Local::now().format("%Y%m%d%H%M")
+    );
+    if let Some(db_state) = app.try_state::<DbState>() {
+        if let Ok(conn) = db_state.0.lock() {
+            let _ = conn.execute(
+                "INSERT OR IGNORE INTO kg_source_batches (batch_id, folder_name, folder_path, file_count) VALUES (?1, ?2, ?3, ?4)",
+                rusqlite::params![batch_id, folder_name, folder_path, total as i64],
+            );
+        }
+    }
+
     // 4. 逐文件处理
     let mut success_count = 0usize;
     let mut failed_count = 0usize;
@@ -578,11 +591,11 @@ pub async fn system_build_kb(app: AppHandle, folder_path: String, _plan: String)
                 // 写入实体节点
                 for (name, etype, desc) in &entity_names_for_kg {
                     let node_id = crate::kg::resolve_node_id(&conn, name, etype);
-                    let _ = crate::kg::upsert_node(&conn, &node_id, name, etype, desc, &file.file_name);
+                    let _ = crate::kg::upsert_node(&conn, &node_id, name, etype, desc, &file.file_name, &batch_id);
                 }
                 // 写入文件节点
                 let file_node_id = format!("file_{}", file.file_name.to_lowercase().replace(' ', "_").replace('.', "_"));
-                let _ = crate::kg::upsert_node(&conn, &file_node_id, &file.file_name, "file", &summary, &file.file_name);
+                let _ = crate::kg::upsert_node(&conn, &file_node_id, &file.file_name, "file", &summary, &file.file_name, &batch_id);
                 // 文件 -> 实体 边
                 for (name, etype, _) in &entity_names_for_kg {
                     let node_id = crate::kg::resolve_node_id(&conn, name, etype);
@@ -619,6 +632,21 @@ pub async fn system_build_kb(app: AppHandle, folder_path: String, _plan: String)
 
     // 5. 生成项目综述页
     write_project_page(&folder_name, total, &summaries);
+    
+    // 5.5. 创建 Source Hub 节点
+    if let Some(db_state) = app.try_state::<DbState>() {
+        if let Ok(conn) = db_state.0.lock() {
+            let hub_node_id = format!("source_{}", batch_id);
+            let hub_summary = format!("来源批次: {}，包含 {} 个文件", folder_name, total);
+            let _ = crate::kg::upsert_node(&conn, &hub_node_id, &folder_name, "source", &hub_summary, &folder_name, &batch_id);
+            
+            for (file_name, _) in &summaries {
+                let file_node_id = format!("file_{}", file_name.to_lowercase().replace(' ', "_").replace('.', "_"));
+                let _ = crate::kg::insert_edge(&conn, &hub_node_id, &file_node_id, "contains_file", 1.0);
+            }
+        }
+    }
+
     append_log_entry("complete", &format!("项目 {} 构建完成: {}/{} 成功", folder_name, success_count, total));
 
     // 6. 发送完成事件
@@ -636,4 +664,23 @@ pub async fn system_build_kb(app: AppHandle, folder_path: String, _plan: String)
         "success": success_count,
         "failed": failed_count
     })
+}
+
+/// 按来源批次智能清除知识图谱节点
+#[tauri::command]
+pub async fn system_remove_source(app: AppHandle, batch_id: String) -> Value {
+    if let Some(db_state) = app.try_state::<DbState>() {
+        if let Ok(conn) = db_state.0.lock() {
+            match crate::kg::remove_source_batch(&conn, &batch_id) {
+                Ok((nodes_del, edges_del)) => {
+                    let _ = conn.execute("DELETE FROM kg_source_batches WHERE batch_id = ?1", rusqlite::params![batch_id]);
+                    return json!({ "ok": true, "nodes_deleted": nodes_del, "edges_deleted": edges_del });
+                }
+                Err(e) => {
+                    return json!({ "error": true, "message": format!("删除失败: {}", e) });
+                }
+            }
+        }
+    }
+    json!({ "error": true, "message": "无法获取数据库锁" })
 }

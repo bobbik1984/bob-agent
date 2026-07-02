@@ -1,4 +1,24 @@
 <template>
+  <!-- 🚇 网络代理 (Network Proxy) -->
+  <section class="settings-section card">
+    <div class="service-card" :class="{ connected: proxyTunnelEnabled }" style="margin-bottom: 0;">
+      <div class="service-card-header" style="margin-bottom: 0;">
+        <div class="service-icon" :style="{ background: proxyTunnelEnabled ? 'rgba(var(--user-accent-rgb, 39,118,187), 0.1)' : 'var(--bg-tertiary)', color: proxyTunnelEnabled ? 'var(--user-accent)' : 'var(--text-muted)' }">
+          <Network :size="20" />
+        </div>
+        <div class="service-info">
+          <span class="service-name">{{ $t('settings.proxy_tunnel_name') }}</span>
+          <span class="service-sub">{{ $t('settings.proxy_tunnel_desc') }}</span>
+        </div>
+        
+        <label class="mcp-switch">
+          <input type="checkbox" :checked="proxyTunnelEnabled" @change="toggleProxyTunnel" />
+          <span class="mcp-slider"></span>
+        </label>
+      </div>
+    </div>
+  </section>
+
   <!-- 📱 通讯渠道 (Communication Channels) -->
   <section class="settings-section card">
     <h3 class="section-title">
@@ -361,18 +381,28 @@
 </template>
 
 <script setup>
-const getAssetUrl = (name) => new URL(`../../assets/logos/${name}`, import.meta.url).href;
+const getAssetUrl = (name) => `/logos/${name}`;
 import { ref, onMounted, onUnmounted } from 'vue';
 import { open } from '@tauri-apps/plugin-dialog';
 import {
   Smartphone, Unplug, X, Plus, Loader2, MessageSquare, Check,
-  Building2, ExternalLink, Unlink, KeyRound, Terminal, Info, Copy
+  Building2, ExternalLink, Unlink, KeyRound, Network, Info, Copy
 } from 'lucide-vue-next';
 
 const props = defineProps({
   config: { type: Object, required: true },
 });
 const emit = defineEmits(['config-changed']);
+
+// ── Proxy Tunnel (Goal 20) ──
+const proxyTunnelEnabled = ref(props.config.proxyTunnelEnabled || false);
+
+async function toggleProxyTunnel() {
+  proxyTunnelEnabled.value = !proxyTunnelEnabled.value;
+  emit('config-changed', { proxyTunnelEnabled: proxyTunnelEnabled.value });
+  // If we want to dynamically trigger Rust to reconnect, we could call an IPC here,
+  // but for now relying on config-changed to save and backend to watch config is enough.
+}
 
 // ── Mobile channels ──
 const mobileChannel = ref('wechat');

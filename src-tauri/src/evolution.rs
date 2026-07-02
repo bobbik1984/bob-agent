@@ -1153,11 +1153,11 @@ async fn phase_notebook_digest(_app: &AppHandle) -> i64 {
                                 ) {
                                     // 确保目标节点存在
                                     let target_id = crate::kg::resolve_node_id(&conn, target, etype);
-                                    let _ = crate::kg::upsert_node(&conn, &target_id, target, etype, "", "");
+                                    let _ = crate::kg::upsert_node(&conn, &target_id, target, etype, "", "", "");
                                     
                                     // 创建当前笔记的 note 节点
                                     let note_id = format!("note_{}", title);
-                                    let _ = crate::kg::upsert_node(&conn, &note_id, title, "note", summary, &path.to_string_lossy());
+                                    let _ = crate::kg::upsert_node(&conn, &note_id, title, "note", summary, &path.to_string_lossy(), "");
                                     
                                     // 建立关系
                                     let _ = crate::kg::insert_edge(&conn, &note_id, &target_id, "mentions", 1.0);

@@ -1,8 +1,8 @@
 # Bob-Agent 开发全局路线图 (Roadmap)
 
-> 🎯 **当前版本**: `v0.4.3` — Ghost Partner (幽灵副手) 阶段正式版。
-> ♻️ **已完成**: Tauri 迁移、主体模式、微信/TG/Discord 通道、文档输出引擎、Goal 闭环执行引擎、Web Drop P2P 极传。
-> 📋 **下一目标**: v0.4.1 — 目标 17 知识图谱融合（SQLite 图存储 + LLM 实体提取 + vis.js 可视化）。
+> 🎯 **当前版本**: `v0.4.4` — Ghost Partner (幽灵副手) 阶段正式版。
+> ♻️ **已完成**: Tauri 迁移、主体模式、微信/TG/Discord 通道、文档输出引擎、Goal 闭环执行引擎、Web Drop P2P 极传、知识图谱融合、智能笔记模块。
+> 📋 **下一目标**: 目标 20 — 内网穿墙隧道 | 目标 22 — Bob-Mobile 手机端 MVP | 目标 23 — 跨端同步引擎 (详见 `docs/MOBILE_BLUEPRINT.md`)。
 
 ---
 
@@ -125,7 +125,7 @@
 
 ## 📍 目标 7: 收尾与发布
 - [x] T-701: **彻底移除 `electron/` 目录** — 42 个遗留文件已清除，Bridge 中的 Electron 引用注释已更新。
-- [ ] T-702: 集成 `llama-cpp-rs` 离线推理。
+- [x] T-702: ~~集成 `llama-cpp-rs` 离线推理~~ (已由 Sidecar + llama-server 方案完美替代)。
 - [x] T-703: 执行 `npm run tauri build`，验证打包流程，生成 `.msi` 或 `.exe` 安装包。
 
 ---
@@ -154,8 +154,8 @@
 ### Phase 3: 用户体验
 
 - [x] T-821: **SettingsView 引导文案** — API 密钥管理面板顶部增加提示："💡 您也可以直接在对话中告诉 Bob 帮您配置密钥"。
-- [ ] T-823: **端到端集成测试** — 在对话中模拟"帮我配好这个 Key: sk-test123"，验证 Outbox 写入 → Reconciler 消费 → config 更新 → UI 自动刷新的完整链路。
-- [ ] T-824: **防破坏测试** — 手动写入格式错误/恶意字段的 `bob_outbox.json`，验证 Reconciler 不崩溃、程序正常运行、审计日志正确记录拒绝原因。
+- [ ] T-823: **端到端集成测试** (集成测试后期再检测) — 在对话中模拟"帮我配好这个 Key: sk-test123"，验证 Outbox 写入 → Reconciler 消费 → config 更新 → UI 自动刷新的完整链路。
+- [ ] T-824: **防破坏测试** (集成测试后期再检测) — 手动写入格式错误/恶意字段的 `bob_outbox.json`，验证 Reconciler 不崩溃、程序正常运行、审计日志正确记录拒绝原因。
 
 ---
 
@@ -739,7 +739,7 @@
 
 ### Phase 0: 数据层 — SQLite 图存储 + Rust 图引擎
 
-- [ ] T-1701: `bob.db` 新增 `kg_nodes` + `kg_edges` 两张表
+- [x] T-1701: `bob.db` 新增 `kg_nodes` + `kg_edges` 两张表
 - [ ] T-1702: Rust 模块 `kg.rs` — Node/Edge CRUD（insert, upsert, delete）
 - [ ] T-1703: `kg.rs` — BFS 子图查询 `kg_query(term, max_hops)` → 返回 JSON
 - [ ] T-1704: `kg.rs` — 图统计 `kg_get_stats()` → 节点数/边数/类型分布
@@ -752,7 +752,7 @@
 
 ### Phase 2: 前端 — KnowledgeGraphView
 
-- [ ] T-1721: 安装 `vis-network` npm 依赖
+- [x] T-1721: 安装 `vis-network` npm 依赖
 - [ ] T-1722: `KnowledgeGraphView.vue` — vis.js 力导向图主画布
 - [ ] T-1723: 顶部工具栏 — 搜索框 + 类型筛选 chips + 节点统计
 - [ ] T-1724: 右侧 Inspector 面板 — 节点详情 + 摘要 + 关联列表
@@ -868,99 +868,137 @@
   - [ ] `bob.db` 新增 `pending_transfers` SQLite 队列表，实现设备异步离线传输。
   - [ ] 增加 LLM `send_to_device` 工具，实现跨设备大模型指令接力交互。
 
-## 🚀 T-1801: 日程交互重构 (Calendar Interaction Refactor)
-- [ ] **拖拽事件 (Drag & Drop)**: 允许在 `.event-card` 上拖拽修改日程发生的日期和时间（吸附到 15 分钟间隔）。
-- [ ] **拖拽时长 (Resize Event)**: 在卡片上下边缘增加拖拽手柄，改变事件的开始/结束时间。
-- [ ] **自定义事件弹窗 (Custom Event Modal)**: 废弃原始的 `prompt()` 弹窗，新增一个符合暗色毛玻璃风格的精致模态框，用于点击空白处添加新事件。
-- [ ] 确保前端交互能够正确回调后端 `updateEventTime` 并持久化。
 
-## ⚠️ 待修复缺陷与待办事项 (Pending Bug Fixes & Action Items)
-
-### 1. 微信 CDN 文件传输缺陷（无法发送较大文件，甚至低于 25MB 的文件）
-- [ ] **现状与缺陷**: PC 端发送文件到手机端依然不稳定，连微信官方限制的 25MB 大小也无法满足，尽管目前代码里设置的 MAX_FILE_SIZE 限制为 100MB。
-- [ ] **技术分析与排查要点**:
-  - **分块流缓冲 (reqwest Stream)**: 检查 `src-tauri/src/wechat/cdn.rs` 中的分块流式上传逻辑 `build_progress_body`（默认 64KB 一分块）。当传输大文件时，可能会因 TCP 阻塞、客户端上传流缓冲区未及时消费或底层 tokio 异步管道被挤压而发生连接重置/中断。
-  - **API 侧限制**: 微信 `ilink/bot/getuploadurl` 接口返回的上传 URL 是否针对单个文件存在更低的大小上限，或大文件计算 AES/MD5 导致参数的临时签名过快超时失效。
-  - **降级机制**: 需测试在超过 25MB（微信官限）或上传失败时，是否能平滑降级至 T-1800 (使用内建 HTTP Server 发送安全 Token 链接，供手机微信直接拉取)。
-
-### 2. PDF 转图片功能失效（PDFium 动态载入失败）
-- [ ] **现状与缺陷**: 虽然包里已经携带了 `pdfium.dll` 引擎，但 PDF 转图片（以及 KB 文字提取）在打包运行（Release 状态）时依然报错“无法绑定 PDFium 引擎”或无响应。
-- [ ] **技术分析与排查要点**:
-  - **路径硬编码**: 在 `src-tauri/src/pdf_renderer.rs` 与 `kb_extractor.rs` 中，绑定引擎时硬编码使用了 `./`（即当前工作目录）去查找 DLL：`let bind = Pdfium::bind_to_library(Pdfium::pdfium_platform_library_name_at_path("./"))`
-  - **打包位置偏差**: 开发模式下，工作目录为 `src-tauri`，DLL 加载正常。但 Tauri 生产环境打包后，`pdfium.dll` 是作为 Resource 被打包进资源的专属目录（`resources/` 目录下），此时通过 `./` 将无法查找到 DLL 从而导致绑定失败。
-  - **解决方案**: 需要修改后端 Rust 接口，使其接收 `tauri::AppHandle`，使用 `app_handle.path().resource_dir()`（Tauri V2 资源路径解析器）动态拼接定位到真实的 `pdfium.dll` 进行绑定，如：
-    ```rust
-    let resource_dir = app_handle.path().resource_dir()?;
-    let pdfium_path = resource_dir.join("pdfium.dll");
-    let bind = Pdfium::bind_to_library(pdfium_path.to_str().unwrap());
-    ```
-
-## 🚀 T-1802: WebRTC Web Drop & 微信文件分享深度修复 (已完成)
-- [x] 修复 ob-agent WebRTC 传输时 
-ustls 报 
-o CryptoProvider 导致发送端 Panic 断开的问题。
-- [x] 更新 web-drop 前端 index.html 的 hash 解析逻辑，兼容 . 和 | 作为分隔符。
-- [x] web_drop.rs 生成链接强制附加 ?v=2 防止手机端微信内置浏览器缓存旧版页面。
-- [x] 修复了 LLM 在处理 share_file 工具调用时产生的链接格式化幻觉，通过双端排版（PC 超链接 + Mobile 纯文本代码块）兼容微信客户端的渲染差异。
-- [x] 验证了 P2P 穿透与 TURN Server 降级逻辑（双重 VPN/对称 NAT 环境下稳定 Fallback 至 VPS 中继节点）。
+## 📍 目标 19: 智能笔记模块 Bob Notebook (T-1900) ✅
+> ✅ **已在目标 17 知识图谱融合中全部实现**。后端 `notebook.rs` (888 行, 14 个 IPC)、前端 `TiptapEditor.vue` + `NoteExplorer.vue` 均已完成并集成到 KnowledgeGraphView。
+> 包含：CRUD、标签管理、反向链接、全文搜索、Dream 笔记摘要、气泡存笔记、@note 上下文注入。
 
 ---
 
-## 📍 目标 19: 智能笔记模块 Bob Notebook (T-1900)
-> 📋 **详细设计文档**: `docs/note_taking_implementation_plan_20260629.md`
-> 🎯 将 Bob 升级为"第二大脑"，在知识图谱视图内增加笔记/知识点模式，与 Chat、QuickNote、Todo、iKnow 图谱深度串联。
+## 📍 目标 20: 内网穿墙隧道 (Proxy Tunnel) 与中继模式
+> 🎯 构建一个纯粹的代理信息流管道（Proxy/Ladder），绕开公司内网防火墙。
+> 📋 **核心逻辑**: 作为全局功能开关存在。对于受限网络环境一键开启穿墙透传，而无限制网络环境继续依赖现有的直连方式，互不干扰。
 
-### Phase 1: 后端基础设施 (Rust Backend)
-- [ ] T-1901: 创建 `src-tauri/src/notebook.rs` 模块，实现笔记目录初始化
-- [ ] T-1902: 实现 6 个核心 CRUD IPC (`notebook_list/read/save/create/delete/rename`)
-- [ ] T-1903: 实现 `notebook_append_daily` 替代旧的 `system_append_quick_note`
-- [ ] T-1904: 实现 `notebook_save_asset`（图片拖入保存至 `notes/assets/`）
-- [ ] T-1905: 实现 `notebook_search`（全文搜索）
-- [ ] T-1906: 在 `notebook_save_note` 内实现即时层副作用：
-  - Markdown checkbox 正则扫描 → 自动同步到 `events` 表
-  - `[[双链]]` 正则解析 → 自动同步到 KG 图谱
-- [ ] T-1907: 实现旧 `quick_notes.md` → `notes/daily/*.md` 一次性数据迁移
-- [ ] T-1908: 在 `lib.rs` 中注册所有新 IPC 命令
+### Phase 1: 前端全局开关与 UI (SettingsConnections)
+- [x] T-2001: 在 SettingsConnections.vue 增加【内网穿墙隧道】拨动开关。
+- [x] T-2002: 开关状态与后端 config.json 双向绑定。
+- [ ] T-2003: UI 面板显示当前隧道的连接状态（🟢代理已连接 / 🔴代理断开）与实时延迟。
 
-### Phase 2: 前端编辑器与 UI (Frontend)
-- [ ] T-1910: 安装 Tiptap 及 `tiptap-markdown` 等依赖
-- [ ] T-1911: 封装 `TiptapEditor.vue`（WYSIWYG + Markdown 序列化 + 图片拖拽 + 自动保存）
-- [ ] T-1912: 封装 `NoteExplorer.vue`（文件夹/日期/标签三种视角 + 右键菜单）
-- [ ] T-1913: 改造 `KnowledgeGraphView.vue`（工具栏 图谱/笔记 Toggle + 条件渲染）
-- [ ] T-1914: 更新 `tauri-bridge.js` 注册所有 `notebook_*` IPC
-- [ ] T-1915: 修改 `QuickNoteOverlay.vue` 调用新的 `notebookAppendDaily`
-- [ ] T-1916: 更新 i18n 翻译文件
-- [ ] T-1917: KG 图谱类型枚举新增 `note` 类型 (📝) 及对应配色
+### Phase 2: Rust 后端网络层重构 (Tunnel Client & Proxy)
+- [ ] T-2011: src-tauri/src/tunnel.rs 实现到 VPS 的长连接隧道引擎（WebSocket或TCP中继）。
+- [ ] T-2012: 改造微信模块 (wechat/req.rs)：请求发前判定，若穿墙开启则通过 Tunnel 管道透传包，否则正常走直连。
+- [ ] T-2013: 改造 Telegram 模块 (	elegram.rs) 同上网络劫持逻辑。
+- [ ] T-2014: 维持自动重连心跳，确保网络波动时隧道的高可用性。
 
-### Phase 3: 生态血管打通与 OKF 安全网 (Ecosystem + Safety)
-- [ ] T-1920: Chat `/memo` 指令 → 从聊天创建主题笔记
-- [ ] T-1921: Chat `@note` 引用 → 笔记内容作为 LLM Context 注入
-- [ ] T-1922: LLM 回复消息气泡增加"📌 存为笔记"按钮
-- [ ] T-1923: 图谱 Inspector 增加"相关笔记"区块
-- [ ] T-1924: Todo 双向回写（TodoList 勾选 → 回写源笔记 `- [x]`）
-- [ ] T-1925: Dream 流水线集成 `phase_notebook_digest()`（每日 LLM 语义摘要）
-- [ ] T-1926: Dream Linter 校验层（幻觉链接检测 + 模糊去重 + 格式合法性校验）
-- [ ] T-1927: 实体类型本体硬约束（Dream LLM Prompt 中强制声明合法类型枚举，拒绝自创类型）
-- [ ] T-1928: 知识过期看门狗（>90 天未更新笔记标记 `stale: true`，图谱中以虚线/半透明显示）
+### Phase 3: VPS 中继端配合 (Tunnel Server)
+- [ ] T-2021: VPS (bob.bobbik.org) 上配置对应的解包与转发逻辑（直接用 Nginx Stream Proxy，或单独部署轻量 WebSocket Server 均可）。
 
 ---
 
-## 💡 T-1930: 基于文件同步的内网穿透通信通道
-> 🎯 利用 Syncthing 文件同步路径作为消息传输载体，穿透公司内网防火墙限制。
-> 📋 **背景**: 部分公司内网不仅封锁 Telegram，甚至连微信都无法使用。
-> 但 Syncthing 基于 relay 和局域网发现的文件同步往往不受 HTTP 代理限制。
+## 📍 目标 22: Bob-Mobile 手机端 MVP (T-2200)
+> 🎯 **目标**: 在同一个 bob-agent 仓库中，基于 Tauri V2 的 Mobile 支持，构建手机端极简入口。
+> 📋 **核心定位**: 手机是"独立前哨站"——能独立调用云端 API 产出知识点和管理日程，但不跑图谱编织和重计算。
+> 📖 **详细蓝图**: `docs/MOBILE_BLUEPRINT.md`
 
-- [ ] T-1930-A: 设计"文件信箱"协议：Bob 在 Syncthing 同步目录下维护一个 `inbox/` 和 `outbox/` 文件夹，
-  每条消息以带时间戳的 `.msg.yaml` 文件落盘，对端 Bob 实例监听目录变化后自动读取并投递到本地消息队列。
-- [ ] T-1930-B: 实现 Rust 后台的 `file_channel.rs` 模块：
-  - `fs::watch` 监听 inbox 目录
-  - 新文件到达后解析 YAML → 注入本地消息流（和 Telegram/微信通道并列）
-  - 发送消息时写入 outbox → Syncthing 自动同步到对端
-- [ ] T-1930-C: 前端 SettingsConnections.vue 增加"文件同步通道"配置卡片，
-  允许用户指定 Syncthing 共享目录路径。
-- [ ] T-1930-D: 支持多媒体消息：图片/文件直接以原始二进制落盘在共享目录下，
-  `.msg.yaml` 中只记录相对路径引用。
+### Phase 0: 升级基建
+- [ ] T-2201: 将 Tauri 从 RC (2.0.0-rc.17) 升级到正式版 2.x stable。
+- [ ] T-2202: 运行 `tauri android init`，生成 Android 移动端脚手架。
+- [ ] T-2203: 验证空白 WebView 在安卓模拟器上能正常打开。
 
-### 3. 微信内网穿墙模式 (WeChat Tunnel Mode)
-- [ ] **需求说明**: 在“连接中心”菜单里添加一个“穿墙模式”，借用 `bob.bobbik.org/transfer` 路径来打通 本地PC -- VPS -- 用户手机端微信 的通信路径，避免被公司内网屏蔽微信端口。
-- [ ] **实现思路**: 需要在前端 `SettingsConnections.vue` 增加 UI 开关，并在 Rust 后端网络请求层 (`wechat` 模块) 增加代理/中继路由逻辑。
+### Phase 1: 代码重构——分层
+- [ ] T-2211: 将现有 `src/views/` 和 `src/components/` 拆分到 `desktop/` 和 `shared/`。
+- [ ] T-2212: 将现有 `src-tauri/src/*.rs` 拆分到 `core/` 和 `desktop/` 子目录。
+- [ ] T-2213: 在 `Cargo.toml` 中引入 `desktop` / `mobile` features 条件编译。
+- [ ] T-2214: 实现 `router.js` 的平台检测与动态路由 (Desktop Shell / Mobile Shell)。
+- [ ] T-2215: **回归测试**：确保 PC 版所有功能不受分层重构影响。
+
+### Phase 2: 手机端 MVP
+- [ ] T-2221: 实现 `MobileShell.vue` (底部 TabBar + 基础导航 + 安全区域适配)。
+- [ ] T-2222: 实现 `CaptureView.vue` (文字输入 + 语音按钮 + 主界面)。
+- [ ] T-2223: 实现 `mobile/ChatView.vue` (轻量聊天，复用 `core/llm.rs`，无 Tool Calling 可视化)。
+- [ ] T-2224: 实现 `PairView.vue` + `qr_scanner.rs` (扫码绑定 + Ed25519 密钥交换)。
+- [ ] T-2225: 实现手机端 SQLite 缓存 (SyncPacket 表 + config 存储)。
+- [ ] T-2226: 在安卓真机上跑通一次完整的"语音输入 → 云端 API 调用 → 收到回复"流程。
+
+---
+
+## 📍 目标 23: 跨端同步引擎 (T-2300)
+> 🎯 **目标**: 复用现有 bob-relay + coturn + WebRTC 基建 (T-1800)，实现手机与 PC 的四级渐进式数据同步。
+> 📋 **核心策略**: PC 主导唤醒，四级降级 (局域网直连 → WebRTC P2P 打洞 → TURN 中继 → 微信 Bot 推送)。
+> 📖 **详细蓝图**: `docs/MOBILE_BLUEPRINT.md` §五
+
+### Phase 3a: bob-relay 增加设备注册协议
+- [ ] T-2301: 在现有 bob-relay (Node.js, VPS1) 中新增设备注册协议 (register/query/notify)。
+- [ ] T-2302: PC 端 Bob 启动时自动向 bob-relay 注册 device_id + 在线状态。
+
+### Phase 3b: 同步通道 (复用 Web Drop 引擎)
+- [ ] T-2311: 复用 `web_drop.rs` 的 WebRTC 引擎，改造为持久化双向 DataChannel 同步通道。
+- [ ] T-2312: 实现四级渐进式连接策略的完整决策链 (局域网 UDP → WebRTC → TURN → Bot)。
+- [ ] T-2313: `http_api.rs` 新增 `/v1/sync` 端点，供手机局域网直连时使用。
+- [ ] T-2314: 实现手机端 `lan_sync.rs`：被动监听 PC 连接 + 主动回连。
+
+### Phase 3c: 同步协议
+- [ ] T-2321: 实现 `sync_protocol.rs` (SyncPacket 序列化 + Ed25519 认证 + X25519-AES-GCM 加密)。
+- [ ] T-2322: 实现 `config_version` 配置版本同步机制 (PC 改了 API Key → 手机下次同步自动更新)。
+- [ ] T-2323: 实现 SyncPacket 批量传输与 ACK + synced 标记机制。
+
+### Phase 3d: 端到端联调
+- [ ] T-2331: 局域网同步联调 (同一 WiFi，UDP 广播发现 + HTTP 直连)。
+- [ ] T-2332: 跨网 WebRTC 打洞联调 (手机 4G + PC WiFi，经 bob-relay 信令 + coturn STUN)。
+- [ ] T-2333: Bot 推送唤醒联调 (手机被杀后台 → PC 通过微信 Bot 推送 → 用户打开手机端 → 同步)。
+
+---
+
+## 🔙 已后置的待办事项 (Backlog)
+
+### 📍 目标 21: 知识图谱 Source-Hub 架构重构 (Implicit Provenance + Cascade GC)
+> 🎯 **目标**: 彻底解决知识图谱中的"幽灵节点"问题，实现按来源批次成套导入/成套清除，并让跨项目的相同概念自动融合桥接。
+> 📋 **核心设计**: 隐式溯源 (JSON 数组多血缘) + 实体去重融合 + 引用计数垃圾回收。
+> 🏗️ **架构哲学**: 借鉴 Google Drive 的扁平化对象存储 + Capacities 的面向对象知识管理，实现"底层隐式血缘（用于生命周期管理）、上层纯粹语义网状关联（用于知识发现）"的混合架构。
+
+#### Phase 1: 数据库 Schema 升级
+- [x] T-3001: `db.rs` — 迁移逻辑：`ALTER TABLE kg_nodes ADD COLUMN source_batches TEXT DEFAULT '[]'`
+- [x] T-3002: `db.rs` — 新增 `kg_source_batches` 批次注册表
+
+#### Phase 2: 改造 `upsert_node` 多来源缝合
+- [x] T-3010: `kg.rs` — `upsert_node` 新增 `batch_id` 参数
+- [x] T-3011: `kg.rs` — ON CONFLICT 时用 `JSON_INSERT` 追加来源（含去重判断）
+- [x] T-3012: `kg.rs` — 更新 `kg_backfill` 兼容新签名
+
+#### Phase 3: 改造 `system_build_kb` — 批次注册 + Hub 节点
+- [x] T-3020: `kb_indexer.rs` — 生成 `batch_id` 并写入 `kg_source_batches`
+- [x] T-3021: `kb_indexer.rs` — 传递 `batch_id` 给所有 `upsert_node` 调用
+- [x] T-3022: `kb_indexer.rs` — 创建 Source Hub 节点（类型 `"source"`）+ `contains_file` 边
+
+#### Phase 4: 新增 `system_remove_source` 级联清除 API
+- [x] T-3030: `kg.rs` — 新增 `remove_source_batch()` 引用计数 GC 函数
+- [x] T-3031: `kb_indexer.rs` — 新增 `system_remove_source` Tauri Command
+- [x] T-3032: `lib.rs` — 注册新命令到 `generate_handler![]`
+
+#### Phase 5: 前端适配
+- [x] T-3040: preload 桥接层暴露 `systemRemoveSource`
+- [x] T-3041: `KnowledgeGraphView.vue` — Source 节点详情面板 + "清除整个批次"按钮
+- [x] T-3042: 实现清除按钮逻辑：二次确认 → API 调用 → 图谱刷新
+- [x] T-3043: 图谱统计区域增加"来源批次列表"
+
+---
+
+
+### ⚠️ 微信 CDN 文件传输缺陷（P2，后置）
+> 需深度排查 reqwest 流式分块上传与微信 API 侧限制
+- [ ] 检查 `wechat/cdn.rs` 分块流式上传逻辑 `build_progress_body`
+- [ ] 排查 `ilink/bot/getuploadurl` 接口对大文件的签名超时问题
+- [ ] 实现 >25MB 失败时自动降级至 Web Drop (T-1800) 的链接分享机制
+
+### ⚠️ PDF 转图片功能失效（P2，后置）
+> 需修改 Rust 接口使用 `app_handle.path().resource_dir()` 动态定位 pdfium.dll
+- [ ] 修改 `pdf_renderer.rs` 与 `kb_extractor.rs` 绑定路径为 Tauri 资源目录
+
+### 💡 界面体验清债与输入指令重构（P3，后置）
+- [ ] Slash/Mention Command 智能悬浮补全菜单
+- [ ] Chat 界面增加显性的"📌 作为笔记速记"按钮
+
+### 💡 日程交互重构 (T-1801)（P3，后置）
+- [ ] 拖拽事件 (Drag & Drop) 改变日程日期与时间
+- [ ] 拖拽时长 (Resize Event) 改变事件开始/结束时间
+- [ ] 自定义事件弹窗替代原始 `prompt()` 弹窗

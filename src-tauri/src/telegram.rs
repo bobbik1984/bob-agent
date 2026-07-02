@@ -68,15 +68,11 @@ pub async fn start_telegram_bot(app: AppHandle, token: String) {
     
     tokio::spawn(async move {
         log::info!("Telegram bot starting with token len {}", token.len());
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(45))
-            .build()
-            .unwrap_or_default();
         let mut offset = 0;
         
         loop {
             let url = format!("https://api.telegram.org/bot{}/getUpdates?offset={}&timeout=30", token, offset);
-            match client.get(&url).send().await {
+            match crate::tunnel::send_request(reqwest::Method::GET, &url, reqwest::header::HeaderMap::new(), None, Duration::from_secs(45)).await {
                 Ok(resp) => {
                     if let Ok(json) = resp.json::<Value>().await {
                         if let Some(result) = json.get("result").and_then(|v| v.as_array()) {
@@ -85,7 +81,7 @@ pub async fn start_telegram_bot(app: AppHandle, token: String) {
                                     offset = update_id + 1;
                                 }
                                 if let Some(message) = update.get("message") {
-                                    handle_message(&app, &client, &token, message).await;
+                                    handle_message(&app, &token, message).await;
                                 }
                             }
                         }
@@ -100,7 +96,13 @@ pub async fn start_telegram_bot(app: AppHandle, token: String) {
     });
 }
 
-async fn handle_message(app: &AppHandle, client: &reqwest::Client, token: &str, message: &Value) {
+async fn tg_post(url: &str, payload: &Value) {
+    let mut headers = reqwest::header::HeaderMap::new();
+    headers.insert(reqwest::header::CONTENT_TYPE, reqwest::header::HeaderValue::from_static("application/json"));
+    let _ = crate::tunnel::send_request(reqwest::Method::POST, url, headers, Some(reqwest::Body::from(serde_json::to_vec(payload).unwrap())), Duration::from_secs(15)).await;
+}
+
+async fn handle_message(app: &AppHandle, token: &str, message: &Value) {
     if let Some(text) = message.get("text").and_then(|v| v.as_str()) {
         let chat_id = message.get("chat").and_then(|c| c.get("id")).and_then(|v| v.as_i64()).unwrap_or(0);
         let user_id = format!("tg-{}", chat_id);
@@ -109,18 +111,14 @@ async fn handle_message(app: &AppHandle, client: &reqwest::Client, token: &str, 
 
         // 拦截全局 /sessions 等指令
         if let Some(reply_text) = crate::im_sessions::handle_im_command(&user_id, text) {
-            let _ = client.post(&format!("https://api.telegram.org/bot{}/sendMessage", token))
-                .json(&serde_json::json!({ "chat_id": chat_id, "text": reply_text }))
-                .send().await;
+            tg_post(&format!("https://api.telegram.org/bot{}/sendMessage", token), &serde_json::json!({ "chat_id": chat_id, "text": reply_text })).await;
             return;
         }
 
         let conv_id = crate::im_sessions::get_or_create_conv_id(&user_id);
 
         // Send typing action
-        let _ = client.post(&format!("https://api.telegram.org/bot{}/sendChatAction", token))
-            .json(&json!({ "chat_id": chat_id, "action": "typing" }))
-            .send().await;
+        tg_post(&format!("https://api.telegram.org/bot{}/sendChatAction", token), &json!({ "chat_id": chat_id, "action": "typing" })).await;
 
         let messages = vec![json!({ "role": "user", "content": text })];
         
@@ -138,8 +136,6 @@ async fn handle_message(app: &AppHandle, client: &reqwest::Client, token: &str, 
         let reply = result.get("content").and_then(|v| v.as_str()).unwrap_or("[无响应]");
         
         // Send reply back
-        let _ = client.post(&format!("https://api.telegram.org/bot{}/sendMessage", token))
-            .json(&json!({ "chat_id": chat_id, "text": reply }))
-            .send().await;
+        tg_post(&format!("https://api.telegram.org/bot{}/sendMessage", token), &json!({ "chat_id": chat_id, "text": reply })).await;
     }
 }

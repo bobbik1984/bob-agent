@@ -1,0 +1,10 @@
+D:\OneDrive\Learning\Code\Gemini\bob-agent\temp_build\target\release\deps\version_check-75290a5d21a10a3b.d: C:\Users\xm_bo\.cargo\registry\src\mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda\version_check-0.9.5\src\lib.rs C:\Users\xm_bo\.cargo\registry\src\mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda\version_check-0.9.5\src\version.rs C:\Users\xm_bo\.cargo\registry\src\mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda\version_check-0.9.5\src\channel.rs C:\Users\xm_bo\.cargo\registry\src\mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda\version_check-0.9.5\src\date.rs
+
+D:\OneDrive\Learning\Code\Gemini\bob-agent\temp_build\target\release\deps\libversion_check-75290a5d21a10a3b.rlib: C:\Users\xm_bo\.cargo\registry\src\mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda\version_check-0.9.5\src\lib.rs C:\Users\xm_bo\.cargo\registry\src\mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda\version_check-0.9.5\src\version.rs C:\Users\xm_bo\.cargo\registry\src\mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda\version_check-0.9.5\src\channel.rs C:\Users\xm_bo\.cargo\registry\src\mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda\version_check-0.9.5\src\date.rs
+
+D:\OneDrive\Learning\Code\Gemini\bob-agent\temp_build\target\release\deps\libversion_check-75290a5d21a10a3b.rmeta: C:\Users\xm_bo\.cargo\registry\src\mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda\version_check-0.9.5\src\lib.rs C:\Users\xm_bo\.cargo\registry\src\mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda\version_check-0.9.5\src\version.rs C:\Users\xm_bo\.cargo\registry\src\mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda\version_check-0.9.5\src\channel.rs C:\Users\xm_bo\.cargo\registry\src\mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda\version_check-0.9.5\src\date.rs
+
+C:\Users\xm_bo\.cargo\registry\src\mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda\version_check-0.9.5\src\lib.rs:
+C:\Users\xm_bo\.cargo\registry\src\mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda\version_check-0.9.5\src\version.rs:
+C:\Users\xm_bo\.cargo\registry\src\mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda\version_check-0.9.5\src\channel.rs:
+C:\Users\xm_bo\.cargo\registry\src\mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda\version_check-0.9.5\src\date.rs:

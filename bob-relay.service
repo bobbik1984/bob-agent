@@ -1,13 +1,14 @@
-﻿[Unit]
-Description=Bob Web Drop Relay
+[Unit]
+Description=Bob Relay Server (WebSocket & Proxy) Python
 After=network.target
 
 [Service]
 Type=simple
-ExecStart=/opt/bob/bob-relay
-Restart=on-failure
 User=ubuntu
-Environment="RUST_LOG=info"
+WorkingDirectory=/home/ubuntu/bob-relay
+ExecStart=/opt/quant_lab/.venv/bin/python bob_relay.py
+Restart=always
+RestartSec=5
 
 [Install]
 WantedBy=multi-user.target

@@ -319,6 +319,7 @@ window.electronAPI = {
   kgStats: async () => invoke('kg_stats'),
   kgDeleteNode: async (nodeId) => invoke('kg_delete_node_cmd', { nodeId }),
   kgBackfill: async () => invoke('kg_backfill'),
+  systemRemoveSource: async (batchId) => invoke('system_remove_source', { batchId }),
 
   // ── 智能笔记 (Notebook) ──────────────────────────────
   notebookListNotes:   async () => invoke('notebook_list_notes'),

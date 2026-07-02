@@ -271,7 +271,7 @@ pub fn notebook_save_note(path: String, content: String, db: State<DbState>) -> 
                     frontmatter_title.clone()
                 };
                 let preview = content.chars().take(200).collect::<String>();
-                let _ = crate::kg::upsert_node(&conn, &note_id, &note_label, "note", &preview, &path);
+                let _ = crate::kg::upsert_node(&conn, &note_id, &note_label, "note", &preview, &path, "");
 
                 // P1-2: Sync tags → KG tag nodes + tagged_as edges
                 if !frontmatter_tags.is_empty() {
@@ -279,7 +279,7 @@ pub fn notebook_save_note(path: String, content: String, db: State<DbState>) -> 
                         let tag_trimmed = tag.trim();
                         if tag_trimmed.is_empty() { continue; }
                         let tag_node_id = format!("tag:{}", tag_trimmed.to_lowercase());
-                        let _ = crate::kg::upsert_node(&conn, &tag_node_id, tag_trimmed, "tag", "", "notebook");
+                        let _ = crate::kg::upsert_node(&conn, &tag_node_id, tag_trimmed, "tag", "", "notebook", "");
                         let _ = crate::kg::insert_edge(&conn, &note_id, &tag_node_id, "tagged_as", 1.0);
                     }
                 }
@@ -299,7 +299,7 @@ pub fn notebook_save_note(path: String, content: String, db: State<DbState>) -> 
                         // Resolve target: try to find existing note node by label
                         let target_node_id = crate::kg::resolve_node_id(&conn, target_title, "note");
                         // Ensure target node exists (might be a "ghost" node for a note not yet created)
-                        let _ = crate::kg::upsert_node(&conn, &target_node_id, target_title, "note", "", "wikilink");
+                        let _ = crate::kg::upsert_node(&conn, &target_node_id, target_title, "note", "", "wikilink", "");
                         let _ = crate::kg::insert_edge(&conn, &note_id, &target_node_id, "links_to", 0.9);
                     }
                 }
@@ -420,7 +420,6 @@ pub fn notebook_delete_note(path: String, db: State<DbState>) -> Result<Value, S
                 // 3. Delete entity nodes where their only source was this document, 
                 // OR better: delete any orphans (nodes with no edges) after the document was removed.
                 // It's safer to just delete orphans that are NOT documents.
-                let mut orphan_count = 0;
                 
                 // For direct graph cleanup based on the `source` field (which might be the only link if edges failed)
                 // We will collect nodes where source matched, delete their edges, then delete them.
@@ -844,7 +843,7 @@ pub fn notebook_merge_tags(canonical: String, aliases: Vec<String>, db: State<Db
     // Merge KG tag nodes
     if let Ok(conn) = db.0.lock() {
         let canonical_id = format!("tag:{}", canonical.to_lowercase());
-        let _ = crate::kg::upsert_node(&conn, &canonical_id, &canonical, "tag", "", "notebook");
+        let _ = crate::kg::upsert_node(&conn, &canonical_id, &canonical, "tag", "", "notebook", "");
         for alias in &aliases {
             let alias_id = format!("tag:{}", alias.to_lowercase());
             let _ = crate::kg::merge_nodes(&conn, &canonical_id, &alias_id);

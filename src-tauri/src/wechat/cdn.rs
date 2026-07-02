@@ -151,7 +151,6 @@ async fn upload_buffer_to_cdn(
         "total_bytes": ciphertext.len(),
     }));
 
-    let client = reqwest::Client::new();
     let mut last_error: Option<String> = None;
 
     for attempt in 1..=UPLOAD_MAX_RETRIES {
@@ -165,13 +164,16 @@ async fn upload_buffer_to_cdn(
             attempt,
         );
 
-        let res = client
-            .post(&cdn_url)
-            .header("Content-Type", "application/octet-stream")
-            .body(body)
-            .timeout(std::time::Duration::from_secs(timeout_secs))
-            .send()
-            .await;
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert(reqwest::header::CONTENT_TYPE, reqwest::header::HeaderValue::from_static("application/octet-stream"));
+        
+        let res = crate::tunnel::send_request(
+            reqwest::Method::POST,
+            &cdn_url,
+            headers,
+            Some(body),
+            std::time::Duration::from_secs(timeout_secs),
+        ).await;
 
         match res {
             Ok(response) => {

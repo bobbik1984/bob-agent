@@ -1,0 +1,10 @@
+D:\OneDrive\Learning\Code\Gemini\bob-agent\temp_build\target\x86_64-unknown-linux-musl\release\deps\log-d55d7412d6a9e0d3.d: C:\Users\xm_bo\.cargo\registry\src\mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda\log-0.4.33\src\lib.rs C:\Users\xm_bo\.cargo\registry\src\mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda\log-0.4.33\src\macros.rs C:\Users\xm_bo\.cargo\registry\src\mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda\log-0.4.33\src\serde.rs C:\Users\xm_bo\.cargo\registry\src\mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda\log-0.4.33\src\__private_api.rs
+
+D:\OneDrive\Learning\Code\Gemini\bob-agent\temp_build\target\x86_64-unknown-linux-musl\release\deps\liblog-d55d7412d6a9e0d3.rlib: C:\Users\xm_bo\.cargo\registry\src\mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda\log-0.4.33\src\lib.rs C:\Users\xm_bo\.cargo\registry\src\mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda\log-0.4.33\src\macros.rs C:\Users\xm_bo\.cargo\registry\src\mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda\log-0.4.33\src\serde.rs C:\Users\xm_bo\.cargo\registry\src\mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda\log-0.4.33\src\__private_api.rs
+
+D:\OneDrive\Learning\Code\Gemini\bob-agent\temp_build\target\x86_64-unknown-linux-musl\release\deps\liblog-d55d7412d6a9e0d3.rmeta: C:\Users\xm_bo\.cargo\registry\src\mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda\log-0.4.33\src\lib.rs C:\Users\xm_bo\.cargo\registry\src\mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda\log-0.4.33\src\macros.rs C:\Users\xm_bo\.cargo\registry\src\mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda\log-0.4.33\src\serde.rs C:\Users\xm_bo\.cargo\registry\src\mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda\log-0.4.33\src\__private_api.rs
+
+C:\Users\xm_bo\.cargo\registry\src\mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda\log-0.4.33\src\lib.rs:
+C:\Users\xm_bo\.cargo\registry\src\mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda\log-0.4.33\src\macros.rs:
+C:\Users\xm_bo\.cargo\registry\src\mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda\log-0.4.33\src\serde.rs:
+C:\Users\xm_bo\.cargo\registry\src\mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda\log-0.4.33\src\__private_api.rs:

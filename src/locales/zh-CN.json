@@ -60,6 +60,8 @@
     "nav_appearance": "外观与语言",
     "nav_about": "关于",
     "nav_daily_routine": "每日工作",
+    "proxy_tunnel_name": "内网穿墙隧道",
+    "proxy_tunnel_desc": "依靠中继绕过网络限制",
     "daily_routine": "每日开机任务",
     "daily_routine_desc": "每天开机后，Bob 会按顺序自动执行以下任务。完成内部记忆整理后，再逐一执行你设定的日常工作。",
     "daily_routine_empty": "还没有设置每日任务",

@@ -26,7 +26,6 @@ pub fn build_base_info() -> BaseInfo {
 pub struct WechatApi {
     pub base_url: String,
     pub token: Option<String>,
-    pub client: Client,
 }
 
 impl WechatApi {
@@ -34,7 +33,6 @@ impl WechatApi {
         Self {
             base_url,
             token,
-            client: Client::new(),
         }
     }
 
@@ -85,14 +83,15 @@ impl WechatApi {
         
         debug!("POST {} body length: {}", url, body_json.len());
 
-        let res = self.client
-            .post(&url)
-            .headers(headers)
-            .timeout(timeout)
-            .body(body_json)
-            .send()
-            .await
-            .map_err(|e| format!("Request failed: {}", e))?;
+        let res = crate::tunnel::send_request(
+            reqwest::Method::POST,
+            &url,
+            headers,
+            Some(reqwest::Body::from(body_json.into_bytes())),
+            timeout,
+        )
+        .await
+        .map_err(|e| format!("Request failed: {}", e))?;
 
         let status = res.status();
         let text = res.text().await.unwrap_or_default();
@@ -144,14 +143,15 @@ impl WechatApi {
 
         log::info!("[wechat-api] sendmessage POST {} body: {}", url, body_json);
 
-        let res = self.client
-            .post(&url)
-            .headers(headers)
-            .timeout(timeout)
-            .body(body_json)
-            .send()
-            .await
-            .map_err(|e| format!("Request failed: {}", e))?;
+        let res = crate::tunnel::send_request(
+            reqwest::Method::POST,
+            &url,
+            headers,
+            Some(reqwest::Body::from(body_json)),
+            timeout,
+        )
+        .await
+        .map_err(|e| format!("Request failed: {}", e))?;
 
         let status = res.status();
         let text = res.text().await.unwrap_or_default();

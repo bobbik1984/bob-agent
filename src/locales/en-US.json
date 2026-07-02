@@ -60,6 +60,8 @@
     "nav_appearance": "Appearance",
     "nav_about": "About",
     "nav_daily_routine": "Daily Routine",
+    "proxy_tunnel_name": "Proxy Tunnel",
+    "proxy_tunnel_desc": "Bypass network restrictions by relaying traffic",
     "daily_routine": "Daily Startup Tasks",
     "daily_routine_desc": "Bob automatically runs these tasks each day when your computer wakes up. Memory maintenance runs first, followed by your custom tasks.",
     "daily_routine_empty": "No daily tasks configured yet",

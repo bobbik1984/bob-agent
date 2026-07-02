@@ -199,7 +199,18 @@ pub fn init_db(data_dir: &std::path::Path) -> Connection {
         );
         CREATE INDEX IF NOT EXISTS idx_kg_edges_source ON kg_edges(source_id);
         CREATE INDEX IF NOT EXISTS idx_kg_edges_target ON kg_edges(target_id);
+        
+        CREATE TABLE IF NOT EXISTS kg_source_batches (
+            batch_id    TEXT PRIMARY KEY,
+            folder_name TEXT NOT NULL,
+            folder_path TEXT NOT NULL,
+            file_count  INTEGER DEFAULT 0,
+            created_at  TEXT DEFAULT (datetime('now')),
+            status      TEXT DEFAULT 'active'
+        );
     ").unwrap_or_default();
+
+    let _ = conn.execute("ALTER TABLE kg_nodes ADD COLUMN source_batches TEXT DEFAULT '[]'", []);
 
     // ── 目標 19: Goal Mode V2 执行错误记录 ────────────────────
     conn.execute_batch("
