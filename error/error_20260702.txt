@@ -1,0 +1,139 @@
+
+error[E0432]: unresolved imports `tauri_plugin_global_shortcut::GlobalShortcutExt`, `tauri_plugin_global_shortcut::Shortcut`, `tauri_plugin_global_shortcut::ShortcutState`
+    --> src/lib.rs:1080:52
+     |
+1080 |                 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
+     |                                                    ^^^^^^^^^^^^^^^^^  ^^^^^^^^  ^^^^^^^^^^^^^ no `ShortcutState` in the root
+     |                                                    |                  |
+     |                                                    |                  no `Shortcut` in the root
+     |                                                    no `GlobalShortcutExt` in the root
+error[E0432]: unresolved import `tauri::tray`
+    --> src/lib.rs:1100:24
+     |
+1100 |             use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+     |                        ^^^^ could not find `tray` in `tauri`
+     |
+note: found an item that was configured out
+    --> /home/runner/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/tauri-2.11.1/src/lib.rs:114:9
+     |
+ 112 | #[cfg(all(desktop, feature = "tray-icon"))]
+     |           ------- the item is gated here
+ 113 | #[cfg_attr(docsrs, doc(cfg(all(desktop, feature = "tray-icon"))))]
+ 114 | pub mod tray;
+     |         ^^^^
+error[E0432]: unresolved import `tauri::menu`
+    --> src/lib.rs:1101:24
+     |
+1101 |             use tauri::menu::{Menu, MenuItem};
+     |                        ^^^^ could not find `menu` in `tauri`
+     |
+note: found an item that was configured out
+    --> /home/runner/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/tauri-2.11.1/src/lib.rs:104:9
+     |
+ 102 | #[cfg(desktop)]
+     |       ------- the item is gated here
+ 103 | #[cfg_attr(docsrs, doc(cfg(desktop)))]
+ 104 | pub mod menu;
+     |         ^^^^
+error[E0425]: cannot find function `init` in crate `tauri_plugin_single_instance`
+   --> src/lib.rs:898:47
+    |
+898 |         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+    |                                               ^^^^ not found in `tauri_plugin_single_instance`
+    |
+help: consider importing one of these functions
+    |
+ 40 + use crate::discord::init;
+    |
+ 40 + use crate::telegram::init;
+    |
+help: if you import `init`, refer to it directly
+    |
+898 -         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+898 +         .plugin(init(|app, _args, _cwd| {
+    |
+error[E0433]: cannot find `Builder` in `tauri_plugin_global_shortcut`
+    --> src/lib.rs:1084:51
+     |
+1084 |                     tauri_plugin_global_shortcut::Builder::new()
+     |                                                   ^^^^^^^ could not find `Builder` in `tauri_plugin_global_shortcut`
+     |
+help: consider importing this struct
+     |
+  40 + use std::thread::Builder;
+     |
+help: if you import `Builder`, refer to it directly
+     |
+1084 -                     tauri_plugin_global_shortcut::Builder::new()
+1084 +                     Builder::new()
+     |
+warning: unused import: `std::io::Write`
+ --> src/scheduler.rs:4:5
+  |
+4 | use std::io::Write;
+  |     ^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+warning: unused import: `Client`
+ --> src/wechat/api.rs:1:15
+  |
+1 | use reqwest::{Client, header};
+  |               ^^^^^^
+warning: unused import: `error`
+ --> src/wechat/api.rs:6:18
+  |
+6 | use log::{debug, error};
+  |                  ^^^^^
+warning: unused import: `reqwest::Client`
+ --> src/wechat/login_qr.rs:3:5
+  |
+3 | use reqwest::Client;
+  |     ^^^^^^^^^^^^^^^
+warning: unused imports: `Engine as _` and `engine::general_purpose::STANDARD`
+ --> src/wechat/cdn.rs:8:14
+  |
+8 | use base64::{Engine as _, engine::general_purpose::STANDARD};
+  |              ^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+warning: unused imports: `debug` and `error`
+ --> src/tunnel.rs:6:11
+  |
+6 | use log::{debug, error};
+  |           ^^^^^  ^^^^^
+warning: unused import: `std::sync::Arc`
+ --> src/tunnel.rs:7:5
+  |
+7 | use std::sync::Arc;
+  |     ^^^^^^^^^^^^^^
+warning: use of deprecated method `pdfium_render::prelude::PdfBitmap::<'a>::as_bytes`: This function has been renamed to better reflect its purpose. Use the PdfBitmap::as_raw_bytes() function instead.
+  --> src/pdf_renderer.rs:36:29
+   |
+36 |         for pixel in bitmap.as_bytes().chunks_exact(4) {
+   |                             ^^^^^^^^
+   |
+   = note: `#[warn(deprecated)]` on by default
+error[E0308]: mismatched types
+   --> src/lib.rs:432:41
+    |
+432 | fn open_path_in_explorer(path: &str) -> bool {
+    |    ---------------------                ^^^^ expected `bool`, found `()`
+    |    |
+    |    implicitly returns `()` as its body has no tail or `return` expression
+error[E0599]: no method named `global_shortcut` found for mutable reference `&mut tauri::App` in the current scope
+    --> src/lib.rs:1096:21
+     |
+1096 |                 app.global_shortcut().register(shortcut)?;
+     |                     ^^^^^^^^^^^^^^^ method not found in `&mut tauri::App`
+warning: unused variable: `app_handle`
+   --> src/lib.rs:133:33
+    |
+133 | async fn system_take_screenshot(app_handle: tauri::AppHandle) -> Result<(), String> {
+    |                                 ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_app_handle`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+Some errors have detailed explanations: E0308, E0425, E0432, E0433, E0599.
+For more information about an error, try `rustc --explain E0308`.
+warning: `bob` (lib) generated 9 warnings
+error: could not compile `bob` (lib) due to 7 previous errors; 9 warnings emitted
+failed to build Android app: `Failed to run `cargo build`: command ["cargo", "build", "--package", "bob", "--manifest-path", "/home/runner/work/bob-agent/bob-agent/src-tauri/Cargo.toml", "--target", "aarch64-linux-android", "--features", "tauri/custom-protocol tauri/custom-protocol", "--lib", "--release"] exited with code 101
+       Error failed to build Android app: `Failed to run `cargo build`: command ["cargo", "build", "--package", "bob", "--manifest-path", "/home/runner/work/bob-agent/bob-agent/src-tauri/Cargo.toml", "--target", "aarch64-linux-android", "--features", "tauri/custom-protocol tauri/custom-protocol", "--lib", "--release"] exited with code 101
+Error: Process completed with exit code 1.

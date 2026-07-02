@@ -442,6 +442,10 @@ fn open_path_in_explorer(path: &str) -> bool {
     {
         std::process::Command::new("xdg-open").arg(path).spawn().is_ok()
     }
+    #[cfg(target_os = "android")]
+    {
+        false
+    }
 }
 
 #[tauri::command]
@@ -686,7 +690,7 @@ pub fn run() {
 
     let browser_state = std::sync::Arc::new(browser::BrowserState::new());
 
-    tauri::Builder::default()
+    let mut builder = tauri::Builder::default()
         .manage(db::DbState(Mutex::new(db)))
         .manage(sidecar::SidecarState { child: Mutex::new(None) })
         .manage(wechat_state.clone())
@@ -894,8 +898,11 @@ pub fn run() {
             notebook::notebook_get_backlinks,
             notebook::notebook_merge_tags,
             notebook::notebook_reject_tag_merge,
-        ])
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+        ]);
+
+    #[cfg(desktop)]
+    {
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             // 如果已经有一个实例在运行，就把已有窗口唤出来
             use tauri::Manager;
             if let Some(window) = app.get_webview_window("main") {
@@ -903,7 +910,10 @@ pub fn run() {
                 let _ = window.unminimize();
                 let _ = window.set_focus();
             }
-        }))
+        }));
+    }
+
+    builder
         .on_window_event(|window, event| match event {
             tauri::WindowEvent::CloseRequested { api, .. } => {
                 // 开发模式：点 ✕ 真正关闭，方便反复调试
@@ -1076,6 +1086,7 @@ pub fn run() {
             }
 
             // ── T-304: 全局快捷键 Ctrl+Shift+B 唤起窗口 ──
+            #[cfg(desktop)]
             {
                 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
                 use tauri::Manager;
@@ -1097,51 +1108,54 @@ pub fn run() {
             }
 
             // ── System Tray Initialization ──
-            use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-            use tauri::menu::{Menu, MenuItem};
-            use tauri::Manager;
+            #[cfg(desktop)]
+            {
+                use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+                use tauri::menu::{Menu, MenuItem};
+                use tauri::Manager;
 
-            let quit_i = MenuItem::with_id(app, "quit", "退出 Bob", true, None::<&str>)?;
-            let show_i = MenuItem::with_id(app, "show", "显示面板", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&show_i, &quit_i])?;
+                let quit_i = MenuItem::with_id(app, "quit", "退出 Bob", true, None::<&str>)?;
+                let show_i = MenuItem::with_id(app, "show", "显示面板", true, None::<&str>)?;
+                let menu = Menu::with_items(app, &[&show_i, &quit_i])?;
 
-            let _tray = TrayIconBuilder::new()
-                .icon(app.default_window_icon().unwrap().clone())
-                .tooltip("Bob Agent")
-                .menu(&menu)
-                .on_menu_event(|app, event| match event.id.as_ref() {
-                    "quit" => {
-                        // 退出前杀掉离线引擎
-                        let state = app.state::<crate::sidecar::SidecarState>();
-                        if let Ok(mut child_lock) = state.child.lock() {
-                            if let Some(mut child) = child_lock.take() {
-                                let _ = child.kill();
+                let _tray = TrayIconBuilder::new()
+                    .icon(app.default_window_icon().unwrap().clone())
+                    .tooltip("Bob Agent")
+                    .menu(&menu)
+                    .on_menu_event(|app, event| match event.id.as_ref() {
+                        "quit" => {
+                            // 退出前杀掉离线引擎
+                            let state = app.state::<crate::sidecar::SidecarState>();
+                            if let Ok(mut child_lock) = state.child.lock() {
+                                if let Some(mut child) = child_lock.take() {
+                                    let _ = child.kill();
+                                }
+                            }
+                            std::process::exit(0);
+                        },
+                        "show" => {
+                            if let Some(window) = app.get_webview_window("main") {
+                                let _ = window.show();
+                                let _ = window.set_focus();
                             }
                         }
-                        std::process::exit(0);
-                    },
-                    "show" => {
-                        if let Some(window) = app.get_webview_window("main") {
-                            let _ = window.show();
-                            let _ = window.set_focus();
+                        _ => {}
+                    })
+                    .on_tray_icon_event(|tray, event| match event {
+                        TrayIconEvent::Click {
+                            button: MouseButton::Left,
+                            button_state: MouseButtonState::Up,
+                            ..
+                        } => {
+                            if let Some(window) = tray.app_handle().get_webview_window("main") {
+                                let _ = window.show();
+                                let _ = window.set_focus();
+                            }
                         }
-                    }
-                    _ => {}
-                })
-                .on_tray_icon_event(|tray, event| match event {
-                    TrayIconEvent::Click {
-                        button: MouseButton::Left,
-                        button_state: MouseButtonState::Up,
-                        ..
-                    } => {
-                        if let Some(window) = tray.app_handle().get_webview_window("main") {
-                            let _ = window.show();
-                            let _ = window.set_focus();
-                        }
-                    }
-                    _ => {}
-                })
-                .build(app)?;
+                        _ => {}
+                    })
+                    .build(app)?;
+            }
 
             Ok(())
         })
