@@ -92,6 +92,23 @@ bob-agent/
 
 防暴设计：禁止 Goal Mode、禁止文件写入工具、语音确认缓冲、流量感知提醒
 
+### 4.1 移动端专属 UX 技术规范 (M2 核心要求)
+
+为了确保 Bob-Mobile 达到顶级原生 App 的体感，开发时必须严格遵守以下技术规范：
+
+1. **全面沉浸式与安全区自适应 (SafeArea)**
+   - **原理**: 绝不硬编码顶部留白。Tauri 需配置为全屏模式（沉浸状态栏）。
+   - **实现**: 在 Vue 根组件或布局容器的 CSS 中，必须使用 `padding-top: env(safe-area-inset-top);` 和 `padding-bottom: env(safe-area-inset-bottom);`。这样系统会自动避开刘海屏、摄像头开孔以及底部的“小白条”，做到内容充实且不遮挡系统关键信息。
+2. **强制锁定竖屏 (Portrait Lock)**
+   - **原理**: AI 效率工具（大量阅读和聊天流）在横屏下高度极度受限且易被输入法完全遮挡。
+   - **实现**: 必须在 `src-tauri/gen/android/app/src/main/AndroidManifest.xml` (或通过 tauri 移动端配置) 中将 `android:screenOrientation` 写死为 `portrait`。
+3. **原生返回手势劫持 (Edge-Swipe Back)**
+   - **原理**: 安卓设备的边缘侧滑或物理返回键，默认会触发 WebView 的历史回退。如果栈底被击穿，App 会意外退出或切入后台。
+   - **实现**: 必须在 Vue Router 全局守卫或顶层组件挂载时监听物理返回事件。逻辑链：若有弹窗/侧边栏打开 → 优先关闭它；若在聊天二级界面 → 执行 `router.back()` 回到主界面；只有在主界面栈底 → 提示“再按一次退出”或允许退后台。
+4. **全局悬浮唤醒球 (Floating Action Button - FAB)**
+   - **原理**: 手机端难以精准点击边角固定图标，改用原生 App 常见的“全局拖拽悬浮球”进行碎片输入。
+   - **实现**: 在 Vue 层全局挂载一个具有 `z-index: 9999` 的半透明 Bob 图标。使用 VueUse 的 `useDraggable` 实现全屏物理拖拽，并在松手时实现“自动贴边吸附”动画。点击该悬浮球，即可一键唤醒语音听写或闪念胶囊输入法。
+
 ---
 
 ## 五、跨端通信架构（复用现有基建）
