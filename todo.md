@@ -463,7 +463,7 @@
 - [ ] T-2227: (M2-07) 移动端专属 Onboarding 绑定流程 (在微信接入后，通过扫码 PC 端直接绑定，生成唯一设备标签，不选工作目录)
 - [ ] T-2228: (M2-08) 原生手势与物理返回键接入 (监听 Android 边缘侧滑/物理返回键，映射到 Vue Router 的 fallback)
 - [ ] T-2229: (M2-09) 灵感速记悬浮窗 (全局半透明可拖拽的 Bob 悬浮球 Floating Action Button，替代原本边角的固定按钮，一键唤醒语音或闪念输入)
-- [ ] T-2230: (M2-10) Android 原生权限与安全基建 (处理 Camera/Audio 动态权限申请，确保内部沙盒 Scoped Storage 的文件读写正确拦截)
+- [ ] T-2230: (M2-10) Android 原生权限与安全基建 (处理 Camera/Audio 动态权限申请，确保内部沙盒 Scoped Storage 的文件读写正确拦截，追加 VIBRATE 震动反馈与 WAKE_LOCK 防休眠权限)
 
 ### Phase 3: 端侧本地大模型集成 (llama.cpp)
 - [ ] T-2231: (M2-21) 调研 Tauri Mobile 下打包与拉起 `llama-server` Native 二进制的 Sidecar 方案
