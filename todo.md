@@ -454,13 +454,13 @@
 
 
 ### Phase 2: 手机端 UI 适配与裁剪 (M2 Sprint)
-- [ ] T-2221: (M2-01) 移动端响应式布局重构 (CSS 媒体查询 / Tailwind 适配)
-- [ ] T-2222: (M2-02) 避开手机顶部状态栏（沉浸式处理 / SafeAreaPadding）
+- [ ] T-2221: (M2-01) 移动端布局彻底重构 (底部导航条 Bottom Navigation，完全替换 PC 侧边栏)
+- [ ] T-2222: (M2-02) 避开手机状态栏（沉浸式处理 / SafeAreaPadding），最大化屏幕利用率
 - [ ] T-2223: (M2-03) 移除或折叠微信、Telegram、Discord 等桌面端专属通道入口
-- [ ] T-2224: (M2-04) 替换 Tauri 默认 Android 图标为专属 Bob Logo
-- [ ] T-2225: (M2-05) SVG 图片和加载动画的移动端比例缩放修复
-- [ ] T-2226: (M2-06) Touch 交互事件优化（滑动抽屉、防误触）
-- [ ] T-2227: (M2-07) Onboarding 流程逻辑修剪（无需选工作目录）
+- [ ] T-2224: (M2-04) 替换 Tauri 默认 Android 图标为专属 Bob Logo，缩放优化 SVG
+- [ ] T-2225: (M2-05) 聊天视图双层级改造 (默认打开上一个对话记录，支持后退返回全局对话列表)
+- [ ] T-2226: (M2-06) 知识库视图极简改造 (左上角汉堡包按钮等小面积控件，用于切换图谱与知识库状态)
+- [ ] T-2227: (M2-07) 移动端专属 Onboarding 绑定流程 (在微信接入后，通过扫码 PC 端直接绑定，生成唯一设备标签，不选工作目录)
 
 ### Phase 3: 端侧本地大模型集成 (llama.cpp)
 - [ ] T-2231: (M2-21) 调研 Tauri Mobile 下打包与拉起 `llama-server` Native 二进制的 Sidecar 方案
@@ -485,7 +485,7 @@
 
 ### Phase 3c: 同步协议
 - [ ] T-2321: 实现 `sync_protocol.rs` (SyncPacket 序列化 + Ed25519 认证 + X25519-AES-GCM 加密)。
-- [ ] T-2322: 实现 `config_version` 配置版本同步机制 (PC 改了 API Key → 手机下次同步自动更新)。
+- [ ] T-2322: 运行时配置全量互通机制 (包括模型偏好选择、知识库状态、API Key，安装后自动双向同步更新)。
 - [ ] T-2323: 实现 SyncPacket 批量传输与 ACK + synced 标记机制。
 
 ### Phase 3d: 端到端联调
