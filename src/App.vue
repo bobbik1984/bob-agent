@@ -1,8 +1,8 @@
 <template>
   <div class="app-shell">
     <!-- 启动画面已移至 index.html (Native Splash) -->
-    <!-- 标题栏拖拽区域 -->
-    <div class="titlebar titlebar-drag">
+    <!-- 标题栏拖拽区域 (Desktop) -->
+    <div v-if="!isMobile" class="titlebar titlebar-drag">
       <div class="titlebar-left titlebar-no-drag">
         <svg class="app-logo" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 152.85 99.94" @click="openQuickNote">
           <g>
@@ -37,8 +37,9 @@
 
     <!-- 主界面 -->
     <div v-else class="main-layout">
-      <!-- 侧栏 -->
+      <!-- 侧栏 (Desktop) -->
       <aside 
+        v-if="!isMobile"
         class="sidebar"
         :style="{
           width: isSidebarCollapsed ? '0px' : sidebarWidth + 'px',
@@ -241,6 +242,13 @@
 
     <!-- 闪念速记浮层 -->
     <QuickNoteOverlay ref="quickNoteRef" />
+
+    <!-- 底部导航 (Mobile) -->
+    <BottomNavigation 
+      v-if="isMobile" 
+      :active-drawer="activeDrawer" 
+      @update:active-drawer="activeDrawer = $event" 
+    />
   </div>
 </template>
 
@@ -252,6 +260,7 @@ import SettingsView from './views/SettingsView.vue';
 import KnowledgeGraphView from './views/KnowledgeGraphView.vue';
 import SetupWizard from './components/SetupWizard.vue';
 import QuickNoteOverlay from './components/QuickNoteOverlay.vue';
+import BottomNavigation from './components/BottomNavigation.vue';
 import { Inbox, Settings, Plus, X, Sun, Moon, ChevronLeft, ChevronRight, ChevronDown, Search, MessageSquare, CalendarDays, Brain, Plug, FolderOpen, Palette, Info, Sunrise, Waypoints } from 'lucide-vue-next';
 import { useI18n } from 'vue-i18n';
 import { getModelMeta } from '@/composables/useModelSwitcher';
@@ -270,6 +279,7 @@ const activeDrawer = ref('chat');         // 'chat' | 'schedule' | 'settings'
 const activeSettingsPanel = ref('model'); // 'model' | 'connections' | 'workspace' | 'daily_routine' | 'appearance' | 'about'
 const chatViewRef = ref(null);
 const quickNoteRef = ref(null);
+const isMobile = ref(/android|webos|iphone|ipad|ipod|blackberry|iemobile|opera mini/i.test(navigator.userAgent));
 
 // ── 闪念速记：全局 provide，子组件 inject 后调用即可 ──
 function openQuickNote() {
@@ -410,7 +420,25 @@ const settingsNavItems = computed(() => [
 let unlistenConfigReconciled = null;
 let unlistenRemoteMessage = null;
 
+function handleBackButton() {
+  if (showDeleteModal.value) {
+    cancelDeleteChat();
+    return true;
+  }
+  // TODO: Add other back handlers for chat view, etc.
+  return false;
+}
+
 onMounted(async () => {
+  if (isMobile.value) {
+    // 拦截 Android 物理返回键
+    history.pushState(null, '', location.href);
+    window.addEventListener('popstate', (e) => {
+      history.pushState(null, '', location.href);
+      handleBackButton();
+    });
+  }
+
   // ── 拦截 F5 / Ctrl+R：桌面应用不需要硬刷新，改为软重载 ──
   document.addEventListener('keydown', async (e) => {
     if (e.key === 'F5' || (e.ctrlKey && e.key === 'r')) {
