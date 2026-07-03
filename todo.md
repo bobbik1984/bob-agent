@@ -454,13 +454,14 @@
 
 
 ### Phase 2: 手机端 UI 适配与裁剪 (M2 Sprint)
-- [ ] T-2221: (M2-01) 移动端布局彻底重构 (底部导航条 Bottom Navigation，完全替换 PC 侧边栏)
+- [ ] T-2221: (M2-01) 移动端布局彻底重构 (底部导航条 Bottom Navigation，完全替换 PC 侧边栏，并锁定竖屏 Portrait 模式，禁止横屏旋转)
 - [ ] T-2222: (M2-02) 避开手机状态栏（沉浸式处理 / SafeAreaPadding），最大化屏幕利用率
 - [ ] T-2223: (M2-03) 移除或折叠微信、Telegram、Discord 等桌面端专属通道入口
 - [ ] T-2224: (M2-04) 替换 Tauri 默认 Android 图标为专属 Bob Logo，缩放优化 SVG
 - [ ] T-2225: (M2-05) 聊天视图双层级改造 (默认打开上一个对话记录，支持后退返回全局对话列表)
 - [ ] T-2226: (M2-06) 知识库视图极简改造 (左上角汉堡包按钮等小面积控件，用于切换图谱与知识库状态)
 - [ ] T-2227: (M2-07) 移动端专属 Onboarding 绑定流程 (在微信接入后，通过扫码 PC 端直接绑定，生成唯一设备标签，不选工作目录)
+- [ ] T-2228: (M2-08) 原生手势与物理返回键接入 (监听 Android 边缘侧滑/物理返回键，映射到 Vue Router 的 fallback)
 
 ### Phase 3: 端侧本地大模型集成 (llama.cpp)
 - [ ] T-2231: (M2-21) 调研 Tauri Mobile 下打包与拉起 `llama-server` Native 二进制的 Sidecar 方案
