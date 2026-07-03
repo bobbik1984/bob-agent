@@ -66,7 +66,7 @@ jobs:
           touch resources/llm-engine/dummy.exe resources/llm-engine/dummy.dll resources/llm-engine/dummy.disabled
           mkdir -p skills
           touch src-tauri/pdfium.dll
-          npx tauri android build --debug --target aarch64
+          npx tauri android build --target aarch64
         env:
           NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/27.0.12077973
 
