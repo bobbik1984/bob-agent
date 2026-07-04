@@ -1,11 +1,305 @@
-import { invoke } from '@tauri-apps/api/core';
-import { open, save } from '@tauri-apps/plugin-dialog';
-import { listen } from '@tauri-apps/api/event';
-import { getCurrentWindow } from '@tauri-apps/api/window';
-
 // ═══════════════════════════════════════════════════════════
 // Bob-Agent Tauri Bridge — 完整适配器层
 // Tauri v2 IPC Bridge — 将所有前端 window.electronAPI 调用映射到 Rust @tauri-apps/api/core invoke
+//
+// 浏览器降级：当 window.__TAURI_INTERNALS__ 不存在时，
+// 提供完整 Mock API 让 UI 能在纯浏览器 (npm run dev) 下渲染。
+// ═══════════════════════════════════════════════════════════
+
+const IS_TAURI = typeof window !== 'undefined' && !!window.__TAURI_INTERNALS__;
+
+// ── Tauri 或 Mock 基础函数 ──────────────────────────────
+let invoke, open, save, listen, getCurrentWindow;
+
+if (IS_TAURI) {
+  // 真实 Tauri 环境 — 动态 import 确保浏览器不会加载这些模块
+  const core = await import('@tauri-apps/api/core');
+  const dialog = await import('@tauri-apps/plugin-dialog');
+  const event = await import('@tauri-apps/api/event');
+  const win = await import('@tauri-apps/api/window');
+  invoke = core.invoke;
+  open = dialog.open;
+  save = dialog.save;
+  listen = event.listen;
+  getCurrentWindow = win.getCurrentWindow;
+} else {
+  // ── 浏览器 Mock 环境 ──────────────────────────────────
+  console.log('%c[Bridge] Running in BROWSER mock mode', 'color: #f59e0b; font-weight: bold;');
+
+  // Mock 数据
+  const MOCK_CONVERSATIONS = [
+    {
+      id: 'mock-conv-1',
+      title: '测试对话：欢迎使用 Bob',
+      model: 'mock-model',
+      updated_at: new Date().toISOString(),
+      last_message: '你好，Bob！',
+      last_role: 'user',
+      total_cost: 0.0012,
+    },
+    {
+      id: 'mock-conv-2',
+      title: '项目讨论',
+      model: 'mock-model',
+      updated_at: new Date(Date.now() - 86400000).toISOString(),
+      last_message: '好的，我来帮你分析一下这个方案。',
+      last_role: 'assistant',
+      total_cost: 0.0058,
+    },
+  ];
+
+  const MOCK_MESSAGES = {
+    'mock-conv-1': [
+      { id: 'm1', role: 'user', content: '你好，Bob！', created_at: new Date(Date.now() - 60000).toISOString() },
+      { id: 'm2', role: 'assistant', content: '嗨！我是 Bob，你的 AI 桌面助手。有什么可以帮你的吗？\n\n我可以帮你：\n- 💬 智能对话\n- 📅 管理日程\n- 📝 记录笔记\n- 🧠 构建知识图谱', created_at: new Date(Date.now() - 30000).toISOString() },
+    ],
+    'mock-conv-2': [
+      { id: 'm3', role: 'user', content: '帮我分析一下当前的项目架构', created_at: new Date(Date.now() - 172800000).toISOString() },
+      { id: 'm4', role: 'assistant', content: '好的，我来帮你分析一下这个方案。', created_at: new Date(Date.now() - 172700000).toISOString() },
+    ],
+  };
+
+  const MOCK_CONFIG = {
+    theme: 'dark',
+    accentColor: '#2776BB',
+    uiScale: '100',
+    locale: 'zh-CN',
+    offlineModelPath: '',
+    weatherCity: '',
+  };
+
+  const MOCK_MODEL_POOL = {
+    providers: [
+      {
+        id: 'deepseek', name: 'DeepSeek', configured: true,
+        models: [
+          { id: 'deepseek-chat', displayName: 'DeepSeek Chat', role: 'primary' },
+          { id: 'deepseek-reasoner', displayName: 'DeepSeek Reasoner', role: null },
+        ],
+      },
+      {
+        id: 'openai', name: 'OpenAI', configured: false,
+        models: [
+          { id: 'gpt-4o', displayName: 'GPT-4o', role: null },
+        ],
+      },
+    ],
+  };
+
+  // Mock invoke — 根据命令返回合理的假数据
+  invoke = async (cmd, args) => {
+    // console.log(`[Mock invoke] ${cmd}`, args);
+    switch (cmd) {
+      // 系统
+      case 'system_is_setup_complete': return true;
+      case 'system_get_version': return '0.5.1-dev (browser)';
+      case 'system_get_log_path': return '/mock/logs/bob.log';
+      case 'system_health_check': return { ok: true, checks: [] };
+      case 'system_validate_chat_ready': return { ready: true };
+      case 'system_get_evolution_stats': return { total_sessions: 5, total_tools: 12 };
+
+      // 配置
+      case 'config_get': return MOCK_CONFIG[args?.key] ?? null;
+      case 'config_get_all': return { ...MOCK_CONFIG };
+      case 'config_set': { MOCK_CONFIG[args?.key] = args?.value; return true; }
+
+      // 对话
+      case 'db_conversations': return [...MOCK_CONVERSATIONS];
+      case 'db_conversation_get': return MOCK_CONVERSATIONS.find(c => c.id === args?.id) || null;
+      case 'db_conversation_create': {
+        const newConv = {
+          id: 'mock-conv-' + Date.now(),
+          title: args?.title || '新对话',
+          model: args?.model || '',
+          updated_at: new Date().toISOString(),
+          last_message: '', last_role: '',
+          total_cost: 0,
+        };
+        MOCK_CONVERSATIONS.unshift(newConv);
+        MOCK_MESSAGES[newConv.id] = [];
+        return newConv.id;
+      }
+      case 'db_conversation_delete': {
+        const idx = MOCK_CONVERSATIONS.findIndex(c => c.id === args?.id);
+        if (idx >= 0) MOCK_CONVERSATIONS.splice(idx, 1);
+        return true;
+      }
+      case 'db_conversation_rename': {
+        const conv = MOCK_CONVERSATIONS.find(c => c.id === args?.id);
+        if (conv) conv.title = args?.title;
+        return true;
+      }
+      case 'system_auto_rename_conversation': return true;
+      case 'db_conversation_update_cost': return true;
+      case 'db_messages': return MOCK_MESSAGES[args?.conversationId] || [];
+      case 'db_message_add': {
+        const msgs = MOCK_MESSAGES[args?.conversationId];
+        if (msgs) {
+          msgs.push({
+            id: 'msg-' + Date.now(),
+            role: args?.role || 'user',
+            content: args?.content || '',
+            created_at: new Date().toISOString(),
+          });
+        }
+        return true;
+      }
+      case 'db_search_messages': return [];
+
+      // LLM
+      case 'llm_chat': case 'llm_vision': return 'mock-request-id';
+      case 'llm_get_models': return [];
+      case 'llm_get_model_pool': return MOCK_MODEL_POOL;
+      case 'llm_assign_model_role': return true;
+      case 'llm_get_active_models': return { primary: 'deepseek-chat', clerk: null, vision: null };
+      case 'llm_rescan_models': return true;
+      case 'llm_refresh_models': return true;
+      case 'llm_get_registry': return { providers: {} };
+      case 'llm_save_registry': return true;
+
+      // 日历
+      case 'system_list_events': return [];
+      case 'system_parse_event': return null;
+      case 'system_confirm_event': return true;
+      case 'system_delete_event': return true;
+      case 'system_update_event_status': return true;
+      case 'system_update_event_time': return true;
+
+      // Cron
+      case 'system_list_cron_jobs': return [];
+      case 'system_add_cron_job': return 'mock-cron-id';
+      case 'system_remove_cron_job': return true;
+      case 'system_toggle_cron_job': return true;
+
+      // 凭证
+      case 'system_get_api_keys': return {};
+      case 'system_set_api_key': return true;
+      case 'system_add_custom_model': return true;
+      case 'system_remove_custom_model': return true;
+      case 'system_get_tool_statuses': return [];
+
+      // 文件
+      case 'system_get_file_meta': return { name: 'mock.txt', size: 1024, isDir: false, isDirectory: false };
+      case 'system_read_file': return '(mock file content)';
+      case 'system_scan_folder': return { error: false, message: 'mock scan', files: [] };
+      case 'system_estimate_kb': return { totalFiles: 0, totalSize: 0 };
+      case 'system_build_kb': return true;
+      case 'system_check_project_index': return null;
+
+      // 文件夹跟踪
+      case 'system_get_tracked_folders': return [];
+      case 'system_add_tracked_folder': return true;
+      case 'system_remove_tracked_folder': return true;
+
+      // 记忆
+      case 'system_summarize_session': return true;
+      case 'system_get_memory_entries': return [];
+      case 'system_delete_memory_entry': return true;
+
+      // 做梦
+      case 'system_get_dream_report': return null;
+      case 'system_dismiss_dream': return true;
+      case 'system_get_tag_proposals': return [];
+      case 'system_clear_tag_proposals': return true;
+
+      // 网页
+      case 'system_fetch_url': return '(mock fetched content)';
+
+      // 系统工具
+      case 'system_open_file': case 'system_show_in_folder':
+      case 'system_open_log_dir': case 'system_open_data_dir':
+      case 'system_open_llm_engine_dir': case 'system_factory_reset':
+      case 'system_take_screenshot':
+        console.log(`[Mock] ${cmd} — desktop only, ignored`); return null;
+
+      case 'start_web_drop': return 'https://mock.webdrop.link';
+
+      // Outbox
+      case 'system_write_outbox': return true;
+
+      // 插件
+      case 'system_get_plugins': return [];
+
+      // MCP
+      case 'mcp_get_config': return { servers: [] };
+      case 'mcp_set_config': return true;
+
+      // 连接器
+      case 'connector_list': return [];
+      case 'connector_start_oauth': return null;
+      case 'connector_save_credentials': return true;
+      case 'connector_disconnect': return true;
+
+      // 离线引擎
+      case 'start_offline_engine': case 'stop_offline_engine':
+        return true;
+      case 'get_offline_engine_status': return { running: false };
+
+      // 微信/TG/Discord
+      case 'wechat_get_login_qr': return null;
+      case 'wechat_check_login_status': return { status: 'disconnected' };
+      case 'wechat_get_current_status': return { connected: false };
+      case 'system_save_telegram_token': case 'system_save_discord_token': return true;
+      case 'system_get_telegram_token': case 'system_get_discord_token': return '';
+
+      // 浏览器增强
+      case 'system_browser_detect': return { found: false };
+      case 'system_browser_enable': return false;
+
+      // GCP
+      case 'system_upload_gcp_credential': case 'system_test_gcp_credential':
+      case 'system_remove_gcp_credential': return true;
+      case 'system_get_gcp_credential_status': return { configured: false };
+
+      // Doctor
+      case 'system_auto_fix': return { success: true };
+
+      // 知识图谱
+      case 'kg_get_full_graph': return { nodes: [], edges: [] };
+      case 'kg_query': return { nodes: [], edges: [] };
+      case 'kg_stats': return { node_count: 0, edge_count: 0, type_distribution: {} };
+      case 'kg_delete_node_cmd': return true;
+      case 'kg_backfill': return true;
+      case 'system_remove_source': return true;
+
+      // 笔记
+      case 'notebook_list_notes': return [];
+      case 'notebook_read_note': return '';
+      case 'notebook_save_note': case 'notebook_create_note':
+      case 'notebook_delete_note': case 'notebook_move_note':
+      case 'notebook_rename_note': case 'notebook_append_daily':
+      case 'notebook_save_asset': case 'notebook_create_folder':
+      case 'notebook_update_tags': case 'notebook_merge_tags':
+      case 'notebook_reject_tag_merge': return true;
+      case 'notebook_search': return [];
+      case 'notebook_list_all_tags': return [];
+      case 'notebook_get_backlinks': return [];
+
+      default:
+        console.warn(`[Mock invoke] unhandled command: ${cmd}`, args);
+        return null;
+    }
+  };
+
+  // Mock 其他 Tauri API
+  open = async () => null;
+  save = async () => null;
+  listen = async (event, handler) => {
+    // console.log(`[Mock listen] ${event}`);
+    return () => {}; // 返回空清理函数
+  };
+  getCurrentWindow = () => ({
+    minimize: async () => {},
+    toggleMaximize: async () => {},
+    hide: async () => {},
+    show: async () => {},
+    setFocus: async () => {},
+    unminimize: async () => {},
+  });
+}
+
+// ═══════════════════════════════════════════════════════════
+// window.electronAPI — 统一接口层（Tauri 和浏览器共用）
 // ═══════════════════════════════════════════════════════════
 
 window.electronAPI = {
@@ -19,7 +313,7 @@ window.electronAPI = {
   listenEvent: (event, handler) => listen(event, handler),
 
   // ── 系统 & 配置 (Mapped to Rust) ─────────────────────
-  openExternal: (url) => invoke('plugin:shell|open', { path: url }),
+  openExternal: (url) => IS_TAURI ? invoke('plugin:shell|open', { path: url }) : window.open(url, '_blank'),
   isSetupComplete: () => invoke('system_is_setup_complete'),
   getConfig: (key) => invoke('config_get', { key }),
   setConfig: (key, value) => invoke('config_set', { key, value: JSON.parse(JSON.stringify(value)) }),
@@ -73,7 +367,6 @@ window.electronAPI = {
       return await invoke('llm_get_models', { provider: provider || null });
     } catch (err) {
       console.error('getModels error:', err);
-      alert('获取模型失败: ' + err);
       return [];
     }
   },
@@ -82,7 +375,7 @@ window.electronAPI = {
   onStreamChunk: (callback) => {
     let unlisten = null;
     listen('llm:chunk', (event) => {
-      callback(event.payload);
+      callback(IS_TAURI ? event.payload : event);
     }).then(fn => {
       unlisten = fn;
     });
@@ -124,7 +417,7 @@ window.electronAPI = {
   onSchedulerCompleted: (callback) => {
     let unlisten = null;
     listen('scheduler:completed', (event) => {
-      callback(event.payload);
+      callback(IS_TAURI ? event.payload : event);
     }).then(fn => { unlisten = fn; });
     return () => { if (unlisten) { unlisten(); unlisten = null; } };
   },
@@ -132,7 +425,7 @@ window.electronAPI = {
   onTodoReminder: (callback) => {
     let unlisten = null;
     listen('todo:reminder', (event) => {
-      callback(event.payload);
+      callback(IS_TAURI ? event.payload : event);
     }).then(fn => { unlisten = fn; });
     return () => { if (unlisten) { unlisten(); unlisten = null; } };
   },
@@ -161,14 +454,14 @@ window.electronAPI = {
   onKBProgress: (callback) => {
     let unlisten = null;
     listen('kb:progress', (event) => {
-      callback(event.payload);
+      callback(IS_TAURI ? event.payload : event);
     }).then(fn => { unlisten = fn; });
     return () => { if (unlisten) { unlisten(); unlisten = null; } };
   },
   onKBComplete: (callback) => {
     let unlisten = null;
     listen('kb:complete', (event) => {
-      callback(event.payload);
+      callback(IS_TAURI ? event.payload : event);
     }).then(fn => { unlisten = fn; });
     return () => { if (unlisten) { unlisten(); unlisten = null; } };
   },
@@ -196,7 +489,7 @@ window.electronAPI = {
   onDreamCompleted: (callback) => {
     let unlisten = null;
     listen('dream:completed', (event) => {
-      callback(event.payload);
+      callback(IS_TAURI ? event.payload : event);
     }).then(fn => { unlisten = fn; });
     return () => { if (unlisten) { unlisten(); unlisten = null; } };
   },
@@ -245,7 +538,7 @@ window.electronAPI = {
   onConfigReconciled: (callback) => {
     let unlisten = null;
     listen('config:reconciled', (event) => {
-      callback(event.payload);
+      callback(IS_TAURI ? event.payload : event);
     }).then(fn => {
       unlisten = fn;
     });
@@ -343,4 +636,4 @@ window.electronAPI = {
   invoke: (cmd, args) => invoke(cmd, args || {}),
 };
 
-console.log('Tauri Bridge v5.8: 73 Rust-native IPC — M17 Knowledge Graph.');
+console.log(`Tauri Bridge v6.0: 73 IPC — ${IS_TAURI ? 'Tauri native' : 'Browser mock'} mode.`);

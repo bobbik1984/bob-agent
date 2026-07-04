@@ -18,6 +18,14 @@
     </button>
     <button 
       class="bottom-nav-item" 
+      :class="{ active: activeDrawer === 'knowledge' }" 
+      @click="$emit('update:activeDrawer', 'knowledge')"
+    >
+      <Waypoints :size="20" />
+      <span>{{ $t('nav.knowledge') || '知识' }}</span>
+    </button>
+    <button 
+      class="bottom-nav-item" 
       :class="{ active: activeDrawer === 'settings' }" 
       @click="$emit('update:activeDrawer', 'settings')"
     >
@@ -28,7 +36,7 @@
 </template>
 
 <script setup>
-import { MessageSquare, CalendarDays, Settings } from 'lucide-vue-next';
+import { MessageSquare, CalendarDays, Settings, Waypoints } from 'lucide-vue-next';
 
 defineProps({
   activeDrawer: {

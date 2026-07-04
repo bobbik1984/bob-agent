@@ -1,5 +1,29 @@
 <template>
   <div class="kg-view layout-row">
+    <!-- Mobile 专属顶部栏 -->
+    <div v-if="isMobile" class="mobile-header">
+      <button class="mobile-hamburger" @click="emit('toggle-sidebar')">
+        <Menu :size="20" />
+      </button>
+
+      <!-- 中间下拉切换视图 -->
+      <div class="mobile-header-center">
+        <button class="mobile-header-title" @click="showMobileMenu = !showMobileMenu" style="background: transparent; border: none; display: flex; align-items: center; gap: 4px;">
+          {{ currentMode === 'graph' ? ($t('kg.graph_view') || '图谱') : ($t('kg.notebook_view') || '笔记') }}
+          <ChevronDown :size="16" />
+        </button>
+        <div v-if="showMobileMenu" class="mobile-menu-dropdown animate-slide-up" style="position: absolute; top: 30px;">
+          <button class="dropdown-item" :class="{ active: currentMode === 'graph' }" @click="currentMode = 'graph'; showMobileMenu = false">
+            <Waypoints :size="16" /> {{ $t('kg.graph_view') || '图谱' }}
+          </button>
+          <button class="dropdown-item" :class="{ active: currentMode === 'notebook' }" @click="currentMode = 'notebook'; showMobileMenu = false">
+            <FileText :size="16" /> {{ $t('kg.notebook_view') || '笔记' }}
+          </button>
+        </div>
+      </div>
+      <div class="mobile-header-right"></div>
+    </div>
+
     <!-- 侧边栏传送门 -->
     <Teleport to="#kg-sidebar-portal" v-if="isMounted">
       <div class="kg-sidebar-wrapper">
@@ -283,14 +307,18 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onBeforeUnmount, watch, computed } from 'vue';
+import { ref, onMounted, onBeforeUnmount, watch, computed, inject } from 'vue';
 import NoteExplorer from '../components/NoteExplorer.vue';
 import TiptapEditor from '../components/TiptapEditor.vue';
 import { useI18n } from 'vue-i18n';
 import { Network } from 'vis-network';
 import { DataSet } from 'vis-data';
-import { Waypoints, Search, X, FileText, RefreshCw, Plus, Link, ExternalLink, Trash2 } from 'lucide-vue-next';
+import { Waypoints, Search, X, FileText, RefreshCw, Plus, Link, ExternalLink, Trash2, ChevronRight, Menu, ChevronDown } from 'lucide-vue-next';
 
+const emit = defineEmits(['toggle-sidebar']);
+
+const isMobile = inject('isMobile');
+const showMobileMenu = ref(false);
 
 // ── 笔记模式逻辑 ─────────────────────────────────────
 const isMounted = ref(false);
@@ -1873,4 +1901,39 @@ async function removeSourceBatch(node) {
   text-overflow: ellipsis;
 }
 
+/* ── Mobile UI Adjustments ────────────────────────────────── */
+
+.mobile-menu-dropdown {
+  position: absolute;
+  top: 40px;
+  left: 0;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+  display: flex;
+  flex-direction: column;
+  min-width: 120px;
+  overflow: hidden;
+}
+
+.mobile-menu-dropdown .dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  background: transparent;
+  border: none;
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+}
+
+.mobile-menu-dropdown .dropdown-item:active {
+  background: var(--bg-tertiary);
+}
+
+.mobile-menu-dropdown .dropdown-item.active {
+  color: var(--accent-primary);
+}
 </style>

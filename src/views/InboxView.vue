@@ -1,7 +1,28 @@
 <template>
   <div class="inbox-view">
+    <!-- 移动端顶部标题栏 -->
+    <div v-if="isMobile" class="mobile-header">
+      <button class="mobile-hamburger" @click="emit('toggle-sidebar')">
+        <Menu :size="20" />
+      </button>
+      <div class="mobile-header-center">
+        <div class="mobile-header-title">{{ $t('inbox.title') }}</div>
+      </div>
+      <div class="mobile-header-right"></div>
+    </div>
+    
+    <!-- 移动端二级导航 Tab 栏 -->
+    <div v-if="isMobile" class="mobile-tab-bar">
+      <button class="mobile-tab-btn" :class="{ active: activeTab === 'timeline' }" @click="activeTab = 'timeline'">日程</button>
+      <button class="mobile-tab-btn" :class="{ active: activeTab === 'todo' }" @click="activeTab = 'todo'">
+        待办
+        <span v-if="overdueEvents.length > 0" class="red-dot"></span>
+      </button>
+      <button class="mobile-tab-btn" :class="{ active: activeTab === 'cron' }" @click="activeTab = 'cron'">自动任务</button>
+    </div>
+
     <div class="inbox-content-wrapper">
-      <div class="inbox-header">
+      <div v-if="!isMobile" class="inbox-header">
         <h2 class="inbox-title">
           <Calendar :size="24" class="title-icon" />{{ $t('inbox.title') }}</h2>
       </div>
@@ -28,7 +49,7 @@
           </div>
         </div>
         <!-- 过期事件区域 -->
-        <div v-if="overdueEvents.length > 0" class="section">
+        <div v-if="overdueEvents.length > 0 && (!isMobile || activeTab === 'todo')" class="section">
           <h3 class="section-title" style="color: var(--color-error)">
             <AlertTriangle :size="16" class="section-icon" />
             {{ $t('inbox.overdue_events') || '过期的日程' }}
@@ -36,18 +57,18 @@
           <TodoList :todos="overdueEvents" @update-status="onTodoStatusUpdate" />
         </div>
 
-        <div class="section">
+        <div v-if="!isMobile || activeTab === 'timeline'" class="section">
           <h3 class="section-title">{{ $t('inbox.this_week') }}</h3>
           <WeekTimeline :weekEvents="events" @create-event="onCreateEvent" />
         </div>
 
-        <div class="section">
+        <div v-if="!isMobile || activeTab === 'todo'" class="section">
           <h3 class="section-title">{{ $t('inbox.todo_list') }}</h3>
           <TodoList :todos="todos" @update-status="onTodoStatusUpdate" />
         </div>
 
         <!-- T-1211: 自动任务区域 -->
-        <div class="section">
+        <div v-if="!isMobile || activeTab === 'cron'" class="section">
           <h3 class="section-title">
             <Timer :size="16" class="section-icon" />
             {{ $t('inbox.auto_tasks') }}
@@ -103,14 +124,17 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { ref, onMounted, onUnmounted, computed, inject } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { formatRelativeTime as formatTime } from '@/utils/date';
-import { AlertTriangle, Calendar, Loader2, Timer, Clock, Pause, Play, Trash2, Bell } from 'lucide-vue-next';
+import { AlertTriangle, Calendar, Loader2, Timer, Clock, Pause, Play, Trash2, Bell, Menu } from 'lucide-vue-next';
 import WeekTimeline from '../components/WeekTimeline.vue';
 import TodoList from '../components/TodoList.vue';
 
+const emit = defineEmits(['toggle-sidebar']);
 const { t, locale } = useI18n();
+const isMobile = inject('isMobile');
+const activeTab = ref('timeline');
 
 const isLoading = ref(true);
 const events = ref([]);
@@ -526,5 +550,52 @@ function describeCron(expr) {
 
 .reminder-dismiss:hover {
   opacity: 1;
+}
+
+/* ── 移动端 Tab 栏 ────────────────────────────────────────── */
+.mobile-tab-bar {
+  display: flex;
+  background: var(--bg-primary);
+  border-bottom: 1px solid var(--border-subtle);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.mobile-tab-bar::-webkit-scrollbar {
+  display: none;
+}
+.mobile-tab-btn {
+  flex: 1;
+  padding: 12px 0;
+  text-align: center;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 14px;
+  position: relative;
+  white-space: nowrap;
+}
+.mobile-tab-btn.active {
+  color: var(--accent-primary);
+  font-weight: 600;
+}
+.mobile-tab-btn.active::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 20%;
+  right: 20%;
+  height: 2px;
+  background: var(--accent-primary);
+  border-radius: 2px 2px 0 0;
+}
+.red-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  background: var(--color-error);
+  border-radius: 50%;
+  position: absolute;
+  top: 8px;
+  right: 12px;
 }
 </style>

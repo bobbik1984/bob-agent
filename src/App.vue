@@ -1,5 +1,5 @@
 <template>
-  <div class="app-shell">
+  <div class="app-shell" :class="{ 'is-mobile': isMobile }">
     <!-- 启动画面已移至 index.html (Native Splash) -->
     <!-- 标题栏拖拽区域 (Desktop) -->
     <div v-if="!isMobile" class="titlebar titlebar-drag">
@@ -37,14 +37,12 @@
 
     <!-- 主界面 -->
     <div v-else class="main-layout">
-      <!-- 侧栏 (Desktop) -->
+      <!-- 侧栏 (Desktop & Mobile Drawer) -->
+      <div v-if="isMobile && mobileDrawerOpen" class="mobile-drawer-overlay animate-fade-in" @click="mobileDrawerOpen = false"></div>
       <aside 
-        v-if="!isMobile"
         class="sidebar"
-        :style="{
-          width: isSidebarCollapsed ? '0px' : sidebarWidth + 'px',
-          minWidth: isSidebarCollapsed ? '0px' : '200px'
-        }"
+        :class="{ 'mobile-drawer': isMobile, 'mobile-drawer-open': isMobile && mobileDrawerOpen }"
+        :style="!isMobile ? { width: isSidebarCollapsed ? '0px' : sidebarWidth + 'px', minWidth: isSidebarCollapsed ? '0px' : '200px' } : {}"
       >
         <!-- ═══ 抽屉 1: 对话 ═══ -->
         <div class="drawer-header" :class="{ active: activeDrawer === 'chat' }" @click="activeDrawer = 'chat'">
@@ -112,7 +110,7 @@
                 :key="conv.id"
                 class="conversation-item"
                 :class="{ active: activeConversationId === conv.id && activeDrawer === 'chat' }"
-                @click="switchConversation(conv.id); activeDrawer = 'chat'"
+                @click="switchConversation(conv.id); activeDrawer = 'chat'; if (isMobile) mobileDrawerOpen = false"
                 @dblclick.stop="startRename(conv)"
               >
                 <div class="conv-body">
@@ -201,6 +199,7 @@
 
       <!-- 侧边栏居中折叠按钮 -->
       <button 
+        v-if="!isMobile"
         class="sidebar-collapse-float" 
         :class="{ 'is-collapsed': isSidebarCollapsed }"
         :style="{ left: isSidebarCollapsed ? '0px' : sidebarWidth + 'px' }" 
@@ -212,14 +211,43 @@
 
       <!-- 内容区 -->
       <main class="content">
+        <!-- 移动端 Settings 顶部导航 -->
+        <div v-if="isMobile && activeDrawer === 'settings'" class="settings-mobile-nav">
+          <div class="mobile-header">
+            <button class="mobile-hamburger" @click="toggleSidebar">
+              <Menu :size="20" />
+            </button>
+            <div class="mobile-header-center">
+              <div class="mobile-header-title">{{ $t('nav.settings') || '设置' }}</div>
+            </div>
+            <div class="mobile-header-right"></div>
+          </div>
+          <div class="settings-mobile-grid">
+            <button
+              v-for="item in settingsNavItems"
+              :key="item.id"
+              class="settings-grid-item"
+              :class="{ active: activeSettingsPanel === item.id }"
+              @click="activeSettingsPanel = item.id"
+            >
+              <component :is="item.icon" :size="20" class="grid-icon" />
+              <span class="grid-label">{{ item.label }}</span>
+            </button>
+          </div>
+        </div>
+
         <ChatView
-          v-show="activeDrawer === 'chat'"
+          v-if="activeDrawer === 'chat'"
           ref="chatViewRef"
           :conversationId="activeConversationId"
           @update-title="updateConversationTitle"
+          @toggle-sidebar="mobileDrawerOpen = !mobileDrawerOpen"
         />
-        <InboxView v-if="activeDrawer === 'schedule'" />
-        <KnowledgeGraphView v-if="activeDrawer === 'knowledge'" />
+        <InboxView v-if="activeDrawer === 'schedule'" @toggle-sidebar="mobileDrawerOpen = !mobileDrawerOpen" />
+        <KnowledgeGraphView 
+          v-if="activeDrawer === 'knowledge'" 
+          @toggle-sidebar="mobileDrawerOpen = !mobileDrawerOpen"
+        />
         <SettingsView
           v-if="activeDrawer === 'settings'"
           :activePanel="activeSettingsPanel"
@@ -253,7 +281,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, computed, nextTick, provide } from 'vue';
+import { ref, onMounted, onUnmounted, computed, nextTick, provide, inject } from 'vue';
 import ChatView from './views/ChatView.vue';
 import InboxView from './views/InboxView.vue';
 import SettingsView from './views/SettingsView.vue';
@@ -261,7 +289,7 @@ import KnowledgeGraphView from './views/KnowledgeGraphView.vue';
 import SetupWizard from './components/SetupWizard.vue';
 import QuickNoteOverlay from './components/QuickNoteOverlay.vue';
 import BottomNavigation from './components/BottomNavigation.vue';
-import { Inbox, Settings, Plus, X, Sun, Moon, ChevronLeft, ChevronRight, ChevronDown, Search, MessageSquare, CalendarDays, Brain, Plug, FolderOpen, Palette, Info, Sunrise, Waypoints } from 'lucide-vue-next';
+import { Inbox, Settings, Plus, X, Sun, Moon, ChevronLeft, ChevronRight, ChevronDown, Search, MessageSquare, CalendarDays, Brain, Plug, FolderOpen, Palette, Info, Sunrise, Waypoints, Menu } from 'lucide-vue-next';
 import { useI18n } from 'vue-i18n';
 import { getModelMeta } from '@/composables/useModelSwitcher';
 
@@ -279,7 +307,19 @@ const activeDrawer = ref('chat');         // 'chat' | 'schedule' | 'settings'
 const activeSettingsPanel = ref('model'); // 'model' | 'connections' | 'workspace' | 'daily_routine' | 'appearance' | 'about'
 const chatViewRef = ref(null);
 const quickNoteRef = ref(null);
-const isMobile = ref(/android|webos|iphone|ipad|ipod|blackberry|iemobile|opera mini/i.test(navigator.userAgent));
+const mobileDrawerOpen = ref(false);
+// ── 响应式移动端检测 (宽高比 1:1 断点) ──
+function checkMobile() {
+  return window.innerHeight > window.innerWidth;
+}
+const isMobile = ref(checkMobile());
+provide('isMobile', isMobile);
+
+let resizeDebounce;
+function onResizeHandler() {
+  clearTimeout(resizeDebounce);
+  resizeDebounce = setTimeout(() => { isMobile.value = checkMobile(); }, 100);
+}
 
 // ── 闪念速记：全局 provide，子组件 inject 后调用即可 ──
 function openQuickNote() {
@@ -430,6 +470,9 @@ function handleBackButton() {
 }
 
 onMounted(async () => {
+  // ── 响应式布局监听 ──
+  window.addEventListener('resize', onResizeHandler);
+
   if (isMobile.value) {
     // 拦截 Android 物理返回键
     history.pushState(null, '', location.href);
@@ -550,6 +593,8 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
+  window.removeEventListener('resize', onResizeHandler);
+  clearTimeout(resizeDebounce);
   if (unlistenConfigReconciled) unlistenConfigReconciled();
   if (unlistenRemoteMessage) unlistenRemoteMessage();
   if (unlistenSchedulerGlobal) unlistenSchedulerGlobal();
@@ -1380,6 +1425,9 @@ function onNavClick(viewId) {
   overflow: hidden;
   background: var(--bg-root);
 }
+.app-shell.is-mobile .content {
+  padding-bottom: calc(60px + env(safe-area-inset-bottom, 0px));
+}
 
 /* ── 启动画面 ──────────────────────────────────────── */
 .splash-overlay {
@@ -1554,5 +1602,120 @@ function onNavClick(viewId) {
 
 .settings-nav-item.active svg {
   color: var(--accent-primary);
+}
+/* ── Mobile Drawer ────────────────────────────────────────── */
+.mobile-drawer-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  z-index: 199;
+}
+
+.mobile-drawer {
+  position: fixed;
+  top: 0;
+  left: -280px;
+  width: 280px;
+  height: 100%;
+  z-index: 200;
+  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: 2px 0 12px rgba(0,0,0,0.2);
+}
+
+.mobile-drawer-open {
+  transform: translateX(280px);
+}
+
+/* 隐藏手机侧边栏中的部分多余信息（如大号 logo） */
+.app-shell.is-mobile .sidebar-top .app-logo {
+  display: none;
+}
+.app-shell.is-mobile .titlebar-theme-btn {
+  display: none;
+}
+
+/* ── Global Mobile Header ────────────────────────────────────────── */
+.mobile-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 50px;
+  padding: 0 16px;
+  background: var(--bg-primary);
+  border-bottom: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+}
+
+.mobile-hamburger, .mobile-header-right {
+  flex: 0 0 32px; /* Fixed width for left and right to ensure center is truly centered */
+  display: flex;
+  align-items: center;
+}
+.mobile-hamburger {
+  justify-content: flex-start;
+  background: transparent;
+  border: none;
+  color: var(--text-primary);
+  padding: 8px;
+  margin-left: -8px;
+  cursor: pointer;
+}
+.mobile-header-right {
+  justify-content: flex-end;
+}
+
+.mobile-header-center {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  position: relative;
+}
+
+.mobile-header-title {
+  font-weight: 600;
+  font-size: 16px;
+  color: var(--text-primary);
+}
+
+/* ── Settings Mobile Grid ────────────────────────────────────────── */
+.settings-mobile-nav {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-primary);
+  border-bottom: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+}
+.settings-mobile-grid {
+  display: flex;
+  justify-content: space-around;
+  padding: 12px 4px;
+}
+.settings-grid-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 10px;
+  padding: 8px 4px;
+  border-radius: var(--radius-md);
+  transition: all 0.2s;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+.grid-label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+.settings-grid-item.active {
+  color: var(--accent-primary);
+  background: var(--surface-glass);
 }
 </style>
