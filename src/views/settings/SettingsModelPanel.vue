@@ -75,7 +75,7 @@
     <h4 style="margin-top: 16px; margin-bottom: 8px; font-size: 0.85em; color: var(--text-secondary);">{{ $t('settings.provider_keys_title') }}</h4>
     <div style="display: flex; flex-direction: column; margin-bottom: 20px;">
       <div class="form-group" v-for="provider in modelProviders" :key="provider.id" style="display: flex; align-items: center; gap: 12px; border-bottom: 1px solid var(--border-subtle); padding: 10px 0; margin-bottom: 0;">
-        <label class="form-label" style="width: 160px; margin-bottom: 0; display: flex; align-items: center; gap: 8px;">
+        <label class="form-label provider-label">
           <img v-if="getProviderLogo(provider.id)" :src="getProviderLogo(provider.id)" style="width: 16px; height: 16px; object-fit: contain; border-radius: 2px;" />
           <span style="flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" :title="$te('providers.' + provider.id) ? $t('providers.' + provider.id) : provider.name">{{ $te('providers.' + provider.id) ? $t('providers.' + provider.id) : provider.name }}</span>
         </label>
@@ -91,7 +91,7 @@
           </div>
           <button class="btn btn-primary" @click="uploadGcpCredential" style="padding: 4px 10px; font-size: 0.9em; white-space: nowrap;">{{ gcpCredStatus.configured ? '更换凭证' : '上传凭证' }}</button>
           <button v-if="gcpCredStatus.configured" class="btn" @click="testGcpCredential" style="padding: 4px 10px; font-size: 0.9em; white-space: nowrap;">测试</button>
-          <button class="btn-icon btn-remove-key" :style="{ visibility: gcpCredStatus.configured ? 'visible' : 'hidden' }" @click="removeGcpCredential" :title="$t('settings.delete_key')">
+          <button v-if="gcpCredStatus.configured" class="btn-icon btn-remove-key" @click="removeGcpCredential" :title="$t('settings.delete_key')">
             <X :size="14" />
           </button>
         </template>
@@ -106,8 +106,10 @@
             :placeholder="provider.hasKey ? $t('settings.configured') : $t('settings.not_configured')" 
             style="flex: 1;" 
           />
-          <button class="btn btn-primary" @click="saveApiKey(provider.id)" style="padding: 4px 10px; font-size: 0.9em;">{{ $t('settings.save') }}</button>
-          <button class="btn-icon btn-remove-key" :style="{ visibility: provider.hasKey ? 'visible' : 'hidden' }" @click="deleteApiKey(provider.id)" :title="$t('settings.delete_key')">
+          <button class="btn-save-key" @click="saveApiKey(provider.id)" :title="$t('settings.save')">
+            <Save :size="16" />
+          </button>
+          <button v-if="provider.hasKey" class="btn-icon btn-remove-key" @click="deleteApiKey(provider.id)" :title="$t('settings.delete_key')">
             <X :size="14" />
           </button>
         </template>
@@ -118,7 +120,7 @@
     <h4 style="margin-bottom: 8px; font-size: 0.85em; color: var(--text-secondary);">{{ $t('settings.plugin_keys_title') }}</h4>
     <div style="display: flex; flex-direction: column;">
       <div class="form-group" v-for="provider in toolProviders" :key="provider.id" style="display: flex; align-items: center; gap: 12px; border-bottom: 1px solid var(--border-subtle); padding: 10px 0; margin-bottom: 0;">
-        <label class="form-label" style="width: 160px; margin-bottom: 0;">{{ provider.name }}</label>
+        <label class="form-label provider-label">{{ provider.name }}</label>
         <span class="status-dot" :style="{ background: provider.hasKey ? 'var(--accent-primary)' : 'transparent', border: provider.hasKey ? '2px solid var(--accent-primary)' : '2px solid var(--text-tertiary)' }" style="width: 10px; height: 10px; border-radius: 50%; display: inline-block;"></span>
         <input 
           v-model="apiKeys[provider.id]" 
@@ -127,8 +129,10 @@
           :placeholder="provider.hasKey ? $t('settings.configured') : $t('settings.not_configured')" 
           style="flex: 1;" 
         />
-        <button class="btn btn-primary" @click="saveApiKey(provider.id)" style="padding: 4px 10px; font-size: 0.9em;">{{ $t('settings.save') }}</button>
-        <button class="btn-icon btn-remove-key" :style="{ visibility: provider.hasKey ? 'visible' : 'hidden' }" @click="deleteApiKey(provider.id)" :title="$t('settings.delete_key')">
+        <button class="btn-save-key" @click="saveApiKey(provider.id)" :title="$t('settings.save')">
+          <Save :size="16" />
+        </button>
+        <button v-if="provider.hasKey" class="btn-icon btn-remove-key" @click="deleteApiKey(provider.id)" :title="$t('settings.delete_key')">
           <X :size="14" />
         </button>
       </div>
@@ -290,7 +294,7 @@
 <script setup>
 import { ref, onMounted } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { Server, FolderOpen, Info, Key, ChevronDown, X, Plus, Trash2, Database, Check, Image as ImageIcon } from 'lucide-vue-next';
+import { Server, FolderOpen, Info, Key, ChevronDown, X, Plus, Trash2, Database, Check, Image as ImageIcon, Save } from 'lucide-vue-next';
 import ModelHub from '../../components/ModelHub.vue';
 import { getModelMeta } from '@/composables/useModelSwitcher';
 
@@ -931,5 +935,41 @@ details[open] > summary .details-chevron {
   opacity: 0.4;
   text-decoration: line-through;
   text-decoration-color: var(--text-tertiary);
+}
+
+.provider-label {
+  width: 130px;
+  margin-bottom: 0 !important;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.btn-save-key {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  cursor: pointer;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-sm, 4px);
+  transition: all 0.2s;
+}
+
+.btn-save-key:hover {
+  color: var(--accent-primary);
+  background: var(--bg-secondary);
+}
+
+@media (max-width: 768px) {
+  .provider-label {
+    width: 90px;
+  }
 }
 </style>

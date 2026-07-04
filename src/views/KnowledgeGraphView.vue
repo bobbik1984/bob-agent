@@ -1,27 +1,15 @@
 <template>
   <div class="kg-view layout-row">
-    <!-- Mobile 专属顶部栏 -->
-    <div v-if="isMobile" class="mobile-header">
-      <button class="mobile-hamburger" @click="emit('toggle-sidebar')">
-        <Menu :size="20" />
+    <!-- 移动端二级导航 Tab 栏 -->
+    <div v-if="isMobile" class="mobile-tab-grid">
+      <button class="mobile-tab-item" :class="{ active: currentMode === 'graph' }" @click="currentMode = 'graph'">
+        <Waypoints :size="20" class="tab-icon" />
+        <span>图谱</span>
       </button>
-
-      <!-- 中间下拉切换视图 -->
-      <div class="mobile-header-center">
-        <button class="mobile-header-title" @click="showMobileMenu = !showMobileMenu" style="background: transparent; border: none; display: flex; align-items: center; gap: 4px;">
-          {{ currentMode === 'graph' ? ($t('kg.graph_view') || '图谱') : ($t('kg.notebook_view') || '笔记') }}
-          <ChevronDown :size="16" />
-        </button>
-        <div v-if="showMobileMenu" class="mobile-menu-dropdown animate-slide-up" style="position: absolute; top: 30px;">
-          <button class="dropdown-item" :class="{ active: currentMode === 'graph' }" @click="currentMode = 'graph'; showMobileMenu = false">
-            <Waypoints :size="16" /> {{ $t('kg.graph_view') || '图谱' }}
-          </button>
-          <button class="dropdown-item" :class="{ active: currentMode === 'notebook' }" @click="currentMode = 'notebook'; showMobileMenu = false">
-            <FileText :size="16" /> {{ $t('kg.notebook_view') || '笔记' }}
-          </button>
-        </div>
-      </div>
-      <div class="mobile-header-right"></div>
+      <button class="mobile-tab-item" :class="{ active: currentMode === 'notebook' }" @click="currentMode = 'notebook'">
+        <FileText :size="20" class="tab-icon" />
+        <span>笔记</span>
+      </button>
     </div>
 
     <!-- 侧边栏传送门 -->
@@ -1902,38 +1890,19 @@ async function removeSourceBatch(node) {
 }
 
 /* ── Mobile UI Adjustments ────────────────────────────────── */
+@media (max-width: 768px) {
+  .kg-view {
+    padding: 0;
+    flex-direction: column;
+  }
 
-.mobile-menu-dropdown {
-  position: absolute;
-  top: 40px;
-  left: 0;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-subtle);
-  border-radius: 8px;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.2);
-  display: flex;
-  flex-direction: column;
-  min-width: 120px;
-  overflow: hidden;
-}
 
-.mobile-menu-dropdown .dropdown-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 12px 16px;
-  background: transparent;
-  border: none;
-  color: var(--text-primary);
-  text-align: left;
-  cursor: pointer;
-}
 
-.mobile-menu-dropdown .dropdown-item:active {
-  background: var(--bg-tertiary);
-}
-
-.mobile-menu-dropdown .dropdown-item.active {
-  color: var(--accent-primary);
+  /* 悬浮搜索框在移动端定位 */
+  .kg-overlay-search {
+    left: auto !important;
+    right: 16px !important;
+    top: 16px !important;
+  }
 }
 </style>

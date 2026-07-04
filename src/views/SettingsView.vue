@@ -118,4 +118,24 @@ defineExpose({
   max-width: 700px;
   margin: 0 auto;
 }
+@media (max-width: 768px) {
+  .settings-scroll {
+    padding: 12px 16px !important;
+    padding-bottom: calc(60px + env(safe-area-inset-bottom, 16px)) !important;
+    overflow-y: overlay;
+  }
+  .settings-scroll::-webkit-scrollbar {
+    width: 4px;
+  }
+  .settings-scroll::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .settings-scroll::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.15);
+    border-radius: 10px;
+  }
+  .settings-scroll::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.3);
+  }
+}
 </style>

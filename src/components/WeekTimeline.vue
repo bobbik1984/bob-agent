@@ -1,10 +1,16 @@
 <template>
   <div class="week-timeline">
     <!-- 导航控制栏 -->
-    <div class="timeline-controls">
-      <button class="nav-btn" @click="weekOffset--">&larr; {{ $t('timeline.prev_week') || '上一周' }}</button>
-      <button class="nav-btn" @click="weekOffset = 0" :disabled="weekOffset === 0">{{ $t('timeline.this_week') || '本周' }}</button>
-      <button class="nav-btn" @click="weekOffset++">{{ $t('timeline.next_week') || '下一周' }} &rarr;</button>
+    <div class="timeline-header-row">
+      <div v-if="isMobile" class="mobile-section-title">
+        <Calendar :size="16" class="section-icon" />
+        本周日程
+      </div>
+      <div class="timeline-controls">
+        <button class="nav-btn" @click="weekOffset--">&larr; {{ $t('timeline.prev_week') || '上一周' }}</button>
+        <button class="nav-btn" @click="weekOffset = 0" :disabled="weekOffset === 0">{{ $t('timeline.this_week') || '本周' }}</button>
+        <button class="nav-btn" @click="weekOffset++">{{ $t('timeline.next_week') || '下一周' }} &rarr;</button>
+      </div>
     </div>
 
     <!-- 垂直网格视图 -->
@@ -94,10 +100,12 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue';
+import { ref, computed, onMounted, onUnmounted, nextTick, inject } from 'vue';
 import { useI18n } from 'vue-i18n';
+import { Calendar } from 'lucide-vue-next';
 
 const { t, tm } = useI18n();
+const isMobile = inject('isMobile');
 
 const props = defineProps({
   weekEvents: { type: Array, default: () => [] }
@@ -367,7 +375,8 @@ const days = computed(() => {
 
 .nav-btn {
   font-size: 12px;
-  padding: 0 16px;
+  line-height: 1;
+  padding: 1px 16px 0 16px; /* 微调 1px 的 paddingTop 以实现视觉绝对居中 */
   height: 28px;
   border-radius: 14px;
   background: var(--surface-primary);
@@ -406,7 +415,7 @@ const days = computed(() => {
   display: flex;
   border-bottom: 1px solid var(--border-subtle);
   background: var(--surface-secondary);
-  padding-right: 8px; /* 给滚动条留位 */
+  padding-right: 0;
 }
 
 .time-axis-header {
@@ -439,11 +448,11 @@ const days = computed(() => {
 }
 
 .day-date {
-  font-size: 18px;
+  font-size: 14px;
   font-weight: 500;
   color: var(--text-primary);
-  width: 32px;
-  height: 32px;
+  width: 26px;
+  height: 26px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -464,6 +473,12 @@ const days = computed(() => {
   flex: 1;
   overflow-y: auto;
   position: relative;
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none;  /* Internet Explorer 10+ */
+}
+
+.calendar-body::-webkit-scrollbar {
+  display: none; /* WebKit */
 }
 
 .time-axis {
@@ -471,6 +486,7 @@ const days = computed(() => {
   flex-shrink: 0;
   border-right: 1px solid var(--border-subtle);
   background: var(--surface-primary);
+  height: 1440px;
 }
 
 .time-slot-label {
@@ -490,6 +506,7 @@ const days = computed(() => {
   display: flex;
   flex: 1;
   position: relative;
+  height: 1440px;
 }
 
 .day-column {
@@ -631,5 +648,70 @@ const days = computed(() => {
   justify-content: flex-end;
   gap: var(--space-2);
   margin-top: var(--space-2);
+}
+
+.timeline-header-row {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  width: 100%;
+}
+
+@media (max-width: 768px) {
+  .week-timeline {
+    flex: 1;
+    min-height: 0;
+    height: 100% !important;
+    background: transparent !important;
+    border: none !important;
+    border-radius: 0 !important;
+    padding: 0 !important;
+  }
+
+  .timeline-header-row {
+    padding: 0 16px;
+    margin: 0 0 12px 0;
+    justify-content: space-between;
+    align-items: center;
+    height: 36px;
+  }
+  
+  .timeline-controls {
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+  
+  .mobile-section-title {
+    font-size: var(--text-lg);
+    font-weight: 600;
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  
+  .section-icon {
+    opacity: 0.8;
+  }
+
+  .calendar-header {
+    background: transparent !important;
+    padding-right: 0 !important;
+  }
+
+  .time-axis,
+  .time-axis-header {
+    background: transparent !important;
+  }
+
+  .calendar-wrapper {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    border: none !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+  }
 }
 </style>

@@ -1073,3 +1073,106 @@ code.hljs {
 /* ── 全局工具类 ── */
 @keyframes spin { to { transform: rotate(360deg); } }
 .animate-spin { animation: spin 1s linear infinite; }
+
+/* ── Mobile Layout Global Rules ── */
+@media (max-width: 768px) {
+  .mobile-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: calc(56px + env(safe-area-inset-top, 0px));
+    padding: env(safe-area-inset-top, 0px) 16px 0 16px;
+    background: var(--bg-primary);
+    border-bottom: 1px solid var(--border-subtle);
+    flex-shrink: 0;
+    z-index: 100;
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  .mobile-hamburger, .mobile-header-right {
+    flex: 0 0 32px;
+    display: flex;
+    align-items: center;
+  }
+
+  .mobile-hamburger {
+    justify-content: flex-start;
+    background: transparent;
+    border: none;
+    color: var(--text-primary);
+    padding: 8px;
+    margin-left: -8px;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .mobile-header-right {
+    justify-content: flex-end;
+  }
+
+  .mobile-header-center {
+    flex: 1;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    position: relative;
+  }
+
+  .mobile-header-title {
+    font-weight: 600;
+    font-size: 16px;
+    color: var(--text-primary);
+  }
+
+  /* ── Unified Mobile Tab/Grid Bar ── */
+  .mobile-tab-grid {
+    display: flex;
+    justify-content: space-around;
+    background: var(--bg-primary);
+    border-bottom: 1px solid var(--border-subtle);
+    padding: 0;
+    width: 100%;
+    box-sizing: border-box;
+    flex-shrink: 0;
+  }
+  
+  .mobile-tab-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    font-size: 10px;
+    padding: 10px 4px 8px 4px;
+    padding-top: calc(10px + env(safe-area-inset-top, 0px));
+    border-radius: 0;
+    transition: all 0.2s;
+    flex: 1;
+    min-width: 0;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .mobile-tab-item.active {
+    color: var(--accent-primary);
+    background: var(--surface-glass);
+    font-weight: 500;
+  }
+  
+  .mobile-tab-item .tab-icon {
+    color: inherit;
+    margin-bottom: 2px;
+  }
+
+  .mobile-tab-item span {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+    font-size: 10px;
+  }
+}

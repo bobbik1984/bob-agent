@@ -1,27 +1,25 @@
 <template>
   <div class="inbox-view">
-    <!-- 移动端顶部标题栏 -->
-    <div v-if="isMobile" class="mobile-header">
-      <button class="mobile-hamburger" @click="emit('toggle-sidebar')">
-        <Menu :size="20" />
-      </button>
-      <div class="mobile-header-center">
-        <div class="mobile-header-title">{{ $t('inbox.title') }}</div>
-      </div>
-      <div class="mobile-header-right"></div>
-    </div>
-    
     <!-- 移动端二级导航 Tab 栏 -->
-    <div v-if="isMobile" class="mobile-tab-bar">
-      <button class="mobile-tab-btn" :class="{ active: activeTab === 'timeline' }" @click="activeTab = 'timeline'">日程</button>
-      <button class="mobile-tab-btn" :class="{ active: activeTab === 'todo' }" @click="activeTab = 'todo'">
-        待办
-        <span v-if="overdueEvents.length > 0" class="red-dot"></span>
+    <div v-if="isMobile" class="mobile-tab-grid">
+      <button class="mobile-tab-item" :class="{ active: activeTab === 'timeline' }" @click="activeTab = 'timeline'">
+        <Calendar :size="20" class="tab-icon" />
+        <span>日程</span>
       </button>
-      <button class="mobile-tab-btn" :class="{ active: activeTab === 'cron' }" @click="activeTab = 'cron'">自动任务</button>
+      <button class="mobile-tab-item" :class="{ active: activeTab === 'todo' }" @click="activeTab = 'todo'">
+        <div style="position: relative; display: inline-flex;">
+          <CheckSquare :size="20" class="tab-icon" />
+          <span v-if="overdueEvents.length > 0" class="red-dot" style="top: -2px; right: -6px;"></span>
+        </div>
+        <span>待办</span>
+      </button>
+      <button class="mobile-tab-item" :class="{ active: activeTab === 'cron' }" @click="activeTab = 'cron'">
+        <Zap :size="20" class="tab-icon" />
+        <span>自动任务</span>
+      </button>
     </div>
 
-    <div class="inbox-content-wrapper">
+    <div class="inbox-content-wrapper" :class="{ 'is-timeline-tab': activeTab === 'timeline' && isMobile }">
       <div v-if="!isMobile" class="inbox-header">
         <h2 class="inbox-title">
           <Calendar :size="24" class="title-icon" />{{ $t('inbox.title') }}</h2>
@@ -58,12 +56,15 @@
         </div>
 
         <div v-if="!isMobile || activeTab === 'timeline'" class="section">
-          <h3 class="section-title">{{ $t('inbox.this_week') }}</h3>
+          <h3 v-if="!isMobile" class="section-title">{{ $t('inbox.this_week') }}</h3>
           <WeekTimeline :weekEvents="events" @create-event="onCreateEvent" />
         </div>
 
         <div v-if="!isMobile || activeTab === 'todo'" class="section">
-          <h3 class="section-title">{{ $t('inbox.todo_list') }}</h3>
+          <h3 class="section-title">
+            <CheckSquare :size="16" class="section-icon" />
+            {{ $t('inbox.todo_list') }}
+          </h3>
           <TodoList :todos="todos" @update-status="onTodoStatusUpdate" />
         </div>
 
@@ -127,7 +128,7 @@
 import { ref, onMounted, onUnmounted, computed, inject } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { formatRelativeTime as formatTime } from '@/utils/date';
-import { AlertTriangle, Calendar, Loader2, Timer, Clock, Pause, Play, Trash2, Bell, Menu } from 'lucide-vue-next';
+import { AlertTriangle, Calendar, Loader2, Timer, Clock, Pause, Play, Trash2, Bell, Menu, CheckSquare, Zap } from 'lucide-vue-next';
 import WeekTimeline from '../components/WeekTimeline.vue';
 import TodoList from '../components/TodoList.vue';
 
@@ -352,7 +353,8 @@ function describeCron(expr) {
   font-size: var(--text-lg);
   font-weight: 600;
   color: var(--text-secondary);
-  margin-bottom: var(--space-3);
+  margin: 0 0 var(--space-3) 0;
+  height: 36px;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -552,42 +554,6 @@ function describeCron(expr) {
   opacity: 1;
 }
 
-/* ── 移动端 Tab 栏 ────────────────────────────────────────── */
-.mobile-tab-bar {
-  display: flex;
-  background: var(--bg-primary);
-  border-bottom: 1px solid var(--border-subtle);
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-.mobile-tab-bar::-webkit-scrollbar {
-  display: none;
-}
-.mobile-tab-btn {
-  flex: 1;
-  padding: 12px 0;
-  text-align: center;
-  background: transparent;
-  border: none;
-  color: var(--text-secondary);
-  font-size: 14px;
-  position: relative;
-  white-space: nowrap;
-}
-.mobile-tab-btn.active {
-  color: var(--accent-primary);
-  font-weight: 600;
-}
-.mobile-tab-btn.active::after {
-  content: '';
-  position: absolute;
-  bottom: 0;
-  left: 20%;
-  right: 20%;
-  height: 2px;
-  background: var(--accent-primary);
-  border-radius: 2px 2px 0 0;
-}
 .red-dot {
   display: inline-block;
   width: 6px;
@@ -597,5 +563,38 @@ function describeCron(expr) {
   position: absolute;
   top: 8px;
   right: 12px;
+}
+@media (max-width: 768px) {
+  .inbox-view {
+    padding: 0;
+    padding-bottom: 0;
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    overflow: hidden;
+  }
+  .inbox-content-wrapper {
+    padding: 12px 16px;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+  .inbox-content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+  .inbox-content-wrapper.is-timeline-tab {
+    padding: 12px 0 0 0 !important;
+  }
+  .inbox-content-wrapper.is-timeline-tab .section {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    margin: 0 !important;
+  }
 }
 </style>

@@ -94,6 +94,15 @@ function getPriorityLabel(priority) {
   padding: var(--space-4);
 }
 
+@media (max-width: 768px) {
+  .todo-list {
+    background: transparent !important;
+    border: none !important;
+    padding: 0 !important;
+    border-radius: 0 !important;
+  }
+}
+
 .empty-state {
   color: var(--text-tertiary);
   text-align: center;

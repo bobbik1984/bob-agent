@@ -18,19 +18,16 @@
       <button class="mobile-hamburger" @click="emit('toggle-sidebar')">
         <Menu :size="20" />
       </button>
-      <div class="mobile-header-center"></div>
+      <div class="mobile-header-center">
+        <span class="mobile-header-title">{{ conversationTitle }}</span>
+      </div>
       <div class="mobile-header-right">
         <span class="cost-indicator" v-if="sessionCost > 0" style="font-size: 12px; color: var(--text-tertiary);">¥{{ sessionCost.toFixed(4) }}</span>
       </div>
     </div>
     <!-- 消息区域 -->
     <div class="messages-area" ref="messagesArea">
-      <!-- 统一的页面标题 -->
-      <div v-if="messages.length > 0" class="view-header" :style="{ opacity: logoOpacity }">
-        <h2 class="view-title">
-          <div class="title-bob-logo bob-clickable" @click="openQuickNote"></div>
-        </h2>
-      </div>
+      
 
       <!-- 空状态：背景 logo（绝对定位，不参与 flex 布局） -->
       <div v-if="messages.length === 0" class="empty-logo-wrapper">
@@ -69,7 +66,9 @@
               @cancel="() => handleCancelEvent(msg)"
             />
           
+    
     </template>
+
 
 
 
@@ -304,6 +303,7 @@
         <button v-if="isMobile" class="mobile-plus-btn" @click="showMobileTools = !showMobileTools; mobileSheetState = 'main'">
           <Plus :size="24" :style="{ transform: showMobileTools ? 'rotate(45deg)' : 'none', transition: 'transform 0.2s' }" />
         </button>
+
         <!-- 文本输入 -->
         <div class="input-wrapper" style="position: relative;">
           <!-- 悬浮指令菜单 (Slash/Mention) -->
@@ -530,6 +530,82 @@
       </transition>
     </Teleport>
 
+
+    <!-- 移动端底部抽屉 (Bottom Sheet) -->
+    <Teleport to="body">
+      <div v-if="isMobile && showMobileTools" class="mobile-sheet-overlay" @click="showMobileTools = false"></div>
+      <transition name="slide-up">
+        <div v-if="isMobile && showMobileTools" class="mobile-bottom-sheet">
+          <div class="sheet-header">
+            <button v-if="mobileSheetState !== 'main'" class="sheet-back-btn" @click="mobileSheetState === 'models' ? mobileSheetState = 'providers' : mobileSheetState = 'main'">
+              <ChevronLeft :size="20" /> <span style="margin-left:4px">{{ $t('chat.back') || '返回' }}</span>
+            </button>
+            <div class="sheet-drag-handle" v-else></div>
+          </div>
+          <div v-if="mobileSheetState === 'main'" class="sheet-content main-grid">
+            <button class="sheet-grid-item" @click="handleAttach; showMobileTools = false">
+              <div class="grid-icon-wrap"><Paperclip :size="24" /></div>
+              <span>全局文件</span>
+            </button>
+            <button class="sheet-grid-item" @click="handleSaveToNote; showMobileTools = false">
+              <div class="grid-icon-wrap"><Bookmark :size="24" /></div>
+              <span>存为笔记</span>
+            </button>
+            <button class="sheet-grid-item" @click="handleScreenshot; showMobileTools = false" :disabled="isScreenshotting">
+              <div class="grid-icon-wrap"><Camera :size="24" /></div>
+              <span>截取屏幕</span>
+            </button>
+            <button class="sheet-grid-item" @click="mobileSheetState = 'providers'">
+              <div class="grid-icon-wrap"><Cpu :size="24" /></div>
+              <span>切换模型</span>
+            </button>
+            <button class="sheet-grid-item" @click="mobileSheetState = 'agentMode'">
+              <div class="grid-icon-wrap"><Zap :size="24" /></div>
+              <span>工作模式</span>
+            </button>
+            <button class="sheet-grid-item" @click="exportConversation; showMobileTools = false">
+              <div class="grid-icon-wrap"><Download :size="24" /></div>
+              <span>导出对话</span>
+            </button>
+          </div>
+          <div v-else-if="mobileSheetState === 'providers'" class="sheet-content list-view">
+            <button v-for="p in modelProviderList" :key="p.id" class="sheet-list-item" :class="{ active: switcherProvider === p.id }" @click="switcherProvider = p.id; mobileSheetState = 'models'">
+              <img v-if="getModelLogo(p.id)" :src="getModelLogo(p.id)" class="model-logo-sm" />
+              <div class="item-info">
+                <span class="item-name">{{ p.name }}</span>
+                <span class="item-count">{{ p.count }} Models</span>
+              </div>
+              <ChevronRight :size="16" class="text-tertiary" />
+            </button>
+          </div>
+          <div v-else-if="mobileSheetState === 'models'" class="sheet-content list-view">
+            <button v-for="m in switcherModels" :key="m.id" class="sheet-list-item" :class="{ active: currentModelRaw === m.id }" @click="switchModel(m.id); showMobileTools = false; mobileSheetState = 'main'">
+              <span class="item-name">{{ m.displayName }}</span>
+              <Check v-if="currentModelRaw === m.id" :size="16" class="text-accent" />
+            </button>
+            <div v-if="switcherModels.length === 0" class="sheet-empty">{{ $t('chat.no_models') || '无可用模型' }}</div>
+          </div>
+          <div v-else-if="mobileSheetState === 'agentMode'" class="sheet-content list-view">
+            <button class="sheet-list-item" :class="{ active: agentMode === 'insight' }" @click="agentMode = 'insight'; showMobileTools = false; mobileSheetState = 'main'">
+              <Shield :size="20" style="margin-right: 12px;" />
+              <span class="item-name">{{ $t('chat.mode_qa_desc') }}</span>
+              <Check v-if="agentMode === 'insight'" :size="16" class="text-accent" />
+            </button>
+            <button class="sheet-list-item" :class="{ active: agentMode === 'yolo' }" @click="agentMode = 'yolo'; showMobileTools = false; mobileSheetState = 'main'">
+              <Zap :size="20" style="margin-right: 12px;" />
+              <span class="item-name">{{ $t('chat.mode_act_desc') }}</span>
+              <Check v-if="agentMode === 'yolo'" :size="16" class="text-accent" />
+            </button>
+            <button class="sheet-list-item" :class="{ active: agentMode === 'goal' }" @click="agentMode = 'goal'; showMobileTools = false; mobileSheetState = 'main'">
+              <Target :size="20" style="margin-right: 12px;" />
+              <span class="item-name">{{ $t('chat.mode_goal_desc') }}</span>
+              <Check v-if="agentMode === 'goal'" :size="16" class="text-accent" />
+            </button>
+          </div>
+        </div>
+      </transition>
+    </Teleport>
+
 </template>
 
 <script>
@@ -673,6 +749,7 @@ function handleClipCommand() {
 // ── 闪念速记入口 (从 App.vue provide) ─────────────────
 const openQuickNote = inject('openQuickNote', () => {});
 const isMobile = inject('isMobile', ref(false));
+const conversationTitle = ref('');
 
 // ── 本地 UI 状态 ─────────────────────────────────────
 const globalFileAccess = ref(false);
@@ -1176,9 +1253,11 @@ onUnmounted(() => {
 watch(() => props.conversationId, async () => {
   if (props.conversationId) {
     const conv = await window.electronAPI.getConversation(props.conversationId);
-    sessionCost.value = conv?.cost || 0;
+    sessionCost.value = conv?.cost || conv?.total_cost || 0;
+    conversationTitle.value = conv?.title || '新对话';
   } else {
     sessionCost.value = 0;
+    conversationTitle.value = '';
   }
 
   loadMessages();
@@ -2561,6 +2640,150 @@ defineExpose({
 .app-shell.is-mobile .input-row {
   align-items: center !important;
 }
+
+/* ── Mobile Bottom Sheet ────────────────────────────────────────── */
+.mobile-sheet-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  z-index: 999;
+  backdrop-filter: blur(2px);
+}
+.mobile-bottom-sheet {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: var(--bg-surface);
+  border-top-left-radius: 16px;
+  border-top-right-radius: 16px;
+  z-index: 1000;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  padding-bottom: env(safe-area-inset-bottom);
+  box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.1);
+}
+.sheet-header {
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  flex-shrink: 0;
+}
+.sheet-drag-handle {
+  width: 36px;
+  height: 4px;
+  background: var(--border-strong);
+  border-radius: 2px;
+}
+.sheet-back-btn {
+  position: absolute;
+  left: 12px;
+  display: flex;
+  align-items: center;
+  background: transparent;
+  border: none;
+  color: var(--text-primary);
+  font-size: 14px;
+  padding: 8px;
+  cursor: pointer;
+}
+.sheet-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 16px 24px;
+}
+.main-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  padding-top: 12px;
+}
+.sheet-grid-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 11px;
+  cursor: pointer;
+}
+.grid-icon-wrap {
+  width: 56px;
+  height: 56px;
+  border-radius: 16px;
+  background: var(--bg-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-primary);
+  transition: background 0.2s;
+}
+.sheet-grid-item:active .grid-icon-wrap {
+  background: var(--surface-glass);
+}
+.list-view {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 8px;
+}
+.sheet-list-item {
+  display: flex;
+  align-items: center;
+  padding: 12px 16px;
+  background: var(--bg-secondary);
+  border: none;
+  border-radius: 12px;
+  color: var(--text-primary);
+  cursor: pointer;
+  text-align: left;
+}
+.sheet-list-item.active {
+  border: 1px solid var(--accent-primary);
+  background: rgba(var(--accent-primary-rgb), 0.1);
+}
+.item-info {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  flex: 1;
+  margin-left: 12px;
+}
+.item-name {
+  font-size: 15px;
+  font-weight: 500;
+}
+.item-count {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  margin-top: 2px;
+}
+.text-tertiary {
+  color: var(--text-tertiary);
+}
+.text-accent {
+  color: var(--accent-primary);
+}
+.sheet-empty {
+  padding: 24px;
+  text-align: center;
+  color: var(--text-tertiary);
+}
+.slide-up-enter-active,
+.slide-up-leave-active {
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.slide-up-enter-from,
+.slide-up-leave-to {
+  transform: translateY(100%);
+}
+
+
 
 /* ── Mobile Bottom Sheet ────────────────────────────────────────── */
 .mobile-sheet-overlay {

@@ -212,28 +212,17 @@
       <!-- 内容区 -->
       <main class="content">
         <!-- 移动端 Settings 顶部导航 -->
-        <div v-if="isMobile && activeDrawer === 'settings'" class="settings-mobile-nav">
-          <div class="mobile-header">
-            <button class="mobile-hamburger" @click="toggleSidebar">
-              <Menu :size="20" />
-            </button>
-            <div class="mobile-header-center">
-              <div class="mobile-header-title">{{ $t('nav.settings') || '设置' }}</div>
-            </div>
-            <div class="mobile-header-right"></div>
-          </div>
-          <div class="settings-mobile-grid">
-            <button
-              v-for="item in settingsNavItems"
-              :key="item.id"
-              class="settings-grid-item"
-              :class="{ active: activeSettingsPanel === item.id }"
-              @click="activeSettingsPanel = item.id"
-            >
-              <component :is="item.icon" :size="20" class="grid-icon" />
-              <span class="grid-label">{{ item.label }}</span>
-            </button>
-          </div>
+        <div v-if="isMobile && activeDrawer === 'settings'" class="mobile-tab-grid">
+          <button
+            v-for="item in settingsNavItems"
+            :key="item.id"
+            class="mobile-tab-item"
+            :class="{ active: activeSettingsPanel === item.id }"
+            @click="activeSettingsPanel = item.id"
+          >
+            <component :is="item.icon" :size="20" class="tab-icon" />
+            <span>{{ item.label }}</span>
+          </button>
         </div>
 
         <ChatView
@@ -1424,9 +1413,22 @@ function onNavClick(viewId) {
   flex: 1;
   overflow: hidden;
   background: var(--bg-root);
+  display: flex;
+  flex-direction: column;
 }
 .app-shell.is-mobile .content {
   padding-bottom: calc(60px + env(safe-area-inset-bottom, 0px));
+}
+@media (max-width: 768px) {
+  .content > * {
+    flex: 1;
+    min-height: 0;
+    height: auto !important;
+  }
+  .content > .mobile-tab-grid {
+    flex: none !important;
+    height: auto !important;
+  }
 }
 
 /* ── 启动画面 ──────────────────────────────────────── */
@@ -1634,88 +1636,7 @@ function onNavClick(viewId) {
   display: none;
 }
 
-/* ── Global Mobile Header ────────────────────────────────────────── */
-.mobile-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  height: 50px;
-  padding: 0 16px;
-  background: var(--bg-primary);
-  border-bottom: 1px solid var(--border-subtle);
-  flex-shrink: 0;
-}
 
-.mobile-hamburger, .mobile-header-right {
-  flex: 0 0 32px; /* Fixed width for left and right to ensure center is truly centered */
-  display: flex;
-  align-items: center;
-}
-.mobile-hamburger {
-  justify-content: flex-start;
-  background: transparent;
-  border: none;
-  color: var(--text-primary);
-  padding: 8px;
-  margin-left: -8px;
-  cursor: pointer;
-}
-.mobile-header-right {
-  justify-content: flex-end;
-}
 
-.mobile-header-center {
-  flex: 1;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  position: relative;
-}
 
-.mobile-header-title {
-  font-weight: 600;
-  font-size: 16px;
-  color: var(--text-primary);
-}
-
-/* ── Settings Mobile Grid ────────────────────────────────────────── */
-.settings-mobile-nav {
-  display: flex;
-  flex-direction: column;
-  background: var(--bg-primary);
-  border-bottom: 1px solid var(--border-subtle);
-  flex-shrink: 0;
-}
-.settings-mobile-grid {
-  display: flex;
-  justify-content: space-around;
-  padding: 12px 4px;
-}
-.settings-grid-item {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  background: transparent;
-  border: none;
-  color: var(--text-secondary);
-  font-size: 10px;
-  padding: 8px 4px;
-  border-radius: var(--radius-md);
-  transition: all 0.2s;
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-}
-.grid-label {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 100%;
-}
-.settings-grid-item.active {
-  color: var(--accent-primary);
-  background: var(--surface-glass);
-}
 </style>
