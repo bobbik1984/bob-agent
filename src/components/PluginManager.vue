@@ -119,7 +119,7 @@ const close = () => emit('close');
 const fetchPlugins = async () => {
   loading.value = true;
   try {
-    plugins.value = await window.electronAPI.getPlugins();
+    plugins.value = await window.appAPI.getPlugins();
   } catch (err) {
     console.error("Failed to load plugins:", err);
   } finally {
@@ -132,7 +132,7 @@ const installPlugin = async (id) => {
   progressLogs.value[id] = '';
   expandedId.value = id;
   try {
-    await window.electronAPI.installPlugin(id);
+    await window.appAPI.installPlugin(id);
     await fetchPlugins();
   } catch (err) {
     progressLogs.value[id] += '\n安装失败: ' + err.message;
@@ -144,15 +144,15 @@ const installPlugin = async (id) => {
 watch(() => props.isOpen, (v) => { if (v) fetchPlugins(); }, { immediate: true });
 
 onMounted(() => {
-  removeListener = window.electronAPI.onPluginProgress(({ id, msg }) => {
+  removeListener = window.appAPI.onPluginProgress(({ id, msg }) => {
     if (!progressLogs.value[id]) progressLogs.value[id] = '';
     progressLogs.value[id] += msg;
     const lines = progressLogs.value[id].split('\n');
     if (lines.length > 8) progressLogs.value[id] = lines.slice(-8).join('\n');
   });
   
-  if (window.electronAPI.onPluginUpdated) {
-    removeUpdatedListener = window.electronAPI.onPluginUpdated((updatedPlugins) => {
+  if (window.appAPI.onPluginUpdated) {
+    removeUpdatedListener = window.appAPI.onPluginUpdated((updatedPlugins) => {
       plugins.value = updatedPlugins;
     });
   }

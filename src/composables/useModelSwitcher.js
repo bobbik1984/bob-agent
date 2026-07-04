@@ -80,10 +80,10 @@ export function useModelSwitcher() {
   async function toggleModelSwitcher() {
     if (!showModelSwitcher.value) {
       try {
-        const pool = await window.electronAPI.getModelPool();
+        const pool = await window.appAPI.getModelPool();
         let keys = {};
-        if (window.electronAPI.getApiKeys) {
-          keys = await window.electronAPI.getApiKeys() || {};
+        if (window.appAPI.getApiKeys) {
+          keys = await window.appAPI.getApiKeys() || {};
         }
         availableModels.value = (pool || [])
           .filter(m => !!keys[m.provider])
@@ -107,7 +107,7 @@ export function useModelSwitcher() {
   }
 
   async function switchModel(modelId) {
-    await window.electronAPI.assignModelRole(modelId, 'main');
+    await window.appAPI.assignModelRole(modelId, 'main');
     currentModelRaw.value = modelId;
     showModelSwitcher.value = false;
   }
@@ -115,7 +115,7 @@ export function useModelSwitcher() {
   // 预加载模型列表
   async function initModels() {
     try {
-      const pool = await window.electronAPI.getModelPool();
+      const pool = await window.appAPI.getModelPool();
       availableModels.value = (pool || []).map(m => ({
         id: m.id,
         provider: m.provider,
@@ -123,14 +123,14 @@ export function useModelSwitcher() {
         displayName: m.displayName || m.id,
         vision: !!m.vision,
       }));
-      const active = await window.electronAPI.getActiveModels();
+      const active = await window.appAPI.getActiveModels();
       currentModelRaw.value = active?.main || '';
     } catch (e) { /* ignore */ }
   }
 
   async function refreshModel() {
     try {
-      const active = await window.electronAPI.getActiveModels();
+      const active = await window.appAPI.getActiveModels();
       if (active && active.main) {
         currentModelRaw.value = active.main;
       }

@@ -300,8 +300,8 @@
           </div>
         </div>
         <!-- 移动端 + 按钮 -->
-        <button v-if="isMobile" class="mobile-plus-btn" @click="showMobileTools = !showMobileTools; mobileSheetState = 'main'">
-          <Plus :size="24" :style="{ transform: showMobileTools ? 'rotate(45deg)' : 'none', transition: 'transform 0.2s' }" />
+        <button v-if="isMobile" class="mobile-plus-btn" @click="handleAttach">
+          <Paperclip :size="20" />
         </button>
 
         <!-- 文本输入 -->
@@ -327,6 +327,7 @@
             class="chat-input"
             :placeholder="$t('chat.input_placeholder')"
             :rows="isMobile ? 1 : 3"
+            enterkeyhint="send"
             @keydown="handleKeydown"
             @input="handleInput"
             @paste="handlePaste"
@@ -335,7 +336,11 @@
         <!-- Mobile 发送按钮 -->
         <div v-if="isMobile" class="mobile-send-btn-wrap">
           <button v-if="isStreaming" class="action-btn stop-btn" @click="stopGeneration" :title="$t('chat.stop')"><span class="icon-stop"></span></button>
-          <button v-else class="action-btn send-btn" :disabled="!canSend || !chatReady" @click="sendMessage" :title="chatReadyMsg || $t('chat.send')"><span class="icon-send"></span></button>
+          <button v-else class="mobile-mode-btn" @click="showMobileTools = true; mobileSheetState = 'agentMode'">
+            <Shield v-if="agentMode === 'insight'" :size="20" style="color: var(--text-tertiary);" />
+            <Zap v-else-if="agentMode === 'yolo'" :size="20" style="color: var(--accent-primary);" />
+            <Target v-else :size="20" style="color: #ff9800;" />
+          </button>
         </div>
         <!-- 底部工具栏 -->
         <div v-if="!isMobile" class="input-toolbar">
@@ -455,80 +460,7 @@
     </div>
   </div>
 
-    <!-- 移动端底部抽屉 (Bottom Sheet) -->
-    <Teleport to="body">
-      <div v-if="isMobile && showMobileTools" class="mobile-sheet-overlay" @click="showMobileTools = false"></div>
-      <transition name="slide-up">
-        <div v-if="isMobile && showMobileTools" class="mobile-bottom-sheet">
-          <div class="sheet-header">
-            <button v-if="mobileSheetState !== 'main'" class="sheet-back-btn" @click="mobileSheetState === 'models' ? mobileSheetState = 'providers' : mobileSheetState = 'main'">
-              <ChevronLeft :size="20" /> <span style="margin-left:4px">{{ $t('chat.back') || '返回' }}</span>
-            </button>
-            <div class="sheet-drag-handle" v-else></div>
-          </div>
-          <div v-if="mobileSheetState === 'main'" class="sheet-content main-grid">
-            <button class="sheet-grid-item" @click="handleAttach; showMobileTools = false">
-              <div class="grid-icon-wrap"><Paperclip :size="24" /></div>
-              <span>全局文件</span>
-            </button>
-            <button class="sheet-grid-item" @click="handleSaveToNote; showMobileTools = false">
-              <div class="grid-icon-wrap"><Bookmark :size="24" /></div>
-              <span>存为笔记</span>
-            </button>
-            <button class="sheet-grid-item" @click="handleScreenshot; showMobileTools = false" :disabled="isScreenshotting">
-              <div class="grid-icon-wrap"><Camera :size="24" /></div>
-              <span>截取屏幕</span>
-            </button>
-            <button class="sheet-grid-item" @click="mobileSheetState = 'providers'">
-              <div class="grid-icon-wrap"><Cpu :size="24" /></div>
-              <span>切换模型</span>
-            </button>
-            <button class="sheet-grid-item" @click="mobileSheetState = 'agentMode'">
-              <div class="grid-icon-wrap"><Zap :size="24" /></div>
-              <span>工作模式</span>
-            </button>
-            <button class="sheet-grid-item" @click="exportConversation; showMobileTools = false">
-              <div class="grid-icon-wrap"><Download :size="24" /></div>
-              <span>导出对话</span>
-            </button>
-          </div>
-          <div v-else-if="mobileSheetState === 'providers'" class="sheet-content list-view">
-            <button v-for="p in modelProviderList" :key="p.id" class="sheet-list-item" :class="{ active: switcherProvider === p.id }" @click="switcherProvider = p.id; mobileSheetState = 'models'">
-              <img v-if="getModelLogo(p.id)" :src="getModelLogo(p.id)" class="model-logo-sm" />
-              <div class="item-info">
-                <span class="item-name">{{ p.name }}</span>
-                <span class="item-count">{{ p.count }} Models</span>
-              </div>
-              <ChevronRight :size="16" class="text-tertiary" />
-            </button>
-          </div>
-          <div v-else-if="mobileSheetState === 'models'" class="sheet-content list-view">
-            <button v-for="m in switcherModels" :key="m.id" class="sheet-list-item" :class="{ active: currentModelRaw === m.id }" @click="switchModel(m.id); showMobileTools = false; mobileSheetState = 'main'">
-              <span class="item-name">{{ m.displayName }}</span>
-              <Check v-if="currentModelRaw === m.id" :size="16" class="text-accent" />
-            </button>
-            <div v-if="switcherModels.length === 0" class="sheet-empty">{{ $t('chat.no_models') || '无可用模型' }}</div>
-          </div>
-          <div v-else-if="mobileSheetState === 'agentMode'" class="sheet-content list-view">
-            <button class="sheet-list-item" :class="{ active: agentMode === 'insight' }" @click="agentMode = 'insight'; showMobileTools = false; mobileSheetState = 'main'">
-              <Shield :size="20" style="margin-right: 12px;" />
-              <span class="item-name">{{ $t('chat.mode_qa_desc') }}</span>
-              <Check v-if="agentMode === 'insight'" :size="16" class="text-accent" />
-            </button>
-            <button class="sheet-list-item" :class="{ active: agentMode === 'yolo' }" @click="agentMode = 'yolo'; showMobileTools = false; mobileSheetState = 'main'">
-              <Zap :size="20" style="margin-right: 12px;" />
-              <span class="item-name">{{ $t('chat.mode_act_desc') }}</span>
-              <Check v-if="agentMode === 'yolo'" :size="16" class="text-accent" />
-            </button>
-            <button class="sheet-list-item" :class="{ active: agentMode === 'goal' }" @click="agentMode = 'goal'; showMobileTools = false; mobileSheetState = 'main'">
-              <Target :size="20" style="margin-right: 12px;" />
-              <span class="item-name">{{ $t('chat.mode_goal_desc') }}</span>
-              <Check v-if="agentMode === 'goal'" :size="16" class="text-accent" />
-            </button>
-          </div>
-        </div>
-      </transition>
-    </Teleport>
+    
 
 
     <!-- 移动端底部抽屉 (Bottom Sheet) -->
@@ -537,38 +469,12 @@
       <transition name="slide-up">
         <div v-if="isMobile && showMobileTools" class="mobile-bottom-sheet">
           <div class="sheet-header">
-            <button v-if="mobileSheetState !== 'main'" class="sheet-back-btn" @click="mobileSheetState === 'models' ? mobileSheetState = 'providers' : mobileSheetState = 'main'">
+            <button v-if="mobileSheetState === 'models'" class="sheet-back-btn" @click="mobileSheetState = 'providers'">
               <ChevronLeft :size="20" /> <span style="margin-left:4px">{{ $t('chat.back') || '返回' }}</span>
             </button>
             <div class="sheet-drag-handle" v-else></div>
           </div>
-          <div v-if="mobileSheetState === 'main'" class="sheet-content main-grid">
-            <button class="sheet-grid-item" @click="handleAttach; showMobileTools = false">
-              <div class="grid-icon-wrap"><Paperclip :size="24" /></div>
-              <span>全局文件</span>
-            </button>
-            <button class="sheet-grid-item" @click="handleSaveToNote; showMobileTools = false">
-              <div class="grid-icon-wrap"><Bookmark :size="24" /></div>
-              <span>存为笔记</span>
-            </button>
-            <button class="sheet-grid-item" @click="handleScreenshot; showMobileTools = false" :disabled="isScreenshotting">
-              <div class="grid-icon-wrap"><Camera :size="24" /></div>
-              <span>截取屏幕</span>
-            </button>
-            <button class="sheet-grid-item" @click="mobileSheetState = 'providers'">
-              <div class="grid-icon-wrap"><Cpu :size="24" /></div>
-              <span>切换模型</span>
-            </button>
-            <button class="sheet-grid-item" @click="mobileSheetState = 'agentMode'">
-              <div class="grid-icon-wrap"><Zap :size="24" /></div>
-              <span>工作模式</span>
-            </button>
-            <button class="sheet-grid-item" @click="exportConversation; showMobileTools = false">
-              <div class="grid-icon-wrap"><Download :size="24" /></div>
-              <span>导出对话</span>
-            </button>
-          </div>
-          <div v-else-if="mobileSheetState === 'providers'" class="sheet-content list-view">
+          <div v-if="mobileSheetState === 'providers'" class="sheet-content list-view">
             <button v-for="p in modelProviderList" :key="p.id" class="sheet-list-item" :class="{ active: switcherProvider === p.id }" @click="switcherProvider = p.id; mobileSheetState = 'models'">
               <img v-if="getModelLogo(p.id)" :src="getModelLogo(p.id)" class="model-logo-sm" />
               <div class="item-info">
@@ -577,6 +483,7 @@
               </div>
               <ChevronRight :size="16" class="text-tertiary" />
             </button>
+            <div v-if="modelProviderList.length === 0" class="sheet-empty">{{ $t('chat.no_models') || '暂无可用模型，请先配置 API Key' }}</div>
           </div>
           <div v-else-if="mobileSheetState === 'models'" class="sheet-content list-view">
             <button v-for="m in switcherModels" :key="m.id" class="sheet-list-item" :class="{ active: currentModelRaw === m.id }" @click="switchModel(m.id); showMobileTools = false; mobileSheetState = 'main'">
@@ -728,10 +635,17 @@ function insertSlashCommand(cmdStr) {
   });
 }
 
+async function onOpenMobileModelSwitcher() {
+  await toggleModelSwitcher();
+  showModelSwitcher.value = false;
+  mobileSheetState.value = 'providers';
+  showMobileTools.value = true;
+}
+
 function handleSaveToNote() {
   const text = inputText.value.trim();
   if (!text) {
-    window.electronAPI?.showNotification(t('app.notification_title') || '提示', t('chat.cmd_note_empty') || '请先输入内容再保存为笔记');
+    window.appAPI?.showNotification(t('app.notification_title') || '提示', t('chat.cmd_note_empty') || '请先输入内容再保存为笔记');
     return;
   }
   // 在原本内容前强制加上 /memo 并触发发送
@@ -858,7 +772,7 @@ const {
           for (const pdfFile of pdfFiles) {
             const pdfPath = pdfFile.path;
             try {
-              const b64Array = await window.electronAPI.invoke('system_render_pdf_to_images', { path: pdfPath });
+              const b64Array = await window.appAPI.invoke('system_render_pdf_to_images', { path: pdfPath });
               if (b64Array && b64Array.length > 0) {
                 if (!userMessage.image_base64s) userMessage.image_base64s = [];
                 userMessage.image_base64s.push(...b64Array);
@@ -892,7 +806,7 @@ async function saveToNote(msg) {
     const cleanText = noteText.replace(/<\|mem\|>/g, '').trim();
     if (!cleanText) return;
     
-    const res = await window.electronAPI.notebookAppendDaily(cleanText);
+    const res = await window.appAPI.notebookAppendDaily(cleanText);
     if (res && res.ok) {
       msg._savedToNote = true;
       // 可以在此处弹出全局 notification，但最简单的是 UI 响应
@@ -929,7 +843,7 @@ async function copyRichText(msg) {
 // ── 浏览器增强确认 ──────────────────────────────────
 async function handleBrowserEnable(data, tool) {
   try {
-    await window.electronAPI.browserEnable();
+    await window.appAPI.browserEnable();
     tool._browserEnable = null;
     tool.result = '✅ 浏览器已启用，正在重新加载页面...';
   } catch (err) {
@@ -941,7 +855,7 @@ async function handleBrowserEnable(data, tool) {
 // ── T-1304: 自动修复处理 ─────────────────────────────
 async function handleAutoFix(code) {
   try {
-    const result = await window.electronAPI.autoFix(code);
+    const result = await window.appAPI.autoFix(code);
     if (result?.ok) {
       healthBanner.value = null;
     } else {
@@ -995,7 +909,7 @@ async function handleScreenshot() {
     } catch (_) { /* 剪贴板可能为空 */ }
 
     // 截图期间的窗口隐藏、等待和恢复逻辑已经全部移到了 Rust 后端
-    await window.electronAPI.takeScreenshot();
+    await window.appAPI.takeScreenshot();
 
     // 彻底抛弃 Tauri 官方的 readImage 插件！
     // 它在处理部分 Windows Snipping Tool 的 DIB 图像时，会导致 Rust 线程死锁或 IPC 序列化永久挂起。
@@ -1104,12 +1018,12 @@ function onMessageLinkClick(e) {
   if (href.startsWith('file://') || /^[A-Za-z]:[\\\/]/.test(href)) {
     let filePath = href.replace('file:///', '');
     try { filePath = decodeURIComponent(filePath); } catch(e){}
-    window.electronAPI.openFile(filePath).catch(err => {
+    window.appAPI.openFile(filePath).catch(err => {
       console.error('打开文件失败:', err);
     });
   } else {
-    if (window.electronAPI.openExternal) {
-      window.electronAPI.openExternal(href);
+    if (window.appAPI.openExternal) {
+      window.appAPI.openExternal(href);
     }
   }
 }
@@ -1143,11 +1057,12 @@ let tauriDragUnlistens = [];
 let remoteMessageUnlisten = null;
 
 onMounted(async () => {
-  cleanupStreamListener = window.electronAPI.onStreamChunk(handleStreamChunk);
+  window.addEventListener('open-mobile-model-switcher', onOpenMobileModelSwitcher);
+  cleanupStreamListener = window.appAPI.onStreamChunk(handleStreamChunk);
 
   // 远程消息监听
-  if (window.electronAPI.onRemoteNewMessage) {
-    remoteMessageUnlisten = await window.electronAPI.onRemoteNewMessage((event) => {
+  if (window.appAPI.onRemoteNewMessage) {
+    remoteMessageUnlisten = await window.appAPI.onRemoteNewMessage((event) => {
       const payload = event?.payload || event;
       const convId = payload?.conversation_id || event?.conversation_id;
       if (convId && convId === props.conversationId) {
@@ -1165,18 +1080,18 @@ onMounted(async () => {
 
   // CDN 上传进度监听
   if (window.__TAURI_INTERNALS__) {
-    cdnUnlistens.push(await window.electronAPI.listenEvent('cdn:upload-start', (e) => {
+    cdnUnlistens.push(await window.appAPI.listenEvent('cdn:upload-start', (e) => {
       cdnUpload.value = { active: true, fileName: e.payload.file_name, percent: 0, bytesSent: 0, totalBytes: e.payload.total_bytes, attempt: 1 };
     }));
-    cdnUnlistens.push(await window.electronAPI.listenEvent('cdn:upload-progress', (e) => {
+    cdnUnlistens.push(await window.appAPI.listenEvent('cdn:upload-progress', (e) => {
       cdnUpload.value.percent = e.payload.percent;
       cdnUpload.value.bytesSent = e.payload.bytes_sent;
     }));
-    cdnUnlistens.push(await window.electronAPI.listenEvent('cdn:upload-done', () => {
+    cdnUnlistens.push(await window.appAPI.listenEvent('cdn:upload-done', () => {
       cdnUpload.value.percent = 100;
       setTimeout(() => { cdnUpload.value.active = false; }, 1500);
     }));
-    cdnUnlistens.push(await window.electronAPI.listenEvent('cdn:upload-error', () => {
+    cdnUnlistens.push(await window.appAPI.listenEvent('cdn:upload-error', () => {
       cdnUpload.value.active = false;
     }));
   }
@@ -1186,7 +1101,7 @@ onMounted(async () => {
 
   // T-1304: 启动健康检查
   try {
-    const health = await window.electronAPI.healthCheck();
+    const health = await window.appAPI.healthCheck();
     if (health && !health.healthy) {
       const firstIssue = health.issues?.[0];
       if (firstIssue) {
@@ -1210,7 +1125,7 @@ onMounted(async () => {
 
   // T-1305: 聊天就绪校验
   try {
-    const ready = await window.electronAPI.validateChatReady();
+    const ready = await window.appAPI.validateChatReady();
     chatReady.value = ready?.ready !== false;  // fail-open
     chatReadyMsg.value = ready?.message || '';
   } catch (e) {
@@ -1233,6 +1148,7 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
+  window.removeEventListener('open-mobile-model-switcher', onOpenMobileModelSwitcher);
   if (cleanupStreamListener) cleanupStreamListener();
   if (remoteMessageUnlisten) remoteMessageUnlisten();
   document.removeEventListener('dragenter', onDragEnter);
@@ -1252,7 +1168,7 @@ onUnmounted(() => {
 // 切换对话时重新加载消息
 watch(() => props.conversationId, async () => {
   if (props.conversationId) {
-    const conv = await window.electronAPI.getConversation(props.conversationId);
+    const conv = await window.appAPI.getConversation(props.conversationId);
     sessionCost.value = conv?.cost || conv?.total_cost || 0;
     conversationTitle.value = conv?.title || '新对话';
   } else {
@@ -1262,7 +1178,7 @@ watch(() => props.conversationId, async () => {
 
   loadMessages();
   globalFileAccess.value = false;
-  currentModelRaw.value = (await window.electronAPI.getActiveModels())?.main || '';
+  currentModelRaw.value = (await window.appAPI.getActiveModels())?.main || '';
 }, { immediate: true });
 
 // streamThinking 自动滚动到底部
@@ -2649,6 +2565,17 @@ defineExpose({
   flex-shrink: 0;
   z-index: 10;
 }
+.mobile-mode-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  width: 28px;
+  height: 28px;
+  cursor: pointer;
+  padding: 0;
+}
 .app-shell.is-mobile .input-row {
   position: relative;
   align-items: flex-end !important;
@@ -2678,9 +2605,8 @@ defineExpose({
   bottom: 0;
   left: 0;
   right: 0;
-  background: var(--bg-surface);
-  border-top-left-radius: 16px;
-  border-top-right-radius: 16px;
+  background: var(--bg-primary);
+  border-radius: 0;
   z-index: 1000;
   max-height: 80vh;
   display: flex;
@@ -2721,7 +2647,7 @@ defineExpose({
 }
 .main-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(2, 1fr);
   gap: 16px;
   padding-top: 12px;
 }
@@ -2732,7 +2658,7 @@ defineExpose({
   gap: 8px;
   background: transparent;
   border: none;
-  color: var(--text-secondary);
+  color: var(--text-primary);
   font-size: 11px;
   cursor: pointer;
 }
@@ -2810,144 +2736,4 @@ defineExpose({
 
 
 /* ── Mobile Bottom Sheet ────────────────────────────────────────── */
-.mobile-sheet-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.4);
-  z-index: 999;
-  backdrop-filter: blur(2px);
-}
-.mobile-bottom-sheet {
-  position: fixed;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  background: var(--bg-surface);
-  border-top-left-radius: 16px;
-  border-top-right-radius: 16px;
-  z-index: 1000;
-  max-height: 80vh;
-  display: flex;
-  flex-direction: column;
-  padding-bottom: env(safe-area-inset-bottom);
-  box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.1);
-}
-.sheet-header {
-  height: 48px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  position: relative;
-  flex-shrink: 0;
-}
-.sheet-drag-handle {
-  width: 36px;
-  height: 4px;
-  background: var(--border-strong);
-  border-radius: 2px;
-}
-.sheet-back-btn {
-  position: absolute;
-  left: 12px;
-  display: flex;
-  align-items: center;
-  background: transparent;
-  border: none;
-  color: var(--text-primary);
-  font-size: 14px;
-  padding: 8px;
-  cursor: pointer;
-}
-.sheet-content {
-  flex: 1;
-  overflow-y: auto;
-  padding: 0 16px 24px;
-}
-.main-grid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 16px;
-  padding-top: 12px;
-}
-.sheet-grid-item {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  background: transparent;
-  border: none;
-  color: var(--text-secondary);
-  font-size: 11px;
-  cursor: pointer;
-}
-.grid-icon-wrap {
-  width: 56px;
-  height: 56px;
-  border-radius: 16px;
-  background: var(--bg-secondary);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--text-primary);
-  transition: background 0.2s;
-}
-.sheet-grid-item:active .grid-icon-wrap {
-  background: var(--surface-glass);
-}
-.list-view {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding-top: 8px;
-}
-.sheet-list-item {
-  display: flex;
-  align-items: center;
-  padding: 12px 16px;
-  background: var(--bg-secondary);
-  border: none;
-  border-radius: 12px;
-  color: var(--text-primary);
-  cursor: pointer;
-  text-align: left;
-}
-.sheet-list-item.active {
-  border: 1px solid var(--accent-primary);
-  background: rgba(var(--accent-primary-rgb), 0.1);
-}
-.item-info {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  flex: 1;
-  margin-left: 12px;
-}
-.item-name {
-  font-size: 15px;
-  font-weight: 500;
-}
-.item-count {
-  font-size: 12px;
-  color: var(--text-tertiary);
-  margin-top: 2px;
-}
-.text-tertiary {
-  color: var(--text-tertiary);
-}
-.text-accent {
-  color: var(--accent-primary);
-}
-.sheet-empty {
-  padding: 24px;
-  text-align: center;
-  color: var(--text-tertiary);
-}
-.slide-up-enter-active,
-.slide-up-leave-active {
-  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-}
-.slide-up-enter-from,
-.slide-up-leave-to {
-  transform: translateY(100%);
-}
 </style>

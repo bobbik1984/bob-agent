@@ -80,6 +80,13 @@ aes-gcm = "0.10"
 webrtc = "0.12"
 rustls = { version = "0.23", features = ["ring"] }
 
+# Candle Inference Engine
+candle-core = "0.5.0"
+candle-nn = "0.5.0"
+candle-transformers = "0.5.0"
+tokenizers = "0.15.2"
+anyhow = "1.0"
+
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.52", features = ["Win32_System_JobObjects", "Win32_Foundation", "Win32_System_Threading", "Win32_Security", "Win32_UI_WindowsAndMessaging", "Win32_System_DataExchange"] }
 

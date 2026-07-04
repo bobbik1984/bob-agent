@@ -44,7 +44,7 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
   // ── 消息加载 ─────────────────────────────────────
   async function loadMessages() {
     if (!props.conversationId) return;
-    const rawMessages = await window.electronAPI.getMessages(props.conversationId);
+    const rawMessages = await window.appAPI.getMessages(props.conversationId);
     messages.value = rawMessages.map(m => ({
       ...m,
       _thinkingExpanded: false,
@@ -73,7 +73,7 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
       const noteContent = text.replace(/^\/memo\s+/, '').trim();
       if (noteContent) {
         try {
-          const res = await window.electronAPI.notebookAppendDaily(noteContent);
+          const res = await window.appAPI.notebookAppendDaily(noteContent);
           if (res && res.ok) {
             messages.value.push({ role: 'user', content: text });
             messages.value.push({ 
@@ -97,10 +97,10 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
       const keyword = text.replace(/^@note\s+/, '').split(' ')[0].trim();
       if (keyword) {
         try {
-          const searchRes = await window.electronAPI.notebookSearch(keyword);
+          const searchRes = await window.appAPI.notebookSearch(keyword);
           if (searchRes && searchRes.ok && searchRes.results && searchRes.results.length > 0) {
             const topHit = searchRes.results[0];
-            const readRes = await window.electronAPI.notebookReadNote(topHit.id);
+            const readRes = await window.appAPI.notebookReadNote(topHit.id);
             if (readRes && readRes.ok) {
               systemContextMsg = {
                 role: 'system',
@@ -130,7 +130,7 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
       const noteTitle = text.replace(/^\/note\s+/, '').trim();
       if (noteTitle) {
         try {
-          const res = await window.electronAPI.notebookCreateNote(noteTitle, []);
+          const res = await window.appAPI.notebookCreateNote(noteTitle, []);
           if (res && res.ok) {
             messages.value.push({ role: 'user', content: text });
             messages.value.push({
@@ -157,9 +157,9 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
             ? lastAssistant.content.replace(/<\|mem\|>/g, '').trim() 
             : '';
           const clipTitle = clipContent.substring(0, 40).replace(/[#\n*]/g, '').trim() || 'AI剪报';
-          const res = await window.electronAPI.notebookCreateNote(clipTitle, ['ai-clip'], 'sources');
+          const res = await window.appAPI.notebookCreateNote(clipTitle, ['ai-clip'], 'sources');
           if (res && res.ok && res.path) {
-            await window.electronAPI.notebookSaveNote(res.path, clipContent);
+            await window.appAPI.notebookSaveNote(res.path, clipContent);
           }
           messages.value.push({ role: 'user', content: text });
           messages.value.push({
@@ -233,7 +233,7 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
     }
 
     // 持久化
-    await window.electronAPI.addMessage(
+    await window.appAPI.addMessage(
       props.conversationId,
       'user',
       userMessage.content,
@@ -267,9 +267,9 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
       let result;
       console.log('[sendMessage] image_base64s present:', !!userMessage.image_base64s, 'apiMessages count:', apiMessages.length);
       if (userMessage.image_base64s) {
-        result = await window.electronAPI.sendVision(apiMessages, userMessage.image_base64s, globalFileAccess.value, agentMode.value, props.conversationId);
+        result = await window.appAPI.sendVision(apiMessages, userMessage.image_base64s, globalFileAccess.value, agentMode.value, props.conversationId);
       } else {
-        result = await window.electronAPI.sendChat(apiMessages, globalFileAccess.value, agentMode.value, props.conversationId);
+        result = await window.appAPI.sendChat(apiMessages, globalFileAccess.value, agentMode.value, props.conversationId);
       }
       console.log('[sendMessage] result:', JSON.stringify(result).slice(0, 300));
 
@@ -279,7 +279,7 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
         const outputCost = (result.usage.completion_tokens || 0) / 1_000_000 * result.pricing.output;
         sessionCost.value += inputCost + outputCost;
         if (props.conversationId) {
-          window.electronAPI.updateConversationCost(props.conversationId, sessionCost.value);
+          window.appAPI.updateConversationCost(props.conversationId, sessionCost.value);
         }
       }
 
@@ -317,7 +317,7 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
         }
         if (outboxOps.length > 0) {
           try {
-            await window.electronAPI.writeOutbox(outboxOps);
+            await window.appAPI.writeOutbox(outboxOps);
             console.log(`[Outbox] 已写入 ${outboxOps.length} 条配置操作`);
           } catch (e) {
             console.error('[Outbox] writeOutbox 失败:', e);
@@ -334,7 +334,7 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
         };
 
         messages.value.push(assistantMsg);
-        await window.electronAPI.addMessage(
+        await window.appAPI.addMessage(
           props.conversationId,
           'assistant',
           assistantMsg.content,
@@ -342,7 +342,7 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
         );
 
         if (messages.value.filter(m => m.role === 'user').length === 1) {
-          window.electronAPI.autoRenameConversation(props.conversationId).then(title => {
+          window.appAPI.autoRenameConversation(props.conversationId).then(title => {
             if (title) {
               emit('update-title', props.conversationId, title);
             }
@@ -430,7 +430,7 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
   }
 
   async function stopGeneration() {
-    await window.electronAPI.stopGeneration();
+    await window.appAPI.stopGeneration();
     isStreaming.value = false;
   }
 
@@ -451,7 +451,7 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
     }
     const md = lines.join('\n');
     const safeName = title.replace(/[<>:"/\\|?*]/g, '_');
-    await window.electronAPI.exportMarkdown(md, `${safeName}.md`);
+    await window.appAPI.exportMarkdown(md, `${safeName}.md`);
   }
 
   // ── Markdown 渲染 ─────────────────────────────────
@@ -599,7 +599,7 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
     if (!text) return;
     isParsing.value = true;
     try {
-      const parsed = await window.electronAPI.parseEvent(text);
+      const parsed = await window.appAPI.parseEvent(text);
       messages.value.push({ role: 'assistant', type: 'confirm-card', event: parsed });
       scrollToBottom();
     } catch (err) {
@@ -614,7 +614,7 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
   async function handleConfirmEvent(event, msgObj) {
     try {
       const plainEvent = JSON.parse(JSON.stringify(event));
-      const res = await window.electronAPI.confirmEvent(plainEvent);
+      const res = await window.appAPI.confirmEvent(plainEvent);
       if (res.ok) {
         msgObj.content = `已成功保存为${event.type === 'todo' ? '待办' : '日程'}：${event.title}`;
         msgObj.type = 'text';
@@ -646,11 +646,11 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
       const clipTitle = prompt('请输入笔记标题:', defaultTitle);
       if (!clipTitle) return;
 
-      const res = await window.electronAPI.notebookCreateNote(clipTitle, ['ai-clip'], 'sources');
+      const res = await window.appAPI.notebookCreateNote(clipTitle, ['ai-clip'], 'sources');
       if (res && res.ok && res.path) {
-        await window.electronAPI.notebookSaveNote(res.path, clipContent);
-        if (window.electronAPI.showNotification) {
-          window.electronAPI.showNotification('已存为笔记', '标题: ' + clipTitle);
+        await window.appAPI.notebookSaveNote(res.path, clipContent);
+        if (window.appAPI.showNotification) {
+          window.appAPI.showNotification('已存为笔记', '标题: ' + clipTitle);
         }
       }
     } catch (e) {

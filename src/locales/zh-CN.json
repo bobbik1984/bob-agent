@@ -54,12 +54,12 @@
   },
   "settings": {
     "title": "设置",
-    "nav_model": "模型基础设置",
-    "nav_connections": "连接中心",
+    "nav_model": "模型",
+    "nav_connections": "连接",
     "nav_workspace": "工作间",
-    "nav_appearance": "外观与语言",
+    "nav_appearance": "外观",
     "nav_about": "关于",
-    "nav_daily_routine": "每日工作",
+    "nav_daily_routine": "任务",
     "proxy_tunnel_name": "内网穿墙隧道",
     "proxy_tunnel_desc": "依靠中继绕过网络限制",
     "daily_routine": "每日开机任务",
@@ -354,7 +354,8 @@
     "cmd_save_note_tooltip": "直接将输入内容保存为笔记，不发给AI",
     "cmd_note_empty": "请先输入内容再保存为笔记",
     "cmd_note_desc": "新建独立笔记并可在笔记视图编辑",
-    "cmd_clip_desc": "将AI最近一条回复保存为笔记"
+    "cmd_clip_desc": "将AI最近一条回复保存为笔记",
+    "back": "返回"
   },
   "model_hub": {
     "title": "模型中心",

@@ -433,7 +433,7 @@ async function activateMobileChannel(channel) {
       return;
     }
     try {
-      await window.electronAPI.telegramSaveToken(tgToken.value);
+      await window.appAPI.telegramSaveToken(tgToken.value);
       alert('Telegram 绑定成功！机器人已在后台启动。');
     } catch(e) {
       alert('绑定失败: ' + e);
@@ -444,7 +444,7 @@ async function activateMobileChannel(channel) {
       return;
     }
     try {
-      await window.electronAPI.discordSaveToken(discordToken.value);
+      await window.appAPI.discordSaveToken(discordToken.value);
       alert('Discord 绑定成功！机器人已在后台启动。');
     } catch(e) {
       alert('绑定失败: ' + e);
@@ -468,10 +468,10 @@ function closeWechatModal() {
 }
 
 async function loadWechatQrCode() {
-  if (!window.electronAPI) return;
+  if (!window.appAPI) return;
   qrCodeUrl.value = '';
   try {
-    const res = await window.electronAPI.wechatGetLoginQr();
+    const res = await window.appAPI.wechatGetLoginQr();
     if (res && res.qrcode_img_content) {
       const content = res.qrcode_img_content;
       if (content.startsWith('data:')) {
@@ -501,7 +501,7 @@ async function loadWechatQrCode() {
 async function pollWechatQrStatus() {
   if (!showWechatModal.value || wechatConnected.value) return;
   try {
-    const res = await window.electronAPI.wechatCheckLoginStatus(rawQrCode.value);
+    const res = await window.appAPI.wechatCheckLoginStatus(rawQrCode.value);
     if (res && (res.status === 'confirmed' || res.status === 'binded_redirect')) {
       wechatConnected.value = true;
       if (wechatPollTimer) clearTimeout(wechatPollTimer);
@@ -526,9 +526,9 @@ function isConnected(name) {
 }
 
 async function loadConnectorStatuses() {
-  if (!window.electronAPI.connectorList) return;
+  if (!window.appAPI.connectorList) return;
   try {
-    const list = await window.electronAPI.connectorList();
+    const list = await window.appAPI.connectorList();
     for (const c of list) {
       connectorStatuses.value[c.name] = c;
     }
@@ -538,13 +538,13 @@ async function loadConnectorStatuses() {
 }
 
 async function connectOAuth(name) {
-  if (!window.electronAPI.connectorStartOAuth) return;
+  if (!window.appAPI.connectorStartOAuth) return;
   connectingService.value = name;
   try {
-    const res = await window.electronAPI.connectorStartOAuth(name);
+    const res = await window.appAPI.connectorStartOAuth(name);
     if (res && res.url) {
       // 使用默认浏览器打开 OAuth 授权页面
-      window.electronAPI.openExternal(res.url);
+      window.appAPI.openExternal(res.url);
     } else if (res && res.error) {
       alert('OAuth Error: ' + res.error);
     }
@@ -559,10 +559,10 @@ async function connectOAuth(name) {
 }
 
 async function saveLarkCredentials() {
-  if (!window.electronAPI.connectorSaveCredentials) return;
+  if (!window.appAPI.connectorSaveCredentials) return;
   connectingService.value = 'lark';
   try {
-    await window.electronAPI.connectorSaveCredentials('lark', {
+    await window.appAPI.connectorSaveCredentials('lark', {
       app_id: larkCreds.value.app_id,
       app_secret: larkCreds.value.app_secret,
     });
@@ -578,9 +578,9 @@ async function saveLarkCredentials() {
 }
 
 async function disconnectService(name) {
-  if (!window.electronAPI.connectorDisconnect) return;
+  if (!window.appAPI.connectorDisconnect) return;
   try {
-    await window.electronAPI.connectorDisconnect(name);
+    await window.appAPI.connectorDisconnect(name);
     delete connectorStatuses.value[name];
   } catch (e) {
     console.error('Disconnect failed:', e);
@@ -593,8 +593,8 @@ const showAddMcp = ref(false);
 const newMcp = ref({ name: '', command: '', args: '' });
 
 async function loadMcpConfig() {
-  if (!window.electronAPI.getMcpConfig) return;
-  const config = await window.electronAPI.getMcpConfig();
+  if (!window.appAPI.getMcpConfig) return;
+  const config = await window.appAPI.getMcpConfig();
   mcpServers.value = config.mcpServers || {};
 }
 
@@ -606,7 +606,7 @@ async function addMcpServer() {
     command: newMcp.value.command.trim(),
     args: newMcp.value.args.trim().split(/\s+/).filter(Boolean),
   };
-  await window.electronAPI.setMcpConfig({ mcpServers: updated });
+  await window.appAPI.setMcpConfig({ mcpServers: updated });
   mcpServers.value = updated;
   newMcp.value = { name: '', command: '', args: '' };
   showAddMcp.value = false;
@@ -622,7 +622,7 @@ async function connectGoogleNative() {
     
     if (selectedPath) {
       connectingService.value = 'google';
-      const res = await window.electronAPI.connectorSaveCredentials('google', {
+      const res = await window.appAPI.connectorSaveCredentials('google', {
         file_path: selectedPath
       });
       if (res && res.error) {
@@ -652,7 +652,7 @@ function addOutlookMcpPreset() {
 async function removeMcpServer(name) {
   const updated = { ...mcpServers.value };
   delete updated[name];
-  await window.electronAPI.setMcpConfig({ mcpServers: updated });
+  await window.appAPI.setMcpConfig({ mcpServers: updated });
   mcpServers.value = updated;
 }
 
@@ -660,27 +660,27 @@ async function removeMcpServer(name) {
 onMounted(async () => {
   await loadMcpConfig();
   await loadConnectorStatuses();
-  if (window.electronAPI.wechatGetCurrentStatus) {
+  if (window.appAPI.wechatGetCurrentStatus) {
     try {
-      const res = await window.electronAPI.wechatGetCurrentStatus();
+      const res = await window.appAPI.wechatGetCurrentStatus();
       if (res && res.connected) {
         wechatConnected.value = true;
       }
     } catch(err) {}
   }
   
-  if (window.electronAPI.telegramGetToken) {
+  if (window.appAPI.telegramGetToken) {
     try {
-      const res = await window.electronAPI.telegramGetToken();
+      const res = await window.appAPI.telegramGetToken();
       if (res && res.token) {
         tgToken.value = res.token;
       }
     } catch(err) {}
   }
 
-  if (window.electronAPI.discordGetToken) {
+  if (window.appAPI.discordGetToken) {
     try {
-      const res = await window.electronAPI.discordGetToken();
+      const res = await window.appAPI.discordGetToken();
       if (res && res.token) {
         discordToken.value = res.token;
       }

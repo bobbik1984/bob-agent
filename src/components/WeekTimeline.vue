@@ -7,9 +7,9 @@
         本周日程
       </div>
       <div class="timeline-controls">
-        <button class="nav-btn" @click="weekOffset--">&larr; {{ $t('timeline.prev_week') || '上一周' }}</button>
-        <button class="nav-btn" @click="weekOffset = 0" :disabled="weekOffset === 0">{{ $t('timeline.this_week') || '本周' }}</button>
-        <button class="nav-btn" @click="weekOffset++">{{ $t('timeline.next_week') || '下一周' }} &rarr;</button>
+        <button class="nav-btn" @click="weekOffset--">&lsaquo;</button>
+        <button class="nav-btn this-week-btn" @click="weekOffset = 0" :disabled="weekOffset === 0">{{ $t('timeline.this_week') || '本周' }}</button>
+        <button class="nav-btn" @click="weekOffset++">&rsaquo;</button>
       </div>
     </div>
 
@@ -132,25 +132,18 @@ onMounted(() => {
   updateCurrentTime();
   timeInterval = setInterval(updateCurrentTime, 60000); // 每分钟更新
   
-  // 智能滚动到最早事件的位置（或早上 8 点）
+  // 智能滚动：优先让当前时间线可见，其次考虑最早事件
   setTimeout(() => {
     if (scrollContainer.value) {
-      let targetH = 8; // 默认滚动到 8:00
-      if (props.weekEvents && props.weekEvents.length > 0) {
-        let minH = 24;
-        props.weekEvents.forEach(ev => {
-          if (ev.start_time) {
-            const h = new Date(ev.start_time).getHours();
-            if (h < minH) minH = h;
-          }
-        });
-        if (minH < 24) targetH = minH;
-      }
+      const now = new Date();
+      const currentH = now.getHours() + now.getMinutes() / 60;
       
-      // 留出 1 小时的顶部缓冲空间
-      let scrollY = Math.max(0, targetH - 1) * PIXELS_PER_HOUR;
+      // 计算可视区域高度，将当前时间线定位在视口上方 1/3 处
+      const viewportH = scrollContainer.value.clientHeight;
+      const offsetRows = viewportH / PIXELS_PER_HOUR / 3; // 上方留约 1/3 视口
       
-      // 添加平滑滚动动画，让用户能感受到定位过程
+      let scrollY = Math.max(0, currentH - offsetRows) * PIXELS_PER_HOUR;
+      
       scrollContainer.value.scrollTo({ top: scrollY, behavior: 'smooth' });
     }
   }, 300); // 延迟执行以确保 DOM 已完成渲染且过渡动画结束
@@ -169,8 +162,8 @@ function openDetail(event) {
 
 async function handleDelete(event) {
   try {
-    if (window.electronAPI && window.electronAPI.deleteEvent) {
-      await window.electronAPI.deleteEvent(event.id);
+    if (window.appAPI && window.appAPI.deleteEvent) {
+      await window.appAPI.deleteEvent(event.id);
     }
     emit('delete-event', event.id);
     const idx = props.weekEvents.findIndex(e => e.id === event.id);
@@ -368,15 +361,16 @@ const days = computed(() => {
 .timeline-controls {
   display: flex;
   justify-content: flex-end;
-  gap: var(--space-2);
+  gap: var(--space-1);
   margin-bottom: var(--space-3);
   padding-bottom: var(--space-2);
 }
 
 .nav-btn {
-  font-size: 12px;
+  font-size: 16px;
   line-height: 1;
-  padding: 1px 16px 0 16px; /* 微调 1px 的 paddingTop 以实现视觉绝对居中 */
+  padding: 0;
+  width: 28px;
   height: 28px;
   border-radius: 14px;
   background: var(--surface-primary);
@@ -387,6 +381,13 @@ const days = computed(() => {
   display: flex;
   align-items: center;
   justify-content: center;
+  flex-shrink: 0;
+}
+
+.nav-btn.this-week-btn {
+  width: auto;
+  padding: 0 12px;
+  font-size: 12px;
 }
 
 .nav-btn:hover:not(:disabled) {

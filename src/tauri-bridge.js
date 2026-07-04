@@ -1,6 +1,6 @@
 // ═══════════════════════════════════════════════════════════
 // Bob-Agent Tauri Bridge — 完整适配器层
-// Tauri v2 IPC Bridge — 将所有前端 window.electronAPI 调用映射到 Rust @tauri-apps/api/core invoke
+// Tauri v2 IPC Bridge — 将所有前端 window.appAPI 调用映射到 Rust @tauri-apps/api/core invoke
 //
 // 浏览器降级：当 window.__TAURI_INTERNALS__ 不存在时，
 // 提供完整 Mock API 让 UI 能在纯浏览器 (npm run dev) 下渲染。
@@ -299,10 +299,10 @@ if (IS_TAURI) {
 }
 
 // ═══════════════════════════════════════════════════════════
-// window.electronAPI — 统一接口层（Tauri 和浏览器共用）
+// window.appAPI — 统一接口层（Tauri 和浏览器共用）
 // ═══════════════════════════════════════════════════════════
 
-window.electronAPI = {
+window.appAPI = {
   // ── 窗口与事件控制 ──────────────────────────────────
   minimizeWindow: () => getCurrentWindow().minimize(),
   toggleMaximize: () => getCurrentWindow().toggleMaximize(),

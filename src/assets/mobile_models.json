@@ -1,0 +1,110 @@
+[
+  {
+    "id": "gemma-4-e4b-it",
+    "name": "Gemma 4 (E4B)",
+    "type": "multimodal",
+    "download_urls": {
+      "main_gguf": [
+        "https://hf-mirror.com/bartowski/google_gemma-4-E4B-it-GGUF/resolve/main/google_gemma-4-E4B-it-Q4_K_M.gguf",
+        "https://huggingface.co/bartowski/google_gemma-4-E4B-it-GGUF/resolve/main/google_gemma-4-E4B-it-Q4_K_M.gguf"
+      ],
+      "mmproj": null
+    }
+  },
+  {
+    "id": "gemma-4-e2b-it",
+    "name": "Gemma 4 (E2B)",
+    "type": "multimodal",
+    "download_urls": {
+      "main_gguf": [
+        "https://hf-mirror.com/unsloth/gemma-4-E2B-it-GGUF/resolve/main/gemma-4-E2B-it-Q4_K_M.gguf",
+        "https://huggingface.co/unsloth/gemma-4-E2B-it-GGUF/resolve/main/gemma-4-E2B-it-Q4_K_M.gguf"
+      ],
+      "mmproj": null
+    }
+  },
+  {
+    "id": "phi-4-mini",
+    "name": "Phi-4 Mini",
+    "type": "text",
+    "download_urls": {
+      "main_gguf": [
+        "https://hf-mirror.com/unsloth/Phi-4-mini-instruct-GGUF/resolve/main/Phi-4-mini-instruct-Q4_K_M.gguf",
+        "https://huggingface.co/unsloth/Phi-4-mini-instruct-GGUF/resolve/main/Phi-4-mini-instruct-Q4_K_M.gguf"
+      ],
+      "mmproj": null
+    }
+  },
+  {
+    "id": "phi-3.5-mini",
+    "name": "Phi-3.5 Mini (Uncensored)",
+    "type": "text",
+    "download_urls": {
+      "main_gguf": [
+        "https://hf-mirror.com/bartowski/Phi-3.5-mini-instruct_Uncensored-GGUF/resolve/main/Phi-3.5-mini-instruct_Uncensored-Q4_K_M.gguf",
+        "https://huggingface.co/bartowski/Phi-3.5-mini-instruct_Uncensored-GGUF/resolve/main/Phi-3.5-mini-instruct_Uncensored-Q4_K_M.gguf"
+      ],
+      "mmproj": null
+    }
+  },
+  {
+    "id": "llama-3.2-3b",
+    "name": "Llama 3.2 (3B Uncensored)",
+    "type": "text",
+    "download_urls": {
+      "main_gguf": [
+        "https://hf-mirror.com/bartowski/Llama-3.2-3B-Instruct-uncensored-GGUF/resolve/main/Llama-3.2-3B-Instruct-uncensored-Q4_K_M.gguf",
+        "https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-uncensored-GGUF/resolve/main/Llama-3.2-3B-Instruct-uncensored-Q4_K_M.gguf"
+      ],
+      "mmproj": null
+    }
+  },
+  {
+    "id": "llama-3.2-1b",
+    "name": "Llama 3.2 (1B)",
+    "type": "text",
+    "download_urls": {
+      "main_gguf": [
+        "https://hf-mirror.com/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q4_K_M.gguf",
+        "https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q4_K_M.gguf"
+      ],
+      "mmproj": null
+    }
+  },
+  {
+    "id": "qwen3.5-4b",
+    "name": "Qwen 3.5 (4B)",
+    "type": "text",
+    "download_urls": {
+      "main_gguf": [
+        "https://hf-mirror.com/bartowski/Qwen_Qwen3.5-4B-GGUF/resolve/main/Qwen_Qwen3.5-4B-Q4_K_M.gguf",
+        "https://huggingface.co/bartowski/Qwen_Qwen3.5-4B-GGUF/resolve/main/Qwen_Qwen3.5-4B-Q4_K_M.gguf"
+      ],
+      "mmproj": null
+    }
+  },
+  {
+    "id": "qwen3.5-2b",
+    "name": "Qwen 3.5 (2B)",
+    "type": "text",
+    "download_urls": {
+      "main_gguf": [
+        "https://hf-mirror.com/bartowski/Qwen_Qwen3.5-2B-GGUF/resolve/main/Qwen_Qwen3.5-2B-Q4_K_M.gguf",
+        "https://huggingface.co/bartowski/Qwen_Qwen3.5-2B-GGUF/resolve/main/Qwen_Qwen3.5-2B-Q4_K_M.gguf"
+      ],
+      "mmproj": null
+    }
+  },
+  {
+    "id": "qwen3.5-0.8b",
+    "name": "Qwen 3.5 (0.8B)",
+    "type": "text",
+    "download_urls": {
+      "main_gguf": [
+        "https://hf-mirror.com/unsloth/Qwen3.5-0.8B-GGUF/resolve/main/Qwen3.5-0.8B-Q4_K_M.gguf",
+        "https://huggingface.co/unsloth/Qwen3.5-0.8B-GGUF/resolve/main/Qwen3.5-0.8B-Q4_K_M.gguf"
+      ],
+      "mmproj": null
+    }
+  }
+]

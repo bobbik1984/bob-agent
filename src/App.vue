@@ -1,8 +1,8 @@
-﻿<template>
+<template>
   <div class="app-shell" :class="{ 'is-mobile': isMobile }">
     <!-- 启动画面已移至 index.html (Native Splash) -->
     <!-- 标题栏拖拽区域 (Desktop) -->
-    <div v-if="!isMobile" class="titlebar titlebar-drag">
+    <div v-if="isTauri && !isNativeMobile" class="titlebar titlebar-drag">
       <div class="titlebar-left titlebar-no-drag">
         <svg class="app-logo" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 152.85 99.94" @click="openQuickNote">
           <g>
@@ -220,7 +220,7 @@
             :class="{ active: activeSettingsPanel === item.id }"
             @click="activeSettingsPanel = item.id"
           >
-            <component :is="item.icon" :size="20" class="tab-icon" />
+            <component :is="item.icon" :size="18" class="tab-icon" />
             <span>{{ item.label }}</span>
           </button>
         </div>
@@ -298,9 +298,9 @@ import { useI18n } from 'vue-i18n';
 import { getModelMeta } from '@/composables/useModelSwitcher';
 
 // Tauri Window API (用于自定义窗口按钮)
-function minimizeWindow() { window.electronAPI.minimizeWindow(); }
-function toggleMaximize() { window.electronAPI.toggleMaximize(); }
-function closeWindow() { window.electronAPI.hideWindow(); } 
+function minimizeWindow() { window.appAPI.minimizeWindow(); }
+function toggleMaximize() { window.appAPI.toggleMaximize(); }
+function closeWindow() { window.appAPI.hideWindow(); } 
 
 const { locale, t } = useI18n();
 
@@ -318,6 +318,9 @@ function checkMobile() {
 }
 const isMobile = ref(checkMobile());
 provide('isMobile', isMobile);
+
+const isNativeMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+const isTauri = !!window.__TAURI_INTERNALS__;
 
 let resizeDebounce;
 function onResizeHandler() {
@@ -404,7 +407,7 @@ function stopResize() {
   document.removeEventListener('mouseup', stopResize);
   document.body.style.cursor = '';
   document.body.style.userSelect = '';
-  window.electronAPI.setConfig('sidebarWidth', sidebarWidth.value);
+  window.appAPI.setConfig('sidebarWidth', sidebarWidth.value);
 }
 
 function toggleSidebar() {
@@ -428,9 +431,9 @@ async function toggleTheme() {
 
   localStorage.setItem('bob-theme', currentTheme.value);
   window.dispatchEvent(new CustomEvent('bob-theme-changed', { detail: currentTheme.value }));
-  window.electronAPI.setConfig('theme', currentTheme.value);
-  if (window.electronAPI.updateTheme) {
-    window.electronAPI.updateTheme(currentTheme.value);
+  window.appAPI.setConfig('theme', currentTheme.value);
+  if (window.appAPI.updateTheme) {
+    window.appAPI.updateTheme(currentTheme.value);
   }
 }
 
@@ -492,8 +495,8 @@ onMounted(async () => {
       e.preventDefault();
       // 软重载：重新拉取对话列表和配置，等同于重新打开应用
       await loadConversations();
-      currentModel.value = await window.electronAPI.getConfig('model') || '';
-      const theme = await window.electronAPI.getConfig('theme');
+      currentModel.value = await window.appAPI.getConfig('model') || '';
+      const theme = await window.appAPI.getConfig('theme');
       if (theme) {
         currentTheme.value = theme;
         document.documentElement.setAttribute('data-theme', theme);
@@ -503,31 +506,31 @@ onMounted(async () => {
   });
 
   // 检查是否已配置
-  isSetupComplete.value = await window.electronAPI.isSetupComplete();
+  isSetupComplete.value = await window.appAPI.isSetupComplete();
   if (DEBUG_ONBOARDING === 0) {
     isSetupComplete.value = false;
   }
 
   if (isSetupComplete.value) {
     await loadConversations();
-    currentModel.value = await window.electronAPI.getConfig('model') || '';
+    currentModel.value = await window.appAPI.getConfig('model') || '';
     // 恢复 UI 缩放偏好和主题和侧边栏宽度
-    const savedWidth = await window.electronAPI.getConfig('sidebarWidth');
+    const savedWidth = await window.appAPI.getConfig('sidebarWidth');
     if (savedWidth) sidebarWidth.value = savedWidth;
 
-    const uiScale = await window.electronAPI.getConfig('uiScale');
+    const uiScale = await window.appAPI.getConfig('uiScale');
     if (uiScale) {
       document.documentElement.setAttribute('data-ui-scale', uiScale);
     }
-    const theme = await window.electronAPI.getConfig('theme');
+    const theme = await window.appAPI.getConfig('theme');
     if (theme) {
       currentTheme.value = theme;
       document.documentElement.setAttribute('data-theme', theme);
-      if (window.electronAPI.updateTheme) {
-        window.electronAPI.updateTheme(theme);
+      if (window.appAPI.updateTheme) {
+        window.appAPI.updateTheme(theme);
       }
     }
-    const accentColor = await window.electronAPI.getConfig('accentColor');
+    const accentColor = await window.appAPI.getConfig('accentColor');
     if (accentColor) {
       localStorage.setItem('bob-accent', accentColor);
       document.documentElement.style.setProperty('--user-accent', accentColor);
@@ -538,7 +541,7 @@ onMounted(async () => {
       document.documentElement.style.setProperty('--user-accent-rgb', `${r}, ${g}, ${b}`);
     }
     // 恢复用户语言偏好
-    const savedLang = await window.electronAPI.getConfig('language');
+    const savedLang = await window.appAPI.getConfig('language');
     if (savedLang) locale.value = savedLang;
   }
 
@@ -547,9 +550,9 @@ onMounted(async () => {
 
   // 显示并聚焦原生窗口，防止藏在后台
   // 注意：不要使用 await，否则任何调用失败（比如窗口并未最小化而引发的异常）都会阻塞后续的开屏动画移除
-  window.electronAPI.unminimizeWindow().catch(() => {});
-  window.electronAPI.showWindow().catch(() => {});
-  window.electronAPI.focusWindow().catch(() => {});
+  window.appAPI.unminimizeWindow().catch(() => {});
+  window.appAPI.showWindow().catch(() => {});
+  window.appAPI.focusWindow().catch(() => {});
 
   // 启动画面淡出 — 原生 Splash 渐隐 1 秒
   setTimeout(() => { 
@@ -562,8 +565,8 @@ onMounted(async () => {
   }, 1000);
 
   // ── Outbox Reconciler 事件监听 (T-813) ─────────────
-  if (window.electronAPI.onConfigReconciled) {
-    unlistenConfigReconciled = window.electronAPI.onConfigReconciled((payload) => {
+  if (window.appAPI.onConfigReconciled) {
+    unlistenConfigReconciled = window.appAPI.onConfigReconciled((payload) => {
       const count = payload?.applied || 0;
       console.log(`[Reconciler] ${count} 条配置已生效，刷新 UI...`);
       // 刷新 ChatView 模型指示器
@@ -571,15 +574,15 @@ onMounted(async () => {
         chatViewRef.value.refreshModel();
       }
       // 重新加载当前模型
-      window.electronAPI.getConfig('model').then(m => {
+      window.appAPI.getConfig('model').then(m => {
         if (m) currentModel.value = m;
       });
     });
   }
 
   // ── 远程消息通知：微信等通道产生新消息时刷新侧边栏 ──────
-  if (window.electronAPI.onRemoteNewMessage) {
-    unlistenRemoteMessage = await window.electronAPI.onRemoteNewMessage((event) => {
+  if (window.appAPI.onRemoteNewMessage) {
+    unlistenRemoteMessage = await window.appAPI.onRemoteNewMessage((event) => {
       const convId = event?.payload?.conversation_id || event?.conversation_id;
       console.log(`[Remote] 收到远程新消息通知, conv_id=${convId}`);
       // 刷新侧边栏对话列表（新对话出现 / 时间戳更新）
@@ -588,8 +591,8 @@ onMounted(async () => {
   }
 
   // T-1303: 全局监听 Cron 任务完成事件，更新导航栏红点
-  if (window.electronAPI.onSchedulerCompleted) {
-    unlistenSchedulerGlobal = window.electronAPI.onSchedulerCompleted((payload) => {
+  if (window.appAPI.onSchedulerCompleted) {
+    unlistenSchedulerGlobal = window.appAPI.onSchedulerCompleted((payload) => {
       console.log('[App] scheduler:completed', payload?.title);
       cronNotifCount.value += 1;
     });
@@ -607,7 +610,7 @@ onUnmounted(() => {
 
 // ── 对话管理 ─────────────────────────────────────────
 async function loadConversations() {
-  conversations.value = await window.electronAPI.getConversations();
+  conversations.value = await window.appAPI.getConversations();
   // 没有对话就创建一个
   if (conversations.value.length === 0) {
     await createNewChat();
@@ -618,9 +621,9 @@ async function loadConversations() {
 
 async function createNewChat() {
   if (activeConversationId.value) {
-    window.electronAPI.summarizeSession(activeConversationId.value).catch(e => console.error(e));
+    window.appAPI.summarizeSession(activeConversationId.value).catch(e => console.error(e));
   }
-  const conv = await window.electronAPI.createConversation(t('chat.new_conversation'), currentModel.value);
+  const conv = await window.appAPI.createConversation(t('chat.new_conversation'), currentModel.value);
   conversations.value.unshift(conv);
   activeConversationId.value = conv.id;
 }
@@ -628,7 +631,7 @@ async function createNewChat() {
 function switchConversation(id) {
   if (activeConversationId.value && activeConversationId.value !== id) {
     // Trigger background summarization for the old conversation
-    window.electronAPI.summarizeSession(activeConversationId.value).catch(err => {
+    window.appAPI.summarizeSession(activeConversationId.value).catch(err => {
       console.error('Background session summarization failed:', err);
     });
   }
@@ -647,7 +650,7 @@ async function confirmDeleteChat() {
   const id = pendingDeleteId.value;
   if (!id) return;
   
-  await window.electronAPI.deleteConversation(id);
+  await window.appAPI.deleteConversation(id);
   conversations.value = conversations.value.filter(c => c.id !== id);
   
   if (activeConversationId.value === id) {
@@ -683,7 +686,7 @@ async function confirmRename(conv) {
   if (newTitle && newTitle !== conv.title) {
     conv.title = newTitle;
     // 持久化到 conversations 表
-    await window.electronAPI.renameConversation(conv.id, newTitle);
+    await window.appAPI.renameConversation(conv.id, newTitle);
   }
   renamingId.value = null;
   renameText.value = '';
@@ -725,16 +728,16 @@ async function onSetupComplete(payload) {
   const startRect = payload?.startRect;
 
   // 优先使用向导传来的值（debug 模式下后端没有保存）
-  const theme = payload?.theme || await window.electronAPI.getConfig('theme');
+  const theme = payload?.theme || await window.appAPI.getConfig('theme');
   if (theme) {
     currentTheme.value = theme;
     document.documentElement.setAttribute('data-theme', theme);
     localStorage.setItem('bob-theme', theme);
-    if (window.electronAPI.updateTheme) {
-      window.electronAPI.updateTheme(theme);
+    if (window.appAPI.updateTheme) {
+      window.appAPI.updateTheme(theme);
     }
   }
-  const accentColor = payload?.accentColor || await window.electronAPI.getConfig('accentColor');
+  const accentColor = payload?.accentColor || await window.appAPI.getConfig('accentColor');
   if (accentColor) {
     localStorage.setItem('bob-accent', accentColor);
     document.documentElement.style.setProperty('--user-accent', accentColor);
@@ -747,7 +750,7 @@ async function onSetupComplete(payload) {
 
   // 切换到聊天界面
   isSetupComplete.value = true;
-  currentModel.value = await window.electronAPI.getConfig('model') || '';
+  currentModel.value = await window.appAPI.getConfig('model') || '';
   await loadConversations();
 
   // 如果有起始坐标，执行精确飞行动画
@@ -813,7 +816,7 @@ async function onSetupComplete(payload) {
 }
 
 async function onConfigChanged() {
-  currentModel.value = await window.electronAPI.getConfig('model') || '';
+  currentModel.value = await window.appAPI.getConfig('model') || '';
 }
 
 // T-1301: 搜索逻辑 (300ms debounce)
@@ -828,7 +831,7 @@ function onSearchInput() {
   isSearching.value = true;
   searchDebounce = setTimeout(async () => {
     try {
-      searchResults.value = await window.electronAPI.searchMessages(q);
+      searchResults.value = await window.appAPI.searchMessages(q);
     } catch (err) {
       console.error('[Search] FTS error:', err);
       searchResults.value = [];
@@ -925,8 +928,9 @@ function onFabPointerMove(e) {
   const deltaX = e.clientX - dragStartX;
   const deltaY = e.clientY - dragStartY;
 
-  // 如果移动距离超过 5px，则认定为拖拽
-  if (Math.abs(deltaX) > 5 || Math.abs(deltaY) > 5) {
+  // 手机触控天然抖动大，阈值设为 15px 防止误判为拖拽
+  const dragThreshold = 15;
+  if (Math.abs(deltaX) > dragThreshold || Math.abs(deltaY) > dragThreshold) {
     isMoved = true;
     isFabDragging.value = true;
   }
@@ -1524,7 +1528,7 @@ function onFabPointerUp(e) {
 .app-shell.is-mobile .content {
   padding-bottom: calc(60px + env(safe-area-inset-bottom, 0px));
 }
-@media (max-width: 768px) {
+@media (max-aspect-ratio: 1/1) {
   .content > * {
     flex: 1;
     min-height: 0;
@@ -1787,6 +1791,11 @@ function onFabPointerUp(e) {
   box-shadow: 0 4px 16px rgba(0,0,0,0.15);
   transition: opacity 0.3s ease, transform 0.15s cubic-bezier(0.34, 1.56, 0.64, 1), background 0.3s ease;
   cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+  outline: none;
   
   /* 默认位置 (初始) */
   right: 16px;
@@ -1801,7 +1810,7 @@ function onFabPointerUp(e) {
 }
 
 .mobile-fab.is-idle {
-  opacity: 0.35;
+  opacity: 0.5;
 }
 
 .mobile-fab:hover {

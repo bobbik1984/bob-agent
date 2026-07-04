@@ -9,18 +9,48 @@
       {{ $t('settings.offline_engine') }}
     </h3>
 
-    
-    <div class="form-group workspace-group">
-      <input
+    <div class="form-group workspace-group" style="flex-direction: column; align-items: stretch;">
+      <CustomSelect
         v-model="config.offlineModelPath"
-        class="input"
-        :placeholder="$t('settings.offline_model_placeholder')"
-        readonly
-      />
-      <button class="btn btn-primary browse-btn" @click="selectOfflineModel">
-        <FolderOpen :size="14" />
-        <span>{{ $t('settings.browse') }}</span>
-      </button>
+        :options="offlineModelOptions"
+        :placeholder="$t('settings.offline_model_placeholder', '请选择')"
+        @update:modelValue="val => saveConfig('offlineModelPath', val)"
+      >
+        <template #selected="{ label }">
+          <span>{{ label || '请选择' }}</span>
+        </template>
+        <template #option="{ option }">
+          <div style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span class="status-dot" :style="{ 
+                background: option.downloaded ? 'var(--user-accent, var(--accent-primary))' : 'transparent',
+                border: option.downloaded ? '2px solid var(--user-accent, var(--accent-primary))' : '2px solid var(--text-tertiary)',
+                width: '8px', height: '8px', borderRadius: '50%', display: 'inline-block' 
+              }"></span>
+              <span :style="{ color: option.downloaded ? 'var(--text-primary)' : 'var(--text-tertiary)' }">{{ option.label }}</span>
+            </div>
+            <button v-if="!option.downloaded && !option.isCustom" class="btn btn-ghost" style="padding: 2px 8px; font-size: 0.85em; color: var(--user-accent, var(--accent-primary));" @click.stop="startDownload(option.id)">
+              {{ downloadingModel === option.id ? `${downloadProgress}%` : '下载' }}
+            </button>
+          </div>
+        </template>
+      </CustomSelect>
+
+      <div style="display: flex; align-items: center; gap: 12px; margin-top: 8px; font-size: 0.85em;">
+        <button class="btn btn-ghost" style="padding: 0; color: var(--text-secondary); display: flex; align-items: center; gap: 4px;" @click="downloadSource = downloadSource === 'hf-mirror' ? 'huggingface' : 'hf-mirror'">
+          <Globe :size="14" /> {{ downloadSource === 'hf-mirror' ? 'HF-mirror' : 'HuggingFace' }}
+        </button>
+        <button class="btn btn-ghost" style="padding: 0; color: var(--text-secondary); display: flex; align-items: center; gap: 4px;" @click="showCustomDownload = !showCustomDownload">
+          <Plus :size="14" /> 自定义链接下载
+        </button>
+      </div>
+      
+      <div v-if="showCustomDownload" style="margin-top: 8px; display: flex; gap: 8px;">
+        <input v-model="customDownloadUrl" class="input" placeholder="输入 .gguf 下载链接..." style="flex: 1; font-size: 0.85em; padding: 4px 8px;" />
+        <button class="btn btn-primary" @click="startCustomDownload" :disabled="!customDownloadUrl" style="padding: 4px 12px; font-size: 0.85em;">
+          {{ downloadingModel === 'custom' ? `${downloadProgress}%` : '下载' }}
+        </button>
+      </div>
     </div>
 
     <div style="margin-top: 8px; margin-bottom: 12px;">
@@ -32,12 +62,11 @@
 
     <Transition name="briefing-fade">
       <div v-if="showLlamaGuide" class="card" style="background: var(--bg-secondary); border: 1px dashed var(--border-subtle); padding: 16px; border-radius: var(--radius-md); margin-bottom: 16px; font-size: 0.9em; box-shadow: none;">
-        <h4 style="font-size: 1.05em; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">{{ $t('settings.llama_guide_title') }}</h4>
-        <p style="color: var(--text-secondary); margin-bottom: 8px; line-height: 1.5;" v-html="$t('settings.llama_guide_desc')"></p>
-
-        <button class="btn btn-primary" style="display: flex; align-items: center; gap: 6px; font-size: 0.9em; padding: 6px 12px;" @click="openLlamaEngineDir">
+        <h4 style="font-size: 1.05em; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">{{ $t('settings.llama_guide_title', '本地引擎指南') }}</h4>
+        <p style="color: var(--text-secondary); margin-bottom: 8px; line-height: 1.5;" v-html="$t('settings.llama_guide_desc', '选择已下载的模型后，Candle引擎会按需将模型挂载到内存中。')"></p>
+        <button class="btn btn-primary" style="display: flex; align-items: center; gap: 6px; font-size: 0.9em; padding: 6px 12px;" @click="openModelsDir">
           <FolderOpen :size="14" />
-          <span>{{ $t('settings.open_llama_dir') }}</span>
+          <span>打开模型目录</span>
         </button>
       </div>
     </Transition>
@@ -45,18 +74,12 @@
     <div style="display: flex; gap: 8px; align-items: center; margin-top: 12px;">
       <button 
         class="btn" 
-        :class="offlineEngineStatus === 'running' ? 'btn-danger' : 'btn-primary'" 
+        :style="offlineEngineStatus === 'running' ? { background: 'var(--user-accent, var(--accent-primary))', color: '#fff' } : { background: 'var(--bg-tertiary)', color: 'var(--text-primary)' }"
         @click="toggleOfflineEngine"
         :disabled="!config.offlineModelPath"
       >
-        <Server :size="14" />
-        <span>{{ offlineEngineStatus === 'running' ? $t('settings.offline_engine_stop') : $t('settings.offline_engine_start') }}</span>
+        <span>{{ offlineEngineStatus === 'running' ? '停止本地模型' : '启动本地模型' }}</span>
       </button>
-      
-      <span style="font-size: 0.85em; display: flex; align-items: center; gap: 6px;" :style="{ color: offlineEngineStatus === 'running' ? 'var(--accent-primary)' : 'var(--text-tertiary)' }">
-        <span class="status-dot" :style="{ background: offlineEngineStatus === 'running' ? 'var(--accent-primary)' : 'var(--text-tertiary)' }" style="width: 8px; height: 8px; border-radius: 50%; display: inline-block;"></span>
-        {{ offlineEngineStatus === 'running' ? $t('settings.offline_engine_running') : $t('settings.offline_engine_stopped') }}
-      </span>
     </div>
   </section>
 
@@ -106,10 +129,17 @@
             :placeholder="provider.hasKey ? $t('settings.configured') : $t('settings.not_configured')" 
             style="flex: 1;" 
           />
-          <button class="btn-save-key" @click="saveApiKey(provider.id)" :title="$t('settings.save')">
+          <button v-if="apiKeys[provider.id] || !provider.hasKey" 
+                  class="btn-icon btn-save-key" 
+                  @click="saveApiKey(provider.id)" 
+                  :title="$t('settings.save')"
+                  :style="{ opacity: !apiKeys[provider.id] ? 0.3 : 1, cursor: !apiKeys[provider.id] ? 'not-allowed' : 'pointer' }">
             <Save :size="16" />
           </button>
-          <button v-if="provider.hasKey" class="btn-icon btn-remove-key" @click="deleteApiKey(provider.id)" :title="$t('settings.delete_key')">
+          <button v-else 
+                  class="btn-icon btn-remove-key" 
+                  @click="deleteApiKey(provider.id)" 
+                  :title="$t('settings.delete_key')">
             <X :size="14" />
           </button>
         </template>
@@ -129,10 +159,17 @@
           :placeholder="provider.hasKey ? $t('settings.configured') : $t('settings.not_configured')" 
           style="flex: 1;" 
         />
-        <button class="btn-save-key" @click="saveApiKey(provider.id)" :title="$t('settings.save')">
+        <button v-if="apiKeys[provider.id] || !provider.hasKey" 
+                class="btn-icon btn-save-key" 
+                @click="saveApiKey(provider.id)" 
+                :title="$t('settings.save')"
+                :style="{ opacity: !apiKeys[provider.id] ? 0.3 : 1, cursor: !apiKeys[provider.id] ? 'not-allowed' : 'pointer' }">
           <Save :size="16" />
         </button>
-        <button v-if="provider.hasKey" class="btn-icon btn-remove-key" @click="deleteApiKey(provider.id)" :title="$t('settings.delete_key')">
+        <button v-else 
+                class="btn-icon btn-remove-key" 
+                @click="deleteApiKey(provider.id)" 
+                :title="$t('settings.delete_key')">
           <X :size="14" />
         </button>
       </div>
@@ -292,11 +329,15 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, computed } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { Server, FolderOpen, Info, Key, ChevronDown, X, Plus, Trash2, Database, Check, Image as ImageIcon, Save } from 'lucide-vue-next';
+import { Server, FolderOpen, Info, Key, ChevronDown, X, Plus, Trash2, Database, Check, Image as ImageIcon, Save, Globe } from 'lucide-vue-next';
 import ModelHub from '../../components/ModelHub.vue';
+import CustomSelect from '../../components/CustomSelect.vue';
+import mobileModels from '@/assets/mobile_models.json';
 import { getModelMeta } from '@/composables/useModelSwitcher';
+import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 
 const props = defineProps({
   config: { type: Object, required: true },
@@ -306,33 +347,142 @@ const { t } = useI18n();
 
 // ── 离线推理引擎 ──
 const offlineEngineStatus = ref('stopped');
-const showLlamaGuide = ref(false);
+const showLlamaGuidance = ref(false);
+const downloadedModelsSet = ref(new Set());
+const downloadingModel = ref(null);
+const downloadProgress = ref(0);
+const showCustomDownload = ref(false);
+const customDownloadUrl = ref('');
+const downloadSource = ref('hf-mirror');
 
-async function openLlamaEngineDir() {
-  await window.electronAPI.openLlamaEngineDir();
+const offlineModelOptions = computed(() => {
+  const options = [];
+  mobileModels.forEach(m => {
+    options.push({
+      label: m.name,
+      value: `models\\${m.id}.gguf`, // relative path for Windows
+      id: m.id,
+      downloaded: downloadedModelsSet.value.has(m.id),
+      isCustom: false
+    });
+  });
+  
+  if (props.config.offlineModelPath && !options.find(o => o.value === props.config.offlineModelPath)) {
+    options.push({
+      label: '自定义文件: ' + props.config.offlineModelPath.split('\\').pop(),
+      value: props.config.offlineModelPath,
+      id: 'custom',
+      downloaded: true,
+      isCustom: true
+    });
+  }
+  return options;
+});
+
+async function openModelsDir() {
+  // Use Tauri shell plugin to open the directory if needed, or omit for now
+  try {
+    await invoke('plugin:shell|open', { path: 'models' });
+  } catch (e) {
+    console.warn(e);
+  }
+}
+
+async function checkDownloadedModels() {
+  const newSet = new Set();
+  for (const model of mobileModels) {
+    try {
+      const isDownloaded = await invoke('check_model_downloaded', { modelId: model.id });
+      if (isDownloaded) newSet.add(model.id);
+    } catch(err) {
+      console.warn("Check download error:", err);
+    }
+  }
+  downloadedModelsSet.value = newSet;
+}
+
+async function startDownload(modelId) {
+  const model = mobileModels.find(m => m.id === modelId);
+  if (!model || !model.download_urls || !model.download_urls.main_gguf.length) return;
+  
+  let url = model.download_urls.main_gguf[0];
+  if (downloadSource.value === 'huggingface') {
+     const hfUrl = model.download_urls.main_gguf.find(u => u.includes('huggingface.co'));
+     if (hfUrl) url = hfUrl;
+  } else {
+     const mirrorUrl = model.download_urls.main_gguf.find(u => u.includes('hf-mirror.com'));
+     if (mirrorUrl) url = mirrorUrl;
+  }
+  
+  await beginDownloadTask(modelId, url);
+}
+
+async function startCustomDownload() {
+  if (!customDownloadUrl.value) return;
+  const url = customDownloadUrl.value;
+  let filename = url.split('/').pop() || 'custom.gguf';
+  if (!filename.endsWith('.gguf')) filename += '.gguf';
+  const modelId = filename.replace('.gguf', '');
+  await beginDownloadTask(modelId, url);
+}
+
+async function beginDownloadTask(modelId, url) {
+  downloadingModel.value = modelId;
+  downloadProgress.value = 0;
+  
+  const unlisten = await listen('download_progress', (event) => {
+    if (event.payload.model_id === modelId) {
+      downloadProgress.value = Math.round(event.payload.progress);
+    }
+  });
+
+  try {
+    const result = await invoke('download_model', { modelId, url });
+    if (result.success) {
+      await checkDownloadedModels();
+      if (downloadingModel.value === 'custom_selected') {
+        props.config.offlineModelPath = result.path;
+        saveConfig('offlineModelPath', result.path);
+      }
+    } else {
+      alert('下载失败: ' + result.error);
+    }
+  } catch(err) {
+    alert('下载出错: ' + err);
+  } finally {
+    downloadingModel.value = null;
+    unlisten();
+  }
 }
 
 async function selectOfflineModel() {
-  if (window.electronAPI.selectFile) {
-    const path = await window.electronAPI.selectFile();
+  try {
+    const path = await window.appAPI.selectFile();
     if (path) {
       props.config.offlineModelPath = path;
       saveConfig('offlineModelPath', path);
     }
+  } catch(e) {
+    console.warn(e);
   }
 }
 
 async function toggleOfflineEngine() {
   if (offlineEngineStatus.value === 'running') {
-    const res = await window.electronAPI.stopOfflineEngine();
-    if (res && res.status === 'stopped') {
-      offlineEngineStatus.value = 'stopped';
+    try {
+      const res = await invoke('stop_offline_engine');
+      if (res && res.status === 'stopped') {
+        offlineEngineStatus.value = 'stopped';
+      }
+    } catch(e) {
+      console.warn("Stop error", e);
     }
   } else {
+    // Start memory mount
     if (!props.config.offlineModelPath) return;
     offlineEngineStatus.value = 'starting';
     try {
-      const res = await window.electronAPI.startOfflineEngine(props.config.offlineModelPath);
+      const res = await invoke('start_offline_engine', { modelPath: props.config.offlineModelPath });
       if (res && res.status === 'running') {
         offlineEngineStatus.value = 'running';
       } else {
@@ -340,12 +490,12 @@ async function toggleOfflineEngine() {
       }
     } catch(err) {
       offlineEngineStatus.value = 'stopped';
-      alert('启动离线引擎失败: ' + err);
+      alert('内存挂载失败: ' + err);
     }
   }
 }
 
-// ── 凭证管理 (Credential Store) ──
+
 const modelProviders = ref([]);
 const toolProviders = ref([
   { id: 'TAVILY_API_KEY', name: 'Tavily (Web Search)', hasKey: false },
@@ -363,8 +513,8 @@ const modelHubRef = ref(null);
 const gcpCredStatus = ref({ configured: false });
 
 async function loadGcpCredentialStatus() {
-  if (window.electronAPI.getGcpCredentialStatus) {
-    gcpCredStatus.value = await window.electronAPI.getGcpCredentialStatus();
+  if (window.appAPI.getGcpCredentialStatus) {
+    gcpCredStatus.value = await window.appAPI.getGcpCredentialStatus();
   }
 }
 
@@ -376,7 +526,7 @@ async function uploadGcpCredential() {
     filters: [{ name: 'JSON', extensions: ['json'] }],
   });
   if (!selected) return;
-  const result = await window.electronAPI.uploadGcpCredential(selected);
+  const result = await window.appAPI.uploadGcpCredential(selected);
   if (result.error) {
     alert('凭证上传失败: ' + result.error);
   } else {
@@ -385,7 +535,7 @@ async function uploadGcpCredential() {
 }
 
 async function testGcpCredential() {
-  const result = await window.electronAPI.testGcpCredential();
+  const result = await window.appAPI.testGcpCredential();
   if (result.error) {
     alert('❌ 连通性测试失败: ' + result.error);
   } else {
@@ -394,7 +544,7 @@ async function testGcpCredential() {
 }
 
 async function removeGcpCredential() {
-  const result = await window.electronAPI.removeGcpCredential();
+  const result = await window.appAPI.removeGcpCredential();
   if (result.ok) {
     await loadGcpCredentialStatus();
   }
@@ -409,7 +559,7 @@ const expandedProviders = ref({});
 
 async function loadRegistryProviders() {
   try {
-    const reg = await window.electronAPI.getRegistry();
+    const reg = await window.appAPI.getRegistry();
     registryData.value = reg;
     if (reg && reg.providers) {
       modelProviders.value = reg.providers
@@ -503,7 +653,7 @@ async function saveRegistry() {
   if (!registryData.value) return;
   try {
     registryData.value.last_updated = new Date().toISOString().slice(0, 10);
-    await window.electronAPI.saveRegistry(registryData.value);
+    await window.appAPI.saveRegistry(registryData.value);
     registryDirty.value = false;
     registrySaveMsg.value = t('settings.registry_saved');
     await loadRegistryProviders();
@@ -526,8 +676,8 @@ function getProviderLogo(providerId) {
 }
 
 async function fetchApiKeys() {
-  if (window.electronAPI.getApiKeys) {
-    const status = await window.electronAPI.getApiKeys();
+  if (window.appAPI.getApiKeys) {
+    const status = await window.appAPI.getApiKeys();
     [...modelProviders.value, ...toolProviders.value].forEach(p => {
       p.hasKey = !!status[p.id];
     });
@@ -535,17 +685,17 @@ async function fetchApiKeys() {
 }
 
 async function fetchToolStatuses() {
-  if (window.electronAPI.getToolStatuses) {
-    const statuses = await window.electronAPI.getToolStatuses();
+  if (window.appAPI.getToolStatuses) {
+    const statuses = await window.appAPI.getToolStatuses();
     toolStatuses.value = statuses;
   }
 }
 
 async function saveApiKey(providerId) {
-  if (window.electronAPI.setApiKey) {
+  if (window.appAPI.setApiKey) {
     const key = apiKeys.value[providerId];
     if (key === undefined || key === null) return;
-    await window.electronAPI.setApiKey(providerId, key);
+    await window.appAPI.setApiKey(providerId, key);
     await fetchApiKeys();
     apiKeys.value[providerId] = '';
     await fetchToolStatuses();
@@ -557,8 +707,8 @@ async function saveApiKey(providerId) {
 }
 
 async function deleteApiKey(providerId) {
-  if (window.electronAPI.setApiKey) {
-    await window.electronAPI.setApiKey(providerId, '');
+  if (window.appAPI.setApiKey) {
+    await window.appAPI.setApiKey(providerId, '');
     apiKeys.value[providerId] = '';
     await fetchApiKeys();
     await fetchToolStatuses();
@@ -570,7 +720,7 @@ async function deleteApiKey(providerId) {
 }
 
 async function loadCustomModels() {
-  const allConfig = await window.electronAPI.getAllConfig();
+  const allConfig = await window.appAPI.getAllConfig();
   customModels.value = allConfig.customModels || [];
 }
 
@@ -578,8 +728,8 @@ async function addCustomModel() {
   if (!newCustomModel.value.name || !newCustomModel.value.url || !newCustomModel.value.key) return;
   const id = newCustomModel.value.id || ('custom-' + Date.now());
   const provider = 'custom_' + id;
-  if (window.electronAPI.addCustomModel) {
-    await window.electronAPI.addCustomModel(id, newCustomModel.value.name, provider, newCustomModel.value.url, newCustomModel.value.key);
+  if (window.appAPI.addCustomModel) {
+    await window.appAPI.addCustomModel(id, newCustomModel.value.name, provider, newCustomModel.value.url, newCustomModel.value.key);
     newCustomModel.value = { name: '', url: '', key: '', id: '' };
     await loadCustomModels();
     if (modelHubRef.value) modelHubRef.value.rescan();
@@ -587,28 +737,29 @@ async function addCustomModel() {
 }
 
 async function removeCustomModel(id) {
-  if (window.electronAPI.removeCustomModel) {
-    await window.electronAPI.removeCustomModel(id);
+  if (window.appAPI.removeCustomModel) {
+    await window.appAPI.removeCustomModel(id);
     await loadCustomModels();
     if (modelHubRef.value) modelHubRef.value.rescan();
   }
 }
 
 async function saveConfig(key, value) {
-  await window.electronAPI.setConfig(key, value);
+  await window.appAPI.setConfig(key, value);
   emit('config-changed');
 }
 
 // ── Init ──
 onMounted(async () => {
+  await checkDownloadedModels();
   await loadRegistryProviders();
   await fetchApiKeys();
   await loadCustomModels();
   await fetchToolStatuses();
   await loadGcpCredentialStatus();
-  if (window.electronAPI.getOfflineEngineStatus) {
+  if (window.appAPI.getOfflineEngineStatus) {
     try {
-      const res = await window.electronAPI.getOfflineEngineStatus();
+      const res = await window.appAPI.getOfflineEngineStatus();
       if (res && res.status) {
         offlineEngineStatus.value = res.status;
       }
@@ -950,16 +1101,8 @@ details[open] > summary .details-chevron {
   background: transparent;
   border: none;
   color: var(--text-secondary);
-  padding: 4px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  cursor: pointer;
-  width: 24px;
-  height: 24px;
-  border-radius: var(--radius-sm, 4px);
   transition: all 0.2s;
+  flex-shrink: 0;
 }
 
 .btn-save-key:hover {

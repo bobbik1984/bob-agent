@@ -115,15 +115,15 @@ const renderedBriefing = computed(() => {
 
 async function loadDreamReport() {
   try {
-    const report = await window.electronAPI.getDreamReport();
+    const report = await window.appAPI.getDreamReport();
     if (report && report.briefing) {
       briefingText.value = report.briefing;
       stats.value = report.stats || {};
       visible.value = true;
     }
     // 进化引擎梦境报告
-    if (window.electronAPI.getEvolutionStats) {
-      const evo = await window.electronAPI.getEvolutionStats();
+    if (window.appAPI.getEvolutionStats) {
+      const evo = await window.appAPI.getEvolutionStats();
       if (evo && evo.dream_history && evo.dream_history.length > 0) {
         const latest = evo.dream_history[0];
         if (latest.report && latest.report !== '无需更新') {
@@ -152,7 +152,7 @@ async function loadDreamReport() {
 
   // P2.5: 加载标签合并提案
   try {
-    const tpRes = await window.electronAPI.getTagProposals();
+    const tpRes = await window.appAPI.getTagProposals();
     if (tpRes && Array.isArray(tpRes) && tpRes.length > 0) {
       tagProposals.value = tpRes;
       visible.value = true;
@@ -168,7 +168,7 @@ const tagProposals = ref([]);
 async function acceptTagMerge(index) {
   const proposal = tagProposals.value[index];
   try {
-    await window.electronAPI.notebookMergeTags(proposal.canonical, proposal.aliases);
+    await window.appAPI.notebookMergeTags(proposal.canonical, proposal.aliases);
     tagProposals.value.splice(index, 1);
   } catch (e) {
     console.error('Accept tag merge failed:', e);
@@ -179,7 +179,7 @@ async function rejectTagMerge(index) {
   const proposal = tagProposals.value[index];
   try {
     for (const alias of proposal.aliases) {
-      await window.electronAPI.notebookRejectTagMerge(proposal.canonical, alias);
+      await window.appAPI.notebookRejectTagMerge(proposal.canonical, alias);
     }
     tagProposals.value.splice(index, 1);
   } catch (e) {
@@ -190,18 +190,18 @@ async function rejectTagMerge(index) {
 function startChat() {
   emit('chat', briefingText.value);
   visible.value = false;
-  window.electronAPI.dismissDream();
+  window.appAPI.dismissDream();
   if (tagProposals.value.length === 0) {
-    window.electronAPI.clearTagProposals().catch(e => {});
+    window.appAPI.clearTagProposals().catch(e => {});
   }
 }
 
 function dismiss() {
   visible.value = false;
   emit('dismiss');
-  window.electronAPI.dismissDream();
+  window.appAPI.dismissDream();
   if (tagProposals.value.length === 0) {
-    window.electronAPI.clearTagProposals().catch(e => {});
+    window.appAPI.clearTagProposals().catch(e => {});
   }
 }
 
@@ -209,7 +209,7 @@ onMounted(() => {
   loadDreamReport();
 
   // 监听后台做梦完成事件
-  cleanupListener = window.electronAPI.onDreamCompleted((report) => {
+  cleanupListener = window.appAPI.onDreamCompleted((report) => {
     if (report && report.briefing) {
       briefingText.value = report.briefing;
       stats.value = report.stats || {};

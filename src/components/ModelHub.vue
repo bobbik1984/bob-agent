@@ -127,7 +127,7 @@ const registry = ref({ providers: [] });
 
 async function loadRegistry() {
   try {
-    registry.value = await window.electronAPI.invoke('llm_get_registry');
+    registry.value = await window.appAPI.invoke('llm_get_registry');
   } catch (e) {
     console.error('Failed to load model registry in ModelHub:', e);
   }
@@ -189,7 +189,7 @@ function toggleRole(role) {
 }
 
 async function assign(modelId, role) {
-  const result = await window.electronAPI.assignModelRole(modelId, role);
+  const result = await window.appAPI.assignModelRole(modelId, role);
   if (result?.ok) {
     if (role === 'main') activeMain.value = modelId;
     else activeClerk.value = modelId;
@@ -202,8 +202,8 @@ async function rescan() {
   isScanning.value = true;
   try {
     await loadRegistry();
-    await window.electronAPI.rescanModels();
-    pool.value = await window.electronAPI.getModelPool();
+    await window.appAPI.rescanModels();
+    pool.value = await window.appAPI.getModelPool();
     if (providerList.value.length > 0 && !activeProvider.value) {
       activeProvider.value = providerList.value[0].id;
     }
@@ -216,10 +216,10 @@ async function refreshProvider() {
   if (!activeProvider.value) return;
   isRefreshing.value = true;
   try {
-    const result = await window.electronAPI.refreshModels(activeProvider.value);
+    const result = await window.appAPI.refreshModels(activeProvider.value);
     if (result?.ok) {
       // 刷新成功，重新加载模型池
-      pool.value = await window.electronAPI.getModelPool();
+      pool.value = await window.appAPI.getModelPool();
     } else if (result?.error) {
       console.warn('刷新模型失败:', result.error);
     }
@@ -232,7 +232,7 @@ async function refreshProvider() {
 
 async function saveVariant() {
   const key = `providerVariant_${activeProvider.value}`;
-  await window.electronAPI.setConfig(key, providerVariant.value);
+  await window.appAPI.setConfig(key, providerVariant.value);
 }
 
 async function loadVariant() {
@@ -240,15 +240,15 @@ async function loadVariant() {
   const hasVariants = p ? (!!p.base_url_variants && Object.keys(p.base_url_variants).length > 0) : false;
   if (!hasVariants) return;
   const key = `providerVariant_${activeProvider.value}`;
-  const val = await window.electronAPI.getConfig(key);
+  const val = await window.appAPI.getConfig(key);
   providerVariant.value = val || 'default';
 }
 
 const apiKeys = ref({});
 
 async function refreshKeyStatus() {
-  if (window.electronAPI.getApiKeys) {
-    apiKeys.value = await window.electronAPI.getApiKeys() || {};
+  if (window.appAPI.getApiKeys) {
+    apiKeys.value = await window.appAPI.getApiKeys() || {};
   }
 }
 
@@ -263,8 +263,8 @@ watch(() => activeProvider.value, () => { loadVariant(); });
 
 onMounted(async () => {
   await loadRegistry();
-  pool.value = await window.electronAPI.getModelPool();
-  const active = await window.electronAPI.getActiveModels();
+  pool.value = await window.appAPI.getModelPool();
+  const active = await window.appAPI.getActiveModels();
   activeMain.value = active?.main || '';
   activeClerk.value = active?.clerk || '';
   await refreshKeyStatus();

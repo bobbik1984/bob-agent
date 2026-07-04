@@ -121,28 +121,28 @@ async function openDocs() {
 }
 
 function openDataDir() {
-  if (window.electronAPI.openDataDir) {
-    window.electronAPI.openDataDir();
+  if (window.appAPI.openDataDir) {
+    window.appAPI.openDataDir();
   }
 }
 
 function openLogDir() {
-  if (window.electronAPI.openLogDir) {
-    window.electronAPI.openLogDir();
+  if (window.appAPI.openLogDir) {
+    window.appAPI.openLogDir();
   }
 }
 
 async function factoryReset() {
   if (confirm(t('modal.factory_reset_warning'))) {
-    if (window.electronAPI.factoryReset) {
-      await window.electronAPI.factoryReset();
+    if (window.appAPI.factoryReset) {
+      await window.appAPI.factoryReset();
     }
   }
 }
 
 onMounted(async () => {
-  if (window.electronAPI.getVersion) {
-    appVersion.value = await window.electronAPI.getVersion();
+  if (window.appAPI.getVersion) {
+    appVersion.value = await window.appAPI.getVersion();
   }
 });
 
@@ -155,7 +155,7 @@ async function runDiagnostics() {
   isDiagnosing.value = true;
   diagnosticResult.value = null;
   try {
-    const res = await window.electronAPI.healthCheck();
+    const res = await window.appAPI.healthCheck();
     diagnosticResult.value = res;
   } catch (e) {
     console.error("Diagnostics failed", e);
@@ -166,7 +166,7 @@ async function runDiagnostics() {
 
 async function fixIssue(code) {
   try {
-    const res = await window.electronAPI.autoFix(code);
+    const res = await window.appAPI.autoFix(code);
     if (res?.ok) {
       alert("自愈修复成功：" + res.message);
       await runDiagnostics(); // re-run diagnostics after fix

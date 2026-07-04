@@ -79,7 +79,7 @@ const jobs = ref([]);
 async function loadJobs() {
   loading.value = true;
   try {
-    const result = await window.electronAPI.listCronJobs();
+    const result = await window.appAPI.listCronJobs();
     if (result?.ok && result.jobs) {
       // 只显示 @daily_startup 类型的任务
       jobs.value = result.jobs.filter(j => j.cron_expr === '@daily_startup');
@@ -94,7 +94,7 @@ async function loadJobs() {
 async function toggleJob(job) {
   const newEnabled = !job.enabled;
   try {
-    const result = await window.electronAPI.toggleCronJob(job.id, newEnabled);
+    const result = await window.appAPI.toggleCronJob(job.id, newEnabled);
     if (result?.ok) {
       job.enabled = newEnabled;
     }
@@ -105,7 +105,7 @@ async function toggleJob(job) {
 
 async function deleteJob(job) {
   try {
-    const result = await window.electronAPI.removeCronJob(job.id);
+    const result = await window.appAPI.removeCronJob(job.id);
     if (result?.ok) {
       jobs.value = jobs.value.filter(j => j.id !== job.id);
     }

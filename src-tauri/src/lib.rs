@@ -36,6 +36,8 @@ mod goal;
 mod assertions;
 mod notebook;
 pub mod tunnel;
+mod model_manager;
+mod candle_engine;
 
 use tauri::Manager;
 use serde_json::{json, Value};
@@ -696,6 +698,7 @@ pub fn run() {
 
     let mut builder = tauri::Builder::default()
         .manage(sidecar::SidecarState { child: Mutex::new(None) })
+        .manage(crate::candle_engine::CandleState { engine: Mutex::new(None), is_running: Mutex::new(false) })
         .manage(wechat_state.clone())
         .manage(browser_state.clone())
         .plugin(tauri_plugin_dialog::init())
@@ -787,6 +790,9 @@ pub fn run() {
             system_set_api_key,
             system_add_custom_model,
             system_remove_custom_model,
+            model_manager::download_model,
+            model_manager::check_model_downloaded,
+            model_manager::pause_download,
             // 文件系统
             filesystem::system_get_file_meta,
             filesystem::system_scan_folder,
@@ -823,10 +829,10 @@ pub fn run() {
             scheduler::system_add_cron_job,
             scheduler::system_remove_cron_job,
             scheduler::system_toggle_cron_job,
-            // Sidecar
-            sidecar::start_offline_engine,
-            sidecar::stop_offline_engine,
-            sidecar::get_offline_engine_status,
+            // Sidecar / Candle Engine
+            crate::candle_engine::start_offline_engine,
+            crate::candle_engine::stop_offline_engine,
+            crate::candle_engine::get_offline_engine_status,
             // 系统工具
             system_get_version,
             system_open_data_dir,

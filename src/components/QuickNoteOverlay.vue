@@ -16,6 +16,9 @@
             autocomplete="off"
             spellcheck="false"
           />
+          <button class="quicknote-model-btn" @click="openModelSwitcher" title="切换模型">
+            <Cpu :size="18" />
+          </button>
         </div>
         <Transition name="quicknote-hint">
           <div v-if="showSaved" class="quicknote-saved">
@@ -29,7 +32,7 @@
 
 <script setup>
 import { ref, nextTick, onMounted, onUnmounted } from 'vue';
-import { Check } from 'lucide-vue-next';
+import { Check, Cpu } from 'lucide-vue-next';
 
 const visible = ref(false);
 const text = ref('');
@@ -47,6 +50,11 @@ function open() {
   });
 }
 
+function openModelSwitcher() {
+  window.dispatchEvent(new CustomEvent('open-mobile-model-switcher'));
+  close();
+}
+
 function close() {
   visible.value = false;
   text.value = '';
@@ -61,7 +69,7 @@ async function submit() {
 
   try {
     // 通过 IPC 写入速记文件
-    await window.electronAPI.notebookAppendDaily(content);
+    await window.appAPI.notebookAppendDaily(content);
   } catch (err) {
     console.warn('[QuickNote] IPC fallback:', err);
   }
@@ -91,6 +99,23 @@ onUnmounted(() => document.removeEventListener('keydown', onGlobalKey));
 </script>
 
 <style scoped>
+.quicknote-model-btn {
+  width: 48px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: color 0.2s;
+  flex-shrink: 0;
+}
+.quicknote-model-btn:hover {
+  color: var(--text-primary);
+}
+
 /* ── 背景遮罩 + 毛玻璃 ── */
 .quicknote-overlay {
   position: fixed;

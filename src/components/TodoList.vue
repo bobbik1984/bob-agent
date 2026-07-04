@@ -70,7 +70,7 @@ function formatTime(timestamp) {
 async function toggleStatus(todo) {
   const newStatus = todo.status === 'done' ? 'pending' : 'done';
   try {
-    await window.electronAPI.updateEventStatus(todo.id, newStatus);
+    await window.appAPI.updateEventStatus(todo.id, newStatus);
     emit('update-status', { id: todo.id, status: newStatus });
   } catch (err) {
     console.error('更新待办状态失败', err);

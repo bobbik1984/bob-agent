@@ -81,7 +81,6 @@ mod job {
     }
 }
 
-#[command]
 pub async fn start_offline_engine(app: AppHandle, model_path: String) -> Result<Value, String> {
     // 1. 杀掉旧进程 (使用独立作用域防止锁跨越 await)
     {
@@ -149,7 +148,6 @@ pub async fn start_offline_engine(app: AppHandle, model_path: String) -> Result<
     Ok(json!({ "status": "running" }))
 }
 
-#[command]
 pub async fn stop_offline_engine(app: AppHandle) -> Result<Value, String> {
     let state: State<SidecarState> = app.state();
     let mut child_lock = state.child.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -162,7 +160,6 @@ pub async fn stop_offline_engine(app: AppHandle) -> Result<Value, String> {
     }
 }
 
-#[command]
 pub async fn get_offline_engine_status(app: AppHandle) -> Result<Value, String> {
     let state: State<SidecarState> = app.state();
     let child_lock = state.child.lock().unwrap_or_else(|poisoned| poisoned.into_inner());

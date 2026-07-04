@@ -180,7 +180,7 @@ const onDrop = async (e) => {
       const fileName = `img_${Date.now()}_${file.name.replace(/[^a-zA-Z0-9.\-]/g, '_')}`;
       
       try {
-        const res = await window.electronAPI.notebookSaveAsset(fileName, Array.from(bytes));
+        const res = await window.appAPI.notebookSaveAsset(fileName, Array.from(bytes));
         if (res.ok) {
           // Note: Here we insert relative path or some path resolver depending on how the frontend serves assets
           // For now, we will insert the file path that is returned, assuming there is a protocol to serve them.

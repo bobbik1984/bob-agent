@@ -206,7 +206,7 @@ const selectedTag = ref(null);
 
 const loadNotes = async () => {
   try {
-    const res = await window.electronAPI.notebookListNotes();
+    const res = await window.appAPI.notebookListNotes();
     if (res && res.daily) {
       notes.value = {
         daily: res.daily || [],
@@ -235,7 +235,7 @@ const loadNotes = async () => {
 
 const loadTags = async () => {
   try {
-    const res = await window.electronAPI.notebookListAllTags();
+    const res = await window.appAPI.notebookListAllTags();
     if (res && res.ok) {
       allTags.value = res.tags || [];
     }
@@ -329,7 +329,7 @@ const createNewNote = async () => {
   const title = prompt(t('notebook.new_note') + ':');
   if (!title) return;
   try {
-    const res = await window.electronAPI.notebookCreateNote(title, []);
+    const res = await window.appAPI.notebookCreateNote(title, []);
     if (res.ok) {
       await loadNotes();
       emit('select', res.path);
@@ -346,22 +346,22 @@ const promoteDailyNote = async (note) => {
   if (!title) return;
   
   try {
-    const readRes = await window.electronAPI.notebookReadNote(note.id);
+    const readRes = await window.appAPI.notebookReadNote(note.id);
     if (!readRes.ok) throw new Error('无法读取原始速记');
     const originalContent = readRes.content || '';
     
-    const newNoteRes = await window.electronAPI.notebookCreateNote(title, [], 'topics');
+    const newNoteRes = await window.appAPI.notebookCreateNote(title, [], 'topics');
     if (!newNoteRes.ok) throw new Error('创建新笔记失败');
     
-    await window.electronAPI.notebookSaveNote(newNoteRes.path, originalContent);
+    await window.appAPI.notebookSaveNote(newNoteRes.path, originalContent);
     
     const appendText = `\n\n> 📍 已提取至 [[${title}]]`;
-    await window.electronAPI.notebookSaveNote(note.id, originalContent + appendText);
+    await window.appAPI.notebookSaveNote(note.id, originalContent + appendText);
     
     await loadNotes();
     emit('select', newNoteRes.path);
-    if (window.electronAPI.showNotification) {
-      window.electronAPI.showNotification('速记提升成功', `已提升为: ${title}`);
+    if (window.appAPI.showNotification) {
+      window.appAPI.showNotification('速记提升成功', `已提升为: ${title}`);
     }
   } catch (err) {
     console.error('提升失败:', err);
@@ -373,7 +373,7 @@ const createNewFolder = async () => {
   const name = prompt(t('notebook.new_folder_prompt'));
   if (!name) return;
   try {
-    const res = await window.electronAPI.notebookCreateFolder(name);
+    const res = await window.appAPI.notebookCreateFolder(name);
     if (res.ok) {
       await loadNotes();
     } else {
@@ -387,7 +387,7 @@ const createNewFolder = async () => {
 const deleteNote = async (note) => {
   if (!confirm(`${t('notebook.new_note')}: "${formatAnyName(note.id)}" ?`)) return;
   try {
-    const res = await window.electronAPI.notebookDeleteNote(note.id);
+    const res = await window.appAPI.notebookDeleteNote(note.id);
     if (res.ok) {
       await loadNotes();
       if (props.selectedNoteId === note.id) emit('select', null);
@@ -410,7 +410,7 @@ const onDrop = async (e, targetCategory) => {
   const sourceCategory = e.dataTransfer.getData('category');
   if (!noteId || !sourceCategory || sourceCategory === targetCategory) return;
   try {
-    const res = await window.electronAPI.notebookMoveNote(noteId, targetCategory);
+    const res = await window.appAPI.notebookMoveNote(noteId, targetCategory);
     if (res.ok) {
       await loadNotes();
       if (props.selectedNoteId === noteId) emit('select', res.new_id);

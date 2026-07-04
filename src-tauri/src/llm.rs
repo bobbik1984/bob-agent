@@ -518,10 +518,32 @@ pub fn get_model_pool() -> Value {
         }
     }
     
+    let config = super::read_config();
     // 从配置中读取 customModels 并追加
-    if let Some(custom_models) = super::read_config().get("customModels").and_then(|v| v.as_array()) {
+    if let Some(custom_models) = config.get("customModels").and_then(|v| v.as_array()) {
         for cm in custom_models {
             pool.push(cm.clone());
+        }
+    }
+    
+    // 注入当前配置的本地离线模型
+    if let Some(offline_path) = config.get("offlineModelPath").and_then(|v| v.as_str()) {
+        if !offline_path.is_empty() {
+            let model_name = std::path::Path::new(offline_path)
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("Local Offline Model");
+                
+            pool.push(json!({
+                "id": offline_path,
+                "modelId": offline_path,
+                "displayName": format!("💻 {}", model_name),
+                "label": format!("💻 {}", model_name),
+                "provider": "offline",
+                "providerName": "本地离线引擎",
+                "vision": false,
+                "pricing": { "input": 0.0, "output": 0.0 }
+            }));
         }
     }
     
@@ -1562,20 +1584,16 @@ pub(crate) async fn stream_internal(
     // 3. 获取工具 Schema
     let tool_schemas = super::tools::get_tool_schemas_with_mcp().await;
 
+    if provider == "offline" {
+        return crate::candle_engine::run_native_inference(app, full_messages.clone(), conv_id_for_emit).await;
+    }
+
     // 4. 构建 HTTP 客户端
     let url = format!("{}/chat/completions", base_url);
-    let client = if provider == "offline" {
-        reqwest::Client::builder()
-            .no_proxy()
-            .timeout(std::time::Duration::from_secs(300))
-            .build()
-            .unwrap_or_else(|_| reqwest::Client::new())
-    } else {
-        reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(300))
-            .build()
-            .unwrap_or_else(|_| reqwest::Client::new())
-    };
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(300))
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new());
 
     // ═══════════════════════════════════════════════════════════
     // Tool Calling 循环 (最多 MAX_TOOL_ROUNDS 轮)

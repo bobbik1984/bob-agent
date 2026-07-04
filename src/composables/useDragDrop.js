@@ -22,7 +22,7 @@ export function useDragDrop({ messages, inputText, scrollToBottom, globalFileAcc
   // ── 附件选择 ──
   async function handleAttach() {
     try {
-      const result = await window.electronAPI.selectFile();
+      const result = await window.appAPI.selectFile();
       if (!result) return;
       if (typeof result === 'object' && result.type === 'image' && result.content) {
         pendingImages.value.push(result.content);
@@ -39,7 +39,7 @@ export function useDragDrop({ messages, inputText, scrollToBottom, globalFileAcc
     } catch (e) {
       console.error('[handleAttach]', e);
     }
-    const base64 = await window.electronAPI.getClipboardImage();
+    const base64 = await window.appAPI.getClipboardImage();
     if (base64) {
       pendingImages.value.push(base64);
     }
@@ -78,14 +78,14 @@ export function useDragDrop({ messages, inputText, scrollToBottom, globalFileAcc
     if (!files || files.length === 0) return;
 
     const file = files[0];
-    const filePath = window.electronAPI.getFilePath ? window.electronAPI.getFilePath(file) : file.path;
+    const filePath = window.appAPI.getFilePath ? window.appAPI.getFilePath(file) : file.path;
 
     // 路由 1: 文件夹
     if (filePath) {
       try {
-        const meta = await window.electronAPI.getFileMeta(filePath);
+        const meta = await window.appAPI.getFileMeta(filePath);
         if (meta && meta.isDir) {
-          const scanResult = await window.electronAPI.scanFolder(filePath);
+          const scanResult = await window.appAPI.scanFolder(filePath);
           if (scanResult && !scanResult.error) {
             pendingFolderInfo.value = { path: filePath, name: meta.name, scanResult };
             scrollToBottom();
@@ -117,7 +117,7 @@ export function useDragDrop({ messages, inputText, scrollToBottom, globalFileAcc
       return;
     }
     try {
-      const result = await window.electronAPI.readFile(filePath);
+      const result = await window.appAPI.readFile(filePath);
       if (result.error) {
         inputText.value = `文件读取失败: ${result.error}`;
       } else {
@@ -134,14 +134,14 @@ export function useDragDrop({ messages, inputText, scrollToBottom, globalFileAcc
     for (const filePath of paths) {
       if (filePath.match(/\.(png|jpg|jpeg|gif|webp)$/i)) continue;
       try {
-        const meta = await window.electronAPI.getFileMeta(filePath);
+        const meta = await window.appAPI.getFileMeta(filePath);
         if (meta && meta.isDir) {
           let scanResult;
           if (window.__preScannedFolder && window.__preScannedFolder.path === filePath) {
             scanResult = window.__preScannedFolder.scanResult;
             window.__preScannedFolder = null;
           } else {
-            scanResult = await window.electronAPI.scanFolder(filePath);
+            scanResult = await window.appAPI.scanFolder(filePath);
           }
           if (scanResult && !scanResult.error) {
             pendingFolderInfo.value = { path: filePath, name: meta.name, scanResult };
@@ -176,7 +176,7 @@ export function useDragDrop({ messages, inputText, scrollToBottom, globalFileAcc
 
     const userContent = `我已经将文件夹「${folder.name}」拖入。`;
     messages.value.push({ role: 'user', content: userContent });
-    await window.electronAPI.addMessage(conversationId(), 'user', userContent, null);
+    await window.appAPI.addMessage(conversationId(), 'user', userContent, null);
 
     const systemMsgId = Date.now().toString();
     const systemMsg = { id: systemMsgId, role: 'assistant', content: '正在处理文件夹，请稍候...' };
@@ -184,7 +184,7 @@ export function useDragDrop({ messages, inputText, scrollToBottom, globalFileAcc
     scrollToBottom();
 
     try {
-      const result = await window.electronAPI.sendChat([{
+      const result = await window.appAPI.sendChat([{
         role: 'user',
         content: `Please execute the "track_folder" tool on this path: ${folder.path}`
       }], globalFileAccess.value, agentMode.value);
@@ -192,12 +192,12 @@ export function useDragDrop({ messages, inputText, scrollToBottom, globalFileAcc
       const successContent = `✅ 已将「${folder.name}」收藏到目录列表。`;
       const index = messages.value.findIndex(m => m.id === systemMsgId);
       if (index !== -1) messages.value[index].content = successContent;
-      await window.electronAPI.addMessage(conversationId(), 'assistant', successContent, null);
+      await window.appAPI.addMessage(conversationId(), 'assistant', successContent, null);
 
       pendingKBEstimate.value = { name: folder.name, path: folder.path, result: null };
       scrollToBottom();
 
-      const estimateResult = await window.electronAPI.estimateKB(folder.path);
+      const estimateResult = await window.appAPI.estimateKB(folder.path);
       if (pendingKBEstimate.value && pendingKBEstimate.value.path === folder.path) {
         pendingKBEstimate.value.result = estimateResult;
       }
@@ -205,7 +205,7 @@ export function useDragDrop({ messages, inputText, scrollToBottom, globalFileAcc
       const failContent = `❌ 文件夹收藏失败: ${err.message}`;
       const index = messages.value.findIndex(m => m.id === systemMsgId);
       if (index !== -1) messages.value[index].content = failContent;
-      await window.electronAPI.addMessage(conversationId(), 'assistant', failContent, null);
+      await window.appAPI.addMessage(conversationId(), 'assistant', failContent, null);
     }
   }
 
@@ -220,7 +220,7 @@ export function useDragDrop({ messages, inputText, scrollToBottom, globalFileAcc
     messages.value.push({ id: progressMsgId, role: 'assistant', content: '📚 正在启动知识库构建...' });
     scrollToBottom();
 
-    const unlistenProgress = window.electronAPI.onKBProgress?.((payload) => {
+    const unlistenProgress = window.appAPI.onKBProgress?.((payload) => {
       const idx = messages.value.findIndex(m => m.id === progressMsgId);
       if (idx !== -1) {
         messages.value[idx].content = `📚 ${payload.message} (${payload.current}/${payload.total})`;
@@ -229,7 +229,7 @@ export function useDragDrop({ messages, inputText, scrollToBottom, globalFileAcc
     });
     if (unlistenProgress) kbUnlistens.push(unlistenProgress);
 
-    const unlistenComplete = window.electronAPI.onKBComplete?.((payload) => {
+    const unlistenComplete = window.appAPI.onKBComplete?.((payload) => {
       const idx = messages.value.findIndex(m => m.id === progressMsgId);
       if (idx !== -1) {
         if (payload.failed > 0) {
@@ -237,7 +237,7 @@ export function useDragDrop({ messages, inputText, scrollToBottom, globalFileAcc
         } else {
           messages.value[idx].content = `✅ 知识库构建完成！已成功处理 ${payload.total} 个文件。你现在可以向我提问关于「${payload.folder}」的内容。`;
         }
-        window.electronAPI.addMessage(conversationId(), 'assistant', messages.value[idx].content, null);
+        window.appAPI.addMessage(conversationId(), 'assistant', messages.value[idx].content, null);
       }
       scrollToBottom();
       if (unlistenProgress) unlistenProgress();
@@ -245,7 +245,7 @@ export function useDragDrop({ messages, inputText, scrollToBottom, globalFileAcc
     });
     if (unlistenComplete) kbUnlistens.push(unlistenComplete);
 
-    window.electronAPI.buildKB?.(folderPath, plan).then((result) => {
+    window.appAPI.buildKB?.(folderPath, plan).then((result) => {
       if (result?.error) {
         const idx = messages.value.findIndex(m => m.id === progressMsgId);
         if (idx !== -1) messages.value[idx].content = `❌ ${result.message}`;
@@ -262,19 +262,19 @@ export function useDragDrop({ messages, inputText, scrollToBottom, globalFileAcc
 
   // ── Tauri 拖拽监听注册 ──
   function setupTauriDragListeners(tauriDragUnlistens) {
-    if (!window.electronAPI.onDragEnter) return;
+    if (!window.appAPI.onDragEnter) return;
 
     let currentPreScanPath = null;
-    window.electronAPI.onDragEnter(async (e) => {
+    window.appAPI.onDragEnter(async (e) => {
       isDragging.value = true;
       if (e.payload && e.payload.paths && e.payload.paths.length > 0) {
         const filePath = e.payload.paths[0];
         if (currentPreScanPath === filePath) return;
         currentPreScanPath = filePath;
         try {
-          const meta = await window.electronAPI.getFileMeta(filePath);
+          const meta = await window.appAPI.getFileMeta(filePath);
           if (meta && meta.isDir) {
-            window.electronAPI.scanFolder(filePath).then(scanResult => {
+            window.appAPI.scanFolder(filePath).then(scanResult => {
               if (scanResult && !scanResult.error) {
                 window.__preScannedFolder = { path: filePath, name: meta.name, scanResult };
               }
@@ -284,9 +284,9 @@ export function useDragDrop({ messages, inputText, scrollToBottom, globalFileAcc
       }
     }).then(u => tauriDragUnlistens.push(u));
 
-    window.electronAPI.onDragLeave(async () => { isDragging.value = false; }).then(u => tauriDragUnlistens.push(u));
+    window.appAPI.onDragLeave(async () => { isDragging.value = false; }).then(u => tauriDragUnlistens.push(u));
 
-    window.electronAPI.onDragDrop(async (e) => {
+    window.appAPI.onDragDrop(async (e) => {
       // 避免在非 Chat 视图时意外触发 (因为 ChatView 是 v-show 并非 unmounted)
       const chatView = document.querySelector('.chat-view');
       if (chatView && chatView.offsetParent === null) return;

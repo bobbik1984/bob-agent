@@ -90,5 +90,10 @@ defineEmits(['update:activeDrawer']);
 .bottom-nav-item span {
   font-size: 10px;
   font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 72px;
+  line-height: 1.2;
 }
 </style>

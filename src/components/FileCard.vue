@@ -119,14 +119,14 @@ const hoverTooltip = computed(() => {
 
 function openFile() {
   if (!meta.value.exists) return;
-  window.electronAPI.openFile(props.filePath).catch(err => {
+  window.appAPI.openFile(props.filePath).catch(err => {
     console.error('[FileCard] 打开文件失败:', err);
   });
 }
 
 async function handleWebDrop() {
   try {
-    const url = await window.electronAPI.startWebDrop(props.filePath);
+    const url = await window.appAPI.startWebDrop(props.filePath);
     // 复制到剪贴板并打开浏览器
     navigator.clipboard.writeText(url);
     window.open(url, '_blank');
@@ -138,7 +138,7 @@ async function handleWebDrop() {
 
 onMounted(async () => {
   try {
-    const result = await window.electronAPI.getFileMeta(props.filePath);
+    const result = await window.appAPI.getFileMeta(props.filePath);
     // 防御：后端可能未显式返回 exists 字段，从 error 字段推断
     if (result.error) {
       result.exists = false;

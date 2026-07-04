@@ -7,7 +7,7 @@ project:
   - Rust
   - Vue 3
   - Desktop
-  updated: '2026-07-02'
+  updated: '2026-07-04'
 phases:
 - name: V0.5 知识图谱 Source-Hub 重构
   tasks:
@@ -28,4 +28,16 @@ phases:
   - text: Rust 后端网络层重构 (Tunnel Client & Proxy)
     status: todo
   - text: VPS 中继端配合 (Tunnel Server)
+    status: todo
+- name: 本地大模型引擎 (Candle Engine) 修复与贯通
+  tasks:
+  - text: 修复 SettingsModelPanel.vue 配置保存时序 bug
+    status: done
+  - text: 修复本地模型 ID 未注入大模型池的 bug
+    status: done
+  - text: 修复模型物理路径未对齐 AppData 的 Bug (os error 3)
+    status: todo
+  - text: 修复 Candle Engine 分词器 (Tokenizer) 加载崩溃 Bug
+    status: todo
+  - text: 实现本地引擎预加载机制与流式返回
     status: todo

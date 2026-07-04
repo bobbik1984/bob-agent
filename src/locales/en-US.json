@@ -54,12 +54,12 @@
   },
   "settings": {
     "title": "Settings",
-    "nav_model": "Model Settings",
-    "nav_connections": "Connections",
-    "nav_workspace": "Workspace",
-    "nav_appearance": "Appearance",
+    "nav_model": "Model",
+    "nav_connections": "Connect",
+    "nav_workspace": "Files",
+    "nav_appearance": "Theme",
     "nav_about": "About",
-    "nav_daily_routine": "Daily Routine",
+    "nav_daily_routine": "Tasks",
     "proxy_tunnel_name": "Proxy Tunnel",
     "proxy_tunnel_desc": "Bypass network restrictions by relaying traffic",
     "daily_routine": "Daily Startup Tasks",
@@ -354,7 +354,8 @@
     "cmd_save_note_tooltip": "Save input as a note directly, do not send to AI",
     "cmd_note_empty": "Please enter content before saving",
     "cmd_note_desc": "Create a new note and open in editor",
-    "cmd_clip_desc": "Save AI's last reply as a note"
+    "cmd_clip_desc": "Save AI's last reply as a note",
+    "back": "Back"
   },
   "model_hub": {
     "title": "Model Hub",

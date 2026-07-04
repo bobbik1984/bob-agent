@@ -348,7 +348,7 @@ async function handleNoteSelect(id) {
       return;
     }
 
-    const res = await window.electronAPI.notebookReadNote(id);
+    const res = await window.appAPI.notebookReadNote(id);
     
     // Abort if user clicked another note while reading from disk
     if (selectedNoteId.value !== id) return;
@@ -383,7 +383,7 @@ async function saveCurrentNote(markdown) {
 
   pendingSaveFn = async () => {
     try {
-      await window.electronAPI.notebookSaveNote(id, markdown);
+      await window.appAPI.notebookSaveNote(id, markdown);
       saveStatus.value = '已自动保存';
       setTimeout(() => {
         if (saveStatus.value === '已自动保存') saveStatus.value = '';
@@ -406,7 +406,7 @@ async function handleTagsUpdate(newTags) {
   if (!selectedNoteId.value) return;
   currentNoteTags.value = newTags;
   try {
-    await window.electronAPI.notebookUpdateTags(selectedNoteId.value, newTags);
+    await window.appAPI.notebookUpdateTags(selectedNoteId.value, newTags);
   } catch (e) {
     console.error('Failed to update tags:', e);
   }
@@ -418,7 +418,7 @@ const showBacklinks = ref(true);
 
 async function loadBacklinks(notePath) {
   try {
-    const res = await window.electronAPI.notebookGetBacklinks(notePath);
+    const res = await window.appAPI.notebookGetBacklinks(notePath);
     if (res && res.ok) {
       backlinks.value = res.backlinks || [];
     }
@@ -432,13 +432,13 @@ async function loadBacklinks(notePath) {
 async function handleWikilinkClick(targetTitle) {
   // Search for the note by title
   try {
-    const res = await window.electronAPI.notebookSearch(targetTitle);
+    const res = await window.appAPI.notebookSearch(targetTitle);
     if (res && res.ok && res.results && res.results.length > 0) {
       // Found existing note — navigate to it
       handleNoteSelect(res.results[0].path);
     } else {
       // Note doesn't exist — create it
-      const createRes = await window.electronAPI.notebookCreateNote(targetTitle, []);
+      const createRes = await window.appAPI.notebookCreateNote(targetTitle, []);
       if (createRes.ok) {
         if (noteExplorerRef.value) noteExplorerRef.value.refresh();
         handleNoteSelect(createRes.path);
@@ -482,14 +482,14 @@ watch(() => selectedNode.value, async (newVal) => {
   // Check project index
   if (newVal.type === 'Project' || newVal.type === 'project') {
     try {
-      const path = await window.electronAPI.checkProjectIndex(newVal.label);
+      const path = await window.appAPI.checkProjectIndex(newVal.label);
       if (path) projectIndexPath.value = path;
     } catch (e) { console.error(e); }
   }
 
   // P1-4: Search for related notes by node label
   try {
-    const res = await window.electronAPI.notebookSearch(newVal.label);
+    const res = await window.appAPI.notebookSearch(newVal.label);
     if (res && res.ok && res.results) {
       inspectorRelatedNotes.value = res.results.slice(0, 5);
     }
@@ -594,7 +594,7 @@ async function confirmMerge() {
   if (!yes) return;
   
   try {
-    const res = await window.electronAPI.invoke('kg_merge_nodes', {
+    const res = await window.appAPI.invoke('kg_merge_nodes', {
       payload: {
         primary_id: targetNode.id,
         alias_id: selectedNode.value.id
@@ -704,8 +704,8 @@ let tauriDragUnlistens = [];
 
 function openSourceFile(path) {
   if (!path) return;
-  if (window.electronAPI && window.electronAPI.openFile) {
-    window.electronAPI.openFile(path).catch(err => {
+  if (window.appAPI && window.appAPI.openFile) {
+    window.appAPI.openFile(path).catch(err => {
       console.error('Failed to open file:', err);
     });
   } else {
@@ -715,7 +715,7 @@ function openSourceFile(path) {
 
 function openProjectPortal() {
   if (projectIndexPath.value) {
-    window.electronAPI.openFile(projectIndexPath.value);
+    window.appAPI.openFile(projectIndexPath.value);
   }
 }
 
@@ -726,16 +726,16 @@ onMounted(async () => {
   loading.value = false;
 
   // 注册 Tauri 原生拖拽监听 (因为全局已接管 native OS drop)
-  if (window.electronAPI.onDragEnter) {
-    window.electronAPI.onDragEnter(async () => {
+  if (window.appAPI.onDragEnter) {
+    window.appAPI.onDragEnter(async () => {
       isDragOver.value = true;
     }).then(u => tauriDragUnlistens.push(u));
 
-    window.electronAPI.onDragLeave(async () => {
+    window.appAPI.onDragLeave(async () => {
       isDragOver.value = false;
     }).then(u => tauriDragUnlistens.push(u));
 
-    window.electronAPI.onDragDrop(async (e) => {
+    window.appAPI.onDragDrop(async (e) => {
       isDragOver.value = false;
       if (e.payload && e.payload.paths && e.payload.paths.length > 0) {
         const path = e.payload.paths[0];
@@ -744,7 +744,7 @@ onMounted(async () => {
           const { ask } = await import('@tauri-apps/plugin-dialog');
           
           // 先预估成本
-          const estimate = await window.electronAPI.estimateKB(path);
+          const estimate = await window.appAPI.estimateKB(path);
           let msg = `是否要从该路径提取知识点并加入图谱？\n\n${path}\n\n`;
           
           if (estimate && !estimate.error) {
@@ -785,8 +785,8 @@ async function loadGraph() {
   try {
     // 加载统计和完整图谱
     const [graphData, statsData] = await Promise.all([
-      window.electronAPI.kgGetFullGraph(),
-      window.electronAPI.kgStats(),
+      window.appAPI.kgGetFullGraph(),
+      window.appAPI.kgStats(),
     ]);
     stats.value = statsData;
     allGraphData.value = graphData;
@@ -1056,12 +1056,12 @@ function applyTypeFilter() {
 async function doBackfill() {
   backfilling.value = true;
   try {
-    const result = await window.electronAPI.kgBackfill();
+    const result = await window.appAPI.kgBackfill();
     console.log('KG backfill result:', result);
     // 直接获取并渲染，不调 loadGraph (避免递归)
     const [graphData, statsData] = await Promise.all([
-      window.electronAPI.kgGetFullGraph(),
-      window.electronAPI.kgStats(),
+      window.appAPI.kgGetFullGraph(),
+      window.appAPI.kgStats(),
     ]);
     stats.value = statsData;
     allGraphData.value = graphData;
@@ -1086,7 +1086,7 @@ function onDragLeave() {
 
 async function confirmExtract(path) {
   try {
-    const est = await window.electronAPI.invoke('system_estimate_kb', { folderPath: path });
+    const est = await window.appAPI.invoke('system_estimate_kb', { folderPath: path });
     
     let msg = `是否要从该路径提取知识点并加入图谱？\n\n路径: ${path}`;
     if (est) {
@@ -1143,12 +1143,12 @@ async function buildKBAndRefresh(folderPath) {
   backfilling.value = true;
   try {
     // 调用现有的 KB 构建管线
-    await window.electronAPI.invoke('system_build_kb', { folderPath, plan: '' });
+    await window.appAPI.invoke('system_build_kb', { folderPath, plan: '' });
     // KB 构建完成后回填图谱并刷新
-    await window.electronAPI.kgBackfill();
+    await window.appAPI.kgBackfill();
     const [graphData, statsData] = await Promise.all([
-      window.electronAPI.kgGetFullGraph(),
-      window.electronAPI.kgStats(),
+      window.appAPI.kgGetFullGraph(),
+      window.appAPI.kgStats(),
     ]);
     stats.value = statsData;
     allGraphData.value = graphData;
@@ -1172,14 +1172,14 @@ async function removeSourceBatch(node) {
   if (confirm(`确定要彻底清除来源批次 "${node.label}" 及其相关联的所有知识点吗？\n警告：此操作不可逆！`)) {
     try {
       loading.value = true;
-      const res = await window.electronAPI.systemRemoveSource(batchId);
+      const res = await window.appAPI.systemRemoveSource(batchId);
       if (res && res.ok) {
         console.log(`Successfully deleted ${res.nodes_deleted} nodes and ${res.edges_deleted} edges.`);
         selectedNode.value = null;
         // 刷新图谱
         const [graphData, statsData] = await Promise.all([
-          window.electronAPI.kgGetFullGraph(),
-          window.electronAPI.kgStats(),
+          window.appAPI.kgGetFullGraph(),
+          window.appAPI.kgStats(),
         ]);
         stats.value = statsData;
         allGraphData.value = graphData;

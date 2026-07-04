@@ -347,12 +347,12 @@ const showPluginManager = ref(false);
 const trackedFolders = ref([]);
 
 async function saveConfig(key, value) {
-  await window.electronAPI.setConfig(key, value);
+  await window.appAPI.setConfig(key, value);
   emit('config-changed');
 }
 
 async function selectWorkspaceDir() {
-  const dirPath = await window.electronAPI.selectWorkspaceDir();
+  const dirPath = await window.appAPI.selectWorkspaceDir();
   if (dirPath) {
     props.config.workspaceDir = dirPath;
     await saveConfig('workspaceDir', dirPath);
@@ -382,7 +382,7 @@ async function confirmWikiMigration() {
   isMigrating.value = true;
   migrationError.value = '';
   try {
-    const res = await window.electronAPI.migrateWikiDir(
+    const res = await window.appAPI.migrateWikiDir(
       props.config.wikiDir || '',
       pendingWikiDir.value,
       migrationMode.value
@@ -404,7 +404,7 @@ async function confirmWikiMigration() {
 }
 
 async function selectWikiDir() {
-  const dirPath = await window.electronAPI.selectDir();
+  const dirPath = await window.appAPI.selectDir();
   if (dirPath) {
     if (dirPath === props.config.wikiDir) return;
     pendingWikiDir.value = dirPath;
@@ -419,7 +419,7 @@ async function clearWikiDir() {
 
 // ── External Skills Dir ──
 async function selectExternalSkillsDir() {
-  const dirPath = await window.electronAPI.selectDir();
+  const dirPath = await window.appAPI.selectDir();
   if (dirPath) {
     props.config.externalSkillsDir = dirPath;
     await saveConfig('externalSkillsDir', dirPath);
@@ -433,19 +433,19 @@ async function clearExternalSkillsDir() {
 
 // ── 文件夹跟踪 ──
 async function loadTrackedFolders() {
-  trackedFolders.value = await window.electronAPI.getTrackedFolders();
+  trackedFolders.value = await window.appAPI.getTrackedFolders();
 }
 
 async function addFolder() {
-  const dirPath = await window.electronAPI.selectFolderToTrack();
+  const dirPath = await window.appAPI.selectFolderToTrack();
   if (dirPath) {
-    await window.electronAPI.addTrackedFolder(dirPath);
+    await window.appAPI.addTrackedFolder(dirPath);
     await loadTrackedFolders();
   }
 }
 
 async function removeFolder(folderPath) {
-  await window.electronAPI.removeTrackedFolder(folderPath);
+  await window.appAPI.removeTrackedFolder(folderPath);
   await loadTrackedFolders();
 }
 
@@ -454,10 +454,10 @@ const memoryLoading = ref(false);
 const memoryEntries = ref([]);
 
 async function loadMemoryEntries() {
-  if (!window.electronAPI.getMemoryEntries) return;
+  if (!window.appAPI.getMemoryEntries) return;
   memoryLoading.value = true;
   try {
-    const entries = await window.electronAPI.getMemoryEntries();
+    const entries = await window.appAPI.getMemoryEntries();
     memoryEntries.value = entries || [];
   } catch (e) {
     console.error('Failed to load memory entries', e);
@@ -470,7 +470,7 @@ async function loadMemoryEntries() {
 async function deleteMemoryEntry(entry) {
   if (!confirm(t('settings.memory_delete_confirm'))) return;
   try {
-    await window.electronAPI.deleteMemoryEntry(entry.type, entry.id);
+    await window.appAPI.deleteMemoryEntry(entry.type, entry.id);
     memoryEntries.value = memoryEntries.value.filter(
       e => !(e.type === entry.type && e.id === entry.id)
     );
@@ -495,10 +495,10 @@ const evoLoading = ref(false);
 const evoStats = ref({});
 
 async function loadEvolutionStats() {
-  if (!window.electronAPI.getEvolutionStats) return;
+  if (!window.appAPI.getEvolutionStats) return;
   evoLoading.value = true;
   try {
-    const data = await window.electronAPI.getEvolutionStats();
+    const data = await window.appAPI.getEvolutionStats();
     evoStats.value = data || {};
   } catch (e) {
     console.error('Failed to load evolution stats', e);

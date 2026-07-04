@@ -154,8 +154,8 @@ const overdueEvents = computed(() => {
 onMounted(async () => {
   try {
     const [allEvents, cronResult] = await Promise.all([
-      window.electronAPI.listEvents(),
-      window.electronAPI.listCronJobs(),
+      window.appAPI.listEvents(),
+      window.appAPI.listCronJobs(),
     ]);
 
     // 过滤分配
@@ -175,10 +175,10 @@ onMounted(async () => {
 // 监听 scheduler:completed 实时刷新
 let unlistenScheduler = null;
 onMounted(() => {
-  unlistenScheduler = window.electronAPI.onSchedulerCompleted?.((payload) => {
+  unlistenScheduler = window.appAPI.onSchedulerCompleted?.((payload) => {
     console.log('[InboxView] scheduler:completed', payload);
     // 刷新 cron job 列表（更新 last_run 等）
-    window.electronAPI.listCronJobs().then(result => {
+    window.appAPI.listCronJobs().then(result => {
       if (result?.jobs) cronJobs.value = result.jobs;
     });
   });
@@ -190,7 +190,7 @@ onUnmounted(() => {
 // T-1307: 监听待办提醒事件
 let unlistenReminder = null;
 onMounted(() => {
-  unlistenReminder = window.electronAPI.onTodoReminder?.((payload) => {
+  unlistenReminder = window.appAPI.onTodoReminder?.((payload) => {
     // 避免重复
     if (!reminders.value.find(r => r.id === payload.id)) {
       reminders.value.push(payload);
@@ -215,10 +215,10 @@ function onTodoStatusUpdate({ id, status }) {
 
 async function onCreateEvent(payload) {
   try {
-    const res = await window.electronAPI.confirmEvent(payload);
+    const res = await window.appAPI.confirmEvent(payload);
     if (res?.ok) {
       // reload events
-      const allEvents = await window.electronAPI.listEvents();
+      const allEvents = await window.appAPI.listEvents();
       events.value = allEvents.filter(e => e.type === 'event');
       todos.value = allEvents.filter(e => e.type === 'todo');
     }
@@ -229,14 +229,14 @@ async function onCreateEvent(payload) {
 
 async function toggleJob(job) {
   const newEnabled = !job.enabled;
-  const result = await window.electronAPI.toggleCronJob(job.id, newEnabled);
+  const result = await window.appAPI.toggleCronJob(job.id, newEnabled);
   if (result?.ok) {
     job.enabled = newEnabled;
   }
 }
 
 async function deleteJob(job) {
-  const result = await window.electronAPI.removeCronJob(job.id);
+  const result = await window.appAPI.removeCronJob(job.id);
   if (result?.ok) {
     cronJobs.value = cronJobs.value.filter(j => j.id !== job.id);
   }

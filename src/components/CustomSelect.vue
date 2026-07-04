@@ -5,8 +5,12 @@
       :class="{ 'is-open': isOpen }"
       @click="toggle"
     >
-      <span>{{ selectedLabel }}</span>
-      <ChevronDown :size="16" class="dropdown-icon" :class="{ 'rotate-180': isOpen }" />
+      <div style="flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left;">
+        <slot name="selected" :option="selectedOption" :label="selectedLabel">
+          <span>{{ selectedLabel }}</span>
+        </slot>
+      </div>
+      <ChevronDown :size="16" class="dropdown-icon" :class="{ 'rotate-180': isOpen }" style="flex-shrink: 0;" />
     </div>
 
     <Transition name="dropdown-fade">
@@ -15,10 +19,12 @@
           v-for="option in options"
           :key="option.value"
           class="custom-select-option"
-          :class="{ 'is-selected': option.value === modelValue }"
-          @click="selectOption(option)"
+          :class="{ 'is-selected': option.value === modelValue, 'is-disabled': option.disabled }"
+          @click="!option.disabled && selectOption(option)"
         >
-          {{ option.label }}
+          <slot name="option" :option="option" :label="option.label">
+            {{ option.label }}
+          </slot>
         </li>
       </ul>
     </Transition>
@@ -49,9 +55,12 @@ const emit = defineEmits(['update:modelValue', 'change']);
 const isOpen = ref(false);
 const wrapperRef = ref(null);
 
+const selectedOption = computed(() => {
+  return props.options.find(opt => opt.value === props.modelValue);
+});
+
 const selectedLabel = computed(() => {
-  const selected = props.options.find(opt => opt.value === props.modelValue);
-  return selected ? selected.label : t('common.please_select');
+  return selectedOption.value ? selectedOption.value.label : t('common.please_select');
 });
 
 function toggle() {
@@ -137,6 +146,16 @@ onUnmounted(() => {
   background: var(--bg-active);
   color: var(--text-primary);
   font-weight: 500;
+}
+
+.custom-select-option.is-disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.custom-select-option.is-disabled:hover {
+  background: transparent;
+  color: var(--text-secondary);
 }
 
 .dropdown-fade-enter-active,
