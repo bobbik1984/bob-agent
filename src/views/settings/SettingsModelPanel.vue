@@ -62,7 +62,7 @@
 
   <!-- API 密钥管理 (Credential Store) -->
   <details class="settings-section card custom-model-override">
-    <summary class="section-title" style="cursor: pointer; display: flex; align-items: center; justify-content: space-between; margin-bottom: 0;">
+    <summary class="section-title">
       <div style="display: flex; align-items: center; gap: 8px;">
         <Key :size="16" class="section-icon" style="opacity: 0.6;" />
         {{ $t('settings.api_keys_title') }}
@@ -182,7 +182,7 @@
 
   <!-- 模型供应商注册表编辑器 (Registry Editor) -->
   <details class="settings-section card custom-model-override">
-    <summary class="section-title" style="cursor: pointer; display: flex; align-items: center; justify-content: space-between; margin-bottom: 0;">
+    <summary class="section-title">
       <div style="display: flex; align-items: center; gap: 8px;">
         <Database :size="16" class="section-icon" style="opacity: 0.6;" />
         {{ $t('settings.registry_title') }}

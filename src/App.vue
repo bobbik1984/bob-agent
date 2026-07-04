@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="app-shell" :class="{ 'is-mobile': isMobile }">
     <!-- 启动画面已移至 index.html (Native Splash) -->
     <!-- 标题栏拖拽区域 (Desktop) -->
@@ -45,7 +45,7 @@
         :style="!isMobile ? { width: isSidebarCollapsed ? '0px' : sidebarWidth + 'px', minWidth: isSidebarCollapsed ? '0px' : '200px' } : {}"
       >
         <!-- ═══ 抽屉 1: 对话 ═══ -->
-        <div class="drawer-header" :class="{ active: activeDrawer === 'chat' }" @click="activeDrawer = 'chat'">
+        <div v-show="!isMobile" class="drawer-header" :class="{ active: activeDrawer === 'chat' }" @click="activeDrawer = 'chat'">
           <div class="drawer-header-left">
             <MessageSquare :size="14" />
             <span>{{ $t('nav.conversations') || '对话' }}</span>
@@ -141,7 +141,7 @@
         </div>
 
         <!-- ═══ 抽屉 2: 日程 ═══ -->
-        <div class="drawer-header" :class="{ active: activeDrawer === 'schedule' }" @click="activeDrawer = 'schedule'">
+        <div v-show="!isMobile" class="drawer-header" :class="{ active: activeDrawer === 'schedule' }" @click="activeDrawer = 'schedule'">
           <div class="drawer-header-left">
             <CalendarDays :size="14" />
             <span>{{ $t('nav.schedule') || '日程' }}</span>
@@ -150,7 +150,7 @@
           <ChevronDown v-if="activeDrawer === 'schedule'" :size="14" class="drawer-chevron" />
           <ChevronRight v-else :size="14" class="drawer-chevron" />
         </div>
-        <div v-show="activeDrawer === 'schedule'" class="drawer-content">
+        <div v-show="!isMobile && activeDrawer === 'schedule'" class="drawer-content">
           <div class="drawer-placeholder">
             <CalendarDays :size="24" style="opacity: 0.3;" />
             <span>{{ $t('nav.schedule_hint') || '日程与待办事项' }}</span>
@@ -158,7 +158,7 @@
         </div>
 
         <!-- ═══ 抽屉 2.5: 知识图谱 ═══ -->
-        <div class="drawer-header" :class="{ active: activeDrawer === 'knowledge' }" @click="activeDrawer = 'knowledge'">
+        <div v-show="!isMobile" class="drawer-header" :class="{ active: activeDrawer === 'knowledge' }" @click="activeDrawer = 'knowledge'">
           <div class="drawer-header-left">
             <Waypoints :size="14" />
             <span>{{ $t('nav.knowledge') || '知识' }}</span>
@@ -166,11 +166,11 @@
           <ChevronDown v-if="activeDrawer === 'knowledge'" :size="14" class="drawer-chevron" />
           <ChevronRight v-else :size="14" class="drawer-chevron" />
         </div>
-        <div v-show="activeDrawer === 'knowledge'" class="drawer-content" id="kg-sidebar-portal" style="display: flex; flex-direction: column; height: 100%;">
+        <div v-show="!isMobile && activeDrawer === 'knowledge'" class="drawer-content" id="kg-sidebar-portal" style="display: flex; flex-direction: column; height: 100%;">
         </div>
 
         <!-- ═══ 抽屉 3: 设置 ═══ -->
-        <div class="drawer-header" :class="{ active: activeDrawer === 'settings' }" @click="activeDrawer = 'settings'">
+        <div v-show="!isMobile" class="drawer-header" :class="{ active: activeDrawer === 'settings' }" @click="activeDrawer = 'settings'">
           <div class="drawer-header-left">
             <Settings :size="14" />
             <span>{{ $t('nav.settings') }}</span>
@@ -178,7 +178,7 @@
           <ChevronDown v-if="activeDrawer === 'settings'" :size="14" class="drawer-chevron" />
           <ChevronRight v-else :size="14" class="drawer-chevron" />
         </div>
-        <div v-show="activeDrawer === 'settings'" class="drawer-content">
+        <div v-show="!isMobile && activeDrawer === 'settings'" class="drawer-content">
           <nav class="settings-nav">
             <button
               v-for="item in settingsNavItems"
@@ -255,6 +255,21 @@
           <button class="btn btn-danger" @click="confirmDeleteChat">{{ $t('modal.confirm_delete') }}</button>
         </div>
       </div>
+    </div>
+
+    <!-- 移动端悬浮球 (灵光一现) -->
+    <div v-if="isMobile" 
+         class="mobile-fab" 
+         :class="{ 'is-idle': fabIsIdle, 'is-dragging': isFabDragging }"
+         :style="fabStyle"
+         @pointerdown="onFabPointerDown"
+         @pointermove="onFabPointerMove"
+         @pointerup="onFabPointerUp"
+         @pointercancel="onFabPointerUp"
+         @click.prevent>
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 152.85 99.94">
+        <g><path fill="currentColor" d="M166.3,82.45a29.91,29.91,0,0,1-52.92,19.11,29.91,29.91,0,0,1-46,0A29.91,29.91,0,0,1,14.45,82.45V15.72a2.3,2.3,0,0,1,2.3-2.3H26a2.3,2.3,0,0,1,2.3,2.3V57.24a29.92,29.92,0,0,1,39.12,6.09,29.91,29.91,0,0,1,39.11-6.09V15.72a2.3,2.3,0,0,1,2.3-2.3H118a2.3,2.3,0,0,1,2.3,2.3V57.24a29.92,29.92,0,0,1,46,25.21Zm-13.8,0a16.11,16.11,0,1,0-16.11,16.1A16.11,16.11,0,0,0,152.5,82.45Zm-46,0a16.11,16.11,0,1,0-16.1,16.1A16.1,16.1,0,0,0,106.48,82.45Zm-46,0a16.11,16.11,0,1,0-16.11,16.1A16.11,16.11,0,0,0,60.47,82.45Z" transform="translate(-13.95 -12.92)"/></g>
+      </svg>
     </div>
 
     <!-- 闪念速记浮层 -->
@@ -865,6 +880,96 @@ function onNavClick(viewId) {
     cronNotifCount.value = 0;
   }
 }
+
+// ── Mobile FAB (灵光一现悬浮球) 逻辑 ──
+const fabX = ref(null);
+const fabY = ref(null);
+const isFabDragging = ref(false);
+const fabIsIdle = ref(true);
+let fabTimer = null;
+let dragStartX = 0;
+let dragStartY = 0;
+let initialFabX = 0;
+let initialFabY = 0;
+let isMoved = false;
+
+const fabStyle = computed(() => {
+  if (fabX.value === null || fabY.value === null) return {};
+  return {
+    left: `${fabX.value}px`,
+    top: `${fabY.value}px`,
+    right: 'auto',
+    bottom: 'auto'
+  };
+});
+
+function onFabPointerDown(e) {
+  dragStartX = e.clientX;
+  dragStartY = e.clientY;
+  isMoved = false;
+  
+  const rect = e.currentTarget.getBoundingClientRect();
+  initialFabX = rect.left;
+  initialFabY = rect.top;
+
+  fabIsIdle.value = false;
+  clearTimeout(fabTimer);
+  
+  // Capture pointer to track outside the button
+  e.currentTarget.setPointerCapture(e.pointerId);
+}
+
+function onFabPointerMove(e) {
+  if (!e.currentTarget.hasPointerCapture(e.pointerId)) return;
+  
+  const deltaX = e.clientX - dragStartX;
+  const deltaY = e.clientY - dragStartY;
+
+  // 如果移动距离超过 5px，则认定为拖拽
+  if (Math.abs(deltaX) > 5 || Math.abs(deltaY) > 5) {
+    isMoved = true;
+    isFabDragging.value = true;
+  }
+
+  if (isMoved) {
+    fabX.value = initialFabX + deltaX;
+    fabY.value = initialFabY + deltaY;
+    
+    // 边界检测
+    const maxW = window.innerWidth - 48; // fab 宽 48
+    const maxH = window.innerHeight - 48;
+    if (fabX.value < 0) fabX.value = 0;
+    if (fabX.value > maxW) fabX.value = maxW;
+    if (fabY.value < 0) fabY.value = 0;
+    if (fabY.value > maxH) fabY.value = maxH;
+  }
+}
+
+function onFabPointerUp(e) {
+  if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+    e.currentTarget.releasePointerCapture(e.pointerId);
+  }
+  
+  isFabDragging.value = false;
+  if (!isMoved) {
+    // 纯点击，唤起速记面板
+    openQuickNote();
+  } else {
+    // 拖拽结束，自动吸附到屏幕边缘
+    const center = window.innerWidth / 2;
+    if (fabX.value < center) {
+      fabX.value = 16;
+    } else {
+      fabX.value = window.innerWidth - 48 - 16;
+    }
+  }
+
+  // 重置闲置计时器 (1秒后恢复半显)
+  fabTimer = setTimeout(() => {
+    fabIsIdle.value = true;
+  }, 1000);
+}
+
 </script>
 
 <style scoped>
@@ -980,7 +1085,7 @@ function onNavClick(viewId) {
 }
 
 .sidebar-resizer:hover::after, .sidebar-resizer:active::after {
-  background: var(--accent-primary);
+  background: var(--user-accent, var(--accent-primary));
 }
 
 .sidebar-collapse-float {
@@ -1099,7 +1204,7 @@ function onNavClick(viewId) {
 }
 
 .sidebar-search.expanded:focus-within {
-  border-color: var(--accent-primary);
+  border-color: var(--user-accent, var(--accent-primary));
 }
 
 .search-icon {
@@ -1186,7 +1291,7 @@ function onNavClick(viewId) {
 }
 
 .search-result-snippet :deep(mark) {
-  background: color-mix(in srgb, var(--accent-primary) 25%, transparent);
+  background: color-mix(in srgb, var(--user-accent, var(--accent-primary)) 25%, transparent);
   color: var(--accent-tertiary);
   border-radius: 2px;
   padding: 0 1px;
@@ -1392,14 +1497,14 @@ function onNavClick(viewId) {
 }
 
 .nav-item.active .nav-icon {
-  color: var(--accent-primary);
+  color: var(--user-accent, var(--accent-primary));
 }
 
 /* ── 对话重命名 ─────────────────────────────────────── */
 .rename-input {
   flex: 1;
   background: var(--bg-tertiary);
-  border: 1px solid var(--accent-primary);
+  border: 1px solid var(--user-accent, var(--accent-primary));
   border-radius: var(--radius-sm);
   color: var(--text-primary);
   font-family: var(--font-sans);
@@ -1603,7 +1708,7 @@ function onNavClick(viewId) {
 }
 
 .settings-nav-item.active svg {
-  color: var(--accent-primary);
+  color: var(--user-accent, var(--accent-primary));
 }
 /* ── Mobile Drawer ────────────────────────────────────────── */
 .mobile-drawer-overlay {
@@ -1636,7 +1741,90 @@ function onNavClick(viewId) {
   display: none;
 }
 
+/* ── Mobile UX: Global Safe Area & Readability ── */
+.app-shell.is-mobile {
+  padding-top: env(safe-area-inset-top, 0px);
+}
 
+.app-shell.is-mobile .sidebar-top {
+  padding: 12px 16px;
+}
 
+.app-shell.is-mobile .conversation-item {
+  padding: 12px 16px;
+  gap: 12px;
+}
 
+.app-shell.is-mobile .conv-title {
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.app-shell.is-mobile .conv-row-2 {
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.app-shell.is-mobile .conv-time {
+  font-size: 12px;
+}
+
+/* ── Mobile FAB (悬浮气泡) ── */
+.mobile-fab {
+  position: fixed;
+  z-index: 9999;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: var(--surface-glass);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--border-subtle);
+  color: var(--user-accent, var(--text-primary));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+  transition: opacity 0.3s ease, transform 0.15s cubic-bezier(0.34, 1.56, 0.64, 1), background 0.3s ease;
+  cursor: pointer;
+  
+  /* 默认位置 (初始) */
+  right: 16px;
+  bottom: calc(170px + env(safe-area-inset-bottom, 0px));
+  touch-action: none;
+}
+
+.mobile-fab svg {
+  width: 24px;
+  height: auto;
+  pointer-events: none;
+}
+
+.mobile-fab.is-idle {
+  opacity: 0.35;
+}
+
+.mobile-fab:hover {
+  opacity: 1 !important;
+}
+
+.mobile-fab:not(.is-idle) {
+  opacity: 1;
+}
+
+.mobile-fab.is-dragging {
+  transform: scale(1.1);
+  transition: transform 0.1s ease, opacity 0.1s ease;
+  /* 取消 transition left/top 防止拖拽卡顿 */
+}
+
+/* 释放后自动吸附使用 transition */
+.mobile-fab:not(.is-dragging) {
+  transition: opacity 0.3s ease, transform 0.15s ease, left 0.3s ease, top 0.3s ease;
+}
+
+.mobile-fab:active {
+  background: var(--surface-card);
+  transform: scale(0.92);
+}
 </style>

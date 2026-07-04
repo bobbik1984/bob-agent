@@ -385,10 +385,6 @@ body {
   background: transparent;
   overflow: hidden;
   user-select: none;
-  padding-top: env(safe-area-inset-top, 0px);
-  padding-bottom: env(safe-area-inset-bottom, 0px);
-  padding-left: env(safe-area-inset-left, 0px);
-  padding-right: env(safe-area-inset-right, 0px);
 }
 
 /* 鈹€鈹€ 鍔ㄦ€佷富棰樿繃娓?(浠呭湪鍒囨崲鏃舵縺娲伙紝涓嶅奖鍝嶆棩甯窰over) 鈹€鈹€ */
@@ -624,6 +620,29 @@ html[data-ui-scale="comfortable"] {
 
 .card:hover {
   border-color: var(--border-default);
+}
+
+/* ── Global Section Title ─────────────────────────────────────── */
+.section-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--text-lg);
+  font-weight: 500;
+  margin-bottom: var(--space-4);
+  color: var(--text-primary);
+}
+
+/* For collapsible details, remove margin when closed to prevent extra space */
+details > summary.section-title {
+  margin-bottom: 0;
+  cursor: pointer;
+  justify-content: space-between;
+}
+
+/* Restore breathing room when the details section is open */
+details[open] > summary.section-title {
+  margin-bottom: var(--space-4);
 }
 
 /* 鈺愨晲鈺?缁熶竴鍗＄墖鍩虹被 (Card Base) 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?*/
@@ -1080,8 +1099,8 @@ code.hljs {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    height: calc(56px + env(safe-area-inset-top, 0px));
-    padding: env(safe-area-inset-top, 0px) 16px 0 16px;
+    height: 56px;
+    padding: 0 16px;
     background: var(--bg-primary);
     border-bottom: 1px solid var(--border-subtle);
     flex-shrink: 0;
@@ -1142,14 +1161,14 @@ code.hljs {
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 6px;
+    gap: 4px;
     background: transparent;
     border: none;
     color: var(--text-secondary);
     font-size: 10px;
-    padding: 10px 4px 8px 4px;
-    padding-top: calc(10px + env(safe-area-inset-top, 0px));
-    border-radius: 0;
+    padding: 8px 4px;
+    margin: 6px 4px;
+    border-radius: 20px;
     transition: all 0.2s;
     flex: 1;
     min-width: 0;
@@ -1158,9 +1177,10 @@ code.hljs {
   }
 
   .mobile-tab-item.active {
-    color: var(--accent-primary);
-    background: var(--surface-glass);
+    color: #ffffff;
+    background: var(--user-accent, var(--accent-primary));
     font-weight: 500;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
   }
   
   .mobile-tab-item .tab-icon {

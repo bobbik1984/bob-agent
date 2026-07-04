@@ -120,9 +120,23 @@ defineExpose({
 }
 @media (max-width: 768px) {
   .settings-scroll {
-    padding: 12px 16px !important;
+    padding: 0 !important;
     padding-bottom: calc(60px + env(safe-area-inset-bottom, 16px)) !important;
     overflow-y: overlay;
+  }
+  /* 移动端彻底压平卡片，实现 Edge-to-Edge 沉浸式列表 */
+  .settings-scroll :deep(.settings-section.card) {
+    border-radius: 0;
+    border-left: none;
+    border-right: none;
+    border-top: none;
+    border-bottom: 1px solid var(--border-subtle);
+    background: transparent;
+    margin-bottom: 0;
+    padding: 20px 16px;
+  }
+  .settings-scroll :deep(.settings-section.card:last-child) {
+    border-bottom: none;
   }
   .settings-scroll::-webkit-scrollbar {
     width: 4px;

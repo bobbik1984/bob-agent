@@ -84,7 +84,7 @@ defineEmits(['update:activeDrawer']);
 }
 
 .bottom-nav-item.active {
-  color: var(--accent-primary);
+  color: var(--user-accent, var(--accent-primary));
 }
 
 .bottom-nav-item span {

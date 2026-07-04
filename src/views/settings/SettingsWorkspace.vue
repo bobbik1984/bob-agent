@@ -1,7 +1,7 @@
 <template>
   <!-- Bob 的工作间（目录管理） -->
   <details class="settings-section card custom-model-override">
-    <summary class="section-title" style="cursor: pointer; display: flex; align-items: center; justify-content: space-between; margin-bottom: 0;">
+    <summary class="section-title">
       <div style="display: flex; align-items: center; gap: 8px;">
         <HardDrive :size="16" class="section-icon" style="opacity: 0.6;" />
         {{ $t('settings.bob_workspace') }}
@@ -159,7 +159,7 @@
 
   <!-- T-1302: 记忆管理 -->
   <details class="settings-section card custom-model-override">
-    <summary class="section-title" style="cursor: pointer; display: flex; align-items: center; justify-content: space-between; margin-bottom: 0;">
+    <summary class="section-title">
       <div style="display: flex; align-items: center; gap: 8px;">
         <Brain :size="16" class="section-icon" />
         {{ $t('settings.memory_title') }}
@@ -206,7 +206,7 @@
 
   <!-- 进化引擎看板 -->
   <details class="settings-section card custom-model-override">
-    <summary class="section-title" style="cursor: pointer; display: flex; align-items: center; justify-content: space-between; margin-bottom: 0;">
+    <summary class="section-title">
       <div style="display: flex; align-items: center; gap: 8px;">
         <Dna :size="16" class="section-icon" />
         {{ $t('settings.evolution_title') || '进化引擎' }}

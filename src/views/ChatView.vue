@@ -2619,26 +2619,50 @@ defineExpose({
   opacity: 1;
 }
 
-/* ── Mobile Input Alignment ───────────────────────────────────────── */
+/* ── Mobile Input Alignment (Absolute Positioning) ── */
 .mobile-plus-btn {
+  position: absolute;
+  left: 8px;
+  bottom: 12px;
+  width: 32px;
+  height: 32px;
   display: flex;
   align-items: center;
   justify-content: center;
   background: transparent;
   border: none;
   color: var(--text-secondary);
-  padding: 8px;
+  padding: 0;
   flex-shrink: 0;
   cursor: pointer;
+  z-index: 10;
 }
 .mobile-send-btn-wrap {
+  position: absolute;
+  right: 8px;
+  bottom: 12px;
+  width: 32px;
+  height: 32px;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+  z-index: 10;
 }
 .app-shell.is-mobile .input-row {
-  align-items: center !important;
+  position: relative;
+  align-items: flex-end !important;
+  padding: 12px;
+}
+.app-shell.is-mobile .input-wrapper {
+  padding-left: 36px;
+  padding-right: 36px;
+  width: 100%;
+  box-sizing: border-box;
+}
+.app-shell.is-mobile .chat-input {
+  min-height: 24px;
+  padding: 4px 0;
 }
 
 /* ── Mobile Bottom Sheet ────────────────────────────────────────── */
