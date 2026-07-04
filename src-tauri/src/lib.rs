@@ -51,6 +51,17 @@ use percent_encoding::percent_decode_str;
 // ═══════════════════════════════════════════════════════════
 
 static DATA_DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+static APP_DATA_DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+pub(crate) fn get_app_data_dir() -> PathBuf {
+    if let Some(dir) = APP_DATA_DIR.get() {
+        return dir.clone();
+    }
+    // Fallback just in case
+    let mut path = dirs::data_dir().unwrap_or_else(|| PathBuf::from("."));
+    path.push("com.bob-agent.app");
+    path
+}
 
 pub(crate) fn get_data_dir() -> PathBuf {
     if let Some(dir) = DATA_DIR.get() {
@@ -943,8 +954,12 @@ pub fn run() {
             {
                 if let Ok(app_dir) = app.path().app_data_dir() {
                     let _ = fs::create_dir_all(&app_dir);
-                    let _ = DATA_DIR.set(app_dir);
+                    let _ = DATA_DIR.set(app_dir.clone());
                 }
+            }
+            if let Ok(app_dir) = app.path().app_data_dir() {
+                let _ = fs::create_dir_all(&app_dir);
+                let _ = APP_DATA_DIR.set(app_dir);
             }
 
             // 在获得 Context 后初始化本地数据

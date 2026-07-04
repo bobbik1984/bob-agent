@@ -49,6 +49,7 @@ pub async fn download_model(
     app: AppHandle,
     model_id: String,
     url: String,
+    tokenizer_url: Option<String>,
 ) -> Result<DownloadResult, String> {
     let models_dir = get_models_dir(&app)?;
     let file_name = format!("{}.gguf", model_id);
@@ -165,8 +166,21 @@ pub async fn download_model(
         });
     }
 
-    // 下载完成，重命名
+    // 下载完成，重命名 GGUF
     tokio::fs::rename(&tmp_path, &file_path).await.map_err(|e| format!("Failed to rename: {}", e))?;
+
+    // 下载 Tokenizer
+    if let Some(t_url) = tokenizer_url {
+        let t_file_name = format!("{}_tokenizer.json", model_id);
+        let t_file_path = models_dir.join(&t_file_name);
+        if !t_file_path.exists() {
+            let t_response = client.get(&t_url).send().await.map_err(|e| format!("Tokenizer request failed: {}", e))?;
+            if t_response.status().is_success() {
+                let t_bytes = t_response.bytes().await.map_err(|e| format!("Tokenizer body error: {}", e))?;
+                tokio::fs::write(&t_file_path, &t_bytes).await.map_err(|e| format!("Failed to write tokenizer: {}", e))?;
+            }
+        }
+    }
 
     // 推送完成事件
     let _ = app.emit("download_progress", DownloadProgress {

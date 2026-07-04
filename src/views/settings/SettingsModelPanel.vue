@@ -406,15 +406,24 @@ async function startDownload(modelId) {
   if (!model || !model.download_urls || !model.download_urls.main_gguf.length) return;
   
   let url = model.download_urls.main_gguf[0];
+  let tokenizerUrl = null;
   if (downloadSource.value === 'huggingface') {
      const hfUrl = model.download_urls.main_gguf.find(u => u.includes('huggingface.co'));
      if (hfUrl) url = hfUrl;
+     
+     if (model.download_urls.tokenizer && model.download_urls.tokenizer.length) {
+         tokenizerUrl = model.download_urls.tokenizer.find(u => u.includes('huggingface.co')) || model.download_urls.tokenizer[0];
+     }
   } else {
      const mirrorUrl = model.download_urls.main_gguf.find(u => u.includes('hf-mirror.com'));
      if (mirrorUrl) url = mirrorUrl;
+     
+     if (model.download_urls.tokenizer && model.download_urls.tokenizer.length) {
+         tokenizerUrl = model.download_urls.tokenizer.find(u => u.includes('hf-mirror.com')) || model.download_urls.tokenizer[0];
+     }
   }
   
-  await beginDownloadTask(modelId, url);
+  await beginDownloadTask(modelId, url, tokenizerUrl);
 }
 
 async function startCustomDownload() {
@@ -426,7 +435,7 @@ async function startCustomDownload() {
   await beginDownloadTask(modelId, url);
 }
 
-async function beginDownloadTask(modelId, url) {
+async function beginDownloadTask(modelId, url, tokenizerUrl = null) {
   downloadingModel.value = modelId;
   downloadProgress.value = 0;
   
@@ -437,7 +446,7 @@ async function beginDownloadTask(modelId, url) {
   });
 
   try {
-    const result = await invoke('download_model', { modelId, url });
+    const result = await invoke('download_model', { modelId, url, tokenizerUrl });
     if (result.success) {
       await checkDownloadedModels();
       if (downloadingModel.value === 'custom_selected') {
