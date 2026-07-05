@@ -240,6 +240,7 @@ mod dummy_engine {
     pub struct CandleState {
         pub engine: Mutex<Option<()>>,
         pub is_running: Mutex<bool>,
+        pub current_model: Mutex<String>,
     }
     
     #[tauri::command]
