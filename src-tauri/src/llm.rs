@@ -526,24 +526,37 @@ pub fn get_model_pool() -> Value {
         }
     }
     
-    // 注入当前配置的本地离线模型
-    if let Some(offline_path) = config.get("offlineModelPath").and_then(|v| v.as_str()) {
-        if !offline_path.is_empty() {
-            let model_name = std::path::Path::new(offline_path)
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .unwrap_or("Local Offline Model");
-                
-            pool.push(json!({
-                "id": offline_path,
-                "modelId": offline_path,
-                "displayName": format!("💻 {}", model_name),
-                "label": format!("💻 {}", model_name),
-                "provider": "offline",
-                "providerName": "本地离线引擎",
-                "vision": false,
-                "pricing": { "input": 0.0, "output": 0.0 }
-            }));
+    // 注入已下载的本地离线模型
+    let models_dir = super::get_data_dir().join("models");
+    let mobile_models_str = include_str!("../../src/assets/mobile_models.json");
+    let mobile_models: Value = serde_json::from_str(mobile_models_str).unwrap_or_default();
+    
+    if let Ok(entries) = std::fs::read_dir(models_dir) {
+        for entry in entries.filter_map(|e| e.ok()) {
+            let path = entry.path();
+            if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("gguf") {
+                if let Some(file_stem) = path.file_stem().and_then(|s| s.to_str()) {
+                    let mut display_name = format!("{} (本地)", file_stem);
+                    if let Some(arr) = mobile_models.as_array() {
+                        if let Some(m) = arr.iter().find(|x| x.get("id").and_then(|v| v.as_str()) == Some(file_stem)) {
+                            if let Some(n) = m.get("name").and_then(|v| v.as_str()) {
+                                display_name = format!("{} (本地)", n);
+                            }
+                        }
+                    }
+                    
+                    pool.push(json!({
+                        "id": file_stem,
+                        "modelId": file_stem,
+                        "displayName": display_name,
+                        "label": display_name,
+                        "provider": "offline",
+                        "providerName": "本地离线引擎",
+                        "vision": false,
+                        "pricing": { "input": 0.0, "output": 0.0 }
+                    }));
+                }
+            }
         }
     }
     

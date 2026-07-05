@@ -30,6 +30,7 @@
     "lucide-vue-next": "^1.0.0",
     "marked": "^14.0.0",
     "marked-highlight": "^2.2.0",
+    "qrcode.vue": "^3.10.0",
     "tiptap-markdown": "^0.9.0",
     "vis-data": "^8.0.4",
     "vis-network": "^10.1.0",

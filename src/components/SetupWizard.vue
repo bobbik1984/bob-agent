@@ -4,13 +4,13 @@
       <div class="wizard-logo">
         <div class="logo-layer" :class="{ visible: step >= 1 }" style="-webkit-mask-image: url(/bob_.svg); mask-image: url(/bob_.svg)"></div>
         <div class="logo-layer" :class="{ visible: step >= 2 }" style="-webkit-mask-image: url(/bob_b.svg); mask-image: url(/bob_b.svg)"></div>
-        <div class="logo-layer" :class="{ visible: step >= 3 }" style="-webkit-mask-image: url(/bob_bo.svg); mask-image: url(/bob_bo.svg)"></div>
-        <div class="logo-layer" :class="{ visible: step >= 4 }" style="-webkit-mask-image: url(/bob_bob.svg); mask-image: url(/bob_bob.svg)"></div>
+        <div class="logo-layer" :class="{ visible: step >= Math.ceil(totalSteps * 0.75) }" style="-webkit-mask-image: url(/bob_bo.svg); mask-image: url(/bob_bo.svg)"></div>
+        <div class="logo-layer" :class="{ visible: isLastStep }" style="-webkit-mask-image: url(/bob_bob.svg); mask-image: url(/bob_bob.svg)"></div>
       </div>
 
       <div class="wizard-body">
-        <!-- Page 1: Language, Theme & Color -->
-        <div v-if="step === 1" class="page">
+        <!-- Page: Appearance (语言、主题、颜色) -->
+        <div v-if="currentStepType === 'appearance'" class="page">
           <div class="theme-options">
             <button :class="['btn-theme', { active: tempConfig.language === 'zh-CN' }]" @click="setLanguage('zh-CN')">
               简体中文
@@ -40,8 +40,8 @@
           </div>
         </div>
 
-        <!-- Page 2: Workspace -->
-        <div v-if="step === 2" class="page page-center">
+        <!-- Page: Workspace (桌面端专属) -->
+        <div v-if="currentStepType === 'workspace'" class="page page-center">
           <div class="workspace-row">
             <div class="workspace-input" :class="{ filled: tempConfig.workspaceDir }" @click="selectWorkspaceDir">
               {{ tempConfig.workspaceDir || $t('setup.workspace_placeholder') }}
@@ -50,16 +50,16 @@
           </div>
         </div>
 
-        <!-- Page 3: LLM -->
-        <div v-if="step === 3" class="page page-center">
+        <!-- Page: LLM -->
+        <div v-if="currentStepType === 'llm'" class="page page-center">
           <div class="llm-form">
             <CustomSelect v-model="tempConfig.provider" :options="providerOptions" :placeholder="$t('setup.provider_placeholder')" />
             <input class="input" type="password" v-model="tempConfig.apiKey" placeholder="API Key" />
           </div>
         </div>
 
-        <!-- Page 4: WeChat -->
-        <div v-if="step === 4" class="page page-top">
+        <!-- Page: WeChat (桌面端) -->
+        <div v-if="currentStepType === 'wechat'" class="page page-top">
           <div class="wechat-toggle" @click="toggleWechat">
             <img :src="'./wechat.svg'" class="wechat-icon" :class="{ active: enableWechat }" alt="" />
             <label class="switch-label">
@@ -79,6 +79,19 @@
             </div>
           </div>
         </div>
+
+        <!-- Page: Scan to Pair (移动端专属占位) -->
+        <div v-if="currentStepType === 'pair'" class="page page-center">
+          <div class="pair-placeholder">
+            <QrCode :size="48" style="opacity: 0.3; margin-bottom: 16px;" />
+            <p style="color: var(--text-secondary); text-align: center; line-height: 1.6;">
+              {{ $t('setup.pair_coming_soon') || '扫码配对功能即将上线，敬请期待' }}
+            </p>
+            <p style="color: var(--text-tertiary); font-size: 12px; margin-top: 8px;">
+              {{ $t('setup.pair_skip_hint') || '可先跳过此步骤，稍后在设置中配对' }}
+            </p>
+          </div>
+        </div>
       </div>
 
       <div class="wizard-nav">
@@ -86,10 +99,10 @@
           <ChevronLeft :size="20" />
         </button>
         <div class="nav-spacer"></div>
-        <button class="nav-arrow" v-if="step < 4" @click="step++">
+        <button class="nav-arrow" v-if="!isLastStep" @click="step++">
           <ChevronRight :size="20" />
         </button>
-        <button class="nav-arrow nav-launch" v-if="step === 4" @click="finishOnboarding">
+        <button class="nav-arrow nav-launch" v-if="isLastStep" @click="finishOnboarding">
           <Rocket :size="20" />
         </button>
       </div>
@@ -98,18 +111,31 @@
 </template>
 
 <script setup>
-import { ref, watch, onMounted, onUnmounted } from 'vue';
+import { ref, computed, watch, onMounted, onUnmounted, inject } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { Moon, Sun, ChevronLeft, ChevronRight, Loader2, Rocket, Check } from 'lucide-vue-next';
+import { Moon, Sun, ChevronLeft, ChevronRight, Loader2, Rocket, Check, Smartphone, QrCode } from 'lucide-vue-next';
 import CustomSelect from './CustomSelect.vue';
 import { ACCENT_COLORS } from '@/constants/theme.js';
 
 const { locale, t: $t } = useI18n();
+const isMobile = inject('isMobile', false);
 
 const emit = defineEmits(['complete']);
-const step = ref(1);
+const step = ref(1); // 1-indexed within wizardSteps
 const isTesting = ref(false);
 const testResult = ref(null);
+
+// 移动端跳过 workspace 步骤，微信步骤改为扫码配对
+const wizardSteps = computed(() => {
+  if (isMobile) {
+    return ['appearance', 'llm', 'pair']; // 3 步: 外观 → LLM → 扫码配对
+  }
+  return ['appearance', 'workspace', 'llm', 'wechat']; // 4 步: 外观 → 工作间 → LLM → 微信
+});
+
+const currentStepType = computed(() => wizardSteps.value[step.value - 1]);
+const totalSteps = computed(() => wizardSteps.value.length);
+const isLastStep = computed(() => step.value >= totalSteps.value);
 
 const enableWechat = ref(false);
 const qrCodeUrl = ref('');
@@ -163,9 +189,10 @@ onMounted(async () => {
   initialSnapshot = JSON.parse(JSON.stringify(snapshotBase));
 });
 
-// 离开 Step 3 时立即保存 API Key 到 OS Keychain
+// 离开 LLM 步骤时立即保存 API Key 到 OS Keychain
 watch(step, async (newStep, oldStep) => {
-  if (oldStep === 3 && tempConfig.value.apiKey && window.appAPI?.setApiKey) {
+  const oldStepType = wizardSteps.value[oldStep - 1];
+  if (oldStepType === 'llm' && tempConfig.value.apiKey && window.appAPI?.setApiKey) {
     await window.appAPI.setApiKey(tempConfig.value.provider, tempConfig.value.apiKey);
   }
 });

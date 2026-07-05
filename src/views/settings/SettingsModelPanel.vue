@@ -4,83 +4,117 @@
 
   <!-- 离线推理引擎 (Offline Engine) -->
   <section class="settings-section card">
-    <h3 class="section-title">
-      <Server :size="16" class="section-icon" />
-      {{ $t('settings.offline_engine') }}
+    <h3 class="section-title" style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <Server :size="16" class="section-icon" />
+        {{ $t('settings.local_models', '本地模型') }}
+      </div>
+      
+      <button class="engine-status-btn"
+           @click="toggleOfflineEngine"
+           :title="offlineEngineStatus === 'running' ? '点击关闭引擎' : '点击开启引擎'"
+      >
+        <span>{{ offlineEngineStatus === 'running' ? '引擎运行中' : '引擎已休眠' }}</span>
+
+        <span class="status-dot" 
+              style="width: 10px; height: 10px; border-radius: 50%; display: inline-block; margin-left: 2px; flex-shrink: 0; box-sizing: border-box;"
+              :style="{ 
+                background: offlineEngineStatus === 'running' ? 'var(--user-accent, var(--accent-primary))' : 'transparent', 
+                border: offlineEngineStatus === 'running' ? 'none' : '2px solid var(--text-tertiary)' 
+              }">
+        </span>
+      </button>
     </h3>
 
     <div class="form-group workspace-group" style="flex-direction: column; align-items: stretch;">
-      <CustomSelect
-        v-model="config.offlineModelPath"
-        :options="offlineModelOptions"
-        :placeholder="$t('settings.offline_model_placeholder', '请选择')"
-        @update:modelValue="val => saveConfig('offlineModelPath', val)"
-      >
-        <template #selected="{ label }">
-          <span>{{ label || '请选择' }}</span>
-        </template>
-        <template #option="{ option }">
-          <div style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
-            <div style="display: flex; align-items: center; gap: 8px;">
-              <span class="status-dot" :style="{ 
-                background: option.downloaded ? 'var(--user-accent, var(--accent-primary))' : 'transparent',
-                border: option.downloaded ? '2px solid var(--user-accent, var(--accent-primary))' : '2px solid var(--text-tertiary)',
-                width: '8px', height: '8px', borderRadius: '50%', display: 'inline-block' 
-              }"></span>
-              <span :style="{ color: option.downloaded ? 'var(--text-primary)' : 'var(--text-tertiary)' }">{{ option.label }}</span>
-            </div>
-            <button v-if="!option.downloaded && !option.isCustom" class="btn btn-ghost" style="padding: 2px 8px; font-size: 0.85em; color: var(--user-accent, var(--accent-primary));" @click.stop="startDownload(option.id)">
-              {{ downloadingModel === option.id ? `${downloadProgress}%` : '下载' }}
-            </button>
-          </div>
-        </template>
-      </CustomSelect>
+      <h4 style="margin-top: 8px; margin-bottom: 8px; font-size: 0.85em; color: var(--text-secondary); display: flex; justify-content: space-between; align-items: center; cursor: pointer; user-select: none;" @click="showOfflineModels = !showOfflineModels">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <Database :size="16" />
+          <span>本地模型资源库 (已下载 {{ downloadedModelsSet.size }} 个)</span>
+        </div>
+        <ChevronDown :size="16" :style="{ transform: showOfflineModels ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s', color: 'inherit' }" />
+      </h4>
+      
+      <div v-show="showOfflineModels" class="manager-content" style="display: flex; flex-direction: column; margin-bottom: 12px;">
+          <div v-for="option in offlineModelOptions" :key="option.id"
+               style="display: flex; align-items: center; gap: 12px; border-bottom: 1px solid var(--border-subtle); padding: 10px 0; margin-bottom: 0;"
+          >
+            <label class="form-label provider-label" style="display: flex; align-items: center; gap: 8px; font-weight: normal; margin-bottom: 0;">
+              <span style="flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" :style="{ color: option.downloaded ? 'var(--text-primary)' : 'var(--text-tertiary)' }" :title="option.label">{{ option.label }}</span>
+            </label>
 
-      <div style="display: flex; align-items: center; gap: 12px; margin-top: 8px; font-size: 0.85em;">
-        <button class="btn btn-ghost" style="padding: 0; color: var(--text-secondary); display: flex; align-items: center; gap: 4px;" @click="downloadSource = downloadSource === 'hf-mirror' ? 'huggingface' : 'hf-mirror'">
-          <Globe :size="14" /> {{ downloadSource === 'hf-mirror' ? 'HF-mirror' : 'HuggingFace' }}
+            <span class="status-dot" :style="{ 
+              background: option.downloaded ? 'var(--user-accent, var(--accent-primary))' : 'transparent',
+              border: option.downloaded ? '2px solid var(--user-accent, var(--accent-primary))' : '2px solid var(--text-tertiary)',
+              width: '10px', height: '10px', borderRadius: '50%', display: 'inline-block', flexShrink: 0
+            }"></span>
+
+            <div class="input" style="flex: 1; display: flex; align-items: center; color: var(--text-tertiary); font-size: 0.9em; user-select: none; cursor: default;">
+              {{ option.downloaded ? '已下载并就绪' : '等待下载' }}
+            </div>
+
+            <div style="display: flex; gap: 4px;" v-if="!option.isCustom">
+              <button v-if="!option.downloaded" 
+                class="btn-icon" 
+                style="width: auto; min-width: 32px; padding: 0 8px; color: var(--user-accent, var(--accent-primary));" 
+                @click.stop="downloadingModel === option.id ? togglePause(option.id) : startDownload(option.id)"
+                @mouseenter="hoveringModel = option.id"
+                @mouseleave="hoveringModel = null"
+              >
+                <template v-if="downloadingModel === option.id">
+                  <component v-if="hoveringModel === option.id || isPaused" :is="isPaused ? Play : Pause" :size="14" />
+                  <span v-else style="font-size: 0.85em;">{{ downloadProgress }}%</span>
+                </template>
+                <Download v-else :size="14" />
+              </button>
+              <button v-if="option.downloaded" 
+                class="btn-icon btn-remove-key" 
+                @click.stop="deleteLocalModel(option.id)"
+                title="删除本地模型"
+              >
+                <X :size="14" />
+              </button>
+            </div>
+        </div>
+      </div>
+
+      <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-top: 12px; margin-bottom: 8px;">
+        <!-- HF Mirror Switch -->
+        <div style="display: flex; align-items: center; justify-content: center; gap: 10px; background: var(--bg-secondary); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 8px; cursor: pointer;" @click="downloadSource = downloadSource === 'hf-mirror' ? 'huggingface' : 'hf-mirror'">
+          <span style="font-size: 0.85em; color: var(--text-secondary);" :style="{ fontWeight: downloadSource === 'huggingface' ? '500' : 'normal', color: downloadSource === 'huggingface' ? 'var(--text-primary)' : 'var(--text-secondary)' }">HF原址</span>
+          <label class="hf-switch" @click.stop>
+            <input type="checkbox" :checked="downloadSource === 'hf-mirror'" @change="downloadSource = $event.target.checked ? 'hf-mirror' : 'huggingface'" />
+            <span class="hf-slider"></span>
+          </label>
+          <span style="font-size: 0.85em;" :style="{ fontWeight: downloadSource === 'hf-mirror' ? '500' : 'normal', color: downloadSource === 'hf-mirror' ? 'var(--text-primary)' : 'var(--text-secondary)' }">国内镜像</span>
+        </div>
+        
+        <!-- Custom URL -->
+        <button class="btn btn-ghost" style="padding: 8px; color: var(--text-primary); background: var(--bg-secondary); border: 1px solid var(--border-subtle); display: flex; align-items: center; justify-content: center; gap: 6px; border-radius: var(--radius-md);" @click="showCustomDownload = !showCustomDownload">
+          <Plus :size="14" /> <span style="font-size: 0.85em;">自定义下载链接</span>
         </button>
-        <button class="btn btn-ghost" style="padding: 0; color: var(--text-secondary); display: flex; align-items: center; gap: 4px;" @click="showCustomDownload = !showCustomDownload">
-          <Plus :size="14" /> 自定义链接下载
+
+        <!-- Physical Dir -->
+        <button class="btn btn-ghost" style="padding: 8px; color: var(--text-primary); background: var(--bg-secondary); border: 1px solid var(--border-subtle); display: flex; align-items: center; justify-content: center; gap: 6px; border-radius: var(--radius-md);" @click="openModelsDir" title="打开底层模型物理存储目录">
+          <FolderOpen :size="14" /> <span style="font-size: 0.85em;">物理模型目录</span>
         </button>
       </div>
       
       <div v-if="showCustomDownload" style="margin-top: 8px; display: flex; gap: 8px;">
-        <input v-model="customDownloadUrl" class="input" placeholder="输入 .gguf 下载链接..." style="flex: 1; font-size: 0.85em; padding: 4px 8px;" />
-        <button class="btn btn-primary" @click="startCustomDownload" :disabled="!customDownloadUrl" style="padding: 4px 12px; font-size: 0.85em;">
-          {{ downloadingModel === 'custom' ? `${downloadProgress}%` : '下载' }}
+        <input v-model="customDownloadUrl" class="input" placeholder="输入 .gguf 下载链接..." style="flex: 1;" />
+        <button class="btn btn-ghost" @click="startCustomDownload" :disabled="!customDownloadUrl" style="color: var(--user-accent, var(--accent-primary)); min-width: 48px; display: flex; align-items: center; justify-content: center; border: 1px solid var(--border-subtle);">
+          <template v-if="downloadingModel === 'custom'">
+            <span style="font-size: 0.85em;">{{ downloadProgress }}%</span>
+          </template>
+          <template v-else>
+            <Download :size="16" />
+          </template>
         </button>
       </div>
     </div>
 
-    <div style="margin-top: 8px; margin-bottom: 12px;">
-      <button class="btn btn-ghost" style="font-size: 0.85em; padding: 4px 0; color: var(--accent-primary); display: flex; align-items: center; gap: 4px;" @click="showLlamaGuide = !showLlamaGuide">
-        <Info :size="12" />
-        <span>{{ showLlamaGuide ? $t('settings.hide_llama_guide') : $t('settings.show_llama_guide') }}</span>
-      </button>
-    </div>
 
-    <Transition name="briefing-fade">
-      <div v-if="showLlamaGuide" class="card" style="background: var(--bg-secondary); border: 1px dashed var(--border-subtle); padding: 16px; border-radius: var(--radius-md); margin-bottom: 16px; font-size: 0.9em; box-shadow: none;">
-        <h4 style="font-size: 1.05em; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">{{ $t('settings.llama_guide_title', '本地引擎指南') }}</h4>
-        <p style="color: var(--text-secondary); margin-bottom: 8px; line-height: 1.5;" v-html="$t('settings.llama_guide_desc', '选择已下载的模型后，Candle引擎会按需将模型挂载到内存中。')"></p>
-        <button class="btn btn-primary" style="display: flex; align-items: center; gap: 6px; font-size: 0.9em; padding: 6px 12px;" @click="openModelsDir">
-          <FolderOpen :size="14" />
-          <span>打开模型目录</span>
-        </button>
-      </div>
-    </Transition>
-    
-    <div style="display: flex; gap: 8px; align-items: center; margin-top: 12px;">
-      <button 
-        class="btn" 
-        :style="offlineEngineStatus === 'running' ? { background: 'var(--user-accent, var(--accent-primary))', color: '#fff' } : { background: 'var(--bg-tertiary)', color: 'var(--text-primary)' }"
-        @click="toggleOfflineEngine"
-        :disabled="!config.offlineModelPath"
-      >
-        <span>{{ offlineEngineStatus === 'running' ? '停止本地模型' : '启动本地模型' }}</span>
-      </button>
-    </div>
+
   </section>
 
   <!-- API 密钥管理 (Credential Store) -->
@@ -190,11 +224,11 @@
       </div>
       
       <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px;">
-        <input v-model="newCustomModel.name" class="input" :placeholder="$t('settings.custom_model_name')" style="font-size: 0.85em; padding: 4px 8px;" />
-        <input v-model="newCustomModel.id" class="input" :placeholder="$t('settings.custom_model_id')" style="font-size: 0.85em; padding: 4px 8px;" />
-        <input v-model="newCustomModel.url" class="input" :placeholder="$t('settings.custom_model_url')" style="font-size: 0.85em; padding: 4px 8px;" />
-        <input v-model="newCustomModel.key" class="input" type="password" :placeholder="$t('settings.custom_model_key')" style="grid-column: span 2; font-size: 0.85em; padding: 4px 8px;" />
-        <button class="btn btn-primary" @click="addCustomModel" :disabled="!newCustomModel.name || !newCustomModel.url || !newCustomModel.key" style="padding: 4px; font-size: 0.85em;">{{ $t('settings.custom_model_add') }}</button>
+        <input v-model="newCustomModel.name" class="input" :placeholder="$t('settings.custom_model_name')" />
+        <input v-model="newCustomModel.id" class="input" :placeholder="$t('settings.custom_model_id')" />
+        <input v-model="newCustomModel.url" class="input" :placeholder="$t('settings.custom_model_url')" />
+        <input v-model="newCustomModel.key" class="input" type="password" :placeholder="$t('settings.custom_model_key')" style="grid-column: span 2;" />
+        <button class="btn btn-primary" @click="addCustomModel" :disabled="!newCustomModel.name || !newCustomModel.url || !newCustomModel.key">{{ $t('settings.custom_model_add') }}</button>
       </div>
     </div>
 
@@ -331,7 +365,7 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { Server, FolderOpen, Info, Key, ChevronDown, X, Plus, Trash2, Database, Check, Image as ImageIcon, Save, Globe } from 'lucide-vue-next';
+import { Server, FolderOpen, Info, Key, ChevronDown, X, Plus, Trash2, Database, Check, Image as ImageIcon, Save, Globe, Pause, Play, Download } from 'lucide-vue-next';
 import ModelHub from '../../components/ModelHub.vue';
 import CustomSelect from '../../components/CustomSelect.vue';
 import mobileModels from '@/assets/mobile_models.json';
@@ -351,8 +385,12 @@ const showLlamaGuidance = ref(false);
 const downloadedModelsSet = ref(new Set());
 const downloadingModel = ref(null);
 const downloadProgress = ref(0);
-const showCustomDownload = ref(false);
+const hoveringModel = ref(null);
+const isPaused = ref(false);
+const showOfflineModels = ref(false);
+
 const customDownloadUrl = ref('');
+const showCustomDownload = ref(false);
 const downloadSource = ref('hf-mirror');
 
 const offlineModelOptions = computed(() => {
@@ -380,11 +418,40 @@ const offlineModelOptions = computed(() => {
 });
 
 async function openModelsDir() {
-  // Use Tauri shell plugin to open the directory if needed, or omit for now
   try {
-    await invoke('plugin:shell|open', { path: 'models' });
+    const { appDataDir, join } = await import('@tauri-apps/api/path');
+    const dataDir = await appDataDir();
+    const modelsPath = await join(dataDir, 'models');
+    await invoke('plugin:shell|open', { path: modelsPath });
   } catch (e) {
-    console.warn(e);
+    console.warn('Failed to open models directory:', e);
+  }
+}
+
+async function togglePause(modelId) {
+  if (isPaused.value) {
+    isPaused.value = false;
+    startDownload(modelId);
+  } else {
+    isPaused.value = true;
+    await invoke('pause_download', { modelId: String(modelId) });
+  }
+}
+
+async function deleteLocalModel(modelId) {
+  if (confirm(`确定要删除 ${modelId} 相关的模型和临时文件吗？这会释放磁盘空间。`)) {
+    try {
+      const deleted = await invoke('delete_local_model', { modelId: String(modelId) });
+      if (deleted) {
+        await checkDownloadedModels();
+        if (props.config.offlineModelPath && props.config.offlineModelPath.includes(modelId)) {
+          props.config.offlineModelPath = '';
+          saveConfig('offlineModelPath', '');
+        }
+      }
+    } catch (e) {
+      alert('删除失败: ' + e);
+    }
   }
 }
 
@@ -438,10 +505,18 @@ async function startCustomDownload() {
 async function beginDownloadTask(modelId, url, tokenizerUrl = null) {
   downloadingModel.value = modelId;
   downloadProgress.value = 0;
+  isPaused.value = false;
   
   const unlisten = await listen('download_progress', (event) => {
     if (event.payload.model_id === modelId) {
-      downloadProgress.value = Math.round(event.payload.progress);
+      if (event.payload.progress >= 0) {
+        // 正常进度 (已知总大小)
+        downloadProgress.value = Math.round(event.payload.progress);
+      } else {
+        // progress = -1: 服务器未返回 Content-Length，显示已下载量
+        const mb = (event.payload.downloaded_bytes / (1024 * 1024)).toFixed(1);
+        downloadProgress.value = `${mb} MB`;
+      }
     }
   });
 
@@ -454,12 +529,18 @@ async function beginDownloadTask(modelId, url, tokenizerUrl = null) {
         saveConfig('offlineModelPath', result.path);
       }
     } else {
-      alert('下载失败: ' + result.error);
+      if (!String(result.error).includes('Paused')) {
+        alert('下载失败: ' + result.error);
+      }
     }
   } catch(err) {
-    alert('下载出错: ' + err);
+    if (!String(err).includes('Paused')) {
+      alert('下载出错: ' + err);
+    }
   } finally {
-    downloadingModel.value = null;
+    if (!isPaused.value) {
+      downloadingModel.value = null;
+    }
     unlisten();
   }
 }
@@ -781,6 +862,69 @@ defineExpose({ modelHubRef });
 </script>
 
 <style scoped>
+.engine-status-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.75em;
+  font-weight: normal;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  border: none;
+  color: var(--text-primary);
+  transition: background 0.2s;
+  font-family: inherit;
+}
+.engine-status-btn:hover {
+  background: var(--bg-tertiary);
+}
+
+.hf-switch {
+  position: relative;
+  display: inline-block;
+  width: 32px;
+  height: 18px;
+  flex-shrink: 0;
+}
+.hf-switch input { 
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+.hf-slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: var(--user-accent, var(--accent-primary));
+  transition: .3s;
+  border-radius: 34px;
+}
+.hf-slider:before {
+  position: absolute;
+  content: "";
+  height: 14px;
+  width: 14px;
+  left: 2px;
+  bottom: 2px;
+  background-color: white;
+  transition: .3s;
+  border-radius: 50%;
+}
+.hf-switch input:not(:checked) + .hf-slider {
+  background-color: var(--border-strong);
+}
+.hf-switch input:not(:checked) + .hf-slider:before {
+  transform: translateX(0);
+}
+.hf-switch input:checked + .hf-slider:before {
+  transform: translateX(14px);
+}
+
 .settings-section {
   margin-bottom: var(--space-5);
 }

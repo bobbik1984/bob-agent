@@ -225,23 +225,28 @@
           </button>
         </div>
 
-        <ChatView
-          v-if="activeDrawer === 'chat'"
-          ref="chatViewRef"
-          :conversationId="activeConversationId"
-          @update-title="updateConversationTitle"
-          @toggle-sidebar="mobileDrawerOpen = !mobileDrawerOpen"
-        />
-        <InboxView v-if="activeDrawer === 'schedule'" @toggle-sidebar="mobileDrawerOpen = !mobileDrawerOpen" />
-        <KnowledgeGraphView 
-          v-if="activeDrawer === 'knowledge'" 
-          @toggle-sidebar="mobileDrawerOpen = !mobileDrawerOpen"
-        />
-        <SettingsView
-          v-if="activeDrawer === 'settings'"
-          :activePanel="activeSettingsPanel"
-          @config-changed="onConfigChanged"
-        />
+        <div class="view-wrapper" v-show="activeDrawer === 'chat'">
+          <ChatView
+            ref="chatViewRef"
+            :conversationId="activeConversationId"
+            @update-title="updateConversationTitle"
+            @toggle-sidebar="mobileDrawerOpen = !mobileDrawerOpen"
+          />
+        </div>
+        <div class="view-wrapper" v-show="activeDrawer === 'schedule'">
+          <InboxView @toggle-sidebar="mobileDrawerOpen = !mobileDrawerOpen" />
+        </div>
+        <div class="view-wrapper" v-show="activeDrawer === 'knowledge'">
+          <KnowledgeGraphView 
+            @toggle-sidebar="mobileDrawerOpen = !mobileDrawerOpen"
+          />
+        </div>
+        <div class="view-wrapper" v-show="activeDrawer === 'settings'">
+          <SettingsView
+            :activePanel="activeSettingsPanel"
+            @config-changed="onConfigChanged"
+          />
+        </div>
       </main>
     </div>
 
@@ -293,7 +298,7 @@ import KnowledgeGraphView from './views/KnowledgeGraphView.vue';
 import SetupWizard from './components/SetupWizard.vue';
 import QuickNoteOverlay from './components/QuickNoteOverlay.vue';
 import BottomNavigation from './components/BottomNavigation.vue';
-import { Inbox, Settings, Plus, X, Sun, Moon, ChevronLeft, ChevronRight, ChevronDown, Search, MessageSquare, CalendarDays, Brain, Plug, FolderOpen, Palette, Info, Sunrise, Waypoints, Menu } from 'lucide-vue-next';
+import { Inbox, Settings, Plus, X, Sun, Moon, ChevronLeft, ChevronRight, ChevronDown, Search, MessageSquare, CalendarDays, Brain, Plug, FolderOpen, Palette, Info, Sunrise, Waypoints, Menu, Smartphone } from 'lucide-vue-next';
 import { useI18n } from 'vue-i18n';
 import { getModelMeta } from '@/composables/useModelSwitcher';
 
@@ -456,7 +461,8 @@ const modelInfo = computed(() => {
 const settingsNavItems = computed(() => [
   { id: 'model', icon: Brain, label: t('settings.nav_model') || '模型基础设置' },
   { id: 'connections', icon: Plug, label: t('settings.nav_connections') || '连接中心' },
-  { id: 'workspace', icon: FolderOpen, label: t('settings.nav_workspace') || '工作间' },
+  { id: 'devices', icon: Smartphone, label: t('settings.nav_devices') || '多端同步' },
+  { id: 'workspace', icon: FolderOpen, label: t('settings.nav_workspace') || '工作区' },
   { id: 'daily_routine', icon: Sunrise, label: t('settings.nav_daily_routine') || '每日工作' },
   { id: 'appearance', icon: Palette, label: t('settings.nav_appearance') || '外观与语言' },
   { id: 'about', icon: Info, label: t('settings.nav_about') || '关于' },
@@ -956,6 +962,7 @@ function onFabPointerUp(e) {
   
   isFabDragging.value = false;
   if (!isMoved) {
+    e.preventDefault(); // 阻断浏览器合成 click 穿透
     // 纯点击，唤起速记面板
     openQuickNote();
   } else {
@@ -977,6 +984,14 @@ function onFabPointerUp(e) {
 </script>
 
 <style scoped>
+.view-wrapper {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
 .app-shell {
   height: 100%;
   display: flex;

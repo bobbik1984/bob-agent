@@ -1,8 +1,8 @@
 # Bob-Agent 开发全局路线图 (Roadmap)
 
-> 🎯 **当前版本**: `v0.4.4` — Ghost Partner (幽灵副手) 阶段正式版。
-> ♻️ **已完成**: Tauri 迁移、主体模式、微信/TG/Discord 通道、文档输出引擎、Goal 闭环执行引擎、Web Drop P2P 极传、知识图谱融合、智能笔记模块。
-> 📋 **下一目标**: 目标 20 — 内网穿墙隧道 | 目标 22 — Bob-Mobile 手机端 MVP | 目标 23 — 跨端同步引擎 (详见 `docs/MOBILE_BLUEPRINT.md`)。
+> 🎯 **当前版本**: `v0.5.0` — Ghost Partner (幽灵副手) 阶段正式版。
+> ♻️ **已完成**: Tauri 迁移、主体模式、微信/TG/Discord 通道、文档输出引擎、Goal 闭环执行引擎、Web Drop P2P 极传、知识图谱融合、智能笔记模块、本地大模型引擎 (Candle) 基础链路。
+> 📋 **当前 Sprint**: 目标 22 — 移动端体验优化 (图标/Onboarding/FAB Bug) | 目标 23 — PC 扫码配对 MVP (详见 `docs/MOBILE_BLUEPRINT.md`)。
 
 ---
 
@@ -86,7 +86,30 @@
 
 ## 📅 开发日志
 
-### 2026-07-04 (今天)
+### 2026-07-05
+
+**主题**: 移动端体验审计 + Release 编译 + 项目文档统一
+
+**完成**:
+1. [Fix] 修复 Android/Tauri JNI 生成错误 (`tauri::mobile_entry_point` 宏因空 identifier 崩溃)，修正 `tauri.conf.json` 的 identifier 为合法的 `org.bobbik.bobagent`。
+2. [Fix] 修复 `dummy_engine.rs` 的函数签名使其在 Android 目标上正确编译 (返回类型从 `()` 改为 `Result`)。
+3. [Build] 按照 `AGENTS.md` 规范执行了完整的 `scripts/release.bat` 6 步发布流水线，产出 `dist-release/bob-installer.exe` + `dist-release/bob-agent-portable.zip`。
+4. [Audit] 对移动端 4 个待解决问题（图标/Onboarding/扫码配对/FAB 闪退）进行逐项代码审计，对照 `MOBILE_BLUEPRINT.md` 和 `todo.md` 确认冲突点并统一。
+5. [Docs] 更新 `todo.md`、`progress.yaml`、`MOBILE_BLUEPRINT.md` 统一反映审查结论。
+
+**待执行 (当前 Sprint)**:
+- [x] T-2224: 修复 Android 桌面图标 (build.rs 自动同步 `icons/android/` → `gen/android/res/mipmap-*`)
+- [x] T-2227: 移动端专属 Onboarding (跳过工作间、微信替换为扫码配对占位)
+- [x] T-2235: 修复移动端 FAB 悬浮球点击后速记键盘闪退 Bug
+- [x] T-2236: 修复 Android 端本地模型 (GGUF) 下载进度始终为 0% 的问题 (Content-Length 缺失导致进度不上报)
+- [x] T-2237: 重构日程添加弹窗 UI (替换原生 dialog 为自定义 Vue 弹窗)
+- [x] T-2238: 调整聊天输入框扩展菜单的圆角样式
+- [x] T-2239: 优化聊天记录中手机端发送消息的来源图标标识
+- [ ] T-2301+: 扫码配对 MVP (局域网直连 + VPS 信令降级)
+
+---
+
+### 2026-07-04
 
 **主题**: 本地大模型引擎 (Candle Engine) 链路修复与贯通分析
 
@@ -470,14 +493,19 @@
 ### Phase 2: 手机端 UI 适配与裁剪 (M2 Sprint)
 - [ ] T-2221: (M2-01) 移动端布局彻底重构 (底部导航条 Bottom Navigation，完全替换 PC 侧边栏，并锁定竖屏 Portrait 模式，禁止横屏旋转)
 - [ ] T-2222: (M2-02) 避开手机状态栏 (利用 CSS `env(safe-area-inset-top/bottom)` 实现自适应安全区，做到真正的沉浸式且不遮挡电量/时间)
-- [ ] T-2223: (M2-03) 移除或折叠微信、Telegram、Discord 等桌面端专属通道入口
-- [ ] T-2224: (M2-04) 替换 Tauri 默认 Android 图标为专属 Bob Logo，缩放优化 SVG
+- [ ] T-2223: (M2-03) 移除或折叠微信、Telegram、Discord 等桌面端专属通道入口 (移动端 Onboarding 中微信步骤替换为"扫码绑定 PC")
+- [ ] T-2224: (M2-04) 修复 Android 桌面图标 — 将 `src-tauri/icons/android/mipmap-*/` 同步覆写到 `src-tauri/gen/android/app/src/main/res/mipmap-*/`，或运行 `npx tauri icon` 重新生成
 - [ ] T-2225: (M2-05) 聊天视图双层级改造 (默认打开上一个对话记录，支持后退返回全局对话列表)
 - [ ] T-2226: (M2-06) 知识库视图极简改造 (左上角汉堡包按钮等小面积控件，用于切换图谱与知识库状态)
-- [ ] T-2227: (M2-07) 移动端专属 Onboarding 绑定流程 (在微信接入后，通过扫码 PC 端直接绑定，生成唯一设备标签，不选工作目录)
+- [ ] T-2227: (M2-07) 移动端专属 Onboarding 绑定流程 — `SetupWizard.vue` 检测 `isNativeMobile` 后跳过工作间选取 (step 2)，第 4 步替换微信为"扫码绑定 PC"(Tauri 原生 barcode-scanner)。`App.vue` 中 FAB 和 BottomNavigation 加 `v-if="isSetupComplete"` 守卫。
 - [ ] T-2228: (M2-08) 原生手势与物理返回键接入 (监听 Android 边缘侧滑/物理返回键，映射到 Vue Router 的 fallback)
 - [ ] T-2229: (M2-09) 灵感速记悬浮窗 (全局半透明可拖拽的 Bob 悬浮球 Floating Action Button，替代原本边角的固定按钮，一键唤醒语音或闪念输入)
 - [ ] T-2230: (M2-10) Android 原生权限与安全基建 (处理 Camera/Audio 动态权限申请，确保内部沙盒 Scoped Storage 的文件读写正确拦截，追加 VIBRATE 震动反馈与 WAKE_LOCK 防休眠权限)
+- [x] T-2235: (M2-11) **修复移动端 FAB 悬浮球点击后速记键盘闪退 Bug** — `App.vue` 的 `onFabPointerUp` 中在调用 `openQuickNote()` 前加 `e.preventDefault()` 阻断浏览器合成 click 穿透；`QuickNoteOverlay.vue` 的 `open()` 中加入 150ms `_justOpened` 防抖锁，`close()` 检查该锁后再执行关闭。
+- [x] T-2236: (M2-12) **修复 Android 端本地模型 (GGUF) 下载进度 0% 问题** — 根因为 CDN 不返回 Content-Length 导致 total_bytes=0 时进度事件从不触发。修复：Rust 端增加 chunked 模式每 1MB 上报，Vue 前端处理 progress=-1 显示已下载字节量。
+- [x] T-2237: (M2-13) **重构日程添加弹窗 UI** — 将现有的浏览器原生 `prompt()` 替换为符合 Bob 专属设计语言的 Vue 自定义 Dialog 弹窗组件。
+- [x] T-2238: (M2-14) **调整聊天扩展菜单样式** — 缩小聊天输入框右侧扩展菜单 ("问答 / 执行 / 闭环") 的圆角 (`border-radius`)，使其与整体 UI 保持一致。
+- [x] T-2239: (M2-15) **优化移动端消息来源标识** — 检测当前环境，若在手机端发送消息，聊天气泡下方应显示专属手机小图标，而非 "Desktop" 标识。
 
 ### Phase 3: 端侧本地大模型集成 (llama.cpp)
 - [ ] T-2231: (M2-21) 调研 Tauri Mobile 下打包与拉起 `llama-server` Native 二进制的 Sidecar 方案
@@ -489,6 +517,12 @@
 > 🎯 **目标**: 复用现有 bob-relay + coturn + WebRTC 基建 (T-1800)，实现手机与 PC 的四级渐进式数据同步。
 > 📋 **核心策略**: PC 主导唤醒，四级降级 (局域网直连 → WebRTC P2P 打洞 → TURN 中继 → 微信 Bot 推送)。
 > 📖 **详细蓝图**: `docs/MOBILE_BLUEPRINT.md` §五
+> 🏗️ **数据同步边界 (Master-Edge 模式)**:
+> - **✅ 手机同步 (镜像/只读)**: 知识库、日程、笔记、模型配置、技能列表、Bob 用户记忆、Bob 人设 (`bob.md`)
+> - **🚫 手机不同步**: 本地大模型文件 (数 GB)
+> - **⚡ 执行权隔离**: 手机同步显示 PC 定时任务但不执行；手机可向 PC 下发新任务
+> - **🔒 安全协议**: Ed25519 身份认证 + X25519 ECDH 密钥协商 + AES-GCM 对称加密
+> - **🤝 PC 端二次确认**: 手机扫码后 PC 弹出确认弹窗，点击"允许"后才建立持久化连接
 
 ### Phase 3a: bob-relay 增加设备注册协议
 - [ ] T-2301: 在现有 bob-relay (Node.js, VPS1) 中新增设备注册协议 (register/query/notify)。
@@ -535,6 +569,11 @@
 > 需修改 Rust 接口使用 `app_handle.path().resource_dir()` 动态定位 pdfium.dll
 - [ ] 修改 `pdf_renderer.rs` 与 `kb_extractor.rs` 绑定路径为 Tauri 资源目录
 
+### 💡 环境变量与凭证清债 (Tech Debt)
+> 根据 `AGENTS.md` 安全红线规范，外部服务 API Key 严禁保留在 `.env` 中
+- [ ] 将 `TAVILY_API_KEY` 和 `TINYFISH_API_KEY` 从 `.env` 迁移至工作区统一的 Credential Store (如 `config.json`)。
+- [ ] 确保前端 `SettingsModelPanel.vue` 中的“插件/外部服务密钥”输入框能正确双向绑定并覆写旧逻辑。
+
 ### 💡 界面体验清债与输入指令重构（P3，后置）
 - [ ] Slash/Mention Command 智能悬浮补全菜单
 - [ ] Chat 界面增加显性的"📌 作为笔记速记"按钮
@@ -547,3 +586,23 @@
 ---
 
 
+
+
+## 📍 目标 24: 跨平台 CI/CD 自动化打包分发流水线 (GitHub Actions)
+> 🎯 **目标**: 当各平台版本开发趋于稳定时，弃用本地脚本，全面迁移至 GitHub Actions 进行云端构建，实现真正意义上的一次推送，全端发布。
+> 📋 **覆盖矩阵**: Windows (x64 Installer/Portable), macOS (Intel/Silicon dmg), Linux (AppImage/deb), iOS (ipa), Android (apk).
+
+### Phase 1: 基础设施迁移
+- [ ] 编写 `.github/workflows/release.yml`，定义 `windows-latest`, `macos-latest`, `ubuntu-latest` 构建矩阵
+- [ ] 将 `scripts/build_payload.mjs` 等前置/后置产物收集脚本接入云端 Runner
+- [ ] 配置 Tauri GitHub Action 构建主程序二进制文件
+
+### Phase 2: 独立安装器流水线
+- [ ] 在云端工作流中复刻 `release.bat` 的思路，在主程序编译完后，将 Payload 移动到 installer 目录
+- [ ] 触发二次 Tauri Build 编译独立安装器 (Windows Only)
+- [ ] 归集所有构建产物到 `dist-release`
+
+### Phase 3: 签名与分发 (移动端 + 桌面端)
+- [ ] 配置 Android Keystore 到 GitHub Secrets，实现 APK 的云端自动签名
+- [ ] 配置 Apple P12 证书与 Provisioning Profile 到 GitHub Secrets，跑通 iOS/macOS 的打包
+- [ ] 集成 `softprops/action-gh-release`，自动将全平台产物附加到对应的 GitHub Release 中

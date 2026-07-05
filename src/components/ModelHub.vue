@@ -203,7 +203,8 @@ async function rescan() {
   try {
     await loadRegistry();
     await window.appAPI.rescanModels();
-    pool.value = await window.appAPI.getModelPool();
+    const p = await window.appAPI.getModelPool();
+    pool.value = Array.isArray(p) ? p : [];
     if (providerList.value.length > 0 && !activeProvider.value) {
       activeProvider.value = providerList.value[0].id;
     }
@@ -219,7 +220,8 @@ async function refreshProvider() {
     const result = await window.appAPI.refreshModels(activeProvider.value);
     if (result?.ok) {
       // 刷新成功，重新加载模型池
-      pool.value = await window.appAPI.getModelPool();
+      const p = await window.appAPI.getModelPool();
+    pool.value = Array.isArray(p) ? p : [];
     } else if (result?.error) {
       console.warn('刷新模型失败:', result.error);
     }
@@ -263,7 +265,15 @@ watch(() => activeProvider.value, () => { loadVariant(); });
 
 onMounted(async () => {
   await loadRegistry();
-  pool.value = await window.appAPI.getModelPool();
+  try {
+    const p = await window.appAPI.getModelPool();
+    console.log('[DEBUG ModelHub] getModelPool returned:', typeof p, p, Array.isArray(p));
+    pool.value = Array.isArray(p) ? p : [];
+  } catch (e) {
+    console.error('[DEBUG ModelHub] getModelPool error:', e);
+    pool.value = [];
+  }
+  
   const active = await window.appAPI.getActiveModels();
   activeMain.value = active?.main || '';
   activeClerk.value = active?.clerk || '';

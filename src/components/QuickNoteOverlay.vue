@@ -41,10 +41,16 @@ const inputRef = ref(null);
 
 const placeholder = ref('灵光一现');
 
+let _justOpened = false;
+
 function open() {
   visible.value = true;
   showSaved.value = false;
   text.value = '';
+  _justOpened = true;
+  setTimeout(() => {
+    _justOpened = false;
+  }, 150);
   nextTick(() => {
     inputRef.value?.focus();
   });
@@ -56,6 +62,7 @@ function openModelSwitcher() {
 }
 
 function close() {
+  if (_justOpened) return;
   visible.value = false;
   text.value = '';
 }

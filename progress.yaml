@@ -1,13 +1,14 @@
 project:
   name: bob-agent
-  version: '0.4.4'
+  version: '0.5.0'
   status: active
   tech:
   - Tauri
   - Rust
   - Vue 3
   - Desktop
-  updated: '2026-07-04'
+  - Android
+  updated: '2026-07-05'
 phases:
 - name: V0.5 知识图谱 Source-Hub 重构
   tasks:
@@ -36,8 +37,28 @@ phases:
   - text: 修复本地模型 ID 未注入大模型池的 bug
     status: done
   - text: 修复模型物理路径未对齐 AppData 的 Bug (os error 3)
-    status: todo
+    status: done
   - text: 修复 Candle Engine 分词器 (Tokenizer) 加载崩溃 Bug
-    status: todo
+    status: done
   - text: 实现本地引擎预加载机制与流式返回
+    status: done
+  - text: 修复 Android/Tauri JNI 生成错误及 dummy_engine
+    status: done
+- name: 移动端体验优化与 PC 扫码配对 (Mobile Polish Sprint)
+  tasks:
+  - text: T-2224 修复 Android 桌面图标 (同步 icons → gen/android)
+    status: done
+  - text: T-2227 移动端 Onboarding 精简 (跳过工作间, 微信→扫码配对)
+    status: done
+  - text: T-2235 修复 FAB 悬浮球点击后速记键盘闪退 Bug
+    status: done
+  - text: T-2236 修复 Android 端本地模型 (GGUF) 下载进度 0% 问题
+    status: done
+  - text: T-2237 重构日程添加弹窗 UI (原生 prompt → Vue Dialog)
+    status: done
+  - text: T-2238 调整聊天扩展菜单样式 (优化过度圆角)
+    status: done
+  - text: T-2239 优化移动端消息来源标识 (用手机图标替代 Desktop)
+    status: done
+  - text: T-2301 扫码配对 MVP (局域网直连 + VPS 信令降级 + Ed25519 握手)
     status: todo

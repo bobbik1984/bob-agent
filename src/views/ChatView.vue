@@ -114,9 +114,9 @@
               🧬
             </div>
             <div v-if="msg.from_channel" class="source-label">
-              <Smartphone v-if="msg.from_channel === 'wechat'" :size="10" />
+              <Smartphone v-if="msg.from_channel === 'wechat' || (msg.from_channel !== 'wechat' && isMobile)" :size="10" />
               <Monitor v-else :size="10" />
-              <span>{{ msg.from_channel === 'wechat' ? 'WeChat' : 'Desktop' }}</span>
+              <span>{{ msg.from_channel === 'wechat' ? 'WeChat' : (isMobile ? 'Mobile' : 'Desktop') }}</span>
             </div>
             <div v-if="msg.role === 'assistant' && msg._modelLabel" class="model-label">
               {{ msg._modelLabel }}
@@ -759,6 +759,24 @@ const {
         });
         scrollToBottom();
         return;
+      }
+    }
+
+    if (currentModelObj && currentModelObj.provider === 'offline') {
+      try {
+        const engineStatus = await window.appAPI.invoke('get_offline_engine_status');
+        if (engineStatus.status !== 'running' || engineStatus.model !== currentModelObj.id) {
+          const confirmed = confirm(`本地模型 ${currentModelObj.displayName} 尚未启动，或正在运行其他模型。\n\n是否立即启动？（需要约 5-10 秒加载至内存）`);
+          if (confirmed) {
+            messages.value.push({ role: 'system', content: `⚙️ 正在启动本地模型 ${currentModelObj.displayName}...` });
+            await window.appAPI.startOfflineEngine(currentModelObj.id);
+            messages.value.push({ role: 'system', content: `✅ 本地模型已就绪。` });
+          } else {
+            return;
+          }
+        }
+      } catch (e) {
+        console.error(e);
       }
     }
 
@@ -2688,7 +2706,7 @@ defineExpose({
   padding: 12px 16px;
   background: var(--bg-secondary);
   border: none;
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   color: var(--text-primary);
   cursor: pointer;
   text-align: left;

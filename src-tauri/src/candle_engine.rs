@@ -110,6 +110,7 @@ mod real_engine {
     pub struct CandleState {
         pub engine: Mutex<Option<CandleEngine>>,
         pub is_running: Mutex<bool>,
+        pub current_model: Mutex<String>,
     }
 
     #[tauri::command]
@@ -139,7 +140,8 @@ mod real_engine {
             Ok(engine) => {
                 *state.engine.lock().unwrap() = Some(engine);
                 *state.is_running.lock().unwrap() = true;
-                Ok(json!({ "status": "running", "message": "Engine started and loaded into memory" }))
+                *state.current_model.lock().unwrap() = stem.to_string();
+                Ok(json!({ "status": "started", "model": stem }))
             }
             Err(e) => {
                 *state.is_running.lock().unwrap() = false;
@@ -158,10 +160,11 @@ mod real_engine {
     #[tauri::command]
     pub async fn get_offline_engine_status(state: State<'_, CandleState>) -> Result<serde_json::Value, String> {
         let running = *state.is_running.lock().unwrap();
+        let current_model = state.current_model.lock().unwrap().clone();
         if running {
-            Ok(json!({ "status": "running" }))
+            Ok(json!({ "status": "running", "model": current_model }))
         } else {
-            Ok(json!({ "status": "stopped" }))
+            Ok(json!({ "status": "stopped", "model": current_model }))
         }
     }
 

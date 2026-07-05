@@ -2,7 +2,7 @@
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "bob",
   "version": "0.5.0",
-  "identifier": "org.bobbik.bobagent",
+  "identifier": "bob.agent",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:5173",

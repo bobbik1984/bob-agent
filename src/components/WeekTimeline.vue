@@ -96,6 +96,28 @@
         </div>
       </div>
     </div>
+    <!-- 新建日程弹窗 -->
+    <div v-if="newEventDialog" class="detail-overlay" @click.self="newEventDialog = false">
+      <div class="detail-card">
+        <h3 class="detail-title">{{ $t('timeline.new_event_title') || '新建日程' }}</h3>
+        <div class="detail-field" style="display: flex; flex-direction: column; gap: 8px;">
+          <input 
+            type="text" 
+            v-model="newEventTitle" 
+            class="bob-input" 
+            style="width: 100%; padding: 10px; border-radius: var(--radius-sm); border: 1px solid var(--border-default); background: var(--bg-primary); color: var(--text-primary); outline: none;" 
+            :placeholder="$t('timeline.new_event_title') || '请输入日程标题'" 
+            @keyup.enter="confirmCreateEvent"
+            ref="newEventInput"
+            autofocus
+          />
+        </div>
+        <div class="detail-actions" style="margin-top: 16px;">
+          <button class="btn btn-ghost" @click="newEventDialog = false">{{ $t('modal.cancel') || '取消' }}</button>
+          <button class="btn btn-primary" @click="confirmCreateEvent" :disabled="!newEventTitle.trim()">{{ $t('modal.confirm') || '确定' }}</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -280,9 +302,26 @@ function onTrackClick(day, e) {
   createNewEvent(day, startHour);
 }
 
+const newEventDialog = ref(false);
+const newEventTitle = ref('');
+const pendingEventData = ref(null);
+const newEventInput = ref(null);
+
 function createNewEvent(day, startHour) {
-  const title = prompt(t('timeline.new_event_title') || '请输入新日程的标题：', '新日程');
-  if (!title) return;
+  pendingEventData.value = { day, startHour };
+  newEventTitle.value = '';
+  newEventDialog.value = true;
+  nextTick(() => {
+    if (newEventInput.value) {
+      newEventInput.value.focus();
+    }
+  });
+}
+
+function confirmCreateEvent() {
+  if (!newEventTitle.value.trim() || !pendingEventData.value) return;
+  const { day, startHour } = pendingEventData.value;
+  const title = newEventTitle.value.trim();
   
   const parts = day.dateStr.split('-');
   const start = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
@@ -303,6 +342,9 @@ function createNewEvent(day, startHour) {
     startTime: fmt(start),
     endTime: fmt(end)
   });
+  
+  newEventDialog.value = false;
+  pendingEventData.value = null;
 }
 
 // ── 以今天为中心的 7 天 ──────────────────────────

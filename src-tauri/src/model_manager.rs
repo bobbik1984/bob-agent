@@ -31,10 +31,8 @@ pub struct DownloadResult {
 }
 
 // 获取模型下载路径，区分移动端和桌面端
-fn get_models_dir(app: &AppHandle) -> Result<PathBuf, String> {
-    // Tauri v2 统一获取 AppData 路径
-    let app_data = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let models_dir = app_data.join("models");
+fn get_models_dir(_app: &AppHandle) -> Result<PathBuf, String> {
+    let models_dir = crate::get_data_dir().join("models");
     
     // 如果目录不存在，同步创建
     if !models_dir.exists() {
@@ -211,4 +209,39 @@ pub fn pause_download(model_id: String) {
     if let Some(tx) = map.get(&model_id) {
         let _ = tx.send(true);
     }
+}
+
+#[tauri::command]
+pub async fn delete_local_model(app: AppHandle, model_id: String) -> Result<bool, String> {
+    let models_dir = get_models_dir(&app)?;
+    
+    // 删除 GGUF 和临时文件
+    let gguf_name = format!("{}.gguf", model_id);
+    let gguf_path = models_dir.join(&gguf_name);
+    let download_path = models_dir.join(format!("{}.download", gguf_name));
+    
+    // 删除 Tokenizer
+    let tok_name = format!("{}_tokenizer.json", model_id);
+    let tok_path = models_dir.join(&tok_name);
+    
+    let mut deleted_any = false;
+    
+    if gguf_path.exists() {
+        if let Err(e) = tokio::fs::remove_file(&gguf_path).await {
+            return Err(format!("Failed to delete gguf: {}", e));
+        }
+        deleted_any = true;
+    }
+    
+    if download_path.exists() {
+        let _ = tokio::fs::remove_file(&download_path).await;
+        deleted_any = true;
+    }
+    
+    if tok_path.exists() {
+        let _ = tokio::fs::remove_file(&tok_path).await;
+        deleted_any = true;
+    }
+    
+    Ok(deleted_any)
 }

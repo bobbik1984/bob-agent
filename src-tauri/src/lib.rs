@@ -28,6 +28,7 @@ mod gmail;
 mod exports;
 mod telegram;
 mod discord;
+mod crypto;
 mod kg;
 pub mod im_sessions;
 mod file_share;
@@ -67,8 +68,22 @@ pub(crate) fn get_data_dir() -> PathBuf {
     if let Some(dir) = DATA_DIR.get() {
         return dir.clone();
     }
-    let mut path = dirs::data_dir().unwrap_or_else(|| PathBuf::from("."));
-    path.push("bob-agent");
+    let base = dirs::data_dir().unwrap_or_else(|| PathBuf::from("."));
+    let new_dir = base.join("bob.agent");
+    let legacy_dir = base.join("bob-agent");
+
+    // 自动数据迁移：如果旧的 bob-agent 存在且新的 bob.agent 不存在，则重命名迁移
+    if legacy_dir.exists() && !new_dir.exists() {
+        let _ = fs::rename(&legacy_dir, &new_dir);
+    }
+
+    // 决定最终使用哪个路径
+    let path = if new_dir.exists() || !legacy_dir.exists() {
+        new_dir
+    } else {
+        legacy_dir
+    };
+
     fs::create_dir_all(&path).unwrap_or_default();
     path
 }
@@ -708,8 +723,9 @@ pub fn run() {
     let browser_state = std::sync::Arc::new(browser::BrowserState::new());
 
     let mut builder = tauri::Builder::default()
+        .manage(crypto::DeviceIdentityState(std::sync::Mutex::new(None)))
         .manage(sidecar::SidecarState { child: Mutex::new(None) })
-        .manage(crate::candle_engine::CandleState { engine: Mutex::new(None), is_running: Mutex::new(false) })
+        .manage(crate::candle_engine::CandleState { engine: Mutex::new(None), is_running: Mutex::new(false), current_model: Mutex::new(String::new()) })
         .manage(wechat_state.clone())
         .manage(browser_state.clone())
         .plugin(tauri_plugin_dialog::init())
@@ -768,6 +784,12 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            // 设备安全与配对
+            crypto::check_device_keys_initialized,
+            crypto::init_device_keys,
+            crypto::unlock_device_keys,
+            crypto::reset_device_keys,
+            crypto::get_pairing_payload,
             // 系统状态
             system_is_setup_complete,
             web_drop::start_web_drop,
@@ -804,6 +826,7 @@ pub fn run() {
             model_manager::download_model,
             model_manager::check_model_downloaded,
             model_manager::pause_download,
+            model_manager::delete_local_model,
             // 文件系统
             filesystem::system_get_file_meta,
             filesystem::system_scan_folder,
@@ -949,16 +972,10 @@ pub fn run() {
         .setup(|app| {
             use tauri::Manager;
             
-            // 解决移动端 Sandbox 路径问题
-            #[cfg(any(target_os = "android", target_os = "ios"))]
-            {
-                if let Ok(app_dir) = app.path().app_data_dir() {
-                    let _ = fs::create_dir_all(&app_dir);
-                    let _ = DATA_DIR.set(app_dir.clone());
-                }
-            }
+            // 解决跨平台 AppData 路径缓存问题
             if let Ok(app_dir) = app.path().app_data_dir() {
                 let _ = fs::create_dir_all(&app_dir);
+                let _ = DATA_DIR.set(app_dir.clone());
                 let _ = APP_DATA_DIR.set(app_dir);
             }
 
