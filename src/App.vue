@@ -263,7 +263,7 @@
     </div>
 
     <!-- 移动端悬浮球 (灵光一现) -->
-    <div v-if="isMobile" 
+    <div v-if="isMobile && isSetupComplete" 
          class="mobile-fab" 
          :class="{ 'is-idle': fabIsIdle, 'is-dragging': isFabDragging }"
          :style="fabStyle"
@@ -282,7 +282,7 @@
 
     <!-- 底部导航 (Mobile) -->
     <BottomNavigation 
-      v-if="isMobile" 
+      v-if="isMobile && isSetupComplete" 
       :active-drawer="activeDrawer" 
       @update:active-drawer="activeDrawer = $event" 
     />
@@ -461,7 +461,6 @@ const modelInfo = computed(() => {
 const settingsNavItems = computed(() => [
   { id: 'model', icon: Brain, label: t('settings.nav_model') || '模型基础设置' },
   { id: 'connections', icon: Plug, label: t('settings.nav_connections') || '连接中心' },
-  { id: 'devices', icon: Smartphone, label: t('settings.nav_devices') || '多端同步' },
   { id: 'workspace', icon: FolderOpen, label: t('settings.nav_workspace') || '工作区' },
   { id: 'daily_routine', icon: Sunrise, label: t('settings.nav_daily_routine') || '每日工作' },
   { id: 'appearance', icon: Palette, label: t('settings.nav_appearance') || '外观与语言' },

@@ -80,21 +80,27 @@
           </div>
         </div>
 
-        <!-- Page: Scan to Pair (移动端专属占位) -->
+        <!-- Page: Scan to Pair (移动端专属) -->
         <div v-if="currentStepType === 'pair'" class="page page-center">
-          <div class="pair-placeholder">
-            <QrCode :size="48" style="opacity: 0.3; margin-bottom: 16px;" />
-            <p style="color: var(--text-secondary); text-align: center; line-height: 1.6;">
-              {{ $t('setup.pair_coming_soon') || '扫码配对功能即将上线，敬请期待' }}
+          <div class="pair-container" style="display: flex; flex-direction: column; align-items: center; width: 100%;">
+            <div style="width: 80px; height: 80px; border-radius: 50%; background: rgba(var(--user-accent-rgb, 39, 118, 187), 0.1); display: flex; align-items: center; justify-content: center; margin-bottom: 24px; color: var(--user-accent);">
+              <Smartphone :size="40" />
+            </div>
+            <h3 style="margin-bottom: 12px; font-weight: 500;">{{ $t('settings.p2p_pairing') || '多端同步' }}</h3>
+            <p style="color: var(--text-secondary); text-align: center; line-height: 1.6; margin-bottom: 32px; font-size: 0.9em; padding: 0 20px;">
+              {{ $t('setup.pair_scan_desc') || '使用手机扫描 PC 端“连接中心”里生成的二维码，建立端到端加密连接。' }}
             </p>
-            <p style="color: var(--text-tertiary); font-size: 12px; margin-top: 8px;">
-              {{ $t('setup.pair_skip_hint') || '可先跳过此步骤，稍后在设置中配对' }}
-            </p>
+            <button class="btn btn-primary" style="width: 80%; padding: 12px; font-size: 1em; border-radius: 24px; display: flex; align-items: center; justify-content: center; gap: 8px;" @click="openScanner">
+              <QrCode :size="18" /> {{ $t('setup.btn_scan_qr') || '打开摄像头扫码' }}
+            </button>
+            <button class="btn btn-ghost" style="margin-top: 16px; font-size: 0.85em; color: var(--text-tertiary);" @click="finishOnboarding">
+              {{ $t('setup.btn_skip') || '跳过，稍后再说' }}
+            </button>
           </div>
         </div>
       </div>
 
-      <div class="wizard-nav">
+      <div class="wizard-nav" v-if="currentStepType !== 'pair'">
         <button class="nav-arrow" v-if="step > 1" @click="step--">
           <ChevronLeft :size="20" />
         </button>
@@ -233,6 +239,23 @@ async function pollQrStatus() {
     if (res && res.status === 'expired') { await loadQrCode(); return; }
   } catch (e) {}
   pollTimer = setTimeout(pollQrStatus, 2000);
+}
+
+async function openScanner() {
+  if (window.appAPI?.scanQrCode) {
+    try {
+      const code = await window.appAPI.scanQrCode();
+      if (code) {
+        // TODO: Handle QR code payload for P2P pairing
+        console.log('Scanned QR code:', code);
+        finishOnboarding();
+      }
+    } catch (err) {
+      console.error('Scan failed:', err);
+    }
+  } else {
+    alert($t('setup.scanner_not_supported') || '当前环境不支持扫码');
+  }
 }
 
 function setLanguage(lang) {

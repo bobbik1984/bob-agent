@@ -1,7 +1,7 @@
 <template>
   <!-- 🚇 网络代理 (Network Proxy) -->
-  <section class="settings-section card">
-    <div class="service-card" :class="{ connected: proxyTunnelEnabled }" style="margin-bottom: 0;">
+  <section class="settings-section" style="margin-bottom: 24px;">
+    <div class="service-card static-card" :class="{ connected: proxyTunnelEnabled }" style="margin-bottom: 0;">
       <div class="service-card-header" style="margin-bottom: 0;">
         <div class="service-icon" :style="{ background: proxyTunnelEnabled ? 'rgba(var(--user-accent-rgb, 39,118,187), 0.1)' : 'var(--bg-tertiary)', color: proxyTunnelEnabled ? 'var(--user-accent)' : 'var(--text-muted)' }">
           <Network :size="20" />
@@ -15,6 +15,45 @@
           <input type="checkbox" :checked="proxyTunnelEnabled" @change="toggleProxyTunnel" />
           <span class="mcp-slider"></span>
         </label>
+      </div>
+    </div>
+  </section>
+  <!-- 🔄 多端同步 (P2P Sync) -->
+  <section class="settings-section" style="margin-bottom: 24px;">
+    <div class="service-card static-card" :class="{ connected: isUnlocked }" style="margin-bottom: 0;">
+      <div class="service-card-header" style="margin-bottom: 0; align-items: center;">
+        <div class="service-icon" :style="{ background: isUnlocked ? 'rgba(var(--user-accent-rgb, 39,118,187), 0.1)' : 'var(--bg-tertiary)', color: isUnlocked ? 'var(--user-accent)' : 'var(--text-muted)' }">
+          <Smartphone :size="20" />
+        </div>
+        <div class="service-info" style="flex: 1; padding-right: 16px;">
+          <span class="service-name">{{ $t('settings.p2p_pairing') }}</span>
+          <span class="service-sub" v-if="!isUnlocked">{{ $t('settings.p2p_auth_desc_new') }}</span>
+          <span class="service-sub" v-else>{{ $t('settings.p2p_pairing_desc') }}</span>
+        </div>
+        
+        <!-- 操作区 -->
+        <div v-if="!isUnlocked" style="display: flex; gap: 8px; align-items: center;">
+          <input 
+            v-model="pinInput" 
+            type="password" 
+            class="input" 
+            maxlength="6"
+            :placeholder="isInitialized ? $t('settings.p2p_pin_placeholder_unlock') : $t('settings.p2p_pin_placeholder_new')"
+            style="width: 220px;"
+            @keyup.enter="handlePinSubmit"
+          />
+          <button class="btn btn-primary" :disabled="pinInput.length < 4" @click="handlePinSubmit">
+            {{ isInitialized ? $t('settings.p2p_btn_unlock') : $t('settings.p2p_btn_generate') }}
+          </button>
+        </div>
+        <div v-else style="display: flex; gap: 8px; align-items: center;">
+          <button class="btn btn-secondary" @click="showP2pModal = true" style="display: flex; align-items: center; transition: none; transform: none; box-shadow: none;">
+            <QrCode :size="16" style="margin-right: 6px;" /> 配对二维码
+          </button>
+          <button class="btn btn-ghost" @click="handleReset" :title="$t('settings.p2p_btn_destroy')" style="display: flex; align-items: center; justify-content: center; transition: none; transform: none; box-shadow: none; color: var(--color-error);">
+            <X :size="16" />
+          </button>
+        </div>
       </div>
     </div>
   </section>
@@ -349,6 +388,59 @@
     </div>
   </section>
 
+  <!-- P2P 配对二维码弹窗 -->
+  <Transition name="briefing-fade">
+    <div v-if="showP2pModal" class="wechat-modal-overlay">
+      <div class="morning-briefing wechat-qr-modal" style="width: 460px;">
+        <div class="briefing-header">
+          <div class="briefing-icon"><Smartphone :size="18" /></div>
+          <div class="briefing-title" style="flex: 1; font-size: 14px; font-weight: 600; color: var(--text-primary);">{{ $t('settings.p2p_pairing') }}</div>
+          <button class="briefing-close" @click="showP2pModal = false" title="关闭" style="background: none; border: none; color: var(--text-tertiary); cursor: pointer; padding: 4px; border-radius: 4px; display: flex; align-items: center; justify-content: center;">
+            <X :size="14" />
+          </button>
+        </div>
+        <div class="briefing-body" style="padding: 24px; display: flex; flex-direction: column;">
+          <div style="display: flex; gap: 32px; align-items: stretch;">
+            <!-- 左侧设备信息 -->
+            <div style="flex: 1; display: flex; flex-direction: column; gap: 12px; justify-content: center;">
+              <div class="form-group" style="margin-bottom: 0;">
+                <label class="form-label" style="font-size: 0.8em;">{{ $t('settings.p2p_pc_device_id') }}</label>
+                <input type="text" readonly class="input" :value="pairingInfo.device_id || $t('settings.loading')" style="width: 100%; font-family: monospace; font-size: 0.8em; color: var(--text-tertiary); padding: 6px 8px;" />
+              </div>
+              <div class="form-group" style="margin-bottom: 0;">
+                <label class="form-label" style="font-size: 0.8em;">{{ $t('settings.p2p_local_ip') }}</label>
+                <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+                  <span v-for="ip in pairingInfo.local_ips" :key="ip" class="tag" style="background: var(--bg-tertiary); padding: 2px 8px; border-radius: 4px; font-size: 0.8em;">
+                    {{ ip }}
+                  </span>
+                  <span v-if="!pairingInfo.local_ips || pairingInfo.local_ips.length === 0" style="color: var(--text-tertiary); font-size: 0.8em;">{{ $t('settings.p2p_no_network') }}</span>
+                </div>
+              </div>
+              <div class="form-group" style="margin-bottom: 0;">
+                <label class="form-label" style="font-size: 0.8em;">{{ $t('settings.p2p_relay_server') }}</label>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <span class="status-dot" style="background: var(--color-success); width: 8px; height: 8px; border-radius: 50%; display: inline-block;"></span>
+                  <span style="font-size: 0.8em;">{{ pairingInfo.relay || 'wss://relay.bobbik.org' }}</span>
+                </div>
+              </div>
+            </div>
+            
+            <!-- 右侧二维码 -->
+            <div style="width: 160px; display: flex; flex-direction: column; align-items: center; justify-content: center; background: white; padding: 12px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
+              <qrcode-vue v-if="qrPayload" :value="qrPayload" :size="136" level="M" />
+              <div v-else style="width: 136px; height: 136px; display: flex; align-items: center; justify-content: center; background: #f0f0f0; border-radius: 8px;">
+                <span style="color: #999; font-size: 0.8em;">{{ $t('settings.p2p_generating') }}</span>
+              </div>
+            </div>
+          </div>
+          <p style="color: var(--text-secondary); font-size: 0.85em; margin-top: 20px; text-align: center;">
+            {{ $t('settings.p2p_scan_hint') }}
+          </p>
+        </div>
+      </div>
+    </div>
+  </Transition>
+
   <!-- 微信扫码弹窗 -->
   <Transition name="briefing-fade">
     <div v-if="showWechatModal" class="wechat-modal-overlay">
@@ -382,12 +474,18 @@
 
 <script setup>
 const getAssetUrl = (name) => `/logos/${name}`;
-import { ref, onMounted, onUnmounted } from 'vue';
+import { ref, onMounted, onUnmounted, computed } from 'vue';
 import { open } from '@tauri-apps/plugin-dialog';
+import { invoke } from '@tauri-apps/api/core';
+import QrcodeVue from 'qrcode.vue';
+import { useI18n } from 'vue-i18n';
 import {
   Smartphone, Unplug, X, Plus, Loader2, MessageSquare, Check,
-  Building2, ExternalLink, Unlink, KeyRound, Network, Info, Copy
+  Building2, ExternalLink, Unlink, KeyRound, Network, Info, Copy,
+  ShieldAlert, TriangleAlert, QrCode
 } from 'lucide-vue-next';
+
+const { t } = useI18n();
 
 const props = defineProps({
   config: { type: Object, required: true },
@@ -403,6 +501,62 @@ async function toggleProxyTunnel() {
   // If we want to dynamically trigger Rust to reconnect, we could call an IPC here,
   // but for now relying on config-changed to save and backend to watch config is enough.
 }
+
+// ── P2P Sync (多端同步) ──
+const isInitialized = ref(true); // Will fetch from backend
+const isUnlocked = ref(false);
+const showP2pModal = ref(false);
+const pinInput = ref('');
+const pairingInfo = ref({
+  device_id: '',
+  local_ips: [],
+  port: 8080,
+  relay: ''
+});
+
+const qrPayload = computed(() => {
+  if (!pairingInfo.value.device_id) return '';
+  return JSON.stringify(pairingInfo.value);
+});
+
+const handlePinSubmit = async () => {
+  if (pinInput.value.length < 4) return;
+  try {
+    if (isInitialized.value) {
+      await invoke('unlock_device_keys', { pin: pinInput.value });
+    } else {
+      await invoke('init_device_keys', { pin: pinInput.value });
+      isInitialized.value = true;
+    }
+    isUnlocked.value = true;
+    pinInput.value = '';
+    await fetchPairingInfo();
+  } catch (error) {
+    alert(t('settings.p2p_alert_pin_err') + error);
+  }
+};
+
+const handleReset = async () => {
+  if (confirm(t('settings.p2p_alert_reset'))) {
+    try {
+      await invoke('reset_device_keys');
+      isInitialized.value = false;
+      isUnlocked.value = false;
+      pinInput.value = '';
+    } catch (error) {
+      alert(t('settings.p2p_alert_reset_err') + error);
+    }
+  }
+};
+
+const fetchPairingInfo = async () => {
+  try {
+    pairingInfo.value = await invoke('get_pairing_payload');
+  } catch (error) {
+    console.error('获取配对信息失败', error);
+  }
+};
+
 
 // ── Mobile channels ──
 const mobileChannel = ref('wechat');
@@ -660,6 +814,13 @@ async function removeMcpServer(name) {
 onMounted(async () => {
   await loadMcpConfig();
   await loadConnectorStatuses();
+  
+  // P2P Key Initialization check
+  try {
+    isInitialized.value = await invoke('check_device_keys_initialized');
+  } catch(e) {
+    console.error('Failed to check key initialization', e);
+  }
   if (window.appAPI.wechatGetCurrentStatus) {
     try {
       const res = await window.appAPI.wechatGetCurrentStatus();
@@ -1007,5 +1168,15 @@ onUnmounted(() => {
 .briefing-fade-leave-to {
   opacity: 0;
   transform: scale(0.95);
+}
+
+.static-card {
+  cursor: default !important;
+  pointer-events: auto !important;
+}
+.static-card:hover {
+  transform: none !important;
+  border-color: var(--border-subtle) !important;
+  box-shadow: none !important;
 }
 </style>

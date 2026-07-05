@@ -14,9 +14,6 @@
           :config="config"
           @config-changed="onConfigChanged"
         />
-        <SettingsDevices
-          v-else-if="activePanel === 'devices'"
-        />
         <SettingsWorkspace
           v-else-if="activePanel === 'workspace'"
           :config="config"
@@ -47,7 +44,6 @@ import { ref, reactive, onMounted, watch } from 'vue';
 
 import SettingsModelPanel from './settings/SettingsModelPanel.vue';
 import SettingsConnections from './settings/SettingsConnections.vue';
-import SettingsDevices from './settings/SettingsDevices.vue';
 import SettingsWorkspace from './settings/SettingsWorkspace.vue';
 import SettingsAppearance from './settings/SettingsAppearance.vue';
 import SettingsAbout from './settings/SettingsAbout.vue';
