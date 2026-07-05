@@ -1604,6 +1604,7 @@ pub(crate) async fn stream_internal(
     // 4. 构建 HTTP 客户端
     let url = format!("{}/chat/completions", base_url);
     let client = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(10))
         .timeout(std::time::Duration::from_secs(300))
         .build()
         .unwrap_or_else(|_| reqwest::Client::new());

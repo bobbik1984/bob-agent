@@ -99,14 +99,13 @@
     <!-- 新建日程弹窗 -->
     <div v-if="newEventDialog" class="detail-overlay" @click.self="newEventDialog = false">
       <div class="detail-card">
-        <h3 class="detail-title">{{ $t('timeline.new_event_title') || '新建日程' }}</h3>
+        <h3 class="detail-title">{{ $t('timeline.new_event_title') }}</h3>
         <div class="detail-field" style="display: flex; flex-direction: column; gap: 8px;">
           <input 
             type="text" 
             v-model="newEventTitle" 
             class="bob-input" 
             style="width: 100%; padding: 10px; border-radius: var(--radius-sm); border: 1px solid var(--border-default); background: var(--bg-primary); color: var(--text-primary); outline: none;" 
-            :placeholder="$t('timeline.new_event_title') || '请输入日程标题'" 
             @keyup.enter="confirmCreateEvent"
             ref="newEventInput"
             autofocus
@@ -122,12 +121,13 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, nextTick, inject } from 'vue';
+import { ref, computed, onMounted, onUnmounted, nextTick, inject, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { Calendar } from 'lucide-vue-next';
 
 const { t, tm } = useI18n();
 const isMobile = inject('isMobile');
+const activeDrawer = inject('activeDrawer', null);
 
 const props = defineProps({
   weekEvents: { type: Array, default: () => [] }
@@ -150,26 +150,33 @@ function updateCurrentTime() {
   currentTimeTop.value = (now.getHours() + now.getMinutes() / 60) * PIXELS_PER_HOUR;
 }
 
+function scrollToCurrentTime() {
+  if (scrollContainer.value) {
+    const now = new Date();
+    const currentH = now.getHours() + now.getMinutes() / 60;
+    const viewportH = scrollContainer.value.clientHeight;
+    if (viewportH === 0) return;
+    const offsetRows = viewportH / PIXELS_PER_HOUR / 3;
+    let scrollY = Math.max(0, currentH - offsetRows) * PIXELS_PER_HOUR;
+    scrollContainer.value.scrollTo({ top: scrollY, behavior: 'smooth' });
+  }
+}
+
 onMounted(() => {
   updateCurrentTime();
   timeInterval = setInterval(updateCurrentTime, 60000); // 每分钟更新
   
   // 智能滚动：优先让当前时间线可见，其次考虑最早事件
-  setTimeout(() => {
-    if (scrollContainer.value) {
-      const now = new Date();
-      const currentH = now.getHours() + now.getMinutes() / 60;
-      
-      // 计算可视区域高度，将当前时间线定位在视口上方 1/3 处
-      const viewportH = scrollContainer.value.clientHeight;
-      const offsetRows = viewportH / PIXELS_PER_HOUR / 3; // 上方留约 1/3 视口
-      
-      let scrollY = Math.max(0, currentH - offsetRows) * PIXELS_PER_HOUR;
-      
-      scrollContainer.value.scrollTo({ top: scrollY, behavior: 'smooth' });
-    }
-  }, 300); // 延迟执行以确保 DOM 已完成渲染且过渡动画结束
+  setTimeout(scrollToCurrentTime, 300); // 延迟执行以确保 DOM 已完成渲染且过渡动画结束
 });
+
+if (activeDrawer) {
+  watch(activeDrawer, (newVal) => {
+    if (newVal === 'schedule') {
+      setTimeout(scrollToCurrentTime, 300);
+    }
+  });
+}
 
 onUnmounted(() => {
   if (timeInterval) clearInterval(timeInterval);

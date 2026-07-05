@@ -1,62 +1,5 @@
 <template>
-  <!-- 🚇 网络代理 (Network Proxy) -->
-  <section class="settings-section" style="margin-bottom: 24px;">
-    <div class="service-card static-card" :class="{ connected: proxyTunnelEnabled }" style="margin-bottom: 0;">
-      <div class="service-card-header" style="margin-bottom: 0;">
-        <div class="service-icon" :style="{ background: proxyTunnelEnabled ? 'rgba(var(--user-accent-rgb, 39,118,187), 0.1)' : 'var(--bg-tertiary)', color: proxyTunnelEnabled ? 'var(--user-accent)' : 'var(--text-muted)' }">
-          <Network :size="20" />
-        </div>
-        <div class="service-info">
-          <span class="service-name">{{ $t('settings.proxy_tunnel_name') }}</span>
-          <span class="service-sub">{{ $t('settings.proxy_tunnel_desc') }}</span>
-        </div>
-        
-        <label class="mcp-switch">
-          <input type="checkbox" :checked="proxyTunnelEnabled" @change="toggleProxyTunnel" />
-          <span class="mcp-slider"></span>
-        </label>
-      </div>
-    </div>
-  </section>
-  <!-- 🔄 多端同步 (P2P Sync) -->
-  <section class="settings-section" style="margin-bottom: 24px;">
-    <div class="service-card static-card" :class="{ connected: isUnlocked }" style="margin-bottom: 0;">
-      <div class="service-card-header" style="margin-bottom: 0; align-items: center;">
-        <div class="service-icon" :style="{ background: isUnlocked ? 'rgba(var(--user-accent-rgb, 39,118,187), 0.1)' : 'var(--bg-tertiary)', color: isUnlocked ? 'var(--user-accent)' : 'var(--text-muted)' }">
-          <Smartphone :size="20" />
-        </div>
-        <div class="service-info" style="flex: 1; padding-right: 16px;">
-          <span class="service-name">{{ $t('settings.p2p_pairing') }}</span>
-          <span class="service-sub" v-if="!isUnlocked">{{ $t('settings.p2p_auth_desc_new') }}</span>
-          <span class="service-sub" v-else>{{ $t('settings.p2p_pairing_desc') }}</span>
-        </div>
-        
-        <!-- 操作区 -->
-        <div v-if="!isUnlocked" style="display: flex; gap: 8px; align-items: center;">
-          <input 
-            v-model="pinInput" 
-            type="password" 
-            class="input" 
-            maxlength="6"
-            :placeholder="isInitialized ? $t('settings.p2p_pin_placeholder_unlock') : $t('settings.p2p_pin_placeholder_new')"
-            style="width: 220px;"
-            @keyup.enter="handlePinSubmit"
-          />
-          <button class="btn btn-primary" :disabled="pinInput.length < 4" @click="handlePinSubmit">
-            {{ isInitialized ? $t('settings.p2p_btn_unlock') : $t('settings.p2p_btn_generate') }}
-          </button>
-        </div>
-        <div v-else style="display: flex; gap: 8px; align-items: center;">
-          <button class="btn btn-secondary" @click="showP2pModal = true" style="display: flex; align-items: center; transition: none; transform: none; box-shadow: none;">
-            <QrCode :size="16" style="margin-right: 6px;" /> 配对二维码
-          </button>
-          <button class="btn btn-ghost" @click="handleReset" :title="$t('settings.p2p_btn_destroy')" style="display: flex; align-items: center; justify-content: center; transition: none; transform: none; box-shadow: none; color: var(--color-error);">
-            <X :size="16" />
-          </button>
-        </div>
-      </div>
-    </div>
-  </section>
+
 
   <!-- 📱 通讯渠道 (Communication Channels) -->
   <section class="settings-section card">
@@ -66,6 +9,45 @@
     </h3>
     
     <div class="service-cards-grid">
+      <!-- 🔄 多端同步 (P2P Sync) -->
+      <div class="service-card static-card" :class="{ connected: isUnlocked }">
+        <div class="service-card-header" style="margin-bottom: 0; align-items: center;">
+          <div class="service-icon" :style="{ background: isUnlocked ? 'rgba(var(--user-accent-rgb, 39,118,187), 0.1)' : 'var(--bg-tertiary)', color: isUnlocked ? 'var(--user-accent)' : 'var(--text-muted)' }">
+            <Smartphone :size="20" />
+          </div>
+          <div class="service-info" style="flex: 1; padding-right: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+            <span class="service-name" style="white-space: nowrap;">{{ $t('settings.p2p_pairing') }}</span>
+            <span class="service-sub" v-if="!isUnlocked" style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ $t('settings.p2p_auth_desc_new') }}</span>
+            <span class="service-sub" v-else style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ $t('settings.p2p_pairing_desc') }}</span>
+          </div>
+          
+          <!-- 操作区 -->
+          <div v-if="!isUnlocked" style="display: flex; gap: 8px; align-items: center; flex: 0 1 120px;">
+            <input 
+              v-model="pinInput" 
+              type="password" 
+              class="input" 
+              maxlength="6"
+              placeholder="PIN"
+              style="width: 100%; min-width: 0;"
+              @keyup.enter="handlePinSubmit"
+            />
+            <button class="btn btn-ghost" style="padding: 8px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; color: var(--text-secondary);" :disabled="pinInput.length < 4" @click="handlePinSubmit" :title="isInitialized ? $t('settings.p2p_btn_unlock') : $t('settings.p2p_btn_generate')">
+              <Unlock v-if="isInitialized" :size="16" />
+              <Lock v-else :size="16" />
+            </button>
+          </div>
+          <div v-else style="display: flex; gap: 8px; align-items: center;">
+            <button class="btn btn-secondary" @click="showP2pModal = true" style="display: flex; align-items: center; transition: none; transform: none; box-shadow: none;">
+              <QrCode :size="16" style="margin-right: 6px;" /> 配对二维码
+            </button>
+            <button class="btn btn-ghost" @click="handleReset" :title="$t('settings.p2p_btn_destroy')" style="display: flex; align-items: center; justify-content: center; transition: none; transform: none; box-shadow: none; color: var(--color-error);">
+              <X :size="16" />
+            </button>
+          </div>
+        </div>
+      </div>
+
       <!-- WeChat -->
       <div class="service-card" :class="{ active: mobileChannel === 'wechat' }">
         <div class="service-card-header" @click="mobileChannel === 'wechat' ? openWechatModal() : mobileChannel = 'wechat'" style="cursor: pointer; margin-bottom: 0;">
@@ -141,6 +123,23 @@
           </div>
         </div>
       </div>
+    </div>
+  </section>
+
+  <!-- 🚇 内网穿墙隧道 (Network Proxy) -->
+  <section class="settings-section card">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+      <h3 class="section-title" style="margin-bottom: 0;">
+        <Network :size="16" class="section-icon" />
+        {{ $t('settings.proxy_tunnel_name') }}
+      </h3>
+      <label class="mcp-switch">
+        <input type="checkbox" :checked="proxyTunnelEnabled" @change="toggleProxyTunnel" />
+        <span class="mcp-slider"></span>
+      </label>
+    </div>
+    <div class="field-hint" style="margin-top: -8px; margin-bottom: 0; margin-left: 28px; color: var(--text-secondary);">
+      {{ $t('settings.proxy_tunnel_desc') }}
     </div>
   </section>
 
@@ -482,7 +481,7 @@ import { useI18n } from 'vue-i18n';
 import {
   Smartphone, Unplug, X, Plus, Loader2, MessageSquare, Check,
   Building2, ExternalLink, Unlink, KeyRound, Network, Info, Copy,
-  ShieldAlert, TriangleAlert, QrCode
+  ShieldAlert, TriangleAlert, QrCode, Lock, Unlock
 } from 'lucide-vue-next';
 
 const { t } = useI18n();

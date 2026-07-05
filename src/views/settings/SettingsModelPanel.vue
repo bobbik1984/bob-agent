@@ -49,8 +49,21 @@
               width: '10px', height: '10px', borderRadius: '50%', display: 'inline-block', flexShrink: 0
             }"></span>
 
-            <div class="input" style="flex: 1; display: flex; align-items: center; color: var(--text-tertiary); font-size: 0.9em; user-select: none; cursor: default;">
-              {{ option.downloaded ? '已下载并就绪' : '等待下载' }}
+            <div class="input" :style="{ 
+              flex: 1, 
+              display: 'flex', 
+              alignItems: 'center', 
+              color: 'var(--text-tertiary)', 
+              fontSize: '0.9em', 
+              userSelect: 'none', 
+              cursor: 'default',
+              padding: '0 8px',
+              background: downloadingModel === option.id ? `linear-gradient(to right, color-mix(in srgb, var(--user-accent, var(--accent-primary)) 20%, transparent) ${typeof downloadProgress === 'number' ? downloadProgress : 0}%, transparent ${typeof downloadProgress === 'number' ? downloadProgress : 0}%)` : ''
+            }">
+              <span v-if="downloadingModel === option.id" style="color: var(--text-primary); font-weight: 500;">
+                {{ typeof downloadProgress === 'number' ? downloadProgress + '%' : downloadProgress }}
+              </span>
+              <span v-else>{{ option.downloaded ? '已下载并就绪' : '等待下载' }}</span>
             </div>
 
             <div style="display: flex; gap: 4px;" v-if="!option.isCustom">
@@ -62,8 +75,7 @@
                 @mouseleave="hoveringModel = null"
               >
                 <template v-if="downloadingModel === option.id">
-                  <component v-if="hoveringModel === option.id || isPaused" :is="isPaused ? Play : Pause" :size="14" />
-                  <span v-else style="font-size: 0.85em;">{{ downloadProgress }}%</span>
+                  <component :is="isPaused ? Play : Pause" :size="14" />
                 </template>
                 <Download v-else :size="14" />
               </button>
@@ -81,12 +93,12 @@
       <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-top: 12px; margin-bottom: 8px;">
         <!-- HF Mirror Switch -->
         <div style="display: flex; align-items: center; justify-content: center; gap: 10px; background: var(--bg-secondary); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 8px; cursor: pointer;" @click="downloadSource = downloadSource === 'hf-mirror' ? 'huggingface' : 'hf-mirror'">
-          <span style="font-size: 0.85em; color: var(--text-secondary);" :style="{ fontWeight: downloadSource === 'huggingface' ? '500' : 'normal', color: downloadSource === 'huggingface' ? 'var(--text-primary)' : 'var(--text-secondary)' }">HF原址</span>
+          <span style="font-size: 0.85em; color: var(--text-secondary);" :style="{ fontWeight: downloadSource === 'huggingface' ? '500' : 'normal', color: downloadSource === 'huggingface' ? 'var(--text-primary)' : 'var(--text-secondary)' }">HF</span>
           <label class="hf-switch" @click.stop>
             <input type="checkbox" :checked="downloadSource === 'hf-mirror'" @change="downloadSource = $event.target.checked ? 'hf-mirror' : 'huggingface'" />
             <span class="hf-slider"></span>
           </label>
-          <span style="font-size: 0.85em;" :style="{ fontWeight: downloadSource === 'hf-mirror' ? '500' : 'normal', color: downloadSource === 'hf-mirror' ? 'var(--text-primary)' : 'var(--text-secondary)' }">国内镜像</span>
+          <span style="font-size: 0.85em;" :style="{ fontWeight: downloadSource === 'hf-mirror' ? '500' : 'normal', color: downloadSource === 'hf-mirror' ? 'var(--text-primary)' : 'var(--text-secondary)' }">CN</span>
         </div>
         
         <!-- Custom URL -->
@@ -391,7 +403,7 @@ const showOfflineModels = ref(false);
 
 const customDownloadUrl = ref('');
 const showCustomDownload = ref(false);
-const downloadSource = ref('hf-mirror');
+const downloadSource = ref('huggingface');
 
 const offlineModelOptions = computed(() => {
   const options = [];
@@ -1242,7 +1254,7 @@ details[open] > summary .details-chevron {
 }
 
 .provider-label {
-  width: 130px;
+  width: 170px;
   margin-bottom: 0 !important;
   display: flex;
   align-items: center;
@@ -1265,7 +1277,7 @@ details[open] > summary .details-chevron {
 
 @media (max-width: 768px) {
   .provider-label {
-    width: 90px;
+    width: 120px;
   }
 }
 </style>

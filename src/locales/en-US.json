@@ -49,6 +49,7 @@
     "delete_title": "Delete Chat",
     "delete_desc": "Are you sure you want to delete this chat? This action cannot be undone.",
     "cancel": "Cancel",
+    "confirm": "Confirm",
     "confirm_delete": "Delete",
     "factory_reset_warning": "Warning: Are you sure you want to clear all chat history, settings, memory, and temporary skills? This action cannot be undone. The app will restart after cleanup."
   },
@@ -519,6 +520,7 @@
       "Fri",
       "Sat"
     ],
+    "new_event_title": "New Event",
     "delete_event": "Delete Event",
     "update_time_failed": "Failed to update time",
     "no_events": "No events",
@@ -528,7 +530,7 @@
     "prev_week": "Prev Week",
     "this_week": "This Week",
     "next_week": "Next Week",
-    "new_event_title": "Enter title for new event:"
+    "new_event_title": "New Event"
   },
   "providers": {
     "qwen": "Alibaba Cloud",

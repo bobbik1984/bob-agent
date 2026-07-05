@@ -49,6 +49,7 @@
     "delete_title": "删除对话",
     "delete_desc": "确定要删除这个对话吗？此操作不可恢复。",
     "cancel": "取消",
+    "confirm": "确定",
     "confirm_delete": "确定删除",
     "factory_reset_warning": "警告：您确定要清空所有聊天记录、配置、记忆和临时技能吗？此操作无法撤销。程序清理后将自动重启。"
   },
@@ -519,6 +520,7 @@
       "周五",
       "周六"
     ],
+    "new_event_title": "新日程",
     "delete_event": "删除事件",
     "update_time_failed": "更新时间失败",
     "no_events": "无日程",
@@ -528,7 +530,7 @@
     "prev_week": "上一周",
     "this_week": "本周",
     "next_week": "下一周",
-    "new_event_title": "请输入新日程的标题："
+    "new_event_title": "新日程"
   },
   "providers": {
     "qwen": "阿里云百炼",

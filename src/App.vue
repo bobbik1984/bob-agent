@@ -313,6 +313,7 @@ const { locale, t } = useI18n();
 const isSetupComplete = ref(false);
 const currentView = ref('chat');  // legacy — kept for backward compat during transition
 const activeDrawer = ref('chat');         // 'chat' | 'schedule' | 'settings'
+provide('activeDrawer', activeDrawer);
 const activeSettingsPanel = ref('model'); // 'model' | 'connections' | 'workspace' | 'daily_routine' | 'appearance' | 'about'
 const chatViewRef = ref(null);
 const quickNoteRef = ref(null);
