@@ -100,7 +100,7 @@
         </div>
       </div>
 
-      <div class="wizard-nav" v-if="currentStepType !== 'pair'">
+      <div class="wizard-nav">
         <button class="nav-arrow" v-if="step > 1" @click="step--">
           <ChevronLeft :size="20" />
         </button>

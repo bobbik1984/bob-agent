@@ -478,10 +478,14 @@
     "delete": "删除"
   },
   "setup": {
-    "theme_dark": "深色",
+    "theme_dark": "暗色",
     "theme_light": "浅色",
-    "workspace_placeholder": "设置工作文件夹",
-    "provider_placeholder": "大模型"
+    "workspace_placeholder": "指定工作间文件夹...",
+    "provider_placeholder": "选择首选模型...",
+    "pair_scan_desc": "请使用手机摄像头扫描 PC 端“连接中心”里生成的二维码，建立端到端加密连接。",
+    "btn_scan_qr": "打开摄像头扫码",
+    "btn_skip": "跳过，稍后再说",
+    "scanner_not_supported": "当前环境暂不支持扫码功能"
   },
   "confirm_card": {
     "new_todo": "新增待办",

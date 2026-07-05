@@ -480,8 +480,12 @@
   "setup": {
     "theme_dark": "Dark",
     "theme_light": "Light",
-    "workspace_placeholder": "Set workspace folder",
-    "provider_placeholder": "LLM Provider"
+    "workspace_placeholder": "Set workspace folder...",
+    "provider_placeholder": "LLM Provider...",
+    "pair_scan_desc": "Please use your phone camera to scan the QR code generated in the PC 'Connection Center' to establish an end-to-end encrypted connection.",
+    "btn_scan_qr": "Open Camera to Scan",
+    "btn_skip": "Skip for now",
+    "scanner_not_supported": "QR scanner is not supported in this environment"
   },
   "confirm_card": {
     "new_todo": "New To-Do",
