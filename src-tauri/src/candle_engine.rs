@@ -126,7 +126,7 @@ mod real_engine {
             } else {
                 format!("{}.gguf", clean_path)
             };
-            let models_dir = crate::get_app_data_dir().join("models");
+            let models_dir = crate::get_data_dir().join("models");
             resolved_path = models_dir.join(file_name);
         }
         
