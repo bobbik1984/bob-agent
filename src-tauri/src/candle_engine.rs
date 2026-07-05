@@ -235,6 +235,7 @@ mod dummy_engine {
     use std::sync::Mutex;
     
     pub struct CandleState {
+        pub engine: Mutex<Option<()>>,
         pub is_running: Mutex<bool>,
     }
     
