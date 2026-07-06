@@ -125,6 +125,7 @@ import { ACCENT_COLORS } from '@/constants/theme.js';
 
 const { locale, t: $t } = useI18n();
 const isMobile = inject('isMobile', false);
+  const isMobileApp = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
 
 const emit = defineEmits(['complete']);
 const step = ref(1); // 1-indexed within wizardSteps
@@ -133,7 +134,7 @@ const testResult = ref(null);
 
 // 移动端跳过 workspace 步骤，微信步骤改为扫码配对
 const wizardSteps = computed(() => {
-  if (isMobile) {
+  if (isMobileApp) {
     return ['appearance', 'llm', 'pair']; // 3 步: 外观 → LLM → 扫码配对
   }
   return ['appearance', 'workspace', 'llm', 'wechat']; // 4 步: 外观 → 工作间 → LLM → 微信
