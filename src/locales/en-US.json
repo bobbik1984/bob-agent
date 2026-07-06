@@ -238,7 +238,7 @@
     "p2p_pairing": "Multi-device Sync",
     "p2p_pairing_desc": "Establish an end-to-end encrypted connection",
     "p2p_auth_title": "Secure Device Authentication",
-    "p2p_auth_desc_new": "For the first time using multi-device sync, please set a 4~6 digit PIN code to protect your device private key.",
+    "p2p_auth_desc_new": "Set a 4~6 digit PIN to protect your private key.",
     "p2p_auth_desc_unlock": "Please enter your local PIN code to unlock device identity.",
     "p2p_pin_placeholder_new": "Set new PIN (4-6 digits)",
     "p2p_pin_placeholder_unlock": "Enter PIN to unlock",

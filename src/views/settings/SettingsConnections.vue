@@ -17,7 +17,7 @@
           </div>
           <div class="service-info">
             <span class="service-name">{{ $t('settings.p2p_pairing') }}</span>
-            <span class="service-sub" style="display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; white-space: normal;">{{ !isUnlocked ? $t('settings.p2p_auth_desc_new') : $t('settings.p2p_pairing_desc') }}</span>
+            <span class="service-sub">{{ !isUnlocked ? $t('settings.p2p_auth_desc_new') : $t('settings.p2p_pairing_desc') }}</span>
           </div>
           <span class="service-status-dot" :class="isUnlocked ? 'dot-connected' : 'dot-disconnected'"></span>
         </div>
@@ -64,15 +64,9 @@
           </div>
           <div class="service-info">
             <span class="service-name">{{ $t('settings.channel_wechat') }}</span>
-            <span class="service-sub" style="display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; white-space: normal;">{{ $t('settings.channel_wechat_desc') }}</span>
+            <span class="service-sub">{{ $t('settings.channel_wechat_desc') }}</span>
           </div>
           <span class="service-status-dot" :class="wechatConnected ? 'dot-connected' : 'dot-disconnected'"></span>
-        </div>
-        <div class="service-card-body">
-          <span class="service-status-text">
-            <template v-if="wechatConnected">{{ $t('settings.conn_connected') }}</template>
-            <template v-else>{{ $t('settings.conn_not_configured') }}</template>
-          </span>
         </div>
         <div class="service-card-footer">
           <button v-if="wechatConnected" class="btn btn-primary-outline btn-sm" @click="openWechatModal()">
@@ -97,13 +91,6 @@
             <span class="service-sub">Telegram Bot</span>
           </div>
           <span class="service-status-dot" :class="tgToken ? 'dot-connected' : 'dot-disconnected'"></span>
-        </div>
-        
-        <div class="service-card-body">
-          <span class="service-status-text">
-            <template v-if="tgToken">{{ $t('settings.conn_connected') }}</template>
-            <template v-else>{{ $t('settings.conn_not_configured') }}</template>
-          </span>
         </div>
         
         <Transition name="slide-fade">
@@ -147,13 +134,6 @@
             <span class="service-sub">Discord Bot</span>
           </div>
           <span class="service-status-dot" :class="discordToken ? 'dot-connected' : 'dot-disconnected'"></span>
-        </div>
-        
-        <div class="service-card-body">
-          <span class="service-status-text">
-            <template v-if="discordToken">{{ $t('settings.conn_connected') }}</template>
-            <template v-else>{{ $t('settings.conn_not_configured') }}</template>
-          </span>
         </div>
         
         <Transition name="slide-fade">
@@ -225,18 +205,6 @@
           <span class="service-status-dot" :class="isConnected('lark') ? 'dot-connected' : 'dot-disconnected'"></span>
         </div>
 
-        <div class="service-card-body">
-          <span class="service-status-text">
-            <template v-if="isConnected('lark')">
-              {{ $t('settings.conn_connected') }}
-              <span v-if="connectorStatuses['lark']?.connected_at" class="connected-time">
-                · {{ connectorStatuses['lark'].connected_at }}
-              </span>
-            </template>
-            <template v-else>{{ $t('settings.conn_not_configured') }}</template>
-          </span>
-        </div>
-
         <!-- 飞书凭证表单 (内联展开) -->
         <Transition name="slide-fade">
           <div v-if="showLarkForm" class="lark-credential-form">
@@ -295,18 +263,6 @@
             <span class="service-sub">{{ $t('settings.conn_native_integration') }}</span>
           </div>
           <span class="service-status-dot" :class="isConnected('google') ? 'dot-connected' : 'dot-disconnected'"></span>
-        </div>
-
-        <div class="service-card-body">
-          <span class="service-status-text">
-            <template v-if="isConnected('google')">
-              {{ $t('settings.conn_connected') }}
-              <span v-if="connectorStatuses['google']?.connected_at" class="connected-time">
-                · {{ connectorStatuses['google'].connected_at }}
-              </span>
-            </template>
-            <template v-else>{{ $t('settings.conn_not_configured') }}</template>
-          </span>
         </div>
 
         <div class="service-card-footer">
