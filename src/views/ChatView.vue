@@ -1997,9 +1997,7 @@ defineExpose({
 
 /* 左侧：供应商列表 */
 .model-popup-providers {
-  width: max-content;
-  min-width: 120px;
-  max-width: 160px;
+  width: 140px;
   flex-shrink: 0;
   border-right: 1px solid var(--border-subtle);
   overflow-y: auto;
@@ -2035,15 +2033,6 @@ defineExpose({
   min-width: 0;
 }
 
-.model-provider-name::after {
-  display: block;
-  content: attr(title);
-  font-weight: 500;
-  height: 0;
-  overflow: hidden;
-  visibility: hidden;
-}
-
 .model-provider-btn:hover {
   background: var(--surface-glass);
   color: var(--text-primary);
@@ -2052,7 +2041,7 @@ defineExpose({
 .model-provider-btn.active {
   background: var(--bg-tertiary);
   color: var(--text-primary);
-  font-weight: 500;
+  font-weight: 600;
 }
 
 .provider-count {

@@ -1194,3 +1194,13 @@ code.hljs {
     font-size: 10px;
   }
 }
+
+.btn-primary-outline {
+  background: rgba(var(--user-accent-rgb, 39,118,187), 0.1);
+  color: var(--user-accent);
+  border: 1px solid rgba(var(--user-accent-rgb, 39,118,187), 0.2);
+}
+.btn-primary-outline:hover {
+  background: rgba(var(--user-accent-rgb, 39,118,187), 0.15);
+  border-color: rgba(var(--user-accent-rgb, 39,118,187), 0.4);
+}

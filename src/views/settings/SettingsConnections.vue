@@ -10,45 +10,38 @@
     
     <div class="service-cards-grid">
       <!-- 🔄 多端同步 (P2P Sync) -->
-      <div class="service-card static-card" :class="{ connected: isUnlocked }">
-        <div class="service-card-header" style="margin-bottom: 0; align-items: center;">
+      <div class="service-card" :class="{ connected: isUnlocked }" style="grid-column: 1 / -1;">
+        <div class="service-card-header">
           <div class="service-icon" :style="{ background: isUnlocked ? 'rgba(var(--user-accent-rgb, 39,118,187), 0.1)' : 'var(--bg-tertiary)', color: isUnlocked ? 'var(--user-accent)' : 'var(--text-muted)' }">
             <Smartphone :size="20" />
           </div>
-          <div class="service-info" style="flex: 1; padding-right: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-            <span class="service-name" style="white-space: nowrap;">{{ $t('settings.p2p_pairing') }}</span>
-            <span class="service-sub" v-if="!isUnlocked" style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ $t('settings.p2p_auth_desc_new') }}</span>
-            <span class="service-sub" v-else style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ $t('settings.p2p_pairing_desc') }}</span>
+          <div class="service-info">
+            <span class="service-name">{{ $t('settings.p2p_pairing') }}</span>
+            <span class="service-sub" style="display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; white-space: normal;">{{ !isUnlocked ? $t('settings.p2p_auth_desc_new') : $t('settings.p2p_pairing_desc') }}</span>
           </div>
-          
-          <!-- 操作区 -->
-          <div v-if="!isUnlocked" style="display: flex; gap: 8px; align-items: center; flex: 0 1 120px;">
+          <span class="service-status-dot" :class="isUnlocked ? 'dot-connected' : 'dot-disconnected'"></span>
+        </div>
+        
+        <div class="service-card-footer">
+          <div v-if="!isUnlocked" style="display: flex; gap: 8px; width: 100%;">
             <template v-if="isMobile">
-              <button class="btn btn-primary" style="padding: 6px 10px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 0.85em;" @click="handleMobileScan" title="扫码配对">
+              <button class="btn btn-primary-outline" style="flex: 1; justify-content: center;" @click="handleMobileScan" title="扫码配对">
                 <Scan :size="14" style="margin-right: 6px;" /> 扫码配对
               </button>
             </template>
             <template v-else>
-              <input 
-                v-model="pinInput" 
-                type="password" 
-                class="input" 
-                maxlength="6"
-                placeholder="PIN"
-                style="width: 100%; min-width: 0;"
-                @keyup.enter="handlePinSubmit"
-              />
-              <button class="btn btn-ghost" style="padding: 8px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; color: var(--text-secondary);" :disabled="pinInput.length < 4" @click="handlePinSubmit" :title="isInitialized ? $t('settings.p2p_btn_unlock') : $t('settings.p2p_btn_generate')">
+              <input v-model="pinInput" type="password" class="input" maxlength="6" placeholder="PIN" style="flex: 1;" @keyup.enter="handlePinSubmit" />
+              <button class="btn btn-primary" style="flex-shrink: 0;" :disabled="pinInput.length < 4" @click="handlePinSubmit" :title="isInitialized ? $t('settings.p2p_btn_unlock') : $t('settings.p2p_btn_generate')">
                 <Unlock v-if="isInitialized" :size="16" />
                 <Lock v-else :size="16" />
               </button>
             </template>
           </div>
-          <div v-else style="display: flex; gap: 8px; align-items: center;">
-            <button class="btn btn-secondary" @click="showP2pModal = true" style="display: flex; align-items: center; transition: none; transform: none; box-shadow: none;">
+          <div v-else style="display: flex; gap: 8px; width: 100%;">
+            <button class="btn btn-primary-outline" style="flex: 1; justify-content: center;" @click="showP2pModal = true">
               <QrCode :size="16" style="margin-right: 6px;" /> 配对二维码
             </button>
-            <button class="btn btn-ghost" @click="handleReset" :title="$t('settings.p2p_btn_destroy')" style="display: flex; align-items: center; justify-content: center; transition: none; transform: none; box-shadow: none; color: var(--color-error);">
+            <button class="btn btn-danger-outline" style="padding: 8px;" @click="handleReset" :title="$t('settings.p2p_btn_destroy')">
               <X :size="16" />
             </button>
           </div>
@@ -56,8 +49,8 @@
       </div>
 
       <!-- WeChat -->
-      <div class="service-card" :class="{ active: mobileChannel === 'wechat' }">
-        <div class="service-card-header" @click="mobileChannel === 'wechat' ? openWechatModal() : mobileChannel = 'wechat'" style="cursor: pointer; margin-bottom: 0;">
+      <div class="service-card" :class="{ connected: wechatConnected }">
+        <div class="service-card-header">
           <div class="service-icon" style="background: rgba(7,193,96,0.1); color: #07c160; display: flex; align-items: center; justify-content: center;">
             <svg viewBox="-51.45 -69.25 445.9 415.5" xmlns="http://www.w3.org/2000/svg" style="width: 20px; height: 20px; fill: currentColor;">
               <g fill="currentColor" fill-rule="evenodd">
@@ -68,16 +61,29 @@
           </div>
           <div class="service-info">
             <span class="service-name">{{ $t('settings.channel_wechat') }}</span>
-            <span class="service-sub" v-if="mobileChannel === 'wechat'" style="color: var(--user-accent);">{{ wechatConnected ? $t('settings.channel_wechat_rebind') : $t('settings.channel_wechat_scan') }}</span>
-            <span class="service-sub" v-else>{{ $t('settings.channel_wechat_desc') }}</span>
+            <span class="service-sub" style="display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; white-space: normal;">{{ $t('settings.channel_wechat_desc') }}</span>
           </div>
-          <span class="service-status-dot" :class="mobileChannel === 'wechat' ? 'dot-connected' : 'dot-disconnected'"></span>
+          <span class="service-status-dot" :class="wechatConnected ? 'dot-connected' : 'dot-disconnected'"></span>
+        </div>
+        <div class="service-card-body">
+          <span class="service-status-text">
+            <template v-if="wechatConnected">{{ $t('settings.conn_connected') }}</template>
+            <template v-else>{{ $t('settings.conn_not_configured') }}</template>
+          </span>
+        </div>
+        <div class="service-card-footer">
+          <button v-if="wechatConnected" class="btn btn-primary-outline btn-sm" @click="openWechatModal()">
+            {{ $t('settings.channel_wechat_rebind') }}
+          </button>
+          <button v-else class="btn btn-primary-outline btn-sm" @click="openWechatModal()">
+            <Scan :size="13" /> {{ $t('settings.channel_wechat_scan') }}
+          </button>
         </div>
       </div>
 
       <!-- Telegram -->
-      <div class="service-card" :class="{ active: mobileChannel === 'telegram' }">
-        <div class="service-card-header" @click="mobileChannel = 'telegram'" style="cursor: pointer; margin-bottom: 0;">
+      <div class="service-card" :class="{ connected: tgToken }">
+        <div class="service-card-header">
           <div class="service-icon" style="background: rgba(42,171,238,0.1); color: #2aabee; display: flex; align-items: center; justify-content: center;">
             <svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg" style="width: 18px; height: 18px; fill: currentColor;">
               <path d="M29.919 6.163l-4.225 19.925c-0.319 1.406-1.15 1.756-2.331 1.094l-6.438-4.744-3.106 2.988c-0.344 0.344-0.631 0.631-1.294 0.631l0.463-6.556 11.931-10.781c0.519-0.462-0.113-0.719-0.806-0.256l-14.75 9.288-6.35-1.988c-1.381-0.431-1.406-1.381 0.288-2.044l24.837-9.569c1.15-0.431 2.156 0.256 1.781 2.013z"/>
@@ -89,23 +95,45 @@
           </div>
           <span class="service-status-dot" :class="tgToken ? 'dot-connected' : 'dot-disconnected'"></span>
         </div>
-        <div class="service-card-body" v-if="mobileChannel === 'telegram'" style="border-top: 1px solid var(--border-default); padding-top: 12px; margin-top: 14px;">
-          <div class="input-group" style="margin-bottom: 0;">
-            <label style="font-size: 0.85em; color: var(--text-secondary); margin-bottom: 6px; display: block;">Bot Token</label>
-            <div style="display: flex; flex-direction: column; gap: 8px;">
-              <input type="password" v-model="tgToken" placeholder="123456789:ABCdefGHIjklMNO..." class="input" />
-              <button class="btn btn-primary" @click="activateMobileChannel('telegram')" style="width: 100%;">
-                <svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg" style="width: 14px; height: 14px; fill: currentColor; flex-shrink: 0;"><path d="M29.919 6.163l-4.225 19.925c-0.319 1.406-1.15 1.756-2.331 1.094l-6.438-4.744-3.106 2.988c-0.344 0.344-0.631 0.631-1.294 0.631l0.463-6.556 11.931-10.781c0.519-0.462-0.113-0.719-0.806-0.256l-14.75 9.288-6.35-1.988c-1.381-0.431-1.406-1.381 0.288-2.044l24.837-9.569c1.15-0.431 2.156 0.256 1.781 2.013z"/></svg> {{ $t('settings.channel_activate') }}
+        
+        <div class="service-card-body">
+          <span class="service-status-text">
+            <template v-if="tgToken">{{ $t('settings.conn_connected') }}</template>
+            <template v-else>{{ $t('settings.conn_not_configured') }}</template>
+          </span>
+        </div>
+        
+        <Transition name="slide-fade">
+          <div v-if="mobileChannel === 'telegram'" class="lark-credential-form">
+            <div class="form-group" style="margin-bottom: 10px;">
+              <label class="form-label">Bot Token</label>
+              <input v-model="tgToken" type="password" class="input" placeholder="123456789:ABCdefGHIjklMNO..." />
+              <p class="field-hint" style="margin-top: 8px; margin-bottom: 0;">{{ $t('settings.channel_tg_hint') }}</p>
+            </div>
+            <div style="display: flex; gap: 8px;">
+              <button class="btn btn-primary btn-sm" @click="activateMobileChannel('telegram')" :disabled="!tgToken">
+                <Check :size="13" /> {{ $t('settings.channel_activate') }}
+              </button>
+              <button class="btn btn-sm" @click="mobileChannel = ''">
+                {{ $t('settings.mcp_cancel') }}
               </button>
             </div>
-            <p class="field-hint" style="margin-top: 8px; margin-bottom: 0;">{{ $t('settings.channel_tg_hint') }}</p>
           </div>
+        </Transition>
+
+        <div class="service-card-footer">
+          <button v-if="tgToken" class="btn btn-danger-outline btn-sm" @click="mobileChannel = mobileChannel === 'telegram' ? '' : 'telegram'">
+            <Unlink :size="13" /> 修改 Token
+          </button>
+          <button v-else class="btn btn-primary-outline btn-sm" @click="mobileChannel = mobileChannel === 'telegram' ? '' : 'telegram'">
+            <KeyRound :size="13" /> {{ $t('settings.conn_connect') }}
+          </button>
         </div>
       </div>
 
       <!-- Discord -->
-      <div class="service-card" :class="{ active: mobileChannel === 'discord' }">
-        <div class="service-card-header" @click="mobileChannel = 'discord'" style="cursor: pointer; margin-bottom: 0;">
+      <div class="service-card" :class="{ connected: discordToken }">
+        <div class="service-card-header">
           <div class="service-icon" style="background: rgba(88,101,242,0.1); color: #5865F2; display: flex; align-items: center; justify-content: center;">
             <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" style="width: 20px; height: 20px; fill: currentColor;">
               <path d="M18.59 5.88997C17.36 5.31997 16.05 4.89997 14.67 4.65997C14.5 4.95997 14.3 5.36997 14.17 5.69997C12.71 5.47997 11.26 5.47997 9.83001 5.69997C9.69001 5.36997 9.49001 4.95997 9.32001 4.65997C7.94001 4.89997 6.63001 5.31997 5.40001 5.88997C2.92001 9.62997 2.25001 13.28 2.58001 16.87C4.23001 18.1 5.82001 18.84 7.39001 19.33C7.78001 18.8 8.12001 18.23 8.42001 17.64C7.85001 17.43 7.31001 17.16 6.80001 16.85C6.94001 16.75 7.07001 16.64 7.20001 16.54C10.33 18 13.72 18 16.81 16.54C16.94 16.65 17.07 16.75 17.21 16.85C16.7 17.16 16.15 17.42 15.59 17.64C15.89 18.23 16.23 18.8 16.62 19.33C18.19 18.84 19.79 18.1 21.43 16.87C21.82 12.7 20.76 9.08997 18.61 5.88997H18.59ZM8.84001 14.67C7.90001 14.67 7.13001 13.8 7.13001 12.73C7.13001 11.66 7.88001 10.79 8.84001 10.79C9.80001 10.79 10.56 11.66 10.55 12.73C10.55 13.79 9.80001 14.67 8.84001 14.67ZM15.15 14.67C14.21 14.67 13.44 13.8 13.44 12.73C13.44 11.66 14.19 10.79 15.15 10.79C16.11 10.79 16.87 11.66 16.86 12.73C16.86 13.79 16.11 14.67 15.15 14.67Z"/>
@@ -117,20 +145,43 @@
           </div>
           <span class="service-status-dot" :class="discordToken ? 'dot-connected' : 'dot-disconnected'"></span>
         </div>
-        <div class="service-card-body" v-if="mobileChannel === 'discord'" style="border-top: 1px solid var(--border-default); padding-top: 12px; margin-top: 14px;">
-          <div class="input-group" style="margin-bottom: 0;">
-            <label style="font-size: 0.85em; color: var(--text-secondary); margin-bottom: 6px; display: block;">Bot Token</label>
-            <div style="display: flex; flex-direction: column; gap: 8px;">
-              <input type="password" v-model="discordToken" placeholder="OTg3NjU0MzIx.ABC.defGHIjklMNO..." class="input" />
-              <button class="btn btn-primary" @click="activateMobileChannel('discord')" style="width: 100%;">
-                <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" style="width: 14px; height: 14px; fill: currentColor; flex-shrink: 0;"><path d="M18.59 5.88997C17.36 5.31997 16.05 4.89997 14.67 4.65997C14.5 4.95997 14.3 5.36997 14.17 5.69997C12.71 5.47997 11.26 5.47997 9.83001 5.69997C9.69001 5.36997 9.49001 4.95997 9.32001 4.65997C7.94001 4.89997 6.63001 5.31997 5.40001 5.88997C2.92001 9.62997 2.25001 13.28 2.58001 16.87C4.23001 18.1 5.82001 18.84 7.39001 19.33C7.78001 18.8 8.12001 18.23 8.42001 17.64C7.85001 17.43 7.31001 17.16 6.80001 16.85C6.94001 16.75 7.07001 16.64 7.20001 16.54C10.33 18 13.72 18 16.81 16.54C16.94 16.65 17.07 16.75 17.21 16.85C16.7 17.16 16.15 17.42 15.59 17.64C15.89 18.23 16.23 18.8 16.62 19.33C18.19 18.84 19.79 18.1 21.43 16.87C21.82 12.7 20.76 9.08997 18.61 5.88997H18.59ZM8.84001 14.67C7.90001 14.67 7.13001 13.8 7.13001 12.73C7.13001 11.66 7.88001 10.79 8.84001 10.79C9.80001 10.79 10.56 11.66 10.55 12.73C10.55 13.79 9.80001 14.67 8.84001 14.67ZM15.15 14.67C14.21 14.67 13.44 13.8 13.44 12.73C13.44 11.66 14.19 10.79 15.15 10.79C16.11 10.79 16.87 11.66 16.86 12.73C16.86 13.79 16.11 14.67 15.15 14.67Z"/></svg> {{ $t('settings.channel_activate') }}
+        
+        <div class="service-card-body">
+          <span class="service-status-text">
+            <template v-if="discordToken">{{ $t('settings.conn_connected') }}</template>
+            <template v-else>{{ $t('settings.conn_not_configured') }}</template>
+          </span>
+        </div>
+        
+        <Transition name="slide-fade">
+          <div v-if="mobileChannel === 'discord'" class="lark-credential-form">
+            <div class="form-group" style="margin-bottom: 10px;">
+              <label class="form-label">Bot Token</label>
+              <input v-model="discordToken" type="password" class="input" placeholder="OTg3NjU0MzIx.ABC.defGHIjklMNO..." />
+              <p class="field-hint" style="margin-top: 8px; margin-bottom: 0;">{{ $t('settings.channel_discord_hint') }}</p>
+            </div>
+            <div style="display: flex; gap: 8px;">
+              <button class="btn btn-primary btn-sm" @click="activateMobileChannel('discord')" :disabled="!discordToken">
+                <Check :size="13" /> {{ $t('settings.channel_activate') }}
+              </button>
+              <button class="btn btn-sm" @click="mobileChannel = ''">
+                {{ $t('settings.mcp_cancel') }}
               </button>
             </div>
-            <p class="field-hint" style="margin-top: 8px; margin-bottom: 0;">{{ $t('settings.channel_discord_hint') }}</p>
           </div>
+        </Transition>
+
+        <div class="service-card-footer">
+          <button v-if="discordToken" class="btn btn-danger-outline btn-sm" @click="mobileChannel = mobileChannel === 'discord' ? '' : 'discord'">
+            <Unlink :size="13" /> 修改 Token
+          </button>
+          <button v-else class="btn btn-primary-outline btn-sm" @click="mobileChannel = mobileChannel === 'discord' ? '' : 'discord'">
+            <KeyRound :size="13" /> {{ $t('settings.conn_connect') }}
+          </button>
         </div>
       </div>
     </div>
+
   </section>
 
   <!-- 🚇 内网穿墙隧道 (Network Proxy) -->
