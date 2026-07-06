@@ -10,7 +10,7 @@
     
     <div class="service-cards-grid">
       <!-- 🔄 多端同步 (P2P Sync) -->
-      <div class="service-card" :class="{ connected: isUnlocked }" style="grid-column: 1 / -1;">
+      <div class="service-card" :class="{ connected: isUnlocked }">
         <div class="service-card-header">
           <div class="service-icon" :style="{ background: isUnlocked ? 'rgba(var(--user-accent-rgb, 39,118,187), 0.1)' : 'var(--bg-tertiary)', color: isUnlocked ? 'var(--user-accent)' : 'var(--text-muted)' }">
             <Smartphone :size="20" />
@@ -31,7 +31,7 @@
             </template>
             <template v-else>
               <input v-model="pinInput" type="password" class="input" maxlength="6" placeholder="PIN" style="flex: 1;" @keyup.enter="handlePinSubmit" />
-              <button class="btn btn-primary" style="flex-shrink: 0;" :disabled="pinInput.length < 4" @click="handlePinSubmit" :title="isInitialized ? $t('settings.p2p_btn_unlock') : $t('settings.p2p_btn_generate')">
+              <button class="btn btn-primary-outline" style="flex-shrink: 0;" :disabled="pinInput.length < 4" @click="handlePinSubmit" :title="isInitialized ? $t('settings.p2p_btn_unlock') : $t('settings.p2p_btn_generate')">
                 <Unlock v-if="isInitialized" :size="16" />
                 <Lock v-else :size="16" />
               </button>
