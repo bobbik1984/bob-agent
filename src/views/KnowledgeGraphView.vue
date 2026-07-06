@@ -1,5 +1,5 @@
 <template>
-  <div class="kg-view layout-row">
+  <div class="kg-view" :class="isMobile ? 'kg-mobile-col' : 'layout-row'">
     <!-- 移动端二级导航 Tab 栏 -->
     <div v-if="isMobile" class="mobile-tab-grid">
       <button class="mobile-tab-item" :class="{ active: currentMode === 'graph' }" @click="currentMode = 'graph'">
@@ -1206,6 +1206,10 @@ async function removeSourceBatch(node) {
 </script>
 
 <style scoped>
+.kg-mobile-col {
+  flex-direction: column !important;
+}
+
 .kg-view {
   display: flex;
   flex-direction: row;

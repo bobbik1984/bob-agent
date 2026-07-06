@@ -1,5 +1,5 @@
 <template>
-  <div class="inbox-view">
+  <div class="inbox-view" :class="{ 'is-mobile': isMobile }">
     <!-- 移动端二级导航 Tab 栏 -->
     <div v-if="isMobile" class="mobile-tab-grid">
       <button class="mobile-tab-item" :class="{ active: activeTab === 'timeline' }" @click="activeTab = 'timeline'">
@@ -300,6 +300,14 @@ function describeCron(expr) {
   overflow-y: auto;
   padding: var(--space-6) var(--space-8);
 }
+.inbox-view.is-mobile {
+  padding: 0;
+}
+
+.inbox-view.is-mobile .inbox-content-wrapper {
+  padding: var(--space-4);
+}
+
 
 .inbox-content-wrapper {
   max-width: 1000px;
