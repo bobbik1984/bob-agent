@@ -30,10 +30,13 @@
               </button>
             </template>
             <template v-else>
-              <input v-model="pinInput" type="password" class="input" maxlength="6" placeholder="PIN" style="flex: 1;" @keyup.enter="handlePinSubmit" />
-              <button class="btn btn-primary-outline" style="flex-shrink: 0;" :disabled="pinInput.length < 4" @click="handlePinSubmit" :title="isInitialized ? $t('settings.p2p_btn_unlock') : $t('settings.p2p_btn_generate')">
-                <Unlock v-if="isInitialized" :size="16" />
-                <Lock v-else :size="16" />
+              <input v-model="pinInput" type="password" class="input" maxlength="6" placeholder="PIN" style="flex: 1; min-width: 0;" @keyup.enter="handlePinSubmit" />
+              <button class="btn btn-primary-outline" style="padding: 0 12px; flex-shrink: 0;" :disabled="pinInput.length < 4" @click="handlePinSubmit" :title="isInitialized ? $t('settings.p2p_btn_unlock') : '设置 PIN 码'">
+                <Lock v-if="isInitialized" :size="16" />
+                <Check v-else :size="16" />
+              </button>
+              <button class="btn btn-ghost" style="padding: 0 10px; flex-shrink: 0; opacity: 0.5; cursor: not-allowed;" disabled title="解锁后查看二维码">
+                <QrCode :size="16" />
               </button>
             </template>
           </div>
