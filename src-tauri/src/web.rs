@@ -3,9 +3,9 @@ use scraper::{Html, Selector};
 use serde_json::{json, Value};
 
 /// T-602: 网页内容抓取 — 使用 reqwest 获取 HTML，用 scraper 提取纯文本
-/// 
+///
 /// 返回格式: { title, content, url, charCount }
-/// 安全措施: 
+/// 安全措施:
 ///   - 最大响应体 2MB
 ///   - 10 秒超时
 ///   - 自动移除 script/style/nav/footer 噪声标签
@@ -91,13 +91,22 @@ pub async fn system_fetch_url(url: String) -> Value {
 /// 跳过 script, style, nav, footer, header, aside 等噪声区域
 fn extract_text_content(document: &Html) -> String {
     // 尝试优先从 <article> 或 <main> 中提取
-    let priority_selectors = ["article", "main", "[role=\"main\"]", ".content", "#content", "#js_content", ".rich_media_content"];
-    
+    let priority_selectors = [
+        "article",
+        "main",
+        "[role=\"main\"]",
+        ".content",
+        "#content",
+        "#js_content",
+        ".rich_media_content",
+    ];
+
     for selector_str in priority_selectors {
         if let Ok(sel) = Selector::parse(selector_str) {
             let elements: Vec<_> = document.select(&sel).collect();
             if !elements.is_empty() {
-                let text: String = elements.iter()
+                let text: String = elements
+                    .iter()
                     .map(|el| el.text().collect::<Vec<_>>().join(" "))
                     .collect::<Vec<_>>()
                     .join("\n\n");

@@ -2004,6 +2004,7 @@ defineExpose({
   border-right: 1px solid var(--border-subtle);
   overflow-y: auto;
   overflow-x: hidden;
+  scrollbar-gutter: stable;
   padding: var(--space-1);
   background: var(--bg-secondary);
 }
@@ -2029,9 +2030,18 @@ defineExpose({
 .model-provider-name {
   flex: 1;
   white-space: nowrap;
-  overflow: hidden;
   text-overflow: ellipsis;
+  overflow: hidden;
   min-width: 0;
+}
+
+.model-provider-name::after {
+  display: block;
+  content: attr(title);
+  font-weight: 500;
+  height: 0;
+  overflow: hidden;
+  visibility: hidden;
 }
 
 .model-provider-btn:hover {
@@ -2056,6 +2066,7 @@ defineExpose({
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
+  scrollbar-gutter: stable;
   padding: var(--space-1);
   min-width: 0;
 }

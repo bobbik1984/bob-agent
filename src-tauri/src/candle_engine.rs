@@ -177,6 +177,28 @@ mod real_engine {
         
         let state = app.state::<CandleState>();
         
+        let running = *state.is_running.lock().unwrap();
+        if !running {
+            let config = crate::read_config();
+            if let Some(path) = config.get("offlineModelPath").and_then(|v| v.as_str()) {
+                if !path.is_empty() {
+                    let app_clone = app.clone();
+                    let conv_id_clone = conv_id.clone();
+                    let _ = app_clone.emit("llm:chunk", json!({ "type": "thinking", "content": "\n[本地模型处于休眠状态，正在自动挂载到内存，请耐心等待 10~30 秒]...\n", "conv_id": &conv_id_clone }));
+                    
+                    let _ = start_offline_engine(path.to_string(), state.clone()).await;
+                }
+            }
+        }
+        
+        let running = *state.is_running.lock().unwrap();
+        if !running {
+            let app_clone = app.clone();
+            let conv_id_clone = conv_id.clone();
+            let _ = app_clone.emit("llm:chunk", json!({ "type": "done", "content": "", "conv_id": &conv_id_clone }));
+            return json!({ "error": "Offline engine is not loaded. Please select a model in Settings first." });
+        }
+        
         let mut prompt = String::new();
         for m in &messages {
             if let (Some(role), Some(content)) = (m.get("role").and_then(|v| v.as_str()), m.get("content").and_then(|v| v.as_str())) {

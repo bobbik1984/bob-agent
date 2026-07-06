@@ -1,8 +1,8 @@
+use pdfium_render::prelude::*;
 use serde_json::{json, Value};
 use std::fs;
 use std::path::Path;
 use walkdir::WalkDir;
-use pdfium_render::prelude::*;
 
 /// LLM-Wiki 知识库引擎 — Phase A: 原生文件解析器
 ///
@@ -20,7 +20,7 @@ pub struct ExtractedFile {
     pub relative_path: String,
     pub absolute_path: String,
     pub file_name: String,
-    pub file_type: String,      // "text", "pdf", "docx", "pptx", "xlsx", "image", "other"
+    pub file_type: String, // "text", "pdf", "docx", "pptx", "xlsx", "image", "other"
     pub text_content: String,
     pub char_count: usize,
     pub byte_size: u64,
@@ -43,25 +43,68 @@ pub struct EstimateResult {
 
 /// 判断文件后缀是否是我们能处理的文本类
 fn is_text_ext(ext: &str) -> bool {
-    matches!(ext, "txt" | "md" | "csv" | "json" | "yaml" | "yml" | "toml" | "xml" | "html" | "htm" | "log" | "ini" | "cfg" | "conf" | "rst" | "tex")
+    matches!(
+        ext,
+        "txt"
+            | "md"
+            | "csv"
+            | "json"
+            | "yaml"
+            | "yml"
+            | "toml"
+            | "xml"
+            | "html"
+            | "htm"
+            | "log"
+            | "ini"
+            | "cfg"
+            | "conf"
+            | "rst"
+            | "tex"
+    )
 }
 
-fn is_pdf(ext: &str) -> bool { ext == "pdf" }
-fn is_docx(ext: &str) -> bool { ext == "docx" }
-fn is_pptx(ext: &str) -> bool { ext == "pptx" }
-fn is_xlsx(ext: &str) -> bool { ext == "xlsx" || ext == "xls" }
+fn is_pdf(ext: &str) -> bool {
+    ext == "pdf"
+}
+fn is_docx(ext: &str) -> bool {
+    ext == "docx"
+}
+fn is_pptx(ext: &str) -> bool {
+    ext == "pptx"
+}
+fn is_xlsx(ext: &str) -> bool {
+    ext == "xlsx" || ext == "xls"
+}
 
 fn is_image(ext: &str) -> bool {
-    matches!(ext, "jpg" | "jpeg" | "png" | "gif" | "bmp" | "webp" | "svg" | "ico" | "tiff" | "tif")
+    matches!(
+        ext,
+        "jpg" | "jpeg" | "png" | "gif" | "bmp" | "webp" | "svg" | "ico" | "tiff" | "tif"
+    )
 }
 
 fn is_media(ext: &str) -> bool {
-    matches!(ext, "mp3" | "mp4" | "wav" | "avi" | "mkv" | "mov" | "flac" | "ogg" | "m4a" | "wmv")
+    matches!(
+        ext,
+        "mp3" | "mp4" | "wav" | "avi" | "mkv" | "mov" | "flac" | "ogg" | "m4a" | "wmv"
+    )
 }
 
 /// 跳过不需要扫描的目录
 fn should_skip_dir(name: &str) -> bool {
-    name.starts_with('.') || matches!(name, "node_modules" | "target" | "dist" | "build" | "__pycache__" | ".git" | "venv" | ".venv")
+    name.starts_with('.')
+        || matches!(
+            name,
+            "node_modules"
+                | "target"
+                | "dist"
+                | "build"
+                | "__pycache__"
+                | ".git"
+                | "venv"
+                | ".venv"
+        )
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -70,8 +113,7 @@ fn should_skip_dir(name: &str) -> bool {
 
 /// 提取纯文本文件
 fn extract_text(path: &Path) -> Result<String, String> {
-    fs::read_to_string(path)
-        .map_err(|e| format!("读取文本失败: {}", e))
+    fs::read_to_string(path).map_err(|e| format!("读取文本失败: {}", e))
 }
 
 /// 提取 PDF 文本 (使用 pdfium-render, 工业级 Chrome 引擎)
@@ -83,7 +125,8 @@ fn extract_pdf(path: &Path) -> Result<String, String> {
             .map_err(|e| format!("无法绑定 PDFium 引擎: {}", e))?;
 
         let pdfium = Pdfium::new(bind);
-        let document = pdfium.load_pdf_from_file(path, None)
+        let document = pdfium
+            .load_pdf_from_file(path, None)
             .map_err(|e| format!("PDFium 加载文件失败: {}", e))?;
 
         let mut full_text = String::new();
@@ -103,10 +146,9 @@ fn extract_pdf(path: &Path) -> Result<String, String> {
 
 /// 提取 DOCX 文本 (ZIP 解压 → XML 解析 → <w:t> 节点)
 fn extract_docx(path: &Path) -> Result<String, String> {
-    let file = fs::File::open(path)
-        .map_err(|e| format!("打开 DOCX 失败: {}", e))?;
-    let mut archive = zip::ZipArchive::new(file)
-        .map_err(|e| format!("DOCX ZIP 解压失败: {}", e))?;
+    let file = fs::File::open(path).map_err(|e| format!("打开 DOCX 失败: {}", e))?;
+    let mut archive =
+        zip::ZipArchive::new(file).map_err(|e| format!("DOCX ZIP 解压失败: {}", e))?;
 
     // DOCX 的正文在 word/document.xml 中
     let mut doc_xml = match archive.by_name("word/document.xml") {
@@ -124,10 +166,9 @@ fn extract_docx(path: &Path) -> Result<String, String> {
 
 /// 提取 PPTX 文本 (ZIP 解压 → 遍历 slides → <a:t> 节点)
 fn extract_pptx(path: &Path) -> Result<String, String> {
-    let file = fs::File::open(path)
-        .map_err(|e| format!("打开 PPTX 失败: {}", e))?;
-    let mut archive = zip::ZipArchive::new(file)
-        .map_err(|e| format!("PPTX ZIP 解压失败: {}", e))?;
+    let file = fs::File::open(path).map_err(|e| format!("打开 PPTX 失败: {}", e))?;
+    let mut archive =
+        zip::ZipArchive::new(file).map_err(|e| format!("PPTX ZIP 解压失败: {}", e))?;
 
     let mut all_text = String::new();
 
@@ -167,10 +208,9 @@ fn extract_pptx(path: &Path) -> Result<String, String> {
 
 /// 提取 XLSX 文本 (使用 calamine crate)
 fn extract_xlsx(path: &Path) -> Result<String, String> {
-    use calamine::{Reader, open_workbook_auto};
+    use calamine::{open_workbook_auto, Reader};
 
-    let mut workbook = open_workbook_auto(path)
-        .map_err(|e| format!("打开 Excel 失败: {}", e))?;
+    let mut workbook = open_workbook_auto(path).map_err(|e| format!("打开 Excel 失败: {}", e))?;
 
     let mut all_text = String::new();
     let sheet_names: Vec<String> = workbook.sheet_names().to_vec();
@@ -179,9 +219,7 @@ fn extract_xlsx(path: &Path) -> Result<String, String> {
         if let Ok(range) = workbook.worksheet_range(&sheet_name) {
             all_text.push_str(&format!("\n## Sheet: {}\n", sheet_name));
             for row in range.rows() {
-                let cells: Vec<String> = row.iter().map(|cell| {
-                    format!("{}", cell)
-                }).collect();
+                let cells: Vec<String> = row.iter().map(|cell| format!("{}", cell)).collect();
                 all_text.push_str(&cells.join("\t"));
                 all_text.push('\n');
             }
@@ -212,7 +250,9 @@ fn extract_xml_text_nodes(xml: &str, tag_name: &str) -> Result<String, String> {
                 let local_name = e.local_name();
                 let name_str = std::str::from_utf8(local_name.as_ref()).unwrap_or("");
                 // 匹配 "t" (local name of w:t or a:t)
-                if name_str == "t" || std::str::from_utf8(e.name().as_ref()).unwrap_or("") == tag_name {
+                if name_str == "t"
+                    || std::str::from_utf8(e.name().as_ref()).unwrap_or("") == tag_name
+                {
                     inside_target = true;
                 }
             }
@@ -226,7 +266,9 @@ fn extract_xml_text_nodes(xml: &str, tag_name: &str) -> Result<String, String> {
             Ok(Event::End(ref e)) => {
                 let local_name = e.local_name();
                 let name_str = std::str::from_utf8(local_name.as_ref()).unwrap_or("");
-                if name_str == "t" || std::str::from_utf8(e.name().as_ref()).unwrap_or("") == tag_name {
+                if name_str == "t"
+                    || std::str::from_utf8(e.name().as_ref()).unwrap_or("") == tag_name
+                {
                     inside_target = false;
                 }
                 // 段落结束添加换行
@@ -256,7 +298,8 @@ pub fn extract_single_file(path: &Path) -> Result<String, String> {
         return Err("文件不存在或不是文件".to_string());
     }
 
-    let ext = path.extension()
+    let ext = path
+        .extension()
         .and_then(|e| e.to_str())
         .unwrap_or("")
         .to_lowercase();
@@ -292,11 +335,15 @@ pub fn extract_folder(folder_path: &str) -> Vec<ExtractedFile> {
     // 如果传入的本就是单文件，直接解析并返回
     if root.is_file() {
         if let Ok(content) = extract_single_file(root) {
-            let relative_path = root.file_name().unwrap_or_default().to_string_lossy().to_string();
+            let relative_path = root
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string();
             let absolute_path = root.to_string_lossy().to_string();
             let char_count = content.chars().count();
             let byte_size = root.metadata().map(|m| m.len()).unwrap_or(0);
-            
+
             results.push(ExtractedFile {
                 relative_path: relative_path.clone(),
                 absolute_path,
@@ -323,23 +370,28 @@ pub fn extract_folder(folder_path: &str) -> Vec<ExtractedFile> {
         };
 
         let path = entry.path();
-        if !path.is_file() { continue; }
+        if !path.is_file() {
+            continue;
+        }
 
-        let ext = path.extension()
+        let ext = path
+            .extension()
             .and_then(|e| e.to_str())
             .unwrap_or("")
             .to_lowercase();
 
-        let file_name = path.file_name()
+        let file_name = path
+            .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("unknown")
             .to_string();
 
-        let relative_path = path.strip_prefix(root)
+        let relative_path = path
+            .strip_prefix(root)
             .unwrap_or(path)
             .to_string_lossy()
             .to_string();
-            
+
         let absolute_path = path.to_string_lossy().to_string();
 
         let byte_size = fs::metadata(path).map(|m| m.len()).unwrap_or(0);
@@ -353,7 +405,9 @@ pub fn extract_folder(folder_path: &str) -> Vec<ExtractedFile> {
             ("text".to_string(), extract_text(path))
         } else if is_pdf(&ext) {
             let pdf_path = path.to_path_buf();
-            let pdf_result = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| extract_pdf(&pdf_path))) {
+            let pdf_result = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                extract_pdf(&pdf_path)
+            })) {
                 Ok(r) => r,
                 Err(_) => Err(format!("PDF {} 解析崩溃，已跳过", file_name)),
             };
@@ -367,7 +421,10 @@ pub fn extract_folder(folder_path: &str) -> Vec<ExtractedFile> {
         } else if is_image(&ext) {
             ("image".to_string(), Ok(format!("[图片: {}]", file_name)))
         } else if is_media(&ext) {
-            ("media".to_string(), Ok(format!("[媒体文件: {}]", file_name)))
+            (
+                "media".to_string(),
+                Ok(format!("[媒体文件: {}]", file_name)),
+            )
         } else {
             continue; // 跳过未知格式
         };
@@ -427,9 +484,12 @@ pub fn estimate_folder(folder_path: &str) -> EstimateResult {
         };
 
         let path = entry.path();
-        if !path.is_file() { continue; }
+        if !path.is_file() {
+            continue;
+        }
 
-        let ext = path.extension()
+        let ext = path
+            .extension()
             .and_then(|e| e.to_str())
             .unwrap_or("")
             .to_lowercase();
@@ -441,7 +501,13 @@ pub fn estimate_folder(folder_path: &str) -> EstimateResult {
             continue;
         }
 
-        if is_text_ext(&ext) || is_pdf(&ext) || is_docx(&ext) || is_pptx(&ext) || is_xlsx(&ext) || is_image(&ext) {
+        if is_text_ext(&ext)
+            || is_pdf(&ext)
+            || is_docx(&ext)
+            || is_pptx(&ext)
+            || is_xlsx(&ext)
+            || is_image(&ext)
+        {
             convertable_files += 1;
             convertable_bytes += byte_size;
         } else {

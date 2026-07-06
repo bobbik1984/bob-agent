@@ -34,7 +34,7 @@ tokio-stream = "0.1"
 futures-util = "0.3.32"
 futures = "0.3"
 bytes = "1"
-reqwest = { version = "0.13.3", features = ["stream", "json"] }
+reqwest = { version = "0.13.3", default-features = false, features = ["rustls", "stream", "json"] }
 axum = { version = "0.8", features = ["http2", "ws"] }
 walkdir = "2.5.0"
 scraper = "0.22"
@@ -81,6 +81,7 @@ webrtc = "0.12"
 rustls = { version = "0.23", features = ["ring"] }
 ed25519-dalek = "2.1.1"
 argon2 = "0.5.3"
+tauri-plugin-barcode-scanner = "2"
 
 [target.'cfg(not(target_os = "android"))'.dependencies]
 candle-core = "0.11.0"
@@ -96,6 +97,9 @@ windows-sys = { version = "0.52", features = ["Win32_System_JobObjects", "Win32_
 trash = "5.2.3"
 tauri-plugin-single-instance = "2.0.0"
 tauri-plugin-global-shortcut = "2.0.0"
+
+[target.'cfg(any(target_os = "android", target_os = "ios"))'.dependencies]
+tauri-plugin-barcode-scanner = "2"
 
 [profile.dev]
 opt-level = 0 # Keep app compilation fast

@@ -1,6 +1,6 @@
 use axum::{
-    extract::{Path, State, WebSocketUpgrade},
     extract::ws::{Message, WebSocket},
+    extract::{Path, State, WebSocketUpgrade},
     response::IntoResponse,
     routing::{get, post},
     Router,
@@ -44,13 +44,19 @@ async fn ws_send_handler(
 
 async fn handle_sender(mut socket: WebSocket, room_id: String, state: AppState) {
     println!("🔵 Sender connected to room: {}", room_id);
-    
+
     let (tx, _rx) = broadcast::channel(1024);
     let (notify_tx, mut notify_rx) = tokio::sync::mpsc::channel::<()>(1);
-    
+
     {
         let mut rooms = state.write().await;
-        rooms.insert(room_id.clone(), Room { tx: tx.clone(), notify_tx });
+        rooms.insert(
+            room_id.clone(),
+            Room {
+                tx: tx.clone(),
+                notify_tx,
+            },
+        );
     }
 
     let (mut sink, mut stream) = socket.split();
@@ -121,15 +127,22 @@ async fn proxy_handler(
 ) -> impl IntoResponse {
     let target_url = match headers.get("X-Proxy-Target-Url") {
         Some(v) => v.to_str().unwrap_or(""),
-        None => return (axum::http::StatusCode::BAD_REQUEST, "Missing X-Proxy-Target-Url").into_response(),
+        None => {
+            return (
+                axum::http::StatusCode::BAD_REQUEST,
+                "Missing X-Proxy-Target-Url",
+            )
+                .into_response()
+        }
     };
-    
+
     let target_method_str = match headers.get("X-Proxy-Target-Method") {
         Some(v) => v.to_str().unwrap_or("GET"),
         None => "GET",
     };
 
-    let method = reqwest::Method::from_bytes(target_method_str.as_bytes()).unwrap_or(reqwest::Method::GET);
+    let method =
+        reqwest::Method::from_bytes(target_method_str.as_bytes()).unwrap_or(reqwest::Method::GET);
 
     let client = reqwest::Client::new();
     let mut req = client.request(method, target_url);
@@ -149,18 +162,23 @@ async fn proxy_handler(
 
     match req.send().await {
         Ok(res) => {
-            let mut response_builder = axum::response::Response::builder()
-                .status(res.status());
-            
+            let mut response_builder = axum::response::Response::builder().status(res.status());
+
             for (k, v) in res.headers() {
                 response_builder = response_builder.header(k.as_str(), v.as_bytes());
             }
 
             let body_bytes = res.bytes().await.unwrap_or_default();
-            response_builder.body(axum::body::Body::from(body_bytes)).unwrap_or_else(|_| (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "").into_response())
+            response_builder
+                .body(axum::body::Body::from(body_bytes))
+                .unwrap_or_else(|_| {
+                    (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "").into_response()
+                })
         }
-        Err(e) => {
-            (axum::http::StatusCode::BAD_GATEWAY, format!("Proxy Error: {}", e)).into_response()
-        }
+        Err(e) => (
+            axum::http::StatusCode::BAD_GATEWAY,
+            format!("Proxy Error: {}", e),
+        )
+            .into_response(),
     }
 }

@@ -24,15 +24,14 @@ use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
 use webrtc::api::media_engine::MediaEngine;
 use webrtc::api::APIBuilder;
 use webrtc::data_channel::data_channel_init::RTCDataChannelInit;
+use webrtc::ice_transport::ice_candidate::RTCIceCandidateInit;
 use webrtc::ice_transport::ice_server::RTCIceServer;
 use webrtc::peer_connection::configuration::RTCConfiguration;
 use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
-use webrtc::ice_transport::ice_candidate::RTCIceCandidateInit;
 
 // 具体 WebSocket 类型（避免泛型地狱）
-type WsStream = tokio_tungstenite::WebSocketStream<
-    tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>
->;
+type WsStream =
+    tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
 type WsSink = futures_util::stream::SplitSink<WsStream, Message>;
 type WsSource = futures_util::stream::SplitStream<WsStream>;
 
@@ -48,12 +47,17 @@ pub async fn start_web_drop(file_path: String) -> Result<String, String> {
         return Err(format!("文件不存在或不是普通文件: {}", file_path));
     }
 
-    let file_name = path.file_name()
+    let file_name = path
+        .file_name()
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| "unknown.bin".to_string());
     let file_size = std::fs::metadata(path).map_err(|e| e.to_string())?.len();
 
-    log::info!("[web_drop] Starting drop for file: {} ({} bytes)", file_name, file_size);
+    log::info!(
+        "[web_drop] Starting drop for file: {} ({} bytes)",
+        file_name,
+        file_size
+    );
 
     // 1. Generate Room ID
     let room_id = {
@@ -74,7 +78,10 @@ pub async fn start_web_drop(file_path: String) -> Result<String, String> {
     let key_b64 = general_purpose::URL_SAFE_NO_PAD.encode(key);
 
     // 3. Construct the share URL immediately
-    let share_url = format!("https://bob.bobbik.org/transfer/?v=2#{}.{}", room_id, key_b64);
+    let share_url = format!(
+        "https://bob.bobbik.org/transfer/?v=2#{}.{}",
+        room_id, key_b64
+    );
     log::info!("[web_drop] Share URL generated: {}", share_url);
 
     let path_buf = path.to_path_buf();
@@ -82,7 +89,8 @@ pub async fn start_web_drop(file_path: String) -> Result<String, String> {
     tokio::spawn(async move {
         let result = tokio::spawn(async move {
             run_drop_session(room_id_clone, key, path_buf, file_name, file_size).await
-        }).await;
+        })
+        .await;
 
         match result {
             Ok(Err(e)) => log::error!("[web_drop] Session error: {}", e),
@@ -120,19 +128,17 @@ async fn run_drop_session(
 
     // ═══ Step 2: 等待接收方连接（READY 信号），5 分钟超时 ═══
     log::info!("[web_drop] Waiting for receiver (5min timeout)...");
-    let ready = tokio::time::timeout(
-        std::time::Duration::from_secs(300),
-        async {
-            while let Some(Ok(msg)) = ws_read.next().await {
-                if let Message::Text(text) = msg {
-                    if text == "READY" {
-                        return true;
-                    }
+    let ready = tokio::time::timeout(std::time::Duration::from_secs(300), async {
+        while let Some(Ok(msg)) = ws_read.next().await {
+            if let Message::Text(text) = msg {
+                if text == "READY" {
+                    return true;
                 }
             }
-            false
         }
-    ).await;
+        false
+    })
+    .await;
 
     match ready {
         Ok(true) => log::info!("[web_drop] Receiver connected, starting WebRTC signaling..."),
@@ -143,13 +149,8 @@ async fn run_drop_session(
     // ═══ Step 3: 尝试 WebRTC P2P ═══
     log::info!("[web_drop] Attempting WebRTC P2P connection...");
 
-    let p2p_result = attempt_webrtc_p2p(
-        &mut ws_write,
-        &mut ws_read,
-        &path,
-        &file_name,
-        file_size,
-    ).await;
+    let p2p_result =
+        attempt_webrtc_p2p(&mut ws_write, &mut ws_read, &path, &file_name, file_size).await;
 
     match p2p_result {
         Ok(true) => {
@@ -167,7 +168,8 @@ async fn run_drop_session(
     // ═══ Step 4: Tier 3 降级 — WebSocket 加密中继 ═══
     // 通知接收方切换到 fallback 模式
     let fallback_msg = serde_json::json!({"type": "fallback"});
-    ws_write.send(Message::Text(fallback_msg.to_string().into()))
+    ws_write
+        .send(Message::Text(fallback_msg.to_string().into()))
         .await
         .map_err(|e| format!("发送 fallback 信号失败: {}", e))?;
 
@@ -186,28 +188,25 @@ async fn attempt_webrtc_p2p(
 ) -> Result<bool, String> {
     // 创建 WebRTC API
     let mut media_engine = MediaEngine::default();
-    media_engine.register_default_codecs()
+    media_engine
+        .register_default_codecs()
         .map_err(|e| format!("MediaEngine 初始化失败: {}", e))?;
 
-    let api = APIBuilder::new()
-        .with_media_engine(media_engine)
-        .build();
+    let api = APIBuilder::new().with_media_engine(media_engine).build();
 
     // ICE 配置（使用自建的 coturn）
     let config = RTCConfiguration {
-        ice_servers: vec![
-            RTCIceServer {
-                urls: vec!["stun:bob.bobbik.org:3478".to_string()],
-                ..Default::default()
-            },
-        ],
+        ice_servers: vec![RTCIceServer {
+            urls: vec!["stun:bob.bobbik.org:3478".to_string()],
+            ..Default::default()
+        }],
         ..Default::default()
     };
 
     let peer_connection = Arc::new(
         api.new_peer_connection(config)
             .await
-            .map_err(|e| format!("创建 PeerConnection 失败: {}", e))?
+            .map_err(|e| format!("创建 PeerConnection 失败: {}", e))?,
     );
 
     // 创建 DataChannel
@@ -250,11 +249,13 @@ async fn attempt_webrtc_p2p(
     }));
 
     // 生成 Offer
-    let offer = peer_connection.create_offer(None)
+    let offer = peer_connection
+        .create_offer(None)
         .await
         .map_err(|e| format!("创建 Offer 失败: {}", e))?;
 
-    peer_connection.set_local_description(offer.clone())
+    peer_connection
+        .set_local_description(offer.clone())
         .await
         .map_err(|e| format!("设置 LocalDescription 失败: {}", e))?;
 
@@ -263,7 +264,8 @@ async fn attempt_webrtc_p2p(
         "type": "offer",
         "sdp": offer.sdp,
     });
-    ws_write.send(Message::Text(offer_msg.to_string().into()))
+    ws_write
+        .send(Message::Text(offer_msg.to_string().into()))
         .await
         .map_err(|e| format!("发送 Offer 失败: {}", e))?;
     log::info!("[web_drop] Offer sent, waiting for Answer...");
@@ -341,19 +343,26 @@ async fn attempt_webrtc_p2p(
         "name": file_name,
         "size": file_size
     });
-    data_channel.send_text(meta_json.to_string())
+    data_channel
+        .send_text(meta_json.to_string())
         .await
         .map_err(|e| format!("发送 P2P 元数据失败: {}", e))?;
 
     // 流式读取文件并通过 DataChannel 发送
-    let mut file = File::open(&path).await.map_err(|e| format!("打开文件失败: {}", e))?;
+    let mut file = File::open(&path)
+        .await
+        .map_err(|e| format!("打开文件失败: {}", e))?;
     let mut buffer = vec![0u8; 64 * 1024]; // 64KB chunks for DataChannel
 
     loop {
-        let n = file.read(&mut buffer).await.map_err(|e| format!("读取文件失败: {}", e))?;
+        let n = file
+            .read(&mut buffer)
+            .await
+            .map_err(|e| format!("读取文件失败: {}", e))?;
         if n == 0 {
             // EOF — 发送空消息作为结束标志
-            data_channel.send(&bytes::Bytes::new())
+            data_channel
+                .send(&bytes::Bytes::new())
                 .await
                 .map_err(|e| format!("发送 EOF 失败: {}", e))?;
             break;
@@ -366,7 +375,8 @@ async fn attempt_webrtc_p2p(
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         }
 
-        data_channel.send(&chunk)
+        data_channel
+            .send(&chunk)
             .await
             .map_err(|e| format!("发送数据块失败: {}", e))?;
     }
@@ -395,16 +405,22 @@ async fn send_via_websocket_relay(
         "name": file_name,
         "size": file_size
     });
-    ws_write.send(Message::Text(meta_json.to_string().into()))
+    ws_write
+        .send(Message::Text(meta_json.to_string().into()))
         .await
         .map_err(|e| format!("发送元数据失败: {}", e))?;
 
     // 流式读取、加密、发送文件块
-    let mut file = File::open(&path).await.map_err(|e| format!("打开文件失败: {}", e))?;
+    let mut file = File::open(&path)
+        .await
+        .map_err(|e| format!("打开文件失败: {}", e))?;
     let mut buffer = vec![0u8; 1024 * 1024]; // 1MB chunks
 
     loop {
-        let n = file.read(&mut buffer).await.map_err(|e| format!("读取文件失败: {}", e))?;
+        let n = file
+            .read(&mut buffer)
+            .await
+            .map_err(|e| format!("读取文件失败: {}", e))?;
 
         if n == 0 {
             log::info!("[web_drop] File EOF reached. Sending close.");
@@ -417,7 +433,8 @@ async fn send_via_websocket_relay(
 
         // 加密
         let nonce = Aes128Gcm::generate_nonce(&mut OsRng);
-        let ciphertext = cipher.encrypt(&nonce, chunk)
+        let ciphertext = cipher
+            .encrypt(&nonce, chunk)
             .map_err(|e| format!("加密失败: {:?}", e))?;
 
         // 拼接 nonce + ciphertext
@@ -425,7 +442,8 @@ async fn send_via_websocket_relay(
         payload.extend_from_slice(&nonce);
         payload.extend_from_slice(&ciphertext);
 
-        ws_write.send(Message::Binary(payload.into()))
+        ws_write
+            .send(Message::Binary(payload.into()))
             .await
             .map_err(|e| format!("发送数据块失败: {}", e))?;
 

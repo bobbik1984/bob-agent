@@ -37,7 +37,11 @@ fn get_cold_session_dir() -> PathBuf {
 
 /// 对话结束时，提取对话摘要并存为 session 日志
 #[tauri::command]
-pub fn system_summarize_session(app: tauri::AppHandle, conversation_id: String, db: tauri::State<'_, crate::db::DbState>) -> bool {
+pub fn system_summarize_session(
+    app: tauri::AppHandle,
+    conversation_id: String,
+    db: tauri::State<'_, crate::db::DbState>,
+) -> bool {
     let conn = match db.0.lock() {
         Ok(c) => c,
         Err(_) => return false,
@@ -51,10 +55,10 @@ pub fn system_summarize_session(app: tauri::AppHandle, conversation_id: String, 
         Err(_) => return false,
     };
 
-    let messages: Vec<(String, String)> = match stmt.query_map(
-        rusqlite::params![conversation_id],
-        |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-    ) {
+    let messages: Vec<(String, String)> = match stmt
+        .query_map(rusqlite::params![conversation_id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        }) {
         Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
         Err(_) => return false,
     };
@@ -64,12 +68,14 @@ pub fn system_summarize_session(app: tauri::AppHandle, conversation_id: String, 
     }
 
     // V1 简易摘要: 提取用户的核心问题 + 助手的最后回复片段
-    let user_questions: Vec<&str> = messages.iter()
+    let user_questions: Vec<&str> = messages
+        .iter()
         .filter(|(role, _)| role == "user")
         .map(|(_, content)| content.as_str())
         .collect();
 
-    let assistant_replies: Vec<&str> = messages.iter()
+    let assistant_replies: Vec<&str> = messages
+        .iter()
         .filter(|(role, _)| role == "assistant")
         .map(|(_, content)| content.as_str())
         .collect();
@@ -115,21 +121,27 @@ pub fn system_summarize_session(app: tauri::AppHandle, conversation_id: String, 
 fn extract_topic_fingerprint(text: &str) -> std::collections::HashSet<String> {
     let mut keywords = std::collections::HashSet::new();
     // 移除标点和特殊字符
-    let cleaned: String = text.chars()
-        .map(|c| if c.is_alphanumeric() || c > '\u{2E80}' || c == ' ' { c } else { ' ' })
+    let cleaned: String = text
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c > '\u{2E80}' || c == ' ' {
+                c
+            } else {
+                ' '
+            }
+        })
         .collect();
 
     for word in cleaned.split_whitespace() {
         let trimmed = word.trim();
-        if trimmed.len() >= 2 { // 至少 2 字符/字
+        if trimmed.len() >= 2 {
+            // 至少 2 字符/字
             keywords.insert(trimmed.to_lowercase());
         }
     }
 
     // 对中文文本按 2-gram 切分（简易 bigram）
-    let chars: Vec<char> = text.chars()
-        .filter(|c| *c > '\u{2E80}')
-        .collect();
+    let chars: Vec<char> = text.chars().filter(|c| *c > '\u{2E80}').collect();
     for window in chars.windows(2) {
         keywords.insert(window.iter().collect::<String>());
     }
@@ -138,23 +150,35 @@ fn extract_topic_fingerprint(text: &str) -> std::collections::HashSet<String> {
 }
 
 /// T-1421: 计算两个关键词集合的 Jaccard 相似度
-fn jaccard_similarity(a: &std::collections::HashSet<String>, b: &std::collections::HashSet<String>) -> f64 {
-    if a.is_empty() || b.is_empty() { return 0.0; }
+fn jaccard_similarity(
+    a: &std::collections::HashSet<String>,
+    b: &std::collections::HashSet<String>,
+) -> f64 {
+    if a.is_empty() || b.is_empty() {
+        return 0.0;
+    }
     let intersection = a.intersection(b).count();
     let union = a.union(b).count();
-    if union == 0 { return 0.0; }
+    if union == 0 {
+        return 0.0;
+    }
     intersection as f64 / union as f64
 }
 
 /// T-1421: 加载所有已压缩的 .md 文件的关键词指纹
-fn load_existing_fingerprints(dir: &std::path::Path) -> Vec<(String, std::collections::HashSet<String>)> {
+fn load_existing_fingerprints(
+    dir: &std::path::Path,
+) -> Vec<(String, std::collections::HashSet<String>)> {
     let mut fingerprints = Vec::new();
     if let Ok(rd) = fs::read_dir(dir) {
         for entry in rd.flatten() {
             let path = entry.path();
-            if path.extension().map_or(true, |ext| ext != "md") { continue; }
+            if path.extension().map_or(true, |ext| ext != "md") {
+                continue;
+            }
             if let Ok(content) = fs::read_to_string(&path) {
-                let filename = path.file_name()
+                let filename = path
+                    .file_name()
                     .map(|n| n.to_string_lossy().to_string())
                     .unwrap_or_default();
                 fingerprints.push((filename, extract_topic_fingerprint(&content)));
@@ -168,10 +192,13 @@ fn load_existing_fingerprints(dir: &std::path::Path) -> Vec<(String, std::collec
 /// 在 setup 阶段由 tokio::spawn 调用，不阻塞主线程
 pub async fn compress_sessions_async(app: tauri::AppHandle) {
     let sessions_dir = get_session_log_dir();
-    if !sessions_dir.exists() { return; }
+    if !sessions_dir.exists() {
+        return;
+    }
 
     let entries: Vec<PathBuf> = match fs::read_dir(&sessions_dir) {
-        Ok(rd) => rd.flatten()
+        Ok(rd) => rd
+            .flatten()
             .map(|e| e.path())
             .filter(|p| p.extension().map_or(false, |ext| ext == "json"))
             .collect(),
@@ -195,13 +222,21 @@ pub async fn compress_sessions_async(app: tauri::AppHandle) {
         };
 
         // 跳过已压缩的
-        if session.get("compressed").and_then(|v| v.as_bool()).unwrap_or(false) {
+        if session
+            .get("compressed")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+        {
             continue;
         }
 
         // 获取 Clerk 模型配置
         let config = super::read_config();
-        let clerk_model = config.get("clerkModel").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let clerk_model = config
+            .get("clerkModel")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
 
         // 如果没有配置 Clerk 模型，跳过 LLM 压缩
         if clerk_model.is_empty() {
@@ -209,15 +244,28 @@ pub async fn compress_sessions_async(app: tauri::AppHandle) {
         }
 
         // 构建压缩 prompt
-        let topics = session.get("userTopics")
+        let topics = session
+            .get("userTopics")
             .and_then(|v| v.as_array())
-            .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>().join("; "))
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str())
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            })
             .unwrap_or_default();
-        let highlight = session.get("assistantHighlight")
+        let highlight = session
+            .get("assistantHighlight")
             .and_then(|v| v.as_str())
             .unwrap_or("");
-        let msg_count = session.get("messageCount").and_then(|v| v.as_u64()).unwrap_or(0);
-        let conv_id = session.get("conversationId").and_then(|v| v.as_str()).unwrap_or("unknown");
+        let msg_count = session
+            .get("messageCount")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        let conv_id = session
+            .get("conversationId")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
 
         // ── T-1421: 语义去重检测 ──────────────────────────
         let current_fp = extract_topic_fingerprint(&format!("{} {}", topics, highlight));
@@ -227,7 +275,9 @@ pub async fn compress_sessions_async(app: tauri::AppHandle) {
             if sim > 0.6 {
                 log::info!(
                     "T-1421: session {} deduplicated (similarity {:.2} with {})",
-                    conv_id, sim, existing_name
+                    conv_id,
+                    sim,
+                    existing_name
                 );
                 // 标记为已去重合并，不重复压缩
                 if let Ok(mut obj) = serde_json::from_str::<Value>(&content) {
@@ -244,7 +294,9 @@ pub async fn compress_sessions_async(app: tauri::AppHandle) {
                 break;
             }
         }
-        if dup_found { continue; }
+        if dup_found {
+            continue;
+        }
         // ── T-1421 END ──────────────────────────────────
 
         let compress_prompt = format!(
@@ -256,7 +308,9 @@ pub async fn compress_sessions_async(app: tauri::AppHandle) {
 
         // 调用 Clerk 模型（使用内部 LLM 调用，非流式简化版）
         let (_, api_key, model_id, base_url) = super::llm::read_llm_config_for_model(&clerk_model);
-        if api_key.is_empty() { continue; }
+        if api_key.is_empty() {
+            continue;
+        }
 
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(30))
@@ -274,7 +328,8 @@ pub async fn compress_sessions_async(app: tauri::AppHandle) {
         });
 
         let url = format!("{}/chat/completions", base_url);
-        let resp = match client.post(&url)
+        let resp = match client
+            .post(&url)
             .header("Content-Type", "application/json")
             .header("Authorization", format!("Bearer {}", api_key))
             .json(&body)
@@ -289,7 +344,11 @@ pub async fn compress_sessions_async(app: tauri::AppHandle) {
         };
 
         if !resp.status().is_success() {
-            log::warn!("Dream V2 compress API error for {}: {}", conv_id, resp.status());
+            log::warn!(
+                "Dream V2 compress API error for {}: {}",
+                conv_id,
+                resp.status()
+            );
             continue;
         }
 
@@ -304,7 +363,9 @@ pub async fn compress_sessions_async(app: tauri::AppHandle) {
             .unwrap_or("")
             .to_string();
 
-        if compressed_text.is_empty() { continue; }
+        if compressed_text.is_empty() {
+            continue;
+        }
 
         // 写入压缩后的 Markdown 文件（替换 JSON）
         let md_path = path.with_extension("md");
@@ -319,7 +380,8 @@ pub async fn compress_sessions_async(app: tauri::AppHandle) {
 
         // T-1421: 将新压缩的文件指纹加入已有集合（供后续 session 去重参考）
         let new_fp = extract_topic_fingerprint(&md_content);
-        let new_name = md_path.file_name()
+        let new_name = md_path
+            .file_name()
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_default();
         existing_fps.push((new_name, new_fp));
@@ -328,21 +390,31 @@ pub async fn compress_sessions_async(app: tauri::AppHandle) {
         if let Ok(mut obj) = serde_json::from_str::<Value>(&content) {
             if let Some(map) = obj.as_object_mut() {
                 map.insert("compressed".to_string(), json!(true));
-                map.insert("compressedFile".to_string(), json!(md_path.file_name().unwrap_or_default().to_string_lossy()));
+                map.insert(
+                    "compressedFile".to_string(),
+                    json!(md_path.file_name().unwrap_or_default().to_string_lossy()),
+                );
                 if let Ok(data) = serde_json::to_string_pretty(&obj) {
                     let _ = fs::write(&path, data);
                 }
             }
         }
 
-        log::info!("Dream V2: compressed session {} -> {}", conv_id, md_path.display());
+        log::info!(
+            "Dream V2: compressed session {} -> {}",
+            conv_id,
+            md_path.display()
+        );
 
         // 避免对 API 造成突发压力，每次压缩后等 1 秒
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
     }
 
     if dedup_count > 0 {
-        log::info!("T-1421: deduplicated {} sessions (skipped compression)", dedup_count);
+        log::info!(
+            "T-1421: deduplicated {} sessions (skipped compression)",
+            dedup_count
+        );
     }
 
     let _ = app.emit("dream:compress-done", json!({"status": "ok"}));
@@ -358,7 +430,9 @@ pub fn migrate_stale_sessions() {
     let hot_dir = get_session_log_dir();
     let cold_dir = get_cold_session_dir();
 
-    if !hot_dir.exists() { return; }
+    if !hot_dir.exists() {
+        return;
+    }
 
     let seven_days_ago = std::time::SystemTime::now()
         .checked_sub(std::time::Duration::from_secs(7 * 24 * 3600))
@@ -372,7 +446,9 @@ pub fn migrate_stale_sessions() {
     let mut migrated = 0u32;
 
     for path in entries {
-        if !path.is_file() { continue; }
+        if !path.is_file() {
+            continue;
+        }
 
         let modified = match fs::metadata(&path).and_then(|m| m.modified()) {
             Ok(t) => t,
@@ -397,7 +473,10 @@ pub fn migrate_stale_sessions() {
     }
 
     if migrated > 0 {
-        log::info!("Dream T-1004: migrated {} stale sessions to cold storage (wiki/sessions/)", migrated);
+        log::info!(
+            "Dream T-1004: migrated {} stale sessions to cold storage (wiki/sessions/)",
+            migrated
+        );
     }
 }
 
@@ -409,7 +488,7 @@ pub fn migrate_stale_sessions() {
 async fn fetch_morning_weather() -> Option<String> {
     let cache_path = super::get_data_dir().join("weather_cache.json");
     let today = chrono::Local::now().format("%Y-%m-%d").to_string();
-    
+
     if let Ok(content) = std::fs::read_to_string(&cache_path) {
         if let Ok(cache) = serde_json::from_str::<serde_json::Value>(&content) {
             if cache.get("date").and_then(|v| v.as_str()) == Some(&today) {
@@ -420,13 +499,20 @@ async fn fetch_morning_weather() -> Option<String> {
         }
     }
 
-    let client = reqwest::Client::builder().timeout(std::time::Duration::from_secs(5)).build().ok()?;
-    
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .ok()?;
+
     // Check override in bob.db
     let db_path = super::get_data_dir().join("bob.db");
     let mut override_city: Option<String> = None;
     if let Ok(conn) = rusqlite::Connection::open(&db_path) {
-        if let Ok(val) = conn.query_row("SELECT value FROM settings WHERE key = 'weatherCity'", [], |row| row.get::<_, String>(0)) {
+        if let Ok(val) = conn.query_row(
+            "SELECT value FROM settings WHERE key = 'weatherCity'",
+            [],
+            |row| row.get::<_, String>(0),
+        ) {
             if !val.trim().is_empty() {
                 override_city = Some(val.trim().to_string());
             }
@@ -434,14 +520,24 @@ async fn fetch_morning_weather() -> Option<String> {
     }
 
     let (lat, lon, city_name) = if let Some(city) = override_city {
-        let geo_url = format!("https://geocoding-api.open-meteo.com/v1/search?name={}&count=1&language=zh", city);
+        let geo_url = format!(
+            "https://geocoding-api.open-meteo.com/v1/search?name={}&count=1&language=zh",
+            city
+        );
         let geo_json: Value = client.get(&geo_url).send().await.ok()?.json().await.ok()?;
         let loc = geo_json.get("results")?.as_array()?.first()?;
         let lat = loc.get("latitude")?.as_f64()?;
         let lon = loc.get("longitude")?.as_f64()?;
         (lat, lon, city)
     } else {
-        let ip_json: Value = client.get("http://ip-api.com/json/?lang=zh-CN").send().await.ok()?.json().await.ok()?;
+        let ip_json: Value = client
+            .get("http://ip-api.com/json/?lang=zh-CN")
+            .send()
+            .await
+            .ok()?
+            .json()
+            .await
+            .ok()?;
         let lat = ip_json.get("lat")?.as_f64()?;
         let lon = ip_json.get("lon")?.as_f64()?;
         let city = ip_json.get("city")?.as_str()?.to_string();
@@ -449,14 +545,29 @@ async fn fetch_morning_weather() -> Option<String> {
     };
 
     let weather_url = format!("https://api.open-meteo.com/v1/forecast?latitude={}&longitude={}&current=weather_code&daily=temperature_2m_max,temperature_2m_min&timezone=Asia%2FShanghai", lat, lon);
-    let w_json: Value = client.get(&weather_url).send().await.ok()?.json().await.ok()?;
-    
+    let w_json: Value = client
+        .get(&weather_url)
+        .send()
+        .await
+        .ok()?
+        .json()
+        .await
+        .ok()?;
+
     let current = w_json.get("current")?;
     let daily = w_json.get("daily")?;
-    
+
     let code = current.get("weather_code")?.as_u64().unwrap_or(0);
-    let t_max = daily.get("temperature_2m_max")?.as_array()?.first()?.as_f64()?;
-    let t_min = daily.get("temperature_2m_min")?.as_array()?.first()?.as_f64()?;
+    let t_max = daily
+        .get("temperature_2m_max")?
+        .as_array()?
+        .first()?
+        .as_f64()?;
+    let t_min = daily
+        .get("temperature_2m_min")?
+        .as_array()?
+        .first()?
+        .as_f64()?;
 
     let condition = match code {
         0 => "晴",
@@ -469,7 +580,13 @@ async fn fetch_morning_weather() -> Option<String> {
         _ => "未知",
     };
 
-    Some(format!("{} {} {}°C ~ {}°C\n\n", city_name, condition, t_min.round() as i64, t_max.round() as i64))
+    Some(format!(
+        "{} {} {}°C ~ {}°C\n\n",
+        city_name,
+        condition,
+        t_min.round() as i64,
+        t_max.round() as i64
+    ))
 }
 
 fn generate_dream_report(app: &tauri::AppHandle) {
@@ -500,32 +617,47 @@ fn generate_dream_report(app: &tauri::AppHandle) {
     // V1 简易简报: 列出最近的几个话题
     let recent = &sessions[..sessions.len().min(5)];
     let mut briefing = String::new();
-    
+
     if let Some(weather) = tauri::async_runtime::block_on(async { fetch_morning_weather().await }) {
         briefing.push_str(&weather);
     }
-    
+
     let digest_stats = tauri::async_runtime::block_on(async {
         let _ = generate_tag_merge_proposals().await;
         generate_notebook_digest().await
     });
-    
+
     briefing.push_str("## 对话回顾\n\n");
-    
+
     for (i, session) in recent.iter().enumerate() {
-        let topics = session.get("userTopics")
+        let topics = session
+            .get("userTopics")
             .and_then(|v| v.as_array())
-            .map(|arr| arr.iter()
-                .filter_map(|v| v.as_str())
-                .collect::<Vec<_>>()
-                .join("; "))
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str())
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            })
             .unwrap_or_else(|| "(无主题)".to_string());
-        
-        let msg_count = session.get("messageCount").and_then(|v| v.as_u64()).unwrap_or(0);
-        let compressed = session.get("compressed").and_then(|v| v.as_bool()).unwrap_or(false);
+
+        let msg_count = session
+            .get("messageCount")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        let compressed = session
+            .get("compressed")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
         let tag = if compressed { " [已压缩]" } else { "" };
-        
-        briefing.push_str(&format!("{}. **{}** ({} 条消息{})\n", i + 1, topics, msg_count, tag));
+
+        briefing.push_str(&format!(
+            "{}. **{}** ({} 条消息{})\n",
+            i + 1,
+            topics,
+            msg_count,
+            tag
+        ));
     }
 
     // T-1308: 追加今日日程到简报
@@ -536,19 +668,18 @@ fn generate_dream_report(app: &tauri::AppHandle) {
             "SELECT title, type, status, start_time, end_time
              FROM events
              WHERE date = ?1 AND status != 'cancelled'
-             ORDER BY start_time ASC"
+             ORDER BY start_time ASC",
         ) {
             let mut has_schedule = false;
-            if let Ok(rows) = stmt.query_map(
-                rusqlite::params![today],
-                |row| Ok((
+            if let Ok(rows) = stmt.query_map(rusqlite::params![today], |row| {
+                Ok((
                     row.get::<_, String>(0)?,
                     row.get::<_, String>(1)?,
                     row.get::<_, String>(2)?,
                     row.get::<_, Option<String>>(3)?,
                     row.get::<_, Option<String>>(4)?,
                 ))
-            ) {
+            }) {
                 for row in rows.flatten() {
                     let (title, etype, status, start_time, _end_time) = row;
                     if !has_schedule {
@@ -558,19 +689,28 @@ fn generate_dream_report(app: &tauri::AppHandle) {
                     let time_str = start_time.as_deref().unwrap_or("");
                     let status_mark = if status == "done" { "[x]" } else { "[ ]" };
                     let type_tag = if etype == "todo" { "待办" } else { "日程" };
-                    briefing.push_str(&format!("- {} **{}** {} {}\n", status_mark, title, type_tag, time_str));
+                    briefing.push_str(&format!(
+                        "- {} **{}** {} {}\n",
+                        status_mark, title, type_tag, time_str
+                    ));
                 }
             }
         }
     }
 
-    let stale_count = if sessions.len() > 10 { sessions.len() - 10 } else { 0 };
+    let stale_count = if sessions.len() > 10 {
+        sessions.len() - 10
+    } else {
+        0
+    };
 
     // T-1421-b: 统计去重记忆和纠正记忆数量
-    let dedup_count = sessions.iter()
+    let dedup_count = sessions
+        .iter()
         .filter(|s| s.get("dedup_merged").is_some())
         .count();
-    let corrected_count = sessions.iter()
+    let corrected_count = sessions
+        .iter()
         .filter(|s| s.get("source").and_then(|v| v.as_str()) == Some("corrected"))
         .count();
 
@@ -578,16 +718,25 @@ fn generate_dream_report(app: &tauri::AppHandle) {
     if dedup_count > 0 || corrected_count > 0 {
         briefing.push_str("\n## 记忆整理\n\n");
         if dedup_count > 0 {
-            briefing.push_str(&format!("- 整理了 **{}** 条重复记忆（已自动合并）\n", dedup_count));
+            briefing.push_str(&format!(
+                "- 整理了 **{}** 条重复记忆（已自动合并）\n",
+                dedup_count
+            ));
         }
         if corrected_count > 0 {
-            briefing.push_str(&format!("- 纠正了 **{}** 条过时记忆（置信度已降低）\n", corrected_count));
+            briefing.push_str(&format!(
+                "- 纠正了 **{}** 条过时记忆（置信度已降低）\n",
+                corrected_count
+            ));
         }
     }
 
     if digest_stats.0 > 0 {
         briefing.push_str("\n## 📓 昨日笔记洞察\n\n");
-        briefing.push_str(&format!("- 昨夜 AI 帮您重新索引了 **{}** 篇笔记，提取了 **{}** 个关键实体关系并入库图谱。\n", digest_stats.0, digest_stats.1));
+        briefing.push_str(&format!(
+            "- 昨夜 AI 帮您重新索引了 **{}** 篇笔记，提取了 **{}** 个关键实体关系并入库图谱。\n",
+            digest_stats.0, digest_stats.1
+        ));
     }
 
     let report = json!({
@@ -622,7 +771,11 @@ pub fn system_get_dream_report() -> Value {
             match serde_json::from_str::<Value>(&content) {
                 Ok(report) => {
                     // 如果已 dismissed，返回 null
-                    if report.get("dismissed").and_then(|v| v.as_bool()).unwrap_or(false) {
+                    if report
+                        .get("dismissed")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false)
+                    {
                         Value::Null
                     } else {
                         report
@@ -664,7 +817,8 @@ pub fn system_dismiss_dream() -> bool {
 /// - .md 文件: 读取首行 `# ...` 标题
 /// - .json 文件: 解析 JSON 中的 userTopics / conversationId 生成标题
 fn extract_session_title(path: &std::path::Path) -> String {
-    let filename = path.file_name()
+    let filename = path
+        .file_name()
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_default();
 
@@ -677,7 +831,9 @@ fn extract_session_title(path: &std::path::Path) -> String {
 
     if ext == "md" {
         // Markdown: 取首行去掉 # 前缀
-        return content.lines().next()
+        return content
+            .lines()
+            .next()
             .map(|l| l.trim().trim_start_matches('#').trim().to_string())
             .filter(|s| !s.is_empty())
             .unwrap_or_else(|| filename.clone());
@@ -691,7 +847,11 @@ fn extract_session_title(path: &std::path::Path) -> String {
                 if let Some(first) = topics.first().and_then(|v| v.as_str()) {
                     let trimmed: String = first.chars().take(40).collect();
                     if !trimmed.is_empty() {
-                        let suffix = if first.chars().count() > 40 { "..." } else { "" };
+                        let suffix = if first.chars().count() > 40 {
+                            "..."
+                        } else {
+                            ""
+                        };
                         return format!("对话摘要: {}{}", trimmed, suffix);
                     }
                 }
@@ -720,9 +880,12 @@ fn collect_session_entries(
 
     for entry in rd.flatten() {
         let path = entry.path();
-        if !path.is_file() { continue; }
+        if !path.is_file() {
+            continue;
+        }
 
-        let filename = path.file_name()
+        let filename = path
+            .file_name()
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_default();
 
@@ -740,7 +903,8 @@ fn collect_session_entries(
 
         let meta = fs::metadata(&path).ok();
         let size = meta.as_ref().map(|m| m.len()).unwrap_or(0);
-        let modified = meta.and_then(|m| m.modified().ok())
+        let modified = meta
+            .and_then(|m| m.modified().ok())
             .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
             .map(|d| d.as_millis() as i64)
             .unwrap_or(0);
@@ -771,7 +935,11 @@ pub fn system_get_memory_entries() -> Value {
             .flat_map(|rd| rd.flatten())
             .filter_map(|e| {
                 let name = e.file_name().to_string_lossy().to_string();
-                if name.ends_with(".md") { Some(name) } else { None }
+                if name.ends_with(".md") {
+                    Some(name)
+                } else {
+                    None
+                }
             })
             .collect()
     } else {
@@ -786,28 +954,42 @@ pub fn system_get_memory_entries() -> Value {
 
     // 2. 扫描冷存储 wiki/sessions/ (已归档的记忆)
     if cold_sessions_dir.exists() {
-        entries.extend(collect_session_entries(&cold_sessions_dir, "session", Some(&cold_md_set)));
+        entries.extend(collect_session_entries(
+            &cold_sessions_dir,
+            "session",
+            Some(&cold_md_set),
+        ));
     }
 
     // 3. 扫描 wiki/ 根目录下的 .md 文件 (知识条目)
     if let Ok(rd) = fs::read_dir(&wiki_dir) {
         for entry in rd.flatten() {
             let path = entry.path();
-            if !path.is_file() { continue; }
-            if path.extension().map_or(true, |ext| ext != "md") { continue; }
+            if !path.is_file() {
+                continue;
+            }
+            if path.extension().map_or(true, |ext| ext != "md") {
+                continue;
+            }
 
-            let filename = path.file_name()
+            let filename = path
+                .file_name()
                 .map(|n| n.to_string_lossy().to_string())
                 .unwrap_or_default();
 
             let title = fs::read_to_string(&path)
                 .ok()
-                .and_then(|c| c.lines().next().map(|l| l.trim().trim_start_matches('#').trim().to_string()))
+                .and_then(|c| {
+                    c.lines()
+                        .next()
+                        .map(|l| l.trim().trim_start_matches('#').trim().to_string())
+                })
                 .unwrap_or_else(|| filename.clone());
 
             let meta = fs::metadata(&path).ok();
             let size = meta.as_ref().map(|m| m.len()).unwrap_or(0);
-            let modified = meta.and_then(|m| m.modified().ok())
+            let modified = meta
+                .and_then(|m| m.modified().ok())
                 .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
                 .map(|d| d.as_millis() as i64)
                 .unwrap_or(0);
@@ -843,7 +1025,7 @@ pub fn system_delete_memory_entry(entry_type: String, entry_id: String) -> Value
         "session_hot" => {
             let mem_dir = get_memory_dir();
             (mem_dir.join("sessions").join(&entry_id), mem_dir)
-        },
+        }
         "wiki" => (wiki_dir.join(&entry_id), wiki_dir.clone()),
         _ => return json!({"error": format!("unknown entry type: {}", entry_type)}),
     };
@@ -879,14 +1061,17 @@ pub fn system_delete_memory_entry(entry_type: String, entry_id: String) -> Value
 /// 在 `migrate_stale_sessions` 之后调用（冷迁移阶段顺带处理）
 pub fn decay_stale_confidence() {
     let sessions_dir = get_session_log_dir();
-    if !sessions_dir.exists() { return; }
+    if !sessions_dir.exists() {
+        return;
+    }
 
     let thirty_days_ms: i64 = 30 * 24 * 3600 * 1000;
     let now_ms = super::now_ms();
     let mut decayed = 0u32;
 
     let entries: Vec<PathBuf> = match fs::read_dir(&sessions_dir) {
-        Ok(rd) => rd.flatten()
+        Ok(rd) => rd
+            .flatten()
             .map(|e| e.path())
             .filter(|p| p.extension().map_or(false, |ext| ext == "json"))
             .collect(),
@@ -903,8 +1088,14 @@ pub fn decay_stale_confidence() {
             Err(_) => continue,
         };
 
-        let last_ref = session.get("lastReferenced").and_then(|v| v.as_i64()).unwrap_or(0);
-        let confidence = session.get("confidence").and_then(|v| v.as_f64()).unwrap_or(0.8);
+        let last_ref = session
+            .get("lastReferenced")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0);
+        let confidence = session
+            .get("confidence")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.8);
 
         // 如果超过 30 天未被引用且 confidence > 0.1，衰减 20%
         if last_ref > 0 && (now_ms - last_ref) > thirty_days_ms && confidence > 0.1 {
@@ -927,7 +1118,9 @@ pub fn decay_stale_confidence() {
 /// 更新指定 session 的 lastReferenced 时间戳（当记忆被注入上下文时调用）
 pub fn touch_memory_reference(session_id: &str) {
     let path = get_session_log_dir().join(format!("{}.json", session_id));
-    if !path.exists() { return; }
+    if !path.exists() {
+        return;
+    }
 
     if let Ok(content) = fs::read_to_string(&path) {
         if let Ok(mut session) = serde_json::from_str::<Value>(&content) {
@@ -950,20 +1143,21 @@ pub async fn generate_tag_merge_proposals() {
         Ok(v) => v,
         Err(_) => return,
     };
-    
+
     let tags_list = match res.get("tags").and_then(|v| v.as_array()) {
         Some(arr) => arr,
         None => return,
     };
-    
+
     if tags_list.len() < 2 {
         return;
     }
-    
-    let tag_names: Vec<String> = tags_list.iter()
+
+    let tag_names: Vec<String> = tags_list
+        .iter()
         .filter_map(|v| v.get("tag").and_then(|t| t.as_str()).map(|s| s.to_string()))
         .collect();
-        
+
     let mut exclusions: Vec<Vec<String>> = Vec::new();
     let parent_dir = match crate::notebook::get_notes_dir().parent() {
         Some(p) => p.to_path_buf(),
@@ -975,23 +1169,26 @@ pub async fn generate_tag_merge_proposals() {
             exclusions = json_arr;
         }
     }
-    
+
     let exclusions_str = serde_json::to_string(&exclusions).unwrap_or_else(|_| "[]".to_string());
     let tags_str = serde_json::to_string(&tag_names).unwrap_or_else(|_| "[]".to_string());
-    
+
     let (_, api_key, model_id, base_url) = crate::llm::read_llm_config_for_model("clerk");
     if api_key.is_empty() {
         return;
     }
-    
+
     let prompt_system = "你是一个标签整理助手。你的任务是从以下标签列表中，找出语义相同或极度相似的标签（如 'js' 和 'javascript'，'ai' 和 '人工智能'，'llm' 和 '大模型'，或是单复数、大小写不同），并将它们归类。如果没有任何相似的标签，请返回空数组。必须返回合法的JSON数组，格式为: `[{\"canonical\": \"主标签名称\", \"aliases\": [\"需要被合并的标签1\", \"需要被合并的标签2\"]}]`。注意：不要将只是宽泛相关的标签合并（比如不要把 javascript 和 typescript 合并，它们是两门独立语言）。";
-    let prompt_user = format!("标签列表：{}\n\n排除列表（这些是用户明确拒绝合并的，绝对不要把它们合并）：{}", tags_str, exclusions_str);
-    
+    let prompt_user = format!(
+        "标签列表：{}\n\n排除列表（这些是用户明确拒绝合并的，绝对不要把它们合并）：{}",
+        tags_str, exclusions_str
+    );
+
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(45))
         .build()
         .unwrap_or_else(|_| reqwest::Client::new());
-        
+
     let body = json!({
         "model": model_id,
         "messages": [
@@ -1002,9 +1199,10 @@ pub async fn generate_tag_merge_proposals() {
         "temperature": 0.1,
         "stream": false
     });
-    
+
     let url = format!("{}/chat/completions", base_url);
-    let resp = match client.post(&url)
+    let resp = match client
+        .post(&url)
         .header("Content-Type", "application/json")
         .header("Authorization", format!("Bearer {}", api_key))
         .json(&body)
@@ -1017,31 +1215,31 @@ pub async fn generate_tag_merge_proposals() {
             return;
         }
     };
-    
+
     if !resp.status().is_success() {
         log::warn!("Tag proposal API error: {}", resp.status());
         return;
     }
-    
+
     let resp_json: Value = match resp.json().await {
         Ok(v) => v,
         Err(_) => return,
     };
-    
+
     let mut content = resp_json
         .pointer("/choices/0/message/content")
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string();
-        
+
     let start_idx = content.find('[');
     let end_idx = content.rfind(']');
     if let (Some(s), Some(e)) = (start_idx, end_idx) {
         if e > s {
-            content = content[s..e+1].to_string();
+            content = content[s..e + 1].to_string();
         }
     }
-    
+
     if let Ok(parsed) = serde_json::from_str::<Value>(&content) {
         if parsed.is_array() {
             let proposals_path = get_memory_dir().join("tag_merge_proposals.json");
@@ -1072,19 +1270,25 @@ pub fn system_clear_tag_proposals() -> bool {
     true
 }
 
-
 pub async fn generate_notebook_digest() -> (usize, usize) {
     let notes_dir = crate::notebook::get_notes_dir();
     let topics_dir = notes_dir.join("topics");
     let projects_dir = notes_dir.join("projects");
-    
+
     let mut files_to_process = Vec::new();
     let threshold = std::time::SystemTime::now() - std::time::Duration::from_secs(48 * 3600);
-    
+
     for dir in &[topics_dir, projects_dir] {
-        if !dir.exists() { continue; }
-        for entry in walkdir::WalkDir::new(dir).into_iter().filter_map(|e| e.ok()) {
-            if entry.path().is_file() && entry.path().extension().and_then(|s| s.to_str()) == Some("md") {
+        if !dir.exists() {
+            continue;
+        }
+        for entry in walkdir::WalkDir::new(dir)
+            .into_iter()
+            .filter_map(|e| e.ok())
+        {
+            if entry.path().is_file()
+                && entry.path().extension().and_then(|s| s.to_str()) == Some("md")
+            {
                 if let Ok(meta) = entry.metadata() {
                     if let Ok(modified) = meta.modified() {
                         if modified > threshold {
@@ -1095,34 +1299,48 @@ pub async fn generate_notebook_digest() -> (usize, usize) {
             }
         }
     }
-    
-    if files_to_process.is_empty() { return (0, 0); }
-    
+
+    if files_to_process.is_empty() {
+        return (0, 0);
+    }
+
     let (_, api_key, model_id, base_url) = crate::llm::read_llm_config_for_model("clerk");
-    if api_key.is_empty() { return (0, 0); }
+    if api_key.is_empty() {
+        return (0, 0);
+    }
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(60))
         .build()
         .unwrap_or_else(|_| reqwest::Client::new());
-    
+
     let mut processed = 0;
     let mut entities_extracted = 0;
-    
+
     let db_path = crate::get_data_dir().join("bob.db");
     let conn = match rusqlite::Connection::open(&db_path) {
         Ok(c) => c,
         Err(_) => return (0, 0),
     };
-    
+
     let prompt_system = "你是一个专业的信息提取员。请从我提供的笔记内容中，提取出最重要的实体（如：人物、技术名词、书籍、概念、项目等），并简要概括它们与该笔记的关系。必须严格返回 JSON 数组格式，例如：[{\"entity\": \"Elon Musk\", \"type\": \"person\", \"relation\": \"提到了\"}]。允许的 type 包括: person, topic, concept, project, tag。如果没有明显的实体，请返回空数组 []。";
-    
-    for path in files_to_process.iter().take(5) { // max 5 notes per dream to save tokens
+
+    for path in files_to_process.iter().take(5) {
+        // max 5 notes per dream to save tokens
         let content = fs::read_to_string(path).unwrap_or_default();
-        if content.len() < 50 { continue; }
-        let rel_path = path.strip_prefix(&notes_dir).unwrap_or(path).to_string_lossy().replace("\\", "/");
+        if content.len() < 50 {
+            continue;
+        }
+        let rel_path = path
+            .strip_prefix(&notes_dir)
+            .unwrap_or(path)
+            .to_string_lossy()
+            .replace("\\", "/");
         let note_id = format!("note_{}", rel_path);
-        
-        let prompt_user = format!("笔记内容：\n\n{}", content.chars().take(2000).collect::<String>());
+
+        let prompt_user = format!(
+            "笔记内容：\n\n{}",
+            content.chars().take(2000).collect::<String>()
+        );
         let body = serde_json::json!({
             "model": model_id,
             "messages": [
@@ -1133,9 +1351,10 @@ pub async fn generate_notebook_digest() -> (usize, usize) {
             "temperature": 0.1,
             "stream": false
         });
-        
+
         let url = format!("{}/chat/completions", base_url);
-        let resp = match client.post(&url)
+        let resp = match client
+            .post(&url)
             .header("Content-Type", "application/json")
             .header("Authorization", format!("Bearer {}", api_key))
             .json(&body)
@@ -1145,22 +1364,63 @@ pub async fn generate_notebook_digest() -> (usize, usize) {
             Ok(r) => r,
             Err(_) => continue,
         };
-        
+
         if let Ok(json) = resp.json::<serde_json::Value>().await {
-            if let Some(content) = json.get("choices").and_then(|c| c.as_array()).and_then(|arr| arr.get(0)).and_then(|c| c.get("message")).and_then(|m| m.get("content")).and_then(|c| c.as_str()) {
-                let cleaned = content.replace("```json", "").replace("```", "").trim().to_string();
+            if let Some(content) = json
+                .get("choices")
+                .and_then(|c| c.as_array())
+                .and_then(|arr| arr.get(0))
+                .and_then(|c| c.get("message"))
+                .and_then(|m| m.get("content"))
+                .and_then(|c| c.as_str())
+            {
+                let cleaned = content
+                    .replace("```json", "")
+                    .replace("```", "")
+                    .trim()
+                    .to_string();
                 if let Ok(entities) = serde_json::from_str::<Vec<serde_json::Value>>(&cleaned) {
                     for entity in entities {
-                        let name = entity.get("entity").and_then(|v| v.as_str()).unwrap_or("").trim();
-                        let etype = entity.get("type").and_then(|v| v.as_str()).unwrap_or("topic").trim();
-                        let relation = entity.get("relation").and_then(|v| v.as_str()).unwrap_or("mentions").trim();
-                        
-                        if name.is_empty() { continue; }
-                        
+                        let name = entity
+                            .get("entity")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .trim();
+                        let etype = entity
+                            .get("type")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("topic")
+                            .trim();
+                        let relation = entity
+                            .get("relation")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("mentions")
+                            .trim();
+
+                        if name.is_empty() {
+                            continue;
+                        }
+
                         let target_id = crate::kg::resolve_node_id(&conn, name, etype);
                         let note_label = path.file_name().unwrap_or_default().to_string_lossy();
-                        let _ = crate::kg::upsert_node(&conn, &note_id, &note_label, "file", "", "dream_digest", "");
-                        let _ = crate::kg::upsert_node(&conn, &target_id, name, etype, "", "dream_digest", "");
+                        let _ = crate::kg::upsert_node(
+                            &conn,
+                            &note_id,
+                            &note_label,
+                            "file",
+                            "",
+                            "dream_digest",
+                            "",
+                        );
+                        let _ = crate::kg::upsert_node(
+                            &conn,
+                            &target_id,
+                            name,
+                            etype,
+                            "",
+                            "dream_digest",
+                            "",
+                        );
                         let _ = crate::kg::insert_edge(&conn, &note_id, &target_id, relation, 0.7);
                         entities_extracted += 1;
                     }
@@ -1169,6 +1429,6 @@ pub async fn generate_notebook_digest() -> (usize, usize) {
             }
         }
     }
-    
+
     (processed, entities_extracted)
 }

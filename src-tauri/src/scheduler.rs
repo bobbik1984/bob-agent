@@ -21,7 +21,8 @@ use tauri_plugin_notification::NotificationExt;
 
 /// 初始化 cron_jobs 表（在 init_db 中调用）
 pub fn init_cron_table(conn: &rusqlite::Connection) {
-    conn.execute_batch("
+    conn.execute_batch(
+        "
         CREATE TABLE IF NOT EXISTS cron_jobs (
             id TEXT PRIMARY KEY,
             title TEXT NOT NULL DEFAULT '',
@@ -31,7 +32,9 @@ pub fn init_cron_table(conn: &rusqlite::Connection) {
             last_run INTEGER DEFAULT 0,
             created_at INTEGER NOT NULL
         );
-    ").unwrap_or_default();
+    ",
+    )
+    .unwrap_or_default();
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -49,11 +52,18 @@ fn matches_cron(expr: &str) -> bool {
     let month = now.format("%m").to_string().parse::<u32>().unwrap_or(1);
     // chrono %u: Monday=1 .. Sunday=7; cron: Sunday=0, Monday=1 .. Saturday=6
     let weekday_chrono = now.format("%u").to_string().parse::<u32>().unwrap_or(1);
-    let weekday = if weekday_chrono == 7 { 0 } else { weekday_chrono };
+    let weekday = if weekday_chrono == 7 {
+        0
+    } else {
+        weekday_chrono
+    };
 
     let fields: Vec<&str> = expr.trim().split_whitespace().collect();
     if fields.len() != 5 {
-        log::warn!("Scheduler: invalid cron expression (need 5 fields): '{}'", expr);
+        log::warn!(
+            "Scheduler: invalid cron expression (need 5 fields): '{}'",
+            expr
+        );
         return false;
     }
 
@@ -219,13 +229,15 @@ async fn run_daily_routine(app: AppHandle) {
         };
         // 确保 settings 表存在
         let _ = conn.execute_batch(
-            "CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)"
+            "CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
         );
-        let last_routine_date: String = conn.query_row(
-            "SELECT value FROM settings WHERE key = 'last_routine_date'",
-            [],
-            |row| row.get(0),
-        ).unwrap_or_default();
+        let last_routine_date: String = conn
+            .query_row(
+                "SELECT value FROM settings WHERE key = 'last_routine_date'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or_default();
 
         if last_routine_date == today {
             return; // 今天已经跑过了，跳过
@@ -263,7 +275,10 @@ async fn run_daily_routine(app: AppHandle) {
         if startup_jobs.is_empty() {
             log::info!("[DailyRoutine] Phase 2: No @daily_startup jobs configured, skipping");
         } else {
-            log::info!("[DailyRoutine] Phase 2: Executing {} @daily_startup job(s)", startup_jobs.len());
+            log::info!(
+                "[DailyRoutine] Phase 2: Executing {} @daily_startup job(s)",
+                startup_jobs.len()
+            );
             for (id, title, _cron_expr, prompt) in &startup_jobs {
                 log::info!("[DailyRoutine]   → Running '{}' ({})", title, id);
                 execute_cron_job(&app, id, title, prompt).await;
@@ -286,26 +301,33 @@ async fn run_daily_routine(app: AppHandle) {
     write_scheduler_audit(&format!("DAILY_ROUTINE completed for {}", today));
 
     // 发射前端事件，通知 UI 流水线已完成
-    let _ = app.emit("daily-routine:completed", json!({
-        "date": today,
-        "timestamp": super::now_ms(),
-    }));
+    let _ = app.emit(
+        "daily-routine:completed",
+        json!({
+            "date": today,
+            "timestamp": super::now_ms(),
+        }),
+    );
 }
 
 /// 从 DB 加载所有 enabled=1 且 cron_expr='@daily_startup' 的任务
-fn load_daily_startup_jobs(conn: &rusqlite::Connection) -> Result<Vec<(String, String, String, String)>, String> {
+fn load_daily_startup_jobs(
+    conn: &rusqlite::Connection,
+) -> Result<Vec<(String, String, String, String)>, String> {
     let mut stmt = conn.prepare(
         "SELECT id, title, cron_expr, prompt_template FROM cron_jobs WHERE enabled = 1 AND cron_expr = '@daily_startup'"
     ).map_err(|e| format!("{}", e))?;
 
-    let rows = stmt.query_map([], |row| {
-        Ok((
-            row.get::<_, String>(0)?,
-            row.get::<_, String>(1)?,
-            row.get::<_, String>(2)?,
-            row.get::<_, String>(3)?,
-        ))
-    }).map_err(|e| format!("{}", e))?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+            ))
+        })
+        .map_err(|e| format!("{}", e))?;
 
     Ok(rows.filter_map(|r| r.ok()).collect())
 }
@@ -339,39 +361,45 @@ fn check_upcoming_todos(app: &AppHandle, db_path: &std::path::Path) {
            AND date <= ?1
            AND (last_notified IS NULL OR last_notified < ?2)
          ORDER BY date ASC, start_time ASC
-         LIMIT 5"
+         LIMIT 5",
     ) {
         Ok(s) => s,
         Err(_) => return,
     };
 
-    let rows: Vec<(String, String, String, Option<String>, Option<String>)> = match stmt.query_map(
-        params![today, now_ms - cooldown],
-        |row| Ok((
-            row.get::<_, String>(0)?,
-            row.get::<_, String>(1)?,
-            row.get::<_, String>(2)?,
-            row.get::<_, Option<String>>(3)?,
-            row.get::<_, Option<String>>(4)?,
-        ))
-    ) {
-        Ok(r) => r.filter_map(|r| r.ok()).collect(),
-        Err(_) => return,
-    };
+    let rows: Vec<(String, String, String, Option<String>, Option<String>)> =
+        match stmt.query_map(params![today, now_ms - cooldown], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, Option<String>>(3)?,
+                row.get::<_, Option<String>>(4)?,
+            ))
+        }) {
+            Ok(r) => r.filter_map(|r| r.ok()).collect(),
+            Err(_) => return,
+        };
 
-    if rows.is_empty() { return; }
+    if rows.is_empty() {
+        return;
+    }
 
     for (id, title, etype, date, start_time) in &rows {
-        let _ = app.emit("todo:reminder", json!({
-            "id": id,
-            "title": title,
-            "type": etype,
-            "date": date,
-            "start_time": start_time,
-        }));
+        let _ = app.emit(
+            "todo:reminder",
+            json!({
+                "id": id,
+                "title": title,
+                "type": etype,
+                "date": date,
+                "start_time": start_time,
+            }),
+        );
 
         // T-1307: 调用 Windows 原生弹窗
-        let _ = app.notification()
+        let _ = app
+            .notification()
             .builder()
             .title("Bob 提醒：今日待办")
             .body(title)
@@ -380,19 +408,29 @@ fn check_upcoming_todos(app: &AppHandle, db_path: &std::path::Path) {
         // 绑定并发送到已配对的微信端进行主动提醒
         if let Some(wechat_state) = app.try_state::<std::sync::Arc<crate::wechat::WechatState>>() {
             if *wechat_state.connected.read().unwrap() {
-                let wxids: Vec<String> = crate::im_sessions::SESSION_MANAGER.get_all_user_ids().into_iter().filter_map(|id| {
-                    if id.starts_with("wechat-") {
-                        Some(id.strip_prefix("wechat-").unwrap().to_string())
-                    } else {
-                        None
-                    }
-                }).collect();
+                let wxids: Vec<String> = crate::im_sessions::SESSION_MANAGER
+                    .get_all_user_ids()
+                    .into_iter()
+                    .filter_map(|id| {
+                        if id.starts_with("wechat-") {
+                            Some(id.strip_prefix("wechat-").unwrap().to_string())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
                 for wxid in wxids {
                     let msg_text = format!("【📅 Bob 日程提醒】今日待办：{}", title);
                     let state_clone = wechat_state.inner().clone();
                     let wxid_clone = wxid.clone();
                     tauri::async_runtime::spawn(async move {
-                        let _ = crate::wechat::commands::send_reply(&wxid_clone, &msg_text, &state_clone, None).await;
+                        let _ = crate::wechat::commands::send_reply(
+                            &wxid_clone,
+                            &msg_text,
+                            &state_clone,
+                            None,
+                        )
+                        .await;
                     });
                 }
             }
@@ -409,19 +447,23 @@ fn check_upcoming_todos(app: &AppHandle, db_path: &std::path::Path) {
 }
 
 /// 从 DB 加载所有 enabled=1 的 cron 任务
-fn load_enabled_jobs(conn: &rusqlite::Connection) -> Result<Vec<(String, String, String, String)>, String> {
-    let mut stmt = conn.prepare(
-        "SELECT id, title, cron_expr, prompt_template FROM cron_jobs WHERE enabled = 1"
-    ).map_err(|e| format!("{}", e))?;
+fn load_enabled_jobs(
+    conn: &rusqlite::Connection,
+) -> Result<Vec<(String, String, String, String)>, String> {
+    let mut stmt = conn
+        .prepare("SELECT id, title, cron_expr, prompt_template FROM cron_jobs WHERE enabled = 1")
+        .map_err(|e| format!("{}", e))?;
 
-    let rows = stmt.query_map([], |row| {
-        Ok((
-            row.get::<_, String>(0)?,
-            row.get::<_, String>(1)?,
-            row.get::<_, String>(2)?,
-            row.get::<_, String>(3)?,
-        ))
-    }).map_err(|e| format!("{}", e))?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+            ))
+        })
+        .map_err(|e| format!("{}", e))?;
 
     Ok(rows.filter_map(|r| r.ok()).collect())
 }
@@ -445,7 +487,11 @@ async fn execute_cron_job(app: &AppHandle, job_id: &str, title: &str, prompt: &s
     let conv_id = match get_or_create_cron_conversation(&db_path, job_id, title) {
         Ok(id) => id,
         Err(e) => {
-            log::error!("Scheduler: failed to get/create conversation for job '{}': {}", job_id, e);
+            log::error!(
+                "Scheduler: failed to get/create conversation for job '{}': {}",
+                job_id,
+                e
+            );
             return;
         }
     };
@@ -473,20 +519,20 @@ async fn execute_cron_job(app: &AppHandle, job_id: &str, title: &str, prompt: &s
     }
 
     // ── Step 3: 构建消息列表，调用 LLM ──
-    let messages = vec![
-        json!({ "role": "user", "content": prompt }),
-    ];
+    let messages = vec![json!({ "role": "user", "content": prompt })];
     let result = crate::llm::stream_chat(
         app.clone(),
         messages,
         Some(conv_id.clone()),
         None,
         false,
-        "default".to_string()
-    ).await;
+        "default".to_string(),
+    )
+    .await;
 
     // ── Step 4: 提取 assistant 回复并保存 ──
-    let response_text = result.get("content")
+    let response_text = result
+        .get("content")
         .and_then(|v| v.as_str())
         .unwrap_or("[无响应]")
         .to_string();
@@ -541,21 +587,31 @@ async fn execute_cron_job(app: &AppHandle, job_id: &str, title: &str, prompt: &s
     }
 
     // ── Step 6: 发射前端事件 ──
-    let _ = app.emit("scheduler:completed", json!({
-        "job_id": job_id,
-        "title": title,
-        "conversation_id": conv_id,
-        "response_preview": response_text.chars().take(100).collect::<String>(),
-        "timestamp": super::now_ms(),
-    }));
+    let _ = app.emit(
+        "scheduler:completed",
+        json!({
+            "job_id": job_id,
+            "title": title,
+            "conversation_id": conv_id,
+            "response_preview": response_text.chars().take(100).collect::<String>(),
+            "timestamp": super::now_ms(),
+        }),
+    );
 
     // ── Step 7: 审计日志 ──
     write_scheduler_audit(&format!(
         "EXECUTED job '{}' ({}) → conv={}, response_len={}",
-        title, job_id, conv_id, response_text.len()
+        title,
+        job_id,
+        conv_id,
+        response_text.len()
     ));
 
-    log::info!("Scheduler: job '{}' executed successfully (response {} chars)", title, response_text.len());
+    log::info!(
+        "Scheduler: job '{}' executed successfully (response {} chars)",
+        title,
+        response_text.len()
+    );
 }
 
 /// 获取或创建 cron 任务的专属对话
@@ -565,17 +621,19 @@ fn get_or_create_cron_conversation(
     job_id: &str,
     title: &str,
 ) -> Result<String, String> {
-    let conn = rusqlite::Connection::open(db_path)
-        .map_err(|e| format!("DB open failed: {}", e))?;
+    let conn = rusqlite::Connection::open(db_path).map_err(|e| format!("DB open failed: {}", e))?;
 
     let conv_id = format!("cron-{}", job_id);
 
     // 检查是否已存在
-    let exists: bool = conn.query_row(
-        "SELECT COUNT(*) FROM conversations WHERE id = ?1",
-        params![conv_id],
-        |row| row.get::<_, i64>(0),
-    ).unwrap_or(0) > 0;
+    let exists: bool = conn
+        .query_row(
+            "SELECT COUNT(*) FROM conversations WHERE id = ?1",
+            params![conv_id],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap_or(0)
+        > 0;
 
     if !exists {
         let now = super::now_ms();
@@ -583,7 +641,8 @@ fn get_or_create_cron_conversation(
             "INSERT INTO conversations (id, title, model, created_at, updated_at)
              VALUES (?1, ?2, '', ?3, ?4)",
             params![conv_id, format!("[Cron] {}", title), now, now],
-        ).map_err(|e| format!("Create conversation failed: {}", e))?;
+        )
+        .map_err(|e| format!("Create conversation failed: {}", e))?;
     }
 
     Ok(conv_id)
@@ -604,7 +663,7 @@ pub async fn system_list_cron_jobs() -> Value {
 
     let mut stmt = match conn.prepare(
         "SELECT id, title, cron_expr, prompt_template, enabled, last_run, created_at
-         FROM cron_jobs ORDER BY created_at DESC"
+         FROM cron_jobs ORDER BY created_at DESC",
     ) {
         Ok(s) => s,
         Err(e) => return json!({ "error": format!("查询失败: {}", e) }),

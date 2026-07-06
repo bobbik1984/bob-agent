@@ -75,9 +75,7 @@ pub fn system_health_check() -> Value {
 
     // 3. API Key 检查 — 校验当前选中模型对应的 Provider 是否配了 Key
     let config = super::read_config();
-    let current_model = config.get("model")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
+    let current_model = config.get("model").and_then(|v| v.as_str()).unwrap_or("");
 
     let current_provider = if current_model.contains(':') {
         current_model.split(':').next().unwrap_or("")
@@ -85,8 +83,10 @@ pub fn system_health_check() -> Value {
         ""
     };
 
-    if !current_provider.is_empty() && current_provider != "ollama" && current_provider != "custom" {
-        let provider_key = config.get("apiKeys")
+    if !current_provider.is_empty() && current_provider != "ollama" && current_provider != "custom"
+    {
+        let provider_key = config
+            .get("apiKeys")
             .and_then(|v| v.as_object())
             .and_then(|m| m.get(current_provider))
             .and_then(|v| v.as_str())
@@ -96,17 +96,24 @@ pub fn system_health_check() -> Value {
             results.push(CheckResult {
                 code: "API_KEY_MISSING".into(),
                 severity: "error".into(),
-                message: format!("当前选中的服务商 [{}] 未配置 API Key，无法进行对话", current_provider),
+                message: format!(
+                    "当前选中的服务商 [{}] 未配置 API Key，无法进行对话",
+                    current_provider
+                ),
                 fixable: false,
             });
         }
     } else if current_provider.is_empty() {
         // 如果连 provider 都解析不出，再走全盘保底检查
-        let has_any_key = config.get("apiKeys")
+        let has_any_key = config
+            .get("apiKeys")
             .and_then(|v| v.as_object())
-            .map(|m| m.values().any(|v| {
-                v.as_str().map_or(false, |s| !s.is_empty() && s != "vaulted")
-            }))
+            .map(|m| {
+                m.values().any(|v| {
+                    v.as_str()
+                        .map_or(false, |s| !s.is_empty() && s != "vaulted")
+                })
+            })
             .unwrap_or(false);
 
         if !has_any_key {
@@ -120,7 +127,8 @@ pub fn system_health_check() -> Value {
     }
 
     // 4. 主模型配置
-    let has_model = config.get("model")
+    let has_model = config
+        .get("model")
         .and_then(|v| v.as_str())
         .map(|s| !s.is_empty())
         .unwrap_or(false);
@@ -137,7 +145,9 @@ pub fn system_health_check() -> Value {
     // 5. 数据目录可写性
     let test_file = data_dir.join(".doctor_write_test");
     match fs::write(&test_file, "test") {
-        Ok(_) => { let _ = fs::remove_file(&test_file); }
+        Ok(_) => {
+            let _ = fs::remove_file(&test_file);
+        }
         Err(_) => {
             results.push(CheckResult {
                 code: "DISK_NOT_WRITABLE".into(),

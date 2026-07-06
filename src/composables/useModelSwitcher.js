@@ -86,7 +86,7 @@ export function useModelSwitcher() {
           keys = await window.appAPI.getApiKeys() || {};
         }
         availableModels.value = (pool || [])
-          .filter(m => !!keys[m.provider])
+          .filter(m => !!keys[m.provider] || m.provider === 'offline')
           .map(m => ({
             id: m.id,
             provider: m.provider,

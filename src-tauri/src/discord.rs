@@ -1,10 +1,10 @@
-use serde_json::{json, Value};
-use tauri::AppHandle;
-use std::time::Duration;
+use futures_util::{SinkExt, StreamExt};
 use rusqlite::params;
-use tokio::sync::Mutex;
+use serde_json::{json, Value};
 use std::sync::Arc;
-use futures_util::{StreamExt, SinkExt};
+use std::time::Duration;
+use tauri::AppHandle;
+use tokio::sync::Mutex;
 
 lazy_static::lazy_static! {
     static ref DISCORD_RUNNING: Arc<Mutex<bool>> = Arc::new(Mutex::new(false));
@@ -14,11 +14,13 @@ lazy_static::lazy_static! {
 pub async fn init(app: AppHandle) {
     let db_path = crate::get_data_dir().join("bob.db");
     if let Ok(conn) = rusqlite::Connection::open(&db_path) {
-        let _ = conn.execute_batch("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
+        let _ = conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
+        );
         if let Ok(token) = conn.query_row(
             "SELECT value FROM settings WHERE key = 'discord_token'",
             [],
-            |row| row.get::<_, String>(0)
+            |row| row.get::<_, String>(0),
         ) {
             if !token.is_empty() {
                 start_discord_bot(app, token).await;
@@ -33,9 +35,9 @@ pub async fn system_save_discord_token(app: AppHandle, token: String) -> Value {
     if let Ok(conn) = rusqlite::Connection::open(&db_path) {
         let _ = conn.execute(
             "INSERT OR REPLACE INTO settings (key, value) VALUES ('discord_token', ?1)",
-            params![token]
+            params![token],
         );
-        
+
         let mut running = DISCORD_RUNNING.lock().await;
         if !*running && !token.is_empty() {
             start_discord_bot(app, token).await;
@@ -54,7 +56,7 @@ pub async fn system_get_discord_token() -> Value {
         if let Ok(token) = conn.query_row(
             "SELECT value FROM settings WHERE key = 'discord_token'",
             [],
-            |row| row.get::<_, String>(0)
+            |row| row.get::<_, String>(0),
         ) {
             return json!({ "ok": true, "token": token });
         }
@@ -64,12 +66,14 @@ pub async fn system_get_discord_token() -> Value {
 
 pub async fn start_discord_bot(app: AppHandle, token: String) {
     let mut running = DISCORD_RUNNING.lock().await;
-    if *running { return; }
+    if *running {
+        return;
+    }
     *running = true;
-    
+
     tokio::spawn(async move {
         log::info!("Discord bot starting with token len {}", token.len());
-        
+
         let client = reqwest::Client::new();
         let gateway_url = "wss://gateway.discord.gg/?v=10&encoding=json";
 
@@ -78,17 +82,19 @@ pub async fn start_discord_bot(app: AppHandle, token: String) {
                 Ok((ws_stream, _)) => {
                     log::info!("Discord connected to Gateway");
                     let (mut write, mut read) = ws_stream.split();
-                    
+
                     let mut heartbeat_interval = 41250;
                     let seq: Arc<Mutex<Option<i64>>> = Arc::new(Mutex::new(None));
-                    
+
                     // Wait for Hello (Opcode 10)
                     if let Some(Ok(msg)) = read.next().await {
                         if let Ok(text) = msg.to_text() {
                             if let Ok(payload) = serde_json::from_str::<Value>(text) {
                                 if payload.get("op").and_then(|v| v.as_i64()) == Some(10) {
                                     if let Some(d) = payload.get("d") {
-                                        if let Some(interval) = d.get("heartbeat_interval").and_then(|v| v.as_u64()) {
+                                        if let Some(interval) =
+                                            d.get("heartbeat_interval").and_then(|v| v.as_u64())
+                                        {
                                             heartbeat_interval = interval;
                                         }
                                     }
@@ -111,8 +117,13 @@ pub async fn start_discord_bot(app: AppHandle, token: String) {
                             }
                         }
                     });
-                    
-                    if let Err(e) = write.send(tokio_tungstenite::tungstenite::Message::Text(identify.to_string().into())).await {
+
+                    if let Err(e) = write
+                        .send(tokio_tungstenite::tungstenite::Message::Text(
+                            identify.to_string().into(),
+                        ))
+                        .await
+                    {
                         log::error!("Discord identify error: {}", e);
                         continue;
                     }
@@ -120,13 +131,14 @@ pub async fn start_discord_bot(app: AppHandle, token: String) {
                     // Start heartbeating in a separate task
                     let (hb_tx, mut hb_rx) = tokio::sync::mpsc::channel::<()>(1);
                     let seq_clone = seq.clone();
-                    
+
                     // We need a lock around the websocket writer to share it.
                     let write_mutex = Arc::new(Mutex::new(write));
                     let write_for_hb = write_mutex.clone();
 
                     tokio::spawn(async move {
-                        let mut interval = tokio::time::interval(Duration::from_millis(heartbeat_interval));
+                        let mut interval =
+                            tokio::time::interval(Duration::from_millis(heartbeat_interval));
                         loop {
                             tokio::select! {
                                 _ = interval.tick() => {
@@ -150,14 +162,18 @@ pub async fn start_discord_bot(app: AppHandle, token: String) {
                                     if let Some(s) = payload.get("s").and_then(|v| v.as_i64()) {
                                         *seq.lock().await = Some(s);
                                     }
-                                    
+
                                     let op = payload.get("op").and_then(|v| v.as_i64());
                                     let t = payload.get("t").and_then(|v| v.as_str());
-                                    
+
                                     if op == Some(0) && t == Some("MESSAGE_CREATE") {
                                         if let Some(d) = payload.get("d") {
                                             // Check if it's from a bot to avoid loops
-                                            let is_bot = d.get("author").and_then(|a| a.get("bot")).and_then(|b| b.as_bool()).unwrap_or(false);
+                                            let is_bot = d
+                                                .get("author")
+                                                .and_then(|a| a.get("bot"))
+                                                .and_then(|b| b.as_bool())
+                                                .unwrap_or(false);
                                             if !is_bot {
                                                 handle_message(&app, &client, &token, d).await;
                                             }
@@ -189,7 +205,7 @@ pub async fn start_discord_bot(app: AppHandle, token: String) {
                     log::error!("Discord ws connect error: {}", e);
                 }
             }
-            
+
             // Reconnect delay
             tokio::time::sleep(Duration::from_secs(5)).await;
         }
@@ -198,46 +214,70 @@ pub async fn start_discord_bot(app: AppHandle, token: String) {
 
 async fn handle_message(app: &AppHandle, client: &reqwest::Client, token: &str, message: &Value) {
     if let Some(text) = message.get("content").and_then(|v| v.as_str()) {
-        let channel_id = message.get("channel_id").and_then(|v| v.as_str()).unwrap_or("");
-        if channel_id.is_empty() || text.is_empty() { return; }
+        let channel_id = message
+            .get("channel_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        if channel_id.is_empty() || text.is_empty() {
+            return;
+        }
 
         let user_id = format!("discord-{}", channel_id);
         log::info!("Discord received message from {}: {}", channel_id, text);
 
         // 拦截全局 /sessions 等指令
         if let Some(reply_text) = crate::im_sessions::handle_im_command(&user_id, text) {
-            let _ = client.post(&format!("https://discord.com/api/v10/channels/{}/messages", channel_id))
+            let _ = client
+                .post(&format!(
+                    "https://discord.com/api/v10/channels/{}/messages",
+                    channel_id
+                ))
                 .header("Authorization", format!("Bot {}", token))
                 .json(&serde_json::json!({ "content": reply_text }))
-                .send().await;
+                .send()
+                .await;
             return;
         }
 
         let conv_id = crate::im_sessions::get_or_create_conv_id(&user_id);
 
         // Send typing action
-        let _ = client.post(&format!("https://discord.com/api/v10/channels/{}/typing", channel_id))
+        let _ = client
+            .post(&format!(
+                "https://discord.com/api/v10/channels/{}/typing",
+                channel_id
+            ))
             .header("Authorization", format!("Bot {}", token))
-            .send().await;
+            .send()
+            .await;
 
         let messages = vec![json!({ "role": "user", "content": text })];
-        
+
         // Let the LLM process the message. Note we pass global_file_access = false
         let result = crate::llm::stream_chat(
-            app.clone(), 
-            messages, 
-            Some(conv_id.clone()), 
+            app.clone(),
+            messages,
+            Some(conv_id.clone()),
             Some(channel_id.to_string()),
             false,
-            "default".to_string()
-        ).await;
+            "default".to_string(),
+        )
+        .await;
 
-        let reply = result.get("content").and_then(|v| v.as_str()).unwrap_or("[无响应]");
-        
+        let reply = result
+            .get("content")
+            .and_then(|v| v.as_str())
+            .unwrap_or("[无响应]");
+
         // Send reply back
-        let _ = client.post(&format!("https://discord.com/api/v10/channels/{}/messages", channel_id))
+        let _ = client
+            .post(&format!(
+                "https://discord.com/api/v10/channels/{}/messages",
+                channel_id
+            ))
             .header("Authorization", format!("Bot {}", token))
             .json(&json!({ "content": reply }))
-            .send().await;
+            .send()
+            .await;
     }
 }

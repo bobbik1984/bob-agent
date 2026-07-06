@@ -9,14 +9,14 @@
 //! - 隐私：URL 参数脱敏、日志不记录页面内容
 //! - 自动回收：空闲 5 分钟关闭浏览器进程
 
+use chromiumoxide::browser::{Browser, BrowserConfig};
+use chromiumoxide::page::ScreenshotParams;
+use futures_util::StreamExt;
+use log::{debug, info, warn};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
-use log::{info, warn, debug};
-use chromiumoxide::browser::{Browser, BrowserConfig};
-use chromiumoxide::page::ScreenshotParams;
-use futures_util::StreamExt;
 
 /// 浏览器全局状态
 pub struct BrowserState {
@@ -62,7 +62,8 @@ fn sanitize_url(url: &str) -> String {
 
 /// 提取 URL 的域名部分用于日志
 fn extract_domain(url: &str) -> &str {
-    let without_scheme = url.strip_prefix("https://")
+    let without_scheme = url
+        .strip_prefix("https://")
         .or_else(|| url.strip_prefix("http://"))
         .unwrap_or(url);
     without_scheme.split('/').next().unwrap_or(url)
@@ -117,7 +118,11 @@ fn detect_from_registry() -> Option<PathBuf> {
     use std::process::Command;
     // 查询注册表中 Edge 的安装路径
     let output = Command::new("reg")
-        .args(["query", r"HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\msedge.exe", "/ve"])
+        .args([
+            "query",
+            r"HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\msedge.exe",
+            "/ve",
+        ])
         .output()
         .ok()?;
     let text = String::from_utf8_lossy(&output.stdout);
@@ -141,7 +146,7 @@ fn detect_from_registry() -> Option<PathBuf> {
 /// 获取或启动浏览器实例（懒加载）
 async fn get_or_launch(state: &BrowserState) -> Result<(), String> {
     let mut guard = state.browser.lock().await;
-    
+
     // 检查现有实例是否还活着
     if let Some(ref mut instance) = *guard {
         instance.last_used = Instant::now();
@@ -149,8 +154,9 @@ async fn get_or_launch(state: &BrowserState) -> Result<(), String> {
     }
 
     // 需要启动新实例
-    let browser_path = detect_browser()
-        .ok_or_else(|| "未检测到 Edge 或 Chrome 浏览器。请安装 Microsoft Edge 后重试。".to_string())?;
+    let browser_path = detect_browser().ok_or_else(|| {
+        "未检测到 Edge 或 Chrome 浏览器。请安装 Microsoft Edge 后重试。".to_string()
+    })?;
 
     info!("[browser] launching headless: {}", browser_path.display());
 
@@ -246,16 +252,21 @@ pub async fn browse_page(
 ) -> Result<String, String> {
     let start = Instant::now();
     let domain = extract_domain(url);
-    info!("[browser] navigate domain={} wait={}s extract={}", domain, wait_seconds, extract);
+    info!(
+        "[browser] navigate domain={} wait={}s extract={}",
+        domain, wait_seconds, extract
+    );
 
     // 确保浏览器已启动
     get_or_launch(state).await?;
 
     let guard = state.browser.lock().await;
     let instance = guard.as_ref().ok_or("浏览器实例不可用")?;
-    
+
     // 打开新页面
-    let page = instance.browser.new_page(url)
+    let page = instance
+        .browser
+        .new_page(url)
         .await
         .map_err(|e| format!("打开页面失败: {}", e))?;
 
@@ -283,7 +294,8 @@ pub async fn browse_page(
     // 提取内容
     let result = match extract {
         "html" => {
-            let content = page.content()
+            let content = page
+                .content()
                 .await
                 .map_err(|e| format!("提取 HTML 失败: {}", e))?;
             let char_count = content.chars().count();
@@ -294,29 +306,38 @@ pub async fn browse_page(
             } else {
                 content
             };
-            info!("[browser] extracted html chars={} elapsed={:.1}s", char_count, start.elapsed().as_secs_f64());
+            info!(
+                "[browser] extracted html chars={} elapsed={:.1}s",
+                char_count,
+                start.elapsed().as_secs_f64()
+            );
             truncated
         }
         "screenshot" => {
-            let screenshot_data = page.screenshot(ScreenshotParams::builder().build())
+            let screenshot_data = page
+                .screenshot(ScreenshotParams::builder().build())
                 .await
                 .map_err(|e| format!("截图失败: {}", e))?;
             let b64 = base64::Engine::encode(
                 &base64::engine::general_purpose::STANDARD,
                 &screenshot_data,
             );
-            info!("[browser] screenshot bytes={} elapsed={:.1}s", screenshot_data.len(), start.elapsed().as_secs_f64());
+            info!(
+                "[browser] screenshot bytes={} elapsed={:.1}s",
+                screenshot_data.len(),
+                start.elapsed().as_secs_f64()
+            );
             format!("data:image/png;base64,{}", b64)
         }
         _ => {
             // 默认提取纯文本（使用 innerText）
-            let text_result = page.evaluate("document.body.innerText")
+            let text_result = page
+                .evaluate("document.body.innerText")
                 .await
                 .map_err(|e| format!("提取文本失败: {}", e))?;
-            
-            let text = text_result.into_value::<String>()
-                .unwrap_or_default();
-            
+
+            let text = text_result.into_value::<String>().unwrap_or_default();
+
             let char_count = text.chars().count();
             let truncated = if char_count > 8000 {
                 let t: String = text.chars().take(8000).collect();
@@ -324,7 +345,11 @@ pub async fn browse_page(
             } else {
                 text
             };
-            info!("[browser] extracted text chars={} elapsed={:.1}s", char_count, start.elapsed().as_secs_f64());
+            info!(
+                "[browser] extracted text chars={} elapsed={:.1}s",
+                char_count,
+                start.elapsed().as_secs_f64()
+            );
             truncated
         }
     };
@@ -347,7 +372,8 @@ pub async fn browse_page(
 /// 检查浏览器增强是否已启用
 pub fn is_browser_enabled() -> bool {
     let config = crate::read_config();
-    config.get("browserEnhanced")
+    config
+        .get("browserEnhanced")
         .and_then(|v| v.as_bool())
         .unwrap_or(true)
 }
@@ -359,7 +385,10 @@ pub fn enable_browser() {
         obj.insert("browserEnhanced".to_string(), serde_json::json!(true));
         // 同时检测并记录浏览器路径
         if let Some(path) = detect_browser() {
-            obj.insert("browserPath".to_string(), serde_json::json!(path.to_string_lossy().to_string()));
+            obj.insert(
+                "browserPath".to_string(),
+                serde_json::json!(path.to_string_lossy().to_string()),
+            );
         }
     }
     crate::write_config(&config);

@@ -3,10 +3,10 @@
 //! 完整流程：读取本地文件 → MD5 哈希 → AES-128-ECB 加密 → getUploadUrl → POST to CDN → 返回上传结果。
 //! 参考实现：wechat_bot/src/cdn/upload.ts + cdn-upload.ts
 
-use aes::cipher::{BlockEncrypt, KeyInit, generic_array::GenericArray};
+use aes::cipher::{generic_array::GenericArray, BlockEncrypt, KeyInit};
 use aes::Aes128;
-use base64::{Engine as _, engine::general_purpose::STANDARD};
-use md5::{Md5, Digest};
+use base64::{engine::general_purpose::STANDARD, Engine as _};
+use md5::{Digest, Md5};
 use rand::Rng;
 use std::path::Path;
 use tauri::Emitter;
@@ -89,30 +89,33 @@ fn build_progress_body(
     attempt: u32,
 ) -> reqwest::Body {
     let total = ciphertext.len();
-    let stream = futures::stream::unfold(
-        (ciphertext, 0usize),
-        move |(data, offset)| {
-            let app = app.clone();
-            let file_name = file_name.clone();
-            async move {
-                if offset >= data.len() {
-                    return None;
-                }
-                let end = std::cmp::min(offset + UPLOAD_CHUNK_SIZE, data.len());
-                let chunk = data[offset..end].to_vec();
-                let sent = end;
-                let percent = (sent as f64 / total as f64 * 100.0).round() as u32;
-                let _ = app.emit("cdn:upload-progress", serde_json::json!({
+    let stream = futures::stream::unfold((ciphertext, 0usize), move |(data, offset)| {
+        let app = app.clone();
+        let file_name = file_name.clone();
+        async move {
+            if offset >= data.len() {
+                return None;
+            }
+            let end = std::cmp::min(offset + UPLOAD_CHUNK_SIZE, data.len());
+            let chunk = data[offset..end].to_vec();
+            let sent = end;
+            let percent = (sent as f64 / total as f64 * 100.0).round() as u32;
+            let _ = app.emit(
+                "cdn:upload-progress",
+                serde_json::json!({
                     "file_name": &file_name,
                     "bytes_sent": sent,
                     "total_bytes": total,
                     "percent": percent,
                     "attempt": attempt,
-                }));
-                Some((Ok::<_, std::io::Error>(bytes::Bytes::from(chunk)), (data, end)))
-            }
-        },
-    );
+                }),
+            );
+            Some((
+                Ok::<_, std::io::Error>(bytes::Bytes::from(chunk)),
+                (data, end),
+            ))
+        }
+    });
     reqwest::Body::wrap_stream(stream)
 }
 
@@ -132,7 +135,9 @@ async fn upload_buffer_to_cdn(
         } else if let Some(param) = upload_param {
             build_cdn_upload_url(CDN_BASE_URL, param, filekey)
         } else {
-            return Err("CDN upload URL missing (need upload_full_url or upload_param)".to_string());
+            return Err(
+                "CDN upload URL missing (need upload_full_url or upload_param)".to_string(),
+            );
         }
     } else if let Some(param) = upload_param {
         build_cdn_upload_url(CDN_BASE_URL, param, filekey)
@@ -143,18 +148,29 @@ async fn upload_buffer_to_cdn(
     // 根据文件大小动态计算超时：每 MB 给 30 秒，最低 120 秒
     let size_mb = (ciphertext.len() as u64 + 1_048_575) / 1_048_576;
     let timeout_secs = std::cmp::max(120, size_mb * 30);
-    log::info!("[cdn] POST to CDN (size={}MB, timeout={}s)", size_mb, timeout_secs);
+    log::info!(
+        "[cdn] POST to CDN (size={}MB, timeout={}s)",
+        size_mb,
+        timeout_secs
+    );
 
     // 通知前端上传开始
-    let _ = app.emit("cdn:upload-start", serde_json::json!({
-        "file_name": file_name,
-        "total_bytes": ciphertext.len(),
-    }));
+    let _ = app.emit(
+        "cdn:upload-start",
+        serde_json::json!({
+            "file_name": file_name,
+            "total_bytes": ciphertext.len(),
+        }),
+    );
 
     let mut last_error: Option<String> = None;
 
     for attempt in 1..=UPLOAD_MAX_RETRIES {
-        log::info!("[cdn] upload attempt {}/{} ...", attempt, UPLOAD_MAX_RETRIES);
+        log::info!(
+            "[cdn] upload attempt {}/{} ...",
+            attempt,
+            UPLOAD_MAX_RETRIES
+        );
 
         // 每次重试都需要重新构建 body（stream 只能消费一次）
         let body = build_progress_body(
@@ -165,66 +181,96 @@ async fn upload_buffer_to_cdn(
         );
 
         let mut headers = reqwest::header::HeaderMap::new();
-        headers.insert(reqwest::header::CONTENT_TYPE, reqwest::header::HeaderValue::from_static("application/octet-stream"));
-        
+        headers.insert(
+            reqwest::header::CONTENT_TYPE,
+            reqwest::header::HeaderValue::from_static("application/octet-stream"),
+        );
+
         let res = crate::tunnel::send_request(
             reqwest::Method::POST,
             &cdn_url,
             headers,
             Some(body),
             std::time::Duration::from_secs(timeout_secs),
-        ).await;
+        )
+        .await;
 
         match res {
             Ok(response) => {
                 let status = response.status().as_u16();
                 if status >= 400 && status < 500 {
-                    let err_msg = response.headers()
+                    let err_msg = response
+                        .headers()
                         .get("x-error-message")
                         .and_then(|v| v.to_str().ok())
                         .unwrap_or("client error")
                         .to_string();
-                    let _ = app.emit("cdn:upload-error", serde_json::json!({
-                        "file_name": file_name, "error": &err_msg,
-                    }));
+                    let _ = app.emit(
+                        "cdn:upload-error",
+                        serde_json::json!({
+                            "file_name": file_name, "error": &err_msg,
+                        }),
+                    );
                     return Err(format!("CDN upload client error {}: {}", status, err_msg));
                 }
                 if status != 200 {
                     let err_msg = format!("CDN upload server error: status {}", status);
                     last_error = Some(err_msg.clone());
-                    log::error!("[cdn] attempt {}/{} failed: {}", attempt, UPLOAD_MAX_RETRIES, err_msg);
+                    log::error!(
+                        "[cdn] attempt {}/{} failed: {}",
+                        attempt,
+                        UPLOAD_MAX_RETRIES,
+                        err_msg
+                    );
                     continue;
                 }
 
                 // 从响应头取 x-encrypted-param
-                let download_param = response.headers()
+                let download_param = response
+                    .headers()
                     .get("x-encrypted-param")
                     .and_then(|v| v.to_str().ok())
                     .map(|s| s.to_string());
 
                 if let Some(param) = download_param {
                     log::info!("[cdn] upload success on attempt {}", attempt);
-                    let _ = app.emit("cdn:upload-done", serde_json::json!({
-                        "file_name": file_name, "attempt": attempt,
-                    }));
+                    let _ = app.emit(
+                        "cdn:upload-done",
+                        serde_json::json!({
+                            "file_name": file_name, "attempt": attempt,
+                        }),
+                    );
                     return Ok(param);
                 } else {
                     last_error = Some("CDN response missing x-encrypted-param header".to_string());
-                    log::error!("[cdn] attempt {}/{} missing x-encrypted-param", attempt, UPLOAD_MAX_RETRIES);
+                    log::error!(
+                        "[cdn] attempt {}/{} missing x-encrypted-param",
+                        attempt,
+                        UPLOAD_MAX_RETRIES
+                    );
                     continue;
                 }
             }
             Err(e) => {
                 last_error = Some(format!("CDN upload request failed: {}", e));
-                log::error!("[cdn] attempt {}/{} failed: {}", attempt, UPLOAD_MAX_RETRIES, e);
+                log::error!(
+                    "[cdn] attempt {}/{} failed: {}",
+                    attempt,
+                    UPLOAD_MAX_RETRIES,
+                    e
+                );
             }
         }
     }
 
-    let final_err = last_error.unwrap_or_else(|| format!("CDN upload failed after {} attempts", UPLOAD_MAX_RETRIES));
-    let _ = app.emit("cdn:upload-error", serde_json::json!({
-        "file_name": file_name, "error": &final_err,
-    }));
+    let final_err = last_error
+        .unwrap_or_else(|| format!("CDN upload failed after {} attempts", UPLOAD_MAX_RETRIES));
+    let _ = app.emit(
+        "cdn:upload-error",
+        serde_json::json!({
+            "file_name": file_name, "error": &final_err,
+        }),
+    );
     Err(final_err)
 }
 
@@ -249,8 +295,7 @@ pub async fn upload_media(
         return Err(format!("文件不存在: {}", file_path));
     }
 
-    let metadata = std::fs::metadata(path)
-        .map_err(|e| format!("无法读取文件元数据: {}", e))?;
+    let metadata = std::fs::metadata(path).map_err(|e| format!("无法读取文件元数据: {}", e))?;
 
     if metadata.len() > MAX_FILE_SIZE {
         return Err(format!(
@@ -264,8 +309,7 @@ pub async fn upload_media(
     }
 
     // 2. 读取文件内容
-    let plaintext = std::fs::read(path)
-        .map_err(|e| format!("无法读取文件: {}", e))?;
+    let plaintext = std::fs::read(path).map_err(|e| format!("无法读取文件: {}", e))?;
 
     let rawsize = plaintext.len() as u64;
     let filesize = aes_ecb_padded_size(rawsize);
@@ -292,10 +336,18 @@ pub async fn upload_media(
 
     log::info!(
         "[cdn] upload_media: file={} rawsize={} filesize={} md5={} media_type={}",
-        file_path, rawsize, filesize, rawfilemd5, media_type
+        file_path,
+        rawsize,
+        filesize,
+        rawfilemd5,
+        media_type
     );
 
-    let fileext = path.extension().and_then(|e| e.to_str()).unwrap_or("bin").to_string();
+    let fileext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("bin")
+        .to_string();
 
     // 5. 调用 getUploadUrl API
     let upload_url_req = GetUploadUrlReq {
@@ -319,12 +371,19 @@ pub async fn upload_media(
     if upload_full_url.is_none() && upload_param.is_none() {
         let errcode = upload_url_resp.errcode.unwrap_or(0);
         let errmsg = upload_url_resp.errmsg.unwrap_or_default();
-        return Err(format!("getUploadUrl returned no upload URL (ret={:?}, errcode={}, errmsg={})", upload_url_resp.ret, errcode, errmsg));
+        return Err(format!(
+            "getUploadUrl returned no upload URL (ret={:?}, errcode={}, errmsg={})",
+            upload_url_resp.ret, errcode, errmsg
+        ));
     }
 
     // 6. AES-128-ECB 加密文件内容
     let ciphertext = encrypt_aes_128_ecb(&plaintext, &aeskey);
-    log::debug!("[cdn] encrypted: plaintext={} ciphertext={}", plaintext.len(), ciphertext.len());
+    log::debug!(
+        "[cdn] encrypted: plaintext={} ciphertext={}",
+        plaintext.len(),
+        ciphertext.len()
+    );
 
     // 7. POST 到 CDN（带实时进度推送）
     let display_name = Path::new(file_path)
@@ -339,7 +398,8 @@ pub async fn upload_media(
         &filekey,
         app,
         &display_name,
-    ).await?;
+    )
+    .await?;
 
     Ok(UploadedFileInfo {
         filekey,
@@ -357,7 +417,10 @@ pub fn is_image_file(file_path: &str) -> bool {
         .and_then(|e| e.to_str())
         .unwrap_or("")
         .to_lowercase();
-    matches!(ext.as_str(), "jpg" | "jpeg" | "png" | "gif" | "bmp" | "webp" | "ico" | "svg" | "tiff" | "tif")
+    matches!(
+        ext.as_str(),
+        "jpg" | "jpeg" | "png" | "gif" | "bmp" | "webp" | "ico" | "svg" | "tiff" | "tif"
+    )
 }
 
 /// 将字节数组编码为十六进制字符串
@@ -386,7 +449,7 @@ mod tests {
         let plaintext = b"Hello, WeChat CDN!";
         let ciphertext = encrypt_aes_128_ecb(plaintext, &key);
         assert_eq!(ciphertext.len(), 32); // 18 bytes → pad to 32
-        // Ciphertext should not be all zeros
+                                          // Ciphertext should not be all zeros
         assert!(ciphertext.iter().any(|&b| b != 0));
     }
 

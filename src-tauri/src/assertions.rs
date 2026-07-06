@@ -32,14 +32,24 @@ impl AssertionResult {
 
 /// Read-only tools that don't produce side effects
 const READ_ONLY_TOOLS: &[&str] = &[
-    "read_file", "list_dir", "list_skills", "read_skill", "system_time",
-    "brain_search", "search_messages",
+    "read_file",
+    "list_dir",
+    "list_skills",
+    "read_skill",
+    "system_time",
+    "brain_search",
+    "search_messages",
 ];
 
 /// Write tools that produce observable side effects
 const WRITE_TOOLS: &[&str] = &[
-    "create_file", "create_directory", "move_file", "copy_file",
-    "delete_file", "rename_file", "run_command",
+    "create_file",
+    "create_directory",
+    "move_file",
+    "copy_file",
+    "delete_file",
+    "rename_file",
+    "run_command",
 ];
 
 /// Run deterministic assertions on the tool execution summary.
@@ -48,22 +58,30 @@ pub fn run_assertions(tool_summary: &Value) -> AssertionResult {
     let mut failures = Vec::new();
     let mut warnings = Vec::new();
 
-    let total_calls = tool_summary.get("total_calls")
-        .and_then(|v| v.as_i64()).unwrap_or(0);
-    let total_failures = tool_summary.get("total_failures")
-        .and_then(|v| v.as_i64()).unwrap_or(0);
-    let calls = tool_summary.get("calls")
-        .and_then(|v| v.as_array());
+    let total_calls = tool_summary
+        .get("total_calls")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0);
+    let total_failures = tool_summary
+        .get("total_failures")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0);
+    let calls = tool_summary.get("calls").and_then(|v| v.as_array());
 
     // ── Rule 1: NO_EMPTY_EXECUTION ──
     // Maker didn't call any tools at all
     if total_calls == 0 {
         failures.push(AssertionFailure {
             rule: "NO_EMPTY_EXECUTION".to_string(),
-            description: "Maker 未调用任何工具。请使用可用工具来完成目标，而不是仅输出文本。".to_string(),
+            description: "Maker 未调用任何工具。请使用可用工具来完成目标，而不是仅输出文本。"
+                .to_string(),
         });
         // Early return - no point checking other rules
-        return AssertionResult { passed: false, failures, warnings };
+        return AssertionResult {
+            passed: false,
+            failures,
+            warnings,
+        };
     }
 
     // ── Rule 2: ERROR_RATIO ──
@@ -73,7 +91,8 @@ pub fn run_assertions(tool_summary: &Value) -> AssertionResult {
             rule: "ERROR_RATIO".to_string(),
             description: format!(
                 "工具调用错误率过高：{}/{} 次调用失败 ({:.0}%)。请检查参数和前置条件后重试。",
-                total_failures, total_calls,
+                total_failures,
+                total_calls,
                 (total_failures as f64 / total_calls as f64) * 100.0
             ),
         });
@@ -104,14 +123,17 @@ pub fn run_assertions(tool_summary: &Value) -> AssertionResult {
 
         // ── Rule 4: FILE_WRITE_SUCCESS ──
         // All file write operations failed
-        let write_calls: Vec<&Value> = call_list.iter().filter(|c| {
-            let name = c.get("name").and_then(|v| v.as_str()).unwrap_or("");
-            name == "create_file" || name == "create_directory"
-        }).collect();
+        let write_calls: Vec<&Value> = call_list
+            .iter()
+            .filter(|c| {
+                let name = c.get("name").and_then(|v| v.as_str()).unwrap_or("");
+                name == "create_file" || name == "create_directory"
+            })
+            .collect();
         if !write_calls.is_empty() {
-            let all_failed = write_calls.iter().all(|c| {
-                c.get("success").and_then(|v| v.as_bool()).unwrap_or(true) == false
-            });
+            let all_failed = write_calls
+                .iter()
+                .all(|c| c.get("success").and_then(|v| v.as_bool()).unwrap_or(true) == false);
             if all_failed {
                 failures.push(AssertionFailure {
                     rule: "FILE_WRITE_SUCCESS".to_string(),
@@ -125,12 +147,15 @@ pub fn run_assertions(tool_summary: &Value) -> AssertionResult {
 
         // ── Rule 5: COMMAND_EXIT_CODE ──
         // Last run_command call failed (warning only)
-        let last_cmd = call_list.iter().rev().find(|c| {
-            c.get("name").and_then(|v| v.as_str()) == Some("run_command")
-        });
+        let last_cmd = call_list
+            .iter()
+            .rev()
+            .find(|c| c.get("name").and_then(|v| v.as_str()) == Some("run_command"));
         if let Some(cmd) = last_cmd {
             if cmd.get("success").and_then(|v| v.as_bool()) == Some(false) {
-                warnings.push("最近一次命令执行失败（exit code ≠ 0），请检查命令输出并修正。".to_string());
+                warnings.push(
+                    "最近一次命令执行失败（exit code ≠ 0），请检查命令输出并修正。".to_string(),
+                );
             }
         }
     }
@@ -154,7 +179,11 @@ pub fn run_assertions(tool_summary: &Value) -> AssertionResult {
     }
 
     let passed = failures.is_empty();
-    AssertionResult { passed, failures, warnings }
+    AssertionResult {
+        passed,
+        failures,
+        warnings,
+    }
 }
 
 #[cfg(test)]
@@ -191,14 +220,19 @@ mod tests {
 
     #[test]
     fn test_analysis_paralysis() {
-        let calls: Vec<Value> = (0..12).map(|_| json!({"name": "read_file", "success": true})).collect();
+        let calls: Vec<Value> = (0..12)
+            .map(|_| json!({"name": "read_file", "success": true}))
+            .collect();
         let summary = json!({
             "total_calls": 12, "total_failures": 0,
             "calls": calls
         });
         let result = run_assertions(&summary);
         assert!(!result.passed);
-        assert!(result.failures.iter().any(|f| f.rule == "NO_ANALYSIS_PARALYSIS"));
+        assert!(result
+            .failures
+            .iter()
+            .any(|f| f.rule == "NO_ANALYSIS_PARALYSIS"));
     }
 
     #[test]
@@ -231,7 +265,10 @@ mod tests {
         });
         let result = run_assertions(&summary);
         assert!(!result.passed);
-        assert!(result.failures.iter().any(|f| f.rule == "FILE_WRITE_SUCCESS"));
+        assert!(result
+            .failures
+            .iter()
+            .any(|f| f.rule == "FILE_WRITE_SUCCESS"));
     }
 
     #[test]

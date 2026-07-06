@@ -23,19 +23,26 @@
           
           <!-- 操作区 -->
           <div v-if="!isUnlocked" style="display: flex; gap: 8px; align-items: center; flex: 0 1 120px;">
-            <input 
-              v-model="pinInput" 
-              type="password" 
-              class="input" 
-              maxlength="6"
-              placeholder="PIN"
-              style="width: 100%; min-width: 0;"
-              @keyup.enter="handlePinSubmit"
-            />
-            <button class="btn btn-ghost" style="padding: 8px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; color: var(--text-secondary);" :disabled="pinInput.length < 4" @click="handlePinSubmit" :title="isInitialized ? $t('settings.p2p_btn_unlock') : $t('settings.p2p_btn_generate')">
-              <Unlock v-if="isInitialized" :size="16" />
-              <Lock v-else :size="16" />
-            </button>
+            <template v-if="isMobile">
+              <button class="btn btn-primary" style="padding: 6px 10px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 0.85em;" @click="handleMobileScan" title="扫码配对">
+                <Scan :size="14" style="margin-right: 6px;" /> 扫码配对
+              </button>
+            </template>
+            <template v-else>
+              <input 
+                v-model="pinInput" 
+                type="password" 
+                class="input" 
+                maxlength="6"
+                placeholder="PIN"
+                style="width: 100%; min-width: 0;"
+                @keyup.enter="handlePinSubmit"
+              />
+              <button class="btn btn-ghost" style="padding: 8px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; color: var(--text-secondary);" :disabled="pinInput.length < 4" @click="handlePinSubmit" :title="isInitialized ? $t('settings.p2p_btn_unlock') : $t('settings.p2p_btn_generate')">
+                <Unlock v-if="isInitialized" :size="16" />
+                <Lock v-else :size="16" />
+              </button>
+            </template>
           </div>
           <div v-else style="display: flex; gap: 8px; align-items: center;">
             <button class="btn btn-secondary" @click="showP2pModal = true" style="display: flex; align-items: center; transition: none; transform: none; box-shadow: none;">
@@ -473,15 +480,16 @@
 
 <script setup>
 const getAssetUrl = (name) => `/logos/${name}`;
-import { ref, onMounted, onUnmounted, computed } from 'vue';
+import { ref, onMounted, onUnmounted, computed, inject } from 'vue';
 import { open } from '@tauri-apps/plugin-dialog';
 import { invoke } from '@tauri-apps/api/core';
+import { scan, checkPermissions, requestPermissions } from '@tauri-apps/plugin-barcode-scanner';
 import QrcodeVue from 'qrcode.vue';
 import { useI18n } from 'vue-i18n';
 import {
   Smartphone, Unplug, X, Plus, Loader2, MessageSquare, Check,
   Building2, ExternalLink, Unlink, KeyRound, Network, Info, Copy,
-  ShieldAlert, TriangleAlert, QrCode, Lock, Unlock
+  ShieldAlert, TriangleAlert, QrCode, Lock, Unlock, Scan
 } from 'lucide-vue-next';
 
 const { t } = useI18n();
@@ -490,6 +498,32 @@ const props = defineProps({
   config: { type: Object, required: true },
 });
 const emit = defineEmits(['config-changed']);
+
+const isMobile = inject('isMobile', ref(false));
+
+const handleMobileScan = async () => {
+  try {
+    // Try requesting permissions
+    try {
+      await requestPermissions();
+    } catch (e) {
+      console.warn("Permission request error:", e);
+    }
+    const result = await scan({ windowed: true });
+    if (result && result.content) {
+      try {
+        const payload = JSON.parse(result.content);
+        alert("扫码成功! 获取配对信息:\n" + JSON.stringify(payload, null, 2));
+      } catch (e) {
+        alert("无效的二维码: " + result.content);
+      }
+    }
+  } catch (err) {
+    if (!String(err).includes('canceled')) {
+      alert("扫码出错: " + err);
+    }
+  }
+};
 
 // ── Proxy Tunnel (Goal 20) ──
 const proxyTunnelEnabled = ref(props.config.proxyTunnelEnabled || false);
@@ -905,7 +939,7 @@ onUnmounted(() => {
 /* ── Office service cards grid ── */
 .service-cards-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, 1fr);
   gap: 12px;
   align-items: start;
 }

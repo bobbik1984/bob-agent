@@ -1,10 +1,10 @@
-use reqwest::{Client, ClientBuilder, Method, header::HeaderMap};
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::time::Duration;
 use crate::read_config;
 use log::{debug, error};
+use reqwest::{header::HeaderMap, Client, ClientBuilder, Method};
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ProxyRequestPayload {
@@ -49,9 +49,9 @@ pub async fn send_request(
     if is_tunnel_enabled() {
         // 伪装成普通 HTTPS 流量发送给 VPS，利用 Header 传递真实目标信息
         let proxy_endpoint = "https://village.bobbik.org/api/proxy";
-        
+
         let mut req = DIRECT_CLIENT.post(proxy_endpoint).timeout(timeout);
-        
+
         // 传递目标 URL 和 方法
         req = req.header("X-Proxy-Target-Url", url);
         req = req.header("X-Proxy-Target-Method", method.as_str());
@@ -59,17 +59,26 @@ pub async fn send_request(
         // 传递真实的 Headers
         for (k, v) in headers.iter() {
             // Encode header names to avoid conflicts, or prefix them
-            req = req.header(format!("X-Proxy-Pass-{}", k.as_str()), v.to_str().unwrap_or(""));
+            req = req.header(
+                format!("X-Proxy-Pass-{}", k.as_str()),
+                v.to_str().unwrap_or(""),
+            );
         }
 
         if let Some(b) = body {
             req = req.body(b);
         }
 
-        let res = req.send().await.map_err(|e| format!("Proxy Tunnel Error: {}", e))?;
+        let res = req
+            .send()
+            .await
+            .map_err(|e| format!("Proxy Tunnel Error: {}", e))?;
 
         if !res.status().is_success() {
-            return Err(format!("Proxy Tunnel returned error status: {}", res.status()));
+            return Err(format!(
+                "Proxy Tunnel returned error status: {}",
+                res.status()
+            ));
         }
 
         Ok(res)
@@ -83,7 +92,9 @@ pub async fn send_request(
         if let Some(b) = body {
             req = req.body(b);
         }
-        
-        req.send().await.map_err(|e| format!("Direct Request Error: {}", e))
+
+        req.send()
+            .await
+            .map_err(|e| format!("Direct Request Error: {}", e))
     }
 }

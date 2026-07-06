@@ -1,11 +1,11 @@
+use lazy_static::lazy_static;
+use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
-use lazy_static::lazy_static;
-use rusqlite::{params, Connection};
 
 lazy_static! {
     pub static ref SESSION_MANAGER: Arc<SessionManager> = Arc::new(SessionManager::new());
@@ -69,13 +69,19 @@ impl SessionManager {
 
     pub fn set_selecting(&self, user_id: &str, list: Vec<ConversationMeta>) {
         let mut sessions = self.sessions.lock().unwrap();
-        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
-        let mut state = sessions.get(user_id).cloned().unwrap_or_else(|| SessionState {
-            conv_id: None,
-            state: "chat".to_string(),
-            selecting_expiry: None,
-            pending_list: None,
-        });
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
+        let mut state = sessions
+            .get(user_id)
+            .cloned()
+            .unwrap_or_else(|| SessionState {
+                conv_id: None,
+                state: "chat".to_string(),
+                selecting_expiry: None,
+                pending_list: None,
+            });
         state.state = "selecting".to_string();
         state.pending_list = Some(list);
         state.selecting_expiry = Some(now + 60_000); // 60 seconds TTL
@@ -90,7 +96,10 @@ impl SessionManager {
             if state.state != "selecting" {
                 return false;
             }
-            let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_millis() as u64;
             if let Some(expiry) = state.selecting_expiry {
                 if now > expiry {
                     state.state = "chat".to_string();
@@ -124,12 +133,15 @@ impl SessionManager {
 
     pub fn bind_session(&self, user_id: &str, conv_id: Option<String>) {
         let mut sessions = self.sessions.lock().unwrap();
-        sessions.insert(user_id.to_string(), SessionState {
-            conv_id,
-            state: "chat".to_string(),
-            selecting_expiry: None,
-            pending_list: None,
-        });
+        sessions.insert(
+            user_id.to_string(),
+            SessionState {
+                conv_id,
+                state: "chat".to_string(),
+                selecting_expiry: None,
+                pending_list: None,
+            },
+        );
         drop(sessions);
         self.save();
     }
@@ -147,7 +159,10 @@ impl SessionManager {
 
 // 帮助函数：格式化时间戳
 fn format_relative_time(ts_ms: i64) -> String {
-    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as i64;
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as i64;
     let diff = now - ts_ms;
     if diff < 60_000 {
         "刚刚".to_string()
@@ -175,7 +190,11 @@ pub fn handle_im_command(user_id: &str, text: &str) -> Option<String> {
 
     if text == "/status" {
         if let Some(conv_id) = SESSION_MANAGER.get_conv_id(user_id) {
-            let short = if conv_id.len() > 8 { &conv_id[..8] } else { &conv_id };
+            let short = if conv_id.len() > 8 {
+                &conv_id[..8]
+            } else {
+                &conv_id
+            };
             return Some(format!("当前会话：{}…（发送 /sessions 可切换）", short));
         } else {
             return Some("当前无活跃会话（下条消息将自动新建）".to_string());
@@ -188,12 +207,12 @@ pub fn handle_im_command(user_id: &str, text: &str) -> Option<String> {
             None => return Some("❌ 数据库连接失败".to_string()),
         };
         let mut stmt = match conn.prepare(
-            "SELECT id, title, updated_at FROM conversations ORDER BY updated_at DESC LIMIT 8"
+            "SELECT id, title, updated_at FROM conversations ORDER BY updated_at DESC LIMIT 8",
         ) {
             Ok(s) => s,
             Err(_) => return Some("❌ 数据库查询失败".to_string()),
         };
-        
+
         let rows = stmt.query_map([], |row| {
             Ok(ConversationMeta {
                 id: row.get(0)?,
@@ -201,22 +220,26 @@ pub fn handle_im_command(user_id: &str, text: &str) -> Option<String> {
                 updated_at: row.get(2)?,
             })
         });
-        
+
         let mut list = Vec::new();
         if let Ok(iter) = rows {
             for row in iter.flatten() {
                 list.push(row);
             }
         }
-        
+
         if list.is_empty() {
             return Some("暂无历史会话，直接发消息开始吧 💬".to_string());
         }
-        
+
         SESSION_MANAGER.set_selecting(user_id, list.clone());
         let mut reply = "📋 请回复序号切换会话（60 秒内有效）：\n".to_string();
         for (i, c) in list.iter().enumerate() {
-            let title = if c.title.is_empty() { "未命名对话" } else { &c.title };
+            let title = if c.title.is_empty() {
+                "未命名对话"
+            } else {
+                &c.title
+            };
             let time_label = format_relative_time(c.updated_at);
             reply.push_str(&format!("[{}] {} ({}）\n", i + 1, title, time_label));
         }
@@ -235,10 +258,17 @@ pub fn handle_im_command(user_id: &str, text: &str) -> Option<String> {
                     let target = &list[idx - 1];
                     SESSION_MANAGER.bind_session(user_id, Some(target.id.clone()));
                     SESSION_MANAGER.cancel_selecting(user_id);
-                    let title = if target.title.is_empty() { "未命名对话" } else { &target.title };
+                    let title = if target.title.is_empty() {
+                        "未命名对话"
+                    } else {
+                        &target.title
+                    };
                     return Some(format!("✅ 已切换至「{}」，继续上下文吧。", title));
                 } else {
-                    return Some(format!("❌ 序号无效，请回复 1-{} 之间的数字，或发送 /sessions 重新列出。", list.len()));
+                    return Some(format!(
+                        "❌ 序号无效，请回复 1-{} 之间的数字，或发送 /sessions 重新列出。",
+                        list.len()
+                    ));
                 }
             }
         } else {
@@ -256,7 +286,11 @@ pub fn get_or_create_conv_id(user_id: &str) -> String {
         // 验证该 ID 在数据库中是否依然存在
         if let Some(conn) = SessionManager::open_db() {
             let exists: bool = conn
-                .query_row("SELECT 1 FROM conversations WHERE id = ?1", params![&id], |_| Ok(true))
+                .query_row(
+                    "SELECT 1 FROM conversations WHERE id = ?1",
+                    params![&id],
+                    |_| Ok(true),
+                )
                 .unwrap_or(false);
             if exists {
                 return id;
@@ -266,7 +300,7 @@ pub fn get_or_create_conv_id(user_id: &str) -> String {
     // 如果没有，或者数据库已被删除，新建
     let new_id = format!("conv-{}", crate::now_ms());
     SESSION_MANAGER.bind_session(user_id, Some(new_id.clone()));
-    
+
     // 初始化空对话入库
     if let Some(conn) = SessionManager::open_db() {
         let title = "未命名对话";
@@ -276,6 +310,6 @@ pub fn get_or_create_conv_id(user_id: &str) -> String {
             params![new_id, title, ts, ts],
         );
     }
-    
+
     new_id
 }

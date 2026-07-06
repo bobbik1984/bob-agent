@@ -322,6 +322,11 @@ onMounted(async () => {
   grid-template-columns: 1fr 1fr;
   gap: var(--space-3);
 }
+@media (max-width: 600px) {
+  .role-cards {
+    grid-template-columns: 1fr;
+  }
+}
 
 .role-card {
   background: var(--bg-secondary);

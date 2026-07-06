@@ -1,9 +1,9 @@
 use serde_json::{json, Value};
-use std::fs;
-use std::path::{Path, PathBuf};
-use std::io::Write;
 use std::collections::hash_map::DefaultHasher;
+use std::fs;
 use std::hash::{Hash, Hasher};
+use std::io::Write;
+use std::path::{Path, PathBuf};
 use tauri::Emitter;
 
 // ═══════════════════════════════════════════════════════════
@@ -59,7 +59,10 @@ impl ToolCallTracker {
 
         // 2. 连续重复模式检测
         let current_hash = Self::hash_args(args);
-        let recent_same: usize = self.history.iter().rev()
+        let recent_same: usize = self
+            .history
+            .iter()
+            .rev()
             .take_while(|(n, h)| n == name && *h == current_hash)
             .count();
 
@@ -71,7 +74,10 @@ impl ToolCallTracker {
         }
 
         // 3. 同名工具连续调用检测（参数不完全相同但工具名相同）
-        let recent_same_name: usize = self.history.iter().rev()
+        let recent_same_name: usize = self
+            .history
+            .iter()
+            .rev()
             .take_while(|(n, _)| n == name)
             .count();
 
@@ -103,7 +109,6 @@ impl ToolCallTracker {
     }
 }
 
-
 // ═══════════════════════════════════════════════════════════
 // 审计日志 — 记录每次工具调用
 // ═══════════════════════════════════════════════════════════
@@ -114,11 +119,22 @@ fn audit_tool_call(name: &str, args: &Value, result_summary: &str) {
     let log_path = logs_dir.join("tools.log");
 
     let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
-    let args_str: String = serde_json::to_string(args).unwrap_or_default().chars().take(200).collect();
+    let args_str: String = serde_json::to_string(args)
+        .unwrap_or_default()
+        .chars()
+        .take(200)
+        .collect();
     let result_short: String = result_summary.chars().take(100).collect();
-    let line = format!("[{}] {} | args: {} | result: {}\n", now, name, args_str, result_short);
+    let line = format!(
+        "[{}] {} | args: {} | result: {}\n",
+        now, name, args_str, result_short
+    );
 
-    if let Ok(mut f) = fs::OpenOptions::new().create(true).append(true).open(&log_path) {
+    if let Ok(mut f) = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+    {
         let _ = f.write_all(line.as_bytes());
     }
 }
@@ -144,11 +160,15 @@ fn resolve_write_path(path: &str, global_file_access: bool) -> Result<PathBuf, S
     // 2. 相对路径 — 直接映射到安全目录
     if !p.is_absolute() {
         let config = super::read_config();
-        
+
         let target = if path.starts_with("wiki/") || path.starts_with("wiki\\") {
             let rel = &path[5..];
             super::get_wiki_dir().join(rel)
-        } else if let Some(ws) = config.get("workspaceDir").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+        } else if let Some(ws) = config
+            .get("workspaceDir")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+        {
             PathBuf::from(ws).join(p)
         } else {
             super::get_data_dir().join(p)
@@ -162,15 +182,18 @@ fn resolve_write_path(path: &str, global_file_access: bool) -> Result<PathBuf, S
             target.clone()
         };
 
-        let safe_wiki = fs::canonicalize(super::get_wiki_dir()).unwrap_or_else(|_| super::get_wiki_dir());
-        let safe_data = fs::canonicalize(super::get_data_dir()).unwrap_or_else(|_| super::get_data_dir());
-        let safe_ws = config.get("workspaceDir")
+        let safe_wiki =
+            fs::canonicalize(super::get_wiki_dir()).unwrap_or_else(|_| super::get_wiki_dir());
+        let safe_data =
+            fs::canonicalize(super::get_data_dir()).unwrap_or_else(|_| super::get_data_dir());
+        let safe_ws = config
+            .get("workspaceDir")
             .and_then(|v| v.as_str())
             .filter(|s| !s.is_empty())
             .map(|s| fs::canonicalize(s).unwrap_or_else(|_| PathBuf::from(s)));
-            
-        let is_safe = canon_parent.starts_with(&safe_wiki) 
-            || canon_parent.starts_with(&safe_data) 
+
+        let is_safe = canon_parent.starts_with(&safe_wiki)
+            || canon_parent.starts_with(&safe_data)
             || safe_ws.map_or(false, |ws| canon_parent.starts_with(&ws));
 
         if !is_safe {
@@ -190,10 +213,14 @@ fn resolve_write_path(path: &str, global_file_access: bool) -> Result<PathBuf, S
     let mut allowed_dirs: Vec<String> = Vec::new();
 
     if let Some(ws) = config.get("wikiDir").and_then(|v| v.as_str()) {
-        if !ws.is_empty() { allowed_dirs.push(ws.to_string()); }
+        if !ws.is_empty() {
+            allowed_dirs.push(ws.to_string());
+        }
     }
     if let Some(ws) = config.get("workspaceDir").and_then(|v| v.as_str()) {
-        if !ws.is_empty() { allowed_dirs.push(ws.to_string()); }
+        if !ws.is_empty() {
+            allowed_dirs.push(ws.to_string());
+        }
     }
 
     // 从数据库读取 tracked_folders
@@ -208,7 +235,7 @@ fn resolve_write_path(path: &str, global_file_access: bool) -> Result<PathBuf, S
     }
 
     let target = p.to_path_buf();
-    
+
     // 规范化目标路径的父目录（因为目标文件可能尚不存在），防范符号链接攻击
     let target_check_path = if let Some(parent) = target.parent() {
         std::fs::canonicalize(parent).unwrap_or_else(|_| parent.to_path_buf())
@@ -810,7 +837,13 @@ fn get_builtin_tool_schemas() -> Vec<Value> {
 
 /// 执行指定工具并返回结果
 /// `from_user`: 当工具调用源自微信会话时，传入消息发送者的加密 wxid
-pub async fn execute_tool(app: &tauri::AppHandle, name: &str, args: &Value, from_user: Option<&str>, global_file_access: bool) -> Value {
+pub async fn execute_tool(
+    app: &tauri::AppHandle,
+    name: &str,
+    args: &Value,
+    from_user: Option<&str>,
+    global_file_access: bool,
+) -> Value {
     // 工具级超时控制：媒体上传类工具给 120 秒，其他给 30 秒
     let timeout_secs = match name {
         "send_wechat_file" => 600, // 大文件上传可能耗时很长，与 CDN 动态超时匹配
@@ -819,8 +852,10 @@ pub async fn execute_tool(app: &tauri::AppHandle, name: &str, args: &Value, from
     let timeout_duration = std::time::Duration::from_secs(timeout_secs);
     let result = match tokio::time::timeout(
         timeout_duration,
-        execute_tool_inner(app, name, args, from_user, global_file_access)
-    ).await {
+        execute_tool_inner(app, name, args, from_user, global_file_access),
+    )
+    .await
+    {
         Ok(r) => r,
         Err(_) => {
             log::warn!("Tool '{}' timed out after {}s", name, timeout_secs);
@@ -840,7 +875,13 @@ pub async fn execute_tool(app: &tauri::AppHandle, name: &str, args: &Value, from
     result
 }
 
-async fn execute_tool_inner(app: &tauri::AppHandle, name: &str, args: &Value, from_user: Option<&str>, global_file_access: bool) -> Value {
+async fn execute_tool_inner(
+    app: &tauri::AppHandle,
+    name: &str,
+    args: &Value,
+    from_user: Option<&str>,
+    global_file_access: bool,
+) -> Value {
     match name {
         "read_file" => {
             let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
@@ -868,12 +909,18 @@ async fn execute_tool_inner(app: &tauri::AppHandle, name: &str, args: &Value, fr
         }
         "move_file" => {
             let source = args.get("source").and_then(|v| v.as_str()).unwrap_or("");
-            let destination = args.get("destination").and_then(|v| v.as_str()).unwrap_or("");
+            let destination = args
+                .get("destination")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
             tool_move_file(source, destination, global_file_access).await
         }
         "copy_file" => {
             let source = args.get("source").and_then(|v| v.as_str()).unwrap_or("");
-            let destination = args.get("destination").and_then(|v| v.as_str()).unwrap_or("");
+            let destination = args
+                .get("destination")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
             tool_copy_file(source, destination, global_file_access).await
         }
         "delete_file" => {
@@ -894,21 +941,23 @@ async fn execute_tool_inner(app: &tauri::AppHandle, name: &str, args: &Value, fr
             let url = args.get("url").and_then(|v| v.as_str()).unwrap_or("");
             super::web::system_fetch_url(url.to_string()).await
         }
-        "list_skills" => {
-            tool_list_skills()
-        }
+        "list_skills" => tool_list_skills(),
         "read_skill" => {
-            let skill_name = args.get("skill_name").and_then(|v| v.as_str()).unwrap_or("");
+            let skill_name = args
+                .get("skill_name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
             tool_read_skill(skill_name)
         }
         "web_search" => {
             let query = args.get("query").and_then(|v| v.as_str()).unwrap_or("");
-            let max = args.get("max_results").and_then(|v| v.as_u64()).unwrap_or(5) as usize;
+            let max = args
+                .get("max_results")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(5) as usize;
             tool_web_search(query, max).await
         }
-        "system_time" => {
-            tool_system_time()
-        }
+        "system_time" => tool_system_time(),
         "get_weather" => {
             let city = args.get("city").and_then(|v| v.as_str()).unwrap_or("");
             tool_get_weather(city).await
@@ -927,38 +976,42 @@ async fn execute_tool_inner(app: &tauri::AppHandle, name: &str, args: &Value, fr
             let content = args.get("content").and_then(|v| v.as_str()).unwrap_or("");
             tool_append_file(path, content, global_file_access).await
         }
-        "list_calendar_events" => {
-            tool_list_calendar_events(app)
-        }
-        "add_calendar_event" => {
-            tool_add_calendar_event(app, args)
-        }
+        "list_calendar_events" => tool_list_calendar_events(app),
+        "add_calendar_event" => tool_add_calendar_event(app, args),
         "build_knowledge_base" => {
             let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
             // 直接触发异步的知识库构建引擎
-            super::kb_indexer::system_build_kb(app.clone(), path.to_string(), "clerk".to_string()).await;
+            super::kb_indexer::system_build_kb(app.clone(), path.to_string(), "clerk".to_string())
+                .await;
             json!({
                 "status": "success",
                 "message": format!("已成功将文件/文件夹 '{}' 发送给后台知识库处理管线。你不需要再做任何事，请告诉用户你已经安排后台在处理了。", path)
             })
         }
         "read_model_registry" => {
-            let provider_id = args.get("provider_id").and_then(|v| v.as_str()).unwrap_or("");
+            let provider_id = args
+                .get("provider_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
             tool_read_model_registry(provider_id)
         }
         "test_model_endpoint" => {
-            let provider_id = args.get("provider_id").and_then(|v| v.as_str()).unwrap_or("");
+            let provider_id = args
+                .get("provider_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
             let model_id = args.get("model_id").and_then(|v| v.as_str()).unwrap_or("");
             tool_test_model_endpoint(provider_id, model_id).await
         }
         "update_model_registry" => {
-            let provider_id = args.get("provider_id").and_then(|v| v.as_str()).unwrap_or("");
+            let provider_id = args
+                .get("provider_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
             let models = args.get("models").cloned().unwrap_or(json!([]));
             tool_update_model_registry(provider_id, models)
         }
-        "browse_page" => {
-            tool_browse_page(app, args).await
-        }
+        "browse_page" => tool_browse_page(app, args).await,
         "send_wechat_file" => {
             let llm_wxid = args.get("wxid").and_then(|v| v.as_str()).unwrap_or("");
             // 如果 LLM 传来的 wxid 不是加密格式 (不含 @im.wechat)，
@@ -967,7 +1020,11 @@ async fn execute_tool_inner(app: &tauri::AppHandle, name: &str, args: &Value, fr
             // 而非 ilink API 要求的加密 wxid 的问题。
             let wxid = if !llm_wxid.contains("@im.wechat") {
                 if let Some(real_wxid) = from_user {
-                    log::info!("[tools] send_wechat_file: LLM passed '{}', overriding with from_user '{}'", llm_wxid, real_wxid);
+                    log::info!(
+                        "[tools] send_wechat_file: LLM passed '{}', overriding with from_user '{}'",
+                        llm_wxid,
+                        real_wxid
+                    );
                     real_wxid
                 } else {
                     llm_wxid
@@ -1011,76 +1068,111 @@ async fn execute_tool_inner(app: &tauri::AppHandle, name: &str, args: &Value, fr
         }
         // ── T-1211: Cron 定时任务 ──
         "add_cron_job" => {
-            let title = args.get("title").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let cron_expr = args.get("cron_expr").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let prompt = args.get("prompt").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let title = args
+                .get("title")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let cron_expr = args
+                .get("cron_expr")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let prompt = args
+                .get("prompt")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
             super::scheduler::system_add_cron_job(title, cron_expr, prompt).await
         }
-        "list_cron_jobs" => {
-            super::scheduler::system_list_cron_jobs().await
-        }
+        "list_cron_jobs" => super::scheduler::system_list_cron_jobs().await,
         "remove_cron_job" => {
-            let id = args.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let id = args
+                .get("id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
             super::scheduler::system_remove_cron_job(id).await
         }
         "toggle_cron_job" => {
-            let id = args.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let enabled = args.get("enabled").and_then(|v| v.as_bool()).unwrap_or(true);
+            let id = args
+                .get("id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let enabled = args
+                .get("enabled")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(true);
             super::scheduler::system_toggle_cron_job(id, enabled).await
         }
         // ── MCP 扩展工具路由 ──
-        name if name.starts_with("mcp_") => {
-            super::mcp::get_manager().call_tool(name, args).await
-        }
+        name if name.starts_with("mcp_") => super::mcp::get_manager().call_tool(name, args).await,
         // ── 原生连接器工具路由 ──
-        name if name.starts_with("lark_") => {
-            super::lark::execute_tool(name, args).await
-        }
+        name if name.starts_with("lark_") => super::lark::execute_tool(name, args).await,
         name if name.starts_with("google_calendar_") => {
             super::google_calendar::execute_tool(name, args).await
         }
-        name if name.starts_with("gmail_") => {
-            super::gmail::execute_tool(name, args).await
-        }
+        name if name.starts_with("gmail_") => super::gmail::execute_tool(name, args).await,
         // ── 里程碑 15: 文档输出引擎 ──
         "export_html" => {
-            let filename = args.get("filename").and_then(|v| v.as_str()).unwrap_or("report");
-            let template = args.get("template").and_then(|v| v.as_str()).unwrap_or("corporate");
-            let title = args.get("title").and_then(|v| v.as_str()).unwrap_or("Report");
+            let filename = args
+                .get("filename")
+                .and_then(|v| v.as_str())
+                .unwrap_or("report");
+            let template = args
+                .get("template")
+                .and_then(|v| v.as_str())
+                .unwrap_or("corporate");
+            let title = args
+                .get("title")
+                .and_then(|v| v.as_str())
+                .unwrap_or("Report");
             let content = args.get("content").and_then(|v| v.as_str()).unwrap_or("");
-            
+
             let data = super::exports::report::ReportData {
                 title: title.to_string(),
                 template: template.to_string(),
                 content: content.to_string(),
             };
-            
+
             let html = super::exports::report::generate_html_report(&data);
-            
+
             // 写入默认 exports 目录
             let config = super::read_config();
-            let exports_dir = config.get("exportsDir")
+            let exports_dir = config
+                .get("exportsDir")
                 .and_then(|v| v.as_str())
                 .filter(|s| !s.is_empty())
                 .map(PathBuf::from)
-                .unwrap_or_else(|| dirs::desktop_dir().unwrap_or_else(|| PathBuf::from(".")).join("Bob-Exports"));
-                
+                .unwrap_or_else(|| {
+                    dirs::desktop_dir()
+                        .unwrap_or_else(|| PathBuf::from("."))
+                        .join("Bob-Exports")
+                });
+
             let _ = fs::create_dir_all(&exports_dir);
             let file_path = exports_dir.join(format!("{}.html", filename));
-            
+
             match fs::write(&file_path, html) {
                 Ok(_) => {
                     let _ = open::that(&file_path);
                     let path_str = file_path.to_string_lossy().to_string();
-                    let _ = app.emit("llm:chunk", json!({ "type": "file_output", "path": &path_str, "conv_id": "" }));
+                    let _ = app.emit(
+                        "llm:chunk",
+                        json!({ "type": "file_output", "path": &path_str, "conv_id": "" }),
+                    );
                     json!({ "ok": format!("HTML 报告已生成: {}", path_str), "path": path_str })
-                },
+                }
                 Err(e) => json!({ "error": format!("无法写入文件: {}", e) }),
             }
         }
         "export_xlsx" => {
-            let filename = args.get("filename").and_then(|v| v.as_str()).unwrap_or("data");
-            
+            let filename = args
+                .get("filename")
+                .and_then(|v| v.as_str())
+                .unwrap_or("data");
+
             let mut data = super::exports::xlsx::XlsxData { sheets: Vec::new() };
             if let Some(sheets_array) = args.get("sheets").and_then(|v| v.as_array()) {
                 for sheet in sheets_array {
@@ -1089,55 +1181,80 @@ async fn execute_tool_inner(app: &tauri::AppHandle, name: &str, args: &Value, fr
                     }
                 }
             }
-            
+
             let config = super::read_config();
-            let exports_dir = config.get("exportsDir")
+            let exports_dir = config
+                .get("exportsDir")
                 .and_then(|v| v.as_str())
                 .filter(|s| !s.is_empty())
                 .map(PathBuf::from)
-                .unwrap_or_else(|| dirs::desktop_dir().unwrap_or_else(|| PathBuf::from(".")).join("Bob-Exports"));
-                
+                .unwrap_or_else(|| {
+                    dirs::desktop_dir()
+                        .unwrap_or_else(|| PathBuf::from("."))
+                        .join("Bob-Exports")
+                });
+
             let _ = fs::create_dir_all(&exports_dir);
             let file_path = exports_dir.join(format!("{}.xlsx", filename));
-            
+
             match super::exports::xlsx::generate_xlsx(&file_path, &data) {
                 Ok(_) => {
                     let _ = open::that(&file_path);
                     let path_str = file_path.to_string_lossy().to_string();
-                    let _ = app.emit("llm:chunk", json!({ "type": "file_output", "path": &path_str, "conv_id": "" }));
+                    let _ = app.emit(
+                        "llm:chunk",
+                        json!({ "type": "file_output", "path": &path_str, "conv_id": "" }),
+                    );
                     json!({ "ok": format!("Excel 表格已生成: {}", path_str), "path": path_str })
-                },
+                }
                 Err(e) => json!({ "error": format!("无法生成 Excel: {}", e) }),
             }
         }
         "export_docx" => {
-            let filename = args.get("filename").and_then(|v| v.as_str()).unwrap_or("document");
+            let filename = args
+                .get("filename")
+                .and_then(|v| v.as_str())
+                .unwrap_or("document");
             let content = args.get("content").and_then(|v| v.as_str()).unwrap_or("");
-            
+
             let config = super::read_config();
-            let exports_dir = config.get("exportsDir")
+            let exports_dir = config
+                .get("exportsDir")
                 .and_then(|v| v.as_str())
                 .filter(|s| !s.is_empty())
                 .map(PathBuf::from)
-                .unwrap_or_else(|| dirs::desktop_dir().unwrap_or_else(|| PathBuf::from(".")).join("Bob-Exports"));
-                
+                .unwrap_or_else(|| {
+                    dirs::desktop_dir()
+                        .unwrap_or_else(|| PathBuf::from("."))
+                        .join("Bob-Exports")
+                });
+
             let _ = fs::create_dir_all(&exports_dir);
             let file_path = exports_dir.join(format!("{}.docx", filename));
-            
+
             match super::exports::docx::generate_docx(&file_path, content) {
                 Ok(_) => {
                     let _ = open::that(&file_path);
                     let path_str = file_path.to_string_lossy().to_string();
-                    let _ = app.emit("llm:chunk", json!({ "type": "file_output", "path": &path_str, "conv_id": "" }));
+                    let _ = app.emit(
+                        "llm:chunk",
+                        json!({ "type": "file_output", "path": &path_str, "conv_id": "" }),
+                    );
                     json!({ "ok": format!("Word 文档已生成: {}", path_str), "path": path_str })
-                },
+                }
                 Err(e) => json!({ "error": format!("无法生成 Word: {}", e) }),
             }
         }
         "export_pptx" => {
-            let filename = args.get("filename").and_then(|v| v.as_str()).unwrap_or("presentation");
-            let template = args.get("template").and_then(|v| v.as_str()).unwrap_or("corporate-dark");
-            
+            let filename = args
+                .get("filename")
+                .and_then(|v| v.as_str())
+                .unwrap_or("presentation");
+            let template = args
+                .get("template")
+                .and_then(|v| v.as_str())
+                .unwrap_or("corporate-dark");
+
             let mut slides = Vec::new();
             if let Some(slides_array) = args.get("slides").and_then(|v| v.as_array()) {
                 for slide in slides_array {
@@ -1146,29 +1263,37 @@ async fn execute_tool_inner(app: &tauri::AppHandle, name: &str, args: &Value, fr
                     }
                 }
             }
-            
+
             let data = super::exports::pptx::PptxData {
                 template: template.to_string(),
                 slides,
             };
-            
+
             let config = super::read_config();
-            let exports_dir = config.get("exportsDir")
+            let exports_dir = config
+                .get("exportsDir")
                 .and_then(|v| v.as_str())
                 .filter(|s| !s.is_empty())
                 .map(PathBuf::from)
-                .unwrap_or_else(|| dirs::desktop_dir().unwrap_or_else(|| PathBuf::from(".")).join("Bob-Exports"));
-                
+                .unwrap_or_else(|| {
+                    dirs::desktop_dir()
+                        .unwrap_or_else(|| PathBuf::from("."))
+                        .join("Bob-Exports")
+                });
+
             let _ = fs::create_dir_all(&exports_dir);
             let file_path = exports_dir.join(format!("{}.pptx", filename));
-            
+
             match super::exports::pptx::generate_pptx(&file_path, &data) {
                 Ok(_) => {
                     let _ = open::that(&file_path);
                     let path_str = file_path.to_string_lossy().to_string();
-                    let _ = app.emit("llm:chunk", json!({ "type": "file_output", "path": &path_str, "conv_id": "" }));
+                    let _ = app.emit(
+                        "llm:chunk",
+                        json!({ "type": "file_output", "path": &path_str, "conv_id": "" }),
+                    );
                     json!({ "ok": format!("PowerPoint 演示文稿已生成: {}", path_str), "path": path_str })
-                },
+                }
                 Err(e) => json!({ "error": format!("无法生成 PPTX: {}", e) }),
             }
         }
@@ -1178,8 +1303,13 @@ async fn execute_tool_inner(app: &tauri::AppHandle, name: &str, args: &Value, fr
             let content = args["content"].as_str().unwrap_or("");
             let source_url = args["source_url"].as_str().unwrap_or("");
             let source_type = args["source_type"].as_str().unwrap_or("reference");
-            let tags: Vec<String> = args["tags"].as_array()
-                .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+            let tags: Vec<String> = args["tags"]
+                .as_array()
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
                 .unwrap_or_else(|| vec![source_type.to_string()]);
 
             // Create the note via notebook module
@@ -1245,7 +1375,8 @@ fn tool_list_dir(path: &str, max_items: usize) -> Value {
     let mut items: Vec<Value> = Vec::new();
     for entry in entries.flatten().take(max_items) {
         let entry_path = entry.path();
-        let name = entry_path.file_name()
+        let name = entry_path
+            .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("")
             .to_string();
@@ -1274,8 +1405,14 @@ fn tool_list_dir(path: &str, max_items: usize) -> Value {
 /// list_skills — 列出可用技能（从 externalSkillsDir 扫描）
 fn tool_list_skills() -> Value {
     let config = super::read_config();
-    let bundled_dir = config.get("bundledSkillsDir").and_then(|v| v.as_str()).map(|s| Path::new(s).to_path_buf());
-    let external_dir = config.get("externalSkillsDir").and_then(|v| v.as_str()).map(|s| Path::new(s).to_path_buf());
+    let bundled_dir = config
+        .get("bundledSkillsDir")
+        .and_then(|v| v.as_str())
+        .map(|s| Path::new(s).to_path_buf());
+    let external_dir = config
+        .get("externalSkillsDir")
+        .and_then(|v| v.as_str())
+        .map(|s| Path::new(s).to_path_buf());
 
     let mut skills_map = std::collections::HashMap::new();
 
@@ -1285,10 +1422,15 @@ fn tool_list_skills() -> Value {
                 if let Ok(entries) = fs::read_dir(dir) {
                     for entry in entries.flatten() {
                         let p = entry.path();
-                        if !p.is_dir() { continue; }
+                        if !p.is_dir() {
+                            continue;
+                        }
                         let md = p.join("SKILL.md");
-                        if !md.exists() { continue; }
-                        let folder_name = p.file_name()
+                        if !md.exists() {
+                            continue;
+                        }
+                        let folder_name = p
+                            .file_name()
                             .and_then(|n| n.to_str())
                             .unwrap_or("unknown")
                             .to_string();
@@ -1296,11 +1438,14 @@ fn tool_list_skills() -> Value {
                             Ok(content) => parse_skill_frontmatter(&content, &folder_name),
                             Err(_) => (folder_name.clone(), String::new()),
                         };
-                        skills_map.insert(folder_name.clone(), json!({
-                            "id": folder_name,
-                            "name": name,
-                            "description": desc
-                        }));
+                        skills_map.insert(
+                            folder_name.clone(),
+                            json!({
+                                "id": folder_name,
+                                "name": name,
+                                "description": desc
+                            }),
+                        );
                     }
                 }
             }
@@ -1375,7 +1520,11 @@ async fn tool_web_search(query: &str, max_results: usize) -> Value {
     let config = super::read_config();
     let api_keys = config.get("apiKeys").cloned().unwrap_or(json!({}));
     // 1. 尝试 Tavily
-    let tavily_key = api_keys.get("TAVILY_API_KEY").or_else(|| api_keys.get("tavily")).and_then(|v| v.as_str()).unwrap_or("");
+    let tavily_key = api_keys
+        .get("TAVILY_API_KEY")
+        .or_else(|| api_keys.get("tavily"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
     if !tavily_key.is_empty() {
         if let Ok(result) = search_tavily(query, max_results, tavily_key).await {
             return result;
@@ -1383,7 +1532,11 @@ async fn tool_web_search(query: &str, max_results: usize) -> Value {
     }
 
     // 2. 降级 TinyFish (免费)
-    let tinyfish_key = api_keys.get("TINYFISH_API_KEY").or_else(|| api_keys.get("tinyfish")).and_then(|v| v.as_str()).unwrap_or("");
+    let tinyfish_key = api_keys
+        .get("TINYFISH_API_KEY")
+        .or_else(|| api_keys.get("tinyfish"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
     if !tinyfish_key.is_empty() {
         if let Ok(result) = search_tinyfish(query, max_results, tinyfish_key).await {
             return result;
@@ -1452,13 +1605,14 @@ async fn search_tinyfish(query: &str, max_results: usize, api_key: &str) -> Resu
         .build()
         .map_err(|e| format!("HTTP 客户端创建失败: {}", e))?;
     // URL-safe 编码查询参数
-    let encoded_query: String = query.chars().map(|c| {
-        match c {
+    let encoded_query: String = query
+        .chars()
+        .map(|c| match c {
             'A'..='Z' | 'a'..='z' | '0'..='9' | '-' | '_' | '.' | '~' => c.to_string(),
             ' ' => "+".to_string(),
             _ => format!("%{:02X}", c as u32),
-        }
-    }).collect();
+        })
+        .collect();
     let search_url = format!(
         "https://api.search.tinyfish.ai?q={}&max_results={}",
         encoded_query, max_results
@@ -1506,7 +1660,9 @@ pub fn parse_skill_frontmatter(content: &str, fallback_name: &str) -> (String, S
     if !trimmed.starts_with("---") {
         if let Some(first_line) = trimmed.lines().next() {
             let clean = first_line.trim_start_matches('#').trim();
-            if !clean.is_empty() { name = clean.to_string(); }
+            if !clean.is_empty() {
+                name = clean.to_string();
+            }
         }
     } else {
         let after_first = &trimmed[3..];
@@ -1529,13 +1685,16 @@ pub fn parse_skill_frontmatter(content: &str, fallback_name: &str) -> (String, S
     }
 
     // Strip common emoji ranges from the name
-    name = name.chars().filter(|c| {
-        let cp = *c as u32;
-        // Exclude common emoji blocks:
-        // 0x2600-0x27BF (Misc Symbols, Dingbats)
-        // 0x1F300-0x1FAFF (Pictographs, Emoticons, Symbols)
-        !( (cp >= 0x2600 && cp <= 0x27BF) || (cp >= 0x1F300 && cp <= 0x1FAFF) )
-    }).collect();
+    name = name
+        .chars()
+        .filter(|c| {
+            let cp = *c as u32;
+            // Exclude common emoji blocks:
+            // 0x2600-0x27BF (Misc Symbols, Dingbats)
+            // 0x1F300-0x1FAFF (Pictographs, Emoticons, Symbols)
+            !((cp >= 0x2600 && cp <= 0x27BF) || (cp >= 0x1F300 && cp <= 0x1FAFF))
+        })
+        .collect();
     name = name.trim().to_string();
 
     if name.to_uppercase().starts_with("SKILL:") {
@@ -1561,8 +1720,14 @@ fn tool_system_time() -> Value {
 }
 
 async fn tool_get_weather(city: &str) -> Value {
-    let geo_url = format!("https://geocoding-api.open-meteo.com/v1/search?name={}&count=1&language=zh", city);
-    let client = match reqwest::Client::builder().timeout(std::time::Duration::from_secs(10)).build() {
+    let geo_url = format!(
+        "https://geocoding-api.open-meteo.com/v1/search?name={}&count=1&language=zh",
+        city
+    );
+    let client = match reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+    {
         Ok(c) => c,
         Err(e) => return json!({ "error": format!("HTTP 客户端创建失败: {}", e) }),
     };
@@ -1582,12 +1747,21 @@ async fn tool_get_weather(city: &str) -> Value {
         Some(loc) => loc,
         None => return json!({ "error": format!("找不到城市: {}", city) }),
     };
-    let lat = location.get("latitude").and_then(|v| v.as_f64()).unwrap_or(0.0);
-    let lon = location.get("longitude").and_then(|v| v.as_f64()).unwrap_or(0.0);
-    let resolved_name = location.get("name").and_then(|v| v.as_str()).unwrap_or(city);
+    let lat = location
+        .get("latitude")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0);
+    let lon = location
+        .get("longitude")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0);
+    let resolved_name = location
+        .get("name")
+        .and_then(|v| v.as_str())
+        .unwrap_or(city);
 
     let weather_url = format!("https://api.open-meteo.com/v1/forecast?latitude={}&longitude={}&current=temperature_2m,weather_code,wind_speed_10m&daily=temperature_2m_max,temperature_2m_min&timezone=Asia%2FShanghai", lat, lon);
-    
+
     let weather_resp = match client.get(&weather_url).send().await {
         Ok(r) => r,
         Err(e) => return json!({ "error": format!("获取天气数据失败: {}", e) }),
@@ -1601,7 +1775,10 @@ async fn tool_get_weather(city: &str) -> Value {
     let current = weather_json.get("current").cloned().unwrap_or(json!({}));
     let daily = weather_json.get("daily").cloned().unwrap_or(json!({}));
 
-    let weather_code = current.get("weather_code").and_then(|v| v.as_u64()).unwrap_or(0);
+    let weather_code = current
+        .get("weather_code")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
     let condition = match weather_code {
         0 => "☀️ 晴朗",
         1..=3 => "⛅ 多云/阴天",
@@ -1613,9 +1790,22 @@ async fn tool_get_weather(city: &str) -> Value {
         _ => "未知",
     };
 
-    let temp = current.get("temperature_2m").and_then(|v| v.as_f64()).unwrap_or(0.0);
-    let max_temp = daily.get("temperature_2m_max").and_then(|a| a.as_array()).and_then(|a| a.get(0)).and_then(|v| v.as_f64()).unwrap_or(0.0);
-    let min_temp = daily.get("temperature_2m_min").and_then(|a| a.as_array()).and_then(|a| a.get(0)).and_then(|v| v.as_f64()).unwrap_or(0.0);
+    let temp = current
+        .get("temperature_2m")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0);
+    let max_temp = daily
+        .get("temperature_2m_max")
+        .and_then(|a| a.as_array())
+        .and_then(|a| a.get(0))
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0);
+    let min_temp = daily
+        .get("temperature_2m_min")
+        .and_then(|a| a.as_array())
+        .and_then(|a| a.get(0))
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0);
 
     json!({
         "city": resolved_name,
@@ -1638,8 +1828,10 @@ async fn tool_write_file(path: &str, content: &str, global_file_access: bool) ->
     }
 
     match fs::write(&target_path, content) {
-        Ok(_) => json!({ "ok": true, "path": target_path.to_string_lossy().to_string(), "bytes_written": content.len() }),
-        Err(e) => json!({ "error": format!("写入文件失败: {}", e) })
+        Ok(_) => {
+            json!({ "ok": true, "path": target_path.to_string_lossy().to_string(), "bytes_written": content.len() })
+        }
+        Err(e) => json!({ "error": format!("写入文件失败: {}", e) }),
     }
 }
 
@@ -1658,8 +1850,10 @@ async fn tool_append_file(path: &str, content: &str, global_file_access: bool) -
     let new_content = format!("{}{}", existing, content);
 
     match fs::write(&target_path, &new_content) {
-        Ok(_) => json!({ "ok": true, "path": target_path.to_string_lossy().to_string(), "bytes_appended": content.len() }),
-        Err(e) => json!({ "error": format!("追加文件失败: {}", e) })
+        Ok(_) => {
+            json!({ "ok": true, "path": target_path.to_string_lossy().to_string(), "bytes_appended": content.len() })
+        }
+        Err(e) => json!({ "error": format!("追加文件失败: {}", e) }),
     }
 }
 
@@ -1670,7 +1864,7 @@ async fn tool_create_directory(path: &str, global_file_access: bool) -> Value {
     };
     match fs::create_dir_all(&target_path) {
         Ok(_) => json!({ "ok": true, "path": target_path.to_string_lossy().to_string() }),
-        Err(e) => json!({ "error": format!("创建文件夹失败: {}", e) })
+        Err(e) => json!({ "error": format!("创建文件夹失败: {}", e) }),
     }
 }
 
@@ -1687,8 +1881,10 @@ async fn tool_move_file(source: &str, destination: &str, global_file_access: boo
         let _ = fs::create_dir_all(parent);
     }
     match fs::rename(&src_path, &dst_path) {
-        Ok(_) => json!({ "ok": true, "source": src_path.to_string_lossy().to_string(), "destination": dst_path.to_string_lossy().to_string() }),
-        Err(e) => json!({ "error": format!("移动文件失败: {}", e) })
+        Ok(_) => {
+            json!({ "ok": true, "source": src_path.to_string_lossy().to_string(), "destination": dst_path.to_string_lossy().to_string() })
+        }
+        Err(e) => json!({ "error": format!("移动文件失败: {}", e) }),
     }
 }
 
@@ -1705,8 +1901,10 @@ async fn tool_copy_file(source: &str, destination: &str, global_file_access: boo
         let _ = fs::create_dir_all(parent);
     }
     match fs::copy(&src_path, &dst_path) {
-        Ok(bytes) => json!({ "ok": true, "bytes_copied": bytes, "destination": dst_path.to_string_lossy().to_string() }),
-        Err(e) => json!({ "error": format!("复制文件失败: {}", e) })
+        Ok(bytes) => {
+            json!({ "ok": true, "bytes_copied": bytes, "destination": dst_path.to_string_lossy().to_string() })
+        }
+        Err(e) => json!({ "error": format!("复制文件失败: {}", e) }),
     }
 }
 
@@ -1718,7 +1916,7 @@ async fn tool_delete_file(path: &str, global_file_access: bool) -> Value {
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     match trash::delete(&target_path) {
         Ok(_) => json!({ "ok": true, "path": target_path.to_string_lossy().to_string() }),
-        Err(e) => json!({ "error": format!("放入回收站失败: {}", e) })
+        Err(e) => json!({ "error": format!("放入回收站失败: {}", e) }),
     }
 
     #[cfg(any(target_os = "android", target_os = "ios"))]
@@ -1726,12 +1924,12 @@ async fn tool_delete_file(path: &str, global_file_access: bool) -> Value {
         if target_path.is_dir() {
             match std::fs::remove_dir_all(&target_path) {
                 Ok(_) => json!({ "ok": true, "path": target_path.to_string_lossy().to_string() }),
-                Err(e) => json!({ "error": format!("直接删除文件夹失败: {}", e) })
+                Err(e) => json!({ "error": format!("直接删除文件夹失败: {}", e) }),
             }
         } else {
             match std::fs::remove_file(&target_path) {
                 Ok(_) => json!({ "ok": true, "path": target_path.to_string_lossy().to_string() }),
-                Err(e) => json!({ "error": format!("直接删除文件失败: {}", e) })
+                Err(e) => json!({ "error": format!("直接删除文件失败: {}", e) }),
             }
         }
     }
@@ -1746,7 +1944,7 @@ async fn tool_rename_file(path: &str, new_name: &str, global_file_access: bool) 
         let new_path = parent.join(new_name);
         match fs::rename(&target_path, &new_path) {
             Ok(_) => json!({ "ok": true, "path": new_path.to_string_lossy().to_string() }),
-            Err(e) => json!({ "error": format!("重命名失败: {}", e) })
+            Err(e) => json!({ "error": format!("重命名失败: {}", e) }),
         }
     } else {
         json!({ "error": "无法确定父目录" })
@@ -1759,7 +1957,8 @@ async fn tool_brain_search(query: &str) -> Value {
     // Step 2: 在 Rust 内存中叠加时间衰减 + 类型权重重排
     // Step 3: 返回 Top 5 给 LLM
     if let Ok(db) = rusqlite::Connection::open(super::get_data_dir().join("bob.db")) {
-        let fts_query = query.split_whitespace()
+        let fts_query = query
+            .split_whitespace()
             .map(|w| format!("\"{}\"", w))
             .collect::<Vec<_>>()
             .join(" OR ");
@@ -1855,11 +2054,18 @@ async fn tool_brain_search(query: &str) -> Value {
 
     for entry in walkdir::WalkDir::new(&wiki_dir).into_iter().flatten() {
         let p = entry.path();
-        if p.is_file() && p.extension().map_or(false, |ext| ext == "md" || ext == "txt") {
+        if p.is_file()
+            && p.extension()
+                .map_or(false, |ext| ext == "md" || ext == "txt")
+        {
             if let Ok(content) = fs::read_to_string(p) {
                 if content.to_lowercase().contains(&q) {
-                    let rel_path = p.strip_prefix(&super::get_data_dir()).unwrap_or(p).to_string_lossy().to_string();
-                    
+                    let rel_path = p
+                        .strip_prefix(&super::get_data_dir())
+                        .unwrap_or(p)
+                        .to_string_lossy()
+                        .to_string();
+
                     // 提取匹配的上下文片段
                     let snippet = if let Some(idx) = content.to_lowercase().find(&q) {
                         let start = idx.saturating_sub(40);
@@ -1949,7 +2155,11 @@ fn tool_add_calendar_event(app: &tauri::AppHandle, args: &Value) -> Value {
             if st.contains("-") {
                 db_start_time = Some(st.to_string());
             } else {
-                let st_clean = if st.len() == 5 { format!("{}:00", st) } else { st.to_string() };
+                let st_clean = if st.len() == 5 {
+                    format!("{}:00", st)
+                } else {
+                    st.to_string()
+                };
                 db_start_time = Some(format!("{} {}", date_str, st_clean));
             }
         } else {
@@ -1960,13 +2170,20 @@ fn tool_add_calendar_event(app: &tauri::AppHandle, args: &Value) -> Value {
             if et.contains("-") {
                 db_end_time = Some(et.to_string());
             } else {
-                let et_clean = if et.len() == 5 { format!("{}:00", et) } else { et.to_string() };
+                let et_clean = if et.len() == 5 {
+                    format!("{}:00", et)
+                } else {
+                    et.to_string()
+                };
                 db_end_time = Some(format!("{} {}", date_str, et_clean));
             }
         }
     }
 
-    let description = args.get("description").and_then(|v| v.as_str()).unwrap_or("");
+    let description = args
+        .get("description")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
 
     match conn.execute(
         "INSERT INTO events (id, title, type, status, date, start_time, end_time, description, created_at)
@@ -1990,18 +2207,21 @@ fn tool_read_model_registry(provider_id: &str) -> Value {
     } else {
         return json!({ "error": "model_providers.json 不存在，请重启应用以初始化" });
     };
-    
+
     if provider_id.is_empty() {
         return registry;
     }
-    
+
     // 只返回指定供应商
     if let Some(providers) = registry.get("providers").and_then(|v| v.as_array()) {
-        if let Some(provider) = providers.iter().find(|p| p.get("id").and_then(|v| v.as_str()) == Some(provider_id)) {
+        if let Some(provider) = providers
+            .iter()
+            .find(|p| p.get("id").and_then(|v| v.as_str()) == Some(provider_id))
+        {
             return provider.clone();
         }
     }
-    
+
     json!({ "error": format!("未找到供应商: {}", provider_id) })
 }
 
@@ -2010,23 +2230,29 @@ async fn tool_test_model_endpoint(provider_id: &str, model_id: &str) -> Value {
     if provider_id.is_empty() || model_id.is_empty() {
         return json!({ "error": "provider_id 和 model_id 不能为空" });
     }
-    
+
     // 从注册表获取 base_url
     let path = super::get_data_dir().join("model_providers.json");
-    let registry: Value = match fs::read_to_string(&path).ok().and_then(|d| serde_json::from_str(&d).ok()) {
+    let registry: Value = match fs::read_to_string(&path)
+        .ok()
+        .and_then(|d| serde_json::from_str(&d).ok())
+    {
         Some(r) => r,
         None => return json!({ "error": "无法读取模型注册表" }),
     };
-    
+
     let config = super::read_config();
     let api_keys = config.get("apiKeys").cloned().unwrap_or(json!({}));
     let api_key = match api_keys.get(provider_id).and_then(|v| v.as_str()) {
         Some(k) if !k.is_empty() => k.to_string(),
-        _ => return json!({ "success": false, "model_id": model_id, "error": format!("未配置 {} 的 API Key", provider_id) }),
+        _ => {
+            return json!({ "success": false, "model_id": model_id, "error": format!("未配置 {} 的 API Key", provider_id) })
+        }
     };
-    
+
     let base_url = if let Some(providers) = registry.get("providers").and_then(|v| v.as_array()) {
-        providers.iter()
+        providers
+            .iter()
             .find(|p| p.get("id").and_then(|v| v.as_str()) == Some(provider_id))
             .map(|p| {
                 let base = p.get("base_url").and_then(|v| v.as_str()).unwrap_or("");
@@ -2034,7 +2260,9 @@ async fn tool_test_model_endpoint(provider_id: &str, model_id: &str) -> Value {
                 let variant_key = format!("providerVariant_{}", provider_id);
                 if let Some(variant) = config.get(&variant_key).and_then(|v| v.as_str()) {
                     if !variant.is_empty() && variant != "default" {
-                        if let Some(variants) = p.get("base_url_variants").and_then(|v| v.as_object()) {
+                        if let Some(variants) =
+                            p.get("base_url_variants").and_then(|v| v.as_object())
+                        {
                             if let Some(url) = variants.get(variant).and_then(|v| v.as_str()) {
                                 return url.to_string();
                             }
@@ -2047,42 +2275,54 @@ async fn tool_test_model_endpoint(provider_id: &str, model_id: &str) -> Value {
     } else {
         return json!({ "success": false, "model_id": model_id, "error": "注册表中无供应商信息" });
     };
-    
+
     if base_url.is_empty() {
         return json!({ "success": false, "model_id": model_id, "error": "找不到供应商的 base_url" });
     }
-    
+
     let url = format!("{}/chat/completions", base_url);
-    let client = match reqwest::Client::builder().timeout(std::time::Duration::from_secs(15)).build() {
+    let client = match reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+    {
         Ok(c) => c,
-        Err(e) => return json!({ "success": false, "model_id": model_id, "error": format!("HTTP 客户端错误: {}", e) }),
+        Err(e) => {
+            return json!({ "success": false, "model_id": model_id, "error": format!("HTTP 客户端错误: {}", e) })
+        }
     };
-    
+
     let body = json!({
         "model": model_id,
         "messages": [{ "role": "user", "content": "Hi" }],
         "max_tokens": 5
     });
-    
+
     let start = std::time::Instant::now();
-    let resp = match client.post(&url)
+    let resp = match client
+        .post(&url)
         .header("Content-Type", "application/json")
         .header("Authorization", format!("Bearer {}", api_key))
         .json(&body)
         .send()
-        .await {
+        .await
+    {
         Ok(r) => r,
-        Err(e) => return json!({ "success": false, "model_id": model_id, "error": format!("请求失败: {}", e) }),
+        Err(e) => {
+            return json!({ "success": false, "model_id": model_id, "error": format!("请求失败: {}", e) })
+        }
     };
-    
+
     let latency_ms = start.elapsed().as_millis();
-    
+
     if resp.status().is_success() {
         let data: Value = resp.json().await.unwrap_or(json!({}));
-        let preview = data.pointer("/choices/0/message/content")
+        let preview = data
+            .pointer("/choices/0/message/content")
             .and_then(|v| v.as_str())
             .unwrap_or("")
-            .chars().take(50).collect::<String>();
+            .chars()
+            .take(50)
+            .collect::<String>();
         json!({
             "success": true,
             "model_id": model_id,
@@ -2091,7 +2331,13 @@ async fn tool_test_model_endpoint(provider_id: &str, model_id: &str) -> Value {
         })
     } else {
         let status = resp.status().as_u16();
-        let text: String = resp.text().await.unwrap_or_default().chars().take(200).collect();
+        let text: String = resp
+            .text()
+            .await
+            .unwrap_or_default()
+            .chars()
+            .take(200)
+            .collect();
         json!({
             "success": false,
             "model_id": model_id,
@@ -2105,25 +2351,28 @@ fn tool_update_model_registry(provider_id: &str, models: Value) -> Value {
     if provider_id.is_empty() {
         return json!({ "error": "provider_id 不能为空" });
     }
-    
+
     let models_arr = match models.as_array() {
         Some(arr) => arr,
         None => return json!({ "error": "models 必须是数组" }),
     };
-    
+
     // 校验每个模型至少有 id 字段
     for m in models_arr {
         if m.get("id").and_then(|v| v.as_str()).is_none() {
             return json!({ "error": format!("模型缺少 id 字段: {:?}", m) });
         }
     }
-    
+
     let path = super::get_data_dir().join("model_providers.json");
-    let mut registry: Value = match fs::read_to_string(&path).ok().and_then(|d| serde_json::from_str(&d).ok()) {
+    let mut registry: Value = match fs::read_to_string(&path)
+        .ok()
+        .and_then(|d| serde_json::from_str(&d).ok())
+    {
         Some(r) => r,
         None => return json!({ "error": "无法读取模型注册表" }),
     };
-    
+
     let mut found = false;
     if let Some(providers) = registry.get_mut("providers").and_then(|v| v.as_array_mut()) {
         for p in providers.iter_mut() {
@@ -2134,26 +2383,24 @@ fn tool_update_model_registry(provider_id: &str, models: Value) -> Value {
             }
         }
     }
-    
+
     if !found {
         return json!({ "error": format!("未找到供应商: {}", provider_id) });
     }
-    
+
     registry["last_updated"] = json!(chrono::Local::now().format("%Y-%m-%d").to_string());
-    
+
     match serde_json::to_string_pretty(&registry) {
-        Ok(data) => {
-            match fs::write(&path, data) {
-                Ok(_) => json!({
-                    "ok": true,
-                    "provider": provider_id,
-                    "models_count": models_arr.len(),
-                    "message": format!("已更新 {} 的模型列表，共 {} 个模型", provider_id, models_arr.len())
-                }),
-                Err(e) => json!({ "error": format!("写入文件失败: {}", e) })
-            }
-        }
-        Err(e) => json!({ "error": format!("序列化失败: {}", e) })
+        Ok(data) => match fs::write(&path, data) {
+            Ok(_) => json!({
+                "ok": true,
+                "provider": provider_id,
+                "models_count": models_arr.len(),
+                "message": format!("已更新 {} 的模型列表，共 {} 个模型", provider_id, models_arr.len())
+            }),
+            Err(e) => json!({ "error": format!("写入文件失败: {}", e) }),
+        },
+        Err(e) => json!({ "error": format!("序列化失败: {}", e) }),
     }
 }
 
@@ -2182,9 +2429,15 @@ async fn tool_browse_page(app: &tauri::AppHandle, args: &Value) -> Value {
     }
 
     // 浏览器已启用，执行浏览
-    let wait = args.get("wait_seconds").and_then(|v| v.as_u64()).unwrap_or(3);
+    let wait = args
+        .get("wait_seconds")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(3);
     let click = args.get("click_selector").and_then(|v| v.as_str());
-    let extract = args.get("extract").and_then(|v| v.as_str()).unwrap_or("text");
+    let extract = args
+        .get("extract")
+        .and_then(|v| v.as_str())
+        .unwrap_or("text");
 
     let browser_state = app.state::<std::sync::Arc<super::browser::BrowserState>>();
 

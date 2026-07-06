@@ -22,8 +22,12 @@ pub fn upsert_node(
     source: &str,
     batch_id: &str,
 ) -> Result<(), String> {
-    let source_batches_init = if batch_id.is_empty() { "[]".to_string() } else { format!("[\"{}\"]", batch_id) };
-    
+    let source_batches_init = if batch_id.is_empty() {
+        "[]".to_string()
+    } else {
+        format!("[\"{}\"]", batch_id)
+    };
+
     conn.execute(
         "INSERT INTO kg_nodes (id, label, node_type, summary, source, source_batches)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6)
@@ -61,7 +65,16 @@ pub fn resolve_node_id(conn: &rusqlite::Connection, name: &str, etype: &str) -> 
         }
     }
     // 默认回退：生成基于类型和名称的标准化 ID
-    format!("{}_{}", etype, name.to_lowercase().replace(' ', "_").replace('.', "_").chars().take(60).collect::<String>())
+    format!(
+        "{}_{}",
+        etype,
+        name.to_lowercase()
+            .replace(' ', "_")
+            .replace('.', "_")
+            .chars()
+            .take(60)
+            .collect::<String>()
+    )
 }
 
 /// 插入一条关系边 (忽略重复)
@@ -76,21 +89,30 @@ pub fn insert_edge(
         "INSERT OR IGNORE INTO kg_edges (source_id, target_id, relation, confidence)
          VALUES (?1, ?2, ?3, ?4)",
         params![source_id, target_id, relation, confidence],
-    ).map_err(|e| format!("insert_edge failed: {}", e))?;
+    )
+    .map_err(|e| format!("insert_edge failed: {}", e))?;
     Ok(())
 }
 
 /// 删除一个节点及其所有关联边
 pub fn delete_node(conn: &rusqlite::Connection, id: &str) -> Result<usize, String> {
-    conn.execute("DELETE FROM kg_edges WHERE source_id = ?1 OR target_id = ?1", params![id])
-        .map_err(|e| format!("delete edges failed: {}", e))?;
-    let deleted = conn.execute("DELETE FROM kg_nodes WHERE id = ?1", params![id])
+    conn.execute(
+        "DELETE FROM kg_edges WHERE source_id = ?1 OR target_id = ?1",
+        params![id],
+    )
+    .map_err(|e| format!("delete edges failed: {}", e))?;
+    let deleted = conn
+        .execute("DELETE FROM kg_nodes WHERE id = ?1", params![id])
         .map_err(|e| format!("delete node failed: {}", e))?;
     Ok(deleted)
 }
 
 /// 合并两个节点 (将 alias_id 合并到 primary_id)
-pub fn merge_nodes(conn: &rusqlite::Connection, primary_id: &str, alias_id: &str) -> Result<(), String> {
+pub fn merge_nodes(
+    conn: &rusqlite::Connection,
+    primary_id: &str,
+    alias_id: &str,
+) -> Result<(), String> {
     if primary_id == alias_id {
         return Ok(());
     }
@@ -99,32 +121,39 @@ pub fn merge_nodes(conn: &rusqlite::Connection, primary_id: &str, alias_id: &str
     conn.execute(
         "UPDATE OR IGNORE kg_edges SET source_id = ?1 WHERE source_id = ?2",
         params![primary_id, alias_id],
-    ).map_err(|e| format!("update source edges failed: {}", e))?;
+    )
+    .map_err(|e| format!("update source edges failed: {}", e))?;
 
     // 2. 将所有 target_id 为 alias_id 的边更新为 primary_id
     conn.execute(
         "UPDATE OR IGNORE kg_edges SET target_id = ?1 WHERE target_id = ?2",
         params![primary_id, alias_id],
-    ).map_err(|e| format!("update target edges failed: {}", e))?;
+    )
+    .map_err(|e| format!("update target edges failed: {}", e))?;
 
     // 3. 删除残留冲突边
     conn.execute(
         "DELETE FROM kg_edges WHERE source_id = ?1 OR target_id = ?1",
         params![alias_id],
-    ).map_err(|e| format!("delete residual edges failed: {}", e))?;
+    )
+    .map_err(|e| format!("delete residual edges failed: {}", e))?;
 
     // 4. 将 alias_id 的 label 加入 primary_id 的 metadata.aliases
-    let alias_label: String = conn.query_row(
-        "SELECT label FROM kg_nodes WHERE id = ?1",
-        params![alias_id],
-        |row| row.get(0),
-    ).map_err(|e| format!("get alias label failed: {}", e))?;
+    let alias_label: String = conn
+        .query_row(
+            "SELECT label FROM kg_nodes WHERE id = ?1",
+            params![alias_id],
+            |row| row.get(0),
+        )
+        .map_err(|e| format!("get alias label failed: {}", e))?;
 
-    let primary_meta: String = conn.query_row(
-        "SELECT metadata FROM kg_nodes WHERE id = ?1",
-        params![primary_id],
-        |row| row.get(0),
-    ).unwrap_or_else(|_| "{}".to_string());
+    let primary_meta: String = conn
+        .query_row(
+            "SELECT metadata FROM kg_nodes WHERE id = ?1",
+            params![primary_id],
+            |row| row.get(0),
+        )
+        .unwrap_or_else(|_| "{}".to_string());
 
     let mut meta_val: Value = serde_json::from_str(&primary_meta).unwrap_or(json!({}));
     if let Some(obj) = meta_val.as_object_mut() {
@@ -136,11 +165,12 @@ pub fn merge_nodes(conn: &rusqlite::Connection, primary_id: &str, alias_id: &str
             }
         }
     }
-    
+
     conn.execute(
         "UPDATE kg_nodes SET metadata = ?1 WHERE id = ?2",
         params![meta_val.to_string(), primary_id],
-    ).map_err(|e| format!("update primary metadata failed: {}", e))?;
+    )
+    .map_err(|e| format!("update primary metadata failed: {}", e))?;
 
     // 5. 删除 alias 节点
     conn.execute("DELETE FROM kg_nodes WHERE id = ?1", params![alias_id])
@@ -150,51 +180,73 @@ pub fn merge_nodes(conn: &rusqlite::Connection, primary_id: &str, alias_id: &str
 }
 
 /// 删除一条边
-pub fn delete_edge(conn: &rusqlite::Connection, source_id: &str, target_id: &str, relation: &str) -> Result<usize, String> {
+pub fn delete_edge(
+    conn: &rusqlite::Connection,
+    source_id: &str,
+    target_id: &str,
+    relation: &str,
+) -> Result<usize, String> {
     conn.execute(
         "DELETE FROM kg_edges WHERE source_id = ?1 AND target_id = ?2 AND relation = ?3",
         params![source_id, target_id, relation],
-    ).map_err(|e| format!("delete edge failed: {}", e))
+    )
+    .map_err(|e| format!("delete edge failed: {}", e))
 }
 
 /// 按来源批次智能清除知识图谱节点
-pub fn remove_source_batch(conn: &rusqlite::Connection, batch_id: &str) -> Result<(usize, usize), String> {
-    let mut stmt = conn.prepare(
-        "SELECT id, source_batches FROM kg_nodes WHERE INSTR(source_batches, ?1) > 0"
-    ).map_err(|e| format!("prepare failed: {}", e))?;
-    
-    let mut rows = stmt.query(params![batch_id]).map_err(|e| format!("query failed: {}", e))?;
-    
+pub fn remove_source_batch(
+    conn: &rusqlite::Connection,
+    batch_id: &str,
+) -> Result<(usize, usize), String> {
+    let mut stmt = conn
+        .prepare("SELECT id, source_batches FROM kg_nodes WHERE INSTR(source_batches, ?1) > 0")
+        .map_err(|e| format!("prepare failed: {}", e))?;
+
+    let mut rows = stmt
+        .query(params![batch_id])
+        .map_err(|e| format!("query failed: {}", e))?;
+
     let mut to_update = Vec::new();
     let mut to_delete = Vec::new();
-    
+
     while let Ok(Some(row)) = rows.next() {
         let id: String = row.get(0).unwrap_or_default();
         let batches_str: String = row.get(1).unwrap_or_else(|_| "[]".to_string());
-        
+
         let mut batches: Vec<String> = serde_json::from_str(&batches_str).unwrap_or_default();
         batches.retain(|b| b != batch_id);
-        
+
         if batches.is_empty() {
             to_delete.push(id);
         } else {
-            let new_batches_str = serde_json::to_string(&batches).unwrap_or_else(|_| "[]".to_string());
+            let new_batches_str =
+                serde_json::to_string(&batches).unwrap_or_else(|_| "[]".to_string());
             to_update.push((id, new_batches_str));
         }
     }
-    
+
     let mut nodes_deleted = 0;
     let mut edges_deleted = 0;
-    
+
     for id in &to_delete {
-        edges_deleted += conn.execute("DELETE FROM kg_edges WHERE source_id = ?1 OR target_id = ?1", params![id]).unwrap_or(0);
-        nodes_deleted += conn.execute("DELETE FROM kg_nodes WHERE id = ?1", params![id]).unwrap_or(0);
+        edges_deleted += conn
+            .execute(
+                "DELETE FROM kg_edges WHERE source_id = ?1 OR target_id = ?1",
+                params![id],
+            )
+            .unwrap_or(0);
+        nodes_deleted += conn
+            .execute("DELETE FROM kg_nodes WHERE id = ?1", params![id])
+            .unwrap_or(0);
     }
-    
+
     for (id, new_batches) in to_update {
-        let _ = conn.execute("UPDATE kg_nodes SET source_batches = ?1 WHERE id = ?2", params![new_batches, id]);
+        let _ = conn.execute(
+            "UPDATE kg_nodes SET source_batches = ?1 WHERE id = ?2",
+            params![new_batches, id],
+        );
     }
-    
+
     Ok((nodes_deleted, edges_deleted))
 }
 
@@ -206,14 +258,14 @@ pub fn query_subgraph(conn: &rusqlite::Connection, term: &str, max_hops: usize) 
     let like_term = format!("%{}%", term);
     let mut stmt = match conn.prepare(
         "SELECT id, label, node_type, summary, source FROM kg_nodes
-         WHERE id LIKE ?1 OR label LIKE ?1 LIMIT 20"
+         WHERE id LIKE ?1 OR label LIKE ?1 LIMIT 20",
     ) {
         Ok(s) => s,
         Err(e) => return json!({"error": format!("query failed: {}", e)}),
     };
 
-    let seeds: Vec<(String, String, String, String, String)> = match stmt
-        .query_map(params![like_term], |row| {
+    let seeds: Vec<(String, String, String, String, String)> =
+        match stmt.query_map(params![like_term], |row| {
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, String>(1)?,
@@ -222,9 +274,9 @@ pub fn query_subgraph(conn: &rusqlite::Connection, term: &str, max_hops: usize) 
                 row.get::<_, String>(4)?,
             ))
         }) {
-        Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
-        Err(_) => vec![],
-    };
+            Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
+            Err(_) => vec![],
+        };
 
     if seeds.is_empty() {
         return json!({"nodes": [], "edges": [], "seed_count": 0});
@@ -239,10 +291,13 @@ pub fn query_subgraph(conn: &rusqlite::Connection, term: &str, max_hops: usize) 
     for (id, label, node_type, summary, source) in &seeds {
         visited.insert(id.clone());
         queue.push_back((id.clone(), 0));
-        result_nodes.insert(id.clone(), json!({
-            "id": id, "label": label, "type": node_type,
-            "summary": summary, "source": source, "is_seed": true
-        }));
+        result_nodes.insert(
+            id.clone(),
+            json!({
+                "id": id, "label": label, "type": node_type,
+                "summary": summary, "source": source, "is_seed": true
+            }),
+        );
     }
 
     while let Some((node_id, depth)) = queue.pop_front() {
@@ -253,10 +308,10 @@ pub fn query_subgraph(conn: &rusqlite::Connection, term: &str, max_hops: usize) 
         // 查询从 node_id 出发的边 (双向)
         if let Ok(mut edge_stmt) = conn.prepare(
             "SELECT source_id, target_id, relation, confidence FROM kg_edges
-             WHERE source_id = ?1 OR target_id = ?1"
+             WHERE source_id = ?1 OR target_id = ?1",
         ) {
-            let edges: Vec<(String, String, String, f64)> = match edge_stmt
-                .query_map(params![node_id], |row| {
+            let edges: Vec<(String, String, String, f64)> =
+                match edge_stmt.query_map(params![node_id], |row| {
                     Ok((
                         row.get::<_, String>(0)?,
                         row.get::<_, String>(1)?,
@@ -264,9 +319,9 @@ pub fn query_subgraph(conn: &rusqlite::Connection, term: &str, max_hops: usize) 
                         row.get::<_, f64>(3)?,
                     ))
                 }) {
-                Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
-                Err(_) => vec![],
-            };
+                    Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
+                    Err(_) => vec![],
+                };
 
             for (src, tgt, rel, conf) in edges {
                 result_edges.push(json!({
@@ -281,7 +336,7 @@ pub fn query_subgraph(conn: &rusqlite::Connection, term: &str, max_hops: usize) 
 
                     // 加载邻居节点信息
                     if let Ok(mut n_stmt) = conn.prepare(
-                        "SELECT id, label, node_type, summary, source FROM kg_nodes WHERE id = ?1"
+                        "SELECT id, label, node_type, summary, source FROM kg_nodes WHERE id = ?1",
                     ) {
                         if let Ok(Some(row)) = n_stmt.query_row(params![neighbor], |row| {
                             Ok(Some(json!({
@@ -303,10 +358,13 @@ pub fn query_subgraph(conn: &rusqlite::Connection, term: &str, max_hops: usize) 
 
     // 去重边
     let mut seen_edges: HashSet<String> = HashSet::new();
-    let unique_edges: Vec<Value> = result_edges.into_iter().filter(|e| {
-        let key = format!("{}->{}:{}", e["source"], e["target"], e["relation"]);
-        seen_edges.insert(key)
-    }).collect();
+    let unique_edges: Vec<Value> = result_edges
+        .into_iter()
+        .filter(|e| {
+            let key = format!("{}->{}:{}", e["source"], e["target"], e["relation"]);
+            seen_edges.insert(key)
+        })
+        .collect();
 
     json!({
         "nodes": result_nodes.values().collect::<Vec<_>>(),
@@ -318,12 +376,18 @@ pub fn query_subgraph(conn: &rusqlite::Connection, term: &str, max_hops: usize) 
 // ── 图统计 ──────────────────────────────────────────────────
 
 pub fn get_stats(conn: &rusqlite::Connection) -> Value {
-    let node_count: i64 = conn.query_row("SELECT COUNT(*) FROM kg_nodes", [], |r| r.get(0)).unwrap_or(0);
-    let edge_count: i64 = conn.query_row("SELECT COUNT(*) FROM kg_edges", [], |r| r.get(0)).unwrap_or(0);
+    let node_count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM kg_nodes", [], |r| r.get(0))
+        .unwrap_or(0);
+    let edge_count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM kg_edges", [], |r| r.get(0))
+        .unwrap_or(0);
 
     // 类型分布
     let mut type_dist: Vec<Value> = Vec::new();
-    if let Ok(mut stmt) = conn.prepare("SELECT node_type, COUNT(*) FROM kg_nodes GROUP BY node_type ORDER BY COUNT(*) DESC") {
+    if let Ok(mut stmt) = conn.prepare(
+        "SELECT node_type, COUNT(*) FROM kg_nodes GROUP BY node_type ORDER BY COUNT(*) DESC",
+    ) {
         if let Ok(rows) = stmt.query_map([], |row| {
             Ok(json!({"type": row.get::<_, String>(0)?, "count": row.get::<_, i64>(1)?}))
         }) {
@@ -333,7 +397,9 @@ pub fn get_stats(conn: &rusqlite::Connection) -> Value {
 
     // 关系类型分布
     let mut rel_dist: Vec<Value> = Vec::new();
-    if let Ok(mut stmt) = conn.prepare("SELECT relation, COUNT(*) FROM kg_edges GROUP BY relation ORDER BY COUNT(*) DESC") {
+    if let Ok(mut stmt) = conn
+        .prepare("SELECT relation, COUNT(*) FROM kg_edges GROUP BY relation ORDER BY COUNT(*) DESC")
+    {
         if let Ok(rows) = stmt.query_map([], |row| {
             Ok(json!({"relation": row.get::<_, String>(0)?, "count": row.get::<_, i64>(1)?}))
         }) {
@@ -346,7 +412,7 @@ pub fn get_stats(conn: &rusqlite::Connection) -> Value {
     if let Ok(mut stmt) = conn.prepare(
         "SELECT n.id, n.label, n.node_type,
                 (SELECT COUNT(*) FROM kg_edges WHERE source_id = n.id OR target_id = n.id) as degree
-         FROM kg_nodes n ORDER BY degree DESC LIMIT 5"
+         FROM kg_nodes n ORDER BY degree DESC LIMIT 5",
     ) {
         if let Ok(rows) = stmt.query_map([], |row| {
             Ok(json!({
@@ -388,7 +454,8 @@ pub fn get_stats(conn: &rusqlite::Connection) -> Value {
 /// 获取完整图谱 (节点 + 边)，用于前端 vis.js 渲染
 pub fn get_full_graph(conn: &rusqlite::Connection) -> Value {
     let mut nodes: Vec<Value> = Vec::new();
-    if let Ok(mut stmt) = conn.prepare("SELECT id, label, node_type, summary, source FROM kg_nodes") {
+    if let Ok(mut stmt) = conn.prepare("SELECT id, label, node_type, summary, source FROM kg_nodes")
+    {
         if let Ok(rows) = stmt.query_map([], |row| {
             Ok(json!({
                 "id": row.get::<_, String>(0)?,
@@ -403,7 +470,9 @@ pub fn get_full_graph(conn: &rusqlite::Connection) -> Value {
     }
 
     let mut edges: Vec<Value> = Vec::new();
-    if let Ok(mut stmt) = conn.prepare("SELECT source_id, target_id, relation, confidence FROM kg_edges") {
+    if let Ok(mut stmt) =
+        conn.prepare("SELECT source_id, target_id, relation, confidence FROM kg_edges")
+    {
         if let Ok(rows) = stmt.query_map([], |row| {
             Ok(json!({
                 "source": row.get::<_, String>(0)?,
@@ -469,9 +538,9 @@ pub fn kg_backfill(db: State<DbState>) -> Value {
     };
 
     // 读取 wiki_fts 中所有条目
-    let mut stmt = match conn.prepare(
-        "SELECT file_name, source_path, summary, keywords, category FROM wiki_fts"
-    ) {
+    let mut stmt = match conn
+        .prepare("SELECT file_name, source_path, summary, keywords, category FROM wiki_fts")
+    {
         Ok(s) => s,
         Err(e) => return json!({"error": format!("query failed: {}", e)}),
     };
@@ -504,20 +573,33 @@ pub fn kg_backfill(db: State<DbState>) -> Value {
         };
 
         // 生成节点 ID
-        let node_id = format!("{}_{}", node_type,
-            file_name.to_lowercase()
+        let node_id = format!(
+            "{}_{}",
+            node_type,
+            file_name
+                .to_lowercase()
                 .replace(' ', "_")
                 .replace('.', "_")
-                .chars().take(60).collect::<String>()
+                .chars()
+                .take(60)
+                .collect::<String>()
         );
 
-        let source = if source_path.is_empty() { file_name } else { source_path };
+        let source = if source_path.is_empty() {
+            file_name
+        } else {
+            source_path
+        };
         let _ = upsert_node(&conn, &node_id, file_name, node_type, summary, source, "");
         node_count += 1;
 
         // 从 keywords 创建 tag 节点 + 边
         if !keywords.is_empty() {
-            for kw in keywords.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()) {
+            for kw in keywords
+                .split(',')
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+            {
                 let tag_id = format!("tag_{}", kw.to_lowercase().replace(' ', "_"));
                 let _ = upsert_node(&conn, &tag_id, kw, "tag", "", "", "");
                 let _ = insert_edge(&conn, &node_id, &tag_id, "tagged_as", 0.7);
@@ -529,13 +611,16 @@ pub fn kg_backfill(db: State<DbState>) -> Value {
     // 同类型 keyword 节点之间创建 related_to 边 (共现关系)
     // 简单策略: 同一文件的关键词互相连接
     for (file_name, _, _, keywords, _) in &entries {
-        if keywords.is_empty() { continue; }
-        let kws: Vec<String> = keywords.split(',')
+        if keywords.is_empty() {
+            continue;
+        }
+        let kws: Vec<String> = keywords
+            .split(',')
             .map(|s| format!("tag_{}", s.trim().to_lowercase().replace(' ', "_")))
             .filter(|s| s.len() > 4)
             .collect();
         for i in 0..kws.len().min(3) {
-            for j in (i+1)..kws.len().min(4) {
+            for j in (i + 1)..kws.len().min(4) {
                 let _ = insert_edge(&conn, &kws[i], &kws[j], "co_occurs_in", 0.5);
                 edge_count += 1;
             }

@@ -20,13 +20,19 @@ struct EncryptedKeyData {
 }
 
 fn get_keys_path(app: &AppHandle) -> PathBuf {
-    app.path().app_data_dir().unwrap_or_else(|_| PathBuf::from(".")).join("workspace_config").join("device_identity.json")
+    app.path()
+        .app_data_dir()
+        .unwrap_or_else(|_| PathBuf::from("."))
+        .join("workspace_config")
+        .join("device_identity.json")
 }
 
 fn derive_key(pin: &str, salt_str: &str) -> Result<[u8; 32], String> {
     let argon2 = Argon2::default();
     let mut key = [0u8; 32];
-    argon2.hash_password_into(pin.as_bytes(), salt_str.as_bytes(), &mut key).map_err(|e| e.to_string())?;
+    argon2
+        .hash_password_into(pin.as_bytes(), salt_str.as_bytes(), &mut key)
+        .map_err(|e| e.to_string())?;
     Ok(key)
 }
 
@@ -36,7 +42,11 @@ pub fn check_device_keys_initialized(app: AppHandle) -> bool {
 }
 
 #[tauri::command]
-pub fn init_device_keys(pin: String, app: AppHandle, state: tauri::State<'_, DeviceIdentityState>) -> Result<(), String> {
+pub fn init_device_keys(
+    pin: String,
+    app: AppHandle,
+    state: tauri::State<'_, DeviceIdentityState>,
+) -> Result<(), String> {
     let path = get_keys_path(&app);
     if path.exists() {
         return Err("Keys already initialized. Use unlock_device_keys instead.".to_string());
@@ -62,30 +72,36 @@ pub fn init_device_keys(pin: String, app: AppHandle, state: tauri::State<'_, Dev
 
     // 4. Encrypt the private key
     let nonce = Nonce::from_slice(&nonce_bytes);
-    let ciphertext = cipher.encrypt(nonce, key_bytes.as_ref()).map_err(|e| e.to_string())?;
+    let ciphertext = cipher
+        .encrypt(nonce, key_bytes.as_ref())
+        .map_err(|e| e.to_string())?;
 
     // 5. Save to disk
     if let Some(parent) = path.parent() {
         let _ = fs::create_dir_all(parent);
     }
-    
+
     let data = EncryptedKeyData {
         salt,
         nonce: nonce_str,
         ciphertext: BASE64.encode(ciphertext),
     };
-    
+
     let json_str = serde_json::to_string_pretty(&data).map_err(|e| e.to_string())?;
     fs::write(path, json_str).map_err(|e| e.to_string())?;
 
     // 6. Keep in memory
     *state.0.lock().unwrap() = Some(signing_key);
-    
+
     Ok(())
 }
 
 #[tauri::command]
-pub fn unlock_device_keys(pin: String, app: AppHandle, state: tauri::State<'_, DeviceIdentityState>) -> Result<(), String> {
+pub fn unlock_device_keys(
+    pin: String,
+    app: AppHandle,
+    state: tauri::State<'_, DeviceIdentityState>,
+) -> Result<(), String> {
     let path = get_keys_path(&app);
     if !path.exists() {
         return Err("Keys not initialized.".to_string());
@@ -101,34 +117,39 @@ pub fn unlock_device_keys(pin: String, app: AppHandle, state: tauri::State<'_, D
     let cipher = Aes256Gcm::new_from_slice(&aes_key).map_err(|e| e.to_string())?;
     let nonce = Nonce::from_slice(&nonce_bytes);
 
-    let key_bytes = cipher.decrypt(nonce, ciphertext.as_ref()).map_err(|_| "Incorrect PIN".to_string())?;
-    
+    let key_bytes = cipher
+        .decrypt(nonce, ciphertext.as_ref())
+        .map_err(|_| "Incorrect PIN".to_string())?;
+
     if key_bytes.len() != 32 {
         return Err("Invalid decrypted key length".to_string());
     }
 
     let mut fixed_key = [0u8; 32];
     fixed_key.copy_from_slice(&key_bytes);
-    
+
     let signing_key = SigningKey::from_bytes(&fixed_key);
-    
+
     *state.0.lock().unwrap() = Some(signing_key);
-    
+
     Ok(())
 }
 
 #[tauri::command]
-pub fn reset_device_keys(app: AppHandle, state: tauri::State<'_, DeviceIdentityState>) -> Result<(), String> {
+pub fn reset_device_keys(
+    app: AppHandle,
+    state: tauri::State<'_, DeviceIdentityState>,
+) -> Result<(), String> {
     // 1. Tell VPS to unregister (placeholder for now, will implement when relay is ready)
     // 2. Remove local file
     let path = get_keys_path(&app);
     if path.exists() {
         let _ = fs::remove_file(path);
     }
-    
+
     // 3. Clear memory
     *state.0.lock().unwrap() = None;
-    
+
     Ok(())
 }
 
@@ -151,10 +172,12 @@ fn get_local_ip() -> Option<String> {
 }
 
 #[tauri::command]
-pub fn get_pairing_payload(state: tauri::State<'_, DeviceIdentityState>) -> Result<PairingPayload, String> {
+pub fn get_pairing_payload(
+    state: tauri::State<'_, DeviceIdentityState>,
+) -> Result<PairingPayload, String> {
     let guard = state.0.lock().unwrap();
     let signing_key = guard.as_ref().ok_or("Keys not unlocked")?;
-    
+
     let verifying_key = VerifyingKey::from(signing_key);
     let pub_key_bytes = verifying_key.to_bytes();
     let b64_pub = BASE64.encode(pub_key_bytes);
@@ -164,7 +187,9 @@ pub fn get_pairing_payload(state: tauri::State<'_, DeviceIdentityState>) -> Resu
         local_ips.push(ip);
     }
 
-    let relay = option_env!("BOB_RELAY_SECRET").map(|_| "wss://relay.bobbik.org").unwrap_or("ws://127.0.0.1:8765");
+    let relay = option_env!("BOB_RELAY_SECRET")
+        .map(|_| "wss://relay.bobbik.org")
+        .unwrap_or("wss://relay.bobbik.org");
 
     Ok(PairingPayload {
         device_id: b64_pub.clone(),

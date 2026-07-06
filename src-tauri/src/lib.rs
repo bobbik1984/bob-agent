@@ -1,51 +1,51 @@
 // Force rebuild to embed latest dist assets
-mod llm;
-mod filesystem;
-mod plugins;
-mod web;
-mod dream;
+mod assertions;
+mod browser;
 mod calendar;
-mod sidecar;
-mod outbox;
-mod scheduler;
-mod tools;
+mod candle_engine;
+mod connector;
+mod crypto;
+mod db;
+mod discord;
+mod doctor;
+mod dream;
+mod evolution;
+mod exports;
+mod file_share;
+mod filesystem;
+mod gcp_auth;
+mod gmail;
+mod goal;
+mod google_calendar;
+mod http_api;
+pub mod im_sessions;
 mod kb_extractor;
 mod kb_indexer;
-mod db;
-mod http_api;
-mod wechat;
 mod keychain;
-mod browser;
-mod doctor;
-mod gcp_auth;
-mod evolution;
-mod pdf_renderer;
-mod mcp;
-mod connector;
-mod lark;
-mod google_calendar;
-mod gmail;
-mod exports;
-mod telegram;
-mod discord;
-mod crypto;
 mod kg;
-pub mod im_sessions;
-mod file_share;
-mod web_drop;
-mod goal;
-mod assertions;
-mod notebook;
-pub mod tunnel;
+mod lark;
+mod llm;
+mod mcp;
 mod model_manager;
-mod candle_engine;
+mod notebook;
+mod outbox;
+mod pdf_renderer;
+mod plugins;
+mod scheduler;
+mod sidecar;
+mod telegram;
+mod tools;
+pub mod tunnel;
+mod web;
+mod web_drop;
+mod wechat;
 
-use tauri::Manager;
+use percent_encoding::percent_decode_str;
 use serde_json::{json, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use percent_encoding::percent_decode_str;
+use tauri::Manager;
 
 // ═══════════════════════════════════════════════════════════
 // 数据目录与配置管理
@@ -99,7 +99,11 @@ pub(crate) fn write_log_with_rotation(log_path: &Path, message: &str, max_size_b
         }
     }
     use std::io::Write;
-    if let Ok(mut f) = fs::OpenOptions::new().create(true).append(true).open(log_path) {
+    if let Ok(mut f) = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(log_path)
+    {
         let _ = f.write_all(message.as_bytes());
     }
 }
@@ -167,13 +171,13 @@ pub(crate) fn now_ms() -> i64 {
 async fn system_take_screenshot(app_handle: tauri::AppHandle) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
-        use windows_sys::Win32::System::DataExchange::GetClipboardSequenceNumber;
         use std::time::Duration;
         use tauri::Manager;
+        use windows_sys::Win32::System::DataExchange::GetClipboardSequenceNumber;
 
         // 获取主窗口
         let window = app_handle.get_webview_window("main");
-        
+
         // 记录截图前的剪贴板序列号
         let initial_seq = unsafe { GetClipboardSequenceNumber() };
 
@@ -213,7 +217,10 @@ async fn system_take_screenshot(app_handle: tauri::AppHandle) -> Result<(), Stri
 #[tauri::command]
 fn system_is_setup_complete() -> bool {
     let config = read_config();
-    config.get("onboarded").and_then(|v| v.as_bool()).unwrap_or(false)
+    config
+        .get("onboarded")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
         || config.get("model").is_some()
 }
 
@@ -246,13 +253,42 @@ fn config_get_all() -> Value {
 // ═══════════════════════════════════════════════════════════
 
 #[tauri::command]
-async fn llm_chat(messages: Vec<Value>, conversation_id: Option<String>, global_file_access: bool, agent_mode: String, app: tauri::AppHandle) -> Value {
-    llm::stream_chat(app, messages, conversation_id, None, global_file_access, agent_mode).await
+async fn llm_chat(
+    messages: Vec<Value>,
+    conversation_id: Option<String>,
+    global_file_access: bool,
+    agent_mode: String,
+    app: tauri::AppHandle,
+) -> Value {
+    llm::stream_chat(
+        app,
+        messages,
+        conversation_id,
+        None,
+        global_file_access,
+        agent_mode,
+    )
+    .await
 }
 
 #[tauri::command]
-async fn llm_vision(messages: Vec<Value>, image_base64s: Vec<String>, conversation_id: Option<String>, global_file_access: bool, agent_mode: String, app: tauri::AppHandle) -> Value {
-    llm::stream_vision(app, messages, image_base64s, conversation_id, global_file_access, agent_mode).await
+async fn llm_vision(
+    messages: Vec<Value>,
+    image_base64s: Vec<String>,
+    conversation_id: Option<String>,
+    global_file_access: bool,
+    agent_mode: String,
+    app: tauri::AppHandle,
+) -> Value {
+    llm::stream_vision(
+        app,
+        messages,
+        image_base64s,
+        conversation_id,
+        global_file_access,
+        agent_mode,
+    )
+    .await
 }
 
 #[tauri::command]
@@ -286,7 +322,13 @@ fn system_set_api_key(provider_id: String, api_key: String) -> Value {
 }
 
 #[tauri::command]
-fn system_add_custom_model(model_id: String, display_name: String, provider: String, base_url: String, api_key: String) -> Value {
+fn system_add_custom_model(
+    model_id: String,
+    display_name: String,
+    provider: String,
+    base_url: String,
+    api_key: String,
+) -> Value {
     llm::add_custom_model(model_id, display_name, provider, base_url, api_key)
 }
 
@@ -386,7 +428,9 @@ fn system_open_file(file_path: String) -> bool {
 fn system_show_in_folder(file_path: String) -> bool {
     let p = Path::new(&file_path);
     let folder = if p.is_file() {
-        p.parent().map(|pp| pp.to_string_lossy().to_string()).unwrap_or(file_path.clone())
+        p.parent()
+            .map(|pp| pp.to_string_lossy().to_string())
+            .unwrap_or(file_path.clone())
     } else {
         file_path.clone()
     };
@@ -411,7 +455,8 @@ struct ProjectInfo {
 #[tauri::command]
 fn system_check_project_index(project_name: String) -> Option<String> {
     // 1. 尝试从全局实体注册表加载别名和准确路径
-    let registry_path = r"D:\OneDrive\Learning\Code\Gemini\Assistant\common\knowledge\entity_registry.yaml";
+    let registry_path =
+        r"D:\OneDrive\Learning\Code\Gemini\Assistant\common\knowledge\entity_registry.yaml";
     if let Ok(content) = std::fs::read_to_string(registry_path) {
         if let Ok(registry) = serde_yaml::from_str::<EntityRegistry>(&content) {
             if let Some(projects) = registry.projects {
@@ -442,13 +487,13 @@ fn system_check_project_index(project_name: String) -> Option<String> {
         r"C:\OneDrive\Projects",
     ];
     let possible_files = vec!["index.html", "template.html"];
-    
+
     let mut names_to_check = vec![project_name.clone()];
     if !project_name.ends_with("项目") {
         names_to_check.push(format!("{}项目", project_name));
         names_to_check.push(format!("{}商业项目", project_name));
     }
-    
+
     for base in base_paths {
         for name in &names_to_check {
             for file in &possible_files {
@@ -466,7 +511,10 @@ fn system_check_project_index(project_name: String) -> Option<String> {
 fn open_path_in_explorer(path: &str) -> bool {
     #[cfg(target_os = "windows")]
     {
-        std::process::Command::new("explorer").arg(path).spawn().is_ok()
+        std::process::Command::new("explorer")
+            .arg(path)
+            .spawn()
+            .is_ok()
     }
     #[cfg(target_os = "macos")]
     {
@@ -474,7 +522,10 @@ fn open_path_in_explorer(path: &str) -> bool {
     }
     #[cfg(target_os = "linux")]
     {
-        std::process::Command::new("xdg-open").arg(path).spawn().is_ok()
+        std::process::Command::new("xdg-open")
+            .arg(path)
+            .spawn()
+            .is_ok()
     }
     #[cfg(any(target_os = "android", target_os = "ios"))]
     {
@@ -492,7 +543,9 @@ fn system_get_tool_statuses() -> Value {
 
     // 检查 Tavily
     let tavily_ok = keys_map.map_or(false, |m| {
-        m.get("TAVILY_API_KEY").and_then(|v| v.as_str()).map_or(false, |s| !s.is_empty())
+        m.get("TAVILY_API_KEY")
+            .and_then(|v| v.as_str())
+            .map_or(false, |s| !s.is_empty())
     });
     statuses.push(json!({
         "name": "Web Search (Tavily)",
@@ -503,7 +556,9 @@ fn system_get_tool_statuses() -> Value {
 
     // 检查 TinyFish
     let tinyfish_ok = keys_map.map_or(false, |m| {
-        m.get("TINYFISH_API_KEY").and_then(|v| v.as_str()).map_or(false, |s| !s.is_empty())
+        m.get("TINYFISH_API_KEY")
+            .and_then(|v| v.as_str())
+            .map_or(false, |s| !s.is_empty())
     });
     statuses.push(json!({
         "name": "Web Fetch (TinyFish)",
@@ -513,9 +568,10 @@ fn system_get_tool_statuses() -> Value {
     }));
 
     // 检查外部技能目录
-    let skills_ok = config.get("externalSkillsDir").and_then(|v| v.as_str()).map_or(false, |s| {
-        !s.is_empty() && Path::new(s).exists()
-    });
+    let skills_ok = config
+        .get("externalSkillsDir")
+        .and_then(|v| v.as_str())
+        .map_or(false, |s| !s.is_empty() && Path::new(s).exists());
     statuses.push(json!({
         "name": "External Skills",
         "isActive": skills_ok,
@@ -560,7 +616,6 @@ fn system_write_outbox(operations: Vec<Value>) -> Value {
 // Tauri Commands — 闪念速记 (Quick Notes)
 // ═══════════════════════════════════════════════════════════
 
-
 // ═══════════════════════════════════════════════════════════
 // Tauri Commands — 知识库与本地引擎路径定位/迁移 (T-1309/T-1310)
 // ═══════════════════════════════════════════════════════════
@@ -568,7 +623,10 @@ fn system_write_outbox(operations: Vec<Value>) -> Value {
 #[tauri::command]
 fn system_open_llm_engine_dir(app: tauri::AppHandle) -> bool {
     use tauri::Manager;
-    if let Ok(resource_dir) = app.path().resolve("llm-engine", tauri::path::BaseDirectory::Resource) {
+    if let Ok(resource_dir) = app
+        .path()
+        .resolve("llm-engine", tauri::path::BaseDirectory::Resource)
+    {
         let _ = fs::create_dir_all(&resource_dir);
         open_path_in_explorer(resource_dir.to_string_lossy().as_ref())
     } else {
@@ -577,7 +635,11 @@ fn system_open_llm_engine_dir(app: tauri::AppHandle) -> bool {
 }
 
 #[tauri::command]
-async fn system_migrate_wiki_dir(old_dir: String, new_dir: String, mode: String) -> Result<Value, String> {
+async fn system_migrate_wiki_dir(
+    old_dir: String,
+    new_dir: String,
+    mode: String,
+) -> Result<Value, String> {
     let old_path = if old_dir.is_empty() {
         get_wiki_dir()
     } else {
@@ -626,10 +688,10 @@ fn migrate_directory_recursive(src: &Path, dst: &Path, mode: &str) -> Result<(),
                             .map_err(|e| format!("无法读取源文件 {:?}: {}", path, e))?;
                         let mut target_content = fs::read_to_string(&dest_path)
                             .map_err(|e| format!("无法读取目标文件 {:?}: {}", dest_path, e))?;
-                        
+
                         target_content.push_str("\n\n---\n\n# 合并的旧文件内容\n\n");
                         target_content.push_str(&old_content);
-                        
+
                         fs::write(&dest_path, target_content)
                             .map_err(|e| format!("无法写入合并文件 {:?}: {}", dest_path, e))?;
                     } else if name_str.ends_with(".json") {
@@ -654,7 +716,8 @@ fn migrate_directory_recursive(src: &Path, dst: &Path, mode: &str) -> Result<(),
 
 fn merge_list_or_log_file(src: &Path, dst: &Path) -> Result<(), String> {
     let src_content = fs::read_to_string(src).map_err(|e| format!("无法读取源列表文件: {}", e))?;
-    let dst_content = fs::read_to_string(dst).map_err(|e| format!("无法读取目标列表文件: {}", e))?;
+    let dst_content =
+        fs::read_to_string(dst).map_err(|e| format!("无法读取目标列表文件: {}", e))?;
 
     let mut lines: Vec<String> = dst_content.lines().map(|s| s.to_string()).collect();
     for line in src_content.lines() {
@@ -722,10 +785,22 @@ pub fn run() {
 
     let browser_state = std::sync::Arc::new(browser::BrowserState::new());
 
-    let mut builder = tauri::Builder::default()
+    let mut builder = tauri::Builder::default();
+    #[cfg(mobile)]
+    {
+        builder = builder.plugin(tauri_plugin_barcode_scanner::init());
+    }
+    
+    let mut builder = builder
         .manage(crypto::DeviceIdentityState(std::sync::Mutex::new(None)))
-        .manage(sidecar::SidecarState { child: Mutex::new(None) })
-        .manage(crate::candle_engine::CandleState { engine: Mutex::new(None), is_running: Mutex::new(false), current_model: Mutex::new(String::new()) })
+        .manage(sidecar::SidecarState {
+            child: Mutex::new(None),
+        })
+        .manage(crate::candle_engine::CandleState {
+            engine: Mutex::new(None),
+            is_running: Mutex::new(false),
+            current_model: Mutex::new(String::new()),
+        })
         .manage(wechat_state.clone())
         .manage(browser_state.clone())
         .plugin(tauri_plugin_dialog::init())
@@ -754,19 +829,24 @@ pub fn run() {
                     .unwrap();
             }
 
-            let mime = match file_path.extension().and_then(|e| e.to_str()).map(|s| s.to_lowercase()).as_deref() {
-                Some("png")          => "image/png",
+            let mime = match file_path
+                .extension()
+                .and_then(|e| e.to_str())
+                .map(|s| s.to_lowercase())
+                .as_deref()
+            {
+                Some("png") => "image/png",
                 Some("jpg" | "jpeg") => "image/jpeg",
-                Some("gif")          => "image/gif",
-                Some("webp")         => "image/webp",
-                Some("svg")          => "image/svg+xml",
-                Some("ico")          => "image/x-icon",
-                Some("bmp")          => "image/bmp",
-                Some("mp4")          => "video/mp4",
-                Some("webm")         => "video/webm",
-                Some("mov")          => "video/quicktime",
-                Some("pdf")          => "application/pdf",
-                _                    => "application/octet-stream",
+                Some("gif") => "image/gif",
+                Some("webp") => "image/webp",
+                Some("svg") => "image/svg+xml",
+                Some("ico") => "image/x-icon",
+                Some("bmp") => "image/bmp",
+                Some("mp4") => "video/mp4",
+                Some("webm") => "video/webm",
+                Some("mov") => "video/quicktime",
+                Some("pdf") => "application/pdf",
+                _ => "application/octet-stream",
             };
 
             match std::fs::read(file_path) {
@@ -971,7 +1051,7 @@ pub fn run() {
         })
         .setup(|app| {
             use tauri::Manager;
-            
+
             // 解决跨平台 AppData 路径缓存问题
             if let Ok(app_dir) = app.path().app_data_dir() {
                 let _ = fs::create_dir_all(&app_dir);
@@ -993,7 +1073,9 @@ pub fn run() {
                     .max_file_size(2_000_000) // 单文件最大 2MB，自动轮转
                     .timezone_strategy(TimezoneStrategy::UseLocal)
                     .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepAll)
-                    .target(Target::new(TargetKind::LogDir { file_name: Some("bob".into()) }));
+                    .target(Target::new(TargetKind::LogDir {
+                        file_name: Some("bob".into()),
+                    }));
                 if cfg!(debug_assertions) {
                     log_builder = log_builder.target(Target::new(TargetKind::Stdout));
                 }
@@ -1044,7 +1126,8 @@ pub fn run() {
                 let mut cfg = read_config();
                 let mut changed = false;
                 if let Some(api_keys) = cfg.get_mut("apiKeys").and_then(|v| v.as_object_mut()) {
-                    let to_remove: Vec<String> = api_keys.iter()
+                    let to_remove: Vec<String> = api_keys
+                        .iter()
                         .filter(|(_, v)| v.as_str() == Some("vaulted"))
                         .map(|(k, _)| k.clone())
                         .collect();
@@ -1069,7 +1152,7 @@ pub fn run() {
 
             // ── 模型注册表初始化 ──
             llm::init_model_registry(app.handle());
-            
+
             // ── 后台刷新模型列表 ──
             let _refresh_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
@@ -1165,8 +1248,8 @@ pub fn run() {
             // ── System Tray Initialization ──
             #[cfg(desktop)]
             {
-                use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
                 use tauri::menu::{Menu, MenuItem};
+                use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 
                 let quit_i = MenuItem::with_id(app, "quit", "退出 Bob", true, None::<&str>)?;
                 let show_i = MenuItem::with_id(app, "show", "显示面板", true, None::<&str>)?;
@@ -1186,7 +1269,7 @@ pub fn run() {
                                 }
                             }
                             std::process::exit(0);
-                        },
+                        }
                         "show" => {
                             if let Some(window) = app.get_webview_window("main") {
                                 let _ = window.show();

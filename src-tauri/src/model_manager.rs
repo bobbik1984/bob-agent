@@ -1,12 +1,12 @@
-use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
-use tauri::{AppHandle, Manager, Emitter};
-use tokio::fs::OpenOptions;
-use tokio::io::AsyncWriteExt;
 use futures_util::StreamExt;
 use reqwest::header::RANGE;
-use std::sync::{Mutex, OnceLock};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::{Mutex, OnceLock};
+use tauri::{AppHandle, Emitter, Manager};
+use tokio::fs::OpenOptions;
+use tokio::io::AsyncWriteExt;
 use tokio::sync::watch;
 
 static ABORT_MAP: OnceLock<Mutex<HashMap<String, watch::Sender<bool>>>> = OnceLock::new();
@@ -33,12 +33,12 @@ pub struct DownloadResult {
 // 获取模型下载路径，区分移动端和桌面端
 fn get_models_dir(_app: &AppHandle) -> Result<PathBuf, String> {
     let models_dir = crate::get_data_dir().join("models");
-    
+
     // 如果目录不存在，同步创建
     if !models_dir.exists() {
         std::fs::create_dir_all(&models_dir).map_err(|e| e.to_string())?;
     }
-    
+
     Ok(models_dir)
 }
 
@@ -64,7 +64,7 @@ pub async fn download_model(
     }
 
     let client = reqwest::Client::new();
-    
+
     // 检查是否有临时文件，用于断点续传
     let mut downloaded_bytes = 0u64;
     if tmp_path.exists() {
@@ -81,10 +81,16 @@ pub async fn download_model(
         req
     };
 
-    let response = req.send().await.map_err(|e| format!("Request failed: {}", e))?;
+    let response = req
+        .send()
+        .await
+        .map_err(|e| format!("Request failed: {}", e))?;
 
     if !response.status().is_success() {
-        return Err(format!("Download failed with status: {}", response.status()));
+        return Err(format!(
+            "Download failed with status: {}",
+            response.status()
+        ));
     }
 
     let total_bytes = response
@@ -151,8 +157,10 @@ pub async fn download_model(
     }
 
     // 确保写入完毕
-    file.flush().await.map_err(|e| format!("Failed to flush: {}", e))?;
-    
+    file.flush()
+        .await
+        .map_err(|e| format!("Failed to flush: {}", e))?;
+
     // 强制关闭文件句柄
     drop(file);
 
@@ -165,28 +173,42 @@ pub async fn download_model(
     }
 
     // 下载完成，重命名 GGUF
-    tokio::fs::rename(&tmp_path, &file_path).await.map_err(|e| format!("Failed to rename: {}", e))?;
+    tokio::fs::rename(&tmp_path, &file_path)
+        .await
+        .map_err(|e| format!("Failed to rename: {}", e))?;
 
     // 下载 Tokenizer
     if let Some(t_url) = tokenizer_url {
         let t_file_name = format!("{}_tokenizer.json", model_id);
         let t_file_path = models_dir.join(&t_file_name);
         if !t_file_path.exists() {
-            let t_response = client.get(&t_url).send().await.map_err(|e| format!("Tokenizer request failed: {}", e))?;
+            let t_response = client
+                .get(&t_url)
+                .send()
+                .await
+                .map_err(|e| format!("Tokenizer request failed: {}", e))?;
             if t_response.status().is_success() {
-                let t_bytes = t_response.bytes().await.map_err(|e| format!("Tokenizer body error: {}", e))?;
-                tokio::fs::write(&t_file_path, &t_bytes).await.map_err(|e| format!("Failed to write tokenizer: {}", e))?;
+                let t_bytes = t_response
+                    .bytes()
+                    .await
+                    .map_err(|e| format!("Tokenizer body error: {}", e))?;
+                tokio::fs::write(&t_file_path, &t_bytes)
+                    .await
+                    .map_err(|e| format!("Failed to write tokenizer: {}", e))?;
             }
         }
     }
 
     // 推送完成事件
-    let _ = app.emit("download_progress", DownloadProgress {
-        model_id: model_id.clone(),
-        progress: 100.0,
-        downloaded_bytes: total_bytes,
-        total_bytes,
-    });
+    let _ = app.emit(
+        "download_progress",
+        DownloadProgress {
+            model_id: model_id.clone(),
+            progress: 100.0,
+            downloaded_bytes: total_bytes,
+            total_bytes,
+        },
+    );
 
     Ok(DownloadResult {
         success: true,
@@ -214,34 +236,34 @@ pub fn pause_download(model_id: String) {
 #[tauri::command]
 pub async fn delete_local_model(app: AppHandle, model_id: String) -> Result<bool, String> {
     let models_dir = get_models_dir(&app)?;
-    
+
     // 删除 GGUF 和临时文件
     let gguf_name = format!("{}.gguf", model_id);
     let gguf_path = models_dir.join(&gguf_name);
     let download_path = models_dir.join(format!("{}.download", gguf_name));
-    
+
     // 删除 Tokenizer
     let tok_name = format!("{}_tokenizer.json", model_id);
     let tok_path = models_dir.join(&tok_name);
-    
+
     let mut deleted_any = false;
-    
+
     if gguf_path.exists() {
         if let Err(e) = tokio::fs::remove_file(&gguf_path).await {
             return Err(format!("Failed to delete gguf: {}", e));
         }
         deleted_any = true;
     }
-    
+
     if download_path.exists() {
         let _ = tokio::fs::remove_file(&download_path).await;
         deleted_any = true;
     }
-    
+
     if tok_path.exists() {
         let _ = tokio::fs::remove_file(&tok_path).await;
         deleted_any = true;
     }
-    
+
     Ok(deleted_any)
 }

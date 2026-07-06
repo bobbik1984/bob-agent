@@ -1,9 +1,9 @@
-use serde_json::{json, Value};
-use tauri::AppHandle;
-use std::time::Duration;
 use rusqlite::params;
-use tokio::sync::Mutex;
+use serde_json::{json, Value};
 use std::sync::Arc;
+use std::time::Duration;
+use tauri::AppHandle;
+use tokio::sync::Mutex;
 
 lazy_static::lazy_static! {
     static ref TG_RUNNING: Arc<Mutex<bool>> = Arc::new(Mutex::new(false));
@@ -13,11 +13,13 @@ lazy_static::lazy_static! {
 pub async fn init(app: AppHandle) {
     let db_path = crate::get_data_dir().join("bob.db");
     if let Ok(conn) = rusqlite::Connection::open(&db_path) {
-        let _ = conn.execute_batch("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
+        let _ = conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
+        );
         if let Ok(token) = conn.query_row(
             "SELECT value FROM settings WHERE key = 'telegram_token'",
             [],
-            |row| row.get::<_, String>(0)
+            |row| row.get::<_, String>(0),
         ) {
             if !token.is_empty() {
                 start_telegram_bot(app, token).await;
@@ -32,9 +34,9 @@ pub async fn system_save_telegram_token(app: AppHandle, token: String) -> Value 
     if let Ok(conn) = rusqlite::Connection::open(&db_path) {
         let _ = conn.execute(
             "INSERT OR REPLACE INTO settings (key, value) VALUES ('telegram_token', ?1)",
-            params![token]
+            params![token],
         );
-        
+
         let mut running = TG_RUNNING.lock().await;
         if !*running && !token.is_empty() {
             start_telegram_bot(app, token).await;
@@ -53,7 +55,7 @@ pub async fn system_get_telegram_token() -> Value {
         if let Ok(token) = conn.query_row(
             "SELECT value FROM settings WHERE key = 'telegram_token'",
             [],
-            |row| row.get::<_, String>(0)
+            |row| row.get::<_, String>(0),
         ) {
             return json!({ "ok": true, "token": token });
         }
@@ -63,21 +65,36 @@ pub async fn system_get_telegram_token() -> Value {
 
 pub async fn start_telegram_bot(app: AppHandle, token: String) {
     let mut running = TG_RUNNING.lock().await;
-    if *running { return; }
+    if *running {
+        return;
+    }
     *running = true;
-    
+
     tokio::spawn(async move {
         log::info!("Telegram bot starting with token len {}", token.len());
         let mut offset = 0;
-        
+
         loop {
-            let url = format!("https://api.telegram.org/bot{}/getUpdates?offset={}&timeout=30", token, offset);
-            match crate::tunnel::send_request(reqwest::Method::GET, &url, reqwest::header::HeaderMap::new(), None, Duration::from_secs(45)).await {
+            let url = format!(
+                "https://api.telegram.org/bot{}/getUpdates?offset={}&timeout=30",
+                token, offset
+            );
+            match crate::tunnel::send_request(
+                reqwest::Method::GET,
+                &url,
+                reqwest::header::HeaderMap::new(),
+                None,
+                Duration::from_secs(45),
+            )
+            .await
+            {
                 Ok(resp) => {
                     if let Ok(json) = resp.json::<Value>().await {
                         if let Some(result) = json.get("result").and_then(|v| v.as_array()) {
                             for update in result {
-                                if let Some(update_id) = update.get("update_id").and_then(|v| v.as_i64()) {
+                                if let Some(update_id) =
+                                    update.get("update_id").and_then(|v| v.as_i64())
+                                {
                                     offset = update_id + 1;
                                 }
                                 if let Some(message) = update.get("message") {
@@ -98,44 +115,74 @@ pub async fn start_telegram_bot(app: AppHandle, token: String) {
 
 async fn tg_post(url: &str, payload: &Value) {
     let mut headers = reqwest::header::HeaderMap::new();
-    headers.insert(reqwest::header::CONTENT_TYPE, reqwest::header::HeaderValue::from_static("application/json"));
-    let _ = crate::tunnel::send_request(reqwest::Method::POST, url, headers, Some(reqwest::Body::from(serde_json::to_vec(payload).unwrap())), Duration::from_secs(15)).await;
+    headers.insert(
+        reqwest::header::CONTENT_TYPE,
+        reqwest::header::HeaderValue::from_static("application/json"),
+    );
+    let _ = crate::tunnel::send_request(
+        reqwest::Method::POST,
+        url,
+        headers,
+        Some(reqwest::Body::from(serde_json::to_vec(payload).unwrap())),
+        Duration::from_secs(15),
+    )
+    .await;
 }
 
 async fn handle_message(app: &AppHandle, token: &str, message: &Value) {
     if let Some(text) = message.get("text").and_then(|v| v.as_str()) {
-        let chat_id = message.get("chat").and_then(|c| c.get("id")).and_then(|v| v.as_i64()).unwrap_or(0);
+        let chat_id = message
+            .get("chat")
+            .and_then(|c| c.get("id"))
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0);
         let user_id = format!("tg-{}", chat_id);
-        
+
         log::info!("Telegram received message from {}: {}", chat_id, text);
 
         // 拦截全局 /sessions 等指令
         if let Some(reply_text) = crate::im_sessions::handle_im_command(&user_id, text) {
-            tg_post(&format!("https://api.telegram.org/bot{}/sendMessage", token), &serde_json::json!({ "chat_id": chat_id, "text": reply_text })).await;
+            tg_post(
+                &format!("https://api.telegram.org/bot{}/sendMessage", token),
+                &serde_json::json!({ "chat_id": chat_id, "text": reply_text }),
+            )
+            .await;
             return;
         }
 
         let conv_id = crate::im_sessions::get_or_create_conv_id(&user_id);
 
         // Send typing action
-        tg_post(&format!("https://api.telegram.org/bot{}/sendChatAction", token), &json!({ "chat_id": chat_id, "action": "typing" })).await;
+        tg_post(
+            &format!("https://api.telegram.org/bot{}/sendChatAction", token),
+            &json!({ "chat_id": chat_id, "action": "typing" }),
+        )
+        .await;
 
         let messages = vec![json!({ "role": "user", "content": text })];
-        
+
         // Let the LLM process the message. Note we pass global_file_access = false
         // By default, external bots shouldn't have arbitrary file access for security
         let result = crate::llm::stream_chat(
-            app.clone(), 
-            messages, 
-            Some(conv_id.clone()), 
+            app.clone(),
+            messages,
+            Some(conv_id.clone()),
             Some(chat_id.to_string()),
             false,
-            "default".to_string()
-        ).await;
+            "default".to_string(),
+        )
+        .await;
 
-        let reply = result.get("content").and_then(|v| v.as_str()).unwrap_or("[无响应]");
-        
+        let reply = result
+            .get("content")
+            .and_then(|v| v.as_str())
+            .unwrap_or("[无响应]");
+
         // Send reply back
-        tg_post(&format!("https://api.telegram.org/bot{}/sendMessage", token), &json!({ "chat_id": chat_id, "text": reply })).await;
+        tg_post(
+            &format!("https://api.telegram.org/bot{}/sendMessage", token),
+            &json!({ "chat_id": chat_id, "text": reply }),
+        )
+        .await;
     }
 }

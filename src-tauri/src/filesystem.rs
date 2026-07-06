@@ -12,7 +12,8 @@ pub fn system_get_file_meta(path: String) -> Value {
         return json!({ "exists": false, "error": "File not found" });
     }
 
-    let name = p.file_name()
+    let name = p
+        .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or("")
         .to_string();
@@ -25,7 +26,8 @@ pub fn system_get_file_meta(path: String) -> Value {
     let is_dir = meta.is_dir();
 
     // 提取扩展名
-    let ext = p.extension()
+    let ext = p
+        .extension()
         .and_then(|e| e.to_str())
         .unwrap_or("")
         .to_lowercase();
@@ -37,7 +39,8 @@ pub fn system_get_file_meta(path: String) -> Value {
         match ext.as_str() {
             "doc" | "docx" | "pdf" | "txt" | "md" | "rtf" | "odt" => "document",
             "xls" | "xlsx" | "csv" | "ods" => "spreadsheet",
-            "js" | "ts" | "rs" | "py" | "html" | "css" | "json" | "yaml" | "toml" | "vue" | "jsx" | "tsx" => "code",
+            "js" | "ts" | "rs" | "py" | "html" | "css" | "json" | "yaml" | "toml" | "vue"
+            | "jsx" | "tsx" => "code",
             "zip" | "rar" | "7z" | "tar" | "gz" => "archive",
             "png" | "jpg" | "jpeg" | "gif" | "bmp" | "svg" | "webp" | "ico" => "image",
             "mp4" | "avi" | "mov" | "mkv" | "webm" => "video",
@@ -47,7 +50,9 @@ pub fn system_get_file_meta(path: String) -> Value {
     };
 
     // 提取修改时间 (毫秒时间戳)
-    let mtime = meta.modified().ok()
+    let mtime = meta
+        .modified()
+        .ok()
         .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
         .map(|d| d.as_millis() as u64);
 
@@ -65,16 +70,17 @@ pub fn system_get_file_meta(path: String) -> Value {
 
 // 跳过不需要扫描的厚重目录
 fn is_hidden_or_ignored(entry: &DirEntry) -> bool {
-    entry.file_name()
-         .to_str()
-         .map(|s| {
-             s.starts_with('.') || 
-             s == "node_modules" || 
-             s == "target" || 
-             s == "dist" || 
-             s == "build"
-         })
-         .unwrap_or(false)
+    entry
+        .file_name()
+        .to_str()
+        .map(|s| {
+            s.starts_with('.')
+                || s == "node_modules"
+                || s == "target"
+                || s == "dist"
+                || s == "build"
+        })
+        .unwrap_or(false)
 }
 
 #[tauri::command]
@@ -106,12 +112,12 @@ pub fn system_scan_folder(folder_path: String) -> Value {
             dir_count += 1;
         } else if entry.path().is_file() {
             file_count += 1;
-            
+
             // 累加大小
             if let Ok(metadata) = entry.metadata() {
                 total_size += metadata.len();
             }
-            
+
             // 提取扩展名进行分类统计
             if let Some(ext) = entry.path().extension().and_then(|e| e.to_str()) {
                 let ext_lower = format!(".{}", ext.to_lowercase());
@@ -120,13 +126,13 @@ pub fn system_scan_folder(folder_path: String) -> Value {
                 *stats.entry("无后缀".to_string()).or_insert(0) += 1;
             }
         }
-        
+
         // 防御性拦截：文件数过多直接熔断，防止前端渲染崩溃
         if file_count > 50000 {
             break;
         }
     }
-    
+
     // dir_count 包含了顶层目录，为了精确需要减去 1
     let final_dir_count = if dir_count > 0 { dir_count - 1 } else { 0 };
 
@@ -154,7 +160,8 @@ pub fn system_read_file(file_path: String) -> Value {
         return json!({ "error": "不能读取文件夹，请使用文件夹扫描" });
     }
 
-    let name = p.file_name()
+    let name = p
+        .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or("unknown")
         .to_string();
@@ -164,7 +171,8 @@ pub fn system_read_file(file_path: String) -> Value {
         Err(_) => return json!({ "error": "无法读取文件元数据" }),
     };
 
-    if size > 5 * 1024 * 1024 { // 5MB 限制
+    if size > 5 * 1024 * 1024 {
+        // 5MB 限制
         return json!({
             "name": name,
             "content": format!("[大文件 {} ({:.2} MB)，为防止内存溢出，已忽略内容提取。]", name, size as f64 / 1024.0 / 1024.0),
@@ -186,7 +194,7 @@ pub fn system_read_file(file_path: String) -> Value {
                 "content": content,
                 "size": size
             })
-        },
+        }
         Err(e) => json!({
             "error": e,
             "name": name,
@@ -214,7 +222,8 @@ pub fn system_add_tracked_folder(folder_path: String) -> bool {
     }
 
     if let Some(obj) = config.as_object_mut() {
-        let mut folders: Vec<String> = obj.get("trackedFolders")
+        let mut folders: Vec<String> = obj
+            .get("trackedFolders")
             .and_then(|v| serde_json::from_value(v.clone()).ok())
             .unwrap_or_default();
 
@@ -231,7 +240,8 @@ pub fn system_add_tracked_folder(folder_path: String) -> bool {
 pub fn system_remove_tracked_folder(folder_path: String) -> bool {
     let mut config = super::read_config();
     if let Some(obj) = config.as_object_mut() {
-        let mut folders: Vec<String> = obj.get("trackedFolders")
+        let mut folders: Vec<String> = obj
+            .get("trackedFolders")
             .and_then(|v| serde_json::from_value(v.clone()).ok())
             .unwrap_or_default();
 

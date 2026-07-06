@@ -1,4 +1,4 @@
-﻿//! Google Calendar 连接器
+//! Google Calendar 连接器
 //!
 //! OAuth 2.0 Desktop App flow + Calendar API v3
 
@@ -9,8 +9,8 @@ const GOOGLE_TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
 const GCAL_API_BASE: &str = "https://www.googleapis.com/calendar/v3";
 
 // 内置 OAuth 凭据（Desktop App 类型，可公开）
-const GOOGLE_CLIENT_ID: &str = "BOB_GOOGLE_CLIENT_ID";  // TODO: 替换为真实值
-const GOOGLE_CLIENT_SECRET: &str = "BOB_GOOGLE_CLIENT_SECRET";  // TODO: 替换为真实值
+const GOOGLE_CLIENT_ID: &str = "BOB_GOOGLE_CLIENT_ID"; // TODO: 替换为真实值
+const GOOGLE_CLIENT_SECRET: &str = "BOB_GOOGLE_CLIENT_SECRET"; // TODO: 替换为真实值
 
 const SCOPES: &str = "https://www.googleapis.com/auth/calendar.readonly \
     https://www.googleapis.com/auth/calendar.events \
@@ -22,9 +22,9 @@ const SCOPES: &str = "https://www.googleapis.com/auth/calendar.readonly \
 pub async fn start_google_oauth() -> Value {
     let creds = match super::connector::load_credentials("google") {
         Some(c) => c,
-        None => return json!({"error": "请先在设置中配置 Google OAuth 凭据 (Client ID/Secret)"})
+        None => return json!({"error": "请先在设置中配置 Google OAuth 凭据 (Client ID/Secret)"}),
     };
-    
+
     let client_id = creds.client_id.as_deref().unwrap_or(GOOGLE_CLIENT_ID);
     if client_id == GOOGLE_CLIENT_ID {
         return json!({"error": "请先配置真实的 Google OAuth 凭据，当前的默认凭据无效。"});
@@ -59,9 +59,13 @@ pub async fn start_google_oauth() -> Value {
 
 /// 用授权码换取 token
 async fn exchange_code_for_token(code: &str, redirect_uri: &str) -> Result<(), String> {
-    let creds = super::connector::load_credentials("google").ok_or("No credentials found for Google")?;
+    let creds =
+        super::connector::load_credentials("google").ok_or("No credentials found for Google")?;
     let client_id = creds.client_id.as_deref().unwrap_or(GOOGLE_CLIENT_ID);
-    let client_secret = creds.client_secret.as_deref().unwrap_or(GOOGLE_CLIENT_SECRET);
+    let client_secret = creds
+        .client_secret
+        .as_deref()
+        .unwrap_or(GOOGLE_CLIENT_SECRET);
 
     if client_id == GOOGLE_CLIENT_ID {
         return Err("Please configure real Google OAuth credentials first.".to_string());
@@ -83,18 +87,32 @@ async fn exchange_code_for_token(code: &str, redirect_uri: &str) -> Result<(), S
         .await
         .map_err(|e| format!("Token request failed: {}", e))?;
 
-    let body: Value = resp.json().await.map_err(|e| format!("Token parse failed: {}", e))?;
+    let body: Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("Token parse failed: {}", e))?;
 
     if let Some(error) = body.get("error").and_then(|v| v.as_str()) {
-        let desc = body.get("error_description").and_then(|v| v.as_str()).unwrap_or("");
+        let desc = body
+            .get("error_description")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
         return Err(format!("OAuth error: {} - {}", error, desc));
     }
 
-    let access_token = body.get("access_token").and_then(|v| v.as_str())
-        .ok_or("Missing access_token")?.to_string();
-    let refresh_token = body.get("refresh_token").and_then(|v| v.as_str())
+    let access_token = body
+        .get("access_token")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing access_token")?
+        .to_string();
+    let refresh_token = body
+        .get("refresh_token")
+        .and_then(|v| v.as_str())
         .map(|s| s.to_string());
-    let expires_in = body.get("expires_in").and_then(|v| v.as_i64()).unwrap_or(3600);
+    let expires_in = body
+        .get("expires_in")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(3600);
 
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -118,8 +136,7 @@ async fn exchange_code_for_token(code: &str, redirect_uri: &str) -> Result<(), S
 
 /// 获取有效的 access token（自动刷新）
 async fn get_token() -> Result<String, String> {
-    let creds = super::connector::load_credentials("google")
-        .ok_or("Google 未连接")?;
+    let creds = super::connector::load_credentials("google").ok_or("Google 未连接")?;
 
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -136,10 +153,15 @@ async fn get_token() -> Result<String, String> {
     }
 
     // 需要刷新
-    let refresh_token = creds.refresh_token.as_deref()
+    let refresh_token = creds
+        .refresh_token
+        .as_deref()
         .ok_or("No refresh token, please reconnect Google")?;
     let client_id = creds.client_id.as_deref().unwrap_or(GOOGLE_CLIENT_ID);
-    let client_secret = creds.client_secret.as_deref().unwrap_or(GOOGLE_CLIENT_SECRET);
+    let client_secret = creds
+        .client_secret
+        .as_deref()
+        .unwrap_or(GOOGLE_CLIENT_SECRET);
 
     let client = reqwest::Client::new();
     let form_body = format!(
@@ -158,9 +180,15 @@ async fn get_token() -> Result<String, String> {
 
     let body: Value = resp.json().await.map_err(|e| e.to_string())?;
 
-    let new_token = body.get("access_token").and_then(|v| v.as_str())
-        .ok_or("Refresh response missing access_token")?.to_string();
-    let expires_in = body.get("expires_in").and_then(|v| v.as_i64()).unwrap_or(3600);
+    let new_token = body
+        .get("access_token")
+        .and_then(|v| v.as_str())
+        .ok_or("Refresh response missing access_token")?
+        .to_string();
+    let expires_in = body
+        .get("expires_in")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(3600);
 
     // 更新凭证
     let mut new_creds = creds.clone();
@@ -175,7 +203,8 @@ async fn get_token() -> Result<String, String> {
 async fn google_get(url: &str) -> Result<Value, String> {
     let token = get_token().await?;
     let client = reqwest::Client::new();
-    let resp = client.get(url)
+    let resp = client
+        .get(url)
         .header("Authorization", format!("Bearer {}", token))
         .send()
         .await
@@ -184,7 +213,11 @@ async fn google_get(url: &str) -> Result<Value, String> {
     if !resp.status().is_success() {
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();
-        return Err(format!("Google API {} : {}", status, &body[..body.len().min(200)]));
+        return Err(format!(
+            "Google API {} : {}",
+            status,
+            &body[..body.len().min(200)]
+        ));
     }
     resp.json().await.map_err(|e| e.to_string())
 }
@@ -245,12 +278,13 @@ pub async fn execute_tool(name: &str, args: &Value) -> Value {
         "google_calendar_list_events" => {
             let time_min = args.get("time_min").and_then(|v| v.as_str()).unwrap_or("");
             let time_max = args.get("time_max").and_then(|v| v.as_str()).unwrap_or("");
-            let max_results = args.get("max_results").and_then(|v| v.as_u64()).unwrap_or(10);
+            let max_results = args
+                .get("max_results")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(10);
             tool_list_events(time_min, time_max, max_results as usize).await
         }
-        "google_calendar_create_event" => {
-            tool_create_event(args).await
-        }
+        "google_calendar_create_event" => tool_create_event(args).await,
         _ => json!({"error": format!("Unknown google_calendar tool: {}", name)}),
     }
 }
@@ -268,16 +302,19 @@ async fn tool_list_events(time_min: &str, time_max: &str, max_results: usize) ->
             let items = body.get("items").cloned().unwrap_or(json!([]));
             // 精简返回
             if let Some(arr) = items.as_array() {
-                let simplified: Vec<Value> = arr.iter().map(|e| {
-                    json!({
-                        "summary": e.get("summary"),
-                        "start": e.get("start"),
-                        "end": e.get("end"),
-                        "location": e.get("location"),
-                        "status": e.get("status"),
-                        "htmlLink": e.get("htmlLink"),
+                let simplified: Vec<Value> = arr
+                    .iter()
+                    .map(|e| {
+                        json!({
+                            "summary": e.get("summary"),
+                            "start": e.get("start"),
+                            "end": e.get("end"),
+                            "location": e.get("location"),
+                            "status": e.get("status"),
+                            "htmlLink": e.get("htmlLink"),
+                        })
                     })
-                }).collect();
+                    .collect();
                 json!({"ok": simplified})
             } else {
                 json!({"ok": items})
@@ -294,9 +331,15 @@ async fn tool_create_event(args: &Value) -> Value {
     };
 
     let summary = args.get("summary").and_then(|v| v.as_str()).unwrap_or("");
-    let start_time = args.get("start_time").and_then(|v| v.as_str()).unwrap_or("");
+    let start_time = args
+        .get("start_time")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
     let end_time = args.get("end_time").and_then(|v| v.as_str()).unwrap_or("");
-    let description = args.get("description").and_then(|v| v.as_str()).unwrap_or("");
+    let description = args
+        .get("description")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
     let location = args.get("location").and_then(|v| v.as_str()).unwrap_or("");
 
     let event_body = json!({
@@ -309,7 +352,8 @@ async fn tool_create_event(args: &Value) -> Value {
 
     let client = reqwest::Client::new();
     let url = format!("{}/calendars/primary/events", GCAL_API_BASE);
-    let resp = client.post(&url)
+    let resp = client
+        .post(&url)
         .header("Authorization", format!("Bearer {}", token))
         .json(&event_body)
         .send()
@@ -329,15 +373,14 @@ async fn tool_create_event(args: &Value) -> Value {
     }
 }
 
-
 // ── 后台静默同步 ──
 pub async fn start_background_sync(app_handle: tauri::AppHandle) {
     use std::time::Duration;
-    use tokio::time;
     use tauri::Manager;
+    use tokio::time;
 
     let mut interval = time::interval(Duration::from_secs(3600)); // 每小时执行一次
-    
+
     loop {
         interval.tick().await;
 
@@ -359,7 +402,7 @@ pub async fn start_background_sync(app_handle: tauri::AppHandle) {
         let time_max = one_month_later.format("%Y-%m-%dT%H:%M:%SZ").to_string();
 
         let events_value = tool_list_events(&time_min, &time_max, 100).await;
-        
+
         // 将事件写入 SQLite DB
         if let Some(events_arr) = events_value.as_array() {
             let db_state = app_handle.state::<crate::db::DbState>();
@@ -369,13 +412,33 @@ pub async fn start_background_sync(app_handle: tauri::AppHandle) {
             };
 
             for ev in events_arr {
-                let summary = ev.get("summary").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                let start_time = ev.get("start").and_then(|v| v.as_str()).map(|s| s.to_string());
-                let end_time = ev.get("end").and_then(|v| v.as_str()).map(|s| s.to_string());
-                let location = ev.get("location").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                let event_id = ev.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let summary = ev
+                    .get("summary")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let start_time = ev
+                    .get("start")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+                let end_time = ev
+                    .get("end")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+                let location = ev
+                    .get("location")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let event_id = ev
+                    .get("id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
 
-                if event_id.is_empty() { continue; }
+                if event_id.is_empty() {
+                    continue;
+                }
                 let local_id = format!("gcal-{}", event_id);
 
                 // Upsert

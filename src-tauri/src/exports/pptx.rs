@@ -13,35 +13,42 @@ pub struct SlideData {
     pub r#type: String, // "cover", "content", "section", "summary", "blank"
     pub title: Option<String>,
     pub subtitle: Option<String>,
-    pub content: Option<String>,       // 正文（支持多段，用 \n\n 分隔）
-    pub bullets: Option<Vec<String>>,  // 要点列表
+    pub content: Option<String>,      // 正文（支持多段，用 \n\n 分隔）
+    pub bullets: Option<Vec<String>>, // 要点列表
 }
 
 /// 颜色主题配置
 struct ThemeColors {
-    bg: &'static str,         // 背景色 (RRGGBB)
-    title: &'static str,      // 标题色
-    text: &'static str,       // 正文色
-    accent: &'static str,     // 强调色
-    subtitle: &'static str,   // 副标题色
+    bg: &'static str,       // 背景色 (RRGGBB)
+    title: &'static str,    // 标题色
+    text: &'static str,     // 正文色
+    accent: &'static str,   // 强调色
+    subtitle: &'static str, // 副标题色
 }
 
 fn get_theme(name: &str) -> ThemeColors {
     match name {
         "corporate-light" => ThemeColors {
-            bg: "FFFFFF", title: "1B1B1B", text: "404040",
-            accent: "2563EB", subtitle: "6B7280",
+            bg: "FFFFFF",
+            title: "1B1B1B",
+            text: "404040",
+            accent: "2563EB",
+            subtitle: "6B7280",
         },
-        _ => ThemeColors { // "corporate-dark" 默认深色主题
-            bg: "1A1A2E", title: "EAEAEA", text: "B0B0C0",
-            accent: "4F8FE6", subtitle: "8888AA",
+        _ => ThemeColors {
+            // "corporate-dark" 默认深色主题
+            bg: "1A1A2E",
+            title: "EAEAEA",
+            text: "B0B0C0",
+            accent: "4F8FE6",
+            subtitle: "8888AA",
         },
     }
 }
 
 /// EMU (English Metric Units) 转换: 1 inch = 914400 EMU, 1 cm = 360000 EMU
 const SLIDE_W: i64 = 12192000; // 标准 16:9 宽 (33.867cm)
-const SLIDE_H: i64 = 6858000;  // 标准 16:9 高 (19.05cm)
+const SLIDE_H: i64 = 6858000; // 标准 16:9 高 (19.05cm)
 
 /// 生成一个合法的 .pptx 文件
 pub fn generate_pptx(path: &Path, data: &PptxData) -> Result<(), Box<dyn std::error::Error>> {
@@ -62,7 +69,9 @@ pub fn generate_pptx(path: &Path, data: &PptxData) -> Result<(), Box<dyn std::er
             i
         ));
     }
-    write!(zip, r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+    write!(
+        zip,
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
 <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
 <Default Extension="xml" ContentType="application/xml"/>
@@ -71,14 +80,18 @@ pub fn generate_pptx(path: &Path, data: &PptxData) -> Result<(), Box<dyn std::er
 <Override PartName="/ppt/slideLayouts/slideLayout1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideLayout+xml"/>
 <Override PartName="/ppt/theme/theme1.xml" ContentType="application/vnd.openxmlformats-officedocument.theme+xml"/>
 {ct_overrides}
-</Types>"#)?;
+</Types>"#
+    )?;
 
     // ── _rels/.rels ──────────────────────────────────────
     zip.start_file("_rels/.rels", options)?;
-    write!(zip, r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+    write!(
+        zip,
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
 <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="ppt/presentation.xml"/>
-</Relationships>"#)?;
+</Relationships>"#
+    )?;
 
     // ── ppt/_rels/presentation.xml.rels ──────────────────
     zip.start_file("ppt/_rels/presentation.xml.rels", options)?;
@@ -91,10 +104,13 @@ pub fn generate_pptx(path: &Path, data: &PptxData) -> Result<(), Box<dyn std::er
             i, i
         ));
     }
-    write!(zip, r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+    write!(
+        zip,
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
 {pres_rels}
-</Relationships>"#)?;
+</Relationships>"#
+    )?;
 
     // ── ppt/presentation.xml ─────────────────────────────
     zip.start_file("ppt/presentation.xml", options)?;
@@ -102,7 +118,9 @@ pub fn generate_pptx(path: &Path, data: &PptxData) -> Result<(), Box<dyn std::er
     for i in 1..=slide_count {
         slide_list.push_str(&format!(r#"<p:sldId id="{}" r:id="rId{}"/>"#, 255 + i, i));
     }
-    write!(zip, r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+    write!(
+        zip,
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <p:presentation xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
 xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
@@ -110,11 +128,14 @@ xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
 <p:sldIdLst>{slide_list}</p:sldIdLst>
 <p:sldSz cx="{SLIDE_W}" cy="{SLIDE_H}"/>
 <p:notesSz cx="{SLIDE_H}" cy="{SLIDE_W}"/>
-</p:presentation>"#)?;
+</p:presentation>"#
+    )?;
 
     // ── ppt/theme/theme1.xml (minimal) ───────────────────
     zip.start_file("ppt/theme/theme1.xml", options)?;
-    write!(zip, r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+    write!(
+        zip,
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" name="BobTheme">
 <a:themeElements>
 <a:clrScheme name="Bob">
@@ -135,39 +156,55 @@ xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
 <a:fmtScheme name="Bob"><a:fillStyleLst><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:fillStyleLst><a:lnStyleLst><a:ln w="9525"><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:ln><a:ln w="9525"><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:ln><a:ln w="9525"><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:ln></a:lnStyleLst><a:effectStyleLst><a:effectStyle><a:effectLst/></a:effectStyle><a:effectStyle><a:effectLst/></a:effectStyle><a:effectStyle><a:effectLst/></a:effectStyle></a:effectStyleLst><a:bgFillStyleLst><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:bgFillStyleLst></a:fmtScheme>
 </a:themeElements>
 </a:theme>"#,
-        bg = theme.bg, title = theme.title, accent = theme.accent)?;
+        bg = theme.bg,
+        title = theme.title,
+        accent = theme.accent
+    )?;
 
     // ── Slide Master & Layout (minimal) ──────────────────
     zip.start_file("ppt/slideMasters/_rels/slideMaster1.xml.rels", options)?;
-    write!(zip, r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+    write!(
+        zip,
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
 <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout" Target="../slideLayouts/slideLayout1.xml"/>
 <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme" Target="../theme/theme1.xml"/>
-</Relationships>"#)?;
+</Relationships>"#
+    )?;
 
     zip.start_file("ppt/slideMasters/slideMaster1.xml", options)?;
-    write!(zip, r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+    write!(
+        zip,
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <p:sldMaster xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
 xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
 <p:cSld><p:bg><p:bgPr><a:solidFill><a:srgbClr val="{bg}"/></a:solidFill><a:effectLst/></p:bgPr></p:bg><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/></p:spTree></p:cSld>
 <p:clrMap bg1="lt1" tx1="dk1" bg2="lt2" tx2="dk2" accent1="accent1" accent2="accent2" accent3="accent3" accent4="accent4" accent5="accent5" accent6="accent6" hlink="hlink" folHlink="folHlink"/>
 <p:sldLayoutIdLst><p:sldLayoutId id="2147483649" r:id="rId1"/></p:sldLayoutIdLst>
-</p:sldMaster>"#, bg = theme.bg)?;
+</p:sldMaster>"#,
+        bg = theme.bg
+    )?;
 
     zip.start_file("ppt/slideLayouts/_rels/slideLayout1.xml.rels", options)?;
-    write!(zip, r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+    write!(
+        zip,
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
 <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideMaster" Target="../slideMasters/slideMaster1.xml"/>
-</Relationships>"#)?;
+</Relationships>"#
+    )?;
 
     zip.start_file("ppt/slideLayouts/slideLayout1.xml", options)?;
-    write!(zip, r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+    write!(
+        zip,
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <p:sldLayout xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
 xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" type="blank">
 <p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/></p:spTree></p:cSld>
-</p:sldLayout>"#)?;
+</p:sldLayout>"#
+    )?;
 
     // ── 生成每一页 Slide ─────────────────────────────────
     for (i, slide) in data.slides.iter().enumerate() {
@@ -175,10 +212,13 @@ xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" type="blank
 
         // slide rels
         zip.start_file(format!("ppt/slides/_rels/slide{}.xml.rels", idx), options)?;
-        write!(zip, r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+        write!(
+            zip,
+            r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
 <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout" Target="../slideLayouts/slideLayout1.xml"/>
-</Relationships>"#)?;
+</Relationships>"#
+        )?;
 
         // slide content
         zip.start_file(format!("ppt/slides/slide{}.xml", idx), options)?;
@@ -193,10 +233,10 @@ xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" type="blank
 /// XML 特殊字符转义
 fn xml_escape(s: &str) -> String {
     s.replace('&', "&amp;")
-     .replace('<', "&lt;")
-     .replace('>', "&gt;")
-     .replace('"', "&quot;")
-     .replace('\'', "&apos;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
 }
 
 /// 构建单页 Slide 的 XML
@@ -213,7 +253,8 @@ fn build_slide_xml(slide: &SlideData, theme: &ThemeColors) -> String {
         _ => build_content_shapes(title, content, &slide.bullets, theme, false),
     };
 
-    format!(r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+    format!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
 xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
@@ -225,7 +266,9 @@ xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
 {shapes}
 </p:spTree>
 </p:cSld>
-</p:sld>"#, bg = theme.bg)
+</p:sld>"#,
+        bg = theme.bg
+    )
 }
 
 /// 封面页：居中大标题 + 副标题
@@ -233,7 +276,8 @@ fn build_cover_shapes(title: &str, subtitle: &str, theme: &ThemeColors) -> Strin
     let mut s = String::new();
 
     // 左侧装饰竖条
-    s.push_str(&format!(r#"<p:sp>
+    s.push_str(&format!(
+        r#"<p:sp>
 <p:nvSpPr><p:cNvPr id="10" name="AccentBar"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr>
 <p:spPr>
 <a:xfrm><a:off x="457200" y="1600000"/><a:ext cx="91440" cy="2400000"/></a:xfrm>
@@ -241,7 +285,9 @@ fn build_cover_shapes(title: &str, subtitle: &str, theme: &ThemeColors) -> Strin
 <a:solidFill><a:srgbClr val="{accent}"/></a:solidFill>
 <a:ln><a:noFill/></a:ln>
 </p:spPr>
-</p:sp>"#, accent = theme.accent));
+</p:sp>"#,
+        accent = theme.accent
+    ));
 
     // 标题
     s.push_str(&format!(r#"<p:sp>
@@ -309,12 +355,19 @@ fn build_section_shapes(title: &str, subtitle: &str, theme: &ThemeColors) -> Str
 }
 
 /// 内容页：标题 + 正文/要点列表
-fn build_content_shapes(title: &str, content: &str, bullets: &Option<Vec<String>>, theme: &ThemeColors, is_summary: bool) -> String {
+fn build_content_shapes(
+    title: &str,
+    content: &str,
+    bullets: &Option<Vec<String>>,
+    theme: &ThemeColors,
+    is_summary: bool,
+) -> String {
     let mut s = String::new();
 
     // 顶部强调线
     let accent_y = 457200; // ~0.5 inch from top
-    s.push_str(&format!(r#"<p:sp>
+    s.push_str(&format!(
+        r#"<p:sp>
 <p:nvSpPr><p:cNvPr id="10" name="TopLine"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr>
 <p:spPr>
 <a:xfrm><a:off x="457200" y="{accent_y}"/><a:ext cx="11277600" cy="36576"/></a:xfrm>
@@ -322,7 +375,9 @@ fn build_content_shapes(title: &str, content: &str, bullets: &Option<Vec<String>
 <a:solidFill><a:srgbClr val="{accent}"/></a:solidFill>
 <a:ln><a:noFill/></a:ln>
 </p:spPr>
-</p:sp>"#, accent = theme.accent));
+</p:sp>"#,
+        accent = theme.accent
+    ));
 
     // 标题
     let title_sz = if is_summary { "2800" } else { "2400" };
@@ -355,7 +410,9 @@ fn build_content_shapes(title: &str, content: &str, bullets: &Option<Vec<String>
     if !content.is_empty() {
         for para in content.split("\n\n") {
             let trimmed = para.trim();
-            if trimmed.is_empty() { continue; }
+            if trimmed.is_empty() {
+                continue;
+            }
             paragraphs.push_str(&format!(
                 r#"<a:p><a:r><a:rPr lang="zh-CN" sz="1600" dirty="0"><a:solidFill><a:srgbClr val="{text_clr}"/></a:solidFill><a:latin typeface="Segoe UI"/><a:ea typeface="Microsoft YaHei"/></a:rPr><a:t>{text}</a:t></a:r></a:p>"#,
                 text_clr = theme.text, text = xml_escape(trimmed)
@@ -366,7 +423,8 @@ fn build_content_shapes(title: &str, content: &str, bullets: &Option<Vec<String>
         paragraphs = format!(r#"<a:p><a:endParaRPr lang="zh-CN"/></a:p>"#);
     }
 
-    s.push_str(&format!(r#"<p:sp>
+    s.push_str(&format!(
+        r#"<p:sp>
 <p:nvSpPr><p:cNvPr id="3" name="Content"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr>
 <p:spPr>
 <a:xfrm><a:off x="457200" y="{body_top}"/><a:ext cx="11277600" cy="{body_height}"/></a:xfrm>
@@ -376,7 +434,8 @@ fn build_content_shapes(title: &str, content: &str, bullets: &Option<Vec<String>
 <a:bodyPr anchor="t" lIns="91440" tIns="45720" rIns="91440" bIns="45720"/>
 {paragraphs}
 </p:txBody>
-</p:sp>"#));
+</p:sp>"#
+    ));
 
     s
 }

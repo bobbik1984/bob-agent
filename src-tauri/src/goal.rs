@@ -86,8 +86,10 @@ pub async fn execute_goal_loop(
             }));
             // 目标 19: 持久化预算耗尽错误
             persist_error(
-                conv_id.as_deref(), &goal_text,
-                "goal_loop", "budget_exhausted",
+                conv_id.as_deref(),
+                &goal_text,
+                "goal_loop",
+                "budget_exhausted",
                 &format!("{} 轮尝试均未达标", max_goal_rounds),
                 None,
             );
@@ -117,35 +119,51 @@ pub async fn execute_goal_loop(
             None,
             true, // global_file_access
             "goal".to_string(),
-        ).await;
+        )
+        .await;
 
-        let final_content = final_result.get("content").and_then(|v| v.as_str()).unwrap_or("");
+        let final_content = final_result
+            .get("content")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
 
         // ══════════════════════════════════════════════════════════
         // 目标 19: Layer 1 — 确定性断言 (零 Token 消耗)
         // ══════════════════════════════════════════════════════════
-        let tool_summary = final_result.get("tool_summary").cloned().unwrap_or(Value::Null);
+        let tool_summary = final_result
+            .get("tool_summary")
+            .cloned()
+            .unwrap_or(Value::Null);
         let assertion = crate::assertions::run_assertions(&tool_summary);
 
         if assertion.has_fatal() {
             // Fatal 断言失败：跳过昂贵的 Clerk 调用，直接重试
-            log::warn!("[Goal] Layer 1 assertion failed: {} fatal(s), {} warning(s)",
-                assertion.failures.len(), assertion.warnings.len());
+            log::warn!(
+                "[Goal] Layer 1 assertion failed: {} fatal(s), {} warning(s)",
+                assertion.failures.len(),
+                assertion.warnings.len()
+            );
 
             // 持久化断言失败
             for f in &assertion.failures {
                 persist_error(
-                    conv_id.as_deref(), &goal_text,
-                    "assertion", &f.rule, &f.description,
+                    conv_id.as_deref(),
+                    &goal_text,
+                    "assertion",
+                    &f.rule,
+                    &f.description,
                     None,
                 );
             }
 
             let feedback_text = assertion.format_feedback();
-            let _ = app.emit("llm:chunk", json!({
-                "type": "text",
-                "content": format!("\n\n> 🛡️ [Layer 1 断言] {}", feedback_text)
-            }));
+            let _ = app.emit(
+                "llm:chunk",
+                json!({
+                    "type": "text",
+                    "content": format!("\n\n> 🛡️ [Layer 1 断言] {}", feedback_text)
+                }),
+            );
             feedback = Some(feedback_text);
             continue; // 跳回循环顶部重试，不调用 Checker
         }
@@ -154,7 +172,10 @@ pub async fn execute_goal_loop(
         let warning_ctx = if assertion.warnings.is_empty() {
             String::new()
         } else {
-            format!("\n\n注意事项（来自确定性检查）：\n{}", assertion.warnings.join("\n"))
+            format!(
+                "\n\n注意事项（来自确定性检查）：\n{}",
+                assertion.warnings.join("\n")
+            )
         };
 
         // ══════════════════════════════════════════════════════════
@@ -172,31 +193,41 @@ pub async fn execute_goal_loop(
         );
 
         let eval_result = crate::llm::call_clerk_oneshot(
-            "你是严格的目标评估者。默认立场为 FAIL。必须输出 JSON 格式。", 
-            &eval_prompt, 
-            500
-        ).await;
+            "你是严格的目标评估者。默认立场为 FAIL。必须输出 JSON 格式。",
+            &eval_prompt,
+            500,
+        )
+        .await;
 
         match parse_verdict(&eval_result) {
             Verdict::Pass => {
-                let _ = app.emit("llm:chunk", json!({
-                    "type": "text",
-                    "content": "\n\n> ✅ [目标评估] 评估器确认目标已达成。"
-                }));
+                let _ = app.emit(
+                    "llm:chunk",
+                    json!({
+                        "type": "text",
+                        "content": "\n\n> ✅ [目标评估] 评估器确认目标已达成。"
+                    }),
+                );
                 break;
             }
             Verdict::Fail(fb) => {
                 // 目标 19: 持久化 Checker 拒绝反馈
                 persist_error(
-                    conv_id.as_deref(), &goal_text,
-                    "checker", "checker_rejection", &fb,
+                    conv_id.as_deref(),
+                    &goal_text,
+                    "checker",
+                    "checker_rejection",
+                    &fb,
                     Some(&final_content.chars().take(500).collect::<String>()),
                 );
                 feedback = Some(fb.clone());
-                let _ = app.emit("llm:chunk", json!({
-                    "type": "text",
-                    "content": format!("\n\n> 🔄 [目标评估] 评估器判定未达标。反馈：{}", fb)
-                }));
+                let _ = app.emit(
+                    "llm:chunk",
+                    json!({
+                        "type": "text",
+                        "content": format!("\n\n> 🔄 [目标评估] 评估器判定未达标。反馈：{}", fb)
+                    }),
+                );
                 // 继续下一轮循环
             }
         }

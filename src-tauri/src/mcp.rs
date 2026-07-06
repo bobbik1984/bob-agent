@@ -3,6 +3,7 @@
 //! 管理 MCP Server 子进程的生命周期，通过 stdin/stdout 进行 JSON-RPC 2.0 通信，
 //! 发现远程工具并将其合并到 Bob 的工具系统中。
 
+use command_group::{AsyncCommandGroup, AsyncGroupChild};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -10,9 +11,8 @@ use std::process::Stdio;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
-use command_group::{AsyncCommandGroup, AsyncGroupChild};
-use tokio::sync::{Mutex, RwLock};
 use tokio::sync::mpsc;
+use tokio::sync::{Mutex, RwLock};
 
 /// MCP Server 配置（从前端/config 传入）
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -67,7 +67,12 @@ impl McpManager {
             }
         }
 
-        log::info!("[MCP] Starting server '{}': {} {:?}", name, config.command, config.args);
+        log::info!(
+            "[MCP] Starting server '{}': {} {:?}",
+            name,
+            config.command,
+            config.args
+        );
 
         // 构建子进程
         let actual_command = if cfg!(target_os = "windows") {
@@ -97,11 +102,25 @@ impl McpManager {
             cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
         }
 
-        let mut child = cmd.group_spawn().map_err(|e| format!("Failed to spawn '{}': {}", config.command, e))?;
+        let mut child = cmd
+            .group_spawn()
+            .map_err(|e| format!("Failed to spawn '{}': {}", config.command, e))?;
 
-        let stdin = child.inner().stdin.take().ok_or("Failed to capture stdin")?;
-        let stdout = child.inner().stdout.take().ok_or("Failed to capture stdout")?;
-        let stderr = child.inner().stderr.take().ok_or("Failed to capture stderr")?;
+        let stdin = child
+            .inner()
+            .stdin
+            .take()
+            .ok_or("Failed to capture stdin")?;
+        let stdout = child
+            .inner()
+            .stdout
+            .take()
+            .ok_or("Failed to capture stdout")?;
+        let stderr = child
+            .inner()
+            .stderr
+            .take()
+            .ok_or("Failed to capture stderr")?;
 
         // stdin 写入通道
         let (stdin_tx, mut stdin_rx) = mpsc::channel::<String>(64);
@@ -160,7 +179,12 @@ impl McpManager {
                         // 通知类消息（无 id）暂时忽略
                     }
                     Err(e) => {
-                        log::debug!("[MCP:{}:stdout] non-JSON line: {} ({})", server_name_stdout, &line[..line.len().min(100)], e);
+                        log::debug!(
+                            "[MCP:{}:stdout] non-JSON line: {} ({})",
+                            server_name_stdout,
+                            &line[..line.len().min(100)],
+                            e
+                        );
                     }
                 }
             }
@@ -198,7 +222,11 @@ impl McpManager {
         });
 
         let init_response = self.send_request(name, init_id, &init_request).await?;
-        log::info!("[MCP:{}] initialize response: {}", name, serde_json::to_string(&init_response).unwrap_or_default());
+        log::info!(
+            "[MCP:{}] initialize response: {}",
+            name,
+            serde_json::to_string(&init_response).unwrap_or_default()
+        );
 
         // 发送 initialized 通知
         let initialized_notif = json!({
@@ -230,8 +258,14 @@ impl McpManager {
             .iter()
             .filter_map(|tool| {
                 let tool_name = tool.get("name")?.as_str()?;
-                let description = tool.get("description").and_then(|d| d.as_str()).unwrap_or("");
-                let input_schema = tool.get("inputSchema").cloned().unwrap_or(json!({"type": "object", "properties": {}}));
+                let description = tool
+                    .get("description")
+                    .and_then(|d| d.as_str())
+                    .unwrap_or("");
+                let input_schema = tool
+                    .get("inputSchema")
+                    .cloned()
+                    .unwrap_or(json!({"type": "object", "properties": {}}));
 
                 // 加前缀避免与内建工具冲突: mcp_{server}_{tool}
                 let prefixed_name = format!("mcp_{}_{}", name, tool_name);
@@ -261,13 +295,20 @@ impl McpManager {
     }
 
     /// 发送 JSON-RPC 请求并等待响应
-    async fn send_request(&self, server_name: &str, id: u64, request: &Value) -> Result<Value, String> {
+    async fn send_request(
+        &self,
+        server_name: &str,
+        id: u64,
+        request: &Value,
+    ) -> Result<Value, String> {
         let (tx, rx) = tokio::sync::oneshot::channel();
 
         // 注册 pending
         {
             let servers = self.servers.read().await;
-            let instance = servers.get(server_name).ok_or(format!("MCP server '{}' not found", server_name))?;
+            let instance = servers
+                .get(server_name)
+                .ok_or(format!("MCP server '{}' not found", server_name))?;
             let mut pending = instance.pending.lock().await;
             pending.insert(id, tx);
         }
@@ -276,14 +317,23 @@ impl McpManager {
         let msg = serde_json::to_string(request).map_err(|e| e.to_string())? + "\n";
         {
             let servers = self.servers.read().await;
-            let instance = servers.get(server_name).ok_or(format!("MCP server '{}' not found", server_name))?;
-            instance.stdin_tx.send(msg).await.map_err(|e| format!("Failed to send to stdin: {}", e))?;
+            let instance = servers
+                .get(server_name)
+                .ok_or(format!("MCP server '{}' not found", server_name))?;
+            instance
+                .stdin_tx
+                .send(msg)
+                .await
+                .map_err(|e| format!("Failed to send to stdin: {}", e))?;
         }
 
         // 等待响应（60 秒超时，预留 npx 安装时间）
         match tokio::time::timeout(std::time::Duration::from_secs(60), rx).await {
             Ok(Ok(response)) => Ok(response),
-            Ok(Err(_)) => Err(format!("MCP server '{}' response channel closed", server_name)),
+            Ok(Err(_)) => Err(format!(
+                "MCP server '{}' response channel closed",
+                server_name
+            )),
             Err(_) => {
                 // 清理 pending
                 let servers = self.servers.read().await;
@@ -291,17 +341,30 @@ impl McpManager {
                     let mut pending = instance.pending.lock().await;
                     pending.remove(&id);
                 }
-                Err(format!("MCP server '{}' request timed out (60s)", server_name))
+                Err(format!(
+                    "MCP server '{}' request timed out (60s)",
+                    server_name
+                ))
             }
         }
     }
 
     /// 发送 JSON-RPC 通知（无需响应）
-    async fn send_notification(&self, server_name: &str, notification: &Value) -> Result<(), String> {
+    async fn send_notification(
+        &self,
+        server_name: &str,
+        notification: &Value,
+    ) -> Result<(), String> {
         let msg = serde_json::to_string(notification).map_err(|e| e.to_string())? + "\n";
         let servers = self.servers.read().await;
-        let instance = servers.get(server_name).ok_or(format!("MCP server '{}' not found", server_name))?;
-        instance.stdin_tx.send(msg).await.map_err(|e| format!("Failed to send notification: {}", e))?;
+        let instance = servers
+            .get(server_name)
+            .ok_or(format!("MCP server '{}' not found", server_name))?;
+        instance
+            .stdin_tx
+            .send(msg)
+            .await
+            .map_err(|e| format!("Failed to send notification: {}", e))?;
         Ok(())
     }
 
@@ -461,7 +524,10 @@ pub async fn init_from_saved_config() {
 
     match serde_json::from_value::<HashMap<String, McpServerConfig>>(mcp_servers) {
         Ok(servers) if !servers.is_empty() => {
-            log::info!("[MCP] Loading {} server(s) from saved config", servers.len());
+            log::info!(
+                "[MCP] Loading {} server(s) from saved config",
+                servers.len()
+            );
             get_manager().start_all_from_config(&servers).await;
         }
         _ => {}

@@ -13,10 +13,13 @@
       <button class="engine-status-btn"
            @click="toggleOfflineEngine"
            :title="offlineEngineStatus === 'running' ? '点击关闭引擎' : '点击开启引擎'"
+           :disabled="offlineEngineStatus === 'starting'"
+           :style="{ opacity: offlineEngineStatus === 'starting' ? 0.7 : 1 }"
       >
-        <span>{{ offlineEngineStatus === 'running' ? '引擎运行中' : '引擎已休眠' }}</span>
+        <span>{{ offlineEngineStatus === 'running' ? '引擎运行中' : (offlineEngineStatus === 'starting' ? '引擎启动中...' : '引擎已休眠') }}</span>
 
-        <span class="status-dot" 
+        <Loader v-if="offlineEngineStatus === 'starting'" :size="12" class="spin" style="margin-left: 2px;" />
+        <span v-else class="status-dot" 
               style="width: 10px; height: 10px; border-radius: 50%; display: inline-block; margin-left: 2px; flex-shrink: 0; box-sizing: border-box;"
               :style="{ 
                 background: offlineEngineStatus === 'running' ? 'var(--user-accent, var(--accent-primary))' : 'transparent', 
@@ -377,7 +380,7 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { Server, FolderOpen, Info, Key, ChevronDown, X, Plus, Trash2, Database, Check, Image as ImageIcon, Save, Globe, Pause, Play, Download } from 'lucide-vue-next';
+import { Server, FolderOpen, Info, Key, ChevronDown, X, Plus, Trash2, Database, Check, Image as ImageIcon, Save, Globe, Pause, Play, Download, Loader } from 'lucide-vue-next';
 import ModelHub from '../../components/ModelHub.vue';
 import CustomSelect from '../../components/CustomSelect.vue';
 import mobileModels from '@/assets/mobile_models.json';
@@ -891,6 +894,14 @@ defineExpose({ modelHubRef });
 }
 .engine-status-btn:hover {
   background: var(--bg-tertiary);
+}
+@keyframes spin {
+  100% {
+    transform: rotate(360deg);
+  }
+}
+.spin {
+  animation: spin 1s linear infinite;
 }
 
 .hf-switch {

@@ -28,10 +28,15 @@ async fn get_token() -> Result<String, String> {
 
     // 需要刷新 — 委托给 google_calendar 的 start_google_oauth 触发
     // 这里尝试自行刷新
-    let refresh_token = creds.refresh_token.as_deref()
+    let refresh_token = creds
+        .refresh_token
+        .as_deref()
         .ok_or("No refresh token, please reconnect Google")?;
     let client_id = creds.client_id.as_deref().unwrap_or("BOB_GOOGLE_CLIENT_ID");
-    let client_secret = creds.client_secret.as_deref().unwrap_or("BOB_GOOGLE_CLIENT_SECRET");
+    let client_secret = creds
+        .client_secret
+        .as_deref()
+        .unwrap_or("BOB_GOOGLE_CLIENT_SECRET");
 
     let client = reqwest::Client::new();
     let form_body = format!(
@@ -49,9 +54,15 @@ async fn get_token() -> Result<String, String> {
         .map_err(|e| format!("Gmail token refresh failed: {}", e))?;
 
     let body: Value = resp.json().await.map_err(|e| e.to_string())?;
-    let new_token = body.get("access_token").and_then(|v| v.as_str())
-        .ok_or("Refresh response missing access_token")?.to_string();
-    let expires_in = body.get("expires_in").and_then(|v| v.as_i64()).unwrap_or(3600);
+    let new_token = body
+        .get("access_token")
+        .and_then(|v| v.as_str())
+        .ok_or("Refresh response missing access_token")?
+        .to_string();
+    let expires_in = body
+        .get("expires_in")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(3600);
 
     let mut new_creds = creds.clone();
     new_creds.access_token = Some(new_token.clone());
@@ -66,7 +77,8 @@ async fn gmail_get(path: &str) -> Result<Value, String> {
     let token = get_token().await?;
     let client = reqwest::Client::new();
     let url = format!("{}{}", GMAIL_API_BASE, path);
-    let resp = client.get(&url)
+    let resp = client
+        .get(&url)
         .header("Authorization", format!("Bearer {}", token))
         .send()
         .await
@@ -75,7 +87,11 @@ async fn gmail_get(path: &str) -> Result<Value, String> {
     if !resp.status().is_success() {
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();
-        return Err(format!("Gmail API {} : {}", status, &body[..body.len().min(200)]));
+        return Err(format!(
+            "Gmail API {} : {}",
+            status,
+            &body[..body.len().min(200)]
+        ));
     }
     resp.json().await.map_err(|e| e.to_string())
 }
@@ -154,19 +170,21 @@ pub async fn execute_tool(name: &str, args: &Value) -> Value {
     match name {
         "gmail_search" => {
             let query = args.get("query").and_then(|v| v.as_str()).unwrap_or("");
-            let max = args.get("max_results").and_then(|v| v.as_u64()).unwrap_or(5) as usize;
+            let max = args
+                .get("max_results")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(5) as usize;
             tool_search(query, max).await
         }
         "gmail_read_message" => {
-            let id = args.get("message_id").and_then(|v| v.as_str()).unwrap_or("");
+            let id = args
+                .get("message_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
             tool_read_message(id).await
         }
-        "gmail_create_draft" => {
-            tool_create_draft(args).await
-        }
-        "gmail_list_labels" => {
-            tool_list_labels().await
-        }
+        "gmail_create_draft" => tool_create_draft(args).await,
+        "gmail_list_labels" => tool_list_labels().await,
         _ => json!({"error": format!("Unknown gmail tool: {}", name)}),
     }
 }
@@ -174,7 +192,11 @@ pub async fn execute_tool(name: &str, args: &Value) -> Value {
 // ── 工具实现 ──────────────────────────────────────────
 
 async fn tool_search(query: &str, max_results: usize) -> Value {
-    let path = format!("/messages?q={}&maxResults={}", urlencoding::encode(query), max_results);
+    let path = format!(
+        "/messages?q={}&maxResults={}",
+        urlencoding::encode(query),
+        max_results
+    );
     match gmail_get(&path).await {
         Ok(body) => {
             let messages = body.get("messages").and_then(|m| m.as_array());
@@ -230,7 +252,8 @@ async fn tool_read_message(message_id: &str) -> Value {
     match gmail_get(&path).await {
         Ok(body) => {
             let snippet = body.get("snippet").and_then(|v| v.as_str()).unwrap_or("");
-            let headers = body.get("payload")
+            let headers = body
+                .get("payload")
                 .and_then(|p| p.get("headers"))
                 .and_then(|h| h.as_array());
 
@@ -275,7 +298,11 @@ fn extract_text_body(msg: &Value) -> Option<String> {
     let payload = msg.get("payload")?;
 
     // 单 part 消息
-    if let Some(body_data) = payload.get("body").and_then(|b| b.get("data")).and_then(|d| d.as_str()) {
+    if let Some(body_data) = payload
+        .get("body")
+        .and_then(|b| b.get("data"))
+        .and_then(|d| d.as_str())
+    {
         return decode_base64url(body_data);
     }
 
@@ -284,7 +311,11 @@ fn extract_text_body(msg: &Value) -> Option<String> {
         for part in parts {
             let mime = part.get("mimeType").and_then(|m| m.as_str()).unwrap_or("");
             if mime == "text/plain" {
-                if let Some(data) = part.get("body").and_then(|b| b.get("data")).and_then(|d| d.as_str()) {
+                if let Some(data) = part
+                    .get("body")
+                    .and_then(|b| b.get("data"))
+                    .and_then(|d| d.as_str())
+                {
                     return decode_base64url(data);
                 }
             }
@@ -330,7 +361,8 @@ async fn tool_create_draft(args: &Value) -> Value {
 
     let client = reqwest::Client::new();
     let url = format!("{}/drafts", GMAIL_API_BASE);
-    let resp = client.post(&url)
+    let resp = client
+        .post(&url)
         .header("Authorization", format!("Bearer {}", token))
         .json(&draft_body)
         .send()
@@ -354,13 +386,16 @@ async fn tool_list_labels() -> Value {
             let labels = body.get("labels").and_then(|l| l.as_array());
             match labels {
                 Some(arr) => {
-                    let simplified: Vec<Value> = arr.iter().map(|l| {
-                        json!({
-                            "id": l.get("id"),
-                            "name": l.get("name"),
-                            "type": l.get("type"),
+                    let simplified: Vec<Value> = arr
+                        .iter()
+                        .map(|l| {
+                            json!({
+                                "id": l.get("id"),
+                                "name": l.get("name"),
+                                "type": l.get("type"),
+                            })
                         })
-                    }).collect();
+                        .collect();
                     json!({"ok": simplified})
                 }
                 None => json!({"ok": []}),

@@ -1,14 +1,14 @@
-use std::sync::Arc;
-use serde_json::json;
-use rusqlite::{params, Connection};
-use tauri::Emitter;
 use base64::Engine as _;
+use rusqlite::{params, Connection};
+use serde_json::json;
+use std::sync::Arc;
+use tauri::Emitter;
 
-use super::types::*;
 use super::accounts::resolve_wechat_account;
-use super::WechatState;
 use super::api::WechatApi;
 use super::cdn;
+use super::types::*;
+use super::WechatState;
 
 const HELP_TEXT: &str = "可用指令：\n/sessions — 列出最近会话，回复序号切换\n/new      — 开启全新会话\n/status   — 查看当前会话 ID\n/help     — 显示此帮助\n\n直接发送文字即可与 Bob 对话 🤖";
 
@@ -20,7 +20,10 @@ fn extract_urls(text: &str) -> Vec<String> {
         if word.starts_with("http://") || word.starts_with("https://") {
             // 清理尾部标点
             let clean = word.trim_end_matches(|c: char| {
-                matches!(c, ',' | '.' | '!' | '?' | ')' | ']' | '>' | '。' | '，' | '！' | '？')
+                matches!(
+                    c,
+                    ',' | '.' | '!' | '?' | ')' | ']' | '>' | '。' | '，' | '！' | '？'
+                )
             });
             if !clean.is_empty() {
                 urls.push(clean.to_string());
@@ -58,8 +61,6 @@ fn open_db() -> Option<Connection> {
     let db_path = crate::get_data_dir().join("bob.db");
     Connection::open(db_path).ok()
 }
-
-
 
 async fn handle_message(
     wxid: &str,
@@ -105,16 +106,20 @@ async fn handle_message(
     );
 
     // 通知桌面前端：用户发来新消息，准备进入思考状态
-    let _ = app_handle.emit("remote:new-message", serde_json::json!({
-        "conversation_id": &conversation_id,
-        "from_channel": "wechat",
-        "status": "thinking"
-    }));
-
+    let _ = app_handle.emit(
+        "remote:new-message",
+        serde_json::json!({
+            "conversation_id": &conversation_id,
+            "from_channel": "wechat",
+            "status": "thinking"
+        }),
+    );
 
     // Load history
     let mut messages = Vec::new();
-    if let Ok(mut stmt) = conn.prepare("SELECT role, content FROM messages WHERE conversation_id = ?1 ORDER BY created_at ASC") {
+    if let Ok(mut stmt) = conn.prepare(
+        "SELECT role, content FROM messages WHERE conversation_id = ?1 ORDER BY created_at ASC",
+    ) {
         let rows = stmt.query_map(params![conversation_id], |row| {
             Ok(json!({
                 "role": row.get::<_, String>(0)?,
@@ -133,7 +138,8 @@ async fn handle_message(
     let urls = extract_urls(text);
     if !urls.is_empty() {
         let mut url_context = String::new();
-        for url in urls.iter().take(2) { // 最多抓取 2 个链接
+        for url in urls.iter().take(2) {
+            // 最多抓取 2 个链接
             let result = crate::web::system_fetch_url(url.to_string()).await;
             if result.get("error").is_none() {
                 let title = result.get("title").and_then(|v| v.as_str()).unwrap_or("");
@@ -143,7 +149,11 @@ async fn handle_message(
                     "\n[来源: {}]\n标题: {}\n{}\n",
                     url, title, preview
                 ));
-                log::info!("[wechat] T-WX01: pre-fetched URL {} ({} chars)", url, preview.len());
+                log::info!(
+                    "[wechat] T-WX01: pre-fetched URL {} ({} chars)",
+                    url,
+                    preview.len()
+                );
             }
         }
         if !url_context.is_empty() {
@@ -155,15 +165,23 @@ async fn handle_message(
     }
 
     // Call LLM
-    // We will need to send typing heartbeats while waiting. 
+    // We will need to send typing heartbeats while waiting.
     // For now we just call it.
-    let result = crate::llm::stream_chat(app_handle.clone(), messages, Some(conversation_id.clone()), Some(wxid.to_string()), false, "default".to_string()).await;
-    
+    let result = crate::llm::stream_chat(
+        app_handle.clone(),
+        messages,
+        Some(conversation_id.clone()),
+        Some(wxid.to_string()),
+        false,
+        "default".to_string(),
+    )
+    .await;
+
     let mut full_text = String::new();
     if let Some(content) = result.get("content").and_then(|v| v.as_str()) {
         full_text.push_str(content);
     }
-    
+
     if full_text.is_empty() {
         return "（Bob 未返回内容，请稍后重试）".to_string();
     }
@@ -176,10 +194,13 @@ async fn handle_message(
     );
 
     // 通知桌面前端：有新的远程消息到达，刷新侧边栏和当前对话
-    let _ = app_handle.emit("remote:new-message", serde_json::json!({
-        "conversation_id": &conversation_id,
-        "from_channel": "wechat",
-    }));
+    let _ = app_handle.emit(
+        "remote:new-message",
+        serde_json::json!({
+            "conversation_id": &conversation_id,
+            "from_channel": "wechat",
+        }),
+    );
 
     if full_text.chars().count() > 3800 {
         let truncated: String = full_text.chars().take(3800).collect();
@@ -202,7 +223,10 @@ pub async fn process_message(msg: WeixinMessage, state: Arc<WechatState>) -> Res
 
     let msg_type = item_list.first().and_then(|i| i.r#type).unwrap_or(0);
 
-    let text_item = item_list.iter().find(|i| i.r#type == Some(1)).and_then(|i| i.text_item.clone());
+    let text_item = item_list
+        .iter()
+        .find(|i| i.r#type == Some(1))
+        .and_then(|i| i.text_item.clone());
     let text = match text_item.and_then(|t| t.text) {
         Some(t) => t,
         None => {
@@ -210,17 +234,19 @@ pub async fn process_message(msg: WeixinMessage, state: Arc<WechatState>) -> Res
             if msg_type == 49 {
                 // type=49 的内容可能在 text_item 的 text 字段中以 XML 形式存在
                 // 也可能在其他 item 的 text 中
-                let card_xml = item_list.iter()
+                let card_xml = item_list
+                    .iter()
                     .filter_map(|i| i.text_item.as_ref()?.text.as_ref())
                     .next()
                     .map(|s| s.to_string())
                     .unwrap_or_default();
-                
+
                 if let Some(url) = extract_url_from_card_xml(&card_xml) {
                     log::info!("[wechat] T-WX01: extracted URL from type=49 card: {}", url);
                     format!("帮我看看这个链接的内容: {}", url)
                 } else {
-                    let reply = "收到了一个分享链接，但无法提取 URL。请直接发送链接地址。".to_string();
+                    let reply =
+                        "收到了一个分享链接，但无法提取 URL。请直接发送链接地址。".to_string();
                     send_reply(&from_user_id, &reply, &state, msg.context_token).await?;
                     return Ok(());
                 }
@@ -242,17 +268,35 @@ pub async fn process_message(msg: WeixinMessage, state: Arc<WechatState>) -> Res
         return Ok(());
     }
 
-    log::info!("[wechat] process_message: from={} text=\"{}\"", from_user_id, text.chars().take(30).collect::<String>());
+    log::info!(
+        "[wechat] process_message: from={} text=\"{}\"",
+        from_user_id,
+        text.chars().take(30).collect::<String>()
+    );
 
-    let reply = handle_message(&from_user_id, &text, state.clone(), msg.context_token.clone()).await;
-    log::info!("[wechat] process_message: reply ready ({} chars), sending...", reply.chars().count());
+    let reply = handle_message(
+        &from_user_id,
+        &text,
+        state.clone(),
+        msg.context_token.clone(),
+    )
+    .await;
+    log::info!(
+        "[wechat] process_message: reply ready ({} chars), sending...",
+        reply.chars().count()
+    );
     send_reply(&from_user_id, &reply, &state, msg.context_token).await?;
     log::info!("[wechat] process_message: reply sent to {}", from_user_id);
 
     Ok(())
 }
 
-pub async fn send_reply(to: &str, text: &str, state: &Arc<WechatState>, context_token: Option<String>) -> Result<(), String> {
+pub async fn send_reply(
+    to: &str,
+    text: &str,
+    state: &Arc<WechatState>,
+    context_token: Option<String>,
+) -> Result<(), String> {
     let account_id = state.account_id.read().unwrap().clone();
     let account = match resolve_wechat_account(account_id.as_deref()) {
         Ok(acc) if acc.configured => acc,
@@ -261,35 +305,39 @@ pub async fn send_reply(to: &str, text: &str, state: &Arc<WechatState>, context_
     };
 
     let api = WechatApi::new(account.base_url, account.token);
-    
+
     let reply_msg = WeixinMessage {
         seq: None,
         message_id: None,
-        from_user_id: Some(String::new()),  // must be empty string, not None
+        from_user_id: Some(String::new()), // must be empty string, not None
         to_user_id: Some(to.to_string()),
-        client_id: Some(format!("bob-{}", crate::now_ms())),  // unique client ID required
+        client_id: Some(format!("bob-{}", crate::now_ms())), // unique client ID required
         create_time_ms: None,
         update_time_ms: None,
         delete_time_ms: None,
         session_id: None,
         group_id: None,
-        message_type: Some(2),   // MESSAGE_TYPE_BOT = 2
-        message_state: Some(2),  // MESSAGE_STATE_FINISH = 2
-        item_list: if text.is_empty() { None } else { Some(vec![MessageItem {
-            r#type: Some(1),
-            create_time_ms: None,
-            update_time_ms: None,
-            is_completed: None,
-            msg_id: None,
-            ref_msg: None,
-            text_item: Some(TextItem {
-                text: Some(text.to_string()),
-            }),
-            image_item: None,
-            voice_item: None,
-            file_item: None,
-            video_item: None,
-        }]) },
+        message_type: Some(2),  // MESSAGE_TYPE_BOT = 2
+        message_state: Some(2), // MESSAGE_STATE_FINISH = 2
+        item_list: if text.is_empty() {
+            None
+        } else {
+            Some(vec![MessageItem {
+                r#type: Some(1),
+                create_time_ms: None,
+                update_time_ms: None,
+                is_completed: None,
+                msg_id: None,
+                ref_msg: None,
+                text_item: Some(TextItem {
+                    text: Some(text.to_string()),
+                }),
+                image_item: None,
+                voice_item: None,
+                file_item: None,
+                video_item: None,
+            }])
+        },
         context_token,
     };
 
@@ -303,7 +351,12 @@ pub async fn send_reply(to: &str, text: &str, state: &Arc<WechatState>, context_
             let ret = resp.ret.unwrap_or(0);
             let errmsg = resp.errmsg.as_deref().unwrap_or("");
             if ret != 0 {
-                log::warn!("[wechat] sendmessage to {} returned ret={} errmsg={}", to, ret, errmsg);
+                log::warn!(
+                    "[wechat] sendmessage to {} returned ret={} errmsg={}",
+                    to,
+                    ret,
+                    errmsg
+                );
             } else {
                 log::info!("[wechat] sendmessage to {} OK (ret={})", to, ret);
             }
@@ -321,9 +374,9 @@ pub async fn send_reply(to: &str, text: &str, state: &Arc<WechatState>, context_
 // ═══════════════════════════════════════════════════════════
 
 /// 发送媒体消息 (图片或文件) 到微信用户
-/// 
+///
 /// 流程：上传到 CDN → 构造 ImageItem/FileItem → sendmessage API
-/// 
+///
 /// 由 LLM tool `send_wechat_file` 和未来的 Tauri command 调用。
 pub async fn send_wechat_file(
     wxid: &str,
@@ -341,9 +394,10 @@ pub async fn send_wechat_file(
     let api = WechatApi::new(account.base_url, account.token);
 
     // 2. 判断媒体类型和大小
-    let file_meta = std::fs::metadata(file_path).map_err(|e| format!("无法读取文件元数据: {}", e))?;
+    let file_meta =
+        std::fs::metadata(file_path).map_err(|e| format!("无法读取文件元数据: {}", e))?;
     let file_size_mb = file_meta.len() as f64 / 1024.0 / 1024.0;
-    
+
     if file_size_mb > 25.0 {
         // ── 大文件降级：通过 Web Drop 中继，生成公网可达的下载链接 ──
         log::info!(
@@ -414,7 +468,8 @@ pub async fn send_wechat_file(
             base_info: None,
         };
 
-        api.send_message(req, 15_000).await
+        api.send_message(req, 15_000)
+            .await
             .map_err(|e| format!("发送下载链接消息失败: {}", e))?;
 
         return Ok(format!(
@@ -431,19 +486,28 @@ pub async fn send_wechat_file(
     };
 
     let type_label = if is_image { "图片" } else { "文件" };
-    log::info!("[wechat] send_wechat_file: to={} path={} type={}", wxid, file_path, type_label);
+    log::info!(
+        "[wechat] send_wechat_file: to={} path={} type={}",
+        wxid,
+        file_path,
+        type_label
+    );
 
     // 3. 上传到 CDN（带实时进度推送）
     let uploaded = cdn::upload_media(&api, file_path, wxid, media_type, app).await?;
     log::info!(
         "[wechat] CDN upload done: filekey={} size={} ciphertext_size={}",
-        uploaded.filekey, uploaded.file_size, uploaded.file_size_ciphertext
+        uploaded.filekey,
+        uploaded.file_size,
+        uploaded.file_size_ciphertext
     );
 
     // 4. 构造 CdnMedia (共用)
     let cdn_media = CdnMedia {
         encrypt_query_param: Some(uploaded.download_encrypted_query_param.clone()),
-        aes_key: Some(base64::engine::general_purpose::STANDARD.encode(uploaded.aeskey_hex.as_bytes())),
+        aes_key: Some(
+            base64::engine::general_purpose::STANDARD.encode(uploaded.aeskey_hex.as_bytes()),
+        ),
         encrypt_type: Some(1),
         full_url: None,
     };
@@ -549,7 +613,8 @@ pub async fn send_wechat_file(
             base_info: None,
         };
 
-        api.send_message(req, 15_000).await
+        api.send_message(req, 15_000)
+            .await
             .map_err(|e| format!("发送{}消息失败: {}", type_label, e))?;
     }
 
@@ -558,7 +623,8 @@ pub async fn send_wechat_file(
         .and_then(|n| n.to_str())
         .unwrap_or("file");
 
-    let result_msg = format!("✅ 已成功发送{} \"{}\" ({}KB) 到微信用户 {}",
+    let result_msg = format!(
+        "✅ 已成功发送{} \"{}\" ({}KB) 到微信用户 {}",
         type_label,
         file_name,
         uploaded.file_size / 1024,

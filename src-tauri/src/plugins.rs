@@ -51,9 +51,15 @@ pub fn system_get_plugins() -> Value {
     }));
 
     let config = super::read_config();
-    let bundled_dir = config.get("bundledSkillsDir").and_then(|v| v.as_str()).map(|s| Path::new(s).to_path_buf());
-    let external_dir = config.get("externalSkillsDir").and_then(|v| v.as_str()).map(|s| Path::new(s).to_path_buf());
-    
+    let bundled_dir = config
+        .get("bundledSkillsDir")
+        .and_then(|v| v.as_str())
+        .map(|s| Path::new(s).to_path_buf());
+    let external_dir = config
+        .get("externalSkillsDir")
+        .and_then(|v| v.as_str())
+        .map(|s| Path::new(s).to_path_buf());
+
     let mut added_external = std::collections::HashSet::new();
 
     // ── 2. 外部自定义技能 (External Skills) ──────────────────
@@ -71,17 +77,23 @@ pub fn system_get_plugins() -> Value {
                         continue;
                     }
 
-                    let folder_name = entry_path.file_name()
+                    let folder_name = entry_path
+                        .file_name()
                         .and_then(|n| n.to_str())
                         .unwrap_or("unknown")
                         .to_string();
 
                     let (name, description) = match fs::read_to_string(&skill_md) {
-                        Ok(content) => crate::tools::parse_skill_frontmatter(&content, &folder_name),
+                        Ok(content) => {
+                            crate::tools::parse_skill_frontmatter(&content, &folder_name)
+                        }
                         Err(_) => (folder_name.clone(), String::new()),
                     };
 
-                    let is_overriding = bundled_dir.as_ref().map(|b| b.join(&folder_name).exists()).unwrap_or(false);
+                    let is_overriding = bundled_dir
+                        .as_ref()
+                        .map(|b| b.join(&folder_name).exists())
+                        .unwrap_or(false);
 
                     plugins.push(json!({
                         "id": format!("skill-external-{}", folder_name),
@@ -115,13 +127,16 @@ pub fn system_get_plugins() -> Value {
                         continue;
                     }
 
-                    let folder_name = entry_path.file_name()
+                    let folder_name = entry_path
+                        .file_name()
                         .and_then(|n| n.to_str())
                         .unwrap_or("unknown")
                         .to_string();
 
                     let (name, description) = match fs::read_to_string(&skill_md) {
-                        Ok(content) => crate::tools::parse_skill_frontmatter(&content, &folder_name),
+                        Ok(content) => {
+                            crate::tools::parse_skill_frontmatter(&content, &folder_name)
+                        }
                         Err(_) => (folder_name.clone(), String::new()),
                     };
 

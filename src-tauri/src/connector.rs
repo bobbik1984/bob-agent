@@ -14,7 +14,7 @@ pub struct ConnectorStatus {
     pub name: String,
     #[serde(rename = "type")]
     pub connector_type: String,
-    pub status: String,  // "connected" | "disconnected" | "expired"
+    pub status: String, // "connected" | "disconnected" | "expired"
     pub connected_at: Option<i64>,
 }
 
@@ -69,7 +69,8 @@ fn tokens_dir() -> PathBuf {
 pub fn save_credentials(name: &str, creds: &StoredCredentials) -> Result<(), String> {
     let path = tokens_dir().join(format!("{}.json", name));
     let data = serde_json::to_string_pretty(creds).map_err(|e| e.to_string())?;
-    std::fs::write(&path, data.as_bytes()).map_err(|e| format!("Failed to save credentials for '{}': {}", name, e))?;
+    std::fs::write(&path, data.as_bytes())
+        .map_err(|e| format!("Failed to save credentials for '{}': {}", name, e))?;
     log::info!("[Connector] Saved credentials for '{}'", name);
     Ok(())
 }
@@ -88,7 +89,8 @@ pub fn load_credentials(name: &str) -> Option<StoredCredentials> {
 pub fn remove_credentials(name: &str) -> Result<(), String> {
     let path = tokens_dir().join(format!("{}.json", name));
     if path.exists() {
-        std::fs::remove_file(&path).map_err(|e| format!("Failed to remove credentials for '{}': {}", name, e))?;
+        std::fs::remove_file(&path)
+            .map_err(|e| format!("Failed to remove credentials for '{}': {}", name, e))?;
     }
     log::info!("[Connector] Removed credentials for '{}'", name);
     Ok(())
@@ -105,7 +107,11 @@ fn get_connector_status(name: &str, connector_type: &str) -> ConnectorStatus {
                 .as_secs() as i64;
 
             let status = if let Some(expires_at) = creds.expires_at {
-                if expires_at < now { "expired" } else { "connected" }
+                if expires_at < now {
+                    "expired"
+                } else {
+                    "connected"
+                }
             } else {
                 "connected"
             };
@@ -130,11 +136,12 @@ fn get_connector_status(name: &str, connector_type: &str) -> ConnectorStatus {
 // OAuth 回调服务器
 // ═══════════════════════════════════════════════════════════
 
-use tokio::sync::oneshot;
 use std::sync::Mutex as StdMutex;
+use tokio::sync::oneshot;
 
 /// 全局 OAuth 回调等待器
-static OAUTH_WAITER: std::sync::OnceLock<StdMutex<Option<oneshot::Sender<String>>>> = std::sync::OnceLock::new();
+static OAUTH_WAITER: std::sync::OnceLock<StdMutex<Option<oneshot::Sender<String>>>> =
+    std::sync::OnceLock::new();
 
 fn get_oauth_waiter() -> &'static StdMutex<Option<oneshot::Sender<String>>> {
     OAUTH_WAITER.get_or_init(|| StdMutex::new(None))
@@ -159,8 +166,10 @@ pub fn start_oauth_server() {
 
     STARTED.call_once(|| {
         tokio::spawn(async {
-            let app = axum::Router::new()
-                .route("/oauth/callback", axum::routing::get(oauth_callback_handler));
+            let app = axum::Router::new().route(
+                "/oauth/callback",
+                axum::routing::get(oauth_callback_handler),
+            );
 
             let listener = match tokio::net::TcpListener::bind("127.0.0.1:19823").await {
                 Ok(l) => l,
@@ -230,29 +239,40 @@ pub async fn connector_start_oauth(name: String) -> Value {
 pub async fn connector_save_credentials(name: String, credentials: Value) -> Value {
     match name.as_str() {
         "google" => {
-            let file_path = credentials.get("file_path").and_then(|v| v.as_str()).unwrap_or("");
+            let file_path = credentials
+                .get("file_path")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
             if file_path.is_empty() {
                 return json!({"error": "file_path is required for google credentials"});
             }
-            
+
             let content = match std::fs::read_to_string(file_path) {
                 Ok(c) => c,
-                Err(e) => return json!({"error": format!("Failed to read credentials file: {}", e)})
+                Err(e) => {
+                    return json!({"error": format!("Failed to read credentials file: {}", e)})
+                }
             };
-            
+
             let parsed: Value = match serde_json::from_str(&content) {
                 Ok(v) => v,
-                Err(e) => return json!({"error": format!("Invalid JSON: {}", e)})
+                Err(e) => return json!({"error": format!("Invalid JSON: {}", e)}),
             };
-            
+
             let (client_id, client_secret) = if let Some(installed) = parsed.get("installed") {
-                (installed.get("client_id").and_then(|v| v.as_str()), installed.get("client_secret").and_then(|v| v.as_str()))
+                (
+                    installed.get("client_id").and_then(|v| v.as_str()),
+                    installed.get("client_secret").and_then(|v| v.as_str()),
+                )
             } else if let Some(web) = parsed.get("web") {
-                (web.get("client_id").and_then(|v| v.as_str()), web.get("client_secret").and_then(|v| v.as_str()))
+                (
+                    web.get("client_id").and_then(|v| v.as_str()),
+                    web.get("client_secret").and_then(|v| v.as_str()),
+                )
             } else {
                 (None, None)
             };
-            
+
             if let (Some(id), Some(secret)) = (client_id, client_secret) {
                 let creds = StoredCredentials {
                     client_id: Some(id.to_string()),
@@ -261,15 +281,23 @@ pub async fn connector_save_credentials(name: String, credentials: Value) -> Val
                 };
                 match save_credentials("google", &creds) {
                     Ok(()) => json!({"ok": true}),
-                    Err(e) => json!({"error": e})
+                    Err(e) => json!({"error": e}),
                 }
             } else {
                 json!({"error": "Invalid credentials.json format (missing installed/web client_id or client_secret)"})
             }
         }
         "lark" => {
-            let app_id = credentials.get("app_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let app_secret = credentials.get("app_secret").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let app_id = credentials
+                .get("app_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let app_secret = credentials
+                .get("app_secret")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
 
             if app_id.is_empty() || app_secret.is_empty() {
                 return json!({"error": "app_id and app_secret are required"});

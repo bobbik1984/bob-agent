@@ -11,7 +11,7 @@ use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, LazyLock};
+use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 // ═══════════════════════════════════════════════════════════
@@ -70,8 +70,7 @@ pub fn register_shared_file(
         return Err(format!("文件不存在或不是普通文件: {}", file_path));
     }
 
-    let meta = std::fs::metadata(path)
-        .map_err(|e| format!("无法读取文件元数据: {}", e))?;
+    let meta = std::fs::metadata(path).map_err(|e| format!("无法读取文件元数据: {}", e))?;
 
     let display_name = path
         .file_name()
@@ -95,11 +94,7 @@ pub fn register_shared_file(
         expires_at: expires,
     };
 
-    let url = format!(
-        "{}/v1/dl/{}",
-        base_url.trim_end_matches('/'),
-        token
-    );
+    let url = format!("{}/v1/dl/{}", base_url.trim_end_matches('/'), token);
 
     let mut registry = SHARE_REGISTRY.lock().unwrap();
     registry.insert(token.clone(), entry);
@@ -130,7 +125,10 @@ pub fn list_active_shares() -> Vec<(String, SharedFileEntry)> {
     let mut registry = SHARE_REGISTRY.lock().unwrap();
     let now = now_ms();
     registry.retain(|_, entry| entry.expires_at == 0 || entry.expires_at > now);
-    registry.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
+    registry
+        .iter()
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect()
 }
 
 /// 撤销分享
@@ -163,7 +161,7 @@ pub fn get_base_url() -> String {
             }
         }
     }
-    
+
     // 如果没有配置，尝试获取本地局域网 IP
     if let Some(ip) = get_local_ip() {
         format!("http://{}:3722", ip)

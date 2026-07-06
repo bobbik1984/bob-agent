@@ -101,7 +101,7 @@ fn append_message(conn: &Connection, conversation_id: &str, role: &str, content:
 /// 加载会话历史消息（按时间升序）
 fn load_history(conn: &Connection, conversation_id: &str) -> Vec<Value> {
     let mut stmt = match conn.prepare(
-        "SELECT role, content FROM messages WHERE conversation_id = ?1 ORDER BY created_at ASC"
+        "SELECT role, content FROM messages WHERE conversation_id = ?1 ORDER BY created_at ASC",
     ) {
         Ok(s) => s,
         Err(_) => return vec![],
@@ -121,7 +121,7 @@ fn load_history(conn: &Connection, conversation_id: &str) -> Vec<Value> {
 /// 获取最近 N 条会话
 fn get_recent_conversations(conn: &Connection, limit: usize) -> Vec<ConversationSummary> {
     let mut stmt = match conn.prepare(
-        "SELECT id, title, updated_at FROM conversations ORDER BY updated_at DESC LIMIT ?1"
+        "SELECT id, title, updated_at FROM conversations ORDER BY updated_at DESC LIMIT ?1",
     ) {
         Ok(s) => s,
         Err(_) => return vec![],
@@ -155,9 +155,11 @@ async fn handle_chat(
         None => {
             // 返回一个立即完成的 SSE 错误流
             let (tx, rx) = mpsc::channel::<Result<Event, Infallible>>(1);
-            let _ = tx.send(Ok(Event::default()
-                .event("error")
-                .data("{\"error\":\"数据库连接失败\"}"))).await;
+            let _ = tx
+                .send(Ok(Event::default()
+                    .event("error")
+                    .data("{\"error\":\"数据库连接失败\"}")))
+                .await;
             return Sse::new(ReceiverStream::new(rx)).keep_alive(KeepAlive::default());
         }
     };
@@ -168,20 +170,26 @@ async fn handle_chat(
             Some(id) if !id.is_empty() => {
                 // 校验会话存在
                 let exists: bool = db
-                    .query_row("SELECT 1 FROM conversations WHERE id = ?1", params![id], |_| Ok(true))
+                    .query_row(
+                        "SELECT 1 FROM conversations WHERE id = ?1",
+                        params![id],
+                        |_| Ok(true),
+                    )
                     .unwrap_or(false);
                 if exists {
                     id.to_string()
                 } else {
                     // ID 不存在时新建
                     let title: String = req.message.chars().take(20).collect();
-                    create_conversation(&db, &title).unwrap_or_else(|| format!("conv-{}", crate::now_ms()))
+                    create_conversation(&db, &title)
+                        .unwrap_or_else(|| format!("conv-{}", crate::now_ms()))
                 }
             }
             _ => {
                 // 新建会话，标题取消息前 20 字
                 let title: String = req.message.chars().take(20).collect();
-                create_conversation(&db, &title).unwrap_or_else(|| format!("conv-{}", crate::now_ms()))
+                create_conversation(&db, &title)
+                    .unwrap_or_else(|| format!("conv-{}", crate::now_ms()))
             }
         }
     };
@@ -262,12 +270,13 @@ async fn handle_chat(
                     }
                     "done" => {
                         // LLM 完成，将完整文本和 conv_id 一起发给客户端
-                        let event = Event::default()
-                            .event("done")
-                            .data(json!({
+                        let event = Event::default().event("done").data(
+                            json!({
                                 "conversation_id": conv_id_for_done,
                                 "full_text": full_text
-                            }).to_string());
+                            })
+                            .to_string(),
+                        );
                         let _ = tx_forward.send(Ok(event)).await;
                         break;
                     }
@@ -285,8 +294,9 @@ async fn handle_chat(
             Some(conv_id_clone.clone()),
             req.from_user.clone(),
             false,
-            agent_mode
-        ).await;
+            agent_mode,
+        )
+        .await;
 
         // 取消事件监听
         app_clone.unlisten(listener_id);
@@ -297,7 +307,11 @@ async fn handle_chat(
         // ── 5. 将 assistant 回复写入数据库 ──────────────────
         let assistant_content = if full_text.is_empty() {
             // 如果流没收到文本（可能发生错误），用 result 中的 content 字段
-            result.get("content").and_then(|v| v.as_str()).unwrap_or("").to_string()
+            result
+                .get("content")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string()
         } else {
             full_text
         };
@@ -308,27 +322,27 @@ async fn handle_chat(
         }
 
         // ── 6. 广播 remote:new-message 给桌面端 UI ──────────
-        let _ = app_clone.emit("remote:new-message", json!({
-            "conversation_id": conv_id_clone,
-            "from_channel": req.from_channel.as_deref().unwrap_or("wechat"),
-        }));
+        let _ = app_clone.emit(
+            "remote:new-message",
+            json!({
+                "conversation_id": conv_id_clone,
+                "from_channel": req.from_channel.as_deref().unwrap_or("wechat"),
+            }),
+        );
     });
 
-    Sse::new(ReceiverStream::new(rx))
-        .keep_alive(
-            KeepAlive::new()
-                .interval(Duration::from_secs(15))
-                .text("keep-alive"),
-        )
+    Sse::new(ReceiverStream::new(rx)).keep_alive(
+        KeepAlive::new()
+            .interval(Duration::from_secs(15))
+            .text("keep-alive"),
+    )
 }
 
 // ═══════════════════════════════════════════════════════════
 // Handler: GET /v1/conversations — 最近会话列表
 // ═══════════════════════════════════════════════════════════
 
-async fn handle_get_conversations(
-    State(state): State<ApiState>,
-) -> impl IntoResponse {
+async fn handle_get_conversations(State(state): State<ApiState>) -> impl IntoResponse {
     let conn = match open_db(&state.app) {
         Some(c) => c,
         None => return Json(json!({ "error": "数据库连接失败" })),
@@ -346,7 +360,9 @@ async fn handle_get_conversations(
 // ═══════════════════════════════════════════════════════════
 
 async fn handle_health() -> impl IntoResponse {
-    Json(json!({ "status": "ok", "service": "bob-agent-api", "version": env!("CARGO_PKG_VERSION") }))
+    Json(
+        json!({ "status": "ok", "service": "bob-agent-api", "version": env!("CARGO_PKG_VERSION") }),
+    )
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -379,19 +395,24 @@ async fn handle_file(
             .unwrap();
     }
 
-    let mime = match file_path.extension().and_then(|e| e.to_str()).map(|s| s.to_lowercase()).as_deref() {
-        Some("png")          => "image/png",
+    let mime = match file_path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|s| s.to_lowercase())
+        .as_deref()
+    {
+        Some("png") => "image/png",
         Some("jpg" | "jpeg") => "image/jpeg",
-        Some("gif")          => "image/gif",
-        Some("webp")         => "image/webp",
-        Some("svg")          => "image/svg+xml",
-        Some("ico")          => "image/x-icon",
-        Some("bmp")          => "image/bmp",
-        Some("mp4")          => "video/mp4",
-        Some("webm")         => "video/webm",
-        Some("mov")          => "video/quicktime",
-        Some("pdf")          => "application/pdf",
-        _                    => "application/octet-stream",
+        Some("gif") => "image/gif",
+        Some("webp") => "image/webp",
+        Some("svg") => "image/svg+xml",
+        Some("ico") => "image/x-icon",
+        Some("bmp") => "image/bmp",
+        Some("mp4") => "video/mp4",
+        Some("webm") => "video/webm",
+        Some("mov") => "video/quicktime",
+        Some("pdf") => "application/pdf",
+        _ => "application/octet-stream",
     };
 
     match std::fs::read(file_path) {
@@ -441,7 +462,11 @@ async fn handle_download(
     // 2. 校验文件仍然存在
     let path = &entry.path;
     if !path.exists() || !path.is_file() {
-        log::warn!("[http_api] /v1/dl/{} 文件已被移动或删除: {:?}", &token[..8], path);
+        log::warn!(
+            "[http_api] /v1/dl/{} 文件已被移动或删除: {:?}",
+            &token[..8],
+            path
+        );
         return axum::response::Response::builder()
             .status(410) // Gone
             .header("Content-Type", "text/plain; charset=utf-8")
@@ -450,31 +475,36 @@ async fn handle_download(
     }
 
     // 3. MIME 类型推断
-    let mime = match path.extension().and_then(|e| e.to_str()).map(|s| s.to_lowercase()).as_deref() {
-        Some("png")          => "image/png",
+    let mime = match path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|s| s.to_lowercase())
+        .as_deref()
+    {
+        Some("png") => "image/png",
         Some("jpg" | "jpeg") => "image/jpeg",
-        Some("gif")          => "image/gif",
-        Some("webp")         => "image/webp",
-        Some("svg")          => "image/svg+xml",
-        Some("mp4")          => "video/mp4",
-        Some("webm")         => "video/webm",
-        Some("mov")          => "video/quicktime",
-        Some("pdf")          => "application/pdf",
-        Some("zip")          => "application/zip",
-        Some("rar")          => "application/x-rar-compressed",
-        Some("7z")           => "application/x-7z-compressed",
-        Some("doc")          => "application/msword",
-        Some("docx")         => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        Some("xls")          => "application/vnd.ms-excel",
-        Some("xlsx")         => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        Some("ppt")          => "application/vnd.ms-powerpoint",
-        Some("pptx")         => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-        Some("mp3")          => "audio/mpeg",
-        Some("wav")          => "audio/wav",
-        Some("txt" | "log")  => "text/plain; charset=utf-8",
-        Some("csv")          => "text/csv; charset=utf-8",
-        Some("json")         => "application/json",
-        _                    => "application/octet-stream",
+        Some("gif") => "image/gif",
+        Some("webp") => "image/webp",
+        Some("svg") => "image/svg+xml",
+        Some("mp4") => "video/mp4",
+        Some("webm") => "video/webm",
+        Some("mov") => "video/quicktime",
+        Some("pdf") => "application/pdf",
+        Some("zip") => "application/zip",
+        Some("rar") => "application/x-rar-compressed",
+        Some("7z") => "application/x-7z-compressed",
+        Some("doc") => "application/msword",
+        Some("docx") => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        Some("xls") => "application/vnd.ms-excel",
+        Some("xlsx") => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        Some("ppt") => "application/vnd.ms-powerpoint",
+        Some("pptx") => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        Some("mp3") => "audio/mpeg",
+        Some("wav") => "audio/wav",
+        Some("txt" | "log") => "text/plain; charset=utf-8",
+        Some("csv") => "text/csv; charset=utf-8",
+        Some("json") => "application/json",
+        _ => "application/octet-stream",
     };
 
     // 4. 流式读取文件
@@ -547,7 +577,13 @@ async fn handle_download(
 
     log::info!(
         "[http_api] /v1/dl/{} {} {} bytes={}-{}/{} ({})",
-        &token[..8], status, display_name, start, end, file_size, mime
+        &token[..8],
+        status,
+        display_name,
+        start,
+        end,
+        file_size,
+        mime
     );
 
     let mut builder = axum::response::Response::builder()
@@ -557,7 +593,10 @@ async fn handle_download(
         .header("Accept-Ranges", "bytes")
         .header(
             "Content-Disposition",
-            format!("attachment; filename=\"{}\"; filename*=UTF-8''{}", display_name, encoded_name),
+            format!(
+                "attachment; filename=\"{}\"; filename*=UTF-8''{}",
+                display_name, encoded_name
+            ),
         )
         .header("Access-Control-Allow-Origin", "*");
 
@@ -640,7 +679,7 @@ pub fn start_http_server(app: AppHandle) {
     let public_router = Router::new()
         .route("/v1/dl/{token}", get(handle_download))
         .with_state(public_state);
-        
+
     tauri::async_runtime::spawn(async move {
         let listener = match create_non_inheritable_listener("0.0.0.0:3722") {
             Ok(l) => l,
@@ -681,10 +720,18 @@ fn create_non_inheritable_listener(addr: &str) -> Result<tokio::net::TcpListener
         }
     }
 
-    socket.set_reuse_address(true).map_err(|e| format!("SO_REUSEADDR 失败: {}", e))?;
-    socket.set_nonblocking(true).map_err(|e| format!("非阻塞设置失败: {}", e))?;
-    socket.bind(&addr.into()).map_err(|e| format!("绑定失败: {}", e))?;
-    socket.listen(128).map_err(|e| format!("listen 失败: {}", e))?;
+    socket
+        .set_reuse_address(true)
+        .map_err(|e| format!("SO_REUSEADDR 失败: {}", e))?;
+    socket
+        .set_nonblocking(true)
+        .map_err(|e| format!("非阻塞设置失败: {}", e))?;
+    socket
+        .bind(&addr.into())
+        .map_err(|e| format!("绑定失败: {}", e))?;
+    socket
+        .listen(128)
+        .map_err(|e| format!("listen 失败: {}", e))?;
 
     let std_listener: std::net::TcpListener = socket.into();
     tokio::net::TcpListener::from_std(std_listener)

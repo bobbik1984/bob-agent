@@ -16,7 +16,8 @@ use std::sync::Mutex;
 use tauri::AppHandle;
 
 // ── 冷却缓存: 防止同一会话短时间内重复触发 Clerk 提取 ─────
-static LAST_EXTRACTION: std::sync::OnceLock<Mutex<HashMap<String, std::time::Instant>>> = std::sync::OnceLock::new();
+static LAST_EXTRACTION: std::sync::OnceLock<Mutex<HashMap<String, std::time::Instant>>> =
+    std::sync::OnceLock::new();
 
 // ── 遥测数据结构 ────────────────────────────────────────────
 
@@ -112,16 +113,23 @@ fn should_extract(messages: &[Value], total_rounds: i64) -> bool {
     // ── Layer 2: 物理安全网 ─────────────────────────────
     // 兜底 A: 发生过工具调用 (说明有实质操作)
     if total_rounds > 0 {
-        log::info!("[Evolution] Triggered via fallback (tool rounds: {})", total_rounds);
+        log::info!(
+            "[Evolution] Triggered via fallback (tool rounds: {})",
+            total_rounds
+        );
         return true;
     }
 
     // 兜底 B: 用户对话深入 (用户发言 >= 3 次)
-    let user_msg_count = messages.iter()
+    let user_msg_count = messages
+        .iter()
         .filter(|m| m.get("role").and_then(|r| r.as_str()) == Some("user"))
         .count();
     if user_msg_count >= 3 {
-        log::info!("[Evolution] Triggered via fallback (user messages: {})", user_msg_count);
+        log::info!(
+            "[Evolution] Triggered via fallback (user messages: {})",
+            user_msg_count
+        );
         return true;
     }
 
@@ -130,7 +138,12 @@ fn should_extract(messages: &[Value], total_rounds: i64) -> bool {
 
 /// 从对话尾部提取持久性事实，写入 wiki/learned/
 /// 使用 clerkModel (最便宜的模型) 执行提取
-pub async fn extract_learned_facts(_app: AppHandle, messages: Vec<Value>, conv_id: String, total_rounds: i64) {
+pub async fn extract_learned_facts(
+    _app: AppHandle,
+    messages: Vec<Value>,
+    conv_id: String,
+    total_rounds: i64,
+) {
     // ── Step 1: 只读检查冷却 (不占位) ────────────────────
     let now_instant = std::time::Instant::now();
     let cache = LAST_EXTRACTION.get_or_init(|| Mutex::new(HashMap::new()));
@@ -138,7 +151,10 @@ pub async fn extract_learned_facts(_app: AppHandle, messages: Vec<Value>, conv_i
         let map = cache.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(&last_time) = map.get(&conv_id) {
             if now_instant.duration_since(last_time).as_secs() < 30 {
-                log::info!("[Evolution] Skipping extraction for conv={} (cooldown active)", conv_id);
+                log::info!(
+                    "[Evolution] Skipping extraction for conv={} (cooldown active)",
+                    conv_id
+                );
                 return;
             }
         }
@@ -146,7 +162,10 @@ pub async fn extract_learned_facts(_app: AppHandle, messages: Vec<Value>, conv_i
 
     // ── Step 2: 三层漏斗判断 ────────────────────────────
     if !should_extract(&messages, total_rounds) {
-        log::info!("[Evolution] Skipping extraction for conv={} (trivial chat)", conv_id);
+        log::info!(
+            "[Evolution] Skipping extraction for conv={} (trivial chat)",
+            conv_id
+        );
         return; // 不写入冷却，不占位
     }
 
@@ -158,7 +177,8 @@ pub async fn extract_learned_facts(_app: AppHandle, messages: Vec<Value>, conv_i
 
     // 4. 读取 clerkModel 配置
     let config = super::read_config();
-    let clerk_model = config.get("clerkModel")
+    let clerk_model = config
+        .get("clerkModel")
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string();
@@ -169,14 +189,17 @@ pub async fn extract_learned_facts(_app: AppHandle, messages: Vec<Value>, conv_i
     }
 
     // 3. 取最后 10 条消息 (截断长消息)
-    let recent: Vec<String> = messages.iter()
+    let recent: Vec<String> = messages
+        .iter()
         .rev()
         .take(10)
         .rev()
         .filter_map(|m| {
             let role = m.get("role").and_then(|r| r.as_str()).unwrap_or("unknown");
             let content = m.get("content").and_then(|c| c.as_str()).unwrap_or("");
-            if content.is_empty() { return None; }
+            if content.is_empty() {
+                return None;
+            }
             // 截断每条消息到 2000 字符
             let truncated: String = content.chars().take(2000).collect();
             // 清洗 <|mem|> 标记，不让 Clerk 看到无意义的暗号
@@ -225,10 +248,14 @@ type 可选值：
     );
 
     // 5. 调用 Clerk 模型 (使用已有的 LLM 基础设施)
-    let (provider, api_key, model_id, base_url) = super::llm::read_llm_config_for_model(&clerk_model);
+    let (provider, api_key, model_id, base_url) =
+        super::llm::read_llm_config_for_model(&clerk_model);
 
     if api_key.is_empty() && provider != "offline" {
-        log::info!("[Evolution] Clerk model {} has no API key, skipping extraction", clerk_model);
+        log::info!(
+            "[Evolution] Clerk model {} has no API key, skipping extraction",
+            clerk_model
+        );
         return;
     }
 
@@ -238,9 +265,14 @@ type 可选值：
         match super::gcp_auth::GcpTokenManager::from_file(&cred_path) {
             Ok(mgr) => match mgr.get_access_token().await {
                 Ok(token) => token,
-                Err(_) => { log::warn!("[Evolution] GCP token failed for clerk"); return; }
+                Err(_) => {
+                    log::warn!("[Evolution] GCP token failed for clerk");
+                    return;
+                }
             },
-            Err(_) => { return; }
+            Err(_) => {
+                return;
+            }
         }
     } else {
         api_key
@@ -249,7 +281,8 @@ type 可选值：
     let url = format!("{}/chat/completions", base_url);
     let client = match reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(60))
-        .build() {
+        .build()
+    {
         Ok(c) => c,
         Err(_) => return,
     };
@@ -264,19 +297,27 @@ type 可选值：
         "max_tokens": 2048,
     });
 
-    let resp = match client.post(&url)
+    let resp = match client
+        .post(&url)
         .header("Content-Type", "application/json")
         .header("Authorization", format!("Bearer {}", final_api_key))
         .json(&body)
         .send()
-        .await {
+        .await
+    {
         Ok(r) if r.status().is_success() => r,
         Ok(r) => {
-            log::info!("[Evolution] Clerk API returned {}, skipping extraction", r.status());
+            log::info!(
+                "[Evolution] Clerk API returned {}, skipping extraction",
+                r.status()
+            );
             return;
         }
         Err(e) => {
-            log::info!("[Evolution] Clerk API request failed: {}, skipping extraction", e);
+            log::info!(
+                "[Evolution] Clerk API request failed: {}, skipping extraction",
+                e
+            );
             return;
         }
     };
@@ -319,8 +360,14 @@ type 可选值：
     let mut saved_count = 0;
 
     for fact in &facts {
-        let fact_type = fact.get("type").and_then(|v| v.as_str()).unwrap_or("reference");
-        let title = fact.get("title").and_then(|v| v.as_str()).unwrap_or("Untitled");
+        let fact_type = fact
+            .get("type")
+            .and_then(|v| v.as_str())
+            .unwrap_or("reference");
+        let title = fact
+            .get("title")
+            .and_then(|v| v.as_str())
+            .unwrap_or("Untitled");
         let content = fact.get("content").and_then(|v| v.as_str()).unwrap_or("");
 
         if title.is_empty() || content.is_empty() {
@@ -328,7 +375,8 @@ type 可选值：
         }
 
         // 生成文件名: {type}_{slug}_{timestamp}.md
-        let slug: String = title.chars()
+        let slug: String = title
+            .chars()
             .filter(|c| c.is_alphanumeric() || *c == '_' || *c == '-' || *c > '\u{4E00}')
             .take(30)
             .collect();
@@ -363,12 +411,16 @@ type 可选值：
         let db_path = super::get_data_dir().join("bob.db");
         if let Ok(conn) = rusqlite::Connection::open(&db_path) {
             for fact in &facts {
-                let fact_type = fact.get("type").and_then(|v| v.as_str()).unwrap_or("reference");
+                let fact_type = fact
+                    .get("type")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("reference");
                 let title = fact.get("title").and_then(|v| v.as_str()).unwrap_or("");
                 let content = fact.get("content").and_then(|v| v.as_str()).unwrap_or("");
                 let keywords = format!("{} {}", fact_type, title);
 
-                let slug: String = title.chars()
+                let slug: String = title
+                    .chars()
                     .filter(|c| c.is_alphanumeric() || *c == '_' || *c == '-' || *c > '\u{4E00}')
                     .take(30)
                     .collect();
@@ -395,7 +447,8 @@ type 可选值：
 
         log::info!(
             "[Evolution] Extraction complete: {} facts saved from conv={}",
-            saved_count, conv_id
+            saved_count,
+            conv_id
         );
     }
 }
@@ -417,11 +470,10 @@ fn get_last_dream_timestamp() -> i64 {
         Ok(c) => c,
         Err(_) => return 0,
     };
-    conn.query_row(
-        "SELECT MAX(created_at) FROM evolution_log",
-        [],
-        |row| row.get::<_, i64>(0),
-    ).unwrap_or(0)
+    conn.query_row("SELECT MAX(created_at) FROM evolution_log", [], |row| {
+        row.get::<_, i64>(0)
+    })
+    .unwrap_or(0)
 }
 
 /// 检查是否需要做梦，如果需要则执行 (被 scheduler.rs 的 tick 调用)
@@ -433,8 +485,15 @@ pub async fn check_and_dream(app: AppHandle) {
         return; // 距离上次做梦不到 24 小时，跳过
     }
 
-    log::info!("[Evolution] Dream triggered: last_dream={}, gap={}h",
-        last, if last > 0 { (now - last) / 3_600_000 } else { 999 });
+    log::info!(
+        "[Evolution] Dream triggered: last_dream={}, gap={}h",
+        last,
+        if last > 0 {
+            (now - last) / 3_600_000
+        } else {
+            999
+        }
+    );
 
     // 执行做梦流水线
     let report = run_dream_pipeline(&app).await;
@@ -459,8 +518,13 @@ pub async fn check_and_dream(app: AppHandle) {
         );
     }
 
-    log::info!("[Evolution] Dream complete: stale={}, merged={}, soul_refined={}, failure_insights={}",
-        report.stale_cleaned, report.memories_merged, report.soul_refined, report.failure_insights);
+    log::info!(
+        "[Evolution] Dream complete: stale={}, merged={}, soul_refined={}, failure_insights={}",
+        report.stale_cleaned,
+        report.memories_merged,
+        report.soul_refined,
+        report.failure_insights
+    );
 }
 
 struct DreamReport {
@@ -516,10 +580,16 @@ async fn run_dream_pipeline(_app: &AppHandle) -> DreamReport {
         summary_parts.push("SOUL.md 已精炼".to_string());
     }
     if report.failure_insights > 0 {
-        summary_parts.push(format!("从执行失败中提炼了 {} 条避坑指南", report.failure_insights));
+        summary_parts.push(format!(
+            "从执行失败中提炼了 {} 条避坑指南",
+            report.failure_insights
+        ));
     }
     if report.notebook_notes_digested > 0 {
-        summary_parts.push(format!("语义消化了 {} 篇笔记", report.notebook_notes_digested));
+        summary_parts.push(format!(
+            "语义消化了 {} 篇笔记",
+            report.notebook_notes_digested
+        ));
     }
     report.summary = if summary_parts.is_empty() {
         "无需更新".to_string()
@@ -544,7 +614,10 @@ async fn phase_failure_analysis() -> i64 {
         return 0;
     }
 
-    log::info!("[Evolution] Phase 4: Analyzing {} execution errors", errors.len());
+    log::info!(
+        "[Evolution] Phase 4: Analyzing {} execution errors",
+        errors.len()
+    );
 
     // 按 (tool_name, error_type) 分组统计
     let mut groups: HashMap<String, usize> = HashMap::new();
@@ -552,9 +625,18 @@ async fn phase_failure_analysis() -> i64 {
     let mut ids_to_mark: Vec<i64> = Vec::new();
 
     for err in &errors {
-        let tool = err.get("tool_name").and_then(|v| v.as_str()).unwrap_or("unknown");
-        let etype = err.get("error_type").and_then(|v| v.as_str()).unwrap_or("unknown");
-        let msg = err.get("error_message").and_then(|v| v.as_str()).unwrap_or("");
+        let tool = err
+            .get("tool_name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
+        let etype = err
+            .get("error_type")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
+        let msg = err
+            .get("error_message")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
         let key = format!("{}/{}", tool, etype);
         *groups.entry(key.clone()).or_insert(0) += 1;
 
@@ -570,7 +652,8 @@ async fn phase_failure_analysis() -> i64 {
     }
 
     // 构建摘要
-    let group_summary: Vec<String> = groups.iter()
+    let group_summary: Vec<String> = groups
+        .iter()
         .map(|(k, v)| format!("  {} (×{})", k, v))
         .collect();
 
@@ -589,8 +672,9 @@ async fn phase_failure_analysis() -> i64 {
     let insights = crate::llm::call_clerk_oneshot(
         "你是 Bob Agent 的执行诊断引擎。只输出避坑指南条目，不要输出其他内容。",
         &analysis_prompt,
-        512
-    ).await;
+        512,
+    )
+    .await;
 
     let insights_text = match insights {
         Some(text) if !text.trim().is_empty() => text.trim().to_string(),
@@ -603,8 +687,11 @@ async fn phase_failure_analysis() -> i64 {
     };
 
     // 统计提炼出的条目数
-    let insight_count = insights_text.lines()
-        .filter(|l| l.trim().starts_with('⚠') || l.trim().starts_with('-') || l.trim().starts_with('*'))
+    let insight_count = insights_text
+        .lines()
+        .filter(|l| {
+            l.trim().starts_with('⚠') || l.trim().starts_with('-') || l.trim().starts_with('*')
+        })
         .count() as i64;
 
     // 追加到 SOUL.md 的避坑区
@@ -629,7 +716,10 @@ async fn phase_failure_analysis() -> i64 {
     if let Err(e) = std::fs::write(&soul_path, &new_soul) {
         log::warn!("[Evolution] Phase 4: Failed to write SOUL.md: {}", e);
     } else {
-        log::info!("[Evolution] Phase 4: Appended {} avoidance tips to SOUL.md", insight_count);
+        log::info!(
+            "[Evolution] Phase 4: Appended {} avoidance tips to SOUL.md",
+            insight_count
+        );
     }
 
     // 标记已分析
@@ -641,7 +731,9 @@ async fn phase_failure_analysis() -> i64 {
 /// Phase 1: 过时淘汰 — 清理 30 天未更新且未被引用的 learned 记忆
 fn phase_stale_cleanup() -> i64 {
     let learned_dir = get_learned_dir();
-    if !learned_dir.exists() { return 0; }
+    if !learned_dir.exists() {
+        return 0;
+    }
 
     let thirty_days_ago = std::time::SystemTime::now()
         .checked_sub(std::time::Duration::from_secs(30 * 24 * 3600))
@@ -650,7 +742,11 @@ fn phase_stale_cleanup() -> i64 {
     let mut cleaned = 0i64;
 
     let entries: Vec<PathBuf> = match std::fs::read_dir(&learned_dir) {
-        Ok(rd) => rd.flatten().map(|e| e.path()).filter(|p| p.is_file()).collect(),
+        Ok(rd) => rd
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.is_file())
+            .collect(),
         Err(_) => return 0,
     };
 
@@ -680,7 +776,10 @@ fn phase_stale_cleanup() -> i64 {
     }
 
     if cleaned > 0 {
-        log::info!("[Evolution] Dream Phase 1: cleaned/marked {} stale memories", cleaned);
+        log::info!(
+            "[Evolution] Dream Phase 1: cleaned/marked {} stale memories",
+            cleaned
+        );
     }
     cleaned
 }
@@ -688,12 +787,16 @@ fn phase_stale_cleanup() -> i64 {
 /// Phase 2: 相似合并 — 基于标题文本重叠率去重
 fn phase_merge_similar() -> i64 {
     let learned_dir = get_learned_dir();
-    if !learned_dir.exists() { return 0; }
+    if !learned_dir.exists() {
+        return 0;
+    }
 
     let entries: Vec<PathBuf> = match std::fs::read_dir(&learned_dir) {
-        Ok(rd) => rd.flatten().map(|e| e.path()).filter(|p| {
-            p.is_file() && p.extension().map_or(false, |ext| ext == "md")
-        }).collect(),
+        Ok(rd) => rd
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.is_file() && p.extension().map_or(false, |ext| ext == "md"))
+            .collect(),
         Err(_) => return 0,
     };
 
@@ -702,11 +805,19 @@ fn phase_merge_similar() -> i64 {
     for path in &entries {
         if let Ok(content) = std::fs::read_to_string(path) {
             // 跳过已标记为过时的
-            if content.contains("superseded: true") { continue; }
+            if content.contains("superseded: true") {
+                continue;
+            }
 
-            let title = content.lines()
+            let title = content
+                .lines()
                 .find(|l| l.starts_with("title:"))
-                .map(|l| l.trim_start_matches("title:").trim().trim_matches('"').to_string())
+                .map(|l| {
+                    l.trim_start_matches("title:")
+                        .trim()
+                        .trim_matches('"')
+                        .to_string()
+                })
                 .unwrap_or_default();
 
             let modified = std::fs::metadata(path)
@@ -723,15 +834,23 @@ fn phase_merge_similar() -> i64 {
     let mut removed_paths: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
 
     for i in 0..titles.len() {
-        if removed_paths.contains(&titles[i].0) { continue; }
+        if removed_paths.contains(&titles[i].0) {
+            continue;
+        }
 
         for j in (i + 1)..titles.len() {
-            if removed_paths.contains(&titles[j].0) { continue; }
+            if removed_paths.contains(&titles[j].0) {
+                continue;
+            }
 
             let similarity = title_similarity(&titles[i].1, &titles[j].1);
             if similarity > 0.7 {
                 // 保留较新的，标记较旧的为过时
-                let older = if titles[i].2 < titles[j].2 { &titles[i].0 } else { &titles[j].0 };
+                let older = if titles[i].2 < titles[j].2 {
+                    &titles[i].0
+                } else {
+                    &titles[j].0
+                };
                 if let Ok(content) = std::fs::read_to_string(older) {
                     let marked = content.replacen("---\n", "---\nsuperseded: true\n", 1);
                     let _ = std::fs::write(older, marked);
@@ -743,7 +862,10 @@ fn phase_merge_similar() -> i64 {
     }
 
     if merged > 0 {
-        log::info!("[Evolution] Dream Phase 2: merged {} similar memories", merged);
+        log::info!(
+            "[Evolution] Dream Phase 2: merged {} similar memories",
+            merged
+        );
     }
     merged
 }
@@ -752,10 +874,14 @@ fn phase_merge_similar() -> i64 {
 fn title_similarity(a: &str, b: &str) -> f64 {
     let a_chars: std::collections::HashSet<char> = a.chars().collect();
     let b_chars: std::collections::HashSet<char> = b.chars().collect();
-    if a_chars.is_empty() && b_chars.is_empty() { return 1.0; }
+    if a_chars.is_empty() && b_chars.is_empty() {
+        return 1.0;
+    }
     let intersection = a_chars.intersection(&b_chars).count();
     let union = a_chars.union(&b_chars).count();
-    if union == 0 { return 0.0; }
+    if union == 0 {
+        return 0.0;
+    }
     intersection as f64 / union as f64
 }
 
@@ -782,7 +908,8 @@ async fn phase_soul_refinement(_app: &AppHandle) -> (bool, String) {
             "SELECT soul_hash FROM evolution_log ORDER BY created_at DESC LIMIT 1",
             [],
             |row| row.get::<_, String>(0),
-        ).unwrap_or_default()
+        )
+        .unwrap_or_default()
     } else {
         String::new()
     };
@@ -809,13 +936,17 @@ async fn phase_soul_refinement(_app: &AppHandle) -> (bool, String) {
                 if p.is_file() {
                     let m = std::fs::metadata(&p).and_then(|m| m.modified()).ok()?;
                     Some((p, m))
-                } else { None }
+                } else {
+                    None
+                }
             })
             .collect();
         entries.sort_by(|a, b| b.1.cmp(&a.1));
         for (path, _) in entries.into_iter().take(10) {
             if let Ok(content) = std::fs::read_to_string(&path) {
-                if content.contains("superseded: true") { continue; }
+                if content.contains("superseded: true") {
+                    continue;
+                }
                 recent_facts.push(content);
             }
         }
@@ -827,7 +958,8 @@ async fn phase_soul_refinement(_app: &AppHandle) -> (bool, String) {
 
     // 调用 Clerk 模型精炼 SOUL
     let config = super::read_config();
-    let clerk_model = config.get("clerkModel")
+    let clerk_model = config
+        .get("clerkModel")
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string();
@@ -836,7 +968,8 @@ async fn phase_soul_refinement(_app: &AppHandle) -> (bool, String) {
         return (false, current_hash);
     }
 
-    let (provider, api_key, model_id, base_url) = super::llm::read_llm_config_for_model(&clerk_model);
+    let (provider, api_key, model_id, base_url) =
+        super::llm::read_llm_config_for_model(&clerk_model);
     if api_key.is_empty() && provider != "offline" {
         return (false, current_hash);
     }
@@ -873,7 +1006,8 @@ async fn phase_soul_refinement(_app: &AppHandle) -> (bool, String) {
 
     let client = match reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(60))
-        .build() {
+        .build()
+    {
         Ok(c) => c,
         Err(_) => return (false, current_hash),
     };
@@ -889,12 +1023,14 @@ async fn phase_soul_refinement(_app: &AppHandle) -> (bool, String) {
     });
 
     let url = format!("{}/chat/completions", base_url);
-    let resp = match client.post(&url)
+    let resp = match client
+        .post(&url)
         .header("Content-Type", "application/json")
         .header("Authorization", format!("Bearer {}", final_api_key))
         .json(&body)
         .send()
-        .await {
+        .await
+    {
         Ok(r) if r.status().is_success() => r,
         _ => return (false, current_hash),
     };
@@ -923,7 +1059,10 @@ async fn phase_soul_refinement(_app: &AppHandle) -> (bool, String) {
     // 字数检查 (≤500 字硬上限)
     let char_count = new_soul.chars().count();
     if char_count > 600 {
-        log::warn!("[Evolution] SOUL refinement output too long ({}字), skipping", char_count);
+        log::warn!(
+            "[Evolution] SOUL refinement output too long ({}字), skipping",
+            char_count
+        );
         return (false, current_hash);
     }
 
@@ -932,7 +1071,11 @@ async fn phase_soul_refinement(_app: &AppHandle) -> (bool, String) {
     match std::fs::write(&soul_path, &new_soul) {
         Ok(_) => {
             let new_hash = simple_hash(&new_soul);
-            log::info!("[Evolution] SOUL.md refined: {}字, hash={}", char_count, new_hash);
+            log::info!(
+                "[Evolution] SOUL.md refined: {}字, hash={}",
+                char_count,
+                new_hash
+            );
             (true, new_hash)
         }
         Err(e) => {
@@ -967,32 +1110,36 @@ pub fn system_get_evolution_stats() -> Value {
     };
 
     // ── 观测统计 ──────────────────────────────────────────
-    let obs_stats = conn.query_row(
-        "SELECT COUNT(*), COALESCE(SUM(tool_calls_count), 0), COALESCE(SUM(tool_failures), 0),
+    let obs_stats = conn
+        .query_row(
+            "SELECT COUNT(*), COALESCE(SUM(tool_calls_count), 0), COALESCE(SUM(tool_failures), 0),
                 COALESCE(SUM(tokens_in), 0), COALESCE(SUM(tokens_out), 0)
          FROM session_observations",
-        [],
-        |row| Ok(json!({
-            "total_conversations": row.get::<_, i64>(0).unwrap_or(0),
-            "total_tool_calls": row.get::<_, i64>(1).unwrap_or(0),
-            "total_tool_failures": row.get::<_, i64>(2).unwrap_or(0),
-            "total_tokens_in": row.get::<_, i64>(3).unwrap_or(0),
-            "total_tokens_out": row.get::<_, i64>(4).unwrap_or(0),
-        }))
-    ).unwrap_or(json!({
-        "total_conversations": 0,
-        "total_tool_calls": 0,
-        "total_tool_failures": 0,
-        "total_tokens_in": 0,
-        "total_tokens_out": 0,
-    }));
+            [],
+            |row| {
+                Ok(json!({
+                    "total_conversations": row.get::<_, i64>(0).unwrap_or(0),
+                    "total_tool_calls": row.get::<_, i64>(1).unwrap_or(0),
+                    "total_tool_failures": row.get::<_, i64>(2).unwrap_or(0),
+                    "total_tokens_in": row.get::<_, i64>(3).unwrap_or(0),
+                    "total_tokens_out": row.get::<_, i64>(4).unwrap_or(0),
+                }))
+            },
+        )
+        .unwrap_or(json!({
+            "total_conversations": 0,
+            "total_tool_calls": 0,
+            "total_tool_failures": 0,
+            "total_tokens_in": 0,
+            "total_tokens_out": 0,
+        }));
 
     // ── 做梦历史 (最近 10 条) ──────────────────────────────
     let mut dream_history = Vec::new();
     if let Ok(mut stmt) = conn.prepare(
         "SELECT dream_type, facts_extracted, stale_cleaned, memories_merged,
                 soul_refined, report_text, created_at
-         FROM evolution_log ORDER BY created_at DESC LIMIT 10"
+         FROM evolution_log ORDER BY created_at DESC LIMIT 10",
     ) {
         if let Ok(rows) = stmt.query_map([], |row| {
             Ok(json!({
@@ -1030,14 +1177,13 @@ pub fn system_get_evolution_stats() -> Value {
     })
 }
 
-
 // ═══════════════════════════════════════════════════════════
 // Phase 5 (目标 19 Phase 3): 笔记语义消化 (Notebook Digest)
 // ═══════════════════════════════════════════════════════════
 async fn phase_notebook_digest(_app: &AppHandle) -> i64 {
     let last_dream = get_last_dream_timestamp();
     let notes_dir = super::get_data_dir().join("notes");
-    
+
     // 我们扫描 notes/daily 和 notes/topics
     let mut files_to_digest = Vec::new();
     let dirs = vec![notes_dir.join("daily"), notes_dir.join("topics")];
@@ -1048,7 +1194,10 @@ async fn phase_notebook_digest(_app: &AppHandle) -> i64 {
                     // 如果文件是以 .md 结尾且修改时间大于上次做梦时间
                     if entry.path().extension().and_then(|s| s.to_str()) == Some("md") {
                         if let Ok(mtime) = meta.modified() {
-                            let mtime_ms = mtime.duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as i64;
+                            let mtime_ms = mtime
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_millis() as i64;
                             if mtime_ms > last_dream {
                                 files_to_digest.push(entry.path());
                             }
@@ -1063,7 +1212,10 @@ async fn phase_notebook_digest(_app: &AppHandle) -> i64 {
         return 0;
     }
 
-    log::info!("[Evolution] Phase 5: {} notes to digest", files_to_digest.len());
+    log::info!(
+        "[Evolution] Phase 5: {} notes to digest",
+        files_to_digest.len()
+    );
     let mut digested_count = 0;
 
     let prompt = r#"你是一个高智能知识分拣引擎 (Dream Engine)。
@@ -1096,14 +1248,17 @@ async fn phase_notebook_digest(_app: &AppHandle) -> i64 {
 - 如果是纯粹的知识点或随想 (Knowledge)，比如“发现RAG在长文本下容易丢失焦点”，提取为 knowledge，并归类到相关实体下。"#;
 
     let db_path = super::get_data_dir().join("bob.db");
-    
+
     for path in files_to_digest {
         let content = match std::fs::read_to_string(&path) {
             Ok(c) => c,
             Err(_) => continue,
         };
-        
-        let title = path.file_stem().and_then(|s| s.to_str()).unwrap_or("untitled");
+
+        let title = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("untitled");
         let note_text = format!("笔记标题: {}\n内容: {}", title, content);
 
         if let Some(resp) = crate::llm::call_clerk_oneshot(prompt, &note_text, 1024).await {
@@ -1111,7 +1266,7 @@ async fn phase_notebook_digest(_app: &AppHandle) -> i64 {
             let json_start = resp.find('{').unwrap_or(0);
             let json_end = resp.rfind('}').unwrap_or(resp.len() - 1) + 1;
             let json_str = &resp[json_start..json_end];
-            
+
             if let Ok(parsed) = serde_json::from_str::<Value>(json_str) {
                 if let Some(intents) = parsed.get("intents").and_then(|v| v.as_array()) {
                     let conn = rusqlite::Connection::open(&db_path).unwrap();
@@ -1130,12 +1285,17 @@ async fn phase_notebook_digest(_app: &AppHandle) -> i64 {
                             "seed" => {
                                 if let Some(title) = intent.get("title").and_then(|v| v.as_str()) {
                                     // 在 topics 目录下新建文件
-                                    let new_path = notes_dir.join("topics").join(format!("{}.md", title.replace('/', "_").replace('\\', "_")));
+                                    let new_path = notes_dir.join("topics").join(format!(
+                                        "{}.md",
+                                        title.replace('/', "_").replace('\\', "_")
+                                    ));
                                     if !new_path.exists() {
-                                        let _ = std::fs::write(&new_path, format!("# {}\n\n", title));
-                                        
+                                        let _ =
+                                            std::fs::write(&new_path, format!("# {}\n\n", title));
+
                                         // 添加到 KG 节点并打上 seed metadata
-                                        let tags = intent.get("tags").unwrap_or(&json!(["seed"])).clone();
+                                        let tags =
+                                            intent.get("tags").unwrap_or(&json!(["seed"])).clone();
                                         let node_id = format!("note_{}", title);
                                         let metadata = json!({"is_seed": true, "tags": tags, "source_note": path.to_string_lossy()});
                                         let _ = conn.execute(
@@ -1149,18 +1309,31 @@ async fn phase_notebook_digest(_app: &AppHandle) -> i64 {
                                 if let (Some(target), Some(etype), Some(summary)) = (
                                     intent.get("target_entity").and_then(|v| v.as_str()),
                                     intent.get("entity_type").and_then(|v| v.as_str()),
-                                    intent.get("summary").and_then(|v| v.as_str())
+                                    intent.get("summary").and_then(|v| v.as_str()),
                                 ) {
                                     // 确保目标节点存在
-                                    let target_id = crate::kg::resolve_node_id(&conn, target, etype);
-                                    let _ = crate::kg::upsert_node(&conn, &target_id, target, etype, "", "", "");
-                                    
+                                    let target_id =
+                                        crate::kg::resolve_node_id(&conn, target, etype);
+                                    let _ = crate::kg::upsert_node(
+                                        &conn, &target_id, target, etype, "", "", "",
+                                    );
+
                                     // 创建当前笔记的 note 节点
                                     let note_id = format!("note_{}", title);
-                                    let _ = crate::kg::upsert_node(&conn, &note_id, title, "note", summary, &path.to_string_lossy(), "");
-                                    
+                                    let _ = crate::kg::upsert_node(
+                                        &conn,
+                                        &note_id,
+                                        title,
+                                        "note",
+                                        summary,
+                                        &path.to_string_lossy(),
+                                        "",
+                                    );
+
                                     // 建立关系
-                                    let _ = crate::kg::insert_edge(&conn, &note_id, &target_id, "mentions", 1.0);
+                                    let _ = crate::kg::insert_edge(
+                                        &conn, &note_id, &target_id, "mentions", 1.0,
+                                    );
                                 }
                             }
                             _ => {}

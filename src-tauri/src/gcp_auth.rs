@@ -41,13 +41,16 @@ pub struct ServiceAccountInfo {
 impl ServiceAccountInfo {
     /// 从 JSON 文件解析 Service Account 信息
     pub fn from_file(path: &Path) -> Result<Self, String> {
-        let content = std::fs::read_to_string(path)
-            .map_err(|e| format!("无法读取凭证文件: {}", e))?;
-        let info: ServiceAccountInfo = serde_json::from_str(&content)
-            .map_err(|e| format!("凭证文件格式无效: {}", e))?;
-        
+        let content =
+            std::fs::read_to_string(path).map_err(|e| format!("无法读取凭证文件: {}", e))?;
+        let info: ServiceAccountInfo =
+            serde_json::from_str(&content).map_err(|e| format!("凭证文件格式无效: {}", e))?;
+
         if info.account_type != "service_account" {
-            return Err(format!("凭证类型必须是 service_account，当前为: {}", info.account_type));
+            return Err(format!(
+                "凭证类型必须是 service_account，当前为: {}",
+                info.account_type
+            ));
         }
         if info.private_key.is_empty() {
             return Err("凭证文件缺少 private_key 字段".to_string());
@@ -55,16 +58,19 @@ impl ServiceAccountInfo {
         if info.client_email.is_empty() {
             return Err("凭证文件缺少 client_email 字段".to_string());
         }
-        
+
         Ok(info)
     }
 
     /// 从 JSON 字符串解析（用于验证）
     pub fn from_json_str(json_str: &str) -> Result<Self, String> {
-        let info: ServiceAccountInfo = serde_json::from_str(json_str)
-            .map_err(|e| format!("JSON 解析失败: {}", e))?;
+        let info: ServiceAccountInfo =
+            serde_json::from_str(json_str).map_err(|e| format!("JSON 解析失败: {}", e))?;
         if info.account_type != "service_account" {
-            return Err(format!("凭证类型必须是 service_account，当前为: {}", info.account_type));
+            return Err(format!(
+                "凭证类型必须是 service_account，当前为: {}",
+                info.account_type
+            ));
         }
         Ok(info)
     }
@@ -86,11 +92,15 @@ struct JwtClaims {
 /// 使用 Service Account 的 private_key 签署 JWT (RS256)
 fn create_signed_jwt(sa: &ServiceAccountInfo) -> Result<String, String> {
     let now = chrono::Utc::now().timestamp();
-    
+
     let claims = JwtClaims {
         iss: sa.client_email.clone(),
         scope: VERTEX_AI_SCOPE.to_string(),
-        aud: sa.token_uri.as_deref().unwrap_or(GOOGLE_TOKEN_URL).to_string(),
+        aud: sa
+            .token_uri
+            .as_deref()
+            .unwrap_or(GOOGLE_TOKEN_URL)
+            .to_string(),
         iat: now,
         exp: now + 3600, // 1 小时有效
     };
@@ -98,9 +108,8 @@ fn create_signed_jwt(sa: &ServiceAccountInfo) -> Result<String, String> {
     let header = jsonwebtoken::Header::new(jsonwebtoken::Algorithm::RS256);
     let key = jsonwebtoken::EncodingKey::from_rsa_pem(sa.private_key.as_bytes())
         .map_err(|e| format!("RSA 私钥解析失败: {}", e))?;
-    
-    jsonwebtoken::encode(&header, &claims, &key)
-        .map_err(|e| format!("JWT 签名失败: {}", e))
+
+    jsonwebtoken::encode(&header, &claims, &key).map_err(|e| format!("JWT 签名失败: {}", e))
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -168,7 +177,7 @@ impl GcpTokenManager {
 
         // 2. 缓存过期或不存在，刷新 Token
         let new_token = self.refresh_token().await?;
-        
+
         // 3. 写入缓存
         {
             let mut cached = self.cached_token.write().await;
@@ -181,14 +190,18 @@ impl GcpTokenManager {
     /// 向 Google OAuth2 端点请求新的 Access Token
     async fn refresh_token(&self) -> Result<CachedToken, String> {
         let jwt = create_signed_jwt(&self.service_account)?;
-        
+
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(15))
             .build()
             .map_err(|e| format!("HTTP 客户端创建失败: {}", e))?;
 
-        let token_url = self.service_account.token_uri.as_deref().unwrap_or(GOOGLE_TOKEN_URL);
-        
+        let token_url = self
+            .service_account
+            .token_uri
+            .as_deref()
+            .unwrap_or(GOOGLE_TOKEN_URL);
+
         let form_body = format!(
             "grant_type={}&assertion={}",
             urlencoding::encode("urn:ietf:params:oauth:grant-type:jwt-bearer"),
@@ -209,22 +222,29 @@ impl GcpTokenManager {
             return Err(format!("Token 请求失败 (HTTP {}): {}", status, body));
         }
 
-        let data: Value = resp.json().await
+        let data: Value = resp
+            .json()
+            .await
             .map_err(|e| format!("Token 响应解析失败: {}", e))?;
 
-        let access_token = data.get("access_token")
+        let access_token = data
+            .get("access_token")
             .and_then(|v| v.as_str())
             .ok_or("Token 响应中缺少 access_token 字段")?
             .to_string();
 
-        let expires_in = data.get("expires_in")
+        let expires_in = data
+            .get("expires_in")
             .and_then(|v| v.as_i64())
             .unwrap_or(3600);
 
         let now = chrono::Utc::now().timestamp();
 
-        log::info!("GCP Access Token 刷新成功 (有效期 {}s, project: {})", 
-            expires_in, self.service_account.project_id);
+        log::info!(
+            "GCP Access Token 刷新成功 (有效期 {}s, project: {})",
+            expires_in,
+            self.service_account.project_id
+        );
 
         Ok(CachedToken {
             access_token,
@@ -257,25 +277,30 @@ pub fn save_gcp_credential(source_path: &str) -> Result<Value, String> {
     }
 
     // 读取并验证 JSON 格式
-    let content = std::fs::read_to_string(source)
-        .map_err(|e| format!("无法读取文件: {}", e))?;
+    let content = std::fs::read_to_string(source).map_err(|e| format!("无法读取文件: {}", e))?;
     let sa = ServiceAccountInfo::from_json_str(&content)?;
 
     // 复制到安全目录
     let dest = get_gcp_credential_path();
-    std::fs::write(&dest, &content)
-        .map_err(|e| format!("无法保存凭证文件: {}", e))?;
+    std::fs::write(&dest, &content).map_err(|e| format!("无法保存凭证文件: {}", e))?;
 
     // 在 config.json 中记录路径
     let mut config = super::read_config();
     if let Some(obj) = config.as_object_mut() {
-        obj.insert("gcpCredentialPath".to_string(), json!(dest.to_string_lossy().to_string()));
+        obj.insert(
+            "gcpCredentialPath".to_string(),
+            json!(dest.to_string_lossy().to_string()),
+        );
         obj.insert("gcpProjectId".to_string(), json!(sa.project_id));
         obj.insert("gcpClientEmail".to_string(), json!(sa.client_email));
     }
     super::write_config(&config);
 
-    log::info!("GCP 凭证已保存: project={}, email={}", sa.project_id, sa.client_email);
+    log::info!(
+        "GCP 凭证已保存: project={}, email={}",
+        sa.project_id,
+        sa.client_email
+    );
 
     Ok(json!({
         "ok": true,
@@ -288,8 +313,7 @@ pub fn save_gcp_credential(source_path: &str) -> Result<Value, String> {
 pub fn remove_gcp_credential() -> Result<Value, String> {
     let path = get_gcp_credential_path();
     if path.exists() {
-        std::fs::remove_file(&path)
-            .map_err(|e| format!("无法删除凭证文件: {}", e))?;
+        std::fs::remove_file(&path).map_err(|e| format!("无法删除凭证文件: {}", e))?;
     }
 
     // 清除 config 中的记录
@@ -309,10 +333,16 @@ pub fn remove_gcp_credential() -> Result<Value, String> {
 pub fn get_gcp_credential_status() -> Value {
     let config = super::read_config();
     let path = get_gcp_credential_path();
-    
+
     if path.exists() {
-        let project_id = config.get("gcpProjectId").and_then(|v| v.as_str()).unwrap_or("未知");
-        let client_email = config.get("gcpClientEmail").and_then(|v| v.as_str()).unwrap_or("未知");
+        let project_id = config
+            .get("gcpProjectId")
+            .and_then(|v| v.as_str())
+            .unwrap_or("未知");
+        let client_email = config
+            .get("gcpClientEmail")
+            .and_then(|v| v.as_str())
+            .unwrap_or("未知");
         json!({
             "configured": true,
             "project_id": project_id,

@@ -1,18 +1,18 @@
 //! wechat module
-//! 
+//!
 //! Rust native WeChat gateway implementation for Bob-Agent.
 
-pub mod types;
-pub mod api;
-pub mod monitor;
 pub mod accounts;
-pub mod msg_queue;
+pub mod api;
+pub mod cdn;
 pub mod commands;
 pub mod login_qr;
-pub mod cdn;
+pub mod monitor;
+pub mod msg_queue;
+pub mod types;
 
-use std::sync::{Arc, Mutex, RwLock};
 use msg_queue::MessageQueue;
+use std::sync::{Arc, Mutex, RwLock};
 use tokio::sync::watch;
 
 pub struct WechatState {
