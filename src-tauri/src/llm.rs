@@ -1998,6 +1998,39 @@ pub(crate) async fn stream_internal(
         full_messages = apply_context_tiering(full_messages, &tiering_conv_id).await;
     }
 
+    // T-1423: 过滤不支持多模态的模型 (如 DeepSeek)
+    if provider == "deepseek" {
+        for msg in full_messages.iter_mut() {
+            if let Some(content) = msg.get_mut("content") {
+                let mut new_text = None;
+                if let Some(arr) = content.as_array() {
+                    let mut text_parts = Vec::new();
+                    let mut had_image = false;
+                    for item in arr {
+                        if item.get("type").and_then(|v| v.as_str()) == Some("text") {
+                            if let Some(text) = item.get("text").and_then(|v| v.as_str()) {
+                                text_parts.push(text.to_string());
+                            }
+                        } else if item.get("type").and_then(|v| v.as_str()) == Some("image_url") {
+                            had_image = true;
+                        }
+                    }
+                    if had_image {
+                        if !text_parts.is_empty() {
+                            text_parts.push("[图片已在当前模型中被忽略]".to_string());
+                        } else {
+                            text_parts.push("[仅图片，当前模型无法查看]".to_string());
+                        }
+                    }
+                    new_text = Some(text_parts.join("\n\n"));
+                }
+                if let Some(text) = new_text {
+                    *content = json!(text);
+                }
+            }
+        }
+    }
+
     // 3. 获取工具 Schema
     let tool_schemas = super::tools::get_tool_schemas_with_mcp().await;
 
