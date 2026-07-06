@@ -238,7 +238,7 @@
     "p2p_pairing": "多端同步",
     "p2p_pairing_desc": "建立端到端加密连接",
     "p2p_auth_title": "安全设备认证",
-    "p2p_auth_desc_new": "请设置 4~6 位纯数字 PIN 码保护您的设备私钥。",
+    "p2p_auth_desc_new": "设置 4-6 位 PIN 码",
     "p2p_auth_desc_unlock": "请输入本地 PIN 码解锁设备身份。",
     "p2p_pin_placeholder_new": "设置新 PIN 码 (4-6位)",
     "p2p_pin_placeholder_unlock": "输入 PIN 解锁",
