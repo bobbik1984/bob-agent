@@ -1259,6 +1259,7 @@ async function removeSourceBatch(node) {
   flex-direction: column;
   min-width: 0;
   height: 100%;
+  position: relative;
 }
 
 .kg-stat-badge {
