@@ -39,6 +39,8 @@ pub mod tunnel;
 mod web;
 mod web_drop;
 mod wechat;
+pub mod lan_sync;
+pub mod sync_engine;
 
 use percent_encoding::percent_decode_str;
 use serde_json::{json, Value};
@@ -870,6 +872,8 @@ pub fn run() {
             crypto::unlock_device_keys,
             crypto::reset_device_keys,
             crypto::get_pairing_payload,
+            sync_engine::trigger_mobile_sync,
+            sync_engine::write_mobile_outbox,
             // 系统状态
             system_is_setup_complete,
             web_drop::start_web_drop,
@@ -1192,8 +1196,21 @@ pub fn run() {
                 dream::compress_sessions_async(dream_handle).await;
             });
 
-            // ── Phase 2: 启动本地 HTTP API (127.0.0.1:3721) ──
+            // ── Phase 2: 启动本地 HTTP API (127.0.0.1:3721 & 0.0.0.0:3722) ──
             http_api::start_http_server(app.handle().clone());
+
+            // ── Phase 3: 启动局域网 UDP 发现广播 (LAN Sync) ──
+            #[cfg(desktop)]
+            {
+                let device_id = match crypto::get_pairing_payload(app.handle().state::<crypto::DeviceIdentityState>()) {
+                    Ok(payload) => payload.device_id,
+                    Err(_) => "unknown-device".to_string(),
+                };
+                let lan_engine = std::sync::Arc::new(lan_sync::LanSyncEngine::new(device_id));
+                lan_engine.start_broadcast(3722); // HTTP API public port is 3722
+                // We should store this in app state if we need to stop it later, but for now we let it run
+                app.manage(lan_engine);
+            }
 
             // ── MCP 扩展引擎 ──
             tauri::async_runtime::spawn(async {

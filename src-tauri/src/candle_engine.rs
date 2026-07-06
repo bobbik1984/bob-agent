@@ -184,9 +184,29 @@ mod real_engine {
                 if !path.is_empty() {
                     let app_clone = app.clone();
                     let conv_id_clone = conv_id.clone();
-                    let _ = app_clone.emit("llm:chunk", json!({ "type": "thinking", "content": "\n[本地模型处于休眠状态，正在自动挂载到内存，请耐心等待 10~30 秒]...\n", "conv_id": &conv_id_clone }));
+                    let _ = app_clone.emit("llm:chunk", json!({ "type": "thinking_replace", "content": "\n本地模型挂载中 0s...\n", "conv_id": &conv_id_clone }));
                     
+                    let (tx, mut rx) = tokio::sync::oneshot::channel::<()>();
+                    
+                    let app_clone_timer = app.clone();
+                    let conv_id_clone_timer = conv_id.clone();
+                    tokio::spawn(async move {
+                        let mut secs = 0;
+                        loop {
+                            tokio::select! {
+                                _ = tokio::time::sleep(tokio::time::Duration::from_secs(1)) => {
+                                    secs += 1;
+                                    let _ = app_clone_timer.emit("llm:chunk", json!({ "type": "thinking_replace", "content": format!("\n本地模型挂载中 {}s...\n", secs), "conv_id": &conv_id_clone_timer }));
+                                }
+                                _ = &mut rx => {
+                                    break;
+                                }
+                            }
+                        }
+                    });
+
                     let _ = start_offline_engine(path.to_string(), state.clone()).await;
+                    let _ = tx.send(());
                 }
             }
         }

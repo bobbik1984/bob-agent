@@ -632,6 +632,10 @@ window.appAPI = {
   notebookMergeTags: async (canonical, aliases) => invoke('notebook_merge_tags', { canonical, aliases }),
   notebookRejectTagMerge: async (tagA, tagB) => invoke('notebook_reject_tag_merge', { tagA, tagB }),
 
+  // ── 同步引擎 (Phase 3 Mobile Sync) ──────────
+  triggerMobileSync: async (payload) => invoke('trigger_mobile_sync', { payload }),
+  writeMobileOutbox: async (operations) => invoke('write_mobile_outbox', { operations }),
+
   // Generic invoke passthrough for components that call invoke directly
   invoke: (cmd, args) => invoke(cmd, args || {}),
 };

@@ -549,6 +549,30 @@ onMounted(async () => {
     // 恢复用户语言偏好
     const savedLang = await window.appAPI.getConfig('language');
     if (savedLang) locale.value = savedLang;
+
+    // Mobile: 1-hour cooldown sync check & Outbox processing
+    if (isMobile.value) {
+      const pairingPayload = await window.appAPI.getConfig('pairing_payload');
+      if (pairingPayload) {
+        const lastSyncTimeStr = localStorage.getItem('bob-last-sync-time');
+        const lastSyncTime = lastSyncTimeStr ? parseInt(lastSyncTimeStr, 10) : 0;
+        const now = Date.now();
+        if (now - lastSyncTime > 60 * 60 * 1000) {
+          console.log('[Sync] 距离上次同步超过1小时，触发移动端双向同步...');
+          if (window.appAPI.triggerMobileSync) {
+            window.appAPI.triggerMobileSync(pairingPayload).then(() => {
+              localStorage.setItem('bob-last-sync-time', now.toString());
+            }).catch(e => console.error('[Sync] 触发同步失败:', e));
+          }
+        } else {
+          console.log('[Sync] 距离上次同步不足1小时，跳过本次冷启动同步。启动静默UDP监听...');
+          // 启动 UDP 监听以接收 PC 的上线广播
+          if (window.appAPI.triggerMobileSync) {
+             window.appAPI.triggerMobileSync({ ...pairingPayload, listen_only: true }).catch(e => console.error(e));
+          }
+        }
+      }
+    }
   }
 
   // 本地存储同步主题，供 index.html 启动瞬间读取

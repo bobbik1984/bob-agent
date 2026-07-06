@@ -535,7 +535,8 @@ const handleMobileScan = async () => {
     if (result && result.content) {
       try {
         const payload = JSON.parse(result.content);
-        alert("扫码成功! 获取配对信息:\n" + JSON.stringify(payload, null, 2));
+        await window.appAPI.setConfig('pairing_payload', payload);
+        alert("扫码成功! 成功连接到电脑端 Bob。");
       } catch (e) {
         alert("无效的二维码: " + result.content);
       }

@@ -7,7 +7,7 @@
 //!   GET  /v1/health            — 健康检查
 
 use axum::{
-    extract::State,
+    extract::{State, ws::{Message, WebSocket, WebSocketUpgrade}},
     response::{
         sse::{Event, KeepAlive, Sse},
         IntoResponse,
@@ -640,6 +640,58 @@ fn parse_range(range: &str, total: u64) -> (u64, u64, bool) {
 }
 
 // ═══════════════════════════════════════════════════════════
+// Handler: GET /v1/sync  — LAN Direct WebSocket Endpoint
+// ═══════════════════════════════════════════════════════════
+
+async fn handle_sync_ws(ws: WebSocketUpgrade) -> impl IntoResponse {
+    ws.on_upgrade(move |socket| async move {
+        // 在这里处理手机端通过局域网发起的连接
+        log::info!("[http_api] /v1/sync: LAN Sync Mobile device connected via WebSocket!");
+        
+        let (mut sink, mut stream) = socket.split();
+        // 简易测试回显
+        use futures_util::{SinkExt, StreamExt};
+        while let Some(Ok(msg)) = stream.next().await {
+            if let Message::Text(text) = msg {
+                log::info!("[http_api] /v1/sync received: {}", text);
+                let _ = sink.send(Message::Text(format!("ECHO: {}", text).into())).await;
+            }
+        }
+        log::info!("[http_api] /v1/sync: LAN Sync Mobile device disconnected.");
+    })
+}
+
+// ════════════════════════════════════════════════════════════
+// REST Sync Endpoints for Mobile Phase 3
+// ════════════════════════════════════════════════════════════
+
+async fn handle_sync_pull(
+    axum::extract::State(state): axum::extract::State<ApiState>,
+) -> impl IntoResponse {
+    // Return PC config.json for now
+    let config = crate::read_config();
+    axum::Json(serde_json::json!({
+        "status": "ok",
+        "config": config,
+        "timestamp": chrono::Utc::now().timestamp()
+    }))
+}
+
+async fn handle_sync_push(
+    axum::extract::State(_state): axum::extract::State<ApiState>,
+    axum::extract::Json(payload): axum::extract::Json<serde_json::Value>,
+) -> impl IntoResponse {
+    log::info!("[http_api] Received mobile push data: {:?}", payload);
+    if let Some(ops) = payload.as_array() {
+        log::info!("[http_api] Pushing {} operations to PC outbox", ops.len());
+        crate::outbox::write_outbox(ops.clone());
+    }
+    axum::Json(serde_json::json!({
+        "status": "ok"
+    }))
+}
+
+// ═══════════════════════════════════════════════════════════
 // 路由组装 & 服务启动
 // ═══════════════════════════════════════════════════════════
 
@@ -674,10 +726,13 @@ pub fn start_http_server(app: AppHandle) {
         }
     });
 
-    // 启动一个专门用于外网下载的 0.0.0.0:3722 服务，仅暴露下载路由
+    // 启动一个专门用于外网下载的 0.0.0.0:3722 服务，仅暴露下载路由和局域网同步路由
     let public_state = ApiState { app };
     let public_router = Router::new()
         .route("/v1/dl/{token}", get(handle_download))
+        .route("/v1/sync", get(handle_sync_ws))
+        .route("/v1/sync/pull", get(handle_sync_pull))
+        .route("/v1/sync/push", post(handle_sync_push))
         .with_state(public_state);
 
     tauri::async_runtime::spawn(async move {

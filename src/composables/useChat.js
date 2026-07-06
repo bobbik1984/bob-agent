@@ -388,6 +388,8 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
       streamContent.value += chunk.content;
     } else if (chunk.type === 'thinking') {
       streamThinking.value += chunk.content;
+    } else if (chunk.type === 'thinking_replace') {
+      streamThinking.value = chunk.content;
     } else if (chunk.type === 'tool_start') {
       activeTools.value.push({ name: chunk.name, status: 'running', result: null, _expanded: false });
     } else if (chunk.type === 'tool_end') {

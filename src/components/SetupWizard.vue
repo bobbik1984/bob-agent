@@ -250,8 +250,13 @@ async function openScanner() {
       document.body.classList.remove('scanner-active');
       
       if (code) {
-        // TODO: Handle QR code payload for P2P pairing
-        console.log('Scanned QR code:', code);
+        try {
+          const payload = JSON.parse(code);
+          await window.appAPI.setConfig('pairing_payload', payload);
+          console.log('Saved pairing payload:', payload);
+        } catch (e) {
+          console.error('Invalid QR Code JSON:', code);
+        }
         finishOnboarding();
       }
     } catch (err) {

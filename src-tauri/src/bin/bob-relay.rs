@@ -14,16 +14,30 @@ struct Room {
     notify_tx: tokio::sync::mpsc::Sender<()>,
 }
 
-// 全局状态：映射 Room ID 到 Room
-type AppState = Arc<RwLock<HashMap<String, Room>>>;
+#[derive(Clone)]
+struct DeviceSession {
+    tx: tokio::sync::mpsc::Sender<Message>,
+}
+
+struct AppStateStruct {
+    rooms: HashMap<String, Room>,
+    devices: HashMap<String, DeviceSession>,
+}
+
+// 全局状态
+type AppState = Arc<RwLock<AppStateStruct>>;
 
 #[tokio::main]
 async fn main() {
-    let state: AppState = Arc::new(RwLock::new(HashMap::new()));
+    let state: AppState = Arc::new(RwLock::new(AppStateStruct {
+        rooms: HashMap::new(),
+        devices: HashMap::new(),
+    }));
 
     let app = Router::new()
         .route("/ws/send/{room_id}", get(ws_send_handler))
         .route("/ws/recv/{room_id}", get(ws_recv_handler))
+        .route("/ws/device/{device_id}", get(ws_device_handler))
         .route("/api/proxy", post(proxy_handler))
         .with_state(state);
 
@@ -49,8 +63,8 @@ async fn handle_sender(mut socket: WebSocket, room_id: String, state: AppState) 
     let (notify_tx, mut notify_rx) = tokio::sync::mpsc::channel::<()>(1);
 
     {
-        let mut rooms = state.write().await;
-        rooms.insert(
+        let mut app_state = state.write().await;
+        app_state.rooms.insert(
             room_id.clone(),
             Room {
                 tx: tx.clone(),
@@ -84,8 +98,8 @@ async fn handle_sender(mut socket: WebSocket, room_id: String, state: AppState) 
     let _ = read_task.await;
     write_task.abort();
 
-    let mut rooms = state.write().await;
-    rooms.remove(&room_id);
+    let mut app_state = state.write().await;
+    app_state.rooms.remove(&room_id);
 }
 
 // 接收端连入：加入房间接收数据
@@ -101,8 +115,8 @@ async fn handle_receiver(mut socket: WebSocket, room_id: String, state: AppState
     println!("🟢 Receiver connected to room: {}", room_id);
 
     let mut rx = {
-        let rooms = state.read().await;
-        if let Some(room) = rooms.get(&room_id) {
+        let app_state = state.read().await;
+        if let Some(room) = app_state.rooms.get(&room_id) {
             let _ = room.notify_tx.try_send(());
             room.tx.subscribe()
         } else {
@@ -118,6 +132,143 @@ async fn handle_receiver(mut socket: WebSocket, room_id: String, state: AppState
             break;
         }
     }
+}
+
+// -----------------------------------------------------------------------------
+// 设备注册与信令 (T-2300 Phase 3a)
+// -----------------------------------------------------------------------------
+
+#[derive(serde::Deserialize)]
+struct DeviceIncomingMessage {
+    #[serde(rename = "type")]
+    msg_type: String, // "query" | "notify"
+    target_device_id: Option<String>,
+    payload: Option<serde_json::Value>,
+}
+
+#[derive(serde::Serialize)]
+struct DeviceOutgoingMessage {
+    #[serde(rename = "type")]
+    msg_type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    target_device_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    from_device_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    online: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    payload: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+}
+
+async fn ws_device_handler(
+    ws: WebSocketUpgrade,
+    Path(device_id): Path<String>,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    ws.on_upgrade(move |socket| handle_device_session(socket, device_id, state))
+}
+
+async fn handle_device_session(socket: WebSocket, device_id: String, state: AppState) {
+    println!("📱 Device registered: {}", device_id);
+
+    let (mut sink, mut stream) = socket.split();
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<Message>(100);
+
+    // 将设备注册到全局状态
+    {
+        let mut app_state = state.write().await;
+        app_state.devices.insert(
+            device_id.clone(),
+            DeviceSession { tx: tx.clone() },
+        );
+    }
+
+    // 写任务：将接收到的 MPSC 消息推给 WebSocket
+    let write_task = tokio::spawn(async move {
+        while let Some(msg) = rx.recv().await {
+            if sink.send(msg).await.is_err() {
+                break;
+            }
+        }
+    });
+
+    // 读任务：接收 WebSocket 消息并处理
+    let state_clone = state.clone();
+    let device_id_clone = device_id.clone();
+    
+    while let Some(Ok(msg)) = stream.next().await {
+        if let Message::Text(text) = msg {
+            if let Ok(incoming) = serde_json::from_str::<DeviceIncomingMessage>(&text) {
+                match incoming.msg_type.as_str() {
+                    "query" => {
+                        if let Some(target_id) = incoming.target_device_id {
+                            let is_online = {
+                                let app_state = state_clone.read().await;
+                                app_state.devices.contains_key(&target_id)
+                            };
+                            let resp = DeviceOutgoingMessage {
+                                msg_type: "query_result".into(),
+                                target_device_id: Some(target_id),
+                                from_device_id: None,
+                                online: Some(is_online),
+                                payload: None,
+                                error: None,
+                            };
+                            if let Ok(json_str) = serde_json::to_string(&resp) {
+                                let _ = tx.send(Message::Text(json_str.into())).await;
+                            }
+                        }
+                    }
+                    "notify" => {
+                        if let Some(target_id) = incoming.target_device_id {
+                            let target_tx = {
+                                let app_state = state_clone.read().await;
+                                app_state.devices.get(&target_id).map(|d| d.tx.clone())
+                            };
+                            
+                            if let Some(target_tx) = target_tx {
+                                let forward_msg = DeviceOutgoingMessage {
+                                    msg_type: "notify".into(),
+                                    target_device_id: None,
+                                    from_device_id: Some(device_id_clone.clone()),
+                                    online: None,
+                                    payload: incoming.payload,
+                                    error: None,
+                                };
+                                if let Ok(json_str) = serde_json::to_string(&forward_msg) {
+                                    let _ = target_tx.send(Message::Text(json_str.into())).await;
+                                }
+                            } else {
+                                // 目标设备离线
+                                let err_resp = DeviceOutgoingMessage {
+                                    msg_type: "error".into(),
+                                    target_device_id: Some(target_id),
+                                    from_device_id: None,
+                                    online: None,
+                                    payload: None,
+                                    error: Some("Target device is offline".into()),
+                                };
+                                if let Ok(json_str) = serde_json::to_string(&err_resp) {
+                                    let _ = tx.send(Message::Text(json_str.into())).await;
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    // 清理资源
+    write_task.abort();
+    {
+        let mut app_state = state.write().await;
+        app_state.devices.remove(&device_id);
+    }
+    println!("📴 Device unregistered: {}", device_id);
 }
 
 // 隐蔽隧道：JSON-over-HTTPS 代理引擎
