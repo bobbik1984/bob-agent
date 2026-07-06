@@ -636,6 +636,27 @@ window.appAPI = {
   triggerMobileSync: async (payload) => invoke('trigger_mobile_sync', { payload }),
   writeMobileOutbox: async (operations) => invoke('write_mobile_outbox', { operations }),
 
+  // ── 扫码 (Mobile Only) ──────────────────────
+  scanQrCode: async () => {
+    if (!IS_TAURI) return null;
+    try {
+      const { scan, checkPermissions, requestPermissions } = await import('@tauri-apps/plugin-barcode-scanner');
+      let perm = await checkPermissions();
+      if (perm === 'prompt' || perm === 'prompt-with-rationale') {
+        perm = await requestPermissions();
+      }
+      if (perm !== 'granted') {
+        alert("需要相机权限才能扫码");
+        return null;
+      }
+      const result = await scan({ windowed: true, formats: ['QR_CODE'] });
+      return result?.content || null;
+    } catch (e) {
+      console.error("scanQrCode error:", e);
+      return null;
+    }
+  },
+
   // Generic invoke passthrough for components that call invoke directly
   invoke: (cmd, args) => invoke(cmd, args || {}),
 };

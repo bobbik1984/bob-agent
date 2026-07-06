@@ -493,7 +493,6 @@ const getAssetUrl = (name) => `/logos/${name}`;
 import { ref, onMounted, onUnmounted, computed, inject } from 'vue';
 import { open } from '@tauri-apps/plugin-dialog';
 import { invoke } from '@tauri-apps/api/core';
-import { scan, checkPermissions, requestPermissions } from '@tauri-apps/plugin-barcode-scanner';
 import QrcodeVue from 'qrcode.vue';
 import { useI18n } from 'vue-i18n';
 import {
@@ -512,39 +511,22 @@ const emit = defineEmits(['config-changed']);
 const isMobile = inject('isMobile', ref(false));
 
 const handleMobileScan = async () => {
-  try {
-    // 1. Check permissions first to avoid crash
-    let perm = await checkPermissions();
-    if (perm.camera === 'prompt' || perm.camera === 'prompt-with-rationale') {
-      perm = await requestPermissions();
-    }
-    if (perm.camera !== 'granted') {
-      alert("需要相机权限才能扫码");
-      return;
-    }
-
-    // 2. Make webview transparent
+  if (window.appAPI?.scanQrCode) {
     document.body.classList.add('scanner-active');
-
-    // 3. Start scan
-    const result = await scan({ windowed: true });
-    
-    // 4. Restore webview immediately
+    const code = await window.appAPI.scanQrCode();
     document.body.classList.remove('scanner-active');
-
-    if (result && result.content) {
+    
+    if (code) {
       try {
-        const payload = JSON.parse(result.content);
+        const payload = JSON.parse(code);
         await window.appAPI.setConfig('pairing_payload', payload);
         alert("扫码成功! 成功连接到电脑端 Bob。");
       } catch (e) {
-        alert("无效的二维码: " + result.content);
+        alert("无效的二维码: " + code);
       }
     }
-  } catch (err) {
-    if (!String(err).includes('canceled')) {
-      alert("扫码出错: " + err);
-    }
+  } else {
+    alert(t('setup.scanner_not_supported') || '当前环境不支持扫码');
   }
 };
 
