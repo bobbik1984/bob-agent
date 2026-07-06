@@ -1763,6 +1763,18 @@ function onFabPointerUp(e) {
 /* ── Mobile UX: Global Safe Area & Readability ── */
 .app-shell.is-mobile {
   padding-top: env(safe-area-inset-top, 0px);
+  position: relative;
+}
+
+.app-shell.is-mobile::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: env(safe-area-inset-top, 0px);
+  background-color: #000000;
+  z-index: 9999;
 }
 
 .app-shell.is-mobile .sidebar-top {
