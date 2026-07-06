@@ -513,13 +513,25 @@ const isMobile = inject('isMobile', ref(false));
 
 const handleMobileScan = async () => {
   try {
-    // Try requesting permissions
-    try {
-      await requestPermissions();
-    } catch (e) {
-      console.warn("Permission request error:", e);
+    // 1. Check permissions first to avoid crash
+    let perm = await checkPermissions();
+    if (perm.camera === 'prompt' || perm.camera === 'prompt-with-rationale') {
+      perm = await requestPermissions();
     }
+    if (perm.camera !== 'granted') {
+      alert("需要相机权限才能扫码");
+      return;
+    }
+
+    // 2. Make webview transparent
+    document.body.classList.add('scanner-active');
+
+    // 3. Start scan
     const result = await scan({ windowed: true });
+    
+    // 4. Restore webview immediately
+    document.body.classList.remove('scanner-active');
+
     if (result && result.content) {
       try {
         const payload = JSON.parse(result.content);

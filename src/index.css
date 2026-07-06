@@ -1205,3 +1205,30 @@ code.hljs {
   background: rgba(var(--user-accent-rgb, 39,118,187), 0.15);
   border-color: rgba(var(--user-accent-rgb, 39,118,187), 0.4);
 }
+
+
+/* ── Mobile UX: QR Scanner Transparent Overlay ── */
+body.scanner-active,
+body.scanner-active #app {
+  background: transparent !important;
+}
+
+body.scanner-active .app-shell {
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+body.scanner-active::after {
+  content: '请将二维码放入取景框\n(使用返回键取消)';
+  white-space: pre-line;
+  position: fixed;
+  bottom: 80px;
+  left: 0;
+  right: 0;
+  text-align: center;
+  color: white;
+  font-size: 16px;
+  text-shadow: 0 1px 4px rgba(0,0,0,0.8);
+  pointer-events: none;
+  z-index: 9999;
+}

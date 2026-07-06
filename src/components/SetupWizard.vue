@@ -245,13 +245,17 @@ async function pollQrStatus() {
 async function openScanner() {
   if (window.appAPI?.scanQrCode) {
     try {
+      document.body.classList.add('scanner-active');
       const code = await window.appAPI.scanQrCode();
+      document.body.classList.remove('scanner-active');
+      
       if (code) {
         // TODO: Handle QR code payload for P2P pairing
         console.log('Scanned QR code:', code);
         finishOnboarding();
       }
     } catch (err) {
+      document.body.classList.remove('scanner-active');
       console.error('Scan failed:', err);
     }
   } else {
