@@ -52,7 +52,7 @@
       </div>
 
       <!-- WeChat -->
-      <div class="service-card" :class="{ connected: wechatConnected }">
+      <div class="service-card static-card" :class="{ connected: wechatConnected }">
         <div class="service-card-header">
           <div class="service-icon" style="background: rgba(7,193,96,0.1); color: #07c160; display: flex; align-items: center; justify-content: center;">
             <svg viewBox="-51.45 -69.25 445.9 415.5" xmlns="http://www.w3.org/2000/svg" style="width: 20px; height: 20px; fill: currentColor;">
@@ -79,7 +79,7 @@
       </div>
 
       <!-- Telegram -->
-      <div class="service-card" :class="{ connected: tgToken }">
+      <div class="service-card static-card" :class="{ connected: tgToken }">
         <div class="service-card-header">
           <div class="service-icon" style="background: rgba(42,171,238,0.1); color: #2aabee; display: flex; align-items: center; justify-content: center;">
             <svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg" style="width: 18px; height: 18px; fill: currentColor;">
@@ -122,7 +122,7 @@
       </div>
 
       <!-- Discord -->
-      <div class="service-card" :class="{ connected: discordToken }">
+      <div class="service-card static-card" :class="{ connected: discordToken }">
         <div class="service-card-header">
           <div class="service-icon" style="background: rgba(88,101,242,0.1); color: #5865F2; display: flex; align-items: center; justify-content: center;">
             <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" style="width: 20px; height: 20px; fill: currentColor;">
@@ -952,6 +952,7 @@ onUnmounted(() => {
   grid-template-columns: repeat(2, 1fr);
   gap: 12px;
   align-items: stretch;
+grid-auto-rows: 1fr;
 }
 @media (max-width: 900px) {
   .service-cards-grid {
