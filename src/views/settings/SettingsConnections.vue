@@ -10,7 +10,7 @@
     
     <div class="service-cards-grid">
       <!-- 🔄 多端同步 (P2P Sync) -->
-      <div class="service-card" :class="{ connected: isUnlocked }">
+      <div class="service-card static-card" :class="{ connected: isUnlocked }">
         <div class="service-card-header">
           <div class="service-icon" :style="{ background: isUnlocked ? 'rgba(var(--user-accent-rgb, 39,118,187), 0.1)' : 'var(--bg-tertiary)', color: isUnlocked ? 'var(--user-accent)' : 'var(--text-muted)' }">
             <Smartphone :size="20" />
@@ -951,7 +951,7 @@ onUnmounted(() => {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   gap: 12px;
-  align-items: start;
+  align-items: stretch;
 }
 @media (max-width: 900px) {
   .service-cards-grid {
