@@ -1,12 +1,64 @@
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, command, Manager, Emitter};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use log::{info, error};
+use std::collections::HashMap;
 
 use std::path::PathBuf;
 use std::fs;
 
 use crate::lan_sync::LanSyncEngine;
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct ConnectedDevice {
+    pub device_id: String,
+    pub platform: String,
+    pub ip_address: String,
+    pub last_seen: i64,
+}
+
+#[derive(Default)]
+pub struct DeviceRegistry {
+    pub devices: RwLock<HashMap<String, ConnectedDevice>>,
+}
+
+impl DeviceRegistry {
+    pub fn update_device(&self, device: ConnectedDevice) {
+        let mut devices = self.devices.write().unwrap();
+        devices.insert(device.device_id.clone(), device);
+    }
+    
+    pub fn get_all(&self) -> Vec<ConnectedDevice> {
+        let devices = self.devices.read().unwrap();
+        let mut list: Vec<_> = devices.values().cloned().collect();
+        // Sort by last_seen descending
+        list.sort_by(|a, b| b.last_seen.cmp(&a.last_seen));
+        list
+    }
+}
+
+#[command]
+pub async fn get_connected_devices(app: AppHandle) -> Result<Vec<ConnectedDevice>, String> {
+    let registry = app.state::<Arc<DeviceRegistry>>();
+    Ok(registry.get_all())
+}
+
+pub fn register_device(app: &AppHandle, headers: &axum::http::HeaderMap, ip: std::net::SocketAddr) {
+    if let (Some(device_id), Some(platform)) = (
+        headers.get("x-device-id").and_then(|v| v.to_str().ok()),
+        headers.get("x-platform").and_then(|v| v.to_str().ok()),
+    ) {
+        let registry = app.state::<Arc<DeviceRegistry>>();
+        let device = ConnectedDevice {
+            device_id: device_id.to_string(),
+            platform: platform.to_string(),
+            ip_address: ip.ip().to_string(),
+            last_seen: crate::now_ms(),
+        };
+        registry.update_device(device);
+        let _ = app.emit("sync:device_connected", ());
+    }
+}
 
 fn get_mobile_outbox_path() -> PathBuf {
     crate::get_data_dir().join("mobile_outbox.json")
@@ -91,7 +143,15 @@ async fn do_active_sync(app: AppHandle, payload: SyncCommandPayload) -> Result<(
         
         // 1. Pull config from PC
         let pull_url = format!("{}/v1/sync/pull", base_url);
-        match client.get(&pull_url).send().await {
+        
+        let config = crate::read_config();
+        let my_device_id = config.get("device_id").and_then(|v| v.as_str()).unwrap_or("unknown").to_string();
+        let platform = std::env::consts::OS.to_string();
+        
+        match client.get(&pull_url)
+            .header("X-Device-Id", &my_device_id)
+            .header("X-Platform", &platform)
+            .send().await {
             Ok(resp) if resp.status().is_success() => {
                 if let Ok(json) = resp.json::<serde_json::Value>().await {
                     if let Some(config) = json.get("config") {
@@ -121,7 +181,10 @@ async fn do_active_sync(app: AppHandle, payload: SyncCommandPayload) -> Result<(
                 if let Ok(data) = fs::read_to_string(&outbox_path) {
                     if let Ok(mock_outbox) = serde_json::from_str::<serde_json::Value>(&data) {
                         let outbox_url = format!("{}/v1/sync/push", base_url);
-                        match client.post(&outbox_url).json(&mock_outbox).send().await {
+                        match client.post(&outbox_url)
+                            .header("X-Device-Id", &my_device_id)
+                            .header("X-Platform", &platform)
+                            .json(&mock_outbox).send().await {
                             Ok(resp) if resp.status().is_success() => {
                                 info!("[Sync Engine] Successfully pushed outbox to PC!");
                                 let _ = fs::remove_file(&outbox_path);

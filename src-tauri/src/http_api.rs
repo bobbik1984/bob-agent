@@ -667,7 +667,10 @@ async fn handle_sync_ws(ws: WebSocketUpgrade) -> impl IntoResponse {
 
 async fn handle_sync_pull(
     axum::extract::State(state): axum::extract::State<ApiState>,
+    axum::extract::ConnectInfo(addr): axum::extract::ConnectInfo<std::net::SocketAddr>,
+    headers: axum::http::HeaderMap,
 ) -> impl IntoResponse {
+    crate::sync_engine::register_device(&state.app, &headers, addr);
     // Return PC config.json for now
     let config = crate::read_config();
     axum::Json(serde_json::json!({
@@ -678,9 +681,12 @@ async fn handle_sync_pull(
 }
 
 async fn handle_sync_push(
-    axum::extract::State(_state): axum::extract::State<ApiState>,
+    axum::extract::State(state): axum::extract::State<ApiState>,
+    axum::extract::ConnectInfo(addr): axum::extract::ConnectInfo<std::net::SocketAddr>,
+    headers: axum::http::HeaderMap,
     axum::extract::Json(payload): axum::extract::Json<serde_json::Value>,
 ) -> impl IntoResponse {
+    crate::sync_engine::register_device(&state.app, &headers, addr);
     log::info!("[http_api] Received mobile push data: {:?}", payload);
     if let Some(ops) = payload.as_array() {
         log::info!("[http_api] Pushing {} operations to PC outbox", ops.len());
@@ -744,7 +750,7 @@ pub fn start_http_server(app: AppHandle) {
             }
         };
         log::info!("[http_api] Bob Public Download API 启动成功，监听 0.0.0.0:3722");
-        if let Err(e) = axum::serve(listener, public_router).await {
+        if let Err(e) = axum::serve(listener, public_router.into_make_service_with_connect_info::<std::net::SocketAddr>()).await {
             log::error!("[http_api] 公共服务异常退出: {}", e);
         }
     });

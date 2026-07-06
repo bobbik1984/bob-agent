@@ -795,6 +795,7 @@ pub fn run() {
     
     let mut builder = builder
         .manage(crypto::DeviceIdentityState(std::sync::Mutex::new(None)))
+        .manage(sync_engine::DeviceRegistry::default())
         .manage(sidecar::SidecarState {
             child: Mutex::new(None),
         })
@@ -872,6 +873,7 @@ pub fn run() {
             crypto::unlock_device_keys,
             crypto::reset_device_keys,
             crypto::get_pairing_payload,
+            sync_engine::get_connected_devices,
             sync_engine::trigger_mobile_sync,
             sync_engine::write_mobile_outbox,
             // 系统状态

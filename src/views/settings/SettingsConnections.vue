@@ -49,6 +49,25 @@
             </button>
           </div>
         </div>
+
+        <!-- 已连接设备列表 -->
+        <div v-if="!isMobile && connectedDevices.length > 0" class="service-card-body" style="border-top: 1px solid var(--border-subtle); margin-top: 12px; padding-top: 12px;">
+          <div style="font-size: 12px; font-weight: 500; color: var(--text-secondary); margin-bottom: 8px;">已连接设备</div>
+          <div style="display: flex; flex-direction: column; gap: 8px;">
+            <div v-for="dev in connectedDevices" :key="dev.device_id" style="display: flex; justify-content: space-between; align-items: center; background: var(--bg-tertiary); padding: 8px 12px; border-radius: 6px;">
+              <div style="display: flex; flex-direction: column; gap: 2px;">
+                <div style="display: flex; align-items: center; gap: 6px;">
+                  <span class="status-dot" :class="isDeviceOnline(dev) ? 'dot-connected' : 'dot-disconnected'" style="width: 8px; height: 8px; border-radius: 50%;"></span>
+                  <span style="font-size: 13px; font-weight: 500; color: var(--text-primary);">{{ dev.platform === 'android' ? 'Android Device' : dev.platform }}</span>
+                  <span style="font-size: 11px; color: var(--text-tertiary); font-family: monospace;">{{ dev.device_id.substring(0, 8) }}</span>
+                </div>
+                <div style="font-size: 11px; color: var(--text-tertiary); margin-left: 14px;">
+                  {{ dev.ip_address }} · {{ formatTime(dev.last_seen) }}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
 
       <!-- WeChat -->
@@ -493,6 +512,7 @@ const getAssetUrl = (name) => `/logos/${name}`;
 import { ref, onMounted, onUnmounted, computed, inject } from 'vue';
 import { open } from '@tauri-apps/plugin-dialog';
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import QrcodeVue from 'qrcode.vue';
 import { useI18n } from 'vue-i18n';
 import {
@@ -595,6 +615,42 @@ const fetchPairingInfo = async () => {
   }
 };
 
+const connectedDevices = ref([]);
+let unlistenDeviceConnected = null;
+
+const fetchConnectedDevices = async () => {
+  try {
+    connectedDevices.value = await invoke('get_connected_devices');
+  } catch (e) {
+    console.error('Failed to get connected devices', e);
+  }
+};
+
+const isDeviceOnline = (dev) => {
+  // Consider online if seen within last 2 minutes (120000ms)
+  return Date.now() - dev.last_seen < 120000;
+};
+
+const formatTime = (ts) => {
+  const d = new Date(ts);
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+};
+
+onMounted(async () => {
+  // Existing init code if any
+  if (!isMobile.value) {
+    await fetchConnectedDevices();
+    unlistenDeviceConnected = await listen('sync:device_connected', () => {
+      fetchConnectedDevices();
+    });
+  }
+});
+
+onUnmounted(() => {
+  if (unlistenDeviceConnected) {
+    unlistenDeviceConnected();
+  }
+});
 
 // ── Mobile channels ──
 const mobileChannel = ref('wechat');
