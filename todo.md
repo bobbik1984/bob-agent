@@ -526,24 +526,24 @@
 > - **🤝 PC 端二次确认**: 手机扫码后 PC 弹出确认弹窗，点击"允许"后才建立持久化连接
 
 ### Phase 3a: bob-relay 增加设备注册协议
-- [ ] T-2301: 在现有 bob-relay (Node.js, VPS1) 中新增设备注册协议 (register/query/notify)。
-- [ ] T-2302: PC 端 Bob 启动时自动向 bob-relay 注册 device_id + 在线状态。
+- [x] T-2301: 在现有 bob-relay (Node.js, VPS1) 中新增设备注册协议 (register/query/notify)。
+- [x] T-2302: PC 端 Bob 启动时自动向 bob-relay 注册 device_id + 在线状态。
 
 ### Phase 3b: 同步通道 (复用 Web Drop 引擎)
-- [ ] T-2311: 复用 `web_drop.rs` 的 WebRTC 引擎，改造为持久化双向 DataChannel 同步通道。
-- [ ] T-2312: 实现四级渐进式连接策略的完整决策链 (局域网 UDP → WebRTC → TURN → Bot)。
-- [ ] T-2313: `http_api.rs` 新增 `/v1/sync` 端点，供手机局域网直连时使用。
-- [ ] T-2314: 实现手机端 `lan_sync.rs`：被动监听 PC 连接 + 主动回连。
+- [x] T-2311: 复用 `web_drop.rs` 的 WebRTC 引擎，改造为持久化双向 DataChannel 同步通道。
+- [x] T-2312: 实现四级渐进式连接策略的完整决策链 (局域网 UDP → WebRTC → TURN → Bot)。
+- [x] T-2313: `http_api.rs` 新增 `/v1/sync` 端点，供手机局域网直连时使用。
+- [x] T-2314: 实现手机端 `lan_sync.rs`：被动监听 PC 连接 + 主动回连。
 
 ### Phase 3c: 同步协议
-- [ ] T-2321: 实现 `sync_protocol.rs` (SyncPacket 序列化 + Ed25519 认证 + X25519-AES-GCM 加密)。
-- [ ] T-2322: 运行时配置全量互通机制 (包括模型偏好选择、知识库状态、API Key，安装后自动双向同步更新)。
-- [ ] T-2323: 实现 SyncPacket 批量传输与 ACK + synced 标记机制。
+- [x] T-2321: 实现 `sync_protocol.rs` (SyncPacket 序列化 + Ed25519 认证 + X25519-AES-GCM 加密)。
+- [x] T-2322: 运行时配置全量互通机制 (包括模型偏好选择、知识库状态、API Key，安装后自动双向同步更新)。
+- [x] T-2323: 实现 SyncPacket 批量传输与 ACK + synced 标记机制。
 
 ### Phase 3d: 端到端联调
-- [ ] T-2331: 局域网同步联调 (同一 WiFi，UDP 广播发现 + HTTP 直连)。
-- [ ] T-2332: 跨网 WebRTC 打洞联调 (手机 4G + PC WiFi，经 bob-relay 信令 + coturn STUN)。
-- [ ] T-2333: Bot 推送唤醒联调 (手机被杀后台 → PC 通过微信 Bot 推送 → 用户打开手机端 → 同步)。
+- [x] T-2331: 局域网同步联调 (同一 WiFi，UDP 广播发现 + HTTP 直连)。
+- [x] T-2332: 跨网 WebRTC 打洞联调 (手机 4G + PC WiFi，经 bob-relay 信令 + coturn STUN)。
+- [x] T-2333: Bot 推送唤醒联调 (手机被杀后台 → PC 通过微信 Bot 推送 → 用户打开手机端 → 同步)。
 
 ---
 
