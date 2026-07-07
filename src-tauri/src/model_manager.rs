@@ -265,5 +265,33 @@ pub async fn delete_local_model(app: AppHandle, model_id: String) -> Result<bool
         deleted_any = true;
     }
 
+    if deleted_any {
+        use tauri::Manager;
+        // 1. 同步清理 config 中的配置项，防止出现幽灵路径
+        let mut cfg = crate::read_config();
+        let mut changed = false;
+        if let Some(p) = cfg.get("offlineModelPath").and_then(|v| v.as_str()) {
+            // 如果当前的离线路径指向了刚才删除的模型，则清空
+            if p.ends_with(&gguf_name) {
+                if let Some(obj) = cfg.as_object_mut() {
+                    obj.insert("offlineModelPath".to_string(), serde_json::json!(""));
+                    changed = true;
+                }
+            }
+        }
+        if changed {
+            crate::write_config(&cfg);
+        }
+
+        // 2. 如果删除的正好是当前正在运行的模型，则强行卸载内存
+        let state = app.state::<crate::candle_engine::CandleState>();
+        let mut running_model = state.current_model.lock().unwrap();
+        if *running_model == model_id {
+            *state.is_running.lock().unwrap() = false;
+            *state.engine.lock().unwrap() = None;
+            *running_model = "".to_string();
+        }
+    }
+
     Ok(deleted_any)
 }
