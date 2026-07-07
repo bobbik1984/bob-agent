@@ -548,6 +548,25 @@
 
 ---
 
+## 📍 目标 25: 票夹与通行证管理系统 (Bob Wallet) (T-2500)
+> 🎯 **目标**: 让 Bob 完美替代 Google Wallet / Apple Wallet 的基础票据管理功能。将门票、机票、电影票、会员卡作为知识图谱中的一等公民，并与日程表深度双向联动。
+> 📋 **核心策略**: 日程 (Calendar) 记录时间，知识图谱 (Knowledge Graph) 承载结构化票据实体与二维码。
+> 📖 **详细执行蓝图**: `docs/TICKET_MANAGEMENT_BLUEPRINT.md`
+
+### Phase 1: 数据层与后端 API (Rust)
+- [ ] 扩展 `events` 表，增加 `linked_ticket_id` 指向图谱节点。
+- [ ] `kg.rs` 新增 `ticket` 节点类型，支持二维码路径、场馆、状态等结构化 metadata 存储。
+- [ ] 新增 `create_ticket` Tool Calling 工具，一次性完成图谱节点、日程事件和关联边的原子化创建。
+
+### Phase 2: 视图与交互融合 (Vue)
+- [ ] 开发 `TicketCard.vue`，支持机票/电影票/展会等不同 Category 的 UI 微件。
+- [ ] 改造 `WeekTimeline.vue` 日程视图，增加 `[🎫 查看入场凭证]` 关联跳转按钮。
+- [ ] 改造 `KnowledgeGraphView.vue`，顶部增加 `[🎫 票夹]` 过滤视图，将所有有效票据聚合并展示二维码。
+
+### Phase 3: 移动端"刷卡"体验 (Mobile)
+- [ ] 移动端专属适配：当日置顶票据卡片。
+- [ ] 点击二维码放大至全屏，并自动调高屏幕亮度、锁定屏幕方向，方便检票扫码。
+
 ## 🔙 已后置的待办事项 (Backlog)
 
 ### 📍 目标 21: 知识图谱 Source-Hub 架构重构 (Implicit Provenance + Cascade GC)
