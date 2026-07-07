@@ -33,6 +33,11 @@
   "bundle": {
     "active": true,
     "targets": ["nsis"],
+    "windows": {
+      "nsis": {
+        "installerHooks": "./hooks.nsi"
+      }
+    },
     "resources": {
       "../resources/llm-engine/*.exe": "llm-engine",
       "../resources/llm-engine/*.dll": "llm-engine",

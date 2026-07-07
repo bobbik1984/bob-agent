@@ -19,7 +19,23 @@
         <Menu :size="20" />
       </button>
       <div class="mobile-header-center">
-        <span class="mobile-header-title">{{ conversationTitle }}</span>
+        <input 
+          v-if="isEditingTitle"
+          ref="titleInputRef"
+          v-model="editTitleText"
+          class="mobile-header-title-input"
+          @blur="saveTitle"
+          @keydown.enter="saveTitle"
+          @keydown.esc="cancelTitleEdit"
+        />
+        <span 
+          v-else
+          class="mobile-header-title" 
+          @click="startTitleEdit"
+          title="点击修改标题"
+        >
+          {{ conversationTitle }}
+        </span>
       </div>
       <div class="mobile-header-right">
         <span class="cost-indicator" v-if="sessionCost > 0" style="font-size: 12px; color: var(--text-tertiary);">¥{{ sessionCost.toFixed(4) }}</span>
@@ -509,8 +525,28 @@
               <Check v-if="agentMode === 'goal'" :size="16" class="text-accent" />
             </button>
           </div>
+          </div>
         </div>
       </transition>
+    </Teleport>
+
+    <!-- Custom Offline Engine Modal -->
+    <Teleport to="body">
+      <div v-if="showOfflineEngineModal" class="modal-overlay">
+        <div class="modal-content custom-confirm-modal">
+          <div class="modal-header">
+            <h3>启动本地引擎</h3>
+          </div>
+          <div class="modal-body">
+            <p>本地模型 <strong>{{ pendingOfflineEngineModel?.displayName }}</strong> 尚未启动，或正在运行其他模型。</p>
+            <p>是否立即启动？（需要约 5-10 秒加载至内存）</p>
+          </div>
+          <div class="modal-footer">
+            <button class="btn btn-secondary" @click="showOfflineEngineModal = false">取消</button>
+            <button class="btn btn-primary" @click="startOfflineEngineFromModal">立即启动</button>
+          </div>
+        </div>
+      </div>
     </Teleport>
 
 </template>
@@ -535,6 +571,58 @@ import MorningBriefing from '../components/MorningBriefing.vue';
 import { useChat } from '../composables/useChat.js';
 import { useModelSwitcher } from '../composables/useModelSwitcher.js';
 import { useDragDrop } from '../composables/useDragDrop.js';
+
+const isEditingTitle = ref(false);
+const titleInputRef = ref(null);
+const editTitleText = ref('');
+
+function startTitleEdit() {
+  editTitleText.value = conversationTitle.value;
+  isEditingTitle.value = true;
+  nextTick(() => {
+    if (titleInputRef.value) titleInputRef.value.focus();
+  });
+}
+
+function saveTitle() {
+  if (!isEditingTitle.value) return;
+  isEditingTitle.value = false;
+  const newTitle = editTitleText.value.trim();
+  if (newTitle && newTitle !== conversationTitle.value) {
+    emit('update-title', { id: props.conversationId, title: newTitle });
+  }
+}
+
+function cancelTitleEdit() {
+  isEditingTitle.value = false;
+}
+
+const showOfflineEngineModal = ref(false);
+const pendingOfflineEngineModel = ref(null);
+
+async function startOfflineEngineFromModal() {
+  if (!pendingOfflineEngineModel.value) return;
+  const currentModelObj = pendingOfflineEngineModel.value;
+  showOfflineEngineModal.value = false;
+  
+  messages.value.push({ role: 'system', content: `⚙️ 正在启动本地模型 ${currentModelObj.displayName}...` });
+  scrollToBottom();
+  
+  try {
+    const res = await window.appAPI.startOfflineEngine(currentModelObj.id);
+    if (res && res.error) {
+       messages.value.push({ role: 'system', content: `❌ 本地模型启动失败: ${res.error}` });
+    } else {
+       messages.value.push({ role: 'system', content: `✅ 本地模型已就绪。` });
+       // Auto-continue sending message
+       sendMessage();
+    }
+  } catch (e) {
+    console.error('Failed to start offline engine', e);
+    messages.value.push({ role: 'system', content: `❌ 本地模型启动失败: ${e}` });
+  }
+  scrollToBottom();
+}
 
 
 
@@ -766,17 +854,13 @@ const {
       try {
         const engineStatus = await window.appAPI.invoke('get_offline_engine_status');
         if (engineStatus.status !== 'running' || engineStatus.model !== currentModelObj.id) {
-          const confirmed = confirm(`本地模型 ${currentModelObj.displayName} 尚未启动，或正在运行其他模型。\n\n是否立即启动？（需要约 5-10 秒加载至内存）`);
-          if (confirmed) {
-            messages.value.push({ role: 'system', content: `⚙️ 正在启动本地模型 ${currentModelObj.displayName}...` });
-            await window.appAPI.startOfflineEngine(currentModelObj.id);
-            messages.value.push({ role: 'system', content: `✅ 本地模型已就绪。` });
-          } else {
-            return;
-          }
+          pendingOfflineEngineModel.value = currentModelObj;
+          showOfflineEngineModal.value = true;
+          return;
         }
       } catch (e) {
         console.error(e);
+        return;
       }
     }
 

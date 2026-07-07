@@ -39,11 +39,15 @@
       </div>
       <div class="provider-selector">
         <label>{{ $t('model_hub.select_provider') }}</label>
-        <select class="input provider-select" v-model="activeProvider">
-          <option v-for="p in providerList" :key="p.id" :value="p.id" :disabled="!apiKeys[p.id] && p.id !== 'offline'">
-            {{ $te('providers.' + p.id) ? $t('providers.' + p.id) : p.name }} ({{ p.count }}) {{ (!apiKeys[p.id] && p.id !== 'offline') ? `(${$t('model_hub.unconfigured')})` : '' }}
-          </option>
-        </select>
+        <CustomSelect
+          v-model="activeProvider"
+          :options="providerList.map(p => ({
+            value: p.id,
+            label: `${$te('providers.' + p.id) ? $t('providers.' + p.id) : p.name} (${p.count}) ${(!apiKeys[p.id] && p.id !== 'offline') ? '(' + $t('model_hub.unconfigured') + ')' : ''}`,
+            disabled: !apiKeys[p.id] && p.id !== 'offline'
+          }))"
+          class="provider-select"
+        />
         <button
           v-if="currentProviderSupportsRefresh"
           class="btn-icon refresh-provider-btn"
@@ -110,6 +114,7 @@
 import { ref, computed, onMounted, watch } from 'vue';
 import { Cpu, RefreshCw, Monitor, Tractor } from 'lucide-vue-next';
 import { useI18n } from 'vue-i18n';
+import CustomSelect from './CustomSelect.vue';
 
 const { t } = useI18n();
 
@@ -285,6 +290,13 @@ onMounted(async () => {
     activeProvider.value = mainEntry ? mainEntry.provider : providerList.value[0].id;
   }
   await loadVariant();
+
+  window.addEventListener('model-downloaded', async () => {
+    try {
+      const p = await window.appAPI.getModelPool();
+      pool.value = Array.isArray(p) ? p : [];
+    } catch(e){}
+  });
 });
 </script>
 

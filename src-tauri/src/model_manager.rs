@@ -54,16 +54,29 @@ pub async fn download_model(
     let file_path = models_dir.join(&file_name);
     let tmp_path = models_dir.join(format!("{}.download", file_name));
 
-    // 如果已经下载完了，直接返回成功
+    let client = reqwest::Client::new();
+
+    // 如果主模型已经下载完了，检查并补齐 Tokenizer 下载，然后返回成功
     if file_path.exists() {
+        if let Some(t_url) = tokenizer_url {
+            let t_file_name = format!("{}_tokenizer.json", model_id);
+            let t_file_path = models_dir.join(&t_file_name);
+            if !t_file_path.exists() {
+                if let Ok(t_response) = client.get(&t_url).send().await {
+                    if t_response.status().is_success() {
+                        if let Ok(t_bytes) = t_response.bytes().await {
+                            let _ = tokio::fs::write(&t_file_path, &t_bytes).await;
+                        }
+                    }
+                }
+            }
+        }
         return Ok(DownloadResult {
             success: true,
             path: file_path.to_string_lossy().to_string(),
             error: None,
         });
     }
-
-    let client = reqwest::Client::new();
 
     // 检查是否有临时文件，用于断点续传
     let mut downloaded_bytes = 0u64;

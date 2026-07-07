@@ -64,6 +64,8 @@ jobs:
             COLORS_XML="src-tauri/gen/android/app/src/main/res/values/colors.xml"
             if [ -f "$COLORS_XML" ]; then
               sed -i 's/name="ic_launcher_background">.*<\/color>/name="ic_launcher_background">#FFFFFF<\/color>/g' $COLORS_XML
+              sed -i 's/#6200EE/#FFFFFF/g' $COLORS_XML
+              sed -i 's/#3700B3/#FFFFFF/g' $COLORS_XML
             fi
             DRAWABLE_BG="src-tauri/gen/android/app/src/main/res/drawable/ic_launcher_background.xml"
             if [ -f "$DRAWABLE_BG" ]; then

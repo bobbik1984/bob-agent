@@ -1770,6 +1770,8 @@ function onFabPointerUp(e) {
   z-index: 200;
   transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
   box-shadow: 2px 0 12px rgba(0,0,0,0.2);
+  padding-top: env(safe-area-inset-top, 20px);
+  background: var(--bg-secondary);
 }
 
 .mobile-drawer-open {
