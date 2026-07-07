@@ -374,7 +374,7 @@ async fn do_active_sync(app: AppHandle, payload: SyncCommandPayload) -> Result<(
 
     if !sync_success {
         error!("[Sync Engine] Failed to connect to any LAN IP. Fallback to relay not yet implemented.");
-        return Err("LAN connection failed".to_string());
+        return Err("手机与电脑不在同一局域网(Wi-Fi)内。通过 Relay 中继同步数据的功能正在开发中，请先确保两台设备连接到同一个路由器。".to_string());
     }
 
     Ok(())

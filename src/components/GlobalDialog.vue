@@ -57,33 +57,35 @@ const handleOverlayClick = () => {
 
 .modal-content {
   background-color: var(--bg-primary, #ffffff);
-  border-radius: 12px;
+  border-radius: 16px;
   width: 90%;
-  max-width: 400px;
-  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+  max-width: 340px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15);
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  border: 1px solid var(--border-color, #e5e7eb);
+  border: none;
 }
 
 .modal-header {
-  padding: 16px 20px;
-  border-bottom: 1px solid var(--border-color, #e5e7eb);
+  padding: 24px 20px 8px;
+  border-bottom: none;
 }
 
 .modal-header h3 {
   margin: 0;
-  font-size: 1.1rem;
+  font-size: 1.2rem;
   color: var(--text-primary, #111827);
   font-weight: 600;
+  text-align: center;
 }
 
 .modal-body {
-  padding: 20px;
+  padding: 8px 24px 24px;
   color: var(--text-secondary, #4b5563);
   font-size: 0.95rem;
   line-height: 1.5;
+  text-align: center;
 }
 
 .modal-body p {
@@ -92,28 +94,29 @@ const handleOverlayClick = () => {
 }
 
 .modal-footer {
-  padding: 16px 20px;
+  padding: 16px 20px 20px;
   display: flex;
-  justify-content: flex-end;
+  justify-content: center;
   gap: 12px;
-  background-color: var(--bg-secondary, #f9fafb);
-  border-top: 1px solid var(--border-color, #e5e7eb);
+  background-color: transparent;
+  border-top: none;
 }
 
 button {
-  padding: 8px 16px;
-  border-radius: 6px;
-  font-size: 0.9rem;
+  padding: 10px 24px;
+  border-radius: 8px;
+  font-size: 0.95rem;
   font-weight: 500;
   cursor: pointer;
   transition: all 0.2s;
   border: none;
+  min-width: 100px;
 }
 
 .btn-secondary {
-  background-color: transparent;
+  background-color: var(--bg-tertiary, #f3f4f6);
   color: var(--text-secondary, #4b5563);
-  border: 1px solid var(--border-color, #d1d5db);
+  border: none;
 }
 
 .btn-secondary:hover {
@@ -133,10 +136,6 @@ button {
 @media (prefers-color-scheme: dark) {
   .modal-content {
     background-color: var(--bg-primary, #1f2937);
-    border-color: var(--border-color, #374151);
-  }
-  .modal-header {
-    border-color: var(--border-color, #374151);
   }
   .modal-header h3 {
     color: var(--text-primary, #f9fafb);
@@ -144,16 +143,6 @@ button {
   .modal-body {
     color: var(--text-secondary, #d1d5db);
   }
-  .modal-footer {
-    background-color: var(--bg-secondary, #111827);
-    border-color: var(--border-color, #374151);
-  }
   .btn-secondary {
-    border-color: var(--border-color, #4b5563);
-    color: var(--text-secondary, #d1d5db);
-  }
-  .btn-secondary:hover {
-    background-color: var(--bg-tertiary, #374151);
-  }
 }
 </style>
