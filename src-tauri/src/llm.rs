@@ -758,9 +758,21 @@ pub fn get_active_models() -> Value {
 
 pub fn assign_model_role(model_id: String, role: String) -> Value {
     let mut config = super::read_config();
+
+    // Check if this model belongs to the offline provider
+    let pool = get_model_pool();
+    let is_offline = pool.as_array()
+        .and_then(|arr| arr.iter().find(|m| m.get("id").and_then(|v| v.as_str()) == Some(&model_id)))
+        .and_then(|m| m.get("provider").and_then(|v| v.as_str()))
+        == Some("offline");
+
     if let Some(obj) = config.as_object_mut() {
         if role == "main" {
             obj.insert("model".to_string(), json!(model_id));
+            // Auto-sync offlineModelPath when selecting an offline model
+            if is_offline {
+                obj.insert("offlineModelPath".to_string(), json!(model_id));
+            }
         } else if role == "clerk" {
             obj.insert("clerkModel".to_string(), json!(model_id));
         }

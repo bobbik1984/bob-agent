@@ -598,6 +598,7 @@ function cancelTitleEdit() {
 
 const showOfflineEngineModal = ref(false);
 const pendingOfflineEngineModel = ref(null);
+let engineJustStarted = false;
 
 async function startOfflineEngineFromModal() {
   if (!pendingOfflineEngineModel.value) return;
@@ -613,7 +614,8 @@ async function startOfflineEngineFromModal() {
        messages.value.push({ role: 'system', content: `❌ 本地模型启动失败: ${res.error}` });
     } else {
        messages.value.push({ role: 'system', content: `✅ 本地模型已就绪。` });
-       // Auto-continue sending message
+       // Set bypass flag so sendMessage() skips the engine re-check
+       engineJustStarted = true;
        sendMessage();
     }
   } catch (e) {
@@ -849,7 +851,7 @@ const {
       }
     }
 
-    if (currentModelObj && currentModelObj.provider === 'offline') {
+    if (currentModelObj && currentModelObj.provider === 'offline' && !engineJustStarted) {
       try {
         const engineStatus = await window.appAPI.invoke('get_offline_engine_status');
         if (engineStatus.status !== 'running' || engineStatus.model !== currentModelObj.id) {
@@ -862,6 +864,7 @@ const {
         return;
       }
     }
+    engineJustStarted = false;
 
     _sendMessage(pendingImages, pendingFiles, resetTextareaHeight, async ({ userMessage, filesToRead, streamThinking }) => {
       // 检查是否有 pdf 需要走 vision 通道渲染为图片

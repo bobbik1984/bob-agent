@@ -74,8 +74,16 @@ impl CandleEngine {
         let mut logits_processor = LogitsProcessor::new(299792458, Some(temperature), None);
         
         let mut index_pos = 0;
+        let start_time = std::time::Instant::now();
+        let timeout = std::time::Duration::from_secs(300); // 5 min hard timeout
         
-        for _ in 0..max_tokens {
+        for i in 0..max_tokens {
+            // Hard timeout guard
+            if start_time.elapsed() > timeout {
+                on_token("\n\n[推理超时 (5 分钟)，已自动停止]".to_string())?;
+                break;
+            }
+            
             let context_size = if index_pos == 0 { tokens.len() } else { 1 };
             let start_pos = tokens.len().saturating_sub(context_size);
             
@@ -95,9 +103,33 @@ impl CandleEngine {
             
             index_pos += context_size;
             
-            // EOS tokens
-            if next_token == 151643 || next_token == 151645 || next_token == 128001 || next_token == 128009 {
+            // EOS tokens (Qwen2: 151643/151645, Llama: 128001/128009, Qwen3: 151668)
+            if next_token == 151643 || next_token == 151645 || next_token == 128001 || next_token == 128009 || next_token == 151668 {
                 break;
+            }
+            
+            // Strip Qwen3 thinking tags — if model outputs <think>...</think>, skip those tokens
+            if i == 0 {
+                if let Some(text) = self.tokenizer.decode(&[next_token], true).ok() {
+                    if text.contains("<think>") {
+                        // Fast-forward through thinking tokens until </think>
+                        loop {
+                            if start_time.elapsed() > timeout { break; }
+                            index_pos += 1;
+                            let input_t = Tensor::new(&[next_token], &self.device)?.unsqueeze(0)?;
+                            let logits_t = self.model.forward(&input_t, index_pos)?;
+                            let logits_t = logits_t.squeeze(0)?.squeeze(0)?.to_dtype(candle_core::DType::F32)?;
+                            let think_token = logits_processor.sample(&logits_t)?;
+                            tokens.push(think_token);
+                            if let Some(t) = self.tokenizer.decode(&[think_token], true).ok() {
+                                if t.contains("</think>") { break; }
+                            }
+                            // EOS during think = done
+                            if think_token == 151643 || think_token == 151645 || think_token == 151668 { break; }
+                        }
+                        continue;
+                    }
+                }
             }
         }
         
@@ -249,16 +281,29 @@ pub async fn run_native_inference(
         
         if let Some(engine) = engine_guard.as_mut() {
             let mut full_response = String::new();
+            let inference_start = std::time::Instant::now();
+            let mut token_count: usize = 0;
             
-            // Emitting an initial thinking chunk so the UI reflects that inference has actually begun!
-            let _ = app_clone.emit("llm:chunk", json!({ "type": "thinking", "content": "\n[本地离线引擎正在推理中，根据上下文长度可能需要 1~5 分钟 (CPU 运算)，请耐心等待]...\n", "conv_id": &conv_id_clone }));
+            // Emitting an initial thinking chunk
+            let _ = app_clone.emit("llm:chunk", json!({ "type": "thinking", "content": "\n[本地引擎：正在处理输入 (prefill)，首个 token 可能需要 10~60 秒...]\n", "conv_id": &conv_id_clone }));
             
-            let res = engine.generate(&prompt, 1024, 0.7, |token| {
+            let res = engine.generate(&prompt, 512, 0.7, |token| {
+                token_count += 1;
                 full_response.push_str(&token);
+                
+                // 第一个 token 到来时，替换 thinking 为实际进度
+                if token_count == 1 {
+                    let prefill_secs = inference_start.elapsed().as_secs();
+                    let _ = app_clone.emit("llm:chunk", json!({ "type": "thinking_replace", "content": format!("\n[Prefill 完成 ({}s)，开始生成...]\n", prefill_secs), "conv_id": &conv_id_clone }));
+                }
+                
                 let _ = app_clone.emit("llm:chunk", json!({ "type": "text", "content": token, "conv_id": &conv_id_clone }));
                 Ok(())
             });
             
+            let total_secs = inference_start.elapsed().as_secs();
+            let tps = if total_secs > 0 { token_count as f64 / total_secs as f64 } else { 0.0 };
+            let _ = app_clone.emit("llm:chunk", json!({ "type": "thinking_replace", "content": format!("\n[推理完成：{} tokens, {}s, {:.1} tok/s]\n", token_count, total_secs, tps), "conv_id": &conv_id_clone }));
             let _ = app_clone.emit("llm:chunk", json!({ "type": "done", "content": "", "conv_id": &conv_id_clone }));
             
             match res {

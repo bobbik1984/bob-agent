@@ -584,11 +584,14 @@ async function toggleOfflineEngine() {
     }
   } else {
     // Start memory mount
-    if (!props.config.offlineModelPath) return;
+    if (!props.config.offlineModelPath) {
+      alert('请先下载或选择一个本地模型，然后在主界面切换到该模型后再启动引擎。');
+      return;
+    }
     offlineEngineStatus.value = 'starting';
     try {
       const res = await invoke('start_offline_engine', { modelPath: props.config.offlineModelPath });
-      if (res && res.status === 'running') {
+      if (res && (res.status === 'started' || res.status === 'running')) {
         offlineEngineStatus.value = 'running';
       } else {
         offlineEngineStatus.value = 'stopped';
