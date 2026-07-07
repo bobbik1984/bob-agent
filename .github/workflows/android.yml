@@ -57,7 +57,18 @@ jobs:
             <uses-permission android:name="android.permission.CAMERA"/>\n\
             <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>\n\
             <uses-permission android:name="android.permission.VIBRATE"/>\n\
-            <uses-permission android:name="android.permission.WAKE_LOCK"/>' $MANIFEST
+            <uses-permission android:name="android.permission.WAKE_LOCK"/>\n\
+            <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>' $MANIFEST
+            
+            echo "Setting icon background to white..."
+            COLORS_XML="src-tauri/gen/android/app/src/main/res/values/colors.xml"
+            if [ -f "$COLORS_XML" ]; then
+              sed -i 's/name="ic_launcher_background">.*<\/color>/name="ic_launcher_background">#FFFFFF<\/color>/g' $COLORS_XML
+            fi
+            DRAWABLE_BG="src-tauri/gen/android/app/src/main/res/drawable/ic_launcher_background.xml"
+            if [ -f "$DRAWABLE_BG" ]; then
+              echo '<?xml version="1.0" encoding="utf-8"?><color xmlns:android="http://schemas.android.com/apk/res/android" color="#FFFFFF"/>' > $DRAWABLE_BG
+            fi
             
             # Lock portrait mode in activity
             sed -i '/<activity/a \            android:screenOrientation="portrait"' $MANIFEST
