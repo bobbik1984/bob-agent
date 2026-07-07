@@ -82,13 +82,13 @@ ed25519-dalek = "2.1.1"
 argon2 = "0.5.3"
 tauri-plugin-barcode-scanner = "2"
 reqwest = { version = "0.12.12", default-features = false, features = ["rustls-tls-webpki-roots", "stream", "json"] }
-
-[target.'cfg(not(target_os = "android"))'.dependencies]
 candle-core = "0.11.0"
 candle-nn = "0.11.0"
 candle-transformers = "0.11.0"
-tokenizers = "0.22"
+tokenizers = { version = "0.22", default-features = false, features = ["onig"] }
 anyhow = "1.0"
+
+# candle/tokenizers moved to [dependencies] for cross-platform (incl. Android) support
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.52", features = ["Win32_System_JobObjects", "Win32_Foundation", "Win32_System_Threading", "Win32_Security", "Win32_UI_WindowsAndMessaging", "Win32_System_DataExchange"] }

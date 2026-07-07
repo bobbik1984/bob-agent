@@ -76,6 +76,19 @@ jobs:
             echo "Android project already initialized."
           fi
 
+      - name: Workaround NDK libgcc removal
+        run: |
+          NDK_TOOLCHAIN=$ANDROID_HOME/ndk/27.0.12077973/toolchains/llvm/prebuilt/linux-x86_64
+          # Find the clang resource lib directory for aarch64
+          CLANG_VER=$(ls $NDK_TOOLCHAIN/lib/clang/ | head -1)
+          LIB_DIR="$NDK_TOOLCHAIN/lib/clang/$CLANG_VER/lib/linux/aarch64"
+          if [ -d "$LIB_DIR" ] && [ -f "$LIB_DIR/libunwind.a" ] && [ ! -f "$LIB_DIR/libgcc.a" ]; then
+            cp "$LIB_DIR/libunwind.a" "$LIB_DIR/libgcc.a"
+            echo "Created libgcc.a symlink workaround"
+          else
+            echo "libgcc workaround not needed or dir not found"
+          fi
+
       - name: Build APK
         run: |
           mkdir -p resources/llm-engine
@@ -85,6 +98,9 @@ jobs:
           npx tauri android build --target aarch64
         env:
           NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/27.0.12077973
+          CC_aarch64_linux_android: ${{ env.ANDROID_HOME }}/ndk/27.0.12077973/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android30-clang
+          CXX_aarch64_linux_android: ${{ env.ANDROID_HOME }}/ndk/27.0.12077973/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android30-clang++
+          AR_aarch64_linux_android: ${{ env.ANDROID_HOME }}/ndk/27.0.12077973/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
