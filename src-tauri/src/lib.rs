@@ -309,8 +309,27 @@ fn llm_get_active_models() -> Value {
 }
 
 #[tauri::command]
-fn llm_assign_model_role(model_id: String, role: String) -> Value {
-    llm::assign_model_role(model_id, role)
+fn llm_assign_model_role(app: tauri::AppHandle, model_id: String, role: String) -> Value {
+    let result = llm::assign_model_role(model_id.clone(), role);
+    
+    // [T-2004] Preload if selected model is offline
+    let config = read_config();
+    if let Some(path_str) = config.get("offlineModelPath").and_then(|v| v.as_str()) {
+        let path = std::path::Path::new(path_str);
+        if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+            if stem == model_id {
+                let path_clone = path_str.to_string();
+                tauri::async_runtime::spawn(async move {
+                    use tauri::Manager;
+                    log::info!("Model {} selected, preloading offline engine...", model_id);
+                    let state = app.state::<crate::candle_engine::CandleState>();
+                    let _ = crate::candle_engine::start_offline_engine(path_clone, state).await;
+                });
+            }
+        }
+    }
+    
+    result
 }
 
 #[tauri::command]
@@ -1165,6 +1184,20 @@ pub fn run() {
                 // 延迟 8 秒，让 UI 先加载完毕
                 tokio::time::sleep(std::time::Duration::from_secs(8)).await;
                 llm::refresh_models_on_startup().await;
+
+                // [T-2004] 如果默认模型是离线引擎，或者配置了 offlineModelPath，则进行静默预热
+                let config = read_config();
+                let is_offline_main = config.get("model").and_then(|v| v.as_str()) == Some("offline");
+                let is_offline_clerk = config.get("clerkModel").and_then(|v| v.as_str()) == Some("offline");
+                if is_offline_main || is_offline_clerk {
+                    if let Some(path) = config.get("offlineModelPath").and_then(|v| v.as_str()) {
+                        if !path.is_empty() {
+                            log::info!("Preloading offline engine for path: {}", path);
+                            let state = _refresh_handle.state::<crate::candle_engine::CandleState>();
+                            let _ = crate::candle_engine::start_offline_engine(path.to_string(), state).await;
+                        }
+                    }
+                }
             });
 
             // ── 内置技能库初始化 ──

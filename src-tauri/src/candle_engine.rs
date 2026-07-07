@@ -131,10 +131,25 @@ mod real_engine {
             resolved_path = models_dir.join(file_name);
         }
         
+        if !resolved_path.exists() {
+            let error_msg = format!("模型文件不存在 (Model file not found): {}", resolved_path.display());
+            return Err(error_msg);
+        }
+
         let path = resolved_path.as_path();
         let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
         let parent = path.parent().unwrap_or(std::path::Path::new(""));
-        let tokenizer_path = parent.join(format!("{}_tokenizer.json", stem));
+        
+        let mut tokenizer_path = parent.join(format!("{}_tokenizer.json", stem));
+        if !tokenizer_path.exists() {
+            // Fallback to generic tokenizer
+            let fallback_path = parent.join("default_tokenizer.json");
+            if fallback_path.exists() {
+                tokenizer_path = fallback_path;
+            } else {
+                return Err(format!("找不到分词器文件 (Tokenizer)。请确保与模型同级目录下存在 {}_tokenizer.json 或 default_tokenizer.json", stem));
+            }
+        }
 
         match CandleEngine::new(&resolved_path.to_string_lossy(), &tokenizer_path.to_string_lossy()) {
             Ok(engine) => {
