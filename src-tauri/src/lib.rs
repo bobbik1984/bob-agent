@@ -814,7 +814,7 @@ pub fn run() {
     
     let mut builder = builder
         .manage(crypto::DeviceIdentityState(std::sync::Mutex::new(None)))
-        .manage(sync_engine::DeviceRegistry::default())
+        .manage(std::sync::Arc::new(sync_engine::DeviceRegistry::load()))
         .manage(sidecar::SidecarState {
             child: Mutex::new(None),
         })
@@ -895,6 +895,7 @@ pub fn run() {
             sync_engine::get_connected_devices,
             sync_engine::trigger_mobile_sync,
             sync_engine::write_mobile_outbox,
+            sync_engine::relay_handshake,
             // 系统状态
             system_is_setup_complete,
             web_drop::start_web_drop,
@@ -1245,6 +1246,9 @@ pub fn run() {
                 lan_engine.start_broadcast(3722); // HTTP API public port is 3722
                 // We should store this in app state if we need to stop it later, but for now we let it run
                 app.manage(lan_engine);
+
+                // 启动 Relay WebSocket 监听器
+                sync_engine::start_relay_listener(app.handle().clone());
             }
 
             // ── MCP 扩展引擎 ──

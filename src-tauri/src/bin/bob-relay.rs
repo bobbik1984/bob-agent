@@ -221,7 +221,8 @@ async fn handle_device_session(socket: WebSocket, device_id: String, state: AppS
                             }
                         }
                     }
-                    "notify" => {
+                    "notify" | "ack" => {
+                        let msg_type = incoming.msg_type.clone();
                         if let Some(target_id) = incoming.target_device_id {
                             let target_tx = {
                                 let app_state = state_clone.read().await;
@@ -230,7 +231,7 @@ async fn handle_device_session(socket: WebSocket, device_id: String, state: AppS
                             
                             if let Some(target_tx) = target_tx {
                                 let forward_msg = DeviceOutgoingMessage {
-                                    msg_type: "notify".into(),
+                                    msg_type,
                                     target_device_id: None,
                                     from_device_id: Some(device_id_clone.clone()),
                                     online: None,

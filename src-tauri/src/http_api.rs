@@ -671,11 +671,21 @@ async fn handle_sync_pull(
     headers: axum::http::HeaderMap,
 ) -> impl IntoResponse {
     crate::sync_engine::register_device(&state.app, &headers, addr);
-    // Return PC config.json for now
-    let config = crate::read_config();
+    // Export full sync schema (config + SQLite rows)
+    let sync_data = match crate::sync_engine::export_sync_data(&state.app) {
+        Ok(data) => data,
+        Err(e) => {
+            log::error!("[http_api] Failed to export sync data: {}", e);
+            return axum::Json(serde_json::json!({
+                "status": "error",
+                "message": e
+            }));
+        }
+    };
+
     axum::Json(serde_json::json!({
         "status": "ok",
-        "config": config,
+        "data": sync_data,
         "timestamp": chrono::Utc::now().timestamp()
     }))
 }

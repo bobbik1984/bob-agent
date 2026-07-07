@@ -460,9 +460,15 @@
               </div>
             </div>
             
-            <!-- 右侧二维码 -->
+            <!-- 右侧二维码或成功状态 -->
             <div style="width: 160px; display: flex; flex-direction: column; align-items: center; justify-content: center; background: white; padding: 12px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
-              <qrcode-vue v-if="qrPayload" :value="qrPayload" :size="136" level="M" />
+              <div v-if="pairingSuccessInfo" style="display: flex; flex-direction: column; align-items: center; justify-content: center; width: 136px; height: 136px; background: #e8f5e9; border-radius: 8px;">
+                <div style="background: var(--color-success); border-radius: 50%; width: 48px; height: 48px; display: flex; align-items: center; justify-content: center; margin-bottom: 12px;">
+                  <Check style="color: white;" :size="24" />
+                </div>
+                <span style="color: var(--text-primary); font-size: 13px; font-weight: 600; text-align: center; line-height: 1.3;">已连接<br/><span style="color: var(--text-secondary); font-size: 11px;">{{ pairingSuccessInfo.device_id.substring(0,8) }}...</span></span>
+              </div>
+              <qrcode-vue v-else-if="qrPayload" :value="qrPayload" :size="136" level="M" />
               <div v-else style="width: 136px; height: 136px; display: flex; align-items: center; justify-content: center; background: #f0f0f0; border-radius: 8px;">
                 <span style="color: #999; font-size: 0.8em;">{{ $t('settings.p2p_generating') }}</span>
               </div>
@@ -539,12 +545,18 @@ const handleMobileScan = async () => {
     if (code) {
       try {
         const payload = JSON.parse(code);
-        await window.appAPI.setConfig('pairing_payload', payload);
-        if (window.appAPI.triggerMobileSync) {
-          await window.appAPI.triggerMobileSync(payload);
-          alert("✅ 配对成功! 成功连接到电脑端 Bob。");
-        } else {
-          alert("⚠️ 扫码成功，但未能发起连接。");
+        if (confirm(`发现设备 PC (ID: ${payload.device_id.substring(0, 8)}...)，是否连接并同步？`)) {
+          await window.appAPI.setConfig('pairing_payload', payload);
+          if (window.appAPI.triggerMobileSync) {
+            // First run Relay Handshake
+            if (window.appAPI.relayHandshake) {
+              await window.appAPI.relayHandshake(payload.device_id);
+            }
+            await window.appAPI.triggerMobileSync(payload);
+            alert("✅ 配对与同步成功! 成功连接到电脑端 Bob。");
+          } else {
+            alert("⚠️ 扫码成功，但未能发起连接。");
+          }
         }
       } catch (e) {
         alert("配对失败: " + e);
@@ -576,6 +588,7 @@ const pairingInfo = ref({
   port: 8080,
   relay: ''
 });
+const pairingSuccessInfo = ref(null);
 
 const qrPayload = computed(() => {
   if (!pairingInfo.value.device_id) return '';
@@ -649,9 +662,14 @@ onMounted(async () => {
       fetchConnectedDevices();
       const dev = event.payload;
       if (dev && dev.platform) {
-        alert(`✅ ${dev.platform} 设备已配对`);
+        pairingSuccessInfo.value = dev;
+        setTimeout(() => {
+          showP2pModal.value = false;
+          pairingSuccessInfo.value = null; // reset for next time
+        }, 3000);
+      } else {
+        showP2pModal.value = false;
       }
-      showP2pModal.value = false;
     });
   }
 });
