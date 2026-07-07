@@ -525,7 +525,6 @@
               <Check v-if="agentMode === 'goal'" :size="16" class="text-accent" />
             </button>
           </div>
-          </div>
         </div>
       </transition>
     </Teleport>
