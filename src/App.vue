@@ -286,6 +286,9 @@
       :active-drawer="activeDrawer" 
       @update:active-drawer="activeDrawer = $event" 
     />
+    
+    <!-- 全局对话框 -->
+    <GlobalDialog />
   </div>
 </template>
 
@@ -298,6 +301,7 @@ import KnowledgeGraphView from './views/KnowledgeGraphView.vue';
 import SetupWizard from './components/SetupWizard.vue';
 import QuickNoteOverlay from './components/QuickNoteOverlay.vue';
 import BottomNavigation from './components/BottomNavigation.vue';
+import GlobalDialog from './components/GlobalDialog.vue';
 import { Inbox, Settings, Plus, X, Sun, Moon, ChevronLeft, ChevronRight, ChevronDown, Search, MessageSquare, CalendarDays, Brain, Plug, FolderOpen, Palette, Info, Sunrise, Waypoints, Menu, Smartphone } from 'lucide-vue-next';
 import { useI18n } from 'vue-i18n';
 import { getModelMeta } from '@/composables/useModelSwitcher';

@@ -91,7 +91,17 @@ pub fn init_device_keys(
     fs::write(path, json_str).map_err(|e| e.to_string())?;
 
     // 6. Keep in memory
-    *state.0.lock().unwrap() = Some(signing_key);
+    *state.0.lock().unwrap() = Some(signing_key.clone());
+
+    // 7. Sync to config
+    let verifying_key = VerifyingKey::from(&signing_key);
+    let b64_pub = BASE64.encode(verifying_key.to_bytes());
+    
+    let mut app_config = crate::read_config();
+    if let Some(obj) = app_config.as_object_mut() {
+        obj.insert("device_id".to_string(), serde_json::json!(b64_pub));
+    }
+    crate::write_config(&app_config);
 
     Ok(())
 }
@@ -130,7 +140,18 @@ pub fn unlock_device_keys(
 
     let signing_key = SigningKey::from_bytes(&fixed_key);
 
-    *state.0.lock().unwrap() = Some(signing_key);
+    // Keep in memory
+    *state.0.lock().unwrap() = Some(signing_key.clone());
+    
+    // Sync to config
+    let verifying_key = VerifyingKey::from(&signing_key);
+    let b64_pub = BASE64.encode(verifying_key.to_bytes());
+    
+    let mut app_config = crate::read_config();
+    if let Some(obj) = app_config.as_object_mut() {
+        obj.insert("device_id".to_string(), serde_json::json!(b64_pub));
+    }
+    crate::write_config(&app_config);
 
     Ok(())
 }

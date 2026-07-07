@@ -627,3 +627,23 @@
 - [ ] 配置 Android Keystore 到 GitHub Secrets，实现 APK 的云端自动签名
 - [ ] 配置 Apple P12 证书与 Provisioning Profile 到 GitHub Secrets，跑通 iOS/macOS 的打包
 - [ ] 集成 `softprops/action-gh-release`，自动将全平台产物附加到对应的 GitHub Release 中
+
+---
+
+## 📍 目标 25: 本地推理 GPU 自动适配 (Auto GPU Detection)
+> 🎯 **目标**: PC 端启动时自动探测 GPU 环境，优先使用硬件加速推理，覆盖 NVIDIA/AMD/Intel 全家桶，无 GPU 则 fallback 到 Candle CPU。
+> 📋 **架构**: Android → Candle CPU (现状即最优解) | PC → 运行时探测 → llama.cpp sidecar (CUDA/Vulkan) → Candle CPU 兜底。
+
+### Phase 1: 运行时 GPU 探测
+- [ ] 在 Rust 端新增 `detect_gpu()` 函数，检测系统是否有 NVIDIA (nvidia-smi) / AMD / Intel 独显
+- [ ] 将探测结果写入 config.json 的 `detectedGpu` 字段，前端设置页展示当前硬件信息
+
+### Phase 2: llama.cpp Sidecar 路由
+- [ ] 重构离线推理入口：当检测到 GPU 且 `llm-engine.exe` 存在时，优先走 sidecar 通道
+- [ ] 实现 sidecar 的 HTTP/stdin 通信协议，与 Candle 共用同一套前端事件（`llm:chunk`）
+- [ ] Fallback 逻辑：sidecar 启动失败 → 自动切回 Candle CPU，用户无感
+
+### Phase 3: Candle CUDA 编译选项 (可选)
+- [ ] 在 `Cargo.toml` 中增加 `cuda` feature flag（条件编译）
+- [ ] GitHub Actions 增加 CUDA Toolkit 的 Windows 构建矩阵
+- [ ] `Device::cuda_if_available(0)` 替换硬编码的 `Device::Cpu`

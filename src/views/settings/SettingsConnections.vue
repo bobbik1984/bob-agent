@@ -536,6 +536,10 @@ const emit = defineEmits(['config-changed']);
 
 const isMobile = inject('isMobile', ref(false));
 
+import { useDialog } from '@/composables/useDialog.js';
+
+const { showConfirm, showAlert } = useDialog();
+
 const handleMobileScan = async () => {
   if (window.appAPI?.scanQrCode) {
     document.body.classList.add('scanner-active');
@@ -545,7 +549,8 @@ const handleMobileScan = async () => {
     if (code) {
       try {
         const payload = JSON.parse(code);
-        if (confirm(`发现设备 PC (ID: ${payload.device_id.substring(0, 8)}...)，是否连接并同步？`)) {
+        const confirmed = await showConfirm(`发现设备 PC (ID: ${payload.device_id.substring(0, 8)}...)，是否连接并同步？`);
+        if (confirmed) {
           await window.appAPI.setConfig('pairing_payload', payload);
           if (window.appAPI.triggerMobileSync) {
             // First run Relay Handshake
@@ -553,17 +558,17 @@ const handleMobileScan = async () => {
               await window.appAPI.relayHandshake(payload.device_id);
             }
             await window.appAPI.triggerMobileSync(payload);
-            alert("✅ 配对与同步成功! 成功连接到电脑端 Bob。");
+            await showAlert("✅ 配对与同步成功! 成功连接到电脑端 Bob。");
           } else {
-            alert("⚠️ 扫码成功，但未能发起连接。");
+            await showAlert("⚠️ 扫码成功，但未能发起连接。");
           }
         }
       } catch (e) {
-        alert("配对失败: " + e);
+        await showAlert("配对失败: " + e);
       }
     }
   } else {
-    alert(t('setup.scanner_not_supported') || '当前环境不支持扫码');
+    await showAlert(t('setup.scanner_not_supported') || '当前环境不支持扫码');
   }
 };
 
@@ -608,19 +613,20 @@ const handlePinSubmit = async () => {
     pinInput.value = '';
     await fetchPairingInfo();
   } catch (error) {
-    alert(t('settings.p2p_alert_pin_err') + error);
+    await showAlert(t('settings.p2p_alert_pin_err') + error);
   }
 };
 
 const handleReset = async () => {
-  if (confirm(t('settings.p2p_alert_reset'))) {
+  const confirmed = await showConfirm(t('settings.p2p_alert_reset'));
+  if (confirmed) {
     try {
       await invoke('reset_device_keys');
       isInitialized.value = false;
       isUnlocked.value = false;
       pinInput.value = '';
     } catch (error) {
-      alert(t('settings.p2p_alert_reset_err') + error);
+      await showAlert(t('settings.p2p_alert_reset_err') + error);
     }
   }
 };
