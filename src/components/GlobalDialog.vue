@@ -144,5 +144,8 @@ button {
     color: var(--text-secondary, #d1d5db);
   }
   .btn-secondary {
+    background-color: var(--bg-tertiary, #374151);
+    color: var(--text-secondary, #9ca3af);
+  }
 }
 </style>

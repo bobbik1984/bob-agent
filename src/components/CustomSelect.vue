@@ -13,26 +13,28 @@
       <ChevronDown :size="16" class="dropdown-icon" :class="{ 'rotate-180': isOpen }" style="flex-shrink: 0;" />
     </div>
 
-    <Transition name="dropdown-fade">
-      <ul v-if="isOpen" class="custom-select-options">
-        <li
-          v-for="option in options"
-          :key="option.value"
-          class="custom-select-option"
-          :class="{ 'is-selected': option.value === modelValue, 'is-disabled': option.disabled }"
-          @click="!option.disabled && selectOption(option)"
-        >
-          <slot name="option" :option="option" :label="option.label">
-            {{ option.label }}
-          </slot>
-        </li>
-      </ul>
-    </Transition>
+    <Teleport to="body">
+      <Transition name="dropdown-fade">
+        <ul v-if="isOpen" class="custom-select-options" :style="dropdownStyle">
+          <li
+            v-for="option in options"
+            :key="option.value"
+            class="custom-select-option"
+            :class="{ 'is-selected': option.value === modelValue, 'is-disabled': option.disabled }"
+            @click="!option.disabled && selectOption(option)"
+          >
+            <slot name="option" :option="option" :label="option.label">
+              {{ option.label }}
+            </slot>
+          </li>
+        </ul>
+      </Transition>
+    </Teleport>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue';
 import { ChevronDown } from 'lucide-vue-next';
 import { useI18n } from 'vue-i18n';
 
@@ -46,7 +48,6 @@ const props = defineProps({
   options: {
     type: Array,
     required: true,
-    // [{ label: 'Option 1', value: '1' }]
   }
 });
 
@@ -54,6 +55,7 @@ const emit = defineEmits(['update:modelValue', 'change']);
 
 const isOpen = ref(false);
 const wrapperRef = ref(null);
+const dropdownStyle = ref({});
 
 const selectedOption = computed(() => {
   return props.options.find(opt => opt.value === props.modelValue);
@@ -63,8 +65,26 @@ const selectedLabel = computed(() => {
   return selectedOption.value ? selectedOption.value.label : t('common.please_select');
 });
 
+function updatePosition() {
+  if (wrapperRef.value) {
+    const rect = wrapperRef.value.getBoundingClientRect();
+    dropdownStyle.value = {
+      position: 'fixed',
+      top: `${rect.bottom + 4}px`,
+      left: `${rect.left}px`,
+      width: `${rect.width}px`,
+      zIndex: 9999
+    };
+  }
+}
+
 function toggle() {
   isOpen.value = !isOpen.value;
+  if (isOpen.value) {
+    nextTick(() => {
+      updatePosition();
+    });
+  }
 }
 
 function selectOption(option) {
@@ -74,17 +94,35 @@ function selectOption(option) {
 }
 
 function handleClickOutside(event) {
-  if (wrapperRef.value && !wrapperRef.value.contains(event.target)) {
+  // If clicking on the wrapper, toggle already handled it.
+  if (wrapperRef.value && wrapperRef.value.contains(event.target)) return;
+  
+  // If clicking on the dropdown itself, let it handle the click.
+  const dropdown = document.querySelector('.custom-select-options');
+  if (dropdown && dropdown.contains(event.target)) return;
+  
+  isOpen.value = false;
+}
+
+function handleScroll(e) {
+  // If scroll happens outside the dropdown, close it
+  const dropdown = document.querySelector('.custom-select-options');
+  if (dropdown && dropdown.contains(e.target)) return;
+  if (isOpen.value) {
     isOpen.value = false;
   }
 }
 
 onMounted(() => {
   document.addEventListener('mousedown', handleClickOutside);
+  document.addEventListener('scroll', handleScroll, true);
+  window.addEventListener('resize', handleScroll);
 });
 
 onUnmounted(() => {
   document.removeEventListener('mousedown', handleClickOutside);
+  document.removeEventListener('scroll', handleScroll, true);
+  window.removeEventListener('resize', handleScroll);
 });
 </script>
 

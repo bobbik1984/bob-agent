@@ -55,8 +55,7 @@
           :disabled="isRefreshing"
           :title="$t('model_hub.refresh')"
         >
-          <RefreshCw :size="13" :class="{ 'animate-spin': isRefreshing }" />
-          <span class="refresh-label">{{ isRefreshing ? $t('model_hub.refreshing') : $t('model_hub.refresh') }}</span>
+          <RefreshCw :size="16" :class="{ 'animate-spin': isRefreshing }" />
         </button>
       </div>
       <!-- 供应商变体切换 -->
@@ -97,8 +96,12 @@
             <span class="model-id-tag">{{ m.modelId }}</span>
           </div>
           <div class="model-actions-col">
-            <span v-if="m.id === activeMain" class="role-tag main">{{ $t('model_hub.role_main') }}</span>
-            <span v-if="m.id === activeClerk" class="role-tag clerk">{{ $t('model_hub.role_clerk') }}</span>
+            <span v-if="m.id === activeMain" class="role-tag main" :title="$t('model_hub.role_main')">
+              <Monitor :size="14" />
+            </span>
+            <span v-if="m.id === activeClerk" class="role-tag clerk" :title="$t('model_hub.role_clerk')">
+              <Tractor :size="14" />
+            </span>
           </div>
         </div>
       </div>
@@ -302,7 +305,7 @@ onMounted(async () => {
 
 <style scoped>
 .model-hub {
-  /* Uses parent .settings-section.card styling */
+  overflow: visible !important;
 }
 
 .pool-badge {
@@ -415,10 +418,8 @@ onMounted(async () => {
 }
 
 .provider-select {
-  padding: 4px 8px;
-  height: 28px;
+  flex: 1;
   min-width: 160px;
-  background: var(--bg-primary);
 }
 
 .model-list {
@@ -427,15 +428,10 @@ onMounted(async () => {
 }
 
 .model-list-hint {
-  font-size: var(--text-sm);
-  color: var(--text-primary);
-  padding: 8px 12px;
-  background: color-mix(in srgb, var(--accent-primary) 15%, transparent);
-  border-radius: var(--radius-sm);
-  margin-bottom: var(--space-3);
-  font-weight: 500;
-  display: flex;
-  align-items: center;
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+  padding: 4px 12px 12px 12px;
+  text-align: center;
 }
 
 .model-row {
@@ -507,20 +503,16 @@ onMounted(async () => {
 }
 
 .role-tag {
-  font-size: 10px;
-  padding: 2px 6px;
-  border-radius: 999px;
-  font-weight: 600;
-  letter-spacing: 0.5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 .role-tag.main {
-  background: color-mix(in srgb, var(--accent-primary) 20%, transparent);
   color: var(--accent-primary);
 }
 .role-tag.clerk {
-  background: color-mix(in srgb, var(--accent-primary) 15%, transparent);
   color: var(--accent-primary);
-  opacity: 0.9;
+  opacity: 0.8;
 }
 
 .empty-hint {
@@ -535,16 +527,18 @@ onMounted(async () => {
 .refresh-provider-btn {
   display: flex;
   align-items: center;
-  gap: 4px;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
   margin-left: 8px;
   color: var(--text-secondary);
   font-size: var(--text-xs);
-  transition: color 0.2s;
+  transition: all 0.2s;
   cursor: pointer;
-  background: none;
+  background: var(--bg-primary);
   border: 1px solid var(--border-primary);
   border-radius: var(--radius-sm);
-  padding: 3px 8px;
+  padding: 4px;
 }
 .refresh-provider-btn:hover { color: var(--accent-primary); border-color: var(--accent-primary); }
 .refresh-provider-btn:disabled { opacity: 0.5; cursor: not-allowed; }

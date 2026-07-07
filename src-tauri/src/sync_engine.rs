@@ -373,8 +373,94 @@ async fn do_active_sync(app: AppHandle, payload: SyncCommandPayload) -> Result<(
     }
 
     if !sync_success {
-        error!("[Sync Engine] Failed to connect to any LAN IP. Fallback to relay not yet implemented.");
-        return Err("手机与电脑不在同一局域网(Wi-Fi)内。通过 Relay 中继同步数据的功能正在开发中，请先确保两台设备连接到同一个路由器。".to_string());
+        info!("[Sync Engine] All LAN attempts failed. Falling back to Relay Tunnel.");
+        
+        let config = crate::read_config();
+        let my_device_id = config.get("device_id").and_then(|v| v.as_str()).unwrap_or("unknown").to_string();
+        let relay_url = "wss://relay.bobbik.org".to_string();
+        let ws_url = format!("{}/ws/device/{}", relay_url, my_device_id);
+
+        let (mut ws_stream, _) = connect_async(&ws_url)
+            .await.map_err(|e| format!("LAN and Relay both failed. Relay err: {}", e))?;
+            
+        // Register
+        let reg_msg = serde_json::json!({
+            "type": "register",
+            "deviceId": my_device_id
+        });
+        ws_stream.send(Message::Text(reg_msg.to_string().into())).await.map_err(|e| e.to_string())?;
+
+        // Send pull request
+        let pull_req = serde_json::json!({
+            "type": "proxy",
+            "target_device_id": payload.device_id,
+            "payload": {
+                "action": "pull"
+            }
+        });
+        ws_stream.send(Message::Text(pull_req.to_string().into())).await.map_err(|e| e.to_string())?;
+
+        info!("[Sync Engine] Sent proxy pull request. Waiting for response...");
+
+        let timeout = tokio::time::Duration::from_secs(15);
+        let pull_task = async {
+            while let Some(msg) = ws_stream.next().await {
+                if let Ok(Message::Text(text)) = msg {
+                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
+                        if json.get("type").and_then(|v| v.as_str()) == Some("proxy") {
+                            if let Some(inner_payload) = json.get("payload") {
+                                if inner_payload.get("action").and_then(|v| v.as_str()) == Some("pull_response") {
+                                    if let Some(data_val) = inner_payload.get("data") {
+                                        if let Ok(sync_data) = serde_json::from_value::<SyncData>(data_val.clone()) {
+                                            return Ok(sync_data);
+                                        }
+                                    }
+                                }
+                            }
+                        } else if json.get("type").and_then(|v| v.as_str()) == Some("proxy_error") {
+                            return Err(json.get("message").and_then(|v| v.as_str()).unwrap_or("Proxy error").to_string());
+                        }
+                    }
+                }
+            }
+            Err("Relay connection closed".to_string())
+        };
+
+        match tokio::select! {
+            res = pull_task => res,
+            _ = tokio::time::sleep(timeout) => Err("Relay sync timeout: PC did not respond.".to_string())
+        } {
+            Ok(sync_data) => {
+                info!("[Sync Engine] Successfully pulled sync data via Relay!");
+                if let Err(e) = import_sync_data(&app, sync_data) {
+                    return Err(format!("Failed to import sync data: {}", e));
+                }
+                let _ = app.emit("config:reconciled", serde_json::json!({"applied": 1}));
+            }
+            Err(e) => {
+                return Err(format!("Relay Pull Error: {}", e));
+            }
+        }
+
+        // 2. Push outbox to PC via Relay
+        let outbox_path = get_mobile_outbox_path();
+        if outbox_path.exists() {
+            if let Ok(data) = std::fs::read_to_string(&outbox_path) {
+                if let Ok(mock_outbox) = serde_json::from_str::<serde_json::Value>(&data) {
+                    let push_req = serde_json::json!({
+                        "type": "proxy",
+                        "target_device_id": payload.device_id,
+                        "payload": {
+                            "action": "push",
+                            "data": mock_outbox
+                        }
+                    });
+                    ws_stream.send(Message::Text(push_req.to_string().into())).await.map_err(|e| e.to_string())?;
+                    info!("[Sync Engine] Sent proxy push request. (Ignoring response for now)");
+                    let _ = std::fs::remove_file(&outbox_path);
+                }
+            }
+        }
     }
 
     Ok(())
@@ -405,6 +491,13 @@ pub fn start_relay_listener(app: AppHandle) {
                 Ok((mut ws_stream, _)) => {
                     log::info!("[Sync Engine] Connected to Relay WebSocket: {}", ws_url);
                     
+                    // Explicitly register device ID (fixes NGINX URL stripping bugs)
+                    let reg_msg = serde_json::json!({
+                        "type": "register",
+                        "deviceId": device_id
+                    });
+                    let _ = ws_stream.send(Message::Text(reg_msg.to_string().into())).await;
+
                     while let Some(msg) = ws_stream.next().await {
                         match msg {
                             Ok(Message::Text(text)) => {
@@ -435,6 +528,34 @@ pub fn start_relay_listener(app: AppHandle) {
                                                 "device_id": from_id,
                                                 "platform": "mobile"
                                             }));
+                                        } else if msg_type == "proxy" {
+                                            if let Some(inner_payload) = json.get("payload") {
+                                                let action = inner_payload.get("action").and_then(|v| v.as_str()).unwrap_or("");
+                                                let from_id = json.get("from_device_id").and_then(|v| v.as_str()).unwrap_or("unknown");
+                                                
+                                                if action == "pull" {
+                                                    log::info!("[Sync Engine] Received proxy pull request from {}", from_id);
+                                                    if let Ok(sync_data) = export_sync_data(&app) {
+                                                        let pull_resp = serde_json::json!({
+                                                            "type": "proxy",
+                                                            "target_device_id": from_id,
+                                                            "payload": {
+                                                                "action": "pull_response",
+                                                                "data": sync_data
+                                                            }
+                                                        });
+                                                        let _ = ws_stream.send(Message::Text(pull_resp.to_string().into())).await;
+                                                    }
+                                                } else if action == "push" {
+                                                    log::info!("[Sync Engine] Received proxy push request from {}", from_id);
+                                                    if let Some(data_val) = inner_payload.get("data") {
+                                                        if let Some(arr) = data_val.as_array() {
+                                                            log::info!("[Sync Engine] Pushing {} operations to PC outbox via Relay", arr.len());
+                                                            crate::outbox::write_outbox(arr.clone());
+                                                        }
+                                                    }
+                                                }
+                                            }
                                         }
                                     }
                                 }
