@@ -540,9 +540,14 @@ const handleMobileScan = async () => {
       try {
         const payload = JSON.parse(code);
         await window.appAPI.setConfig('pairing_payload', payload);
-        alert("扫码成功! 成功连接到电脑端 Bob。");
+        if (window.appAPI.triggerMobileSync) {
+          await window.appAPI.triggerMobileSync(payload);
+          alert("✅ 配对成功! 成功连接到电脑端 Bob。");
+        } else {
+          alert("⚠️ 扫码成功，但未能发起连接。");
+        }
       } catch (e) {
-        alert("无效的二维码: " + code);
+        alert("配对失败: " + e);
       }
     }
   } else {
@@ -640,8 +645,13 @@ onMounted(async () => {
   // Existing init code if any
   if (!isMobile.value) {
     await fetchConnectedDevices();
-    unlistenDeviceConnected = await listen('sync:device_connected', () => {
+    unlistenDeviceConnected = await listen('sync:device_connected', (event) => {
       fetchConnectedDevices();
+      const dev = event.payload;
+      if (dev && dev.platform) {
+        alert(`✅ ${dev.platform} 设备已配对`);
+      }
+      showP2pModal.value = false;
     });
   }
 });

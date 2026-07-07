@@ -195,7 +195,7 @@ pub fn get_pairing_payload(
         device_id: b64_pub.clone(),
         public_key: b64_pub,
         local_ips,
-        port: 8080,
+        port: 3722,
         relay: relay.to_string(),
     })
 }

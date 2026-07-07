@@ -544,6 +544,7 @@
 - [x] T-2331: 局域网同步联调 (同一 WiFi，UDP 广播发现 + HTTP 直连)。
 - [x] T-2332: 跨网 WebRTC 打洞联调 (手机 4G + PC WiFi，经 bob-relay 信令 + coturn STUN)。
 - [x] T-2333: Bot 推送唤醒联调 (手机被杀后台 → PC 通过微信 Bot 推送 → 用户打开手机端 → 同步)。
+- [ ] T-2334: 设备列表持久化 (DeviceRegistry 落盘保存，目前为内存 RwLock<HashMap>)。
 
 ---
 

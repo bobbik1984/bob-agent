@@ -55,8 +55,8 @@ pub fn register_device(app: &AppHandle, headers: &axum::http::HeaderMap, ip: std
             ip_address: ip.ip().to_string(),
             last_seen: crate::now_ms(),
         };
-        registry.update_device(device);
-        let _ = app.emit("sync:device_connected", ());
+        registry.update_device(device.clone());
+        let _ = app.emit("sync:device_connected", device);
     }
 }
 
