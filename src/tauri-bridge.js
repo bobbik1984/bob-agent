@@ -635,6 +635,7 @@ window.appAPI = {
   // ── 同步引擎 (Phase 3 Mobile Sync) ──────────
   triggerMobileSync: async (payload) => invoke('trigger_mobile_sync', { payload }),
   writeMobileOutbox: async (operations) => invoke('write_mobile_outbox', { operations }),
+  relayHandshake: async (targetDeviceId) => invoke('relay_handshake', { targetDeviceId }),
 
   // ── 扫码 (Mobile Only) ──────────────────────
   scanQrCode: async () => {

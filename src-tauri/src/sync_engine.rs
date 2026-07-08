@@ -156,24 +156,45 @@ pub async fn write_mobile_outbox(_app: AppHandle, operations: Vec<serde_json::Va
 }
 
 #[command]
-pub async fn relay_handshake(_app: AppHandle, target_device_id: String) -> Result<(), String> {
+pub async fn relay_handshake(app: AppHandle, target_device_id: String) -> Result<(), String> {
     let config = crate::read_config();
     let my_device_id = config.get("device_id").and_then(|v| v.as_str()).unwrap_or("unknown").to_string();
     
     let relay_url = "wss://relay.bobbik.org".to_string();
     let ws_url = format!("{}/ws/device/{}", relay_url, my_device_id);
 
-    let (mut ws_stream, _) = connect_async(&ws_url).await.map_err(|e| format!("Failed to connect to relay: {}", e))?;
+    // ── Stage 3a: Connect to Relay server ──
+    let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_connect", "status": "running"}));
+    let (mut ws_stream, _) = match connect_async(&ws_url).await {
+        Ok(stream) => {
+            let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_connect", "status": "done"}));
+            stream
+        }
+        Err(e) => {
+            let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_connect", "status": "error", "detail": format!("{}", e)}));
+            return Err(format!("Failed to connect to relay: {}", e));
+        }
+    };
     
-    // Send notify
+    // ── Stage 3b: Send notify to PC via Relay ──
+    let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_notify", "status": "running"}));
     let notify = serde_json::json!({
         "type": "notify",
         "target_device_id": target_device_id,
         "payload": {}
     });
-    ws_stream.send(Message::Text(notify.to_string().into())).await.map_err(|e| e.to_string())?;
+    match ws_stream.send(Message::Text(notify.to_string().into())).await {
+        Ok(_) => {
+            let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_notify", "status": "done"}));
+        }
+        Err(e) => {
+            let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_notify", "status": "error", "detail": format!("{}", e)}));
+            return Err(e.to_string());
+        }
+    }
 
-    // Wait for ack with timeout
+    // ── Stage 3c: Wait for PC ack ──
+    let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_ack", "status": "running"}));
     let timeout = tokio::time::Duration::from_secs(10);
     let ack_task = async {
         while let Some(msg) = ws_stream.next().await {
@@ -188,10 +209,19 @@ pub async fn relay_handshake(_app: AppHandle, target_device_id: String) -> Resul
         Err("Connection closed before ack".to_string())
     };
 
-    tokio::select! {
+    match tokio::select! {
         res = ack_task => res,
         _ = tokio::time::sleep(timeout) => {
-            Err("Handshake timeout: PC did not respond. Please ensure PC Bob is open and online.".to_string())
+            Err("Handshake timeout: PC did not respond within 10s.".to_string())
+        }
+    } {
+        Ok(()) => {
+            let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_ack", "status": "done"}));
+            Ok(())
+        }
+        Err(e) => {
+            let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_ack", "status": "error", "detail": &e}));
+            Err(e)
         }
     }
 }
@@ -296,6 +326,9 @@ pub fn import_sync_data(app: &AppHandle, data: SyncData) -> Result<(), String> {
 async fn do_active_sync(app: AppHandle, payload: SyncCommandPayload) -> Result<(), String> {
     info!("[Sync Engine] Starting active sync to device {}", payload.device_id);
     
+    // ── Stage 4: LAN sync ──
+    let _ = app.emit("sync:progress", serde_json::json!({"stage": "lan_sync", "status": "running"}));
+    
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(5))
         .build()
@@ -305,6 +338,7 @@ async fn do_active_sync(app: AppHandle, payload: SyncCommandPayload) -> Result<(
     for ip in &payload.local_ips {
         let base_url = format!("http://{}:{}", ip, payload.port);
         info!("[Sync Engine] Trying LAN IP: {}", base_url);
+        let _ = app.emit("sync:progress", serde_json::json!({"stage": "lan_sync", "status": "running", "detail": format!("尝试 {}", ip)}));
         
         // 1. Pull config from PC
         let pull_url = format!("{}/v1/sync/pull", base_url);
@@ -328,6 +362,7 @@ async fn do_active_sync(app: AppHandle, payload: SyncCommandPayload) -> Result<(
                                 // Emit config reconciled event so UI updates
                                 let _ = app.emit("config:reconciled", serde_json::json!({"applied": 1}));
                                 sync_success = true;
+                                let _ = app.emit("sync:progress", serde_json::json!({"stage": "lan_sync", "status": "done", "detail": format!("通过 {} 同步成功", ip)}));
                             }
                         }
                     } else if let Some(config) = json.get("config") { // Fallback for old PC version
@@ -373,15 +408,24 @@ async fn do_active_sync(app: AppHandle, payload: SyncCommandPayload) -> Result<(
     }
 
     if !sync_success {
+        let _ = app.emit("sync:progress", serde_json::json!({"stage": "lan_sync", "status": "error", "detail": "所有局域网 IP 均不可达"}));
         info!("[Sync Engine] All LAN attempts failed. Falling back to Relay Tunnel.");
+        
+        // ── Stage 5: Relay tunnel sync ──
+        let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_sync", "status": "running", "detail": "连接 Relay 隧道..."}));
         
         let config = crate::read_config();
         let my_device_id = config.get("device_id").and_then(|v| v.as_str()).unwrap_or("unknown").to_string();
         let relay_url = "wss://relay.bobbik.org".to_string();
         let ws_url = format!("{}/ws/device/{}", relay_url, my_device_id);
 
-        let (mut ws_stream, _) = connect_async(&ws_url)
-            .await.map_err(|e| format!("LAN and Relay both failed. Relay err: {}", e))?;
+        let (mut ws_stream, _) = match connect_async(&ws_url).await {
+            Ok(s) => s,
+            Err(e) => {
+                let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_sync", "status": "error", "detail": format!("Relay 连接失败: {}", e)}));
+                return Err(format!("LAN and Relay both failed. Relay err: {}", e));
+            }
+        };
             
         // Register
         let reg_msg = serde_json::json!({
@@ -401,6 +445,7 @@ async fn do_active_sync(app: AppHandle, payload: SyncCommandPayload) -> Result<(
         ws_stream.send(Message::Text(pull_req.to_string().into())).await.map_err(|e| e.to_string())?;
 
         info!("[Sync Engine] Sent proxy pull request. Waiting for response...");
+        let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_sync", "status": "running", "detail": "等待 PC 回传数据..."}));
 
         let timeout = tokio::time::Duration::from_secs(15);
         let pull_task = async {
@@ -433,11 +478,14 @@ async fn do_active_sync(app: AppHandle, payload: SyncCommandPayload) -> Result<(
             Ok(sync_data) => {
                 info!("[Sync Engine] Successfully pulled sync data via Relay!");
                 if let Err(e) = import_sync_data(&app, sync_data) {
+                    let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_sync", "status": "error", "detail": format!("导入数据失败: {}", e)}));
                     return Err(format!("Failed to import sync data: {}", e));
                 }
+                let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_sync", "status": "done"}));
                 let _ = app.emit("config:reconciled", serde_json::json!({"applied": 1}));
             }
             Err(e) => {
+                let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_sync", "status": "error", "detail": &e}));
                 return Err(format!("Relay Pull Error: {}", e));
             }
         }

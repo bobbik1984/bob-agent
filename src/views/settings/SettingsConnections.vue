@@ -511,6 +511,46 @@
       </div>
     </div>
   </Transition>
+
+  <!-- ── Pairing Progress Overlay ── -->
+  <Transition name="modal-fade">
+    <div v-if="showPairingProgress" class="pairing-overlay">
+      <div class="pairing-progress-card">
+        <div class="pairing-progress-header">
+          <span class="pairing-progress-icon">🔗</span>
+          <span>{{ pairingDone ? (pairingError ? '配对失败' : '配对成功!') : '正在配对...' }}</span>
+        </div>
+        <div class="pairing-steps">
+          <div
+            v-for="step in pairingSteps"
+            :key="step.id"
+            class="pairing-step"
+            :class="'step-' + step.status"
+          >
+            <span class="step-indicator">
+              <span v-if="step.status === 'done'" class="step-check">✅</span>
+              <span v-else-if="step.status === 'error'" class="step-cross">❌</span>
+              <span v-else-if="step.status === 'running'" class="step-spinner"></span>
+              <span v-else-if="step.status === 'skipped'" class="step-skip">⏭️</span>
+              <span v-else class="step-pending">○</span>
+            </span>
+            <div class="step-content">
+              <span class="step-label">{{ step.label }}</span>
+              <span v-if="step.detail" class="step-detail">{{ step.detail }}</span>
+            </div>
+          </div>
+        </div>
+        <div class="pairing-progress-footer">
+          <button v-if="pairingDone" class="btn btn-primary-outline" @click="closePairingProgress">
+            关闭
+          </button>
+          <button v-else class="btn btn-secondary-outline" @click="closePairingProgress">
+            取消
+          </button>
+        </div>
+      </div>
+    </div>
+  </Transition>
 </template>
 
 <script setup>
@@ -540,32 +580,132 @@ import { useDialog } from '@/composables/useDialog.js';
 
 const { showConfirm, showAlert } = useDialog();
 
+// ── Pairing Progress Overlay State ──
+const showPairingProgress = ref(false);
+const pairingDone = ref(false);
+const pairingError = ref(false);
+
+const pairingSteps = ref([]);
+
+function initPairingSteps() {
+  pairingSteps.value = [
+    { id: 'parse',         label: '二维码解析',         status: 'pending', detail: '' },
+    { id: 'save_config',   label: '保存配对配置',       status: 'pending', detail: '' },
+    { id: 'relay_connect', label: '连接 Relay 服务器',  status: 'pending', detail: '' },
+    { id: 'relay_notify',  label: 'Relay → 通知 PC',   status: 'pending', detail: '' },
+    { id: 'relay_ack',     label: '等待 PC 回应',       status: 'pending', detail: '' },
+    { id: 'lan_sync',      label: 'LAN 直连同步',       status: 'pending', detail: '' },
+    { id: 'relay_sync',    label: 'Relay 隧道同步',     status: 'pending', detail: '' },
+  ];
+  pairingDone.value = false;
+  pairingError.value = false;
+}
+
+function updateStep(id, status, detail) {
+  const step = pairingSteps.value.find(s => s.id === id);
+  if (step) {
+    step.status = status;
+    if (detail !== undefined) step.detail = detail;
+  }
+}
+
+function closePairingProgress() {
+  showPairingProgress.value = false;
+}
+
 const handleMobileScan = async () => {
   if (window.appAPI?.scanQrCode) {
     document.body.classList.add('scanner-active');
     const code = await window.appAPI.scanQrCode();
     document.body.classList.remove('scanner-active');
     
-    if (code) {
-      try {
-        const payload = JSON.parse(code);
-        const confirmed = await showConfirm(`发现设备 PC (ID: ${payload.device_id.substring(0, 8)}...)，是否连接并同步？`);
-        if (confirmed) {
-          await window.appAPI.setConfig('pairing_payload', payload);
-          if (window.appAPI.triggerMobileSync) {
-            // First run Relay Handshake
-            if (window.appAPI.relayHandshake) {
-              await window.appAPI.relayHandshake(payload.device_id);
-            }
-            await window.appAPI.triggerMobileSync(payload);
-            await showAlert("✅ 配对与同步成功! 成功连接到电脑端 Bob。");
-          } else {
-            await showAlert("⚠️ 扫码成功，但未能发起连接。");
-          }
+    if (!code) return;
+
+    let payload;
+    try {
+      payload = JSON.parse(code);
+    } catch (e) {
+      await showAlert("二维码内容无法解析: " + e);
+      return;
+    }
+
+    const confirmed = await showConfirm(`发现设备 PC (ID: ${payload.device_id.substring(0, 8)}...)，是否连接并同步？`);
+    if (!confirmed) return;
+
+    // Show progress overlay
+    initPairingSteps();
+    showPairingProgress.value = true;
+    updateStep('parse', 'done', '');
+
+    // Listen for Rust-side progress events
+    let unlistenProgress = null;
+    try {
+      unlistenProgress = await listen('sync:progress', (event) => {
+        const { stage, status, detail } = event.payload;
+        updateStep(stage, status, detail || '');
+      });
+    } catch (e) {
+      console.warn('Could not listen to sync:progress events:', e);
+    }
+
+    try {
+      // Step 2: Save config
+      updateStep('save_config', 'running', '');
+      await window.appAPI.setConfig('pairing_payload', payload);
+      updateStep('save_config', 'done', '');
+
+      // Step 3: Relay Handshake (3a/3b/3c are emitted from Rust side)
+      if (window.appAPI.relayHandshake) {
+        updateStep('relay_connect', 'running', '');
+        try {
+          await window.appAPI.relayHandshake(payload.device_id);
+          // Rust events update 3a/3b/3c individually, but ensure all marked done on success
+        } catch (e) {
+          // Rust events already marked the failing sub-step as error
+          pairingDone.value = true;
+          pairingError.value = true;
+          return;
         }
-      } catch (e) {
-        await showAlert("配对失败: " + e);
+      } else {
+        updateStep('relay_connect', 'skipped', '无 Relay 握手接口');
+        updateStep('relay_notify', 'skipped', '');
+        updateStep('relay_ack', 'skipped', '');
       }
+
+      // Step 4 & 5: Data Sync (lan_sync / relay_sync are emitted from Rust side)
+      if (window.appAPI.triggerMobileSync) {
+        updateStep('lan_sync', 'running', '');
+        try {
+          await window.appAPI.triggerMobileSync(payload);
+          // If we got here without error, sync succeeded (LAN or Relay)
+          // Check which one actually succeeded
+          const lanStep = pairingSteps.value.find(s => s.id === 'lan_sync');
+          const relayStep = pairingSteps.value.find(s => s.id === 'relay_sync');
+          if (lanStep.status !== 'done' && relayStep.status !== 'done') {
+            // Fallback: mark lan as done if no events came through (old PC)
+            updateStep('lan_sync', 'done', '');
+          }
+          if (relayStep.status === 'pending') {
+            updateStep('relay_sync', 'skipped', 'LAN 已成功，无需使用');
+          }
+
+          pairingDone.value = true;
+          pairingError.value = false;
+        } catch (e) {
+          pairingDone.value = true;
+          pairingError.value = true;
+          // The specific failing step was already marked by Rust events
+        }
+      } else {
+        updateStep('lan_sync', 'error', '无同步接口');
+        pairingDone.value = true;
+        pairingError.value = true;
+      }
+    } catch (e) {
+      pairingDone.value = true;
+      pairingError.value = true;
+    } finally {
+      if (unlistenProgress) unlistenProgress();
     }
   } else {
     await showAlert(t('setup.scanner_not_supported') || '当前环境不支持扫码');
@@ -1308,4 +1448,118 @@ grid-auto-rows: 1fr;
   border-color: var(--border-subtle) !important;
   box-shadow: none !important;
 }
+/* ── Pairing Progress Overlay ── */
+.pairing-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(4px);
+}
+
+.pairing-progress-card {
+  background: var(--bg-primary);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  padding: 24px;
+  width: 90%;
+  max-width: 360px;
+}
+
+.pairing-progress-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 20px;
+}
+
+.pairing-progress-icon {
+  font-size: 1.3rem;
+}
+
+.pairing-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.pairing-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.step-indicator {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+}
+
+.step-pending {
+  color: var(--text-tertiary);
+  font-size: 12px;
+}
+
+.step-check, .step-cross, .step-skip {
+  font-size: 14px;
+}
+
+.step-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--border-subtle);
+  border-top-color: var(--accent-primary, #3b82f6);
+  border-radius: 50%;
+  animation: pairing-spin 0.8s linear infinite;
+}
+
+@keyframes pairing-spin {
+  to { transform: rotate(360deg); }
+}
+
+.step-content {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.step-label {
+  font-size: 0.9rem;
+  color: var(--text-primary);
+  line-height: 22px;
+}
+
+.step-detail {
+  font-size: 0.75rem;
+  color: var(--text-tertiary);
+  margin-top: 1px;
+  word-break: break-all;
+}
+
+.step-done .step-label { color: var(--text-secondary); }
+.step-error .step-label { color: var(--color-error, #ef4444); }
+.step-error .step-detail { color: var(--color-error, #ef4444); opacity: 0.8; }
+.step-skipped .step-label { color: var(--text-tertiary); text-decoration: line-through; opacity: 0.6; }
+
+.pairing-progress-footer {
+  margin-top: 20px;
+  display: flex;
+  justify-content: center;
+}
+
+.pairing-progress-footer .btn {
+  min-width: 120px;
+  justify-content: center;
+}
+
 </style>
