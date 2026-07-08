@@ -165,7 +165,7 @@ pub async fn relay_handshake(app: AppHandle, target_device_id: String) -> Result
 
     // ── Stage 3a: Connect to Relay server ──
     let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_connect", "status": "running"}));
-    let (mut ws_stream, _) = match tokio::time::timeout(tokio::time::Duration::from_secs(5), connect_async(&ws_url)).await {
+    let (mut ws_stream, _) = match tokio::time::timeout(tokio::time::Duration::from_secs(5), connect_websocket_robust(&ws_url)).await {
         Ok(Ok(stream)) => {
             let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_connect", "status": "done"}));
             stream
@@ -423,7 +423,7 @@ async fn do_active_sync(app: AppHandle, payload: SyncCommandPayload) -> Result<(
         let relay_url = "wss://relay.bobbik.org".to_string();
         let ws_url = format!("{}/ws/device/{}", relay_url, my_device_id);
 
-        let (mut ws_stream, _) = match tokio::time::timeout(tokio::time::Duration::from_secs(5), connect_async(&ws_url)).await {
+        let (mut ws_stream, _) = match tokio::time::timeout(tokio::time::Duration::from_secs(5), connect_websocket_robust(&ws_url)).await {
             Ok(Ok(s)) => s,
             Ok(Err(e)) => {
                 let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_sync", "status": "error", "detail": format!("Relay 连接拒绝: {}", e)}));
@@ -524,6 +524,29 @@ async fn do_active_sync(app: AppHandle, payload: SyncCommandPayload) -> Result<(
 
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
 use futures_util::{StreamExt, SinkExt};
+use tokio::net::TcpStream;
+use tokio_tungstenite::client_async_tls;
+use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+
+async fn connect_websocket_robust(ws_url: &str) -> Result<(tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<TcpStream>>, tokio_tungstenite::tungstenite::handshake::client::Response), String> {
+    let req = ws_url.into_client_request().map_err(|e| e.to_string())?;
+    let host = req.uri().host().ok_or("Invalid websocket host")?;
+    let port = req.uri().port_u16().unwrap_or(if req.uri().scheme_str() == Some("wss") { 443 } else { 80 });
+    let addrs = tokio::net::lookup_host(format!("{}:{}", host, port)).await.map_err(|e| e.to_string())?;
+
+    let mut tcp_stream = None;
+    for addr in addrs {
+        if let Ok(Ok(stream)) = tokio::time::timeout(
+            std::time::Duration::from_secs(2), 
+            TcpStream::connect(addr)
+        ).await {
+            tcp_stream = Some(stream);
+            break;
+        }
+    }
+    let tcp = tcp_stream.ok_or_else(|| "All IPs failed to connect".to_string())?;
+    client_async_tls(req, tcp).await.map_err(|e| e.to_string())
+}
 
 pub fn start_relay_listener(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
@@ -543,7 +566,7 @@ pub fn start_relay_listener(app: AppHandle) {
         let ws_url = format!("{}/ws/device/{}", relay_url, device_id);
 
         loop {
-            match connect_async(&ws_url).await {
+            match connect_websocket_robust(&ws_url).await {
                 Ok((mut ws_stream, _)) => {
                     log::info!("[Sync Engine] Connected to Relay WebSocket: {}", ws_url);
                     
