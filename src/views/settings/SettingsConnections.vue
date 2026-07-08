@@ -661,10 +661,9 @@ const handleMobileScan = async () => {
           await window.appAPI.relayHandshake(payload.device_id);
           // Rust events update 3a/3b/3c individually, but ensure all marked done on success
         } catch (e) {
-          // Rust events already marked the failing sub-step as error
-          pairingDone.value = true;
-          pairingError.value = true;
-          return;
+          // Relay handshake failed. We should NOT return here. 
+          // We must continue to try LAN sync!
+          console.warn('Relay handshake failed, skipping to data sync...', e);
         }
       } else {
         updateStep('relay_connect', 'skipped', '无 Relay 握手接口');
