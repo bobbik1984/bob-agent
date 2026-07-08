@@ -255,7 +255,11 @@ async function openScanner() {
           await window.appAPI.setConfig('pairing_payload', payload);
           console.log('Saved pairing payload:', payload);
           if (window.appAPI.triggerMobileSync) {
-            await window.appAPI.triggerMobileSync(payload);
+            const syncTimeout = new Promise((_, reject) => setTimeout(() => reject(new Error('Sync Timeout')), 15000));
+            await Promise.race([
+              window.appAPI.triggerMobileSync(payload),
+              syncTimeout
+            ]);
           }
         } catch (e) {
           console.error('Invalid QR Code JSON:', code);

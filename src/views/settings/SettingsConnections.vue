@@ -658,12 +658,17 @@ const handleMobileScan = async () => {
       if (window.appAPI.relayHandshake) {
         updateStep('relay_connect', 'running', '');
         try {
-          await window.appAPI.relayHandshake(payload.device_id);
+          const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Relay Timeout')), 5000));
+          await Promise.race([
+            window.appAPI.relayHandshake(payload.device_id),
+            timeoutPromise
+          ]);
           // Rust events update 3a/3b/3c individually, but ensure all marked done on success
         } catch (e) {
           // Relay handshake failed. We should NOT return here. 
           // We must continue to try LAN sync!
           console.warn('Relay handshake failed, skipping to data sync...', e);
+          updateStep('relay_connect', 'error', '连接超时或失败');
         }
       } else {
         updateStep('relay_connect', 'skipped', '无 Relay 握手接口');
@@ -675,7 +680,11 @@ const handleMobileScan = async () => {
       if (window.appAPI.triggerMobileSync) {
         updateStep('lan_sync', 'running', '');
         try {
-          await window.appAPI.triggerMobileSync(payload);
+          const syncTimeout = new Promise((_, reject) => setTimeout(() => reject(new Error('Sync Timeout')), 15000));
+          await Promise.race([
+            window.appAPI.triggerMobileSync(payload),
+            syncTimeout
+          ]);
           // If we got here without error, sync succeeded (LAN or Relay)
           // Check which one actually succeeded
           const lanStep = pairingSteps.value.find(s => s.id === 'lan_sync');
