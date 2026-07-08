@@ -204,7 +204,16 @@ watch(step, async (newStep, oldStep) => {
   }
 });
 
-onUnmounted(() => { if (pollTimer) clearTimeout(pollTimer); });
+onUnmounted(() => { 
+  if (pollTimer) clearTimeout(pollTimer); 
+  // 确保在组件卸载时取消原生的二维码扫描（修复左滑返回卡死的 Bug）
+  if (document.body.classList.contains('scanner-active')) {
+    document.body.classList.remove('scanner-active');
+    if (window.appAPI && window.appAPI.cancelQrCode) {
+      window.appAPI.cancelQrCode();
+    }
+  }
+});
 
 async function toggleWechat() {
   if (enableWechat.value) {

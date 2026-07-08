@@ -657,6 +657,15 @@ window.appAPI = {
       return null;
     }
   },
+  cancelQrCode: async () => {
+    if (!IS_TAURI) return;
+    try {
+      const { cancel } = await import('@tauri-apps/plugin-barcode-scanner');
+      await cancel();
+    } catch (e) {
+      console.error("cancelQrCode error:", e);
+    }
+  },
 
   // Generic invoke passthrough for components that call invoke directly
   invoke: (cmd, args) => invoke(cmd, args || {}),

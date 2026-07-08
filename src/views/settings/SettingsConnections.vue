@@ -832,6 +832,13 @@ onUnmounted(() => {
   if (unlistenDeviceConnected) {
     unlistenDeviceConnected();
   }
+  // 确保在组件卸载时取消原生的二维码扫描（修复左滑返回卡死的 Bug）
+  if (document.body.classList.contains('scanner-active')) {
+    document.body.classList.remove('scanner-active');
+    if (window.appAPI && window.appAPI.cancelQrCode) {
+      window.appAPI.cancelQrCode();
+    }
+  }
 });
 
 // ── Mobile channels ──
