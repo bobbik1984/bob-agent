@@ -1402,13 +1402,11 @@ fn tool_list_dir(path: &str, max_items: usize) -> Value {
     })
 }
 
-/// list_skills — 列出可用技能（从 externalSkillsDir 扫描）
+include!(concat!(env!("OUT_DIR"), "/gen_skills.rs"));
+
+/// list_skills — 列出可用技能
 fn tool_list_skills() -> Value {
     let config = super::read_config();
-    let bundled_dir = config
-        .get("bundledSkillsDir")
-        .and_then(|v| v.as_str())
-        .map(|s| Path::new(s).to_path_buf());
     let external_dir = config
         .get("externalSkillsDir")
         .and_then(|v| v.as_str())
@@ -1416,8 +1414,32 @@ fn tool_list_skills() -> Value {
 
     let mut skills_map = std::collections::HashMap::new();
 
-    let mut load_from_dir = |dir_opt: Option<&std::path::PathBuf>| {
-        if let Some(dir) = dir_opt {
+    // 1. 加载内置技能
+    // 在移动端 (Android/iOS) 平台下，物理文件系统无法访问虚拟 APK 资源，因此使用编译期静态嵌入的数据；
+    // 在桌面端平台下，依然使用动态物理扫描 (支持本地开发调试和实时修改)。
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    {
+        for &(id, bytes) in BUNDLED_SKILLS {
+            let content = String::from_utf8_lossy(bytes);
+            let (name, desc) = parse_skill_frontmatter(&content, id);
+            skills_map.insert(
+                id.to_string(),
+                json!({
+                    "id": id,
+                    "name": name,
+                    "description": desc
+                }),
+            );
+        }
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        let bundled_dir = config
+            .get("bundledSkillsDir")
+            .and_then(|v| v.as_str())
+            .map(|s| Path::new(s).to_path_buf());
+
+        if let Some(dir) = bundled_dir {
             if dir.exists() && dir.is_dir() {
                 if let Ok(entries) = fs::read_dir(dir) {
                     for entry in entries.flatten() {
@@ -1450,11 +1472,42 @@ fn tool_list_skills() -> Value {
                 }
             }
         }
-    };
+    }
 
-    // 先加载内置，再加载外部（外部覆盖内置同名技能）
-    load_from_dir(bundled_dir.as_ref());
-    load_from_dir(external_dir.as_ref());
+    // 2. 加载外部目录（外部覆盖内置同名技能）
+    if let Some(dir) = external_dir {
+        if dir.exists() && dir.is_dir() {
+            if let Ok(entries) = fs::read_dir(dir) {
+                for entry in entries.flatten() {
+                    let p = entry.path();
+                    if !p.is_dir() {
+                        continue;
+                    }
+                    let md = p.join("SKILL.md");
+                    if !md.exists() {
+                        continue;
+                    }
+                    let folder_name = p
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("unknown")
+                        .to_string();
+                    let (name, desc) = match fs::read_to_string(&md) {
+                        Ok(content) => parse_skill_frontmatter(&content, &folder_name),
+                        Err(_) => (folder_name.clone(), String::new()),
+                    };
+                    skills_map.insert(
+                        folder_name.clone(),
+                        json!({
+                            "id": folder_name,
+                            "name": name,
+                            "description": desc
+                        }),
+                    );
+                }
+            }
+        }
+    }
 
     let skills: Vec<Value> = skills_map.into_values().collect();
     json!({ "skills": skills, "count": skills.len() })
@@ -1466,44 +1519,63 @@ fn tool_read_skill(skill_name: &str) -> Value {
         return json!({ "error": "请指定技能名称" });
     }
 
-    // 安全检查：防止路径穿越
     if skill_name.contains("..") || skill_name.contains('/') || skill_name.contains('\\') {
         return json!({ "error": "非法技能名称" });
     }
 
-    let config = super::read_config();
-    let skills_dir = match config.get("externalSkillsDir").and_then(|v| v.as_str()) {
-        Some(dir) => dir.to_string(),
-        None => return json!({ "error": "未配置技能目录 (externalSkillsDir)" }),
-    };
-
-    let skill_md = Path::new(&skills_dir).join(skill_name).join("SKILL.md");
-    if !skill_md.exists() {
-        return json!({ "error": format!("技能 '{}' 不存在", skill_name) });
-    }
-
-    match fs::read_to_string(&skill_md) {
-        Ok(content) => {
-            // 同时检查是否有 references 子目录
-            let refs_dir = Path::new(&skills_dir).join(skill_name).join("references");
-            let mut ref_files: Vec<String> = Vec::new();
-            if refs_dir.exists() {
-                if let Ok(entries) = fs::read_dir(&refs_dir) {
-                    for entry in entries.flatten() {
-                        if let Some(name) = entry.path().file_name().and_then(|n| n.to_str()) {
-                            ref_files.push(name.to_string());
-                        }
-                    }
-                }
-            }
-
-            json!({
+    // 1. 尝试从编译期嵌入的内置技能中读取 (支持移动端/离线)
+    for &(id, bytes) in BUNDLED_SKILLS {
+        if id == skill_name {
+            let content = String::from_utf8_lossy(bytes).into_owned();
+            return json!({
                 "skill_name": skill_name,
                 "content": content,
-                "reference_files": ref_files
-            })
+                "reference_files": Vec::<String>::new()
+            });
         }
-        Err(e) => json!({ "error": format!("读取失败: {}", e) }),
+    }
+
+    // 2. 尝试从本地物理外部目录中读取 (支持运行时动态技能)
+    let config = super::read_config();
+    let mut skill_content = None;
+    let mut ref_files: Vec<String> = Vec::new();
+
+    let dirs_to_try = [
+        config.get("externalSkillsDir").and_then(|v| v.as_str()),
+        config.get("bundledSkillsDir").and_then(|v| v.as_str()),
+    ];
+
+    for dir_opt in dirs_to_try {
+        if let Some(dir_path) = dir_opt {
+            let skill_dir = Path::new(dir_path).join(skill_name);
+            let skill_md = skill_dir.join("SKILL.md");
+            if skill_md.exists() {
+                if let Ok(content) = fs::read_to_string(&skill_md) {
+                    skill_content = Some(content);
+                    let refs_dir = skill_dir.join("references");
+                    if refs_dir.exists() {
+                        if let Ok(entries) = fs::read_dir(&refs_dir) {
+                            for entry in entries.flatten() {
+                                if let Some(name) = entry.path().file_name().and_then(|n| n.to_str()) {
+                                    ref_files.push(name.to_string());
+                                }
+                            }
+                        }
+                    }
+                    break;
+                }
+            }
+        }
+    }
+
+    if let Some(content) = skill_content {
+        json!({
+            "skill_name": skill_name,
+            "content": content,
+            "reference_files": ref_files
+        })
+    } else {
+        json!({ "error": format!("技能 '{}' 不存在或无法读取", skill_name) })
     }
 }
 
