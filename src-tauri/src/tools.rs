@@ -539,14 +539,14 @@ fn get_builtin_tool_schemas() -> Vec<Value> {
             "type": "function",
             "function": {
                 "name": "add_calendar_event",
-                "description": "向用户的日程表（日历）中添加一条新的日程或待办事项。当用户要求你记录日程、安排时间、提醒某事或去某个地方时调用此工具。",
+                "description": "向用户的日程表（日历）中添加一条新的日程或待办事项。警告：必须区分类型。日程(event)必须带有 startTime；待办(todo)绝不能带 startTime。",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "title": { "type": "string", "description": "事件的简短标题" },
-                        "type": { "type": "string", "description": "事件类型：'event'（日程）或 'todo'（待办）", "enum": ["event", "todo"] },
+                        "type": { "type": "string", "description": "事件类型：'event'（网格日历日程）或 'todo'（底部待办列表）", "enum": ["event", "todo"] },
                         "date": { "type": "string", "description": "日期，格式 YYYY-MM-DD" },
-                        "startTime": { "type": "string", "description": "开始时间，格式 HH:MM（可选）" },
+                        "startTime": { "type": "string", "description": "开始时间，格式 HH:MM（24小时制）。注意：'event' 类型此项为必填项；'todo' 类型绝不能填此项！" },
                         "endTime": { "type": "string", "description": "结束时间，格式 HH:MM（可选）" },
                         "description": { "type": "string", "description": "详细描述或补充说明" }
                     },

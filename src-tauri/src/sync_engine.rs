@@ -529,76 +529,24 @@ use tokio_tungstenite::client_async_tls;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 
 async fn connect_websocket_robust(ws_url: &str) -> Result<(tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<TcpStream>>, tokio_tungstenite::tungstenite::handshake::client::Response), String> {
-    let req = ws_url.into_client_request().map_err(|e| e.to_string())?;
-    let host = req.uri().host().ok_or("Invalid websocket host")?;
-    let port = req.uri().port_u16().unwrap_or(if req.uri().scheme_str() == Some("wss") { 443 } else { 80 });
-    let lookup = format!("{}:{}", host, port);
-    let addrs: Vec<std::net::SocketAddr> = tokio::net::lookup_host(&lookup).await.map_err(|e| e.to_string())?.collect();
-
-    // Sort: IPv4 first, then IPv6. This avoids IPv6 blackhole on mobile VPNs.
-    let mut sorted_addrs = addrs.clone();
-    sorted_addrs.sort_by_key(|a| if a.is_ipv4() { 0 } else { 1 });
-
-    log::info!("[WS Robust] Resolved {} addrs for {}: {:?}", sorted_addrs.len(), lookup, sorted_addrs);
-
-    for addr in &sorted_addrs {
-        log::info!("[WS Robust] Trying {} ...", addr);
-        // Step 1: TCP connect with 2s timeout
-        let tcp = match tokio::time::timeout(
-            std::time::Duration::from_secs(2),
-            TcpStream::connect(addr)
-        ).await {
-            Ok(Ok(stream)) => {
-                log::info!("[WS Robust] TCP connected to {}", addr);
-                stream
-            }
-            Ok(Err(e)) => {
-                log::warn!("[WS Robust] TCP connect to {} failed: {}", addr, e);
-                continue;
-            }
-            Err(_) => {
-                log::warn!("[WS Robust] TCP connect to {} timed out (2s)", addr);
-                continue;
-            }
-        };
-
-        // Step 2: TLS + WebSocket upgrade with 3s timeout
-        let req_clone = ws_url.into_client_request().map_err(|e| e.to_string())?;
-        match tokio::time::timeout(
-            std::time::Duration::from_secs(3),
-            client_async_tls(req_clone, tcp)
-        ).await {
-            Ok(Ok(result)) => {
-                log::info!("[WS Robust] WebSocket connected via {}", addr);
-                return Ok(result);
-            }
-            Ok(Err(e)) => {
-                log::warn!("[WS Robust] TLS/WS handshake to {} failed: {}", addr, e);
-                continue;
-            }
-            Err(_) => {
-                log::warn!("[WS Robust] TLS/WS handshake to {} timed out (3s)", addr);
-                continue;
-            }
-        }
-    }
-
-    Err(format!("All {} addresses failed to connect", sorted_addrs.len()))
+    log::info!("[WS Robust] Connecting to {} using standard connect_async", ws_url);
+    tokio_tungstenite::connect_async(ws_url).await.map_err(|e| e.to_string())
 }
 
 pub fn start_relay_listener(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
         // Wait for device identity to be loaded
-        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
-        
-        let config = crate::read_config();
-        let device_id = match config.get("device_id").and_then(|v| v.as_str()) {
-            Some(id) => id.to_string(),
-            None => {
-                log::warn!("[Sync Engine] start_relay_listener: could not get device_id");
-                return;
+        let mut device_id_opt = None;
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+            let config = crate::read_config();
+            if let Some(id) = config.get("device_id").and_then(|v| v.as_str()) {
+                device_id_opt = Some(id.to_string());
+                break;
             }
-        };
+            log::warn!("[Sync Engine] start_relay_listener: could not get device_id, retrying in 3s...");
+        }
+        let device_id = device_id_opt.unwrap();
 
         let relay_url = "wss://relay.bobbik.org".to_string();
         let ws_url = format!("{}/ws/device/{}", relay_url, device_id);

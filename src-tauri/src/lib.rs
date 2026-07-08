@@ -802,6 +802,10 @@ fn system_render_pdf_to_images(path: String) -> Result<Vec<String>, String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // 必须在所有涉及 TLS/HTTPS 的操作之前全局注册 rustls 加密算法提供商
+    // 否则 rustls 0.23+ 在创建 ClientConfig 时会直接 panic
+    rustls::crypto::ring::default_provider().install_default().ok();
+
     let wechat_state = std::sync::Arc::new(wechat::WechatState::new());
 
     let browser_state = std::sync::Arc::new(browser::BrowserState::new());
@@ -1236,7 +1240,7 @@ pub fn run() {
             http_api::start_http_server(app.handle().clone());
 
             // ── Phase 3: 启动局域网 UDP 发现广播 (LAN Sync) ──
-            #[cfg(desktop)]
+            #[cfg(not(mobile))]
             {
                 let device_id = match crypto::get_pairing_payload(app.handle().state::<crypto::DeviceIdentityState>()) {
                     Ok(payload) => payload.device_id,
