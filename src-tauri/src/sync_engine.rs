@@ -532,20 +532,58 @@ async fn connect_websocket_robust(ws_url: &str) -> Result<(tokio_tungstenite::We
     let req = ws_url.into_client_request().map_err(|e| e.to_string())?;
     let host = req.uri().host().ok_or("Invalid websocket host")?;
     let port = req.uri().port_u16().unwrap_or(if req.uri().scheme_str() == Some("wss") { 443 } else { 80 });
-    let addrs = tokio::net::lookup_host(format!("{}:{}", host, port)).await.map_err(|e| e.to_string())?;
+    let lookup = format!("{}:{}", host, port);
+    let addrs: Vec<std::net::SocketAddr> = tokio::net::lookup_host(&lookup).await.map_err(|e| e.to_string())?.collect();
 
-    let mut tcp_stream = None;
-    for addr in addrs {
-        if let Ok(Ok(stream)) = tokio::time::timeout(
-            std::time::Duration::from_secs(2), 
+    // Sort: IPv4 first, then IPv6. This avoids IPv6 blackhole on mobile VPNs.
+    let mut sorted_addrs = addrs.clone();
+    sorted_addrs.sort_by_key(|a| if a.is_ipv4() { 0 } else { 1 });
+
+    log::info!("[WS Robust] Resolved {} addrs for {}: {:?}", sorted_addrs.len(), lookup, sorted_addrs);
+
+    for addr in &sorted_addrs {
+        log::info!("[WS Robust] Trying {} ...", addr);
+        // Step 1: TCP connect with 2s timeout
+        let tcp = match tokio::time::timeout(
+            std::time::Duration::from_secs(2),
             TcpStream::connect(addr)
         ).await {
-            tcp_stream = Some(stream);
-            break;
+            Ok(Ok(stream)) => {
+                log::info!("[WS Robust] TCP connected to {}", addr);
+                stream
+            }
+            Ok(Err(e)) => {
+                log::warn!("[WS Robust] TCP connect to {} failed: {}", addr, e);
+                continue;
+            }
+            Err(_) => {
+                log::warn!("[WS Robust] TCP connect to {} timed out (2s)", addr);
+                continue;
+            }
+        };
+
+        // Step 2: TLS + WebSocket upgrade with 3s timeout
+        let req_clone = ws_url.into_client_request().map_err(|e| e.to_string())?;
+        match tokio::time::timeout(
+            std::time::Duration::from_secs(3),
+            client_async_tls(req_clone, tcp)
+        ).await {
+            Ok(Ok(result)) => {
+                log::info!("[WS Robust] WebSocket connected via {}", addr);
+                return Ok(result);
+            }
+            Ok(Err(e)) => {
+                log::warn!("[WS Robust] TLS/WS handshake to {} failed: {}", addr, e);
+                continue;
+            }
+            Err(_) => {
+                log::warn!("[WS Robust] TLS/WS handshake to {} timed out (3s)", addr);
+                continue;
+            }
         }
     }
-    let tcp = tcp_stream.ok_or_else(|| "All IPs failed to connect".to_string())?;
-    client_async_tls(req, tcp).await.map_err(|e| e.to_string())
+
+    Err(format!("All {} addresses failed to connect", sorted_addrs.len()))
 }
 
 pub fn start_relay_listener(app: AppHandle) {
