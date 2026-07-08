@@ -216,7 +216,7 @@
 4. [Docs] 全面更新开发文档、Changelog 及 progress 记录。
 
 **未完成**:
-- [ ] 思考状态 (streamThinking) 的前端流式动态加载动画。
+- [x] 思考状态 (streamThinking) 的前端流式动态加载动画。
 
 ## 📍 目标 10: 认知与记忆引擎升级 (Phase 2)
 > 🎯 **目标**: 让 Bob 拥有长期记忆能力，理解自己的“人设”，并能主动维护和检索知识库。
@@ -330,44 +330,44 @@
 
 ### Phase 0: 架构断裂修复 (Bug Fix — 最高优先级)
 
-  - [ ] `tauri-bridge.js`: sendChat/sendVision 将 `globalFileAccess`, `agentMode` 透传给 Rust invoke
-  - [ ] `lib.rs`: llm_chat/llm_vision 命令签名新增 `global_file_access: bool`, `agent_mode: String`
-  - [ ] `llm.rs`: stream_internal() 接收并使用这两个参数:
+  - [x] `tauri-bridge.js`: sendChat/sendVision 将 `globalFileAccess`, `agentMode` 透传给 Rust invoke
+  - [x] `lib.rs`: llm_chat/llm_vision 命令签名新增 `global_file_access: bool`, `agent_mode: String`
+  - [x] `llm.rs`: stream_internal() 接收并使用这两个参数:
     - `global_file_access` → 传给 execute_tool() → resolve_write_path()
     - `agent_mode == "yolo"` → system prompt 附加"干活模式"指令
-  - [ ] `tools.rs`: 移除 L1419-1420 的 TODO 硬编码 `let global_file_access = false`
+  - [x] `tools.rs`: 移除 L1419-1420 的 TODO 硬编码 `let global_file_access = false`
 
 ### Phase 1: 文件操作工具集 (Shell-Lite, 5 个新工具)
 
-- [ ] T-1611: **create_directory 工具**
-  - [ ] `tools.rs`: Schema + execute 分支, 使用 `std::fs::create_dir_all()`
-  - [ ] 安全: 复用 `resolve_write_path()` 白名单
+- [x] T-1611: **create_directory 工具**
+  - [x] `tools.rs`: Schema + execute 分支, 使用 `std::fs::create_dir_all()`
+  - [x] 安全: 复用 `resolve_write_path()` 白名单
 
-- [ ] T-1612: **move_file 工具**
-  - [ ] `tools.rs`: Schema + execute 分支, 使用 `std::fs::rename()` + 跨盘降级 copy+delete
-  - [ ] 安全: 源路径需在 tracked_folders 内, 目标路径走 `resolve_write_path()`
+- [x] T-1612: **move_file 工具**
+  - [x] `tools.rs`: Schema + execute 分支, 使用 `std::fs::rename()` + 跨盘降级 copy+delete
+  - [x] 安全: 源路径需在 tracked_folders 内, 目标路径走 `resolve_write_path()`
 
-- [ ] T-1613: **copy_file 工具**
-  - [ ] `tools.rs`: Schema + execute 分支, 使用 `std::fs::copy()`
-  - [ ] 安全: 同 move_file
+- [x] T-1613: **copy_file 工具**
+  - [x] `tools.rs`: Schema + execute 分支, 使用 `std::fs::copy()`
+  - [x] 安全: 同 move_file
 
-- [ ] T-1614: **delete_file 工具 (回收站优先)**
-  - [ ] `Cargo.toml`: 引入 `trash = "5"` 跨平台回收站 crate
-  - [ ] `tools.rs`: Schema + execute 分支, 优先 `trash::delete()`, 降级 `std::fs::remove_file()`
-  - [ ] 安全: 仅允许删除 tracked_folders / workspaceDir 内的文件
+- [x] T-1614: **delete_file 工具 (回收站优先)**
+  - [x] `Cargo.toml`: 引入 `trash = "5"` 跨平台回收站 crate
+  - [x] `tools.rs`: Schema + execute 分支, 优先 `trash::delete()`, 降级 `std::fs::remove_file()`
+  - [x] 安全: 仅允许删除 tracked_folders / workspaceDir 内的文件
 
-- [ ] T-1615: **rename_file 工具**
-  - [ ] `tools.rs`: Schema + execute 分支, 使用 `std::fs::rename()` 同目录内
-  - [ ] 安全: 复用 `resolve_write_path()`
+- [x] T-1615: **rename_file 工具**
+  - [x] `tools.rs`: Schema + execute 分支, 使用 `std::fs::rename()` 同目录内
+  - [x] 安全: 复用 `resolve_write_path()`
 
-- [ ] T-1616: **System Prompt 更新**
-  - [ ] `llm.rs`: 工具列表注释区追加 5 个文件操作工具的描述
+- [x] T-1616: **System Prompt 更新**
+  - [x] `llm.rs`: 工具列表注释区追加 5 个文件操作工具的描述
 
 
 ### Phase 4: 验证
 
-- [ ] T-1641: cargo check + cargo clippy 编译通过
-- [ ] T-1642: 端到端测试 — 对话中"帮我建个文件夹"/"移动文件" 验证
+- [x] T-1641: cargo check + cargo clippy 编译通过
+- [x] T-1642: 端到端测试 — 对话中"帮我建个文件夹"/"移动文件" 验证
 
 ---
 
@@ -377,35 +377,35 @@
 
 ### Phase 0: 数据层 — SQLite 图存储 + Rust 图引擎
 
-- [ ] T-1702: Rust 模块 `kg.rs` — Node/Edge CRUD（insert, upsert, delete）
-- [ ] T-1703: `kg.rs` — BFS 子图查询 `kg_query(term, max_hops)` → 返回 JSON
-- [ ] T-1704: `kg.rs` — 图统计 `kg_get_stats()` → 节点数/边数/类型分布
+- [x] T-1702: Rust 模块 `kg.rs` — Node/Edge CRUD（insert, upsert, delete）
+- [x] T-1703: `kg.rs` — BFS 子图查询 `kg_query(term, max_hops)` → 返回 JSON
+- [x] T-1704: `kg.rs` — 图统计 `kg_get_stats()` → 节点数/边数/类型分布
 
 ### Phase 1: 提取层 — LLM 实体+关系提取
 
-- [ ] T-1711: `kb_indexer.rs` 扩展 — Prompt 追加 relations 字段
-- [ ] T-1712: 索引完成后调用 `kg.rs` 写入节点和边（去重 upsert）
-- [ ] T-1713: `brain_search` 升级 — FTS5 + 图谱子图 RRF 混合
+- [x] T-1711: `kb_indexer.rs` 扩展 — Prompt 追加 relations 字段
+- [x] T-1712: 索引完成后调用 `kg.rs` 写入节点和边（去重 upsert）
+- [x] T-1713: `brain_search` 升级 — FTS5 + 图谱子图 RRF 混合
 
 ### Phase 2: 前端 — KnowledgeGraphView
 
-- [ ] T-1722: `KnowledgeGraphView.vue` — vis.js 力导向图主画布
-- [ ] T-1723: 顶部工具栏 — 搜索框 + 类型筛选 chips + 节点统计
-- [ ] T-1724: 右侧 Inspector 面板 — 节点详情 + 摘要 + 关联列表
-- [ ] T-1725: 侧边栏新增“知识图谱”导航入口
+- [x] T-1722: `KnowledgeGraphView.vue` — vis.js 力导向图主画布
+- [x] T-1723: 顶部工具栏 — 搜索框 + 类型筛选 chips + 节点统计
+- [x] T-1724: 右侧 Inspector 面板 — 节点详情 + 摘要 + 关联列表
+- [x] T-1725: 侧边栏新增“知识图谱”导航入口
 
 ### Phase 3: 流程串联 — 闭合 UX 循环
 
-- [ ] T-1731: KB 构建完成消息添加“查看知识图谱” CTA 按钮
-- [ ] T-1732: 进度消息分三阶段：提取文本 → 生成摘要 → 构建图谱
-- [ ] T-1733: Tool Calling 新增 `query_knowledge_graph` 工具
-- [ ] T-1734: 对话中右键 → “提取到知识图谱”
+- [x] T-1731: KB 构建完成消息添加“查看知识图谱” CTA 按钮
+- [x] T-1732: 进度消息分三阶段：提取文本 → 生成摘要 → 构建图谱
+- [x] T-1733: Tool Calling 新增 `query_knowledge_graph` 工具
+- [x] T-1734: 对话中右键 → “提取到知识图谱”
 
 ### Phase 4: 图谱维护
 
-- [ ] T-1741: Dream V3 — 检测孤立/重复节点，标记 superseded
-- [ ] T-1742: Inspector 支持手动编辑关系
-- [ ] T-1743: 图谱导出（JSON / Markdown）
+- [x] T-1741: Dream V3 — 检测孤立/重复节点，标记 superseded
+- [x] T-1742: Inspector 支持手动编辑关系
+- [x] T-1743: 图谱导出（JSON / Markdown）
 
 ---
 
@@ -495,7 +495,7 @@
 - [ ] T-2221: (M2-01) 移动端布局彻底重构 (底部导航条 Bottom Navigation，完全替换 PC 侧边栏，并锁定竖屏 Portrait 模式，禁止横屏旋转)
 - [ ] T-2222: (M2-02) 避开手机状态栏 (利用 CSS `env(safe-area-inset-top/bottom)` 实现自适应安全区，做到真正的沉浸式且不遮挡电量/时间)
 - [ ] T-2223: (M2-03) 移除或折叠微信、Telegram、Discord 等桌面端专属通道入口 (移动端 Onboarding 中微信步骤替换为"扫码绑定 PC")
-- [ ] T-2224: (M2-04) 修复 Android 桌面图标 — 将 `src-tauri/icons/android/mipmap-*/` 同步覆写到 `src-tauri/gen/android/app/src/main/res/mipmap-*/`，或运行 `npx tauri icon` 重新生成
+- [x] T-2224: (M2-04) 修复 Android 桌面图标 — 将 `src-tauri/icons/android/mipmap-*/` 同步覆写到 `src-tauri/gen/android/app/src/main/res/mipmap-*/`，或运行 `npx tauri icon` 重新生成
 - [ ] T-2225: (M2-05) 聊天视图双层级改造 (默认打开上一个对话记录，支持后退返回全局对话列表)
 - [ ] T-2226: (M2-06) 知识库视图极简改造 (左上角汉堡包按钮等小面积控件，用于切换图谱与知识库状态)
 - [ ] T-2227: (M2-07) 移动端专属 Onboarding 绑定流程 — `SetupWizard.vue` 检测 `isNativeMobile` 后跳过工作间选取 (step 2)，第 4 步替换微信为"扫码绑定 PC"(Tauri 原生 barcode-scanner)。`App.vue` 中 FAB 和 BottomNavigation 加 `v-if="isSetupComplete"` 守卫。
@@ -544,7 +544,7 @@
 - [x] T-2331: 局域网同步联调 (同一 WiFi，UDP 广播发现 + HTTP 直连)。
 - [x] T-2332: 跨网 WebRTC 打洞联调 (手机 4G + PC WiFi，经 bob-relay 信令 + coturn STUN)。
 - [x] T-2333: Bot 推送唤醒联调 (手机被杀后台 → PC 通过微信 Bot 推送 → 用户打开手机端 → 同步)。
-- [ ] T-2334: 设备列表持久化 (DeviceRegistry 落盘保存，目前为内存 RwLock<HashMap>)。
+- [x] T-2334: 设备列表持久化 (DeviceRegistry 落盘保存，目前为内存 RwLock<HashMap>)。
 
 ---
 
@@ -592,16 +592,19 @@
 
 ### 💡 环境变量与凭证清债 (Tech Debt)
 > 根据 `AGENTS.md` 安全红线规范，外部服务 API Key 严禁保留在 `.env` 中
-- [ ] 将 `TAVILY_API_KEY` 和 `TINYFISH_API_KEY` 从 `.env` 迁移至工作区统一的 Credential Store (如 `config.json`)。
+- [x] 将 `TAVILY_API_KEY` 和 `TINYFISH_API_KEY` 从 `.env` 迁移至工作区统一的 Credential Store (如 `config.json`)。
 - [ ] 确保前端 `SettingsModelPanel.vue` 中的“插件/外部服务密钥”输入框能正确双向绑定并覆写旧逻辑。
 
 ### 💡 界面体验清债与输入指令重构（P3，后置）
 - [ ] Slash/Mention Command 智能悬浮补全菜单
 - [ ] Chat 界面增加显性的"📌 作为笔记速记"按钮
+- [ ] **连接中心卡片高度与展示优化**: 强制多端同步、微信、TG、Discord 服务卡片保持等高，避免因“多端同步”展示已连接设备撑大卡片导致其他卡片底部留白过多。
+- [ ] **多端同步状态展示重构**: 改用点亮的手机图标（主题色）表示设备已连接，鼠标悬停时 tooltip 显示具体设备名称，点击图标后弹出设备详情模态框。
+- [ ] **全端设备名称支持**: 在所有终端（包括 PC 和手机等）设置中增加“设备名称”自定义输入区域，以支持跨端的身份识别。
 
 ### 💡 日程交互重构 (T-1801)（P3，后置）
-- [ ] 拖拽事件 (Drag & Drop) 改变日程日期与时间
-- [ ] 拖拽时长 (Resize Event) 改变事件开始/结束时间
+- [ ] 拖拽事件 (Drag & Drop): 允许在日历内将日程拖拽移动到不同的时间，或左右的日期里。
+- [ ] 拖拽时长 (Resize Event): 卡片上下边缘可以直接拖拽延长或者缩短时长，最小调整尺度设为 15 分钟。
 - [ ] 自定义事件弹窗替代原始 `prompt()` 弹窗
 
 ---
