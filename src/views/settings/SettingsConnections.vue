@@ -41,9 +41,16 @@
             </template>
           </div>
           <div v-else style="display: flex; gap: 8px; width: 100%;">
-            <button class="btn btn-primary-outline" style="flex: 1; justify-content: center;" @click="showP2pModal = true">
-              <QrCode :size="16" style="margin-right: 6px;" /> 配对二维码
-            </button>
+            <template v-if="isMobile">
+              <button class="btn btn-primary-outline" style="flex: 1; justify-content: center;" @click="handleMobileScan" title="重新扫码配对">
+                <Scan :size="14" style="margin-right: 6px;" /> 重新扫码
+              </button>
+            </template>
+            <template v-else>
+              <button class="btn btn-primary-outline" style="flex: 1; justify-content: center;" @click="showP2pModal = true">
+                <QrCode :size="16" style="margin-right: 6px;" /> 配对二维码
+              </button>
+            </template>
             <button class="btn btn-danger-outline" style="padding: 8px;" @click="handleReset" :title="$t('settings.p2p_btn_destroy')">
               <X :size="16" />
             </button>
@@ -51,8 +58,10 @@
         </div>
 
         <!-- 已连接设备列表 -->
-        <div v-if="!isMobile && connectedDevices.length > 0" class="service-card-body" style="border-top: 1px solid var(--border-subtle); margin-top: 12px; padding-top: 12px;">
-          <div style="font-size: 12px; font-weight: 500; color: var(--text-secondary); margin-bottom: 8px;">已连接设备</div>
+        <div v-if="connectedDevices.length > 0" class="service-card-body" style="border-top: 1px solid var(--border-subtle); margin-top: 12px; padding-top: 12px;">
+          <div style="font-size: 12px; font-weight: 500; color: var(--text-secondary); margin-bottom: 8px;">
+            {{ isMobile ? '已配对的电脑' : '已连接设备' }}
+          </div>
           <div style="display: flex; flex-direction: column; gap: 8px;">
             <div v-for="dev in connectedDevices" :key="dev.device_id" style="display: flex; justify-content: space-between; align-items: center; background: var(--bg-tertiary); padding: 8px 12px; border-radius: 6px;">
               <div style="display: flex; flex-direction: column; gap: 2px;">
@@ -611,6 +620,13 @@ function updateStep(id, status, detail) {
 
 function closePairingProgress() {
   showPairingProgress.value = false;
+  if (pairingDone.value && !pairingError.value) {
+    fetchConnectedDevices().then(() => {
+      if (isMobile.value && connectedDevices.value.length > 0) {
+        isUnlocked.value = true;
+      }
+    });
+  }
 }
 
 const handleMobileScan = async () => {
@@ -773,6 +789,7 @@ const handleReset = async () => {
       isInitialized.value = false;
       isUnlocked.value = false;
       pinInput.value = '';
+      connectedDevices.value = [];
     } catch (error) {
       await showAlert(t('settings.p2p_alert_reset_err') + error);
     }
@@ -810,8 +827,13 @@ const formatTime = (ts) => {
 
 onMounted(async () => {
   // Existing init code if any
-  if (!isMobile.value) {
-    await fetchConnectedDevices();
+  await fetchConnectedDevices();
+  if (isMobile.value) {
+    // On mobile, bypass PIN lock and mark as unlocked if we have paired devices
+    if (connectedDevices.value.length > 0) {
+      isUnlocked.value = true;
+    }
+  } else {
     unlistenDeviceConnected = await listen('sync:device_connected', (event) => {
       fetchConnectedDevices();
       const dev = event.payload;
@@ -826,6 +848,7 @@ onMounted(async () => {
       }
     });
   }
+  await fetchPairingInfo();
 });
 
 onUnmounted(() => {
