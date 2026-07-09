@@ -1,5 +1,5 @@
 <template>
-  <div class="week-timeline">
+  <div class="week-timeline" @touchstart="handleTouchStart" @touchend="handleTouchEnd">
     <!-- 导航控制栏 -->
     <div class="timeline-header-row">
       <div v-if="isMobile" class="mobile-section-title">
@@ -137,6 +137,34 @@ const emit = defineEmits(['update-time', 'delete-event', 'create-event']);
 
 const weekOffset = ref(0);
 const scrollContainer = ref(null);
+
+// ── 移动端滑动切换上下周 ───────────────────────
+const touchStartX = ref(0);
+const touchStartY = ref(0);
+
+function handleTouchStart(e) {
+  if (isMobile.value && e.touches && e.touches[0]) {
+    touchStartX.value = e.touches[0].clientX;
+    touchStartY.value = e.touches[0].clientY;
+  }
+}
+
+function handleTouchEnd(e) {
+  if (isMobile.value && e.changedTouches && e.changedTouches[0]) {
+    const diffX = e.changedTouches[0].clientX - touchStartX.value;
+    const diffY = e.changedTouches[0].clientY - touchStartY.value;
+    // 阈值检查：水平滑动位移 > 50px 且水平方向主导（比垂直滚动角度更偏向水平，比例 1.8 避开常规垂直滚动）
+    if (Math.abs(diffX) > 50 && Math.abs(diffX) > Math.abs(diffY) * 1.8) {
+      if (diffX > 0) {
+        // 向右滑 -> 返回上一周
+        weekOffset.value--;
+      } else {
+        // 向左滑 -> 进到下一周
+        weekOffset.value++;
+      }
+    }
+  }
+}
 
 // ── UI 常量 ───────────────────────────────────
 const PIXELS_PER_HOUR = 60; // 每小时60px高度
