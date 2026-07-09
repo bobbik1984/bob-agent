@@ -586,6 +586,7 @@
 
 ---
 
+## ⚙️ 遗留系统缺陷与技术债 (Legacy Defects & Tech Debt - Postponed)
 
 ### ⚠️ 微信 CDN 文件传输缺陷（P2，后置）
 > 需深度排查 reqwest 流式分块上传与微信 API 侧限制
@@ -602,6 +603,10 @@
 - [x] 将 `TAVILY_API_KEY` 和 `TINYFISH_API_KEY` 从 `.env` 迁移至工作区统一的 Credential Store (如 `config.json`)。
 - [ ] 确保前端 `SettingsModelPanel.vue` 中的“插件/外部服务密钥”输入框能正确双向绑定并覆写旧逻辑。
 
+---
+
+## 🎨 UI/UX 体验优化与交互适配 (UI/UX & Interactions - Postponed)
+
 ### 💡 界面体验清债与输入指令重构（P3，后置）
 - [ ] Slash/Mention Command 智能悬浮补全菜单
 - [ ] Chat 界面增加显性的"📌 作为笔记速记"按钮
@@ -610,7 +615,7 @@
 - [ ] **全端设备名称支持**: 在所有终端（包括 PC 和手机等）设置中增加“设备名称”自定义输入区域，以支持跨端的身份识别。
 
 ### 💡 日程交互重构 (T-1801)（P3，后置）
-- [ ] 拖拽事件 (Drag & Drop): 允许在日历内将日程拖拽移动到不同的时间，或左右的日期里。
+- [ ] 拖拽事件 (Drag & Drop): 允许在日历内将日程拖拽移动 to 不同的时间，或左右的日期里。
 - [ ] 拖拽时长 (Resize Event): 卡片上下边缘可以直接拖拽延长或者缩短时长，最小调整尺度设为 15 分钟。
 - [ ] 自定义事件弹窗替代原始 `prompt()` 弹窗
 
