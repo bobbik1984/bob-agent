@@ -246,6 +246,8 @@ pub async fn relay_handshake(app: AppHandle, target_device_id: String) -> Result
 pub struct SyncData {
     pub config: serde_json::Value,
     pub settings: Vec<serde_json::Value>,
+    pub conversations: Vec<serde_json::Value>,
+    pub messages: Vec<serde_json::Value>,
     pub events: Vec<serde_json::Value>,
     pub cron_jobs: Vec<serde_json::Value>,
     pub kg_nodes: Vec<serde_json::Value>,
@@ -286,18 +288,22 @@ pub fn export_sync_data(app: &AppHandle) -> Result<SyncData, String> {
     };
 
     let settings = extract("SELECT key, value FROM settings", &["key", "value"]).unwrap_or_default();
-    let events = extract("SELECT id, title, type, status, date_str, start_time, end_time, description, updated_at FROM events", 
-        &["id", "title", "type", "status", "date_str", "start_time", "end_time", "description", "updated_at"]).unwrap_or_default();
-    let cron_jobs = extract("SELECT id, title, cron_expr, command, args, created_at FROM cron_jobs", 
-        &["id", "title", "cron_expr", "command", "args", "created_at"]).unwrap_or_default();
-    let kg_nodes = extract("SELECT id, label, attributes, memory_ids, last_updated FROM kg_nodes", 
-        &["id", "label", "attributes", "memory_ids", "last_updated"]).unwrap_or_default();
-    let kg_edges = extract("SELECT source_id, target_id, relation_type, weight, memory_ids, last_updated FROM kg_edges", 
-        &["source_id", "target_id", "relation_type", "weight", "memory_ids", "last_updated"]).unwrap_or_default();
+    let conversations = extract("SELECT id, title, model, cost, last_message, last_role, created_at, updated_at FROM conversations", 
+        &["id", "title", "model", "cost", "last_message", "last_role", "created_at", "updated_at"]).unwrap_or_default();
+    let messages = extract("SELECT id, conversation_id, role, content, image_base64, created_at, from_channel FROM messages", 
+        &["id", "conversation_id", "role", "content", "image_base64", "created_at", "from_channel"]).unwrap_or_default();
+    let events = extract("SELECT id, title, type, status, date, start_time, end_time, description, created_at, updated_at FROM events", 
+        &["id", "title", "type", "status", "date", "start_time", "end_time", "description", "created_at", "updated_at"]).unwrap_or_default();
+    let cron_jobs = extract("SELECT id, title, cron_expr, prompt_template, enabled, last_run, created_at, updated_at FROM cron_jobs", 
+        &["id", "title", "cron_expr", "prompt_template", "enabled", "last_run", "created_at", "updated_at"]).unwrap_or_default();
+    let kg_nodes = extract("SELECT id, label, node_type, summary, source, metadata, created_at, updated_at FROM kg_nodes", 
+        &["id", "label", "node_type", "summary", "source", "metadata", "created_at", "updated_at"]).unwrap_or_default();
+    let kg_edges = extract("SELECT source_id, target_id, relation, confidence, created_at, updated_at FROM kg_edges", 
+        &["source_id", "target_id", "relation", "confidence", "created_at", "updated_at"]).unwrap_or_default();
     let wiki_fts = extract("SELECT file_name, source_path, wiki_path, summary, keywords, category, indexed_at FROM wiki_fts", 
         &["file_name", "source_path", "wiki_path", "summary", "keywords", "category", "indexed_at"]).unwrap_or_default();
 
-    Ok(SyncData { config, settings, events, cron_jobs, kg_nodes, kg_edges, wiki_fts })
+    Ok(SyncData { config, settings, conversations, messages, events, cron_jobs, kg_nodes, kg_edges, wiki_fts })
 }
 
 pub fn import_sync_data(app: &AppHandle, data: SyncData) -> Result<(), String> {
@@ -330,10 +336,12 @@ pub fn import_sync_data(app: &AppHandle, data: SyncData) -> Result<(), String> {
     };
 
     import_table("settings", data.settings, &["key", "value"]);
-    import_table("events", data.events, &["id", "title", "type", "status", "date_str", "start_time", "end_time", "description", "updated_at"]);
-    import_table("cron_jobs", data.cron_jobs, &["id", "title", "cron_expr", "command", "args", "created_at"]);
-    import_table("kg_nodes", data.kg_nodes, &["id", "label", "attributes", "memory_ids", "last_updated"]);
-    import_table("kg_edges", data.kg_edges, &["source_id", "target_id", "relation_type", "weight", "memory_ids", "last_updated"]);
+    import_table("conversations", data.conversations, &["id", "title", "model", "cost", "last_message", "last_role", "created_at", "updated_at"]);
+    import_table("messages", data.messages, &["id", "conversation_id", "role", "content", "image_base64", "created_at", "from_channel"]);
+    import_table("events", data.events, &["id", "title", "type", "status", "date", "start_time", "end_time", "description", "created_at", "updated_at"]);
+    import_table("cron_jobs", data.cron_jobs, &["id", "title", "cron_expr", "prompt_template", "enabled", "last_run", "created_at", "updated_at"]);
+    import_table("kg_nodes", data.kg_nodes, &["id", "label", "node_type", "summary", "source", "metadata", "created_at", "updated_at"]);
+    import_table("kg_edges", data.kg_edges, &["source_id", "target_id", "relation", "confidence", "created_at", "updated_at"]);
     import_table("wiki_fts", data.wiki_fts, &["file_name", "source_path", "wiki_path", "summary", "keywords", "category", "indexed_at"]);
 
     Ok(())
@@ -375,6 +383,22 @@ async fn do_active_sync(app: AppHandle, payload: SyncCommandPayload) -> Result<(
                             if let Err(e) = import_sync_data(&app, sync_data) {
                                 error!("[Sync Engine] Failed to import sync data: {}", e);
                             } else {
+                                sync_success = true;
+                                
+                                // Also pull skills zip
+                                let skills_url = format!("{}/v1/sync/skills/download", base_url);
+                                let _ = app.emit("sync:progress", serde_json::json!({"stage": "skills_sync", "status": "running"}));
+                                if let Ok(s_resp) = client.get(&skills_url).header("X-Device-Id", &my_device_id).send().await {
+                                    if s_resp.status().is_success() {
+                                        if let Ok(bytes) = s_resp.bytes().await {
+                                            let ext_dir = config.get("externalSkillsDir").and_then(|v| v.as_str()).map(|s| std::path::PathBuf::from(s))
+                                                .unwrap_or_else(|| crate::get_data_dir().join("skills"));
+                                            let _ = crate::skills_sync::unpack_skills(&bytes, &ext_dir);
+                                            info!("[Sync Engine] Successfully pulled and unpacked skills");
+                                        }
+                                    }
+                                }
+
                                 // Emit config reconciled event so UI updates
                                 let _ = app.emit("config:reconciled", serde_json::json!({"applied": 1}));
                                 sync_success = true;

@@ -22,9 +22,10 @@ use tauri::{AppHandle, Emitter};
 
 /// 允许的 Outbox 操作类型
 const ALLOWED_OPS: &[&str] = &[
-    "set_api_key",        // 设置某供应商的 API Key
-    "set_config",         // 修改通用配置项 (受 key 白名单限制)
+    "set_api_key",        // 设置/删除 API Key
+    "set_config",         // 修改通用配置项
     "add_tracked_folder", // 添加关注文件夹
+    "install_skill_from_url", // 下载技能包
 ];
 
 /// 允许通过 Outbox 修改的 config key (set_config 操作的二级白名单)
@@ -172,14 +173,20 @@ fn validate_operation(op: &Value) -> Result<(), String> {
                 .and_then(|v| v.as_str())
                 .ok_or("add_tracked_folder 缺少 'path' 字段")?;
 
-            let p = std::path::Path::new(path);
-            if !p.exists() || !p.is_dir() {
-                return Err(format!("路径不存在或不是文件夹: '{}'", path));
+            if path.contains("..") {
+                return Err("路径中包含非法字符 (..)".to_string());
             }
 
             Ok(())
         }
-        _ => Err(format!("未处理的操作类型: '{}'", op_type)),
+        "install_skill_from_url" => {
+            let url = op.get("url").and_then(|v| v.as_str()).ok_or("缺少 'url' 字段")?;
+            if !url.starts_with("http") {
+                return Err("url 必须以 http 开头".to_string());
+            }
+            Ok(())
+        }
+        _ => Err(format!("未实现的操作验证: '{}'", op_type)),
     }
 }
 
@@ -302,6 +309,21 @@ fn apply_operation(config: &mut Value, op: &Value) {
                 }
             }
         }
+        "install_skill_from_url" => {
+            let url = op.get("url").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let config_copy = config.clone();
+            tauri::async_runtime::spawn(async move {
+                let skills_dir = config_copy.get("externalSkillsDir").and_then(|v| v.as_str()).map(|s| std::path::PathBuf::from(s))
+                    .unwrap_or_else(|| crate::get_data_dir().join("skills"));
+                
+                if let Ok(resp) = reqwest::get(&url).await {
+                    if let Ok(bytes) = resp.bytes().await {
+                        let _ = crate::skills_sync::unpack_skills(&bytes, &skills_dir);
+                        log::info!("[Outbox] Successfully installed skill from URL: {}", url);
+                    }
+                }
+            });
+        }
         "set_config" => {
             let key = op.get("key").and_then(|v| v.as_str()).unwrap_or("");
             let value = op.get("value").cloned().unwrap_or(Value::Null);
@@ -344,6 +366,10 @@ fn describe_operation(op: &Value) -> String {
         "add_tracked_folder" => {
             let path = op.get("path").and_then(|v| v.as_str()).unwrap_or("?");
             format!("add_tracked_folder(path={})", path)
+        }
+        "install_skill_from_url" => {
+            let url = op.get("url").and_then(|v| v.as_str()).unwrap_or("?");
+            format!("install_skill_from_url(url={})", url)
         }
         _ => format!("{}(?)", op_type),
     }

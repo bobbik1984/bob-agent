@@ -6,7 +6,7 @@
     <strong>隐于桌面，使命必达的本地 AI 私人秘书</strong>
   </p>
   <p align="center">
-    <img src="https://img.shields.io/badge/version-v0.4.0-blue?style=flat-square" alt="Version" />
+    <img src="https://img.shields.io/badge/version-v0.6.0-blue?style=flat-square" alt="Version" />
     <img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="License" />
     <img src="https://img.shields.io/badge/platform-Windows_|_Android-0078D6?style=flat-square&logo=windows" alt="Platform" />
     <img src="https://img.shields.io/badge/Tauri-v2-FFC131?style=flat-square&logo=tauri" alt="Tauri v2" />

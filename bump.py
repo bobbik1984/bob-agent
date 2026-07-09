@@ -10,20 +10,20 @@ def update_file(path, pattern, repl):
         print(f"Updated {path}")
 
 # package.json
-update_file('package.json', r'"version": "0.5.1"', '"version": "0.5.2"')
+update_file('package.json', r'"version": "0.6.0"', '"version": "0.6.1"')
 
 # tauri.conf.json
-update_file('src-tauri/tauri.conf.json', r'"version": "0.5.1"', '"version": "0.5.2"')
+update_file('src-tauri/tauri.conf.json', r'"version": "0.6.0"', '"version": "0.6.1"')
 
 # Cargo.toml
-update_file('src-tauri/Cargo.toml', r'version = "0.5.1"', 'version = "0.5.2"')
+update_file('src-tauri/Cargo.toml', r'version = "0.6.0"', 'version = "0.6.1"')
 
 try:
-    update_file('installer/src-tauri/Cargo.toml', r'version = "0.5.1"', 'version = "0.5.2"')
+    update_file('installer/src-tauri/Cargo.toml', r'version = "0.6.0"', 'version = "0.6.1"')
 except FileNotFoundError:
     pass
 
 try:
-    update_file('installer/src-tauri/tauri.conf.json', r'"version": "0.5.1"', '"version": "0.5.2"')
+    update_file('installer/src-tauri/tauri.conf.json', r'"version": "0.6.0"', '"version": "0.6.1"')
 except FileNotFoundError:
     pass

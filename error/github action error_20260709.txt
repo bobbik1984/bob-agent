@@ -1,0 +1,232 @@
+warning: `bob` (lib) generated 81 warnings (run `cargo fix --lib -p bob` to apply 18 suggestions)
+    Finished `release` profile [optimized] target(s) in 10m 25s
+        Info symlinking lib "/home/runner/work/bob-agent/bob-agent/src-tauri/target/aarch64-linux-android/release/libapp_lib.so" in jniLibs dir "/home/runner/work/bob-agent/bob-agent/src-tauri/gen/android/app/src/main/jniLibs/arm64-v8a"
+        Info "/home/runner/work/bob-agent/bob-agent/src-tauri/target/aarch64-linux-android/release/libapp_lib.so" requires shared lib "liblog.so"
+        Info "/home/runner/work/bob-agent/bob-agent/src-tauri/target/aarch64-linux-android/release/libapp_lib.so" requires shared lib "libdl.so"
+        Info "/home/runner/work/bob-agent/bob-agent/src-tauri/target/aarch64-linux-android/release/libapp_lib.so" requires shared lib "libandroid.so"
+        Info "/home/runner/work/bob-agent/bob-agent/src-tauri/target/aarch64-linux-android/release/libapp_lib.so" requires shared lib "libm.so"
+        Info "/home/runner/work/bob-agent/bob-agent/src-tauri/target/aarch64-linux-android/release/libapp_lib.so" requires shared lib "libc.so"
+        Info symlink at "/home/runner/work/bob-agent/bob-agent/src-tauri/gen/android/app/src/main/jniLibs/arm64-v8a/libapp_lib.so" points to "/home/runner/work/bob-agent/bob-agent/src-tauri/target/aarch64-linux-android/release/libapp_lib.so"
+Downloading https://services.gradle.org/distributions/gradle-8.14.3-bin.zip
+.............10%.............20%.............30%.............40%.............50%.............60%.............70%.............80%.............90%..............100%
+w: file:///home/runner/work/bob-agent/bob-agent/src-tauri/gen/android/buildSrc/src/main/java/bob/agent/kotlin/BuildTask.kt:53:17 'exec(Action<in ExecSpec!>): ExecResult' is deprecated. Deprecated in Java
+Checking the license for package Android SDK Platform 36 in /usr/local/lib/android/sdk/licenses
+License for package Android SDK Platform 36 accepted.
+Preparing "Install Android SDK Platform 36 (revision 2)".
+Warning: An error occurred while preparing SDK package Android SDK Platform 36: Error on ZipFile unknown archive.:
+java.io.IOException: Error on ZipFile unknown archive
+	at org.apache.commons.compress.archivers.zip.ZipFile.<init>(ZipFile.java:383)
+	at org.apache.commons.compress.archivers.zip.ZipFile.<init>(ZipFile.java:323)
+	at org.apache.commons.compress.archivers.zip.ZipFile.<init>(ZipFile.java:279)
+	at com.android.repository.util.InstallerUtil.unzip(InstallerUtil.java:101)
+	at com.android.repository.impl.installer.BasicInstaller.doPrepare(BasicInstaller.java:91)
+	at com.android.repository.impl.installer.AbstractPackageOperation.prepare(AbstractPackageOperation.java:340)
+	at com.android.builder.sdk.DefaultSdkLoader.installRemotePackages(DefaultSdkLoader.java:365)
+	at com.android.builder.sdk.DefaultSdkLoader.installTarget(DefaultSdkLoader.java:244)
+	at com.android.builder.sdk.DefaultSdkLoader.getTargetInfo(DefaultSdkLoader.java:161)
+	at com.android.build.gradle.internal.SdkHandler.initTarget(SdkHandler.java:136)
+	at com.android.build.gradle.internal.SdkFullLoadingStrategy.init(SdkFullLoadingStrategy.kt:49)
+	at com.android.build.gradle.internal.SdkFullLoadingStrategy.getBuildToolsInfo(SdkFullLoadingStrategy.kt:74)
+	at com.android.build.gradle.internal.SdkFullLoadingStrategy.getFileFromBuildTool(SdkFullLoadingStrategy.kt:78)
+	at com.android.build.gradle.internal.SdkFullLoadingStrategy.getCoreLambaStubs(SdkFullLoadingStrategy.kt:81)
+	at com.android.build.gradle.internal.SdkLoadingStrategy.getCoreLambaStubs(SdkLoadingStrategy.kt:41)
+	at com.android.build.gradle.internal.SdkComponentsBuildService$VersionedSdkLoader$coreLambdaStubsProvider$1.call(SdkComponents.kt:244)
+	at com.android.build.gradle.internal.SdkComponentsBuildService$VersionedSdkLoader$coreLambdaStubsProvider$1.call(SdkComponents.kt:244)
+	at org.gradle.api.internal.provider.DefaultProvider.calculateOwnValue(DefaultProvider.java:73)
+	at org.gradle.api.internal.provider.AbstractMinimalProvider.calculateValue(AbstractMinimalProvider.java:117)
+	at org.gradle.api.internal.provider.TransformBackedProvider.calculateOwnValue(TransformBackedProvider.java:82)
+	at org.gradle.api.internal.provider.AbstractMinimalProvider.calculateValue(AbstractMinimalProvider.java:117)
+	at org.gradle.api.internal.provider.TransformBackedProvider.calculateOwnValue(TransformBackedProvider.java:82)
+	at org.gradle.api.internal.provider.AbstractMinimalProvider.calculateValue(AbstractMinimalProvider.java:117)
+	at org.gradle.api.internal.provider.DefaultProperty.calculateValueFrom(DefaultProperty.java:158)
+	at org.gradle.api.internal.provider.DefaultProperty.calculateValueFrom(DefaultProperty.java:34)
+	at org.gradle.api.internal.provider.AbstractProperty.doCalculateValue(AbstractProperty.java:172)
+	at org.gradle.api.internal.provider.AbstractProperty.calculateOwnValue(AbstractProperty.java:165)
+	at org.gradle.api.internal.provider.AbstractMinimalProvider.calculateValue(AbstractMinimalProvider.java:117)
+	at org.gradle.api.internal.provider.FlatMapProvider.calculateOwnValue(FlatMapProvider.java:54)
+	at org.gradle.api.internal.provider.AbstractMinimalProvider.calculateOwnPresentValue(AbstractMinimalProvider.java:82)
+	at org.gradle.api.internal.provider.AbstractMinimalProvider.get(AbstractMinimalProvider.java:102)
+	at org.gradle.api.internal.provider.ProviderResolutionStrategy$2.resolve(ProviderResolutionStrategy.java:33)
+	at org.gradle.api.internal.file.collections.ProviderBackedFileCollection.visitDependencies(ProviderBackedFileCollection.java:56)
+	at org.gradle.api.internal.tasks.CachingTaskDependencyResolveContext$TaskGraphImpl.getNodeValues(CachingTaskDependencyResolveContext.java:108)
+	at org.gradle.internal.graph.CachingDirectedGraphWalker$GraphWithEmptyEdges.getNodeValues(CachingDirectedGraphWalker.java:219)
+	at org.gradle.internal.graph.CachingDirectedGraphWalker.doSearch(CachingDirectedGraphWalker.java:127)
+	at org.gradle.internal.graph.CachingDirectedGraphWalker.findValues(CachingDirectedGraphWalker.java:79)
+	at org.gradle.api.internal.tasks.CachingTaskDependencyResolveContext.getDependencies(CachingTaskDependencyResolveContext.java:67)
+	at org.gradle.execution.plan.TaskDependencyResolver.resolveDependenciesFor(TaskDependencyResolver.java:49)
+	at org.gradle.execution.plan.LocalTaskNode.getDependencies(LocalTaskNode.java:151)
+	at org.gradle.execution.plan.LocalTaskNode.resolveDependencies(LocalTaskNode.java:125)
+	at org.gradle.execution.plan.DefaultExecutionPlan.discoverNodeRelationships(DefaultExecutionPlan.java:182)
+	at org.gradle.execution.plan.DefaultExecutionPlan.doAddEntryNodes(DefaultExecutionPlan.java:154)
+	at org.gradle.execution.plan.DefaultExecutionPlan.addEntryTasks(DefaultExecutionPlan.java:129)
+	at org.gradle.execution.plan.DefaultExecutionPlan.addEntryTasks(DefaultExecutionPlan.java:121)
+	at org.gradle.execution.TaskNameResolvingBuildTaskScheduler.scheduleRequestedTasks(TaskNameResolvingBuildTaskScheduler.java:61)
+	at org.gradle.execution.DefaultTasksBuildTaskScheduler.scheduleRequestedTasks(DefaultTasksBuildTaskScheduler.java:72)
+	at org.gradle.initialization.DefaultTaskExecutionPreparer.lambda$scheduleRequestedTasks$0(DefaultTaskExecutionPreparer.java:48)
+	at org.gradle.internal.Factories$1.create(Factories.java:31)
+	at org.gradle.internal.work.DefaultWorkerLeaseService.withReplacedLocks(DefaultWorkerLeaseService.java:359)
+	at org.gradle.api.internal.project.DefaultProjectStateRegistry$DefaultBuildProjectRegistry.withMutableStateOfAllProjects(DefaultProjectStateRegistry.java:239)
+	at org.gradle.api.internal.project.DefaultProjectStateRegistry$DefaultBuildProjectRegistry.withMutableStateOfAllProjects(DefaultProjectStateRegistry.java:232)
+	at org.gradle.initialization.DefaultTaskExecutionPreparer.scheduleRequestedTasks(DefaultTaskExecutionPreparer.java:47)
+	at org.gradle.initialization.VintageBuildModelController.lambda$scheduleRequestedTasks$0(VintageBuildModelController.java:76)
+	at org.gradle.internal.model.StateTransitionController.lambda$inState$1(StateTransitionController.java:99)
+	at org.gradle.internal.model.StateTransitionController.lambda$inState$2(StateTransitionController.java:114)
+	at org.gradle.internal.work.DefaultSynchronizer.withLock(DefaultSynchronizer.java:46)
+	at org.gradle.internal.model.StateTransitionController.inState(StateTransitionController.java:110)
+	at org.gradle.internal.model.StateTransitionController.inState(StateTransitionController.java:98)
+	at org.gradle.initialization.VintageBuildModelController.scheduleRequestedTasks(VintageBuildModelController.java:76)
+	at org.gradle.internal.build.DefaultBuildLifecycleController$DefaultWorkGraphBuilder.addRequestedTasks(DefaultBuildLifecycleController.java:404)
+	at org.gradle.internal.buildtree.DefaultBuildTreeWorkPreparer.lambda$scheduleRequestedTasks$0(DefaultBuildTreeWorkPreparer.java:41)
+	at org.gradle.internal.build.DefaultBuildLifecycleController.lambda$populateWorkGraph$7(DefaultBuildLifecycleController.java:189)
+	at org.gradle.internal.build.DefaultBuildWorkPreparer.populateWorkGraph(DefaultBuildWorkPreparer.java:42)
+	at org.gradle.internal.build.BuildOperationFiringBuildWorkPreparer$PopulateWorkGraph.populateTaskGraph(BuildOperationFiringBuildWorkPreparer.java:106)
+	at org.gradle.internal.build.BuildOperationFiringBuildWorkPreparer$PopulateWorkGraph.run(BuildOperationFiringBuildWorkPreparer.java:92)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner$1.execute(DefaultBuildOperationRunner.java:30)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner$1.execute(DefaultBuildOperationRunner.java:27)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner$2.execute(DefaultBuildOperationRunner.java:67)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner$2.execute(DefaultBuildOperationRunner.java:60)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner.execute(DefaultBuildOperationRunner.java:167)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner.execute(DefaultBuildOperationRunner.java:60)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner.run(DefaultBuildOperationRunner.java:48)
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Could not determine the dependencies of task ':app:minifyUniversalReleaseWithR8'.
+> Failed to install the following SDK components:
+      platforms;android-36 Android SDK Platform 36
+  Install the missing components using the SDK manager in Android Studio.
+
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights.
+> Get more help at https://help.gradle.org.
+
+	at org.gradle.internal.build.BuildOperationFiringBuildWorkPreparer.populateWorkGraph(BuildOperationFiringBuildWorkPreparer.java:67)
+	at org.gradle.internal.build.DefaultBuildLifecycleController.lambda$populateWorkGraph$8(DefaultBuildLifecycleController.java:189)
+	at org.gradle.internal.model.StateTransitionController.lambda$inState$1(StateTransitionController.java:99)
+	at org.gradle.internal.model.StateTransitionController.lambda$inState$2(StateTransitionController.java:114)
+	at org.gradle.internal.work.DefaultSynchronizer.withLock(DefaultSynchronizer.java:46)
+	at org.gradle.internal.model.StateTransitionController.inState(StateTransitionController.java:110)
+	at org.gradle.internal.model.StateTransitionController.inState(StateTransitionController.java:98)
+	at org.gradle.internal.build.DefaultBuildLifecycleController.populateWorkGraph(DefaultBuildLifecycleController.java:189)
+	at org.gradle.internal.build.DefaultBuildWorkGraphController$DefaultBuildWorkGraph.populateWorkGraph(DefaultBuildWorkGraphController.java:169)
+	at org.gradle.composite.internal.DefaultBuildController.populateWorkGraph(DefaultBuildController.java:76)
+	at org.gradle.composite.internal.DefaultIncludedBuildTaskGraph$DefaultBuildTreeWorkGraphBuilder.withWorkGraph(DefaultIncludedBuildTaskGraph.java:153)
+	at org.gradle.internal.buildtree.DefaultBuildTreeWorkPreparer.lambda$scheduleRequestedTasks$1(DefaultBuildTreeWorkPreparer.java:41)
+	at org.gradle.composite.internal.DefaultIncludedBuildTaskGraph$DefaultBuildTreeWorkGraph$1.run(DefaultIncludedBuildTaskGraph.java:209)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner$1.execute(DefaultBuildOperationRunner.java:30)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner$1.execute(DefaultBuildOperationRunner.java:27)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner$2.execute(DefaultBuildOperationRunner.java:67)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner$2.execute(DefaultBuildOperationRunner.java:60)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner.execute(DefaultBuildOperationRunner.java:167)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner.execute(DefaultBuildOperationRunner.java:60)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner.run(DefaultBuildOperationRunner.java:48)
+	at org.gradle.composite.internal.DefaultIncludedBuildTaskGraph$DefaultBuildTreeWorkGraph.scheduleWork(DefaultIncludedBuildTaskGraph.java:204)
+	at org.gradle.internal.buildtree.DefaultBuildTreeWorkPreparer.scheduleRequestedTasks(DefaultBuildTreeWorkPreparer.java:37)
+	at org.gradle.internal.cc.impl.VintageBuildTreeWorkController$scheduleAndRunRequestedTasks$1.apply(VintageBuildTreeWorkController.kt:36)
+	at org.gradle.internal.cc.impl.VintageBuildTreeWorkController$scheduleAndRunRequestedTasks$1.apply(VintageBuildTreeWorkController.kt:35)
+	at org.gradle.composite.internal.DefaultIncludedBuildTaskGraph.withNewWorkGraph(DefaultIncludedBuildTaskGraph.java:112)
+	at org.gradle.internal.cc.impl.VintageBuildTreeWorkController.scheduleAndRunRequestedTasks(VintageBuildTreeWorkController.kt:35)
+	at org.gradle.internal.buildtree.DefaultBuildTreeLifecycleController.lambda$scheduleAndRunTasks$1(DefaultBuildTreeLifecycleController.java:77)
+	at org.gradle.internal.buildtree.DefaultBuildTreeLifecycleController.lambda$runBuild$4(DefaultBuildTreeLifecycleController.java:120)
+	at org.gradle.internal.model.StateTransitionController.lambda$transition$6(StateTransitionController.java:169)
+	at org.gradle.internal.model.StateTransitionController.doTransition(StateTransitionController.java:266)
+	at org.gradle.internal.model.StateTransitionController.lambda$transition$7(StateTransitionController.java:169)
+	at org.gradle.internal.work.DefaultSynchronizer.withLock(DefaultSynchronizer.java:46)
+	at org.gradle.internal.model.StateTransitionController.transition(StateTransitionController.java:169)
+	at org.gradle.internal.buildtree.DefaultBuildTreeLifecycleController.runBuild(DefaultBuildTreeLifecycleController.java:117)
+	at org.gradle.internal.buildtree.DefaultBuildTreeLifecycleController.scheduleAndRunTasks(DefaultBuildTreeLifecycleController.java:77)
+	at org.gradle.internal.buildtree.DefaultBuildTreeLifecycleController.scheduleAndRunTasks(DefaultBuildTreeLifecycleController.java:72)
+	at org.gradle.tooling.internal.provider.ExecuteBuildActionRunner.run(ExecuteBuildActionRunner.java:31)
+	at org.gradle.launcher.exec.ChainingBuildActionRunner.run(ChainingBuildActionRunner.java:35)
+	at org.gradle.internal.buildtree.ProblemReportingBuildActionRunner.run(ProblemReportingBuildActionRunner.java:49)
+	at org.gradle.launcher.exec.BuildOutcomeReportingBuildActionRunner.run(BuildOutcomeReportingBuildActionRunner.java:71)
+	at org.gradle.tooling.internal.provider.FileSystemWatchingBuildActionRunner.run(FileSystemWatchingBuildActionRunner.java:135)
+	at org.gradle.launcher.exec.BuildCompletionNotifyingBuildActionRunner.run(BuildCompletionNotifyingBuildActionRunner.java:41)
+	at org.gradle.launcher.exec.RootBuildLifecycleBuildActionExecutor.lambda$execute$0(RootBuildLifecycleBuildActionExecutor.java:54)
+	at org.gradle.composite.internal.DefaultRootBuildState.run(DefaultRootBuildState.java:130)
+	at org.gradle.launcher.exec.RootBuildLifecycleBuildActionExecutor.execute(RootBuildLifecycleBuildActionExecutor.java:54)
+	at org.gradle.internal.buildtree.InitDeprecationLoggingActionExecutor.execute(InitDeprecationLoggingActionExecutor.java:62)
+	at org.gradle.internal.buildtree.InitProblems.execute(InitProblems.java:36)
+	at org.gradle.internal.buildtree.DefaultBuildTreeContext.execute(DefaultBuildTreeContext.java:40)
+	at org.gradle.launcher.exec.BuildTreeLifecycleBuildActionExecutor.lambda$execute$0(BuildTreeLifecycleBuildActionExecutor.java:71)
+	at org.gradle.internal.buildtree.BuildTreeState.run(BuildTreeState.java:60)
+	at org.gradle.launcher.exec.BuildTreeLifecycleBuildActionExecutor.execute(BuildTreeLifecycleBuildActionExecutor.java:71)
+	at org.gradle.launcher.exec.RunAsBuildOperationBuildActionExecutor$2.call(RunAsBuildOperationBuildActionExecutor.java:67)
+	at org.gradle.launcher.exec.RunAsBuildOperationBuildActionExecutor$2.call(RunAsBuildOperationBuildActionExecutor.java:63)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner$CallableBuildOperationWorker.execute(DefaultBuildOperationRunner.java:210)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner$CallableBuildOperationWorker.execute(DefaultBuildOperationRunner.java:205)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner$2.execute(DefaultBuildOperationRunner.java:67)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner$2.execute(DefaultBuildOperationRunner.java:60)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner.execute(DefaultBuildOperationRunner.java:167)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner.execute(DefaultBuildOperationRunner.java:60)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner.call(DefaultBuildOperationRunner.java:54)
+	at org.gradle.launcher.exec.RunAsBuildOperationBuildActionExecutor.execute(RunAsBuildOperationBuildActionExecutor.java:63)
+	at org.gradle.launcher.exec.RunAsWorkerThreadBuildActionExecutor.lambda$execute$0(RunAsWorkerThreadBuildActionExecutor.java:36)
+	at org.gradle.internal.work.DefaultWorkerLeaseService.withLocks(DefaultWorkerLeaseService.java:263)
+	at org.gradle.internal.work.DefaultWorkerLeaseService.runAsWorkerThread(DefaultWorkerLeaseService.java:127)
+	at org.gradle.launcher.exec.RunAsWorkerThreadBuildActionExecutor.execute(RunAsWorkerThreadBuildActionExecutor.java:36)
+	at org.gradle.tooling.internal.provider.continuous.ContinuousBuildActionExecutor.execute(ContinuousBuildActionExecutor.java:110)
+	at org.gradle.tooling.internal.provider.SubscribableBuildActionExecutor.execute(SubscribableBuildActionExecutor.java:64)
+	at org.gradle.internal.session.DefaultBuildSessionContext.execute(DefaultBuildSessionContext.java:46)
+	at org.gradle.internal.buildprocess.execution.BuildSessionLifecycleBuildActionExecutor$ActionImpl.apply(BuildSessionLifecycleBuildActionExecutor.java:92)
+	at org.gradle.internal.buildprocess.execution.BuildSessionLifecycleBuildActionExecutor$ActionImpl.apply(BuildSessionLifecycleBuildActionExecutor.java:80)
+	at org.gradle.internal.session.BuildSessionState.run(BuildSessionState.java:73)
+	at org.gradle.internal.buildprocess.execution.BuildSessionLifecycleBuildActionExecutor.execute(BuildSessionLifecycleBuildActionExecutor.java:62)
+	at org.gradle.internal.buildprocess.execution.BuildSessionLifecycleBuildActionExecutor.execute(BuildSessionLifecycleBuildActionExecutor.java:41)
+	at org.gradle.internal.buildprocess.execution.StartParamsValidatingActionExecutor.execute(StartParamsValidatingActionExecutor.java:64)
+	at org.gradle.internal.buildprocess.execution.StartParamsValidatingActionExecutor.execute(StartParamsValidatingActionExecutor.java:32)
+	at org.gradle.internal.buildprocess.execution.SessionFailureReportingActionExecutor.execute(SessionFailureReportingActionExecutor.java:51)
+	at org.gradle.internal.buildprocess.execution.SessionFailureReportingActionExecutor.execute(SessionFailureReportingActionExecutor.java:39)
+	at org.gradle.internal.buildprocess.execution.SetupLoggingActionExecutor.execute(SetupLoggingActionExecutor.java:47)
+	at org.gradle.internal.buildprocess.execution.SetupLoggingActionExecutor.execute(SetupLoggingActionExecutor.java:31)
+	at org.gradle.launcher.daemon.server.exec.ExecuteBuild.doBuild(ExecuteBuild.java:70)
+	at org.gradle.launcher.daemon.server.exec.BuildCommandOnly.execute(BuildCommandOnly.java:37)
+	at org.gradle.launcher.daemon.server.api.DaemonCommandExecution.proceed(DaemonCommandExecution.java:104)
+	at org.gradle.launcher.daemon.server.exec.WatchForDisconnection.execute(WatchForDisconnection.java:39)
+	at org.gradle.launcher.daemon.server.api.DaemonCommandExecution.proceed(DaemonCommandExecution.java:104)
+	at org.gradle.launcher.daemon.server.exec.ResetDeprecationLogger.execute(ResetDeprecationLogger.java:29)
+	at org.gradle.launcher.daemon.server.api.DaemonCommandExecution.proceed(DaemonCommandExecution.java:104)
+	at org.gradle.launcher.daemon.server.exec.RequestStopIfSingleUsedDaemon.execute(RequestStopIfSingleUsedDaemon.java:35)
+	at org.gradle.launcher.daemon.server.api.DaemonCommandExecution.proceed(DaemonCommandExecution.java:104)
+	at org.gradle.launcher.daemon.server.exec.ForwardClientInput.lambda$execute$0(ForwardClientInput.java:40)
+	at org.gradle.internal.daemon.clientinput.ClientInputForwarder.forwardInput(ClientInputForwarder.java:80)
+	at org.gradle.launcher.daemon.server.exec.ForwardClientInput.execute(ForwardClientInput.java:37)
+	at org.gradle.launcher.daemon.server.api.DaemonCommandExecution.proceed(DaemonCommandExecution.java:104)
+	at org.gradle.launcher.daemon.server.exec.LogAndCheckHealth.execute(LogAndCheckHealth.java:64)
+	at org.gradle.launcher.daemon.server.api.DaemonCommandExecution.proceed(DaemonCommandExecution.java:104)
+	at org.gradle.launcher.daemon.server.exec.LogToClient.doBuild(LogToClient.java:63)
+	at org.gradle.launcher.daemon.server.exec.BuildCommandOnly.execute(BuildCommandOnly.java:37)
+	at org.gradle.launcher.daemon.server.api.DaemonCommandExecution.proceed(DaemonCommandExecution.java:104)
+	at org.gradle.launcher.daemon.server.exec.EstablishBuildEnvironment.doBuild(EstablishBuildEnvironment.java:84)
+	at org.gradle.launcher.daemon.server.exec.BuildCommandOnly.execute(BuildCommandOnly.java:37)
+	at org.gradle.launcher.daemon.server.api.DaemonCommandExecution.proceed(DaemonCommandExecution.java:104)
+	at org.gradle.launcher.daemon.server.exec.StartBuildOrRespondWithBusy$1.run(StartBuildOrRespondWithBusy.java:52)
+	at org.gradle.launcher.daemon.server.DaemonStateCoordinator.lambda$runCommand$0(DaemonStateCoordinator.java:321)
+	at org.gradle.internal.concurrent.ExecutorPolicy$CatchAndRecordFailures.onExecute(ExecutorPolicy.java:64)
+	at org.gradle.internal.concurrent.AbstractManagedExecutor$1.run(AbstractManagedExecutor.java:48)
+	at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1136)
+	at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:635)
+	at java.base/java.lang.Thread.run(Thread.java:840)
+Caused by: java.util.zip.ZipException: Archive is not a ZIP archive
+	at org.apache.commons.compress.archivers.zip.ZipFile.positionAtEndOfCentralDirectoryRecord(ZipFile.java:1221)
+	at org.apache.commons.compress.archivers.zip.ZipFile.positionAtCentralDirectory(ZipFile.java:1097)
+	at org.apache.commons.compress.archivers.zip.ZipFile.populateFromCentralDirectory(ZipFile.java:713)
+	at org.apache.commons.compress.archivers.zip.ZipFile.<init>(ZipFile.java:376)
+	... 179 more
+"Install Android SDK Platform 36 (revision 2)" failed.
+
+[Incubating] Problems report is available at: file:///home/runner/work/bob-agent/bob-agent/src-tauri/gen/android/build/reports/problems/problems-report.html
+
+Deprecated Gradle features were used in this build, making it incompatible with Gradle 9.0.
+
+You can use '--warning-mode all' to show the individual deprecation warnings and determine if they come from your own scripts or plugins.
+
+For more on this, please refer to https://docs.gradle.org/8.14.3/userguide/command_line_interface.html#sec:command_line_warnings in the Gradle documentation.
+BUILD FAILED in 1m 40s
+failed to build APK: Failed to assemble APK with Io(BeforeSpawn(<closure>), Io(StderrFile(OwnedFd { fd: 24 }), Io(StdoutFile(OwnedFd { fd: 23 }), Io(StdinFile(OwnedFd { fd: 22 }), Io(Env("CARGO_TARGET_ARMV7_LINUX_ANDROIDEABI_RUSTFLAGS", "-Clink-arg=-landroid -Clink-arg=-llog -Clink-arg=-lOpenSLES"), Io(Env("TAURI_CLI_VERBOSITY", "0"), Io(Env("TAURI_ANDROID_PROJECT_PATH", "/home/runner/work/bob-agent/bob-agent/src-tauri/gen/android"), Io(Env("CARGO_TARGET_AARCH64_LINUX_ANDROID_RUSTFLAGS", "-Clink-arg=-landroid -Clink-arg=-llog -Clink-arg=-lOpenSLES"), Io(Env("WRY_ANDROID_PACKAGE", "bob.agent"), Io(Env("ANDROID_HOME", "/usr/local/lib/android/sdk"), Io(Env("HOME", "/home/runner"), Io(Env("CARGO_TARGET_X86_64_LINUX_ANDROID_LINKER", "/usr/local/lib/android/sdk/ndk/27.0.12077973/toolchains/llvm/prebuilt/linux-x86_64/bin/x86_64-linux-android24-clang"), Io(Env("WRY_ANDROID_KOTLIN_FILES_OUT_DIR", "/home/runner/work/bob-agent/bob-agent/src-tauri/gen/android/app/src/main/java/bob/agent/generated"), Io(Env("CARGO_INCREMENTAL", "0"), Io(Env("CARGO_TARGET_I686_LINUX_ANDROID_RUSTFLAGS", "-Clink-arg=-landroid -Clink-arg=-llog -Clink-arg=-lOpenSLES"), Io(Env("TAURI_ANDROID_PACKAGE_UNESCAPED", "bob.agent"), Io(Env("WRY_ANDROID_LIBRARY", "app_lib"), Io(Env("RUST_LOG_STYLE", "always"), Io(Env("CARGO_TARGET_I686_LINUX_ANDROID_LINKER", "/usr/local/lib/android/sdk/ndk/27.0.12077973/toolchains/llvm/prebuilt/linux-x86_64/bin/i686-linux-android24-clang"), Io(Env("CARGO_HOME", "/home/runner/.cargo"), Io(Env("CARGO_TERM_COLOR", "always"), Io(Env("CARGO_TARGET_X86_64_LINUX_ANDROID_RUSTFLAGS", "-Clink-arg=-landroid -Clink-arg=-llog -Clink-arg=-lOpenSLES"), Io(Env("NDK_HOME", "/usr/local/lib/android/sdk/ndk/27.0.12077973"), Io(Env("PATH", "/home/runner/work/bob-agent/bob-agent/node_modules/.bin:/home/runner/work/bob-agent/bob-agent/node_modules/.bin:/home/runner/work/bob-agent/node_modules/.bin:/home/runner/work/node_modules/.bin:/home/runner/node_modules/.bin:/home/node_modules/.bin:/node_modules/.bin:/opt/hostedtoolcache/node/20.20.2/x64/lib/node_modules/npm/node_modules/@npmcli/run-script/lib/node-gyp-bin:/usr/local/lib/android/sdk/platform-tools:/usr/local/lib/android/sdk/cmdline-tools/16.0/bin:/opt/hostedtoolcache/Java_Zulu_jdk/17.0.19-10/x64/bin:/opt/hostedtoolcache/node/20.20.2/x64/bin:/snap/bin:/home/runner/.local/bin:/opt/pipx_bin:/home/runner/.cargo/bin:/home/runner/.config/composer/vendor/bin:/usr/local/.ghcup/bin:/home/runner/.dotnet/tools:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin"), Io(Env("CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER", "/usr/local/lib/android/sdk/ndk/27.0.12077973/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android24-clang"), Io(Env("CARGO_TARGET_ARMV7_LINUX_ANDROIDEABI_LINKER", "/usr/local/lib/android/sdk/ndk/27.0.12077973/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi24-clang"), Cmd(["/home/runner/work/bob-agent/bob-agent/src-tauri/gen/android/gradlew", "--project-dir", "/home/runner/work/bob-agent/bob-agent/src-tauri/gen/android"]))))))))))))))))))))))))))): command ["/home/runner/work/bob-agent/bob-agent/src-tauri/gen/android/gradlew", "--project-dir", "/home/runner/work/bob-agent/bob-agent/src-tauri/gen/android"] exited with code 1
+       Error failed to build APK: Failed to assemble APK with Io(BeforeSpawn(<closure>), Io(StderrFile(OwnedFd { fd: 24 }), Io(StdoutFile(OwnedFd { fd: 23 }), Io(StdinFile(OwnedFd { fd: 22 }), Io(Env("CARGO_TARGET_ARMV7_LINUX_ANDROIDEABI_RUSTFLAGS", "-Clink-arg=-landroid -Clink-arg=-llog -Clink-arg=-lOpenSLES"), Io(Env("TAURI_CLI_VERBOSITY", "0"), Io(Env("TAURI_ANDROID_PROJECT_PATH", "/home/runner/work/bob-agent/bob-agent/src-tauri/gen/android"), Io(Env("CARGO_TARGET_AARCH64_LINUX_ANDROID_RUSTFLAGS", "-Clink-arg=-landroid -Clink-arg=-llog -Clink-arg=-lOpenSLES"), Io(Env("WRY_ANDROID_PACKAGE", "bob.agent"), Io(Env("ANDROID_HOME", "/usr/local/lib/android/sdk"), Io(Env("HOME", "/home/runner"), Io(Env("CARGO_TARGET_X86_64_LINUX_ANDROID_LINKER", "/usr/local/lib/android/sdk/ndk/27.0.12077973/toolchains/llvm/prebuilt/linux-x86_64/bin/x86_64-linux-android24-clang"), Io(Env("WRY_ANDROID_KOTLIN_FILES_OUT_DIR", "/home/runner/work/bob-agent/bob-agent/src-tauri/gen/android/app/src/main/java/bob/agent/generated"), Io(Env("CARGO_INCREMENTAL", "0"), Io(Env("CARGO_TARGET_I686_LINUX_ANDROID_RUSTFLAGS", "-Clink-arg=-landroid -Clink-arg=-llog -Clink-arg=-lOpenSLES"), Io(Env("TAURI_ANDROID_PACKAGE_UNESCAPED", "bob.agent"), Io(Env("WRY_ANDROID_LIBRARY", "app_lib"), Io(Env("RUST_LOG_STYLE", "always"), Io(Env("CARGO_TARGET_I686_LINUX_ANDROID_LINKER", "/usr/local/lib/android/sdk/ndk/27.0.12077973/toolchains/llvm/prebuilt/linux-x86_64/bin/i686-linux-android24-clang"), Io(Env("CARGO_HOME", "/home/runner/.cargo"), Io(Env("CARGO_TERM_COLOR", "always"), Io(Env("CARGO_TARGET_X86_64_LINUX_ANDROID_RUSTFLAGS", "-Clink-arg=-landroid -Clink-arg=-llog -Clink-arg=-lOpenSLES"), Io(Env("NDK_HOME", "/usr/local/lib/android/sdk/ndk/27.0.12077973"), Io(Env("PATH", "/home/runner/work/bob-agent/bob-agent/node_modules/.bin:/home/runner/work/bob-agent/bob-agent/node_modules/.bin:/home/runner/work/bob-agent/node_modules/.bin:/home/runner/work/node_modules/.bin:/home/runner/node_modules/.bin:/home/node_modules/.bin:/node_modules/.bin:/opt/hostedtoolcache/node/20.20.2/x64/lib/node_modules/npm/node_modules/@npmcli/run-script/lib/node-gyp-bin:/usr/local/lib/android/sdk/platform-tools:/usr/local/lib/android/sdk/cmdline-tools/16.0/bin:/opt/hostedtoolcache/Java_Zulu_jdk/17.0.19-10/x64/bin:/opt/hostedtoolcache/node/20.20.2/x64/bin:/snap/bin:/home/runner/.local/bin:/opt/pipx_bin:/home/runner/.cargo/bin:/home/runner/.config/composer/vendor/bin:/usr/local/.ghcup/bin:/home/runner/.dotnet/tools:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin"), Io(Env("CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER", "/usr/local/lib/android/sdk/ndk/27.0.12077973/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android24-clang"), Io(Env("CARGO_TARGET_ARMV7_LINUX_ANDROIDEABI_LINKER", "/usr/local/lib/android/sdk/ndk/27.0.12077973/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi24-clang"), Cmd(["/home/runner/work/bob-agent/bob-agent/src-tauri/gen/android/gradlew", "--project-dir", "/home/runner/work/bob-agent/bob-agent/src-tauri/gen/android"]))))))))))))))))))))))))))): command ["/home/runner/work/bob-agent/bob-agent/src-tauri/gen/android/gradlew", "--project-dir", "/home/runner/work/bob-agent/bob-agent/src-tauri/gen/android"] exited with code 1
+Error: Process completed with exit code 1.

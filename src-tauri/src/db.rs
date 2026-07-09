@@ -238,6 +238,10 @@ pub fn init_db(data_dir: &std::path::Path) -> Connection {
         "ALTER TABLE kg_nodes ADD COLUMN source_batches TEXT DEFAULT '[]'",
         [],
     );
+    let _ = conn.execute("ALTER TABLE kg_nodes ADD COLUMN updated_at INTEGER DEFAULT 0", []);
+    let _ = conn.execute("ALTER TABLE kg_edges ADD COLUMN updated_at INTEGER DEFAULT 0", []);
+    let _ = conn.execute("ALTER TABLE events ADD COLUMN updated_at INTEGER DEFAULT 0", []);
+    let _ = conn.execute("ALTER TABLE cron_jobs ADD COLUMN updated_at INTEGER DEFAULT 0", []);
 
     // ── 目標 19: Goal Mode V2 执行错误记录 ────────────────────
     conn.execute_batch(

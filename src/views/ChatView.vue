@@ -482,7 +482,7 @@
       <div v-if="isMobile && showMobileTools" class="mobile-sheet-overlay" @click="showMobileTools = false"></div>
       <transition name="slide-up">
         <div v-if="isMobile && showMobileTools" class="mobile-bottom-sheet">
-          <div class="sheet-header">
+          <div v-show="mobileSheetState !== 'main'" class="sheet-header">
             <button v-if="mobileSheetState === 'models'" class="sheet-back-btn" @click="mobileSheetState = 'providers'">
               <ChevronLeft :size="20" /> <span style="margin-left:4px">{{ $t('chat.back') || '返回' }}</span>
             </button>
@@ -509,7 +509,7 @@
             
             <!-- 2. 选择模型 -->
             <button class="sheet-grid-item" @click="mobileSheetState = 'providers'">
-              <div class="grid-icon-wrap" style="background: var(--color-success-bg); color: var(--color-success);">
+              <div class="grid-icon-wrap" style="background: rgba(var(--user-accent-rgb, 39, 118, 187), 0.1); color: var(--accent-primary);">
                 <Cpu :size="24" />
               </div>
               <span class="grid-item-label">{{ $t('chat.mobile_select_model') }}</span>
@@ -517,7 +517,7 @@
             
             <!-- 3. 执行形式 -->
             <button class="sheet-grid-item" @click="mobileSheetState = 'agentMode'">
-              <div class="grid-icon-wrap" style="background: var(--color-warning-bg); color: var(--color-warning);">
+              <div class="grid-icon-wrap" style="background: rgba(var(--user-accent-rgb, 39, 118, 187), 0.1); color: var(--accent-primary);">
                 <Zap :size="24" />
               </div>
               <span class="grid-item-label">{{ $t('chat.mobile_agent_mode') }}</span>
@@ -1193,8 +1193,28 @@ let cleanupStreamListener = null;
 let tauriDragUnlistens = [];
 let remoteMessageUnlisten = null;
 
+function onAndroidBackPressed(e) {
+  if (showOfflineEngineModal.value) {
+    showOfflineEngineModal.value = false;
+    e.preventDefault();
+  } else if (showCommandMenu.value) {
+    showCommandMenu.value = false;
+    e.preventDefault();
+  } else if (showMobileTools.value) {
+    showMobileTools.value = false;
+    e.preventDefault();
+  } else if (showAgentModeSwitcher.value) {
+    showAgentModeSwitcher.value = false;
+    e.preventDefault();
+  } else if (showModelSwitcher.value) {
+    showModelSwitcher.value = false;
+    e.preventDefault();
+  }
+}
+
 onMounted(async () => {
   window.addEventListener('open-mobile-model-switcher', onOpenMobileModelSwitcher);
+  window.addEventListener('android-back-pressed', onAndroidBackPressed);
   cleanupStreamListener = window.appAPI.onStreamChunk(handleStreamChunk);
 
   // 远程消息监听
@@ -1286,6 +1306,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   window.removeEventListener('open-mobile-model-switcher', onOpenMobileModelSwitcher);
+  window.removeEventListener('android-back-pressed', onAndroidBackPressed);
   if (cleanupStreamListener) cleanupStreamListener();
   if (remoteMessageUnlisten) remoteMessageUnlisten();
   document.removeEventListener('dragenter', onDragEnter);
@@ -2743,7 +2764,6 @@ defineExpose({
   left: 0;
   right: 0;
   background: var(--bg-primary);
-  border-radius: 20px 20px 0 0;
   border-top: 1px solid var(--border-subtle);
   z-index: 1000;
   max-height: 80vh;

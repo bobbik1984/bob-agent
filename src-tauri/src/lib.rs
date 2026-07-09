@@ -41,6 +41,7 @@ mod web_drop;
 mod wechat;
 pub mod lan_sync;
 pub mod sync_engine;
+pub mod skills_sync;
 
 use percent_encoding::percent_decode_str;
 use serde_json::{json, Value};
@@ -814,6 +815,7 @@ pub fn run() {
     #[cfg(mobile)]
     {
         builder = builder.plugin(tauri_plugin_barcode_scanner::init());
+        builder = builder.plugin(tauri_plugin_haptics::init());
     }
     
     let mut builder = builder
@@ -952,6 +954,7 @@ pub fn run() {
             kb_indexer::system_remove_source,
             // 插件/技能
             plugins::system_get_plugins,
+            plugins::import_skills_zip,
             // 网页抓取
             web::system_fetch_url,
             // 做梦引擎

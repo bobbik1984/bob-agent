@@ -37,7 +37,9 @@
               :class="{ active: selectedNode?.id === proj.id }"
               @click="focusNode(proj.id)"
             >
-              <span class="project-icon" :style="{ color: kgColors['project'] || kgColors['Project'] || '#6366f1' }">★</span>
+              <span class="project-icon" :style="{ color: kgColors['project'] || kgColors['Project'] || 'var(--user-accent, var(--accent-primary))' }">
+                <Star :size="14" fill="currentColor" />
+              </span>
               <span class="project-name">{{ proj.label }}</span>
               <span class="project-degree">{{ proj.degree }}</span>
             </button>
@@ -57,7 +59,9 @@
               :class="{ active: selectedNode?.id === 'source_' + batch.batch_id }"
               @click="focusNode('source_' + batch.batch_id)"
             >
-              <span class="project-icon" :style="{ color: kgColors['source'] || '#a855f7' }">📦</span>
+              <span class="project-icon" :style="{ color: kgColors['source'] || 'var(--user-accent, var(--accent-primary))' }">
+                <Package :size="14" />
+              </span>
               <span class="project-name" :title="batch.folder_path">{{ batch.folder_name }}</span>
               <span class="project-degree">{{ batch.file_count }}</span>
             </button>
@@ -76,6 +80,7 @@
         <!-- 笔记侧边栏内容 -->
         <div v-show="currentMode === 'notebook'" class="kg-sidebar-content notebook-sidebar-content">
           <NoteExplorer 
+            v-if="!isMobile"
             ref="noteExplorerRef"
             :selectedNoteId="selectedNoteId"
             @select="handleNoteSelect"
@@ -244,9 +249,17 @@
 
     <!-- 笔记工作台 -->
     <div v-if="currentMode === 'notebook'" class="notebook-body">
+      <!-- 移动端侧边栏 (抽屉+工具栏) -->
+      <NoteExplorer 
+        v-if="isMobile"
+        ref="noteExplorerRefMobile"
+        :selectedNoteId="selectedNoteId"
+        @select="handleNoteSelect"
+      />
+      
       <div class="notebook-editor-area">
         <div v-if="!selectedNoteId" class="notebook-empty-state">
-          请在左侧选择或新建一篇笔记
+          {{ isMobile ? '请在菜单中选择或新建一篇笔记' : '请在左侧选择或新建一篇笔记' }}
         </div>
         <template v-else>
           <div v-if="isLoadingNote" class="notebook-empty-state">
@@ -301,7 +314,7 @@ import TiptapEditor from '../components/TiptapEditor.vue';
 import { useI18n } from 'vue-i18n';
 import { Network } from 'vis-network';
 import { DataSet } from 'vis-data';
-import { Waypoints, Search, X, FileText, RefreshCw, Plus, Link, ExternalLink, Trash2, ChevronRight, Menu, ChevronDown } from 'lucide-vue-next';
+import { Waypoints, Search, X, FileText, RefreshCw, Plus, Link, ExternalLink, Trash2, ChevronRight, Menu, ChevronDown, Star, Package } from 'lucide-vue-next';
 
 const emit = defineEmits(['toggle-sidebar']);
 
@@ -720,7 +733,24 @@ function openProjectPortal() {
 }
 
 // ── 初始化 ──────────────────────────────────────────────
+function onAndroidBackPressed(e) {
+  if (showMobileMenu.value) {
+    showMobileMenu.value = false;
+    e.preventDefault();
+  } else if (mergeMode.value) {
+    mergeMode.value = false;
+    e.preventDefault();
+  } else if (selectedNode.value) {
+    selectedNode.value = null;
+    e.preventDefault();
+  } else if (currentMode.value === 'notebook' && selectedNoteId.value) {
+    selectedNoteId.value = null;
+    e.preventDefault();
+  }
+}
+
 onMounted(async () => {
+  window.addEventListener('android-back-pressed', onAndroidBackPressed);
   updateKgColors();
   await loadGraph();
   loading.value = false;
@@ -774,6 +804,7 @@ onMounted(async () => {
 });
 
 onBeforeUnmount(() => {
+  window.removeEventListener('android-back-pressed', onAndroidBackPressed);
   if (network) {
     network.destroy();
     network = null;
@@ -1292,13 +1323,12 @@ async function removeSourceBatch(node) {
 .kg-search-box {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
-  background: var(--surface-glass);
-  backdrop-filter: blur(8px);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  padding: var(--space-1) var(--space-3);
-  box-shadow: var(--shadow-sm);
+  gap: 8px;
+  background: var(--bg-secondary);
+  border: none;
+  border-bottom: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 6px 16px;
   width: 240px;
 }
 
@@ -1306,7 +1336,8 @@ async function removeSourceBatch(node) {
   border: none;
   background: transparent;
   color: var(--text-primary);
-  font-size: var(--text-sm);
+  font-size: 12px;
+  height: 28px;
   outline: none;
   flex: 1;
   min-width: 0;
@@ -1385,6 +1416,9 @@ async function removeSourceBatch(node) {
 
 .project-icon {
   font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .project-name {
@@ -1413,6 +1447,10 @@ async function removeSourceBatch(node) {
 .chip-shape {
   font-size: 10px;
   line-height: 1;
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  width: 14px;
 }
 
 /* ── 主体 ──────────────────────────────────── */
@@ -1890,24 +1928,227 @@ async function removeSourceBatch(node) {
   color: var(--text-tertiary);
   margin-top: 2px;
   white-space: nowrap;
+  background: var(--bg-tertiary);
+}
+
+.relation-icon {
+  font-size: 10px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+}
+
+.relation-info {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.relation-label {
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+  flex: 1;
+}
+
+.relation-type {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  background: var(--bg-tertiary);
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+.inspector-empty {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  text-align: center;
+  padding: var(--space-4);
+}
+
+/* ── 空状态 ──────────────────────────────────── */
+.kg-empty {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.kg-empty p {
+  margin: var(--space-2) 0;
+  font-size: var(--text-base);
+}
+
+.kg-empty-hint {
+  font-size: var(--text-sm) !important;
+  opacity: 0.6;
+}
+
+.kg-backfill-btn {
+  margin-top: var(--space-4);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--accent-primary);
+  background: transparent;
+  color: var(--accent-primary);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  transition: all var(--duration-fast);
+}
+
+.kg-backfill-btn:hover:not(:disabled) {
+  background: var(--accent-primary);
+  color: var(--text-inverse);
+}
+
+.kg-backfill-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+
+
+.mode-toggle {
+  display: flex;
+  background-color: var(--bg-tertiary);
+  border-radius: 6px;
+  padding: 2px;
+  gap: 2px;
+}
+.mode-toggle button {
+  flex: 1;
+  background: transparent;
+  border: none;
+  padding: 6px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border-radius: 4px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-weight: 500;
+  transition: all 0.2s;
+}
+.mode-toggle button:hover {
+  color: var(--text-primary);
+}
+.mode-toggle button.active {
+  background-color: var(--bg-primary);
+  color: var(--user-accent);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+
+.notebook-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+.notebook-editor-area {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 0;
+  background-color: var(--bg-primary);
+}
+
+.notebook-empty-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  color: var(--text-muted);
+  font-size: 1.1em;
+}
+
+/* ── P2-2: Backlinks Panel ── */
+.backlinks-panel {
+  border-top: 1px solid var(--border-subtle);
+  padding: 8px 16px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+.backlinks-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-family: var(--font-sans);
+  color: var(--text-tertiary);
+  cursor: pointer;
+  padding: 4px 0;
+  user-select: none;
+}
+.backlinks-header:hover { color: var(--text-secondary); }
+.backlinks-header .caret {
+  transition: transform 0.2s;
+}
+.backlinks-header .caret.open {
+  transform: rotate(90deg);
+}
+.backlinks-list {
+  margin-top: 6px;
+}
+.backlink-item {
+  display: flex;
+  flex-direction: column;
+  padding: 6px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s;
+  margin-bottom: 2px;
+}
+.backlink-item:hover {
+  background-color: var(--bg-tertiary);
+}
+.backlink-title {
+  font-size: 13px;
+  color: var(--user-accent);
+  font-family: var(--font-sans);
+}
+.backlink-context {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  margin-top: 2px;
+  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 /* ── Mobile UI Adjustments ────────────────────────────────── */
-@media (max-width: 768px) {
-  .kg-view {
-    padding: 0;
-    flex-direction: column;
-  }
+.kg-mobile-col.kg-view {
+  padding: 0;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
 
+.kg-mobile-col .kg-overlay-legend {
+  bottom: calc(80px + env(safe-area-inset-bottom, 20px)) !important;
+  max-height: 40vh;
+  overflow-y: auto;
+}
 
+.kg-mobile-col .kg-overlay-search {
+  left: 16px !important;
+  right: 16px !important;
+  top: 16px !important;
+  width: auto !important;
+}
 
-  /* 悬浮搜索框在移动端定位 */
-  .kg-overlay-search {
-    left: auto !important;
-    right: 16px !important;
-    top: 16px !important;
-  }
+.kg-mobile-col .kg-search-box {
+  width: 100% !important;
 }
 </style>

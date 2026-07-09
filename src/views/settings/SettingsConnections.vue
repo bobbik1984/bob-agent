@@ -34,7 +34,7 @@
         
         <div class="service-card-footer">
           <div v-if="!isUnlocked" style="display: flex; gap: 8px; width: 100%;">
-            <template v-if="isMobile">
+            <template v-if="isNativeMobile">
               <button class="btn btn-primary-outline btn-sm" style="flex: 1; justify-content: center;" @click="handleMobileScan" title="扫码配对">
                 <Scan :size="13" style="margin-right: 6px;" /> 扫码配对
               </button>
@@ -51,7 +51,7 @@
             </template>
           </div>
           <div v-else style="display: flex; gap: 8px; width: 100%;">
-            <template v-if="isMobile">
+            <template v-if="isNativeMobile">
               <button class="btn btn-primary-outline btn-sm" style="flex: 1; justify-content: center;" @click="handleMobileScan" title="重新扫码配对">
                 <Scan :size="13" style="margin-right: 6px;" /> 重新扫码
               </button>
@@ -611,7 +611,7 @@ const props = defineProps({
 });
 const emit = defineEmits(['config-changed']);
 
-const isMobile = inject('isMobile', ref(false));
+const isNativeMobile = inject('isNativeMobile', false);
 
 import { useDialog } from '@/composables/useDialog.js';
 
@@ -650,7 +650,7 @@ function closePairingProgress() {
   showPairingProgress.value = false;
   if (pairingDone.value && !pairingError.value) {
     fetchConnectedDevices().then(() => {
-      if (isMobile.value && connectedDevices.value.length > 0) {
+      if (isNativeMobile && connectedDevices.value.length > 0) {
         isUnlocked.value = true;
       }
     });
@@ -873,11 +873,8 @@ const formatTime = (ts) => {
 onMounted(async () => {
   // Existing init code if any
   await fetchConnectedDevices();
-  if (isMobile.value) {
-    // On mobile, bypass PIN lock and mark as unlocked if we have paired devices
-    if (connectedDevices.value.length > 0) {
-      isUnlocked.value = true;
-    }
+  if (isNativeMobile) {
+    isUnlocked.value = true;
   } else {
     unlistenDeviceConnected = await listen('sync:device_connected', (event) => {
       fetchConnectedDevices();

@@ -1,5 +1,5 @@
 <template>
-  <div class="week-timeline" @touchstart="handleTouchStart" @touchend="handleTouchEnd">
+  <div class="week-timeline" :class="{ 'is-mobile-view': isMobile }" @touchstart="handleTouchStart" @touchend="handleTouchEnd">
     <!-- 导航控制栏 -->
     <div class="timeline-header-row">
       <div v-if="isMobile" class="mobile-section-title">
@@ -735,61 +735,59 @@ const days = computed(() => {
   width: 100%;
 }
 
-@media (max-width: 768px) {
-  .week-timeline {
-    flex: 1;
-    min-height: 0;
-    height: 100% !important;
-    background: transparent !important;
-    border: none !important;
-    border-radius: 0 !important;
-    padding: 0 !important;
-  }
+.week-timeline.is-mobile-view {
+  flex: 1;
+  min-height: 0;
+  height: 100% !important;
+  background: transparent !important;
+  border: none !important;
+  border-radius: 0 !important;
+  padding: 0 !important;
+}
 
-  .timeline-header-row {
-    padding: 0 16px;
-    margin: 0 0 12px 0;
-    justify-content: space-between;
-    align-items: center;
-    height: 36px;
-  }
-  
-  .timeline-controls {
-    margin: 0 !important;
-    padding: 0 !important;
-  }
-  
-  .mobile-section-title {
-    font-size: var(--text-lg);
-    font-weight: 600;
-    color: var(--text-secondary);
-    display: flex;
-    align-items: center;
-    gap: 6px;
-  }
-  
-  .section-icon {
-    opacity: 0.8;
-  }
+.week-timeline.is-mobile-view .timeline-header-row {
+  padding: 0 16px;
+  margin: 0 0 12px 0;
+  justify-content: space-between;
+  align-items: center;
+  height: 36px;
+}
 
-  .calendar-header {
-    background: transparent !important;
-    padding-right: 0 !important;
-  }
+.week-timeline.is-mobile-view .timeline-controls {
+  margin: 0 !important;
+  padding: 0 !important;
+}
 
-  .time-axis,
-  .time-axis-header {
-    background: transparent !important;
-  }
+.week-timeline.is-mobile-view .mobile-section-title {
+  font-size: var(--text-lg);
+  font-weight: 600;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
 
-  .calendar-wrapper {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    min-height: 0;
-    border: none !important;
-    border-radius: 0 !important;
-    background: transparent !important;
-  }
+.week-timeline.is-mobile-view .section-icon {
+  opacity: 0.8;
+}
+
+.week-timeline.is-mobile-view .calendar-header {
+  background: transparent !important;
+  padding-right: 0 !important;
+}
+
+.week-timeline.is-mobile-view .time-axis,
+.week-timeline.is-mobile-view .time-axis-header {
+  background: transparent !important;
+}
+
+.week-timeline.is-mobile-view .calendar-wrapper {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border: none !important;
+  border-radius: 0 !important;
+  background: transparent !important;
 }
 </style>

@@ -11,7 +11,7 @@
 
 
     <!-- 工作目录 (workspaceDir) -->
-    <div class="details-section">
+    <div v-if="!isNativeMobile" class="details-section">
       <label class="form-label" style="font-size: 0.85em; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
         <FolderOpen :size="14" style="opacity: 0.6;" />
         {{ $t('settings.workspace') }}
@@ -38,7 +38,7 @@
       </button>
     </div>
 
-    <div class="details-section">
+    <div v-if="!isNativeMobile" class="details-section">
       <!-- 关注的文件夹 -->
       <label class="form-label" style="font-size: 0.85em; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
         <FolderHeart :size="14" style="opacity: 0.6;" />
@@ -91,58 +91,62 @@
       </div>
 
       <!-- 知识库目录 (wikiDir) -->
-      <label class="form-label" style="font-size: 0.85em; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
-        <FileText :size="14" style="opacity: 0.6;" />
-        {{ $t('settings.wiki_dir') }}
-      </label>
+      <template v-if="!isNativeMobile">
+        <label class="form-label" style="font-size: 0.85em; margin-bottom: 6px; display: flex; align-items: center; gap: 6px; margin-top: 24px;">
+          <FileText :size="14" style="opacity: 0.6;" />
+          {{ $t('settings.wiki_dir') }}
+        </label>
 
-      <div class="form-group workspace-group">
-        <input
-          v-model="config.wikiDir"
-          class="input"
-          :placeholder="$t('settings.wiki_dir_placeholder')"
-          readonly
-        />
-        <button class="btn btn-primary browse-btn" @click="selectWikiDir">
-          <FolderOpen :size="14" />
-          <span>{{ $t('settings.browse') }}</span>
+        <div class="form-group workspace-group">
+          <input
+            v-model="config.wikiDir"
+            class="input"
+            :placeholder="$t('settings.wiki_dir_placeholder')"
+            readonly
+          />
+          <button class="btn btn-primary browse-btn" @click="selectWikiDir">
+            <FolderOpen :size="14" />
+            <span>{{ $t('settings.browse') }}</span>
+          </button>
+        </div>
+        <button
+          v-if="config.wikiDir"
+          class="btn-clear"
+          @click="clearWikiDir"
+        >
+          {{ $t('settings.clear_wiki') }}
         </button>
-      </div>
-      <button
-        v-if="config.wikiDir"
-        class="btn-clear"
-        @click="clearWikiDir"
-      >
-        {{ $t('settings.clear_wiki') }}
-      </button>
+      </template>
     </div>
 
     <div class="details-section">
       <!-- 技能目录 (externalSkillsDir) -->
-      <label class="form-label" style="font-size: 0.85em; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
-        <Puzzle :size="14" style="opacity: 0.6;" />
-        {{ $t('settings.skills') }}
-      </label>
+      <template v-if="!isNativeMobile">
+        <label class="form-label" style="font-size: 0.85em; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
+          <Puzzle :size="14" style="opacity: 0.6;" />
+          {{ $t('settings.skills') }}
+        </label>
 
-      <div class="form-group workspace-group">
-        <input
-          v-model="config.externalSkillsDir"
-          class="input"
-          :placeholder="$t('settings.skills_placeholder')"
-          readonly
-        />
-        <button class="btn btn-primary browse-btn" @click="selectExternalSkillsDir">
-          <FolderOpen :size="14" />
-          <span>{{ $t('settings.browse') }}</span>
+        <div class="form-group workspace-group">
+          <input
+            v-model="config.externalSkillsDir"
+            class="input"
+            :placeholder="$t('settings.skills_placeholder')"
+            readonly
+          />
+          <button class="btn btn-primary browse-btn" @click="selectExternalSkillsDir">
+            <FolderOpen :size="14" />
+            <span>{{ $t('settings.browse') }}</span>
+          </button>
+        </div>
+        <button
+          v-if="config.externalSkillsDir"
+          class="btn-clear"
+          @click="clearExternalSkillsDir"
+        >
+          {{ $t('settings.clear_skills') }}
         </button>
-      </div>
-      <button
-        v-if="config.externalSkillsDir"
-        class="btn-clear"
-        @click="clearExternalSkillsDir"
-      >
-        {{ $t('settings.clear_skills') }}
-      </button>
+      </template>
 
       <div class="plugin-manager-entry details-section">
 
@@ -330,11 +334,13 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, inject } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { formatDateTime as formatMemoryTime, formatFuzzyTime as formatEvoTime } from '@/utils/date';
 import { HardDrive, FolderOpen, FolderHeart, FileText, Puzzle, Layers, X, Plus, ChevronDown, Trash2, Brain, BookOpen, Loader2, Dna, Moon, Cloud } from 'lucide-vue-next';
 import PluginManager from '../../components/PluginManager.vue';
+
+const isNativeMobile = inject('isNativeMobile', false);
 
 const props = defineProps({
   config: { type: Object, required: true },

@@ -3,6 +3,12 @@
 version = 3
 
 [[package]]
+name = "Inflector"
+version = "0.11.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fe438c63458706e03479442743baae6c88256498e6431708f6dfc520a26515d3"
+
+[[package]]
 name = "adler2"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -793,6 +799,7 @@ dependencies = [
  "tauri-plugin-clipboard-manager",
  "tauri-plugin-dialog",
  "tauri-plugin-global-shortcut",
+ "tauri-plugin-haptics",
  "tauri-plugin-log",
  "tauri-plugin-notification",
  "tauri-plugin-shell",
@@ -5367,7 +5374,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash",
  "rustls",
- "socket2 0.5.10",
+ "socket2 0.6.4",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -5405,9 +5412,9 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.5.10",
+ "socket2 0.6.4",
  "tracing",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -6666,6 +6673,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "specta"
+version = "2.0.0-rc.20"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4ccbb212565d2dc177bc15ecb7b039d66c4490da892436a4eee5b394d620c9bc"
+dependencies = [
+ "paste",
+ "specta-macros",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "specta-macros"
+version = "2.0.0-rc.17"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "68999d29816965eb9e5201f60aec02a76512139811661a7e8e653abc810b8f72"
+dependencies = [
+ "Inflector",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
+]
+
+[[package]]
 name = "spki"
 version = "0.7.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6978,6 +7008,7 @@ dependencies = [
  "serde_json",
  "serde_repr",
  "serialize-to-javascript",
+ "specta",
  "swift-rs",
  "tauri-build",
  "tauri-macros",
@@ -7156,6 +7187,21 @@ dependencies = [
  "tauri",
  "tauri-plugin",
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "tauri-plugin-haptics"
+version = "2.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dbff1c8c3501d2b25e24c5c99a994f47e8748fe028de474741a33f2800fa2da2"
+dependencies = [
+ "log",
+ "serde",
+ "serde_json",
+ "specta",
+ "tauri",
+ "tauri-plugin",
+ "thiserror 1.0.69",
 ]
 
 [[package]]

@@ -1,12 +1,20 @@
 <template>
-  <div class="note-explorer">
+  <div class="note-explorer" :class="{ 'is-mobile': isMobile }">
     <div class="explorer-header">
-      <div class="view-toggles">
-        <button :class="{ active: viewMode === 'tree' }" @click="viewMode = 'tree'" :title="$t('notebook.tree_view')"><Folder :size="16" /></button>
-        <button :class="{ active: viewMode === 'timeline' }" @click="viewMode = 'timeline'" :title="$t('notebook.timeline_view')"><CalendarDays :size="16" /></button>
-        <button :class="{ active: viewMode === 'tags' }" @click="viewMode = 'tags'; loadTags()" :title="$t('notebook.tags_view')"><Tag :size="16" /></button>
+      <div style="display: flex; align-items: center;">
+        <button v-if="isMobile" class="btn-ghost mobile-menu-btn" @click="mobileDrawerOpen = !mobileDrawerOpen" title="打开笔记列表" style="margin-right: 8px; padding: 4px; border-radius: 4px; display: flex; align-items: center; justify-content: center;">
+          <Menu :size="18" />
+        </button>
+        <div class="view-toggles">
+          <button :class="{ active: viewMode === 'tree' }" @click="viewMode = 'tree'; if(isMobile) mobileDrawerOpen = true" :title="$t('notebook.tree_view')"><Folder :size="16" /></button>
+          <button :class="{ active: viewMode === 'timeline' }" @click="viewMode = 'timeline'; if(isMobile) mobileDrawerOpen = true" :title="$t('notebook.timeline_view')"><CalendarDays :size="16" /></button>
+          <button :class="{ active: viewMode === 'tags' }" @click="viewMode = 'tags'; loadTags(); if(isMobile) mobileDrawerOpen = true" :title="$t('notebook.tags_view')"><Tag :size="16" /></button>
+        </div>
       </div>
       <div class="header-actions">
+        <button class="new-note-btn" @click="showSearchInput = !showSearchInput; if(isMobile && showSearchInput) mobileDrawerOpen = true" :class="{ active: showSearchInput }" title="搜索">
+          <Search :size="16" />
+        </button>
         <button class="new-note-btn" @click="loadNotes" :title="$t('notebook.refresh')">
           <RefreshCw :size="16" />
         </button>
@@ -19,6 +27,28 @@
       </div>
     </div>
 
+
+    <div v-if="showSearchInput" class="explorer-search-bar" style="padding: 6px 16px; border-bottom: 1px solid var(--border-subtle); background: var(--bg-secondary);">
+      <input v-model="searchQuery" type="text" class="input" placeholder="搜索笔记标题..." style="width: 100%; height: 28px; font-size: 12px; border-radius: var(--radius-sm);" />
+    </div>
+
+    <!-- 移动端遮罩 -->
+    <div v-if="isMobile && mobileDrawerOpen" class="mobile-drawer-overlay animate-fade-in" @click="mobileDrawerOpen = false"></div>
+
+    <div class="explorer-content-wrapper" :class="{ 'is-mobile': isMobile, 'drawer-open': isMobile && mobileDrawerOpen }">
+      
+      <!-- 搜索结果 -->
+      <div v-if="searchQuery.trim()" class="explorer-content">
+        <ul class="note-list tag-results">
+          <li v-for="note in searchResults" :key="note.id" class="hover-show-btn-delete" :class="{ active: selectedNoteId === note.id }" @click="selectNote(note)">
+            <FileText :size="14" class="icon" />
+            <span class="title-text">{{ note.title || formatAnyName(note.id) }}</span>
+          </li>
+          <li v-if="searchResults.length === 0" class="empty-text">未找到匹配的笔记</li>
+        </ul>
+      </div>
+      
+      <template v-else>
     <!-- 树状视图 -->
     <div v-if="viewMode === 'tree'" class="explorer-content">
       <!-- 速记 -->
@@ -178,12 +208,14 @@
         </li>
       </ul>
     </div>
+      </template>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, computed, defineEmits, defineProps } from 'vue';
-import { Folder, FolderPlus, CalendarDays, ChevronRight, FileText, Plus, X, RefreshCw, Tag, ArrowUpFromLine } from 'lucide-vue-next';
+import { ref, onMounted, computed, defineEmits, defineProps, inject } from 'vue';
+import { Folder, FolderPlus, CalendarDays, ChevronRight, FileText, Plus, X, RefreshCw, Tag, ArrowUpFromLine, Search, Menu } from 'lucide-vue-next';
 import { useI18n } from 'vue-i18n';
 
 const { t } = useI18n();
@@ -203,6 +235,28 @@ const notes = ref({ daily: [], topics: [], sources: [], projects: {}, custom: {}
 const expanded = ref({ daily: true, topics: true, projects: true, sources: true });
 const allTags = ref([]);
 const selectedTag = ref(null);
+
+const isMobile = inject('isMobile', ref(false));
+const mobileDrawerOpen = ref(false);
+const showSearchInput = ref(false);
+const searchQuery = ref('');
+
+const searchResults = computed(() => {
+  if (!searchQuery.value.trim()) return [];
+  const q = searchQuery.value.toLowerCase();
+  return allNotesFlat.value.filter(note => {
+    const title = (note.title || formatAnyName(note.id)).toLowerCase();
+    return title.includes(q) || note.id.toLowerCase().includes(q);
+  });
+});
+
+const selectNote = (note) => {
+  emit('select', note.id);
+  if (isMobile.value) {
+    mobileDrawerOpen.value = false;
+  }
+};
+
 
 const loadNotes = async () => {
   try {
@@ -226,6 +280,11 @@ const loadNotes = async () => {
         if (expanded.value['custom_' + folderName] === undefined) {
           expanded.value['custom_' + folderName] = true;
         }
+      }
+      
+      // 首次加载且未选择笔记时，自动跳转到最新的一篇
+      if (!props.selectedNoteId && sortedTimelineNotes.value.length > 0) {
+        emit('select', sortedTimelineNotes.value[0].id);
       }
     }
   } catch (e) {
@@ -319,7 +378,6 @@ const formatTimelineDate = (note) => {
 };
 
 // ── 操作 ───────────────────────────────────────
-const selectNote = (note) => emit('select', note.id);
 
 const filterByTag = (tagName) => {
   selectedTag.value = selectedTag.value === tagName ? null : tagName;
@@ -435,6 +493,11 @@ defineExpose({ refresh: loadNotes });
   overflow: hidden;
 }
 
+.note-explorer.is-mobile {
+  height: auto;
+  overflow: visible;
+}
+
 .explorer-header {
   display: flex;
   justify-content: space-between;
@@ -482,7 +545,6 @@ defineExpose({ refresh: loadNotes });
   color: var(--text-secondary);
   cursor: pointer;
   padding: 6px;
-  border-radius: 6px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -563,7 +625,6 @@ defineExpose({ refresh: loadNotes });
 .note-list li {
   padding: 8px 12px;
   margin-bottom: 2px;
-  border-radius: 6px;
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -706,7 +767,6 @@ defineExpose({ refresh: loadNotes });
   padding: 8px 12px 8px 24px;
   cursor: pointer;
   position: relative;
-  border-radius: 4px;
   font-family: var(--font-sans);
   transition: all 0.2s ease;
 }
@@ -766,4 +826,41 @@ defineExpose({ refresh: loadNotes });
   background-color: var(--border-light);
   z-index: 0;
 }
+
+.explorer-content-wrapper {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.explorer-content-wrapper.is-mobile {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 60vh;
+  background: var(--bg-primary);
+  z-index: 100;
+  transform: translateY(100%);
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 -4px 20px rgba(0,0,0,0.1);
+  border-top: 1px solid var(--border-subtle);
+}
+
+.explorer-content-wrapper.drawer-open {
+  transform: translateY(0);
+}
+
+.mobile-drawer-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.4);
+  z-index: 90;
+}
+
+.btn-ghost:hover {
+  background: var(--bg-tertiary);
+}
 </style>
+

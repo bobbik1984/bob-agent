@@ -549,6 +549,17 @@ window.appAPI = {
 
   // ── 插件系统 (Rust 原生) ───────────────────────────────
   getPlugins: async () => invoke('system_get_plugins'),
+  importSkillsZip: async () => {
+    const selected = await open({
+      multiple: false,
+      filters: [{ name: 'Zip files', extensions: ['zip'] }]
+    });
+    if (selected) {
+      await invoke('import_skills_zip', { path: selected });
+      return true;
+    }
+    return false;
+  },
   installPlugin: async (id) => true,                   // TODO T-603 (安装逻辑)
   onPluginProgress: (callback) => {
     console.log('Mock: onPluginProgress listener bound'); // TODO T-603

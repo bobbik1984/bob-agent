@@ -38,7 +38,7 @@
             <AlertTriangle :size="16" class="section-icon" />
             {{ $t('inbox.overdue_events') || '过期的日程' }}
           </h3>
-          <TodoList :todos="overdueEvents" @update-status="onTodoStatusUpdate" />
+          <TodoList :todos="overdueEvents" @update-status="onTodoStatusUpdate" @delete-todo="onTodoDelete" />
         </div>
 
         <div v-if="!isMobile || activeTab === 'timeline'" class="section">
@@ -51,7 +51,7 @@
             <CheckSquare :size="16" class="section-icon" />
             {{ $t('inbox.todo_list') }}
           </h3>
-          <TodoList :todos="todos" @update-status="onTodoStatusUpdate" />
+          <TodoList :todos="todos" @update-status="onTodoStatusUpdate" @delete-todo="onTodoDelete" />
         </div>
 
         <!-- T-1211: 自动任务区域 -->
@@ -197,6 +197,11 @@ function onTodoStatusUpdate({ id, status }) {
   if (item) {
     item.status = status;
   }
+}
+
+function onTodoDelete(id) {
+  todos.value = todos.value.filter(t => t.id !== id);
+  events.value = events.value.filter(e => e.id !== id);
 }
 
 async function onCreateEvent(payload) {
@@ -558,37 +563,35 @@ function describeCron(expr) {
   top: 8px;
   right: 12px;
 }
-@media (max-width: 768px) {
-  .inbox-view {
-    padding: 0;
-    padding-bottom: 0;
-    display: flex;
-    flex-direction: column;
-    height: 100%;
-    overflow: hidden;
-  }
-  .inbox-content-wrapper {
-    padding: 12px 16px;
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    min-height: 0;
-  }
-  .inbox-content {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    min-height: 0;
-  }
-  .inbox-content-wrapper.is-timeline-tab {
-    padding: 12px 0 0 0 !important;
-  }
-  .inbox-content-wrapper.is-timeline-tab .section {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    min-height: 0;
-    margin: 0 !important;
-  }
+.inbox-view.is-mobile {
+  padding: 0;
+  padding-bottom: 0;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+.inbox-view.is-mobile .inbox-content-wrapper {
+  padding: 12px 16px;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.inbox-view.is-mobile .inbox-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.inbox-view.is-mobile .inbox-content-wrapper.is-timeline-tab {
+  padding: 12px 0 0 0 !important;
+}
+.inbox-view.is-mobile .inbox-content-wrapper.is-timeline-tab .section {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  margin: 0 !important;
 }
 </style>

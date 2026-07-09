@@ -690,6 +690,37 @@ async fn handle_sync_pull(
     }))
 }
 
+async fn handle_sync_skills_download(
+    axum::extract::State(state): axum::extract::State<ApiState>,
+    axum::extract::ConnectInfo(addr): axum::extract::ConnectInfo<std::net::SocketAddr>,
+    headers: axum::http::HeaderMap,
+) -> impl IntoResponse {
+    crate::sync_engine::register_device(&state.app, &headers, addr);
+    
+    let config = crate::read_config();
+    let skills_dir = config.get("externalSkillsDir").and_then(|v| v.as_str()).map(|s| std::path::PathBuf::from(s))
+        .unwrap_or_else(|| crate::get_data_dir().join("skills"));
+    
+    if !skills_dir.exists() {
+        return (axum::http::StatusCode::NOT_FOUND, "Skills directory not found".to_string()).into_response();
+    }
+    
+    match crate::skills_sync::pack_skills(&skills_dir) {
+        Ok(bytes) => {
+            let mut res = axum::response::Response::new(axum::body::Body::from(bytes));
+            res.headers_mut().insert(
+                axum::http::header::CONTENT_TYPE,
+                axum::http::HeaderValue::from_static("application/zip"),
+            );
+            res
+        },
+        Err(e) => {
+            log::error!("[http_api] Failed to pack skills: {}", e);
+            (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "Failed to pack skills".to_string()).into_response()
+        }
+    }
+}
+
 async fn handle_sync_push(
     axum::extract::State(state): axum::extract::State<ApiState>,
     axum::extract::ConnectInfo(addr): axum::extract::ConnectInfo<std::net::SocketAddr>,
@@ -748,6 +779,7 @@ pub fn start_http_server(app: AppHandle) {
         .route("/v1/dl/{token}", get(handle_download))
         .route("/v1/sync", get(handle_sync_ws))
         .route("/v1/sync/pull", get(handle_sync_pull))
+        .route("/v1/sync/skills/download", get(handle_sync_skills_download))
         .route("/v1/sync/push", post(handle_sync_push))
         .with_state(public_state);
 

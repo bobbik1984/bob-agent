@@ -46,13 +46,15 @@
     </div>
 
     <!-- Editor Content -->
-    <editor-content :editor="editor" class="editor-content" />
+    <editor-content :editor="editor" class="editor-content" :class="{ 'is-mobile': isMobile }" />
   </div>
 </template>
 
 <script setup>
-import { ref, watch, onMounted, onBeforeUnmount, nextTick, defineProps, defineEmits } from 'vue';
+import { ref, watch, onMounted, onBeforeUnmount, nextTick, defineProps, defineEmits, inject } from 'vue';
 import { Editor, EditorContent } from '@tiptap/vue-3';
+
+const isMobile = inject('isMobile');
 import StarterKit from '@tiptap/starter-kit';
 import TaskList from '@tiptap/extension-task-list';
 import TaskItem from '@tiptap/extension-task-item';
@@ -316,6 +318,10 @@ const onDrop = async (e) => {
   overflow-y: auto;
   padding: 24px 32px;
   color: var(--text-primary);
+}
+
+.editor-content.is-mobile {
+  padding: 24px 16px calc(60px + env(safe-area-inset-bottom, 0px)) 16px;
 }
 
 /* Tiptap specific styles */

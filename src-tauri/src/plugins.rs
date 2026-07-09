@@ -2,6 +2,20 @@ use serde_json::{json, Value};
 use std::fs;
 use std::path::Path;
 
+#[tauri::command]
+pub fn import_skills_zip(path: String) -> Result<(), String> {
+    use std::io::Read;
+    let mut f = std::fs::File::open(&path).map_err(|e| e.to_string())?;
+    let mut bytes = Vec::new();
+    f.read_to_end(&mut bytes).map_err(|e| e.to_string())?;
+    
+    let config = crate::read_config();
+    let skills_dir = config.get("externalSkillsDir").and_then(|v| v.as_str()).map(|s| std::path::PathBuf::from(s))
+        .unwrap_or_else(|| crate::get_data_dir().join("skills"));
+        
+    crate::skills_sync::unpack_skills(&bytes, &skills_dir)
+}
+
 /// 扫描外部技能目录，解析每个子文件夹中的 SKILL.md 的 YAML frontmatter
 /// 同时注册内置的系统级工具
 #[tauri::command]

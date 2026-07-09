@@ -26,9 +26,14 @@
             ({{ $t('todo.completed_at', { time: formatTime(todo.completed_at) }) }})
           </span>
         </div>
-        <span class="todo-priority" :class="todo.priority || 'medium'">
-          {{ getPriorityLabel(todo.priority) }}
-        </span>
+        <div class="todo-actions">
+          <span class="todo-priority" :class="todo.priority || 'medium'">
+            {{ getPriorityLabel(todo.priority) }}
+          </span>
+          <button class="todo-delete-btn" @click.stop="deleteTodo(todo)" :title="$t('todo.delete') || '删除'">
+            <X :size="14" />
+          </button>
+        </div>
       </div>
     </div>
   </div>
@@ -37,6 +42,7 @@
 <script setup>
 import { computed, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
+import { X } from 'lucide-vue-next';
 
 const { t } = useI18n();
 
@@ -47,7 +53,7 @@ const props = defineProps({
   }
 });
 
-const emit = defineEmits(['update-status']);
+const emit = defineEmits(['update-status', 'delete-todo']);
 
 const showCompleted = ref(false);
 
@@ -77,6 +83,19 @@ async function toggleStatus(todo) {
   }
 }
 
+async function deleteTodo(todo) {
+  if (confirm(t('todo.confirm_delete') || '确定要删除这条待办吗？')) {
+    try {
+      if (window.appAPI && window.appAPI.deleteEvent) {
+        await window.appAPI.deleteEvent(todo.id);
+        emit('delete-todo', todo.id);
+      }
+    } catch (err) {
+      console.error('删除待办失败', err);
+    }
+  }
+}
+
 function getPriorityLabel(priority) {
   const map = { low: t('confirm_card.low'), medium: t('confirm_card.medium'), high: t('confirm_card.high') };
   return map[priority] || t('confirm_card.medium');
@@ -94,13 +113,11 @@ function getPriorityLabel(priority) {
   padding: var(--space-4);
 }
 
-@media (max-width: 768px) {
-  .todo-list {
-    background: transparent !important;
-    border: none !important;
-    padding: 0 !important;
-    border-radius: 0 !important;
-  }
+.inbox-view.is-mobile .todo-list {
+  background: transparent !important;
+  border: none !important;
+  padding: 0 !important;
+  border-radius: 0 !important;
 }
 
 .empty-state {
@@ -146,6 +163,37 @@ function getPriorityLabel(priority) {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  min-width: 0;
+}
+
+.todo-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.todo-delete-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-sm);
+  border: none;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  opacity: 0;
+  transition: all 0.2s;
+}
+
+.todo-item:hover .todo-delete-btn {
+  opacity: 1;
+}
+
+.todo-delete-btn:hover {
+  background: color-mix(in srgb, var(--error) 15%, transparent);
+  color: var(--error);
 }
 
 .todo-main {

@@ -828,6 +828,20 @@ fn get_builtin_tool_schemas() -> Vec<Value> {
                 }
             }
         }),
+        json!({
+            "type": "function",
+            "function": {
+                "name": "install_skill_from_url",
+                "description": "通过 URL 下载并安装 (.zip) 格式的技能包。该操作需要提交到 Outbox 进行安全审批。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "url": { "type": "string", "description": "技能包的下载链接 (.zip)" }
+                    },
+                    "required": ["url"]
+                }
+            }
+        }),
     ]
 }
 
@@ -906,6 +920,16 @@ async fn execute_tool_inner(
         "create_directory" => {
             let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
             tool_create_directory(path, global_file_access).await
+        }
+        "install_skill_from_url" => {
+            let url = args.get("url").and_then(|v| v.as_str()).unwrap_or("");
+            if url.is_empty() {
+                return json!({"error": "缺少 url 参数"});
+            }
+            crate::outbox::write_outbox(vec![json!({
+                "op": "install_skill_from_url",
+                "url": url
+            })])
         }
         "move_file" => {
             let source = args.get("source").and_then(|v| v.as_str()).unwrap_or("");

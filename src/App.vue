@@ -330,6 +330,7 @@ const isMobile = ref(checkMobile());
 provide('isMobile', isMobile);
 
 const isNativeMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+provide('isNativeMobile', isNativeMobile);
 const isTauri = !!window.__TAURI_INTERNALS__;
 
 let resizeDebounce;
@@ -478,12 +479,44 @@ let unlistenConfigReconciled = null;
 let unlistenRemoteMessage = null;
 
 function handleBackButton() {
+  // 1. 模态弹窗层
   if (showDeleteModal.value) {
     cancelDeleteChat();
     return true;
   }
-  // TODO: Add other back handlers for chat view, etc.
-  return false;
+  
+  // 2. 全局覆盖层 (闪念速记)
+  if (quickNoteRef.value && quickNoteRef.value.visible) {
+    quickNoteRef.value.close();
+    return true;
+  }
+  
+  // 3. 移动端侧边抽屉层
+  if (isMobile.value && mobileDrawerOpen.value) {
+    mobileDrawerOpen.value = false;
+    return true;
+  }
+  
+  // 4. 子组件自定义拦截 (分发 android-back-pressed 事件)
+  // 任何子组件可以通过 e.preventDefault() 阻止默认的后退兜底行为
+  const backEvent = new CustomEvent('android-back-pressed', { cancelable: true });
+  const canceled = !window.dispatchEvent(backEvent);
+  if (canceled) {
+    return true;
+  }
+
+  // 5. 跨标签页降级 (如果不在主对话页，先退回主对话页)
+  if (isMobile.value && activeDrawer.value !== 'chat') {
+    activeDrawer.value = 'chat';
+    return true;
+  }
+  
+  // 6. 兜底：退到系统后台保留运行
+  if (window.appAPI && window.appAPI.hideWindow) {
+    window.appAPI.hideWindow();
+  }
+  
+  return true;
 }
 
 onMounted(async () => {
@@ -1489,8 +1522,23 @@ function onFabPointerUp(e) {
 }
 
 .conversation-item.active {
-  background: var(--bg-tertiary);
-  color: var(--text-primary);
+  background: var(--user-accent, var(--accent-primary));
+  color: var(--text-inverse);
+}
+
+.conversation-item.active .conv-time,
+.conversation-item.active .conv-row-2,
+.conversation-item.active .delete-btn {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.conversation-item.active .delete-btn {
+  background: transparent;
+}
+
+.conversation-item.active .delete-btn:hover {
+  color: var(--text-inverse);
+  background: rgba(255, 255, 255, 0.2);
 }
 
 /* ── 侧栏底部导航 ─────────────────────────────────── */
@@ -1766,14 +1814,14 @@ function onFabPointerUp(e) {
   width: 280px;
   height: 100%;
   z-index: 200;
-  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-  box-shadow: 2px 0 12px rgba(0,0,0,0.2);
+  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.3s cubic-bezier(0.16, 1, 0.3, 1);
   padding-top: env(safe-area-inset-top, 20px);
   background: var(--bg-secondary);
 }
 
 .mobile-drawer-open {
   transform: translateX(280px);
+  box-shadow: 2px 0 12px rgba(0,0,0,0.2);
 }
 
 /* 隐藏手机侧边栏中的部分多余信息（如大号 logo） */
