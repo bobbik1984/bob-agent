@@ -2,6 +2,7 @@
   <Teleport to="body">
     <Transition name="quicknote">
       <div v-if="visible" class="quicknote-overlay" @click.self="close">
+        <!-- 中央速记框 -->
         <div class="quicknote-bar">
           <div class="quicknote-bob">
             <div class="quicknote-bob-icon"></div>
@@ -16,15 +17,26 @@
             autocomplete="off"
             spellcheck="false"
           />
-          <button class="quicknote-model-btn" @click="openModelSwitcher" title="切换模型">
-            <Cpu :size="18" />
-          </button>
         </div>
+
         <Transition name="quicknote-hint">
           <div v-if="showSaved" class="quicknote-saved">
-            <Check :size="14" /> 已记录
+            <Check :size="14" /> {{ $t('quicknote.saved') }}
           </div>
         </Transition>
+
+        <!-- 底部快捷控制栏 -->
+        <div class="quicknote-bottom-bar">
+          <button class="quicknote-bottom-btn" @click="openModelSwitcher">
+            <Cpu :size="15" />
+            <span>{{ $t('quicknote.select_model') }}</span>
+          </button>
+
+          <button class="quicknote-bottom-btn" @click="openScanPairing">
+            <QrCode :size="15" />
+            <span>{{ $t('quicknote.scan_pairing') }}</span>
+          </button>
+        </div>
       </div>
     </Transition>
   </Teleport>
@@ -32,7 +44,10 @@
 
 <script setup>
 import { ref, nextTick, onMounted, onUnmounted } from 'vue';
-import { Check, Cpu } from 'lucide-vue-next';
+import { useI18n } from 'vue-i18n';
+import { Check, Cpu, QrCode } from 'lucide-vue-next';
+
+const { t: $t } = useI18n();
 
 const visible = ref(false);
 const text = ref('');
@@ -59,6 +74,40 @@ function open() {
 function openModelSwitcher() {
   window.dispatchEvent(new CustomEvent('open-mobile-model-switcher'));
   close();
+}
+
+async function openScanPairing() {
+  if (window.appAPI?.scanQrCode) {
+    try {
+      close();
+      await nextTick();
+      document.body.classList.add('scanner-active');
+      const code = await window.appAPI.scanQrCode();
+      document.body.classList.remove('scanner-active');
+      
+      if (code) {
+        try {
+          const payload = JSON.parse(code);
+          await window.appAPI.setConfig('pairing_payload', payload);
+          console.log('Saved pairing payload from FAB:', payload);
+          if (window.appAPI.triggerMobileSync) {
+            const syncTimeout = new Promise((_, reject) => setTimeout(() => reject(new Error('Sync Timeout')), 15000));
+            await Promise.race([
+              window.appAPI.triggerMobileSync(payload),
+              syncTimeout
+            ]);
+          }
+        } catch (e) {
+          console.error('Invalid QR Code JSON:', code);
+        }
+      }
+    } catch (err) {
+      document.body.classList.remove('scanner-active');
+      console.error('Scan failed:', err);
+    }
+  } else {
+    alert($t('setup.scanner_not_supported') || '当前环境不支持扫码');
+  }
 }
 
 function close() {
@@ -106,23 +155,6 @@ onUnmounted(() => document.removeEventListener('keydown', onGlobalKey));
 </script>
 
 <style scoped>
-.quicknote-model-btn {
-  width: 48px;
-  height: 48px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: transparent;
-  border: none;
-  color: var(--text-secondary);
-  cursor: pointer;
-  transition: color 0.2s;
-  flex-shrink: 0;
-}
-.quicknote-model-btn:hover {
-  color: var(--text-primary);
-}
-
 /* ── 背景遮罩 + 毛玻璃 ── */
 .quicknote-overlay {
   position: fixed;
@@ -132,9 +164,9 @@ onUnmounted(() => document.removeEventListener('keydown', onGlobalKey));
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.65);
-  backdrop-filter: blur(24px);
-  -webkit-backdrop-filter: blur(24px);
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
 }
 
 /* ── 输入条 ── */
@@ -200,10 +232,53 @@ onUnmounted(() => document.removeEventListener('keydown', onGlobalKey));
   display: flex;
   align-items: center;
   gap: 6px;
-  margin-top: 12px;
+  margin-top: 16px;
   font-size: 13px;
   color: var(--accent-primary);
   opacity: 0.9;
+}
+
+/* ── 底部快捷栏 ── */
+.quicknote-bottom-bar {
+  position: absolute;
+  bottom: calc(24px + env(safe-area-inset-bottom, 0px));
+  left: 24px;
+  right: 24px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  pointer-events: none;
+}
+
+.quicknote-bottom-btn {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  padding: 0 16px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-default);
+  border-radius: 20px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  box-shadow: var(--shadow-md);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  outline: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.quicknote-bottom-btn:hover {
+  color: var(--text-primary);
+  border-color: var(--border-hover);
+  background: var(--bg-tertiary);
+}
+
+.quicknote-bottom-btn:active {
+  transform: scale(0.95);
+  background: var(--bg-primary);
 }
 
 /* ── 动画 ── */
@@ -230,6 +305,21 @@ onUnmounted(() => document.removeEventListener('keydown', onGlobalKey));
 }
 .quicknote-leave-to .quicknote-bar {
   transform: scale(0.96) translateY(4px);
+  opacity: 0;
+}
+
+.quicknote-enter-active .quicknote-bottom-btn {
+  transition: transform 0.25s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.2s;
+}
+.quicknote-leave-active .quicknote-bottom-btn {
+  transition: transform 0.15s ease-in, opacity 0.12s;
+}
+.quicknote-enter-from .quicknote-bottom-btn {
+  transform: translateY(12px);
+  opacity: 0;
+}
+.quicknote-leave-to .quicknote-bottom-btn {
+  transform: translateY(4px);
   opacity: 0;
 }
 
