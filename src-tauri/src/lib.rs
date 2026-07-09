@@ -897,6 +897,7 @@ pub fn run() {
             crypto::reset_device_keys,
             crypto::get_pairing_payload,
             sync_engine::get_connected_devices,
+            sync_engine::disconnect_device,
             sync_engine::trigger_mobile_sync,
             sync_engine::write_mobile_outbox,
             sync_engine::relay_handshake,

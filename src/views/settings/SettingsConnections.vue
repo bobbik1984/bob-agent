@@ -19,7 +19,17 @@
             <span class="service-name">{{ $t('settings.p2p_pairing') }}</span>
             <span class="service-sub">{{ !isUnlocked ? $t('settings.p2p_auth_desc_new') : $t('settings.p2p_pairing_desc') }}</span>
           </div>
-          <span class="service-status-dot" :class="isUnlocked ? 'dot-connected' : 'dot-disconnected'"></span>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <button 
+              v-if="connectedDevices.length > 0" 
+              class="device-indicator-btn"
+              @click.stop="showDevicesModal = true" 
+              :title="connectedDevices.map(d => `${d.platform === 'android' ? 'Android' : d.platform} (${d.device_id.substring(0, 8)})`).join('\n')"
+            >
+              <Smartphone :size="12" />
+            </button>
+            <span class="service-status-dot" :class="isUnlocked ? 'dot-connected' : 'dot-disconnected'"></span>
+          </div>
         </div>
         
         <div class="service-card-footer">
@@ -54,27 +64,6 @@
             <button class="btn btn-danger-outline" style="padding: 8px;" @click="handleReset" :title="$t('settings.p2p_btn_destroy')">
               <X :size="16" />
             </button>
-          </div>
-        </div>
-
-        <!-- 已连接设备列表 -->
-        <div v-if="connectedDevices.length > 0" class="service-card-body" style="border-top: 1px solid var(--border-subtle); margin-top: 12px; padding-top: 12px;">
-          <div style="font-size: 12px; font-weight: 500; color: var(--text-secondary); margin-bottom: 8px;">
-            {{ isMobile ? '已配对的电脑' : '已连接设备' }}
-          </div>
-          <div style="display: flex; flex-direction: column; gap: 8px;">
-            <div v-for="dev in connectedDevices" :key="dev.device_id" style="display: flex; justify-content: space-between; align-items: center; background: var(--bg-tertiary); padding: 8px 12px; border-radius: 6px;">
-              <div style="display: flex; flex-direction: column; gap: 2px;">
-                <div style="display: flex; align-items: center; gap: 6px;">
-                  <span class="status-dot" :class="isDeviceOnline(dev) ? 'dot-connected' : 'dot-disconnected'" style="width: 8px; height: 8px; border-radius: 50%;"></span>
-                  <span style="font-size: 13px; font-weight: 500; color: var(--text-primary);">{{ dev.platform === 'android' ? 'Android Device' : dev.platform }}</span>
-                  <span style="font-size: 11px; color: var(--text-tertiary); font-family: monospace;">{{ dev.device_id.substring(0, 8) }}</span>
-                </div>
-                <div style="font-size: 11px; color: var(--text-tertiary); margin-left: 14px;">
-                  {{ dev.ip_address }} · {{ formatTime(dev.last_seen) }}
-                </div>
-              </div>
-            </div>
           </div>
         </div>
       </div>
@@ -491,6 +480,45 @@
     </div>
   </Transition>
 
+  <!-- 📱 已连接设备列表弹窗 -->
+  <Transition name="briefing-fade">
+    <div v-if="showDevicesModal" class="wechat-modal-overlay" @click.self="showDevicesModal = false">
+      <div class="morning-briefing wechat-qr-modal" style="width: 420px; border-radius: var(--radius-lg); background: var(--bg-secondary); border: 1px solid var(--border-subtle); overflow: hidden; box-shadow: var(--shadow-lg);">
+        <div class="briefing-header" style="display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid var(--border-subtle); background: var(--bg-tertiary);">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <div class="briefing-icon" style="color: var(--user-accent, var(--accent-primary)); display: flex; align-items: center;"><Smartphone :size="18" /></div>
+            <div class="briefing-title" style="font-size: 14px; font-weight: 600; color: var(--text-primary);">已配对的设备列表</div>
+          </div>
+          <button class="briefing-close" @click="showDevicesModal = false" title="关闭" style="background: none; border: none; color: var(--text-tertiary); cursor: pointer; padding: 4px; border-radius: 4px; display: flex; align-items: center; justify-content: center;">
+            <X :size="14" />
+          </button>
+        </div>
+        
+        <div class="briefing-body" style="padding: 20px; display: flex; flex-direction: column; gap: 12px; max-height: 400px; overflow-y: auto;">
+          <div v-for="dev in connectedDevices" :key="dev.device_id" style="display: flex; flex-direction: column; gap: 6px; background: var(--bg-tertiary); padding: 12px; border-radius: var(--radius-md); border: 1px solid var(--border-subtle);">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <div style="display: flex; align-items: center; gap: 6px;">
+                <span class="status-dot" :class="isDeviceOnline(dev) ? 'dot-connected' : 'dot-disconnected'" style="width: 8px; height: 8px; border-radius: 50%;"></span>
+                <span style="font-size: 13px; font-weight: 600; color: var(--text-primary);">{{ dev.platform === 'android' ? 'Android Device' : dev.platform }}</span>
+                <span style="font-size: 11px; color: var(--text-tertiary); font-family: monospace;">({{ dev.device_id.substring(0, 8) }})</span>
+              </div>
+              <button class="btn btn-danger-outline btn-sm" style="padding: 4px 8px; font-size: 11px;" @click="handleDisconnectDevice(dev)" title="解绑此设备">
+                <Unlink :size="11" /> 解绑
+              </button>
+            </div>
+            <div style="font-size: 11px; color: var(--text-secondary); margin-left: 14px; display: flex; flex-direction: column; gap: 2px;">
+              <div>IP 地址: {{ dev.ip_address }}</div>
+              <div>最后活跃: {{ formatTime(dev.last_seen) }}</div>
+            </div>
+          </div>
+          <div v-if="connectedDevices.length === 0" style="text-align: center; padding: 20px; color: var(--text-tertiary); font-size: 13px;">
+            暂无已配对设备
+          </div>
+        </div>
+      </div>
+    </div>
+  </Transition>
+
   <!-- 微信扫码弹窗 -->
   <Transition name="briefing-fade">
     <div v-if="showWechatModal" class="wechat-modal-overlay">
@@ -750,6 +778,7 @@ async function toggleProxyTunnel() {
 const isInitialized = ref(true); // Will fetch from backend
 const isUnlocked = ref(false);
 const showP2pModal = ref(false);
+const showDevicesModal = ref(false);
 const pinInput = ref('');
 const pairingInfo = ref({
   device_id: '',
@@ -792,6 +821,22 @@ const handleReset = async () => {
       connectedDevices.value = [];
     } catch (error) {
       await showAlert(t('settings.p2p_alert_reset_err') + error);
+    }
+  }
+};
+
+const handleDisconnectDevice = async (dev) => {
+  const confirmed = await showConfirm(`确定要解绑设备 ${dev.platform} (${dev.device_id.substring(0, 8)}) 吗？`);
+  if (confirmed) {
+    try {
+      await invoke('disconnect_device', { deviceId: dev.device_id });
+      await fetchConnectedDevices();
+      if (connectedDevices.value.length === 0) {
+        showDevicesModal.value = false;
+        isUnlocked.value = false;
+      }
+    } catch (e) {
+      console.error('Failed to disconnect device', e);
     }
   }
 };
@@ -1214,8 +1259,7 @@ onUnmounted(() => {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
-  align-items: stretch;
-grid-auto-rows: 1fr;
+  align-items: start;
 }
 @media (max-width: 900px) {
   .service-cards-grid {
@@ -1304,8 +1348,32 @@ grid-auto-rows: 1fr;
 .service-card-header {
   display: flex;
   align-items: center;
-  gap: 10px;
+  justify-content: space-between;
+  width: 100%;
   margin-bottom: 8px;
+}
+
+.device-indicator-btn {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-subtle);
+  color: var(--user-accent, var(--accent-primary));
+  padding: 4px;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  width: 22px;
+  height: 22px;
+  box-shadow: var(--shadow-sm);
+  flex-shrink: 0;
+}
+
+.device-indicator-btn:hover {
+  background: var(--user-accent, var(--accent-primary));
+  color: var(--bg-primary);
+  border-color: var(--user-accent, var(--accent-primary));
 }
 
 .service-icon {

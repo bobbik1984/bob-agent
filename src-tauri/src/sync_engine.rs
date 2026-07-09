@@ -70,6 +70,18 @@ pub async fn get_connected_devices(app: AppHandle) -> Result<Vec<ConnectedDevice
     Ok(registry.get_all())
 }
 
+#[command]
+pub async fn disconnect_device(app: AppHandle, device_id: String) -> Result<(), String> {
+    let registry = app.state::<Arc<DeviceRegistry>>();
+    {
+        let mut devices = registry.devices.write().unwrap();
+        devices.remove(&device_id);
+    }
+    registry.save();
+    let _ = app.emit("sync:device_disconnected", device_id);
+    Ok(())
+}
+
 pub fn register_device(app: &AppHandle, headers: &axum::http::HeaderMap, ip: std::net::SocketAddr) {
     if let (Some(device_id), Some(platform)) = (
         headers.get("x-device-id").and_then(|v| v.to_str().ok()),
