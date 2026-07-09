@@ -546,6 +546,13 @@
 - [x] T-2333: Bot 推送唤醒联调 (手机被杀后台 → PC 通过微信 Bot 推送 → 用户打开手机端 → 同步)。
 - [x] T-2334: 设备列表持久化 (DeviceRegistry 落盘保存，目前为内存 RwLock<HashMap>)。
 
+### Phase 3e: 跨端技能同步与数据同步进阶 (Skills & DB Sync)
+- [ ] T-2335: 实现 SQLite 数据库（知识库索引、图谱、对话记录）的双向增量 Merge 覆盖同步协议。
+- [ ] T-2341: PC 端新增“推送技能到手机” WebRTC 发送通道，读取 `bundled_skills` / `external_skills` 目录打包成数据 payload 传输。
+- [ ] T-2342: 手机端接收到 payload 后，自动解压保存至手机沙盒目录 (`app_local_data_dir/skills`)。
+- [ ] T-2343: 手机端 UI（设置面板/技能管理器）新增【导入技能 (.zip/文件夹)】按钮，调用 Tauri 原生文件选择器。
+- [ ] T-2344: 对话工具扩展：支持用户指令让 Bob 从远程 URL 下载并安装 `SKILL.md` 到 `externalSkillsDir`。
+
 ---
 
 ## 📍 目标 25: 票夹与通行证管理系统 (Bob Wallet) (T-2500)
