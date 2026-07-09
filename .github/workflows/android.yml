@@ -60,17 +60,35 @@ jobs:
             <uses-permission android:name="android.permission.WAKE_LOCK"/>\n\
             <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>' $MANIFEST
             
-            echo "Setting icon background to white..."
-            COLORS_XML="src-tauri/gen/android/app/src/main/res/values/colors.xml"
-            if [ -f "$COLORS_XML" ]; then
-              sed -i 's/name="ic_launcher_background">.*<\/color>/name="ic_launcher_background">#FFFFFF<\/color>/g' $COLORS_XML
-              sed -i 's/#6200EE/#FFFFFF/g' $COLORS_XML
-              sed -i 's/#3700B3/#FFFFFF/g' $COLORS_XML
-            fi
-            DRAWABLE_BG="src-tauri/gen/android/app/src/main/res/drawable/ic_launcher_background.xml"
-            if [ -f "$DRAWABLE_BG" ]; then
-              echo '<?xml version="1.0" encoding="utf-8"?><color xmlns:android="http://schemas.android.com/apk/res/android" color="#FFFFFF"/>' > $DRAWABLE_BG
-            fi
+            echo "Setting icon background to white and patching all default purple colors..."
+            python -c '
+import os, re
+res_dir = "src-tauri/gen/android/app/src/main/res"
+if os.path.exists(res_dir):
+    for root, dirs, files in os.walk(res_dir):
+        for file in files:
+            if file.endswith(".xml"):
+                path = os.path.join(root, file)
+                try:
+                    with open(path, "r", encoding="utf-8") as f:
+                        content = f.read()
+                    new_content = content
+                    new_content = new_content.replace("#FF6200EE", "#FFFFFFFF")
+                    new_content = new_content.replace("#6200EE", "#FFFFFF")
+                    new_content = new_content.replace("#FF3700B3", "#FFFFFFFF")
+                    new_content = new_content.replace("#3700B3", "#FFFFFF")
+                    new_content = re.sub(
+                        r"name=\"ic_launcher_background\">[^<]+</color>",
+                        "name=\"ic_launcher_background\">#FFFFFF</color>",
+                        new_content
+                    )
+                    if new_content != content:
+                        with open(path, "w", encoding="utf-8") as f:
+                            f.write(new_content)
+                        print(f"Patched color in resource: {path}")
+                except Exception as e:
+                    print(f"Error patching {path}: {e}")
+'
             
             # Lock portrait mode in activity
             sed -i '/<activity/a \            android:screenOrientation="portrait"' $MANIFEST
