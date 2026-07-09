@@ -210,7 +210,7 @@
 
     <div class="service-cards-grid">
       <!-- 飞书 (Feishu / Lark) -->
-      <div class="service-card" :class="{ connected: isConnected('lark') }">
+      <div class="service-card static-card" :class="{ connected: isConnected('lark') }">
         <div class="service-card-header">
           <div class="service-icon lark-icon">
             <img :src="getAssetUrl('feishu.svg')" style="width: 22px; height: 22px; object-fit: contain;" alt="Feishu" />
@@ -270,7 +270,7 @@
       </div>
 
       <!-- Google Calendar (Native) -->
-      <div class="service-card" :class="{ connected: isConnected('google') }">
+      <div class="service-card static-card" :class="{ connected: isConnected('google') }">
         <div class="service-card-header">
           <div class="service-icon" style="background: transparent;">
             <img :src="getAssetUrl('google.svg')" style="width: 22px; height: 22px; object-fit: contain;" alt="Google" />
