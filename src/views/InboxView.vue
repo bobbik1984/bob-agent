@@ -31,21 +31,7 @@
       </div>
 
       <div v-else class="inbox-content">
-        <!-- T-1307: 待办提醒横幅 -->
-        <div v-if="reminders.length > 0" class="reminder-section">
-          <div
-            v-for="(r, ri) in reminders"
-            :key="r.id || ri"
-            class="reminder-alert"
-          >
-            <Bell :size="14" class="reminder-icon" />
-            <span class="reminder-text">
-              <strong>{{ r.title }}</strong>
-              <span v-if="r.date" class="reminder-date">{{ r.date }}</span>
-            </span>
-            <button class="reminder-dismiss" @click="dismissReminder(ri)">&times;</button>
-          </div>
-        </div>
+
         <!-- 过期事件区域 -->
         <div v-if="overdueEvents.length > 0 && (!isMobile || activeTab === 'todo')" class="section">
           <h3 class="section-title" style="color: var(--color-error)">
