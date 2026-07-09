@@ -316,8 +316,8 @@
           </div>
         </div>
         <!-- 移动端 + 按钮 -->
-        <button v-if="isMobile" class="mobile-plus-btn" @click="handleAttach">
-          <Paperclip :size="20" />
+        <button v-if="isMobile" class="mobile-plus-btn" @click="showMobileTools = true; mobileSheetState = 'main'">
+          <Plus :size="20" />
         </button>
 
         <!-- 文本输入 -->
@@ -352,10 +352,8 @@
         <!-- Mobile 发送按钮 -->
         <div v-if="isMobile" class="mobile-send-btn-wrap">
           <button v-if="isStreaming" class="action-btn stop-btn" @click="stopGeneration" :title="$t('chat.stop')"><span class="icon-stop"></span></button>
-          <button v-else class="mobile-mode-btn" @click="showMobileTools = true; mobileSheetState = 'agentMode'">
-            <Shield v-if="agentMode === 'insight'" :size="20" style="color: var(--text-tertiary);" />
-            <Zap v-else-if="agentMode === 'yolo'" :size="20" style="color: var(--accent-primary);" />
-            <Target v-else :size="20" style="color: #ff9800;" />
+          <button v-else class="action-btn send-btn" :disabled="!canSend || !chatReady" @click="sendMessage" :title="chatReadyMsg || $t('chat.send')">
+            <Send :size="16" />
           </button>
         </div>
         <!-- 底部工具栏 -->
@@ -488,9 +486,37 @@
             <button v-if="mobileSheetState === 'models'" class="sheet-back-btn" @click="mobileSheetState = 'providers'">
               <ChevronLeft :size="20" /> <span style="margin-left:4px">{{ $t('chat.back') || '返回' }}</span>
             </button>
+            <button v-else-if="mobileSheetState === 'providers' || mobileSheetState === 'agentMode'" class="sheet-back-btn" @click="mobileSheetState = 'main'">
+              <ChevronLeft :size="20" /> <span style="margin-left:4px">{{ $t('chat.back') || '返回' }}</span>
+            </button>
             <div class="sheet-drag-handle" v-else></div>
           </div>
-          <div v-if="mobileSheetState === 'providers'" class="sheet-content list-view">
+          <div v-if="mobileSheetState === 'main'" class="sheet-content main-grid" style="grid-template-columns: repeat(3, 1fr); padding-bottom: 24px;">
+            <!-- 1. 添加附件 -->
+            <button class="sheet-grid-item" @click="handleAttach(); showMobileTools = false;">
+              <div class="grid-icon-wrap" style="background: rgba(var(--user-accent-rgb, 39, 118, 187), 0.1); color: var(--accent-primary);">
+                <Paperclip :size="24" />
+              </div>
+              <span class="grid-item-label">{{ $t('chat.mobile_attach') }}</span>
+            </button>
+            
+            <!-- 2. 选择模型 -->
+            <button class="sheet-grid-item" @click="mobileSheetState = 'providers'">
+              <div class="grid-icon-wrap" style="background: rgba(76, 175, 80, 0.1); color: #4caf50;">
+                <Cpu :size="24" />
+              </div>
+              <span class="grid-item-label">{{ $t('chat.mobile_select_model') }}</span>
+            </button>
+            
+            <!-- 3. 执行形式 -->
+            <button class="sheet-grid-item" @click="mobileSheetState = 'agentMode'">
+              <div class="grid-icon-wrap" style="background: rgba(255, 152, 0, 0.1); color: #ff9800;">
+                <Zap :size="24" />
+              </div>
+              <span class="grid-item-label">{{ $t('chat.mobile_agent_mode') }}</span>
+            </button>
+          </div>
+          <div v-else-if="mobileSheetState === 'providers'" class="sheet-content list-view">
             <button v-for="p in modelProviderList" :key="p.id" class="sheet-list-item" :class="{ active: switcherProvider === p.id }" @click="switcherProvider = p.id; mobileSheetState = 'models'">
               <img v-if="getModelLogo(p.id)" :src="getModelLogo(p.id)" class="model-logo-sm" />
               <div class="item-info">
@@ -557,7 +583,7 @@ import '@/utils/markdown';
 <script setup>
 import { ref, watch, onMounted, onUnmounted, nextTick, inject, computed } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { Sparkles, FileText, Camera, Calendar, User, ChevronRight, ChevronDown, ChevronUp, ChevronLeft, X, FileUp, Paperclip, Bookmark, Loader2, Shield, Zap, Target, Lock, Unlock, Download, Smartphone, Monitor, ClipboardCopy, Check, BookmarkPlus, Plus, Menu } from 'lucide-vue-next';
+import { Sparkles, FileText, Camera, Calendar, User, ChevronRight, ChevronDown, ChevronUp, ChevronLeft, X, FileUp, Paperclip, Bookmark, Loader2, Shield, Zap, Target, Lock, Unlock, Download, Smartphone, Monitor, ClipboardCopy, Check, BookmarkPlus, Plus, Menu, Cpu, Send } from 'lucide-vue-next';
 import ConfirmCard from '../components/ConfirmCard.vue';
 import FileCard from '../components/FileCard.vue';
 import SearchCard from '../components/SearchCard.vue';
