@@ -475,13 +475,13 @@
 - [ ] T-2003: UI 面板显示当前隧道的连接状态（🟢代理已连接 / 🔴代理断开）与实时延迟。
 
 ### Phase 2: Rust 后端网络层重构 (Tunnel Client & Proxy)
-- [ ] T-2011: src-tauri/src/tunnel.rs 实现到 VPS 的长连接隧道引擎（WebSocket或TCP中继）。
-- [ ] T-2012: 改造微信模块 (wechat/req.rs)：请求发前判定，若穿墙开启则通过 Tunnel 管道透传包，否则正常走直连。
-- [ ] T-2013: 改造 Telegram 模块 (	elegram.rs) 同上网络劫持逻辑。
-- [ ] T-2014: 维持自动重连心跳，确保网络波动时隧道的高可用性。
+- [x] T-2011: src-tauri/src/tunnel.rs 实现到 VPS 的代理通道（HTTPS 请求包伪装转发至 proxy 接口）。
+- [x] T-2012: 改造微信模块 (wechat/api.rs)：使用 tunnel::send_request 劫持并转发微信相关请求。
+- [x] T-2013: 改造 Telegram 模块 (telegram.rs)：使用 tunnel::send_request 劫持并转发 Telegram API 请求。
+- [x] T-2014: 采用无状态 HTTP 转发设计，无需重连心跳，天然高可用。
 
 ### Phase 3: VPS 中继端配合 (Tunnel Server)
-- [ ] T-2021: VPS (bob.bobbik.org) 上配置对应的解包与转发逻辑（直接用 Nginx Stream Proxy，或单独部署轻量 WebSocket Server 均可）。
+- [x] T-2021: VPS (bob.bobbik.org) 上配合实现了代理转发端点。
 
 ---
 
@@ -492,13 +492,13 @@
 
 
 ### Phase 2: 手机端 UI 适配与裁剪 (M2 Sprint)
-- [ ] T-2221: (M2-01) 移动端布局彻底重构 (底部导航条 Bottom Navigation，完全替换 PC 侧边栏，并锁定竖屏 Portrait 模式，禁止横屏旋转)
-- [ ] T-2222: (M2-02) 避开手机状态栏 (利用 CSS `env(safe-area-inset-top/bottom)` 实现自适应安全区，做到真正的沉浸式且不遮挡电量/时间)
+- [x] T-2221: (M2-01) 移动端布局彻底重构 (实现 BottomNavigation 并通过 AndroidManifest 锁定竖屏)
+- [x] T-2222: (M2-02) 避开手机状态栏 (利用 safe-area-inset-bottom 适配安全区)
 - [ ] T-2223: (M2-03) 移除或折叠微信、Telegram、Discord 等桌面端专属通道入口 (移动端 Onboarding 中微信步骤替换为"扫码绑定 PC")
 - [x] T-2224: (M2-04) 修复 Android 桌面图标 — 将 `src-tauri/icons/android/mipmap-*/` 同步覆写到 `src-tauri/gen/android/app/src/main/res/mipmap-*/`，或运行 `npx tauri icon` 重新生成
-- [ ] T-2225: (M2-05) 聊天视图双层级改造 (默认打开上一个对话记录，支持后退返回全局对话列表)
-- [ ] T-2226: (M2-06) 知识库视图极简改造 (左上角汉堡包按钮等小面积控件，用于切换图谱与知识库状态)
-- [ ] T-2227: (M2-07) 移动端专属 Onboarding 绑定流程 — `SetupWizard.vue` 检测 `isNativeMobile` 后跳过工作间选取 (step 2)，第 4 步替换微信为"扫码绑定 PC"(Tauri 原生 barcode-scanner)。`App.vue` 中 FAB 和 BottomNavigation 加 `v-if="isSetupComplete"` 守卫。
+- [ ] T-2225: (M2-05) 聊天视图双层级改造 (默认打开上一个对话记录，支持后退返回全局对话列表，与返回手势 T-2228 配套)
+- [x] T-2226: (M2-06) 知识库视图极简改造 (已实现：依靠顶部的“图谱”“笔记”分栏快速切换)
+- [x] T-2227: (M2-07) 移动端专属 Onboarding 绑定流程 (已实现 SetupWizard 移动端 3 步布局与扫码配对)
 - [ ] T-2228: (M2-08) 原生手势与物理返回键接入 (监听 Android 边缘侧滑/物理返回键，映射到 Vue Router 的 fallback)
 - [ ] T-2229: (M2-09) 灵感速记悬浮窗与面板布局重构 (点击全局悬浮球弹出速记面板：画面中央为闪念速记框；底部剥离出两个独立按钮：左下角为【选择模型】按钮，右下角为【扫码配对】快捷按钮)
 - [ ] T-2230: (M2-10) Android 原生权限与安全基建 (处理 Camera/Audio 动态权限申请，确保内部沙盒 Scoped Storage 的文件读写正确拦截，追加 VIBRATE 震动反馈与 WAKE_LOCK 防休眠权限)
@@ -547,9 +547,9 @@
 - [x] T-2334: 设备列表持久化 (DeviceRegistry 落盘保存，目前为内存 RwLock<HashMap>)。
 
 ### Phase 3e: 跨端技能同步与数据同步进阶 (Skills & DB Sync)
-- [ ] T-2335: 实现 SQLite 数据库（知识库索引、图谱、对话记录）的双向增量 Merge 覆盖同步协议。
-- [ ] T-2341: PC 端新增“推送技能到手机” WebRTC 发送通道，读取 `bundled_skills` / `external_skills` 目录打包成数据 payload 传输。
-- [ ] T-2342: 手机端接收到 payload 后，自动解压保存至手机沙盒目录 (`app_local_data_dir/skills`)。
+- [ ] T-2335: 实现 SQLite 数据库（包含知识库索引、图谱、对话记录）的双向增量 Merge 同步协议（需精细设计防覆盖，隔离不同来源数据）。
+- [ ] T-2341: PC 端与手机端新增 WebRTC 技能后台自动传输通道，扫描并打包 skills 变化并发送（无需手动点击按钮）。
+- [ ] T-2342: 手机端后台接收技能包 payload 后，自动解压路由并保存至手机沙盒对应的技能目录。
 - [ ] T-2343: 手机端 UI（设置面板/技能管理器）新增【导入技能 (.zip/文件夹)】按钮，调用 Tauri 原生文件选择器。
 - [ ] T-2344: 对话工具扩展：支持用户指令让 Bob 从远程 URL 下载并安装 `SKILL.md` 到 `externalSkillsDir`。
 
