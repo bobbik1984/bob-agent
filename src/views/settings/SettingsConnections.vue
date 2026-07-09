@@ -1554,6 +1554,9 @@ onUnmounted(() => {
   border-color: var(--border-subtle) !important;
   box-shadow: none !important;
 }
+.static-card.connected {
+  border-color: var(--border-subtle) !important;
+}
 /* ── Pairing Progress Overlay ── */
 .pairing-overlay {
   position: fixed;
