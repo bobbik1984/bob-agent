@@ -554,26 +554,20 @@ onMounted(async () => {
     const savedLang = await window.appAPI.getConfig('language');
     if (savedLang) locale.value = savedLang;
 
-    // Mobile: 1-hour cooldown sync check & Outbox processing
+    // Mobile: Auto-reconnect and trigger sync on startup
     if (isMobile.value) {
       const pairingPayload = await window.appAPI.getConfig('pairing_payload');
       if (pairingPayload) {
-        const lastSyncTimeStr = localStorage.getItem('bob-last-sync-time');
-        const lastSyncTime = lastSyncTimeStr ? parseInt(lastSyncTimeStr, 10) : 0;
-        const now = Date.now();
-        if (now - lastSyncTime > 60 * 60 * 1000) {
-          console.log('[Sync] 距离上次同步超过1小时，触发移动端双向同步...');
-          if (window.appAPI.triggerMobileSync) {
-            window.appAPI.triggerMobileSync(pairingPayload).then(() => {
-              localStorage.setItem('bob-last-sync-time', now.toString());
-            }).catch(e => console.error('[Sync] 触发同步失败:', e));
-          }
-        } else {
-          console.log('[Sync] 距离上次同步不足1小时，跳过本次冷启动同步。启动静默UDP监听...');
-          // 启动 UDP 监听以接收 PC 的上线广播
-          if (window.appAPI.triggerMobileSync) {
-             window.appAPI.triggerMobileSync({ ...pairingPayload, listen_only: true }).catch(e => console.error(e));
-          }
+        console.log('[Sync] 检测到已配对设备，启动后台双向同步...');
+        if (window.appAPI.triggerMobileSync) {
+          window.appAPI.triggerMobileSync(pairingPayload).then(() => {
+            console.log('[Sync] 后台同步成功！');
+            localStorage.setItem('bob-last-sync-time', Date.now().toString());
+          }).catch(e => {
+            console.warn('[Sync] 后台同步失败 (PC可能处于离线状态)，启动静默UDP监听...', e);
+            // Fallback to background UDP listener if initial active sync failed
+            window.appAPI.triggerMobileSync({ ...pairingPayload, listen_only: true }).catch(err => console.error(err));
+          });
         }
       }
     }
