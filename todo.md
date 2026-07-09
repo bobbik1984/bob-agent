@@ -500,7 +500,7 @@
 - [ ] T-2226: (M2-06) 知识库视图极简改造 (左上角汉堡包按钮等小面积控件，用于切换图谱与知识库状态)
 - [ ] T-2227: (M2-07) 移动端专属 Onboarding 绑定流程 — `SetupWizard.vue` 检测 `isNativeMobile` 后跳过工作间选取 (step 2)，第 4 步替换微信为"扫码绑定 PC"(Tauri 原生 barcode-scanner)。`App.vue` 中 FAB 和 BottomNavigation 加 `v-if="isSetupComplete"` 守卫。
 - [ ] T-2228: (M2-08) 原生手势与物理返回键接入 (监听 Android 边缘侧滑/物理返回键，映射到 Vue Router 的 fallback)
-- [ ] T-2229: (M2-09) 灵感速记悬浮窗 (全局半透明可拖拽的 Bob 悬浮球 Floating Action Button，替代原本边角的固定按钮，一键唤醒语音或闪念输入)
+- [ ] T-2229: (M2-09) 灵感速记悬浮窗与面板布局重构 (点击全局悬浮球弹出速记面板：画面中央为闪念速记框；底部剥离出两个独立按钮：左下角为【选择模型】按钮，右下角为【扫码配对】快捷按钮)
 - [ ] T-2230: (M2-10) Android 原生权限与安全基建 (处理 Camera/Audio 动态权限申请，确保内部沙盒 Scoped Storage 的文件读写正确拦截，追加 VIBRATE 震动反馈与 WAKE_LOCK 防休眠权限)
 - [x] T-2235: (M2-11) **修复移动端 FAB 悬浮球点击后速记键盘闪退 Bug** — `App.vue` 的 `onFabPointerUp` 中在调用 `openQuickNote()` 前加 `e.preventDefault()` 阻断浏览器合成 click 穿透；`QuickNoteOverlay.vue` 的 `open()` 中加入 150ms `_justOpened` 防抖锁，`close()` 检查该锁后再执行关闭。
 - [x] T-2236: (M2-12) **修复 Android 端本地模型 (GGUF) 下载进度 0% 问题** — 根因为 CDN 不返回 Content-Length 导致 total_bytes=0 时进度事件从不触发。修复：Rust 端增加 chunked 模式每 1MB 上报，Vue 前端处理 progress=-1 显示已下载字节量。
