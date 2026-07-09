@@ -489,7 +489,14 @@
             <button v-else-if="mobileSheetState === 'providers' || mobileSheetState === 'agentMode'" class="sheet-back-btn" @click="mobileSheetState = 'main'">
               <ChevronLeft :size="20" /> <span style="margin-left:4px">{{ $t('chat.back') || '返回' }}</span>
             </button>
-            <div class="sheet-drag-handle" v-else></div>
+            
+            <div class="sheet-title" style="font-size: 14px; font-weight: 600; color: var(--text-primary);">
+              {{
+                mobileSheetState === 'main' ? '快捷功能' :
+                mobileSheetState === 'providers' ? '选择供应商' :
+                mobileSheetState === 'models' ? '选择具体模型' : '选择执行形式'
+              }}
+            </div>
           </div>
           <div v-if="mobileSheetState === 'main'" class="sheet-content main-grid" style="grid-template-columns: repeat(3, 1fr); padding-bottom: 24px;">
             <!-- 1. 添加附件 -->
@@ -502,7 +509,7 @@
             
             <!-- 2. 选择模型 -->
             <button class="sheet-grid-item" @click="mobileSheetState = 'providers'">
-              <div class="grid-icon-wrap" style="background: rgba(76, 175, 80, 0.1); color: #4caf50;">
+              <div class="grid-icon-wrap" style="background: var(--color-success-bg); color: var(--color-success);">
                 <Cpu :size="24" />
               </div>
               <span class="grid-item-label">{{ $t('chat.mobile_select_model') }}</span>
@@ -510,7 +517,7 @@
             
             <!-- 3. 执行形式 -->
             <button class="sheet-grid-item" @click="mobileSheetState = 'agentMode'">
-              <div class="grid-icon-wrap" style="background: rgba(255, 152, 0, 0.1); color: #ff9800;">
+              <div class="grid-icon-wrap" style="background: var(--color-warning-bg); color: var(--color-warning);">
                 <Zap :size="24" />
               </div>
               <span class="grid-item-label">{{ $t('chat.mobile_agent_mode') }}</span>
@@ -2736,13 +2743,15 @@ defineExpose({
   left: 0;
   right: 0;
   background: var(--bg-primary);
-  border-radius: 0;
+  border-radius: 20px 20px 0 0;
+  border-top: 1px solid var(--border-subtle);
   z-index: 1000;
   max-height: 80vh;
   display: flex;
   flex-direction: column;
   padding-bottom: env(safe-area-inset-bottom);
-  box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.25);
+  transition: all 0.3s ease;
 }
 .sheet-header {
   height: 48px;
@@ -2751,12 +2760,14 @@ defineExpose({
   justify-content: center;
   position: relative;
   flex-shrink: 0;
+  border-bottom: 1px solid var(--border-subtle);
 }
 .sheet-drag-handle {
-  width: 36px;
+  width: 40px;
   height: 4px;
   background: var(--border-strong);
   border-radius: 2px;
+  opacity: 0.6;
 }
 .sheet-back-btn {
   position: absolute;
