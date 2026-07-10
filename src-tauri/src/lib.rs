@@ -1228,6 +1228,21 @@ pub fn run() {
 
             // ── 内置技能库初始化 ──
             // 记录安装包资源中 skills 目录的绝对路径，用于“双轨合并读取”架构
+            #[cfg(any(target_os = "android", target_os = "ios"))]
+            {
+                let skills_dir = get_data_dir().join("skills");
+                let is_empty = std::fs::read_dir(&skills_dir).map(|mut i| i.next().is_none()).unwrap_or(true);
+                if is_empty {
+                    log::info!("Extracting bundled skills payload to sandbox...");
+                    let zip_bytes = include_bytes!(concat!(env!("OUT_DIR"), "/bundled_skills.zip"));
+                    if let Err(e) = crate::skills_sync::unpack_skills(zip_bytes, &skills_dir) {
+                        log::error!("Failed to unpack bundled skills payload: {}", e);
+                    } else {
+                        log::info!("Successfully unpacked bundled skills to sandbox");
+                    }
+                }
+            }
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
             {
                 use tauri::Manager;
                 let mut cfg = read_config();

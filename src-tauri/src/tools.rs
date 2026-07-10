@@ -1453,8 +1453,6 @@ fn tool_list_dir(path: &str, max_items: usize) -> Value {
     })
 }
 
-include!(concat!(env!("OUT_DIR"), "/gen_skills.rs"));
-
 /// list_skills — 列出可用技能
 fn tool_list_skills() -> Value {
     let config = super::read_config();
@@ -1463,31 +1461,12 @@ fn tool_list_skills() -> Value {
     let mut skills_map = std::collections::HashMap::new();
 
     // 1. 加载内置技能
-    // 在移动端 (Android/iOS) 平台下，物理文件系统无法访问虚拟 APK 资源，因此使用编译期静态嵌入的数据；
-    // 在桌面端平台下，依然使用动态物理扫描 (支持本地开发调试和实时修改)。
-    #[cfg(any(target_os = "android", target_os = "ios"))]
-    {
-        for &(id, bytes) in BUNDLED_SKILLS {
-            let content = String::from_utf8_lossy(bytes);
-            let (name, desc) = parse_skill_frontmatter(&content, id);
-            skills_map.insert(
-                id.to_string(),
-                json!({
-                    "id": id,
-                    "name": name,
-                    "description": desc
-                }),
-            );
-        }
-    }
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
-    {
-        let bundled_dir = config
-            .get("bundledSkillsDir")
-            .and_then(|v| v.as_str())
-            .map(|s| Path::new(s).to_path_buf());
+    let bundled_dir = config
+        .get("bundledSkillsDir")
+        .and_then(|v| v.as_str())
+        .map(|s| Path::new(s).to_path_buf());
 
-        if let Some(dir) = bundled_dir {
+    if let Some(dir) = bundled_dir {
             if dir.exists() && dir.is_dir() {
                 if let Ok(entries) = fs::read_dir(dir) {
                     for entry in entries.flatten() {
@@ -1571,19 +1550,8 @@ fn tool_read_skill(skill_name: &str) -> Value {
         return json!({ "error": "非法技能名称" });
     }
 
-    // 1. 尝试从编译期嵌入的内置技能中读取 (支持移动端/离线)
-    for &(id, bytes) in BUNDLED_SKILLS {
-        if id == skill_name {
-            let content = String::from_utf8_lossy(bytes).into_owned();
-            return json!({
-                "skill_name": skill_name,
-                "content": content,
-                "reference_files": Vec::<String>::new()
-            });
-        }
-    }
+    // 1. 本地物理扫描 (支持运行时动态技能)
 
-    // 2. 尝试从本地物理外部目录中读取 (支持运行时动态技能)
     let config = super::read_config();
     let mut skill_content = None;
     let mut ref_files: Vec<String> = Vec::new();

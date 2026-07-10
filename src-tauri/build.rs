@@ -48,41 +48,63 @@ fn main() {
         println!("cargo:rerun-if-changed=icons/android");
     }
 
-    // Generate static skills registry for mobile/offline reading
+    // Generate static skills zip for mobile initial launch payload
     let out_dir = std::env::var("OUT_DIR").unwrap();
-    let dest_path = std::path::Path::new(&out_dir).join("gen_skills.rs");
-    let mut skills = Vec::new();
+    let dest_path = std::path::Path::new(&out_dir).join("bundled_skills.zip");
+    
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
     let skills_dir = std::path::Path::new(&manifest_dir).join("../skills");
+    
+    let blacklist = [
+        "AKP_Link_Harvester",
+        "note_graphify",
+        "pptx-translate",
+        "skill-creator",
+        "mckinsey-designer",
+    ];
+
     if skills_dir.exists() {
-        if let Ok(entries) = std::fs::read_dir(&skills_dir) {
-            for entry in entries.flatten() {
-                let p = entry.path();
-                if p.is_dir() {
-                    let md = p.join("SKILL.md");
-                    if md.exists() {
-                        if let Some(folder_name) = p.file_name().and_then(|n| n.to_str()) {
-                            skills.push(folder_name.to_string());
+        if let Ok(f) = std::fs::File::create(&dest_path) {
+            let mut zip = zip::ZipWriter::new(f);
+            let options = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+
+            if let Ok(entries) = std::fs::read_dir(&skills_dir) {
+                for entry in entries.flatten() {
+                    let p = entry.path();
+                    if p.is_dir() {
+                        let folder_name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                        if blacklist.contains(&folder_name) {
+                            continue; // Skip blacklisted
+                        }
+                        
+                        // Recursively add files
+                        let mut dirs = vec![p.clone()];
+                        while let Some(dir) = dirs.pop() {
+                            if let Ok(sub_entries) = std::fs::read_dir(&dir) {
+                                for sub_entry in sub_entries.flatten() {
+                                    let sub_path = sub_entry.path();
+                                    if sub_path.is_dir() {
+                                        dirs.push(sub_path);
+                                    } else {
+                                        if let Ok(rel_path) = sub_path.strip_prefix(&skills_dir) {
+                                            use std::io::{Read, Write};
+                                            let _ = zip.start_file(rel_path.to_string_lossy().replace("\\", "/"), options.clone());
+                                            if let Ok(mut f_src) = std::fs::File::open(&sub_path) {
+                                                let mut content = Vec::new();
+                                                let _ = f_src.read_to_end(&mut content);
+                                                let _ = zip.write_all(&content);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
             }
+            let _ = zip.finish();
         }
     }
-    skills.sort();
-
-    let mut file_content = String::new();
-    file_content.push_str("pub static BUNDLED_SKILLS: &[(&str, &[u8])] = &[\n");
-    for skill in &skills {
-        let skill_md_path = skills_dir.join(skill).join("SKILL.md");
-        let abs_path = skill_md_path.to_string_lossy().replace("\\", "/");
-        file_content.push_str(&format!(
-            "    (\"{}\", include_bytes!(\"{}\")),\n",
-            skill, abs_path
-        ));
-    }
-    file_content.push_str("];\n");
-    let _ = std::fs::write(&dest_path, file_content);
     println!("cargo:rerun-if-changed=../skills");
 
     tauri_build::build()

@@ -123,30 +123,7 @@ pub fn system_get_plugins() -> Value {
     }
 
     // ── 3. 内置官方技能 (Bundled Skills) ──────────────────
-    #[cfg(any(target_os = "android", target_os = "ios"))]
-    {
-        for &(id, bytes) in crate::tools::BUNDLED_SKILLS {
-            let content = String::from_utf8_lossy(bytes);
-            let (name, description) = crate::tools::parse_skill_frontmatter(&content, id);
-            
-            let is_overridden = added_external.contains(id);
-
-            plugins.push(json!({
-                "id": format!("skill-official-{}", id),
-                "name": name,
-                "type": "skill",
-                "typeLabel": "官方技能",
-                "is_official": true,
-                "is_overridden": is_overridden,
-                "description": description,
-                "installed": true,
-                "path": format!("bundled://{}", id)
-            }));
-        }
-    }
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
-    {
-        if let Some(dir_path) = &bundled_dir {
+    if let Some(dir_path) = &bundled_dir {
             if dir_path.exists() && dir_path.is_dir() {
                 if let Ok(entries) = fs::read_dir(dir_path) {
                     for entry in entries.flatten() {
