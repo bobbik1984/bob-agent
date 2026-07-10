@@ -167,7 +167,6 @@ pub fn system_get_plugins() -> Value {
                 }
             }
         }
-    }
 
     json!(plugins)
 }
