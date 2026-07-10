@@ -82,6 +82,9 @@ jobs:
             echo "libgcc workaround not needed or dir not found"
           fi
 
+      - name: Patch Android Icons (kill purple, force @mipmap refs)
+        run: python scripts/patch_android_icons.py
+
       - name: Build APK
         run: |
           mkdir -p resources/llm-engine
