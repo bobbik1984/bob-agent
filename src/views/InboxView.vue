@@ -38,7 +38,7 @@
             <AlertTriangle :size="16" class="section-icon" />
             {{ $t('inbox.overdue_events') || '过期的日程' }}
           </h3>
-          <TodoList :todos="overdueEvents" @update-status="onTodoStatusUpdate" @delete-todo="onTodoDelete" />
+          <TodoList :todos="overdueEvents" @update-status="onTodoStatusUpdate" @delete-todo="onTodoDelete" @create-todo="onCreateEvent" />
         </div>
 
         <div v-if="!isMobile || activeTab === 'timeline'" class="section">
@@ -51,7 +51,7 @@
             <CheckSquare :size="16" class="section-icon" />
             {{ $t('inbox.todo_list') }}
           </h3>
-          <TodoList :todos="todos" @update-status="onTodoStatusUpdate" @delete-todo="onTodoDelete" />
+          <TodoList :todos="todos" @update-status="onTodoStatusUpdate" @delete-todo="onTodoDelete" @create-todo="onCreateEvent" />
         </div>
 
         <!-- T-1211: 自动任务区域 -->

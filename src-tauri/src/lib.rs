@@ -970,6 +970,7 @@ pub fn run() {
             calendar::system_parse_event,
             calendar::system_confirm_event,
             calendar::system_delete_event,
+            calendar::system_update_event_description,
             calendar::system_update_event_status,
             calendar::system_update_event_time,
             // Cron 调度

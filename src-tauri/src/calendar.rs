@@ -151,9 +151,30 @@ pub fn system_delete_event(id: String, db: tauri::State<'_, crate::db::DbState>)
         Ok(c) => c,
         Err(_) => return false,
     };
-    conn.execute("DELETE FROM events WHERE id = ?1", params![id])
+    let rows = conn.execute("DELETE FROM events WHERE id = ?1", params![&id])
         .unwrap_or(0);
+    if rows > 0 {
+        let ts = crate::now_ms();
+        let _ = conn.execute("INSERT OR REPLACE INTO sync_tombstones (table_name, record_key, deleted_at) VALUES ('events', ?1, ?2)", params![id, ts]);
+    }
     true
+}
+
+#[tauri::command]
+pub fn system_update_event_description(
+    id: String,
+    description: String,
+    db: tauri::State<'_, crate::db::DbState>,
+) -> bool {
+    let conn = match db.0.lock() {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+    conn.execute(
+        "UPDATE events SET description = ?1 WHERE id = ?2",
+        params![description, id],
+    )
+    .is_ok()
 }
 
 /// 更新事件状态（pending/done/cancelled）

@@ -407,6 +407,7 @@ window.appAPI = {
   confirmEvent: async (event) => invoke('system_confirm_event', { event }),
   deleteEvent: async (id) => invoke('system_delete_event', { id }),
   updateEventStatus: async (id, status) => invoke('system_update_event_status', { id, status }),
+  updateEventDescription: async (id, description) => invoke('system_update_event_description', { id, description }),
   updateEventTime: async (id, startTime, endTime) => invoke('system_update_event_time', { id, startTime, endTime }),
 
   // ── Cron 定时任务 (Rust 原生 T-1211) ───────────────

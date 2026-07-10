@@ -1,24 +1,42 @@
 <template>
   <div class="todo-list">
-    <div class="todo-header" v-if="todos.some(t => t.status === 'done')">
-      <label class="toggle-completed">
+    <div class="todo-header">
+      <button class="add-todo-btn" @click="isAdding = true" :title="$t('todo.add') || '添加待办'">
+        <Plus :size="16" />
+      </button>
+      <label class="toggle-completed" v-if="todos.some(t => t.status === 'done')">
         <input type="checkbox" v-model="showCompleted" />
         <span class="toggle-text">{{ $t('todo.show_completed') }}</span>
       </label>
     </div>
-    <div v-if="visibleTodos.length === 0" class="empty-state">{{ $t('todo.empty') }}</div>
+
+    <div v-if="isAdding" class="add-todo-form">
+      <input v-model="newTitle" class="add-todo-input" :placeholder="$t('todo.title_placeholder') || '待办事项...'" @keyup.enter="saveNewTodo" autofocus />
+      <textarea v-model="newDesc" class="add-todo-textarea" :placeholder="$t('todo.desc_placeholder') || '详情描述 (可选)...'" rows="2"></textarea>
+      <div class="add-todo-actions">
+        <button class="add-todo-cancel" @click="cancelAdd">{{ $t('common.cancel') || '取消' }}</button>
+        <button class="add-todo-save" @click="saveNewTodo" :disabled="!newTitle.trim()">{{ $t('common.save') || '保存' }}</button>
+      </div>
+    </div>
+
+    <div v-if="visibleTodos.length === 0 && !isAdding" class="empty-state">{{ $t('todo.empty') }}</div>
     <div
       v-for="todo in visibleTodos"
       :key="todo.id"
-      class="todo-item"
-      :class="{ 'is-done': todo.status === 'done' }"
+      class="todo-item-wrapper"
     >
-      <input
-        type="checkbox"
-        class="todo-checkbox"
-        :checked="todo.status === 'done'"
-        @change="toggleStatus(todo)"
-      />
+      <div 
+        class="todo-item"
+        :class="{ 'is-done': todo.status === 'done', 'is-expanded': expandedIds.has(todo.id) }"
+        @click="toggleExpand(todo.id)"
+      >
+        <input
+          type="checkbox"
+          class="todo-checkbox"
+          :checked="todo.status === 'done'"
+          @change.stop="toggleStatus(todo)"
+          @click.stop
+        />
       <div class="todo-content">
         <div class="todo-main">
           <span class="todo-title">{{ todo.title }}</span>
@@ -35,14 +53,34 @@
           </button>
         </div>
       </div>
+      </div>
+      <div v-if="expandedIds.has(todo.id)" class="todo-details">
+        <textarea
+          v-if="editingDescId === todo.id"
+          v-model="editDescDraft"
+          @blur="saveDesc(todo)"
+          @keydown.ctrl.enter="saveDesc(todo)"
+          @click.stop
+          class="todo-desc-edit"
+          ref="descInputRefs"
+        ></textarea>
+        <span 
+          v-else 
+          class="todo-desc-text" 
+          @click.stop="startEditingDesc(todo)"
+          :class="{ 'is-empty': !todo.description }"
+        >
+          {{ todo.description || '点击添加描述...' }}
+        </span>
+      </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { computed, ref } from 'vue';
+import { computed, ref, nextTick } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { X } from 'lucide-vue-next';
+import { X, Plus } from 'lucide-vue-next';
 
 const { t } = useI18n();
 
@@ -53,9 +91,82 @@ const props = defineProps({
   }
 });
 
-const emit = defineEmits(['update-status', 'delete-todo']);
+const emit = defineEmits(['update-status', 'delete-todo', 'create-todo']);
 
 const showCompleted = ref(false);
+const expandedIds = ref(new Set());
+const isAdding = ref(false);
+const newTitle = ref('');
+const newDesc = ref('');
+
+const editingDescId = ref(null);
+const editDescDraft = ref('');
+const descInputRefs = ref([]);
+
+function startEditingDesc(todo) {
+  editingDescId.value = todo.id;
+  editDescDraft.value = todo.description || '';
+  nextTick(() => {
+    // 聚焦到对应的 textarea
+    if (descInputRefs.value) {
+      let inputs = Array.isArray(descInputRefs.value) ? descInputRefs.value : [descInputRefs.value];
+      const el = inputs.find(el => el && el.value === editDescDraft.value);
+      if (el) el.focus();
+      else if (inputs.length > 0 && inputs[0]) inputs[0].focus();
+    }
+  });
+}
+
+async function saveDesc(todo) {
+  if (editingDescId.value !== todo.id) return;
+  const newDescStr = editDescDraft.value.trim();
+  
+  if (newDescStr !== todo.description) {
+    try {
+      if (window.appAPI && window.appAPI.updateEventDescription) {
+        await window.appAPI.updateEventDescription(todo.id, newDescStr);
+        todo.description = newDescStr;
+      }
+    } catch (err) {
+      console.error('更新描述失败', err);
+    }
+  }
+  
+  editingDescId.value = null;
+}
+
+function toggleExpand(id) {
+  const newSet = new Set(expandedIds.value);
+  if (newSet.has(id)) {
+    newSet.delete(id);
+  } else {
+    newSet.add(id);
+  }
+  expandedIds.value = newSet;
+}
+
+function cancelAdd() {
+  isAdding.value = false;
+  newTitle.value = '';
+  newDesc.value = '';
+}
+
+function saveNewTodo() {
+  if (!newTitle.value.trim()) return;
+  
+  const pad = (n) => String(n).padStart(2, '0');
+  const d = new Date();
+  const dateStr = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+
+  emit('create-todo', {
+    title: newTitle.value.trim(),
+    description: newDesc.value.trim(),
+    type: 'todo',
+    date: dateStr
+  });
+  
+  cancelAdd();
+}
 
 const visibleTodos = computed(() => {
   return props.todos
@@ -127,19 +238,69 @@ function getPriorityLabel(priority) {
   font-size: var(--text-sm);
 }
 
-.todo-item {
+.todo-item-wrapper {
   display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-2) var(--space-3);
+  flex-direction: column;
+  gap: 4px;
   background: var(--bg-primary);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
   transition: all 0.2s;
 }
 
-.todo-item:hover {
+.todo-item-wrapper:hover {
   border-color: var(--accent-primary);
+}
+
+.todo-details {
+  padding: 0 12px 12px 38px;
+  font-size: 12px;
+  color: var(--text-tertiary);
+  line-height: 1.5;
+}
+
+.todo-desc-text {
+  display: block;
+  white-space: pre-wrap;
+  cursor: text;
+  padding: 4px;
+  border-radius: var(--radius-sm);
+  transition: background 0.2s;
+  min-height: 20px;
+}
+
+.todo-desc-text:hover {
+  background: var(--surface-secondary);
+}
+
+.todo-desc-text.is-empty {
+  font-style: italic;
+  opacity: 0.6;
+}
+
+.todo-desc-edit {
+  width: 100%;
+  min-height: 60px;
+  background: var(--surface-input);
+  border: 1px solid var(--accent-primary);
+  border-radius: var(--radius-sm);
+  padding: 6px;
+  color: var(--text-primary);
+  font-size: 12px;
+  resize: vertical;
+  font-family: inherit;
+}
+
+.todo-desc-edit:focus {
+  outline: none;
+}
+
+.todo-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  cursor: pointer;
 }
 
 .todo-item.is-done {
@@ -209,8 +370,85 @@ function getPriorityLabel(priority) {
 
 .todo-header {
   display: flex;
-  justify-content: flex-end;
+  justify-content: space-between;
+  align-items: center;
   padding-bottom: 8px;
+}
+
+.add-todo-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  transition: all 0.2s;
+}
+
+.add-todo-btn:hover {
+  background-color: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.add-todo-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--surface-secondary);
+  padding: 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-primary);
+  margin-bottom: var(--space-2);
+}
+
+.add-todo-input, .add-todo-textarea {
+  width: 100%;
+  background: var(--surface-input);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 8px 12px;
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.add-todo-input:focus, .add-todo-textarea:focus {
+  outline: none;
+  border-color: var(--accent-primary);
+}
+
+.add-todo-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.add-todo-cancel {
+  background: transparent;
+  border: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  padding: 4px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.add-todo-save {
+  background: var(--accent-primary);
+  border: none;
+  color: var(--bg-primary);
+  padding: 4px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.add-todo-save:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .toggle-completed {
