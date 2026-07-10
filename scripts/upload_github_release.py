@@ -9,7 +9,8 @@ REPO = "bobbik1984/bob-agent"  # This should be the public repo
 VERSION = "v0.6.0"
 FILES_TO_UPLOAD = [
     r"dist-release\bob-installer.exe",
-    r"dist-release\bob-agent-portable.zip"
+    r"dist-release\bob-agent-portable.zip",
+    r"dist-release\bob_v0.6.0.apk"
 ]
 
 def main():

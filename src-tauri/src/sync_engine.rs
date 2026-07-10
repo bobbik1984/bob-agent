@@ -177,7 +177,7 @@ pub async fn relay_handshake(app: AppHandle, target_device_id: String) -> Result
 
     // ── Stage 3a: Connect to Relay server ──
     let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_connect", "status": "running"}));
-    let (mut ws_stream, _) = match tokio::time::timeout(tokio::time::Duration::from_secs(5), connect_websocket_robust(&ws_url)).await {
+    let (mut ws_stream, _) = match tokio::time::timeout(tokio::time::Duration::from_secs(15), connect_websocket_robust(&ws_url)).await {
         Ok(Ok(stream)) => {
             let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_connect", "status": "done"}));
             stream
@@ -187,7 +187,7 @@ pub async fn relay_handshake(app: AppHandle, target_device_id: String) -> Result
             return Err(format!("Failed to connect to relay: {}", e));
         }
         Err(_) => {
-            let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_connect", "status": "error", "detail": "连接超时 (5s)"}));
+            let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_connect", "status": "error", "detail": "连接超时 (15s)"}));
             return Err("Failed to connect to relay: Timeout".to_string());
         }
     };
@@ -253,19 +253,20 @@ pub struct SyncData {
     pub kg_nodes: Vec<serde_json::Value>,
     pub kg_edges: Vec<serde_json::Value>,
     pub wiki_fts: Vec<serde_json::Value>,
+    #[serde(default)]
+    pub tombstones: Vec<serde_json::Value>,
 }
 
-pub fn export_sync_data(app: &AppHandle) -> Result<SyncData, String> {
+pub fn export_sync_data(app: &AppHandle, since_ts: i64) -> Result<SyncData, String> {
     let config = crate::read_config();
     let db = app.state::<crate::db::DbState>();
     let conn = db.0.lock().map_err(|_| "Failed to lock db")?;
     
-    let extract = |query: &str, cols: &[&str]| -> Result<Vec<serde_json::Value>, String> {
+    let extract = |query: &str, params: &[&dyn rusqlite::ToSql], cols: &[&str]| -> Result<Vec<serde_json::Value>, String> {
         let mut stmt = conn.prepare(query).map_err(|e| e.to_string())?;
-        let rows = stmt.query_map([], |row| {
+        let rows = stmt.query_map(params, |row| {
             let mut map = serde_json::Map::new();
             for (i, col) in cols.iter().enumerate() {
-                // Simplified string extraction for sync
                 let val: Result<String, _> = row.get(i);
                 if let Ok(v) = val {
                     map.insert(col.to_string(), serde_json::Value::String(v));
@@ -287,31 +288,71 @@ pub fn export_sync_data(app: &AppHandle) -> Result<SyncData, String> {
         Ok(result)
     };
 
-    let settings = extract("SELECT key, value FROM settings", &["key", "value"]).unwrap_or_default();
-    let conversations = extract("SELECT id, title, model, cost, last_message, last_role, created_at, updated_at FROM conversations", 
+    let settings = extract("SELECT key, value FROM settings", &[], &["key", "value"]).unwrap_or_default();
+    let conversations = extract("SELECT id, title, model, cost, last_message, last_role, created_at, updated_at FROM conversations WHERE updated_at >= ?1", &[&since_ts], 
         &["id", "title", "model", "cost", "last_message", "last_role", "created_at", "updated_at"]).unwrap_or_default();
-    let messages = extract("SELECT id, conversation_id, role, content, image_base64, created_at, from_channel FROM messages", 
-        &["id", "conversation_id", "role", "content", "image_base64", "created_at", "from_channel"]).unwrap_or_default();
-    let events = extract("SELECT id, title, type, status, date, start_time, end_time, description, created_at, updated_at FROM events", 
+    let messages = extract("SELECT id, conversation_id, role, content, image_base64, created_at, from_channel, sync_id FROM messages WHERE created_at >= ?1", &[&since_ts], 
+        &["id", "conversation_id", "role", "content", "image_base64", "created_at", "from_channel", "sync_id"]).unwrap_or_default();
+    let events = extract("SELECT id, title, type, status, date, start_time, end_time, description, created_at, updated_at FROM events WHERE updated_at >= ?1", &[&since_ts], 
         &["id", "title", "type", "status", "date", "start_time", "end_time", "description", "created_at", "updated_at"]).unwrap_or_default();
-    let cron_jobs = extract("SELECT id, title, cron_expr, prompt_template, enabled, last_run, created_at, updated_at FROM cron_jobs", 
+    let cron_jobs = extract("SELECT id, title, cron_expr, prompt_template, enabled, last_run, created_at, updated_at FROM cron_jobs WHERE updated_at >= ?1", &[&since_ts], 
         &["id", "title", "cron_expr", "prompt_template", "enabled", "last_run", "created_at", "updated_at"]).unwrap_or_default();
-    let kg_nodes = extract("SELECT id, label, node_type, summary, source, metadata, created_at, updated_at FROM kg_nodes", 
+    let kg_nodes = extract("SELECT id, label, node_type, summary, source, metadata, created_at, updated_at FROM kg_nodes WHERE updated_at >= ?1", &[&since_ts], 
         &["id", "label", "node_type", "summary", "source", "metadata", "created_at", "updated_at"]).unwrap_or_default();
-    let kg_edges = extract("SELECT source_id, target_id, relation, confidence, created_at, updated_at FROM kg_edges", 
+    let kg_edges = extract("SELECT source_id, target_id, relation, confidence, created_at, updated_at FROM kg_edges WHERE updated_at >= ?1", &[&since_ts], 
         &["source_id", "target_id", "relation", "confidence", "created_at", "updated_at"]).unwrap_or_default();
-    let wiki_fts = extract("SELECT file_name, source_path, wiki_path, summary, keywords, category, indexed_at FROM wiki_fts", 
+    let wiki_fts = extract("SELECT file_name, source_path, wiki_path, summary, keywords, category, indexed_at FROM wiki_fts", &[], 
         &["file_name", "source_path", "wiki_path", "summary", "keywords", "category", "indexed_at"]).unwrap_or_default();
+    let tombstones = extract("SELECT table_name, record_key, deleted_at FROM sync_tombstones WHERE deleted_at >= ?1", &[&since_ts],
+        &["table_name", "record_key", "deleted_at"]).unwrap_or_default();
 
-    Ok(SyncData { config, settings, conversations, messages, events, cron_jobs, kg_nodes, kg_edges, wiki_fts })
+    Ok(SyncData { config, settings, conversations, messages, events, cron_jobs, kg_nodes, kg_edges, wiki_fts, tombstones })
 }
 
 pub fn import_sync_data(app: &AppHandle, data: SyncData) -> Result<(), String> {
     crate::write_config(&data.config);
     let db = app.state::<crate::db::DbState>();
     let conn = db.0.lock().map_err(|_| "Failed to lock db")?;
+    let ts = crate::now_ms();
 
-    let mut import_table = |table: &str, rows: Vec<serde_json::Value>, cols: &[&str]| {
+    // 1. Process Tombstones FIRST (Physical Deletion)
+    if !data.tombstones.is_empty() {
+        for t in &data.tombstones {
+            if let Some(obj) = t.as_object() {
+                let table = obj.get("table_name").and_then(|v| v.as_str()).unwrap_or("");
+                let record_key = obj.get("record_key").and_then(|v| v.as_str()).unwrap_or("");
+                let deleted_at = obj.get("deleted_at").and_then(|v| v.as_i64()).unwrap_or(0);
+                
+                let query = match table {
+                    "conversations" => Some("DELETE FROM conversations WHERE id = ?1"),
+                    "events" => Some("DELETE FROM events WHERE id = ?1"),
+                    "kg_nodes" => Some("DELETE FROM kg_nodes WHERE id = ?1"),
+                    _ => None,
+                };
+                
+                if let Some(q) = query {
+                    // Check local updated_at to ensure deletion is newer than last update
+                    let local_updated_at: i64 = conn.query_row(
+                        &format!("SELECT updated_at FROM {} WHERE id = ?1", table),
+                        rusqlite::params![record_key],
+                        |row| row.get(0)
+                    ).unwrap_or(0);
+                    
+                    if deleted_at >= local_updated_at {
+                        let _ = conn.execute(q, rusqlite::params![record_key]);
+                        // Record tombstone locally to prevent ghost resurrections
+                        let _ = conn.execute(
+                            "INSERT OR REPLACE INTO sync_tombstones (table_name, record_key, deleted_at) VALUES (?1, ?2, ?3)", 
+                            rusqlite::params![table, record_key, deleted_at]
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    // Generic blind replace (for one-way configs and readonly tables)
+    let mut import_replace = |table: &str, rows: Vec<serde_json::Value>, cols: &[&str]| {
         if rows.is_empty() { return; }
         let placeholders = vec!["?"; cols.len()].join(", ");
         let query = format!("INSERT OR REPLACE INTO {} ({}) VALUES ({})", table, cols.join(", "), placeholders);
@@ -320,29 +361,78 @@ pub fn import_sync_data(app: &AppHandle, data: SyncData) -> Result<(), String> {
                 let mut params = Vec::new();
                 for col in cols {
                     let val = obj.get(*col).unwrap_or(&serde_json::Value::Null);
-                    if let Some(s) = val.as_str() {
-                        params.push(rusqlite::types::Value::Text(s.to_string()));
-                    } else if let Some(i) = val.as_i64() {
-                        params.push(rusqlite::types::Value::Integer(i));
-                    } else if let Some(f) = val.as_f64() {
-                        params.push(rusqlite::types::Value::Real(f));
-                    } else {
-                        params.push(rusqlite::types::Value::Null);
-                    }
+                    if let Some(s) = val.as_str() { params.push(rusqlite::types::Value::Text(s.to_string())); }
+                    else if let Some(i) = val.as_i64() { params.push(rusqlite::types::Value::Integer(i)); }
+                    else if let Some(f) = val.as_f64() { params.push(rusqlite::types::Value::Real(f)); }
+                    else { params.push(rusqlite::types::Value::Null); }
                 }
                 let _ = conn.execute(&query, rusqlite::params_from_iter(params));
             }
         }
     };
 
-    import_table("settings", data.settings, &["key", "value"]);
-    import_table("conversations", data.conversations, &["id", "title", "model", "cost", "last_message", "last_role", "created_at", "updated_at"]);
-    import_table("messages", data.messages, &["id", "conversation_id", "role", "content", "image_base64", "created_at", "from_channel"]);
-    import_table("events", data.events, &["id", "title", "type", "status", "date", "start_time", "end_time", "description", "created_at", "updated_at"]);
-    import_table("cron_jobs", data.cron_jobs, &["id", "title", "cron_expr", "prompt_template", "enabled", "last_run", "created_at", "updated_at"]);
-    import_table("kg_nodes", data.kg_nodes, &["id", "label", "node_type", "summary", "source", "metadata", "created_at", "updated_at"]);
-    import_table("kg_edges", data.kg_edges, &["source_id", "target_id", "relation", "confidence", "created_at", "updated_at"]);
-    import_table("wiki_fts", data.wiki_fts, &["file_name", "source_path", "wiki_path", "summary", "keywords", "category", "indexed_at"]);
+    // LWW (Last-Write-Wins) strategy for bidirectional sync tables
+    let mut import_lww = |table: &str, rows: Vec<serde_json::Value>, cols: &[&str]| {
+        if rows.is_empty() { return; }
+        let placeholders = vec!["?"; cols.len()].join(", ");
+        let query_insert = format!("INSERT OR REPLACE INTO {} ({}) VALUES ({})", table, cols.join(", "), placeholders);
+        let query_check = format!("SELECT updated_at FROM {} WHERE id = ?1", table);
+        
+        for row in rows {
+            if let Some(obj) = row.as_object() {
+                let id = obj.get("id").and_then(|v| v.as_str()).unwrap_or("");
+                let remote_updated_at = obj.get("updated_at").and_then(|v| v.as_i64()).unwrap_or(0);
+                
+                let local_updated_at: i64 = conn.query_row(&query_check, rusqlite::params![id], |r| r.get(0)).unwrap_or(0);
+                
+                if remote_updated_at >= local_updated_at {
+                    let mut params = Vec::new();
+                    for col in cols {
+                        let val = obj.get(*col).unwrap_or(&serde_json::Value::Null);
+                        if let Some(s) = val.as_str() { params.push(rusqlite::types::Value::Text(s.to_string())); }
+                        else if let Some(i) = val.as_i64() { params.push(rusqlite::types::Value::Integer(i)); }
+                        else if let Some(f) = val.as_f64() { params.push(rusqlite::types::Value::Real(f)); }
+                        else { params.push(rusqlite::types::Value::Null); }
+                    }
+                    let _ = conn.execute(&query_insert, rusqlite::params_from_iter(params));
+                }
+            }
+        }
+    };
+
+    // Append-only strategy for messages (de-dupe by sync_id)
+    if !data.messages.is_empty() {
+        for msg in data.messages {
+            if let Some(obj) = msg.as_object() {
+                let sync_id = obj.get("sync_id").and_then(|v| v.as_str()).unwrap_or("");
+                if !sync_id.is_empty() {
+                    let existing: i32 = conn.query_row("SELECT 1 FROM messages WHERE sync_id = ?1", rusqlite::params![sync_id], |_| Ok(1)).unwrap_or(0);
+                    if existing == 0 {
+                        let _ = conn.execute(
+                            "INSERT INTO messages (conversation_id, role, content, image_base64, created_at, from_channel, sync_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                            rusqlite::params![
+                                obj.get("conversation_id").and_then(|v| v.as_str()).unwrap_or(""),
+                                obj.get("role").and_then(|v| v.as_str()).unwrap_or(""),
+                                obj.get("content").and_then(|v| v.as_str()).unwrap_or(""),
+                                obj.get("image_base64").and_then(|v| v.as_str()),
+                                obj.get("created_at").and_then(|v| v.as_i64()).unwrap_or(ts),
+                                obj.get("from_channel").and_then(|v| v.as_str()).unwrap_or("mobile"),
+                                sync_id
+                            ]
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    import_replace("settings", data.settings, &["key", "value"]);
+    import_lww("conversations", data.conversations, &["id", "title", "model", "cost", "last_message", "last_role", "created_at", "updated_at"]);
+    import_lww("events", data.events, &["id", "title", "type", "status", "date", "start_time", "end_time", "description", "created_at", "updated_at"]);
+    import_replace("cron_jobs", data.cron_jobs, &["id", "title", "cron_expr", "prompt_template", "enabled", "last_run", "created_at", "updated_at"]);
+    import_replace("kg_nodes", data.kg_nodes, &["id", "label", "node_type", "summary", "source", "metadata", "created_at", "updated_at"]);
+    import_replace("kg_edges", data.kg_edges, &["source_id", "target_id", "relation", "confidence", "created_at", "updated_at"]);
+    import_replace("wiki_fts", data.wiki_fts, &["file_name", "source_path", "wiki_path", "summary", "keywords", "category", "indexed_at"]);
 
     Ok(())
 }
@@ -357,6 +447,14 @@ async fn do_active_sync(app: AppHandle, payload: SyncCommandPayload) -> Result<(
         .timeout(std::time::Duration::from_secs(5))
         .build()
         .map_err(|e| e.to_string())?;
+
+    let last_sync_ts: i64 = match app.state::<crate::db::DbState>().0.lock() {
+        Ok(conn) => {
+            let s: String = conn.query_row("SELECT value FROM settings WHERE key = 'last_sync_ts'", [], |row| row.get(0)).unwrap_or_else(|_| "0".to_string());
+            s.parse::<i64>().unwrap_or(0)
+        }
+        Err(_) => 0,
+    };
 
     let mut sync_success = false;
     for ip in &payload.local_ips {
@@ -374,25 +472,32 @@ async fn do_active_sync(app: AppHandle, payload: SyncCommandPayload) -> Result<(
         match client.get(&pull_url)
             .header("X-Device-Id", &my_device_id)
             .header("X-Platform", &platform)
+            .header("X-Since-Ts", last_sync_ts.to_string())
             .send().await {
             Ok(resp) if resp.status().is_success() => {
                 if let Ok(json) = resp.json::<serde_json::Value>().await {
                     if let Some(data_val) = json.get("data") {
                         if let Ok(sync_data) = serde_json::from_value::<SyncData>(data_val.clone()) {
-                            info!("[Sync Engine] Successfully pulled full sync data from PC!");
+                            info!("[Sync Engine] Successfully pulled full/incremental sync data from PC!");
                             if let Err(e) = import_sync_data(&app, sync_data) {
                                 error!("[Sync Engine] Failed to import sync data: {}", e);
                             } else {
                                 sync_success = true;
                                 
+                                // Update last_sync_ts
+                                let now = crate::now_ms();
+                                if let Ok(conn) = app.state::<crate::db::DbState>().0.lock() {
+                                    let _ = conn.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)", []);
+                                    let _ = conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('last_sync_ts', ?1)", rusqlite::params![now.to_string()]);
+                                }
+
                                 // Also pull skills zip
                                 let skills_url = format!("{}/v1/sync/skills/download", base_url);
                                 let _ = app.emit("sync:progress", serde_json::json!({"stage": "skills_sync", "status": "running"}));
                                 if let Ok(s_resp) = client.get(&skills_url).header("X-Device-Id", &my_device_id).send().await {
                                     if s_resp.status().is_success() {
                                         if let Ok(bytes) = s_resp.bytes().await {
-                                            let ext_dir = config.get("externalSkillsDir").and_then(|v| v.as_str()).map(|s| std::path::PathBuf::from(s))
-                                                .unwrap_or_else(|| crate::get_data_dir().join("skills"));
+                                            let ext_dir = crate::get_external_skills_dir_or_default(&config);
                                             let _ = crate::skills_sync::unpack_skills(&bytes, &ext_dir);
                                             info!("[Sync Engine] Successfully pulled and unpacked skills");
                                         }
@@ -459,14 +564,14 @@ async fn do_active_sync(app: AppHandle, payload: SyncCommandPayload) -> Result<(
         let relay_url = "wss://relay.bobbik.org".to_string();
         let ws_url = format!("{}/ws/device/{}", relay_url, my_device_id);
 
-        let (mut ws_stream, _) = match tokio::time::timeout(tokio::time::Duration::from_secs(5), connect_websocket_robust(&ws_url)).await {
+        let (mut ws_stream, _) = match tokio::time::timeout(tokio::time::Duration::from_secs(15), connect_websocket_robust(&ws_url)).await {
             Ok(Ok(s)) => s,
             Ok(Err(e)) => {
                 let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_sync", "status": "error", "detail": format!("Relay 连接拒绝: {}", e)}));
                 return Err(format!("LAN and Relay both failed. Relay err: {}", e));
             }
             Err(_) => {
-                let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_sync", "status": "error", "detail": "Relay 连接超时 (5s)"}));
+                let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_sync", "status": "error", "detail": "Relay 连接超时 (15s)"}));
                 return Err("LAN and Relay both failed. Relay err: Timeout".to_string());
             }
         };
@@ -636,7 +741,8 @@ pub fn start_relay_listener(app: AppHandle) {
                                                 
                                                 if action == "pull" {
                                                     log::info!("[Sync Engine] Received proxy pull request from {}", from_id);
-                                                    if let Ok(sync_data) = export_sync_data(&app) {
+                                                    let since_ts = inner_payload.get("since_ts").and_then(|v| v.as_i64()).unwrap_or(0);
+                                                    if let Ok(sync_data) = export_sync_data(&app, since_ts) {
                                                         let pull_resp = serde_json::json!({
                                                             "type": "proxy",
                                                             "target_device_id": from_id,

@@ -96,6 +96,30 @@ pub fn init_db(data_dir: &std::path::Path) -> Connection {
     conn.execute_batch("ALTER TABLE messages ADD COLUMN from_channel TEXT DEFAULT 'desktop';")
         .unwrap_or_default();
 
+    // ==========================================
+    // T-2335 同步协议基建
+    // ==========================================
+    conn.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS sync_tombstones (
+            table_name TEXT NOT NULL,
+            record_key TEXT NOT NULL,
+            deleted_at INTEGER NOT NULL,
+            PRIMARY KEY (table_name, record_key)
+        );
+        "
+    ).unwrap_or_default();
+
+    conn.execute_batch("ALTER TABLE messages ADD COLUMN sync_id TEXT;").unwrap_or_default();
+    
+    let my_device_id = crate::read_config().get("device_id").and_then(|v| v.as_str()).unwrap_or("unknown").to_string();
+    conn.execute(
+        "UPDATE messages SET sync_id = ?1 || '-' || created_at || '-' || id WHERE sync_id IS NULL",
+        params![my_device_id]
+    ).unwrap_or_default();
+    
+    conn.execute_batch("CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_sync ON messages(sync_id);").unwrap_or_default();
+
     // 初始化日程表
     crate::calendar::init_events_table(&conn);
 
@@ -372,11 +396,20 @@ pub fn db_conversation_delete(id: String, db: State<DbState>) -> bool {
     // 先删消息，再删对话
     conn.execute(
         "DELETE FROM messages WHERE conversation_id = ?1",
-        params![id],
+        params![&id],
     )
     .unwrap_or(0);
-    conn.execute("DELETE FROM conversations WHERE id = ?1", params![id])
+    
+    let rows = conn.execute("DELETE FROM conversations WHERE id = ?1", params![&id])
         .unwrap_or(0);
+    
+    if rows > 0 {
+        let ts = crate::now_ms();
+        conn.execute(
+            "INSERT OR REPLACE INTO sync_tombstones (table_name, record_key, deleted_at) VALUES ('conversations', ?1, ?2)", 
+            params![id, ts]
+        ).unwrap_or(0);
+    }
     true
 }
 
@@ -452,11 +485,15 @@ pub fn db_message_add(
         Err(_) => return false,
     };
     let ts = crate::now_ms();
+    let config = crate::read_config();
+    let my_device_id = config.get("device_id").and_then(|v| v.as_str()).unwrap_or("unknown").to_string();
+    let uuid_part: String = uuid::Uuid::new_v4().to_string().chars().take(8).collect();
+    let sync_id = format!("{}-{}-{}", my_device_id, ts, uuid_part);
 
     conn.execute(
-        "INSERT INTO messages (conversation_id, role, content, image_base64, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5)",
-        params![conversation_id, role, content, image_base64, ts],
+        "INSERT INTO messages (conversation_id, role, content, image_base64, created_at, sync_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![conversation_id, role, content, image_base64, ts, sync_id],
     )
     .unwrap_or(0);
 
@@ -596,4 +633,25 @@ pub fn system_factory_reset(db: State<DbState>) -> bool {
     let config_path = crate::get_config_path();
     let _ = std::fs::remove_file(config_path);
     true
+}
+
+// ═══════════════════════════════════════════════════════════
+// 同步协议 - 辅助函数
+// ═══════════════════════════════════════════════════════════
+pub fn db_delete_with_tombstone(
+    conn: &Connection,
+    table_name: &str,
+    record_key: &str,
+    delete_query: &str,
+    params: &[&dyn rusqlite::ToSql]
+) -> Result<usize, String> {
+    let rows_deleted = conn.execute(delete_query, params).map_err(|e| e.to_string())?;
+    if rows_deleted > 0 {
+        let ts = crate::now_ms();
+        let _ = conn.execute(
+            "INSERT OR REPLACE INTO sync_tombstones (table_name, record_key, deleted_at) VALUES (?1, ?2, ?3)",
+            params![table_name, record_key, ts]
+        );
+    }
+    Ok(rows_deleted)
 }

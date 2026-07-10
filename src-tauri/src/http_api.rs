@@ -671,8 +671,9 @@ async fn handle_sync_pull(
     headers: axum::http::HeaderMap,
 ) -> impl IntoResponse {
     crate::sync_engine::register_device(&state.app, &headers, addr);
-    // Export full sync schema (config + SQLite rows)
-    let sync_data = match crate::sync_engine::export_sync_data(&state.app) {
+    let since_ts: i64 = headers.get("X-Since-Ts").and_then(|v| v.to_str().ok()).and_then(|s| s.parse().ok()).unwrap_or(0);
+    // Export full or incremental sync schema (config + SQLite rows + tombstones)
+    let sync_data = match crate::sync_engine::export_sync_data(&state.app, since_ts) {
         Ok(data) => data,
         Err(e) => {
             log::error!("[http_api] Failed to export sync data: {}", e);
@@ -698,8 +699,7 @@ async fn handle_sync_skills_download(
     crate::sync_engine::register_device(&state.app, &headers, addr);
     
     let config = crate::read_config();
-    let skills_dir = config.get("externalSkillsDir").and_then(|v| v.as_str()).map(|s| std::path::PathBuf::from(s))
-        .unwrap_or_else(|| crate::get_data_dir().join("skills"));
+    let skills_dir = crate::get_external_skills_dir_or_default(&config);
     
     if !skills_dir.exists() {
         return (axum::http::StatusCode::NOT_FOUND, "Skills directory not found".to_string()).into_response();

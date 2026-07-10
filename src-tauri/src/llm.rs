@@ -1032,10 +1032,7 @@ fn build_skills_summary() -> String {
         .get("bundledSkillsDir")
         .and_then(|v| v.as_str())
         .map(|s| std::path::Path::new(s).to_path_buf());
-    let external_dir = config
-        .get("externalSkillsDir")
-        .and_then(|v| v.as_str())
-        .map(|s| std::path::Path::new(s).to_path_buf());
+    let external_dir = crate::get_external_skills_dir(&config);
 
     let mut skills_map = std::collections::HashMap::new();
 
@@ -1925,11 +1922,26 @@ pub(crate) async fn stream_internal(
             "当前受限于【沙盒安全机制】，你仅被允许访问 CWD 工作目录及通过 UI 显式授权的目录。对其他绝对路径的文件操作将被拒绝。"
         };
 
+        let mut is_from_mobile = false;
+        if let Some(last_user_msg) = messages.iter().rev().find(|m| m.get("role").and_then(|r| r.as_str()) == Some("user")) {
+            if last_user_msg.get("from_channel").and_then(|c| c.as_str()) == Some("mobile") {
+                is_from_mobile = true;
+            }
+        }
+
+        let mut context_injection = String::new();
+        if os_info == "android" || os_info == "ios" {
+            context_injection.push_str("\n[环境] 移动端\n[约束] 凡遇到涉及操作本地电脑（如读写PC文件、执行终端命令、查看机器状态）的请求，严禁拒绝。必须直接调用 send_to_pc_agent 工具将任务转发给已绑定的 PC 节点处理，并向用户返回结果。\n");
+        } else if is_from_mobile {
+            context_injection.push_str("\n[状态] 用户当前正通过手机网络远程向你下达指令\n[要求] 回答需极其简炼，适合手机屏幕阅读。凡涉及系统关机、格式化或高危修改操作，必须在执行前向用户明确二次确认。\n");
+        }
+
         let system_prompt = format!(
             "你是 Bob，一个友善、专业的桌面 AI 私人助手，由 Tauri (Rust) 和 Vue 3 构建。\n\
 你当前运行在用户的本地计算机上。\n\
 当前操作系统: {}\n\
 当前工作目录 (CWD): {}\n\
+{}\n\
 {}\n\
 {}\n\
 请用中文回答用户的问题，并记住你是一个拥有本机访问能力的桌面助手，而不是一个受限的云端网页服务。\n\
@@ -1953,6 +1965,7 @@ pub(crate) async fn stream_internal(
 - **copy_file**: 复制文件（仅在干活模式可用）
 - **delete_file**: 安全删除文件或目录到系统回收站（仅在干活模式可用）
 - **rename_file**: 重命名文件或目录（仅在干活模式可用）
+- **send_to_pc_agent**: 将任务转发给绑定的 PC 节点执行（跨端协同）
 {}
 ## 文档输出能力
 你能够为用户生成并导出专业级别的文档，请在以下场景主动调用对应的导出工具：
@@ -1997,7 +2010,7 @@ pub(crate) async fn stream_internal(
 2. **待办 (type=\\\"todo\\\")**：没有明确时间点，只需某天完成的事情。只需提供 `date` 参数，**不要**提供 `startTime`。它们会显示在用户的待办事项打勾列表中。\n\
 \n\
 **极其重要**：必须直接调用工具写入系统。绝对不要仅仅在回复中口头答应或只输出列表！",
-            os_info, current_dir, wxid_info, agent_mode_info, file_access_info, skills_summary, memory_summary, wiki_status
+            os_info, current_dir, context_injection, wxid_info, agent_mode_info, file_access_info, skills_summary, memory_summary, wiki_status
         );
 
         full_messages.push(json!({

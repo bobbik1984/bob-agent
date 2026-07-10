@@ -19,7 +19,7 @@
 
 ## 📖 Introduction / 项目简介
 
-**Bob Agent** is a privacy-first, self-evolving AI desktop & mobile secretary built on **Tauri v2 + Rust**. Bob lives in your system tray on PC and runs natively on your Android device. He weaves AI into your daily workflow—local file access, multi-model orchestration, extensible MCP tools, WeChat bridge, E2EE file transfer, and a native SQLite knowledge graph—all without a single byte of your private data leaving your machine.
+**Bob Agent** is a privacy-first, self-evolving AI desktop & mobile secretary built on **Tauri v2 + Rust**. Bob lives in your system tray on PC and runs natively on your Android device. He weaves AI into your daily workflow—local file access, multi-model orchestration, extensible MCP tools, Mobile Android sync, E2EE file transfer, and a native SQLite knowledge graph—all without a single byte of your private data leaving your machine.
 
 **Bob Agent** 是基于 **Tauri v2 + Rust** 构建的「隐私优先、智能演化」跨端私人秘书。在 PC 端他常驻系统托盘，在手机端他是轻量前哨站。通过打通本地文件、多模型协作、MCP 协议扩展、极传与本地 SQLite 知识图谱——所有敏感数据永不出本地，极致安全。
 
@@ -35,7 +35,7 @@
 | 🧠 | **3-Tier Memory 记忆进化** | 3-tier memory (Soul → Session → Wiki). Compaction engine runs nightly to clean, summarize, and cold-condense facts. <br>三层记忆架构。后台 Dream 压缩线程在闲置时自动运行，做事实蒸馏、冷凝与去重，形成个人本地 Wiki。 |
 | 🕸️ | **SQLite Graph 知识脑图** | Native SQLite graph database (nodes + edges). BFS sub-graph extraction and interactive Vis.js canvas visualization. <br>基于本地 SQLite 构建轻量知识网络，自动提取实体关系，并通过 Vis.js 脑图画布进行拖拽交互。 |
 | 🎯 | **Goal Mode 死磕闭环** | Maker-Checker execution loop with 50-round tool calling budget. Clerk auto-evaluates output; auto-retry up to 3× until PASS. <br>面向复杂任务的自动循环机制，Clerk 模型严审工具执行结果，不达正确目标誓不罢休。 |
-| 📲 | **WeChat Gateway 微信桥接** | Scan QR to pair. Remote control sessions, link prefetch, and AES-128 CDN encrypted file transfer. <br>扫码配对备用微信，在户外直接用微信向电脑投喂文件、查询日程、接收主动提醒。 |
+| 📲 | **Native Android App 原生安卓端** | Scan QR to sync via local network. SQLite bi-directional synchronization, offline availability, and PC as SSOT. <br>原生安卓端，PC作为唯一真相源，局域网扫码双向同步，断网也可用。 |
 | 🛜 | **Web Drop 极传** | WebRTC P2P cross-device file transfer. 3-tier fallback (loopback → P2P → relay) with zero-knowledge AES-GCM E2EE. <br>基于 WebRTC 的点对点多端文件传输，零知识证明加密，不经由云服务器缓存。 |
 | 🩺 | **Doctor 自检自愈** | Health checks across API connection, SQLite integrity, sandboxes, and Sidecars. One-click auto-fix and rollback. <br>全面自检网络、数据库锁、环境依赖，遇到异常一键回滚配置、解锁数据库，零折腾。 |
 
@@ -85,7 +85,7 @@ scripts\release.bat
 
 **Output Artifacts / 生成产物** (`dist-release/`):
 - `bob-installer.exe` — Custom borderless dark-themed installer (~25MB).
-- `bob-agent-portable.zip` — Portable green version (~15MB).
+- `bob-agent-portable.zip` — Portable green version (~38MB).
 
 ---
 
@@ -103,7 +103,7 @@ bob-agent/
 │   ├── dream.rs                    # Nightly Dream compaction & SOUL engine
 │   ├── goal.rs                     # Goal Mode (Maker-Checker loop)
 │   ├── web_drop.rs                 # WebRTC P2P direct transmission
-│   ├── wechat/                     # WeChat bridge channel adapter
+│   ├── wechat/                     # Mobile Android sync channel adapter
 │   ├── doctor.rs                   # System health self-diagnostics & auto-fix
 │   └── keychain.rs                 # Secure Keychain credential encryption
 ├── src/                            # Vue 3 frontend / Vue 3 前端源码

@@ -1,5 +1,5 @@
 <template>
-  <div class="chat-view">
+  <div class="chat-view" :class="{ 'is-mobile': isMobile }">
     <!-- Lightbox for Image Zoom -->
     <div v-if="zoomedImage" class="image-lightbox" @click="zoomedImage = null; imageScale = 1; imageTranslateX = 0; imageTranslateY = 0;" @wheel.prevent="handleImageWheel" @mousemove="handleImageMouseMove" @mouseup="handleImageMouseUp" @mouseleave="handleImageMouseUp">
       <img :src="zoomedImage" :style="{ transform: `translate(${imageTranslateX}px, ${imageTranslateY}px) scale(${imageScale})` }" @click.stop @mousedown="handleImageMouseDown" />
@@ -315,13 +315,12 @@
             <button class="file-remove-btn" @click="pendingFiles.splice(index, 1)"><X :size="10" /></button>
           </div>
         </div>
-        <!-- 移动端 + 按钮 -->
-        <button v-if="isMobile" class="mobile-plus-btn" @click="showMobileTools = true; mobileSheetState = 'main'">
-          <Plus :size="20" />
-        </button>
-
         <!-- 文本输入 -->
         <div class="input-wrapper" style="position: relative;">
+          <!-- 移动端 + 按钮 -->
+          <button v-if="isMobile" class="mobile-plus-btn" @click="showMobileTools = true; mobileSheetState = 'main'">
+            <Plus :size="20" />
+          </button>
           <!-- 悬浮指令菜单 (Slash/Mention) -->
           <div v-if="showCommandMenu" class="mention-menu">
             <div 
@@ -348,13 +347,13 @@
             @input="handleInput"
             @paste="handlePaste"
           ></textarea>
-        </div>
-        <!-- Mobile 发送按钮 -->
-        <div v-if="isMobile" class="mobile-send-btn-wrap">
-          <button v-if="isStreaming" class="action-btn stop-btn" @click="stopGeneration" :title="$t('chat.stop')"><span class="icon-stop"></span></button>
-          <button v-else class="action-btn send-btn" :disabled="!canSend || !chatReady" @click="sendMessage" :title="chatReadyMsg || $t('chat.send')">
-            <Send :size="16" />
-          </button>
+          <!-- Mobile 发送按钮 -->
+          <div v-if="isMobile" class="mobile-send-btn-wrap">
+            <button v-if="isStreaming" class="action-btn stop-btn" @click="stopGeneration" :title="$t('chat.stop')"><span class="icon-stop"></span></button>
+            <button v-else class="action-btn send-btn" :disabled="!canSend || !chatReady" @click="sendMessage" :title="chatReadyMsg || $t('chat.send')">
+              <span class="icon-send"></span>
+            </button>
+          </div>
         </div>
         <!-- 底部工具栏 -->
         <div v-if="!isMobile" class="input-toolbar">
@@ -590,7 +589,7 @@ import '@/utils/markdown';
 <script setup>
 import { ref, watch, onMounted, onUnmounted, nextTick, inject, computed } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { Sparkles, FileText, Camera, Calendar, User, ChevronRight, ChevronDown, ChevronUp, ChevronLeft, X, FileUp, Paperclip, Bookmark, Loader2, Shield, Zap, Target, Lock, Unlock, Download, Smartphone, Monitor, ClipboardCopy, Check, BookmarkPlus, Plus, Menu, Cpu, Send } from 'lucide-vue-next';
+import { Sparkles, FileText, Camera, Calendar, User, ChevronRight, ChevronDown, ChevronUp, ChevronLeft, X, FileUp, Paperclip, Bookmark, Loader2, Shield, Zap, Target, Lock, Unlock, Download, Smartphone, Monitor, ClipboardCopy, Check, BookmarkPlus, Plus, Menu, Cpu, Play } from 'lucide-vue-next';
 import ConfirmCard from '../components/ConfirmCard.vue';
 import FileCard from '../components/FileCard.vue';
 import SearchCard from '../components/SearchCard.vue';
@@ -2696,8 +2695,8 @@ defineExpose({
 /* ── Mobile Input Alignment (Absolute Positioning) ── */
 .mobile-plus-btn {
   position: absolute;
-  left: 8px;
-  bottom: 12px;
+  left: 0;
+  top: 2px;
   width: 32px;
   height: 32px;
   display: flex;
@@ -2713,8 +2712,8 @@ defineExpose({
 }
 .mobile-send-btn-wrap {
   position: absolute;
-  right: 8px;
-  bottom: 12px;
+  right: 0;
+  top: 2px;
   width: 32px;
   height: 32px;
   display: flex;
@@ -2734,20 +2733,23 @@ defineExpose({
   cursor: pointer;
   padding: 0;
 }
-.app-shell.is-mobile .input-row {
+.chat-view.is-mobile .input-row {
   position: relative;
   align-items: flex-end !important;
-  padding: 12px;
+  padding: 8px 12px;
 }
-.app-shell.is-mobile .input-wrapper {
+.chat-view.is-mobile .input-wrapper {
   padding-left: 36px;
   padding-right: 36px;
   width: 100%;
   box-sizing: border-box;
 }
-.app-shell.is-mobile .chat-input {
-  min-height: 24px;
-  padding: 4px 0;
+.chat-view.is-mobile .chat-input {
+  display: block;
+  box-sizing: border-box;
+  min-height: 36px;
+  line-height: 24px;
+  padding: 6px 0;
 }
 
 /* ── Mobile Bottom Sheet ────────────────────────────────────────── */

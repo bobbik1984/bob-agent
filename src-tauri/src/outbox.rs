@@ -313,8 +313,7 @@ fn apply_operation(config: &mut Value, op: &Value) {
             let url = op.get("url").and_then(|v| v.as_str()).unwrap_or("").to_string();
             let config_copy = config.clone();
             tauri::async_runtime::spawn(async move {
-                let skills_dir = config_copy.get("externalSkillsDir").and_then(|v| v.as_str()).map(|s| std::path::PathBuf::from(s))
-                    .unwrap_or_else(|| crate::get_data_dir().join("skills"));
+                let skills_dir = crate::get_external_skills_dir_or_default(&config_copy);
                 
                 if let Ok(resp) = reqwest::get(&url).await {
                     if let Ok(bytes) = resp.bytes().await {

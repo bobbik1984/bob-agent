@@ -294,6 +294,21 @@ fn get_builtin_tool_schemas() -> Vec<Value> {
         json!({
             "type": "function",
             "function": {
+                "name": "send_to_pc_agent",
+                "description": "将本地机器操作任务（如读写PC文件、执行终端命令）打包发送给绑定的 PC 节点执行。仅在移动端使用。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "instruction": { "type": "string", "description": "需要 PC 节点执行的具体指令，尽量详细完整" },
+                        "require_sync": { "type": "boolean", "description": "是否需要同步等待 PC 节点返回执行结果" }
+                    },
+                    "required": ["instruction", "require_sync"]
+                }
+            }
+        }),
+        json!({
+            "type": "function",
+            "function": {
                 "name": "create_directory",
                 "description": "创建新文件夹（目录）。如果父目录不存在会自动创建。如果目录已存在，不会报错。需要干活模式授权。",
                 "parameters": {
@@ -931,6 +946,18 @@ async fn execute_tool_inner(
                 "url": url
             })])
         }
+        "send_to_pc_agent" => {
+            let instruction = args.get("instruction").and_then(|v| v.as_str()).unwrap_or("");
+            let require_sync = args.get("require_sync").and_then(|v| v.as_bool()).unwrap_or(false);
+            
+            // Mock Implementation for Stage 1
+            log::info!("[Mobile Synergy] Intercepted send_to_pc_agent. Instruction: {}, sync: {}", instruction, require_sync);
+            json!({
+                "status": "acknowledged",
+                "message": "已成功拦截跨端工具意图。PC 端后台执行与结果回传管道将在后续版本实装。当前任务已记录。",
+                "instruction_echo": instruction
+            })
+        }
         "move_file" => {
             let source = args.get("source").and_then(|v| v.as_str()).unwrap_or("");
             let destination = args
@@ -1431,10 +1458,7 @@ include!(concat!(env!("OUT_DIR"), "/gen_skills.rs"));
 /// list_skills — 列出可用技能
 fn tool_list_skills() -> Value {
     let config = super::read_config();
-    let external_dir = config
-        .get("externalSkillsDir")
-        .and_then(|v| v.as_str())
-        .map(|s| Path::new(s).to_path_buf());
+    let external_dir = crate::get_external_skills_dir(&config);
 
     let mut skills_map = std::collections::HashMap::new();
 
@@ -1564,14 +1588,14 @@ fn tool_read_skill(skill_name: &str) -> Value {
     let mut skill_content = None;
     let mut ref_files: Vec<String> = Vec::new();
 
-    let dirs_to_try = [
-        config.get("externalSkillsDir").and_then(|v| v.as_str()),
-        config.get("bundledSkillsDir").and_then(|v| v.as_str()),
+    let dirs_to_try = vec![
+        crate::get_external_skills_dir(&config),
+        config.get("bundledSkillsDir").and_then(|v| v.as_str()).map(|s| Path::new(s).to_path_buf()),
     ];
 
     for dir_opt in dirs_to_try {
         if let Some(dir_path) = dir_opt {
-            let skill_dir = Path::new(dir_path).join(skill_name);
+            let skill_dir = dir_path.join(skill_name);
             let skill_md = skill_dir.join("SKILL.md");
             if skill_md.exists() {
                 if let Ok(content) = fs::read_to_string(&skill_md) {

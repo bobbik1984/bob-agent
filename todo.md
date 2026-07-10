@@ -663,3 +663,29 @@
 - [ ] 在 `Cargo.toml` 中增加 `cuda` feature flag（条件编译）
 - [ ] GitHub Actions 增加 CUDA Toolkit 的 Windows 构建矩阵
 - [ ] `Device::cuda_if_available(0)` 替换硬编码的 `Device::Cpu`
+
+---
+
+## 📍 目标 26: 远程 AGY / Antigravity 代理执行桥接 (Remote Terminal Bridge)
+> 🎯 **目标**: 让手机或 PC 端 Bob 成为“包工头”，将重度代码/运维任务委派给后端（VPS/本地）具有完整运行环境的 AGY 或 Claude Code 执行，实现“轻量级前端 + 重型后端执行”范式。
+
+### 📝 跨平台远程工具特性研究 (Linux vs PC)
+> **AGY (Antigravity CLI)**:
+> - **Windows (PC)**: 可执行文件通常为 `agy.exe`（如果在 PATH 中则直接 `agy`），调用方式 `agy run "<prompt>"`。
+> - **Linux (VPS)**: 可执行文件通常为 `agy`，常驻于 tmux session 中，调用方式也是 `agy run "<prompt>"`。需处理 SSH 连接（通过 `plink` 或原生的 `ssh`）。
+> **Claude Code**:
+> - **Windows (PC)**: `npx @anthropic-ai/claude-code` 或全局安装后的 `claude`。
+> - **Linux (VPS)**: 全局安装的 `claude`。官方提供 `claude remote-control` 供手机端 App 直连，但如果被 Bob 调度，则通过 SSH 以非交互式指令调用。
+> **调度挑战**:
+> - 这类 Agent 通常带有强交互性（如确认修改、报错询问）。在自动化调度下，需要注入 `--yes` 等强制非交互参数，或者把交互流通过 stdout 抛回给 Bob 的 LLM 去代为回答（双重 Agent 协同）。
+
+### Phase 1: 异步工具层 (Rust)
+- [ ] T-2601: `tools.rs` 新增 `delegate_to_agy` 工具，接收 `target_node` 与 `task_prompt` 参数。
+- [ ] T-2602: 实现 Detached Background Task 机制，工具被调用后立即向 LLM 返回任务已下发（防阻塞超时）。
+- [ ] T-2603: 结合 `plink` 或 `std::process`，实现基于 `target_node` 路由的远程/本地命令拉起逻辑。
+
+### Phase 2: 状态回流与跨端 UI (Vue + Sync)
+- [ ] T-2611: Tauri 后端执行完毕后，发射全局事件 `agy:task_completed`。
+- [ ] T-2612: 前端 `ChatView` 监听该事件，自动以 Bob 的身份将 AGY 的执行总结插入对话流，并通过 Sync Engine 实时推送到手机端。
+- [ ] T-2613: 开发轻量级的悬浮状态卡片（"AGY 正在 X1 Tablet 执行任务..."），供手机和 PC 端实时感知远端运行状态。
+

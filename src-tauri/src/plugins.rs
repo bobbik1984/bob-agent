@@ -10,8 +10,7 @@ pub fn import_skills_zip(path: String) -> Result<(), String> {
     f.read_to_end(&mut bytes).map_err(|e| e.to_string())?;
     
     let config = crate::read_config();
-    let skills_dir = config.get("externalSkillsDir").and_then(|v| v.as_str()).map(|s| std::path::PathBuf::from(s))
-        .unwrap_or_else(|| crate::get_data_dir().join("skills"));
+    let skills_dir = crate::get_external_skills_dir_or_default(&config);
         
     crate::skills_sync::unpack_skills(&bytes, &skills_dir)
 }
@@ -69,10 +68,7 @@ pub fn system_get_plugins() -> Value {
         .get("bundledSkillsDir")
         .and_then(|v| v.as_str())
         .map(|s| Path::new(s).to_path_buf());
-    let external_dir = config
-        .get("externalSkillsDir")
-        .and_then(|v| v.as_str())
-        .map(|s| Path::new(s).to_path_buf());
+    let external_dir = crate::get_external_skills_dir(&config);
 
     let mut added_external = std::collections::HashSet::new();
 

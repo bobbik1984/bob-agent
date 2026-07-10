@@ -134,6 +134,24 @@ pub(crate) fn get_wiki_dir() -> PathBuf {
     dir
 }
 
+pub(crate) fn get_external_skills_dir(config: &serde_json::Value) -> Option<PathBuf> {
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    {
+        Some(get_data_dir().join("skills"))
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        config
+            .get("externalSkillsDir")
+            .and_then(|v| v.as_str())
+            .map(|s| PathBuf::from(s))
+    }
+}
+
+pub(crate) fn get_external_skills_dir_or_default(config: &serde_json::Value) -> PathBuf {
+    get_external_skills_dir(config).unwrap_or_else(|| get_data_dir().join("skills"))
+}
+
 fn get_config_path() -> PathBuf {
     get_data_dir().join("config.json")
 }
@@ -590,10 +608,8 @@ fn system_get_tool_statuses() -> Value {
     }));
 
     // 检查外部技能目录
-    let skills_ok = config
-        .get("externalSkillsDir")
-        .and_then(|v| v.as_str())
-        .map_or(false, |s| !s.is_empty() && Path::new(s).exists());
+    let skills_ok = get_external_skills_dir(&config)
+        .map_or(false, |p| p.exists());
     statuses.push(json!({
         "name": "External Skills",
         "isActive": skills_ok,
