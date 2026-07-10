@@ -1,6 +1,6 @@
 project:
   name: bob-agent
-  version: '0.5.0'
+  version: '0.6.0'
   status: active
   tech:
   - Tauri
@@ -8,8 +8,16 @@ project:
   - Vue 3
   - Desktop
   - Android
-  updated: '2026-07-05'
+  updated: '2026-07-10'
 phases:
+- name: V0.6.0 移动端架构与跨端同步优化
+  tasks:
+  - text: 移动端沙盒化技能解压架构重构
+    status: done
+  - text: 移动端编译期黑名单过滤机制
+    status: done
+  - text: 跨设备同步 (Sync Engine) 技能下发与物理目录合并
+    status: done
 - name: V0.5 知识图谱 Source-Hub 重构
   tasks:
   - text: 数据库 Schema 升级，新增 source_batches

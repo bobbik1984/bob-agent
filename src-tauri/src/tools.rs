@@ -1499,7 +1499,6 @@ fn tool_list_skills() -> Value {
                 }
             }
         }
-    }
 
     // 2. 加载外部目录（外部覆盖内置同名技能）
     if let Some(dir) = external_dir {

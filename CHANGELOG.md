@@ -2,6 +2,15 @@
 
 All notable changes to bob-agent will be documented in this file.
 
+## [0.6.0] - 2026-07-10
+
+### 🏗️ Architecture & Sync
+- **[Mobile] 内置技能沙盒化 (Mobile Sandbox & Offline Skills)**：彻底抛弃了移动端从二进制内存加载内置技能的旧架构。现在 uild.rs 会在编译时经过黑名单过滤（移除极客/桌面专属技能），将官方技能打包为 undled_skills.zip 嵌入 APK。手机首次启动时，会自动解压到沙盒物理路径 (/data/user/0/.../skills)。这使得内置技能也可以在 UI 中被自由管理或删除。
+- **[Sync Engine] 跨平台技能同步修复**：修复了桌面端向手机端同步技能时“日志正常但技能列表空白”的问题。基于新的移动端沙盒架构，桌面端同步推送的 externalSkillsDir 内容现在可以直接合并到手机沙盒目录，跨设备目录路径隔离被完美抹平。
+
+### 🐛 Bug Fixes
+- **[Mobile] 语法修复**：修复了重构 plugins.rs 时移除移动端特供宏 #[cfg] 残留的语法大括号闭合问题。
+
 ## [0.32.2] - 2026-06-23
 
 ### 🐛 Bug Fixes & Improvements
