@@ -67,12 +67,16 @@
       </p>
       <div class="hero-ctas">
         <a href="downloads/bob-installer.exe?v=0.6.0" class="btn-primary btn-large" id="btn-download-hero">
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
-          下载安装版(Installer)
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="20" height="20"><path d="M0 3.449L9.75 2.1v9.451H0m10.949-9.602L24 0v11.4H10.949M0 12.6h9.75v9.451L0 20.699M10.949 12.6H24V24l-12.949-1.801"/></svg>
+          Windows
         </a>
         <a href="downloads/bob-agent-portable.zip?v=0.6.0" class="btn-secondary btn-large" id="btn-download-portable-hero">
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8M16 6l-4-4-4 4M12 2v13"/></svg>
-          下载绿色版(Portable ZIP)
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="20" height="20"><path d="M0 3.449L9.75 2.1v9.451H0m10.949-9.602L24 0v11.4H10.949M0 12.6h9.75v9.451L0 20.699M10.949 12.6H24V24l-12.949-1.801"/></svg>
+          绿色版 (ZIP)
+        </a>
+        <a href="downloads/bob_v0.6.0.apk?v=0.6.0" class="btn-secondary btn-large" id="btn-download-apk-hero">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="20" height="20"><path d="M17.523 15.3414c-.5511 0-.9993-.4486-.9993-.9997s.4483-.9993.9993-.9993c.5511 0 .9993.4482.9993.9993.0001.5511-.4482.9997-.9993.9997zm-11.046 0c-.5511 0-.9993-.4486-.9993-.9997s.4482-.9993.9993-.9993c.5511 0 .9993.4482.9993.9993 0 .5511-.4482.9997-.9993.9997zm11.4045-6.02l1.9973-3.4592a.415.415 0 00-.1521-.5676.416.416 0 00-.5676.1521l-2.0223 3.503C15.5902 8.2562 13.8533 7.854 12 7.854c-1.8533 0-3.5902.4022-5.1367 1.0968L4.841 5.4477a.4166.4166 0 00-.5676-.1521.4152.4152 0 00-.1521.5676l1.9973 3.4592C2.6889 11.1867.3432 14.6589 0 18.761h24c-.3432-4.1021-2.6889-7.5743-6.1185-9.4396z"/></svg>
+          Android
         </a>
         <a href="#features" class="btn-text-link" id="btn-explore">
           功能特色
@@ -81,11 +85,11 @@
       </div>
       <div class="hero-metrics-bar">
         <div class="metric-item">
-          <span class="metric-item-name">安装包大小</span>约15MB
+          <span class="metric-item-name">安装包大小</span>约38MB
         </div>
         <span class="metric-divider">|</span>
         <div class="metric-item">
-          <span class="metric-item-name">常驻内存:</span>约30MB
+          <span class="metric-item-name">常驻内存:</span>约50MB
         </div>
         <span class="metric-divider">|</span>
         <div class="metric-item">
@@ -287,29 +291,29 @@
           </div>
         </div>
 
-        <!-- Feature 7: WeChat Gateway -->
-        <div class="feature-card" id="feat-wechat">
+        <!-- Feature 7: Android Companion App -->
+        <div class="feature-card" id="feat-android">
           <div class="card-front">
             <div class="feature-icon-wrapper">
-              <i data-lucide="message-square"></i>
+              <i data-lucide="smartphone"></i>
             </div>
-            <h3 class="feature-title">微信捎句话，他就帮你干活</h3>
+            <h3 class="feature-title">原生安卓端，断网照样陪伴</h3>
             <p class="feature-body">
-              出门在外？用微信和bob 捎句话，就能随时查询电脑上的日程、传输文件给电脑，或者把微信里的文章链接发给他来快速总结、
+              全新的原生安卓伴侣！通过局域网扫码，即可实现 PC 与手机之间 SQLite 数据库的双向无缝同步。电脑作为主心骨，手机离线也能查看知识图谱与日程。
             </p>
             <div class="feature-tags">
-              <span class="feature-tag">手机端联动</span>
-              <span class="feature-tag">微信远程控制</span>
+              <span class="feature-tag">原生安卓 App</span>
+              <span class="feature-tag">断网双向同步</span>
             </div>
           </div>
           <div class="card-overlay">
             
             <div class="overlay-content">
-              <div class="tab-pane active" id="wechat-guide">
+              <div class="tab-pane active" id="android-guide">
                 <ol class="step-list">
-                  <li>在设置面板点击微信图标，手机微信扫码完成安全配对。</li>
-                  <li>手机微信给bob 的个人微信号发送要抓取的文章或链接。</li>
-                  <li>bob 本地静默提取前2000 字并用AI 生成摘要推回你手机。</li>
+                  <li>在电脑端调出向导，用手机扫码下载最新版 bob 原生安卓 App。</li>
+                  <li>手机连接同一局域网扫码，自动完成 SQLite 数据库与技能同步。</li>
+                  <li>出门在外断网依然可查笔记日程，联网后自动双向合并。</li>
                 </ol>
               </div>
               
@@ -421,7 +425,7 @@
         <div class="charts-container">
           <div class="chart-box">
             <h4 class="chart-label">安装包体积对比</h4>
-            <div class="bar-wrapper"><span class="bar-name">bob</span><div class="bar-track"><div class="bar-fill bob-bar" style="width: 7.5%;"></div></div><span class="bar-value">15MB</span></div>
+            <div class="bar-wrapper"><span class="bar-name">bob</span><div class="bar-track"><div class="bar-fill bob-bar" style="width: 7.5%;"></div></div><span class="bar-value">38MB</span></div>
             <div class="bar-wrapper"><span class="bar-name">Claude Desktop</span><div class="bar-track"><div class="bar-fill" style="width: 50%;"></div></div><span class="bar-value">100MB</span></div>
             <div class="bar-wrapper"><span class="bar-name">Trae / Cursor</span><div class="bar-track"><div class="bar-fill" style="width: 75%;"></div></div><span class="bar-value">150MB</span></div>
             <div class="bar-wrapper"><span class="bar-name">Hermes Desktop</span><div class="bar-track"><div class="bar-fill" style="width: 100%;"></div></div><span class="bar-value">200MB</span></div>
@@ -429,7 +433,7 @@
           
           <div class="chart-box">
             <h4 class="chart-label">常驻内存占用对比</h4>
-            <div class="bar-wrapper"><span class="bar-name">bob</span><div class="bar-track"><div class="bar-fill bob-bar" style="width: 6%;"></div></div><span class="bar-value">30MB</span></div>
+            <div class="bar-wrapper"><span class="bar-name">bob</span><div class="bar-track"><div class="bar-fill bob-bar" style="width: 6%;"></div></div><span class="bar-value">50MB</span></div>
             <div class="bar-wrapper"><span class="bar-name">Claude Desktop</span><div class="bar-track"><div class="bar-fill" style="width: 60%;"></div></div><span class="bar-value">300MB</span></div>
             <div class="bar-wrapper"><span class="bar-name">GitHub Copilot</span><div class="bar-track"><div class="bar-fill" style="width: 80%;"></div></div><span class="bar-value">400MB</span></div>
             <div class="bar-wrapper"><span class="bar-name">Hermes Desktop</span><div class="bar-track"><div class="bar-fill" style="width: 100%;"></div></div><span class="bar-value">500MB</span></div>
@@ -507,7 +511,7 @@
                   </tr>
                   <tr>
                     <td class="feature-name">轻便安装</td>
-                    <td class="highlight"><div class="rating-stars">★★★</div><div class="rating-text">极轻 (~15MB)</div></td>
+                    <td class="highlight"><div class="rating-stars">★★★</div><div class="rating-text">极轻 (~38MB)</div></td>
                     <td><div class="rating-stars">★★☆</div><div class="rating-text">中等 (~200MB)</div></td>
                     <td><div class="rating-stars">★☆☆</div><div class="rating-text">重 (需Node)</div></td>
                     <td><div class="rating-stars">★☆☆</div><div class="rating-text">较重 (需Node)</div></td>
@@ -583,6 +587,19 @@
                     <td><div class="rating-stars">☆☆☆</div><div class="rating-text">无</div></td>
                     <td><div class="rating-stars">★★☆</div><div class="rating-text">代办与爬虫</div></td>
                   </tr>
+                                    <tr>
+                    <td class="feature-name">移动端脱网同步</td>
+                    <td class="highlight"><div class="rating-stars">★★★</div><div class="rating-text">原生双向断网可用</div></td>
+                    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">无移动端</div></td>
+                    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">无</div></td>
+                    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">纯桌面</div></td>
+                    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">无</div></td>
+                    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">无</div></td>
+                    <td><div class="rating-stars">★★☆</div><div class="rating-text">必须依赖云端</div></td>
+                    <td><div class="rating-stars">★★☆</div><div class="rating-text">企业云端</div></td>
+                    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">无移动端</div></td>
+                    <td><div class="rating-stars">☆☆☆</div><div class="rating-text">无</div></td>
+                  </tr>
                   <tr>
                     <td class="feature-name">沙盒开发与工程管理</td>
                     <td class="highlight"><div class="rating-stars">☆☆☆</div><div class="rating-text">专注办公，无开发沙盒</div></td>
@@ -617,7 +634,7 @@
             <div class="advantages-elaboration">
               <div class="advantage-block">
                 <h5>一、部署与运行：零依赖与无感常驻</h5>
-                <p>许多宣称“支持本地运行”的 Agent，实质上是极客主导的工具，要求用户在安装前自行部署Node.js、Python 或CUDA 环境，甚至在初次启动时强行要求下载数 GB 的运行依赖与模型文件（例如Hermes Desktop 安装后会强制引导用户下载 2GB 左右的模型依赖方可启动）。而bob 运行在Tauri v2 与Rust，将核心与本地模型边车全部静态编译为单一的原生程序，包体约15MB，运行内存仅 30MB，实现真正的零依赖安装、无感常驻。</p>
+                <p>许多宣称“支持本地运行”的 Agent，实质上是极客主导的工具，要求用户在安装前自行部署Node.js、Python 或CUDA 环境，甚至在初次启动时强行要求下载数 GB 的运行依赖与模型文件（例如Hermes Desktop 安装后会强制引导用户下载 2GB 左右的模型依赖方可启动）。而bob 运行在Tauri v2 与Rust，将核心与本地模型边车全部静态编译为单一的原生程序，包体约38MB，运行内存仅 50MB，实现真正的零依赖安装、无感常驻。</p>
               </div>
               
               <div class="advantage-block">
@@ -785,16 +802,20 @@
       </p>
       <div class="pitch-ctas">
         <a href="downloads/bob-installer.exe?v=0.6.0" class="btn-primary btn-large" id="btn-download-bottom">
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
-          下载安装版(v0.6.0)
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="20" height="20"><path d="M0 3.449L9.75 2.1v9.451H0m10.949-9.602L24 0v11.4H10.949M0 12.6h9.75v9.451L0 20.699M10.949 12.6H24V24l-12.949-1.801"/></svg>
+          Windows
         </a>
         <a href="downloads/bob-agent-portable.zip?v=0.6.0" class="btn-secondary btn-large" id="btn-download-portable-bottom">
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8M16 6l-4-4-4 4M12 2v13"/></svg>
-          下载绿色版
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="20" height="20"><path d="M0 3.449L9.75 2.1v9.451H0m10.949-9.602L24 0v11.4H10.949M0 12.6h9.75v9.451L0 20.699M10.949 12.6H24V24l-12.949-1.801"/></svg>
+          绿色版 (ZIP)
         </a>
-        <a href="guide.html" class="btn-secondary btn-large" id="btn-guide-bottom">
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2zM22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+        <a href="downloads/bob_v0.6.0.apk?v=0.6.0" class="btn-secondary btn-large" id="btn-download-apk-bottom">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="20" height="20"><path d="M17.523 15.3414c-.5511 0-.9993-.4486-.9993-.9997s.4483-.9993.9993-.9993c.5511 0 .9993.4482.9993.9993.0001.5511-.4482.9997-.9993.9997zm-11.046 0c-.5511 0-.9993-.4486-.9993-.9997s.4482-.9993.9993-.9993c.5511 0 .9993.4482.9993.9993 0 .5511-.4482.9997-.9993.9997zm11.4045-6.02l1.9973-3.4592a.415.415 0 00-.1521-.5676.416.416 0 00-.5676.1521l-2.0223 3.503C15.5902 8.2562 13.8533 7.854 12 7.854c-1.8533 0-3.5902.4022-5.1367 1.0968L4.841 5.4477a.4166.4166 0 00-.5676-.1521.4152.4152 0 00-.1521.5676l1.9973 3.4592C2.6889 11.1867.3432 14.6589 0 18.761h24c-.3432-4.1021-2.6889-7.5743-6.1185-9.4396z"/></svg>
+          Android
+        </a>
+        <a href="guide.html" class="btn-text-link" id="btn-guide-bottom">
           阅读用户手册
+          <svg class="arrow-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
         </a>
       </div>
     </section>
