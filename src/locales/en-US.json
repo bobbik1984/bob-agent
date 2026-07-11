@@ -532,8 +532,7 @@
     "notes": "Notes",
     "prev_week": "Prev Week",
     "this_week": "This Week",
-    "next_week": "Next Week",
-    "new_event_title": "New Event"
+    "next_week": "Next Week"
   },
   "providers": {
     "qwen": "Alibaba Cloud",
@@ -543,7 +542,9 @@
     "deepseek": "DeepSeek",
     "openai": "OpenAI",
     "minimax": "MiniMax",
-    "offline": "Local Model"
+    "offline": "Local Model",
+    "modelscope": "ModelScope",
+    "openrouter": "OpenRouter"
   },
   "common": {
     "please_select": "Please select"

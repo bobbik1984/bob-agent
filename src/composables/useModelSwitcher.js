@@ -24,6 +24,7 @@ export function getModelMeta(id) {
   if (name.includes('minimax')) return { name: 'MiniMax', logo: '/logos/minimax.png' };
   if (name.includes('mimo')) return { name: 'Mimo', logo: '/logos/mimo.png' };
   if (name.includes('modelscope')) return { name: 'ModelScope', logo: '/logos/modelscope.png' };
+  if (name.includes('openrouter')) return { name: 'OpenRouter', logo: '/logos/openrouter.png' };
   if (name.includes('claude') || name.includes('anthropic')) return { name: 'Claude', logo: '/logos/claude.png' };
   if (name.includes('grok') || name.includes('xai')) return { name: 'Grok', logo: '/logos/grok.png' };
   if (name.includes('llama') || name.includes('local-')) return { name: 'Local', logo: null };

@@ -61,7 +61,7 @@
     },
     {
       "id": "qwen",
-      "name": "\u963f\u91cc\u4e91\u767e\u70bc",
+      "name": "阿里云百炼",
       "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
       "supports_model_list": false,
       "models": [
@@ -122,7 +122,7 @@
         },
         {
           "id": "wanx-v1",
-          "name": "\u901a\u4e49\u4e07\u76f8 (Wanx)",
+          "name": "通义万相 (Wanx)",
           "vision": false,
           "pricing": {
             "input": 0.0,
@@ -133,7 +133,7 @@
     },
     {
       "id": "zhipu",
-      "name": "\u667a\u8c31 AI",
+      "name": "智谱 AI",
       "base_url": "https://open.bigmodel.cn/api/paas/v4",
       "base_url_variants": {
         "coding": "https://open.bigmodel.cn/api/coding/paas/v4"
@@ -170,7 +170,7 @@
         },
         {
           "id": "glm-4-flash",
-          "name": "GLM-4 Flash (\u514d\u8d39)",
+          "name": "GLM-4 Flash (免费)",
           "vision": false,
           "pricing": {
             "input": 0.0,
@@ -181,7 +181,7 @@
     },
     {
       "id": "kimi",
-      "name": "\u6708\u4e4b\u6697\u9762",
+      "name": "月之暗面",
       "base_url": "https://api.moonshot.cn/v1",
       "base_url_variants": {
         "international": "https://api.moonshot.ai/v1"
@@ -211,7 +211,7 @@
     },
     {
       "id": "doubao",
-      "name": "\u5b57\u8282\u706b\u5c71",
+      "name": "字节火山",
       "base_url": "https://ark.cn-beijing.volces.com/api/v3",
       "supports_model_list": false,
       "models": [
@@ -290,7 +290,7 @@
         },
         {
           "id": "doubao-pro-32k-241215",
-          "name": "Doubao Pro 32K (\u725b\u9a6c)",
+          "name": "Doubao Pro 32K (牛马)",
           "vision": false,
           "pricing": {
             "input": 0.8,
@@ -299,7 +299,7 @@
         },
         {
           "id": "doubao-lite-32k-241215",
-          "name": "Doubao Lite 32K (\u6781\u901f)",
+          "name": "Doubao Lite 32K (极速)",
           "vision": false,
           "pricing": {
             "input": 0.3,
@@ -503,10 +503,98 @@
     },
     {
       "id": "offline",
-      "name": "\u672c\u5730\u79bb\u7ebf",
+      "name": "本地离线",
       "base_url": "http://127.0.0.1:11434/v1",
       "supports_model_list": false,
       "models": []
+    },
+    {
+      "id": "modelscope",
+      "name": "ModelScope",
+      "base_url": "https://api.modelscope.cn/v1",
+      "supports_model_list": true,
+      "models": [
+        {
+          "id": "qwen-max-3.6",
+          "name": "Qwen Max 3.6",
+          "pricing": {
+            "input": 0.0,
+            "output": 0.0
+          }
+        },
+        {
+          "id": "ZhipuAI/GLM-5.2",
+          "name": "ZhipuAI GLM-5.2",
+          "pricing": {
+            "input": 0.0,
+            "output": 0.0
+          }
+        },
+        {
+          "id": "Tencent-Hunyuan/Hy3",
+          "name": "Hunyuan Hy3",
+          "pricing": {
+            "input": 0,
+            "output": 0
+          }
+        },
+        {
+          "id": "deepseek-ai/DeepSeek-V4-Pro",
+          "name": "DeepSeek V4 Pro",
+          "pricing": {
+            "input": 0.0,
+            "output": 0.0
+          }
+        },
+        {
+          "id": "deepseek-ai/DeepSeek-V4-Flash-DSpark",
+          "name": "DeepSeek V4 Flash (DSpark)",
+          "pricing": {
+            "input": 0.0,
+            "output": 0.0
+          }
+        },
+        {
+          "id": "deepseek-ai/DeepSeek-V4-Pro-DSpark",
+          "name": "DeepSeek V4 Pro (DSpark)",
+          "pricing": {
+            "input": 0.0,
+            "output": 0.0
+          }
+        }
+      ]
+    },
+    {
+      "id": "openrouter",
+      "name": "OpenRouter",
+      "base_url": "https://openrouter.ai/api/v1",
+      "supports_model_list": true,
+      "models": [
+        {
+          "id": "anthropic/claude-fable-5",
+          "name": "Claude Fable 5.0",
+          "pricing": {
+            "input": 0.0,
+            "output": 0.0
+          }
+        },
+        {
+          "id": "openai/gpt-5.6-high",
+          "name": "GPT 5.6 High",
+          "pricing": {
+            "input": 0.0,
+            "output": 0.0
+          }
+        },
+        {
+          "id": "qwen/qwen3.7-max",
+          "name": "Qwen 3.7 Max",
+          "pricing": {
+            "input": 0.0,
+            "output": 0.0
+          }
+        }
+      ]
     }
   ]
 }

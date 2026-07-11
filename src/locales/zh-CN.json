@@ -532,8 +532,7 @@
     "notes": "备注",
     "prev_week": "上一周",
     "this_week": "本周",
-    "next_week": "下一周",
-    "new_event_title": "新日程"
+    "next_week": "下一周"
   },
   "providers": {
     "qwen": "阿里云百炼",
@@ -543,7 +542,9 @@
     "deepseek": "DeepSeek",
     "openai": "OpenAI",
     "minimax": "MiniMax",
-    "offline": "本地模型"
+    "offline": "本地模型",
+    "modelscope": "魔搭",
+    "openrouter": "OpenRouter"
   },
   "common": {
     "please_select": "请选择"
