@@ -361,7 +361,13 @@ window.appAPI = {
     invoke('llm_chat', { messages, conversationId, globalFileAccess, agentMode }),
   sendVision: (messages, imageBase64s, globalFileAccess, agentMode, conversationId) => 
     invoke('llm_vision', { messages, imageBase64s, conversationId, globalFileAccess, agentMode }),
-  stopGeneration: async () => { /* 待实现 AbortController */ },
+  stopGeneration: async (convId) => {
+    try {
+      await invoke('abort_generation', { convId: convId || '' });
+    } catch (err) {
+      console.error('abort_generation error:', err);
+    }
+  },
   getModels: async (provider) => {
     try {
       return await invoke('llm_get_models', { provider: provider || null });
@@ -626,6 +632,16 @@ window.appAPI = {
   kgBackfill: async () => invoke('kg_backfill'),
   systemRemoveSource: async (batchId) => invoke('system_remove_source', { batchId }),
 
+  // ── 票据直接创建 (绕过 LLM, 用于 rxing BCBP 自动识别) ──
+  createTicketDirect: async (args) => {
+    try {
+      return await invoke('system_create_ticket', { args });
+    } catch (err) {
+      console.error('[TauriBridge] createTicketDirect err:', err);
+      throw err;
+    }
+  },
+
   // ── 智能笔记 (Notebook) ──────────────────────────────
   notebookListNotes:   async () => invoke('notebook_list_notes'),
   notebookReadNote:    async (path) => invoke('notebook_read_note', { path }),
@@ -650,6 +666,7 @@ window.appAPI = {
   relayHandshake: async (targetDeviceId) => invoke('relay_handshake', { targetDeviceId }),
 
   // ── 扫码 (Mobile Only) ──────────────────────
+  systemParseBcbp: async (raw) => invoke('system_parse_bcbp', { raw }),
   scanQrCode: async () => {
     if (!IS_TAURI) return null;
     try {
@@ -676,6 +693,15 @@ window.appAPI = {
       await cancel();
     } catch (e) {
       console.error("cancelQrCode error:", e);
+    }
+  },
+
+  systemDecodeBarcodeBase64: async (base64Str) => {
+    try {
+      return await invoke('system_decode_barcode_base64', { base64Str });
+    } catch (err) {
+      console.error('[TauriBridge] systemDecodeBarcodeBase64 err:', err);
+      throw err;
     }
   },
 

@@ -98,3 +98,53 @@ pub async fn send_request(
             .map_err(|e| format!("Direct Request Error: {}", e))
     }
 }
+
+/// 检查内网穿墙隧道的连接状态与延迟
+#[tauri::command]
+pub async fn check_tunnel_status() -> serde_json::Value {
+    let enabled = is_tunnel_enabled();
+    let start = std::time::Instant::now();
+
+    // 创建一个带有短超时时间的 client
+    let client = match reqwest::Client::builder()
+        .timeout(Duration::from_secs(3))
+        .build()
+    {
+        Ok(c) => c,
+        Err(_) => {
+            return serde_json::json!({
+                "enabled": enabled,
+                "connected": false,
+                "latency_ms": 0,
+            })
+        }
+    };
+
+    match client.get("https://village.bobbik.org").send().await {
+        Ok(res) => {
+            if res.status().is_success() {
+                let latency = start.elapsed().as_millis();
+                serde_json::json!({
+                    "enabled": enabled,
+                    "connected": true,
+                    "latency_ms": latency,
+                })
+            } else {
+                serde_json::json!({
+                    "enabled": enabled,
+                    "connected": false,
+                    "latency_ms": 0,
+                    "error": format!("HTTP {}", res.status()),
+                })
+            }
+        }
+        Err(e) => {
+            serde_json::json!({
+                "enabled": enabled,
+                "connected": false,
+                "latency_ms": 0,
+                "error": format!("{}", e),
+            })
+        }
+    }
+}

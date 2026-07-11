@@ -41,7 +41,11 @@
       <div v-if="isMobile && mobileDrawerOpen" class="mobile-drawer-overlay animate-fade-in" @click="mobileDrawerOpen = false"></div>
       <aside 
         class="sidebar"
-        :class="{ 'mobile-drawer': isMobile, 'mobile-drawer-open': isMobile && mobileDrawerOpen }"
+        :class="{
+          'mobile-drawer': isMobile && !(activeDrawer === 'chat' && mobileChatState === 'list'),
+          'mobile-drawer-open': isMobile && mobileDrawerOpen,
+          'mobile-chat-list-view': isMobile && activeDrawer === 'chat' && mobileChatState === 'list'
+        }"
         :style="!isMobile ? { width: isSidebarCollapsed ? '0px' : sidebarWidth + 'px', minWidth: isSidebarCollapsed ? '0px' : '200px' } : {}"
       >
         <!-- ═══ 抽屉 1: 对话 ═══ -->
@@ -110,7 +114,7 @@
                 :key="conv.id"
                 class="conversation-item"
                 :class="{ active: activeConversationId === conv.id && activeDrawer === 'chat' }"
-                @click="switchConversation(conv.id); activeDrawer = 'chat'; if (isMobile) mobileDrawerOpen = false"
+                @click="switchConversation(conv.id); activeDrawer = 'chat'; if (isMobile) { mobileChatState = 'detail'; mobileDrawerOpen = false; }"
                 @dblclick.stop="startRename(conv)"
               >
                 <div class="conv-body">
@@ -210,7 +214,7 @@
       </button>
 
       <!-- 内容区 -->
-      <main class="content">
+      <main class="content" v-show="!(isMobile && activeDrawer === 'chat' && mobileChatState === 'list')">
         <!-- 移动端 Settings 顶部导航 -->
         <div v-if="isMobile && activeDrawer === 'settings'" class="mobile-tab-grid">
           <button
@@ -230,7 +234,7 @@
             ref="chatViewRef"
             :conversationId="activeConversationId"
             @update-title="updateConversationTitle"
-            @toggle-sidebar="mobileDrawerOpen = !mobileDrawerOpen"
+            @back-to-list="mobileChatState = 'list'"
           />
         </div>
         <div class="view-wrapper" v-show="activeDrawer === 'schedule'">
@@ -282,7 +286,7 @@
 
     <!-- 底部导航 (Mobile) -->
     <BottomNavigation 
-      v-if="isMobile && isSetupComplete" 
+      v-if="isMobile && isSetupComplete && !(activeDrawer === 'chat' && mobileChatState === 'detail')" 
       :active-drawer="activeDrawer" 
       @update:active-drawer="activeDrawer = $event" 
     />
@@ -322,6 +326,7 @@ const activeSettingsPanel = ref('model'); // 'model' | 'connections' | 'workspac
 const chatViewRef = ref(null);
 const quickNoteRef = ref(null);
 const mobileDrawerOpen = ref(false);
+const mobileChatState = ref('detail'); // 'list' | 'detail'
 // ── 响应式移动端检测 (宽高比 1:1 断点) ──
 function checkMobile() {
   return window.innerHeight > window.innerWidth;
@@ -497,6 +502,12 @@ function handleBackButton() {
     return true;
   }
   
+  // 3.5. 退回聊天列表 (T-2225)
+  if (isMobile.value && activeDrawer.value === 'chat' && mobileChatState.value === 'detail') {
+    mobileChatState.value = 'list';
+    return true;
+  }
+  
   // 4. 子组件自定义拦截 (分发 android-back-pressed 事件)
   // 任何子组件可以通过 e.preventDefault() 阻止默认的后退兜底行为
   const backEvent = new CustomEvent('android-back-pressed', { cancelable: true });
@@ -522,6 +533,10 @@ function handleBackButton() {
 onMounted(async () => {
   // ── 响应式布局监听 ──
   window.addEventListener('resize', onResizeHandler);
+  
+  window.addEventListener('switch-view', (e) => {
+    onNavClick(e.detail);
+  });
 
   if (isMobile.value) {
     // 拦截 Android 物理返回键
@@ -687,6 +702,10 @@ async function createNewChat() {
   const conv = await window.appAPI.createConversation(t('chat.new_conversation'), currentModel.value);
   conversations.value.unshift(conv);
   activeConversationId.value = conv.id;
+  if (isMobile.value) {
+    mobileChatState.value = 'detail';
+    mobileDrawerOpen.value = false;
+  }
 }
 
 function switchConversation(id) {
@@ -1822,6 +1841,18 @@ function onFabPointerUp(e) {
 .mobile-drawer-open {
   transform: translateX(280px);
   box-shadow: 2px 0 12px rgba(0,0,0,0.2);
+}
+
+.mobile-chat-list-view {
+  position: static !important;
+  width: 100% !important;
+  flex: 1;
+  height: 100% !important;
+  transform: none !important;
+  box-shadow: none !important;
+  border-right: none !important;
+  z-index: 1 !important;
+  padding-top: env(safe-area-inset-top, 20px) !important;
 }
 
 /* 隐藏手机侧边栏中的部分多余信息（如大号 logo） */

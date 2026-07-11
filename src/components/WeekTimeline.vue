@@ -42,7 +42,12 @@
             v-for="day in days" 
             :key="day.dateStr" 
             class="day-column"
+            :class="{ 'drag-over': dragOverDay === day.dateStr }"
             @click.self="onTrackClick(day, $event)"
+            @dragover.prevent
+            @dragenter="onDragEnter(day, $event)"
+            @dragleave="onDragLeave(day, $event)"
+            @drop="onDrop(day, $event)"
           >
             <!-- 背景网格线 -->
             <div v-for="h in Math.floor(24)" :key="h" class="grid-cell" @click.self="onCellClick(day, h, $event)"></div>
@@ -59,15 +64,19 @@
               class="event-card"
               :style="{
                 top: event.top + 'px',
-                height: event.height + 'px',
+                height: (resizingEventId === event.id ? resizingEventHeight : event.height) + 'px',
                 left: event.left,
                 width: event.width
               }"
               :class="{ 'is-short': event.height < 30 }"
+              draggable="true"
+              @dragstart="onDragStart(event, $event)"
+              @dragend="onDragEnd"
               @click.stop="openDetail(event.raw)"
             >
               <div class="event-time" v-if="event.height >= 40">{{ formatTimeRange(event.raw) }}</div>
               <div class="event-title">{{ event.title }}</div>
+              <div class="resize-handle" @mousedown.stop.prevent="startResize(event, $event)"></div>
             </div>
           </div>
         </div>
@@ -86,12 +95,14 @@
           <label>{{ $t('timeline.location') || '地点' }}</label>
           <span>{{ detailEvent.location }}</span>
         </div>
-        <div v-if="detailEvent.notes" class="detail-field">
+        <div class="detail-field" v-if="detailEvent.notes">
           <label>{{ $t('timeline.notes') || '备注' }}</label>
           <span>{{ detailEvent.notes }}</span>
         </div>
-        <div class="detail-actions">
-          <button class="btn btn-ghost" @click="detailEvent = null">{{ $t('modal.cancel') || '取消' }}</button>
+        <div class="detail-actions" style="margin-top: 16px; display: flex; gap: 8px;">
+          <button v-if="detailEvent.linked_ticket_id" class="action-btn" @click="viewTicket(detailEvent.linked_ticket_id)" style="background-color: var(--color-success);">
+            {{ $t('calendar.view_ticket') || '查看凭证' }}
+          </button>
           <button class="btn btn-danger" @click="handleDelete(detailEvent)">{{ $t('modal.confirm_delete') || '删除' }}</button>
         </div>
       </div>
@@ -137,6 +148,8 @@ const emit = defineEmits(['update-time', 'delete-event', 'create-event']);
 
 const weekOffset = ref(0);
 const scrollContainer = ref(null);
+const resizingEventId = ref(null);
+const resizingEventHeight = ref(null);
 
 // ── 移动端滑动切换上下周 ───────────────────────
 const touchStartX = ref(0);
@@ -213,8 +226,23 @@ onUnmounted(() => {
 // ── 事件详情弹窗 ──────────────────────────────────
 const detailEvent = ref(null);
 
+const justDragged = ref(false);
+
 function openDetail(event) {
+  if (justDragged.value) {
+    return;
+  }
   detailEvent.value = event;
+}
+
+function viewTicket(ticketId) {
+  // close detail popover
+  detailEvent.value = null;
+  // dispatch event to switch to kg view and open ticket
+  window.dispatchEvent(new CustomEvent('switch-view', { detail: 'kg' }));
+  setTimeout(() => {
+    window.dispatchEvent(new CustomEvent('open-ticket-view', { detail: ticketId }));
+  }, 100);
 }
 
 async function handleDelete(event) {
@@ -380,6 +408,151 @@ function confirmCreateEvent() {
   
   newEventDialog.value = false;
   pendingEventData.value = null;
+}
+
+const dragOverDay = ref(null);
+
+function onDragStart(event, e) {
+  justDragged.value = true;
+  const rect = e.currentTarget.getBoundingClientRect();
+  const grabOffset = e.clientY - rect.top;
+  e.dataTransfer.setData('text/plain', JSON.stringify({ eventId: event.id, grabOffset }));
+}
+
+function onDragEnd() {
+  // 捕获阶段拦截并阻止拖拽结束引发的 click 事件
+  const preventClick = (e) => {
+    e.stopPropagation();
+    e.preventDefault();
+    window.removeEventListener('click', preventClick, true);
+  };
+  window.addEventListener('click', preventClick, true);
+  setTimeout(() => {
+    window.removeEventListener('click', preventClick, true);
+  }, 50);
+
+  setTimeout(() => {
+    justDragged.value = false;
+  }, 200);
+}
+
+function onDragEnter(day, e) {
+  dragOverDay.value = day.dateStr;
+}
+
+function onDragLeave(day, e) {
+  if (dragOverDay.value === day.dateStr) {
+    dragOverDay.value = null;
+  }
+}
+
+async function onDrop(day, e) {
+  dragOverDay.value = null;
+  const dragDataStr = e.dataTransfer.getData('text/plain');
+  if (!dragDataStr) return;
+  try {
+    const { eventId, grabOffset } = JSON.parse(dragDataStr);
+    const ev = props.weekEvents.find(event => event.id === eventId);
+    if (!ev) return;
+    
+    const columnRect = e.currentTarget.getBoundingClientRect();
+    const y = e.clientY - columnRect.top;
+    
+    let targetY = y - grabOffset;
+    if (targetY < 0) targetY = 0;
+    if (targetY > 24 * PIXELS_PER_HOUR) targetY = 24 * PIXELS_PER_HOUR;
+    
+    const snappedY = Math.round(targetY / 15) * 15;
+    const startHour = snappedY / PIXELS_PER_HOUR;
+    
+    const start = new Date(ev.start_time);
+    const end = ev.end_time ? new Date(ev.end_time) : new Date(start.getTime() + 60 * 60 * 1000);
+    const durationMs = end.getTime() - start.getTime();
+    
+    const parts = day.dateStr.split('-');
+    const targetDate = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+    const startH = Math.floor(startHour);
+    const startM = Math.round((startHour - startH) * 60);
+    
+    const newStart = new Date(targetDate);
+    newStart.setHours(startH, startM, 0, 0);
+    
+    const newEnd = new Date(newStart.getTime() + durationMs);
+    
+    await updateEventTimes(ev.id, newStart.toISOString(), newEnd.toISOString());
+  } catch (err) {
+    console.error('Failed to parse drag data', err);
+  }
+}
+
+function startResize(event, startEvent) {
+  justDragged.value = true;
+  resizingEventId.value = event.id;
+  resizingEventHeight.value = event.height;
+
+  const startY = startEvent.clientY;
+  const startHeight = event.height;
+  const ev = props.weekEvents.find(e => e.id === event.id);
+  if (!ev) return;
+  
+  const onMouseMove = (moveEvent) => {
+    const deltaY = moveEvent.clientY - startY;
+    let newHeight = startHeight + deltaY;
+    if (newHeight < 15) newHeight = 15;
+    const snappedHeight = Math.round(newHeight / 15) * 15;
+    resizingEventHeight.value = snappedHeight;
+  };
+  
+  const onMouseUp = async (upEvent) => {
+    window.removeEventListener('mousemove', onMouseMove);
+    window.removeEventListener('mouseup', onMouseUp);
+    
+    // 捕获阶段拦截并阻止调整大小时长结束引发的 click 事件
+    const preventClick = (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      window.removeEventListener('click', preventClick, true);
+    };
+    window.addEventListener('click', preventClick, true);
+    setTimeout(() => {
+      window.removeEventListener('click', preventClick, true);
+    }, 50);
+
+    setTimeout(() => {
+      justDragged.value = false;
+    }, 200);
+
+    const deltaY = upEvent.clientY - startY;
+    let newHeight = startHeight + deltaY;
+    if (newHeight < 15) newHeight = 15;
+    const snappedHeight = Math.round(newHeight / 15) * 15;
+    
+    const durationHours = snappedHeight / PIXELS_PER_HOUR;
+    const start = new Date(ev.start_time);
+    const end = new Date(start.getTime() + durationHours * 60 * 60 * 1000);
+    
+    resizingEventId.value = null;
+    resizingEventHeight.value = null;
+
+    await updateEventTimes(ev.id, start.toISOString(), end.toISOString());
+  };
+  
+  window.addEventListener('mousemove', onMouseMove);
+  window.addEventListener('mouseup', onMouseUp);
+}
+
+async function updateEventTimes(id, startTime, endTime) {
+  if (window.appAPI && window.appAPI.updateEventTime) {
+    const success = await window.appAPI.updateEventTime(id, startTime, endTime);
+    if (success) {
+      const ev = props.weekEvents.find(e => e.id === id);
+      if (ev) {
+        ev.start_time = startTime;
+        ev.end_time = endTime;
+      }
+      emit('update-time', { id, start_time: startTime, end_time: endTime });
+    }
+  }
 }
 
 // ── 以今天为中心的 7 天 ──────────────────────────
@@ -592,6 +765,12 @@ const days = computed(() => {
   position: relative;
   border-right: 1px solid var(--border-subtle);
   min-width: 0; /* flex bug fix */
+  transition: background-color 0.2s ease, outline 0.2s ease;
+}
+.day-column.drag-over {
+  background: var(--accent-glow, rgba(128, 128, 128, 0.08));
+  outline: 1px dashed var(--user-accent, var(--accent-primary));
+  outline-offset: -1px;
 }
 .day-column:last-child {
   border-right: none;
@@ -638,6 +817,21 @@ const days = computed(() => {
   z-index: 5;
   display: flex;
   flex-direction: column;
+  user-select: none;
+}
+.resize-handle {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 6px;
+  cursor: ns-resize;
+  background: transparent;
+  z-index: 10;
+}
+.resize-handle:hover {
+  background: var(--user-accent, var(--accent-primary));
+  opacity: 0.5;
 }
 
 .event-card:hover {

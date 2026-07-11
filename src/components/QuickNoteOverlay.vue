@@ -98,7 +98,45 @@ async function openScanPairing() {
             ]);
           }
         } catch (e) {
-          console.error('Invalid QR Code JSON:', code);
+          // 不是 JSON，检查是否是标准登机牌 (BCBP)
+          if (window.appAPI?.systemParseBcbp && code.startsWith('M1')) {
+            try {
+              const bcbpInfo = await window.appAPI.systemParseBcbp(code);
+              if (bcbpInfo) {
+                // 解析儒略日
+                const day = parseInt(bcbpInfo.date, 10);
+                let dateStr = '';
+                if (!isNaN(day) && day >= 1 && day <= 366) {
+                  const year = new Date().getFullYear();
+                  const d = new Date(year, 0, day);
+                  dateStr = `${year}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+                }
+                
+                const bpData = {
+                  raw_data: code,
+                  format: 'unknown',
+                  passenger_name: bcbpInfo.passenger_name,
+                  pnr: bcbpInfo.pnr,
+                  origin: bcbpInfo.origin,
+                  destination: bcbpInfo.destination,
+                  carrier: bcbpInfo.carrier,
+                  flight_number: bcbpInfo.flight_number,
+                  date: dateStr,
+                  seat: bcbpInfo.seat.replace(/^0+/, ''),
+                };
+                
+                console.log('Detected BCBP in mobile scanner:', bpData);
+                window.dispatchEvent(new CustomEvent('detect-boarding-pass', { detail: bpData }));
+                return;
+              }
+            } catch (parseErr) {
+              console.warn('BCBP parse failed:', parseErr);
+            }
+          }
+
+          console.log('Not a pairing JSON or BCBP, treating as generic barcode:', code);
+          const msg = `我刚刚扫描了一个条码，内容是：\n${code}\n请帮我解析并放入票夹`;
+          window.dispatchEvent(new CustomEvent('send-message-to-bob', { detail: msg }));
         }
       }
     } catch (err) {

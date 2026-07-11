@@ -1029,6 +1029,7 @@ async fn execute_tool_inner(
         }
         "list_calendar_events" => tool_list_calendar_events(app),
         "add_calendar_event" => tool_add_calendar_event(app, args),
+        "create_ticket" => tool_create_ticket(app, args),
         "build_knowledge_base" => {
             let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
             // 直接触发异步的知识库构建引擎
@@ -2540,5 +2541,111 @@ async fn tool_browse_page(app: &tauri::AppHandle, args: &Value) -> Value {
             "url": url,
             "suggestion": "可以尝试用 fetch_url 作为降级方案"
         }),
+    }
+}
+
+
+fn tool_create_ticket(app: &tauri::AppHandle, args: &serde_json::Value) -> serde_json::Value {
+    use tauri::Manager;
+    let db = app.state::<crate::db::DbState>();
+    let mut conn = match db.0.lock() {
+        Ok(c) => c,
+        Err(_) => return serde_json::json!({ "error": "Database lock failed" }),
+    };
+
+    let ticket_id = format!("ticket-{}", crate::now_ms());
+    let title = args.get("title").and_then(|v| v.as_str()).unwrap_or("");
+    let category = args.get("category").and_then(|v| v.as_str()).unwrap_or("generic");
+    let start_time = args.get("start_time").and_then(|v| v.as_str()).unwrap_or("");
+    let end_time = args.get("end_time").and_then(|v| v.as_str()).unwrap_or("");
+    let venue = args.get("venue").and_then(|v| v.as_str()).unwrap_or("");
+    let seat_info = args.get("seat_info").and_then(|v| v.as_str()).unwrap_or("");
+    let barcode_data = args.get("barcode_data").and_then(|v| v.as_str()).unwrap_or("");
+    let barcode_type = args.get("barcode_type").and_then(|v| v.as_str()).unwrap_or("");
+    let flight_info = args.get("flight_info").cloned().unwrap_or(serde_json::json!({}));
+
+    let metadata = serde_json::json!({
+        "category": category,
+        "venue": venue,
+        "start_time": start_time,
+        "end_time": end_time,
+        "seat_info": seat_info,
+        "barcode_data": barcode_data,
+        "barcode_type": barcode_type,
+        "flight_info": flight_info,
+        "status": "upcoming"
+    });
+    let metadata_str = metadata.to_string();
+    let now = crate::now_ms();
+    
+    // 日历事件参数
+    let event_id = format!("evt-{}", now);
+    let date = if start_time.len() >= 10 { &start_time[0..10] } else { "" };
+    
+    // 开启事务
+    let tx = match conn.transaction() {
+        Ok(t) => t,
+        Err(e) => return serde_json::json!({ "error": format!("Transaction start failed: {}", e) }),
+    };
+
+    // 1. 创建知识图谱票据节点
+    let res1 = tx.execute(
+        "INSERT INTO kg_nodes (id, label, node_type, summary, source, metadata, updated_at)
+         VALUES (?1, ?2, 'ticket', '', 'user_input', ?3, ?4)
+         ON CONFLICT(id) DO UPDATE SET
+            label = ?2,
+            metadata = ?3,
+            updated_at = ?4",
+        rusqlite::params![ticket_id, title, metadata_str, now],
+    );
+    if let Err(e) = res1 {
+        return serde_json::json!({ "error": format!("Failed to insert ticket node: {}", e) });
+    }
+
+    // 2. 创建日历事件并关联 ticket_id
+    let res2 = tx.execute(
+        "INSERT INTO events (id, title, type, status, date, start_time, end_time, description, created_at, updated_at, linked_ticket_id)
+         VALUES (?1, ?2, 'event', 'pending', ?3, ?4, ?5, '', ?6, ?6, ?7)",
+        rusqlite::params![event_id, title, date, start_time, end_time, now, ticket_id],
+    );
+    if let Err(e) = res2 {
+        return serde_json::json!({ "error": format!("Failed to insert calendar event: {}", e) });
+    }
+
+    // 3. 创建图谱关联边 ticket -> event
+    let res3 = tx.execute(
+        "INSERT INTO kg_edges (source_id, target_id, relation, confidence, created_at, updated_at)
+         VALUES (?1, ?2, 'scheduled_on', 1.0, datetime('now'), ?3)
+         ON CONFLICT(source_id, target_id, relation) DO UPDATE SET confidence = 1.0",
+        rusqlite::params![ticket_id, event_id, now],
+    );
+    if let Err(e) = res3 {
+        return serde_json::json!({ "error": format!("Failed to insert edge: {}", e) });
+    }
+
+    if let Err(e) = tx.commit() {
+        return serde_json::json!({ "error": format!("Transaction commit failed: {}", e) });
+    }
+
+    // 通知前端日历更新
+    let _ = app.emit("calendar-updated", ());
+    // 通知图谱更新
+    let _ = app.emit("kg-updated", ());
+
+    serde_json::json!({
+        "status": "success",
+        "ticket_id": ticket_id,
+        "event_id": event_id,
+        "message": format!("票据凭证 '{}' 已成功创建并关联到日历和图谱", title)
+    })
+}
+
+#[tauri::command]
+pub fn system_create_ticket(app: tauri::AppHandle, args: serde_json::Value) -> Result<serde_json::Value, String> {
+    let result = tool_create_ticket(&app, &args);
+    if result.get("error").is_some() {
+        Err(result["error"].as_str().unwrap_or("Unknown error").to_string())
+    } else {
+        Ok(result)
     }
 }

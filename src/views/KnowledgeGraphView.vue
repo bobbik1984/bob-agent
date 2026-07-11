@@ -10,6 +10,10 @@
         <FileText :size="20" class="tab-icon" />
         <span>笔记</span>
       </button>
+      <button class="mobile-tab-item" :class="{ active: currentMode === 'ticket' }" @click="currentMode = 'ticket'">
+        <Ticket :size="20" class="tab-icon" />
+        <span>{{ $t('ticket.my_tickets') || '票夹' }}</span>
+      </button>
     </div>
 
     <!-- 侧边栏传送门 -->
@@ -22,6 +26,9 @@
             </button>
             <button :class="{ active: currentMode === 'notebook' }" @click="currentMode = 'notebook'">
               <FileText :size="16" /> {{ $t('kg.notebook_view') }}
+            </button>
+            <button :class="{ active: currentMode === 'ticket' }" @click="currentMode = 'ticket'">
+              <Ticket :size="16" /> {{ $t('ticket.my_tickets') || '票夹' }}
             </button>
           </div>
         </div>
@@ -293,7 +300,16 @@
       </div>
     </div>
 
-    <!-- 空状态 / 生成中 -->
+    <div v-if="currentMode === 'ticket'" class="ticket-body" style="flex:1; overflow-y:auto; padding:24px; background-color: var(--bg-primary);">
+      <div v-if="ticketNodes.length === 0" class="notebook-empty-state">
+        {{ $t('ticket.empty') || '票夹为空' }}
+      </div>
+      <div v-else style="display:grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 24px; align-items: start;">
+        <TicketCard v-for="node in ticketNodes" :key="node.id" :node="node" />
+      </div>
+    </div>
+
+    <!-- 图谱空状态 / 生成中 -->
     <div v-if="currentMode === 'graph' && !loading && stats && stats.node_count === 0 && !backfilling" class="kg-empty">
       <Waypoints :size="48" style="opacity: 0.2;" />
       <p>{{ $t('kg.empty') }}</p>
@@ -310,11 +326,12 @@
 <script setup>
 import { ref, onMounted, onBeforeUnmount, watch, computed, inject } from 'vue';
 import NoteExplorer from '../components/NoteExplorer.vue';
+import TicketCard from '../components/TicketCard.vue';
 import TiptapEditor from '../components/TiptapEditor.vue';
 import { useI18n } from 'vue-i18n';
 import { Network } from 'vis-network';
 import { DataSet } from 'vis-data';
-import { Waypoints, Search, X, FileText, RefreshCw, Plus, Link, ExternalLink, Trash2, ChevronRight, Menu, ChevronDown, Star, Package } from 'lucide-vue-next';
+import { Waypoints, Search, X, FileText, RefreshCw, Plus, Link, ExternalLink, Trash2, ChevronRight, Menu, ChevronDown, Star, Package, Ticket } from 'lucide-vue-next';
 
 const emit = defineEmits(['toggle-sidebar']);
 
@@ -536,6 +553,22 @@ const allNodesList = computed(() => {
     .sort((a,b) => a.label.localeCompare(b.label));
 });
 
+const ticketNodes = computed(() => {
+  const _trigger = stats.value;
+  if (!allGraphData.value || !allGraphData.value.nodes) return [];
+  return allGraphData.value.nodes
+    .filter(n => n.node_type === 'ticket' || n.type === 'ticket' || n.type === 'Ticket')
+    .sort((a,b) => {
+      // sort by start_time descending if available
+      const aMeta = typeof a.metadata === 'string' ? JSON.parse(a.metadata) : (a.metadata || {});
+      const bMeta = typeof b.metadata === 'string' ? JSON.parse(b.metadata) : (b.metadata || {});
+      if (aMeta.start_time && bMeta.start_time) {
+        return new Date(bMeta.start_time) - new Date(aMeta.start_time);
+      }
+      return 0;
+    });
+});
+
 const topProjects = computed(() => {
   const _trigger = stats.value; // Force reactivity since allGraphData is not a ref
   if (!allGraphData.value || !allGraphData.value.nodes) return [];
@@ -750,6 +783,12 @@ function onAndroidBackPressed(e) {
 }
 
 onMounted(async () => {
+  window.addEventListener('resize', resizeNetwork);
+  
+  window.addEventListener('open-ticket-view', (e) => {
+    currentMode.value = 'ticket';
+  });
+
   window.addEventListener('android-back-pressed', onAndroidBackPressed);
   updateKgColors();
   await loadGraph();

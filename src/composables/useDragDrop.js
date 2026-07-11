@@ -18,6 +18,7 @@ export function useDragDrop({ messages, inputText, scrollToBottom, globalFileAcc
   const pendingFiles = ref([]);
   const pendingFolderInfo = ref(null);
   const pendingKBEstimate = ref(null);
+  const pendingBoardingPass = ref(null); // rxing BCBP 自动识别结果
 
   // ── 附件选择 ──
   async function handleAttach() {
@@ -45,6 +46,17 @@ export function useDragDrop({ messages, inputText, scrollToBottom, globalFileAcc
     }
   }
 
+  // ── BCBP 儒略日 → 日期转换 ──
+  function julianDayToDate(julianStr) {
+    const day = parseInt(julianStr, 10);
+    if (isNaN(day) || day < 1 || day > 366) return '';
+    const year = new Date().getFullYear();
+    const date = new Date(year, 0, day);
+    const mm = String(date.getMonth() + 1).padStart(2, '0');
+    const dd = String(date.getDate()).padStart(2, '0');
+    return `${year}-${mm}-${dd}`;
+  }
+
   // ── 图片粘贴 ──
   function handlePaste(event) {
     const items = event.clipboardData?.items;
@@ -54,14 +66,92 @@ export function useDragDrop({ messages, inputText, scrollToBottom, globalFileAcc
         event.preventDefault();
         const file = item.getAsFile();
         const reader = new FileReader();
-        reader.onload = (e) => {
+        reader.onload = async (e) => {
           const base64 = e.target.result.replace(/^data:image\/\w+;base64,/, '');
           pendingImages.value.push(base64);
+          if (window.appAPI?.systemDecodeBarcodeBase64) {
+            try {
+              const res = await window.appAPI.systemDecodeBarcodeBase64(base64);
+              if (res && res.data) {
+                // BCBP 格式检测：以 M1 开头的是标准登机牌
+                if (res.bcbp_info) {
+                  const info = res.bcbp_info;
+                  const dateStr = julianDayToDate(info.date);
+                  pendingBoardingPass.value = {
+                    raw_data: res.data,
+                    format: res.format,
+                    passenger_name: info.passenger_name,
+                    pnr: info.pnr,
+                    origin: info.origin,
+                    destination: info.destination,
+                    carrier: info.carrier,
+                    flight_number: info.flight_number,
+                    date: dateStr,
+                    seat: info.seat.replace(/^0+/, ''),
+                  };
+                  console.log('[DragDrop] BCBP 登机牌识别成功:', pendingBoardingPass.value);
+                } else {
+                  // 非 BCBP 的普通条码 → 追加文字给大模型
+                  if (inputText.value.length > 0 && !inputText.value.endsWith('\n')) {
+                    inputText.value += '\n';
+                  }
+                  inputText.value += `[系统自动提取的图片条码内容: ${res.data}]`;
+                }
+              }
+            } catch (err) {
+              // rxing 解码失败，静默忽略，让大模型 Vision 兜底
+            }
+          }
         };
         reader.readAsDataURL(file);
         return;
       }
     }
+  }
+
+  // ── 登机牌确认/忽略 ──
+  async function confirmBoardingPass() {
+    const bp = pendingBoardingPass.value;
+    if (!bp) return;
+    try {
+      const args = {
+        title: `${bp.carrier}${bp.flight_number} ${bp.origin}-${bp.destination}`,
+        category: 'flight',
+        start_time: bp.date ? `${bp.date} 00:00:00` : '',
+        end_time: '',
+        venue: `${bp.origin} - ${bp.destination}`,
+        seat_info: bp.seat,
+        barcode_data: bp.raw_data,
+        barcode_type: 'qr',
+        flight_info: {
+          flight_number: `${bp.carrier}${bp.flight_number}`,
+          carrier: bp.carrier,
+          pnr: bp.pnr,
+          origin: bp.origin,
+          destination: bp.destination,
+          seat: bp.seat,
+        },
+      };
+      await window.appAPI.createTicketDirect(args);
+      messages.value.push({
+        role: 'assistant',
+        content: `已将航班 ${bp.carrier}${bp.flight_number} (${bp.origin} → ${bp.destination}) 的登机牌存入票夹。`,
+      });
+      pendingImages.value = [];
+    } catch (err) {
+      console.error('[DragDrop] 票据创建失败:', err);
+      messages.value.push({
+        role: 'assistant',
+        content: `票据创建失败: ${err}`,
+        _isError: true,
+      });
+    }
+    pendingBoardingPass.value = null;
+    scrollToBottom();
+  }
+
+  function dismissBoardingPass() {
+    pendingBoardingPass.value = null;
   }
 
   // ── DOM 拖拽入口 ──
@@ -103,9 +193,20 @@ export function useDragDrop({ messages, inputText, scrollToBottom, globalFileAcc
     // 路由 2: 图片
     if (file.type.startsWith('image/')) {
       const reader = new FileReader();
-      reader.onload = (e) => {
+      reader.onload = async (e) => {
         const base64 = e.target.result.replace(/^data:image\/\w+;base64,/, '');
         pendingImages.value.push(base64);
+        if (window.appAPI?.systemDecodeBarcodeBase64) {
+          try {
+            const res = await window.appAPI.systemDecodeBarcodeBase64(base64);
+            if (res && res.data) {
+              if (inputText.value.length > 0 && !inputText.value.endsWith('\n')) {
+                inputText.value += '\n';
+              }
+              inputText.value += `[系统自动提取的图片条码内容: ${res.data}]`;
+            }
+          } catch (err) {}
+        }
       };
       reader.readAsDataURL(file);
       return;
@@ -304,6 +405,7 @@ export function useDragDrop({ messages, inputText, scrollToBottom, globalFileAcc
     pendingFiles,
     pendingFolderInfo,
     pendingKBEstimate,
+    pendingBoardingPass,
     handleAttach,
     handlePaste,
     onDragEnter,
@@ -313,6 +415,8 @@ export function useDragDrop({ messages, inputText, scrollToBottom, globalFileAcc
     confirmFolderTrack,
     cancelKBEstimate,
     startKBBuild,
+    confirmBoardingPass,
+    dismissBoardingPass,
     setupTauriDragListeners,
   };
 }

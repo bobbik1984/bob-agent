@@ -34,6 +34,8 @@ phases:
   tasks:
   - text: 前端全局开关与 UI (SettingsConnections)
     status: done
+  - text: T-2003 前端显示隧道连接状态 (🟢/🔴) 与实时延迟
+    status: done
   - text: Rust 后端网络层重构 (Tunnel Client & Proxy)
     status: todo
   - text: VPS 中继端配合 (Tunnel Server)
@@ -68,5 +70,9 @@ phases:
     status: done
   - text: T-2239 优化移动端消息来源标识 (用手机图标替代 Desktop)
     status: done
+  - text: T-2223 移除或折叠移动端微信、TG、Discord 入口
+    status: done
+  - text: T-1801 修复日历拉伸时长边界时偶尔误触详情修改弹窗的 Bug
+    status: done
   - text: T-2301 扫码配对 MVP (局域网直连 + VPS 信令降级 + Ed25519 握手)
-    status: todo
+    status: done

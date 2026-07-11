@@ -592,7 +592,21 @@
   },
   "quicknote": {
     "select_model": "选择模型",
-    "scan_pairing": "扫码配对",
+    "scan_pairing": "扫码",
     "saved": "已记录"
+  },
+  "ticket": {
+    "status_expired": "已过期",
+    "status_upcoming": "待参与",
+    "seat": "座位/入口",
+    "carrier": "承运/主办",
+    "view": "查看票夹",
+    "my_tickets": "票据",
+    "empty": "票夹为空"
+  },
+  "calendar": {
+    "view_ticket": "查看凭证",
+    "time": "时间",
+    "venue": "场馆"
   }
 }

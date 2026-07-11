@@ -1,5 +1,5 @@
 <template>
-  <div class="chat-view" :class="{ 'is-mobile': isMobile }">
+  <div class="chat-view" :class="{ 'is-mobile': isMobile }" @touchstart="handleTouchStart" @touchend="handleTouchEnd">
     <!-- Lightbox for Image Zoom -->
     <div v-if="zoomedImage" class="image-lightbox" @click="zoomedImage = null; imageScale = 1; imageTranslateX = 0; imageTranslateY = 0;" @wheel.prevent="handleImageWheel" @mousemove="handleImageMouseMove" @mouseup="handleImageMouseUp" @mouseleave="handleImageMouseUp">
       <img :src="zoomedImage" :style="{ transform: `translate(${imageTranslateX}px, ${imageTranslateY}px) scale(${imageScale})` }" @click.stop @mousedown="handleImageMouseDown" />
@@ -15,8 +15,8 @@
     </div>
     <!-- 移动端专属顶部栏 -->
     <div v-if="isMobile" class="mobile-header">
-      <button class="mobile-hamburger" @click="emit('toggle-sidebar')">
-        <Menu :size="20" />
+      <button class="mobile-hamburger" @click="emit('back-to-list')">
+        <ChevronLeft :size="24" />
       </button>
       <div class="mobile-header-center">
         <input 
@@ -111,12 +111,24 @@
           <div v-if="!msg._isError && msg.type !== 'confirm-card' && msg.type !== 'action-item-card' && msg.content" class="message-content selectable">
             <template v-for="(block, bi) in renderMessageBlocks(msg.content)" :key="bi">
               <div v-if="block.type === 'html'" v-html="block.content"></div>
+              <CodeBlock v-else-if="block.type === 'code'" :code="block.code" :lang="block.lang" />
               <FileCard v-else-if="block.type === 'file'" :filePath="block.path" />
             </template>
           </div>
 
-          <!-- 图片预览 -->
-          <div v-if="msg.image_base64" class="message-image">
+          <!-- 图片预览 (多图数组优先) -->
+          <div v-if="msg.image_base64s && msg.image_base64s.length > 0" class="message-images-grid" style="display: flex; gap: 8px; flex-wrap: wrap;">
+            <div v-for="(b64, imgIdx) in msg.image_base64s" :key="imgIdx" class="message-image">
+              <img 
+                :src="'data:image/png;base64,' + b64" 
+                alt="用户图片" 
+                @click="zoomedImage = 'data:image/png;base64,' + b64; imageScale = 1; imageTranslateX = 0; imageTranslateY = 0;"
+                style="cursor: zoom-in; max-height: 200px; border-radius: 4px;"
+              />
+            </div>
+          </div>
+          <!-- 图片预览 (单图旧版兼容，仅在没有 image_base64s 时显示) -->
+          <div v-else-if="msg.image_base64" class="message-image">
             <img 
               :src="'data:image/png;base64,' + msg.image_base64" 
               alt="用户图片" 
@@ -235,7 +247,13 @@
               {{ formatBytes(cdnUpload.bytesSent) }} / {{ formatBytes(cdnUpload.totalBytes) }}
             </div>
           </div>
-          <div v-if="streamContent" class="message-content selectable" v-html="renderMarkdown(streamContent)"></div>
+          <div v-if="streamContent" class="message-content selectable">
+            <template v-for="(block, bi) in renderMessageBlocks(streamContent)" :key="bi">
+              <div v-if="block.type === 'html'" v-html="block.content"></div>
+              <CodeBlock v-else-if="block.type === 'code'" :code="block.code" :lang="block.lang" />
+              <FileCard v-else-if="block.type === 'file'" :filePath="block.path" />
+            </template>
+          </div>
           <!-- 流式元数据：模型标注 + 记忆标志 -->
           <div class="message-meta-row" v-if="currentModelName || streamContent.includes('<|mem|>')">
             <div v-if="streamContent.includes('<|mem|>')" class="memory-indicator" title="已自动提炼知识到脑库">
@@ -300,6 +318,44 @@
         </button>
       </div>
       <div class="input-row">
+        <!-- BCBP 登机牌自动识别确认卡片 -->
+        <div v-if="pendingBoardingPass" class="boarding-pass-card">
+          <div class="bp-header">
+            <span class="bp-icon">✈</span>
+            <span class="bp-title">检测到登机牌</span>
+          </div>
+          <div class="bp-route">
+            <div class="bp-airport">
+              <span class="bp-code">{{ pendingBoardingPass.origin }}</span>
+            </div>
+            <div class="bp-flight-info">
+              <span class="bp-flight-number">{{ pendingBoardingPass.carrier }}{{ pendingBoardingPass.flight_number }}</span>
+              <div class="bp-arrow">→</div>
+              <span class="bp-date">{{ pendingBoardingPass.date }}</span>
+            </div>
+            <div class="bp-airport">
+              <span class="bp-code">{{ pendingBoardingPass.destination }}</span>
+            </div>
+          </div>
+          <div class="bp-details">
+            <div class="bp-detail-item">
+              <span class="bp-label">旅客</span>
+              <span class="bp-value">{{ pendingBoardingPass.passenger_name }}</span>
+            </div>
+            <div class="bp-detail-item">
+              <span class="bp-label">座位</span>
+              <span class="bp-value">{{ pendingBoardingPass.seat }}</span>
+            </div>
+            <div class="bp-detail-item">
+              <span class="bp-label">PNR</span>
+              <span class="bp-value">{{ pendingBoardingPass.pnr }}</span>
+            </div>
+          </div>
+          <div class="bp-actions">
+            <button class="bp-btn bp-btn-confirm" @click="confirmBoardingPass">存入票夹</button>
+            <button class="bp-btn bp-btn-dismiss" @click="dismissBoardingPass">忽略</button>
+          </div>
+        </div>
         <!-- 图片预览 -->
         <div v-if="pendingImages.length > 0" class="inline-images-preview" style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px;">
           <div v-for="(img, idx) in pendingImages" :key="idx" class="inline-image-preview" style="position: relative;">
@@ -331,7 +387,10 @@
               @click="executeCommand(index)"
               @mouseenter="activeCommandIndex = index"
             >
-              <span>{{ cmd.icon }} {{ cmd.label }}</span>
+              <span style="display: flex; align-items: center; gap: 8px;">
+                <component :is="cmd.icon" :size="14" style="opacity: 0.7; flex-shrink: 0;" />
+                <span>{{ cmd.label }}</span>
+              </span>
               <span v-if="cmd.description" style="color: var(--text-tertiary); font-size: 0.85em; margin-left: 8px;">{{ cmd.description }}</span>
               <span class="mention-shortcut" v-if="index === activeCommandIndex">Enter</span>
             </div>
@@ -589,9 +648,10 @@ import '@/utils/markdown';
 <script setup>
 import { ref, watch, onMounted, onUnmounted, nextTick, inject, computed } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { Sparkles, FileText, Camera, Calendar, User, ChevronRight, ChevronDown, ChevronUp, ChevronLeft, X, FileUp, Paperclip, Bookmark, Loader2, Shield, Zap, Target, Lock, Unlock, Download, Smartphone, Monitor, ClipboardCopy, Check, BookmarkPlus, Plus, Menu, Cpu, Play } from 'lucide-vue-next';
+import { Sparkles, FileText, Camera, Calendar, User, ChevronRight, ChevronDown, ChevronUp, ChevronLeft, X, FileUp, Paperclip, Bookmark, Loader2, Shield, Zap, Target, Lock, Unlock, Download, Smartphone, Monitor, ClipboardCopy, Check, BookmarkPlus, Plus, Menu, Cpu, Play, PenLine, BookOpen, Pin } from 'lucide-vue-next';
 import ConfirmCard from '../components/ConfirmCard.vue';
 import FileCard from '../components/FileCard.vue';
+import CodeBlock from '../components/CodeBlock.vue';
 import SearchCard from '../components/SearchCard.vue';
 import BrowserEnableCard from '../components/BrowserEnableCard.vue';
 import FolderDropCard from '../components/FolderDropCard.vue';
@@ -664,7 +724,7 @@ const { t } = useI18n();
 const props = defineProps({
   conversationId: String,
 });
-const emit = defineEmits(['update-title', 'toggle-sidebar']);
+const emit = defineEmits(['update-title', 'back-to-list']);
 
 // ── DOM refs (留在组件层) ─────────────────────────────
 const messagesArea = ref(null);
@@ -719,13 +779,13 @@ const activeCommandIndex = ref(0);
 const commandList = computed(() => {
   if (commandType.value === 'slash') {
     return [
-      { id: 'memo', icon: '📝', label: t('chat.cmd_memo') || '/memo', description: t('chat.cmd_memo_desc') || '作为闪念笔记保存，不发给AI', action: () => insertSlashCommand('/memo ') },
-      { id: 'note', icon: '📓', label: '/note', description: t('chat.cmd_note_desc') || '新建笔记并打开编辑器', action: () => insertSlashCommand('/note ') },
-      { id: 'clip', icon: '📌', label: '/clip', description: t('chat.cmd_clip_desc') || '将AI最近回复保存为笔记', action: () => handleClipCommand() },
+      { id: 'memo', icon: PenLine, label: t('chat.cmd_memo') || '/memo', description: t('chat.cmd_memo_desc') || '作为闪念笔记保存，不发给AI', action: () => insertSlashCommand('/memo ') },
+      { id: 'note', icon: BookOpen, label: '/note', description: t('chat.cmd_note_desc') || '新建笔记并打开编辑器', action: () => insertSlashCommand('/note ') },
+      { id: 'clip', icon: Pin, label: '/clip', description: t('chat.cmd_clip_desc') || '将AI最近回复保存为笔记', action: () => handleClipCommand() },
     ];
   } else {
     return [
-      { id: 'file', icon: '📎', label: t('chat.cmd_file') || '引用本地文件/图片', description: '', action: async () => { 
+      { id: 'file', icon: Paperclip, label: t('chat.cmd_file') || '引用本地文件/图片', description: '', action: async () => { 
           await handleAttach(); 
           if (commandTriggerIndex.value >= 0) {
             inputText.value = inputText.value.substring(0, commandTriggerIndex.value) + inputText.value.substring(commandTriggerIndex.value + 1);
@@ -786,6 +846,23 @@ const openQuickNote = inject('openQuickNote', () => {});
 const isMobile = inject('isMobile', ref(false));
 const conversationTitle = ref('');
 
+// ── 手势返回 (T-2225) ──────────────────────────────
+let touchStartX = 0;
+let touchStartY = 0;
+function handleTouchStart(e) {
+  if (!isMobile.value) return;
+  touchStartX = e.changedTouches[0].screenX;
+  touchStartY = e.changedTouches[0].screenY;
+}
+function handleTouchEnd(e) {
+  if (!isMobile.value) return;
+  const touchEndX = e.changedTouches[0].screenX;
+  const touchEndY = e.changedTouches[0].screenY;
+  if (touchStartX < 40 && touchEndX - touchStartX > 50 && Math.abs(touchEndY - touchStartY) < 50) {
+    emit('back-to-list');
+  }
+}
+
 // ── 本地 UI 状态 ─────────────────────────────────────
 const globalFileAccess = ref(false);
 const agentMode = ref('insight');
@@ -842,8 +919,10 @@ const {
 // 拖拽/附件
 const {
   isDragging, pendingImages, pendingFiles, pendingFolderInfo, pendingKBEstimate,
+  pendingBoardingPass,
   handleAction, handleAttach, handlePaste, onDragEnter, handleDrop, handleTauriDrop,
   cancelFolderTrack, confirmFolderTrack, cancelKBEstimate, startKBBuild,
+  confirmBoardingPass, dismissBoardingPass,
   setupTauriDragListeners,
 } = useDragDrop({
   messages, inputText, scrollToBottom, globalFileAccess, agentMode,
@@ -1211,9 +1290,17 @@ function onAndroidBackPressed(e) {
   }
 }
 
+function onSendMessageToBob(e) {
+  if (e.detail) {
+    inputText.value = e.detail;
+    sendMessage();
+  }
+}
+
 onMounted(async () => {
   window.addEventListener('open-mobile-model-switcher', onOpenMobileModelSwitcher);
   window.addEventListener('android-back-pressed', onAndroidBackPressed);
+  window.addEventListener('send-message-to-bob', onSendMessageToBob);
   cleanupStreamListener = window.appAPI.onStreamChunk(handleStreamChunk);
 
   // 远程消息监听
@@ -1306,6 +1393,7 @@ onMounted(async () => {
 onUnmounted(() => {
   window.removeEventListener('open-mobile-model-switcher', onOpenMobileModelSwitcher);
   window.removeEventListener('android-back-pressed', onAndroidBackPressed);
+  window.removeEventListener('send-message-to-bob', onSendMessageToBob);
   if (cleanupStreamListener) cleanupStreamListener();
   if (remoteMessageUnlisten) remoteMessageUnlisten();
   document.removeEventListener('dragenter', onDragEnter);
@@ -2899,4 +2987,117 @@ defineExpose({
 
 
 /* ── Mobile Bottom Sheet ────────────────────────────────────────── */
+
+/* ── Boarding Pass Confirmation Card ───────────────────────────── */
+.boarding-pass-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--user-accent, #4f8cf7);
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 10px;
+  animation: slideUp 0.3s ease-out;
+}
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.bp-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.bp-icon { font-size: 1.3em; }
+.bp-title {
+  font-weight: 600;
+  color: var(--text-primary);
+  font-size: 0.95em;
+}
+.bp-route {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+  padding: 10px 0;
+}
+.bp-airport { text-align: center; flex: 0 0 auto; }
+.bp-code {
+  font-size: 1.6em;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: 2px;
+}
+.bp-flight-info {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex: 1;
+  gap: 2px;
+}
+.bp-flight-number {
+  font-size: 0.85em;
+  font-weight: 600;
+  color: var(--user-accent, #4f8cf7);
+}
+.bp-arrow {
+  font-size: 1.2em;
+  color: var(--text-tertiary);
+}
+.bp-date {
+  font-size: 0.8em;
+  color: var(--text-secondary);
+}
+.bp-details {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 14px;
+  padding: 8px 12px;
+  background: var(--bg-tertiary);
+  border-radius: 8px;
+}
+.bp-detail-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+}
+.bp-label {
+  font-size: 0.7em;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+.bp-value {
+  font-size: 0.9em;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.bp-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+.bp-btn {
+  padding: 6px 16px;
+  border-radius: 8px;
+  font-size: 0.85em;
+  font-weight: 500;
+  cursor: pointer;
+  border: none;
+  transition: all 0.2s ease;
+}
+.bp-btn-confirm {
+  background: var(--user-accent, #4f8cf7);
+  color: #fff;
+}
+.bp-btn-confirm:hover {
+  filter: brightness(1.1);
+}
+.bp-btn-dismiss {
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+}
+.bp-btn-dismiss:hover {
+  background: var(--bg-primary);
+}
 </style>

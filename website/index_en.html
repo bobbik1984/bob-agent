@@ -774,7 +774,7 @@
         </div>
 
         <!-- Milestone 17 -->
-        <div class="roadmap-item active">
+        <div class="roadmap-item completed">
           <div class="roadmap-dot"></div>
           <div class="roadmap-meta">
             <span class="roadmap-version">Milestone 17 — Deep KB & Graph Integration</span>
@@ -785,6 +785,38 @@
               <li><strong>Source-Hub Architecture</strong>: Aggregate cross-channel data (Web, WeChat, Discord) into Hub nodes.</li>
               <li><strong>Batch Sync & Disambiguation</strong>: Efficiently index heterogeneous data with intelligent entity deduplication.</li>
               <li><strong>Intranet Tunneling</strong>: One-click reverse proxy tunnel to allow external services to securely push data directly to the local brain.</li>
+            </ul>
+          </div>
+        </div>
+
+        <!-- Milestone 18 -->
+        <div class="roadmap-item completed">
+          <div class="roadmap-dot"></div>
+          <div class="roadmap-meta">
+            <span class="roadmap-version">Milestone 18 — Mobile Companion & Seamless Sync</span>
+          </div>
+          <div class="roadmap-content">
+            <p>Reconstruct the lightweight mobile interface based on Tauri V2 Mobile, establishing PC-primary, multi-tier fallback WebRTC channels, and self-healing UX polish.</p>
+            <ul>
+              <li><strong>Mobile Sandboxed Skill Engine</strong>: Compile and package modular skills, automatically deploying them to the Android sandbox at runtime.</li>
+              <li><strong>Seamless Scan-to-Pair</strong>: Secure dual-device pairing with Ed25519 handshakes and X25519-AES-GCM encryption, falling back from local HTTP to WebRTC traversal.</li>
+              <li><strong>Mobile UX Self-Healing</strong>: Fix missing download progress in Android model manager, FAB note panel crash, calendar gesture bounds, and list selection click prevention.</li>
+            </ul>
+          </div>
+        </div>
+
+        <!-- Milestone 19 -->
+        <div class="roadmap-item active">
+          <div class="roadmap-dot"></div>
+          <div class="roadmap-meta">
+            <span class="roadmap-version">Milestone 19 — Invoice Association & Mobile Voice Input</span>
+          </div>
+          <div class="roadmap-content">
+            <p>Deepen local transaction processing and mobile input, linking invoices to timeline events and enabling natural mobile voice stream interactions.</p>
+            <ul>
+              <li><strong>Smart Invoice Event Binding</strong>: Extract time, amount, and merchant info from receipts (PDF/images) and map them to calendar events or timeline items.</li>
+              <li><strong>Mobile Voice Memo</strong>: Record voice memos on mobile, transcribing with local/cloud ASR in seconds into to-do tasks or card notes.</li>
+              <li><strong>UX & Latency Awareness (T-2003/T-2223)</strong>: Integrated connection checks and latency ping indicators (🟢/🔴), folding WeChat/TG/Discord entries under narrow viewports.</li>
             </ul>
           </div>
         </div>

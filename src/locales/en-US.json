@@ -592,7 +592,21 @@
   },
   "quicknote": {
     "select_model": "Select Model",
-    "scan_pairing": "Scan Pairing",
+    "scan_pairing": "Scan",
     "saved": "Saved"
+  },
+  "ticket": {
+    "status_expired": "Expired",
+    "status_upcoming": "Upcoming",
+    "seat": "Seat/Gate",
+    "carrier": "Carrier/Host",
+    "view": "View Tickets",
+    "my_tickets": "Tickets",
+    "empty": "No tickets yet"
+  },
+  "calendar": {
+    "view_ticket": "View Ticket",
+    "time": "Time",
+    "venue": "Venue"
   }
 }

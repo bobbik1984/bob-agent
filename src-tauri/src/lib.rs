@@ -1,4 +1,5 @@
 // Force rebuild to embed latest dist assets
+mod barcode;
 mod assertions;
 mod browser;
 mod calendar;
@@ -50,6 +51,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use tauri::Manager;
+use std::collections::HashMap;
+
+pub struct AbortState(pub Mutex<HashMap<String, tokio::sync::mpsc::Sender<()>>>);
 
 // ═══════════════════════════════════════════════════════════
 // 数据目录与配置管理
@@ -275,6 +279,19 @@ fn config_get_all() -> Value {
 // ═══════════════════════════════════════════════════════════
 
 #[tauri::command]
+async fn abort_generation(
+    conv_id: String,
+    state: tauri::State<'_, AbortState>,
+) -> Result<(), String> {
+    let sender_opt = state.0.lock().unwrap().remove(&conv_id);
+    if let Some(sender) = sender_opt {
+        let _ = sender.send(()).await;
+        log::info!("Sent abort signal to conv_id: {}", conv_id);
+    }
+    Ok(())
+}
+
+#[tauri::command]
 async fn llm_chat(
     messages: Vec<Value>,
     conversation_id: Option<String>,
@@ -479,7 +496,6 @@ fn system_show_in_folder(file_path: String) -> bool {
 }
 
 use serde::Deserialize;
-use std::collections::HashMap;
 
 #[derive(Deserialize)]
 struct EntityRegistry {
@@ -835,6 +851,8 @@ pub fn run() {
         builder = builder.plugin(tauri_plugin_haptics::init());
     }
     
+    builder = builder.manage(AbortState(Mutex::new(HashMap::new())));
+
     let mut builder = builder
         .manage(crypto::DeviceIdentityState(std::sync::Mutex::new(None)))
         .manage(std::sync::Arc::new(sync_engine::DeviceRegistry::load()))
@@ -909,6 +927,11 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            abort_generation,
+            barcode::system_decode_barcode,
+            barcode::system_decode_barcode_base64,
+            barcode::system_parse_bcbp,
+            tools::system_create_ticket,
             // 设备安全与配对
             crypto::check_device_keys_initialized,
             crypto::init_device_keys,
@@ -995,6 +1018,8 @@ pub fn run() {
             scheduler::system_add_cron_job,
             scheduler::system_remove_cron_job,
             scheduler::system_toggle_cron_job,
+            // 隧道与代理
+            tunnel::check_tunnel_status,
             // Sidecar / Candle Engine
             crate::candle_engine::start_offline_engine,
             crate::candle_engine::stop_offline_engine,

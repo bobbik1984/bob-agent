@@ -90,6 +90,24 @@
         </div>
       </div>
 
+      <!-- 设备名称 (deviceName) -->
+      <label class="form-label" style="font-size: 0.85em; margin-bottom: 6px; display: flex; align-items: center; gap: 6px; margin-top: 24px;">
+        <Smartphone :size="14" style="opacity: 0.6;" />
+        设备名称
+      </label>
+
+      <div class="form-group workspace-group">
+        <div class="path-display" style="display: flex; gap: 8px;">
+          <input 
+            v-model="config.deviceName" 
+            class="input" 
+            placeholder="例如: ThinkPad X1 (留空则使用设备 ID)" 
+            @change="saveConfig('deviceName', config.deviceName)"
+            style="flex: 1;"
+          />
+        </div>
+      </div>
+
       <!-- 知识库目录 (wikiDir) -->
       <template v-if="!isNativeMobile">
         <label class="form-label" style="font-size: 0.85em; margin-bottom: 6px; display: flex; align-items: center; gap: 6px; margin-top: 24px;">
@@ -337,7 +355,7 @@
 import { ref, onMounted, inject } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { formatDateTime as formatMemoryTime, formatFuzzyTime as formatEvoTime } from '@/utils/date';
-import { HardDrive, FolderOpen, FolderHeart, FileText, Puzzle, Layers, X, Plus, ChevronDown, Trash2, Brain, BookOpen, Loader2, Dna, Moon, Cloud } from 'lucide-vue-next';
+import { HardDrive, FolderOpen, FolderHeart, FileText, Puzzle, Layers, X, Plus, ChevronDown, Trash2, Brain, BookOpen, Loader2, Dna, Moon, Cloud, Smartphone } from 'lucide-vue-next';
 import PluginManager from '../../components/PluginManager.vue';
 
 const isNativeMobile = inject('isNativeMobile', false);

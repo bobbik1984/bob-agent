@@ -44,14 +44,12 @@ pub fn init_cron_table(conn: &rusqlite::Connection) {
 /// 检查当前分钟是否匹配 cron 表达式
 /// 格式: "minute hour day_of_month month day_of_week"
 /// 支持: * (任意), N (具体值), N-M (范围), */N (步长), N,M,K (列表)
-fn matches_cron(expr: &str) -> bool {
-    let now = chrono::Local::now();
-    let minute = now.format("%M").to_string().parse::<u32>().unwrap_or(0);
-    let hour = now.format("%H").to_string().parse::<u32>().unwrap_or(0);
-    let day = now.format("%d").to_string().parse::<u32>().unwrap_or(1);
-    let month = now.format("%m").to_string().parse::<u32>().unwrap_or(1);
-    // chrono %u: Monday=1 .. Sunday=7; cron: Sunday=0, Monday=1 .. Saturday=6
-    let weekday_chrono = now.format("%u").to_string().parse::<u32>().unwrap_or(1);
+fn matches_cron_at_time(expr: &str, time: chrono::DateTime<chrono::Local>) -> bool {
+    let minute = time.format("%M").to_string().parse::<u32>().unwrap_or(0);
+    let hour = time.format("%H").to_string().parse::<u32>().unwrap_or(0);
+    let day = time.format("%d").to_string().parse::<u32>().unwrap_or(1);
+    let month = time.format("%m").to_string().parse::<u32>().unwrap_or(1);
+    let weekday_chrono = time.format("%u").to_string().parse::<u32>().unwrap_or(1);
     let weekday = if weekday_chrono == 7 {
         0
     } else {
@@ -60,10 +58,6 @@ fn matches_cron(expr: &str) -> bool {
 
     let fields: Vec<&str> = expr.trim().split_whitespace().collect();
     if fields.len() != 5 {
-        log::warn!(
-            "Scheduler: invalid cron expression (need 5 fields): '{}'",
-            expr
-        );
         return false;
     }
 
@@ -72,6 +66,10 @@ fn matches_cron(expr: &str) -> bool {
         && field_matches(fields[2], day, 1, 31)
         && field_matches(fields[3], month, 1, 12)
         && field_matches(fields[4], weekday, 0, 6)
+}
+
+fn matches_cron(expr: &str) -> bool {
+    matches_cron_at_time(expr, chrono::Local::now())
 }
 
 /// 检查单个 cron 字段是否匹配给定值
@@ -140,12 +138,113 @@ fn part_matches(part: &str, value: u32, min: u32, max: u32) -> bool {
 // 后台调度循环
 // ═══════════════════════════════════════════════════════════
 
+// ═══════════════════════════════════════════════════════════
+// 启动补发检查
+// ═══════════════════════════════════════════════════════════
+
+/// 检查当天在 Bob 启动前被错过的所有定时任务，并自动补发执行一次
+async fn check_and_compensate_missed_jobs(app: &AppHandle) {
+    let db_path = super::get_data_dir().join("bob.db");
+    let conn = match rusqlite::Connection::open(&db_path) {
+        Ok(c) => c,
+        Err(e) => {
+            log::warn!("Scheduler startup check: failed to open DB: {}", e);
+            return;
+        }
+    };
+
+    let jobs = match load_enabled_jobs(&conn) {
+        Ok(j) => j,
+        Err(e) => {
+            log::warn!("Scheduler startup check: failed to load jobs: {}", e);
+            return;
+        }
+    };
+
+    let now = chrono::Local::now();
+    
+    // 计算今天 00:00:00 的 Local DateTime
+    let today_start = match now.date_naive().and_hms_opt(0, 0, 0) {
+        Some(naive) => match naive.and_local_timezone(chrono::Local) {
+            chrono::LocalResult::Single(dt) => dt,
+            _ => now,
+        },
+        None => now,
+    };
+
+    log::info!(
+        "Scheduler startup check: verifying missed runs since today start ({})",
+        today_start.format("%Y-%m-%d %H:%M:%S")
+    );
+
+    for (id, title, cron_expr, prompt, last_run_ms, created_at_ms) in &jobs {
+        if cron_expr == "@daily_startup" {
+            continue; // @daily_startup is managed by run_daily_routine date-debounce check
+        }
+
+        // 将 last_run_ms 和 created_at_ms 转为 Local DateTime
+        let last_run_time = if *last_run_ms > 0 {
+            let secs = last_run_ms / 1000;
+            let nsecs = (last_run_ms % 1000) * 1_000_000;
+            chrono::DateTime::from_timestamp(secs, nsecs as u32)
+                .map(|utc| utc.with_timezone(&chrono::Local))
+        } else {
+            None
+        };
+
+        let created_at_time = {
+            let secs = created_at_ms / 1000;
+            let nsecs = (created_at_ms % 1000) * 1_000_000;
+            chrono::DateTime::from_timestamp(secs, nsecs as u32)
+                .map(|utc| utc.with_timezone(&chrono::Local))
+                .unwrap_or(now)
+        };
+
+        let mut check_time = today_start;
+        let mut missed_run_time = None;
+
+        // 每分钟进行匹配检查
+        while check_time < now {
+            if check_time >= created_at_time && matches_cron_at_time(cron_expr, check_time) {
+                let ran_after = match last_run_time {
+                    Some(lr) => lr >= check_time,
+                    None => false,
+                };
+                if !ran_after {
+                    missed_run_time = Some(check_time);
+                }
+            }
+            check_time = check_time + chrono::Duration::minutes(1);
+        }
+
+        if let Some(trigger_time) = missed_run_time {
+            log::info!(
+                "Scheduler startup check: missed run found for job '{}' ({}) scheduled at {}. Executing compensation.",
+                title,
+                id,
+                trigger_time.format("%Y-%m-%d %H:%M:%S")
+            );
+            execute_cron_job(app, id, title, prompt).await;
+
+            // 更新 last_run
+            let run_ts = super::now_ms();
+            let _ = conn.execute(
+                "UPDATE cron_jobs SET last_run = ?1 WHERE id = ?2",
+                params![run_ts, id],
+            );
+        }
+    }
+}
+
 /// 启动 Scheduler 后台守护循环
 /// 每 60 秒 tick 一次，扫描并执行匹配的 cron 任务
 pub async fn start_scheduler(app: AppHandle) {
     // 延迟 15 秒，让其他初始化 (DB/Reconciler/ModelRegistry) 先完成
     tokio::time::sleep(tokio::time::Duration::from_secs(15)).await;
     log::info!("Scheduler: background cron loop started");
+
+    // ── 补发检查 ──
+    check_and_compensate_missed_jobs(&app).await;
 
     let mut ticker = tokio::time::interval(tokio::time::Duration::from_secs(60));
 
@@ -172,7 +271,7 @@ pub async fn start_scheduler(app: AppHandle) {
         };
 
         // ── 标准 Cron 任务（排除 @daily_startup，它们由 Daily Routine 管理）──
-        for (id, title, cron_expr, prompt) in &jobs {
+        for (id, title, cron_expr, prompt, _last_run, _created_at) in &jobs {
             if cron_expr == "@daily_startup" {
                 continue; // 跳过，由 run_daily_routine 统一调度
             }
@@ -449,9 +548,9 @@ fn check_upcoming_todos(app: &AppHandle, db_path: &std::path::Path) {
 /// 从 DB 加载所有 enabled=1 的 cron 任务
 fn load_enabled_jobs(
     conn: &rusqlite::Connection,
-) -> Result<Vec<(String, String, String, String)>, String> {
+) -> Result<Vec<(String, String, String, String, i64, i64)>, String> {
     let mut stmt = conn
-        .prepare("SELECT id, title, cron_expr, prompt_template FROM cron_jobs WHERE enabled = 1")
+        .prepare("SELECT id, title, cron_expr, prompt_template, last_run, created_at FROM cron_jobs WHERE enabled = 1")
         .map_err(|e| format!("{}", e))?;
 
     let rows = stmt
@@ -461,6 +560,8 @@ fn load_enabled_jobs(
                 row.get::<_, String>(1)?,
                 row.get::<_, String>(2)?,
                 row.get::<_, String>(3)?,
+                row.get::<_, i64>(4).unwrap_or(0),
+                row.get::<_, i64>(5)?,
             ))
         })
         .map_err(|e| format!("{}", e))?;
@@ -855,5 +956,23 @@ mod tests {
         assert!(field_matches("1-3,7,10-12", 11, 0, 31));
         assert!(!field_matches("1-3,7,10-12", 5, 0, 31));
         assert!(!field_matches("1-3,7,10-12", 13, 0, 31));
+    }
+
+    #[test]
+    fn test_matches_cron_at_time() {
+        use chrono::TimeZone;
+        // Let's construct a local date time: 2026-07-11 12:30:00 (which is a Saturday, weekday index 6)
+        let dt = chrono::Local.with_ymd_and_hms(2026, 7, 11, 12, 30, 0).single().unwrap();
+
+        // 1. Matches exact time
+        assert!(matches_cron_at_time("30 12 11 7 6", dt));
+        // 2. Matches star wildcard
+        assert!(matches_cron_at_time("* * * * *", dt));
+        // 3. Matches step
+        assert!(matches_cron_at_time("*/10 12 * * *", dt));
+        // 4. Mismatch in minute
+        assert!(!matches_cron_at_time("15 12 11 7 6", dt));
+        // 5. Mismatch in weekday
+        assert!(!matches_cron_at_time("30 12 11 7 0", dt));
     }
 }

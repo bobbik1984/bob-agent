@@ -1,7 +1,7 @@
 use futures_util::StreamExt;
 use serde_json::{json, Value};
 use std::path::PathBuf;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
 // ── 模型注册表路径 ─────────────────────────────────────
 fn get_registry_path() -> PathBuf {
@@ -1757,6 +1757,15 @@ pub(crate) async fn stream_internal(
 ) -> Value {
     // conv_id 用于标记 llm:chunk 事件属于哪个会话，防止跨会话串流
     let conv_id_for_emit = conv_id.clone().unwrap_or_default();
+    
+    // ── T-1800: 排队纠偏 (Abort Generation) ─────────────────
+    let (abort_tx, mut abort_rx) = tokio::sync::mpsc::channel::<()>(1);
+    if !conv_id_for_emit.is_empty() {
+        if let Some(state) = app.try_state::<crate::AbortState>() {
+            state.0.lock().unwrap().insert(conv_id_for_emit.clone(), abort_tx);
+        }
+    }
+
     // 1. 读取 LLM 配置
     let config = super::read_config();
     let config_model_id = config
@@ -2229,10 +2238,22 @@ pub(crate) async fn stream_internal(
         const EMIT_INTERVAL_MS: u128 = 30;
         const EMIT_BUFFER_SIZE: usize = 4;
 
-        while let Some(chunk_result) = stream.next().await {
+        let mut aborted = false;
+        
+        loop {
+            let chunk_result = tokio::select! {
+                res = stream.next() => res,
+                _ = abort_rx.recv() => {
+                    log::info!("Generation aborted by user (conv_id: {})", conv_id_for_emit);
+                    aborted = true;
+                    break;
+                }
+            };
+
             let bytes = match chunk_result {
-                Ok(b) => b,
-                Err(_) => break,
+                Some(Ok(b)) => b,
+                Some(Err(_)) => break,
+                None => break,
             };
             buffer.push_str(&String::from_utf8_lossy(&bytes));
 
@@ -2578,6 +2599,10 @@ pub(crate) async fn stream_internal(
             }
         }
 
+        if aborted {
+            break;
+        }
+
         // ── 判断: Tool Call 还是最终回复 ────────────────
         if !pending_tool_calls.is_empty() {
             has_tool_calls = true;
@@ -2903,6 +2928,13 @@ pub(crate) async fn stream_internal(
             if let Some(p) = m.get("pricing") {
                 pricing = p.clone();
             }
+        }
+    }
+
+    // 清理 AbortState
+    if !conv_id_for_emit.is_empty() {
+        if let Some(state) = app.try_state::<crate::AbortState>() {
+            state.0.lock().unwrap().remove(&conv_id_for_emit);
         }
     }
 

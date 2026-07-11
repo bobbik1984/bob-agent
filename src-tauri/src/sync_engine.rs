@@ -15,6 +15,8 @@ pub struct ConnectedDevice {
     pub platform: String,
     pub ip_address: String,
     pub last_seen: i64,
+    #[serde(default)]
+    pub device_name: Option<String>,
 }
 
 #[derive(Default)]
@@ -88,11 +90,15 @@ pub fn register_device(app: &AppHandle, headers: &axum::http::HeaderMap, ip: std
         headers.get("x-platform").and_then(|v| v.to_str().ok()),
     ) {
         let registry = app.state::<Arc<DeviceRegistry>>();
+        let device_name = headers.get("x-device-name")
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_string());
         let device = ConnectedDevice {
             device_id: device_id.to_string(),
             platform: platform.to_string(),
             ip_address: ip.ip().to_string(),
             last_seen: crate::now_ms(),
+            device_name,
         };
         registry.update_device(device.clone());
         let _ = app.emit("sync:device_connected", device);
@@ -171,6 +177,8 @@ pub async fn write_mobile_outbox(_app: AppHandle, operations: Vec<serde_json::Va
 pub async fn relay_handshake(app: AppHandle, target_device_id: String) -> Result<(), String> {
     let config = crate::read_config();
     let my_device_id = config.get("device_id").and_then(|v| v.as_str()).unwrap_or("unknown").to_string();
+    let my_device_name = config.get("deviceName").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let platform = std::env::consts::OS.to_string();
     
     let relay_url = "wss://relay.bobbik.org".to_string();
     let ws_url = format!("{}/ws/device/{}", relay_url, my_device_id);
@@ -197,7 +205,10 @@ pub async fn relay_handshake(app: AppHandle, target_device_id: String) -> Result
     let notify = serde_json::json!({
         "type": "notify",
         "target_device_id": target_device_id,
-        "payload": {}
+        "payload": {
+            "device_name": my_device_name,
+            "platform": platform,
+        }
     });
     match ws_stream.send(Message::Text(notify.to_string().into())).await {
         Ok(_) => {
@@ -509,11 +520,13 @@ async fn do_active_sync(app: AppHandle, payload: SyncCommandPayload) -> Result<(
         
         let config = crate::read_config();
         let my_device_id = config.get("device_id").and_then(|v| v.as_str()).unwrap_or("unknown").to_string();
+        let my_device_name = config.get("deviceName").and_then(|v| v.as_str()).unwrap_or("").to_string();
         let platform = std::env::consts::OS.to_string();
         
         match client.get(&pull_url)
             .header("X-Device-Id", &my_device_id)
             .header("X-Platform", &platform)
+            .header("X-Device-Name", &my_device_name)
             .header("X-Since-Ts", last_sync_ts.to_string())
             .send().await {
             Ok(resp) if resp.status().is_success() => {
@@ -536,7 +549,7 @@ async fn do_active_sync(app: AppHandle, payload: SyncCommandPayload) -> Result<(
                                 // Also pull skills zip
                                 let skills_url = format!("{}/v1/sync/skills/download", base_url);
                                 let _ = app.emit("sync:progress", serde_json::json!({"stage": "skills_sync", "status": "running"}));
-                                if let Ok(s_resp) = client.get(&skills_url).header("X-Device-Id", &my_device_id).send().await {
+                                if let Ok(s_resp) = client.get(&skills_url).header("X-Device-Id", &my_device_id).header("X-Device-Name", &my_device_name).send().await {
                                     if s_resp.status().is_success() {
                                         if let Ok(bytes) = s_resp.bytes().await {
                                             let ext_dir = crate::get_external_skills_dir_or_default(&config);
@@ -578,6 +591,7 @@ async fn do_active_sync(app: AppHandle, payload: SyncCommandPayload) -> Result<(
                         match client.post(&outbox_url)
                             .header("X-Device-Id", &my_device_id)
                             .header("X-Platform", &platform)
+                            .header("X-Device-Name", &my_device_name)
                             .json(&mock_outbox).send().await {
                             Ok(resp) if resp.status().is_success() => {
                                 info!("[Sync Engine] Successfully pushed outbox to PC!");
@@ -598,6 +612,7 @@ async fn do_active_sync(app: AppHandle, payload: SyncCommandPayload) -> Result<(
                 match client.post(&push_db_url)
                     .header("X-Device-Id", &my_device_id)
                     .header("X-Platform", &platform)
+                    .header("X-Device-Name", &my_device_name)
                     .json(&local_sync_data).send().await {
                     Ok(resp) if resp.status().is_success() => {
                         info!("[Sync Engine] Successfully pushed SQLite data to PC!");
@@ -785,14 +800,17 @@ pub fn start_relay_listener(app: AppHandle) {
                                         if msg_type == "notify" {
                                             let from_id = json.get("from_device_id").and_then(|v| v.as_str()).unwrap_or("unknown");
                                             log::info!("[Sync Engine] Received notify from {}", from_id);
+                                            let device_name = json.get("payload").and_then(|p| p.get("device_name")).and_then(|v| v.as_str()).map(|s| s.to_string());
+                                            let platform = json.get("payload").and_then(|p| p.get("platform")).and_then(|v| v.as_str()).unwrap_or("mobile").to_string();
                                             
                                             // Register device in DeviceRegistry
                                             let registry = app.state::<Arc<DeviceRegistry>>();
                                             registry.update_device(ConnectedDevice {
                                                 device_id: from_id.to_string(),
-                                                platform: "mobile".to_string(),
+                                                platform: platform.clone(),
                                                 ip_address: "relay".to_string(),
                                                 last_seen: crate::now_ms(),
+                                                device_name: device_name.clone(),
                                             });
 
                                             // Send Ack back
@@ -805,7 +823,8 @@ pub fn start_relay_listener(app: AppHandle) {
                                             // Emit to frontend
                                             let _ = app.emit("sync:device_connected", serde_json::json!({
                                                 "device_id": from_id,
-                                                "platform": "mobile"
+                                                "platform": platform,
+                                                "device_name": device_name
                                             }));
                                         } else if msg_type == "proxy" {
                                             if let Some(inner_payload) = json.get("payload") {

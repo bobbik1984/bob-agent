@@ -77,14 +77,26 @@
 
 
 ### 5. 残留 Mock 清单 (技术债)
-> 以下接口仍为 Mock，尚未绑定真正的 Rust invoke：
-- **🧠 记忆与做梦引擎 (T-604)**: summarizeSession, getDreamReport, dismissDream, onDreamCompleted。
-- **🛠️ 系统级交互 (T-608 残留)**: updateTheme, getClipboardImage, showNotification。
-- **⚙️ MCP 配置 (T-609)**: getMcpConfig, setMcpConfig。
-> ✅ 已消除: T-603(插件扫描), T-605(日程), T-606(文件读取), T-607(文件夹跟踪), T-608(大部分系统工具)
+> 以下接口仍为 Mock，尚未绑定真正的 Rust invoke 或原生实现：
+- **🛠️ 系统级交互 (T-608 残留)**: updateTheme, showNotification。
+> ✅ 已消除 Mock 并实装:
+> - T-603(插件扫描), T-605(日程), T-606(文件读取), T-607(文件夹跟踪), T-608(大部分系统工具)
+> - 🧠 记忆与做梦引擎: summarizeSession, getDreamReport, dismissDream, onDreamCompleted (Rust 实装)
+> - ⚙️ MCP 配置: getMcpConfig, setMcpConfig (Rust 实装)
+> - 📋 剪贴板图片: getClipboardImage (前端 Web API 原生实现)
 ---
 
 ## 📅 开发日志
+
+### 2026-07-11
+
+**主题**: 内网隧道延迟监测、移动端布局折叠与日历手势边界卡顿自愈
+
+**完成**:
+1. [Feature] **[T-2003] 穿墙隧道状态与延迟检测** — 新增 Tauri 后端 `check_tunnel_status` 命令；Vue 前端 (SettingsConnections) 引入 8 秒自动轮询机制，动态呈现 🟢 已连接 (xx ms) / 🔴 未连接 状态标识。
+2. [Layout] **[T-2223] 移动端专属通道收纳** — 检测到移动端或窄屏环境时，自动将微信、TG、Discord 等桌面端专属通道入口收纳折叠进一个 `<details class="settings-section card">` (桌面端专属通道) 伸缩面板中，保持排版紧凑。
+3. [Fix] **[T-1801] 修复日历调整时长边界误触详情弹窗 Bug** — 在拖拽结束 (`onDragEnd`) 与缩放结束 (`onMouseUp`) 瞬间注册捕获阶段的 `click` 拦截监听，物理吞噬紧随其后的模拟 `click` 事件，并辅以 50ms 自动垃圾回收，完美解决移动端模拟时序或渲染微卡顿导致的详情修改弹窗误触。
+4. [Sync] 运行 project_aligner 统一全量进度，并将 navigator / dev_dashboard 自动强推至火山云节点部署生效。
 
 ### 2026-07-10
 
@@ -146,7 +158,7 @@
 4. [Audit] **Slash Commands 摸底** — 梳理了当前仅存的 `/memo`、`@note` 和 `@` 命令，发现极度隐蔽的 UX 问题。
 
 **未完成**:
-- [ ] T-2001: 实现 Slash/Mention Command 的智能悬浮补全菜单 (方案 A)
+- [x] T-2001: 实现 Slash/Mention Command 的智能悬浮补全菜单 (方案 A)
 
 **已完成 (Phase 2.5 & Phase 3)**:
 
@@ -244,15 +256,17 @@
   - [ ] 在 `llm.rs` 中针对 `provider == "offline"` 增加降级逻辑（如果模型不支持标准 JSON，则通过 Prompt 强制要求 XML 标签包裹）
   - [ ] 实现离线模式下的错误重试机制（解析 JSON 失败时，返回报错信息让小模型自行修正）
 - [ ] **Epic: 排队纠偏 (Queue Correction)**
-  - [ ] 在前端 `ChatView.vue` 添加“打断执行”按钮，点击后发送中止信号给 Tauri 后端
-  - [ ] 在 `llm.rs` 中引入 `tokio::sync::mpsc` 监听前端中断信号
-  - [ ] 修改 `stream_internal` 的 Tool Calling 循环：一旦收到中断信号，立刻跳出循环并丢弃挂起的工具
-  - [ ] 将用户新输入的“纠正指令”作为新一轮上下文直接喂给 LLM 重新规划
-- [ ] 引入 `tokio-cron-scheduler` 库，在 `lib.rs` 的后台守护线程中初始化
-  - [ ] 在应用启动时，从 SQLite 读取用户的自动化日程（如每天 08:00 播报新闻）
-  - [ ] 编写后台无头 (Headless) 唤醒逻辑：时间一到，自动后台组装 Prompt 并调用 `stream_internal`，将结果通过系统通知（Notification）或悬浮窗推给用户
+  - [x] 在前端 `ChatView.vue` 添加“打断执行”按钮，点击后发送中止信号给 Tauri 后端
+  - [x] 在 `llm.rs` 中引入 `tokio::sync::mpsc` 监听前端中断信号
+  - [x] 修改 `stream_internal` 的 Tool Calling 循环：一旦收到中断信号，立刻跳出循环并丢弃挂起的工具
+  - [x] 将用户新输入的“纠正指令”作为新一轮上下文直接喂给 LLM 重新规划
+- [x] 引入 `tokio-cron-scheduler` 库，在 `lib.rs` 的 Tauri 进程后台线程中初始化 (仅在应用运行时调度，不注册系统常驻守护进程)
+  - [x] 在应用启动时，从 SQLite 读取用户的自动化日程（如每天 08:00 播报新闻），并自动检查当天该任务是否已执行；若当天已过预定时间点且未曾执行，则在启动后立即补发执行一次
+  - [x] 编写应用内定时唤醒逻辑：时间一到且应用在运行，自动后台组装 Prompt 并调用 `stream_internal`，将结果通过系统通知（Notification）或悬浮窗推给用户
 
 ### 体验层
+- [ ] **Epic: 对话窗口内联渲染 HTML**
+  - [ ] 在对话窗口里渲染 HTML 页面，以有效展示由 Excel 读取数据生成的图表
 
 ---
 
@@ -483,7 +497,7 @@
 > 📋 **核心逻辑**: 作为全局功能开关存在。对于受限网络环境一键开启穿墙透传，而无限制网络环境继续依赖现有的直连方式，互不干扰。
 
 ### Phase 1: 前端全局开关与 UI (SettingsConnections)
-- [ ] T-2003: UI 面板显示当前隧道的连接状态（🟢代理已连接 / 🔴代理断开）与实时延迟。
+- [x] T-2003: UI 面板显示当前隧道的连接状态（🟢代理已连接 / 🔴代理断开）与实时延迟。
 
 ### Phase 2: Rust 后端网络层重构 (Tunnel Client & Proxy)
 - [x] T-2011: src-tauri/src/tunnel.rs 实现到 VPS 的代理通道（HTTPS 请求包伪装转发至 proxy 接口）。
@@ -505,9 +519,9 @@
 ### Phase 2: 手机端 UI 适配与裁剪 (M2 Sprint)
 - [x] T-2221: (M2-01) 移动端布局彻底重构 (实现 BottomNavigation 并通过 AndroidManifest 锁定竖屏)
 - [x] T-2222: (M2-02) 避开手机状态栏 (利用 safe-area-inset-bottom 适配安全区)
-- [ ] T-2223: (M2-03) 移除或折叠微信、Telegram、Discord 等桌面端专属通道入口 (移动端 Onboarding 中微信步骤替换为"扫码绑定 PC")
+- [x] T-2223: (M2-03) 移除或折叠微信、Telegram、Discord 等桌面端专属通道入口 (移动端 Onboarding 中微信步骤替换为"扫码绑定 PC")
 - [x] T-2224: (M2-04) 修复 Android 桌面图标 — 将 `src-tauri/icons/android/mipmap-*/` 同步覆写到 `src-tauri/gen/android/app/src/main/res/mipmap-*/`，或运行 `npx tauri icon` 重新生成
-- [ ] T-2225: (M2-05) 聊天视图双层级改造 (默认打开上一个对话记录，支持后退返回全局对话列表，与返回手势 T-2228 配套)
+- [x] T-2225: (M2-05) 聊天视图双层级改造 (默认打开上一个对话记录，支持后退返回全局对话列表，与返回手势 T-2228 配套)
 - [x] T-2226: (M2-06) 知识库视图极简改造 (已实现：依靠顶部的“图谱”“笔记”分栏快速切换)
 - [x] T-2227: (M2-07) 移动端专属 Onboarding 绑定流程 (已实现 SetupWizard 移动端 3 步布局与扫码配对)
 - [x] T-2228: (M2-08) 原生手势与物理返回键接入 (监听 Android 边缘侧滑/物理返回键，映射到 Vue Router 的 fallback)
@@ -519,6 +533,7 @@
 - [x] T-2238: (M2-14) **调整聊天扩展菜单样式** — 缩小聊天输入框右侧扩展菜单 ("问答 / 执行 / 闭环") 的圆角 (`border-radius`)，使其与整体 UI 保持一致。
 - [x] T-2239: (M2-15) **优化移动端消息来源标识** — 检测当前环境，若在手机端发送消息，聊天气泡下方应显示专属手机小图标，而非 "Desktop" 标识。
 - [x] T-2240: (M2-16) **手机端 WeekTimeline 日历区域手势切换** — 引入 `touchstart` / `touchend` 触摸划动监听，允许手机用户通过左右手势在不同周（上一周/下一周）之间进行顺畅切换。
+- [ ] T-2241: (M2-17) **手机端原生麦克风语音输入支持 (Speech-to-Text)** — 确定采用方案 B（自主编写 Kotlin/Swift 原生桥接），直连 Android `SpeechRecognizer` (监听 `onPartialResults` 阶段回调) 与 iOS `SFSpeechRecognizer`；绕开 WebView 兼容性陷阱；支持蓝牙耳机录音（SCO 协议）；前端 ChatView 输入框旁增加“麦克风”长按/点击录音交互，并将 native 层实时回调的文本增量追加/流式渲染至输入框。
 
 ### Phase 3: 端侧本地大模型集成 (Candle Engine)
 - [ ] T-2231: (M2-21) 优化内化的 `candle` 推理引擎在移动端 ARM 架构下的编译与内存占用（取代此前的 llama-server 方案）。
@@ -559,11 +574,11 @@
 - [x] T-2334: 设备列表持久化 (DeviceRegistry 落盘保存)。修复手机端 Settings UI 隐藏已连接设备列表以及 bypass PIN 码直接展示在线/离线状态与主动解绑按钮的漏洞，确保持久关联，直到任意一端主动解除配对。
 
 ### Phase 3e: 跨端技能同步与数据同步进阶 (Skills & DB Sync)
-- [ ] T-2335: 实现 SQLite 数据库（包含知识库索引、图谱、对话记录）的双向增量 Merge 同步协议（需精细设计防覆盖，隔离不同来源数据）。
+- [x] T-2335: 实现 SQLite 数据库（包含知识库索引、图谱、对话记录）的双向增量 Merge 同步协议（需精细设计防覆盖，隔离不同来源数据）。
 - [x] T-2341: PC 端与手机端新增 WebRTC 技能后台自动传输通道，扫描并打包 skills 变化并发送（无需手动点击按钮）。
 - [x] T-2342: 手机端后台接收技能包 payload 后，自动解压路由并保存至手机沙盒对应的技能目录。
-- [ ] T-2343: 手机端 UI（设置面板/技能管理器）新增【导入技能 (.zip/文件夹)】按钮，调用 Tauri 原生文件选择器。
-- [ ] T-2344: 对话工具扩展：支持用户指令让 Bob 从远程 URL 下载并安装 `SKILL.md` 到 `externalSkillsDir`（复用 T-823 的 Outbox 校验与 Reconciler 异步应用机制，保障安全性）。
+- [x] T-2343: 手机端 UI（设置面板/技能管理器）新增【导入技能 (.zip/文件夹)】按钮，调用 Tauri 原生文件选择器。
+- [x] T-2344: 对话工具扩展：支持用户指令让 Bob 从远程 URL 下载并安装 `SKILL.md` 到 `externalSkillsDir`（复用 T-823 的 Outbox 校验与 Reconciler 异步应用机制，保障安全性）。
 
 ---
 
@@ -621,15 +636,15 @@
 
 ### 💡 界面体验清债与输入指令重构（P3，后置）
 - [ ] Slash/Mention Command 智能悬浮补全菜单
-- [ ] Chat 界面增加显性的"📌 作为笔记速记"按钮
+- [x] Chat 界面增加显性的"📌 作为笔记速记"按钮 (已实现为消息气泡底部的 BookmarkPlus 按钮)
 - [x] **连接中心卡片高度与展示优化**: 调整服务卡片网格对齐，移除强制等高拉伸限制，使微信、TG、Discord 服务卡片在多端同步展开列表时保持紧凑的自然高度。
 - [x] **多端同步状态展示重构**: 改用点亮的手机图标（主题色）表示设备已连接，鼠标悬停时 tooltip 显示具体设备名称，点击图标后弹出设备详情模态框。
-- [ ] **全端设备名称支持**: 在所有终端（包括 PC 和手机等）设置中增加“设备名称”自定义输入区域，以支持跨端的身份识别。
+- [x] **全端设备名称支持**: 在所有终端（包括 PC 和手机等）设置中增加“设备名称”自定义输入区域，以支持跨端的身份识别。
 
 ### 💡 日程交互重构 (T-1801)（P3，后置）
-- [ ] 拖拽事件 (Drag & Drop): 允许在日历内将日程拖拽移动 to 不同的时间，或左右的日期里。
-- [ ] 拖拽时长 (Resize Event): 卡片上下边缘可以直接拖拽延长或者缩短时长，最小调整尺度设为 15 分钟。
-- [ ] 自定义事件弹窗替代原始 `prompt()` 弹窗
+- [x] 拖拽事件 (Drag & Drop): 允许在日历内将日程拖拽移动 to 不同的时间，或左右的日期里。
+- [x] 拖拽时长 (Resize Event): 卡片上下边缘可以直接拖拽延长或者缩短时长，最小调整尺度设为 15 分钟。
+- [x] 自定义事件弹窗替代原始 `prompt()` 弹窗
 
 ---
 

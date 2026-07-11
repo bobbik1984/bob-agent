@@ -68,6 +68,132 @@
         </div>
       </div>
 
+      <!-- WeChat (Inline on Desktop) -->
+      <div v-if="!hideDesktopChannels" class="service-card static-card" >
+        <div class="service-card-header">
+          <div class="service-icon" style="background: rgba(7,193,96,0.1); color: #07c160; display: flex; align-items: center; justify-content: center;">
+            <svg viewBox="-51.45 -69.25 445.9 415.5" xmlns="http://www.w3.org/2000/svg" style="width: 20px; height: 20px; fill: currentColor;">
+              <g fill="currentColor" fill-rule="evenodd">
+                <path d="M274 167c-7.778 0-14-6.222-14-14s6.222-14 14-14 14 6.222 14 14c0 7.389-6.222 14-14 14m-69 0c-7.778 0-14-6.222-14-14s6.222-14 14-14 14 6.222 14 14c0 7.389-6.222 14-14 14m102.39 78.581C329.216 229.871 343 206.5 343 180.827 343 133.316 297.052 95 240 95s-103 38.316-103 85.827c0 47.512 45.948 85.828 103 85.828 11.87 0 22.974-1.533 33.695-4.598.766-.383 1.915-.383 3.063-.383 1.915 0 3.83.766 5.361 1.532l22.591 13.028c.766.383 1.149.766 1.915.766a3.433 3.433 0 003.446-3.448c0-.767-.383-1.533-.383-2.683 0-.383-3.063-10.728-4.595-17.242-.383-.766-.383-1.532-.383-2.299-.383-2.682.766-4.597 2.68-5.747"/>
+                <path d="M164 86c-8.93 0-16-7.07-16-16s7.07-16 16-16 16 7.07 16 16c0 8.558-7.07 16-16 16m-82 0c-8.93 0-16-7.07-16-16s7.07-16 16-16 16 7.07 16 16c0 8.558-7.07 16-16 16m41.96-86C55.646 0 0 45.895 0 102.88c0 30.98 16.502 58.899 42.983 77.64 1.919 1.53 3.454 3.824 3.454 6.884 0 .764-.384 1.912-.384 2.677-1.919 7.649-5.373 20.27-5.757 20.652-.383 1.148-.767 1.913-.767 3.06 0 2.295 1.919 4.207 4.221 4.207.768 0 1.535-.382 2.303-.765l27.248-15.68c1.919-1.148 4.222-1.913 6.524-1.913 1.152 0 2.303 0 3.454.383 12.665 3.442 26.48 5.736 40.297 5.736h6.908c-2.687-8.031-4.222-16.445-4.222-25.242 0-51.631 50.658-93.701 112.83-93.701H246C237.173 37.48 185.747 0 123.96 0"/>
+              </g>
+            </svg>
+          </div>
+          <div class="service-info">
+            <span class="service-name">{{ $t('settings.channel_wechat') }}</span>
+            <span class="service-sub">{{ $t('settings.channel_wechat_desc') }}</span>
+          </div>
+          <span class="service-status-dot" :class="wechatConnected ? 'dot-connected' : 'dot-disconnected'"></span>
+        </div>
+        <div class="service-card-footer">
+          <button v-if="wechatConnected" class="btn btn-primary-outline btn-sm" @click="openWechatModal()">
+            {{ $t('settings.channel_wechat_rebind') }}
+          </button>
+          <button v-else class="btn btn-primary-outline btn-sm" @click="openWechatModal()">
+            <Scan :size="13" /> {{ $t('settings.channel_wechat_scan') }}
+          </button>
+        </div>
+      </div>
+
+      <!-- Telegram (Inline on Desktop) -->
+      <div v-if="!hideDesktopChannels" class="service-card static-card" >
+        <div class="service-card-header">
+          <div class="service-icon" style="background: rgba(42,171,238,0.1); color: #2aabee; display: flex; align-items: center; justify-content: center;">
+            <svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg" style="width: 18px; height: 18px; fill: currentColor;">
+              <path d="M29.919 6.163l-4.225 19.925c-0.319 1.406-1.15 1.756-2.331 1.094l-6.438-4.744-3.106 2.988c-0.344 0.344-0.631 0.631-1.294 0.631l0.463-6.556 11.931-10.781c0.519-0.462-0.113-0.719-0.806-0.256l-14.75 9.288-6.35-1.988c-1.381-0.431-1.406-1.381 0.288-2.044l24.837-9.569c1.15-0.431 2.156 0.256 1.781 2.013z"/>
+            </svg>
+          </div>
+          <div class="service-info">
+            <span class="service-name">{{ $t('settings.channel_telegram') }}</span>
+            <span class="service-sub">Telegram Bot</span>
+          </div>
+          <span class="service-status-dot" :class="tgToken ? 'dot-connected' : 'dot-disconnected'"></span>
+        </div>
+        
+        <Transition name="slide-fade">
+          <div v-if="mobileChannel === 'telegram'" class="lark-credential-form">
+            <div class="form-group" style="margin-bottom: 10px;">
+              <label class="form-label">Bot Token</label>
+              <input v-model="tgToken" type="password" class="input" placeholder="123456789:ABCdefGHIjklMNO..." />
+              <p class="field-hint" style="margin-top: 8px; margin-bottom: 0;">{{ $t('settings.channel_tg_hint') }}</p>
+            </div>
+            <div style="display: flex; gap: 8px;">
+              <button class="btn btn-primary btn-sm" @click="activateMobileChannel('telegram')" :disabled="!tgToken">
+                <Check :size="13" /> {{ $t('settings.channel_activate') }}
+              </button>
+              <button class="btn btn-sm" @click="mobileChannel = ''">
+                {{ $t('settings.mcp_cancel') }}
+              </button>
+            </div>
+          </div>
+        </Transition>
+
+        <div class="service-card-footer">
+          <button v-if="tgToken" class="btn btn-danger-outline btn-sm" @click="mobileChannel = mobileChannel === 'telegram' ? '' : 'telegram'">
+            <Unlink :size="13" /> 修改 Token
+          </button>
+          <button v-else class="btn btn-primary-outline btn-sm" @click="mobileChannel = mobileChannel === 'telegram' ? '' : 'telegram'">
+            <KeyRound :size="13" /> {{ $t('settings.conn_connect') }}
+          </button>
+        </div>
+      </div>
+
+      <!-- Discord (Inline on Desktop) -->
+      <div v-if="!hideDesktopChannels" class="service-card static-card" >
+        <div class="service-card-header">
+          <div class="service-icon" style="background: rgba(88,101,242,0.1); color: #5865F2; display: flex; align-items: center; justify-content: center;">
+            <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" style="width: 20px; height: 20px; fill: currentColor;">
+              <path d="M18.59 5.88997C17.36 5.31997 16.05 4.89997 14.67 4.65997C14.5 4.95997 14.3 5.36997 14.17 5.69997C12.71 5.47997 11.26 5.47997 9.83001 5.69997C9.69001 5.36997 9.49001 4.95997 9.32001 4.65997C7.94001 4.89997 6.63001 5.31997 5.40001 5.88997C2.92001 9.62997 2.25001 13.28 2.58001 16.87C4.23001 18.1 5.82001 18.84 7.39001 19.33C7.78001 18.8 8.12001 18.23 8.42001 17.64C7.85001 17.43 7.31001 17.16 6.80001 16.85C6.94001 16.75 7.07001 16.64 7.20001 16.54C10.33 18 13.72 18 16.81 16.54C16.94 16.65 17.07 16.75 17.21 16.85C16.7 17.16 16.15 17.42 15.59 17.64C15.89 18.23 16.23 18.8 16.62 19.33C18.19 18.84 19.79 18.1 21.43 16.87C21.82 12.7 20.76 9.08997 18.61 5.88997H18.59ZM8.84001 14.67C7.90001 14.67 7.13001 13.8 7.13001 12.73C7.13001 11.66 7.88001 10.79 8.84001 10.79C9.80001 10.79 10.56 11.66 10.55 12.73C10.55 13.79 9.80001 14.67 8.84001 14.67ZM15.15 14.67C14.21 14.67 13.44 13.8 13.44 12.73C13.44 11.66 14.19 10.79 15.15 10.79C16.11 10.79 16.87 11.66 16.86 12.73C16.86 13.79 16.11 14.67 15.15 14.67Z"/>
+            </svg>
+          </div>
+          <div class="service-info">
+            <span class="service-name">{{ $t('settings.channel_discord') }}</span>
+            <span class="service-sub">Discord Bot</span>
+          </div>
+          <span class="service-status-dot" :class="discordToken ? 'dot-connected' : 'dot-disconnected'"></span>
+        </div>
+        
+        <Transition name="slide-fade">
+          <div v-if="mobileChannel === 'discord'" class="lark-credential-form">
+            <div class="form-group" style="margin-bottom: 10px;">
+              <label class="form-label">Bot Token</label>
+              <input v-model="discordToken" type="password" class="input" placeholder="OTg3NjU0MzIx.ABC.defGHIjklMNO..." />
+              <p class="field-hint" style="margin-top: 8px; margin-bottom: 0;">{{ $t('settings.channel_discord_hint') }}</p>
+            </div>
+            <div style="display: flex; gap: 8px;">
+              <button class="btn btn-primary btn-sm" @click="activateMobileChannel('discord')" :disabled="!discordToken">
+                <Check :size="13" /> {{ $t('settings.channel_activate') }}
+              </button>
+              <button class="btn btn-sm" @click="mobileChannel = ''">
+                {{ $t('settings.mcp_cancel') }}
+              </button>
+            </div>
+          </div>
+        </Transition>
+
+        <div class="service-card-footer">
+          <button v-if="discordToken" class="btn btn-danger-outline btn-sm" @click="mobileChannel = mobileChannel === 'discord' ? '' : 'discord'">
+            <Unlink :size="13" /> 修改 Token
+          </button>
+          <button v-else class="btn btn-primary-outline btn-sm" @click="mobileChannel = mobileChannel === 'discord' ? '' : 'discord'">
+            <KeyRound :size="13" /> {{ $t('settings.conn_connect') }}
+          </button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 🖥️ 桌面端专属通道 (Desktop Channels - Folded on Mobile) -->
+  <details v-if="hideDesktopChannels" class="settings-section card custom-model-override" style="margin-top: 16px;">
+    <summary class="section-title">
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <Monitor :size="16" class="section-icon" style="opacity: 0.6;" />
+        <span>{{ $t('settings.desktop_channels_title', '桌面端专属通道') }}</span>
+      </div>
+      <ChevronDown :size="16" class="details-chevron" />
+    </summary>
+    
+    <div class="service-cards-grid" style="margin-top: 16px;">
       <!-- WeChat -->
       <div class="service-card static-card" >
         <div class="service-card-header">
@@ -181,8 +307,7 @@
         </div>
       </div>
     </div>
-
-  </section>
+  </details>
 
   <!-- 🚇 内网穿墙隧道 (Network Proxy) -->
   <section class="settings-section card">
@@ -191,6 +316,13 @@
         <Network :size="16" class="section-icon" />
         {{ $t('settings.proxy_tunnel_name') }}
       </h3>
+      
+      <!-- 运行状态与延迟显示 -->
+      <div v-if="proxyTunnelEnabled" style="display: flex; align-items: center; gap: 8px; margin-right: auto; margin-left: 16px; font-size: 0.85em; color: var(--text-secondary);">
+        <span class="service-status-dot" :class="tunnelStatus.connected ? 'dot-connected' : 'dot-disconnected'"></span>
+        <span>{{ tunnelStatus.connected ? `已连接 (${tunnelStatus.latency}ms)` : '已断开' }}</span>
+      </div>
+
       <label class="mcp-switch">
         <input type="checkbox" :checked="proxyTunnelEnabled" @change="toggleProxyTunnel" />
         <span class="mcp-slider"></span>
@@ -499,7 +631,7 @@
             <div style="display: flex; justify-content: space-between; align-items: center;">
               <div style="display: flex; align-items: center; gap: 6px;">
                 <span class="status-dot" :class="isDeviceOnline(dev) ? 'dot-connected' : 'dot-disconnected'" style="width: 8px; height: 8px; border-radius: 50%;"></span>
-                <span style="font-size: 13px; font-weight: 600; color: var(--text-primary);">{{ dev.platform === 'android' ? 'Android Device' : dev.platform }}</span>
+                <span style="font-size: 13px; font-weight: 600; color: var(--text-primary);">{{ dev.device_name || (dev.platform === 'android' ? 'Android Device' : dev.platform) }}</span>
                 <span style="font-size: 11px; color: var(--text-tertiary); font-family: monospace;">({{ dev.device_id.substring(0, 8) }})</span>
               </div>
               <button class="btn btn-danger-outline btn-sm" style="padding: 4px 8px; font-size: 11px;" @click="handleDisconnectDevice(dev)" title="解绑此设备">
@@ -592,7 +724,7 @@
 
 <script setup>
 const getAssetUrl = (name) => `/logos/${name}`;
-import { ref, onMounted, onUnmounted, computed, inject } from 'vue';
+import { ref, onMounted, onUnmounted, computed, inject, watch } from 'vue';
 import { open } from '@tauri-apps/plugin-dialog';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
@@ -601,7 +733,8 @@ import { useI18n } from 'vue-i18n';
 import {
   Smartphone, Unplug, X, Plus, Loader2, MessageSquare, Check,
   Building2, ExternalLink, Unlink, KeyRound, Network, Info, Copy,
-  ShieldAlert, TriangleAlert, QrCode, Lock, Unlock, Scan
+  ShieldAlert, TriangleAlert, QrCode, Lock, Unlock, Scan,
+  Monitor, ChevronDown
 } from 'lucide-vue-next';
 
 const { t } = useI18n();
@@ -612,6 +745,8 @@ const props = defineProps({
 const emit = defineEmits(['config-changed']);
 
 const isNativeMobile = inject('isNativeMobile', false);
+const isMobile = inject('isMobile', ref(false));
+const hideDesktopChannels = computed(() => isNativeMobile || isMobile.value);
 
 import { useDialog } from '@/composables/useDialog.js';
 
@@ -766,13 +901,45 @@ const handleMobileScan = async () => {
 
 // ── Proxy Tunnel (Goal 20) ──
 const proxyTunnelEnabled = ref(props.config.proxyTunnelEnabled || false);
+const tunnelStatus = ref({ connected: false, latency: 0 });
+let tunnelInterval = null;
 
 async function toggleProxyTunnel() {
   proxyTunnelEnabled.value = !proxyTunnelEnabled.value;
   emit('config-changed', { proxyTunnelEnabled: proxyTunnelEnabled.value });
-  // If we want to dynamically trigger Rust to reconnect, we could call an IPC here,
-  // but for now relying on config-changed to save and backend to watch config is enough.
 }
+
+async function updateTunnelStatus() {
+  if (!proxyTunnelEnabled.value) {
+    tunnelStatus.value = { connected: false, latency: 0 };
+    return;
+  }
+  try {
+    const res = await invoke('check_tunnel_status');
+    if (res && res.connected) {
+      tunnelStatus.value = { connected: true, latency: res.latency_ms };
+    } else {
+      tunnelStatus.value = { connected: false, latency: 0 };
+    }
+  } catch (e) {
+    tunnelStatus.value = { connected: false, latency: 0 };
+  }
+}
+
+watch(proxyTunnelEnabled, (val) => {
+  if (val) {
+    updateTunnelStatus();
+    if (!tunnelInterval) {
+      tunnelInterval = setInterval(updateTunnelStatus, 8000);
+    }
+  } else {
+    if (tunnelInterval) {
+      clearInterval(tunnelInterval);
+      tunnelInterval = null;
+    }
+    tunnelStatus.value = { connected: false, latency: 0 };
+  }
+});
 
 // ── P2P Sync (多端同步) ──
 const isInitialized = ref(true); // Will fetch from backend
@@ -1195,12 +1362,22 @@ onMounted(async () => {
       }
     } catch(err) {}
   }
+
+  // 隧道延迟检测轮询
+  if (proxyTunnelEnabled.value) {
+    updateTunnelStatus();
+    tunnelInterval = setInterval(updateTunnelStatus, 8000);
+  }
 });
 
 onUnmounted(() => {
   if (wechatPollTimer) {
     clearTimeout(wechatPollTimer);
     wechatPollTimer = null;
+  }
+  if (tunnelInterval) {
+    clearInterval(tunnelInterval);
+    tunnelInterval = null;
   }
 });
 </script>
