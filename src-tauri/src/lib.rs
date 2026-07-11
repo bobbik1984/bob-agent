@@ -42,6 +42,7 @@ mod wechat;
 pub mod lan_sync;
 pub mod sync_engine;
 pub mod skills_sync;
+pub mod sync_resolver;
 
 use percent_encoding::percent_decode_str;
 use serde_json::{json, Value};
@@ -1272,8 +1273,11 @@ pub fn run() {
                 dream::compress_sessions_async(dream_handle).await;
             });
 
-            // ── Phase 2: 启动本地 HTTP API (127.0.0.1:3721 & 0.0.0.0:3722) ──
+            // ⚡ Phase 2: 启动 HTTP API (127.0.0.1:3721 & 0.0.0.0:3722) ⚡
             http_api::start_http_server(app.handle().clone());
+
+            // ⚡ Phase 2.5: 启动 Ghost Merger ⚡
+            sync_resolver::start_ghost_merger_task(app.handle().clone());
 
             // ── Phase 3: 启动局域网 UDP 发现广播 (LAN Sync) ──
             #[cfg(not(mobile))]

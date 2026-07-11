@@ -23,7 +23,7 @@ use std::{
     sync::{Arc, Mutex},
     time::Duration,
 };
-use tauri::{AppHandle, Emitter, Listener};
+use tauri::{AppHandle, Emitter, Listener, Manager};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
@@ -757,6 +757,44 @@ pub fn create_router(app: AppHandle) -> Router {
 ///
 /// 使用 socket2 创建不可继承的 TCP socket，防止 WebView2 / MCP 等子进程
 /// 继承 socket handle 导致端口在主进程退出后仍被幽灵占用。
+async fn handle_sync_push_db(
+    axum::extract::State(state): axum::extract::State<ApiState>,
+    axum::extract::ConnectInfo(addr): axum::extract::ConnectInfo<std::net::SocketAddr>,
+    headers: axum::http::HeaderMap,
+    axum::extract::Json(payload): axum::extract::Json<crate::sync_engine::SyncData>,
+) -> impl IntoResponse {
+    crate::sync_engine::register_device(&state.app, &headers, addr);
+    log::info!("[http_api] Received SQLite push data from mobile!");
+    
+    // In a real multi-device setup, last_sync_ts should be tracked per device.
+    // For MVP, we can read the global last_sync_ts.
+    let last_sync_ts: i64 = match state.app.state::<crate::db::DbState>().0.lock() {
+        Ok(conn) => {
+            let s: String = conn.query_row("SELECT value FROM settings WHERE key = 'last_sync_ts'", [], |row| row.get(0)).unwrap_or_else(|_| "0".to_string());
+            s.parse::<i64>().unwrap_or(0)
+        }
+        Err(_) => 0,
+    };
+    
+    if let Err(e) = crate::sync_engine::import_sync_data(&state.app, payload, last_sync_ts) {
+        log::error!("[http_api] Failed to import pushed DB data: {}", e);
+        return axum::Json(serde_json::json!({
+            "status": "error",
+            "message": e
+        }));
+    }
+    
+    // Update last_sync_ts
+    let now = crate::now_ms();
+    if let Ok(conn) = state.app.state::<crate::db::DbState>().0.lock() {
+        let _ = conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('last_sync_ts', ?1)", rusqlite::params![now.to_string()]);
+    }
+    
+    axum::Json(serde_json::json!({
+        "status": "ok"
+    }))
+}
+
 pub fn start_http_server(app: AppHandle) {
     let router = create_router(app.clone());
     tauri::async_runtime::spawn(async move {
@@ -781,6 +819,7 @@ pub fn start_http_server(app: AppHandle) {
         .route("/v1/sync/pull", get(handle_sync_pull))
         .route("/v1/sync/skills/download", get(handle_sync_skills_download))
         .route("/v1/sync/push", post(handle_sync_push))
+        .route("/v1/sync/push_db", post(handle_sync_push_db))
         .with_state(public_state);
 
     tauri::async_runtime::spawn(async move {

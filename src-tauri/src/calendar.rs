@@ -116,7 +116,7 @@ pub fn system_confirm_event(event: Value, db: tauri::State<'_, crate::db::DbStat
         Err(_) => return json!({ "ok": false, "error": "数据库锁失败" }),
     };
 
-    let id = format!("evt-{}", super::now_ms());
+    let id = ulid::Ulid::new().to_string();
     let title = event.get("title").and_then(|v| v.as_str()).unwrap_or("");
     let etype = event
         .get("type")
@@ -135,9 +135,9 @@ pub fn system_confirm_event(event: Value, db: tauri::State<'_, crate::db::DbStat
         .unwrap_or("");
 
     match conn.execute(
-        "INSERT INTO events (id, title, type, status, date, start_time, end_time, description, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-        params![id, title, etype, status, date, start_time, end_time, description, super::now_ms()],
+        "INSERT INTO events (id, title, type, status, date, start_time, end_time, description, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+        params![id, title, etype, status, date, start_time, end_time, description, super::now_ms(), super::now_ms()],
     ) {
         Ok(_) => json!({ "ok": true, "id": id }),
         Err(e) => json!({ "ok": false, "error": format!("{}", e) }),
@@ -171,8 +171,8 @@ pub fn system_update_event_description(
         Err(_) => return false,
     };
     conn.execute(
-        "UPDATE events SET description = ?1 WHERE id = ?2",
-        params![description, id],
+        "UPDATE events SET description = ?1, updated_at = ?3 WHERE id = ?2",
+        params![description, id, super::now_ms()],
     )
     .is_ok()
 }
@@ -199,8 +199,8 @@ pub fn system_update_event_status(
     };
 
     conn.execute(
-        "UPDATE events SET status = ?1, completed_at = ?2 WHERE id = ?3",
-        params![status, completed_at, id],
+        "UPDATE events SET status = ?1, completed_at = ?2, updated_at = ?4 WHERE id = ?3",
+        params![status, completed_at, id, super::now_ms()],
     )
     .unwrap_or(0);
     true
@@ -219,8 +219,8 @@ pub fn system_update_event_time(
         Err(_) => return false,
     };
     conn.execute(
-        "UPDATE events SET start_time = ?1, end_time = ?2 WHERE id = ?3",
-        params![start_time, end_time, id],
+        "UPDATE events SET start_time = ?1, end_time = ?2, updated_at = ?4 WHERE id = ?3",
+        params![start_time, end_time, id, super::now_ms()],
     )
     .unwrap_or(0);
     true

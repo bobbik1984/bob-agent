@@ -309,7 +309,7 @@ pub fn export_sync_data(app: &AppHandle, since_ts: i64) -> Result<SyncData, Stri
     Ok(SyncData { config, settings, conversations, messages, events, cron_jobs, kg_nodes, kg_edges, wiki_fts, tombstones })
 }
 
-pub fn import_sync_data(app: &AppHandle, data: SyncData) -> Result<(), String> {
+pub fn import_sync_data(app: &AppHandle, data: SyncData, last_sync_ts: i64) -> Result<(), String> {
     crate::write_config(&data.config);
     let db = app.state::<crate::db::DbState>();
     let conn = db.0.lock().map_err(|_| "Failed to lock db")?;
@@ -371,7 +371,7 @@ pub fn import_sync_data(app: &AppHandle, data: SyncData) -> Result<(), String> {
         }
     };
 
-    // LWW (Last-Write-Wins) strategy for bidirectional sync tables
+    // LWW (Last-Write-Wins) strategy with Conflict Detection
     let mut import_lww = |table: &str, rows: Vec<serde_json::Value>, cols: &[&str]| {
         if rows.is_empty() { return; }
         let placeholders = vec!["?"; cols.len()].join(", ");
@@ -385,7 +385,49 @@ pub fn import_sync_data(app: &AppHandle, data: SyncData) -> Result<(), String> {
                 
                 let local_updated_at: i64 = conn.query_row(&query_check, rusqlite::params![id], |r| r.get(0)).unwrap_or(0);
                 
-                if remote_updated_at >= local_updated_at {
+                // CONFLICT DETECTION
+                let is_conflict = local_updated_at > last_sync_ts && remote_updated_at > last_sync_ts && local_updated_at != remote_updated_at;
+                
+                if is_conflict {
+                    log::warn!("[Sync Engine] Conflict detected on table {} for id {}. local_updated_at: {}, remote_updated_at: {}, last_sync_ts: {}", table, id, local_updated_at, remote_updated_at, last_sync_ts);
+                    
+                    // Generate new ULID for the remote conflicted copy
+                    let conflict_id = ulid::Ulid::new().to_string();
+                    
+                    let mut params = Vec::new();
+                    for col in cols {
+                        let mut val = obj.get(*col).unwrap_or(&serde_json::Value::Null).clone();
+                        
+                        // Overwrite ID
+                        if *col == "id" {
+                            val = serde_json::Value::String(conflict_id.clone());
+                        }
+                        
+                        // Append to title/label if it exists
+                        if *col == "title" || *col == "label" {
+                            if let Some(s) = val.as_str() {
+                                val = serde_json::Value::String(format!("{} (手机同步冲突副本)", s));
+                            }
+                        }
+                        
+                        if let Some(s) = val.as_str() { params.push(rusqlite::types::Value::Text(s.to_string())); }
+                        else if let Some(i) = val.as_i64() { params.push(rusqlite::types::Value::Integer(i)); }
+                        else if let Some(f) = val.as_f64() { params.push(rusqlite::types::Value::Real(f)); }
+                        else { params.push(rusqlite::types::Value::Null); }
+                    }
+                    
+                    // Insert the conflict copy
+                    let _ = conn.execute(&query_insert, rusqlite::params_from_iter(params));
+                    
+                    // Record to sync_conflicts
+                    let ts = crate::now_ms();
+                    let _ = conn.execute(
+                        "INSERT INTO sync_conflicts (id, table_name, local_id, remote_id, status, created_at) VALUES (?1, ?2, ?3, ?4, 'pending', ?5)",
+                        rusqlite::params![ulid::Ulid::new().to_string(), table, id, conflict_id, ts]
+                    );
+                    
+                } else if remote_updated_at > local_updated_at {
+                    // Normal LWW overwrite
                     let mut params = Vec::new();
                     for col in cols {
                         let val = obj.get(*col).unwrap_or(&serde_json::Value::Null);
@@ -479,7 +521,7 @@ async fn do_active_sync(app: AppHandle, payload: SyncCommandPayload) -> Result<(
                     if let Some(data_val) = json.get("data") {
                         if let Ok(sync_data) = serde_json::from_value::<SyncData>(data_val.clone()) {
                             info!("[Sync Engine] Successfully pulled full/incremental sync data from PC!");
-                            if let Err(e) = import_sync_data(&app, sync_data) {
+                            if let Err(e) = import_sync_data(&app, sync_data, last_sync_ts) {
                                 error!("[Sync Engine] Failed to import sync data: {}", e);
                             } else {
                                 sync_success = true;
@@ -545,6 +587,23 @@ async fn do_active_sync(app: AppHandle, payload: SyncCommandPayload) -> Result<(
                                 error!("[Sync Engine] Failed to push outbox to PC.");
                             }
                         }
+                    }
+                }
+            }
+            
+            // 3. Push local DB changes to PC
+            if let Ok(local_sync_data) = export_sync_data(&app, last_sync_ts) {
+                let push_db_url = format!("{}/v1/sync/push_db", base_url);
+                let _ = app.emit("sync:progress", serde_json::json!({"stage": "lan_sync", "status": "running", "detail": "推送本地数据到电脑..."}));
+                match client.post(&push_db_url)
+                    .header("X-Device-Id", &my_device_id)
+                    .header("X-Platform", &platform)
+                    .json(&local_sync_data).send().await {
+                    Ok(resp) if resp.status().is_success() => {
+                        info!("[Sync Engine] Successfully pushed SQLite data to PC!");
+                    }
+                    _ => {
+                        error!("[Sync Engine] Failed to push SQLite data to PC.");
                     }
                 }
             }
@@ -626,7 +685,7 @@ async fn do_active_sync(app: AppHandle, payload: SyncCommandPayload) -> Result<(
         } {
             Ok(sync_data) => {
                 info!("[Sync Engine] Successfully pulled sync data via Relay!");
-                if let Err(e) = import_sync_data(&app, sync_data) {
+                if let Err(e) = import_sync_data(&app, sync_data, 0) { // For relay pull we might not have accurate last_sync_ts right now
                     let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_sync", "status": "error", "detail": format!("导入数据失败: {}", e)}));
                     return Err(format!("Failed to import sync data: {}", e));
                 }
@@ -657,6 +716,20 @@ async fn do_active_sync(app: AppHandle, payload: SyncCommandPayload) -> Result<(
                     let _ = std::fs::remove_file(&outbox_path);
                 }
             }
+        }
+        
+        // 3. Push local DB changes to PC via Relay
+        if let Ok(local_sync_data) = export_sync_data(&app, last_sync_ts) {
+            let push_db_req = serde_json::json!({
+                "type": "proxy",
+                "target_device_id": payload.device_id,
+                "payload": {
+                    "action": "push_db",
+                    "data": local_sync_data
+                }
+            });
+            let _ = ws_stream.send(Message::Text(push_db_req.to_string().into())).await;
+            info!("[Sync Engine] Sent proxy push_db request via Relay.");
         }
     }
 
@@ -759,6 +832,28 @@ pub fn start_relay_listener(app: AppHandle) {
                                                         if let Some(arr) = data_val.as_array() {
                                                             log::info!("[Sync Engine] Pushing {} operations to PC outbox via Relay", arr.len());
                                                             crate::outbox::write_outbox(arr.clone());
+                                                        }
+                                                    }
+                                                } else if action == "push_db" {
+                                                    log::info!("[Sync Engine] Received proxy push_db request from {}", from_id);
+                                                    if let Some(data_val) = inner_payload.get("data") {
+                                                        if let Ok(sync_data) = serde_json::from_value::<SyncData>(data_val.clone()) {
+                                                            let last_sync_ts_pc: i64 = match app.state::<crate::db::DbState>().0.lock() {
+                                                                Ok(conn) => {
+                                                                    let s: String = conn.query_row("SELECT value FROM settings WHERE key = 'last_sync_ts'", [], |row| row.get(0)).unwrap_or_else(|_| "0".to_string());
+                                                                    s.parse::<i64>().unwrap_or(0)
+                                                                }
+                                                                Err(_) => 0,
+                                                            };
+                                                            
+                                                            if let Err(e) = import_sync_data(&app, sync_data, last_sync_ts_pc) {
+                                                                log::error!("[Sync Engine] Failed to import relay pushed DB data: {}", e);
+                                                            } else {
+                                                                let now = crate::now_ms();
+                                                                if let Ok(conn) = app.state::<crate::db::DbState>().0.lock() {
+                                                                    let _ = conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('last_sync_ts', ?1)", rusqlite::params![now.to_string()]);
+                                                                }
+                                                            }
                                                         }
                                                     }
                                                 }

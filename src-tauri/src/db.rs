@@ -107,6 +107,14 @@ pub fn init_db(data_dir: &std::path::Path) -> Connection {
             deleted_at INTEGER NOT NULL,
             PRIMARY KEY (table_name, record_key)
         );
+        CREATE TABLE IF NOT EXISTS sync_conflicts (
+            id TEXT PRIMARY KEY,
+            table_name TEXT NOT NULL,
+            local_id TEXT NOT NULL,
+            remote_id TEXT NOT NULL,
+            status TEXT DEFAULT 'pending',
+            created_at INTEGER NOT NULL
+        );
         "
     ).unwrap_or_default();
 
@@ -344,7 +352,7 @@ pub fn db_conversation_create(title: String, model: String, db: State<DbState>) 
         Ok(c) => c,
         Err(_) => return serde_json::json!({ "error": "数据库锁失败" }),
     };
-    let id = format!("conv-{}", crate::now_ms());
+    let id = ulid::Ulid::new().to_string();
     let ts = crate::now_ms();
     if let Err(e) = conn.execute(
         "INSERT INTO conversations (id, title, model, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)",

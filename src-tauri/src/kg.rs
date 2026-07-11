@@ -22,15 +22,15 @@ pub fn upsert_node(
     source: &str,
     batch_id: &str,
 ) -> Result<(), String> {
-    let source_batches_init = if batch_id.is_empty() {
+    let initial_batch = if batch_id.is_empty() {
         "[]".to_string()
     } else {
         format!("[\"{}\"]", batch_id)
     };
 
     conn.execute(
-        "INSERT INTO kg_nodes (id, label, node_type, summary, source, source_batches)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+        "INSERT INTO kg_nodes (id, label, node_type, summary, source, source_batches, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?8)
          ON CONFLICT(id) DO UPDATE SET
             label = COALESCE(NULLIF(?2, ''), kg_nodes.label),
             node_type = ?3,
@@ -40,8 +40,9 @@ pub fn upsert_node(
                 WHEN ?7 = '' THEN kg_nodes.source_batches
                 WHEN INSTR(kg_nodes.source_batches, ?7) > 0 THEN kg_nodes.source_batches
                 ELSE JSON_INSERT(kg_nodes.source_batches, '$[#]', ?7)
-            END",
-        params![id, label, node_type, summary, source, source_batches_init, batch_id],
+            END,
+            updated_at = ?8",
+        params![id, label, node_type, summary, source, initial_batch, batch_id, crate::now_ms()],
     ).map_err(|e| format!("upsert_node failed: {}", e))?;
     Ok(())
 }
@@ -86,9 +87,12 @@ pub fn insert_edge(
     confidence: f64,
 ) -> Result<(), String> {
     conn.execute(
-        "INSERT OR IGNORE INTO kg_edges (source_id, target_id, relation, confidence)
-         VALUES (?1, ?2, ?3, ?4)",
-        params![source_id, target_id, relation, confidence],
+        "INSERT INTO kg_edges (source_id, target_id, relation, confidence, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5)
+         ON CONFLICT(source_id, target_id, relation) DO UPDATE SET
+            confidence = MAX(kg_edges.confidence, ?4),
+            updated_at = ?5",
+        params![source_id, target_id, relation, confidence, crate::now_ms()],
     )
     .map_err(|e| format!("insert_edge failed: {}", e))?;
     Ok(())
@@ -167,8 +171,8 @@ pub fn merge_nodes(
     }
 
     conn.execute(
-        "UPDATE kg_nodes SET metadata = ?1 WHERE id = ?2",
-        params![meta_val.to_string(), primary_id],
+        "UPDATE kg_nodes SET metadata = ?1, updated_at = ?3 WHERE id = ?2",
+        params![meta_val.to_string(), primary_id, crate::now_ms()],
     )
     .map_err(|e| format!("update primary metadata failed: {}", e))?;
 
@@ -242,8 +246,8 @@ pub fn remove_source_batch(
 
     for (id, new_batches) in to_update {
         let _ = conn.execute(
-            "UPDATE kg_nodes SET source_batches = ?1 WHERE id = ?2",
-            params![new_batches, id],
+            "UPDATE kg_nodes SET source_batches = ?1, updated_at = ?3 WHERE id = ?2",
+            params![new_batches, id, crate::now_ms()],
         );
     }
 
