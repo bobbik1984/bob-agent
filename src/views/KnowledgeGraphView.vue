@@ -126,7 +126,7 @@
               <span class="chip-shape" :style="{ color: kgColors[t.type] || 'var(--text-muted)' }">
                 {{ getTypeShapeIcon(t.type) }}
               </span>
-              {{ getTypeName(t.type) }} ({{ t.count }})
+              {{ getTypeName(t.type) }}&nbsp;&nbsp;{{ t.count }}
             </button>
           </div>
         </div>

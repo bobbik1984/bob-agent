@@ -37,6 +37,8 @@
     "type_event": "Event",
     "type_technology": "Technology",
     "type_note": "Note",
+    "type_source": "Source",
+    "type_ticket": "Ticket",
     "stats_summary": "{nodes} Nodes · {edges} Edges",
     "graph_view": "Graph",
     "notebook_view": "Notes",

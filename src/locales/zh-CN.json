@@ -37,6 +37,8 @@
     "type_event": "事件",
     "type_technology": "技术",
     "type_note": "笔记",
+    "type_source": "来源",
+    "type_ticket": "票据",
     "stats_summary": "{nodes} 节点 · {edges} 关系",
     "graph_view": "图谱",
     "notebook_view": "笔记",
