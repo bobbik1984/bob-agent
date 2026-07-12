@@ -3018,115 +3018,113 @@ defineExpose({
 /* ── Mobile Bottom Sheet ────────────────────────────────────────── */
 
 /* ── Boarding Pass Confirmation Card ───────────────────────────── */
-.boarding-pass-card {
-  background: var(--bg-secondary);
-  border: 1px solid var(--user-accent, #4f8cf7);
-  border-radius: 12px;
-  padding: 16px;
-  margin-bottom: 10px;
+.boarding-pass-modern-card {
+  background: linear-gradient(135deg, #357376 0%, #204b4d 100%);
+  color: #ffffff;
+  border-radius: 16px;
+  padding: 24px;
+  margin-bottom: 12px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.15);
   animation: slideUp 0.3s ease-out;
+  font-family: var(--font-sans, system-ui, sans-serif);
 }
 @keyframes slideUp {
   from { opacity: 0; transform: translateY(12px); }
   to { opacity: 1; transform: translateY(0); }
 }
-.bp-header {
+.bp-modern-header {
   display: flex;
   align-items: center;
   gap: 8px;
+  font-size: 0.9em;
+  font-weight: 500;
+  opacity: 0.9;
   margin-bottom: 12px;
 }
-.bp-icon { font-size: 1.3em; }
-.bp-title {
-  font-weight: 600;
-  color: var(--text-primary);
-  font-size: 0.95em;
-}
-.bp-route {
+.bp-modern-icon {
+  background: rgba(255,255,255,0.2);
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  margin-bottom: 12px;
-  padding: 10px 0;
+  justify-content: center;
+  font-size: 1.1em;
 }
-.bp-airport { text-align: center; flex: 0 0 auto; }
-.bp-code {
-  font-size: 1.6em;
+.bp-modern-title {
+  font-size: 1.8em;
   font-weight: 700;
-  color: var(--text-primary);
-  letter-spacing: 2px;
-}
-.bp-flight-info {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  flex: 1;
-  gap: 2px;
-}
-.bp-flight-number {
-  font-size: 0.85em;
-  font-weight: 600;
-  color: var(--user-accent, #4f8cf7);
-}
-.bp-arrow {
-  font-size: 1.2em;
-  color: var(--text-tertiary);
-}
-.bp-date {
-  font-size: 0.8em;
-  color: var(--text-secondary);
-}
-.bp-details {
-  display: flex;
-  gap: 16px;
-  margin-bottom: 14px;
-  padding: 8px 12px;
-  background: var(--bg-tertiary);
-  border-radius: 8px;
-}
-.bp-detail-item {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  flex: 1;
-}
-.bp-label {
-  font-size: 0.7em;
-  color: var(--text-tertiary);
-  text-transform: uppercase;
+  margin-bottom: 24px;
   letter-spacing: 1px;
 }
-.bp-value {
-  font-size: 0.9em;
-  font-weight: 600;
-  color: var(--text-primary);
-}
-.bp-actions {
+.bp-modern-row {
   display: flex;
-  gap: 8px;
-  justify-content: flex-end;
+  justify-content: space-between;
+  margin-bottom: 4px;
 }
-.bp-btn {
-  padding: 6px 16px;
+.bp-modern-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.bp-modern-label {
+  font-size: 0.75em;
+  opacity: 0.8;
+  text-transform: capitalize;
+  letter-spacing: 0.5px;
+}
+.bp-modern-value {
+  font-size: 1.2em;
+  font-weight: 600;
+}
+.bp-modern-divider {
+  height: 1px;
+  background: rgba(255,255,255,0.15);
+  margin: 16px 0;
+}
+.bp-modern-qr-section {
+  margin-top: 32px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+.bp-modern-qr-wrapper {
+  background: #ffffff;
+  padding: 12px;
+  border-radius: 12px;
+}
+.bp-modern-barcode-text {
+  font-family: monospace;
+  font-size: 1.1em;
+  letter-spacing: 2px;
+  font-weight: 600;
+  opacity: 0.9;
+}
+.bp-modern-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 32px;
+}
+.bp-modern-btn {
+  flex: 1;
+  padding: 12px;
   border-radius: 8px;
-  font-size: 0.85em;
-  font-weight: 500;
-  cursor: pointer;
   border: none;
-  transition: all 0.2s ease;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.2s;
+  font-size: 1em;
 }
-.bp-btn-confirm {
-  background: var(--user-accent, #4f8cf7);
-  color: #fff;
+.bp-modern-btn:hover {
+  opacity: 0.9;
 }
-.bp-btn-confirm:hover {
-  filter: brightness(1.1);
+.bp-modern-btn-confirm {
+  background: #ffffff;
+  color: #357376;
 }
-.bp-btn-dismiss {
-  background: var(--bg-tertiary);
-  color: var(--text-secondary);
-}
-.bp-btn-dismiss:hover {
-  background: var(--bg-primary);
+.bp-modern-btn-dismiss {
+  background: rgba(255,255,255,0.2);
+  color: #ffffff;
 }
 </style>
