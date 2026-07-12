@@ -1426,7 +1426,7 @@ async function removeSourceBatch(node) {
   align-items: center;
   gap: 4px;
   padding: 4px 10px;
-  border-radius: 99px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border-subtle);
   background: var(--bg-primary);
   color: var(--text-secondary);
@@ -2212,14 +2212,14 @@ async function removeSourceBatch(node) {
   padding-bottom: 12px;
 }
 
-.kg-mobile-col .kg-overlay-search {
+.kg-mobile-col .kg-overlay-search.expanded {
   left: 16px !important;
   right: 16px !important;
   top: 16px !important;
   width: auto !important;
 }
 
-.kg-mobile-col .kg-search-box {
+.kg-mobile-col .kg-overlay-search.expanded .kg-search-box {
   width: 100% !important;
 }
 </style>
