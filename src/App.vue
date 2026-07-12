@@ -1626,7 +1626,7 @@ function onFabPointerUp(e) {
 .app-shell.is-mobile .content {
   padding-bottom: calc(60px + env(safe-area-inset-bottom, 0px));
 }
-@media (max-aspect-ratio: 1/1) {
+@media (max-aspect-ratio: 99999/100000) {
   .content > * {
     flex: 1;
     min-height: 0;

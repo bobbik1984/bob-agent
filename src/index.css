@@ -1078,7 +1078,7 @@ code.hljs {
 .animate-spin { animation: spin 1s linear infinite; }
 
 /* ── Mobile Layout Global Rules ── */
-@media (max-aspect-ratio: 1/1) {
+@media (max-aspect-ratio: 99999/100000) {
   .mobile-header {
     display: flex;
     align-items: center;
