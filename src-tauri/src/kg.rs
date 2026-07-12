@@ -458,15 +458,22 @@ pub fn get_stats(conn: &rusqlite::Connection) -> Value {
 /// 获取完整图谱 (节点 + 边)，用于前端 vis.js 渲染
 pub fn get_full_graph(conn: &rusqlite::Connection) -> Value {
     let mut nodes: Vec<Value> = Vec::new();
-    if let Ok(mut stmt) = conn.prepare("SELECT id, label, node_type, summary, source FROM kg_nodes")
+    if let Ok(mut stmt) = conn.prepare("SELECT id, label, node_type, summary, source, metadata FROM kg_nodes")
     {
         if let Ok(rows) = stmt.query_map([], |row| {
+            let meta_str: Option<String> = row.get(5)?;
+            let meta_json: Option<serde_json::Value> = if let Some(s) = meta_str {
+                serde_json::from_str(&s).unwrap_or_else(|_| serde_json::json!({})).into()
+            } else {
+                None
+            };
             Ok(json!({
                 "id": row.get::<_, String>(0)?,
                 "label": row.get::<_, String>(1)?,
                 "type": row.get::<_, String>(2)?,
                 "summary": row.get::<_, String>(3)?,
-                "source": row.get::<_, String>(4)?
+                "source": row.get::<_, String>(4)?,
+                "metadata": meta_json
             }))
         }) {
             nodes = rows.filter_map(|r| r.ok()).collect();
