@@ -324,31 +324,38 @@
             <span class="bp-icon">✈</span>
             <span class="bp-title">检测到登机牌</span>
           </div>
-          <div class="bp-route">
-            <div class="bp-airport">
-              <span class="bp-code">{{ pendingBoardingPass.origin }}</span>
+          <div class="bp-body" style="display: flex; gap: 16px; align-items: center; margin-bottom: 12px;">
+            <div class="bp-main" style="flex: 1;">
+              <div class="bp-route">
+                <div class="bp-airport">
+                  <span class="bp-code" style="font-size: 2.2em; font-weight: 800; color: var(--text-primary);">{{ pendingBoardingPass.origin }}</span>
+                </div>
+                <div class="bp-flight-info">
+                  <span class="bp-flight-number" style="font-size: 1.1em; font-weight: 700; color: var(--user-accent, #4f8cf7);">{{ pendingBoardingPass.carrier }}{{ pendingBoardingPass.flight_number }}</span>
+                  <div class="bp-arrow">→</div>
+                  <span class="bp-date" style="font-size: 0.9em; font-weight: 500;">{{ pendingBoardingPass.date }}</span>
+                </div>
+                <div class="bp-airport">
+                  <span class="bp-code" style="font-size: 2.2em; font-weight: 800; color: var(--text-primary);">{{ pendingBoardingPass.destination }}</span>
+                </div>
+              </div>
+              <div class="bp-details">
+                <div class="bp-detail-item">
+                  <span class="bp-label">旅客 / PASSENGER</span>
+                  <span class="bp-value" style="font-weight: 600;">{{ pendingBoardingPass.passenger_name }}</span>
+                </div>
+                <div class="bp-detail-item">
+                  <span class="bp-label">座位 / SEAT</span>
+                  <span class="bp-value" style="font-size: 1.2em; font-weight: 700;">{{ pendingBoardingPass.seat }}</span>
+                </div>
+                <div class="bp-detail-item">
+                  <span class="bp-label">PNR</span>
+                  <span class="bp-value" style="font-family: monospace; font-size: 1.1em; font-weight: 600;">{{ pendingBoardingPass.pnr }}</span>
+                </div>
+              </div>
             </div>
-            <div class="bp-flight-info">
-              <span class="bp-flight-number">{{ pendingBoardingPass.carrier }}{{ pendingBoardingPass.flight_number }}</span>
-              <div class="bp-arrow">→</div>
-              <span class="bp-date">{{ pendingBoardingPass.date }}</span>
-            </div>
-            <div class="bp-airport">
-              <span class="bp-code">{{ pendingBoardingPass.destination }}</span>
-            </div>
-          </div>
-          <div class="bp-details">
-            <div class="bp-detail-item">
-              <span class="bp-label">旅客</span>
-              <span class="bp-value">{{ pendingBoardingPass.passenger_name }}</span>
-            </div>
-            <div class="bp-detail-item">
-              <span class="bp-label">座位</span>
-              <span class="bp-value">{{ pendingBoardingPass.seat }}</span>
-            </div>
-            <div class="bp-detail-item">
-              <span class="bp-label">PNR</span>
-              <span class="bp-value">{{ pendingBoardingPass.pnr }}</span>
+            <div class="bp-qr" v-if="pendingBoardingPass.raw_base64" style="background: white; padding: 6px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); display: flex; align-items: center; justify-content: center; width: 90px; height: 90px; flex-shrink: 0;">
+              <img :src="'data:image/png;base64,' + pendingBoardingPass.raw_base64" style="width: 100%; height: 100%; object-fit: contain; filter: grayscale(1) contrast(100);" />
             </div>
           </div>
           <div class="bp-actions">

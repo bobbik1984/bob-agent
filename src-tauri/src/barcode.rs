@@ -121,12 +121,12 @@ pub fn parse_bcbp(raw: &str) -> Option<BoardingPassInfo> {
     
     // BCBP standard offsets
     let passenger_name = raw.chars().skip(2).take(20).collect::<String>().trim().to_string();
-    let pnr = raw.chars().skip(24).take(7).collect::<String>().trim().to_string();
-    let origin = raw.chars().skip(31).take(3).collect::<String>().trim().to_string();
-    let destination = raw.chars().skip(34).take(3).collect::<String>().trim().to_string();
-    let carrier = raw.chars().skip(37).take(3).collect::<String>().trim().to_string();
-    let flight_number = raw.chars().skip(40).take(5).collect::<String>().trim().to_string();
-    let date = raw.chars().skip(45).take(3).collect::<String>().trim().to_string();
+    let pnr = raw.chars().skip(23).take(7).collect::<String>().trim().to_string();
+    let origin = raw.chars().skip(30).take(3).collect::<String>().trim().to_string();
+    let destination = raw.chars().skip(33).take(3).collect::<String>().trim().to_string();
+    let carrier = raw.chars().skip(36).take(3).collect::<String>().trim().to_string();
+    let flight_number = raw.chars().skip(39).take(5).collect::<String>().trim().to_string();
+    let date = raw.chars().skip(44).take(3).collect::<String>().trim().to_string();
     let seat = raw.chars().skip(48).take(4).collect::<String>().trim().to_string();
     
     Some(BoardingPassInfo {

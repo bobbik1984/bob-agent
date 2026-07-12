@@ -79,6 +79,7 @@ export function useDragDrop({ messages, inputText, scrollToBottom, globalFileAcc
                   const dateStr = julianDayToDate(info.date);
                   pendingBoardingPass.value = {
                     raw_data: res.data,
+                    raw_base64: base64,
                     format: res.format,
                     passenger_name: info.passenger_name,
                     pnr: info.pnr,
