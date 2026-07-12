@@ -1428,8 +1428,7 @@ async function removeSourceBatch(node) {
   padding: 4px 10px;
   border-radius: 99px;
   border: 1px solid var(--border-subtle);
-  background: var(--surface-glass);
-  backdrop-filter: blur(4px);
+  background: var(--bg-primary);
   color: var(--text-secondary);
   font-size: var(--text-xs);
   cursor: pointer;
@@ -1443,7 +1442,7 @@ async function removeSourceBatch(node) {
 }
 
 .kg-filter-chip.active {
-  background: var(--surface-input);
+  background: var(--bg-secondary);
   border-color: var(--accent-primary);
   color: var(--text-primary);
 }
