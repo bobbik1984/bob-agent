@@ -13,6 +13,67 @@
       <button v-if="healthBanner.fixable" class="health-fix-btn" @click="handleAutoFix(healthBanner.code)">修复</button>
       <button class="health-dismiss-btn" @click="dismissHealthBanner(healthBanner.code)">&times;</button>
     </div>
+
+    <!-- Boarding Pass Modal -->
+    <div v-if="pendingBoardingPass" class="bp-modal-overlay" @click.self="dismissBoardingPass">
+      <div class="boarding-pass-modern-card">
+        <div class="bp-modern-header">
+          <span class="bp-modern-icon">✈</span>
+          <span>Boarding Pass</span>
+        </div>
+        <div class="bp-modern-title">
+          {{ pendingBoardingPass.origin }} → {{ pendingBoardingPass.destination }}
+        </div>
+        
+        <div class="bp-modern-row">
+          <div class="bp-modern-field">
+            <div class="bp-modern-label">Passenger Name</div>
+            <div class="bp-modern-value">{{ pendingBoardingPass.passenger_name }}</div>
+          </div>
+        </div>
+        
+        <div class="bp-modern-divider"></div>
+        
+        <div class="bp-modern-row">
+          <div class="bp-modern-field">
+            <div class="bp-modern-label">Flight</div>
+            <div class="bp-modern-value">{{ pendingBoardingPass.carrier }} {{ pendingBoardingPass.flight_number }}</div>
+          </div>
+          <div class="bp-modern-field" style="text-align: right;">
+            <div class="bp-modern-label">Date</div>
+            <div class="bp-modern-value">{{ pendingBoardingPass.date }}</div>
+          </div>
+        </div>
+        
+        <div class="bp-modern-divider"></div>
+        
+        <div class="bp-modern-row">
+          <div class="bp-modern-field">
+            <div class="bp-modern-label">Seat</div>
+            <div class="bp-modern-value">{{ pendingBoardingPass.seat }}</div>
+          </div>
+          <div class="bp-modern-field" style="text-align: right;">
+            <div class="bp-modern-label">PNR</div>
+            <div class="bp-modern-value">{{ pendingBoardingPass.pnr }}</div>
+          </div>
+        </div>
+        
+        <div class="bp-modern-qr-section">
+          <div class="bp-modern-qr-wrapper">
+             <qrcode-vue v-if="pendingBoardingPass.raw_data" :value="pendingBoardingPass.raw_data" :size="160" level="M" />
+          </div>
+          <div class="bp-modern-barcode-text">
+             {{ pendingBoardingPass.pnr }}
+          </div>
+        </div>
+
+        <div class="bp-modern-actions">
+          <button class="bp-modern-btn bp-modern-btn-confirm" @click="confirmBoardingPass">存入票夹</button>
+          <button class="bp-modern-btn bp-modern-btn-dismiss" @click="dismissBoardingPass">忽略</button>
+        </div>
+      </div>
+    </div>
+
     <!-- 移动端专属顶部栏 -->
     <div v-if="isMobile" class="mobile-header">
       <button class="mobile-hamburger" @click="emit('open-drawer')">
@@ -318,63 +379,6 @@
         </button>
       </div>
       <div class="input-row">
-        <!-- BCBP 登机牌自动识别确认卡片 -->
-        <div v-if="pendingBoardingPass" class="boarding-pass-modern-card">
-          <div class="bp-modern-header">
-            <span class="bp-modern-icon">✈</span>
-            <span>Boarding Pass</span>
-          </div>
-          <div class="bp-modern-title">
-            {{ pendingBoardingPass.origin }} → {{ pendingBoardingPass.destination }}
-          </div>
-          
-          <div class="bp-modern-row">
-            <div class="bp-modern-field">
-              <div class="bp-modern-label">Passenger Name</div>
-              <div class="bp-modern-value">{{ pendingBoardingPass.passenger_name }}</div>
-            </div>
-          </div>
-          
-          <div class="bp-modern-divider"></div>
-          
-          <div class="bp-modern-row">
-            <div class="bp-modern-field">
-              <div class="bp-modern-label">Flight</div>
-              <div class="bp-modern-value">{{ pendingBoardingPass.carrier }} {{ pendingBoardingPass.flight_number }}</div>
-            </div>
-            <div class="bp-modern-field" style="text-align: right;">
-              <div class="bp-modern-label">Date</div>
-              <div class="bp-modern-value">{{ pendingBoardingPass.date }}</div>
-            </div>
-          </div>
-          
-          <div class="bp-modern-divider"></div>
-          
-          <div class="bp-modern-row">
-            <div class="bp-modern-field">
-              <div class="bp-modern-label">Seat</div>
-              <div class="bp-modern-value">{{ pendingBoardingPass.seat }}</div>
-            </div>
-            <div class="bp-modern-field" style="text-align: right;">
-              <div class="bp-modern-label">PNR</div>
-              <div class="bp-modern-value">{{ pendingBoardingPass.pnr }}</div>
-            </div>
-          </div>
-          
-          <div class="bp-modern-qr-section">
-            <div class="bp-modern-qr-wrapper">
-               <qrcode-vue v-if="pendingBoardingPass.raw_data" :value="pendingBoardingPass.raw_data" :size="160" level="M" />
-            </div>
-            <div class="bp-modern-barcode-text">
-               {{ pendingBoardingPass.pnr }}
-            </div>
-          </div>
-
-          <div class="bp-modern-actions">
-            <button class="bp-modern-btn bp-modern-btn-confirm" @click="confirmBoardingPass">存入票夹</button>
-            <button class="bp-modern-btn bp-modern-btn-dismiss" @click="dismissBoardingPass">忽略</button>
-          </div>
-        </div>
         <!-- 图片预览 -->
         <div v-if="pendingImages.length > 0" class="inline-images-preview" style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px;">
           <div v-for="(img, idx) in pendingImages" :key="idx" class="inline-image-preview" style="position: relative;">
@@ -3018,19 +3022,31 @@ defineExpose({
 /* ── Mobile Bottom Sheet ────────────────────────────────────────── */
 
 /* ── Boarding Pass Confirmation Card ───────────────────────────── */
+.bp-modal-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  backdrop-filter: blur(4px);
+}
 .boarding-pass-modern-card {
-  background: linear-gradient(135deg, #357376 0%, #204b4d 100%);
-  color: #ffffff;
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-default);
   border-radius: 16px;
   padding: 24px;
-  margin-bottom: 12px;
-  box-shadow: 0 8px 24px rgba(0,0,0,0.15);
-  animation: slideUp 0.3s ease-out;
+  width: 90%;
+  max-width: 360px;
+  box-shadow: 0 16px 40px rgba(0,0,0,0.3);
+  animation: modalPop 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
   font-family: var(--font-sans, system-ui, sans-serif);
 }
-@keyframes slideUp {
-  from { opacity: 0; transform: translateY(12px); }
-  to { opacity: 1; transform: translateY(0); }
+@keyframes modalPop {
+  from { opacity: 0; transform: scale(0.9); }
+  to { opacity: 1; transform: scale(1); }
 }
 .bp-modern-header {
   display: flex;
@@ -3042,7 +3058,8 @@ defineExpose({
   margin-bottom: 12px;
 }
 .bp-modern-icon {
-  background: rgba(255,255,255,0.2);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
   width: 24px;
   height: 24px;
   border-radius: 50%;
@@ -3079,7 +3096,7 @@ defineExpose({
 }
 .bp-modern-divider {
   height: 1px;
-  background: rgba(255,255,255,0.15);
+  background: var(--border-default);
   margin: 16px 0;
 }
 .bp-modern-qr-section {
@@ -3120,11 +3137,11 @@ defineExpose({
   opacity: 0.9;
 }
 .bp-modern-btn-confirm {
-  background: #ffffff;
-  color: #357376;
+  background: var(--user-accent, #4f8cf7);
+  color: #ffffff;
 }
 .bp-modern-btn-dismiss {
-  background: rgba(255,255,255,0.2);
-  color: #ffffff;
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
 }
 </style>
