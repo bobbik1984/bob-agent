@@ -21,49 +21,45 @@
           <span class="bp-modern-icon">✈</span>
           <span>Boarding Pass</span>
         </div>
-        <div class="bp-modern-title">
-          {{ pendingBoardingPass.origin }} → {{ pendingBoardingPass.destination }}
+
+        <div class="bp-route-row">
+          <span class="bp-airport-code">{{ pendingBoardingPass.origin }}</span>
+          <span class="bp-route-arrow">→</span>
+          <span class="bp-airport-code">{{ pendingBoardingPass.destination }}</span>
         </div>
-        
-        <div class="bp-modern-row">
+
+        <div class="bp-modern-divider"></div>
+
+        <div class="bp-detail-grid">
           <div class="bp-modern-field">
             <div class="bp-modern-label">Passenger Name</div>
             <div class="bp-modern-value">{{ pendingBoardingPass.passenger_name }}</div>
           </div>
-        </div>
-        
-        <div class="bp-modern-divider"></div>
-        
-        <div class="bp-modern-row">
           <div class="bp-modern-field">
             <div class="bp-modern-label">Flight</div>
             <div class="bp-modern-value">{{ pendingBoardingPass.carrier }} {{ pendingBoardingPass.flight_number }}</div>
           </div>
-          <div class="bp-modern-field" style="text-align: right;">
+          <div class="bp-modern-field">
             <div class="bp-modern-label">Date</div>
             <div class="bp-modern-value">{{ pendingBoardingPass.date }}</div>
           </div>
-        </div>
-        
-        <div class="bp-modern-divider"></div>
-        
-        <div class="bp-modern-row">
+          <div class="bp-modern-field" v-if="pendingBoardingPass.departure_time">
+            <div class="bp-modern-label">Time</div>
+            <div class="bp-modern-value">{{ pendingBoardingPass.departure_time }}</div>
+          </div>
           <div class="bp-modern-field">
             <div class="bp-modern-label">Seat</div>
             <div class="bp-modern-value">{{ pendingBoardingPass.seat }}</div>
           </div>
-          <div class="bp-modern-field" style="text-align: right;">
+          <div class="bp-modern-field">
             <div class="bp-modern-label">PNR</div>
             <div class="bp-modern-value">{{ pendingBoardingPass.pnr }}</div>
           </div>
         </div>
-        
+
         <div class="bp-modern-qr-section">
           <div class="bp-modern-qr-wrapper">
-             <qrcode-vue v-if="pendingBoardingPass.raw_data" :value="pendingBoardingPass.raw_data" :size="160" level="M" />
-          </div>
-          <div class="bp-modern-barcode-text">
-             {{ pendingBoardingPass.pnr }}
+             <qrcode-vue v-if="pendingBoardingPass.raw_data" :value="pendingBoardingPass.raw_data" :size="200" level="M" />
           </div>
         </div>
 
@@ -3037,9 +3033,9 @@ defineExpose({
   color: var(--text-primary);
   border: 1px solid var(--border-default);
   border-radius: 16px;
-  padding: 24px;
+  padding: 20px;
   width: 90%;
-  max-width: 360px;
+  max-width: 340px;
   box-shadow: 0 16px 40px rgba(0,0,0,0.3);
   animation: modalPop 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
   font-family: var(--font-sans, system-ui, sans-serif);
@@ -3051,90 +3047,83 @@ defineExpose({
 .bp-modern-header {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 0.9em;
+  gap: 6px;
+  font-size: 0.8em;
   font-weight: 500;
-  opacity: 0.9;
-  margin-bottom: 12px;
+  opacity: 0.7;
+  margin-bottom: 8px;
+  justify-content: flex-end;
 }
 .bp-modern-icon {
-  background: var(--bg-secondary);
-  color: var(--text-primary);
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 1.1em;
+  font-size: 1em;
 }
-.bp-modern-title {
-  font-size: 1.8em;
+.bp-route-row {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+.bp-airport-code {
+  font-size: 1.6em;
   font-weight: 700;
-  margin-bottom: 24px;
   letter-spacing: 1px;
 }
-.bp-modern-row {
-  display: flex;
-  justify-content: space-between;
-  margin-bottom: 4px;
+.bp-route-arrow {
+  font-size: 1.1em;
+  opacity: 0.5;
+}
+.bp-detail-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 12px 8px;
 }
 .bp-modern-field {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
 }
 .bp-modern-label {
-  font-size: 0.75em;
-  opacity: 0.8;
-  text-transform: capitalize;
-  letter-spacing: 0.5px;
+  font-size: 0.7em;
+  opacity: 0.6;
+  letter-spacing: 0.3px;
 }
 .bp-modern-value {
-  font-size: 1.2em;
+  font-size: 1.05em;
   font-weight: 600;
 }
 .bp-modern-divider {
   height: 1px;
   background: var(--border-default);
-  margin: 16px 0;
+  margin: 10px 0;
 }
 .bp-modern-qr-section {
-  margin-top: 32px;
+  margin-top: 16px;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 12px;
 }
 .bp-modern-qr-wrapper {
   background: #ffffff;
-  padding: 12px;
-  border-radius: 12px;
-}
-.bp-modern-barcode-text {
-  font-family: var(--font-sans, system-ui, sans-serif);
-  font-size: 1.1em;
-  letter-spacing: 2px;
-  font-weight: 600;
-  opacity: 0.9;
+  padding: 10px;
+  border-radius: 10px;
 }
 .bp-modern-actions {
   display: flex;
-  gap: 12px;
-  margin-top: 32px;
+  gap: 10px;
+  margin-top: 16px;
 }
 .bp-modern-btn {
   flex: 1;
-  padding: 12px;
+  padding: 10px;
   border-radius: 8px;
   border: none;
   font-weight: 600;
   cursor: pointer;
   transition: opacity 0.2s;
-  font-size: 1em;
+  font-size: 0.9em;
 }
 .bp-modern-btn:hover {
-  opacity: 0.9;
+  opacity: 0.85;
 }
 .bp-modern-btn-confirm {
   background: var(--user-accent, #4f8cf7);
