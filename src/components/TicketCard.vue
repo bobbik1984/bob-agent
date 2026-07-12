@@ -1,84 +1,90 @@
 <template>
   <div class="ticket-card-wrapper" :class="{ 'is-expired': isExpired }">
-    <div class="ticket-header">
+    <div class="ticket-header" @click="expanded = !expanded" style="cursor: pointer;">
       <div class="ticket-title-row">
         <component :is="categoryIcon" class="category-icon" />
         <span class="ticket-title">{{ node.label }}</span>
-        <span class="ticket-status" :class="ticketStatusClass">{{ displayStatus }}</span>
+        <span class="ticket-status" :class="ticketStatusClass"></span>
+        <ChevronDown class="expand-chevron" :class="{ 'is-open': expanded }" />
+      </div>
+      <div class="ticket-subtitle" v-if="!expanded && metadata.start_time">
+        {{ metadata.start_time.split(' ')[0] }}
       </div>
     </div>
 
-    <div class="ticket-body">
-      <!-- 针对机票和火车的特殊高亮排版 -->
-      <div v-if="isTravel" class="travel-route">
-        <div class="route-point">
-          <div class="time">{{ formatTimeOnly(metadata.start_time) }}</div>
-          <div class="location">{{ originLabel }}</div>
+    <template v-if="expanded">
+      <div class="ticket-body">
+        <!-- 针对机票和火车的特殊高亮排版 -->
+        <div v-if="isTravel" class="travel-route">
+          <div class="route-point">
+            <div class="time">{{ formatTimeOnly(metadata.start_time) }}</div>
+            <div class="location">{{ originLabel }}</div>
+          </div>
+          <div class="route-arrow">
+            <Plane v-if="metadata.category === 'flight'" class="arrow-icon" />
+            <Train v-else-if="metadata.category === 'train'" class="arrow-icon" />
+            <ArrowRight v-else class="arrow-icon" />
+            <div class="duration" v-if="metadata.flight_info?.flight_number">{{ metadata.flight_info.flight_number }}</div>
+          </div>
+          <div class="route-point right">
+            <div class="time">{{ formatTimeOnly(metadata.end_time) || '--:--' }}</div>
+            <div class="location">{{ destinationLabel }}</div>
+          </div>
         </div>
-        <div class="route-arrow">
-          <Plane v-if="metadata.category === 'flight'" class="arrow-icon" />
-          <Train v-else-if="metadata.category === 'train'" class="arrow-icon" />
-          <ArrowRight v-else class="arrow-icon" />
-          <div class="duration" v-if="metadata.flight_info?.flight_number">{{ metadata.flight_info.flight_number }}</div>
+
+        <!-- 常规场馆/时间排版 (电影、展会等) -->
+        <div v-else class="generic-info">
+          <div class="info-group">
+            <label>{{ $t('calendar.time') || 'Time' }}</label>
+            <div class="val">{{ metadata.start_time }}</div>
+          </div>
+          <div class="info-group" v-if="metadata.venue">
+            <label>{{ $t('calendar.venue') || 'Venue' }}</label>
+            <div class="val">{{ metadata.venue }}</div>
+          </div>
         </div>
-        <div class="route-point right">
-          <div class="time">{{ formatTimeOnly(metadata.end_time) || '--:--' }}</div>
-          <div class="location">{{ destinationLabel }}</div>
+
+        <div class="sub-info-grid" v-if="hasSubInfo">
+          <div class="info-cell" v-if="seatLabel">
+            <label>{{ $t('ticket.seat') || 'Seat/Gate' }}</label>
+            <div class="val highlight">{{ seatLabel }}</div>
+          </div>
+          <div class="info-cell" v-if="metadata.flight_info?.carrier">
+            <label>{{ $t('ticket.carrier') || 'Carrier' }}</label>
+            <div class="val">{{ metadata.flight_info.carrier }}</div>
+          </div>
+          <div class="info-cell" v-if="metadata.flight_info?.pnr">
+            <label>PNR</label>
+            <div class="val">{{ metadata.flight_info.pnr }}</div>
+          </div>
         </div>
       </div>
 
-      <!-- 常规场馆/时间排版 (电影、展会等) -->
-      <div v-else class="generic-info">
-        <div class="info-group">
-          <label>{{ $t('calendar.time') || 'Time' }}</label>
-          <div class="val">{{ metadata.start_time }}</div>
+      <div class="ticket-footer" v-if="metadata.barcode_data">
+        <div class="qr-container">
+          <qrcode-vue 
+            :value="metadata.barcode_data" 
+            :size="120" 
+            level="H" 
+            background="var(--bg-tertiary)"
+            foreground="var(--text-primary)"
+            render-as="svg"
+          />
+          <div class="qr-center-logo">
+            <component :is="categoryIcon" class="qr-inner-icon" />
+          </div>
         </div>
-        <div class="info-group" v-if="metadata.venue">
-          <label>{{ $t('calendar.venue') || 'Venue' }}</label>
-          <div class="val">{{ metadata.venue }}</div>
-        </div>
-      </div>
-
-      <div class="sub-info-grid" v-if="hasSubInfo">
-        <div class="info-cell" v-if="seatLabel">
-          <label>{{ $t('ticket.seat') || 'Seat/Gate' }}</label>
-          <div class="val highlight">{{ seatLabel }}</div>
-        </div>
-        <div class="info-cell" v-if="metadata.flight_info?.carrier">
-          <label>{{ $t('ticket.carrier') || 'Carrier' }}</label>
-          <div class="val">{{ metadata.flight_info.carrier }}</div>
-        </div>
-        <div class="info-cell" v-if="metadata.flight_info?.pnr">
-          <label>PNR</label>
-          <div class="val">{{ metadata.flight_info.pnr }}</div>
+        <div class="barcode-raw" v-if="metadata.barcode_type !== 'qr'">
+          {{ metadata.barcode_data }}
         </div>
       </div>
-    </div>
-
-    <div class="ticket-footer" v-if="metadata.barcode_data">
-      <div class="qr-container">
-        <qrcode-vue 
-          :value="metadata.barcode_data" 
-          :size="120" 
-          level="H" 
-          background="var(--bg-tertiary)"
-          foreground="var(--text-primary)"
-          render-as="svg"
-        />
-        <div class="qr-center-logo">
-          <component :is="categoryIcon" class="qr-inner-icon" />
-        </div>
-      </div>
-      <div class="barcode-raw" v-if="metadata.barcode_type !== 'qr'">
-        {{ metadata.barcode_data }}
-      </div>
-    </div>
+    </template>
   </div>
 </template>
 
 <script setup>
-import { computed } from 'vue';
-import { Plane, Film, Ticket, Calendar, Train, ArrowRight, CreditCard, Music } from 'lucide-vue-next';
+import { computed, ref } from 'vue';
+import { Plane, Film, Ticket, Calendar, Train, ArrowRight, CreditCard, Music, ChevronDown } from 'lucide-vue-next';
 import QrcodeVue from 'qrcode.vue';
 import { useI18n } from 'vue-i18n';
 
@@ -90,6 +96,8 @@ const props = defineProps({
 });
 
 const { t } = useI18n();
+
+const expanded = ref(false);
 
 const metadata = computed(() => {
   if (typeof props.node.metadata === 'string') {
@@ -104,8 +112,11 @@ const metadata = computed(() => {
 
 const isExpired = computed(() => {
   if (!metadata.value.start_time) return false;
-  const startTime = new Date(metadata.value.start_time).getTime();
-  return Date.now() > startTime + 24 * 3600 * 1000; // 过期一天后
+  // Handle both "YYYY-MM-DD HH:MM:SS" and "YYYY-MM-DD" formats
+  const dtStr = metadata.value.start_time.replace(' ', 'T');
+  const startTime = new Date(dtStr).getTime();
+  if (isNaN(startTime)) return false;
+  return Date.now() > startTime + 24 * 3600 * 1000;
 });
 
 const isTravel = computed(() => {
@@ -182,6 +193,24 @@ function formatTimeOnly(dtStr) {
 .ticket-card-wrapper.is-expired {
   opacity: 0.6;
   filter: grayscale(100%);
+}
+
+.expand-chevron {
+  width: 16px;
+  height: 16px;
+  color: var(--text-tertiary);
+  transition: transform 0.2s ease;
+  flex-shrink: 0;
+}
+.expand-chevron.is-open {
+  transform: rotate(180deg);
+}
+
+.ticket-subtitle {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  margin-top: 4px;
+  padding-left: 33px;
 }
 
 .ticket-header {
