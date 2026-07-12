@@ -21,13 +21,13 @@
             <input v-model="searchQuery" type="text" placeholder="搜索笔记标题..." @blur="showSearchInput = false" @keydown.esc="showSearchInput = false" ref="searchInputRef" style="border: none; background: transparent; color: var(--text-primary); font-size: 12px; outline: none; flex: 1; min-width: 0;" />
           </div>
         </div>
-        <button v-show="!showSearchInput" class="new-note-btn" @click="loadNotes" :title="$t('notebook.refresh')">
+        <button class="new-note-btn" @click="loadNotes" :title="$t('notebook.refresh')">
           <RefreshCw :size="16" />
         </button>
-        <button v-show="!showSearchInput" class="new-note-btn" @click="createNewFolder" :title="$t('notebook.new_folder')">
+        <button class="new-note-btn" @click="createNewFolder" :title="$t('notebook.new_folder')">
           <FolderPlus :size="16" />
         </button>
-        <button v-show="!showSearchInput" class="new-note-btn" @click="createNewNote" :title="$t('notebook.new_note')">
+        <button class="new-note-btn" @click="createNewNote" :title="$t('notebook.new_note')">
           <Plus :size="16" />
         </button>
       </div>
@@ -539,8 +539,7 @@ defineExpose({ refresh: loadNotes });
 }
 
 .explorer-search-box.expanded {
-  width: 100%;
-  max-width: 200px;
+  width: 200px;
   background: var(--surface-input);
   border: 1px solid var(--border-subtle);
 }
