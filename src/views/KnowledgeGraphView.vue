@@ -560,8 +560,11 @@ const ticketNodes = computed(() => {
     .filter(n => n.node_type === 'ticket' || n.type === 'ticket' || n.type === 'Ticket')
     .sort((a,b) => {
       // sort by start_time descending if available
-      const aMeta = typeof a.metadata === 'string' ? JSON.parse(a.metadata) : (a.metadata || {});
-      const bMeta = typeof b.metadata === 'string' ? JSON.parse(b.metadata) : (b.metadata || {});
+      let aMeta = {};
+      let bMeta = {};
+      try { aMeta = typeof a.metadata === 'string' && a.metadata ? JSON.parse(a.metadata) : (a.metadata || {}); } catch(e) {}
+      try { bMeta = typeof b.metadata === 'string' && b.metadata ? JSON.parse(b.metadata) : (b.metadata || {}); } catch(e) {}
+      
       if (aMeta.start_time && bMeta.start_time) {
         return new Date(bMeta.start_time) - new Date(aMeta.start_time);
       }
