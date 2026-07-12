@@ -127,6 +127,7 @@ export function useDragDrop({ messages, inputText, scrollToBottom, globalFileAcc
         flight_info: {
           flight_number: `${bp.carrier}${bp.flight_number}`,
           carrier: bp.carrier,
+          passenger_name: bp.passenger_name,
           pnr: bp.pnr,
           origin: bp.origin,
           destination: bp.destination,

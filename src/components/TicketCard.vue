@@ -1,90 +1,81 @@
 <template>
-  <div class="ticket-card-wrapper" :class="{ 'is-expired': isExpired }">
-    <div class="ticket-header" @click="expanded = !expanded" style="cursor: pointer;">
+  <div class="ticket-card-wrapper" :class="{ 'is-expired': isExpired }" @click="showDetail = true" style="cursor: pointer;">
+    <div class="ticket-header">
       <div class="ticket-title-row">
         <component :is="categoryIcon" class="category-icon" />
         <span class="ticket-title">{{ node.label }}</span>
         <span class="ticket-status" :class="ticketStatusClass"></span>
-        <ChevronDown class="expand-chevron" :class="{ 'is-open': expanded }" />
       </div>
-      <div class="ticket-subtitle" v-if="!expanded && metadata.start_time">
+      <div class="ticket-subtitle" v-if="metadata.start_time">
         {{ metadata.start_time.split(' ')[0] }}
       </div>
     </div>
-
-    <template v-if="expanded">
-      <div class="ticket-body">
-        <!-- 针对机票和火车的特殊高亮排版 -->
-        <div v-if="isTravel" class="travel-route">
-          <div class="route-point">
-            <div class="time">{{ formatTimeOnly(metadata.start_time) }}</div>
-            <div class="location">{{ originLabel }}</div>
-          </div>
-          <div class="route-arrow">
-            <Plane v-if="metadata.category === 'flight'" class="arrow-icon" />
-            <Train v-else-if="metadata.category === 'train'" class="arrow-icon" />
-            <ArrowRight v-else class="arrow-icon" />
-            <div class="duration" v-if="metadata.flight_info?.flight_number">{{ metadata.flight_info.flight_number }}</div>
-          </div>
-          <div class="route-point right">
-            <div class="time">{{ formatTimeOnly(metadata.end_time) || '--:--' }}</div>
-            <div class="location">{{ destinationLabel }}</div>
-          </div>
-        </div>
-
-        <!-- 常规场馆/时间排版 (电影、展会等) -->
-        <div v-else class="generic-info">
-          <div class="info-group">
-            <label>{{ $t('calendar.time') || 'Time' }}</label>
-            <div class="val">{{ metadata.start_time }}</div>
-          </div>
-          <div class="info-group" v-if="metadata.venue">
-            <label>{{ $t('calendar.venue') || 'Venue' }}</label>
-            <div class="val">{{ metadata.venue }}</div>
-          </div>
-        </div>
-
-        <div class="sub-info-grid" v-if="hasSubInfo">
-          <div class="info-cell" v-if="seatLabel">
-            <label>{{ $t('ticket.seat') || 'Seat/Gate' }}</label>
-            <div class="val highlight">{{ seatLabel }}</div>
-          </div>
-          <div class="info-cell" v-if="metadata.flight_info?.carrier">
-            <label>{{ $t('ticket.carrier') || 'Carrier' }}</label>
-            <div class="val">{{ metadata.flight_info.carrier }}</div>
-          </div>
-          <div class="info-cell" v-if="metadata.flight_info?.pnr">
-            <label>PNR</label>
-            <div class="val">{{ metadata.flight_info.pnr }}</div>
-          </div>
-        </div>
-      </div>
-
-      <div class="ticket-footer" v-if="metadata.barcode_data">
-        <div class="qr-container">
-          <qrcode-vue 
-            :value="metadata.barcode_data" 
-            :size="120" 
-            level="H" 
-            background="var(--bg-tertiary)"
-            foreground="var(--text-primary)"
-            render-as="svg"
-          />
-          <div class="qr-center-logo">
-            <component :is="categoryIcon" class="qr-inner-icon" />
-          </div>
-        </div>
-        <div class="barcode-raw" v-if="metadata.barcode_type !== 'qr'">
-          {{ metadata.barcode_data }}
-        </div>
-      </div>
-    </template>
   </div>
+
+  <!-- Detail Modal -->
+  <Teleport to="body">
+    <div v-if="showDetail" class="bp-modal-overlay" @click.self="showDetail = false">
+      <div class="boarding-pass-modern-card">
+        <div class="bp-modern-header">
+          <span class="bp-modern-icon"><component :is="categoryIcon" style="width:14px;height:14px;" /></span>
+          <span>{{ isTravel ? 'Boarding Pass' : (metadata.category || 'Ticket') }}</span>
+        </div>
+
+        <div class="bp-route-row" v-if="isTravel">
+          <span class="bp-airport-code">{{ originLabel }}</span>
+          <span class="bp-route-arrow">→</span>
+          <span class="bp-airport-code">{{ destinationLabel }}</span>
+        </div>
+        <div class="bp-route-row" v-else>
+          <span class="bp-airport-code" style="font-size:1.3em;">{{ node.label }}</span>
+        </div>
+
+        <div class="bp-modern-divider"></div>
+
+        <div class="bp-detail-grid">
+          <div class="bp-modern-field" v-if="metadata.flight_info?.passenger_name || metadata.passenger_name">
+            <div class="bp-modern-label">Passenger</div>
+            <div class="bp-modern-value">{{ metadata.flight_info?.passenger_name || metadata.passenger_name }}</div>
+          </div>
+          <div class="bp-modern-field" v-if="metadata.flight_info?.flight_number">
+            <div class="bp-modern-label">Flight</div>
+            <div class="bp-modern-value">{{ metadata.flight_info.carrier }} {{ metadata.flight_info.flight_number }}</div>
+          </div>
+          <div class="bp-modern-field" v-if="metadata.start_time">
+            <div class="bp-modern-label">Date</div>
+            <div class="bp-modern-value">{{ metadata.start_time.split(' ')[0] }}</div>
+          </div>
+          <div class="bp-modern-field" v-if="seatLabel">
+            <div class="bp-modern-label">Seat</div>
+            <div class="bp-modern-value">{{ seatLabel }}</div>
+          </div>
+          <div class="bp-modern-field" v-if="metadata.flight_info?.pnr">
+            <div class="bp-modern-label">PNR</div>
+            <div class="bp-modern-value">{{ metadata.flight_info.pnr }}</div>
+          </div>
+          <div class="bp-modern-field" v-if="metadata.venue && !isTravel">
+            <div class="bp-modern-label">Venue</div>
+            <div class="bp-modern-value">{{ metadata.venue }}</div>
+          </div>
+        </div>
+
+        <div class="bp-modern-qr-section" v-if="metadata.barcode_data">
+          <div class="bp-modern-qr-wrapper">
+            <qrcode-vue :value="metadata.barcode_data" :size="200" level="M" />
+          </div>
+        </div>
+
+        <div class="bp-modern-actions">
+          <button class="bp-modern-btn bp-modern-btn-dismiss" @click="showDetail = false">关闭</button>
+        </div>
+      </div>
+    </div>
+  </Teleport>
 </template>
 
 <script setup>
 import { computed, ref } from 'vue';
-import { Plane, Film, Ticket, Calendar, Train, ArrowRight, CreditCard, Music, ChevronDown } from 'lucide-vue-next';
+import { Plane, Film, Ticket, Calendar, Train, ArrowRight, CreditCard, Music } from 'lucide-vue-next';
 import QrcodeVue from 'qrcode.vue';
 import { useI18n } from 'vue-i18n';
 
@@ -98,6 +89,7 @@ const props = defineProps({
 const { t } = useI18n();
 
 const expanded = ref(false);
+const showDetail = ref(false);
 
 const metadata = computed(() => {
   if (typeof props.node.metadata === 'string') {
@@ -191,19 +183,11 @@ function formatTimeOnly(dtStr) {
 }
 
 .ticket-card-wrapper.is-expired {
-  opacity: 0.6;
-  filter: grayscale(100%);
+  opacity: 0.5;
 }
 
-.expand-chevron {
-  width: 16px;
-  height: 16px;
-  color: var(--text-tertiary);
-  transition: transform 0.2s ease;
-  flex-shrink: 0;
-}
-.expand-chevron.is-open {
-  transform: rotate(180deg);
+.ticket-card-wrapper.is-expired .category-icon {
+  background: var(--text-muted, #999);
 }
 
 .ticket-subtitle {
@@ -215,8 +199,6 @@ function formatTimeOnly(dtStr) {
 
 .ticket-header {
   padding: 10px 14px;
-  border-bottom: 2px dashed var(--border-subtle);
-  background-color: var(--bg-secondary);
 }
 
 .ticket-title-row {
@@ -246,7 +228,6 @@ function formatTimeOnly(dtStr) {
 }
 
 .ticket-status {
-  font-size: 8px;
   width: 8px;
   height: 8px;
   border-radius: 50%;
@@ -258,150 +239,120 @@ function formatTimeOnly(dtStr) {
 }
 
 .status-expired {
-  background-color: var(--bg-root);
-  color: var(--text-muted);
+  background-color: var(--text-muted, #999);
 }
 
-.ticket-body {
-  padding: 12px 14px;
-}
-
-.travel-route {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 12px;
-}
-
-.route-point {
-  display: flex;
-  flex-direction: column;
-}
-
-.route-point.right {
-  text-align: right;
-}
-
-.route-point .time {
-  font-size: 20px;
-  font-weight: 700;
-  line-height: 1.2;
-}
-
-.route-point .location {
-  font-size: 12px;
-  color: var(--text-secondary);
-  margin-top: 2px;
-}
-
-.route-arrow {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  color: var(--text-muted);
-  flex: 1;
-  padding: 0 16px;
-}
-
-.arrow-icon {
-  width: 24px;
-  height: 24px;
-  margin-bottom: 4px;
-}
-
-.duration {
-  font-size: 12px;
-  letter-spacing: 1px;
-}
-
-.generic-info {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-bottom: 12px;
-}
-
-.info-group label {
-  font-size: 12px;
-  color: var(--text-secondary);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-.info-group .val {
-  font-size: 14px;
-  font-weight: 600;
-  margin-top: 2px;
-}
-
-.sub-info-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(60px, 1fr));
-  gap: 8px;
-  padding-top: 10px;
-  border-top: 1px solid var(--border-subtle);
-}
-
-.info-cell label {
-  font-size: 11px;
-  color: var(--text-secondary);
-  text-transform: uppercase;
-  margin-bottom: 4px;
-  display: block;
-}
-
-.info-cell .val {
-  font-size: 14px;
-  font-weight: 500;
-}
-
-.info-cell .val.highlight {
-  font-size: 14px;
-  font-weight: 700;
-}
-
-.ticket-footer {
-  padding: 14px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  background-color: var(--bg-secondary);
-}
-
-.qr-container {
-  position: relative;
-  width: 120px;
-  height: 120px;
-  padding: 8px;
-  background-color: var(--bg-tertiary);
-  border-radius: 10px;
-}
-
-.qr-center-logo {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  width: 24px;
-  height: 24px;
-  background-color: var(--bg-tertiary);
-  border-radius: 6px;
+/* ── Detail Modal (reuse ChatView boarding pass style names) ── */
+.bp-modal-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.5);
   display: flex;
   align-items: center;
   justify-content: center;
+  z-index: 9999;
+  backdrop-filter: blur(4px);
 }
-
-.qr-inner-icon {
-  width: 16px;
-  height: 16px;
+.boarding-pass-modern-card {
+  background: var(--bg-tertiary);
   color: var(--text-primary);
+  border: 1px solid var(--border-default);
+  border-radius: 16px;
+  padding: 20px;
+  width: 90%;
+  max-width: 340px;
+  box-shadow: 0 16px 40px rgba(0,0,0,0.3);
+  animation: modalPop 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  font-family: var(--font-sans, system-ui, sans-serif);
 }
-
-.barcode-raw {
-  margin-top: 12px;
-  font-family: monospace;
-  font-size: 12px;
-  color: var(--text-muted);
-  letter-spacing: 2px;
+@keyframes modalPop {
+  from { opacity: 0; transform: scale(0.9); }
+  to { opacity: 1; transform: scale(1); }
+}
+.bp-modern-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8em;
+  font-weight: 500;
+  opacity: 0.7;
+  margin-bottom: 8px;
+  justify-content: flex-end;
+}
+.bp-modern-icon {
+  display: flex;
+  align-items: center;
+}
+.bp-route-row {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+.bp-airport-code {
+  font-size: 1.6em;
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+.bp-route-arrow {
+  font-size: 1.1em;
+  opacity: 0.5;
+}
+.bp-detail-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 12px 8px;
+}
+.bp-modern-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.bp-modern-label {
+  font-size: 0.7em;
+  opacity: 0.6;
+  letter-spacing: 0.3px;
+}
+.bp-modern-value {
+  font-size: 1.05em;
+  font-weight: 600;
+}
+.bp-modern-divider {
+  height: 1px;
+  background: var(--border-default);
+  margin: 10px 0;
+}
+.bp-modern-qr-section {
+  margin-top: 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.bp-modern-qr-wrapper {
+  background: #ffffff;
+  padding: 10px;
+  border-radius: 10px;
+}
+.bp-modern-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 16px;
+}
+.bp-modern-btn {
+  flex: 1;
+  padding: 10px;
+  border-radius: 8px;
+  border: none;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.2s;
+  font-size: 0.9em;
+}
+.bp-modern-btn:hover {
+  opacity: 0.85;
+}
+.bp-modern-btn-dismiss {
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
 }
 </style>
