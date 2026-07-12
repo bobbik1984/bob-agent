@@ -131,10 +131,13 @@
               :class="{ active: activeTypes.has(t.type) }"
               @click="toggleType(t.type)"
             >
-              <span class="chip-shape" :style="{ color: kgColors[t.type] || 'var(--text-muted)' }">
-                {{ getTypeShapeIcon(t.type) }}
+              <span style="display: flex; align-items: center; gap: 6px;">
+                <span class="chip-shape" :style="{ color: kgColors[t.type] || 'var(--text-muted)' }">
+                  {{ getTypeShapeIcon(t.type) }}
+                </span>
+                <span>{{ getTypeName(t.type) }}</span>
               </span>
-              {{ getTypeName(t.type) }}&nbsp;&nbsp;{{ t.count }}
+              <span style="font-variant-numeric: tabular-nums; opacity: 0.8;">{{ t.count }}</span>
             </button>
           </div>
         </div>
@@ -1416,7 +1419,7 @@ async function removeSourceBatch(node) {
 .kg-type-filters {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
+  align-items: stretch;
   gap: var(--space-1);
   padding: 4px;
 }
@@ -1424,7 +1427,8 @@ async function removeSourceBatch(node) {
 .kg-filter-chip {
   display: flex;
   align-items: center;
-  gap: 4px;
+  justify-content: space-between;
+  gap: 12px;
   padding: 4px 10px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border-subtle);
