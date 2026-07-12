@@ -340,6 +340,7 @@ import NoteExplorer from '../components/NoteExplorer.vue';
 import TicketCard from '../components/TicketCard.vue';
 import TiptapEditor from '../components/TiptapEditor.vue';
 import { useI18n } from 'vue-i18n';
+import { useDialog } from '../composables/useDialog';
 import { Network } from 'vis-network';
 import { DataSet } from 'vis-data';
 import { Waypoints, Search, X, FileText, RefreshCw, Plus, Link, ExternalLink, Trash2, ChevronRight, Menu, ChevronDown, Star, Package, Ticket } from 'lucide-vue-next';
@@ -835,11 +836,13 @@ onMounted(async () => {
 
     window.appAPI.onDragDrop(async (e) => {
       isDragOver.value = false;
+      const kgView = document.querySelector('.kg-view');
+      if (kgView && kgView.offsetParent === null) return;
       if (e.payload && e.payload.paths && e.payload.paths.length > 0) {
         const path = e.payload.paths[0];
         let yes = false;
         try {
-          const { ask } = await import('@tauri-apps/plugin-dialog');
+          // using useDialog
           
           // 先预估成本
           const estimate = await window.appAPI.estimateKB(path);
@@ -855,9 +858,9 @@ onMounted(async () => {
             msg += `【预估失败】\n${estimate.error}\n`;
           }
 
-          yes = await ask(msg, {
+          yes = await useDialog().showConfirm({
             title: '提取前确认 (包含成本预估)',
-            type: 'info'
+            message: msg
           });
         } catch (err) {
           yes = window.confirm(`是否要从该路径提取知识点并加入图谱？\n\n${path}`);
@@ -1196,10 +1199,9 @@ async function confirmExtract(path) {
       msg += `\n预估费用: 约 ￥${est.estimated_cost_core_rmb.toFixed(4)}`;
     }
 
-    const { ask } = await import('@tauri-apps/plugin-dialog');
-    const yes = await ask(msg, {
+    const yes = await useDialog().showConfirm({
       title: '提取前确认及成本预估',
-      type: 'info'
+      message: msg
     });
     
     if (yes) {
