@@ -134,6 +134,8 @@ export function useDragDrop({ messages, inputText, scrollToBottom, globalFileAcc
         },
       };
       await window.appAPI.createTicketDirect(args);
+      // Notify ticket view to refresh
+      window.dispatchEvent(new CustomEvent('ticket-created'));
       messages.value.push({
         role: 'assistant',
         content: `已将航班 ${bp.carrier}${bp.flight_number} (${bp.origin} → ${bp.destination}) 的登机牌存入票夹。`,

@@ -819,6 +819,20 @@ onMounted(async () => {
     currentMode.value = 'ticket';
   });
 
+  // Auto-refresh ticket list when a new ticket is created from chat
+  window.addEventListener('ticket-created', async () => {
+    try {
+      const [graphData, statsData] = await Promise.all([
+        window.appAPI.kgGetFullGraph(),
+        window.appAPI.kgStats(),
+      ]);
+      stats.value = statsData;
+      allGraphData.value = graphData;
+    } catch (e) {
+      console.warn('[KG] ticket-created refresh failed:', e);
+    }
+  });
+
   window.addEventListener('android-back-pressed', onAndroidBackPressed);
   updateKgColors();
   await loadGraph();
