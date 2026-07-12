@@ -360,7 +360,7 @@
         <div v-if="pendingImages.length > 0" class="inline-images-preview" style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px;">
           <div v-for="(img, idx) in pendingImages" :key="idx" class="inline-image-preview" style="position: relative;">
             <img :src="'data:image/png;base64,' + img" alt="Pending Image" style="max-height: 100px; border-radius: 4px;" />
-            <button class="image-remove-inline btn-icon" @click="pendingImages.splice(idx, 1)" style="position: absolute; top: 0; right: 0; background: var(--shadow-lg); color: var(--text-inverse); padding: 2px; border-radius: 50%;"><X :size="10" /></button>
+            <button class="image-remove-inline btn-icon" @click="pendingImages.splice(idx, 1)" style="position: absolute; top: -6px; right: -6px; background: var(--text-primary); color: var(--bg-primary); padding: 2px; border-radius: 50%; box-shadow: 0 2px 4px rgba(0,0,0,0.2);"><X :size="12" /></button>
           </div>
         </div>
         <!-- 待发送文件预览 -->
@@ -2491,8 +2491,9 @@ defineExpose({
 .input-toolbar {
   display: flex;
   align-items: center;
-  gap: 2px;
-  padding-top: var(--space-1);
+  flex-wrap: wrap;
+  gap: 4px;
+  padding-top: var(--space-2);
 }
 
 .toolbar-spacer {
