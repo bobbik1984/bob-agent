@@ -785,6 +785,13 @@ function onAndroidBackPressed(e) {
   }
 }
 
+function resizeNetwork() {
+  if (network) {
+    network.redraw();
+    network.fit();
+  }
+}
+
 onMounted(async () => {
   window.addEventListener('resize', resizeNetwork);
   
