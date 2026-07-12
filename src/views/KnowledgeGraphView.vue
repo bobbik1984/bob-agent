@@ -1391,8 +1391,7 @@ async function removeSourceBatch(node) {
 .kg-search-box {
   display: flex;
   align-items: center;
-  background: var(--surface-glass);
-  backdrop-filter: blur(8px);
+  background: var(--bg-primary);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
   padding: 6px 16px;
@@ -1436,7 +1435,6 @@ async function removeSourceBatch(node) {
   flex-direction: column;
   align-items: stretch;
   gap: var(--space-1);
-  padding: 4px;
 }
 
 .kg-filter-chip {
