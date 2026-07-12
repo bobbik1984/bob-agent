@@ -42,9 +42,8 @@
       <aside 
         class="sidebar"
         :class="{
-          'mobile-drawer': isMobile && !(activeDrawer === 'chat' && mobileChatState === 'list'),
-          'mobile-drawer-open': isMobile && mobileDrawerOpen,
-          'mobile-chat-list-view': isMobile && activeDrawer === 'chat' && mobileChatState === 'list'
+          'mobile-drawer': isMobile,
+          'mobile-drawer-open': isMobile && mobileDrawerOpen
         }"
         :style="!isMobile ? { width: isSidebarCollapsed ? '0px' : sidebarWidth + 'px', minWidth: isSidebarCollapsed ? '0px' : '200px' } : {}"
       >
@@ -114,7 +113,7 @@
                 :key="conv.id"
                 class="conversation-item"
                 :class="{ active: activeConversationId === conv.id && activeDrawer === 'chat' }"
-                @click="switchConversation(conv.id); activeDrawer = 'chat'; if (isMobile) { mobileChatState = 'detail'; mobileDrawerOpen = false; }"
+                @click="switchConversation(conv.id); activeDrawer = 'chat'; if (isMobile) { mobileDrawerOpen = false; }"
                 @dblclick.stop="startRename(conv)"
               >
                 <div class="conv-body">
@@ -214,7 +213,7 @@
       </button>
 
       <!-- 内容区 -->
-      <main class="content" v-show="!(isMobile && activeDrawer === 'chat' && mobileChatState === 'list')">
+      <main class="content">
         <!-- 移动端 Settings 顶部导航 -->
         <div v-if="isMobile && activeDrawer === 'settings'" class="mobile-tab-grid">
           <button
@@ -234,7 +233,7 @@
             ref="chatViewRef"
             :conversationId="activeConversationId"
             @update-title="updateConversationTitle"
-            @back-to-list="mobileChatState = 'list'"
+            @open-drawer="mobileDrawerOpen = true"
           />
         </div>
         <div class="view-wrapper" v-show="activeDrawer === 'schedule'">
@@ -286,7 +285,7 @@
 
     <!-- 底部导航 (Mobile) -->
     <BottomNavigation 
-      v-if="isMobile && isSetupComplete && !(activeDrawer === 'chat' && mobileChatState === 'detail')" 
+      v-if="isMobile && isSetupComplete" 
       :active-drawer="activeDrawer" 
       @update:active-drawer="activeDrawer = $event" 
     />
@@ -326,7 +325,6 @@ const activeSettingsPanel = ref('model'); // 'model' | 'connections' | 'workspac
 const chatViewRef = ref(null);
 const quickNoteRef = ref(null);
 const mobileDrawerOpen = ref(false);
-const mobileChatState = ref('detail'); // 'list' | 'detail'
 // ── 响应式移动端检测 (宽高比 1:1 断点) ──
 function checkMobile() {
   return window.innerHeight > window.innerWidth;
@@ -499,12 +497,6 @@ function handleBackButton() {
   // 3. 移动端侧边抽屉层
   if (isMobile.value && mobileDrawerOpen.value) {
     mobileDrawerOpen.value = false;
-    return true;
-  }
-  
-  // 3.5. 退回聊天列表 (T-2225)
-  if (isMobile.value && activeDrawer.value === 'chat' && mobileChatState.value === 'detail') {
-    mobileChatState.value = 'list';
     return true;
   }
   
@@ -703,7 +695,6 @@ async function createNewChat() {
   conversations.value.unshift(conv);
   activeConversationId.value = conv.id;
   if (isMobile.value) {
-    mobileChatState.value = 'detail';
     mobileDrawerOpen.value = false;
   }
 }

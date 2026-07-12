@@ -15,8 +15,8 @@
     </div>
     <!-- 移动端专属顶部栏 -->
     <div v-if="isMobile" class="mobile-header">
-      <button class="mobile-hamburger" @click="emit('back-to-list')">
-        <ChevronLeft :size="24" />
+      <button class="mobile-hamburger" @click="emit('open-drawer')">
+        <Menu :size="24" />
       </button>
       <div class="mobile-header-center">
         <input 
@@ -724,7 +724,7 @@ const { t } = useI18n();
 const props = defineProps({
   conversationId: String,
 });
-const emit = defineEmits(['update-title', 'back-to-list']);
+const emit = defineEmits(['update-title', 'open-drawer']);
 
 // ── DOM refs (留在组件层) ─────────────────────────────
 const messagesArea = ref(null);
@@ -859,7 +859,7 @@ function handleTouchEnd(e) {
   const touchEndX = e.changedTouches[0].screenX;
   const touchEndY = e.changedTouches[0].screenY;
   if (touchStartX < 40 && touchEndX - touchStartX > 50 && Math.abs(touchEndY - touchStartY) < 50) {
-    emit('back-to-list');
+    emit('open-drawer');
   }
 }
 
