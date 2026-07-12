@@ -59,7 +59,7 @@
       <div class="qr-container">
         <qrcode-vue 
           :value="metadata.barcode_data" 
-          :size="160" 
+          :size="120" 
           level="H" 
           background="var(--bg-tertiary)"
           foreground="var(--text-primary)"
@@ -169,14 +169,12 @@ function formatTimeOnly(dtStr) {
 .ticket-card-wrapper {
   background-color: var(--bg-tertiary);
   border: 1px solid var(--border-subtle);
-  border-radius: 14px;
+  border-radius: 12px;
   overflow: hidden;
   display: flex;
   flex-direction: column;
   width: 100%;
-  max-width: 400px;
-  margin: 0 auto;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
   color: var(--text-primary);
   font-family: 'Inter', system-ui, sans-serif;
 }
@@ -187,7 +185,7 @@ function formatTimeOnly(dtStr) {
 }
 
 .ticket-header {
-  padding: 16px 20px;
+  padding: 10px 14px;
   border-bottom: 2px dashed var(--border-subtle);
   background-color: var(--bg-secondary);
 }
@@ -195,18 +193,23 @@ function formatTimeOnly(dtStr) {
 .ticket-title-row {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
 }
 
 .category-icon {
-  width: 20px;
-  height: 20px;
-  color: var(--text-secondary);
+  width: 18px;
+  height: 18px;
+  padding: 5px;
+  border-radius: 8px;
+  background: var(--user-accent, #4f8cf7);
+  color: #ffffff;
+  box-sizing: content-box;
+  flex-shrink: 0;
 }
 
 .ticket-title {
   font-weight: 600;
-  font-size: 16px;
+  font-size: 14px;
   flex: 1;
   white-space: nowrap;
   overflow: hidden;
@@ -214,15 +217,15 @@ function formatTimeOnly(dtStr) {
 }
 
 .ticket-status {
-  font-size: 12px;
-  padding: 4px 8px;
-  border-radius: 12px;
-  font-weight: 500;
+  font-size: 8px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
 }
 
 .status-active {
   background-color: var(--color-success);
-  color: #fff;
 }
 
 .status-expired {
@@ -231,14 +234,14 @@ function formatTimeOnly(dtStr) {
 }
 
 .ticket-body {
-  padding: 24px 20px;
+  padding: 12px 14px;
 }
 
 .travel-route {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 24px;
+  margin-bottom: 12px;
 }
 
 .route-point {
@@ -251,15 +254,15 @@ function formatTimeOnly(dtStr) {
 }
 
 .route-point .time {
-  font-size: 28px;
+  font-size: 20px;
   font-weight: 700;
   line-height: 1.2;
 }
 
 .route-point .location {
-  font-size: 14px;
+  font-size: 12px;
   color: var(--text-secondary);
-  margin-top: 4px;
+  margin-top: 2px;
 }
 
 .route-arrow {
@@ -285,8 +288,8 @@ function formatTimeOnly(dtStr) {
 .generic-info {
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  margin-bottom: 24px;
+  gap: 8px;
+  margin-bottom: 12px;
 }
 
 .info-group label {
@@ -297,16 +300,16 @@ function formatTimeOnly(dtStr) {
 }
 
 .info-group .val {
-  font-size: 18px;
+  font-size: 14px;
   font-weight: 600;
-  margin-top: 4px;
+  margin-top: 2px;
 }
 
 .sub-info-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));
-  gap: 16px;
-  padding-top: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(60px, 1fr));
+  gap: 8px;
+  padding-top: 10px;
   border-top: 1px solid var(--border-subtle);
 }
 
@@ -324,12 +327,12 @@ function formatTimeOnly(dtStr) {
 }
 
 .info-cell .val.highlight {
-  font-size: 18px;
+  font-size: 14px;
   font-weight: 700;
 }
 
 .ticket-footer {
-  padding: 24px;
+  padding: 14px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -338,11 +341,11 @@ function formatTimeOnly(dtStr) {
 
 .qr-container {
   position: relative;
-  width: 160px;
-  height: 160px;
-  padding: 10px;
+  width: 120px;
+  height: 120px;
+  padding: 8px;
   background-color: var(--bg-tertiary);
-  border-radius: 12px;
+  border-radius: 10px;
 }
 
 .qr-center-logo {
@@ -350,18 +353,18 @@ function formatTimeOnly(dtStr) {
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  width: 32px;
-  height: 32px;
+  width: 24px;
+  height: 24px;
   background-color: var(--bg-tertiary);
-  border-radius: 8px;
+  border-radius: 6px;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
 .qr-inner-icon {
-  width: 20px;
-  height: 20px;
+  width: 16px;
+  height: 16px;
   color: var(--text-primary);
 }
 
