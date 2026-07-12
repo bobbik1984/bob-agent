@@ -501,6 +501,9 @@ function handleBackButton() {
   }
   
   // 4. 子组件自定义拦截 (分发 android-back-pressed 事件)
+  if (document.body.classList.contains('scanner-active')) {
+    return false;
+  }
   // 任何子组件可以通过 e.preventDefault() 阻止默认的后退兜底行为
   const backEvent = new CustomEvent('android-back-pressed', { cancelable: true });
   const canceled = !window.dispatchEvent(backEvent);

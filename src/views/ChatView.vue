@@ -1297,10 +1297,17 @@ function onSendMessageToBob(e) {
   }
 }
 
+function onDetectBoardingPass(e) {
+  if (e.detail) {
+    pendingBoardingPass.value = e.detail;
+  }
+}
+
 onMounted(async () => {
   window.addEventListener('open-mobile-model-switcher', onOpenMobileModelSwitcher);
   window.addEventListener('android-back-pressed', onAndroidBackPressed);
   window.addEventListener('send-message-to-bob', onSendMessageToBob);
+  window.addEventListener('detect-boarding-pass', onDetectBoardingPass);
   cleanupStreamListener = window.appAPI.onStreamChunk(handleStreamChunk);
 
   // 远程消息监听
@@ -1394,6 +1401,7 @@ onUnmounted(() => {
   window.removeEventListener('open-mobile-model-switcher', onOpenMobileModelSwitcher);
   window.removeEventListener('android-back-pressed', onAndroidBackPressed);
   window.removeEventListener('send-message-to-bob', onSendMessageToBob);
+  window.removeEventListener('detect-boarding-pass', onDetectBoardingPass);
   if (cleanupStreamListener) cleanupStreamListener();
   if (remoteMessageUnlisten) remoteMessageUnlisten();
   document.removeEventListener('dragenter', onDragEnter);
