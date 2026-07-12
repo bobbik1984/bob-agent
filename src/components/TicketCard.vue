@@ -70,6 +70,7 @@
         </div>
 
         <div class="bp-modern-actions">
+          <button class="bp-modern-btn bp-modern-btn-danger" @click="deleteTicket">删除</button>
           <button class="bp-modern-btn bp-modern-btn-dismiss" @click="showDetail = false">关闭</button>
         </div>
       </div>
@@ -79,7 +80,7 @@
 
 <script setup>
 import { computed, ref } from 'vue';
-import { Plane, Film, Ticket, Calendar, Train, ArrowRight, CreditCard, Music } from 'lucide-vue-next';
+import { Plane, Film, Ticket, Calendar, Train, ArrowRight, CreditCard, Music, ChevronDown } from 'lucide-vue-next';
 import QrcodeVue from 'qrcode.vue';
 import { useI18n } from 'vue-i18n';
 
@@ -96,10 +97,15 @@ const expanded = ref(false);
 const showDetail = ref(false);
 
 const metadata = computed(() => {
+  console.log("TicketCard node.label:", props.node.label);
+  console.log("TicketCard raw metadata:", props.node.metadata);
   if (typeof props.node.metadata === 'string') {
     try {
-      return JSON.parse(props.node.metadata);
-    } catch {
+      const parsed = JSON.parse(props.node.metadata);
+      console.log("TicketCard parsed metadata:", parsed);
+      return parsed;
+    } catch (e) {
+      console.error("TicketCard JSON parse error:", e);
       return {};
     }
   }
@@ -138,9 +144,21 @@ const displayStatus = computed(() => {
 });
 
 const ticketStatusClass = computed(() => {
-  if (isExpired.value) return 'status-expired';
-  return 'status-active';
+  return isExpired.value ? 'status-expired' : 'status-active';
 });
+
+const deleteTicket = async () => {
+  if (confirm('确定要删除此票据吗？')) {
+    try {
+      await window.appAPI.kgDeleteNode(props.node.id);
+      showDetail.value = false;
+      window.dispatchEvent(new CustomEvent('ticket-created')); // triggers a refresh in KnowledgeGraphView
+    } catch (e) {
+      console.error('Failed to delete ticket', e);
+      alert('删除失败');
+    }
+  }
+};
 
 const originLabel = computed(() => {
   if (metadata.value.flight_info?.origin) return metadata.value.flight_info.origin;
@@ -358,5 +376,10 @@ function formatTimeOnly(dtStr) {
 .bp-modern-btn-dismiss {
   background: var(--bg-secondary);
   color: var(--text-secondary);
+}
+.bp-modern-btn-danger {
+  background: var(--color-error, #f44336);
+  color: #ffffff;
+  flex: 0.5;
 }
 </style>
