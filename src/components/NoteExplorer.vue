@@ -12,25 +12,28 @@
         </div>
       </div>
       <div class="header-actions">
-        <button class="new-note-btn" @click="showSearchInput = !showSearchInput; if(isMobile && showSearchInput) mobileDrawerOpen = true" :class="{ active: showSearchInput }" title="搜索">
-          <Search :size="16" />
-        </button>
-        <button class="new-note-btn" @click="loadNotes" :title="$t('notebook.refresh')">
+        <div class="explorer-search-box" :class="{ expanded: showSearchInput }">
+          <button v-show="!showSearchInput" class="new-note-btn" @click="expandSearch" title="搜索">
+            <Search :size="16" />
+          </button>
+          <div v-show="showSearchInput" style="display: flex; align-items: center; gap: 8px; width: 100%; padding: 0 8px;">
+            <Search :size="14" style="color: var(--text-muted); flex-shrink: 0;" />
+            <input v-model="searchQuery" type="text" placeholder="搜索笔记标题..." @blur="showSearchInput = false" @keydown.esc="showSearchInput = false" ref="searchInputRef" style="border: none; background: transparent; color: var(--text-primary); font-size: 12px; outline: none; flex: 1; min-width: 0;" />
+          </div>
+        </div>
+        <button v-show="!showSearchInput" class="new-note-btn" @click="loadNotes" :title="$t('notebook.refresh')">
           <RefreshCw :size="16" />
         </button>
-        <button class="new-note-btn" @click="createNewFolder" :title="$t('notebook.new_folder')">
+        <button v-show="!showSearchInput" class="new-note-btn" @click="createNewFolder" :title="$t('notebook.new_folder')">
           <FolderPlus :size="16" />
         </button>
-        <button class="new-note-btn" @click="createNewNote" :title="$t('notebook.new_note')">
+        <button v-show="!showSearchInput" class="new-note-btn" @click="createNewNote" :title="$t('notebook.new_note')">
           <Plus :size="16" />
         </button>
       </div>
     </div>
 
 
-    <div v-if="showSearchInput" class="explorer-search-bar" style="padding: 6px 16px; border-bottom: 1px solid var(--border-subtle); background: var(--bg-secondary);">
-      <input v-model="searchQuery" type="text" class="input" placeholder="搜索笔记标题..." style="width: 100%; height: 28px; font-size: 12px; border-radius: var(--radius-sm);" />
-    </div>
 
     <!-- 移动端遮罩 -->
     <div v-if="isMobile && mobileDrawerOpen" class="mobile-drawer-overlay animate-fade-in" @click="mobileDrawerOpen = false"></div>
@@ -240,6 +243,14 @@ const isMobile = inject('isMobile', ref(false));
 const mobileDrawerOpen = ref(false);
 const showSearchInput = ref(false);
 const searchQuery = ref('');
+const searchInputRef = ref(null);
+
+function expandSearch() {
+  showSearchInput.value = true;
+  setTimeout(() => {
+    if (searchInputRef.value) searchInputRef.value.focus();
+  }, 150);
+}
 
 const searchResults = computed(() => {
   if (!searchQuery.value.trim()) return [];
@@ -512,8 +523,38 @@ defineExpose({ refresh: loadNotes });
 .header-actions {
   display: flex;
   gap: 4px;
+  flex: 1;
+  justify-content: flex-end;
 }
 
+.explorer-search-box {
+  display: flex;
+  align-items: center;
+  border-radius: var(--radius-sm);
+  height: 28px;
+  width: 28px;
+  box-sizing: border-box;
+  transition: all 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+  overflow: hidden;
+}
+
+.explorer-search-box.expanded {
+  width: 100%;
+  max-width: 200px;
+  background: var(--surface-input);
+  border: 1px solid var(--border-subtle);
+}
+
+.explorer-search-box:not(.expanded) {
+  background: transparent;
+  border: none;
+  justify-content: center;
+}
+.explorer-search-box:not(.expanded) .new-note-btn {
+  width: 100%;
+  height: 100%;
+  padding: 0;
+}
 .view-toggles {
   display: flex;
   gap: 4px;

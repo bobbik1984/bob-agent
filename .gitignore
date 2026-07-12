@@ -50,3 +50,5 @@ implementation_plan.md
 *.b64
 tauri.conf.json.bak
 test_group.rs
+
+.cargo/config.toml
