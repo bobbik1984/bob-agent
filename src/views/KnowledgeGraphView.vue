@@ -104,20 +104,20 @@
         <!-- Search Overlay -->
         <div class="kg-overlay-search" :class="{ expanded: kgSearchExpanded }">
           <div class="kg-search-box">
-            <button v-if="!kgSearchExpanded" class="btn-icon" style="padding: 6px;" @click="expandSearch" title="搜索">
+            <button v-show="!kgSearchExpanded" class="btn-icon" @click="expandSearch" title="搜索">
               <Search :size="16" />
             </button>
-            <template v-else>
-              <Search :size="14" style="color: var(--text-muted);" />
+            <div v-show="kgSearchExpanded" style="display: flex; align-items: center; gap: 8px; width: 100%;">
+              <Search :size="14" style="color: var(--text-muted); flex-shrink: 0;" />
               <input
                 v-model="searchTerm"
-                :placeholder="$t('kg.search_placeholder') || '搜索节点...'"
+                :placeholder="$t('kg.search_placeholder') || '节点...'"
                 @keyup.enter="doSearch"
                 @blur="kgSearchExpanded = false"
                 @keydown.esc="kgSearchExpanded = false"
                 ref="searchInputRef"
               />
-            </template>
+            </div>
           </div>
         </div>
 
@@ -509,9 +509,9 @@ const kgSearchExpanded = ref(false);
 const searchInputRef = ref(null);
 function expandSearch() {
   kgSearchExpanded.value = true;
-  nextTick(() => {
+  setTimeout(() => {
     if (searchInputRef.value) searchInputRef.value.focus();
-  });
+  }, 150); // slight delay to allow transition to start/finish
 }
 const selectedNode = ref(null);
 const selectedRelations = ref([]);
@@ -1391,18 +1391,33 @@ async function removeSourceBatch(node) {
 .kg-search-box {
   display: flex;
   align-items: center;
-  gap: 8px;
   background: var(--surface-glass);
   backdrop-filter: blur(8px);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
   padding: 6px 16px;
   width: 240px;
+  height: 40px;
+  box-sizing: border-box;
   box-shadow: var(--shadow-sm);
+  transition: all 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+  overflow: hidden;
 }
+
 .kg-overlay-search:not(.expanded) .kg-search-box {
-  width: auto;
-  padding: 4px;
+  width: 40px;
+  padding: 0;
+  justify-content: center;
+}
+
+.kg-overlay-search:not(.expanded) .btn-icon {
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
 }
 
 .kg-search-box input {
