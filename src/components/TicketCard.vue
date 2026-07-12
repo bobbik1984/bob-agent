@@ -42,8 +42,12 @@
             <div class="bp-modern-value">{{ metadata.flight_info.flight_number }}</div>
           </div>
           <div class="bp-modern-field" v-if="metadata.start_time">
+            <div class="bp-modern-label">{{ $t('ticket.date') || 'Date' }}</div>
+            <div class="bp-modern-value">{{ metadata.start_time.split(' ')[0] }}</div>
+          </div>
+          <div class="bp-modern-field" v-if="metadata.start_time && metadata.start_time.includes(' ') && metadata.start_time.split(' ')[1] !== '00:00:00'">
             <div class="bp-modern-label">{{ $t('ticket.time') || 'Time' }}</div>
-            <div class="bp-modern-value">{{ formatDateTime(metadata.start_time) }}</div>
+            <div class="bp-modern-value">{{ formatTimeOnly(metadata.start_time) }}</div>
           </div>
           <div class="bp-modern-field" v-if="seatLabel">
             <div class="bp-modern-label">{{ $t('ticket.seat') || 'Seat' }}</div>
@@ -329,30 +333,28 @@ const formatTimeOnly = (timeStr) => {
   opacity: 0.5;
 }
 .bp-detail-grid {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 20px 12px;
 }
 .bp-modern-field {
   display: flex;
-  flex-direction: row;
-  justify-content: space-between;
-  align-items: baseline;
-  border-bottom: 1px dashed var(--border-subtle);
-  padding-bottom: 8px;
-}
-.bp-modern-field:last-child {
-  border-bottom: none;
-  padding-bottom: 0;
+  flex-direction: column;
+  gap: 4px;
+  align-items: flex-start;
 }
 .bp-modern-label {
-  font-size: 0.7em;
-  opacity: 0.6;
+  font-size: 0.75em;
+  opacity: 0.7;
   letter-spacing: 0.3px;
 }
 .bp-modern-value {
-  font-size: 1.25em;
+  font-size: 1.15em;
   font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  width: 100%;
 }
 .bp-modern-divider {
   height: 1px;
