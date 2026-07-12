@@ -100,7 +100,20 @@ export function useDragDrop({ messages, inputText, scrollToBottom, globalFileAcc
                 }
               }
             } catch (err) {
-              // rxing 解码失败，静默忽略，让大模型 Vision 兜底
+              // rxing 识别失败（默认情况），意味着需要 Vision 大模型介入
+            }
+          }
+          if (window.appAPI?.systemSaveTempImage) {
+            try {
+              const tempPath = await window.appAPI.systemSaveTempImage(base64);
+              if (tempPath) {
+                if (inputText.value.length > 0 && !inputText.value.endsWith('\n')) {
+                  inputText.value += '\n';
+                }
+                inputText.value += `[ImageLocalPath: ${tempPath.replace(/\\/g, '/')}]`;
+              }
+            } catch (err) {
+              console.error('Failed to save temp image:', err);
             }
           }
         };
@@ -210,6 +223,19 @@ export function useDragDrop({ messages, inputText, scrollToBottom, globalFileAcc
               inputText.value += `[系统自动提取的图片条码内容: ${res.data}]`;
             }
           } catch (err) {}
+        }
+        if (window.appAPI?.systemSaveTempImage) {
+          try {
+            const tempPath = await window.appAPI.systemSaveTempImage(base64);
+            if (tempPath) {
+              if (inputText.value.length > 0 && !inputText.value.endsWith('\n')) {
+                inputText.value += '\n';
+              }
+              inputText.value += `[ImageLocalPath: ${tempPath.replace(/\\/g, '/')}]`;
+            }
+          } catch (err) {
+            console.error('Failed to save temp image:', err);
+          }
         }
       };
       reader.readAsDataURL(file);

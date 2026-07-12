@@ -932,6 +932,7 @@ pub fn run() {
             barcode::system_decode_barcode_base64,
             barcode::system_parse_bcbp,
             tools::system_create_ticket,
+            tools::system_save_temp_image,
             // 设备安全与配对
             crypto::check_device_keys_initialized,
             crypto::init_device_keys,
@@ -1080,6 +1081,7 @@ pub fn run() {
             kg::kg_query,
             kg::kg_stats,
             kg::kg_delete_node_cmd,
+            kg::kg_update_ticket_cmd,
             kg::kg_merge_nodes,
             kg::kg_backfill,
             notebook::notebook_list_notes,

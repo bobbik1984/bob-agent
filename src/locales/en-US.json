@@ -406,7 +406,10 @@
     "variant_intl": "International",
     "variant_coding": "Coding",
     "billing_plan": "Plan",
-    "region": "Region"
+    "region": "Region",
+    "vision_model": "Vision Model",
+    "assign_hint_vision": "Click a model below to assign as Vision",
+    "role_vision": "Vision"
   },
   "file_card": {
     "just_now": "just now",

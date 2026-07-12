@@ -134,7 +134,7 @@ const overdueEvents = computed(() => {
   const pad = (n) => String(n).padStart(2, '0');
   const todayStr = `${today.getFullYear()}-${pad(today.getMonth()+1)}-${pad(today.getDate())}`;
 
-  return events.value.filter(e => e.status === 'pending' && e.date && e.date < todayStr);
+  return events.value.filter(e => e.status === 'pending' && e.date && e.date < todayStr && !e.linked_ticket_id);
 });
 
 onMounted(async () => {
@@ -187,7 +187,26 @@ onUnmounted(() => {
   if (unlistenReminder) unlistenReminder();
 });
 
-function dismissReminder(index) {
+
+  const reloadEvents = async () => {
+    try {
+      const allEvents = await window.appAPI.listEvents();
+      events.value = allEvents.filter(e => e.type === 'event');
+      todos.value = allEvents.filter(e => e.type === 'todo');
+    } catch (err) {
+      console.error('Failed to reload events', err);
+    }
+  };
+
+  onMounted(() => {
+    window.addEventListener('ticket-created', reloadEvents);
+  });
+
+  onUnmounted(() => {
+    window.removeEventListener('ticket-created', reloadEvents);
+  });
+
+  function dismissReminder(index) {
   reminders.value.splice(index, 1);
 }
 

@@ -572,6 +572,33 @@ fn get_builtin_tool_schemas() -> Vec<Value> {
         json!({
             "type": "function",
             "function": {
+                "name": "create_ticket",
+                "description": "解析票据或凭证信息并录入到知识图谱和日程中。当用户提供票据截图（如电影票、登机牌）要求保存时调用。特别注意：如果是电影票/演出票等包含精美海报画面的图片，必须从图片中识别海报区域的边界框(cover_bbox)和提供原图绝对路径(cover_image)进行保存。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "title": { "type": "string", "description": "票据标题（如电影名称、航班号等）" },
+                        "category": { "type": "string", "description": "分类，如 'movie', 'flight', 'train', 'concert' 等" },
+                        "start_time": { "type": "string", "description": "开始时间，格式 YYYY-MM-DD HH:MM:SS 或 YYYY-MM-DD" },
+                        "end_time": { "type": "string", "description": "结束时间" },
+                        "venue": { "type": "string", "description": "地点或路线(如 影院及影厅名、虹桥-首都)" },
+                        "seat_info": { "type": "string", "description": "座位号" },
+                        "barcode_data": { "type": "string", "description": "二维码或条形码包含的内容" },
+                        "barcode_type": { "type": "string", "description": "码的类型，如 'QR_CODE'" },
+                        "cover_image": { "type": "string", "description": "若为图片截屏提取，必须提供用户提示词中附带的[ImageLocalPath: xxx]的完整绝对路径，以便后台进行裁剪" },
+                        "cover_bbox": { 
+                            "type": "array", 
+                            "items": { "type": "integer" },
+                            "description": "如果图片中包含影片/演出的海报画面，请推断该画面在原图中的包围盒 [x, y, width, height]，以便裁剪留存" 
+                        }
+                    },
+                    "required": ["title", "category"]
+                }
+            }
+        }),
+        json!({
+            "type": "function",
+            "function": {
                 "name": "read_model_registry",
                 "description": "读取当前模型注册表，返回所有供应商及其模型列表。当你需要查看、对比或更新模型配置时调用。",
                 "parameters": {
@@ -2564,7 +2591,7 @@ fn tool_create_ticket(app: &tauri::AppHandle, args: &serde_json::Value) -> serde
     let barcode_type = args.get("barcode_type").and_then(|v| v.as_str()).unwrap_or("");
     let flight_info = args.get("flight_info").cloned().unwrap_or(serde_json::json!({}));
 
-    let metadata = serde_json::json!({
+    let mut metadata = serde_json::json!({
         "category": category,
         "venue": venue,
         "start_time": start_time,
@@ -2575,20 +2602,66 @@ fn tool_create_ticket(app: &tauri::AppHandle, args: &serde_json::Value) -> serde
         "flight_info": flight_info,
         "status": "upcoming"
     });
+    
+    // T-1802: Poster cropping fallback
+    let cover_image_path = args.get("cover_image").and_then(|v| v.as_str()).unwrap_or("");
+    if !cover_image_path.is_empty() {
+        if let Some(bbox) = args.get("cover_bbox").and_then(|v| v.as_array()) {
+            if bbox.len() >= 4 {
+                let x = bbox[0].as_f64().unwrap_or(0.0);
+                let y = bbox[1].as_f64().unwrap_or(0.0);
+                let w = bbox[2].as_f64().unwrap_or(0.0);
+                let h = bbox[3].as_f64().unwrap_or(0.0);
+                
+                if w > 0.0 && h > 0.0 {
+                    if let Ok(mut img) = image::open(cover_image_path) {
+                        use image::GenericImageView;
+                        let (img_w, img_h) = img.dimensions();
+                        let real_x = ((x / 1000.0) * img_w as f64) as u32;
+                        let real_y = ((y / 1000.0) * img_h as f64) as u32;
+                        let real_w = ((w / 1000.0) * img_w as f64) as u32;
+                        let real_h = ((h / 1000.0) * img_h as f64) as u32;
+                        
+                        let real_x = real_x.min(img_w);
+                        let real_y = real_y.min(img_h);
+                        let real_w = real_w.min(img_w - real_x);
+                        let real_h = real_h.min(img_h - real_y);
+
+                        if real_w > 0 && real_h > 0 {
+                            let cropped = image::imageops::crop(&mut img, real_x, real_y, real_w, real_h).to_image();
+                            let out_name = format!("{}-cover.jpg", ticket_id);
+                            
+                            // AppData storage
+                            let app_dir = std::env::var("APPDATA")
+                                .map(|v| std::path::PathBuf::from(v).join("bob.agent"))
+                                .unwrap_or_else(|_| std::env::temp_dir().join("bob.agent"));
+                            
+                            let cover_dir = app_dir.join("covers");
+                            let _ = std::fs::create_dir_all(&cover_dir);
+                            let out_path = cover_dir.join(&out_name);
+                            if cropped.save(&out_path).is_ok() {
+                                if let Some(m) = metadata.as_object_mut() {
+                                    m.insert("cover_image".to_string(), serde_json::json!(out_name));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     let metadata_str = metadata.to_string();
     let now = crate::now_ms();
     
-    // 日历事件参数
     let event_id = format!("evt-{}", now);
     let date = if start_time.len() >= 10 { &start_time[0..10] } else { "" };
     
-    // 开启事务
     let tx = match conn.transaction() {
         Ok(t) => t,
         Err(e) => return serde_json::json!({ "error": format!("Transaction start failed: {}", e) }),
     };
 
-    // 1. 创建知识图谱票据节点
     let res1 = tx.execute(
         "INSERT INTO kg_nodes (id, label, node_type, summary, source, metadata, updated_at)
          VALUES (?1, ?2, 'ticket', '', 'user_input', ?3, ?4)
@@ -2602,7 +2675,6 @@ fn tool_create_ticket(app: &tauri::AppHandle, args: &serde_json::Value) -> serde
         return serde_json::json!({ "error": format!("Failed to insert ticket node: {}", e) });
     }
 
-    // 2. 创建日历事件并关联 ticket_id
     let res2 = tx.execute(
         "INSERT INTO events (id, title, type, status, date, start_time, end_time, description, created_at, updated_at, linked_ticket_id)
          VALUES (?1, ?2, 'event', 'pending', ?3, ?4, ?5, '', ?6, ?6, ?7)",
@@ -2612,7 +2684,6 @@ fn tool_create_ticket(app: &tauri::AppHandle, args: &serde_json::Value) -> serde
         return serde_json::json!({ "error": format!("Failed to insert calendar event: {}", e) });
     }
 
-    // 3. 创建图谱关联边 ticket -> event
     let res3 = tx.execute(
         "INSERT INTO kg_edges (source_id, target_id, relation, confidence, created_at, updated_at)
          VALUES (?1, ?2, 'scheduled_on', 1.0, datetime('now'), ?3)
@@ -2626,7 +2697,7 @@ fn tool_create_ticket(app: &tauri::AppHandle, args: &serde_json::Value) -> serde
     if let Err(e) = tx.commit() {
         return serde_json::json!({ "error": format!("Transaction commit failed: {}", e) });
     }
-
+    
     // 通知前端日历更新
     let _ = app.emit("calendar-updated", ());
     // 通知图谱更新
@@ -2648,4 +2719,43 @@ pub fn system_create_ticket(app: tauri::AppHandle, args: serde_json::Value) -> R
     } else {
         Ok(result)
     }
+}
+
+
+#[tauri::command]
+pub fn system_save_temp_image(base64_data: String) -> Result<String, String> {
+    use base64::{engine::general_purpose, Engine as _};
+    use std::io::Write;
+    use std::path::PathBuf;
+
+    let b64 = if let Some(stripped) = base64_data.strip_prefix("data:image/") {
+        if let Some(idx) = stripped.find("base64,") {
+            &stripped[idx + 7..]
+        } else {
+            &base64_data
+        }
+    } else {
+        &base64_data
+    };
+
+    let bytes = general_purpose::STANDARD
+        .decode(b64)
+        .map_err(|e| format!("Base64 decode error: {}", e))?;
+
+    let app_dir = std::env::var("APPDATA")
+        .map(|v| PathBuf::from(v).join("bob.agent"))
+        .unwrap_or_else(|_| std::env::temp_dir().join("bob.agent"));
+    
+    let temp_dir = app_dir.join("temp_images");
+    if !temp_dir.exists() {
+        std::fs::create_dir_all(&temp_dir).map_err(|e| e.to_string())?;
+    }
+
+    let filename = format!("temp_{}.png", crate::now_ms());
+    let file_path = temp_dir.join(&filename);
+
+    let mut file = std::fs::File::create(&file_path).map_err(|e| e.to_string())?;
+    file.write_all(&bytes).map_err(|e| e.to_string())?;
+
+    Ok(file_path.to_string_lossy().to_string())
 }

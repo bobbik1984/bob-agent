@@ -50,8 +50,10 @@ pub fn system_list_events(db: tauri::State<'_, crate::db::DbState>) -> Vec<Value
     };
 
     let mut stmt = match conn.prepare(
-        "SELECT id, title, type, status, date, start_time, end_time, description, created_at, completed_at
-         FROM events ORDER BY created_at DESC"
+        "SELECT e.id, e.title, e.type, e.status, e.date, e.start_time, e.end_time, e.description, e.created_at, e.completed_at, e.linked_ticket_id, k.metadata
+         FROM events e
+         LEFT JOIN kg_nodes k ON e.linked_ticket_id = k.id
+         ORDER BY e.created_at DESC"
     ) {
         Ok(s) => s,
         Err(_) => return vec![],
@@ -69,6 +71,8 @@ pub fn system_list_events(db: tauri::State<'_, crate::db::DbState>) -> Vec<Value
             "description": row.get::<_, Option<String>>(7).unwrap_or(None),
             "created_at": row.get::<_, i64>(8)?,
             "completed_at": row.get::<_, Option<i64>>(9).unwrap_or(Some(0)).unwrap_or(0),
+            "linked_ticket_id": row.get::<_, Option<String>>(10).unwrap_or(None),
+            "ticket_metadata": row.get::<_, Option<String>>(11).unwrap_or(None),
         }))
     }) {
         Ok(r) => r,
@@ -133,11 +137,14 @@ pub fn system_confirm_event(event: Value, db: tauri::State<'_, crate::db::DbStat
         .get("description")
         .and_then(|v| v.as_str())
         .unwrap_or("");
+    let linked_ticket_id = event
+        .get("linked_ticket_id")
+        .and_then(|v| v.as_str());
 
     match conn.execute(
-        "INSERT INTO events (id, title, type, status, date, start_time, end_time, description, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-        params![id, title, etype, status, date, start_time, end_time, description, super::now_ms(), super::now_ms()],
+        "INSERT INTO events (id, title, type, status, date, start_time, end_time, description, created_at, updated_at, linked_ticket_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+        params![id, title, etype, status, date, start_time, end_time, description, super::now_ms(), super::now_ms(), linked_ticket_id],
     ) {
         Ok(_) => json!({ "ok": true, "id": id }),
         Err(e) => json!({ "ok": false, "error": format!("{}", e) }),

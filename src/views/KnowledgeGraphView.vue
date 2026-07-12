@@ -315,7 +315,7 @@
       <div v-if="ticketNodes.length === 0" class="notebook-empty-state">
         {{ $t('ticket.empty') || '票夹为空' }}
       </div>
-      <div v-else style="display:grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px; align-items: start;">
+      <div v-else style="display:grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; align-items: stretch;">
         <TicketCard v-for="node in ticketNodes" :key="node.id" :node="node" />
       </div>
     </div>
@@ -831,6 +831,11 @@ onMounted(async () => {
   
   window.addEventListener('open-ticket-view', (e) => {
     currentMode.value = 'ticket';
+    if (e.detail) {
+      setTimeout(() => {
+        window.dispatchEvent(new CustomEvent('ticket-card-open', { detail: e.detail }));
+      }, 100);
+    }
   });
 
   // Auto-refresh ticket list when a new ticket is created from chat

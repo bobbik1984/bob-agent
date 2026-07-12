@@ -2,9 +2,14 @@
   <div class="week-timeline" :class="{ 'is-mobile-view': isMobile }" @touchstart="handleTouchStart" @touchend="handleTouchEnd">
     <!-- 导航控制栏 -->
     <div class="timeline-header-row">
-      <div v-if="isMobile" class="mobile-section-title">
-        <Calendar :size="16" class="section-icon" />
-        本周日程
+      <div class="timeline-title-area">
+        <div v-if="isMobile" class="mobile-section-title">
+          <Calendar :size="16" class="section-icon" />
+          本周日程
+        </div>
+        <div class="current-month-display">
+          {{ currentMonthDisplay }}
+        </div>
       </div>
       <div class="timeline-controls">
         <button class="nav-btn" @click="weekOffset--">&lsaquo;</button>
@@ -74,8 +79,23 @@
               @dragend="onDragEnd"
               @click.stop="openDetail(event.raw)"
             >
-              <div class="event-time" v-if="event.height >= 40">{{ formatTimeRange(event.raw) }}</div>
-              <div class="event-title">{{ event.title }}</div>
+              <template v-if="getTicketInfo(event.raw)">
+                <div class="event-time" v-if="event.height >= 40">{{ formatTimeRange(event.raw) || '待确认' }}</div>
+                <div class="ticket-dense-info" :class="{ 'row-layout': event.height < 40 }">
+                  <div class="ticket-header" style="display: flex; align-items: center; gap: 4px; opacity: 0.9; font-weight: 500;">
+                    <component :is="getTicketInfo(event.raw).type === 'flight' ? Plane : Train" :size="12" class="ticket-icon" />
+                    <span class="ticket-code">{{ getTicketInfo(event.raw).code }}</span>
+                  </div>
+                  <div class="ticket-route" v-if="getTicketInfo(event.raw).origin && getTicketInfo(event.raw).dest" style="font-size: 0.95em; opacity: 0.8; margin-top: 2px;">
+                    <span v-if="event.height < 40" style="margin: 0 4px;">|</span>
+                    {{ getTicketInfo(event.raw).origin }} ➔ {{ getTicketInfo(event.raw).dest }}
+                  </div>
+                </div>
+              </template>
+              <template v-else>
+                <div class="event-time" v-if="event.height >= 40">{{ formatTimeRange(event.raw) }}</div>
+                <div class="event-title">{{ event.title }}</div>
+              </template>
               <div class="resize-handle" @mousedown.stop.prevent="startResize(event, $event)"></div>
             </div>
           </div>
@@ -100,7 +120,7 @@
           <span>{{ detailEvent.notes }}</span>
         </div>
         <div class="detail-actions" style="margin-top: 16px; display: flex; gap: 8px;">
-          <button v-if="detailEvent.linked_ticket_id" class="action-btn" @click="viewTicket(detailEvent.linked_ticket_id)" style="background-color: var(--color-success);">
+          <button v-if="detailEvent.linked_ticket_id" class="btn btn-primary" @click="viewTicket(detailEvent.linked_ticket_id)">
             {{ $t('calendar.view_ticket') || '查看凭证' }}
           </button>
           <button class="btn btn-danger" @click="handleDelete(detailEvent)">{{ $t('modal.confirm_delete') || '删除' }}</button>
@@ -134,7 +154,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, nextTick, inject, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { Calendar } from 'lucide-vue-next';
+import { Calendar, Plane, Train } from 'lucide-vue-next';
 
 const { t, tm } = useI18n();
 const isMobile = inject('isMobile');
@@ -261,14 +281,58 @@ async function handleDelete(event) {
 
 // ── 格式化辅助 ──────────────────────────────────
 function formatTimeRange(event) {
+  if (!event.start_time) return '';
   const s = new Date(event.start_time);
   const pad = (n) => String(n).padStart(2, '0');
+  // For 00:00 events without end_time, we might not want to show 00:00, but formatTimeRange handles rendering.
+  // If it's a 00:00 event with NO end time, let's just return "待定" or something?
+  // The user mentioned: 如果像 19 日那样缺失具体时间，我们应该优雅地显示为“待确认时间”或者隐藏时间
+  if (s.getHours() === 0 && s.getMinutes() === 0 && !event.end_time) {
+    return ''; // return empty so it doesn't show "00:00"
+  }
+  
   let str = `${pad(s.getHours())}:${pad(s.getMinutes())}`;
   if (event.end_time) {
     const e = new Date(event.end_time);
     str += ` - ${pad(e.getHours())}:${pad(e.getMinutes())}`;
   }
   return str;
+}
+
+function getTicketInfo(event) {
+  if (!event.linked_ticket_id || !event.ticket_metadata) return null;
+  try {
+    const meta = JSON.parse(event.ticket_metadata);
+    if (meta.category === 'flight' || meta.category === 'train') {
+      const type = meta.category;
+      const flight_info = meta.flight_info || {};
+      const train_info = meta.train_info || {};
+      
+      let code = '';
+      let origin = '';
+      let dest = '';
+      
+      if (type === 'flight') {
+        code = flight_info.flight_number || '';
+        origin = flight_info.origin || '';
+        dest = flight_info.destination || '';
+      } else if (type === 'train') {
+        code = train_info.train_number || '';
+        origin = train_info.origin || '';
+        dest = train_info.destination || '';
+      }
+      
+      return {
+        type,
+        code,
+        origin,
+        dest
+      };
+    }
+  } catch (e) {
+    console.warn("Failed to parse ticket_metadata", e);
+  }
+  return null;
 }
 
 function parseEventHours(event) {
@@ -595,6 +659,17 @@ const days = computed(() => {
   }
   return result;
 });
+
+const currentMonthDisplay = computed(() => {
+  if (days.value.length === 0) return '';
+  const midWeekDay = days.value[3];
+  if (!midWeekDay || !midWeekDay.dateStr) return '';
+  const parts = midWeekDay.dateStr.split('-');
+  if (parts.length >= 2) {
+    return `${parts[0]}年 ${parseInt(parts[1], 10)}月`;
+  }
+  return '';
+});
 </script>
 
 <style scoped>
@@ -605,15 +680,34 @@ const days = computed(() => {
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-lg);
   padding: var(--space-4);
-  height: 600px; /* 固定高度，内部滚动 */
+  height: 900px; /* 固定高度，内部滚动 */
+}
+
+.timeline-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--space-3);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.timeline-title-area {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.current-month-display {
+  font-size: 1.4em;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: 0.5px;
 }
 
 .timeline-controls {
   display: flex;
-  justify-content: flex-end;
   gap: var(--space-1);
-  margin-bottom: var(--space-3);
-  padding-bottom: var(--space-2);
 }
 
 .nav-btn {
@@ -865,6 +959,31 @@ const days = computed(() => {
   font-size: 11px;
   white-space: nowrap;
   -webkit-line-clamp: 1;
+}
+
+.ticket-dense-info {
+  display: flex;
+  flex-direction: column;
+  margin-top: 2px;
+}
+.ticket-dense-info.row-layout {
+  flex-direction: row;
+  align-items: center;
+  margin-top: 0;
+}
+.ticket-header {
+  white-space: nowrap;
+}
+.ticket-route {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ticket-code {
+  font-size: 12px;
+}
+.is-short .ticket-code {
+  font-size: 11px;
 }
 
 /* 详情弹窗 */

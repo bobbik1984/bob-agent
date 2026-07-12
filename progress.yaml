@@ -8,8 +8,18 @@ project:
   - Vue 3
   - Desktop
   - Android
-  updated: '2026-07-10'
+  updated: '2026-07-13'
 phases:
+- name: V0.6.0 日程日历基建与票夹卡片优化
+  tasks:
+  - text: 修复后台 Google Calendar 同步拉取与解析失败的问题
+    status: done
+  - text: TicketCard 非差旅票据 (电影票/演出票) UI CSS Grid 重新布局
+    status: done
+  - text: WeekTimeline 跨周翻页加入动态月份大标题，防止丢失时间上下文
+    status: done
+  - text: 静态二维码直接内置 qrcode-vue 高清渲染，摒弃图片裁剪依赖
+    status: done
 - name: V0.6.0 移动端架构与跨端同步优化
   tasks:
   - text: 移动端沙盒化技能解压架构重构
@@ -34,7 +44,7 @@ phases:
   tasks:
   - text: 前端全局开关与 UI (SettingsConnections)
     status: done
-  - text: T-2003 前端显示隧道连接状态 (🟢/🔴) 与实时延迟
+  - text: T-2003 前端显示隧道连接状态 (已连接/未连接) 与实时延迟
     status: done
   - text: Rust 后端网络层重构 (Tunnel Client & Proxy)
     status: todo

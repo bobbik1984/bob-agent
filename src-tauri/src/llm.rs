@@ -753,7 +753,12 @@ pub fn get_active_models() -> Value {
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string();
-    json!({ "main": main, "clerk": clerk })
+    let vision = config
+        .get("visionModel")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    json!({ "main": main, "clerk": clerk, "vision": vision })
 }
 
 pub fn assign_model_role(model_id: String, role: String) -> Value {
@@ -775,6 +780,8 @@ pub fn assign_model_role(model_id: String, role: String) -> Value {
             }
         } else if role == "clerk" {
             obj.insert("clerkModel".to_string(), json!(model_id));
+        } else if role == "vision" {
+            obj.insert("visionModel".to_string(), json!(model_id));
         }
     }
     super::write_config(&config);
@@ -1754,6 +1761,7 @@ pub(crate) async fn stream_internal(
     from_user: Option<String>,
     global_file_access: bool,
     agent_mode: String,
+    target_role: Option<String>,
 ) -> Value {
     // conv_id 用于标记 llm:chunk 事件属于哪个会话，防止跨会话串流
     let conv_id_for_emit = conv_id.clone().unwrap_or_default();
@@ -1768,11 +1776,23 @@ pub(crate) async fn stream_internal(
 
     // 1. 读取 LLM 配置
     let config = super::read_config();
-    let config_model_id = config
+    let mut config_model_id = config
         .get("model")
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string();
+    
+    if let Some(role) = target_role {
+        if role == "vision" {
+            if let Some(v) = config.get("visionModel").and_then(|v| v.as_str()) {
+                if !v.is_empty() { config_model_id = v.to_string(); }
+            }
+        } else if role == "clerk" {
+            if let Some(v) = config.get("clerkModel").and_then(|v| v.as_str()) {
+                if !v.is_empty() { config_model_id = v.to_string(); }
+            }
+        }
+    }
     let (provider, mut api_key, model_override, custom_base_url) =
         read_llm_config_for_model(&config_model_id);
 
@@ -2970,6 +2990,7 @@ pub async fn stream_chat(
         from_user,
         global_file_access,
         agent_mode,
+        None
     )
     .await
 }
@@ -3005,7 +3026,7 @@ pub async fn stream_vision(
             obj.insert("content".to_string(), Value::Array(content_array));
         }
     }
-    stream_internal(app, messages, conv_id, None, global_file_access, agent_mode).await
+    stream_internal(app, messages, conv_id, None, global_file_access, agent_mode, Some("vision".to_string())).await
 }
 
 // ═══════════════════════════════════════════════════════════

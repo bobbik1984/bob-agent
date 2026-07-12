@@ -403,8 +403,14 @@ pub async fn start_background_sync(app_handle: tauri::AppHandle) {
 
         let events_value = tool_list_events(&time_min, &time_max, 100).await;
 
+        if let Some(err) = events_value.get("error") {
+            log::error!("[GoogleSync] Background sync failed: {}", err);
+            continue;
+        }
+
         // 将事件写入 SQLite DB
-        if let Some(events_arr) = events_value.as_array() {
+        if let Some(events_arr) = events_value.get("ok").and_then(|v| v.as_array()) {
+            log::info!("[GoogleSync] Syncing {} events to DB", events_arr.len());
             let db_state = app_handle.state::<crate::db::DbState>();
             let conn = match db_state.0.lock() {
                 Ok(c) => c,
@@ -419,10 +425,12 @@ pub async fn start_background_sync(app_handle: tauri::AppHandle) {
                     .to_string();
                 let start_time = ev
                     .get("start")
+                    .and_then(|v| v.get("dateTime").or_else(|| v.get("date")))
                     .and_then(|v| v.as_str())
                     .map(|s| s.to_string());
                 let end_time = ev
                     .get("end")
+                    .and_then(|v| v.get("dateTime").or_else(|| v.get("date")))
                     .and_then(|v| v.as_str())
                     .map(|s| s.to_string());
                 let location = ev
@@ -439,10 +447,10 @@ pub async fn start_background_sync(app_handle: tauri::AppHandle) {
                 if event_id.is_empty() {
                     continue;
                 }
-                let local_id = format!("gcal-{}", event_id);
+                let local_id = format!("gcal_{}", event_id);
 
-                // Upsert
-                let _ = conn.execute(
+                // 插入或更新，保证幂等性
+                if let Err(err) = conn.execute(
                     "INSERT INTO events (id, title, type, status, start_time, end_time, description, created_at)
                      VALUES (?1, ?2, 'event', 'pending', ?3, ?4, ?5, ?6)
                      ON CONFLICT(id) DO UPDATE SET
@@ -451,7 +459,9 @@ pub async fn start_background_sync(app_handle: tauri::AppHandle) {
                         end_time = excluded.end_time,
                         description = excluded.description",
                     rusqlite::params![local_id, summary, start_time, end_time, location, super::now_ms()],
-                );
+                ) {
+                    log::error!("[GoogleSync] DB insert failed for {}: {}", local_id, err);
+                }
             }
         }
     }

@@ -629,6 +629,7 @@ window.appAPI = {
   kgQuery: async (term, maxHops) => invoke('kg_query', { term, maxHops }),
   kgStats: async () => invoke('kg_stats'),
   kgDeleteNode: async (nodeId) => invoke('kg_delete_node_cmd', { nodeId }),
+  kgUpdateTicket: async (nodeId, newTitle, newMetadata) => invoke('kg_update_ticket_cmd', { nodeId, newTitle, newMetadata }),
   kgBackfill: async () => invoke('kg_backfill'),
   systemRemoveSource: async (batchId) => invoke('system_remove_source', { batchId }),
 
@@ -693,6 +694,15 @@ window.appAPI = {
       await cancel();
     } catch (e) {
       console.error("cancelQrCode error:", e);
+    }
+  },
+
+  systemSaveTempImage: async (base64Data) => {
+    try {
+      return await invoke('system_save_temp_image', { base64Data });
+    } catch (err) {
+      console.error('[TauriBridge] systemSaveTempImage err:', err);
+      throw err;
     }
   },
 

@@ -105,6 +105,22 @@ pub fn delete_node(conn: &rusqlite::Connection, id: &str) -> Result<usize, Strin
         params![id],
     )
     .map_err(|e| format!("delete edges failed: {}", e))?;
+    
+    // CASCADE DELETE: Remove any calendar events linked to this ticket
+    if let Ok(mut stmt) = conn.prepare("SELECT id FROM events WHERE linked_ticket_id = ?1") {
+        if let Ok(rows) = stmt.query_map(params![id], |row| row.get::<_, String>(0)) {
+            let event_ids: Vec<String> = rows.filter_map(|r| r.ok()).collect();
+            let ts = crate::now_ms();
+            for eid in event_ids {
+                let _ = conn.execute("DELETE FROM events WHERE id = ?1", params![&eid]);
+                let _ = conn.execute(
+                    "INSERT OR REPLACE INTO sync_tombstones (table_name, record_key, deleted_at) VALUES ('events', ?1, ?2)",
+                    params![&eid, ts],
+                );
+            }
+        }
+    }
+
     let deleted = conn
         .execute("DELETE FROM kg_nodes WHERE id = ?1", params![id])
         .map_err(|e| format!("delete node failed: {}", e))?;
@@ -667,4 +683,46 @@ pub fn kg_merge_nodes(
         return Ok(json!({ "ok": false, "error": e }));
     }
     Ok(json!({ "ok": true }))
+}
+
+#[tauri::command]
+pub fn kg_update_ticket_cmd(db: State<DbState>, node_id: String, new_title: String, new_metadata: Value) -> Value {
+    let mut conn = match db.0.lock() {
+        Ok(c) => c,
+        Err(_) => return json!({"error": "DB lock failed"}),
+    };
+    
+    let metadata_str = new_metadata.to_string();
+    let now = crate::now_ms();
+    
+    let tx = match conn.transaction() {
+        Ok(t) => t,
+        Err(e) => return json!({"error": format!("Transaction failed: {}", e)}),
+    };
+    
+    let res1 = tx.execute(
+        "UPDATE kg_nodes SET label = ?1, metadata = ?2, updated_at = ?3 WHERE id = ?4",
+        rusqlite::params![new_title, metadata_str, now, node_id],
+    );
+    if let Err(e) = res1 {
+        return json!({"error": format!("Failed to update ticket node: {}", e)});
+    }
+    
+    let start_time = new_metadata.get("start_time").and_then(|v| v.as_str()).unwrap_or("");
+    let end_time = new_metadata.get("end_time").and_then(|v| v.as_str()).unwrap_or("");
+    let date = if start_time.len() >= 10 { &start_time[0..10] } else { "" };
+    
+    let res2 = tx.execute(
+        "UPDATE events SET title = ?1, date = ?2, start_time = ?3, end_time = ?4, updated_at = ?5 WHERE linked_ticket_id = ?6",
+        rusqlite::params![new_title, date, start_time, end_time, now, node_id],
+    );
+    if let Err(e) = res2 {
+        return json!({"error": format!("Failed to update event: {}", e)});
+    }
+    
+    if let Err(e) = tx.commit() {
+        return json!({"error": format!("Transaction commit failed: {}", e)});
+    }
+    
+    json!({"ok": true})
 }

@@ -406,7 +406,10 @@
     "variant_intl": "海外",
     "variant_coding": "编程",
     "billing_plan": "计费方案",
-    "region": "区域"
+    "region": "区域",
+    "vision_model": "视觉模型",
+    "assign_hint_vision": "点击下方模型将其设为「视觉」",
+    "role_vision": "视觉"
   },
   "file_card": {
     "just_now": "刚刚",

@@ -88,12 +88,22 @@
 
 ## 📅 开发日志
 
+### 2026-07-13 (今天)
+
+**主题**: 票夹卡片布局优化与日历同步基建 (Ticket & Calendar UX)
+
+**完成**:
+1. [Fix] **Google Calendar 同步鲁棒性修复** — 修复了 `start_background_sync` 在处理 `events_value` 时的序列化嵌套解析异常，确保后台拉取的 Google 日历日程能正确提取并持久化入 `events` 表。
+2. [UI] **TicketCard 非差旅票据自适应布局** — 专门为电影票、演出票等 `!isTravel` 类型的票据重新设计了 CSS Grid。将较长的“场馆”字段横向扩展 (`span 3`) 避免文字溢出，同时实现了空乘客字段的智能折叠，保留大尺寸票务标题。
+3. [UI] **日历月份指示器防迷航** — 解决了在 `WeekTimeline.vue` 连续跨周翻页时丢失月份上下文的痛点，通过提取当周中位数日期的月份，在左上角加入了全局动态大标题 (`YYYY年 M月`)。
+4. [Verify] 确认内置的 `qrcode-vue` 能完美反编译并重新渲染各类静态电影票/展会二维码。明确了 12306 动态高铁加密防伪码的技术边界，确立了“高强度加密票据只提取文字行程，隐藏静态二维码”的务实规范。
+
 ### 2026-07-11
 
 **主题**: 内网隧道延迟监测、移动端布局折叠与日历手势边界卡顿自愈
 
 **完成**:
-1. [Feature] **[T-2003] 穿墙隧道状态与延迟检测** — 新增 Tauri 后端 `check_tunnel_status` 命令；Vue 前端 (SettingsConnections) 引入 8 秒自动轮询机制，动态呈现 🟢 已连接 (xx ms) / 🔴 未连接 状态标识。
+1. [Feature] **[T-2003] 穿墙隧道状态与延迟检测** — 新增 Tauri 后端 `check_tunnel_status` 命令；Vue 前端 (SettingsConnections) 引入 8 秒自动轮询机制，动态呈现 已连接 (xx ms) / 未连接 状态标识。
 2. [Layout] **[T-2223] 移动端专属通道收纳** — 检测到移动端或窄屏环境时，自动将微信、TG、Discord 等桌面端专属通道入口收纳折叠进一个 `<details class="settings-section card">` (桌面端专属通道) 伸缩面板中，保持排版紧凑。
 3. [Fix] **[T-1801] 修复日历调整时长边界误触详情弹窗 Bug** — 在拖拽结束 (`onDragEnd`) 与缩放结束 (`onMouseUp`) 瞬间注册捕获阶段的 `click` 拦截监听，物理吞噬紧随其后的模拟 `click` 事件，并辅以 50ms 自动垃圾回收，完美解决移动端模拟时序或渲染微卡顿导致的详情修改弹窗误触。
 4. [Sync] 运行 project_aligner 统一全量进度，并将 navigator / dev_dashboard 自动强推至火山云节点部署生效。
@@ -497,7 +507,7 @@
 > 📋 **核心逻辑**: 作为全局功能开关存在。对于受限网络环境一键开启穿墙透传，而无限制网络环境继续依赖现有的直连方式，互不干扰。
 
 ### Phase 1: 前端全局开关与 UI (SettingsConnections)
-- [x] T-2003: UI 面板显示当前隧道的连接状态（🟢代理已连接 / 🔴代理断开）与实时延迟。
+- [x] T-2003: UI 面板显示当前隧道的连接状态（已连接 / 未连接）与实时延迟。
 
 ### Phase 2: Rust 后端网络层重构 (Tunnel Client & Proxy)
 - [x] T-2011: src-tauri/src/tunnel.rs 实现到 VPS 的代理通道（HTTPS 请求包伪装转发至 proxy 接口）。
@@ -588,12 +598,12 @@
 > 📖 **详细执行蓝图**: `docs/TICKET_MANAGEMENT_BLUEPRINT.md`
 
 ### Phase 1: 数据层与后端 API (Rust)
-- [ ] 扩展 `events` 表，增加 `linked_ticket_id` 指向图谱节点。
-- [ ] `kg.rs` 新增 `ticket` 节点类型，支持二维码路径、场馆、状态等结构化 metadata 存储。
+- [x] 扩展 `events` 表，增加 `linked_ticket_id` 指向图谱节点。
+- [x] `kg.rs` 新增 `ticket` 节点类型，支持二维码路径、场馆、状态等结构化 metadata 存储。
 - [ ] 新增 `create_ticket` Tool Calling 工具，一次性完成图谱节点、日程事件和关联边的原子化创建。
 
 ### Phase 2: 视图与交互融合 (Vue)
-- [ ] 开发 `TicketCard.vue`，支持机票/电影票/展会等不同 Category 的 UI 微件。
+- [x] 开发 `TicketCard.vue`，支持机票/电影票/展会等不同 Category 的 UI 微件。
 - [ ] 改造 `WeekTimeline.vue` 日程视图，增加 `[🎫 查看入场凭证]` 关联跳转按钮。
 - [ ] 改造 `KnowledgeGraphView.vue`，顶部增加 `[🎫 票夹]` 过滤视图，将所有有效票据聚合并展示二维码。
 
