@@ -3112,7 +3112,7 @@ defineExpose({
   border-radius: 12px;
 }
 .bp-modern-barcode-text {
-  font-family: monospace;
+  font-family: var(--font-sans, system-ui, sans-serif);
   font-size: 1.1em;
   letter-spacing: 2px;
   font-weight: 600;
