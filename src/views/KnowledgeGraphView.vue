@@ -102,14 +102,22 @@
       <div v-show="currentMode === 'graph'" class="kg-body">
         
         <!-- Search Overlay -->
-        <div class="kg-overlay-search">
+        <div class="kg-overlay-search" :class="{ expanded: kgSearchExpanded }">
           <div class="kg-search-box">
-            <Search :size="14" />
-            <input
-              v-model="searchTerm"
-              :placeholder="$t('kg.search_placeholder') || '搜索节点...'"
-              @keyup.enter="doSearch"
-            />
+            <button v-if="!kgSearchExpanded" class="btn-icon" style="padding: 6px;" @click="expandSearch" title="搜索">
+              <Search :size="16" />
+            </button>
+            <template v-else>
+              <Search :size="14" style="color: var(--text-muted);" />
+              <input
+                v-model="searchTerm"
+                :placeholder="$t('kg.search_placeholder') || '搜索节点...'"
+                @keyup.enter="doSearch"
+                @blur="kgSearchExpanded = false"
+                @keydown.esc="kgSearchExpanded = false"
+                ref="searchInputRef"
+              />
+            </template>
           </div>
         </div>
 
@@ -494,6 +502,14 @@ let currentNoteFrontmatter = null;
 const networkContainer = ref(null);
 const stats = ref(null);
 const searchTerm = ref('');
+const kgSearchExpanded = ref(false);
+const searchInputRef = ref(null);
+function expandSearch() {
+  kgSearchExpanded.value = true;
+  nextTick(() => {
+    if (searchInputRef.value) searchInputRef.value.focus();
+  });
+}
 const selectedNode = ref(null);
 const selectedRelations = ref([]);
 const projectIndexPath = ref(null);
@@ -1373,12 +1389,17 @@ async function removeSourceBatch(node) {
   display: flex;
   align-items: center;
   gap: 8px;
-  background: var(--bg-secondary);
-  border: none;
-  border-bottom: 1px solid var(--border-subtle);
+  background: var(--surface-glass);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
   padding: 6px 16px;
   width: 240px;
+  box-shadow: var(--shadow-sm);
+}
+.kg-overlay-search:not(.expanded) .kg-search-box {
+  width: auto;
+  padding: 4px;
 }
 
 .kg-search-box input {
@@ -1397,6 +1418,7 @@ async function removeSourceBatch(node) {
   flex-direction: column;
   align-items: flex-start;
   gap: var(--space-1);
+  padding: 4px;
 }
 
 .kg-filter-chip {
@@ -2188,6 +2210,7 @@ async function removeSourceBatch(node) {
   bottom: calc(80px + env(safe-area-inset-bottom, 20px)) !important;
   max-height: 40vh;
   overflow-y: auto;
+  padding-bottom: 12px;
 }
 
 .kg-mobile-col .kg-overlay-search {
