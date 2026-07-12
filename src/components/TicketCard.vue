@@ -70,7 +70,9 @@
         </div>
 
         <div class="bp-modern-actions">
-          <button class="bp-modern-btn bp-modern-btn-danger" @click="deleteTicket">删除</button>
+          <button class="bp-modern-btn bp-modern-btn-danger" @click="deleteTicket" title="删除">
+            <Trash2 style="width:16px;height:16px;" />
+          </button>
           <button class="bp-modern-btn bp-modern-btn-dismiss" @click="showDetail = false">关闭</button>
         </div>
       </div>
@@ -80,7 +82,7 @@
 
 <script setup>
 import { computed, ref } from 'vue';
-import { Plane, Film, Ticket, Calendar, Train, ArrowRight, CreditCard, Music, ChevronDown } from 'lucide-vue-next';
+import { Plane, Film, Ticket, Calendar, Train, ArrowRight, CreditCard, Music, ChevronDown, Trash2 } from 'lucide-vue-next';
 import QrcodeVue from 'qrcode.vue';
 import { useI18n } from 'vue-i18n';
 
@@ -299,7 +301,7 @@ function formatTimeOnly(dtStr) {
   font-weight: 500;
   opacity: 0.7;
   margin-bottom: 8px;
-  justify-content: flex-end;
+  justify-content: flex-start;
 }
 .bp-modern-icon {
   display: flex;
@@ -309,7 +311,8 @@ function formatTimeOnly(dtStr) {
   display: flex;
   align-items: baseline;
   gap: 12px;
-  margin-bottom: 4px;
+  margin-top: 4px;
+  margin-bottom: 24px; /* Space for future terminal info */
 }
 .bp-airport-code {
   font-size: 1.6em;
@@ -336,8 +339,8 @@ function formatTimeOnly(dtStr) {
   letter-spacing: 0.3px;
 }
 .bp-modern-value {
-  font-size: 1.05em;
-  font-weight: 600;
+  font-size: 1.25em;
+  font-weight: 700;
 }
 .bp-modern-divider {
   height: 1px;
@@ -380,6 +383,10 @@ function formatTimeOnly(dtStr) {
 .bp-modern-btn-danger {
   background: var(--color-error, #f44336);
   color: #ffffff;
-  flex: 0.5;
+  flex: none;
+  width: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 </style>
