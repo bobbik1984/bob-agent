@@ -39,11 +39,15 @@
           </div>
           <div class="bp-modern-field" v-if="metadata.flight_info?.flight_number">
             <div class="bp-modern-label">Flight</div>
-            <div class="bp-modern-value">{{ metadata.flight_info.carrier }} {{ metadata.flight_info.flight_number }}</div>
+            <div class="bp-modern-value">{{ metadata.flight_info.flight_number }}</div>
           </div>
           <div class="bp-modern-field" v-if="metadata.start_time">
             <div class="bp-modern-label">Date</div>
             <div class="bp-modern-value">{{ metadata.start_time.split(' ')[0] }}</div>
+          </div>
+          <div class="bp-modern-field" v-if="metadata.start_time && metadata.start_time.includes(' ') && metadata.start_time.split(' ')[1] !== '00:00:00'">
+            <div class="bp-modern-label">Time</div>
+            <div class="bp-modern-value">{{ formatTimeOnly(metadata.start_time) }}</div>
           </div>
           <div class="bp-modern-field" v-if="seatLabel">
             <div class="bp-modern-label">Seat</div>
