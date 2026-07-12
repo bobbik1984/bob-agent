@@ -579,16 +579,30 @@ const ticketNodes = computed(() => {
   return allGraphData.value.nodes
     .filter(n => n.node_type === 'ticket' || n.type === 'ticket' || n.type === 'Ticket')
     .sort((a,b) => {
-      // sort by start_time descending if available
       let aMeta = {};
       let bMeta = {};
       try { aMeta = typeof a.metadata === 'string' && a.metadata ? JSON.parse(a.metadata) : (a.metadata || {}); } catch(e) {}
       try { bMeta = typeof b.metadata === 'string' && b.metadata ? JSON.parse(b.metadata) : (b.metadata || {}); } catch(e) {}
       
-      if (aMeta.start_time && bMeta.start_time) {
-        return new Date(bMeta.start_time) - new Date(aMeta.start_time);
+      const now = new Date();
+      const dateA = aMeta.start_time ? new Date(aMeta.start_time) : null;
+      const dateB = bMeta.start_time ? new Date(bMeta.start_time) : null;
+      
+      if (!dateA && !dateB) return 0;
+      if (!dateA) return 1;
+      if (!dateB) return -1;
+      
+      const isAExpired = dateA < now;
+      const isBExpired = dateB < now;
+      
+      if (!isAExpired && isBExpired) return -1;
+      if (isAExpired && !isBExpired) return 1;
+      
+      if (!isAExpired && !isBExpired) {
+        return dateA - dateB; // Upcoming: closer to today first (ascending)
       }
-      return 0;
+      
+      return dateB - dateA; // Expired: closer to today first (descending)
     });
 });
 
