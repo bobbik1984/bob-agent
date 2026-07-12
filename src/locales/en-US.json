@@ -600,11 +600,17 @@
   "ticket": {
     "status_expired": "Expired",
     "status_upcoming": "Upcoming",
-    "seat": "Seat/Gate",
+    "seat": "Seat",
     "carrier": "Carrier/Host",
     "view": "View Tickets",
     "my_tickets": "Tickets",
-    "empty": "No tickets yet"
+    "empty": "No tickets yet",
+    "passenger": "Passenger",
+    "flight": "Flight",
+    "date": "Date",
+    "time": "Time",
+    "pnr": "PNR",
+    "venue": "Venue"
   },
   "calendar": {
     "view_ticket": "View Ticket",

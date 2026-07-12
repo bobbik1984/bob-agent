@@ -600,11 +600,17 @@
   "ticket": {
     "status_expired": "已过期",
     "status_upcoming": "待参与",
-    "seat": "座位/入口",
+    "seat": "座位",
     "carrier": "承运/主办",
     "view": "查看票夹",
     "my_tickets": "票据",
-    "empty": "票夹为空"
+    "empty": "票夹为空",
+    "passenger": "乘客",
+    "flight": "航班",
+    "date": "日期",
+    "time": "时间",
+    "pnr": "PNR",
+    "venue": "场馆"
   },
   "calendar": {
     "view_ticket": "查看凭证",

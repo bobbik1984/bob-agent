@@ -34,31 +34,27 @@
 
         <div class="bp-detail-grid">
           <div class="bp-modern-field" v-if="metadata.flight_info?.passenger_name || metadata.passenger_name">
-            <div class="bp-modern-label">Passenger</div>
+            <div class="bp-modern-label">{{ $t('ticket.passenger') || 'Passenger' }}</div>
             <div class="bp-modern-value">{{ metadata.flight_info?.passenger_name || metadata.passenger_name }}</div>
           </div>
           <div class="bp-modern-field" v-if="metadata.flight_info?.flight_number">
-            <div class="bp-modern-label">Flight</div>
+            <div class="bp-modern-label">{{ $t('ticket.flight') || 'Flight' }}</div>
             <div class="bp-modern-value">{{ metadata.flight_info.flight_number }}</div>
           </div>
           <div class="bp-modern-field" v-if="metadata.start_time">
-            <div class="bp-modern-label">Date</div>
-            <div class="bp-modern-value">{{ metadata.start_time.split(' ')[0] }}</div>
-          </div>
-          <div class="bp-modern-field" v-if="metadata.start_time && metadata.start_time.includes(' ') && metadata.start_time.split(' ')[1] !== '00:00:00'">
-            <div class="bp-modern-label">Time</div>
-            <div class="bp-modern-value">{{ formatTimeOnly(metadata.start_time) }}</div>
+            <div class="bp-modern-label">{{ $t('ticket.time') || 'Time' }}</div>
+            <div class="bp-modern-value">{{ formatDateTime(metadata.start_time) }}</div>
           </div>
           <div class="bp-modern-field" v-if="seatLabel">
-            <div class="bp-modern-label">Seat</div>
+            <div class="bp-modern-label">{{ $t('ticket.seat') || 'Seat' }}</div>
             <div class="bp-modern-value">{{ seatLabel }}</div>
           </div>
           <div class="bp-modern-field" v-if="metadata.flight_info?.pnr">
-            <div class="bp-modern-label">PNR</div>
+            <div class="bp-modern-label">{{ $t('ticket.pnr') || 'PNR' }}</div>
             <div class="bp-modern-value">{{ metadata.flight_info.pnr }}</div>
           </div>
           <div class="bp-modern-field" v-if="metadata.venue && !isTravel">
-            <div class="bp-modern-label">Venue</div>
+            <div class="bp-modern-label">{{ $t('ticket.venue') || 'Venue' }}</div>
             <div class="bp-modern-value">{{ metadata.venue }}</div>
           </div>
         </div>
@@ -182,14 +178,23 @@ const hasSubInfo = computed(() => {
   return seatLabel.value || metadata.value.flight_info?.carrier || metadata.value.flight_info?.pnr;
 });
 
-function formatTimeOnly(dtStr) {
-  if (!dtStr) return '';
-  const parts = dtStr.split(' ');
-  if (parts.length > 1) {
-    return parts[1].substring(0, 5); // HH:MM
+const formatDateTime = (timeStr) => {
+  if (!timeStr) return '';
+  const parts = timeStr.split(' ');
+  if (parts.length > 1 && parts[1] !== '00:00:00') {
+    return `${parts[0]} ${parts[1].substring(0, 5)}`;
   }
-  return dtStr;
-}
+  return parts[0];
+};
+
+const formatTimeOnly = (timeStr) => {
+  if (!timeStr) return '';
+  const parts = timeStr.split(' ');
+  if (parts.length > 1) {
+    return parts[1].substring(0, 5);
+  }
+  return '';
+};
 </script>
 
 <style scoped>
@@ -312,7 +317,7 @@ function formatTimeOnly(dtStr) {
   align-items: baseline;
   gap: 12px;
   margin-top: 4px;
-  margin-bottom: 24px; /* Space for future terminal info */
+  margin-bottom: 24px;
 }
 .bp-airport-code {
   font-size: 1.6em;
@@ -324,14 +329,21 @@ function formatTimeOnly(dtStr) {
   opacity: 0.5;
 }
 .bp-detail-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
-  gap: 12px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 .bp-modern-field {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: baseline;
+  border-bottom: 1px dashed var(--border-subtle);
+  padding-bottom: 8px;
+}
+.bp-modern-field:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
 }
 .bp-modern-label {
   font-size: 0.7em;
