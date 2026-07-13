@@ -2663,8 +2663,8 @@ fn tool_create_ticket(app: &tauri::AppHandle, args: &serde_json::Value) -> serde
     };
 
     let res1 = tx.execute(
-        "INSERT INTO kg_nodes (id, label, node_type, summary, source, metadata, updated_at)
-         VALUES (?1, ?2, 'ticket', '', 'user_input', ?3, ?4)
+        "INSERT INTO kg_nodes (id, label, node_type, summary, source, metadata, created_at, updated_at)
+         VALUES (?1, ?2, 'ticket', '', 'user_input', ?3, ?4, ?4)
          ON CONFLICT(id) DO UPDATE SET
             label = ?2,
             metadata = ?3,

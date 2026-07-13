@@ -721,6 +721,35 @@ async fn handle_sync_skills_download(
     }
 }
 
+async fn handle_sync_notes_download(
+    axum::extract::State(state): axum::extract::State<ApiState>,
+    axum::extract::ConnectInfo(addr): axum::extract::ConnectInfo<std::net::SocketAddr>,
+    headers: axum::http::HeaderMap,
+) -> impl IntoResponse {
+    crate::sync_engine::register_device(&state.app, &headers, addr);
+    
+    let notes_dir = crate::get_data_dir().join("notebook").join("notes");
+    
+    if !notes_dir.exists() {
+        return (axum::http::StatusCode::NOT_FOUND, "Notes directory not found".to_string()).into_response();
+    }
+    
+    match crate::skills_sync::pack_skills(&notes_dir) {
+        Ok(bytes) => {
+            let mut res = axum::response::Response::new(axum::body::Body::from(bytes));
+            res.headers_mut().insert(
+                axum::http::header::CONTENT_TYPE,
+                axum::http::HeaderValue::from_static("application/zip"),
+            );
+            res
+        },
+        Err(e) => {
+            log::error!("[http_api] Failed to pack notes: {}", e);
+            (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "Failed to pack notes".to_string()).into_response()
+        }
+    }
+}
+
 async fn handle_sync_push(
     axum::extract::State(state): axum::extract::State<ApiState>,
     axum::extract::ConnectInfo(addr): axum::extract::ConnectInfo<std::net::SocketAddr>,
@@ -818,6 +847,7 @@ pub fn start_http_server(app: AppHandle) {
         .route("/v1/sync", get(handle_sync_ws))
         .route("/v1/sync/pull", get(handle_sync_pull))
         .route("/v1/sync/skills/download", get(handle_sync_skills_download))
+        .route("/v1/sync/notes/download", get(handle_sync_notes_download))
         .route("/v1/sync/push", post(handle_sync_push))
         .route("/v1/sync/push_db", post(handle_sync_push_db))
         .with_state(public_state);

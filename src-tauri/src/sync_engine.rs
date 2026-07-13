@@ -304,8 +304,8 @@ pub fn export_sync_data(app: &AppHandle, since_ts: i64) -> Result<SyncData, Stri
         &["id", "title", "model", "cost", "last_message", "last_role", "created_at", "updated_at"]).unwrap_or_default();
     let messages = extract("SELECT id, conversation_id, role, content, image_base64, created_at, from_channel, sync_id FROM messages WHERE created_at >= ?1", &[&since_ts], 
         &["id", "conversation_id", "role", "content", "image_base64", "created_at", "from_channel", "sync_id"]).unwrap_or_default();
-    let events = extract("SELECT id, title, type, status, date, start_time, end_time, description, created_at, updated_at FROM events WHERE updated_at >= ?1", &[&since_ts], 
-        &["id", "title", "type", "status", "date", "start_time", "end_time", "description", "created_at", "updated_at"]).unwrap_or_default();
+    let events = extract("SELECT id, title, type, status, date, start_time, end_time, description, created_at, updated_at, linked_ticket_id FROM events WHERE updated_at >= ?1", &[&since_ts], 
+        &["id", "title", "type", "status", "date", "start_time", "end_time", "description", "created_at", "updated_at", "linked_ticket_id"]).unwrap_or_default();
     let cron_jobs = extract("SELECT id, title, cron_expr, prompt_template, enabled, last_run, created_at, updated_at FROM cron_jobs WHERE updated_at >= ?1", &[&since_ts], 
         &["id", "title", "cron_expr", "prompt_template", "enabled", "last_run", "created_at", "updated_at"]).unwrap_or_default();
     let kg_nodes = extract("SELECT id, label, node_type, summary, source, metadata, created_at, updated_at FROM kg_nodes WHERE updated_at >= ?1", &[&since_ts], 
@@ -481,7 +481,7 @@ pub fn import_sync_data(app: &AppHandle, data: SyncData, last_sync_ts: i64) -> R
 
     import_replace("settings", data.settings, &["key", "value"]);
     import_lww("conversations", data.conversations, &["id", "title", "model", "cost", "last_message", "last_role", "created_at", "updated_at"]);
-    import_lww("events", data.events, &["id", "title", "type", "status", "date", "start_time", "end_time", "description", "created_at", "updated_at"]);
+    import_lww("events", data.events, &["id", "title", "type", "status", "date", "start_time", "end_time", "description", "created_at", "updated_at", "linked_ticket_id"]);
     import_replace("cron_jobs", data.cron_jobs, &["id", "title", "cron_expr", "prompt_template", "enabled", "last_run", "created_at", "updated_at"]);
     import_replace("kg_nodes", data.kg_nodes, &["id", "label", "node_type", "summary", "source", "metadata", "created_at", "updated_at"]);
     import_replace("kg_edges", data.kg_edges, &["source_id", "target_id", "relation", "confidence", "created_at", "updated_at"]);
@@ -555,6 +555,19 @@ async fn do_active_sync(app: AppHandle, payload: SyncCommandPayload) -> Result<(
                                             let ext_dir = crate::get_external_skills_dir_or_default(&config);
                                             let _ = crate::skills_sync::unpack_skills(&bytes, &ext_dir);
                                             info!("[Sync Engine] Successfully pulled and unpacked skills");
+                                        }
+                                    }
+                                }
+
+                                // Also pull notes zip
+                                let notes_url = format!("{}/v1/sync/notes/download", base_url);
+                                let _ = app.emit("sync:progress", serde_json::json!({"stage": "notes_sync", "status": "running"}));
+                                if let Ok(n_resp) = client.get(&notes_url).header("X-Device-Id", &my_device_id).header("X-Device-Name", &my_device_name).send().await {
+                                    if n_resp.status().is_success() {
+                                        if let Ok(bytes) = n_resp.bytes().await {
+                                            let notes_dir = crate::get_data_dir().join("notebook").join("notes");
+                                            let _ = crate::skills_sync::unpack_skills(&bytes, &notes_dir);
+                                            info!("[Sync Engine] Successfully pulled and unpacked notes");
                                         }
                                     }
                                 }
