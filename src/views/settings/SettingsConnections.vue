@@ -1,7 +1,7 @@
-﻿<template>
+<template>
 
 
-  <!-- 馃摫 閫氳娓犻亾 (Communication Channels) -->
+  <!-- 📱 通讯渠道 (Communication Channels) -->
   <section class="settings-section card">
     <h3 class="section-title">
       <Smartphone :size="16" class="section-icon" />
@@ -9,7 +9,7 @@
     </h3>
     
     <div class="service-cards-grid">
-      <!-- 馃攧 澶氱鍚屾 (P2P Sync) -->
+      <!-- 🔄 多端同步 (P2P Sync) -->
       <div class="service-card static-card" >
         <div class="service-card-header">
           <div class="service-icon" :style="{ background: isUnlocked ? 'rgba(var(--user-accent-rgb, 39,118,187), 0.1)' : 'var(--bg-tertiary)', color: isUnlocked ? 'var(--user-accent)' : 'var(--text-muted)' }">
@@ -18,13 +18,13 @@
           <div class="service-info">
             <span class="service-name">{{ $t('settings.p2p_pairing') }}</span>
             <span class="service-sub" style="display: flex; gap: 8px; align-items: center;">{{ !isUnlocked ? $t('settings.p2p_auth_desc_new') : $t('settings.p2p_pairing_desc') }}
-              <span v-if="lastSyncTime" style="font-size: 10px; padding: 2px 6px; background: var(--bg-tertiary); border-radius: 4px; color: var(--text-secondary);">鏈€鍚庡悓姝? {{ formatSyncTime(lastSyncTime) }}</span></span>
+              <span v-if="lastSyncTime" style="font-size: 10px; padding: 2px 6px; background: var(--bg-tertiary); border-radius: 4px; color: var(--text-secondary);">最后同步: {{ formatSyncTime(lastSyncTime) }}</span></span>
           </div>
                     <div style="display: flex; align-items: center; gap: 8px;">
             <button 
               class="device-indicator-btn"
               @click.stop="openSyncLogs" 
-              title="鏌ョ湅鍚屾鏃ュ織"
+              title="查看同步日志"
             >
               <Info :size="12" />
             </button>
@@ -43,8 +43,8 @@
         <div class="service-card-footer">
           <div v-if="!isUnlocked" style="display: flex; gap: 8px; width: 100%;">
             <template v-if="isNativeMobile">
-              <button class="btn btn-primary-outline btn-sm" style="flex: 1; justify-content: center;" @click="handleMobileScan" title="鎵爜閰嶅">
-                <Scan :size="13" style="margin-right: 6px;" /> 鎵爜閰嶅
+              <button class="btn btn-primary-outline btn-sm" style="flex: 1; justify-content: center;" @click="handleMobileScan" title="扫码配对">
+                <Scan :size="13" style="margin-right: 6px;" /> 扫码配对
               </button>
             
     
@@ -55,24 +55,24 @@
 </template>
             <template v-else>
               <input v-model="pinInput" type="password" class="input" maxlength="6" placeholder="PIN" style="flex: 1; min-width: 0; height: 28px; padding: 4px 8px; font-size: 12px; border-radius: var(--radius-sm);" @keyup.enter="handlePinSubmit" />
-              <button class="btn btn-primary-outline btn-sm" style="padding: 0 10px; flex-shrink: 0; height: 28px;" :disabled="pinInput.length < 4" @click="handlePinSubmit" :title="isInitialized ? $t('settings.p2p_btn_unlock') : '璁剧疆 PIN 鐮?">
+              <button class="btn btn-primary-outline btn-sm" style="padding: 0 10px; flex-shrink: 0; height: 28px;" :disabled="pinInput.length < 4" @click="handlePinSubmit" :title="isInitialized ? $t('settings.p2p_btn_unlock') : '设置 PIN 码'">
                 <Lock v-if="isInitialized" :size="13" />
                 <Check v-else :size="13" />
               </button>
-              <button class="btn btn-ghost btn-sm" style="padding: 0 8px; flex-shrink: 0; height: 28px; opacity: 0.5; cursor: not-allowed;" disabled title="瑙ｉ攣鍚庢煡鐪嬩簩缁寸爜">
+              <button class="btn btn-ghost btn-sm" style="padding: 0 8px; flex-shrink: 0; height: 28px; opacity: 0.5; cursor: not-allowed;" disabled title="解锁后查看二维码">
                 <QrCode :size="13" />
               </button>
             </template>
           </div>
           <div v-else style="display: flex; gap: 8px; width: 100%;">
             <template v-if="isNativeMobile">
-              <button class="btn btn-primary-outline btn-sm" style="flex: 1; justify-content: center;" @click="handleMobileScan" title="閲嶆柊鎵爜閰嶅">
-                <Scan :size="13" style="margin-right: 6px;" /> 閲嶆柊鎵爜
+              <button class="btn btn-primary-outline btn-sm" style="flex: 1; justify-content: center;" @click="handleMobileScan" title="重新扫码配对">
+                <Scan :size="13" style="margin-right: 6px;" /> 重新扫码
               </button>
             </template>
             <template v-else>
               <button class="btn btn-primary-outline btn-sm" style="flex: 1; justify-content: center; height: 28px;" @click="showP2pModal = true">
-                <QrCode :size="13" style="margin-right: 6px;" /> 閰嶅浜岀淮鐮?
+                <QrCode :size="13" style="margin-right: 6px;" /> 配对二维码
               </button>
             </template>
             <button class="btn btn-danger-outline btn-sm" style="padding: 5px 8px; height: 28px; flex-shrink: 0;" @click="handleReset" :title="$t('settings.p2p_btn_destroy')">
@@ -144,7 +144,7 @@
 
         <div class="service-card-footer">
           <button v-if="tgToken" class="btn btn-danger-outline btn-sm" @click="mobileChannel = mobileChannel === 'telegram' ? '' : 'telegram'">
-            <Unlink :size="13" /> 淇敼 Token
+            <Unlink :size="13" /> 修改 Token
           </button>
           <button v-else class="btn btn-primary-outline btn-sm" @click="mobileChannel = mobileChannel === 'telegram' ? '' : 'telegram'">
             <KeyRound :size="13" /> {{ $t('settings.conn_connect') }}
@@ -187,7 +187,7 @@
 
         <div class="service-card-footer">
           <button v-if="discordToken" class="btn btn-danger-outline btn-sm" @click="mobileChannel = mobileChannel === 'discord' ? '' : 'discord'">
-            <Unlink :size="13" /> 淇敼 Token
+            <Unlink :size="13" /> 修改 Token
           </button>
           <button v-else class="btn btn-primary-outline btn-sm" @click="mobileChannel = mobileChannel === 'discord' ? '' : 'discord'">
             <KeyRound :size="13" /> {{ $t('settings.conn_connect') }}
@@ -197,12 +197,12 @@
     </div>
   </section>
 
-  <!-- 馃枼锔?妗岄潰绔笓灞為€氶亾 (Desktop Channels - Folded on Mobile) -->
+  <!-- 🖥️ 桌面端专属通道 (Desktop Channels - Folded on Mobile) -->
   <details v-if="hideDesktopChannels" class="settings-section card custom-model-override" style="margin-top: 16px;">
     <summary class="section-title">
       <div style="display: flex; align-items: center; gap: 8px;">
         <Monitor :size="16" class="section-icon" style="opacity: 0.6;" />
-        <span>{{ $t('settings.desktop_channels_title', '妗岄潰绔笓灞為€氶亾') }}</span>
+        <span>{{ $t('settings.desktop_channels_title', '桌面端专属通道') }}</span>
       </div>
       <ChevronDown :size="16" class="details-chevron" />
     </summary>
@@ -270,7 +270,7 @@
 
         <div class="service-card-footer">
           <button v-if="tgToken" class="btn btn-danger-outline btn-sm" @click="mobileChannel = mobileChannel === 'telegram' ? '' : 'telegram'">
-            <Unlink :size="13" /> 淇敼 Token
+            <Unlink :size="13" /> 修改 Token
           </button>
           <button v-else class="btn btn-primary-outline btn-sm" @click="mobileChannel = mobileChannel === 'telegram' ? '' : 'telegram'">
             <KeyRound :size="13" /> {{ $t('settings.conn_connect') }}
@@ -313,7 +313,7 @@
 
         <div class="service-card-footer">
           <button v-if="discordToken" class="btn btn-danger-outline btn-sm" @click="mobileChannel = mobileChannel === 'discord' ? '' : 'discord'">
-            <Unlink :size="13" /> 淇敼 Token
+            <Unlink :size="13" /> 修改 Token
           </button>
           <button v-else class="btn btn-primary-outline btn-sm" @click="mobileChannel = mobileChannel === 'discord' ? '' : 'discord'">
             <KeyRound :size="13" /> {{ $t('settings.conn_connect') }}
@@ -323,7 +323,7 @@
     </div>
   </details>
 
-  <!-- 馃殗 鍐呯綉绌垮闅ч亾 (Network Proxy) -->
+  <!-- 🚇 内网穿墙隧道 (Network Proxy) -->
   <section class="settings-section card">
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
       <h3 class="section-title" style="margin-bottom: 0;">
@@ -331,10 +331,10 @@
         {{ $t('settings.proxy_tunnel_name') }}
       </h3>
       
-      <!-- 杩愯鐘舵€佷笌寤惰繜鏄剧ず -->
+      <!-- 运行状态与延迟显示 -->
       <div v-if="proxyTunnelEnabled" style="display: flex; align-items: center; gap: 8px; margin-right: auto; margin-left: 16px; font-size: 0.85em; color: var(--text-secondary);">
         <span class="service-status-dot" :class="tunnelStatus.connected ? 'dot-connected' : 'dot-disconnected'"></span>
-        <span>{{ tunnelStatus.connected ? `宸茶繛鎺?(${tunnelStatus.latency}ms)` : '宸叉柇寮€' }}</span>
+        <span>{{ tunnelStatus.connected ? `已连接 (${tunnelStatus.latency}ms)` : '已断开' }}</span>
       </div>
 
       <label class="mcp-switch">
@@ -347,7 +347,7 @@
     </div>
   </section>
 
-  <!-- 馃彚 鍔炲叕鏈嶅姟 (Office Services) -->
+  <!-- 🏢 办公服务 (Office Services) -->
   <section class="settings-section card">
     <h3 class="section-title">
       <Building2 :size="16" class="section-icon" />
@@ -355,7 +355,7 @@
     </h3>
 
     <div class="service-cards-grid">
-      <!-- 椋炰功 (Feishu / Lark) -->
+      <!-- 飞书 (Feishu / Lark) -->
       <div class="service-card static-card" :class="{ connected: isConnected('lark') }">
         <div class="service-card-header">
           <div class="service-icon lark-icon">
@@ -368,7 +368,7 @@
           <span class="service-status-dot" :class="isConnected('lark') ? 'dot-connected' : 'dot-disconnected'"></span>
         </div>
 
-        <!-- 椋炰功鍑瘉琛ㄥ崟 (鍐呰仈灞曞紑) -->
+        <!-- 飞书凭证表单 (内联展开) -->
         <Transition name="slide-fade">
           <div v-if="showLarkForm" class="lark-credential-form">
             <div class="form-group" style="margin-bottom: 10px;">
@@ -377,7 +377,7 @@
             </div>
             <div class="form-group" style="margin-bottom: 10px;">
               <label class="form-label">{{ $t('settings.conn_lark_app_secret') }}</label>
-              <input v-model="larkCreds.app_secret" type="password" class="input" placeholder="鈥⑩€⑩€⑩€⑩€⑩€⑩€⑩€⑩€⑩€⑩€⑩€⑩€⑩€⑩€⑩€? />
+              <input v-model="larkCreds.app_secret" type="password" class="input" placeholder="••••••••••••••••" />
             </div>
             <div style="display: flex; gap: 8px;">
               <button
@@ -452,7 +452,7 @@
     </div>
   </section>
 
-  <!-- 馃敡 鑷畾涔?MCP 鎵╁睍 (Custom MCP Extensions) -->
+  <!-- 🔧 自定义 MCP 扩展 (Custom MCP Extensions) -->
   <section class="settings-section card">
     <h3 class="section-title">
       <Unplug :size="16" class="section-icon" />
@@ -460,7 +460,7 @@
     </h3>
 
     <div class="service-cards-grid">
-      <!-- 宸查厤缃殑 MCP Servers -->
+      <!-- 已配置的 MCP Servers -->
       <div
         v-for="(cfg, name) in mcpServers"
         :key="name"
@@ -478,7 +478,7 @@
               {{ name.toLowerCase().includes('google') || name.toLowerCase().includes('outlook') ? $t('settings.mcp_preset') : $t('settings.mcp_custom') }}
             </span>
           </div>
-          <label class="mcp-switch" title="鏂紑杩炴帴">
+          <label class="mcp-switch" title="断开连接">
             <input type="checkbox" checked @change="removeMcpServer(name)" />
             <span class="mcp-slider"></span>
           </label>
@@ -498,14 +498,14 @@
             <span class="service-name" style="color: var(--text-secondary);">Outlook 365</span>
             <span class="service-sub" style="display: flex; gap: 8px; align-items: center;">{{ $t('settings.conn_quick_connect') }}</span>
           </div>
-          <label class="mcp-switch" title="鎺ュ叆鏈嶅姟" @click.prevent>
+          <label class="mcp-switch" title="接入服务" @click.prevent>
             <input type="checkbox" :checked="false" />
             <span class="mcp-slider"></span>
           </label>
         </div>
       </div>
 
-      <!-- 娣诲姞鑷畾涔?MCP Server 鍗＄墖 -->
+      <!-- 添加自定义 MCP Server 卡片 -->
       <div v-if="!showAddMcp" class="service-card preset-card" @click="showAddMcp = true">
         <div class="service-card-header" style="margin-bottom: 0;">
           <div class="service-icon" style="background: transparent; color: var(--text-tertiary);">
@@ -518,12 +518,12 @@
         </div>
       </div>
       
-      <!-- 娣诲姞琛ㄥ崟鍗＄墖 -->
+      <!-- 添加表单卡片 -->
       <div v-else class="service-card active" style="grid-column: 1 / -1;">
         <div class="service-card-body" style="padding: 12px; margin-top: 0; display: flex; flex-direction: column; gap: 8px;">
           <div class="form-group" style="margin: 0;">
             <label class="form-label" style="font-size: 0.8em; margin-bottom: 4px;">{{ $t('settings.mcp_name') }}</label>
-            <input v-model="newMcp.name" class="input" placeholder="渚嬪 filesystem" style="padding: 4px 8px; font-size: 0.85em;" />
+            <input v-model="newMcp.name" class="input" placeholder="例如 filesystem" style="padding: 4px 8px; font-size: 0.85em;" />
           </div>
           <div class="form-group" style="margin: 0;">
             <label class="form-label" style="font-size: 0.8em; margin-bottom: 4px;">{{ $t('settings.mcp_command') }}</label>
@@ -567,20 +567,20 @@
     </div>
   </section>
 
-  <!-- P2P 閰嶅浜岀淮鐮佸脊绐?-->
+  <!-- P2P 配对二维码弹窗 -->
   <Transition name="briefing-fade">
     <div v-if="showP2pModal" class="wechat-modal-overlay">
       <div class="morning-briefing wechat-qr-modal" style="width: 460px;">
         <div class="briefing-header">
           <div class="briefing-icon"><Smartphone :size="18" /></div>
           <div class="briefing-title" style="flex: 1; font-size: 14px; font-weight: 600; color: var(--text-primary);">{{ $t('settings.p2p_pairing') }}</div>
-          <button class="briefing-close" @click="showP2pModal = false" title="鍏抽棴" style="background: none; border: none; color: var(--text-tertiary); cursor: pointer; padding: 4px; border-radius: 4px; display: flex; align-items: center; justify-content: center;">
+          <button class="briefing-close" @click="showP2pModal = false" title="关闭" style="background: none; border: none; color: var(--text-tertiary); cursor: pointer; padding: 4px; border-radius: 4px; display: flex; align-items: center; justify-content: center;">
             <X :size="14" />
           </button>
         </div>
         <div class="briefing-body" style="padding: 24px; display: flex; flex-direction: column;">
           <div style="display: flex; gap: 32px; align-items: stretch;">
-            <!-- 宸︿晶璁惧淇℃伅 -->
+            <!-- 左侧设备信息 -->
             <div style="flex: 1; display: flex; flex-direction: column; gap: 12px; justify-content: center;">
               <div class="form-group" style="margin-bottom: 0;">
                 <label class="form-label" style="font-size: 0.8em;">{{ $t('settings.p2p_pc_device_id') }}</label>
@@ -604,13 +604,13 @@
               </div>
             </div>
             
-            <!-- 鍙充晶浜岀淮鐮佹垨鎴愬姛鐘舵€?-->
+            <!-- 右侧二维码或成功状态 -->
             <div style="width: 160px; display: flex; flex-direction: column; align-items: center; justify-content: center; background: white; padding: 12px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
               <div v-if="pairingSuccessInfo" style="display: flex; flex-direction: column; align-items: center; justify-content: center; width: 136px; height: 136px; background: #e8f5e9; border-radius: 8px;">
                 <div style="background: var(--color-success); border-radius: 50%; width: 48px; height: 48px; display: flex; align-items: center; justify-content: center; margin-bottom: 12px;">
                   <Check style="color: white;" :size="24" />
                 </div>
-                <span style="color: var(--text-primary); font-size: 13px; font-weight: 600; text-align: center; line-height: 1.3;">宸茶繛鎺?br/><span style="color: var(--text-secondary); font-size: 11px;">{{ pairingSuccessInfo.device_id.substring(0,8) }}...</span></span>
+                <span style="color: var(--text-primary); font-size: 13px; font-weight: 600; text-align: center; line-height: 1.3;">已连接<br/><span style="color: var(--text-secondary); font-size: 11px;">{{ pairingSuccessInfo.device_id.substring(0,8) }}...</span></span>
               </div>
               <qrcode-vue v-else-if="qrPayload" :value="qrPayload" :size="136" level="M" />
               <div v-else style="width: 136px; height: 136px; display: flex; align-items: center; justify-content: center; background: #f0f0f0; border-radius: 8px;">
@@ -626,16 +626,16 @@
     </div>
   </Transition>
 
-  <!-- 馃摫 宸茶繛鎺ヨ澶囧垪琛ㄥ脊绐?-->
+  <!-- 📱 已连接设备列表弹窗 -->
   <Transition name="briefing-fade">
     <div v-if="showDevicesModal" class="wechat-modal-overlay" @click.self="showDevicesModal = false">
       <div class="morning-briefing wechat-qr-modal" style="width: 420px; border-radius: var(--radius-lg); background: var(--bg-secondary); border: 1px solid var(--border-subtle); overflow: hidden; box-shadow: var(--shadow-lg);">
         <div class="briefing-header" style="display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid var(--border-subtle); background: var(--bg-tertiary);">
           <div style="display: flex; align-items: center; gap: 8px;">
             <div class="briefing-icon" style="color: var(--user-accent, var(--accent-primary)); display: flex; align-items: center;"><Smartphone :size="18" /></div>
-            <div class="briefing-title" style="font-size: 14px; font-weight: 600; color: var(--text-primary);">宸查厤瀵圭殑璁惧鍒楄〃</div>
+            <div class="briefing-title" style="font-size: 14px; font-weight: 600; color: var(--text-primary);">已配对的设备列表</div>
           </div>
-          <button class="briefing-close" @click="showDevicesModal = false" title="鍏抽棴" style="background: none; border: none; color: var(--text-tertiary); cursor: pointer; padding: 4px; border-radius: 4px; display: flex; align-items: center; justify-content: center;">
+          <button class="briefing-close" @click="showDevicesModal = false" title="关闭" style="background: none; border: none; color: var(--text-tertiary); cursor: pointer; padding: 4px; border-radius: 4px; display: flex; align-items: center; justify-content: center;">
             <X :size="14" />
           </button>
         </div>
@@ -647,33 +647,33 @@
                 <span class="status-dot" :class="isDeviceOnline(dev) ? 'dot-connected' : 'dot-disconnected'" style="width: 8px; height: 8px; border-radius: 50%;"></span>
                 <span style="font-size: 13px; font-weight: 600; color: var(--text-primary);">{{ dev.device_name || (dev.platform === 'android' ? 'Android Device' : dev.platform) }}</span>
                 <span style="font-size: 11px; color: var(--text-tertiary); font-family: monospace;">({{ dev.device_id.substring(0, 8) }})</span>
-                <span v-if="dev.syncStatus === 'syncing'" style="font-size: 10px; padding: 2px 6px; background: var(--color-success); border-radius: 4px; color: white; margin-left: 6px;">馃攧 姝ｅ湪鍚屾</span>
+                <span v-if="dev.syncStatus === 'syncing'" style="font-size: 10px; padding: 2px 6px; background: var(--color-success); border-radius: 4px; color: white; margin-left: 6px;">🔄 正在同步</span>
               </div>
-              <button class="btn btn-danger-outline btn-sm" style="padding: 4px 8px; font-size: 11px;" @click="handleDisconnectDevice(dev)" title="瑙ｇ粦姝よ澶?>
-                <Unlink :size="11" /> 瑙ｇ粦
+              <button class="btn btn-danger-outline btn-sm" style="padding: 4px 8px; font-size: 11px;" @click="handleDisconnectDevice(dev)" title="解绑此设备">
+                <Unlink :size="11" /> 解绑
               </button>
             </div>
             <div style="font-size: 11px; color: var(--text-secondary); margin-left: 14px; display: flex; flex-direction: column; gap: 2px;">
-              <div>IP 鍦板潃: {{ dev.ip_address }}</div>
-              <div>鏈€鍚庢椿璺? {{ formatTime(dev.last_seen) }}</div>
+              <div>IP 地址: {{ dev.ip_address }}</div>
+              <div>最后活跃: {{ formatTime(dev.last_seen) }}</div>
             </div>
           </div>
           <div v-if="connectedDevices.length === 0" style="text-align: center; padding: 20px; color: var(--text-tertiary); font-size: 13px;">
-            鏆傛棤宸查厤瀵硅澶?
+            暂无已配对设备
           </div>
         </div>
       </div>
     </div>
   </Transition>
 
-  <!-- 寰俊鎵爜寮圭獥 -->
+  <!-- 微信扫码弹窗 -->
   <Transition name="briefing-fade">
     <div v-if="showWechatModal" class="wechat-modal-overlay">
       <div class="morning-briefing wechat-qr-modal">
         <div class="briefing-header">
           <div class="briefing-icon"><MessageSquare :size="18" /></div>
           <div class="briefing-title" style="flex: 1; font-size: 14px; font-weight: 600; color: var(--text-primary);">{{ $t('settings.wechat_bind_title') }}</div>
-          <button class="briefing-close" @click="closeWechatModal" title="鍏抽棴" style="background: none; border: none; color: var(--text-tertiary); cursor: pointer; padding: 4px; border-radius: 4px; display: flex; align-items: center; justify-content: center;">
+          <button class="briefing-close" @click="closeWechatModal" title="关闭" style="background: none; border: none; color: var(--text-tertiary); cursor: pointer; padding: 4px; border-radius: 4px; display: flex; align-items: center; justify-content: center;">
             <X :size="14" />
           </button>
         </div>
@@ -696,13 +696,13 @@
     </div>
   </Transition>
 
-  <!-- 鈹€鈹€ Pairing Progress Overlay 鈹€鈹€ -->
+  <!-- ── Pairing Progress Overlay ── -->
   <Transition name="modal-fade">
     <div v-if="showPairingProgress" class="pairing-overlay">
       <div class="pairing-progress-card">
         <div class="pairing-progress-header">
-          <span class="pairing-progress-icon">馃敆</span>
-          <span>{{ pairingDone ? (pairingError ? '閰嶅澶辫触' : '閰嶅鎴愬姛!') : '姝ｅ湪閰嶅...' }}</span>
+          <span class="pairing-progress-icon">🔗</span>
+          <span>{{ pairingDone ? (pairingError ? '配对失败' : '配对成功!') : '正在配对...' }}</span>
         </div>
         <div class="pairing-steps">
           <div
@@ -712,11 +712,11 @@
             :class="'step-' + step.status"
           >
             <span class="step-indicator">
-              <span v-if="step.status === 'done'" class="step-check">鉁?/span>
-              <span v-else-if="step.status === 'error'" class="step-cross">鉂?/span>
+              <span v-if="step.status === 'done'" class="step-check">✅</span>
+              <span v-else-if="step.status === 'error'" class="step-cross">❌</span>
               <span v-else-if="step.status === 'running'" class="step-spinner"></span>
-              <span v-else-if="step.status === 'skipped'" class="step-skip">鈴笍</span>
-              <span v-else class="step-pending">鈼?/span>
+              <span v-else-if="step.status === 'skipped'" class="step-skip">⏭️</span>
+              <span v-else class="step-pending">○</span>
             </span>
             <div class="step-content">
               <span class="step-label">{{ step.label }}</span>
@@ -726,33 +726,33 @@
         </div>
         <div class="pairing-progress-footer">
           <button v-if="pairingDone" class="btn btn-primary-outline" @click="closePairingProgress">
-            鍏抽棴
+            关闭
           </button>
           <button v-else class="btn btn-secondary-outline" @click="closePairingProgress">
-            鍙栨秷
+            取消
           </button>
         </div>
       </div>
     </div>
   </Transition>
 
-  <!-- 鍚屾鏃ュ織 Modal -->
+  <!-- 同步日志 Modal -->
   <Transition name="briefing-fade">
     <div v-if="showSyncLogsModal" class="wechat-modal-overlay" @click.self="showSyncLogsModal = false" style="z-index: 10000;">
       <div class="morning-briefing wechat-qr-modal" style="width: 500px; max-width: 90vw; border-radius: var(--radius-lg); background: var(--bg-secondary); border: 1px solid var(--border-subtle); overflow: hidden; box-shadow: var(--shadow-lg);">
         <div class="briefing-header" style="display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid var(--border-subtle); background: var(--bg-tertiary);">
           <div style="display: flex; align-items: center; gap: 8px;">
             <div class="briefing-icon" style="color: var(--text-primary); display: flex; align-items: center;"><Info :size="18" /></div>
-            <div class="briefing-title" style="font-size: 14px; font-weight: 600; color: var(--text-primary);">鍚屾鏃ュ織</div>
+            <div class="briefing-title" style="font-size: 14px; font-weight: 600; color: var(--text-primary);">同步日志</div>
           </div>
-          <button class="briefing-close" @click="showSyncLogsModal = false" title="鍏抽棴" style="background: none; border: none; color: var(--text-tertiary); cursor: pointer; padding: 4px; border-radius: 4px; display: flex; align-items: center; justify-content: center;">
+          <button class="briefing-close" @click="showSyncLogsModal = false" title="关闭" style="background: none; border: none; color: var(--text-tertiary); cursor: pointer; padding: 4px; border-radius: 4px; display: flex; align-items: center; justify-content: center;">
             <X :size="14" />
           </button>
         </div>
         
         <div style="padding: 16px; display: flex; flex-direction: column; gap: 8px; max-height: 60vh; overflow-y: auto;">
           <div v-if="syncLogs.length === 0" style="text-align: center; color: var(--text-tertiary); padding: 20px;">
-            鏆傛棤鍚屾鏃ュ織
+            暂无同步日志
           </div>
           <div v-else v-for="(log, idx) in syncLogs" :key="idx" style="border: 1px solid var(--border-subtle); border-radius: 8px; padding: 12px; background: var(--bg-primary);">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
@@ -805,7 +805,7 @@ import { useDialog } from '@/composables/useDialog.js';
 
 const { showConfirm, showAlert } = useDialog();
 
-// 鈹€鈹€ Pairing Progress Overlay State 鈹€鈹€
+// ── Pairing Progress Overlay State ──
 const showPairingProgress = ref(false);
 const pairingDone = ref(false);
 const pairingError = ref(false);
@@ -855,11 +855,11 @@ const handleMobileScan = async () => {
     try {
       payload = JSON.parse(code);
     } catch (e) {
-      await showAlert("浜岀淮鐮佸唴瀹规棤娉曡В鏋? " + e);
+      await showAlert("二维码内容无法解析: " + e);
       return;
     }
 
-    const confirmed = await showConfirm(`鍙戠幇璁惧 PC (ID: ${payload.device_id.substring(0, 8)}...)锛屾槸鍚﹁繛鎺ュ苟鍚屾锛焋);
+    const confirmed = await showConfirm(`发现设备 PC (ID: ${payload.device_id.substring(0, 8)}...)，是否连接并同步？`);
     if (!confirmed) return;
 
     // Show progress overlay
@@ -973,11 +973,11 @@ const handleMobileScan = async () => {
       if (unlistenProgress) unlistenProgress();
     }
   } else {
-    await showAlert(t('setup.scanner_not_supported') || '褰撳墠鐜涓嶆敮鎸佹壂鐮?);
+    await showAlert(t('setup.scanner_not_supported') || '当前环境不支持扫码');
   }
 };
 
-// 鈹€鈹€ Proxy Tunnel (Goal 20) 鈹€鈹€
+// ── Proxy Tunnel (Goal 20) ──
 const proxyTunnelEnabled = ref(props.config.proxyTunnelEnabled || false);
 const tunnelStatus = ref({ connected: false, latency: 0 });
 let tunnelInterval = null;
@@ -1019,7 +1019,7 @@ watch(proxyTunnelEnabled, (val) => {
   }
 });
 
-// 鈹€鈹€ P2P Sync (澶氱鍚屾) 鈹€鈹€
+// ── P2P Sync (多端同步) ──
 const isInitialized = ref(true); // Will fetch from backend
 const isUnlocked = ref(false);
 const showP2pModal = ref(false);
@@ -1084,7 +1084,7 @@ const handleReset = async () => {
 };
 
 const handleDisconnectDevice = async (dev) => {
-  const confirmed = await showConfirm(`纭畾瑕佽В缁戣澶?${dev.platform} (${dev.device_id.substring(0, 8)}) 鍚楋紵`);
+  const confirmed = await showConfirm(`确定要解绑设备 ${dev.platform} (${dev.device_id.substring(0, 8)}) 吗？`);
   if (confirmed) {
     try {
       await invoke('disconnect_device', { deviceId: dev.device_id });
@@ -1103,7 +1103,7 @@ const fetchPairingInfo = async () => {
   try {
     pairingInfo.value = await invoke('get_pairing_payload');
   } catch (error) {
-    console.error('鑾峰彇閰嶅淇℃伅澶辫触', error);
+    console.error('获取配对信息失败', error);
   }
 };
 
@@ -1125,9 +1125,9 @@ const isDeviceOnline = (dev) => {
 };
 
 const formatSyncTime = (tsStr) => {
-  if (!tsStr) return '鏈煡';
+  if (!tsStr) return '未知';
   const ts = parseInt(tsStr);
-  if (isNaN(ts)) return '鏈煡';
+  if (isNaN(ts)) return '未知';
   const d = new Date(ts);
   return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 };
@@ -1175,7 +1175,7 @@ onUnmounted(() => {
   if (unlistenDeviceSyncing) {
     unlistenDeviceSyncing();
   }
-  // 纭繚鍦ㄧ粍浠跺嵏杞芥椂鍙栨秷鍘熺敓鐨勪簩缁寸爜鎵弿锛堜慨澶嶅乏婊戣繑鍥炲崱姝荤殑 Bug锛?
+  // 确保在组件卸载时取消原生的二维码扫描（修复左滑返回卡死的 Bug）
   if (document.body.classList.contains('scanner-active')) {
     document.body.classList.remove('scanner-active');
     if (window.appAPI && window.appAPI.cancelQrCode) {
@@ -1184,7 +1184,7 @@ onUnmounted(() => {
   }
 });
 
-// 鈹€鈹€ Mobile channels 鈹€鈹€
+// ── Mobile channels ──
 const mobileChannel = ref('wechat');
 const tgToken = ref('');
 const discordToken = ref('');
@@ -1209,25 +1209,25 @@ async function copyUrl(url) {
 async function activateMobileChannel(channel) {
   if (channel === 'telegram') {
     if (!tgToken.value) {
-      alert('璇峰～鍐?Telegram Bot Token');
+      alert('请填写 Telegram Bot Token');
       return;
     }
     try {
       await window.appAPI.telegramSaveToken(tgToken.value);
-      alert('Telegram 缁戝畾鎴愬姛锛佹満鍣ㄤ汉宸插湪鍚庡彴鍚姩銆?);
+      alert('Telegram 绑定成功！机器人已在后台启动。');
     } catch(e) {
-      alert('缁戝畾澶辫触: ' + e);
+      alert('绑定失败: ' + e);
     }
   } else if (channel === 'discord') {
     if (!discordToken.value) {
-      alert('璇峰～鍐?Discord Bot Token');
+      alert('请填写 Discord Bot Token');
       return;
     }
     try {
       await window.appAPI.discordSaveToken(discordToken.value);
-      alert('Discord 缁戝畾鎴愬姛锛佹満鍣ㄤ汉宸插湪鍚庡彴鍚姩銆?);
+      alert('Discord 绑定成功！机器人已在后台启动。');
     } catch(e) {
-      alert('缁戝畾澶辫触: ' + e);
+      alert('绑定失败: ' + e);
     }
   }
 }
@@ -1295,7 +1295,7 @@ async function pollWechatQrStatus() {
   wechatPollTimer = setTimeout(pollWechatQrStatus, 2000);
 }
 
-// 鈹€鈹€ 鍔炲叕鏈嶅姟杩炴帴鍣?(Office Connectors) 鈹€鈹€
+// ── 办公服务连接器 (Office Connectors) ──
 const connectorStatuses = ref({});
 const connectingService = ref('');
 const showLarkForm = ref(false);
@@ -1323,17 +1323,17 @@ async function connectOAuth(name) {
   try {
     const res = await window.appAPI.connectorStartOAuth(name);
     if (res && res.url) {
-      // 浣跨敤榛樿娴忚鍣ㄦ墦寮€ OAuth 鎺堟潈椤甸潰
+      // 使用默认浏览器打开 OAuth 授权页面
       window.appAPI.openExternal(res.url);
     } else if (res && res.error) {
       alert('OAuth Error: ' + res.error);
     }
   } catch (e) {
     console.error('OAuth start failed:', e);
-    alert('杩炴帴澶辫触: ' + e);
+    alert('连接失败: ' + e);
   } finally {
     connectingService.value = '';
-    // 寤惰繜鍒锋柊鐘舵€侊紝绛夌敤鎴峰畬鎴?OAuth 鍥炶皟
+    // 延迟刷新状态，等用户完成 OAuth 回调
     setTimeout(loadConnectorStatuses, 3000);
   }
 }
@@ -1351,7 +1351,7 @@ async function saveLarkCredentials() {
     await loadConnectorStatuses();
   } catch (e) {
     console.error('Failed to save Lark credentials:', e);
-    alert('淇濆瓨澶辫触: ' + e);
+    alert('保存失败: ' + e);
   } finally {
     connectingService.value = '';
   }
@@ -1367,7 +1367,7 @@ async function disconnectService(name) {
   }
 }
 
-// 鈹€鈹€ MCP 閰嶇疆绠＄悊 鈹€鈹€
+// ── MCP 配置管理 ──
 const mcpServers = ref({});
 const showAddMcp = ref(false);
 const newMcp = ref({ name: '', command: '', args: '' });
@@ -1396,7 +1396,7 @@ async function connectGoogleNative() {
   try {
     const selectedPath = await open({
       multiple: false,
-      title: '閫夋嫨 Google OAuth credentials.json',
+      title: '选择 Google OAuth credentials.json',
       filters: [{ name: 'JSON Credentials', extensions: ['json'] }]
     });
     
@@ -1406,7 +1406,7 @@ async function connectGoogleNative() {
         file_path: selectedPath
       });
       if (res && res.error) {
-        alert('閰嶇疆澶辫触: ' + res.error);
+        alert('配置失败: ' + res.error);
         connectingService.value = '';
         return;
       }
@@ -1415,7 +1415,7 @@ async function connectGoogleNative() {
     }
   } catch (err) {
     console.error('Failed to configure Google Calendar natively', err);
-    alert('閰嶇疆澶辫触: ' + err);
+    alert('配置失败: ' + err);
     connectingService.value = '';
   }
 }
@@ -1436,7 +1436,7 @@ async function removeMcpServer(name) {
   mcpServers.value = updated;
 }
 
-// 鈹€鈹€ Init 鈹€鈹€
+// ── Init ──
 onMounted(async () => {
   await loadMcpConfig();
   await loadConnectorStatuses();
@@ -1474,7 +1474,7 @@ onMounted(async () => {
     } catch(err) {}
   }
 
-  // 闅ч亾寤惰繜妫€娴嬭疆璇?
+  // 隧道延迟检测轮询
   if (proxyTunnelEnabled.value) {
     updateTunnelStatus();
     tunnelInterval = setInterval(updateTunnelStatus, 8000);
@@ -1533,13 +1533,13 @@ onUnmounted(() => {
   font-weight: 500;
 }
 
-/* 鈹€鈹€ Service Card Active State (For Mutually Exclusive Cards) 鈹€鈹€ */
+/* ── Service Card Active State (For Mutually Exclusive Cards) ── */
 .service-card.active {
   border-color: var(--user-accent, var(--accent-primary));
   box-shadow: 0 0 0 1px var(--user-accent, var(--accent-primary));
 }
 
-/* 鈹€鈹€ Office service cards grid 鈹€鈹€ */
+/* ── Office service cards grid ── */
 .service-cards-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1748,7 +1748,7 @@ onUnmounted(() => {
   border-color: var(--color-error);
 }
 
-/* 鈹€鈹€ 椋炰功鍑瘉琛ㄥ崟灞曞紑 鈹€鈹€ */
+/* ── 飞书凭证表单展开 ── */
 .lark-credential-form {
   padding: 12px;
   margin-top: 8px;
@@ -1775,7 +1775,7 @@ onUnmounted(() => {
   transform: translateY(-8px);
 }
 
-/* 鈹€鈹€ WeChat QR modal 鈹€鈹€ */
+/* ── WeChat QR modal ── */
 .wechat-modal-overlay {
   position: absolute;
   top: 0;
@@ -1842,7 +1842,7 @@ onUnmounted(() => {
 .static-card.connected {
   border-color: var(--border-subtle) !important;
 }
-/* 鈹€鈹€ Pairing Progress Overlay 鈹€鈹€ */
+/* ── Pairing Progress Overlay ── */
 .pairing-overlay {
   position: fixed;
   top: 0; left: 0; right: 0; bottom: 0;
