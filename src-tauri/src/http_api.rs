@@ -665,11 +665,30 @@ async fn handle_sync_ws(ws: WebSocketUpgrade) -> impl IntoResponse {
 // REST Sync Endpoints for Mobile Phase 3
 // ════════════════════════════════════════════════════════════
 
+fn verify_auth(app: &AppHandle, headers: &axum::http::HeaderMap) -> bool {
+    let expected_key = match crate::crypto::get_pairing_payload(app.state::<crate::crypto::DeviceIdentityState>()) {
+        Ok(payload) => payload.public_key,
+        Err(_) => return false,
+    };
+    if let Some(auth_val) = headers.get("Authorization") {
+        if let Ok(auth_str) = auth_val.to_str() {
+            return auth_str == expected_key;
+        }
+    }
+    false
+}
+
 async fn handle_sync_pull(
     axum::extract::State(state): axum::extract::State<ApiState>,
     axum::extract::ConnectInfo(addr): axum::extract::ConnectInfo<std::net::SocketAddr>,
     headers: axum::http::HeaderMap,
 ) -> impl IntoResponse {
+    if !verify_auth(&state.app, &headers) {
+        return axum::response::Response::builder()
+            .status(axum::http::StatusCode::UNAUTHORIZED)
+            .body(axum::body::Body::from("Unauthorized"))
+            .unwrap();
+    }
     crate::sync_engine::register_device(&state.app, &headers, addr);
     let since_ts: i64 = headers.get("X-Since-Ts").and_then(|v| v.to_str().ok()).and_then(|s| s.parse().ok()).unwrap_or(0);
     // Export full or incremental sync schema (config + SQLite rows + tombstones)
@@ -680,7 +699,7 @@ async fn handle_sync_pull(
             return axum::Json(serde_json::json!({
                 "status": "error",
                 "message": e
-            }));
+            })).into_response();
         }
     };
 
@@ -688,7 +707,7 @@ async fn handle_sync_pull(
         "status": "ok",
         "data": sync_data,
         "timestamp": chrono::Utc::now().timestamp()
-    }))
+    })).into_response()
 }
 
 async fn handle_sync_skills_download(
@@ -696,6 +715,12 @@ async fn handle_sync_skills_download(
     axum::extract::ConnectInfo(addr): axum::extract::ConnectInfo<std::net::SocketAddr>,
     headers: axum::http::HeaderMap,
 ) -> impl IntoResponse {
+    if !verify_auth(&state.app, &headers) {
+        return axum::response::Response::builder()
+            .status(axum::http::StatusCode::UNAUTHORIZED)
+            .body(axum::body::Body::from("Unauthorized"))
+            .unwrap();
+    }
     crate::sync_engine::register_device(&state.app, &headers, addr);
     
     let config = crate::read_config();
@@ -726,6 +751,12 @@ async fn handle_sync_notes_download(
     axum::extract::ConnectInfo(addr): axum::extract::ConnectInfo<std::net::SocketAddr>,
     headers: axum::http::HeaderMap,
 ) -> impl IntoResponse {
+    if !verify_auth(&state.app, &headers) {
+        return axum::response::Response::builder()
+            .status(axum::http::StatusCode::UNAUTHORIZED)
+            .body(axum::body::Body::from("Unauthorized"))
+            .unwrap();
+    }
     crate::sync_engine::register_device(&state.app, &headers, addr);
     
     let notes_dir = crate::get_data_dir().join("notebook").join("notes");
@@ -756,6 +787,12 @@ async fn handle_sync_push(
     headers: axum::http::HeaderMap,
     axum::extract::Json(payload): axum::extract::Json<serde_json::Value>,
 ) -> impl IntoResponse {
+    if !verify_auth(&state.app, &headers) {
+        return axum::response::Response::builder()
+            .status(axum::http::StatusCode::UNAUTHORIZED)
+            .body(axum::body::Body::from("Unauthorized"))
+            .unwrap();
+    }
     crate::sync_engine::register_device(&state.app, &headers, addr);
     log::info!("[http_api] Received mobile push data: {:?}", payload);
     if let Some(ops) = payload.as_array() {
@@ -764,7 +801,7 @@ async fn handle_sync_push(
     }
     axum::Json(serde_json::json!({
         "status": "ok"
-    }))
+    })).into_response()
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -792,6 +829,12 @@ async fn handle_sync_push_db(
     headers: axum::http::HeaderMap,
     axum::extract::Json(payload): axum::extract::Json<crate::sync_engine::SyncData>,
 ) -> impl IntoResponse {
+    if !verify_auth(&state.app, &headers) {
+        return axum::response::Response::builder()
+            .status(axum::http::StatusCode::UNAUTHORIZED)
+            .body(axum::body::Body::from("Unauthorized"))
+            .unwrap();
+    }
     crate::sync_engine::register_device(&state.app, &headers, addr);
     log::info!("[http_api] Received SQLite push data from mobile!");
     
@@ -810,7 +853,7 @@ async fn handle_sync_push_db(
         return axum::Json(serde_json::json!({
             "status": "error",
             "message": e
-        }));
+        })).into_response();
     }
     
     // Update last_sync_ts
@@ -821,7 +864,7 @@ async fn handle_sync_push_db(
     
     axum::Json(serde_json::json!({
         "status": "ok"
-    }))
+    })).into_response()
 }
 
 pub fn start_http_server(app: AppHandle) {

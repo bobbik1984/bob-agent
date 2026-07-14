@@ -891,7 +891,7 @@ const handleMobileScan = async () => {
         try {
           const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Relay Timeout')), 15000));
           await Promise.race([
-            window.appAPI.relayHandshake(payload.device_id),
+            window.appAPI.relayHandshake(payload.device_id, payload.public_key),
             timeoutPromise
           ]);
           // Rust events update 3a/3b/3c individually, but ensure all marked done on success

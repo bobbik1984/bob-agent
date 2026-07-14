@@ -174,7 +174,7 @@ pub async fn write_mobile_outbox(_app: AppHandle, operations: Vec<serde_json::Va
 }
 
 #[command]
-pub async fn relay_handshake(app: AppHandle, target_device_id: String) -> Result<(), String> {
+pub async fn relay_handshake(app: AppHandle, target_device_id: String, auth_code: String) -> Result<(), String> {
     let config = crate::read_config();
     let my_device_id = config.get("device_id").and_then(|v| v.as_str()).unwrap_or("unknown").to_string();
     let my_device_name = config.get("deviceName").and_then(|v| v.as_str()).unwrap_or("").to_string();
@@ -209,15 +209,16 @@ pub async fn relay_handshake(app: AppHandle, target_device_id: String) -> Result
 
     // ── Stage 3b: Send notify to PC via Relay ──
     let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_notify", "status": "running"}));
-    let notify = serde_json::json!({
+    let msg = serde_json::json!({
         "type": "notify",
         "target_device_id": target_device_id,
         "payload": {
             "device_name": my_device_name,
             "platform": platform,
+            "auth_code": auth_code
         }
     });
-    match ws_stream.send(Message::Text(notify.to_string().into())).await {
+    match ws_stream.send(Message::Text(msg.to_string().into())).await {
         Ok(_) => {
             let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_notify", "status": "done"}));
         }
@@ -235,6 +236,9 @@ pub async fn relay_handshake(app: AppHandle, target_device_id: String) -> Result
             if let Ok(Message::Text(text)) = msg {
                 if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
                     if json.get("type").and_then(|v| v.as_str()) == Some("ack") {
+                        if let Some(error_msg) = json.get("error").and_then(|v| v.as_str()) {
+                            return Err(format!("Relay error: {}", error_msg));
+                        }
                         return Ok(());
                     }
                     if let Some(error_msg) = json.get("error").and_then(|v| v.as_str()) {
@@ -257,8 +261,13 @@ pub async fn relay_handshake(app: AppHandle, target_device_id: String) -> Result
             Ok(())
         }
         Err(e) => {
-            let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_ack", "status": "error", "detail": format!("ERR-PAIRING-03: {}", e)}));
-            Err(e)
+            if e.contains("Unauthorized") {
+                let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_ack", "status": "error", "detail": "ERR-PAIRING-04: 鉴权失败 (认证码不匹配)"}));
+                Err("ERR-PAIRING-04: 鉴权失败 (认证码不匹配)".to_string())
+            } else {
+                let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_ack", "status": "error", "detail": format!("ERR-PAIRING-03: {}", e)}));
+                Err(e)
+            }
         }
     }
 }
@@ -565,6 +574,7 @@ async fn do_active_sync(app: AppHandle, payload: SyncCommandPayload) -> Result<(
             .header("X-Platform", &platform)
             .header("X-Device-Name", &my_device_name)
             .header("X-Since-Ts", last_sync_ts.to_string())
+            .header("Authorization", &payload.public_key)
             .send().await {
             Ok(resp) if resp.status().is_success() => {
                 if let Ok(json) = resp.json::<serde_json::Value>().await {
@@ -586,7 +596,7 @@ async fn do_active_sync(app: AppHandle, payload: SyncCommandPayload) -> Result<(
                                 // Also pull skills zip
                                 let skills_url = format!("{}/v1/sync/skills/download", base_url);
                                 let _ = app.emit("sync:progress", serde_json::json!({"stage": "skills_sync", "status": "running"}));
-                                if let Ok(s_resp) = client.get(&skills_url).header("X-Device-Id", &my_device_id).header("X-Device-Name", &my_device_name).send().await {
+                                if let Ok(s_resp) = client.get(&skills_url).header("X-Device-Id", &my_device_id).header("X-Device-Name", &my_device_name).header("Authorization", &payload.public_key).send().await {
                                     if s_resp.status().is_success() {
                                         if let Ok(bytes) = s_resp.bytes().await {
                                             let ext_dir = crate::get_external_skills_dir_or_default(&config);
@@ -599,7 +609,7 @@ async fn do_active_sync(app: AppHandle, payload: SyncCommandPayload) -> Result<(
                                 // Also pull notes zip
                                 let notes_url = format!("{}/v1/sync/notes/download", base_url);
                                 let _ = app.emit("sync:progress", serde_json::json!({"stage": "notes_sync", "status": "running"}));
-                                if let Ok(n_resp) = client.get(&notes_url).header("X-Device-Id", &my_device_id).header("X-Device-Name", &my_device_name).send().await {
+                                if let Ok(n_resp) = client.get(&notes_url).header("X-Device-Id", &my_device_id).header("X-Device-Name", &my_device_name).header("Authorization", &payload.public_key).send().await {
                                     if n_resp.status().is_success() {
                                         if let Ok(bytes) = n_resp.bytes().await {
                                             let notes_dir = crate::get_data_dir().join("notebook").join("notes");
@@ -624,7 +634,12 @@ async fn do_active_sync(app: AppHandle, payload: SyncCommandPayload) -> Result<(
                 }
             }
             Ok(resp) => {
-                error!("[Sync Engine] Pull request failed with status: {}", resp.status());
+                if resp.status() == reqwest::StatusCode::UNAUTHORIZED {
+                    let _ = app.emit("sync:progress", serde_json::json!({"stage": "lan_sync", "status": "error", "detail": "ERR-SYNC-05: 鉴权失败 (无效的配对凭证)"}));
+                    sync_success = false;
+                } else {
+                    error!("[Sync Engine] Pull request failed: HTTP {}", resp.status());
+                }
             }
             Err(e) => {
                 error!("[Sync Engine] Request to {} failed: {}", pull_url, e);
@@ -642,6 +657,7 @@ async fn do_active_sync(app: AppHandle, payload: SyncCommandPayload) -> Result<(
                             .header("X-Device-Id", &my_device_id)
                             .header("X-Platform", &platform)
                             .header("X-Device-Name", &my_device_name)
+                            .header("Authorization", &payload.public_key)
                             .json(&mock_outbox).send().await {
                             Ok(resp) if resp.status().is_success() => {
                                 info!("[Sync Engine] Successfully pushed outbox to PC!");
@@ -663,6 +679,7 @@ async fn do_active_sync(app: AppHandle, payload: SyncCommandPayload) -> Result<(
                     .header("X-Device-Id", &my_device_id)
                     .header("X-Platform", &platform)
                     .header("X-Device-Name", &my_device_name)
+                    .header("Authorization", &payload.public_key)
                     .json(&local_sync_data).send().await {
                     Ok(resp) if resp.status().is_success() => {
                         info!("[Sync Engine] Successfully pushed SQLite data to PC!");
@@ -712,7 +729,8 @@ async fn do_active_sync(app: AppHandle, payload: SyncCommandPayload) -> Result<(
             "type": "proxy",
             "target_device_id": payload.device_id,
             "payload": {
-                "action": "pull"
+                "action": "pull",
+                "auth_code": payload.public_key
             }
         });
         ws_stream.send(Message::Text(pull_req.to_string().into())).await.map_err(|e| e.to_string())?;
@@ -733,6 +751,11 @@ async fn do_active_sync(app: AppHandle, payload: SyncCommandPayload) -> Result<(
                                             return Ok(sync_data);
                                         }
                                     }
+                                } else if let Some(error_msg) = inner_payload.get("error").and_then(|v| v.as_str()) {
+                                    if error_msg == "Unauthorized" {
+                                        return Err("ERR-SYNC-05: 鉴权失败 (无效的配对凭证)".to_string());
+                                    }
+                                    return Err(format!("Relay proxy error: {}", error_msg));
                                 }
                             }
                         } else if json.get("type").and_then(|v| v.as_str()) == Some("proxy_error") {
@@ -773,6 +796,7 @@ async fn do_active_sync(app: AppHandle, payload: SyncCommandPayload) -> Result<(
                         "target_device_id": payload.device_id,
                         "payload": {
                             "action": "push",
+                            "auth_code": payload.public_key,
                             "data": mock_outbox
                         }
                     });
@@ -790,6 +814,7 @@ async fn do_active_sync(app: AppHandle, payload: SyncCommandPayload) -> Result<(
                 "target_device_id": payload.device_id,
                 "payload": {
                     "action": "push_db",
+                    "auth_code": payload.public_key,
                     "data": local_sync_data
                 }
             });
@@ -874,6 +899,21 @@ pub fn start_relay_listener(app: AppHandle) {
                                         if msg_type == "notify" {
                                             let from_id = json.get("from_device_id").and_then(|v| v.as_str()).unwrap_or("unknown");
                                             log::info!("[Sync Engine] Received notify from {}", from_id);
+                                            
+                                            // Verify auth code
+                                            let provided_auth = json.get("payload").and_then(|p| p.get("auth_code")).and_then(|a| a.as_str());
+                                            let expected_auth = crate::crypto::get_pairing_payload(app.state::<crate::crypto::DeviceIdentityState>()).map(|p| p.public_key).unwrap_or_default();
+                                            if provided_auth != Some(expected_auth.as_str()) {
+                                                log::error!("[Sync Engine] Auth code mismatch in notify from {}", from_id);
+                                                let ack = serde_json::json!({
+                                                    "type": "ack",
+                                                    "target_device_id": from_id,
+                                                    "error": "Unauthorized"
+                                                });
+                                                let _ = tx.send(Message::Text(ack.to_string().into())).await;
+                                                continue;
+                                            }
+
                                             let device_name = json.get("payload").and_then(|p| p.get("device_name")).and_then(|v| v.as_str()).map(|s| s.to_string());
                                             let platform = json.get("payload").and_then(|p| p.get("platform")).and_then(|v| v.as_str()).unwrap_or("mobile").to_string();
                                             
@@ -902,8 +942,26 @@ pub fn start_relay_listener(app: AppHandle) {
                                             }));
                                         } else if msg_type == "proxy" {
                                             if let Some(inner_payload) = json.get("payload") {
-                                                let action = inner_payload.get("action").and_then(|v| v.as_str()).unwrap_or("");
                                                 let from_id = json.get("from_device_id").and_then(|v| v.as_str()).unwrap_or("unknown");
+                                                
+                                                // Verify auth code for proxy
+                                                let provided_auth = inner_payload.get("auth_code").and_then(|a| a.as_str());
+                                                let expected_auth = crate::crypto::get_pairing_payload(app.state::<crate::crypto::DeviceIdentityState>()).map(|p| p.public_key).unwrap_or_default();
+                                                if provided_auth != Some(expected_auth.as_str()) {
+                                                    log::error!("[Sync Engine] Auth code mismatch in proxy from {}", from_id);
+                                                    let err_resp = serde_json::json!({
+                                                        "type": "proxy",
+                                                        "target_device_id": from_id,
+                                                        "payload": {
+                                                            "action": "error",
+                                                            "error": "Unauthorized"
+                                                        }
+                                                    });
+                                                    let _ = tx.send(Message::Text(err_resp.to_string().into())).await;
+                                                    continue;
+                                                }
+                                                
+                                                let action = inner_payload.get("action").and_then(|v| v.as_str()).unwrap_or("");
                                                 
                                                 if action == "pull" {
                                                     log::info!("[Sync Engine] Received proxy pull request from {}", from_id);

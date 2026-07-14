@@ -664,7 +664,7 @@ window.appAPI = {
   // ── 同步引擎 (Phase 3 Mobile Sync) ──────────
   triggerMobileSync: async (payload) => invoke('trigger_mobile_sync', { payload }),
   writeMobileOutbox: async (operations) => invoke('write_mobile_outbox', { operations }),
-  relayHandshake: async (targetDeviceId) => invoke('relay_handshake', { targetDeviceId }),
+  relayHandshake: async (targetDeviceId, authCode) => invoke('relay_handshake', { targetDeviceId, authCode }),
 
   // ── 扫码 (Mobile Only) ──────────────────────
   systemParseBcbp: async (raw) => invoke('system_parse_bcbp', { raw }),
