@@ -692,7 +692,7 @@ async fn handle_sync_pull(
     crate::sync_engine::register_device(&state.app, &headers, addr);
     let since_ts: i64 = headers.get("X-Since-Ts").and_then(|v| v.to_str().ok()).and_then(|s| s.parse().ok()).unwrap_or(0);
     // Export full or incremental sync schema (config + SQLite rows + tombstones)
-    let sync_data = match crate::sync_engine::export_sync_data(&state.app, since_ts) {
+    let sync_data = match crate::sync_engine::export_sync_data(&state.app, since_ts, false) {
         Ok(data) => data,
         Err(e) => {
             log::error!("[http_api] Failed to export sync data: {}", e);
