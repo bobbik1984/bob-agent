@@ -230,6 +230,9 @@ pub async fn relay_handshake(app: AppHandle, target_device_id: String) -> Result
                     if json.get("type").and_then(|v| v.as_str()) == Some("ack") {
                         return Ok(());
                     }
+                    if let Some(error_msg) = json.get("error").and_then(|v| v.as_str()) {
+                        return Err(format!("Relay error: {}", error_msg));
+                    }
                 }
             }
         }
