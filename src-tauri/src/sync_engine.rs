@@ -191,12 +191,12 @@ pub async fn relay_handshake(app: AppHandle, target_device_id: String) -> Result
             stream
         }
         Ok(Err(e)) => {
-            let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_connect", "status": "error", "detail": format!("ERR-01: 连接拒绝: {}", e)}));
-            return Err(format!("ERR-01: Failed to connect to relay: {}", e));
+            let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_connect", "status": "error", "detail": format!("ERR-PAIRING-01: 连接拒绝: {}", e)}));
+            return Err(format!("ERR-PAIRING-01: Failed to connect to relay: {}", e));
         }
         Err(_) => {
-            let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_connect", "status": "error", "detail": "ERR-01: 连接超时 (15s)"}));
-            return Err("ERR-01: Failed to connect to relay: Timeout".to_string());
+            let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_connect", "status": "error", "detail": "ERR-PAIRING-01: 连接超时 (15s)"}));
+            return Err("ERR-PAIRING-01: Failed to connect to relay: Timeout".to_string());
         }
     };
     
@@ -222,8 +222,8 @@ pub async fn relay_handshake(app: AppHandle, target_device_id: String) -> Result
             let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_notify", "status": "done"}));
         }
         Err(e) => {
-            let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_notify", "status": "error", "detail": format!("ERR-02: {}", e)}));
-            return Err(format!("ERR-02: {}", e.to_string()));
+            let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_notify", "status": "error", "detail": format!("ERR-PAIRING-02: {}", e)}));
+            return Err(format!("ERR-PAIRING-02: {}", e.to_string()));
         }
     }
 
@@ -257,7 +257,7 @@ pub async fn relay_handshake(app: AppHandle, target_device_id: String) -> Result
             Ok(())
         }
         Err(e) => {
-            let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_ack", "status": "error", "detail": format!("ERR-03: {}", e)}));
+            let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_ack", "status": "error", "detail": format!("ERR-PAIRING-03: {}", e)}));
             Err(e)
         }
     }
@@ -677,7 +677,7 @@ async fn do_active_sync(app: AppHandle, payload: SyncCommandPayload) -> Result<(
     }
 
     if !sync_success {
-        let _ = app.emit("sync:progress", serde_json::json!({"stage": "lan_sync", "status": "error", "detail": "ERR-04: 所有局域网 IP 均不可达"}));
+        let _ = app.emit("sync:progress", serde_json::json!({"stage": "lan_sync", "status": "error", "detail": "ERR-SYNC-01: 所有局域网 IP 均不可达"}));
         info!("[Sync Engine] All LAN attempts failed. Falling back to Relay Tunnel.");
         
         // ── Stage 5: Relay tunnel sync ──
@@ -691,12 +691,12 @@ async fn do_active_sync(app: AppHandle, payload: SyncCommandPayload) -> Result<(
         let (mut ws_stream, _) = match tokio::time::timeout(tokio::time::Duration::from_secs(15), connect_websocket_robust(&ws_url)).await {
             Ok(Ok(s)) => s,
             Ok(Err(e)) => {
-                let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_sync", "status": "error", "detail": format!("ERR-05: Relay 连接拒绝: {}", e)}));
-                return Err(format!("ERR-05: Failed to connect to relay: {}", e));
+                let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_sync", "status": "error", "detail": format!("ERR-SYNC-02: Relay 连接拒绝: {}", e)}));
+                return Err(format!("ERR-SYNC-02: Failed to connect to relay: {}", e));
             }
             Err(_) => {
-                let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_sync", "status": "error", "detail": "ERR-05: Relay 连接超时 (15s)"}));
-                return Err("ERR-05: Failed to connect to relay: Timeout".to_string());
+                let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_sync", "status": "error", "detail": "ERR-SYNC-02: Relay 连接超时 (15s)"}));
+                return Err("ERR-SYNC-02: Failed to connect to relay: Timeout".to_string());
             }
         };
             
@@ -751,14 +751,14 @@ async fn do_active_sync(app: AppHandle, payload: SyncCommandPayload) -> Result<(
             Ok(sync_data) => {
                 info!("[Sync Engine] Successfully pulled sync data via Relay!");
                 if let Err(e) = import_sync_data(&app, sync_data, 0) { // For relay pull we might not have accurate last_sync_ts right now
-                    let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_sync", "status": "error", "detail": format!("ERR-06: 导入数据失败: {}", e)}));
+                    let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_sync", "status": "error", "detail": format!("ERR-SYNC-03: 导入数据失败: {}", e)}));
                     return Err(format!("Failed to import sync data: {}", e));
                 }
                 let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_sync", "status": "done"}));
                 let _ = app.emit("config:reconciled", serde_json::json!({"applied": 1}));
             }
             Err(e) => {
-                let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_sync", "status": "error", "detail": format!("ERR-07: {}", e)}));
+                let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_sync", "status": "error", "detail": format!("ERR-SYNC-04: {}", e)}));
                 return Err(format!("Relay Pull Error: {}", e));
             }
         }
