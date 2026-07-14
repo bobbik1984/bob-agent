@@ -200,6 +200,13 @@ pub async fn relay_handshake(app: AppHandle, target_device_id: String) -> Result
         }
     };
     
+    // Explicitly register device ID (fixes NGINX URL stripping bugs and ensures we are active)
+    let reg_msg = serde_json::json!({
+        "type": "register",
+        "deviceId": my_device_id
+    });
+    let _ = ws_stream.send(Message::Text(reg_msg.to_string().into())).await;
+
     // ── Stage 3b: Send notify to PC via Relay ──
     let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_notify", "status": "running"}));
     let notify = serde_json::json!({
@@ -307,16 +314,15 @@ pub fn export_sync_data(app: &AppHandle, since_ts: i64) -> Result<SyncData, Stri
         &["id", "title", "model", "cost", "last_message", "last_role", "created_at", "updated_at"]).unwrap_or_default();
     let messages = extract("SELECT id, conversation_id, role, content, image_base64, created_at, from_channel, sync_id FROM messages WHERE created_at >= ?1", &[&since_ts], 
         &["id", "conversation_id", "role", "content", "image_base64", "created_at", "from_channel", "sync_id"]).unwrap_or_default();
-    let events = extract("SELECT id, title, type, status, date, start_time, end_time, description, created_at, updated_at, linked_ticket_id FROM events WHERE updated_at >= ?1", &[&since_ts], 
-        &["id", "title", "type", "status", "date", "start_time", "end_time", "description", "created_at", "updated_at", "linked_ticket_id"]).unwrap_or_default();
-    let cron_jobs = extract("SELECT id, title, cron_expr, prompt_template, enabled, last_run, created_at, updated_at FROM cron_jobs WHERE updated_at >= ?1", &[&since_ts], 
-        &["id", "title", "cron_expr", "prompt_template", "enabled", "last_run", "created_at", "updated_at"]).unwrap_or_default();
-    let kg_nodes = extract("SELECT id, label, node_type, summary, source, metadata, created_at, updated_at FROM kg_nodes WHERE updated_at >= ?1", &[&since_ts], 
-        &["id", "label", "node_type", "summary", "source", "metadata", "created_at", "updated_at"]).unwrap_or_default();
-    let kg_edges = extract("SELECT source_id, target_id, relation, confidence, created_at, updated_at FROM kg_edges WHERE updated_at >= ?1", &[&since_ts], 
-        &["source_id", "target_id", "relation", "confidence", "created_at", "updated_at"]).unwrap_or_default();
-    let wiki_fts = extract("SELECT file_name, source_path, wiki_path, summary, keywords, category, indexed_at FROM wiki_fts", &[], 
-        &["file_name", "source_path", "wiki_path", "summary", "keywords", "category", "indexed_at"]).unwrap_or_default();
+    let events = extract("SELECT id, title, type, status, date, start_time, end_time, description, created_at, linked_ticket_id FROM events", &[], 
+        &["id", "title", "type", "status", "date", "start_time", "end_time", "description", "created_at", "linked_ticket_id"]).unwrap_or_default();
+    let cron_jobs = extract("SELECT id, title, cron_expr, prompt_template, enabled, last_run, created_at FROM cron_jobs", &[], 
+        &["id", "title", "cron_expr", "prompt_template", "enabled", "last_run", "created_at"]).unwrap_or_default();
+    let kg_nodes = extract("SELECT id, label, node_type, summary, source, metadata, created_at FROM kg_nodes", &[], 
+        &["id", "label", "node_type", "summary", "source", "metadata", "created_at"]).unwrap_or_default();
+    let kg_edges = extract("SELECT source_id, target_id, relation, confidence, created_at FROM kg_edges", &[], 
+        &["source_id", "target_id", "relation", "confidence", "created_at"]).unwrap_or_default();
+    let wiki_fts = Vec::new();
     let tombstones = extract("SELECT table_name, record_key, deleted_at FROM sync_tombstones WHERE deleted_at >= ?1", &[&since_ts],
         &["table_name", "record_key", "deleted_at"]).unwrap_or_default();
 
@@ -458,7 +464,7 @@ pub fn import_sync_data(app: &AppHandle, data: SyncData, last_sync_ts: i64) -> R
 
     // Append-only strategy for messages (de-dupe by sync_id)
     if !data.messages.is_empty() {
-        for msg in data.messages {
+        for msg in &data.messages {
             if let Some(obj) = msg.as_object() {
                 let sync_id = obj.get("sync_id").and_then(|v| v.as_str()).unwrap_or("");
                 if !sync_id.is_empty() {
@@ -482,13 +488,41 @@ pub fn import_sync_data(app: &AppHandle, data: SyncData, last_sync_ts: i64) -> R
         }
     }
 
-    import_replace("settings", data.settings, &["key", "value"]);
-    import_lww("conversations", data.conversations, &["id", "title", "model", "cost", "last_message", "last_role", "created_at", "updated_at"]);
-    import_lww("events", data.events, &["id", "title", "type", "status", "date", "start_time", "end_time", "description", "created_at", "updated_at", "linked_ticket_id"]);
-    import_replace("cron_jobs", data.cron_jobs, &["id", "title", "cron_expr", "prompt_template", "enabled", "last_run", "created_at", "updated_at"]);
-    import_replace("kg_nodes", data.kg_nodes, &["id", "label", "node_type", "summary", "source", "metadata", "created_at", "updated_at"]);
-    import_replace("kg_edges", data.kg_edges, &["source_id", "target_id", "relation", "confidence", "created_at", "updated_at"]);
-    import_replace("wiki_fts", data.wiki_fts, &["file_name", "source_path", "wiki_path", "summary", "keywords", "category", "indexed_at"]);
+    import_replace("settings", data.settings.clone(), &["key", "value"]);
+    import_lww("conversations", data.conversations.clone(), &["id", "title", "model", "cost", "last_message", "last_role", "created_at", "updated_at"]);
+    import_replace("events", data.events.clone(), &["id", "title", "type", "status", "date", "start_time", "end_time", "description", "created_at", "linked_ticket_id"]);
+    import_replace("cron_jobs", data.cron_jobs.clone(), &["id", "title", "cron_expr", "prompt_template", "enabled", "last_run", "created_at"]);
+    import_replace("kg_nodes", data.kg_nodes.clone(), &["id", "label", "node_type", "summary", "source", "metadata", "created_at"]);
+    import_replace("kg_edges", data.kg_edges.clone(), &["source_id", "target_id", "relation", "confidence", "created_at"]);
+
+    // Append to sync_history.json
+    let history_path = crate::get_data_dir().join("sync_history.json");
+    let mut history: Vec<serde_json::Value> = if let Ok(existing) = std::fs::read_to_string(&history_path) {
+        serde_json::from_str(&existing).unwrap_or_default()
+    } else {
+        vec![]
+    };
+    
+    let total_records = data.conversations.len() + data.messages.len() + data.events.len() + data.cron_jobs.len() + data.kg_nodes.len() + data.kg_edges.len();
+    history.insert(0, serde_json::json!({
+        "timestamp": ts,
+        "direction": "pull",
+        "counts": {
+            "conversations": data.conversations.len(),
+            "messages": data.messages.len(),
+            "events": data.events.len(),
+            "settings": data.settings.len(),
+            "cron_jobs": data.cron_jobs.len(),
+            "kg_nodes": data.kg_nodes.len(),
+            "kg_edges": data.kg_edges.len()
+        },
+        "message": format!("Successfully synced {} records", total_records)
+    }));
+    
+    if history.len() > 50 { history.truncate(50); } // Keep last 50
+    if let Ok(json_str) = serde_json::to_string(&history) {
+        let _ = std::fs::write(&history_path, json_str);
+    }
 
     Ok(())
 }
