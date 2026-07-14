@@ -287,7 +287,7 @@ pub struct SyncData {
     pub tombstones: Vec<serde_json::Value>,
 }
 
-pub fn export_sync_data(app: &AppHandle, since_ts: i64) -> Result<SyncData, String> {
+pub fn export_sync_data(app: &AppHandle, since_ts: i64, is_relay: bool) -> Result<SyncData, String> {
     let config = crate::read_config();
     let db = app.state::<crate::db::DbState>();
     let conn = db.0.lock().map_err(|_| "Failed to lock db")?;
@@ -321,16 +321,26 @@ pub fn export_sync_data(app: &AppHandle, since_ts: i64) -> Result<SyncData, Stri
     let settings = extract("SELECT key, value FROM settings", &[], &["key", "value"]).unwrap_or_default();
     let conversations = extract("SELECT id, title, model, cost, last_message, last_role, created_at, updated_at FROM conversations WHERE updated_at >= ?1", &[&since_ts], 
         &["id", "title", "model", "cost", "last_message", "last_role", "created_at", "updated_at"]).unwrap_or_default();
-    let messages = extract("SELECT id, conversation_id, role, content, image_base64, created_at, from_channel, sync_id FROM messages WHERE created_at >= ?1", &[&since_ts], 
-        &["id", "conversation_id", "role", "content", "image_base64", "created_at", "from_channel", "sync_id"]).unwrap_or_default();
+    let messages = if is_relay {
+        extract("SELECT id, conversation_id, role, content, NULL as image_base64, created_at, from_channel, sync_id FROM messages WHERE created_at >= ?1", &[&since_ts], 
+        &["id", "conversation_id", "role", "content", "image_base64", "created_at", "from_channel", "sync_id"]).unwrap_or_default()
+    } else {
+        extract("SELECT id, conversation_id, role, content, image_base64, created_at, from_channel, sync_id FROM messages WHERE created_at >= ?1", &[&since_ts], 
+        &["id", "conversation_id", "role", "content", "image_base64", "created_at", "from_channel", "sync_id"]).unwrap_or_default()
+    };
     let events = extract("SELECT id, title, type, status, date, start_time, end_time, description, created_at, linked_ticket_id FROM events", &[], 
         &["id", "title", "type", "status", "date", "start_time", "end_time", "description", "created_at", "linked_ticket_id"]).unwrap_or_default();
     let cron_jobs = extract("SELECT id, title, cron_expr, prompt_template, enabled, last_run, created_at FROM cron_jobs", &[], 
         &["id", "title", "cron_expr", "prompt_template", "enabled", "last_run", "created_at"]).unwrap_or_default();
-    let kg_nodes = extract("SELECT id, label, node_type, summary, source, metadata, created_at FROM kg_nodes", &[], 
-        &["id", "label", "node_type", "summary", "source", "metadata", "created_at"]).unwrap_or_default();
-    let kg_edges = extract("SELECT source_id, target_id, relation, confidence, created_at FROM kg_edges", &[], 
-        &["source_id", "target_id", "relation", "confidence", "created_at"]).unwrap_or_default();
+    
+    let kg_nodes = if is_relay { vec![] } else {
+        extract("SELECT id, label, node_type, summary, source, metadata, created_at FROM kg_nodes", &[], 
+        &["id", "label", "node_type", "summary", "source", "metadata", "created_at"]).unwrap_or_default()
+    };
+    let kg_edges = if is_relay { vec![] } else {
+        extract("SELECT source_id, target_id, relation, confidence, created_at FROM kg_edges", &[], 
+        &["source_id", "target_id", "relation", "confidence", "created_at"]).unwrap_or_default()
+    };
     let wiki_fts = Vec::new();
     let tombstones = extract("SELECT table_name, record_key, deleted_at FROM sync_tombstones WHERE deleted_at >= ?1", &[&since_ts],
         &["table_name", "record_key", "deleted_at"]).unwrap_or_default();
@@ -702,7 +712,7 @@ pub async fn do_active_sync(app: AppHandle, payload: SyncCommandPayload) -> Resu
             }
             
             // 3. Push local DB changes to PC
-            if let Ok(local_sync_data) = export_sync_data(&app, last_sync_ts) {
+            if let Ok(local_sync_data) = export_sync_data(&app, last_sync_ts, false) {
                 let push_db_url = format!("{}/v1/sync/push_db", base_url);
                 let _ = app.emit("sync:progress", serde_json::json!({"stage": "lan_sync", "status": "running", "detail": "推送本地数据到电脑..."}));
                 match client.post(&push_db_url)
@@ -850,7 +860,7 @@ pub async fn do_active_sync(app: AppHandle, payload: SyncCommandPayload) -> Resu
         }
         
         // 3. Push local DB changes to PC via Relay
-        if let Ok(local_sync_data) = export_sync_data(&app, last_sync_ts) {
+        if let Ok(local_sync_data) = export_sync_data(&app, last_sync_ts, true) {
             let push_db_req = serde_json::json!({
                 "type": "proxy",
                 "target_device_id": payload.device_id,
@@ -1013,7 +1023,7 @@ pub fn start_relay_listener(app: AppHandle) {
                                                 if action == "pull" {
                                                     log::info!("[Sync Engine] Received proxy pull request from {}", from_id);
                                                     let since_ts = inner_payload.get("since_ts").and_then(|v| v.as_i64()).unwrap_or(0);
-                                                    if let Ok(sync_data) = export_sync_data(&app, since_ts) {
+                                                    if let Ok(sync_data) = export_sync_data(&app, since_ts, true) {
                                                         let pull_resp = serde_json::json!({
                                                             "type": "proxy",
                                                             "target_device_id": from_id,
@@ -1022,7 +1032,11 @@ pub fn start_relay_listener(app: AppHandle) {
                                                                 "data": sync_data
                                                             }
                                                         });
-                                                        let _ = tx.send(Message::Text(pull_resp.to_string().into())).await;
+                                                        if let Err(e) = tx.send(Message::Text(pull_resp.to_string().into())).await {
+                                                            log::error!("[Sync Engine] Failed to send pull_response to {}: {}", from_id, e);
+                                                        } else {
+                                                            log::info!("[Sync Engine] Sent pull_response to {} successfully", from_id);
+                                                        }
                                                     }
                                                 } else if action == "push" {
                                                     log::info!("[Sync Engine] Received proxy push request from {}", from_id);
