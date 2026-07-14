@@ -928,9 +928,15 @@ pub fn start_relay_listener(app: AppHandle) {
                     let (mut tx, mut rx) = ws_stream.split();
                     let mut ping_interval = tokio::time::interval(std::time::Duration::from_secs(30));
 
+                    let mut last_activity = crate::now_ms();
+
                     loop {
                         tokio::select! {
                             _ = ping_interval.tick() => {
+                                if crate::now_ms() - last_activity > 90_000 {
+                                    log::error!("[Sync Engine] Relay connection timeout: No activity for 90s. Reconnecting...");
+                                    break;
+                                }
                                 if let Err(e) = tx.send(Message::Ping(bytes::Bytes::new())).await {
                                     log::error!("[Sync Engine] Ping failed: {}", e);
                                     break;
@@ -944,6 +950,7 @@ pub fn start_relay_listener(app: AppHandle) {
                                         break;
                                     }
                                 };
+                                last_activity = crate::now_ms();
                                 match msg {
                             Ok(Message::Text(text)) => {
                                 if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
