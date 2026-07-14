@@ -896,10 +896,9 @@ const handleMobileScan = async () => {
           ]);
           // Rust events update 3a/3b/3c individually, but ensure all marked done on success
         } catch (e) {
-          // Relay handshake failed. We should NOT return here. 
-          // We must continue to try LAN sync!
+          // Relay handshake failed. We must continue to try LAN sync!
           console.warn('Relay handshake failed, skipping to data sync...', e);
-          updateStep('relay_connect', 'error', '连接超时或失败');
+          updateStep('relay_connect', 'error', 'Error: ' + String(e));
         }
       } else {
         updateStep('relay_connect', 'skipped', '无 Relay 握手接口');
