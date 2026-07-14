@@ -525,18 +525,43 @@ pub fn import_sync_data(app: &AppHandle, data: SyncData, last_sync_ts: i64) -> R
             "kg_nodes": data.kg_nodes.len(),
             "kg_edges": data.kg_edges.len()
         },
-        "message": format!("Successfully synced {} records", total_records)
+        "total_records": total_records,
+        "detail": "成功合并云端数据"
     }));
     
     if history.len() > 50 { history.truncate(50); } // Keep last 50
-    if let Ok(json_str) = serde_json::to_string(&history) {
+    if let Ok(json_str) = serde_json::to_string_pretty(&history) {
         let _ = std::fs::write(&history_path, json_str);
     }
 
     Ok(())
 }
 
-async fn do_active_sync(app: AppHandle, payload: SyncCommandPayload) -> Result<(), String> {
+pub fn log_sync_action(action: &str, status: &str, detail: &str) {
+    let history_path = crate::get_data_dir().join("sync_history.json");
+    let mut history: Vec<serde_json::Value> = if let Ok(existing) = std::fs::read_to_string(&history_path) {
+        serde_json::from_str(&existing).unwrap_or_default()
+    } else {
+        vec![]
+    };
+    
+    history.insert(0, serde_json::json!({
+        "timestamp": crate::now_ms(),
+        "action": action,
+        "status": status,
+        "detail": detail
+    }));
+    
+    if history.len() > 50 {
+        history.truncate(50);
+    }
+    
+    if let Ok(json_str) = serde_json::to_string_pretty(&history) {
+        let _ = std::fs::write(history_path, json_str);
+    }
+}
+
+pub async fn do_active_sync(app: AppHandle, payload: SyncCommandPayload) -> Result<(), String> {
     info!("[Sync Engine] Starting active sync to device {}", payload.device_id);
     
     // ── Stage 4: LAN sync ──
@@ -635,14 +660,19 @@ async fn do_active_sync(app: AppHandle, payload: SyncCommandPayload) -> Result<(
             }
             Ok(resp) => {
                 if resp.status() == reqwest::StatusCode::UNAUTHORIZED {
-                    let _ = app.emit("sync:progress", serde_json::json!({"stage": "lan_sync", "status": "error", "detail": "ERR-SYNC-05: 鉴权失败 (无效的配对凭证)"}));
+                    let err_msg = "ERR-SYNC-05: 鉴权失败 (无效的配对凭证)";
+                    let _ = app.emit("sync:progress", serde_json::json!({"stage": "lan_sync", "status": "error", "detail": err_msg}));
+                    log_sync_action("LAN Pull", "error", err_msg);
                     sync_success = false;
                 } else {
-                    error!("[Sync Engine] Pull request failed: HTTP {}", resp.status());
+                    let err_msg = format!("HTTP {}", resp.status());
+                    error!("[Sync Engine] Pull request failed: {}", err_msg);
+                    log_sync_action("LAN Pull", "error", &err_msg);
                 }
             }
             Err(e) => {
                 error!("[Sync Engine] Request to {} failed: {}", pull_url, e);
+                log_sync_action("LAN Pull", "error", &e.to_string());
             }
         }
 
@@ -708,12 +738,16 @@ async fn do_active_sync(app: AppHandle, payload: SyncCommandPayload) -> Result<(
         let (mut ws_stream, _) = match tokio::time::timeout(tokio::time::Duration::from_secs(15), connect_websocket_robust(&ws_url)).await {
             Ok(Ok(s)) => s,
             Ok(Err(e)) => {
-                let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_sync", "status": "error", "detail": format!("ERR-SYNC-02: Relay 连接拒绝: {}", e)}));
+                let err_msg = format!("ERR-SYNC-02: Relay 连接拒绝: {}", e);
+                let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_sync", "status": "error", "detail": &err_msg}));
+                log_sync_action("Relay Connect", "error", &err_msg);
                 return Err(format!("ERR-SYNC-02: Failed to connect to relay: {}", e));
             }
             Err(_) => {
-                let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_sync", "status": "error", "detail": "ERR-SYNC-02: Relay 连接超时 (15s)"}));
-                return Err("ERR-SYNC-02: Failed to connect to relay: Timeout".to_string());
+                let err_msg = "ERR-SYNC-02: Relay 连接超时 (15s)";
+                let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_sync", "status": "error", "detail": err_msg}));
+                log_sync_action("Relay Connect", "error", err_msg);
+                return Err(err_msg.to_string());
             }
         };
             
@@ -736,9 +770,9 @@ async fn do_active_sync(app: AppHandle, payload: SyncCommandPayload) -> Result<(
         ws_stream.send(Message::Text(pull_req.to_string().into())).await.map_err(|e| e.to_string())?;
 
         info!("[Sync Engine] Sent proxy pull request. Waiting for response...");
-        let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_sync", "status": "running", "detail": "等待 PC 回传数据..."}));
+        let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_sync", "status": "running", "detail": "请求拉取数据 (对话、日程、票据)..."}));
 
-        let timeout = tokio::time::Duration::from_secs(15);
+        let timeout = tokio::time::Duration::from_secs(45);
         let pull_task = async {
             while let Some(msg) = ws_stream.next().await {
                 if let Ok(Message::Text(text)) = msg {
@@ -769,12 +803,20 @@ async fn do_active_sync(app: AppHandle, payload: SyncCommandPayload) -> Result<(
 
         match tokio::select! {
             res = pull_task => res,
-            _ = tokio::time::sleep(timeout) => Err("Relay sync timeout: PC did not respond.".to_string())
+            _ = tokio::time::sleep(timeout) => {
+                let err_msg = "ERR-SYNC-02: Relay 拉取超时 (45s)";
+                let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_sync", "status": "error", "detail": err_msg}));
+                log_sync_action("Relay Pull", "error", err_msg);
+                Err("Relay pull timeout".to_string())
+            }
         } {
             Ok(sync_data) => {
                 info!("[Sync Engine] Successfully pulled sync data via Relay!");
+                let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_sync", "status": "running", "detail": "收到云端数据，正在进行本地合并..."}));
                 if let Err(e) = import_sync_data(&app, sync_data, 0) { // For relay pull we might not have accurate last_sync_ts right now
-                    let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_sync", "status": "error", "detail": format!("ERR-SYNC-03: 导入数据失败: {}", e)}));
+                    let err_msg = format!("ERR-SYNC-03: 导入数据失败: {}", e);
+                    let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_sync", "status": "error", "detail": &err_msg}));
+                    log_sync_action("Relay Import", "error", &err_msg);
                     return Err(format!("Failed to import sync data: {}", e));
                 }
                 let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_sync", "status": "done"}));
@@ -963,6 +1005,11 @@ pub fn start_relay_listener(app: AppHandle) {
                                                 
                                                 let action = inner_payload.get("action").and_then(|v| v.as_str()).unwrap_or("");
                                                 
+                                                let _ = app.emit("sync:device_syncing", serde_json::json!({
+                                                    "device_id": from_id,
+                                                    "status": "syncing"
+                                                }));
+
                                                 if action == "pull" {
                                                     log::info!("[Sync Engine] Received proxy pull request from {}", from_id);
                                                     let since_ts = inner_payload.get("since_ts").and_then(|v| v.as_i64()).unwrap_or(0);
@@ -1008,6 +1055,11 @@ pub fn start_relay_listener(app: AppHandle) {
                                                         }
                                                     }
                                                 }
+                                                
+                                                let _ = app.emit("sync:device_syncing", serde_json::json!({
+                                                    "device_id": from_id,
+                                                    "status": "idle"
+                                                }));
                                             }
                                         }
                                     }

@@ -36,7 +36,7 @@
             >
               <Smartphone :size="12" />
             </button>
-            <span class="service-status-dot" :class="connectedDevices.length > 0 ? 'dot-connected' : 'dot-disconnected'"></span>
+            <span class="service-status-dot" :class="(connectedDevices.length > 0 || pairingInfo.device_id) ? 'dot-connected' : 'dot-disconnected'"></span>
           </div>
         </div>
         
@@ -647,6 +647,7 @@
                 <span class="status-dot" :class="isDeviceOnline(dev) ? 'dot-connected' : 'dot-disconnected'" style="width: 8px; height: 8px; border-radius: 50%;"></span>
                 <span style="font-size: 13px; font-weight: 600; color: var(--text-primary);">{{ dev.device_name || (dev.platform === 'android' ? 'Android Device' : dev.platform) }}</span>
                 <span style="font-size: 11px; color: var(--text-tertiary); font-family: monospace;">({{ dev.device_id.substring(0, 8) }})</span>
+                <span v-if="dev.syncStatus === 'syncing'" style="font-size: 10px; padding: 2px 6px; background: var(--color-success); border-radius: 4px; color: white; margin-left: 6px;">🔄 正在同步</span>
               </div>
               <button class="btn btn-danger-outline btn-sm" style="padding: 4px 8px; font-size: 11px;" @click="handleDisconnectDevice(dev)" title="解绑此设备">
                 <Unlink :size="11" /> 解绑
@@ -1007,7 +1008,7 @@ const openSyncLogs = async () => {
   } catch (e) {
     console.error("Failed to load sync logs:", e);
   }
-  alert("Click registered! Logs: " + syncLogs.value.length); showSyncLogsModal.value = true;
+  showSyncLogsModal.value = true;
 };
 
 const pinInput = ref('');
@@ -1082,6 +1083,7 @@ const fetchPairingInfo = async () => {
 
 const connectedDevices = ref([]);
 let unlistenDeviceConnected = null;
+let unlistenDeviceSyncing = null;
 
 const fetchConnectedDevices = async () => {
   try {
@@ -1128,6 +1130,14 @@ onMounted(async () => {
         showP2pModal.value = false;
       }
     });
+    unlistenDeviceSyncing = await listen('sync:device_syncing', (event) => {
+      if (event.payload && event.payload.device_id) {
+        const dev = connectedDevices.value.find(d => d.device_id === event.payload.device_id);
+        if (dev) {
+          dev.syncStatus = event.payload.status;
+        }
+      }
+    });
   }
   await fetchPairingInfo();
 });
@@ -1135,6 +1145,9 @@ onMounted(async () => {
 onUnmounted(() => {
   if (unlistenDeviceConnected) {
     unlistenDeviceConnected();
+  }
+  if (unlistenDeviceSyncing) {
+    unlistenDeviceSyncing();
   }
   // 确保在组件卸载时取消原生的二维码扫描（修复左滑返回卡死的 Bug）
   if (document.body.classList.contains('scanner-active')) {
