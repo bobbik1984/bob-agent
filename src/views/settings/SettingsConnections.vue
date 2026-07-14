@@ -17,9 +17,17 @@
           </div>
           <div class="service-info">
             <span class="service-name">{{ $t('settings.p2p_pairing') }}</span>
-            <span class="service-sub">{{ !isUnlocked ? $t('settings.p2p_auth_desc_new') : $t('settings.p2p_pairing_desc') }}</span>
+            <span class="service-sub" style="display: flex; gap: 8px; align-items: center;">{{ !isUnlocked ? $t('settings.p2p_auth_desc_new') : $t('settings.p2p_pairing_desc') }}
+              <span v-if="lastSyncTime" style="font-size: 10px; padding: 2px 6px; background: var(--bg-tertiary); border-radius: 4px; color: var(--text-secondary);">最后同步: {{ formatSyncTime(lastSyncTime) }}</span></span>
           </div>
-          <div style="display: flex; align-items: center; gap: 8px;">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+            <button 
+              class="device-indicator-btn"
+              @click.stop="openSyncLogs" 
+              title="查看同步日志"
+            >
+              <Info :size="12" />
+            </button>
             <button 
               v-if="connectedDevices.length > 0" 
               class="device-indicator-btn"
@@ -28,7 +36,7 @@
             >
               <Smartphone :size="12" />
             </button>
-            <span class="service-status-dot" :class="isUnlocked ? 'dot-connected' : 'dot-disconnected'"></span>
+            <span class="service-status-dot" :class="connectedDevices.length > 0 ? 'dot-connected' : 'dot-disconnected'"></span>
           </div>
         </div>
         
@@ -38,7 +46,13 @@
               <button class="btn btn-primary-outline btn-sm" style="flex: 1; justify-content: center;" @click="handleMobileScan" title="扫码配对">
                 <Scan :size="13" style="margin-right: 6px;" /> 扫码配对
               </button>
-            </template>
+            
+    
+
+
+  
+
+</template>
             <template v-else>
               <input v-model="pinInput" type="password" class="input" maxlength="6" placeholder="PIN" style="flex: 1; min-width: 0; height: 28px; padding: 4px 8px; font-size: 12px; border-radius: var(--radius-sm);" @keyup.enter="handlePinSubmit" />
               <button class="btn btn-primary-outline btn-sm" style="padding: 0 10px; flex-shrink: 0; height: 28px;" :disabled="pinInput.length < 4" @click="handlePinSubmit" :title="isInitialized ? $t('settings.p2p_btn_unlock') : '设置 PIN 码'">
@@ -81,7 +95,7 @@
           </div>
           <div class="service-info">
             <span class="service-name">{{ $t('settings.channel_wechat') }}</span>
-            <span class="service-sub">{{ $t('settings.channel_wechat_desc') }}</span>
+            <span class="service-sub" style="display: flex; gap: 8px; align-items: center;">{{ $t('settings.channel_wechat_desc') }}</span>
           </div>
           <span class="service-status-dot" :class="wechatConnected ? 'dot-connected' : 'dot-disconnected'"></span>
         </div>
@@ -105,7 +119,7 @@
           </div>
           <div class="service-info">
             <span class="service-name">{{ $t('settings.channel_telegram') }}</span>
-            <span class="service-sub">Telegram Bot</span>
+            <span class="service-sub" style="display: flex; gap: 8px; align-items: center;">Telegram Bot</span>
           </div>
           <span class="service-status-dot" :class="tgToken ? 'dot-connected' : 'dot-disconnected'"></span>
         </div>
@@ -148,7 +162,7 @@
           </div>
           <div class="service-info">
             <span class="service-name">{{ $t('settings.channel_discord') }}</span>
-            <span class="service-sub">Discord Bot</span>
+            <span class="service-sub" style="display: flex; gap: 8px; align-items: center;">Discord Bot</span>
           </div>
           <span class="service-status-dot" :class="discordToken ? 'dot-connected' : 'dot-disconnected'"></span>
         </div>
@@ -207,7 +221,7 @@
           </div>
           <div class="service-info">
             <span class="service-name">{{ $t('settings.channel_wechat') }}</span>
-            <span class="service-sub">{{ $t('settings.channel_wechat_desc') }}</span>
+            <span class="service-sub" style="display: flex; gap: 8px; align-items: center;">{{ $t('settings.channel_wechat_desc') }}</span>
           </div>
           <span class="service-status-dot" :class="wechatConnected ? 'dot-connected' : 'dot-disconnected'"></span>
         </div>
@@ -231,7 +245,7 @@
           </div>
           <div class="service-info">
             <span class="service-name">{{ $t('settings.channel_telegram') }}</span>
-            <span class="service-sub">Telegram Bot</span>
+            <span class="service-sub" style="display: flex; gap: 8px; align-items: center;">Telegram Bot</span>
           </div>
           <span class="service-status-dot" :class="tgToken ? 'dot-connected' : 'dot-disconnected'"></span>
         </div>
@@ -274,7 +288,7 @@
           </div>
           <div class="service-info">
             <span class="service-name">{{ $t('settings.channel_discord') }}</span>
-            <span class="service-sub">Discord Bot</span>
+            <span class="service-sub" style="display: flex; gap: 8px; align-items: center;">Discord Bot</span>
           </div>
           <span class="service-status-dot" :class="discordToken ? 'dot-connected' : 'dot-disconnected'"></span>
         </div>
@@ -349,7 +363,7 @@
           </div>
           <div class="service-info">
             <span class="service-name">{{ $t('settings.conn_lark_name') }}</span>
-            <span class="service-sub">{{ $t('settings.conn_lark_desc') }}</span>
+            <span class="service-sub" style="display: flex; gap: 8px; align-items: center;">{{ $t('settings.conn_lark_desc') }}</span>
           </div>
           <span class="service-status-dot" :class="isConnected('lark') ? 'dot-connected' : 'dot-disconnected'"></span>
         </div>
@@ -409,7 +423,7 @@
           </div>
           <div class="service-info">
             <span class="service-name">Google Calendar</span>
-            <span class="service-sub">{{ $t('settings.conn_native_integration') }}</span>
+            <span class="service-sub" style="display: flex; gap: 8px; align-items: center;">{{ $t('settings.conn_native_integration') }}</span>
           </div>
           <span class="service-status-dot" :class="isConnected('google') ? 'dot-connected' : 'dot-disconnected'"></span>
         </div>
@@ -482,7 +496,7 @@
           </div>
           <div class="service-info">
             <span class="service-name" style="color: var(--text-secondary);">Outlook 365</span>
-            <span class="service-sub">{{ $t('settings.conn_quick_connect') }}</span>
+            <span class="service-sub" style="display: flex; gap: 8px; align-items: center;">{{ $t('settings.conn_quick_connect') }}</span>
           </div>
           <label class="mcp-switch" title="接入服务" @click.prevent>
             <input type="checkbox" :checked="false" />
@@ -499,7 +513,7 @@
           </div>
           <div class="service-info">
             <span class="service-name" style="color: var(--text-secondary);">{{ $t('settings.mcp_add') }}</span>
-            <span class="service-sub">{{ $t('settings.mcp_custom') }}</span>
+            <span class="service-sub" style="display: flex; gap: 8px; align-items: center;">{{ $t('settings.mcp_custom') }}</span>
           </div>
         </div>
       </div>
@@ -720,8 +734,45 @@
       </div>
     </div>
   </Transition>
-</template>
 
+  <!-- 同步日志 Modal -->
+  <Transition name="briefing-fade">
+    <div v-if="showSyncLogsModal" class="wechat-modal-overlay" @click.self="showSyncLogsModal = false" style="z-index: 10000;">
+      <div class="morning-briefing wechat-qr-modal" style="width: 500px; max-width: 90vw; border-radius: var(--radius-lg); background: var(--bg-secondary); border: 1px solid var(--border-subtle); overflow: hidden; box-shadow: var(--shadow-lg);">
+        <div class="briefing-header" style="display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid var(--border-subtle); background: var(--bg-tertiary);">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <div class="briefing-icon" style="color: var(--text-primary); display: flex; align-items: center;"><Info :size="18" /></div>
+            <div class="briefing-title" style="font-size: 14px; font-weight: 600; color: var(--text-primary);">同步日志</div>
+          </div>
+          <button class="briefing-close" @click="showSyncLogsModal = false" title="关闭" style="background: none; border: none; color: var(--text-tertiary); cursor: pointer; padding: 4px; border-radius: 4px; display: flex; align-items: center; justify-content: center;">
+            <X :size="14" />
+          </button>
+        </div>
+        
+        <div style="padding: 16px; display: flex; flex-direction: column; gap: 8px; max-height: 60vh; overflow-y: auto;">
+          <div v-if="syncLogs.length === 0" style="text-align: center; color: var(--text-tertiary); padding: 20px;">
+            暂无同步日志
+          </div>
+          <div v-else v-for="(log, idx) in syncLogs" :key="idx" style="border: 1px solid var(--border-subtle); border-radius: 8px; padding: 12px; background: var(--bg-primary);">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+              <div style="display: flex; gap: 6px; align-items: center;">
+                <span v-if="log.status === 'success'" style="color: var(--color-success); display: flex;"><CheckCircle :size="14"/></span>
+                <span v-else-if="log.status === 'error'" style="color: var(--color-error); display: flex;"><XCircle :size="14"/></span>
+                <span v-else style="color: var(--text-tertiary); display: flex;"><Info :size="14"/></span>
+                <span style="font-weight: 600; font-size: 13px;">{{ log.action }}</span>
+              </div>
+              <span style="font-size: 12px; color: var(--text-tertiary);">{{ new Date(log.timestamp).toLocaleTimeString() }}</span>
+            </div>
+            <div style="font-size: 13px; color: var(--text-secondary);">
+              {{ log.detail }}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </Transition>
+
+</template>
 <script setup>
 const getAssetUrl = (name) => `/logos/${name}`;
 import { ref, onMounted, onUnmounted, computed, inject, watch } from 'vue';
@@ -746,6 +797,7 @@ const emit = defineEmits(['config-changed']);
 
 const isNativeMobile = inject('isNativeMobile', false);
 const isMobile = inject('isMobile', ref(false));
+const lastSyncTime = inject('lastSyncTime', ref(''));
 const hideDesktopChannels = computed(() => isNativeMobile || isMobile.value);
 
 import { useDialog } from '@/composables/useDialog.js';
@@ -837,7 +889,7 @@ const handleMobileScan = async () => {
       if (window.appAPI.relayHandshake) {
         updateStep('relay_connect', 'running', '');
         try {
-          const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Relay Timeout')), 5000));
+          const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Relay Timeout')), 15000));
           await Promise.race([
             window.appAPI.relayHandshake(payload.device_id),
             timeoutPromise
@@ -946,6 +998,19 @@ const isInitialized = ref(true); // Will fetch from backend
 const isUnlocked = ref(false);
 const showP2pModal = ref(false);
 const showDevicesModal = ref(false);
+
+const showSyncLogsModal = ref(false);
+const syncLogs = ref([]);
+
+const openSyncLogs = async () => {
+  try {
+    syncLogs.value = await invoke('get_sync_logs');
+  } catch (e) {
+    console.error("Failed to load sync logs:", e);
+  }
+  alert("Click registered! Logs: " + syncLogs.value.length); showSyncLogsModal.value = true;
+};
+
 const pinInput = ref('');
 const pairingInfo = ref({
   device_id: '',
@@ -1030,6 +1095,14 @@ const fetchConnectedDevices = async () => {
 const isDeviceOnline = (dev) => {
   // Consider online if seen within last 2 minutes (120000ms)
   return Date.now() - dev.last_seen < 120000;
+};
+
+const formatSyncTime = (tsStr) => {
+  if (!tsStr) return '未知';
+  const ts = parseInt(tsStr);
+  if (isNaN(ts)) return '未知';
+  const d = new Date(ts);
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 };
 
 const formatTime = (ts) => {

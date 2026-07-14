@@ -307,6 +307,7 @@ import BottomNavigation from './components/BottomNavigation.vue';
 import GlobalDialog from './components/GlobalDialog.vue';
 import { Inbox, Settings, Plus, X, Sun, Moon, ChevronLeft, ChevronRight, ChevronDown, Search, MessageSquare, CalendarDays, Brain, Plug, FolderOpen, Palette, Info, Sunrise, Waypoints, Menu, Smartphone } from 'lucide-vue-next';
 import { useI18n } from 'vue-i18n';
+import { listen } from '@tauri-apps/api/event';
 import { getModelMeta } from '@/composables/useModelSwitcher';
 
 // Tauri Window API (用于自定义窗口按钮)
@@ -325,6 +326,10 @@ const activeSettingsPanel = ref('model'); // 'model' | 'connections' | 'workspac
 const chatViewRef = ref(null);
 const quickNoteRef = ref(null);
 const mobileDrawerOpen = ref(false);
+
+const lastSyncTime = ref(localStorage.getItem('bob-last-sync-time') || '');
+provide('lastSyncTime', lastSyncTime);
+
 // ── 响应式移动端检测 (宽高比 1:1 断点) ──
 function checkMobile() {
   return window.innerHeight > window.innerWidth;
@@ -480,6 +485,7 @@ const settingsNavItems = computed(() => [
 // ── 生命周期 ─────────────────────────────────────────
 let unlistenConfigReconciled = null;
 let unlistenRemoteMessage = null;
+let unlistenSync = null;
 
 function handleBackButton() {
   // 1. 模态弹窗层
@@ -526,6 +532,14 @@ function handleBackButton() {
 }
 
 onMounted(async () => {
+  unlistenSync = await listen('sync:completed', (event) => {
+    if (event.payload && event.payload.timestamp) {
+      lastSyncTime.value = event.payload.timestamp.toString();
+      localStorage.setItem('bob-last-sync-time', lastSyncTime.value);
+      console.log(`[Sync] sync:completed received (${event.payload.direction}), updated lastSyncTime.`);
+    }
+  });
+
   // ── 响应式布局监听 ──
   window.addEventListener('resize', onResizeHandler);
   
@@ -675,6 +689,7 @@ onUnmounted(() => {
   clearTimeout(resizeDebounce);
   if (unlistenConfigReconciled) unlistenConfigReconciled();
   if (unlistenRemoteMessage) unlistenRemoteMessage();
+  if (unlistenSync) unlistenSync();
   if (unlistenSchedulerGlobal) unlistenSchedulerGlobal();
   if (searchDebounce) clearTimeout(searchDebounce);
 });

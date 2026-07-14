@@ -805,8 +805,27 @@ pub fn start_relay_listener(app: AppHandle) {
                     });
                     let _ = ws_stream.send(Message::Text(reg_msg.to_string().into())).await;
 
-                    while let Some(msg) = ws_stream.next().await {
-                        match msg {
+                    use futures_util::{StreamExt, SinkExt};
+                    let (mut tx, mut rx) = ws_stream.split();
+                    let mut ping_interval = tokio::time::interval(std::time::Duration::from_secs(30));
+
+                    loop {
+                        tokio::select! {
+                            _ = ping_interval.tick() => {
+                                if let Err(e) = tx.send(Message::Ping(bytes::Bytes::new())).await {
+                                    log::error!("[Sync Engine] Ping failed: {}", e);
+                                    break;
+                                }
+                            }
+                            msg_opt = rx.next() => {
+                                let msg = match msg_opt {
+                                    Some(m) => m,
+                                    None => {
+                                        log::error!("[Sync Engine] Relay WS connection closed (None)");
+                                        break;
+                                    }
+                                };
+                                match msg {
                             Ok(Message::Text(text)) => {
                                 if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
                                     if let Some(msg_type) = json.get("type").and_then(|v| v.as_str()) {
@@ -831,7 +850,7 @@ pub fn start_relay_listener(app: AppHandle) {
                                                 "type": "ack",
                                                 "target_device_id": from_id,
                                             });
-                                            let _ = ws_stream.send(Message::Text(ack.to_string().into())).await;
+                                            let _ = tx.send(Message::Text(ack.to_string().into())).await;
                                             
                                             // Emit to frontend
                                             let _ = app.emit("sync:device_connected", serde_json::json!({
@@ -856,7 +875,7 @@ pub fn start_relay_listener(app: AppHandle) {
                                                                 "data": sync_data
                                                             }
                                                         });
-                                                        let _ = ws_stream.send(Message::Text(pull_resp.to_string().into())).await;
+                                                        let _ = tx.send(Message::Text(pull_resp.to_string().into())).await;
                                                     }
                                                 } else if action == "push" {
                                                     log::info!("[Sync Engine] Received proxy push request from {}", from_id);
@@ -900,8 +919,10 @@ pub fn start_relay_listener(app: AppHandle) {
                             }
                             _ => {}
                         }
-                    }
-                }
+                            } // closes rx.next() =>
+                        } // closes tokio::select!
+                    } // closes loop
+                } // closes Ok((ws_stream, _)) =>
                 Err(e) => {
                     log::error!("[Sync Engine] Failed to connect to Relay: {}", e);
                 }
@@ -911,4 +932,15 @@ pub fn start_relay_listener(app: AppHandle) {
             tokio::time::sleep(std::time::Duration::from_secs(5)).await;
         }
     });
+}
+
+#[tauri::command]
+pub fn get_sync_logs(app: tauri::AppHandle) -> Result<Vec<serde_json::Value>, String> {
+    let path = crate::get_data_dir().join("sync_history.json");
+    if let Ok(data) = std::fs::read_to_string(&path) {
+        if let Ok(logs) = serde_json::from_str::<Vec<serde_json::Value>>(&data) {
+            return Ok(logs);
+        }
+    }
+    Ok(vec![])
 }
