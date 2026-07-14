@@ -813,14 +813,12 @@ const pairingError = ref(false);
 const pairingSteps = ref([]);
 
 function initPairingSteps() {
-  pairingSteps.value = [
-    { id: 'parse',         label: '浜岀淮鐮佽В鏋?,         status: 'pending', detail: '' },
-    { id: 'save_config',   label: '淇濆瓨閰嶅閰嶇疆',       status: 'pending', detail: '' },
-    { id: 'relay_connect', label: '杩炴帴 Relay 鏈嶅姟鍣?,  status: 'pending', detail: '' },
-    { id: 'relay_notify',  label: 'Relay 鈫?閫氱煡 PC',   status: 'pending', detail: '' },
-    { id: 'relay_ack',     label: '绛夊緟 PC 鍥炲簲',       status: 'pending', detail: '' },
-    { id: 'lan_sync',      label: 'LAN 鐩磋繛鍚屾',       status: 'pending', detail: '' },
-    { id: 'relay_sync',    label: 'Relay 闅ч亾鍚屾',     status: 'pending', detail: '' },
+    pairingSteps.value = [
+    { id: 'parse',         label: '二维码解码',         status: 'pending', detail: '' },
+    { id: 'save_config',   label: '保存配对配置',       status: 'pending', detail: '' },
+    { id: 'lan_sync',      label: '尝试局域网直连同步',   status: 'pending', detail: '' },
+    { id: 'relay_handshake', label: '尝试外网隧道穿透',  status: 'pending', detail: '' },
+    { id: 'relay_sync',    label: '外网隧道数据同步',     status: 'pending', detail: '' },
   ];
   pairingDone.value = false;
   pairingError.value = false;
@@ -886,60 +884,88 @@ const handleMobileScan = async () => {
       await window.appAPI.setConfig('pairing_payload', payload);
       updateStep('save_config', 'done', '');
 
-      // Step 3: Relay Handshake (3a/3b/3c are emitted from Rust side)
+            // Step 3: 尝试局域网直连同步 (LAN Sync)
+      if (window.appAPI.triggerMobileSync) {
+        updateStep('lan_sync', 'running', '');
+        let lanSuccess = false;
+        try {
+          const syncTimeout = new Promise((_, reject) => setTimeout(() => reject(new Error('Sync Timeout')), 15000));
+          
+          // Force LAN only for this attempt
+          const lanPayload = { ...payload, skip_relay: true };
+          
+          await Promise.race([
+            window.appAPI.triggerMobileSync(lanPayload),
+            syncTimeout
+          ]);
+          
+          const lanStep = pairingSteps.value.find(s => s.id === 'lan_sync');
+          if (lanStep && (lanStep.status === 'done' || lanStep.status === 'running')) {
+            updateStep('lan_sync', 'done', '');
+            lanSuccess = true;
+          }
+        } catch (e) {
+          updateStep('lan_sync', 'error', 'Error: ' + String(e));
+        }
+
+        if (lanSuccess) {
+          updateStep('relay_handshake', 'skipped', '局域网已连接，无需外网穿透');
+          updateStep('relay_sync', 'skipped', '');
+          pairingDone.value = true;
+          pairingError.value = false;
+          return;
+        }
+      }
+
+      // Step 4: 局域网失败，尝试外网隧道握手 (Relay Handshake)
       if (window.appAPI.relayHandshake) {
-        updateStep('relay_connect', 'running', '');
+        updateStep('relay_handshake', 'running', '');
         try {
           const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Relay Timeout')), 15000));
           await Promise.race([
             window.appAPI.relayHandshake(payload.device_id, payload.public_key),
             timeoutPromise
           ]);
-          // Rust events update 3a/3b/3c individually, but ensure all marked done on success
+          updateStep('relay_handshake', 'done', '');
         } catch (e) {
-          // Relay handshake failed. We must continue to try LAN sync!
-          console.warn('Relay handshake failed, skipping to data sync...', e);
-          updateStep('relay_connect', 'error', 'Error: ' + String(e));
+          console.warn('Relay handshake failed', e);
+          const errStr = String(e);
+          if (!errStr.includes('ERR-PAIRING-03')) {
+            updateStep('relay_handshake', 'error', 'Error: ' + errStr);
+          } else {
+            updateStep('relay_handshake', 'error', 'Error: PC 未响应握手');
+          }
+          pairingDone.value = true;
+          pairingError.value = true;
+          return; // If handshake fails, no point in syncing
         }
-      } else {
-        updateStep('relay_connect', 'skipped', '鏃?Relay 鎻℃墜鎺ュ彛');
-        updateStep('relay_notify', 'skipped', '');
-        updateStep('relay_ack', 'skipped', '');
       }
 
-      // Step 4 & 5: Data Sync (lan_sync / relay_sync are emitted from Rust side)
+      // Step 5: 外网隧道同步 (Relay Sync)
       if (window.appAPI.triggerMobileSync) {
-        updateStep('lan_sync', 'running', '');
+        updateStep('relay_sync', 'running', '');
         try {
-          const syncTimeout = new Promise((_, reject) => setTimeout(() => reject(new Error('Sync Timeout')), 15000));
+          const syncTimeout = new Promise((_, reject) => setTimeout(() => reject(new Error('Sync Timeout')), 45000));
+          const relayPayload = { ...payload, skip_relay: false, local_ips: [] }; // Force Relay
+          
           await Promise.race([
-            window.appAPI.triggerMobileSync(payload),
+            window.appAPI.triggerMobileSync(relayPayload),
             syncTimeout
           ]);
-          // If we got here without error, sync succeeded (LAN or Relay)
-          // Check which one actually succeeded
-          const lanStep = pairingSteps.value.find(s => s.id === 'lan_sync');
+          
           const relayStep = pairingSteps.value.find(s => s.id === 'relay_sync');
-          if (lanStep.status !== 'done' && relayStep.status !== 'done') {
-            // Fallback: mark lan as done if no events came through (old PC)
-            updateStep('lan_sync', 'done', '');
+          if (relayStep && (relayStep.status === 'done' || relayStep.status === 'running')) {
+            updateStep('relay_sync', 'done', '');
           }
-          if (relayStep.status === 'pending') {
-            updateStep('relay_sync', 'skipped', 'LAN 宸叉垚鍔燂紝鏃犻渶浣跨敤');
-          }
-
           pairingDone.value = true;
           pairingError.value = false;
         } catch (e) {
+          updateStep('relay_sync', 'error', 'Error: ' + String(e));
           pairingDone.value = true;
           pairingError.value = true;
-          // The specific failing step was already marked by Rust events
         }
-      } else {
-        updateStep('lan_sync', 'error', '鏃犲悓姝ユ帴鍙?);
-        pairingDone.value = true;
-        pairingError.value = true;
       }
+
     } catch (e) {
       pairingDone.value = true;
       pairingError.value = true;
