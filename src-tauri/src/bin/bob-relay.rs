@@ -141,9 +141,11 @@ async fn handle_receiver(mut socket: WebSocket, room_id: String, state: AppState
 #[derive(serde::Deserialize)]
 struct DeviceIncomingMessage {
     #[serde(rename = "type")]
-    msg_type: String, // "query" | "notify"
+    msg_type: String, // "register" | "query" | "notify" | "ack" | "proxy"
     target_device_id: Option<String>,
     payload: Option<serde_json::Value>,
+    #[serde(rename = "deviceId")]
+    device_id: Option<String>,
 }
 
 #[derive(serde::Serialize)]
@@ -176,11 +178,14 @@ async fn handle_device_session(socket: WebSocket, device_id: String, state: AppS
     let (mut sink, mut stream) = socket.split();
     let (tx, mut rx) = tokio::sync::mpsc::channel::<Message>(100);
 
+    // Track effective device ID (may be corrected by register message)
+    let mut effective_id = device_id.clone();
+
     // 将设备注册到全局状态
     {
         let mut app_state = state.write().await;
         app_state.devices.insert(
-            device_id.clone(),
+            effective_id.clone(),
             DeviceSession { tx: tx.clone() },
         );
     }
@@ -196,12 +201,23 @@ async fn handle_device_session(socket: WebSocket, device_id: String, state: AppS
 
     // 读任务：接收 WebSocket 消息并处理
     let state_clone = state.clone();
-    let device_id_clone = device_id.clone();
     
     while let Some(Ok(msg)) = stream.next().await {
         if let Message::Text(text) = msg {
             if let Ok(incoming) = serde_json::from_str::<DeviceIncomingMessage>(&text) {
                 match incoming.msg_type.as_str() {
+                    "register" => {
+                        // Re-register with correct ID (fixes NGINX URL stripping)
+                        if let Some(new_id) = incoming.device_id {
+                            if new_id != effective_id {
+                                println!("🔄 Device re-registered: {} -> {}", effective_id, new_id);
+                                let mut app_state = state_clone.write().await;
+                                app_state.devices.remove(&effective_id);
+                                app_state.devices.insert(new_id.clone(), DeviceSession { tx: tx.clone() });
+                                effective_id = new_id;
+                            }
+                        }
+                    }
                     "query" => {
                         if let Some(target_id) = incoming.target_device_id {
                             let is_online = {
@@ -221,7 +237,7 @@ async fn handle_device_session(socket: WebSocket, device_id: String, state: AppS
                             }
                         }
                     }
-                    "notify" | "ack" => {
+                    "notify" | "ack" | "proxy" => {
                         let msg_type = incoming.msg_type.clone();
                         if let Some(target_id) = incoming.target_device_id {
                             let target_tx = {
@@ -233,7 +249,7 @@ async fn handle_device_session(socket: WebSocket, device_id: String, state: AppS
                                 let forward_msg = DeviceOutgoingMessage {
                                     msg_type,
                                     target_device_id: None,
-                                    from_device_id: Some(device_id_clone.clone()),
+                                    from_device_id: Some(effective_id.clone()),
                                     online: None,
                                     payload: incoming.payload,
                                     error: None,
@@ -263,13 +279,13 @@ async fn handle_device_session(socket: WebSocket, device_id: String, state: AppS
         }
     }
 
-    // 清理资源
+    // 清理资源 (use effective_id which may have been corrected by register)
     write_task.abort();
     {
         let mut app_state = state.write().await;
-        app_state.devices.remove(&device_id);
+        app_state.devices.remove(&effective_id);
     }
-    println!("📴 Device unregistered: {}", device_id);
+    println!("📴 Device unregistered: {}", effective_id);
 }
 
 // 隐蔽隧道：JSON-over-HTTPS 代理引擎

@@ -181,7 +181,7 @@ pub async fn relay_handshake(app: AppHandle, target_device_id: String) -> Result
     let platform = std::env::consts::OS.to_string();
     
     let relay_url = "wss://relay.bobbik.org".to_string();
-    let ws_url = format!("{}/ws/device/{}", relay_url, my_device_id);
+    let ws_url = format!("{}/ws/device/{}", relay_url, url_encode_device_id(&my_device_id));
 
     // ── Stage 3a: Connect to Relay server ──
     let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_connect", "status": "running"}));
@@ -652,7 +652,7 @@ async fn do_active_sync(app: AppHandle, payload: SyncCommandPayload) -> Result<(
         let config = crate::read_config();
         let my_device_id = config.get("device_id").and_then(|v| v.as_str()).unwrap_or("unknown").to_string();
         let relay_url = "wss://relay.bobbik.org".to_string();
-        let ws_url = format!("{}/ws/device/{}", relay_url, my_device_id);
+        let ws_url = format!("{}/ws/device/{}", relay_url, url_encode_device_id(&my_device_id));
 
         let (mut ws_stream, _) = match tokio::time::timeout(tokio::time::Duration::from_secs(15), connect_websocket_robust(&ws_url)).await {
             Ok(Ok(s)) => s,
@@ -773,6 +773,11 @@ use tokio::net::TcpStream;
 use tokio_tungstenite::client_async_tls;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 
+/// URL-encode Base64 device_id to prevent +, /, = from being mangled in URL paths
+fn url_encode_device_id(id: &str) -> String {
+    id.replace('+', "%2B").replace('/', "%2F").replace('=', "%3D")
+}
+
 async fn connect_websocket_robust(ws_url: &str) -> Result<(tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<TcpStream>>, tokio_tungstenite::tungstenite::handshake::client::Response), String> {
     log::info!("[WS Robust] Connecting to {} using standard connect_async", ws_url);
     tokio_tungstenite::connect_async(ws_url).await.map_err(|e| e.to_string())
@@ -794,7 +799,7 @@ pub fn start_relay_listener(app: AppHandle) {
         let device_id = device_id_opt.unwrap();
 
         let relay_url = "wss://relay.bobbik.org".to_string();
-        let ws_url = format!("{}/ws/device/{}", relay_url, device_id);
+        let ws_url = format!("{}/ws/device/{}", relay_url, url_encode_device_id(&device_id));
 
         loop {
             match connect_websocket_robust(&ws_url).await {
