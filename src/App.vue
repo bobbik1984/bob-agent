@@ -551,7 +551,7 @@ onMounted(async () => {
           }
           if (ops.length > 0) {
             await window.appAPI.writeMobileOutbox(ops);
-            window.dispatchEvent(new CustomEvent('toast', { detail: { type: 'success', message: 已保存  条分享内容 } }));
+            window.dispatchEvent(new CustomEvent('toast', { detail: { type: 'success', message: `已保存 ${ops.length} 条分享内容` } }));
           }
         }
       } catch (e) {
