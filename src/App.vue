@@ -542,7 +542,7 @@ onMounted(async () => {
             ops.push({
               action: 'create_note',
               payload: {
-                content: intent.type === 'text' ? intent.content : [Shared Image: ],
+                content: intent.type === 'text' ? intent.content : `[Shared Image: ${intent.filename}]`,
                 timestamp: Date.now(),
                 source: 'mobile_share'
               }
