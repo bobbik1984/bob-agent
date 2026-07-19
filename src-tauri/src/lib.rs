@@ -927,6 +927,8 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            sync_engine::get_shared_intents,
+            sync_engine::clear_shared_intent,
             abort_generation,
             barcode::system_decode_barcode,
             barcode::system_decode_barcode_base64,

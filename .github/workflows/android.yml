@@ -65,6 +65,13 @@ jobs:
             
             # Lock portrait mode in activity
             sed -i '/<activity/a \            android:screenOrientation="portrait"' $MANIFEST
+            
+            echo "Injecting ShareActivity intent filter..."
+            python scripts/patch_android_intent.py
+            
+            echo "Copying ShareActivity.kt to package dir..."
+            mkdir -p src-tauri/gen/android/app/src/main/java/bob/agent
+            cp scripts/android_patches/ShareActivity.kt src-tauri/gen/android/app/src/main/java/bob/agent/
           else
             echo "Android project already initialized."
           fi

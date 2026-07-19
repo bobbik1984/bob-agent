@@ -725,3 +725,17 @@
 - [ ] T-2612: 前端 `ChatView` 监听该事件，自动以 Bob 的身份将 AGY 的执行总结插入对话流，并通过 Sync Engine 实时推送到手机端。
 - [ ] T-2613: 开发轻量级的悬浮状态卡片（"AGY 正在 X1 Tablet 执行任务..."），供手机和 PC 端实时感知远端运行状态。
 
+
+## 📍 目标 27: 移动端系统级分享接入 (Share to Bob)
+> 🎯 **目标**: 让 Bob 成为 Android 系统的全局数据黑洞。用户可以在相册、浏览器、微信等任何 App 中，通过系统的“分享”面板将图片、链接、文本一键发送给 Bob，实现无缝的信息采集。
+> 📋 **技术方案**: 采用“Github CI 原生代码热注入”方案。在 CI 流水线中向生成的 `AndroidManifest.xml` 注入 `intent-filter`，并将拦截 Intent 的 Kotlin 原生代码热注入到编译目录，最后由前端异步消费。
+
+### Phase 1: 基础设施热注入脚本编写
+- [ ] 编写 `ShareReceiver.kt` 原生拦截器，负责接收 Intent 并将文件保存到 Tauri 缓存目录
+- [ ] 编写 Python 补丁脚本 `scripts/patch_android_intent.py`，用于给 Manifest 注入 `<intent-filter>`
+- [ ] 更新 `android.yml`，在 `tauri android init` 之后立刻执行注入脚本和 Kotlin 文件拷贝
+
+### Phase 2: 前端消费与同步联动
+- [ ] 在前端启动时，添加对分享缓存目录的轮询或监听机制
+- [ ] 设计“收到分享内容”的拦截弹窗或直接静默入库（作为 Note 或 Task）
+- [ ] 确保落盘的数据能够自动进入 Outbox 并在下一次连接时同步给 PC

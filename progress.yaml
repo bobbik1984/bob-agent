@@ -86,3 +86,11 @@ phases:
     status: done
   - text: T-2301 扫码配对 MVP (局域网直连 + VPS 信令降级 + Ed25519 握手)
     status: done
+- name: V0.7 移动端全局分享接入 (Share to Bob)
+  tasks:
+  - text: "设计 Github CI 原生 Kotlin 代码热注入方案"
+    status: done
+  - text: "编写 ShareReceiver.kt 与 Manifest 注入脚本"
+    status: todo
+  - text: "实现前端缓存监听与入库同步逻辑"
+    status: todo

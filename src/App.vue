@@ -531,7 +531,35 @@ function handleBackButton() {
   return true;
 }
 
-onMounted(async () => {
+onMounted(async () => {\n    if (isNativeMobile.value) {\n
+    const checkSharedIntents = async () => {
+      try {
+        const intents = await window.__TAURI__.invoke('get_shared_intents');
+        if (intents && intents.length > 0) {
+          const ops = [];
+          for (const intent of intents) {
+            ops.push({
+              action: 'create_note',
+              payload: {
+                content: intent.type === 'text' ? intent.content : [Shared Image: ],
+                timestamp: Date.now(),
+                source: 'mobile_share'
+              }
+            });
+            await window.__TAURI__.invoke('clear_shared_intent', { filename: intent.filename });
+          }
+          if (ops.length > 0) {
+            await window.appAPI.writeMobileOutbox(ops);
+            window.dispatchEvent(new CustomEvent('toast', { detail: { type: 'success', message: 已保存  条分享内容 } }));
+          }
+        }
+      } catch (e) {
+        console.warn('Share intent check failed:', e);
+      }
+    };
+    checkSharedIntents();
+    window.addEventListener('focus', checkSharedIntents);
+\n    }
   unlistenSync = await listen('sync:completed', (event) => {
     if (event.payload && event.payload.timestamp) {
       lastSyncTime.value = event.payload.timestamp.toString();
