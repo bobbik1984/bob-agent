@@ -531,7 +531,8 @@ function handleBackButton() {
   return true;
 }
 
-onMounted(async () => {\n    if (isNativeMobile.value) {\n
+onMounted(async () => {
+  if (isNativeMobile.value) {
     const checkSharedIntents = async () => {
       try {
         const intents = await window.__TAURI__.invoke('get_shared_intents');
@@ -559,7 +560,7 @@ onMounted(async () => {\n    if (isNativeMobile.value) {\n
     };
     checkSharedIntents();
     window.addEventListener('focus', checkSharedIntents);
-\n    }
+  }
   unlistenSync = await listen('sync:completed', (event) => {
     if (event.payload && event.payload.timestamp) {
       lastSyncTime.value = event.payload.timestamp.toString();
