@@ -204,11 +204,12 @@ const PIXELS_PER_HOUR = 60; // 每小时60px高度
 
 // 当前时间线
 const currentTimeTop = ref(0);
+const nowTracker = ref(new Date());
 let timeInterval = null;
 
 function updateCurrentTime() {
-  const now = new Date();
-  currentTimeTop.value = (now.getHours() + now.getMinutes() / 60) * PIXELS_PER_HOUR;
+  nowTracker.value = new Date();
+  currentTimeTop.value = (nowTracker.value.getHours() + nowTracker.value.getMinutes() / 60) * PIXELS_PER_HOUR;
 }
 
 function scrollToCurrentTime() {
@@ -623,7 +624,7 @@ async function updateEventTimes(id, startTime, endTime) {
 const weekdayNames = computed(() => tm('timeline.days') || ['周日', '周一', '周二', '周三', '周四', '周五', '周六']);
 
 const days = computed(() => {
-  const today = new Date();
+  const today = new Date(nowTracker.value);
   today.setHours(0, 0, 0, 0);
   const result = [];
   
