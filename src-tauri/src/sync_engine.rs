@@ -1,4 +1,4 @@
-﻿use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, command, Manager, Emitter};
 use std::sync::{Arc, RwLock};
 use log::{info, error};
@@ -735,11 +735,18 @@ pub async fn do_active_sync(app: AppHandle, payload: SyncCommandPayload) -> Resu
         }
     }
 
-    if sync_success || payload.skip_relay { return Ok(()); }
+    if sync_success {
+        return Ok(());
+    }
 
-    if !sync_success {
-        let _ = app.emit("sync:progress", serde_json::json!({"stage": "lan_sync", "status": "error", "detail": "ERR-SYNC-01: 鎵€鏈夊眬鍩熺綉 IP 鍧囦笉鍙揪"}));
-        info!("[Sync Engine] All LAN attempts failed. Falling back to Relay Tunnel.");
+    let _ = app.emit("sync:progress", serde_json::json!({"stage": "lan_sync", "status": "error", "detail": "ERR-SYNC-01: 所有局域网 IP 均不可达"}));
+    info!("[Sync Engine] All LAN attempts failed.");
+
+    if payload.skip_relay {
+        return Err("ERR-SYNC-01: LAN Sync failed".to_string());
+    }
+
+    info!("[Sync Engine] Falling back to Relay Tunnel.");
         
         // 鈹€鈹€ Stage 5: Relay tunnel sync 鈹€鈹€
         let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_sync", "status": "running", "detail": "杩炴帴 Relay 闅ч亾..."}));
@@ -877,8 +884,6 @@ pub async fn do_active_sync(app: AppHandle, payload: SyncCommandPayload) -> Resu
             let _ = ws_stream.send(Message::Text(push_db_req.to_string().into())).await;
             info!("[Sync Engine] Sent proxy push_db request via Relay.");
         }
-    }
-
     Ok(())
 }
 
