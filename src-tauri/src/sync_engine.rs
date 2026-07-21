@@ -1,8 +1,11 @@
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, command, Manager, Emitter};
 use std::sync::{Arc, RwLock};
+use std::sync::atomic::{AtomicBool, Ordering};
 use log::{info, error};
 use std::collections::HashMap;
+
+pub static RELAY_CONNECTED: AtomicBool = AtomicBool::new(false);
 
 use std::path::PathBuf;
 use std::fs;
@@ -925,6 +928,7 @@ pub fn start_relay_listener(app: AppHandle) {
             match connect_websocket_robust(&ws_url).await {
                 Ok((mut ws_stream, _)) => {
                     log::info!("[Sync Engine] Connected to Relay WebSocket: {}", ws_url);
+                    RELAY_CONNECTED.store(true, Ordering::SeqCst);
                     
                     // Explicitly register device ID (fixes NGINX URL stripping bugs)
                     let reg_msg = serde_json::json!({
@@ -935,6 +939,7 @@ pub fn start_relay_listener(app: AppHandle) {
 
                     use futures_util::{StreamExt, SinkExt};
                     let (mut tx, mut rx) = ws_stream.split();
+                    let (tx_mpsc, mut rx_mpsc) = tokio::sync::mpsc::channel::<Message>(100);
                     let mut ping_interval = tokio::time::interval(std::time::Duration::from_secs(30));
 
                     let mut last_activity = crate::now_ms();
@@ -946,9 +951,14 @@ pub fn start_relay_listener(app: AppHandle) {
                                     log::error!("[Sync Engine] Relay connection timeout: No activity for 90s. Reconnecting...");
                                     break;
                                 }
-                                if let Err(e) = tx.send(Message::Ping(bytes::Bytes::new())).await {
-                                    log::error!("[Sync Engine] Ping failed: {}", e);
-                                    break;
+                                let _ = tx_mpsc.send(Message::Ping(bytes::Bytes::new())).await;
+                            }
+                            mpsc_msg_opt = rx_mpsc.recv() => {
+                                if let Some(msg) = mpsc_msg_opt {
+                                    if let Err(e) = tx.send(msg).await {
+                                        log::error!("[Sync Engine] Failed to send WS message: {}", e);
+                                        break;
+                                    }
                                 }
                             }
                             msg_opt = rx.next() => {
@@ -978,7 +988,7 @@ pub fn start_relay_listener(app: AppHandle) {
                                                     "target_device_id": from_id,
                                                     "error": "Unauthorized"
                                                 });
-                                                let _ = tx.send(Message::Text(ack.to_string().into())).await;
+                                                let _ = tx_mpsc.send(Message::Text(ack.to_string().into())).await;
                                                 continue;
                                             }
 
@@ -1000,7 +1010,7 @@ pub fn start_relay_listener(app: AppHandle) {
                                                 "type": "ack",
                                                 "target_device_id": from_id,
                                             });
-                                            let _ = tx.send(Message::Text(ack.to_string().into())).await;
+                                            let _ = tx_mpsc.send(Message::Text(ack.to_string().into())).await;
                                             
                                             // Emit to frontend
                                             let _ = app.emit("sync:device_connected", serde_json::json!({
@@ -1025,7 +1035,7 @@ pub fn start_relay_listener(app: AppHandle) {
                                                             "error": "Unauthorized"
                                                         }
                                                     });
-                                                    let _ = tx.send(Message::Text(err_resp.to_string().into())).await;
+                                                    let _ = tx_mpsc.send(Message::Text(err_resp.to_string().into())).await;
                                                     continue;
                                                 }
                                                 
@@ -1048,7 +1058,7 @@ pub fn start_relay_listener(app: AppHandle) {
                                                                 "data": sync_data
                                                             }
                                                         });
-                                                        if let Err(e) = tx.send(Message::Text(pull_resp.to_string().into())).await {
+                                                        if let Err(e) = tx_mpsc.send(Message::Text(pull_resp.to_string().into())).await {
                                                             log::error!("[Sync Engine] Failed to send pull_response to {}: {}", from_id, e);
                                                         } else {
                                                             log::info!("[Sync Engine] Sent pull_response to {} successfully", from_id);
@@ -1062,6 +1072,55 @@ pub fn start_relay_listener(app: AppHandle) {
                                                             crate::outbox::write_outbox(arr.clone());
                                                         }
                                                     }
+                                                                                                } else if action == "rpc_request" {
+                                                    log::info!("[Sync Engine] Received proxy rpc_request from {}", from_id);
+                                                    let request_id = inner_payload.get("request_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                                                    let instruction = inner_payload.get("instruction").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                                                    let from_id_clone = from_id.to_string();
+                                                    let app_clone = app.clone();
+                                                    let tx_mpsc_clone = tx_mpsc.clone();
+                                                    
+                                                    tauri::async_runtime::spawn(async move {
+                                                        let msgs = vec![serde_json::json!({
+                                                            "role": "user",
+                                                            "content": format!("[移动端 RPC 指令]\n{}", instruction)
+                                                        })];
+                                                        
+                                                        let conv_id = format!("headless_{}", request_id);
+                                                        log::info!("[Sync Engine] Executing Headless Agent for RPC {}", request_id);
+                                                        
+                                                        let result = crate::llm::stream_chat(
+                                                            app_clone,
+                                                            msgs,
+                                                            Some(conv_id.clone()),
+                                                            None,
+                                                            true,
+                                                            "standard".to_string(),
+                                                        ).await;
+                                                        
+                                                        let result_text = if let Some(arr) = result.as_array() {
+                                                            if let Some(last) = arr.last() {
+                                                                last.get("content").and_then(|v| v.as_str()).unwrap_or("Empty response").to_string()
+                                                            } else {
+                                                                "Empty array".to_string()
+                                                            }
+                                                        } else {
+                                                            "Error formatting result".to_string()
+                                                        };
+                                                        
+                                                        let resp = serde_json::json!({
+                                                            "type": "proxy",
+                                                            "target_device_id": from_id_clone,
+                                                            "payload": {
+                                                                "action": "rpc_response",
+                                                                "request_id": request_id,
+                                                                "status": "success",
+                                                                "result": result_text
+                                                            }
+                                                        });
+                                                        
+                                                        let _ = tx_mpsc_clone.send(Message::Text(resp.to_string().into())).await;
+                                                    });
                                                 } else if action == "push_db" {
                                                     log::info!("[Sync Engine] Received proxy push_db request from {}", from_id);
                                                     if let Some(data_val) = inner_payload.get("data") {
@@ -1104,9 +1163,11 @@ pub fn start_relay_listener(app: AppHandle) {
                             } // closes rx.next() =>
                         } // closes tokio::select!
                     } // closes loop
+                    RELAY_CONNECTED.store(false, Ordering::SeqCst);
                 } // closes Ok((ws_stream, _)) =>
                 Err(e) => {
                     log::error!("[Sync Engine] Failed to connect to Relay: {}", e);
+                    RELAY_CONNECTED.store(false, Ordering::SeqCst);
                 }
             }
             
@@ -1167,4 +1228,9 @@ pub fn clear_shared_intent(app: tauri::AppHandle, filename: String) -> Result<()
         let _ = std::fs::remove_file(file_path);
     }
     Ok(())
+}
+
+#[tauri::command]
+pub fn get_p2p_relay_status() -> bool {
+    RELAY_CONNECTED.load(Ordering::SeqCst)
 }

@@ -947,6 +947,7 @@ pub fn run() {
             sync_engine::write_mobile_outbox,
             sync_engine::relay_handshake,
             sync_engine::get_sync_logs,
+            sync_engine::get_p2p_relay_status,
             // 系统状态
             system_is_setup_complete,
             web_drop::start_web_drop,

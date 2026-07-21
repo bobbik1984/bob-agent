@@ -977,13 +977,87 @@ async fn execute_tool_inner(
             let instruction = args.get("instruction").and_then(|v| v.as_str()).unwrap_or("");
             let require_sync = args.get("require_sync").and_then(|v| v.as_bool()).unwrap_or(false);
             
-            // Mock Implementation for Stage 1
-            log::info!("[Mobile Synergy] Intercepted send_to_pc_agent. Instruction: {}, sync: {}", instruction, require_sync);
-            json!({
-                "status": "acknowledged",
-                "message": "已成功拦截跨端工具意图。PC 端后台执行与结果回传管道将在后续版本实装。当前任务已记录。",
-                "instruction_echo": instruction
-            })
+            log::info!("[Mobile Synergy] Invoking send_to_pc_agent. Instruction: {}, sync: {}", instruction, require_sync);
+            
+            let mut pc_device_id = String::new();
+            use tauri::Manager;
+            if let Ok(conn) = app.state::<crate::db::DbState>().0.lock() {
+                if let Ok(id) = conn.query_row("SELECT device_id FROM connected_devices WHERE platform IN ('windows', 'mac', 'linux', 'pc') ORDER BY last_seen DESC LIMIT 1", [], |row| row.get(0)) {
+                    pc_device_id = id;
+                }
+            }
+            if pc_device_id.is_empty() {
+                return json!({ "error": "未找到已绑定的 PC 节点。请确保 PC 端已配对并且在线。" });
+            }
+
+            let config = crate::read_config();
+            let my_device_id = config.get("device_id").and_then(|v| v.as_str()).unwrap_or("mobile").to_string();
+            let request_id = format!("req_{}", crate::now_ms());
+            
+            let rpc_payload = serde_json::json!({
+                "type": "proxy",
+                "from_device_id": my_device_id,
+                "target_device_id": pc_device_id,
+                "payload": {
+                    "action": "rpc_request",
+                    "request_id": request_id,
+                    "instruction": instruction,
+                    "require_sync": require_sync
+                }
+            });
+
+            if require_sync {
+                let encoded_id = my_device_id.replace('+', "%2B").replace('/', "%2F").replace('=', "%3D");
+                let ws_url = format!("wss://relay.bobbik.org/ws/device/{}", encoded_id);
+                
+                let result = tokio::time::timeout(std::time::Duration::from_secs(45), async {
+                    if let Ok((mut ws_stream, _)) = tokio_tungstenite::connect_async(&ws_url).await {
+                        use futures_util::{SinkExt, StreamExt};
+                        let reg_msg = serde_json::json!({"type": "register", "deviceId": my_device_id});
+                        let _ = ws_stream.send(tokio_tungstenite::tungstenite::Message::Text(reg_msg.to_string().into())).await;
+                        let _ = ws_stream.send(tokio_tungstenite::tungstenite::Message::Text(rpc_payload.to_string().into())).await;
+                        
+                        while let Some(Ok(msg)) = ws_stream.next().await {
+                            if let tokio_tungstenite::tungstenite::Message::Text(text) = msg {
+                                if let Ok(resp) = serde_json::from_str::<serde_json::Value>(&text) {
+                                    if resp.get("type").and_then(|v| v.as_str()) == Some("proxy") {
+                                        if let Some(payload) = resp.get("payload") {
+                                            if payload.get("action").and_then(|v| v.as_str()) == Some("rpc_response") {
+                                                if payload.get("request_id").and_then(|v| v.as_str()) == Some(request_id.as_str()) {
+                                                    return Ok(payload.get("result").and_then(|v| v.as_str()).unwrap_or("").to_string());
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Err("Failed to connect or stream closed".to_string())
+                }).await;
+                
+                match result {
+                    Ok(Ok(res)) => json!({ "status": "success", "result": res }),
+                    Ok(Err(e)) => json!({ "error": format!("RPC 通信失败: {}", e) }),
+                    Err(_) => json!({ "error": "RPC 请求超时 (45秒未收到 PC 响应，可能因为 PC 处理过慢或已休眠掉线)" }),
+                }
+            } else {
+                tauri::async_runtime::spawn(async move {
+                    let encoded_id = my_device_id.replace('+', "%2B").replace('/', "%2F").replace('=', "%3D");
+                    let ws_url = format!("wss://relay.bobbik.org/ws/device/{}", encoded_id);
+                    if let Ok((mut ws_stream, _)) = tokio_tungstenite::connect_async(&ws_url).await {
+                        use futures_util::SinkExt;
+                        let reg_msg = serde_json::json!({"type": "register", "deviceId": my_device_id});
+                        let _ = ws_stream.send(tokio_tungstenite::tungstenite::Message::Text(reg_msg.to_string().into())).await;
+                        let _ = ws_stream.send(tokio_tungstenite::tungstenite::Message::Text(rpc_payload.to_string().into())).await;
+                    }
+                });
+                json!({
+                    "status": "acknowledged",
+                    "message": format!("已异步投递至 PC 端执行，追踪码: {}", request_id),
+                    "instruction_echo": instruction
+                })
+            }
         }
         "move_file" => {
             let source = args.get("source").and_then(|v| v.as_str()).unwrap_or("");

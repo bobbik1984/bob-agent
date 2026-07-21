@@ -598,7 +598,7 @@
               <div class="form-group" style="margin-bottom: 0;">
                 <label class="form-label" style="font-size: 0.8em;">{{ $t('settings.p2p_relay_server') }}</label>
                 <div style="display: flex; align-items: center; gap: 8px;">
-                  <span class="status-dot" style="background: var(--color-success); width: 8px; height: 8px; border-radius: 50%; display: inline-block;"></span>
+                  <span class="service-status-dot" :class="p2pRelayConnected ? 'dot-connected' : 'dot-disconnected'"></span>
                   <span style="font-size: 0.8em;">{{ pairingInfo.relay || 'wss://relay.bobbik.org' }}</span>
                 </div>
               </div>
@@ -1045,6 +1045,8 @@ const pairingInfo = ref({
   relay: ''
 });
 const pairingSuccessInfo = ref(null);
+const p2pRelayConnected = ref(false);
+let p2pRelayInterval = null;
 
 const qrPayload = computed(() => {
   if (!pairingInfo.value.device_id) return '';
@@ -1474,6 +1476,17 @@ onMounted(async () => {
     } catch(err) {}
   }
 
+  // P2P Relay connection status
+  const updateP2pRelayStatus = async () => {
+    try {
+      p2pRelayConnected.value = await invoke('get_p2p_relay_status');
+    } catch (e) {
+      p2pRelayConnected.value = false;
+    }
+  };
+  updateP2pRelayStatus();
+  p2pRelayInterval = setInterval(updateP2pRelayStatus, 5000);
+
   // 隧道延迟检测轮询
   if (proxyTunnelEnabled.value) {
     updateTunnelStatus();
@@ -1489,6 +1502,10 @@ onUnmounted(() => {
   if (tunnelInterval) {
     clearInterval(tunnelInterval);
     tunnelInterval = null;
+  }
+  if (p2pRelayInterval) {
+    clearInterval(p2pRelayInterval);
+    p2pRelayInterval = null;
   }
 });
 </script>
