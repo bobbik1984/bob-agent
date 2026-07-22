@@ -196,11 +196,11 @@ pub async fn relay_handshake(app: AppHandle, target_device_id: String, auth_code
             stream
         }
         Ok(Err(e)) => {
-            let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_connect", "status": "error", "detail": format!("ERR-PAIRING-01: 杩炴帴鎷掔粷: {}", e)}));
+            let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_connect", "status": "error", "detail": format!("ERR-PAIRING-01: 连接拒绝: {}", e)}));
             return Err(format!("ERR-PAIRING-01: Failed to connect to relay: {}", e));
         }
         Err(_) => {
-            let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_connect", "status": "error", "detail": "ERR-PAIRING-01: 杩炴帴瓒呮椂 (15s)"}));
+            let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_connect", "status": "error", "detail": "ERR-PAIRING-01: 连接超时 (15s)"}));
             return Err("ERR-PAIRING-01: Failed to connect to relay: Timeout".to_string());
         }
     };
@@ -267,8 +267,8 @@ pub async fn relay_handshake(app: AppHandle, target_device_id: String, auth_code
         }
         Err(e) => {
             if e.contains("Unauthorized") {
-                let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_ack", "status": "error", "detail": "ERR-PAIRING-04: 閴存潈澶辫触 (璁よ瘉鐮佷笉鍖归厤)"}));
-                Err("ERR-PAIRING-04: 閴存潈澶辫触 (璁よ瘉鐮佷笉鍖归厤)".to_string())
+                let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_ack", "status": "error", "detail": "ERR-PAIRING-04: 鉴权失败 (认证码不匹配)"}));
+                Err("ERR-PAIRING-04: 鉴权失败 (认证码不匹配)".to_string())
             } else {
                 let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_ack", "status": "error", "detail": format!("ERR-PAIRING-03: {}", e)}));
                 Err(e)
@@ -599,7 +599,7 @@ pub async fn do_active_sync(app: AppHandle, payload: SyncCommandPayload) -> Resu
     for ip in &payload.local_ips {
         let base_url = format!("http://{}:{}", ip, payload.port);
         info!("[Sync Engine] Trying LAN IP: {}", base_url);
-        let _ = app.emit("sync:progress", serde_json::json!({"stage": "lan_sync", "status": "running", "detail": format!("灏濊瘯 {}", ip)}));
+        let _ = app.emit("sync:progress", serde_json::json!({"stage": "lan_sync", "status": "running", "detail": format!("尝试 {}", ip)}));
         
         // 1. Pull config from PC
         let pull_url = format!("{}/v1/sync/pull", base_url);
@@ -662,7 +662,7 @@ pub async fn do_active_sync(app: AppHandle, payload: SyncCommandPayload) -> Resu
                                 // Emit config reconciled event so UI updates
                                 let _ = app.emit("config:reconciled", serde_json::json!({"applied": 1}));
                                 sync_success = true;
-                                let _ = app.emit("sync:progress", serde_json::json!({"stage": "lan_sync", "status": "done", "detail": format!("閫氳繃 {} 鍚屾鎴愬姛", ip)}));
+                                let _ = app.emit("sync:progress", serde_json::json!({"stage": "lan_sync", "status": "done", "detail": format!("通过 {} 鍚屾鎴愬姛", ip)}));
                             }
                         }
                     } else if let Some(config) = json.get("config") { // Fallback for old PC version
@@ -675,7 +675,7 @@ pub async fn do_active_sync(app: AppHandle, payload: SyncCommandPayload) -> Resu
             }
             Ok(resp) => {
                 if resp.status() == reqwest::StatusCode::UNAUTHORIZED {
-                    let err_msg = "ERR-SYNC-05: 閴存潈澶辫触 (鏃犳晥鐨勯厤瀵瑰嚟璇?";
+                    let err_msg = "ERR-SYNC-05: 鉴权失败 (无效的配对凭证)";
                     let _ = app.emit("sync:progress", serde_json::json!({"stage": "lan_sync", "status": "error", "detail": err_msg}));
                     log_sync_action("LAN Pull", "error", err_msg);
                     sync_success = false;
@@ -752,7 +752,7 @@ pub async fn do_active_sync(app: AppHandle, payload: SyncCommandPayload) -> Resu
     info!("[Sync Engine] Falling back to Relay Tunnel.");
         
         // 鈹€鈹€ Stage 5: Relay tunnel sync 鈹€鈹€
-        let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_sync", "status": "running", "detail": "杩炴帴 Relay 闅ч亾..."}));
+        let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_sync", "status": "running", "detail": "连接 Relay 隧道..."}));
         
         let config = crate::read_config();
         let my_device_id = config.get("device_id").and_then(|v| v.as_str()).unwrap_or("unknown").to_string();
@@ -762,13 +762,13 @@ pub async fn do_active_sync(app: AppHandle, payload: SyncCommandPayload) -> Resu
         let (mut ws_stream, _) = match tokio::time::timeout(tokio::time::Duration::from_secs(15), connect_websocket_robust(&ws_url)).await {
             Ok(Ok(s)) => s,
             Ok(Err(e)) => {
-                let err_msg = format!("ERR-SYNC-02: Relay 杩炴帴鎷掔粷: {}", e);
+                let err_msg = format!("ERR-SYNC-02: Relay 连接拒绝: {}", e);
                 let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_sync", "status": "error", "detail": &err_msg}));
                 log_sync_action("Relay Connect", "error", &err_msg);
                 return Err(format!("ERR-SYNC-02: Failed to connect to relay: {}", e));
             }
             Err(_) => {
-                let err_msg = "ERR-SYNC-02: Relay 杩炴帴瓒呮椂 (15s)";
+                let err_msg = "ERR-SYNC-02: Relay 连接超时 (15s)";
                 let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_sync", "status": "error", "detail": err_msg}));
                 log_sync_action("Relay Connect", "error", err_msg);
                 return Err(err_msg.to_string());
@@ -794,7 +794,7 @@ pub async fn do_active_sync(app: AppHandle, payload: SyncCommandPayload) -> Resu
         ws_stream.send(Message::Text(pull_req.to_string().into())).await.map_err(|e| e.to_string())?;
 
         info!("[Sync Engine] Sent proxy pull request. Waiting for response...");
-        let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_sync", "status": "running", "detail": "璇锋眰鎷夊彇鏁版嵁 (瀵硅瘽銆佹棩绋嬨€佺エ鎹?..."}));
+        let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_sync", "status": "running", "detail": "请求拉取数据 (对话、日程、票据...)"}));
 
         let timeout = tokio::time::Duration::from_secs(45);
         let pull_task = async {
@@ -811,7 +811,7 @@ pub async fn do_active_sync(app: AppHandle, payload: SyncCommandPayload) -> Resu
                                     }
                                 } else if let Some(error_msg) = inner_payload.get("error").and_then(|v| v.as_str()) {
                                     if error_msg == "Unauthorized" {
-                                        return Err("ERR-SYNC-05: 閴存潈澶辫触 (鏃犳晥鐨勯厤瀵瑰嚟璇?".to_string());
+                                        return Err("ERR-SYNC-05: 鉴权失败 (无效的配对凭证)".to_string());
                                     }
                                     return Err(format!("Relay proxy error: {}", error_msg));
                                 }
@@ -828,7 +828,7 @@ pub async fn do_active_sync(app: AppHandle, payload: SyncCommandPayload) -> Resu
         match tokio::select! {
             res = pull_task => res,
             _ = tokio::time::sleep(timeout) => {
-                let err_msg = "ERR-SYNC-02: Relay 鎷夊彇瓒呮椂 (45s)";
+                let err_msg = "ERR-SYNC-02: Relay 拉取超时 (45s)";
                 let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_sync", "status": "error", "detail": err_msg}));
                 log_sync_action("Relay Pull", "error", err_msg);
                 Err("Relay pull timeout".to_string())
@@ -836,9 +836,9 @@ pub async fn do_active_sync(app: AppHandle, payload: SyncCommandPayload) -> Resu
         } {
             Ok(sync_data) => {
                 info!("[Sync Engine] Successfully pulled sync data via Relay!");
-                let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_sync", "status": "running", "detail": "鏀跺埌浜戠鏁版嵁锛屾鍦ㄨ繘琛屾湰鍦板悎骞?.."}));
+                let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_sync", "status": "running", "detail": "收到云端数据，正在进行本地合并..."}));
                 if let Err(e) = import_sync_data(&app, sync_data, 0) { // For relay pull we might not have accurate last_sync_ts right now
-                    let err_msg = format!("ERR-SYNC-03: 瀵煎叆鏁版嵁澶辫触: {}", e);
+                    let err_msg = format!("ERR-SYNC-03: 导入数据失败: {}", e);
                     let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_sync", "status": "error", "detail": &err_msg}));
                     log_sync_action("Relay Import", "error", &err_msg);
                     return Err(format!("Failed to import sync data: {}", e));
