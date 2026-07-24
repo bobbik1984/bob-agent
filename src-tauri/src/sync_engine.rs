@@ -818,6 +818,8 @@ pub async fn do_active_sync(app: AppHandle, payload: SyncCommandPayload) -> Resu
                             }
                         } else if json.get("type").and_then(|v| v.as_str()) == Some("proxy_error") {
                             return Err(json.get("message").and_then(|v| v.as_str()).unwrap_or("Proxy error").to_string());
+                        } else if json.get("type").and_then(|v| v.as_str()) == Some("error") {
+                            return Err(json.get("error").and_then(|v| v.as_str()).unwrap_or("Relay error").to_string());
                         }
                     }
                 }
@@ -908,23 +910,26 @@ async fn connect_websocket_robust(ws_url: &str) -> Result<(tokio_tungstenite::We
 
 pub fn start_relay_listener(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
-        // Wait for device identity to be loaded
-        let mut device_id_opt = None;
         loop {
-            tokio::time::sleep(std::time::Duration::from_secs(3)).await;
-            let config = crate::read_config();
-            if let Some(id) = config.get("device_id").and_then(|v| v.as_str()) {
-                device_id_opt = Some(id.to_string());
-                break;
+            // Re-fetch device_id on every reconnect attempt to handle Identity resets
+            let mut current_device_id = String::new();
+            for _ in 0..10 {
+                let config = crate::read_config();
+                if let Some(id) = config.get("device_id").and_then(|v| v.as_str()) {
+                    current_device_id = id.to_string();
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_secs(3)).await;
             }
-            log::warn!("[Sync Engine] start_relay_listener: could not get device_id, retrying in 3s...");
-        }
-        let device_id = device_id_opt.unwrap();
+            if current_device_id.is_empty() {
+                log::warn!("[Sync Engine] start_relay_listener: could not get device_id, retrying in 5s...");
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                continue;
+            }
 
-        let relay_url = "wss://relay.bobbik.org".to_string();
-        let ws_url = format!("{}/ws/device/{}", relay_url, url_encode_device_id(&device_id));
+            let relay_url = "wss://relay.bobbik.org".to_string();
+            let ws_url = format!("{}/ws/device/{}", relay_url, url_encode_device_id(&current_device_id));
 
-        loop {
             match connect_websocket_robust(&ws_url).await {
                 Ok((mut ws_stream, _)) => {
                     log::info!("[Sync Engine] Connected to Relay WebSocket: {}", ws_url);
@@ -933,7 +938,7 @@ pub fn start_relay_listener(app: AppHandle) {
                     // Explicitly register device ID (fixes NGINX URL stripping bugs)
                     let reg_msg = serde_json::json!({
                         "type": "register",
-                        "deviceId": device_id
+                        "deviceId": current_device_id
                     });
                     let _ = ws_stream.send(Message::Text(reg_msg.to_string().into())).await;
 
@@ -951,6 +956,14 @@ pub fn start_relay_listener(app: AppHandle) {
                                     log::error!("[Sync Engine] Relay connection timeout: No activity for 90s. Reconnecting...");
                                     break;
                                 }
+                                
+                                // Check if device_id was reset/changed by the user
+                                let latest_device_id = crate::read_config().get("device_id").and_then(|v| v.as_str()).unwrap_or("unknown").to_string();
+                                if latest_device_id != "unknown" && latest_device_id != current_device_id {
+                                    log::info!("[Sync Engine] Device ID changed! Breaking relay connection to reconnect...");
+                                    break;
+                                }
+
                                 let _ = tx_mpsc.send(Message::Ping(bytes::Bytes::new())).await;
                             }
                             mpsc_msg_opt = rx_mpsc.recv() => {
