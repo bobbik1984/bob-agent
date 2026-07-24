@@ -921,7 +921,7 @@ const handleMobileScan = async () => {
       if (window.appAPI.relayHandshake) {
         updateStep('relay_handshake', 'running', '');
         try {
-          const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Relay Timeout')), 15000));
+          const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Relay Timeout')), 30000));
           await Promise.race([
             window.appAPI.relayHandshake(payload.device_id, payload.public_key),
             timeoutPromise
@@ -930,10 +930,16 @@ const handleMobileScan = async () => {
         } catch (e) {
           console.warn('Relay handshake failed', e);
           const errStr = String(e);
-          if (!errStr.includes('ERR-PAIRING-03')) {
-            updateStep('relay_handshake', 'error', 'Error: ' + errStr);
+          if (errStr.includes('ERR-PAIRING-01')) {
+              updateStep('relay_handshake', 'error', 'Error: 手机无法连接到中继服务器');
+          } else if (errStr.includes('ERR-PAIRING-03')) {
+              updateStep('relay_handshake', 'error', 'Error: PC无响应 (可能PC已掉线或网络不稳定)');
+          } else if (errStr.includes('Target device is offline')) {
+              updateStep('relay_handshake', 'error', 'Error: PC未连接到中继服务器 (离线)');
+          } else if (errStr.includes('Relay Timeout')) {
+              updateStep('relay_handshake', 'error', 'Error: 握手请求超时 (网络极差)');
           } else {
-            updateStep('relay_handshake', 'error', 'Error: PC 未响应握手');
+              updateStep('relay_handshake', 'error', 'Error: ' + errStr);
           }
           pairingDone.value = true;
           pairingError.value = true;
