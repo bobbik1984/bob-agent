@@ -704,26 +704,51 @@
           <span class="pairing-progress-icon">🔗</span>
           <span>{{ pairingDone ? (pairingError ? '配对失败' : '配对成功!') : '正在配对...' }}</span>
         </div>
-        <div class="pairing-steps">
-          <div
-            v-for="step in pairingSteps"
-            :key="step.id"
-            class="pairing-step"
-            :class="'step-' + step.status"
-          >
-            <span class="step-indicator">
-              <span v-if="step.status === 'done'" class="step-check">✅</span>
-              <span v-else-if="step.status === 'error'" class="step-cross">❌</span>
-              <span v-else-if="step.status === 'running'" class="step-spinner"></span>
-              <span v-else-if="step.status === 'skipped'" class="step-skip">⏭️</span>
-              <span v-else class="step-pending">○</span>
-            </span>
-            <div class="step-content">
-              <span class="step-label">{{ step.label }}</span>
-              <span v-if="step.detail" class="step-detail">{{ step.detail }}</span>
+
+        <div class="topology-diagram">
+          <div class="topo-node mobile" :class="mobileClass">
+            <div class="icon-box"><Smartphone :size="28"/></div>
+            <span>手机</span>
+          </div>
+
+          <div class="topo-paths">
+            <!-- LAN Path -->
+            <div class="topo-path-direct" :class="lanPathClass">
+              <div class="path-label">LAN</div>
+              <div class="path-line"></div>
+              <div v-if="lanStep?.status === 'running' || (lanStep?.status === 'done' && !pairingDone)" class="data-packet direct-packet"></div>
+            </div>
+
+            <!-- Relay Path -->
+            <div class="topo-path-relay" :class="relayPathClass">
+              <div class="relay-leg leg-left">
+                <div class="path-line"></div>
+                <div v-if="relayPathClass === 'path-active'" class="data-packet"></div>
+              </div>
+              
+              <div class="topo-node cloud" :class="relayNodeClass">
+                <div class="icon-box"><Cloud :size="24"/></div>
+                <span>中继</span>
+              </div>
+
+              <div class="relay-leg leg-right">
+                <div class="path-line"></div>
+                <div v-if="relayPathClass === 'path-active'" class="data-packet delay-packet"></div>
+              </div>
             </div>
           </div>
+
+          <div class="topo-node pc" :class="pcClass">
+            <div class="icon-box"><Monitor :size="28"/></div>
+            <span>电脑</span>
+          </div>
         </div>
+
+        <div v-if="pairingError" class="topo-error-box">
+          <ShieldAlert :size="16"/>
+          <span>{{ currentErrorDetail }}</span>
+        </div>
+
         <div class="pairing-progress-footer">
           <button v-if="pairingDone" class="btn btn-primary-outline" @click="closePairingProgress">
             关闭
@@ -786,7 +811,7 @@ import {
   Smartphone, Unplug, X, Plus, Loader2, MessageSquare, Check,
   Building2, ExternalLink, Unlink, KeyRound, Network, Info, Copy,
   ShieldAlert, TriangleAlert, QrCode, Lock, Unlock, Scan,
-  Monitor, ChevronDown
+  Monitor, ChevronDown, Cloud
 } from 'lucide-vue-next';
 
 const { t } = useI18n();
@@ -811,6 +836,46 @@ const pairingDone = ref(false);
 const pairingError = ref(false);
 
 const pairingSteps = ref([]);
+
+const lanStep = computed(() => pairingSteps.value.find(s => s.id === 'lan_sync'));
+const relayHandshakeStep = computed(() => pairingSteps.value.find(s => s.id === 'relay_handshake'));
+const relaySyncStep = computed(() => pairingSteps.value.find(s => s.id === 'relay_sync'));
+
+const lanPathClass = computed(() => {
+  if (!lanStep.value) return 'path-inactive';
+  if (lanStep.value.status === 'running') return 'path-active';
+  if (lanStep.value.status === 'done') return 'path-success';
+  if (lanStep.value.status === 'error') return 'path-error';
+  return 'path-inactive';
+});
+
+const relayPathClass = computed(() => {
+  if (relayHandshakeStep.value?.status === 'running' || relaySyncStep.value?.status === 'running') return 'path-active';
+  if (relaySyncStep.value?.status === 'done') return 'path-success';
+  if (relayHandshakeStep.value?.status === 'error' || relaySyncStep.value?.status === 'error') return 'path-error';
+  if (relayHandshakeStep.value?.status === 'done' && relaySyncStep.value?.status === 'pending') return 'path-active';
+  return 'path-inactive';
+});
+
+const relayNodeClass = computed(() => {
+  if (relayHandshakeStep.value?.status === 'error' || relaySyncStep.value?.status === 'error') return 'error';
+  if (relaySyncStep.value?.status === 'done') return 'success';
+  if (relayHandshakeStep.value?.status === 'running' || relaySyncStep.value?.status === 'running') return 'active';
+  return '';
+});
+
+const mobileClass = computed(() => {
+  return pairingError.value ? 'error' : (pairingDone.value ? 'success' : 'active');
+});
+
+const pcClass = computed(() => {
+  return pairingError.value ? 'error' : (pairingDone.value ? 'success' : (relayHandshakeStep.value?.status === 'running' || lanStep.value?.status === 'running' || relaySyncStep.value?.status === 'running' ? 'active' : ''));
+});
+
+const currentErrorDetail = computed(() => {
+  const errStep = pairingSteps.value.find(s => s.status === 'error');
+  return errStep ? errStep.detail : '';
+});
 
 function initPairingSteps() {
     pairingSteps.value = [
@@ -1866,6 +1931,7 @@ onUnmounted(() => {
   border-color: var(--border-subtle) !important;
 }
 /* ── Pairing Progress Overlay ── */
+
 .pairing-overlay {
   position: fixed;
   top: 0; left: 0; right: 0; bottom: 0;
@@ -1883,7 +1949,7 @@ onUnmounted(() => {
   box-shadow: var(--shadow-lg);
   padding: 24px;
   width: 90%;
-  max-width: 360px;
+  max-width: 440px;
 }
 
 .pairing-progress-header {
@@ -1893,90 +1959,184 @@ onUnmounted(() => {
   font-size: 1.1rem;
   font-weight: 600;
   color: var(--text-primary);
-  margin-bottom: 20px;
+  margin-bottom: 24px;
 }
 
 .pairing-progress-icon {
   font-size: 1.3rem;
 }
 
-.pairing-steps {
+.topology-diagram {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  position: relative;
+  margin-bottom: 24px;
+  padding: 10px 0;
+}
+
+.topo-node {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  align-items: center;
+  gap: 8px;
+  z-index: 2;
+  color: var(--text-secondary);
+  transition: all 0.3s ease;
+  width: 60px;
 }
 
-.pairing-step {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
+.topo-node span {
+  font-size: 12px;
+  font-weight: 500;
 }
 
-.step-indicator {
-  flex-shrink: 0;
-  width: 22px;
-  height: 22px;
+.topo-node .icon-box {
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
+  background: var(--bg-secondary);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 14px;
-}
-
-.step-pending {
-  color: var(--text-tertiary);
-  font-size: 12px;
-}
-
-.step-check, .step-cross, .step-skip {
-  font-size: 14px;
-}
-
-.step-spinner {
-  width: 16px;
-  height: 16px;
   border: 2px solid var(--border-subtle);
-  border-top-color: var(--accent-primary, #3b82f6);
-  border-radius: 50%;
-  animation: pairing-spin 0.8s linear infinite;
+  transition: all 0.3s ease;
+  color: var(--text-secondary);
 }
 
-@keyframes pairing-spin {
-  to { transform: rotate(360deg); }
+.topo-node.active { color: var(--user-accent); }
+.topo-node.active .icon-box {
+  border-color: var(--user-accent);
+  color: var(--user-accent);
+  box-shadow: 0 0 12px rgba(var(--user-accent-rgb, 39, 118, 187), 0.3);
 }
 
-.step-content {
+.topo-node.success { color: var(--color-success); }
+.topo-node.success .icon-box {
+  border-color: var(--color-success);
+  color: var(--color-success);
+}
+
+.topo-node.error { color: var(--color-error); }
+.topo-node.error .icon-box {
+  border-color: var(--color-error);
+  color: var(--color-error);
+}
+
+.topo-paths {
+  flex: 1;
+  position: relative;
+  height: 80px;
+  margin: 0 12px;
+}
+
+.topo-path-direct {
+  position: absolute;
+  top: 10px;
+  left: 0; right: 0;
+  height: 20px;
   display: flex;
-  flex-direction: column;
-  min-width: 0;
+  justify-content: center;
 }
 
-.step-label {
-  font-size: 0.9rem;
-  color: var(--text-primary);
-  line-height: 22px;
-}
-
-.step-detail {
-  font-size: 0.75rem;
+.path-label {
+  position: absolute;
+  top: -16px;
+  font-size: 10px;
   color: var(--text-tertiary);
-  margin-top: 1px;
-  word-break: break-all;
+  background: var(--bg-primary);
+  padding: 0 4px;
+  z-index: 1;
 }
 
-.step-done .step-label { color: var(--text-secondary); }
-.step-error .step-label { color: var(--color-error, #ef4444); }
-.step-error .step-detail { color: var(--color-error, #ef4444); opacity: 0.8; }
-.step-skipped .step-label { color: var(--text-tertiary); text-decoration: line-through; opacity: 0.6; }
+.path-line {
+  position: absolute;
+  top: 50%;
+  left: 0; right: 0;
+  height: 2px;
+  background: var(--border-subtle);
+  transform: translateY(-50%);
+}
+
+.topo-path-relay {
+  position: absolute;
+  bottom: 0;
+  left: 0; right: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.relay-leg {
+  flex: 1;
+  position: relative;
+  height: 40px;
+}
+.relay-leg .path-line {
+  top: 50%;
+}
+
+.path-active .path-line {
+  background: transparent;
+  border-top: 2px dashed var(--user-accent);
+  animation: march 1s linear infinite;
+}
+
+.path-success .path-line {
+  background: var(--color-success);
+}
+
+.path-error .path-line {
+  background: var(--color-error);
+}
+
+.path-inactive { opacity: 0.3; }
+
+@keyframes march {
+  0% { background-position: 0 0; }
+  100% { background-position: 20px 0; }
+}
+
+.data-packet {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 6px;
+  height: 6px;
+  background: var(--user-accent);
+  border-radius: 50%;
+  transform: translateY(-50%);
+  box-shadow: 0 0 6px var(--user-accent);
+  animation: fly 1.2s linear infinite;
+  opacity: 0;
+}
+
+.delay-packet {
+  animation-delay: 0.6s;
+}
+
+@keyframes fly {
+  0% { left: 0%; opacity: 0; }
+  15% { opacity: 1; }
+  85% { opacity: 1; }
+  100% { left: 100%; opacity: 0; }
+}
+
+.topo-error-box {
+  background: rgba(var(--color-error-rgb, 220, 53, 69), 0.1);
+  color: var(--color-error);
+  padding: 12px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  margin-bottom: 20px;
+}
 
 .pairing-progress-footer {
-  margin-top: 20px;
   display: flex;
-  justify-content: center;
+  justify-content: flex-end;
 }
-
-.pairing-progress-footer .btn {
-  min-width: 120px;
-  justify-content: center;
-}
-
 </style>
+
