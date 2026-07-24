@@ -408,6 +408,13 @@ window.appAPI = {
   saveRegistry: (registry) => invoke('llm_save_registry', { registry }),
 
   // ── 日历 / 日程 (Rust 原生 T-605) ──────────────────────
+  onCalendarUpdated: (callback) => {
+    let unlisten = null;
+    listen('calendar-updated', (event) => {
+      callback(IS_TAURI ? event.payload : event);
+    }).then(fn => { unlisten = fn; });
+    return () => { if (unlisten) { unlisten(); unlisten = null; } };
+  },
   listEvents: async () => invoke('system_list_events'),
   parseEvent: async (text) => invoke('system_parse_event', { text }),
   confirmEvent: async (event) => invoke('system_confirm_event', { event }),

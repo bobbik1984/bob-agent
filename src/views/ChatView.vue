@@ -391,7 +391,7 @@
           </div>
         </div>
         <!-- 文本输入 -->
-        <div class="input-wrapper" style="position: relative;">
+        <div class="input-wrapper" :class="{ 'is-recording-wrapper': isRecording }" style="position: relative;">
           <!-- 移动端 + 按钮 -->
           <button v-if="isMobile" class="mobile-plus-btn" @click="showMobileTools = true; mobileSheetState = 'main'">
             <Plus :size="20" />
@@ -428,6 +428,16 @@
           <!-- Mobile 发送按钮 -->
           <div v-if="isMobile" class="mobile-send-btn-wrap">
             <button v-if="isStreaming" class="action-btn stop-btn" @click="stopGeneration" :title="$t('chat.stop')"><span class="icon-stop"></span></button>
+            <button v-else-if="!inputText.trim()" 
+              class="action-btn mic-btn" 
+              :class="{ 'is-recording': isRecording }"
+              @touchstart.prevent="startVoiceRecording"
+              @touchend.prevent="stopVoiceRecording"
+              @touchcancel.prevent="cancelVoiceRecording"
+              @contextmenu.prevent
+            >
+              <Mic :size="16" />
+            </button>
             <button v-else class="action-btn send-btn" :disabled="!canSend || !chatReady" @click="sendMessage" :title="chatReadyMsg || $t('chat.send')">
               <span class="icon-send"></span>
             </button>
@@ -668,7 +678,7 @@ import '@/utils/markdown';
 import { ref, watch, onMounted, onUnmounted, nextTick, inject, computed } from 'vue';
 import { useI18n } from 'vue-i18n';
 import QrcodeVue from 'qrcode.vue';
-import { Sparkles, FileText, Camera, Calendar, User, ChevronRight, ChevronDown, ChevronUp, ChevronLeft, X, FileUp, Paperclip, Bookmark, Loader2, Shield, Zap, Target, Lock, Unlock, Download, Smartphone, Monitor, ClipboardCopy, Check, BookmarkPlus, Plus, Menu, Cpu, Play, PenLine, BookOpen, Pin } from 'lucide-vue-next';
+import { Sparkles, FileText, Camera, Calendar, User, ChevronRight, ChevronDown, ChevronUp, ChevronLeft, X, FileUp, Paperclip, Bookmark, Loader2, Shield, Zap, Target, Lock, Unlock, Download, Smartphone, Monitor, ClipboardCopy, Check, BookmarkPlus, Plus, Menu, Cpu, Play, PenLine, BookOpen, Pin, Mic } from 'lucide-vue-next';
 import ConfirmCard from '../components/ConfirmCard.vue';
 import FileCard from '../components/FileCard.vue';
 import CodeBlock from '../components/CodeBlock.vue';
@@ -686,6 +696,55 @@ import { useDragDrop } from '../composables/useDragDrop.js';
 const isEditingTitle = ref(false);
 const titleInputRef = ref(null);
 const editTitleText = ref('');
+
+
+const isRecording = ref(false);
+let startTextCache = '';
+
+async function startVoiceRecording(e) {
+  if (isRecording.value) return;
+  try {
+    isRecording.value = true;
+    startTextCache = inputText.value;
+    if (navigator.vibrate) navigator.vibrate(50);
+    if (window.appAPI && window.appAPI.invoke) {
+      await window.appAPI.invoke('plugin:speech-recognizer|startListening', { language: 'zh-CN' });
+    }
+  } catch (err) {
+    console.error("Speech start error:", err);
+    isRecording.value = false;
+    if (err === 'require_permission') {
+      window.dispatchEvent(new CustomEvent('send-message-to-bob', { detail: '⚠️ Bob 需要麦克风权限才能听见您的声音。系统正在请求权限，请点击允许后重试。' }));
+    }
+  }
+}
+
+async function stopVoiceRecording(e) {
+  if (!isRecording.value) return;
+  try {
+    isRecording.value = false;
+    if (navigator.vibrate) navigator.vibrate(30);
+    if (window.appAPI && window.appAPI.invoke) {
+      await window.appAPI.invoke('plugin:speech-recognizer|stopListening');
+    }
+  } catch (err) {
+    console.error("Speech stop error:", err);
+  }
+}
+
+async function cancelVoiceRecording(e) {
+  if (!isRecording.value) return;
+  try {
+    isRecording.value = false;
+    inputText.value = startTextCache;
+    if (navigator.vibrate) navigator.vibrate([30, 50, 30]);
+    if (window.appAPI && window.appAPI.invoke) {
+      await window.appAPI.invoke('plugin:speech-recognizer|cancelListening');
+    }
+  } catch (err) {
+    console.error("Speech cancel error:", err);
+  }
+}
 
 function startTitleEdit() {
   editTitleText.value = conversationTitle.value;
@@ -1324,6 +1383,18 @@ function onDetectBoardingPass(e) {
 }
 
 onMounted(async () => {
+  if (window.appAPI && window.appAPI.listen) {
+    window.appAPI.listen('speech:partial', (e) => {
+      inputText.value = startTextCache + e.payload.text;
+    });
+    window.appAPI.listen('speech:result', (e) => {
+      inputText.value = startTextCache + e.payload.text;
+    });
+    window.appAPI.listen('speech:error', (e) => {
+      console.warn('Speech error:', e.payload);
+      isRecording.value = false;
+    });
+  }
   window.addEventListener('open-mobile-model-switcher', onOpenMobileModelSwitcher);
   window.addEventListener('android-back-pressed', onAndroidBackPressed);
   window.addEventListener('send-message-to-bob', onSendMessageToBob);
@@ -3133,4 +3204,39 @@ defineExpose({
   background: var(--bg-secondary);
   color: var(--text-secondary);
 }
+
+/* 语音输入样式 */
+.is-recording-wrapper {
+  background: var(--bg-secondary) !important;
+  box-shadow: inset 0 0 20px rgba(var(--user-accent-rgb, 39,118,187), 0.05);
+  border-color: rgba(var(--user-accent-rgb, 39,118,187), 0.3) !important;
+  transition: all 0.3s ease;
+}
+
+.mic-btn {
+  background: transparent;
+  border: 1px solid var(--border-default);
+  color: var(--text-secondary);
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  width: 32px;
+  height: 32px;
+}
+
+.mic-btn.is-recording {
+  background: var(--bg-tertiary);
+  color: var(--user-accent, var(--accent-primary));
+  border-color: var(--user-accent, var(--accent-primary));
+  animation: pulse-mic 1.5s infinite;
+}
+
+@keyframes pulse-mic {
+  0% { box-shadow: 0 0 0 0 rgba(var(--user-accent-rgb, 39,118,187), 0.4); }
+  70% { box-shadow: 0 0 0 10px rgba(var(--user-accent-rgb, 39,118,187), 0); }
+  100% { box-shadow: 0 0 0 0 rgba(var(--user-accent-rgb, 39,118,187), 0); }
+}
 </style>
+

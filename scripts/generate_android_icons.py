@@ -22,18 +22,16 @@ DENSITIES = {
 }
 
 # Logo 在自适应图标安全区中的占比
-# Android 安全区 = 自适应画布的 66.7%，此值是相对于整个画布的比例
-# 0.60 意味着 Logo 占安全区的 ~90%，视觉饱满且不会被裁切
-LOGO_SCALE = 0.60
+# 因为我们不再暴力剔除 SVG 内边距，所以让 1024x1024 画布完全贴合安卓的安全遮罩圆圈
+# 安卓安全区 = 72dp，总画布 = 108dp，比例约为 66.6%
+# 这样 SVG 内部原本多大的蓝字，在这里就是多大
+LOGO_SCALE = 0.666
 
 
 def load_and_crop_logo():
     """加载源图标并裁剪掉四周的透明留白"""
     img = Image.open(SOURCE_ICON).convert("RGBA")
-    # 用 alpha 通道的 bbox 精确裁剪
-    alpha_bbox = img.split()[-1].getbbox()
-    if alpha_bbox:
-        img = img.crop(alpha_bbox)
+    print(f"Source logo loaded: {img.size[0]}x{img.size[1]} (Preserving padding)")
     print(f"Source logo cropped to: {img.size[0]}x{img.size[1]}")
     return img
 

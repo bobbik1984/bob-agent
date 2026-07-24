@@ -553,6 +553,20 @@ fn get_builtin_tool_schemas() -> Vec<Value> {
         json!({
             "type": "function",
             "function": {
+                "name": "delete_calendar_event",
+                "description": "删除日程表或待办事项中的某条记录。可以通过 list_calendar_events 查看到需要删除项目的 id。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "id": { "type": "string", "description": "要删除的事件或待办的唯一 ID" }
+                    },
+                    "required": ["id"]
+                }
+            }
+        }),
+        json!({
+            "type": "function",
+            "function": {
                 "name": "add_calendar_event",
                 "description": "向用户的日程表（日历）中添加一条新的日程或待办事项。警告：必须区分类型。日程(event)必须带有 startTime；待办(todo)绝不能带 startTime。",
                 "parameters": {
@@ -1130,6 +1144,7 @@ async fn execute_tool_inner(
         }
         "list_calendar_events" => tool_list_calendar_events(app),
         "add_calendar_event" => tool_add_calendar_event(app, args),
+        "delete_calendar_event" => tool_delete_calendar_event(app, args),
         "create_ticket" => tool_create_ticket(app, args),
         "build_knowledge_base" => {
             let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
@@ -2379,8 +2394,38 @@ fn tool_add_calendar_event(app: &tauri::AppHandle, args: &Value) -> Value {
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
         rusqlite::params![id, title, etype, status, date_str, db_start_time, db_end_time, description, super::now_ms()],
     ) {
-        Ok(_) => json!({ "ok": true, "id": id, "message": format!("成功添加日程：{}", title) }),
+        Ok(_) => {
+            let _ = app.emit("calendar-updated", ());
+            json!({ "ok": true, "id": id, "message": format!("成功添加日程：{}", title) })
+        }
         Err(e) => json!({ "error": format!("添加日程失败：{}", e) }),
+    }
+}
+
+/// delete_calendar_event — 删除日程/待办
+fn tool_delete_calendar_event(app: &tauri::AppHandle, args: &Value) -> Value {
+    use tauri::Manager;
+    let id = match args.get("id").and_then(|v| v.as_str()) {
+        Some(s) => s,
+        None => return json!({ "error": "缺少或无效的参数: id" }),
+    };
+
+    let db = app.state::<crate::db::DbState>();
+    let conn = match db.0.lock() {
+        Ok(c) => c,
+        Err(_) => return json!({ "error": "无法获取数据库锁" }),
+    };
+
+    match conn.execute("DELETE FROM events WHERE id = ?1", rusqlite::params![id]) {
+        Ok(rows) => {
+            if rows > 0 {
+                let _ = app.emit("calendar-updated", ());
+                json!({ "ok": true, "message": format!("成功删除日程/待办 (ID: {})", id) })
+            } else {
+                json!({ "error": format!("未找到该 ID 的日程/待办: {}", id) })
+            }
+        }
+        Err(e) => json!({ "error": format!("删除失败：{}", e) }),
     }
 }
 

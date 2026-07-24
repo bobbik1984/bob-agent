@@ -198,12 +198,17 @@ onUnmounted(() => {
     }
   };
 
+  let unlistenCalendar = null;
   onMounted(() => {
     window.addEventListener('ticket-created', reloadEvents);
+    if (window.appAPI.onCalendarUpdated) {
+      unlistenCalendar = window.appAPI.onCalendarUpdated(reloadEvents);
+    }
   });
 
   onUnmounted(() => {
     window.removeEventListener('ticket-created', reloadEvents);
+    if (unlistenCalendar) unlistenCalendar();
   });
 
   function dismissReminder(index) {

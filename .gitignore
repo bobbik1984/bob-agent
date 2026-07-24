@@ -52,3 +52,5 @@ tauri.conf.json.bak
 test_group.rs
 
 .cargo/config.toml
+src-tauri/target_tmp/
+
