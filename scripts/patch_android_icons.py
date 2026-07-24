@@ -39,7 +39,15 @@ def copy_icon_assets():
             dst_path = os.path.join(GEN_RES, rel_path)
 
             os.makedirs(os.path.dirname(dst_path), exist_ok=True)
-            shutil.copy2(src_path, dst_path)
+            
+            # Delete any existing file with the same base name to prevent .webp vs .png conflicts
+            base_name = os.path.splitext(fname)[0]
+            dst_dir = os.path.dirname(dst_path)
+            for existing in os.listdir(dst_dir):
+                if os.path.splitext(existing)[0] == base_name:
+                    os.remove(os.path.join(dst_dir, existing))
+                    
+            shutil.copy(src_path, dst_path)
             copied += 1
             print(f"  Copied: {rel_path}")
 
