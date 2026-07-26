@@ -113,6 +113,7 @@
 <script setup>
 import { ref, onMounted, onUnmounted, computed, inject } from 'vue';
 import { useI18n } from 'vue-i18n';
+import { listen } from '@tauri-apps/api/event';
 import { formatRelativeTime as formatTime } from '@/utils/date';
 import { AlertTriangle, Calendar, Loader2, Timer, Clock, Pause, Play, Trash2, Bell, Menu, CheckSquare, Zap } from 'lucide-vue-next';
 import WeekTimeline from '../components/WeekTimeline.vue';
@@ -172,6 +173,8 @@ onMounted(() => {
 onUnmounted(() => {
   if (unlistenScheduler) unlistenScheduler();
 });
+
+
 
 // T-1307: 监听待办提醒事件
 let unlistenReminder = null;

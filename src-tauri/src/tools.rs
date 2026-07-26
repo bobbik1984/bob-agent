@@ -613,6 +613,48 @@ fn get_builtin_tool_schemas() -> Vec<Value> {
         json!({
             "type": "function",
             "function": {
+                "name": "list_tickets",
+                "description": "列出当前票夹中的所有票据记录。当你需要核对、合并或查看现有票据时调用此工具。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {}
+                }
+            }
+        }),
+        json!({
+            "type": "function",
+            "function": {
+                "name": "delete_ticket",
+                "description": "删除票夹中的某条票据记录。在执行合并、修正错误条目前，先使用 list_tickets 获取 ID，然后调用此工具删除。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "id": { "type": "string", "description": "要删除的票据 ID" }
+                    },
+                    "required": ["id"]
+                }
+            }
+        }),
+        json!({
+            "type": "function",
+            "function": {
+                "name": "update_ticket",
+                "description": "更新现有票据的字段。你可以用来修正提取错误的标题或时间。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "id": { "type": "string", "description": "票据 ID" },
+                        "title": { "type": "string", "description": "新标题" },
+                        "category": { "type": "string" },
+                        "start_time": { "type": "string" }
+                    },
+                    "required": ["id"]
+                }
+            }
+        }),
+        json!({
+            "type": "function",
+            "function": {
                 "name": "read_model_registry",
                 "description": "读取当前模型注册表，返回所有供应商及其模型列表。当你需要查看、对比或更新模型配置时调用。",
                 "parameters": {
@@ -1146,6 +1188,9 @@ async fn execute_tool_inner(
         "add_calendar_event" => tool_add_calendar_event(app, args),
         "delete_calendar_event" => tool_delete_calendar_event(app, args),
         "create_ticket" => tool_create_ticket(app, args),
+        "list_tickets" => tool_list_tickets(app),
+        "delete_ticket" => tool_delete_ticket(app, args),
+        "update_ticket" => tool_update_ticket(app, args),
         "build_knowledge_base" => {
             let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
             // 直接触发异步的知识库构建引擎
@@ -2829,6 +2874,109 @@ fn tool_create_ticket(app: &tauri::AppHandle, args: &serde_json::Value) -> serde
         "message": format!("票据凭证 '{}' 已成功创建并关联到日历和图谱", title)
     })
 }
+
+fn tool_list_tickets(app: &tauri::AppHandle) -> serde_json::Value {
+    use tauri::Manager;
+    let db = app.state::<crate::db::DbState>();
+    let conn = match db.0.lock() {
+        Ok(c) => c,
+        Err(_) => return serde_json::json!({ "error": "Database lock failed" }),
+    };
+    let mut stmt = match conn.prepare("SELECT id, label, metadata FROM kg_nodes WHERE node_type = 'ticket'") {
+        Ok(s) => s,
+        Err(e) => return serde_json::json!({ "error": format!("Query prepare failed: {}", e) }),
+    };
+    let mut results = Vec::new();
+    let rows = stmt.query_map([], |row| {
+        let id: String = row.get(0)?;
+        let label: String = row.get(1)?;
+        let meta_str: String = row.get(2)?;
+        Ok((id, label, meta_str))
+    });
+    if let Ok(mapped_rows) = rows {
+        for row in mapped_rows.flatten() {
+            let meta: serde_json::Value = serde_json::from_str(&row.2).unwrap_or(serde_json::json!({}));
+            results.push(serde_json::json!({
+                "id": row.0,
+                "title": row.1,
+                "metadata": meta
+            }));
+        }
+    }
+    serde_json::json!({ "tickets": results })
+}
+
+fn tool_delete_ticket(app: &tauri::AppHandle, args: &serde_json::Value) -> serde_json::Value {
+    use tauri::{Emitter, Manager};
+    let id = args.get("id").and_then(|v| v.as_str()).unwrap_or("");
+    if id.is_empty() { return serde_json::json!({ "error": "Missing ticket id" }); }
+    let db = app.state::<crate::db::DbState>();
+    let mut conn = match db.0.lock() {
+        Ok(c) => c,
+        Err(_) => return serde_json::json!({ "error": "Database lock failed" }),
+    };
+    let tx = match conn.transaction() {
+        Ok(t) => t,
+        Err(e) => return serde_json::json!({ "error": format!("Tx fail: {}", e) }),
+    };
+    let _ = tx.execute("DELETE FROM kg_nodes WHERE id = ?1 AND node_type = 'ticket'", rusqlite::params![id]);
+    let _ = tx.execute("DELETE FROM events WHERE linked_ticket_id = ?1", rusqlite::params![id]);
+    let _ = tx.execute("DELETE FROM kg_edges WHERE source_id = ?1 OR target_id = ?1", rusqlite::params![id]);
+    let _ = tx.commit();
+    let _ = app.emit("kg-updated", ());
+    let _ = app.emit("calendar-updated", ());
+    serde_json::json!({ "ok": true, "message": format!("Ticket {} deleted", id) })
+}
+
+fn tool_update_ticket(app: &tauri::AppHandle, args: &serde_json::Value) -> serde_json::Value {
+    use tauri::{Emitter, Manager};
+    let id = args.get("id").and_then(|v| v.as_str()).unwrap_or("");
+    if id.is_empty() { return serde_json::json!({ "error": "Missing ticket id" }); }
+    let db = app.state::<crate::db::DbState>();
+    let mut conn = match db.0.lock() {
+        Ok(c) => c,
+        Err(_) => return serde_json::json!({ "error": "Database lock failed" }),
+    };
+    let title = args.get("title").and_then(|v| v.as_str());
+    let existing = conn.query_row(
+        "SELECT label, metadata FROM kg_nodes WHERE id = ?1",
+        rusqlite::params![id],
+        |row| {
+            let l: String = row.get(0)?;
+            let m: String = row.get(1)?;
+            Ok((l, m))
+        }
+    );
+    if let Ok((old_title, old_meta)) = existing {
+        let mut meta: serde_json::Value = serde_json::from_str(&old_meta).unwrap_or(serde_json::json!({}));
+        let new_title = title.unwrap_or(&old_title).to_string();
+        if let Some(cat) = args.get("category").and_then(|v| v.as_str()) {
+            meta["category"] = serde_json::json!(cat);
+        }
+        if let Some(st) = args.get("start_time").and_then(|v| v.as_str()) {
+            meta["start_time"] = serde_json::json!(st);
+        }
+        let tx = match conn.transaction() {
+            Ok(t) => t,
+            Err(e) => return serde_json::json!({ "error": format!("Tx fail: {}", e) }),
+        };
+        let _ = tx.execute(
+            "UPDATE kg_nodes SET label = ?1, metadata = ?2, updated_at = ?3 WHERE id = ?4",
+            rusqlite::params![new_title, meta.to_string(), crate::now_ms(), id]
+        );
+        let _ = tx.execute(
+            "UPDATE events SET title = ?1, updated_at = ?2 WHERE linked_ticket_id = ?3",
+            rusqlite::params![new_title, crate::now_ms(), id]
+        );
+        let _ = tx.commit();
+        let _ = app.emit("kg-updated", ());
+        let _ = app.emit("calendar-updated", ());
+        serde_json::json!({ "ok": true, "message": "Ticket updated" })
+    } else {
+        serde_json::json!({ "error": "Ticket not found" })
+    }
+}
+
 
 #[tauri::command]
 pub fn system_create_ticket(app: tauri::AppHandle, args: serde_json::Value) -> Result<serde_json::Value, String> {

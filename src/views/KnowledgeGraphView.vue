@@ -341,6 +341,7 @@ import TicketCard from '../components/TicketCard.vue';
 import TiptapEditor from '../components/TiptapEditor.vue';
 import { useI18n } from 'vue-i18n';
 import { useDialog } from '../composables/useDialog';
+import { listen } from '@tauri-apps/api/event';
 import { Network } from 'vis-network';
 import { DataSet } from 'vis-data';
 import { Waypoints, Search, X, FileText, RefreshCw, Plus, Link, ExternalLink, Trash2, ChevronRight, Menu, ChevronDown, Star, Package, Ticket } from 'lucide-vue-next';
@@ -850,6 +851,17 @@ onMounted(async () => {
     } catch (e) {
       console.warn('[KG] ticket-created refresh failed:', e);
     }
+  });
+
+  listen('kg-updated', async () => {
+    console.log('[KG] Auto-refreshing knowledge base due to kg-updated event...');
+    try {
+      await loadGraph();
+    } catch (e) {
+      console.warn('[KG] auto-refresh failed:', e);
+    }
+  }).then(unlisten => {
+    tauriDragUnlistens.push(unlisten);
   });
 
   window.addEventListener('android-back-pressed', onAndroidBackPressed);
