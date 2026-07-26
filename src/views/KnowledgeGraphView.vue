@@ -853,16 +853,22 @@ onMounted(async () => {
     }
   });
 
-  listen('kg-updated', async () => {
-    console.log('[KG] Auto-refreshing knowledge base due to kg-updated event...');
+  if (window.__TAURI_IPC__) {
     try {
-      await loadGraph();
+      listen('kg-updated', async () => {
+        console.log('[KG] Auto-refreshing knowledge base due to kg-updated event...');
+        try {
+          await loadGraph();
+        } catch (e) {
+          console.warn('[KG] auto-refresh failed:', e);
+        }
+      }).then(unlisten => {
+        tauriDragUnlistens.push(unlisten);
+      });
     } catch (e) {
-      console.warn('[KG] auto-refresh failed:', e);
+      console.warn('Failed to listen to kg-updated', e);
     }
-  }).then(unlisten => {
-    tauriDragUnlistens.push(unlisten);
-  });
+  }
 
   window.addEventListener('android-back-pressed', onAndroidBackPressed);
   updateKgColors();

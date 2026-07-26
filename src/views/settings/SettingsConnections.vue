@@ -911,6 +911,20 @@ function closePairingProgress() {
 const handleMobileScan = async () => {
   if (window.appAPI?.scanQrCode) {
     document.body.classList.add('scanner-active');
+    
+    let unlistenProgress = null;
+    if (window.__TAURI_IPC__) {
+      unlistenProgress = await listen('sync:progress', (event) => {
+        if (event.payload && typeof event.payload === 'object') {
+          syncProgressState.value = { ...syncProgressState.value, ...event.payload };
+          
+          if (event.payload.stage === 'done' || event.payload.stage === 'error') {
+            setTimeout(() => { showProgress.value = false; }, 3000);
+          }
+        }
+      });
+    }
+
     const code = await window.appAPI.scanQrCode();
     document.body.classList.remove('scanner-active');
     
@@ -933,7 +947,6 @@ const handleMobileScan = async () => {
     updateStep('parse', 'done', '');
 
     // Listen for Rust-side progress events
-    let unlistenProgress = null;
     try {
       unlistenProgress = await listen('sync:progress', (event) => {
         const { stage, status, detail } = event.payload;

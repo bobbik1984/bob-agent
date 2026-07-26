@@ -561,13 +561,19 @@ onMounted(async () => {
     checkSharedIntents();
     window.addEventListener('focus', checkSharedIntents);
   }
-  unlistenSync = await listen('sync:completed', (event) => {
-    if (event.payload && event.payload.timestamp) {
-      lastSyncTime.value = event.payload.timestamp.toString();
-      localStorage.setItem('bob-last-sync-time', lastSyncTime.value);
-      console.log(`[Sync] sync:completed received (${event.payload.direction}), updated lastSyncTime.`);
+  if (window.__TAURI_IPC__) {
+    try {
+      unlistenSync = await listen('sync:completed', (event) => {
+        if (event.payload && event.payload.timestamp) {
+          lastSyncTime.value = event.payload.timestamp.toString();
+          localStorage.setItem('bob-last-sync-time', lastSyncTime.value);
+          console.log(`[Sync] sync:completed received (${event.payload.direction}), updated lastSyncTime.`);
+        }
+      });
+    } catch (e) {
+      console.warn('Failed to listen to sync:completed', e);
     }
-  });
+  }
 
   // ── 响应式布局监听 ──
   window.addEventListener('resize', onResizeHandler);
