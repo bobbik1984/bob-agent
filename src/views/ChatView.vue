@@ -3238,5 +3238,31 @@ defineExpose({
   70% { box-shadow: 0 0 0 10px rgba(var(--user-accent-rgb, 39,118,187), 0); }
   100% { box-shadow: 0 0 0 0 rgba(var(--user-accent-rgb, 39,118,187), 0); }
 }
+
+/* ── Mobile UI Optimizations ── */
+.chat-view.is-mobile .messages-area {
+  padding: var(--space-4) var(--space-3);
+}
+
+.chat-view.is-mobile .message-row {
+  gap: 6px; /* 减小头像和气泡之间的间距 */
+}
+
+.chat-view.is-mobile .message-body {
+  max-width: 92%; /* 让气泡占据更多横向空间 */
+}
+
+.chat-view.is-mobile .message-avatar {
+  width: 24px;
+  height: 24px;
+  font-size: 10px;
+  margin-top: 2px;
+}
+
+.chat-view.is-mobile .message-user .message-content,
+.chat-view.is-mobile .message-assistant .message-content {
+  padding: 8px 12px; /* 减小气泡内部的内边距，让内容更紧凑 */
+  font-size: 14px; /* 确保字体在手机上大小适中且不会显得空旷 */
+}
 </style>
 
