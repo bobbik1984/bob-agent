@@ -160,3 +160,23 @@ deploy_website.bat
 - **灵魂定义**：详见 [data/memory/SOUL.md](data/memory/SOUL.md)
 - **路线图**：详见 [todo.md](todo.md)
 - **开源发布工作流**：详见 [OPEN_SOURCE_WORKFLOW.md](OPEN_SOURCE_WORKFLOW.md)
+
+
+## 📊 结构化数据检索引擎 (Native Table Tools)
+
+**规则：处理大型 Excel/CSV 文件时，绝对禁止将全文抛入大模型上下文，必须利用底层原生工具进行类人操作！**
+
+为了确保纯白领客群的开箱即用体验，Bob 系统内置了基于 `calamine` 库的原生数据检索引擎。系统通过一套严格管控的 API 与底层通信：
+
+1. **统一的命名系统 (Naming System)**
+   - `table_schema_viewer`：查阅表头及 Sheet 信息（对应人类动作：打开文件看一眼）。
+   - `table_global_search`：全文跨列扫描关键词，提取所在行（对应人类动作：Ctrl + F）。
+   - `table_column_filter`：针对特定列执行精确匹配（对应人类动作：漏斗筛选）。
+
+2. **严格的权限管理开关 (Permission Controls)**
+   - 沙箱解析：所有路径入参必须通过 `resolve_table_read_path` 校验。
+   - 越权拦截：除非启用 `global_file_access = true`，否则 AI 仅允许检索绑定在 `wikiDir` 或 `dataDir` 下的文件。尝试读取非授权外网或系统文件将被直接拒绝。
+
+3. **统一的管控逻辑 (Unified Dispatch & Audit)**
+   - 防死循环：工具调用接入 `ToolCallTracker`，若在同文件同表中循环搜寻将被强行熔断。
+   - 审计留痕：所有检索行为强制通过 `audit_tool_call` 输出至 `tools.log`，以便溯源。

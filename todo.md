@@ -739,3 +739,11 @@
 - [ ] 在前端启动时，添加对分享缓存目录的轮询或监听机制
 - [ ] 设计“收到分享内容”的拦截弹窗或直接静默入库（作为 Note 或 Task）
 - [ ] 确保落盘的数据能够自动进入 Outbox 并在下一次连接时同步给 PC
+
+## [WIP] 增强底层表格处理能力 (Native Excel Tools)
+- [x] 在 `tools.rs` 中引入并使用 `calamine` 解析库。
+- [x] 开发 `table_schema_viewer`：提取 Sheet 结构及列名。
+- [x] 开发 `table_global_search`：实现行级别的关键词匹配过滤。
+- [x] 开发 `table_column_filter`：实现按列精准查询。
+- [x] 接入 `ToolCallTracker`、`resolve_table_read_path` 权限检查和 `audit_tool_call`。
+- [ ] 将新工具在 Bridge 中予以暴露。

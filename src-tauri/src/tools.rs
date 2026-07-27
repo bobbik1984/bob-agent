@@ -294,6 +294,55 @@ fn get_builtin_tool_schemas() -> Vec<Value> {
         json!({
             "type": "function",
             "function": {
+                "name": "table_schema_viewer",
+                "description": "查阅表格(Excel/CSV)的结构，返回包含的 Sheet 名以及表头字段，以决定后续如何检索数据。必须提供绝对路径。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "path": { "type": "string", "description": "文件的绝对路径" }
+                    },
+                    "required": ["path"]
+                }
+            }
+        }),
+        json!({
+            "type": "function",
+            "function": {
+                "name": "table_global_search",
+                "description": "全局搜索表格数据（类似 Ctrl+F）。通过指定关键词跨列匹配，提取包含任意关键词所在的完整数据行，从而跳过截断限制提取海量数据。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "path": { "type": "string", "description": "文件的绝对路径" },
+                        "sheet_name": { "type": "string", "description": "要检索的工作表名称" },
+                        "search_terms": { "type": "array", "items": { "type": "string" }, "description": "要搜索的关键词数组" },
+                        "columns_to_extract": { "type": "array", "items": { "type": "string" }, "description": "可选。如果数据列很多，这里指定仅需要提取的列名，以节省Token" }
+                    },
+                    "required": ["path", "sheet_name", "search_terms"]
+                }
+            }
+        }),
+        json!({
+            "type": "function",
+            "function": {
+                "name": "table_column_filter",
+                "description": "精准漏斗过滤（类似漏斗筛选）。在指定的某一列中，查找完全包含目标值的数据行。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "path": { "type": "string", "description": "文件的绝对路径" },
+                        "sheet_name": { "type": "string", "description": "要检索的工作表名称" },
+                        "column": { "type": "string", "description": "要在哪一列表头下进行筛选过滤" },
+                        "value": { "type": "string", "description": "要匹配包含的值" },
+                        "columns_to_extract": { "type": "array", "items": { "type": "string" }, "description": "可选。指定仅需要提取的列名，以节省Token" }
+                    },
+                    "required": ["path", "sheet_name", "column", "value"]
+                }
+            }
+        }),
+        json!({
+            "type": "function",
+            "function": {
                 "name": "send_to_pc_agent",
                 "description": "将本地机器操作任务（如读写PC文件、执行终端命令）打包发送给绑定的 PC 节点执行。仅在移动端使用。",
                 "parameters": {
@@ -995,6 +1044,25 @@ async fn execute_tool_inner(
     global_file_access: bool,
 ) -> Value {
     match name {
+        "table_schema_viewer" => {
+            let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
+            tool_table_schema_viewer(path, global_file_access)
+        }
+        "table_global_search" => {
+            let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
+            let sheet_name = args.get("sheet_name").and_then(|v| v.as_str()).unwrap_or("");
+            let search_terms = args.get("search_terms").and_then(|v| v.as_array()).map(|arr| arr.iter().filter_map(|v| v.as_str()).collect()).unwrap_or_default();
+            let columns_to_extract = args.get("columns_to_extract").and_then(|v| v.as_array()).map(|arr| arr.iter().filter_map(|v| v.as_str()).collect());
+            tool_table_global_search(path, sheet_name, search_terms, columns_to_extract, global_file_access)
+        }
+        "table_column_filter" => {
+            let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
+            let sheet_name = args.get("sheet_name").and_then(|v| v.as_str()).unwrap_or("");
+            let column = args.get("column").and_then(|v| v.as_str()).unwrap_or("");
+            let value = args.get("value").and_then(|v| v.as_str()).unwrap_or("");
+            let columns_to_extract = args.get("columns_to_extract").and_then(|v| v.as_array()).map(|arr| arr.iter().filter_map(|v| v.as_str()).collect());
+            tool_table_column_filter(path, sheet_name, column, value, columns_to_extract, global_file_access)
+        }
         "read_file" => {
             let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
             // 路径穿越防御（含 URL 编码绕过防护）
@@ -3025,4 +3093,156 @@ pub fn system_save_temp_image(base64_data: String) -> Result<String, String> {
     file.write_all(&bytes).map_err(|e| e.to_string())?;
 
     Ok(file_path.to_string_lossy().to_string())
+}
+
+// ═══════════════════════════════════════════════════════════
+// T-1402: 结构化表格原生检索引擎 (Native Table Tools)
+// ═══════════════════════════════════════════════════════════
+use calamine::{open_workbook_auto, Reader};
+
+fn resolve_table_read_path(path: &str, global_file_access: bool) -> Result<PathBuf, String> {
+    let decoded = urlencoding::decode(path).unwrap_or(std::borrow::Cow::Borrowed(path));
+    if decoded.contains("../") || path.contains("../") {
+        return Err("禁止使用 ../ 进行路径穿越".into());
+    }
+    let path_buf = PathBuf::from(path);
+    if !path_buf.is_absolute() {
+        return Err("必须提供绝对路径".into());
+    }
+    if global_file_access {
+        return Ok(path_buf);
+    }
+    let data_dir = super::get_data_dir();
+    let wiki_dir = super::get_wiki_dir();
+    if path_buf.starts_with(&data_dir) || path_buf.starts_with(&wiki_dir) {
+        Ok(path_buf)
+    } else {
+        Err("无权访问该路径：非全局模式下，只能查询知识库(wikiDir)或数据(dataDir)内的表格文件。".into())
+    }
+}
+
+fn tool_table_schema_viewer(path: &str, global_file_access: bool) -> Value {
+    let target_path = match resolve_table_read_path(path, global_file_access) {
+        Ok(p) => p,
+        Err(e) => return json!({ "error": e }),
+    };
+    let mut workbook = match open_workbook_auto(&target_path) {
+        Ok(wb) => wb,
+        Err(e) => return json!({ "error": format!("无法打开表格: {}", e) }),
+    };
+    let mut schema = serde_json::Map::new();
+    let sheet_names = workbook.sheet_names().to_owned();
+    for sheet_name in sheet_names {
+        if let Ok(range) = workbook.worksheet_range(&sheet_name) {
+            let headers = if let Some(first_row) = range.rows().next() {
+                first_row.iter().map(|c| c.to_string()).collect::<Vec<_>>()
+            } else {
+                vec![]
+            };
+            schema.insert(sheet_name, json!(headers));
+        }
+    }
+    json!({ "schema": schema })
+}
+
+fn tool_table_global_search(path: &str, sheet_name: &str, search_terms: Vec<&str>, columns_to_extract: Option<Vec<&str>>, global_file_access: bool) -> Value {
+    let target_path = match resolve_table_read_path(path, global_file_access) {
+        Ok(p) => p,
+        Err(e) => return json!({ "error": e }),
+    };
+    let mut workbook = match open_workbook_auto(&target_path) {
+        Ok(wb) => wb,
+        Err(e) => return json!({ "error": format!("无法打开表格: {}", e) }),
+    };
+    let range = match workbook.worksheet_range(sheet_name) {
+        Ok(r) => r,
+        Err(_) => return json!({ "error": format!("工作表 {} 不存在", sheet_name) }),
+    };
+    
+    let mut results = Vec::new();
+    let mut header: Vec<String> = Vec::new();
+    
+    for (i, row) in range.rows().enumerate() {
+        if i == 0 {
+            header = row.iter().map(|c| c.to_string()).collect();
+            continue;
+        }
+        let row_strs: Vec<String> = row.iter().map(|c| c.to_string()).collect();
+        let mut hit = false;
+        for term in &search_terms {
+            if row_strs.iter().any(|cell| cell.contains(term)) {
+                hit = true;
+                break;
+            }
+        }
+        if hit {
+            let mut row_map = serde_json::Map::new();
+            for (j, cell_val) in row_strs.iter().enumerate() {
+                let col_name = header.get(j).unwrap_or(&format!("Col{}", j)).clone();
+                if let Some(ref ext_cols) = columns_to_extract {
+                    if !ext_cols.contains(&col_name.as_str()) {
+                        continue;
+                    }
+                }
+                row_map.insert(col_name, json!(cell_val));
+            }
+            results.push(row_map);
+            if results.len() >= 200 { 
+                break;
+            }
+        }
+    }
+    json!({ "results": results, "truncated": results.len() >= 200 })
+}
+
+fn tool_table_column_filter(path: &str, sheet_name: &str, column: &str, value: &str, columns_to_extract: Option<Vec<&str>>, global_file_access: bool) -> Value {
+    let target_path = match resolve_table_read_path(path, global_file_access) {
+        Ok(p) => p,
+        Err(e) => return json!({ "error": e }),
+    };
+    let mut workbook = match open_workbook_auto(&target_path) {
+        Ok(wb) => wb,
+        Err(e) => return json!({ "error": format!("无法打开表格: {}", e) }),
+    };
+    let range = match workbook.worksheet_range(sheet_name) {
+        Ok(r) => r,
+        Err(_) => return json!({ "error": format!("工作表 {} 不存在", sheet_name) }),
+    };
+    
+    let mut results = Vec::new();
+    let mut header: Vec<String> = Vec::new();
+    let mut target_col_idx = None;
+    
+    for (i, row) in range.rows().enumerate() {
+        if i == 0 {
+            header = row.iter().map(|c| c.to_string()).collect();
+            target_col_idx = header.iter().position(|h| h == column);
+            if target_col_idx.is_none() {
+                return json!({ "error": format!("找不到列: {}", column) });
+            }
+            continue;
+        }
+        let row_strs: Vec<String> = row.iter().map(|c| c.to_string()).collect();
+        if let Some(idx) = target_col_idx {
+            if let Some(cell_val) = row_strs.get(idx) {
+                if cell_val.contains(value) {
+                    let mut row_map = serde_json::Map::new();
+                    for (j, val) in row_strs.iter().enumerate() {
+                        let col_name = header.get(j).unwrap_or(&format!("Col{}", j)).clone();
+                        if let Some(ref ext_cols) = columns_to_extract {
+                            if !ext_cols.contains(&col_name.as_str()) {
+                                continue;
+                            }
+                        }
+                        row_map.insert(col_name, json!(val));
+                    }
+                    results.push(row_map);
+                    if results.len() >= 200 {
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    json!({ "results": results, "truncated": results.len() >= 200 })
 }
