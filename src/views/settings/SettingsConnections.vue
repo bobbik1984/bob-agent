@@ -705,42 +705,37 @@
           <span>{{ pairingDone ? (pairingError ? '配对失败' : '配对成功!') : '正在配对...' }}</span>
         </div>
 
-        <div class="topology-diagram">
+        <div class="topology-diagram minimalist-style">
+          <!-- LAN Arc Path -->
+          <svg class="lan-arc-line" viewBox="0 0 200 60" preserveAspectRatio="none" :class="lanPathClass">
+            <path d="M 0 60 Q 100 -40 200 60" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="4,4" />
+          </svg>
+
           <div class="topo-node mobile" :class="mobileClass">
-            <div class="icon-box"><Smartphone :size="28"/></div>
-            <span>手机</span>
+            <Smartphone :size="32" stroke-width="1.5" />
           </div>
 
           <div class="topo-paths">
-            <!-- LAN Path -->
-            <div class="topo-path-direct" :class="lanPathClass">
-              <div class="path-label">LAN</div>
-              <div class="path-line"></div>
-              <div v-if="lanStep?.status === 'running' || (lanStep?.status === 'done' && !pairingDone)" class="data-packet direct-packet"></div>
-            </div>
-
             <!-- Relay Path -->
-            <div class="topo-path-relay" :class="relayPathClass">
-              <div class="relay-leg leg-left">
+            <div class="topo-path-relay">
+              <div class="relay-leg leg-left" :class="relayPathLeftClass">
                 <div class="path-line"></div>
-                <div v-if="relayPathClass === 'path-active'" class="data-packet"></div>
+                <div v-if="relayPathLeftClass === 'path-active'" class="data-packet"></div>
               </div>
               
               <div class="topo-node cloud" :class="relayNodeClass">
-                <div class="icon-box"><Cloud :size="24"/></div>
-                <span>中继</span>
+                <Cloud :size="32" stroke-width="1.5" />
               </div>
 
-              <div class="relay-leg leg-right">
+              <div class="relay-leg leg-right" :class="relayPathRightClass">
                 <div class="path-line"></div>
-                <div v-if="relayPathClass === 'path-active'" class="data-packet delay-packet"></div>
+                <div v-if="relayPathRightClass === 'path-active'" class="data-packet delay-packet"></div>
               </div>
             </div>
           </div>
 
           <div class="topo-node pc" :class="pcClass">
-            <div class="icon-box"><Monitor :size="28"/></div>
-            <span>电脑</span>
+            <Monitor :size="32" stroke-width="1.5" />
           </div>
         </div>
 
@@ -838,7 +833,9 @@ const pairingError = ref(false);
 const pairingSteps = ref([]);
 
 const lanStep = computed(() => pairingSteps.value.find(s => s.id === 'lan_sync'));
-const relayHandshakeStep = computed(() => pairingSteps.value.find(s => s.id === 'relay_handshake'));
+const relayConnectStep = computed(() => pairingSteps.value.find(s => s.id === 'relay_connect'));
+const relayNotifyStep = computed(() => pairingSteps.value.find(s => s.id === 'relay_notify'));
+const relayAckStep = computed(() => pairingSteps.value.find(s => s.id === 'relay_ack'));
 const relaySyncStep = computed(() => pairingSteps.value.find(s => s.id === 'relay_sync'));
 
 const lanPathClass = computed(() => {
@@ -849,18 +846,24 @@ const lanPathClass = computed(() => {
   return 'path-inactive';
 });
 
-const relayPathClass = computed(() => {
-  if (relayHandshakeStep.value?.status === 'running' || relaySyncStep.value?.status === 'running') return 'path-active';
+const relayPathLeftClass = computed(() => {
+  if (relayConnectStep.value?.status === 'error' || relayNotifyStep.value?.status === 'error') return 'path-error';
+  if (relayConnectStep.value?.status === 'running' || relayNotifyStep.value?.status === 'running' || relayAckStep.value?.status === 'running' || relaySyncStep.value?.status === 'running') return 'path-active';
   if (relaySyncStep.value?.status === 'done') return 'path-success';
-  if (relayHandshakeStep.value?.status === 'error' || relaySyncStep.value?.status === 'error') return 'path-error';
-  if (relayHandshakeStep.value?.status === 'done' && relaySyncStep.value?.status === 'pending') return 'path-active';
+  return 'path-inactive';
+});
+
+const relayPathRightClass = computed(() => {
+  if (relayAckStep.value?.status === 'error' || relaySyncStep.value?.status === 'error') return 'path-error';
+  if (relayAckStep.value?.status === 'running' || relaySyncStep.value?.status === 'running') return 'path-active';
+  if (relaySyncStep.value?.status === 'done') return 'path-success';
   return 'path-inactive';
 });
 
 const relayNodeClass = computed(() => {
-  if (relayHandshakeStep.value?.status === 'error' || relaySyncStep.value?.status === 'error') return 'error';
+  if (relayConnectStep.value?.status === 'error' || relayNotifyStep.value?.status === 'error' || relayAckStep.value?.status === 'error' || relaySyncStep.value?.status === 'error') return 'error';
   if (relaySyncStep.value?.status === 'done') return 'success';
-  if (relayHandshakeStep.value?.status === 'running' || relaySyncStep.value?.status === 'running') return 'active';
+  if (relayConnectStep.value?.status === 'running' || relayNotifyStep.value?.status === 'running' || relayAckStep.value?.status === 'running' || relaySyncStep.value?.status === 'running') return 'active';
   return '';
 });
 
@@ -869,7 +872,7 @@ const mobileClass = computed(() => {
 });
 
 const pcClass = computed(() => {
-  return pairingError.value ? 'error' : (pairingDone.value ? 'success' : (relayHandshakeStep.value?.status === 'running' || lanStep.value?.status === 'running' || relaySyncStep.value?.status === 'running' ? 'active' : ''));
+  return (relayAckStep.value?.status === 'error' || relaySyncStep.value?.status === 'error') ? 'error' : (pairingDone.value ? 'success' : (relayAckStep.value?.status === 'running' || lanStep.value?.status === 'running' || relaySyncStep.value?.status === 'running' ? 'active' : ''));
 });
 
 const currentErrorDetail = computed(() => {
@@ -882,8 +885,10 @@ function initPairingSteps() {
     { id: 'parse',         label: '二维码解码',         status: 'pending', detail: '' },
     { id: 'save_config',   label: '保存配对配置',       status: 'pending', detail: '' },
     { id: 'lan_sync',      label: '尝试局域网直连同步',   status: 'pending', detail: '' },
-    { id: 'relay_handshake', label: '尝试外网隧道穿透',  status: 'pending', detail: '' },
-    { id: 'relay_sync',    label: '外网隧道数据同步',     status: 'pending', detail: '' },
+    { id: 'relay_connect', label: '连接中继',         status: 'pending', detail: '' },
+    { id: 'relay_notify',  label: '呼叫设备',         status: 'pending', detail: '' },
+    { id: 'relay_ack',     label: '等待响应',         status: 'pending', detail: '' },
+    { id: 'relay_sync',    label: '中继同步',         status: 'pending', detail: '' },
   ];
   pairingDone.value = false;
   pairingError.value = false;
@@ -987,7 +992,9 @@ const handleMobileScan = async () => {
         }
 
         if (lanSuccess) {
-          updateStep('relay_handshake', 'skipped', '局域网已连接，无需外网穿透');
+          updateStep('relay_connect', 'skipped', '局域网已连接，无需外网穿透');
+          updateStep('relay_notify', 'skipped', '');
+          updateStep('relay_ack', 'skipped', '');
           updateStep('relay_sync', 'skipped', '');
           pairingDone.value = true;
           pairingError.value = false;
@@ -997,27 +1004,25 @@ const handleMobileScan = async () => {
 
       // Step 4: 局域网失败，尝试外网隧道握手 (Relay Handshake)
       if (window.appAPI.relayHandshake) {
-        updateStep('relay_handshake', 'running', '');
+        updateStep('relay_connect', 'running', '');
         try {
           const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Relay Timeout')), 30000));
           await Promise.race([
             window.appAPI.relayHandshake(payload.device_id, payload.public_key),
             timeoutPromise
           ]);
-          updateStep('relay_handshake', 'done', '');
+          // done states are managed by sync:progress
         } catch (e) {
           console.warn('Relay handshake failed', e);
           const errStr = String(e);
-          if (errStr.includes('ERR-PAIRING-01')) {
-              updateStep('relay_handshake', 'error', 'Error: 手机无法连接到中继服务器');
-          } else if (errStr.includes('ERR-PAIRING-03')) {
-              updateStep('relay_handshake', 'error', 'Error: PC无响应 (可能PC已掉线或网络不稳定)');
-          } else if (errStr.includes('Target device is offline')) {
-              updateStep('relay_handshake', 'error', 'Error: PC未连接到中继服务器 (离线)');
-          } else if (errStr.includes('Relay Timeout')) {
-              updateStep('relay_handshake', 'error', 'Error: 握手请求超时 (网络极差)');
+          if (errStr.includes('ERR-PAIRING-01') || errStr.includes('Relay Timeout')) {
+              updateStep('relay_connect', 'error', 'Error: 手机连不上中继服务器');
+          } else if (errStr.includes('ERR-PAIRING-02')) {
+              updateStep('relay_notify', 'error', 'Error: 无法发送配对请求');
+          } else if (errStr.includes('ERR-PAIRING-03') || errStr.includes('ERR-PAIRING-04') || errStr.includes('Target device is offline')) {
+              updateStep('relay_ack', 'error', 'Error: PC无响应 (可能未联网或掉线)');
           } else {
-              updateStep('relay_handshake', 'error', 'Error: ' + errStr);
+              updateStep('relay_connect', 'error', 'Error: ' + errStr);
           }
           pairingDone.value = true;
           pairingError.value = true;
@@ -2153,3 +2158,96 @@ onUnmounted(() => {
 }
 </style>
 
+
+<style scoped>
+.minimalist-style {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 30px 40px;
+}
+.lan-arc-line {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 70%;
+  height: 60px;
+  z-index: 1;
+}
+.lan-arc-line.path-inactive {
+  color: var(--border-subtle);
+}
+.lan-arc-line.path-active {
+  color: var(--user-accent);
+  stroke-dasharray: 4,4;
+  animation: arc-flow 1s linear infinite;
+}
+.lan-arc-line.path-success {
+  color: var(--color-success);
+  stroke-dasharray: none;
+}
+.lan-arc-line.path-error {
+  color: var(--color-error);
+  stroke-dasharray: none;
+}
+@keyframes arc-flow {
+  0% { stroke-dashoffset: 8; }
+  100% { stroke-dashoffset: 0; }
+}
+
+.minimalist-style .topo-node {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  color: var(--text-tertiary);
+  z-index: 2;
+  border: none;
+  background: transparent;
+}
+.minimalist-style .topo-node.active {
+  color: var(--user-accent);
+}
+.minimalist-style .topo-node.success {
+  color: var(--color-success);
+}
+.minimalist-style .topo-node.error {
+  color: var(--color-error);
+}
+
+.minimalist-style .topo-paths {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 10px;
+  position: relative;
+}
+.minimalist-style .topo-path-relay {
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+.minimalist-style .relay-leg {
+  flex: 1;
+  position: relative;
+}
+.minimalist-style .relay-leg .path-line {
+  height: 2px;
+  width: 100%;
+  background: var(--border-subtle);
+  border-radius: 1px;
+}
+.minimalist-style .relay-leg.path-active .path-line {
+  background: var(--user-accent);
+}
+.minimalist-style .relay-leg.path-success .path-line {
+  background: var(--color-success);
+}
+.minimalist-style .relay-leg.path-error .path-line {
+  background: var(--color-error);
+}
+</style>
