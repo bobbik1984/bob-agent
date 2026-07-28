@@ -747,3 +747,5 @@
 - [x] 开发 `table_column_filter`：实现按列精准查询。
 - [x] 接入 `ToolCallTracker`、`resolve_table_read_path` 权限检查和 `audit_tool_call`。
 - [ ] 将新工具在 Bridge 中予以暴露。
+
+- [ ] 跨端协作 (Cross-Device Synergy): 重构 send_to_pc_agent 工具，移除 equire_sync 同步阻塞等待，改为通过传入 session_id 触发 PC 端底层数据库异步回调，彻底解决长连接 45 秒超时断开导致的结果无法回传问题。

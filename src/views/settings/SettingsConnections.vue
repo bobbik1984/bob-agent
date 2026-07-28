@@ -707,8 +707,8 @@
 
         <div class="topology-diagram minimalist-style">
           <!-- LAN Arc Path -->
-          <svg class="lan-arc-line" viewBox="0 0 200 60" preserveAspectRatio="none" :class="lanPathClass">
-            <path d="M 0 60 Q 100 -40 200 60" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="4,4" />
+          <svg class="lan-arc-line" viewBox="0 0 100 100" preserveAspectRatio="none" :class="lanPathClass">
+            <path d="M 0 100 Q 50 0 100 100" fill="none" stroke="currentColor" stroke-width="1.5" vector-effect="non-scaling-stroke" stroke-dasharray="6,4" />
           </svg>
 
           <div class="topo-node mobile" :class="mobileClass">
@@ -2165,16 +2165,17 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 30px 40px;
+  padding: 45px 40px 25px; /* Give more top padding for the arc */
 }
 .lan-arc-line {
   position: absolute;
   top: 10px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 70%;
-  height: 60px;
+  left: 64px; /* Centers with the first icon (padding-left 40 + half-width 24) */
+  right: 64px; /* Centers with the last icon */
+  width: auto;
+  height: 35px; /* Bottom ends at 45px, exactly where the icons start */
   z-index: 1;
+  overflow: visible;
 }
 .lan-arc-line.path-inactive {
   color: var(--border-subtle);

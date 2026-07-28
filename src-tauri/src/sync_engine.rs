@@ -486,6 +486,9 @@ pub fn import_sync_data(app: &AppHandle, data: SyncData, last_sync_ts: i64) -> R
         }
     };
 
+    import_replace("settings", data.settings.clone(), &["key", "value"]);
+    import_lww("conversations", data.conversations.clone(), &["id", "title", "model", "cost", "last_message", "last_role", "created_at", "updated_at"]);
+
     // Append-only strategy for messages (de-dupe by sync_id)
     if !data.messages.is_empty() {
         for msg in &data.messages {
@@ -512,8 +515,6 @@ pub fn import_sync_data(app: &AppHandle, data: SyncData, last_sync_ts: i64) -> R
         }
     }
 
-    import_replace("settings", data.settings.clone(), &["key", "value"]);
-    import_lww("conversations", data.conversations.clone(), &["id", "title", "model", "cost", "last_message", "last_role", "created_at", "updated_at"]);
     import_replace("events", data.events.clone(), &["id", "title", "type", "status", "date", "start_time", "end_time", "description", "created_at", "linked_ticket_id"]);
     import_replace("cron_jobs", data.cron_jobs.clone(), &["id", "title", "cron_expr", "prompt_template", "enabled", "last_run", "created_at"]);
     import_replace("kg_nodes", data.kg_nodes.clone(), &["id", "label", "node_type", "summary", "source", "metadata", "created_at"]);
