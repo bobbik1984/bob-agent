@@ -128,6 +128,7 @@ pub struct SyncCommandPayload {
 #[command]
 pub async fn trigger_mobile_sync(app: AppHandle, payload: SyncCommandPayload) -> Result<(), String> {
     info!("[Sync Engine] trigger_mobile_sync called, listen_only: {}", payload.listen_only);
+    log_sync_action("Auto Discovery", "running", if payload.listen_only { "Passive listen" } else { "Active probe" });
 
     if payload.listen_only {
         let lan_engine = app.state::<Arc<LanSyncEngine>>();
@@ -542,7 +543,7 @@ pub fn import_sync_data(app: &AppHandle, data: SyncData, last_sync_ts: i64) -> R
             "kg_edges": data.kg_edges.len()
         },
         "total_records": total_records,
-        "detail": "鎴愬姛鍚堝苟浜戠鏁版嵁"
+        "detail": "成功合并云端数据"
     }));
     
     if history.len() > 50 { history.truncate(50); } // Keep last 50
@@ -663,7 +664,7 @@ pub async fn do_active_sync(app: AppHandle, payload: SyncCommandPayload) -> Resu
                                 // Emit config reconciled event so UI updates
                                 let _ = app.emit("config:reconciled", serde_json::json!({"applied": 1}));
                                 sync_success = true;
-                                let _ = app.emit("sync:progress", serde_json::json!({"stage": "lan_sync", "status": "done", "detail": format!("通过 {} 鍚屾鎴愬姛", ip)}));
+                                let _ = app.emit("sync:progress", serde_json::json!({"stage": "lan_sync", "status": "done", "detail": format!("通过 {} 同步成功", ip)}));
                             }
                         }
                     } else if let Some(config) = json.get("config") { // Fallback for old PC version

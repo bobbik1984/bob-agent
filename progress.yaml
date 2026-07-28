@@ -28,6 +28,10 @@ phases:
     status: done
   - text: 跨设备同步 (Sync Engine) 技能下发与物理目录合并
     status: done
+  - text: 修复手机端同步后丢失历史消息的 SQLite 外键冲突 Bug
+    status: done
+  - text: 实现多端上线自动相互发现与握手同步机制
+    status: done
 - name: V0.5 知识图谱 Source-Hub 重构
   tasks:
   - text: 数据库 Schema 升级，新增 source_batches
