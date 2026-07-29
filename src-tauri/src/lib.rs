@@ -944,6 +944,7 @@ pub fn run() {
             sync_engine::get_connected_devices,
             sync_engine::disconnect_device,
             sync_engine::trigger_mobile_sync,
+            sync_engine::trigger_wakeup_via_relay,
             sync_engine::write_mobile_outbox,
             sync_engine::relay_handshake,
             sync_engine::get_sync_logs,

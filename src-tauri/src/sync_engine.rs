@@ -180,6 +180,46 @@ pub async fn write_mobile_outbox(_app: AppHandle, operations: Vec<serde_json::Va
 }
 
 #[command]
+pub async fn trigger_wakeup_via_relay(app: AppHandle, device_id: String) -> Result<(), String> {
+    let config = crate::read_config();
+    let my_device_id = config.get("device_id").and_then(|v| v.as_str()).unwrap_or("unknown").to_string();
+    
+    let relay_url = "wss://relay.bobbik.org".to_string();
+    let ws_url = format!("{}/ws/device/{}", relay_url, url_encode_device_id(&my_device_id));
+
+    log_sync_action("Relay Wakeup", "running", &format!("Attempting to wake up device: {}", device_id));
+
+    let (mut ws_stream, _) = match tokio::time::timeout(tokio::time::Duration::from_secs(10), connect_websocket_robust(&ws_url)).await {
+        Ok(Ok(stream)) => stream,
+        _ => {
+            log_sync_action("Relay Wakeup", "error", "Failed to connect to relay");
+            return Err("Failed to connect to relay".to_string());
+        }
+    };
+    
+    let reg_msg = serde_json::json!({
+        "type": "register",
+        "deviceId": my_device_id
+    });
+    let _ = ws_stream.send(Message::Text(reg_msg.to_string().into())).await;
+
+    let msg = serde_json::json!({
+        "type": "wakeup",
+        "target_device_id": device_id,
+        "from_device_id": my_device_id
+    });
+    
+    if let Err(e) = ws_stream.send(Message::Text(msg.to_string().into())).await {
+        log_sync_action("Relay Wakeup", "error", &format!("Failed to send wakeup: {}", e));
+        return Err(e.to_string());
+    }
+
+    log_sync_action("Relay Wakeup", "done", &format!("Wakeup signal sent to {}", device_id));
+    
+    Ok(())
+}
+
+#[command]
 pub async fn relay_handshake(app: AppHandle, target_device_id: String, auth_code: String) -> Result<(), String> {
     let config = crate::read_config();
     let my_device_id = config.get("device_id").and_then(|v| v.as_str()).unwrap_or("unknown").to_string();
@@ -1032,6 +1072,15 @@ pub fn start_relay_listener(app: AppHandle) {
                                                 "device_id": from_id,
                                                 "platform": platform,
                                                 "device_name": device_name
+                                            }));
+                                        } else if msg_type == "wakeup" {
+                                            let from_id = json.get("from_device_id").and_then(|v| v.as_str()).unwrap_or("unknown");
+                                            log::info!("[Sync Engine] Received wakeup from {}", from_id);
+                                            log_sync_action("Relay Wakeup", "done", &format!("Received wakeup from PC {}", from_id));
+                                            
+                                            // Emit to frontend to trigger mobile sync
+                                            let _ = app.emit("sync:wakeup", serde_json::json!({
+                                                "device_id": from_id
                                             }));
                                         } else if msg_type == "proxy" {
                                             if let Some(inner_payload) = json.get("payload") {

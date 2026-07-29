@@ -670,6 +670,7 @@ window.appAPI = {
 
   // ── 同步引擎 (Phase 3 Mobile Sync) ──────────
   triggerMobileSync: async (payload) => invoke('trigger_mobile_sync', { payload }),
+  triggerWakeupViaRelay: async (deviceId) => invoke('trigger_wakeup_via_relay', { deviceId }),
   writeMobileOutbox: async (operations) => invoke('write_mobile_outbox', { operations }),
   relayHandshake: async (targetDeviceId, authCode) => invoke('relay_handshake', { targetDeviceId, authCode }),
 

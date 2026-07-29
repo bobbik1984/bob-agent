@@ -650,15 +650,51 @@ onMounted(async () => {
     const pairingPayload = await window.appAPI.getConfig('pairing_payload');
     if (pairingPayload) {
       console.log('[Sync] 检测到已配对设备，启动后台双向同步...');
-      if (window.appAPI.triggerMobileSync) {
-        window.appAPI.triggerMobileSync(pairingPayload).then(() => {
-          console.log('[Sync] 后台同步成功！');
-          localStorage.setItem('bob-last-sync-time', Date.now().toString());
-        }).catch(e => {
-          console.warn('[Sync] 后台同步失败 (对方可能处于离线状态)，启动静默UDP监听...', e);
-          // Fallback to background UDP listener if initial active sync failed
-          window.appAPI.triggerMobileSync({ ...pairingPayload, listen_only: true }).catch(err => console.error(err));
-        });
+      const doSync = () => {
+        if (window.appAPI.triggerMobileSync) {
+          window.appAPI.triggerMobileSync(pairingPayload).then(() => {
+            console.log('[Sync] 后台同步成功！');
+            localStorage.setItem('bob-last-sync-time', Date.now().toString());
+          }).catch(e => {
+            console.warn('[Sync] 后台同步失败 (对方可能处于离线状态)，启动静默UDP监听...', e);
+            window.appAPI.triggerMobileSync({ ...pairingPayload, listen_only: true }).catch(err => console.error(err));
+          });
+        }
+      };
+      
+      doSync();
+
+      // Listen for visibility change (wake up from background)
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+          const lastSync = parseInt(localStorage.getItem('bob-last-sync-time') || '0');
+          if (Date.now() - lastSync > 60000) { // 1分钟防抖
+            console.log('[Sync] 移动端恢复前台，主动触发同步...');
+            doSync();
+          }
+        }
+      });
+      
+      // Listen for Relay wakeup signal from PC
+      listen('sync:wakeup', (event) => {
+        console.log('[Sync] 收到 PC 端唤醒信令，立即触发同步...', event);
+        doSync();
+      });
+
+    } else {
+      // PC 端：主动向所有已配对设备发送唤醒信令
+      try {
+        if (window.appAPI.getConnectedDevices && window.appAPI.triggerWakeupViaRelay) {
+          const devices = await window.appAPI.getConnectedDevices();
+          if (devices && devices.length > 0) {
+            console.log(`[Sync] PC端启动，向 ${devices.length} 个配对设备发送上线唤醒信令...`);
+            for (const dev of devices) {
+              window.appAPI.triggerWakeupViaRelay(dev.device_id).catch(err => console.error('Wakeup error:', err));
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('Failed to wake up devices:', err);
       }
     }
   }

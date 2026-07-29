@@ -610,6 +610,8 @@ function describeCron(expr) {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 .inbox-view.is-mobile .inbox-content-wrapper.is-timeline-tab {
   padding: 12px 0 0 0 !important;
