@@ -1960,7 +1960,7 @@ pub(crate) async fn stream_internal(
 
         let mut context_injection = String::new();
         if os_info == "android" || os_info == "ios" {
-            context_injection.push_str("\n[环境] 移动端\n[约束] 凡遇到涉及操作本地电脑（如读写PC文件、执行终端命令、查看机器状态）的请求，严禁拒绝。必须直接调用 send_to_pc_agent 工具将任务转发给已绑定的 PC 节点处理，并向用户返回结果。\n");
+            context_injection.push_str("\n[执行端路由纪律]\n1. 手机本地执行：记录日程/待办、查票据、记笔记、搜索网页，必须直接使用对应工具（如 add_calendar_event, web_search）在手机本地完成。\n2. 穿透 PC 执行：生成复杂文档(如 PPTX/DOCX)、执行终端命令、操作微信、开启定时任务(cron_job)、读写桌面文件，必须使用 send_to_pc_agent 打包投递给 PC。\n");
         } else if is_from_mobile {
             context_injection.push_str("\n[状态] 用户当前正通过手机网络远程向你下达指令\n[要求] 回答需极其简炼，适合手机屏幕阅读。凡涉及系统关机、格式化或高危修改操作，必须在执行前向用户明确二次确认。\n");
         }

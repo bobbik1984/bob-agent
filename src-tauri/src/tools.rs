@@ -290,7 +290,7 @@ pub async fn get_tool_schemas_with_mcp() -> Vec<Value> {
 }
 
 fn get_builtin_tool_schemas() -> Vec<Value> {
-    vec![
+    let mut tools = vec![
         json!({
             "type": "function",
             "function": {
@@ -989,7 +989,26 @@ fn get_builtin_tool_schemas() -> Vec<Value> {
                 }
             }
         }),
-    ]
+    ];
+
+    let os = std::env::consts::OS;
+    if os == "android" || os == "ios" {
+        let pc_exclusive = vec![
+            "enable_browser", "browse_page", "send_wechat_file", "share_file", 
+            "add_cron_job", "remove_cron_job", "toggle_cron_job", "list_cron_jobs",
+            "create_directory", "move_file", "copy_file", "delete_file", "rename_file",
+            "export_docx", "export_pptx", "install_skill_from_url"
+        ];
+        tools.retain(|t| {
+            if let Some(name) = t.get("function").and_then(|f| f.get("name")).and_then(|n| n.as_str()) {
+                !pc_exclusive.contains(&name)
+            } else {
+                true
+            }
+        });
+    }
+
+    tools
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -1159,13 +1178,24 @@ async fn execute_tool_inner(
                     }
                     Err("Failed to connect or stream closed".to_string())
                 }).await;
-                
                 match result {
-                    Ok(Ok(res)) => json!({ "status": "success", "result": res }),
+                    Ok(Ok(res)) => {
+                        // After success, tell the mobile frontend to run doSync() 
+                        // so it can pull whatever changes the PC just made.
+                        let _ = app.emit("sync:wakeup", serde_json::json!({ "reason": "rpc_success" }));
+                        json!({ "status": "success", "result": res })
+                    },
                     Ok(Err(e)) => json!({ "error": format!("RPC 通信失败: {}", e) }),
                     Err(_) => json!({ "error": "RPC 请求超时 (45秒未收到 PC 响应，可能因为 PC 处理过慢或已休眠掉线)" }),
                 }
             } else {
+                let app_clone = app.clone();
+                let pc_id_clone = pc_device_id.clone();
+                let is_online = crate::sync_engine::trigger_wakeup_via_relay(app_clone, pc_id_clone).await.is_ok();
+                if !is_online {
+                    return json!({ "error": "PC 处于离线状态或未响应唤醒请求，无法异步投递任务" });
+                }
+
                 tauri::async_runtime::spawn(async move {
                     let encoded_id = my_device_id.replace('+', "%2B").replace('/', "%2F").replace('=', "%3D");
                     let ws_url = format!("wss://relay.bobbik.org/ws/device/{}", encoded_id);

@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "bob",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "identifier": "bob.agent",
   "build": {
     "frontendDist": "../dist",
@@ -32,7 +32,9 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis"],
+    "targets": [
+      "nsis"
+    ],
     "windows": {
       "nsis": {
         "installerHooks": "./hooks.nsi"
