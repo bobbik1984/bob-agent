@@ -139,7 +139,7 @@ const overdueEvents = computed(() => {
 });
 
 onMounted(async () => {
-  window.addEventListener('sync:refresh-events', fetchEvents);
+  window.addEventListener('sync:refresh-events', reloadEvents);
   try {
     const [allEvents, cronResult] = await Promise.all([
       window.appAPI.listEvents(),
@@ -211,7 +211,7 @@ onUnmounted(() => {
   });
 
   onUnmounted(() => {
-    window.removeEventListener('sync:refresh-events', fetchEvents);
+    window.removeEventListener('sync:refresh-events', reloadEvents);
     window.removeEventListener('ticket-created', reloadEvents);
     if (unlistenCalendar) unlistenCalendar();
   });

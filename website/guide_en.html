@@ -1,0 +1,669 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="bob agent official user manual, covering quick start, core features, Goal Mode, MCP configuration, and troubleshooting self-healing guide." />
+  <title>bob agent User Manual — Detailed Guide & Configuration Manual</title>
+  <link rel="stylesheet" href="style.css?v=0.7.1" />
+  
+  <!-- Code Highlighting Stylesheet (Dynamically toggles between dark/light) -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@0.7.1/build/styles/github-dark.min.css" id="hljs-theme" />
+  
+  <!-- 🔑 Theme Initializer Script: Prevent any light/dark flashes on load -->
+  <script>
+    (function() {
+      try {
+        var theme = localStorage.getItem('bob-theme') || 'light';
+        document.documentElement.setAttribute('data-theme', theme);
+      } catch (e) {}
+    })();
+  </script>
+</head>
+<body>
+
+  <!-- Floating Sticky Header -->
+  <header>
+    <div class="nav-container">
+      <a href="index_en.html" class="logo-wrapper" id="nav-logo">
+        <div class="logo-image-mask"></div>
+        <span class="logo-text">Agent<span class="logo-dot">.</span></span>
+      </a>
+      
+      <nav class="nav-links">
+        <a href="index.html#features" class="nav-link" id="link-features">Core Features</a>
+        <a href="index.html#tech-stack" class="nav-link" id="link-tech">Architecture</a>
+        <a href="index.html#roadmap" class="nav-link" id="link-roadmap">Roadmap</a>
+        <a href="#" class="nav-link active" id="link-docs">User Guide</a>
+      </nav>
+      
+      <div class="nav-actions">
+        <!-- Language Switcher -->
+        <a href="guide.html" class="theme-toggle-btn lang-switcher" title="切换到中文">
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>
+          <span class="lang-text">中</span>
+        </a>
+        
+        <a href="https://github.com/bobbik1984/bob-agent" class="github-btn" target="_blank" title="GitHub Repository">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-0.7.1-1.25-.27-2.48-1-0.7.1-0.7.1-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4"/><path d="M9 18c-4.51 2-5-2-7-2"/></svg>
+        </a>
+        <button class="theme-toggle-btn" id="theme-toggle" title="Toggle Theme">
+          <!-- Sun Icon (for light mode toggle) -->
+          <svg class="sun-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
+          <!-- Moon Icon (for dark mode toggle) -->
+          <svg class="moon-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <div class="main-wrapper">
+    
+    <!-- Documentation Layout Grid -->
+    <div class="docs-layout">
+      
+      <!-- Sticky Sidebar Menu -->
+      <aside class="docs-sidebar">
+        <div class="sidebar-title">Table of Contents</div>
+        <ul class="sidebar-menu" id="sidebar-menu">
+          <!-- Dynamically populated via JavaScript -->
+        </ul>
+      </aside>
+      
+      <!-- Main Content Panel -->
+      <main class="docs-content markdown-body" id="docs-content">
+        <!-- Rendered markdown goes here -->
+      </main>
+      
+    </div>
+    
+  </div>
+
+  <!-- Markdown Parser CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <!-- Code Highlighter CDN -->
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@0.7.1/build/highlight.min.js"></script>
+
+  <!-- 📖 Embedded USER_GUIDE.md Source: Allows zero-CORS dynamic parsing even in local file:// setups -->
+  <script id="markdown-source" type="text/markdown">
+# Bob Agent User Guide
+
+> **Version v0.7.1 (Tauri v2)**
+>
+> Your ghostly desktop co-pilot, hidden in the system tray, always ready to complete the mission.
+
+---
+
+## 1. Getting Started
+
+### System Requirements
+
+- **OS**: Windows 10 / 11 (64-bit)
+- **API Key**: At least one LLM provider's API Key (e.g., DeepSeek, OpenAI, Qwen, etc.)
+
+> 💡 If you don't have a paid Key yet, you can use the free API Key from ModelScope to get started.
+
+### Developer Setup
+
+```bash
+# Requires: Node.js 18+, Rust toolchain, VS C++ Build Tools
+npm install
+npm run dev:tauri
+```
+
+### First-Time Setup
+
+1. After launching for the first time, a **Setup Wizard** will automatically pop up to guide you through the basic configuration.
+2. Go to **Settings → Model Panel → API Key Management**, and enter your API Key.
+3. Return to the chat interface and start chatting with Bob!
+
+> 💡 **Lazy Mode**: You can also just tell Bob directly in the chat:  
+> *"Help me configure this Key: sk-xxx"*  
+> Bob will autonomously write the API Key via the **Outbox system** (AI declarative configuration pipeline), without you having to open the settings panel manually.
+
+---
+
+## 2. Smart Chat
+
+### Basic Conversation
+
+- Type your content in the input box and press **Enter** to send.
+- Press **Shift + Enter** to start a new line within the input box.
+- Bob's replies support **Markdown rendering** and **code syntax highlighting**, offering a great reading experience for technical content.
+- A **cost indicator** (¥/$) will be displayed at the bottom of each chat, letting you monitor your Token consumption in real-time.
+
+### 📸 Vision
+
+Bob supports multimodal vision analysis. You can send images in the following ways:
+
+- **Ctrl + V**: Paste a screenshot or an image from your clipboard directly.
+- **Drag & Drop**: Drag an image file into the chat window.
+- **Screenshot**: Bob can capture the current desktop screen via tools and analyze it.
+
+Once sent, Bob will use Vision capabilities to recognize and analyze the image content.
+
+### 🤖 Agent Mode
+
+When Agent Mode is enabled, Bob can autonomously call a series of native Rust tools to accomplish complex tasks. Here are all the currently available tools:
+
+| Tool | Description |
+|------|-------------|
+| `read_file` | Read local file contents |
+| `write_file` | Write to/create a local file |
+| `append_file` | Append content to an existing file |
+| `list_dir` | Browse directory structures |
+| `web_search` | Search the internet (requires Tavily API Key) |
+| `fetch_url` | Fetch webpage content and extract plain text |
+| `brain_search` | Search the local knowledge base (Wiki directory) |
+| `add_calendar_event` | Add an event or to-do to the calendar |
+| `system_time` | Get the current system time and date |
+| `get_weather` | Check real-time weather for a city |
+| `list_skills` | Browse the list of available cognitive skills |
+| `read_skill` | Read the content of a specific cognitive skill |
+| `send_wechat_file` | (Deprecated) Send a file to WeChat |
+| `share_file` | Generate a file sharing link via Web Drop |
+
+> **Restatement Mechanism**: During long, multi-step tool call chains, Bob will automatically "restate the goal"—reviewing the original goal after each round of tool calls. This prevents the LLM from losing focus or drifting off course in long chains, significantly increasing the success rate of complex tasks.
+
+---
+
+## 3. Goal Mode
+
+### What is Goal Mode?
+
+Goal Mode is Bob's advanced execution mode. It employs a **Maker-Checker closed-loop architecture**, allowing the AI to repeatedly iterate on the task output like a rigorous engineer until it fully meets the standard.
+
+### How to Activate
+
+When sending a message, toggle the **Goal Mode** switch to enable it.
+
+### Mechanism
+
+1. **Maker (Execution)**: Uses the Main model to execute the task. The tool call budget is increased from the default 5 rounds to a **50-round limit**, allowing the AI to perform extremely complex operations (Read file → Search web → Draft content → Self-correct).
+2. **Checker (Review)**: Calls the Clerk model to act as a strict evaluator. It reads your original goal and the Maker's final output, defaults to a `FAIL` stance, and verifies the results step-by-step.
+3. **Auto Retry**: If the Checker fails the output, it generates a detailed list of missing points (Feedback). The system packages this Feedback as a new task and hands it back to the Maker for correction. The outer loop will retry **up to 3 times** until the Checker grants a `PASS`.
+
+### Use Cases
+
+- Complex tasks requiring multi-step collaboration (e.g., Research + Organize + Write a full report).
+- Scenarios where output quality is highly demanding, and superficial Q&A isn't enough.
+- Any work that requires "grinding it out until it's perfect".
+
+---
+
+## 4. Model Hub
+
+### Auto-Discovery
+
+Bob's backend reads from the model provider registry. Once you enter the API Key of any OpenAI-compatible provider (e.g., DeepSeek, Qwen, Volcengine, ModelScope, etc.), the system automatically sends a probe request to the provider's `/models` endpoint to **discover and record newly released models**.
+
+- Automatically filters out non-chat models like Embedding, TTS, and Voice to keep the list clean.
+- Newly discovered models are hidden by default. You can toggle their visibility to prevent list overload.
+- You can manually click the **Refresh** button to rescan.
+
+### Main & Clerk Model Roles
+
+| Role | Purpose | Recommended Models |
+|------|---------|--------------------|
+| **Main Model** | Core chat, complex reasoning, tool call decision-making | Strong reasoning models like deepseek-chat, glm-4-plus |
+| **Clerk Model** | Background tasks: Daily reports, session compaction, memory extraction, Goal Mode evaluation | Free or extremely low-cost models (e.g. from ModelScope) |
+
+Dividing labor between main and clerk models minimizes your Token budget consumption.
+
+### Custom Models
+
+If your provider is not in the built-in list, you can manually add custom models in **Settings → Model Panel**:
+- Just fill in the Model ID, Display Name, API Base URL, and API Key.
+- Custom models are managed alongside auto-discovered models.
+
+### Offline Engine (Sidecar)
+
+Bob has a built-in `llama-server` process manager that supports loading local GGUF model files:
+- Provides **100% local offline inference** in networkless or confidential environments.
+- Managed via **Settings → Model Panel → Offline Engine**, just select your local model file to start.
+
+---
+
+## 5. MCP Servers
+
+### What is MCP?
+
+**MCP (Model Context Protocol)** is an open protocol that allows external tool services to interact with AI models in a standardized way. Bob includes a built-in MCP client that can launch and manage third-party MCP Servers, seamlessly integrating their tools into Bob's toolset.
+
+### How to Configure
+
+1. Go to **Settings → Workspace → MCP Servers**.
+2. Add the MCP server configuration in JSON format:
+
+```json
+{
+  "server_name": {
+    "command": "npx",
+    "args": ["-y", "@example/mcp-server"],
+    "env": {
+      "API_KEY": "your-key-here"
+    }
+  }
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `command` | Launch command (supports `npx`, `npm`, `python`, binary executables) |
+| `args` | Array of command arguments |
+| `env` | Optional environment variables |
+
+### Tool Merging
+
+- Upon startup, Bob automatically fetches all tools exposed by the MCP service via `tools/list`.
+- All MCP tools are automatically prefixed (Format: `mcp_{server_name}_{tool_name}`) to prevent naming conflicts.
+- MCP tools are **seamlessly merged** with Bob's 14 native tools, ready for the LLM to call uniformly.
+- On Windows, `.cmd` suffixes are automatically adapted to ensure compatibility.
+
+> ⚠️ When starting an `npx`-based MCP service for the first time, you may need to wait about 60 seconds for dependencies to be pulled.
+
+---
+
+## 6. Knowledge Base & Graph
+
+### 📁 Knowledge Base
+
+#### Setting up the Knowledge Base
+
+1. In **Settings → Workspace**, set your Wiki Knowledge Base directory.
+2. **Drag and drop folders** into Bob's chat window, and Bob will automatically scan and index them.
+
+#### Supported Formats
+
+- `.md` (Markdown)
+- `.txt` (Plain text)
+- `.pdf` (PDF Documents)
+- `.docx` (Word Documents)
+- `.xlsx` (Excel Spreadsheets)
+
+#### Using Search
+
+Ask questions naturally in the chat. In Agent Mode, Bob will automatically call the `brain_search` tool to search your knowledge base. You can also explicitly say, "Search my knowledge base for xxx."
+
+### 🕸️ Knowledge Graph
+
+Bob maintains an **entity-relationship knowledge graph** in the local SQLite database, structuring your knowledge as nodes and edges.
+
+#### How to Access
+
+Click the **Knowledge Graph** icon on the left navigation bar to enter the interactive graph canvas.
+
+#### Core Features
+
+- **Visual Force-Directed Graph**: All nodes and relationships are rendered dynamically as a physics simulation (based on Vis.js), allowing drag and zoom.
+- **BFS Local Subgraph Exploration**: Using a keyword as a seed, it performs a 2-3 hop breadth-first search outwards, rendering the local subgraph in milliseconds. Perfect for "following the clues" in knowledge exploration.
+- **Node Merging / Alias Disambiguation**: Supports merging different aliases of the same entity (e.g., "DS" and "DeepSeek") into a main node, automatically redirecting all connected edges to maintain a single source of truth.
+
+---
+
+## 7. Calendar & Scheduling
+
+### 📅 Calendar
+
+#### Creating Events with Natural Language
+
+Tell Bob what you want using natural language, for example:
+
+- *"Product review meeting tomorrow at 3 PM"*
+- *"Remind me to get a haircut in an hour"*
+- *"Phone conference with client at 10 AM on Friday"*
+
+Bob will call the `add_calendar_event` tool to write the event to the local database.
+
+#### WeekTimeline
+
+Click the **Calendar** icon on the left navigation bar to see the full week timeline view:
+- All events are displayed as time blocks on the timeline.
+- Supports **drag and drop** to adjust the start and end times of events.
+
+#### Todo List
+
+In addition to time-based events, Bob also supports managing To-do items, which are displayed uniformly in the calendar panel.
+
+### ⏰ Cron Jobs
+
+Bob has a built-in Cron scheduling engine that can periodically execute AI tasks:
+
+| Action | Description |
+|--------|-------------|
+| **Add Cron Job** | Create via **Settings → Daily Routine**, filling in the title, Cron expression, and prompt |
+| **Enable / Disable** | Toggle the active state of the task via the switch |
+| **Delete Task** | Remove cron jobs you no longer need |
+
+For example, you can set a task to run every day at 8 AM: *"Check today's schedule and generate a morning briefing"*.
+
+---
+
+## 8. Android Companion App
+
+### Connection & Sync
+
+1. Open the **Setup Wizard** or go to **Settings → Sync** on your PC.
+2. Scan the **Download QR code** to install the native Android App.
+3. Ensure both devices are on the same local network (Wi-Fi), then scan the **Local Sync QR Code**.
+4. The Android app will automatically pull the SQLite database (including knowledge graph, schedule) and all Skill packages from your PC.
+
+### Offline Usage
+
+- Once synced, your phone holds a **complete local offline replica**.
+- Even when you are completely offline, you can view your knowledge graph and schedule.
+
+### PC as Single Source of Truth (SSOT)
+
+- Bob uses an LWW (Last-Write-Wins) incremental sync mechanism.
+- Upon reconnecting to your home network, the PC acts as the SSOT and overrides conflicts.
+- The phone functions mostly as a read-only viewer with lightweight state synchronization.
+
+### Cross-Device Web Drop
+
+- Establish a P2P direct connection on the local network via QR scan.
+- Instantly drop files and photos from your phone to your PC. AES-128 GCM encrypted end-to-end with zero server relay.
+
+---
+
+## 9. Web Drop
+
+### What is Web Drop?
+
+Web Drop is Bob's built-in **end-to-end encrypted file sharing** feature, allowing you to quickly transfer files from your computer to your phone (or any device with a web browser).
+
+### How to Use
+
+1. In Agent Mode, tell Bob: *"Help me share this file"*, or Bob will automatically call the `share_file` tool when executing tasks.
+2. Bob will generate a **sharing link**.
+3. Open this link in your phone's browser to receive the file directly.
+
+### Security Mechanism (E2EE)
+
+- Bob generates a Room ID and an AES-128 GCM encryption key in local memory.
+- The sharing link is concatenated in the URL Hash Fragment format (`#room_id.key`).
+- Since browsers do not send the content after the `#` to the server, **the relay server can only see the ciphertext and cannot decrypt the file content**.
+- Transmission prioritizes WebRTC peer-to-peer direct connection, falling back to an encrypted relay if restricted by NAT.
+
+Simply put: **Only you and the receiver can see your file; any middleman (including the server) cannot read it.**
+
+---
+
+## 10. Connectors
+
+Bob supports integration with various external services. Configure them via the **Settings → Connections** panel:
+
+| Connector | Function | Configuration Method |
+|-----------|----------|----------------------|
+| **Google Calendar** | Sync Google Calendar events | OAuth Login |
+| **Gmail** | Read and send emails | OAuth Login |
+| **Lark / Feishu** | Connect to Lark workspace | Enter Credentials |
+| **Telegram Bot** | Remotely control Bob via Telegram | Enter Bot Token |
+| **Discord Bot** | Remotely control Bob via Discord | Enter Bot Token |
+
+Once successfully connected, Bob can invoke these service capabilities in chats (e.g., check calendar, send emails, etc.).
+
+---
+
+## 11. Memory & Evolution
+
+### Three-Tier Memory Model
+
+Bob possesses a carefully designed three-tier memory system that allows him to truly "remember" you:
+
+| Tier | Name | Role |
+|------|------|------|
+| **Soul Tier** | `SOUL.md` | Bob's core persona, communication style, and your hard preferences. Injected as the System Prompt in every chat. |
+| **Session Tier** | Short-term Hot Memory | The current session and context of recent chats. Automatically cold-migrated to long-term storage after 7 days. |
+| **Wiki Tier** | Long-term Cold Knowledge | Local Wiki knowledge accumulation, recalled via full-text search and graph relations. |
+
+### Silent Learning
+
+At the end of every chat round, Bob automatically analyzes the conversation in the background (executed by the Clerk model) to extract **persistent facts**, including:
+
+- **User Habits** (user): Your preferences, tastes, and working style.
+- **Project Knowledge** (project): Tech stacks, architectural decisions.
+- **Feedback Records** (feedback): Your corrections to AI mistakes—**ensuring the same mistake isn't made twice**.
+- **Common References** (reference): Frequently used code snippets, commands, or URLs.
+
+Extracted facts are automatically saved as Markdown files and instantly written into the SQLite full-text index, allowing `brain_search` to retrieve them in the very next chat round.
+
+### 🌙 Dream Engine
+
+Every 24 hours, when the application is awake, Bob silently "dreams" in the background (Compaction):
+
+- Cleans up expired/temporary facts.
+- Merges redundant memories with similar content.
+- **SOUL Self-Tuning**: Rewrites accumulated feedback records and user habits back into `SOUL.md`, achieving self-correction and persona evolution.
+
+You will see a **Dream Report** the next time you open Bob, detailing the memory organizing work Bob did while "sleeping."
+
+---
+
+## 12. Settings Reference
+
+### Model Panel
+
+- **API Key Management**: Add/modify API Keys for various providers.
+- **Model Hub**: Browse auto-discovered models, toggle visibility.
+- **Role Assignment**: Set the Main Model and Clerk Model.
+- **Custom Models**: Manually add models not in the preset list.
+- **Offline Engine**: Manage the local llama-server and GGUF model files.
+
+### Workspace
+
+- **Knowledge Base Directory**: Set the local path for the Wiki knowledge base.
+- **Watched Folders**: Add/remove folders to track.
+- **MCP Servers**: Configure Model Context Protocol servers (JSON format).
+
+### Connections
+
+- **Sync**: Scan QR to download Android App and establish local sync.
+- **Telegram**: Enter Bot Token to enable remote control.
+- **Discord**: Enter Bot Token to enable remote control.
+- **Google**: OAuth authorization to connect Google Calendar and Gmail.
+- **Lark / Feishu**: Enter credentials to connect to Lark.
+
+### Daily Routine
+
+- **Cron Jobs**: Add, delete, enable/disable scheduled AI tasks.
+
+### Appearance
+
+- **Theme Mode**: Dark / Light / System — Smooth CSS transitions.
+- **Accent Color**: Choose a personalized theme color from the preset palette.
+- **Language**: 简体中文 / English — Fully bilingual UI.
+
+### About
+
+- **Open Data Directory**: View local database, memory, and knowledge base files.
+- **Open Log Directory**: Access error logs and tool call records.
+- **Version Info**: Current Bob Agent version number.
+- **Factory Reset**: Clear all data (⚠️ Use with caution!).
+- **Doctor Health Check**: One-click self-test for API Key connectivity, database status, sandbox permissions, and other core metrics.
+
+---
+
+## 13. Keyboard Shortcuts
+
+| Shortcut | Function |
+|----------|----------|
+| `Ctrl + Shift + B` | **Global Wake-up** — Press in any application to immediately bring up the Bob window. |
+| `Ctrl + V` | Paste image into chat (screenshot or image from clipboard). |
+| `Enter` | Send message. |
+| `Shift + Enter` | New line in the input box. |
+| **Drag & Drop** | Drag files/folders into the chat window to parse or index them automatically. |
+
+---
+
+## 14. Troubleshooting
+
+### Bob Not Responding
+
+1. **Check API Key**: Go to Settings → Model Panel → API Key Management, and ensure at least one provider's Key is configured.
+2. **Check Model Selection**: Ensure a usable model is selected in the bottom status bar.
+3. **Check Logs**: Go to Settings → About → Open Log Directory, and inspect the error logs.
+
+### 🩺 Doctor Health Check
+
+In **Settings → About**, click **Health Check**. Bob will automatically test:
+
+- API Key Connectivity
+- Local SQLite database read/write permissions
+- Tauri backend sandbox path whitelist
+- Local llama-server process status
+- Other core component metrics
+
+### 🔧 Auto-Fix
+
+When the health check finds an issue, Bob offers a **one-click Auto-Fix** feature:
+- Automatically rolls back to a safe backup.
+- Rebuilds corrupted configuration files.
+- Re-initializes storage.
+- The entire process preserves your core user data.
+
+### Calendar Panel is Empty
+
+- Make sure to use Agent Mode in the chat to let Bob add events.
+- Bob will call the `add_calendar_event` tool, and you can see the event by refreshing the calendar panel upon success.
+
+### Application Opened Two Windows
+
+- Fixed via `tauri-plugin-single-instance`.
+- If residual processes remain, close them in the Task Manager and restart.
+
+---
+
+## 15. Data & Privacy
+
+### Local-First
+
+- **All data stays local** — No telemetry, no cloud syncing, no background uploads.
+- Chat history is stored in the local SQLite database.
+- Memory files are pure Markdown, located in the `data/memory/` and `data/wiki/` directories.
+
+### API Key Storage
+
+- API Keys are stored locally in `config.json`.
+- Encrypted storage functionality is planned.
+
+### Tool Audit Log
+
+- Every action record of the Agent calling tools is saved in `logs/tools.log`, which can be audited at any time.
+
+### Factory Reset
+
+- You can delete all data and return to the initial state at any time via **Settings → About → Factory Reset**.
+
+---
+
+> **Bob Agent — Hidden in the desktop, always ready.**
+
+  </script>
+
+  <!-- Main JavaScript Controller -->
+  <script>
+    // Theme Switch Logic
+    const themeToggleBtn = document.getElementById('theme-toggle');
+    themeToggleBtn.addEventListener('click', () => {
+      let currentTheme = document.documentElement.getAttribute('data-theme');
+      let targetTheme = currentTheme === 'dark' ? 'light' : 'dark';
+      
+      document.documentElement.setAttribute('data-theme', targetTheme);
+      localStorage.setItem('bob-theme', targetTheme);
+      updateHljsTheme(targetTheme);
+    });
+
+    // Update HighlightJS style block depending on active theme
+    function updateHljsTheme(theme) {
+      const hljsLink = document.getElementById('hljs-theme');
+      if (theme === 'dark') {
+        hljsLink.href = 'https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@0.7.1/build/styles/github-dark.min.css';
+      } else {
+        hljsLink.href = 'https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@0.7.1/build/styles/github.min.css';
+      }
+    }
+
+    // Parse and Render Markdown Content on Load
+    window.addEventListener('DOMContentLoaded', () => {
+      const markdown = document.getElementById('markdown-source').textContent;
+      const contentPanel = document.getElementById('docs-content');
+      
+      // Parse markdown into HTML using marked.js
+      contentPanel.innerHTML = marked.parse(markdown);
+      
+      // Sync HighlightJS theme
+      const currentTheme = document.documentElement.getAttribute('data-theme') || 'dark';
+      updateHljsTheme(currentTheme);
+      
+      // Highlight code blocks
+      hljs.highlightAll();
+      
+      // Generate Sticky Sidebar Menu dynamically based on H2 tags
+      const headings = contentPanel.querySelectorAll('h2');
+      const menu = document.getElementById('sidebar-menu');
+      
+      headings.forEach((heading, index) => {
+        const text = heading.textContent;
+        // Strip numbers from label for a cleaner visual representation if preferred,
+        // but keeping it matches user guide structure.
+        const id = heading.id || `section-${index + 1}`;
+        heading.id = id;
+        
+        const li = document.createElement('li');
+        li.className = 'sidebar-item';
+        li.id = `sidebar-item-${id}`;
+        
+        const a = document.createElement('a');
+        a.href = `#${id}`;
+        a.textContent = text;
+        
+        // Prevent default jump and do smooth scroll manually
+        a.addEventListener('click', (e) => {
+          e.preventDefault();
+          const target = document.getElementById(id);
+          if (target) {
+            window.scrollTo({
+              top: target.offsetTop - 120, // offset header height
+              behavior: 'smooth'
+            });
+            // Update URL hash
+            history.pushState(null, null, `#${id}`);
+          }
+        });
+        
+        li.appendChild(a);
+        menu.appendChild(li);
+      });
+      
+      // Scroll Spy Logic: Highlighting active sidebar menu items on scroll
+      window.addEventListener('scroll', () => {
+        let currentSectionId = '';
+        headings.forEach(heading => {
+          const rect = heading.getBoundingClientRect();
+          // Offset near the sticky header (150px)
+          if (rect.top <= 150) {
+            currentSectionId = heading.id;
+          }
+        });
+        
+        // Clear all active classes
+        document.querySelectorAll('.sidebar-item').forEach(item => {
+          item.classList.remove('active');
+        });
+        
+        // Apply active class to current visible section item
+        if (currentSectionId) {
+          const activeItem = document.getElementById(`sidebar-item-${currentSectionId}`);
+          if (activeItem) {
+            activeItem.classList.add('active');
+          }
+        }
+      });
+      
+      // Initial trigger for Scroll Spy
+      window.dispatchEvent(new Event('scroll'));
+    });
+  </script>
+</body>
+</html>
