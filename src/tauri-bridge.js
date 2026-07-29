@@ -673,6 +673,7 @@ window.appAPI = {
   triggerWakeupViaRelay: async (deviceId) => invoke('trigger_wakeup_via_relay', { deviceId }),
   writeMobileOutbox: async (operations) => invoke('write_mobile_outbox', { operations }),
   relayHandshake: async (targetDeviceId, authCode) => invoke('relay_handshake', { targetDeviceId, authCode }),
+  getConnectedDevices: async () => invoke('get_connected_devices'),
 
   // ── 扫码 (Mobile Only) ──────────────────────
   systemParseBcbp: async (raw) => invoke('system_parse_bcbp', { raw }),
