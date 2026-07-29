@@ -38,7 +38,7 @@
       <div class="calendar-body" ref="scrollContainer">
         <div class="time-axis">
           <div v-for="h in Math.floor(24)" :key="h" class="time-slot-label">
-            <span>{{ String(h).padStart(2, '0') }}:00</span>
+            <span>{{ String(h - 1).padStart(2, '0') }}:00</span>
           </div>
         </div>
 
