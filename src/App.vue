@@ -731,6 +731,9 @@ onMounted(async () => {
       window.appAPI.getConfig('model').then(m => {
         if (m) currentModel.value = m;
       });
+      
+      // 全局广播同步完成，触发各视图刷新数据
+      window.dispatchEvent(new CustomEvent('sync:refresh-events'));
     });
   }
 
