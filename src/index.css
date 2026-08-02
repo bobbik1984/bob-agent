@@ -58,6 +58,9 @@ a:hover {
   --color-warning:  #d97706;
   --color-success:  #10b981;
 
+  /* 统一卡片与面板倒角 (统一圆润度) */
+  --radius-default: 4px;
+
   /* 知识图谱主题色 (Dark) */
   --kg-node-tag:       #22d3ee;
   --kg-node-project:   #4ade80;

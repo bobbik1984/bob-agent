@@ -1,3 +1,5 @@
+import { useDialog } from '@/composables/useDialog.js';
+const { showConfirm, showAlert, showPrompt } = useDialog();
 // ═══════════════════════════════════════════════════════════
 // Bob-Agent Tauri Bridge — 完整适配器层
 // Tauri v2 IPC Bridge — 将所有前端 window.appAPI 调用映射到 Rust @tauri-apps/api/core invoke
@@ -686,7 +688,7 @@ window.appAPI = {
         perm = await requestPermissions();
       }
       if (perm !== 'granted') {
-        alert("需要相机权限才能扫码");
+        await showAlert("需要相机权限才能扫码");
         return null;
       }
       const result = await scan({ windowed: true, formats: ['QR_CODE'] });

@@ -127,27 +127,7 @@
         </div>
       </div>
     </div>
-    <!-- 新建日程弹窗 -->
-    <div v-if="newEventDialog" class="detail-overlay" @click.self="newEventDialog = false">
-      <div class="detail-card">
-        <h3 class="detail-title">{{ $t('timeline.new_event_title') }}</h3>
-        <div class="detail-field" style="display: flex; flex-direction: column; gap: 8px;">
-          <input 
-            type="text" 
-            v-model="newEventTitle" 
-            class="bob-input" 
-            style="width: 100%; padding: 10px; border-radius: var(--radius-sm); border: 1px solid var(--border-default); background: var(--bg-primary); color: var(--text-primary); outline: none;" 
-            @keyup.enter="confirmCreateEvent"
-            ref="newEventInput"
-            autofocus
-          />
-        </div>
-        <div class="detail-actions" style="margin-top: 16px;">
-          <button class="btn btn-ghost" @click="newEventDialog = false">{{ $t('modal.cancel') || '取消' }}</button>
-          <button class="btn btn-primary" @click="confirmCreateEvent" :disabled="!newEventTitle.trim()">{{ $t('modal.confirm') || '确定' }}</button>
-        </div>
-      </div>
-    </div>
+
   </div>
 </template>
 
@@ -155,8 +135,10 @@
 import { ref, computed, onMounted, onUnmounted, nextTick, inject, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { Calendar, Plane, Train } from 'lucide-vue-next';
+import { useDialog } from '@/composables/useDialog.js';
 
 const { t, tm } = useI18n();
+const { showPrompt } = useDialog();
 const isMobile = inject('isMobile');
 const activeDrawer = inject('activeDrawer', null);
 
@@ -430,49 +412,35 @@ function onTrackClick(day, e) {
   createNewEvent(day, startHour);
 }
 
-const newEventDialog = ref(false);
-const newEventTitle = ref('');
-const pendingEventData = ref(null);
-const newEventInput = ref(null);
-
-function createNewEvent(day, startHour) {
-  pendingEventData.value = { day, startHour };
-  newEventTitle.value = '';
-  newEventDialog.value = true;
-  nextTick(() => {
-    if (newEventInput.value) {
-      newEventInput.value.focus();
-    }
+async function createNewEvent(day, startHour) {
+  const title = await showPrompt({
+    title: t('timeline.new_event_title') || '新日程',
+    placeholder: t('todo.title_placeholder') || '请输入标题...',
+    confirmText: t('modal.confirm') || '确定',
+    cancelText: t('modal.cancel') || '取消'
   });
-}
 
-function confirmCreateEvent() {
-  if (!newEventTitle.value.trim() || !pendingEventData.value) return;
-  const { day, startHour } = pendingEventData.value;
-  const title = newEventTitle.value.trim();
-  
+  if (!title || !title.trim()) return;
+
   const parts = day.dateStr.split('-');
   const start = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
   start.setHours(startHour, 0, 0, 0);
-  
+
   const end = new Date(start);
   end.setHours(startHour + 1, 0, 0, 0);
-  
+
   const fmt = (d) => {
     const pad = (n) => String(n).padStart(2, '0');
     return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:00`;
   };
 
   emit('create-event', {
-    title,
+    title: title.trim(),
     type: 'event',
     date: day.dateStr,
     startTime: fmt(start),
     endTime: fmt(end)
   });
-  
-  newEventDialog.value = false;
-  pendingEventData.value = null;
 }
 
 const dragOverDay = ref(null);
@@ -679,7 +647,7 @@ const currentMonthDisplay = computed(() => {
   flex-direction: column;
   background: var(--surface-card);
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-default);
   padding: var(--space-4);
   height: 900px; /* 固定高度，内部滚动 */
 }
@@ -717,7 +685,7 @@ const currentMonthDisplay = computed(() => {
   padding: 0;
   width: 28px;
   height: 28px;
-  border-radius: 14px;
+  border-radius: var(--radius-default);
   background: var(--surface-primary);
   border: 1px solid var(--border-subtle);
   color: var(--text-secondary);
@@ -753,7 +721,7 @@ const currentMonthDisplay = computed(() => {
   flex: 1;
   overflow: hidden;
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-default);
   background: var(--bg-primary);
 }
 
@@ -903,7 +871,7 @@ const currentMonthDisplay = computed(() => {
   background: var(--accent-glow, rgba(128, 128, 128, 0.15));
   border-left: 3px solid var(--user-accent, var(--accent-primary));
   color: var(--text-primary);
-  border-radius: 4px;
+  border-radius: var(--radius-default);
   padding: 4px 6px;
   overflow: hidden;
   box-shadow: 0 1px 3px rgba(0,0,0,0.1);
@@ -1001,7 +969,7 @@ const currentMonthDisplay = computed(() => {
 .detail-card {
   background: var(--bg-primary);
   border: 1px solid var(--border-default);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-default);
   padding: var(--space-6);
   width: 360px;
   max-width: 90vw;

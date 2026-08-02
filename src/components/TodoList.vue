@@ -1,7 +1,7 @@
 <template>
   <div class="todo-list">
     <div class="todo-header">
-      <button class="add-todo-btn" @click="isAdding = true" :title="$t('todo.add') || '添加待办'">
+      <button class="add-todo-btn" @click="addTodoViaDialog" :title="$t('todo.add') || '添加待办'">
         <Plus :size="16" />
       </button>
       <label class="toggle-completed" v-if="todos.some(t => t.status === 'done')">
@@ -10,16 +10,7 @@
       </label>
     </div>
 
-    <div v-if="isAdding" class="add-todo-form">
-      <input v-model="newTitle" class="add-todo-input" :placeholder="$t('todo.title_placeholder') || '待办事项...'" @keyup.enter="saveNewTodo" autofocus />
-      <textarea v-model="newDesc" class="add-todo-textarea" :placeholder="$t('todo.desc_placeholder') || '详情描述 (可选)...'" rows="2"></textarea>
-      <div class="add-todo-actions">
-        <button class="add-todo-cancel" @click="cancelAdd">{{ $t('common.cancel') || '取消' }}</button>
-        <button class="add-todo-save" @click="saveNewTodo" :disabled="!newTitle.trim()">{{ $t('common.save') || '保存' }}</button>
-      </div>
-    </div>
-
-    <div v-if="visibleTodos.length === 0 && !isAdding" class="empty-state">{{ $t('todo.empty') }}</div>
+    <div v-if="visibleTodos.length === 0" class="empty-state">{{ $t('todo.empty') }}</div>
     <div
       v-for="todo in visibleTodos"
       :key="todo.id"
@@ -81,8 +72,10 @@
 import { computed, ref, nextTick } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { X, Plus } from 'lucide-vue-next';
+import { useDialog } from '@/composables/useDialog.js';
 
 const { t } = useI18n();
+const { showConfirm, showPrompt } = useDialog();
 
 const props = defineProps({
   todos: {
@@ -95,13 +88,31 @@ const emit = defineEmits(['update-status', 'delete-todo', 'create-todo']);
 
 const showCompleted = ref(false);
 const expandedIds = ref(new Set());
-const isAdding = ref(false);
-const newTitle = ref('');
-const newDesc = ref('');
 
 const editingDescId = ref(null);
 const editDescDraft = ref('');
 const descInputRefs = ref([]);
+
+async function addTodoViaDialog() {
+  const title = await showPrompt({
+    title: t('inbox.new_todo') || '新待办',
+    placeholder: t('todo.title_placeholder') || '待办事项...',
+    confirmText: t('modal.confirm') || '确定',
+    cancelText: t('modal.cancel') || '取消'
+  });
+
+  if (title && title.trim()) {
+    const pad = (n) => String(n).padStart(2, '0');
+    const d = new Date();
+    const dateStr = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+
+    emit('create-todo', {
+      title: title.trim(),
+      type: 'todo',
+      date: dateStr
+    });
+  }
+}
 
 function startEditingDesc(todo) {
   editingDescId.value = todo.id;
@@ -145,29 +156,6 @@ function toggleExpand(id) {
   expandedIds.value = newSet;
 }
 
-function cancelAdd() {
-  isAdding.value = false;
-  newTitle.value = '';
-  newDesc.value = '';
-}
-
-function saveNewTodo() {
-  if (!newTitle.value.trim()) return;
-  
-  const pad = (n) => String(n).padStart(2, '0');
-  const d = new Date();
-  const dateStr = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
-
-  emit('create-todo', {
-    title: newTitle.value.trim(),
-    description: newDesc.value.trim(),
-    type: 'todo',
-    date: dateStr
-  });
-  
-  cancelAdd();
-}
-
 const visibleTodos = computed(() => {
   return props.todos
     .filter(todo => showCompleted.value || todo.status !== 'done')
@@ -178,7 +166,7 @@ const visibleTodos = computed(() => {
     });
 });
 
-function formatTime(timestamp) {
+async function formatTime(timestamp) {
   if (!timestamp) return '';
   const d = new Date(timestamp * 1000);
   return `${d.getMonth() + 1}-${d.getDate()} ${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
@@ -195,7 +183,14 @@ async function toggleStatus(todo) {
 }
 
 async function deleteTodo(todo) {
-  if (confirm(t('todo.confirm_delete') || '确定要删除这条待办吗？')) {
+  const confirmed = await showConfirm({
+    title: t('todo.delete_title') || '删除待办',
+    message: t('todo.confirm_delete') || '确定要删除这条待办吗？',
+    confirmText: t('common.confirm') || '确定',
+    cancelText: t('common.cancel') || '取消'
+  });
+
+  if (confirmed) {
     try {
       if (window.appAPI && window.appAPI.deleteEvent) {
         await window.appAPI.deleteEvent(todo.id);
@@ -393,63 +388,7 @@ function getPriorityLabel(priority) {
   color: var(--text-primary);
 }
 
-.add-todo-form {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  background: var(--surface-secondary);
-  padding: 12px;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--border-primary);
-  margin-bottom: var(--space-2);
-}
 
-.add-todo-input, .add-todo-textarea {
-  width: 100%;
-  background: var(--surface-input);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
-  padding: 8px 12px;
-  color: var(--text-primary);
-  font-size: 13px;
-}
-
-.add-todo-input:focus, .add-todo-textarea:focus {
-  outline: none;
-  border-color: var(--accent-primary);
-}
-
-.add-todo-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  margin-top: 4px;
-}
-
-.add-todo-cancel {
-  background: transparent;
-  border: 1px solid var(--border-subtle);
-  color: var(--text-secondary);
-  padding: 4px 12px;
-  border-radius: var(--radius-sm);
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.add-todo-save {
-  background: var(--accent-primary);
-  border: none;
-  color: var(--bg-primary);
-  padding: 4px 12px;
-  border-radius: var(--radius-sm);
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.add-todo-save:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
 
 .toggle-completed {
   font-size: 12px;

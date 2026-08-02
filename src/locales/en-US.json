@@ -465,7 +465,8 @@
     "type_official": "Official Skill",
     "type_custom": "Custom Skill",
     "overridden": "Overridden by custom skill",
-    "overriding": "Overrides official skill"
+    "overriding": "Overrides official skill",
+    "import_zip": "Import Plugin"
   },
   "tray": {
     "show": "Show bob-agent",
@@ -484,7 +485,8 @@
     "last_run": "Last run: ",
     "pause": "Pause",
     "resume": "Resume",
-    "delete": "Delete"
+    "delete": "Delete",
+    "new_todo": "New Todo"
   },
   "setup": {
     "theme_dark": "Dark",
@@ -515,7 +517,13 @@
   "todo": {
     "empty": "No to-dos yet. Tell me to add a task!",
     "show_completed": "Show completed",
-    "completed_at": "Done at {time}"
+    "completed_at": "Done at {time}",
+    "title_placeholder": "To-Do item...",
+    "desc_placeholder": "Description (optional)...",
+    "delete_title": "Delete To-Do",
+    "confirm_delete": "Are you sure you want to delete this to-do?",
+    "add": "Add Todo",
+    "delete": "Delete"
   },
   "timeline": {
     "today": "Today",
@@ -552,7 +560,10 @@
     "openrouter": "OpenRouter"
   },
   "common": {
-    "please_select": "Please select"
+    "please_select": "Please select",
+    "cancel": "Cancel",
+    "save": "Save",
+    "confirm": "Confirm"
   },
   "dream": {
     "morning_title": "Good morning! Here's your weekly recap",
@@ -586,7 +597,8 @@
     "add_tag": "Add Tag",
     "tag_placeholder": "Enter tag name...",
     "select_category": "Select Category",
-    "select_category_hint": "Choose where to save this note"
+    "select_category_hint": "Choose where to save this note",
+    "promote": "Promote to Note"
   },
   "date": {
     "today": "Today",

@@ -217,6 +217,9 @@
 </template>
 
 <script setup>
+import { useDialog } from '@/composables/useDialog.js';
+const { showConfirm, showAlert, showPrompt } = useDialog();
+
 import { ref, onMounted, computed, defineEmits, defineProps, inject } from 'vue';
 import { Folder, FolderPlus, CalendarDays, ChevronRight, FileText, Plus, X, RefreshCw, Tag, ArrowUpFromLine, Search, Menu } from 'lucide-vue-next';
 import { useI18n } from 'vue-i18n';
@@ -245,7 +248,7 @@ const showSearchInput = ref(false);
 const searchQuery = ref('');
 const searchInputRef = ref(null);
 
-function expandSearch() {
+async function expandSearch() {
   showSearchInput.value = true;
   setTimeout(() => {
     if (searchInputRef.value) searchInputRef.value.focus();
@@ -261,7 +264,7 @@ const searchResults = computed(() => {
   });
 });
 
-const selectNote = (note) => {
+const selectNote = async (note) => {
   emit('select', note.id);
   if (isMobile.value) {
     mobileDrawerOpen.value = false;
@@ -318,7 +321,7 @@ onMounted(() => {
   loadNotes();
 });
 
-const toggleSection = (sec) => {
+const toggleSection = async (sec) => {
   expanded.value[sec] = !expanded.value[sec];
 };
 
@@ -370,7 +373,7 @@ const formatDailyName = (id) => id.replace('daily/', '').replace('.md', '');
 const formatTopicName = (id) => id.replace('topics/', '').replace('.md', '');
 const formatAnyName = (id) => id.split('/').pop().replace('.md', '');
 
-const formatTimelineDate = (note) => {
+const formatTimelineDate = async (note) => {
   const ts = note.updated || note.created;
   if (!ts) {
     const name = note.title || note.id || '';
@@ -390,12 +393,12 @@ const formatTimelineDate = (note) => {
 
 // ── 操作 ───────────────────────────────────────
 
-const filterByTag = (tagName) => {
+const filterByTag = async (tagName) => {
   selectedTag.value = selectedTag.value === tagName ? null : tagName;
 };
 
 const createNewNote = async () => {
-  const title = prompt(t('notebook.new_note') + ':');
+  const title = await showPrompt(t('notebook.new_note') + ':');
   if (!title) return;
   try {
     const res = await window.appAPI.notebookCreateNote(title, []);
@@ -403,15 +406,15 @@ const createNewNote = async () => {
       await loadNotes();
       emit('select', res.path);
     } else {
-      alert(t('notebook.new_note') + ' failed: ' + res.error);
+      await showAlert(t('notebook.new_note') + ' failed: ' + res.error);
     }
   } catch (e) {
-    alert(t('notebook.new_note') + ' failed: ' + e.message);
+    await showAlert(t('notebook.new_note') + ' failed: ' + e.message);
   }
 };
 
 const promoteDailyNote = async (note) => {
-  const title = prompt(t('notebook.promote_title') || '请输入新笔记的标题 (将会移动到 topics 分类):', '从速记提取');
+  const title = await showPrompt(t('notebook.promote_title') || '请输入新笔记的标题 (将会移动到 topics 分类):', '从速记提取');
   if (!title) return;
   
   try {
@@ -434,41 +437,41 @@ const promoteDailyNote = async (note) => {
     }
   } catch (err) {
     console.error('提升失败:', err);
-    alert('提升失败: ' + err.message);
+    await showAlert('提升失败: ' + err.message);
   }
 };
 
 const createNewFolder = async () => {
-  const name = prompt(t('notebook.new_folder_prompt'));
+  const name = await showPrompt(t('notebook.new_folder_prompt'));
   if (!name) return;
   try {
     const res = await window.appAPI.notebookCreateFolder(name);
     if (res.ok) {
       await loadNotes();
     } else {
-      alert(res.error);
+      await showAlert(res.error);
     }
   } catch (e) {
-    alert(e.message);
+    await showAlert(e.message);
   }
 };
 
 const deleteNote = async (note) => {
-  if (!confirm(`${t('notebook.new_note')}: "${formatAnyName(note.id)}" ?`)) return;
+  if (!(await showConfirm(`${t('notebook.new_note')}: "${formatAnyName(note.id)}" ?`))) return;
   try {
     const res = await window.appAPI.notebookDeleteNote(note.id);
     if (res.ok) {
       await loadNotes();
       if (props.selectedNoteId === note.id) emit('select', null);
     } else {
-      alert(res.error);
+      await showAlert(res.error);
     }
   } catch (e) {
-    alert(e.message);
+    await showAlert(e.message);
   }
 };
 
-const onDragStart = (e, note, category) => {
+const onDragStart = async (e, note, category) => {
   e.dataTransfer.setData('noteId', note.id);
   e.dataTransfer.setData('category', category);
   e.dataTransfer.effectAllowed = 'move';
@@ -484,10 +487,10 @@ const onDrop = async (e, targetCategory) => {
       await loadNotes();
       if (props.selectedNoteId === noteId) emit('select', res.new_id);
     } else {
-      alert(res.error);
+      await showAlert(res.error);
     }
   } catch (err) {
-    alert(err.message);
+    await showAlert(err.message);
   }
 };
 

@@ -24,6 +24,9 @@
 </template>
 
 <script setup>
+import { useDialog } from '@/composables/useDialog.js';
+const { showConfirm, showAlert, showPrompt } = useDialog();
+
 import { ref, computed, onMounted, markRaw } from 'vue';
 import {
   File, FileText, FileCode, FileSpreadsheet, FileArchive,
@@ -117,7 +120,7 @@ const hoverTooltip = computed(() => {
   return lines.join('\n');
 });
 
-function openFile() {
+async function openFile() {
   if (!meta.value.exists) return;
   window.appAPI.openFile(props.filePath).catch(err => {
     console.error('[FileCard] 打开文件失败:', err);
@@ -132,7 +135,7 @@ async function handleWebDrop() {
     window.open(url, '_blank');
   } catch (err) {
     console.error('[FileCard] Web Drop 失败:', err);
-    alert('Web Drop 失败: ' + err);
+    await showAlert('Web Drop 失败: ' + err);
   }
 }
 

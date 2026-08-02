@@ -111,7 +111,7 @@ defineExpose({
 
 .settings-scroll::-webkit-scrollbar-thumb {
   background: var(--border-subtle);
-  border-radius: 3px;
+  border-radius: var(--radius-default);
 }
 
 .settings-content {
@@ -145,8 +145,8 @@ defineExpose({
     background: transparent;
   }
   .settings-scroll::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.15);
-    border-radius: 10px;
+    background-color: var(--surface-card);
+    border-radius: var(--radius-default);
   }
   .settings-scroll::-webkit-scrollbar-thumb:hover {
     background: rgba(255, 255, 255, 0.3);

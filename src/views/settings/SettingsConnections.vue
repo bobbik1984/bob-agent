@@ -18,7 +18,7 @@
           <div class="service-info">
             <span class="service-name">{{ $t('settings.p2p_pairing') }}</span>
             <span class="service-sub" style="display: flex; gap: 8px; align-items: center;">{{ !isUnlocked ? $t('settings.p2p_auth_desc_new') : $t('settings.p2p_pairing_desc') }}
-              <span v-if="lastSyncTime" style="font-size: 10px; padding: 2px 6px; background: var(--bg-tertiary); border-radius: 4px; color: var(--text-secondary);">最后同步: {{ formatSyncTime(lastSyncTime) }}</span></span>
+              <span v-if="lastSyncTime" style="font-size: 10px; padding: 2px 6px; background: var(--bg-tertiary); border-radius: var(--radius-default); color: var(--text-secondary);">最后同步: {{ formatSyncTime(lastSyncTime) }}</span></span>
           </div>
                     <div style="display: flex; align-items: center; gap: 8px;">
             <button 
@@ -54,7 +54,7 @@
 
 </template>
             <template v-else>
-              <input v-model="pinInput" type="password" class="input" maxlength="6" placeholder="PIN" style="flex: 1; min-width: 0; height: 28px; padding: 4px 8px; font-size: 12px; border-radius: var(--radius-sm);" @keyup.enter="handlePinSubmit" />
+              <input v-model="pinInput" type="password" class="input" maxlength="6" placeholder="PIN" style="flex: 1; min-width: 0; height: 28px; padding: 4px 8px; font-size: 12px; border-radius: var(--radius-default);" @keyup.enter="handlePinSubmit" />
               <button class="btn btn-primary-outline btn-sm" style="padding: 0 10px; flex-shrink: 0; height: 28px;" :disabled="pinInput.length < 4" @click="handlePinSubmit" :title="isInitialized ? $t('settings.p2p_btn_unlock') : '设置 PIN 码'">
                 <Lock v-if="isInitialized" :size="13" />
                 <Check v-else :size="13" />
@@ -532,7 +532,7 @@
           <div class="form-group" style="margin: 0;">
             <label class="form-label" style="font-size: 0.8em; margin-bottom: 4px;">{{ $t('settings.mcp_args') }}</label>
             <input v-model="newMcp.args" class="input" placeholder="-y @modelcontextprotocol/server-filesystem /path" style="padding: 4px 8px; font-size: 0.85em;" />
-            <div v-if="newMcp.name === 'Outlook365'" style="margin-top: 6px; font-size: 0.75em; color: var(--text-tertiary); line-height: 1.5; background: var(--bg-root); padding: 8px; border-radius: 6px;">
+            <div v-if="newMcp.name === 'Outlook365'" style="margin-top: 6px; font-size: 0.75em; color: var(--text-tertiary); line-height: 1.5; background: var(--bg-root); padding: 8px; border-radius: var(--radius-default);">
               <div style="display: flex; align-items: center; margin-bottom: 4px; color: var(--text-secondary);">
                 <Info :size="14" style="margin-right: 4px;" /> <b>{{ $t('settings.mcp_outlook_guide') }}</b>
               </div>
@@ -574,7 +574,7 @@
         <div class="briefing-header">
           <div class="briefing-icon"><Smartphone :size="18" /></div>
           <div class="briefing-title" style="flex: 1; font-size: 14px; font-weight: 600; color: var(--text-primary);">{{ $t('settings.p2p_pairing') }}</div>
-          <button class="briefing-close" @click="showP2pModal = false" title="关闭" style="background: none; border: none; color: var(--text-tertiary); cursor: pointer; padding: 4px; border-radius: 4px; display: flex; align-items: center; justify-content: center;">
+          <button class="briefing-close" @click="showP2pModal = false" title="关闭" style="background: none; border: none; color: var(--text-tertiary); cursor: pointer; padding: 4px; border-radius: var(--radius-default); display: flex; align-items: center; justify-content: center;">
             <X :size="14" />
           </button>
         </div>
@@ -589,7 +589,7 @@
               <div class="form-group" style="margin-bottom: 0;">
                 <label class="form-label" style="font-size: 0.8em;">{{ $t('settings.p2p_local_ip') }}</label>
                 <div style="display: flex; flex-wrap: wrap; gap: 6px;">
-                  <span v-for="ip in pairingInfo.local_ips" :key="ip" class="tag" style="background: var(--bg-tertiary); padding: 2px 8px; border-radius: 4px; font-size: 0.8em;">
+                  <span v-for="ip in pairingInfo.local_ips" :key="ip" class="tag" style="background: var(--bg-tertiary); padding: 2px 8px; border-radius: var(--radius-default); font-size: 0.8em;">
                     {{ ip }}
                   </span>
                   <span v-if="!pairingInfo.local_ips || pairingInfo.local_ips.length === 0" style="color: var(--text-tertiary); font-size: 0.8em;">{{ $t('settings.p2p_no_network') }}</span>
@@ -605,15 +605,15 @@
             </div>
             
             <!-- 右侧二维码或成功状态 -->
-            <div style="width: 160px; display: flex; flex-direction: column; align-items: center; justify-content: center; background: white; padding: 12px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
-              <div v-if="pairingSuccessInfo" style="display: flex; flex-direction: column; align-items: center; justify-content: center; width: 136px; height: 136px; background: #e8f5e9; border-radius: 8px;">
+            <div style="width: 160px; display: flex; flex-direction: column; align-items: center; justify-content: center; background: white; padding: 12px; border-radius: var(--radius-default); box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
+              <div v-if="pairingSuccessInfo" style="display: flex; flex-direction: column; align-items: center; justify-content: center; width: 136px; height: 136px; background: #e8f5e9; border-radius: var(--radius-default);">
                 <div style="background: var(--color-success); border-radius: 50%; width: 48px; height: 48px; display: flex; align-items: center; justify-content: center; margin-bottom: 12px;">
                   <Check style="color: white;" :size="24" />
                 </div>
                 <span style="color: var(--text-primary); font-size: 13px; font-weight: 600; text-align: center; line-height: 1.3;">已连接<br/><span style="color: var(--text-secondary); font-size: 11px;">{{ pairingSuccessInfo.device_id.substring(0,8) }}...</span></span>
               </div>
               <qrcode-vue v-else-if="qrPayload" :value="qrPayload" :size="136" level="M" />
-              <div v-else style="width: 136px; height: 136px; display: flex; align-items: center; justify-content: center; background: #f0f0f0; border-radius: 8px;">
+              <div v-else style="width: 136px; height: 136px; display: flex; align-items: center; justify-content: center; background: #f0f0f0; border-radius: var(--radius-default);">
                 <span style="color: #999; font-size: 0.8em;">{{ $t('settings.p2p_generating') }}</span>
               </div>
             </div>
@@ -629,25 +629,25 @@
   <!-- 📱 已连接设备列表弹窗 -->
   <Transition name="briefing-fade">
     <div v-if="showDevicesModal" class="wechat-modal-overlay" @click.self="showDevicesModal = false">
-      <div class="morning-briefing wechat-qr-modal" style="width: 420px; border-radius: var(--radius-lg); background: var(--bg-secondary); border: 1px solid var(--border-subtle); overflow: hidden; box-shadow: var(--shadow-lg);">
+      <div class="morning-briefing wechat-qr-modal" style="width: 420px; border-radius: var(--radius-default); background: var(--bg-secondary); border: 1px solid var(--border-subtle); overflow: hidden; box-shadow: var(--shadow-lg);">
         <div class="briefing-header" style="display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid var(--border-subtle); background: var(--bg-tertiary);">
           <div style="display: flex; align-items: center; gap: 8px;">
             <div class="briefing-icon" style="color: var(--user-accent, var(--accent-primary)); display: flex; align-items: center;"><Smartphone :size="18" /></div>
             <div class="briefing-title" style="font-size: 14px; font-weight: 600; color: var(--text-primary);">已配对的设备列表</div>
           </div>
-          <button class="briefing-close" @click="showDevicesModal = false" title="关闭" style="background: none; border: none; color: var(--text-tertiary); cursor: pointer; padding: 4px; border-radius: 4px; display: flex; align-items: center; justify-content: center;">
+          <button class="briefing-close" @click="showDevicesModal = false" title="关闭" style="background: none; border: none; color: var(--text-tertiary); cursor: pointer; padding: 4px; border-radius: var(--radius-default); display: flex; align-items: center; justify-content: center;">
             <X :size="14" />
           </button>
         </div>
         
         <div class="briefing-body" style="padding: 20px; display: flex; flex-direction: column; gap: 12px; max-height: 400px; overflow-y: auto;">
-          <div v-for="dev in connectedDevices" :key="dev.device_id" style="display: flex; flex-direction: column; gap: 6px; background: var(--bg-tertiary); padding: 12px; border-radius: var(--radius-md); border: 1px solid var(--border-subtle);">
+          <div v-for="dev in connectedDevices" :key="dev.device_id" style="display: flex; flex-direction: column; gap: 6px; background: var(--bg-tertiary); padding: 12px; border-radius: var(--radius-default); border: 1px solid var(--border-subtle);">
             <div style="display: flex; justify-content: space-between; align-items: center;">
               <div style="display: flex; align-items: center; gap: 6px;">
                 <span class="status-dot" :class="isDeviceOnline(dev) ? 'dot-connected' : 'dot-disconnected'" style="width: 8px; height: 8px; border-radius: 50%;"></span>
                 <span style="font-size: 13px; font-weight: 600; color: var(--text-primary);">{{ dev.device_name || (dev.platform === 'android' ? 'Android Device' : dev.platform) }}</span>
                 <span style="font-size: 11px; color: var(--text-tertiary); font-family: monospace;">({{ dev.device_id.substring(0, 8) }})</span>
-                <span v-if="dev.syncStatus === 'syncing'" style="font-size: 10px; padding: 2px 6px; background: var(--color-success); border-radius: 4px; color: white; margin-left: 6px;">🔄 正在同步</span>
+                <span v-if="dev.syncStatus === 'syncing'" style="font-size: 10px; padding: 2px 6px; background: var(--color-success); border-radius: var(--radius-default); color: white; margin-left: 6px;">🔄 正在同步</span>
               </div>
               <button class="btn btn-danger-outline btn-sm" style="padding: 4px 8px; font-size: 11px;" @click="handleDisconnectDevice(dev)" title="解绑此设备">
                 <Unlink :size="11" /> 解绑
@@ -673,7 +673,7 @@
         <div class="briefing-header">
           <div class="briefing-icon"><MessageSquare :size="18" /></div>
           <div class="briefing-title" style="flex: 1; font-size: 14px; font-weight: 600; color: var(--text-primary);">{{ $t('settings.wechat_bind_title') }}</div>
-          <button class="briefing-close" @click="closeWechatModal" title="关闭" style="background: none; border: none; color: var(--text-tertiary); cursor: pointer; padding: 4px; border-radius: 4px; display: flex; align-items: center; justify-content: center;">
+          <button class="briefing-close" @click="closeWechatModal" title="关闭" style="background: none; border: none; color: var(--text-tertiary); cursor: pointer; padding: 4px; border-radius: var(--radius-default); display: flex; align-items: center; justify-content: center;">
             <X :size="14" />
           </button>
         </div>
@@ -683,12 +683,12 @@
             <p style="margin-top: 12px; font-size: 13px; color: var(--text-secondary);">{{ $t('settings.wechat_loading_qr') }}</p>
           </div>
           <div v-else-if="wechatConnected" class="qr-success" style="text-align: center; display: flex; flex-direction: column; align-items: center;">
-            <div style="width: 64px; height: 64px; border-radius: 32px; background-color: rgba(var(--user-accent-rgb, 39, 118, 187), 0.1); color: var(--user-accent); display: flex; align-items: center; justify-content: center;"><Check :size="32" /></div>
+            <div style="width: 64px; height: 64px; border-radius: var(--radius-default); background-color: rgba(var(--user-accent-rgb, 39, 118, 187), 0.1); color: var(--user-accent); display: flex; align-items: center; justify-content: center;"><Check :size="32" /></div>
             <h3 style="margin-top: 16px; color: var(--user-accent);">{{ $t('settings.wechat_bind_success') }}</h3>
             <p style="color: var(--text-secondary); font-size: 13px; margin-top: 4px;">{{ $t('settings.wechat_bind_success_desc') }}</p>
           </div>
           <div v-else class="qr-box" style="text-align: center;">
-            <img :src="qrCodeUrl" style="width: 200px; height: 200px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);" alt="Wechat Login QR" />
+            <img :src="qrCodeUrl" style="width: 200px; height: 200px; border-radius: var(--radius-default); box-shadow: 0 4px 12px rgba(0,0,0,0.15);" alt="Wechat Login QR" />
             <p style="margin-top: 16px; font-size: 14px; color: var(--text-secondary); font-weight: 500;">{{ $t('settings.wechat_scan_hint') }}</p>
           </div>
         </div>
@@ -759,13 +759,13 @@
   <!-- 同步日志 Modal -->
   <Transition name="briefing-fade">
     <div v-if="showSyncLogsModal" class="wechat-modal-overlay" @click.self="showSyncLogsModal = false" style="z-index: 10000;">
-      <div class="morning-briefing wechat-qr-modal" style="width: 500px; max-width: 90vw; border-radius: var(--radius-lg); background: var(--bg-secondary); border: 1px solid var(--border-subtle); overflow: hidden; box-shadow: var(--shadow-lg);">
+      <div class="morning-briefing wechat-qr-modal" style="width: 500px; max-width: 90vw; border-radius: var(--radius-default); background: var(--bg-secondary); border: 1px solid var(--border-subtle); overflow: hidden; box-shadow: var(--shadow-lg);">
         <div class="briefing-header" style="display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid var(--border-subtle); background: var(--bg-tertiary);">
           <div style="display: flex; align-items: center; gap: 8px;">
             <div class="briefing-icon" style="color: var(--text-primary); display: flex; align-items: center;"><Info :size="18" /></div>
             <div class="briefing-title" style="font-size: 14px; font-weight: 600; color: var(--text-primary);">同步日志</div>
           </div>
-          <button class="briefing-close" @click="showSyncLogsModal = false" title="关闭" style="background: none; border: none; color: var(--text-tertiary); cursor: pointer; padding: 4px; border-radius: 4px; display: flex; align-items: center; justify-content: center;">
+          <button class="briefing-close" @click="showSyncLogsModal = false" title="关闭" style="background: none; border: none; color: var(--text-tertiary); cursor: pointer; padding: 4px; border-radius: var(--radius-default); display: flex; align-items: center; justify-content: center;">
             <X :size="14" />
           </button>
         </div>
@@ -774,7 +774,7 @@
           <div v-if="syncLogs.length === 0" style="text-align: center; color: var(--text-tertiary); padding: 20px;">
             暂无同步日志
           </div>
-          <div v-else v-for="(log, idx) in syncLogs" :key="idx" style="border: 1px solid var(--border-subtle); border-radius: 8px; padding: 12px; background: var(--bg-primary);">
+          <div v-else v-for="(log, idx) in syncLogs" :key="idx" style="border: 1px solid var(--border-subtle); border-radius: var(--radius-default); padding: 12px; background: var(--bg-primary);">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
               <div style="display: flex; gap: 6px; align-items: center;">
                 <span v-if="log.status === 'success'" style="color: var(--color-success); display: flex;"><CheckCircle :size="14"/></span>
@@ -880,7 +880,7 @@ const currentErrorDetail = computed(() => {
   return errStep ? errStep.detail : '';
 });
 
-function initPairingSteps() {
+async function initPairingSteps() {
     pairingSteps.value = [
     { id: 'parse',         label: '二维码解码',         status: 'pending', detail: '' },
     { id: 'save_config',   label: '保存配对配置',       status: 'pending', detail: '' },
@@ -894,7 +894,7 @@ function initPairingSteps() {
   pairingError.value = false;
 }
 
-function updateStep(id, status, detail) {
+async function updateStep(id, status, detail) {
   const step = pairingSteps.value.find(s => s.id === id);
   if (step) {
     step.status = status;
@@ -902,7 +902,7 @@ function updateStep(id, status, detail) {
   }
 }
 
-function closePairingProgress() {
+async function closePairingProgress() {
   showPairingProgress.value = false;
   if (pairingDone.value && !pairingError.value) {
     fetchConnectedDevices().then(() => {
@@ -1210,12 +1210,12 @@ const fetchConnectedDevices = async () => {
   }
 };
 
-const isDeviceOnline = (dev) => {
+const isDeviceOnline = async (dev) => {
   // Consider online if seen within last 2 minutes (120000ms)
   return Date.now() - dev.last_seen < 120000;
 };
 
-const formatSyncTime = (tsStr) => {
+const formatSyncTime = async (tsStr) => {
   if (!tsStr) return '未知';
   const ts = parseInt(tsStr);
   if (isNaN(ts)) return '未知';
@@ -1223,7 +1223,7 @@ const formatSyncTime = (tsStr) => {
   return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 };
 
-const formatTime = (ts) => {
+const formatTime = async (ts) => {
   const d = new Date(ts);
   return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 };
@@ -1300,25 +1300,25 @@ async function copyUrl(url) {
 async function activateMobileChannel(channel) {
   if (channel === 'telegram') {
     if (!tgToken.value) {
-      alert('请填写 Telegram Bot Token');
+      await showAlert('请填写 Telegram Bot Token');
       return;
     }
     try {
       await window.appAPI.telegramSaveToken(tgToken.value);
-      alert('Telegram 绑定成功！机器人已在后台启动。');
+      await showAlert('Telegram 绑定成功！机器人已在后台启动。');
     } catch(e) {
-      alert('绑定失败: ' + e);
+      await showAlert('绑定失败: ' + e);
     }
   } else if (channel === 'discord') {
     if (!discordToken.value) {
-      alert('请填写 Discord Bot Token');
+      await showAlert('请填写 Discord Bot Token');
       return;
     }
     try {
       await window.appAPI.discordSaveToken(discordToken.value);
-      alert('Discord 绑定成功！机器人已在后台启动。');
+      await showAlert('Discord 绑定成功！机器人已在后台启动。');
     } catch(e) {
-      alert('绑定失败: ' + e);
+      await showAlert('绑定失败: ' + e);
     }
   }
 }
@@ -1329,7 +1329,7 @@ async function openWechatModal() {
   await loadWechatQrCode();
 }
 
-function closeWechatModal() {
+async function closeWechatModal() {
   showWechatModal.value = false;
   if (wechatPollTimer) {
     clearTimeout(wechatPollTimer);
@@ -1392,7 +1392,7 @@ const connectingService = ref('');
 const showLarkForm = ref(false);
 const larkCreds = ref({ app_id: '', app_secret: '' });
 
-function isConnected(name) {
+async function isConnected(name) {
   return connectorStatuses.value[name]?.status === 'connected';
 }
 
@@ -1417,11 +1417,11 @@ async function connectOAuth(name) {
       // 使用默认浏览器打开 OAuth 授权页面
       window.appAPI.openExternal(res.url);
     } else if (res && res.error) {
-      alert('OAuth Error: ' + res.error);
+      await showAlert('OAuth Error: ' + res.error);
     }
   } catch (e) {
     console.error('OAuth start failed:', e);
-    alert('连接失败: ' + e);
+    await showAlert('连接失败: ' + e);
   } finally {
     connectingService.value = '';
     // 延迟刷新状态，等用户完成 OAuth 回调
@@ -1442,7 +1442,7 @@ async function saveLarkCredentials() {
     await loadConnectorStatuses();
   } catch (e) {
     console.error('Failed to save Lark credentials:', e);
-    alert('保存失败: ' + e);
+    await showAlert('保存失败: ' + e);
   } finally {
     connectingService.value = '';
   }
@@ -1497,7 +1497,7 @@ async function connectGoogleNative() {
         file_path: selectedPath
       });
       if (res && res.error) {
-        alert('配置失败: ' + res.error);
+        await showAlert('配置失败: ' + res.error);
         connectingService.value = '';
         return;
       }
@@ -1506,7 +1506,7 @@ async function connectGoogleNative() {
     }
   } catch (err) {
     console.error('Failed to configure Google Calendar natively', err);
-    alert('配置失败: ' + err);
+    await showAlert('配置失败: ' + err);
     connectingService.value = '';
   }
 }
@@ -1694,7 +1694,7 @@ onUnmounted(() => {
   bottom: 0;
   background-color: color-mix(in srgb, var(--color-success) 80%, transparent);
   transition: .3s;
-  border-radius: 34px;
+  border-radius: var(--radius-default);
 }
 .mcp-slider:before {
   position: absolute;
@@ -1722,7 +1722,7 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-default);
   background: var(--bg-secondary);
   padding: 12px 16px;
   transition: border-color var(--duration-fast) var(--ease-out),
@@ -1770,7 +1770,7 @@ onUnmounted(() => {
 .service-icon {
   width: 36px;
   height: 36px;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-default);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1845,7 +1845,7 @@ onUnmounted(() => {
   background: transparent;
   color: var(--color-error);
   border: 1px solid color-mix(in srgb, var(--color-error) 35%, transparent);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-default);
   cursor: pointer;
   transition: all var(--duration-fast) var(--ease-out);
 }
@@ -1861,7 +1861,7 @@ onUnmounted(() => {
   margin-bottom: 8px;
   background: var(--surface-glass);
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-default);
 }
 
 .slide-fade-enter-active {
@@ -1963,7 +1963,7 @@ onUnmounted(() => {
 
 .pairing-progress-card {
   background: var(--bg-primary);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-default);
   box-shadow: var(--shadow-lg);
   padding: 24px;
   width: 90%;
@@ -2012,7 +2012,7 @@ onUnmounted(() => {
 .topo-node .icon-box {
   width: 48px;
   height: 48px;
-  border-radius: 14px;
+  border-radius: var(--radius-default);
   background: var(--bg-secondary);
   display: flex;
   align-items: center;
@@ -2144,7 +2144,7 @@ onUnmounted(() => {
   background: rgba(var(--color-error-rgb, 220, 53, 69), 0.1);
   color: var(--color-error);
   padding: 12px;
-  border-radius: 8px;
+  border-radius: var(--radius-default);
   display: flex;
   align-items: center;
   gap: 8px;
@@ -2240,7 +2240,7 @@ onUnmounted(() => {
   height: 2px;
   width: 100%;
   background: var(--border-subtle);
-  border-radius: 1px;
+  border-radius: var(--radius-default);
 }
 .minimalist-style .relay-leg.path-active .path-line {
   background: var(--user-accent);

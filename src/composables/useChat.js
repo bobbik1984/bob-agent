@@ -1,3 +1,5 @@
+import { useDialog } from '@/composables/useDialog.js';
+const { showConfirm, showAlert, showPrompt } = useDialog();
 /**
  * useChat — 核心聊天逻辑 composable
  *
@@ -658,7 +660,7 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
     }
   }
 
-  function handleCancelEvent(msgObj) {
+  async function handleCancelEvent(msgObj) {
     msgObj.content = '已取消保存';
     msgObj.type = 'text';
   }
@@ -673,7 +675,7 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
         ? msg.content.replace(/<\|mem\|>/g, '').trim()
         : '';
       const defaultTitle = clipContent.substring(0, 40).replace(/[#\n*]/g, '').trim() || 'AI片段';
-      const clipTitle = prompt('请输入笔记标题:', defaultTitle);
+      const clipTitle = await showPrompt('请输入笔记标题:', defaultTitle);
       if (!clipTitle) return;
 
       const res = await window.appAPI.notebookCreateNote(clipTitle, ['ai-clip'], 'sources');

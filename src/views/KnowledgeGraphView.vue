@@ -652,7 +652,7 @@ function startResizeInspector(e) {
   document.body.style.userSelect = 'none';
 }
 
-function handleResizeInspector(e) {
+async function handleResizeInspector(e) {
   if (!isResizingInspector.value) return;
   // Panel is on the right, so width is (screen width - mouse X)
   let newWidth = window.innerWidth - e.clientX;
@@ -661,7 +661,7 @@ function handleResizeInspector(e) {
   inspectorWidth.value = newWidth;
 }
 
-function stopResizeInspector() {
+async function stopResizeInspector() {
   isResizingInspector.value = false;
   document.removeEventListener('mousemove', handleResizeInspector);
   document.removeEventListener('mouseup', stopResizeInspector);
@@ -674,7 +674,7 @@ async function confirmMerge() {
   const targetNode = allNodesList.value.find(n => n.id === mergeTargetId.value);
   if (!targetNode) return;
   
-  const yes = window.confirm(`确定要将【${selectedNode.value.label}】合并至【${targetNode.label}】吗？\n\n合并后，当前节点将被删除，其所有关联关系将转移到目标节点上。`);
+  const yes = await showConfirm(`确定要将【${selectedNode.value.label}】合并至【${targetNode.label}】吗？\n\n合并后，当前节点将被删除，其所有关联关系将转移到目标节点上。`);
   if (!yes) return;
   
   try {
@@ -690,7 +690,7 @@ async function confirmMerge() {
     selectedNode.value = null;
     await loadGraph();
   } catch (e) {
-    alert("合并失败: " + e);
+    await showAlert("合并失败: " + e);
   }
 }
 
@@ -786,14 +786,14 @@ function buildNetworkOptions() {
 
 let tauriDragUnlistens = [];
 
-function openSourceFile(path) {
+async function openSourceFile(path) {
   if (!path) return;
   if (window.appAPI && window.appAPI.openFile) {
     window.appAPI.openFile(path).catch(err => {
       console.error('Failed to open file:', err);
     });
   } else {
-    alert(`无法直接打开文件: ${path}`);
+    await showAlert(`无法直接打开文件: ${path}`);
   }
 }
 
@@ -1173,14 +1173,14 @@ function focusNode(nodeId) {
   }
 }
 
-function toggleType(type) {
+async function toggleType(type) {
   const s = new Set(activeTypes.value);
   if (s.has(type)) s.delete(type); else s.add(type);
   activeTypes.value = s;
   applyTypeFilter();
 }
 
-function applyTypeFilter() {
+async function applyTypeFilter() {
   if (!nodesDataSet || !edgesDataSet) return;
 
   const showAll = activeTypes.value.size === 0;
@@ -1229,11 +1229,11 @@ async function doBackfill() {
 }
 
 // ── 拖拽添加 + 文件夹选择 ────────────────────────────────
-function onDragOver(e) {
+async function onDragOver(e) {
   isDragOver.value = true;
 }
 
-function onDragLeave() {
+async function onDragLeave() {
   isDragOver.value = false;
 }
 
@@ -1260,7 +1260,7 @@ async function confirmExtract(path) {
     }
   } catch (err) {
     console.error(err);
-    const yes = window.confirm(`是否要从该路径提取知识点并加入图谱？\n\n${path}`);
+    const yes = await showConfirm(`是否要从该路径提取知识点并加入图谱？\n\n${path}`);
     if (yes) {
       await buildKBAndRefresh(path);
     }
@@ -1321,7 +1321,7 @@ async function removeSourceBatch(node) {
   // 如果是 source 节点，它的 id 形式是 source_<batch_id>
   const batchId = node.id.replace('source_', '');
   
-  if (confirm(`确定要彻底清除来源批次 "${node.label}" 及其相关联的所有知识点吗？\n警告：此操作不可逆！`)) {
+  if (await showConfirm(`确定要彻底清除来源批次 "${node.label}" 及其相关联的所有知识点吗？\n警告：此操作不可逆！`)) {
     try {
       loading.value = true;
       const res = await window.appAPI.systemRemoveSource(batchId);
@@ -1345,11 +1345,11 @@ async function removeSourceBatch(node) {
           }
         }
       } else {
-        alert(res?.message || '删除失败');
+        await showAlert(res?.message || '删除失败');
       }
     } catch (e) {
       console.error('Failed to remove source batch:', e);
-      alert('删除发生错误');
+      await showAlert('删除发生错误');
     } finally {
       loading.value = false;
     }
@@ -1446,7 +1446,7 @@ async function removeSourceBatch(node) {
   align-items: center;
   background: var(--bg-primary);
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-default);
   padding: 6px 16px;
   width: 240px;
   height: 40px;
@@ -1469,7 +1469,7 @@ async function removeSourceBatch(node) {
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-default);
 }
 
 .kg-search-box input {
@@ -1496,7 +1496,7 @@ async function removeSourceBatch(node) {
   justify-content: space-between;
   gap: 12px;
   padding: 4px 10px;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-default);
   border: 1px solid var(--border-subtle);
   background: var(--bg-primary);
   color: var(--text-secondary);
@@ -1540,7 +1540,7 @@ async function removeSourceBatch(node) {
   padding: 8px 12px;
   border: none;
   background: transparent;
-  border-radius: 6px;
+  border-radius: var(--radius-default);
   cursor: pointer;
   transition: all 0.2s;
   text-align: left;
@@ -1575,7 +1575,7 @@ async function removeSourceBatch(node) {
   color: var(--text-muted);
   background: var(--bg-tertiary);
   padding: 2px 6px;
-  border-radius: 12px;
+  border-radius: var(--radius-default);
 }
 
 .kg-project-list-empty {
@@ -1620,7 +1620,7 @@ async function removeSourceBatch(node) {
   justify-content: center;
   width: 32px;
   height: 32px;
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-default);
   border: 1px solid var(--border-subtle);
   background: transparent;
   color: var(--text-secondary);
@@ -1696,7 +1696,7 @@ async function removeSourceBatch(node) {
 
 .inspector-merge-panel {
   background: var(--bg-tertiary);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-default);
   padding: var(--space-3);
   margin-bottom: var(--space-4);
   border: 1px solid var(--border-subtle);
@@ -1720,7 +1720,7 @@ async function removeSourceBatch(node) {
 .merge-search-input {
   width: 100%;
   padding: 6px;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-default);
   border: 1px solid var(--border-subtle);
   background: var(--bg-primary);
   color: var(--text-primary);
@@ -1743,7 +1743,7 @@ async function removeSourceBatch(node) {
   max-height: 150px;
   overflow-y: auto;
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-default);
   background: var(--bg-primary);
   margin-bottom: var(--space-3);
 }
@@ -1791,7 +1791,7 @@ async function removeSourceBatch(node) {
 .merge-actions button {
   flex: 1;
   padding: 4px 8px;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-default);
   font-size: var(--text-xs);
   cursor: pointer;
   border: none;
@@ -1867,7 +1867,7 @@ async function removeSourceBatch(node) {
   align-items: center;
   gap: var(--space-2);
   padding: var(--space-2);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-default);
   cursor: pointer;
   transition: background var(--duration-fast);
 }
@@ -1904,7 +1904,7 @@ async function removeSourceBatch(node) {
   color: var(--text-muted);
   background: var(--bg-tertiary);
   padding: 1px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-default);
 }
 
 .inspector-empty {
@@ -1940,7 +1940,7 @@ async function removeSourceBatch(node) {
   align-items: center;
   gap: var(--space-2);
   padding: var(--space-2) var(--space-4);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-default);
   border: 1px solid var(--accent-primary);
   background: transparent;
   color: var(--accent-primary);
@@ -1964,7 +1964,7 @@ async function removeSourceBatch(node) {
 .mode-toggle {
   display: flex;
   background-color: var(--bg-tertiary);
-  border-radius: 6px;
+  border-radius: var(--radius-default);
   padding: 2px;
   gap: 2px;
 }
@@ -1977,7 +1977,7 @@ async function removeSourceBatch(node) {
   align-items: center;
   justify-content: center;
   gap: 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-default);
   color: var(--text-secondary);
   cursor: pointer;
   font-weight: 500;
@@ -2050,7 +2050,7 @@ async function removeSourceBatch(node) {
   display: flex;
   flex-direction: column;
   padding: 6px 10px;
-  border-radius: 6px;
+  border-radius: var(--radius-default);
   cursor: pointer;
   transition: background 0.15s;
   margin-bottom: 2px;
@@ -2099,7 +2099,7 @@ async function removeSourceBatch(node) {
   color: var(--text-muted);
   background: var(--bg-tertiary);
   padding: 1px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-default);
 }
 
 .inspector-empty {
@@ -2135,7 +2135,7 @@ async function removeSourceBatch(node) {
   align-items: center;
   gap: var(--space-2);
   padding: var(--space-2) var(--space-4);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-default);
   border: 1px solid var(--accent-primary);
   background: transparent;
   color: var(--accent-primary);
@@ -2159,7 +2159,7 @@ async function removeSourceBatch(node) {
 .mode-toggle {
   display: flex;
   background-color: var(--bg-tertiary);
-  border-radius: 6px;
+  border-radius: var(--radius-default);
   padding: 2px;
   gap: 2px;
 }
@@ -2172,7 +2172,7 @@ async function removeSourceBatch(node) {
   align-items: center;
   justify-content: center;
   gap: 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-default);
   color: var(--text-secondary);
   cursor: pointer;
   font-weight: 500;
@@ -2245,7 +2245,7 @@ async function removeSourceBatch(node) {
   display: flex;
   flex-direction: column;
   padding: 6px 10px;
-  border-radius: 6px;
+  border-radius: var(--radius-default);
   cursor: pointer;
   transition: background 0.15s;
   margin-bottom: 2px;

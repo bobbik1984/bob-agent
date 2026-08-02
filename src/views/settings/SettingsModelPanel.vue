@@ -95,7 +95,7 @@
 
       <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-top: 12px; margin-bottom: 8px;">
         <!-- HF Mirror Switch -->
-        <div style="display: flex; align-items: center; justify-content: center; gap: 10px; background: var(--bg-secondary); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 8px; cursor: pointer;" @click="downloadSource = downloadSource === 'hf-mirror' ? 'huggingface' : 'hf-mirror'">
+        <div style="display: flex; align-items: center; justify-content: center; gap: 10px; background: var(--bg-secondary); border: 1px solid var(--border-subtle); border-radius: var(--radius-default); padding: 8px; cursor: pointer;" @click="downloadSource = downloadSource === 'hf-mirror' ? 'huggingface' : 'hf-mirror'">
           <span style="font-size: 0.85em; color: var(--text-secondary);" :style="{ fontWeight: downloadSource === 'huggingface' ? '500' : 'normal', color: downloadSource === 'huggingface' ? 'var(--text-primary)' : 'var(--text-secondary)' }">HF</span>
           <label class="hf-switch" @click.stop>
             <input type="checkbox" :checked="downloadSource === 'hf-mirror'" @change="downloadSource = $event.target.checked ? 'hf-mirror' : 'huggingface'" />
@@ -105,12 +105,12 @@
         </div>
         
         <!-- Custom URL -->
-        <button class="btn btn-ghost" style="padding: 8px; color: var(--text-primary); background: var(--bg-secondary); border: 1px solid var(--border-subtle); display: flex; align-items: center; justify-content: center; gap: 6px; border-radius: var(--radius-md);" @click="showCustomDownload = !showCustomDownload">
+        <button class="btn btn-ghost" style="padding: 8px; color: var(--text-primary); background: var(--bg-secondary); border: 1px solid var(--border-subtle); display: flex; align-items: center; justify-content: center; gap: 6px; border-radius: var(--radius-default);" @click="showCustomDownload = !showCustomDownload">
           <Plus :size="14" /> <span style="font-size: 0.85em;">自定义下载链接</span>
         </button>
 
         <!-- Physical Dir -->
-        <button class="btn btn-ghost" style="padding: 8px; color: var(--text-primary); background: var(--bg-secondary); border: 1px solid var(--border-subtle); display: flex; align-items: center; justify-content: center; gap: 6px; border-radius: var(--radius-md);" @click="openModelsDir" title="打开底层模型物理存储目录">
+        <button class="btn btn-ghost" style="padding: 8px; color: var(--text-primary); background: var(--bg-secondary); border: 1px solid var(--border-subtle); display: flex; align-items: center; justify-content: center; gap: 6px; border-radius: var(--radius-default);" @click="openModelsDir" title="打开底层模型物理存储目录">
           <FolderOpen :size="14" /> <span style="font-size: 0.85em;">物理模型目录</span>
         </button>
       </div>
@@ -148,7 +148,7 @@
     <div style="display: flex; flex-direction: column; margin-bottom: 20px;">
       <div class="form-group" v-for="provider in modelProviders" :key="provider.id" style="display: flex; align-items: center; gap: 12px; border-bottom: 1px solid var(--border-subtle); padding: 10px 0; margin-bottom: 0;">
         <label class="form-label provider-label">
-          <img v-if="getProviderLogo(provider.id)" :src="getProviderLogo(provider.id)" style="width: 16px; height: 16px; object-fit: contain; border-radius: 2px;" />
+          <img v-if="getProviderLogo(provider.id)" :src="getProviderLogo(provider.id)" style="width: 16px; height: 16px; object-fit: contain; border-radius: var(--radius-default);" />
           <span style="flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" :title="$te('providers.' + provider.id) ? $t('providers.' + provider.id) : provider.name">{{ $te('providers.' + provider.id) ? $t('providers.' + provider.id) : provider.name }}</span>
         </label>
 
@@ -229,7 +229,7 @@
       <h4 style="margin-bottom: 8px; font-size: 0.85em; color: var(--text-secondary);">{{ $t('settings.custom_model_title') }}</h4>
       
       <div style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px;">
-        <div v-for="cm in customModels" :key="cm.id" style="display: flex; align-items: center; gap: 8px; padding: 6px 8px; background: var(--bg-tertiary); border-radius: 4px; border: 1px solid var(--border-subtle);">
+        <div v-for="cm in customModels" :key="cm.id" style="display: flex; align-items: center; gap: 8px; padding: 6px 8px; background: var(--bg-tertiary); border-radius: var(--radius-default); border: 1px solid var(--border-subtle);">
           <span style="font-weight: bold; width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ cm.displayName }}</span>
           <span style="flex: 1; font-size: 0.85em; color: var(--text-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ cm.baseUrl }}</span>
           <button class="btn-icon" style="color: var(--color-error); width: 24px; height: 24px;" @click="removeCustomModel(cm.id)" :title="$t('settings.delete')">
@@ -253,7 +253,7 @@
       <div style="display: flex; flex-wrap: wrap; gap: 8px;">
         <span v-for="tool in toolStatuses" :key="tool.name"
           :title="tool.isActive ? tool.description : ($t('settings.tool_missing') + tool.missingCredentials.join(', '))"
-          style="padding: 3px 10px; border-radius: 12px; font-size: 0.8em; display: inline-flex; align-items: center; gap: 6px;"
+          style="padding: 3px 10px; border-radius: var(--radius-default); font-size: 0.8em; display: inline-flex; align-items: center; gap: 6px;"
           :style="{ 
             background: tool.isActive ? 'color-mix(in srgb, var(--accent-primary) 10%, transparent)' : 'color-mix(in srgb, var(--text-tertiary) 10%, transparent)',
             color: tool.isActive ? 'var(--text-primary)' : 'var(--text-tertiary)'
@@ -378,6 +378,9 @@
 </template>
 
 <script setup>
+import { useDialog } from '@/composables/useDialog.js';
+const { showConfirm, showAlert, showPrompt } = useDialog();
+
 import { ref, onMounted, computed } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { Server, FolderOpen, Info, Key, ChevronDown, X, Plus, Trash2, Database, Check, Image as ImageIcon, Save, Globe, Pause, Play, Download, Loader } from 'lucide-vue-next';
@@ -454,7 +457,7 @@ async function togglePause(modelId) {
 }
 
 async function deleteLocalModel(modelId) {
-  if (confirm(`确定要删除 ${modelId} 相关的模型和临时文件吗？这会释放磁盘空间。`)) {
+  if (await showConfirm(`确定要删除 ${modelId} 相关的模型和临时文件吗？这会释放磁盘空间。`)) {
     try {
       const deleted = await invoke('delete_local_model', { modelId: String(modelId) });
       if (deleted) {
@@ -465,7 +468,7 @@ async function deleteLocalModel(modelId) {
         }
       }
     } catch (e) {
-      alert('删除失败: ' + e);
+      await showAlert('删除失败: ' + e);
     }
   }
 }
@@ -545,12 +548,12 @@ async function beginDownloadTask(modelId, url, tokenizerUrl = null) {
       }
     } else {
       if (!String(result.error).includes('Paused')) {
-        alert('下载失败: ' + result.error);
+        await showAlert('下载失败: ' + result.error);
       }
     }
   } catch(err) {
     if (!String(err).includes('Paused')) {
-      alert('下载出错: ' + err);
+      await showAlert('下载出错: ' + err);
     }
   } finally {
     if (!isPaused.value) {
@@ -585,7 +588,7 @@ async function toggleOfflineEngine() {
   } else {
     // Start memory mount
     if (!props.config.offlineModelPath) {
-      alert('请先下载或选择一个本地模型，然后在主界面切换到该模型后再启动引擎。');
+      await showAlert('请先下载或选择一个本地模型，然后在主界面切换到该模型后再启动引擎。');
       return;
     }
     offlineEngineStatus.value = 'starting';
@@ -598,7 +601,7 @@ async function toggleOfflineEngine() {
       }
     } catch(err) {
       offlineEngineStatus.value = 'stopped';
-      alert('内存挂载失败: ' + err);
+      await showAlert('内存挂载失败: ' + err);
     }
   }
 }
@@ -636,7 +639,7 @@ async function uploadGcpCredential() {
   if (!selected) return;
   const result = await window.appAPI.uploadGcpCredential(selected);
   if (result.error) {
-    alert('凭证上传失败: ' + result.error);
+    await showAlert('凭证上传失败: ' + result.error);
   } else {
     await loadGcpCredentialStatus();
   }
@@ -645,9 +648,9 @@ async function uploadGcpCredential() {
 async function testGcpCredential() {
   const result = await window.appAPI.testGcpCredential();
   if (result.error) {
-    alert('❌ 连通性测试失败: ' + result.error);
+    await showAlert('❌ 连通性测试失败: ' + result.error);
   } else {
-    alert('✅ 连通性测试成功！\nProject: ' + result.project_id + '\nToken: ' + result.token_preview);
+    await showAlert('✅ 连通性测试成功！\nProject: ' + result.project_id + '\nToken: ' + result.token_preview);
   }
 }
 
@@ -746,9 +749,9 @@ function addNewProvider() {
   markRegistryDirty();
 }
 
-function removeProvider(index) {
+async function removeProvider(index) {
   if (!registryData.value) return;
-  if (!confirm(t('settings.registry_confirm_remove'))) return;
+  if (!(await showConfirm(t('settings.registry_confirm_remove')))) return;
   registryData.value.providers.splice(index, 1);
   markRegistryDirty();
   modelProviders.value = registryData.value.providers
@@ -888,7 +891,7 @@ defineExpose({ modelHubRef });
   font-weight: normal;
   cursor: pointer;
   padding: 4px 8px;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-default);
   background: transparent;
   border: none;
   color: var(--text-primary);
@@ -928,7 +931,7 @@ defineExpose({ modelHubRef });
   bottom: 0;
   background-color: var(--user-accent, var(--accent-primary));
   transition: .3s;
-  border-radius: 34px;
+  border-radius: var(--radius-default);
 }
 .hf-slider:before {
   position: absolute;
@@ -1074,7 +1077,7 @@ details[open] > summary .details-chevron {
 .registry-provider-card {
   background: var(--bg-primary);
   border: 1px solid var(--border-default);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-default);
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -1102,7 +1105,7 @@ details[open] > summary .details-chevron {
   width: 16px;
   height: 16px;
   object-fit: contain;
-  border-radius: 2px;
+  border-radius: var(--radius-default);
   flex-shrink: 0;
 }
 
@@ -1177,7 +1180,7 @@ details[open] > summary .details-chevron {
   align-items: center;
   margin-bottom: 4px;
   padding: 2px 4px;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-default);
   transition: background 0.15s;
 }
 .registry-model-row:hover {
@@ -1211,7 +1214,7 @@ details[open] > summary .details-chevron {
   font-family: var(--font-mono, monospace);
   color: var(--text-primary);
   padding: 4px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-default);
   outline: none;
   transition: all 0.2s;
 }
@@ -1222,7 +1225,7 @@ details[open] > summary .details-chevron {
 
 .registry-add-provider-card {
   border: 1px dashed var(--border-default);
-  border-radius: 8px;
+  border-radius: var(--radius-default);
   padding: 12px 14px;
   background: var(--bg-secondary);
   display: flex;

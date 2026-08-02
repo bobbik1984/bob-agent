@@ -90,7 +90,7 @@
             <p style="color: var(--text-secondary); text-align: center; line-height: 1.6; margin-bottom: 32px; font-size: 0.9em; padding: 0 20px;">
               {{ $t('setup.pair_scan_desc') || '使用手机扫描 PC 端“连接中心”里生成的二维码，建立端到端加密连接。' }}
             </p>
-            <button class="btn btn-primary" style="width: 80%; padding: 12px; font-size: 1em; border-radius: 24px; display: flex; align-items: center; justify-content: center; gap: 8px;" @click="openScanner">
+            <button class="btn btn-primary" style="width: 80%; padding: 12px; font-size: 1em; border-radius: var(--radius-default); display: flex; align-items: center; justify-content: center; gap: 8px;" @click="openScanner">
               <QrCode :size="18" /> {{ $t('setup.btn_scan_qr') || '打开摄像头扫码' }}
             </button>
             <button class="btn btn-ghost" style="margin-top: 16px; font-size: 0.85em; color: var(--text-tertiary);" @click="finishOnboarding">
@@ -117,6 +117,9 @@
 </template>
 
 <script setup>
+import { useDialog } from '@/composables/useDialog.js';
+const { showConfirm, showAlert, showPrompt } = useDialog();
+
 import { ref, computed, watch, onMounted, onUnmounted, inject } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { Moon, Sun, ChevronLeft, ChevronRight, Loader2, Rocket, Check, Smartphone, QrCode } from 'lucide-vue-next';
@@ -280,7 +283,7 @@ async function openScanner() {
       console.error('Scan failed:', err);
     }
   } else {
-    alert($t('setup.scanner_not_supported') || '当前环境不支持扫码');
+    await showAlert($t('setup.scanner_not_supported') || '当前环境不支持扫码');
   }
 }
 
@@ -422,7 +425,7 @@ async function finishOnboarding() {
   padding: 14px;
   background-color: var(--bg-secondary);
   border: 2px solid var(--border-color);
-  border-radius: 8px;
+  border-radius: var(--radius-default);
   color: var(--text-primary);
   cursor: pointer;
   transition: all 0.2s ease;
@@ -447,7 +450,7 @@ async function finishOnboarding() {
 .color-circle {
   width: 24px;
   height: 24px;
-  border-radius: 12px;
+  border-radius: var(--radius-default);
   border: 2px solid transparent;
   cursor: pointer;
   transition: transform 0.2s, box-shadow 0.2s;
@@ -474,7 +477,7 @@ async function finishOnboarding() {
   padding: 12px 16px;
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
-  border-radius: 8px;
+  border-radius: var(--radius-default);
   color: var(--text-tertiary);
   font-size: 14px;
   cursor: pointer;
@@ -491,7 +494,7 @@ async function finishOnboarding() {
   padding: 12px 16px;
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
-  border-radius: 8px;
+  border-radius: var(--radius-default);
   color: var(--text-secondary);
   font-size: 16px;
   font-weight: 700;
@@ -579,7 +582,7 @@ input:checked + .slider:before {
   transform: translateX(22px);
 }
 
-.slider.round { border-radius: 22px; }
+.slider.round { border-radius: var(--radius-default); }
 .slider.round:before { border-radius: 50%; }
 
 .qr-area {
@@ -597,7 +600,7 @@ input:checked + .slider:before {
   align-items: center;
   justify-content: center;
   background: var(--bg-secondary);
-  border-radius: 12px;
+  border-radius: var(--radius-default);
 }
 
 .qr-done {
@@ -608,13 +611,13 @@ input:checked + .slider:before {
   justify-content: center;
   color: var(--user-accent);
   background: rgba(var(--user-accent-rgb), 0.1);
-  border-radius: 12px;
+  border-radius: var(--radius-default);
 }
 
 .qr-image {
   width: 140px;
   height: 140px;
-  border-radius: 12px;
+  border-radius: var(--radius-default);
 }
 
 /* ── Nav ── */

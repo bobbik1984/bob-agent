@@ -465,7 +465,8 @@
     "type_official": "官方技能",
     "type_custom": "自定义技能",
     "overridden": "被自定义技能覆盖",
-    "overriding": "覆盖了官方同名技能"
+    "overriding": "覆盖了官方同名技能",
+    "import_zip": "导入插件"
   },
   "tray": {
     "show": "显示 bob-agent",
@@ -484,7 +485,8 @@
     "last_run": "上次执行：",
     "pause": "暂停",
     "resume": "恢复",
-    "delete": "删除"
+    "delete": "删除",
+    "new_todo": "新待办"
   },
   "setup": {
     "theme_dark": "暗色",
@@ -515,7 +517,13 @@
   "todo": {
     "empty": "还没有待办事项，快去对我说添加任务吧！",
     "show_completed": "显示已完成",
-    "completed_at": "完成于 {time}"
+    "completed_at": "完成于 {time}",
+    "title_placeholder": "待办事项...",
+    "desc_placeholder": "详情描述 (可选)...",
+    "delete_title": "删除待办",
+    "confirm_delete": "确定要删除这条待办吗？",
+    "add": "添加待办",
+    "delete": "删除"
   },
   "timeline": {
     "today": "今天",
@@ -552,7 +560,10 @@
     "openrouter": "OpenRouter"
   },
   "common": {
-    "please_select": "请选择"
+    "please_select": "请选择",
+    "cancel": "取消",
+    "save": "保存",
+    "confirm": "确定"
   },
   "dream": {
     "morning_title": "早安！以下是我整理的近期动态",
@@ -586,7 +597,8 @@
     "add_tag": "添加标签",
     "tag_placeholder": "输入标签名...",
     "select_category": "选择分类",
-    "select_category_hint": "选择笔记保存位置"
+    "select_category_hint": "选择笔记保存位置",
+    "promote": "提升为笔记"
   },
   "date": {
     "today": "今天",

@@ -352,6 +352,9 @@
 </template>
 
 <script setup>
+import { useDialog } from '@/composables/useDialog.js';
+const { showConfirm, showAlert, showPrompt } = useDialog();
+
 import { ref, onMounted, inject } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { formatDateTime as formatMemoryTime, formatFuzzyTime as formatEvoTime } from '@/utils/date';
@@ -395,7 +398,7 @@ const migrationMode = ref('copy_merge');
 const isMigrating = ref(false);
 const migrationError = ref('');
 
-function cancelWikiMigration() {
+async function cancelWikiMigration() {
   if (isMigrating.value) return;
   showWikiMigrationModal.value = false;
   pendingWikiDir.value = '';
@@ -416,7 +419,7 @@ async function confirmWikiMigration() {
       await saveConfig('wikiDir', pendingWikiDir.value);
       showWikiMigrationModal.value = false;
       pendingWikiDir.value = '';
-      alert(t('settings.wiki_migrate_success'));
+      await showAlert(t('settings.wiki_migrate_success'));
     } else {
       migrationError.value = res?.error || t('settings.wiki_migrate_error_unknown');
     }
@@ -492,7 +495,7 @@ async function loadMemoryEntries() {
 }
 
 async function deleteMemoryEntry(entry) {
-  if (!confirm(t('settings.memory_delete_confirm'))) return;
+  if (!(await showConfirm(t('settings.memory_delete_confirm')))) return;
   try {
     await window.appAPI.deleteMemoryEntry(entry.type, entry.id);
     memoryEntries.value = memoryEntries.value.filter(

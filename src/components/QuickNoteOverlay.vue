@@ -43,6 +43,9 @@
 </template>
 
 <script setup>
+import { useDialog } from '@/composables/useDialog.js';
+const { showConfirm, showAlert, showPrompt } = useDialog();
+
 import { ref, nextTick, onMounted, onUnmounted } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { Check, Cpu, QrCode } from 'lucide-vue-next';
@@ -71,7 +74,7 @@ function open() {
   });
 }
 
-function openModelSwitcher() {
+async function openModelSwitcher() {
   window.dispatchEvent(new CustomEvent('open-mobile-model-switcher'));
   close();
 }
@@ -159,7 +162,7 @@ async function openScanPairing() {
       console.error('Scan failed:', err);
     }
   } else {
-    alert($t('setup.scanner_not_supported') || '当前环境不支持扫码');
+    await showAlert($t('setup.scanner_not_supported') || '当前环境不支持扫码');
   }
 }
 
@@ -231,7 +234,7 @@ onUnmounted(() => document.removeEventListener('keydown', onGlobalKey));
   height: 48px;
   background: var(--bg-primary);
   border: 1px solid var(--border-default);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-default);
   overflow: hidden;
   box-shadow: var(--shadow-lg), 0 0 0 1px var(--border-subtle);
 }
@@ -312,7 +315,7 @@ onUnmounted(() => document.removeEventListener('keydown', onGlobalKey));
   padding: 0 16px;
   background: var(--bg-secondary);
   border: 1px solid var(--border-default);
-  border-radius: 20px;
+  border-radius: var(--radius-default);
   color: var(--text-secondary);
   font-size: 13px;
   font-weight: 500;

@@ -84,6 +84,9 @@
 </template>
 
 <script setup>
+import { useDialog } from '@/composables/useDialog.js';
+const { showConfirm, showAlert, showPrompt } = useDialog();
+
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { X, Loader2, ChevronRight, Box, User, Wrench, AlertTriangle, Zap, Upload } from 'lucide-vue-next';
@@ -113,7 +116,7 @@ const pluginGroups = computed(() => {
   return groups.filter(g => g.items.length > 0);
 });
 
-const formatTypeLabel = (p) => {
+const formatTypeLabel = async (p) => {
   if (p.type === 'tool') return t('plugin.type_native') || '内置能力';
   if (p.type === 'skill') return p.is_official ? (t('plugin.type_official') || '官方技能') : (t('plugin.type_custom') || '自定义技能');
   return p.typeLabel;
@@ -153,7 +156,7 @@ const importSkillsZip = async () => {
       await fetchPlugins();
     }
   } catch (err) {
-    alert("导入失败: " + err);
+    await showAlert("导入失败: " + err);
   }
 };
 

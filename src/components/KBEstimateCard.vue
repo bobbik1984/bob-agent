@@ -107,7 +107,7 @@ const formatTokens = (tokens) => {
 .confirm-card {
   background-color: var(--bg-primary);
   border: 1px solid var(--border-color);
-  border-radius: 12px;
+  border-radius: var(--radius-default);
   overflow: hidden;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
   width: 100%;
@@ -128,7 +128,7 @@ const formatTokens = (tokens) => {
   color: var(--accent-primary);
   width: 48px;
   height: 48px;
-  border-radius: 12px;
+  border-radius: var(--radius-default);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -171,7 +171,7 @@ const formatTokens = (tokens) => {
 .stats-grid {
   display: flex;
   background-color: var(--bg-secondary);
-  border-radius: 8px;
+  border-radius: var(--radius-default);
   padding: 12px;
   margin-bottom: 16px;
   border: 1px solid var(--border-color);
@@ -213,7 +213,7 @@ const formatTokens = (tokens) => {
 
 .cost-display {
   border: 1px solid var(--accent-primary);
-  border-radius: 8px;
+  border-radius: var(--radius-default);
   padding: 12px;
   margin-bottom: 8px;
   background-color: rgba(var(--accent-primary-rgb), 0.05);
@@ -254,7 +254,7 @@ const formatTokens = (tokens) => {
   color: var(--text-tertiary);
   background-color: var(--bg-secondary);
   padding: 10px;
-  border-radius: 8px;
+  border-radius: var(--radius-default);
   line-height: 1.4;
 }
 

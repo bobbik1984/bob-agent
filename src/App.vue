@@ -1200,7 +1200,7 @@ function onFabPointerUp(e) {
   align-items: center;
   justify-content: center;
   border: none;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-default);
   background: transparent;
   color: var(--text-tertiary);
   cursor: pointer;
@@ -1271,7 +1271,7 @@ function onFabPointerUp(e) {
   background: var(--surface-glass);
   border: 1px solid var(--border-subtle);
   border-right: none;
-  border-radius: 4px 0 0 4px;
+  border-radius: var(--radius-default) 0 0 var(--radius-default);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1290,7 +1290,7 @@ function onFabPointerUp(e) {
   transform: translateY(-50%);
   border-right: 1px solid var(--border-subtle);
   border-left: none;
-  border-radius: 0 4px 4px 0;
+  border-radius: 0 var(--radius-default) var(--radius-default) 0;
   background: var(--bg-primary);
   box-shadow: var(--shadow-sm);
 }
@@ -1311,7 +1311,7 @@ function onFabPointerUp(e) {
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-default);
   border: 1px solid var(--border-subtle);
   background: transparent;
   color: var(--text-secondary);
@@ -1332,7 +1332,7 @@ function onFabPointerUp(e) {
   align-items: center;
   justify-content: center;
   gap: 6px;
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-default);
   border: 1px dashed var(--border-subtle);
   background: transparent;
   color: var(--text-secondary);
@@ -1374,7 +1374,7 @@ function onFabPointerUp(e) {
   height: 34px;
   background: var(--surface-input, var(--bg-tertiary));
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-default);
 }
 
 .sidebar-search.expanded:focus-within {
@@ -1409,7 +1409,7 @@ function onFabPointerUp(e) {
   align-items: center;
   justify-content: center;
   color: var(--text-muted);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-default);
   flex-shrink: 0;
 }
 
@@ -1434,7 +1434,7 @@ function onFabPointerUp(e) {
 
 .search-result-item {
   padding: var(--space-2) var(--space-3);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-default);
   cursor: pointer;
   transition: background var(--duration-fast);
   margin-bottom: 2px;
@@ -1467,7 +1467,7 @@ function onFabPointerUp(e) {
 .search-result-snippet :deep(mark) {
   background: color-mix(in srgb, var(--user-accent, var(--accent-primary)) 25%, transparent);
   color: var(--accent-tertiary);
-  border-radius: 2px;
+  border-radius: var(--radius-default);
   padding: 0 1px;
 }
 
@@ -1504,7 +1504,7 @@ function onFabPointerUp(e) {
   text-align: center;
   background: var(--error, #e74c3c);
   color: var(--text-inverse);
-  border-radius: 7px;
+  border-radius: var(--radius-default);
   padding: 0 3px;
 }
 
@@ -1533,7 +1533,7 @@ function onFabPointerUp(e) {
   width: 100%;
   padding: var(--space-2) var(--space-3);
   border: none;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-default);
   background: transparent;
   color: var(--text-secondary);
   font-family: var(--font-sans);
@@ -1604,7 +1604,7 @@ function onFabPointerUp(e) {
   color: var(--text-tertiary);
   transition: all var(--duration-fast);
   background: var(--bg-secondary);
-  border-radius: 2px;
+  border-radius: var(--radius-default);
 }
 
 .conversation-item:hover .delete-btn {
@@ -1657,7 +1657,7 @@ function onFabPointerUp(e) {
   gap: var(--space-3);
   padding: var(--space-2) var(--space-3);
   border: none;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-default);
   background: transparent;
   color: var(--text-secondary);
   font-family: var(--font-sans);
@@ -1694,7 +1694,7 @@ function onFabPointerUp(e) {
   flex: 1;
   background: var(--bg-tertiary);
   border: 1px solid var(--user-accent, var(--accent-primary));
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-default);
   color: var(--text-primary);
   font-family: var(--font-sans);
   font-size: var(--text-sm);
@@ -1760,7 +1760,7 @@ function onFabPointerUp(e) {
   width: 48px;
   height: 2px;
   background: var(--border-subtle, #333);
-  border-radius: 1px;
+  border-radius: var(--radius-default);
   overflow: hidden;
   position: relative;
 }
@@ -1771,7 +1771,7 @@ function onFabPointerUp(e) {
   inset: 0;
   width: 50%;
   background: var(--accent-primary, #6366f1);
-  border-radius: 1px;
+  border-radius: var(--radius-default);
   animation: splash-slide 1.2s ease-in-out infinite;
 }
 
@@ -1839,7 +1839,7 @@ function onFabPointerUp(e) {
   text-align: center;
   background: var(--color-error);
   color: var(--bg-root);
-  border-radius: 8px;
+  border-radius: var(--radius-default);
   padding: 0 4px;
 }
 
@@ -1876,7 +1876,7 @@ function onFabPointerUp(e) {
   gap: 10px;
   padding: var(--space-2) var(--space-3);
   border: none;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-default);
   background: transparent;
   color: var(--text-secondary);
   font-family: var(--font-sans);

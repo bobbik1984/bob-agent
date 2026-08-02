@@ -147,6 +147,9 @@
 </template>
 
 <script setup>
+import { useDialog } from '@/composables/useDialog.js';
+const { showConfirm, showAlert, showPrompt } = useDialog();
+
 import { computed, ref, watch, onMounted, onUnmounted } from 'vue';
 import { Plane, Film, Ticket, Calendar, Train, ArrowRight, CreditCard, Music, ChevronDown, Trash2 } from 'lucide-vue-next';
 import QrcodeVue from 'qrcode.vue';
@@ -179,7 +182,7 @@ const formatDateInput = (field) => {
   editForm.value[field] = val;
 };
 
-const formatTimeInput = (field) => {
+const formatTimeInput = async (field) => {
   let val = editForm.value[field] || '';
   val = val.replace(/\D/g, ''); 
   if (val.length > 4) val = val.substring(0, 4);
@@ -219,7 +222,7 @@ const addToCalendar = async () => {
   }
 };
 
-const startEdit = () => {
+const startEdit = async () => {
   editForm.value = {
     title: props.node.label,
     origin: originLabel.value,
@@ -366,14 +369,14 @@ const ticketStatusClass = computed(() => {
 });
 
 const deleteTicket = async () => {
-  if (confirm('确定要删除此票据吗？')) {
+  if (await showConfirm('确定要删除此票据吗？')) {
     try {
       await window.appAPI.kgDeleteNode(props.node.id);
       showDetail.value = false;
       window.dispatchEvent(new CustomEvent('ticket-created')); // triggers a refresh in KnowledgeGraphView
     } catch (e) {
       console.error('Failed to delete ticket', e);
-      alert('删除失败');
+      await showAlert('删除失败');
     }
   }
 };
@@ -435,7 +438,7 @@ onUnmounted(() => {
 .ticket-card-wrapper {
   background-color: var(--bg-tertiary);
   border: 1px solid var(--border-subtle);
-  border-radius: 12px;
+  border-radius: var(--radius-default);
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -475,9 +478,9 @@ onUnmounted(() => {
   width: 18px;
   height: 18px;
   padding: 5px;
-  border-radius: 8px;
+  border-radius: var(--radius-default);
   background: var(--user-accent, #4f8cf7);
-  color: #ffffff;
+  color: var(--text-primary);
   box-sizing: content-box;
   flex-shrink: 0;
 }
@@ -521,7 +524,7 @@ onUnmounted(() => {
   background: var(--bg-tertiary);
   color: var(--text-primary);
   border: 1px solid var(--border-default);
-  border-radius: 16px;
+  border-radius: var(--radius-default);
   padding: 20px;
   width: 90%;
   max-width: 340px;
@@ -630,9 +633,9 @@ onUnmounted(() => {
   align-items: center;
 }
 .bp-modern-qr-wrapper {
-  background: #ffffff;
+  background: var(--text-primary);
   padding: 10px;
-  border-radius: 10px;
+  border-radius: var(--radius-default);
 }
 .bp-modern-actions {
   display: flex;
@@ -642,7 +645,7 @@ onUnmounted(() => {
 .bp-modern-btn {
   flex: 1;
   padding: 10px;
-  border-radius: 8px;
+  border-radius: var(--radius-default);
   border: none;
   font-weight: 600;
   cursor: pointer;
@@ -658,7 +661,7 @@ onUnmounted(() => {
 }
 .bp-modern-btn-danger {
   background: var(--color-error, #f44336);
-  color: #ffffff;
+  color: var(--text-primary);
   flex: none;
   width: 44px;
   display: flex;
@@ -670,7 +673,7 @@ onUnmounted(() => {
   background: var(--bg-primary);
   border: 1px solid var(--border-default);
   color: var(--text-primary);
-  border-radius: 6px;
+  border-radius: var(--radius-default);
   padding: 4px 8px;
   font-size: 1.05em;
   width: 100%;
@@ -684,7 +687,7 @@ onUnmounted(() => {
 }
 .bp-modern-btn-primary {
   background: var(--accent-primary);
-  color: #fff;
+  color: var(--text-primary);
 }
 
 

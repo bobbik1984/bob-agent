@@ -180,7 +180,7 @@
                 :src="'data:image/png;base64,' + b64" 
                 alt="用户图片" 
                 @click="zoomedImage = 'data:image/png;base64,' + b64; imageScale = 1; imageTranslateX = 0; imageTranslateY = 0;"
-                style="cursor: zoom-in; max-height: 200px; border-radius: 4px;"
+                style="cursor: zoom-in; max-height: 200px; border-radius: var(--radius-default);"
               />
             </div>
           </div>
@@ -378,7 +378,7 @@
         <!-- 图片预览 -->
         <div v-if="pendingImages.length > 0" class="inline-images-preview" style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px;">
           <div v-for="(img, idx) in pendingImages" :key="idx" class="inline-image-preview" style="position: relative;">
-            <img :src="'data:image/png;base64,' + img" alt="Pending Image" style="max-height: 100px; border-radius: 4px;" />
+            <img :src="'data:image/png;base64,' + img" alt="Pending Image" style="max-height: 100px; border-radius: var(--radius-default);" />
             <button class="image-remove-inline btn-icon" @click="pendingImages.splice(idx, 1)" style="position: absolute; top: -6px; right: -6px; background: var(--text-primary); color: var(--bg-primary); padding: 2px; border-radius: 50%; box-shadow: 0 2px 4px rgba(0,0,0,0.2);"><X :size="12" /></button>
           </div>
         </div>
@@ -1010,7 +1010,40 @@ const {
 
 // ── 模板绑定的包装函数 ──────────────────────────────
   // sendMessage 需要传入 pendingImage/pendingFiles/resetTextareaHeight
-  async function sendMessage() {
+  
+let speechUnlistenPartial = null;
+let speechUnlistenFinal = null;
+
+async function toggleSpeechRecognition() {
+    try {
+        if (isListening.value) {
+            await window.appAPI.invoke('plugin:speech|stop_listening');
+            isListening.value = false;
+        } else {
+            // Setup listeners once
+            if (!speechUnlistenPartial) {
+                speechUnlistenPartial = await window.appAPI.listen('speech_partial', (event) => {
+                    inputText.value = event.payload.text;
+                });
+            }
+            if (!speechUnlistenFinal) {
+                speechUnlistenFinal = await window.appAPI.listen('speech_final', (event) => {
+                    inputText.value = event.payload.text;
+                    isListening.value = false;
+                });
+            }
+            // Start
+            await window.appAPI.invoke('plugin:speech|start_listening');
+            isListening.value = true;
+        }
+    } catch (err) {
+        console.error('Speech recognition error:', err);
+        isListening.value = false;
+        alert('无法启动语音识别: ' + err);
+    }
+}
+
+async function sendMessage() {
     // 自动探测文本中的绝对路径，转为附件
     const txt = inputText.value || '';
     const pathRegex = /([a-zA-Z]:\\[^"'<>|*?]+?\.(?:pdf|txt|md|csv|json|yaml|yml|log|py|js|rs|ts|vue|html|css|docx|xlsx|png|jpg|jpeg|gif|webp))/gi;
@@ -1596,7 +1629,7 @@ defineExpose({
 .health-fix-btn {
   background: none;
   border: 1px solid currentColor;
-  border-radius: 4px;
+  border-radius: var(--radius-default);
   padding: 2px 8px;
   font-size: 11px;
   cursor: pointer;
@@ -1736,7 +1769,7 @@ defineExpose({
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-default);
   flex-shrink: 0;
   margin-top: 4px;
   font-size: 12px;
@@ -1797,7 +1830,7 @@ defineExpose({
   font-family: var(--font-mono);
   font-size: 0.95em;
   padding: 0 2px;
-  border-radius: 2px;
+  border-radius: var(--radius-default);
   background: transparent;
   color: var(--text-primary);
 }
@@ -1906,7 +1939,7 @@ defineExpose({
   padding: 4px 10px;
   background: color-mix(in srgb, var(--accent-primary) 10%, transparent);
   border: 1px solid color-mix(in srgb, var(--accent-primary) 30%, transparent);
-  border-radius: 6px;
+  border-radius: var(--radius-default);
   text-decoration: none;
   color: var(--accent-primary);
   font-weight: 500;
@@ -1936,7 +1969,7 @@ defineExpose({
 
 /* ── 消息图片 ───────────────────────────────────────── */
 .message-image {
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-default);
   overflow: hidden;
 }
 
@@ -1947,7 +1980,7 @@ defineExpose({
   max-height: 240px;
   display: block;
   object-fit: contain;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-default);
 }
 
 /* ── 图片预览条 ─────────────────────────────────────── */
@@ -1964,7 +1997,7 @@ defineExpose({
   position: relative;
   width: 48px;
   height: 48px;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-default);
   overflow: hidden;
   border: 1px solid var(--border-default);
 }
@@ -2000,7 +2033,7 @@ defineExpose({
   padding: 12px 16px;
   background: color-mix(in srgb, var(--color-error, #ef4444) 8%, var(--bg-secondary));
   border: 1px solid color-mix(in srgb, var(--color-error, #ef4444) 20%, transparent);
-  border-radius: 8px;
+  border-radius: var(--radius-default);
   margin: 4px 0;
 }
 
@@ -2046,7 +2079,7 @@ defineExpose({
   margin: 8px 0;
   padding: 10px 14px;
   background: var(--bg-secondary);
-  border-radius: 8px;
+  border-radius: var(--radius-default);
   border-left: 2px solid var(--accent-primary);
   animation: fadeIn 0.2s ease;
 }
@@ -2077,13 +2110,13 @@ defineExpose({
   width: 100%;
   height: 4px;
   background: var(--bg-tertiary);
-  border-radius: 2px;
+  border-radius: var(--radius-default);
   overflow: hidden;
 }
 .cdn-upload-bar-fill {
   height: 100%;
   background: var(--accent-primary);
-  border-radius: 2px;
+  border-radius: var(--radius-default);
   transition: width 0.15s ease;
 }
 .cdn-upload-detail {
@@ -2158,7 +2191,7 @@ defineExpose({
   margin-top: 6px;
   padding: 8px 10px;
   background: var(--bg-secondary);
-  border-radius: 6px;
+  border-radius: var(--radius-default);
   font-size: 11px;
   font-family: var(--font-mono, monospace);
   color: var(--text-tertiary);
@@ -2185,7 +2218,7 @@ defineExpose({
   margin-top: 6px;
   font-size: 10px;
   padding: 2px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-default);
   background: transparent;
   border: 1px solid var(--border-subtle);
   color: var(--text-tertiary);
@@ -2273,7 +2306,7 @@ defineExpose({
   height: 22px;
   padding: 0 6px;
   border: none;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-default);
   background: transparent;
   color: var(--text-tertiary);
   font-size: var(--text-xs);
@@ -2297,7 +2330,7 @@ defineExpose({
   width: 12px;
   height: 12px;
   object-fit: contain;
-  border-radius: 2px;
+  border-radius: var(--radius-default);
 }
 
 /* ── 模型切换弹窗 ─────────────────────────────────── */
@@ -2310,7 +2343,7 @@ defineExpose({
   min-width: 300px;
   background: var(--bg-primary);
   border: 1px solid var(--border-default);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-default);
   box-shadow: var(--shadow-lg);
   z-index: 200;
   overflow: hidden;
@@ -2340,7 +2373,7 @@ defineExpose({
   width: 100%;
   padding: 5px 8px;
   border: none;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-default);
   background: transparent;
   color: var(--text-secondary);
   font-family: var(--font-sans);
@@ -2393,7 +2426,7 @@ defineExpose({
   width: 100%;
   padding: 6px 10px;
   border: none;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-default);
   background: transparent;
   color: var(--text-secondary);
   font-family: var(--font-sans);
@@ -2464,7 +2497,7 @@ defineExpose({
   box-sizing: border-box;
   background: var(--surface-card);
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-default);
   padding: var(--space-2) var(--space-3);
   transition: border-color var(--duration-fast) var(--ease-out);
 }
@@ -2494,7 +2527,7 @@ defineExpose({
   gap: 6px;
   background: var(--surface-card);
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-default);
   padding: 4px 8px 4px 6px;
   font-size: 11px;
   color: var(--text-secondary);
@@ -2516,7 +2549,7 @@ defineExpose({
   color: var(--text-tertiary);
   cursor: pointer;
   padding: 2px;
-  border-radius: var(--radius-xs);
+  border-radius: var(--radius-default);
 }
 
 .file-remove-btn:hover {
@@ -2529,7 +2562,7 @@ defineExpose({
   height: auto;
   max-width: 64px;
   max-height: 48px;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-default);
   border: 1px solid var(--border-subtle);
   object-fit: contain;
 }
@@ -2604,7 +2637,7 @@ defineExpose({
   justify-content: center;
   width: 17px;
   height: 17px;
-  border-radius: 2px;
+  border-radius: var(--radius-default);
   border: 1px solid var(--border-default);
   background: transparent;
   cursor: pointer;
@@ -2808,7 +2841,7 @@ defineExpose({
   margin-bottom: 8px;
   background-color: var(--bg-secondary);
   border: 1px solid var(--border-light);
-  border-radius: 8px;
+  border-radius: var(--radius-default);
   padding: 4px;
   box-shadow: 0 4px 12px var(--shadow-color, rgba(0,0,0,0.1));
   z-index: 100;
@@ -2816,7 +2849,7 @@ defineExpose({
 }
 .mention-menu-item {
   padding: 8px 12px;
-  border-radius: 6px;
+  border-radius: var(--radius-default);
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -2832,7 +2865,7 @@ defineExpose({
   color: var(--text-tertiary);
   background-color: var(--bg-root);
   padding: 2px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-default);
 }
 
 /* Image Lightbox */
@@ -2854,7 +2887,7 @@ defineExpose({
   max-width: 90vw;
   max-height: 90vh;
   object-fit: contain;
-  border-radius: 8px;
+  border-radius: var(--radius-default);
   box-shadow: 0 10px 30px var(--shadow-lg);
   cursor: grab;
   transition: transform 0.1s ease-out;
@@ -2976,7 +3009,7 @@ defineExpose({
   width: 40px;
   height: 4px;
   background: var(--border-strong);
-  border-radius: 2px;
+  border-radius: var(--radius-default);
   opacity: 0.6;
 }
 .sheet-back-btn {
@@ -3016,7 +3049,7 @@ defineExpose({
 .grid-icon-wrap {
   width: 56px;
   height: 56px;
-  border-radius: 16px;
+  border-radius: var(--radius-default);
   background: var(--bg-secondary);
   display: flex;
   align-items: center;
@@ -3039,7 +3072,7 @@ defineExpose({
   padding: 12px 16px;
   background: var(--bg-secondary);
   border: none;
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-default);
   color: var(--text-primary);
   cursor: pointer;
   text-align: left;
@@ -3103,7 +3136,7 @@ defineExpose({
   background: var(--bg-tertiary);
   color: var(--text-primary);
   border: 1px solid var(--border-default);
-  border-radius: 16px;
+  border-radius: var(--radius-default);
   padding: 20px;
   width: 90%;
   max-width: 340px;
@@ -3174,9 +3207,9 @@ defineExpose({
   align-items: center;
 }
 .bp-modern-qr-wrapper {
-  background: #ffffff;
+  background: var(--text-primary);
   padding: 10px;
-  border-radius: 10px;
+  border-radius: var(--radius-default);
 }
 .bp-modern-actions {
   display: flex;
@@ -3186,7 +3219,7 @@ defineExpose({
 .bp-modern-btn {
   flex: 1;
   padding: 10px;
-  border-radius: 8px;
+  border-radius: var(--radius-default);
   border: none;
   font-weight: 600;
   cursor: pointer;
@@ -3198,7 +3231,7 @@ defineExpose({
 }
 .bp-modern-btn-confirm {
   background: var(--user-accent, #4f8cf7);
-  color: #ffffff;
+  color: var(--text-primary);
 }
 .bp-modern-btn-dismiss {
   background: var(--bg-secondary);
@@ -3263,6 +3296,16 @@ defineExpose({
 .chat-view.is-mobile .message-assistant .message-content {
   padding: 8px 12px; /* 减小气泡内部的内边距，让内容更紧凑 */
   font-size: 14px; /* 确保字体在手机上大小适中且不会显得空旷 */
+}
+
+.mic-btn.listening {
+  color: var(--color-danger);
+  animation: breathe 1.5s infinite;
+}
+@keyframes breathe {
+  0% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.1); opacity: 0.8; }
+  100% { transform: scale(1); opacity: 1; }
 }
 </style>
 

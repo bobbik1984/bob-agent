@@ -5,11 +5,21 @@
         <h3>{{ state.title }}</h3>
       </div>
       <div class="modal-body">
-        <p>{{ state.message }}</p>
+        <p v-if="state.message">{{ state.message }}</p>
+        <div v-if="state.type === 'prompt'" class="prompt-input-wrapper">
+          <input 
+            type="text"
+            v-model="state.inputValue" 
+            :placeholder="state.inputPlaceholder"
+            @keyup.enter="confirm"
+            class="prompt-input"
+            autofocus
+          />
+        </div>
       </div>
       <div class="modal-footer">
         <button 
-          v-if="state.type === 'confirm'" 
+          v-if="state.type === 'confirm' || state.type === 'prompt'" 
           class="btn-secondary" 
           @click="cancel"
         >
@@ -32,7 +42,7 @@ import { useDialog } from '../composables/useDialog.js';
 const { state, confirm, cancel } = useDialog();
 
 const handleOverlayClick = () => {
-  if (state.type === 'confirm') {
+  if (state.type === 'confirm' || state.type === 'prompt') {
     cancel();
   } else {
     confirm();
@@ -47,41 +57,41 @@ const handleOverlayClick = () => {
   left: 0;
   right: 0;
   bottom: 0;
-  background-color: rgba(0, 0, 0, 0.5);
+  background-color: rgba(0, 0, 0, 0.4);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 9999;
-  backdrop-filter: blur(2px);
+  backdrop-filter: blur(4px);
 }
 
 .modal-content {
-  background-color: var(--bg-primary, #ffffff);
-  border-radius: 16px;
+  background-color: var(--bg-primary, #1a1a2e);
+  border-radius: var(--radius-lg, 12px);
   width: 90%;
   max-width: 340px;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  border: none;
+  border: 1px solid var(--border-subtle);
 }
 
 .modal-header {
-  padding: 24px 20px 8px;
+  padding: 20px 20px 8px;
   border-bottom: none;
 }
 
 .modal-header h3 {
   margin: 0;
-  font-size: 1.2rem;
+  font-size: 1.1rem;
   color: var(--text-primary, #111827);
   font-weight: 600;
   text-align: center;
 }
 
 .modal-body {
-  padding: 8px 24px 24px;
+  padding: 8px 20px 16px;
   color: var(--text-secondary, #4b5563);
   font-size: 0.95rem;
   line-height: 1.5;
@@ -94,7 +104,7 @@ const handleOverlayClick = () => {
 }
 
 .modal-footer {
-  padding: 16px 20px 20px;
+  padding: 12px 20px 20px;
   display: flex;
   justify-content: center;
   gap: 12px;
@@ -103,24 +113,24 @@ const handleOverlayClick = () => {
 }
 
 button {
-  padding: 10px 24px;
-  border-radius: 8px;
-  font-size: 0.95rem;
+  padding: 8px 20px;
+  border-radius: var(--radius-sm, 6px);
+  font-size: 0.9rem;
   font-weight: 500;
   cursor: pointer;
   transition: all 0.2s;
   border: none;
-  min-width: 100px;
+  min-width: 80px;
 }
 
 .btn-secondary {
   background-color: var(--bg-tertiary, #f3f4f6);
   color: var(--text-secondary, #4b5563);
-  border: none;
+  border: 1px solid var(--border-primary, transparent);
 }
 
 .btn-secondary:hover {
-  background-color: var(--bg-tertiary, #f3f4f6);
+  background-color: var(--surface-secondary, #e5e7eb);
 }
 
 .btn-primary {
@@ -130,6 +140,27 @@ button {
 
 .btn-primary:hover {
   filter: brightness(1.1);
+}
+
+.prompt-input-wrapper {
+  margin-top: 12px;
+}
+
+.prompt-input {
+  width: 100%;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm, 6px);
+  border: 1px solid var(--border-subtle, #e5e7eb);
+  background-color: var(--surface-input, var(--bg-secondary, #f9fafb));
+  color: var(--text-primary, #111827);
+  font-size: 0.95rem;
+  outline: none;
+  box-sizing: border-box;
+  transition: border-color 0.2s;
+}
+
+.prompt-input:focus {
+  border-color: var(--user-accent, var(--accent-primary, #3b82f6));
 }
 
 /* Dark mode overrides if variables are not fully set */
@@ -146,6 +177,11 @@ button {
   .btn-secondary {
     background-color: var(--bg-tertiary, #374151);
     color: var(--text-secondary, #9ca3af);
+  }
+  .prompt-input {
+    background-color: var(--surface-input, var(--bg-secondary, #374151));
+    border-color: var(--border-subtle, #4b5563);
+    color: var(--text-primary, #f9fafb);
   }
 }
 </style>

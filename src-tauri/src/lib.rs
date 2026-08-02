@@ -849,6 +849,7 @@ pub fn run() {
     {
         builder = builder.plugin(tauri_plugin_barcode_scanner::init());
         builder = builder.plugin(tauri_plugin_haptics::init());
+        builder = builder.plugin(tauri_plugin_speech::init());
     }
     
     builder = builder.manage(AbortState(Mutex::new(HashMap::new())));
