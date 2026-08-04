@@ -2,6 +2,7 @@
 name = "tauri-plugin-speech"
 version = "0.1.0"
 edition = "2021"
+links = "tauri-plugin-speech"
 authors = ["BobAgent"]
 
 [dependencies]
