@@ -1,11 +1,11 @@
 use tauri::{Runtime, Window, AppHandle};
 
 #[tauri::command]
-pub async fn start_listening<R: Runtime>(app: AppHandle<R>, window: Window<R>) -> Result<(), String> {
+pub async fn start_listening<R: Runtime>(_app: AppHandle<R>, window: Window<R>) -> Result<(), String> {
     #[cfg(target_os = "android")]
     {
         use tauri::Emitter;
-        app.emit("speech_partial", "[Native code will intercept this]").unwrap();
+        _app.emit("speech_partial", "[Native code will intercept this]").unwrap();
     }
     #[cfg(not(target_os = "android"))]
     {
@@ -16,6 +16,6 @@ pub async fn start_listening<R: Runtime>(app: AppHandle<R>, window: Window<R>) -
 }
 
 #[tauri::command]
-pub async fn stop_listening<R: Runtime>() -> Result<(), String> {
+pub async fn stop_listening<R: Runtime>(_app: AppHandle<R>) -> Result<(), String> {
     Ok(())
 }
