@@ -73,8 +73,8 @@ const handleOverlayClick = () => {
 }
 
 .modal-content {
-  background-color: var(--bg-primary, #1a1a2e);
-  border-radius: var(--radius-lg, 12px);
+  background-color: var(--bg-primary, #141414);
+  border-radius: var(--radius-lg, 10px);
   width: 90%;
   max-width: 340px;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
@@ -92,14 +92,14 @@ const handleOverlayClick = () => {
 .modal-header h3 {
   margin: 0;
   font-size: 1.1rem;
-  color: var(--text-primary, #111827);
+  color: var(--text-primary, #e8e8e8);
   font-weight: 600;
   text-align: center;
 }
 
 .modal-body {
   padding: 8px 20px 16px;
-  color: var(--text-secondary, #4b5563);
+  color: var(--text-secondary, #a0a0a0);
   font-size: 0.95rem;
   line-height: 1.5;
   text-align: center;
@@ -121,7 +121,7 @@ const handleOverlayClick = () => {
 
 button {
   padding: 8px 20px;
-  border-radius: var(--radius-sm, 6px);
+  border-radius: var(--radius-sm, 4px);
   font-size: 0.9rem;
   font-weight: 500;
   cursor: pointer;
@@ -131,18 +131,18 @@ button {
 }
 
 .btn-secondary {
-  background-color: var(--bg-tertiary, #f3f4f6);
-  color: var(--text-secondary, #4b5563);
+  background-color: var(--bg-tertiary, #242424);
+  color: var(--text-secondary, #a0a0a0);
   border: 1px solid var(--border-primary, transparent);
 }
 
 .btn-secondary:hover {
-  background-color: var(--surface-secondary, #e5e7eb);
+  background-color: var(--bg-hover, #2c2c2c);
 }
 
 .btn-primary {
-  background-color: var(--user-accent, var(--accent-primary, #3b82f6));
-  color: white;
+  background-color: var(--user-accent, var(--accent-primary, #e8e8e8));
+  color: var(--text-inverse, #0c0c0c);
 }
 
 .btn-primary:hover {
@@ -150,7 +150,7 @@ button {
 }
 
 .btn-danger {
-  background-color: var(--color-error, #ef4444);
+  background-color: var(--color-error, #dc2626);
   color: white;
 }
 
@@ -165,10 +165,10 @@ button {
 .prompt-input {
   width: 100%;
   padding: 8px 12px;
-  border-radius: var(--radius-sm, 6px);
-  border: 1px solid var(--border-subtle, #e5e7eb);
-  background-color: var(--surface-input, var(--bg-secondary, #f9fafb));
-  color: var(--text-primary, #111827);
+  border-radius: var(--radius-sm, 4px);
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+  background-color: var(--surface-input, rgba(255, 255, 255, 0.08));
+  color: var(--text-primary, #e8e8e8);
   font-size: 0.95rem;
   outline: none;
   box-sizing: border-box;
@@ -176,16 +176,16 @@ button {
 }
 
 .prompt-input:focus {
-  border-color: var(--user-accent, var(--accent-primary, #3b82f6));
+  border-color: var(--user-accent, var(--accent-primary, #e8e8e8));
 }
 
 .prompt-textarea {
   width: 100%;
   padding: 8px 12px;
-  border-radius: var(--radius-sm, 6px);
-  border: 1px solid var(--border-subtle, #e5e7eb);
-  background-color: var(--surface-input, var(--bg-secondary, #f9fafb));
-  color: var(--text-primary, #111827);
+  border-radius: var(--radius-sm, 4px);
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+  background-color: var(--surface-input, rgba(255, 255, 255, 0.08));
+  color: var(--text-primary, #e8e8e8);
   font-size: 0.9rem;
   font-family: inherit;
   outline: none;
@@ -197,33 +197,6 @@ button {
 }
 
 .prompt-textarea:focus {
-  border-color: var(--user-accent, var(--accent-primary, #3b82f6));
-}
-
-/* Dark mode overrides if variables are not fully set */
-@media (prefers-color-scheme: dark) {
-  .modal-content {
-    background-color: var(--bg-primary, #1f2937);
-  }
-  .modal-header h3 {
-    color: var(--text-primary, #f9fafb);
-  }
-  .modal-body {
-    color: var(--text-secondary, #d1d5db);
-  }
-  .btn-secondary {
-    background-color: var(--bg-tertiary, #374151);
-    color: var(--text-secondary, #9ca3af);
-  }
-  .prompt-input {
-    background-color: var(--surface-input, var(--bg-secondary, #374151));
-    border-color: var(--border-subtle, #4b5563);
-    color: var(--text-primary, #f9fafb);
-  }
-  .prompt-textarea {
-    background-color: var(--surface-input, var(--bg-secondary, #374151));
-    border-color: var(--border-subtle, #4b5563);
-    color: var(--text-primary, #f9fafb);
-  }
+  border-color: var(--user-accent, var(--accent-primary, #e8e8e8));
 }
 </style>
