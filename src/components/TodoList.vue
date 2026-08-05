@@ -94,20 +94,23 @@ const editDescDraft = ref('');
 const descInputRefs = ref([]);
 
 async function addTodoViaDialog() {
-  const title = await showPrompt({
+  const result = await showPrompt({
     title: t('inbox.new_todo') || '新待办',
     placeholder: t('todo.title_placeholder') || '待办事项...',
+    showDescription: true,
+    descriptionPlaceholder: t('todo.desc_placeholder') || '详情描述 (可选)...',
     confirmText: t('modal.confirm') || '确定',
     cancelText: t('modal.cancel') || '取消'
   });
 
-  if (title && title.trim()) {
+  if (result && result.title && result.title.trim()) {
     const pad = (n) => String(n).padStart(2, '0');
     const d = new Date();
     const dateStr = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
 
     emit('create-todo', {
-      title: title.trim(),
+      title: result.title.trim(),
+      description: (result.description || '').trim(),
       type: 'todo',
       date: dateStr
     });

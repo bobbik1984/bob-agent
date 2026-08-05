@@ -1,21 +1,23 @@
-import { reactive, readonly } from 'vue';
+import { reactive } from 'vue';
 
 const state = reactive({
   isVisible: false,
   title: '',
   message: '',
-  type: 'confirm', // 'confirm' or 'alert'
+  type: 'confirm', // 'confirm', 'alert', or 'prompt'
   confirmText: '确定',
   cancelText: '取消',
   inputValue: '',
   inputPlaceholder: '',
+  descriptionValue: '',
+  descriptionPlaceholder: '',
+  showDescription: false,
   resolvePromise: null,
 });
 
 export function useDialog() {
   const showConfirm = (options) => {
     return new Promise((resolve) => {
-      // Support passing just a string for simple alerts
       if (typeof options === 'string') {
         options = { message: options };
       }
@@ -31,7 +33,6 @@ export function useDialog() {
 
   const showAlert = (options) => {
     return new Promise((resolve) => {
-      // Support passing just a string
       if (typeof options === 'string') {
         options = { message: options };
       }
@@ -54,6 +55,9 @@ export function useDialog() {
       state.type = 'prompt';
       state.inputValue = options.defaultValue || '';
       state.inputPlaceholder = options.placeholder || '';
+      state.showDescription = options.showDescription || false;
+      state.descriptionValue = options.defaultDescription || '';
+      state.descriptionPlaceholder = options.descriptionPlaceholder || '';
       state.confirmText = options.confirmText || '确定';
       state.cancelText = options.cancelText || '取消';
       state.resolvePromise = resolve;
@@ -65,7 +69,14 @@ export function useDialog() {
     state.isVisible = false;
     if (state.resolvePromise) {
       if (state.type === 'prompt') {
-        state.resolvePromise(state.inputValue);
+        if (state.showDescription) {
+          state.resolvePromise({
+            title: state.inputValue,
+            description: state.descriptionValue,
+          });
+        } else {
+          state.resolvePromise(state.inputValue);
+        }
       } else {
         state.resolvePromise(true);
       }
@@ -86,7 +97,7 @@ export function useDialog() {
   };
 
   return {
-    state: readonly(state),
+    state,
     showConfirm,
     showAlert,
     showPrompt,

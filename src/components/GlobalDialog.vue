@@ -11,10 +11,17 @@
             type="text"
             v-model="state.inputValue" 
             :placeholder="state.inputPlaceholder"
-            @keyup.enter="confirm"
+            @keyup.enter="!state.showDescription && confirm()"
             class="prompt-input"
             autofocus
           />
+          <textarea
+            v-if="state.showDescription"
+            v-model="state.descriptionValue"
+            :placeholder="state.descriptionPlaceholder"
+            class="prompt-textarea"
+            rows="3"
+          ></textarea>
         </div>
       </div>
       <div class="modal-footer">
@@ -163,6 +170,27 @@ button {
   border-color: var(--user-accent, var(--accent-primary, #3b82f6));
 }
 
+.prompt-textarea {
+  width: 100%;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm, 6px);
+  border: 1px solid var(--border-subtle, #e5e7eb);
+  background-color: var(--surface-input, var(--bg-secondary, #f9fafb));
+  color: var(--text-primary, #111827);
+  font-size: 0.9rem;
+  font-family: inherit;
+  outline: none;
+  box-sizing: border-box;
+  resize: vertical;
+  min-height: 60px;
+  margin-top: 8px;
+  transition: border-color 0.2s;
+}
+
+.prompt-textarea:focus {
+  border-color: var(--user-accent, var(--accent-primary, #3b82f6));
+}
+
 /* Dark mode overrides if variables are not fully set */
 @media (prefers-color-scheme: dark) {
   .modal-content {
@@ -179,6 +207,11 @@ button {
     color: var(--text-secondary, #9ca3af);
   }
   .prompt-input {
+    background-color: var(--surface-input, var(--bg-secondary, #374151));
+    border-color: var(--border-subtle, #4b5563);
+    color: var(--text-primary, #f9fafb);
+  }
+  .prompt-textarea {
     background-color: var(--surface-input, var(--bg-secondary, #374151));
     border-color: var(--border-subtle, #4b5563);
     color: var(--text-primary, #f9fafb);
