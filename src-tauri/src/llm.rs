@@ -1169,6 +1169,78 @@ fn build_memory_summary() -> String {
     lines.join("\n")
 }
 
+/// 从 memory_entries 索引表查询结构化记忆
+/// 按优先级: correction > identity > preference > fact
+/// 作为 build_memory_summary() 的补充注入
+fn build_structured_memories() -> String {
+    let db_path = super::get_data_dir().join("bob.db");
+    let conn = match rusqlite::Connection::open(&db_path) {
+        Ok(c) => c,
+        Err(_) => return String::new(),
+    };
+
+    let mut sections = Vec::new();
+
+    // 1. 纠错记忆 (最高优先级)
+    if let Ok(mut stmt) = conn.prepare(
+        "SELECT claim FROM memory_entries
+         WHERE memory_type = 'correction' AND status = 'active'
+         ORDER BY last_confirmed DESC LIMIT 10",
+    ) {
+        let corrections: Vec<String> = stmt
+            .query_map([], |row| row.get::<_, String>(0))
+            .ok()
+            .map(|rows| rows.filter_map(|r| r.ok()).collect())
+            .unwrap_or_default();
+        if !corrections.is_empty() {
+            sections.push("\n## ⚠️ 重要纠错 (必须遵守)".to_string());
+            for c in &corrections {
+                sections.push(format!("- {}", c));
+            }
+        }
+    }
+
+    // 2. 用户身份
+    if let Ok(mut stmt) = conn.prepare(
+        "SELECT claim FROM memory_entries
+         WHERE memory_type = 'identity' AND status = 'active' AND confidence >= 0.7
+         ORDER BY confidence DESC LIMIT 5",
+    ) {
+        let identities: Vec<String> = stmt
+            .query_map([], |row| row.get::<_, String>(0))
+            .ok()
+            .map(|rows| rows.filter_map(|r| r.ok()).collect())
+            .unwrap_or_default();
+        if !identities.is_empty() {
+            sections.push("\n## 用户画像".to_string());
+            for i in &identities {
+                sections.push(format!("- {}", i));
+            }
+        }
+    }
+
+    // 3. 全局偏好
+    if let Ok(mut stmt) = conn.prepare(
+        "SELECT claim FROM memory_entries
+         WHERE memory_type = 'preference' AND status = 'active' AND scope = 'global'
+         ORDER BY confidence DESC LIMIT 10",
+    ) {
+        let prefs: Vec<String> = stmt
+            .query_map([], |row| row.get::<_, String>(0))
+            .ok()
+            .map(|rows| rows.filter_map(|r| r.ok()).collect())
+            .unwrap_or_default();
+        if !prefs.is_empty() {
+            sections.push("\n## 用户偏好".to_string());
+            for p in &prefs {
+                sections.push(format!("- {}", p));
+            }
+        }
+    }
+
+    sections.join("\n")
+}
+
 /// 构建 Wiki 知识库状态概览，注入 System Prompt
 fn build_wiki_status() -> String {
     let wiki_dir = super::get_wiki_dir();
@@ -1623,6 +1695,32 @@ fn detect_and_apply_corrections(messages: &[Value], conv_id: &str) {
             corrections_found,
             conv_id
         );
+
+        // 同步写入 memory_entries 索引表 (correction 类型, confidence=1.0)
+        let db_path = super::get_data_dir().join("bob.db");
+        if let Ok(conn) = rusqlite::Connection::open(&db_path) {
+            let now = super::now_ms();
+            for user_msg in &recent_user_msgs {
+                let has_correction = correction_patterns.iter().any(|p| user_msg.contains(p));
+                if !has_correction { continue; }
+
+                let id = ulid::Ulid::new().to_string();
+                let evidence = serde_json::json!([{"conv_id": conv_id, "timestamp": now}]);
+                let _ = conn.execute(
+                    "INSERT OR REPLACE INTO memory_entries
+                     (id, claim, memory_type, scope, source, confidence, evidence,
+                      first_seen, last_confirmed, status, version, created_at, updated_at)
+                     VALUES (?1, ?2, 'correction', 'global', 'user_explicit', 1.0, ?3,
+                             ?4, ?4, 'active', 1, ?4, ?4)",
+                    rusqlite::params![
+                        id,
+                        *user_msg,
+                        serde_json::to_string(&evidence).unwrap_or_default(),
+                        now,
+                    ],
+                );
+            }
+        }
     }
 }
 
@@ -2029,7 +2127,11 @@ pub(crate) async fn stream_internal(
         };
         let os_info = std::env::consts::OS;
         let skills_summary = build_skills_summary();
-        let memory_summary = build_memory_summary();
+        let memory_summary = {
+            let base = build_memory_summary();
+            let structured = build_structured_memories();
+            if structured.is_empty() { base } else { format!("{}\n{}", base, structured) }
+        };
         let wiki_status = build_wiki_status();
         let wxid_info = if let Some(u) = &from_user {
             format!("当前对话的微信用户 ID (wxid) 是: {}\n", u)
@@ -2808,7 +2910,64 @@ pub(crate) async fn stream_internal(
                 uncached.push((*i, args.clone()));
             }
 
-            let tool_futures: Vec<_> = uncached
+            // ── R2/R3 风险确认: 敏感/破坏性工具需用户批准 ────────
+            let mut confirmed_uncached: Vec<(usize, Value)> = Vec::new();
+            let mut rejected_tools: Vec<(usize, String)> = Vec::new();
+
+            // yolo/goal 模式 或 微信来源的调用跳过确认
+            let skip_confirm = agent_mode == "yolo" || agent_mode == "goal" || from_user.is_some();
+
+            for (i, args) in uncached {
+                let name = &pending_tool_calls[i].name;
+                let risk = super::tools::get_tool_risk(name);
+
+                if !skip_confirm && matches!(risk, super::tools::ToolRisk::R2 | super::tools::ToolRisk::R3) {
+                    // 创建 oneshot channel 等待用户确认
+                    let request_id = format!("{}-{}", conv_id_for_emit, i);
+                    let (tx, rx) = tokio::sync::oneshot::channel::<bool>();
+
+                    if let Some(state) = app.try_state::<super::tool_confirm::ToolConfirmState>() {
+                        if let Ok(mut map) = state.pending.lock() {
+                            map.insert(request_id.clone(), tx);
+                        }
+                    }
+
+                    // 向前端发射确认请求
+                    let args_preview = serde_json::to_string(&args)
+                        .unwrap_or_default().chars().take(300).collect::<String>();
+                    let risk_label = format!("{:?}", risk);
+                    let _ = app.emit("tool:confirm_required", json!({
+                        "request_id": request_id,
+                        "tool_name": name,
+                        "args_preview": args_preview,
+                        "risk_level": risk_label,
+                        "conv_id": &conv_id_for_emit,
+                    }));
+
+                    log::info!("[ToolConfirm] Awaiting confirmation for {} (risk={:?})", name, risk);
+
+                    // 等待确认 (30s 超时 → 默认拒绝)
+                    let approved = match tokio::time::timeout(
+                        std::time::Duration::from_secs(30),
+                        rx,
+                    ).await {
+                        Ok(Ok(v)) => v,
+                        _ => false,
+                    };
+
+                    if approved {
+                        log::info!("[ToolConfirm] User approved: {}", name);
+                        confirmed_uncached.push((i, args));
+                    } else {
+                        log::info!("[ToolConfirm] User rejected: {}", name);
+                        rejected_tools.push((i, format!("用户拒绝执行 (风险等级: {:?})", risk)));
+                    }
+                } else {
+                    confirmed_uncached.push((i, args));
+                }
+            }
+
+            let tool_futures: Vec<_> = confirmed_uncached
                 .iter()
                 .map(|(i, args)| {
                     let app_clone = app.clone();
@@ -2870,6 +3029,12 @@ pub(crate) async fn stream_internal(
             }
 
             for (idx, reason) in circuit_broken {
+                let name = pending_tool_calls[idx].name.clone();
+                all_results.push((idx, name, json!({ "error": reason })));
+            }
+
+            // R2/R3 确认被拒绝的工具
+            for (idx, reason) in rejected_tools {
                 let name = pending_tool_calls[idx].name.clone();
                 all_results.push((idx, name, json!({ "error": reason })));
             }

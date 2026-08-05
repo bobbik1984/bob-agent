@@ -13,6 +13,7 @@ const state = reactive({
   descriptionPlaceholder: '',
   showDescription: false,
   resolvePromise: null,
+  confirmClass: '',  // '' | 'btn-danger' for R3 high-risk actions
 });
 
 export function useDialog() {
@@ -26,6 +27,7 @@ export function useDialog() {
       state.type = 'confirm';
       state.confirmText = options.confirmText || '确定';
       state.cancelText = options.cancelText || '取消';
+      state.confirmClass = options.confirmClass || '';
       state.resolvePromise = resolve;
       state.isVisible = true;
     });

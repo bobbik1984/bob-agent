@@ -33,7 +33,7 @@
           {{ state.cancelText }}
         </button>
         <button 
-          class="btn-primary" 
+          :class="state.confirmClass || 'btn-primary'" 
           @click="confirm"
         >
           {{ state.confirmText }}
@@ -146,6 +146,15 @@ button {
 }
 
 .btn-primary:hover {
+  filter: brightness(1.1);
+}
+
+.btn-danger {
+  background-color: var(--color-error, #ef4444);
+  color: white;
+}
+
+.btn-danger:hover {
   filter: brightness(1.1);
 }
 

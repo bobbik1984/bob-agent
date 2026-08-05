@@ -311,6 +311,33 @@ pub fn init_db(data_dir: &std::path::Path) -> Connection {
         UPDATE kg_nodes SET node_type = 'technology' WHERE node_type IN ('Technology', '技术');
     ").unwrap_or_default();
 
+    // ── 记忆数据契约: 结构化记忆索引 ────────────────────────
+    conn.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS memory_entries (
+            id TEXT PRIMARY KEY,
+            claim TEXT NOT NULL,
+            memory_type TEXT NOT NULL DEFAULT 'preference',
+            scope TEXT NOT NULL DEFAULT 'global',
+            source TEXT NOT NULL DEFAULT 'inferred',
+            confidence REAL NOT NULL DEFAULT 0.8,
+            evidence TEXT DEFAULT '[]',
+            file_path TEXT DEFAULT NULL,
+            first_seen INTEGER NOT NULL,
+            last_confirmed INTEGER NOT NULL,
+            status TEXT NOT NULL DEFAULT 'active',
+            replaces TEXT DEFAULT NULL,
+            version INTEGER NOT NULL DEFAULT 1,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_memory_type ON memory_entries(memory_type);
+        CREATE INDEX IF NOT EXISTS idx_memory_status ON memory_entries(status);
+        CREATE INDEX IF NOT EXISTS idx_memory_scope ON memory_entries(scope);
+    ",
+    )
+    .unwrap_or_default();
+
     conn
 }
 

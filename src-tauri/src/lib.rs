@@ -36,6 +36,7 @@ mod scheduler;
 mod sidecar;
 mod telegram;
 mod tools;
+mod tool_confirm;
 pub mod tunnel;
 mod web;
 mod web_drop;
@@ -853,6 +854,7 @@ pub fn run() {
     }
     
     builder = builder.manage(AbortState(Mutex::new(HashMap::new())));
+    builder = builder.manage(tool_confirm::ToolConfirmState::new());
 
     let mut builder = builder
         .manage(crypto::DeviceIdentityState(std::sync::Mutex::new(None)))
@@ -950,6 +952,7 @@ pub fn run() {
             sync_engine::relay_handshake,
             sync_engine::get_sync_logs,
             sync_engine::get_p2p_relay_status,
+            tool_confirm::tool_confirm_response,
             // 系统状态
             system_is_setup_complete,
             web_drop::start_web_drop,

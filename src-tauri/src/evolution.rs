@@ -399,6 +399,7 @@ type 可选值：
             Ok(_) => {
                 saved_count += 1;
                 log::info!("[Evolution] Saved fact: {} -> {:?}", title, file_path);
+                sync_fact_to_memory_index(fact_type, title, content, &file_path, &conv_id);
             }
             Err(e) => {
                 log::warn!("[Evolution] Failed to write fact file: {}", e);
@@ -1346,4 +1347,51 @@ async fn phase_notebook_digest(_app: &AppHandle) -> i64 {
     }
 
     digested_count
+}
+
+fn sync_fact_to_memory_index(
+    fact_type: &str,
+    title: &str,
+    content: &str,
+    file_path: &std::path::Path,
+    conv_id: &str,
+) {
+    let db_path = super::get_data_dir().join("bob.db");
+    let conn = match rusqlite::Connection::open(&db_path) {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+
+    let (memory_type, scope, confidence) = match fact_type {
+        "user" => ("identity", "global".to_string(), 0.8),
+        "feedback" => ("correction", "global".to_string(), 1.0),
+        "project" => ("fact", format!("project:{}", title), 0.8),
+        _ => ("fact", "global".to_string(), 0.8),
+    };
+
+    let claim = format!("{}: {}", title, content.chars().take(200).collect::<String>());
+    let now = super::now_ms();
+    let evidence = serde_json::json!([{"conv_id": conv_id, "timestamp": now}]).to_string();
+    let file_path_str = file_path.to_string_lossy().to_string();
+    let id = ulid::Ulid::new().to_string();
+
+    let _ = conn.execute(
+        "INSERT OR REPLACE INTO memory_entries 
+         (id, claim, memory_type, scope, source, confidence, evidence, file_path, first_seen, last_confirmed, status, version)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+        rusqlite::params![
+            id,
+            claim,
+            memory_type,
+            scope,
+            "inferred",
+            confidence,
+            evidence,
+            file_path_str,
+            now,
+            now,
+            "active",
+            1
+        ],
+    );
 }

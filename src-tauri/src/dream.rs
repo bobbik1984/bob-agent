@@ -102,7 +102,8 @@ pub fn system_summarize_session(
     // 写入 session 日志
     let session_path = get_session_log_dir().join(format!("{}.json", conversation_id));
     if let Ok(data) = serde_json::to_string_pretty(&summary) {
-        let _ = fs::write(session_path, data);
+        let _ = fs::write(&session_path, data);
+        sync_session_to_memory_index(&conversation_id, &summary, &session_path);
     }
 
     // 触发更新晨报 (放进后台线程避免网络请求阻塞 IPC)
@@ -1432,3 +1433,50 @@ pub async fn generate_notebook_digest() -> (usize, usize) {
 
     (processed, entities_extracted)
 }
+
+fn sync_session_to_memory_index(conv_id: &str, summary: &serde_json::Value, file_path: &std::path::Path) {
+    let db_path = super::get_data_dir().join("bob.db");
+    let conn = match rusqlite::Connection::open(&db_path) {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+
+    let topics = summary
+        .get("userTopics")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str())
+                .collect::<Vec<_>>()
+                .join("; ")
+        })
+        .unwrap_or_else(|| "(无主题)".to_string());
+
+    let claim = format!("Session summary: {}", topics);
+    let now = super::now_ms();
+    let evidence = serde_json::json!([conv_id]).to_string();
+    let file_path_str = file_path.to_string_lossy().to_string();
+    
+    let id = ulid::Ulid::new().to_string();
+
+    let _ = conn.execute(
+        "INSERT OR REPLACE INTO memory_entries 
+         (id, claim, memory_type, scope, source, confidence, evidence, file_path, first_seen, last_confirmed, status, version)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+        rusqlite::params![
+            id,
+            claim,
+            "context",
+            format!("session:{}", conv_id),
+            "inferred",
+            0.8,
+            evidence,
+            file_path_str,
+            now,
+            now,
+            "active",
+            1
+        ],
+    );
+}
+
