@@ -1585,6 +1585,15 @@ async fn apply_context_tiering(messages: Vec<Value>, conv_id: &str) -> Vec<Value
 // T-1412-b: 即时纠错检测 (Correction Detection)
 // ═══════════════════════════════════════════════════════════
 
+fn infer_correction_scope(message: &str, conv_id: &str) -> String {
+    let contextual_markers = ["这次", "本次", "当前", "这个项目", "本项目", "这份", "这篇"];
+    if contextual_markers.iter().any(|marker| message.contains(marker)) {
+        format!("conversation:{}", conv_id)
+    } else {
+        "global".to_string()
+    }
+}
+
 /// 检测对话中用户是否纠正了 Bob 的错误认知，如果发现纠正：
 /// 1. 降低相关旧记忆的 confidence
 /// 2. 通过日志记录纠正事件（新记忆由正常的 session summarize 流程生成）
@@ -1696,29 +1705,22 @@ fn detect_and_apply_corrections(messages: &[Value], conv_id: &str) {
             conv_id
         );
 
-        // 同步写入 memory_entries 索引表 (correction 类型, confidence=1.0)
-        let db_path = super::get_data_dir().join("bob.db");
-        if let Ok(conn) = rusqlite::Connection::open(&db_path) {
-            let now = super::now_ms();
-            for user_msg in &recent_user_msgs {
-                let has_correction = correction_patterns.iter().any(|p| user_msg.contains(p));
-                if !has_correction { continue; }
-
-                let id = ulid::Ulid::new().to_string();
-                let evidence = serde_json::json!([{"conv_id": conv_id, "timestamp": now}]);
-                let _ = conn.execute(
-                    "INSERT OR REPLACE INTO memory_entries
-                     (id, claim, memory_type, scope, source, confidence, evidence,
-                      first_seen, last_confirmed, status, version, created_at, updated_at)
-                     VALUES (?1, ?2, 'correction', 'global', 'user_explicit', 1.0, ?3,
-                             ?4, ?4, 'active', 1, ?4, ?4)",
-                    rusqlite::params![
-                        id,
-                        *user_msg,
-                        serde_json::to_string(&evidence).unwrap_or_default(),
-                        now,
-                    ],
-                );
+        // 同步写入版本化纠错索引。情境性措辞默认限制在当前会话，避免污染全局偏好。
+        let now = super::now_ms();
+        for user_msg in &recent_user_msgs {
+            let has_correction = correction_patterns.iter().any(|p| user_msg.contains(p));
+            if !has_correction {
+                continue;
+            }
+            let scope = infer_correction_scope(user_msg, conv_id);
+            let evidence = serde_json::json!([{"conv_id": conv_id, "timestamp": now}]);
+            if let Err(error) = crate::db::store_explicit_correction(
+                user_msg,
+                &scope,
+                &serde_json::to_string(&evidence).unwrap_or_default(),
+                None,
+            ) {
+                log::warn!("Failed to persist explicit correction: {}", error);
             }
         }
     }
@@ -1852,19 +1854,109 @@ fn estimate_complexity(messages: &[Value]) -> (Complexity, u32) {
 }
 
 // ═══════════════════════════════════════════════════════════
-// T-2901: 意图自动分类器 (Intent Classifier)
+// T-3011: 结构化意图分类器 (Structured Intent Classifier)
 // ═══════════════════════════════════════════════════════════
 
+/// 任务种类: 决定工具可见性和 system prompt 语气
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum TaskKind {
+    /// 纯问答/知识查询 — 只允许 R0 白名单工具
+    Answer,
+    /// 需要执行操作（写文件、发消息等）
+    Action,
+    /// 后台/异步任务（预留，当前等同于 Action）
+    Background,
+}
+
+impl std::fmt::Display for TaskKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TaskKind::Answer => write!(f, "answer"),
+            TaskKind::Action => write!(f, "action"),
+            TaskKind::Background => write!(f, "background"),
+        }
+    }
+}
+
+/// 意图复杂度: 决定工具调用预算和计划行为 (区别于 T-1431 的模型路由 Complexity)
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum IntentComplexity {
+    /// 单步或极少步骤即可完成
+    Simple,
+    /// 多步骤，需要先规划再执行
+    Planned,
+    /// 持续迭代直到目标达成
+    Goal,
+}
+
+impl std::fmt::Display for IntentComplexity {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            IntentComplexity::Simple => write!(f, "simple"),
+            IntentComplexity::Planned => write!(f, "planned"),
+            IntentComplexity::Goal => write!(f, "goal"),
+        }
+    }
+}
+
+/// 分类器输出: 分离任务种类与复杂度，附带置信度和匹配信号
+#[derive(Clone, Debug)]
+pub(crate) struct IntentDecision {
+    pub task_kind: TaskKind,
+    pub complexity: IntentComplexity,
+    pub confidence: f32,
+    pub matched_signals: Vec<String>,
+}
+
+impl std::fmt::Display for IntentDecision {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}:{} (conf={:.2}, signals=[{}])",
+            self.task_kind, self.complexity, self.confidence,
+            self.matched_signals.join(", "))
+    }
+}
+
+impl IntentDecision {
+    /// 向下兼容: 返回旧版 intent 字符串用于 get_filtered_tool_schemas
+    pub fn legacy_intent(&self) -> &str {
+        match self.task_kind {
+            TaskKind::Answer => "answer",
+            TaskKind::Action | TaskKind::Background => match self.complexity {
+                IntentComplexity::Simple => "quick",
+                IntentComplexity::Planned => "planned",
+                IntentComplexity::Goal => "goal",
+            },
+        }
+    }
+}
+
 /// 规则优先的意图分类器
-/// 返回: "answer" | "quick" | "planned" | "goal"
-fn classify_intent(messages: &[Value], agent_mode: &str) -> String {
+/// T-3011: 返回结构化 IntentDecision，分离 task_kind 和 complexity
+fn classify_intent(messages: &[Value], agent_mode: &str) -> IntentDecision {
     // 1. 用户手动指定的模式优先（非 auto 时直接映射）
     match agent_mode {
-        "insight" => return "answer".to_string(),
-        "goal" => return "goal".to_string(),
-        "yolo" => return "planned".to_string(),
+        "insight" => return IntentDecision {
+            task_kind: TaskKind::Answer,
+            complexity: IntentComplexity::Simple,
+            confidence: 1.0,
+            matched_signals: vec!["user_mode=insight".to_string()],
+        },
+        "goal" => return IntentDecision {
+            task_kind: TaskKind::Action,
+            complexity: IntentComplexity::Goal,
+            confidence: 1.0,
+            matched_signals: vec!["user_mode=goal".to_string()],
+        },
+        "yolo" => return IntentDecision {
+            task_kind: TaskKind::Action,
+            complexity: IntentComplexity::Planned,
+            confidence: 1.0,
+            matched_signals: vec!["user_mode=yolo".to_string()],
+        },
         _ => {} // "auto" 或其他值 → 继续自动分类
     }
+
+    let mut signals: Vec<String> = Vec::new();
 
     // 2. 提取用户最后一条消息的文本
     let user_text = messages.iter().rev()
@@ -1885,7 +1977,7 @@ fn classify_intent(messages: &[Value], agent_mode: &str) -> String {
     let text = user_text.to_lowercase();
     let len = text.chars().count();
 
-    // 3. 带图片 → quick（可能需要 Vision 工具处理）
+    // 3. 检测图片附件 — 仅表示需要 Vision 能力，不自动意味着 Action
     let has_image = messages.iter().rev()
         .take(2)
         .any(|m| {
@@ -1894,7 +1986,9 @@ fn classify_intent(messages: &[Value], agent_mode: &str) -> String {
                     item.get("type").and_then(|v| v.as_str()) == Some("image_url")
                 )).unwrap_or(false)
         });
-    if has_image { return "quick".to_string(); }
+    if has_image {
+        signals.push("has_image".to_string());
+    }
 
     // 4. 强 Answer 信号（解释性/概念性问题）
     let answer_patterns = [
@@ -1905,10 +1999,22 @@ fn classify_intent(messages: &[Value], agent_mode: &str) -> String {
     ];
     let action_blockers = ["帮我", "创建", "生成", "写", "做", "建", "发",
         "create", "generate", "write", "make", "send", "build"];
-    let is_pure_question = answer_patterns.iter().any(|p| text.contains(p))
-        && !action_blockers.iter().any(|p| text.contains(p));
+
+    let matched_answer: Vec<&&str> = answer_patterns.iter().filter(|p| text.contains(**p)).collect();
+    let has_action_blocker = action_blockers.iter().any(|p| text.contains(p));
+    let is_pure_question = !matched_answer.is_empty() && !has_action_blocker;
+
     if is_pure_question {
-        return "answer".to_string();
+        for p in &matched_answer {
+            signals.push(format!("answer_pattern:{}", p));
+        }
+        // 图片 + 纯问题 = Answer ("看看这张图是什么")，不是 Action
+        return IntentDecision {
+            task_kind: TaskKind::Answer,
+            complexity: IntentComplexity::Simple,
+            confidence: 0.85,
+            matched_signals: signals,
+        };
     }
 
     // 5. 强 Action 信号（写/创建/发送等动作词）
@@ -1922,7 +2028,14 @@ fn classify_intent(messages: &[Value], agent_mode: &str) -> String {
         "open", "download", "install", "add", "make", "summarize",
         "translate", "convert", "extract", "analyze",
     ];
-    let has_action = action_patterns.iter().any(|p| text.contains(p));
+    let matched_action: Vec<&&str> = action_patterns.iter().filter(|p| text.contains(**p)).collect();
+    let has_action = !matched_action.is_empty();
+
+    if has_action {
+        for p in &matched_action {
+            signals.push(format!("action_pattern:{}", p));
+        }
+    }
 
     // 6. 复杂任务信号
     let complex_patterns = [
@@ -1930,18 +2043,62 @@ fn classify_intent(messages: &[Value], agent_mode: &str) -> String {
         "每个", "分析并", "总结并", "整理后", "生成报告", "多个",
         "and then", "step by step", "batch", "all files", "for each",
     ];
-    let complex_count = complex_patterns.iter().filter(|p| text.contains(**p)).count();
-    let is_complex = complex_count >= 2 || len > 200;
+    let matched_complex: Vec<&&str> = complex_patterns.iter().filter(|p| text.contains(**p)).collect();
+    let complex_count = matched_complex.len();
+    // T-3011: 文本长度不能单独决定 Simple/Planned
+    let is_complex = complex_count >= 2;
 
+    if is_complex {
+        for p in &matched_complex {
+            signals.push(format!("complex_pattern:{}", p));
+        }
+    }
+
+    // 7. 综合决策
     if has_action && is_complex {
-        return "planned".to_string();
+        return IntentDecision {
+            task_kind: TaskKind::Action,
+            complexity: IntentComplexity::Planned,
+            confidence: 0.80,
+            matched_signals: signals,
+        };
     }
     if has_action {
-        return "quick".to_string();
+        return IntentDecision {
+            task_kind: TaskKind::Action,
+            complexity: IntentComplexity::Simple,
+            confidence: 0.75,
+            matched_signals: signals,
+        };
+    }
+    // 图片但无动作词 → Answer ("这张图是什么？")
+    if has_image {
+        return IntentDecision {
+            task_kind: TaskKind::Answer,
+            complexity: IntentComplexity::Simple,
+            confidence: 0.65,
+            matched_signals: signals,
+        };
     }
 
-    // 7. 短消息默认 answer，长消息默认 quick
-    if len < 40 { "answer".to_string() } else { "quick".to_string() }
+    // 8. 无明确信号时保持最小权限。文本长度不能授予写工具。
+    if len < 40 {
+        signals.push(format!("short_text:len={}", len));
+        IntentDecision {
+            task_kind: TaskKind::Answer,
+            complexity: IntentComplexity::Simple,
+            confidence: 0.50,
+            matched_signals: signals,
+        }
+    } else {
+        signals.push(format!("long_text:len={}", len));
+        IntentDecision {
+            task_kind: TaskKind::Answer,
+            complexity: IntentComplexity::Simple,
+            confidence: 0.40,
+            matched_signals: signals,
+        }
+    }
 }
 
 /// 内部通用流式处理 — 支持 Tool Calling 循环
@@ -2105,9 +2262,9 @@ pub(crate) async fn stream_internal(
         .any(|m| m.get("role").and_then(|r| r.as_str()) == Some("system"));
     let mut full_messages: Vec<Value> = Vec::new();
 
-    // T-2901: intent auto classification (must be before if-block for scope)
-    let intent = classify_intent(&messages, &agent_mode);
-    log::info!("[Intent] classified as: {} (agent_mode={})", intent, agent_mode);
+    // T-3011: structured intent auto classification (must be before if-block for scope)
+    let decision = classify_intent(&messages, &agent_mode);
+    log::info!("[Intent] classified as: {} (agent_mode={})", decision, agent_mode);
 
     if !has_system {
         let config = super::read_config();
@@ -2139,13 +2296,13 @@ pub(crate) async fn stream_internal(
             String::new()
         };
 
-        // T-2901: intent-based system prompt injection
+        // T-3011: intent-based system prompt injection (separated by TaskKind + Complexity)
 
-        let agent_mode_info: &str = match intent.as_str() {
-            "answer" => "\n## Current Intent: Q&A\nDirectly answer the user's question. Do not use tools unless the user explicitly requests an action.\n",
-            "quick" => "\n## Current Intent: Quick Action\nComplete the task with minimum steps. Use tools efficiently and report results briefly.\n",
-            "planned" => "\n## Current Intent: Planned Task\nThis is a multi-step task. Briefly outline your plan first, then execute step by step. Report progress after each step.\n",
-            _ => "",
+        let agent_mode_info: &str = match (&decision.task_kind, &decision.complexity) {
+            (TaskKind::Answer, _) => "\n## Current Intent: Q&A\nDirectly answer the user's question. You may use read-only tools (search, read_file, weather) to gather information, but do NOT perform any write operations or side-effecting actions.\n",
+            (TaskKind::Action | TaskKind::Background, IntentComplexity::Simple) => "\n## Current Intent: Quick Action\nComplete the task with the minimum necessary steps.\nFollow runtime permission policy for every tool call.\nPrefer reversible actions and report exactly what changed.\nNever bypass confirmation requirements.\n",
+            (TaskKind::Action | TaskKind::Background, IntentComplexity::Planned) => "\n## Current Intent: Planned Task\nThis is a multi-step task. Briefly outline your plan first, then execute step by step. Report progress after each step.\n",
+            (TaskKind::Action | TaskKind::Background, IntentComplexity::Goal) => "",
         };
 
         let file_access_info = if global_file_access {
@@ -2292,8 +2449,8 @@ pub(crate) async fn stream_internal(
     }
 
     // 3. 获取工具 Schema
-    // T-2901: filter tool schemas by intent
-    let tool_schemas = super::tools::get_filtered_tool_schemas(&intent).await;
+    // T-3011: filter tool schemas by structured intent decision
+    let tool_schemas = super::tools::get_filtered_tool_schemas(decision.legacy_intent()).await;
 
     if provider == "offline" {
         return crate::candle_engine::run_native_inference(
@@ -2330,12 +2487,14 @@ pub(crate) async fn stream_internal(
     let mut tool_call_log: Vec<Value> = Vec::new();
 
     // ── T-1401: 循环熔断器 ──────────────────────────────────
-    // T-2901: dynamic tool budget based on intent
-    let tool_budget = match intent.as_str() {
-        "answer" => 0,
-        "quick" => 15,
-        "planned" => 30,
-        _ => 15,
+    // T-3011: dynamic tool budget based on structured IntentDecision
+    let tool_budget = match decision.task_kind {
+        TaskKind::Answer => 3,   // Answer 允许最多 3 轮只读工具查询
+        TaskKind::Action | TaskKind::Background => match decision.complexity {
+            IntentComplexity::Simple => 15,
+            IntentComplexity::Planned => 30,
+            IntentComplexity::Goal => 50,
+        },
     };
     let mut tool_tracker =
         super::tools::ToolCallTracker::with_budget(tool_budget);
@@ -2914,14 +3073,25 @@ pub(crate) async fn stream_internal(
             let mut confirmed_uncached: Vec<(usize, Value)> = Vec::new();
             let mut rejected_tools: Vec<(usize, String)> = Vec::new();
 
-            // yolo/goal 模式 或 微信来源的调用跳过确认
-            let skip_confirm = agent_mode == "yolo" || agent_mode == "goal" || from_user.is_some();
+            // T-3001: 风险策略由 ToolRisk 强制执行
+            // 模式 (yolo/goal) 和来源 (微信/远程) 不构成绕过理由
+            // R0/R1 自动执行；R2/R3 始终需要确认
 
             for (i, args) in uncached {
                 let name = &pending_tool_calls[i].name;
-                let risk = super::tools::get_tool_risk(name);
+                let risk = super::tools::get_tool_risk_for_call(name, &args);
 
-                if !skip_confirm && matches!(risk, super::tools::ToolRisk::R2 | super::tools::ToolRisk::R3) {
+                if matches!(risk, super::tools::ToolRisk::R2 | super::tools::ToolRisk::R3) {
+                    // 远程/IM 请求当前没有可信审批通道。不要等待一个用户看不到的桌面弹窗，
+                    // 直接安全拒绝并把原因反馈给模型。后续可由跨端审批卡替代。
+                    if from_user.is_some() {
+                        rejected_tools.push((
+                            i,
+                            format!("远程请求需要在 Bob 桌面端确认后才能执行 (风险等级: {:?})", risk),
+                        ));
+                        continue;
+                    }
+
                     // 创建 oneshot channel 等待用户确认
                     let request_id = format!("{}-{}", conv_id_for_emit, i);
                     let (tx, rx) = tokio::sync::oneshot::channel::<bool>();
@@ -2954,6 +3124,13 @@ pub(crate) async fn stream_internal(
                         Ok(Ok(v)) => v,
                         _ => false,
                     };
+
+                    // 响应成功时前端命令已经移除条目；超时/接收端关闭时在这里兜底清理。
+                    if let Some(state) = app.try_state::<super::tool_confirm::ToolConfirmState>() {
+                        if let Ok(mut map) = state.pending.lock() {
+                            map.remove(&request_id);
+                        }
+                    }
 
                     if approved {
                         log::info!("[ToolConfirm] User approved: {}", name);
@@ -3244,6 +3421,51 @@ pub(crate) async fn stream_internal(
             "calls": tool_call_log,
         },
     })
+}
+
+#[cfg(test)]
+mod intent_tests {
+    use super::*;
+
+    fn user_message(text: &str) -> Vec<Value> {
+        vec![json!({ "role": "user", "content": text })]
+    }
+
+    #[test]
+    fn uncertain_long_text_stays_read_only() {
+        let text = "量化交易涉及统计模型、市场数据、风险控制与交易纪律。不同策略在时间跨度、容量和波动特征方面各不相同，其中许多概念需要结合市场环境才能理解。";
+        let decision = classify_intent(&user_message(text), "auto");
+        assert_eq!(decision.task_kind, TaskKind::Answer);
+        assert_eq!(decision.complexity, IntentComplexity::Simple);
+        assert!(decision.confidence < 0.5);
+        assert_eq!(decision.legacy_intent(), "answer");
+    }
+
+    #[test]
+    fn explicit_simple_action_is_quick() {
+        let decision = classify_intent(&user_message("帮我创建一个文件夹叫 test"), "auto");
+        assert_eq!(decision.task_kind, TaskKind::Action);
+        assert_eq!(decision.complexity, IntentComplexity::Simple);
+        assert_eq!(decision.legacy_intent(), "quick");
+    }
+
+    #[test]
+    fn mixed_multistep_action_is_planned() {
+        let decision = classify_intent(
+            &user_message("帮我整理所有 PDF，然后逐个分析并生成报告"),
+            "auto",
+        );
+        assert_eq!(decision.task_kind, TaskKind::Action);
+        assert_eq!(decision.complexity, IntentComplexity::Planned);
+        assert_eq!(decision.legacy_intent(), "planned");
+    }
+
+    #[test]
+    fn insight_override_remains_read_only() {
+        let decision = classify_intent(&user_message("帮我删除 test.txt"), "insight");
+        assert_eq!(decision.task_kind, TaskKind::Answer);
+        assert_eq!(decision.legacy_intent(), "answer");
+    }
 }
 
 pub async fn stream_chat(

@@ -1373,6 +1373,20 @@ fn sync_fact_to_memory_index(
     let now = super::now_ms();
     let evidence = serde_json::json!([{"conv_id": conv_id, "timestamp": now}]).to_string();
     let file_path_str = file_path.to_string_lossy().to_string();
+
+    // 用户反馈属于明确纠错，复用统一的版本替代入口，避免与即时纠错形成多个 active 版本。
+    if fact_type == "feedback" {
+        if let Err(error) = crate::db::store_explicit_correction(
+            &claim,
+            &scope,
+            &evidence,
+            Some(&file_path_str),
+        ) {
+            log::warn!("Failed to index explicit feedback correction: {}", error);
+        }
+        return;
+    }
+
     let id = ulid::Ulid::new().to_string();
 
     let _ = conn.execute(

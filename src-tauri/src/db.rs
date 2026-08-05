@@ -341,6 +341,116 @@ pub fn init_db(data_dir: &std::path::Path) -> Connection {
     conn
 }
 
+fn normalized_memory_bigrams(input: &str) -> std::collections::HashSet<String> {
+    let normalized: Vec<char> = input
+        .to_lowercase()
+        .chars()
+        .filter(|c| c.is_alphanumeric() || ('\u{4e00}'..='\u{9fff}').contains(c))
+        .collect();
+    normalized
+        .windows(2)
+        .map(|pair| pair.iter().collect::<String>())
+        .collect()
+}
+
+fn memory_claim_similarity(a: &str, b: &str) -> f64 {
+    let a_set = normalized_memory_bigrams(a);
+    let b_set = normalized_memory_bigrams(b);
+    if a_set.is_empty() || b_set.is_empty() {
+        return 0.0;
+    }
+    let overlap = a_set.intersection(&b_set).count() as f64;
+    (2.0 * overlap) / (a_set.len() + b_set.len()) as f64
+}
+
+/// 写入用户明确纠错，并在同一作用域内对高度相似的旧纠错建立版本替代关系。
+/// 旧版本保留用于审计，但不会再被注入上下文。
+pub(crate) fn store_explicit_correction(
+    claim: &str,
+    scope: &str,
+    evidence: &str,
+    file_path: Option<&str>,
+) -> Result<String, String> {
+    let db_path = crate::get_data_dir().join("bob.db");
+    let mut conn = Connection::open(db_path).map_err(|e| e.to_string())?;
+
+    let candidates: Vec<(String, String, i64)> = {
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, claim, version FROM memory_entries
+                 WHERE memory_type = 'correction' AND status = 'active' AND scope = ?1
+                 ORDER BY last_confirmed DESC LIMIT 50",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map(params![scope], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+            })
+            .map_err(|e| e.to_string())?;
+        rows.filter_map(|row| row.ok()).collect()
+    };
+
+    let replacement = candidates
+        .into_iter()
+        .map(|candidate| {
+            let score = memory_claim_similarity(claim, &candidate.1);
+            (candidate, score)
+        })
+        .filter(|(_, score)| *score >= 0.72)
+        .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+        .map(|(candidate, _)| candidate);
+
+    let now = crate::now_ms();
+    let id = ulid::Ulid::new().to_string();
+    let (replaces, version) = replacement
+        .as_ref()
+        .map(|(old_id, _, old_version)| (Some(old_id.as_str()), old_version + 1))
+        .unwrap_or((None, 1));
+
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    if let Some((old_id, _, _)) = replacement.as_ref() {
+        tx.execute(
+            "UPDATE memory_entries SET status = 'superseded', updated_at = ?2 WHERE id = ?1",
+            params![old_id, now],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    tx.execute(
+        "INSERT INTO memory_entries
+         (id, claim, memory_type, scope, source, confidence, evidence, file_path,
+          first_seen, last_confirmed, status, replaces, version, created_at, updated_at)
+         VALUES (?1, ?2, 'correction', ?3, 'user_explicit', 1.0, ?4, ?5,
+                 ?6, ?6, 'active', ?7, ?8, ?6, ?6)",
+        params![id, claim, scope, evidence, file_path, now, replaces, version],
+    )
+    .map_err(|e| e.to_string())?;
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(id)
+}
+
+#[cfg(test)]
+mod memory_contract_tests {
+    use super::memory_claim_similarity;
+
+    #[test]
+    fn opposite_corrections_share_a_topic_signature() {
+        let score = memory_claim_similarity(
+            "你记错了，我使用的是 Vue 3，不是 React",
+            "纠正一下，我使用的是 React，不是 Vue 3",
+        );
+        assert!(score >= 0.72, "similar correction score was {score}");
+    }
+
+    #[test]
+    fn unrelated_corrections_do_not_replace_each_other() {
+        let score = memory_claim_similarity(
+            "我的名字是小明，不是小红",
+            "合同摘要必须保留违约责任",
+        );
+        assert!(score < 0.72, "unrelated correction score was {score}");
+    }
+}
+
 #[tauri::command]
 pub fn db_conversations(db: State<DbState>) -> Vec<Value> {
     let conn = match db.0.lock() {

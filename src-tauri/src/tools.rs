@@ -284,7 +284,32 @@ pub enum ToolRisk {
     R3,
 }
 
+/// Answer 模式可见工具的唯一白名单。
+/// 新增 R0 工具不会自动进入 Answer，必须在此显式审核后加入。
+pub const ANSWER_TOOL_ALLOWLIST: &[&str] = &[
+    "system_time",
+    "get_weather",
+    "brain_search",
+    "web_search",
+    "fetch_url",
+    "read_file",
+    "list_dir",
+    "list_calendar_events",
+    "list_tickets",
+    "table_schema_viewer",
+    "table_global_search",
+    "table_column_filter",
+    "read_skill",
+    "list_skills",
+    "read_model_registry",
+];
+
+fn is_answer_tool_allowed(name: &str) -> bool {
+    ANSWER_TOOL_ALLOWLIST.contains(&name) && get_tool_risk(name) == ToolRisk::R0
+}
+
 /// 根据工具名返回其风险等级
+/// T-3002: 只有实现了可测试 undo/compensation 的写操作才可标为 R1
 pub fn get_tool_risk(name: &str) -> ToolRisk {
     match name {
         // R0: 纯读取/查询，无副作用
@@ -295,27 +320,60 @@ pub fn get_tool_risk(name: &str) -> ToolRisk {
         | "table_schema_viewer" | "table_global_search" | "table_column_filter"
         => ToolRisk::R0,
 
-        // R1: 本地可撤销写入
+        // R1: 本地可撤销写入 (可覆写回原值或文件系统层有回收站保护)
         "write_file" | "append_file" | "create_directory" | "move_file"
-        | "copy_file" | "rename_file" | "add_calendar_event"
-        | "delete_calendar_event" | "add_cron_job" | "remove_cron_job"
-        | "toggle_cron_job" | "build_knowledge_base" | "create_ticket"
-        | "update_ticket" | "delete_ticket" | "save_to_notes"
+        | "copy_file" | "rename_file" | "build_knowledge_base"
+        | "create_ticket" | "update_ticket" | "save_to_notes"
         | "export_html" | "export_xlsx" | "export_docx" | "export_pptx"
         | "update_model_registry" | "enable_browser"
         => ToolRisk::R1,
 
-        // R2: 外部影响（网络请求、浏览器自动化）
+        // R2: 外部影响 / 无可测试撤销的写操作
+        // 日程、定时任务、票据删除均无 undo 机制，不应为 R1
         "browse_page" | "share_file" | "test_model_endpoint"
-        | "install_skill_from_url"
+        | "add_calendar_event" | "delete_calendar_event"
+        | "add_cron_job" | "remove_cron_job" | "toggle_cron_job"
+        | "delete_ticket"
         => ToolRisk::R2,
 
-        // R3: 破坏性/外部发送
+        // R3: 破坏性/外部发送/外部安装
         "delete_file" | "send_wechat_file" | "send_to_pc_agent"
+        | "install_skill_from_url"
         => ToolRisk::R3,
 
-        // MCP 和动态工具默认 R2（外部影响）
+        // MCP 和动态工具默认 R2（外部影响）；不得进入 Answer 白名单
         _ => ToolRisk::R2,
+    }
+}
+
+/// 根据调用参数动态提升风险等级。
+/// 新建本地文件保持 R1；覆盖已有数据或移动已有路径需要 R2 确认。
+pub fn get_tool_risk_for_call(name: &str, args: &Value) -> ToolRisk {
+    let base = get_tool_risk(name);
+    if base != ToolRisk::R1 {
+        return base;
+    }
+
+    let path_exists = |key: &str| {
+        args.get(key)
+            .and_then(|v| v.as_str())
+            .filter(|p| !p.trim().is_empty())
+            .map(|p| std::path::Path::new(p).exists())
+            .unwrap_or(false)
+    };
+
+    match name {
+        // 覆盖或追加已有文件会破坏原内容；新建文件仍为低风险写入。
+        "write_file" | "append_file" => {
+            if path_exists("path") { ToolRisk::R2 } else { ToolRisk::R1 }
+        }
+        // 复制到已有目标会覆盖目标内容。
+        "copy_file" => {
+            if path_exists("destination") { ToolRisk::R2 } else { ToolRisk::R1 }
+        }
+        // 移动会改变源路径；当前尚无自动补偿事务。
+        "move_file" | "rename_file" => ToolRisk::R2,
+        _ => base,
     }
 }
 
@@ -344,12 +402,22 @@ pub async fn get_tool_schemas_with_mcp() -> Vec<Value> {
 }
 
 /// T-2901: 根据意图类型过滤工具 Schema
-/// - "answer": 不注入任何工具
+/// - "answer": 仅注入显式审核过的 R0 白名单
 /// - "quick": 只注入 R0 + R1 工具（安全的本地操作）
 /// - "planned" / 其他: 注入全部工具
 pub async fn get_filtered_tool_schemas(intent: &str) -> Vec<Value> {
     match intent {
-        "answer" => vec![],
+        // T-3012: Answer 使用显式只读白名单；动态/MCP 工具不会自动进入。
+        "answer" => {
+            get_tool_schemas_with_mcp().await
+                .into_iter()
+                .filter(|t| {
+                    let name = t.pointer("/function/name")
+                        .and_then(|v| v.as_str()).unwrap_or("");
+                    is_answer_tool_allowed(name)
+                })
+                .collect()
+        }
         "quick" => {
             get_tool_schemas_with_mcp().await
                 .into_iter()
@@ -3351,4 +3419,155 @@ fn tool_table_column_filter(path: &str, sheet_name: &str, column: &str, value: &
         }
     }
     json!({ "results": results, "truncated": results.len() >= 200 })
+}
+
+// ═══════════════════════════════════════════════════════════
+// T-3003: 权限回归测试
+// ═══════════════════════════════════════════════════════════
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── 工具风险等级快照测试 ─────────────────────────────────
+    // 所有内置工具的风险等级必须与此快照精确匹配。
+    // 新增工具时必须在此添加对应条目，否则测试失败。
+    #[test]
+    fn snapshot_r0_tools() {
+        let r0_tools = vec![
+            "read_file", "list_dir", "fetch_url", "web_search",
+            "system_time", "get_weather", "brain_search",
+            "list_skills", "read_skill", "list_calendar_events",
+            "list_cron_jobs", "list_tickets", "read_model_registry",
+            "table_schema_viewer", "table_global_search", "table_column_filter",
+        ];
+        for tool in r0_tools {
+            assert_eq!(
+                get_tool_risk(tool), ToolRisk::R0,
+                "Tool '{}' should be R0 (read-only)", tool
+            );
+        }
+    }
+
+    #[test]
+    fn snapshot_r1_tools() {
+        let r1_tools = vec![
+            "write_file", "append_file", "create_directory", "move_file",
+            "copy_file", "rename_file", "build_knowledge_base",
+            "create_ticket", "update_ticket", "save_to_notes",
+            "export_html", "export_xlsx", "export_docx", "export_pptx",
+            "update_model_registry", "enable_browser",
+        ];
+        for tool in r1_tools {
+            assert_eq!(
+                get_tool_risk(tool), ToolRisk::R1,
+                "Tool '{}' should be R1 (reversible write)", tool
+            );
+        }
+    }
+
+    #[test]
+    fn snapshot_r2_tools() {
+        let r2_tools = vec![
+            "browse_page", "share_file", "test_model_endpoint",
+            "add_calendar_event", "delete_calendar_event",
+            "add_cron_job", "remove_cron_job", "toggle_cron_job",
+            "delete_ticket",
+        ];
+        for tool in r2_tools {
+            assert_eq!(
+                get_tool_risk(tool), ToolRisk::R2,
+                "Tool '{}' should be R2 (external impact / no undo)", tool
+            );
+        }
+    }
+
+    #[test]
+    fn snapshot_r3_tools() {
+        let r3_tools = vec![
+            "delete_file", "send_wechat_file", "send_to_pc_agent",
+            "install_skill_from_url",
+        ];
+        for tool in r3_tools {
+            assert_eq!(
+                get_tool_risk(tool), ToolRisk::R3,
+                "Tool '{}' should be R3 (destructive / external send / external install)", tool
+            );
+        }
+    }
+
+    // ── 安全不变量断言 ──────────────────────────────────────
+
+    /// 未知工具 (MCP/动态连接器) 必须默认 R2
+    #[test]
+    fn unknown_tools_default_r2() {
+        assert_eq!(get_tool_risk("some_unknown_mcp_tool"), ToolRisk::R2);
+        assert_eq!(get_tool_risk(""), ToolRisk::R2);
+        assert_eq!(get_tool_risk("my_custom_plugin_action"), ToolRisk::R2);
+    }
+
+    /// R3 工具不能被降级为 R1 或 R0
+    #[test]
+    fn r3_tools_never_below_r2() {
+        let r3_critical = vec!["delete_file", "send_wechat_file", "send_to_pc_agent", "install_skill_from_url"];
+        for tool in r3_critical {
+            let risk = get_tool_risk(tool);
+            assert!(
+                risk == ToolRisk::R3,
+                "CRITICAL: Tool '{}' has risk {:?}, must be R3", tool, risk
+            );
+        }
+    }
+
+    /// 日程/Cron/票据删除不允许为 R1 (无可测试 undo)
+    #[test]
+    fn no_undo_tools_at_least_r2() {
+        let no_undo = vec![
+            "add_calendar_event", "delete_calendar_event",
+            "add_cron_job", "remove_cron_job", "toggle_cron_job",
+            "delete_ticket",
+        ];
+        for tool in no_undo {
+            let risk = get_tool_risk(tool);
+            assert!(
+                risk == ToolRisk::R2 || risk == ToolRisk::R3,
+                "Tool '{}' has no proven undo, must be >= R2, got {:?}", tool, risk
+            );
+        }
+    }
+
+    /// Answer 白名单中不应包含任何写入工具
+    #[test]
+    fn answer_whitelist_no_write_tools() {
+        for tool in ANSWER_TOOL_ALLOWLIST {
+            assert_eq!(
+                get_tool_risk(tool), ToolRisk::R0,
+                "Answer whitelist tool '{}' must be R0, but got {:?}", tool, get_tool_risk(tool)
+            );
+            assert!(is_answer_tool_allowed(tool));
+        }
+        assert!(!is_answer_tool_allowed("write_file"));
+        assert!(!is_answer_tool_allowed("mcp_dynamic_read"));
+    }
+
+    #[test]
+    fn existing_file_write_is_promoted_to_r2() {
+        let path = std::env::temp_dir().join(format!("bob-risk-test-{}.txt", ulid::Ulid::new()));
+        std::fs::write(&path, "original").expect("create risk test fixture");
+        let args = json!({ "path": path.to_string_lossy() });
+        assert_eq!(get_tool_risk_for_call("write_file", &args), ToolRisk::R2);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn new_file_write_remains_r1() {
+        let path = std::env::temp_dir().join(format!("bob-risk-new-{}.txt", ulid::Ulid::new()));
+        let args = json!({ "path": path.to_string_lossy() });
+        assert_eq!(get_tool_risk_for_call("write_file", &args), ToolRisk::R1);
+    }
+
+    #[test]
+    fn move_and_rename_require_confirmation_without_compensation() {
+        assert_eq!(get_tool_risk_for_call("move_file", &json!({})), ToolRisk::R2);
+        assert_eq!(get_tool_risk_for_call("rename_file", &json!({})), ToolRisk::R2);
+    }
 }
