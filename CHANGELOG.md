@@ -2,6 +2,20 @@
 
 All notable changes to bob-agent will be documented in this file.
 
+## [0.7.5] - 2026-08-05
+
+### 🏗️ Architecture
+- **[Agent] R2/R3 工具风险分级确认流**：新增 `tool_confirm.rs`，基于 `oneshot` channel 实现阻塞式确认状态管理。`llm.rs` 在 Tool Calling 循环中自动判断工具风险级别（R0 自动执行 / R1 自动+撤销 / R2 预览确认 / R3 强制确认+审计），R2/R3 级别工具执行前通过 `app.emit()` 推送确认请求给前端 `GlobalDialog.vue`，用户拒绝时返回 rejection 信息供 LLM 改策略。
+- **[Memory] 记忆数据契约标准化**：`db.rs` 新增 `memory_entries` SQLite 索引表，包含 `scope`（项目/全局）、`source`（user_explicit/ai_inferred/correction）、`confidence`（0-1.0 置信度）、`evidence`（原文引用）、`replaces`（版本链）字段。`dream.rs` 和 `evolution.rs` 新增自动同步钩子，Markdown 文件写入后自动 `INSERT OR REPLACE` 到索引表。检索优先级：纠错 > 用户明说 > AI推断。
+
+### 🎨 UI/UX
+- **[Design System] GlobalDialog.vue CSS 对齐 `index.css`**：审计弹窗组件 CSS 变量 fallback 值，修正全部不一致项：
+  - 圆角：弹窗 `12px → 10px` (`--radius-lg`)，按钮/输入框 `6px → 4px` (`--radius-sm`)
+  - 颜色：从 Tailwind 灰色系默认值 (`#1a1a2e`, `#111827`, `#4b5563`) 切换到 `index.css` 暗色系 (`#141414`, `#e8e8e8`, `#a0a0a0`)
+  - 语义化：`btn-primary` 文字色从硬编码 `white` 改为 `var(--text-inverse, #0c0c0c)`
+  - `btn-danger` fallback 从 `#ef4444` 修正为 `#dc2626` (匹配 `--color-error`)
+  - 删除冗余的 `@media (prefers-color-scheme: dark)` 覆盖块（30 行），因 fallback 现已直接映射暗色系值
+
 ## [0.6.0] - 2026-07-10
 
 ### 🏗️ Architecture & Sync

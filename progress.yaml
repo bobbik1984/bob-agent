@@ -1,6 +1,6 @@
 project:
   name: bob-agent
-  version: '0.6.5'
+  version: '0.7.5'
   status: active
   tech:
   - Tauri
@@ -8,8 +8,24 @@ project:
   - Vue 3
   - Desktop
   - Android
-  updated: '2026-07-24'
+  updated: '2026-08-05'
 phases:
+- name: V0.7.5 目标29 工具风险分级 R2/R3 确认 + 记忆契约 + UI 设计系统对齐
+  tasks:
+  - text: "T-2911 tools.rs 每个工具增加 risk_level R0/R1/R2/R3 字段"
+    status: done
+  - text: "T-2912 tool_confirm.rs 确认状态管理 (oneshot channel) + llm.rs 风险分发"
+    status: done
+  - text: "T-2913 GlobalDialog.vue 复用为 R2/R3 确认弹窗"
+    status: done
+  - text: "T-2921 dream.rs/evolution.rs 记忆数据模型增加 scope/source/confidence"
+    status: done
+  - text: "T-2922 db.rs 新增 memory_entries 索引表 + 自动同步钩子"
+    status: done
+  - text: "T-2923 记忆召回检索优先级 (纠错 > 用户明说 > AI推断)"
+    status: done
+  - text: "GlobalDialog.vue CSS fallback 全面对齐 index.css 设计系统"
+    status: done
 - name: V0.6.0 日程日历基建与票夹卡片优化
   tasks:
   - text: 修复后台 Google Calendar 同步拉取与解析失败的问题

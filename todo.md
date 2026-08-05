@@ -1,8 +1,8 @@
 # Bob-Agent 开发全局路线图 (Roadmap)
 
-> 🎯 **当前版本**: `v0.5.0` — Ghost Partner (幽灵副手) 阶段正式版。
-> ♻️ **已完成**: Tauri 迁移、主体模式、微信/TG/Discord 通道、文档输出引擎、Goal 闭环执行引擎、Web Drop P2P 极传、知识图谱融合、智能笔记模块、本地大模型引擎 (Candle) 基础链路。
-> 📋 **当前 Sprint**: 目标 22 — 移动端体验优化 (图标/Onboarding/FAB Bug) | 目标 23 — PC 扫码配对 MVP (详见 `docs/MOBILE_BLUEPRINT.md`)。
+> 🎯 **当前版本**: `v0.7.5` — 产品智能化收敛阶段。
+> ♻️ **已完成**: Tauri 迁移、主体模式、微信/TG/Discord 通道、文档输出引擎、Goal 闭环执行引擎、Web Drop P2P 极传、知识图谱融合、智能笔记模块、本地大模型引擎 (Candle) 基础链路、移动端体验优化、PC 扫码配对、跨端同步引擎、Auto 模式 + 意图分类器、R2/R3 工具风险分级确认、记忆数据契约标准化。
+> 📋 **当前 Sprint**: 目标 29 Phase 1 — 意图自动分类 (T-2901~T-2905) | Phase 4 — 纠错记忆最高优先级 (T-2931~T-2932)。
 
 ---
 
@@ -88,7 +88,17 @@
 
 ## 📅 开发日志
 
-### 2026-07-13 (今天)
+### 2026-08-05
+
+**主题**: 目标 29 Phase 2/3 实装 — R2/R3 工具确认 + 记忆契约 + UI 设计系统对齐
+
+**完成**:
+1. [Arch] **R2/R3 工具风险确认流** — 新增 `tool_confirm.rs` (oneshot channel 状态管理)；`llm.rs` 集成风险评估分发逻辑，R2/R3 工具自动阻塞等待 UI 确认，拒绝后返回 rejection 信息给 LLM。
+2. [Arch] **记忆数据契约** — `db.rs` 新增 `memory_entries` SQLite 索引表 (scope/source/confidence/evidence/replaces)；`dream.rs` 和 `evolution.rs` 新增自动同步钩子，Markdown 文件写入后自动 INSERT OR REPLACE 到索引。
+3. [UI] **GlobalDialog.vue CSS 设计系统对齐** — 审计弹窗组件 vs `ui_preview.html` 设计规范，修正所有 CSS fallback 值：圆角 12px→10px (radius-lg)、6px→4px (radius-sm)；颜色从 Tailwind 默认色板切换到 `index.css` 暗色系 (#141414/#e8e8e8/#a0a0a0)；`btn-primary` 文字色从硬编码 `white` 改为 `var(--text-inverse)`；`btn-danger` fallback 从 #ef4444 改为 #dc2626；删除冗余的 `@media (prefers-color-scheme: dark)` 覆盖块 (30 行)。
+4. [Docs] 全量文档更新 — todo.md / progress.yaml / CHANGELOG.md 同步刷新至当前开发进度。
+
+### 2026-07-13
 
 **主题**: 票夹卡片布局优化与日历同步基建 (Ticket & Calendar UX)
 
@@ -271,23 +281,23 @@
 - [ ] T-2904: **Planned Task 模式** — 多步骤复杂任务，自动生成 2-6 步计划，确认后执行
 - [ ] T-2905: **UI 适配** — 前端移除模式切换 UI（保留高级菜单中的"只回答"/"帮我完成"临时覆盖）
 
-### Phase 2: 工具风险分级 R0-R3 (P0, 2-3天)
+### Phase 2: 工具风险分级 R0-R3 (P0, 2-3天) ✅
 > 按工具副作用严重程度自动决定是否需要用户确认，替代当前的全局 agentMode 开关。
 
-- [ ] T-2911: **风险标注** — 在 `tools.rs` 每个工具定义上增加 `risk_level: R0/R1/R2/R3` 字段
-- [ ] T-2912: **Policy Engine** — `tools.rs` 的 `execute_tool()` 入口根据 risk_level 决定行为：
+- [x] T-2911: **风险标注** — 在 `tools.rs` 每个工具定义上增加 `risk_level: R0/R1/R2/R3` 字段
+- [x] T-2912: **Policy Engine** — `tool_confirm.rs` 新增确认状态管理 (oneshot channel)；`llm.rs` 的 `execute_tool()` 入口根据 risk_level 决定行为：
   - R0 (读取/查询): 自动执行
   - R1 (可撤销写入): 自动执行 + 提供撤销
   - R2 (外部影响): 预览确认后执行
   - R3 (删除/批量/发送): 明确确认 + 审计日志
-- [ ] T-2913: **确认 UI** — 前端新增工具确认卡片组件（R2/R3 级别自动弹出）
+- [x] T-2913: **确认 UI** — `GlobalDialog.vue` 复用为 R2/R3 确认弹窗，CSS fallback 全面对齐 `index.css` 设计系统
 
-### Phase 3: 记忆数据契约标准化 (P1, 1周)
+### Phase 3: 记忆数据契约标准化 (P1, 1周) ✅
 > 给每条记忆加 scope（防止项目偏好外溢为全局）、source（区分用户明说 vs AI 推断）、version（支持回滚）。
 
-- [ ] T-2921: **Schema 扩展** — `dream.rs` / `evolution.rs` 的记忆数据模型增加 `scope`, `source`, `confidence`, `evidence`, `replaces` 字段
-- [ ] T-2922: **SQLite 迁移** — 扩展 `memories` / `facts` 表 schema
-- [ ] T-2923: **检索优先级** — 记忆召回时：纠错 > 用户明说 > AI推断；项目级偏好不外溢为全局
+- [x] T-2921: **Schema 扩展** — `dream.rs` / `evolution.rs` 的记忆数据模型增加 `scope`, `source`, `confidence`, `evidence`, `replaces` 字段
+- [x] T-2922: **SQLite 迁移** — `db.rs` 新增 `memory_entries` 索引表 + `dream.rs`/`evolution.rs` 自动同步钩子 (INSERT OR REPLACE)
+- [x] T-2923: **检索优先级** — 记忆召回时：纠错 > 用户明说 > AI推断；项目级偏好不外溢为全局
 
 ### Phase 4: 纠错记忆最高优先级 (P1, 2天)
 > 用户纠正过的内容永不自然衰减，优先级高于所有推断记忆。
