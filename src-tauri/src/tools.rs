@@ -268,6 +268,60 @@ fn resolve_write_path(path: &str, global_file_access: bool) -> Result<PathBuf, S
 // ═══════════════════════════════════════════════════════════
 // T-901: 工具 Schema 注册表
 // ═══════════════════════════════════════════════════════════
+// T-2911: 工具风险分级 (Tool Risk Classification)
+// ═══════════════════════════════════════════════════════════
+
+/// 工具风险等级
+/// R0: 读取/查询 — 自动执行
+/// R1: 可撤销写入 — 自动执行 + 提供撤销
+/// R2: 外部影响 — 预览确认后执行
+/// R3: 破坏性/批量/发送 — 明确确认 + 审计
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ToolRisk {
+    R0,
+    R1,
+    R2,
+    R3,
+}
+
+/// 根据工具名返回其风险等级
+pub fn get_tool_risk(name: &str) -> ToolRisk {
+    match name {
+        // R0: 纯读取/查询，无副作用
+        "read_file" | "list_dir" | "fetch_url" | "web_search"
+        | "system_time" | "get_weather" | "brain_search"
+        | "list_skills" | "read_skill" | "list_calendar_events"
+        | "list_cron_jobs" | "list_tickets" | "read_model_registry"
+        | "table_schema_viewer" | "table_global_search" | "table_column_filter"
+        => ToolRisk::R0,
+
+        // R1: 本地可撤销写入
+        "write_file" | "append_file" | "create_directory" | "move_file"
+        | "copy_file" | "rename_file" | "add_calendar_event"
+        | "delete_calendar_event" | "add_cron_job" | "remove_cron_job"
+        | "toggle_cron_job" | "build_knowledge_base" | "create_ticket"
+        | "update_ticket" | "delete_ticket" | "save_to_notes"
+        | "export_html" | "export_xlsx" | "export_docx" | "export_pptx"
+        | "update_model_registry" | "enable_browser"
+        => ToolRisk::R1,
+
+        // R2: 外部影响（网络请求、浏览器自动化）
+        "browse_page" | "share_file" | "test_model_endpoint"
+        | "install_skill_from_url"
+        => ToolRisk::R2,
+
+        // R3: 破坏性/外部发送
+        "delete_file" | "send_wechat_file" | "send_to_pc_agent"
+        => ToolRisk::R3,
+
+        // MCP 和动态工具默认 R2（外部影响）
+        _ => ToolRisk::R2,
+    }
+}
+
+// ═══════════════════════════════════════════════════════════
+// 工具 Schema 获取
+// ═══════════════════════════════════════════════════════════
 
 /// 返回所有可用工具的 OpenAI Function Calling 格式描述
 pub fn get_tool_schemas() -> Vec<Value> {
@@ -288,6 +342,28 @@ pub async fn get_tool_schemas_with_mcp() -> Vec<Value> {
     tools.extend(super::gmail::get_tool_schemas());
     tools
 }
+
+/// T-2901: 根据意图类型过滤工具 Schema
+/// - "answer": 不注入任何工具
+/// - "quick": 只注入 R0 + R1 工具（安全的本地操作）
+/// - "planned" / 其他: 注入全部工具
+pub async fn get_filtered_tool_schemas(intent: &str) -> Vec<Value> {
+    match intent {
+        "answer" => vec![],
+        "quick" => {
+            get_tool_schemas_with_mcp().await
+                .into_iter()
+                .filter(|t| {
+                    let name = t.pointer("/function/name")
+                        .and_then(|v| v.as_str()).unwrap_or("");
+                    matches!(get_tool_risk(name), ToolRisk::R0 | ToolRisk::R1)
+                })
+                .collect()
+        }
+        _ => get_tool_schemas_with_mcp().await,
+    }
+}
+
 
 fn get_builtin_tool_schemas() -> Vec<Value> {
     let mut tools = vec![

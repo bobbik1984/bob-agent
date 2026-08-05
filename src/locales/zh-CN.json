@@ -333,6 +333,8 @@
     "parse_event": "解析为日程",
     "attach_tooltip": "附件 / 粘贴图片",
     "no_models": "暂无可用模型",
+    "mode_auto": "自动",
+    "mode_auto_desc": "自动 (智能判断)",
     "mode_qa": "问答",
     "mode_act": "干活",
     "mode_qa_desc": "问答 (只读防误触)",

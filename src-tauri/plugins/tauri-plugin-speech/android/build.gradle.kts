@@ -21,5 +21,5 @@ android {
 dependencies {
     implementation("androidx.core:core-ktx:1.10.1")
     implementation("androidx.appcompat:appcompat:1.6.1")
-    compileOnly("app.tauri:tauri-android:2.0.0")
+    compileOnly("app.tauri:tauri-android:+")
 }

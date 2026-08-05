@@ -333,6 +333,8 @@
     "parse_event": "Parse as Event",
     "attach_tooltip": "Attach / Paste Image",
     "no_models": "No models available",
+    "mode_auto": "Auto",
+    "mode_auto_desc": "Auto (Smart Detection)",
     "mode_qa": "Q&A",
     "mode_act": "Act",
     "mode_qa_desc": "Q&A (Read-only for safety)",

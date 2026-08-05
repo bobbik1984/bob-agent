@@ -500,13 +500,18 @@
           <!-- 代理模式切换器 -->
           <div class="model-switcher-wrap">
             <button class="toolbar-item model-indicator" @click="showAgentModeSwitcher = !showAgentModeSwitcher">
-              <Shield v-if="agentMode === 'insight'" :size="12" style="color: var(--text-tertiary);" />
+              <Sparkles v-if="agentMode === 'auto'" :size="12" style="color: var(--accent-primary);" />
+              <Shield v-else-if="agentMode === 'insight'" :size="12" style="color: var(--text-tertiary);" />
               <Zap v-else-if="agentMode === 'yolo'" :size="12" style="color: var(--accent-primary);" />
-              <Target v-else :size="12" style="color: #ff9800;" />
-              <span>{{ agentMode === 'insight' ? $t('chat.mode_qa') : (agentMode === 'yolo' ? $t('chat.mode_act') : $t('chat.mode_goal')) }}</span>
+              <Target v-else :size="12" style="color: var(--color-warning);" />
+              <span>{{ { auto: $t('chat.mode_auto'), insight: $t('chat.mode_qa'), yolo: $t('chat.mode_act'), goal: $t('chat.mode_goal') }[agentMode] || $t('chat.mode_auto') }}</span>
               <ChevronUp :size="10" class="chevron-icon" />
             </button>
             <div v-if="showAgentModeSwitcher" class="model-popup">
+              <button class="model-option" :class="{ active: agentMode === 'auto' }" @click="agentMode = 'auto'; showAgentModeSwitcher = false">
+                <Sparkles :size="14" style="margin-right: 8px;" />
+                <span class="model-option-label">{{ $t('chat.mode_auto_desc') }}</span>
+              </button>
               <button class="model-option" :class="{ active: agentMode === 'insight' }" @click="agentMode = 'insight'; showAgentModeSwitcher = false">
                 <Shield :size="14" style="margin-right: 8px;" />
                 <span class="model-option-label">{{ $t('chat.mode_qa_desc') }}</span>
@@ -629,6 +634,11 @@
             <div v-if="switcherModels.length === 0" class="sheet-empty">{{ $t('chat.no_models') || '无可用模型' }}</div>
           </div>
           <div v-else-if="mobileSheetState === 'agentMode'" class="sheet-content list-view">
+            <button class="sheet-list-item" :class="{ active: agentMode === 'auto' }" @click="agentMode = 'auto'; showMobileTools = false; mobileSheetState = 'main'">
+              <Sparkles :size="20" style="margin-right: 12px;" />
+              <span class="item-name">{{ $t('chat.mode_auto_desc') }}</span>
+              <Check v-if="agentMode === 'auto'" :size="16" class="text-accent" />
+            </button>
             <button class="sheet-list-item" :class="{ active: agentMode === 'insight' }" @click="agentMode = 'insight'; showMobileTools = false; mobileSheetState = 'main'">
               <Shield :size="20" style="margin-right: 12px;" />
               <span class="item-name">{{ $t('chat.mode_qa_desc') }}</span>
@@ -944,7 +954,7 @@ function handleTouchEnd(e) {
 
 // ── 本地 UI 状态 ─────────────────────────────────────
 const globalFileAccess = ref(false);
-const agentMode = ref('insight');
+const agentMode = ref('auto');
 const showAgentModeSwitcher = ref(false);
 
 // ── T-1304: Doctor 健康横幅 ──────────────────────────

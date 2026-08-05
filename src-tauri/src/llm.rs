@@ -1753,6 +1753,99 @@ fn estimate_complexity(messages: &[Value]) -> (Complexity, u32) {
     (complexity, score)
 }
 
+// ═══════════════════════════════════════════════════════════
+// T-2901: 意图自动分类器 (Intent Classifier)
+// ═══════════════════════════════════════════════════════════
+
+/// 规则优先的意图分类器
+/// 返回: "answer" | "quick" | "planned" | "goal"
+fn classify_intent(messages: &[Value], agent_mode: &str) -> String {
+    // 1. 用户手动指定的模式优先（非 auto 时直接映射）
+    match agent_mode {
+        "insight" => return "answer".to_string(),
+        "goal" => return "goal".to_string(),
+        "yolo" => return "planned".to_string(),
+        _ => {} // "auto" 或其他值 → 继续自动分类
+    }
+
+    // 2. 提取用户最后一条消息的文本
+    let user_text = messages.iter().rev()
+        .find(|m| m.get("role").and_then(|r| r.as_str()) == Some("user"))
+        .and_then(|m| {
+            if let Some(s) = m.get("content").and_then(|c| c.as_str()) {
+                Some(s.to_string())
+            } else if let Some(arr) = m.get("content").and_then(|c| c.as_array()) {
+                let parts: Vec<String> = arr.iter()
+                    .filter(|item| item.get("type").and_then(|v| v.as_str()) == Some("text"))
+                    .filter_map(|item| item.get("text").and_then(|v| v.as_str()).map(|s| s.to_string()))
+                    .collect();
+                if parts.is_empty() { None } else { Some(parts.join(" ")) }
+            } else { None }
+        })
+        .unwrap_or_default();
+
+    let text = user_text.to_lowercase();
+    let len = text.chars().count();
+
+    // 3. 带图片 → quick（可能需要 Vision 工具处理）
+    let has_image = messages.iter().rev()
+        .take(2)
+        .any(|m| {
+            m.get("content").and_then(|c| c.as_array())
+                .map(|arr| arr.iter().any(|item|
+                    item.get("type").and_then(|v| v.as_str()) == Some("image_url")
+                )).unwrap_or(false)
+        });
+    if has_image { return "quick".to_string(); }
+
+    // 4. 强 Answer 信号（解释性/概念性问题）
+    let answer_patterns = [
+        "什么是", "为什么", "解释", "什么意思", "区别是", "怎么理解",
+        "是什么", "告诉我", "介绍一下", "说说", "聊聊", "有哪些",
+        "what is", "why ", "explain", "how does", "tell me about",
+        "what's the difference", "can you describe", "what are",
+    ];
+    let action_blockers = ["帮我", "创建", "生成", "写", "做", "建", "发",
+        "create", "generate", "write", "make", "send", "build"];
+    let is_pure_question = answer_patterns.iter().any(|p| text.contains(p))
+        && !action_blockers.iter().any(|p| text.contains(p));
+    if is_pure_question {
+        return "answer".to_string();
+    }
+
+    // 5. 强 Action 信号（写/创建/发送等动作词）
+    let action_patterns = [
+        "帮我", "创建", "生成", "写一个", "写入", "保存", "导出",
+        "发送", "移动", "复制", "删除", "重命名", "整理", "修改",
+        "搜索", "查找", "打开", "下载", "安装", "添加", "新建",
+        "总结", "翻译", "转换", "提取", "分析",
+        "create", "generate", "write", "save", "export", "send",
+        "move", "copy", "delete", "rename", "search", "find",
+        "open", "download", "install", "add", "make", "summarize",
+        "translate", "convert", "extract", "analyze",
+    ];
+    let has_action = action_patterns.iter().any(|p| text.contains(p));
+
+    // 6. 复杂任务信号
+    let complex_patterns = [
+        "然后", "接着", "之后", "步骤", "计划", "批量", "所有",
+        "每个", "分析并", "总结并", "整理后", "生成报告", "多个",
+        "and then", "step by step", "batch", "all files", "for each",
+    ];
+    let complex_count = complex_patterns.iter().filter(|p| text.contains(**p)).count();
+    let is_complex = complex_count >= 2 || len > 200;
+
+    if has_action && is_complex {
+        return "planned".to_string();
+    }
+    if has_action {
+        return "quick".to_string();
+    }
+
+    // 7. 短消息默认 answer，长消息默认 quick
+    if len < 40 { "answer".to_string() } else { "quick".to_string() }
+}
+
 /// 内部通用流式处理 — 支持 Tool Calling 循环
 pub(crate) async fn stream_internal(
     app: AppHandle,
@@ -1913,6 +2006,11 @@ pub(crate) async fn stream_internal(
         .iter()
         .any(|m| m.get("role").and_then(|r| r.as_str()) == Some("system"));
     let mut full_messages: Vec<Value> = Vec::new();
+
+    // T-2901: intent auto classification (must be before if-block for scope)
+    let intent = classify_intent(&messages, &agent_mode);
+    log::info!("[Intent] classified as: {} (agent_mode={})", intent, agent_mode);
+
     if !has_system {
         let config = super::read_config();
         let configured_workspace = config
@@ -1939,10 +2037,13 @@ pub(crate) async fn stream_internal(
             String::new()
         };
 
-        let agent_mode_info = if agent_mode == "yolo" {
-            "\n## 工作模式：干活模式 (YOLO)\n你当前处于高度授权的“干活模式”。你可以大胆使用文件操作等工具完成用户的请求，无需反复向用户确认。\n"
-        } else {
-            ""
+        // T-2901: intent-based system prompt injection
+
+        let agent_mode_info: &str = match intent.as_str() {
+            "answer" => "\n## Current Intent: Q&A\nDirectly answer the user's question. Do not use tools unless the user explicitly requests an action.\n",
+            "quick" => "\n## Current Intent: Quick Action\nComplete the task with minimum steps. Use tools efficiently and report results briefly.\n",
+            "planned" => "\n## Current Intent: Planned Task\nThis is a multi-step task. Briefly outline your plan first, then execute step by step. Report progress after each step.\n",
+            _ => "",
         };
 
         let file_access_info = if global_file_access {
@@ -2089,7 +2190,8 @@ pub(crate) async fn stream_internal(
     }
 
     // 3. 获取工具 Schema
-    let tool_schemas = super::tools::get_tool_schemas_with_mcp().await;
+    // T-2901: filter tool schemas by intent
+    let tool_schemas = super::tools::get_filtered_tool_schemas(&intent).await;
 
     if provider == "offline" {
         return crate::candle_engine::run_native_inference(
@@ -2126,8 +2228,15 @@ pub(crate) async fn stream_internal(
     let mut tool_call_log: Vec<Value> = Vec::new();
 
     // ── T-1401: 循环熔断器 ──────────────────────────────────
+    // T-2901: dynamic tool budget based on intent
+    let tool_budget = match intent.as_str() {
+        "answer" => 0,
+        "quick" => 15,
+        "planned" => 30,
+        _ => 15,
+    };
     let mut tool_tracker =
-        super::tools::ToolCallTracker::with_budget(if agent_mode == "goal" { 50 } else { 15 });
+        super::tools::ToolCallTracker::with_budget(tool_budget);
 
     // ── 工具结果缓存 (会话级) ────────────────────────────────
     // 避免同一对话中重复读取同一文件/目录，节省 Token 和时间
