@@ -978,8 +978,15 @@ const handleMobileScan = async () => {
       return;
     }
 
-    const confirmed = await showConfirm(`发现设备 PC (ID: ${payload.device_id.substring(0, 8)}...)，是否连接并同步？`);
-    if (!confirmed) return;
+    const existingConfig = await window.appAPI.getConfig();
+    const existingPayload = existingConfig?.pairing_payload;
+    if (existingPayload && existingPayload.device_id && existingPayload.device_id !== payload.device_id) {
+      const isOverride = await showConfirm(`⚠️ 身份不匹配\n\n您正在扫描一个新的 PC (ID: ${payload.device_id.substring(0, 8)})\n但本机已绑定了另一个 PC (ID: ${existingPayload.device_id.substring(0, 8)})\n\n是否覆盖现有配对？(可能会导致同步记录分叉)`);
+      if (!isOverride) return;
+    } else {
+      const confirmed = await showConfirm(`发现设备 PC (ID: ${payload.device_id.substring(0, 8)}...)，是否连接并同步？`);
+      if (!confirmed) return;
+    }
 
     // Show progress overlay
     initPairingSteps();
@@ -1725,13 +1732,13 @@ onUnmounted(() => {
 /* ── Office service cards grid ── */
 .service-cards-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: 12px;
   align-items: start;
 }
 @media (max-width: 900px) {
   .service-cards-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   }
 }
 @media (max-width: 600px) {

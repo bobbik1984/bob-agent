@@ -214,6 +214,7 @@ html, body {
   width: 120px;
   height: 80px;
   margin: 0 auto 36px;
+  flex-shrink: 0;
 }
 
 .logo-layer {
@@ -373,6 +374,7 @@ html, body {
   display: flex;
   align-items: center;
   margin-top: 36px;
+  min-height: 40px;
 }
 
 .nav-spacer { flex: 1; }

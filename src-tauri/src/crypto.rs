@@ -171,6 +171,10 @@ pub fn reset_device_keys(
     // 3. Clear memory
     *state.0.lock().unwrap() = None;
 
+    if let Some(tx) = crate::sync_engine::RELAY_RECONNECT_TRIGGER.lock().unwrap().as_ref() {
+        let _ = tx.try_send(());
+    }
+
     Ok(())
 }
 
@@ -185,8 +189,47 @@ pub struct PairingPayload {
     pub relay: String,
 }
 
-fn get_local_ip() -> Option<String> {
-    let socket = UdpSocket::bind("0.0.0.0:0").ok()?;
+fn get_candidate_ips() -> Vec<String> {
+    let mut ips = Vec::new();
+    if let Ok(interfaces) = get_if_addrs::get_if_addrs() {
+        for iface in interfaces {
+            let name = iface.name.to_lowercase();
+            // Filter out known virtual/vpn interfaces
+            if name.contains("tailscale") || name.contains("tap") || name.contains("tun") || 
+               name.contains("vethernet") || name.contains("docker") || name.contains("wsl") || 
+               name.contains("vboxnet") || name.contains("vmware") || name.contains("openvpn") {
+                continue;
+            }
+            if let get_if_addrs::IfAddr::V4(addr) = iface.addr {
+                let ip = addr.ip;
+                // Exclude loopback and link-local
+                if ip.is_loopback() || ip.is_link_local() {
+                    continue;
+                }
+                // Check if it's a private IP (RFC1918)
+                let octets = ip.octets();
+                let is_private = octets[0] == 10 || 
+                                 (octets[0] == 172 && octets[1] >= 16 && octets[1] <= 31) ||
+                                 (octets[0] == 192 && octets[1] == 168);
+                if is_private {
+                    ips.push(ip.to_string());
+                }
+            }
+        }
+    }
+    
+    // Fallback if none found
+    if ips.is_empty() {
+        if let Some(ip) = get_local_ip_fallback() {
+            ips.push(ip);
+        }
+    }
+    
+    ips
+}
+
+fn get_local_ip_fallback() -> Option<String> {
+    let socket = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
     socket.connect("8.8.8.8:80").ok()?;
     let addr = socket.local_addr().ok()?;
     Some(addr.ip().to_string())
@@ -203,10 +246,7 @@ pub fn get_pairing_payload(
     let pub_key_bytes = verifying_key.to_bytes();
     let b64_pub = BASE64.encode(pub_key_bytes);
 
-    let mut local_ips = Vec::new();
-    if let Some(ip) = get_local_ip() {
-        local_ips.push(ip);
-    }
+    let local_ips = get_candidate_ips();
 
     let relay = option_env!("BOB_RELAY_SECRET")
         .map(|_| "wss://relay.bobbik.org")

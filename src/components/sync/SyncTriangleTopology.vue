@@ -48,9 +48,9 @@ const nodeClass = (value) => `is-${normalized(value)}`;
 
 const physicalLinkState = (states) => {
   const values = states.map(normalized);
-  if (values.includes('running')) return 'running';
   if (values.includes('failed')) return 'failed';
   if (values.includes('timeout')) return 'timeout';
+  if (values.includes('running')) return 'running';
   if (values.includes('success')) return 'success';
   if (values.every((value) => value === 'skipped')) return 'skipped';
   if (values.includes('pending')) return 'pending';

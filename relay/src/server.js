@@ -93,6 +93,12 @@ export function createRelayServer({ port = DEFAULT_PORT, logger = console, fault
     ws.deviceId = normalizeId(data.deviceId);
     ws.protocolVersion = Number(data.protocol_version) || 1;
     if (previousId && previousId !== ws.deviceId && devices.get(previousId) === ws) devices.delete(previousId);
+    const existingWs = devices.get(ws.deviceId);
+    if (existingWs && existingWs !== ws) {
+      logger.warn(`[${ws.id}] Replacing existing session for device: ${ws.deviceId}`);
+      sendJson(existingWs, { type: 'error', error_code: 'RLY-SESSION-REPLACED', message: 'Session replaced by a new connection from the same device.' });
+      existingWs.close(1008, 'Session replaced');
+    }
     devices.set(ws.deviceId, ws);
     logger.log(`[${ws.id}] Registered device via MSG: ${ws.deviceId}`);
     if (isV2Message(data)) {
@@ -209,6 +215,12 @@ export function createRelayServer({ port = DEFAULT_PORT, logger = console, fault
     else if (req.url?.length > 1) deviceId = req.url.substring(1).split('?')[0];
     if (deviceId && deviceId !== 'socket.io') {
       ws.deviceId = normalizeId(decodeURIComponent(deviceId));
+      const existingWs = devices.get(ws.deviceId);
+      if (existingWs && existingWs !== ws) {
+        logger.warn(`[${ws.id}] Replacing existing session for device: ${ws.deviceId}`);
+        sendJson(existingWs, { type: 'error', error_code: 'RLY-SESSION-REPLACED', message: 'Session replaced by a new connection from the same device.' });
+        existingWs.close(1008, 'Session replaced');
+      }
       devices.set(ws.deviceId, ws);
       logger.log(`[${ws.id}] Registered device via URL: ${ws.deviceId}`);
     }

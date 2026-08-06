@@ -7,11 +7,73 @@ use std::collections::HashMap;
 
 pub static RELAY_CONNECTED: AtomicBool = AtomicBool::new(false);
 
+use lazy_static::lazy_static;
+use std::sync::Mutex;
+use tokio::sync::oneshot;
+use tokio_tungstenite::tungstenite::protocol::Message;
+
+lazy_static! {
+    pub static ref RELAY_TX: RwLock<Option<tokio::sync::mpsc::Sender<Message>>> = RwLock::new(None);
+    pub static ref PENDING_REQUESTS: RwLock<HashMap<String, oneshot::Sender<serde_json::Value>>> = RwLock::new(HashMap::new());
+    pub static ref RELAY_RECONNECT_TRIGGER: Mutex<Option<tokio::sync::mpsc::Sender<()>>> = Mutex::new(None);
+}
 use std::path::PathBuf;
 use std::fs;
 
 use crate::lan_sync::LanSyncEngine;
 use crate::sync_protocol::{DiagnosticEvent, DiagnosticStage, DiagnosticStatus, TransportKind, SYNC_PROTOCOL_VERSION};
+
+pub async fn send_relay_request_and_wait(
+    request: serde_json::Value,
+    timeout: tokio::time::Duration,
+) -> Result<serde_json::Value, String> {
+    let trace_id = request.get("trace_id").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+    if trace_id.is_empty() {
+        return Err("Request missing trace_id".to_string());
+    }
+
+    let (tx, rx) = oneshot::channel();
+    {
+        let mut pending = PENDING_REQUESTS.write().unwrap();
+        pending.insert(trace_id.clone(), tx);
+    }
+
+    let relay_tx = {
+        let lock = RELAY_TX.read().unwrap();
+        lock.as_ref().cloned()
+    };
+
+    let send_result = if let Some(tx) = relay_tx {
+        tx.send(Message::Text(request.to_string().into())).await
+    } else {
+        return Err("ERR-SYNC-02: Relay 后台未连接".to_string());
+    };
+
+    if send_result.is_err() {
+        let mut pending = PENDING_REQUESTS.write().unwrap();
+        pending.remove(&trace_id);
+        return Err("ERR-SYNC-02: Failed to send to Relay".to_string());
+    }
+
+    match tokio::time::timeout(timeout, rx).await {
+        Ok(Ok(response)) => {
+            if response.get("type").and_then(|v| v.as_str()) == Some("diagnostic_receipt") && response.get("status").and_then(|v| v.as_str()) == Some("failed") {
+                let code = response.get("error_code").and_then(|v| v.as_str()).unwrap_or("RLY-UNKNOWN");
+                return Err(format!("{}: Relay delivery failed", code));
+            }
+            if response.get("type").and_then(|v| v.as_str()) == Some("error") || response.get("type").and_then(|v| v.as_str()) == Some("proxy_error") {
+                return Err(response.get("error").or_else(|| response.get("message")).and_then(|v| v.as_str()).unwrap_or("Relay error").to_string());
+            }
+            Ok(response)
+        }
+        Ok(Err(_)) => Err("Relay response channel closed".to_string()),
+        Err(_) => {
+            let mut pending = PENDING_REQUESTS.write().unwrap();
+            pending.remove(&trace_id);
+            Err("ERR-SYNC-02: Relay 请求超时".to_string())
+        }
+    }
+}
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ConnectedDevice {
@@ -974,40 +1036,14 @@ async fn do_active_sync(app: AppHandle, payload: SyncCommandPayload, trace: Opti
         // 鈹€鈹€ Stage 5: Relay tunnel sync 鈹€鈹€
         let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_sync", "status": "running", "detail": "连接 Relay 隧道..."}));
         
-        let config = crate::read_config();
-        let my_device_id = config.get("device_id").and_then(|v| v.as_str()).unwrap_or("unknown").to_string();
-        let relay_url = "wss://relay.bobbik.org".to_string();
-        let ws_url = format!("{}/ws/device/{}", relay_url, url_encode_device_id(&my_device_id));
-
-        let (mut ws_stream, _) = match tokio::time::timeout(tokio::time::Duration::from_secs(15), connect_websocket_robust(&ws_url)).await {
-            Ok(Ok(s)) => s,
-            Ok(Err(e)) => {
-                let err_msg = format!("ERR-SYNC-02: Relay 连接拒绝: {}", e);
-                let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_sync", "status": "error", "detail": &err_msg}));
-                log_sync_action("Relay Connect", "error", &err_msg);
-                return Err(format!("ERR-SYNC-02: Failed to connect to relay: {}", e));
-            }
-            Err(_) => {
-                let err_msg = "ERR-SYNC-02: Relay 连接超时 (15s)";
-                let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_sync", "status": "error", "detail": err_msg}));
-                log_sync_action("Relay Connect", "error", err_msg);
-                return Err(err_msg.to_string());
-            }
-        };
+        if !RELAY_CONNECTED.load(Ordering::SeqCst) {
+            let err_msg = "ERR-SYNC-02: Relay 后台未连接";
+            let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_sync", "status": "error", "detail": err_msg}));
+            return Err(err_msg.to_string());
+        }
             
         let relay_trace_id = trace.as_ref().map(|value| value.trace_id.clone()).unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
         let relay_sync_id = trace.as_ref().map(|value| value.sync_id.clone()).unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-
-        // Register
-        let reg_msg = serde_json::json!({
-            "type": "register",
-            "deviceId": my_device_id,
-            "protocol_version": SYNC_PROTOCOL_VERSION,
-            "trace_id": relay_trace_id.clone(),
-            "message_id": uuid::Uuid::new_v4().to_string(),
-            "sync_id": relay_sync_id.clone()
-        });
-        ws_stream.send(Message::Text(reg_msg.to_string().into())).await.map_err(|e| e.to_string())?;
 
         // Send pull request
         let pull_req = serde_json::json!({
@@ -1022,72 +1058,48 @@ async fn do_active_sync(app: AppHandle, payload: SyncCommandPayload, trace: Opti
                 "auth_code": payload.public_key
             }
         });
-        ws_stream.send(Message::Text(pull_req.to_string().into())).await.map_err(|e| e.to_string())?;
 
         info!("[Sync Engine] Sent proxy pull request. Waiting for response...");
         let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_sync", "status": "running", "detail": "请求拉取数据 (对话、日程、票据...)"}));
 
-        let timeout = tokio::time::Duration::from_secs(45);
-        let pull_task = async {
-            while let Some(msg) = ws_stream.next().await {
-                if let Ok(Message::Text(text)) = msg {
-                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
-                        if json.get("type").and_then(|v| v.as_str()) == Some("diagnostic_receipt") {
-                            record_relay_receipt(&json, &payload.device_id);
-                            if json.get("status").and_then(|v| v.as_str()) == Some("failed") {
-                                let code = json.get("error_code").and_then(|v| v.as_str()).unwrap_or("RLY-UNKNOWN");
-                                return Err(format!("{}: Relay delivery failed", code));
-                            }
-                        } else if json.get("type").and_then(|v| v.as_str()) == Some("proxy") {
-                            if let Some(inner_payload) = json.get("payload") {
-                                if inner_payload.get("action").and_then(|v| v.as_str()) == Some("pull_response") {
-                                    if let Some(data_val) = inner_payload.get("data") {
-                                        if let Ok(sync_data) = serde_json::from_value::<SyncData>(data_val.clone()) {
-                                            return Ok(sync_data);
-                                        }
-                                    }
-                                } else if let Some(error_msg) = inner_payload.get("error").and_then(|v| v.as_str()) {
-                                    if error_msg == "Unauthorized" {
-                                        return Err("ERR-SYNC-05: 鉴权失败 (无效的配对凭证)".to_string());
-                                    }
-                                    return Err(format!("Relay proxy error: {}", error_msg));
-                                }
-                            }
-                        } else if json.get("type").and_then(|v| v.as_str()) == Some("proxy_error") {
-                            return Err(json.get("message").and_then(|v| v.as_str()).unwrap_or("Proxy error").to_string());
-                        } else if json.get("type").and_then(|v| v.as_str()) == Some("error") {
-                            return Err(json.get("error").and_then(|v| v.as_str()).unwrap_or("Relay error").to_string());
+        match send_relay_request_and_wait(pull_req, tokio::time::Duration::from_secs(45)).await {
+            Ok(response) => {
+                let sync_data = if let Some(inner_payload) = response.get("payload") {
+                    if let Some(data_val) = inner_payload.get("data") {
+                        serde_json::from_value::<SyncData>(data_val.clone()).map_err(|e| e.to_string())
+                    } else {
+                        Err("No data in pull_response".to_string())
+                    }
+                } else {
+                    Err("No payload in pull_response".to_string())
+                };
+
+                match sync_data {
+                    Ok(sync_data) => {
+                        info!("[Sync Engine] Successfully pulled sync data via Relay!");
+                        let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_sync", "status": "running", "detail": "收到云端数据，正在进行本地合并..."}));
+                        if let Err(e) = import_sync_data(&app, sync_data, 0) { // For relay pull we might not have accurate last_sync_ts right now
+                            let err_msg = format!("ERR-SYNC-03: 导入数据失败: {}", e);
+                            let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_sync", "status": "error", "detail": &err_msg}));
+                            log_sync_action("Relay Import", "error", &err_msg);
+                            return Err(format!("Failed to import sync data: {}", e));
                         }
+                        let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_sync", "status": "done"}));
+                        let _ = app.emit("config:reconciled", serde_json::json!({"applied": 1}));
+                    }
+                    Err(e) => {
+                        let err_msg = format!("ERR-SYNC-03: 解析拉取数据失败: {}", e);
+                        let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_sync", "status": "error", "detail": &err_msg}));
+                        log_sync_action("Relay Pull Parse", "error", &err_msg);
+                        return Err(err_msg);
                     }
                 }
             }
-            Err("Relay connection closed".to_string())
-        };
-
-        match tokio::select! {
-            res = pull_task => res,
-            _ = tokio::time::sleep(timeout) => {
-                let err_msg = "ERR-SYNC-02: Relay 拉取超时 (45s)";
-                let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_sync", "status": "error", "detail": err_msg}));
-                log_sync_action("Relay Pull", "error", err_msg);
-                Err("Relay pull timeout".to_string())
-            }
-        } {
-            Ok(sync_data) => {
-                info!("[Sync Engine] Successfully pulled sync data via Relay!");
-                let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_sync", "status": "running", "detail": "收到云端数据，正在进行本地合并..."}));
-                if let Err(e) = import_sync_data(&app, sync_data, 0) { // For relay pull we might not have accurate last_sync_ts right now
-                    let err_msg = format!("ERR-SYNC-03: 导入数据失败: {}", e);
-                    let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_sync", "status": "error", "detail": &err_msg}));
-                    log_sync_action("Relay Import", "error", &err_msg);
-                    return Err(format!("Failed to import sync data: {}", e));
-                }
-                let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_sync", "status": "done"}));
-                let _ = app.emit("config:reconciled", serde_json::json!({"applied": 1}));
-            }
             Err(e) => {
-                let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_sync", "status": "error", "detail": format!("ERR-SYNC-04: {}", e)}));
-                return Err(format!("Relay Pull Error: {}", e));
+                let err_msg = format!("ERR-SYNC-02: Relay 拉取失败: {}", e);
+                let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_sync", "status": "error", "detail": &err_msg}));
+                log_sync_action("Relay Pull", "error", &err_msg);
+                return Err(e);
             }
         }
 
@@ -1105,7 +1117,13 @@ async fn do_active_sync(app: AppHandle, payload: SyncCommandPayload, trace: Opti
                             "data": mock_outbox
                         }
                     });
-                    ws_stream.send(Message::Text(push_req.to_string().into())).await.map_err(|e| e.to_string())?;
+                    let relay_tx = {
+                        let lock = RELAY_TX.read().unwrap();
+                        lock.as_ref().cloned()
+                    };
+                    if let Some(tx) = relay_tx {
+                        let _ = tx.send(Message::Text(push_req.to_string().into())).await;
+                    }
                     info!("[Sync Engine] Sent proxy push request. (Ignoring response for now)");
                     let _ = std::fs::remove_file(&outbox_path);
                 }
@@ -1123,13 +1141,19 @@ async fn do_active_sync(app: AppHandle, payload: SyncCommandPayload, trace: Opti
                     "data": local_sync_data
                 }
             });
-            let _ = ws_stream.send(Message::Text(push_db_req.to_string().into())).await;
+            let relay_tx = {
+                let lock = RELAY_TX.read().unwrap();
+                lock.as_ref().cloned()
+            };
+            if let Some(tx) = relay_tx {
+                let _ = tx.send(Message::Text(push_db_req.to_string().into())).await;
+            }
             info!("[Sync Engine] Sent proxy push_db request via Relay.");
         }
     Ok(TransportKind::Relay)
 }
 
-use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
+use tokio_tungstenite::connect_async;
 use futures_util::{StreamExt, SinkExt};
 use tokio::net::TcpStream;
 use tokio_tungstenite::client_async_tls;
@@ -1187,12 +1211,30 @@ pub fn start_relay_listener(app: AppHandle) {
                     use futures_util::{StreamExt, SinkExt};
                     let (mut tx, mut rx) = ws_stream.split();
                     let (tx_mpsc, mut rx_mpsc) = tokio::sync::mpsc::channel::<Message>(100);
+                    let (reconnect_tx, mut reconnect_rx) = tokio::sync::mpsc::channel::<()>(1);
                     let mut ping_interval = tokio::time::interval(std::time::Duration::from_secs(30));
+
+                    {
+                        let mut lock = RELAY_TX.write().unwrap();
+                        *lock = Some(tx_mpsc.clone());
+                    }
+                    {
+                        let mut lock = PENDING_REQUESTS.write().unwrap();
+                        lock.clear();
+                    }
+                    {
+                        let mut lock = RELAY_RECONNECT_TRIGGER.lock().unwrap();
+                        *lock = Some(reconnect_tx);
+                    }
 
                     let mut last_activity = crate::now_ms();
 
                     loop {
                         tokio::select! {
+                            _ = reconnect_rx.recv() => {
+                                log::info!("[Sync Engine] Received manual reconnect trigger!");
+                                break;
+                            }
                             _ = ping_interval.tick() => {
                                 if crate::now_ms() - last_activity > 90_000 {
                                     log::error!("[Sync Engine] Relay connection timeout: No activity for 90s. Reconnecting...");
@@ -1228,6 +1270,25 @@ pub fn start_relay_listener(app: AppHandle) {
                                 match msg {
                             Ok(Message::Text(text)) => {
                                 if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
+                                    // Intercept routed responses
+                                    if let Some(trace_id) = json.get("trace_id").and_then(|v| v.as_str()) {
+                                        let is_response = match json.get("type").and_then(|v| v.as_str()) {
+                                            Some("ack") | Some("diagnostic_receipt") | Some("error") | Some("proxy_error") => true,
+                                            Some("proxy") => {
+                                                json.get("payload").and_then(|p| p.get("action")).and_then(|a| a.as_str()) == Some("pull_response")
+                                                || json.get("payload").and_then(|p| p.get("action")).and_then(|a| a.as_str()) == Some("error")
+                                            }
+                                            _ => false
+                                        };
+                                        if is_response {
+                                            let mut pending = PENDING_REQUESTS.write().unwrap();
+                                            if let Some(tx) = pending.remove(trace_id) {
+                                                let _ = tx.send(json.clone());
+                                                continue;
+                                            }
+                                        }
+                                    }
+
                                     if let Some(msg_type) = json.get("type").and_then(|v| v.as_str()) {
                                         if msg_type == "notify" {
                                             let from_id = json.get("from_device_id").and_then(|v| v.as_str()).unwrap_or("unknown");
