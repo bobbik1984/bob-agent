@@ -366,10 +366,24 @@ pub async fn relay_handshake(app: AppHandle, target_device_id: String, auth_code
         }
         Ok(Err(e)) => {
             let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_connect", "status": "error", "detail": format!("ERR-PAIRING-01: 连接拒绝: {}", e)}));
+            let _ = crate::sync_history::record_activity(
+                DiagnosticStatus::Failed,
+                Some(TransportKind::Relay),
+                Some(target_device_id.clone()),
+                "Relay 连接失败",
+                Some("ERR-PAIRING-01".to_string()),
+            );
             return Err(format!("ERR-PAIRING-01: Failed to connect to relay: {}", e));
         }
         Err(_) => {
             let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_connect", "status": "error", "detail": "ERR-PAIRING-01: 连接超时 (15s)"}));
+            let _ = crate::sync_history::record_activity(
+                DiagnosticStatus::Timeout,
+                Some(TransportKind::Relay),
+                Some(target_device_id.clone()),
+                "Relay 连接超时",
+                Some("ERR-PAIRING-01".to_string()),
+            );
             return Err("ERR-PAIRING-01: Failed to connect to relay: Timeout".to_string());
         }
     };
@@ -406,6 +420,13 @@ pub async fn relay_handshake(app: AppHandle, target_device_id: String, auth_code
         }
         Err(e) => {
             let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_notify", "status": "error", "detail": format!("ERR-PAIRING-02: {}", e)}));
+            let _ = crate::sync_history::record_activity(
+                DiagnosticStatus::Failed,
+                Some(TransportKind::Relay),
+                Some(target_device_id.clone()),
+                "Relay 配对请求发送失败",
+                Some("ERR-PAIRING-02".to_string()),
+            );
             return Err(format!("ERR-PAIRING-02: {}", e.to_string()));
         }
     }
@@ -440,15 +461,36 @@ pub async fn relay_handshake(app: AppHandle, target_device_id: String, auth_code
     } {
         Ok(()) => {
             let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_ack", "status": "done"}));
+            let _ = crate::sync_history::record_activity(
+                DiagnosticStatus::Success,
+                Some(TransportKind::Relay),
+                Some(target_device_id.clone()),
+                "Relay 配对握手成功",
+                None,
+            );
             Ok(())
         }
         Err(e) => {
             if e.contains("Unauthorized") {
                 let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_ack", "status": "error", "detail": "ERR-PAIRING-04: 鉴权失败 (认证码不匹配)"}));
+                let _ = crate::sync_history::record_activity(
+                    DiagnosticStatus::Failed,
+                    Some(TransportKind::Relay),
+                    Some(target_device_id.clone()),
+                    "Relay 配对鉴权失败",
+                    Some("ERR-PAIRING-04".to_string()),
+                );
                 Err("ERR-PAIRING-04: 鉴权失败 (认证码不匹配)".to_string())
             } else {
                 let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_ack", "status": "error", "detail": format!("ERR-PAIRING-03: {}", e)}));
-                Err(e)
+                let _ = crate::sync_history::record_activity(
+                    DiagnosticStatus::Failed,
+                    Some(TransportKind::Relay),
+                    Some(target_device_id.clone()),
+                    "PC 未通过 Relay 响应",
+                    Some("ERR-PAIRING-03".to_string()),
+                );
+                Err(format!("ERR-PAIRING-03: {}", e))
             }
         }
     }
@@ -1196,6 +1238,13 @@ pub fn start_relay_listener(app: AppHandle) {
                                             let expected_auth = crate::crypto::get_pairing_payload(app.state::<crate::crypto::DeviceIdentityState>()).map(|p| p.public_key).unwrap_or_default();
                                             if provided_auth != Some(expected_auth.as_str()) {
                                                 log::error!("[Sync Engine] Auth code mismatch in notify from {}", from_id);
+                                                let _ = crate::sync_history::record_activity(
+                                                    DiagnosticStatus::Failed,
+                                                    Some(TransportKind::Relay),
+                                                    Some(from_id.to_string()),
+                                                    "拒绝移动端 Relay 配对请求",
+                                                    Some("ERR-PAIRING-04".to_string()),
+                                                );
                                                 let mut ack = serde_json::json!({
                                                     "type": "ack",
                                                     "target_device_id": from_id,
@@ -1226,6 +1275,13 @@ pub fn start_relay_listener(app: AppHandle) {
                                             });
                                             copy_trace_fields(&json, &mut ack, true);
                                             let _ = tx_mpsc.send(Message::Text(ack.to_string().into())).await;
+                                            let _ = crate::sync_history::record_activity(
+                                                DiagnosticStatus::Success,
+                                                Some(TransportKind::Relay),
+                                                Some(from_id.to_string()),
+                                                "已确认移动端 Relay 配对",
+                                                None,
+                                            );
                                             
                                             // Emit to frontend
                                             let _ = app.emit("sync:device_connected", serde_json::json!({
@@ -1285,8 +1341,22 @@ pub fn start_relay_listener(app: AppHandle) {
                                                         copy_trace_fields(&json, &mut pull_resp, true);
                                                         if let Err(e) = tx_mpsc.send(Message::Text(pull_resp.to_string().into())).await {
                                                             log::error!("[Sync Engine] Failed to send pull_response to {}: {}", from_id, e);
+                                                            let _ = crate::sync_history::record_activity(
+                                                                DiagnosticStatus::Failed,
+                                                                Some(TransportKind::Relay),
+                                                                Some(from_id.to_string()),
+                                                                "向移动端返回同步数据失败",
+                                                                Some("ERR-SYNC-RELAY-SEND".to_string()),
+                                                            );
                                                         } else {
                                                             log::info!("[Sync Engine] Sent pull_response to {} successfully", from_id);
+                                                            let _ = crate::sync_history::record_activity(
+                                                                DiagnosticStatus::Success,
+                                                                Some(TransportKind::Relay),
+                                                                Some(from_id.to_string()),
+                                                                "已通过 Relay 向移动端返回同步数据",
+                                                                None,
+                                                            );
                                                         }
                                                     }
                                                 } else if action == "push" {
@@ -1360,11 +1430,25 @@ pub fn start_relay_listener(app: AppHandle) {
                                                             
                                                             if let Err(e) = import_sync_data(&app, sync_data, last_sync_ts_pc) {
                                                                 log::error!("[Sync Engine] Failed to import relay pushed DB data: {}", e);
+                                                                let _ = crate::sync_history::record_activity(
+                                                                    DiagnosticStatus::Failed,
+                                                                    Some(TransportKind::Relay),
+                                                                    Some(from_id.to_string()),
+                                                                    "Relay 数据写入 PC 失败",
+                                                                    Some("ERR-SYNC-RELAY-IMPORT".to_string()),
+                                                                );
                                                             } else {
                                                                 let now = crate::now_ms();
                                                                 if let Ok(conn) = app.state::<crate::db::DbState>().0.lock() {
                                                                     let _ = conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('last_sync_ts', ?1)", rusqlite::params![now.to_string()]);
                                                                 }
+                                                                let _ = crate::sync_history::record_activity(
+                                                                    DiagnosticStatus::Success,
+                                                                    Some(TransportKind::Relay),
+                                                                    Some(from_id.to_string()),
+                                                                    "已通过 Relay 接收并写入移动端数据",
+                                                                    None,
+                                                                );
                                                             }
                                                         }
                                                     }

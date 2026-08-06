@@ -70,6 +70,27 @@ pub fn record_run(run: SyncRun) -> Result<(), String> {
     write_json(&events_path(), &events)
 }
 
+pub fn record_activity(
+    status: DiagnosticStatus,
+    transport: Option<TransportKind>,
+    peer_device_id: Option<String>,
+    summary: impl Into<String>,
+    error_code: Option<String>,
+) -> Result<(), String> {
+    let now = crate::now_ms();
+    record_run(SyncRun {
+        sync_id: uuid::Uuid::new_v4().to_string(),
+        trace_id: uuid::Uuid::new_v4().to_string(),
+        started_at: now,
+        finished_at: now,
+        status,
+        transport,
+        peer_device_id,
+        summary: Some(summary.into()),
+        error_code,
+    })
+}
+
 pub fn record_event(event: DiagnosticEvent) -> Result<(), String> {
     let mut events: Vec<DiagnosticEvent> = read_json(&events_path());
     let duplicate = events.iter().any(|existing| {

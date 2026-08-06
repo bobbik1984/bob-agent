@@ -683,6 +683,7 @@ async fn handle_sync_pull(
     axum::extract::ConnectInfo(addr): axum::extract::ConnectInfo<std::net::SocketAddr>,
     headers: axum::http::HeaderMap,
 ) -> impl IntoResponse {
+    let peer_device_id = headers.get("x-device-id").and_then(|value| value.to_str().ok()).map(str::to_string);
     if !verify_auth(&state.app, &headers) {
         return axum::response::Response::builder()
             .status(axum::http::StatusCode::UNAUTHORIZED)
@@ -696,12 +697,27 @@ async fn handle_sync_pull(
         Ok(data) => data,
         Err(e) => {
             log::error!("[http_api] Failed to export sync data: {}", e);
+            let _ = crate::sync_history::record_activity(
+                crate::sync_protocol::DiagnosticStatus::Failed,
+                Some(crate::sync_protocol::TransportKind::Lan),
+                peer_device_id.clone(),
+                "向移动端返回 LAN 同步数据失败",
+                Some("ERR-SYNC-LAN-EXPORT".to_string()),
+            );
             return axum::Json(serde_json::json!({
                 "status": "error",
                 "message": e
             })).into_response();
         }
     };
+
+    let _ = crate::sync_history::record_activity(
+        crate::sync_protocol::DiagnosticStatus::Success,
+        Some(crate::sync_protocol::TransportKind::Lan),
+        peer_device_id,
+        "已通过 LAN 向移动端返回同步数据",
+        None,
+    );
 
     axum::Json(serde_json::json!({
         "status": "ok",
@@ -829,6 +845,7 @@ async fn handle_sync_push_db(
     headers: axum::http::HeaderMap,
     axum::extract::Json(payload): axum::extract::Json<crate::sync_engine::SyncData>,
 ) -> impl IntoResponse {
+    let peer_device_id = headers.get("x-device-id").and_then(|value| value.to_str().ok()).map(str::to_string);
     if !verify_auth(&state.app, &headers) {
         return axum::response::Response::builder()
             .status(axum::http::StatusCode::UNAUTHORIZED)
@@ -850,6 +867,13 @@ async fn handle_sync_push_db(
     
     if let Err(e) = crate::sync_engine::import_sync_data(&state.app, payload, last_sync_ts) {
         log::error!("[http_api] Failed to import pushed DB data: {}", e);
+        let _ = crate::sync_history::record_activity(
+            crate::sync_protocol::DiagnosticStatus::Failed,
+            Some(crate::sync_protocol::TransportKind::Lan),
+            peer_device_id.clone(),
+            "LAN 数据写入 PC 失败",
+            Some("ERR-SYNC-LAN-IMPORT".to_string()),
+        );
         return axum::Json(serde_json::json!({
             "status": "error",
             "message": e
@@ -861,6 +885,13 @@ async fn handle_sync_push_db(
     if let Ok(conn) = state.app.state::<crate::db::DbState>().0.lock() {
         let _ = conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('last_sync_ts', ?1)", rusqlite::params![now.to_string()]);
     }
+    let _ = crate::sync_history::record_activity(
+        crate::sync_protocol::DiagnosticStatus::Success,
+        Some(crate::sync_protocol::TransportKind::Lan),
+        peer_device_id,
+        "已通过 LAN 接收并写入移动端数据",
+        None,
+    );
     
     axum::Json(serde_json::json!({
         "status": "ok"

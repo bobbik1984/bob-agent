@@ -736,7 +736,7 @@
         <div class="briefing-header" style="display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid var(--border-subtle); background: var(--bg-tertiary);">
           <div style="display: flex; align-items: center; gap: 8px;">
             <div class="briefing-icon" style="color: var(--text-primary); display: flex; align-items: center;"><Info :size="18" /></div>
-            <div class="briefing-title" style="font-size: 14px; font-weight: 600; color: var(--text-primary);">同步日志</div>
+            <div class="briefing-title" style="font-size: 14px; font-weight: 600; color: var(--text-primary);">活动与同步记录</div>
           </div>
           <button class="briefing-close" @click="showSyncLogsModal = false" title="关闭" style="background: none; border: none; color: var(--text-tertiary); cursor: pointer; padding: 4px; border-radius: var(--radius-default); display: flex; align-items: center; justify-content: center;">
             <X :size="14" />
@@ -745,7 +745,7 @@
         
         <div style="padding: 16px; display: flex; flex-direction: column; gap: 8px; max-height: 60vh; overflow-y: auto;">
           <div v-if="syncLogs.length === 0" style="text-align: center; color: var(--text-tertiary); padding: 20px;">
-            暂无同步日志
+            暂无连接或同步记录
           </div>
           <div v-else v-for="(log, idx) in syncLogs" :key="idx" style="border: 1px solid var(--border-subtle); border-radius: var(--radius-default); padding: 12px; background: var(--bg-primary);">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
@@ -851,8 +851,11 @@ const pcClass = computed(() => {
 });
 
 const currentErrorDetail = computed(() => {
-  const errStep = pairingSteps.value.find(s => s.status === 'error');
-  return errStep ? errStep.detail : '';
+  const priority = ['relay_sync', 'relay_ack', 'relay_notify', 'relay_connect', 'lan_sync', 'save_config', 'parse'];
+  const errStep = priority
+    .map(id => pairingSteps.value.find(step => step.id === id && step.status === 'error'))
+    .find(Boolean);
+  return errStep?.detail || '配对未完成，请查看活动与同步记录。';
 });
 
 const normalizeLegacyStatus = (status) => ({
@@ -1144,9 +1147,10 @@ const overallConnectionLabel = computed(() => {
 
 const openSyncLogs = async () => {
   try {
-    syncLogs.value = await window.electronAPI.getSyncRuns();
+    syncLogs.value = await window.appAPI.getSyncRuns();
   } catch (e) {
     console.error("Failed to load sync logs:", e);
+    syncLogs.value = [];
   }
   showSyncLogsModal.value = true;
 };
@@ -1994,9 +1998,10 @@ onUnmounted(() => {
   background: var(--bg-primary);
   border-radius: var(--radius-default);
   box-shadow: var(--shadow-lg);
-  padding: 24px;
-  width: 90%;
-  max-width: 440px;
+  padding: 20px;
+  width: min(calc(100vw - 40px), 380px);
+  max-width: none;
+  box-sizing: border-box;
 }
 
 .pairing-progress-header {
@@ -2006,7 +2011,7 @@ onUnmounted(() => {
   font-size: 1.1rem;
   font-weight: 600;
   color: var(--text-primary);
-  margin-bottom: 24px;
+  margin-bottom: 10px;
 }
 
 .pairing-progress-icon {

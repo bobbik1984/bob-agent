@@ -125,7 +125,7 @@ onBeforeUnmount(() => resizeObserver?.disconnect());
 <style scoped>
 .sync-topology {
   position: relative;
-  width: min(100%, 440px);
+  width: min(100%, 320px);
   aspect-ratio: 360 / 260;
   margin-inline: auto;
 }
@@ -142,7 +142,7 @@ onBeforeUnmount(() => resizeObserver?.disconnect());
   stroke: var(--border-strong, #777);
   stroke-width: 2.2;
   stroke-linecap: round;
-  stroke-dasharray: .01 9;
+  stroke-dasharray: .01 5;
   vector-effect: non-scaling-stroke;
   transition: stroke .2s, opacity .2s;
 }
@@ -155,7 +155,7 @@ onBeforeUnmount(() => resizeObserver?.disconnect());
 .sync-edge.is-timeout { stroke: var(--text-tertiary); opacity: .72; }
 .sync-edge.is-skipped { opacity: .18; }
 
-@keyframes sync-march { to { stroke-dashoffset: -18; } }
+@keyframes sync-march { to { stroke-dashoffset: -10; } }
 
 .sync-node {
   position: absolute;
