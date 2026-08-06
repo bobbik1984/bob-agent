@@ -698,6 +698,7 @@ window.appAPI = {
   getSyncConnectivitySnapshot: async () => invoke('get_sync_connectivity_snapshot'),
   getSyncRuns: async () => invoke('get_sync_runs'),
   getSyncTraceEvents: async (traceId) => invoke('get_sync_trace_events', { traceId }),
+  getSyncLogs: async () => invoke('get_sync_logs'),
 
   // ── 扫码 (Mobile Only) ──────────────────────
   systemParseBcbp: async (raw) => invoke('system_parse_bcbp', { raw }),

@@ -712,6 +712,15 @@
           :aria-label="t('settings.p2p_pairing')"
         />
 
+        <div v-if="showIncrementalProgress" class="pairing-sync-progress">
+          <div class="pairing-sync-progress__head">
+            <span>{{ incrementalProgressLabel }}</span>
+            <strong>{{ incrementalProgressPercent }}%</strong>
+          </div>
+          <div class="pairing-sync-progress__track"><div :style="{ width: `${incrementalProgressPercent}%` }"></div></div>
+          <p>{{ incrementalProgressDetail }}</p>
+        </div>
+
         <div v-if="pairingError" class="topo-error-box">
           <ShieldAlert :size="16"/>
           <span>{{ currentErrorDetail }}</span>
@@ -758,7 +767,7 @@
               <span style="font-size: 12px; color: var(--text-tertiary);">{{ new Date(log.finished_at).toLocaleString() }}</span>
             </div>
             <div style="font-size: 13px; color: var(--text-secondary);">
-              {{ log.transport ? `${log.transport.toUpperCase()} · ` : '' }}{{ log.error_code || '数据已在本机确认写入' }}
+              {{ log.transport ? `${log.transport.toUpperCase()} · ` : '' }}{{ formatSyncLogDetail(log) }}
             </div>
           </div>
         </div>
@@ -804,6 +813,7 @@ const { showConfirm, showAlert } = useDialog();
 const showPairingProgress = ref(false);
 const pairingDone = ref(false);
 const pairingError = ref(false);
+const syncProgressState = ref({});
 
 const pairingSteps = ref([]);
 
@@ -812,6 +822,16 @@ const relayConnectStep = computed(() => pairingSteps.value.find(s => s.id === 'r
 const relayNotifyStep = computed(() => pairingSteps.value.find(s => s.id === 'relay_notify'));
 const relayAckStep = computed(() => pairingSteps.value.find(s => s.id === 'relay_ack'));
 const relaySyncStep = computed(() => pairingSteps.value.find(s => s.id === 'relay_sync'));
+const showIncrementalProgress = computed(() => relayAckStep.value?.status === 'done' || ['running','done','error'].includes(relaySyncStep.value?.status));
+const incrementalProgressPercent = computed(() => {
+  if (relaySyncStep.value?.status === 'done') return 100;
+  if (relaySyncStep.value?.status === 'error') return Number(syncProgressState.value.progress || 64);
+  if (relaySyncStep.value?.status === 'running') return Number(syncProgressState.value.progress || 36);
+  if (relayAckStep.value?.status === 'done') return 8;
+  return 0;
+});
+const incrementalProgressLabel = computed(() => relaySyncStep.value?.status === 'done' ? '增量同步完成' : relaySyncStep.value?.status === 'error' ? '增量同步未完成' : '检查并同步增量');
+const incrementalProgressDetail = computed(() => relaySyncStep.value?.detail || syncProgressState.value.detail || (relayAckStep.value?.status === 'done' ? '配对已确认，正在比较双方同步游标。' : '等待增量检查。'));
 
 const lanPathClass = computed(() => {
   if (!lanStep.value) return 'path-inactive';
@@ -970,6 +990,7 @@ const handleMobileScan = async () => {
     try {
       unlistenProgress = await listen('sync:progress', (event) => {
         const { stage, status, detail } = event.payload;
+        syncProgressState.value = { ...syncProgressState.value, ...event.payload };
         updateStep(stage, status, detail || '');
       });
     } catch (e) {
@@ -1147,12 +1168,38 @@ const overallConnectionLabel = computed(() => {
 
 const openSyncLogs = async () => {
   try {
-    syncLogs.value = await window.appAPI.getSyncRuns();
+    const [runsResult, legacyResult] = await Promise.allSettled([
+      window.appAPI.getSyncRuns(),
+      window.appAPI.getSyncLogs(),
+    ]);
+    const runs = runsResult.status === 'fulfilled' && Array.isArray(runsResult.value)
+      ? runsResult.value
+      : [];
+    const legacy = legacyResult.status === 'fulfilled' && Array.isArray(legacyResult.value)
+      ? legacyResult.value.map((log) => ({
+          finished_at: log.timestamp,
+          status: log.status === 'done' ? 'success' : (log.status === 'error' ? 'failed' : log.status),
+          summary: log.action || '同步活动',
+          detail: log.detail || '',
+        }))
+      : [];
+    syncLogs.value = [...runs, ...legacy]
+      .sort((left, right) => Number(right.finished_at || 0) - Number(left.finished_at || 0))
+      .slice(0, 50);
   } catch (e) {
     console.error("Failed to load sync logs:", e);
     syncLogs.value = [];
   }
   showSyncLogsModal.value = true;
+};
+
+const formatSyncLogDetail = (log) => {
+  if (log.detail) return log.detail;
+  if (log.error_code) return log.error_code;
+  if (log.summary?.includes('配对') || log.summary?.includes('连接')) return '连接事实已确认';
+  if (log.status === 'success') return '数据已在本机确认写入';
+  if (log.status === 'running') return '操作进行中';
+  return '未产生本地写入确认';
 };
 
 const pinInput = ref('');
@@ -2190,6 +2237,12 @@ onUnmounted(() => {
   display: flex;
   justify-content: flex-end;
 }
+
+.pairing-sync-progress { margin: 0 2px 14px; }
+.pairing-sync-progress__head { display:flex;justify-content:space-between;color:var(--text-secondary);font-size:12px;margin-bottom:6px; }
+.pairing-sync-progress__track { height:7px;background:var(--bg-tertiary);border-radius:999px;overflow:hidden; }
+.pairing-sync-progress__track div { height:100%;background:var(--user-accent);border-radius:inherit;transition:width .35s ease; }
+.pairing-sync-progress p { margin:6px 0 0;color:var(--text-tertiary);font-size:11px; }
 </style>
 
 

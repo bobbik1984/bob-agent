@@ -1,27 +1,24 @@
 <template>
   <div ref="topologyRef" class="sync-topology" role="img" :aria-label="ariaLabel">
     <svg class="sync-topology__canvas" viewBox="0 0 360 260" preserveAspectRatio="none" aria-hidden="true">
-      <path class="sync-edge" :class="edgeClass(leftLinkState)" :d="edgePaths.left" />
-      <path class="sync-edge" :class="edgeClass(rightLinkState)" :d="edgePaths.right" />
-      <path class="sync-edge sync-edge--lan" :class="edgeClass(paths.lan_direct)" :d="edgePaths.lan" />
+      <path class="sync-edge" :class="edgeClass(leftLinkState)" :d="edgePaths.left.d" />
+      <path class="sync-edge" :class="edgeClass(rightLinkState)" :d="edgePaths.right.d" />
+      <path class="sync-edge sync-edge--lan" :class="edgeClass(paths.lan_direct)" :d="edgePaths.lan.d" />
+      <g :class="pulseClass(leftLinkState, leftReverse)"><circle v-for="(point,index) in edgePaths.left.points" :key="index" :cx="point.x" :cy="point.y" r="2.4" /></g>
+      <g :class="pulseClass(rightLinkState, rightReverse)"><circle v-for="(point,index) in edgePaths.right.points" :key="index" :cx="point.x" :cy="point.y" r="2.4" /></g>
+      <g :class="pulseClass(paths.lan_direct, false)"><circle v-for="(point,index) in edgePaths.lan.points" :key="index" :cx="point.x" :cy="point.y" r="2.4" /></g>
     </svg>
 
     <div ref="relayRef" class="sync-node sync-node--relay" :class="nodeClass(nodes.relay)">
       <Cloud :size="25" :stroke-width="1.6" />
-      <span>{{ labels.relay }}</span>
     </div>
     <div ref="mobileRef" class="sync-node sync-node--mobile" :class="nodeClass(nodes.mobile)">
       <Smartphone :size="25" :stroke-width="1.6" />
-      <span>{{ labels.mobile }}</span>
     </div>
     <div ref="pcRef" class="sync-node sync-node--pc" :class="nodeClass(nodes.pc)">
       <Monitor :size="25" :stroke-width="1.6" />
-      <span>{{ labels.pc }}</span>
     </div>
 
-    <button class="sync-edge-label sync-edge-label--lan" type="button" @click="$emit('select-path', 'lan_direct')">
-      {{ labels.lan }}
-    </button>
   </div>
 </template>
 
@@ -36,13 +33,12 @@ const props = defineProps({
   ariaLabel: { type: String, required: true },
 });
 
-defineEmits(['select-path']);
-
 const topologyRef = ref(null);
 const relayRef = ref(null);
 const mobileRef = ref(null);
 const pcRef = ref(null);
-const edgePaths = reactive({ left: '', right: '', lan: '' });
+const emptyEdge = () => ({ d: '', points: [] });
+const edgePaths = reactive({ left: emptyEdge(), right: emptyEdge(), lan: emptyEdge() });
 let resizeObserver;
 
 const allowedStates = new Set(['pending', 'running', 'success', 'failed', 'timeout', 'unknown', 'skipped']);
@@ -69,6 +65,9 @@ const rightLinkState = computed(() => physicalLinkState([
   props.paths.relay_to_pc,
   props.paths.pc_to_relay,
 ]));
+const leftReverse = computed(() => normalized(props.paths.relay_to_mobile) === 'running' && normalized(props.paths.mobile_to_relay) !== 'running');
+const rightReverse = computed(() => normalized(props.paths.pc_to_relay) === 'running' && normalized(props.paths.relay_to_pc) !== 'running');
+const pulseClass = (state, reverse) => ({ 'sync-pulses': true, 'is-active': normalized(state) === 'running', 'is-reverse': reverse });
 
 const nodeGeometry = (element, topologyRect) => {
   const rect = element.getBoundingClientRect();
@@ -77,8 +76,10 @@ const nodeGeometry = (element, topologyRect) => {
   return {
     x: (rect.left - topologyRect.left + rect.width / 2) * scaleX,
     y: (rect.top - topologyRect.top + rect.height / 2) * scaleY,
-    halfWidth: rect.width * scaleX / 2,
-    halfHeight: rect.height * scaleY / 2,
+    // Links visually connect to the icon, not to the wider icon-plus-label box.
+    // A fixed icon radius keeps at least four dots visible on narrow Android layouts.
+    halfWidth: 15,
+    halfHeight: 15,
   };
 };
 
@@ -92,12 +93,13 @@ const clippedEdge = (from, to) => {
     Math.abs(ux) > 0.0001 ? node.halfWidth / Math.abs(ux) : Infinity,
     Math.abs(uy) > 0.0001 ? node.halfHeight / Math.abs(uy) : Infinity,
   );
-  const gap = 4.5;
+  const gap = 3.5;
   const startDistance = boundaryDistance(from) + gap;
   const endDistance = boundaryDistance(to) + gap;
   const start = { x: from.x + ux * startDistance, y: from.y + uy * startDistance };
   const end = { x: to.x - ux * endDistance, y: to.y - uy * endDistance };
-  return `M ${start.x.toFixed(1)} ${start.y.toFixed(1)} L ${end.x.toFixed(1)} ${end.y.toFixed(1)}`;
+  const points = [0.2,0.4,0.6,0.8].map((ratio) => ({ x: start.x + (end.x-start.x)*ratio, y: start.y + (end.y-start.y)*ratio }));
+  return { d: `M ${start.x.toFixed(1)} ${start.y.toFixed(1)} L ${end.x.toFixed(1)} ${end.y.toFixed(1)}`, points };
 };
 
 const updateGeometry = () => {
@@ -174,44 +176,37 @@ onBeforeUnmount(() => resizeObserver?.disconnect());
   transition: color .2s, opacity .2s;
 }
 
-.sync-node span { font-size: 11px; font-weight: 600; }
-.sync-node--relay { left: 50%; top: 33%; }
-.sync-node--mobile { left: 38.8%; top: 61%; }
-.sync-node--pc { left: 61.2%; top: 61%; }
+.sync-node--relay { left: 50%; top: 29.3%; }
+.sync-node--mobile { left: 36.5%; top: 66.5%; }
+.sync-node--pc { left: 63.5%; top: 66.5%; }
 .sync-node.is-running,
 .sync-node.is-success { color: var(--user-accent); }
 .sync-node.is-failed,
 .sync-node.is-timeout { color: var(--text-primary); }
 .sync-node.is-skipped { opacity: .35; }
 
-.sync-edge-label {
-  position: absolute;
-  left: 50%;
-  top: 67%;
-  transform: translateX(-50%);
-  z-index: 3;
-  border: 0;
-  padding: 2px 7px;
-  border-radius: var(--radius-sm);
-  color: var(--text-tertiary);
-  background: var(--bg-primary);
-  font: inherit;
-  font-size: 10px;
-  cursor: pointer;
-}
-
-.sync-edge-label:focus-visible { outline: 2px solid var(--user-accent); outline-offset: 2px; }
+.sync-pulses { opacity: 0; pointer-events: none; }
+.sync-pulses circle { fill: var(--user-accent); opacity: .18; transform-box: fill-box; transform-origin: center; }
+.sync-pulses.is-active { opacity: 1; }
+.sync-pulses.is-active circle { animation: sync-dot-pulse 1.15s ease-in-out infinite; }
+.sync-pulses.is-active circle:nth-child(2) { animation-delay: .18s; }
+.sync-pulses.is-active circle:nth-child(3) { animation-delay: .36s; }
+.sync-pulses.is-active circle:nth-child(4) { animation-delay: .54s; }
+.sync-pulses.is-active.is-reverse circle:nth-child(1) { animation-delay: .54s; }
+.sync-pulses.is-active.is-reverse circle:nth-child(2) { animation-delay: .36s; }
+.sync-pulses.is-active.is-reverse circle:nth-child(3) { animation-delay: .18s; }
+.sync-pulses.is-active.is-reverse circle:nth-child(4) { animation-delay: 0s; }
+@keyframes sync-dot-pulse { 0%,58%,100% { opacity:.18;transform:scale(.8) } 25% { opacity:1;transform:scale(1.45) } }
 
 @media (max-width: 360px) {
   .sync-node { width: 56px; height: 46px; }
-  .sync-node span { font-size: 10px; }
-  .sync-node--relay { top: 36.4%; }
-  .sync-node--mobile { left: 38.8%; top: 59%; }
-  .sync-node--pc { left: 61.2%; top: 59%; }
-  .sync-edge-label { top: 65%; }
+  .sync-node--relay { top: 31%; }
+  .sync-node--mobile { left: 36.5%; top: 64%; }
+  .sync-node--pc { left: 63.5%; top: 64%; }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .sync-edge.is-running { animation: none; }
+  .sync-pulses.is-active circle { animation: none; opacity: .8; }
 }
 </style>
