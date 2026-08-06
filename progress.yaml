@@ -8,8 +8,34 @@ project:
   - Vue 3
   - Desktop
   - Android
-  updated: '2026-08-05'
+  updated: '2026-08-06'
 phases:
+- name: V0.7.5+ 跨端同步精准诊断与 Relay V2
+  tasks:
+  - text: T-3001 Rust/JS 诊断契约、统一状态枚举与幂等归约器
+    status: done
+  - text: T-3002 三角拓扑首版、Emoji 移除与在线判断修复
+    status: done
+  - text: T-3003 确认 VPS3 Node Relay 为生产运行实现
+    status: done
+  - text: T-3004 将生产 Node Relay 收口到 relay/ 唯一源码目录
+    status: done
+  - text: T-3011 Relay V2 trace 字段与逐跳回执（保持 v1 兼容）
+    status: done
+  - text: T-3012 Relay 注册、请求、投递、响应回执与稳定错误码
+    status: done
+  - text: T-3013 Relay 双客户端与故障注入测试
+    status: done
+  - text: T-3021 Rust ConnectivitySnapshot 与 Bridge 接入
+    status: done
+  - text: T-3022 最多 50 条真实同步历史与高级诊断分层
+    status: done
+  - text: T-3023 三角拓扑接入真实快照并拆分 Relay 与对端状态
+    status: done
+  - text: T-3031 Rust 41/41、JS 6/6、Relay 11/11 与 Vite 构建验证
+    status: done
+  - text: T-3033 PC/Android 构建产物体积回归门
+    status: todo
 - name: V0.7.5 目标29 工具风险分级 R2/R3 确认 + 记忆契约 + UI 设计系统对齐
   tasks:
   - text: "T-2911 tools.rs 每个工具增加 risk_level R0/R1/R2/R3 字段"

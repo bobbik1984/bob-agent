@@ -43,6 +43,9 @@ mod web_drop;
 mod wechat;
 pub mod lan_sync;
 pub mod sync_engine;
+pub mod sync_diagnostics;
+pub mod sync_history;
+pub mod sync_protocol;
 pub mod skills_sync;
 pub mod sync_resolver;
 
@@ -952,6 +955,9 @@ pub fn run() {
             sync_engine::relay_handshake,
             sync_engine::get_sync_logs,
             sync_engine::get_p2p_relay_status,
+            sync_diagnostics::get_sync_connectivity_snapshot,
+            sync_history::get_sync_runs,
+            sync_history::get_sync_trace_events,
             tool_confirm::tool_confirm_response,
             // 系统状态
             system_is_setup_complete,

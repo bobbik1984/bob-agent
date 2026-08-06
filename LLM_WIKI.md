@@ -246,3 +246,33 @@ AI 自主修改配置（例如自动写入 API Key、修改默认模型等）的
 - **核心实现**: [outbox.rs](file:///d:/OneDrive/Learning/Code/Gemini/bob-agent/src-tauri/src/outbox.rs)
   - `write_outbox()`：写入 `bob_outbox.json`。
   - Rust 后端内置 2 秒轮询 of Reconciler 守护进程，通过 6 层校验（操作白名单、Provider 校验、凭证哈希防劫持等）安全合并入最终的 `config.json`。
+
+---
+
+## 🔄 11. 跨端同步诊断与 Relay (Cross-device Sync Diagnostics)
+
+### 11.1 运行架构
+
+- 生产 Relay：VPS3 `/home/ubuntu/bob-relay/src/server.js`，Node.js，监听 `localhost:3090`，由 `relay.bobbik.org` 反向代理。
+- 仓库唯一源码：`relay/`。该目录只部署到 VPS，不进入 PC 安装包、绿色包或 Android 包。
+- `bob-relay.js`、`src-tauri/src/bin/bob-relay.rs`、`bob-relay.service` 是遗留替代实现，不是生产真相源。
+- 客户端网络实现：`src-tauri/src/sync_engine.rs`；Bridge：`src/tauri-bridge.js`；设置页：`src/views/settings/SettingsConnections.vue`。
+
+### 11.2 诊断契约
+
+- Rust 契约：`src-tauri/src/sync_protocol.rs`。
+- Rust 状态归约：`src-tauri/src/sync_diagnostics.rs`。
+- 前端契约/归约：`src/sync/diagnostic-contract.js`、`src/sync/diagnostic-reducer.js`。
+- 三角拓扑：`src/components/sync/SyncTriangleTopology.vue`。
+- 主标识：`trace_id`（一次配对/同步）、`message_id`（一条网络消息）、`sync_id`（一次数据同步）。
+- 标准状态：`pending/running/success/failed/timeout/unknown/skipped`。
+- LAN 为三角形底边；Relay 四段为 Mobile→Relay、Relay→PC、PC→Relay、Relay→Mobile。
+
+### 11.3 不可破坏约束
+
+1. 没有逐跳证据时显示 `unknown/timeout`，不得猜测责任方。
+2. Wakeup、socket connected、message sent 都不等于同步成功；只有接收端事务提交才能记成功。
+3. 用户同步历史只保留最新 50 条，trace events 随所属记录级联清理。
+4. 诊断是同步旁路；诊断写入失败不能阻断正常同步。
+5. 不为诊断新增客户端 npm、Rust、Android 运行时依赖或权限。
+6. 每次候选发布比较 PC/Android 产物体积，异常增长阻断发布。

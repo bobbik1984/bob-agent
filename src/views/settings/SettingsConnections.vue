@@ -36,7 +36,7 @@
             >
               <Smartphone :size="12" />
             </button>
-            <span class="service-status-dot" :class="(connectedDevices.length > 0 || pairingInfo.device_id) ? 'dot-connected' : 'dot-disconnected'"></span>
+            <span class="service-status-dot" :class="overallConnectionClass" :title="overallConnectionLabel"></span>
           </div>
         </div>
         
@@ -701,43 +701,16 @@
     <div v-if="showPairingProgress" class="pairing-overlay">
       <div class="pairing-progress-card">
         <div class="pairing-progress-header">
-          <span class="pairing-progress-icon">🔗</span>
+          <Link2 class="pairing-progress-icon" :size="21" aria-hidden="true" />
           <span>{{ pairingDone ? (pairingError ? '配对失败' : '配对成功!') : '正在配对...' }}</span>
         </div>
 
-        <div class="topology-diagram minimalist-style">
-          <!-- LAN Arc Path -->
-          <svg class="lan-arc-line" viewBox="0 0 100 100" preserveAspectRatio="none" :class="lanPathClass">
-            <path d="M 0 100 Q 50 0 100 100" fill="none" stroke="currentColor" stroke-width="1.5" vector-effect="non-scaling-stroke" stroke-dasharray="6,4" />
-          </svg>
-
-          <div class="topo-node mobile" :class="mobileClass">
-            <Smartphone :size="32" stroke-width="1.5" />
-          </div>
-
-          <div class="topo-paths">
-            <!-- Relay Path -->
-            <div class="topo-path-relay">
-              <div class="relay-leg leg-left" :class="relayPathLeftClass">
-                <div class="path-line"></div>
-                <div v-if="relayPathLeftClass === 'path-active'" class="data-packet"></div>
-              </div>
-              
-              <div class="topo-node cloud" :class="relayNodeClass">
-                <Cloud :size="32" stroke-width="1.5" />
-              </div>
-
-              <div class="relay-leg leg-right" :class="relayPathRightClass">
-                <div class="path-line"></div>
-                <div v-if="relayPathRightClass === 'path-active'" class="data-packet delay-packet"></div>
-              </div>
-            </div>
-          </div>
-
-          <div class="topo-node pc" :class="pcClass">
-            <Monitor :size="32" stroke-width="1.5" />
-          </div>
-        </div>
+        <SyncTriangleTopology
+          :paths="diagnosticPaths"
+          :nodes="diagnosticNodes"
+          :labels="{ mobile: 'Mobile', relay: 'Relay', pc: 'PC', lan: 'LAN' }"
+          :aria-label="t('settings.p2p_pairing')"
+        />
 
         <div v-if="pairingError" class="topo-error-box">
           <ShieldAlert :size="16"/>
@@ -778,14 +751,14 @@
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
               <div style="display: flex; gap: 6px; align-items: center;">
                 <span v-if="log.status === 'success'" style="color: var(--color-success); display: flex;"><CheckCircle :size="14"/></span>
-                <span v-else-if="log.status === 'error'" style="color: var(--color-error); display: flex;"><XCircle :size="14"/></span>
+                <span v-else-if="log.status === 'failed'" style="color: var(--color-error); display: flex;"><XCircle :size="14"/></span>
                 <span v-else style="color: var(--text-tertiary); display: flex;"><Info :size="14"/></span>
-                <span style="font-weight: 600; font-size: 13px;">{{ log.action }}</span>
+                <span style="font-weight: 600; font-size: 13px;">{{ log.summary || (log.status === 'success' ? '同步成功' : '同步失败') }}</span>
               </div>
-              <span style="font-size: 12px; color: var(--text-tertiary);">{{ new Date(log.timestamp).toLocaleTimeString() }}</span>
+              <span style="font-size: 12px; color: var(--text-tertiary);">{{ new Date(log.finished_at).toLocaleString() }}</span>
             </div>
             <div style="font-size: 13px; color: var(--text-secondary);">
-              {{ log.detail }}
+              {{ log.transport ? `${log.transport.toUpperCase()} · ` : '' }}{{ log.error_code || '数据已在本机确认写入' }}
             </div>
           </div>
         </div>
@@ -806,8 +779,10 @@ import {
   Smartphone, Unplug, X, Plus, Loader2, MessageSquare, Check,
   Building2, ExternalLink, Unlink, KeyRound, Network, Info, Copy,
   ShieldAlert, TriangleAlert, QrCode, Lock, Unlock, Scan,
-  Monitor, ChevronDown, Cloud
+  Monitor, ChevronDown, Cloud, Link2
+  , CheckCircle, XCircle
 } from 'lucide-vue-next';
+import SyncTriangleTopology from '../../components/sync/SyncTriangleTopology.vue';
 
 const { t } = useI18n();
 
@@ -879,6 +854,43 @@ const currentErrorDetail = computed(() => {
   const errStep = pairingSteps.value.find(s => s.status === 'error');
   return errStep ? errStep.detail : '';
 });
+
+const normalizeLegacyStatus = (status) => ({
+  done: 'success', error: 'failed', running: 'running', skipped: 'skipped', pending: 'pending',
+}[status] || 'unknown');
+
+// Legacy pairing events do not carry per-hop Relay receipts. Only an end-to-end
+// acknowledgement can prove the return path; otherwise the unobserved hops stay unknown.
+const diagnosticPaths = computed(() => {
+  const observed = connectivitySnapshot.value.active_trace?.paths;
+  if (observed) {
+    return {
+      lan_direct: observed.lan_direct?.status || 'unknown',
+      mobile_to_relay: observed.mobile_to_relay?.status || 'unknown',
+      relay_to_pc: observed.relay_to_pc?.status || 'unknown',
+      pc_to_relay: observed.pc_to_relay?.status || 'unknown',
+      relay_to_mobile: observed.relay_to_mobile?.status || 'unknown',
+    };
+  }
+  const relayRoundTripSucceeded = relayAckStep.value?.status === 'done';
+  const relayRoundTripRunning = ['running', 'done'].includes(relayConnectStep.value?.status)
+    || ['running', 'done'].includes(relayNotifyStep.value?.status);
+  return {
+    lan_direct: normalizeLegacyStatus(lanStep.value?.status),
+    mobile_to_relay: normalizeLegacyStatus(relayConnectStep.value?.status),
+    relay_to_pc: relayRoundTripSucceeded ? 'success' : (relayRoundTripRunning ? 'running' : 'unknown'),
+    pc_to_relay: relayRoundTripSucceeded ? 'success' : 'unknown',
+    relay_to_mobile: relayRoundTripSucceeded ? 'success' : 'unknown',
+  };
+});
+
+const diagnosticNodes = computed(() => ({
+  mobile: mobilePeerOnline.value ? 'success' : (pairingDone.value && !pairingError.value ? 'success' : 'unknown'),
+  relay: connectivitySnapshot.value.relay === 'registered' ? 'success' : (connectivitySnapshot.value.relay === 'connecting' ? 'running' : 'failed'),
+  pc: connectivitySnapshot.value.local_identity === 'ready' ? 'success' : (relayAckStep.value?.status === 'done' || lanStep.value?.status === 'done'
+    ? 'success'
+    : (relayAckStep.value?.status === 'error' ? 'unknown' : 'pending')),
+}));
 
 async function initPairingSteps() {
     pairingSteps.value = [
@@ -1116,10 +1128,23 @@ const showDevicesModal = ref(false);
 
 const showSyncLogsModal = ref(false);
 const syncLogs = ref([]);
+const connectivitySnapshot = ref({ local_identity: 'uninitialized', relay: 'disconnected', peers: [] });
+
+const mobilePeerOnline = computed(() => connectivitySnapshot.value.peers?.some(peer => peer.presence === 'online'));
+const overallConnectionClass = computed(() => {
+  if (connectivitySnapshot.value.relay === 'registered' && mobilePeerOnline.value) return 'dot-connected';
+  if (connectivitySnapshot.value.relay === 'registered') return 'dot-warning';
+  return 'dot-disconnected';
+});
+const overallConnectionLabel = computed(() => {
+  if (connectivitySnapshot.value.relay === 'registered' && mobilePeerOnline.value) return 'Relay 已连接，移动端在线';
+  if (connectivitySnapshot.value.relay === 'registered') return 'Relay 已连接，尚未确认移动端在线';
+  return 'Relay 未连接';
+});
 
 const openSyncLogs = async () => {
   try {
-    syncLogs.value = await invoke('get_sync_logs');
+    syncLogs.value = await window.electronAPI.getSyncRuns();
   } catch (e) {
     console.error("Failed to load sync logs:", e);
   }
@@ -1210,12 +1235,12 @@ const fetchConnectedDevices = async () => {
   }
 };
 
-const isDeviceOnline = async (dev) => {
+const isDeviceOnline = (dev) => {
   // Consider online if seen within last 2 minutes (120000ms)
   return Date.now() - dev.last_seen < 120000;
 };
 
-const formatSyncTime = async (tsStr) => {
+const formatSyncTime = (tsStr) => {
   if (!tsStr) return '未知';
   const ts = parseInt(tsStr);
   if (isNaN(ts)) return '未知';
@@ -1223,7 +1248,7 @@ const formatSyncTime = async (tsStr) => {
   return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 };
 
-const formatTime = async (ts) => {
+const formatTime = (ts) => {
   const d = new Date(ts);
   return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 };
@@ -1568,7 +1593,8 @@ onMounted(async () => {
   // P2P Relay connection status
   const updateP2pRelayStatus = async () => {
     try {
-      p2pRelayConnected.value = await invoke('get_p2p_relay_status');
+      connectivitySnapshot.value = await window.electronAPI.getSyncConnectivitySnapshot();
+      p2pRelayConnected.value = connectivitySnapshot.value.relay === 'registered';
     } catch (e) {
       p2pRelayConnected.value = false;
     }
@@ -1810,6 +1836,9 @@ onUnmounted(() => {
 }
 .dot-connected {
   background: var(--color-success);
+}
+.dot-warning {
+  background: var(--color-warning);
 }
 .dot-disconnected {
   background: var(--text-muted);

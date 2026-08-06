@@ -11,6 +11,7 @@ use std::path::PathBuf;
 use std::fs;
 
 use crate::lan_sync::LanSyncEngine;
+use crate::sync_protocol::{DiagnosticEvent, DiagnosticStage, DiagnosticStatus, TransportKind, SYNC_PROTOCOL_VERSION};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ConnectedDevice {
@@ -125,6 +126,12 @@ pub struct SyncCommandPayload {
     pub skip_relay: bool,
 }
 
+#[derive(Clone)]
+struct SyncTraceContext {
+    sync_id: String,
+    trace_id: String,
+}
+
 #[command]
 pub async fn trigger_mobile_sync(app: AppHandle, payload: SyncCommandPayload) -> Result<(), String> {
     info!("[Sync Engine] trigger_mobile_sync called, listen_only: {}", payload.listen_only);
@@ -146,7 +153,7 @@ pub async fn trigger_mobile_sync(app: AppHandle, payload: SyncCommandPayload) ->
                 
                 let app_for_task = app_clone.clone();
                 tauri::async_runtime::spawn(async move {
-                    if let Err(e) = do_active_sync(app_for_task, active_payload).await {
+                    if let Err(e) = do_active_sync(app_for_task, active_payload, None).await {
                         error!("[Sync Engine] Active sync failed: {}", e);
                     }
                 });
@@ -155,7 +162,126 @@ pub async fn trigger_mobile_sync(app: AppHandle, payload: SyncCommandPayload) ->
         return Ok(());
     }
 
-    do_active_sync(app, payload).await.map_err(|e| e.to_string())
+    let started_at = crate::now_ms();
+    let sync_id = uuid::Uuid::new_v4().to_string();
+    let trace_id = uuid::Uuid::new_v4().to_string();
+    let peer_device_id = payload.device_id.clone();
+    crate::sync_diagnostics::begin_trace(&trace_id, SYNC_PROTOCOL_VERSION);
+    record_diagnostic_event(&trace_id, &sync_id, &peer_device_id, TransportKind::Lan, DiagnosticStage::LanDirect, DiagnosticStatus::Running, 1, None);
+
+    let result = do_active_sync(
+        app,
+        payload,
+        Some(SyncTraceContext { sync_id: sync_id.clone(), trace_id: trace_id.clone() }),
+    ).await;
+    let (status, transport, summary, error_code) = match &result {
+        Ok(transport) => {
+            if *transport == TransportKind::Lan {
+                record_diagnostic_event(&trace_id, &sync_id, &peer_device_id, *transport, DiagnosticStage::LanDirect, DiagnosticStatus::Success, 2, None);
+            } else {
+                record_diagnostic_event(&trace_id, &sync_id, &peer_device_id, TransportKind::Lan, DiagnosticStage::LanDirect, DiagnosticStatus::Skipped, 2, Some("LAN 不可用，已自动切换 Relay"));
+                for (sequence, stage) in [
+                    DiagnosticStage::MobileToRelay,
+                    DiagnosticStage::RelayToPc,
+                    DiagnosticStage::PcProcessing,
+                    DiagnosticStage::PcToRelay,
+                    DiagnosticStage::RelayToMobile,
+                    DiagnosticStage::MobileProcessing,
+                    DiagnosticStage::LocalCommit,
+                ].into_iter().enumerate() {
+                    record_diagnostic_event(&trace_id, &sync_id, &peer_device_id, TransportKind::Relay, stage, DiagnosticStatus::Success, sequence as u64 + 2, None);
+                }
+            }
+            (DiagnosticStatus::Success, Some(*transport), Some("同步完成".to_string()), None)
+        }
+        Err(error) => {
+            record_diagnostic_event(&trace_id, &sync_id, &peer_device_id, TransportKind::Lan, DiagnosticStage::LanDirect, DiagnosticStatus::Failed, 2, Some(error));
+            record_diagnostic_event(&trace_id, &sync_id, &peer_device_id, TransportKind::Relay, DiagnosticStage::LocalCommit, DiagnosticStatus::Unknown, 2, Some(error));
+            (DiagnosticStatus::Failed, None, Some("同步未完成".to_string()), extract_error_code(error))
+        }
+    };
+    let _ = crate::sync_history::record_run(crate::sync_history::SyncRun {
+        sync_id,
+        trace_id,
+        started_at,
+        finished_at: crate::now_ms(),
+        status,
+        transport,
+        peer_device_id: Some(peer_device_id),
+        summary,
+        error_code,
+    });
+    result.map(|_| ())
+}
+
+fn extract_error_code(error: &str) -> Option<String> {
+    error.split_whitespace().find(|part| part.starts_with("ERR-")).map(|part| part.trim_end_matches(':').to_string())
+}
+
+fn record_diagnostic_event(
+    trace_id: &str,
+    sync_id: &str,
+    peer_device_id: &str,
+    transport: TransportKind,
+    stage: DiagnosticStage,
+    status: DiagnosticStatus,
+    sequence: u64,
+    detail: Option<&str>,
+) {
+    let event = DiagnosticEvent {
+        protocol_version: SYNC_PROTOCOL_VERSION,
+        trace_id: trace_id.to_string(),
+        message_id: uuid::Uuid::new_v4().to_string(),
+        sync_id: Some(sync_id.to_string()),
+        from_device_id: crate::read_config().get("device_id").and_then(|value| value.as_str()).unwrap_or("unknown").to_string(),
+        target_device_id: peer_device_id.to_string(),
+        transport,
+        stage,
+        status,
+        sequence,
+        timestamp: crate::now_ms(),
+        error_code: detail.and_then(extract_error_code),
+        detail: detail.map(str::to_string),
+    };
+    crate::sync_diagnostics::apply_event(&event);
+    let _ = crate::sync_history::record_event(event);
+}
+
+fn copy_trace_fields(source: &serde_json::Value, target: &mut serde_json::Value, response: bool) {
+    if source.get("protocol_version").and_then(|value| value.as_u64()).unwrap_or(1) < SYNC_PROTOCOL_VERSION as u64 {
+        return;
+    }
+    for key in ["protocol_version", "trace_id", "message_id", "sync_id"] {
+        if let Some(value) = source.get(key) {
+            target[key] = value.clone();
+        }
+    }
+    if response {
+        target["flow_phase"] = serde_json::json!("response");
+    }
+}
+
+fn record_relay_receipt(receipt: &serde_json::Value, peer_device_id: &str) {
+    let Some(trace_id) = receipt.get("trace_id").and_then(|value| value.as_str()) else { return; };
+    let sync_id = receipt.get("sync_id").and_then(|value| value.as_str()).unwrap_or(trace_id);
+    let (stage, status) = match receipt.get("receipt").and_then(|value| value.as_str()) {
+        Some("relay_request_accepted") => (DiagnosticStage::MobileToRelay, DiagnosticStatus::Success),
+        Some("relay_delivered_to_target") => (DiagnosticStage::RelayToPc, DiagnosticStatus::Success),
+        Some("relay_response_accepted") => (DiagnosticStage::PcToRelay, DiagnosticStatus::Success),
+        Some("relay_delivered_to_origin") => (DiagnosticStage::RelayToMobile, DiagnosticStatus::Success),
+        Some("target_offline") | Some("delivery_failed") => (DiagnosticStage::RelayToPc, DiagnosticStatus::Failed),
+        _ => return,
+    };
+    record_diagnostic_event(
+        trace_id,
+        sync_id,
+        peer_device_id,
+        TransportKind::Relay,
+        stage,
+        status,
+        receipt.get("timestamp").and_then(|value| value.as_u64()).unwrap_or(1),
+        receipt.get("error_code").and_then(|value| value.as_str()),
+    );
 }
 
 #[command]
@@ -225,6 +351,8 @@ pub async fn relay_handshake(app: AppHandle, target_device_id: String, auth_code
     let my_device_id = config.get("device_id").and_then(|v| v.as_str()).unwrap_or("unknown").to_string();
     let my_device_name = config.get("deviceName").and_then(|v| v.as_str()).unwrap_or("").to_string();
     let platform = std::env::consts::OS.to_string();
+    let trace_id = uuid::Uuid::new_v4().to_string();
+    let sync_id = uuid::Uuid::new_v4().to_string();
     
     let relay_url = "wss://relay.bobbik.org".to_string();
     let ws_url = format!("{}/ws/device/{}", relay_url, url_encode_device_id(&my_device_id));
@@ -249,7 +377,11 @@ pub async fn relay_handshake(app: AppHandle, target_device_id: String, auth_code
     // Explicitly register device ID (fixes NGINX URL stripping bugs and ensures we are active)
     let reg_msg = serde_json::json!({
         "type": "register",
-        "deviceId": my_device_id
+        "deviceId": my_device_id,
+        "protocol_version": SYNC_PROTOCOL_VERSION,
+        "trace_id": trace_id.clone(),
+        "message_id": uuid::Uuid::new_v4().to_string(),
+        "sync_id": sync_id.clone()
     });
     let _ = ws_stream.send(Message::Text(reg_msg.to_string().into())).await;
 
@@ -258,6 +390,10 @@ pub async fn relay_handshake(app: AppHandle, target_device_id: String, auth_code
     let msg = serde_json::json!({
         "type": "notify",
         "target_device_id": target_device_id,
+        "protocol_version": SYNC_PROTOCOL_VERSION,
+        "trace_id": trace_id,
+        "message_id": uuid::Uuid::new_v4().to_string(),
+        "sync_id": sync_id,
         "payload": {
             "device_name": my_device_name,
             "platform": platform,
@@ -618,7 +754,7 @@ pub fn log_sync_action(action: &str, status: &str, detail: &str) {
     }
 }
 
-pub async fn do_active_sync(app: AppHandle, payload: SyncCommandPayload) -> Result<(), String> {
+async fn do_active_sync(app: AppHandle, payload: SyncCommandPayload, trace: Option<SyncTraceContext>) -> Result<TransportKind, String> {
     info!("[Sync Engine] Starting active sync to device {}", payload.device_id);
     
     // 鈹€鈹€ Stage 4: LAN sync 鈹€鈹€
@@ -781,7 +917,7 @@ pub async fn do_active_sync(app: AppHandle, payload: SyncCommandPayload) -> Resu
     }
 
     if sync_success {
-        return Ok(());
+        return Ok(TransportKind::Lan);
     }
 
     let _ = app.emit("sync:progress", serde_json::json!({"stage": "lan_sync", "status": "error", "detail": "ERR-SYNC-01: 所有局域网 IP 均不可达"}));
@@ -817,10 +953,17 @@ pub async fn do_active_sync(app: AppHandle, payload: SyncCommandPayload) -> Resu
             }
         };
             
+        let relay_trace_id = trace.as_ref().map(|value| value.trace_id.clone()).unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+        let relay_sync_id = trace.as_ref().map(|value| value.sync_id.clone()).unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+
         // Register
         let reg_msg = serde_json::json!({
             "type": "register",
-            "deviceId": my_device_id
+            "deviceId": my_device_id,
+            "protocol_version": SYNC_PROTOCOL_VERSION,
+            "trace_id": relay_trace_id.clone(),
+            "message_id": uuid::Uuid::new_v4().to_string(),
+            "sync_id": relay_sync_id.clone()
         });
         ws_stream.send(Message::Text(reg_msg.to_string().into())).await.map_err(|e| e.to_string())?;
 
@@ -828,6 +971,10 @@ pub async fn do_active_sync(app: AppHandle, payload: SyncCommandPayload) -> Resu
         let pull_req = serde_json::json!({
             "type": "proxy",
             "target_device_id": payload.device_id,
+            "protocol_version": SYNC_PROTOCOL_VERSION,
+            "trace_id": relay_trace_id,
+            "message_id": uuid::Uuid::new_v4().to_string(),
+            "sync_id": relay_sync_id,
             "payload": {
                 "action": "pull",
                 "auth_code": payload.public_key
@@ -843,7 +990,13 @@ pub async fn do_active_sync(app: AppHandle, payload: SyncCommandPayload) -> Resu
             while let Some(msg) = ws_stream.next().await {
                 if let Ok(Message::Text(text)) = msg {
                     if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
-                        if json.get("type").and_then(|v| v.as_str()) == Some("proxy") {
+                        if json.get("type").and_then(|v| v.as_str()) == Some("diagnostic_receipt") {
+                            record_relay_receipt(&json, &payload.device_id);
+                            if json.get("status").and_then(|v| v.as_str()) == Some("failed") {
+                                let code = json.get("error_code").and_then(|v| v.as_str()).unwrap_or("RLY-UNKNOWN");
+                                return Err(format!("{}: Relay delivery failed", code));
+                            }
+                        } else if json.get("type").and_then(|v| v.as_str()) == Some("proxy") {
                             if let Some(inner_payload) = json.get("payload") {
                                 if inner_payload.get("action").and_then(|v| v.as_str()) == Some("pull_response") {
                                     if let Some(data_val) = inner_payload.get("data") {
@@ -931,7 +1084,7 @@ pub async fn do_active_sync(app: AppHandle, payload: SyncCommandPayload) -> Resu
             let _ = ws_stream.send(Message::Text(push_db_req.to_string().into())).await;
             info!("[Sync Engine] Sent proxy push_db request via Relay.");
         }
-    Ok(())
+    Ok(TransportKind::Relay)
 }
 
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
@@ -953,6 +1106,7 @@ async fn connect_websocket_robust(ws_url: &str) -> Result<(tokio_tungstenite::We
 pub fn start_relay_listener(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
         loop {
+            crate::sync_diagnostics::set_relay_state(crate::sync_diagnostics::RelayConnectionState::Connecting);
             // Re-fetch device_id on every reconnect attempt to handle Identity resets
             let mut current_device_id = String::new();
             for _ in 0..10 {
@@ -964,10 +1118,13 @@ pub fn start_relay_listener(app: AppHandle) {
                 tokio::time::sleep(std::time::Duration::from_secs(3)).await;
             }
             if current_device_id.is_empty() {
+                crate::sync_diagnostics::set_local_identity(crate::sync_diagnostics::LocalIdentityState::Uninitialized);
+                crate::sync_diagnostics::set_relay_state(crate::sync_diagnostics::RelayConnectionState::Disconnected);
                 log::warn!("[Sync Engine] start_relay_listener: could not get device_id, retrying in 5s...");
                 tokio::time::sleep(std::time::Duration::from_secs(5)).await;
                 continue;
             }
+            crate::sync_diagnostics::set_local_identity(crate::sync_diagnostics::LocalIdentityState::Ready);
 
             let relay_url = "wss://relay.bobbik.org".to_string();
             let ws_url = format!("{}/ws/device/{}", relay_url, url_encode_device_id(&current_device_id));
@@ -976,6 +1133,7 @@ pub fn start_relay_listener(app: AppHandle) {
                 Ok((mut ws_stream, _)) => {
                     log::info!("[Sync Engine] Connected to Relay WebSocket: {}", ws_url);
                     RELAY_CONNECTED.store(true, Ordering::SeqCst);
+                    crate::sync_diagnostics::set_relay_state(crate::sync_diagnostics::RelayConnectionState::Registered);
                     
                     // Explicitly register device ID (fixes NGINX URL stripping bugs)
                     let reg_msg = serde_json::json!({
@@ -1038,11 +1196,12 @@ pub fn start_relay_listener(app: AppHandle) {
                                             let expected_auth = crate::crypto::get_pairing_payload(app.state::<crate::crypto::DeviceIdentityState>()).map(|p| p.public_key).unwrap_or_default();
                                             if provided_auth != Some(expected_auth.as_str()) {
                                                 log::error!("[Sync Engine] Auth code mismatch in notify from {}", from_id);
-                                                let ack = serde_json::json!({
+                                                let mut ack = serde_json::json!({
                                                     "type": "ack",
                                                     "target_device_id": from_id,
                                                     "error": "Unauthorized"
                                                 });
+                                                copy_trace_fields(&json, &mut ack, true);
                                                 let _ = tx_mpsc.send(Message::Text(ack.to_string().into())).await;
                                                 continue;
                                             }
@@ -1061,10 +1220,11 @@ pub fn start_relay_listener(app: AppHandle) {
                                             });
 
                                             // Send Ack back
-                                            let ack = serde_json::json!({
+                                            let mut ack = serde_json::json!({
                                                 "type": "ack",
                                                 "target_device_id": from_id,
                                             });
+                                            copy_trace_fields(&json, &mut ack, true);
                                             let _ = tx_mpsc.send(Message::Text(ack.to_string().into())).await;
                                             
                                             // Emit to frontend
@@ -1114,7 +1274,7 @@ pub fn start_relay_listener(app: AppHandle) {
                                                     log::info!("[Sync Engine] Received proxy pull request from {}", from_id);
                                                     let since_ts = inner_payload.get("since_ts").and_then(|v| v.as_i64()).unwrap_or(0);
                                                     if let Ok(sync_data) = export_sync_data(&app, since_ts, true) {
-                                                        let pull_resp = serde_json::json!({
+                                                        let mut pull_resp = serde_json::json!({
                                                             "type": "proxy",
                                                             "target_device_id": from_id,
                                                             "payload": {
@@ -1122,6 +1282,7 @@ pub fn start_relay_listener(app: AppHandle) {
                                                                 "data": sync_data
                                                             }
                                                         });
+                                                        copy_trace_fields(&json, &mut pull_resp, true);
                                                         if let Err(e) = tx_mpsc.send(Message::Text(pull_resp.to_string().into())).await {
                                                             log::error!("[Sync Engine] Failed to send pull_response to {}: {}", from_id, e);
                                                         } else {
@@ -1234,6 +1395,8 @@ pub fn start_relay_listener(app: AppHandle) {
                     RELAY_CONNECTED.store(false, Ordering::SeqCst);
                 }
             }
+            RELAY_CONNECTED.store(false, Ordering::SeqCst);
+            crate::sync_diagnostics::set_relay_state(crate::sync_diagnostics::RelayConnectionState::Disconnected);
             
             // Reconnect backoff
             tokio::time::sleep(std::time::Duration::from_secs(5)).await;

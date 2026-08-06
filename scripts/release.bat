@@ -89,5 +89,7 @@ echo  Installer:  dist-release\bob-installer.exe
 echo  Portable:   dist-release\bob-agent-portable.zip
 echo.
 
-explorer "%DIST_DIR%"
-pause
+if /I not "%BOB_RELEASE_NONINTERACTIVE%"=="1" (
+    explorer "%DIST_DIR%"
+    pause
+)

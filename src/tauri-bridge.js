@@ -695,6 +695,9 @@ window.appAPI = {
   writeMobileOutbox: async (operations) => invoke('write_mobile_outbox', { operations }),
   relayHandshake: async (targetDeviceId, authCode) => invoke('relay_handshake', { targetDeviceId, authCode }),
   getConnectedDevices: async () => invoke('get_connected_devices'),
+  getSyncConnectivitySnapshot: async () => invoke('get_sync_connectivity_snapshot'),
+  getSyncRuns: async () => invoke('get_sync_runs'),
+  getSyncTraceEvents: async (traceId) => invoke('get_sync_trace_events', { traceId }),
 
   // ── 扫码 (Mobile Only) ──────────────────────
   systemParseBcbp: async (raw) => invoke('system_parse_bcbp', { raw }),

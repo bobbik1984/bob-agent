@@ -93,6 +93,9 @@ scripts\release.bat
 
 ```
 bob-agent/
+├── relay/                         # VPS-only Node.js Relay source of truth (not bundled in clients)
+│   ├── src/server.js              # relay.bobbik.org production protocol source
+│   └── tests/                     # Relay compatibility and fault-injection tests
 ├── src-tauri/src/                  # Rust backend / Rust 后端源码
 │   ├── main.rs                     # Tauri entry point / 程序入口
 │   ├── lib.rs                      # App configuration, DB connection, Tray & IPC

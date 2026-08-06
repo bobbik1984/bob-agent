@@ -1,6 +1,6 @@
 [package]
 name = "bob-installer"
-version = "0.7.5"
+version = "0.7.6"
 description = "Bob Agent Installer"
 authors = ["xm_bo"]
 edition = "2021"

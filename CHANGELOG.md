@@ -2,6 +2,29 @@
 
 All notable changes to bob-agent will be documented in this file.
 
+## [Unreleased] - Sync Diagnostics
+
+### Architecture
+- Added versioned Rust/JavaScript diagnostic contracts and idempotent path-state reducers for LAN and four Relay hops.
+- Established `relay/` as the repository source of truth for the VPS3 Node.js Relay; server dependencies remain VPS-only and are not bundled into PC or Android clients.
+- Added backward-compatible Relay v2 trace propagation and explicit registration, request, delivery, response, offline-target and delivery-failure receipts.
+- Replaced the vulnerable server-only `uuid` package with Node's built-in `crypto.randomUUID()`; Relay now has one runtime dependency and passes dependency audit with zero known vulnerabilities.
+- Added structured connectivity snapshots and Bridge APIs, plus a separate sync-run history capped at 50 entries with cascading trace cleanup.
+- Added legacy wakeup routing to the canonical Node Relay implementation.
+- Added structured connectivity snapshots and Bridge APIs, plus a separate sync-run history capped at 50 entries with cascading trace cleanup.
+- Added legacy wakeup routing to the canonical Node Relay implementation.
+
+### UI/UX
+- Added the first responsive triangular Mobile-Relay-PC topology component.
+- Replaced the pairing Emoji with a Lucide icon and fixed Promise-based online/time formatting helpers.
+- Split Relay registration from peer presence in the connection indicator so saved pairing data is no longer shown as online.
+- Split Relay registration from peer presence in the connection indicator so saved pairing data is no longer shown as online.
+
+### Quality gates
+- User sync history is capped at 50 records with trace-event cleanup.
+- Client dependency and package-size diffs are mandatory release gates.
+- Relay v1/v2 compatibility and fault-injection suite passes 11/11 in the mapped `D:\ignore_sync` test environment, including legacy wakeup routing, outbound loss, return-path loss, delay, duplicate receipts and out-of-order receipts.
+
 ## [0.7.5] - 2026-08-05
 
 ### 🏗️ Architecture
