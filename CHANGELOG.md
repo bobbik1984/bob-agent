@@ -2,7 +2,7 @@
 
 All notable changes to bob-agent will be documented in this file.
 
-## [Unreleased] - Sync Diagnostics
+## [0.7.7] - 2026-08-06 - Sync Diagnostics
 
 ### Architecture
 - Added versioned Rust/JavaScript diagnostic contracts and idempotent path-state reducers for LAN and four Relay hops.
@@ -16,6 +16,7 @@ All notable changes to bob-agent will be documented in this file.
 
 ### UI/UX
 - Added the first responsive triangular Mobile-Relay-PC topology component.
+- Refined the topology into a compact equilateral layout with borderless icon nodes and one dotted line per physical link; directional failures remain explicit in the diagnostic status and sync log instead of duplicating arrow paths.
 - Replaced the pairing Emoji with a Lucide icon and fixed Promise-based online/time formatting helpers.
 - Split Relay registration from peer presence in the connection indicator so saved pairing data is no longer shown as online.
 - Split Relay registration from peer presence in the connection indicator so saved pairing data is no longer shown as online.
