@@ -371,25 +371,8 @@ pub async fn write_mobile_outbox(_app: AppHandle, operations: Vec<serde_json::Va
 pub async fn trigger_wakeup_via_relay(app: AppHandle, device_id: String) -> Result<(), String> {
     let config = crate::read_config();
     let my_device_id = config.get("device_id").and_then(|v| v.as_str()).unwrap_or("unknown").to_string();
-    
-    let relay_url = "wss://relay.bobbik.org".to_string();
-    let ws_url = format!("{}/ws/device/{}", relay_url, url_encode_device_id(&my_device_id));
 
     log_sync_action("Relay Wakeup", "running", &format!("Attempting to wake up device: {}", device_id));
-
-    let (mut ws_stream, _) = match tokio::time::timeout(tokio::time::Duration::from_secs(10), connect_websocket_robust(&ws_url)).await {
-        Ok(Ok(stream)) => stream,
-        _ => {
-            log_sync_action("Relay Wakeup", "error", "Failed to connect to relay");
-            return Err("Failed to connect to relay".to_string());
-        }
-    };
-    
-    let reg_msg = serde_json::json!({
-        "type": "register",
-        "deviceId": my_device_id
-    });
-    let _ = ws_stream.send(Message::Text(reg_msg.to_string().into())).await;
 
     let msg = serde_json::json!({
         "type": "wakeup",
@@ -397,9 +380,19 @@ pub async fn trigger_wakeup_via_relay(app: AppHandle, device_id: String) -> Resu
         "from_device_id": my_device_id
     });
     
-    if let Err(e) = ws_stream.send(Message::Text(msg.to_string().into())).await {
-        log_sync_action("Relay Wakeup", "error", &format!("Failed to send wakeup: {}", e));
-        return Err(e.to_string());
+    let relay_tx = {
+        let lock = RELAY_TX.read().unwrap();
+        lock.as_ref().cloned()
+    };
+
+    if let Some(tx) = relay_tx {
+        if let Err(e) = tx.send(tokio_tungstenite::tungstenite::Message::Text(msg.to_string().into())).await {
+            log_sync_action("Relay Wakeup", "error", &format!("Failed to send wakeup: {}", e));
+            return Err(e.to_string());
+        }
+    } else {
+        log_sync_action("Relay Wakeup", "error", "Relay 后台未连接");
+        return Err("Relay 后台未连接".to_string());
     }
 
     log_sync_action("Relay Wakeup", "done", &format!("Wakeup signal sent to {}", device_id));
@@ -410,58 +403,34 @@ pub async fn trigger_wakeup_via_relay(app: AppHandle, device_id: String) -> Resu
 #[command]
 pub async fn relay_handshake(app: AppHandle, target_device_id: String, auth_code: String) -> Result<(), String> {
     let config = crate::read_config();
-    let my_device_id = config.get("device_id").and_then(|v| v.as_str()).unwrap_or("unknown").to_string();
     let my_device_name = config.get("deviceName").and_then(|v| v.as_str()).unwrap_or("").to_string();
     let platform = std::env::consts::OS.to_string();
     let trace_id = uuid::Uuid::new_v4().to_string();
     let sync_id = uuid::Uuid::new_v4().to_string();
     
-    let relay_url = "wss://relay.bobbik.org".to_string();
-    let ws_url = format!("{}/ws/device/{}", relay_url, url_encode_device_id(&my_device_id));
-
-    // 鈹€鈹€ Stage 3a: Connect to Relay server 鈹€鈹€
+    // ── Stage 3a: Verify Relay connection ──
     let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_connect", "status": "running"}));
-    let (mut ws_stream, _) = match tokio::time::timeout(tokio::time::Duration::from_secs(15), connect_websocket_robust(&ws_url)).await {
-        Ok(Ok(stream)) => {
-            let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_connect", "status": "done"}));
-            stream
-        }
-        Ok(Err(e)) => {
-            let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_connect", "status": "error", "detail": format!("ERR-PAIRING-01: 连接拒绝: {}", e)}));
-            let _ = crate::sync_history::record_activity(
-                DiagnosticStatus::Failed,
-                Some(TransportKind::Relay),
-                Some(target_device_id.clone()),
-                "Relay 连接失败",
-                Some("ERR-PAIRING-01".to_string()),
-            );
-            return Err(format!("ERR-PAIRING-01: Failed to connect to relay: {}", e));
-        }
-        Err(_) => {
-            let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_connect", "status": "error", "detail": "ERR-PAIRING-01: 连接超时 (15s)"}));
-            let _ = crate::sync_history::record_activity(
-                DiagnosticStatus::Timeout,
-                Some(TransportKind::Relay),
-                Some(target_device_id.clone()),
-                "Relay 连接超时",
-                Some("ERR-PAIRING-01".to_string()),
-            );
-            return Err("ERR-PAIRING-01: Failed to connect to relay: Timeout".to_string());
-        }
+    
+    let relay_tx = {
+        let lock = RELAY_TX.read().unwrap();
+        lock.as_ref().cloned()
     };
     
-    // Explicitly register device ID (fixes NGINX URL stripping bugs and ensures we are active)
-    let reg_msg = serde_json::json!({
-        "type": "register",
-        "deviceId": my_device_id,
-        "protocol_version": SYNC_PROTOCOL_VERSION,
-        "trace_id": trace_id.clone(),
-        "message_id": uuid::Uuid::new_v4().to_string(),
-        "sync_id": sync_id.clone()
-    });
-    let _ = ws_stream.send(Message::Text(reg_msg.to_string().into())).await;
+    if relay_tx.is_none() {
+        let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_connect", "status": "error", "detail": "ERR-PAIRING-01: Relay 后台未连接"}));
+        let _ = crate::sync_history::record_activity(
+            DiagnosticStatus::Failed,
+            Some(TransportKind::Relay),
+            Some(target_device_id.clone()),
+            "Relay 连接失败",
+            Some("ERR-PAIRING-01".to_string()),
+        );
+        return Err("ERR-PAIRING-01: Relay 后台未连接".to_string());
+    }
+    
+    let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_connect", "status": "done"}));
 
-    // 鈹€鈹€ Stage 3b: Send notify to PC via Relay 鈹€鈹€
+    // ── Stage 3b & 3c: Send notify to PC via Relay and wait for Ack ──
     let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_notify", "status": "running"}));
     let msg = serde_json::json!({
         "type": "notify",
@@ -476,84 +445,44 @@ pub async fn relay_handshake(app: AppHandle, target_device_id: String, auth_code
             "auth_code": auth_code
         }
     });
-    match ws_stream.send(Message::Text(msg.to_string().into())).await {
-        Ok(_) => {
+    
+    match send_relay_request_and_wait(msg, tokio::time::Duration::from_secs(10)).await {
+        Ok(json) => {
             let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_notify", "status": "done"}));
-        }
-        Err(e) => {
-            let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_notify", "status": "error", "detail": format!("ERR-PAIRING-02: {}", e)}));
-            let _ = crate::sync_history::record_activity(
-                DiagnosticStatus::Failed,
-                Some(TransportKind::Relay),
-                Some(target_device_id.clone()),
-                "Relay 配对请求发送失败",
-                Some("ERR-PAIRING-02".to_string()),
-            );
-            return Err(format!("ERR-PAIRING-02: {}", e.to_string()));
-        }
-    }
-
-    // 鈹€鈹€ Stage 3c: Wait for PC ack 鈹€鈹€
-    let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_ack", "status": "running"}));
-    let timeout = tokio::time::Duration::from_secs(10);
-    let ack_task = async {
-        while let Some(msg) = ws_stream.next().await {
-            if let Ok(Message::Text(text)) = msg {
-                if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
-                    if json.get("type").and_then(|v| v.as_str()) == Some("ack") {
-                        if let Some(error_msg) = json.get("error").and_then(|v| v.as_str()) {
-                            return Err(format!("Relay error: {}", error_msg));
-                        }
-                        return Ok(());
-                    }
-                    if let Some(error_msg) = json.get("error").and_then(|v| v.as_str()) {
-                        return Err(format!("Relay error: {}", error_msg));
-                    }
-                }
+            let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_ack", "status": "running"}));
+            
+            if let Some(error_msg) = json.get("error").and_then(|v| v.as_str()) {
+                let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_ack", "status": "error", "detail": format!("ERR-PAIRING-04: {}", error_msg)}));
+                let _ = crate::sync_history::record_activity(
+                    DiagnosticStatus::Failed,
+                    Some(TransportKind::Relay),
+                    Some(target_device_id.clone()),
+                    "目标设备拒绝配对",
+                    Some("ERR-PAIRING-04".to_string()),
+                );
+                return Err(format!("Relay error: {}", error_msg));
             }
-        }
-        Err("Connection closed before ack".to_string())
-    };
-
-    match tokio::select! {
-        res = ack_task => res,
-        _ = tokio::time::sleep(timeout) => {
-            Err("Handshake timeout: PC did not respond within 10s.".to_string())
-        }
-    } {
-        Ok(()) => {
+            
             let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_ack", "status": "done"}));
             let _ = crate::sync_history::record_activity(
                 DiagnosticStatus::Success,
                 Some(TransportKind::Relay),
                 Some(target_device_id.clone()),
-                "Relay 配对握手成功",
+                "Relay 配对成功",
                 None,
             );
             Ok(())
         }
         Err(e) => {
-            if e.contains("Unauthorized") {
-                let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_ack", "status": "error", "detail": "ERR-PAIRING-04: 鉴权失败 (认证码不匹配)"}));
-                let _ = crate::sync_history::record_activity(
-                    DiagnosticStatus::Failed,
-                    Some(TransportKind::Relay),
-                    Some(target_device_id.clone()),
-                    "Relay 配对鉴权失败",
-                    Some("ERR-PAIRING-04".to_string()),
-                );
-                Err("ERR-PAIRING-04: 鉴权失败 (认证码不匹配)".to_string())
-            } else {
-                let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_ack", "status": "error", "detail": format!("ERR-PAIRING-03: {}", e)}));
-                let _ = crate::sync_history::record_activity(
-                    DiagnosticStatus::Failed,
-                    Some(TransportKind::Relay),
-                    Some(target_device_id.clone()),
-                    "PC 未通过 Relay 响应",
-                    Some("ERR-PAIRING-03".to_string()),
-                );
-                Err(format!("ERR-PAIRING-03: {}", e))
-            }
+            let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_ack", "status": "error", "detail": format!("ERR-PAIRING-03: {}", e)}));
+            let _ = crate::sync_history::record_activity(
+                DiagnosticStatus::Timeout,
+                Some(TransportKind::Relay),
+                Some(target_device_id.clone()),
+                "等待目标设备响应超时",
+                Some("ERR-PAIRING-03".to_string()),
+            );
+            Err(format!("ERR-PAIRING-03: {}", e))
         }
     }
 }
