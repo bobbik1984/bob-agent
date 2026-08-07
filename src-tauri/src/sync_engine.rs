@@ -790,13 +790,96 @@ pub fn log_sync_action(action: &str, status: &str, detail: &str) {
 async fn do_active_sync(app: AppHandle, payload: SyncCommandPayload, trace: Option<SyncTraceContext>) -> Result<TransportKind, String> {
     info!("[Sync Engine] Starting active sync to device {}", payload.device_id);
     
-    // 鈹€鈹€ Stage 4: LAN sync 鈹€鈹€
-    let _ = app.emit("sync:progress", serde_json::json!({"stage": "lan_sync", "status": "running"}));
+    // ── Stage: Route Discovery ──
+    let _ = app.emit("sync:progress", serde_json::json!({"stage": "route_discovery", "status": "running", "detail": "多路并发探测中..."}));
     
+    use futures_util::stream::StreamExt;
+    use futures_util::stream::FuturesUnordered;
+
+    let config = crate::read_config();
+    let my_device_id = config.get("device_id").and_then(|v| v.as_str()).unwrap_or("unknown").to_string();
+    let my_device_name = config.get("deviceName").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let platform = std::env::consts::OS.to_string();
+
     let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(5))
+        .timeout(std::time::Duration::from_millis(2500))
         .build()
         .map_err(|e| e.to_string())?;
+
+    let mut tasks = FuturesUnordered::new();
+
+    for ip in &payload.local_ips {
+        let ip_clone = ip.clone();
+        let client_clone = client.clone();
+        let port = payload.port;
+        tasks.push(tauri::async_runtime::spawn(async move {
+            let url = format!("http://{}:{}/v1/health", ip_clone, port);
+            match client_clone.get(&url).send().await {
+                Ok(resp) if resp.status().is_success() => Some((TransportKind::Lan, Some(ip_clone))),
+                _ => None,
+            }
+        }));
+    }
+
+    if !payload.skip_relay {
+        let target_device_id = payload.device_id.clone();
+        let public_key = payload.public_key.clone();
+        let device_name = my_device_name.clone();
+        let platform_clone = platform.clone();
+        
+        tasks.push(tauri::async_runtime::spawn(async move {
+            if !RELAY_CONNECTED.load(Ordering::SeqCst) {
+                return None;
+            }
+            
+            let msg = serde_json::json!({
+                "type": "notify",
+                "target_device_id": target_device_id,
+                "protocol_version": SYNC_PROTOCOL_VERSION,
+                "trace_id": uuid::Uuid::new_v4().to_string(),
+                "message_id": uuid::Uuid::new_v4().to_string(),
+                "sync_id": uuid::Uuid::new_v4().to_string(),
+                "payload": {
+                    "device_name": device_name,
+                    "platform": platform_clone,
+                    "auth_code": public_key
+                }
+            });
+            
+            match send_relay_request_and_wait(msg, tokio::time::Duration::from_secs(5)).await {
+                Ok(json) => {
+                    if json.get("error").is_none() {
+                        Some((TransportKind::Relay, None))
+                    } else {
+                        None
+                    }
+                }
+                Err(_) => None
+            }
+        }));
+    }
+
+    let mut winning_transport = None;
+    while let Some(res) = tasks.next().await {
+        if let Ok(Some(transport)) = res {
+            winning_transport = Some(transport);
+            break;
+        }
+    }
+
+    let (transport, lan_ip) = match winning_transport {
+        Some(t) => t,
+        None => {
+            let err_msg = "ERR-SYNC-01: 所有网络通道 (LAN/Relay) 均不可达或超时";
+            let _ = app.emit("sync:progress", serde_json::json!({"stage": "route_discovery", "status": "error", "detail": err_msg}));
+            log_sync_action("Route Discovery", "error", err_msg);
+            return Err(err_msg.to_string());
+        }
+    };
+    
+    let route_name = if transport == TransportKind::Lan { format!("局域网 ({})", lan_ip.as_deref().unwrap_or("unknown")) } else { "Relay 外网".to_string() };
+    let _ = app.emit("sync:progress", serde_json::json!({"stage": "route_discovery", "status": "done", "detail": format!("通道建立成功: {}", route_name)}));
+    info!("[Sync Engine] Route discovery won by {:?}", transport);
 
     let last_sync_ts: i64 = match app.state::<crate::db::DbState>().0.lock() {
         Ok(conn) => {
@@ -806,21 +889,15 @@ async fn do_active_sync(app: AppHandle, payload: SyncCommandPayload, trace: Opti
         Err(_) => 0,
     };
 
-    let mut sync_success = false;
-    for ip in &payload.local_ips {
+    if transport == TransportKind::Lan {
+        let ip = lan_ip.unwrap();
         let base_url = format!("http://{}:{}", ip, payload.port);
-        info!("[Sync Engine] Trying LAN IP: {}", base_url);
-        let _ = app.emit("sync:progress", serde_json::json!({"stage": "lan_sync", "status": "running", "detail": format!("尝试 {}", ip)}));
+        let _ = app.emit("sync:progress", serde_json::json!({"stage": "lan_sync", "status": "running", "detail": format!("通过 {} 传输数据", ip)}));
         
-        // 1. Pull config from PC
+        let client_full = reqwest::Client::builder().timeout(std::time::Duration::from_secs(30)).build().unwrap();
+
         let pull_url = format!("{}/v1/sync/pull", base_url);
-        
-        let config = crate::read_config();
-        let my_device_id = config.get("device_id").and_then(|v| v.as_str()).unwrap_or("unknown").to_string();
-        let my_device_name = config.get("deviceName").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let platform = std::env::consts::OS.to_string();
-        
-        match client.get(&pull_url)
+        match client_full.get(&pull_url)
             .header("X-Device-Id", &my_device_id)
             .header("X-Platform", &platform)
             .header("X-Device-Name", &my_device_name)
@@ -831,150 +908,77 @@ async fn do_active_sync(app: AppHandle, payload: SyncCommandPayload, trace: Opti
                 if let Ok(json) = resp.json::<serde_json::Value>().await {
                     if let Some(data_val) = json.get("data") {
                         if let Ok(sync_data) = serde_json::from_value::<SyncData>(data_val.clone()) {
-                            info!("[Sync Engine] Successfully pulled full/incremental sync data from PC!");
                             if let Err(e) = import_sync_data(&app, sync_data, last_sync_ts) {
-                                error!("[Sync Engine] Failed to import sync data: {}", e);
-                            } else {
-                                sync_success = true;
-                                
-                                // Update last_sync_ts
-                                let now = crate::now_ms();
-                                if let Ok(conn) = app.state::<crate::db::DbState>().0.lock() {
-                                    let _ = conn.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)", []);
-                                    let _ = conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('last_sync_ts', ?1)", rusqlite::params![now.to_string()]);
-                                }
-
-                                // Also pull skills zip
-                                let skills_url = format!("{}/v1/sync/skills/download", base_url);
-                                let _ = app.emit("sync:progress", serde_json::json!({"stage": "skills_sync", "status": "running"}));
-                                if let Ok(s_resp) = client.get(&skills_url).header("X-Device-Id", &my_device_id).header("X-Device-Name", &my_device_name).header("Authorization", &payload.public_key).send().await {
-                                    if s_resp.status().is_success() {
-                                        if let Ok(bytes) = s_resp.bytes().await {
-                                            let ext_dir = crate::get_external_skills_dir_or_default(&config);
-                                            let _ = crate::skills_sync::unpack_skills(&bytes, &ext_dir);
-                                            info!("[Sync Engine] Successfully pulled and unpacked skills");
-                                        }
-                                    }
-                                }
-
-                                // Also pull notes zip
-                                let notes_url = format!("{}/v1/sync/notes/download", base_url);
-                                let _ = app.emit("sync:progress", serde_json::json!({"stage": "notes_sync", "status": "running"}));
-                                if let Ok(n_resp) = client.get(&notes_url).header("X-Device-Id", &my_device_id).header("X-Device-Name", &my_device_name).header("Authorization", &payload.public_key).send().await {
-                                    if n_resp.status().is_success() {
-                                        if let Ok(bytes) = n_resp.bytes().await {
-                                            let notes_dir = crate::get_data_dir().join("notebook").join("notes");
-                                            let _ = crate::skills_sync::unpack_skills(&bytes, &notes_dir);
-                                            info!("[Sync Engine] Successfully pulled and unpacked notes");
-                                        }
-                                    }
-                                }
-
-                                // Emit config reconciled event so UI updates
-                                let _ = app.emit("config:reconciled", serde_json::json!({"applied": 1}));
-                                sync_success = true;
-                                let _ = app.emit("sync:progress", serde_json::json!({"stage": "lan_sync", "status": "done", "detail": format!("通过 {} 同步成功", ip)}));
+                                let err_msg = format!("导入失败: {}", e);
+                                let _ = app.emit("sync:progress", serde_json::json!({"stage": "lan_sync", "status": "error", "detail": &err_msg}));
+                                return Err(err_msg);
                             }
+                            
+                            let now = crate::now_ms();
+                            if let Ok(conn) = app.state::<crate::db::DbState>().0.lock() {
+                                let _ = conn.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)", []);
+                                let _ = conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('last_sync_ts', ?1)", rusqlite::params![now.to_string()]);
+                            }
+
+                            let _ = app.emit("sync:progress", serde_json::json!({"stage": "skills_sync", "status": "running"}));
+                            let _ = client_full.get(format!("{}/v1/sync/skills/download", base_url)).header("X-Device-Id", &my_device_id).header("X-Device-Name", &my_device_name).header("Authorization", &payload.public_key).send().await
+                                .map(|r| async { if let Ok(bytes) = r.bytes().await { let _ = crate::skills_sync::unpack_skills(&bytes, &crate::get_external_skills_dir_or_default(&config)); } });
+
+                            let _ = app.emit("sync:progress", serde_json::json!({"stage": "notes_sync", "status": "running"}));
+                            let _ = client_full.get(format!("{}/v1/sync/notes/download", base_url)).header("X-Device-Id", &my_device_id).header("X-Device-Name", &my_device_name).header("Authorization", &payload.public_key).send().await
+                                .map(|r| async { if let Ok(bytes) = r.bytes().await { let _ = crate::skills_sync::unpack_skills(&bytes, &crate::get_data_dir().join("notebook").join("notes")); } });
+
+                            let _ = app.emit("config:reconciled", serde_json::json!({"applied": 1}));
                         }
-                    } else if let Some(config) = json.get("config") { // Fallback for old PC version
-                        info!("[Sync Engine] Successfully pulled config from PC!");
-                        crate::write_config(&config);
+                    } else if let Some(config_val) = json.get("config") {
+                        crate::write_config(&config_val);
                         let _ = app.emit("config:reconciled", serde_json::json!({"applied": 1}));
-                        sync_success = true;
                     }
                 }
+            }
+            Ok(resp) if resp.status() == reqwest::StatusCode::UNAUTHORIZED => {
+                let err_msg = "ERR-SYNC-05: 鉴权失败 (无效的配对凭证)";
+                let _ = app.emit("sync:progress", serde_json::json!({"stage": "lan_sync", "status": "error", "detail": err_msg}));
+                return Err(err_msg.to_string());
             }
             Ok(resp) => {
-                if resp.status() == reqwest::StatusCode::UNAUTHORIZED {
-                    let err_msg = "ERR-SYNC-05: 鉴权失败 (无效的配对凭证)";
-                    let _ = app.emit("sync:progress", serde_json::json!({"stage": "lan_sync", "status": "error", "detail": err_msg}));
-                    log_sync_action("LAN Pull", "error", err_msg);
-                    sync_success = false;
-                } else {
-                    let err_msg = format!("HTTP {}", resp.status());
-                    error!("[Sync Engine] Pull request failed: {}", err_msg);
-                    log_sync_action("LAN Pull", "error", &err_msg);
-                }
+                let err_msg = format!("HTTP {}", resp.status());
+                let _ = app.emit("sync:progress", serde_json::json!({"stage": "lan_sync", "status": "error", "detail": &err_msg}));
+                return Err(err_msg);
             }
             Err(e) => {
-                error!("[Sync Engine] Request to {} failed: {}", pull_url, e);
-                log_sync_action("LAN Pull", "error", &e.to_string());
+                let err_msg = e.to_string();
+                let _ = app.emit("sync:progress", serde_json::json!({"stage": "lan_sync", "status": "error", "detail": &err_msg}));
+                return Err(err_msg);
             }
         }
 
-        if sync_success {
-            // 2. Push outbox to PC (if any)
-            let outbox_path = get_mobile_outbox_path();
-            if outbox_path.exists() {
-                if let Ok(data) = fs::read_to_string(&outbox_path) {
-                    if let Ok(mock_outbox) = serde_json::from_str::<serde_json::Value>(&data) {
-                        let outbox_url = format!("{}/v1/sync/push", base_url);
-                        match client.post(&outbox_url)
-                            .header("X-Device-Id", &my_device_id)
-                            .header("X-Platform", &platform)
-                            .header("X-Device-Name", &my_device_name)
-                            .header("Authorization", &payload.public_key)
-                            .json(&mock_outbox).send().await {
-                            Ok(resp) if resp.status().is_success() => {
-                                info!("[Sync Engine] Successfully pushed outbox to PC!");
-                                let _ = fs::remove_file(&outbox_path);
-                            }
-                            _ => {
-                                error!("[Sync Engine] Failed to push outbox to PC.");
-                            }
-                        }
-                    }
+        use std::fs;
+        let outbox_path = get_mobile_outbox_path();
+        if outbox_path.exists() {
+            if let Ok(data) = fs::read_to_string(&outbox_path) {
+                if let Ok(mock_outbox) = serde_json::from_str::<serde_json::Value>(&data) {
+                    let outbox_url = format!("{}/v1/sync/push", base_url);
+                    let _ = client_full.post(&outbox_url).header("X-Device-Id", &my_device_id).header("X-Platform", &platform).header("X-Device-Name", &my_device_name).header("Authorization", &payload.public_key).json(&mock_outbox).send().await;
+                    let _ = fs::remove_file(&outbox_path);
                 }
             }
-            
-            // 3. Push local DB changes to PC
-            if let Ok(local_sync_data) = export_sync_data(&app, last_sync_ts, false) {
-                let push_db_url = format!("{}/v1/sync/push_db", base_url);
-                let _ = app.emit("sync:progress", serde_json::json!({"stage": "lan_sync", "status": "running", "detail": "鎺ㄩ€佹湰鍦版暟鎹埌鐢佃剳..."}));
-                match client.post(&push_db_url)
-                    .header("X-Device-Id", &my_device_id)
-                    .header("X-Platform", &platform)
-                    .header("X-Device-Name", &my_device_name)
-                    .header("Authorization", &payload.public_key)
-                    .json(&local_sync_data).send().await {
-                    Ok(resp) if resp.status().is_success() => {
-                        info!("[Sync Engine] Successfully pushed SQLite data to PC!");
-                    }
-                    _ => {
-                        error!("[Sync Engine] Failed to push SQLite data to PC.");
-                    }
-                }
-            }
-            break;
         }
-    }
+        
+        if let Ok(local_sync_data) = export_sync_data(&app, last_sync_ts, false) {
+            let push_db_url = format!("{}/v1/sync/push_db", base_url);
+            let _ = client_full.post(&push_db_url).header("X-Device-Id", &my_device_id).header("X-Platform", &platform).header("X-Device-Name", &my_device_name).header("Authorization", &payload.public_key).json(&local_sync_data).send().await;
+        }
 
-    if sync_success {
+        let _ = app.emit("sync:progress", serde_json::json!({"stage": "lan_sync", "status": "done"}));
         return Ok(TransportKind::Lan);
-    }
 
-    let _ = app.emit("sync:progress", serde_json::json!({"stage": "lan_sync", "status": "error", "detail": "ERR-SYNC-01: 所有局域网 IP 均不可达"}));
-    info!("[Sync Engine] All LAN attempts failed.");
-
-    if payload.skip_relay {
-        return Err("ERR-SYNC-01: LAN Sync failed".to_string());
-    }
-
-    info!("[Sync Engine] Falling back to Relay Tunnel.");
+    } else {
+        let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_sync", "status": "running", "detail": "通过 Relay 传输数据..."}));
         
-        // 鈹€鈹€ Stage 5: Relay tunnel sync 鈹€鈹€
-        let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_sync", "status": "running", "detail": "连接 Relay 隧道..."}));
-        
-        if !RELAY_CONNECTED.load(Ordering::SeqCst) {
-            let err_msg = "ERR-SYNC-02: Relay 后台未连接";
-            let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_sync", "status": "error", "detail": err_msg}));
-            return Err(err_msg.to_string());
-        }
-            
         let relay_trace_id = trace.as_ref().map(|value| value.trace_id.clone()).unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
         let relay_sync_id = trace.as_ref().map(|value| value.sync_id.clone()).unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
 
-        // Send pull request
         let pull_req = serde_json::json!({
             "type": "proxy",
             "target_device_id": payload.device_id,
@@ -988,54 +992,32 @@ async fn do_active_sync(app: AppHandle, payload: SyncCommandPayload, trace: Opti
             }
         });
 
-        info!("[Sync Engine] Sent proxy pull request. Waiting for response...");
-        let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_sync", "status": "running", "detail": "请求拉取数据 (对话、日程、票据...)"}));
-
         match send_relay_request_and_wait(pull_req, tokio::time::Duration::from_secs(45)).await {
             Ok(response) => {
-                let sync_data = if let Some(inner_payload) = response.get("payload") {
+                if let Some(inner_payload) = response.get("payload") {
                     if let Some(data_val) = inner_payload.get("data") {
-                        serde_json::from_value::<SyncData>(data_val.clone()).map_err(|e| e.to_string())
-                    } else {
-                        Err("No data in pull_response".to_string())
-                    }
-                } else {
-                    Err("No payload in pull_response".to_string())
-                };
-
-                match sync_data {
-                    Ok(sync_data) => {
-                        info!("[Sync Engine] Successfully pulled sync data via Relay!");
-                        let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_sync", "status": "running", "detail": "收到云端数据，正在进行本地合并..."}));
-                        if let Err(e) = import_sync_data(&app, sync_data, 0) { // For relay pull we might not have accurate last_sync_ts right now
-                            let err_msg = format!("ERR-SYNC-03: 导入数据失败: {}", e);
-                            let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_sync", "status": "error", "detail": &err_msg}));
-                            log_sync_action("Relay Import", "error", &err_msg);
-                            return Err(format!("Failed to import sync data: {}", e));
+                        if let Ok(sync_data) = serde_json::from_value::<SyncData>(data_val.clone()) {
+                            if let Err(e) = import_sync_data(&app, sync_data, 0) {
+                                let err_msg = format!("导入失败: {}", e);
+                                let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_sync", "status": "error", "detail": &err_msg}));
+                                return Err(err_msg);
+                            }
+                            let _ = app.emit("config:reconciled", serde_json::json!({"applied": 1}));
                         }
-                        let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_sync", "status": "done"}));
-                        let _ = app.emit("config:reconciled", serde_json::json!({"applied": 1}));
-                    }
-                    Err(e) => {
-                        let err_msg = format!("ERR-SYNC-03: 解析拉取数据失败: {}", e);
-                        let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_sync", "status": "error", "detail": &err_msg}));
-                        log_sync_action("Relay Pull Parse", "error", &err_msg);
-                        return Err(err_msg);
                     }
                 }
             }
             Err(e) => {
-                let err_msg = format!("ERR-SYNC-02: Relay 拉取失败: {}", e);
+                let err_msg = format!("Relay Pull 失败: {}", e);
                 let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_sync", "status": "error", "detail": &err_msg}));
-                log_sync_action("Relay Pull", "error", &err_msg);
-                return Err(e);
+                return Err(err_msg);
             }
         }
 
-        // 2. Push outbox to PC via Relay
+        use std::fs;
         let outbox_path = get_mobile_outbox_path();
         if outbox_path.exists() {
-            if let Ok(data) = std::fs::read_to_string(&outbox_path) {
+            if let Ok(data) = fs::read_to_string(&outbox_path) {
                 if let Ok(mock_outbox) = serde_json::from_str::<serde_json::Value>(&data) {
                     let push_req = serde_json::json!({
                         "type": "proxy",
@@ -1046,20 +1028,15 @@ async fn do_active_sync(app: AppHandle, payload: SyncCommandPayload, trace: Opti
                             "data": mock_outbox
                         }
                     });
-                    let relay_tx = {
-                        let lock = RELAY_TX.read().unwrap();
-                        lock.as_ref().cloned()
-                    };
-                    if let Some(tx) = relay_tx {
+                    let tx_opt = RELAY_TX.read().unwrap().as_ref().cloned();
+                    if let Some(tx) = tx_opt {
                         let _ = tx.send(Message::Text(push_req.to_string().into())).await;
                     }
-                    info!("[Sync Engine] Sent proxy push request. (Ignoring response for now)");
-                    let _ = std::fs::remove_file(&outbox_path);
+                    let _ = fs::remove_file(&outbox_path);
                 }
             }
         }
         
-        // 3. Push local DB changes to PC via Relay
         if let Ok(local_sync_data) = export_sync_data(&app, last_sync_ts, true) {
             let push_db_req = serde_json::json!({
                 "type": "proxy",
@@ -1070,17 +1047,17 @@ async fn do_active_sync(app: AppHandle, payload: SyncCommandPayload, trace: Opti
                     "data": local_sync_data
                 }
             });
-            let relay_tx = {
-                let lock = RELAY_TX.read().unwrap();
-                lock.as_ref().cloned()
-            };
-            if let Some(tx) = relay_tx {
+            let tx_opt = RELAY_TX.read().unwrap().as_ref().cloned();
+            if let Some(tx) = tx_opt {
                 let _ = tx.send(Message::Text(push_db_req.to_string().into())).await;
             }
-            info!("[Sync Engine] Sent proxy push_db request via Relay.");
         }
-    Ok(TransportKind::Relay)
+
+        let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_sync", "status": "done"}));
+        return Ok(TransportKind::Relay);
+    }
 }
+
 
 use tokio_tungstenite::connect_async;
 use futures_util::{StreamExt, SinkExt};

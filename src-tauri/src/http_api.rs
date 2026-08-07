@@ -917,6 +917,7 @@ pub fn start_http_server(app: AppHandle) {
     // 启动一个专门用于外网下载的 0.0.0.0:3722 服务，仅暴露下载路由和局域网同步路由
     let public_state = ApiState { app };
     let public_router = Router::new()
+        .route("/v1/health", get(handle_health))
         .route("/v1/dl/{token}", get(handle_download))
         .route("/v1/sync", get(handle_sync_ws))
         .route("/v1/sync/pull", get(handle_sync_pull))
