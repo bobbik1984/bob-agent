@@ -875,7 +875,7 @@ const currentErrorDetail = computed(() => {
   const errStep = priority
     .map(id => pairingSteps.value.find(step => step.id === id && step.status === 'error'))
     .find(Boolean);
-  return errStep?.detail || '配对未完成，请查看{{ $t('settings.pairing_logs_title') }}。';
+    return errStep?.detail || t('settings.pairing_failed');
 });
 
 const normalizeLegacyStatus = (status) => ({
