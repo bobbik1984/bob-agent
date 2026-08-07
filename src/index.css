@@ -1081,7 +1081,7 @@ code.hljs {
 .animate-spin { animation: spin 1s linear infinite; }
 
 /* ── Mobile Layout Global Rules ── */
-@media (max-aspect-ratio: 99999/100000) {
+
   .mobile-header {
     display: flex;
     align-items: center;
@@ -1181,7 +1181,6 @@ code.hljs {
     max-width: 100%;
     font-size: 10px;
   }
-}
 
 .btn-primary-outline {
   background: rgba(var(--user-accent-rgb, 39,118,187), 0.1);

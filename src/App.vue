@@ -334,7 +334,7 @@ provide('lastSyncStatus', lastSyncStatus);
 
 // ── 响应式移动端检测 (宽高比 1:1 断点) ──
 function checkMobile() {
-  return window.matchMedia('(max-aspect-ratio: 99999/100000)').matches;
+  return window.innerHeight > window.innerWidth;
 }
 const isMobile = ref(checkMobile());
 provide('isMobile', isMobile);
@@ -1728,16 +1728,13 @@ function onFabPointerUp(e) {
 .app-shell.is-mobile .content {
   padding-bottom: calc(60px + env(safe-area-inset-bottom, 0px));
 }
-@media (max-aspect-ratio: 99999/100000) {
-  .content > * {
-    flex: 1;
-    min-height: 0;
-    height: auto !important;
-  }
-  .content > .mobile-tab-grid {
-    flex: none !important;
-    height: auto !important;
-  }
+.app-shell.is-mobile .content > * {
+  flex: 1;
+  min-height: 0;
+}
+.app-shell.is-mobile .content > .mobile-tab-grid {
+  flex: none !important;
+  height: auto !important;
 }
 
 /* ── 启动画面 ──────────────────────────────────────── */
