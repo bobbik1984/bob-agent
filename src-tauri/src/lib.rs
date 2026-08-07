@@ -1332,10 +1332,10 @@ pub fn run() {
                 lan_engine.start_broadcast(3722); // HTTP API public port is 3722
                 // We should store this in app state if we need to stop it later, but for now we let it run
                 app.manage(lan_engine);
-
-                // 启动 Relay WebSocket 监听器
-                sync_engine::start_relay_listener(app.handle().clone());
             }
+
+            // 启动 Relay WebSocket 监听器 (所有端)
+            sync_engine::start_relay_listener(app.handle().clone());
 
             // ── MCP 扩展引擎 ──
             tauri::async_runtime::spawn(async {
