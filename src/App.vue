@@ -334,7 +334,7 @@ provide('lastSyncStatus', lastSyncStatus);
 
 // ── 响应式移动端检测 (宽高比 1:1 断点) ──
 function checkMobile() {
-  return window.innerHeight > window.innerWidth;
+  return window.matchMedia('(max-aspect-ratio: 99999/100000)').matches;
 }
 const isMobile = ref(checkMobile());
 provide('isMobile', isMobile);
