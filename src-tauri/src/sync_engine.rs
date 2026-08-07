@@ -802,7 +802,7 @@ async fn do_active_sync(app: AppHandle, payload: SyncCommandPayload, trace: Opti
     let platform = std::env::consts::OS.to_string();
 
     let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_millis(2500))
+        .timeout(std::time::Duration::from_millis(5000)) // 增加到 5 秒以防部分手机休眠唤醒慢
         .build()
         .map_err(|e| e.to_string())?;
 
@@ -828,6 +828,13 @@ async fn do_active_sync(app: AppHandle, payload: SyncCommandPayload, trace: Opti
         let platform_clone = platform.clone();
         
         tasks.push(tauri::async_runtime::spawn(async move {
+            let mut waited = 0;
+            // 手机刚扫码唤醒时，后台 Websocket 可能还未重连成功。给予最多 8 秒的重连宽限期。
+            while !RELAY_CONNECTED.load(Ordering::SeqCst) && waited < 16 {
+                tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                waited += 1;
+            }
+
             if !RELAY_CONNECTED.load(Ordering::SeqCst) {
                 return None;
             }
@@ -1028,6 +1035,7 @@ async fn do_active_sync(app: AppHandle, payload: SyncCommandPayload, trace: Opti
                             "data": mock_outbox
                         }
                     });
+                    
                     let tx_opt = RELAY_TX.read().unwrap().as_ref().cloned();
                     if let Some(tx) = tx_opt {
                         let _ = tx.send(Message::Text(push_req.to_string().into())).await;
@@ -1057,6 +1065,7 @@ async fn do_active_sync(app: AppHandle, payload: SyncCommandPayload, trace: Opti
         return Ok(TransportKind::Relay);
     }
 }
+
 
 
 use tokio_tungstenite::connect_async;
