@@ -17,12 +17,26 @@ pub fn init_db(data_dir: &std::path::Path) -> Connection {
         let is_healthy = match Connection::open(&db_path) {
             Ok(probe) => {
                 let mut healthy = false;
-                if let Ok(mut stmt) = probe.prepare("PRAGMA quick_check;") {
+                
+                // T-2225: PRAGMA quick_check; can take >5s on large mobile DBs, causing black screen.
+                // We use a lightweight check on Android to ensure DB is readable, and quick_check on PC.
+                #[cfg(target_os = "android")]
+                let check_query = "SELECT 1 FROM sqlite_schema LIMIT 1;";
+                #[cfg(not(target_os = "android"))]
+                let check_query = "PRAGMA quick_check;";
+                
+                if let Ok(mut stmt) = probe.prepare(check_query) {
                     if let Ok(mut rows) = stmt.query([]) {
                         if let Ok(Some(row)) = rows.next() {
-                            let result: String = row.get(0).unwrap_or_default();
-                            if result.to_lowercase() == "ok" {
-                                healthy = true;
+                            #[cfg(target_os = "android")]
+                            { healthy = true; } // If we can read schema, it's alive.
+                            
+                            #[cfg(not(target_os = "android"))]
+                            {
+                                let result: String = row.get(0).unwrap_or_default();
+                                if result.to_lowercase() == "ok" {
+                                    healthy = true;
+                                }
                             }
                         }
                     }

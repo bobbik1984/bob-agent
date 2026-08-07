@@ -978,8 +978,7 @@ const handleMobileScan = async () => {
       return;
     }
 
-    const existingConfig = await window.appAPI.getConfig();
-    const existingPayload = existingConfig?.pairing_payload;
+    const existingPayload = await window.appAPI.getConfig('pairing_payload');
     if (existingPayload && existingPayload.device_id && existingPayload.device_id !== payload.device_id) {
       const isOverride = await showConfirm(`⚠️ 身份不匹配\n\n您正在扫描一个新的 PC (ID: ${payload.device_id.substring(0, 8)})\n但本机已绑定了另一个 PC (ID: ${existingPayload.device_id.substring(0, 8)})\n\n是否覆盖现有配对？(可能会导致同步记录分叉)`);
       if (!isOverride) return;
