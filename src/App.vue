@@ -328,7 +328,9 @@ const quickNoteRef = ref(null);
 const mobileDrawerOpen = ref(false);
 
 const lastSyncTime = ref(localStorage.getItem('bob-last-sync-time') || '');
+const lastSyncStatus = ref(localStorage.getItem('bob-last-sync-status') || '');
 provide('lastSyncTime', lastSyncTime);
+provide('lastSyncStatus', lastSyncStatus);
 
 // ── 响应式移动端检测 (宽高比 1:1 断点) ──
 function checkMobile() {
@@ -566,7 +568,9 @@ onMounted(async () => {
       unlistenSync = await listen('sync:completed', (event) => {
         if (event.payload && event.payload.timestamp) {
           lastSyncTime.value = event.payload.timestamp.toString();
+          lastSyncStatus.value = 'success';
           localStorage.setItem('bob-last-sync-time', lastSyncTime.value);
+          localStorage.setItem('bob-last-sync-status', 'success');
           console.log(`[Sync] sync:completed received (${event.payload.direction}), updated lastSyncTime.`);
         }
       });
@@ -654,9 +658,13 @@ onMounted(async () => {
         if (window.appAPI.triggerMobileSync) {
           window.appAPI.triggerMobileSync(pairingPayload).then(() => {
             console.log('[Sync] 后台同步成功！');
+            lastSyncStatus.value = 'success';
             localStorage.setItem('bob-last-sync-time', Date.now().toString());
+            localStorage.setItem('bob-last-sync-status', 'success');
           }).catch(e => {
             console.warn('[Sync] 后台同步失败 (对方可能处于离线状态)，启动静默UDP监听...', e);
+            lastSyncStatus.value = 'error';
+            localStorage.setItem('bob-last-sync-status', 'error');
             window.appAPI.triggerMobileSync({ ...pairingPayload, listen_only: true }).catch(err => console.error(err));
           });
         }

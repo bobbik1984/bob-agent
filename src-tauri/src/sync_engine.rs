@@ -1268,9 +1268,14 @@ pub fn start_relay_listener(app: AppHandle) {
                                             
                                             // Verify auth code
                                             let provided_auth = json.get("payload").and_then(|p| p.get("auth_code")).and_then(|a| a.as_str());
-                                            let expected_auth = crate::crypto::get_pairing_payload(app.state::<crate::crypto::DeviceIdentityState>()).map(|p| p.public_key).unwrap_or_default();
-                                            if provided_auth != Some(expected_auth.as_str()) {
-                                                log::error!("[Sync Engine] Auth code mismatch in notify from {}", from_id);
+                                            let expected_auth_res = crate::crypto::get_pairing_payload(app.state::<crate::crypto::DeviceIdentityState>());
+                                            let expected_auth = expected_auth_res.as_ref().map(|p| p.public_key.as_str()).unwrap_or_default();
+                                            if provided_auth != Some(expected_auth) {
+                                                if expected_auth_res.is_err() {
+                                                    log::error!("[Sync Engine] Auth code mismatch in notify from {}: Local keys are locked/unavailable", from_id);
+                                                } else {
+                                                    log::error!("[Sync Engine] Auth code mismatch in notify from {}", from_id);
+                                                }
                                                 let _ = crate::sync_history::record_activity(
                                                     DiagnosticStatus::Failed,
                                                     Some(TransportKind::Relay),
@@ -1337,9 +1342,14 @@ pub fn start_relay_listener(app: AppHandle) {
                                                 
                                                 // Verify auth code for proxy
                                                 let provided_auth = inner_payload.get("auth_code").and_then(|a| a.as_str());
-                                                let expected_auth = crate::crypto::get_pairing_payload(app.state::<crate::crypto::DeviceIdentityState>()).map(|p| p.public_key).unwrap_or_default();
-                                                if provided_auth != Some(expected_auth.as_str()) {
-                                                    log::error!("[Sync Engine] Auth code mismatch in proxy from {}", from_id);
+                                                let expected_auth_res = crate::crypto::get_pairing_payload(app.state::<crate::crypto::DeviceIdentityState>());
+                                                let expected_auth = expected_auth_res.as_ref().map(|p| p.public_key.as_str()).unwrap_or_default();
+                                                if provided_auth != Some(expected_auth) {
+                                                    if expected_auth_res.is_err() {
+                                                        log::error!("[Sync Engine] Auth code mismatch in proxy from {}: Local keys are locked/unavailable", from_id);
+                                                    } else {
+                                                        log::error!("[Sync Engine] Auth code mismatch in proxy from {}", from_id);
+                                                    }
                                                     let err_resp = serde_json::json!({
                                                         "type": "proxy",
                                                         "target_device_id": from_id,

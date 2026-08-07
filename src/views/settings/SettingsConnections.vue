@@ -29,12 +29,14 @@
               <Info :size="12" />
             </button>
             <button 
-              v-if="connectedDevices.length > 0" 
+              v-if="isUnlocked && pairingInfo.device_id" 
               class="device-indicator-btn"
               @click.stop="showDevicesModal = true" 
-              :title="connectedDevices.map(d => `${d.platform === 'android' ? 'Android' : d.platform} (${d.device_id.substring(0, 8)})`).join('\n')"
+              :title="`上次同步状态: ${lastSyncStatus === 'success' ? '成功' : '未知/失败'}`"
+              :style="{ color: lastSyncStatus === 'success' ? 'var(--user-accent)' : 'var(--text-muted)' }"
             >
-              <Smartphone :size="12" />
+              <Monitor v-if="isNativeMobile" :size="14" />
+              <Smartphone v-else :size="14" />
             </button>
             <span class="service-status-dot" :class="overallConnectionClass" :title="overallConnectionLabel"></span>
           </div>
@@ -803,6 +805,7 @@ const emit = defineEmits(['config-changed']);
 const isNativeMobile = inject('isNativeMobile', false);
 const isMobile = inject('isMobile', ref(false));
 const lastSyncTime = inject('lastSyncTime', ref(''));
+const lastSyncStatus = inject('lastSyncStatus', ref(''));
 const hideDesktopChannels = computed(() => isNativeMobile || isMobile.value);
 
 import { useDialog } from '@/composables/useDialog.js';
@@ -885,25 +888,30 @@ const normalizeLegacyStatus = (status) => ({
 // Legacy pairing events do not carry per-hop Relay receipts. Only an end-to-end
 // acknowledgement can prove the return path; otherwise the unobserved hops stay unknown.
 const diagnosticPaths = computed(() => {
+  const forceSuccess = pairingDone.value && !pairingError.value;
+  const mapStatus = (status) => forceSuccess && (status === 'running' || status === 'success') ? 'success' : status;
+
   const observed = connectivitySnapshot.value.active_trace?.paths;
   if (observed) {
     return {
-      lan_direct: observed.lan_direct?.status || 'unknown',
-      mobile_to_relay: observed.mobile_to_relay?.status || 'unknown',
-      relay_to_pc: observed.relay_to_pc?.status || 'unknown',
-      pc_to_relay: observed.pc_to_relay?.status || 'unknown',
-      relay_to_mobile: observed.relay_to_mobile?.status || 'unknown',
+      lan_direct: mapStatus(observed.lan_direct?.status || 'unknown'),
+      mobile_to_relay: mapStatus(observed.mobile_to_relay?.status || 'unknown'),
+      relay_to_pc: mapStatus(observed.relay_to_pc?.status || 'unknown'),
+      pc_to_relay: mapStatus(observed.pc_to_relay?.status || 'unknown'),
+      relay_to_mobile: mapStatus(observed.relay_to_mobile?.status || 'unknown'),
     };
   }
   const relayRoundTripSucceeded = relayAckStep.value?.status === 'done';
   const relayRoundTripRunning = ['running', 'done'].includes(relayConnectStep.value?.status)
     || ['running', 'done'].includes(relayNotifyStep.value?.status);
+    
+  const mapLegacy = (status) => forceSuccess && (status === 'running' || status === 'success') ? 'success' : status;
   return {
-    lan_direct: normalizeLegacyStatus(lanStep.value?.status),
-    mobile_to_relay: normalizeLegacyStatus(relayConnectStep.value?.status),
-    relay_to_pc: relayRoundTripSucceeded ? 'success' : (relayRoundTripRunning ? 'running' : 'unknown'),
-    pc_to_relay: relayRoundTripSucceeded ? 'success' : 'unknown',
-    relay_to_mobile: relayRoundTripSucceeded ? 'success' : 'unknown',
+    lan_direct: mapLegacy(normalizeLegacyStatus(lanStep.value?.status)),
+    mobile_to_relay: mapLegacy(normalizeLegacyStatus(relayConnectStep.value?.status)),
+    relay_to_pc: mapLegacy(relayRoundTripSucceeded ? 'success' : (relayRoundTripRunning ? 'running' : 'unknown')),
+    pc_to_relay: mapLegacy(relayRoundTripSucceeded ? 'success' : 'unknown'),
+    relay_to_mobile: mapLegacy(relayRoundTripSucceeded ? 'success' : 'unknown'),
   };
 });
 
@@ -1162,13 +1170,13 @@ const connectivitySnapshot = ref({ local_identity: 'uninitialized', relay: 'disc
 
 const mobilePeerOnline = computed(() => connectivitySnapshot.value.peers?.some(peer => peer.presence === 'online'));
 const overallConnectionClass = computed(() => {
-  if (connectivitySnapshot.value.relay === 'registered' && mobilePeerOnline.value) return 'dot-connected';
-  if (connectivitySnapshot.value.relay === 'registered') return 'dot-warning';
+  if (connectivitySnapshot.value.relay === 'registered') return 'dot-connected';
+  if (connectivitySnapshot.value.relay === 'connecting') return 'dot-warning';
   return 'dot-disconnected';
 });
 const overallConnectionLabel = computed(() => {
-  if (connectivitySnapshot.value.relay === 'registered' && mobilePeerOnline.value) return 'Relay 已连接，移动端在线';
-  if (connectivitySnapshot.value.relay === 'registered') return 'Relay 已连接，尚未确认移动端在线';
+  if (connectivitySnapshot.value.relay === 'registered') return 'Relay 基建已连接';
+  if (connectivitySnapshot.value.relay === 'connecting') return 'Relay 连接中...';
   return 'Relay 未连接';
 });
 
@@ -1825,6 +1833,7 @@ onUnmounted(() => {
   justify-content: space-between;
   width: 100%;
   margin-bottom: 8px;
+  gap: 12px;
 }
 
 .device-indicator-btn {

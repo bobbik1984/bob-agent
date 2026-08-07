@@ -1967,6 +1967,7 @@ async function removeSourceBatch(node) {
   border-radius: var(--radius-default);
   padding: 2px;
   gap: 2px;
+  overflow-x: auto;
 }
 .mode-toggle button {
   flex: 1;
