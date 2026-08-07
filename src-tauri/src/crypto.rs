@@ -191,23 +191,24 @@ pub struct PairingPayload {
 
 fn get_candidate_ips() -> Vec<String> {
     let mut ips = Vec::new();
-    if let Ok(interfaces) = get_if_addrs::get_if_addrs() {
-        for iface in interfaces {
-            let name = iface.name.to_lowercase();
+    if let Ok(interfaces) = local_ip_address::list_afinet_netifas() {
+        for (name, ip) in interfaces {
+            let name = name.to_lowercase();
             // Filter out known virtual/vpn interfaces
             if name.contains("tailscale") || name.contains("tap") || name.contains("tun") || 
                name.contains("vethernet") || name.contains("docker") || name.contains("wsl") || 
                name.contains("vboxnet") || name.contains("vmware") || name.contains("openvpn") {
                 continue;
             }
-            if let get_if_addrs::IfAddr::V4(addr) = iface.addr {
-                let ip = addr.ip;
-                // Exclude loopback and link-local
-                if ip.is_loopback() || ip.is_link_local() {
-                    continue;
-                }
-                // Check if it's a private IP (RFC1918)
-                let octets = ip.octets();
+            
+            // Exclude loopback and link-local
+            if ip.is_loopback() || ip.to_string().starts_with("169.254.") {
+                continue;
+            }
+            
+            // We want to capture private IPs
+            if let std::net::IpAddr::V4(ipv4) = ip {
+                let octets = ipv4.octets();
                 let is_private = octets[0] == 10 || 
                                  (octets[0] == 172 && octets[1] >= 16 && octets[1] <= 31) ||
                                  (octets[0] == 192 && octets[1] == 168);

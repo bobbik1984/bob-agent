@@ -1651,7 +1651,7 @@ onMounted(async () => {
   // P2P Relay connection status
   const updateP2pRelayStatus = async () => {
     try {
-      connectivitySnapshot.value = await window.electronAPI.getSyncConnectivitySnapshot();
+        connectivitySnapshot.value = await window.appAPI.getSyncConnectivitySnapshot();
       p2pRelayConnected.value = connectivitySnapshot.value.relay === 'registered';
     } catch (e) {
       p2pRelayConnected.value = false;
