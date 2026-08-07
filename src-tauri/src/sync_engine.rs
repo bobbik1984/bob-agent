@@ -12,9 +12,23 @@ use std::sync::Mutex;
 use tokio::sync::oneshot;
 use tokio_tungstenite::tungstenite::protocol::Message;
 
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum RelayTerminal {
+    Ack,
+    ProxyResponse,
+    CommitAck,
+    AnyResponse,
+}
+
+pub struct RelayRequestWaiter {
+    pub tx: oneshot::Sender<serde_json::Value>,
+    pub terminal: RelayTerminal,
+}
+
 lazy_static! {
     pub static ref RELAY_TX: RwLock<Option<tokio::sync::mpsc::Sender<Message>>> = RwLock::new(None);
-    pub static ref PENDING_REQUESTS: RwLock<HashMap<String, oneshot::Sender<serde_json::Value>>> = RwLock::new(HashMap::new());
+    pub static ref PENDING_REQUESTS: RwLock<HashMap<String, RelayRequestWaiter>> = RwLock::new(HashMap::new());
     pub static ref RELAY_RECONNECT_TRIGGER: Mutex<Option<tokio::sync::mpsc::Sender<()>>> = Mutex::new(None);
 }
 use std::path::PathBuf;
@@ -26,16 +40,18 @@ use crate::sync_protocol::{DiagnosticEvent, DiagnosticStage, DiagnosticStatus, T
 pub async fn send_relay_request_and_wait(
     request: serde_json::Value,
     timeout: tokio::time::Duration,
+    terminal: RelayTerminal,
 ) -> Result<serde_json::Value, String> {
     let trace_id = request.get("trace_id").and_then(|v| v.as_str()).unwrap_or_default().to_string();
-    if trace_id.is_empty() {
-        return Err("Request missing trace_id".to_string());
+    let message_id = request.get("message_id").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+    if trace_id.is_empty() || message_id.is_empty() {
+        return Err("Request missing trace_id or message_id".to_string());
     }
 
     let (tx, rx) = oneshot::channel();
     {
         let mut pending = PENDING_REQUESTS.write().unwrap();
-        pending.insert(trace_id.clone(), tx);
+        pending.insert(message_id.clone(), RelayRequestWaiter { tx, terminal });
     }
 
     let relay_tx = {
@@ -51,16 +67,12 @@ pub async fn send_relay_request_and_wait(
 
     if send_result.is_err() {
         let mut pending = PENDING_REQUESTS.write().unwrap();
-        pending.remove(&trace_id);
+        pending.remove(&message_id);
         return Err("ERR-SYNC-02: Failed to send to Relay".to_string());
     }
 
     match tokio::time::timeout(timeout, rx).await {
         Ok(Ok(response)) => {
-            if response.get("type").and_then(|v| v.as_str()) == Some("diagnostic_receipt") && response.get("status").and_then(|v| v.as_str()) == Some("failed") {
-                let code = response.get("error_code").and_then(|v| v.as_str()).unwrap_or("RLY-UNKNOWN");
-                return Err(format!("{}: Relay delivery failed", code));
-            }
             if response.get("type").and_then(|v| v.as_str()) == Some("error") || response.get("type").and_then(|v| v.as_str()) == Some("proxy_error") {
                 return Err(response.get("error").or_else(|| response.get("message")).and_then(|v| v.as_str()).unwrap_or("Relay error").to_string());
             }
@@ -69,7 +81,7 @@ pub async fn send_relay_request_and_wait(
         Ok(Err(_)) => Err("Relay response channel closed".to_string()),
         Err(_) => {
             let mut pending = PENDING_REQUESTS.write().unwrap();
-            pending.remove(&trace_id);
+            pending.remove(&message_id);
             Err("ERR-SYNC-02: Relay 请求超时".to_string())
         }
     }
@@ -242,17 +254,7 @@ pub async fn trigger_mobile_sync(app: AppHandle, payload: SyncCommandPayload) ->
                 record_diagnostic_event(&trace_id, &sync_id, &peer_device_id, *transport, DiagnosticStage::LanDirect, DiagnosticStatus::Success, 2, None);
             } else {
                 record_diagnostic_event(&trace_id, &sync_id, &peer_device_id, TransportKind::Lan, DiagnosticStage::LanDirect, DiagnosticStatus::Skipped, 2, Some("LAN 不可用，已自动切换 Relay"));
-                for (sequence, stage) in [
-                    DiagnosticStage::MobileToRelay,
-                    DiagnosticStage::RelayToPc,
-                    DiagnosticStage::PcProcessing,
-                    DiagnosticStage::PcToRelay,
-                    DiagnosticStage::RelayToMobile,
-                    DiagnosticStage::MobileProcessing,
-                    DiagnosticStage::LocalCommit,
-                ].into_iter().enumerate() {
-                    record_diagnostic_event(&trace_id, &sync_id, &peer_device_id, TransportKind::Relay, stage, DiagnosticStatus::Success, sequence as u64 + 2, None);
-                }
+                // Removed synthetic success events. The real events are driven by diagnostic_receipts and terminal ACKs.
             }
             (DiagnosticStatus::Success, Some(*transport), Some("同步完成".to_string()), None)
         }
@@ -313,13 +315,20 @@ fn copy_trace_fields(source: &serde_json::Value, target: &mut serde_json::Value,
     if source.get("protocol_version").and_then(|value| value.as_u64()).unwrap_or(1) < SYNC_PROTOCOL_VERSION as u64 {
         return;
     }
-    for key in ["protocol_version", "trace_id", "message_id", "sync_id"] {
+    for key in ["protocol_version", "trace_id", "sync_id"] {
         if let Some(value) = source.get(key) {
             target[key] = value.clone();
         }
     }
     if response {
         target["flow_phase"] = serde_json::json!("response");
+        if let Some(msg_id) = source.get("message_id") {
+            target["ref_message_id"] = msg_id.clone();
+        }
+    } else {
+        if let Some(msg_id) = source.get("message_id") {
+            target["message_id"] = msg_id.clone();
+        }
     }
 }
 
@@ -361,8 +370,11 @@ pub async fn write_mobile_outbox(_app: AppHandle, operations: Vec<serde_json::Va
     outbox.extend(operations);
 
     let data = serde_json::to_string_pretty(&outbox).map_err(|e| e.to_string())?;
-    fs::write(&path, data).map_err(|e| e.to_string())?;
     
+    let temp_path = path.with_extension("tmp");
+    fs::write(&temp_path, data).map_err(|e| e.to_string())?;
+    fs::rename(&temp_path, &path).map_err(|e| e.to_string())?;
+
     info!("[Sync Engine] Appended to mobile outbox, total items: {}", outbox.len());
     Ok(())
 }
@@ -446,7 +458,7 @@ pub async fn relay_handshake(app: AppHandle, target_device_id: String, auth_code
         }
     });
     
-    match send_relay_request_and_wait(msg, tokio::time::Duration::from_secs(10)).await {
+    match send_relay_request_and_wait(msg, tokio::time::Duration::from_secs(10), RelayTerminal::Ack).await {
         Ok(json) => {
             let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_notify", "status": "done"}));
             let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_ack", "status": "running"}));
@@ -566,7 +578,8 @@ pub fn export_sync_data(app: &AppHandle, since_ts: i64, is_relay: bool) -> Resul
 pub fn import_sync_data(app: &AppHandle, data: SyncData, last_sync_ts: i64) -> Result<(), String> {
     crate::write_config(&data.config);
     let db = app.state::<crate::db::DbState>();
-    let conn = db.0.lock().map_err(|_| "Failed to lock db")?;
+    let mut conn = db.0.lock().map_err(|_| "Failed to lock db")?;
+    let tx_sql = conn.transaction().map_err(|e| e.to_string())?;
     let ts = crate::now_ms();
 
     // 1. Process Tombstones FIRST (Physical Deletion)
@@ -586,19 +599,19 @@ pub fn import_sync_data(app: &AppHandle, data: SyncData, last_sync_ts: i64) -> R
                 
                 if let Some(q) = query {
                     // Check local updated_at to ensure deletion is newer than last update
-                    let local_updated_at: i64 = conn.query_row(
+                    let local_updated_at: i64 = tx_sql.query_row(
                         &format!("SELECT updated_at FROM {} WHERE id = ?1", table),
                         rusqlite::params![record_key],
                         |row| row.get(0)
                     ).unwrap_or(0);
                     
                     if deleted_at >= local_updated_at {
-                        let _ = conn.execute(q, rusqlite::params![record_key]);
+                        tx_sql.execute(q, rusqlite::params![record_key]).map_err(|e| e.to_string())?;
                         // Record tombstone locally to prevent ghost resurrections
-                        let _ = conn.execute(
+                        tx_sql.execute(
                             "INSERT OR REPLACE INTO sync_tombstones (table_name, record_key, deleted_at) VALUES (?1, ?2, ?3)", 
                             rusqlite::params![table, record_key, deleted_at]
-                        );
+                        ).map_err(|e| e.to_string())?;
                     }
                 }
             }
@@ -606,8 +619,8 @@ pub fn import_sync_data(app: &AppHandle, data: SyncData, last_sync_ts: i64) -> R
     }
 
     // Generic blind replace (for one-way configs and readonly tables)
-    let mut import_replace = |table: &str, rows: Vec<serde_json::Value>, cols: &[&str]| {
-        if rows.is_empty() { return; }
+    let mut import_replace = |table: &str, rows: Vec<serde_json::Value>, cols: &[&str]| -> Result<(), rusqlite::Error> {
+        if rows.is_empty() { return Ok(()); }
         let placeholders = vec!["?"; cols.len()].join(", ");
         let query = format!("INSERT OR REPLACE INTO {} ({}) VALUES ({})", table, cols.join(", "), placeholders);
         for row in rows {
@@ -620,14 +633,15 @@ pub fn import_sync_data(app: &AppHandle, data: SyncData, last_sync_ts: i64) -> R
                     else if let Some(f) = val.as_f64() { params.push(rusqlite::types::Value::Real(f)); }
                     else { params.push(rusqlite::types::Value::Null); }
                 }
-                let _ = conn.execute(&query, rusqlite::params_from_iter(params));
+                tx_sql.execute(&query, rusqlite::params_from_iter(params))?;
             }
         }
+        Ok(())
     };
 
     // LWW (Last-Write-Wins) strategy with Conflict Detection
-    let mut import_lww = |table: &str, rows: Vec<serde_json::Value>, cols: &[&str]| {
-        if rows.is_empty() { return; }
+    let mut import_lww = |table: &str, rows: Vec<serde_json::Value>, cols: &[&str]| -> Result<(), rusqlite::Error> {
+        if rows.is_empty() { return Ok(()); }
         let placeholders = vec!["?"; cols.len()].join(", ");
         let query_insert = format!("INSERT OR REPLACE INTO {} ({}) VALUES ({})", table, cols.join(", "), placeholders);
         let query_check = format!("SELECT updated_at FROM {} WHERE id = ?1", table);
@@ -637,7 +651,7 @@ pub fn import_sync_data(app: &AppHandle, data: SyncData, last_sync_ts: i64) -> R
                 let id = obj.get("id").and_then(|v| v.as_str()).unwrap_or("");
                 let remote_updated_at = obj.get("updated_at").and_then(|v| v.as_i64()).unwrap_or(0);
                 
-                let local_updated_at: i64 = conn.query_row(&query_check, rusqlite::params![id], |r| r.get(0)).unwrap_or(0);
+                let local_updated_at: i64 = tx_sql.query_row(&query_check, rusqlite::params![id], |r| r.get(0)).unwrap_or(0);
                 
                 // CONFLICT DETECTION
                 let is_conflict = local_updated_at > last_sync_ts && remote_updated_at > last_sync_ts && local_updated_at != remote_updated_at;
@@ -660,7 +674,7 @@ pub fn import_sync_data(app: &AppHandle, data: SyncData, last_sync_ts: i64) -> R
                         // Append to title/label if it exists
                         if *col == "title" || *col == "label" {
                             if let Some(s) = val.as_str() {
-                                val = serde_json::Value::String(format!("{} (鎵嬫満鍚屾鍐茬獊鍓湰)", s));
+                                val = serde_json::Value::String(format!("{} (手机同步冲突副本)", s));
                             }
                         }
                         
@@ -671,14 +685,14 @@ pub fn import_sync_data(app: &AppHandle, data: SyncData, last_sync_ts: i64) -> R
                     }
                     
                     // Insert the conflict copy
-                    let _ = conn.execute(&query_insert, rusqlite::params_from_iter(params));
+                    tx_sql.execute(&query_insert, rusqlite::params_from_iter(params))?;
                     
                     // Record to sync_conflicts
                     let ts = crate::now_ms();
-                    let _ = conn.execute(
+                    tx_sql.execute(
                         "INSERT INTO sync_conflicts (id, table_name, local_id, remote_id, status, created_at) VALUES (?1, ?2, ?3, ?4, 'pending', ?5)",
                         rusqlite::params![ulid::Ulid::new().to_string(), table, id, conflict_id, ts]
-                    );
+                    )?;
                     
                 } else if remote_updated_at > local_updated_at {
                     // Normal LWW overwrite
@@ -690,14 +704,15 @@ pub fn import_sync_data(app: &AppHandle, data: SyncData, last_sync_ts: i64) -> R
                         else if let Some(f) = val.as_f64() { params.push(rusqlite::types::Value::Real(f)); }
                         else { params.push(rusqlite::types::Value::Null); }
                     }
-                    let _ = conn.execute(&query_insert, rusqlite::params_from_iter(params));
+                    tx_sql.execute(&query_insert, rusqlite::params_from_iter(params))?;
                 }
             }
         }
+        Ok(())
     };
 
-    import_replace("settings", data.settings.clone(), &["key", "value"]);
-    import_lww("conversations", data.conversations.clone(), &["id", "title", "model", "cost", "last_message", "last_role", "created_at", "updated_at"]);
+    import_replace("settings", data.settings.clone(), &["key", "value"]).map_err(|e| e.to_string())?;
+    import_lww("conversations", data.conversations.clone(), &["id", "title", "model", "cost", "last_message", "last_role", "created_at", "updated_at"]).map_err(|e| e.to_string())?;
 
     // Append-only strategy for messages (de-dupe by sync_id)
     if !data.messages.is_empty() {
@@ -705,9 +720,9 @@ pub fn import_sync_data(app: &AppHandle, data: SyncData, last_sync_ts: i64) -> R
             if let Some(obj) = msg.as_object() {
                 let sync_id = obj.get("sync_id").and_then(|v| v.as_str()).unwrap_or("");
                 if !sync_id.is_empty() {
-                    let existing: i32 = conn.query_row("SELECT 1 FROM messages WHERE sync_id = ?1", rusqlite::params![sync_id], |_| Ok(1)).unwrap_or(0);
+                    let existing: i32 = tx_sql.query_row("SELECT 1 FROM messages WHERE sync_id = ?1", rusqlite::params![sync_id], |_| Ok(1)).unwrap_or(0);
                     if existing == 0 {
-                        let _ = conn.execute(
+                        tx_sql.execute(
                             "INSERT INTO messages (conversation_id, role, content, image_base64, created_at, from_channel, sync_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
                             rusqlite::params![
                                 obj.get("conversation_id").and_then(|v| v.as_str()).unwrap_or(""),
@@ -718,17 +733,19 @@ pub fn import_sync_data(app: &AppHandle, data: SyncData, last_sync_ts: i64) -> R
                                 obj.get("from_channel").and_then(|v| v.as_str()).unwrap_or("mobile"),
                                 sync_id
                             ]
-                        );
+                        ).map_err(|e| e.to_string())?;
                     }
                 }
             }
         }
     }
 
-    import_replace("events", data.events.clone(), &["id", "title", "type", "status", "date", "start_time", "end_time", "description", "created_at", "linked_ticket_id"]);
-    import_replace("cron_jobs", data.cron_jobs.clone(), &["id", "title", "cron_expr", "prompt_template", "enabled", "last_run", "created_at"]);
-    import_replace("kg_nodes", data.kg_nodes.clone(), &["id", "label", "node_type", "summary", "source", "metadata", "created_at"]);
-    import_replace("kg_edges", data.kg_edges.clone(), &["source_id", "target_id", "relation", "confidence", "created_at"]);
+    import_replace("events", data.events.clone(), &["id", "title", "type", "status", "date", "start_time", "end_time", "description", "created_at", "linked_ticket_id"]).map_err(|e| e.to_string())?;
+    import_replace("cron_jobs", data.cron_jobs.clone(), &["id", "title", "cron_expr", "prompt_template", "enabled", "last_run", "created_at"]).map_err(|e| e.to_string())?;
+    import_replace("kg_nodes", data.kg_nodes.clone(), &["id", "label", "node_type", "summary", "source", "metadata", "created_at"]).map_err(|e| e.to_string())?;
+    import_replace("kg_edges", data.kg_edges.clone(), &["source_id", "target_id", "relation", "confidence", "created_at"]).map_err(|e| e.to_string())?;
+
+    tx_sql.commit().map_err(|e| e.to_string())?;
 
     // Append to sync_history.json
     let history_path = crate::get_data_dir().join("sync_history.json");
@@ -853,7 +870,7 @@ async fn do_active_sync(app: AppHandle, payload: SyncCommandPayload, trace: Opti
                 }
             });
             
-            match send_relay_request_and_wait(msg, tokio::time::Duration::from_secs(5)).await {
+            match send_relay_request_and_wait(msg, tokio::time::Duration::from_secs(5), RelayTerminal::Ack).await {
                 Ok(json) => {
                     if json.get("error").is_none() {
                         Some((TransportKind::Relay, None))
@@ -999,7 +1016,7 @@ async fn do_active_sync(app: AppHandle, payload: SyncCommandPayload, trace: Opti
             }
         });
 
-        match send_relay_request_and_wait(pull_req, tokio::time::Duration::from_secs(45)).await {
+        match send_relay_request_and_wait(pull_req, tokio::time::Duration::from_secs(45), RelayTerminal::ProxyResponse).await {
             Ok(response) => {
                 if let Some(inner_payload) = response.get("payload") {
                     if let Some(data_val) = inner_payload.get("data") {
@@ -1011,7 +1028,15 @@ async fn do_active_sync(app: AppHandle, payload: SyncCommandPayload, trace: Opti
                             }
                             let _ = app.emit("config:reconciled", serde_json::json!({"applied": 1}));
                         }
+                    } else {
+                        let err_msg = "响应中缺少 data 字段".to_string();
+                        let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_sync", "status": "error", "detail": &err_msg}));
+                        return Err(err_msg);
                     }
+                } else {
+                    let err_msg = "响应中缺少 payload 字段".to_string();
+                    let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_sync", "status": "error", "detail": &err_msg}));
+                    return Err(err_msg);
                 }
             }
             Err(e) => {
@@ -1029,6 +1054,10 @@ async fn do_active_sync(app: AppHandle, payload: SyncCommandPayload, trace: Opti
                     let push_req = serde_json::json!({
                         "type": "proxy",
                         "target_device_id": payload.device_id,
+                        "trace_id": trace.as_ref().map(|t| t.trace_id.clone()).unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
+                        "message_id": uuid::Uuid::new_v4().to_string(),
+                        "sync_id": trace.as_ref().map(|t| t.sync_id.clone()).unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
+                        "protocol_version": SYNC_PROTOCOL_VERSION,
                         "payload": {
                             "action": "push",
                             "auth_code": payload.public_key,
@@ -1036,11 +1065,11 @@ async fn do_active_sync(app: AppHandle, payload: SyncCommandPayload, trace: Opti
                         }
                     });
                     
-                    let tx_opt = RELAY_TX.read().unwrap().as_ref().cloned();
-                    if let Some(tx) = tx_opt {
-                        let _ = tx.send(Message::Text(push_req.to_string().into())).await;
+                    if let Ok(_) = send_relay_request_and_wait(push_req, tokio::time::Duration::from_secs(45), RelayTerminal::CommitAck).await {
+                        let _ = fs::remove_file(&outbox_path);
+                    } else {
+                        log::warn!("[Sync Engine] Push request failed to get CommitAck, outbox retained.");
                     }
-                    let _ = fs::remove_file(&outbox_path);
                 }
             }
         }
@@ -1049,16 +1078,17 @@ async fn do_active_sync(app: AppHandle, payload: SyncCommandPayload, trace: Opti
             let push_db_req = serde_json::json!({
                 "type": "proxy",
                 "target_device_id": payload.device_id,
+                "trace_id": trace.as_ref().map(|t| t.trace_id.clone()).unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
+                "message_id": uuid::Uuid::new_v4().to_string(),
+                "sync_id": trace.as_ref().map(|t| t.sync_id.clone()).unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
+                "protocol_version": SYNC_PROTOCOL_VERSION,
                 "payload": {
                     "action": "push_db",
                     "auth_code": payload.public_key,
                     "data": local_sync_data
                 }
             });
-            let tx_opt = RELAY_TX.read().unwrap().as_ref().cloned();
-            if let Some(tx) = tx_opt {
-                let _ = tx.send(Message::Text(push_db_req.to_string().into())).await;
-            }
+            let _ = send_relay_request_and_wait(push_db_req, tokio::time::Duration::from_secs(45), RelayTerminal::CommitAck).await;
         }
 
         let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_sync", "status": "done"}));
@@ -1186,19 +1216,46 @@ pub fn start_relay_listener(app: AppHandle) {
                             Ok(Message::Text(text)) => {
                                 if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
                                     // Intercept routed responses
-                                    if let Some(trace_id) = json.get("trace_id").and_then(|v| v.as_str()) {
-                                        let is_response = match json.get("type").and_then(|v| v.as_str()) {
-                                            Some("ack") | Some("diagnostic_receipt") | Some("error") | Some("proxy_error") => true,
-                                            Some("proxy") => {
-                                                json.get("payload").and_then(|p| p.get("action")).and_then(|a| a.as_str()) == Some("pull_response")
-                                                || json.get("payload").and_then(|p| p.get("action")).and_then(|a| a.as_str()) == Some("error")
+                                    if let Some(msg_type) = json.get("type").and_then(|v| v.as_str()) {
+                                        if msg_type == "diagnostic_receipt" {
+                                            let peer_id = json.get("from_device_id").and_then(|v| v.as_str()).unwrap_or("unknown");
+                                            record_relay_receipt(&json, peer_id);
+                                            if json.get("status").and_then(|v| v.as_str()) == Some("failed") {
+                                                if let Some(ref_msg_id) = json.get("ref_message_id").and_then(|v| v.as_str()).or_else(|| json.get("message_id").and_then(|v| v.as_str())) {
+                                                    let mut pending = PENDING_REQUESTS.write().unwrap();
+                                                    if let Some(waiter) = pending.remove(ref_msg_id) {
+                                                        let mut err_resp = json.clone();
+                                                        err_resp["type"] = serde_json::json!("error");
+                                                        err_resp["error"] = serde_json::json!(format!("{}: Relay delivery failed", json.get("error_code").and_then(|v| v.as_str()).unwrap_or("RLY-UNKNOWN")));
+                                                        let _ = waiter.tx.send(err_resp);
+                                                    }
+                                                }
                                             }
-                                            _ => false
+                                            continue;
+                                        }
+                                    }
+
+                                    let target_msg_id = json.get("ref_message_id").and_then(|v| v.as_str()).or_else(|| json.get("message_id").and_then(|v| v.as_str()));
+                                    if let Some(ref_msg_id) = target_msg_id {
+                                        let mut pending = PENDING_REQUESTS.write().unwrap();
+                                        let is_match = if let Some(waiter) = pending.get(ref_msg_id) {
+                                            let term_match = match waiter.terminal {
+                                                RelayTerminal::Ack => json.get("type").and_then(|v| v.as_str()) == Some("ack"),
+                                                RelayTerminal::CommitAck => json.get("type").and_then(|v| v.as_str()) == Some("commit_ack"),
+                                                RelayTerminal::ProxyResponse => {
+                                                    json.get("type").and_then(|v| v.as_str()) == Some("proxy") &&
+                                                    json.get("payload").and_then(|p| p.get("action")).map(|v| v.as_str() == Some("pull_response") || v.as_str() == Some("error")).unwrap_or(false)
+                                                }
+                                                RelayTerminal::AnyResponse => true,
+                                            };
+                                            term_match || json.get("type").and_then(|v| v.as_str()) == Some("error") || json.get("type").and_then(|v| v.as_str()) == Some("proxy_error")
+                                        } else {
+                                            false
                                         };
-                                        if is_response {
-                                            let mut pending = PENDING_REQUESTS.write().unwrap();
-                                            if let Some(tx) = pending.remove(trace_id) {
-                                                let _ = tx.send(json.clone());
+
+                                        if is_match {
+                                            if let Some(waiter) = pending.remove(ref_msg_id) {
+                                                let _ = waiter.tx.send(json.clone());
                                                 continue;
                                             }
                                         }
@@ -1341,9 +1398,16 @@ pub fn start_relay_listener(app: AppHandle) {
                                                         if let Some(arr) = data_val.as_array() {
                                                             log::info!("[Sync Engine] Pushing {} operations to PC outbox via Relay", arr.len());
                                                             crate::outbox::write_outbox(arr.clone());
+                                                            
+                                                            let mut commit_ack = serde_json::json!({
+                                                                "type": "commit_ack",
+                                                                "target_device_id": from_id,
+                                                            });
+                                                            copy_trace_fields(&json, &mut commit_ack, true);
+                                                            let _ = tx_mpsc.send(Message::Text(commit_ack.to_string().into())).await;
                                                         }
                                                     }
-                                                                                                } else if action == "rpc_request" {
+                                                } else if action == "rpc_request" {
                                                     log::info!("[Sync Engine] Received proxy rpc_request from {}", from_id);
                                                     let request_id = inner_payload.get("request_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
                                                     let instruction = inner_payload.get("instruction").and_then(|v| v.as_str()).unwrap_or("").to_string();
@@ -1413,6 +1477,14 @@ pub fn start_relay_listener(app: AppHandle) {
                                                                     "Relay 数据写入 PC 失败",
                                                                     Some("ERR-SYNC-RELAY-IMPORT".to_string()),
                                                                 );
+                                                                
+                                                                let mut err_resp = serde_json::json!({
+                                                                    "type": "error",
+                                                                    "target_device_id": from_id,
+                                                                    "error": format!("DB Import failed: {}", e)
+                                                                });
+                                                                copy_trace_fields(&json, &mut err_resp, true);
+                                                                let _ = tx_mpsc.send(Message::Text(err_resp.to_string().into())).await;
                                                             } else {
                                                                 let now = crate::now_ms();
                                                                 if let Ok(conn) = app.state::<crate::db::DbState>().0.lock() {
@@ -1425,6 +1497,13 @@ pub fn start_relay_listener(app: AppHandle) {
                                                                     "已通过 Relay 接收并写入移动端数据",
                                                                     None,
                                                                 );
+                                                                
+                                                                let mut commit_ack = serde_json::json!({
+                                                                    "type": "commit_ack",
+                                                                    "target_device_id": from_id,
+                                                                });
+                                                                copy_trace_fields(&json, &mut commit_ack, true);
+                                                                let _ = tx_mpsc.send(Message::Text(commit_ack.to_string().into())).await;
                                                             }
                                                         }
                                                     }
@@ -1529,3 +1608,29 @@ pub fn force_relay_reconnect() {
         let _ = tx.try_send(());
     }
 }
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn test_receipt_does_not_complete_waiter() {
+        let waiter = RelayRequestWaiter {
+            terminal: RelayTerminal::Ack, // We wait for Ack, not receipt
+            tx: tokio::sync::oneshot::channel().0,
+        };
+        
+        let receipt = json!({
+            "type": "receipt",
+            "receipt": "relay_delivered_to_target",
+            "message_id": "msg1"
+        });
+        
+        // This is a receipt, it should NOT complete the waiter since the terminal is Ack
+        assert_ne!(receipt.get("type").unwrap().as_str().unwrap(), "ack");
+        assert_eq!(waiter.terminal, RelayTerminal::Ack);
+    }
+}
+

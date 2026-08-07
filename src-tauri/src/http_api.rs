@@ -359,9 +359,27 @@ async fn handle_get_conversations(State(state): State<ApiState>) -> impl IntoRes
 // Handler: GET /v1/health
 // ═══════════════════════════════════════════════════════════
 
-async fn handle_health() -> impl IntoResponse {
+async fn handle_health(State(state): State<ApiState>) -> impl IntoResponse {
+    use tauri::Manager;
+    let mut device_id = "unknown".to_string();
+    if let Some(identity_state) = state.app.try_state::<crate::crypto::DeviceIdentityState>() {
+        if let Ok(guard) = identity_state.0.lock() {
+            if let Some(signing_key) = guard.as_ref() {
+                let verifying_key = ed25519_dalek::VerifyingKey::from(signing_key);
+                use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+                device_id = BASE64.encode(verifying_key.to_bytes());
+            }
+        }
+    }
+    
     Json(
-        json!({ "status": "ok", "service": "bob-agent-api", "version": env!("CARGO_PKG_VERSION") }),
+        json!({ 
+            "status": "ok", 
+            "service": "bob-agent-api", 
+            "version": env!("CARGO_PKG_VERSION"),
+            "device_id": device_id,
+            "protocol_version": crate::sync_protocol::SYNC_PROTOCOL_VERSION
+        }),
     )
 }
 

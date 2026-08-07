@@ -633,7 +633,7 @@
         <div class="briefing-header" style="display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid var(--border-subtle); background: var(--bg-tertiary);">
           <div style="display: flex; align-items: center; gap: 8px;">
             <div class="briefing-icon" style="color: var(--user-accent, var(--accent-primary)); display: flex; align-items: center;"><Smartphone :size="18" /></div>
-            <div class="briefing-title" style="font-size: 14px; font-weight: 600; color: var(--text-primary);">已配对的设备列表</div>
+            <div class="briefing-title" style="font-size: 14px; font-weight: 600; color: var(--text-primary);">{{ $t('settings.pairing_device_list') }}</div>
           </div>
           <button class="briefing-close" @click="showDevicesModal = false" title="关闭" style="background: none; border: none; color: var(--text-tertiary); cursor: pointer; padding: 4px; border-radius: var(--radius-default); display: flex; align-items: center; justify-content: center;">
             <X :size="14" />
@@ -649,7 +649,7 @@
                 <span style="font-size: 11px; color: var(--text-tertiary); font-family: monospace;">({{ dev.device_id.substring(0, 8) }})</span>
                 <span v-if="dev.syncStatus === 'syncing'" style="font-size: 10px; padding: 2px 6px; background: var(--color-success); border-radius: var(--radius-default); color: white; margin-left: 6px;">🔄 正在同步</span>
               </div>
-              <button class="btn btn-danger-outline btn-sm" style="padding: 4px 8px; font-size: 11px;" @click="handleDisconnectDevice(dev)" title="解绑此设备">
+              <button class="btn btn-danger-outline btn-sm" style="padding: 4px 8px; font-size: 11px;" @click="handleDisconnectDevice(dev)" title="{{ $t('settings.pairing_device_unbind') }}">
                 <Unlink :size="11" /> 解绑
               </button>
             </div>
@@ -702,7 +702,7 @@
       <div class="pairing-progress-card">
         <div class="pairing-progress-header">
           <Link2 class="pairing-progress-icon" :size="21" aria-hidden="true" />
-          <span>{{ pairingDone ? (pairingError ? '配对失败' : '配对成功!') : '正在配对...' }}</span>
+          <span>{{ pairingDone ? (pairingError ? $t('settings.pairing_failed') : $t('settings.pairing_success')) : $t('settings.pairing_in_progress') }}</span>
         </div>
 
         <SyncTriangleTopology
@@ -745,7 +745,7 @@
         <div class="briefing-header" style="display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid var(--border-subtle); background: var(--bg-tertiary);">
           <div style="display: flex; align-items: center; gap: 8px;">
             <div class="briefing-icon" style="color: var(--text-primary); display: flex; align-items: center;"><Info :size="18" /></div>
-            <div class="briefing-title" style="font-size: 14px; font-weight: 600; color: var(--text-primary);">活动与同步记录</div>
+            <div class="briefing-title" style="font-size: 14px; font-weight: 600; color: var(--text-primary);">{{ $t('settings.pairing_logs_title') }}</div>
           </div>
           <button class="briefing-close" @click="showSyncLogsModal = false" title="关闭" style="background: none; border: none; color: var(--text-tertiary); cursor: pointer; padding: 4px; border-radius: var(--radius-default); display: flex; align-items: center; justify-content: center;">
             <X :size="14" />
@@ -754,7 +754,7 @@
         
         <div style="padding: 16px; display: flex; flex-direction: column; gap: 8px; max-height: 60vh; overflow-y: auto;">
           <div v-if="syncLogs.length === 0" style="text-align: center; color: var(--text-tertiary); padding: 20px;">
-            暂无连接或同步记录
+            {{ $t('settings.pairing_logs_empty') }}
           </div>
           <div v-else v-for="(log, idx) in syncLogs" :key="idx" style="border: 1px solid var(--border-subtle); border-radius: var(--radius-default); padding: 12px; background: var(--bg-primary);">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
@@ -875,7 +875,7 @@ const currentErrorDetail = computed(() => {
   const errStep = priority
     .map(id => pairingSteps.value.find(step => step.id === id && step.status === 'error'))
     .find(Boolean);
-  return errStep?.detail || '配对未完成，请查看活动与同步记录。';
+  return errStep?.detail || '配对未完成，请查看{{ $t('settings.pairing_logs_title') }}。';
 });
 
 const normalizeLegacyStatus = (status) => ({
@@ -917,13 +917,13 @@ const diagnosticNodes = computed(() => ({
 
 async function initPairingSteps() {
     pairingSteps.value = [
-    { id: 'parse',         label: '二维码解码',         status: 'pending', detail: '' },
-    { id: 'save_config',   label: '保存配对配置',       status: 'pending', detail: '' },
-    { id: 'lan_sync',      label: '尝试局域网直连同步',   status: 'pending', detail: '' },
-    { id: 'relay_connect', label: '连接中继',         status: 'pending', detail: '' },
-    { id: 'relay_notify',  label: '呼叫设备',         status: 'pending', detail: '' },
-    { id: 'relay_ack',     label: '等待响应',         status: 'pending', detail: '' },
-    { id: 'relay_sync',    label: '中继同步',         status: 'pending', detail: '' },
+    { id: 'parse',         label: t('settings.step_parse'),         status: 'pending', detail: '' },
+    { id: 'save_config',   label: t('settings.step_save_config'),       status: 'pending', detail: '' },
+    { id: 'lan_sync',      label: t('settings.step_lan_sync'),   status: 'pending', detail: '' },
+    { id: 'relay_connect', label: t('settings.step_relay_connect'),         status: 'pending', detail: '' },
+    { id: 'relay_notify',  label: t('settings.step_relay_notify'),         status: 'pending', detail: '' },
+    { id: 'relay_ack',     label: t('settings.step_relay_ack'),         status: 'pending', detail: '' },
+    { id: 'relay_sync',    label: t('settings.step_relay_sync'),         status: 'pending', detail: '' },
   ];
   pairingDone.value = false;
   pairingError.value = false;

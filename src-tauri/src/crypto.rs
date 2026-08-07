@@ -191,13 +191,55 @@ pub struct PairingPayload {
 
 fn get_candidate_ips() -> Vec<String> {
     let mut ips = Vec::new();
+    
+    #[cfg(target_os = "windows")]
+    let mut bad_interfaces = std::collections::HashSet::new();
+    
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        if let Ok(output) = std::process::Command::new("wmic")
+            .args(&["nic", "get", "NetConnectionID,Description"])
+            .creation_flags(CREATE_NO_WINDOW)
+            .output() 
+        {
+            let text = String::from_utf8_lossy(&output.stdout);
+            let mut lines = text.lines();
+            if let Some(header) = lines.next() {
+                if let Some(net_conn_idx) = header.find("NetConnectionID") {
+                    for line in lines {
+                        if line.len() > net_conn_idx {
+                            let desc = line[..net_conn_idx].trim().to_lowercase();
+                            let name = line[net_conn_idx..].trim().to_string();
+                            if !name.is_empty() {
+                                if desc.contains("tailscale") || desc.contains("tap") || desc.contains("tun") || 
+                                   desc.contains("vethernet") || desc.contains("docker") || desc.contains("wsl") || 
+                                   desc.contains("vboxnet") || desc.contains("vmware") || desc.contains("openvpn") ||
+                                   desc.contains("protonvpn") || desc.contains("virtual") || desc.contains("cellular") ||
+                                   desc.contains("mobile broadband") {
+                                    bad_interfaces.insert(name);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     if let Ok(interfaces) = local_ip_address::list_afinet_netifas() {
         for (name, ip) in interfaces {
-            let name = name.to_lowercase();
+            let name_lower = name.to_lowercase();
             // Filter out known virtual/vpn interfaces
-            if name.contains("tailscale") || name.contains("tap") || name.contains("tun") || 
-               name.contains("vethernet") || name.contains("docker") || name.contains("wsl") || 
-               name.contains("vboxnet") || name.contains("vmware") || name.contains("openvpn") {
+            if name_lower.contains("tailscale") || name_lower.contains("tap") || name_lower.contains("tun") || 
+               name_lower.contains("vethernet") || name_lower.contains("docker") || name_lower.contains("wsl") || 
+               name_lower.contains("vboxnet") || name_lower.contains("vmware") || name_lower.contains("openvpn") {
+                continue;
+            }
+            
+            #[cfg(target_os = "windows")]
+            if bad_interfaces.contains(&name) || bad_interfaces.contains(name.trim()) {
                 continue;
             }
             
@@ -225,6 +267,13 @@ fn get_candidate_ips() -> Vec<String> {
             ips.push(ip);
         }
     }
+    
+    // Sort so that 192.168 comes first, then 172, then 10
+    ips.sort_by(|a, b| {
+        let a_is_192 = a.starts_with("192.168.");
+        let b_is_192 = b.starts_with("192.168.");
+        b_is_192.cmp(&a_is_192)
+    });
     
     ips
 }
@@ -260,4 +309,27 @@ pub fn get_pairing_payload(
         port: 3722,
         relay: relay.to_string(),
     })
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_lan_candidate_sorting() {
+        let mut ips = vec![
+            "10.0.0.5".to_string(),
+            "172.16.0.4".to_string(),
+            "192.168.1.100".to_string(),
+        ];
+        
+        ips.sort_by(|a, b| {
+            let a_is_192 = a.starts_with("192.168.");
+            let b_is_192 = b.starts_with("192.168.");
+            b_is_192.cmp(&a_is_192)
+        });
+        
+        assert_eq!(ips[0], "192.168.1.100");
+    }
 }
