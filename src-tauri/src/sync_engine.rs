@@ -1521,3 +1521,11 @@ pub fn clear_shared_intent(app: tauri::AppHandle, filename: String) -> Result<()
 pub fn get_p2p_relay_status() -> bool {
     RELAY_CONNECTED.load(Ordering::SeqCst)
 }
+
+#[tauri::command]
+pub fn force_relay_reconnect() {
+    log::info!("[Sync Engine] Force reconnect triggered by frontend network change");
+    if let Some(tx) = RELAY_RECONNECT_TRIGGER.lock().unwrap().as_ref() {
+        let _ = tx.try_send(());
+    }
+}

@@ -665,8 +665,15 @@ onMounted(async () => {
       doSync();
 
       // Listen for visibility change (wake up from background)
+      window.addEventListener('online', () => {
+        console.log('[Network] Online event detected, forcing Relay reconnect...');
+        if (window.__TAURI__) window.__TAURI__.invoke('force_relay_reconnect');
+      });
+
+      // Listen for visibility change (wake up from background)
       document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'visible') {
+          if (window.__TAURI__) window.__TAURI__.invoke('force_relay_reconnect');
           const lastSync = parseInt(localStorage.getItem('bob-last-sync-time') || '0');
           if (Date.now() - lastSync > 60000) { // 1分钟防抖
             console.log('[Sync] 移动端恢复前台，主动触发同步...');

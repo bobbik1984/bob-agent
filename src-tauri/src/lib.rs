@@ -955,6 +955,7 @@ pub fn run() {
             sync_engine::relay_handshake,
             sync_engine::get_sync_logs,
             sync_engine::get_p2p_relay_status,
+            sync_engine::force_relay_reconnect,
             sync_diagnostics::get_sync_connectivity_snapshot,
             sync_history::get_sync_runs,
             sync_history::get_sync_trace_events,
