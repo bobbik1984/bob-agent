@@ -2,6 +2,15 @@
 
 All notable changes to bob-agent will be documented in this file.
 
+## [Unreleased] - Goal Runtime Documentation Alignment
+
+### Documentation
+- Defined Bob's product north star as a zero-setup, privacy-first personal execution system focused on verified outcome closure.
+- Added `docs/GOAL_RUNTIME.md` as the SSOT for Goal Contract, durable runtime, execution DAG, verification, recovery and outcome-driven memory.
+- Reclassified the current Goal implementation as a Maker–Checker prototype instead of a complete persistent Goal mode.
+- Added the T-3100 roadmap and aligned README, AGENTS, LLM Wiki, architecture, feature, user-guide and progress documentation.
+- Separated SOUL identity from procedural failure memory and established Goal trajectory learning as the Dream evolution direction.
+
 ## [0.7.7] - 2026-08-06 - Sync Diagnostics
 
 ### Architecture

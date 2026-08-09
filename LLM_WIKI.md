@@ -13,7 +13,7 @@
 | **做梦引擎 (记忆整理)** | `App.vue` / 后台守护 | `summarizeSession` | `system_summarize_session` | [dream.rs](file:///d:/OneDrive/Learning/Code/Gemini/bob-agent/src-tauri/src/dream.rs) |
 | **微信穿透网关** | `SettingsView.vue` (QR 扫码) | `wechatGetLoginQr` | `wechat_get_login_qr` | [mod.rs (wechat)](file:///d:/OneDrive/Learning/Code/Gemini/bob-agent/src-tauri/src/wechat/mod.rs) |
 | **Web Drop 极传** | `ChatView.vue` (文件分享) | `startWebDrop` | `start_web_drop` | [web_drop.rs](file:///d:/OneDrive/Learning/Code/Gemini/bob-agent/src-tauri/src/web_drop.rs) |
-| **Goal Mode 闭环执行** | `ChatView.vue` (模式切换) | `llmChat` (携带 mode="goal") | `llm_chat` (调用 goal 循环) | [goal.rs](file:///d:/OneDrive/Learning/Code/Gemini/bob-agent/src-tauri/src/goal.rs) |
+| **Goal Loop 原型** | `ChatView.vue` (模式切换) | `llmChat` (携带 mode="goal") | `llm_chat` (调用 goal 循环) | [goal.rs](file:///d:/OneDrive/Learning/Code/Gemini/bob-agent/src-tauri/src/goal.rs)；目标架构见 `docs/GOAL_RUNTIME.md` |
 | **多模型自动发现** | `SettingsView.vue` (刷新) | `llmRefreshModels` | `llm_refresh_models` | [llm.rs](file:///d:/OneDrive/Learning/Code/Gemini/bob-agent/src-tauri/src/llm.rs) |
 | **MCP 工具生态** | `SettingsView.vue` (配置) | `mcpGetConfig` | `mcp_get_config` | [mcp.rs](file:///d:/OneDrive/Learning/Code/Gemini/bob-agent/src-tauri/src/mcp.rs) |
 | **可视化知识图谱** | `GraphView.vue` (图谱画布) | `kgGetFullGraph` | `kg_get_full_graph` | [kg.rs](file:///d:/OneDrive/Learning/Code/Gemini/bob-agent/src-tauri/src/kg.rs) |
@@ -64,7 +64,7 @@
 ## 🧠 2. 做梦引擎 (Dream Engine / Cognitive Compaction)
 
 ### 2.1 功能概述
-防长线上下文超载的核心机制。每次对话结束，静默分析近 20 轮上下文提取事实偏好。每天夜间或后台空闲时唤起“梦境”，使用 Clerk 低成本模型压缩 Session 归档，并将用户反馈自动重写回 `SOUL.md` 进行人设进化。
+当前 Dream 负责对话摘要、持久事实提取、结构化纠错、记忆清理/合并、SOUL 精炼和执行失败分析。它已经是可运行的记忆整理系统，但尚不是完整的结果驱动用户模型：召回仍以固定最近记录为主，Goal 的计划、证据、用户验收和策略成败尚未形成学习闭环。
 
 ### 2.2 核心逻辑流
 ```
@@ -74,11 +74,13 @@
 [lib.rs 触发 system_summarize_session] ── 提炼当前 Session 话题，保存为 json 日志
   │
   ▼
-[后台 Dream Engine 轮询/触发] ────────── 异步拉取近 7 天 JSON，唤醒 Clerk 整理
+[后台 Dream/Evolution Engine 轮询/触发] ── 使用 Clerk 与本地规则整理
   │
   ├─► 冗余事实合并与生命周期清理
   ├─► >7天 Session 冷迁移至 wiki/sessions/ (冷记忆归档)
-  └─► 重塑 SOUL.md: 提取 feedback 写入 SOUL 的进化模块，实现无监督微调
+  ├─► 结构化 correction/identity/preference/fact 索引
+  ├─► SOUL.md 小幅精炼与哈希冲突保护
+  └─► execution_errors 失败模式分析（当前仍需从 SOUL 迁移至 procedural memory）
 ```
 
 ### 2.3 关键代码位置
@@ -90,7 +92,9 @@
 - **前端配合**: `App.vue` 挂载 `onRemoteNewMessage` 触发本地会话摘要；`ChatView.vue` 展现晨报卡片。
 
 ### 2.4 修改/扩展指导
-- **优化记忆召回率**：修改 [llm.rs](file:///d:/OneDrive/Learning/Code/Gemini/bob-agent/src-tauri/src/llm.rs) 中的 `build_memory_summary()` 函数，调整 Wiki 事实与灵魂注入 System Prompt 的比例与层级。
+- **先读目标架构**：涉及 SOUL、Dream、记忆分类或 Goal 轨迹学习时，必须先读 `docs/GOAL_RUNTIME.md` 第 6 节。
+- **边界**：SOUL 只保存稳定身份与交互原则；工具错误进入 procedural/diagnostic memory；项目事实不得外溢为全局偏好。
+- **下一阶段**：按当前 Goal 的语义、scope 和证据召回 identity/preference/episodic/procedural/project/correction，替代固定最近记录注入。
 
 ---
 
@@ -154,10 +158,10 @@
 
 ---
 
-## 🎯 5. Goal Mode 闭环执行器 (Goal Loop)
+## 🎯 5. Goal Loop 原型与 Goal Runtime 目标
 
 ### 5.1 功能概述
-支持长时间、大预算、多步骤死磕任务的模式。内置 Maker-Checker 架构，将工具调用循环上限提升至 50 轮，并使用独立 Clerk 对结果进行严格质检与重试。
+当前实现是会话内 Maker–Checker Goal Loop 原型：用户必须手动选择 Goal，工具调用预算提高到 50 轮，确定性断言通过后再由 Clerk 质检，外层最多重试三次。它尚不具备 Goal Contract、持久任务图、应用重启恢复、节点级验证和局部重跑，因此不得称为完整 Goal Runtime。
 
 ### 5.2 核心逻辑流
 ```
@@ -180,6 +184,14 @@
   - `execute_goal_loop()`: 负责三轮外部大重试，维护 Checker 的反馈流。
 - **LLM 协同**: [llm.rs](file:///d:/OneDrive/Learning/Code/Gemini/bob-agent/src-tauri/src/llm.rs) 中的 `stream_internal()`
   - 检查 `agent_mode == "goal"`，将 `MAX_TOOL_CALL_ROUNDS` 设为 50，并在每轮工具结束后主动注入 `Restatement` 消息（重申任务目标防失焦）。
+
+### 5.4 目标架构与开发入口
+
+- **目标架构 SSOT**：`docs/GOAL_RUNTIME.md`
+- **执行路线图**：`todo.md` 目标 31（T-3100）
+- **禁止误解**：SQLite Knowledge Graph 保存语义关系，不是执行 DAG。
+- **推进顺序**：Goal Compiler → 持久 Runtime → 最小 DAG → 节点 Verifier/恢复 → Dream 结果学习 → 自适应模型路由。
+- **完成口径**：只有应用重启可恢复、Done 绑定证据、失败可定位并局部恢复、权限不被绕过时，才能对外称为产品级 Goal。
 
 ---
 

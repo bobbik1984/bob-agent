@@ -1,6 +1,6 @@
 project:
   name: bob-agent
-  version: '0.7.5'
+  version: '0.7.8'
   status: active
   tech:
   - Tauri
@@ -8,8 +8,24 @@ project:
   - Vue 3
   - Desktop
   - Android
-  updated: '2026-08-06'
+  updated: '2026-08-09'
 phases:
+- name: V0.7.8+ True Goal Runtime 与结果驱动个性化
+  tasks:
+  - text: T-3101~T-3104 契约冻结、回放集与现有 Goal Loop 基线
+    status: active
+  - text: T-3111~T-3115 Goal Compiler、VISTA 适配判断与 Auto Goal 路由
+    status: todo
+  - text: T-3121~T-3126 持久 Goal 状态机、证据、预算与重启恢复
+    status: todo
+  - text: T-3131~T-3136 最小执行 DAG、上下文胶囊与局部重试
+    status: todo
+  - text: T-3141~T-3145 Verifier Registry、故障注入与跨端连续性
+    status: todo
+  - text: T-3151~T-3157 记忆分层、Goal 轨迹学习与用户可控记忆
+    status: todo
+  - text: T-3161~T-3164 基于历史结果的模型/策略路由与北极星看板
+    status: todo
 - name: V0.7.5+ 跨端同步精准诊断与 Relay V2
   tasks:
   - text: T-3001 Rust/JS 诊断契约、统一状态枚举与幂等归约器

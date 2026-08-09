@@ -41,8 +41,14 @@ test_*.js
 *.tmp
 db_output.txt
 implementation_plan.md
-# Removed from tracking to shrink repo size
-/docs/
+# Keep runtime-generated or archival docs out of Git, but track architecture SSOTs.
+/docs/*
+!/docs/ARCHITECTURE.md
+!/docs/GOAL_RUNTIME.md
+!/docs/FEATURES.md
+!/docs/USER_GUIDE.md
+!/docs/MOBILE_BLUEPRINT.md
+!/docs/TICKET_MANAGEMENT_BLUEPRINT.md
 /website/
 /references/
 /resources/

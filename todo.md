@@ -1,8 +1,9 @@
 # Bob-Agent 开发全局路线图 (Roadmap)
 
-> 🎯 **当前版本**: `v0.7.5` — 产品智能化收敛阶段。
-> ♻️ **已完成**: Tauri 迁移、主体模式、微信/TG/Discord 通道、文档输出引擎、Goal 闭环执行引擎、Web Drop P2P 极传、知识图谱融合、智能笔记模块、本地大模型引擎 (Candle) 基础链路、移动端体验优化、PC 扫码配对、跨端同步引擎、Auto 模式 + 意图分类器、R2/R3 工具风险分级确认、记忆数据契约标准化。
-> 📋 **当前 Sprint**: 目标 29 Phase 1 — 意图自动分类 (T-2901~T-2905) | Phase 4 — 纠错记忆最高优先级 (T-2931~T-2932)。
+> 🎯 **当前版本**: `v0.7.8` — 从 Goal Loop 原型进入持久 Goal Runtime 阶段。
+> ♻️ **已完成**: Tauri 迁移、Tool Calling、Maker–Checker Goal Loop 原型、R0–R3 权限确认、规则意图分类、结构化记忆契约、知识图谱、跨端同步与 Relay 逐跳诊断。
+> 📋 **当前 Sprint**: 目标 31 Phase 0/1 — 契约冻结、Goal Compiler 与自动路由。完整架构以 `docs/GOAL_RUNTIME.md` 为唯一真相源。
+> ⚠️ **口径约束**: 当前 Goal 仍是会话内三轮重试原型；在持久状态、证据闭环、暂停恢复与自动升级完成前，不得在文档或 UI 中称为“完整 Goal Runtime”。
 
 ---
 
@@ -269,17 +270,18 @@
 
 ## 📍 目标 29: 产品智能化收敛 — 从工具箱到工作代理 (T-2900)
 > 🎯 **目标**: 隐藏内部复杂性（模式切换、模型选择、工具权限），让用户只需表达目标，Bob 自动判断、执行、验证。
-> 📋 **来源**: [产品升级指导文件](references/bob_agent_product_upgrade_guide.html) + [深度分析报告](file:///C:/Users/xm_bo/.gemini/antigravity/brain/9e898a48-5666-4744-aa8f-dafe8494aa01/upgrade_guide_analysis.md)
+> 📋 **来源**: `docs/GOAL_RUNTIME.md` + `references/20260808_Goal Mode study.md` + `references/20260808_Goal_Mode_Agent_Prompt_Playbook_CN.docx`
 > 🏗️ **核心原则**: 可靠性先于自治程度；先收敛再智能化。
 
-### Phase 1: 意图自动分类 — 取消手动模式切换 (P0, 1-2周)
-> 用户不再需要手动选"问答/执行/闭环"。Bob 自动将请求分为 Answer / Quick Action / Planned Task / Background。
+### Phase 1: 意图自动分类 — 基础能力部分完成
+> 当前规则分类已能区分 Answer / Quick Action / Planned Task，但低置信度无 Clerk 兜底、Auto 不会进入 Goal，模式切换 UI 仍存在。
 
-- [ ] T-2901: **意图分类器** — 在 `llm.rs` 入口增加轻量分类（规则优先 + Clerk 模型兜底），根据用户输入自动判断任务类型
-- [ ] T-2902: **Answer 模式** — 纯解释/查询请求，不注入写工具，直接回答
-- [ ] T-2903: **Quick Action 模式** — 单步低风险任务，执行后提供撤销入口
-- [ ] T-2904: **Planned Task 模式** — 多步骤复杂任务，自动生成 2-6 步计划，确认后执行
-- [ ] T-2905: **UI 适配** — 前端移除模式切换 UI（保留高级菜单中的"只回答"/"帮我完成"临时覆盖）
+- [x] T-2901a: **结构化意图分类** — `TaskKind + IntentComplexity + confidence + matched_signals`
+- [ ] T-2901b: **低置信度兜底** — 使用 Clerk 输出结构化分类，不因文本长度授予写权限
+- [x] T-2902: **Answer 模式** — 仅注入只读工具并限制预算
+- [x] T-2903: **Quick Action 模式** — 最小步骤执行，继续受 R0–R3 Policy Engine 约束
+- [ ] T-2904: **Planned Task 状态化** — 生成 2–6 步计划并记录进度，而不只依赖 Prompt 要求
+- [ ] T-2905: **UI 收敛** — 默认只展示 Auto；高级菜单保留“只回答/帮我完成/停止”覆盖
 
 ### Phase 2: 工具风险分级 R0-R3 (P0, 2-3天) ✅
 > 按工具副作用严重程度自动决定是否需要用户确认，替代当前的全局 agentMode 开关。
@@ -302,8 +304,83 @@
 ### Phase 4: 纠错记忆最高优先级 (P1, 2天)
 > 用户纠正过的内容永不自然衰减，优先级高于所有推断记忆。
 
-- [ ] T-2931: **纠错标记** — `evolution.rs` 事实提取新增 `correction` 类型，标记为不可被 Dream 自动合并/覆盖
-- [ ] T-2932: **衰减豁免** — Dream 压缩时跳过 `correction` 类型记忆，不降低置信度
+- [x] T-2931: **纠错标记与版本链** — 即时纠错和 `feedback` 统一写入 active correction，并替代旧版本
+- [ ] T-2932: **全管线衰减豁免** — Dream 清理、标题合并和文件淘汰必须识别 correction，不得按时间误删
+
+---
+
+## 📍 目标 31: 个人执行系统主线 — True Goal Runtime (T-3100)
+> 🎯 **终态**: 用户只需表达意图，Bob 自动形成安全、可恢复、可验证的结果；普通用户无需管理模式、模型、MCP、上下文或子任务。
+> 📖 **架构 SSOT**: `docs/GOAL_RUNTIME.md`
+> 🧭 **开发纪律**: Goal Contract → 持久 Runtime → 最小 DAG → 节点验证/恢复 → Goal 轨迹学习 → 自适应路由。禁止跳过基础状态层直接堆多 Agent。
+> 📦 **产品约束**: PC/绿色版零外部运行时，Android 不增加用户侧依赖；所有阶段必须执行客户端体积回归。
+
+### Phase 0: 契约冻结与回放基线 (P0)
+
+- [ ] T-3101: 定义 `IntentDecision`、`GoalContract`、`GoalStatus`、`NodeStatus`、`Evidence` 的 Rust/JS 版本化契约
+- [ ] T-3102: 建立 Answer / QuickAction / Planned / Goal / Routine 意图回放集，覆盖中文短句、隐含目标和高风险歧义
+- [ ] T-3103: 为现有三轮 Goal Loop 建立基线测试：通过率、误通过率、重试次数、Token、耗时和失败类型
+- [ ] T-3104: UI 和文档统一使用“Goal Loop 原型”口径，移除“自动死磕直到完成”等超出现状的承诺
+
+### Phase 1: Goal Compiler 与自动路由 (P0)
+
+- [ ] T-3111: 新增 Goal Compiler，将用户自然语言编译为 outcome/evidence/scope/constraints/milestones/budget/risk/blocker/handoff
+- [ ] T-3112: 实现 VISTA 风格适配评分；只将可验证、可迭代且边界足够明确的任务升级为 Goal
+- [ ] T-3113: Auto 路由支持 Planned → Goal，低置信度使用 Clerk 结构化兜底
+- [ ] T-3114: 使用已确认用户偏好补全低风险默认值；不可逆选择、凭证缺失或业务互斥时才询问
+- [ ] T-3115: 增加“Bob 将如何完成/完成标准”轻量预览，允许调整但不强迫普通用户学习模式概念
+
+### Phase 2: 持久 Goal Runtime (P0)
+
+- [ ] T-3121: SQLite 新增 `goals/goal_attempts/goal_evidence/goal_events/goal_checkpoints`
+- [ ] T-3122: 实现 draft → ready → running → waiting_user/blocked → verifying → done/failed/cancelled 状态机
+- [ ] T-3123: 支持暂停、继续、取消、预算耗尽、阻塞原因和应用重启恢复
+- [ ] T-3124: Goal 状态卡展示完成条件、当前阶段、耗时/预算和最近一次验证原因
+- [ ] T-3125: 保证 Goal、远程和定时执行均不能绕过 R0–R3 Policy Engine
+- [ ] T-3126: Done 必须绑定 Evidence；证据不足保持 unverified，不接受执行者自述
+
+### Phase 3: 最小执行 DAG 与上下文胶囊 (P1)
+
+- [ ] T-3131: 新增 `goal_nodes/goal_edges`，支持顺序、独立并行和汇合三种关系
+- [ ] T-3132: 独立节点使用干净上下文；依赖节点只接收 Goal Contract、相关记忆、前序 artifact 和证据
+- [ ] T-3133: 节点声明 tool/model/vision/risk/verifier/retry/fallback profile
+- [ ] T-3134: 失败节点局部重试并使受影响下游失效，禁止整项 Goal 无差别重跑
+- [ ] T-3135: Coordinator 只保存规范状态与 artifact 引用，不把完整聊天历史复制到每个节点
+- [ ] T-3136: 通过数据证明并行收益后再启用多 Agent；并行数量必须有资源和预算上限
+
+### Phase 4: 验证、故障恢复与跨端连续性 (P1)
+
+- [ ] T-3141: 验证顺序固定为确定性检查 → 业务规则 → Clerk/Rubric → 必要时用户验收
+- [ ] T-3142: 为文件、数据库、日程、报告和同步任务建立领域 Verifier Registry
+- [ ] T-3143: 故障注入覆盖模型超时、工具失败、进程重启、网络中断、乱序事件和证据缺失
+- [ ] T-3144: PC 为 Goal 状态 SSOT；手机可查看、补充信息、暂停/继续，断线后幂等归并状态
+- [ ] T-3145: 用户日志说明“完成了什么/证据是什么/哪里失败”；高级诊断保留 trace，不向普通用户泄露内部噪声
+
+### Phase 5: Dream 结果学习与用户模型 (P1)
+
+- [ ] T-3151: 记忆正式拆分 identity/preference/episodic/procedural/project/correction
+- [ ] T-3152: 停止向 SOUL 写入工具避坑；迁移到 procedural memory 或诊断库
+- [ ] T-3153: Dream 读取原始目标、Goal Contract、计划、轨迹、验证和用户验收，形成结果驱动的学习样本
+- [ ] T-3154: 记忆增加 valid_from/valid_until/usage_count/success_correlation/sensitivity/user_confirmed
+- [ ] T-3155: 按当前 Goal 语义、scope 和证据检索记忆，替代固定“最近三段＋前十条”注入
+- [ ] T-3156: 提供记忆查看、确认、纠正、删除和导出；高敏感推断默认不自动固化
+- [ ] T-3157: 建立记忆回放评估：有记忆是否真实减少澄清、返工和用户纠正，而不是只增加 Prompt 长度
+
+### Phase 6: 自适应模型与策略路由 (P2)
+
+- [ ] T-3161: 根据节点能力选择廉价文本、Vision、主模型或强推理模型，确定性验证优先不用 LLM
+- [ ] T-3162: 记录 task_kind × model/tool/strategy 的成功率、成本和时延，禁止凭主观硬编码“最佳模型”
+- [ ] T-3163: 建立降级链：模型不可用、工具失败或预算紧张时换模型/工具/计划，而不是无限重试
+- [ ] T-3164: 北极星看板统计验证闭环率、平均澄清次数、恢复成功率、误通过率和记忆纠正率
+
+### 目标 31 完成门槛
+
+- [ ] 普通用户无需手动选择 Goal 即可触发合适的持久任务
+- [ ] 应用重启和移动端断线后能可靠恢复，且不会重复执行有副作用节点
+- [ ] 每个 Done 都能展示可追溯证据，每个 Blocked 都能说明具体缺口
+- [ ] 失败可以定位到节点、工具或验证规则，并优先局部恢复
+- [ ] Dream 能从用户验收和真实结果学习，且用户可控制记忆
+- [ ] PC 安装版/绿色版/Android 体积无未解释增长，零外部运行时约束保持成立
 
 ---
 
@@ -496,7 +573,7 @@
 
 ## 📍 目标 19: Goal Mode V2 — 双层裁判 + 自进化失败闭环
 
-> 🎯 **核心理念**: "失败不是日志，而是进化请求"。为 Goal Mode 注入 Layer 1 确定性断言（零 Token 预筛）和 Dream Engine 失败模式分析（夜间自动提炼避坑指南写入 SOUL.md）。
+> ✅ **原型基础已完成，后续并入目标 31**。已实现 Layer 1 确定性断言、Clerk 复核和执行失败记录。原“避坑指南写入 SOUL”方向已废止，执行经验应迁移至 procedural memory。
 > 📖 **设计来源**: [AI智能体深度分析与产品优化.docx](references/AI智能体深度分析与产品优化.docx) + [朋友的务实建议](references/20260627_bob_next_step_with_coderunner.txt)
 
 
@@ -532,7 +609,7 @@
 **全部完成** 🎉
 
 ## 📍 目标 18: Goal Mode (闭环执行引擎)
-> 🎯 **目标**: 让 Bob 具备以结果为导向的闭环执行能力，在遇到复杂任务时自主拆解、评估和重试，直至任务完全成功。
+> ✅ **Maker–Checker 原型已完成，产品级 Goal Runtime 转入目标 31**。当前只保证会话内有限重试，不承诺自动拆解、持久恢复或一定成功。
 
 
 ## 🚀 T-1800: Bob 联邦网络与 Web Drop 引擎

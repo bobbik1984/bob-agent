@@ -555,8 +555,8 @@ pub fn export_sync_data(app: &AppHandle, since_ts: i64, is_relay: bool) -> Resul
         extract("SELECT id, conversation_id, role, content, image_base64, created_at, from_channel, sync_id FROM messages WHERE created_at >= ?1", &[&since_ts], 
         &["id", "conversation_id", "role", "content", "image_base64", "created_at", "from_channel", "sync_id"]).unwrap_or_default()
     };
-    let events = extract("SELECT id, title, type, status, date, start_time, end_time, description, created_at, linked_ticket_id FROM events", &[], 
-        &["id", "title", "type", "status", "date", "start_time", "end_time", "description", "created_at", "linked_ticket_id"]).unwrap_or_default();
+    let events = extract("SELECT id, title, type, status, date, start_time, end_time, description, created_at, updated_at, completed_at, linked_ticket_id FROM events WHERE updated_at >= ?1", &[&since_ts], 
+        &["id", "title", "type", "status", "date", "start_time", "end_time", "description", "created_at", "updated_at", "completed_at", "linked_ticket_id"]).unwrap_or_default();
     let cron_jobs = extract("SELECT id, title, cron_expr, prompt_template, enabled, last_run, created_at FROM cron_jobs", &[], 
         &["id", "title", "cron_expr", "prompt_template", "enabled", "last_run", "created_at"]).unwrap_or_default();
     
@@ -740,7 +740,7 @@ pub fn import_sync_data(app: &AppHandle, data: SyncData, last_sync_ts: i64) -> R
         }
     }
 
-    import_replace("events", data.events.clone(), &["id", "title", "type", "status", "date", "start_time", "end_time", "description", "created_at", "linked_ticket_id"]).map_err(|e| e.to_string())?;
+    import_lww("events", data.events.clone(), &["id", "title", "type", "status", "date", "start_time", "end_time", "description", "created_at", "updated_at", "completed_at", "linked_ticket_id"]).map_err(|e| e.to_string())?;
     import_replace("cron_jobs", data.cron_jobs.clone(), &["id", "title", "cron_expr", "prompt_template", "enabled", "last_run", "created_at"]).map_err(|e| e.to_string())?;
     import_replace("kg_nodes", data.kg_nodes.clone(), &["id", "label", "node_type", "summary", "source", "metadata", "created_at"]).map_err(|e| e.to_string())?;
     import_replace("kg_edges", data.kg_edges.clone(), &["source_id", "target_id", "relation", "confidence", "created_at"]).map_err(|e| e.to_string())?;
@@ -756,6 +756,20 @@ pub fn import_sync_data(app: &AppHandle, data: SyncData, last_sync_ts: i64) -> R
     };
     
     let total_records = data.conversations.len() + data.messages.len() + data.events.len() + data.cron_jobs.len() + data.kg_nodes.len() + data.kg_edges.len();
+    let mut detail_parts = Vec::new();
+    if data.conversations.len() > 0 { detail_parts.push(format!("会话 {} 项", data.conversations.len())); }
+    if data.messages.len() > 0 { detail_parts.push(format!("消息 {} 项", data.messages.len())); }
+    if data.events.len() > 0 { detail_parts.push(format!("待办日程 {} 项", data.events.len())); }
+    if data.settings.len() > 0 { detail_parts.push(format!("配置 {} 项", data.settings.len())); }
+    if data.cron_jobs.len() > 0 { detail_parts.push(format!("定时任务 {} 项", data.cron_jobs.len())); }
+    if data.kg_nodes.len() > 0 { detail_parts.push(format!("知识节点 {} 项", data.kg_nodes.len())); }
+    
+    let detail_str = if detail_parts.is_empty() {
+        "成功合并云端数据 (无新增)".to_string()
+    } else {
+        format!("同步更新：{}", detail_parts.join(", "))
+    };
+
     history.insert(0, serde_json::json!({
         "timestamp": ts,
         "direction": "pull",
@@ -769,7 +783,7 @@ pub fn import_sync_data(app: &AppHandle, data: SyncData, last_sync_ts: i64) -> R
             "kg_edges": data.kg_edges.len()
         },
         "total_records": total_records,
-        "detail": "成功合并云端数据"
+        "detail": detail_str
     }));
     
     if history.len() > 50 { history.truncate(50); } // Keep last 50

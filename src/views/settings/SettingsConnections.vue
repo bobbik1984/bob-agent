@@ -29,11 +29,10 @@
               <Info :size="12" />
             </button>
             <button 
-              v-if="isUnlocked && pairingInfo.device_id" 
               class="device-indicator-btn"
               @click.stop="showDevicesModal = true" 
-              :title="`上次同步状态: ${lastSyncStatus === 'success' ? '成功' : '未知/失败'}`"
-              :style="{ color: lastSyncStatus === 'success' ? 'var(--user-accent)' : 'var(--text-muted)' }"
+              :title="`上次同步状态: ${lastSyncStatus === 'success' ? '成功' : (lastSyncStatus === 'error' ? '失败' : '未知')}`"
+              :style="{ color: lastSyncStatus === 'success' ? 'var(--user-accent)' : (lastSyncStatus === 'error' ? 'var(--color-error)' : 'var(--text-muted)') }"
             >
               <Monitor v-if="isNativeMobile" :size="14" />
               <Smartphone v-else :size="14" />

@@ -1,182 +1,66 @@
-# AGENTS.md — bob-agent AI 编码代理入职手册
+# Local Agent Guide: bob-agent
 
-> 继承根目录 Gemini/AGENTS.md 的全局准则
-> **适用范围**：所有在此项目工作的 AI 编码代理（Antigravity、Jules、CodeRunner、Cursor 等）
-> **架构状态**：✅ **Electron → Tauri 迁移已完成**（进入 Agent 化深化阶段）
-> **历史归档**：Electron 时代的完整入职手册已保存至 `docs/agents_electron.md`
+> 适用于在本仓库工作的所有编码代理。先读本文件，再按任务类型 JIT 加载相关文档。
 
----
+## 1. [The Desk] 当前开发焦点
 
-## 项目概述
+- **产品定位**：Bob 是零设置、隐私优先、跨设备、持续理解用户的个人执行系统；不是 Codex/Claude Code 的终端复制品。
+- **当前主线**：把现有 Maker–Checker Goal Loop 升级为可自动进入、可验证、可暂停恢复的 Goal Runtime。
+- **推进顺序**：Goal Contract → 持久状态 → 最小 DAG → 节点验证/恢复 → Goal 轨迹接入 Dream → 自适应模型路由。
+- **当前真实边界**：Auto 尚不会升级到 Goal；Goal 尚无持久 DAG 和重启恢复；Dream 以事实整理为主，尚未形成结果驱动的用户模型。
+- **核心约束**：PC 安装版/绿色版保持零外部运行时，Android 不增加用户侧依赖；客户端体积增长必须解释和验证。
+- **工作区状态提醒**：开始修改前先检查 `git status`，不得覆盖用户未提交的代码或临时文件。
 
-**bob-agent** 是一个 **Windows 桌面 AI 私人秘书**，面向不喜欢折腾的普通用户。
+## 2. 项目红线
 
-- **产品定位**：开箱即用的桌面 AI 助手，核心能力是对话 + 图片识别 + 日程管理 + 文件分析
-- **技术栈**：**Tauri v2 (Rust)** + Vue 3 + Vite（正在从 Electron 迁移）
-- **目标用户**：办公白领、非技术人员
-- **血统**：融合了 CodeRunner 的上下文管理精华 + DeepSeek-TUI 的工程理念 + TodoList 的日程管理能力
+1. **纯 Tauri**：系统能力、网络、文件和数据库逻辑放在 Rust；不得恢复 Electron 后端。
+2. **Bridge 唯一入口**：Vue 组件继续调用 `window.electronAPI.*`；Tauri `invoke` 只出现在 `src/tauri-bridge.js`。
+3. **零依赖体验**：不得为了 Goal、DAG、Dream 或同步增加 Python/Node 用户运行时；Relay 的 Node 依赖只存在于服务器。
+4. **Goal 不得虚假完成**：执行者不能单方面宣布 Done；证据不足使用 `unverified`，失败必须定位到节点或验证规则。
+5. **Memory 边界**：SOUL 只保存稳定身份与交互原则；工具失败进入 procedural/diagnostic memory，不得污染 SOUL。
+6. **权限不降级**：Goal/Auto/远程来源都不能绕过 R0–R3 Policy Engine；不可逆、外部影响和批量操作仍需确认。
+7. **UI 一致性**：只用 Lucide 图标，禁用 Emoji；用户可见文本必须同步 `zh-CN.json` 与 `en-US.json`；颜色使用设计变量。
+8. **隐私与凭证**：不得提交 `.env`、`data/` 或用户记忆，不得硬编码 API Key。
+9. **稳健错误处理**：Tauri Command 返回可读 `Result`；生产路径禁止新增 `unwrap()`/`panic!()`。
+10. **文档同步**：改变真实能力、数据契约或路线图时，同步更新对应 SSOT、`todo.md`、`progress.yaml`；不得把目标架构写成已完成功能。
 
----
+## 3. JIT 路由
 
-## 🔴 新增 UI 内容预检清单（Pre-flight Checklist）
+| 任务 | 修改前必须阅读 |
+|---|---|
+| Goal、自动路由、DAG、Verifier、Dream/Memory | `docs/GOAL_RUNTIME.md`、`todo.md` 对应目标 |
+| Rust 模块、IPC、数据库、状态机 | `docs/ARCHITECTURE.md`、`LLM_WIKI.md` |
+| UI、布局、颜色、图标、i18n | `design_principles.md` |
+| 跨端同步、Relay、移动端配对 | `docs/MOBILE_BLUEPRINT.md`、`todo.md` 目标 23/30 |
+| 用户可见功能和操作说明 | `docs/FEATURES.md`、`docs/USER_GUIDE.md` |
+| 发布、安装器、版本 | `scripts/release.bat`、`OPEN_SOURCE_WORKFLOW.md`、`CHANGELOG.md` |
+| 历史 Electron 设计 | `docs/agents_electron.md`，仅用于考古，不得作为当前实现依据 |
 
-**每次新增或修改任何用户可见的界面内容时**，Agent 必须逐项过检：
+文档职责：`README.md` 讲产品定位和真实能力；`docs/ARCHITECTURE.md` 讲当前系统；`docs/GOAL_RUNTIME.md` 讲 Goal/Dream 目标架构；`todo.md` 管未完成任务；`progress.yaml` 是看板源。
 
-| # | 检查项 | 规则来源 |
-|:--|:-------|:---------|
-| 1 | **架构归属**：新内容放在正确的模块/组件中？是否需要新增 Rust Command + Bridge 适配？ | §架构铁律 |
-| 2 | **配色语义**：使用了正确的 CSS 变量？Logo 用 `--logo-color`？图标/文字用 `--text-*`？交互用 `--accent-*`？**绝对不要**硬编码颜色或直接用 `--user-accent` 给文字/图标上色 | §Logo 配色 / §强调色 |
-| 3 | **图标对齐**：所有包含 Lucide 图标的容器都用了 `display: flex; align-items: center`？ | §图标对齐 |
-| 4 | **国际化**：所有用户可见文字都通过 `$t()` 调用？已在 `zh-CN.json` 和 `en-US.json` 中同步添加 key？ | §i18n 铁律 |
-| 5 | **权限声明**：如用到新的原生能力，已在 `capabilities/default.json` 中注册？ | §权限声明 |
+## 4. 本地验证循环
 
-> **口诀**：架构 → 配色 → 对齐 → 多语种 → 权限
+按改动风险选择最小充分验证，不要无意义生成大量产物：
 
----
-
-## ⚠️ 架构铁律（每个 Agent 必读）
-
-### 🔴 纯 Tauri 架构
-
-项目目前为纯 **Tauri (Rust)** 后端架构。旧的 `electron/` 目录已被彻底移除。**所有的底层系统能力、API 请求、文件操作必须在 Rust 侧实现**。
-
-### 🔴 前端零改动原则
-
-前端 `src/` 中的 Vue 组件**不知道**自己跑在 Tauri 还是 Electron 里。它们统一调用 `window.electronAPI.xxx()`。所有适配工作由 `src/tauri-bridge.js` 这个垫片层完成。**绝对禁止**修改 Vue 组件中的 IPC 调用方式。
-
-### 🔴 Bridge 适配器模式
-
-`tauri-bridge.js` 是连接前端和 Rust 后端的唯一网关：
-- 已实现的 Rust Command → `invoke('rust_command_name', { args })`
-- 尚未实现的接口 → 返回 Mock 假数据（如 `sendChat: async () => { ... }`）
-- **每完成一个 Rust Command，就去 Bridge 中把对应的 Mock 替换为真实的 `invoke()` 调用**
-
----
-
-## 命令
-
-```bash
-# ─── Tauri 开发（主线，日常使用这个） ───
-npm run dev:tauri        # 启动 Tauri 开发模式（Vite 热更新 + Rust 编译）
-npm run build:tauri      # 构建 Tauri 生产版本（~15MB 安装包）
-
-# ─── Rust 侧独立命令 ───
-cd src-tauri && cargo build          # 仅编译 Rust 后端
-cd src-tauri && cargo check          # 快速语法检查（不生成二进制）
-cd src-tauri && cargo test           # 运行 Rust 单元测试
-
-# ─── 前端与测试 ───
-npm run build            # 仅构建前端 (vite build)
-npm test                 # 运行 Vitest 测试
-npm run lint             # ESLint 检查
+```powershell
+npm test
+npm run build
+Set-Location src-tauri; cargo check
 ```
 
-### 🔴 安装包编译工作流 (Bootstrapper Pipeline)
+- Rust/数据库/同步修改：运行相关 Rust 单测；跨端协议同时运行 Relay 故障注入测试。
+- UI 修改：先用 `npm run dev` 的 `localhost:5173` 验证；需要原生能力时再运行 `npm run dev:tauri`。
+- Goal/Dream 修改：必须覆盖状态机、暂停恢复、预算、权限、证据缺失、模型超时和进程重启。
+- 发布只运行 `scripts\release.bat`，不得用默认 NSIS/MSI 代替项目 Bootstrapper。
+- 发布前记录 PC 安装版、绿色版和 Android APK 的体积变化。
 
-本项目的安装器使用的是**双 Tauri 嵌套架构**（Bootstrapper 模式），以实现极其定制化的暗黑风格安装引导（无边框、无系统灰条）。**绝对禁止**使用默认的 Tauri Bundle (NSIS/MSI) 直接分发主程序。
+## 5. 完成定义
 
-#### 一键发布（推荐）
+一项开发任务只有同时满足以下条件才算完成：
 
-```bash
-scripts\release.bat
-```
-
-运行后会**自动依次执行**以下 6 步，最终产物统一收集到 `dist-release/` 目录并自动打开文件夹：
-
-| 步骤 | 操作 | 说明 |
-|:---:|------|------|
-| 1/6 | `npm run tauri build` | 编译主程序 `bob.exe` (Release) |
-| 2/6 | `node scripts/build_payload.mjs` | 将 bob.exe + pdfium.dll + skills 打包为 payload.zip |
-| 3/6 | 复制 payload.zip → installer | 供安装器嵌入 |
-| 4/6 | `cd installer && npm run tauri build` | 编译带 Bob Logo 的独立安装器 |
-| 5/6 | 收集产物 → `dist-release/` | 归集最终可分发文件 |
-| 6/6 | 清理中间文件 | 删除 payload.zip、bundle 临时目录 |
-
-#### 最终产物
-
-```
-dist-release/
-├── bob-installer.exe          # 带 Bob Logo 的独立安装器（~25MB）
-└── bob-agent-portable.zip     # 绿色免安装版（~15MB）
-```
-
-> ⚠️ `dist-release/` 已被 `.gitignore` 排除，二进制产物不入版本控制。
-
-### 🌐 官网部署工作流 (Marketing Website Pipeline)
-
-`bob-agent/website/` 目录存放的是着陆页（Landing Page）和静态资源。
-> **⚠️ 严禁假定自动同步**：该目录**没有**包含在 Syncthing 的同步范围内，必须通过脚本手动推送到指定的云端节点。
-> *具体的部署节点 IP、外网域名映射以及 SSH Session 名称，请查阅 `Assistant/common/knowledge/skills/cluster_ops/references/node_inventory.md` 和 `service_map.md` 获取最新映射。*
-
-#### 部署方式：
-在项目根目录运行一键部署脚本：
-```bash
-deploy_website.bat
-```
-执行过程说明：
-1. **打包**：将 `website/` 目录压缩为 `.zip`。
-2. **传输**：通过 `pscp` 和预配置的 SSH Session 将文件推送到目标节点的 `/tmp/` 目录。
-3. **部署**：通过 `plink` 远程执行 `sudo unzip` 解压到 Caddy 的目标目录 `/opt/bob/`。
-
----
-
-## 编码规范
-
-### Rust 侧（`src-tauri/`）
-
-1. **UTF-8**：Rust 的 `String` 天然 UTF-8，但读写外部文件时仍需注意 BOM 和换行符。
-2. **错误处理**：Tauri Command 必须返回 `Result<T, String>` 或使用 `thiserror`。**禁止在 Command 中 `unwrap()`/`panic!()`**——前端需要收到可读的错误信息而不是进程崩溃。
-3. **模块化**：当 `lib.rs` 超过 200 行时，必须拆分为 `mod config;`、`mod database;`、`mod llm;` 等子模块。
-
-### Vue 前端侧（`src/`）
-
-1. **IPC 调用**：统一通过 `window.electronAPI.xxx()` 调用。**不要直接 import `@tauri-apps/api/core`**——这会破坏与 Electron 的兼容性。所有 Tauri 特有 API 仅在 `tauri-bridge.js` 中使用。
-2. **组件风格**：Vue 组件使用 `PascalCase`，JS 函数使用 `camelCase`，文件名使用 `kebab-case`。
-3. **响应式设计**：遵循 `frontend-design` Skill 中的响应式铁律（使用 `100dvh`，输入框 `≥16px` 防 iOS 缩放等）。
-4. **🔴 静态资源 SSOT（唯一真相源）**：所有第三方动态图标/Logo（如各家大模型的品牌 Logo）**必须且只能**存放在 `public/logos/` 目录中。
-   - 引用方式：由于这些 Logo 通常是根据模型 ID 动态加载的（例如 `getProviderLogo(id)`），前端代码应直接使用绝对路径 `/logos/xxx.png` 引用。
-   - Vite 在编译时会自动将 `public/` 目录下的所有文件原封不动地复制到 `dist/` 中供 Tauri 打包，千万不要手动把源文件丢进 `dist/`！
-   - 如果是与业务高度绑定的固定静态装饰图片，才建议放入 `src/assets/` 并使用 `new URL(..., import.meta.url)`。
-
----
-
-## 安全红线
-
-- **绝对不要**在代码中硬编码 API Key（Rust 侧使用 Stronghold 加密存储，或动态路由至 config.json）
-- **绝对不要**在 Rust Command 中 `unwrap()` 或 `panic!()`（使用 `Result` 返回错误）
-- **绝对不要**在 Vue 前端中直接 import `@tauri-apps/api/core`（仅 Bridge 层可用）
-- **绝对不要**向 `electron/` 目录添加新功能
-- **绝对不要**执行用户未确认的文件写入操作
-- `data/` 目录绝不提交到版本控制（含用户私人记忆）
-- `.env` 文件绝不提交到版本控制
-
----
-
-## JIT 指针
-
-- **全量功能与逻辑字典 (LLM-Wiki)**：详见 [LLM_WIKI.md](LLM_WIKI.md) (当需要修改、查找或调试具体功能如“闪念速记”时，请优先阅读此字典)
-- **架构/目录树/IPC/依赖**：详见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
-- **UI 设计铁律 (配色/对齐/i18n)**：详见 [design_principles.md](design_principles.md)
-- **灵魂定义**：详见 [data/memory/SOUL.md](data/memory/SOUL.md)
-- **路线图**：详见 [todo.md](todo.md)
-- **开源发布工作流**：详见 [OPEN_SOURCE_WORKFLOW.md](OPEN_SOURCE_WORKFLOW.md)
-
-
-## 📊 结构化数据检索引擎 (Native Table Tools)
-
-**规则：处理大型 Excel/CSV 文件时，绝对禁止将全文抛入大模型上下文，必须利用底层原生工具进行类人操作！**
-
-为了确保纯白领客群的开箱即用体验，Bob 系统内置了基于 `calamine` 库的原生数据检索引擎。系统通过一套严格管控的 API 与底层通信：
-
-1. **统一的命名系统 (Naming System)**
-   - `table_schema_viewer`：查阅表头及 Sheet 信息（对应人类动作：打开文件看一眼）。
-   - `table_global_search`：全文跨列扫描关键词，提取所在行（对应人类动作：Ctrl + F）。
-   - `table_column_filter`：针对特定列执行精确匹配（对应人类动作：漏斗筛选）。
-
-2. **严格的权限管理开关 (Permission Controls)**
-   - 沙箱解析：所有路径入参必须通过 `resolve_table_read_path` 校验。
-   - 越权拦截：除非启用 `global_file_access = true`，否则 AI 仅允许检索绑定在 `wikiDir` 或 `dataDir` 下的文件。尝试读取非授权外网或系统文件将被直接拒绝。
-
-3. **统一的管控逻辑 (Unified Dispatch & Audit)**
-   - 防死循环：工具调用接入 `ToolCallTracker`，若在同文件同表中循环搜寻将被强行熔断。
-   - 审计留痕：所有检索行为强制通过 `audit_tool_call` 输出至 `tools.log`，以便溯源。
+- 代码行为与任务验收条件一致；
+- 相关测试或可复现检查通过；
+- 用户可见失败有准确状态与可理解日志；
+- 没有绕过权限、隐私、零依赖和体积约束；
+- 权威文档反映真实状态，目标能力未被误写为已完成；
+- `git diff` 中没有无关修改或用户文件损失。

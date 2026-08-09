@@ -2,11 +2,11 @@
   <img src="public/bob_logo.svg" alt="Bob Agent Logo" width="120" style="margin-bottom: 10px;" />
   <h1 align="center">Bob Agent</h1>
   <p align="center">
-    <strong>Your Ghost Co-Pilot on the Desktop</strong><br/>
-    <strong>隐于桌面，使命必达的本地 AI 私人秘书</strong>
+    <strong>A zero-setup personal execution system that learns how you work</strong><br/>
+    <strong>零设置、懂你的、以结果为单位工作的个人执行系统</strong>
   </p>
   <p align="center">
-    <img src="https://img.shields.io/badge/version-v0.6.0-blue?style=flat-square" alt="Version" />
+    <img src="https://img.shields.io/badge/version-v0.7.8-blue?style=flat-square" alt="Version" />
     <img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="License" />
     <img src="https://img.shields.io/badge/platform-Windows_|_Android-0078D6?style=flat-square&logo=windows" alt="Platform" />
     <img src="https://img.shields.io/badge/Tauri-v2-FFC131?style=flat-square&logo=tauri" alt="Tauri v2" />
@@ -19,9 +19,16 @@
 
 ## 📖 Introduction / 项目简介
 
-**Bob Agent** is a privacy-first, self-evolving AI desktop & mobile secretary built on **Tauri v2 + Rust**. Bob lives in your system tray on PC and runs natively on your Android device. He weaves AI into your daily workflow—local file access, multi-model orchestration, extensible MCP tools, Mobile Android sync, E2EE file transfer, and a native SQLite knowledge graph—all without a single byte of your private data leaving your machine.
+**Bob Agent** is a privacy-first, self-evolving personal execution system built on **Tauri v2 + Rust**. Its product direction is simple: users express intent in ordinary language; Bob turns it into a safe, resumable and verifiable result without asking them to manage models, tools, MCP or agent orchestration. Bob lives in the Windows tray and extends to Android as a lightweight companion.
 
-**Bob Agent** 是基于 **Tauri v2 + Rust** 构建的「隐私优先、智能演化」跨端私人秘书。在 PC 端他常驻系统托盘，在手机端他是轻量前哨站。通过打通本地文件、多模型协作、MCP 协议扩展、极传与本地 SQLite 知识图谱——所有敏感数据永不出本地，极致安全。
+**Bob Agent** 是基于 **Tauri v2 + Rust** 构建的「隐私优先、持续进化」个人执行系统。用户只需表达意图，Bob 的目标是自动判断应该回答、执行、规划、持续推进还是定时处理，并以可验证结果完成闭环。PC 端保持安装简单与绿色免安装，Android 端保持轻量；模型、工具、记忆和跨端协作的内部复杂性不应转嫁给普通用户。
+
+### Product North Star / 产品北极星
+
+> **Verified outcome closure with minimum user friction.**<br>
+> 在尽量少打扰用户的前提下，持续提高“用户认可、证据可查、失败可恢复”的任务闭环率。
+
+当前 `Goal Mode` 是 Maker–Checker 三轮重试原型，不等同于完整的持久 Goal Runtime。下一阶段主线是 **Goal Contract → 持久状态 → 最小任务 DAG → 节点验证与恢复 → Goal 轨迹驱动的个性化学习**。详见 [Goal Runtime 与个性化进化架构](docs/GOAL_RUNTIME.md)。
 
 ---
 
@@ -32,9 +39,9 @@
 | 🎐 | **Quick Capture 极速交互** | Global hotkey (`Ctrl+Shift+B`), drag-and-drop file/screenshot processing — capture ideas without breaking your workflow. <br>全局快捷键一键唤起、文件/截图拖拽交互、托盘气泡常驻，不打断手头工作。 |
 | 🎛️ | **Model Hub 模型中心** | Auto-discover 40+ models from any OpenAI-compatible provider. Main/Clerk dual-model roles. Offline Sidecar (GGUF). <br>自动检索任何兼容 API 服务商的 40+ 模型，内置 Maker/Clerk 双角色协作，支持本地离线大模型运行。 |
 | 🔌 | **MCP Client 认知工具** | Native stdio JSON-RPC 2.0 client managing MCP Server child processes. Dynamic tool discovery & conflicts-free namespacing. <br>原生 stdio 异步管理 MCP 子进程，自动扫码注册认知技能，完全兼容开源 MCP 生态。 |
-| 🧠 | **3-Tier Memory 记忆进化** | 3-tier memory (Soul → Session → Wiki). Compaction engine runs nightly to clean, summarize, and cold-condense facts. <br>三层记忆架构。后台 Dream 压缩线程在闲置时自动运行，做事实蒸馏、冷凝与去重，形成个人本地 Wiki。 |
+| 🧠 | **Memory & Dream 记忆进化** | Current: Soul, Session, Wiki, structured corrections and nightly compaction. Direction: separate identity, preference, episodic, procedural and project memory, then learn from verified Goal outcomes. <br>当前已具备三层记忆、结构化纠错与夜间整理；下一阶段将身份、偏好、经历、策略和项目状态分离，并从 Goal 的真实结果中学习。 |
 | 🕸️ | **SQLite Graph 知识脑图** | Native SQLite graph database (nodes + edges). BFS sub-graph extraction and interactive Vis.js canvas visualization. <br>基于本地 SQLite 构建轻量知识网络，自动提取实体关系，并通过 Vis.js 脑图画布进行拖拽交互。 |
-| 🎯 | **Goal Mode 死磕闭环** | Maker-Checker execution loop with 50-round tool calling budget. Clerk auto-evaluates output; auto-retry up to 3× until PASS. <br>面向复杂任务的自动循环机制，Clerk 模型严审工具执行结果，不达正确目标誓不罢休。 |
+| 🎯 | **Goal Loop 闭环原型** | Current: high-budget Maker–Checker loop, deterministic assertions and up to three retries. Direction: automatic Goal compilation, durable state, task DAG, evidence-bound completion and restart recovery. <br>当前具备高预算执行、确定性断言与 Clerk 三轮验收；完整 Goal Runtime、任务图、持久恢复和证据闭环仍是下一阶段开发目标。 |
 | 📲 | **Native Android App 原生安卓端** | Scan QR to sync via local network. SQLite bi-directional synchronization, offline availability, and PC as SSOT. <br>原生安卓端，PC作为唯一真相源，局域网扫码双向同步，断网也可用。 |
 | 🛜 | **Web Drop 极传** | WebRTC P2P cross-device file transfer. 3-tier fallback (loopback → P2P → relay) with zero-knowledge AES-GCM E2EE. <br>基于 WebRTC 的点对点多端文件传输，零知识证明加密，不经由云服务器缓存。 |
 | 🩺 | **Doctor 自检自愈** | Health checks across API connection, SQLite integrity, sandboxes, and Sidecars. One-click auto-fix and rollback. <br>全面自检网络、数据库锁、环境依赖，遇到异常一键回滚配置、解锁数据库，零折腾。 |
@@ -126,6 +133,7 @@ bob-agent/
 - [FEATURES.md](docs/FEATURES.md) — Detailed feature list / 功能列表与说明
 - [USER_GUIDE.md](docs/USER_GUIDE.md) — User user manual / 用户操作手册
 - [ARCHITECTURE.md](docs/ARCHITECTURE.md) — Under-the-hood design details / 技术架构与设计决策
+- [GOAL_RUNTIME.md](docs/GOAL_RUNTIME.md) — Goal, execution DAG, verification and personalized evolution target architecture / Goal、执行图、验证与个性化进化目标架构
 
 ---
 
