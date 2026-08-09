@@ -154,9 +154,17 @@
           <ChevronRight v-else :size="14" class="drawer-chevron" />
         </div>
         <div v-show="!isMobile && activeDrawer === 'schedule'" class="drawer-content">
-          <div class="drawer-placeholder">
-            <CalendarDays :size="24" style="opacity: 0.3;" />
-            <span>{{ $t('nav.schedule_hint') || '日程与待办事项' }}</span>
+          <div class="settings-nav">
+            <button
+              v-for="item in scheduleNavItems"
+              :key="item.id"
+              class="settings-nav-item"
+              :class="{ active: activeSchedulePanel === item.id }"
+              @click="activeSchedulePanel = item.id"
+            >
+              <component :is="item.icon" :size="16" />
+              <span>{{ item.label }}</span>
+            </button>
           </div>
         </div>
 
@@ -237,7 +245,11 @@
           />
         </div>
         <div class="view-wrapper" v-show="activeDrawer === 'schedule'">
-          <InboxView @toggle-sidebar="mobileDrawerOpen = !mobileDrawerOpen" />
+          <InboxView 
+            :activePanel="activeSchedulePanel" 
+            @update:activePanel="activeSchedulePanel = $event"
+            @toggle-sidebar="mobileDrawerOpen = !mobileDrawerOpen" 
+          />
         </div>
         <div class="view-wrapper" v-show="activeDrawer === 'knowledge'">
           <KnowledgeGraphView 
@@ -305,7 +317,7 @@ import SetupWizard from './components/SetupWizard.vue';
 import QuickNoteOverlay from './components/QuickNoteOverlay.vue';
 import BottomNavigation from './components/BottomNavigation.vue';
 import GlobalDialog from './components/GlobalDialog.vue';
-import { Inbox, Settings, Plus, X, Sun, Moon, ChevronLeft, ChevronRight, ChevronDown, Search, MessageSquare, CalendarDays, Brain, Plug, FolderOpen, Palette, Info, Sunrise, Waypoints, Menu, Smartphone } from 'lucide-vue-next';
+import { Inbox, Settings, Plus, X, Sun, Moon, ChevronLeft, ChevronRight, ChevronDown, Search, MessageSquare, CalendarDays, Brain, Plug, FolderOpen, Palette, Info, Sunrise, Waypoints, Menu, Smartphone, Calendar, CheckSquare, Timer } from 'lucide-vue-next';
 import { useI18n } from 'vue-i18n';
 import { listen } from '@tauri-apps/api/event';
 import { getModelMeta } from '@/composables/useModelSwitcher';
@@ -320,9 +332,10 @@ const { locale, t } = useI18n();
 // ── 状态 ─────────────────────────────────────────────
 const isSetupComplete = ref(false);
 const currentView = ref('chat');  // legacy — kept for backward compat during transition
-const activeDrawer = ref('chat');         // 'chat' | 'schedule' | 'settings'
+const activeDrawer = ref('chat');         // 'chat' | 'schedule' | 'settings' | 'knowledge'
 provide('activeDrawer', activeDrawer);
 const activeSettingsPanel = ref('model'); // 'model' | 'connections' | 'workspace' | 'daily_routine' | 'appearance' | 'about'
+const activeSchedulePanel = ref('timeline'); // 'timeline' | 'todo' | 'cron'
 const chatViewRef = ref(null);
 const quickNoteRef = ref(null);
 const mobileDrawerOpen = ref(false);
@@ -461,6 +474,13 @@ async function toggleTheme() {
 const bottomNavItems = computed(() => [
   { id: 'inbox', icon: Inbox, label: t('nav.inbox') },
   { id: 'settings', icon: Settings, label: t('nav.settings') },
+]);
+
+
+const scheduleNavItems = computed(() => [
+  { id: 'timeline', icon: Calendar, label: t('inbox.this_week') || '本周日程' },
+  { id: 'todo', icon: CheckSquare, label: t('inbox.todo_list') || '待办事项' },
+  { id: 'cron', icon: Timer, label: t('inbox.auto_tasks') || '计划任务' },
 ]);
 
 const modelInfo = computed(() => {

@@ -32,21 +32,21 @@
 
       <div v-else class="inbox-content">
 
-        <!-- 过期事件区域 -->
-        <div v-if="overdueEvents.length > 0 && (!isMobile || activeTab === 'todo')" class="section">
+        <!-- 事件 -->
+        <div v-if="overdueEvents.length > 0 && activeTab === 'todo'" class="section">
           <h3 class="section-title" style="color: var(--color-error)">
             <AlertTriangle :size="16" class="section-icon" />
-            {{ $t('inbox.overdue_events') || '过期的日程' }}
+            {{ $t('inbox.overdue_events') || '过期日程' }}
           </h3>
           <TodoList :todos="overdueEvents" @update-status="onTodoStatusUpdate" @delete-todo="onTodoDelete" @create-todo="onCreateEvent" />
         </div>
 
-        <div v-if="!isMobile || activeTab === 'timeline'" class="section">
+        <div v-if="activeTab === 'timeline'" class="section">
           <h3 v-if="!isMobile" class="section-title">{{ $t('inbox.this_week') }}</h3>
           <WeekTimeline :weekEvents="events" @create-event="onCreateEvent" />
         </div>
 
-        <div v-if="!isMobile || activeTab === 'todo'" class="section">
+        <div v-if="activeTab === 'todo'" class="section">
           <h3 class="section-title">
             <CheckSquare :size="16" class="section-icon" />
             {{ $t('inbox.todo_list') }}
@@ -54,8 +54,8 @@
           <TodoList :todos="todos" @update-status="onTodoStatusUpdate" @delete-todo="onTodoDelete" @create-todo="onCreateEvent" />
         </div>
 
-        <!-- T-1211: 自动任务区域 -->
-        <div v-if="!isMobile || activeTab === 'cron'" class="section">
+        <!-- T-1211: 自动任务 -->
+        <div v-if="activeTab === 'cron'" class="section">
           <h3 class="section-title">
             <Timer :size="16" class="section-icon" />
             {{ $t('inbox.auto_tasks') }}
@@ -119,10 +119,16 @@ import { AlertTriangle, Calendar, Loader2, Timer, Clock, Pause, Play, Trash2, Be
 import WeekTimeline from '../components/WeekTimeline.vue';
 import TodoList from '../components/TodoList.vue';
 
-const emit = defineEmits(['toggle-sidebar']);
+const props = defineProps({
+  activePanel: { type: String, default: 'timeline' }
+});
+const emit = defineEmits(['toggle-sidebar', 'update:activePanel']);
 const { t, locale } = useI18n();
 const isMobile = inject('isMobile');
-const activeTab = ref('timeline');
+const activeTab = computed({
+  get: () => props.activePanel,
+  set: (val) => emit('update:activePanel', val)
+});
 
 const isLoading = ref(true);
 const events = ref([]);
