@@ -406,6 +406,10 @@ mod tests {
             tags: vec![],
             domains: vec![],
             topics: vec![],
+            reason: None,
+            owner: None,
+            due_at: None,
+            metadata: json!({}),
         }
     }
 

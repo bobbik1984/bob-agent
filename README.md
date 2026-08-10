@@ -28,7 +28,7 @@
 > **Bob keeps complex work moving without losing context.**<br>
 > **Bob 让复杂工作不断线。**
 
-`v0.8.0` 已封存可靠 Capture 与知识提交基线。`v0.8.1` 已落地第一条 **Persistent Work Core** 垂直切片：项目、目标、任务、决定和活动记录独立于聊天持久化，并可生成 Markdown 快照；现有输入自动关联、Decision/Change、Router 与 Advanced Runtime 仍按路线推进。现有 `Goal Mode` 仍是 Maker–Checker 三轮重试原型，不等同于完整持久 Runtime。阶段顺序与完成门槛见 [Bob Evolution Roadmap](docs/BOB_EVOLUTION_ROADMAP.md)。
+`v0.8.0` 已封存可靠 Capture 与知识提交基线。`v0.8.1` 开发线已落地 **Persistent Work Core** 及现有输入接入：项目、目标、任务、决定和活动记录独立于聊天持久化；Todo/Event、Markdown 知识和本机文件通过稳定引用更新同一 Project State，歧义归属在“工作”页稍后处理。完整 Decision/Change 影响分析、Router 与 Advanced Runtime 仍按路线推进。现有 `Goal Mode` 仍是 Maker–Checker 三轮重试原型，不等同于完整持久 Runtime。
 
 ---
 

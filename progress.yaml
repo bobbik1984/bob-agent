@@ -18,19 +18,19 @@ phases:
 - name: Phase 1 Persistent Work Core
   tasks:
   - text: WC-101 Work Object 数据契约
-    status: active
+    status: done
   - text: WC-102 SQLite Repository 与 Work Event Journal
     status: done
   - text: WC-103 Project 聚合与 Markdown 快照
     status: done
   - text: WC-104 最小 Project API、Bridge 与 UI
-    status: active
+    status: done
 - name: Phase 2 现有入口关联
   tasks:
   - text: Capture、Note、Source、Todo、Event、File 关联 Project
-    status: todo
+    status: done
   - text: 多派生对象事务与低置信度确认
-    status: todo
+    status: done
 - name: Phase 3 Decision 与 Change
   tasks:
   - text: Decision Memory 与新版文件 Change Detection

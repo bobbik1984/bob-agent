@@ -163,7 +163,7 @@ pub fn system_confirm_event(event: Value, db: tauri::State<'_, crate::db::DbStat
 /// 删除事件
 #[tauri::command]
 pub fn system_delete_event(id: String, db: tauri::State<'_, crate::db::DbState>) -> bool {
-    let conn = match db.0.lock() {
+    let mut conn = match db.0.lock() {
         Ok(c) => c,
         Err(_) => return false,
     };
@@ -173,6 +173,15 @@ pub fn system_delete_event(id: String, db: tauri::State<'_, crate::db::DbState>)
     if rows > 0 {
         let ts = crate::now_ms();
         let _ = conn.execute("INSERT OR REPLACE INTO sync_tombstones (table_name, record_key, deleted_at) VALUES ('events', ?1, ?2)", params![id, ts]);
+        if let Err(error) = crate::work_core::project_links::record_external_state_change(
+            &mut conn,
+            "calendar_event",
+            &id,
+            "deleted",
+            json!({ "eventId": id }),
+        ) {
+            log::warn!("Record linked calendar deletion failed: {error}");
+        }
     }
     true
 }
@@ -201,7 +210,7 @@ pub fn system_update_event_status(
     status: String,
     db: tauri::State<'_, crate::db::DbState>,
 ) -> bool {
-    let conn = match db.0.lock() {
+    let mut conn = match db.0.lock() {
         Ok(c) => c,
         Err(_) => return false,
     };
@@ -215,11 +224,29 @@ pub fn system_update_event_status(
         0
     };
 
-    conn.execute(
-        "UPDATE events SET status = ?1, completed_at = ?2, updated_at = ?4 WHERE id = ?3",
-        params![status, completed_at, id, super::now_ms()],
-    )
-    .unwrap_or(0);
+    let updated = conn
+        .execute(
+            "UPDATE events SET status = ?1, completed_at = ?2, updated_at = ?4 WHERE id = ?3",
+            params![&status, completed_at, &id, super::now_ms()],
+        )
+        .unwrap_or(0);
+    if updated > 0 {
+        if let Err(error) = crate::work_core::project_links::record_external_state_change(
+            &mut conn,
+            "calendar_event",
+            &id,
+            if status == "done" {
+                "completed"
+            } else if status == "cancelled" {
+                "cancelled"
+            } else {
+                "status_changed"
+            },
+            json!({ "eventId": id, "status": status }),
+        ) {
+            log::warn!("Record linked calendar status failed: {error}");
+        }
+    }
     true
 }
 
@@ -231,15 +258,27 @@ pub fn system_update_event_time(
     end_time: String,
     db: tauri::State<'_, crate::db::DbState>,
 ) -> bool {
-    let conn = match db.0.lock() {
+    let mut conn = match db.0.lock() {
         Ok(c) => c,
         Err(_) => return false,
     };
-    conn.execute(
-        "UPDATE events SET start_time = ?1, end_time = ?2, updated_at = ?4 WHERE id = ?3",
-        params![start_time, end_time, id, super::now_ms()],
-    )
-    .unwrap_or(0);
+    let updated = conn
+        .execute(
+            "UPDATE events SET start_time = ?1, end_time = ?2, updated_at = ?4 WHERE id = ?3",
+            params![&start_time, &end_time, &id, super::now_ms()],
+        )
+        .unwrap_or(0);
+    if updated > 0 {
+        if let Err(error) = crate::work_core::project_links::record_external_state_change(
+            &mut conn,
+            "calendar_event",
+            &id,
+            "rescheduled",
+            json!({ "eventId": id, "startTime": start_time, "endTime": end_time }),
+        ) {
+            log::warn!("Record linked calendar reschedule failed: {error}");
+        }
+    }
     true
 }
 

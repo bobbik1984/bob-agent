@@ -227,7 +227,7 @@ fn save_receipt<T: serde::Serialize>(
     Ok(())
 }
 
-fn append_event(
+pub(crate) fn append_event(
     tx: &Transaction<'_>,
     project_id: &str,
     object_id: Option<&str>,
@@ -247,7 +247,11 @@ fn append_event(
     Ok(())
 }
 
-fn touch_project(tx: &Transaction<'_>, project_id: &str, now: i64) -> Result<(), String> {
+pub(crate) fn touch_project(
+    tx: &Transaction<'_>,
+    project_id: &str,
+    now: i64,
+) -> Result<(), String> {
     let changed = tx
         .execute(
             "UPDATE work_projects SET revision = revision + 1, updated_at = ?2 WHERE id = ?1 AND deleted_at IS NULL",
@@ -386,6 +390,16 @@ pub fn create_object(
     conn: &mut Connection,
     input: CreateWorkObjectInput,
 ) -> Result<WorkObject, String> {
+    let tx = conn.transaction().map_err(|error| error.to_string())?;
+    let object = create_object_in_tx(&tx, input)?;
+    tx.commit().map_err(|error| error.to_string())?;
+    Ok(object)
+}
+
+pub(crate) fn create_object_in_tx(
+    tx: &Transaction<'_>,
+    input: CreateWorkObjectInput,
+) -> Result<WorkObject, String> {
     validate_project_id(&input.project_id)?;
     validate_title(&input.title)?;
     require_idempotency_key(&input.idempotency_key)?;
@@ -395,17 +409,17 @@ pub fn create_object(
         .status
         .unwrap_or_else(|| default_status(input.kind).to_string());
     validate_status(&status)?;
-    if let Some(existing) = read_receipt(conn, &input.idempotency_key, OBJECT_OPERATION)? {
+    if let Some(existing) = read_receipt(tx, &input.idempotency_key, OBJECT_OPERATION)? {
         return Ok(existing);
     }
-    let project = get_project(conn, &input.project_id)?
+    let project = get_project(tx, &input.project_id)?
         .ok_or_else(|| format!("项目不存在: {}", input.project_id))?;
     if project.deleted_at.is_some() {
         return Err("不能向已删除项目添加工作对象".into());
     }
     if let Some(parent_id) = input.parent_id.as_deref() {
         let parent =
-            get_object(conn, parent_id)?.ok_or_else(|| format!("父对象不存在: {parent_id}"))?;
+            get_object(tx, parent_id)?.ok_or_else(|| format!("父对象不存在: {parent_id}"))?;
         if parent.project_id != input.project_id || parent.deleted_at.is_some() {
             return Err("父对象必须属于同一活动项目".into());
         }
@@ -428,7 +442,6 @@ pub fn create_object(
         deleted_at: None,
     };
     let actor = actor_or_bob(input.actor.as_deref());
-    let tx = conn.transaction().map_err(|error| error.to_string())?;
     tx.execute(
         "INSERT INTO work_objects (id, schema_version, kind, project_id, parent_id, title, status, description, data_json, source_capture_id, revision, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
         params![
@@ -448,9 +461,9 @@ pub fn create_object(
         ],
     )
     .map_err(|error| error.to_string())?;
-    touch_project(&tx, &object.project_id, now)?;
+    touch_project(tx, &object.project_id, now)?;
     append_event(
-        &tx,
+        tx,
         &object.project_id,
         Some(&object.id),
         &format!("{}.created", object.kind.as_str()),
@@ -460,14 +473,13 @@ pub fn create_object(
         now,
     )?;
     save_receipt(
-        &tx,
+        tx,
         &input.idempotency_key,
         OBJECT_OPERATION,
         &object.id,
         &object,
         now,
     )?;
-    tx.commit().map_err(|error| error.to_string())?;
     Ok(object)
 }
 

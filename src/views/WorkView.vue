@@ -18,6 +18,53 @@
       <button type="button" :aria-label="t('common.close')" @click="errorMessage = ''"><X :size="14" /></button>
     </div>
 
+    <section v-if="pendingLinks.length" class="assignment-panel" aria-live="polite">
+      <div class="assignment-heading">
+        <div>
+          <p class="section-kicker">{{ t('work.assignment_kicker') }}</p>
+          <h2><Link2 :size="18" />{{ t('work.assignment_title') }}</h2>
+          <p>{{ t('work.assignment_description') }}</p>
+        </div>
+        <span class="assignment-count">{{ pendingLinks.length }}</span>
+      </div>
+      <div class="assignment-list">
+        <article v-for="candidate in pendingLinks" :key="candidate.id" class="assignment-card">
+          <div class="assignment-copy">
+            <strong>{{ candidate.title }}</strong>
+            <span>{{ candidate.projectHint || t('work.assignment_no_hint') }}</span>
+            <small>{{ candidateReason(candidate.reasonCode) }}</small>
+          </div>
+          <div class="assignment-controls">
+            <select v-model="candidateDrafts[candidate.id].projectId" :aria-label="t('work.assignment_project')">
+              <option value="" disabled>{{ t('work.assignment_select') }}</option>
+              <option v-for="project in projects" :key="project.id" :value="project.id">{{ project.title }}</option>
+            </select>
+            <input
+              v-if="candidate.intent === 'decision' && candidate.reasonCode === 'missing_decision_reason'"
+              v-model.trim="candidateDrafts[candidate.id].reason"
+              :placeholder="t('work.assignment_reason_hint')"
+            />
+            <input
+              v-if="candidate.intent === 'commitment' && candidate.reasonCode === 'missing_commitment_owner'"
+              v-model.trim="candidateDrafts[candidate.id].owner"
+              :placeholder="t('work.assignment_owner_hint')"
+            />
+            <input
+              v-if="candidate.intent === 'commitment' && candidate.reasonCode === 'missing_commitment_due_at'"
+              v-model.trim="candidateDrafts[candidate.id].dueAt"
+              :placeholder="t('work.assignment_due_hint')"
+            />
+            <button class="primary-button compact" type="button" :disabled="saving || !candidateDrafts[candidate.id].projectId" @click="resolveCandidate(candidate)">
+              <Check :size="15" />{{ t('work.assignment_confirm') }}
+            </button>
+            <button class="secondary-button compact" type="button" :disabled="saving" @click="dismissCandidate(candidate)">
+              <X :size="15" />{{ t('work.assignment_dismiss') }}
+            </button>
+          </div>
+        </article>
+      </div>
+    </section>
+
     <div class="work-layout">
       <aside class="project-rail">
         <div class="rail-heading">
@@ -206,7 +253,7 @@ import { computed, onMounted, reactive, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import {
   Check, CheckCircle2, ChevronRight, Circle, CircleAlert, FileDown, FolderKanban,
-  History, ListChecks, LoaderCircle, Milestone, Plus, RefreshCw, Route, Scale,
+  History, Link2, ListChecks, LoaderCircle, Milestone, Plus, RefreshCw, Route, Scale,
   Target, X,
 } from 'lucide-vue-next';
 
@@ -218,6 +265,8 @@ const loading = ref(false);
 const saving = ref(false);
 const creatingProject = ref(false);
 const errorMessage = ref('');
+const pendingLinks = ref([]);
+const candidateDrafts = reactive({});
 
 const projectDraft = reactive({ title: '', mission: '', currentPhase: '' });
 const itemDraft = reactive({ kind: 'task', title: '', reason: '' });
@@ -244,6 +293,7 @@ async function loadProjects() {
   errorMessage.value = '';
   try {
     projects.value = await window.appAPI.workProjectList();
+    await loadPendingLinks();
     if (!activeProjectId.value && projects.value.length) {
       await selectProject(projects.value[0].id);
     }
@@ -252,6 +302,58 @@ async function loadProjects() {
   } finally {
     loading.value = false;
   }
+}
+
+async function loadPendingLinks() {
+  pendingLinks.value = await window.appAPI.workProjectLinkListPending(50);
+  for (const candidate of pendingLinks.value) {
+    const firstCandidate = candidate.selectedProjectId || candidate.candidateProjectIds?.[0] || '';
+    candidateDrafts[candidate.id] ||= { projectId: firstCandidate, reason: '', owner: '', dueAt: '' };
+  }
+}
+
+async function resolveCandidate(candidate) {
+  const draft = candidateDrafts[candidate.id];
+  saving.value = true;
+  errorMessage.value = '';
+  try {
+    const outcome = await window.appAPI.workProjectLinkResolve({
+      candidateId: candidate.id,
+      projectId: draft.projectId,
+      expectedRevision: candidate.revision,
+      reason: draft.reason || null,
+      owner: draft.owner || null,
+      dueAt: draft.dueAt || null,
+    });
+    delete candidateDrafts[candidate.id];
+    await loadPendingLinks();
+    await loadProjects();
+    if (outcome.candidate?.selectedProjectId) await selectProject(outcome.candidate.selectedProjectId);
+  } catch (error) {
+    errorMessage.value = String(error);
+    await loadPendingLinks();
+  } finally {
+    saving.value = false;
+  }
+}
+
+async function dismissCandidate(candidate) {
+  saving.value = true;
+  errorMessage.value = '';
+  try {
+    await window.appAPI.workProjectLinkDismiss({ candidateId: candidate.id, expectedRevision: candidate.revision });
+    delete candidateDrafts[candidate.id];
+    await loadPendingLinks();
+  } catch (error) {
+    errorMessage.value = String(error);
+    await loadPendingLinks();
+  } finally {
+    saving.value = false;
+  }
+}
+
+function candidateReason(reasonCode) {
+  return t(`work.assignment_${reasonCode}`, t('work.assignment_unknown'));
 }
 
 async function selectProject(projectId) {
@@ -355,6 +457,7 @@ function eventLabel(event) {
   if (type.endsWith('.created')) return t('work.event_item_created');
   if (type.endsWith('.status_changed')) return t('work.event_status_changed');
   if (type === 'relation.created') return t('work.event_relation_created');
+  if (type === 'external_link.recorded') return t('work.event_external_link_recorded');
   return type;
 }
 
@@ -374,6 +477,22 @@ onMounted(loadProjects);
 .work-header p, .project-summary p { margin: 0; color: var(--text-tertiary); }
 .work-eyebrow, .section-kicker { color: var(--user-accent, var(--accent-primary)) !important; font-size: 12px; font-weight: 650; letter-spacing: .08em; text-transform: uppercase; }
 .work-layout { max-width: 1280px; min-height: calc(100% - 90px); margin: 0 auto; display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 16px; }
+.assignment-panel { max-width: 1280px; margin: 0 auto 16px; border: 1px solid var(--border-subtle); border-radius: 14px; padding: 15px; background: var(--surface-card); }
+.assignment-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.assignment-heading h2 { display: flex; align-items: center; gap: 8px; margin: 3px 0 4px; font-size: 16px; }
+.assignment-heading p { margin: 0; color: var(--text-tertiary); font-size: 12px; }
+.assignment-count { min-width: 25px; height: 25px; display: inline-grid; place-items: center; border: 1px solid var(--border-subtle); border-radius: 999px; color: var(--user-accent, var(--accent-primary)); font-size: 11px; }
+.assignment-list { display: grid; gap: 8px; margin-top: 13px; }
+.assignment-card { display: grid; grid-template-columns: minmax(180px, .8fr) minmax(320px, 1.2fr); gap: 12px; align-items: center; border-top: 1px solid var(--border-subtle); padding-top: 10px; }
+.assignment-card:first-child { border-top: 0; padding-top: 0; }
+.assignment-copy { min-width: 0; display: grid; gap: 3px; }
+.assignment-copy strong, .assignment-copy span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.assignment-copy strong { font-size: 13px; }
+.assignment-copy span, .assignment-copy small { color: var(--text-tertiary); font-size: 11px; }
+.assignment-controls { display: flex; gap: 7px; align-items: center; }
+.assignment-controls select, .assignment-controls input { min-width: 0; padding: 8px 10px; }
+.assignment-controls select { flex: 1; }
+.assignment-controls input { flex: 1.2; }
 .project-rail, .project-board, .create-project-card, .work-empty-state { border: 1px solid var(--border-subtle); border-radius: 16px; background: var(--surface-card); }
 .project-rail { padding: 10px; }
 .rail-heading { display: flex; justify-content: space-between; padding: 8px 9px 12px; color: var(--text-tertiary); font-size: 12px; }
@@ -444,6 +563,10 @@ textarea { resize: vertical; }
   .work-header { align-items: center; }
   .work-header p:not(.work-eyebrow) { display: none; }
   .work-layout { grid-template-columns: 1fr; }
+  .assignment-card { grid-template-columns: 1fr; }
+  .assignment-card:nth-child(n+4) { display: none; }
+  .assignment-controls { display: grid; grid-template-columns: 1fr 1fr; }
+  .assignment-controls select, .assignment-controls input { grid-column: 1 / -1; }
   .project-rail { display: flex; gap: 6px; overflow-x: auto; }
   .rail-heading, .rail-empty { display: none; }
   .project-row { min-width: 160px; }

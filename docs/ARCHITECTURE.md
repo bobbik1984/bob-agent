@@ -6,7 +6,7 @@
 
 ## v0.8.1 演进边界（当前实现）
 
-`v0.8.0` 已封存 Capture 与知识提交基线。`v0.8.1` 已在现有 Rust 后端中建立隔离的 `work_core`，没有重写 Tauri、Android、Capture、Notes、Calendar、Sync、Relay 或 Tools，也没有增加客户端运行时依赖。
+`v0.8.0` 已封存 Capture 与知识提交基线。`v0.8.1` 开发线已在现有 Rust 后端中建立隔离的 `work_core`，并完成现有输入到 Project State 的第一轮接入；没有重写 Tauri、Android、Sync、Relay 或 Tools，也没有增加客户端运行时依赖。
 
 ```mermaid
 flowchart TD
@@ -22,7 +22,21 @@ flowchart TD
     Adapter --> Runtime["API / Codex / AGY / Other"]
 ```
 
-当前已实现 Work Object 契约、SQLite Repository、append-only Work Event、幂等与 revision、软删除、Project Aggregate、Markdown 快照、Tauri Commands、Bridge 和最小 `WorkView`。现有 Capture/Note/Calendar 尚未自动关联 Work Core；Router、Advanced、Graph 和 Runtime Adapter 仍是后续目标。跨模块决定见 `docs/DECISIONS.md`，完整阶段与质量门见 `docs/superpowers/plans/2026-08-10-work-continuity-evolution-plan.md`。
+当前已实现 Work Object 契约、SQLite Repository、append-only Work Event、幂等与 revision、软删除、Project Aggregate、Markdown 快照、Tauri Commands、Bridge 和最小 `WorkView`。Capture Router 现在可以把明确项目任务、决策、承诺、会议派生项和文件成果写入 Work Core；Todo/Event、Note/Source 和文件继续保留各自真相源，`work_external_links` 只保存稳定引用。无法唯一确认项目或缺少关键字段时写入 `project_link_candidates`，由 WorkView 非阻断处理。Router、Advanced、Dynamic Graph 和 Runtime Adapter 仍是后续目标；文件变化目前只产生待确认 Change，不做决定影响分析。
+
+### 输入与 Project State 的当前边界
+
+```text
+Capture Journal (原始输入)
+  ├─ 明确工作对象 ── project_links ── Work Object + Work Event
+  ├─ Todo / Event ── Calendar 为状态真相源 ── stable external link
+  ├─ Note / Source ── Markdown 为内容真相源 ── stable external link
+  └─ File ── 原路径 + 流式 hash/size/mtime ── Artifact 或 Change Candidate
+
+歧义 / 缺字段 ── project_link_candidates ── WorkView 稍后归属或忽略
+```
+
+`project_link_candidates`、Work Object、Work Event、Capture refs 在同一个 SQLite transaction 中确认；Markdown 先安全落盘再登记引用。外部对象的完成、取消、改期和删除只追加项目活动，不复制外部状态。快照在数据库提交并释放锁后 best-effort 刷新。
 
 ## 总体架构
 
@@ -80,7 +94,7 @@ bob-agent/
 │   │   ├── llm.rs                   # LLM 引擎 (SSE 流式 + Tool Calling 循环)
 │   │   ├── tools.rs                 # 🔑 12 个原生工具 + 执行调度器
 │   │   ├── capture.rs               # CaptureEnvelope + SQLite Journal + 幂等归并
-│   │   ├── work_core/               # 持久项目状态、事件、关系与 Markdown 快照
+│   │   ├── work_core/               # 持久项目状态、候选归属、外部引用、事件与 Markdown 快照
 │   │   ├── calendar.rs              # 日程/待办管理 (SQLite)
 │   │   ├── outbox.rs                # Outbox/Reconciler 声明式配置
 │   │   ├── filesystem.rs            # 文件读取/扫描/跟踪

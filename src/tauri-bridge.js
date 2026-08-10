@@ -109,12 +109,36 @@ if (IS_TAURI) {
 
   const MOCK_WORK_PROJECTS = [];
   const MOCK_WORK_AGGREGATES = {};
+  const MOCK_PROJECT_LINK_CANDIDATES = [];
 
   const emptyWorkAggregate = (project) => ({
     project,
     responsibilities: [], goals: [], milestones: [], tasks: [], decisions: [],
     artifacts: [], evidence: [], risks: [], changes: [], commitments: [], recentEvents: [],
   });
+
+  if (typeof location !== 'undefined' && new URLSearchParams(location.search).get('workCandidates') === '1') {
+    const now = Date.now();
+    const previewProject = {
+      schemaVersion: 1, id: 'project_mock_bob', title: 'Bob 产品升级', mission: '让复杂工作不断线',
+      status: 'active', currentPhase: 'Phase 2', summary: null, sourceRef: null, metadata: {},
+      revision: 1, createdAt: now, updatedAt: now, deletedAt: null,
+    };
+    MOCK_WORK_PROJECTS.push(previewProject);
+    MOCK_WORK_AGGREGATES[previewProject.id] = emptyWorkAggregate(previewProject);
+    MOCK_PROJECT_LINK_CANDIDATES.push(
+      {
+        id: 'project_link_mock_ambiguous', captureId: 'mock_ambiguous', intent: 'work_task', title: '整理同步回放',
+        proposal: {}, projectHint: 'Bob', candidateProjectIds: [], selectedProjectId: null, status: 'pending',
+        reasonCode: 'ambiguous_project', confidence: 0.92, resolvedObjectId: null, revision: 1, createdAt: now, updatedAt: now,
+      },
+      {
+        id: 'project_link_mock_decision', captureId: 'mock_decision', intent: 'decision', title: '保留当前同步架构',
+        proposal: {}, projectHint: 'Bob 产品升级', candidateProjectIds: ['project_mock_bob'], selectedProjectId: 'project_mock_bob', status: 'pending',
+        reasonCode: 'missing_decision_reason', confidence: 0.96, resolvedObjectId: null, revision: 1, createdAt: now - 1000, updatedAt: now - 1000,
+      },
+    );
+  }
 
   // Mock invoke — 根据命令返回合理的假数据
   invoke = async (cmd, args) => {
@@ -216,6 +240,30 @@ if (IS_TAURI) {
       }
       case 'work_relation_create': return { id: `relation_mock_${Date.now()}`, ...(args?.input || {}), createdAt: Date.now(), deletedAt: null };
       case 'work_project_export_snapshot': return { projectId: args?.projectId, path: `notes/projects/${args?.projectId}/_PROJECT_STATE.md`, bytesWritten: 0 };
+      case 'work_project_link_list_pending': return MOCK_PROJECT_LINK_CANDIDATES.filter(item => item.status === 'pending').slice(0, args?.limit || 20);
+      case 'work_project_link_resolve': {
+        const input = args?.input || {};
+        const candidate = MOCK_PROJECT_LINK_CANDIDATES.find(item => item.id === input.candidateId);
+        if (!candidate) throw new Error('PROJECT_LINK_NOT_FOUND');
+        if (candidate.revision !== input.expectedRevision) throw new Error('PROJECT_LINK_REVISION_CONFLICT');
+        candidate.status = 'resolved';
+        candidate.selectedProjectId = input.projectId;
+        candidate.reasonCode = 'user_resolved';
+        candidate.revision += 1;
+        candidate.updatedAt = Date.now();
+        return { candidate, object: null };
+      }
+      case 'work_project_link_dismiss': {
+        const input = args?.input || {};
+        const candidate = MOCK_PROJECT_LINK_CANDIDATES.find(item => item.id === input.candidateId);
+        if (!candidate) throw new Error('PROJECT_LINK_NOT_FOUND');
+        if (candidate.revision !== input.expectedRevision) throw new Error('PROJECT_LINK_REVISION_CONFLICT');
+        candidate.status = 'dismissed';
+        candidate.reasonCode = 'user_dismissed';
+        candidate.revision += 1;
+        return candidate;
+      }
+      case 'work_external_link_list': return [];
       case 'capture_ingest': return { ok: true, duplicate: false, capture: { captureId: 'mock-capture-' + Date.now(), status: 'received' } };
       case 'capture_process_pending': return { ok: true, processed: 0, committed: 0, needsClarification: 0, awaitingPipeline: 0, deferred: 0 };
       case 'capture_quick_note': return { ok: true, duplicate: false, captureId: 'mock-capture-' + Date.now(), status: 'committed', path: 'daily/mock.md' };
@@ -464,6 +512,10 @@ window.appAPI = {
   workObjectDelete: (input) => invoke('work_object_delete', { input }),
   workRelationCreate: (input) => invoke('work_relation_create', { input }),
   workProjectExportSnapshot: (projectId) => invoke('work_project_export_snapshot', { projectId }),
+  workProjectLinkListPending: (limit = 20) => invoke('work_project_link_list_pending', { limit }),
+  workProjectLinkResolve: (input) => invoke('work_project_link_resolve', { input }),
+  workProjectLinkDismiss: (input) => invoke('work_project_link_dismiss', { input }),
+  workExternalLinkList: (projectId) => invoke('work_external_link_list', { projectId }),
 
   // ── 系统 & 配置 (Mapped to Rust) ─────────────────────
   openExternal: (url) => IS_TAURI ? invoke('plugin:shell|open', { path: url }) : window.open(url, '_blank'),

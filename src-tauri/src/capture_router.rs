@@ -16,6 +16,12 @@ pub enum RouteIntent {
     Event,
     Source,
     Note,
+    WorkTask,
+    Decision,
+    Artifact,
+    Meeting,
+    Change,
+    Commitment,
     Pending,
 }
 
@@ -40,6 +46,14 @@ pub struct RouteDecision {
     pub domains: Vec<String>,
     #[serde(default)]
     pub topics: Vec<String>,
+    #[serde(default)]
+    pub reason: Option<String>,
+    #[serde(default)]
+    pub owner: Option<String>,
+    #[serde(default)]
+    pub due_at: Option<String>,
+    #[serde(default)]
+    pub metadata: Value,
 }
 
 pub fn init_capture_router_tables(conn: &Connection) {
@@ -259,9 +273,74 @@ fn clean_title(text: &str) -> String {
     title.chars().take(100).collect()
 }
 
+fn explicit_project_reference(text: &str) -> (Option<String>, Option<String>) {
+    if let Ok(id_pattern) = Regex::new(r"\b(project_[A-Za-z0-9_-]+)\b") {
+        if let Some(value) = id_pattern
+            .captures(text)
+            .and_then(|captures| captures.get(1))
+        {
+            return (Some(value.as_str().to_string()), None);
+        }
+    }
+    if let Ok(name_pattern) =
+        Regex::new(r"(?:在|归入|属于)\s*([^，,:：。]{1,80}?)\s*项目(?:中|里|下)?")
+    {
+        if let Some(value) = name_pattern
+            .captures(text)
+            .and_then(|captures| captures.get(1))
+        {
+            return (None, Some(value.as_str().trim().to_string()));
+        }
+    }
+    (None, None)
+}
+
+fn work_route(capture: &CaptureEnvelope, intent: RouteIntent) -> RouteDecision {
+    let text = capture.content.as_deref().unwrap_or("").trim();
+    let (project_id, project_hint) = explicit_project_reference(text);
+    let reason = text
+        .split_once("因为")
+        .map(|(_, value)| value.trim().to_string())
+        .or_else(|| {
+            text.to_lowercase()
+                .split_once("because")
+                .map(|(_, value)| value.trim().to_string())
+        });
+    RouteDecision {
+        intent,
+        title: clean_title(text),
+        date: None,
+        start_time: None,
+        end_time: None,
+        confidence: 1.0,
+        needs_clarification: false,
+        reason_codes: vec!["explicit_work_intent".into()],
+        project_id,
+        project_hint,
+        tags: vec![],
+        domains: vec![],
+        topics: vec![],
+        reason,
+        owner: None,
+        due_at: None,
+        metadata: json!({}),
+    }
+}
+
 pub fn route_locally(capture: &CaptureEnvelope) -> RouteDecision {
     let text = capture.content.as_deref().unwrap_or("").trim();
     let explicit = capture.explicit_intent.as_deref().unwrap_or("");
+    if let Some(intent) = match explicit {
+        "work_task" => Some(RouteIntent::WorkTask),
+        "decision" => Some(RouteIntent::Decision),
+        "artifact" => Some(RouteIntent::Artifact),
+        "meeting" => Some(RouteIntent::Meeting),
+        "change" => Some(RouteIntent::Change),
+        "commitment" => Some(RouteIntent::Commitment),
+        _ => None,
+    } {
+        return work_route(capture, intent);
+    }
     if explicit == "seed" {
         return RouteDecision {
             intent: RouteIntent::QuickNote,
@@ -277,9 +356,14 @@ pub fn route_locally(capture: &CaptureEnvelope) -> RouteDecision {
             tags: vec![],
             domains: vec![],
             topics: vec![],
+            reason: None,
+            owner: None,
+            due_at: None,
+            metadata: json!({}),
         };
     }
     if capture.source_url.is_some() || matches!(explicit, "source" | "knowledge") {
+        let (project_id, project_hint) = explicit_project_reference(text);
         return RouteDecision {
             intent: RouteIntent::Source,
             title: clean_title(text),
@@ -289,11 +373,15 @@ pub fn route_locally(capture: &CaptureEnvelope) -> RouteDecision {
             confidence: 0.98,
             needs_clarification: false,
             reason_codes: vec!["source_detected".into()],
-            project_id: None,
-            project_hint: None,
+            project_id,
+            project_hint,
             tags: vec![],
             domains: vec![],
             topics: vec![],
+            reason: None,
+            owner: None,
+            due_at: None,
+            metadata: json!({}),
         };
     }
 
@@ -325,6 +413,7 @@ pub fn route_locally(capture: &CaptureEnvelope) -> RouteDecision {
     } else {
         0.94
     };
+    let (project_id, project_hint) = explicit_project_reference(text);
     RouteDecision {
         intent,
         title: clean_title(text),
@@ -334,12 +423,57 @@ pub fn route_locally(capture: &CaptureEnvelope) -> RouteDecision {
         confidence,
         needs_clarification,
         reason_codes: reasons,
-        project_id: None,
-        project_hint: None,
+        project_id,
+        project_hint,
         tags: vec![],
         domains: vec![],
         topics: vec![],
+        reason: None,
+        owner: None,
+        due_at: None,
+        metadata: json!({}),
     }
+}
+
+fn project_proposal(
+    capture: &CaptureEnvelope,
+    route: &RouteDecision,
+    external_kind: Option<&str>,
+    external_id: Option<String>,
+    mut metadata: Value,
+) -> Option<crate::work_core::project_links::ProjectLinkProposal> {
+    use crate::work_core::project_links::{ProjectLinkIntent, ProjectLinkProposal};
+    let intent = match route.intent {
+        RouteIntent::WorkTask => ProjectLinkIntent::WorkTask,
+        RouteIntent::Decision => ProjectLinkIntent::Decision,
+        RouteIntent::Todo => ProjectLinkIntent::Todo,
+        RouteIntent::Event => ProjectLinkIntent::Event,
+        RouteIntent::Note => ProjectLinkIntent::Note,
+        RouteIntent::Source => ProjectLinkIntent::Source,
+        RouteIntent::Artifact => ProjectLinkIntent::Artifact,
+        RouteIntent::Meeting => ProjectLinkIntent::Meeting,
+        RouteIntent::Change => ProjectLinkIntent::Change,
+        RouteIntent::Commitment => ProjectLinkIntent::Commitment,
+        _ => return None,
+    };
+    if let Some(object) = metadata.as_object_mut() {
+        object.insert("captureId".into(), json!(capture.capture_id));
+    }
+    Some(ProjectLinkProposal {
+        intent,
+        title: route.title.clone(),
+        project_id: route.project_id.clone(),
+        project_hint: route.project_hint.clone(),
+        description: capture.content.clone(),
+        reason: route.reason.clone(),
+        owner: route.owner.clone(),
+        due_at: route.due_at.clone(),
+        external_kind: external_kind.map(str::to_string),
+        external_id,
+        metadata,
+        confidence: route.confidence as f64,
+        reason_codes: route.reason_codes.clone(),
+    })
 }
 
 fn validate_route(route: &RouteDecision) -> Result<(), String> {
@@ -423,20 +557,34 @@ fn commit_knowledge(
     conn: &Connection,
     capture: &CaptureEnvelope,
     route: &RouteDecision,
-) -> Result<String, String> {
+) -> Result<crate::knowledge_committer::CommitOutcome, String> {
     save_route(conn, &capture.capture_id, route, "validated")?;
-    let outcome = crate::knowledge_committer::commit_knowledge_capture(capture, route)?;
-    let derived_ref = outcome.relative_path;
+    let mut write_route = route.clone();
+    if write_route.intent == RouteIntent::Source {
+        write_route.project_id = None;
+        write_route.project_hint = None;
+    } else if write_route.intent == RouteIntent::Note && write_route.project_id.is_none() {
+        if let Some(proposal) = project_proposal(capture, route, None, None, json!({})) {
+            write_route.project_id =
+                crate::work_core::project_links::resolve_unique_project_id(conn, &proposal)?;
+        }
+        write_route.project_hint = None;
+    }
+    let outcome = crate::knowledge_committer::commit_knowledge_capture(capture, &write_route)?;
+    let derived_ref = outcome.relative_path.clone();
     crate::capture::mark_knowledge_committed(conn, capture, std::slice::from_ref(&derived_ref))?;
     conn.execute(
         "UPDATE capture_enrichment SET stage = 'committed', updated_at = ?2 WHERE capture_id = ?1",
         params![&capture.capture_id, crate::now_ms()],
     )
     .map_err(|e| e.to_string())?;
-    Ok(derived_ref)
+    Ok(outcome)
 }
 
-pub fn apply_local_route(conn: &Connection, capture: &CaptureEnvelope) -> Result<Value, String> {
+pub fn apply_local_route(
+    conn: &mut Connection,
+    capture: &CaptureEnvelope,
+) -> Result<Value, String> {
     let route = route_locally(capture);
     match route.intent {
         RouteIntent::Todo | RouteIntent::Event if !route.needs_clarification => {
@@ -448,11 +596,60 @@ pub fn apply_local_route(conn: &Connection, capture: &CaptureEnvelope) -> Result
                 params![&capture.capture_id, crate::now_ms()],
             )
             .map_err(|e| e.to_string())?;
+            if let Some(proposal) = project_proposal(
+                capture,
+                &route,
+                Some("calendar_event"),
+                derived_ref.strip_prefix("event:").map(str::to_string),
+                json!({ "date": route.date, "startTime": route.start_time, "endTime": route.end_time }),
+            ) {
+                let _ = crate::work_core::project_links::apply_proposal(conn, capture, proposal)?;
+            }
             Ok(json!({ "route": route, "committed": true, "derivedRef": derived_ref }))
         }
         RouteIntent::QuickNote | RouteIntent::Source => {
-            let derived_ref = commit_knowledge(conn, capture, &route)?;
-            Ok(json!({ "route": route, "committed": true, "derivedRef": derived_ref }))
+            let outcome = commit_knowledge(conn, capture, &route)?;
+            if let Some(proposal) = project_proposal(
+                capture,
+                &route,
+                Some("knowledge_source"),
+                Some(outcome.object_id.clone()),
+                json!({ "path": outcome.relative_path }),
+            ) {
+                let _ = crate::work_core::project_links::apply_proposal(conn, capture, proposal)?;
+            }
+            Ok(json!({ "route": route, "committed": true, "derivedRef": outcome.relative_path }))
+        }
+        RouteIntent::WorkTask
+        | RouteIntent::Decision
+        | RouteIntent::Artifact
+        | RouteIntent::Meeting
+        | RouteIntent::Change
+        | RouteIntent::Commitment => {
+            save_route(conn, &capture.capture_id, &route, "validated")?;
+            let mut metadata = route.metadata.clone();
+            if route.intent == RouteIntent::Artifact {
+                if let Some(path) = capture.file_path.as_deref() {
+                    metadata =
+                        serde_json::to_value(crate::work_core::project_links::fingerprint_file(
+                            std::path::Path::new(path),
+                        )?)
+                        .map_err(|e| e.to_string())?;
+                }
+            }
+            let proposal = project_proposal(
+                capture,
+                &route,
+                capture.file_path.as_ref().map(|_| "file"),
+                capture.file_path.clone(),
+                metadata,
+            )
+            .ok_or_else(|| "无法构建项目关联建议".to_string())?;
+            let outcome = crate::work_core::project_links::apply_proposal(conn, capture, proposal)?;
+            let pending = outcome.as_ref().map(|v| v.candidate.status.as_str()) == Some("pending");
+            Ok(
+                json!({ "route": route, "committed": !pending, "projectAssignmentPending": pending, "outcome": outcome }),
+            )
         }
         _ => {
             save_route(conn, &capture.capture_id, &route, "pending_model")?;
@@ -478,12 +675,12 @@ fn parse_clerk_route(raw: &str) -> Result<RouteDecision, String> {
 
 async fn clerk_route(capture: &CaptureEnvelope) -> Result<RouteDecision, String> {
     let prompt = format!(
-        "将下面输入解析为 JSON。intent 只能是 todo、event、quick_note、note、source、pending。不要调用工具，不要猜测缺失日期或项目 ID。date 使用 YYYY-MM-DD，startTime/endTime 使用 HH:MM；projectId 只有输入明确包含 project_ ID 时才能填写；用户只说项目名称时写入 projectHint，由本地索引唯一匹配；tags、domains、topics 使用简短数组；信息不足时 needsClarification=true。当前本地日期是 {}。\n\n输入：{}",
+        "将下面输入解析为 JSON。intent 只能是 todo、event、quick_note、note、source、work_task、decision、artifact、meeting、change、commitment、pending。普通提醒和日程继续使用 todo/event；只有明确要求写入某个项目的任务、决策、文件成果、会议结论、变化或承诺时才使用工作意图。不要调用工具，不要猜测缺失日期或项目 ID。date 使用 YYYY-MM-DD，startTime/endTime 使用 HH:MM；projectId 只有输入明确包含 project_ ID 时才能填写；用户只说项目名称时写入 projectHint，由本地索引唯一精确匹配。decision 必须提取 reason；commitment 必须提取 owner 和 dueAt；meeting 把明确形成的 decision/task/commitment 放入 metadata.items。tags、domains、topics 使用简短数组；信息不足时 needsClarification=true。当前本地日期是 {}。\n\n输入：{}",
         Local::now().date_naive(),
         capture.content.as_deref().unwrap_or("")
     );
     let raw = crate::llm::call_clerk_oneshot(
-        "你是离线优先个人助理的结构化意图解析器。只输出符合字段 intent,title,date,startTime,endTime,confidence,needsClarification,reasonCodes,projectId,projectHint,tags,domains,topics 的 JSON。",
+        "你是离线优先个人助理的结构化意图解析器。只输出符合字段 intent,title,date,startTime,endTime,confidence,needsClarification,reasonCodes,projectId,projectHint,tags,domains,topics,reason,owner,dueAt,metadata 的 JSON。模型只提出候选，项目归属和最终写入由本地确定性代码决定。",
         &prompt,
         400,
     )
@@ -514,7 +711,7 @@ async fn process_capture(app: &AppHandle, capture: CaptureEnvelope) -> Result<Va
     ) {
         let db = app.state::<DbState>();
         let conn = db.0.lock().map_err(|e| e.to_string())?;
-        let derived_ref = match commit_knowledge(&conn, &capture, &route) {
+        let outcome = match commit_knowledge(&conn, &capture, &route) {
             Ok(value) => value,
             Err(error) if crate::knowledge_committer::is_project_clarification_error(&error) => {
                 let mut clarification_route = route.clone();
@@ -537,12 +734,64 @@ async fn process_capture(app: &AppHandle, capture: CaptureEnvelope) -> Result<Va
             }
             Err(error) => return Err(error),
         };
+        let derived_ref = outcome.relative_path.clone();
+        drop(conn);
+        let db = app.state::<DbState>();
+        let mut conn = db.0.lock().map_err(|e| e.to_string())?;
+        if let Some(proposal) = project_proposal(
+            &capture,
+            &route,
+            Some(if route.intent == RouteIntent::Note {
+                "knowledge_note"
+            } else {
+                "knowledge_source"
+            }),
+            Some(outcome.object_id.clone()),
+            json!({ "path": outcome.relative_path }),
+        ) {
+            let _ = crate::work_core::project_links::apply_proposal(&mut conn, &capture, proposal)?;
+        }
         return Ok(json!({
             "captureId": capture.capture_id,
             "committed": true,
             "intent": route.intent,
             "derivedRef": derived_ref
         }));
+    }
+    if matches!(
+        route.intent,
+        RouteIntent::WorkTask
+            | RouteIntent::Decision
+            | RouteIntent::Artifact
+            | RouteIntent::Meeting
+            | RouteIntent::Change
+            | RouteIntent::Commitment
+    ) {
+        let db = app.state::<DbState>();
+        let mut conn = db.0.lock().map_err(|e| e.to_string())?;
+        save_route(&conn, &capture.capture_id, &route, "validated")?;
+        let mut metadata = route.metadata.clone();
+        if route.intent == RouteIntent::Artifact {
+            if let Some(path) = capture.file_path.as_deref() {
+                let fingerprint =
+                    crate::work_core::project_links::fingerprint_file(std::path::Path::new(path))?;
+                metadata = serde_json::to_value(fingerprint).map_err(|e| e.to_string())?;
+            }
+        }
+        let proposal = project_proposal(
+            &capture,
+            &route,
+            capture.file_path.as_ref().map(|_| "file"),
+            capture.file_path.clone(),
+            metadata,
+        )
+        .ok_or_else(|| "无法构建项目关联建议".to_string())?;
+        let outcome =
+            crate::work_core::project_links::apply_proposal(&mut conn, &capture, proposal)?;
+        let pending = outcome.as_ref().map(|v| v.candidate.status.as_str()) == Some("pending");
+        return Ok(
+            json!({ "captureId": capture.capture_id, "committed": !pending, "projectAssignmentPending": pending, "outcome": outcome }),
+        );
     }
     if !matches!(route.intent, RouteIntent::Todo | RouteIntent::Event) {
         let db = app.state::<DbState>();
@@ -559,7 +808,7 @@ async fn process_capture(app: &AppHandle, capture: CaptureEnvelope) -> Result<Va
         return Ok(json!({ "captureId": capture.capture_id, "needsClarification": true }));
     }
     let db = app.state::<DbState>();
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let mut conn = db.0.lock().map_err(|e| e.to_string())?;
     save_route(&conn, &capture.capture_id, &route, "validated")?;
     let derived_ref = commit_action(&conn, &capture, &route)?;
     crate::capture::mark_routed_committed(&conn, &capture, &[derived_ref.clone()])?;
@@ -568,6 +817,15 @@ async fn process_capture(app: &AppHandle, capture: CaptureEnvelope) -> Result<Va
         params![&capture.capture_id, crate::now_ms()],
     )
     .map_err(|e| e.to_string())?;
+    if let Some(proposal) = project_proposal(
+        &capture,
+        &route,
+        Some("calendar_event"),
+        derived_ref.strip_prefix("event:").map(str::to_string),
+        json!({ "date": route.date, "startTime": route.start_time, "endTime": route.end_time }),
+    ) {
+        let _ = crate::work_core::project_links::apply_proposal(&mut conn, &capture, proposal)?;
+    }
     Ok(json!({ "captureId": capture.capture_id, "committed": true, "derivedRef": derived_ref }))
 }
 

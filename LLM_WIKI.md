@@ -13,6 +13,7 @@
 | :--- | :--- | :--- | :--- | :--- |
 | **可靠 Capture / 闪念速记** | [QuickNoteOverlay.vue](file:///d:/OneDrive/Learning/Code/Gemini/bob-agent/src/components/QuickNoteOverlay.vue) | `captureQuickNote` | `capture_quick_note` | [capture.rs](file:///d:/OneDrive/Learning/Code/Gemini/bob-agent/src-tauri/src/capture.rs) |
 | **持续工作核心 / Project State** | [WorkView.vue](file:///d:/OneDrive/Learning/Code/Gemini/bob-agent/src/views/WorkView.vue) | `workProject*` / `workObject*` | `work_project_*` / `work_object_*` | [work_core](file:///d:/OneDrive/Learning/Code/Gemini/bob-agent/src-tauri/src/work_core) |
+| **项目归属候选 / 外部引用** | [WorkView.vue](file:///d:/OneDrive/Learning/Code/Gemini/bob-agent/src/views/WorkView.vue) | `workProjectLink*` / `workExternalLinkList` | `work_project_link_*` / `work_external_link_list` | [project_links.rs](file:///d:/OneDrive/Learning/Code/Gemini/bob-agent/src-tauri/src/work_core/project_links.rs) |
 | **做梦引擎 (记忆整理)** | `App.vue` / 后台守护 | `summarizeSession` | `system_summarize_session` | [dream.rs](file:///d:/OneDrive/Learning/Code/Gemini/bob-agent/src-tauri/src/dream.rs) |
 | **微信穿透网关** | `SettingsView.vue` (QR 扫码) | `wechatGetLoginQr` | `wechat_get_login_qr` | [mod.rs (wechat)](file:///d:/OneDrive/Learning/Code/Gemini/bob-agent/src-tauri/src/wechat/mod.rs) |
 | **Web Drop 极传** | `ChatView.vue` (文件分享) | `startWebDrop` | `start_web_drop` | [web_drop.rs](file:///d:/OneDrive/Learning/Code/Gemini/bob-agent/src-tauri/src/web_drop.rs) |
@@ -63,6 +64,10 @@
   - 每日笔记使用隐藏 `bob-capture:{capture_id}` 标识防止崩溃恢复时重复追加；跨端状态归并禁止 committed/synced 倒退。
   - `capture_mobile_image()` 将 Android 临时图片原子归档为 `notes/assets/captures/images/YYYY/MM/<capture_id>--<hash8>--<original>`；失败不清缓存，当前 `sync_scope=local_only`。
   - `capture_router.rs` 提供离线优先 Todo/Event 分流：本地时间快车道、Clerk 结构化候选、日期校验、确定性事件 ID、延迟重试和真实数据库回执。
+  - 明确的 `work_task`、`decision`、`artifact`、`meeting`、`change`、`commitment` 由 `work_core/project_links.rs` 做本地项目唯一匹配；模型只产出 Proposal，不能决定最终归属。
+  - Todo/Event 仍以 `events` 为真相源；Note/Source 仍以 Markdown 为真相源；Work Core 通过 `work_external_links` 保存稳定引用和项目语义，不复制正文、日期或完成状态。
+  - 项目重名、找不到、失效或关键字段缺失写入 `project_link_candidates`；WorkView 提供稍后归属与忽略，不弹出阻断式对话框。
+  - PC 文件引用只记录绝对路径、流式 MD5、大小和修改时间，不复制源文件；同路径 hash 变化生成待确认 Change，当前不会自动修改既有 Decision。
   - `capture_process_pending()` 在后台处理 `pending_enrichment`；网络/模型不可用只延后，不影响原始 Capture。
   - `knowledge_committer.rs` 负责 QuickNote/Note/Source 的确定性提交：Markdown 是权威真相源，稳定 ID 防重复，Source 保留原始引用；项目名称只通过本地 Project 对象唯一匹配，无法确定时请求确认。
   - `capture_activity_list()` 返回最近语义事件；`capture_events` 每设备最多 50 条，UI 使用 i18n key 在展示时翻译。

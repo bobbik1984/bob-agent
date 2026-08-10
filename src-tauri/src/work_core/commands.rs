@@ -6,6 +6,10 @@ use super::models::{
     CreateProjectInput, CreateRelationInput, CreateWorkObjectInput, DeleteWorkObjectInput,
     ProjectAggregate, UpdateWorkStatusInput, WorkObject, WorkProject, WorkRelation,
 };
+use super::project_links::{
+    self, DismissProjectLinkInput, ExternalLink, ProjectLinkCandidate, ProjectLinkOutcome,
+    ResolveProjectLinkInput,
+};
 use super::{repository, snapshot};
 
 fn refresh_snapshot(project_id: &str, aggregate: Result<ProjectAggregate, String>) {
@@ -104,4 +108,45 @@ pub fn work_project_export_snapshot(
     let aggregate = repository::get_project_aggregate(&conn, &project_id)?;
     drop(conn);
     snapshot::write_project_snapshot(&aggregate)
+}
+
+#[tauri::command]
+pub fn work_project_link_list_pending(
+    db: State<'_, DbState>,
+    limit: Option<usize>,
+) -> Result<Vec<ProjectLinkCandidate>, String> {
+    let conn = db.0.lock().map_err(|error| error.to_string())?;
+    project_links::list_pending(&conn, limit.unwrap_or(20))
+}
+
+#[tauri::command]
+pub fn work_project_link_resolve(
+    db: State<'_, DbState>,
+    input: ResolveProjectLinkInput,
+) -> Result<ProjectLinkOutcome, String> {
+    let mut conn = db.0.lock().map_err(|error| error.to_string())?;
+    let outcome = project_links::resolve_candidate(&mut conn, input)?;
+    let project_id = outcome.candidate.selected_project_id.clone();
+    if let Some(project_id) = project_id.as_deref() {
+        project_links::refresh_project_snapshot(&conn, project_id);
+    }
+    Ok(outcome)
+}
+
+#[tauri::command]
+pub fn work_project_link_dismiss(
+    db: State<'_, DbState>,
+    input: DismissProjectLinkInput,
+) -> Result<ProjectLinkCandidate, String> {
+    let mut conn = db.0.lock().map_err(|error| error.to_string())?;
+    project_links::dismiss_candidate(&mut conn, input)
+}
+
+#[tauri::command]
+pub fn work_external_link_list(
+    db: State<'_, DbState>,
+    project_id: String,
+) -> Result<Vec<ExternalLink>, String> {
+    let conn = db.0.lock().map_err(|error| error.to_string())?;
+    project_links::list_external_links(&conn, &project_id)
 }

@@ -7,7 +7,7 @@
 
 本文件只保存当前实施批次和紧邻下一批的任务。目标架构不得写成已实现能力。
 
-## 当前主线：Phase 0–1 Persistent Work Core
+## 已完成主线：Phase 0–2 Persistent Work Core 与输入接入
 
 ### WC-001 文档与术语收口（P0，已完成）
 
@@ -23,8 +23,8 @@
 
 - [x] 定义 Project、Responsibility、Goal、Milestone、Task、Decision、Artifact、Evidence、Risk、Change、Commitment。
 - [x] 冻结类型前缀、状态、revision、时间、软删除、来源和幂等字段。
-- [ ] 明确 Decision 的 reason、alternatives、evidence、participants、owner 与 revisit condition。
-- [ ] 明确 Work Object 与 Note、Source、Event、Todo、File 的引用关系。
+- [ ] 明确 Decision 的 alternatives、evidence、participants、owner 与 revisit condition（Phase 3）。
+- [x] 明确 Work Object 与 Note、Source、Event、Todo、File 的引用关系。
 
 **验收**：schema 可序列化、可版本化；非法状态和缺失关键字段无法进入 Repository。
 
@@ -58,18 +58,29 @@
 
 **验收**：用户能创建并重新打开 Project，查看为什么作出决定以及下一步；UI 不暴露内部 DAG、prompt、token 或进程。
 
-## 紧邻下一批：入口关联与 Change
+## WC-201–204 现有入口关联（P1，已完成）
 
-- [ ] Capture 可事务性产生或关联 Project、Task、Decision、Meeting、Change 和 Commitment。
-- [ ] Note 只属于零个或一个 Project；Source/Knowledge Point 可被多个 Project 引用。
-- [ ] Todo/Event 与 Work Task/Milestone 建立稳定引用，不复制事实。
-- [ ] 新文件识别版本并生成 Change 候选；冲突或决定影响必须确认。
+- [x] Capture 可事务性产生或关联 Project、Task、Decision、Meeting、Change 和 Commitment。
+- [x] 项目归属使用有效 ID 或唯一精确标题；歧义保存为 WorkView 待归属项，不弹窗打断。
+- [x] Note 只登记单项目归属引用；Source/Knowledge Point 可被多个 Project 引用且不复制正文。
+- [x] Todo/Event 与 Work Task/Milestone 建立稳定引用，Calendar 保持状态真相源。
+- [x] 文件只记录原路径、流式 hash、大小和 mtime；同路径内容变化生成待确认 Change。
+- [x] 日程完成、取消、改期、删除追加 Work Event，不复制外部状态。
+- [x] 覆盖幂等、revision、重名、缺字段、多对象回滚和跨项目知识引用测试。
+
+**验收**：Capture、Candidate、Work Object、外部真相源和 Work Event 可相互追溯；重复处理不创建第二对象；歧义不阻止 Todo/Event/Markdown 先可靠落库。
+
+## 当前下一批：Phase 3 Decision 与 Change
+
+- [ ] Decision 补齐 alternatives、evidence、participants、owner 与 revisit condition。
+- [ ] Change 分析受影响 Decision、Goal、Task、Artifact 和风险，不自动改写既有事实。
+- [ ] 提供用户确认、拒绝、延后与影响说明，并把选择写入 Work Event。
 
 ## v0.8.0 遗留质量门
 
 - [ ] 使用真实 PC/Android 完成 Capture 三入口与 Relay trace 对账。
 - [ ] 记录 PC 主程序、绿色包、安装器和 Android APK/AAB 字节数。
-- [ ] Source 正文提取、Knowledge Point 蒸馏和证据关系进入 Phase 2，不阻塞 Work Core 数据层。
+- [ ] Source 正文提取、Knowledge Point 蒸馏和证据关系继续独立演进，不阻塞已完成的 Work Core 引用层。
 
 ## 暂缓
 

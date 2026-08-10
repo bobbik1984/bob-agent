@@ -1,6 +1,6 @@
 # Phase 2A：Project Link Candidate 设计
 
-> 状态：已确认，待实施  
+> 状态：已实现并通过回归（Phase 2A）
 > 日期：2026-08-10  
 > 上位计划：`docs/superpowers/plans/2026-08-10-work-continuity-evolution-plan.md`  
 > 产品原则：确定性直写，歧义待归属；先保存，不打断，不猜项目。

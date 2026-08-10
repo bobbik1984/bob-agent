@@ -1,6 +1,6 @@
 # Bob 演进路线图
 
-> 状态：v0.8.1 开始执行
+> 状态：v0.8.1 开发线已完成 Phase 0–2，进入 Phase 3
 > 产品北极星：`docs/PRODUCT_VISION.md`
 > 完整设计与阶段门：`docs/superpowers/plans/2026-08-10-work-continuity-evolution-plan.md`
 
@@ -8,9 +8,8 @@
 
 `v0.8.0` 已封存可靠 Capture、知识对象契约、离线分类、Todo/Event 确定性提交和 Note/Source Markdown 提交基线。它是不可修改的历史版本。
 
-当前已完成第一条 Persistent Work Core 垂直切片：版本化 Work Object、SQLite Repository、Work Event Journal、Project Aggregate、Markdown 快照和最小 Work UI。当前仍缺少：
+当前已完成 Persistent Work Core 及现有入口接入：版本化 Work Object、SQLite Repository、Work Event Journal、Project Aggregate、Markdown 快照、最小 Work UI、Project Link Candidate 和外部真相源引用。当前仍缺少：
 
-- Capture、Note、Source、Todo、Event、File 与 Project State 的自动关联；
 - 新信息对旧决定和项目状态的 Change Detection；
 - Direct / Deep / Advanced 可靠路由；
 - 可恢复 Goal Runtime 与 Dynamic Task Graph；
@@ -34,7 +33,7 @@ flowchart LR
 
 不得为了展示多 Agent 或订阅调度而跨越前置质量门。API-only 环境必须始终能够运行完整核心框架。
 
-## 当前实施批次：Phase 0–1
+## 已完成实施批次：Phase 0–2
 
 ### Phase 0：Re-anchor
 
@@ -54,11 +53,21 @@ flowchart LR
 - [x] 验证新会话恢复、重启恢复和事务回滚；
 - [ ] 在下一次 PC/Android 发布产物上完成体积变化与真机 UI 验收。
 
+### Phase 2：现有入口接入
+
+- [x] 明确项目任务、Decision、Commitment 和会议派生项事务性写入 Project State；
+- [x] Todo/Event 保留 Calendar 真相源并建立 Task/Milestone 稳定引用；
+- [x] Note/Source 保留 Markdown 真相源，支持单项目归属与多项目知识引用；
+- [x] 文件保留原位置，只登记路径、流式 hash、大小、mtime 与 Artifact 引用；
+- [x] 同路径内容变化生成待确认 Change，不自动修改既有 Decision；
+- [x] 项目歧义和缺字段进入 WorkView 待归属区，不使用阻断弹窗；
+- [x] 外部 Todo/Event 状态变化追加 Work Event，Project 不复制其状态。
+
 ## 后续阶段摘要
 
 | 阶段 | 用户价值 | 完成信号 |
 |---|---|---|
-| Phase 2 | 所有输入更新同一个项目现实 | Capture、Note、Source、Todo、Event、File 可追溯关联 Project |
+| Phase 2（完成） | 所有输入更新同一个项目现实 | Capture、Note、Source、Todo、Event、File 可追溯关联 Project |
 | Phase 3 | Bob 知道什么改变了什么 | 新文件能指出受影响决定、证据和待确认变化 |
 | Phase 4 | 用户无需选择复杂模式 | 简单请求保持轻量，持续工作自动进入 Advanced |
 | Phase 5 | 复杂目标可以中断恢复 | Goal 重启可恢复，Done 绑定 Evidence |

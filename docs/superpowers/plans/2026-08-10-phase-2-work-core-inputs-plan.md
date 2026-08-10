@@ -1,6 +1,7 @@
 # Phase 2：现有输入接入 Work Core 实施计划
 
 > 日期：2026-08-10  
+> 状态：Phase 2A–2D 已实现并通过回归
 > 前置规格：`docs/superpowers/specs/2026-08-10-project-link-candidates-design.md`  
 > 完成目标：Capture、行动、知识与文件可以更新同一个 Project State，且可追溯、可恢复、不复制权威事实。
 

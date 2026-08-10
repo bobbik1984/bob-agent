@@ -541,6 +541,67 @@ pub(crate) fn mark_needs_clarification(
     )
 }
 
+fn merged_derived_refs(capture: &CaptureEnvelope, extra: &[String]) -> Vec<String> {
+    let mut refs = capture.derived_refs.clone();
+    for value in extra {
+        if !refs.contains(value) {
+            refs.push(value.clone());
+        }
+    }
+    refs
+}
+
+pub(crate) fn mark_project_assignment_pending(
+    conn: &Connection,
+    capture: &CaptureEnvelope,
+    candidate_id: &str,
+    reason_code: &str,
+) -> Result<(), String> {
+    let candidate_ref = format!("project_link:{candidate_id}");
+    let refs = merged_derived_refs(capture, &[candidate_ref]);
+    update_capture(
+        conn,
+        &capture.capture_id,
+        CaptureStatus::NeedsClarification,
+        Some("project_assignment"),
+        Some(reason_code),
+        &refs,
+    )?;
+    record_event(
+        conn,
+        Some(&capture.capture_id),
+        &capture.source_device,
+        "capture.project_assignment_pending",
+        json!({ "candidateId": candidate_id, "reasonCode": reason_code }),
+        "info",
+    )
+}
+
+pub(crate) fn mark_project_link_dismissed(
+    conn: &Connection,
+    capture: &CaptureEnvelope,
+    candidate_id: &str,
+) -> Result<(), String> {
+    let candidate_ref = format!("project_link:{candidate_id}");
+    let refs = merged_derived_refs(capture, &[candidate_ref]);
+    update_capture(
+        conn,
+        &capture.capture_id,
+        CaptureStatus::Committed,
+        None,
+        None,
+        &refs,
+    )?;
+    record_event(
+        conn,
+        Some(&capture.capture_id),
+        &capture.source_device,
+        "capture.project_assignment_dismissed",
+        json!({ "candidateId": candidate_id }),
+        "info",
+    )
+}
+
 pub(crate) fn mark_enrichment_retry(
     conn: &Connection,
     capture: &CaptureEnvelope,
@@ -894,7 +955,7 @@ pub(crate) fn merge_capture_record(
 #[tauri::command]
 pub fn capture_ingest(input: CaptureInput, db: State<DbState>) -> Result<Value, String> {
     let envelope = build_envelope(input)?;
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let mut conn = db.0.lock().map_err(|e| e.to_string())?;
     let (stored, duplicate) = insert_or_get(&conn, &envelope)?;
     if duplicate
         && matches!(
@@ -904,7 +965,7 @@ pub fn capture_ingest(input: CaptureInput, db: State<DbState>) -> Result<Value, 
     {
         return Ok(json!({ "ok": true, "duplicate": true, "capture": stored }));
     }
-    let route = crate::capture_router::apply_local_route(&conn, &stored)?;
+    let route = crate::capture_router::apply_local_route(&mut conn, &stored)?;
     let updated = conn
         .query_row(
             &format!("{CAPTURE_SELECT} WHERE capture_id = ?1"),
