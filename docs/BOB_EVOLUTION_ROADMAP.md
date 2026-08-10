@@ -1,6 +1,6 @@
 # Bob 演进路线图
 
-> 状态：v0.8.1 开发线已完成 Phase 0–2，进入 Phase 3
+> 状态：v0.8.1 开发线已完成 Phase 0–3，进入 Phase 4
 > 产品北极星：`docs/PRODUCT_VISION.md`
 > 完整设计与阶段门：`docs/superpowers/plans/2026-08-10-work-continuity-evolution-plan.md`
 
@@ -8,9 +8,8 @@
 
 `v0.8.0` 已封存可靠 Capture、知识对象契约、离线分类、Todo/Event 确定性提交和 Note/Source Markdown 提交基线。它是不可修改的历史版本。
 
-当前已完成 Persistent Work Core 及现有入口接入：版本化 Work Object、SQLite Repository、Work Event Journal、Project Aggregate、Markdown 快照、最小 Work UI、Project Link Candidate 和外部真相源引用。当前仍缺少：
+当前已完成 Persistent Work Core、现有入口接入和 Decision/Change Review：版本化 Work Object、SQLite Repository、Work Event Journal、Project Aggregate、Markdown 快照、最小 Work UI、Project Link Candidate、完整 Decision 契约、不可变文件修订与影响确认。当前仍缺少：
 
-- 新信息对旧决定和项目状态的 Change Detection；
 - Direct / Deep / Advanced 可靠路由；
 - 可恢复 Goal Runtime 与 Dynamic Task Graph；
 - 可替换 Agent Runtime 和结果驱动 Dream。
@@ -33,7 +32,7 @@ flowchart LR
 
 不得为了展示多 Agent 或订阅调度而跨越前置质量门。API-only 环境必须始终能够运行完整核心框架。
 
-## 已完成实施批次：Phase 0–2
+## 已完成实施批次：Phase 0–3
 
 ### Phase 0：Re-anchor
 
@@ -63,12 +62,22 @@ flowchart LR
 - [x] 项目歧义和缺字段进入 WorkView 待归属区，不使用阻断弹窗；
 - [x] 外部 Todo/Event 状态变化追加 Work Event，Project 不复制其状态。
 
+### Phase 3：Decision Memory 与 Change Review
+
+- [x] Decision 保存决定、理由、备选、被否决方案、参与者、负责人、证据和重访条件；
+- [x] 旧 Decision 数据保持兼容，写入时统一清理空值与重复列表；
+- [x] 同路径文件 hash 变化时保留旧 Artifact，并创建新版 Artifact 与 Change；
+- [x] 根据显式关系、Decision evidence、旧 Artifact 和验证过的对象 ID 生成影响 Review；
+- [x] 无证据时显示“影响范围未知”，不假装没有影响；
+- [x] 用户可接受、拒绝或延后；只有接受后才建立影响、冲突或替代关系；
+- [x] 所有 Review 变化进入 Work Event，Markdown 快照展示完整 Decision 和待确认 Change。
+
 ## 后续阶段摘要
 
 | 阶段 | 用户价值 | 完成信号 |
 |---|---|---|
 | Phase 2（完成） | 所有输入更新同一个项目现实 | Capture、Note、Source、Todo、Event、File 可追溯关联 Project |
-| Phase 3 | Bob 知道什么改变了什么 | 新文件能指出受影响决定、证据和待确认变化 |
+| Phase 3（完成） | Bob 知道什么改变了什么 | 新文件能指出受影响决定、证据和待确认变化 |
 | Phase 4 | 用户无需选择复杂模式 | 简单请求保持轻量，持续工作自动进入 Advanced |
 | Phase 5 | 复杂目标可以中断恢复 | Goal 重启可恢复，Done 绑定 Evidence |
 | Phase 6 | 多阶段工作局部恢复 | 节点失败只影响其下游，计划允许重构 |

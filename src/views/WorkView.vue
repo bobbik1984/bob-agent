@@ -65,6 +65,62 @@
       </div>
     </section>
 
+    <section v-if="pendingChangeReviews.length" class="assignment-panel change-review-panel" aria-live="polite">
+      <div class="assignment-heading">
+        <div>
+          <p class="section-kicker">{{ t('work.change_review_kicker') }}</p>
+          <h2><GitCompareArrows :size="18" />{{ t('work.change_review_title') }}</h2>
+          <p>{{ t('work.change_review_description') }}</p>
+        </div>
+        <span class="assignment-count">{{ pendingChangeReviews.length }}</span>
+      </div>
+      <div class="assignment-list">
+        <article v-for="review in pendingChangeReviews" :key="review.id" class="assignment-card change-review-card">
+          <div class="assignment-copy">
+            <strong>{{ review.changeTitle }}</strong>
+            <span>{{ t('work.change_review_affects', { kind: targetKindLabel(review.targetKind), title: review.targetTitle }) }}</span>
+            <small>{{ changeReason(review.reasonCode) }}</small>
+          </div>
+          <div class="assignment-controls change-review-controls">
+            <input
+              v-model.trim="changeReviewDrafts[review.id]"
+              :placeholder="t('work.change_review_note_hint')"
+            />
+            <button class="primary-button compact" type="button" :disabled="saving" @click="handleChangeReview(review, 'accept')">
+              <Check :size="15" />{{ t('work.change_review_accept') }}
+            </button>
+            <button class="secondary-button compact" type="button" :disabled="saving" @click="handleChangeReview(review, 'reject')">
+              <X :size="15" />{{ t('work.change_review_reject') }}
+            </button>
+            <button class="secondary-button compact" type="button" :disabled="saving" @click="handleChangeReview(review, 'defer')">
+              <Clock3 :size="15" />{{ t('work.change_review_defer') }}
+            </button>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <details v-if="deferredChangeReviews.length" class="assignment-panel deferred-review-panel">
+      <summary>
+        <span><Clock3 :size="16" />{{ t('work.change_review_deferred_title') }}</span>
+        <span class="assignment-count">{{ deferredChangeReviews.length }}</span>
+      </summary>
+      <div class="assignment-list">
+        <article v-for="review in deferredChangeReviews" :key="review.id" class="assignment-card change-review-card">
+          <div class="assignment-copy">
+            <strong>{{ review.changeTitle }}</strong>
+            <span>{{ t('work.change_review_affects', { kind: targetKindLabel(review.targetKind), title: review.targetTitle }) }}</span>
+            <small>{{ changeReason(review.reasonCode) }}</small>
+          </div>
+          <div class="assignment-controls deferred-review-controls">
+            <button class="secondary-button compact" type="button" :disabled="saving" @click="handleChangeReview(review, 'reopen')">
+              <RefreshCw :size="15" />{{ t('work.change_review_reopen') }}
+            </button>
+          </div>
+        </article>
+      </div>
+    </details>
+
     <div class="work-layout">
       <aside class="project-rail">
         <div class="rail-heading">
@@ -216,6 +272,13 @@
               <article v-for="decision in aggregate.decisions" :key="decision.id" class="work-card">
                 <strong>{{ decision.data?.decision || decision.title }}</strong>
                 <p>{{ decision.data?.reason }}</p>
+                <div v-if="hasDecisionDetails(decision)" class="decision-details">
+                  <span v-if="decision.data?.owner">{{ t('work.decision_owner', { value: decision.data.owner }) }}</span>
+                  <span v-if="decision.data?.participants?.length">{{ t('work.decision_participants', { value: decision.data.participants.join('、') }) }}</span>
+                  <span v-if="decision.data?.alternatives?.length">{{ t('work.decision_alternatives', { value: decision.data.alternatives.join('；') }) }}</span>
+                  <span v-if="decision.data?.evidence?.length">{{ t('work.decision_evidence', { count: decision.data.evidence.length }) }}</span>
+                  <span v-if="decision.data?.revisitCondition">{{ t('work.decision_revisit', { value: decision.data.revisitCondition }) }}</span>
+                </div>
                 <span class="mini-status">{{ statusLabel(decision.status) }}</span>
               </article>
               <p v-if="aggregate.decisions.length === 0" class="column-empty">{{ t('work.empty_decisions') }}</p>
@@ -253,7 +316,7 @@ import { computed, onMounted, reactive, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import {
   Check, CheckCircle2, ChevronRight, Circle, CircleAlert, FileDown, FolderKanban,
-  History, Link2, ListChecks, LoaderCircle, Milestone, Plus, RefreshCw, Route, Scale,
+  Clock3, GitCompareArrows, History, Link2, ListChecks, LoaderCircle, Milestone, Plus, RefreshCw, Route, Scale,
   Target, X,
 } from 'lucide-vue-next';
 
@@ -267,6 +330,9 @@ const creatingProject = ref(false);
 const errorMessage = ref('');
 const pendingLinks = ref([]);
 const candidateDrafts = reactive({});
+const pendingChangeReviews = ref([]);
+const deferredChangeReviews = ref([]);
+const changeReviewDrafts = reactive({});
 
 const projectDraft = reactive({ title: '', mission: '', currentPhase: '' });
 const itemDraft = reactive({ kind: 'task', title: '', reason: '' });
@@ -294,6 +360,7 @@ async function loadProjects() {
   try {
     projects.value = await window.appAPI.workProjectList();
     await loadPendingLinks();
+    await loadChangeReviews();
     if (!activeProjectId.value && projects.value.length) {
       await selectProject(projects.value[0].id);
     }
@@ -301,6 +368,38 @@ async function loadProjects() {
     errorMessage.value = String(error);
   } finally {
     loading.value = false;
+  }
+}
+
+async function loadChangeReviews() {
+  [pendingChangeReviews.value, deferredChangeReviews.value] = await Promise.all([
+    window.appAPI.workChangeReviewList({ status: 'pending', limit: 50 }),
+    window.appAPI.workChangeReviewList({ status: 'deferred', limit: 50 }),
+  ]);
+  for (const review of pendingChangeReviews.value) {
+    changeReviewDrafts[review.id] ||= '';
+  }
+}
+
+async function handleChangeReview(review, action) {
+  saving.value = true;
+  errorMessage.value = '';
+  try {
+    await window.appAPI.workChangeReviewAction({
+      reviewId: review.id,
+      action,
+      expectedRevision: review.revision,
+      note: changeReviewDrafts[review.id] || null,
+    });
+    delete changeReviewDrafts[review.id];
+    await loadChangeReviews();
+    await loadProjects();
+    if (activeProjectId.value) await selectProject(activeProjectId.value);
+  } catch (error) {
+    errorMessage.value = String(error);
+    await loadChangeReviews();
+  } finally {
+    saving.value = false;
   }
 }
 
@@ -354,6 +453,19 @@ async function dismissCandidate(candidate) {
 
 function candidateReason(reasonCode) {
   return t(`work.assignment_${reasonCode}`, t('work.assignment_unknown'));
+}
+
+function changeReason(reasonCode) {
+  return t(`work.change_review_reason_${reasonCode}`, t('work.change_review_reason_unknown'));
+}
+
+function targetKindLabel(kind) {
+  return t(`work.kind_${kind}`, kind);
+}
+
+function hasDecisionDetails(decision) {
+  const data = decision?.data || {};
+  return Boolean(data.owner || data.revisitCondition || data.participants?.length || data.alternatives?.length || data.evidence?.length);
 }
 
 async function selectProject(projectId) {
@@ -458,6 +570,7 @@ function eventLabel(event) {
   if (type.endsWith('.status_changed')) return t('work.event_status_changed');
   if (type === 'relation.created') return t('work.event_relation_created');
   if (type === 'external_link.recorded') return t('work.event_external_link_recorded');
+  if (type.startsWith('change_review.')) return t(`work.event_${type.replace('.', '_')}`, type);
   return type;
 }
 
@@ -493,6 +606,14 @@ onMounted(loadProjects);
 .assignment-controls select, .assignment-controls input { min-width: 0; padding: 8px 10px; }
 .assignment-controls select { flex: 1; }
 .assignment-controls input { flex: 1.2; }
+.change-review-panel { border-color: color-mix(in srgb, var(--user-accent, var(--accent-primary)) 24%, var(--border-subtle)); }
+.change-review-controls input { flex: 1; }
+.change-review-controls .secondary-button { white-space: nowrap; }
+.deferred-review-panel { padding: 11px 15px; }
+.deferred-review-panel summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--text-secondary); cursor: pointer; list-style: none; font-size: 12px; }
+.deferred-review-panel summary::-webkit-details-marker { display: none; }
+.deferred-review-panel summary > span:first-child { display: inline-flex; align-items: center; gap: 7px; }
+.deferred-review-controls { justify-content: flex-end; }
 .project-rail, .project-board, .create-project-card, .work-empty-state { border: 1px solid var(--border-subtle); border-radius: 16px; background: var(--surface-card); }
 .project-rail { padding: 10px; }
 .rail-heading { display: flex; justify-content: space-between; padding: 8px 9px 12px; color: var(--text-tertiary); font-size: 12px; }
@@ -539,6 +660,7 @@ textarea { resize: vertical; }
 .work-card { position: relative; margin-top: 10px; border: 1px solid var(--border-subtle); border-radius: 9px; padding: 11px; background: var(--bg-primary); }
 .work-card strong { display: block; font-size: 12px; line-height: 1.5; }
 .work-card p { margin: 5px 0 9px; color: var(--text-tertiary); font-size: 11px; line-height: 1.5; }
+.decision-details { display: grid; gap: 3px; margin: -2px 0 9px; color: var(--text-muted); font-size: 10px; line-height: 1.45; }
 .task-card { display: flex; gap: 8px; }
 .task-card.complete strong { color: var(--text-muted); text-decoration: line-through; }
 .task-toggle { border: 0; padding: 0; color: var(--user-accent, var(--accent-primary)); background: transparent; cursor: pointer; }
@@ -567,6 +689,7 @@ textarea { resize: vertical; }
   .assignment-card:nth-child(n+4) { display: none; }
   .assignment-controls { display: grid; grid-template-columns: 1fr 1fr; }
   .assignment-controls select, .assignment-controls input { grid-column: 1 / -1; }
+  .change-review-controls { grid-template-columns: repeat(3, 1fr); }
   .project-rail { display: flex; gap: 6px; overflow-x: auto; }
   .rail-heading, .rail-empty { display: none; }
   .project-row { min-width: 160px; }

@@ -9,7 +9,11 @@ use serde_json::{json, Value};
 
 use crate::capture::CaptureEnvelope;
 
-use super::models::{CreateWorkObjectInput, WorkObject, WorkObjectKind, WorkProject};
+use super::decision_change::{self, ChangeAnalysisInput, ExplicitImpact};
+use super::models::{
+    CreateWorkObjectInput, DecisionData, RejectedAlternative, WorkObject, WorkObjectKind,
+    WorkProject,
+};
 use super::{repository, snapshot};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -327,7 +331,16 @@ fn missing_field(proposal: &ProjectLinkProposal) -> Option<&'static str> {
                 .as_deref()
                 .map(str::trim)
                 .unwrap_or("")
-                .is_empty() =>
+                .is_empty()
+                && proposal
+                    .metadata
+                    .get("decisionData")
+                    .or_else(|| proposal.metadata.get("decision"))
+                    .and_then(|value| value.get("reason"))
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .unwrap_or("")
+                    .is_empty() =>
         {
             Some("missing_decision_reason")
         }
@@ -509,7 +522,16 @@ fn create_external_link_in_tx(
          ON CONFLICT(project_id, external_kind, external_id, relation) DO UPDATE SET object_id=COALESCE(excluded.object_id, work_external_links.object_id), metadata_json=excluded.metadata_json, updated_at=excluded.updated_at, deleted_at=NULL",
         params![id, project_id, object_id, kind, external_id, relation, capture_id, serde_json::to_string(&proposal.metadata).map_err(|e| e.to_string())?, now],
     ).map_err(|e| e.to_string())?;
-    let event_key = format!("external-link:{id}");
+    let event_key = if relation == "artifact_source" {
+        let fingerprint = proposal
+            .metadata
+            .get("hash")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown");
+        format!("external-link:{id}:{fingerprint}")
+    } else {
+        format!("external-link:{id}")
+    };
     let event_exists: i64 = tx
         .query_row(
             "SELECT COUNT(*) FROM work_events WHERE idempotency_key=?1",
@@ -544,18 +566,35 @@ fn create_external_link_in_tx(
     }))
 }
 
+fn decision_data(proposal: &ProjectLinkProposal) -> Result<Value, String> {
+    let source = proposal
+        .metadata
+        .get("decisionData")
+        .or_else(|| proposal.metadata.get("decision"))
+        .filter(|value| value.is_object());
+    let mut value = source.cloned().unwrap_or_else(|| json!({}));
+    let object = value
+        .as_object_mut()
+        .ok_or_else(|| "Decision 数据必须是 object".to_string())?;
+    object
+        .entry("decision")
+        .or_insert_with(|| json!(proposal.title));
+    if let Some(reason) = proposal.reason.as_deref() {
+        object.insert("reason".into(), json!(reason));
+    }
+    object.entry("reason").or_insert(Value::Null);
+    DecisionData::from_value(&value)?.into_value()
+}
+
 fn object_input(
     project_id: &str,
     capture_id: &str,
     proposal: &ProjectLinkProposal,
-) -> Option<CreateWorkObjectInput> {
+) -> Result<Option<CreateWorkObjectInput>, String> {
     let (kind, data) = match proposal.intent {
         ProjectLinkIntent::WorkTask | ProjectLinkIntent::Todo => (WorkObjectKind::Task, json!({})),
         ProjectLinkIntent::Event => (WorkObjectKind::Milestone, json!({})),
-        ProjectLinkIntent::Decision => (
-            WorkObjectKind::Decision,
-            json!({"decision": proposal.title, "reason": proposal.reason}),
-        ),
+        ProjectLinkIntent::Decision => (WorkObjectKind::Decision, decision_data(proposal)?),
         ProjectLinkIntent::Note => (
             WorkObjectKind::Evidence,
             json!({"evidenceType": "note", "reference": proposal.external_id}),
@@ -567,7 +606,7 @@ fn object_input(
             json!({"owner": proposal.owner, "dueAt": proposal.due_at}),
         ),
         ProjectLinkIntent::Source | ProjectLinkIntent::Knowledge | ProjectLinkIntent::Meeting => {
-            return None
+            return Ok(None)
         }
     };
     let idempotency_key = if proposal.intent == ProjectLinkIntent::Artifact {
@@ -581,18 +620,18 @@ fn object_input(
     } else {
         format!("capture-work:{capture_id}:{}", proposal.intent.as_str())
     };
-    Some(CreateWorkObjectInput {
+    Ok(Some(CreateWorkObjectInput {
         kind,
         project_id: project_id.into(),
         parent_id: None,
         title: proposal.title.clone(),
-        status: None,
+        status: (proposal.intent == ProjectLinkIntent::Change).then(|| "needs_review".to_string()),
         description: proposal.description.clone(),
         data,
         source_capture_id: Some(capture_id.into()),
         actor: Some("bob".into()),
         idempotency_key,
-    })
+    }))
 }
 
 fn meeting_inputs(
@@ -620,9 +659,45 @@ fn meeting_inputs(
                 .trim()
                 .to_string();
             let data = match kind {
-                WorkObjectKind::Decision => {
-                    json!({ "decision": title, "reason": item.get("reason") })
+                WorkObjectKind::Decision => DecisionData {
+                    decision: title.clone(),
+                    reason: item
+                        .get("reason")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .into(),
+                    alternatives: item
+                        .get("alternatives")
+                        .cloned()
+                        .and_then(|value| serde_json::from_value(value).ok())
+                        .unwrap_or_default(),
+                    rejected_alternatives: item
+                        .get("rejectedAlternatives")
+                        .cloned()
+                        .and_then(|value| {
+                            serde_json::from_value::<Vec<RejectedAlternative>>(value).ok()
+                        })
+                        .unwrap_or_default(),
+                    participants: item
+                        .get("participants")
+                        .cloned()
+                        .and_then(|value| serde_json::from_value(value).ok())
+                        .unwrap_or_default(),
+                    owner: item
+                        .get("owner")
+                        .and_then(Value::as_str)
+                        .map(str::to_string),
+                    evidence: item
+                        .get("evidence")
+                        .cloned()
+                        .and_then(|value| serde_json::from_value(value).ok())
+                        .unwrap_or_default(),
+                    revisit_condition: item
+                        .get("revisitCondition")
+                        .and_then(Value::as_str)
+                        .map(str::to_string),
                 }
+                .into_value()?,
                 WorkObjectKind::Commitment => {
                     json!({ "owner": item.get("owner"), "dueAt": item.get("dueAt") })
                 }
@@ -669,6 +744,150 @@ fn merged_refs(
     refs
 }
 
+fn current_file_fingerprint(metadata: &Value) -> Value {
+    let mut value = serde_json::Map::new();
+    for key in ["path", "hash", "size", "modifiedAt"] {
+        if let Some(item) = metadata.get(key) {
+            value.insert(key.into(), item.clone());
+        }
+    }
+    Value::Object(value)
+}
+
+fn file_name_key(path: &str) -> Option<String> {
+    Path::new(path)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .map(|value| value.trim().to_lowercase())
+        .filter(|value| !value.is_empty())
+}
+
+fn mark_file_change(
+    proposal: &mut ProjectLinkProposal,
+    previous_artifact_id: Option<String>,
+    previous_metadata: Value,
+    match_method: &str,
+) -> bool {
+    let current_hash = proposal
+        .metadata
+        .get("hash")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let previous_hash = previous_metadata
+        .get("hash")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    if previous_hash.is_empty() || current_hash.is_empty() || previous_hash == current_hash {
+        return false;
+    }
+    if let Some(object) = proposal.metadata.as_object_mut() {
+        object.insert("previousHash".into(), json!(previous_hash));
+        object.insert("previousFingerprint".into(), previous_metadata);
+        object.insert("versionMatchMethod".into(), json!(match_method));
+        if let Some(previous_artifact_id) = previous_artifact_id {
+            object.insert("previousArtifactId".into(), json!(previous_artifact_id));
+        }
+        object.insert("changeType".into(), json!("file_content_changed"));
+    }
+    proposal.intent = ProjectLinkIntent::Change;
+    true
+}
+
+fn string_array(value: Option<&Value>) -> Vec<String> {
+    value
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+fn explicit_impacts(value: Option<&Value>) -> Vec<ExplicitImpact> {
+    value
+        .cloned()
+        .and_then(|value| serde_json::from_value(value).ok())
+        .unwrap_or_default()
+}
+
+fn apply_file_change_in_tx(
+    tx: &Transaction<'_>,
+    capture: &CaptureEnvelope,
+    proposal: &ProjectLinkProposal,
+    project_id: &str,
+) -> Result<(WorkObject, WorkObject, Option<ExternalLink>, Vec<String>), String> {
+    let mut artifact_proposal = proposal.clone();
+    artifact_proposal.intent = ProjectLinkIntent::Artifact;
+    artifact_proposal.metadata = current_file_fingerprint(&proposal.metadata);
+    let artifact_input = object_input(project_id, &capture.capture_id, &artifact_proposal)?
+        .ok_or_else(|| "FILE_CHANGE_ARTIFACT_INPUT_MISSING".to_string())?;
+    let new_artifact = repository::create_object_in_tx(tx, artifact_input)?;
+
+    let previous_artifact_id = proposal
+        .metadata
+        .get("previousArtifactId")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let change_data = json!({
+        "changeType": proposal.metadata.get("changeType").and_then(Value::as_str).unwrap_or("file_content_changed"),
+        "externalKind": "file",
+        "externalId": proposal.external_id.clone(),
+        "previousFingerprint": proposal.metadata.get("previousFingerprint").cloned().unwrap_or(Value::Null),
+        "currentFingerprint": artifact_proposal.metadata.clone(),
+        "previousArtifactId": previous_artifact_id,
+        "newArtifactId": new_artifact.id.clone(),
+        "affectedObjectIds": proposal.metadata.get("affectedObjectIds").cloned().unwrap_or_else(|| json!([])),
+        "observedAt": now_ms()
+    });
+    let change = repository::create_object_in_tx(
+        tx,
+        CreateWorkObjectInput {
+            kind: WorkObjectKind::Change,
+            project_id: project_id.into(),
+            parent_id: None,
+            title: proposal.title.clone(),
+            status: Some("needs_review".into()),
+            description: proposal.description.clone(),
+            data: change_data,
+            source_capture_id: Some(capture.capture_id.clone()),
+            actor: Some("bob".into()),
+            idempotency_key: format!("capture-work:{}:file-change", capture.capture_id),
+        },
+    )?;
+    let link = create_external_link_in_tx(
+        tx,
+        project_id,
+        Some(&new_artifact.id),
+        &artifact_proposal,
+        &capture.capture_id,
+    )?;
+    let mut external_refs = vec![proposal.external_id.clone().unwrap_or_default()];
+    if let Some(link) = &link {
+        external_refs.push(format!("external_link:{}", link.id));
+    }
+    let reviews = decision_change::create_change_reviews_in_tx(
+        tx,
+        ChangeAnalysisInput {
+            project_id,
+            change: &change,
+            new_artifact: Some(&new_artifact),
+            previous_artifact_id,
+            external_refs,
+            explicit_affected_object_ids: string_array(proposal.metadata.get("affectedObjectIds")),
+            explicit_impacts: explicit_impacts(proposal.metadata.get("impacts")),
+        },
+    )?;
+    Ok((
+        change,
+        new_artifact,
+        link,
+        reviews.into_iter().map(|review| review.id).collect(),
+    ))
+}
+
 fn apply_resolved(
     conn: &mut Connection,
     capture: &CaptureEnvelope,
@@ -684,21 +903,63 @@ fn apply_resolved(
         return Err("项目关联已被忽略".into());
     }
     let mut objects = Vec::new();
-    if proposal.intent == ProjectLinkIntent::Meeting {
-        for input in meeting_inputs(project_id, &capture.capture_id, proposal)? {
+    let mut review_ids = Vec::new();
+    let file_change = proposal.intent == ProjectLinkIntent::Change
+        && proposal.external_kind.as_deref() == Some("file")
+        && proposal.metadata.get("previousHash").is_some();
+    let link = if file_change {
+        let (change, artifact, link, reviews) =
+            apply_file_change_in_tx(&tx, capture, proposal, project_id)?;
+        objects.push(change);
+        objects.push(artifact);
+        review_ids = reviews;
+        link
+    } else {
+        if proposal.intent == ProjectLinkIntent::Meeting {
+            for input in meeting_inputs(project_id, &capture.capture_id, proposal)? {
+                objects.push(repository::create_object_in_tx(&tx, input)?);
+            }
+        } else if let Some(input) = object_input(project_id, &capture.capture_id, proposal)? {
             objects.push(repository::create_object_in_tx(&tx, input)?);
         }
-    } else if let Some(input) = object_input(project_id, &capture.capture_id, proposal) {
-        objects.push(repository::create_object_in_tx(&tx, input)?);
-    }
+        let link = create_external_link_in_tx(
+            &tx,
+            project_id,
+            objects.first().map(|value| value.id.as_str()),
+            proposal,
+            &capture.capture_id,
+        )?;
+        if proposal.intent == ProjectLinkIntent::Change {
+            if let Some(change) = objects.first() {
+                let mut external_refs = vec![proposal.external_id.clone().unwrap_or_default()];
+                if let Some(link) = &link {
+                    external_refs.push(format!("external_link:{}", link.id));
+                }
+                review_ids = decision_change::create_change_reviews_in_tx(
+                    &tx,
+                    ChangeAnalysisInput {
+                        project_id,
+                        change,
+                        new_artifact: None,
+                        previous_artifact_id: proposal
+                            .metadata
+                            .get("previousArtifactId")
+                            .and_then(Value::as_str),
+                        external_refs,
+                        explicit_affected_object_ids: string_array(
+                            proposal.metadata.get("affectedObjectIds"),
+                        ),
+                        explicit_impacts: explicit_impacts(proposal.metadata.get("impacts")),
+                    },
+                )?
+                .into_iter()
+                .map(|review| review.id)
+                .collect();
+            }
+        }
+        link
+    };
     let object = objects.first().cloned();
-    let link = create_external_link_in_tx(
-        &tx,
-        project_id,
-        object.as_ref().map(|v| v.id.as_str()),
-        proposal,
-        &capture.capture_id,
-    )?;
     let candidate = upsert_candidate(
         &tx,
         &capture.capture_id,
@@ -711,12 +972,26 @@ fn apply_resolved(
         None,
     )?;
     let latest_capture = crate::capture::get_capture(&tx, &capture.capture_id)?;
-    let refs = merged_refs(
+    let mut refs = merged_refs(
         &latest_capture,
         &candidate.id,
         object.as_ref(),
         link.as_ref(),
     );
+    for value in objects
+        .iter()
+        .skip(1)
+        .map(|object| format!("work:{}", object.id))
+        .chain(
+            review_ids
+                .iter()
+                .map(|review_id| format!("change_review:{review_id}")),
+        )
+    {
+        if !refs.contains(&value) {
+            refs.push(value);
+        }
+    }
     crate::capture::mark_routed_committed(&tx, &latest_capture, &refs)?;
     tx.execute("UPDATE capture_enrichment SET stage='committed', last_error=NULL, updated_at=?2 WHERE capture_id=?1", params![capture.capture_id, now_ms()]).map_err(|e| e.to_string())?;
     tx.commit().map_err(|e| e.to_string())?;
@@ -779,32 +1054,73 @@ pub fn apply_proposal(
         reason_code = "change_requires_review".into();
     }
     if proposal.intent == ProjectLinkIntent::Artifact {
-        if let (Some(project_id), Some(path), Some(current_hash)) = (
-            project_id.as_deref(),
-            proposal.external_id.as_deref(),
-            proposal.metadata.get("hash").and_then(Value::as_str),
-        ) {
-            let previous: Option<String> = conn
+        if let (Some(project_id), Some(path)) =
+            (project_id.as_deref(), proposal.external_id.as_deref())
+        {
+            let explicit_previous = proposal
+                .metadata
+                .get("previousArtifactId")
+                .and_then(Value::as_str)
+                .and_then(|object_id| repository::get_object(conn, object_id).ok().flatten())
+                .filter(|object| {
+                    object.project_id == project_id && object.kind == WorkObjectKind::Artifact
+                })
+                .map(|object| (Some(object.id), object.data, "explicit"));
+            let exact_previous = conn
                 .query_row(
-                    "SELECT metadata_json FROM work_external_links WHERE project_id=?1 AND external_kind='file' AND external_id=?2 AND relation='artifact_source' AND deleted_at IS NULL",
+                    "SELECT object_id, metadata_json FROM work_external_links WHERE project_id=?1 AND external_kind='file' AND external_id=?2 AND relation='artifact_source' AND deleted_at IS NULL",
                     params![project_id, path],
-                    |row| row.get(0),
+                    |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, String>(1)?)),
                 )
                 .optional()
-                .map_err(|e| e.to_string())?;
-            if let Some(previous_raw) = previous {
-                let previous_metadata: Value =
-                    serde_json::from_str(&previous_raw).unwrap_or_else(|_| json!({}));
-                let previous_hash = previous_metadata
-                    .get("hash")
-                    .and_then(Value::as_str)
-                    .unwrap_or("");
-                if !previous_hash.is_empty() && previous_hash != current_hash {
-                    if let Some(object) = proposal.metadata.as_object_mut() {
-                        object.insert("previousHash".into(), json!(previous_hash));
-                        object.insert("changeType".into(), json!("file_content_changed"));
-                    }
-                    proposal.intent = ProjectLinkIntent::Change;
+                .map_err(|e| e.to_string())?
+                .map(|(object_id, raw)| {
+                    (
+                        object_id,
+                        serde_json::from_str(&raw).unwrap_or_else(|_| json!({})),
+                        "same_path",
+                    )
+                });
+            let file_name = file_name_key(path);
+            let same_name_previous = if explicit_previous.is_none()
+                && exact_previous.is_none()
+                && file_name.is_some()
+            {
+                let mut statement = conn
+                    .prepare("SELECT object_id, external_id, metadata_json FROM work_external_links WHERE project_id=?1 AND external_kind='file' AND relation='artifact_source' AND deleted_at IS NULL AND external_id != ?2")
+                    .map_err(|e| e.to_string())?;
+                let matches = statement
+                    .query_map(params![project_id, path], |row| {
+                        Ok((
+                            row.get::<_, Option<String>>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, String>(2)?,
+                        ))
+                    })
+                    .map_err(|e| e.to_string())?
+                    .filter_map(Result::ok)
+                    .filter(|(_, candidate_path, _)| file_name_key(candidate_path) == file_name)
+                    .collect::<Vec<_>>();
+                match matches.as_slice() {
+                    [(object_id, _, raw)] => Some((
+                        object_id.clone(),
+                        serde_json::from_str(raw).unwrap_or_else(|_| json!({})),
+                        "unique_file_name",
+                    )),
+                    _ => None,
+                }
+            } else {
+                None
+            };
+            if let Some((previous_artifact_id, previous_metadata, method)) =
+                explicit_previous.or(exact_previous).or(same_name_previous)
+            {
+                if mark_file_change(
+                    &mut proposal,
+                    previous_artifact_id,
+                    previous_metadata,
+                    method,
+                ) {
                     reason_code = "change_requires_review".into();
                 }
             }
@@ -1278,6 +1594,110 @@ mod tests {
                 .get::<_, i64>(0))
                 .unwrap(),
             1
+        );
+    }
+
+    #[test]
+    fn confirming_changed_file_preserves_old_artifact_and_creates_change_reviews() {
+        let mut conn = database();
+        project(&mut conn, "project_bob", "Bob");
+        let first_capture = capture("file-v1");
+        insert_capture(&conn, &first_capture);
+        let mut first = proposal(ProjectLinkIntent::Artifact, "Bob");
+        first.external_kind = Some("file".into());
+        first.external_id = Some("C:/docs/plan.md".into());
+        first.metadata = json!({ "path": "C:/docs/plan.md", "hash": "v1", "size": 10 });
+        let old_artifact = apply_proposal(&mut conn, &first_capture, first)
+            .unwrap()
+            .unwrap()
+            .object
+            .unwrap();
+
+        let changed_capture = capture("file-v2");
+        insert_capture(&conn, &changed_capture);
+        let mut changed = proposal(ProjectLinkIntent::Artifact, "Bob");
+        changed.external_kind = Some("file".into());
+        changed.external_id = Some("C:/docs/plan.md".into());
+        changed.metadata = json!({ "path": "C:/docs/plan.md", "hash": "v2", "size": 12 });
+        let pending = apply_proposal(&mut conn, &changed_capture, changed)
+            .unwrap()
+            .unwrap()
+            .candidate;
+        let resolved = resolve_candidate(
+            &mut conn,
+            ResolveProjectLinkInput {
+                candidate_id: pending.id,
+                project_id: "project_bob".into(),
+                expected_revision: pending.revision,
+                reason: None,
+                owner: None,
+                due_at: None,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            resolved.object.as_ref().unwrap().kind,
+            WorkObjectKind::Change
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT COUNT(*) FROM work_objects WHERE kind='artifact'",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap(),
+            2
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT COUNT(*) FROM work_change_reviews WHERE status='pending'",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap(),
+            1
+        );
+        let link = list_external_links(&conn, "project_bob").unwrap().remove(0);
+        assert_ne!(link.object_id.as_deref(), Some(old_artifact.id.as_str()));
+        assert_eq!(
+            link.metadata.get("hash").and_then(Value::as_str),
+            Some("v2")
+        );
+    }
+
+    #[test]
+    fn unique_same_file_name_becomes_review_candidate_not_automatic_version() {
+        let mut conn = database();
+        project(&mut conn, "project_bob", "Bob");
+        let first_capture = capture("named-file-v1");
+        insert_capture(&conn, &first_capture);
+        let mut first = proposal(ProjectLinkIntent::Artifact, "Bob");
+        first.external_kind = Some("file".into());
+        first.external_id = Some("C:/archive/report.md".into());
+        first.metadata = json!({ "path": "C:/archive/report.md", "hash": "old" });
+        apply_proposal(&mut conn, &first_capture, first)
+            .unwrap()
+            .unwrap();
+
+        let second_capture = capture("named-file-v2");
+        insert_capture(&conn, &second_capture);
+        let mut second = proposal(ProjectLinkIntent::Artifact, "Bob");
+        second.external_kind = Some("file".into());
+        second.external_id = Some("D:/incoming/report.md".into());
+        second.metadata = json!({ "path": "D:/incoming/report.md", "hash": "new" });
+        let candidate = apply_proposal(&mut conn, &second_capture, second)
+            .unwrap()
+            .unwrap()
+            .candidate;
+        assert_eq!(candidate.status, "pending");
+        assert_eq!(candidate.reason_code, "change_requires_review");
+        assert_eq!(
+            candidate
+                .proposal
+                .metadata
+                .get("versionMatchMethod")
+                .and_then(Value::as_str),
+            Some("unique_file_name")
         );
     }
 

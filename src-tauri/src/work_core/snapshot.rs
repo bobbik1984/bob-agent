@@ -3,7 +3,9 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use super::models::{validate_project_id, ProjectAggregate, WorkObject, WORK_SCHEMA_VERSION};
+use super::models::{
+    validate_project_id, DecisionData, ProjectAggregate, WorkObject, WORK_SCHEMA_VERSION,
+};
 
 #[derive(Debug, Clone, Serialize)]
 struct SnapshotFrontmatter<'a> {
@@ -47,11 +49,53 @@ fn render_items(title: &str, items: &[WorkObject], output: &mut String) {
             }
         }
         if item.kind == super::models::WorkObjectKind::Decision {
-            if let Some(decision) = item.data.get("decision").and_then(|value| value.as_str()) {
-                output.push_str(&format!("  - 决定：{}\n", decision.trim()));
+            if let Ok(decision) = DecisionData::from_value(&item.data) {
+                output.push_str(&format!("  - 决定：{}\n", decision.decision));
+                output.push_str(&format!("  - 理由：{}\n", decision.reason));
+                if !decision.alternatives.is_empty() {
+                    output.push_str(&format!("  - 备选：{}\n", decision.alternatives.join("；")));
+                }
+                if !decision.rejected_alternatives.is_empty() {
+                    output.push_str(&format!(
+                        "  - 已否决：{}\n",
+                        decision
+                            .rejected_alternatives
+                            .iter()
+                            .map(|alternative| format!(
+                                "{}（{}）",
+                                alternative.option, alternative.reason
+                            ))
+                            .collect::<Vec<_>>()
+                            .join("；")
+                    ));
+                }
+                if !decision.participants.is_empty() {
+                    output.push_str(&format!(
+                        "  - 参与者：{}\n",
+                        decision.participants.join("、")
+                    ));
+                }
+                if let Some(owner) = decision.owner {
+                    output.push_str(&format!("  - 负责人：{owner}\n"));
+                }
+                if !decision.evidence.is_empty() {
+                    output.push_str(&format!("  - 证据：{}\n", decision.evidence.join("；")));
+                }
+                if let Some(condition) = decision.revisit_condition {
+                    output.push_str(&format!("  - 重访条件：{condition}\n"));
+                }
             }
-            if let Some(reason) = item.data.get("reason").and_then(|value| value.as_str()) {
-                output.push_str(&format!("  - 理由：{}\n", reason.trim()));
+        }
+        if item.kind == super::models::WorkObjectKind::Change {
+            if let Some(change_type) = item.data.get("changeType").and_then(|value| value.as_str())
+            {
+                output.push_str(&format!("  - 变化类型：{}\n", change_type.trim()));
+            }
+            if let Some(reference) = item.data.get("externalId").and_then(|value| value.as_str()) {
+                output.push_str(&format!("  - 来源：{}\n", reference.trim()));
+            }
+            if item.status == "needs_review" {
+                output.push_str("  - 影响：待用户确认，不会自动改写既有事实\n");
             }
         }
     }

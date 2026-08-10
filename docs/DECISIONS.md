@@ -45,3 +45,14 @@
 理由：静态计划无法表达持续变化的项目，单个长循环也无法可靠支持跨时间恢复和局部重试。
 
 约束：执行者不能单方面宣布完成；Goal 和节点完成必须绑定 Evidence 与验证结果。
+
+## D-011：变化事实与影响判断分离
+
+- 日期：2026-08-10
+- 状态：accepted
+
+决定：文件 fingerprint 或明确输入产生的 Change 可以作为观察事实自动记录，但它对 Decision、Goal、Task、Artifact 和 Risk 的影响必须进入独立 Change Review。只有用户接受后才建立 `affected_by`、`contradicts` 或 `supersedes` 关系。
+
+理由：新信息存在不等于既有决定已经失效。把观察、判断和确认分开，既能主动提示，又能避免模型悄悄改写用户的项目现实。
+
+约束：自动分析只能使用同项目的显式关系、Decision evidence、旧 Artifact 或经过校验的对象 ID；纯标题或语义相似度不得直接产生已确认关系。拒绝、延后和重新打开同样必须写入 Work Event。

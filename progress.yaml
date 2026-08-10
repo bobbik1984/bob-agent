@@ -33,8 +33,12 @@ phases:
     status: done
 - name: Phase 3 Decision 与 Change
   tasks:
-  - text: Decision Memory 与新版文件 Change Detection
-    status: todo
+  - text: Decision Memory 完整字段与兼容校验
+    status: done
+  - text: 不可变文件修订、Change Detection 与影响候选
+    status: done
+  - text: Change Review 接受、拒绝、延后和审计事件
+    status: done
 - name: Phase 4-5 Router 与 Advanced Loop
   tasks:
   - text: Direct、Deep、Advanced Complexity Router

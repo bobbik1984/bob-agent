@@ -1,6 +1,6 @@
 # Phase 3 Decision Memory 与 Change Review 设计
 
-> 状态：approved for implementation  
+> 状态：implemented
 > 日期：2026-08-10  
 > 上游：`docs/BOB_EVOLUTION_ROADMAP.md`、`docs/DECISIONS.md`、`docs/superpowers/plans/2026-08-10-work-continuity-evolution-plan.md`
 

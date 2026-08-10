@@ -6,7 +6,7 @@
 
 ## v0.8.1 演进边界（当前实现）
 
-`v0.8.0` 已封存 Capture 与知识提交基线。`v0.8.1` 开发线已在现有 Rust 后端中建立隔离的 `work_core`，并完成现有输入到 Project State 的第一轮接入；没有重写 Tauri、Android、Sync、Relay 或 Tools，也没有增加客户端运行时依赖。
+`v0.8.0` 已封存 Capture 与知识提交基线。`v0.8.1` 开发线已在现有 Rust 后端中建立隔离的 `work_core`，完成现有输入接入、完整 Decision 契约与 Change Review；没有重写 Tauri、Android、Sync、Relay 或 Tools，也没有增加客户端运行时依赖。
 
 ```mermaid
 flowchart TD
@@ -22,7 +22,7 @@ flowchart TD
     Adapter --> Runtime["API / Codex / AGY / Other"]
 ```
 
-当前已实现 Work Object 契约、SQLite Repository、append-only Work Event、幂等与 revision、软删除、Project Aggregate、Markdown 快照、Tauri Commands、Bridge 和最小 `WorkView`。Capture Router 现在可以把明确项目任务、决策、承诺、会议派生项和文件成果写入 Work Core；Todo/Event、Note/Source 和文件继续保留各自真相源，`work_external_links` 只保存稳定引用。无法唯一确认项目或缺少关键字段时写入 `project_link_candidates`，由 WorkView 非阻断处理。Router、Advanced、Dynamic Graph 和 Runtime Adapter 仍是后续目标；文件变化目前只产生待确认 Change，不做决定影响分析。
+当前已实现 Work Object 契约、SQLite Repository、append-only Work Event、幂等与 revision、软删除、Project Aggregate、Markdown 快照、Tauri Commands、Bridge 和最小 `WorkView`。Capture Router 可以把明确项目任务、决策、承诺、会议派生项和文件成果写入 Work Core；Todo/Event、Note/Source 和文件继续保留各自真相源，`work_external_links` 只保存稳定引用。Decision 原生保存 reason、alternatives、rejected alternatives、participants、owner、evidence 与 revisit condition。新版文件创建不可变 Artifact revision 和 Change，并依据显式关系、Decision evidence 或经过同项目校验的影响提示生成 `work_change_reviews`。接受、拒绝、延后和重新打开都写入 Work Event；确认前不修改既有 Decision、Goal、Task、Artifact 或 Risk。Router、Advanced、Dynamic Graph 和 Runtime Adapter 仍是后续目标。
 
 ### 输入与 Project State 的当前边界
 
@@ -31,12 +31,15 @@ Capture Journal (原始输入)
   ├─ 明确工作对象 ── project_links ── Work Object + Work Event
   ├─ Todo / Event ── Calendar 为状态真相源 ── stable external link
   ├─ Note / Source ── Markdown 为内容真相源 ── stable external link
-  └─ File ── 原路径 + 流式 hash/size/mtime ── Artifact 或 Change Candidate
+  └─ File ── 原路径 + 流式 hash/size/mtime ── immutable Artifact revision + Change
 
 歧义 / 缺字段 ── project_link_candidates ── WorkView 稍后归属或忽略
+显式证据 / 关系 ── work_change_reviews ── 接受 / 拒绝 / 延后 ── Work Relation + Event
 ```
 
-`project_link_candidates`、Work Object、Work Event、Capture refs 在同一个 SQLite transaction 中确认；Markdown 先安全落盘再登记引用。外部对象的完成、取消、改期和删除只追加项目活动，不复制外部状态。快照在数据库提交并释放锁后 best-effort 刷新。
+`project_link_candidates`、Work Object、Work Event、Capture refs 在同一个 SQLite transaction 中确认；文件修订的新版 Artifact、Change、外部路径指针和 Change Review 也原子提交。Markdown 先安全落盘再登记引用。外部对象的完成、取消、改期和删除只追加项目活动，不复制外部状态。快照在数据库提交并释放锁后 best-effort 刷新。
+
+跨设备边界：`v0.8.1` 仍以 PC 端 Work Core 为项目状态权威源。移动端产生的 Capture 会通过现有同步链路回放并由 PC 落入 Work Core，但 `work_objects`、`work_relations` 与 `work_change_reviews` 尚不进行独立的双向表级合并。完整的跨设备 Work Core 合并需要后续协议版本、冲突规则与迁移测试；在此之前不得把 Phase 3 描述为多端状态双向同步完成。
 
 ## 总体架构
 

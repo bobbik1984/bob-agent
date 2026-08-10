@@ -1,7 +1,92 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::HashSet;
 
 pub const WORK_SCHEMA_VERSION: u32 = 1;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RejectedAlternative {
+    pub option: String,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DecisionData {
+    pub decision: String,
+    pub reason: String,
+    #[serde(default)]
+    pub alternatives: Vec<String>,
+    #[serde(default)]
+    pub rejected_alternatives: Vec<RejectedAlternative>,
+    #[serde(default)]
+    pub participants: Vec<String>,
+    #[serde(default)]
+    pub owner: Option<String>,
+    #[serde(default)]
+    pub evidence: Vec<String>,
+    #[serde(default)]
+    pub revisit_condition: Option<String>,
+}
+
+fn normalized_optional(value: Option<String>) -> Option<String> {
+    value
+        .map(|item| item.trim().to_string())
+        .filter(|item| !item.is_empty())
+}
+
+fn normalized_list(values: Vec<String>) -> Vec<String> {
+    let mut seen = HashSet::new();
+    values
+        .into_iter()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty() && seen.insert(value.clone()))
+        .collect()
+}
+
+impl DecisionData {
+    pub fn normalize(mut self) -> Result<Self, String> {
+        self.decision = self.decision.trim().to_string();
+        self.reason = self.reason.trim().to_string();
+        if self.decision.is_empty() {
+            return Err("decision 缺少必填字段: decision".into());
+        }
+        if self.reason.is_empty() {
+            return Err("decision 缺少必填字段: reason".into());
+        }
+        self.alternatives = normalized_list(self.alternatives);
+        self.participants = normalized_list(self.participants);
+        self.evidence = normalized_list(self.evidence);
+        self.owner = normalized_optional(self.owner);
+        self.revisit_condition = normalized_optional(self.revisit_condition);
+        let mut rejected_seen = HashSet::new();
+        self.rejected_alternatives = self
+            .rejected_alternatives
+            .into_iter()
+            .filter_map(|alternative| {
+                let option = alternative.option.trim().to_string();
+                let reason = alternative.reason.trim().to_string();
+                if option.is_empty() || reason.is_empty() || !rejected_seen.insert(option.clone()) {
+                    None
+                } else {
+                    Some(RejectedAlternative { option, reason })
+                }
+            })
+            .collect();
+        Ok(self)
+    }
+
+    pub fn from_value(value: &Value) -> Result<Self, String> {
+        serde_json::from_value::<Self>(value.clone())
+            .map_err(|error| format!("Decision 数据格式无效: {error}"))?
+            .normalize()
+    }
+
+    pub fn into_value(self) -> Result<Value, String> {
+        serde_json::to_value(self.normalize()?).map_err(|error| error.to_string())
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -268,9 +353,12 @@ pub fn validate_object_payload(kind: WorkObjectKind, data: &Value) -> Result<(),
     if !data.is_object() {
         return Err("工作对象 data 必须是 JSON object".into());
     }
+    if kind == WorkObjectKind::Decision {
+        DecisionData::from_value(data)?;
+        return Ok(());
+    }
     let required = match kind {
         WorkObjectKind::Goal => &["outcome"][..],
-        WorkObjectKind::Decision => &["decision", "reason"][..],
         WorkObjectKind::Evidence => &["evidenceType", "reference"][..],
         WorkObjectKind::Commitment => &["owner", "dueAt"][..],
         _ => &[][..],
@@ -294,5 +382,54 @@ pub fn validate_object_payload(kind: WorkObjectKind, data: &Value) -> Result<(),
             kind.as_str(),
             missing.join(", ")
         ))
+    }
+}
+
+#[cfg(test)]
+mod decision_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn decision_data_normalizes_lists_and_keeps_legacy_shape_compatible() {
+        let legacy = DecisionData::from_value(&json!({
+            "decision": " 保留 Tauri ",
+            "reason": " 降低迁移风险 "
+        }))
+        .unwrap();
+        assert_eq!(legacy.decision, "保留 Tauri");
+        assert!(legacy.alternatives.is_empty());
+
+        let complete = DecisionData::from_value(&json!({
+            "decision": "采用增量方案",
+            "reason": "风险最低",
+            "alternatives": ["重写", "重写", " "],
+            "rejectedAlternatives": [
+                {"option": "重写", "reason": "成本过高"},
+                {"option": "重写", "reason": "重复项"},
+                {"option": "", "reason": "无效"}
+            ],
+            "participants": ["Alice", " Alice ", "Bob"],
+            "owner": " Alice ",
+            "evidence": ["artifact_1", "artifact_1", "source_2"],
+            "revisitCondition": " 成本下降时 "
+        }))
+        .unwrap();
+        assert_eq!(complete.alternatives, vec!["重写"]);
+        assert_eq!(complete.rejected_alternatives.len(), 1);
+        assert_eq!(complete.participants, vec!["Alice", "Bob"]);
+        assert_eq!(complete.owner.as_deref(), Some("Alice"));
+        assert_eq!(complete.evidence, vec!["artifact_1", "source_2"]);
+        assert_eq!(complete.revisit_condition.as_deref(), Some("成本下降时"));
+    }
+
+    #[test]
+    fn decision_data_rejects_missing_reason() {
+        let error = DecisionData::from_value(&json!({
+            "decision": "采用增量方案",
+            "reason": ""
+        }))
+        .unwrap_err();
+        assert!(error.contains("reason"));
     }
 }

@@ -7,7 +7,7 @@
 
 本文件只保存当前实施批次和紧邻下一批的任务。目标架构不得写成已实现能力。
 
-## 已完成主线：Phase 0–2 Persistent Work Core 与输入接入
+## 已完成主线：Phase 0–3 Persistent Work Core、输入接入与变更审查
 
 ### WC-001 文档与术语收口（P0，已完成）
 
@@ -23,7 +23,7 @@
 
 - [x] 定义 Project、Responsibility、Goal、Milestone、Task、Decision、Artifact、Evidence、Risk、Change、Commitment。
 - [x] 冻结类型前缀、状态、revision、时间、软删除、来源和幂等字段。
-- [ ] 明确 Decision 的 alternatives、evidence、participants、owner 与 revisit condition（Phase 3）。
+- [x] 明确 Decision 的 alternatives、evidence、participants、owner 与 revisit condition（Phase 3）。
 - [x] 明确 Work Object 与 Note、Source、Event、Todo、File 的引用关系。
 
 **验收**：schema 可序列化、可版本化；非法状态和缺失关键字段无法进入 Repository。
@@ -70,11 +70,21 @@
 
 **验收**：Capture、Candidate、Work Object、外部真相源和 Work Event 可相互追溯；重复处理不创建第二对象；歧义不阻止 Todo/Event/Markdown 先可靠落库。
 
-## 当前下一批：Phase 3 Decision 与 Change
+## WC-301–303 Decision Memory 与 Change Review（P1，已完成）
 
-- [ ] Decision 补齐 alternatives、evidence、participants、owner 与 revisit condition。
-- [ ] Change 分析受影响 Decision、Goal、Task、Artifact 和风险，不自动改写既有事实。
-- [ ] 提供用户确认、拒绝、延后与影响说明，并把选择写入 Work Event。
+- [x] Decision 补齐 alternatives、rejected alternatives、evidence、participants、owner 与 revisit condition，并兼容旧数据。
+- [x] 同路径新版文件保留旧 Artifact，原子创建新版 Artifact、Change 和影响 Review。
+- [x] 基于显式关系、Decision evidence、旧 Artifact 和同项目对象 ID 分析受影响 Decision、Goal、Task、Artifact 与 Risk。
+- [x] 提供用户确认、拒绝、延后、重新打开和影响说明；选择写入 Work Event。
+- [x] 只有确认后才建立 `affected_by`、`contradicts` 或 `supersedes`，不自动改写既有事实。
+
+**验收**：新版文件能够指出前后 fingerprint、旧/新 Artifact、受影响对象、证据和待确认关系；无证据时明确显示影响范围未知；重复处理、revision 冲突和事务失败不会产生半套状态。
+
+## 当前下一批：Phase 4 Complexity Router
+
+- [ ] 定义 Direct、Deep、Advanced 的结构化路由结果、置信度、风险和持续性。
+- [ ] 确定性信号优先，复杂语义才调用 Clerk；断网时保持 Answer/Quick Action 基本可用。
+- [ ] 建立中英文回放集，避免普通问答被过度升级，允许用户覆盖自动判断。
 
 ## v0.8.0 遗留质量门
 

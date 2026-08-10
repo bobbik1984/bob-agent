@@ -2,6 +2,9 @@ use tauri::State;
 
 use crate::db::DbState;
 
+use super::decision_change::{
+    self, ChangeReview, ChangeReviewActionInput, ChangeReviewActionOutcome,
+};
 use super::models::{
     CreateProjectInput, CreateRelationInput, CreateWorkObjectInput, DeleteWorkObjectInput,
     ProjectAggregate, UpdateWorkStatusInput, WorkObject, WorkProject, WorkRelation,
@@ -149,4 +152,31 @@ pub fn work_external_link_list(
 ) -> Result<Vec<ExternalLink>, String> {
     let conn = db.0.lock().map_err(|error| error.to_string())?;
     project_links::list_external_links(&conn, &project_id)
+}
+
+#[tauri::command]
+pub fn work_change_review_list(
+    db: State<'_, DbState>,
+    project_id: Option<String>,
+    status: Option<String>,
+    limit: Option<usize>,
+) -> Result<Vec<ChangeReview>, String> {
+    let conn = db.0.lock().map_err(|error| error.to_string())?;
+    decision_change::list_reviews(
+        &conn,
+        project_id.as_deref(),
+        status.as_deref(),
+        limit.unwrap_or(20),
+    )
+}
+
+#[tauri::command]
+pub fn work_change_review_action(
+    db: State<'_, DbState>,
+    input: ChangeReviewActionInput,
+) -> Result<ChangeReviewActionOutcome, String> {
+    let mut conn = db.0.lock().map_err(|error| error.to_string())?;
+    let outcome = decision_change::apply_review_action(&mut conn, input)?;
+    project_links::refresh_project_snapshot(&conn, &outcome.review.project_id);
+    Ok(outcome)
 }

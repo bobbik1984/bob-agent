@@ -110,6 +110,7 @@ if (IS_TAURI) {
   const MOCK_WORK_PROJECTS = [];
   const MOCK_WORK_AGGREGATES = {};
   const MOCK_PROJECT_LINK_CANDIDATES = [];
+  const MOCK_CHANGE_REVIEWS = [];
 
   const emptyWorkAggregate = (project) => ({
     project,
@@ -117,7 +118,8 @@ if (IS_TAURI) {
     artifacts: [], evidence: [], risks: [], changes: [], commitments: [], recentEvents: [],
   });
 
-  if (typeof location !== 'undefined' && new URLSearchParams(location.search).get('workCandidates') === '1') {
+  const workPreviewParams = typeof location !== 'undefined' ? new URLSearchParams(location.search) : new URLSearchParams();
+  if (workPreviewParams.get('workCandidates') === '1' || workPreviewParams.get('workChanges') === '1') {
     const now = Date.now();
     const previewProject = {
       schemaVersion: 1, id: 'project_mock_bob', title: 'Bob 产品升级', mission: '让复杂工作不断线',
@@ -138,6 +140,29 @@ if (IS_TAURI) {
         reasonCode: 'missing_decision_reason', confidence: 0.96, resolvedObjectId: null, revision: 1, createdAt: now - 1000, updatedAt: now - 1000,
       },
     );
+    if (workPreviewParams.get('workChanges') === '1') {
+      const aggregate = MOCK_WORK_AGGREGATES[previewProject.id];
+      aggregate.decisions.push({
+        schemaVersion: 1, id: 'decision_mock_architecture', kind: 'decision', projectId: previewProject.id,
+        parentId: null, title: '保留现有 Tauri 客户端', status: 'accepted', description: null,
+        data: { decision: '保留现有 Tauri 客户端', reason: '保持零依赖安装', evidence: ['artifact_mock_report'] },
+        sourceCaptureId: null, revision: 1, createdAt: now, updatedAt: now, deletedAt: null,
+      });
+      aggregate.changes.push({
+        schemaVersion: 1, id: 'change_mock_report', kind: 'change', projectId: previewProject.id,
+        parentId: null, title: '新版架构报告', status: 'needs_review', description: null,
+        data: { changeType: 'file_content_changed', externalId: 'D:/docs/architecture.md' },
+        sourceCaptureId: null, revision: 1, createdAt: now, updatedAt: now, deletedAt: null,
+      });
+      MOCK_CHANGE_REVIEWS.push({
+        id: 'change_review_mock_decision', projectId: previewProject.id, changeId: 'change_mock_report',
+        targetObjectId: 'decision_mock_architecture', targetKind: 'decision',
+        relationSourceId: 'decision_mock_architecture', relationTargetId: 'change_mock_report',
+        proposedRelation: 'affected_by', reasonCode: 'decision_evidence_changed', explanation: null,
+        evidenceRefs: ['artifact_mock_report'], confidence: 1, status: 'pending', resolutionNote: null,
+        revision: 1, createdAt: now, updatedAt: now, resolvedAt: null,
+      });
+    }
   }
 
   // Mock invoke — 根据命令返回合理的假数据
@@ -264,6 +289,29 @@ if (IS_TAURI) {
         return candidate;
       }
       case 'work_external_link_list': return [];
+      case 'work_change_review_list': {
+        const projectId = args?.projectId;
+        const status = args?.status;
+        return MOCK_CHANGE_REVIEWS
+          .filter(item => !projectId || item.projectId === projectId)
+          .filter(item => !status || item.status === status)
+          .slice(0, args?.limit || 20);
+      }
+      case 'work_change_review_action': {
+        const input = args?.input || {};
+        const review = MOCK_CHANGE_REVIEWS.find(item => item.id === input.reviewId);
+        if (!review) throw new Error('CHANGE_REVIEW_NOT_FOUND');
+        const nextStatus = { accept: 'accepted', reject: 'rejected', defer: 'deferred', reopen: 'pending' }[input.action];
+        if (!nextStatus) throw new Error('CHANGE_REVIEW_ACTION_INVALID');
+        if (review.status === nextStatus) return { review, relationCreated: false };
+        if (review.revision !== input.expectedRevision) throw new Error('CHANGE_REVIEW_REVISION_CONFLICT');
+        review.status = nextStatus;
+        review.resolutionNote = input.note || null;
+        review.revision += 1;
+        review.updatedAt = Date.now();
+        review.resolvedAt = ['accepted', 'rejected'].includes(nextStatus) ? Date.now() : null;
+        return { review, relationCreated: input.action === 'accept' };
+      }
       case 'capture_ingest': return { ok: true, duplicate: false, capture: { captureId: 'mock-capture-' + Date.now(), status: 'received' } };
       case 'capture_process_pending': return { ok: true, processed: 0, committed: 0, needsClarification: 0, awaitingPipeline: 0, deferred: 0 };
       case 'capture_quick_note': return { ok: true, duplicate: false, captureId: 'mock-capture-' + Date.now(), status: 'committed', path: 'daily/mock.md' };
@@ -516,6 +564,8 @@ window.appAPI = {
   workProjectLinkResolve: (input) => invoke('work_project_link_resolve', { input }),
   workProjectLinkDismiss: (input) => invoke('work_project_link_dismiss', { input }),
   workExternalLinkList: (projectId) => invoke('work_external_link_list', { projectId }),
+  workChangeReviewList: ({ projectId = null, status = null, limit = 20 } = {}) => invoke('work_change_review_list', { projectId, status, limit }),
+  workChangeReviewAction: (input) => invoke('work_change_review_action', { input }),
 
   // ── 系统 & 配置 (Mapped to Rust) ─────────────────────
   openExternal: (url) => IS_TAURI ? invoke('plugin:shell|open', { path: url }) : window.open(url, '_blank'),

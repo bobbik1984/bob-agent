@@ -28,7 +28,7 @@
 > **Bob keeps complex work moving without losing context.**<br>
 > **Bob 让复杂工作不断线。**
 
-`v0.8.0` 已封存可靠 Capture 与知识提交基线。`v0.8.1` 开发线已落地 **Persistent Work Core** 及现有输入接入：项目、目标、任务、决定和活动记录独立于聊天持久化；Todo/Event、Markdown 知识和本机文件通过稳定引用更新同一 Project State，歧义归属在“工作”页稍后处理。完整 Decision/Change 影响分析、Router 与 Advanced Runtime 仍按路线推进。现有 `Goal Mode` 仍是 Maker–Checker 三轮重试原型，不等同于完整持久 Runtime。
+`v0.8.0` 已封存可靠 Capture 与知识提交基线。`v0.8.1` 开发线已完成 **Persistent Work Core、现有输入接入和 Decision/Change Review**：项目、目标、任务、完整决定和活动记录独立于聊天持久化；Todo/Event、Markdown 知识和本机文件通过稳定引用更新同一 Project State；新版文件保留旧 Artifact，并把有证据的影响交给用户确认，不会自动改写既有决定。Complexity Router 与 Advanced Runtime 仍按路线推进。现有 `Goal Mode` 仍是 Maker–Checker 三轮重试原型，不等同于完整持久 Runtime。
 
 ---
 
@@ -38,6 +38,7 @@
 |:---:|---|---|
 | 🎐 | **Quick Capture 极速交互** | Global hotkey (`Ctrl+Shift+B`), drag-and-drop file/screenshot processing — capture ideas without breaking your workflow. <br>全局快捷键一键唤起、文件/截图拖拽交互、托盘气泡常驻，不打断手头工作。 |
 | 🧭 | **Persistent Work Core 持续工作核心** | Project state, goals, tasks, decisions, revisions and append-only activity survive chat changes and app restarts, with portable Markdown snapshots. <br>项目状态、目标、任务、决定和活动记录不依赖某次对话，并可生成供其他 Agent 阅读的 Markdown 快照。 |
+| 🔎 | **Decision & Change Review 决策与变更审查** | Decisions retain alternatives, evidence, participants, owners and revisit conditions. File revisions preserve prior artifacts and surface evidence-backed impact for confirmation. <br>决策原生保留备选、证据、参与者、负责人和重访条件；新版文件不覆盖旧成果，只把有依据的影响交给用户确认。 |
 | 🎛️ | **Model Hub 模型中心** | Auto-discover 40+ models from any OpenAI-compatible provider. Main/Clerk dual-model roles. Offline Sidecar (GGUF). <br>自动检索任何兼容 API 服务商的 40+ 模型，内置 Maker/Clerk 双角色协作，支持本地离线大模型运行。 |
 | 🔌 | **MCP Client 认知工具** | Native stdio JSON-RPC 2.0 client managing MCP Server child processes. Dynamic tool discovery & conflicts-free namespacing. <br>原生 stdio 异步管理 MCP 子进程，自动扫码注册认知技能，完全兼容开源 MCP 生态。 |
 | 🧠 | **Memory & Dream 记忆进化** | Current: Soul, Session, Wiki, structured corrections and nightly compaction. Direction: separate identity, preference, episodic, procedural and project memory, then learn from verified Goal outcomes. <br>当前已具备三层记忆、结构化纠错与夜间整理；下一阶段将身份、偏好、经历、策略和项目状态分离，并从 Goal 的真实结果中学习。 |

@@ -628,13 +628,21 @@ pub fn apply_local_route(
         | RouteIntent::Commitment => {
             save_route(conn, &capture.capture_id, &route, "validated")?;
             let mut metadata = route.metadata.clone();
-            if route.intent == RouteIntent::Artifact {
+            if matches!(route.intent, RouteIntent::Artifact | RouteIntent::Change) {
                 if let Some(path) = capture.file_path.as_deref() {
-                    metadata =
+                    let fingerprint =
                         serde_json::to_value(crate::work_core::project_links::fingerprint_file(
                             std::path::Path::new(path),
                         )?)
                         .map_err(|e| e.to_string())?;
+                    let object = metadata
+                        .as_object_mut()
+                        .ok_or_else(|| "Artifact metadata 必须是 JSON object".to_string())?;
+                    if let Some(fingerprint) = fingerprint.as_object() {
+                        for (key, value) in fingerprint {
+                            object.insert(key.clone(), value.clone());
+                        }
+                    }
                 }
             }
             let proposal = project_proposal(
@@ -675,7 +683,7 @@ fn parse_clerk_route(raw: &str) -> Result<RouteDecision, String> {
 
 async fn clerk_route(capture: &CaptureEnvelope) -> Result<RouteDecision, String> {
     let prompt = format!(
-        "将下面输入解析为 JSON。intent 只能是 todo、event、quick_note、note、source、work_task、decision、artifact、meeting、change、commitment、pending。普通提醒和日程继续使用 todo/event；只有明确要求写入某个项目的任务、决策、文件成果、会议结论、变化或承诺时才使用工作意图。不要调用工具，不要猜测缺失日期或项目 ID。date 使用 YYYY-MM-DD，startTime/endTime 使用 HH:MM；projectId 只有输入明确包含 project_ ID 时才能填写；用户只说项目名称时写入 projectHint，由本地索引唯一精确匹配。decision 必须提取 reason；commitment 必须提取 owner 和 dueAt；meeting 把明确形成的 decision/task/commitment 放入 metadata.items。tags、domains、topics 使用简短数组；信息不足时 needsClarification=true。当前本地日期是 {}。\n\n输入：{}",
+        "将下面输入解析为 JSON。intent 只能是 todo、event、quick_note、note、source、work_task、decision、artifact、meeting、change、commitment、pending。普通提醒和日程继续使用 todo/event；只有明确要求写入某个项目的任务、决策、文件成果、会议结论、变化或承诺时才使用工作意图。不要调用工具，不要猜测缺失日期、项目 ID 或影响关系。date 使用 YYYY-MM-DD，startTime/endTime 使用 HH:MM；projectId 只有输入明确包含 project_ ID 时才能填写；用户只说项目名称时写入 projectHint，由本地索引唯一精确匹配。decision 必须提取 reason，并把完整结构放入 metadata.decisionData：decision、reason、alternatives、rejectedAlternatives（option/reason）、participants、owner、evidence、revisitCondition；未提及的可选字段使用空数组或 null。commitment 必须提取 owner 和 dueAt；meeting 把明确形成的 decision/task/commitment 放入 metadata.items，decision item 使用相同完整字段。change 只有在输入明确引用 Work Object ID 时才写入 metadata.affectedObjectIds；若输入还明确表达关系，可写 metadata.impacts 数组，每项仅包含 objectId、relation（affected_by/contradicts/supersedes）、explanation、evidenceRefs、confidence，不得依靠猜测填写。tags、domains、topics 使用简短数组；信息不足时 needsClarification=true。当前本地日期是 {}。\n\n输入：{}",
         Local::now().date_naive(),
         capture.content.as_deref().unwrap_or("")
     );

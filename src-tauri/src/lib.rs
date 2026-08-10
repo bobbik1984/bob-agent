@@ -952,6 +952,8 @@ pub fn run() {
             work_core::commands::work_project_link_resolve,
             work_core::commands::work_project_link_dismiss,
             work_core::commands::work_external_link_list,
+            work_core::commands::work_change_review_list,
+            work_core::commands::work_change_review_action,
             capture::capture_ingest,
             capture_router::capture_process_pending,
             capture::capture_quick_note,
