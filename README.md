@@ -28,7 +28,7 @@
 > **Bob keeps complex work moving without losing context.**<br>
 > **Bob 让复杂工作不断线。**
 
-`v0.8.0` 已封存可靠 Capture 与知识提交基线。`v0.8.1` 当前主线是在现有模块上建立 **Persistent Work Core → Project State → Decision/Change → Advanced Project Runtime**。现有 `Goal Mode` 仍是 Maker–Checker 三轮重试原型，不等同于完整持久 Runtime。阶段顺序与完成门槛见 [Bob Evolution Roadmap](docs/BOB_EVOLUTION_ROADMAP.md)。
+`v0.8.0` 已封存可靠 Capture 与知识提交基线。`v0.8.1` 已落地第一条 **Persistent Work Core** 垂直切片：项目、目标、任务、决定和活动记录独立于聊天持久化，并可生成 Markdown 快照；现有输入自动关联、Decision/Change、Router 与 Advanced Runtime 仍按路线推进。现有 `Goal Mode` 仍是 Maker–Checker 三轮重试原型，不等同于完整持久 Runtime。阶段顺序与完成门槛见 [Bob Evolution Roadmap](docs/BOB_EVOLUTION_ROADMAP.md)。
 
 ---
 
@@ -37,6 +37,7 @@
 | | Feature / 功能 | Description / 描述 |
 |:---:|---|---|
 | 🎐 | **Quick Capture 极速交互** | Global hotkey (`Ctrl+Shift+B`), drag-and-drop file/screenshot processing — capture ideas without breaking your workflow. <br>全局快捷键一键唤起、文件/截图拖拽交互、托盘气泡常驻，不打断手头工作。 |
+| 🧭 | **Persistent Work Core 持续工作核心** | Project state, goals, tasks, decisions, revisions and append-only activity survive chat changes and app restarts, with portable Markdown snapshots. <br>项目状态、目标、任务、决定和活动记录不依赖某次对话，并可生成供其他 Agent 阅读的 Markdown 快照。 |
 | 🎛️ | **Model Hub 模型中心** | Auto-discover 40+ models from any OpenAI-compatible provider. Main/Clerk dual-model roles. Offline Sidecar (GGUF). <br>自动检索任何兼容 API 服务商的 40+ 模型，内置 Maker/Clerk 双角色协作，支持本地离线大模型运行。 |
 | 🔌 | **MCP Client 认知工具** | Native stdio JSON-RPC 2.0 client managing MCP Server child processes. Dynamic tool discovery & conflicts-free namespacing. <br>原生 stdio 异步管理 MCP 子进程，自动扫码注册认知技能，完全兼容开源 MCP 生态。 |
 | 🧠 | **Memory & Dream 记忆进化** | Current: Soul, Session, Wiki, structured corrections and nightly compaction. Direction: separate identity, preference, episodic, procedural and project memory, then learn from verified Goal outcomes. <br>当前已具备三层记忆、结构化纠错与夜间整理；下一阶段将身份、偏好、经历、策略和项目状态分离，并从 Goal 的真实结果中学习。 |

@@ -168,6 +168,15 @@
           </div>
         </div>
 
+        <!-- ═══ 抽屉 2.25: 持续工作 ═══ -->
+        <div v-show="!isMobile" class="drawer-header" :class="{ active: activeDrawer === 'work' }" @click="activeDrawer = 'work'">
+          <div class="drawer-header-left">
+            <BriefcaseBusiness :size="14" />
+            <span>{{ $t('nav.work') || '工作' }}</span>
+          </div>
+          <ChevronRight :size="14" class="drawer-chevron" />
+        </div>
+
         <!-- ═══ 抽屉 2.5: 知识图谱 ═══ -->
         <div v-show="!isMobile" class="drawer-header" :class="{ active: activeDrawer === 'knowledge' }" @click="activeDrawer = 'knowledge'">
           <div class="drawer-header-left">
@@ -251,6 +260,9 @@
             @toggle-sidebar="mobileDrawerOpen = !mobileDrawerOpen" 
           />
         </div>
+        <div class="view-wrapper" v-show="activeDrawer === 'work'">
+          <WorkView />
+        </div>
         <div class="view-wrapper" v-show="activeDrawer === 'knowledge'">
           <KnowledgeGraphView 
             @toggle-sidebar="mobileDrawerOpen = !mobileDrawerOpen"
@@ -313,11 +325,12 @@ import ChatView from './views/ChatView.vue';
 import InboxView from './views/InboxView.vue';
 import SettingsView from './views/SettingsView.vue';
 import KnowledgeGraphView from './views/KnowledgeGraphView.vue';
+import WorkView from './views/WorkView.vue';
 import SetupWizard from './components/SetupWizard.vue';
 import QuickNoteOverlay from './components/QuickNoteOverlay.vue';
 import BottomNavigation from './components/BottomNavigation.vue';
 import GlobalDialog from './components/GlobalDialog.vue';
-import { Inbox, Settings, Plus, X, Sun, Moon, ChevronLeft, ChevronRight, ChevronDown, Search, MessageSquare, CalendarDays, Brain, Plug, FolderOpen, Palette, Info, Sunrise, Waypoints, Menu, Smartphone, Calendar, CheckSquare, Timer } from 'lucide-vue-next';
+import { Inbox, Settings, Plus, X, Sun, Moon, ChevronLeft, ChevronRight, ChevronDown, Search, MessageSquare, CalendarDays, Brain, Plug, FolderOpen, Palette, Info, Sunrise, Waypoints, Menu, Smartphone, Calendar, CheckSquare, Timer, BriefcaseBusiness } from 'lucide-vue-next';
 import { useI18n } from 'vue-i18n';
 import { listen } from '@tauri-apps/api/event';
 import { getModelMeta } from '@/composables/useModelSwitcher';
@@ -332,7 +345,7 @@ const { locale, t } = useI18n();
 // ── 状态 ─────────────────────────────────────────────
 const isSetupComplete = ref(false);
 const currentView = ref('chat');  // legacy — kept for backward compat during transition
-const activeDrawer = ref('chat');         // 'chat' | 'schedule' | 'settings' | 'knowledge'
+const activeDrawer = ref('chat');         // 'chat' | 'schedule' | 'work' | 'knowledge' | 'settings'
 provide('activeDrawer', activeDrawer);
 const activeSettingsPanel = ref('model'); // 'model' | 'connections' | 'workspace' | 'daily_routine' | 'appearance' | 'about'
 const activeSchedulePanel = ref('timeline'); // 'timeline' | 'todo' | 'cron'

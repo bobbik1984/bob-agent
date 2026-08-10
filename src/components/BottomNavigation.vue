@@ -16,8 +16,16 @@
       <CalendarDays :size="20" />
       <span>{{ $t('nav.schedule') || '日程' }}</span>
     </button>
-    <button 
-      class="bottom-nav-item" 
+    <button
+      class="bottom-nav-item"
+      :class="{ active: activeDrawer === 'work' }"
+      @click="$emit('update:activeDrawer', 'work')"
+    >
+      <BriefcaseBusiness :size="20" />
+      <span>{{ $t('nav.work') || '工作' }}</span>
+    </button>
+    <button
+      class="bottom-nav-item"
       :class="{ active: activeDrawer === 'knowledge' }" 
       @click="$emit('update:activeDrawer', 'knowledge')"
     >
@@ -36,7 +44,7 @@
 </template>
 
 <script setup>
-import { MessageSquare, CalendarDays, Settings, Waypoints } from 'lucide-vue-next';
+import { BriefcaseBusiness, MessageSquare, CalendarDays, Settings, Waypoints } from 'lucide-vue-next';
 
 defineProps({
   activeDrawer: {

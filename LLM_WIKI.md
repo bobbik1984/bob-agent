@@ -12,6 +12,7 @@
 | 搜索关键词/功能 | 核心 Vue 组件 / 触发点 | Bridge 桥接层函数 | Rust Command 后端实现 | 核心业务文件 |
 | :--- | :--- | :--- | :--- | :--- |
 | **可靠 Capture / 闪念速记** | [QuickNoteOverlay.vue](file:///d:/OneDrive/Learning/Code/Gemini/bob-agent/src/components/QuickNoteOverlay.vue) | `captureQuickNote` | `capture_quick_note` | [capture.rs](file:///d:/OneDrive/Learning/Code/Gemini/bob-agent/src-tauri/src/capture.rs) |
+| **持续工作核心 / Project State** | [WorkView.vue](file:///d:/OneDrive/Learning/Code/Gemini/bob-agent/src/views/WorkView.vue) | `workProject*` / `workObject*` | `work_project_*` / `work_object_*` | [work_core](file:///d:/OneDrive/Learning/Code/Gemini/bob-agent/src-tauri/src/work_core) |
 | **做梦引擎 (记忆整理)** | `App.vue` / 后台守护 | `summarizeSession` | `system_summarize_session` | [dream.rs](file:///d:/OneDrive/Learning/Code/Gemini/bob-agent/src-tauri/src/dream.rs) |
 | **微信穿透网关** | `SettingsView.vue` (QR 扫码) | `wechatGetLoginQr` | `wechat_get_login_qr` | [mod.rs (wechat)](file:///d:/OneDrive/Learning/Code/Gemini/bob-agent/src-tauri/src/wechat/mod.rs) |
 | **Web Drop 极传** | `ChatView.vue` (文件分享) | `startWebDrop` | `start_web_drop` | [web_drop.rs](file:///d:/OneDrive/Learning/Code/Gemini/bob-agent/src-tauri/src/web_drop.rs) |

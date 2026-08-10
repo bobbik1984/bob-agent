@@ -9,20 +9,20 @@
 
 ## 当前主线：Phase 0–1 Persistent Work Core
 
-### WC-001 文档与术语收口（P0，进行中）
+### WC-001 文档与术语收口（P0，已完成）
 
 - [x] 将“Bob 让复杂工作不断线”确立为产品北极星。
 - [x] 明确 Bob Core、Orchestration、Runtime 与 Integration 边界。
 - [x] 建立 canonical state、渐进演进、Runtime 可替换和 Graph/Loop 分层的 Decision Log。
 - [x] 重写当前路线图，保留 `v0.8.0` 为不可修改的 Capture 历史基线。
-- [ ] 完成文档一致性检查并提交 Phase 0。
+- [x] 完成文档一致性检查并提交 Phase 0。
 
 **验收**：愿景、路线、架构、代码导航、架构决定、任务和进度各有唯一职责；规划能力没有写成现状。
 
 ### WC-101 Work Object 契约（P0）
 
-- [ ] 定义 Project、Responsibility、Goal、Milestone、Task、Decision、Artifact、Evidence、Risk、Change、Commitment。
-- [ ] 冻结类型前缀、状态、revision、时间、软删除、来源和幂等字段。
+- [x] 定义 Project、Responsibility、Goal、Milestone、Task、Decision、Artifact、Evidence、Risk、Change、Commitment。
+- [x] 冻结类型前缀、状态、revision、时间、软删除、来源和幂等字段。
 - [ ] 明确 Decision 的 reason、alternatives、evidence、participants、owner 与 revisit condition。
 - [ ] 明确 Work Object 与 Note、Source、Event、Todo、File 的引用关系。
 
@@ -30,30 +30,31 @@
 
 ### WC-102 SQLite Repository 与 Work Event Journal（P0）
 
-- [ ] 增加向前兼容 migration，不修改真实 Markdown 文件。
-- [ ] Repository 统一负责事务、幂等、乐观 revision 和软删除。
-- [ ] 所有状态变化写入 append-only `work_events`。
-- [ ] 同一幂等键返回原回执；跨对象失败必须整体回滚。
-- [ ] 增加 schema、事务、冲突、软删除和事件顺序单元测试。
+- [x] 增加向前兼容 migration，不修改真实 Markdown 文件。
+- [x] Repository 统一负责事务、幂等、乐观 revision 和软删除。
+- [x] 所有状态变化写入 append-only `work_events`。
+- [x] 同一幂等键返回原回执；跨对象失败必须整体回滚。
+- [x] 增加 schema、事务、冲突、软删除和事件顺序单元测试。
 
 **验收**：进程重启后状态不丢失；重复请求不创建第二对象；失败不留下半套 Project State。
 
 ### WC-103 Project 聚合与可迁移快照（P1）
 
-- [ ] 聚合目标、当前阶段、开放任务、决定、风险、近期变化和下一步。
-- [ ] 兼容现有 Markdown Project 稳定 ID，只注册不迁移真实数据。
-- [ ] 生成只读 Markdown 项目快照，禁止快照反向覆盖较新运行状态。
-- [ ] 增加新会话恢复、重启恢复和快照稳定性测试。
+- [x] 聚合目标、当前阶段、开放任务、决定、风险、近期变化和下一步。
+- [x] 兼容现有 Markdown Project 稳定 ID，只注册不迁移真实数据。
+- [x] 生成只读 Markdown 项目快照，禁止快照反向覆盖较新运行状态。
+- [x] 增加新会话恢复、重启恢复和快照稳定性测试。
 
 **验收**：不读取旧对话上下文也能恢复准确项目摘要；不同 Agent 可通过 Markdown 快照理解项目。
 
 ### WC-104 最小 Project API 与 UI（P1）
 
-- [ ] 增加 Project/Goal/Task/Decision Tauri Commands。
-- [ ] 只通过 `tauri-bridge.js` 暴露给 Vue。
-- [ ] Project 页面只展示 Goal、状态、变化、任务、Decision 和用户需关注项。
-- [ ] 同步中英文 i18n，继续使用 Lucide 和设计变量。
-- [ ] 完成前端测试、Rust 测试、生产构建和客户端体积对比。
+- [x] 增加 Project/Goal/Task/Decision Tauri Commands。
+- [x] 只通过 `tauri-bridge.js` 暴露给 Vue。
+- [x] Project 页面只展示 Goal、状态、变化、任务、Decision 和用户需关注项。
+- [x] 同步中英文 i18n，继续使用 Lucide 和设计变量。
+- [x] 完成前端测试、Rust 测试和生产构建。
+- [ ] 在下一次 PC/Android 发布产物上完成客户端体积对比和真机紧凑布局验收。
 
 **验收**：用户能创建并重新打开 Project，查看为什么作出决定以及下一步；UI 不暴露内部 DAG、prompt、token 或进程。
 

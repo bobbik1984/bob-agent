@@ -158,6 +158,11 @@ pub fn init_db(data_dir: &std::path::Path) -> Connection {
     // R1-01: 所有聊天、速记和移动分享的统一可靠入口。
     crate::capture::init_capture_tables(&conn);
 
+    // v0.8.1: Persistent Project State 与 Decision 的独立 Work Core。
+    if let Err(error) = crate::work_core::init_work_core_tables(&conn) {
+        log::error!("{error}");
+    }
+
     // 初始化 Cron 调度表 (T-1211)
     crate::scheduler::init_cron_table(&conn);
 

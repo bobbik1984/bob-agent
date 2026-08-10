@@ -53,6 +53,7 @@ pub mod tunnel;
 mod web;
 mod web_drop;
 mod wechat;
+mod work_core;
 
 use percent_encoding::percent_decode_str;
 use serde_json::{json, Value};
@@ -939,6 +940,14 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            work_core::commands::work_project_list,
+            work_core::commands::work_project_create,
+            work_core::commands::work_project_get,
+            work_core::commands::work_object_create,
+            work_core::commands::work_object_update_status,
+            work_core::commands::work_object_delete,
+            work_core::commands::work_relation_create,
+            work_core::commands::work_project_export_snapshot,
             capture::capture_ingest,
             capture_router::capture_process_pending,
             capture::capture_quick_note,

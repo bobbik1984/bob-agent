@@ -107,6 +107,15 @@ if (IS_TAURI) {
     ],
   };
 
+  const MOCK_WORK_PROJECTS = [];
+  const MOCK_WORK_AGGREGATES = {};
+
+  const emptyWorkAggregate = (project) => ({
+    project,
+    responsibilities: [], goals: [], milestones: [], tasks: [], decisions: [],
+    artifacts: [], evidence: [], risks: [], changes: [], commitments: [], recentEvents: [],
+  });
+
   // Mock invoke — 根据命令返回合理的假数据
   invoke = async (cmd, args) => {
     // console.log(`[Mock invoke] ${cmd}`, args);
@@ -118,6 +127,95 @@ if (IS_TAURI) {
       case 'system_health_check': return { ok: true, checks: [] };
       case 'system_validate_chat_ready': return { ready: true };
       case 'system_get_evolution_stats': return { total_sessions: 5, total_tools: 12 };
+      case 'work_project_list': return [...MOCK_WORK_PROJECTS];
+      case 'work_project_create': {
+        const now = Date.now();
+        const input = args?.input || {};
+        const project = {
+          schemaVersion: 1,
+          id: input.projectId || `project_mock_${now}`,
+          title: input.title || '未命名项目',
+          mission: input.mission || '',
+          status: 'active',
+          currentPhase: input.currentPhase || null,
+          summary: input.summary || null,
+          sourceRef: input.sourceRef || null,
+          metadata: input.metadata || {},
+          revision: 1,
+          createdAt: now,
+          updatedAt: now,
+          deletedAt: null,
+        };
+        MOCK_WORK_PROJECTS.unshift(project);
+        MOCK_WORK_AGGREGATES[project.id] = emptyWorkAggregate(project);
+        return project;
+      }
+      case 'work_project_get': return MOCK_WORK_AGGREGATES[args?.projectId] || null;
+      case 'work_object_create': {
+        const input = args?.input || {};
+        const aggregate = MOCK_WORK_AGGREGATES[input.projectId];
+        if (!aggregate) throw new Error('项目不存在');
+        const now = Date.now();
+        const object = {
+          schemaVersion: 1,
+          id: `${input.kind || 'task'}_mock_${now}`,
+          kind: input.kind || 'task',
+          projectId: input.projectId,
+          parentId: input.parentId || null,
+          title: input.title || '未命名工作项',
+          status: input.status || (input.kind === 'decision' ? 'accepted' : 'pending'),
+          description: input.description || null,
+          data: input.data || {},
+          sourceCaptureId: input.sourceCaptureId || null,
+          revision: 1,
+          createdAt: now,
+          updatedAt: now,
+          deletedAt: null,
+        };
+        const collections = {
+          responsibility: 'responsibilities', goal: 'goals', milestone: 'milestones',
+          task: 'tasks', decision: 'decisions', artifact: 'artifacts', evidence: 'evidence',
+          risk: 'risks', change: 'changes', commitment: 'commitments',
+        };
+        const collection = collections[input.kind];
+        if (aggregate[collection]) aggregate[collection].unshift(object);
+        aggregate.project.revision += 1;
+        aggregate.project.updatedAt = now;
+        return object;
+      }
+      case 'work_object_update_status': {
+        const input = args?.input || {};
+        for (const aggregate of Object.values(MOCK_WORK_AGGREGATES)) {
+          for (const collection of ['responsibilities', 'goals', 'milestones', 'tasks', 'decisions', 'artifacts', 'evidence', 'risks', 'changes', 'commitments']) {
+            const object = aggregate[collection].find(item => item.id === input.objectId);
+            if (object) {
+              object.status = input.status;
+              object.revision += 1;
+              object.updatedAt = Date.now();
+              aggregate.project.revision += 1;
+              aggregate.project.updatedAt = object.updatedAt;
+              return object;
+            }
+          }
+        }
+        throw new Error('工作对象不存在');
+      }
+      case 'work_object_delete': {
+        const input = args?.input || {};
+        for (const aggregate of Object.values(MOCK_WORK_AGGREGATES)) {
+          for (const collection of ['responsibilities', 'goals', 'milestones', 'tasks', 'decisions', 'artifacts', 'evidence', 'risks', 'changes', 'commitments']) {
+            const index = aggregate[collection].findIndex(item => item.id === input.objectId);
+            if (index >= 0) {
+              aggregate.project.revision += 1;
+              aggregate.project.updatedAt = Date.now();
+              return aggregate[collection].splice(index, 1)[0];
+            }
+          }
+        }
+        throw new Error('工作对象不存在');
+      }
+      case 'work_relation_create': return { id: `relation_mock_${Date.now()}`, ...(args?.input || {}), createdAt: Date.now(), deletedAt: null };
+      case 'work_project_export_snapshot': return { projectId: args?.projectId, path: `notes/projects/${args?.projectId}/_PROJECT_STATE.md`, bytesWritten: 0 };
       case 'capture_ingest': return { ok: true, duplicate: false, capture: { captureId: 'mock-capture-' + Date.now(), status: 'received' } };
       case 'capture_process_pending': return { ok: true, processed: 0, committed: 0, needsClarification: 0, awaitingPipeline: 0, deferred: 0 };
       case 'capture_quick_note': return { ok: true, duplicate: false, captureId: 'mock-capture-' + Date.now(), status: 'committed', path: 'daily/mock.md' };
@@ -356,6 +454,16 @@ window.appAPI = {
   focusWindow: () => getCurrentWindow().setFocus(),
   unminimizeWindow: () => getCurrentWindow().unminimize(),
   listenEvent: (event, handler) => listen(event, handler),
+
+  // ── 持续工作核心 (Work Core) ─────────────────────────
+  workProjectList: () => invoke('work_project_list'),
+  workProjectCreate: (input) => invoke('work_project_create', { input }),
+  workProjectGet: (projectId) => invoke('work_project_get', { projectId }),
+  workObjectCreate: (input) => invoke('work_object_create', { input }),
+  workObjectUpdateStatus: (input) => invoke('work_object_update_status', { input }),
+  workObjectDelete: (input) => invoke('work_object_delete', { input }),
+  workRelationCreate: (input) => invoke('work_relation_create', { input }),
+  workProjectExportSnapshot: (projectId) => invoke('work_project_export_snapshot', { projectId }),
 
   // ── 系统 & 配置 (Mapped to Rust) ─────────────────────
   openExternal: (url) => IS_TAURI ? invoke('plugin:shell|open', { path: url }) : window.open(url, '_blank'),

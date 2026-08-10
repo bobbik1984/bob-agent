@@ -4,9 +4,9 @@
 > **历史归档**: Electron 时代架构见 `docs/agents_electron.md`
 > **Goal/Dream 目标架构**: 见 `docs/GOAL_RUNTIME.md`。本文件描述当前系统；目标文档中的未完成模块不得被当作现有能力。
 
-## v0.8.1 演进边界（目标，尚未实现）
+## v0.8.1 演进边界（当前实现）
 
-`v0.8.0` 已封存 Capture 与知识提交基线。`v0.8.1` 开始在现有 Rust 后端中建立隔离的 `work_core`，不重写 Tauri、Android、Capture、Notes、Calendar、Sync、Relay 或 Tools。
+`v0.8.0` 已封存 Capture 与知识提交基线。`v0.8.1` 已在现有 Rust 后端中建立隔离的 `work_core`，没有重写 Tauri、Android、Capture、Notes、Calendar、Sync、Relay 或 Tools，也没有增加客户端运行时依赖。
 
 ```mermaid
 flowchart TD
@@ -22,7 +22,7 @@ flowchart TD
     Adapter --> Runtime["API / Codex / AGY / Other"]
 ```
 
-当前实施只覆盖 Work Core；Router、Advanced、Graph 和 Runtime Adapter 仍是后续目标。跨模块决定见 `docs/DECISIONS.md`，完整阶段与质量门见 `docs/superpowers/plans/2026-08-10-work-continuity-evolution-plan.md`。
+当前已实现 Work Object 契约、SQLite Repository、append-only Work Event、幂等与 revision、软删除、Project Aggregate、Markdown 快照、Tauri Commands、Bridge 和最小 `WorkView`。现有 Capture/Note/Calendar 尚未自动关联 Work Core；Router、Advanced、Graph 和 Runtime Adapter 仍是后续目标。跨模块决定见 `docs/DECISIONS.md`，完整阶段与质量门见 `docs/superpowers/plans/2026-08-10-work-continuity-evolution-plan.md`。
 
 ## 总体架构
 
@@ -32,8 +32,8 @@ flowchart TD
 │                                                          │
 │  ┌─────────── WebView (Vue 3 + Vite) ────────────────┐  │
 │  │                                                    │  │
-│  │  ChatView  │  InboxView(日程)  │  SettingsView     │  │
-│  │  (对话+视觉+工具)  (时间轴+待办)  (配置+模型中心)     │  │
+│  │  ChatView │ InboxView │ WorkView │ SettingsView     │  │
+│  │  对话工具    日程待办    项目状态    配置与模型         │  │
 │  │                                                    │  │
 │  └───────────── tauri-bridge.js (适配层) ─────────────┘  │
 │                         │ invoke() / listen()            │
@@ -80,6 +80,7 @@ bob-agent/
 │   │   ├── llm.rs                   # LLM 引擎 (SSE 流式 + Tool Calling 循环)
 │   │   ├── tools.rs                 # 🔑 12 个原生工具 + 执行调度器
 │   │   ├── capture.rs               # CaptureEnvelope + SQLite Journal + 幂等归并
+│   │   ├── work_core/               # 持久项目状态、事件、关系与 Markdown 快照
 │   │   ├── calendar.rs              # 日程/待办管理 (SQLite)
 │   │   ├── outbox.rs                # Outbox/Reconciler 声明式配置
 │   │   ├── filesystem.rs            # 文件读取/扫描/跟踪
@@ -100,6 +101,7 @@ bob-agent/
 │   ├── views/
 │   │   ├── ChatView.vue             # 对话 + 视觉 + 工具调用展示
 │   │   ├── InboxView.vue            # 日程面板（时间轴 + 待办）
+│   │   ├── WorkView.vue             # 项目、目标、任务、决定与活动记录
 │   │   └── SettingsView.vue         # 设置面板（含工作空间配置）
 │   └── components/
 │       ├── SetupWizard.vue          # 首次启动向导

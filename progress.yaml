@@ -14,17 +14,17 @@ phases:
 - name: Phase 0 Re-anchor
   tasks:
   - text: WC-001 愿景、路线、文档职责与 Decision Log
-    status: active
+    status: done
 - name: Phase 1 Persistent Work Core
   tasks:
   - text: WC-101 Work Object 数据契约
-    status: todo
+    status: active
   - text: WC-102 SQLite Repository 与 Work Event Journal
-    status: todo
+    status: done
   - text: WC-103 Project 聚合与 Markdown 快照
-    status: todo
+    status: done
   - text: WC-104 最小 Project API、Bridge 与 UI
-    status: todo
+    status: active
 - name: Phase 2 现有入口关联
   tasks:
   - text: Capture、Note、Source、Todo、Event、File 关联 Project

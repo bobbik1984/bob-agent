@@ -8,10 +8,9 @@
 
 `v0.8.0` 已封存可靠 Capture、知识对象契约、离线分类、Todo/Event 确定性提交和 Note/Source Markdown 提交基线。它是不可修改的历史版本。
 
-当前仍缺少：
+当前已完成第一条 Persistent Work Core 垂直切片：版本化 Work Object、SQLite Repository、Work Event Journal、Project Aggregate、Markdown 快照和最小 Work UI。当前仍缺少：
 
-- 独立于聊天的 Persistent Project State；
-- Project、Goal、Task、Decision、Evidence 的统一工作对象；
+- Capture、Note、Source、Todo、Event、File 与 Project State 的自动关联；
 - 新信息对旧决定和项目状态的 Change Detection；
 - Direct / Deep / Advanced 可靠路由；
 - 可恢复 Goal Runtime 与 Dynamic Task Graph；
@@ -39,20 +38,21 @@ flowchart LR
 
 ### Phase 0：Re-anchor
 
-- [ ] 统一产品愿景、术语和文档职责；
-- [ ] 建立架构 Decision Log；
-- [ ] 明确 Bob Core、Orchestration、Runtime 和 Integration 边界；
-- [ ] 让 `todo.md` 与 `progress.yaml` 只展示当前真实主线。
+- [x] 统一产品愿景、术语和文档职责；
+- [x] 建立架构 Decision Log；
+- [x] 明确 Bob Core、Orchestration、Runtime 和 Integration 边界；
+- [x] 让 `todo.md` 与 `progress.yaml` 只展示当前真实主线。
 
 ### Phase 1：Persistent Work Core
 
-- [ ] 建立 Project、Responsibility、Goal、Milestone、Task、Decision、Artifact、Evidence、Risk、Change、Commitment 契约；
-- [ ] 建立 SQLite Repository、事务、幂等、revision、软删除和 append-only Work Event Journal；
-- [ ] 聚合项目目标、阶段、任务、决定、风险、变化与下一步；
-- [ ] 兼容现有 Markdown Project 稳定 ID，不迁移真实数据；
-- [ ] 生成可迁移 Markdown 项目快照；
-- [ ] 建立 Project/Goal/Task/Decision 最小 Bridge 和 UI；
-- [ ] 验证新会话恢复、重启恢复、事务回滚和体积变化。
+- [x] 建立 Project、Responsibility、Goal、Milestone、Task、Decision、Artifact、Evidence、Risk、Change、Commitment 基础契约；
+- [x] 建立 SQLite Repository、事务、幂等、revision、软删除和 append-only Work Event Journal；
+- [x] 聚合项目目标、阶段、任务、决定、风险、变化与下一步；
+- [x] 兼容现有 Markdown Project 稳定 ID，不迁移真实数据；
+- [x] 生成可迁移 Markdown 项目快照；
+- [x] 建立 Project/Goal/Task/Decision 最小 Bridge 和 UI；
+- [x] 验证新会话恢复、重启恢复和事务回滚；
+- [ ] 在下一次 PC/Android 发布产物上完成体积变化与真机 UI 验收。
 
 ## 后续阶段摘要
 
