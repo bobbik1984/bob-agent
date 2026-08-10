@@ -17,20 +17,22 @@ pub fn init_db(data_dir: &std::path::Path) -> Connection {
         let is_healthy = match Connection::open(&db_path) {
             Ok(probe) => {
                 let mut healthy = false;
-                
+
                 // T-2225: PRAGMA quick_check; can take >5s on large mobile DBs, causing black screen.
                 // We use a lightweight check on Android to ensure DB is readable, and quick_check on PC.
                 #[cfg(target_os = "android")]
                 let check_query = "SELECT 1 FROM sqlite_schema LIMIT 1;";
                 #[cfg(not(target_os = "android"))]
                 let check_query = "PRAGMA quick_check;";
-                
+
                 if let Ok(mut stmt) = probe.prepare(check_query) {
                     if let Ok(mut rows) = stmt.query([]) {
                         if let Ok(Some(row)) = rows.next() {
                             #[cfg(target_os = "android")]
-                            { healthy = true; } // If we can read schema, it's alive.
-                            
+                            {
+                                healthy = true;
+                            } // If we can read schema, it's alive.
+
                             #[cfg(not(target_os = "android"))]
                             {
                                 let result: String = row.get(0).unwrap_or_default();
@@ -129,21 +131,32 @@ pub fn init_db(data_dir: &std::path::Path) -> Connection {
             status TEXT DEFAULT 'pending',
             created_at INTEGER NOT NULL
         );
-        "
-    ).unwrap_or_default();
+        ",
+    )
+    .unwrap_or_default();
 
-    conn.execute_batch("ALTER TABLE messages ADD COLUMN sync_id TEXT;").unwrap_or_default();
-    
-    let my_device_id = crate::read_config().get("device_id").and_then(|v| v.as_str()).unwrap_or("unknown").to_string();
+    conn.execute_batch("ALTER TABLE messages ADD COLUMN sync_id TEXT;")
+        .unwrap_or_default();
+
+    let my_device_id = crate::read_config()
+        .get("device_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown")
+        .to_string();
     conn.execute(
         "UPDATE messages SET sync_id = ?1 || '-' || created_at || '-' || id WHERE sync_id IS NULL",
-        params![my_device_id]
-    ).unwrap_or_default();
-    
-    conn.execute_batch("CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_sync ON messages(sync_id);").unwrap_or_default();
+        params![my_device_id],
+    )
+    .unwrap_or_default();
+
+    conn.execute_batch("CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_sync ON messages(sync_id);")
+        .unwrap_or_default();
 
     // 初始化日程表
     crate::calendar::init_events_table(&conn);
+
+    // R1-01: 所有聊天、速记和移动分享的统一可靠入口。
+    crate::capture::init_capture_tables(&conn);
 
     // 初始化 Cron 调度表 (T-1211)
     crate::scheduler::init_cron_table(&conn);
@@ -284,11 +297,26 @@ pub fn init_db(data_dir: &std::path::Path) -> Connection {
         "ALTER TABLE kg_nodes ADD COLUMN source_batches TEXT DEFAULT '[]'",
         [],
     );
-    let _ = conn.execute("ALTER TABLE kg_nodes ADD COLUMN updated_at INTEGER DEFAULT 0", []);
-    let _ = conn.execute("ALTER TABLE kg_edges ADD COLUMN updated_at INTEGER DEFAULT 0", []);
-    let _ = conn.execute("ALTER TABLE events ADD COLUMN updated_at INTEGER DEFAULT 0", []);
-    let _ = conn.execute("ALTER TABLE events ADD COLUMN linked_ticket_id TEXT DEFAULT NULL", []);
-    let _ = conn.execute("ALTER TABLE cron_jobs ADD COLUMN updated_at INTEGER DEFAULT 0", []);
+    let _ = conn.execute(
+        "ALTER TABLE kg_nodes ADD COLUMN updated_at INTEGER DEFAULT 0",
+        [],
+    );
+    let _ = conn.execute(
+        "ALTER TABLE kg_edges ADD COLUMN updated_at INTEGER DEFAULT 0",
+        [],
+    );
+    let _ = conn.execute(
+        "ALTER TABLE events ADD COLUMN updated_at INTEGER DEFAULT 0",
+        [],
+    );
+    let _ = conn.execute(
+        "ALTER TABLE events ADD COLUMN linked_ticket_id TEXT DEFAULT NULL",
+        [],
+    );
+    let _ = conn.execute(
+        "ALTER TABLE cron_jobs ADD COLUMN updated_at INTEGER DEFAULT 0",
+        [],
+    );
 
     // ── 目標 19: Goal Mode V2 执行错误记录 ────────────────────
     conn.execute_batch(
@@ -457,10 +485,7 @@ mod memory_contract_tests {
 
     #[test]
     fn unrelated_corrections_do_not_replace_each_other() {
-        let score = memory_claim_similarity(
-            "我的名字是小明，不是小红",
-            "合同摘要必须保留违约责任",
-        );
+        let score = memory_claim_similarity("我的名字是小明，不是小红", "合同摘要必须保留违约责任");
         assert!(score < 0.72, "unrelated correction score was {score}");
     }
 }
@@ -559,10 +584,11 @@ pub fn db_conversation_delete(id: String, db: State<DbState>) -> bool {
         params![&id],
     )
     .unwrap_or(0);
-    
-    let rows = conn.execute("DELETE FROM conversations WHERE id = ?1", params![&id])
+
+    let rows = conn
+        .execute("DELETE FROM conversations WHERE id = ?1", params![&id])
         .unwrap_or(0);
-    
+
     if rows > 0 {
         let ts = crate::now_ms();
         conn.execute(
@@ -646,7 +672,11 @@ pub fn db_message_add(
     };
     let ts = crate::now_ms();
     let config = crate::read_config();
-    let my_device_id = config.get("device_id").and_then(|v| v.as_str()).unwrap_or("unknown").to_string();
+    let my_device_id = config
+        .get("device_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown")
+        .to_string();
     let uuid_part: String = uuid::Uuid::new_v4().to_string().chars().take(8).collect();
     let sync_id = format!("{}-{}-{}", my_device_id, ts, uuid_part);
 
@@ -803,9 +833,11 @@ pub fn db_delete_with_tombstone(
     table_name: &str,
     record_key: &str,
     delete_query: &str,
-    params: &[&dyn rusqlite::ToSql]
+    params: &[&dyn rusqlite::ToSql],
 ) -> Result<usize, String> {
-    let rows_deleted = conn.execute(delete_query, params).map_err(|e| e.to_string())?;
+    let rows_deleted = conn
+        .execute(delete_query, params)
+        .map_err(|e| e.to_string())?;
     if rows_deleted > 0 {
         let ts = crate::now_ms();
         let _ = conn.execute(

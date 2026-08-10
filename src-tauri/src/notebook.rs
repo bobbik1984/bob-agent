@@ -600,23 +600,51 @@ pub fn notebook_rename_note(old_path: String, new_title: String) -> Result<Value
 
 #[tauri::command]
 pub fn notebook_append_daily(content: String) -> Result<Value, String> {
+    append_daily_entry(&content, None)
+}
+
+/// Capture-aware append. The hidden marker makes replay idempotent when the
+/// process stops after the file write but before the journal status update.
+pub(crate) fn notebook_append_daily_capture(
+    content: String,
+    capture_id: String,
+) -> Result<Value, String> {
+    append_daily_entry(&content, Some(&capture_id))
+}
+
+fn append_daily_entry(content: &str, capture_id: Option<&str>) -> Result<Value, String> {
     use std::io::Write;
     let today = chrono::Local::now().format("%Y-%m-%d").to_string();
     let time = chrono::Local::now().format("%H:%M").to_string();
 
     let path = get_daily_notes_dir().join(format!("{}.md", today));
-
-    let entry = format!("\n- [{}] {}\n", time, content.trim());
+    let marker = capture_id.map(|id| format!("<!-- bob-capture:{id} -->"));
+    if let Some(marker_value) = marker.as_deref() {
+        if fs::read_to_string(&path)
+            .map(|existing| existing.contains(marker_value))
+            .unwrap_or(false)
+        {
+            return Ok(json!({
+                "ok": true,
+                "duplicate": true,
+                "path": format!("daily/{}.md", today)
+            }));
+        }
+    }
+    let entry = match marker {
+        Some(marker_value) => format!("\n- [{}] {} {}\n", time, content.trim(), marker_value),
+        None => format!("\n- [{}] {}\n", time, content.trim()),
+    };
 
     match std::fs::OpenOptions::new()
         .create(true)
         .append(true)
         .open(&path)
     {
-        Ok(mut f) => {
-            let _ = f.write_all(entry.as_bytes());
-            Ok(json!({ "ok": true, "path": format!("daily/{}.md", today) }))
-        }
+        Ok(mut f) => f
+            .write_all(entry.as_bytes())
+            .map(|_| json!({ "ok": true, "duplicate": false, "path": format!("daily/{}.md", today) }))
+            .map_err(|e| e.to_string()),
         Err(e) => Ok(json!({ "ok": false, "error": e.to_string() })),
     }
 }

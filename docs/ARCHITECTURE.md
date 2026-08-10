@@ -59,6 +59,7 @@ bob-agent/
 │   │   ├── lib.rs                   # 🔑 Config + DB 初始化 + IPC 注册 + 系统托盘
 │   │   ├── llm.rs                   # LLM 引擎 (SSE 流式 + Tool Calling 循环)
 │   │   ├── tools.rs                 # 🔑 12 个原生工具 + 执行调度器
+│   │   ├── capture.rs               # CaptureEnvelope + SQLite Journal + 幂等归并
 │   │   ├── calendar.rs              # 日程/待办管理 (SQLite)
 │   │   ├── outbox.rs                # Outbox/Reconciler 声明式配置
 │   │   ├── filesystem.rs            # 文件读取/扫描/跟踪
@@ -202,6 +203,7 @@ Tauri Commands:
 | `dream.rs` | 做梦引擎 V2 (Clerk 异步压缩 + 7天冷热迁移 + 晨间简报) |
 | `evolution.rs` | 运行遥测、事实/纠错提取、每日记忆整理、SOUL 精炼与失败模式分析 |
 | `goal.rs` | 当前 Maker–Checker Goal Loop 原型：断言、Clerk 验收与三轮外层重试 |
+| `capture.rs` | 统一接收快捷笔记、聊天 memo、Android 分享和知识收藏；记录状态、幂等键与派生对象引用 |
 | `sidecar.rs` | Sidecar 子进程管理 (llama-server 离线推理) |
 | `kb_extractor.rs` | 知识库文件提取 (PDF/DOCX/XLSX → 纯文本) |
 | `kb_indexer.rs` | 知识库索引构建 |
@@ -233,6 +235,8 @@ window.electronAPI = {
 ## IPC 实现状态速查表
 
 ### 🟢 已用 Rust 实现（真实调用）
+
+Capture 主命令：`capture_ingest`、`capture_quick_note`、`capture_mobile_image`、`capture_list`、`capture_retry`、`capture_diagnostics`、`capture_activity_list`。前端必须经 `tauri-bridge.js` 调用，不应直接写笔记后再假设捕获成功。
 
 | 分类 | 前端调用 | Rust Command | 说明 |
 |:---|:---|:---|:---|
@@ -268,6 +272,26 @@ window.electronAPI = {
 ## 数据库 Schema (SQLite / rusqlite)
 
 数据库位于 `%LOCALAPPDATA%/bob-agent/bob.db`：
+
+`capture_journal` 是所有轻量输入的接收账本。它保存版本化 Envelope、规范化内容哈希、唯一幂等键、状态与错误阶段、重试次数/下次重试时间、来源/同步范围及派生对象引用。跨端同步包含 `captures` 集合，并通过幂等键归并；状态只能单调推进，较新的失败不能覆盖本地 committed/synced 终态。
+
+当调用方未显式提供 `source_url` 时，Capture 会从原始文本或 Markdown 链接中提取首个 HTTP(S) URL。聊天文章保存、快捷笔记和 Android 文本分享因此使用同一来源识别规则；入口与显式意图仍被保留，避免把“收藏知识”和“记下灵感”混为一类。
+
+`capture_events` 是用户活动记录，不是另一套状态机。它只保存语义事件代码和参数，每个来源设备保留最近 50 条；前端按当前 locale 翻译。同步 trace、Relay 心跳和协议诊断继续使用 `sync_history`，不污染普通 Capture 活动。
+
+PC 文件默认原位引用。Android 图片因系统 URI 权限短暂，归档到 `notes/assets/captures/images/YYYY/MM/<capture_id>--<hash8>--<original>`；原子复制成功后才清理缓存。图片当前为 `local_only`，SQLite 同步导出会排除它，直到阶段 3 提供真实资产传输。
+
+### 可迁移知识对象（实施中）
+
+长期认知资产以 Markdown 为真相源，SQLite 只保存 Capture 运行状态和可重建的搜索、关系与图谱索引。`knowledge_schema.rs` 定义稳定 ID、对象类型、关系词表、兼容解析、严格新对象校验和安全文件提交；`knowledge_audit.rs` 只读扫描 `notes/` 与 `wiki/`，识别重复、旧类型和失效引用。正式契约见 `docs/KNOWLEDGE_SCHEMA.md`，完整演进设计见 `docs/superpowers/specs/2026-08-10-unified-knowledge-lifecycle-design.md`。
+
+当前阶段只增加契约和审计能力，不移动 AppData 真实文件，也不切换 Notebook、Dream 或 Graph 的现有读取路径。
+
+应用启动时调用 `recover_incomplete_captures()`。只有 `quick_note`、`chat_memo`、`mobile_share` 文本入口会被自动重放；笔记条目使用隐藏 `capture_id` 标识实现文件层幂等。未知入口保持 pending，等待后续分类器或用户操作，避免错误归档。
+
+统一分流的目标契约是“离线捕获、延迟理解、确定性提交”。Capture 先在本地落账；明确日期和显式意图由轻量规则直接处理，复杂口语由 Clerk 转换为结构化候选。Clerk 不直接调用日历或写入长期知识文件，候选必须经过本地 schema、日期、时区、冲突和幂等校验，再由工具层提交。断网或模型不可用时保留 `pending_enrichment`，恢复后从失败阶段续跑；只有真实工具回执才能把活动标记为成功。
+
+`knowledge_committer.rs` 是 QuickNote、Note 与 Source 的唯一 Capture 提交边界。Note 使用内容身份，Source 使用规范化 URL 或原文件身份；重复捕获复用同一稳定对象。项目归属只存在于 Note：显式稳定 ID 可直接使用，项目名称必须在本地 Project Markdown 中唯一匹配，否则进入澄清状态。仅有 URL 的 Source 先保存为 `pending_extraction`，后续提取与蒸馏不得覆盖原始来源。
 
 ```sql
 -- 对话历史

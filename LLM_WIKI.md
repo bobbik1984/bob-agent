@@ -9,7 +9,7 @@
 
 | 搜索关键词/功能 | 核心 Vue 组件 / 触发点 | Bridge 桥接层函数 | Rust Command 后端实现 | 核心业务文件 |
 | :--- | :--- | :--- | :--- | :--- |
-| **闪念速记 / 灵光一现** | [QuickNoteOverlay.vue](file:///d:/OneDrive/Learning/Code/Gemini/bob-agent/src/components/QuickNoteOverlay.vue) | `appendQuickNote` | `system_append_quick_note` | [lib.rs](file:///d:/OneDrive/Learning/Code/Gemini/bob-agent/src-tauri/src/lib.rs) |
+| **可靠 Capture / 闪念速记** | [QuickNoteOverlay.vue](file:///d:/OneDrive/Learning/Code/Gemini/bob-agent/src/components/QuickNoteOverlay.vue) | `captureQuickNote` | `capture_quick_note` | [capture.rs](file:///d:/OneDrive/Learning/Code/Gemini/bob-agent/src-tauri/src/capture.rs) |
 | **做梦引擎 (记忆整理)** | `App.vue` / 后台守护 | `summarizeSession` | `system_summarize_session` | [dream.rs](file:///d:/OneDrive/Learning/Code/Gemini/bob-agent/src-tauri/src/dream.rs) |
 | **微信穿透网关** | `SettingsView.vue` (QR 扫码) | `wechatGetLoginQr` | `wechat_get_login_qr` | [mod.rs (wechat)](file:///d:/OneDrive/Learning/Code/Gemini/bob-agent/src-tauri/src/wechat/mod.rs) |
 | **Web Drop 极传** | `ChatView.vue` (文件分享) | `startWebDrop` | `start_web_drop` | [web_drop.rs](file:///d:/OneDrive/Learning/Code/Gemini/bob-agent/src-tauri/src/web_drop.rs) |
@@ -27,7 +27,7 @@
 ## ⚡ 1. 闪念速记 / 灵光一现 (Quick Notes)
 
 ### 1.1 功能概述
-用户通过全局快捷键 `Ctrl+Shift+B` 唤起主窗口后，在窗口内点击 Bob Logo 唤起悬浮闪念框（Quick Capture Bubble），输入闪念回车后，系统通过 Rust 后端无缝写入本地速记 Markdown 文件。主打**极速、轻量、无干扰**。
+用户通过全局快捷键 `Ctrl+Shift+B` 唤起主窗口后，在窗口内点击 Bob Logo 唤起悬浮闪念框。输入闪念回车后，Rust 后端先写入 `capture_journal`，再写入每日笔记；只有两步成功后状态才进入 `committed`。这让“已记录”具备可核验的事实基础，同时保持**极速、轻量、无干扰**。
 
 ### 1.2 核心逻辑流
 ```
@@ -36,11 +36,11 @@
   ▼
 [Vue 渲染 QuickNoteOverlay.vue] ───── 输入内容, 回车确认
   │
-  ▼  window.electronAPI.appendQuickNote(content)
-[tauri-bridge.js] ─────────────────── invoke("system_append_quick_note", { content })
+  ▼  window.electronAPI.captureQuickNote(content, entryPoint, sourceDevice)
+[tauri-bridge.js] ─────────────────── invoke("capture_quick_note", { input })
   │
   ▼
-[lib.rs (system_append_quick_note)] ── 读取并追加至 {data_dir}/quick_notes.md
+[capture.rs (capture_quick_note)] ─── 幂等写入 capture_journal，再追加每日笔记
   │
   ▼  追加格式: \n- [YYYY-MM-DD HH:MM:SS] {content}\n
 [返回 ok: true 与文件路径] ──────────── 前端展示 "已记录" (Lucide Check) 自动淡出
@@ -51,13 +51,24 @@
   - 点击 Bob Logo，调用 `open()` 激活输入框并聚焦。
   - `submit()` 读取输入文本，执行 IPC 请求并淡入“已记录”提示，800ms 后自动关闭。
 - **Bridge 垫片**: [tauri-bridge.js](file:///d:/OneDrive/Learning/Code/Gemini/bob-agent/src/tauri-bridge.js)
-  - `appendQuickNote: async (content) => invoke('system_append_quick_note', { content })`
-- **Rust 后端**: [lib.rs](file:///d:/OneDrive/Learning/Code/Gemini/bob-agent/src-tauri/src/lib.rs) 中的 `system_append_quick_note()`:
-  - 自动获取 `get_data_dir().join("quick_notes.md")`，以 `.append(true)` 追加时间戳与格式化行。
+  - `captureQuickNote()` 调用 `capture_quick_note`；`captureIngest()` 和 `captureList()` 提供通用接收与诊断入口。
+- **Rust 后端**: [capture.rs](file:///d:/OneDrive/Learning/Code/Gemini/bob-agent/src-tauri/src/capture.rs)
+  - `CaptureEnvelope` 保存入口、来源设备、内容哈希、幂等键、同步范围、状态、错误阶段和派生对象引用。
+  - `build_envelope()` 在 `source_url` 缺省时统一从正文/Markdown 提取首个 HTTP(S) URL；稳定回放夹具位于 `tests/fixtures/capture/`。
+  - `capture_quick_note()` 先登记 Journal，写入每日笔记后更新为 `committed`；失败则保留 `failed` 记录。
+  - `recover_incomplete_captures()` 在启动时重放安全的文本速记入口；`capture_retry` 用于显式重试，`capture_diagnostics` 查询待处理与最近失败。
+  - 每日笔记使用隐藏 `bob-capture:{capture_id}` 标识防止崩溃恢复时重复追加；跨端状态归并禁止 committed/synced 倒退。
+  - `capture_mobile_image()` 将 Android 临时图片原子归档为 `notes/assets/captures/images/YYYY/MM/<capture_id>--<hash8>--<original>`；失败不清缓存，当前 `sync_scope=local_only`。
+  - `capture_router.rs` 提供离线优先 Todo/Event 分流：本地时间快车道、Clerk 结构化候选、日期校验、确定性事件 ID、延迟重试和真实数据库回执。
+  - `capture_process_pending()` 在后台处理 `pending_enrichment`；网络/模型不可用只延后，不影响原始 Capture。
+  - `knowledge_committer.rs` 负责 QuickNote/Note/Source 的确定性提交：Markdown 是权威真相源，稳定 ID 防重复，Source 保留原始引用；项目名称只通过本地 Project 对象唯一匹配，无法确定时请求确认。
+  - `capture_activity_list()` 返回最近语义事件；`capture_events` 每设备最多 50 条，UI 使用 i18n key 在展示时翻译。
 
 ### 1.4 修改/扩展指导
-- **需要修改文件存储路径**：修改 `lib.rs` 中 `system_append_quick_note` 的 `path` 变量。
-- **需要扩展格式（例如支持 YAML Frontmatter）**：直接在 `lib.rs` 中修改 `entry` 的格式化 string。
+- **需要修改笔记落点**：调整 `capture.rs` 的 Quick Note 提交阶段，不可绕过 Journal。
+- **需要新增入口**：构造 `CaptureInput`，保留稳定 `entry_point` 和 `source_device`；跨端重放必须提供稳定幂等键。
+- **文章收藏**：`write_file` 写入 `wiki/raw/article` 或 `wiki/sources`、以及 `save_to_notes` 成功后，会登记已提交 Capture 和来源 URL。
+- **知识对象契约（实施中）**：`knowledge_schema.rs` 定义可迁移 Markdown 的稳定 ID、类型、关系、兼容解析和安全写入；`knowledge_audit.rs` 提供只读盘点命令 `knowledge_audit_run`。SQLite 不是长期知识的唯一载体，详细格式见 `docs/KNOWLEDGE_SCHEMA.md`。
 
 ---
 

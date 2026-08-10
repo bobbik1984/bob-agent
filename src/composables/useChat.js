@@ -75,7 +75,7 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
       const noteContent = text.replace(/^\/memo\s+/, '').trim();
       if (noteContent) {
         try {
-          const res = await window.appAPI.notebookAppendDaily(noteContent);
+          const res = await window.appAPI.captureQuickNote(noteContent, 'chat_memo');
           if (res && res.ok) {
             messages.value.push({ role: 'user', content: text });
             messages.value.push({ 

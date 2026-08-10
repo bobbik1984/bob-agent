@@ -39,6 +39,17 @@ pub fn init_events_table(conn: &rusqlite::Connection) {
     ",
     )
     .unwrap_or_default();
+
+    // Keep the calendar initializer self-contained for fresh databases and
+    // isolated tests. Existing installations safely ignore duplicate columns.
+    let _ = conn.execute(
+        "ALTER TABLE events ADD COLUMN updated_at INTEGER DEFAULT 0",
+        [],
+    );
+    let _ = conn.execute(
+        "ALTER TABLE events ADD COLUMN linked_ticket_id TEXT DEFAULT NULL",
+        [],
+    );
 }
 
 /// 列出所有事件和待办
@@ -137,9 +148,7 @@ pub fn system_confirm_event(event: Value, db: tauri::State<'_, crate::db::DbStat
         .get("description")
         .and_then(|v| v.as_str())
         .unwrap_or("");
-    let linked_ticket_id = event
-        .get("linked_ticket_id")
-        .and_then(|v| v.as_str());
+    let linked_ticket_id = event.get("linked_ticket_id").and_then(|v| v.as_str());
 
     match conn.execute(
         "INSERT INTO events (id, title, type, status, date, start_time, end_time, description, created_at, updated_at, linked_ticket_id)
@@ -158,7 +167,8 @@ pub fn system_delete_event(id: String, db: tauri::State<'_, crate::db::DbState>)
         Ok(c) => c,
         Err(_) => return false,
     };
-    let rows = conn.execute("DELETE FROM events WHERE id = ?1", params![&id])
+    let rows = conn
+        .execute("DELETE FROM events WHERE id = ?1", params![&id])
         .unwrap_or(0);
     if rows > 0 {
         let ts = crate::now_ms();

@@ -28,7 +28,7 @@
 > **Verified outcome closure with minimum user friction.**<br>
 > 在尽量少打扰用户的前提下，持续提高“用户认可、证据可查、失败可恢复”的任务闭环率。
 
-当前 `Goal Mode` 是 Maker–Checker 三轮重试原型，不等同于完整的持久 Goal Runtime。下一阶段主线是 **Goal Contract → 持久状态 → 最小任务 DAG → 节点验证与恢复 → Goal 轨迹驱动的个性化学习**。详见 [Goal Runtime 与个性化进化架构](docs/GOAL_RUNTIME.md)。
+当前主线是先建立可靠的 **Capture → 分类 → 跨端一致 → Memory/Dream** 数据闭环，再在可信数据底座上推进 Goal Runtime 与最小 DAG。现有 `Goal Mode` 仍是 Maker–Checker 三轮重试原型，不等同于完整的持久 Goal Runtime。阶段顺序与完成门槛见 [Bob Evolution Roadmap](docs/BOB_EVOLUTION_ROADMAP.md)。
 
 ---
 
@@ -111,6 +111,7 @@ bob-agent/
 │   ├── kg.rs                       # SQLite-based Knowledge Graph engine
 │   ├── evolution.rs                # Self-evolution memory core
 │   ├── dream.rs                    # Nightly Dream compaction & SOUL engine
+│   ├── capture.rs                  # Reliable Capture envelope, journal & recovery boundary
 │   ├── goal.rs                     # Goal Mode (Maker-Checker loop)
 │   ├── web_drop.rs                 # WebRTC P2P direct transmission
 │   ├── wechat/                     # Mobile Android sync channel adapter
@@ -132,6 +133,8 @@ bob-agent/
 
 - [FEATURES.md](docs/FEATURES.md) — Detailed feature list / 功能列表与说明
 - [USER_GUIDE.md](docs/USER_GUIDE.md) — User user manual / 用户操作手册
+- [PRODUCT_VISION.md](docs/PRODUCT_VISION.md) — Product north star, users, pain and differentiation / 产品愿景
+- [BOB_EVOLUTION_ROADMAP.md](docs/BOB_EVOLUTION_ROADMAP.md) — Ordered development phases and quality gates / 分阶段演进路线
 - [ARCHITECTURE.md](docs/ARCHITECTURE.md) — Under-the-hood design details / 技术架构与设计决策
 - [GOAL_RUNTIME.md](docs/GOAL_RUNTIME.md) — Goal, execution DAG, verification and personalized evolution target architecture / Goal、执行图、验证与个性化进化目标架构
 

@@ -118,6 +118,30 @@ if (IS_TAURI) {
       case 'system_health_check': return { ok: true, checks: [] };
       case 'system_validate_chat_ready': return { ready: true };
       case 'system_get_evolution_stats': return { total_sessions: 5, total_tools: 12 };
+      case 'capture_ingest': return { ok: true, duplicate: false, capture: { captureId: 'mock-capture-' + Date.now(), status: 'received' } };
+      case 'capture_process_pending': return { ok: true, processed: 0, committed: 0, needsClarification: 0, awaitingPipeline: 0, deferred: 0 };
+      case 'capture_quick_note': return { ok: true, duplicate: false, captureId: 'mock-capture-' + Date.now(), status: 'committed', path: 'daily/mock.md' };
+      case 'capture_list': return [];
+      case 'capture_retry': return { ok: true, alreadyComplete: false, capture: { captureId: args.captureId, status: 'committed' } };
+      case 'capture_diagnostics': return { pendingCount: 0, failedCount: 0, recentFailed: [] };
+      case 'knowledge_audit_run': return {
+        schema_version: 1,
+        scanned_at: new Date().toISOString(),
+        read_only: true,
+        roots: [],
+        file_count: 0,
+        files: [],
+        exact_duplicates: [],
+        source_duplicates: [],
+        same_title_candidates: [],
+        broken_wikilinks: {},
+        read_errors: [],
+        suggested_target_counts: {},
+      };
+      case 'capture_activity_list': return [];
+      case 'capture_mobile_image': return { ok: true, duplicate: false, captureId: 'mock-image-' + Date.now(), managedPath: 'assets/captures/images/mock.png' };
+      case 'get_shared_intents': return [];
+      case 'clear_shared_intent': return null;
 
       // 配置
       case 'config_get': return MOCK_CONFIG[args?.key] ?? null;
@@ -681,6 +705,17 @@ window.appAPI = {
   notebookRenameNote:  async (oldPath, newTitle) => invoke('notebook_rename_note', { oldPath, newTitle }),
   notebookSearch:      async (query) => invoke('notebook_search', { query }),
   notebookAppendDaily: async (content) => invoke('notebook_append_daily', { content }),
+  captureIngest: async (input) => invoke('capture_ingest', { input }),
+  captureProcessPending: async (limit = 10) => invoke('capture_process_pending', { limit }),
+  captureQuickNote: async (content, entryPoint = 'quick_note', sourceDevice = null, idempotencyKey = null) => invoke('capture_quick_note', { content, entryPoint, sourceDevice, idempotencyKey }),
+  captureList: async (limit = 50) => invoke('capture_list', { limit }),
+  captureRetry: async (captureId) => invoke('capture_retry', { captureId }),
+  captureDiagnostics: async () => invoke('capture_diagnostics'),
+  knowledgeAuditRun: async () => invoke('knowledge_audit_run'),
+  captureActivityList: async (limit = 50) => invoke('capture_activity_list', { limit }),
+  captureMobileImage: async (filename) => invoke('capture_mobile_image', { filename }),
+  getSharedIntents: async () => invoke('get_shared_intents'),
+  clearSharedIntent: async (filename) => invoke('clear_shared_intent', { filename }),
   notebookSaveAsset:   async (fileName, data) => invoke('notebook_save_asset', { fileName, data }),
   notebookCreateFolder: async (name) => invoke('notebook_create_folder', { name }),
   notebookListAllTags: async () => invoke('notebook_list_all_tags'),

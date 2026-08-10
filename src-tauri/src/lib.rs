@@ -1,9 +1,11 @@
 // Force rebuild to embed latest dist assets
-mod barcode;
 mod assertions;
+mod barcode;
 mod browser;
 mod calendar;
 mod candle_engine;
+mod capture;
+mod capture_router;
 mod connector;
 mod crypto;
 mod db;
@@ -24,6 +26,10 @@ mod kb_extractor;
 mod kb_indexer;
 mod keychain;
 mod kg;
+mod knowledge_audit;
+mod knowledge_committer;
+mod knowledge_schema;
+pub mod lan_sync;
 mod lark;
 mod llm;
 mod mcp;
@@ -34,28 +40,27 @@ mod pdf_renderer;
 mod plugins;
 mod scheduler;
 mod sidecar;
+pub mod skills_sync;
+pub mod sync_diagnostics;
+pub mod sync_engine;
+pub mod sync_history;
+pub mod sync_protocol;
+pub mod sync_resolver;
 mod telegram;
-mod tools;
 mod tool_confirm;
+mod tools;
 pub mod tunnel;
 mod web;
 mod web_drop;
 mod wechat;
-pub mod lan_sync;
-pub mod sync_engine;
-pub mod sync_diagnostics;
-pub mod sync_history;
-pub mod sync_protocol;
-pub mod skills_sync;
-pub mod sync_resolver;
 
 use percent_encoding::percent_decode_str;
 use serde_json::{json, Value};
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use tauri::Manager;
-use std::collections::HashMap;
 
 pub struct AbortState(pub Mutex<HashMap<String, tokio::sync::mpsc::Sender<()>>>);
 
@@ -352,7 +357,7 @@ fn llm_get_active_models() -> Value {
 #[tauri::command]
 fn llm_assign_model_role(app: tauri::AppHandle, model_id: String, role: String) -> Value {
     let result = llm::assign_model_role(model_id.clone(), role);
-    
+
     // [T-2004] Preload if selected model is offline
     let config = read_config();
     if let Some(path_str) = config.get("offlineModelPath").and_then(|v| v.as_str()) {
@@ -369,7 +374,7 @@ fn llm_assign_model_role(app: tauri::AppHandle, model_id: String, role: String) 
             }
         }
     }
-    
+
     result
 }
 
@@ -629,8 +634,7 @@ fn system_get_tool_statuses() -> Value {
     }));
 
     // 检查外部技能目录
-    let skills_ok = get_external_skills_dir(&config)
-        .map_or(false, |p| p.exists());
+    let skills_ok = get_external_skills_dir(&config).map_or(false, |p| p.exists());
     statuses.push(json!({
         "name": "External Skills",
         "isActive": skills_ok,
@@ -842,7 +846,9 @@ fn system_render_pdf_to_images(path: String) -> Result<Vec<String>, String> {
 pub fn run() {
     // 必须在所有涉及 TLS/HTTPS 的操作之前全局注册 rustls 加密算法提供商
     // 否则 rustls 0.23+ 在创建 ClientConfig 时会直接 panic
-    rustls::crypto::ring::default_provider().install_default().ok();
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .ok();
 
     let wechat_state = std::sync::Arc::new(wechat::WechatState::new());
 
@@ -855,7 +861,7 @@ pub fn run() {
         builder = builder.plugin(tauri_plugin_haptics::init());
         builder = builder.plugin(tauri_plugin_speech::init());
     }
-    
+
     builder = builder.manage(AbortState(Mutex::new(HashMap::new())));
     builder = builder.manage(tool_confirm::ToolConfirmState::new());
 
@@ -933,6 +939,15 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            capture::capture_ingest,
+            capture_router::capture_process_pending,
+            capture::capture_quick_note,
+            capture::capture_list,
+            capture::capture_retry,
+            capture::capture_diagnostics,
+            capture::capture_activity_list,
+            capture::capture_mobile_image,
+            knowledge_audit::knowledge_audit_run,
             sync_engine::get_shared_intents,
             sync_engine::clear_shared_intent,
             abort_generation,
@@ -1156,8 +1171,31 @@ pub fn run() {
 
             // 在获得 Context 后初始化本地数据
             let db_conn = db::init_db(&get_data_dir());
-            app.manage(db::DbState(Mutex::new(db_conn)));
             notebook::init_notebook_dirs();
+            match capture::recover_incomplete_captures(&db_conn) {
+                Ok(summary) => eprintln!("[Capture] startup recovery: {summary}"),
+                Err(error) => eprintln!("[Capture] startup recovery failed: {error}"),
+            }
+            app.manage(db::DbState(Mutex::new(db_conn)));
+
+            // Offline-first Capture enrichment. The journal is already durable at
+            // this point; network/model failures only defer enrichment and never
+            // invalidate the original capture.
+            let enrichment_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_secs(8)).await;
+                loop {
+                    if let Err(error) = capture_router::capture_process_pending(
+                        enrichment_handle.clone(),
+                        Some(10),
+                    )
+                    .await
+                    {
+                        log::warn!("[Capture] background enrichment deferred: {error}");
+                    }
+                    tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+                }
+            });
 
             app.handle().plugin(tauri_plugin_shell::init())?;
             // 日志：debug 输出到终端 + 文件，release 仅输出到文件
@@ -1257,14 +1295,19 @@ pub fn run() {
 
                 // [T-2004] 如果默认模型是离线引擎，或者配置了 offlineModelPath，则进行静默预热
                 let config = read_config();
-                let is_offline_main = config.get("model").and_then(|v| v.as_str()) == Some("offline");
-                let is_offline_clerk = config.get("clerkModel").and_then(|v| v.as_str()) == Some("offline");
+                let is_offline_main =
+                    config.get("model").and_then(|v| v.as_str()) == Some("offline");
+                let is_offline_clerk =
+                    config.get("clerkModel").and_then(|v| v.as_str()) == Some("offline");
                 if is_offline_main || is_offline_clerk {
                     if let Some(path) = config.get("offlineModelPath").and_then(|v| v.as_str()) {
                         if !path.is_empty() {
                             log::info!("Preloading offline engine for path: {}", path);
-                            let state = _refresh_handle.state::<crate::candle_engine::CandleState>();
-                            let _ = crate::candle_engine::start_offline_engine(path.to_string(), state).await;
+                            let state =
+                                _refresh_handle.state::<crate::candle_engine::CandleState>();
+                            let _ =
+                                crate::candle_engine::start_offline_engine(path.to_string(), state)
+                                    .await;
                         }
                     }
                 }
@@ -1275,7 +1318,9 @@ pub fn run() {
             #[cfg(any(target_os = "android", target_os = "ios"))]
             {
                 let skills_dir = get_data_dir().join("skills");
-                let is_empty = std::fs::read_dir(&skills_dir).map(|mut i| i.next().is_none()).unwrap_or(true);
+                let is_empty = std::fs::read_dir(&skills_dir)
+                    .map(|mut i| i.next().is_none())
+                    .unwrap_or(true);
                 if is_empty {
                     log::info!("Extracting bundled skills payload to sandbox...");
                     let zip_bytes = include_bytes!(concat!(env!("OUT_DIR"), "/bundled_skills.zip"));
@@ -1325,13 +1370,15 @@ pub fn run() {
             // ── Phase 3: 启动局域网 UDP 发现广播 (LAN Sync) ──
             #[cfg(not(mobile))]
             {
-                let device_id = match crypto::get_pairing_payload(app.handle().state::<crypto::DeviceIdentityState>()) {
+                let device_id = match crypto::get_pairing_payload(
+                    app.handle().state::<crypto::DeviceIdentityState>(),
+                ) {
                     Ok(payload) => payload.device_id,
                     Err(_) => "unknown-device".to_string(),
                 };
                 let lan_engine = std::sync::Arc::new(lan_sync::LanSyncEngine::new(device_id));
                 lan_engine.start_broadcast(3722); // HTTP API public port is 3722
-                // We should store this in app state if we need to stop it later, but for now we let it run
+                                                  // We should store this in app state if we need to stop it later, but for now we let it run
                 app.manage(lan_engine);
             }
 

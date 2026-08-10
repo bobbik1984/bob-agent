@@ -557,23 +557,32 @@ onMounted(async () => {
   if (isNativeMobile.value) {
     const checkSharedIntents = async () => {
       try {
-        const intents = await window.__TAURI__.invoke('get_shared_intents');
+        const intents = await window.appAPI.getSharedIntents();
         if (intents && intents.length > 0) {
-          const ops = [];
+          let savedCount = 0;
+          let failedCount = 0;
           for (const intent of intents) {
-            ops.push({
-              action: 'create_note',
-              payload: {
-                content: intent.type === 'text' ? intent.content : `[Shared Image: ${intent.filename}]`,
-                timestamp: Date.now(),
-                source: 'mobile_share'
+            try {
+              const result = intent.type === 'text'
+                ? await window.appAPI.captureQuickNote(intent.content, 'mobile_share', 'android', `android-share:${intent.filename}`)
+                : await window.appAPI.captureMobileImage(intent.filename);
+              if (result?.ok) {
+                savedCount += 1;
+                // 只有 Journal 与笔记/受管图片均提交成功后才清除临时分享缓存。
+                await window.appAPI.clearSharedIntent(intent.filename);
+              } else {
+                failedCount += 1;
               }
-            });
-            await window.__TAURI__.invoke('clear_shared_intent', { filename: intent.filename });
+            } catch (error) {
+              failedCount += 1;
+              console.warn('Shared item capture failed; source cache retained:', error);
+            }
           }
-          if (ops.length > 0) {
-            await window.appAPI.writeMobileOutbox(ops);
-            window.dispatchEvent(new CustomEvent('toast', { detail: { type: 'success', message: `已保存 ${ops.length} 条分享内容` } }));
+          if (savedCount > 0) {
+            window.dispatchEvent(new CustomEvent('toast', { detail: { type: 'success', message: t('app.capture_saved', { count: savedCount }) } }));
+          }
+          if (failedCount > 0) {
+            window.dispatchEvent(new CustomEvent('toast', { detail: { type: 'error', message: t('app.capture_failed', { count: failedCount }) } }));
           }
         }
       } catch (e) {

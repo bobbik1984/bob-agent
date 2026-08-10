@@ -53,7 +53,10 @@ class ShareActivity : Activity() {
     private fun saveUriToCache(uri: Uri) {
         try {
             val inputStream = contentResolver.openInputStream(uri)
-            val fileName = getFileName(uri) ?: "shared_image_${UUID.randomUUID()}.png"
+            val originalName = getFileName(uri) ?: "shared_image.png"
+            // A UUID prefix prevents two shares with the same display name from
+            // overwriting each other. Rust strips the prefix when archiving.
+            val fileName = "${UUID.randomUUID()}__${sanitizeFileName(originalName)}"
             val targetDir = File(cacheDir, "shared_incoming")
             if (!targetDir.exists()) targetDir.mkdirs()
             
@@ -78,6 +81,13 @@ class ShareActivity : Activity() {
         } catch (e: Exception) {
             e.printStackTrace()
         }
+    }
+
+    private fun sanitizeFileName(value: String): String {
+        val cleaned = value.replace(Regex("[^\\p{L}\\p{N}._-]"), "_")
+            .trim('.', '_')
+            .take(120)
+        return if (cleaned.isBlank()) "shared_image.png" else cleaned
     }
 
     private fun getFileName(uri: Uri): String? {

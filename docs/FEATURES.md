@@ -31,7 +31,8 @@ Bob 被设计为"桌面上最安静的幽灵副手"——它栖居于系统托�
 
 ### 技术亮点 / Technical Highlights
 
-- **灵感闪存 (Quick Capture Bubble)**：屏幕边缘常驻微型悬浮按钮，回车即存入 Quick Note 库
+- **灵感闪存 (Quick Capture Bubble)**：屏幕边缘常驻微型悬浮按钮；回车后先登记 Capture Journal，再写入每日笔记，只有真实提交成功才提示已记录
+- **多入口可靠接收**：快捷笔记、聊天 `/memo`、Android 文本分享以及文章收藏保留入口、来源设备、幂等键与提交状态；Android 原始分享缓存只在本地提交成功后清理
 - **全局快捷键 `Ctrl+Shift+B`**：任何窗口环境下一键唤起，`lib.rs` 注册 Tauri Global Shortcut
 - **文件/图片拖放 (Drag & Drop)**：拖入对话框后后端瞬间完成解析，支持文本与二进制文件
 - **桌面截屏 (`system_take_screenshot`)**：一键截取当前桌面，注入 Vision 对话流程
@@ -299,6 +300,8 @@ CDP (Chrome DevTools Protocol) 集成，支持自动化网页操作。📋 Plann
 ---
 
 ## 路线图 / Roadmap {#roadmap}
+
+当前开发顺序以 `docs/BOB_EVOLUTION_ROADMAP.md` 为准：可靠 Capture → 知识/行动分流 → 跨端一致 → Memory/Dream → Goal Runtime 与最小 DAG。现有 Goal Mode 是原型能力，不提前于数据底座扩展。
 
 | 里程碑 | 描述 | 状态 |
 |--------|------|------|

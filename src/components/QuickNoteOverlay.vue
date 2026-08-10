@@ -180,8 +180,8 @@ async function submit() {
   }
 
   try {
-    // 通过 IPC 写入速记文件
-    await window.appAPI.notebookAppendDaily(content);
+    // 先进入持久 Capture Journal，再由统一入口写入每日速记。
+    await window.appAPI.captureQuickNote(content, 'quick_note');
   } catch (err) {
     console.warn('[QuickNote] IPC fallback:', err);
   }

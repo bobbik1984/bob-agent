@@ -763,7 +763,7 @@
                 <span v-if="log.status === 'success'" style="color: var(--color-success); display: flex;"><CheckCircle :size="14"/></span>
                 <span v-else-if="log.status === 'failed'" style="color: var(--color-error); display: flex;"><XCircle :size="14"/></span>
                 <span v-else style="color: var(--text-tertiary); display: flex;"><Info :size="14"/></span>
-                <span style="font-weight: 600; font-size: 13px;">{{ log.summary || (log.status === 'success' ? '同步成功' : '同步失败') }}</span>
+                <span style="font-weight: 600; font-size: 13px;">{{ log.summary || (log.status === 'success' ? $t('settings.activity_sync_success') : $t('settings.activity_sync_failed')) }}</span>
               </div>
               <span style="font-size: 12px; color: var(--text-tertiary);">{{ new Date(log.finished_at).toLocaleString() }}</span>
             </div>
@@ -1181,9 +1181,10 @@ const overallConnectionLabel = computed(() => {
 
 const openSyncLogs = async () => {
   try {
-    const [runsResult, legacyResult] = await Promise.allSettled([
+    const [runsResult, legacyResult, captureResult] = await Promise.allSettled([
       window.appAPI.getSyncRuns(),
       window.appAPI.getSyncLogs(),
+      window.appAPI.captureActivityList(50),
     ]);
     const runs = runsResult.status === 'fulfilled' && Array.isArray(runsResult.value)
       ? runsResult.value
@@ -1192,11 +1193,14 @@ const openSyncLogs = async () => {
       ? legacyResult.value.map((log) => ({
           finished_at: log.timestamp,
           status: log.status === 'done' ? 'success' : (log.status === 'error' ? 'failed' : log.status),
-          summary: log.action || '同步活动',
+          summary: log.action || t('settings.activity_sync'),
           detail: log.detail || '',
         }))
       : [];
-    syncLogs.value = [...runs, ...legacy]
+    const captureActivities = captureResult.status === 'fulfilled' && Array.isArray(captureResult.value)
+      ? captureResult.value.map(formatCaptureActivity)
+      : [];
+    syncLogs.value = [...runs, ...legacy, ...captureActivities]
       .sort((left, right) => Number(right.finished_at || 0) - Number(left.finished_at || 0))
       .slice(0, 50);
   } catch (e) {
@@ -1206,13 +1210,70 @@ const openSyncLogs = async () => {
   showSyncLogsModal.value = true;
 };
 
+const formatActivityBytes = (value) => {
+  const bytes = Number(value || 0);
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+};
+
+const captureEntryPointLabel = (entryPoint) => {
+  const keys = {
+    quick_note: 'capture_entry_quick_note',
+    chat_memo: 'capture_entry_chat_memo',
+    mobile_share: 'capture_entry_mobile_share',
+    mobile_image_share: 'capture_entry_mobile_image',
+    chat_article_save: 'capture_entry_article',
+    save_to_notes: 'capture_entry_article',
+  };
+  return keys[entryPoint] ? t(`settings.${keys[entryPoint]}`) : (entryPoint || '-');
+};
+
+const formatCaptureActivity = (event) => {
+  const params = event.params || {};
+  const code = event.eventCode || '';
+  const titleKeys = {
+    'capture.received': 'capture_event_received',
+    'capture.committed': 'capture_event_committed',
+    'capture.failed': 'capture_event_failed',
+    'capture.recovered': 'capture_event_recovered',
+    'capture.synced': 'capture_event_synced',
+    'capture.image_saved': 'capture_event_image_saved',
+    'capture.pending_enrichment': 'capture_event_pending_enrichment',
+    'capture.needs_clarification': 'capture_event_needs_clarification',
+    'capture.enrichment_deferred': 'capture_event_enrichment_deferred',
+    'capture.enrichment_failed': 'capture_event_enrichment_failed',
+    'capture.action_committed': 'capture_event_action_committed',
+    'capture.knowledge_committed': 'capture_event_knowledge_committed',
+  };
+  let detail = '';
+  if (code === 'capture.received') detail = t('settings.capture_detail_received', { entryPoint: captureEntryPointLabel(params.entryPoint || event.sourceDevice) });
+  else if (code === 'capture.committed') detail = t('settings.capture_detail_committed', { destination: params.destination || '-' });
+  else if (code === 'capture.failed') detail = t('settings.capture_detail_failed', { stage: params.stage || '-' });
+  else if (code === 'capture.recovered') detail = t('settings.capture_detail_recovered');
+  else if (code === 'capture.synced') detail = t('settings.capture_detail_synced');
+  else if (code === 'capture.image_saved') detail = t('settings.capture_detail_image_saved', { fileName: params.fileName || '-', size: formatActivityBytes(params.size) });
+  else if (code === 'capture.pending_enrichment') detail = t('settings.capture_detail_pending_enrichment');
+  else if (code === 'capture.needs_clarification') detail = t('settings.capture_detail_needs_clarification');
+  else if (code === 'capture.enrichment_deferred') detail = t('settings.capture_detail_enrichment_deferred');
+  else if (code === 'capture.enrichment_failed') detail = t('settings.capture_detail_enrichment_failed');
+  else if (code === 'capture.action_committed') detail = t('settings.capture_detail_action_committed', { destination: params.destination || '-' });
+  else if (code === 'capture.knowledge_committed') detail = t('settings.capture_detail_knowledge_committed', { destination: params.destination || '-' });
+  return {
+    finished_at: event.createdAt,
+    status: event.status === 'failed' ? 'failed' : (event.status === 'success' ? 'success' : 'info'),
+    summary: t(`settings.${titleKeys[code] || 'capture_event_unknown'}`),
+    detail,
+  };
+};
+
 const formatSyncLogDetail = (log) => {
   if (log.detail) return log.detail;
   if (log.error_code) return log.error_code;
-  if (log.summary?.includes('配对') || log.summary?.includes('连接')) return '连接事实已确认';
-  if (log.status === 'success') return '数据已在本机确认写入';
-  if (log.status === 'running') return '操作进行中';
-  return '未产生本地写入确认';
+  if (log.summary?.includes('配对') || log.summary?.includes('连接')) return t('settings.activity_confirmed');
+  if (log.status === 'success') return t('settings.activity_written');
+  if (log.status === 'running') return t('settings.activity_running');
+  return t('settings.activity_no_write');
 };
 
 const pinInput = ref('');

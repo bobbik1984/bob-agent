@@ -1,0 +1,11 @@
+{
+  "fixtureId": "capture-foundation-v1",
+  "canonicalUrl": "https://fixture.bob.local/articles/capture-foundation",
+  "title": "Bob Capture 稳定回放文章",
+  "entryPoints": {
+    "chat_article_save": "knowledge",
+    "quick_note": "seed",
+    "mobile_share": "seed"
+  },
+  "expectedStatus": "committed"
+}

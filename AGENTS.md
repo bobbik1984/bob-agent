@@ -5,8 +5,8 @@
 ## 1. [The Desk] 当前开发焦点
 
 - **产品定位**：Bob 是零设置、隐私优先、跨设备、持续理解用户的个人执行系统；不是 Codex/Claude Code 的终端复制品。
-- **当前主线**：把现有 Maker–Checker Goal Loop 升级为可自动进入、可验证、可暂停恢复的 Goal Runtime。
-- **推进顺序**：Goal Contract → 持久状态 → 最小 DAG → 节点验证/恢复 → Goal 轨迹接入 Dream → 自适应模型路由。
+- **当前主线**：先建立统一、可恢复、可跨端对账的 Capture 基座，再推进知识/行动分流与 Goal Runtime。
+- **推进顺序**：真实基线 → CaptureEnvelope/Journal → 三入口纵切片 → 跨端一致 → Memory/Dream → 持久 Goal → 最小 DAG。
 - **当前真实边界**：Auto 尚不会升级到 Goal；Goal 尚无持久 DAG 和重启恢复；Dream 以事实整理为主，尚未形成结果驱动的用户模型。
 - **核心约束**：PC 安装版/绿色版保持零外部运行时，Android 不增加用户侧依赖；客户端体积增长必须解释和验证。
 - **工作区状态提醒**：开始修改前先检查 `git status`，不得覆盖用户未提交的代码或临时文件。
@@ -28,6 +28,9 @@
 
 | 任务 | 修改前必须阅读 |
 |---|---|
+| 产品方向、功能边界 | `docs/PRODUCT_VISION.md`、`docs/BOB_EVOLUTION_ROADMAP.md` |
+| Capture、分享、笔记、知识/行动分流 | `docs/CAPTURE_BASELINE.md`、`todo.md` 当前主线 |
+| 可迁移知识对象、目录边界与迁移 | `docs/KNOWLEDGE_SCHEMA.md`、`docs/superpowers/specs/2026-08-10-unified-knowledge-lifecycle-design.md` |
 | Goal、自动路由、DAG、Verifier、Dream/Memory | `docs/GOAL_RUNTIME.md`、`todo.md` 对应目标 |
 | Rust 模块、IPC、数据库、状态机 | `docs/ARCHITECTURE.md`、`LLM_WIKI.md` |
 | UI、布局、颜色、图标、i18n | `design_principles.md` |
@@ -36,7 +39,7 @@
 | 发布、安装器、版本 | `scripts/release.bat`、`OPEN_SOURCE_WORKFLOW.md`、`CHANGELOG.md` |
 | 历史 Electron 设计 | `docs/agents_electron.md`，仅用于考古，不得作为当前实现依据 |
 
-文档职责：`README.md` 讲产品定位和真实能力；`docs/ARCHITECTURE.md` 讲当前系统；`docs/GOAL_RUNTIME.md` 讲 Goal/Dream 目标架构；`todo.md` 管未完成任务；`progress.yaml` 是看板源。
+文档职责：`PRODUCT_VISION.md` 定方向；`BOB_EVOLUTION_ROADMAP.md` 定阶段；`README.md` 讲产品入口和真实能力；`ARCHITECTURE.md` 讲当前系统；`LLM_WIKI.md` 做代码导航；`todo.md` 管当前可执行任务；`progress.yaml` 是看板源。
 
 ## 4. 本地验证循环
 

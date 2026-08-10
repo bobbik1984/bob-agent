@@ -1300,7 +1300,7 @@ pub(crate) async fn call_clerk_oneshot(
     }
 
     let (provider, api_key, model_id, base_url) = read_llm_config_for_model(clerk_model);
-    if api_key.is_empty() || base_url.is_empty() {
+    if (api_key.is_empty() && provider != "offline") || base_url.is_empty() {
         return None;
     }
 

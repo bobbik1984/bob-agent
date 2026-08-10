@@ -4,7 +4,7 @@ use std::fs;
 use std::hash::{Hash, Hasher};
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use tauri::Emitter;
+use tauri::{Emitter, Manager};
 
 // ═══════════════════════════════════════════════════════════
 // T-1401: 工具调用循环熔断器 (Circuit Breaker)
@@ -313,33 +313,57 @@ fn is_answer_tool_allowed(name: &str) -> bool {
 pub fn get_tool_risk(name: &str) -> ToolRisk {
     match name {
         // R0: 纯读取/查询，无副作用
-        "read_file" | "list_dir" | "fetch_url" | "web_search"
-        | "system_time" | "get_weather" | "brain_search"
-        | "list_skills" | "read_skill" | "list_calendar_events"
-        | "list_cron_jobs" | "list_tickets" | "read_model_registry"
-        | "table_schema_viewer" | "table_global_search" | "table_column_filter"
-        => ToolRisk::R0,
+        "read_file"
+        | "list_dir"
+        | "fetch_url"
+        | "web_search"
+        | "system_time"
+        | "get_weather"
+        | "brain_search"
+        | "list_skills"
+        | "read_skill"
+        | "list_calendar_events"
+        | "list_cron_jobs"
+        | "list_tickets"
+        | "read_model_registry"
+        | "table_schema_viewer"
+        | "table_global_search"
+        | "table_column_filter" => ToolRisk::R0,
 
         // R1: 本地可撤销写入 (可覆写回原值或文件系统层有回收站保护)
-        "write_file" | "append_file" | "create_directory" | "move_file"
-        | "copy_file" | "rename_file" | "build_knowledge_base"
-        | "create_ticket" | "update_ticket" | "save_to_notes"
-        | "export_html" | "export_xlsx" | "export_docx" | "export_pptx"
-        | "update_model_registry" | "enable_browser"
-        => ToolRisk::R1,
+        "write_file"
+        | "append_file"
+        | "create_directory"
+        | "move_file"
+        | "copy_file"
+        | "rename_file"
+        | "build_knowledge_base"
+        | "create_ticket"
+        | "update_ticket"
+        | "save_to_notes"
+        | "export_html"
+        | "export_xlsx"
+        | "export_docx"
+        | "export_pptx"
+        | "update_model_registry"
+        | "enable_browser" => ToolRisk::R1,
 
         // R2: 外部影响 / 无可测试撤销的写操作
         // 日程、定时任务、票据删除均无 undo 机制，不应为 R1
-        "browse_page" | "share_file" | "test_model_endpoint"
-        | "add_calendar_event" | "delete_calendar_event"
-        | "add_cron_job" | "remove_cron_job" | "toggle_cron_job"
-        | "delete_ticket"
-        => ToolRisk::R2,
+        "browse_page"
+        | "share_file"
+        | "test_model_endpoint"
+        | "add_calendar_event"
+        | "delete_calendar_event"
+        | "add_cron_job"
+        | "remove_cron_job"
+        | "toggle_cron_job"
+        | "delete_ticket" => ToolRisk::R2,
 
         // R3: 破坏性/外部发送/外部安装
-        "delete_file" | "send_wechat_file" | "send_to_pc_agent"
-        | "install_skill_from_url"
-        => ToolRisk::R3,
+        "delete_file" | "send_wechat_file" | "send_to_pc_agent" | "install_skill_from_url" => {
+            ToolRisk::R3
+        }
 
         // MCP 和动态工具默认 R2（外部影响）；不得进入 Answer 白名单
         _ => ToolRisk::R2,
@@ -365,11 +389,19 @@ pub fn get_tool_risk_for_call(name: &str, args: &Value) -> ToolRisk {
     match name {
         // 覆盖或追加已有文件会破坏原内容；新建文件仍为低风险写入。
         "write_file" | "append_file" => {
-            if path_exists("path") { ToolRisk::R2 } else { ToolRisk::R1 }
+            if path_exists("path") {
+                ToolRisk::R2
+            } else {
+                ToolRisk::R1
+            }
         }
         // 复制到已有目标会覆盖目标内容。
         "copy_file" => {
-            if path_exists("destination") { ToolRisk::R2 } else { ToolRisk::R1 }
+            if path_exists("destination") {
+                ToolRisk::R2
+            } else {
+                ToolRisk::R1
+            }
         }
         // 移动会改变源路径；当前尚无自动补偿事务。
         "move_file" | "rename_file" => ToolRisk::R2,
@@ -408,30 +440,31 @@ pub async fn get_tool_schemas_with_mcp() -> Vec<Value> {
 pub async fn get_filtered_tool_schemas(intent: &str) -> Vec<Value> {
     match intent {
         // T-3012: Answer 使用显式只读白名单；动态/MCP 工具不会自动进入。
-        "answer" => {
-            get_tool_schemas_with_mcp().await
-                .into_iter()
-                .filter(|t| {
-                    let name = t.pointer("/function/name")
-                        .and_then(|v| v.as_str()).unwrap_or("");
-                    is_answer_tool_allowed(name)
-                })
-                .collect()
-        }
-        "quick" => {
-            get_tool_schemas_with_mcp().await
-                .into_iter()
-                .filter(|t| {
-                    let name = t.pointer("/function/name")
-                        .and_then(|v| v.as_str()).unwrap_or("");
-                    matches!(get_tool_risk(name), ToolRisk::R0 | ToolRisk::R1)
-                })
-                .collect()
-        }
+        "answer" => get_tool_schemas_with_mcp()
+            .await
+            .into_iter()
+            .filter(|t| {
+                let name = t
+                    .pointer("/function/name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                is_answer_tool_allowed(name)
+            })
+            .collect(),
+        "quick" => get_tool_schemas_with_mcp()
+            .await
+            .into_iter()
+            .filter(|t| {
+                let name = t
+                    .pointer("/function/name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                matches!(get_tool_risk(name), ToolRisk::R0 | ToolRisk::R1)
+            })
+            .collect(),
         _ => get_tool_schemas_with_mcp().await,
     }
 }
-
 
 fn get_builtin_tool_schemas() -> Vec<Value> {
     let mut tools = vec![
@@ -793,10 +826,10 @@ fn get_builtin_tool_schemas() -> Vec<Value> {
                         "barcode_data": { "type": "string", "description": "二维码或条形码包含的内容" },
                         "barcode_type": { "type": "string", "description": "码的类型，如 'QR_CODE'" },
                         "cover_image": { "type": "string", "description": "若为图片截屏提取，必须提供用户提示词中附带的[ImageLocalPath: xxx]的完整绝对路径，以便后台进行裁剪" },
-                        "cover_bbox": { 
-                            "type": "array", 
+                        "cover_bbox": {
+                            "type": "array",
                             "items": { "type": "integer" },
-                            "description": "如果图片中包含影片/演出的海报画面，请推断该画面在原图中的包围盒 [x, y, width, height]，以便裁剪留存" 
+                            "description": "如果图片中包含影片/演出的海报画面，请推断该画面在原图中的包围盒 [x, y, width, height]，以便裁剪留存"
                         }
                     },
                     "required": ["title", "category"]
@@ -1138,13 +1171,29 @@ fn get_builtin_tool_schemas() -> Vec<Value> {
     let os = std::env::consts::OS;
     if os == "android" || os == "ios" {
         let pc_exclusive = vec![
-            "enable_browser", "browse_page", "send_wechat_file", "share_file", 
-            "add_cron_job", "remove_cron_job", "toggle_cron_job", "list_cron_jobs",
-            "create_directory", "move_file", "copy_file", "delete_file", "rename_file",
-            "export_docx", "export_pptx", "install_skill_from_url"
+            "enable_browser",
+            "browse_page",
+            "send_wechat_file",
+            "share_file",
+            "add_cron_job",
+            "remove_cron_job",
+            "toggle_cron_job",
+            "list_cron_jobs",
+            "create_directory",
+            "move_file",
+            "copy_file",
+            "delete_file",
+            "rename_file",
+            "export_docx",
+            "export_pptx",
+            "install_skill_from_url",
         ];
         tools.retain(|t| {
-            if let Some(name) = t.get("function").and_then(|f| f.get("name")).and_then(|n| n.as_str()) {
+            if let Some(name) = t
+                .get("function")
+                .and_then(|f| f.get("name"))
+                .and_then(|n| n.as_str())
+            {
                 !pc_exclusive.contains(&name)
             } else {
                 true
@@ -1213,18 +1262,47 @@ async fn execute_tool_inner(
         }
         "table_global_search" => {
             let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
-            let sheet_name = args.get("sheet_name").and_then(|v| v.as_str()).unwrap_or("");
-            let search_terms = args.get("search_terms").and_then(|v| v.as_array()).map(|arr| arr.iter().filter_map(|v| v.as_str()).collect()).unwrap_or_default();
-            let columns_to_extract = args.get("columns_to_extract").and_then(|v| v.as_array()).map(|arr| arr.iter().filter_map(|v| v.as_str()).collect());
-            tool_table_global_search(path, sheet_name, search_terms, columns_to_extract, global_file_access)
+            let sheet_name = args
+                .get("sheet_name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let search_terms = args
+                .get("search_terms")
+                .and_then(|v| v.as_array())
+                .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect())
+                .unwrap_or_default();
+            let columns_to_extract = args
+                .get("columns_to_extract")
+                .and_then(|v| v.as_array())
+                .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect());
+            tool_table_global_search(
+                path,
+                sheet_name,
+                search_terms,
+                columns_to_extract,
+                global_file_access,
+            )
         }
         "table_column_filter" => {
             let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
-            let sheet_name = args.get("sheet_name").and_then(|v| v.as_str()).unwrap_or("");
+            let sheet_name = args
+                .get("sheet_name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
             let column = args.get("column").and_then(|v| v.as_str()).unwrap_or("");
             let value = args.get("value").and_then(|v| v.as_str()).unwrap_or("");
-            let columns_to_extract = args.get("columns_to_extract").and_then(|v| v.as_array()).map(|arr| arr.iter().filter_map(|v| v.as_str()).collect());
-            tool_table_column_filter(path, sheet_name, column, value, columns_to_extract, global_file_access)
+            let columns_to_extract = args
+                .get("columns_to_extract")
+                .and_then(|v| v.as_array())
+                .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect());
+            tool_table_column_filter(
+                path,
+                sheet_name,
+                column,
+                value,
+                columns_to_extract,
+                global_file_access,
+            )
         }
         "read_file" => {
             let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
@@ -1261,11 +1339,21 @@ async fn execute_tool_inner(
             })])
         }
         "send_to_pc_agent" => {
-            let instruction = args.get("instruction").and_then(|v| v.as_str()).unwrap_or("");
-            let require_sync = args.get("require_sync").and_then(|v| v.as_bool()).unwrap_or(false);
-            
-            log::info!("[Mobile Synergy] Invoking send_to_pc_agent. Instruction: {}, sync: {}", instruction, require_sync);
-            
+            let instruction = args
+                .get("instruction")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let require_sync = args
+                .get("require_sync")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+
+            log::info!(
+                "[Mobile Synergy] Invoking send_to_pc_agent. Instruction: {}, sync: {}",
+                instruction,
+                require_sync
+            );
+
             let mut pc_device_id = String::new();
             use tauri::Manager;
             if let Ok(conn) = app.state::<crate::db::DbState>().0.lock() {
@@ -1278,9 +1366,13 @@ async fn execute_tool_inner(
             }
 
             let config = crate::read_config();
-            let my_device_id = config.get("device_id").and_then(|v| v.as_str()).unwrap_or("mobile").to_string();
+            let my_device_id = config
+                .get("device_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("mobile")
+                .to_string();
             let request_id = format!("req_{}", crate::now_ms());
-            
+
             let rpc_payload = serde_json::json!({
                 "type": "proxy",
                 "from_device_id": my_device_id,
@@ -1294,24 +1386,47 @@ async fn execute_tool_inner(
             });
 
             if require_sync {
-                let encoded_id = my_device_id.replace('+', "%2B").replace('/', "%2F").replace('=', "%3D");
+                let encoded_id = my_device_id
+                    .replace('+', "%2B")
+                    .replace('/', "%2F")
+                    .replace('=', "%3D");
                 let ws_url = format!("wss://relay.bobbik.org/ws/device/{}", encoded_id);
-                
+
                 let result = tokio::time::timeout(std::time::Duration::from_secs(45), async {
-                    if let Ok((mut ws_stream, _)) = tokio_tungstenite::connect_async(&ws_url).await {
+                    if let Ok((mut ws_stream, _)) = tokio_tungstenite::connect_async(&ws_url).await
+                    {
                         use futures_util::{SinkExt, StreamExt};
-                        let reg_msg = serde_json::json!({"type": "register", "deviceId": my_device_id});
-                        let _ = ws_stream.send(tokio_tungstenite::tungstenite::Message::Text(reg_msg.to_string().into())).await;
-                        let _ = ws_stream.send(tokio_tungstenite::tungstenite::Message::Text(rpc_payload.to_string().into())).await;
-                        
+                        let reg_msg =
+                            serde_json::json!({"type": "register", "deviceId": my_device_id});
+                        let _ = ws_stream
+                            .send(tokio_tungstenite::tungstenite::Message::Text(
+                                reg_msg.to_string().into(),
+                            ))
+                            .await;
+                        let _ = ws_stream
+                            .send(tokio_tungstenite::tungstenite::Message::Text(
+                                rpc_payload.to_string().into(),
+                            ))
+                            .await;
+
                         while let Some(Ok(msg)) = ws_stream.next().await {
                             if let tokio_tungstenite::tungstenite::Message::Text(text) = msg {
                                 if let Ok(resp) = serde_json::from_str::<serde_json::Value>(&text) {
                                     if resp.get("type").and_then(|v| v.as_str()) == Some("proxy") {
                                         if let Some(payload) = resp.get("payload") {
-                                            if payload.get("action").and_then(|v| v.as_str()) == Some("rpc_response") {
-                                                if payload.get("request_id").and_then(|v| v.as_str()) == Some(request_id.as_str()) {
-                                                    return Ok(payload.get("result").and_then(|v| v.as_str()).unwrap_or("").to_string());
+                                            if payload.get("action").and_then(|v| v.as_str())
+                                                == Some("rpc_response")
+                                            {
+                                                if payload
+                                                    .get("request_id")
+                                                    .and_then(|v| v.as_str())
+                                                    == Some(request_id.as_str())
+                                                {
+                                                    return Ok(payload
+                                                        .get("result")
+                                                        .and_then(|v| v.as_str())
+                                                        .unwrap_or("")
+                                                        .to_string());
                                                 }
                                             }
                                         }
@@ -1321,33 +1436,55 @@ async fn execute_tool_inner(
                         }
                     }
                     Err("Failed to connect or stream closed".to_string())
-                }).await;
+                })
+                .await;
                 match result {
                     Ok(Ok(res)) => {
-                        // After success, tell the mobile frontend to run doSync() 
+                        // After success, tell the mobile frontend to run doSync()
                         // so it can pull whatever changes the PC just made.
-                        let _ = app.emit("sync:wakeup", serde_json::json!({ "reason": "rpc_success" }));
+                        let _ = app.emit(
+                            "sync:wakeup",
+                            serde_json::json!({ "reason": "rpc_success" }),
+                        );
                         json!({ "status": "success", "result": res })
-                    },
+                    }
                     Ok(Err(e)) => json!({ "error": format!("RPC 通信失败: {}", e) }),
-                    Err(_) => json!({ "error": "RPC 请求超时 (45秒未收到 PC 响应，可能因为 PC 处理过慢或已休眠掉线)" }),
+                    Err(_) => {
+                        json!({ "error": "RPC 请求超时 (45秒未收到 PC 响应，可能因为 PC 处理过慢或已休眠掉线)" })
+                    }
                 }
             } else {
                 let app_clone = app.clone();
                 let pc_id_clone = pc_device_id.clone();
-                let is_online = crate::sync_engine::trigger_wakeup_via_relay(app_clone, pc_id_clone).await.is_ok();
+                let is_online =
+                    crate::sync_engine::trigger_wakeup_via_relay(app_clone, pc_id_clone)
+                        .await
+                        .is_ok();
                 if !is_online {
                     return json!({ "error": "PC 处于离线状态或未响应唤醒请求，无法异步投递任务" });
                 }
 
                 tauri::async_runtime::spawn(async move {
-                    let encoded_id = my_device_id.replace('+', "%2B").replace('/', "%2F").replace('=', "%3D");
+                    let encoded_id = my_device_id
+                        .replace('+', "%2B")
+                        .replace('/', "%2F")
+                        .replace('=', "%3D");
                     let ws_url = format!("wss://relay.bobbik.org/ws/device/{}", encoded_id);
-                    if let Ok((mut ws_stream, _)) = tokio_tungstenite::connect_async(&ws_url).await {
+                    if let Ok((mut ws_stream, _)) = tokio_tungstenite::connect_async(&ws_url).await
+                    {
                         use futures_util::SinkExt;
-                        let reg_msg = serde_json::json!({"type": "register", "deviceId": my_device_id});
-                        let _ = ws_stream.send(tokio_tungstenite::tungstenite::Message::Text(reg_msg.to_string().into())).await;
-                        let _ = ws_stream.send(tokio_tungstenite::tungstenite::Message::Text(rpc_payload.to_string().into())).await;
+                        let reg_msg =
+                            serde_json::json!({"type": "register", "deviceId": my_device_id});
+                        let _ = ws_stream
+                            .send(tokio_tungstenite::tungstenite::Message::Text(
+                                reg_msg.to_string().into(),
+                            ))
+                            .await;
+                        let _ = ws_stream
+                            .send(tokio_tungstenite::tungstenite::Message::Text(
+                                rpc_payload.to_string().into(),
+                            ))
+                            .await;
                     }
                 });
                 json!({
@@ -1415,7 +1552,38 @@ async fn execute_tool_inner(
         "write_file" => {
             let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
             let content = args.get("content").and_then(|v| v.as_str()).unwrap_or("");
-            tool_write_file(path, content, global_file_access).await
+            let result = tool_write_file(path, content, global_file_access).await;
+            let normalized = path.replace('\\', "/").to_lowercase();
+            if result.get("ok").is_some()
+                && (normalized.contains("wiki/raw/article/")
+                    || normalized.contains("wiki/sources/"))
+            {
+                let actual_path = result
+                    .get("path")
+                    .and_then(Value::as_str)
+                    .unwrap_or(path)
+                    .to_string();
+                let input = crate::capture::CaptureInput {
+                    entry_point: "chat_article_save".to_string(),
+                    content: Some(content.to_string()),
+                    source_url: crate::capture::extract_source_url(content),
+                    file_path: Some(actual_path.clone()),
+                    explicit_intent: Some("knowledge".to_string()),
+                    language: None,
+                    privacy_scope: None,
+                    sync_scope: None,
+                    source_device: Some("desktop".to_string()),
+                    idempotency_key: None,
+                };
+                if let Ok(conn) = app.state::<crate::db::DbState>().0.lock() {
+                    if let Err(error) =
+                        crate::capture::record_committed_capture(&conn, input, vec![actual_path])
+                    {
+                        log::warn!("Article Capture journal write failed: {}", error);
+                    }
+                }
+            }
+            result
         }
         "brain_search" => {
             let query = args.get("query").and_then(|v| v.as_str()).unwrap_or("");
@@ -1785,18 +1953,62 @@ async fn execute_tool_inner(
                         // Save content (notebook_save_note needs DbState, use file-based approach)
                         let notes_dir = super::notebook::get_notes_dir();
                         let full_path = notes_dir.join(path);
-                        if let Ok(existing) = fs::read_to_string(&full_path) {
-                            // Append body after frontmatter
-                            if existing.starts_with("---") {
-                                if let Some(end_idx) = existing[3..].find("---") {
-                                    let fm = &existing[..3 + end_idx + 3];
-                                    let new_content = format!("{}\n\n{}", fm, body);
-                                    let _ = fs::write(&full_path, new_content);
-                                }
+                        let existing = match fs::read_to_string(&full_path) {
+                            Ok(existing) => existing,
+                            Err(error) => {
+                                return json!({ "error": format!("读取新建笔记失败: {}", error) });
                             }
+                        };
+                        let end_idx = match existing
+                            .strip_prefix("---")
+                            .and_then(|rest| rest.find("---"))
+                        {
+                            Some(index) => index,
+                            None => return json!({ "error": "新建笔记缺少有效 frontmatter" }),
+                        };
+                        let fm_end = 3 + end_idx + 3;
+                        let new_content = format!("{}\n\n{}", &existing[..fm_end], body);
+                        if let Err(error) = fs::write(&full_path, new_content) {
+                            return json!({ "error": format!("写入笔记失败: {}", error) });
                         }
 
-                        json!({ "ok": format!("笔记「{}」已保存到 sources/", title), "path": path })
+                        let input = crate::capture::CaptureInput {
+                            entry_point: "save_to_notes".to_string(),
+                            content: Some(content.to_string()),
+                            source_url: (!source_url.is_empty()).then(|| source_url.to_string()),
+                            file_path: Some(full_path.to_string_lossy().to_string()),
+                            explicit_intent: Some("knowledge".to_string()),
+                            language: None,
+                            privacy_scope: None,
+                            sync_scope: None,
+                            source_device: Some("desktop".to_string()),
+                            idempotency_key: None,
+                        };
+                        let capture_id = match app.state::<crate::db::DbState>().0.lock() {
+                            Ok(conn) => match crate::capture::record_committed_capture(
+                                &conn,
+                                input,
+                                vec![path.to_string()],
+                            ) {
+                                Ok((capture, _)) => capture.capture_id,
+                                Err(error) => {
+                                    return json!({
+                                        "error": format!("笔记已写入，但 Capture Journal 记录失败: {}", error),
+                                        "path": path,
+                                        "partial_saved": true
+                                    });
+                                }
+                            },
+                            Err(error) => {
+                                return json!({
+                                    "error": format!("笔记已写入，但 Capture Journal 被占用: {}", error),
+                                    "path": path,
+                                    "partial_saved": true
+                                });
+                            }
+                        };
+
+                        json!({ "ok": format!("笔记「{}」已保存到 sources/", title), "path": path, "capture_id": capture_id })
                     } else {
                         json!({ "error": "创建笔记失败" })
                     }
@@ -1871,38 +2083,38 @@ fn tool_list_skills() -> Value {
         .map(|s| Path::new(s).to_path_buf());
 
     if let Some(dir) = bundled_dir {
-            if dir.exists() && dir.is_dir() {
-                if let Ok(entries) = fs::read_dir(dir) {
-                    for entry in entries.flatten() {
-                        let p = entry.path();
-                        if !p.is_dir() {
-                            continue;
-                        }
-                        let md = p.join("SKILL.md");
-                        if !md.exists() {
-                            continue;
-                        }
-                        let folder_name = p
-                            .file_name()
-                            .and_then(|n| n.to_str())
-                            .unwrap_or("unknown")
-                            .to_string();
-                        let (name, desc) = match fs::read_to_string(&md) {
-                            Ok(content) => parse_skill_frontmatter(&content, &folder_name),
-                            Err(_) => (folder_name.clone(), String::new()),
-                        };
-                        skills_map.insert(
-                            folder_name.clone(),
-                            json!({
-                                "id": folder_name,
-                                "name": name,
-                                "description": desc
-                            }),
-                        );
+        if dir.exists() && dir.is_dir() {
+            if let Ok(entries) = fs::read_dir(dir) {
+                for entry in entries.flatten() {
+                    let p = entry.path();
+                    if !p.is_dir() {
+                        continue;
                     }
+                    let md = p.join("SKILL.md");
+                    if !md.exists() {
+                        continue;
+                    }
+                    let folder_name = p
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("unknown")
+                        .to_string();
+                    let (name, desc) = match fs::read_to_string(&md) {
+                        Ok(content) => parse_skill_frontmatter(&content, &folder_name),
+                        Err(_) => (folder_name.clone(), String::new()),
+                    };
+                    skills_map.insert(
+                        folder_name.clone(),
+                        json!({
+                            "id": folder_name,
+                            "name": name,
+                            "description": desc
+                        }),
+                    );
                 }
             }
         }
+    }
 
     // 2. 加载外部目录（外部覆盖内置同名技能）
     if let Some(dir) = external_dir {
@@ -1961,7 +2173,10 @@ fn tool_read_skill(skill_name: &str) -> Value {
 
     let dirs_to_try = vec![
         crate::get_external_skills_dir(&config),
-        config.get("bundledSkillsDir").and_then(|v| v.as_str()).map(|s| Path::new(s).to_path_buf()),
+        config
+            .get("bundledSkillsDir")
+            .and_then(|v| v.as_str())
+            .map(|s| Path::new(s).to_path_buf()),
     ];
 
     for dir_opt in dirs_to_try {
@@ -1975,7 +2190,9 @@ fn tool_read_skill(skill_name: &str) -> Value {
                     if refs_dir.exists() {
                         if let Ok(entries) = fs::read_dir(&refs_dir) {
                             for entry in entries.flatten() {
-                                if let Some(name) = entry.path().file_name().and_then(|n| n.to_str()) {
+                                if let Some(name) =
+                                    entry.path().file_name().and_then(|n| n.to_str())
+                                {
                                     ref_files.push(name.to_string());
                                 }
                             }
@@ -2977,7 +3194,6 @@ async fn tool_browse_page(app: &tauri::AppHandle, args: &Value) -> Value {
     }
 }
 
-
 fn tool_create_ticket(app: &tauri::AppHandle, args: &serde_json::Value) -> serde_json::Value {
     use tauri::Manager;
     let db = app.state::<crate::db::DbState>();
@@ -2988,14 +3204,29 @@ fn tool_create_ticket(app: &tauri::AppHandle, args: &serde_json::Value) -> serde
 
     let ticket_id = format!("ticket-{}", crate::now_ms());
     let title = args.get("title").and_then(|v| v.as_str()).unwrap_or("");
-    let category = args.get("category").and_then(|v| v.as_str()).unwrap_or("generic");
-    let start_time = args.get("start_time").and_then(|v| v.as_str()).unwrap_or("");
+    let category = args
+        .get("category")
+        .and_then(|v| v.as_str())
+        .unwrap_or("generic");
+    let start_time = args
+        .get("start_time")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
     let end_time = args.get("end_time").and_then(|v| v.as_str()).unwrap_or("");
     let venue = args.get("venue").and_then(|v| v.as_str()).unwrap_or("");
     let seat_info = args.get("seat_info").and_then(|v| v.as_str()).unwrap_or("");
-    let barcode_data = args.get("barcode_data").and_then(|v| v.as_str()).unwrap_or("");
-    let barcode_type = args.get("barcode_type").and_then(|v| v.as_str()).unwrap_or("");
-    let flight_info = args.get("flight_info").cloned().unwrap_or(serde_json::json!({}));
+    let barcode_data = args
+        .get("barcode_data")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let barcode_type = args
+        .get("barcode_type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let flight_info = args
+        .get("flight_info")
+        .cloned()
+        .unwrap_or(serde_json::json!({}));
 
     let mut metadata = serde_json::json!({
         "category": category,
@@ -3008,9 +3239,12 @@ fn tool_create_ticket(app: &tauri::AppHandle, args: &serde_json::Value) -> serde
         "flight_info": flight_info,
         "status": "upcoming"
     });
-    
+
     // T-1802: Poster cropping fallback
-    let cover_image_path = args.get("cover_image").and_then(|v| v.as_str()).unwrap_or("");
+    let cover_image_path = args
+        .get("cover_image")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
     if !cover_image_path.is_empty() {
         if let Some(bbox) = args.get("cover_bbox").and_then(|v| v.as_array()) {
             if bbox.len() >= 4 {
@@ -3018,7 +3252,7 @@ fn tool_create_ticket(app: &tauri::AppHandle, args: &serde_json::Value) -> serde
                 let y = bbox[1].as_f64().unwrap_or(0.0);
                 let w = bbox[2].as_f64().unwrap_or(0.0);
                 let h = bbox[3].as_f64().unwrap_or(0.0);
-                
+
                 if w > 0.0 && h > 0.0 {
                     if let Ok(mut img) = image::open(cover_image_path) {
                         use image::GenericImageView;
@@ -3027,27 +3261,32 @@ fn tool_create_ticket(app: &tauri::AppHandle, args: &serde_json::Value) -> serde
                         let real_y = ((y / 1000.0) * img_h as f64) as u32;
                         let real_w = ((w / 1000.0) * img_w as f64) as u32;
                         let real_h = ((h / 1000.0) * img_h as f64) as u32;
-                        
+
                         let real_x = real_x.min(img_w);
                         let real_y = real_y.min(img_h);
                         let real_w = real_w.min(img_w - real_x);
                         let real_h = real_h.min(img_h - real_y);
 
                         if real_w > 0 && real_h > 0 {
-                            let cropped = image::imageops::crop(&mut img, real_x, real_y, real_w, real_h).to_image();
+                            let cropped =
+                                image::imageops::crop(&mut img, real_x, real_y, real_w, real_h)
+                                    .to_image();
                             let out_name = format!("{}-cover.jpg", ticket_id);
-                            
+
                             // AppData storage
                             let app_dir = std::env::var("APPDATA")
                                 .map(|v| std::path::PathBuf::from(v).join("bob.agent"))
                                 .unwrap_or_else(|_| std::env::temp_dir().join("bob.agent"));
-                            
+
                             let cover_dir = app_dir.join("covers");
                             let _ = std::fs::create_dir_all(&cover_dir);
                             let out_path = cover_dir.join(&out_name);
                             if cropped.save(&out_path).is_ok() {
                                 if let Some(m) = metadata.as_object_mut() {
-                                    m.insert("cover_image".to_string(), serde_json::json!(out_name));
+                                    m.insert(
+                                        "cover_image".to_string(),
+                                        serde_json::json!(out_name),
+                                    );
                                 }
                             }
                         }
@@ -3059,10 +3298,14 @@ fn tool_create_ticket(app: &tauri::AppHandle, args: &serde_json::Value) -> serde
 
     let metadata_str = metadata.to_string();
     let now = crate::now_ms();
-    
+
     let event_id = format!("evt-{}", now);
-    let date = if start_time.len() >= 10 { &start_time[0..10] } else { "" };
-    
+    let date = if start_time.len() >= 10 {
+        &start_time[0..10]
+    } else {
+        ""
+    };
+
     let tx = match conn.transaction() {
         Ok(t) => t,
         Err(e) => return serde_json::json!({ "error": format!("Transaction start failed: {}", e) }),
@@ -3103,7 +3346,7 @@ fn tool_create_ticket(app: &tauri::AppHandle, args: &serde_json::Value) -> serde
     if let Err(e) = tx.commit() {
         return serde_json::json!({ "error": format!("Transaction commit failed: {}", e) });
     }
-    
+
     // 通知前端日历更新
     let _ = app.emit("calendar-updated", ());
     // 通知图谱更新
@@ -3124,10 +3367,11 @@ fn tool_list_tickets(app: &tauri::AppHandle) -> serde_json::Value {
         Ok(c) => c,
         Err(_) => return serde_json::json!({ "error": "Database lock failed" }),
     };
-    let mut stmt = match conn.prepare("SELECT id, label, metadata FROM kg_nodes WHERE node_type = 'ticket'") {
-        Ok(s) => s,
-        Err(e) => return serde_json::json!({ "error": format!("Query prepare failed: {}", e) }),
-    };
+    let mut stmt =
+        match conn.prepare("SELECT id, label, metadata FROM kg_nodes WHERE node_type = 'ticket'") {
+            Ok(s) => s,
+            Err(e) => return serde_json::json!({ "error": format!("Query prepare failed: {}", e) }),
+        };
     let mut results = Vec::new();
     let rows = stmt.query_map([], |row| {
         let id: String = row.get(0)?;
@@ -3137,7 +3381,8 @@ fn tool_list_tickets(app: &tauri::AppHandle) -> serde_json::Value {
     });
     if let Ok(mapped_rows) = rows {
         for row in mapped_rows.flatten() {
-            let meta: serde_json::Value = serde_json::from_str(&row.2).unwrap_or(serde_json::json!({}));
+            let meta: serde_json::Value =
+                serde_json::from_str(&row.2).unwrap_or(serde_json::json!({}));
             results.push(serde_json::json!({
                 "id": row.0,
                 "title": row.1,
@@ -3151,7 +3396,9 @@ fn tool_list_tickets(app: &tauri::AppHandle) -> serde_json::Value {
 fn tool_delete_ticket(app: &tauri::AppHandle, args: &serde_json::Value) -> serde_json::Value {
     use tauri::{Emitter, Manager};
     let id = args.get("id").and_then(|v| v.as_str()).unwrap_or("");
-    if id.is_empty() { return serde_json::json!({ "error": "Missing ticket id" }); }
+    if id.is_empty() {
+        return serde_json::json!({ "error": "Missing ticket id" });
+    }
     let db = app.state::<crate::db::DbState>();
     let mut conn = match db.0.lock() {
         Ok(c) => c,
@@ -3161,9 +3408,18 @@ fn tool_delete_ticket(app: &tauri::AppHandle, args: &serde_json::Value) -> serde
         Ok(t) => t,
         Err(e) => return serde_json::json!({ "error": format!("Tx fail: {}", e) }),
     };
-    let _ = tx.execute("DELETE FROM kg_nodes WHERE id = ?1 AND node_type = 'ticket'", rusqlite::params![id]);
-    let _ = tx.execute("DELETE FROM events WHERE linked_ticket_id = ?1", rusqlite::params![id]);
-    let _ = tx.execute("DELETE FROM kg_edges WHERE source_id = ?1 OR target_id = ?1", rusqlite::params![id]);
+    let _ = tx.execute(
+        "DELETE FROM kg_nodes WHERE id = ?1 AND node_type = 'ticket'",
+        rusqlite::params![id],
+    );
+    let _ = tx.execute(
+        "DELETE FROM events WHERE linked_ticket_id = ?1",
+        rusqlite::params![id],
+    );
+    let _ = tx.execute(
+        "DELETE FROM kg_edges WHERE source_id = ?1 OR target_id = ?1",
+        rusqlite::params![id],
+    );
     let _ = tx.commit();
     let _ = app.emit("kg-updated", ());
     let _ = app.emit("calendar-updated", ());
@@ -3173,7 +3429,9 @@ fn tool_delete_ticket(app: &tauri::AppHandle, args: &serde_json::Value) -> serde
 fn tool_update_ticket(app: &tauri::AppHandle, args: &serde_json::Value) -> serde_json::Value {
     use tauri::{Emitter, Manager};
     let id = args.get("id").and_then(|v| v.as_str()).unwrap_or("");
-    if id.is_empty() { return serde_json::json!({ "error": "Missing ticket id" }); }
+    if id.is_empty() {
+        return serde_json::json!({ "error": "Missing ticket id" });
+    }
     let db = app.state::<crate::db::DbState>();
     let mut conn = match db.0.lock() {
         Ok(c) => c,
@@ -3187,10 +3445,11 @@ fn tool_update_ticket(app: &tauri::AppHandle, args: &serde_json::Value) -> serde
             let l: String = row.get(0)?;
             let m: String = row.get(1)?;
             Ok((l, m))
-        }
+        },
     );
     if let Ok((old_title, old_meta)) = existing {
-        let mut meta: serde_json::Value = serde_json::from_str(&old_meta).unwrap_or(serde_json::json!({}));
+        let mut meta: serde_json::Value =
+            serde_json::from_str(&old_meta).unwrap_or(serde_json::json!({}));
         let new_title = title.unwrap_or(&old_title).to_string();
         if let Some(cat) = args.get("category").and_then(|v| v.as_str()) {
             meta["category"] = serde_json::json!(cat);
@@ -3204,11 +3463,11 @@ fn tool_update_ticket(app: &tauri::AppHandle, args: &serde_json::Value) -> serde
         };
         let _ = tx.execute(
             "UPDATE kg_nodes SET label = ?1, metadata = ?2, updated_at = ?3 WHERE id = ?4",
-            rusqlite::params![new_title, meta.to_string(), crate::now_ms(), id]
+            rusqlite::params![new_title, meta.to_string(), crate::now_ms(), id],
         );
         let _ = tx.execute(
             "UPDATE events SET title = ?1, updated_at = ?2 WHERE linked_ticket_id = ?3",
-            rusqlite::params![new_title, crate::now_ms(), id]
+            rusqlite::params![new_title, crate::now_ms(), id],
         );
         let _ = tx.commit();
         let _ = app.emit("kg-updated", ());
@@ -3219,17 +3478,21 @@ fn tool_update_ticket(app: &tauri::AppHandle, args: &serde_json::Value) -> serde
     }
 }
 
-
 #[tauri::command]
-pub fn system_create_ticket(app: tauri::AppHandle, args: serde_json::Value) -> Result<serde_json::Value, String> {
+pub fn system_create_ticket(
+    app: tauri::AppHandle,
+    args: serde_json::Value,
+) -> Result<serde_json::Value, String> {
     let result = tool_create_ticket(&app, &args);
     if result.get("error").is_some() {
-        Err(result["error"].as_str().unwrap_or("Unknown error").to_string())
+        Err(result["error"]
+            .as_str()
+            .unwrap_or("Unknown error")
+            .to_string())
     } else {
         Ok(result)
     }
 }
-
 
 #[tauri::command]
 pub fn system_save_temp_image(base64_data: String) -> Result<String, String> {
@@ -3254,7 +3517,7 @@ pub fn system_save_temp_image(base64_data: String) -> Result<String, String> {
     let app_dir = std::env::var("APPDATA")
         .map(|v| PathBuf::from(v).join("bob.agent"))
         .unwrap_or_else(|_| std::env::temp_dir().join("bob.agent"));
-    
+
     let temp_dir = app_dir.join("temp_images");
     if !temp_dir.exists() {
         std::fs::create_dir_all(&temp_dir).map_err(|e| e.to_string())?;
@@ -3291,7 +3554,10 @@ fn resolve_table_read_path(path: &str, global_file_access: bool) -> Result<PathB
     if path_buf.starts_with(&data_dir) || path_buf.starts_with(&wiki_dir) {
         Ok(path_buf)
     } else {
-        Err("无权访问该路径：非全局模式下，只能查询知识库(wikiDir)或数据(dataDir)内的表格文件。".into())
+        Err(
+            "无权访问该路径：非全局模式下，只能查询知识库(wikiDir)或数据(dataDir)内的表格文件。"
+                .into(),
+        )
     }
 }
 
@@ -3319,7 +3585,13 @@ fn tool_table_schema_viewer(path: &str, global_file_access: bool) -> Value {
     json!({ "schema": schema })
 }
 
-fn tool_table_global_search(path: &str, sheet_name: &str, search_terms: Vec<&str>, columns_to_extract: Option<Vec<&str>>, global_file_access: bool) -> Value {
+fn tool_table_global_search(
+    path: &str,
+    sheet_name: &str,
+    search_terms: Vec<&str>,
+    columns_to_extract: Option<Vec<&str>>,
+    global_file_access: bool,
+) -> Value {
     let target_path = match resolve_table_read_path(path, global_file_access) {
         Ok(p) => p,
         Err(e) => return json!({ "error": e }),
@@ -3332,10 +3604,10 @@ fn tool_table_global_search(path: &str, sheet_name: &str, search_terms: Vec<&str
         Ok(r) => r,
         Err(_) => return json!({ "error": format!("工作表 {} 不存在", sheet_name) }),
     };
-    
+
     let mut results = Vec::new();
     let mut header: Vec<String> = Vec::new();
-    
+
     for (i, row) in range.rows().enumerate() {
         if i == 0 {
             header = row.iter().map(|c| c.to_string()).collect();
@@ -3361,7 +3633,7 @@ fn tool_table_global_search(path: &str, sheet_name: &str, search_terms: Vec<&str
                 row_map.insert(col_name, json!(cell_val));
             }
             results.push(row_map);
-            if results.len() >= 200 { 
+            if results.len() >= 200 {
                 break;
             }
         }
@@ -3369,7 +3641,14 @@ fn tool_table_global_search(path: &str, sheet_name: &str, search_terms: Vec<&str
     json!({ "results": results, "truncated": results.len() >= 200 })
 }
 
-fn tool_table_column_filter(path: &str, sheet_name: &str, column: &str, value: &str, columns_to_extract: Option<Vec<&str>>, global_file_access: bool) -> Value {
+fn tool_table_column_filter(
+    path: &str,
+    sheet_name: &str,
+    column: &str,
+    value: &str,
+    columns_to_extract: Option<Vec<&str>>,
+    global_file_access: bool,
+) -> Value {
     let target_path = match resolve_table_read_path(path, global_file_access) {
         Ok(p) => p,
         Err(e) => return json!({ "error": e }),
@@ -3382,11 +3661,11 @@ fn tool_table_column_filter(path: &str, sheet_name: &str, column: &str, value: &
         Ok(r) => r,
         Err(_) => return json!({ "error": format!("工作表 {} 不存在", sheet_name) }),
     };
-    
+
     let mut results = Vec::new();
     let mut header: Vec<String> = Vec::new();
     let mut target_col_idx = None;
-    
+
     for (i, row) in range.rows().enumerate() {
         if i == 0 {
             header = row.iter().map(|c| c.to_string()).collect();
@@ -3434,16 +3713,29 @@ mod tests {
     #[test]
     fn snapshot_r0_tools() {
         let r0_tools = vec![
-            "read_file", "list_dir", "fetch_url", "web_search",
-            "system_time", "get_weather", "brain_search",
-            "list_skills", "read_skill", "list_calendar_events",
-            "list_cron_jobs", "list_tickets", "read_model_registry",
-            "table_schema_viewer", "table_global_search", "table_column_filter",
+            "read_file",
+            "list_dir",
+            "fetch_url",
+            "web_search",
+            "system_time",
+            "get_weather",
+            "brain_search",
+            "list_skills",
+            "read_skill",
+            "list_calendar_events",
+            "list_cron_jobs",
+            "list_tickets",
+            "read_model_registry",
+            "table_schema_viewer",
+            "table_global_search",
+            "table_column_filter",
         ];
         for tool in r0_tools {
             assert_eq!(
-                get_tool_risk(tool), ToolRisk::R0,
-                "Tool '{}' should be R0 (read-only)", tool
+                get_tool_risk(tool),
+                ToolRisk::R0,
+                "Tool '{}' should be R0 (read-only)",
+                tool
             );
         }
     }
@@ -3451,16 +3743,29 @@ mod tests {
     #[test]
     fn snapshot_r1_tools() {
         let r1_tools = vec![
-            "write_file", "append_file", "create_directory", "move_file",
-            "copy_file", "rename_file", "build_knowledge_base",
-            "create_ticket", "update_ticket", "save_to_notes",
-            "export_html", "export_xlsx", "export_docx", "export_pptx",
-            "update_model_registry", "enable_browser",
+            "write_file",
+            "append_file",
+            "create_directory",
+            "move_file",
+            "copy_file",
+            "rename_file",
+            "build_knowledge_base",
+            "create_ticket",
+            "update_ticket",
+            "save_to_notes",
+            "export_html",
+            "export_xlsx",
+            "export_docx",
+            "export_pptx",
+            "update_model_registry",
+            "enable_browser",
         ];
         for tool in r1_tools {
             assert_eq!(
-                get_tool_risk(tool), ToolRisk::R1,
-                "Tool '{}' should be R1 (reversible write)", tool
+                get_tool_risk(tool),
+                ToolRisk::R1,
+                "Tool '{}' should be R1 (reversible write)",
+                tool
             );
         }
     }
@@ -3468,15 +3773,22 @@ mod tests {
     #[test]
     fn snapshot_r2_tools() {
         let r2_tools = vec![
-            "browse_page", "share_file", "test_model_endpoint",
-            "add_calendar_event", "delete_calendar_event",
-            "add_cron_job", "remove_cron_job", "toggle_cron_job",
+            "browse_page",
+            "share_file",
+            "test_model_endpoint",
+            "add_calendar_event",
+            "delete_calendar_event",
+            "add_cron_job",
+            "remove_cron_job",
+            "toggle_cron_job",
             "delete_ticket",
         ];
         for tool in r2_tools {
             assert_eq!(
-                get_tool_risk(tool), ToolRisk::R2,
-                "Tool '{}' should be R2 (external impact / no undo)", tool
+                get_tool_risk(tool),
+                ToolRisk::R2,
+                "Tool '{}' should be R2 (external impact / no undo)",
+                tool
             );
         }
     }
@@ -3484,13 +3796,17 @@ mod tests {
     #[test]
     fn snapshot_r3_tools() {
         let r3_tools = vec![
-            "delete_file", "send_wechat_file", "send_to_pc_agent",
+            "delete_file",
+            "send_wechat_file",
+            "send_to_pc_agent",
             "install_skill_from_url",
         ];
         for tool in r3_tools {
             assert_eq!(
-                get_tool_risk(tool), ToolRisk::R3,
-                "Tool '{}' should be R3 (destructive / external send / external install)", tool
+                get_tool_risk(tool),
+                ToolRisk::R3,
+                "Tool '{}' should be R3 (destructive / external send / external install)",
+                tool
             );
         }
     }
@@ -3508,12 +3824,19 @@ mod tests {
     /// R3 工具不能被降级为 R1 或 R0
     #[test]
     fn r3_tools_never_below_r2() {
-        let r3_critical = vec!["delete_file", "send_wechat_file", "send_to_pc_agent", "install_skill_from_url"];
+        let r3_critical = vec![
+            "delete_file",
+            "send_wechat_file",
+            "send_to_pc_agent",
+            "install_skill_from_url",
+        ];
         for tool in r3_critical {
             let risk = get_tool_risk(tool);
             assert!(
                 risk == ToolRisk::R3,
-                "CRITICAL: Tool '{}' has risk {:?}, must be R3", tool, risk
+                "CRITICAL: Tool '{}' has risk {:?}, must be R3",
+                tool,
+                risk
             );
         }
     }
@@ -3522,15 +3845,20 @@ mod tests {
     #[test]
     fn no_undo_tools_at_least_r2() {
         let no_undo = vec![
-            "add_calendar_event", "delete_calendar_event",
-            "add_cron_job", "remove_cron_job", "toggle_cron_job",
+            "add_calendar_event",
+            "delete_calendar_event",
+            "add_cron_job",
+            "remove_cron_job",
+            "toggle_cron_job",
             "delete_ticket",
         ];
         for tool in no_undo {
             let risk = get_tool_risk(tool);
             assert!(
                 risk == ToolRisk::R2 || risk == ToolRisk::R3,
-                "Tool '{}' has no proven undo, must be >= R2, got {:?}", tool, risk
+                "Tool '{}' has no proven undo, must be >= R2, got {:?}",
+                tool,
+                risk
             );
         }
     }
@@ -3540,8 +3868,11 @@ mod tests {
     fn answer_whitelist_no_write_tools() {
         for tool in ANSWER_TOOL_ALLOWLIST {
             assert_eq!(
-                get_tool_risk(tool), ToolRisk::R0,
-                "Answer whitelist tool '{}' must be R0, but got {:?}", tool, get_tool_risk(tool)
+                get_tool_risk(tool),
+                ToolRisk::R0,
+                "Answer whitelist tool '{}' must be R0, but got {:?}",
+                tool,
+                get_tool_risk(tool)
             );
             assert!(is_answer_tool_allowed(tool));
         }
@@ -3567,7 +3898,22 @@ mod tests {
 
     #[test]
     fn move_and_rename_require_confirmation_without_compensation() {
-        assert_eq!(get_tool_risk_for_call("move_file", &json!({})), ToolRisk::R2);
-        assert_eq!(get_tool_risk_for_call("rename_file", &json!({})), ToolRisk::R2);
+        assert_eq!(
+            get_tool_risk_for_call("move_file", &json!({})),
+            ToolRisk::R2
+        );
+        assert_eq!(
+            get_tool_risk_for_call("rename_file", &json!({})),
+            ToolRisk::R2
+        );
+    }
+
+    #[test]
+    fn extracts_article_source_url_from_markdown() {
+        let content = "> 来源: [原文](https://example.com/article)\n\n摘要";
+        assert_eq!(
+            crate::capture::extract_source_url(content).as_deref(),
+            Some("https://example.com/article")
+        );
     }
 }

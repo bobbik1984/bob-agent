@@ -1,6 +1,6 @@
 {
   "name": "bob-agent",
-  "version": "0.7.8",
+  "version": "0.8.0",
   "description": "AI 桌面私人秘书 — 智能对话 + 图片识别 + 日程管理 + 文件分析",
   "scripts": {
     "dev": "vite",
@@ -8,7 +8,8 @@
     "tauri": "tauri",
     "dev:tauri": "tauri dev",
     "build:tauri": "tauri build",
-    "test": "vitest run",
+    "test": "vitest run --exclude relay/**",
+    "test:relay": "npm --prefix relay test",
     "test:watch": "vitest",
     "lint": "eslint src/ src-tauri/"
   },
