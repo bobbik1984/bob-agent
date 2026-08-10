@@ -1,6 +1,6 @@
 # Bob 演进路线图
 
-> 状态：v0.8.1 开发线已完成 Phase 0–3，进入 Phase 4
+> 状态：v0.8.1 开发线已完成 Phase 0–4，进入 Phase 5
 > 产品北极星：`docs/PRODUCT_VISION.md`
 > 完整设计与阶段门：`docs/superpowers/plans/2026-08-10-work-continuity-evolution-plan.md`
 
@@ -8,9 +8,8 @@
 
 `v0.8.0` 已封存可靠 Capture、知识对象契约、离线分类、Todo/Event 确定性提交和 Note/Source Markdown 提交基线。它是不可修改的历史版本。
 
-当前已完成 Persistent Work Core、现有入口接入和 Decision/Change Review：版本化 Work Object、SQLite Repository、Work Event Journal、Project Aggregate、Markdown 快照、最小 Work UI、Project Link Candidate、完整 Decision 契约、不可变文件修订与影响确认。当前仍缺少：
+当前已完成 Persistent Work Core、现有入口接入、Decision/Change Review 和 Complexity Router：版本化 Work Object、Work Event Journal、Project Aggregate、Markdown 快照、最小 Work UI、完整 Decision 契约、不可变文件修订、影响确认，以及 Direct/Deep/Advanced 规则优先路由。当前仍缺少：
 
-- Direct / Deep / Advanced 可靠路由；
 - 可恢复 Goal Runtime 与 Dynamic Task Graph；
 - 可替换 Agent Runtime 和结果驱动 Dream。
 
@@ -32,7 +31,7 @@ flowchart LR
 
 不得为了展示多 Agent 或订阅调度而跨越前置质量门。API-only 环境必须始终能够运行完整核心框架。
 
-## 已完成实施批次：Phase 0–3
+## 已完成实施批次：Phase 0–4
 
 ### Phase 0：Re-anchor
 
@@ -72,13 +71,22 @@ flowchart LR
 - [x] 用户可接受、拒绝或延后；只有接受后才建立影响、冲突或替代关系；
 - [x] 所有 Review 变化进入 Work Event，Markdown 快照展示完整 Decision 和待确认 Change。
 
+### Phase 4：Complexity Router
+
+- [x] 独立 Rust 契约返回 Direct、Deep、Advanced、task kind、置信度、风险、持续性和原因代码；
+- [x] 确定性信号优先，只有真正模糊的语义才限时调用 Clerk；失败或断网保守只读降级；
+- [x] 复杂只读分析只获得 R0 工具，路由和用户覆盖都不能绕过 R2/R3 Policy Engine；
+- [x] Auto Advanced 不进入旧 Goal Loop，只做有边界的启动且禁止虚假完成；
+- [x] 建立 30+ 个中英文回放场景，覆盖问答、单步动作、复杂分析、批处理、持续任务、重复日程和长文本；
+- [x] 回复显示低干扰路由标签，Goal 覆盖入口明确标为不可恢复的实验原型。
+
 ## 后续阶段摘要
 
 | 阶段 | 用户价值 | 完成信号 |
 |---|---|---|
 | Phase 2（完成） | 所有输入更新同一个项目现实 | Capture、Note、Source、Todo、Event、File 可追溯关联 Project |
 | Phase 3（完成） | Bob 知道什么改变了什么 | 新文件能指出受影响决定、证据和待确认变化 |
-| Phase 4 | 用户无需选择复杂模式 | 简单请求保持轻量，持续工作自动进入 Advanced |
+| Phase 4（完成） | 用户无需选择复杂模式 | 简单请求保持轻量，持续工作识别为 Advanced 且不虚假完成 |
 | Phase 5 | 复杂目标可以中断恢复 | Goal 重启可恢复，Done 绑定 Evidence |
 | Phase 6 | 多阶段工作局部恢复 | 节点失败只影响其下游，计划允许重构 |
 | Phase 7 | 专业角色提高可靠性 | 多角色有可量化收益，而非 Agent 表演 |

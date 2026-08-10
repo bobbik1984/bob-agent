@@ -5,9 +5,9 @@
 ## 1. [The Desk] 当前开发焦点
 
 - **产品定位**：Bob 是让复杂工作不断线的 Personal Work Orchestration Layer；不是 Codex/Claude Code 的外壳。
-- **当前主线**：`v0.8.1` Phase 0–1，建立 Persistent Work Core、Project State 与 Decision 一等对象。
+- **当前主线**：`v0.8.1` 已完成 Phase 0–4 Persistent Work Core、输入关联、Decision/Change 与 Complexity Router，进入 Phase 5 Advanced Project Loop。
 - **推进顺序**：Work Core → 现有入口关联 → Decision/Change → Complexity Router → Advanced Project Loop → Dynamic Graph → Runtime Adapter。
-- **当前真实边界**：Auto 尚不会升级到 Goal；Goal 尚无持久 DAG 和重启恢复；Dream 以事实整理为主，尚未形成结果驱动的用户模型。
+- **当前真实边界**：Auto 已能识别 Direct、Deep、Advanced，但 Advanced 只做有限启动；Goal 尚无持久状态、DAG 和重启恢复；Dream 以事实整理为主，尚未形成结果驱动的用户模型。
 - **核心约束**：PC 安装版/绿色版保持零外部运行时，Android 不增加用户侧依赖；客户端体积增长必须解释和验证。
 - **工作区状态提醒**：开始修改前先检查 `git status`，不得覆盖用户未提交的代码或临时文件。
 

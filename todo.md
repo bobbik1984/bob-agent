@@ -7,7 +7,7 @@
 
 本文件只保存当前实施批次和紧邻下一批的任务。目标架构不得写成已实现能力。
 
-## 已完成主线：Phase 0–3 Persistent Work Core、输入接入与变更审查
+## 已完成主线：Phase 0–4 Work Core、变更审查与复杂度路由
 
 ### WC-001 文档与术语收口（P0，已完成）
 
@@ -80,11 +80,23 @@
 
 **验收**：新版文件能够指出前后 fingerprint、旧/新 Artifact、受影响对象、证据和待确认关系；无证据时明确显示影响范围未知；重复处理、revision 冲突和事务失败不会产生半套状态。
 
-## 当前下一批：Phase 4 Complexity Router
+## WC-401–403 Complexity Router（P2，已完成）
 
-- [ ] 定义 Direct、Deep、Advanced 的结构化路由结果、置信度、风险和持续性。
-- [ ] 确定性信号优先，复杂语义才调用 Clerk；断网时保持 Answer/Quick Action 基本可用。
-- [ ] 建立中英文回放集，避免普通问答被过度升级，允许用户覆盖自动判断。
+- [x] 定义 Direct、Deep、Advanced 的结构化路由结果、task kind、置信度、风险、持续性和原因代码。
+- [x] 确定性信号优先，真正模糊语义才限时调用 Clerk；断网或解析失败保守只读降级。
+- [x] 复杂只读分析与复杂 Action 分离，路由和用户覆盖均不改变 R0–R3 权限。
+- [x] Auto Advanced 不自动调用旧 Goal Loop，不宣称跨时间目标完成。
+- [x] 建立 30+ 个中英文回放场景并在回复中展示低干扰路由标签。
+
+**验收**：普通问答、长文本和重复提醒不被过度升级；复杂分析进入 Deep；持续、跨时间、恢复和阶段依赖进入 Advanced；Clerk 不可用不阻止基本问答和单步操作。
+
+## 当前下一批：Phase 5 Advanced Project Loop
+
+- [ ] Goal Compiler 生成 outcome、evidence、scope、constraints、budget、risk policy 和 blocker policy。
+- [ ] 用 SQLite 持久化 Goal 状态、尝试、证据和检查点，应用重启后能够恢复。
+- [ ] 建立单 Agent `observe → plan → act → verify → repair → finish` 有限循环。
+- [ ] Done 必须绑定 Evidence；等待用户、阻塞、超预算、失败和取消具有明确状态。
+- [ ] R0–R3 Policy Engine 继续作为唯一权限边界。
 
 ## v0.8.0 遗留质量门
 

@@ -3,7 +3,7 @@ project:
   version: '0.8.1'
   status: active
   north_star: Bob 让复杂工作不断线
-  updated: '2026-08-10'
+  updated: '2026-08-11'
   tech:
   - Tauri
   - Rust
@@ -39,10 +39,16 @@ phases:
     status: done
   - text: Change Review 接受、拒绝、延后和审计事件
     status: done
-- name: Phase 4-5 Router 与 Advanced Loop
+- name: Phase 4 Complexity Router
   tasks:
   - text: Direct、Deep、Advanced Complexity Router
-    status: todo
+    status: done
+  - text: 确定性优先与限时 Clerk 保守降级
+    status: done
+  - text: 中英文回放与用户覆盖
+    status: done
+- name: Phase 5 Advanced Loop
+  tasks:
   - text: API-only Persistent Advanced Project Loop
     status: todo
 - name: Phase 6-10 Orchestration 与 Intelligence

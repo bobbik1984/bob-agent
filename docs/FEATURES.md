@@ -14,7 +14,7 @@
 3. [MCP 可扩展工具生态](#mcp-extensible-tool-ecosystem)
 4. [自进化认知记忆系统](#self-evolving-cognitive-memory)
 5. [可视化知识图谱](#interactive-knowledge-graph)
-6. [Goal Mode 闭环执行器](#goal-mode-execution-loop)
+6. [Complexity Router 与 Goal Loop 原型](#goal-mode-execution-loop)
 7. [微信穿透网关](#wechat-gateway)
 8. [Web Drop 端到端加密极传](#web-drop-e2ee-file-transfer)
 9. [Doctor 自检与自愈](#self-diagnosis--auto-repair)
@@ -141,15 +141,20 @@ Bob 不只是一个无状态的聊天框——它会"记住你"。每次对话�
 
 ---
 
-## Goal Loop 闭环原型 {#goal-mode-execution-loop}
+## Complexity Router 与 Goal Loop 原型 {#goal-mode-execution-loop}
 
 ### 用户视角 / User Perspective
 
-手动开启 Goal Mode 后，Bob 会使用更高的工具预算执行任务，并由独立 Clerk 检查最终结果；未通过时最多进行 3 轮外层重试。这是 Goal Loop 原型，不保证任务一定成功，也尚不支持自动进入 Goal、持久任务图、应用重启恢复或节点级局部重跑。
+默认 Auto 会先用本地规则判断 Direct、Deep 或 Advanced：普通问答和单步动作保持轻量，复杂分析在当前会话深入处理，跨时间、阶段、依赖或恢复需求标记为持续任务。只有真正模糊的语义才限时调用 Clerk，失败时保守降级且不阻止离线问答。Advanced 在持久 Runtime 完成前只做有限启动，不会自动进入旧 Goal Loop 或宣称长期目标完成。
+
+手动开启 Goal Mode 后，Bob 仍可使用历史 Maker–Checker 原型执行并由 Clerk 检查，未通过时最多进行 3 轮外层重试。该入口是实验性原型，不保证任务一定成功，也不支持持久任务图、应用重启恢复或节点级局部重跑。
 
 ### 技术亮点 / Technical Highlights
 
-- **Maker-Checker 双角色架构**：
+- **结构化路由结果**：返回 mode、task kind、置信度、风险、持续性、来源和原因代码；复杂只读分析不会获得写工具
+- **权限分离**：路由和用户覆盖都不能绕过 R0–R3 Policy Engine
+- **中英文回放集**：30+ 个稳定场景防止普通问答、长文本和重复提醒被过度升级
+- **Maker-Checker 双角色架构（仅手动 Goal 原型）**：
   - **Maker (执行端)**：使用 Main Model，工具调用预算从默认 5 轮飙升至 **50 轮上限**，允许极其复杂的链路探索
   - **Checker (评估端)**：调用 Clerk Model 作为严格判决器，默认以 `FAIL` 为立场，逐条检查 Maker 产出
 - **反馈注入与自动重试 (Feedback Injection & Auto-Retry)**：Checker 判定未通过时生成缺失清单，系统自动封装为新任务重新塞回 Maker 队列，最大 3 次外层循环

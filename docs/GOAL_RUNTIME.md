@@ -22,11 +22,11 @@ Bob 不以复制 Codex 的编程深度或 Claude Code 的终端能力为目标�
 
 ## 2. 当前能力边界
 
-当前 `goal.rs` 已实现 Maker–Checker 原型：Goal 模式提供较高工具预算，先运行确定性断言，再由 Clerk 判断 PASS/FAIL，最多执行三轮外层重试。
+当前 `complexity_router.rs` 已实现 Direct、Deep、Advanced 规则优先路由，模糊语义才限时调用 Clerk；`goal.rs` 仍是 Maker–Checker 原型：只有用户显式选择 Goal 模式时，才提供较高工具预算、确定性断言和最多三轮外层重试。
 
 这不是完整 Goal Runtime，当前缺口包括：
 
-- Auto 意图分类不会自动升级到 Goal；
+- Auto 可以识别 Advanced，但尚不会创建可恢复的持久 Goal；
 - 原始用户消息尚未编译为结构化 Goal Contract；
 - 没有持久化的 Goal、节点、依赖、证据和检查点；
 - 没有真正的执行 DAG、节点级验证和局部恢复；

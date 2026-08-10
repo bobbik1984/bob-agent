@@ -15,6 +15,7 @@
 | **持续工作核心 / Project State** | [WorkView.vue](file:///d:/OneDrive/Learning/Code/Gemini/bob-agent/src/views/WorkView.vue) | `workProject*` / `workObject*` | `work_project_*` / `work_object_*` | [work_core](file:///d:/OneDrive/Learning/Code/Gemini/bob-agent/src-tauri/src/work_core) |
 | **项目归属候选 / 外部引用** | [WorkView.vue](file:///d:/OneDrive/Learning/Code/Gemini/bob-agent/src/views/WorkView.vue) | `workProjectLink*` / `workExternalLinkList` | `work_project_link_*` / `work_external_link_list` | [project_links.rs](file:///d:/OneDrive/Learning/Code/Gemini/bob-agent/src-tauri/src/work_core/project_links.rs) |
 | **Decision Memory / Change Review** | [WorkView.vue](file:///d:/OneDrive/Learning/Code/Gemini/bob-agent/src/views/WorkView.vue) | `workChangeReview*` | `work_change_review_*` | [decision_change.rs](file:///d:/OneDrive/Learning/Code/Gemini/bob-agent/src-tauri/src/work_core/decision_change.rs) / [models.rs](file:///d:/OneDrive/Learning/Code/Gemini/bob-agent/src-tauri/src/work_core/models.rs) |
+| **Complexity Router / 自动处理强度** | [ChatView.vue](file:///d:/OneDrive/Learning/Code/Gemini/bob-agent/src/views/ChatView.vue) | `sendChat` / `sendVision` | `llm_chat` / `llm_vision` | [complexity_router.rs](file:///d:/OneDrive/Learning/Code/Gemini/bob-agent/src-tauri/src/complexity_router.rs) |
 | **做梦引擎 (记忆整理)** | `App.vue` / 后台守护 | `summarizeSession` | `system_summarize_session` | [dream.rs](file:///d:/OneDrive/Learning/Code/Gemini/bob-agent/src-tauri/src/dream.rs) |
 | **微信穿透网关** | `SettingsView.vue` (QR 扫码) | `wechatGetLoginQr` | `wechat_get_login_qr` | [mod.rs (wechat)](file:///d:/OneDrive/Learning/Code/Gemini/bob-agent/src-tauri/src/wechat/mod.rs) |
 | **Web Drop 极传** | `ChatView.vue` (文件分享) | `startWebDrop` | `start_web_drop` | [web_drop.rs](file:///d:/OneDrive/Learning/Code/Gemini/bob-agent/src-tauri/src/web_drop.rs) |
@@ -70,6 +71,7 @@
   - 项目重名、找不到、失效或关键字段缺失写入 `project_link_candidates`；WorkView 提供稍后归属与忽略，不弹出阻断式对话框。
   - PC 文件引用只记录绝对路径、流式 MD5、大小和修改时间，不复制源文件；同路径 hash 变化保留旧 Artifact、创建新版 Artifact 与 Change，再生成待确认影响。
   - `decision_change.rs` 负责 Decision 强类型契约和 Change Review 状态机。影响只来自同项目显式关系、Decision evidence、旧 Artifact 或验证过的对象 ID；接受后才写 `affected_by`、`contradicts`、`supersedes`，拒绝和延后同样保留 Work Event。
+  - `complexity_router.rs` 是 Direct/Deep/Advanced 的唯一分类入口：本地规则优先，模糊语义才调用限时 Clerk；输出决定工具范围、预算、提示词和响应元数据，但不能覆盖 Policy Engine。中英文回放夹具位于 `tests/fixtures/router/`。
   - `capture_process_pending()` 在后台处理 `pending_enrichment`；网络/模型不可用只延后，不影响原始 Capture。
   - `knowledge_committer.rs` 负责 QuickNote/Note/Source 的确定性提交：Markdown 是权威真相源，稳定 ID 防重复，Source 保留原始引用；项目名称只通过本地 Project 对象唯一匹配，无法确定时请求确认。
   - `capture_activity_list()` 返回最近语义事件；`capture_events` 每设备最多 50 条，UI 使用 i18n key 在展示时翻译。

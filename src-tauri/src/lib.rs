@@ -7,6 +7,7 @@ mod candle_engine;
 mod capture;
 mod capture_router;
 mod connector;
+mod complexity_router;
 mod crypto;
 mod db;
 mod discord;

@@ -335,6 +335,7 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
           thinking: finalThinking,
           _thinkingExpanded: false,
           _modelLabel: currentModelName.value || result.model || '',
+          _route: result.route || null,
         };
 
         messages.value.push(assistantMsg);

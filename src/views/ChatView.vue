@@ -206,6 +206,16 @@
             <div v-if="msg.role === 'assistant' && msg._modelLabel" class="model-label">
               {{ msg._modelLabel }}
             </div>
+            <div
+              v-if="msg.role === 'assistant' && msg._route"
+              class="route-label"
+              :title="$t('chat.route_hint', { confidence: Math.round((msg._route.confidence || 0) * 100) })"
+            >
+              <Zap v-if="msg._route.mode === 'direct'" :size="10" />
+              <Sparkles v-else-if="msg._route.mode === 'deep'" :size="10" />
+              <Target v-else :size="10" />
+              <span>{{ $t(`chat.route_${msg._route.mode}`) }}</span>
+            </div>
             <button
               v-if="msg.role === 'assistant' && msg.content"
               class="copy-rich-btn"
@@ -2742,7 +2752,7 @@ defineExpose({
   margin-top: 2px;
 }
 
-.model-label, .source-label {
+.model-label, .source-label, .route-label {
   font-size: 11px;
   color: var(--text-muted);
   opacity: 0.5;
@@ -2765,6 +2775,12 @@ defineExpose({
 
 .source-label {
   display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.route-label {
+  display: inline-flex;
   align-items: center;
   gap: 4px;
 }

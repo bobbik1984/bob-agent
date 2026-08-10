@@ -6,7 +6,7 @@
 
 ## v0.8.1 演进边界（当前实现）
 
-`v0.8.0` 已封存 Capture 与知识提交基线。`v0.8.1` 开发线已在现有 Rust 后端中建立隔离的 `work_core`，完成现有输入接入、完整 Decision 契约与 Change Review；没有重写 Tauri、Android、Sync、Relay 或 Tools，也没有增加客户端运行时依赖。
+`v0.8.0` 已封存 Capture 与知识提交基线。`v0.8.1` 开发线已在现有 Rust 后端中建立隔离的 `work_core`，完成现有输入接入、完整 Decision 契约、Change Review 与 Complexity Router；没有重写 Tauri、Android、Sync、Relay 或 Tools，也没有增加客户端运行时依赖。
 
 ```mermaid
 flowchart TD
@@ -22,7 +22,21 @@ flowchart TD
     Adapter --> Runtime["API / Codex / AGY / Other"]
 ```
 
-当前已实现 Work Object 契约、SQLite Repository、append-only Work Event、幂等与 revision、软删除、Project Aggregate、Markdown 快照、Tauri Commands、Bridge 和最小 `WorkView`。Capture Router 可以把明确项目任务、决策、承诺、会议派生项和文件成果写入 Work Core；Todo/Event、Note/Source 和文件继续保留各自真相源，`work_external_links` 只保存稳定引用。Decision 原生保存 reason、alternatives、rejected alternatives、participants、owner、evidence 与 revisit condition。新版文件创建不可变 Artifact revision 和 Change，并依据显式关系、Decision evidence 或经过同项目校验的影响提示生成 `work_change_reviews`。接受、拒绝、延后和重新打开都写入 Work Event；确认前不修改既有 Decision、Goal、Task、Artifact 或 Risk。Router、Advanced、Dynamic Graph 和 Runtime Adapter 仍是后续目标。
+当前已实现 Work Object 契约、SQLite Repository、append-only Work Event、幂等与 revision、软删除、Project Aggregate、Markdown 快照、Tauri Commands、Bridge 和最小 `WorkView`。Capture Router 可以把明确项目任务、决策、承诺、会议派生项和文件成果写入 Work Core；Todo/Event、Note/Source 和文件继续保留各自真相源，`work_external_links` 只保存稳定引用。Decision 原生保存完整理由、备选、证据与重访条件。新版文件创建不可变 Artifact revision 和 Change，并依据显式证据生成 `work_change_reviews`。Complexity Router 已独立为纯 Rust 模块，规则优先返回 Direct、Deep 或 Advanced、task kind、置信度、风险和持续性，模糊输入才限时调用 Clerk。Advanced Runtime、Dynamic Graph 和 Runtime Adapter 仍是后续目标。
+
+### Complexity Router 当前边界
+
+```text
+自然语言 + 用户覆盖
+  ├─ 明确本地信号 ── Direct / Deep / Advanced
+  └─ 真正模糊语义 ── 4 秒 Clerk ── 严格枚举解析
+                              └─ 失败 / 断网 ── 保守只读降级
+
+Route Decision ── tool scope + budget + prompt + response metadata
+Policy Engine  ── R0–R3 最终授权（路由不可覆盖）
+```
+
+`complexity_router.rs` 是处理强度的唯一分类入口。Direct 处理回答和单步动作；Deep 在当前会话内进行有限多步分析或执行；Advanced 只识别需要持久状态的工作。Phase 5 之前，Auto Advanced 只允许有边界的启动和下一步说明，不自动调用旧 `goal.rs`，也不得宣称跨时间目标已经完成。只有用户显式选择 Goal 原型时才保留旧 Maker–Checker 入口。
 
 ### 输入与 Project State 的当前边界
 

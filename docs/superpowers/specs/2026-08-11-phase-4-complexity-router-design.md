@@ -1,6 +1,6 @@
 # Phase 4 Complexity Router 设计
 
-> 状态：approved
+> 状态：implemented
 > 日期：2026-08-11
 > 上游：`docs/PRODUCT_VISION.md`、`docs/BOB_EVOLUTION_ROADMAP.md`、`docs/GOAL_RUNTIME.md`
 
