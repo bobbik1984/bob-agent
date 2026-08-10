@@ -1,5 +1,7 @@
 # bob-agent LLM-Wiki — 全量功能与逻辑字典 (Feature & Logic Directory)
 
+> 本文件只导航现有能力与代码入口。产品北极星见 `docs/PRODUCT_VISION.md`，长期架构决定见 `docs/DECISIONS.md`，Work Continuity 目标计划见 `docs/superpowers/plans/2026-08-10-work-continuity-evolution-plan.md`。
+
 > **定位**：供 AI 编码代理（及人类开发者）快速检索、定位、阅读和修改 Bob-Agent 核心功能的“数字地图”。
 > 当你需要修改、调试或理解某个特定功能的端到端逻辑时，请直接跳转到对应小节。
 

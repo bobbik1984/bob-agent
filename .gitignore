@@ -53,6 +53,7 @@ implementation_plan.md
 !/docs/USER_GUIDE.md
 !/docs/MOBILE_BLUEPRINT.md
 !/docs/TICKET_MANAGEMENT_BLUEPRINT.md
+!/docs/DECISIONS.md
 !/docs/superpowers/
 /docs/superpowers/*
 !/docs/superpowers/plans/

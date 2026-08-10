@@ -1,78 +1,57 @@
 project:
   name: bob-agent
-  version: '0.7.8'
+  version: '0.8.1'
   status: active
+  north_star: Bob 让复杂工作不断线
+  updated: '2026-08-10'
   tech:
   - Tauri
   - Rust
   - Vue 3
   - Desktop
   - Android
-  updated: '2026-08-10'
 phases:
-- name: 阶段 0-1 可靠 Capture 基座
+- name: Phase 0 Re-anchor
   tasks:
-  - text: R0-01 核心入口现状回放与缺口基线
+  - text: WC-001 愿景、路线、文档职责与 Decision Log
     status: active
-  - text: R0-02 Relay 双端 trace 与客户端体积基线
-    status: todo
-  - text: R0-03 愿景、路线图、当前任务与进度文档收口
-    status: done
-  - text: R1-01 CaptureEnvelope、SQLite Journal 与 Bridge 契约
-    status: done
-  - text: R1-02 快捷笔记、聊天 memo、Android 分享入口适配
-    status: done
-  - text: R1-03 中断恢复、重试与跨端状态归并
-    status: done
-  - text: R1-04 聊天收藏、快捷笔记、Android 分享三入口纵切片
-    status: active
-- name: 阶段 2 知识与行动可靠分流
+- name: Phase 1 Persistent Work Core
   tasks:
-  - text: 可迁移 Markdown schema、稳定 ID 与只读知识审计
-    status: done
-  - text: 真实知识目录 dry-run 与迁移分类报告
-    status: active
-  - text: Source、Knowledge、Seed、Todo、Event、Routine、Goal 统一分类契约
+  - text: WC-101 Work Object 数据契约
     status: todo
-  - text: 多派生对象事务提交与低置信度纠正
+  - text: WC-102 SQLite Repository 与 Work Event Journal
     status: todo
-  - text: Todo/Event 时间语义修复与回放集
-    status: done
-  - text: 离线优先 Capture、Clerk 延迟解析与确定性日历提交
-    status: done
-  - text: Note/Source 延迟分类结果接入权威 Markdown 管线
-    status: done
-  - text: Source 正文提取、Knowledge Point 蒸馏与证据关系
+  - text: WC-103 Project 聚合与 Markdown 快照
     status: todo
-- name: 阶段 3 跨端一致与发布质量门
+  - text: WC-104 最小 Project API、Bridge 与 UI
+    status: todo
+- name: Phase 2 现有入口关联
   tasks:
-  - text: Capture 领域对象同步、冲突策略与删除语义
+  - text: Capture、Note、Source、Todo、Event、File 关联 Project
     status: todo
-  - text: PC/Android 真实网络矩阵与双端结果一致性
+  - text: 多派生对象事务与低置信度确认
     status: todo
-  - text: PC 主程序、绿色包、安装器和 Android 体积回归门
-    status: todo
-- name: 阶段 4 可靠记忆与 Dream
+- name: Phase 3 Decision 与 Change
   tasks:
-  - text: 统一 Notebook、Source、Dream 与 Evolution 数据路径
+  - text: Decision Memory 与新版文件 Change Detection
     status: todo
-  - text: 有来源、置信度、有效期和纠正能力的用户模型
-    status: todo
-  - text: 未处理 Capture 修复、去重、主题巩固和偏好候选
-    status: todo
-- name: 阶段 5-6 Goal Runtime 与最小 DAG
+- name: Phase 4-5 Router 与 Advanced Loop
   tasks:
-  - text: Goal Contract、自动路由、持久状态与重启恢复
+  - text: Direct、Deep、Advanced Complexity Router
     status: todo
-  - text: Done 证据、节点验证、局部恢复与跨端连续性
+  - text: API-only Persistent Advanced Project Loop
     status: todo
-  - text: 最小 DAG、上下文胶囊和基于结果的模型路由
-    status: todo
-- name: 已完成基础能力
+- name: Phase 6-10 Orchestration 与 Intelligence
   tasks:
-  - text: Relay V2 逐跳回执、连接诊断、50 条同步历史与三角拓扑
+  - text: Dynamic Task Graph 与 Evidence Review
+    status: todo
+  - text: Lead-Clerk、Runtime Adapter 与可选 Runtime Host
+    status: todo
+  - text: Work Graph Intelligence 与结果驱动 Dream
+    status: todo
+- name: v0.8.0 已封存基线
+  tasks:
+  - text: Capture Journal、离线分流、Note/Source 提交与知识 schema
     status: done
-  - text: R0-R3 工具权限、记忆基础契约与纠错版本链
-    status: done
-  - text: Tauri PC/Android、日历待办、Notebook、知识图谱与 Goal Loop 原型
+  - text: Tauri PC/Android、Relay 诊断、日历待办与 Goal Loop 原型
     status: done

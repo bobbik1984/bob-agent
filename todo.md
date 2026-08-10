@@ -1,114 +1,79 @@
 # Bob 当前开发清单
 
+> 当前开发线：v0.8.1
 > 产品方向：`docs/PRODUCT_VISION.md`
->
-> 阶段顺序与完成门槛：`docs/BOB_EVOLUTION_ROADMAP.md`
->
-> 现状回放与已知缺口：`docs/CAPTURE_BASELINE.md`
-> 2026-08-09 前的完整历史清单：`docs/archive_todo_pre_capture_20260809.md`
+> 阶段顺序：`docs/BOB_EVOLUTION_ROADMAP.md`
+> 完整计划：`docs/superpowers/plans/2026-08-10-work-continuity-evolution-plan.md`
 
-本文件只保存当前阶段及紧邻下一阶段的可执行任务，不再混入每日开发日志、已完成版本说明或长期设想。
+本文件只保存当前实施批次和紧邻下一批的任务。目标架构不得写成已实现能力。
 
-## 当前主线：阶段 0–1，可靠 Capture 基座
+## 当前主线：Phase 0–1 Persistent Work Core
 
-### R0-01 现状回放集（P0，进行中）
+### WC-001 文档与术语收口（P0，进行中）
 
-- [x] 盘点聊天 `/memo`、快捷笔记、Android 系统分享的实际入口。
-- [x] 记录 Android 分享原 `create_note` Outbox 操作无法通过 PC 白名单的断点。
-- [ ] 为文章收藏、Source/Knowledge 生成和网页提取建立自动回放样例。
-- [ ] 为 Todo/Event 自然语言分类建立中英文回放样例。
-- [ ] 在真实 PC 与 Android 上执行 `docs/CAPTURE_BASELINE.md` 场景矩阵。
+- [x] 将“Bob 让复杂工作不断线”确立为产品北极星。
+- [x] 明确 Bob Core、Orchestration、Runtime 与 Integration 边界。
+- [x] 建立 canonical state、渐进演进、Runtime 可替换和 Graph/Loop 分层的 Decision Log。
+- [x] 重写当前路线图，保留 `v0.8.0` 为不可修改的 Capture 历史基线。
+- [ ] 完成文档一致性检查并提交 Phase 0。
 
-**验收**：每条核心路径均有输入、预期落点、实际落点、失败状态和复现步骤。
+**验收**：愿景、路线、架构、代码导航、架构决定、任务和进度各有唯一职责；规划能力没有写成现状。
 
-### R0-02 发布与同步基线（P0）
+### WC-101 Work Object 契约（P0）
 
-- [x] Relay V2 契约、客户端诊断和自动故障注入测试已有基础。
-- [ ] 使用同一 `trace_id/sync_id` 完成 PC、Relay、Android 三方真实日志对账。
-- [ ] 记录 PC 主程序、绿色包、安装器、Android APK/AAB 当前字节数。
-- [ ] 验证 LAN、跨网 Relay、对端离线、回程丢失和应用重启。
-- [ ] 确认生产 Relay 的版本、进程守护和重启策略。
+- [ ] 定义 Project、Responsibility、Goal、Milestone、Task、Decision、Artifact、Evidence、Risk、Change、Commitment。
+- [ ] 冻结类型前缀、状态、revision、时间、软删除、来源和幂等字段。
+- [ ] 明确 Decision 的 reason、alternatives、evidence、participants、owner 与 revisit condition。
+- [ ] 明确 Work Object 与 Note、Source、Event、Todo、File 的引用关系。
 
-**验收**：连接与同步失败能定位到具体阶段，客户端产物有可比较体积基线。
+**验收**：schema 可序列化、可版本化；非法状态和缺失关键字段无法进入 Repository。
 
-### R0-03 文档收口（P0，已完成）
+### WC-102 SQLite Repository 与 Work Event Journal（P0）
 
-- [x] 建立 `docs/PRODUCT_VISION.md`。
-- [x] 建立 `docs/BOB_EVOLUTION_ROADMAP.md`。
-- [x] 将旧 `todo.md` 完整归档，重建当前执行清单。
-- [x] 将当前主线从 Goal Runtime 调整为 Capture 基座。
-- [x] 完成第一轮代码验证后更新 `README.md`、`docs/ARCHITECTURE.md`、`docs/FEATURES.md` 与 `LLM_WIKI.md`。
+- [ ] 增加向前兼容 migration，不修改真实 Markdown 文件。
+- [ ] Repository 统一负责事务、幂等、乐观 revision 和软删除。
+- [ ] 所有状态变化写入 append-only `work_events`。
+- [ ] 同一幂等键返回原回执；跨对象失败必须整体回滚。
+- [ ] 增加 schema、事务、冲突、软删除和事件顺序单元测试。
 
-**验收**：愿景、路线、真实架构、代码导航、任务和进度各有唯一职责。
+**验收**：进程重启后状态不丢失；重复请求不创建第二对象；失败不留下半套 Project State。
 
-### R1-01 CaptureEnvelope 契约（P0，已完成）
+### WC-103 Project 聚合与可迁移快照（P1）
 
-- [x] 定义版本化 Envelope：入口、来源设备、原始内容、来源 URL/文件、显式意图、哈希、幂等键、隐私/同步范围、状态与错误阶段。
-- [x] 新增 SQLite `capture_journal` 与状态索引。
-- [x] 增加 `capture_ingest`、`capture_quick_note`、`capture_list` Bridge API。
-- [x] 增加等价内容规范化、幂等和空载荷 Rust 单测。
-- [x] 通过 Rust 编译、单测和前端构建验证。
+- [ ] 聚合目标、当前阶段、开放任务、决定、风险、近期变化和下一步。
+- [ ] 兼容现有 Markdown Project 稳定 ID，只注册不迁移真实数据。
+- [ ] 生成只读 Markdown 项目快照，禁止快照反向覆盖较新运行状态。
+- [ ] 增加新会话恢复、重启恢复和快照稳定性测试。
 
-**验收**：重复输入不重复落库；失败保留阶段和原始输入；不增加用户侧运行时。
+**验收**：不读取旧对话上下文也能恢复准确项目摘要；不同 Agent 可通过 Markdown 快照理解项目。
 
-### R1-02 入口适配（P0，已完成）
+### WC-104 最小 Project API 与 UI（P1）
 
-- [x] 快捷笔记改由 Capture Journal 可靠提交。
-- [x] 聊天 `/memo` 改由 Capture Journal 可靠提交。
-- [x] Android 分享先本地提交成功再清理原始缓存，移除无效 `create_note` 伪 Outbox。
-- [x] Capture Journal 纳入 SQLite 增量同步。
-- [x] 将 Link Harvester 的文章写入路径和 `save_to_notes` 接入 Source/Knowledge Capture 流程。
-- [x] PC 普通文件保持原路径引用；Android 图片从临时缓存原子归档到可追溯受管目录，不再生成占位文本。
-- [x] 为各 Capture 入口加入语义化用户活动日志，每设备仅保留最近 50 条并按当前 UI 语言渲染。
+- [ ] 增加 Project/Goal/Task/Decision Tauri Commands。
+- [ ] 只通过 `tauri-bridge.js` 暴露给 Vue。
+- [ ] Project 页面只展示 Goal、状态、变化、任务、Decision 和用户需关注项。
+- [ ] 同步中英文 i18n，继续使用 Lucide 和设计变量。
+- [ ] 完成前端测试、Rust 测试、生产构建和客户端体积对比。
 
-**验收**：同一内容从不同入口进入时具有一致的来源、幂等与处理状态。
+**验收**：用户能创建并重新打开 Project，查看为什么作出决定以及下一步；UI 不暴露内部 DAG、prompt、token 或进程。
 
-**边界**：Android 当前原生 ShareActivity 只接收文本与图片；普通文档分享及图片二进制跨端传输留到阶段 3，不以元数据同步冒充文件同步。
+## 紧邻下一批：入口关联与 Change
 
-### R1-03 Capture Journal 恢复能力（P1，已完成）
+- [ ] Capture 可事务性产生或关联 Project、Task、Decision、Meeting、Change 和 Commitment。
+- [ ] Note 只属于零个或一个 Project；Source/Knowledge Point 可被多个 Project 引用。
+- [ ] Todo/Event 与 Work Task/Milestone 建立稳定引用，不复制事实。
+- [ ] 新文件识别版本并生成 Change 候选；冲突或决定影响必须确认。
 
-- [x] 增加失败 Capture 的手动重试命令、最多 5 次自动恢复和有上限退避策略。
-- [x] 应用启动时安全恢复速记类 `received/extracting/classifying/committing` 中断项；未知入口保留诊断，不猜测落点。
-- [x] 增加待处理数量和最近 20 条失败查询，但不污染普通同步日志。
-- [x] 为跨端乱序、重复、状态推进和终态不可倒退补充测试。
+## v0.8.0 遗留质量门
 
-**验收**：模型、网络或应用中断不会丢失输入，也不会重复产生派生对象。
-
-### R1-04 三入口纵切片（P1，进行中）
-
-- [x] 建立本地稳定网页与期望契约夹具，不依赖公网内容漂移。
-- [x] 自动回放聊天收藏、快捷笔记和 Android 文本分享三入口。
-- [x] 对比 canonical URL、Knowledge/Seed 显式意图、committed 状态、活动日志和跨数据库归并结果。
-- [x] 修复快捷笔记与 Android 文本分享只在正文保留 URL、Journal `source_url` 为空的差异。
-- [ ] 在真实 PC 与 Android 上执行三入口回放，记录双方日志与同一同步结果。
-
-**验收**：三入口得到等价的来源与状态；允许因显式意图产生不同派生对象，但差异必须可解释。
-
-## 下一阶段：知识与行动分流
-
-阶段 1 完成后才展开：
-
-- [x] 确认统一信息与知识生命周期设计，明确 Markdown 真相源与 SQLite 可重建加速层。
-- [x] 建立知识对象 schema、稳定 ID、关系词表、兼容解析和安全写入测试。
-- [x] 建立只读知识审计器与固定迁移 fixtures；真实 AppData dry-run 不修改文件。
-- [ ] 根据 dry-run 结果完善旧 `wiki/learned` 分类与同标题候选判断。
-- [ ] 建立可从 Markdown 重建的 SQLite 对象和关系索引。
-- [x] 实现 Todo/Event 离线优先分流状态机：先持久化 Capture，联网后由 Clerk 延迟补充语义。
-- [x] 实现组合式本地时间快车道与统一置信度协议，避免穷举完整句子。
-- [x] 将 Clerk 限定为结构化解析器；所有日历/待办写入必须经过本地校验、幂等提交和真实回执。
-- [x] 增加断网退避、非法模型输出、日期校验和重复创建防护测试。
-- [x] 将 Note/Source/QuickNote 接入权威 Markdown 提交管线：稳定 ID、来源去重、原始引用、项目唯一匹配和真实写入回执。
-- [ ] 接入 Source 正文提取、Knowledge Point 蒸馏与来源到知识点的可追溯关系。
-- 结构化区分 Source、Knowledge、Seed、Todo、Event、Routine、Goal；
-- 一次 Capture 可事务性地产生多个派生对象；
-- 修复 Todo 被午夜时间伪装成 Event 的语义问题；
-- 低置信度分类使用低干扰确认；
-- 用户纠正进入最高优先级 correction memory。
+- [ ] 使用真实 PC/Android 完成 Capture 三入口与 Relay trace 对账。
+- [ ] 记录 PC 主程序、绿色包、安装器和 Android APK/AAB 字节数。
+- [ ] Source 正文提取、Knowledge Point 蒸馏和证据关系进入 Phase 2，不阻塞 Work Core 数据层。
 
 ## 暂缓
 
-在 Capture、分流和跨端一致完成前暂缓：多 Agent、完整 Goal DAG UI、iOS、独立 Web UI、手机大型本地模型和新增通讯渠道。
+在 Persistent Work Core 和单 Agent Advanced Loop 被验证前，暂缓多 Agent、Runtime Host、订阅调度、完整 DAG UI、iOS、独立 Web UI和新增通讯渠道。
 
 ## 完成规则
 
-任务只有在代码、测试、用户可理解错误、跨端影响、依赖/体积和权威文档同时通过时才能标记完成。规划中的能力不得写成现有功能。
+任务只有在代码、测试、用户可理解错误、恢复、权限、同步影响、依赖/体积和权威文档同时通过后才能标记完成。

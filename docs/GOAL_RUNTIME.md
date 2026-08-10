@@ -4,9 +4,11 @@
 > 更新：2026-08-09  
 > 权责：本文件是 Goal、任务 DAG、验证闭环和 Dream 学习边界的单一真相源；任务状态以 `todo.md` 和 `progress.yaml` 为准。
 
+Goal Runtime 位于 Persistent Work Core 之上。Project、Decision、Change 与 canonical state 的长期边界以 `docs/PRODUCT_VISION.md` 和 `docs/DECISIONS.md` 为准；本文件不重新定义这些对象。
+
 ## 1. 产品终局
 
-Bob 是一个**零设置、隐私优先、跨设备、持续理解用户的个人执行系统**：用户只需表达意图，Bob 负责把它转化为安全、可恢复、可验证的结果。
+Bob 是一个**零设置、隐私优先、跨设备的个人工作编排层**：用户只需表达意图，Bob 负责把它转化为安全、可恢复、可验证并能更新真实项目状态的结果。
 
 Bob 不以复制 Codex 的编程深度或 Claude Code 的终端能力为目标。核心竞争力是：
 
@@ -178,4 +180,3 @@ Dream 的学习输入应是：原始目标、Goal Contract、计划、执行轨�
 - 故障注入：模型超时、工具失败、进程重启、网络中断和证据缺失；
 - 体积回归：PC 安装版、绿色版和 Android APK 不出现未解释增长；
 - 可观测性：用户日志与高级诊断分层，用户记录保持有限数量。
-

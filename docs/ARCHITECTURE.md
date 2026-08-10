@@ -4,6 +4,26 @@
 > **历史归档**: Electron 时代架构见 `docs/agents_electron.md`
 > **Goal/Dream 目标架构**: 见 `docs/GOAL_RUNTIME.md`。本文件描述当前系统；目标文档中的未完成模块不得被当作现有能力。
 
+## v0.8.1 演进边界（目标，尚未实现）
+
+`v0.8.0` 已封存 Capture 与知识提交基线。`v0.8.1` 开始在现有 Rust 后端中建立隔离的 `work_core`，不重写 Tauri、Android、Capture、Notes、Calendar、Sync、Relay 或 Tools。
+
+```mermaid
+flowchart TD
+    UI["Bob Product UI"] --> Inputs["Capture / Calendar / Notes / Files"]
+    Inputs --> Core["Persistent Work Core"]
+    Core --> State["Project State / Decision / Change / Evidence"]
+    State --> Router["Complexity Router"]
+    Router --> Direct["Direct"]
+    Router --> Deep["Deep"]
+    Router --> Advanced["Advanced Project Runtime"]
+    Advanced --> Graph["Goal / Dynamic Task Graph"]
+    Graph --> Adapter["Agent Runtime Adapter"]
+    Adapter --> Runtime["API / Codex / AGY / Other"]
+```
+
+当前实施只覆盖 Work Core；Router、Advanced、Graph 和 Runtime Adapter 仍是后续目标。跨模块决定见 `docs/DECISIONS.md`，完整阶段与质量门见 `docs/superpowers/plans/2026-08-10-work-continuity-evolution-plan.md`。
+
 ## 总体架构
 
 ```

@@ -6,7 +6,7 @@
     <strong>零设置、懂你的、以结果为单位工作的个人执行系统</strong>
   </p>
   <p align="center">
-    <img src="https://img.shields.io/badge/version-v0.7.8-blue?style=flat-square" alt="Version" />
+    <img src="https://img.shields.io/badge/version-v0.8.1-blue?style=flat-square" alt="Version" />
     <img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="License" />
     <img src="https://img.shields.io/badge/platform-Windows_|_Android-0078D6?style=flat-square&logo=windows" alt="Platform" />
     <img src="https://img.shields.io/badge/Tauri-v2-FFC131?style=flat-square&logo=tauri" alt="Tauri v2" />
@@ -25,10 +25,10 @@
 
 ### Product North Star / 产品北极星
 
-> **Verified outcome closure with minimum user friction.**<br>
-> 在尽量少打扰用户的前提下，持续提高“用户认可、证据可查、失败可恢复”的任务闭环率。
+> **Bob keeps complex work moving without losing context.**<br>
+> **Bob 让复杂工作不断线。**
 
-当前主线是先建立可靠的 **Capture → 分类 → 跨端一致 → Memory/Dream** 数据闭环，再在可信数据底座上推进 Goal Runtime 与最小 DAG。现有 `Goal Mode` 仍是 Maker–Checker 三轮重试原型，不等同于完整的持久 Goal Runtime。阶段顺序与完成门槛见 [Bob Evolution Roadmap](docs/BOB_EVOLUTION_ROADMAP.md)。
+`v0.8.0` 已封存可靠 Capture 与知识提交基线。`v0.8.1` 当前主线是在现有模块上建立 **Persistent Work Core → Project State → Decision/Change → Advanced Project Runtime**。现有 `Goal Mode` 仍是 Maker–Checker 三轮重试原型，不等同于完整持久 Runtime。阶段顺序与完成门槛见 [Bob Evolution Roadmap](docs/BOB_EVOLUTION_ROADMAP.md)。
 
 ---
 

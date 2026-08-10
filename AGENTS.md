@@ -4,9 +4,9 @@
 
 ## 1. [The Desk] 当前开发焦点
 
-- **产品定位**：Bob 是零设置、隐私优先、跨设备、持续理解用户的个人执行系统；不是 Codex/Claude Code 的终端复制品。
-- **当前主线**：先建立统一、可恢复、可跨端对账的 Capture 基座，再推进知识/行动分流与 Goal Runtime。
-- **推进顺序**：真实基线 → CaptureEnvelope/Journal → 三入口纵切片 → 跨端一致 → Memory/Dream → 持久 Goal → 最小 DAG。
+- **产品定位**：Bob 是让复杂工作不断线的 Personal Work Orchestration Layer；不是 Codex/Claude Code 的外壳。
+- **当前主线**：`v0.8.1` Phase 0–1，建立 Persistent Work Core、Project State 与 Decision 一等对象。
+- **推进顺序**：Work Core → 现有入口关联 → Decision/Change → Complexity Router → Advanced Project Loop → Dynamic Graph → Runtime Adapter。
 - **当前真实边界**：Auto 尚不会升级到 Goal；Goal 尚无持久 DAG 和重启恢复；Dream 以事实整理为主，尚未形成结果驱动的用户模型。
 - **核心约束**：PC 安装版/绿色版保持零外部运行时，Android 不增加用户侧依赖；客户端体积增长必须解释和验证。
 - **工作区状态提醒**：开始修改前先检查 `git status`，不得覆盖用户未提交的代码或临时文件。
@@ -29,9 +29,11 @@
 | 任务 | 修改前必须阅读 |
 |---|---|
 | 产品方向、功能边界 | `docs/PRODUCT_VISION.md`、`docs/BOB_EVOLUTION_ROADMAP.md` |
+| 跨模块长期架构决定 | `docs/DECISIONS.md` |
+| Work Continuity 完整阶段与质量门 | `docs/superpowers/plans/2026-08-10-work-continuity-evolution-plan.md` |
 | Capture、分享、笔记、知识/行动分流 | `docs/CAPTURE_BASELINE.md`、`todo.md` 当前主线 |
 | 可迁移知识对象、目录边界与迁移 | `docs/KNOWLEDGE_SCHEMA.md`、`docs/superpowers/specs/2026-08-10-unified-knowledge-lifecycle-design.md` |
-| Goal、自动路由、DAG、Verifier、Dream/Memory | `docs/GOAL_RUNTIME.md`、`todo.md` 对应目标 |
+| Project State、Goal、自动路由、DAG、Verifier、Dream/Memory | `docs/GOAL_RUNTIME.md`、`docs/DECISIONS.md`、`todo.md` 对应目标 |
 | Rust 模块、IPC、数据库、状态机 | `docs/ARCHITECTURE.md`、`LLM_WIKI.md` |
 | UI、布局、颜色、图标、i18n | `design_principles.md` |
 | 跨端同步、Relay、移动端配对 | `docs/MOBILE_BLUEPRINT.md`、`todo.md` 目标 23/30 |
