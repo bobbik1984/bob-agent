@@ -65,6 +65,14 @@ phases:
     status: done
   - text: PC/Android 发布产物体积和真机验收
     status: todo
+- name: Work UI consistency
+  tasks:
+  - text: 桌面端单一内容流与横向项目切换
+    status: done
+  - text: Android 功能 Tab、项目分组滚动与独立多项目展开
+    status: done
+  - text: Android 真机纵横屏、明暗主题与触控验收
+    status: todo
 - name: Phase 6-10 Orchestration 与 Intelligence
   tasks:
   - text: Dynamic Task Graph 与 Evidence Review

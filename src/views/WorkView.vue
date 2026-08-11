@@ -1,6 +1,8 @@
 <template>
   <section class="work-view" :class="`layout-${layoutMode}`">
-    <header class="work-header">
+    <WorkMobileTabs v-if="isNativeMobile" v-model="mobileActiveTab" />
+
+    <header v-if="!isNativeMobile" class="work-header">
       <div>
         <p class="work-eyebrow">{{ t('work.eyebrow') }}</p>
         <h1>{{ t('work.title') }}</h1>
@@ -18,7 +20,12 @@
       <button type="button" :aria-label="t('common.close')" @click="errorMessage = ''"><X :size="14" /></button>
     </div>
 
-    <section v-if="pendingLinks.length" class="assignment-panel" aria-live="polite">
+    <button v-if="isNativeMobile && mobilePendingCount" class="mobile-pending-summary" type="button" :aria-expanded="mobilePendingOpen" @click="mobilePendingOpen = !mobilePendingOpen">
+      <span>{{ t('work.mobile_pending', { count: mobilePendingCount }) }}</span>
+      <ChevronDown :size="16" :class="{ rotated: mobilePendingOpen }" />
+    </button>
+
+    <section v-if="pendingLinks.length && (!isNativeMobile || mobilePendingOpen)" class="assignment-panel" aria-live="polite">
       <div class="assignment-heading">
         <div>
           <p class="section-kicker">{{ t('work.assignment_kicker') }}</p>
@@ -65,7 +72,7 @@
       </div>
     </section>
 
-    <section v-if="pendingChangeReviews.length" class="assignment-panel change-review-panel" aria-live="polite">
+    <section v-if="pendingChangeReviews.length && (!isNativeMobile || mobilePendingOpen)" class="assignment-panel change-review-panel" aria-live="polite">
       <div class="assignment-heading">
         <div>
           <p class="section-kicker">{{ t('work.change_review_kicker') }}</p>
@@ -100,7 +107,7 @@
       </div>
     </section>
 
-    <details v-if="deferredChangeReviews.length" class="assignment-panel deferred-review-panel">
+    <details v-if="deferredChangeReviews.length && (!isNativeMobile || mobilePendingOpen)" class="assignment-panel deferred-review-panel">
       <summary>
         <span><Clock3 :size="16" />{{ t('work.change_review_deferred_title') }}</span>
         <span class="assignment-count">{{ deferredChangeReviews.length }}</span>
@@ -121,7 +128,7 @@
       </div>
     </details>
 
-    <nav v-if="projects.length && terminalKind !== 'native-mobile'" class="project-switcher" :aria-label="t('work.projects')">
+    <nav v-if="projects.length && !isNativeMobile" class="project-switcher" :aria-label="t('work.projects')">
       <button
         v-for="project in projects"
         :key="project.id"
@@ -136,15 +143,7 @@
       </button>
     </nav>
 
-    <label v-else-if="projects.length" class="project-select-wrap">
-      <span class="sr-only">{{ t('work.projects') }}</span>
-      <span class="project-state-dot active" aria-hidden="true"></span>
-      <select :value="activeProjectId" @change="selectProject($event.target.value)">
-        <option v-for="project in projects" :key="project.id" :value="project.id">{{ project.title }}</option>
-      </select>
-    </label>
-
-    <main class="work-main">
+    <main v-if="!isNativeMobile" class="work-main">
         <form v-if="creatingProject" class="create-project-card" @submit.prevent="createProject">
           <div class="section-heading">
             <div>
@@ -356,6 +355,109 @@
           </button>
         </div>
     </main>
+
+    <main v-else class="mobile-work-main">
+      <div class="mobile-work-toolbar">
+        <span>{{ t('work.mobile_project_count', { count: sortedProjects.length }) }}</span>
+        <button class="btn btn-secondary btn-compact" type="button" @click="beginProject">
+          <Plus :size="15" />{{ t('work.mobile_new') }}
+        </button>
+      </div>
+
+      <form v-if="creatingProject" class="mobile-create-project" @submit.prevent="createProject">
+        <div class="mobile-create-heading">
+          <strong>{{ t('work.new_project') }}</strong>
+          <button class="btn btn-icon" type="button" :aria-label="t('common.close')" @click="creatingProject = false"><X :size="17" /></button>
+        </div>
+        <input v-model.trim="projectDraft.title" required maxlength="200" :placeholder="t('work.project_name_hint')" />
+        <textarea v-model.trim="projectDraft.mission" rows="2" :placeholder="t('work.project_mission_hint')"></textarea>
+        <input v-model.trim="projectDraft.currentPhase" maxlength="120" :placeholder="t('work.current_phase_hint')" />
+        <div class="form-actions">
+          <button class="btn btn-secondary" type="button" @click="creatingProject = false">{{ t('common.cancel') }}</button>
+          <button class="btn btn-primary" type="submit" :disabled="saving || !projectDraft.title">{{ t('work.create_action') }}</button>
+        </div>
+      </form>
+
+      <div v-if="!sortedProjects.length && !creatingProject" class="mobile-work-empty">
+        <Route :size="26" />
+        <span>{{ t('work.empty_projects') }}</span>
+        <button class="btn btn-secondary btn-compact" type="button" @click="beginProject"><Plus :size="15" />{{ t('work.mobile_new') }}</button>
+      </div>
+
+      <div v-else class="mobile-project-list">
+        <WorkProjectAccordion
+          v-for="project in sortedProjects"
+          :key="project.id"
+          :project="project"
+          :expanded="expandedProjectIds.has(project.id)"
+          :count-label="mobileProjectCountLabel(project.id)"
+          :loading="Boolean(mobileProjectLoading[project.id])"
+          :error="mobileProjectErrors[project.id] || ''"
+          @toggle="toggleMobileProject(project.id)"
+          @retry="loadMobileProject(project.id)"
+        >
+          <template v-if="mobileAggregates[project.id]">
+            <WorkMobileOverview v-if="mobileActiveTab === 'overview'" :aggregate="mobileAggregates[project.id]" />
+
+            <div v-else-if="mobileActiveTab === 'goals'" class="mobile-item-list">
+              <article v-for="goal in mobileAggregates[project.id].goals" :key="goal.id" class="mobile-work-item" :data-work-object-id="goal.id">
+                <strong>{{ goal.title }}</strong>
+                <p v-if="goal.data?.outcome || goal.description">{{ goal.data?.outcome || goal.description }}</p>
+                <span class="mini-status">{{ statusLabel(goal.status) }}</span>
+                <div v-if="mobileRuntimeForGoal(project.id, goal.id)" class="runtime-card">
+                  <div class="runtime-state-line">
+                    <span class="runtime-dot" :class="mobileRuntimeForGoal(project.id, goal.id).run.status"></span>
+                    <strong>{{ runtimeStatusLabel(mobileRuntimeForGoal(project.id, goal.id).run.status) }}</strong>
+                    <small>{{ runtimePhaseLabel(mobileRuntimeForGoal(project.id, goal.id).run.phase) }}</small>
+                  </div>
+                  <p v-if="mobileRuntimeForGoal(project.id, goal.id).run.nextAction" class="runtime-next">{{ runtimeText(mobileRuntimeForGoal(project.id, goal.id).run.nextAction) }}</p>
+                  <div v-if="mobileRuntimeForGoal(project.id, goal.id).pendingApproval" class="runtime-actions">
+                    <button v-for="choice in mobileRuntimeForGoal(project.id, goal.id).pendingApproval.choices" :key="choice.choiceId"
+                      class="btn btn-secondary btn-compact" type="button" :disabled="runtimeBusy === mobileRuntimeForGoal(project.id, goal.id).run.runId"
+                      @click="handleApproval(mobileRuntimeForGoal(project.id, goal.id), choice)">{{ t(choice.labelKey) }}</button>
+                  </div>
+                  <div v-else-if="!isTerminalRuntime(mobileRuntimeForGoal(project.id, goal.id).run.status)" class="runtime-actions">
+                    <button v-if="['ready', 'blocked', 'waiting_user'].includes(mobileRuntimeForGoal(project.id, goal.id).run.status)"
+                      class="btn btn-secondary btn-compact" type="button" :disabled="runtimeBusy === mobileRuntimeForGoal(project.id, goal.id).run.runId"
+                      @click="handleRuntimeAction(mobileRuntimeForGoal(project.id, goal.id), 'continue')">{{ t('goal.continue') }}</button>
+                    <button v-if="mobileRuntimeForGoal(project.id, goal.id).run.status !== 'waiting_user'"
+                      class="btn btn-secondary btn-compact" type="button" :disabled="runtimeBusy === mobileRuntimeForGoal(project.id, goal.id).run.runId"
+                      @click="handleRuntimeAction(mobileRuntimeForGoal(project.id, goal.id), 'defer')">{{ t('goal.defer') }}</button>
+                    <button class="btn btn-secondary btn-compact" type="button" :disabled="runtimeBusy === mobileRuntimeForGoal(project.id, goal.id).run.runId"
+                      @click="handleRuntimeAction(mobileRuntimeForGoal(project.id, goal.id), 'cancel')">{{ t('goal.cancel') }}</button>
+                  </div>
+                </div>
+              </article>
+              <p v-if="mobileAggregates[project.id].goals.length === 0" class="column-empty">{{ t('work.empty_goals') }}</p>
+            </div>
+
+            <div v-else-if="mobileActiveTab === 'tasks'" class="mobile-item-list">
+              <article v-for="task in mobileAggregates[project.id].tasks" :key="task.id" class="mobile-work-item mobile-task-item" :class="{ complete: task.status === 'done' }">
+                <button class="task-toggle" type="button" :disabled="task.status === 'done'" @click="completeTask(task)">
+                  <CheckCircle2 v-if="task.status === 'done'" :size="18" /><Circle v-else :size="18" />
+                </button>
+                <div><strong>{{ task.title }}</strong><p v-if="task.description">{{ task.description }}</p><span class="mini-status">{{ statusLabel(task.status) }}</span></div>
+              </article>
+              <p v-if="mobileAggregates[project.id].tasks.length === 0" class="column-empty">{{ t('work.empty_tasks') }}</p>
+            </div>
+
+            <div v-else-if="mobileActiveTab === 'decisions'" class="mobile-item-list">
+              <article v-for="decision in mobileAggregates[project.id].decisions" :key="decision.id" class="mobile-work-item">
+                <strong>{{ decision.data?.decision || decision.title }}</strong><p v-if="decision.data?.reason">{{ decision.data.reason }}</p><span class="mini-status">{{ statusLabel(decision.status) }}</span>
+              </article>
+              <p v-if="mobileAggregates[project.id].decisions.length === 0" class="column-empty">{{ t('work.empty_decisions') }}</p>
+            </div>
+
+            <div v-else class="mobile-activity-list">
+              <div v-for="event in mobileAggregates[project.id].recentEvents" :key="event.id" class="activity-row">
+                <span class="activity-mark"></span><span>{{ eventLabel(event) }}</span><time>{{ formatTime(event.createdAt) }}</time>
+              </div>
+              <p v-if="mobileAggregates[project.id].recentEvents.length === 0" class="column-empty">{{ t('work.empty_activity') }}</p>
+            </div>
+          </template>
+        </WorkProjectAccordion>
+      </div>
+    </main>
   </section>
 </template>
 
@@ -363,14 +465,19 @@
 import { computed, inject, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import {
-  Check, CheckCircle2, Circle, CircleAlert, FileDown,
+  Check, CheckCircle2, ChevronDown, Circle, CircleAlert, FileDown,
   Clock3, GitCompareArrows, History, Link2, ListChecks, LoaderCircle, Milestone, Plus, RefreshCw, Route, Scale,
   Target, X,
 } from 'lucide-vue-next';
+import WorkMobileOverview from '../components/work/WorkMobileOverview.vue';
+import WorkMobileTabs from '../components/work/WorkMobileTabs.vue';
+import WorkProjectAccordion from '../components/work/WorkProjectAccordion.vue';
+import { getMobileProjectCounts, sortProjectsByUpdatedAt, toggleExpandedProjectIds } from '../work/mobile-work-view.js';
 
 const { t, locale } = useI18n();
 const layoutMode = inject('layoutMode', ref('desktop-wide'));
 const terminalKind = inject('terminalKind', 'desktop');
+const isNativeMobile = terminalKind === 'native-mobile';
 const projects = ref([]);
 const aggregate = ref(null);
 const activeProjectId = ref('');
@@ -385,6 +492,14 @@ const deferredChangeReviews = ref([]);
 const changeReviewDrafts = reactive({});
 const runtimeRuns = ref([]);
 const runtimeBusy = ref('');
+const mobileActiveTab = ref('overview');
+const mobileAggregates = reactive({});
+const mobileRuntimes = reactive({});
+const mobileProjectErrors = reactive({});
+const mobileProjectLoading = reactive({});
+const expandedProjectIds = ref(new Set());
+const mobilePendingOpen = ref(false);
+let mobileExpansionInitialized = false;
 let stopRuntimeListener = null;
 
 const projectDraft = reactive({ title: '', mission: '', currentPhase: '' });
@@ -392,6 +507,8 @@ const itemDraft = reactive({ kind: 'task', title: '', reason: '' });
 
 const openTasks = computed(() => (aggregate.value?.tasks || []).filter(task => !['done', 'cancelled', 'archived'].includes(task.status)));
 const runtimeByGoal = computed(() => Object.fromEntries(runtimeRuns.value.map(item => [item.run.goalId, item])));
+const sortedProjects = computed(() => sortProjectsByUpdatedAt(projects.value));
+const mobilePendingCount = computed(() => pendingLinks.value.length + pendingChangeReviews.value.length + deferredChangeReviews.value.length);
 const itemPlaceholder = computed(() => ({
   task: t('work.task_hint'),
   goal: t('work.goal_hint'),
@@ -408,6 +525,60 @@ function beginProject() {
   errorMessage.value = '';
 }
 
+function toggleMobileProject(projectId) {
+  expandedProjectIds.value = toggleExpandedProjectIds(expandedProjectIds.value, projectId);
+  if (expandedProjectIds.value.has(projectId) && !mobileAggregates[projectId] && !mobileProjectLoading[projectId]) {
+    loadMobileProject(projectId);
+  }
+}
+
+function mobileProjectCountLabel(projectId) {
+  const aggregateValue = mobileAggregates[projectId];
+  if (!aggregateValue) return mobileProjectLoading[projectId] ? t('work.mobile_loading') : '';
+  const counts = getMobileProjectCounts(aggregateValue);
+  if (mobileActiveTab.value === 'overview') {
+    return t('work.mobile_overview_count', { goals: counts.goals, tasks: counts.tasks });
+  }
+  return t('work.mobile_item_count', { count: counts[mobileActiveTab.value] || 0 });
+}
+
+function mobileRuntimeForGoal(projectId, goalId) {
+  return (mobileRuntimes[projectId] || []).find(item => item.run.goalId === goalId);
+}
+
+async function loadMobileProject(projectId) {
+  mobileProjectLoading[projectId] = true;
+  mobileProjectErrors[projectId] = '';
+  try {
+    const [projectAggregate, runtimes] = await Promise.all([
+      window.appAPI.workProjectGet(projectId),
+      window.appAPI.goalRuntimeList({ projectId, limit: 50 }),
+    ]);
+    mobileAggregates[projectId] = projectAggregate;
+    mobileRuntimes[projectId] = runtimes;
+  } catch (error) {
+    mobileProjectErrors[projectId] = String(error);
+  } finally {
+    mobileProjectLoading[projectId] = false;
+  }
+}
+
+async function loadMobileProjects() {
+  const currentIds = new Set(sortedProjects.value.map(project => project.id));
+  for (const projectId of Object.keys(mobileAggregates)) {
+    if (!currentIds.has(projectId)) {
+      delete mobileAggregates[projectId];
+      delete mobileRuntimes[projectId];
+      delete mobileProjectErrors[projectId];
+    }
+  }
+  if (!mobileExpansionInitialized && sortedProjects.value.length) {
+    expandedProjectIds.value = new Set([sortedProjects.value[0].id]);
+    mobileExpansionInitialized = true;
+  }
+  await Promise.allSettled(sortedProjects.value.map(project => loadMobileProject(project.id)));
+}
+
 async function loadProjects() {
   loading.value = true;
   errorMessage.value = '';
@@ -415,7 +586,9 @@ async function loadProjects() {
     projects.value = await window.appAPI.workProjectList();
     await loadPendingLinks();
     await loadChangeReviews();
-    if (!activeProjectId.value && projects.value.length) {
+    if (isNativeMobile) {
+      await loadMobileProjects();
+    } else if (!activeProjectId.value && projects.value.length) {
       await selectProject(projects.value[0].id);
     }
   } catch (error) {
@@ -448,7 +621,7 @@ async function handleChangeReview(review, action) {
     delete changeReviewDrafts[review.id];
     await loadChangeReviews();
     await loadProjects();
-    if (activeProjectId.value) await selectProject(activeProjectId.value);
+    if (!isNativeMobile && activeProjectId.value) await selectProject(activeProjectId.value);
   } catch (error) {
     errorMessage.value = String(error);
     await loadChangeReviews();
@@ -481,7 +654,7 @@ async function resolveCandidate(candidate) {
     delete candidateDrafts[candidate.id];
     await loadPendingLinks();
     await loadProjects();
-    if (outcome.candidate?.selectedProjectId) await selectProject(outcome.candidate.selectedProjectId);
+    if (!isNativeMobile && outcome.candidate?.selectedProjectId) await selectProject(outcome.candidate.selectedProjectId);
   } catch (error) {
     errorMessage.value = String(error);
     await loadPendingLinks();
@@ -537,9 +710,17 @@ async function selectProject(projectId) {
   }
 }
 
-async function refreshRuntime() {
-  if (!activeProjectId.value) return;
-  runtimeRuns.value = await window.appAPI.goalRuntimeList({ projectId: activeProjectId.value, limit: 50 });
+async function refreshRuntime(projectId = activeProjectId.value) {
+  if (!projectId) return;
+  const runtimes = await window.appAPI.goalRuntimeList({ projectId, limit: 50 });
+  if (isNativeMobile) mobileRuntimes[projectId] = runtimes;
+  else runtimeRuns.value = runtimes;
+}
+
+async function refreshProject(projectId) {
+  if (!projectId) return;
+  if (isNativeMobile) await loadMobileProject(projectId);
+  else await selectProject(projectId);
 }
 
 async function handleApproval(runtime, choice) {
@@ -551,8 +732,8 @@ async function handleApproval(runtime, choice) {
       choiceId: choice.choiceId,
       expectedRevision: runtime.pendingApproval.revision,
       actor: 'user',
-      deviceId: 'desktop',
-      inputModality: 'pointer',
+      deviceId: isNativeMobile ? 'mobile' : 'desktop',
+      inputModality: isNativeMobile ? 'touch' : 'pointer',
       trustedDevice: true,
       idempotencyKey: idempotencyKey('goal-approval'),
     });
@@ -563,11 +744,10 @@ async function handleApproval(runtime, choice) {
         idempotencyKey: idempotencyKey('goal-approved-continue'),
       });
     }
-    await refreshRuntime();
-    await selectProject(activeProjectId.value);
+    await refreshProject(runtime.run.projectId);
   } catch (error) {
     errorMessage.value = String(error);
-    await refreshRuntime();
+    await refreshRuntime(runtime.run.projectId);
   } finally {
     runtimeBusy.value = '';
   }
@@ -585,11 +765,10 @@ async function handleRuntimeAction(runtime, action) {
     if (action === 'continue') await window.appAPI.goalRuntimeContinue(input);
     if (action === 'defer') await window.appAPI.goalRuntimeDefer(input);
     if (action === 'cancel') await window.appAPI.goalRuntimeCancel(input);
-    await refreshRuntime();
-    await selectProject(activeProjectId.value);
+    await refreshProject(runtime.run.projectId);
   } catch (error) {
     errorMessage.value = String(error);
-    await refreshRuntime();
+    await refreshRuntime(runtime.run.projectId);
   } finally {
     runtimeBusy.value = '';
   }
@@ -612,7 +791,12 @@ async function createProject() {
     projectDraft.currentPhase = '';
     creatingProject.value = false;
     await loadProjects();
-    await selectProject(project.id);
+    if (isNativeMobile) {
+      expandedProjectIds.value = new Set([...expandedProjectIds.value, project.id]);
+      await loadMobileProject(project.id);
+    } else {
+      await selectProject(project.id);
+    }
   } catch (error) {
     errorMessage.value = String(error);
   } finally {
@@ -640,7 +824,7 @@ async function createWorkItem() {
     });
     itemDraft.title = '';
     itemDraft.reason = '';
-    await selectProject(activeProjectId.value);
+    await refreshProject(task.projectId || activeProjectId.value);
     await loadProjects();
   } catch (error) {
     errorMessage.value = String(error);
@@ -719,7 +903,13 @@ async function handleTodayBriefNavigation(event) {
   const item = event.detail;
   const projectId = item?.action?.payload?.projectId || item?.messageArgs?.projectId;
   const objectId = item?.action?.targetId || item?.action?.payload?.goalId;
-  if (projectId) await selectProject(projectId);
+  if (projectId && isNativeMobile) {
+    expandedProjectIds.value = new Set([...expandedProjectIds.value, projectId]);
+    if (!mobileAggregates[projectId]) await loadMobileProject(projectId);
+    mobileActiveTab.value = 'goals';
+  } else if (projectId) {
+    await selectProject(projectId);
+  }
   requestAnimationFrame(() => {
     const target = objectId ? document.querySelector(`[data-work-object-id="${CSS.escape(objectId)}"]`) : null;
     target?.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -728,7 +918,15 @@ async function handleTodayBriefNavigation(event) {
 
 onMounted(async () => {
   await loadProjects();
-  stopRuntimeListener = await window.appAPI.listenEvent('goal:runtime-state', () => refreshRuntime());
+  stopRuntimeListener = await window.appAPI.listenEvent('goal:runtime-state', event => {
+    const projectId = event?.payload?.projectId || event?.projectId;
+    if (isNativeMobile) {
+      if (projectId) loadMobileProject(projectId);
+      else Promise.allSettled(sortedProjects.value.map(project => loadMobileProject(project.id)));
+    } else {
+      refreshRuntime();
+    }
+  });
   window.addEventListener('today-brief-action', handleTodayBriefNavigation);
 });
 onBeforeUnmount(() => {
@@ -775,9 +973,6 @@ onBeforeUnmount(() => {
 .project-option.active { color: var(--user-accent, var(--accent-primary)); border-color: color-mix(in srgb, var(--user-accent, var(--accent-primary)) 24%, transparent); background: color-mix(in srgb, var(--user-accent, var(--accent-primary)) 8%, transparent); }
 .project-state-dot { width: 7px; height: 7px; flex: 0 0 auto; box-sizing: border-box; border: 1.5px solid var(--text-muted); border-radius: 50%; background: transparent; }
 .project-option.active .project-state-dot, .project-state-dot.active { border-color: var(--user-accent, var(--accent-primary)); background: var(--user-accent, var(--accent-primary)); }
-.project-select-wrap { max-width: 1000px; min-height: 38px; margin: 0 auto 12px; display: flex; align-items: center; gap: 8px; border-bottom: 1px solid var(--border-subtle); padding: 0 2px 8px; }
-.project-select-wrap select { min-width: 0; border: 0; padding: 7px 28px 7px 0; background: transparent; font-weight: 600; }
-.project-select-wrap select:focus { border: 0; }
 .project-board, .create-project-card, .work-empty-state { border: 1px solid var(--border-subtle); border-radius: 16px; background: var(--surface-card); }
 .work-empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; color: var(--text-muted); text-align: center; }
 .work-main { min-width: 0; max-width: 1000px; margin: 0 auto; }
@@ -843,15 +1038,34 @@ textarea { resize: vertical; }
 .spin { animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-.work-view.layout-desktop-compact,
-.work-view.layout-mobile-native { padding: 16px 14px 84px; }
+.mobile-work-main { min-width: 0; padding: 0 14px 28px; }
+.mobile-work-toolbar { display: flex; align-items: center; justify-content: space-between; min-height: 52px; border-bottom: 1px solid var(--border-subtle); color: var(--text-tertiary); font-size: 12px; }
+.mobile-pending-summary { display: flex; align-items: center; justify-content: space-between; width: 100%; min-height: 43px; border: 0; border-bottom: 1px solid var(--border-subtle); padding: 0 2px; color: var(--text-secondary); background: transparent; font: inherit; font-size: 12px; cursor: pointer; }
+.mobile-pending-summary svg { transition: transform 160ms ease; }
+.mobile-pending-summary svg.rotated { transform: rotate(180deg); }
+.mobile-create-project { display: grid; gap: 9px; border-bottom: 1px solid var(--border-subtle); padding: 14px 0 16px; }
+.mobile-create-heading { display: flex; align-items: center; justify-content: space-between; }
+.mobile-create-heading strong { font-size: 14px; }
+.mobile-work-empty { display: flex; flex-direction: column; align-items: center; gap: 10px; min-height: 240px; justify-content: center; color: var(--text-muted); font-size: 12px; }
+.mobile-project-list { min-width: 0; }
+.mobile-item-list { display: grid; gap: 8px; }
+.mobile-work-item { border: 1px solid var(--border-subtle); border-radius: 10px; padding: 10px; background: var(--surface-card); }
+.mobile-work-item > strong { display: block; font-size: 12px; line-height: 1.45; }
+.mobile-work-item > p, .mobile-task-item p { margin: 4px 0 8px; color: var(--text-tertiary); font-size: 11px; line-height: 1.45; }
+.mobile-task-item { display: flex; gap: 9px; }
+.mobile-task-item.complete strong { color: var(--text-muted); text-decoration: line-through; }
+.mobile-activity-list { padding: 0 2px; }
+
+.work-view.layout-desktop-compact { padding: 16px 14px 84px; }
+.work-view.layout-mobile-native { padding: 0 0 84px; }
+.layout-mobile-native > .mobile-pending-summary { width: calc(100% - 28px); margin: 0 14px; }
+.layout-mobile-native > .assignment-panel { width: calc(100% - 28px); box-sizing: border-box; margin-right: 14px; margin-left: 14px; }
 .layout-desktop-compact .work-header,
 .layout-mobile-native .work-header { align-items: center; }
 .layout-desktop-compact .work-header p:not(.work-eyebrow),
 .layout-mobile-native .work-header p:not(.work-eyebrow) { display: none; }
 .layout-desktop-compact .assignment-card,
 .layout-mobile-native .assignment-card { grid-template-columns: 1fr; }
-.layout-mobile-native .assignment-card:nth-child(n+4) { display: none; }
 .layout-desktop-compact .assignment-controls,
 .layout-mobile-native .assignment-controls { display: grid; grid-template-columns: 1fr 1fr; }
 .layout-desktop-compact .assignment-controls select,
