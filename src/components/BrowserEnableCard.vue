@@ -40,7 +40,7 @@
     </div>
 
     <div class="card-footer" v-if="!confirmed">
-      <button class="btn btn-ghost" @click="$emit('cancel')">跳过</button>
+      <button class="btn btn-secondary" @click="$emit('cancel')">跳过</button>
       <button class="btn btn-primary" @click="handleConfirm">
         <Globe :size="14" />
         启用浏览器
@@ -210,34 +210,4 @@ function handleConfirm() {
   padding: var(--space-2);
 }
 
-.btn {
-  padding: var(--space-2) var(--space-4);
-  font-size: var(--text-sm);
-  border-radius: var(--radius-md);
-  cursor: pointer;
-  border: 1px solid transparent;
-  display: flex;
-  align-items: center;
-  gap: var(--space-1);
-}
-
-.btn-ghost {
-  background: transparent;
-  color: var(--text-secondary);
-}
-
-.btn-ghost:hover {
-  background: var(--surface-hover);
-}
-
-.btn-primary {
-  background: transparent;
-  color: var(--text-primary);
-  border: 1px solid var(--border-default);
-}
-
-.btn-primary:hover {
-  border-color: var(--text-secondary);
-  background: var(--surface-hover);
-}
 </style>

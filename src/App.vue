@@ -1,5 +1,8 @@
 <template>
-  <div class="app-shell" :class="{ 'is-mobile': isMobile }">
+  <div
+    class="app-shell"
+    :class="[{ 'is-mobile': isMobile }, `layout-${layoutMode}`, `terminal-${terminalKind}`]"
+  >
     <!-- 启动画面已移至 index.html (Native Splash) -->
     <!-- 标题栏拖拽区域 (Desktop) -->
     <div v-if="isTauri && !isNativeMobile" class="titlebar titlebar-drag">
@@ -292,12 +295,17 @@
     <!-- 移动端悬浮球 (灵光一现) -->
     <div v-if="isMobile && isSetupComplete" 
          class="mobile-fab" 
+         role="button"
+         tabindex="0"
+         :aria-label="$t('quicknote.open')"
          :class="{ 'is-idle': fabIsIdle, 'is-dragging': isFabDragging }"
          :style="fabStyle"
          @pointerdown="onFabPointerDown"
          @pointermove="onFabPointerMove"
          @pointerup="onFabPointerUp"
          @pointercancel="onFabPointerUp"
+         @keydown.enter.prevent="openQuickNote"
+         @keydown.space.prevent="openQuickNote"
          @click.prevent>
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 152.85 99.94">
         <g><path fill="currentColor" d="M166.3,82.45a29.91,29.91,0,0,1-52.92,19.11,29.91,29.91,0,0,1-46,0A29.91,29.91,0,0,1,14.45,82.45V15.72a2.3,2.3,0,0,1,2.3-2.3H26a2.3,2.3,0,0,1,2.3,2.3V57.24a29.92,29.92,0,0,1,39.12,6.09,29.91,29.91,0,0,1,39.11-6.09V15.72a2.3,2.3,0,0,1,2.3-2.3H118a2.3,2.3,0,0,1,2.3,2.3V57.24a29.92,29.92,0,0,1,46,25.21Zm-13.8,0a16.11,16.11,0,1,0-16.11,16.1A16.11,16.11,0,0,0,152.5,82.45Zm-46,0a16.11,16.11,0,1,0-16.1,16.1A16.1,16.1,0,0,0,106.48,82.45Zm-46,0a16.11,16.11,0,1,0-16.11,16.1A16.11,16.11,0,0,0,60.47,82.45Z" transform="translate(-13.95 -12.92)"/></g>
@@ -305,7 +313,23 @@
     </div>
 
     <!-- 闪念速记浮层 -->
-    <QuickNoteOverlay ref="quickNoteRef" />
+    <QuickNoteOverlay
+      ref="quickNoteRef"
+      :today-count="dailyBrief.snapshot.value?.actionableCount || 0"
+      @open-today="openTodayFromQuickNote"
+    />
+
+    <TodayLayerSurface
+      :visible="dailyBrief.isVisible.value"
+      :snapshot="dailyBrief.snapshot.value"
+      :loading="dailyBrief.loading.value"
+      :refreshing="dailyBrief.refreshing.value"
+      :error-code="dailyBrief.errorCode.value"
+      @ready="handleTodayReady"
+      @close="dailyBrief.closeTodayLayer"
+      @refresh="dailyBrief.refresh"
+      @action="handleTodayBriefAction"
+    />
 
     <!-- 底部导航 (Mobile) -->
     <BottomNavigation 
@@ -328,12 +352,15 @@ import KnowledgeGraphView from './views/KnowledgeGraphView.vue';
 import WorkView from './views/WorkView.vue';
 import SetupWizard from './components/SetupWizard.vue';
 import QuickNoteOverlay from './components/QuickNoteOverlay.vue';
+import TodayLayerSurface from './components/TodayLayerSurface.vue';
 import BottomNavigation from './components/BottomNavigation.vue';
 import GlobalDialog from './components/GlobalDialog.vue';
 import { Inbox, Settings, Plus, X, Sun, Moon, ChevronLeft, ChevronRight, ChevronDown, Search, MessageSquare, CalendarDays, Brain, Plug, FolderOpen, Palette, Info, Sunrise, Waypoints, Menu, Smartphone, Calendar, CheckSquare, Timer, BriefcaseBusiness } from 'lucide-vue-next';
 import { useI18n } from 'vue-i18n';
 import { listen } from '@tauri-apps/api/event';
 import { getModelMeta } from '@/composables/useModelSwitcher';
+import { useDailyBrief } from '@/composables/useDailyBrief.js';
+import { createLayoutState } from '@/layout/layout-mode.js';
 
 // Tauri Window API (用于自定义窗口按钮)
 function minimizeWindow() { window.appAPI.minimizeWindow(); }
@@ -351,7 +378,10 @@ const activeSettingsPanel = ref('model'); // 'model' | 'connections' | 'workspac
 const activeSchedulePanel = ref('timeline'); // 'timeline' | 'todo' | 'cron'
 const chatViewRef = ref(null);
 const quickNoteRef = ref(null);
+const dailyBrief = useDailyBrief();
 const mobileDrawerOpen = ref(false);
+provide('dailyBrief', dailyBrief);
+provide('openTodayLayer', dailyBrief.openTodayLayer);
 
 const lastSyncTime = ref(localStorage.getItem('bob-last-sync-time') || '');
 const lastSyncStatus = ref(localStorage.getItem('bob-last-sync-status') || '');
@@ -359,20 +389,38 @@ provide('lastSyncTime', lastSyncTime);
 provide('lastSyncStatus', lastSyncStatus);
 
 // ── 响应式移动端检测 (宽高比 1:1 断点) ──
-function checkMobile() {
-  return window.innerHeight > window.innerWidth;
-}
-const isMobile = ref(checkMobile());
+const initialLayout = createLayoutState({
+  width: window.innerWidth,
+  height: window.innerHeight,
+  userAgent: navigator.userAgent,
+});
+const terminalKind = initialLayout.terminalKind;
+const viewportShape = ref(initialLayout.viewportShape);
+const layoutMode = ref(initialLayout.layoutMode);
+// Compatibility flag: existing navigation treats non-wide layouts as compact.
+const isMobile = ref(initialLayout.compactNavigation);
 provide('isMobile', isMobile);
+provide('terminalKind', terminalKind);
+provide('viewportShape', viewportShape);
+provide('layoutMode', layoutMode);
 
-const isNativeMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+const isNativeMobile = terminalKind === 'native-mobile';
 provide('isNativeMobile', isNativeMobile);
 const isTauri = !!window.__TAURI_INTERNALS__;
 
 let resizeDebounce;
 function onResizeHandler() {
   clearTimeout(resizeDebounce);
-  resizeDebounce = setTimeout(() => { isMobile.value = checkMobile(); }, 100);
+  resizeDebounce = setTimeout(() => {
+    const nextLayout = createLayoutState({
+      width: window.innerWidth,
+      height: window.innerHeight,
+      userAgent: navigator.userAgent,
+    });
+    viewportShape.value = nextLayout.viewportShape;
+    layoutMode.value = nextLayout.layoutMode;
+    isMobile.value = nextLayout.compactNavigation;
+  }, 100);
 }
 
 // ── 闪念速记：全局 provide，子组件 inject 后调用即可 ──
@@ -380,6 +428,39 @@ function openQuickNote() {
   quickNoteRef.value?.open();
 }
 provide('openQuickNote', openQuickNote);
+
+function openTodayFromQuickNote(returnContext) {
+  void dailyBrief.openTodayLayer('quick_note', returnContext);
+}
+
+function handleTodayReady() {
+  const fromQuickNote = dailyBrief.surface.entrySource === 'quick_note';
+  dailyBrief.notifyReady();
+  void dailyBrief.ensureLoaded().then(() => dailyBrief.markSeen());
+  if (fromQuickNote) quickNoteRef.value?.close({ preserveDraft: true, force: true });
+}
+
+async function handleTodayBriefAction(item) {
+  const action = item?.action;
+  if (!action || action.kind === 'none') return;
+  if (action.kind === 'open_calendar') {
+    activeDrawer.value = 'schedule';
+    activeSchedulePanel.value = 'timeline';
+  } else if (action.kind === 'open_todo') {
+    activeDrawer.value = 'schedule';
+    activeSchedulePanel.value = 'todo';
+  } else if (action.kind === 'continue_conversation' && action.targetId) {
+    activeDrawer.value = 'chat';
+    await switchConversation(action.targetId);
+  } else if (['open_goal', 'open_work_object', 'respond_approval'].includes(action.kind)) {
+    activeDrawer.value = 'work';
+    window.dispatchEvent(new CustomEvent('today-brief-action', { detail: item }));
+  } else {
+    window.dispatchEvent(new CustomEvent('today-brief-action', { detail: item }));
+  }
+  dailyBrief.closeTodayLayer();
+}
+provide('handleTodayBriefAction', handleTodayBriefAction);
 
 
 import { watch } from 'vue';
@@ -521,6 +602,15 @@ const settingsNavItems = computed(() => [
 let unlistenConfigReconciled = null;
 let unlistenRemoteMessage = null;
 let unlistenSync = null;
+let unlistenBriefGoal = null;
+let unlistenBriefCalendar = null;
+let unlistenBriefDream = null;
+let briefRefreshTimer = null;
+
+function scheduleDailyBriefRefresh() {
+  clearTimeout(briefRefreshTimer);
+  briefRefreshTimer = setTimeout(() => { void dailyBrief.refresh(); }, 250);
+}
 
 function handleBackButton() {
   // 1. 模态弹窗层
@@ -529,13 +619,19 @@ function handleBackButton() {
     return true;
   }
   
-  // 2. 全局覆盖层 (闪念速记)
+  // 2. Today Layer
+  if (dailyBrief.isMounted.value) {
+    dailyBrief.closeTodayLayer();
+    return true;
+  }
+
+  // 3. 全局覆盖层 (闪念速记)
   if (quickNoteRef.value && quickNoteRef.value.visible) {
     quickNoteRef.value.close();
     return true;
   }
   
-  // 3. 移动端侧边抽屉层
+  // 4. 移动端侧边抽屉层
   if (isMobile.value && mobileDrawerOpen.value) {
     mobileDrawerOpen.value = false;
     return true;
@@ -567,7 +663,7 @@ function handleBackButton() {
 }
 
 onMounted(async () => {
-  if (isNativeMobile.value) {
+  if (isNativeMobile) {
     const checkSharedIntents = async () => {
       try {
         const intents = await window.appAPI.getSharedIntents();
@@ -661,6 +757,7 @@ onMounted(async () => {
 
   if (isSetupComplete.value) {
     await loadConversations();
+    void dailyBrief.ensureLoaded();
     currentModel.value = await window.appAPI.getConfig('model') || '';
     // 恢复 UI 缩放偏好和主题和侧边栏宽度
     const savedWidth = await window.appAPI.getConfig('sidebarWidth');
@@ -756,6 +853,13 @@ onMounted(async () => {
     }
   }
 
+  unlistenBriefCalendar = window.appAPI.onCalendarUpdated?.(scheduleDailyBriefRefresh) || null;
+  unlistenBriefDream = window.appAPI.onDreamCompleted?.(scheduleDailyBriefRefresh) || null;
+  if (window.appAPI.listenEvent) {
+    unlistenBriefGoal = await window.appAPI.listenEvent('goal:runtime-state', scheduleDailyBriefRefresh);
+  }
+  window.addEventListener('sync:refresh-events', scheduleDailyBriefRefresh);
+
   // 本地存储同步主题，供 index.html 启动瞬间读取
   if (currentTheme.value) localStorage.setItem('bob-theme', currentTheme.value);
 
@@ -820,6 +924,11 @@ onUnmounted(() => {
   if (unlistenRemoteMessage) unlistenRemoteMessage();
   if (unlistenSync) unlistenSync();
   if (unlistenSchedulerGlobal) unlistenSchedulerGlobal();
+  if (unlistenBriefGoal) unlistenBriefGoal();
+  if (unlistenBriefCalendar) unlistenBriefCalendar();
+  if (unlistenBriefDream) unlistenBriefDream();
+  window.removeEventListener('sync:refresh-events', scheduleDailyBriefRefresh);
+  clearTimeout(briefRefreshTimer);
   if (searchDebounce) clearTimeout(searchDebounce);
 });
 

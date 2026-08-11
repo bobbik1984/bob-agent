@@ -67,3 +67,25 @@
 理由：把“任务看起来复杂”“允许做什么”和“能否跨时间恢复”混为一体，会导致普通问答过度升级、模型越权或旧 Goal Loop 冒充持久执行。三者分离后，断网仍可回答，复杂只读分析不会获得写工具，Advanced 也不会虚假完成。
 
 约束：长文本本身不能升级；重复日程本身是 Direct；Clerk 不能授予 Action 权限；Auto Advanced 不得自动进入旧 `goal.rs`。用户显式覆盖仍不能绕过 R2/R3 确认。
+
+## D-013：Phase 5 使用单活动执行切片与证据门
+
+- 日期：2026-08-11
+- 状态：accepted
+
+决定：Work Core Goal 保存期望终态，独立 Goal Runtime 保存 Run、Attempt、Evidence、Checkpoint、Approval 和 Event。首版全局最多运行一个有预算的顺序切片；R0/R1 可自动推进，R2/R3 与关键歧义进入持久结构化选择。Repository 在没有已验证必需 Evidence 时拒绝 `done`。
+
+理由：先验证一个可恢复、可审计、不会虚假完成的纵切片，比直接引入 DAG、多 Agent 或常驻 Host 更能暴露真实产品问题，同时保持 PC/Android 零外部运行时和客户端体积边界。
+
+约束：应用关闭期间不承诺执行；未知副作用不得自动重放；R3 handoff 不等于批准；2–4 个选项协议必须适配触控、鼠标和手表旋钮/滚动，语音仅是可选输入；Phase 6 前不得把顺序 Plan 宣称为 DAG。
+
+## D-014：Today 是对话内的只读投影，不是新的工作真相源
+
+- 日期：2026-08-11
+- 状态：accepted
+
+决定：Bob 启动与新对话继续以 Conversation 为主界面。Today 以紧凑卡片和共享 Layer 投影 Calendar、Todo、Work Core、Goal Runtime、Session 与 Dream；悬浮速记仅提供入口并保留草稿。普通聚合使用确定性本地规则，不依赖 Main/Clerk。
+
+理由：独立工作首页会增加导航与阅读摩擦，也容易形成第二套状态。统一 surface 能让桌面、手机和未来轻量终端共享同一信息层级，同时保留 Bob “一句话进入、按需展开”的产品特征。
+
+约束：Today 不得改写源数据；一个来源失败不得污染全部状态；每设备已读相互独立；默认只显示一个焦点和最多两个关注项；移动端不得强制全屏；Quick Note → Today 切换不得丢失未提交文本；语义增强失败必须退回确定性结果。

@@ -3,23 +3,24 @@
 > **文档定位**：本文件是 Bob Agent 所有产品特性的**唯一真相源 (Single Source of Truth)**。
 > 未来推广网站、README、应用商店描述等所有面向用户的文案，均应从本文件提取内容，而非反向维护。
 >
-> 最后更新：2026-06-24
+> 最后更新：2026-08-11
 
 ---
 
 ## 目录 / Table of Contents
 
 1. [极简交互与原生体感](#minimal-interaction--native-ux)
-2. [多模型自动发现与协作](#model-hub--auto-discovery)
-3. [MCP 可扩展工具生态](#mcp-extensible-tool-ecosystem)
-4. [自进化认知记忆系统](#self-evolving-cognitive-memory)
-5. [可视化知识图谱](#interactive-knowledge-graph)
-6. [Complexity Router 与 Goal Loop 原型](#goal-mode-execution-loop)
-7. [微信穿透网关](#wechat-gateway)
-8. [Web Drop 端到端加密极传](#web-drop-e2ee-file-transfer)
-9. [Doctor 自检与自愈](#self-diagnosis--auto-repair)
-10. [其他能力速览](#additional-capabilities)
-11. [路线图 / Roadmap](#roadmap)
+2. [Conversation-first Today Layer](#conversation-first-today-layer)
+3. [多模型自动发现与协作](#model-hub--auto-discovery)
+4. [MCP 可扩展工具生态](#mcp-extensible-tool-ecosystem)
+5. [自进化认知记忆系统](#self-evolving-cognitive-memory)
+6. [可视化知识图谱](#interactive-knowledge-graph)
+7. [Complexity Router 与 Goal Loop 原型](#goal-mode-execution-loop)
+8. [微信穿透网关](#wechat-gateway)
+9. [Web Drop 端到端加密极传](#web-drop-e2ee-file-transfer)
+10. [Doctor 自检与自愈](#self-diagnosis--auto-repair)
+11. [其他能力速览](#additional-capabilities)
+12. [路线图 / Roadmap](#roadmap)
 
 ---
 
@@ -43,6 +44,27 @@ Bob 被设计为"桌面上最安静的幽灵副手"——它栖居于系统托�
 ### 状态 / Status
 
 ✅ Shipped
+
+---
+
+## Conversation-first Today Layer {#conversation-first-today-layer}
+
+### 用户视角 / User Perspective
+
+Bob 启动和新对话仍以聊天为主，不增加一个需要学习的“工作首页”。对话首屏用一张紧凑 Today 卡片显示当前最重要的一件事和最多两个需关注项；点击后在同一个 Today Layer 中查看完整日程、待办、项目、Goal、审批、最近会话与 Dream 摘要。悬浮速记仍是灵感入口，底部 Today 按钮先打开同一层，再无感关闭浮窗，未提交草稿不会丢失。
+
+### 技术亮点 / Technical Highlights
+
+- Rust `daily_brief` 只读聚合现有真相源，不复制或改写日程、待办、项目与 Goal 状态。
+- 本地确定性去重和排序固定输出一个焦点、最多两个关注项；常规展示不调用大模型，断网可用。
+- SQLite 保存按本地日期的快照、revision、来源 fingerprint 与逐设备已读状态；内容变化才重新出现为未读。
+- 每个来源独立报告健康状态；单一来源失败显示 partial，不把其余可靠信息一起判为失败。
+- PC 与移动端共用同一信息层级；手机使用内部滚动的非全屏弹层，关闭后恢复原焦点。
+- 所有入口共用一个 App 级控制器和唯一 surface，支持重复点击合并、Escape、焦点陷阱及 reduced motion。
+
+### 状态 / Status
+
+✅ Shipped in v0.9.0；真实 PC/Android 发布产物仍需做最终体积与真机验收。
 
 ---
 
@@ -145,7 +167,7 @@ Bob 不只是一个无状态的聊天框——它会"记住你"。每次对话�
 
 ### 用户视角 / User Perspective
 
-默认 Auto 会先用本地规则判断 Direct、Deep 或 Advanced：普通问答和单步动作保持轻量，复杂分析在当前会话深入处理，跨时间、阶段、依赖或恢复需求标记为持续任务。只有真正模糊的语义才限时调用 Clerk，失败时保守降级且不阻止离线问答。Advanced 在持久 Runtime 完成前只做有限启动，不会自动进入旧 Goal Loop 或宣称长期目标完成。
+默认 Auto 会先用本地规则判断 Direct、Deep 或 Advanced：普通问答和单步动作保持轻量，复杂分析在当前会话深入处理，跨时间、阶段或恢复需求进入持久 Advanced Project Loop。只有真正模糊的语义才限时调用 Clerk。Advanced 会保存 Goal 状态、尝试、审批、证据与恢复点；R0/R1 可在有界预算内推进，R2/R3 和关键选择等待确认，证据不足不会显示完成。
 
 手动开启 Goal Mode 后，Bob 仍可使用历史 Maker–Checker 原型执行并由 Clerk 检查，未通过时最多进行 3 轮外层重试。该入口是实验性原型，不保证任务一定成功，也不支持持久任务图、应用重启恢复或节点级局部重跑。
 
@@ -154,6 +176,9 @@ Bob 不只是一个无状态的聊天框——它会"记住你"。每次对话�
 - **结构化路由结果**：返回 mode、task kind、置信度、风险、持续性、来源和原因代码；复杂只读分析不会获得写工具
 - **权限分离**：路由和用户覆盖都不能绕过 R0–R3 Policy Engine
 - **中英文回放集**：30+ 个稳定场景防止普通问答、长文本和重复提醒被过度升级
+- **持久状态**：SQLite 保存 Run、Attempt、Evidence、Checkpoint、Approval 与最近 50 条可见事件
+- **安全恢复**：应用启动后只恢复安全 R0/R1 检查点；结果未知的外部操作保持阻塞
+- **结构化选择**：2–4 个互斥选项适配鼠标、触控、旋钮或滚动，语音不是必要条件
 - **Maker-Checker 双角色架构（仅手动 Goal 原型）**：
   - **Maker (执行端)**：使用 Main Model，工具调用预算从默认 5 轮飙升至 **50 轮上限**，允许极其复杂的链路探索
   - **Checker (评估端)**：调用 Clerk Model 作为严格判决器，默认以 `FAIL` 为立场，逐条检查 Maker 产出
@@ -162,7 +187,7 @@ Bob 不只是一个无状态的聊天框——它会"记住你"。每次对话�
 
 ### 状态 / Status
 
-🟡 Prototype shipped；完整 Goal Runtime 见 `docs/GOAL_RUNTIME.md` 和 `todo.md` 目标 31
+✅ Phase 5 first vertical slice validated。当前是单 Agent Advanced Project Loop；Dynamic DAG、多 Agent、可信跨端 R3 最终确认仍未交付。旧手动 Goal Mode 仍是独立实验原型。
 
 ---
 

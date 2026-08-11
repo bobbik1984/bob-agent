@@ -529,7 +529,8 @@ html[data-ui-scale="comfortable"] {
   align-items: center;
   justify-content: center;
   gap: var(--space-2);
-  padding: var(--space-2) var(--space-4);
+  min-height: 32px;
+  padding: 0 var(--space-4);
   border: none;
   border-radius: var(--radius-md);
   font-family: var(--font-sans);
@@ -538,6 +539,18 @@ html[data-ui-scale="comfortable"] {
   cursor: pointer;
   transition: all var(--duration-fast) var(--ease-out);
   outline: none;
+}
+
+.btn:focus-visible,
+.btn-icon:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--user-accent, var(--accent-primary)) 55%, transparent);
+  outline-offset: 2px;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+  pointer-events: none;
 }
 
 .btn:active {
@@ -556,16 +569,41 @@ html[data-ui-scale="comfortable"] {
   transform: translateY(-1px);
 }
 
+.btn-secondary,
 .btn-ghost {
   background: transparent;
   color: var(--text-secondary);
   border: 1px solid var(--border-subtle);
 }
 
+.btn-secondary:hover,
 .btn-ghost:hover {
   background: var(--surface-glass);
   color: var(--text-primary);
   border-color: var(--border-default);
+}
+
+.btn-compact {
+  min-height: 28px;
+  padding: 0 var(--space-3);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+
+.btn-selected {
+  color: var(--user-accent, var(--accent-primary));
+  border-color: color-mix(in srgb, var(--user-accent, var(--accent-primary)) 38%, var(--border-subtle));
+  background: color-mix(in srgb, var(--user-accent, var(--accent-primary)) 9%, transparent);
+}
+
+.btn-danger-outline {
+  color: var(--color-error);
+  border: 1px solid color-mix(in srgb, var(--color-error) 55%, var(--border-subtle));
+  background: transparent;
+}
+
+.btn-danger-outline:hover {
+  background: color-mix(in srgb, var(--color-error) 8%, transparent);
 }
 
 .btn-icon {

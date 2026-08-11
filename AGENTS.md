@@ -5,9 +5,9 @@
 ## 1. [The Desk] 当前开发焦点
 
 - **产品定位**：Bob 是让复杂工作不断线的 Personal Work Orchestration Layer；不是 Codex/Claude Code 的外壳。
-- **当前主线**：`v0.8.1` 已完成 Phase 0–4 Persistent Work Core、输入关联、Decision/Change 与 Complexity Router，进入 Phase 5 Advanced Project Loop。
+- **当前主线**：`v0.9.0` 已完成 Phase 0–5 的首个可靠纵切片，并交付 Conversation-first Today Layer；下一主线是 Phase 6 Dynamic Task Graph。
 - **推进顺序**：Work Core → 现有入口关联 → Decision/Change → Complexity Router → Advanced Project Loop → Dynamic Graph → Runtime Adapter。
-- **当前真实边界**：Auto 已能识别 Direct、Deep、Advanced，但 Advanced 只做有限启动；Goal 尚无持久状态、DAG 和重启恢复；Dream 以事实整理为主，尚未形成结果驱动的用户模型。
+- **当前真实边界**：Auto Advanced 已能创建持久 Goal、执行单个有界切片、保存审批/证据/检查点，并在启动时只恢复安全 R0/R1；尚无 Dynamic DAG、多 Agent、应用关闭期间后台执行、可信跨端 R3 最终确认和结果驱动 Dream。
 - **核心约束**：PC 安装版/绿色版保持零外部运行时，Android 不增加用户侧依赖；客户端体积增长必须解释和验证。
 - **工作区状态提醒**：开始修改前先检查 `git status`，不得覆盖用户未提交的代码或临时文件。
 
@@ -36,8 +36,10 @@
 | Project State、Goal、自动路由、DAG、Verifier、Dream/Memory | `docs/GOAL_RUNTIME.md`、`docs/DECISIONS.md`、`todo.md` 对应目标 |
 | Rust 模块、IPC、数据库、状态机 | `docs/ARCHITECTURE.md`、`LLM_WIKI.md` |
 | UI、布局、颜色、图标、i18n | `design_principles.md` |
+| Today Layer、晨间入口、速记无损切换 | `docs/superpowers/specs/2026-08-11-conversation-first-today-layer-design.md`、`docs/superpowers/plans/2026-08-11-conversation-first-today-layer-plan.md` |
 | 跨端同步、Relay、移动端配对 | `docs/MOBILE_BLUEPRINT.md`、`todo.md` 目标 23/30 |
 | 用户可见功能和操作说明 | `docs/FEATURES.md`、`docs/USER_GUIDE.md` |
+| 跨终端布局、按钮层级和界面状态 | `docs/UI_SYSTEM.md` |
 | 发布、安装器、版本 | `scripts/release.bat`、`OPEN_SOURCE_WORKFLOW.md`、`CHANGELOG.md` |
 | 历史 Electron 设计 | `docs/agents_electron.md`，仅用于考古，不得作为当前实现依据 |
 

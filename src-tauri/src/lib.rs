@@ -10,6 +10,7 @@ mod connector;
 mod complexity_router;
 mod crypto;
 mod db;
+mod daily_brief;
 mod discord;
 mod doctor;
 mod dream;
@@ -20,6 +21,7 @@ mod filesystem;
 mod gcp_auth;
 mod gmail;
 mod goal;
+mod goal_runtime;
 mod google_calendar;
 mod http_api;
 pub mod im_sessions;
@@ -955,6 +957,16 @@ pub fn run() {
             work_core::commands::work_external_link_list,
             work_core::commands::work_change_review_list,
             work_core::commands::work_change_review_action,
+            goal_runtime::commands::goal_runtime_list,
+            goal_runtime::commands::goal_runtime_get,
+            goal_runtime::commands::goal_runtime_list_events,
+            goal_runtime::commands::goal_runtime_continue,
+            goal_runtime::commands::goal_runtime_defer,
+            goal_runtime::commands::goal_runtime_cancel,
+            goal_runtime::commands::goal_runtime_decide_approval,
+            daily_brief::commands::daily_brief_get,
+            daily_brief::commands::daily_brief_refresh,
+            daily_brief::commands::daily_brief_mark_seen,
             capture::capture_ingest,
             capture_router::capture_process_pending,
             capture::capture_quick_note,
@@ -1186,13 +1198,23 @@ pub fn run() {
             }
 
             // 在获得 Context 后初始化本地数据
-            let db_conn = db::init_db(&get_data_dir());
+            let mut db_conn = db::init_db(&get_data_dir());
             notebook::init_notebook_dirs();
             match capture::recover_incomplete_captures(&db_conn) {
                 Ok(summary) => eprintln!("[Capture] startup recovery: {summary}"),
                 Err(error) => eprintln!("[Capture] startup recovery failed: {error}"),
             }
+            match goal_runtime::repository::recover_incomplete_runs(&mut db_conn) {
+                Ok(summary) => eprintln!("[Goal Runtime] startup recovery: {summary:?}"),
+                Err(error) => eprintln!("[Goal Runtime] startup recovery failed: {error}"),
+            }
             app.manage(db::DbState(Mutex::new(db_conn)));
+
+            let goal_runtime_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                goal_runtime::commands::resume_startup_runs(goal_runtime_handle).await;
+            });
 
             // Offline-first Capture enrichment. The journal is already durable at
             // this point; network/model failures only defer enrichment and never

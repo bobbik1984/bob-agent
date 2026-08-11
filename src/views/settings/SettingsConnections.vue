@@ -1996,19 +1996,6 @@ onUnmounted(() => {
   gap: 4px;
 }
 
-.btn-danger-outline {
-  background: transparent;
-  color: var(--color-error);
-  border: 1px solid color-mix(in srgb, var(--color-error) 35%, transparent);
-  border-radius: var(--radius-default);
-  cursor: pointer;
-  transition: all var(--duration-fast) var(--ease-out);
-}
-.btn-danger-outline:hover {
-  background: color-mix(in srgb, var(--color-error) 10%, transparent);
-  border-color: var(--color-error);
-}
-
 /* ── 飞书凭证表单展开 ── */
 .lark-credential-form {
   padding: 12px;

@@ -120,6 +120,7 @@ pub async fn execute_goal_loop(
             true, // global_file_access
             "goal".to_string(),
             None,
+            None,
         )
         .await;
 

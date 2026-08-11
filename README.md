@@ -6,7 +6,7 @@
     <strong>零设置、懂你的、以结果为单位工作的个人执行系统</strong>
   </p>
   <p align="center">
-    <img src="https://img.shields.io/badge/version-v0.8.1-blue?style=flat-square" alt="Version" />
+    <img src="https://img.shields.io/badge/version-v0.9.0-blue?style=flat-square" alt="Version" />
     <img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="License" />
     <img src="https://img.shields.io/badge/platform-Windows_|_Android-0078D6?style=flat-square&logo=windows" alt="Platform" />
     <img src="https://img.shields.io/badge/Tauri-v2-FFC131?style=flat-square&logo=tauri" alt="Tauri v2" />
@@ -28,7 +28,7 @@
 > **Bob keeps complex work moving without losing context.**<br>
 > **Bob 让复杂工作不断线。**
 
-`v0.8.0` 已封存可靠 Capture 与知识提交基线。`v0.8.1` 开发线已完成 **Persistent Work Core、现有输入接入、Decision/Change Review 与 Complexity Router**：项目状态独立于聊天持久化；Todo/Event、Markdown 知识和本机文件通过稳定引用更新同一 Project State；新版文件保留旧 Artifact；Auto 会以确定性规则优先判断 Direct、Deep 或 Advanced，只有模糊语义才短暂调用 Clerk。Advanced Project Runtime 仍按 Phase 5 推进；现有 `Goal Mode` 仍是 Maker–Checker 三轮重试原型，不等同于完整持久 Runtime。
+`v0.8.0` 已封存可靠 Capture 与知识提交基线。`v0.9.0` 已完成 **Persistent Work Core、现有输入接入、Decision/Change Review、Complexity Router** 与 Phase 5 **单 Agent Advanced Project Loop** 的首个可靠纵切片。对话首屏新增 Today 摘要：用一个焦点和最多两个关注项汇总日程、待办、项目、Goal、审批、最近会话与 Dream，并可从速记浮层无损打开。Dynamic DAG、多 Agent、常驻后台与可信跨端 R3 最终确认仍未实现；显式 `Goal Mode` 继续作为旧 Maker–Checker 实验入口，不等同于新 Runtime。
 
 ---
 
@@ -44,7 +44,8 @@
 | 🔌 | **MCP Client 认知工具** | Native stdio JSON-RPC 2.0 client managing MCP Server child processes. Dynamic tool discovery & conflicts-free namespacing. <br>原生 stdio 异步管理 MCP 子进程，自动扫码注册认知技能，完全兼容开源 MCP 生态。 |
 | 🧠 | **Memory & Dream 记忆进化** | Current: Soul, Session, Wiki, structured corrections and nightly compaction. Direction: separate identity, preference, episodic, procedural and project memory, then learn from verified Goal outcomes. <br>当前已具备三层记忆、结构化纠错与夜间整理；下一阶段将身份、偏好、经历、策略和项目状态分离，并从 Goal 的真实结果中学习。 |
 | 🕸️ | **SQLite Graph 知识脑图** | Native SQLite graph database (nodes + edges). BFS sub-graph extraction and interactive Vis.js canvas visualization. <br>基于本地 SQLite 构建轻量知识网络，自动提取实体关系，并通过 Vis.js 脑图画布进行拖拽交互。 |
-| 🎯 | **Goal Loop 闭环原型** | Current: high-budget Maker–Checker loop, deterministic assertions and up to three retries. Direction: automatic Goal compilation, durable state, task DAG, evidence-bound completion and restart recovery. <br>当前具备高预算执行、确定性断言与 Clerk 三轮验收；完整 Goal Runtime、任务图、持久恢复和证据闭环仍是下一阶段开发目标。 |
+| 🎯 | **Advanced Project Loop 持续目标闭环** | Auto compiles persistent Goals, stores attempts, checkpoints, approvals and evidence in SQLite, resumes safe R0/R1 work after restart, and refuses unverified completion. Dynamic DAG and multi-agent orchestration remain later phases. <br>Auto 可把持续任务编译为持久 Goal，在 SQLite 中保存尝试、检查点、审批与证据；重启后只恢复安全的 R0/R1 工作，证据不足不得完成。动态 DAG 与多 Agent 仍属后续阶段。 |
+| — | **Conversation-first Today Layer 今日概览** | A compact, model-free daily surface inside chat: one focus, up to two attention items, expandable detail, per-device seen state, and lossless handoff from Quick Note. <br>以对话为主入口，用一个焦点、最多两个关注项和可展开明细汇总当天状态；速记草稿切换时不丢失，PC 与移动端分别记录已读。 |
 | 📲 | **Native Android App 原生安卓端** | Scan QR to sync via local network. SQLite bi-directional synchronization, offline availability, and PC as SSOT. <br>原生安卓端，PC作为唯一真相源，局域网扫码双向同步，断网也可用。 |
 | 🛜 | **Web Drop 极传** | WebRTC P2P cross-device file transfer. 3-tier fallback (loopback → P2P → relay) with zero-knowledge AES-GCM E2EE. <br>基于 WebRTC 的点对点多端文件传输，零知识证明加密，不经由云服务器缓存。 |
 | 🩺 | **Doctor 自检自愈** | Health checks across API connection, SQLite integrity, sandboxes, and Sidecars. One-click auto-fix and rollback. <br>全面自检网络、数据库锁、环境依赖，遇到异常一键回滚配置、解锁数据库，零折腾。 |
@@ -116,6 +117,7 @@ bob-agent/
 │   ├── dream.rs                    # Nightly Dream compaction & SOUL engine
 │   ├── capture.rs                  # Reliable Capture envelope, journal & recovery boundary
 │   ├── goal.rs                     # Goal Mode (Maker-Checker loop)
+│   ├── goal_runtime/               # Persistent bounded Goal execution, evidence and recovery
 │   ├── web_drop.rs                 # WebRTC P2P direct transmission
 │   ├── wechat/                     # Mobile Android sync channel adapter
 │   ├── doctor.rs                   # System health self-diagnostics & auto-fix
@@ -139,6 +141,7 @@ bob-agent/
 - [PRODUCT_VISION.md](docs/PRODUCT_VISION.md) — Product north star, users, pain and differentiation / 产品愿景
 - [BOB_EVOLUTION_ROADMAP.md](docs/BOB_EVOLUTION_ROADMAP.md) — Ordered development phases and quality gates / 分阶段演进路线
 - [ARCHITECTURE.md](docs/ARCHITECTURE.md) — Under-the-hood design details / 技术架构与设计决策
+- [UI_SYSTEM.md](docs/UI_SYSTEM.md) — Shared responsive layout and button hierarchy / 跨终端布局与按钮层级
 - [GOAL_RUNTIME.md](docs/GOAL_RUNTIME.md) — Goal, execution DAG, verification and personalized evolution target architecture / Goal、执行图、验证与个性化进化目标架构
 
 ---

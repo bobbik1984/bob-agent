@@ -1,6 +1,6 @@
 # Bob 演进路线图
 
-> 状态：v0.8.1 开发线已完成 Phase 0–4，进入 Phase 5
+> 状态：v0.9.0 已完成 Phase 0–5 的首个可靠纵切片，并交付 Conversation-first Today Layer
 > 产品北极星：`docs/PRODUCT_VISION.md`
 > 完整设计与阶段门：`docs/superpowers/plans/2026-08-10-work-continuity-evolution-plan.md`
 
@@ -8,9 +8,9 @@
 
 `v0.8.0` 已封存可靠 Capture、知识对象契约、离线分类、Todo/Event 确定性提交和 Note/Source Markdown 提交基线。它是不可修改的历史版本。
 
-当前已完成 Persistent Work Core、现有入口接入、Decision/Change Review 和 Complexity Router：版本化 Work Object、Work Event Journal、Project Aggregate、Markdown 快照、最小 Work UI、完整 Decision 契约、不可变文件修订、影响确认，以及 Direct/Deep/Advanced 规则优先路由。当前仍缺少：
+当前已完成 Persistent Work Core、现有入口接入、Decision/Change Review、Complexity Router，以及单 Agent Advanced Project Loop 的可靠纵切片：Auto Advanced 可建立持久 Goal，低风险工作按预算推进，审批、证据、检查点和启动恢复均写入 SQLite。Conversation-first Today Layer 已将 Calendar、Todo、Work、Goal、Session 与 Dream 以本地只读方式投影进对话首屏。当前仍缺少：
 
-- 可恢复 Goal Runtime 与 Dynamic Task Graph；
+- Dynamic Task Graph 与节点级局部恢复；
 - 可替换 Agent Runtime 和结果驱动 Dream。
 
 ## 路线与依赖
@@ -87,7 +87,7 @@ flowchart LR
 | Phase 2（完成） | 所有输入更新同一个项目现实 | Capture、Note、Source、Todo、Event、File 可追溯关联 Project |
 | Phase 3（完成） | Bob 知道什么改变了什么 | 新文件能指出受影响决定、证据和待确认变化 |
 | Phase 4（完成） | 用户无需选择复杂模式 | 简单请求保持轻量，持续工作识别为 Advanced 且不虚假完成 |
-| Phase 5 | 复杂目标可以中断恢复 | Goal 重启可恢复，Done 绑定 Evidence |
+| Phase 5（完成首个纵切片） | 复杂目标可以中断恢复 | 140 项 Rust 测试通过；具备安全恢复、审批持久化与 Evidence gate |
 | Phase 6 | 多阶段工作局部恢复 | 节点失败只影响其下游，计划允许重构 |
 | Phase 7 | 专业角色提高可靠性 | 多角色有可量化收益，而非 Agent 表演 |
 | Phase 8 | 模型与执行器可替换 | 更换 Runtime 不丢 Project State |

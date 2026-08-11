@@ -111,6 +111,7 @@ if (IS_TAURI) {
   const MOCK_WORK_AGGREGATES = {};
   const MOCK_PROJECT_LINK_CANDIDATES = [];
   const MOCK_CHANGE_REVIEWS = [];
+  const MOCK_GOAL_RUNTIMES = [];
 
   const emptyWorkAggregate = (project) => ({
     project,
@@ -119,7 +120,7 @@ if (IS_TAURI) {
   });
 
   const workPreviewParams = typeof location !== 'undefined' ? new URLSearchParams(location.search) : new URLSearchParams();
-  if (workPreviewParams.get('workCandidates') === '1' || workPreviewParams.get('workChanges') === '1') {
+  if (workPreviewParams.get('workCandidates') === '1' || workPreviewParams.get('workChanges') === '1' || workPreviewParams.get('goalRuntime') === '1') {
     const now = Date.now();
     const previewProject = {
       schemaVersion: 1, id: 'project_mock_bob', title: 'Bob 产品升级', mission: '让复杂工作不断线',
@@ -128,6 +129,35 @@ if (IS_TAURI) {
     };
     MOCK_WORK_PROJECTS.push(previewProject);
     MOCK_WORK_AGGREGATES[previewProject.id] = emptyWorkAggregate(previewProject);
+    if (workPreviewParams.get('goalRuntime') === '1') {
+      const goal = {
+        schemaVersion: 1, id: 'goal_mock_runtime', kind: 'goal', projectId: previewProject.id,
+        parentId: null, title: '完成 Phase 5 验证', status: 'ready', description: null,
+        data: { outcome: 'Phase 5 通过恢复与证据验收' }, sourceCaptureId: null,
+        revision: 1, createdAt: now, updatedAt: now, deletedAt: null,
+      };
+      MOCK_WORK_AGGREGATES[previewProject.id].goals.push(goal);
+      MOCK_GOAL_RUNTIMES.push({
+        goal,
+        run: {
+          runId: 'goal_run_mock', goalId: goal.id, projectId: previewProject.id,
+          status: 'waiting_user', phase: 'verify', verificationState: 'pending', risk: 'r0',
+          modelCallsUsed: 1, toolCallsUsed: 0, repairsUsed: 0, runtimeSecondsUsed: 4,
+          latestCheckpointId: 'checkpoint_mock', leaseOwner: null, leaseExpiresAt: null,
+          recoveryCount: 0, lastErrorCode: null, lastErrorDetail: null,
+          nextAction: 'goal.next_waiting_choice', revision: 3, createdAt: now, updatedAt: now, finishedAt: null,
+        },
+        pendingApproval: {
+          approvalId: 'approval_mock', runId: 'goal_run_mock', summary: 'goal.summary_accept_result',
+          risk: 'r0', trustedDeviceRequired: false, status: 'pending', revision: 1,
+          choices: [
+            { choiceId: 'accept_result', labelKey: 'goal.approval_accept_result', semantic: 'approve', payload: { purpose: 'user_acceptance', ruleId: 'user_acceptance' } },
+            { choiceId: 'continue', labelKey: 'goal.approval_continue', semantic: 'defer', payload: { purpose: 'continue_work' } },
+            { choiceId: 'cancel', labelKey: 'goal.approval_cancel', semantic: 'reject', payload: {} },
+          ],
+        },
+      });
+    }
     MOCK_PROJECT_LINK_CANDIDATES.push(
       {
         id: 'project_link_mock_ambiguous', captureId: 'mock_ambiguous', intent: 'work_task', title: '整理同步回放',
@@ -165,6 +195,43 @@ if (IS_TAURI) {
     }
   }
 
+  const mockDailyBrief = (localDate = new Date().toISOString().slice(0, 10)) => ({
+    schemaVersion: 1,
+    snapshotId: `daily:${localDate}:1`,
+    localDate,
+    revision: 1,
+    generatedAt: Date.now(),
+    status: 'fresh',
+    focusItem: {
+      itemId: 'brief:goal_runtime:mock-review', canonicalRef: 'goal:mock-review', source: 'goal_runtime',
+      sourceId: 'mock-review', sourceRevision: '1', kind: 'approval', title: '确认 Bob Phase 5 的验收结果',
+      titleKey: null, summary: '验证记录已经齐备，等待确认下一步。', summaryKey: null, messageArgs: {},
+      priority: 1000, requiresAttention: true, occurredAt: Date.now(), dueAt: null,
+      action: { kind: 'respond_approval', targetType: 'goal_approval', targetId: 'mock-approval', payload: { runId: 'mock-review' } },
+      reasonCodes: ['brief.reason.waiting_user'], evidenceRefs: ['goal_run:mock-review@1'],
+    },
+    attentionItems: [{
+      itemId: 'brief:todo:mock-todo', canonicalRef: 'todo:mock-todo', source: 'todo', sourceId: 'mock-todo',
+      sourceRevision: '1', kind: 'due', title: '整理本周产品评审材料', titleKey: null,
+      summary: '今天到期', summaryKey: null, messageArgs: {}, priority: 800, requiresAttention: true,
+      occurredAt: Date.now(), dueAt: Date.now(), action: { kind: 'open_todo', targetType: 'todo', targetId: 'mock-todo', payload: {} },
+      reasonCodes: ['brief.reason.due_today'], evidenceRefs: [],
+    }],
+    detailItems: [{
+      itemId: 'brief:conversation:mock-conv-2', canonicalRef: 'conversation:mock-conv-2', source: 'conversation',
+      sourceId: 'mock-conv-2', sourceRevision: '1', kind: 'continue_conversation', title: '项目讨论',
+      titleKey: 'brief.item.continue_conversation', summary: '继续上次的架构讨论', summaryKey: null, messageArgs: {},
+      priority: 390, requiresAttention: false, occurredAt: Date.now(), dueAt: null,
+      action: { kind: 'continue_conversation', targetType: 'conversation', targetId: 'mock-conv-2', payload: null },
+      reasonCodes: ['brief.reason.recent_conversation'], evidenceRefs: [],
+    }],
+    sectionCounts: { attention: 2, today: 1, inProgress: 1, changes: 0, insights: 0 },
+    actionableCount: 2,
+    changedSinceLastSeen: ['brief:goal_runtime:mock-review', 'brief:todo:mock-todo'],
+    sourceHealth: [],
+    warnings: [],
+  });
+
   // Mock invoke — 根据命令返回合理的假数据
   invoke = async (cmd, args) => {
     // console.log(`[Mock invoke] ${cmd}`, args);
@@ -176,6 +243,9 @@ if (IS_TAURI) {
       case 'system_health_check': return { ok: true, checks: [] };
       case 'system_validate_chat_ready': return { ready: true };
       case 'system_get_evolution_stats': return { total_sessions: 5, total_tools: 12 };
+      case 'daily_brief_get': return mockDailyBrief(args?.dateContext?.localDate);
+      case 'daily_brief_refresh': return mockDailyBrief(args?.dateContext?.localDate);
+      case 'daily_brief_mark_seen': return true;
       case 'work_project_list': return [...MOCK_WORK_PROJECTS];
       case 'work_project_create': {
         const now = Date.now();
@@ -200,6 +270,41 @@ if (IS_TAURI) {
         return project;
       }
       case 'work_project_get': return MOCK_WORK_AGGREGATES[args?.projectId] || null;
+      case 'goal_runtime_list': return MOCK_GOAL_RUNTIMES.filter(item => !args?.projectId || item.run.projectId === args.projectId);
+      case 'goal_runtime_get': {
+        const item = MOCK_GOAL_RUNTIMES.find(entry => entry.run.runId === args?.runId);
+        return item ? { ...item, evidence: [], events: [] } : null;
+      }
+      case 'goal_runtime_list_events': return [];
+      case 'goal_runtime_continue': {
+        const item = MOCK_GOAL_RUNTIMES.find(entry => entry.run.runId === args?.input?.runId);
+        if (item) { item.run.status = 'running'; item.run.phase = 'observe'; item.run.revision += 1; item.pendingApproval = null; }
+        return { content: '目标已继续执行。', goal: item?.run || null };
+      }
+      case 'goal_runtime_defer': {
+        const item = MOCK_GOAL_RUNTIMES.find(entry => entry.run.runId === args?.input?.runId);
+        if (item) { item.run.status = 'waiting_user'; item.run.revision += 1; }
+        return item?.run || null;
+      }
+      case 'goal_runtime_cancel': {
+        const item = MOCK_GOAL_RUNTIMES.find(entry => entry.run.runId === args?.input?.runId);
+        if (item) { item.run.status = 'cancelled'; item.run.revision += 1; item.pendingApproval = null; }
+        return item?.run || null;
+      }
+      case 'goal_runtime_decide_approval': {
+        const item = MOCK_GOAL_RUNTIMES.find(entry => entry.pendingApproval?.approvalId === args?.input?.approvalId);
+        if (!item) throw new Error('选择已经处理');
+        const choice = item.pendingApproval.choices.find(entry => entry.choiceId === args.input.choiceId);
+        item.pendingApproval.status = 'resolved';
+        item.pendingApproval.selectedChoiceId = choice?.choiceId || null;
+        item.run.status = choice?.semantic === 'reject' ? 'cancelled' : choice?.payload?.purpose === 'user_acceptance' ? 'done' : 'ready';
+        item.run.verificationState = item.run.status === 'done' ? 'verified' : item.run.verificationState;
+        item.run.nextAction = item.run.status === 'done' || item.run.status === 'cancelled' ? null : item.run.nextAction;
+        if (item.run.status === 'done' || item.run.status === 'cancelled') item.goal.status = item.run.status;
+        item.run.revision += 1;
+        item.pendingApproval = null;
+        return { approval: { status: 'resolved' }, run: item.run };
+      }
       case 'work_object_create': {
         const input = args?.input || {};
         const aggregate = MOCK_WORK_AGGREGATES[input.projectId];
@@ -566,6 +671,16 @@ window.appAPI = {
   workExternalLinkList: (projectId) => invoke('work_external_link_list', { projectId }),
   workChangeReviewList: ({ projectId = null, status = null, limit = 20 } = {}) => invoke('work_change_review_list', { projectId, status, limit }),
   workChangeReviewAction: (input) => invoke('work_change_review_action', { input }),
+  goalRuntimeList: ({ projectId = null, limit = 50 } = {}) => invoke('goal_runtime_list', { projectId, limit }),
+  goalRuntimeGet: (runId) => invoke('goal_runtime_get', { runId }),
+  goalRuntimeListEvents: (runId, limit = 50) => invoke('goal_runtime_list_events', { runId, limit }),
+  goalRuntimeContinue: (input) => invoke('goal_runtime_continue', { input }),
+  goalRuntimeDefer: (input) => invoke('goal_runtime_defer', { input }),
+  goalRuntimeCancel: (input) => invoke('goal_runtime_cancel', { input }),
+  goalRuntimeDecideApproval: (input) => invoke('goal_runtime_decide_approval', { input }),
+  dailyBriefGet: (dateContext) => invoke('daily_brief_get', { dateContext }),
+  dailyBriefRefresh: (dateContext) => invoke('daily_brief_refresh', { dateContext }),
+  dailyBriefMarkSeen: (snapshotId, revision) => invoke('daily_brief_mark_seen', { snapshotId, revision }),
 
   // ── 系统 & 配置 (Mapped to Rust) ─────────────────────
   openExternal: (url) => IS_TAURI ? invoke('plugin:shell|open', { path: url }) : window.open(url, '_blank'),

@@ -231,6 +231,28 @@ pub(crate) fn route_text(text: &str, has_image_input: bool, user_mode: &str) -> 
                 false,
             );
         }
+        "goal_runtime_read" => {
+            return decision(
+                RouteMode::Advanced,
+                RouteTaskKind::Answer,
+                1.0,
+                RouteRisk::R0,
+                RouteSource::Override,
+                vec!["persistent_runtime_slice".to_string()],
+                false,
+            );
+        }
+        "goal_runtime_action" => {
+            return decision(
+                RouteMode::Advanced,
+                RouteTaskKind::Action,
+                1.0,
+                risk_for_action(&normalized),
+                RouteSource::Override,
+                vec!["persistent_runtime_slice".to_string()],
+                false,
+            );
+        }
         _ => {}
     }
 

@@ -3,7 +3,7 @@ use serde_json::{json, Value};
 use std::path::PathBuf;
 use tauri::{AppHandle, Emitter, Manager};
 
-use crate::complexity_router::{self, RouteMode};
+use crate::complexity_router::{self, RouteDecision, RouteMode};
 
 // ── 模型注册表路径 ─────────────────────────────────────
 fn get_registry_path() -> PathBuf {
@@ -1741,6 +1741,27 @@ fn detect_and_apply_corrections(messages: &[Value], conv_id: &str) {
 // Tool Calling 引擎 (T-903/T-904)
 // ═══════════════════════════════════════════════════════════
 
+async fn resolve_complexity_route(messages: &[Value], agent_mode: &str) -> RouteDecision {
+    let baseline_route = complexity_router::route_messages(messages, agent_mode);
+    if baseline_route.semantic_fallback_recommended && agent_mode == "auto" {
+        let user_text: String = complexity_router::last_user_text(messages)
+            .chars().take(1_200).collect();
+        let prompt = complexity_router::clerk_prompt(&user_text, &baseline_route);
+        match call_clerk_oneshot_with_timeout(
+            "You are Bob's conservative complexity classifier. Classify processing shape only. You cannot grant permissions or execute tools.",
+            &prompt,
+            120,
+            4,
+        ).await {
+            Some(raw) => complexity_router::apply_clerk_json(&baseline_route, &raw)
+                .unwrap_or_else(|| complexity_router::conservative_fallback(baseline_route)),
+            None => complexity_router::conservative_fallback(baseline_route),
+        }
+    } else {
+        baseline_route
+    }
+}
+
 // ═══════════════════════════════════════════════════════════
 /// 内部通用流式处理 — 支持 Tool Calling 循环
 pub(crate) async fn stream_internal(
@@ -1751,6 +1772,7 @@ pub(crate) async fn stream_internal(
     global_file_access: bool,
     agent_mode: String,
     target_role: Option<String>,
+    route_override: Option<RouteDecision>,
 ) -> Value {
     // conv_id 用于标记 llm:chunk 事件属于哪个会话，防止跨会话串流
     let conv_id_for_emit = conv_id.clone().unwrap_or_default();
@@ -1764,27 +1786,9 @@ pub(crate) async fn stream_internal(
     }
 
     // Phase 4: rules first; only ambiguous semantics may use a short Clerk call.
-    let baseline_route = complexity_router::route_messages(&messages, &agent_mode);
-    let decision = if baseline_route.semantic_fallback_recommended && agent_mode == "auto" {
-        let user_text: String = complexity_router::last_user_text(&messages)
-            .chars()
-            .take(1_200)
-            .collect();
-        let prompt = complexity_router::clerk_prompt(&user_text, &baseline_route);
-        match call_clerk_oneshot_with_timeout(
-            "You are Bob's conservative complexity classifier. Classify processing shape only. You cannot grant permissions or execute tools.",
-            &prompt,
-            120,
-            4,
-        )
-        .await
-        {
-            Some(raw) => complexity_router::apply_clerk_json(&baseline_route, &raw)
-                .unwrap_or_else(|| complexity_router::conservative_fallback(baseline_route)),
-            None => complexity_router::conservative_fallback(baseline_route),
-        }
-    } else {
-        baseline_route
+    let decision = match route_override {
+        Some(decision) => decision,
+        None => resolve_complexity_route(&messages, &agent_mode).await,
     };
     log::info!("[ComplexityRouter] {} (agent_mode={})", decision, agent_mode);
     let _ = app.emit(
@@ -1964,7 +1968,12 @@ pub(crate) async fn stream_internal(
             String::new()
         };
 
-        let agent_mode_info = decision.system_instruction();
+        let runtime_slice = agent_mode.starts_with("goal_runtime_");
+        let agent_mode_info = if runtime_slice {
+            "\n## Persistent Goal execution slice\nExecute only the current bounded slice of a persisted Goal. Use only the tools exposed in this request. Report observable results and blockers; do not claim cross-time completion, expand scope, or bypass permission checks.\n"
+        } else {
+            decision.system_instruction()
+        };
 
         let file_access_info = if global_file_access {
             "当前开启了【全局文件访问权限】，你可以访问操作系统上的任何文件。"
@@ -2110,7 +2119,12 @@ pub(crate) async fn stream_internal(
     }
 
     // 3. 获取工具 Schema
-    let tool_schemas = super::tools::get_filtered_tool_schemas(decision.tool_intent()).await;
+    let tool_intent = match agent_mode.as_str() {
+        "goal_runtime_read" => "answer",
+        "goal_runtime_action" => "quick",
+        _ => decision.tool_intent(),
+    };
+    let tool_schemas = super::tools::get_filtered_tool_schemas(tool_intent).await;
 
     if provider == "offline" {
         return crate::candle_engine::run_native_inference(
@@ -2147,7 +2161,11 @@ pub(crate) async fn stream_internal(
     let mut tool_call_log: Vec<Value> = Vec::new();
 
     // ── T-1401: 循环熔断器 ──────────────────────────────────
-    let tool_budget = decision.tool_budget();
+    let tool_budget = match agent_mode.as_str() {
+        "goal_runtime_read" => decision.tool_budget().min(8),
+        "goal_runtime_action" => decision.tool_budget().min(15),
+        _ => decision.tool_budget(),
+    };
     let mut tool_tracker =
         super::tools::ToolCallTracker::with_budget(tool_budget);
 
@@ -3087,6 +3105,21 @@ pub async fn stream_chat(
     if agent_mode == "goal" {
         return crate::goal::execute_goal_loop(app, messages, conv_id).await;
     }
+    let route_override = if agent_mode == "auto" {
+        let decision = resolve_complexity_route(&messages, &agent_mode).await;
+        if decision.mode == RouteMode::Advanced {
+            return crate::goal_runtime::engine::execute_advanced_request(
+                app,
+                messages,
+                conv_id,
+                from_user,
+                global_file_access,
+                decision,
+            )
+            .await;
+        }
+        Some(decision)
+    } else { None };
     stream_internal(
         app,
         messages,
@@ -3094,7 +3127,8 @@ pub async fn stream_chat(
         from_user,
         global_file_access,
         agent_mode,
-        None
+        None,
+        route_override,
     )
     .await
 }
@@ -3130,7 +3164,7 @@ pub async fn stream_vision(
             obj.insert("content".to_string(), Value::Array(content_array));
         }
     }
-    stream_internal(app, messages, conv_id, None, global_file_access, agent_mode, Some("vision".to_string())).await
+    stream_internal(app, messages, conv_id, None, global_file_access, agent_mode, Some("vision".to_string()), None).await
 }
 
 // ═══════════════════════════════════════════════════════════

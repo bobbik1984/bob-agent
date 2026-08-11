@@ -1,7 +1,7 @@
 # Bob 产品愿景
 
 > 愿景成熟度：已确认，持续验证
-> 当前开发线：v0.8.1 Work Continuity
+> 当前发布线：v0.9.0 Work Continuity
 
 ## 一句话愿景
 

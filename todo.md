@@ -1,6 +1,6 @@
 # Bob 当前开发清单
 
-> 当前开发线：v0.8.1
+> 当前发布线：v0.9.0
 > 产品方向：`docs/PRODUCT_VISION.md`
 > 阶段顺序：`docs/BOB_EVOLUTION_ROADMAP.md`
 > 完整计划：`docs/superpowers/plans/2026-08-10-work-continuity-evolution-plan.md`
@@ -90,13 +90,27 @@
 
 **验收**：普通问答、长文本和重复提醒不被过度升级；复杂分析进入 Deep；持续、跨时间、恢复和阶段依赖进入 Advanced；Clerk 不可用不阻止基本问答和单步操作。
 
-## 当前下一批：Phase 5 Advanced Project Loop
+## 已完成批次：Phase 5 Advanced Project Loop
 
-- [ ] Goal Compiler 生成 outcome、evidence、scope、constraints、budget、risk policy 和 blocker policy。
-- [ ] 用 SQLite 持久化 Goal 状态、尝试、证据和检查点，应用重启后能够恢复。
-- [ ] 建立单 Agent `observe → plan → act → verify → repair → finish` 有限循环。
-- [ ] Done 必须绑定 Evidence；等待用户、阻塞、超预算、失败和取消具有明确状态。
-- [ ] R0–R3 Policy Engine 继续作为唯一权限边界。
+- [x] Goal Compiler 生成 outcome、evidence、scope、constraints、budget、risk policy 和 blocker policy。
+- [x] 用 SQLite 持久化 Goal 状态、尝试、证据、审批、事件和检查点，应用重启后恢复安全 R0/R1。
+- [x] 建立单 Agent `observe → plan → act → verify → repair → finish` 有限循环，全局最多一个活动执行切片。
+- [x] Done 必须绑定 Evidence；等待用户、阻塞、超预算、失败和取消具有明确状态。
+- [x] R0–R3 Policy Engine 继续作为唯一权限边界，R3 handoff 不视为批准。
+- [x] Chat/WorkView 展示状态、下一步、预算、恢复点、结构化选项和本地化错误。
+- [x] 前端测试、生产构建与 Rust `cargo check --lib` 通过，未新增依赖。
+- [x] 完整 `cargo test --lib --offline` 通过：140 passed、0 failed、1 个真实数据审计测试按设计 ignored。
+
+## 已完成产品纵切片：Conversation-first Today Layer
+
+- [x] 对话首屏显示一个焦点、最多两个关注项和可展开详情，不新增独立工作首页。
+- [x] 只读聚合 Calendar、Todo、Work Core、Goal Runtime、Session 与 Dream；来源独立降级。
+- [x] SQLite 缓存 fingerprint、revision 与逐设备已读；内容不变不制造更新。
+- [x] Chat、桌面/移动入口与 Quick Note 共用唯一 Today Surface；速记交接保留草稿。
+- [x] 手机使用紧凑非全屏弹层和内部滚动；支持 Escape、焦点恢复和 reduced motion。
+- [x] 不新增客户端依赖，不调用大模型完成常规排序；中英文 i18n 与 Lucide 图标一致。
+- [x] 9 项前端测试、生产构建、12 项 Daily Brief Rust 测试及 140 项完整 Rust 回归通过。
+- [ ] 在下一次 PC/Android 发布产物中完成真机 UI、客户端体积和跨端已读/刷新验收。
 
 ## v0.8.0 遗留质量门
 

@@ -96,10 +96,16 @@
       </div>
       <div class="mobile-header-right">
         <span class="cost-indicator" v-if="sessionCost > 0" style="font-size: 12px; color: var(--text-tertiary);">¥{{ sessionCost.toFixed(4) }}</span>
+        <button class="today-chat-entry" :title="t('today.title')" @click="openTodayLayer('chat_header')">
+          <CalendarRange :size="16" />
+        </button>
       </div>
     </div>
     <!-- 消息区域 -->
     <div class="messages-area" ref="messagesArea">
+      <button v-if="messages.length > 0 && !isMobile" class="today-chat-entry today-chat-entry-desktop" :title="t('today.title')" @click="openTodayLayer('chat_header')">
+        <CalendarRange :size="15" />
+      </button>
       
 
       <!-- 空状态：背景 logo（绝对定位，不参与 flex 布局） -->
@@ -109,10 +115,14 @@
 
       <!-- 空状态：前景内容（晨间汇报等） -->
       <div v-if="messages.length === 0" class="empty-state animate-fade-in">
-        <!-- 晨间汇报卡片 -->
-        <MorningBriefing
-          @chat="onBriefingChat"
-          @dismiss="() => {}"
+        <TodayBriefCard
+          :snapshot="dailyBriefSnapshot"
+          :loading="dailyBriefLoading"
+          :error-code="dailyBriefError"
+          compact
+          @expand="openTodayLayer('empty_chat')"
+          @action="handleTodayBriefAction"
+          @refresh="dailyBrief?.refresh()"
         />
       </div>
 
@@ -172,6 +182,27 @@
               <FileCard v-else-if="block.type === 'file'" :filePath="block.path" />
             </template>
           </div>
+
+          <section v-if="msg._goal" class="goal-runtime-chat-card" aria-live="polite">
+            <div class="goal-runtime-chat-head">
+              <Target :size="15" />
+              <strong>{{ t(`goal.status_${msg._goal.status}`, msg._goal.status) }}</strong>
+              <span>{{ t(`goal.phase_${msg._goal.phase}`, msg._goal.phase) }}</span>
+            </div>
+            <p v-if="msg._goal.nextAction">{{ msg._goal.nextAction.startsWith?.('goal.') ? t(msg._goal.nextAction) : msg._goal.nextAction }}</p>
+            <p v-if="msg._goal.runtimeError" class="goal-runtime-error">{{ msg._goal.runtimeError }}</p>
+            <div v-if="msg._goal.approval" class="goal-runtime-chat-actions">
+              <button
+                v-for="choice in msg._goal.approval.choices"
+                :key="choice.choiceId"
+                type="button"
+                class="goal-choice-button"
+                :class="{ primary: choice.semantic === 'approve' || choice.semantic === 'select_option' }"
+                :disabled="goalActionBusy === msg._goal.runId"
+                @click="handleChatGoalApproval(msg, choice)"
+              >{{ t(choice.labelKey) }}</button>
+            </div>
+          </section>
 
           <!-- 图片预览 (多图数组优先) -->
           <div v-if="msg.image_base64s && msg.image_base64s.length > 0" class="message-images-grid" style="display: flex; gap: 8px; flex-wrap: wrap;">
@@ -698,7 +729,7 @@ import '@/utils/markdown';
 import { ref, watch, onMounted, onUnmounted, nextTick, inject, computed } from 'vue';
 import { useI18n } from 'vue-i18n';
 import QrcodeVue from 'qrcode.vue';
-import { Sparkles, FileText, Camera, Calendar, User, ChevronRight, ChevronDown, ChevronUp, ChevronLeft, X, FileUp, Paperclip, Bookmark, Loader2, Shield, Zap, Target, Lock, Unlock, Download, Smartphone, Monitor, ClipboardCopy, Check, BookmarkPlus, Plus, Menu, Cpu, Play, PenLine, BookOpen, Pin, Mic } from 'lucide-vue-next';
+import { Sparkles, FileText, Camera, Calendar, CalendarRange, User, ChevronRight, ChevronDown, ChevronUp, ChevronLeft, X, FileUp, Paperclip, Bookmark, Loader2, Shield, Zap, Target, Lock, Unlock, Download, Smartphone, Monitor, ClipboardCopy, Check, BookmarkPlus, Plus, Menu, Cpu, Play, PenLine, BookOpen, Pin, Mic } from 'lucide-vue-next';
 import ConfirmCard from '../components/ConfirmCard.vue';
 import FileCard from '../components/FileCard.vue';
 import CodeBlock from '../components/CodeBlock.vue';
@@ -706,7 +737,7 @@ import SearchCard from '../components/SearchCard.vue';
 import BrowserEnableCard from '../components/BrowserEnableCard.vue';
 import FolderDropCard from '../components/FolderDropCard.vue';
 import KBEstimateCard from '../components/KBEstimateCard.vue';
-import MorningBriefing from '../components/MorningBriefing.vue';
+import TodayBriefCard from '../components/TodayBriefCard.vue';
 
 
 import { useChat } from '../composables/useChat.js';
@@ -716,6 +747,41 @@ import { useDragDrop } from '../composables/useDragDrop.js';
 const isEditingTitle = ref(false);
 const titleInputRef = ref(null);
 const editTitleText = ref('');
+const goalActionBusy = ref('');
+
+function chatGoalKey(scope) {
+  const value = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  return `chat:${scope}:${value}`;
+}
+
+async function handleChatGoalApproval(message, choice) {
+  const goal = message._goal;
+  if (!goal?.approval) return;
+  goalActionBusy.value = goal.runId;
+  try {
+    const outcome = await window.appAPI.goalRuntimeDecideApproval({
+      approvalId: goal.approval.approvalId,
+      choiceId: choice.choiceId,
+      expectedRevision: goal.approval.revision,
+      actor: 'user', deviceId: isMobile.value ? 'mobile' : 'desktop',
+      inputModality: 'pointer', trustedDevice: !isMobile.value,
+      idempotencyKey: chatGoalKey('approval'),
+    });
+    message._goal = { ...goal, ...outcome.run, approval: null };
+    if (outcome.run?.status === 'ready' && ['approve', 'select_option'].includes(choice.semantic)) {
+      const continued = await window.appAPI.goalRuntimeContinue({
+        runId: outcome.run.runId,
+        expectedRevision: outcome.run.revision,
+        idempotencyKey: chatGoalKey('continue'),
+      });
+      if (continued?.goal) message._goal = { ...message._goal, ...continued.goal, approval: continued.goal.approval || null };
+    }
+  } catch (error) {
+    console.error('[Goal Runtime] approval failed:', error);
+  } finally {
+    goalActionBusy.value = '';
+  }
+}
 
 
 const isRecording = ref(false);
@@ -942,6 +1008,13 @@ function handleClipCommand() {
 
 // ── 闪念速记入口 (从 App.vue provide) ─────────────────
 const openQuickNote = inject('openQuickNote', () => {});
+const dailyBrief = inject('dailyBrief', null);
+const openTodayLayer = inject('openTodayLayer', () => Promise.resolve(false));
+const handleTodayBriefAction = inject('handleTodayBriefAction', () => {});
+const dailyBriefSnapshot = computed(() => dailyBrief?.snapshot?.value || null);
+const dailyBriefLoading = computed(() => dailyBrief?.loading?.value || false);
+const dailyBriefError = computed(() => dailyBrief?.errorCode?.value || '');
+void dailyBrief?.ensureLoaded?.();
 const isMobile = inject('isMobile', ref(false));
 const conversationTitle = ref('');
 
@@ -1007,7 +1080,7 @@ const {
 const {
   messages, displayMessages, inputText, isStreaming, streamContent, streamThinking,
   activeTools, isParsing, sessionCost, canSend,
-  loadMessages, onBriefingChat, sendMessage: _sendMessage,
+  loadMessages, sendMessage: _sendMessage,
   handleStreamChunk, stopGeneration, exportConversation,
   renderMarkdown, renderMessageBlocks,
   parseTextAsEvent: _parseTextAsEvent,
@@ -1682,6 +1755,34 @@ defineExpose({
   position: relative;  /* 为绝对定位的 logo 背景层提供锚点 */
 }
 
+.today-chat-entry {
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  padding: 0;
+  color: var(--text-secondary);
+  background: transparent;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.today-chat-entry:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.today-chat-entry-desktop {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  align-self: flex-end;
+  margin-bottom: calc(-1 * var(--space-5));
+}
+
 .view-header {
   position: sticky;
   top: 0;
@@ -1743,6 +1844,10 @@ defineExpose({
   z-index: 1;  /* 在 logo 上方 */
   min-height: 0;  /* 允许 flex 子项收缩到内容以下，防止溢出 */
   overflow: hidden;  /* 裁剪超出容器的内容 */
+}
+
+.empty-state :deep(.today-card) {
+  max-width: 480px;
 }
 
 .empty-bob-logo {
@@ -2778,6 +2883,30 @@ defineExpose({
   align-items: center;
   gap: 4px;
 }
+.goal-runtime-chat-card {
+  max-width: 520px;
+  margin-top: 9px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--accent-primary) 24%, var(--border-subtle));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--surface-card) 88%, transparent);
+}
+.goal-runtime-chat-head { display: flex; align-items: center; gap: 7px; color: var(--text-secondary); }
+.goal-runtime-chat-head strong { color: var(--text-primary); font-size: 12px; }
+.goal-runtime-chat-head span { margin-left: auto; color: var(--text-muted); font-size: 10px; }
+.goal-runtime-chat-card p { margin: 6px 0 0; color: var(--text-tertiary); font-size: 11px; }
+.goal-runtime-chat-card .goal-runtime-error { font-family: var(--font-mono); color: var(--text-secondary); }
+.goal-runtime-chat-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
+.goal-choice-button {
+  min-height: 29px; padding: 0 10px; border: 1px solid var(--border-subtle); border-radius: 8px;
+  color: var(--text-secondary); background: transparent; font: inherit; font-size: 11px; cursor: pointer;
+}
+.goal-choice-button.primary {
+  color: var(--accent-primary);
+  border-color: color-mix(in srgb, var(--accent-primary) 42%, var(--border-subtle));
+  background: color-mix(in srgb, var(--accent-primary) 8%, transparent);
+}
+.goal-choice-button:disabled { opacity: .55; cursor: wait; }
 
 .route-label {
   display: inline-flex;

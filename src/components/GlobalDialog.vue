@@ -27,13 +27,13 @@
       <div class="modal-footer">
         <button 
           v-if="state.type === 'confirm' || state.type === 'prompt'" 
-          class="btn-secondary" 
+          class="btn btn-secondary"
           @click="cancel"
         >
           {{ state.cancelText }}
         </button>
         <button 
-          :class="state.confirmClass || 'btn-primary'" 
+          :class="['btn', state.confirmClass || 'btn-primary']"
           @click="confirm"
         >
           {{ state.confirmText }}
@@ -119,44 +119,7 @@ const handleOverlayClick = () => {
   border-top: none;
 }
 
-button {
-  padding: 8px 20px;
-  border-radius: var(--radius-sm, 4px);
-  font-size: 0.9rem;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s;
-  border: none;
-  min-width: 80px;
-}
-
-.btn-secondary {
-  background-color: var(--bg-tertiary, #242424);
-  color: var(--text-secondary, #a0a0a0);
-  border: 1px solid var(--border-primary, transparent);
-}
-
-.btn-secondary:hover {
-  background-color: var(--bg-hover, #2c2c2c);
-}
-
-.btn-primary {
-  background-color: var(--user-accent, var(--accent-primary, #e8e8e8));
-  color: var(--text-inverse, #0c0c0c);
-}
-
-.btn-primary:hover {
-  filter: brightness(1.1);
-}
-
-.btn-danger {
-  background-color: var(--color-error, #dc2626);
-  color: white;
-}
-
-.btn-danger:hover {
-  filter: brightness(1.1);
-}
+.modal-footer .btn { min-width: 80px; }
 
 .prompt-input-wrapper {
   margin-top: 12px;

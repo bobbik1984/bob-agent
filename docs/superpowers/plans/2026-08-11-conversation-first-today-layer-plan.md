@@ -1,12 +1,22 @@
 # Conversation-first Today Layer 实施计划
 
-> 状态：计划已编写，尚未实施
+> 状态：核心纵切片已实施并通过自动化与 Tauri 原生启动验证；PC/Android 发布产物的真机与体积验收待下一次发布
 >
 > 日期：2026-08-11
 >
 > 设计依据：`docs/superpowers/specs/2026-08-11-conversation-first-today-layer-design.md`
 >
 > 产品边界：对话是默认入口；Today Layer 是派生的轻量工作层；Quick Note 始终优先服务灵感记录
+
+### 2026-08-11 实施收口
+
+- 已完成 Rust `daily_brief` 契约、只读来源、确定性排序、缓存、逐设备已读和三个 Commands；未修改 Cargo/package 依赖。
+- 已完成 App 级唯一 Today Surface、对话首屏卡片、桌面/移动入口、结构化导航和 Quick Note 草稿无损交接；旧 `MorningBriefing` 已移除。
+- 常规排序保持纯本地。可选 Clerk 没有接入，因为当前确定性 `1 + 2` 已满足产品预算；以后只能作为不改变事实与权限的可失败增强。
+- 浏览器预览复用 `tauri-bridge.js` 的开发 fixture 和真实组件，没有创建第二套演示 UI。桌面 1280×800、手机 390×844 和草稿恢复已验证。
+- `npm test` 9/9、`npm run build`、Daily Brief Rust 12/12、全量 Rust 140 passed / 0 failed / 1 ignored 均通过；`git diff --check` 通过。
+- `npm run tauri dev` 已生成并启动响应正常的 `bob.exe`，开发页面返回 HTTP 200；真机键盘、Android Back、跨端已读与安装包体积保留到发布质量门。
+- 当前工作树原本包含未提交 Phase 5 修改，重叠 hunk 不适合安全拆分提交，因此本轮不提交、不推送、不升版本。
 
 ## 1. 交付目标
 

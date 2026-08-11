@@ -163,6 +163,16 @@ pub fn init_db(data_dir: &std::path::Path) -> Connection {
         log::error!("{error}");
     }
 
+    // Phase 5: 可恢复 Goal 执行状态，保持与 Work Core 权威 Goal 分离。
+    if let Err(error) = crate::goal_runtime::init_goal_runtime_tables(&conn) {
+        log::error!("{error}");
+    }
+
+    // Today Layer: deterministic, offline-first daily briefing cache and per-device seen state.
+    if let Err(error) = crate::daily_brief::init_daily_brief_tables(&conn) {
+        log::error!("{error}");
+    }
+
     // 初始化 Cron 调度表 (T-1211)
     crate::scheduler::init_cron_table(&conn);
 

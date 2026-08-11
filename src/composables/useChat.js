@@ -58,12 +58,6 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
     setTimeout(scrollToBottom, 1200);
   }
 
-  // ── 晨间汇报交互 ──────────────────────────────────
-  function onBriefingChat(briefingContent) {
-    inputText.value = `关于你刚才的晨间回顾，我想继续聊聊：\n\n${briefingContent}`;
-    nextTick(() => sendMessage());
-  }
-
   // ── 发送消息 ─────────────────────────────────────
   async function sendMessage(pendingImages, pendingFiles, resetTextareaHeight, beforeApiCallHook = null) {
     let text = inputText.value.trim();
@@ -287,7 +281,7 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
         }
       }
 
-      if (result.error) {
+      if (result.error && !result.goal) {
         messages.value.push({
           role: 'assistant',
           content: result.error,
@@ -336,6 +330,7 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
           _thinkingExpanded: false,
           _modelLabel: currentModelName.value || result.model || '',
           _route: result.route || null,
+          _goal: result.goal || null,
         };
 
         messages.value.push(assistantMsg);
@@ -706,7 +701,6 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
     canSend,
     // 方法
     loadMessages,
-    onBriefingChat,
     sendMessage,
     handleStreamChunk,
     stopGeneration,

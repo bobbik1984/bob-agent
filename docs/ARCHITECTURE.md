@@ -4,9 +4,9 @@
 > **历史归档**: Electron 时代架构见 `docs/agents_electron.md`
 > **Goal/Dream 目标架构**: 见 `docs/GOAL_RUNTIME.md`。本文件描述当前系统；目标文档中的未完成模块不得被当作现有能力。
 
-## v0.8.1 演进边界（当前实现）
+## v0.9.0 演进边界（当前实现）
 
-`v0.8.0` 已封存 Capture 与知识提交基线。`v0.8.1` 开发线已在现有 Rust 后端中建立隔离的 `work_core`，完成现有输入接入、完整 Decision 契约、Change Review 与 Complexity Router；没有重写 Tauri、Android、Sync、Relay 或 Tools，也没有增加客户端运行时依赖。
+`v0.8.0` 已封存 Capture 与知识提交基线。`v0.9.0` 已在现有 Rust 后端中建立隔离的 `work_core`，完成现有输入接入、完整 Decision 契约、Change Review、Complexity Router、单 Agent Advanced Project Loop、Conversation-first Today Layer 与统一界面布局基础；没有重写 Tauri、Android、Sync、Relay 或 Tools，也没有增加客户端运行时依赖。
 
 ```mermaid
 flowchart TD
@@ -22,7 +22,22 @@ flowchart TD
     Adapter --> Runtime["API / Codex / AGY / Other"]
 ```
 
-当前已实现 Work Object 契约、SQLite Repository、append-only Work Event、幂等与 revision、软删除、Project Aggregate、Markdown 快照、Tauri Commands、Bridge 和最小 `WorkView`。Capture Router 可以把明确项目任务、决策、承诺、会议派生项和文件成果写入 Work Core；Todo/Event、Note/Source 和文件继续保留各自真相源，`work_external_links` 只保存稳定引用。Decision 原生保存完整理由、备选、证据与重访条件。新版文件创建不可变 Artifact revision 和 Change，并依据显式证据生成 `work_change_reviews`。Complexity Router 已独立为纯 Rust 模块，规则优先返回 Direct、Deep 或 Advanced、task kind、置信度、风险和持续性，模糊输入才限时调用 Clerk。Advanced Runtime、Dynamic Graph 和 Runtime Adapter 仍是后续目标。
+当前已实现 Work Object 契约、SQLite Repository、append-only Work Event、Project Aggregate、输入关联、Decision/Change Review 与 Complexity Router。Phase 5 又增加独立 `goal_runtime`：Work Core Goal 保存用户终态，Runtime 分表保存 Run、Attempt、Evidence、Checkpoint、Approval、Event 和幂等回执；Auto Advanced 进入一个有预算的顺序执行切片，低风险状态可在启动后恢复，未知副作用转为 blocked/unverified。Conversation-first Today Layer 通过独立 `daily_brief` 只读聚合这些现有真相源。Dynamic Graph、多个执行 Agent、Runtime Adapter、常驻后台和结果驱动 Dream 仍是后续目标。
+
+### Today Layer 当前边界
+
+```text
+Calendar / Todo / Work Core / Goal Runtime / Session / Dream
+                         │ read-only collectors + source health
+                         ▼
+          Daily Brief ranker + cache + per-device seen
+                         ▼
+     Chat compact card / shared Today Layer / Quick Note entry
+```
+
+`daily_brief` 不创建新的业务真相源。它按用户提供的本地日期和 UTC offset 收集现有数据，以 canonical reference 去重，确定性选出一个 focus、最多两个 attention，并保留最多 50 个 detail。SQLite 的 `daily_brief_cache` 保存快照与来源 fingerprint，`daily_brief_seen` 保存每台设备的 revision 和逐条内容版本；强制刷新不会在内容未变时制造新 revision。某一来源失败只把快照标为 `partial` 并返回稳定错误码，其他来源仍可展示。
+
+前端由 `useDailyBrief` 和 App 级唯一 `TodayLayerSurface` 共同管理；Chat 首屏、桌面/移动入口和 Quick Note 都打开同一个 surface。Quick Note 交接先完成 Today 首次绘制，再关闭速记浮层，并保留未提交草稿。普通 Today 生成不调用 Main/Clerk，不增加客户端依赖；未来只有需要语义归并且本地信号不足时，才允许把 Clerk 作为可失败的增强层。
 
 ### Complexity Router 当前边界
 
@@ -36,7 +51,7 @@ Route Decision ── tool scope + budget + prompt + response metadata
 Policy Engine  ── R0–R3 最终授权（路由不可覆盖）
 ```
 
-`complexity_router.rs` 是处理强度的唯一分类入口。Direct 处理回答和单步动作；Deep 在当前会话内进行有限多步分析或执行；Advanced 只识别需要持久状态的工作。Phase 5 之前，Auto Advanced 只允许有边界的启动和下一步说明，不自动调用旧 `goal.rs`，也不得宣称跨时间目标已经完成。只有用户显式选择 Goal 原型时才保留旧 Maker–Checker 入口。
+`complexity_router.rs` 是处理强度的唯一分类入口。Direct 处理回答和单步动作；Deep 在当前会话内进行有限多步分析或执行；Advanced 识别需要持久状态的工作并交给 `goal_runtime`，不再自动进入旧 `goal.rs`。Runtime 只执行一个有界顺序切片，`done` 由 Repository 的 Evidence gate 强制；用户显式选择 Goal 时仍可使用旧 Maker–Checker 兼容入口。
 
 ### 输入与 Project State 的当前边界
 
@@ -53,7 +68,7 @@ Capture Journal (原始输入)
 
 `project_link_candidates`、Work Object、Work Event、Capture refs 在同一个 SQLite transaction 中确认；文件修订的新版 Artifact、Change、外部路径指针和 Change Review 也原子提交。Markdown 先安全落盘再登记引用。外部对象的完成、取消、改期和删除只追加项目活动，不复制外部状态。快照在数据库提交并释放锁后 best-effort 刷新。
 
-跨设备边界：`v0.8.1` 仍以 PC 端 Work Core 为项目状态权威源。移动端产生的 Capture 会通过现有同步链路回放并由 PC 落入 Work Core，但 `work_objects`、`work_relations` 与 `work_change_reviews` 尚不进行独立的双向表级合并。完整的跨设备 Work Core 合并需要后续协议版本、冲突规则与迁移测试；在此之前不得把 Phase 3 描述为多端状态双向同步完成。
+跨设备边界：`v0.9.0` 仍以 PC 端 Work Core 为项目状态权威源。移动端产生的 Capture 会通过现有同步链路回放并由 PC 落入 Work Core，但 `work_objects`、`work_relations` 与 `work_change_reviews` 尚不进行独立的双向表级合并。完整的跨设备 Work Core 合并需要后续协议版本、冲突规则与迁移测试；在此之前不得把 Phase 3 描述为多端状态双向同步完成。
 
 ## 总体架构
 

@@ -13,7 +13,7 @@
             class="quicknote-input"
             :placeholder="placeholder"
             @keydown.enter="submit"
-            @keydown.escape="close"
+            @keydown.escape="close({ force: true })"
             autocomplete="off"
             spellcheck="false"
           />
@@ -36,6 +36,12 @@
             <QrCode :size="15" />
             <span>{{ $t('quicknote.scan_pairing') }}</span>
           </button>
+
+          <button class="quicknote-bottom-btn" @click="openTodayLayer">
+            <CalendarRange :size="15" />
+            <span>{{ $t('quicknote.daily_brief') }}</span>
+            <span v-if="todayCount > 0" class="quicknote-count">{{ todayCount > 9 ? '9+' : todayCount }}</span>
+          </button>
         </div>
       </div>
     </Transition>
@@ -48,9 +54,11 @@ const { showConfirm, showAlert, showPrompt } = useDialog();
 
 import { ref, nextTick, onMounted, onUnmounted } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { Check, Cpu, QrCode } from 'lucide-vue-next';
+import { CalendarRange, Check, Cpu, QrCode } from 'lucide-vue-next';
 
 const { t: $t } = useI18n();
+defineProps({ todayCount: { type: Number, default: 0 } });
+const emit = defineEmits(['open-today']);
 
 const visible = ref(false);
 const text = ref('');
@@ -60,11 +68,13 @@ const inputRef = ref(null);
 const placeholder = ref('灵光一现');
 
 let _justOpened = false;
+let _draftPreserved = false;
 
 function open() {
   visible.value = true;
   showSaved.value = false;
-  text.value = '';
+  if (!_draftPreserved) text.value = '';
+  _draftPreserved = false;
   _justOpened = true;
   setTimeout(() => {
     _justOpened = false;
@@ -72,6 +82,10 @@ function open() {
   nextTick(() => {
     inputRef.value?.focus();
   });
+}
+
+function openTodayLayer() {
+  emit('open-today', { draft: text.value });
 }
 
 async function openModelSwitcher() {
@@ -166,10 +180,11 @@ async function openScanPairing() {
   }
 }
 
-function close() {
-  if (_justOpened) return;
+function close({ preserveDraft = false, force = false } = {}) {
+  if (_justOpened && !force) return;
   visible.value = false;
-  text.value = '';
+  _draftPreserved = preserveDraft;
+  if (!preserveDraft) text.value = '';
 }
 
 async function submit() {
@@ -335,6 +350,20 @@ onUnmounted(() => document.removeEventListener('keydown', onGlobalKey));
 .quicknote-bottom-btn:active {
   transform: scale(0.95);
   background: var(--bg-primary);
+}
+
+.quicknote-count {
+  min-width: 17px;
+  height: 17px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px;
+  color: var(--text-primary);
+  background: var(--border-subtle);
+  border-radius: var(--radius-full);
+  font-size: 10px;
+  line-height: 1;
 }
 
 /* ── 动画 ── */

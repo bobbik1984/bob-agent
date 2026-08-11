@@ -1,0 +1,913 @@
+# Bob-Agent 开发全局路线图 (Roadmap)
+
+> 🎯 **当前版本**: `v0.7.8` — 从 Goal Loop 原型进入持久 Goal Runtime 阶段。
+> ♻️ **已完成**: Tauri 迁移、Tool Calling、Maker–Checker Goal Loop 原型、R0–R3 权限确认、规则意图分类、结构化记忆契约、知识图谱、跨端同步与 Relay 逐跳诊断。
+> 📋 **当前 Sprint**: 目标 31 Phase 0/1 — 契约冻结、Goal Compiler 与自动路由。完整架构以 `docs/GOAL_RUNTIME.md` 为唯一真相源。
+> ⚠️ **口径约束**: 当前 Goal 仍是会话内三轮重试原型；在持久状态、证据闭环、暂停恢复与自动升级完成前，不得在文档或 UI 中称为“完整 Goal Runtime”。
+
+---
+
+## 📍 目标 1: Tauri 基础脚手架 ✅
+
+---
+
+## 📍 目标 2: 前端完整性保障 (让所有页面能正常渲染) ✅
+> ⚠️ 本阶段**不写任何 Rust 代码**，只在 `tauri-bridge.js` 中补全 Mock，以及在 `App.vue` 中添加窗口按钮。
+
+
+### 2B: Bridge Mock 完整性 (补全所有 53 个接口)
+> 以下是当前 `tauri-bridge.js` 中**完全缺失**的接口，按组件分类列出。
+
+
+### 2C: 导航验证
+
+---
+
+## 📍 目标 3: Rust 原生化 — 配置与凭证
+> 将 Bridge 中的 Mock 逐步替换为真正的 Rust 实现。
+
+
+## 📍 目标 7: 收尾与发布
+
+---
+
+## 📍 目标 8: 声明式配置 + 单向调谐 (Outbox/Reconciler 架构) ✅
+> 🎯 **目标**: 让 Bob 在获得第一个 API Key（点火）后，具备自主配置系统的能力。
+> 🛡️ **安全原则**: AI 只写 Outbox 文件（"办公桌"），Rust 内部守护者单向读取、校验、生效，AI 永远碰不到核心配置的"保险柜"。
+
+
+### Phase 3: 用户体验
+
+- [ ] T-823: **端到端集成测试** (集成测试后期再检测) — 在对话中模拟"帮我配好这个 Key: sk-test123"，验证 Outbox 写入 → Reconciler 消费 → config 更新 → UI 自动刷新的完整链路（可与 T-2344 对话添加技能归为同一类安全应用流测试）。
+- [ ] T-824: **防破坏测试** (集成测试后期再检测) — 手动写入格式错误/恶意字段的 `bob_outbox.json`，验证 Reconciler 不崩溃、程序正常运行、审计日志正确记录拒绝原因。
+
+---
+
+## 📍 目标 9: Tool Calling 引擎 (Agent 升级) ✅
+> 🎯 **目标**: 让 Bob 从 ChatBot 升级为 Agent——能够主动调用工具（读文件、抓网页、查技能），而非仅靠用户拖拽喂数据。
+> 🏗️ **方案**: Rust 侧实现（方案 A），全部在进程内完成，不依赖 Python/Node。
+
+
+### Phase 2: 集成与测试
+
+
+---
+
+## 🔍 IPC 数据契约审计 (防踩坑指南)
+> 为了避免像 ModelHub 那样因前后端数据结构不匹配导致的 Bug，以下列出各 Vue 组件实际期望的 Rust 返回数据结构（基于 `tauri-bridge.js` 尚未实现的 Mock 接口梳理）：
+
+### 1. 文件/工作区扫描 (`scanFolder` / `getFileMeta`)
+- **来源**: `ChatView.vue` (处理拖拽上传文件夹)
+- **期望格式 (`getFileMeta`)**: `{ name: string, size: number, isDir: boolean, isDirectory: boolean }`
+- **期望格式 (`scanFolder`)**: 必须返回一个对象，包含 `{ error: boolean, message?: string, ... }`，否则会导致无法弹出“确认扫描”卡片。
+
+### 2. 工具与凭证状态 (`getToolStatuses` / `getApiKeys`)
+- **来源**: `SettingsView.vue` (设置页 API 密钥管理)
+- **期望格式 (`getApiKeys`)**: `{ "deepseek": "sk-xxx...", "openai": "sk-yyy..." }`。前端通过 Key 匹配对应服务商。
+- **期望格式 (`getToolStatuses`)**: 必须是一个对象数组 `[{ name: string, isActive: boolean, description: string, missingCredentials: string[] }]`。前端依靠 `missingCredentials.length > 0` 来决定是否标红并显示警告。
+
+### 3. 日历与做梦引擎 (`listEvents` / `getDreamReport`)
+- **来源**: 暂未深度排查，目前 Mock 强行返回空数组或 `null`。在实现 T-604 (做梦引擎) 时必须严格审查 Vue 端如何渲染报告对象。
+- **注意**: `summarizeSession` 预期返回布尔值以触发前端通知。
+
+### 4. 跨服务商模型切换 (API Key 鉴权陷阱)
+- **现象**: 在对话框中如果从 `deepseek` 切换为 `doubao`，大模型引擎仍会错误地使用 `deepseek` 的 API Key 去请求，导致鉴权失败。
+- **改进要求**: 
+  1. Rust 引擎在发送 `stream_chat` 请求时，必须根据当前选中的 `modelId` 动态反查其所属的 `provider`，并读取对应 `provider` 的专属 API Key。
+  2. 前端 UI (`ModelHub` 或模型下拉菜单) 应当过滤掉那些尚未配置 API Key 的模型，或者在切换到未配置密钥的模型时，主动拦截并弹窗提示用户前往设置页填写。
+
+
+### 5. 残留 Mock 清单 (技术债)
+> 以下接口仍为 Mock，尚未绑定真正的 Rust invoke 或原生实现：
+- **🛠️ 系统级交互 (T-608 残留)**: updateTheme, showNotification。
+> ✅ 已消除 Mock 并实装:
+> - T-603(插件扫描), T-605(日程), T-606(文件读取), T-607(文件夹跟踪), T-608(大部分系统工具)
+> - 🧠 记忆与做梦引擎: summarizeSession, getDreamReport, dismissDream, onDreamCompleted (Rust 实装)
+> - ⚙️ MCP 配置: getMcpConfig, setMcpConfig (Rust 实装)
+> - 📋 剪贴板图片: getClipboardImage (前端 Web API 原生实现)
+---
+
+## 📅 开发日志
+
+### 2026-08-05
+
+**主题**: 目标 29 Phase 2/3 实装 — R2/R3 工具确认 + 记忆契约 + UI 设计系统对齐
+
+**完成**:
+1. [Arch] **R2/R3 工具风险确认流** — 新增 `tool_confirm.rs` (oneshot channel 状态管理)；`llm.rs` 集成风险评估分发逻辑，R2/R3 工具自动阻塞等待 UI 确认，拒绝后返回 rejection 信息给 LLM。
+2. [Arch] **记忆数据契约** — `db.rs` 新增 `memory_entries` SQLite 索引表 (scope/source/confidence/evidence/replaces)；`dream.rs` 和 `evolution.rs` 新增自动同步钩子，Markdown 文件写入后自动 INSERT OR REPLACE 到索引。
+3. [UI] **GlobalDialog.vue CSS 设计系统对齐** — 审计弹窗组件 vs `ui_preview.html` 设计规范，修正所有 CSS fallback 值：圆角 12px→10px (radius-lg)、6px→4px (radius-sm)；颜色从 Tailwind 默认色板切换到 `index.css` 暗色系 (#141414/#e8e8e8/#a0a0a0)；`btn-primary` 文字色从硬编码 `white` 改为 `var(--text-inverse)`；`btn-danger` fallback 从 #ef4444 改为 #dc2626；删除冗余的 `@media (prefers-color-scheme: dark)` 覆盖块 (30 行)。
+4. [Docs] 全量文档更新 — todo.md / progress.yaml / CHANGELOG.md 同步刷新至当前开发进度。
+
+### 2026-07-13
+
+**主题**: 票夹卡片布局优化与日历同步基建 (Ticket & Calendar UX)
+
+**完成**:
+1. [Fix] **Google Calendar 同步鲁棒性修复** — 修复了 `start_background_sync` 在处理 `events_value` 时的序列化嵌套解析异常，确保后台拉取的 Google 日历日程能正确提取并持久化入 `events` 表。
+2. [UI] **TicketCard 非差旅票据自适应布局** — 专门为电影票、演出票等 `!isTravel` 类型的票据重新设计了 CSS Grid。将较长的“场馆”字段横向扩展 (`span 3`) 避免文字溢出，同时实现了空乘客字段的智能折叠，保留大尺寸票务标题。
+3. [UI] **日历月份指示器防迷航** — 解决了在 `WeekTimeline.vue` 连续跨周翻页时丢失月份上下文的痛点，通过提取当周中位数日期的月份，在左上角加入了全局动态大标题 (`YYYY年 M月`)。
+4. [Verify] 确认内置的 `qrcode-vue` 能完美反编译并重新渲染各类静态电影票/展会二维码。明确了 12306 动态高铁加密防伪码的技术边界，确立了“高强度加密票据只提取文字行程，隐藏静态二维码”的务实规范。
+
+### 2026-07-11
+
+**主题**: 内网隧道延迟监测、移动端布局折叠与日历手势边界卡顿自愈
+
+**完成**:
+1. [Feature] **[T-2003] 穿墙隧道状态与延迟检测** — 新增 Tauri 后端 `check_tunnel_status` 命令；Vue 前端 (SettingsConnections) 引入 8 秒自动轮询机制，动态呈现 已连接 (xx ms) / 未连接 状态标识。
+2. [Layout] **[T-2223] 移动端专属通道收纳** — 检测到移动端或窄屏环境时，自动将微信、TG、Discord 等桌面端专属通道入口收纳折叠进一个 `<details class="settings-section card">` (桌面端专属通道) 伸缩面板中，保持排版紧凑。
+3. [Fix] **[T-1801] 修复日历调整时长边界误触详情弹窗 Bug** — 在拖拽结束 (`onDragEnd`) 与缩放结束 (`onMouseUp`) 瞬间注册捕获阶段的 `click` 拦截监听，物理吞噬紧随其后的模拟 `click` 事件，并辅以 50ms 自动垃圾回收，完美解决移动端模拟时序或渲染微卡顿导致的详情修改弹窗误触。
+4. [Sync] 运行 project_aligner 统一全量进度，并将 navigator / dev_dashboard 自动强推至火山云节点部署生效。
+
+### 2026-07-10
+
+**主题**: 移动端技能沙盒化与跨端 Sync 路径贯通
+
+**完成**:
+1. [Arch] **移动端内置技能沙盒化** — 废除原有的只读二进制加载机制，在编译期 (uild.rs) 引入黑名单过滤并将技能打为 zip，在移动端首次启动时 (setup) 将其释放到物理沙盒 /data/user/0/.../skills 中。
+2. [Sync] **跨设备技能同步路径统一** — 移除了 plugins.rs 和 	ools.rs 的移动端特供宏。现在同步引擎下发的外部技能 zip，可与内置技能共存于同一物理目录并正常生效展示。
+3. [Fix] 修复了重构过程中的语法大括号闭合编译错误。
+4. [Docs] 执行 project_aligner 技能完成 v0.6.0 的全量文档对齐。
+
+
+
+### 2026-07-05
+
+**主题**: 移动端体验审计 + Release 编译 + 项目文档统一
+
+**完成**:
+1. [Fix] 修复 Android/Tauri JNI 生成错误 (`tauri::mobile_entry_point` 宏因空 identifier 崩溃)，修正 `tauri.conf.json` 的 identifier 为合法的 `org.bobbik.bobagent`。
+2. [Fix] 修复 `dummy_engine.rs` 的函数签名使其在 Android 目标上正确编译 (返回类型从 `()` 改为 `Result`)。
+3. [Build] 按照 `AGENTS.md` 规范执行了完整的 `scripts/release.bat` 6 步发布流水线，产出 `dist-release/bob-installer.exe` + `dist-release/bob-agent-portable.zip`。
+4. [Audit] 对移动端 4 个待解决问题（图标/Onboarding/扫码配对/FAB 闪退）进行逐项代码审计，对照 `MOBILE_BLUEPRINT.md` 和 `todo.md` 确认冲突点并统一。
+5. [Docs] 更新 `todo.md`、`progress.yaml`、`MOBILE_BLUEPRINT.md` 统一反映审查结论。
+
+**待执行 (当前 Sprint)**:
+- [x] T-2224: 修复 Android 桌面图标 (build.rs 自动同步 `icons/android/` → `gen/android/res/mipmap-*`)
+- [x] T-2227: 移动端专属 Onboarding (跳过工作间、微信替换为扫码配对占位)
+- [x] T-2235: 修复移动端 FAB 悬浮球点击后速记键盘闪退 Bug
+- [x] T-2236: 修复 Android 端本地模型 (GGUF) 下载进度始终为 0% 的问题 (Content-Length 缺失导致进度不上报)
+- [x] T-2237: 重构日程添加弹窗 UI (替换原生 dialog 为自定义 Vue 弹窗)
+- [x] T-2238: 调整聊天输入框扩展菜单的圆角样式
+- [x] T-2239: 优化聊天记录中手机端发送消息的来源图标标识
+- [x] T-2301+: 扫码配对 MVP (局域网直连 + VPS 信令降级)
+
+---
+
+### 2026-07-04
+
+**主题**: 本地大模型引擎 (Candle Engine) 链路修复与贯通分析
+
+**完成**:
+1. [Fix] 修复了前端 `SettingsModelPanel.vue` 中因为 Vue `v-model` 竞态时序导致的离线模型选择在重启后丢失的 Bug。
+2. [Fix] 修复了本地模型 ID 未动态注入全局大模型池的问题，使得聊天界面现在可以正确加载并在下拉框中展示本地模型选项。
+3. [Audit] 分析并定位了本地推理报 `os error 3` 的底层原因：`candle_engine.rs` 中的文件指针未转换为针对 AppData 目录的绝对路径，且存在未加载 Tokenizer 导致必定崩溃的实现盲区。
+
+**未完成**:
+- [ ] T-2002: 修复 `candle_engine` 的物理路径对齐问题。
+- [ ] T-2003: 补全 `candle_engine` 对于 `.gguf` 内置分词器（Tokenizer）的加载支持，或在下载时同步提供 `tokenizer.json`。
+- [ ] T-2004: 实现本地引擎的内存常驻（预加载）及流式输出对接。
+
+---
+
+### 2026-06-30
+
+**完成**:
+1. [Fix] **知识图谱布局重构** — 图例面板左下角单列排布，搜索框浮层化，清除无效的 `unknow` 文本。
+2. [Fix] **笔记侧边栏 (Note Explorer) 一致性** — 时间轴文本单行截断，暗色模式下 `timeline-dot` 颜色对比度修复。
+3. [Audit] **全局状态审计** — 确认 Tauri V2 后端的 `tokio-cron-scheduler` 引擎 (无人值守自动化) 已完全实装并在运行中，清理了旧版冗余的 todo 检查项。
+4. [Audit] **Slash Commands 摸底** — 梳理了当前仅存的 `/memo`、`@note` 和 `@` 命令，发现极度隐蔽的 UX 问题。
+
+**未完成**:
+- [x] T-2001: 实现 Slash/Mention Command 的智能悬浮补全菜单 (方案 A)
+
+**已完成 (Phase 2.5 & Phase 3)**:
+
+
+### 2026-05-15 (今天)
+
+**主题**: Agent 化升级 - Tool Calling 引擎 + Web Search
+
+**完成**:
+1. 新建 `tools.rs` 工具注册表 - 6 个零外部依赖原生工具: read_file, list_dir, fetch_url, web_search, list_skills, read_skill
+2. 重写 `llm.rs` stream_internal - 完整 Tool Calling 循环 (最多 5 轮), SSE 流式 delta.tool_calls 增量累加解析
+3. web_search 双引擎 - Tavily (主, POST JSON body) + TinyFish (降级, GET header), 纯 Rust reqwest
+4. Tavily + TinyFish API Key 注入 - 从 unified_api_registry.json 提取, 写入 config.json
+5. Outbox 白名单修正 - KNOWN_PROVIDERS 中 TAVILY_API_KEY -> tavily, TINYFISH_API_KEY -> tinyfish
+6. System Prompt 增强 - 工具列表 + 动态技能摘要注入
+7. 编译通过 - cargo check 0 errors
+8. [Fix] MiniMax/Qwen 的 OpenAI 兼容模式下的 `<think>` 标签流式切分状态机
+9. [Fix] 流式缓冲区尾部残留导致文本截断、错觉"停在思考中"的严重 Bug（补全了收尾的 emit）
+10. [Fix] 流式交互 UI 体验：完善等待动画 (弹跳圆点) 的显示时机，只在请求飞出至正文流入的真空期展现，彻底折叠 `<think>` 阶段内容。
+11. [Feature] 确认 `system_time`, `get_weather`, `write_file`, `brain_search` 四个核心工具已在 `tools.rs` 中用 Rust 原生实现完毕，补全了底层基础感知能力。
+
+**未完成**:
+- [ ] T-912: npm run tauri dev 端到端测试
+
+---
+
+### 2026-05-16
+
+**主题**: 日程系统工业化 + 双窗口修复 + 文档大扫除
+
+**完成**:
+1. [Feature] `add_calendar_event` 工具 - 在 tools.rs 中新增，让 LLM 能自主向 SQLite events 表写入日程
+2. [Fix] `calendar.rs` 字段名不匹配 - 后端返回 `startTime`(驼峰) vs 前端读 `start_time`(下划线)，导致日程面板永远空白
+3. [Fix] `tools.rs` start_time 格式拼接 - 大模型传 date+startTime 分离参数，需拼接为 `YYYY-MM-DD HH:MM:SS` ISO 格式
+4. [Fix] 双窗口幽灵进程 - `prevent_close` 在 dev 模式下导致殆尸进程。dev 模式改为真关闭，release 模式保留托盘隐藏
+5. [Feature] `tauri-plugin-single-instance` - 第二次启动自动唤醒已有窗口，不再弹出重复实例
+6. [Fix] 导航更名 - “收件箱”→“日程” (zh-CN.json / en-US.json)
+7. [Docs] 文档大扫除 - 重写 ARCHITECTURE.md, README.md, USER_GUIDE.md；更新 AGENTS.md, progress.yaml；归档 DEVELOPMENT_PLAN.md
+
+**未完成**:
+- [ ] T-912: 端到端测试
+
+---
+
+### 2026-05-17
+
+**主题**: P0 灵魂/记忆完成 + P2 安全加固 + 全局快捷键 + UX 统一 + Restatement 引擎创新
+
+**完成**:
+1. [P0] T-1001 灵魂注入 — 重写 `data/memory/SOUL.md` 为完整人设定义，`llm.rs` 每次对话自动注入
+2. [P0] T-1002 热记忆注入 — `build_memory_summary()` 读取最近 3 份 session 摘要注入上下文
+3. [Security] `write_file` / `append_file` 路径白名单升级 — 新增 `resolve_write_path()` 统一鉴权：相对路径→安全目录，绝对路径→需在 workspaceDir/tracked_folders 内，globalFileAccess 开关可全开放
+4. [Security] `read_file` 路径穿越防御 — `..` 检测前置拦截
+5. [Security] Tool Calling 审计日志 — 新增 `audit_tool_call()`，每次工具调用写入 `AppData/bob-agent/logs/tools.log`
+6. [Security] TinyFish URL 编码安全 — 从简单 `replace(' ', '+')` 升级为 RFC 3986 percent-encoding
+7. [Feature] T-304: 全局快捷键 `Ctrl+Shift+B` — 添加 `tauri-plugin-global-shortcut`，任意界面一键唤起 Bob 窗口
+8. [Feature] `SearchCard.vue` 搜索结果卡片 — 与 FileCard 统一设计语言 (inline pill + Lucide 图标)，web_search 结果自动解析为可点击卡片
+9. [UI] 工具调用圆点样式 — 运行中=实心主题色闪烁，完成=实心主题色静止，统一 `var(--accent-primary)`
+10. [Engine] **尾部注意力重申 (Restatement)** — 在 `llm.rs` Tool Calling 循环第 2 轮起，于 messages 尾部动态注入 system 消息，重申用户原始请求和 SOUL 规则，利用 U 型注意力防止多轮工具调用后失焦
+11. [Research] 分析 `code_runner/references/20260516_别人的测试经验_agent开发和codex应用.md`，提取 4 个架构启发（Restatement/技能固化/排队纠偏/Cron自动化），确认 skill-creator 已就位
+12. [Docs] 全量文档更新 — todo.md / progress.yaml / AGENTS.md / ARCHITECTURE.md / USER_GUIDE.md / README.md 同步刷新
+13. [Engine] T-1003: **异步记忆压缩 (Dream V2)** — 重写 `dream.rs`，启动后 5 秒延迟触发 `compress_sessions_async()`，用 Clerk 模型将 V1 JSON 摘要升级为高质量 Markdown 总结
+14. [Engine] T-1004: **冷热记忆迁移** — 新增 `migrate_stale_sessions()`，启动时同步执行，将 >7 天的 session 文件从 `memory/sessions/` 归档到 `wiki/sessions/`（跨盘复制+删除）
+15. [Feature] T-304: **全局快捷键确认** — `Ctrl+Shift+B` 沿用，标记完成
+16. [Build] cargo check 0 errors 编译验证通过，emoji 安全审计通过
+
+**未完成**:
+- [ ] T-912: 端到端测试
+
+### 2026-06-11
+
+**主题**: 本地文件服务 CSP 放行与生产环境发布打包
+
+**完成**:
+1. [Fix] **CSP 安全策略修复** — 修改 `index.html` 的 Content-Security-Policy 头部，添加 `http://127.0.0.1:*` 到 `img-src` 白名单，解决 WebView2 静默拦截本地图片请求导致图标/本地图片无法显示的问题。
+2. [Cleanup] **移除前端冗余日志** — 移除 `useChat.js` 在渲染管道中为了调试路径正则替换及 DOMPurify 的调试语句。
+3. [Build] **自动化发布构建** — 执行 `scripts/release.bat`，完成 Tauri 双重编译（主程序+引导安装器），打包产出 `dist-release/bob-installer.exe` 和 `dist-release/bob-agent-portable.zip`。
+4. [Docs] 全面更新开发文档、Changelog 及 progress 记录。
+
+**未完成**:
+- [x] 思考状态 (streamThinking) 的前端流式动态加载动画。
+
+## 📍 目标 10: 认知与记忆引擎升级 (Phase 2)
+> 🎯 **目标**: 让 Bob 拥有长期记忆能力，理解自己的“人设”，并能主动维护和检索知识库。
+
+
+---
+
+## 📍 目标 29: 产品智能化收敛 — 从工具箱到工作代理 (T-2900)
+> 🎯 **目标**: 隐藏内部复杂性（模式切换、模型选择、工具权限），让用户只需表达目标，Bob 自动判断、执行、验证。
+> 📋 **来源**: `docs/GOAL_RUNTIME.md` + `references/20260808_Goal Mode study.md` + `references/20260808_Goal_Mode_Agent_Prompt_Playbook_CN.docx`
+> 🏗️ **核心原则**: 可靠性先于自治程度；先收敛再智能化。
+
+### Phase 1: 意图自动分类 — 基础能力部分完成
+> 当前规则分类已能区分 Answer / Quick Action / Planned Task，但低置信度无 Clerk 兜底、Auto 不会进入 Goal，模式切换 UI 仍存在。
+
+- [x] T-2901a: **结构化意图分类** — `TaskKind + IntentComplexity + confidence + matched_signals`
+- [ ] T-2901b: **低置信度兜底** — 使用 Clerk 输出结构化分类，不因文本长度授予写权限
+- [x] T-2902: **Answer 模式** — 仅注入只读工具并限制预算
+- [x] T-2903: **Quick Action 模式** — 最小步骤执行，继续受 R0–R3 Policy Engine 约束
+- [ ] T-2904: **Planned Task 状态化** — 生成 2–6 步计划并记录进度，而不只依赖 Prompt 要求
+- [ ] T-2905: **UI 收敛** — 默认只展示 Auto；高级菜单保留“只回答/帮我完成/停止”覆盖
+
+### Phase 2: 工具风险分级 R0-R3 (P0, 2-3天) ✅
+> 按工具副作用严重程度自动决定是否需要用户确认，替代当前的全局 agentMode 开关。
+
+- [x] T-2911: **风险标注** — 在 `tools.rs` 每个工具定义上增加 `risk_level: R0/R1/R2/R3` 字段
+- [x] T-2912: **Policy Engine** — `tool_confirm.rs` 新增确认状态管理 (oneshot channel)；`llm.rs` 的 `execute_tool()` 入口根据 risk_level 决定行为：
+  - R0 (读取/查询): 自动执行
+  - R1 (可撤销写入): 自动执行 + 提供撤销
+  - R2 (外部影响): 预览确认后执行
+  - R3 (删除/批量/发送): 明确确认 + 审计日志
+- [x] T-2913: **确认 UI** — `GlobalDialog.vue` 复用为 R2/R3 确认弹窗，CSS fallback 全面对齐 `index.css` 设计系统
+
+### Phase 3: 记忆数据契约标准化 (P1, 1周) ✅
+> 给每条记忆加 scope（防止项目偏好外溢为全局）、source（区分用户明说 vs AI 推断）、version（支持回滚）。
+
+- [x] T-2921: **Schema 扩展** — `dream.rs` / `evolution.rs` 的记忆数据模型增加 `scope`, `source`, `confidence`, `evidence`, `replaces` 字段
+- [x] T-2922: **SQLite 迁移** — `db.rs` 新增 `memory_entries` 索引表 + `dream.rs`/`evolution.rs` 自动同步钩子 (INSERT OR REPLACE)
+- [x] T-2923: **检索优先级** — 记忆召回时：纠错 > 用户明说 > AI推断；项目级偏好不外溢为全局
+
+### Phase 4: 纠错记忆最高优先级 (P1, 2天)
+> 用户纠正过的内容永不自然衰减，优先级高于所有推断记忆。
+
+- [x] T-2931: **纠错标记与版本链** — 即时纠错和 `feedback` 统一写入 active correction，并替代旧版本
+- [ ] T-2932: **全管线衰减豁免** — Dream 清理、标题合并和文件淘汰必须识别 correction，不得按时间误删
+
+---
+
+## 📍 目标 31: 个人执行系统主线 — True Goal Runtime (T-3100)
+> 🎯 **终态**: 用户只需表达意图，Bob 自动形成安全、可恢复、可验证的结果；普通用户无需管理模式、模型、MCP、上下文或子任务。
+> 📖 **架构 SSOT**: `docs/GOAL_RUNTIME.md`
+> 🧭 **开发纪律**: Goal Contract → 持久 Runtime → 最小 DAG → 节点验证/恢复 → Goal 轨迹学习 → 自适应路由。禁止跳过基础状态层直接堆多 Agent。
+> 📦 **产品约束**: PC/绿色版零外部运行时，Android 不增加用户侧依赖；所有阶段必须执行客户端体积回归。
+
+### Phase 0: 契约冻结与回放基线 (P0)
+
+- [ ] T-3101: 定义 `IntentDecision`、`GoalContract`、`GoalStatus`、`NodeStatus`、`Evidence` 的 Rust/JS 版本化契约
+- [ ] T-3102: 建立 Answer / QuickAction / Planned / Goal / Routine 意图回放集，覆盖中文短句、隐含目标和高风险歧义
+- [ ] T-3103: 为现有三轮 Goal Loop 建立基线测试：通过率、误通过率、重试次数、Token、耗时和失败类型
+- [ ] T-3104: UI 和文档统一使用“Goal Loop 原型”口径，移除“自动死磕直到完成”等超出现状的承诺
+
+### Phase 1: Goal Compiler 与自动路由 (P0)
+
+- [ ] T-3111: 新增 Goal Compiler，将用户自然语言编译为 outcome/evidence/scope/constraints/milestones/budget/risk/blocker/handoff
+- [ ] T-3112: 实现 VISTA 风格适配评分；只将可验证、可迭代且边界足够明确的任务升级为 Goal
+- [ ] T-3113: Auto 路由支持 Planned → Goal，低置信度使用 Clerk 结构化兜底
+- [ ] T-3114: 使用已确认用户偏好补全低风险默认值；不可逆选择、凭证缺失或业务互斥时才询问
+- [ ] T-3115: 增加“Bob 将如何完成/完成标准”轻量预览，允许调整但不强迫普通用户学习模式概念
+
+### Phase 2: 持久 Goal Runtime (P0)
+
+- [ ] T-3121: SQLite 新增 `goals/goal_attempts/goal_evidence/goal_events/goal_checkpoints`
+- [ ] T-3122: 实现 draft → ready → running → waiting_user/blocked → verifying → done/failed/cancelled 状态机
+- [ ] T-3123: 支持暂停、继续、取消、预算耗尽、阻塞原因和应用重启恢复
+- [ ] T-3124: Goal 状态卡展示完成条件、当前阶段、耗时/预算和最近一次验证原因
+- [ ] T-3125: 保证 Goal、远程和定时执行均不能绕过 R0–R3 Policy Engine
+- [ ] T-3126: Done 必须绑定 Evidence；证据不足保持 unverified，不接受执行者自述
+
+### Phase 3: 最小执行 DAG 与上下文胶囊 (P1)
+
+- [ ] T-3131: 新增 `goal_nodes/goal_edges`，支持顺序、独立并行和汇合三种关系
+- [ ] T-3132: 独立节点使用干净上下文；依赖节点只接收 Goal Contract、相关记忆、前序 artifact 和证据
+- [ ] T-3133: 节点声明 tool/model/vision/risk/verifier/retry/fallback profile
+- [ ] T-3134: 失败节点局部重试并使受影响下游失效，禁止整项 Goal 无差别重跑
+- [ ] T-3135: Coordinator 只保存规范状态与 artifact 引用，不把完整聊天历史复制到每个节点
+- [ ] T-3136: 通过数据证明并行收益后再启用多 Agent；并行数量必须有资源和预算上限
+
+### Phase 4: 验证、故障恢复与跨端连续性 (P1)
+
+- [ ] T-3141: 验证顺序固定为确定性检查 → 业务规则 → Clerk/Rubric → 必要时用户验收
+- [ ] T-3142: 为文件、数据库、日程、报告和同步任务建立领域 Verifier Registry
+- [ ] T-3143: 故障注入覆盖模型超时、工具失败、进程重启、网络中断、乱序事件和证据缺失
+- [ ] T-3144: PC 为 Goal 状态 SSOT；手机可查看、补充信息、暂停/继续，断线后幂等归并状态
+- [ ] T-3145: 用户日志说明“完成了什么/证据是什么/哪里失败”；高级诊断保留 trace，不向普通用户泄露内部噪声
+
+### Phase 5: Dream 结果学习与用户模型 (P1)
+
+- [ ] T-3151: 记忆正式拆分 identity/preference/episodic/procedural/project/correction
+- [ ] T-3152: 停止向 SOUL 写入工具避坑；迁移到 procedural memory 或诊断库
+- [ ] T-3153: Dream 读取原始目标、Goal Contract、计划、轨迹、验证和用户验收，形成结果驱动的学习样本
+- [ ] T-3154: 记忆增加 valid_from/valid_until/usage_count/success_correlation/sensitivity/user_confirmed
+- [ ] T-3155: 按当前 Goal 语义、scope 和证据检索记忆，替代固定“最近三段＋前十条”注入
+- [ ] T-3156: 提供记忆查看、确认、纠正、删除和导出；高敏感推断默认不自动固化
+- [ ] T-3157: 建立记忆回放评估：有记忆是否真实减少澄清、返工和用户纠正，而不是只增加 Prompt 长度
+
+### Phase 6: 自适应模型与策略路由 (P2)
+
+- [ ] T-3161: 根据节点能力选择廉价文本、Vision、主模型或强推理模型，确定性验证优先不用 LLM
+- [ ] T-3162: 记录 task_kind × model/tool/strategy 的成功率、成本和时延，禁止凭主观硬编码“最佳模型”
+- [ ] T-3163: 建立降级链：模型不可用、工具失败或预算紧张时换模型/工具/计划，而不是无限重试
+- [ ] T-3164: 北极星看板统计验证闭环率、平均澄清次数、恢复成功率、误通过率和记忆纠正率
+
+### 目标 31 完成门槛
+
+- [ ] 普通用户无需手动选择 Goal 即可触发合适的持久任务
+- [ ] 应用重启和移动端断线后能可靠恢复，且不会重复执行有副作用节点
+- [ ] 每个 Done 都能展示可追溯证据，每个 Blocked 都能说明具体缺口
+- [ ] 失败可以定位到节点、工具或验证规则，并优先局部恢复
+- [ ] Dream 能从用户验收和真实结果学习，且用户可控制记忆
+- [ ] PC 安装版/绿色版/Android 体积无未解释增长，零外部运行时约束保持成立
+
+---
+
+## 🔧 可完善项 (Improvement Backlog)
+
+
+### 引擎层
+- [ ] **Epic: 离线模型 Tool Calling (Offline Function Calling)**
+  - [ ] 调研本地 `llama-server` (如 Llama-3/Qwen) 的 function calling 输出格式
+  - [ ] 在 `llm.rs` 中针对 `provider == "offline"` 增加降级逻辑（如果模型不支持标准 JSON，则通过 Prompt 强制要求 XML 标签包裹）
+  - [ ] 实现离线模式下的错误重试机制（解析 JSON 失败时，返回报错信息让小模型自行修正）
+- [ ] **Epic: 排队纠偏 (Queue Correction)**
+  - [x] 在前端 `ChatView.vue` 添加“打断执行”按钮，点击后发送中止信号给 Tauri 后端
+  - [x] 在 `llm.rs` 中引入 `tokio::sync::mpsc` 监听前端中断信号
+  - [x] 修改 `stream_internal` 的 Tool Calling 循环：一旦收到中断信号，立刻跳出循环并丢弃挂起的工具
+  - [x] 将用户新输入的“纠正指令”作为新一轮上下文直接喂给 LLM 重新规划
+- [x] 引入 `tokio-cron-scheduler` 库，在 `lib.rs` 的 Tauri 进程后台线程中初始化 (仅在应用运行时调度，不注册系统常驻守护进程)
+  - [x] 在应用启动时，从 SQLite 读取用户的自动化日程（如每天 08:00 播报新闻），并自动检查当天该任务是否已执行；若当天已过预定时间点且未曾执行，则在启动后立即补发执行一次
+  - [x] 编写应用内定时唤醒逻辑：时间一到且应用在运行，自动后台组装 Prompt 并调用 `stream_internal`，将结果通过系统通知（Notification）或悬浮窗推给用户
+
+### 体验层
+- [ ] **Epic: 对话窗口内联渲染 HTML**
+  - [ ] 在对话窗口里渲染 HTML 页面，以有效展示由 Excel 读取数据生成的图表
+
+---
+
+## 📍 目标 10: 架构审计与安全加固 (Post-Migration Audit)
+> 🎯 **目标**: 根据 Jules 提供的 Electron 到 Tauri 迁移审计报告，全面清理技术债并加固系统安全性。
+> 🛡️ **安全原则**: 消除 Rust 后端 Panic 隐患，彻底清理弃用的 Node.js 依赖，封堵路径穿越漏洞。
+
+
+### 第三阶段: 生产级加固 (v0.2.0 Sprint — 已完成)
+
+---
+
+## 目标 11: v0.3 — 微信接入 + HTTP API (已完成)
+
+微信接入模块已在 Rust 侧原生实现 (wechat/ 9个文件 + http_api.rs)，桌面端 UI 已适配。
+
+---
+
+## 📍 目标 12: v0.4 — Ghost Partner (幽灵副手)
+> 🎯 **目标**: 从"被动响应的聊天机器人"进化为"主动辅助的桌面幽灵副手"。
+> 📋 **来源**: `docs/20260606_AI 桌面助手竞品与差异化战略.docx` 竞品分析 + 差异化战略梳理。
+> 🏗️ **核心定位**: 「中国泛白领办公桌上的幽灵副手」— 极度轻量、原生体验、纯本地化，拒绝全能 IDE 叙事。
+
+
+### Phase 1: 文件操作工具集 (Shell-Lite, 5 个新工具)
+
+
+- [ ] T-1212: **文件目录监控 (Micro-Heartbeat File Watch)**
+  - [ ] Cargo.toml 引入 `notify` crate（文件系统事件通知，比 walkdir 轮询更省电）
+  - [ ] 监控 tracked_folders + 微信下载目录
+  - [ ] 新文件出现时，通过系统托盘气泡或桌面通知轻提醒
+  - [ ] 可选: 自动触发 LLM-Wiki ingest（需用户在提醒中确认）
+
+
+### Phase 4: 高阶自治（延后 / 按需）
+
+- [ ] T-1231: **Outbox 预填提案 (Proactive Proposals)**
+  - [ ] 微心跳检测到新事务时，后台模型分析并预填 `bob_outbox.json` 草案
+  - [ ] 用户唤醒桌面时，弹出执行清单一键确认
+  - [ ] 将交互逻辑从"被动等待指令"升级为"主动提供执行提案"
+
+- [ ] T-1232: **过程记忆提取 (Procedural Memory / Skill Extraction)**
+  - [ ] Dream Engine 复盘近期重复操作模式，将高频操作固化为新的 Skill 定义
+  - [ ] 引入自学习循环，实现"越用越顺手"的正向演进
+  - *注: 这是研究课题，暂不排期，需先观察 dream.rs V2 的实际产出质量*
+
+---
+
+## 目标 13: v0.4 — 体感/防御/主动性升级 (借鉴 Hermes Desktop)
+> **目标**: 把 Bob 已有的强大后端能力"浮出水面"，让用户真正感知到 Bob 在背后做了什么。
+> **来源**: Hermes Desktop 竞品分析 + `bob_optimization_plan.md` + `bob_v04_dev_guide.md`
+> **设计红线**: 14px 最大圆角 / 纯灰度 / 无蓝色 / **严禁 Emoji** / 无技术术语 / 所有通知可关闭
+
+
+### Phase 3: 主动性升级 — 让 Bob "动起来" (3-4周)
+
+
+---
+
+## 📍 目标 14: v0.5 — 认知引擎升级 (Cognitive Engine v2)
+> 🎯 **目标**: 让 Bob 从"能记住事"进化为"会思考的记忆体"——自动去噪、自我纠错、成本自控。
+> 📋 **来源**: `docs/分布式 Agent 认知系统审视.docx` 理论框架，提取出 5 个可落地到单 Agent 桌面产品的改进点。
+> 🏗️ **核心原则**: 所有"智能"逻辑尽可能下沉到 Rust 确定性层（瘦智能体，胖平台），减少对 LLM 的依赖。
+
+
+### Phase 3: 智能路由升级 (P3 — 研究性质)
+
+
+---
+
+## 📍 目标 15: v0.6 — 文档输出引擎 (Document Export Engine)
+> 让 Bob 从"只会说"进化为"能交付"——对话结束后导出精排版 HTML 报告、PDF、Excel、Word、PPT。
+> 核心策略: **HTML-first** — 精排 HTML 是主力输出，PDF 通过打印导出。
+> 设计来源: o2_analysis 项目 + guizang-ppt-skill + mckinsey-designer + frontend-design
+
+
+### Phase 4: PPTX 模板注入式生成 (Tier 4, 延后)
+
+
+---
+
+## 📍 目标 16: v0.4.1 — Shell 执行引擎 + 通讯渠道接入
+> 🎯 **目标**: 补齐白领场景的"文件整理"与"移动端通讯"两个关键能力缺口。
+> 📋 **来源**: 用户反馈 — 基础文件操作 + Telegram/Discord 后端接入。
+> 🏗️ **预估工作量**: 2-3 天。
+
+### Phase 0: 架构断裂修复 (Bug Fix — 最高优先级)
+
+  - [x] `tauri-bridge.js`: sendChat/sendVision 将 `globalFileAccess`, `agentMode` 透传给 Rust invoke
+  - [x] `lib.rs`: llm_chat/llm_vision 命令签名新增 `global_file_access: bool`, `agent_mode: String`
+  - [x] `llm.rs`: stream_internal() 接收并使用这两个参数:
+    - `global_file_access` → 传给 execute_tool() → resolve_write_path()
+    - `agent_mode == "yolo"` → system prompt 附加"干活模式"指令
+  - [x] `tools.rs`: 移除 L1419-1420 的 TODO 硬编码 `let global_file_access = false`
+
+### Phase 1: 文件操作工具集 (Shell-Lite, 5 个新工具)
+
+- [x] T-1611: **create_directory 工具**
+  - [x] `tools.rs`: Schema + execute 分支, 使用 `std::fs::create_dir_all()`
+  - [x] 安全: 复用 `resolve_write_path()` 白名单
+
+- [x] T-1612: **move_file 工具**
+  - [x] `tools.rs`: Schema + execute 分支, 使用 `std::fs::rename()` + 跨盘降级 copy+delete
+  - [x] 安全: 源路径需在 tracked_folders 内, 目标路径走 `resolve_write_path()`
+
+- [x] T-1613: **copy_file 工具**
+  - [x] `tools.rs`: Schema + execute 分支, 使用 `std::fs::copy()`
+  - [x] 安全: 同 move_file
+
+- [x] T-1614: **delete_file 工具 (回收站优先)**
+  - [x] `Cargo.toml`: 引入 `trash = "5"` 跨平台回收站 crate
+  - [x] `tools.rs`: Schema + execute 分支, 优先 `trash::delete()`, 降级 `std::fs::remove_file()`
+  - [x] 安全: 仅允许删除 tracked_folders / workspaceDir 内的文件
+
+- [x] T-1615: **rename_file 工具**
+  - [x] `tools.rs`: Schema + execute 分支, 使用 `std::fs::rename()` 同目录内
+  - [x] 安全: 复用 `resolve_write_path()`
+
+- [x] T-1616: **System Prompt 更新**
+  - [x] `llm.rs`: 工具列表注释区追加 5 个文件操作工具的描述
+
+
+### Phase 4: 验证
+
+- [x] T-1641: cargo check + cargo clippy 编译通过
+- [x] T-1642: 端到端测试 — 对话中"帮我建个文件夹"/"移动文件" 验证
+
+---
+
+## 📍 目标 17: v0.33 — 知识图谱融合 (Knowledge Graph)
+
+> 核心目标：把 iknow 的语义图谱能力原生化到 Bob 中，闭合“拖拽文件夹 → 知识提取 → 图谱展示”的完整 UX 循环。
+
+### Phase 0: 数据层 — SQLite 图存储 + Rust 图引擎
+
+- [x] T-1702: Rust 模块 `kg.rs` — Node/Edge CRUD（insert, upsert, delete）
+- [x] T-1703: `kg.rs` — BFS 子图查询 `kg_query(term, max_hops)` → 返回 JSON
+- [x] T-1704: `kg.rs` — 图统计 `kg_get_stats()` → 节点数/边数/类型分布
+
+### Phase 1: 提取层 — LLM 实体+关系提取
+
+- [x] T-1711: `kb_indexer.rs` 扩展 — Prompt 追加 relations 字段
+- [x] T-1712: 索引完成后调用 `kg.rs` 写入节点和边（去重 upsert）
+- [x] T-1713: `brain_search` 升级 — FTS5 + 图谱子图 RRF 混合
+
+### Phase 2: 前端 — KnowledgeGraphView
+
+- [x] T-1722: `KnowledgeGraphView.vue` — vis.js 力导向图主画布
+- [x] T-1723: 顶部工具栏 — 搜索框 + 类型筛选 chips + 节点统计
+- [x] T-1724: 右侧 Inspector 面板 — 节点详情 + 摘要 + 关联列表
+- [x] T-1725: 侧边栏新增“知识图谱”导航入口
+
+### Phase 3: 流程串联 — 闭合 UX 循环
+
+- [x] T-1731: KB 构建完成消息添加“查看知识图谱” CTA 按钮
+- [x] T-1732: 进度消息分三阶段：提取文本 → 生成摘要 → 构建图谱
+- [x] T-1733: Tool Calling 新增 `query_knowledge_graph` 工具
+- [x] T-1734: 对话中右键 → “提取到知识图谱”
+
+### Phase 4: 图谱维护
+
+- [x] T-1741: Dream V3 — 检测孤立/重复节点，标记 superseded
+- [x] T-1742: Inspector 支持手动编辑关系
+- [x] T-1743: 图谱导出（JSON / Markdown）
+
+---
+
+## 📍 目标 19: Goal Mode V2 — 双层裁判 + 自进化失败闭环
+
+> ✅ **原型基础已完成，后续并入目标 31**。已实现 Layer 1 确定性断言、Clerk 复核和执行失败记录。原“避坑指南写入 SOUL”方向已废止，执行经验应迁移至 procedural memory。
+> 📖 **设计来源**: [AI智能体深度分析与产品优化.docx](references/AI智能体深度分析与产品优化.docx) + [朋友的务实建议](references/20260627_bob_next_step_with_coderunner.txt)
+
+
+### Phase 4: 验证
+
+---
+
+
+## 📝 v0.32.2 工作记录 (2026-06-26)
+
+**完成**:
+1. [Feature] **一键体检与自愈面板**: 在设置页面新增 "Doctor" 系统自检 Dashboard，包含关键配置、连通性检测，支持一键热修复。
+2. [Fix] **消息横幅免打扰**: 聊天主界面的体检警告横幅增加 `localStorage` 的 24 小时休眠逻辑，防止频繁打扰。
+3. [Arch] **毫秒级无感自愈防线**: 重构 `db.rs` 的数据库初始化。在开局 1 秒闪屏内植入探针连接执行 `PRAGMA quick_check;`。若查出损坏瞬间完成热回滚，并解除 SQLite 文件锁以防死锁，实现 "Fail-Open" 降级不死机策略。
+4. [UI] **日程中心视图优化**: 调整 `WeekTimeline.vue` 展示逻辑。废除自然周（周一至周日）强绑定，改为始终以“今天”为中心的滚动 7 天视图（过去 3 天 + 未来 3 天），大幅提升聚焦体验。
+
+**全部完成** 🎉
+
+---
+
+## 📝 v0.32.1 工作记录 (2026-06-12 ~ 2026-06-14)
+
+**完成**:
+1. [Fix] **Release 版日志修复**: 移除 `cfg!(debug_assertions)` 守卫，Release 构建现在输出日志至 `logs/bob.log` (2MB 轮转)
+2. [Fix] **CDN 上传超时修复**: 固定 120s 超时替换为动态计算: `max(120s, size_in_MB * 30s)`
+3. [Feature] **实时上传进度条**: stream-based 分块上传 (64KB/chunk)，前端实时显示文件名 + 百分比 + 字节计数
+4. [Arch] **外层工具超时与 CDN 匹配**: send_wechat_file 外层 tokio timeout 120s -> 600s
+5. [Verify] **T-1601 透传修复确认**: 全链路已连通 (useChat -> bridge -> lib -> llm -> tools)，关闭过期 TODO
+6. [Verify] **T-1611~1616 文件操作工具确认**: 5 个工具 (create_directory/move/copy/delete/rename) 已完整实现
+7. [Feature] **streamThinking 流式思考动画**: 脉冲圆点 + 可折叠面板 + 自动滚动 + i18n
+8. [Feature] **工具结果缓存**: 会话级 HashMap (read_file/list_dir/list_skills/read_skill/system_time)，写操作自动清空
+
+**全部完成** 🎉
+
+## 📍 目标 18: Goal Mode (闭环执行引擎)
+> ✅ **Maker–Checker 原型已完成，产品级 Goal Runtime 转入目标 31**。当前只保证会话内有限重试，不承诺自动拆解、持久恢复或一定成功。
+
+
+## 🚀 T-1800: Bob 联邦网络与 Web Drop 引擎
+- [ ] **阶段二 (Bug 修复 & 部署测试)**
+  - [ ] **[高优]** Cloudflare 代理拦截了 WebSocket 握手，需将 DNS 的橙色云朵改成灰色 (DNS Only)，然后让 Caddy 自动申请证书。
+  - [ ] **[UI]** 修复 URL 中分隔符 `|` 导致手机微信无法点击的问题（替换为 `.`）。
+  - [ ] **[运维]** 修复 `bob-services.sh` 中 sudo 下执行 node 找不到命令的环境变量问题。
+- [ ] **阶段三：联邦身份与 Agent Swarm (远景)**
+  - [ ] 在 `SettingsView` 新增【联邦网络】面板，生成本地私有的 `Swarm Key` (AES 密钥种子)。
+  - [ ] `bob.db` 新增 `pending_transfers` SQLite 队列表，实现设备异步离线传输。
+  - [ ] 增加 LLM `send_to_device` 工具，实现跨设备大模型指令接力交互。
+
+
+## 📍 目标 19: 智能笔记模块 Bob Notebook (T-1900) ✅
+> ✅ **已在目标 17 知识图谱融合中全部实现**。后端 `notebook.rs` (888 行, 14 个 IPC)、前端 `TiptapEditor.vue` + `NoteExplorer.vue` 均已完成并集成到 KnowledgeGraphView。
+> 包含：CRUD、标签管理、反向链接、全文搜索、Dream 笔记摘要、气泡存笔记、@note 上下文注入。
+
+---
+
+## 📍 目标 20: 内网穿墙隧道 (Proxy Tunnel) 与中继模式
+> 🎯 构建一个纯粹的代理信息流管道（Proxy/Ladder），绕开公司内网防火墙。
+> 📋 **核心逻辑**: 作为全局功能开关存在。对于受限网络环境一键开启穿墙透传，而无限制网络环境继续依赖现有的直连方式，互不干扰。
+
+### Phase 1: 前端全局开关与 UI (SettingsConnections)
+- [x] T-2003: UI 面板显示当前隧道的连接状态（已连接 / 未连接）与实时延迟。
+
+### Phase 2: Rust 后端网络层重构 (Tunnel Client & Proxy)
+- [x] T-2011: src-tauri/src/tunnel.rs 实现到 VPS 的代理通道（HTTPS 请求包伪装转发至 proxy 接口）。
+- [x] T-2012: 改造微信模块 (wechat/api.rs)：使用 tunnel::send_request 劫持并转发微信相关请求。
+- [x] T-2013: 改造 Telegram 模块 (telegram.rs)：使用 tunnel::send_request 劫持并转发 Telegram API 请求。
+- [x] T-2014: 采用无状态 HTTP 转发设计，无需重连心跳，天然高可用。
+
+### Phase 3: VPS 中继端配合 (Tunnel Server)
+- [x] T-2021: VPS (bob.bobbik.org) 上配合实现了代理转发端点。
+
+---
+
+## 📍 目标 22: Bob-Mobile 手机端 MVP (T-2200)
+> 🎯 **目标**: 在同一个 bob-agent 仓库中，基于 Tauri V2 的 Mobile 支持，构建手机端极简入口，并最终进化为端侧 LLM 离线节点。
+> 📋 **核心定位**: 手机是"独立前哨站"和"便携式离线推理节点"。
+> 📖 **详细蓝图**: `docs/MOBILE_BLUEPRINT.md`
+
+
+### Phase 2: 手机端 UI 适配与裁剪 (M2 Sprint)
+- [x] T-2221: (M2-01) 移动端布局彻底重构 (实现 BottomNavigation 并通过 AndroidManifest 锁定竖屏)
+- [x] T-2222: (M2-02) 避开手机状态栏 (利用 safe-area-inset-bottom 适配安全区)
+- [x] T-2223: (M2-03) 移除或折叠微信、Telegram、Discord 等桌面端专属通道入口 (移动端 Onboarding 中微信步骤替换为"扫码绑定 PC")
+- [x] T-2224: (M2-04) 修复 Android 桌面图标 — 将 `src-tauri/icons/android/mipmap-*/` 同步覆写到 `src-tauri/gen/android/app/src/main/res/mipmap-*/`，或运行 `npx tauri icon` 重新生成
+- [x] T-2225: (M2-05) 聊天视图双层级改造 (默认打开上一个对话记录，支持后退返回全局对话列表，与返回手势 T-2228 配套)
+- [x] T-2226: (M2-06) 知识库视图极简改造 (已实现：依靠顶部的“图谱”“笔记”分栏快速切换)
+- [x] T-2227: (M2-07) 移动端专属 Onboarding 绑定流程 (已实现 SetupWizard 移动端 3 步布局与扫码配对)
+- [x] T-2228: (M2-08) 原生手势与物理返回键接入 (监听 Android 边缘侧滑/物理返回键，映射到 Vue Router 的 fallback)
+- [x] T-2229: (M2-09) 灵感速记悬浮窗与面板布局重构 (点击全局悬浮球弹出速记面板：画面中央为闪念速记框；底部剥离出两个独立按钮：左下角为【选择模型】按钮，右下角为【扫码配对】快捷按钮)
+- [ ] T-2230: (M2-10) Android 原生权限与安全基建 (处理 Camera/Audio 动态权限申请，确保内部沙盒 Scoped Storage 的文件读写正确拦截，追加 VIBRATE 震动反馈与 WAKE_LOCK 防休眠权限)
+- [x] T-2235: (M2-11) **修复移动端 FAB 悬浮球点击后速记键盘闪退 Bug** — `App.vue` 的 `onFabPointerUp` 中在调用 `openQuickNote()` 前加 `e.preventDefault()` 阻断浏览器合成 click 穿透；`QuickNoteOverlay.vue` 的 `open()` 中加入 150ms `_justOpened` 防抖锁，`close()` 检查该锁后再执行关闭。
+- [x] T-2236: (M2-12) **修复 Android 端本地模型 (GGUF) 下载进度 0% 问题** — 根因为 CDN 不返回 Content-Length 导致 total_bytes=0 时进度事件从不触发。修复：Rust 端增加 chunked 模式每 1MB 上报，Vue 前端处理 progress=-1 显示已下载字节量。
+- [x] T-2237: (M2-13) **重构日程添加弹窗 UI** — 将现有的浏览器原生 `prompt()` 替换为符合 Bob 专属设计语言的 Vue 自定义 Dialog 弹窗组件。
+- [x] T-2238: (M2-14) **调整聊天扩展菜单样式** — 缩小聊天输入框右侧扩展菜单 ("问答 / 执行 / 闭环") 的圆角 (`border-radius`)，使其与整体 UI 保持一致。
+- [x] T-2239: (M2-15) **优化移动端消息来源标识** — 检测当前环境，若在手机端发送消息，聊天气泡下方应显示专属手机小图标，而非 "Desktop" 标识。
+- [x] T-2240: (M2-16) **手机端 WeekTimeline 日历区域手势切换** — 引入 `touchstart` / `touchend` 触摸划动监听，允许手机用户通过左右手势在不同周（上一周/下一周）之间进行顺畅切换。
+- [ ] T-2241: (M2-17) **手机端原生麦克风语音输入支持 (Speech-to-Text)** — 确定采用方案 B（自主编写 Kotlin/Swift 原生桥接），直连 Android `SpeechRecognizer` (监听 `onPartialResults` 阶段回调) 与 iOS `SFSpeechRecognizer`；绕开 WebView 兼容性陷阱；支持蓝牙耳机录音（SCO 协议）；前端 ChatView 输入框旁增加“麦克风”长按/点击录音交互，并将 native 层实时回调的文本增量追加/流式渲染至输入框。
+
+### Phase 3: 端侧本地大模型集成 (Candle Engine)
+- [ ] T-2231: (M2-21) 优化内化的 `candle` 推理引擎在移动端 ARM 架构下的编译与内存占用（取代此前的 llama-server 方案）。
+- [ ] T-2232: (M2-22) 集成 Gemma 4B / Qwen 等轻便开源模型至手机本地 `candle` 推理引擎，测试移动端算力。
+
+---
+
+## 📍 目标 23: 跨端同步引擎 (T-2300)
+> 🎯 **目标**: 复用现有 bob-relay + coturn + WebRTC 基建 (T-1800)，实现手机与 PC 的四级渐进式数据同步。
+> 📋 **核心策略**: PC 主导唤醒，四级降级 (局域网直连 → WebRTC P2P 打洞 → TURN 中继 → 微信 Bot 推送)。
+> 📖 **详细蓝图**: `docs/MOBILE_BLUEPRINT.md` §五
+> 🏗️ **数据同步边界 (Master-Edge 模式)**:
+> - **✅ 手机同步 (镜像/只读)**: 知识库、日程、笔记、模型配置、技能列表、Bob 用户记忆、Bob 人设 (`bob.md`)
+> - **🚫 手机不同步**: 本地大模型文件 (数 GB)
+> - **⚡ 执行权隔离**: 手机同步显示 PC 定时任务但不执行；手机可向 PC 下发新任务
+> - **🔒 安全协议**: Ed25519 身份认证 + X25519 ECDH 密钥协商 + AES-GCM 对称加密
+> - **🤝 PC 端二次确认**: 手机扫码后 PC 弹出确认弹窗，点击"允许"后才建立持久化连接
+
+### Phase 3a: bob-relay 增加设备注册协议
+- [x] T-2301: 在现有 bob-relay (Node.js, VPS1) 中新增设备注册协议 (register/query/notify)。
+- [x] T-2302: PC 端 Bob 启动时自动向 bob-relay 注册 device_id + 在线状态。
+
+### Phase 3b: 同步通道 (复用 Web Drop 引擎)
+- [x] T-2311: 复用 `web_drop.rs` 的 WebRTC 引擎，改造为持久化双向 DataChannel 同步通道。
+- [x] T-2312: 实现四级渐进式连接策略的完整决策链 (局域网 UDP → WebRTC → TURN → Bot)。
+- [x] T-2313: `http_api.rs` 新增 `/v1/sync` 端点，供手机局域网直连时使用。
+- [x] T-2314: 实现手机端 `lan_sync.rs`：被动监听 PC 连接 + 主动回连。
+
+### Phase 3c: 同步协议
+- [x] T-2321: 实现 `sync_protocol.rs` (SyncPacket 序列化 + Ed25519 认证 + X25519-AES-GCM 加密)。
+- [x] T-2322: 运行时配置全量互通机制 (包括模型偏好选择、知识库状态、API Key，安装后自动双向同步更新)。
+- [x] T-2323: 实现 SyncPacket 批量传输与 ACK + synced 标记机制。
+
+### Phase 3d: 端到端联调
+- [x] T-2331: 局域网同步联调 (同一 WiFi，UDP 广播发现 + HTTP 直连)。
+- [x] T-2332: 跨网 WebRTC 打洞联调 (手机 4G + PC WiFi，经 bob-relay 信令 + coturn STUN)。
+- [x] T-2333: Bot 推送唤醒联调 (手机被杀后台 → PC 通过微信 Bot 推送 → 用户打开手机端 → 同步)。
+- [x] T-2334: 设备列表持久化 (DeviceRegistry 落盘保存)。修复手机端 Settings UI 隐藏已连接设备列表以及 bypass PIN 码直接展示在线/离线状态与主动解绑按钮的漏洞，确保持久关联，直到任意一端主动解除配对。
+
+### Phase 3e: 跨端技能同步与数据同步进阶 (Skills & DB Sync)
+- [x] T-2335: 实现 SQLite 数据库（包含知识库索引、图谱、对话记录）的双向增量 Merge 同步协议（需精细设计防覆盖，隔离不同来源数据）。
+- [x] T-2341: PC 端与手机端新增 WebRTC 技能后台自动传输通道，扫描并打包 skills 变化并发送（无需手动点击按钮）。
+- [x] T-2342: 手机端后台接收技能包 payload 后，自动解压路由并保存至手机沙盒对应的技能目录。
+- [x] T-2343: 手机端 UI（设置面板/技能管理器）新增【导入技能 (.zip/文件夹)】按钮，调用 Tauri 原生文件选择器。
+- [x] T-2344: 对话工具扩展：支持用户指令让 Bob 从远程 URL 下载并安装 `SKILL.md` 到 `externalSkillsDir`（复用 T-823 的 Outbox 校验与 Reconciler 异步应用机制，保障安全性）。
+
+---
+
+## 📍 目标 25: 票夹与通行证管理系统 (Bob Wallet) (T-2500)
+> 🎯 **目标**: 让 Bob 完美替代 Google Wallet / Apple Wallet 的基础票据管理功能。将门票、机票、电影票、会员卡作为知识图谱中的一等公民，并与日程表深度双向联动。
+> 📋 **核心策略**: 日程 (Calendar) 记录时间，知识图谱 (Knowledge Graph) 承载结构化票据实体与二维码。
+> 📖 **详细执行蓝图**: `docs/TICKET_MANAGEMENT_BLUEPRINT.md`
+
+### Phase 1: 数据层与后端 API (Rust)
+- [x] 扩展 `events` 表，增加 `linked_ticket_id` 指向图谱节点。
+- [x] `kg.rs` 新增 `ticket` 节点类型，支持二维码路径、场馆、状态等结构化 metadata 存储。
+- [ ] 新增 `create_ticket` Tool Calling 工具，一次性完成图谱节点、日程事件和关联边的原子化创建。
+
+### Phase 2: 视图与交互融合 (Vue)
+- [x] 开发 `TicketCard.vue`，支持机票/电影票/展会等不同 Category 的 UI 微件。
+- [ ] 改造 `WeekTimeline.vue` 日程视图，增加 `[🎫 查看入场凭证]` 关联跳转按钮。
+- [ ] 改造 `KnowledgeGraphView.vue`，顶部增加 `[🎫 票夹]` 过滤视图，将所有有效票据聚合并展示二维码。
+
+### Phase 3: 移动端"刷卡"体验 (Mobile)
+- [x] 移动端专属适配：当日置顶票据卡片。
+- [x] 点击二维码放大至全屏，并自动调高屏幕亮度、锁定屏幕方向，方便检票扫码。
+
+## 🔙 已后置的待办事项 (Backlog)
+
+### 📍 目标 21: 知识图谱 Source-Hub 架构重构 (Implicit Provenance + Cascade GC)
+> 🎯 **目标**: 彻底解决知识图谱中的"幽灵节点"问题，实现按来源批次成套导入/成套清除，并让跨项目的相同概念自动融合桥接。
+> 📋 **核心设计**: 隐式溯源 (JSON 数组多血缘) + 实体去重融合 + 引用计数垃圾回收。
+> 🏗️ **架构哲学**: 借鉴 Google Drive 的扁平化对象存储 + Capacities 的面向对象知识管理，实现"底层隐式血缘（用于生命周期管理）、上层纯粹语义网状关联（用于知识发现）"的混合架构。
+
+
+#### Phase 5: 前端适配
+
+---
+
+## ⚙️ 遗留系统缺陷与技术债 (Legacy Defects & Tech Debt - Postponed)
+
+### ⚠️ 微信 CDN 文件传输缺陷（P2，后置）
+> 需深度排查 reqwest 流式分块上传与微信 API 侧限制
+- [ ] 检查 `wechat/cdn.rs` 分块流式上传逻辑 `build_progress_body`
+- [ ] 排查 `ilink/bot/getuploadurl` 接口对大文件的签名超时问题
+- [ ] 实现 >25MB 失败时自动降级至 Web Drop (T-1800) 的链接分享机制
+
+### ⚠️ PDF 转图片功能失效（P2，后置）
+> 需修改 Rust 接口使用 `app_handle.path().resource_dir()` 动态定位 pdfium.dll
+- [ ] 修改 `pdf_renderer.rs` 与 `kb_extractor.rs` 绑定路径为 Tauri 资源目录
+
+### 💡 环境变量与凭证清债 (Tech Debt)
+> 根据 `AGENTS.md` 安全红线规范，外部服务 API Key 严禁保留在 `.env` 中
+- [x] 将 `TAVILY_API_KEY` 和 `TINYFISH_API_KEY` 从 `.env` 迁移至工作区统一的 Credential Store (如 `config.json`)。
+- [ ] 确保前端 `SettingsModelPanel.vue` 中的“插件/外部服务密钥”输入框能正确双向绑定并覆写旧逻辑。
+
+---
+
+## 🎨 UI/UX 体验优化与交互适配 (UI/UX & Interactions - Postponed)
+
+### 💡 界面体验清债与输入指令重构（P3，后置）
+- [ ] Slash/Mention Command 智能悬浮补全菜单
+- [x] Chat 界面增加显性的"📌 作为笔记速记"按钮 (已实现为消息气泡底部的 BookmarkPlus 按钮)
+- [x] **连接中心卡片高度与展示优化**: 调整服务卡片网格对齐，移除强制等高拉伸限制，使微信、TG、Discord 服务卡片在多端同步展开列表时保持紧凑的自然高度。
+- [x] **多端同步状态展示重构**: 改用点亮的手机图标（主题色）表示设备已连接，鼠标悬停时 tooltip 显示具体设备名称，点击图标后弹出设备详情模态框。
+- [x] **全端设备名称支持**: 在所有终端（包括 PC 和手机等）设置中增加“设备名称”自定义输入区域，以支持跨端的身份识别。
+
+### 💡 日程交互重构 (T-1801)（P3，后置）
+- [x] 拖拽事件 (Drag & Drop): 允许在日历内将日程拖拽移动 to 不同的时间，或左右的日期里。
+- [x] 拖拽时长 (Resize Event): 卡片上下边缘可以直接拖拽延长或者缩短时长，最小调整尺度设为 15 分钟。
+- [x] 自定义事件弹窗替代原始 `prompt()` 弹窗
+
+---
+
+
+
+
+## 📍 目标 24: 跨平台 CI/CD 自动化打包分发流水线 (GitHub Actions)
+> 🎯 **目标**: 当各平台版本开发趋于稳定时，弃用本地脚本，全面迁移至 GitHub Actions 进行云端构建，实现真正意义上的一次推送，全端发布。
+> 📋 **覆盖矩阵**: Windows (x64 Installer/Portable), macOS (Intel/Silicon dmg), Linux (AppImage/deb), iOS (ipa), Android (apk).
+
+### Phase 1: 基础设施迁移
+- [ ] 编写 `.github/workflows/release.yml`，定义 `windows-latest`, `macos-latest`, `ubuntu-latest` 构建矩阵
+- [ ] 将 `scripts/build_payload.mjs` 等前置/后置产物收集脚本接入云端 Runner
+- [ ] 配置 Tauri GitHub Action 构建主程序二进制文件
+
+### Phase 2: 独立安装器流水线
+- [ ] 在云端工作流中复刻 `release.bat` 的思路，在主程序编译完后，将 Payload 移动到 installer 目录
+- [ ] 触发二次 Tauri Build 编译独立安装器 (Windows Only)
+- [ ] 归集所有构建产物到 `dist-release`
+
+### Phase 3: 签名与分发 (移动端 + 桌面端)
+- [ ] 配置 Android Keystore 到 GitHub Secrets，实现 APK 的云端自动签名
+- [ ] 配置 Apple P12 证书与 Provisioning Profile 到 GitHub Secrets，跑通 iOS/macOS 的打包
+- [ ] 集成 `softprops/action-gh-release`，自动将全平台产物附加到对应的 GitHub Release 中
+
+---
+
+## 📍 目标 25: 本地推理 GPU 自动适配 (Auto GPU Detection)
+> 🎯 **目标**: PC 端启动时自动探测 GPU 环境，优先使用硬件加速推理，覆盖 NVIDIA/AMD/Intel 全家桶，无 GPU 则 fallback 到 Candle CPU。
+> 📋 **架构**: Android → Candle CPU (现状即最优解) | PC → 运行时探测 → llama.cpp sidecar (CUDA/Vulkan) → Candle CPU 兜底。
+
+### Phase 1: 运行时 GPU 探测
+- [ ] 在 Rust 端新增 `detect_gpu()` 函数，检测系统是否有 NVIDIA (nvidia-smi) / AMD / Intel 独显
+- [ ] 将探测结果写入 config.json 的 `detectedGpu` 字段，前端设置页展示当前硬件信息
+
+### Phase 2: llama.cpp Sidecar 路由
+- [ ] 重构离线推理入口：当检测到 GPU 且 `llm-engine.exe` 存在时，优先走 sidecar 通道
+- [ ] 实现 sidecar 的 HTTP/stdin 通信协议，与 Candle 共用同一套前端事件（`llm:chunk`）
+- [ ] Fallback 逻辑：sidecar 启动失败 → 自动切回 Candle CPU，用户无感
+
+### Phase 3: Candle CUDA 编译选项 (可选)
+- [ ] 在 `Cargo.toml` 中增加 `cuda` feature flag（条件编译）
+- [ ] GitHub Actions 增加 CUDA Toolkit 的 Windows 构建矩阵
+- [ ] `Device::cuda_if_available(0)` 替换硬编码的 `Device::Cpu`
+
+---
+
+## 📍 目标 26: 远程 AGY / Antigravity 代理执行桥接 (Remote Terminal Bridge)
+> 🎯 **目标**: 让手机或 PC 端 Bob 成为“包工头”，将重度代码/运维任务委派给后端（VPS/本地）具有完整运行环境的 AGY 或 Claude Code 执行，实现“轻量级前端 + 重型后端执行”范式。
+
+### 📝 跨平台远程工具特性研究 (Linux vs PC)
+> **AGY (Antigravity CLI)**:
+> - **Windows (PC)**: 可执行文件通常为 `agy.exe`（如果在 PATH 中则直接 `agy`），调用方式 `agy run "<prompt>"`。
+> - **Linux (VPS)**: 可执行文件通常为 `agy`，常驻于 tmux session 中，调用方式也是 `agy run "<prompt>"`。需处理 SSH 连接（通过 `plink` 或原生的 `ssh`）。
+> **Claude Code**:
+> - **Windows (PC)**: `npx @anthropic-ai/claude-code` 或全局安装后的 `claude`。
+> - **Linux (VPS)**: 全局安装的 `claude`。官方提供 `claude remote-control` 供手机端 App 直连，但如果被 Bob 调度，则通过 SSH 以非交互式指令调用。
+> **调度挑战**:
+> - 这类 Agent 通常带有强交互性（如确认修改、报错询问）。在自动化调度下，需要注入 `--yes` 等强制非交互参数，或者把交互流通过 stdout 抛回给 Bob 的 LLM 去代为回答（双重 Agent 协同）。
+
+### Phase 1: 异步工具层 (Rust)
+- [ ] T-2601: `tools.rs` 新增 `delegate_to_agy` 工具，接收 `target_node` 与 `task_prompt` 参数。
+- [ ] T-2602: 实现 Detached Background Task 机制，工具被调用后立即向 LLM 返回任务已下发（防阻塞超时）。
+- [ ] T-2603: 结合 `plink` 或 `std::process`，实现基于 `target_node` 路由的远程/本地命令拉起逻辑。
+
+### Phase 2: 状态回流与跨端 UI (Vue + Sync)
+- [ ] T-2611: Tauri 后端执行完毕后，发射全局事件 `agy:task_completed`。
+- [ ] T-2612: 前端 `ChatView` 监听该事件，自动以 Bob 的身份将 AGY 的执行总结插入对话流，并通过 Sync Engine 实时推送到手机端。
+- [ ] T-2613: 开发轻量级的悬浮状态卡片（"AGY 正在 X1 Tablet 执行任务..."），供手机和 PC 端实时感知远端运行状态。
+
+
+## 📍 目标 27: 移动端系统级分享接入 (Share to Bob)
+> 🎯 **目标**: 让 Bob 成为 Android 系统的全局数据黑洞。用户可以在相册、浏览器、微信等任何 App 中，通过系统的“分享”面板将图片、链接、文本一键发送给 Bob，实现无缝的信息采集。
+> 📋 **技术方案**: 采用“Github CI 原生代码热注入”方案。在 CI 流水线中向生成的 `AndroidManifest.xml` 注入 `intent-filter`，并将拦截 Intent 的 Kotlin 原生代码热注入到编译目录，最后由前端异步消费。
+
+### Phase 1: 基础设施热注入脚本编写
+- [ ] 编写 `ShareReceiver.kt` 原生拦截器，负责接收 Intent 并将文件保存到 Tauri 缓存目录
+- [ ] 编写 Python 补丁脚本 `scripts/patch_android_intent.py`，用于给 Manifest 注入 `<intent-filter>`
+- [ ] 更新 `android.yml`，在 `tauri android init` 之后立刻执行注入脚本和 Kotlin 文件拷贝
+
+### Phase 2: 前端消费与同步联动
+- [ ] 在前端启动时，添加对分享缓存目录的轮询或监听机制
+- [ ] 设计“收到分享内容”的拦截弹窗或直接静默入库（作为 Note 或 Task）
+- [ ] 确保落盘的数据能够自动进入 Outbox 并在下一次连接时同步给 PC
+
+## [WIP] 增强底层表格处理能力 (Native Excel Tools)
+- [x] 在 `tools.rs` 中引入并使用 `calamine` 解析库。
+- [x] 开发 `table_schema_viewer`：提取 Sheet 结构及列名。
+- [x] 开发 `table_global_search`：实现行级别的关键词匹配过滤。
+- [x] 开发 `table_column_filter`：实现按列精准查询。
+- [x] 接入 `ToolCallTracker`、`resolve_table_read_path` 权限检查和 `audit_tool_call`。
+- [ ] 将新工具在 Bridge 中予以暴露。
+
+- [ ] 跨端协作 (Cross-Device Synergy): 重构 send_to_pc_agent 工具，移除 equire_sync 同步阻塞等待，改为通过传入 session_id 触发 PC 端底层数据库异步回调，彻底解决长连接 45 秒超时断开导致的结果无法回传问题。
+
+## 📍 目标 28: 多平台与网页端入口 (Multi-platform & Web UI)
+- [ ] **iOS 客户端开发**：研究基于 Tauri V2 的 iOS 打包方案，补全苹果生态支持。
+- [ ] **网页端对话窗口 (Web UI)**：
+  - 设计网页版独立入口，允许在浏览器中随时随地进行对话。
+  - **设备认证与关联方案**：
+    - 方案A（设备扫网页）：网页端展示动态二维码，使用已登录的手机端 Bob-Mobile 扫码建立长连接通道。
+    - 方案B（网页扫设备/截图）：如果只有单设备，可以由 PC/手机生成二维码截图，然后在网页端上传截图进行解析与认证，从而关联到该特定设备节点。
+
+## 📍 目标 30: 跨端同步精准诊断与 Relay V2 (T-3000)
+
+> 🎯 **目标**：让 Mobile、Relay、PC 的 LAN 与四段 Relay 路径可独立观测；只根据逐跳回执归因，证据不足时显示“未确认”，不再全图标红。
+> **客户端约束**：PC 安装版与绿色版保持零外部依赖，Android 不增加运行时、Gradle 依赖或权限；用户同步历史最多 50 条。
+
+### Phase 1: 契约与源码收口
+- [x] T-3001: 新增 Rust/JS v2 诊断契约、统一状态枚举和幂等归约器。
+- [x] T-3002: 新增三角拓扑组件首版，移除配对 Emoji，修复设备在线异步判断。
+- [x] T-3003: 现场确认 `relay.bobbik.org` 实际运行 VPS3 Node `src/server.js:3090`，Python/Rust/根目录 Node 文件均非生产实现。
+- [x] T-3004: 将线上 Node Relay 收口到 `relay/`，建立仓库唯一源码与依赖锁文件。
+
+### Phase 2: Relay V2 逐跳回执
+- [x] T-3011: 保持 v1 兼容，增加 `protocol_version/trace_id/message_id/sync_id` 透传。
+- [x] T-3012: 增加注册、请求接收、目标投递、响应接收、返回投递回执与稳定错误码。
+- [x] T-3013: 增加双 WebSocket 客户端、离线目标、旧版 wakeup、去程/回程丢包、延迟、重复和乱序故障注入测试（11/11 通过）。
+
+### Phase 3: 客户端状态与真实日志
+- [x] T-3021: Rust `ConnectivitySnapshot`、Bridge API 与统一诊断事件接入。
+- [x] T-3022: 用户同步历史与高级诊断分离；只在事务提交后记录成功，最多保留 50 条。
+- [x] T-3023: 三角拓扑改用真实快照，PC/Mobile 明确显示 Relay、对端和最近同步状态。
+
+### Phase 4: 验证与发布
+- [ ] T-3031: `localhost:5173` 完成状态矩阵、响应式布局和无 Emoji 检查。
+- [ ] T-3032: `npm run tauri dev` 完成四段真实故障注入和双端 trace 对账。
+- [ ] T-3033: 比较 PC 主程序、绿色包、安装程序及 Android APK/AAB 字节数，异常增长阻断发布。
+- [ ] T-3034: 先部署兼容 Relay v2，再灰度 PC/Mobile；将线上 Relay 纳入 PM2 或 systemd 管理。

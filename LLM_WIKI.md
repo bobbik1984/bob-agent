@@ -12,6 +12,7 @@
 | 搜索关键词/功能 | 核心 Vue 组件 / 触发点 | Bridge 桥接层函数 | Rust Command 后端实现 | 核心业务文件 |
 | :--- | :--- | :--- | :--- | :--- |
 | **可靠 Capture / 闪念速记** | [QuickNoteOverlay.vue](file:///d:/OneDrive/Learning/Code/Gemini/bob-agent/src/components/QuickNoteOverlay.vue) | `captureQuickNote` | `capture_quick_note` | [capture.rs](file:///d:/OneDrive/Learning/Code/Gemini/bob-agent/src-tauri/src/capture.rs) |
+| **Today Layer / 今日概览** | [TodayBriefCard.vue](file:///d:/OneDrive/Learning/Code/Gemini/bob-agent/src/components/TodayBriefCard.vue) / [TodayLayerSurface.vue](file:///d:/OneDrive/Learning/Code/Gemini/bob-agent/src/components/TodayLayerSurface.vue) | `dailyBriefGet` / `dailyBriefRefresh` / `dailyBriefMarkSeen` | `daily_brief_get` / `daily_brief_refresh` / `daily_brief_mark_seen` | [daily_brief](file:///d:/OneDrive/Learning/Code/Gemini/bob-agent/src-tauri/src/daily_brief) / [useDailyBrief.js](file:///d:/OneDrive/Learning/Code/Gemini/bob-agent/src/composables/useDailyBrief.js) |
 | **持续工作核心 / Project State** | [WorkView.vue](file:///d:/OneDrive/Learning/Code/Gemini/bob-agent/src/views/WorkView.vue) | `workProject*` / `workObject*` | `work_project_*` / `work_object_*` | [work_core](file:///d:/OneDrive/Learning/Code/Gemini/bob-agent/src-tauri/src/work_core) |
 | **项目归属候选 / 外部引用** | [WorkView.vue](file:///d:/OneDrive/Learning/Code/Gemini/bob-agent/src/views/WorkView.vue) | `workProjectLink*` / `workExternalLinkList` | `work_project_link_*` / `work_external_link_list` | [project_links.rs](file:///d:/OneDrive/Learning/Code/Gemini/bob-agent/src-tauri/src/work_core/project_links.rs) |
 | **Decision Memory / Change Review** | [WorkView.vue](file:///d:/OneDrive/Learning/Code/Gemini/bob-agent/src/views/WorkView.vue) | `workChangeReview*` | `work_change_review_*` | [decision_change.rs](file:///d:/OneDrive/Learning/Code/Gemini/bob-agent/src-tauri/src/work_core/decision_change.rs) / [models.rs](file:///d:/OneDrive/Learning/Code/Gemini/bob-agent/src-tauri/src/work_core/models.rs) |
@@ -81,6 +82,15 @@
 - **需要新增入口**：构造 `CaptureInput`，保留稳定 `entry_point` 和 `source_device`；跨端重放必须提供稳定幂等键。
 - **文章收藏**：`write_file` 写入 `wiki/raw/article` 或 `wiki/sources`、以及 `save_to_notes` 成功后，会登记已提交 Capture 和来源 URL。
 - **知识对象契约（实施中）**：`knowledge_schema.rs` 定义可迁移 Markdown 的稳定 ID、类型、关系、兼容解析和安全写入；`knowledge_audit.rs` 提供只读盘点命令 `knowledge_audit_run`。SQLite 不是长期知识的唯一载体，详细格式见 `docs/KNOWLEDGE_SCHEMA.md`。
+
+### 1.5 Today Layer 与 Quick Note 交接
+
+- `daily_brief/sources.rs` 只读采集各权威来源并分别返回健康状态；不得在这里创建或修改 Work、Calendar、Goal 数据。
+- `ranker.rs` 负责 canonical 去重和确定性 `1 focus + <=2 attention + <=50 detail`；日常路径不应调用模型。
+- `service.rs` 负责 `daily_brief_cache`、内容 fingerprint、revision 和逐设备 `daily_brief_seen`；强制刷新不等于强制增加 revision。
+- `useDailyBrief.js` 是前端唯一控制器；`App.vue` 只挂载一个 `TodayLayerSurface`，Chat 与 Quick Note 只请求打开它。
+- Quick Note 打开 Today 时必须先绘制 Today，再以 `preserveDraft` 关闭浮层；Android Back、Escape 与普通关闭需要区分。
+- 更改此功能前先读 `docs/superpowers/specs/2026-08-11-conversation-first-today-layer-design.md` 与对应 implementation plan。
 
 ---
 
@@ -181,40 +191,40 @@
 
 ---
 
-## 🎯 5. Goal Loop 原型与 Goal Runtime 目标
+## 🎯 5. Advanced Project Loop 与旧 Goal 原型
 
 ### 5.1 功能概述
-当前实现是会话内 Maker–Checker Goal Loop 原型：用户必须手动选择 Goal，工具调用预算提高到 50 轮，确定性断言通过后再由 Clerk 质检，外层最多重试三次。它尚不具备 Goal Contract、持久任务图、应用重启恢复、节点级验证和局部重跑，因此不得称为完整 Goal Runtime。
+Auto Advanced 当前进入 `goal_runtime`：编译版本化 Goal Contract，以 Work Core Goal 为终态真相源，在 SQLite 中保存 Run、Attempt、Evidence、Checkpoint、Approval、Event 与幂等回执；单次只运行一个有预算的执行切片，启动时仅恢复安全 R0/R1，`done` 必须通过 Evidence gate。用户手动选择 Goal 时仍进入旧 `goal.rs` Maker–Checker 原型；两条路径不能混淆。Dynamic DAG、节点依赖与局部下游重跑尚未实现。
 
-### 5.2 核心逻辑流
+### 5.2 Auto Advanced 核心流
 ```
-[用户开启 Goal 模式发送任务]
-  │
-  ▼◄───────────────────────────────────────────┐
-[Maker 模式执行 (Main Model)]                  │
-  ├── 智能调度 Tools 循环 (工具上限谱写至 50 轮)   │ 重新灌入上下文与清单
-  └── 输出最终报告                             │
-  │                                            │
-  ▼                                            │
-[Checker 模式质检 (Clerk Model)]               │
-  ├── 严格评判: 默认倾向 FAIL                   │
-  ├── 若 PASS: 闭环完成，输出结果              │
-  └── 若 FAIL: 整理缺失清单 (Feedback) ────────┘
+[Auto 路由为 Advanced]
+  → Compiler（本地安全骨架 + 可选 Clerk 候选）
+  → Work Core Goal + Goal Run
+  → R2/R3/歧义：持久选择；R0/R1：获取租约
+  → observe → plan → act → verify → repair
+  → Evidence verified：done；否则 blocked / waiting_user
+  → 启动恢复：只续跑安全检查点，未知副作用不重放
 ```
 
 ### 5.3 关键代码位置
-- **核心主循环**: [goal.rs](file:///d:/OneDrive/Learning/Code/Gemini/bob-agent/src-tauri/src/goal.rs)
-  - `execute_goal_loop()`: 负责三轮外部大重试，维护 Checker 的反馈流。
-- **LLM 协同**: [llm.rs](file:///d:/OneDrive/Learning/Code/Gemini/bob-agent/src-tauri/src/llm.rs) 中的 `stream_internal()`
-  - 检查 `agent_mode == "goal"`，将 `MAX_TOOL_CALL_ROUNDS` 设为 50，并在每轮工具结束后主动注入 `Restatement` 消息（重申任务目标防失焦）。
+- `goal_runtime/models.rs`：Contract、状态机、预算、风险、审批和证据协议。
+- `goal_runtime/repository.rs`：SQLite schema、事务、revision、幂等、租约、恢复与 Evidence gate。
+- `goal_runtime/compiler.rs`：确定性安全基线和限时 Clerk 候选校验。
+- `goal_runtime/engine.rs`：单 Agent 有界执行、验证、修复和恢复。
+- `goal_runtime/commands.rs`：列表、详情、继续、暂缓、取消、选择和事件查询。
+- `goal_runtime/verifier.rs`：工具回执、文件引用和 rubric verdict 解析。
+- `llm.rs`：Auto Advanced 分流与内部只读/动作执行上下文。
+- `goal.rs`：仅保留用户显式选择的旧 Maker–Checker 实验入口。
 
 ### 5.4 目标架构与开发入口
 
 - **目标架构 SSOT**：`docs/GOAL_RUNTIME.md`
 - **执行路线图**：`todo.md` 目标 31（T-3100）
 - **禁止误解**：SQLite Knowledge Graph 保存语义关系，不是执行 DAG。
-- **推进顺序**：Goal Compiler → 持久 Runtime → 最小 DAG → 节点 Verifier/恢复 → Dream 结果学习 → 自适应模型路由。
-- **完成口径**：只有应用重启可恢复、Done 绑定证据、失败可定位并局部恢复、权限不被绕过时，才能对外称为产品级 Goal。
+- **当前完成**：Goal Compiler → 持久单 Agent Runtime → Evidence gate → 安全启动恢复 → 最小 UI。
+- **后续顺序**：Dynamic Graph → 节点级下游失效/局部恢复 → Lead–Clerk → Runtime Adapter → Dream 结果学习。
+- **禁止误解**：当前可称为单 Agent Advanced Project Loop；不能称为 Dynamic DAG、多 Agent或应用关闭期间的后台 Agent。
 
 ---
 

@@ -510,9 +510,10 @@ fn transition_allowed(from: &str, to: &str) -> bool {
     }
 }
 
-pub fn update_object_status(
+fn update_object_status_inner(
     conn: &mut Connection,
     input: UpdateWorkStatusInput,
+    runtime_authorized: bool,
 ) -> Result<WorkObject, String> {
     validate_status(&input.status)?;
     require_idempotency_key(&input.idempotency_key)?;
@@ -530,7 +531,7 @@ pub fn update_object_status(
             input.expected_revision, current.revision
         ));
     }
-    if !transition_allowed(&current.status, &input.status) {
+    if !runtime_authorized && !transition_allowed(&current.status, &input.status) {
         return Err(format!(
             "不允许的状态转换: {} -> {}",
             current.status, input.status
@@ -579,6 +580,28 @@ pub fn update_object_status(
     )?;
     tx.commit().map_err(|error| error.to_string())?;
     Ok(updated)
+}
+
+pub fn update_object_status(
+    conn: &mut Connection,
+    input: UpdateWorkStatusInput,
+) -> Result<WorkObject, String> {
+    update_object_status_inner(conn, input, false)
+}
+
+pub(crate) fn update_goal_status_from_runtime(
+    conn: &mut Connection,
+    input: UpdateWorkStatusInput,
+) -> Result<WorkObject, String> {
+    let object = get_object(conn, &input.object_id)?
+        .ok_or_else(|| format!("工作对象不存在: {}", input.object_id))?;
+    if object.kind != WorkObjectKind::Goal {
+        return Err("Goal Runtime 只能回写 Goal 对象".into());
+    }
+    if !matches!(input.status.as_str(), "done" | "failed" | "cancelled") {
+        return Err("Goal Runtime 只能回写终态".into());
+    }
+    update_object_status_inner(conn, input, true)
 }
 
 pub fn delete_object(

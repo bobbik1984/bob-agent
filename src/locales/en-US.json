@@ -790,9 +790,53 @@
     "days_ago": "{n} days ago"
   },
   "quicknote": {
+    "open": "Open Quick Note",
     "select_model": "Select Model",
     "scan_pairing": "Scan",
+    "daily_brief": "Today",
     "saved": "Saved"
+  },
+  "today": {
+    "title": "Today at a glance",
+    "layer_title": "Today",
+    "changed": "{count} updates",
+    "unavailable": "Today's information is temporarily unavailable",
+    "retry": "Retry",
+    "clear": "Nothing needs your attention right now",
+    "summary": "Today's category summary",
+    "count_today": "Today {count}",
+    "count_progress": "In progress {count}",
+    "count_changes": "Changes {count}",
+    "count_insights": "Insights {count}",
+    "no_more": "No other updates",
+    "details": "View all",
+    "collapse": "Collapse",
+    "partial": "Some sources are unavailable; reliable items are still shown",
+    "stale": "Showing the latest reliable snapshot",
+    "refresh": "Refresh",
+    "close": "Close",
+    "untitled": "Untitled item",
+    "kind": {
+      "approval": "Needs confirmation", "risk": "Needs attention", "due": "Due today", "schedule": "Schedule",
+      "progress": "Continue", "change": "Recent change", "continue_conversation": "Resume work", "insight": "New insight"
+    },
+    "action": {
+      "open_goal": "View goal", "open_work_object": "View work item", "open_calendar": "View schedule",
+      "open_todo": "View tasks", "continue_conversation": "Continue conversation", "respond_approval": "Review", "open_details": "View details"
+    },
+    "source": {
+      "work_core": "Work", "goal_runtime": "Goal", "calendar": "Schedule", "todo": "Tasks",
+      "conversation": "Conversation", "dream": "Memory review"
+    }
+  },
+  "brief": {
+    "item": {
+      "goal_approval": "A goal is waiting for your confirmation", "goal": "Continue a goal",
+      "continue_conversation": "Continue your previous work", "dream_insight": "Bob has a new understanding of your work"
+    },
+    "summary": {
+      "dream_maintenance": "Reviewed {digestNotes} notes and {digestEntities} knowledge entities, merged {merged}, and corrected {corrected}."
+    }
   },
   "ticket": {
     "status_expired": "Expired",
@@ -813,5 +857,65 @@
     "view_ticket": "View Ticket",
     "time": "Time",
     "venue": "Venue"
+  },
+  "goal": {
+    "verification": "Verification",
+    "risk": "Risk",
+    "calls": "Model {model} · tools {tools}",
+    "checkpoint_saved": "Recovery point saved",
+    "continue": "Continue",
+    "defer": "Defer",
+    "cancel": "Cancel goal",
+    "approval_approve": "Confirm and continue",
+    "approval_handoff": "Open on trusted device",
+    "approval_defer": "Defer",
+    "approval_cancel": "Cancel",
+    "approval_continue_safe": "Continue within safe scope",
+    "approval_accept_result": "This result works",
+    "approval_continue": "Keep working",
+    "summary_need_choice": "Choose how Bob should continue",
+    "summary_confirm_execution": "Confirm before execution continues",
+    "summary_accept_result": "Does the current result satisfy this goal?",
+    "next_waiting_choice": "Waiting for your choice",
+    "next_observe": "Reading current state",
+    "next_plan_slice": "Planning this safe execution slice",
+    "next_approved": "Approved and ready to continue",
+    "next_cancelled": "Cancelled",
+    "next_deferred": "Deferred",
+    "next_handoff": "Waiting on a trusted device",
+    "next_confirm_side_effect": "Confirm whether the previous external action succeeded",
+    "next_resume_checkpoint": "Continue from the safe checkpoint",
+    "next_verify_evidence": "Verify evidence",
+    "next_review_failure": "Review the failed step before continuing",
+    "next_record_acceptance": "Record result acceptance",
+    "next_running": "Bob is continuing the goal",
+    "status_draft": "Needs details",
+    "status_ready": "Ready",
+    "status_running": "Running",
+    "status_waiting_user": "Waiting for choice",
+    "status_blocked": "Blocked",
+    "status_verifying": "Verifying",
+    "status_done": "Verified complete",
+    "status_failed": "Failed",
+    "status_cancelled": "Cancelled",
+    "phase_compile": "Understanding goal",
+    "phase_observe": "Reading current state",
+    "phase_plan": "Planning",
+    "phase_act": "Acting",
+    "phase_verify": "Verifying",
+    "phase_repair": "Repairing",
+    "phase_finish": "Finished",
+    "verification_pending": "Pending",
+    "verification_verified": "Verified",
+    "verification_rejected": "Rejected",
+    "verification_unverified": "Insufficient evidence",
+    "error_evidence_unverified": "No verifiable tool receipt was produced within the repair budget",
+    "error_slice_timeout": "This execution slice reached its time limit and stopped safely",
+    "error_budget_model": "The model-call budget is exhausted",
+    "error_budget_tool": "The tool-call budget is exhausted",
+    "error_budget_runtime": "The runtime budget is exhausted",
+    "error_budget_repair": "The repair budget is exhausted",
+    "error_runtime_busy": "Another goal is running; continue this one later",
+    "error_unknown": "The goal cannot continue yet; review its activity record"
   }
 }

@@ -54,12 +54,15 @@ implementation_plan.md
 !/docs/MOBILE_BLUEPRINT.md
 !/docs/TICKET_MANAGEMENT_BLUEPRINT.md
 !/docs/DECISIONS.md
+!/docs/UI_SYSTEM.md
+!/docs/UI_BUTTON_AUDIT_2026-08-11.md
 !/docs/superpowers/
 /docs/superpowers/*
 !/docs/superpowers/plans/
 /docs/superpowers/plans/*
 !/docs/superpowers/plans/2026-08-10-work-continuity-evolution-plan.md
 !/docs/superpowers/plans/2026-08-10-phase-2-work-core-inputs-plan.md
+!/docs/superpowers/plans/2026-08-11-work-layout-button-system-plan.md
 !/docs/superpowers/specs/
 /docs/superpowers/specs/*
 !/docs/superpowers/specs/2026-08-10-project-link-candidates-design.md
@@ -70,6 +73,8 @@ implementation_plan.md
 *.b64
 tauri.conf.json.bak
 test_group.rs
+/old_sync.rs
+/test.css
 
 .cargo/config.toml
 src-tauri/target_tmp/

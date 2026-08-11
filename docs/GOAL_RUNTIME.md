@@ -1,7 +1,7 @@
 # Bob Goal Runtime 与个性化进化架构
 
-> 状态：目标架构（尚未全部实现）  
-> 更新：2026-08-09  
+> 状态：Phase 5 单 Agent纵切片已实现并在验证；Phase 6+ 仍为目标架构
+> 更新：2026-08-11
 > 权责：本文件是 Goal、任务 DAG、验证闭环和 Dream 学习边界的单一真相源；任务状态以 `todo.md` 和 `progress.yaml` 为准。
 
 Goal Runtime 位于 Persistent Work Core 之上。Project、Decision、Change 与 canonical state 的长期边界以 `docs/PRODUCT_VISION.md` 和 `docs/DECISIONS.md` 为准；本文件不重新定义这些对象。
@@ -22,18 +22,18 @@ Bob 不以复制 Codex 的编程深度或 Claude Code 的终端能力为目标�
 
 ## 2. 当前能力边界
 
-当前 `complexity_router.rs` 已实现 Direct、Deep、Advanced 规则优先路由，模糊语义才限时调用 Clerk；`goal.rs` 仍是 Maker–Checker 原型：只有用户显式选择 Goal 模式时，才提供较高工具预算、确定性断言和最多三轮外层重试。
+当前 `complexity_router.rs` 已实现 Direct、Deep、Advanced 规则优先路由；Auto Advanced 会调用独立 `goal_runtime`。Phase 5 已实现版本化 Goal Contract、安全本地骨架与 Clerk 候选、SQLite Run/Attempt/Evidence/Checkpoint/Approval/Event、revision/幂等/租约、单活动执行切片、预算、结构化选择、Evidence gate、启动恢复及最小 Chat/Work UI。Work Core Goal 仍是“做什么”的真相源，Runtime 只保存“执行到哪里”。旧 `goal.rs` 仅服务用户显式选择的 Maker–Checker 实验入口。
 
-这不是完整 Goal Runtime，当前缺口包括：
+当前仍不是终局 Goal 系统，明确缺口包括：
 
-- Auto 可以识别 Advanced，但尚不会创建可恢复的持久 Goal；
-- 原始用户消息尚未编译为结构化 Goal Contract；
-- 没有持久化的 Goal、节点、依赖、证据和检查点；
-- 没有真正的执行 DAG、节点级验证和局部恢复；
-- 重启、跨端或上下文压缩后不能可靠续跑；
-- Dream 尚未使用完整 Goal 轨迹学习用户偏好和有效策略。
+- 尚无真正的 Dynamic Task Graph、依赖失效传播、并行节点和局部下游重跑；
+- 应用关闭期间不执行，启动恢复也只自动推进安全 R0/R1；
+- R3 只生成 trusted-device handoff，尚未接入已解锁可信设备的最终批准证明；
+- 手机、手表、眼镜仅由 2–4 选项协议预留适配，尚未完成所有端的 UI；
+- Dream 尚未使用完整 Goal 轨迹学习用户偏好和有效策略；
+- Phase 5 专用 Rust 测试门尚待最终执行确认。
 
-对外文档必须将当前能力称为“Goal Loop 原型”，直到本文件的完成门槛全部满足。
+因此对外应称为“单 Agent Advanced Project Loop”，不得宣称已具备完整 DAG 或全天候自治 Goal Runtime。
 
 ## 3. 统一概念
 
