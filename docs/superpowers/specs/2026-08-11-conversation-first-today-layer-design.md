@@ -98,6 +98,8 @@ Dream 洞察只有在与当前工作相关、可解释且能形成行动建议�
 
 Today Layer 是独立的轻量表层，但不是独立导航页，也不占满整个画面。PC 使用有最大宽度和高度的紧凑面板；手机使用保留周围界面可见的单列浮层或底部面板，内容超出时只在面板内部滚动。
 
+普通对话中的标题入口、空对话中的 Brief 卡片展开操作，以及 Quick Note 底部按钮，最终都必须打开同一个 `TodayLayerSurface` 实例。三种入口共用完全一致的数据快照、信息层级、组件、动画、焦点管理和关闭行为；入口来源只用于决定关闭后返回哪里，不得派生“对话版”和“速记版”两套 Today Layer。
+
 如果用户在速记框中已经输入文字，浮层交接必须保留草稿且不得自动提交。用户下次打开速记时可以继续编辑。若 Today Layer 无法挂载，则 Quick Note 保持打开并显示可读错误，不能先关闭后留下空白画面。
 
 ### 3.6 时间语义
@@ -227,7 +229,7 @@ Vue 只通过 `window.electronAPI.*` 使用 Daily Brief。所有 Tauri `invoke` 
 
 现有 Morning Brief 的 Dream 内容成为一个数据来源，不再由单个大组件直接拼接所有报告。用户可见文字全部进入 `zh-CN.json` 和 `en-US.json`，只使用 Lucide 图标和现有语义化颜色变量。
 
-`QuickNoteOverlay` 只增加一个小型 Daily Brief 按钮和无损交接事件，不接收 Brief 数据，也不渲染 Brief 内容。Quick Note 与 Today Layer 通过 App 级协调状态交接，避免两个组件互相调用或共享内部实现。
+`QuickNoteOverlay` 只增加一个小型 Daily Brief 按钮和无损交接事件，不接收 Brief 数据，也不渲染 Brief 内容。Quick Note、空对话卡片和对话标题入口都通过 App 级协调状态打开同一个 `TodayLayerSurface`，避免入口组件互相调用、复制 Brief 视图或共享内部实现。
 
 ## 8. 交互规则
 
@@ -270,6 +272,7 @@ Vue 只通过 `window.electronAPI.*` 使用 Daily Brief。所有 Tauri `invoke` 
 - 单击悬浮气泡只出现速记输入，不会直接展示或展开 Today Layer。
 - 点击速记底部 Daily Brief 按钮后，Today Layer 先显示、速记后淡出，全程没有闪屏或空白状态。
 - 已输入但未提交的速记草稿在交接后仍然保留。
+- 从普通对话和 Quick Note 打开的 Today Layer 在内容、布局、交互和状态上完全一致；关闭后分别返回各自原来的上下文。
 - 同日再次查看优先展示增量，不重复整篇昨日总结。
 - PC 适合快速扫读和侧向展开；360 px 宽手机保持单列、可滚动且输入框可返回。
 - 点击“继续上次工作”不再把完整简报伪装成用户消息。
