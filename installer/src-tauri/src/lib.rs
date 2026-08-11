@@ -3,11 +3,20 @@ use std::io::{self, Cursor};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use tauri::Emitter;
-use tauri::Manager;
 
 /// payload.zip 在编译时被硬编码进二进制
 /// 不再依赖任何外部文件——exe 自身就是完整的安装器
 static PAYLOAD: &[u8] = include_bytes!("../payload.zip");
+
+#[cfg(target_os = "windows")]
+fn hidden_windows_command(program: &str) -> Command {
+    use std::os::windows::process::CommandExt;
+
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+    let mut command = Command::new(program);
+    command.creation_flags(CREATE_NO_WINDOW);
+    command
+}
 
 /// 获取默认安装路径
 #[tauri::command]
@@ -44,24 +53,30 @@ async fn select_install_dir(app: tauri::AppHandle) -> Result<Option<String>, Str
 #[tauri::command]
 async fn install(app: tauri::AppHandle, install_dir: String) -> Result<(), String> {
     use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
-    
+
     let install_path = Path::new(&install_dir);
 
     // 0. Kill any existing bob.exe process to avoid file lock (OS error 32)
     #[cfg(target_os = "windows")]
     {
-        if let Ok(output) = Command::new("tasklist").args(&["/FI", "IMAGENAME eq bob.exe"]).output() {
+        if let Ok(output) = hidden_windows_command("tasklist")
+            .args(["/FI", "IMAGENAME eq bob.exe"])
+            .output()
+        {
             let output_str = String::from_utf8_lossy(&output.stdout);
             if output_str.contains("bob.exe") {
-                let confirmed = app.dialog()
+                let confirmed = app
+                    .dialog()
                     .message("检测到 Bob 正在运行，必须关闭后才能继续安装。\n是否现在强制关闭它？")
                     .title("安装向导")
                     .kind(MessageDialogKind::Warning)
                     .buttons(MessageDialogButtons::OkCancel)
                     .blocking_show();
-                
+
                 if confirmed {
-                    let _ = Command::new("taskkill").args(&["/F", "/IM", "bob.exe", "/T"]).output();
+                    let _ = hidden_windows_command("taskkill")
+                        .args(["/F", "/IM", "bob.exe", "/T"])
+                        .output();
                     std::thread::sleep(std::time::Duration::from_millis(1000));
                 } else {
                     return Err("用户取消了结束进程，安装中止。".to_string());
@@ -71,13 +86,12 @@ async fn install(app: tauri::AppHandle, install_dir: String) -> Result<(), Strin
     }
 
     // 1. 确保安装目录存在
-    fs::create_dir_all(install_path)
-        .map_err(|e| format!("无法创建安装目录: {}", e))?;
+    fs::create_dir_all(install_path).map_err(|e| format!("无法创建安装目录: {}", e))?;
 
     // 2. 直接从内存中的 payload 解压
     let cursor = Cursor::new(PAYLOAD);
-    let mut archive = zip::ZipArchive::new(cursor)
-        .map_err(|e| format!("无法解析内嵌 payload: {}", e))?;
+    let mut archive =
+        zip::ZipArchive::new(cursor).map_err(|e| format!("无法解析内嵌 payload: {}", e))?;
 
     let total = archive.len();
     for i in 0..total {
@@ -88,17 +102,14 @@ async fn install(app: tauri::AppHandle, install_dir: String) -> Result<(), Strin
         let out_path = install_path.join(entry.mangled_name());
 
         if entry.is_dir() {
-            fs::create_dir_all(&out_path)
-                .map_err(|e| format!("创建目录失败: {}", e))?;
+            fs::create_dir_all(&out_path).map_err(|e| format!("创建目录失败: {}", e))?;
         } else {
             if let Some(parent) = out_path.parent() {
-                fs::create_dir_all(parent)
-                    .map_err(|e| format!("创建父目录失败: {}", e))?;
+                fs::create_dir_all(parent).map_err(|e| format!("创建父目录失败: {}", e))?;
             }
-            let mut out_file = fs::File::create(&out_path)
-                .map_err(|e| format!("创建文件失败: {}", e))?;
-            io::copy(&mut entry, &mut out_file)
-                .map_err(|e| format!("写入文件失败: {}", e))?;
+            let mut out_file =
+                fs::File::create(&out_path).map_err(|e| format!("创建文件失败: {}", e))?;
+            io::copy(&mut entry, &mut out_file).map_err(|e| format!("写入文件失败: {}", e))?;
         }
 
         // 每解压 10 个文件或最后一个文件时，通知前端更新进度
@@ -113,15 +124,17 @@ async fn install(app: tauri::AppHandle, install_dir: String) -> Result<(), Strin
     if bob_exe.exists() {
         // 桌面快捷方式
         if let Ok(desktop) = std::env::var("USERPROFILE") {
-            let desktop_lnk = PathBuf::from(&desktop).join("Desktop").join("Bob Agent.lnk");
+            let desktop_lnk = PathBuf::from(&desktop)
+                .join("Desktop")
+                .join("Bob Agent.lnk");
             let _ = mslnk::ShellLink::new(bob_exe.to_str().unwrap())
                 .map(|sl| sl.create_lnk(desktop_lnk.to_str().unwrap()));
         }
 
         // 开始菜单快捷方式
         if let Ok(appdata) = std::env::var("APPDATA") {
-            let start_menu_dir = PathBuf::from(&appdata)
-                .join("Microsoft\\Windows\\Start Menu\\Programs\\Bob Agent");
+            let start_menu_dir =
+                PathBuf::from(&appdata).join("Microsoft\\Windows\\Start Menu\\Programs\\Bob Agent");
             let _ = fs::create_dir_all(&start_menu_dir);
             let start_lnk = start_menu_dir.join("Bob Agent.lnk");
             let _ = mslnk::ShellLink::new(bob_exe.to_str().unwrap())
@@ -148,7 +161,7 @@ fn write_uninstall_registry(install_dir: &str, bob_exe: &Path) -> Result<(), Str
         .map_err(|e| format!("无法创建注册表项: {}", e))?;
 
     let _ = key.set_value("DisplayName", &"Bob Agent");
-    let _ = key.set_value("DisplayVersion", &"0.3.1");
+    let _ = key.set_value("DisplayVersion", &env!("CARGO_PKG_VERSION"));
     let _ = key.set_value("Publisher", &"xm_bo");
     let _ = key.set_value("InstallLocation", &install_dir);
     let _ = key.set_value(

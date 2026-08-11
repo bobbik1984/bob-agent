@@ -1,4 +1,4 @@
-export const WORK_MOBILE_TABS = Object.freeze(['overview', 'goals', 'tasks', 'decisions', 'activity']);
+export const WORK_VIEW_TABS = Object.freeze(['overview', 'goals', 'tasks', 'decisions', 'activity']);
 
 const CLOSED_TASK_STATUSES = new Set(['done', 'cancelled', 'archived']);
 
@@ -29,4 +29,3 @@ export function toggleExpandedProjectIds(currentIds, projectId) {
   else nextIds.add(projectId);
   return nextIds;
 }
-

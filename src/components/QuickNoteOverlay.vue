@@ -228,6 +228,7 @@ onUnmounted(() => document.removeEventListener('keydown', onGlobalKey));
 <style scoped>
 /* ── 背景遮罩 + 毛玻璃 ── */
 .quicknote-overlay {
+  --quicknote-width: min(560px, calc(100vw - 48px));
   position: fixed;
   inset: 0;
   z-index: 9999;
@@ -242,16 +243,20 @@ onUnmounted(() => document.removeEventListener('keydown', onGlobalKey));
 
 /* ── 输入条 ── */
 .quicknote-bar {
+  position: absolute;
+  top: 50%;
+  left: 50%;
   display: flex;
   align-items: center;
   gap: 0;
-  width: min(560px, 85vw);
+  width: var(--quicknote-width);
   height: 48px;
   background: var(--bg-primary);
   border: 1px solid var(--border-default);
   border-radius: var(--radius-default);
   overflow: hidden;
   box-shadow: var(--shadow-lg), 0 0 0 1px var(--border-subtle);
+  transform: translate(-50%, -50%);
 }
 
 /* Bob 图标（胶囊左端） */
@@ -300,32 +305,41 @@ onUnmounted(() => document.removeEventListener('keydown', onGlobalKey));
 
 /* ── 已记录反馈 ── */
 .quicknote-saved {
+  position: absolute;
+  top: calc(50% + 38px);
+  left: 50%;
   display: flex;
   align-items: center;
   gap: 6px;
-  margin-top: 16px;
+  margin: 0;
   font-size: 13px;
   color: var(--accent-primary);
   opacity: 0.9;
+  transform: translateX(-50%);
 }
 
 /* ── 底部快捷栏 ── */
 .quicknote-bottom-bar {
   position: absolute;
   bottom: calc(24px + env(safe-area-inset-bottom, 0px));
-  left: 24px;
-  right: 24px;
-  display: flex;
-  justify-content: space-between;
+  left: 50%;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  gap: 8px;
+  width: var(--quicknote-width);
   align-items: center;
   pointer-events: none;
+  transform: translateX(-50%);
 }
 
 .quicknote-bottom-btn {
   pointer-events: auto;
   display: flex;
   align-items: center;
-  gap: 8px;
+  justify-content: center;
+  gap: 7px;
+  min-width: 0;
   height: 40px;
   padding: 0 16px;
   background: var(--bg-secondary);
@@ -353,12 +367,13 @@ onUnmounted(() => document.removeEventListener('keydown', onGlobalKey));
 }
 
 .quicknote-count {
-  min-width: 17px;
-  height: 17px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0 4px;
+  display: inline-grid;
+  place-items: center;
+  align-self: center;
+  min-width: 20px;
+  height: 18px;
+  box-sizing: border-box;
+  padding: 0 5px;
   color: var(--text-primary);
   background: var(--border-subtle);
   border-radius: var(--radius-full);
@@ -385,11 +400,11 @@ onUnmounted(() => document.removeEventListener('keydown', onGlobalKey));
   transition: transform 0.15s ease-in, opacity 0.12s;
 }
 .quicknote-enter-from .quicknote-bar {
-  transform: scale(0.92) translateY(8px);
+  transform: translate(-50%, -50%) translateY(8px) scale(0.92);
   opacity: 0;
 }
 .quicknote-leave-to .quicknote-bar {
-  transform: scale(0.96) translateY(4px);
+  transform: translate(-50%, -50%) translateY(4px) scale(0.96);
   opacity: 0;
 }
 
@@ -416,7 +431,7 @@ onUnmounted(() => document.removeEventListener('keydown', onGlobalKey));
 }
 .quicknote-hint-enter-from {
   opacity: 0;
-  transform: translateY(4px);
+  transform: translateX(-50%) translateY(4px);
 }
 .quicknote-hint-leave-to {
   opacity: 0;

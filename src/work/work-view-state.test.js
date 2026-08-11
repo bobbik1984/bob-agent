@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { getMobileProjectCounts, getOpenTasks, sortProjectsByUpdatedAt, toggleExpandedProjectIds } from './mobile-work-view.js';
+import { getMobileProjectCounts, getOpenTasks, sortProjectsByUpdatedAt, toggleExpandedProjectIds } from './work-view-state.js';
 
-describe('mobile work view helpers', () => {
+describe('shared work view helpers', () => {
   it('sorts projects by latest update without mutating input', () => {
     const projects = [
       { id: 'old', updatedAt: '2026-08-01T08:00:00Z' },
@@ -34,4 +34,3 @@ describe('mobile work view helpers', () => {
     expect([...third]).toEqual(['b']);
   });
 });
-

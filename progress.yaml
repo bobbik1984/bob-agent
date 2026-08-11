@@ -67,11 +67,11 @@ phases:
     status: todo
 - name: Work UI consistency
   tasks:
-  - text: 桌面端单一内容流与横向项目切换
+  - text: PC 与 Android 共用功能 Tab、项目分组和多项目展开
     status: done
-  - text: Android 功能 Tab、项目分组滚动与独立多项目展开
+  - text: Quick Note 居中输入条、共享边界和 3–5 项等宽动作网格
     status: done
-  - text: Android 真机纵横屏、明暗主题与触控验收
+  - text: PC 与 Android 真机纵横屏、明暗主题与触控验收
     status: todo
 - name: Phase 6-10 Orchestration 与 Intelligence
   tasks:

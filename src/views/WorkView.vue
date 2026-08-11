@@ -1,8 +1,8 @@
 <template>
   <section class="work-view" :class="`layout-${layoutMode}`">
-    <WorkMobileTabs v-if="isNativeMobile" v-model="mobileActiveTab" />
+    <WorkViewTabs v-if="useUnifiedWorkView" v-model="mobileActiveTab" />
 
-    <header v-if="!isNativeMobile" class="work-header">
+    <header v-if="!useUnifiedWorkView" class="work-header">
       <div>
         <p class="work-eyebrow">{{ t('work.eyebrow') }}</p>
         <h1>{{ t('work.title') }}</h1>
@@ -20,12 +20,12 @@
       <button type="button" :aria-label="t('common.close')" @click="errorMessage = ''"><X :size="14" /></button>
     </div>
 
-    <button v-if="isNativeMobile && mobilePendingCount" class="mobile-pending-summary" type="button" :aria-expanded="mobilePendingOpen" @click="mobilePendingOpen = !mobilePendingOpen">
+    <button v-if="useUnifiedWorkView && mobilePendingCount" class="mobile-pending-summary" type="button" :aria-expanded="mobilePendingOpen" @click="mobilePendingOpen = !mobilePendingOpen">
       <span>{{ t('work.mobile_pending', { count: mobilePendingCount }) }}</span>
       <ChevronDown :size="16" :class="{ rotated: mobilePendingOpen }" />
     </button>
 
-    <section v-if="pendingLinks.length && (!isNativeMobile || mobilePendingOpen)" class="assignment-panel" aria-live="polite">
+    <section v-if="pendingLinks.length && (!useUnifiedWorkView || mobilePendingOpen)" class="assignment-panel" aria-live="polite">
       <div class="assignment-heading">
         <div>
           <p class="section-kicker">{{ t('work.assignment_kicker') }}</p>
@@ -72,7 +72,7 @@
       </div>
     </section>
 
-    <section v-if="pendingChangeReviews.length && (!isNativeMobile || mobilePendingOpen)" class="assignment-panel change-review-panel" aria-live="polite">
+    <section v-if="pendingChangeReviews.length && (!useUnifiedWorkView || mobilePendingOpen)" class="assignment-panel change-review-panel" aria-live="polite">
       <div class="assignment-heading">
         <div>
           <p class="section-kicker">{{ t('work.change_review_kicker') }}</p>
@@ -107,7 +107,7 @@
       </div>
     </section>
 
-    <details v-if="deferredChangeReviews.length && (!isNativeMobile || mobilePendingOpen)" class="assignment-panel deferred-review-panel">
+    <details v-if="deferredChangeReviews.length && (!useUnifiedWorkView || mobilePendingOpen)" class="assignment-panel deferred-review-panel">
       <summary>
         <span><Clock3 :size="16" />{{ t('work.change_review_deferred_title') }}</span>
         <span class="assignment-count">{{ deferredChangeReviews.length }}</span>
@@ -128,7 +128,7 @@
       </div>
     </details>
 
-    <nav v-if="projects.length && !isNativeMobile" class="project-switcher" :aria-label="t('work.projects')">
+    <nav v-if="projects.length && !useUnifiedWorkView" class="project-switcher" :aria-label="t('work.projects')">
       <button
         v-for="project in projects"
         :key="project.id"
@@ -143,7 +143,7 @@
       </button>
     </nav>
 
-    <main v-if="!isNativeMobile" class="work-main">
+    <main v-if="!useUnifiedWorkView" class="work-main">
         <form v-if="creatingProject" class="create-project-card" @submit.prevent="createProject">
           <div class="section-heading">
             <div>
@@ -397,7 +397,7 @@
           @retry="loadMobileProject(project.id)"
         >
           <template v-if="mobileAggregates[project.id]">
-            <WorkMobileOverview v-if="mobileActiveTab === 'overview'" :aggregate="mobileAggregates[project.id]" />
+            <WorkOverview v-if="mobileActiveTab === 'overview'" :aggregate="mobileAggregates[project.id]" />
 
             <div v-else-if="mobileActiveTab === 'goals'" class="mobile-item-list">
               <article v-for="goal in mobileAggregates[project.id].goals" :key="goal.id" class="mobile-work-item" :data-work-object-id="goal.id">
@@ -469,15 +469,16 @@ import {
   Clock3, GitCompareArrows, History, Link2, ListChecks, LoaderCircle, Milestone, Plus, RefreshCw, Route, Scale,
   Target, X,
 } from 'lucide-vue-next';
-import WorkMobileOverview from '../components/work/WorkMobileOverview.vue';
-import WorkMobileTabs from '../components/work/WorkMobileTabs.vue';
+import WorkOverview from '../components/work/WorkOverview.vue';
+import WorkViewTabs from '../components/work/WorkViewTabs.vue';
 import WorkProjectAccordion from '../components/work/WorkProjectAccordion.vue';
-import { getMobileProjectCounts, sortProjectsByUpdatedAt, toggleExpandedProjectIds } from '../work/mobile-work-view.js';
+import { getMobileProjectCounts, sortProjectsByUpdatedAt, toggleExpandedProjectIds } from '../work/work-view-state.js';
 
 const { t, locale } = useI18n();
 const layoutMode = inject('layoutMode', ref('desktop-wide'));
 const terminalKind = inject('terminalKind', 'desktop');
 const isNativeMobile = terminalKind === 'native-mobile';
+const useUnifiedWorkView = true;
 const projects = ref([]);
 const aggregate = ref(null);
 const activeProjectId = ref('');
@@ -586,7 +587,7 @@ async function loadProjects() {
     projects.value = await window.appAPI.workProjectList();
     await loadPendingLinks();
     await loadChangeReviews();
-    if (isNativeMobile) {
+    if (useUnifiedWorkView) {
       await loadMobileProjects();
     } else if (!activeProjectId.value && projects.value.length) {
       await selectProject(projects.value[0].id);
@@ -621,7 +622,7 @@ async function handleChangeReview(review, action) {
     delete changeReviewDrafts[review.id];
     await loadChangeReviews();
     await loadProjects();
-    if (!isNativeMobile && activeProjectId.value) await selectProject(activeProjectId.value);
+    if (!useUnifiedWorkView && activeProjectId.value) await selectProject(activeProjectId.value);
   } catch (error) {
     errorMessage.value = String(error);
     await loadChangeReviews();
@@ -654,7 +655,7 @@ async function resolveCandidate(candidate) {
     delete candidateDrafts[candidate.id];
     await loadPendingLinks();
     await loadProjects();
-    if (!isNativeMobile && outcome.candidate?.selectedProjectId) await selectProject(outcome.candidate.selectedProjectId);
+    if (!useUnifiedWorkView && outcome.candidate?.selectedProjectId) await selectProject(outcome.candidate.selectedProjectId);
   } catch (error) {
     errorMessage.value = String(error);
     await loadPendingLinks();
@@ -713,13 +714,13 @@ async function selectProject(projectId) {
 async function refreshRuntime(projectId = activeProjectId.value) {
   if (!projectId) return;
   const runtimes = await window.appAPI.goalRuntimeList({ projectId, limit: 50 });
-  if (isNativeMobile) mobileRuntimes[projectId] = runtimes;
+  if (useUnifiedWorkView) mobileRuntimes[projectId] = runtimes;
   else runtimeRuns.value = runtimes;
 }
 
 async function refreshProject(projectId) {
   if (!projectId) return;
-  if (isNativeMobile) await loadMobileProject(projectId);
+  if (useUnifiedWorkView) await loadMobileProject(projectId);
   else await selectProject(projectId);
 }
 
@@ -791,7 +792,7 @@ async function createProject() {
     projectDraft.currentPhase = '';
     creatingProject.value = false;
     await loadProjects();
-    if (isNativeMobile) {
+    if (useUnifiedWorkView) {
       expandedProjectIds.value = new Set([...expandedProjectIds.value, project.id]);
       await loadMobileProject(project.id);
     } else {
@@ -903,7 +904,7 @@ async function handleTodayBriefNavigation(event) {
   const item = event.detail;
   const projectId = item?.action?.payload?.projectId || item?.messageArgs?.projectId;
   const objectId = item?.action?.targetId || item?.action?.payload?.goalId;
-  if (projectId && isNativeMobile) {
+  if (projectId && useUnifiedWorkView) {
     expandedProjectIds.value = new Set([...expandedProjectIds.value, projectId]);
     if (!mobileAggregates[projectId]) await loadMobileProject(projectId);
     mobileActiveTab.value = 'goals';
@@ -920,7 +921,7 @@ onMounted(async () => {
   await loadProjects();
   stopRuntimeListener = await window.appAPI.listenEvent('goal:runtime-state', event => {
     const projectId = event?.payload?.projectId || event?.projectId;
-    if (isNativeMobile) {
+    if (useUnifiedWorkView) {
       if (projectId) loadMobileProject(projectId);
       else Promise.allSettled(sortedProjects.value.map(project => loadMobileProject(project.id)));
     } else {
@@ -1038,7 +1039,9 @@ textarea { resize: vertical; }
 .spin { animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-.mobile-work-main { min-width: 0; padding: 0 14px 28px; }
+.work-view > .work-view-tabs { width: 100%; max-width: 1000px; margin: 0 auto; }
+.work-view > .mobile-pending-summary { max-width: 1000px; margin-right: auto; margin-left: auto; }
+.mobile-work-main { width: 100%; max-width: 1000px; min-width: 0; box-sizing: border-box; margin: 0 auto; padding: 0 14px 28px; }
 .mobile-work-toolbar { display: flex; align-items: center; justify-content: space-between; min-height: 52px; border-bottom: 1px solid var(--border-subtle); color: var(--text-tertiary); font-size: 12px; }
 .mobile-pending-summary { display: flex; align-items: center; justify-content: space-between; width: 100%; min-height: 43px; border: 0; border-bottom: 1px solid var(--border-subtle); padding: 0 2px; color: var(--text-secondary); background: transparent; font: inherit; font-size: 12px; cursor: pointer; }
 .mobile-pending-summary svg { transition: transform 160ms ease; }

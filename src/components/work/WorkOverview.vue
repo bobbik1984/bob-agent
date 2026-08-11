@@ -9,7 +9,7 @@
 <script setup>
 import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { getOpenTasks } from '../../work/mobile-work-view.js';
+import { getOpenTasks } from '../../work/work-view-state.js';
 const props = defineProps({ aggregate: { type: Object, required: true } });
 const { t, locale } = useI18n();
 const nextTask = computed(() => getOpenTasks(props.aggregate)[0]);
