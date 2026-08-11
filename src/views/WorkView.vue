@@ -1070,8 +1070,12 @@ textarea { resize: vertical; }
 
 .work-view.layout-desktop-compact { padding: 16px 14px 84px; }
 .work-view.layout-mobile-native { padding: 0 0 84px; }
-.layout-mobile-native > .mobile-pending-summary { width: calc(100% - 28px); margin: 0 14px; }
-.layout-mobile-native > .assignment-panel { width: calc(100% - 28px); box-sizing: border-box; margin-right: 14px; margin-left: 14px; }
+.work-view.is-unified.layout-desktop-compact,
+.work-view.is-unified.layout-mobile-native { padding: 0 0 84px; }
+.work-view.is-unified.layout-desktop-compact > .mobile-pending-summary,
+.work-view.is-unified.layout-mobile-native > .mobile-pending-summary { width: calc(100% - 28px); margin: 0 14px; }
+.work-view.is-unified.layout-desktop-compact > .assignment-panel,
+.work-view.is-unified.layout-mobile-native > .assignment-panel { width: calc(100% - 28px); box-sizing: border-box; margin-right: 14px; margin-left: 14px; }
 .layout-desktop-compact .work-header,
 .layout-mobile-native .work-header { align-items: center; }
 .layout-desktop-compact .work-header p:not(.work-eyebrow),

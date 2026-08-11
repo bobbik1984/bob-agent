@@ -19,6 +19,7 @@ PC 与 Android 使用同一组 Vue 组件、同一份项目聚合数据和同一
 
 - `desktop-wide` 下，“工作”像“日程”和“设置”一样在左侧栏展开二级菜单，菜单为“概览 / 目标 / 任务 / 决策 / 动态”；
 - `desktop-compact` 与 `mobile-native` 下，同一组二级菜单移动到内容区顶部；
+- 顶部菜单上、左、右三边与内容区边界贴合，不继承项目内容的页面 padding；菜单下方的项目内容继续保留既有水平留白；
 - 宽屏侧栏复用 `.settings-nav / .settings-nav-item`，窄屏与手机复用 `.mobile-tab-grid / .mobile-tab-item`，不得为 Work 自创第三套导航视觉；
 - 激活项使用 Bob 现有的完整实色块选中态，不使用仅文字变色或底部短线；
 - `activeWorkPanel` 是唯一导航状态源，窗口宽窄变化时选中项和内容不重置；
