@@ -1,6 +1,6 @@
 <template>
-  <section class="work-view" :class="`layout-${layoutMode}`">
-    <WorkViewTabs v-if="useUnifiedWorkView" v-model="mobileActiveTab" />
+  <section class="work-view" :class="[`layout-${layoutMode}`, { 'is-unified': useUnifiedWorkView }]">
+    <WorkViewTabs v-if="useUnifiedWorkView && isCompactNavigation" v-model="activeWorkPanel" />
 
     <header v-if="!useUnifiedWorkView" class="work-header">
       <div>
@@ -397,9 +397,9 @@
           @retry="loadMobileProject(project.id)"
         >
           <template v-if="mobileAggregates[project.id]">
-            <WorkOverview v-if="mobileActiveTab === 'overview'" :aggregate="mobileAggregates[project.id]" />
+            <WorkOverview v-if="activeWorkPanel === 'overview'" :aggregate="mobileAggregates[project.id]" />
 
-            <div v-else-if="mobileActiveTab === 'goals'" class="mobile-item-list">
+            <div v-else-if="activeWorkPanel === 'goals'" class="mobile-item-list">
               <article v-for="goal in mobileAggregates[project.id].goals" :key="goal.id" class="mobile-work-item" :data-work-object-id="goal.id">
                 <strong>{{ goal.title }}</strong>
                 <p v-if="goal.data?.outcome || goal.description">{{ goal.data?.outcome || goal.description }}</p>
@@ -431,7 +431,7 @@
               <p v-if="mobileAggregates[project.id].goals.length === 0" class="column-empty">{{ t('work.empty_goals') }}</p>
             </div>
 
-            <div v-else-if="mobileActiveTab === 'tasks'" class="mobile-item-list">
+            <div v-else-if="activeWorkPanel === 'tasks'" class="mobile-item-list">
               <article v-for="task in mobileAggregates[project.id].tasks" :key="task.id" class="mobile-work-item mobile-task-item" :class="{ complete: task.status === 'done' }">
                 <button class="task-toggle" type="button" :disabled="task.status === 'done'" @click="completeTask(task)">
                   <CheckCircle2 v-if="task.status === 'done'" :size="18" /><Circle v-else :size="18" />
@@ -441,7 +441,7 @@
               <p v-if="mobileAggregates[project.id].tasks.length === 0" class="column-empty">{{ t('work.empty_tasks') }}</p>
             </div>
 
-            <div v-else-if="mobileActiveTab === 'decisions'" class="mobile-item-list">
+            <div v-else-if="activeWorkPanel === 'decisions'" class="mobile-item-list">
               <article v-for="decision in mobileAggregates[project.id].decisions" :key="decision.id" class="mobile-work-item">
                 <strong>{{ decision.data?.decision || decision.title }}</strong><p v-if="decision.data?.reason">{{ decision.data.reason }}</p><span class="mini-status">{{ statusLabel(decision.status) }}</span>
               </article>
@@ -473,11 +473,17 @@ import WorkOverview from '../components/work/WorkOverview.vue';
 import WorkViewTabs from '../components/work/WorkViewTabs.vue';
 import WorkProjectAccordion from '../components/work/WorkProjectAccordion.vue';
 import { getMobileProjectCounts, sortProjectsByUpdatedAt, toggleExpandedProjectIds } from '../work/work-view-state.js';
+import { DEFAULT_WORK_VIEW, isWorkView } from '../work/work-view-navigation.js';
 
 const { t, locale } = useI18n();
+const props = defineProps({
+  activePanel: { type: String, default: DEFAULT_WORK_VIEW, validator: isWorkView },
+});
+const emit = defineEmits(['update:activePanel']);
 const layoutMode = inject('layoutMode', ref('desktop-wide'));
 const terminalKind = inject('terminalKind', 'desktop');
 const isNativeMobile = terminalKind === 'native-mobile';
+const isCompactNavigation = inject('isMobile', ref(false));
 const useUnifiedWorkView = true;
 const projects = ref([]);
 const aggregate = ref(null);
@@ -493,7 +499,10 @@ const deferredChangeReviews = ref([]);
 const changeReviewDrafts = reactive({});
 const runtimeRuns = ref([]);
 const runtimeBusy = ref('');
-const mobileActiveTab = ref('overview');
+const activeWorkPanel = computed({
+  get: () => props.activePanel,
+  set: value => emit('update:activePanel', value),
+});
 const mobileAggregates = reactive({});
 const mobileRuntimes = reactive({});
 const mobileProjectErrors = reactive({});
@@ -537,10 +546,10 @@ function mobileProjectCountLabel(projectId) {
   const aggregateValue = mobileAggregates[projectId];
   if (!aggregateValue) return mobileProjectLoading[projectId] ? t('work.mobile_loading') : '';
   const counts = getMobileProjectCounts(aggregateValue);
-  if (mobileActiveTab.value === 'overview') {
+  if (activeWorkPanel.value === 'overview') {
     return t('work.mobile_overview_count', { goals: counts.goals, tasks: counts.tasks });
   }
-  return t('work.mobile_item_count', { count: counts[mobileActiveTab.value] || 0 });
+  return t('work.mobile_item_count', { count: counts[activeWorkPanel.value] || 0 });
 }
 
 function mobileRuntimeForGoal(projectId, goalId) {
@@ -907,7 +916,7 @@ async function handleTodayBriefNavigation(event) {
   if (projectId && useUnifiedWorkView) {
     expandedProjectIds.value = new Set([...expandedProjectIds.value, projectId]);
     if (!mobileAggregates[projectId]) await loadMobileProject(projectId);
-    mobileActiveTab.value = 'goals';
+    activeWorkPanel.value = 'goals';
   } else if (projectId) {
     await selectProject(projectId);
   }
@@ -938,6 +947,7 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .work-view { height: 100%; overflow: auto; box-sizing: border-box; background: var(--bg-primary); color: var(--text-primary); padding: clamp(20px, 3vw, 36px); }
+.work-view.is-unified { padding: 0; }
 .work-header, .project-summary, .section-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
 .work-header { max-width: 1000px; margin: 0 auto 18px; }
 .work-header h1, .project-summary h2, .create-project-card h2 { margin: 3px 0 6px; font-size: clamp(22px, 2.2vw, 30px); letter-spacing: -0.03em; }
@@ -1039,7 +1049,6 @@ textarea { resize: vertical; }
 .spin { animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-.work-view > .work-view-tabs { width: 100%; max-width: 1000px; margin: 0 auto; }
 .work-view > .mobile-pending-summary { max-width: 1000px; margin-right: auto; margin-left: auto; }
 .mobile-work-main { width: 100%; max-width: 1000px; min-width: 0; box-sizing: border-box; margin: 0 auto; padding: 0 14px 28px; }
 .mobile-work-toolbar { display: flex; align-items: center; justify-content: space-between; min-height: 52px; border-bottom: 1px solid var(--border-subtle); color: var(--text-tertiary); font-size: 12px; }

@@ -177,7 +177,22 @@
             <BriefcaseBusiness :size="14" />
             <span>{{ $t('nav.work') || '工作' }}</span>
           </div>
-          <ChevronRight :size="14" class="drawer-chevron" />
+          <ChevronDown v-if="activeDrawer === 'work'" :size="14" class="drawer-chevron" />
+          <ChevronRight v-else :size="14" class="drawer-chevron" />
+        </div>
+        <div v-show="!isMobile && activeDrawer === 'work'" class="drawer-content">
+          <nav class="settings-nav">
+            <button
+              v-for="item in workNavItems"
+              :key="item.id"
+              class="settings-nav-item"
+              :class="{ active: activeWorkPanel === item.id }"
+              @click="activeWorkPanel = item.id"
+            >
+              <component :is="item.icon" :size="16" />
+              <span>{{ item.label }}</span>
+            </button>
+          </nav>
         </div>
 
         <!-- ═══ 抽屉 2.5: 知识图谱 ═══ -->
@@ -264,7 +279,10 @@
           />
         </div>
         <div class="view-wrapper" v-show="activeDrawer === 'work'">
-          <WorkView />
+          <WorkView
+            :active-panel="activeWorkPanel"
+            @update:active-panel="activeWorkPanel = $event"
+          />
         </div>
         <div class="view-wrapper" v-show="activeDrawer === 'knowledge'">
           <KnowledgeGraphView 
@@ -361,6 +379,7 @@ import { listen } from '@tauri-apps/api/event';
 import { getModelMeta } from '@/composables/useModelSwitcher';
 import { useDailyBrief } from '@/composables/useDailyBrief.js';
 import { createLayoutState } from '@/layout/layout-mode.js';
+import { DEFAULT_WORK_VIEW, WORK_VIEW_ITEMS } from '@/work/work-view-navigation.js';
 
 // Tauri Window API (用于自定义窗口按钮)
 function minimizeWindow() { window.appAPI.minimizeWindow(); }
@@ -376,6 +395,7 @@ const activeDrawer = ref('chat');         // 'chat' | 'schedule' | 'work' | 'kno
 provide('activeDrawer', activeDrawer);
 const activeSettingsPanel = ref('model'); // 'model' | 'connections' | 'workspace' | 'daily_routine' | 'appearance' | 'about'
 const activeSchedulePanel = ref('timeline'); // 'timeline' | 'todo' | 'cron'
+const activeWorkPanel = ref(DEFAULT_WORK_VIEW);
 const chatViewRef = ref(null);
 const quickNoteRef = ref(null);
 const dailyBrief = useDailyBrief();
@@ -576,6 +596,11 @@ const scheduleNavItems = computed(() => [
   { id: 'todo', icon: CheckSquare, label: t('inbox.todo_list') || '待办事项' },
   { id: 'cron', icon: Timer, label: t('inbox.auto_tasks') || '计划任务' },
 ]);
+
+const workNavItems = computed(() => WORK_VIEW_ITEMS.map(item => ({
+  ...item,
+  label: t(item.labelKey),
+})));
 
 const modelInfo = computed(() => {
   if (!currentModel.value) return { name: t('app.not_configured'), logo: null };
