@@ -1,7 +1,7 @@
 <template>
-  <div class="settings-view">
-    <div class="settings-scroll">
-      <div class="settings-content">
+  <div class="app-page-view settings-view">
+    <div class="app-page-scroll settings-scroll">
+      <div class="app-page-scroll-content settings-content">
         <!-- 根据侧边栏设置导航选中项，渲染对应子面板 -->
         <SettingsModelPanel
           v-if="activePanel === 'model'"
@@ -95,35 +95,11 @@ defineExpose({
   background: var(--bg-root);
 }
 
-.settings-scroll {
-  flex: 1;
-  overflow-y: auto;
-  overflow-x: hidden;
-  padding: var(--space-4) var(--space-5);
-  scrollbar-width: thin;
-  scrollbar-color: var(--border-subtle) transparent;
-  scrollbar-gutter: stable;
-}
-
-.settings-scroll::-webkit-scrollbar {
-  width: 6px;
-}
-
-.settings-scroll::-webkit-scrollbar-thumb {
-  background: var(--border-subtle);
-  border-radius: var(--radius-default);
-}
-
 .settings-content {
   max-width: 700px;
   margin: 0 auto;
 }
 @media (max-width: 768px) {
-  .settings-scroll {
-    padding: 0 !important;
-    padding-bottom: calc(60px + env(safe-area-inset-bottom, 16px)) !important;
-    overflow-y: overlay;
-  }
   /* 移动端彻底压平卡片，实现 Edge-to-Edge 沉浸式列表 */
   .settings-scroll :deep(.settings-section.card) {
     border-radius: 0;
@@ -138,15 +114,8 @@ defineExpose({
   .settings-scroll :deep(.settings-section.card:last-child) {
     border-bottom: none;
   }
-  .settings-scroll::-webkit-scrollbar {
-    width: 4px;
-  }
   .settings-scroll::-webkit-scrollbar-track {
     background: transparent;
-  }
-  .settings-scroll::-webkit-scrollbar-thumb {
-    background-color: var(--surface-card);
-    border-radius: var(--radius-default);
   }
   .settings-scroll::-webkit-scrollbar-thumb:hover {
     background: rgba(255, 255, 255, 0.3);

@@ -1,5 +1,5 @@
 <template>
-  <div class="inbox-view" :class="{ 'is-mobile': isMobile }">
+  <div class="app-page-view inbox-view" :class="{ 'is-mobile': isMobile }">
     <!-- 移动端二级导航 Tab 栏 -->
     <div v-if="isMobile" class="mobile-tab-grid">
       <button class="mobile-tab-item" :class="{ active: activeTab === 'timeline' }" @click="activeTab = 'timeline'">
@@ -19,7 +19,7 @@
       </button>
     </div>
 
-    <div class="inbox-content-wrapper" :class="{ 'is-timeline-tab': activeTab === 'timeline' && isMobile }">
+    <div class="app-page-scroll inbox-content-wrapper" :class="{ 'is-timeline-tab': activeTab === 'timeline' && isMobile }">
       <div v-if="!isMobile" class="inbox-header">
         <h2 class="inbox-title">
           <Calendar :size="24" class="title-icon" />{{ $t('inbox.title') }}</h2>
@@ -30,7 +30,7 @@
         <span>{{ $t('inbox.loading') }}</span>
       </div>
 
-      <div v-else class="inbox-content">
+      <div v-else class="app-page-scroll-content inbox-content">
 
         <!-- 事件 -->
         <div v-if="overdueEvents.length > 0 && activeTab === 'todo'" class="section">
@@ -320,30 +320,14 @@ function describeCron(expr) {
 
 <style scoped>
 .inbox-view {
-  flex: 1;
   min-width: 0;
-  height: 100%;
-  overflow-y: auto;
-  padding: var(--space-6) var(--space-8);
 }
-.inbox-view.is-mobile {
-  padding: 0;
-}
-
-.inbox-view.is-mobile .inbox-content-wrapper {
-  padding: var(--space-4);
-}
-
 
 .inbox-content-wrapper {
-  max-width: 1000px;
-  width: 100%;
-  margin: 0 auto;
-  padding: 0;
+  /* Used as app-page-scroll */
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  gap: var(--space-6);
 }
 
 .inbox-header {
@@ -353,31 +337,16 @@ function describeCron(expr) {
 .inbox-title {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
-  font-size: var(--text-2xl);
-  font-weight: 600;
-  color: var(--text-primary);
-}
-
-.title-icon {
-  color: var(--text-secondary);
-}
-
-.inbox-subtitle {
-  color: var(--text-tertiary);
-  margin-top: var(--space-2);
-}
-
-.loading-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
   gap: var(--space-3);
   color: var(--text-tertiary);
   padding: var(--space-8);
 }
 
 .inbox-content {
+  /* Used as app-page-scroll-content */
+  max-width: 1000px;
+  width: 100%;
+  margin: 0 auto;
   display: flex;
   flex-direction: column;
   gap: var(--space-6);
@@ -394,66 +363,74 @@ function describeCron(expr) {
   gap: 6px;
 }
 
-
+.section-icon {
+  color: var(--text-tertiary);
+}
 
 .cron-count {
+  background: var(--surface-tertiary);
+  color: var(--text-secondary);
   font-size: 11px;
-  font-weight: 500;
-  background: var(--accent-primary);
-  color: var(--bg-primary);
-  border-radius: 10px;
-  padding: 0 7px;
-  line-height: 18px;
-  margin-left: 4px;
+  padding: 2px 6px;
+  border-radius: 12px;
+  margin-left: 8px;
 }
 
 /* ── 空状态 ── */
 .empty-cron {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px;
+  color: var(--text-muted);
+  background: var(--surface-secondary);
+  border-radius: var(--radius-lg);
+  border: 1px dashed var(--border-primary);
   text-align: center;
-  padding: var(--space-6) var(--space-4);
-  color: var(--text-tertiary);
 }
 
-.empty-icon {
-  opacity: 0.3;
-  margin-bottom: var(--space-2);
+.empty-cron .empty-icon {
+  margin-bottom: 12px;
+  opacity: 0.5;
 }
 
-.empty-hint {
+.empty-cron .empty-hint {
   font-size: 12px;
-  opacity: 0.7;
   margin-top: 4px;
 }
 
-/* ── Cron 卡片列表 ── */
+/* ── 自动任务列表 ── */
 .cron-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+  display: grid;
+  gap: 12px;
 }
 
 .cron-card {
   display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  padding: 12px 14px;
-  background: var(--surface-secondary);
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px;
+  background: var(--surface-card);
   border: 1px solid var(--border-primary);
-  border-radius: var(--radius-lg, 10px);
-  transition: opacity 0.2s, border-color 0.2s;
-}
-
-.cron-card.disabled {
-  opacity: 0.45;
+  border-radius: var(--radius-lg);
+  transition: all 0.2s;
 }
 
 .cron-card:hover {
-  border-color: var(--accent-primary);
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-sm);
+}
+
+.cron-card.disabled {
+  opacity: 0.6;
+  background: var(--surface-secondary);
 }
 
 .cron-main {
   flex: 1;
   min-width: 0;
+  padding-right: 16px;
 }
 
 .cron-title-row {
@@ -464,74 +441,59 @@ function describeCron(expr) {
 }
 
 .cron-title {
-  font-weight: 600;
-  font-size: 14px;
+  font-weight: 500;
   color: var(--text-primary);
-}
-
-.cron-expr {
-  font-size: 11px;
-  font-family: var(--font-mono);
-  background: var(--surface-input);
-  padding: 1px 6px;
-  border-radius: 4px;
-  color: var(--text-muted);
 }
 
 .cron-desc {
   font-size: 12px;
-  color: var(--accent-primary);
-  margin-bottom: 4px;
+  color: var(--user-accent, var(--accent-primary));
+  font-family: var(--font-mono);
+  margin-bottom: 6px;
 }
 
 .cron-prompt {
-  font-size: 12px;
-  color: var(--text-tertiary);
+  font-size: 13px;
+  color: var(--text-secondary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 100%;
 }
 
 .cron-meta {
   font-size: 11px;
-  color: var(--text-muted);
-  margin-top: 4px;
-  opacity: 0.7;
+  color: var(--text-tertiary);
+  margin-top: 8px;
 }
 
-/* ── 操作按钮 ── */
 .cron-actions {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
-  flex-shrink: 0;
+  gap: 8px;
 }
 
-.cron-toggle, .cron-delete {
+.cron-toggle,
+.cron-delete {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
-  border-radius: var(--radius-sm, 6px);
-  border: 1px solid var(--border-primary);
-  background: var(--surface-primary);
-  color: var(--text-muted);
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  border: none;
+  background: var(--surface-tertiary);
+  color: var(--text-secondary);
   cursor: pointer;
-  transition: all 0.15s;
+  transition: all 0.2s;
 }
 
 .cron-toggle:hover {
-  color: var(--accent-primary);
-  border-color: var(--accent-primary);
-  background: color-mix(in srgb, var(--accent-primary) 8%, transparent);
+  background: var(--surface-hover);
+  color: var(--text-primary);
 }
 
 .cron-delete:hover {
+  background: color-mix(in srgb, var(--color-error) 15%, transparent);
   color: var(--color-error);
-  border-color: var(--color-error);
-  background: color-mix(in srgb, var(--color-error) 8%, transparent);
 }
 
 /* ── T-1307: 待办提醒 ── */
@@ -598,30 +560,8 @@ function describeCron(expr) {
   top: 8px;
   right: 12px;
 }
-.inbox-view.is-mobile {
-  padding: 0;
-  padding-bottom: 0;
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  overflow: hidden;
-}
-.inbox-view.is-mobile .inbox-content-wrapper {
-  padding: 12px 16px;
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-}
-.inbox-view.is-mobile .inbox-content {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  overflow-y: auto;
-  -webkit-overflow-scrolling: touch;
-}
-.inbox-view.is-mobile .inbox-content-wrapper.is-timeline-tab {
+
+.inbox-view.is-mobile .inbox-content-wrapper.is-timeline-tab .inbox-content {
   padding: 12px 0 0 0 !important;
 }
 .inbox-view.is-mobile .inbox-content-wrapper.is-timeline-tab .section {

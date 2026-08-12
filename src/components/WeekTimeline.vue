@@ -47,12 +47,8 @@
             v-for="day in days" 
             :key="day.dateStr" 
             class="day-column"
-            :class="{ 'drag-over': dragOverDay === day.dateStr }"
+            :data-date="day.dateStr"
             @click.self="onTrackClick(day, $event)"
-            @dragover.prevent
-            @dragenter="onDragEnter(day, $event)"
-            @dragleave="onDragLeave(day, $event)"
-            @drop="onDrop(day, $event)"
           >
             <!-- 背景网格线 -->
             <div v-for="h in Math.floor(24)" :key="h" class="grid-cell" @click.self="onCellClick(day, h, $event)"></div>
@@ -68,17 +64,15 @@
               :key="event.id"
               class="event-card"
               :style="{
-                top: event.top + 'px',
-                height: (resizingEventId === event.id ? resizingEventHeight : event.height) + 'px',
+                top: (resizingTopEventId === event.id ? resizingTopEventTop : event.top) + 'px',
+                height: (resizingEventId === event.id ? resizingEventHeight : (resizingTopEventId === event.id ? resizingTopEventHeight : event.height)) + 'px',
                 left: event.left,
                 width: event.width
               }"
-              :class="{ 'is-short': event.height < 30 }"
-              draggable="true"
-              @dragstart="onDragStart(event, $event)"
-              @dragend="onDragEnd"
-              @click.stop="openDetail(event.raw)"
+              :class="{ 'is-short': event.height < 30, 'is-dragging': movingEventId === event.id }"
+              @mousedown="startMove(event, $event, day)"
             >
+              <div class="resize-handle top" @mousedown.stop.prevent="startResizeTop(event, $event)"></div>
               <template v-if="getTicketInfo(event.raw)">
                 <div class="event-time" v-if="event.height >= 40">{{ formatTimeRange(event.raw) || '待确认' }}</div>
                 <div class="ticket-dense-info" :class="{ 'row-layout': event.height < 40 }">
@@ -96,8 +90,18 @@
                 <div class="event-time" v-if="event.height >= 40">{{ formatTimeRange(event.raw) }}</div>
                 <div class="event-title">{{ event.title }}</div>
               </template>
-              <div class="resize-handle" @mousedown.stop.prevent="startResize(event, $event)"></div>
+              <div class="resize-handle bottom" @mousedown.stop.prevent="startResize(event, $event)"></div>
             </div>
+          </div>
+          
+          <!-- Ghost Card (跟随鼠标拖拽时显示) -->
+          <div v-if="ghostCard" class="event-card ghost-card" :style="{
+            top: ghostCard.top + 'px',
+            left: `calc((100% / 7) * ${ghostCard.targetCol} + 4px)`,
+            width: `calc((100% / 7) - 8px)`,
+            height: ghostCard.height + 'px'
+          }">
+            <div style="font-size: 12px; font-weight: bold; opacity: 0.8; margin-top: 2px;">{{ formatGhostTime(ghostCard) }}</div>
           </div>
         </div>
       </div>
@@ -443,79 +447,167 @@ async function createNewEvent(day, startHour) {
   });
 }
 
-const dragOverDay = ref(null);
+const movingEventId = ref(null);
+const ghostCard = ref(null);
+const resizingTopEventId = ref(null);
+const resizingTopEventTop = ref(null);
+const resizingTopEventHeight = ref(null);
 
-function onDragStart(event, e) {
-  justDragged.value = true;
-  const rect = e.currentTarget.getBoundingClientRect();
-  const grabOffset = e.clientY - rect.top;
-  e.dataTransfer.setData('text/plain', JSON.stringify({ eventId: event.id, grabOffset }));
+function getEventTimeByPosition(top, height, dateStr) {
+  const parts = dateStr.split('-');
+  const baseDate = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+  const startHour = top / PIXELS_PER_HOUR;
+  const startH = Math.floor(startHour);
+  const startM = Math.round((startHour - startH) * 60);
+  const start = new Date(baseDate);
+  start.setHours(startH, startM, 0, 0);
+  
+  const endHour = (top + height) / PIXELS_PER_HOUR;
+  const endH = Math.floor(endHour);
+  const endM = Math.round((endHour - endH) * 60);
+  const end = new Date(baseDate);
+  end.setHours(endH, endM, 0, 0);
+  
+  return { start, end };
 }
 
-function onDragEnd() {
-  // 捕获阶段拦截并阻止拖拽结束引发的 click 事件
-  const preventClick = (e) => {
-    e.stopPropagation();
-    e.preventDefault();
-    window.removeEventListener('click', preventClick, true);
+function formatGhostTime(ghost) {
+  const { start, end } = getEventTimeByPosition(ghost.top, ghost.height, ghost.dateStr);
+  const fmt = d => `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  return `${fmt(start)} - ${fmt(end)}`;
+}
+
+function startMove(event, startEvent, day) {
+  if (startEvent.target.classList.contains('resize-handle')) return;
+  
+  const startX = startEvent.clientX;
+  const startY = startEvent.clientY;
+  const initialTop = event.top;
+  let hasMoved = false;
+
+  const ev = props.weekEvents.find(e => e.id === event.id);
+  if (!ev) return;
+
+  const gridRect = document.querySelector('.days-grid').getBoundingClientRect();
+  const grabOffset = startEvent.clientY - (gridRect.top + initialTop);
+  
+  // Also pass 'days' from computed to use in closure
+  const currentDays = days.value;
+
+  const onMouseMove = (moveEvent) => {
+    const dx = Math.abs(moveEvent.clientX - startX);
+    const dy = Math.abs(moveEvent.clientY - startY);
+    if (!hasMoved && (dx > 3 || dy > 3)) {
+      hasMoved = true;
+      movingEventId.value = event.id;
+      ghostCard.value = {
+        id: event.id,
+        top: initialTop,
+        height: event.height,
+        targetCol: currentDays.findIndex(d => d.dateStr === day.dateStr),
+        dateStr: day.dateStr
+      };
+    }
+    
+    if (hasMoved) {
+      let rawY = moveEvent.clientY - gridRect.top - grabOffset;
+      if (rawY < 0) rawY = 0;
+      if (rawY > 24 * PIXELS_PER_HOUR - event.height) rawY = 24 * PIXELS_PER_HOUR - event.height;
+      const snappedY = Math.round(rawY / 15) * 15;
+      
+      const colWidth = gridRect.width / 7;
+      let targetCol = Math.floor((moveEvent.clientX - gridRect.left) / colWidth);
+      if (targetCol < 0) targetCol = 0;
+      if (targetCol > 6) targetCol = 6;
+      
+      ghostCard.value.top = snappedY;
+      ghostCard.value.targetCol = targetCol;
+      ghostCard.value.dateStr = currentDays[targetCol].dateStr;
+    }
   };
-  window.addEventListener('click', preventClick, true);
-  setTimeout(() => {
-    window.removeEventListener('click', preventClick, true);
-  }, 50);
 
-  setTimeout(() => {
-    justDragged.value = false;
-  }, 200);
+  const onMouseUp = async (upEvent) => {
+    window.removeEventListener('mousemove', onMouseMove);
+    window.removeEventListener('mouseup', onMouseUp);
+    
+    if (hasMoved) {
+      const preventClick = (e) => {
+        e.stopPropagation(); e.preventDefault();
+        window.removeEventListener('click', preventClick, true);
+      };
+      window.addEventListener('click', preventClick, true);
+      setTimeout(() => window.removeEventListener('click', preventClick, true), 50);
+
+      const finalGhost = { ...ghostCard.value };
+      movingEventId.value = null;
+      ghostCard.value = null;
+
+      const { start, end } = getEventTimeByPosition(finalGhost.top, finalGhost.height, finalGhost.dateStr);
+      await updateEventTimes(ev.id, start.toISOString(), end.toISOString());
+    } else {
+      openDetail(event.raw);
+    }
+  };
+
+  window.addEventListener('mousemove', onMouseMove);
+  window.addEventListener('mouseup', onMouseUp);
 }
 
-function onDragEnter(day, e) {
-  dragOverDay.value = day.dateStr;
-}
+function startResizeTop(event, startEvent) {
+  justDragged.value = true;
+  resizingTopEventId.value = event.id;
+  resizingTopEventTop.value = event.top;
+  resizingTopEventHeight.value = event.height;
 
-function onDragLeave(day, e) {
-  if (dragOverDay.value === day.dateStr) {
-    dragOverDay.value = null;
-  }
-}
+  const startY = startEvent.clientY;
+  const startTop = event.top;
+  const startHeight = event.height;
+  const ev = props.weekEvents.find(e => e.id === event.id);
+  if (!ev) return;
+  
+  const bottomEdge = startTop + startHeight;
+  const currentDays = days.value;
+  
+  const onMouseMove = (moveEvent) => {
+    const deltaY = moveEvent.clientY - startY;
+    let newTop = startTop + deltaY;
+    if (newTop < 0) newTop = 0;
+    
+    let snappedTop = Math.round(newTop / 15) * 15;
+    
+    if (bottomEdge - snappedTop < 15) snappedTop = bottomEdge - 15;
+    
+    resizingTopEventTop.value = snappedTop;
+    resizingTopEventHeight.value = bottomEdge - snappedTop;
+  };
+  
+  const onMouseUp = async (upEvent) => {
+    window.removeEventListener('mousemove', onMouseMove);
+    window.removeEventListener('mouseup', onMouseUp);
+    
+    const preventClick = (e) => {
+      e.stopPropagation(); e.preventDefault();
+      window.removeEventListener('click', preventClick, true);
+    };
+    window.addEventListener('click', preventClick, true);
+    setTimeout(() => window.removeEventListener('click', preventClick, true), 50);
+    setTimeout(() => justDragged.value = false, 200);
+    
+    const finalTop = resizingTopEventTop.value;
+    const finalHeight = resizingTopEventHeight.value;
+    resizingTopEventId.value = null;
+    resizingTopEventTop.value = null;
+    resizingTopEventHeight.value = null;
 
-async function onDrop(day, e) {
-  dragOverDay.value = null;
-  const dragDataStr = e.dataTransfer.getData('text/plain');
-  if (!dragDataStr) return;
-  try {
-    const { eventId, grabOffset } = JSON.parse(dragDataStr);
-    const ev = props.weekEvents.find(event => event.id === eventId);
-    if (!ev) return;
-    
-    const columnRect = e.currentTarget.getBoundingClientRect();
-    const y = e.clientY - columnRect.top;
-    
-    let targetY = y - grabOffset;
-    if (targetY < 0) targetY = 0;
-    if (targetY > 24 * PIXELS_PER_HOUR) targetY = 24 * PIXELS_PER_HOUR;
-    
-    const snappedY = Math.round(targetY / 15) * 15;
-    const startHour = snappedY / PIXELS_PER_HOUR;
-    
-    const start = new Date(ev.start_time);
-    const end = ev.end_time ? new Date(ev.end_time) : new Date(start.getTime() + 60 * 60 * 1000);
-    const durationMs = end.getTime() - start.getTime();
-    
-    const parts = day.dateStr.split('-');
-    const targetDate = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
-    const startH = Math.floor(startHour);
-    const startM = Math.round((startHour - startH) * 60);
-    
-    const newStart = new Date(targetDate);
-    newStart.setHours(startH, startM, 0, 0);
-    
-    const newEnd = new Date(newStart.getTime() + durationMs);
-    
-    await updateEventTimes(ev.id, newStart.toISOString(), newEnd.toISOString());
-  } catch (err) {
-    console.error('Failed to parse drag data', err);
-  }
+    const day = currentDays.find(d => d.layoutEvents.some(e => e.id === event.id));
+    if (day) {
+      const { start, end } = getEventTimeByPosition(finalTop, finalHeight, day.dateStr);
+      await updateEventTimes(ev.id, start.toISOString(), end.toISOString());
+    }
+  };
+  
+  window.addEventListener('mousemove', onMouseMove);
+  window.addEventListener('mouseup', onMouseUp);
 }
 
 function startResize(event, startEvent) {
@@ -882,15 +974,30 @@ const currentMonthDisplay = computed(() => {
   flex-direction: column;
   user-select: none;
 }
+.ghost-card {
+  position: absolute;
+  background: var(--accent-glow, rgba(128, 128, 128, 0.08));
+  border: 1px dashed var(--user-accent, var(--accent-primary));
+  opacity: 0.8;
+  pointer-events: none;
+  z-index: 100;
+  border-radius: 6px;
+  padding: 4px 6px;
+}
+
 .resize-handle {
   position: absolute;
-  bottom: 0;
   left: 0;
   right: 0;
   height: 6px;
   cursor: ns-resize;
-  background: transparent;
-  z-index: 10;
+  z-index: 20;
+}
+.resize-handle.bottom {
+  bottom: 0;
+}
+.resize-handle.top {
+  top: 0;
 }
 .resize-handle:hover {
   background: var(--user-accent, var(--accent-primary));

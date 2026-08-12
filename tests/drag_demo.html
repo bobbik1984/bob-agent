@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Calendar Drag Demo</title>
+<style>
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    padding: 20px;
+    background: #f5f5f5;
+  }
+  .calendar-grid {
+    display: flex;
+    width: 800px;
+    height: 600px;
+    background: white;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    overflow: hidden;
+    position: relative;
+    user-select: none;
+  }
+  .day-column {
+    flex: 1;
+    border-right: 1px solid #eee;
+    position: relative;
+  }
+  .day-column:last-child {
+    border-right: none;
+  }
+  .grid-cell {
+    height: 50px; /* 1 hour */
+    border-bottom: 1px dashed #f0f0f0;
+    box-sizing: border-box;
+  }
+  
+  /* The Event Card */
+  .event-card {
+    position: absolute;
+    left: 4px;
+    right: 4px;
+    background: #e3f2fd;
+    border: 1px solid #90caf9;
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 12px;
+    color: #1565c0;
+    box-sizing: border-box;
+    cursor: grab;
+    transition: opacity 0.2s;
+  }
+  .event-card:active {
+    cursor: grabbing;
+  }
+  .event-card.is-dragging {
+    opacity: 0.3;
+  }
+  
+  /* The Ghost Card (Follows Mouse) */
+  .ghost-card {
+    position: absolute;
+    background: #bbdefb;
+    border: 2px dashed #1976d2;
+    border-radius: 4px;
+    opacity: 0.8;
+    pointer-events: none; /* Ignore mouse events so we can drop below it */
+    z-index: 100;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+  }
+
+  /* Resize Handles */
+  .resize-handle {
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: 8px;
+    background: transparent;
+    z-index: 10;
+  }
+  .resize-handle.top {
+    top: -2px;
+    cursor: ns-resize;
+  }
+  .resize-handle.bottom {
+    bottom: -2px;
+    cursor: ns-resize;
+  }
+  .resize-handle:hover {
+    background: rgba(25, 118, 210, 0.2);
+  }
+  
+  .hint {
+    margin-bottom: 20px;
+    color: #555;
+  }
+</style>
+</head>
+<body>
+
+<div class="hint">
+  <strong>互动演示：纯鼠标驱动的拖拽与缩放</strong><br>
+  1. 拖拽中间的蓝色块，体验“幽灵卡片”平滑跨列、跨时段吸附。<br>
+  2. 拖拽顶部手柄调整起始时间，拖拽底部调整结束时间。
+</div>
+
+<div class="calendar-grid" id="grid">
+  <!-- 7 Days -->
+  <div class="day-column" data-day="0"></div>
+  <div class="day-column" data-day="1"></div>
+  <div class="day-column" data-day="2"></div>
+  <div class="day-column" data-day="3"></div>
+  <div class="day-column" data-day="4"></div>
+  <div class="day-column" data-day="5"></div>
+  <div class="day-column" data-day="6"></div>
+
+  <!-- The real event card -->
+  <div class="event-card" id="myEvent" style="top: 100px; height: 100px; left: calc((100% / 7) * 2 + 4px); width: calc((100% / 7) - 8px);">
+    <div class="resize-handle top" id="resizerTop"></div>
+    <div style="pointer-events: none;">
+      <strong>开会</strong><br>
+      02:00 - 04:00
+    </div>
+    <div class="resize-handle bottom" id="resizerBottom"></div>
+  </div>
+</div>
+
+<script>
+  const grid = document.getElementById('grid');
+  const myEvent = document.getElementById('myEvent');
+  const resizerTop = document.getElementById('resizerTop');
+  const resizerBottom = document.getElementById('resizerBottom');
+  
+  let isDragging = false;
+  let isResizingTop = false;
+  let isResizingBottom = false;
+  
+  // State variables for math
+  const snapY = 12.5; // 15 mins snap if 1 hour = 50px
+  let currentTop = 100;
+  let currentHeight = 100;
+  let currentDay = 2; // Column index (0-6)
+  
+  // Ghost card
+  let ghost = null;
+  let grabOffsetX = 0;
+  let grabOffsetY = 0;
+
+  // --- DRAWING GRID CELLS ---
+  document.querySelectorAll('.day-column').forEach(col => {
+    for (let i = 0; i < 12; i++) {
+      const cell = document.createElement('div');
+      cell.className = 'grid-cell';
+      col.appendChild(cell);
+    }
+  });
+
+  function updateEventVisuals() {
+    myEvent.style.top = currentTop + 'px';
+    myEvent.style.height = currentHeight + 'px';
+    myEvent.style.left = `calc((100% / 7) * ${currentDay} + 4px)`;
+    myEvent.style.width = `calc((100% / 7) - 8px)`;
+  }
+
+  // --- DRAG LOGIC (MOVE) ---
+  myEvent.addEventListener('mousedown', (e) => {
+    // Ignore if clicking resize handles
+    if (e.target === resizerTop || e.target === resizerBottom) return;
+    
+    isDragging = true;
+    myEvent.classList.add('is-dragging');
+    
+    // Create ghost card
+    ghost = document.createElement('div');
+    ghost.className = 'ghost-card';
+    ghost.style.height = currentHeight + 'px';
+    ghost.style.width = myEvent.offsetWidth + 'px';
+    grid.appendChild(ghost);
+
+    const rect = myEvent.getBoundingClientRect();
+    const gridRect = grid.getBoundingClientRect();
+    
+    // Where did user click inside the card?
+    grabOffsetX = e.clientX - rect.left;
+    grabOffsetY = e.clientY - rect.top;
+    
+    moveGhost(e);
+  });
+
+  function moveGhost(e) {
+    if (!ghost) return;
+    const gridRect = grid.getBoundingClientRect();
+    
+    // Absolute position relative to grid
+    let rawX = e.clientX - gridRect.left - grabOffsetX;
+    let rawY = e.clientY - gridRect.top - grabOffsetY;
+    
+    // Find which column we are in (0-6)
+    const colWidth = gridRect.width / 7;
+    let targetCol = Math.floor((e.clientX - gridRect.left) / colWidth);
+    if (targetCol < 0) targetCol = 0;
+    if (targetCol > 6) targetCol = 6;
+    
+    // Snap Y position
+    if (rawY < 0) rawY = 0;
+    let snappedY = Math.round(rawY / snapY) * snapY;
+    
+    ghost.style.left = `calc((100% / 7) * ${targetCol} + 4px)`;
+    ghost.style.top = snappedY + 'px';
+    
+    // Store temporarily
+    ghost.dataset.targetCol = targetCol;
+    ghost.dataset.targetTop = snappedY;
+  }
+
+  // --- RESIZE TOP LOGIC ---
+  resizerTop.addEventListener('mousedown', (e) => {
+    e.stopPropagation();
+    isResizingTop = true;
+  });
+
+  // --- RESIZE BOTTOM LOGIC ---
+  resizerBottom.addEventListener('mousedown', (e) => {
+    e.stopPropagation();
+    isResizingBottom = true;
+  });
+
+  // --- GLOBAL MOUSE EVENTS ---
+  window.addEventListener('mousemove', (e) => {
+    if (isDragging) {
+      moveGhost(e);
+    } else if (isResizingBottom) {
+      const gridRect = grid.getBoundingClientRect();
+      let newY = e.clientY - gridRect.top;
+      let newHeight = newY - currentTop;
+      newHeight = Math.max(25, Math.round(newHeight / snapY) * snapY); // Min height
+      myEvent.style.height = newHeight + 'px';
+      myEvent.dataset.tempHeight = newHeight;
+    } else if (isResizingTop) {
+      const gridRect = grid.getBoundingClientRect();
+      let newY = e.clientY - gridRect.top;
+      newY = Math.max(0, Math.round(newY / snapY) * snapY);
+      
+      // Calculate bottom boundary so we don't invert
+      const bottomEdge = currentTop + currentHeight;
+      if (bottomEdge - newY < 25) newY = bottomEdge - 25;
+      
+      let newHeight = bottomEdge - newY;
+      
+      myEvent.style.top = newY + 'px';
+      myEvent.style.height = newHeight + 'px';
+      myEvent.dataset.tempTop = newY;
+      myEvent.dataset.tempHeight = newHeight;
+    }
+  });
+
+  window.addEventListener('mouseup', (e) => {
+    if (isDragging) {
+      isDragging = false;
+      myEvent.classList.remove('is-dragging');
+      if (ghost) {
+        currentDay = parseInt(ghost.dataset.targetCol);
+        currentTop = parseFloat(ghost.dataset.targetTop);
+        ghost.remove();
+        ghost = null;
+      }
+      updateEventVisuals();
+    }
+    
+    if (isResizingBottom) {
+      isResizingBottom = false;
+      if (myEvent.dataset.tempHeight) {
+        currentHeight = parseFloat(myEvent.dataset.tempHeight);
+      }
+      updateEventVisuals();
+    }
+    
+    if (isResizingTop) {
+      isResizingTop = false;
+      if (myEvent.dataset.tempTop) currentTop = parseFloat(myEvent.dataset.tempTop);
+      if (myEvent.dataset.tempHeight) currentHeight = parseFloat(myEvent.dataset.tempHeight);
+      updateEventVisuals();
+    }
+  });
+</script>
+</body>
+</html>
