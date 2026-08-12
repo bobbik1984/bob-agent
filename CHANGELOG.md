@@ -2,7 +2,20 @@
 
 All notable changes to bob-agent will be documented in this file.
 
-## [Unreleased] - Goal Runtime Documentation Alignment
+## [Unreleased]
+
+### Fixed
+- Unified the Work experience across PC and Android around one shared set of Overview, Goals, Tasks, Decisions and Activity views, with the same project accordion content on both clients.
+- Reused the established responsive navigation contract: wide desktop windows place Work sub-navigation in the left sidebar, while compact desktop windows and Android place it flush against the top content boundary with a solid accent selection state.
+- Removed the legacy slogan-style Work header, duplicate project selector and inconsistent page-specific navigation treatment.
+- Kept Quick Note centered independently of screen size, aligned its bottom action group to the input boundaries, distributed 3–5 actions evenly and corrected the Today count badge alignment.
+- Prevented Windows helper checks such as `tasklist` and `taskkill` from flashing a terminal window during installation.
+
+### Changed
+- Recorded PC release artifacts for the current `0.9.0` correction build:
+  - `bob-installer.exe`: 42,611,712 bytes (40.64 MB), SHA-256 `C6147708D642D64E19E824CAF286C4FA73FCB2768BC079C102403DAD7B1C8BD0`.
+  - `bob-agent-portable.zip`: 32,304,619 bytes (30.81 MB), SHA-256 `5C554698F85583A04AE5E8E27D403BFE6F9FAFA418C89002CC0EEBECB4E19490`.
+- Android package-size and real-device acceptance remain open quality gates.
 
 ### Documentation
 - Defined Bob's product north star as a zero-setup, privacy-first personal execution system focused on verified outcome closure.

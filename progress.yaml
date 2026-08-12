@@ -3,7 +3,7 @@ project:
   version: '0.9.0'
   status: active
   north_star: Bob 让复杂工作不断线
-  updated: '2026-08-11'
+  updated: '2026-08-12'
   tech:
   - Tauri
   - Rust
@@ -69,7 +69,11 @@ phases:
   tasks:
   - text: PC 与 Android 共用功能 Tab、项目分组和多项目展开
     status: done
+  - text: 宽屏复用左侧二级导航，窄屏与 Android 复用贴边顶部导航
+    status: done
   - text: Quick Note 居中输入条、共享边界和 3–5 项等宽动作网格
+    status: done
+  - text: Windows 安装器辅助命令保持静默，不闪现终端窗口
     status: done
   - text: PC 与 Android 真机纵横屏、明暗主题与触控验收
     status: todo

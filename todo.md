@@ -11,6 +11,7 @@
 
 - [x] 建立 Work 功能 Tab、按项目分组滚动、独立多项目展开及折叠数量摘要的第一版组件。
 - [x] PC 与 Android 统一为同一套 Work 功能 Tab 和项目分组，移除旧口号式页面；Quick Note 采用共享宽度与 3–5 项等宽动作网格；安装器系统命令静默运行。
+- [x] Work 响应式导航复用既有页面模板：宽屏进入左侧二级栏，窄屏与 Android 顶部贴边展示，选中项使用主题色实色块。
 
 ### WC-001 文档与术语收口（P0，已完成）
 
@@ -118,7 +119,8 @@
 ## v0.8.0 遗留质量门
 
 - [ ] 使用真实 PC/Android 完成 Capture 三入口与 Relay trace 对账。
-- [ ] 记录 PC 主程序、绿色包、安装器和 Android APK/AAB 字节数。
+- [x] 记录 `0.9.0` PC 绿色包与安装器的字节数及 SHA-256。
+- [ ] 记录 Android APK/AAB 字节数，并完成 PC/Android 真机对照验收。
 - [ ] Source 正文提取、Knowledge Point 蒸馏和证据关系继续独立演进，不阻塞已完成的 Work Core 引用层。
 
 ## 暂缓
