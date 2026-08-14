@@ -1,5 +1,7 @@
 use crate::complexity_router::RouteMode;
 use crate::work_core::models::{ProjectAggregate, WorkObject, WorkObjectKind, WorkProject};
+use crate::work_core::repository;
+use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
 const HIGH_CONFIDENCE: f32 = 0.85;
@@ -103,6 +105,24 @@ pub(crate) struct ContextSourceSnapshot {
     pub projects: Vec<WorkProject>,
     pub aggregates: Vec<ProjectAggregate>,
     pub focus_project_ids: Vec<String>,
+}
+
+impl ContextSourceSnapshot {
+    pub(crate) fn load(conn: &Connection) -> Result<Self, String> {
+        let projects = repository::list_projects(conn)?
+            .into_iter()
+            .filter(|project| is_active_status(&project.status) && project.deleted_at.is_none())
+            .collect::<Vec<_>>();
+        let mut aggregates = Vec::with_capacity(projects.len());
+        for project in &projects {
+            aggregates.push(repository::get_project_aggregate(conn, &project.id)?);
+        }
+        Ok(Self {
+            projects,
+            aggregates,
+            focus_project_ids: Vec::new(),
+        })
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -578,6 +598,9 @@ fn single_line(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::work_core::models::CreateProjectInput;
+    use crate::work_core::repository::{create_project, init_work_core_tables};
+    use rusqlite::Connection;
     use serde_json::{json, Value};
 
     fn project(id: &str, title: &str, status: &str, updated_at: i64) -> WorkProject {
@@ -831,5 +854,31 @@ mod tests {
         assert!(direct
             .reason_codes
             .contains(&"context.budget_truncated".into()));
+    }
+
+    #[test]
+    fn source_snapshot_loads_from_work_core_without_chat_history() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        init_work_core_tables(&connection).unwrap();
+        create_project(
+            &mut connection,
+            CreateProjectInput {
+                project_id: Some("project_bob".into()),
+                title: "Bob 助手".into(),
+                mission: "让个人工作不断线".into(),
+                current_phase: Some("Phase 5.5".into()),
+                summary: None,
+                source_ref: None,
+                metadata: json!({}),
+                actor: Some("test".into()),
+                idempotency_key: "create-project-bob".into(),
+            },
+        )
+        .unwrap();
+
+        let snapshot = ContextSourceSnapshot::load(&connection).unwrap();
+        assert_eq!(snapshot.projects.len(), 1);
+        assert_eq!(snapshot.aggregates.len(), 1);
+        assert_eq!(snapshot.aggregates[0].project.id, "project_bob");
     }
 }

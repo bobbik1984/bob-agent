@@ -3,6 +3,9 @@ use serde_json::{json, Value};
 use std::path::PathBuf;
 use tauri::{AppHandle, Emitter, Manager};
 
+use crate::assistant_context::{
+    compile_purpose, render_context_packet, resolve_context, ContextSourceSnapshot,
+};
 use crate::complexity_router::{self, RouteDecision, RouteMode};
 
 // ── 模型注册表路径 ─────────────────────────────────────
@@ -1762,6 +1765,70 @@ async fn resolve_complexity_route(messages: &[Value], agent_mode: &str) -> Route
     }
 }
 
+fn prepare_assistant_context_packet(
+    app: &AppHandle,
+    messages: &[Value],
+    route: RouteMode,
+    conversation_id: &str,
+    shadow: bool,
+) -> Option<String> {
+    let raw_intent = complexity_router::last_user_text(messages);
+    if raw_intent.trim().is_empty() {
+        return None;
+    }
+    let purpose = compile_purpose(&raw_intent);
+    let state = app.try_state::<crate::db::DbState>()?;
+    let snapshot = {
+        let connection = match state.0.lock() {
+            Ok(connection) => connection,
+            Err(error) => {
+                log::warn!(
+                    "[AssistantContext] database lock unavailable conv={} error={}",
+                    conversation_id,
+                    error
+                );
+                return None;
+            }
+        };
+        match ContextSourceSnapshot::load(&connection) {
+            Ok(snapshot) => snapshot,
+            Err(error) => {
+                log::warn!(
+                    "[AssistantContext] source unavailable conv={} error={}",
+                    conversation_id,
+                    error
+                );
+                return None;
+            }
+        }
+    };
+    let context = resolve_context(&purpose, &snapshot, route, super::now_ms());
+    let selected_id = context
+        .active_object
+        .as_ref()
+        .map(|object| object.object_id.as_str())
+        .unwrap_or("none");
+    log::info!(
+        "[AssistantContext] conv={} shadow={} candidates={} selected={} confidence={:.2} facts={} reasons={}",
+        conversation_id,
+        shadow,
+        snapshot.projects.len(),
+        selected_id,
+        context.confidence,
+        context.relevant_facts.len(),
+        context.reason_codes.join(",")
+    );
+    if shadow || context.active_object.is_none() {
+        return None;
+    }
+    let packet = render_context_packet(&purpose, &context);
+    if packet.is_empty() {
+        None
+    } else {
+        Some(packet)
+    }
+}
+
 // ═══════════════════════════════════════════════════════════
 /// 内部通用流式处理 — 支持 Tool Calling 循环
 pub(crate) async fn stream_internal(
@@ -1937,6 +2004,21 @@ pub(crate) async fn stream_internal(
         .iter()
         .any(|m| m.get("role").and_then(|r| r.as_str()) == Some("system"));
     let mut full_messages: Vec<Value> = Vec::new();
+    let assistant_context_packet = if has_system {
+        None
+    } else {
+        let shadow = config
+            .get("assistantContextShadow")
+            .and_then(Value::as_bool)
+            .unwrap_or(true);
+        prepare_assistant_context_packet(
+            &app,
+            &messages,
+            decision.mode,
+            &conv_id_for_emit,
+            shadow,
+        )
+    };
 
     if !has_system {
         let config = super::read_config();
@@ -2076,6 +2158,12 @@ pub(crate) async fn stream_internal(
             "role": "system",
             "content": system_prompt
         }));
+        if let Some(packet) = assistant_context_packet {
+            full_messages.push(json!({
+                "role": "system",
+                "content": packet
+            }));
+        }
     }
     full_messages.extend(messages);
 
