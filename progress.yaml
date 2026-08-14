@@ -69,11 +69,15 @@ phases:
   tasks:
   - text: Bob V3 目标设计与 Phase 5.5-A/B 实施计划
     status: done
-  - text: 无依赖体积、启动、资源和数据库基线
+  - text: 无依赖基线脚本与现有产物、manifest、数据库快照
+    status: done
+  - text: 受控安装版冷启动、空闲资源与当前 Android 产物基线
     status: todo
   - text: PurposeFrame、AssistantContext 与确定性候选解析
-    status: todo
-  - text: 高置信度上下文影子验证与有界注入
+    status: done
+  - text: 默认影子模式、reason code 与权限回归
+    status: done
+  - text: PC 真实场景验证与高置信度有界注入
     status: todo
   - text: 五个日常场景和 PC/Android 真机验收
     status: todo

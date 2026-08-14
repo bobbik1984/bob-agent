@@ -321,3 +321,48 @@ AI 自主修改配置（例如自动写入 API Key、修改默认模型等）的
 4. 诊断是同步旁路；诊断写入失败不能阻断正常同步。
 5. 不为诊断新增客户端 npm、Rust、Android 运行时依赖或权限。
 6. 每次候选发布比较 PC/Android 产物体积，异常增长阻断发布。
+
+---
+
+## 🧭 12. 个人助手上下文恢复 (Assistant Context Shadow)
+
+### 12.1 当前功能边界
+
+Phase 5.5-B 当前已实现确定性、只读的上下文解析和聊天影子接入。它能从用户最后一句目的中保留显式约束与能力需求提示，从 Work Core 恢复唯一高置信度 Project，并组装带来源、revision、更新时间和 Route 预算的最小事实包。两个合理候选会返回 `context.ambiguous_candidates`，无项目的日常请求不会绑定 Project。
+
+当前 `assistantContextShadow` 缺省为 `true`：解析结果只进入安全日志指标，不进入模型 Prompt，也不改变工具权限。高置信度 Context Packet、Today focus、用户澄清和 Capability Snapshot 尚未正式启用。
+
+### 12.2 核心数据流
+
+```text
+llm::stream_internal
+  → Complexity Router 得到 RouteMode
+  → compile_purpose(last_user_text)
+  → ContextSourceSnapshot::load(Work Core SQLite)
+  → resolve_context(PurposeFrame, snapshot, RouteMode)
+  → shadow: log metrics
+  → enabled + unique high confidence: render_context_packet
+```
+
+数据库锁只覆盖 `ContextSourceSnapshot::load`，不会跨越模型或网络调用。读取失败、锁失败、空库和无候选都返回当前聊天路径；不创建新的 SQLite 表或状态源。
+
+### 12.3 关键代码位置
+
+- `src-tauri/src/assistant_context.rs`
+  - `compile_purpose()`：保留目的、显式约束、稳定对象引用和能力需求提示。
+  - `ContextSourceSnapshot::load()`：只读现有 `work_projects` 与 Project Aggregate。
+  - `resolve_context()`：确定性候选、歧义门、事实选择和 Route 预算。
+  - `render_context_packet()`：生成固定、带来源的最小模型上下文。
+  - 模块内 11 组回放覆盖唯一项目、双项目歧义、移动提醒、桌面文件、PowerShell 提示、预算与 SQLite 只读加载。
+- `src-tauri/src/llm.rs`
+  - `prepare_assistant_context_packet()`：在聊天主链中读取快照、记录指标，并执行 shadow/启用门。
+- `scripts/measure-phase55-baseline.ps1`
+  - 无依赖记录现有产物、manifest 和数据库大小；无法可靠测量的启动/资源指标写为 `not_measured`。
+
+### 12.4 扩展约束
+
+1. 不从聊天摘要复制 Project State；新事实优先进入 Work Core 或既有权威源。
+2. 不让上下文分数改变 Direct/Deep/Advanced 或 R0–R3 权限。
+3. 不读取 API Key、完整环境变量或无关项目内容。
+4. 不在 Phase 5.5-C 前把能力需求提示解释为能力可用。
+5. 正式启用 Context Packet 前必须完成影子误选检查、PC 真场景和资源基线。
