@@ -1,9 +1,9 @@
 project:
   name: bob-agent
-  version: '0.9.0'
+  version: '0.9.2'
   status: active
   north_star: Bob 让复杂工作不断线
-  updated: '2026-08-12'
+  updated: '2026-08-14'
   tech:
   - Tauri
   - Rust
@@ -64,6 +64,18 @@ phases:
   - text: 缓存、来源降级、逐设备已读与完整回归
     status: done
   - text: PC/Android 发布产物体积和真机验收
+    status: todo
+- name: Phase 5.5 Personal Assistant Intelligence
+  tasks:
+  - text: Bob V3 目标设计与 Phase 5.5-A/B 实施计划
+    status: done
+  - text: 无依赖体积、启动、资源和数据库基线
+    status: todo
+  - text: PurposeFrame、AssistantContext 与确定性候选解析
+    status: todo
+  - text: 高置信度上下文影子验证与有界注入
+    status: todo
+  - text: 五个日常场景和 PC/Android 真机验收
     status: todo
 - name: Work UI consistency
   tasks:

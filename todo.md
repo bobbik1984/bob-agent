@@ -1,9 +1,9 @@
 # Bob 当前开发清单
 
-> 当前发布线：v0.9.0
+> 当前发布线：v0.9.2
 > 产品方向：`docs/PRODUCT_VISION.md`
 > 阶段顺序：`docs/BOB_EVOLUTION_ROADMAP.md`
-> 完整计划：`docs/superpowers/plans/2026-08-10-work-continuity-evolution-plan.md`
+> 当前计划：`docs/superpowers/plans/2026-08-14-phase-5-5-personal-assistant-context-plan.md`
 
 本文件只保存当前实施批次和紧邻下一批的任务。目标架构不得写成已实现能力。
 
@@ -116,6 +116,19 @@
 - [x] 9 项前端测试、生产构建、12 项 Daily Brief Rust 测试及 140 项完整 Rust 回归通过。
 - [ ] 在下一次 PC/Android 发布产物中完成真机 UI、客户端体积和跨端已读/刷新验收。
 
+## 当前主线：Phase 5.5-A/B 个人助手上下文恢复
+
+- [x] 收敛 Bob V3 目标设计，并形成 Phase 5.5-A/B 可执行计划。
+- [ ] 建立无依赖体积、启动、资源与数据库基线；无法可靠测得的项目明确标记为未测。
+- [ ] 定义 PurposeFrame、AssistantContext、来源、时效、冲突、置信度与上下文预算。
+- [ ] 复用 Work Core 与 Today 状态实现确定性候选解析，不新增数据库表或依赖。
+- [ ] 唯一高置信度项目可注入最小事实包；中低置信度不猜测绑定。
+- [ ] 先以影子模式记录候选和 reason code，通过回放后再启用高置信度注入。
+- [ ] 证明 Context Resolver 不改变 Complexity Router、R0–R3 权限和现有降级路径。
+- [ ] 完成专用/全量 Rust 测试、前端测试、生产构建和至少一次 PC 真实场景验证。
+
+**验收**：用户只说目的时，唯一明确项目能够恢复；两个合理候选时不会误选；上下文包有来源、revision、时效和严格预算；关闭开关可以无损退回当前聊天路径。
+
 ## v0.8.0 遗留质量门
 
 - [ ] 使用真实 PC/Android 完成 Capture 三入口与 Relay trace 对账。
@@ -125,7 +138,7 @@
 
 ## 暂缓
 
-在 Persistent Work Core 和单 Agent Advanced Loop 被验证前，暂缓多 Agent、Runtime Host、订阅调度、完整 DAG UI、iOS、独立 Web UI和新增通讯渠道。
+在 Phase 5.5 五个日常场景稳定通过前，暂缓多角色编排、Runtime Host、订阅调度、完整任务图 UI、自动 Skill、iOS、独立 Web UI 和新增通讯渠道。
 
 ## 完成规则
 
