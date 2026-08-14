@@ -44,6 +44,7 @@ implementation_plan.md
 # Keep runtime-generated or archival docs out of Git, but track architecture SSOTs.
 /docs/*
 !/docs/ARCHITECTURE.md
+!/docs/BOB_ARCHITECTURE_V3.md
 !/docs/PRODUCT_VISION.md
 !/docs/BOB_EVOLUTION_ROADMAP.md
 !/docs/CAPTURE_BASELINE.md
