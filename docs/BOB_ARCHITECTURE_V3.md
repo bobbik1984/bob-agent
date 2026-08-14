@@ -1,4 +1,4 @@
-# Bob Architecture V3：从大语言模型产品到个人长期助手
+# Bob Architecture V3：这才是 Bob 该有的样子
 
 > 文档状态：已确认方向的目标设计，尚不代表全部实现现状
 >
@@ -8,11 +8,13 @@
 >
 > 愿景权威：[PRODUCT_VISION.md](PRODUCT_VISION.md)，本文不修改产品愿景
 >
-> 路线关系：在现有 Phase 5 与 Phase 6 之间增加 **Phase 5.5 Personal Assistant Intelligence**
+> 路线关系：在现有 Phase 5 与 Phase 6 之间增加 **Phase 5.5：个人助手智能层**
+
+> 设计立场：本文只从 Bob 自身出发，定义一个个人长期助手应有的职责、边界、契约和演进路径。
 
 ## 0. 最终裁决
 
-Bob 不是一个装在桌面里的大语言模型，也不是九个 Agent 框架的功能合集。Bob 是一个借助模型和工具工作的个人长期助手：
+Bob 是一个借助模型和工具工作的个人长期助手：
 
 > **用户负责表达目的，Bob 负责恢复上下文；用户只补充本次例外和不可推断的关键选择。**
 
@@ -28,7 +30,7 @@ Bob 不是一个装在桌面里的大语言模型，也不是九个 Agent 框架
 
 ## 1. 不可偏离的设计原则
 
-### 1.1 Purpose first
+### 1.1 目的优先
 
 用户的自然输入应主要是“目的 + 本次例外”，例如：
 
@@ -39,15 +41,15 @@ Bob 不是一个装在桌面里的大语言模型，也不是九个 Agent 框架
 - “别动正式数据”是本次例外；
 - 当前项目、历史决定、相关文件、阻塞和下一步由 Bob 恢复。
 
-### 1.2 Context is Bob's responsibility
+### 1.2 上下文是 Bob 的责任
 
 Bob 优先从 Persistent Work Core、Decision、Change、Evidence、Today、Session 与结构化记忆中恢复上下文。聊天记录只能补充临时语义，不能成为长期工作状态的唯一来源。
 
-### 1.3 Environment aware, capability bounded
+### 1.3 感知环境，能力有界
 
 Bob 只能使用当前设备真实存在、健康且已授权的能力。不存在的 PowerShell、浏览器、Office、Shell、登录态或手机执行环境绝不能因为模型“知道这种工具”而被假定可用。
 
-### 1.4 Simplest viable path
+### 1.4 最轻可行路径
 
 同一个目的存在多种路径时，优先级固定为：
 
@@ -59,13 +61,13 @@ Bob 只能使用当前设备真实存在、健康且已授权的能力。不存�
 → 询问或延后
 ```
 
-简单任务不进入 Goal Runtime、DAG、多 Agent 或模型修复循环。
+简单任务不进入 Goal Runtime、任务图、多角色编排或模型修复循环。
 
-### 1.5 Continuity over cleverness
+### 1.5 连续性高于炫技
 
 重启不丢任务、不会重复产生副作用、能说明真实进度，比单次回答显得聪明更重要。
 
-### 1.6 Evolve without burden
+### 1.6 成长不能增加用户负担
 
 - PC 安装版和绿色版不增加用户侧必装运行时；
 - Android 不引入通用 Shell、容器或沉重执行环境；
@@ -82,7 +84,7 @@ Bob 已经具备可复用的正确骨架：
 - Tauri/Rust + SQLite 桌面与 Android 客户端；
 - Persistent Work Core、Decision/Change Review 与 append-only Work Event；
 - Direct / Deep / Advanced Complexity Router；
-- 单 Agent Goal Runtime、Evidence gate、审批和安全恢复；
+- 单执行循环 Goal Runtime、Evidence gate、审批和安全恢复；
 - Conversation-first Today Layer；
 - `std::env::consts::OS` 粗粒度平台识别；
 - 手机端过滤部分 PC 专属工具，并可通过 `send_to_pc_agent` 转交；
@@ -449,8 +451,8 @@ V3 不全面迁移到新的 Event Sourcing 底座：
 - PC 安装包、绿色版和 Android APK 体积增长超过 5% 必须单独接受决策；
 - 冷启动和空闲资源增长原则上不超过 10%；
 - 核心离线时仍可 Capture、查看 Work、管理审批和排队；
-- 简单任务永远不进入通用 DAG 或多 Agent；
-- UI 不出现 Event Spine、Provider、Wave、Token、DAG 等工程术语。
+- 简单任务永远不进入通用任务图或多角色编排；
+- UI 不出现事件管线、能力提供器、执行波次、Token、任务图等工程术语。
 
 ### 13.2 功能门
 
@@ -466,15 +468,15 @@ V3 不全面迁移到新的 Event Sourcing 底座：
 
 | 指标 | 观察问题 |
 |---|---|
-| Context Repetition | 用户需要重复背景和细节多少次 |
-| First Understanding | 一句话表达目的后首次理解是否正确 |
-| Clarification Burden | 每个目标需要用户回答几个问题 |
-| Wrong Context Rate | 是否选错项目、文件或过期决定 |
-| Capability Truthfulness | 是否尝试了不存在或未授权的工具 |
-| Time to Useful Action | 从表达目的到有效行动需要多久 |
-| Correction Carryover | 明确纠正是否在后续同类场景生效 |
+| 上下文重复率 | 用户需要重复背景和细节多少次 |
+| 首次理解正确率 | 一句话表达目的后首次理解是否正确 |
+| 澄清负担 | 每个目标需要用户回答几个问题 |
+| 错误上下文率 | 是否选错项目、文件或过期决定 |
+| 能力真实性 | 是否尝试了不存在或未授权的工具 |
+| 有效行动时间 | 从表达目的到有效行动需要多久 |
+| 纠正延续率 | 明确纠正是否在后续同类场景生效 |
 
-这些指标优先于工具数量、Agent 数量、事件数量和自动生成 Skill 数量。
+这些指标优先于工具数量、执行角色数量、事件数量和自动生成 Skill 数量。
 
 ## 14. 对现有代码的最小影响
 
@@ -499,21 +501,21 @@ action_selector.rs      local / handoff / ask / defer
 
 如果实现规模很小，也可以先放入现有模块的子模块中；不为了文件名预建平台。
 
-## 15. 九师会审后的重新排序
+## 15. Bob 自己的能力优先级
 
-九个项目提供思想，不提供 Bob 的产品方向。
+能力是否进入 Bob，只取决于它能否让个人日常使用更连续、更省心、更可靠。
 
-| 顺序 | 来源 | 近期吸收 | 明确拒绝或延后 |
-|---:|---|---|---|
-| 1 | Get Shit Done | 新鲜、局部、目标相关的上下文 | Markdown 文件态 Runtime、固定超大 Token 包 |
-| 2 | Codex | 环境与权限契约、能力真实性 | 把 Bob 变成编码 Agent 或持续全盘扫描 |
-| 3 | Code Runner | 错误分类、有限重试、验证 | 通用 DAG 平台和盲目三轮模型修复 |
-| 4 | Claude Code | 高风险确认、持久 Yield | 普通动作频繁弹窗和 Agent Swarm |
-| 5 | DeepSeek Harness | 关键生命周期检查点 | Cordis/Node Runtime、全量 Event Sourcing 迁移 |
-| 6 | pi-mom | 现有手机/PC 投递可靠性 | 为增加渠道而增加渠道 |
-| 7 | Hermes Agent | 纠正、偏好和经验候选 | 自动生成并激活 Skill、内置 Python/Lua |
-| 8 | Antigravity | 自然语言背后的 Goal/Schedule 契约 | 以 Slash Command 作为主要 UX |
-| 9 | OpenManus | 有明确高频场景时复用 Rust 浏览器能力 | Playwright/Python 常驻栈和通用 GUI 平台 |
+| 优先级 | Bob 需要形成的能力 | 现在的取舍 |
+|---:|---|---|
+| 1 | 从一句目的恢复正确上下文 | 立即建设，复用 Work Core，不要求用户重复背景 |
+| 2 | 感知当前设备、权限和真实工具 | 立即建设，按需探测，不做持续全盘扫描 |
+| 3 | 选择本地、转交、询问或延后 | 立即建设，确定性最轻路径优先 |
+| 4 | 验证结果并更新真实工作状态 | 立即建设，不把生成内容或转交回执冒充完成 |
+| 5 | 安静处理可恢复的小故障 | 有界建设，简单错误只做一次确定性重试 |
+| 6 | 记住明确纠正与稳定偏好 | 谨慎建设，可查看、可撤销、区分本次例外 |
+| 7 | 多阶段工作的局部恢复 | 由真实失败数据触发，不预建通用任务图平台 |
+| 8 | 浏览器、远端执行和更多输入渠道 | 只服务已验证的高频日常场景 |
+| 9 | 自动形成新的程序性能力 | 长期延后，必须先证明收益、安全和可回滚 |
 
 ## 16. 冲突与取舍
 
@@ -526,24 +528,24 @@ action_selector.rs      local / handoff / ask / defer
 | 更聪明 vs 更多功能 | 以重复解释、错误上下文和有效行动时间衡量 |
 | 自愈 vs 不可控成本 | 确定性一次重试；Advanced 最多一次改变策略的模型诊断 |
 | 自进化 vs 人格/供应链漂移 | 先记纠正和偏好，Skill 只做远期候选 |
-| DAG 局部恢复 vs 日常轻量 | Phase 5.5 继续单节点/顺序计划；数据证明需要后再进入 Phase 6 |
+| 任务图局部恢复 vs 日常轻量 | Phase 5.5 继续单节点/顺序计划；数据证明需要后再进入 Phase 6 |
 
 ## 17. 架构决策候选
 
 以下内容在用户审阅本文后再写入 `DECISIONS.md`：
 
-1. **D-015：Purpose-first**——用户表达目的，Bob 从权威状态恢复上下文；
-2. **D-016：Capability-bounded**——工具只有在当前设备真实可用且已授权时才可被选择；
-3. **D-017：Simplest viable path**——确定性本地路径优先，复杂 Runtime 必须由任务需要触发；
-4. **D-018：Existing state remains authoritative**——Phase 5.5 不建立第二套 Work 或 Event 真相源；
-5. **D-019：Growth starts from correction**——近期进化先记录可撤销的纠正与偏好，不自动激活 Skill。
+1. **D-015：目的优先**——用户表达目的，Bob 从权威状态恢复上下文；
+2. **D-016：能力有界**——工具只有在当前设备真实可用且已授权时才可被选择；
+3. **D-017：最轻可行路径**——确定性本地路径优先，复杂 Runtime 必须由任务需要触发；
+4. **D-018：现有状态保持权威**——Phase 5.5 不建立第二套 Work 或 Event 真相源；
+5. **D-019：成长始于纠正**——近期进化先记录可撤销的纠正与偏好，不自动激活 Skill。
 
 ## 18. Phase 5.5 之后
 
 只有 Phase 5.5 的五个日常场景稳定通过后，才按证据决定后续顺序：
 
 1. 扩展纠正记忆和有限自愈；
-2. 若真实长线任务证明顺序切片不足，再进入 Phase 6 小型 Dynamic Task Graph；
+2. 若真实长线任务证明顺序切片不足，再进入 Phase 6 小型动态任务图；
 3. 若专业角色在评测中有量化收益，再进入 Lead–Clerk；
 4. Runtime Adapter、Host、浏览器自动化和自动 Skill 继续保持可选；
 5. 任何新能力都必须再次通过安装、启动、资源、离线和真机质量门。
@@ -560,33 +562,3 @@ Bob 的成熟不表现为工具越来越多，而表现为：
 - 必须询问时只问真正影响结果的问题。
 
 > **最初，用户教 Bob 怎么做；成熟后，用户只告诉 Bob 想达到什么结果。**
-
----
-
-## 附录 A：主要事实与思想来源
-
-### Bob 本地事实
-
-- `docs/PRODUCT_VISION.md`
-- `docs/BOB_EVOLUTION_ROADMAP.md`
-- `docs/DECISIONS.md`
-- `docs/GOAL_RUNTIME.md`
-- `src-tauri/src/work_core/`
-- `src-tauri/src/goal_runtime/`
-- `src-tauri/src/llm.rs`
-- `src-tauri/src/tools.rs`
-- `src-tauri/src/doctor.rs`
-- `src-tauri/src/sync_engine.rs`
-
-### 外部一手资料
-
-- [DeepSeek Harness Architecture](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/architecture.md)
-- [Hermes Skills System](https://hermes-agent.nousresearch.com/docs/user-guide/features/skills)
-- [GSD Architecture](https://github.com/gsd-build/get-shit-done/blob/main/docs/ARCHITECTURE.md)
-- [Claude Code Permissions](https://code.claude.com/docs/en/permissions)
-- [OpenManus](https://github.com/FoundationAgents/OpenManus)
-- [Google Antigravity Codelab](https://codelabs.developers.google.com/getting-started-agy-ide)
-- [pi-mom](https://github.com/badlogic/pi-mono/blob/main/packages/mom/README.md)
-- [Codex App Server Protocol](https://github.com/openai/codex/blob/main/codex-rs/app-server/README.md)
-
-Code Runner 的本地事实来源于 `src/core/task_scheduler.py`、`loop_controller.py`、`tool_executor.py`、`reputation.py` 与项目任务清单。未实现能力不作为现状陈述。
