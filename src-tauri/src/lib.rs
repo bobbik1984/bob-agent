@@ -1,5 +1,6 @@
 // Force rebuild to embed latest dist assets
 mod assertions;
+mod assistant_context;
 mod barcode;
 mod browser;
 mod calendar;
