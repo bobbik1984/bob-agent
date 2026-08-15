@@ -388,8 +388,6 @@ import ModelHub from '../../components/ModelHub.vue';
 import CustomSelect from '../../components/CustomSelect.vue';
 import mobileModels from '@/assets/mobile_models.json';
 import { getModelMeta } from '@/composables/useModelSwitcher';
-import { invoke } from '@tauri-apps/api/core';
-import { listen } from '@tauri-apps/api/event';
 
 const props = defineProps({
   config: { type: Object, required: true },
@@ -437,10 +435,7 @@ const offlineModelOptions = computed(() => {
 
 async function openModelsDir() {
   try {
-    const { appDataDir, join } = await import('@tauri-apps/api/path');
-    const dataDir = await appDataDir();
-    const modelsPath = await join(dataDir, 'models');
-    await invoke('plugin:shell|open', { path: modelsPath });
+    await window.appAPI.openModelsDir();
   } catch (e) {
     console.warn('Failed to open models directory:', e);
   }
@@ -452,14 +447,14 @@ async function togglePause(modelId) {
     startDownload(modelId);
   } else {
     isPaused.value = true;
-    await invoke('pause_download', { modelId: String(modelId) });
+    await window.appAPI.invoke('pause_download', { modelId: String(modelId) });
   }
 }
 
 async function deleteLocalModel(modelId) {
   if (await showConfirm(`确定要删除 ${modelId} 相关的模型和临时文件吗？这会释放磁盘空间。`)) {
     try {
-      const deleted = await invoke('delete_local_model', { modelId: String(modelId) });
+      const deleted = await window.appAPI.invoke('delete_local_model', { modelId: String(modelId) });
       if (deleted) {
         await checkDownloadedModels();
         if (props.config.offlineModelPath && props.config.offlineModelPath.includes(modelId)) {
@@ -477,7 +472,7 @@ async function checkDownloadedModels() {
   const newSet = new Set();
   for (const model of mobileModels) {
     try {
-      const isDownloaded = await invoke('check_model_downloaded', { modelId: model.id });
+      const isDownloaded = await window.appAPI.invoke('check_model_downloaded', { modelId: model.id });
       if (isDownloaded) newSet.add(model.id);
     } catch(err) {
       console.warn("Check download error:", err);
@@ -525,7 +520,7 @@ async function beginDownloadTask(modelId, url, tokenizerUrl = null) {
   downloadProgress.value = 0;
   isPaused.value = false;
   
-  const unlisten = await listen('download_progress', (event) => {
+  const unlisten = await window.appAPI.listenEvent('download_progress', (event) => {
     if (event.payload.model_id === modelId) {
       if (event.payload.progress >= 0) {
         // 正常进度 (已知总大小)
@@ -539,7 +534,7 @@ async function beginDownloadTask(modelId, url, tokenizerUrl = null) {
   });
 
   try {
-    const result = await invoke('download_model', { modelId, url, tokenizerUrl });
+    const result = await window.appAPI.invoke('download_model', { modelId, url, tokenizerUrl });
     if (result.success) {
       await checkDownloadedModels();
       if (downloadingModel.value === 'custom_selected') {
@@ -578,7 +573,7 @@ async function selectOfflineModel() {
 async function toggleOfflineEngine() {
   if (offlineEngineStatus.value === 'running') {
     try {
-      const res = await invoke('stop_offline_engine');
+      const res = await window.appAPI.stopOfflineEngine();
       if (res && res.status === 'stopped') {
         offlineEngineStatus.value = 'stopped';
       }
@@ -593,7 +588,7 @@ async function toggleOfflineEngine() {
     }
     offlineEngineStatus.value = 'starting';
     try {
-      const res = await invoke('start_offline_engine', { modelPath: props.config.offlineModelPath });
+      const res = await window.appAPI.startOfflineEngine(props.config.offlineModelPath);
       if (res && (res.status === 'started' || res.status === 'running')) {
         offlineEngineStatus.value = 'running';
       } else {

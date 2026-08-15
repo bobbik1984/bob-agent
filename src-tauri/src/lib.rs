@@ -1,21 +1,24 @@
 // Force rebuild to embed latest dist assets
+mod action_selector;
 mod assertions;
 mod assistant_context;
 mod barcode;
 mod browser;
 mod calendar;
 mod candle_engine;
+mod capability;
 mod capture;
 mod capture_router;
-mod connector;
 mod complexity_router;
+mod connector;
 mod crypto;
-mod db;
 mod daily_brief;
+mod db;
 mod discord;
 mod doctor;
 mod dream;
 mod evolution;
+mod execution_error;
 mod exports;
 mod file_share;
 mod filesystem;
@@ -42,6 +45,7 @@ mod notebook;
 mod outbox;
 mod pdf_renderer;
 mod plugins;
+mod result_receipt;
 mod scheduler;
 mod sidecar;
 pub mod skills_sync;
@@ -1224,11 +1228,9 @@ pub fn run() {
             tauri::async_runtime::spawn(async move {
                 tokio::time::sleep(std::time::Duration::from_secs(8)).await;
                 loop {
-                    if let Err(error) = capture_router::capture_process_pending(
-                        enrichment_handle.clone(),
-                        Some(10),
-                    )
-                    .await
+                    if let Err(error) =
+                        capture_router::capture_process_pending(enrichment_handle.clone(), Some(10))
+                            .await
                     {
                         log::warn!("[Capture] background enrichment deferred: {error}");
                     }
@@ -1241,6 +1243,7 @@ pub fn run() {
             {
                 use tauri_plugin_log::{Target, TargetKind, TimezoneStrategy};
                 let mut log_builder = tauri_plugin_log::Builder::default()
+                    .clear_targets()
                     .level(log::LevelFilter::Info)
                     .max_file_size(2_000_000) // 单文件最大 2MB，自动轮转
                     .timezone_strategy(TimezoneStrategy::UseLocal)

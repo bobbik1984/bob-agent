@@ -5,9 +5,9 @@
 ## 1. [The Desk] 当前开发焦点
 
 - **产品定位**：Bob 是让复杂工作不断线的 Personal Work Orchestration Layer；不是 Codex/Claude Code 的外壳。
-- **当前主线**：`v0.9.0` 已完成 Phase 0–5 的首个可靠纵切片，并交付 Conversation-first Today Layer；下一主线是 Phase 6 Dynamic Task Graph。
-- **推进顺序**：Work Core → 现有入口关联 → Decision/Change → Complexity Router → Advanced Project Loop → Dynamic Graph → Runtime Adapter。
-- **当前真实边界**：Auto Advanced 已能创建持久 Goal、执行单个有界切片、保存审批/证据/检查点，并在启动时只恢复安全 R0/R1；尚无 Dynamic DAG、多 Agent、应用关闭期间后台执行、可信跨端 R3 最终确认和结果驱动 Dream。
+- **当前主线**：`v0.9.3` 已完成 Phase 0–5 与 Phase 5.5 内部可靠闭环；当前主线是真实 PC/Android 场景和资源质量门，不提前进入 Dynamic Task Graph。
+- **推进顺序**：Work Core → 现有入口关联 → Decision/Change → Complexity Router → Advanced Project Loop → 上下文恢复 → 能力快照 → 行动选择 → 结果回执与安全成长；只有真实失败数据证明顺序切片不足时再进入 Dynamic Graph。
+- **当前真实边界**：Auto Advanced 已消费确定性解析后的 Project，并接入 Capability Snapshot、Action Selector、有界错误恢复、ResultReceipt 与待审经验候选；普通对话的完整 Context Packet 默认仍为 shadow，真实 PC/Android 质量门尚未完成。
 - **核心约束**：PC 安装版/绿色版保持零外部运行时，Android 不增加用户侧依赖；客户端体积增长必须解释和验证。
 - **工作区状态提醒**：开始修改前先检查 `git status`，不得覆盖用户未提交的代码或临时文件。
 

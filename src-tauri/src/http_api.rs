@@ -7,7 +7,10 @@
 //!   GET  /v1/health            — 健康检查
 
 use axum::{
-    extract::{State, ws::{Message, WebSocket, WebSocketUpgrade}},
+    extract::{
+        ws::{Message, WebSocket, WebSocketUpgrade},
+        State,
+    },
     response::{
         sse::{Event, KeepAlive, Sse},
         IntoResponse,
@@ -234,6 +237,7 @@ async fn handle_chat(
         let tx_forward = tx_chunk.clone();
         let forward_handle = tokio::spawn(async move {
             let mut full_text = String::new();
+            let mut thinking_announced = false;
             while let Some(chunk) = bridge_rx.recv().await {
                 let chunk_type = chunk.get("type").and_then(|v| v.as_str()).unwrap_or("");
                 match chunk_type {
@@ -247,10 +251,13 @@ async fn handle_chat(
                         }
                     }
                     "thinking" => {
-                        if let Some(content) = chunk.get("content").and_then(|v| v.as_str()) {
+                        // HTTP API may be consumed by remote/mobile bridges. Preserve a progress
+                        // signal without exporting the model's raw internal reasoning text.
+                        if !thinking_announced {
+                            thinking_announced = true;
                             let event = Event::default()
                                 .event("thinking")
-                                .data(json!({ "content": content }).to_string());
+                                .data(json!({ "content": "", "status": "thinking" }).to_string());
                             let _ = tx_forward.send(Ok(event)).await;
                         }
                     }
@@ -371,16 +378,14 @@ async fn handle_health(State(state): State<ApiState>) -> impl IntoResponse {
             }
         }
     }
-    
-    Json(
-        json!({ 
-            "status": "ok", 
-            "service": "bob-agent-api", 
-            "version": env!("CARGO_PKG_VERSION"),
-            "device_id": device_id,
-            "protocol_version": crate::sync_protocol::SYNC_PROTOCOL_VERSION
-        }),
-    )
+
+    Json(json!({
+        "status": "ok",
+        "service": "bob-agent-api",
+        "version": env!("CARGO_PKG_VERSION"),
+        "device_id": device_id,
+        "protocol_version": crate::sync_protocol::SYNC_PROTOCOL_VERSION
+    }))
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -665,14 +670,16 @@ async fn handle_sync_ws(ws: WebSocketUpgrade) -> impl IntoResponse {
     ws.on_upgrade(move |socket| async move {
         // 在这里处理手机端通过局域网发起的连接
         log::info!("[http_api] /v1/sync: LAN Sync Mobile device connected via WebSocket!");
-        
+
         let (mut sink, mut stream) = socket.split();
         // 简易测试回显
         use futures_util::{SinkExt, StreamExt};
         while let Some(Ok(msg)) = stream.next().await {
             if let Message::Text(text) = msg {
                 log::info!("[http_api] /v1/sync received: {}", text);
-                let _ = sink.send(Message::Text(format!("ECHO: {}", text).into())).await;
+                let _ = sink
+                    .send(Message::Text(format!("ECHO: {}", text).into()))
+                    .await;
             }
         }
         log::info!("[http_api] /v1/sync: LAN Sync Mobile device disconnected.");
@@ -684,10 +691,12 @@ async fn handle_sync_ws(ws: WebSocketUpgrade) -> impl IntoResponse {
 // ════════════════════════════════════════════════════════════
 
 fn verify_auth(app: &AppHandle, headers: &axum::http::HeaderMap) -> bool {
-    let expected_key = match crate::crypto::get_pairing_payload(app.state::<crate::crypto::DeviceIdentityState>()) {
-        Ok(payload) => payload.public_key,
-        Err(_) => return false,
-    };
+    let expected_key =
+        match crate::crypto::get_pairing_payload(app.state::<crate::crypto::DeviceIdentityState>())
+        {
+            Ok(payload) => payload.public_key,
+            Err(_) => return false,
+        };
     if let Some(auth_val) = headers.get("Authorization") {
         if let Ok(auth_str) = auth_val.to_str() {
             return auth_str == expected_key;
@@ -701,7 +710,10 @@ async fn handle_sync_pull(
     axum::extract::ConnectInfo(addr): axum::extract::ConnectInfo<std::net::SocketAddr>,
     headers: axum::http::HeaderMap,
 ) -> impl IntoResponse {
-    let peer_device_id = headers.get("x-device-id").and_then(|value| value.to_str().ok()).map(str::to_string);
+    let peer_device_id = headers
+        .get("x-device-id")
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_string);
     if !verify_auth(&state.app, &headers) {
         return axum::response::Response::builder()
             .status(axum::http::StatusCode::UNAUTHORIZED)
@@ -709,7 +721,11 @@ async fn handle_sync_pull(
             .unwrap();
     }
     crate::sync_engine::register_device(&state.app, &headers, addr);
-    let since_ts: i64 = headers.get("X-Since-Ts").and_then(|v| v.to_str().ok()).and_then(|s| s.parse().ok()).unwrap_or(0);
+    let since_ts: i64 = headers
+        .get("X-Since-Ts")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0);
     // Export full or incremental sync schema (config + SQLite rows + tombstones)
     let sync_data = match crate::sync_engine::export_sync_data(&state.app, since_ts, false) {
         Ok(data) => data,
@@ -725,7 +741,8 @@ async fn handle_sync_pull(
             return axum::Json(serde_json::json!({
                 "status": "error",
                 "message": e
-            })).into_response();
+            }))
+            .into_response();
         }
     };
 
@@ -741,7 +758,8 @@ async fn handle_sync_pull(
         "status": "ok",
         "data": sync_data,
         "timestamp": chrono::Utc::now().timestamp()
-    })).into_response()
+    }))
+    .into_response()
 }
 
 async fn handle_sync_skills_download(
@@ -756,14 +774,18 @@ async fn handle_sync_skills_download(
             .unwrap();
     }
     crate::sync_engine::register_device(&state.app, &headers, addr);
-    
+
     let config = crate::read_config();
     let skills_dir = crate::get_external_skills_dir_or_default(&config);
-    
+
     if !skills_dir.exists() {
-        return (axum::http::StatusCode::NOT_FOUND, "Skills directory not found".to_string()).into_response();
+        return (
+            axum::http::StatusCode::NOT_FOUND,
+            "Skills directory not found".to_string(),
+        )
+            .into_response();
     }
-    
+
     match crate::skills_sync::pack_skills(&skills_dir) {
         Ok(bytes) => {
             let mut res = axum::response::Response::new(axum::body::Body::from(bytes));
@@ -772,10 +794,14 @@ async fn handle_sync_skills_download(
                 axum::http::HeaderValue::from_static("application/zip"),
             );
             res
-        },
+        }
         Err(e) => {
             log::error!("[http_api] Failed to pack skills: {}", e);
-            (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "Failed to pack skills".to_string()).into_response()
+            (
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to pack skills".to_string(),
+            )
+                .into_response()
         }
     }
 }
@@ -792,13 +818,17 @@ async fn handle_sync_notes_download(
             .unwrap();
     }
     crate::sync_engine::register_device(&state.app, &headers, addr);
-    
+
     let notes_dir = crate::get_data_dir().join("notebook").join("notes");
-    
+
     if !notes_dir.exists() {
-        return (axum::http::StatusCode::NOT_FOUND, "Notes directory not found".to_string()).into_response();
+        return (
+            axum::http::StatusCode::NOT_FOUND,
+            "Notes directory not found".to_string(),
+        )
+            .into_response();
     }
-    
+
     match crate::skills_sync::pack_skills(&notes_dir) {
         Ok(bytes) => {
             let mut res = axum::response::Response::new(axum::body::Body::from(bytes));
@@ -807,10 +837,14 @@ async fn handle_sync_notes_download(
                 axum::http::HeaderValue::from_static("application/zip"),
             );
             res
-        },
+        }
         Err(e) => {
             log::error!("[http_api] Failed to pack notes: {}", e);
-            (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "Failed to pack notes".to_string()).into_response()
+            (
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to pack notes".to_string(),
+            )
+                .into_response()
         }
     }
 }
@@ -835,7 +869,8 @@ async fn handle_sync_push(
     }
     axum::Json(serde_json::json!({
         "status": "ok"
-    })).into_response()
+    }))
+    .into_response()
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -863,7 +898,10 @@ async fn handle_sync_push_db(
     headers: axum::http::HeaderMap,
     axum::extract::Json(payload): axum::extract::Json<crate::sync_engine::SyncData>,
 ) -> impl IntoResponse {
-    let peer_device_id = headers.get("x-device-id").and_then(|value| value.to_str().ok()).map(str::to_string);
+    let peer_device_id = headers
+        .get("x-device-id")
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_string);
     if !verify_auth(&state.app, &headers) {
         return axum::response::Response::builder()
             .status(axum::http::StatusCode::UNAUTHORIZED)
@@ -872,17 +910,23 @@ async fn handle_sync_push_db(
     }
     crate::sync_engine::register_device(&state.app, &headers, addr);
     log::info!("[http_api] Received SQLite push data from mobile!");
-    
+
     // In a real multi-device setup, last_sync_ts should be tracked per device.
     // For MVP, we can read the global last_sync_ts.
     let last_sync_ts: i64 = match state.app.state::<crate::db::DbState>().0.lock() {
         Ok(conn) => {
-            let s: String = conn.query_row("SELECT value FROM settings WHERE key = 'last_sync_ts'", [], |row| row.get(0)).unwrap_or_else(|_| "0".to_string());
+            let s: String = conn
+                .query_row(
+                    "SELECT value FROM settings WHERE key = 'last_sync_ts'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap_or_else(|_| "0".to_string());
             s.parse::<i64>().unwrap_or(0)
         }
         Err(_) => 0,
     };
-    
+
     if let Err(e) = crate::sync_engine::import_sync_data(&state.app, payload, last_sync_ts) {
         log::error!("[http_api] Failed to import pushed DB data: {}", e);
         let _ = crate::sync_history::record_activity(
@@ -895,13 +939,17 @@ async fn handle_sync_push_db(
         return axum::Json(serde_json::json!({
             "status": "error",
             "message": e
-        })).into_response();
+        }))
+        .into_response();
     }
-    
+
     // Update last_sync_ts
     let now = crate::now_ms();
     if let Ok(conn) = state.app.state::<crate::db::DbState>().0.lock() {
-        let _ = conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('last_sync_ts', ?1)", rusqlite::params![now.to_string()]);
+        let _ = conn.execute(
+            "INSERT OR REPLACE INTO settings (key, value) VALUES ('last_sync_ts', ?1)",
+            rusqlite::params![now.to_string()],
+        );
     }
     let _ = crate::sync_history::record_activity(
         crate::sync_protocol::DiagnosticStatus::Success,
@@ -910,10 +958,11 @@ async fn handle_sync_push_db(
         "已通过 LAN 接收并写入移动端数据",
         None,
     );
-    
+
     axum::Json(serde_json::json!({
         "status": "ok"
-    })).into_response()
+    }))
+    .into_response()
 }
 
 pub fn start_http_server(app: AppHandle) {
@@ -954,7 +1003,12 @@ pub fn start_http_server(app: AppHandle) {
             }
         };
         log::info!("[http_api] Bob Public Download API 启动成功，监听 0.0.0.0:3722");
-        if let Err(e) = axum::serve(listener, public_router.into_make_service_with_connect_info::<std::net::SocketAddr>()).await {
+        if let Err(e) = axum::serve(
+            listener,
+            public_router.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+        )
+        .await
+        {
             log::error!("[http_api] 公共服务异常退出: {}", e);
         }
     });

@@ -97,7 +97,7 @@
 ## 🧠 2. 做梦引擎 (Dream Engine / Cognitive Compaction)
 
 ### 2.1 功能概述
-当前 Dream 负责对话摘要、持久事实提取、结构化纠错、记忆清理/合并、SOUL 精炼和执行失败分析。它已经是可运行的记忆整理系统，但尚不是完整的结果驱动用户模型：召回仍以固定最近记录为主，Goal 的计划、证据、用户验收和策略成败尚未形成学习闭环。
+当前 Dream 负责对话摘要、受控持久事实提取、结构化纠错、记忆清理/合并和执行失败诊断。SOUL 已改为只读身份边界，Dream 不再自动改写；单次失败只留在 `execution_errors`，相同工具与错误类型重复出现后才生成待审阅 diagnostic candidate。Goal 验证成功会生成待审阅 experience candidate，不会自动激活策略或 Skill。
 
 ### 2.2 核心逻辑流
 ```
@@ -112,8 +112,9 @@
   ├─► 冗余事实合并与生命周期清理
   ├─► >7天 Session 冷迁移至 wiki/sessions/ (冷记忆归档)
   ├─► 结构化 correction/identity/preference/fact 索引
-  ├─► SOUL.md 小幅精炼与哈希冲突保护
-  └─► execution_errors 失败模式分析（当前仍需从 SOUL 迁移至 procedural memory）
+  ├─► SOUL.md 只读哈希审计（不改写）
+  ├─► execution_errors 重复失败生成 diagnostic candidate
+  └─► Goal verified result 生成待审阅 experience candidate
 ```
 
 ### 2.3 关键代码位置
@@ -328,9 +329,9 @@ AI 自主修改配置（例如自动写入 API Key、修改默认模型等）的
 
 ### 12.1 当前功能边界
 
-Phase 5.5-B 当前已实现确定性、只读的上下文解析和聊天影子接入。它能从用户最后一句目的中保留显式约束与能力需求提示，从 Work Core 恢复唯一高置信度 Project，并组装带来源、revision、更新时间和 Route 预算的最小事实包。两个合理候选会返回 `context.ambiguous_candidates`，无项目的日常请求不会绑定 Project。
+Phase 5.5-B–E 已实现确定性、只读的上下文解析和可靠行动闭环。它能从用户最后一句目的中保留显式约束与能力需求提示，从 Work Core 恢复唯一高置信度 Project，并组装带来源、revision、更新时间和 Route 预算的最小事实包。Auto Advanced 会绑定该 Project；两个合理候选会返回 `context.ambiguous_candidates` 且不会误建 Goal，无项目的日常请求才回退个人工作区。
 
-当前 `assistantContextShadow` 缺省为 `true`：解析结果只进入安全日志指标，不进入模型 Prompt，也不改变工具权限。高置信度 Context Packet、Today focus、用户澄清和 Capability Snapshot 尚未正式启用。
+当前 `assistantContextShadow` 仍缺省为 `true`：在真实 PC Work Core 数据通过误选门之前，Context Packet 不进入模型 Prompt。该开关不影响 Goal Runtime 使用同一确定性解析结果。Capability Snapshot、Action Selector、工具求交集、结构化错误恢复与 ResultReceipt 已进入真实聊天执行链路；Today focus 接入和真机质量门仍待完成。
 
 ### 12.2 核心数据流
 
@@ -353,9 +354,17 @@ llm::stream_internal
   - `ContextSourceSnapshot::load()`：只读现有 `work_projects` 与 Project Aggregate。
   - `resolve_context()`：确定性候选、歧义门、事实选择和 Route 预算。
   - `render_context_packet()`：生成固定、带来源的最小模型上下文。
-  - 模块内 11 组回放覆盖唯一项目、双项目歧义、移动提醒、桌面文件、PowerShell 提示、预算与 SQLite 只读加载。
+  - 模块内回放覆盖唯一项目、双项目歧义、移动提醒、桌面文件、PowerShell 提示、预算与 SQLite 只读加载。
 - `src-tauri/src/llm.rs`
-  - `prepare_assistant_context_packet()`：在聊天主链中读取快照、记录指标，并执行 shadow/启用门。
+  - `prepare_assistant_context()`：在聊天主链中读取快照、记录指标，并为 Context Packet 与 Action Selector 复用同一解析结果。
+- `src-tauri/src/capability.rs`
+  - `CapabilitySnapshot::capture()`：只读感知平台、请求来源、文件授权范围、已连接 PC 和适配器状态；检测到但无受控适配器的 PowerShell/Git 标记为 degraded。
+- `src-tauri/src/action_selector.rs`
+  - `select_action()`：确定性选择 `local_execute / pc_handoff / ask / defer`，模型不能覆盖能力与权限事实。
+- `src-tauri/src/execution_error.rs`
+  - 统一错误类别、副作用状态与恢复动作；未知副作用立即停止，临时只读失败最多重试一次。
+- `src-tauri/src/result_receipt.rs`
+  - 为 Direct Action 持久化最小幂等回执；Advanced 继续以 Goal Attempt、Evidence 与 Event 为权威记录。
 - `scripts/measure-phase55-baseline.ps1`
   - 无依赖记录现有产物、manifest 和数据库大小；无法可靠测量的启动/资源指标写为 `not_measured`。
 

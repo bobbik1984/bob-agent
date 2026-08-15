@@ -1,7 +1,7 @@
 # Bob Goal Runtime 与个性化进化架构
 
-> 状态：Phase 5 单 Agent纵切片已实现并在验证；Phase 6+ 仍为目标架构
-> 更新：2026-08-11
+> 状态：Phase 5 单 Agent 可靠执行闭环已实现；Phase 6+ 仍为目标架构
+> 更新：2026-08-15
 > 权责：本文件是 Goal、任务 DAG、验证闭环和 Dream 学习边界的单一真相源；任务状态以 `todo.md` 和 `progress.yaml` 为准。
 
 Goal Runtime 位于 Persistent Work Core 之上。Project、Decision、Change 与 canonical state 的长期边界以 `docs/PRODUCT_VISION.md` 和 `docs/DECISIONS.md` 为准；本文件不重新定义这些对象。
@@ -30,8 +30,11 @@ Bob 不以复制 Codex 的编程深度或 Claude Code 的终端能力为目标�
 - 应用关闭期间不执行，启动恢复也只自动推进安全 R0/R1；
 - R3 只生成 trusted-device handoff，尚未接入已解锁可信设备的最终批准证明；
 - 手机、手表、眼镜仅由 2–4 选项协议预留适配，尚未完成所有端的 UI；
-- Dream 尚未使用完整 Goal 轨迹学习用户偏好和有效策略；
-- Phase 5 专用 Rust 测试门尚待最终执行确认。
+- Context Packet 的整体启用门仍为默认影子模式，需用真实 PC 数据验证召回、隐私与上下文体积后再开启；
+- 当前已把高置信 Project 解析结果传入 Goal Contract；歧义时先最小澄清，不创建错误 Goal；
+- 当前已按错误类别选择一次确定性重试、参数修复、策略改变、询问或停止，仍不支持任意次数自治重规划；
+- Direct Action 与 Goal 已产生最小 ResultReceipt；已验证 Goal 只沉淀为待审经验候选，不会自动变成技能或人格；
+- Dream 已停止自动修改 SOUL；重复工具故障只进入诊断候选，单次故障只保留执行记录。
 
 因此对外应称为“单 Agent Advanced Project Loop”，不得宣称已具备完整 DAG 或全天候自治 Goal Runtime。
 
@@ -148,18 +151,21 @@ SOUL 只保存稳定身份与交互原则，禁止混入工具错误和临时项
 
 Dream 的学习输入应是：原始目标、Goal Contract、计划、执行轨迹、验证结果、用户修改与最终验收。推断记忆只有积累足够证据后才提升置信度；用户明确表达的偏好和纠错立即生效，但始终可查看、编辑和删除。
 
-执行失败应写入 procedural memory 或诊断库，不得写入 SOUL。
+执行失败应写入诊断记录，不得写入 SOUL。只有重复、同型且具有稳定复用价值的故障才可形成待审诊断候选；只有经确定性证据验证的 Goal 结果才可形成待审经验候选。候选默认不激活，也不自动生成技能。
 
 ## 7. 开发顺序与非目标
 
-严格按以下顺序推进：
+Phase 5 的可靠执行闭环已完成代码纵切片：
 
-1. Goal Contract 与自动路由；
-2. 持久 Goal Runtime；
-3. 最小 DAG、节点上下文和局部恢复；
-4. Goal 轨迹接入 Dream；
-5. 基于历史成功率的模型与策略路由；
-6. 数据证明有收益后再扩展多 Agent 并行。
+1. Goal Contract 与自动路由（已完成首个纵切片）；
+2. 持久 Goal Runtime（已完成首个纵切片）；
+3. 上下文恢复、Capability Snapshot 与 Action Selector（已完成代码接入）；
+4. 错误分类、有界修复和最小 ResultReceipt（已完成代码接入）；
+5. 验证结果接入可撤销的纠正、偏好与经验候选（已完成安全候选边界）；
+6. 真实失败数据证明顺序切片不足后，再建设最小 DAG 与局部恢复；
+7. 数据证明有收益后再扩展多角色或 Runtime Adapter。
+
+下一道启用门不是继续增加功能，而是用真实 PC Work Core 数据验证 Context Packet，并完成 PC/Android 的启动时间、资源占用、安装体积和五类日常场景回归。未通过这些门槛前，新增 DAG、多角色与外部 Runtime Adapter 继续后置。
 
 当前非目标：
 

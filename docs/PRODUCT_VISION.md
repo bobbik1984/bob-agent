@@ -62,7 +62,7 @@ Bob 与通用 Agent 的本质区别是：
 
 ## 当前边界
 
-Bob 已有 Capture、知识、笔记、日历、待办、工具、同步、记忆和会话内 Goal Loop 原型，但尚未具备完整 Persistent Project State、Decision Memory、Dynamic Task Graph、Runtime Adapter 和基于真实结果的 Dream。规划中的能力不得写成现状。
+Bob 已具备 Capture、Persistent Work Core、Decision/Change Review、Complexity Router、Conversation-first Today Layer，以及可持久化审批、证据和检查点的单 Agent Advanced Project Loop。环境能力快照、行动选择、有界错误恢复、统一结果回执和安全经验候选已接入执行链；普通对话的完整 Context Packet 仍处于影子模式，真实 PC/Android 质量门尚未完成。Dynamic Task Graph 与 Runtime Adapter 继续延后。规划中的能力不得写成现状。
 
 ## 北极星指标
 
@@ -86,3 +86,4 @@ Bob 已有 Capture、知识、笔记、日历、待办、工具、同步、记�
 |---|---|
 | 2026-08-09 | 建立低摩擦、跨端、知识与行动统一的个人助理愿景。 |
 | 2026-08-10 | 将“让复杂工作不断线”确立为北极星，明确 Personal Work Model、Persistent Project State、Decision 和可替换 Runtime 边界。 |
+| 2026-08-15 | 按真实实现更新当前边界，确认先完成上下文、能力、行动、回执与安全成长闭环，再由失败数据决定是否进入 Dynamic Task Graph。 |

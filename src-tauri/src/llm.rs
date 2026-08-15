@@ -4,7 +4,8 @@ use std::path::PathBuf;
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::assistant_context::{
-    compile_purpose, render_context_packet, resolve_context, ContextSourceSnapshot,
+    compile_purpose, render_context_packet, resolve_context_from_work_core, AssistantContext,
+    ContextSourceSnapshot, PurposeFrame,
 };
 use crate::complexity_router::{self, RouteDecision, RouteMode};
 
@@ -771,8 +772,12 @@ pub fn assign_model_role(model_id: String, role: String) -> Value {
 
     // Check if this model belongs to the offline provider
     let pool = get_model_pool();
-    let is_offline = pool.as_array()
-        .and_then(|arr| arr.iter().find(|m| m.get("id").and_then(|v| v.as_str()) == Some(&model_id)))
+    let is_offline = pool
+        .as_array()
+        .and_then(|arr| {
+            arr.iter()
+                .find(|m| m.get("id").and_then(|v| v.as_str()) == Some(&model_id))
+        })
         .and_then(|m| m.get("provider").and_then(|v| v.as_str()))
         == Some("offline");
 
@@ -1169,7 +1174,7 @@ fn build_memory_summary() -> String {
 
     lines.push("\n## 知识库检索 (Tier 3: 长期记忆)".to_string());
     lines.push("你有权限使用 brain_search 检索知识库中的文档和过往学到的知识。".to_string());
-    lines.push("注意：你现在拥有自动自进化记忆系统。当用户告知你一条重要的架构原则、个人偏好，或你认为非常有必要长期记住的知识时，请在你的回复末尾悄悄加上一个不可见的标记 `<|mem|>`。你依然只需要正常回复用户，但必须带上这个标记。后台会自动提取并永久保存，**绝不要尝试手动调用 write_file 去保存记忆！**".to_string());
+    lines.push("注意：你拥有自动记忆系统，但记忆应当缓慢、可靠地生长。只有当用户明确提供了长期偏好、稳定的项目决策或对你的纠正时，才在回复末尾加上不可见标记 `<|mem|>`。不要标记从工具结果自行推断的环境事实；用户要求只读、不记忆、不保存或不修改时绝不能标记。**绝不要手动调用 write_file 保存记忆。**".to_string());
 
     lines.join("\n")
 }
@@ -1601,7 +1606,10 @@ async fn apply_context_tiering(messages: Vec<Value>, conv_id: &str) -> Vec<Value
 
 fn infer_correction_scope(message: &str, conv_id: &str) -> String {
     let contextual_markers = ["这次", "本次", "当前", "这个项目", "本项目", "这份", "这篇"];
-    if contextual_markers.iter().any(|marker| message.contains(marker)) {
+    if contextual_markers
+        .iter()
+        .any(|marker| message.contains(marker))
+    {
         format!("conversation:{}", conv_id)
     } else {
         "global".to_string()
@@ -1748,7 +1756,9 @@ async fn resolve_complexity_route(messages: &[Value], agent_mode: &str) -> Route
     let baseline_route = complexity_router::route_messages(messages, agent_mode);
     if baseline_route.semantic_fallback_recommended && agent_mode == "auto" {
         let user_text: String = complexity_router::last_user_text(messages)
-            .chars().take(1_200).collect();
+            .chars()
+            .take(1_200)
+            .collect();
         let prompt = complexity_router::clerk_prompt(&user_text, &baseline_route);
         match call_clerk_oneshot_with_timeout(
             "You are Bob's conservative complexity classifier. Classify processing shape only. You cannot grant permissions or execute tools.",
@@ -1765,20 +1775,19 @@ async fn resolve_complexity_route(messages: &[Value], agent_mode: &str) -> Route
     }
 }
 
-fn prepare_assistant_context_packet(
+fn prepare_assistant_context(
     app: &AppHandle,
     messages: &[Value],
     route: RouteMode,
     conversation_id: &str,
     shadow: bool,
-) -> Option<String> {
+) -> Option<(PurposeFrame, ContextSourceSnapshot, AssistantContext)> {
     let raw_intent = complexity_router::last_user_text(messages);
     if raw_intent.trim().is_empty() {
         return None;
     }
-    let purpose = compile_purpose(&raw_intent);
     let state = app.try_state::<crate::db::DbState>()?;
-    let snapshot = {
+    let (purpose, snapshot, context) = {
         let connection = match state.0.lock() {
             Ok(connection) => connection,
             Err(error) => {
@@ -1790,8 +1799,8 @@ fn prepare_assistant_context_packet(
                 return None;
             }
         };
-        match ContextSourceSnapshot::load(&connection) {
-            Ok(snapshot) => snapshot,
+        match resolve_context_from_work_core(&connection, &raw_intent, route, super::now_ms()) {
+            Ok(resolved) => resolved,
             Err(error) => {
                 log::warn!(
                     "[AssistantContext] source unavailable conv={} error={}",
@@ -1802,7 +1811,6 @@ fn prepare_assistant_context_packet(
             }
         }
     };
-    let context = resolve_context(&purpose, &snapshot, route, super::now_ms());
     let selected_id = context
         .active_object
         .as_ref()
@@ -1818,15 +1826,7 @@ fn prepare_assistant_context_packet(
         context.relevant_facts.len(),
         context.reason_codes.join(",")
     );
-    if shadow || context.active_object.is_none() {
-        return None;
-    }
-    let packet = render_context_packet(&purpose, &context);
-    if packet.is_empty() {
-        None
-    } else {
-        Some(packet)
-    }
+    Some((purpose, snapshot, context))
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -1843,12 +1843,16 @@ pub(crate) async fn stream_internal(
 ) -> Value {
     // conv_id 用于标记 llm:chunk 事件属于哪个会话，防止跨会话串流
     let conv_id_for_emit = conv_id.clone().unwrap_or_default();
-    
+
     // ── T-1800: 排队纠偏 (Abort Generation) ─────────────────
     let (abort_tx, mut abort_rx) = tokio::sync::mpsc::channel::<()>(1);
     if !conv_id_for_emit.is_empty() {
         if let Some(state) = app.try_state::<crate::AbortState>() {
-            state.0.lock().unwrap().insert(conv_id_for_emit.clone(), abort_tx);
+            state
+                .0
+                .lock()
+                .unwrap()
+                .insert(conv_id_for_emit.clone(), abort_tx);
         }
     }
 
@@ -1857,7 +1861,11 @@ pub(crate) async fn stream_internal(
         Some(decision) => decision,
         None => resolve_complexity_route(&messages, &agent_mode).await,
     };
-    log::info!("[ComplexityRouter] {} (agent_mode={})", decision, agent_mode);
+    log::info!(
+        "[ComplexityRouter] {} (agent_mode={})",
+        decision,
+        agent_mode
+    );
     let _ = app.emit(
         "llm:route",
         json!({
@@ -1873,15 +1881,19 @@ pub(crate) async fn stream_internal(
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string();
-    
+
     if let Some(role) = target_role {
         if role == "vision" {
             if let Some(v) = config.get("visionModel").and_then(|v| v.as_str()) {
-                if !v.is_empty() { config_model_id = v.to_string(); }
+                if !v.is_empty() {
+                    config_model_id = v.to_string();
+                }
             }
         } else if role == "clerk" {
             if let Some(v) = config.get("clerkModel").and_then(|v| v.as_str()) {
-                if !v.is_empty() { config_model_id = v.to_string(); }
+                if !v.is_empty() {
+                    config_model_id = v.to_string();
+                }
             }
         }
     }
@@ -2004,21 +2016,55 @@ pub(crate) async fn stream_internal(
         .iter()
         .any(|m| m.get("role").and_then(|r| r.as_str()) == Some("system"));
     let mut full_messages: Vec<Value> = Vec::new();
-    let assistant_context_packet = if has_system {
+    let assistant_context_shadow = config
+        .get("assistantContextShadow")
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
+    let assistant_context = if has_system {
         None
     } else {
-        let shadow = config
-            .get("assistantContextShadow")
-            .and_then(Value::as_bool)
-            .unwrap_or(true);
-        prepare_assistant_context_packet(
+        prepare_assistant_context(
             &app,
             &messages,
             decision.mode,
             &conv_id_for_emit,
-            shadow,
+            assistant_context_shadow,
         )
     };
+    let assistant_context_packet = assistant_context
+        .as_ref()
+        .and_then(|(purpose, _, context)| {
+            if assistant_context_shadow || context.active_object.is_none() {
+                None
+            } else {
+                let packet = render_context_packet(purpose, context);
+                (!packet.is_empty()).then_some(packet)
+            }
+        });
+    let request_from_mobile = messages
+        .iter()
+        .rev()
+        .find(|message| message.get("role").and_then(Value::as_str) == Some("user"))
+        .and_then(|message| message.get("from_channel"))
+        .and_then(Value::as_str)
+        == Some("mobile");
+    let capability_snapshot = crate::capability::CapabilitySnapshot::capture(
+        &app,
+        request_from_mobile,
+        global_file_access,
+    );
+    let fallback_purpose = compile_purpose(&complexity_router::last_user_text(&messages));
+    let (purpose, resolved_context) = assistant_context
+        .as_ref()
+        .map(|(purpose, _, context)| (purpose, Some(context)))
+        .unwrap_or((&fallback_purpose, None));
+    let action_decision = crate::action_selector::select_action(
+        purpose,
+        resolved_context,
+        &capability_snapshot,
+        &decision,
+        None,
+    );
 
     if !has_system {
         let config = super::read_config();
@@ -2041,7 +2087,11 @@ pub(crate) async fn stream_internal(
         let memory_summary = {
             let base = build_memory_summary();
             let structured = build_structured_memories();
-            if structured.is_empty() { base } else { format!("{}\n{}", base, structured) }
+            if structured.is_empty() {
+                base
+            } else {
+                format!("{}\n{}", base, structured)
+            }
         };
         let wiki_status = build_wiki_status();
         let wxid_info = if let Some(u) = &from_user {
@@ -2063,19 +2113,14 @@ pub(crate) async fn stream_internal(
             "当前受限于【沙盒安全机制】，你仅被允许访问 CWD 工作目录及通过 UI 显式授权的目录。对其他绝对路径的文件操作将被拒绝。"
         };
 
-        let mut is_from_mobile = false;
-        if let Some(last_user_msg) = messages.iter().rev().find(|m| m.get("role").and_then(|r| r.as_str()) == Some("user")) {
-            if last_user_msg.get("from_channel").and_then(|c| c.as_str()) == Some("mobile") {
-                is_from_mobile = true;
-            }
-        }
-
         let mut context_injection = String::new();
         if os_info == "android" || os_info == "ios" {
             context_injection.push_str("\n[执行端路由纪律]\n1. 手机本地执行：记录日程/待办、查票据、记笔记、搜索网页，必须直接使用对应工具（如 add_calendar_event, web_search）在手机本地完成。\n2. 穿透 PC 执行：生成复杂文档(如 PPTX/DOCX)、执行终端命令、操作微信、开启定时任务(cron_job)、读写桌面文件，必须使用 send_to_pc_agent 打包投递给 PC。\n");
-        } else if is_from_mobile {
+        } else if request_from_mobile {
             context_injection.push_str("\n[状态] 用户当前正通过手机网络远程向你下达指令\n[要求] 回答需极其简炼，适合手机屏幕阅读。凡涉及系统关机、格式化或高危修改操作，必须在执行前向用户明确二次确认。\n");
         }
+        context_injection.push_str(&capability_snapshot.render_prompt());
+        context_injection.push_str(&action_decision.render_prompt());
 
         let system_prompt = format!(
             "你是 Bob，一个友善、专业的桌面 AI 私人助手，由 Tauri (Rust) 和 Vue 3 构建。\n\
@@ -2107,6 +2152,7 @@ pub(crate) async fn stream_internal(
 - **delete_file**: 安全删除文件或目录到系统回收站（仅在干活模式可用）
 - **rename_file**: 重命名文件或目录（仅在干活模式可用）
 - **send_to_pc_agent**: 将任务转发给绑定的 PC 节点执行（跨端协同）
+证据纪律：只陈述工具直接证明的事实。目录不存在不能证明软件未安装，文件路径也不能证明具体版本；现有工具无法核实时，明确说明无法核实，不得用系统默认值或常识补全。
 {}
 ## 文档输出能力
 你能够为用户生成并导出专业级别的文档，请在以下场景主动调用对应的导出工具：
@@ -2165,6 +2211,8 @@ pub(crate) async fn stream_internal(
             }));
         }
     }
+    let receipt_message_count = messages.len();
+    let receipt_last_user_text = complexity_router::last_user_text(&messages);
     full_messages.extend(messages);
 
     // T-1411: 上下文分级压缩 — 如果对话过长，压缩旧消息为摘要
@@ -2212,7 +2260,12 @@ pub(crate) async fn stream_internal(
         "goal_runtime_action" => "quick",
         _ => decision.tool_intent(),
     };
-    let tool_schemas = super::tools::get_filtered_tool_schemas(tool_intent).await;
+    let tool_schemas = super::tools::get_filtered_tool_schemas(
+        tool_intent,
+        &capability_snapshot,
+        &action_decision,
+    )
+    .await;
 
     if provider == "offline" {
         return crate::candle_engine::run_native_inference(
@@ -2254,8 +2307,7 @@ pub(crate) async fn stream_internal(
         "goal_runtime_action" => decision.tool_budget().min(15),
         _ => decision.tool_budget(),
     };
-    let mut tool_tracker =
-        super::tools::ToolCallTracker::with_budget(tool_budget);
+    let mut tool_tracker = super::tools::ToolCallTracker::with_budget(tool_budget);
 
     // ── 工具结果缓存 (会话级) ────────────────────────────────
     // 避免同一对话中重复读取同一文件/目录，节省 Token 和时间
@@ -2387,7 +2439,7 @@ pub(crate) async fn stream_internal(
         const EMIT_BUFFER_SIZE: usize = 4;
 
         let mut aborted = false;
-        
+
         loop {
             let chunk_result = tokio::select! {
                 res = stream.next() => res,
@@ -2839,13 +2891,19 @@ pub(crate) async fn stream_internal(
                 let name = &pending_tool_calls[i].name;
                 let risk = super::tools::get_tool_risk_for_call(name, &args);
 
-                if matches!(risk, super::tools::ToolRisk::R2 | super::tools::ToolRisk::R3) {
+                if matches!(
+                    risk,
+                    super::tools::ToolRisk::R2 | super::tools::ToolRisk::R3
+                ) {
                     // 远程/IM 请求当前没有可信审批通道。不要等待一个用户看不到的桌面弹窗，
                     // 直接安全拒绝并把原因反馈给模型。后续可由跨端审批卡替代。
                     if from_user.is_some() {
                         rejected_tools.push((
                             i,
-                            format!("远程请求需要在 Bob 桌面端确认后才能执行 (风险等级: {:?})", risk),
+                            format!(
+                                "远程请求需要在 Bob 桌面端确认后才能执行 (风险等级: {:?})",
+                                risk
+                            ),
                         ));
                         continue;
                     }
@@ -2862,26 +2920,34 @@ pub(crate) async fn stream_internal(
 
                     // 向前端发射确认请求
                     let args_preview = serde_json::to_string(&args)
-                        .unwrap_or_default().chars().take(300).collect::<String>();
+                        .unwrap_or_default()
+                        .chars()
+                        .take(300)
+                        .collect::<String>();
                     let risk_label = format!("{:?}", risk);
-                    let _ = app.emit("tool:confirm_required", json!({
-                        "request_id": request_id,
-                        "tool_name": name,
-                        "args_preview": args_preview,
-                        "risk_level": risk_label,
-                        "conv_id": &conv_id_for_emit,
-                    }));
+                    let _ = app.emit(
+                        "tool:confirm_required",
+                        json!({
+                            "request_id": request_id,
+                            "tool_name": name,
+                            "args_preview": args_preview,
+                            "risk_level": risk_label,
+                            "conv_id": &conv_id_for_emit,
+                        }),
+                    );
 
-                    log::info!("[ToolConfirm] Awaiting confirmation for {} (risk={:?})", name, risk);
+                    log::info!(
+                        "[ToolConfirm] Awaiting confirmation for {} (risk={:?})",
+                        name,
+                        risk
+                    );
 
                     // 等待确认 (30s 超时 → 默认拒绝)
-                    let approved = match tokio::time::timeout(
-                        std::time::Duration::from_secs(30),
-                        rx,
-                    ).await {
-                        Ok(Ok(v)) => v,
-                        _ => false,
-                    };
+                    let approved =
+                        match tokio::time::timeout(std::time::Duration::from_secs(30), rx).await {
+                            Ok(Ok(v)) => v,
+                            _ => false,
+                        };
 
                     // 响应成功时前端命令已经移除条目；超时/接收端关闭时在这里兜底清理。
                     if let Some(state) = app.try_state::<super::tool_confirm::ToolConfirmState>() {
@@ -2988,6 +3054,10 @@ pub(crate) async fn stream_internal(
                 tool_call_log.push(json!({
                     "name": name,
                     "success": !is_error,
+                    "errorClass": result.get("errorClass").cloned().unwrap_or(Value::Null),
+                    "sideEffectState": result.get("sideEffectState").cloned().unwrap_or(Value::Null),
+                    "recoveryAction": result.get("recoveryAction").cloned().unwrap_or(Value::Null),
+                    "retryCount": result.get("retryCount").cloned().unwrap_or(json!(0)),
                 }));
 
                 let result_str = serde_json::to_string_pretty(&result).unwrap_or_default();
@@ -3125,13 +3195,13 @@ pub(crate) async fn stream_internal(
             "content": final_content.clone()
         }));
         let extract_conv_id = conv_id_for_emit.clone();
-        let extract_rounds = rounds_completed as i64;
+        let extract_failures = tool_failures_total;
         tokio::spawn(async move {
             super::evolution::extract_learned_facts(
                 extract_app,
                 extract_messages,
                 extract_conv_id,
-                extract_rounds,
+                extract_failures,
             )
             .await;
         });
@@ -3167,6 +3237,25 @@ pub(crate) async fn stream_internal(
         }
     }
 
+    let tool_summary = json!({
+        "total_calls": tool_calls_total,
+        "total_failures": tool_failures_total,
+        "calls": tool_call_log,
+    });
+    let decision_seed = format!(
+        "{}:{}:{}",
+        conv_id_for_emit, receipt_message_count, receipt_last_user_text
+    );
+    let result_receipt =
+        crate::result_receipt::from_tool_summary(&tool_summary, super::now_ms(), &decision_seed);
+    if !agent_mode.starts_with("goal_runtime_") {
+        if let Err(error) =
+            crate::result_receipt::persist_direct_action(&app, &conv_id_for_emit, &result_receipt)
+        {
+            log::warn!("[ResultReceipt] persistence unavailable: {error}");
+        }
+    }
+
     json!({
         "content": final_content,
         "thinking": if final_thinking.is_empty() { Value::Null } else { Value::String(final_thinking) },
@@ -3174,11 +3263,8 @@ pub(crate) async fn stream_internal(
         "pricing": pricing,
         "model": model_id,
         "route": &decision,
-        "tool_summary": {
-            "total_calls": tool_calls_total,
-            "total_failures": tool_failures_total,
-            "calls": tool_call_log,
-        },
+        "tool_summary": tool_summary,
+        "resultReceipt": result_receipt,
     })
 }
 
@@ -3207,7 +3293,9 @@ pub async fn stream_chat(
             .await;
         }
         Some(decision)
-    } else { None };
+    } else {
+        None
+    };
     stream_internal(
         app,
         messages,
@@ -3252,7 +3340,17 @@ pub async fn stream_vision(
             obj.insert("content".to_string(), Value::Array(content_array));
         }
     }
-    stream_internal(app, messages, conv_id, None, global_file_access, agent_mode, Some("vision".to_string()), None).await
+    stream_internal(
+        app,
+        messages,
+        conv_id,
+        None,
+        global_file_access,
+        agent_mode,
+        Some("vision".to_string()),
+        None,
+    )
+    .await
 }
 
 // ═══════════════════════════════════════════════════════════

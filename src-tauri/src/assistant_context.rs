@@ -125,6 +125,18 @@ impl ContextSourceSnapshot {
     }
 }
 
+pub(crate) fn resolve_context_from_work_core(
+    conn: &Connection,
+    raw_intent: &str,
+    route: RouteMode,
+    generated_at: i64,
+) -> Result<(PurposeFrame, ContextSourceSnapshot, AssistantContext), String> {
+    let purpose = compile_purpose(raw_intent);
+    let snapshot = ContextSourceSnapshot::load(conn)?;
+    let context = resolve_context(&purpose, &snapshot, route, generated_at);
+    Ok((purpose, snapshot, context))
+}
+
 #[derive(Clone, Debug)]
 struct ScoredCandidate {
     project: WorkProject,

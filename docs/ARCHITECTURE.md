@@ -4,9 +4,9 @@
 > **历史归档**: Electron 时代架构见 `docs/agents_electron.md`
 > **Goal/Dream 目标架构**: 见 `docs/GOAL_RUNTIME.md`。本文件描述当前系统；目标文档中的未完成模块不得被当作现有能力。
 
-## v0.9.2 演进边界（当前实现）
+## v0.9.3 演进边界（当前实现）
 
-`v0.8.0` 已封存 Capture 与知识提交基线。当前 `v0.9.2` 已在现有 Rust 后端中建立隔离的 `work_core`，完成现有输入接入、完整 Decision 契约、Change Review、Complexity Router、单 Agent Advanced Project Loop、Conversation-first Today Layer 与统一界面布局基础；没有重写 Tauri、Android、Sync、Relay 或 Tools，也没有增加客户端运行时依赖。
+`v0.8.0` 已封存 Capture 与知识提交基线。当前 `v0.9.3` 已在现有 Rust 后端中建立隔离的 `work_core`，完成现有输入接入、完整 Decision 契约、Change Review、Complexity Router、单 Agent Advanced Project Loop、Conversation-first Today Layer，以及项目上下文绑定、能力快照、行动选择、有界错误恢复、结果回执与安全经验候选；没有增加客户端运行时依赖。
 
 ```mermaid
 flowchart TD
@@ -68,7 +68,7 @@ Capture Journal (原始输入)
 
 `project_link_candidates`、Work Object、Work Event、Capture refs 在同一个 SQLite transaction 中确认；文件修订的新版 Artifact、Change、外部路径指针和 Change Review 也原子提交。Markdown 先安全落盘再登记引用。外部对象的完成、取消、改期和删除只追加项目活动，不复制外部状态。快照在数据库提交并释放锁后 best-effort 刷新。
 
-跨设备边界：当前 `v0.9.2` 仍以 PC 端 Work Core 为项目状态权威源。移动端产生的 Capture 会通过现有同步链路回放并由 PC 落入 Work Core，但 `work_objects`、`work_relations` 与 `work_change_reviews` 尚不进行独立的双向表级合并。完整的跨设备 Work Core 合并需要后续协议版本、冲突规则与迁移测试；在此之前不得把 Phase 3 描述为多端状态双向同步完成。
+跨设备边界：当前 `v0.9.3` 仍以 PC 端 Work Core 为项目状态权威源。移动端产生的 Capture 会通过现有同步链路回放并由 PC 落入 Work Core，但 `work_objects`、`work_relations` 与 `work_change_reviews` 尚不进行独立的双向表级合并。完整的跨设备 Work Core 合并需要后续协议版本、冲突规则与迁移测试；在此之前不得把 Phase 3 描述为多端状态双向同步完成。
 
 ### Phase 5.5 Assistant Context 当前边界（影子模式）
 
@@ -87,7 +87,7 @@ Capture Journal (原始输入)
 
 `llm.rs` 在 Complexity Router 之后、系统消息组装之前运行该解析，并在短数据库锁内完成 SQLite 读取；锁在任何模型或网络调用前释放。内部配置 `assistantContextShadow` 缺省为 `true`，因此当前只记录候选数、选中对象 ID、置信度、事实数和 reason code，不改变 Prompt、工具列表、Complexity Router 或 R0–R3 权限。只有显式关闭 shadow 且存在唯一高置信度对象时，代码路径才会生成独立 Context Packet；正式启用仍等待 PC 真场景与资源基线验证。
 
-该切片没有新增依赖、数据库表、用户设置或后台服务。能力提示只表达任务需要 PowerShell、浏览器或桌面文件，不声明当前环境真的拥有这些能力；Capability Snapshot 属于后续 Phase 5.5-C。
+该切片没有新增依赖、用户设置或后台服务。`capability.rs` 已实现纯 Rust Capability Snapshot，并与模型工具表求交集；`action_selector.rs` 只允许本机执行、PC 转交、询问或延后。错误恢复保持有界，Direct/Advanced 统一返回 ResultReceipt，验证成功只形成待审经验候选。普通对话的完整 Context Packet 仍等待真实 PC 数据通过误选和资源质量门。
 
 ## 总体架构
 

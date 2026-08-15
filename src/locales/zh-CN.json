@@ -205,6 +205,7 @@
     "enable": "启用",
     "disable": "停用",
     "loading": "加载中...",
+    "local_models": "本地模型",
     "ai_model": "AI 模型",
     "provider": "服务商",
     "api_key": "API Key",

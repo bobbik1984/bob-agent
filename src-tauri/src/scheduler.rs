@@ -162,7 +162,7 @@ async fn check_and_compensate_missed_jobs(app: &AppHandle) {
     };
 
     let now = chrono::Local::now();
-    
+
     // 计算今天 00:00:00 的 Local DateTime
     let today_start = match now.date_naive().and_hms_opt(0, 0, 0) {
         Some(naive) => match naive.and_local_timezone(chrono::Local) {
@@ -457,10 +457,9 @@ fn check_upcoming_todos(app: &AppHandle, db_path: &std::path::Path) {
         "SELECT id, title, type, date, start_time
          FROM events
          WHERE status = 'pending'
-           AND date <= ?1
+           AND date = ?1
            AND (last_notified IS NULL OR last_notified < ?2)
-         ORDER BY date ASC, start_time ASC
-         LIMIT 5",
+         ORDER BY start_time ASC",
     ) {
         Ok(s) => s,
         Err(_) => return,
@@ -484,6 +483,8 @@ fn check_upcoming_todos(app: &AppHandle, db_path: &std::path::Path) {
         return;
     }
 
+    let reminder_body = format_todo_reminder_body(&rows);
+
     for (id, title, etype, date, start_time) in &rows {
         let _ = app.emit(
             "todo:reminder",
@@ -496,45 +497,6 @@ fn check_upcoming_todos(app: &AppHandle, db_path: &std::path::Path) {
             }),
         );
 
-        // T-1307: 调用 Windows 原生弹窗
-        let _ = app
-            .notification()
-            .builder()
-            .title("Bob 提醒：今日待办")
-            .body(title)
-            .show();
-
-        // 绑定并发送到已配对的微信端进行主动提醒
-        if let Some(wechat_state) = app.try_state::<std::sync::Arc<crate::wechat::WechatState>>() {
-            if *wechat_state.connected.read().unwrap() {
-                let wxids: Vec<String> = crate::im_sessions::SESSION_MANAGER
-                    .get_all_user_ids()
-                    .into_iter()
-                    .filter_map(|id| {
-                        if id.starts_with("wechat-") {
-                            Some(id.strip_prefix("wechat-").unwrap().to_string())
-                        } else {
-                            None
-                        }
-                    })
-                    .collect();
-                for wxid in wxids {
-                    let msg_text = format!("【📅 Bob 日程提醒】今日待办：{}", title);
-                    let state_clone = wechat_state.inner().clone();
-                    let wxid_clone = wxid.clone();
-                    tauri::async_runtime::spawn(async move {
-                        let _ = crate::wechat::commands::send_reply(
-                            &wxid_clone,
-                            &msg_text,
-                            &state_clone,
-                            None,
-                        )
-                        .await;
-                    });
-                }
-            }
-        }
-
         // 更新 last_notified 时间戳
         let _ = conn.execute(
             "UPDATE events SET last_notified = ?1 WHERE id = ?2",
@@ -542,7 +504,72 @@ fn check_upcoming_todos(app: &AppHandle, db_path: &std::path::Path) {
         );
     }
 
-    log::info!("Scheduler T-1307: sent {} todo reminders", rows.len());
+    // 同一轮待办只生成一条原生通知，避免打开 Bob 时被历史任务刷屏。
+    if let Err(error) = app
+        .notification()
+        .builder()
+        .title("Bob 提醒：今日待办")
+        .body(&reminder_body)
+        .show()
+    {
+        log::warn!("Scheduler T-1307: native reminder failed: {error}");
+    }
+
+    let mut queued_wechat_digests = 0;
+    if let Some(wechat_state) = app.try_state::<std::sync::Arc<crate::wechat::WechatState>>() {
+        if *wechat_state.connected.read().unwrap() {
+            let wxids: Vec<String> = crate::im_sessions::SESSION_MANAGER
+                .get_all_user_ids()
+                .into_iter()
+                .filter_map(|id| id.strip_prefix("wechat-").map(str::to_string))
+                .collect();
+            for wxid in wxids {
+                queued_wechat_digests += 1;
+                let msg_text = format!("【📅 Bob 日程提醒】{}", reminder_body);
+                let state_clone = wechat_state.inner().clone();
+                tauri::async_runtime::spawn(async move {
+                    if let Err(error) =
+                        crate::wechat::commands::send_reply(&wxid, &msg_text, &state_clone, None)
+                            .await
+                    {
+                        log::warn!("Scheduler T-1307: WeChat digest delivery failed: {error}");
+                    }
+                });
+            }
+        }
+    }
+
+    log::info!(
+        "Scheduler T-1307: surfaced {} todo(s); queued {} WeChat digest(s)",
+        rows.len(),
+        queued_wechat_digests
+    );
+}
+
+fn format_todo_reminder_body(
+    rows: &[(String, String, String, Option<String>, Option<String>)],
+) -> String {
+    if rows.len() == 1 {
+        return rows[0].1.clone();
+    }
+
+    let preview = rows
+        .iter()
+        .take(3)
+        .map(|(_, title, _, _, _)| title.as_str())
+        .collect::<Vec<_>>()
+        .join("；");
+    let remaining = rows.len().saturating_sub(3);
+    if remaining == 0 {
+        format!("今日有 {} 项待办：{}", rows.len(), preview)
+    } else {
+        format!(
+            "今日有 {} 项待办：{}；另有 {} 项",
+            rows.len(),
+            preview,
+            remaining
+        )
+    }
 }
 
 /// 从 DB 加载所有 enabled=1 的 cron 任务
@@ -962,7 +989,10 @@ mod tests {
     fn test_matches_cron_at_time() {
         use chrono::TimeZone;
         // Let's construct a local date time: 2026-07-11 12:30:00 (which is a Saturday, weekday index 6)
-        let dt = chrono::Local.with_ymd_and_hms(2026, 7, 11, 12, 30, 0).single().unwrap();
+        let dt = chrono::Local
+            .with_ymd_and_hms(2026, 7, 11, 12, 30, 0)
+            .single()
+            .unwrap();
 
         // 1. Matches exact time
         assert!(matches_cron_at_time("30 12 11 7 6", dt));
@@ -974,5 +1004,35 @@ mod tests {
         assert!(!matches_cron_at_time("15 12 11 7 6", dt));
         // 5. Mismatch in weekday
         assert!(!matches_cron_at_time("30 12 11 7 0", dt));
+    }
+
+    fn reminder_row(title: &str) -> (String, String, String, Option<String>, Option<String>) {
+        (
+            title.to_string(),
+            title.to_string(),
+            "todo".to_string(),
+            Some("2026-08-14".to_string()),
+            None,
+        )
+    }
+
+    #[test]
+    fn todo_reminder_uses_single_title_without_extra_noise() {
+        let rows = vec![reminder_row("提交周报")];
+        assert_eq!(format_todo_reminder_body(&rows), "提交周报");
+    }
+
+    #[test]
+    fn todo_reminder_aggregates_long_lists() {
+        let rows = vec![
+            reminder_row("提交周报"),
+            reminder_row("预约体检"),
+            reminder_row("取快递"),
+            reminder_row("给家里回电话"),
+        ];
+        assert_eq!(
+            format_todo_reminder_body(&rows),
+            "今日有 4 项待办：提交周报；预约体检；取快递；另有 1 项"
+        );
     }
 }

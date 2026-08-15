@@ -6,6 +6,9 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use tauri::{Emitter, Manager};
 
+use crate::action_selector::{ActionDecision, ActionKind};
+use crate::capability::CapabilitySnapshot;
+
 // ═══════════════════════════════════════════════════════════
 // T-1401: 工具调用循环熔断器 (Circuit Breaker)
 // ═══════════════════════════════════════════════════════════
@@ -259,6 +262,65 @@ fn resolve_write_path(path: &str, global_file_access: bool) -> Result<PathBuf, S
     ))
 }
 
+/// 解析 read_file/list_dir 的目标路径。
+/// 默认仅允许当前工作目录、Bob 数据目录、知识库、工作区与用户显式关注的目录。
+fn resolve_read_path(path: &str, global_file_access: bool) -> Result<PathBuf, String> {
+    let decoded_path = urlencoding::decode(path).unwrap_or(std::borrow::Cow::Borrowed(path));
+    if decoded_path.contains("..") || path.contains("..") {
+        return Err("禁止使用 ../ 进行路径穿越".to_string());
+    }
+
+    let supplied = Path::new(path);
+    let target = if supplied.is_absolute() {
+        supplied.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .map_err(|e| format!("无法确定当前工作目录: {}", e))?
+            .join(supplied)
+    };
+
+    if global_file_access {
+        return Ok(target);
+    }
+
+    let config = super::read_config();
+    let mut allowed_dirs = vec![super::get_data_dir(), super::get_wiki_dir()];
+    if let Ok(cwd) = std::env::current_dir() {
+        allowed_dirs.push(cwd);
+    }
+    for key in ["wikiDir", "workspaceDir"] {
+        if let Some(dir) = config
+            .get(key)
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+        {
+            allowed_dirs.push(PathBuf::from(dir));
+        }
+    }
+    if let Ok(db) = rusqlite::Connection::open(super::get_data_dir().join("bob.db")) {
+        if let Ok(mut stmt) = db.prepare("SELECT folder_path FROM tracked_folders") {
+            if let Ok(rows) = stmt.query_map([], |row| row.get::<_, String>(0)) {
+                allowed_dirs.extend(rows.flatten().map(PathBuf::from));
+            }
+        }
+    }
+
+    let canonical_target = fs::canonicalize(&target).unwrap_or_else(|_| target.clone());
+    let allowed = allowed_dirs.into_iter().any(|dir| {
+        let canonical_dir = fs::canonicalize(&dir).unwrap_or(dir);
+        canonical_target.starts_with(canonical_dir)
+    });
+
+    if allowed {
+        Ok(target)
+    } else {
+        Err(format!(
+            "路径读取被拒绝：{} 不在当前工作区或用户授权的目录内。",
+            path
+        ))
+    }
+}
+
 /// 里程碑 9: Tool Calling 引擎
 ///
 /// 本模块定义 Bob 可以"主动使用的手"：
@@ -421,11 +483,20 @@ pub fn get_tool_schemas() -> Vec<Value> {
 }
 
 /// 合并 MCP + 原生连接器工具的异步版本
-pub async fn get_tool_schemas_with_mcp() -> Vec<Value> {
-    let mut tools = get_builtin_tool_schemas();
+pub async fn get_tool_schemas_with_mcp(snapshot: &CapabilitySnapshot) -> Vec<Value> {
+    let mut tools = get_builtin_tool_schemas()
+        .into_iter()
+        .filter(|tool| {
+            tool.pointer("/function/name")
+                .and_then(Value::as_str)
+                .is_some_and(|name| snapshot.tool_available(name))
+        })
+        .collect::<Vec<_>>();
     // MCP 扩展工具
-    let mcp_tools = super::mcp::get_manager().get_all_tool_schemas().await;
-    tools.extend(mcp_tools);
+    if snapshot.mcp_runtime_available() {
+        let mcp_tools = super::mcp::get_manager().get_all_tool_schemas().await;
+        tools.extend(mcp_tools);
+    }
     // 原生连接器工具（根据连接状态动态返回）
     tools.extend(super::lark::get_tool_schemas());
     tools.extend(super::google_calendar::get_tool_schemas());
@@ -437,10 +508,14 @@ pub async fn get_tool_schemas_with_mcp() -> Vec<Value> {
 /// - "answer": 仅注入显式审核过的 R0 白名单
 /// - "quick": 只注入 R0 + R1 工具（安全的本地操作）
 /// - "planned" / 其他: 注入全部工具
-pub async fn get_filtered_tool_schemas(intent: &str) -> Vec<Value> {
-    match intent {
+pub async fn get_filtered_tool_schemas(
+    intent: &str,
+    snapshot: &CapabilitySnapshot,
+    action: &ActionDecision,
+) -> Vec<Value> {
+    let tools = match intent {
         // T-3012: Answer 使用显式只读白名单；动态/MCP 工具不会自动进入。
-        "answer" => get_tool_schemas_with_mcp()
+        "answer" => get_tool_schemas_with_mcp(snapshot)
             .await
             .into_iter()
             .filter(|t| {
@@ -451,7 +526,7 @@ pub async fn get_filtered_tool_schemas(intent: &str) -> Vec<Value> {
                 is_answer_tool_allowed(name)
             })
             .collect(),
-        "quick" => get_tool_schemas_with_mcp()
+        "quick" => get_tool_schemas_with_mcp(snapshot)
             .await
             .into_iter()
             .filter(|t| {
@@ -462,7 +537,25 @@ pub async fn get_filtered_tool_schemas(intent: &str) -> Vec<Value> {
                 matches!(get_tool_risk(name), ToolRisk::R0 | ToolRisk::R1)
             })
             .collect(),
-        _ => get_tool_schemas_with_mcp().await,
+        _ => get_tool_schemas_with_mcp(snapshot).await,
+    };
+    match action.kind {
+        ActionKind::LocalExecute => tools,
+        ActionKind::PcHandoff => tools
+            .into_iter()
+            .filter(|tool| {
+                tool.pointer("/function/name").and_then(Value::as_str) == Some("send_to_pc_agent")
+            })
+            .collect(),
+        ActionKind::Ask => tools
+            .into_iter()
+            .filter(|tool| {
+                tool.pointer("/function/name")
+                    .and_then(Value::as_str)
+                    .is_some_and(|name| get_tool_risk(name) == ToolRisk::R0)
+            })
+            .collect(),
+        ActionKind::Defer => Vec::new(),
     }
 }
 
@@ -1217,6 +1310,33 @@ pub async fn execute_tool(
     from_user: Option<&str>,
     global_file_access: bool,
 ) -> Value {
+    let side_effect_possible = get_tool_risk_for_call(name, args) != ToolRisk::R0;
+    let mut result = execute_tool_raw(app, name, args, from_user, global_file_access).await;
+    let mut retry_count = 0;
+    if let Some(error) = result.get("error").and_then(Value::as_str) {
+        let disposition = crate::execution_error::classify_tool_error(
+            error,
+            error_is_timeout(error),
+            side_effect_possible,
+            retry_count,
+        );
+        if disposition.recovery == crate::execution_error::RecoveryAction::RetryOnce {
+            retry_count = 1;
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            result = execute_tool_raw(app, name, args, from_user, global_file_access).await;
+        }
+    }
+    annotate_tool_result(&mut result, side_effect_possible, retry_count);
+    result
+}
+
+async fn execute_tool_raw(
+    app: &tauri::AppHandle,
+    name: &str,
+    args: &Value,
+    from_user: Option<&str>,
+    global_file_access: bool,
+) -> Value {
     // 工具级超时控制：媒体上传类工具给 120 秒，其他给 30 秒
     let timeout_secs = match name {
         "send_wechat_file" => 600, // 大文件上传可能耗时很长，与 CDN 动态超时匹配
@@ -1246,6 +1366,45 @@ pub async fn execute_tool(
     };
     audit_tool_call(name, args, &summary);
     result
+}
+
+fn error_is_timeout(error: &str) -> bool {
+    let normalized = error.to_ascii_lowercase();
+    normalized.contains("timeout") || normalized.contains("timed out") || error.contains("超时")
+}
+
+fn annotate_tool_result(result: &mut Value, side_effect_possible: bool, retry_count: u32) {
+    let Some(object) = result.as_object_mut() else {
+        return;
+    };
+    object.insert("retryCount".into(), json!(retry_count));
+    if let Some(error) = object
+        .get("error")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+    {
+        let disposition = crate::execution_error::classify_tool_error(
+            &error,
+            error_is_timeout(&error),
+            side_effect_possible,
+            retry_count,
+        );
+        object.insert("errorClass".into(), json!(disposition.class));
+        object.insert(
+            "sideEffectState".into(),
+            json!(disposition.side_effect_state),
+        );
+        object.insert("recoveryAction".into(), json!(disposition.recovery));
+    } else {
+        object.insert(
+            "sideEffectState".into(),
+            json!(if side_effect_possible {
+                crate::execution_error::SideEffectState::Applied
+            } else {
+                crate::execution_error::SideEffectState::None
+            }),
+        );
+    }
 }
 
 async fn execute_tool_inner(
@@ -1306,16 +1465,17 @@ async fn execute_tool_inner(
         }
         "read_file" => {
             let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
-            // 路径穿越防御（含 URL 编码绕过防护）
-            let decoded = urlencoding::decode(path).unwrap_or(std::borrow::Cow::Borrowed(path));
-            if decoded.contains("..") || path.contains("..") {
-                return json!({ "error": "禁止使用 ../ 进行路径穿越" });
-            }
-            match crate::kb_extractor::extract_single_file(std::path::Path::new(path)) {
+            let target_path = match resolve_read_path(path, global_file_access) {
+                Ok(p) => p,
+                Err(e) => return json!({ "error": e }),
+            };
+            match crate::kb_extractor::extract_single_file(&target_path) {
                 Ok(text) => json!({ "content": text }),
                 Err(e) => {
                     // Fallback to system_read_file if extraction fails (though extract_single_file already uses it internally for text)
-                    let fallback = super::filesystem::system_read_file(path.to_string());
+                    let fallback = super::filesystem::system_read_file(
+                        target_path.to_string_lossy().to_string(),
+                    );
                     if fallback.get("error").is_some() {
                         json!({ "error": format!("文件解析失败: {}", e) })
                     } else {
@@ -1522,7 +1682,7 @@ async fn execute_tool_inner(
         "list_dir" => {
             let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
             let max = args.get("max_items").and_then(|v| v.as_u64()).unwrap_or(50) as usize;
-            tool_list_dir(path, max)
+            tool_list_dir(path, max, global_file_access)
         }
         "fetch_url" => {
             let url = args.get("url").and_then(|v| v.as_str()).unwrap_or("");
@@ -2025,8 +2185,12 @@ async fn execute_tool_inner(
 // ═══════════════════════════════════════════════════════════
 
 /// list_dir — 列出目录内容
-fn tool_list_dir(path: &str, max_items: usize) -> Value {
-    let p = Path::new(path);
+fn tool_list_dir(path: &str, max_items: usize, global_file_access: bool) -> Value {
+    let target_path = match resolve_read_path(path, global_file_access) {
+        Ok(p) => p,
+        Err(e) => return json!({ "error": e }),
+    };
+    let p = target_path.as_path();
     if !p.exists() {
         return json!({ "error": format!("路径不存在: {}", path) });
     }
@@ -3915,5 +4079,18 @@ mod tests {
             crate::capture::extract_source_url(content).as_deref(),
             Some("https://example.com/article")
         );
+    }
+
+    #[test]
+    fn read_scope_allows_current_workspace() {
+        let cwd = std::env::current_dir().expect("current directory");
+        assert!(resolve_read_path(&cwd.to_string_lossy(), false).is_ok());
+    }
+
+    #[test]
+    fn read_scope_rejects_unapproved_directory() {
+        let outside = std::env::temp_dir().join(format!("bob-read-scope-{}", ulid::Ulid::new()));
+        assert!(resolve_read_path(&outside.to_string_lossy(), false).is_err());
+        assert!(resolve_read_path(&outside.to_string_lossy(), true).is_ok());
     }
 }

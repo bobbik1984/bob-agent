@@ -6,7 +6,7 @@
     <strong>零设置、懂你的、以结果为单位工作的个人执行系统</strong>
   </p>
   <p align="center">
-    <img src="https://img.shields.io/badge/version-v0.9.0-blue?style=flat-square" alt="Version" />
+    <img src="https://img.shields.io/badge/version-v0.9.3-blue?style=flat-square" alt="Version" />
     <img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="License" />
     <img src="https://img.shields.io/badge/platform-Windows_|_Android-0078D6?style=flat-square&logo=windows" alt="Platform" />
     <img src="https://img.shields.io/badge/Tauri-v2-FFC131?style=flat-square&logo=tauri" alt="Tauri v2" />
@@ -28,7 +28,7 @@
 > **Bob keeps complex work moving without losing context.**<br>
 > **Bob 让复杂工作不断线。**
 
-`v0.8.0` 已封存可靠 Capture 与知识提交基线。`v0.9.0` 已完成 **Persistent Work Core、现有输入接入、Decision/Change Review、Complexity Router** 与 Phase 5 **单 Agent Advanced Project Loop** 的首个可靠纵切片。对话首屏新增 Today 摘要：用一个焦点和最多两个关注项汇总日程、待办、项目、Goal、审批、最近会话与 Dream，并可从速记浮层无损打开。Dynamic DAG、多 Agent、常驻后台与可信跨端 R3 最终确认仍未实现；显式 `Goal Mode` 继续作为旧 Maker–Checker 实验入口，不等同于新 Runtime。
+`v0.8.0` 已封存可靠 Capture 与知识提交基线。`v0.9.3` 已完成 **Persistent Work Core、Decision/Change Review、Complexity Router、Conversation-first Today Layer** 与单 Agent **Advanced Project Loop** 的首个可靠闭环，并新增项目上下文绑定、环境能力快照、确定性行动选择、有界错误恢复、结果回执和安全经验候选。普通对话的完整 Context Packet 仍保持影子模式，等待真实 PC 数据通过误选与资源质量门；Dynamic DAG、多 Agent、常驻后台与可信跨端 R3 最终确认仍未实现。
 
 ---
 

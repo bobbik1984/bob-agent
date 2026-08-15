@@ -93,47 +93,190 @@ fn get_learned_dir() -> PathBuf {
     dir
 }
 
-/// 三层漏斗判断: 对话是否值得触发 Clerk 知识提取
+fn latest_user_message(messages: &[Value]) -> &str {
+    messages
+        .iter()
+        .rev()
+        .find(|m| m.get("role").and_then(|r| r.as_str()) == Some("user"))
+        .and_then(|m| m.get("content").and_then(|c| c.as_str()))
+        .unwrap_or("")
+}
+
+fn user_blocks_persistent_learning(message: &str) -> bool {
+    let normalized = message.to_lowercase();
+    [
+        "不要记忆",
+        "不要记住",
+        "别记住",
+        "不要保存",
+        "不要写入",
+        "不要修改",
+        "只读",
+        "do not remember",
+        "don't remember",
+        "do not save",
+        "don't save",
+        "read-only",
+        "read only",
+    ]
+    .iter()
+    .any(|marker| normalized.contains(marker))
+}
+
+fn user_requests_persistent_learning(message: &str) -> bool {
+    let normalized = message.to_lowercase();
+    [
+        "请记住",
+        "帮我记住",
+        "记到长期记忆",
+        "保存到记忆",
+        "remember this",
+        "save this to memory",
+    ]
+    .iter()
+    .any(|marker| normalized.contains(marker))
+}
+
+fn user_provides_durable_memory(message: &str) -> bool {
+    let normalized = message.to_lowercase();
+    [
+        "我喜欢",
+        "我更喜欢",
+        "我的偏好",
+        "以后都",
+        "以后不要",
+        "一直用",
+        "你记错了",
+        "纠正一下",
+        "项目决定",
+        "架构原则",
+        "i prefer",
+        "my preference",
+        "from now on",
+        "you remembered incorrectly",
+        "project decision",
+    ]
+    .iter()
+    .any(|marker| normalized.contains(marker))
+}
+
+/// 判断一次对话是否值得触发知识提取。
 ///
-/// Layer 1 (快车道): 检测助手回复中的 <|mem|> 隐式标记
-/// Layer 2 (安全网): 物理兜底 — 有工具调用 OR 用户发言 >= 3 轮
-fn should_extract(messages: &[Value], total_rounds: i64) -> bool {
+/// 记忆默认慢生长：尊重用户的只读/不记忆要求；失败探索不沉淀为事实；
+/// 单次工具调用本身也不再等价于“值得长期记住”。
+fn should_extract(messages: &[Value], tool_failures: i64) -> bool {
+    let latest_user = latest_user_message(messages);
+    if user_blocks_persistent_learning(latest_user) {
+        log::info!("[Evolution] Skipping extraction (user requested no persistent changes)");
+        return false;
+    }
+
+    let explicit_memory_request = user_requests_persistent_learning(latest_user);
+    if tool_failures > 0 && !explicit_memory_request {
+        log::info!(
+            "[Evolution] Skipping extraction (tool failures: {})",
+            tool_failures
+        );
+        return false;
+    }
+
+    if explicit_memory_request {
+        log::info!("[Evolution] Triggered via explicit user memory request");
+        return true;
+    }
+
     // ── Layer 1: 快车道 — 检测助手回复中是否有隐式标记 ──
     for msg in messages {
         if msg.get("role").and_then(|r| r.as_str()) == Some("assistant") {
             if let Some(content) = msg.get("content").and_then(|c| c.as_str()) {
                 if content.contains("<|mem|>") {
-                    log::info!("[Evolution] Triggered via <|mem|> marker");
-                    return true;
+                    if user_provides_durable_memory(latest_user) {
+                        log::info!("[Evolution] Triggered via durable user statement");
+                        return true;
+                    }
+                    log::info!("[Evolution] Ignoring marker without durable user evidence");
                 }
             }
         }
     }
 
-    // ── Layer 2: 物理安全网 ─────────────────────────────
-    // 兜底 A: 发生过工具调用 (说明有实质操作)
-    if total_rounds > 0 {
-        log::info!(
-            "[Evolution] Triggered via fallback (tool rounds: {})",
-            total_rounds
-        );
-        return true;
-    }
-
-    // 兜底 B: 用户对话深入 (用户发言 >= 3 次)
-    let user_msg_count = messages
-        .iter()
-        .filter(|m| m.get("role").and_then(|r| r.as_str()) == Some("user"))
-        .count();
-    if user_msg_count >= 3 {
-        log::info!(
-            "[Evolution] Triggered via fallback (user messages: {})",
-            user_msg_count
-        );
-        return true;
-    }
-
+    // ── Layer 2: 深入对话安全网 ─────────────────────────
     false
+}
+
+#[cfg(test)]
+mod extraction_policy_tests {
+    use super::*;
+
+    fn message(role: &str, content: &str) -> Value {
+        json!({ "role": role, "content": content })
+    }
+
+    #[test]
+    fn explicit_no_change_request_blocks_learning() {
+        let messages = vec![
+            message("user", "请检查环境，不要猜测，也不要修改任何内容。"),
+            message("assistant", "发现了一个可执行文件。<|mem|>"),
+        ];
+        assert!(!should_extract(&messages, 0));
+    }
+
+    #[test]
+    fn failed_tool_exploration_does_not_become_memory() {
+        let messages = vec![
+            message("user", "检查一下当前环境"),
+            message("assistant", "我认为已经确认。<|mem|>"),
+        ];
+        assert!(!should_extract(&messages, 1));
+    }
+
+    #[test]
+    fn tool_use_alone_is_not_a_learning_signal() {
+        let messages = vec![message("user", "检查一下当前环境")];
+        assert!(!should_extract(&messages, 0));
+    }
+
+    #[test]
+    fn explicit_user_memory_request_remains_supported() {
+        let messages = vec![message("user", "请记住我更喜欢简短的回答")];
+        assert!(should_extract(&messages, 1));
+    }
+
+    #[test]
+    fn long_conversation_without_durable_user_evidence_does_not_learn() {
+        let messages = vec![
+            message("user", "先看看现状"),
+            message("assistant", "好的"),
+            message("user", "再检查一下"),
+            message("assistant", "继续"),
+            message("user", "给我结论"),
+            message("assistant", "这是结论 <|mem|>"),
+        ];
+        assert!(!should_extract(&messages, 0));
+    }
+
+    #[test]
+    fn durable_preference_with_marker_can_learn() {
+        let messages = vec![
+            message("user", "我更喜欢简短直接的回复"),
+            message("assistant", "明白了 <|mem|>"),
+        ];
+        assert!(should_extract(&messages, 0));
+    }
+
+    #[test]
+    fn repeated_failures_become_candidates_but_single_failures_do_not() {
+        let errors = vec![
+            json!({"id":1,"tool_name":"read_file","error_type":"permission_denied"}),
+            json!({"id":2,"tool_name":"read_file","error_type":"permission_denied"}),
+            json!({"id":3,"tool_name":"web_search","error_type":"transient_network"}),
+        ];
+        let candidates = build_diagnostic_candidates(&errors);
+        assert_eq!(candidates.len(), 1);
+        assert!(candidates[0].claim.contains("read_file"));
+        assert!(candidates[0].claim.contains("需要复核根因"));
+        assert!(!candidates[0].claim.contains("web_search"));
+    }
 }
 
 /// 从对话尾部提取持久性事实，写入 wiki/learned/
@@ -142,7 +285,7 @@ pub async fn extract_learned_facts(
     _app: AppHandle,
     messages: Vec<Value>,
     conv_id: String,
-    total_rounds: i64,
+    tool_failures: i64,
 ) {
     // ── Step 1: 只读检查冷却 (不占位) ────────────────────
     let now_instant = std::time::Instant::now();
@@ -161,7 +304,7 @@ pub async fn extract_learned_facts(
     } // lock 释放
 
     // ── Step 2: 三层漏斗判断 ────────────────────────────
-    if !should_extract(&messages, total_rounds) {
+    if !should_extract(&messages, tool_failures) {
         log::info!(
             "[Evolution] Skipping extraction for conv={} (trivial chat)",
             conv_id
@@ -226,6 +369,10 @@ pub async fn extract_learned_facts(
 - 只提取 **NEW** 的事实（不重复常识）
 - 只提取 **PERSISTENT** 的事实（会在未来的对话中有用）
 - 每条事实必须是独立的、可复用的知识点
+- 用户明确要求不记忆、不保存、只读或不修改时，必须返回 `[]`
+- 环境与项目状态只接受用户明确陈述，或工具结果直接证明的事实
+- 不得从目录名、常见默认值、路径不存在、失败的工具调用或助手自己的推测中推导事实
+- “未找到”不等于“不存在”；无法核验时返回 `[]`
 
 ## 输出格式
 返回 JSON 数组（如果没有值得提取的内容，返回空数组 `[]`）：
@@ -539,7 +686,10 @@ struct DreamReport {
     soul_hash: String,
 }
 
-/// 四阶段梦境流水线
+/// 夜间整理流水线。
+///
+/// SOUL 只允许用户显式维护；Dream 只能整理事实、生成待审阅诊断候选，
+/// 绝不能自动改写人格、权限或执行策略。
 async fn run_dream_pipeline(_app: &AppHandle) -> DreamReport {
     let mut report = DreamReport {
         facts_extracted: 0,
@@ -558,15 +708,13 @@ async fn run_dream_pipeline(_app: &AppHandle) -> DreamReport {
     // ── Phase 2: 相似合并 ──────────────────────────────────
     report.memories_merged = phase_merge_similar();
 
-    // ── Phase 3: SOUL 精炼 ─────────────────────────────────
-    let (refined, hash) = phase_soul_refinement(_app).await;
-    report.soul_refined = refined;
-    report.soul_hash = hash;
+    // SOUL 是稳定身份边界。仅记录当前 hash 用于审计，不修改文件。
+    report.soul_hash = current_soul_hash();
 
-    // ── Phase 4: 失败模式分析 (目标 19) ────────────────
+    // ── Phase 3: 失败模式候选（只进入 diagnostic candidate）
     report.failure_insights = phase_failure_analysis().await;
 
-    // ── Phase 5: 笔记语义消化 (Phase 3) ────────────────
+    // ── Phase 4: 笔记语义消化 ──────────────────────────────
     report.notebook_notes_digested = phase_notebook_digest(_app).await;
 
     // 构建摘要
@@ -577,14 +725,8 @@ async fn run_dream_pipeline(_app: &AppHandle) -> DreamReport {
     if report.memories_merged > 0 {
         summary_parts.push(format!("合并 {} 条相似记忆", report.memories_merged));
     }
-    if report.soul_refined {
-        summary_parts.push("SOUL.md 已精炼".to_string());
-    }
     if report.failure_insights > 0 {
-        summary_parts.push(format!(
-            "从执行失败中提炼了 {} 条避坑指南",
-            report.failure_insights
-        ));
+        summary_parts.push(format!("生成 {} 条待审阅诊断候选", report.failure_insights));
     }
     if report.notebook_notes_digested > 0 {
         summary_parts.push(format!(
@@ -601,7 +743,56 @@ async fn run_dream_pipeline(_app: &AppHandle) -> DreamReport {
     report
 }
 
-/// Phase 4 (目标 19): 失败模式分析 — 扫描 execution_errors, 提炼避坑指南并追加到 SOUL.md
+#[derive(Clone, Debug, PartialEq)]
+struct DiagnosticCandidate {
+    id: String,
+    claim: String,
+    evidence: String,
+}
+
+fn build_diagnostic_candidates(errors: &[Value]) -> Vec<DiagnosticCandidate> {
+    let mut groups: HashMap<(String, String), Vec<i64>> = HashMap::new();
+    for error in errors {
+        let tool = error
+            .get("tool_name")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown")
+            .to_string();
+        let error_type = error
+            .get("error_type")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown")
+            .to_string();
+        let error_id = error.get("id").and_then(Value::as_i64).unwrap_or_default();
+        groups.entry((tool, error_type)).or_default().push(error_id);
+    }
+
+    let mut candidates = groups
+        .into_iter()
+        .filter(|(_, ids)| ids.len() >= 2)
+        .map(|((tool, error_type), ids)| {
+            let signature = format!("{tool}/{error_type}");
+            DiagnosticCandidate {
+                id: format!("diagnostic-{}", simple_hash(&signature)),
+                claim: format!(
+                    "工具 {tool} 在最近诊断窗口重复出现 {error_type}（{} 次），需要复核根因后才能提升为程序性策略。",
+                    ids.len()
+                ),
+                evidence: json!({
+                    "tool": tool,
+                    "errorType": error_type,
+                    "errorIds": ids,
+                })
+                .to_string(),
+            }
+        })
+        .collect::<Vec<_>>();
+    candidates.sort_by(|left, right| left.id.cmp(&right.id));
+    candidates
+}
+
+/// 扫描 execution_errors，只生成待审阅的诊断候选。
+/// 单次错误继续保留在诊断表，不形成长期规则；任何错误都不得写入 SOUL。
 async fn phase_failure_analysis() -> i64 {
     let db_path = super::get_data_dir().join("bob.db");
     let conn = match rusqlite::Connection::open(&db_path) {
@@ -615,118 +806,38 @@ async fn phase_failure_analysis() -> i64 {
         return 0;
     }
 
-    log::info!(
-        "[Evolution] Phase 4: Analyzing {} execution errors",
-        errors.len()
-    );
-
-    // 按 (tool_name, error_type) 分组统计
-    let mut groups: HashMap<String, usize> = HashMap::new();
-    let mut error_details = Vec::new();
-    let mut ids_to_mark: Vec<i64> = Vec::new();
-
-    for err in &errors {
-        let tool = err
-            .get("tool_name")
-            .and_then(|v| v.as_str())
-            .unwrap_or("unknown");
-        let etype = err
-            .get("error_type")
-            .and_then(|v| v.as_str())
-            .unwrap_or("unknown");
-        let msg = err
-            .get("error_message")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        let key = format!("{}/{}", tool, etype);
-        *groups.entry(key.clone()).or_insert(0) += 1;
-
-        // 取每组最多 2 条详情
-        if groups[&key] <= 2 {
-            let msg_short: String = msg.chars().take(200).collect();
-            error_details.push(format!("- [{}] {}: {}", tool, etype, msg_short));
-        }
-
-        if let Some(id) = err.get("id").and_then(|v| v.as_i64()) {
-            ids_to_mark.push(id);
+    let ids_to_mark = errors
+        .iter()
+        .filter_map(|error| error.get("id").and_then(Value::as_i64))
+        .collect::<Vec<_>>();
+    let candidates = build_diagnostic_candidates(&errors);
+    let now = super::now_ms();
+    for candidate in &candidates {
+        if let Err(error) = conn.execute(
+            "INSERT INTO memory_entries
+             (id, claim, memory_type, scope, source, confidence, evidence,
+              first_seen, last_confirmed, status, version, created_at, updated_at)
+             VALUES (?1, ?2, 'diagnostic', 'global', 'dream_diagnostic', 0.5, ?3,
+                     ?4, ?4, 'candidate', 1, ?4, ?4)
+             ON CONFLICT(id) DO UPDATE SET
+               claim=excluded.claim,
+               evidence=excluded.evidence,
+               last_confirmed=excluded.last_confirmed,
+               status='candidate',
+               version=memory_entries.version + 1,
+               updated_at=excluded.updated_at",
+            rusqlite::params![candidate.id, candidate.claim, candidate.evidence, now],
+        ) {
+            log::warn!("[Evolution] Failed to save diagnostic candidate: {}", error);
         }
     }
-
-    // 构建摘要
-    let group_summary: Vec<String> = groups
-        .iter()
-        .map(|(k, v)| format!("  {} (×{})", k, v))
-        .collect();
-
-    let analysis_prompt = format!(
-        "分析以下 Bob Agent 过去 48 小时的执行失败记录，提炼出 3-5 条最有价值的避坑指南。\n\
-         每条格式: '⚠️ 当 [场景] 时，应 [正确做法]，避免 [错误做法]。'\n\
-         只输出真正高频或严重的模式，不要列举琐碎错误。如果错误记录全是偶发的，可以只输出 1-2 条或不输出。\n\n\
-         失败模式统计 ({} 条记录, {} 个模式):\n{}\n\n\
-         具体错误详情 (每组取样):\n{}",
-        errors.len(), groups.len(),
-        group_summary.join("\n"),
-        error_details.join("\n")
-    );
-
-    // 调用 Clerk 分析
-    let insights = crate::llm::call_clerk_oneshot(
-        "你是 Bob Agent 的执行诊断引擎。只输出避坑指南条目，不要输出其他内容。",
-        &analysis_prompt,
-        512,
-    )
-    .await;
-
-    let insights_text = match insights {
-        Some(text) if !text.trim().is_empty() => text.trim().to_string(),
-        _ => {
-            log::info!("[Evolution] Phase 4: Clerk returned empty insights, marking as analyzed");
-            // 即使 Clerk 没返回内容，也标记已分析避免重复处理
-            let _ = crate::db::mark_errors_analyzed(&conn, &ids_to_mark);
-            return 0;
-        }
-    };
-
-    // 统计提炼出的条目数
-    let insight_count = insights_text
-        .lines()
-        .filter(|l| {
-            l.trim().starts_with('⚠') || l.trim().starts_with('-') || l.trim().starts_with('*')
-        })
-        .count() as i64;
-
-    // 追加到 SOUL.md 的避坑区
-    let memory_dir = super::get_data_dir().join("memory");
-    let soul_path = memory_dir.join("SOUL.md");
-    let _ = std::fs::create_dir_all(&memory_dir);
-
-    let current_soul = std::fs::read_to_string(&soul_path).unwrap_or_default();
-    let now_str = chrono::Local::now().format("%Y-%m-%d").to_string();
-    let avoidance_section = format!(
-        "\n\n## 🚫 避坑指南 (Dream Engine 自动提炼)\n> 最后更新: {}\n\n{}",
-        now_str, insights_text
-    );
-
-    // 如果已有避坑区，替换；否则追加
-    let new_soul = if let Some(pos) = current_soul.find("## 🚫 避坑指南") {
-        format!("{}{}", &current_soul[..pos].trim_end(), avoidance_section)
-    } else {
-        format!("{}{}", current_soul.trim_end(), avoidance_section)
-    };
-
-    if let Err(e) = std::fs::write(&soul_path, &new_soul) {
-        log::warn!("[Evolution] Phase 4: Failed to write SOUL.md: {}", e);
-    } else {
-        log::info!(
-            "[Evolution] Phase 4: Appended {} avoidance tips to SOUL.md",
-            insight_count
+    if let Err(error) = crate::db::mark_errors_analyzed(&conn, &ids_to_mark) {
+        log::warn!(
+            "[Evolution] Failed to mark diagnostic errors analyzed: {}",
+            error
         );
     }
-
-    // 标记已分析
-    let _ = crate::db::mark_errors_analyzed(&conn, &ids_to_mark);
-
-    insight_count.max(1) // 至少返回 1 表示执行了分析
+    candidates.len() as i64
 }
 
 /// Phase 1: 过时淘汰 — 清理 30 天未更新且未被引用的 learned 记忆
@@ -886,204 +997,11 @@ fn title_similarity(a: &str, b: &str) -> f64 {
     intersection as f64 / union as f64
 }
 
-/// Phase 3: SOUL 精炼 — 结合新记忆重写 SOUL.md
-/// 附带 hash 防冲突保护：如果用户手动编辑过 SOUL，跳过重写
-async fn phase_soul_refinement(_app: &AppHandle) -> (bool, String) {
+fn current_soul_hash() -> String {
     let memory_dir = super::get_data_dir().join("memory");
     let soul_path = memory_dir.join("SOUL.md");
-
-    // 读取当前 SOUL
-    let current_soul = if soul_path.exists() {
-        std::fs::read_to_string(&soul_path).unwrap_or_default()
-    } else {
-        String::new()
-    };
-
-    // 计算当前 hash (SHA256 简化版: 取前 16 位)
-    let current_hash = simple_hash(&current_soul);
-
-    // 检查上次做梦时记录的 hash，如果不同说明用户手动编辑过
-    let db_path = super::get_data_dir().join("bob.db");
-    let last_hash = if let Ok(conn) = rusqlite::Connection::open(&db_path) {
-        conn.query_row(
-            "SELECT soul_hash FROM evolution_log ORDER BY created_at DESC LIMIT 1",
-            [],
-            |row| row.get::<_, String>(0),
-        )
-        .unwrap_or_default()
-    } else {
-        String::new()
-    };
-
-    if !last_hash.is_empty() && last_hash != current_hash {
-        log::info!("[Evolution] SOUL.md manually edited (hash mismatch), skipping refinement");
-        return (false, current_hash);
-    }
-
-    // 如果 SOUL 为空，暂不生成（需要用户先写一版初稿）
-    if current_soul.trim().is_empty() {
-        return (false, current_hash);
-    }
-
-    // 收集最新的 learned 事实（最多 10 条最新的）
-    let learned_dir = get_learned_dir();
-    let mut recent_facts = Vec::new();
-    if learned_dir.exists() {
-        let mut entries: Vec<(PathBuf, std::time::SystemTime)> = std::fs::read_dir(&learned_dir)
-            .into_iter()
-            .flat_map(|rd| rd.flatten())
-            .filter_map(|e| {
-                let p = e.path();
-                if p.is_file() {
-                    let m = std::fs::metadata(&p).and_then(|m| m.modified()).ok()?;
-                    Some((p, m))
-                } else {
-                    None
-                }
-            })
-            .collect();
-        entries.sort_by(|a, b| b.1.cmp(&a.1));
-        for (path, _) in entries.into_iter().take(10) {
-            if let Ok(content) = std::fs::read_to_string(&path) {
-                if content.contains("superseded: true") {
-                    continue;
-                }
-                recent_facts.push(content);
-            }
-        }
-    }
-
-    if recent_facts.is_empty() {
-        return (false, current_hash);
-    }
-
-    // 调用 Clerk 模型精炼 SOUL
-    let config = super::read_config();
-    let clerk_model = config
-        .get("clerkModel")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
-
-    if clerk_model.is_empty() {
-        return (false, current_hash);
-    }
-
-    let (provider, api_key, model_id, base_url) =
-        super::llm::read_llm_config_for_model(&clerk_model);
-    if api_key.is_empty() && provider != "offline" {
-        return (false, current_hash);
-    }
-
-    let final_api_key = if api_key == "__GCP_TOKEN__" {
-        let cred_path = super::gcp_auth::get_gcp_credential_path();
-        match super::gcp_auth::GcpTokenManager::from_file(&cred_path) {
-            Ok(mgr) => match mgr.get_access_token().await {
-                Ok(token) => token,
-                Err(_) => return (false, current_hash),
-            },
-            Err(_) => return (false, current_hash),
-        }
-    } else {
-        api_key
-    };
-
-    let facts_text = recent_facts.join("\n---\n");
-    let refinement_prompt = format!(
-        r#"你是一个人格精炼引擎。根据以下最新的知识事实，精炼更新下面的 SOUL 人格文件。
-
-## 规则
-- 保持 SOUL 在 300-500 字以内
-- 只做精细微调（更新事实、修正偏差），不要大幅改写风格
-- 保留用户已有的核心人格设定
-- 输出 SOUL.md 的完整新内容（纯 Markdown，不要代码围栏）
-
-## 当前 SOUL.md
-{current_soul}
-
-## 最新知识事实
-{facts_text}"#
-    );
-
-    let client = match reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(60))
-        .build()
-    {
-        Ok(c) => c,
-        Err(_) => return (false, current_hash),
-    };
-
-    let body = json!({
-        "model": model_id,
-        "messages": [
-            { "role": "system", "content": "你是 SOUL.md 人格精炼引擎。只输出精炼后的完整 SOUL 内容。" },
-            { "role": "user", "content": refinement_prompt }
-        ],
-        "temperature": 0.3,
-        "max_tokens": 1024,
-    });
-
-    let url = format!("{}/chat/completions", base_url);
-    let resp = match client
-        .post(&url)
-        .header("Content-Type", "application/json")
-        .header("Authorization", format!("Bearer {}", final_api_key))
-        .json(&body)
-        .send()
-        .await
-    {
-        Ok(r) if r.status().is_success() => r,
-        _ => return (false, current_hash),
-    };
-
-    let resp_json: Value = match resp.json().await {
-        Ok(j) => j,
-        Err(_) => return (false, current_hash),
-    };
-
-    let new_soul = resp_json
-        .pointer("/choices/0/message/content")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .trim()
-        .trim_start_matches("```markdown")
-        .trim_start_matches("```")
-        .trim_end_matches("```")
-        .trim()
-        .to_string();
-
-    if new_soul.is_empty() || new_soul.len() < 50 {
-        log::warn!("[Evolution] SOUL refinement output too short, skipping");
-        return (false, current_hash);
-    }
-
-    // 字数检查 (≤500 字硬上限)
-    let char_count = new_soul.chars().count();
-    if char_count > 600 {
-        log::warn!(
-            "[Evolution] SOUL refinement output too long ({}字), skipping",
-            char_count
-        );
-        return (false, current_hash);
-    }
-
-    // 写入新 SOUL
-    let _ = std::fs::create_dir_all(&memory_dir);
-    match std::fs::write(&soul_path, &new_soul) {
-        Ok(_) => {
-            let new_hash = simple_hash(&new_soul);
-            log::info!(
-                "[Evolution] SOUL.md refined: {}字, hash={}",
-                char_count,
-                new_hash
-            );
-            (true, new_hash)
-        }
-        Err(e) => {
-            log::warn!("[Evolution] Failed to write SOUL.md: {}", e);
-            (false, current_hash)
-        }
-    }
+    let current_soul = std::fs::read_to_string(soul_path).unwrap_or_default();
+    simple_hash(&current_soul)
 }
 
 /// 简易字符串 hash (用于 SOUL 防冲突检测)
@@ -1369,19 +1287,20 @@ fn sync_fact_to_memory_index(
         _ => ("fact", "global".to_string(), 0.8),
     };
 
-    let claim = format!("{}: {}", title, content.chars().take(200).collect::<String>());
+    let claim = format!(
+        "{}: {}",
+        title,
+        content.chars().take(200).collect::<String>()
+    );
     let now = super::now_ms();
     let evidence = serde_json::json!([{"conv_id": conv_id, "timestamp": now}]).to_string();
     let file_path_str = file_path.to_string_lossy().to_string();
 
     // 用户反馈属于明确纠错，复用统一的版本替代入口，避免与即时纠错形成多个 active 版本。
     if fact_type == "feedback" {
-        if let Err(error) = crate::db::store_explicit_correction(
-            &claim,
-            &scope,
-            &evidence,
-            Some(&file_path_str),
-        ) {
+        if let Err(error) =
+            crate::db::store_explicit_correction(&claim, &scope, &evidence, Some(&file_path_str))
+        {
             log::warn!("Failed to index explicit feedback correction: {}", error);
         }
         return;

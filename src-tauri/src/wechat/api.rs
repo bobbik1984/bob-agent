@@ -152,7 +152,24 @@ impl WechatApi {
         let headers = self.build_headers();
         let body_json = serde_json::to_string(&req).unwrap_or_default();
 
-        log::info!("[wechat-api] sendmessage POST {} body: {}", url, body_json);
+        let message_chars = req
+            .msg
+            .as_ref()
+            .and_then(|msg| msg.item_list.as_ref())
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(|item| item.text_item.as_ref())
+                    .filter_map(|item| item.text.as_ref())
+                    .map(|text| text.chars().count())
+                    .sum::<usize>()
+            })
+            .unwrap_or(0);
+        log::info!(
+            "[wechat-api] sendmessage POST {} message_chars={}",
+            url,
+            message_chars
+        );
 
         let res = crate::tunnel::send_request(
             reqwest::Method::POST,
@@ -167,11 +184,7 @@ impl WechatApi {
         let status = res.status();
         let text = res.text().await.unwrap_or_default();
 
-        log::info!(
-            "[wechat-api] sendmessage response: status={} body={}",
-            status,
-            text
-        );
+        log::info!("[wechat-api] sendmessage response: status={}", status);
 
         if !status.is_success() {
             return Err(format!("HTTP {}: {}", status, text));

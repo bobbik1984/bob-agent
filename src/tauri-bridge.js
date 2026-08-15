@@ -498,8 +498,14 @@ if (IS_TAURI) {
       case 'llm_get_active_models': return { primary: 'deepseek-chat', clerk: null, vision: null };
       case 'llm_rescan_models': return true;
       case 'llm_refresh_models': return true;
-      case 'llm_get_registry': return { providers: {} };
+      case 'llm_get_registry': return { providers: [] };
       case 'llm_save_registry': return true;
+
+      // 本地模型（浏览器预览不访问磁盘或启动推理进程）
+      case 'check_model_downloaded': return false;
+      case 'pause_download': return true;
+      case 'delete_local_model': return true;
+      case 'download_model': return { success: false, error: 'Browser preview does not download models' };
 
       // 日历
       case 'system_list_events': return [];
@@ -585,6 +591,7 @@ if (IS_TAURI) {
       case 'wechat_get_current_status': return { connected: false };
       case 'system_save_telegram_token': case 'system_save_discord_token': return true;
       case 'system_get_telegram_token': case 'system_get_discord_token': return '';
+      case 'get_connected_devices': return [];
 
       // 浏览器增强
       case 'system_browser_detect': return { found: false };
@@ -969,6 +976,14 @@ window.appAPI = {
   stopOfflineEngine: async () => invoke('stop_offline_engine'),
   getOfflineEngineStatus: async () => invoke('get_offline_engine_status'),
   openLlamaEngineDir: () => invoke('system_open_llm_engine_dir'),
+  openModelsDir: async () => {
+    if (!IS_TAURI) return false;
+    const { appDataDir, join } = await import('@tauri-apps/api/path');
+    const dataDir = await appDataDir();
+    const modelsPath = await join(dataDir, 'models');
+    await invoke('plugin:shell|open', { path: modelsPath });
+    return true;
+  },
 
   // ── 微信助理 (Rust 原生 WeChat Gateway) ─────────────────
   wechatGetLoginQr: async () => invoke('wechat_get_login_qr'),

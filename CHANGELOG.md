@@ -4,7 +4,23 @@ All notable changes to bob-agent will be documented in this file.
 
 ## [Unreleased]
 
+## [0.9.3] - 2026-08-15 - Reliable Personal Agent Loop
+
+### Added
+- Added deterministic Project resolution for Advanced Goals, with minimal clarification instead of creating a Goal when multiple projects remain plausible.
+- Added a pure-Rust Capability Snapshot and tool intersection so Bob only exposes capabilities that are actually callable on the current device.
+- Added a deterministic Action Selector for local execution, PC handoff, user clarification and safe deferral.
+- Added structured execution-error classification, bounded recovery and idempotent ResultReceipt records for Direct and Advanced work.
+
+### Safety and learning
+- Stopped Dream from rewriting `SOUL.md`; isolated repeated tool failures as reviewable diagnostic candidates.
+- Restricted durable learning to explicit preferences, corrections and deterministically verified Goal outcomes; verified experiences remain inactive review candidates rather than automatic Skills.
+- Prevented remote/mobile HTTP streams from exposing raw model reasoning while preserving a progress signal.
+- Removed full WeChat message bodies from logs and made expired sessions fail closed instead of appearing connected.
+
 ### Fixed
+- Aggregated overdue todo reminders into one bounded notification instead of replaying every historical item individually.
+- Routed local-model filesystem and process actions through the Tauri bridge so browser previews remain safe and deterministic.
 - Unified the Work experience across PC and Android around one shared set of Overview, Goals, Tasks, Decisions and Activity views, with the same project accordion content on both clients.
 - Reused the established responsive navigation contract: wide desktop windows place Work sub-navigation in the left sidebar, while compact desktop windows and Android place it flush against the top content boundary with a solid accent selection state.
 - Removed the legacy slogan-style Work header, duplicate project selector and inconsistent page-specific navigation treatment.

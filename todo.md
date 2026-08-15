@@ -3,7 +3,7 @@
 > 当前发布线：v0.9.2
 > 产品方向：`docs/PRODUCT_VISION.md`
 > 阶段顺序：`docs/BOB_EVOLUTION_ROADMAP.md`
-> 当前计划：`docs/superpowers/plans/2026-08-14-phase-5-5-personal-assistant-context-plan.md`
+> 当前计划：`docs/superpowers/plans/2026-08-15-phase-5-5-reliable-personal-agent-loop-plan.md`
 
 本文件只保存当前实施批次和紧邻下一批的任务。目标架构不得写成已实现能力。
 
@@ -116,7 +116,7 @@
 - [x] 9 项前端测试、生产构建、12 项 Daily Brief Rust 测试及 140 项完整 Rust 回归通过。
 - [ ] 在下一次 PC/Android 发布产物中完成真机 UI、客户端体积和跨端已读/刷新验收。
 
-## 当前主线：Phase 5.5-A/B 个人助手上下文恢复
+## 当前主线：Phase 5.5 可靠个人 Agent 闭环
 
 - [x] 收敛 Bob V3 目标设计，并形成 Phase 5.5-A/B 可执行计划。
 - [x] 建立无依赖基线脚本，记录现有产物、manifest 和数据库大小；既有产物来源未验证，性能字段明确为未测。
@@ -126,10 +126,25 @@
 - [x] 以默认开启的影子模式记录候选和 reason code；中低置信度不绑定项目。
 - [ ] 完成 PC 真实场景误选检查后，才启用唯一高置信度 Context Packet。
 - [x] 全量工具权限回归证明 Context Resolver 不改变 Complexity Router、R0–R3 权限和现有降级路径。
-- [x] 11 项上下文测试、151 项全量 Rust 测试、19 项前端测试和生产构建通过。
+- [x] 11 项上下文测试、完整 Rust 回归、19 项前端测试和生产构建通过。
 - [ ] 完成至少一次 PC 真实场景验证；Android 行为留到 Capability Snapshot 阶段验证。
 
 **验收**：用户只说目的时，唯一明确项目能够恢复；两个合理候选时不会误选；上下文包有来源、revision、时效和严格预算；关闭开关可以无损退回当前聊天路径。
+
+### Phase 5.5-C–E 内部闭环（P0/P1）
+
+- [x] 停止 Dream 自动重写 SOUL，并将重复工具失败分流为待审阅 diagnostic candidate。
+- [ ] 用真实 PC Work Core 数据完成 shadow 误选检查，证据通过后启用唯一高置信度 Context Packet。
+- [x] 让 Auto Advanced 优先绑定解析后的真实 Project；歧义时不创建正式 Goal，只询问一次关键问题。
+- [x] 实现纯 Rust Capability Snapshot；区分可调用、降级、不可用、文件授权范围与已连接 PC。
+- [x] 将模型工具表与当前能力求交集；不可用能力不得暴露，检测到但缺少适配器的 PowerShell/Git 不进入工具表。
+- [x] 实现 `local_execute / pc_handoff / ask / defer` 确定性 Action Selector。
+- [x] 建立错误分类和有界修复：只读瞬时故障确定性重试一次，Advanced 最多一次改变策略，未知副作用立即停止。
+- [x] 为有副作用的 Direct Action 增加最小幂等 ResultReceipt；Advanced 复用 Goal Evidence、Attempt 与 Event。
+- [x] 收紧记忆准入：明确纠正和长期偏好可生效，验证成功只生成待审阅经验候选；单次例外和工具失败不升级。
+- [ ] 通过五个日常场景、故障注入、PC/Android 真机、体积与资源质量门。
+
+**验收**：Bob 能从目的恢复正确对象，感知真实能力，选择最轻路径，以回执证明完成，并在不污染人格和不增加用户配置的前提下成长。
 
 ## v0.8.0 遗留质量门
 
@@ -140,7 +155,7 @@
 
 ## 暂缓
 
-在 Phase 5.5 五个日常场景稳定通过前，暂缓多角色编排、Runtime Host、订阅调度、完整任务图 UI、自动 Skill、iOS、独立 Web UI 和新增通讯渠道。
+在 Phase 5.5 五个日常场景稳定通过前，暂缓 Dynamic Task Graph、多角色编排、Runtime Host、订阅调度、完整任务图 UI、通用 Shell、自动 Skill、iOS、独立 Web UI 和新增通讯渠道。
 
 ## 完成规则
 

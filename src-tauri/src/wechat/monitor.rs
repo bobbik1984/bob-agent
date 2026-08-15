@@ -83,12 +83,12 @@ pub fn start_monitor(state: Arc<WechatState>) {
     // Spawn the long-poll monitor
     let base_url = account.base_url.clone();
     let token = account.token.clone();
-    tauri::async_runtime::spawn(async move {
-        monitor_weixin_provider(account_id, base_url, token, stop_rx, msg_tx).await;
-    });
-
+    let monitor_state = state.clone();
     *state.connected.write().unwrap() = true;
     info!("[wechat] Monitor started");
+    tauri::async_runtime::spawn(async move {
+        monitor_weixin_provider(account_id, base_url, token, stop_rx, msg_tx, monitor_state).await;
+    });
 }
 
 #[derive(Clone)]
@@ -104,6 +104,7 @@ pub async fn monitor_weixin_provider(
     token: Option<String>,
     mut stop_rx: tokio::sync::watch::Receiver<bool>,
     message_tx: tokio::sync::mpsc::UnboundedSender<WeixinMessage>,
+    state: Arc<WechatState>,
 ) {
     info!("Weixin monitor started (account={})", account_id);
 
@@ -160,11 +161,9 @@ pub async fn monitor_weixin_provider(
                     let is_session_expired =
                         ret == SESSION_EXPIRED_ERRCODE || errcode == SESSION_EXPIRED_ERRCODE;
                     if is_session_expired {
+                        *state.connected.write().unwrap() = false;
                         error!("getUpdates: session expired, please re-login via QR");
-                        // Wait for a long time or stop since token is invalid
-                        consecutive_failures = 0;
-                        sleep(Duration::from_secs(600)).await;
-                        continue;
+                        break;
                     }
 
                     consecutive_failures += 1;

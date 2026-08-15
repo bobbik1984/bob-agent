@@ -218,6 +218,8 @@ pub struct SendMessageResp {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ret: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub errcode: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub errmsg: Option<String>,
 }
 
@@ -346,4 +348,20 @@ pub struct GetUploadUrlResp {
     pub thumb_upload_param: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub upload_full_url: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SendMessageResp;
+
+    #[test]
+    fn send_message_response_preserves_wechat_errcode() {
+        let response: SendMessageResp =
+            serde_json::from_str(r#"{"errcode":-14,"errmsg":"session timeout"}"#)
+                .expect("response should deserialize");
+
+        assert_eq!(response.ret, None);
+        assert_eq!(response.errcode, Some(-14));
+        assert_eq!(response.errmsg.as_deref(), Some("session timeout"));
+    }
 }

@@ -1,9 +1,9 @@
 project:
   name: bob-agent
-  version: '0.9.2'
+  version: '0.9.3'
   status: active
   north_star: Bob 让复杂工作不断线
-  updated: '2026-08-14'
+  updated: '2026-08-15'
   tech:
   - Tauri
   - Rust
@@ -79,7 +79,21 @@ phases:
     status: done
   - text: PC 真实场景验证与高置信度有界注入
     status: todo
-  - text: 五个日常场景和 PC/Android 真机验收
+  - text: Dream 停止修改 SOUL，失败分流到诊断记忆
+    status: done
+  - text: Auto Advanced 绑定解析后的真实 Project
+    status: done
+  - text: Capability Snapshot 与可用工具求交集
+    status: done
+  - text: local_execute、pc_handoff、ask、defer Action Selector
+    status: done
+  - text: 错误分类、有界修复与最小 ResultReceipt
+    status: done
+  - text: 验证结果驱动的纠正、偏好与经验候选
+    status: done
+  - text: 五个日常场景与故障注入的确定性代码回放
+    status: done
+  - text: PC/Android 真机、体积与资源质量门
     status: todo
 - name: Work UI consistency
   tasks:

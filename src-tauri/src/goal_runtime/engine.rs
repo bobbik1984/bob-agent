@@ -1,8 +1,12 @@
+use serde::Serialize;
 use serde_json::{json, Value};
 use std::hash::{Hash, Hasher};
 use std::time::Instant;
 use tauri::{AppHandle, Emitter, Manager};
 
+use crate::assistant_context::{
+    resolve_context_from_work_core, AssistantContext, ContextSourceSnapshot,
+};
 use crate::complexity_router::{RouteDecision, RouteTaskKind};
 use crate::db::DbState;
 use crate::work_core::models::{CreateWorkObjectInput, WorkObjectKind};
@@ -153,12 +157,21 @@ fn response_value(
             "nextAction": run.next_action,
             "approval": approval,
         },
+        "resultReceipt": {
+            "decisionId": run.run_id,
+            "status": run.status,
+            "verifiedEvidence": [],
+            "stateChanges": [],
+            "sideEffectState": "none",
+            "correctionRefs": [],
+            "completedAt": run.finished_at,
+        },
         "tool_summary": { "total_calls": 0, "total_failures": 0, "calls": [] },
     })
 }
 
 fn attach_execution_metadata(response: &mut Value, execution: &Value) {
-    for field in ["usage", "pricing", "model", "tool_summary"] {
+    for field in ["usage", "pricing", "model", "tool_summary", "resultReceipt"] {
         if let Some(value) = execution.get(field) {
             response[field] = value.clone();
         }
@@ -171,6 +184,77 @@ fn runtime_error_response(error: impl Into<String>, route: &RouteDecision, run: 
     response["runtimeError"] = Value::String(error.clone());
     response["goal"]["runtimeError"] = Value::String(error);
     response
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProjectCandidate {
+    project_id: String,
+    title: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum GoalProjectResolution {
+    Selected(String),
+    Personal,
+    Ambiguous(Vec<ProjectCandidate>),
+}
+
+fn goal_project_resolution(
+    context: &AssistantContext,
+    snapshot: &ContextSourceSnapshot,
+) -> GoalProjectResolution {
+    if let Some(conflict) = context.conflicts.first() {
+        let candidates = conflict
+            .candidate_ids
+            .iter()
+            .filter_map(|project_id| {
+                snapshot
+                    .projects
+                    .iter()
+                    .find(|project| project.id == *project_id)
+                    .map(|project| ProjectCandidate {
+                        project_id: project.id.clone(),
+                        title: project.title.clone(),
+                    })
+            })
+            .collect::<Vec<_>>();
+        if !candidates.is_empty() {
+            return GoalProjectResolution::Ambiguous(candidates);
+        }
+    }
+    context
+        .active_object
+        .as_ref()
+        .map(|object| GoalProjectResolution::Selected(object.project_id.clone()))
+        .unwrap_or(GoalProjectResolution::Personal)
+}
+
+fn ambiguity_response(candidates: Vec<ProjectCandidate>, route: &RouteDecision) -> Value {
+    let names = candidates
+        .iter()
+        .map(|candidate| candidate.title.as_str())
+        .collect::<Vec<_>>()
+        .join(if language_is_english() { ", " } else { "、" });
+    let content = if language_is_english() {
+        format!("I found several possible projects ({names}). Which one should I continue?")
+    } else {
+        format!("我找到了多个可能的项目（{names}）。你希望我继续哪一个？")
+    };
+    json!({
+        "content": content,
+        "thinking": Value::Null,
+        "usage": Value::Null,
+        "pricing": { "input": 0.0, "output": 0.0 },
+        "model": "goal-runtime",
+        "route": route,
+        "needsClarification": true,
+        "clarification": {
+            "reasonCode": "context.ambiguous_candidates",
+            "candidates": candidates,
+        },
+        "tool_summary": { "total_calls": 0, "total_failures": 0, "calls": [] },
+    })
 }
 
 pub async fn execute_advanced_request(
@@ -192,10 +276,26 @@ pub async fn execute_advanced_request(
                 return json!({"content": status_message(GoalRunStatus::Failed), "error": error.to_string(), "route": decision})
             }
         };
-        match repository::ensure_personal_workspace(&mut conn) {
-            Ok(project_id) => project_id,
-            Err(error) => {
-                return json!({"content": status_message(GoalRunStatus::Failed), "error": error, "route": decision})
+        let resolution =
+            match resolve_context_from_work_core(&conn, &request, decision.mode, crate::now_ms()) {
+                Ok((_purpose, snapshot, context)) => goal_project_resolution(&context, &snapshot),
+                Err(error) => {
+                    log::warn!("[GoalRuntime] context resolution unavailable: {error}");
+                    GoalProjectResolution::Personal
+                }
+            };
+        match resolution {
+            GoalProjectResolution::Selected(project_id) => project_id,
+            GoalProjectResolution::Personal => {
+                match repository::ensure_personal_workspace(&mut conn) {
+                    Ok(project_id) => project_id,
+                    Err(error) => {
+                        return json!({"content": status_message(GoalRunStatus::Failed), "error": error, "route": decision})
+                    }
+                }
+            }
+            GoalProjectResolution::Ambiguous(candidates) => {
+                return ambiguity_response(candidates, &decision)
             }
         }
     };
@@ -509,6 +609,13 @@ pub async fn execute_advanced_request(
             .min(u32::MAX as u64) as u32;
         let rule = contract.evidence_rules.iter().find(|rule| rule.required);
         let verification = rule.map(|rule| verifier::verify_tool_summary(rule, &tool_summary));
+        let recovery_action = crate::execution_error::recovery_from_tool_summary(
+            &tool_summary,
+            verification
+                .as_ref()
+                .is_none_or(|outcome| outcome.state != VerificationState::Verified),
+            attempt_index,
+        );
         let attempt_status = if verification
             .as_ref()
             .is_some_and(|outcome| outcome.state == VerificationState::Verified)
@@ -687,6 +794,24 @@ pub async fn execute_advanced_request(
                         Err(error) => return runtime_error_response(error, &decision, &run),
                     }
                 };
+                {
+                    let state = app.state::<DbState>();
+                    if let Ok(conn) = state.0.lock() {
+                        if let Err(error) =
+                            crate::result_receipt::persist_verified_experience_candidate(
+                                &conn,
+                                &run.goal_id,
+                                &run.run_id,
+                                &contract.outcome,
+                                &tool_summary,
+                            )
+                        {
+                            log::warn!(
+                                "[GoalRuntime] verified experience candidate unavailable: {error}"
+                            );
+                        }
+                    };
+                }
                 verified = true;
                 break;
             }
@@ -699,7 +824,10 @@ pub async fn execute_advanced_request(
             {
                 break;
             }
-            execution_messages.push(json!({"role":"user","content":"The previous bounded attempt did not produce verifiable tool evidence. Repair only the requested goal using the available safe tools. Do not claim completion without a real tool receipt."}));
+            let Some(prompt) = crate::execution_error::recovery_prompt(recovery_action) else {
+                break;
+            };
+            execution_messages.push(json!({"role":"user","content":prompt}));
         }
     }
 
@@ -795,4 +923,94 @@ pub async fn execute_advanced_request(
     );
     attach_execution_metadata(&mut response, &final_result);
     response
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::assistant_context::{ContextConflict, ContextObjectRef};
+    use crate::work_core::models::WorkProject;
+
+    fn project(id: &str, title: &str) -> WorkProject {
+        WorkProject {
+            schema_version: 1,
+            id: id.into(),
+            title: title.into(),
+            mission: String::new(),
+            status: "active".into(),
+            current_phase: None,
+            summary: None,
+            source_ref: None,
+            metadata: Value::Null,
+            revision: 1,
+            created_at: 1,
+            updated_at: 1,
+            deleted_at: None,
+        }
+    }
+
+    fn empty_context() -> AssistantContext {
+        AssistantContext {
+            active_object: None,
+            relevant_facts: Vec::new(),
+            conflicts: Vec::new(),
+            confidence: 0.0,
+            reason_codes: Vec::new(),
+            generated_at: 1,
+        }
+    }
+
+    #[test]
+    fn goal_project_uses_the_resolved_project() {
+        let mut context = empty_context();
+        context.active_object = Some(ContextObjectRef {
+            object_id: "project_bob".into(),
+            object_kind: "project".into(),
+            project_id: "project_bob".into(),
+            title: "Bob".into(),
+            source_ref: "work_project:project_bob@1".into(),
+        });
+        assert_eq!(
+            goal_project_resolution(&context, &ContextSourceSnapshot::default()),
+            GoalProjectResolution::Selected("project_bob".into())
+        );
+    }
+
+    #[test]
+    fn ambiguous_projects_require_clarification_before_goal_creation() {
+        let mut context = empty_context();
+        context.conflicts.push(ContextConflict {
+            candidate_ids: vec!["project_north".into(), "project_south".into()],
+            reason_code: "context.ambiguous_candidates".into(),
+        });
+        let snapshot = ContextSourceSnapshot {
+            projects: vec![
+                project("project_north", "North"),
+                project("project_south", "South"),
+            ],
+            aggregates: Vec::new(),
+            focus_project_ids: Vec::new(),
+        };
+        assert_eq!(
+            goal_project_resolution(&context, &snapshot),
+            GoalProjectResolution::Ambiguous(vec![
+                ProjectCandidate {
+                    project_id: "project_north".into(),
+                    title: "North".into(),
+                },
+                ProjectCandidate {
+                    project_id: "project_south".into(),
+                    title: "South".into(),
+                },
+            ])
+        );
+    }
+
+    #[test]
+    fn no_project_context_falls_back_to_personal_workspace() {
+        assert_eq!(
+            goal_project_resolution(&empty_context(), &ContextSourceSnapshot::default()),
+            GoalProjectResolution::Personal
+        );
+    }
 }

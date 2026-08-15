@@ -348,19 +348,26 @@ pub async fn send_reply(
 
     match api.send_message(req, 15_000).await {
         Ok(resp) => {
-            let ret = resp.ret.unwrap_or(0);
+            let ret = resp.ret.or(resp.errcode).unwrap_or(-1);
             let errmsg = resp.errmsg.as_deref().unwrap_or("");
             if ret != 0 {
+                if ret == -14 {
+                    *state.connected.write().unwrap() = false;
+                }
                 log::warn!(
                     "[wechat] sendmessage to {} returned ret={} errmsg={}",
                     to,
                     ret,
                     errmsg
                 );
+                Err(format!(
+                    "sendmessage returned ret={} errmsg={}",
+                    ret, errmsg
+                ))
             } else {
                 log::info!("[wechat] sendmessage to {} OK (ret={})", to, ret);
+                Ok(())
             }
-            Ok(())
         }
         Err(e) => {
             log::error!("[wechat] sendmessage to {} failed: {}", to, e);

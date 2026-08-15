@@ -1,18 +1,19 @@
 # Bob 演进路线图
 
-> 状态：v0.9.2 已完成 Phase 0–5 的首个可靠纵切片，并交付 Conversation-first Today Layer；当前主线为 Phase 5.5 个人助手智能层
+> 状态：v0.9.3 已完成 Phase 0–5 与 Phase 5.5 内部可靠闭环；当前主线为真实 PC/Android 场景和资源质量门
 > 产品北极星：`docs/PRODUCT_VISION.md`
 > Phase 5.5 设计：`docs/BOB_ARCHITECTURE_V3.md`
-> 当前实施计划：`docs/superpowers/plans/2026-08-14-phase-5-5-personal-assistant-context-plan.md`
+> 当前实施计划：`docs/superpowers/plans/2026-08-15-phase-5-5-reliable-personal-agent-loop-plan.md`
 
 ## 当前基线
 
 `v0.8.0` 已封存可靠 Capture、知识对象契约、离线分类、Todo/Event 确定性提交和 Note/Source Markdown 提交基线。它是不可修改的历史版本。
 
-当前已完成 Persistent Work Core、现有入口接入、Decision/Change Review、Complexity Router，以及单 Agent Advanced Project Loop 的可靠纵切片：Auto Advanced 可建立持久 Goal，低风险工作按预算推进，审批、证据、检查点和启动恢复均写入 SQLite。Conversation-first Today Layer 已将 Calendar、Todo、Work、Goal、Session 与 Dream 以本地只读方式投影进对话首屏。当前仍缺少：
+当前已完成 Persistent Work Core、现有入口接入、Decision/Change Review、Complexity Router，以及单 Agent Advanced Project Loop 的可靠纵切片：Auto Advanced 可建立持久 Goal，低风险工作按预算推进，审批、证据、检查点和启动恢复均写入 SQLite。Conversation-first Today Layer 已将 Calendar、Todo、Work、Goal、Session 与 Dream 以本地只读方式投影进对话首屏。Phase 5.5 的内部可靠闭环也已落地：Goal Runtime 会消费确定性解析后的 Project，Capability Snapshot 与工具表求交集，Action Selector 只允许本地执行、PC 转交、询问或延后，错误按类别有界恢复，Direct/Advanced 都返回 ResultReceipt；Dream 不再修改 SOUL，验证成功只形成待审阅经验候选。当前仍缺少：
 
-- 从一句目的稳定恢复当前工作对象与最小相关上下文；
-- 根据当前设备、权限和真实工具能力选择本地执行、转交、询问或延后；
+- 用真实 PC Work Core 数据通过误选门后，关闭默认 shadow 并正式注入唯一高置信度 Context Packet；
+- 完成 PC/Android 真机、安装体积、冷启动与资源质量门，确认能力快照和跨端转交在真实设备稳定；
+- 用真实长线任务数据评估 ResultReceipt、经验候选和恢复策略是否真正减少用户重复说明与人工接管；
 - Dynamic Task Graph 与节点级局部恢复；
 - 可替换 Agent Runtime 和结果驱动 Dream。
 
@@ -25,8 +26,10 @@ flowchart LR
     P2 --> P3["Phase 3 Decision 与 Change"]
     P3 --> P4["Phase 4 Complexity Router"]
     P4 --> P5["Phase 5 Advanced Project Loop"]
-    P5 --> P55["Phase 5.5 个人助手智能层"]
-    P55 --> P6["Phase 6 Dynamic Task Graph"]
+    P5 --> P55["Phase 5.5 可靠个人 Agent 闭环"]
+    P55 --> GATE{"真实长线任务证明顺序切片不足?"}
+    GATE -->|是| P6["Phase 6 Dynamic Task Graph"]
+    GATE -->|否| P55
     P6 --> P7["Phase 7 Lead–Clerk Review"]
     P7 --> P8["Phase 8 Runtime Adapter"]
     P8 --> P9["Phase 9 Runtime Host"]
@@ -91,8 +94,8 @@ flowchart LR
 | Phase 2（完成） | 所有输入更新同一个项目现实 | Capture、Note、Source、Todo、Event、File 可追溯关联 Project |
 | Phase 3（完成） | Bob 知道什么改变了什么 | 新文件能指出受影响决定、证据和待确认变化 |
 | Phase 4（完成） | 用户无需选择复杂模式 | 简单请求保持轻量，持续工作识别为 Advanced 且不虚假完成 |
-| Phase 5（完成首个纵切片） | 复杂目标可以中断恢复 | 140 项 Rust 测试通过；具备安全恢复、审批持久化与 Evidence gate |
-| Phase 5.5 | 用户主要说目的，Bob 恢复上下文并选择真实可用的最轻路径 | 五个日常场景通过；不会选错项目、调用不存在能力或伪造完成 |
+| Phase 5（完成首个纵切片） | 复杂目标可以中断恢复 | 具备安全恢复、审批持久化与 Evidence gate；完整回归持续通过 |
+| Phase 5.5 | 用户主要说目的，Bob 恢复上下文并选择真实可用的最轻路径 | 五个日常场景通过；不会选错项目、调用不存在能力、污染长期人格或伪造完成 |
 | Phase 6 | 多阶段工作局部恢复 | 节点失败只影响其下游，计划允许重构 |
 | Phase 7 | 专业角色提高可靠性 | 多角色有可量化收益，而非 Agent 表演 |
 | Phase 8 | 模型与执行器可替换 | 更换 Runtime 不丢 Project State |
