@@ -18,6 +18,10 @@ All notable changes to bob-agent will be documented in this file.
 - Prevented remote/mobile HTTP streams from exposing raw model reasoning while preserving a progress signal.
 - Removed full WeChat message bodies from logs and made expired sessions fail closed instead of appearing connected.
 
+### Release artifacts
+- `bob-installer.exe`: 42,666,496 bytes, SHA-256 `DE2C8D0212E79263AC0C70F1B3F1BE98FF0AA2385EC5B7AD629A92AA154D677C`.
+- `bob-agent-portable.zip`: 32,359,339 bytes, SHA-256 `7A064EFF2BF93297902D5C2FC0177F7DD207978749B57531D7E4A34C9E7E2FFE`.
+
 ### Fixed
 - Aggregated overdue todo reminders into one bounded notification instead of replaying every historical item individually.
 - Routed local-model filesystem and process actions through the Tauri bridge so browser previews remain safe and deterministic.
