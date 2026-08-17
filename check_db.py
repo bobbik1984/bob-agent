@@ -1,13 +1,7 @@
 import sqlite3
+import os
 
-db_path = r'C:\Users\xm_bo\AppData\Roaming\bob-agent\bob.db'
-try:
-    conn = sqlite3.connect(db_path)
-    cur = conn.cursor()
-    
-    cur.execute("INSERT OR REPLACE INTO kv_store (key, value) VALUES ('last_dream_timestamp', '1700000000')")
-    conn.commit()
-    print('? Successfully reset last_dream_timestamp to past.')
-    
-except Exception as e:
-    print(f'Error: {e}')
+db_path = os.path.expandvars(r"%APPDATA%\bob.agent\bob.db")
+conn = sqlite3.connect(db_path)
+print(conn.cursor().execute("SELECT COUNT(*) FROM kg_nodes WHERE node_type='Ticket' OR node_type='ticket'").fetchone()[0])
+conn.close()

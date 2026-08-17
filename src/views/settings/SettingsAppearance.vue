@@ -123,8 +123,8 @@ function applyTheme(theme, persist = true) {
   if (persist) {
     saveConfig('theme', theme);
   }
-  if (window.electronAPI.updateTheme) {
-    window.electronAPI.updateTheme(theme);
+  if (window.appAPI.updateTheme) {
+    window.appAPI.updateTheme(theme);
   }
 }
 
@@ -142,7 +142,7 @@ function applyAccentColor(color) {
 }
 
 async function saveConfig(key, value) {
-  await window.electronAPI.setConfig(key, value);
+  await window.appAPI.setConfig(key, value);
   emit('config-changed');
 }
 

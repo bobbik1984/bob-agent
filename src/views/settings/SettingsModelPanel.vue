@@ -4,65 +4,137 @@
 
   <!-- 离线推理引擎 (Offline Engine) -->
   <section class="settings-section card">
-    <h3 class="section-title">
-      <Server :size="16" class="section-icon" />
-      {{ $t('settings.offline_engine') }}
+    <h3 class="section-title" style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <Server :size="16" class="section-icon" />
+        {{ $t('settings.local_models', '本地模型') }}
+      </div>
+      
+      <button class="engine-status-btn"
+           @click="toggleOfflineEngine"
+           :title="offlineEngineStatus === 'running' ? '点击关闭引擎' : '点击开启引擎'"
+           :disabled="offlineEngineStatus === 'starting'"
+           :style="{ opacity: offlineEngineStatus === 'starting' ? 0.7 : 1 }"
+      >
+        <span>{{ offlineEngineStatus === 'running' ? '引擎运行中' : (offlineEngineStatus === 'starting' ? '引擎启动中...' : '引擎已休眠') }}</span>
+
+        <Loader v-if="offlineEngineStatus === 'starting'" :size="12" class="spin" style="margin-left: 2px;" />
+        <span v-else class="status-dot" 
+              style="width: 10px; height: 10px; border-radius: 50%; display: inline-block; margin-left: 2px; flex-shrink: 0; box-sizing: border-box;"
+              :style="{ 
+                background: offlineEngineStatus === 'running' ? 'var(--user-accent, var(--accent-primary))' : 'transparent', 
+                border: offlineEngineStatus === 'running' ? 'none' : '2px solid var(--text-tertiary)' 
+              }">
+        </span>
+      </button>
     </h3>
 
-    
-    <div class="form-group workspace-group">
-      <input
-        v-model="config.offlineModelPath"
-        class="input"
-        :placeholder="$t('settings.offline_model_placeholder')"
-        readonly
-      />
-      <button class="btn btn-primary browse-btn" @click="selectOfflineModel">
-        <FolderOpen :size="14" />
-        <span>{{ $t('settings.browse') }}</span>
-      </button>
-    </div>
+    <div class="form-group workspace-group" style="flex-direction: column; align-items: stretch;">
+      <h4 style="margin-top: 8px; margin-bottom: 8px; font-size: 0.85em; color: var(--text-secondary); display: flex; justify-content: space-between; align-items: center; cursor: pointer; user-select: none;" @click="showOfflineModels = !showOfflineModels">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <Database :size="16" />
+          <span>本地模型资源库 (已下载 {{ downloadedModelsSet.size }} 个)</span>
+        </div>
+        <ChevronDown :size="16" :style="{ transform: showOfflineModels ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s', color: 'inherit' }" />
+      </h4>
+      
+      <div v-show="showOfflineModels" class="manager-content" style="display: flex; flex-direction: column; margin-bottom: 12px;">
+          <div v-for="option in offlineModelOptions" :key="option.id"
+               style="display: flex; align-items: center; gap: 12px; border-bottom: 1px solid var(--border-subtle); padding: 10px 0; margin-bottom: 0;"
+          >
+            <label class="form-label provider-label" style="display: flex; align-items: center; gap: 8px; font-weight: normal; margin-bottom: 0;">
+              <span style="flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" :style="{ color: option.downloaded ? 'var(--text-primary)' : 'var(--text-tertiary)' }" :title="option.label">{{ option.label }}</span>
+            </label>
 
-    <div style="margin-top: 8px; margin-bottom: 12px;">
-      <button class="btn btn-ghost" style="font-size: 0.85em; padding: 4px 0; color: var(--accent-primary); display: flex; align-items: center; gap: 4px;" @click="showLlamaGuide = !showLlamaGuide">
-        <Info :size="12" />
-        <span>{{ showLlamaGuide ? $t('settings.hide_llama_guide') : $t('settings.show_llama_guide') }}</span>
-      </button>
-    </div>
+            <span class="status-dot" :style="{ 
+              background: option.downloaded ? 'var(--user-accent, var(--accent-primary))' : 'transparent',
+              border: option.downloaded ? '2px solid var(--user-accent, var(--accent-primary))' : '2px solid var(--text-tertiary)',
+              width: '10px', height: '10px', borderRadius: '50%', display: 'inline-block', flexShrink: 0
+            }"></span>
 
-    <Transition name="briefing-fade">
-      <div v-if="showLlamaGuide" class="card" style="background: var(--bg-secondary); border: 1px dashed var(--border-subtle); padding: 16px; border-radius: var(--radius-md); margin-bottom: 16px; font-size: 0.9em; box-shadow: none;">
-        <h4 style="font-size: 1.05em; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">{{ $t('settings.llama_guide_title') }}</h4>
-        <p style="color: var(--text-secondary); margin-bottom: 8px; line-height: 1.5;" v-html="$t('settings.llama_guide_desc')"></p>
+            <div class="input" :style="{ 
+              flex: 1, 
+              display: 'flex', 
+              alignItems: 'center', 
+              color: 'var(--text-tertiary)', 
+              fontSize: '0.9em', 
+              userSelect: 'none', 
+              cursor: 'default',
+              padding: '0 8px',
+              background: downloadingModel === option.id ? `linear-gradient(to right, color-mix(in srgb, var(--user-accent, var(--accent-primary)) 20%, transparent) ${typeof downloadProgress === 'number' ? downloadProgress : 0}%, transparent ${typeof downloadProgress === 'number' ? downloadProgress : 0}%)` : ''
+            }">
+              <span v-if="downloadingModel === option.id" style="color: var(--text-primary); font-weight: 500;">
+                {{ typeof downloadProgress === 'number' ? downloadProgress + '%' : downloadProgress }}
+              </span>
+              <span v-else>{{ option.downloaded ? '已下载并就绪' : '等待下载' }}</span>
+            </div>
 
-        <button class="btn btn-primary" style="display: flex; align-items: center; gap: 6px; font-size: 0.9em; padding: 6px 12px;" @click="openLlamaEngineDir">
-          <FolderOpen :size="14" />
-          <span>{{ $t('settings.open_llama_dir') }}</span>
+            <div style="display: flex; gap: 4px;" v-if="!option.isCustom">
+              <button v-if="!option.downloaded" 
+                class="btn-icon" 
+                style="width: auto; min-width: 32px; padding: 0 8px; color: var(--user-accent, var(--accent-primary));" 
+                @click.stop="downloadingModel === option.id ? togglePause(option.id) : startDownload(option.id)"
+                @mouseenter="hoveringModel = option.id"
+                @mouseleave="hoveringModel = null"
+              >
+                <template v-if="downloadingModel === option.id">
+                  <component :is="isPaused ? Play : Pause" :size="14" />
+                </template>
+                <Download v-else :size="14" />
+              </button>
+              <button v-if="option.downloaded" 
+                class="btn-icon btn-remove-key" 
+                @click.stop="deleteLocalModel(option.id)"
+                title="删除本地模型"
+              >
+                <X :size="14" />
+              </button>
+            </div>
+        </div>
+      </div>
+
+      <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-top: 12px; margin-bottom: 8px;">
+        <!-- HF Mirror Switch -->
+        <div style="display: flex; align-items: center; justify-content: center; gap: 10px; background: var(--bg-secondary); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 8px; cursor: pointer;" @click="downloadSource = downloadSource === 'hf-mirror' ? 'huggingface' : 'hf-mirror'">
+          <span style="font-size: 0.85em; color: var(--text-secondary);" :style="{ fontWeight: downloadSource === 'huggingface' ? '500' : 'normal', color: downloadSource === 'huggingface' ? 'var(--text-primary)' : 'var(--text-secondary)' }">HF</span>
+          <label class="hf-switch" @click.stop>
+            <input type="checkbox" :checked="downloadSource === 'hf-mirror'" @change="downloadSource = $event.target.checked ? 'hf-mirror' : 'huggingface'" />
+            <span class="hf-slider"></span>
+          </label>
+          <span style="font-size: 0.85em;" :style="{ fontWeight: downloadSource === 'hf-mirror' ? '500' : 'normal', color: downloadSource === 'hf-mirror' ? 'var(--text-primary)' : 'var(--text-secondary)' }">CN</span>
+        </div>
+        
+        <!-- Custom URL -->
+        <button class="btn btn-ghost" style="padding: 8px; color: var(--text-primary); background: var(--bg-secondary); border: 1px solid var(--border-subtle); display: flex; align-items: center; justify-content: center; gap: 6px; border-radius: var(--radius-md);" @click="showCustomDownload = !showCustomDownload">
+          <Plus :size="14" /> <span style="font-size: 0.85em;">自定义下载链接</span>
+        </button>
+
+        <!-- Physical Dir -->
+        <button class="btn btn-ghost" style="padding: 8px; color: var(--text-primary); background: var(--bg-secondary); border: 1px solid var(--border-subtle); display: flex; align-items: center; justify-content: center; gap: 6px; border-radius: var(--radius-md);" @click="openModelsDir" title="打开底层模型物理存储目录">
+          <FolderOpen :size="14" /> <span style="font-size: 0.85em;">物理模型目录</span>
         </button>
       </div>
-    </Transition>
-    
-    <div style="display: flex; gap: 8px; align-items: center; margin-top: 12px;">
-      <button 
-        class="btn" 
-        :class="offlineEngineStatus === 'running' ? 'btn-danger' : 'btn-primary'" 
-        @click="toggleOfflineEngine"
-        :disabled="!config.offlineModelPath"
-      >
-        <Server :size="14" />
-        <span>{{ offlineEngineStatus === 'running' ? $t('settings.offline_engine_stop') : $t('settings.offline_engine_start') }}</span>
-      </button>
       
-      <span style="font-size: 0.85em; display: flex; align-items: center; gap: 6px;" :style="{ color: offlineEngineStatus === 'running' ? 'var(--accent-primary)' : 'var(--text-tertiary)' }">
-        <span class="status-dot" :style="{ background: offlineEngineStatus === 'running' ? 'var(--accent-primary)' : 'var(--text-tertiary)' }" style="width: 8px; height: 8px; border-radius: 50%; display: inline-block;"></span>
-        {{ offlineEngineStatus === 'running' ? $t('settings.offline_engine_running') : $t('settings.offline_engine_stopped') }}
-      </span>
+      <div v-if="showCustomDownload" style="margin-top: 8px; display: flex; gap: 8px;">
+        <input v-model="customDownloadUrl" class="input" placeholder="输入 .gguf 下载链接..." style="flex: 1;" />
+        <button class="btn btn-ghost" @click="startCustomDownload" :disabled="!customDownloadUrl" style="color: var(--user-accent, var(--accent-primary)); min-width: 48px; display: flex; align-items: center; justify-content: center; border: 1px solid var(--border-subtle);">
+          <template v-if="downloadingModel === 'custom'">
+            <span style="font-size: 0.85em;">{{ downloadProgress }}%</span>
+          </template>
+          <template v-else>
+            <Download :size="16" />
+          </template>
+        </button>
+      </div>
     </div>
+
+
+
   </section>
 
   <!-- API 密钥管理 (Credential Store) -->
   <details class="settings-section card custom-model-override">
-    <summary class="section-title" style="cursor: pointer; display: flex; align-items: center; justify-content: space-between; margin-bottom: 0;">
+    <summary class="section-title">
       <div style="display: flex; align-items: center; gap: 8px;">
         <Key :size="16" class="section-icon" style="opacity: 0.6;" />
         {{ $t('settings.api_keys_title') }}
@@ -75,7 +147,7 @@
     <h4 style="margin-top: 16px; margin-bottom: 8px; font-size: 0.85em; color: var(--text-secondary);">{{ $t('settings.provider_keys_title') }}</h4>
     <div style="display: flex; flex-direction: column; margin-bottom: 20px;">
       <div class="form-group" v-for="provider in modelProviders" :key="provider.id" style="display: flex; align-items: center; gap: 12px; border-bottom: 1px solid var(--border-subtle); padding: 10px 0; margin-bottom: 0;">
-        <label class="form-label" style="width: 160px; margin-bottom: 0; display: flex; align-items: center; gap: 8px;">
+        <label class="form-label provider-label">
           <img v-if="getProviderLogo(provider.id)" :src="getProviderLogo(provider.id)" style="width: 16px; height: 16px; object-fit: contain; border-radius: 2px;" />
           <span style="flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" :title="$te('providers.' + provider.id) ? $t('providers.' + provider.id) : provider.name">{{ $te('providers.' + provider.id) ? $t('providers.' + provider.id) : provider.name }}</span>
         </label>
@@ -91,7 +163,7 @@
           </div>
           <button class="btn btn-primary" @click="uploadGcpCredential" style="padding: 4px 10px; font-size: 0.9em; white-space: nowrap;">{{ gcpCredStatus.configured ? '更换凭证' : '上传凭证' }}</button>
           <button v-if="gcpCredStatus.configured" class="btn" @click="testGcpCredential" style="padding: 4px 10px; font-size: 0.9em; white-space: nowrap;">测试</button>
-          <button class="btn-icon btn-remove-key" :style="{ visibility: gcpCredStatus.configured ? 'visible' : 'hidden' }" @click="removeGcpCredential" :title="$t('settings.delete_key')">
+          <button v-if="gcpCredStatus.configured" class="btn-icon btn-remove-key" @click="removeGcpCredential" :title="$t('settings.delete_key')">
             <X :size="14" />
           </button>
         </template>
@@ -106,8 +178,17 @@
             :placeholder="provider.hasKey ? $t('settings.configured') : $t('settings.not_configured')" 
             style="flex: 1;" 
           />
-          <button class="btn btn-primary" @click="saveApiKey(provider.id)" style="padding: 4px 10px; font-size: 0.9em;">{{ $t('settings.save') }}</button>
-          <button class="btn-icon btn-remove-key" :style="{ visibility: provider.hasKey ? 'visible' : 'hidden' }" @click="deleteApiKey(provider.id)" :title="$t('settings.delete_key')">
+          <button v-if="apiKeys[provider.id] || !provider.hasKey" 
+                  class="btn-icon btn-save-key" 
+                  @click="saveApiKey(provider.id)" 
+                  :title="$t('settings.save')"
+                  :style="{ opacity: !apiKeys[provider.id] ? 0.3 : 1, cursor: !apiKeys[provider.id] ? 'not-allowed' : 'pointer' }">
+            <Save :size="16" />
+          </button>
+          <button v-else 
+                  class="btn-icon btn-remove-key" 
+                  @click="deleteApiKey(provider.id)" 
+                  :title="$t('settings.delete_key')">
             <X :size="14" />
           </button>
         </template>
@@ -118,7 +199,7 @@
     <h4 style="margin-bottom: 8px; font-size: 0.85em; color: var(--text-secondary);">{{ $t('settings.plugin_keys_title') }}</h4>
     <div style="display: flex; flex-direction: column;">
       <div class="form-group" v-for="provider in toolProviders" :key="provider.id" style="display: flex; align-items: center; gap: 12px; border-bottom: 1px solid var(--border-subtle); padding: 10px 0; margin-bottom: 0;">
-        <label class="form-label" style="width: 160px; margin-bottom: 0;">{{ provider.name }}</label>
+        <label class="form-label provider-label">{{ provider.name }}</label>
         <span class="status-dot" :style="{ background: provider.hasKey ? 'var(--accent-primary)' : 'transparent', border: provider.hasKey ? '2px solid var(--accent-primary)' : '2px solid var(--text-tertiary)' }" style="width: 10px; height: 10px; border-radius: 50%; display: inline-block;"></span>
         <input 
           v-model="apiKeys[provider.id]" 
@@ -127,8 +208,17 @@
           :placeholder="provider.hasKey ? $t('settings.configured') : $t('settings.not_configured')" 
           style="flex: 1;" 
         />
-        <button class="btn btn-primary" @click="saveApiKey(provider.id)" style="padding: 4px 10px; font-size: 0.9em;">{{ $t('settings.save') }}</button>
-        <button class="btn-icon btn-remove-key" :style="{ visibility: provider.hasKey ? 'visible' : 'hidden' }" @click="deleteApiKey(provider.id)" :title="$t('settings.delete_key')">
+        <button v-if="apiKeys[provider.id] || !provider.hasKey" 
+                class="btn-icon btn-save-key" 
+                @click="saveApiKey(provider.id)" 
+                :title="$t('settings.save')"
+                :style="{ opacity: !apiKeys[provider.id] ? 0.3 : 1, cursor: !apiKeys[provider.id] ? 'not-allowed' : 'pointer' }">
+          <Save :size="16" />
+        </button>
+        <button v-else 
+                class="btn-icon btn-remove-key" 
+                @click="deleteApiKey(provider.id)" 
+                :title="$t('settings.delete_key')">
           <X :size="14" />
         </button>
       </div>
@@ -149,11 +239,11 @@
       </div>
       
       <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px;">
-        <input v-model="newCustomModel.name" class="input" :placeholder="$t('settings.custom_model_name')" style="font-size: 0.85em; padding: 4px 8px;" />
-        <input v-model="newCustomModel.id" class="input" :placeholder="$t('settings.custom_model_id')" style="font-size: 0.85em; padding: 4px 8px;" />
-        <input v-model="newCustomModel.url" class="input" :placeholder="$t('settings.custom_model_url')" style="font-size: 0.85em; padding: 4px 8px;" />
-        <input v-model="newCustomModel.key" class="input" type="password" :placeholder="$t('settings.custom_model_key')" style="grid-column: span 2; font-size: 0.85em; padding: 4px 8px;" />
-        <button class="btn btn-primary" @click="addCustomModel" :disabled="!newCustomModel.name || !newCustomModel.url || !newCustomModel.key" style="padding: 4px; font-size: 0.85em;">{{ $t('settings.custom_model_add') }}</button>
+        <input v-model="newCustomModel.name" class="input" :placeholder="$t('settings.custom_model_name')" />
+        <input v-model="newCustomModel.id" class="input" :placeholder="$t('settings.custom_model_id')" />
+        <input v-model="newCustomModel.url" class="input" :placeholder="$t('settings.custom_model_url')" />
+        <input v-model="newCustomModel.key" class="input" type="password" :placeholder="$t('settings.custom_model_key')" style="grid-column: span 2;" />
+        <button class="btn btn-primary" @click="addCustomModel" :disabled="!newCustomModel.name || !newCustomModel.url || !newCustomModel.key">{{ $t('settings.custom_model_add') }}</button>
       </div>
     </div>
 
@@ -178,7 +268,7 @@
 
   <!-- 模型供应商注册表编辑器 (Registry Editor) -->
   <details class="settings-section card custom-model-override">
-    <summary class="section-title" style="cursor: pointer; display: flex; align-items: center; justify-content: space-between; margin-bottom: 0;">
+    <summary class="section-title">
       <div style="display: flex; align-items: center; gap: 8px;">
         <Database :size="16" class="section-icon" style="opacity: 0.6;" />
         {{ $t('settings.registry_title') }}
@@ -288,10 +378,15 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, computed } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { Server, FolderOpen, Info, Key, ChevronDown, X, Plus, Trash2, Database, Check, Image as ImageIcon } from 'lucide-vue-next';
+import { Server, FolderOpen, Info, Key, ChevronDown, X, Plus, Trash2, Database, Check, Image as ImageIcon, Save, Globe, Pause, Play, Download, Loader } from 'lucide-vue-next';
 import ModelHub from '../../components/ModelHub.vue';
+import CustomSelect from '../../components/CustomSelect.vue';
+import mobileModels from '@/assets/mobile_models.json';
+import { getModelMeta } from '@/composables/useModelSwitcher';
+import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 
 const props = defineProps({
   config: { type: Object, required: true },
@@ -301,46 +396,214 @@ const { t } = useI18n();
 
 // ── 离线推理引擎 ──
 const offlineEngineStatus = ref('stopped');
-const showLlamaGuide = ref(false);
+const showLlamaGuidance = ref(false);
+const downloadedModelsSet = ref(new Set());
+const downloadingModel = ref(null);
+const downloadProgress = ref(0);
+const hoveringModel = ref(null);
+const isPaused = ref(false);
+const showOfflineModels = ref(false);
 
-async function openLlamaEngineDir() {
-  await window.electronAPI.openLlamaEngineDir();
+const customDownloadUrl = ref('');
+const showCustomDownload = ref(false);
+const downloadSource = ref('huggingface');
+
+const offlineModelOptions = computed(() => {
+  const options = [];
+  mobileModels.forEach(m => {
+    options.push({
+      label: m.name,
+      value: `models\\${m.id}.gguf`, // relative path for Windows
+      id: m.id,
+      downloaded: downloadedModelsSet.value.has(m.id),
+      isCustom: false
+    });
+  });
+  
+  if (props.config.offlineModelPath && !options.find(o => o.value === props.config.offlineModelPath)) {
+    options.push({
+      label: '自定义文件: ' + props.config.offlineModelPath.split('\\').pop(),
+      value: props.config.offlineModelPath,
+      id: 'custom',
+      downloaded: true,
+      isCustom: true
+    });
+  }
+  return options;
+});
+
+async function openModelsDir() {
+  try {
+    const { appDataDir, join } = await import('@tauri-apps/api/path');
+    const dataDir = await appDataDir();
+    const modelsPath = await join(dataDir, 'models');
+    await invoke('plugin:shell|open', { path: modelsPath });
+  } catch (e) {
+    console.warn('Failed to open models directory:', e);
+  }
+}
+
+async function togglePause(modelId) {
+  if (isPaused.value) {
+    isPaused.value = false;
+    startDownload(modelId);
+  } else {
+    isPaused.value = true;
+    await invoke('pause_download', { modelId: String(modelId) });
+  }
+}
+
+async function deleteLocalModel(modelId) {
+  if (confirm(`确定要删除 ${modelId} 相关的模型和临时文件吗？这会释放磁盘空间。`)) {
+    try {
+      const deleted = await invoke('delete_local_model', { modelId: String(modelId) });
+      if (deleted) {
+        await checkDownloadedModels();
+        if (props.config.offlineModelPath && props.config.offlineModelPath.includes(modelId)) {
+          props.config.offlineModelPath = '';
+          saveConfig('offlineModelPath', '');
+        }
+      }
+    } catch (e) {
+      alert('删除失败: ' + e);
+    }
+  }
+}
+
+async function checkDownloadedModels() {
+  const newSet = new Set();
+  for (const model of mobileModels) {
+    try {
+      const isDownloaded = await invoke('check_model_downloaded', { modelId: model.id });
+      if (isDownloaded) newSet.add(model.id);
+    } catch(err) {
+      console.warn("Check download error:", err);
+    }
+  }
+  downloadedModelsSet.value = newSet;
+}
+
+async function startDownload(modelId) {
+  const model = mobileModels.find(m => m.id === modelId);
+  if (!model || !model.download_urls || !model.download_urls.main_gguf.length) return;
+  
+  let url = model.download_urls.main_gguf[0];
+  let tokenizerUrl = null;
+  if (downloadSource.value === 'huggingface') {
+     const hfUrl = model.download_urls.main_gguf.find(u => u.includes('huggingface.co'));
+     if (hfUrl) url = hfUrl;
+     
+     if (model.download_urls.tokenizer && model.download_urls.tokenizer.length) {
+         tokenizerUrl = model.download_urls.tokenizer.find(u => u.includes('huggingface.co')) || model.download_urls.tokenizer[0];
+     }
+  } else {
+     const mirrorUrl = model.download_urls.main_gguf.find(u => u.includes('hf-mirror.com'));
+     if (mirrorUrl) url = mirrorUrl;
+     
+     if (model.download_urls.tokenizer && model.download_urls.tokenizer.length) {
+         tokenizerUrl = model.download_urls.tokenizer.find(u => u.includes('hf-mirror.com')) || model.download_urls.tokenizer[0];
+     }
+  }
+  
+  await beginDownloadTask(modelId, url, tokenizerUrl);
+}
+
+async function startCustomDownload() {
+  if (!customDownloadUrl.value) return;
+  const url = customDownloadUrl.value;
+  let filename = url.split('/').pop() || 'custom.gguf';
+  if (!filename.endsWith('.gguf')) filename += '.gguf';
+  const modelId = filename.replace('.gguf', '');
+  await beginDownloadTask(modelId, url);
+}
+
+async function beginDownloadTask(modelId, url, tokenizerUrl = null) {
+  downloadingModel.value = modelId;
+  downloadProgress.value = 0;
+  isPaused.value = false;
+  
+  const unlisten = await listen('download_progress', (event) => {
+    if (event.payload.model_id === modelId) {
+      if (event.payload.progress >= 0) {
+        // 正常进度 (已知总大小)
+        downloadProgress.value = Math.round(event.payload.progress);
+      } else {
+        // progress = -1: 服务器未返回 Content-Length，显示已下载量
+        const mb = (event.payload.downloaded_bytes / (1024 * 1024)).toFixed(1);
+        downloadProgress.value = `${mb} MB`;
+      }
+    }
+  });
+
+  try {
+    const result = await invoke('download_model', { modelId, url, tokenizerUrl });
+    if (result.success) {
+      await checkDownloadedModels();
+      if (downloadingModel.value === 'custom_selected') {
+        props.config.offlineModelPath = result.path;
+        saveConfig('offlineModelPath', result.path);
+      }
+    } else {
+      if (!String(result.error).includes('Paused')) {
+        alert('下载失败: ' + result.error);
+      }
+    }
+  } catch(err) {
+    if (!String(err).includes('Paused')) {
+      alert('下载出错: ' + err);
+    }
+  } finally {
+    if (!isPaused.value) {
+      downloadingModel.value = null;
+    }
+    unlisten();
+  }
 }
 
 async function selectOfflineModel() {
-  if (window.electronAPI.selectFile) {
-    const path = await window.electronAPI.selectFile();
+  try {
+    const path = await window.appAPI.selectFile();
     if (path) {
       props.config.offlineModelPath = path;
       saveConfig('offlineModelPath', path);
     }
+  } catch(e) {
+    console.warn(e);
   }
 }
 
 async function toggleOfflineEngine() {
   if (offlineEngineStatus.value === 'running') {
-    const res = await window.electronAPI.stopOfflineEngine();
-    if (res && res.status === 'stopped') {
-      offlineEngineStatus.value = 'stopped';
+    try {
+      const res = await invoke('stop_offline_engine');
+      if (res && res.status === 'stopped') {
+        offlineEngineStatus.value = 'stopped';
+      }
+    } catch(e) {
+      console.warn("Stop error", e);
     }
   } else {
-    if (!props.config.offlineModelPath) return;
+    // Start memory mount
+    if (!props.config.offlineModelPath) {
+      alert('请先下载或选择一个本地模型，然后在主界面切换到该模型后再启动引擎。');
+      return;
+    }
     offlineEngineStatus.value = 'starting';
     try {
-      const res = await window.electronAPI.startOfflineEngine(props.config.offlineModelPath);
-      if (res && res.status === 'running') {
+      const res = await invoke('start_offline_engine', { modelPath: props.config.offlineModelPath });
+      if (res && (res.status === 'started' || res.status === 'running')) {
         offlineEngineStatus.value = 'running';
       } else {
         offlineEngineStatus.value = 'stopped';
       }
     } catch(err) {
       offlineEngineStatus.value = 'stopped';
-      alert('启动离线引擎失败: ' + err);
+      alert('内存挂载失败: ' + err);
     }
   }
 }
 
-// ── 凭证管理 (Credential Store) ──
+
 const modelProviders = ref([]);
 const toolProviders = ref([
   { id: 'TAVILY_API_KEY', name: 'Tavily (Web Search)', hasKey: false },
@@ -358,8 +621,8 @@ const modelHubRef = ref(null);
 const gcpCredStatus = ref({ configured: false });
 
 async function loadGcpCredentialStatus() {
-  if (window.electronAPI.getGcpCredentialStatus) {
-    gcpCredStatus.value = await window.electronAPI.getGcpCredentialStatus();
+  if (window.appAPI.getGcpCredentialStatus) {
+    gcpCredStatus.value = await window.appAPI.getGcpCredentialStatus();
   }
 }
 
@@ -371,7 +634,7 @@ async function uploadGcpCredential() {
     filters: [{ name: 'JSON', extensions: ['json'] }],
   });
   if (!selected) return;
-  const result = await window.electronAPI.uploadGcpCredential(selected);
+  const result = await window.appAPI.uploadGcpCredential(selected);
   if (result.error) {
     alert('凭证上传失败: ' + result.error);
   } else {
@@ -380,7 +643,7 @@ async function uploadGcpCredential() {
 }
 
 async function testGcpCredential() {
-  const result = await window.electronAPI.testGcpCredential();
+  const result = await window.appAPI.testGcpCredential();
   if (result.error) {
     alert('❌ 连通性测试失败: ' + result.error);
   } else {
@@ -389,7 +652,7 @@ async function testGcpCredential() {
 }
 
 async function removeGcpCredential() {
-  const result = await window.electronAPI.removeGcpCredential();
+  const result = await window.appAPI.removeGcpCredential();
   if (result.ok) {
     await loadGcpCredentialStatus();
   }
@@ -404,7 +667,7 @@ const expandedProviders = ref({});
 
 async function loadRegistryProviders() {
   try {
-    const reg = await window.electronAPI.getRegistry();
+    const reg = await window.appAPI.getRegistry();
     registryData.value = reg;
     if (reg && reg.providers) {
       modelProviders.value = reg.providers
@@ -498,7 +761,7 @@ async function saveRegistry() {
   if (!registryData.value) return;
   try {
     registryData.value.last_updated = new Date().toISOString().slice(0, 10);
-    await window.electronAPI.saveRegistry(registryData.value);
+    await window.appAPI.saveRegistry(registryData.value);
     registryDirty.value = false;
     registrySaveMsg.value = t('settings.registry_saved');
     await loadRegistryProviders();
@@ -517,23 +780,12 @@ async function resetRegistry() {
 }
 
 function getProviderLogo(providerId) {
-  const name = (providerId || '').toLowerCase();
-  if (name.includes('deepseek')) return '/logos/deepseek.png';
-  if (name.includes('openai')) return '/logos/openai.png';
-  if (name.includes('qwen') || name.includes('dashscope')) return '/logos/qwen.png';
-  if (name.includes('doubao')) return '/logos/doubao.png';
-  if (name.includes('zhipu')) return '/logos/glm.svg';
-  if (name.includes('kimi')) return '/logos/kimi.png';
-  if (name.includes('minimax')) return '/logos/minimax.png';
-  if (name.includes('vertex')) return '/logos/google.png';
-  if (name.includes('gemini') || name.includes('google')) return '/logos/google.png';
-  if (name.includes('claude') || name.includes('anthropic')) return '/logos/claude.png';
-  return null;
+  return getModelMeta(providerId).logo;
 }
 
 async function fetchApiKeys() {
-  if (window.electronAPI.getApiKeys) {
-    const status = await window.electronAPI.getApiKeys();
+  if (window.appAPI.getApiKeys) {
+    const status = await window.appAPI.getApiKeys();
     [...modelProviders.value, ...toolProviders.value].forEach(p => {
       p.hasKey = !!status[p.id];
     });
@@ -541,17 +793,17 @@ async function fetchApiKeys() {
 }
 
 async function fetchToolStatuses() {
-  if (window.electronAPI.getToolStatuses) {
-    const statuses = await window.electronAPI.getToolStatuses();
+  if (window.appAPI.getToolStatuses) {
+    const statuses = await window.appAPI.getToolStatuses();
     toolStatuses.value = statuses;
   }
 }
 
 async function saveApiKey(providerId) {
-  if (window.electronAPI.setApiKey) {
+  if (window.appAPI.setApiKey) {
     const key = apiKeys.value[providerId];
     if (key === undefined || key === null) return;
-    await window.electronAPI.setApiKey(providerId, key);
+    await window.appAPI.setApiKey(providerId, key);
     await fetchApiKeys();
     apiKeys.value[providerId] = '';
     await fetchToolStatuses();
@@ -563,8 +815,8 @@ async function saveApiKey(providerId) {
 }
 
 async function deleteApiKey(providerId) {
-  if (window.electronAPI.setApiKey) {
-    await window.electronAPI.setApiKey(providerId, '');
+  if (window.appAPI.setApiKey) {
+    await window.appAPI.setApiKey(providerId, '');
     apiKeys.value[providerId] = '';
     await fetchApiKeys();
     await fetchToolStatuses();
@@ -576,7 +828,7 @@ async function deleteApiKey(providerId) {
 }
 
 async function loadCustomModels() {
-  const allConfig = await window.electronAPI.getAllConfig();
+  const allConfig = await window.appAPI.getAllConfig();
   customModels.value = allConfig.customModels || [];
 }
 
@@ -584,8 +836,8 @@ async function addCustomModel() {
   if (!newCustomModel.value.name || !newCustomModel.value.url || !newCustomModel.value.key) return;
   const id = newCustomModel.value.id || ('custom-' + Date.now());
   const provider = 'custom_' + id;
-  if (window.electronAPI.addCustomModel) {
-    await window.electronAPI.addCustomModel(id, newCustomModel.value.name, provider, newCustomModel.value.url, newCustomModel.value.key);
+  if (window.appAPI.addCustomModel) {
+    await window.appAPI.addCustomModel(id, newCustomModel.value.name, provider, newCustomModel.value.url, newCustomModel.value.key);
     newCustomModel.value = { name: '', url: '', key: '', id: '' };
     await loadCustomModels();
     if (modelHubRef.value) modelHubRef.value.rescan();
@@ -593,28 +845,29 @@ async function addCustomModel() {
 }
 
 async function removeCustomModel(id) {
-  if (window.electronAPI.removeCustomModel) {
-    await window.electronAPI.removeCustomModel(id);
+  if (window.appAPI.removeCustomModel) {
+    await window.appAPI.removeCustomModel(id);
     await loadCustomModels();
     if (modelHubRef.value) modelHubRef.value.rescan();
   }
 }
 
 async function saveConfig(key, value) {
-  await window.electronAPI.setConfig(key, value);
+  await window.appAPI.setConfig(key, value);
   emit('config-changed');
 }
 
 // ── Init ──
 onMounted(async () => {
+  await checkDownloadedModels();
   await loadRegistryProviders();
   await fetchApiKeys();
   await loadCustomModels();
   await fetchToolStatuses();
   await loadGcpCredentialStatus();
-  if (window.electronAPI.getOfflineEngineStatus) {
+  if (window.appAPI.getOfflineEngineStatus) {
     try {
-      const res = await window.electronAPI.getOfflineEngineStatus();
+      const res = await window.appAPI.getOfflineEngineStatus();
       if (res && res.status) {
         offlineEngineStatus.value = res.status;
       }
@@ -627,6 +880,77 @@ defineExpose({ modelHubRef });
 </script>
 
 <style scoped>
+.engine-status-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.75em;
+  font-weight: normal;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  border: none;
+  color: var(--text-primary);
+  transition: background 0.2s;
+  font-family: inherit;
+}
+.engine-status-btn:hover {
+  background: var(--bg-tertiary);
+}
+@keyframes spin {
+  100% {
+    transform: rotate(360deg);
+  }
+}
+.spin {
+  animation: spin 1s linear infinite;
+}
+
+.hf-switch {
+  position: relative;
+  display: inline-block;
+  width: 32px;
+  height: 18px;
+  flex-shrink: 0;
+}
+.hf-switch input { 
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+.hf-slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: var(--user-accent, var(--accent-primary));
+  transition: .3s;
+  border-radius: 34px;
+}
+.hf-slider:before {
+  position: absolute;
+  content: "";
+  height: 14px;
+  width: 14px;
+  left: 2px;
+  bottom: 2px;
+  background-color: white;
+  transition: .3s;
+  border-radius: 50%;
+}
+.hf-switch input:not(:checked) + .hf-slider {
+  background-color: var(--border-strong);
+}
+.hf-switch input:not(:checked) + .hf-slider:before {
+  transform: translateX(0);
+}
+.hf-switch input:checked + .hf-slider:before {
+  transform: translateX(14px);
+}
+
 .settings-section {
   margin-bottom: var(--space-5);
 }
@@ -941,5 +1265,33 @@ details[open] > summary .details-chevron {
   opacity: 0.4;
   text-decoration: line-through;
   text-decoration-color: var(--text-tertiary);
+}
+
+.provider-label {
+  width: 170px;
+  margin-bottom: 0 !important;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.btn-save-key {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  transition: all 0.2s;
+  flex-shrink: 0;
+}
+
+.btn-save-key:hover {
+  color: var(--accent-primary);
+  background: var(--bg-secondary);
+}
+
+@media (max-width: 768px) {
+  .provider-label {
+    width: 120px;
+  }
 }
 </style>

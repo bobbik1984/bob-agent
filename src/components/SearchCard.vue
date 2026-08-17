@@ -20,8 +20,8 @@ const props = defineProps({
 });
 
 function openUrl() {
-  if (window.electronAPI?.openExternal) {
-    window.electronAPI.openExternal(props.url);
+  if (window.appAPI?.openExternal) {
+    window.appAPI.openExternal(props.url);
   } else {
     window.open(props.url, '_blank');
   }

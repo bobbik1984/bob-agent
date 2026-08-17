@@ -32,6 +32,48 @@
     </div>
   </section>
 
+  <!-- 系统自检 -->
+  <section class="settings-section card">
+    <h3 class="section-title">
+      <Stethoscope :size="16" class="section-icon" />
+      {{ $t('settings.diagnostics') }}
+    </h3>
+    <div class="about-info">
+      <p>{{ $t('settings.diagnostics_desc') }}</p>
+    </div>
+    
+    <div style="margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border-subtle);">
+      <button class="btn btn-primary" style="display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%;" @click="runDiagnostics" :disabled="isDiagnosing">
+        <Activity :size="14" v-if="!isDiagnosing" />
+        <Loader2 :size="14" class="animate-spin" v-else />
+        <span>{{ isDiagnosing ? $t('settings.diagnostics_running') : $t('settings.diagnostics_start') }}</span>
+      </button>
+    </div>
+
+    <!-- 诊断结果 -->
+    <div v-if="diagnosticResult" style="margin-top: 16px; padding: 12px; border-radius: 8px; background: var(--bg-hover);">
+      <div v-if="diagnosticResult.healthy" style="display: flex; align-items: center; gap: 8px; color: var(--color-success, #10b981);">
+        <CheckCircle2 :size="16" />
+        <span style="font-size: 13px; font-weight: 500;">{{ $t('settings.diagnostics_healthy') }}</span>
+      </div>
+      <div v-else>
+        <div style="font-size: 13px; font-weight: 500; margin-bottom: 8px; color: var(--text-primary);">{{ $t('settings.diagnostics_issues') }}</div>
+        <div v-for="issue in diagnosticResult.issues" :key="issue.code" style="display: flex; align-items: flex-start; gap: 8px; margin-bottom: 8px; font-size: 13px; color: var(--text-secondary);">
+          <div :style="{ color: issue.severity === 'error' ? 'var(--color-error)' : 'var(--color-warning)' }">
+            <AlertCircle :size="14" v-if="issue.severity === 'error'" />
+            <AlertTriangle :size="14" v-else />
+          </div>
+          <div style="flex: 1;">
+            <div style="font-weight: 500; color: var(--text-primary);">{{ issue.message }}</div>
+            <div style="font-size: 12px; margin-top: 6px;" v-if="issue.fixable">
+              <button class="btn btn-primary" style="padding: 4px 10px; font-size: 12px; height: 26px;" @click="fixIssue(issue.code)">一键自愈修复</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <!-- 使用文档弹窗 -->
   <Transition name="briefing-fade">
     <div v-if="showHelpModal" class="wechat-modal-overlay" @click.self="showHelpModal = false">
@@ -52,9 +94,8 @@
 <script setup>
 import { ref, onMounted } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { marked } from 'marked';
-import DOMPurify from 'dompurify';
-import { Info, BookOpen, FolderOpen, FileText, Trash2, X } from 'lucide-vue-next';
+import { renderMarkdownSimple } from '@/utils/markdown';
+import { Info, BookOpen, FolderOpen, FileText, Trash2, X, Stethoscope, Activity, Loader2, CheckCircle2, AlertCircle, AlertTriangle } from 'lucide-vue-next';
 
 const props = defineProps({
   config: { type: Object, required: true },
@@ -72,8 +113,7 @@ async function openDocs() {
     try {
       const resp = await fetch('/guide.md');
       const md = await resp.text();
-      const raw = marked.parse(md, { breaks: true });
-      renderedGuide.value = DOMPurify.sanitize(raw);
+      renderedGuide.value = renderMarkdownSimple(md);
     } catch (e) {
       renderedGuide.value = '<p style="color: var(--text-secondary)">Failed to load guide.</p>';
     }
@@ -81,30 +121,62 @@ async function openDocs() {
 }
 
 function openDataDir() {
-  if (window.electronAPI.openDataDir) {
-    window.electronAPI.openDataDir();
+  if (window.appAPI.openDataDir) {
+    window.appAPI.openDataDir();
   }
 }
 
 function openLogDir() {
-  if (window.electronAPI.openLogDir) {
-    window.electronAPI.openLogDir();
+  if (window.appAPI.openLogDir) {
+    window.appAPI.openLogDir();
   }
 }
 
 async function factoryReset() {
   if (confirm(t('modal.factory_reset_warning'))) {
-    if (window.electronAPI.factoryReset) {
-      await window.electronAPI.factoryReset();
+    if (window.appAPI.factoryReset) {
+      await window.appAPI.factoryReset();
     }
   }
 }
 
 onMounted(async () => {
-  if (window.electronAPI.getVersion) {
-    appVersion.value = await window.electronAPI.getVersion();
+  if (window.appAPI.getVersion) {
+    appVersion.value = await window.appAPI.getVersion();
   }
 });
+
+// Diagnostics Logic
+const isDiagnosing = ref(false);
+const diagnosticResult = ref(null);
+
+async function runDiagnostics() {
+  if (isDiagnosing.value) return;
+  isDiagnosing.value = true;
+  diagnosticResult.value = null;
+  try {
+    const res = await window.appAPI.healthCheck();
+    diagnosticResult.value = res;
+  } catch (e) {
+    console.error("Diagnostics failed", e);
+  } finally {
+    isDiagnosing.value = false;
+  }
+}
+
+async function fixIssue(code) {
+  try {
+    const res = await window.appAPI.autoFix(code);
+    if (res?.ok) {
+      alert("自愈修复成功：" + res.message);
+      await runDiagnostics(); // re-run diagnostics after fix
+    } else {
+      alert("修复失败：" + (res?.message || '未知错误'));
+    }
+  } catch (e) {
+    console.error("AutoFix failed", e);
+  }
+}
 </script>
 
 <style scoped>
@@ -275,4 +347,5 @@ onMounted(async () => {
   opacity: 0;
   transform: scale(0.95);
 }
+
 </style>

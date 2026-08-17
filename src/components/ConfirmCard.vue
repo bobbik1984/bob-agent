@@ -40,6 +40,7 @@
 <script setup>
 import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
+import { formatTimeRange } from '@/utils/date';
 import { CheckSquare, Calendar } from 'lucide-vue-next';
 
 const { t } = useI18n();
@@ -57,20 +58,7 @@ const isTodo = computed(() => props.event.type === 'todo');
 
 const formattedTime = computed(() => {
   if (!props.event.start_time) return t('confirm_card.no_time');
-  const start = new Date(props.event.start_time);
-  let timeStr = start.toLocaleString('zh-CN', {
-    month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
-  });
-
-  if (props.event.end_time) {
-    const end = new Date(props.event.end_time);
-    if (start.toDateString() === end.toDateString()) {
-      timeStr += ` - ${end.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}`;
-    } else {
-      timeStr += ` ${t('confirm_card.to')} ${end.toLocaleString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}`;
-    }
-  }
-  return timeStr;
+  return formatTimeRange(props.event.start_time, props.event.end_time);
 });
 
 const priorityLabel = computed(() => {

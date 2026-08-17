@@ -39,11 +39,15 @@
       </div>
       <div class="provider-selector">
         <label>{{ $t('model_hub.select_provider') }}</label>
-        <select class="input provider-select" v-model="activeProvider">
-          <option v-for="p in providerList" :key="p.id" :value="p.id" :disabled="!apiKeys[p.id] && p.id !== 'offline'">
-            {{ $te('providers.' + p.id) ? $t('providers.' + p.id) : p.name }} ({{ p.count }}) {{ (!apiKeys[p.id] && p.id !== 'offline') ? `(${$t('model_hub.unconfigured')})` : '' }}
-          </option>
-        </select>
+        <CustomSelect
+          v-model="activeProvider"
+          :options="providerList.map(p => ({
+            value: p.id,
+            label: `${$te('providers.' + p.id) ? $t('providers.' + p.id) : p.name} (${p.count}) ${(!apiKeys[p.id] && p.id !== 'offline') ? '(' + $t('model_hub.unconfigured') + ')' : ''}`,
+            disabled: !apiKeys[p.id] && p.id !== 'offline'
+          }))"
+          class="provider-select"
+        />
         <button
           v-if="currentProviderSupportsRefresh"
           class="btn-icon refresh-provider-btn"
@@ -51,8 +55,7 @@
           :disabled="isRefreshing"
           :title="$t('model_hub.refresh')"
         >
-          <RefreshCw :size="13" :class="{ 'animate-spin': isRefreshing }" />
-          <span class="refresh-label">{{ isRefreshing ? $t('model_hub.refreshing') : $t('model_hub.refresh') }}</span>
+          <RefreshCw :size="16" :class="{ 'animate-spin': isRefreshing }" />
         </button>
       </div>
       <!-- 供应商变体切换 -->
@@ -93,8 +96,12 @@
             <span class="model-id-tag">{{ m.modelId }}</span>
           </div>
           <div class="model-actions-col">
-            <span v-if="m.id === activeMain" class="role-tag main">{{ $t('model_hub.role_main') }}</span>
-            <span v-if="m.id === activeClerk" class="role-tag clerk">{{ $t('model_hub.role_clerk') }}</span>
+            <span v-if="m.id === activeMain" class="role-tag main" :title="$t('model_hub.role_main')">
+              <Monitor :size="14" />
+            </span>
+            <span v-if="m.id === activeClerk" class="role-tag clerk" :title="$t('model_hub.role_clerk')">
+              <Tractor :size="14" />
+            </span>
           </div>
         </div>
       </div>
@@ -110,6 +117,7 @@
 import { ref, computed, onMounted, watch } from 'vue';
 import { Cpu, RefreshCw, Monitor, Tractor } from 'lucide-vue-next';
 import { useI18n } from 'vue-i18n';
+import CustomSelect from './CustomSelect.vue';
 
 const { t } = useI18n();
 
@@ -127,7 +135,7 @@ const registry = ref({ providers: [] });
 
 async function loadRegistry() {
   try {
-    registry.value = await window.electronAPI.invoke('llm_get_registry');
+    registry.value = await window.appAPI.invoke('llm_get_registry');
   } catch (e) {
     console.error('Failed to load model registry in ModelHub:', e);
   }
@@ -189,7 +197,7 @@ function toggleRole(role) {
 }
 
 async function assign(modelId, role) {
-  const result = await window.electronAPI.assignModelRole(modelId, role);
+  const result = await window.appAPI.assignModelRole(modelId, role);
   if (result?.ok) {
     if (role === 'main') activeMain.value = modelId;
     else activeClerk.value = modelId;
@@ -202,8 +210,9 @@ async function rescan() {
   isScanning.value = true;
   try {
     await loadRegistry();
-    await window.electronAPI.rescanModels();
-    pool.value = await window.electronAPI.getModelPool();
+    await window.appAPI.rescanModels();
+    const p = await window.appAPI.getModelPool();
+    pool.value = Array.isArray(p) ? p : [];
     if (providerList.value.length > 0 && !activeProvider.value) {
       activeProvider.value = providerList.value[0].id;
     }
@@ -216,10 +225,11 @@ async function refreshProvider() {
   if (!activeProvider.value) return;
   isRefreshing.value = true;
   try {
-    const result = await window.electronAPI.refreshModels(activeProvider.value);
+    const result = await window.appAPI.refreshModels(activeProvider.value);
     if (result?.ok) {
       // 刷新成功，重新加载模型池
-      pool.value = await window.electronAPI.getModelPool();
+      const p = await window.appAPI.getModelPool();
+    pool.value = Array.isArray(p) ? p : [];
     } else if (result?.error) {
       console.warn('刷新模型失败:', result.error);
     }
@@ -232,7 +242,7 @@ async function refreshProvider() {
 
 async function saveVariant() {
   const key = `providerVariant_${activeProvider.value}`;
-  await window.electronAPI.setConfig(key, providerVariant.value);
+  await window.appAPI.setConfig(key, providerVariant.value);
 }
 
 async function loadVariant() {
@@ -240,15 +250,15 @@ async function loadVariant() {
   const hasVariants = p ? (!!p.base_url_variants && Object.keys(p.base_url_variants).length > 0) : false;
   if (!hasVariants) return;
   const key = `providerVariant_${activeProvider.value}`;
-  const val = await window.electronAPI.getConfig(key);
+  const val = await window.appAPI.getConfig(key);
   providerVariant.value = val || 'default';
 }
 
 const apiKeys = ref({});
 
 async function refreshKeyStatus() {
-  if (window.electronAPI.getApiKeys) {
-    apiKeys.value = await window.electronAPI.getApiKeys() || {};
+  if (window.appAPI.getApiKeys) {
+    apiKeys.value = await window.appAPI.getApiKeys() || {};
   }
 }
 
@@ -263,8 +273,16 @@ watch(() => activeProvider.value, () => { loadVariant(); });
 
 onMounted(async () => {
   await loadRegistry();
-  pool.value = await window.electronAPI.getModelPool();
-  const active = await window.electronAPI.getActiveModels();
+  try {
+    const p = await window.appAPI.getModelPool();
+    console.log('[DEBUG ModelHub] getModelPool returned:', typeof p, p, Array.isArray(p));
+    pool.value = Array.isArray(p) ? p : [];
+  } catch (e) {
+    console.error('[DEBUG ModelHub] getModelPool error:', e);
+    pool.value = [];
+  }
+  
+  const active = await window.appAPI.getActiveModels();
   activeMain.value = active?.main || '';
   activeClerk.value = active?.clerk || '';
   await refreshKeyStatus();
@@ -275,12 +293,19 @@ onMounted(async () => {
     activeProvider.value = mainEntry ? mainEntry.provider : providerList.value[0].id;
   }
   await loadVariant();
+
+  window.addEventListener('model-downloaded', async () => {
+    try {
+      const p = await window.appAPI.getModelPool();
+      pool.value = Array.isArray(p) ? p : [];
+    } catch(e){}
+  });
 });
 </script>
 
 <style scoped>
 .model-hub {
-  /* Uses parent .settings-section.card styling */
+  overflow: visible !important;
 }
 
 .pool-badge {
@@ -311,6 +336,11 @@ onMounted(async () => {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: var(--space-3);
+}
+@media (max-width: 600px) {
+  .role-cards {
+    grid-template-columns: 1fr;
+  }
 }
 
 .role-card {
@@ -388,10 +418,8 @@ onMounted(async () => {
 }
 
 .provider-select {
-  padding: 4px 8px;
-  height: 28px;
+  flex: 1;
   min-width: 160px;
-  background: var(--bg-primary);
 }
 
 .model-list {
@@ -400,15 +428,10 @@ onMounted(async () => {
 }
 
 .model-list-hint {
-  font-size: var(--text-sm);
-  color: var(--text-primary);
-  padding: 8px 12px;
-  background: color-mix(in srgb, var(--accent-primary) 15%, transparent);
-  border-radius: var(--radius-sm);
-  margin-bottom: var(--space-3);
-  font-weight: 500;
-  display: flex;
-  align-items: center;
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+  padding: 4px 12px 12px 12px;
+  text-align: center;
 }
 
 .model-row {
@@ -480,20 +503,16 @@ onMounted(async () => {
 }
 
 .role-tag {
-  font-size: 10px;
-  padding: 2px 6px;
-  border-radius: 999px;
-  font-weight: 600;
-  letter-spacing: 0.5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 .role-tag.main {
-  background: color-mix(in srgb, var(--accent-primary) 20%, transparent);
   color: var(--accent-primary);
 }
 .role-tag.clerk {
-  background: color-mix(in srgb, var(--accent-primary) 15%, transparent);
   color: var(--accent-primary);
-  opacity: 0.9;
+  opacity: 0.8;
 }
 
 .empty-hint {
@@ -503,26 +522,23 @@ onMounted(async () => {
   font-size: var(--text-sm);
 }
 
-@keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
-.animate-spin { animation: spin 1s linear infinite; }
 
 /* ── Provider Refresh Button ─────────────────── */
 .refresh-provider-btn {
   display: flex;
   align-items: center;
-  gap: 4px;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
   margin-left: 8px;
   color: var(--text-secondary);
   font-size: var(--text-xs);
-  transition: color 0.2s;
+  transition: all 0.2s;
   cursor: pointer;
-  background: none;
+  background: var(--bg-primary);
   border: 1px solid var(--border-primary);
   border-radius: var(--radius-sm);
-  padding: 3px 8px;
+  padding: 4px;
 }
 .refresh-provider-btn:hover { color: var(--accent-primary); border-color: var(--accent-primary); }
 .refresh-provider-btn:disabled { opacity: 0.5; cursor: not-allowed; }

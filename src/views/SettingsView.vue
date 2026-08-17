@@ -67,7 +67,7 @@ const modelPanelRef = ref(null);
 
 onMounted(async () => {
   // 加载配置
-  const savedConfig = await window.electronAPI.getConfig('all');
+  const savedConfig = await window.appAPI.getAllConfig();
   if (savedConfig) {
     Object.assign(config, savedConfig);
   }
@@ -117,5 +117,39 @@ defineExpose({
 .settings-content {
   max-width: 700px;
   margin: 0 auto;
+}
+@media (max-width: 768px) {
+  .settings-scroll {
+    padding: 0 !important;
+    padding-bottom: calc(60px + env(safe-area-inset-bottom, 16px)) !important;
+    overflow-y: overlay;
+  }
+  /* 移动端彻底压平卡片，实现 Edge-to-Edge 沉浸式列表 */
+  .settings-scroll :deep(.settings-section.card) {
+    border-radius: 0;
+    border-left: none;
+    border-right: none;
+    border-top: none;
+    border-bottom: 1px solid var(--border-subtle);
+    background: transparent;
+    margin-bottom: 0;
+    padding: 20px 16px;
+  }
+  .settings-scroll :deep(.settings-section.card:last-child) {
+    border-bottom: none;
+  }
+  .settings-scroll::-webkit-scrollbar {
+    width: 4px;
+  }
+  .settings-scroll::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .settings-scroll::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.15);
+    border-radius: 10px;
+  }
+  .settings-scroll::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.3);
+  }
 }
 </style>

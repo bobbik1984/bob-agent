@@ -5,10 +5,10 @@ import { resolve } from 'path';
 export default defineConfig({
   plugins: [vue()],
   root: '.',
-  base: './',
   build: {
     outDir: 'dist',
     emptyOutDir: true,
+    target: 'esnext',
   },
   resolve: {
     alias: {

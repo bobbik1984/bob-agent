@@ -1,11 +1,13 @@
+use log::{debug, error, info, warn};
 use std::sync::Arc;
 use std::time::Duration;
-use log::{debug, error, info, warn};
-use tokio::time::sleep;
 use tokio::sync::watch;
+use tokio::time::sleep;
 
+use super::accounts::{
+    get_default_account_id, load_sync_buf, resolve_wechat_account, save_sync_buf,
+};
 use super::api::WechatApi;
-use super::accounts::{load_sync_buf, save_sync_buf, resolve_wechat_account, get_default_account_id};
 use super::types::{GetUpdatesReq, WeixinMessage};
 use super::WechatState;
 
@@ -44,7 +46,10 @@ pub fn start_monitor(state: Arc<WechatState>) {
     let account = match resolve_wechat_account(Some(&account_id)) {
         Ok(acc) if acc.configured => acc,
         _ => {
-            warn!("[wechat] Account {} not configured (no token), monitor not started.", account_id);
+            warn!(
+                "[wechat] Account {} not configured (no token), monitor not started.",
+                account_id
+            );
             *state.connected.write().unwrap() = false;
             return;
         }
@@ -69,7 +74,9 @@ pub fn start_monitor(state: Arc<WechatState>) {
             if wxid.is_empty() {
                 continue;
             }
-            state_clone.msg_queue.enqueue(wxid, msg, state_clone.clone());
+            state_clone
+                .msg_queue
+                .enqueue(wxid, msg, state_clone.clone());
         }
     });
 
@@ -99,12 +106,15 @@ pub async fn monitor_weixin_provider(
     message_tx: tokio::sync::mpsc::UnboundedSender<WeixinMessage>,
 ) {
     info!("Weixin monitor started (account={})", account_id);
-    
+
     let api = WechatApi::new(base_url, token);
     let mut get_updates_buf = load_sync_buf(&account_id).unwrap_or_default();
-    
+
     if !get_updates_buf.is_empty() {
-        debug!("Using previous get_updates_buf ({} bytes)", get_updates_buf.len());
+        debug!(
+            "Using previous get_updates_buf ({} bytes)",
+            get_updates_buf.len()
+        );
     } else {
         info!("No previous get_updates_buf found, starting fresh");
     }
@@ -147,7 +157,8 @@ pub async fn monitor_weixin_provider(
                 let errcode = resp.errcode.unwrap_or(0);
 
                 if ret != 0 || errcode != 0 {
-                    let is_session_expired = ret == SESSION_EXPIRED_ERRCODE || errcode == SESSION_EXPIRED_ERRCODE;
+                    let is_session_expired =
+                        ret == SESSION_EXPIRED_ERRCODE || errcode == SESSION_EXPIRED_ERRCODE;
                     if is_session_expired {
                         error!("getUpdates: session expired, please re-login via QR");
                         // Wait for a long time or stop since token is invalid
@@ -157,11 +168,16 @@ pub async fn monitor_weixin_provider(
                     }
 
                     consecutive_failures += 1;
-                    error!("getUpdates failed: ret={} errcode={} errmsg={:?} ({}/{})", 
-                        ret, errcode, resp.errmsg, consecutive_failures, MAX_CONSECUTIVE_FAILURES);
+                    error!(
+                        "getUpdates failed: ret={} errcode={} errmsg={:?} ({}/{})",
+                        ret, errcode, resp.errmsg, consecutive_failures, MAX_CONSECUTIVE_FAILURES
+                    );
 
                     if consecutive_failures >= MAX_CONSECUTIVE_FAILURES {
-                        error!("getUpdates: {} consecutive failures, backing off", MAX_CONSECUTIVE_FAILURES);
+                        error!(
+                            "getUpdates: {} consecutive failures, backing off",
+                            MAX_CONSECUTIVE_FAILURES
+                        );
                         consecutive_failures = 0;
                         sleep(Duration::from_millis(BACKOFF_DELAY_MS)).await;
                     } else {
@@ -172,7 +188,7 @@ pub async fn monitor_weixin_provider(
 
                 // Success
                 consecutive_failures = 0;
-                
+
                 if let Some(new_buf) = resp.get_updates_buf {
                     if !new_buf.is_empty() {
                         save_sync_buf(&account_id, &new_buf);
@@ -195,8 +211,11 @@ pub async fn monitor_weixin_provider(
             }
             Err(err) => {
                 consecutive_failures += 1;
-                error!("getUpdates error ({}/{}): {}", consecutive_failures, MAX_CONSECUTIVE_FAILURES, err);
-                
+                error!(
+                    "getUpdates error ({}/{}): {}",
+                    consecutive_failures, MAX_CONSECUTIVE_FAILURES, err
+                );
+
                 if consecutive_failures >= MAX_CONSECUTIVE_FAILURES {
                     consecutive_failures = 0;
                     sleep(Duration::from_millis(BACKOFF_DELAY_MS)).await;

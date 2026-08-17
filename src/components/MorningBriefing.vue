@@ -14,16 +14,19 @@
       <div class="briefing-body">
         <div class="briefing-content" v-html="renderedBriefing"></div>
 
-        <div v-if="stats.staled > 0 || stats.merged > 0" class="briefing-maintenance">
+        <div v-if="stats.staled > 0 || stats.merged > 0 || stats.digest_notes > 0" class="briefing-maintenance">
           <span class="maintenance-label">
             <Sparkles :size="12" style="margin-right: 4px;" />
-            {{ t('dream.maintenance') }}
+            {{ t('dream.maintenance') || '整理报告' }}
           </span>
           <span v-if="stats.staled > 0" class="maintenance-item">
             {{ t('dream.archived', { count: stats.staled }) }}
           </span>
           <span v-if="stats.merged > 0" class="maintenance-item">
             {{ t('dream.merged', { count: stats.merged }) }}
+          </span>
+          <span v-if="stats.digest_notes > 0" class="maintenance-item" style="color: var(--user-accent); font-weight: 500;">
+            📓 深度阅读了 {{ stats.digest_notes }} 篇笔记，提取 {{ stats.digest_entities }} 个图谱实体
           </span>
         </div>
 
@@ -34,6 +37,33 @@
             进化报告
           </span>
           <span class="maintenance-item evo-highlight">{{ evolutionReport }}</span>
+        </div>
+
+        <!-- 目标 19: 失败模式学习提示 -->
+        <div v-if="failureInsightsText" class="briefing-evolution">
+          <span class="maintenance-label">
+            <ShieldCheck :size="12" style="margin-right: 4px;" />
+            {{ t('dream.failureLabel') }}
+          </span>
+          <span class="maintenance-item evo-failure">{{ failureInsightsText }}</span>
+        </div>
+
+        <!-- P2.5: 标签合并提案 -->
+        <div v-if="tagProposals.length > 0" class="tag-proposals-section">
+          <div class="maintenance-label">
+            <Sparkles :size="12" style="margin-right: 4px;" />
+            标签整理建议
+          </div>
+          <div v-for="(proposal, index) in tagProposals" :key="index" class="tag-proposal-card">
+            <div class="proposal-info">
+              将 <span class="tag-alias" v-for="alias in proposal.aliases" :key="alias">#{{ alias }}</span> 
+              合并为 <span class="tag-canonical">#{{ proposal.canonical }}</span>
+            </div>
+            <div class="proposal-actions">
+              <button class="prop-btn accept" @click="acceptTagMerge(index)">合并</button>
+              <button class="prop-btn reject" @click="rejectTagMerge(index)">忽略</button>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -52,9 +82,8 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { X, Sun, Sunset, Moon, Sparkles, Dna } from 'lucide-vue-next';
-import { marked } from 'marked';
-import DOMPurify from 'dompurify';
+import { X, Sun, Sunset, Moon, Sparkles, Dna, ShieldCheck } from 'lucide-vue-next';
+import { renderMarkdownSimple } from '@/utils/markdown';
 
 const { t } = useI18n();
 const emit = defineEmits(['chat', 'dismiss']);
@@ -77,29 +106,42 @@ const visible = ref(false);
 const briefingText = ref('');
 const stats = ref({ staled: 0, merged: 0 });
 const evolutionReport = ref('');
+const failureInsightsText = ref('');
 let cleanupListener = null;
 
 const renderedBriefing = computed(() => {
-  if (!briefingText.value) return '';
-  const raw = marked.parse(briefingText.value, { breaks: true });
-  return DOMPurify.sanitize(raw);
+  return renderMarkdownSimple(briefingText.value);
 });
 
 async function loadDreamReport() {
   try {
-    const report = await window.electronAPI.getDreamReport();
+    const report = await window.appAPI.getDreamReport();
     if (report && report.briefing) {
       briefingText.value = report.briefing;
       stats.value = report.stats || {};
       visible.value = true;
     }
     // 进化引擎梦境报告
-    if (window.electronAPI.getEvolutionStats) {
-      const evo = await window.electronAPI.getEvolutionStats();
+    if (window.appAPI.getEvolutionStats) {
+      const evo = await window.appAPI.getEvolutionStats();
       if (evo && evo.dream_history && evo.dream_history.length > 0) {
         const latest = evo.dream_history[0];
         if (latest.report && latest.report !== '无需更新') {
-          evolutionReport.value = latest.report;
+          // 目标 19: 分离失败学习文本与普通进化报告
+          const parts = latest.report.split('; ');
+          const failurePart = parts.find(p => p.includes('避坑') || p.includes('failure'));
+          const otherParts = parts.filter(p => p !== failurePart);
+          
+          if (otherParts.length > 0) {
+            evolutionReport.value = otherParts.join('; ');
+          }
+          if (failurePart) {
+            failureInsightsText.value = failurePart;
+          }
+          // 如果只有 failurePart 没有其他进化报告，也把 evolutionReport 设为原文
+          if (!evolutionReport.value && failurePart) {
+            evolutionReport.value = '';
+          }
           visible.value = true;  // 即使没有晚报，有进化报告也展示
         }
       }
@@ -107,25 +149,67 @@ async function loadDreamReport() {
   } catch (err) {
     console.error('[MorningBriefing] Failed to load dream report:', err);
   }
+
+  // P2.5: 加载标签合并提案
+  try {
+    const tpRes = await window.appAPI.getTagProposals();
+    if (tpRes && Array.isArray(tpRes) && tpRes.length > 0) {
+      tagProposals.value = tpRes;
+      visible.value = true;
+    }
+  } catch (e) {
+    console.error('Failed to load tag proposals:', e);
+  }
+}
+
+// P2.5: Tag Proposal Handlers
+const tagProposals = ref([]);
+
+async function acceptTagMerge(index) {
+  const proposal = tagProposals.value[index];
+  try {
+    await window.appAPI.notebookMergeTags(proposal.canonical, proposal.aliases);
+    tagProposals.value.splice(index, 1);
+  } catch (e) {
+    console.error('Accept tag merge failed:', e);
+  }
+}
+
+async function rejectTagMerge(index) {
+  const proposal = tagProposals.value[index];
+  try {
+    for (const alias of proposal.aliases) {
+      await window.appAPI.notebookRejectTagMerge(proposal.canonical, alias);
+    }
+    tagProposals.value.splice(index, 1);
+  } catch (e) {
+    console.error('Reject tag merge failed:', e);
+  }
 }
 
 function startChat() {
   emit('chat', briefingText.value);
   visible.value = false;
-  window.electronAPI.dismissDream();
+  window.appAPI.dismissDream();
+  if (tagProposals.value.length === 0) {
+    window.appAPI.clearTagProposals().catch(e => {});
+  }
 }
 
 function dismiss() {
   visible.value = false;
   emit('dismiss');
-  window.electronAPI.dismissDream();
+  window.appAPI.dismissDream();
+  if (tagProposals.value.length === 0) {
+    window.appAPI.clearTagProposals().catch(e => {});
+  }
 }
 
 onMounted(() => {
   loadDreamReport();
 
   // 监听后台做梦完成事件
-  cleanupListener = window.electronAPI.onDreamCompleted((report) => {
+  cleanupListener = window.appAPI.onDreamCompleted((report) => {
     if (report && report.briefing) {
       briefingText.value = report.briefing;
       stats.value = report.stats || {};
@@ -321,5 +405,68 @@ onUnmounted(() => {
   background: color-mix(in srgb, var(--user-accent) 12%, var(--bg-hover));
   color: var(--text-secondary);
   border: 1px solid color-mix(in srgb, var(--user-accent) 20%, transparent);
+}
+.evo-failure {
+  background: color-mix(in srgb, var(--color-warning, #f59e0b) 12%, var(--bg-hover));
+  color: var(--text-secondary);
+  border: 1px solid color-mix(in srgb, var(--color-warning, #f59e0b) 20%, transparent);
+}
+
+/* P2.5 标签整理提案 */
+.tag-proposals-section {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--border-subtle);
+}
+.tag-proposal-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  padding: 8px 12px;
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.tag-alias {
+  color: var(--color-warning, #f59e0b);
+  font-weight: 500;
+  margin: 0 2px;
+}
+.tag-canonical {
+  color: var(--user-accent);
+  font-weight: 500;
+  margin: 0 2px;
+}
+.proposal-actions {
+  display: flex;
+  gap: 6px;
+}
+.prop-btn {
+  background: none;
+  border: 1px solid transparent;
+  padding: 4px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 11px;
+  transition: all 0.2s;
+}
+.prop-btn.accept {
+  background: color-mix(in srgb, var(--user-accent) 15%, transparent);
+  color: var(--user-accent);
+}
+.prop-btn.accept:hover {
+  background: var(--user-accent);
+  color: var(--text-inverse);
+}
+.prop-btn.reject {
+  background: var(--bg-tertiary);
+  color: var(--text-tertiary);
+}
+.prop-btn.reject:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
 }
 </style>

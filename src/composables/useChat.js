@@ -15,8 +15,8 @@
  */
 
 import { ref, computed, nextTick } from 'vue';
-import { marked } from 'marked';
-import DOMPurify from 'dompurify';
+import { marked, DOMPurify } from '@/utils/markdown';
+import { formatDate } from '@/utils/date';
 
 // ── 文件链接正则 (拆分 FileCard) ──
 const FILE_LINK_RE = /\<a\s+[^>]*href="((?:file:\/\/\/[^"]+)|(?:[A-Za-z]:[\\][^"]+))"[^>]*>[^<]*<\/a>/gi;
@@ -44,7 +44,7 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
   // ── 消息加载 ─────────────────────────────────────
   async function loadMessages() {
     if (!props.conversationId) return;
-    const rawMessages = await window.electronAPI.getMessages(props.conversationId);
+    const rawMessages = await window.appAPI.getMessages(props.conversationId);
     messages.value = rawMessages.map(m => ({
       ...m,
       _thinkingExpanded: false,
@@ -63,24 +63,145 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
   }
 
   // ── 发送消息 ─────────────────────────────────────
-  async function sendMessage(pendingImage, pendingFiles, resetTextareaHeight) {
-    const text = inputText.value.trim();
-    if (!text && !pendingImage.value && pendingFiles.value.length === 0) return;
+  async function sendMessage(pendingImages, pendingFiles, resetTextareaHeight, beforeApiCallHook = null) {
+    let text = inputText.value.trim();
+    if (!text && pendingImages.value.length === 0 && pendingFiles.value.length === 0) return;
     if (isStreaming.value) return;
 
+    // T-1920: /memo 快捷记事
+    if (text.startsWith('/memo ')) {
+      const noteContent = text.replace(/^\/memo\s+/, '').trim();
+      if (noteContent) {
+        try {
+          const res = await window.appAPI.notebookAppendDaily(noteContent);
+          if (res && res.ok) {
+            messages.value.push({ role: 'user', content: text });
+            messages.value.push({ 
+              role: 'system', 
+              content: `✅ 已记录速记。[知识图谱 -> 速记] 中可查看。` 
+            });
+            inputText.value = '';
+            resetTextareaHeight();
+            setTimeout(scrollToBottom, 100);
+            return;
+          }
+        } catch (e) {
+          console.error('Failed to memo', e);
+        }
+      }
+      return;
+    }
+
+    let systemContextMsg = null;
+    if (text.startsWith('@note ')) {
+      const keyword = text.replace(/^@note\s+/, '').split(' ')[0].trim();
+      if (keyword) {
+        try {
+          const searchRes = await window.appAPI.notebookSearch(keyword);
+          if (searchRes && searchRes.ok && searchRes.results && searchRes.results.length > 0) {
+            const topHit = searchRes.results[0];
+            const readRes = await window.appAPI.notebookReadNote(topHit.id);
+            if (readRes && readRes.ok) {
+              systemContextMsg = {
+                role: 'system',
+                content: `【隐式笔记上下文注入 - 笔记：${topHit.title || topHit.id}】\n${readRes.content}\n`
+              };
+              messages.value.push({
+                role: 'system',
+                content: `🔍 已挂载笔记上下文: ${topHit.title || topHit.id}`
+              });
+            }
+          } else {
+             messages.value.push({
+                role: 'system',
+                content: `❌ 未找到关联笔记: ${keyword}`
+              });
+          }
+        } catch (e) {
+          console.error('Failed to search note', e);
+        }
+      }
+      text = text.replace(/^@note\s+[^\s]+/, '').trim();
+      if (!text) text = "请根据我挂载的笔记上下文，提取核心内容并生成一份总结。";
+    }
+
+    // P3-3: 拦截 /note — 新建独立笔记
+    if (text.startsWith('/note ')) {
+      const noteTitle = text.replace(/^\/note\s+/, '').trim();
+      if (noteTitle) {
+        try {
+          const res = await window.appAPI.notebookCreateNote(noteTitle, []);
+          if (res && res.ok) {
+            messages.value.push({ role: 'user', content: text });
+            messages.value.push({
+              role: 'system',
+              content: `📓 笔记「${noteTitle}」已创建。请切换到 [笔记] 视图查看。`
+            });
+            inputText.value = '';
+            resetTextareaHeight();
+            setTimeout(scrollToBottom, 100);
+            return;
+          }
+        } catch (e) {
+          console.error('Failed to create note', e);
+        }
+      }
+    }
+
+    // P3-3: 拦截 /clip — 将AI最近回复保存为笔记
+    if (text.startsWith('/clip')) {
+      const lastAssistant = [...messages.value].reverse().find(m => m.role === 'assistant' && m.content);
+      if (lastAssistant) {
+        try {
+          const clipContent = typeof lastAssistant.content === 'string' 
+            ? lastAssistant.content.replace(/<\|mem\|>/g, '').trim() 
+            : '';
+          const clipTitle = clipContent.substring(0, 40).replace(/[#\n*]/g, '').trim() || 'AI剪报';
+          const res = await window.appAPI.notebookCreateNote(clipTitle, ['ai-clip'], 'sources');
+          if (res && res.ok && res.path) {
+            await window.appAPI.notebookSaveNote(res.path, clipContent);
+          }
+          messages.value.push({ role: 'user', content: text });
+          messages.value.push({
+            role: 'system',
+            content: `📌 AI回复已保存为笔记「${clipTitle}」。`
+          });
+          inputText.value = '';
+          resetTextareaHeight();
+          setTimeout(scrollToBottom, 100);
+          return;
+        } catch (e) {
+          console.error('Failed to clip note', e);
+        }
+      } else {
+        messages.value.push({ role: 'user', content: text });
+        messages.value.push({
+          role: 'system',
+          content: '⚠️ 没有找到可以保存的 AI 回复。'
+        });
+        inputText.value = '';
+        resetTextareaHeight();
+        setTimeout(scrollToBottom, 100);
+        return;
+      }
+    }
+
     const filesToRead = [...pendingFiles.value];
-    const imageBase64 = pendingImage.value;
+    const imageBase64s = [...pendingImages.value];
 
     const userMessage = {
       role: 'user',
-      content: text || (imageBase64 ? '请分析这张图片' : '请分析附件内容'),
-      image_base64: imageBase64 || null,
+      content: text || (imageBase64s.length > 0 ? '看图片' : '继续'),
+      image_base64s: imageBase64s.length > 0 ? imageBase64s : null,
     };
 
-    // 立即添加到 UI 并清空输入框
+    // 存到 UI 中
     messages.value.push(userMessage);
+    if (systemContextMsg) {
+      messages.value.push(systemContextMsg);
+    }
     inputText.value = '';
-    pendingImage.value = null;
+    pendingImages.value = [];
     pendingFiles.value = [];
     resetTextareaHeight();
 
@@ -93,6 +214,17 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
     await nextTick();
     scrollToBottom();
 
+    if (beforeApiCallHook) {
+      try {
+        await beforeApiCallHook({ userMessage, filesToRead, streamThinking });
+      } catch (err) {
+        console.error('[beforeApiCallHook error]', err);
+        isStreaming.value = false;
+        messages.value.push({ role: 'assistant', content: err.message || String(err), _isError: true });
+        return;
+      }
+    }
+
     // 将附件路径展示在界面上
     if (filesToRead.length > 0) {
       for (const f of filesToRead) {
@@ -101,7 +233,7 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
     }
 
     // 持久化
-    await window.electronAPI.addMessage(
+    await window.appAPI.addMessage(
       props.conversationId,
       'user',
       userMessage.content,
@@ -133,11 +265,11 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
 
     try {
       let result;
-      console.log('[sendMessage] image_base64 present:', !!userMessage.image_base64, 'apiMessages count:', apiMessages.length);
-      if (userMessage.image_base64) {
-        result = await window.electronAPI.sendVision(apiMessages, userMessage.image_base64, globalFileAccess.value, agentMode.value, props.conversationId);
+      console.log('[sendMessage] image_base64s present:', !!userMessage.image_base64s, 'apiMessages count:', apiMessages.length);
+      if (userMessage.image_base64s) {
+        result = await window.appAPI.sendVision(apiMessages, userMessage.image_base64s, globalFileAccess.value, agentMode.value, props.conversationId);
       } else {
-        result = await window.electronAPI.sendChat(apiMessages, globalFileAccess.value, agentMode.value, props.conversationId);
+        result = await window.appAPI.sendChat(apiMessages, globalFileAccess.value, agentMode.value, props.conversationId);
       }
       console.log('[sendMessage] result:', JSON.stringify(result).slice(0, 300));
 
@@ -147,7 +279,7 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
         const outputCost = (result.usage.completion_tokens || 0) / 1_000_000 * result.pricing.output;
         sessionCost.value += inputCost + outputCost;
         if (props.conversationId) {
-          window.electronAPI.updateConversationCost(props.conversationId, sessionCost.value);
+          window.appAPI.updateConversationCost(props.conversationId, sessionCost.value);
         }
       }
 
@@ -185,30 +317,12 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
         }
         if (outboxOps.length > 0) {
           try {
-            await window.electronAPI.writeOutbox(outboxOps);
+            await window.appAPI.writeOutbox(outboxOps);
             console.log(`[Outbox] 已写入 ${outboxOps.length} 条配置操作`);
           } catch (e) {
             console.error('[Outbox] writeOutbox 失败:', e);
           }
           finalContent = finalContent.replace(configBlockRegex, '').trim();
-        }
-
-        // ── T-1306: 行动项捕获 (bob-action-items 代码块) ──
-        const actionBlockRegex = /```bob-action-items\n([\s\S]*?)\n```/g;
-        const extractedItems = [];
-        let actionMatch;
-        while ((actionMatch = actionBlockRegex.exec(finalContent)) !== null) {
-          try {
-            const items = JSON.parse(actionMatch[1]);
-            if (Array.isArray(items)) {
-              extractedItems.push(...items);
-            }
-          } catch (e) {
-            console.warn('[ActionItems] bob-action-items JSON 解析失败:', e);
-          }
-        }
-        if (extractedItems.length > 0) {
-          finalContent = finalContent.replace(actionBlockRegex, '').trim();
         }
 
         const assistantMsg = {
@@ -220,7 +334,7 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
         };
 
         messages.value.push(assistantMsg);
-        await window.electronAPI.addMessage(
+        await window.appAPI.addMessage(
           props.conversationId,
           'assistant',
           assistantMsg.content,
@@ -228,24 +342,11 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
         );
 
         if (messages.value.filter(m => m.role === 'user').length === 1) {
-          window.electronAPI.autoRenameConversation(props.conversationId).then(title => {
+          window.appAPI.autoRenameConversation(props.conversationId).then(title => {
             if (title) {
               emit('update-title', props.conversationId, title);
             }
           }).catch(console.error);
-        }
-
-        // T-1306: 将提取的行动项推入消息列表作为交互卡片
-        for (const item of extractedItems) {
-          messages.value.push({
-            role: 'assistant',
-            type: 'action-item-card',
-            actionItem: {
-              title: item.title || '',
-              type: item.type || 'todo',
-              date: item.date || null,
-            },
-          });
         }
       }
     } catch (err) {
@@ -287,6 +388,8 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
       streamContent.value += chunk.content;
     } else if (chunk.type === 'thinking') {
       streamThinking.value += chunk.content;
+    } else if (chunk.type === 'thinking_replace') {
+      streamThinking.value = chunk.content;
     } else if (chunk.type === 'tool_start') {
       activeTools.value.push({ name: chunk.name, status: 'running', result: null, _expanded: false });
     } else if (chunk.type === 'tool_end') {
@@ -329,7 +432,7 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
   }
 
   async function stopGeneration() {
-    await window.electronAPI.stopGeneration();
+    await window.appAPI.stopGeneration();
     isStreaming.value = false;
   }
 
@@ -338,7 +441,7 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
     if (messages.value.length === 0) return;
     const lines = [];
     const title = messages.value.find(m => m.role === 'user')?.content?.slice(0, 30) || '对话';
-    const date = new Date().toLocaleDateString('zh-CN');
+    const date = formatDate(Date.now());
     lines.push(`# ${title}`);
     lines.push(`> 导出时间: ${date}\n`);
     for (const msg of messages.value) {
@@ -350,7 +453,7 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
     }
     const md = lines.join('\n');
     const safeName = title.replace(/[<>:"/\\|?*]/g, '_');
-    await window.electronAPI.exportMarkdown(md, `${safeName}.md`);
+    await window.appAPI.exportMarkdown(md, `${safeName}.md`);
   }
 
   // ── Markdown 渲染 ─────────────────────────────────
@@ -498,7 +601,7 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
     if (!text) return;
     isParsing.value = true;
     try {
-      const parsed = await window.electronAPI.parseEvent(text);
+      const parsed = await window.appAPI.parseEvent(text);
       messages.value.push({ role: 'assistant', type: 'confirm-card', event: parsed });
       scrollToBottom();
     } catch (err) {
@@ -513,7 +616,7 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
   async function handleConfirmEvent(event, msgObj) {
     try {
       const plainEvent = JSON.parse(JSON.stringify(event));
-      const res = await window.electronAPI.confirmEvent(plainEvent);
+      const res = await window.appAPI.confirmEvent(plainEvent);
       if (res.ok) {
         msgObj.content = `已成功保存为${event.type === 'todo' ? '待办' : '日程'}：${event.title}`;
         msgObj.type = 'text';
@@ -532,40 +635,35 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
     msgObj.type = 'text';
   }
 
-  // ── T-1306: 行动项卡片交互 ─────────────────────────
-  async function handleSaveActionItem(item, msgObj) {
-    try {
-      const event = {
-        title: item.title,
-        type: item.type || 'todo',
-        status: 'pending',
-        date: item.date || null,
-        startTime: null,
-        endTime: null,
-        description: '',
-      };
-      const res = await window.electronAPI.confirmEvent(event);
-      if (res.ok) {
-        msgObj.content = `已保存${item.type === 'todo' ? '待办' : '日程'}: ${item.title}`;
-        msgObj.type = 'text';
-      } else {
-        msgObj.content = `保存失败: ${res.error}`;
-        msgObj.type = 'text';
-      }
-    } catch (err) {
-      msgObj.content = `保存失败: ${err.message}`;
-      msgObj.type = 'text';
-    }
-  }
 
-  function handleDismissActionItem(msgObj) {
-    msgObj.content = '已忽略';
-    msgObj.type = 'text';
-  }
+
+
+  const clipMessageToNote = async (msg) => {
+    if (!msg || !msg.content) return;
+    try {
+      const clipContent = typeof msg.content === 'string'
+        ? msg.content.replace(/<\|mem\|>/g, '').trim()
+        : '';
+      const defaultTitle = clipContent.substring(0, 40).replace(/[#\n*]/g, '').trim() || 'AI片段';
+      const clipTitle = prompt('请输入笔记标题:', defaultTitle);
+      if (!clipTitle) return;
+
+      const res = await window.appAPI.notebookCreateNote(clipTitle, ['ai-clip'], 'sources');
+      if (res && res.ok && res.path) {
+        await window.appAPI.notebookSaveNote(res.path, clipContent);
+        if (window.appAPI.showNotification) {
+          window.appAPI.showNotification('已存为笔记', '标题: ' + clipTitle);
+        }
+      }
+    } catch (e) {
+      console.error('Failed to clip note', e);
+    }
+  };
 
   return {
     // 状态
     messages,
+    clipMessageToNote,
     displayMessages,
     inputText,
     isStreaming,
@@ -587,7 +685,6 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
     parseTextAsEvent,
     handleConfirmEvent,
     handleCancelEvent,
-    handleSaveActionItem,
-    handleDismissActionItem,
+
   };
 }

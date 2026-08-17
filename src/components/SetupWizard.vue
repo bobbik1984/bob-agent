@@ -4,13 +4,13 @@
       <div class="wizard-logo">
         <div class="logo-layer" :class="{ visible: step >= 1 }" style="-webkit-mask-image: url(/bob_.svg); mask-image: url(/bob_.svg)"></div>
         <div class="logo-layer" :class="{ visible: step >= 2 }" style="-webkit-mask-image: url(/bob_b.svg); mask-image: url(/bob_b.svg)"></div>
-        <div class="logo-layer" :class="{ visible: step >= 3 }" style="-webkit-mask-image: url(/bob_bo.svg); mask-image: url(/bob_bo.svg)"></div>
-        <div class="logo-layer" :class="{ visible: step >= 4 }" style="-webkit-mask-image: url(/bob_bob.svg); mask-image: url(/bob_bob.svg)"></div>
+        <div class="logo-layer" :class="{ visible: step >= Math.ceil(totalSteps * 0.75) }" style="-webkit-mask-image: url(/bob_bo.svg); mask-image: url(/bob_bo.svg)"></div>
+        <div class="logo-layer" :class="{ visible: isLastStep }" style="-webkit-mask-image: url(/bob_bob.svg); mask-image: url(/bob_bob.svg)"></div>
       </div>
 
       <div class="wizard-body">
-        <!-- Page 1: Language, Theme & Color -->
-        <div v-if="step === 1" class="page">
+        <!-- Page: Appearance (语言、主题、颜色) -->
+        <div v-if="currentStepType === 'appearance'" class="page">
           <div class="theme-options">
             <button :class="['btn-theme', { active: tempConfig.language === 'zh-CN' }]" @click="setLanguage('zh-CN')">
               简体中文
@@ -40,8 +40,8 @@
           </div>
         </div>
 
-        <!-- Page 2: Workspace -->
-        <div v-if="step === 2" class="page page-center">
+        <!-- Page: Workspace (桌面端专属) -->
+        <div v-if="currentStepType === 'workspace'" class="page page-center">
           <div class="workspace-row">
             <div class="workspace-input" :class="{ filled: tempConfig.workspaceDir }" @click="selectWorkspaceDir">
               {{ tempConfig.workspaceDir || $t('setup.workspace_placeholder') }}
@@ -50,18 +50,18 @@
           </div>
         </div>
 
-        <!-- Page 3: LLM -->
-        <div v-if="step === 3" class="page page-center">
+        <!-- Page: LLM -->
+        <div v-if="currentStepType === 'llm'" class="page page-center">
           <div class="llm-form">
             <CustomSelect v-model="tempConfig.provider" :options="providerOptions" :placeholder="$t('setup.provider_placeholder')" />
             <input class="input" type="password" v-model="tempConfig.apiKey" placeholder="API Key" />
           </div>
         </div>
 
-        <!-- Page 4: WeChat -->
-        <div v-if="step === 4" class="page page-top">
+        <!-- Page: WeChat (桌面端) -->
+        <div v-if="currentStepType === 'wechat'" class="page page-top">
           <div class="wechat-toggle" @click="toggleWechat">
-            <img src="/wechat.svg" class="wechat-icon" :class="{ active: enableWechat }" alt="" />
+            <img :src="'./wechat.svg'" class="wechat-icon" :class="{ active: enableWechat }" alt="" />
             <label class="switch-label">
               <input type="checkbox" v-model="enableWechat" @change="toggleWechat" @click.stop />
               <span class="slider round"></span>
@@ -69,7 +69,7 @@
           </div>
           <div v-if="enableWechat" class="qr-area animate-fade-in">
             <div v-if="!qrCodeUrl && !wechatConnected" class="qr-loading">
-              <Loader2 class="spin" :size="24" />
+              <Loader2 class="animate-spin" :size="24" />
             </div>
             <div v-else-if="wechatConnected" class="qr-done">
               <Check :size="32" />
@@ -79,6 +79,25 @@
             </div>
           </div>
         </div>
+
+        <!-- Page: Scan to Pair (移动端专属) -->
+        <div v-if="currentStepType === 'pair'" class="page page-center">
+          <div class="pair-container" style="display: flex; flex-direction: column; align-items: center; width: 100%;">
+            <div style="width: 80px; height: 80px; border-radius: 50%; background: rgba(var(--user-accent-rgb, 39, 118, 187), 0.1); display: flex; align-items: center; justify-content: center; margin-bottom: 24px; color: var(--user-accent);">
+              <Smartphone :size="40" />
+            </div>
+            <h3 style="margin-bottom: 12px; font-weight: 500;">{{ $t('settings.p2p_pairing') || '多端同步' }}</h3>
+            <p style="color: var(--text-secondary); text-align: center; line-height: 1.6; margin-bottom: 32px; font-size: 0.9em; padding: 0 20px;">
+              {{ $t('setup.pair_scan_desc') || '使用手机扫描 PC 端“连接中心”里生成的二维码，建立端到端加密连接。' }}
+            </p>
+            <button class="btn btn-primary" style="width: 80%; padding: 12px; font-size: 1em; border-radius: 24px; display: flex; align-items: center; justify-content: center; gap: 8px;" @click="openScanner">
+              <QrCode :size="18" /> {{ $t('setup.btn_scan_qr') || '打开摄像头扫码' }}
+            </button>
+            <button class="btn btn-ghost" style="margin-top: 16px; font-size: 0.85em; color: var(--text-tertiary);" @click="finishOnboarding">
+              {{ $t('setup.btn_skip') || '跳过，稍后再说' }}
+            </button>
+          </div>
+        </div>
       </div>
 
       <div class="wizard-nav">
@@ -86,10 +105,10 @@
           <ChevronLeft :size="20" />
         </button>
         <div class="nav-spacer"></div>
-        <button class="nav-arrow" v-if="step < 4" @click="step++">
+        <button class="nav-arrow" v-if="!isLastStep" @click="step++">
           <ChevronRight :size="20" />
         </button>
-        <button class="nav-arrow nav-launch" v-if="step === 4" @click="finishOnboarding">
+        <button class="nav-arrow nav-launch" v-if="isLastStep" @click="finishOnboarding">
           <Rocket :size="20" />
         </button>
       </div>
@@ -98,18 +117,32 @@
 </template>
 
 <script setup>
-import { ref, watch, onMounted, onUnmounted } from 'vue';
+import { ref, computed, watch, onMounted, onUnmounted, inject } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { Moon, Sun, ChevronLeft, ChevronRight, Loader2, Rocket, Check } from 'lucide-vue-next';
+import { Moon, Sun, ChevronLeft, ChevronRight, Loader2, Rocket, Check, Smartphone, QrCode } from 'lucide-vue-next';
 import CustomSelect from './CustomSelect.vue';
 import { ACCENT_COLORS } from '@/constants/theme.js';
 
 const { locale, t: $t } = useI18n();
+const isMobile = inject('isMobile', false);
+  const isMobileApp = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
 
 const emit = defineEmits(['complete']);
-const step = ref(1);
+const step = ref(1); // 1-indexed within wizardSteps
 const isTesting = ref(false);
 const testResult = ref(null);
+
+// 移动端跳过 workspace 步骤，微信步骤改为扫码配对
+const wizardSteps = computed(() => {
+  if (isMobileApp) {
+    return ['appearance', 'llm', 'pair']; // 3 步: 外观 → LLM → 扫码配对
+  }
+  return ['appearance', 'workspace', 'llm', 'wechat']; // 4 步: 外观 → 工作间 → LLM → 微信
+});
+
+const currentStepType = computed(() => wizardSteps.value[step.value - 1]);
+const totalSteps = computed(() => wizardSteps.value.length);
+const isLastStep = computed(() => step.value >= totalSteps.value);
 
 const enableWechat = ref(false);
 const qrCodeUrl = ref('');
@@ -144,8 +177,8 @@ const providerOptions = [
 onMounted(async () => {
   // 先拍快照：从已有配置（而非 tempConfig）直接拍摄，防止用户在加载期间修改 tempConfig 导致快照被污染
   const snapshotBase = { ...tempConfig.value };
-  if (window.electronAPI) {
-    const saved = await window.electronAPI.getConfig('all');
+  if (window.appAPI) {
+    const saved = await window.appAPI.getAllConfig();
     if (saved) {
       // 用已有配置覆盖 snapshotBase 和 tempConfig
       if (saved.language) { snapshotBase.language = saved.language; tempConfig.value.language = saved.language; locale.value = saved.language; }
@@ -163,14 +196,24 @@ onMounted(async () => {
   initialSnapshot = JSON.parse(JSON.stringify(snapshotBase));
 });
 
-// 离开 Step 3 时立即保存 API Key 到 OS Keychain
+// 离开 LLM 步骤时立即保存 API Key 到 OS Keychain
 watch(step, async (newStep, oldStep) => {
-  if (oldStep === 3 && tempConfig.value.apiKey && window.electronAPI?.setApiKey) {
-    await window.electronAPI.setApiKey(tempConfig.value.provider, tempConfig.value.apiKey);
+  const oldStepType = wizardSteps.value[oldStep - 1];
+  if (oldStepType === 'llm' && tempConfig.value.apiKey && window.appAPI?.setApiKey) {
+    await window.appAPI.setApiKey(tempConfig.value.provider, tempConfig.value.apiKey);
   }
 });
 
-onUnmounted(() => { if (pollTimer) clearTimeout(pollTimer); });
+onUnmounted(() => { 
+  if (pollTimer) clearTimeout(pollTimer); 
+  // 确保在组件卸载时取消原生的二维码扫描（修复左滑返回卡死的 Bug）
+  if (document.body.classList.contains('scanner-active')) {
+    document.body.classList.remove('scanner-active');
+    if (window.appAPI && window.appAPI.cancelQrCode) {
+      window.appAPI.cancelQrCode();
+    }
+  }
+});
 
 async function toggleWechat() {
   if (enableWechat.value) {
@@ -182,9 +225,9 @@ async function toggleWechat() {
 }
 
 async function loadQrCode() {
-  if (!window.electronAPI) return;
+  if (!window.appAPI) return;
   try {
-    const res = await window.electronAPI.wechatGetLoginQr();
+    const res = await window.appAPI.wechatGetLoginQr();
     if (res && res.qrcode_img_content) {
       qrCodeUrl.value = res.qrcode_img_content;
       rawQrCode.value = res.qrcode;
@@ -198,7 +241,7 @@ async function loadQrCode() {
 async function pollQrStatus() {
   if (!enableWechat.value || wechatConnected.value) return;
   try {
-    const res = await window.electronAPI.wechatCheckLoginStatus(rawQrCode.value);
+    const res = await window.appAPI.wechatCheckLoginStatus(rawQrCode.value);
     if (res && (res.status === 'confirmed' || res.status === 'binded_redirect')) {
       wechatConnected.value = true;
       return;
@@ -206,6 +249,39 @@ async function pollQrStatus() {
     if (res && res.status === 'expired') { await loadQrCode(); return; }
   } catch (e) {}
   pollTimer = setTimeout(pollQrStatus, 2000);
+}
+
+async function openScanner() {
+  if (window.appAPI?.scanQrCode) {
+    try {
+      document.body.classList.add('scanner-active');
+      const code = await window.appAPI.scanQrCode();
+      document.body.classList.remove('scanner-active');
+      
+      if (code) {
+        try {
+          const payload = JSON.parse(code);
+          await window.appAPI.setConfig('pairing_payload', payload);
+          console.log('Saved pairing payload:', payload);
+          if (window.appAPI.triggerMobileSync) {
+            const syncTimeout = new Promise((_, reject) => setTimeout(() => reject(new Error('Sync Timeout')), 15000));
+            await Promise.race([
+              window.appAPI.triggerMobileSync(payload),
+              syncTimeout
+            ]);
+          }
+        } catch (e) {
+          console.error('Invalid QR Code JSON:', code);
+        }
+        finishOnboarding();
+      }
+    } catch (err) {
+      document.body.classList.remove('scanner-active');
+      console.error('Scan failed:', err);
+    }
+  } else {
+    alert($t('setup.scanner_not_supported') || '当前环境不支持扫码');
+  }
 }
 
 function setLanguage(lang) {
@@ -229,31 +305,31 @@ function setAccentColor(color) {
 }
 
 async function selectWorkspaceDir() {
-  if (window.electronAPI) {
-    const dir = await window.electronAPI.selectWorkspaceDir();
+  if (window.appAPI) {
+    const dir = await window.appAPI.selectWorkspaceDir();
     if (dir) tempConfig.value.workspaceDir = dir;
   }
 }
 
 async function finishOnboarding() {
-  if (window.electronAPI) {
+  if (window.appAPI) {
     // 只写入用户在向导中实际修改过的字段，不动已有配置
     const fieldsToCheck = ['language', 'theme', 'accentColor', 'workspaceDir', 'provider'];
     for (const key of fieldsToCheck) {
       if (tempConfig.value[key] !== initialSnapshot[key]) {
-        await window.electronAPI.setConfig(key, tempConfig.value[key]);
+        await window.appAPI.setConfig(key, tempConfig.value[key]);
       }
     }
     // API Key：仅当用户在向导里输入了新 Key 时才写入
-    if (tempConfig.value.apiKey && window.electronAPI.setApiKey) {
-      await window.electronAPI.setApiKey(tempConfig.value.provider, tempConfig.value.apiKey);
+    if (tempConfig.value.apiKey && window.appAPI.setApiKey) {
+      await window.appAPI.setApiKey(tempConfig.value.provider, tempConfig.value.apiKey);
     }
-    await window.electronAPI.setConfig('onboarded', true);
+    await window.appAPI.setConfig('onboarded', true);
     // 仅当 provider 发生了变更时，才重新绑定默认模型
     if (tempConfig.value.provider !== initialSnapshot.provider) {
-      const models = await window.electronAPI.getModels(tempConfig.value.provider);
+      const models = await window.appAPI.getModels(tempConfig.value.provider);
       const defaultModel = models.find(m => m.default) || models[0];
-      if (defaultModel) await window.electronAPI.setConfig('model', defaultModel.id);
+      if (defaultModel) await window.appAPI.setConfig('model', defaultModel.id);
     }
   }
   emit('complete');
@@ -580,6 +656,4 @@ input:checked + .slider:before {
   background: rgba(var(--user-accent-rgb), 0.15);
 }
 
-.spin { animation: spin 1s linear infinite; }
-@keyframes spin { 100% { transform: rotate(360deg); } }
 </style>

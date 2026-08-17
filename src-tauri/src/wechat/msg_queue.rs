@@ -1,7 +1,7 @@
+use log::error;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
-use log::error;
 
 use super::types::WeixinMessage;
 use super::WechatState; // we will define this in mod.rs
@@ -19,10 +19,13 @@ impl MessageQueue {
 
     pub fn enqueue(&self, wxid: String, msg: WeixinMessage, state: Arc<WechatState>) {
         let mut queues = self.queues.lock().unwrap();
-        
+
         if let Some(tx) = queues.get(&wxid) {
             if tx.send(msg.clone()).is_ok() {
-                log::info!("[msg_queue] Enqueued message for wxid={} (existing queue)", wxid);
+                log::info!(
+                    "[msg_queue] Enqueued message for wxid={} (existing queue)",
+                    wxid
+                );
                 return;
             }
             // If send fails, the receiver is dropped, we'll recreate it.

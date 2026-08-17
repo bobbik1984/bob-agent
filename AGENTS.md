@@ -9,18 +9,12 @@
 
 ## 项目概述
 
-**bob-agent** 是一个 **Windows 桌面 AI 私人秘书**（v0.32.1），面向不喜欢折腾的普通用户。
+**bob-agent** 是一个 **Windows 桌面 AI 私人秘书**，面向不喜欢折腾的普通用户。
 
-- **产品定位**：「中国泛白领办公桌上的幽灵副手」— 开箱即用、纯本地、极致轻量的 AI 桌面伴侣
-- **技术栈**：**Tauri v2 (Rust)** + Vue 3 + Vite（Electron 迁移已完成）
+- **产品定位**：开箱即用的桌面 AI 助手，核心能力是对话 + 图片识别 + 日程管理 + 文件分析
+- **技术栈**：**Tauri v2 (Rust)** + Vue 3 + Vite（正在从 Electron 迁移）
 - **目标用户**：办公白领、非技术人员
-- **核心能力**：
-  - 智能对话 + 图片识别 + 12+ 原生工具 (Tool Calling)
-  - 日程管理 + 智能待办跟进 + 晨间简报
-  - 文档导出 (DOCX/XLSX/PPTX/HTML)
-  - 微信/Telegram/Discord 多通道接入
-  - 三层记忆体系 (SOUL → sessions → wiki) + Dream V2 异步压缩
-  - 认知引擎 V2 (熔断器/上下文分级/语义去重/复杂度路由)
+- **血统**：融合了 CodeRunner 的上下文管理精华 + DeepSeek-TUI 的工程理念 + TodoList 的日程管理能力
 
 ---
 
@@ -108,6 +102,22 @@ dist-release/
 
 > ⚠️ `dist-release/` 已被 `.gitignore` 排除，二进制产物不入版本控制。
 
+### 🌐 官网部署工作流 (Marketing Website Pipeline)
+
+`bob-agent/website/` 目录存放的是着陆页（Landing Page）和静态资源。
+> **⚠️ 严禁假定自动同步**：该目录**没有**包含在 Syncthing 的同步范围内，必须通过脚本手动推送到指定的云端节点。
+> *具体的部署节点 IP、外网域名映射以及 SSH Session 名称，请查阅 `Assistant/common/knowledge/skills/cluster_ops/references/node_inventory.md` 和 `service_map.md` 获取最新映射。*
+
+#### 部署方式：
+在项目根目录运行一键部署脚本：
+```bash
+deploy_website.bat
+```
+执行过程说明：
+1. **打包**：将 `website/` 目录压缩为 `.zip`。
+2. **传输**：通过 `pscp` 和预配置的 SSH Session 将文件推送到目标节点的 `/tmp/` 目录。
+3. **部署**：通过 `plink` 远程执行 `sudo unzip` 解压到 Caddy 的目标目录 `/opt/bob/`。
+
 ---
 
 ## 编码规范
@@ -123,6 +133,10 @@ dist-release/
 1. **IPC 调用**：统一通过 `window.electronAPI.xxx()` 调用。**不要直接 import `@tauri-apps/api/core`**——这会破坏与 Electron 的兼容性。所有 Tauri 特有 API 仅在 `tauri-bridge.js` 中使用。
 2. **组件风格**：Vue 组件使用 `PascalCase`，JS 函数使用 `camelCase`，文件名使用 `kebab-case`。
 3. **响应式设计**：遵循 `frontend-design` Skill 中的响应式铁律（使用 `100dvh`，输入框 `≥16px` 防 iOS 缩放等）。
+4. **🔴 静态资源 SSOT（唯一真相源）**：所有第三方动态图标/Logo（如各家大模型的品牌 Logo）**必须且只能**存放在 `public/logos/` 目录中。
+   - 引用方式：由于这些 Logo 通常是根据模型 ID 动态加载的（例如 `getProviderLogo(id)`），前端代码应直接使用绝对路径 `/logos/xxx.png` 引用。
+   - Vite 在编译时会自动将 `public/` 目录下的所有文件原封不动地复制到 `dist/` 中供 Tauri 打包，千万不要手动把源文件丢进 `dist/`！
+   - 如果是与业务高度绑定的固定静态装饰图片，才建议放入 `src/assets/` 并使用 `new URL(..., import.meta.url)`。
 
 ---
 
@@ -138,22 +152,11 @@ dist-release/
 
 ---
 
-## 🔄 工作流程规范
-
-| 触发场景 | 必须执行的操作 |
-|:---------|:--------------|
-| 收到新需求/新功能请求 | 立即将需求写入 `todo.md` 对应里程碑下，分配 Task ID |
-| 完成一项开发工作 | 更新 `todo.md` 对应项为 `[x]`，同时在 `progress.yaml` 的 `recent_fixes` 中添加记录 |
-| 发布新版本 | 更新 `todo.md` 头部版本号、`progress.yaml` 的 `project.version` 和 `project.updated` |
-| 新增 Rust 模块 | 在 `progress.yaml` 的 `rust_modules` 中注册 |
-| 修复 Bug | 在 `todo.md` 对应日期的工作记录中添加 `[Fix]` 条目 |
-
----
-
 ## JIT 指针
 
+- **全量功能与逻辑字典 (LLM-Wiki)**：详见 [LLM_WIKI.md](LLM_WIKI.md) (当需要修改、查找或调试具体功能如“闪念速记”时，请优先阅读此字典)
 - **架构/目录树/IPC/依赖**：详见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 - **UI 设计铁律 (配色/对齐/i18n)**：详见 [design_principles.md](design_principles.md)
 - **灵魂定义**：详见 [data/memory/SOUL.md](data/memory/SOUL.md)
 - **路线图**：详见 [todo.md](todo.md)
-- **进度追踪**：详见 [progress.yaml](progress.yaml)
+- **开源发布工作流**：详见 [OPEN_SOURCE_WORKFLOW.md](OPEN_SOURCE_WORKFLOW.md)

@@ -10,6 +10,27 @@
 
 import { ref, computed } from 'vue';
 
+// ── 静态资源与名称映射 SSOT (供整个项目复用) ──
+export function getModelMeta(id) {
+  const name = (id || '').toLowerCase();
+  
+  if (name.includes('deepseek')) return { name: 'DeepSeek', logo: '/logos/deepseek.png' };
+  if (name.includes('gpt') || name.includes('o3') || name.includes('o4') || name.includes('openai')) return { name: 'OpenAI', logo: '/logos/openai.png' };
+  if (name.includes('gemini') || name.includes('google') || name.includes('gemma') || name.includes('vertex')) return { name: 'Gemini', logo: '/logos/google.png' };
+  if (name.includes('qwen') || name.includes('dashscope') || name.includes('aliyun')) return { name: 'Qwen', logo: '/logos/qwen.png' };
+  if (name.includes('glm') || name.includes('zhipu')) return { name: 'GLM', logo: '/logos/glm.svg' };
+  if (name.includes('kimi') || name.includes('moonshot')) return { name: 'Kimi', logo: '/logos/kimi.png' };
+  if (name.includes('doubao') || name.includes('seed') || name.includes('volcengine')) return { name: 'Doubao', logo: '/logos/doubao.png' };
+  if (name.includes('minimax')) return { name: 'MiniMax', logo: '/logos/minimax.png' };
+  if (name.includes('mimo')) return { name: 'Mimo', logo: '/logos/mimo.png' };
+  if (name.includes('modelscope')) return { name: 'ModelScope', logo: '/logos/modelscope.png' };
+  if (name.includes('claude') || name.includes('anthropic')) return { name: 'Claude', logo: '/logos/claude.png' };
+  if (name.includes('grok') || name.includes('xai')) return { name: 'Grok', logo: '/logos/grok.png' };
+  if (name.includes('llama') || name.includes('local-')) return { name: 'Local', logo: null };
+  
+  return { name: id, logo: null };
+}
+
 export function useModelSwitcher() {
   const currentModelRaw = ref('');
   const showModelSwitcher = ref(false);
@@ -40,21 +61,7 @@ export function useModelSwitcher() {
 
   // ── Logo 匹配 ──
   function getModelLogo(modelId) {
-    const name = (modelId || '').toLowerCase();
-    if (name.includes('deepseek')) return '/logos/deepseek.png';
-    if (name.includes('gpt') || name.includes('openai')) return '/logos/openai.png';
-    if (name.includes('gemini') || name.includes('google') || name.includes('gemma')) return '/logos/google.png';
-    if (name.includes('qwen') || name.includes('dashscope')) return '/logos/qwen.png';
-    if (name.includes('glm') || name.includes('zhipu')) return '/logos/glm.svg';
-    if (name.includes('kimi') || name.includes('moonshot')) return '/logos/kimi.png';
-    if (name.includes('doubao') || name.includes('seed')) return '/logos/doubao.png';
-    if (name.includes('minimax')) return '/logos/minimax.png';
-    if (name.includes('mimo')) return '/logos/mimo.png';
-    if (name.includes('modelscope')) return '/logos/modelscope.png';
-    if (name.includes('claude') || name.includes('anthropic')) return '/logos/claude.png';
-    if (name.includes('grok') || name.includes('xai')) return '/logos/grok.png';
-    if (name.includes('openrouter')) return '/logos/openrouter.png';
-    return null;
+    return getModelMeta(modelId).logo;
   }
 
   const currentModelName = computed(() => {
@@ -73,13 +80,13 @@ export function useModelSwitcher() {
   async function toggleModelSwitcher() {
     if (!showModelSwitcher.value) {
       try {
-        const pool = await window.electronAPI.getModelPool();
+        const pool = await window.appAPI.getModelPool();
         let keys = {};
-        if (window.electronAPI.getApiKeys) {
-          keys = await window.electronAPI.getApiKeys() || {};
+        if (window.appAPI.getApiKeys) {
+          keys = await window.appAPI.getApiKeys() || {};
         }
         availableModels.value = (pool || [])
-          .filter(m => !!keys[m.provider])
+          .filter(m => !!keys[m.provider] || m.provider === 'offline')
           .map(m => ({
             id: m.id,
             provider: m.provider,
@@ -100,7 +107,7 @@ export function useModelSwitcher() {
   }
 
   async function switchModel(modelId) {
-    await window.electronAPI.assignModelRole(modelId, 'main');
+    await window.appAPI.assignModelRole(modelId, 'main');
     currentModelRaw.value = modelId;
     showModelSwitcher.value = false;
   }
@@ -108,7 +115,7 @@ export function useModelSwitcher() {
   // 预加载模型列表
   async function initModels() {
     try {
-      const pool = await window.electronAPI.getModelPool();
+      const pool = await window.appAPI.getModelPool();
       availableModels.value = (pool || []).map(m => ({
         id: m.id,
         provider: m.provider,
@@ -116,14 +123,14 @@ export function useModelSwitcher() {
         displayName: m.displayName || m.id,
         vision: !!m.vision,
       }));
-      const active = await window.electronAPI.getActiveModels();
+      const active = await window.appAPI.getActiveModels();
       currentModelRaw.value = active?.main || '';
     } catch (e) { /* ignore */ }
   }
 
   async function refreshModel() {
     try {
-      const active = await window.electronAPI.getActiveModels();
+      const active = await window.appAPI.getActiveModels();
       if (active && active.main) {
         currentModelRaw.value = active.main;
       }

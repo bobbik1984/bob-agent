@@ -43,7 +43,32 @@ async fn select_install_dir(app: tauri::AppHandle) -> Result<Option<String>, Str
 /// 执行安装：从内嵌 payload 解压 + 创建快捷方式 + 写注册表
 #[tauri::command]
 async fn install(app: tauri::AppHandle, install_dir: String) -> Result<(), String> {
+    use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+    
     let install_path = Path::new(&install_dir);
+
+    // 0. Kill any existing bob.exe process to avoid file lock (OS error 32)
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(output) = Command::new("tasklist").args(&["/FI", "IMAGENAME eq bob.exe"]).output() {
+            let output_str = String::from_utf8_lossy(&output.stdout);
+            if output_str.contains("bob.exe") {
+                let confirmed = app.dialog()
+                    .message("检测到 Bob 正在运行，必须关闭后才能继续安装。\n是否现在强制关闭它？")
+                    .title("安装向导")
+                    .kind(MessageDialogKind::Warning)
+                    .buttons(MessageDialogButtons::OkCancel)
+                    .blocking_show();
+                
+                if confirmed {
+                    let _ = Command::new("taskkill").args(&["/F", "/IM", "bob.exe", "/T"]).output();
+                    std::thread::sleep(std::time::Duration::from_millis(1000));
+                } else {
+                    return Err("用户取消了结束进程，安装中止。".to_string());
+                }
+            }
+        }
+    }
 
     // 1. 确保安装目录存在
     fs::create_dir_all(install_path)

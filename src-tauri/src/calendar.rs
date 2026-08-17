@@ -8,7 +8,8 @@ use serde_json::{json, Value};
 
 /// 初始化 events 表（在 init_db 中调用）
 pub fn init_events_table(conn: &rusqlite::Connection) {
-    conn.execute_batch("
+    conn.execute_batch(
+        "
         CREATE TABLE IF NOT EXISTS events (
             id TEXT PRIMARY KEY,
             title TEXT NOT NULL DEFAULT '',
@@ -20,16 +21,24 @@ pub fn init_events_table(conn: &rusqlite::Connection) {
             description TEXT DEFAULT '',
             created_at INTEGER NOT NULL
         );
-    ").unwrap_or_default();
+    ",
+    )
+    .unwrap_or_default();
 
     // T-1307: 向 last_notified 迁移（数据库兼容）
-    conn.execute_batch("
+    conn.execute_batch(
+        "
         ALTER TABLE events ADD COLUMN last_notified INTEGER DEFAULT 0;
-    ").unwrap_or_default();
-    
-    conn.execute_batch("
+    ",
+    )
+    .unwrap_or_default();
+
+    conn.execute_batch(
+        "
         ALTER TABLE events ADD COLUMN completed_at INTEGER DEFAULT 0;
-    ").unwrap_or_default();
+    ",
+    )
+    .unwrap_or_default();
 }
 
 /// 列出所有事件和待办
@@ -73,9 +82,10 @@ pub fn system_list_events(db: tauri::State<'_, crate::db::DbState>) -> Vec<Value
 #[tauri::command]
 pub fn system_parse_event(text: String) -> Value {
     let lower = text.to_lowercase();
-    
+
     // 简单判断类型
-    let event_type = if lower.contains("待办") || lower.contains("todo") || lower.contains("任务") {
+    let event_type = if lower.contains("待办") || lower.contains("todo") || lower.contains("任务")
+    {
         "todo"
     } else {
         "event"
@@ -108,12 +118,21 @@ pub fn system_confirm_event(event: Value, db: tauri::State<'_, crate::db::DbStat
 
     let id = format!("evt-{}", super::now_ms());
     let title = event.get("title").and_then(|v| v.as_str()).unwrap_or("");
-    let etype = event.get("type").and_then(|v| v.as_str()).unwrap_or("event");
-    let status = event.get("status").and_then(|v| v.as_str()).unwrap_or("pending");
+    let etype = event
+        .get("type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("event");
+    let status = event
+        .get("status")
+        .and_then(|v| v.as_str())
+        .unwrap_or("pending");
     let date = event.get("date").and_then(|v| v.as_str());
     let start_time = event.get("startTime").and_then(|v| v.as_str());
     let end_time = event.get("endTime").and_then(|v| v.as_str());
-    let description = event.get("description").and_then(|v| v.as_str()).unwrap_or("");
+    let description = event
+        .get("description")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
 
     match conn.execute(
         "INSERT INTO events (id, title, type, status, date, start_time, end_time, description, created_at)
@@ -132,34 +151,48 @@ pub fn system_delete_event(id: String, db: tauri::State<'_, crate::db::DbState>)
         Ok(c) => c,
         Err(_) => return false,
     };
-    conn.execute("DELETE FROM events WHERE id = ?1", params![id]).unwrap_or(0);
+    conn.execute("DELETE FROM events WHERE id = ?1", params![id])
+        .unwrap_or(0);
     true
 }
 
 /// 更新事件状态（pending/done/cancelled）
 #[tauri::command]
-pub fn system_update_event_status(id: String, status: String, db: tauri::State<'_, crate::db::DbState>) -> bool {
+pub fn system_update_event_status(
+    id: String,
+    status: String,
+    db: tauri::State<'_, crate::db::DbState>,
+) -> bool {
     let conn = match db.0.lock() {
         Ok(c) => c,
         Err(_) => return false,
     };
-    
+
     let completed_at = if status == "done" {
-        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64
     } else {
         0
     };
-    
+
     conn.execute(
         "UPDATE events SET status = ?1, completed_at = ?2 WHERE id = ?3",
         params![status, completed_at, id],
-    ).unwrap_or(0);
+    )
+    .unwrap_or(0);
     true
 }
 
 /// 更新事件时间（拖拽调整）
 #[tauri::command]
-pub fn system_update_event_time(id: String, start_time: String, end_time: String, db: tauri::State<'_, crate::db::DbState>) -> bool {
+pub fn system_update_event_time(
+    id: String,
+    start_time: String,
+    end_time: String,
+    db: tauri::State<'_, crate::db::DbState>,
+) -> bool {
     let conn = match db.0.lock() {
         Ok(c) => c,
         Err(_) => return false,
@@ -167,7 +200,8 @@ pub fn system_update_event_time(id: String, start_time: String, end_time: String
     conn.execute(
         "UPDATE events SET start_time = ?1, end_time = ?2 WHERE id = ?3",
         params![start_time, end_time, id],
-    ).unwrap_or(0);
+    )
+    .unwrap_or(0);
     true
 }
 
@@ -177,12 +211,12 @@ fn chrono_like_today() -> String {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();
-    
+
     // 简单计算: Unix timestamp to YYYY-MM-DD (UTC)
     let days = now / 86400;
     let mut y = 1970i64;
     let mut remaining = days as i64;
-    
+
     loop {
         let days_in_year = if is_leap(y) { 366 } else { 365 };
         if remaining < days_in_year {
@@ -191,13 +225,13 @@ fn chrono_like_today() -> String {
         remaining -= days_in_year;
         y += 1;
     }
-    
+
     let months_days = if is_leap(y) {
         [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
     } else {
         [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
     };
-    
+
     let mut m = 1;
     for &md in &months_days {
         if remaining < md {
@@ -206,7 +240,7 @@ fn chrono_like_today() -> String {
         remaining -= md;
         m += 1;
     }
-    
+
     format!("{:04}-{:02}-{:02}", y, m, remaining + 1)
 }
 
@@ -217,7 +251,7 @@ fn is_leap(y: i64) -> bool {
 /// T-1307: 供后台定时器调用的内部接口，获取今天尚未提醒过的待办/事件
 pub fn get_due_todos_for_scheduler(conn: &rusqlite::Connection) -> Vec<(String, String)> {
     let today = chrono_like_today();
-    
+
     // 把 today 转换为整数以便和 last_notified 比较 (2026-06-06 -> 20260606)
     let today_int: i64 = today.replace("-", "").parse().unwrap_or(0);
 
@@ -225,7 +259,7 @@ pub fn get_due_todos_for_scheduler(conn: &rusqlite::Connection) -> Vec<(String, 
         "SELECT id, title FROM events 
          WHERE date = ?1 
          AND status != 'completed' 
-         AND last_notified != ?2"
+         AND last_notified != ?2",
     ) {
         Ok(s) => s,
         Err(_) => return vec![],
@@ -245,7 +279,7 @@ pub fn get_due_todos_for_scheduler(conn: &rusqlite::Connection) -> Vec<(String, 
 pub fn mark_todo_notified(conn: &rusqlite::Connection, id: &str) {
     let today = chrono_like_today();
     let today_int: i64 = today.replace("-", "").parse().unwrap_or(0);
-    
+
     let _ = conn.execute(
         "UPDATE events SET last_notified = ?1 WHERE id = ?2",
         params![today_int, id],

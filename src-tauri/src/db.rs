@@ -1,4 +1,4 @@
-use rusqlite::{Connection, params};
+use rusqlite::{params, Connection};
 use serde_json::Value;
 use std::sync::Mutex;
 use tauri::State;
@@ -8,16 +8,60 @@ pub struct DbState(pub Mutex<Connection>);
 pub fn init_db(data_dir: &std::path::Path) -> Connection {
     let db_path = data_dir.join("bob.db");
 
-    // 自动冷备份数据库 (T-1309)
+    let db_backup = data_dir.join("bob.db.bak");
+
+    // ==========================================
+    // 1. 无感自检与自愈 (Self-Healing)
+    // ==========================================
     if db_path.exists() {
-        let db_backup = data_dir.join("bob.db.bak");
-        let _ = std::fs::copy(&db_path, &db_backup);
+        let is_healthy = match Connection::open(&db_path) {
+            Ok(probe) => {
+                let mut healthy = false;
+                if let Ok(mut stmt) = probe.prepare("PRAGMA quick_check;") {
+                    if let Ok(mut rows) = stmt.query([]) {
+                        if let Ok(Some(row)) = rows.next() {
+                            let result: String = row.get(0).unwrap_or_default();
+                            if result.to_lowercase() == "ok" {
+                                healthy = true;
+                            }
+                        }
+                    }
+                }
+                // 显式释放 probe，解除 SQLite 文件占用锁
+                drop(probe);
+                healthy
+            }
+            Err(_) => false,
+        };
+
+        if is_healthy {
+            // 健康：更新冷备份文件，保证备份池 100% 纯净
+            let _ = std::fs::copy(&db_path, &db_backup);
+        } else {
+            // 损坏：尝试从备份安全回滚
+            log::warn!(
+                "T-1304: Database corruption detected during startup. Attempting self-healing..."
+            );
+            if db_backup.exists() {
+                if std::fs::copy(&db_backup, &db_path).is_err() {
+                    // 如果连恢复都失败，干脆重命名坏库，触发降级创建空库
+                    let _ = std::fs::rename(&db_path, data_dir.join("bob.db.corrupted"));
+                }
+            } else {
+                // 没有备份可用，直接重命名坏库隔离
+                let _ = std::fs::rename(&db_path, data_dir.join("bob.db.corrupted"));
+            }
+        }
     }
 
+    // ==========================================
+    // 2. 正式开辟全局连接
+    // ==========================================
     let conn = Connection::open(&db_path)
-        .expect("Failed to open SQLite database");
+        .expect("Failed to open SQLite database even after self-healing attempts");
 
-    conn.execute_batch("
+    conn.execute_batch(
+        "
         CREATE TABLE IF NOT EXISTS conversations (
             id TEXT PRIMARY KEY,
             title TEXT NOT NULL DEFAULT '新对话',
@@ -38,16 +82,19 @@ pub fn init_db(data_dir: &std::path::Path) -> Connection {
             FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
         );
         CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conversation_id);
-    ").expect("Failed to initialize database tables");
+    ",
+    )
+    .expect("Failed to initialize database tables");
 
     // 启用 WAL 模式（并发读写性能更佳）
-    conn.execute_batch("PRAGMA journal_mode=WAL;").unwrap_or_default();
-    conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap_or_default();
+    conn.execute_batch("PRAGMA journal_mode=WAL;")
+        .unwrap_or_default();
+    conn.execute_batch("PRAGMA foreign_keys=ON;")
+        .unwrap_or_default();
 
     // Phase 2 迁移：messages 表新增 from_channel 列（已存在则忽略）
-    conn.execute_batch(
-        "ALTER TABLE messages ADD COLUMN from_channel TEXT DEFAULT 'desktop';"
-    ).unwrap_or_default();
+    conn.execute_batch("ALTER TABLE messages ADD COLUMN from_channel TEXT DEFAULT 'desktop';")
+        .unwrap_or_default();
 
     // 初始化日程表
     crate::calendar::init_events_table(&conn);
@@ -56,7 +103,8 @@ pub fn init_db(data_dir: &std::path::Path) -> Connection {
     crate::scheduler::init_cron_table(&conn);
 
     // LLM-Wiki 知识库全文搜索索引 (FTS5)
-    conn.execute_batch("
+    conn.execute_batch(
+        "
         CREATE VIRTUAL TABLE IF NOT EXISTS wiki_fts USING fts5(
             file_name,
             source_path,
@@ -66,9 +114,24 @@ pub fn init_db(data_dir: &std::path::Path) -> Connection {
             category,
             indexed_at
         );
-    ").unwrap_or_default();
+    ",
+    )
+    .unwrap_or_default();
 
-    // T-1301: 对话消息全文搜索索引 (FTS5)
+    // P0-2: 笔记专用全文搜索索引 (FTS5)
+    conn.execute_batch(
+        "
+        CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(
+            note_path,
+            title,
+            content,
+            tags,
+            tokenize='unicode61'
+        );
+    ",
+    )
+    .unwrap_or_default();
+
     conn.execute_batch("
         CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
             content,
@@ -90,13 +153,17 @@ pub fn init_db(data_dir: &std::path::Path) -> Connection {
     ").unwrap_or_default();
 
     // 回填存量消息到 FTS 索引
-    conn.execute_batch("
+    conn.execute_batch(
+        "
         INSERT OR IGNORE INTO messages_fts(rowid, content)
         SELECT id, content FROM messages;
-    ").unwrap_or_default();
+    ",
+    )
+    .unwrap_or_default();
 
     // ── 进化引擎: 零成本遥测记录 ──────────────────────────
-    conn.execute_batch("
+    conn.execute_batch(
+        "
         CREATE TABLE IF NOT EXISTS session_observations (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             conversation_id TEXT NOT NULL,
@@ -110,10 +177,13 @@ pub fn init_db(data_dir: &std::path::Path) -> Connection {
             stop_reason TEXT DEFAULT '',
             created_at INTEGER NOT NULL
         );
-    ").unwrap_or_default();
+    ",
+    )
+    .unwrap_or_default();
 
     // ── 进化引擎: 做梦日志 ──────────────────────────────────
-    conn.execute_batch("
+    conn.execute_batch(
+        "
         CREATE TABLE IF NOT EXISTS evolution_log (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             dream_type TEXT NOT NULL DEFAULT 'daily_catchup',
@@ -125,10 +195,13 @@ pub fn init_db(data_dir: &std::path::Path) -> Connection {
             soul_hash TEXT DEFAULT '',
             created_at INTEGER NOT NULL
         );
-    ").unwrap_or_default();
+    ",
+    )
+    .unwrap_or_default();
 
     // ── M17: 知识图谱 ──────────────────────────────────────
-    conn.execute_batch("
+    conn.execute_batch(
+        "
         CREATE TABLE IF NOT EXISTS kg_nodes (
             id          TEXT PRIMARY KEY,
             label       TEXT NOT NULL,
@@ -148,7 +221,43 @@ pub fn init_db(data_dir: &std::path::Path) -> Connection {
         );
         CREATE INDEX IF NOT EXISTS idx_kg_edges_source ON kg_edges(source_id);
         CREATE INDEX IF NOT EXISTS idx_kg_edges_target ON kg_edges(target_id);
-    ").unwrap_or_default();
+        
+        CREATE TABLE IF NOT EXISTS kg_source_batches (
+            batch_id    TEXT PRIMARY KEY,
+            folder_name TEXT NOT NULL,
+            folder_path TEXT NOT NULL,
+            file_count  INTEGER DEFAULT 0,
+            created_at  TEXT DEFAULT (datetime('now')),
+            status      TEXT DEFAULT 'active'
+        );
+    ",
+    )
+    .unwrap_or_default();
+
+    let _ = conn.execute(
+        "ALTER TABLE kg_nodes ADD COLUMN source_batches TEXT DEFAULT '[]'",
+        [],
+    );
+
+    // ── 目標 19: Goal Mode V2 执行错误记录 ────────────────────
+    conn.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS execution_errors (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            conv_id TEXT,
+            goal_description TEXT,
+            tool_name TEXT NOT NULL,
+            error_type TEXT NOT NULL,
+            error_message TEXT NOT NULL,
+            context_summary TEXT,
+            analyzed INTEGER NOT NULL DEFAULT 0,
+            created_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_exec_errors_analyzed ON execution_errors(analyzed);
+        CREATE INDEX IF NOT EXISTS idx_exec_errors_created ON execution_errors(created_at);
+    ",
+    )
+    .unwrap_or_default();
 
     // 数据迁移: 标准化知识图谱节点类型 (修复中英文混杂的问题)
     conn.execute_batch("
@@ -176,7 +285,7 @@ pub fn db_conversations(db: State<DbState>) -> Vec<Value> {
     };
     let mut stmt = match conn.prepare(
         "SELECT id, title, model, cost, last_message, last_role, created_at, updated_at
-         FROM conversations ORDER BY updated_at DESC"
+         FROM conversations ORDER BY updated_at DESC",
     ) {
         Ok(s) => s,
         Err(_) => return vec![],
@@ -245,8 +354,9 @@ pub fn db_conversation_get(id: String, db: State<DbState>) -> Option<Value> {
                 "created_at": row.get::<_, i64>(4)?,
                 "updated_at": row.get::<_, i64>(5)?,
             }))
-        }
-    ).ok()
+        },
+    )
+    .ok()
 }
 
 #[tauri::command]
@@ -256,8 +366,13 @@ pub fn db_conversation_delete(id: String, db: State<DbState>) -> bool {
         Err(_) => return false,
     };
     // 先删消息，再删对话
-    conn.execute("DELETE FROM messages WHERE conversation_id = ?1", params![id]).unwrap_or(0);
-    conn.execute("DELETE FROM conversations WHERE id = ?1", params![id]).unwrap_or(0);
+    conn.execute(
+        "DELETE FROM messages WHERE conversation_id = ?1",
+        params![id],
+    )
+    .unwrap_or(0);
+    conn.execute("DELETE FROM conversations WHERE id = ?1", params![id])
+        .unwrap_or(0);
     true
 }
 
@@ -270,7 +385,8 @@ pub fn db_conversation_rename(id: String, title: String, db: State<DbState>) -> 
     conn.execute(
         "UPDATE conversations SET title = ?1, updated_at = ?2 WHERE id = ?3",
         params![title, crate::now_ms(), id],
-    ).unwrap_or(0);
+    )
+    .unwrap_or(0);
     true
 }
 
@@ -283,7 +399,8 @@ pub fn db_conversation_update_cost(id: String, cost: f64, db: State<DbState>) ->
     conn.execute(
         "UPDATE conversations SET cost = ?1 WHERE id = ?2",
         params![cost, id],
-    ).unwrap_or(0);
+    )
+    .unwrap_or(0);
     true
 }
 
@@ -295,7 +412,7 @@ pub fn db_messages(conversation_id: String, db: State<DbState>) -> Vec<Value> {
     };
     let mut stmt = match conn.prepare(
         "SELECT id, role, content, image_base64, created_at, from_channel
-         FROM messages WHERE conversation_id = ?1 ORDER BY created_at ASC"
+         FROM messages WHERE conversation_id = ?1 ORDER BY created_at ASC",
     ) {
         Ok(s) => s,
         Err(_) => return vec![],
@@ -320,8 +437,11 @@ pub fn db_messages(conversation_id: String, db: State<DbState>) -> Vec<Value> {
 
 #[tauri::command]
 pub fn db_message_add(
-    conversation_id: String, role: String, content: String,
-    image_base64: Option<String>, db: State<DbState>
+    conversation_id: String,
+    role: String,
+    content: String,
+    image_base64: Option<String>,
+    db: State<DbState>,
 ) -> bool {
     let conn = match db.0.lock() {
         Ok(c) => c,
@@ -333,14 +453,16 @@ pub fn db_message_add(
         "INSERT INTO messages (conversation_id, role, content, image_base64, created_at)
          VALUES (?1, ?2, ?3, ?4, ?5)",
         params![conversation_id, role, content, image_base64, ts],
-    ).unwrap_or(0);
+    )
+    .unwrap_or(0);
 
     // 更新对话的最后消息和时间戳
     let preview: String = content.chars().take(20).collect();
     conn.execute(
         "UPDATE conversations SET last_message = ?1, last_role = ?2, updated_at = ?3 WHERE id = ?4",
         params![preview, role, ts, conversation_id],
-    ).unwrap_or(0);
+    )
+    .unwrap_or(0);
 
     true
 }
@@ -364,7 +486,7 @@ pub fn db_search_messages(query: String, db: State<DbState>) -> Vec<Value> {
          JOIN conversations c ON c.id = m.conversation_id
          WHERE messages_fts MATCH ?1
          ORDER BY rank
-         LIMIT 30"
+         LIMIT 30",
     ) {
         Ok(s) => s,
         Err(e) => {
@@ -387,6 +509,77 @@ pub fn db_search_messages(query: String, db: State<DbState>) -> Vec<Value> {
     };
 
     rows.filter_map(|r| r.ok()).collect()
+}
+
+// ═══════════════════════════════════════════════════════════
+// 目标 19: Goal Mode V2 — 执行错误记录与查询
+// ═══════════════════════════════════════════════════════════
+
+/// 记录一条执行错误到 execution_errors 表
+pub fn log_execution_error(
+    conn: &Connection,
+    conv_id: Option<&str>,
+    goal: &str,
+    tool_name: &str,
+    error_type: &str,
+    error_msg: &str,
+    context: Option<&str>,
+) -> Result<i64, String> {
+    let ts = crate::now_ms();
+    conn.execute(
+        "INSERT INTO execution_errors (conv_id, goal_description, tool_name, error_type, error_message, context_summary, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![conv_id, goal, tool_name, error_type, error_msg, context, ts],
+    ).map_err(|e| format!("log_execution_error: {}", e))?;
+    Ok(conn.last_insert_rowid())
+}
+
+/// 查询未被 Dream Engine 分析过的错误记录
+pub fn get_unanalyzed_errors(conn: &Connection, since_hours: u64) -> Vec<Value> {
+    let cutoff = crate::now_ms() as i64 - (since_hours as i64 * 3_600_000);
+    let mut stmt = match conn.prepare(
+        "SELECT id, conv_id, goal_description, tool_name, error_type, error_message, context_summary, created_at
+         FROM execution_errors
+         WHERE analyzed = 0 AND created_at > ?1
+         ORDER BY created_at DESC
+         LIMIT 100"
+    ) {
+        Ok(s) => s,
+        Err(_) => return vec![],
+    };
+
+    let rows = match stmt.query_map(params![cutoff], |row| {
+        Ok(serde_json::json!({
+            "id": row.get::<_, i64>(0)?,
+            "conv_id": row.get::<_, Option<String>>(1).unwrap_or(None),
+            "goal": row.get::<_, Option<String>>(2).unwrap_or(None),
+            "tool_name": row.get::<_, String>(3)?,
+            "error_type": row.get::<_, String>(4)?,
+            "error_message": row.get::<_, String>(5)?,
+            "context": row.get::<_, Option<String>>(6).unwrap_or(None),
+            "created_at": row.get::<_, i64>(7)?,
+        }))
+    }) {
+        Ok(r) => r,
+        Err(_) => return vec![],
+    };
+
+    rows.filter_map(|r| r.ok()).collect()
+}
+
+/// 标记指定错误记录为已分析（Dream Engine 处理后调用）
+pub fn mark_errors_analyzed(conn: &Connection, ids: &[i64]) -> Result<(), String> {
+    if ids.is_empty() {
+        return Ok(());
+    }
+    for id in ids {
+        conn.execute(
+            "UPDATE execution_errors SET analyzed = 1 WHERE id = ?1",
+            params![id],
+        )
+        .map_err(|e| format!("mark_errors_analyzed: {}", e))?;
+    }
+    Ok(())
 }
 
 #[tauri::command]

@@ -18,6 +18,7 @@ mod browser;
 mod doctor;
 mod gcp_auth;
 mod evolution;
+mod pdf_renderer;
 mod mcp;
 mod connector;
 mod lark;
@@ -201,8 +202,8 @@ async fn llm_chat(messages: Vec<Value>, conversation_id: Option<String>, global_
 }
 
 #[tauri::command]
-async fn llm_vision(messages: Vec<Value>, image_base64: String, conversation_id: Option<String>, global_file_access: bool, agent_mode: String, app: tauri::AppHandle) -> Value {
-    llm::stream_vision(app, messages, image_base64, conversation_id, global_file_access, agent_mode).await
+async fn llm_vision(messages: Vec<Value>, image_base64s: Vec<String>, conversation_id: Option<String>, global_file_access: bool, agent_mode: String, app: tauri::AppHandle) -> Value {
+    llm::stream_vision(app, messages, image_base64s, conversation_id, global_file_access, agent_mode).await
 }
 
 #[tauri::command]
@@ -675,6 +676,12 @@ fn merge_json_file(src: &Path, dst: &Path) -> Result<(), String> {
 // Tauri App 启动
 // ═══════════════════════════════════════════════════════════
 
+#[tauri::command]
+fn system_render_pdf_to_images(path: String) -> Result<Vec<String>, String> {
+    // 默认最多渲染前 20 页，防止 OOM 和过度消耗 Token
+    crate::pdf_renderer::render_pdf_to_images(&path, 20)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let db = db::init_db(&get_data_dir());
@@ -820,6 +827,7 @@ pub fn run() {
             system_open_file,
             system_show_in_folder,
             system_check_project_index,
+            system_render_pdf_to_images,
             system_get_tool_statuses,
             db::system_factory_reset,
             // Outbox (声明式配置)
@@ -897,10 +905,11 @@ pub fn run() {
             app.handle().plugin(tauri_plugin_shell::init())?;
             // 日志：debug 输出到终端 + 文件，release 仅输出到文件
             {
-                use tauri_plugin_log::{Target, TargetKind};
+                use tauri_plugin_log::{Target, TargetKind, TimezoneStrategy};
                 let mut log_builder = tauri_plugin_log::Builder::default()
                     .level(log::LevelFilter::Info)
                     .max_file_size(2_000_000) // 单文件最大 2MB，自动轮转
+                    .timezone_strategy(TimezoneStrategy::UseLocal)
                     .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepAll)
                     .target(Target::new(TargetKind::LogDir { file_name: Some("bob".into()) }));
                 if cfg!(debug_assertions) {

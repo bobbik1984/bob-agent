@@ -15,10 +15,13 @@
     "core:window:allow-toggle-maximize",
     "core:window:allow-unmaximize",
     "dialog:default",
-    "global-shortcut:allow-register",
-    "global-shortcut:allow-unregister",
     "clipboard-manager:allow-write-html",
     "clipboard-manager:allow-write-text",
-    "notification:default"
+    "notification:default",
+    "shell:allow-open",
+    {
+      "identifier": "shell:allow-open",
+      "allow": [{ "url": "http://**" }, { "url": "https://**" }]
+    }
   ]
 }

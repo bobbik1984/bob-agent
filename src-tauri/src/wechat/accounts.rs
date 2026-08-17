@@ -102,7 +102,10 @@ pub fn clear_stale_accounts_for_user_id(current_account_id: &str, user_id: &str)
         if let Some(data) = load_wechat_account(&id) {
             if let Some(uid) = data.user_id {
                 if uid.trim() == user_id.trim() {
-                    log::info!("clear_stale_accounts_for_user_id: removing stale account={}", id);
+                    log::info!(
+                        "clear_stale_accounts_for_user_id: removing stale account={}",
+                        id
+                    );
                     clear_wechat_account(&id);
                     unregister_wechat_account_id(&id);
                 }
@@ -124,7 +127,7 @@ pub fn load_wechat_account(account_id: &str) -> Option<WechatAccountData> {
 pub fn save_wechat_account(account_id: &str, update: WechatAccountData) {
     let id = normalize_account_id(account_id);
     let mut existing = load_wechat_account(&id).unwrap_or_default();
-    
+
     if let Some(token) = update.token {
         let trimmed = token.trim().to_string();
         if !trimmed.is_empty() {
@@ -188,11 +191,18 @@ pub fn resolve_wechat_account(account_id: Option<&str>) -> Result<ResolvedWechat
 
     let account_data = load_wechat_account(&id);
     let token = account_data.as_ref().and_then(|a| a.token.clone());
-    let state_base_url = account_data.as_ref().and_then(|a| a.base_url.clone()).unwrap_or_else(|| "".to_string());
+    let state_base_url = account_data
+        .as_ref()
+        .and_then(|a| a.base_url.clone())
+        .unwrap_or_else(|| "".to_string());
 
     Ok(ResolvedWechatAccount {
         account_id: id,
-        base_url: if state_base_url.is_empty() { DEFAULT_BASE_URL.to_string() } else { state_base_url },
+        base_url: if state_base_url.is_empty() {
+            DEFAULT_BASE_URL.to_string()
+        } else {
+            state_base_url
+        },
         configured: token.is_some(),
         token,
         enabled: true,
