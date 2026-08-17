@@ -159,8 +159,17 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
           _thinkingExpanded: false,
         });
       } else {
-        let finalContent = streamContent.value || result.content || '';
-        let finalThinking = streamThinking.value || result.thinking || null;
+        // ── 竞态修复: 取 Rust 后端 result 与前端流式累积的较长者 ──
+        // Rust 的 result.content/result.thinking 是逐字符累积的完整内容（权威源），
+        // 但前端 streamContent 可能因 IPC 事件时序问题而缺失尾部 token。
+        // 取较长者可确保在任何时序下都不丢失数据。
+        const streamVal = (streamContent.value || '').trim();
+        const resultVal = (result.content || '').trim();
+        let finalContent = streamVal.length >= resultVal.length ? streamVal : resultVal;
+
+        const streamThinkVal = (streamThinking.value || '').trim();
+        const resultThinkVal = (result.thinking || '').trim();
+        let finalThinking = (streamThinkVal.length >= resultThinkVal.length ? streamThinkVal : resultThinkVal) || null;
 
         // ── Outbox: 检测 bob-config 代码块 (T-812) ──
         const configBlockRegex = /```bob-config\n([\s\S]*?)\n```/g;
@@ -204,7 +213,7 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
 
         const assistantMsg = {
           role: 'assistant',
-          content: finalContent || '（模型未返回内容，请检查 API 配置或重试）',
+          content: finalContent || (finalThinking ? '' : '（模型未返回内容，请检查 API 配置或重试）'),
           thinking: finalThinking,
           _thinkingExpanded: false,
           _modelLabel: currentModelName.value || result.model || '',
@@ -262,6 +271,15 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
     if (chunk.conv_id && props.conversationId && chunk.conv_id !== props.conversationId) {
       return;
     }
+    
+    // 如果当前并未处于流状态（例如后台或远端微信触发的生成），则自动唤醒流状态
+    if (!isStreaming.value) {
+      isStreaming.value = true;
+      streamContent.value = '';
+      streamThinking.value = '';
+      activeTools.value = [];
+    }
+
     if (chunk.type === 'clear') {
       streamContent.value = '';
       return;
@@ -301,6 +319,11 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
           } catch (e) { /* 非 JSON 则正常展示 */ }
         }
       }
+    } else if (chunk.type === 'file_output' && chunk.path) {
+      // 导出工具生成的文件 → 追加为 file:/// 链接，renderMessageBlocks 会将其渲染为 FileCard
+      const fileName = chunk.path.replace(/\\/g, '/').split('/').pop() || chunk.path;
+      const fileUrl = 'file:///' + chunk.path.replace(/\\/g, '/');
+      streamContent.value += `\n\n[${fileName}](${fileUrl})`;
     }
     scrollToBottom();
   }
@@ -333,24 +356,92 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
   // ── Markdown 渲染 ─────────────────────────────────
   function renderMarkdown(text) {
     if (!text) return '';
-    const cleaned = text.replace(/<calendar_event>[\s\S]*?(?:<\/calendar_event>|$)/gi, '')
+    let cleaned = text.replace(/<calendar_event>[\s\S]*?(?:<\/calendar_event>|$)/gi, '')
       .replace(/<\|mem\|>/g, ''); // 视觉过滤进化引擎隐式标记
+
+    // 注：纯文本路径的自动链接已移除（误伤率过高）
+    // 导出文件的链接由 Rust 后端 file_output 事件精确注入
+
+    // ── 预处理: 自动链接裸 URL（输出 markdown 语法供 marked 解析）──
+    // 注意：不能输出 <a> HTML，因为 marked 会在表格 cell 内转义原始 HTML
+    // 捕获可选的前后反引号，如果 URL 被反引号单独完全包裹，则剥离反引号使其成为真正的可点击链接
+    cleaned = cleaned.replace(
+      /(`)?(?<!\]\()(?<!["'])(https?:\/\/[^\s<>)"\]`]+)(`)?/g,
+      (full, b1, url, b2, offset) => {
+        const before = cleaned.slice(Math.max(0, offset - 15), offset);
+        if (/\]\(\s*$/.test(before) || /href=["']$/.test(before)) return full;
+        
+        let keepB1 = b1 || '';
+        let keepB2 = b2 || '';
+        // 剥离反引号以防止渲染为不可点击的代码块
+        if (b1 === '`' && b2 === '`') {
+          keepB1 = '';
+          keepB2 = '';
+        }
+
+        try {
+          const u = new URL(url);
+          let label = u.hostname.replace(/^www\./, '');
+          if (u.pathname && u.pathname !== '/') label += u.pathname.slice(0, 30);
+          return `${keepB1}[${label}](${url})${keepB2}`;
+        } catch { return `${keepB1}[${url.slice(0, 40)}](${url})${keepB2}`; }
+      }
+    );
+
     let rawHtml = marked.parse(cleaned);
 
-    // ── bob:// 本地文件协议桥接 ──
-    // 将 <img src="D:\...\file.png"> 或 <img src="file:///D:/..."> 
-    // 转换为 <img src="bob://localhost/D:/..."> 以触发 Rust 后端流式读取
+    // ── 安全网: 兜底未被 marked 解析的 markdown 链接 ──
+    // marked 偶尔对表格内、超长 OAuth URL 等边缘情况解析失败
+    // 此时 marked 已将 & 编码为 &amp;，href 需解码一层防止双重转义
     rawHtml = rawHtml.replace(
-      /(<img\s+[^>]*src=")(?:file:\/\/\/)?([A-Za-z]:[\\\/][^"]+)(")/gi,
-      (_, pre, path, post) => pre + 'bob://localhost/' + path.replace(/\\/g, '/') + post
-    );
-    // 对 video / source 标签做同样处理
-    rawHtml = rawHtml.replace(
-      /(<(?:video|source)\s+[^>]*src=")(?:file:\/\/\/)?([A-Za-z]:[\\\/][^"]+)(")/gi,
-      (_, pre, path, post) => pre + 'bob://localhost/' + path.replace(/\\/g, '/') + post
+      /\[([^\]<>]+)\]\((https?:\/\/[^)]+)\)/g,
+      (match, text, url, offset) => {
+        // 跳过 <code>/<pre> 内部的内容
+        const before = rawHtml.slice(Math.max(0, offset - 300), offset);
+        const codeOpens = (before.match(/<code/gi) || []).length;
+        const codeCloses = (before.match(/<\/code/gi) || []).length;
+        const preOpens = (before.match(/<pre/gi) || []).length;
+        const preCloses = (before.match(/<\/pre/gi) || []).length;
+        if (codeOpens > codeCloses || preOpens > preCloses) return match;
+        const cleanUrl = url.replace(/&amp;/g, '&');
+        const cleanText = text.replace(/&amp;/g, '&');
+        return `<a href="${cleanUrl}">${cleanText}</a>`;
+      }
     );
 
-    return DOMPurify.sanitize(rawHtml, { ADD_TAGS: ['video', 'source'], ADD_ATTR: ['controls', 'autoplay', 'loop', 'muted'] });
+    // ── 安全网 2: 清理被 marked HTML 转义过的残留 <a> 标签 ──
+    // 旧消息可能因之前的 bug 存储了含 &lt;a href=&quot;...&quot;&gt; 的文本
+    rawHtml = rawHtml.replace(
+      /&lt;a\s+href=&quot;(https?:\/\/[^&]+)&quot;&gt;([^&]*?)&lt;\/a&gt;/gi,
+      '<a href="$1">$2</a>'
+    );
+
+    // ── 本地文件协议桥接：通过 Bob HTTP API 提供文件 ──
+    // 使用已有的 127.0.0.1:3721 HTTP 服务来提供本地文件，
+    // 比 Tauri 自定义协议更可靠（dev/production 模式均可用）
+    const LOCAL_FILE_API = 'http://127.0.0.1:3721/v1/file?path=';
+    rawHtml = rawHtml.replace(
+      /(<img\s+[^>]*src=")(?:file:\/\/\/)?([A-Za-z]:(?:[\\\/]|%5[Cc]|%2[Ff])[^"]+)(")/gi,
+      (_, pre, rawPath, post) => {
+        const cleaned = decodeURIComponent(rawPath).replace(/\\/g, '/');
+        return pre + LOCAL_FILE_API + encodeURIComponent(cleaned) + post;
+      }
+    );
+    rawHtml = rawHtml.replace(
+      /(<(?:video|source)\s+[^>]*src=")(?:file:\/\/\/)?([A-Za-z]:(?:[\\\/]|%5[Cc]|%2[Ff])[^"]+)(")/gi,
+      (_, pre, rawPath, post) => {
+        const cleaned = decodeURIComponent(rawPath).replace(/\\/g, '/');
+        return pre + LOCAL_FILE_API + encodeURIComponent(cleaned) + post;
+      }
+    );
+
+    // ── 后处理: URL 链接新窗口打开 ──
+    rawHtml = rawHtml.replace(
+      /<a\s+href="(https?:\/\/[^"]+)"/g,
+      '<a href="$1" target="_blank" rel="noopener noreferrer"'
+    );
+
+    return DOMPurify.sanitize(rawHtml, { ADD_TAGS: ['video', 'source'], ADD_ATTR: ['controls', 'autoplay', 'loop', 'muted', 'target', 'rel'] });
   }
 
   function renderMessageBlocks(text) {
@@ -362,25 +453,43 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
     }
     const blocks = [];
     let lastIndex = 0;
+    const seenFilePaths = new Set(); // 去重：同一文件路径只渲染一个 FileCard
     FILE_LINK_RE.lastIndex = 0;
     let match;
     while ((match = FILE_LINK_RE.exec(html)) !== null) {
-      if (match.index > lastIndex) {
-        blocks.push({ type: 'html', content: html.slice(lastIndex, match.index) });
-      }
+      // 跳过 <table> 内部的文件链接——拆分会破坏表格 HTML 结构
+      const before = html.slice(Math.max(0, match.index - 500), match.index);
+      const tableOpens = (before.match(/<table/gi) || []).length;
+      const tableCloses = (before.match(/<\/table/gi) || []).length;
+      if (tableOpens > tableCloses) continue; // 在表格内部，跳过
+
       let filePath = match[1];
       if (filePath.startsWith('file:///')) {
         filePath = filePath.replace('file:///', '');
       }
       try { filePath = decodeURIComponent(filePath); } catch(e) {}
       filePath = filePath.replace(/\//g, '\\');
+
+      // 去重：如果已有相同路径的 FileCard，则将此链接保留为普通 HTML 而非拆分
+      const normalizedKey = filePath.toLowerCase();
+      if (seenFilePaths.has(normalizedKey)) {
+        continue; // 跳过重复的，保留原始 <a> 标签在 HTML 中
+      }
+      seenFilePaths.add(normalizedKey);
+
+      if (match.index > lastIndex) {
+        blocks.push({ type: 'html', content: html.slice(lastIndex, match.index) });
+      }
       blocks.push({ type: 'file', path: filePath });
       lastIndex = match.index + match[0].length;
     }
     if (lastIndex < html.length) {
       blocks.push({ type: 'html', content: html.slice(lastIndex) });
     }
-    return blocks;
+    // 将所有 FileCard 统一沉底到消息末尾，用户无需滚屏回翻即可点击
+    const htmlBlocks = blocks.filter(b => b.type === 'html');
+    const fileBlocks = blocks.filter(b => b.type === 'file');
+    return [...htmlBlocks, ...fileBlocks];
   }
 
   // ── 日程解析 ─────────────────────────────────────

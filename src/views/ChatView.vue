@@ -1,5 +1,11 @@
 <template>
   <div class="chat-view">
+    <!-- Lightbox for Image Zoom -->
+    <div v-if="zoomedImage" class="image-lightbox" @click="zoomedImage = null; imageScale = 1; imageTranslateX = 0; imageTranslateY = 0;" @wheel.prevent="handleImageWheel" @mousemove="handleImageMouseMove" @mouseup="handleImageMouseUp" @mouseleave="handleImageMouseUp">
+      <img :src="zoomedImage" :style="{ transform: `translate(${imageTranslateX}px, ${imageTranslateY}px) scale(${imageScale})` }" @click.stop @mousedown="handleImageMouseDown" />
+      <button class="lightbox-close" @click="zoomedImage = null; imageScale = 1; imageTranslateX = 0; imageTranslateY = 0;">&times;</button>
+    </div>
+
     <!-- T-1304: 系统健康横幅 -->
     <div v-if="healthBanner" class="health-banner" :class="healthBanner.severity">
       <span class="health-icon">{{ healthBanner.severity === 'error' ? '!' : 'i' }}</span>
@@ -64,7 +70,7 @@
           </template>
 
           <!-- 思维链折叠 -->
-          <div v-else-if="msg.thinking" class="thinking-card" :class="{ expanded: msg._thinkingExpanded }">
+          <div v-if="msg.thinking && !msg._isError && msg.type !== 'confirm-card' && msg.type !== 'action-item-card'" class="thinking-card" :class="{ expanded: msg._thinkingExpanded }">
             <button class="thinking-toggle" @click="msg._thinkingExpanded = !msg._thinkingExpanded">
               <ChevronRight :size="14" class="thinking-arrow" :class="{ 'expanded': msg._thinkingExpanded }" />
               <span>Thought process</span>
@@ -82,15 +88,21 @@
             </div>
           </div>
           <!-- 消息内容（block 数组渲染：text + file-card 交替）-->
-          <div v-else class="message-content selectable" @click="onMessageLinkClick">
+          <div v-if="!msg._isError && msg.type !== 'confirm-card' && msg.type !== 'action-item-card' && msg.content" class="message-content selectable" @click="onMessageLinkClick">
             <template v-for="(block, bi) in renderMessageBlocks(msg.content)" :key="bi">
               <div v-if="block.type === 'html'" v-html="block.content"></div>
               <FileCard v-else-if="block.type === 'file'" :filePath="block.path" />
             </template>
           </div>
+
           <!-- 图片预览 -->
           <div v-if="msg.image_base64" class="message-image">
-            <img :src="'data:image/png;base64,' + msg.image_base64" alt="用户图片" />
+            <img 
+              :src="'data:image/png;base64,' + msg.image_base64" 
+              alt="用户图片" 
+              @click="zoomedImage = 'data:image/png;base64,' + msg.image_base64; imageScale = 1; imageTranslateX = 0; imageTranslateY = 0;"
+              style="cursor: zoom-in;"
+            />
           </div>
           <!-- 元数据标注：模型 & 来源 & 复制 & 记忆标志 -->
           <div class="message-meta-row" v-if="msg.role === 'assistant' || msg.from_channel">
@@ -124,8 +136,19 @@
         <div class="message-avatar avatar-bob"><div class="bob-avatar-icon"></div></div>
         <div class="message-body">
           <!-- 等待响应指示器：回车后立即出现，思考期间持续显示，直到正文开始流入才消失 -->
-          <div v-if="!streamContent && activeTools.length === 0" class="typing-indicator">
+          <div v-if="!streamContent && activeTools.length === 0 && !streamThinking" class="typing-indicator">
             <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+          </div>
+          <!-- 流式思考过程（实时） -->
+          <div v-if="streamThinking" class="thinking-card stream-thinking" :class="{ expanded: streamThinkingExpanded }">
+            <button class="thinking-toggle" @click="streamThinkingExpanded = !streamThinkingExpanded">
+              <span class="thinking-pulse"></span>
+              <ChevronRight :size="14" class="thinking-arrow" :class="{ 'expanded': streamThinkingExpanded }" />
+              <span>{{ $t('chat.thinking') || 'Thinking...' }}</span>
+            </button>
+            <div v-if="streamThinkingExpanded" ref="streamThinkingRef" class="thinking-content stream-thinking-content selectable">
+              {{ streamThinking }}
+            </div>
           </div>
           <!-- 工具调用状态 -->
           <div v-if="activeTools.length > 0" class="tool-calls-panel">
@@ -168,6 +191,20 @@
                   </button>
                 </template>
               </div>
+            </div>
+          </div>
+          <!-- CDN 上传进度条 -->
+          <div v-if="cdnUpload.active" class="cdn-upload-progress">
+            <div class="cdn-upload-info">
+              <FileUp :size="14" />
+              <span class="cdn-upload-name">{{ cdnUpload.fileName }}</span>
+              <span class="cdn-upload-percent">{{ cdnUpload.percent }}%</span>
+            </div>
+            <div class="cdn-upload-bar-track">
+              <div class="cdn-upload-bar-fill" :style="{ width: cdnUpload.percent + '%' }"></div>
+            </div>
+            <div class="cdn-upload-detail">
+              {{ formatBytes(cdnUpload.bytesSent) }} / {{ formatBytes(cdnUpload.totalBytes) }}
             </div>
           </div>
           <div v-if="streamContent" class="message-content selectable" v-html="renderMarkdown(streamContent)"></div>
@@ -249,20 +286,32 @@
           </div>
         </div>
         <!-- 文本输入 -->
-        <textarea
-          ref="inputRef"
-          v-model="inputText"
-          class="chat-input"
-          :placeholder="$t('chat.input_placeholder')"
-          rows="3"
-          @keydown="handleKeydown"
-          @input="autoResize"
-          @paste="handlePaste"
-        ></textarea>
+        <div class="input-wrapper" style="position: relative;">
+          <!-- 悬浮 @ 菜单 -->
+          <div v-if="showMentionMenu" class="mention-menu">
+            <div class="mention-menu-item" @click="handleMentionSelect">
+              <span>📁 浏览本地文件...</span>
+              <span class="mention-shortcut">Enter</span>
+            </div>
+          </div>
+          <textarea
+            ref="inputRef"
+            v-model="inputText"
+            class="chat-input"
+            :placeholder="$t('chat.input_placeholder')"
+            rows="3"
+            @keydown="handleKeydown"
+            @input="handleInput"
+            @paste="handlePaste"
+          ></textarea>
+        </div>
         <!-- 底部工具栏 -->
         <div class="input-toolbar">
           <button class="toolbar-item attach-btn" :title="$t('chat.attach_tooltip')" @click="handleAttach">
             <Paperclip :size="14" />
+          </button>
+          <button class="toolbar-item attach-btn" title="截取屏幕" @click="handleScreenshot" :disabled="isScreenshotting">
+            <Camera :size="14" />
           </button>
           <!-- 模型切换器 -->
           <div class="model-switcher-wrap" v-if="currentModelName">
@@ -377,7 +426,7 @@ import DOMPurify from 'dompurify';
 DOMPurify.addHook('uponSanitizeAttribute', function (node, data) {
   if (data.attrName === 'href' || data.attrName === 'src') {
     const val = data.attrValue;
-    if (val.startsWith('file://') || val.startsWith('bob://') || /^[A-Za-z]:[\\\/]/.test(val)) {
+    if (val.startsWith('file://') || val.startsWith('bob://') || val.startsWith('asset://') || val.startsWith('http://bob.localhost/') || val.startsWith('https://bob.localhost/') || val.startsWith('http://asset.localhost/') || /^[A-Za-z]:[\\\/]/.test(val)) {
       data.keepAttr = true;
       data.forceKeepAttr = true;
     }
@@ -422,6 +471,47 @@ const messagesArea = ref(null);
 const inputRef = ref(null);
 const logoOpacity = ref(1);
 
+const zoomedImage = ref(null);
+const imageScale = ref(1);
+const imageTranslateX = ref(0);
+const imageTranslateY = ref(0);
+let isDraggingImage = false;
+let startDragX = 0;
+let startDragY = 0;
+
+function handleImageWheel(e) {
+  if (!zoomedImage.value) return;
+  // zoom speed
+  const zoomFactor = 0.1;
+  if (e.deltaY < 0) {
+    // scroll up -> zoom in
+    imageScale.value = Math.min(imageScale.value + zoomFactor, 5); // max 5x
+  } else {
+    // scroll down -> zoom out
+    imageScale.value = Math.max(imageScale.value - zoomFactor, 0.2); // min 0.2x
+  }
+}
+
+function handleImageMouseDown(e) {
+  e.preventDefault();
+  isDraggingImage = true;
+  startDragX = e.clientX - imageTranslateX.value;
+  startDragY = e.clientY - imageTranslateY.value;
+}
+
+function handleImageMouseMove(e) {
+  if (!isDraggingImage) return;
+  imageTranslateX.value = e.clientX - startDragX;
+  imageTranslateY.value = e.clientY - startDragY;
+}
+
+function handleImageMouseUp(e) {
+  isDraggingImage = false;
+}
+
+const showMentionMenu = ref(false);
+let mentionTriggerIndex = -1;
+
 // ── 闪念速记入口 (从 App.vue provide) ─────────────────
 const openQuickNote = inject('openQuickNote', () => {});
 
@@ -436,6 +526,10 @@ const healthBanner = ref(null);
 // ── T-1305: 聊天就绪守卫 ─────────────────────────────
 const chatReady = ref(true);  // fail-open: 默认可发送
 const chatReadyMsg = ref('');
+
+// ── streamThinking 流式思考 ──────────────────────────
+const streamThinkingExpanded = ref(true);  // 默认展开，用户可折叠
+const streamThinkingRef = ref(null);
 
 // ── 组合 Composables ─────────────────────────────────
 
@@ -479,10 +573,24 @@ const {
 });
 
 // ── 模板绑定的包装函数 ──────────────────────────────
-// sendMessage 需要传入 pendingImage/pendingFiles/resetTextareaHeight
-function sendMessage() {
-  _sendMessage(pendingImage, pendingFiles, resetTextareaHeight);
-}
+  // sendMessage 需要传入 pendingImage/pendingFiles/resetTextareaHeight
+  function sendMessage() {
+    if (pendingImage.value) {
+      const currentModelObj = availableModels.value.find(m => m.id === currentModelRaw.value);
+      const hasVision = currentModelObj && currentModelObj.vision;
+      if (!hasVision) {
+        messages.value.push({
+          role: 'assistant',
+          content: '当前选定的模型不支持视觉（图像识别）能力，无法处理截图。请切换至支持 vision 的模型（如 GPT-4o, Gemini 1.5 Pro 等）后再试。',
+          _isError: true,
+          _thinkingExpanded: false,
+        });
+        scrollToBottom();
+        return;
+      }
+    }
+    _sendMessage(pendingImage, pendingFiles, resetTextareaHeight);
+  }
 
 function parseTextAsEvent() {
   _parseTextAsEvent(resetTextareaHeight);
@@ -541,7 +649,101 @@ async function handleAutoFix(code) {
 }
 
 // ── 输入辅助 (依赖 DOM ref, 留在组件层) ──────────────
+function handleInput(event) {
+  autoResize();
+  const text = inputText.value;
+  const cursorIndex = inputRef.value?.selectionStart || 0;
+  const textBeforeCursor = text.substring(0, cursorIndex);
+  
+  if (/(?:^|\s)@$/.test(textBeforeCursor)) {
+    showMentionMenu.value = true;
+    mentionTriggerIndex = cursorIndex - 1;
+  } else {
+    showMentionMenu.value = false;
+  }
+}
+
+async function handleMentionSelect() {
+  showMentionMenu.value = false;
+  await handleAttach();
+  if (mentionTriggerIndex >= 0) {
+    const text = inputText.value;
+    inputText.value = text.substring(0, mentionTriggerIndex) + text.substring(mentionTriggerIndex + 1);
+    mentionTriggerIndex = -1;
+  }
+}
+
+const isScreenshotting = ref(false);
+
+async function handleScreenshot() {
+  if (isScreenshotting.value) return; // 防止重复点击
+  isScreenshotting.value = true;
+  try {
+    const { getCurrentWindow } = await import('@tauri-apps/api/window');
+    const appWindow = getCurrentWindow();
+    
+    // 记录截图前的剪贴板状态，用于检测用户是否取消了截图
+    let prevClipHash = '';
+    try {
+      const { readImage } = await import('@tauri-apps/plugin-clipboard-manager');
+      const prevImg = await readImage();
+      const prevBytes = await prevImg.rgba();
+      prevClipHash = prevBytes.length.toString();
+    } catch (_) { /* 剪贴板可能为空 */ }
+
+    // 截图期间的窗口隐藏、等待和恢复逻辑已经全部移到了 Rust 后端
+    await window.electronAPI.takeScreenshot();
+
+    // 彻底抛弃 Tauri 官方的 readImage 插件！
+    // 它在处理部分 Windows Snipping Tool 的 DIB 图像时，会导致 Rust 线程死锁或 IPC 序列化永久挂起。
+    // 我们强制使用原生 HTML5 navigator.clipboard.read()，并且增加一个 Race 超时机制，防止权限弹窗无人点击导致假死。
+    try {
+      const clipboardItems = await Promise.race([
+        navigator.clipboard.read(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Permission prompt timeout or clipboard locked')), 15000))
+      ]);
+
+      for (const item of clipboardItems) {
+        const imageType = item.types.find(t => t.startsWith('image/'));
+        if (imageType) {
+          const blob = await item.getType(imageType);
+          const base64Result = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = (e) => resolve(e.target.result.replace(/^data:image\/\w+;base64,/, ''));
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+          });
+          if (base64Result) {
+            pendingImage.value = base64Result;
+            return; // 成功粘贴！
+          }
+        }
+      }
+      console.log('No image found in native clipboard');
+    } catch (err) {
+      console.warn("Native clipboard read failed (permission denied, timed out, or unreadable):", err);
+    }
+  } catch (e) {
+    console.error('Screenshot failed:', e);
+  } finally {
+    isScreenshotting.value = false;
+  }
+}
+
 function handleKeydown(event) {
+  if (showMentionMenu.value) {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      handleMentionSelect();
+      return;
+    }
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      showMentionMenu.value = false;
+      return;
+    }
+  }
+
   if (event.key === 'Enter' && !event.shiftKey) {
     event.preventDefault();
     sendMessage();
@@ -606,6 +808,22 @@ function onStartKBBuild(folderPath, plan) {
   startKBBuild(folderPath, plan, kbUnlistens);
 }
 
+// -- CDN 上传进度状态 --
+const cdnUpload = ref({
+  active: false,
+  fileName: '',
+  percent: 0,
+  bytesSent: 0,
+  totalBytes: 0,
+});
+function formatBytes(bytes) {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / 1048576).toFixed(1) + ' MB';
+}
+
+let cdnUnlistens = [];
+
 // ── 生命周期 ─────────────────────────────────────────
 let cleanupStreamListener = null;
 let tauriDragUnlistens = [];
@@ -617,11 +835,38 @@ onMounted(async () => {
   // 远程消息监听
   if (window.electronAPI.onRemoteNewMessage) {
     remoteMessageUnlisten = await window.electronAPI.onRemoteNewMessage((event) => {
-      const convId = event?.payload?.conversation_id || event?.conversation_id;
+      const payload = event?.payload || event;
+      const convId = payload?.conversation_id || event?.conversation_id;
       if (convId && convId === props.conversationId) {
+        if (payload?.status === 'thinking') {
+          isStreaming.value = true;
+          streamContent.value = '';
+          streamThinking.value = '';
+        } else {
+          isStreaming.value = false;
+        }
         loadMessages();
       }
     });
+  }
+
+  // CDN 上传进度监听
+  if (window.__TAURI_INTERNALS__) {
+    const { listen } = await import('@tauri-apps/api/event');
+    cdnUnlistens.push(await listen('cdn:upload-start', (e) => {
+      cdnUpload.value = { active: true, fileName: e.payload.file_name, percent: 0, bytesSent: 0, totalBytes: e.payload.total_bytes };
+    }));
+    cdnUnlistens.push(await listen('cdn:upload-progress', (e) => {
+      cdnUpload.value.percent = e.payload.percent;
+      cdnUpload.value.bytesSent = e.payload.bytes_sent;
+    }));
+    cdnUnlistens.push(await listen('cdn:upload-done', () => {
+      cdnUpload.value.percent = 100;
+      setTimeout(() => { cdnUpload.value.active = false; }, 1500);
+    }));
+    cdnUnlistens.push(await listen('cdn:upload-error', () => {
+      cdnUpload.value.active = false;
+    }));
   }
 
   loadMessages();
@@ -682,6 +927,8 @@ onUnmounted(() => {
   tauriDragUnlistens = [];
   kbUnlistens.forEach(u => typeof u === 'function' && u());
   kbUnlistens = [];
+  cdnUnlistens.forEach(u => typeof u === 'function' && u());
+  cdnUnlistens = [];
 });
 
 // 切换对话时重新加载消息
@@ -692,10 +939,20 @@ watch(() => props.conversationId, async () => {
   } else {
     sessionCost.value = 0;
   }
+
   loadMessages();
   globalFileAccess.value = false;
   currentModelRaw.value = (await window.electronAPI.getActiveModels())?.main || '';
 }, { immediate: true });
+
+// streamThinking 自动滚动到底部
+watch(streamThinking, () => {
+  nextTick(() => {
+    if (streamThinkingRef.value) {
+      streamThinkingRef.value.scrollTop = streamThinkingRef.value.scrollHeight;
+    }
+  });
+});
 
 // ── 暴露给父组件 ────────────────────────────────────────
 defineExpose({
@@ -1017,6 +1274,30 @@ defineExpose({
   overflow-y: auto;
 }
 
+/* ── 流式思考动画 ──────────────────────────────────── */
+.stream-thinking {
+  border-left-color: var(--accent-primary);
+}
+
+.thinking-pulse {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent-primary);
+  animation: pulse-thinking 1.4s ease-in-out infinite;
+}
+
+@keyframes pulse-thinking {
+  0%, 100% { opacity: 0.3; transform: scale(0.85); }
+  50% { opacity: 1; transform: scale(1.15); }
+}
+
+.stream-thinking-content {
+  max-height: 200px;
+  scroll-behavior: smooth;
+}
+
 /* ── 文件卡片 ───────────────────────────────────────── */
 .message-content a[href^="file://"],
 .message-content a[href^="C:\\"],
@@ -1164,6 +1445,62 @@ defineExpose({
   margin: 8px 0;
 }
 
+/* CDN 上传进度条 */
+.cdn-upload-progress {
+  margin: 8px 0;
+  padding: 10px 14px;
+  background: var(--bg-secondary);
+  border-radius: 8px;
+  border-left: 2px solid var(--accent-primary);
+  animation: fadeIn 0.2s ease;
+}
+.cdn-upload-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+}
+.cdn-upload-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-primary);
+  font-weight: 500;
+}
+.cdn-upload-percent {
+  font-variant-numeric: tabular-nums;
+  color: var(--accent-primary);
+  font-weight: 600;
+  min-width: 36px;
+  text-align: right;
+}
+.cdn-upload-bar-track {
+  width: 100%;
+  height: 4px;
+  background: var(--bg-tertiary);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.cdn-upload-bar-fill {
+  height: 100%;
+  background: var(--accent-primary);
+  border-radius: 2px;
+  transition: width 0.15s ease;
+}
+.cdn-upload-detail {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  margin-top: 4px;
+  font-variant-numeric: tabular-nums;
+}
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
 .tool-call-item {
   border-left: 2px solid var(--border-subtle);
   padding: 4px 0 4px 12px;
@@ -1276,9 +1613,9 @@ defineExpose({
   align-items: center;
   justify-content: center;
   z-index: 100;
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-primary) 30%, transparent),
-              inset 0 0 50px color-mix(in srgb, var(--accent-primary) 20%, transparent);
   backdrop-filter: blur(4px);
+  outline: 2px dashed var(--accent-primary);
+  outline-offset: -12px;
 }
 
 .drop-content {
@@ -1542,6 +1879,7 @@ defineExpose({
 .inline-image-preview {
   position: relative;
   display: inline-block;
+  width: max-content;
   padding: 4px 0 6px 0;
 }
 
@@ -1601,7 +1939,7 @@ defineExpose({
 .image-remove-inline {
   position: absolute;
   top: 0;
-  right: -8px;
+  right: -6px;
   width: 16px;
   height: 16px;
   font-size: 8px;
@@ -1613,6 +1951,14 @@ defineExpose({
   justify-content: center;
   cursor: pointer;
   border: none;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  pointer-events: none;
+}
+
+.inline-image-preview:hover .image-remove-inline {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .chat-input {
@@ -1843,5 +2189,84 @@ defineExpose({
 }
 .bob-clickable:active {
   transform: scale(0.93);
+}
+
+.mention-menu {
+  position: absolute;
+  bottom: 100%;
+  left: 16px;
+  margin-bottom: 8px;
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  padding: 4px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+  z-index: 100;
+  min-width: 200px;
+}
+.mention-menu-item {
+  padding: 8px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+.mention-menu-item:hover, .mention-menu-item.active {
+  background-color: var(--bg-tertiary);
+}
+.mention-shortcut {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  background-color: var(--bg-root);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+/* Image Lightbox */
+.image-lightbox {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background-color: rgba(0, 0, 0, 0.85);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 9999;
+  cursor: zoom-out;
+  backdrop-filter: blur(4px);
+}
+.image-lightbox img {
+  max-width: 90vw;
+  max-height: 90vh;
+  object-fit: contain;
+  border-radius: 8px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+  cursor: grab;
+  transition: transform 0.1s ease-out;
+}
+.image-lightbox img:active {
+  cursor: grabbing;
+  transition: none; /* smooth tracking while dragging */
+}
+.lightbox-close {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  background: transparent;
+  border: none;
+  color: white;
+  font-size: 40px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.7;
+  transition: opacity 0.2s;
+}
+.lightbox-close:hover {
+  opacity: 1;
 }
 </style>

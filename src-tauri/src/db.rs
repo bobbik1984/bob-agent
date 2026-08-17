@@ -127,6 +127,44 @@ pub fn init_db(data_dir: &std::path::Path) -> Connection {
         );
     ").unwrap_or_default();
 
+    // ── M17: 知识图谱 ──────────────────────────────────────
+    conn.execute_batch("
+        CREATE TABLE IF NOT EXISTS kg_nodes (
+            id          TEXT PRIMARY KEY,
+            label       TEXT NOT NULL,
+            node_type   TEXT NOT NULL DEFAULT 'concept',
+            summary     TEXT DEFAULT '',
+            source      TEXT DEFAULT '',
+            metadata    TEXT DEFAULT '{}',
+            created_at  TEXT DEFAULT (datetime('now'))
+        );
+        CREATE TABLE IF NOT EXISTS kg_edges (
+            source_id   TEXT NOT NULL,
+            target_id   TEXT NOT NULL,
+            relation    TEXT NOT NULL DEFAULT 'related_to',
+            confidence  REAL DEFAULT 0.8,
+            created_at  TEXT DEFAULT (datetime('now')),
+            PRIMARY KEY (source_id, target_id, relation)
+        );
+        CREATE INDEX IF NOT EXISTS idx_kg_edges_source ON kg_edges(source_id);
+        CREATE INDEX IF NOT EXISTS idx_kg_edges_target ON kg_edges(target_id);
+    ").unwrap_or_default();
+
+    // 数据迁移: 标准化知识图谱节点类型 (修复中英文混杂的问题)
+    conn.execute_batch("
+        UPDATE kg_nodes SET node_type = 'concept' WHERE node_type IN ('Concept', '概念', '名词');
+        UPDATE kg_nodes SET node_type = 'project' WHERE node_type IN ('Project', '项目');
+        UPDATE kg_nodes SET node_type = 'file'    WHERE node_type IN ('File', '文件');
+        UPDATE kg_nodes SET node_type = 'tag'     WHERE node_type IN ('Tag', '标签');
+        UPDATE kg_nodes SET node_type = 'person'  WHERE node_type IN ('Person', '人物', '人名', 'author', '作者');
+        UPDATE kg_nodes SET node_type = 'topic'   WHERE node_type IN ('Topic', '主题');
+        UPDATE kg_nodes SET node_type = 'entity'  WHERE node_type IN ('Entity', '实体');
+        UPDATE kg_nodes SET node_type = 'organization' WHERE node_type IN ('Organization', '组织', '机构', '公司');
+        UPDATE kg_nodes SET node_type = 'location' WHERE node_type IN ('Location', '地点', '位置');
+        UPDATE kg_nodes SET node_type = 'event'   WHERE node_type IN ('Event', '事件');
+        UPDATE kg_nodes SET node_type = 'technology' WHERE node_type IN ('Technology', '技术');
+    ").unwrap_or_default();
+
     conn
 }
 

@@ -9,12 +9,18 @@
 
 ## 项目概述
 
-**bob-agent** 是一个 **Windows 桌面 AI 私人秘书**，面向不喜欢折腾的普通用户。
+**bob-agent** 是一个 **Windows 桌面 AI 私人秘书**（v0.32.1），面向不喜欢折腾的普通用户。
 
-- **产品定位**：开箱即用的桌面 AI 助手，核心能力是对话 + 图片识别 + 日程管理 + 文件分析
-- **技术栈**：**Tauri v2 (Rust)** + Vue 3 + Vite（正在从 Electron 迁移）
+- **产品定位**：「中国泛白领办公桌上的幽灵副手」— 开箱即用、纯本地、极致轻量的 AI 桌面伴侣
+- **技术栈**：**Tauri v2 (Rust)** + Vue 3 + Vite（Electron 迁移已完成）
 - **目标用户**：办公白领、非技术人员
-- **血统**：融合了 CodeRunner 的上下文管理精华 + DeepSeek-TUI 的工程理念 + TodoList 的日程管理能力
+- **核心能力**：
+  - 智能对话 + 图片识别 + 12+ 原生工具 (Tool Calling)
+  - 日程管理 + 智能待办跟进 + 晨间简报
+  - 文档导出 (DOCX/XLSX/PPTX/HTML)
+  - 微信/Telegram/Discord 多通道接入
+  - 三层记忆体系 (SOUL → sessions → wiki) + Dream V2 异步压缩
+  - 认知引擎 V2 (熔断器/上下文分级/语义去重/复杂度路由)
 
 ---
 
@@ -132,9 +138,22 @@ dist-release/
 
 ---
 
+## 🔄 工作流程规范
+
+| 触发场景 | 必须执行的操作 |
+|:---------|:--------------|
+| 收到新需求/新功能请求 | 立即将需求写入 `todo.md` 对应里程碑下，分配 Task ID |
+| 完成一项开发工作 | 更新 `todo.md` 对应项为 `[x]`，同时在 `progress.yaml` 的 `recent_fixes` 中添加记录 |
+| 发布新版本 | 更新 `todo.md` 头部版本号、`progress.yaml` 的 `project.version` 和 `project.updated` |
+| 新增 Rust 模块 | 在 `progress.yaml` 的 `rust_modules` 中注册 |
+| 修复 Bug | 在 `todo.md` 对应日期的工作记录中添加 `[Fix]` 条目 |
+
+---
+
 ## JIT 指针
 
 - **架构/目录树/IPC/依赖**：详见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 - **UI 设计铁律 (配色/对齐/i18n)**：详见 [design_principles.md](design_principles.md)
 - **灵魂定义**：详见 [data/memory/SOUL.md](data/memory/SOUL.md)
 - **路线图**：详见 [todo.md](todo.md)
+- **进度追踪**：详见 [progress.yaml](progress.yaml)

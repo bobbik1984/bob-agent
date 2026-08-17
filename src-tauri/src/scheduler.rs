@@ -460,6 +460,8 @@ async fn execute_cron_job(app: &AppHandle, job_id: &str, title: &str, prompt: &s
         messages,
         Some(conv_id.clone()),
         None,
+        false,
+        "default".to_string()
     ).await;
 
     // ── Step 4: 提取 assistant 回复并保存 ──

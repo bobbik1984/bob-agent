@@ -231,6 +231,14 @@ async fn handle_message(
         params![preview, "user", ts, conversation_id],
     );
 
+    // 通知桌面前端：用户发来新消息，准备进入思考状态
+    let _ = app_handle.emit("remote:new-message", serde_json::json!({
+        "conversation_id": &conversation_id,
+        "from_channel": "wechat",
+        "status": "thinking"
+    }));
+
+
     // Load history
     let mut messages = Vec::new();
     if let Ok(mut stmt) = conn.prepare("SELECT role, content FROM messages WHERE conversation_id = ?1 ORDER BY created_at ASC") {
@@ -276,7 +284,7 @@ async fn handle_message(
     // Call LLM
     // We will need to send typing heartbeats while waiting. 
     // For now we just call it.
-    let result = crate::llm::stream_chat(app_handle.clone(), messages, Some(conversation_id.clone()), Some(wxid.to_string())).await;
+    let result = crate::llm::stream_chat(app_handle.clone(), messages, Some(conversation_id.clone()), Some(wxid.to_string()), false, "default".to_string()).await;
     
     let mut full_text = String::new();
     if let Some(content) = result.get("content").and_then(|v| v.as_str()) {
@@ -451,6 +459,7 @@ pub async fn send_wechat_file(
     wxid: &str,
     file_path: &str,
     caption: Option<&str>,
+    app: &tauri::AppHandle,
 ) -> Result<String, String> {
     // 1. 解析账户信息
     let account = match resolve_wechat_account(None) {
@@ -472,8 +481,8 @@ pub async fn send_wechat_file(
     let type_label = if is_image { "图片" } else { "文件" };
     log::info!("[wechat] send_wechat_file: to={} path={} type={}", wxid, file_path, type_label);
 
-    // 3. 上传到 CDN
-    let uploaded = cdn::upload_media(&api, file_path, wxid, media_type).await?;
+    // 3. 上传到 CDN（带实时进度推送）
+    let uploaded = cdn::upload_media(&api, file_path, wxid, media_type, app).await?;
     log::info!(
         "[wechat] CDN upload done: filekey={} size={} ciphertext_size={}",
         uploaded.filekey, uploaded.file_size, uploaded.file_size_ciphertext

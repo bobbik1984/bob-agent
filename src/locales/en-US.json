@@ -10,11 +10,33 @@
     "inbox": "Calendar",
     "schedule": "Schedule",
     "schedule_hint": "Schedule & Tasks",
+    "knowledge": "Knowledge Graph",
+    "knowledge_hint": "Entities & Relationships",
     "settings": "Settings",
     "theme_to_light": "Switch to light mode",
     "theme_to_dark": "Switch to dark mode",
     "rename": "Rename",
     "delete_chat": "Delete Chat"
+  },
+  "kg": {
+    "title": "Knowledge Graph",
+    "search_placeholder": "Search nodes...",
+    "empty": "Knowledge graph is empty",
+    "empty_hint": "Drag a folder into the chat to build a knowledge base — the graph will be generated automatically",
+    "generating": "Generating knowledge graph...",
+    "generate_btn": "Generate from knowledge base",
+    "type_concept": "Concept",
+    "type_project": "Project",
+    "type_file": "File",
+    "type_tag": "Tag",
+    "type_person": "Person",
+    "type_topic": "Topic",
+    "type_entity": "Entity",
+    "type_organization": "Organization",
+    "type_location": "Location",
+    "type_event": "Event",
+    "type_technology": "Technology",
+    "stats_summary": "{nodes} Nodes · {edges} Edges"
   },
   "modal": {
     "delete_title": "Delete Chat",
@@ -254,6 +276,7 @@
     "empty_title": "Hi, I'm Bob",
     "empty_subtitle": "How can I help you?",
     "export_success": "Chat exported to: ",
+    "thinking": "Thinking...",
     "error_title": "Request Failed",
     "drop_hint_full": "Drop files here / Track folder",
     "parsing": "Parsing...",
@@ -424,7 +447,9 @@
     "high": "High"
   },
   "todo": {
-    "empty": "No to-dos yet. Tell me to add a task!"
+    "empty": "No to-dos yet. Tell me to add a task!",
+    "show_completed": "Show completed",
+    "completed_at": "Done at {time}"
   },
   "timeline": {
     "today": "Today",

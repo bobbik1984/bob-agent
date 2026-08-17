@@ -1,6 +1,6 @@
 # Bob Agent User Guide / 用户手册
 
-> Version 1.0.0-alpha (Tauri)
+> Version 0.3.2 (Tauri)
 
 ## 1. Getting Started / 快速上手
 
@@ -68,6 +68,12 @@ Bob 拥有 12 个 Rust 原生工具，可以自主调用：
 2. **拖拽文件夹**到对话窗口，Bob 会自动索引
 3. 在对话中说 "搜索我的知识库" 即可检索已索引内容
 4. 支持 .md / .txt / .pdf / .docx / .xlsx 等格式
+
+### 🟢 WeChat Integration / 微信互联 (v0.3 新增)
+
+- Bob 能够作为后台服务监听指定的微信消息
+- 用户可以通过微信端发送消息和文件给 Bob，实现跨端控制
+- 大模型调用 `send_wechat_file` 等工具时，会自动感知当前上下文所属的微信账户并路由回传
 
 ## 3. Settings / 设置详解
 

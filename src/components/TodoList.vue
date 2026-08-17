@@ -1,8 +1,14 @@
 <template>
   <div class="todo-list">
-    <div v-if="todos.length === 0" class="empty-state">{{ $t('todo.empty') }}</div>
+    <div class="todo-header" v-if="todos.some(t => t.status === 'done')">
+      <label class="toggle-completed">
+        <input type="checkbox" v-model="showCompleted" />
+        <span class="toggle-text">{{ $t('todo.show_completed') }}</span>
+      </label>
+    </div>
+    <div v-if="visibleTodos.length === 0" class="empty-state">{{ $t('todo.empty') }}</div>
     <div
-      v-for="todo in sortedTodos"
+      v-for="todo in visibleTodos"
       :key="todo.id"
       class="todo-item"
       :class="{ 'is-done': todo.status === 'done' }"
@@ -14,7 +20,12 @@
         @change="toggleStatus(todo)"
       />
       <div class="todo-content">
-        <span class="todo-title">{{ todo.title }}</span>
+        <div class="todo-main">
+          <span class="todo-title">{{ todo.title }}</span>
+          <span v-if="todo.status === 'done' && todo.completed_at" class="todo-time">
+            ({{ $t('todo.completed_at', { time: formatTime(todo.completed_at) }) }})
+          </span>
+        </div>
         <span class="todo-priority" :class="todo.priority || 'medium'">
           {{ getPriorityLabel(todo.priority) }}
         </span>
@@ -24,7 +35,7 @@
 </template>
 
 <script setup>
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 
 const { t } = useI18n();
@@ -38,13 +49,23 @@ const props = defineProps({
 
 const emit = defineEmits(['update-status']);
 
-const sortedTodos = computed(() => {
-  return [...props.todos].sort((a, b) => {
-    if (a.status === 'done' && b.status !== 'done') return 1;
-    if (a.status !== 'done' && b.status === 'done') return -1;
-    return 0;
-  });
+const showCompleted = ref(false);
+
+const visibleTodos = computed(() => {
+  return props.todos
+    .filter(todo => showCompleted.value || todo.status !== 'done')
+    .sort((a, b) => {
+      if (a.status === 'done' && b.status !== 'done') return 1;
+      if (a.status !== 'done' && b.status === 'done') return -1;
+      return 0;
+    });
 });
+
+function formatTime(timestamp) {
+  if (!timestamp) return '';
+  const d = new Date(timestamp * 1000);
+  return `${d.getMonth() + 1}-${d.getDate()} ${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
+}
 
 async function toggleStatus(todo) {
   const newStatus = todo.status === 'done' ? 'pending' : 'done';
@@ -116,6 +137,36 @@ function getPriorityLabel(priority) {
   display: flex;
   align-items: center;
   justify-content: space-between;
+}
+
+.todo-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.todo-time {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.todo-header {
+  display: flex;
+  justify-content: flex-end;
+  padding-bottom: 8px;
+}
+
+.toggle-completed {
+  font-size: 12px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.toggle-text:hover {
+  color: var(--text-primary);
 }
 
 .todo-title {

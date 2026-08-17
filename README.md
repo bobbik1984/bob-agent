@@ -10,6 +10,8 @@
 |---------|-------------|
 | 💬 **Multi-Model Chat** | 40+ models auto-discovered (DeepSeek, OpenAI, Qwen, Doubao, GLM, Kimi, MiniMax...) with SSE streaming & Markdown rendering |
 | 🤖 **Agent + Tool Calling** | 12 Rust-native tools (file I/O, web search, weather, calendar, knowledge base...) with 5-round auto-invocation |
+| 🟢 **WeChat Integration** | Monitor and interact via WeChat. Automatic context routing and file transfer to the local chat |
+| 🌐 **HTTP API Server** | Local SSE API server (`127.0.0.1:3721`) for serving local files and external integrations |
 | 📸 **Vision** | Paste/drop images for AI analysis |
 | 📅 **Calendar** | Natural language → event creation, drag-and-drop scheduling on weekly timeline |
 | 📁 **Knowledge Base** | Drag a folder → auto-index → full-text search across docs (.docx/.xlsx/.pdf/.md) |
@@ -57,6 +59,7 @@ npm test
 | Desktop Shell | **Tauri v2** (Rust) |
 | Frontend | Vue 3 + Vite 6 |
 | LLM Communication | `reqwest` + SSE stream parser (Rust native) |
+| External Integration| Built-in HTTP API (`axum`) + WeChat monitor |
 | Database | SQLite (`rusqlite`, bundled) |
 | Tool Engine | 12 Rust-native tools + OpenAI Function Calling protocol |
 | File Parsing | `pdf-extract` + `calamine` (xlsx) + `quick-xml` (docx) |

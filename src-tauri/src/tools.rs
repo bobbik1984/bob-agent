@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::io::Write;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
+use tauri::Emitter;
 
 // ═══════════════════════════════════════════════════════════
 // T-1401: 工具调用循环熔断器 (Circuit Breaker)
@@ -259,6 +260,79 @@ fn get_builtin_tool_schemas() -> Vec<Value> {
         json!({
             "type": "function",
             "function": {
+                "name": "create_directory",
+                "description": "创建新文件夹（目录）。如果父目录不存在会自动创建。如果目录已存在，不会报错。需要干活模式授权。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "path": { "type": "string", "description": "要创建的目录的绝对路径" }
+                    },
+                    "required": ["path"]
+                }
+            }
+        }),
+        json!({
+            "type": "function",
+            "function": {
+                "name": "move_file",
+                "description": "移动文件或文件夹到新位置。也可用于跨目录移动。如果目标已存在，将被覆盖。需要干活模式授权。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "source": { "type": "string", "description": "源文件或文件夹的绝对路径" },
+                        "destination": { "type": "string", "description": "目标路径的绝对路径" }
+                    },
+                    "required": ["source", "destination"]
+                }
+            }
+        }),
+        json!({
+            "type": "function",
+            "function": {
+                "name": "copy_file",
+                "description": "复制文件到新位置。如果目标已存在，将被覆盖。仅支持复制单个文件。需要干活模式授权。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "source": { "type": "string", "description": "源文件的绝对路径" },
+                        "destination": { "type": "string", "description": "目标文件的绝对路径" }
+                    },
+                    "required": ["source", "destination"]
+                }
+            }
+        }),
+        json!({
+            "type": "function",
+            "function": {
+                "name": "delete_file",
+                "description": "安全删除文件或目录（移动到系统回收站）。如果可能，请首选此工具而非直接覆盖。需要干活模式授权。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "path": { "type": "string", "description": "要删除的文件或目录的绝对路径" }
+                    },
+                    "required": ["path"]
+                }
+            }
+        }),
+        json!({
+            "type": "function",
+            "function": {
+                "name": "rename_file",
+                "description": "重命名文件或目录。必须在同一个目录下进行操作（不能跨目录，跨目录请用 move_file）。需要干活模式授权。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "path": { "type": "string", "description": "要重命名的原绝对路径" },
+                        "new_name": { "type": "string", "description": "新的名称（仅文件名，不是完整路径）" }
+                    },
+                    "required": ["path", "new_name"]
+                }
+            }
+        }),
+        json!({
+            "type": "function",
+            "function": {
                 "name": "read_file",
                 "description": "读取指定路径的文本文件内容。支持 txt/md/json/yaml/csv 等文本格式，上限 500KB。用于查看用户提到的文件、读取配置文件、提取密钥等。",
                 "parameters": {
@@ -413,6 +487,17 @@ fn get_builtin_tool_schemas() -> Vec<Value> {
                         "content": { "type": "string", "description": "要追加的文本内容" }
                     },
                     "required": ["path", "content"]
+                }
+            }
+        }),
+        json!({
+            "type": "function",
+            "function": {
+                "name": "list_calendar_events",
+                "description": "列出用户的本地日程表（日历）和待办事项（未完成的）。当用户问'我今天有什么事'、'我的待办事项有哪些'时调用此工具。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {}
                 }
             }
         }),
@@ -587,6 +672,95 @@ fn get_builtin_tool_schemas() -> Vec<Value> {
                 }
             }
         }),
+        json!({
+            "type": "function",
+            "function": {
+                "name": "export_html",
+                "description": "生成一份精排版的 HTML 报告文件，可直接在浏览器打开或打印为 PDF",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "filename": { "type": "string", "description": "输出文件名 (不含扩展名)" },
+                        "template": { "type": "string", "description": "模板名称: corporate | academic | dashboard", "enum": ["corporate", "academic", "dashboard"] },
+                        "title": { "type": "string", "description": "报告标题" },
+                        "content": { "type": "string", "description": "Markdown 格式的报告正文" }
+                    },
+                    "required": ["filename", "template", "title", "content"]
+                }
+            }
+        }),
+        json!({
+            "type": "function",
+            "function": {
+                "name": "export_xlsx",
+                "description": "将结构化数据导出为 Excel 表格文件",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "filename": { "type": "string", "description": "输出文件名 (不含扩展名)" },
+                        "sheets": {
+                            "type": "array",
+                            "description": "工作表数据",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "name": { "type": "string", "description": "工作表名称" },
+                                    "headers": { "type": "array", "items": { "type": "string" }, "description": "列标题数组" },
+                                    "rows": { "type": "array", "items": { "type": "array", "items": {} }, "description": "数据行的二维数组 (可以是数字或字符串)" }
+                                },
+                                "required": ["name", "headers", "rows"]
+                            }
+                        }
+                    },
+                    "required": ["filename", "sheets"]
+                }
+            }
+        }),
+        json!({
+            "type": "function",
+            "function": {
+                "name": "export_docx",
+                "description": "将文本内容导出为格式工整的 Word 文档",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "filename": { "type": "string", "description": "输出文件名 (不含扩展名)" },
+                        "content": { "type": "string", "description": "Markdown 格式的文档正文" }
+                    },
+                    "required": ["filename", "content"]
+                }
+            }
+        }),
+        json!({
+            "type": "function",
+            "function": {
+                "name": "export_pptx",
+                "description": "生成 PowerPoint 演示文稿(.pptx)。支持封面页、内容页、章节页和总结页。建议先通过 read_skill 加载 mckinsey-designer 技能来规划 Storyboard 结构。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "filename": { "type": "string", "description": "输出文件名 (不含扩展名)" },
+                        "template": { "type": "string", "description": "配色主题: corporate-dark | corporate-light", "enum": ["corporate-dark", "corporate-light"] },
+                        "slides": {
+                            "type": "array",
+                            "description": "幻灯片数组，每页一个对象",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "type": { "type": "string", "description": "页面类型: cover | content | section | summary" },
+                                    "title": { "type": "string", "description": "页面标题" },
+                                    "subtitle": { "type": "string", "description": "副标题 (封面页/章节页可用)" },
+                                    "content": { "type": "string", "description": "正文段落 (用 \\n\\n 分隔多段)" },
+                                    "bullets": { "type": "array", "items": { "type": "string" }, "description": "要点列表" }
+                                },
+                                "required": ["type", "title"]
+                            }
+                        }
+                    },
+                    "required": ["filename", "template", "slides"]
+                }
+            }
+        }),
     ]
 }
 
@@ -596,16 +770,16 @@ fn get_builtin_tool_schemas() -> Vec<Value> {
 
 /// 执行指定工具并返回结果
 /// `from_user`: 当工具调用源自微信会话时，传入消息发送者的加密 wxid
-pub async fn execute_tool(app: &tauri::AppHandle, name: &str, args: &Value, from_user: Option<&str>) -> Value {
+pub async fn execute_tool(app: &tauri::AppHandle, name: &str, args: &Value, from_user: Option<&str>, global_file_access: bool) -> Value {
     // 工具级超时控制：媒体上传类工具给 120 秒，其他给 30 秒
     let timeout_secs = match name {
-        "send_wechat_file" => 120,
+        "send_wechat_file" => 600, // 大文件上传可能耗时很长，与 CDN 动态超时匹配
         _ => 30,
     };
     let timeout_duration = std::time::Duration::from_secs(timeout_secs);
     let result = match tokio::time::timeout(
         timeout_duration,
-        execute_tool_inner(app, name, args, from_user)
+        execute_tool_inner(app, name, args, from_user, global_file_access)
     ).await {
         Ok(r) => r,
         Err(_) => {
@@ -626,7 +800,7 @@ pub async fn execute_tool(app: &tauri::AppHandle, name: &str, args: &Value, from
     result
 }
 
-async fn execute_tool_inner(app: &tauri::AppHandle, name: &str, args: &Value, from_user: Option<&str>) -> Value {
+async fn execute_tool_inner(app: &tauri::AppHandle, name: &str, args: &Value, from_user: Option<&str>, global_file_access: bool) -> Value {
     match name {
         "read_file" => {
             let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
@@ -636,6 +810,29 @@ async fn execute_tool_inner(app: &tauri::AppHandle, name: &str, args: &Value, fr
                 return json!({ "error": "禁止使用 ../ 进行路径穿越" });
             }
             super::filesystem::system_read_file(path.to_string())
+        }
+        "create_directory" => {
+            let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
+            tool_create_directory(path, global_file_access).await
+        }
+        "move_file" => {
+            let source = args.get("source").and_then(|v| v.as_str()).unwrap_or("");
+            let destination = args.get("destination").and_then(|v| v.as_str()).unwrap_or("");
+            tool_move_file(source, destination, global_file_access).await
+        }
+        "copy_file" => {
+            let source = args.get("source").and_then(|v| v.as_str()).unwrap_or("");
+            let destination = args.get("destination").and_then(|v| v.as_str()).unwrap_or("");
+            tool_copy_file(source, destination, global_file_access).await
+        }
+        "delete_file" => {
+            let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
+            tool_delete_file(path, global_file_access).await
+        }
+        "rename_file" => {
+            let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
+            let new_name = args.get("new_name").and_then(|v| v.as_str()).unwrap_or("");
+            tool_rename_file(path, new_name, global_file_access).await
         }
         "list_dir" => {
             let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
@@ -668,7 +865,7 @@ async fn execute_tool_inner(app: &tauri::AppHandle, name: &str, args: &Value, fr
         "write_file" => {
             let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
             let content = args.get("content").and_then(|v| v.as_str()).unwrap_or("");
-            tool_write_file(path, content).await
+            tool_write_file(path, content, global_file_access).await
         }
         "brain_search" => {
             let query = args.get("query").and_then(|v| v.as_str()).unwrap_or("");
@@ -677,7 +874,10 @@ async fn execute_tool_inner(app: &tauri::AppHandle, name: &str, args: &Value, fr
         "append_file" => {
             let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
             let content = args.get("content").and_then(|v| v.as_str()).unwrap_or("");
-            tool_append_file(path, content).await
+            tool_append_file(path, content, global_file_access).await
+        }
+        "list_calendar_events" => {
+            tool_list_calendar_events(app)
         }
         "add_calendar_event" => {
             tool_add_calendar_event(app, args)
@@ -726,7 +926,7 @@ async fn execute_tool_inner(app: &tauri::AppHandle, name: &str, args: &Value, fr
             };
             let file_path = args.get("file_path").and_then(|v| v.as_str()).unwrap_or("");
             let caption = args.get("caption").and_then(|v| v.as_str());
-            match super::wechat::commands::send_wechat_file(wxid, file_path, caption).await {
+            match super::wechat::commands::send_wechat_file(wxid, file_path, caption, app).await {
                 Ok(msg) => json!({ "ok": msg }),
                 Err(e) => json!({ "error": e }),
             }
@@ -772,6 +972,136 @@ async fn execute_tool_inner(app: &tauri::AppHandle, name: &str, args: &Value, fr
         }
         name if name.starts_with("gmail_") => {
             super::gmail::execute_tool(name, args).await
+        }
+        // ── 里程碑 15: 文档输出引擎 ──
+        "export_html" => {
+            let filename = args.get("filename").and_then(|v| v.as_str()).unwrap_or("report");
+            let template = args.get("template").and_then(|v| v.as_str()).unwrap_or("corporate");
+            let title = args.get("title").and_then(|v| v.as_str()).unwrap_or("Report");
+            let content = args.get("content").and_then(|v| v.as_str()).unwrap_or("");
+            
+            let data = super::exports::report::ReportData {
+                title: title.to_string(),
+                template: template.to_string(),
+                content: content.to_string(),
+            };
+            
+            let html = super::exports::report::generate_html_report(&data);
+            
+            // 写入默认 exports 目录
+            let config = super::read_config();
+            let exports_dir = config.get("exportsDir")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .map(PathBuf::from)
+                .unwrap_or_else(|| dirs::desktop_dir().unwrap_or_else(|| PathBuf::from(".")).join("Bob-Exports"));
+                
+            let _ = fs::create_dir_all(&exports_dir);
+            let file_path = exports_dir.join(format!("{}.html", filename));
+            
+            match fs::write(&file_path, html) {
+                Ok(_) => {
+                    let _ = open::that(&file_path);
+                    let path_str = file_path.to_string_lossy().to_string();
+                    let _ = app.emit("llm:chunk", json!({ "type": "file_output", "path": &path_str, "conv_id": "" }));
+                    json!({ "ok": format!("HTML 报告已生成: {}", path_str), "path": path_str })
+                },
+                Err(e) => json!({ "error": format!("无法写入文件: {}", e) }),
+            }
+        }
+        "export_xlsx" => {
+            let filename = args.get("filename").and_then(|v| v.as_str()).unwrap_or("data");
+            
+            let mut data = super::exports::xlsx::XlsxData { sheets: Vec::new() };
+            if let Some(sheets_array) = args.get("sheets").and_then(|v| v.as_array()) {
+                for sheet in sheets_array {
+                    if let Ok(sheet_data) = serde_json::from_value(sheet.clone()) {
+                        data.sheets.push(sheet_data);
+                    }
+                }
+            }
+            
+            let config = super::read_config();
+            let exports_dir = config.get("exportsDir")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .map(PathBuf::from)
+                .unwrap_or_else(|| dirs::desktop_dir().unwrap_or_else(|| PathBuf::from(".")).join("Bob-Exports"));
+                
+            let _ = fs::create_dir_all(&exports_dir);
+            let file_path = exports_dir.join(format!("{}.xlsx", filename));
+            
+            match super::exports::xlsx::generate_xlsx(&file_path, &data) {
+                Ok(_) => {
+                    let _ = open::that(&file_path);
+                    let path_str = file_path.to_string_lossy().to_string();
+                    let _ = app.emit("llm:chunk", json!({ "type": "file_output", "path": &path_str, "conv_id": "" }));
+                    json!({ "ok": format!("Excel 表格已生成: {}", path_str), "path": path_str })
+                },
+                Err(e) => json!({ "error": format!("无法生成 Excel: {}", e) }),
+            }
+        }
+        "export_docx" => {
+            let filename = args.get("filename").and_then(|v| v.as_str()).unwrap_or("document");
+            let content = args.get("content").and_then(|v| v.as_str()).unwrap_or("");
+            
+            let config = super::read_config();
+            let exports_dir = config.get("exportsDir")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .map(PathBuf::from)
+                .unwrap_or_else(|| dirs::desktop_dir().unwrap_or_else(|| PathBuf::from(".")).join("Bob-Exports"));
+                
+            let _ = fs::create_dir_all(&exports_dir);
+            let file_path = exports_dir.join(format!("{}.docx", filename));
+            
+            match super::exports::docx::generate_docx(&file_path, content) {
+                Ok(_) => {
+                    let _ = open::that(&file_path);
+                    let path_str = file_path.to_string_lossy().to_string();
+                    let _ = app.emit("llm:chunk", json!({ "type": "file_output", "path": &path_str, "conv_id": "" }));
+                    json!({ "ok": format!("Word 文档已生成: {}", path_str), "path": path_str })
+                },
+                Err(e) => json!({ "error": format!("无法生成 Word: {}", e) }),
+            }
+        }
+        "export_pptx" => {
+            let filename = args.get("filename").and_then(|v| v.as_str()).unwrap_or("presentation");
+            let template = args.get("template").and_then(|v| v.as_str()).unwrap_or("corporate-dark");
+            
+            let mut slides = Vec::new();
+            if let Some(slides_array) = args.get("slides").and_then(|v| v.as_array()) {
+                for slide in slides_array {
+                    if let Ok(slide_data) = serde_json::from_value(slide.clone()) {
+                        slides.push(slide_data);
+                    }
+                }
+            }
+            
+            let data = super::exports::pptx::PptxData {
+                template: template.to_string(),
+                slides,
+            };
+            
+            let config = super::read_config();
+            let exports_dir = config.get("exportsDir")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .map(PathBuf::from)
+                .unwrap_or_else(|| dirs::desktop_dir().unwrap_or_else(|| PathBuf::from(".")).join("Bob-Exports"));
+                
+            let _ = fs::create_dir_all(&exports_dir);
+            let file_path = exports_dir.join(format!("{}.pptx", filename));
+            
+            match super::exports::pptx::generate_pptx(&file_path, &data) {
+                Ok(_) => {
+                    let _ = open::that(&file_path);
+                    let path_str = file_path.to_string_lossy().to_string();
+                    let _ = app.emit("llm:chunk", json!({ "type": "file_output", "path": &path_str, "conv_id": "" }));
+                    json!({ "ok": format!("PowerPoint 演示文稿已生成: {}", path_str), "path": path_str })
+                },
+                Err(e) => json!({ "error": format!("无法生成 PPTX: {}", e) }),
+            }
         }
         _ => json!({ "error": format!("未知工具: {}", name) }),
     }
@@ -1181,9 +1511,7 @@ async fn tool_get_weather(city: &str) -> Value {
     })
 }
 
-async fn tool_write_file(path: &str, content: &str) -> Value {
-    // TODO: global_file_access 应从调用链传入，目前默认 false
-    let global_file_access = false;
+async fn tool_write_file(path: &str, content: &str, global_file_access: bool) -> Value {
     let target_path = match resolve_write_path(path, global_file_access) {
         Ok(p) => p,
         Err(e) => return json!({ "error": e }),
@@ -1199,8 +1527,7 @@ async fn tool_write_file(path: &str, content: &str) -> Value {
     }
 }
 
-async fn tool_append_file(path: &str, content: &str) -> Value {
-    let global_file_access = false;
+async fn tool_append_file(path: &str, content: &str, global_file_access: bool) -> Value {
     let target_path = match resolve_write_path(path, global_file_access) {
         Ok(p) => p,
         Err(e) => return json!({ "error": e }),
@@ -1217,6 +1544,80 @@ async fn tool_append_file(path: &str, content: &str) -> Value {
     match fs::write(&target_path, &new_content) {
         Ok(_) => json!({ "ok": true, "path": target_path.to_string_lossy().to_string(), "bytes_appended": content.len() }),
         Err(e) => json!({ "error": format!("追加文件失败: {}", e) })
+    }
+}
+
+async fn tool_create_directory(path: &str, global_file_access: bool) -> Value {
+    let target_path = match resolve_write_path(path, global_file_access) {
+        Ok(p) => p,
+        Err(e) => return json!({ "error": e }),
+    };
+    match fs::create_dir_all(&target_path) {
+        Ok(_) => json!({ "ok": true, "path": target_path.to_string_lossy().to_string() }),
+        Err(e) => json!({ "error": format!("创建文件夹失败: {}", e) })
+    }
+}
+
+async fn tool_move_file(source: &str, destination: &str, global_file_access: bool) -> Value {
+    let src_path = match resolve_write_path(source, global_file_access) {
+        Ok(p) => p,
+        Err(e) => return json!({ "error": format!("源路径: {}", e) }),
+    };
+    let dst_path = match resolve_write_path(destination, global_file_access) {
+        Ok(p) => p,
+        Err(e) => return json!({ "error": format!("目标路径: {}", e) }),
+    };
+    if let Some(parent) = dst_path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    match fs::rename(&src_path, &dst_path) {
+        Ok(_) => json!({ "ok": true, "source": src_path.to_string_lossy().to_string(), "destination": dst_path.to_string_lossy().to_string() }),
+        Err(e) => json!({ "error": format!("移动文件失败: {}", e) })
+    }
+}
+
+async fn tool_copy_file(source: &str, destination: &str, global_file_access: bool) -> Value {
+    let src_path = match resolve_write_path(source, global_file_access) {
+        Ok(p) => p,
+        Err(e) => return json!({ "error": format!("源路径: {}", e) }),
+    };
+    let dst_path = match resolve_write_path(destination, global_file_access) {
+        Ok(p) => p,
+        Err(e) => return json!({ "error": format!("目标路径: {}", e) }),
+    };
+    if let Some(parent) = dst_path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    match fs::copy(&src_path, &dst_path) {
+        Ok(bytes) => json!({ "ok": true, "bytes_copied": bytes, "destination": dst_path.to_string_lossy().to_string() }),
+        Err(e) => json!({ "error": format!("复制文件失败: {}", e) })
+    }
+}
+
+async fn tool_delete_file(path: &str, global_file_access: bool) -> Value {
+    let target_path = match resolve_write_path(path, global_file_access) {
+        Ok(p) => p,
+        Err(e) => return json!({ "error": e }),
+    };
+    match trash::delete(&target_path) {
+        Ok(_) => json!({ "ok": true, "path": target_path.to_string_lossy().to_string() }),
+        Err(e) => json!({ "error": format!("放入回收站失败: {}", e) })
+    }
+}
+
+async fn tool_rename_file(path: &str, new_name: &str, global_file_access: bool) -> Value {
+    let target_path = match resolve_write_path(path, global_file_access) {
+        Ok(p) => p,
+        Err(e) => return json!({ "error": e }),
+    };
+    if let Some(parent) = target_path.parent() {
+        let new_path = parent.join(new_name);
+        match fs::rename(&target_path, &new_path) {
+            Ok(_) => json!({ "ok": true, "path": new_path.to_string_lossy().to_string() }),
+            Err(e) => json!({ "error": format!("重命名失败: {}", e) })
+        }
+    } else {
+        json!({ "error": "无法确定父目录" })
     }
 }
 
@@ -1350,6 +1751,47 @@ async fn tool_brain_search(query: &str) -> Value {
         json!({ "message": format!("未在知识库中找到包含 '{}' 的内容。", query) })
     } else {
         json!({ "source": "file_scan", "results": results })
+    }
+}
+
+/// list_calendar_events — 列出本地日程/待办
+fn tool_list_calendar_events(app: &tauri::AppHandle) -> Value {
+    use tauri::Manager;
+    let db = app.state::<crate::db::DbState>();
+    let conn = match db.0.lock() {
+        Ok(c) => c,
+        Err(_) => return json!({ "error": "数据库锁失败" }),
+    };
+
+    let mut stmt = match conn.prepare(
+        "SELECT id, title, type, status, date, start_time, end_time, description 
+         FROM events WHERE status != 'done' AND status != 'cancelled' ORDER BY date ASC, start_time ASC"
+    ) {
+        Ok(s) => s,
+        Err(e) => return json!({ "error": format!("查询失败: {}", e) }),
+    };
+
+    let rows = match stmt.query_map([], |row| {
+        Ok(json!({
+            "id": row.get::<_, String>(0)?,
+            "title": row.get::<_, String>(1)?,
+            "type": row.get::<_, String>(2)?,
+            "status": row.get::<_, String>(3)?,
+            "date": row.get::<_, Option<String>>(4).unwrap_or(None),
+            "start_time": row.get::<_, Option<String>>(5).unwrap_or(None),
+            "end_time": row.get::<_, Option<String>>(6).unwrap_or(None),
+            "description": row.get::<_, Option<String>>(7).unwrap_or(None),
+        }))
+    }) {
+        Ok(r) => r,
+        Err(e) => return json!({ "error": format!("解析查询结果失败: {}", e) }),
+    };
+
+    let events: Vec<Value> = rows.filter_map(|r| r.ok()).collect();
+    if events.is_empty() {
+        json!({ "message": "目前没有任何未完成的日程或待办事项。" })
+    } else {
+        json!({ "events": events })
     }
 }
 

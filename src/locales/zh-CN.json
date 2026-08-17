@@ -10,11 +10,33 @@
     "inbox": "日程",
     "schedule": "日程",
     "schedule_hint": "日程与待办事项",
+    "knowledge": "知识图谱",
+    "knowledge_hint": "实体与关联网络",
     "settings": "设置",
     "theme_to_light": "切换到亮色模式",
     "theme_to_dark": "切换到暗色模式",
     "rename": "重命名",
     "delete_chat": "删除对话"
+  },
+  "kg": {
+    "title": "知识图谱",
+    "search_placeholder": "搜索知识点...",
+    "empty": "知识图谱为空",
+    "empty_hint": "拖拽文件夹到对话窗口，构建知识库后将自动生成图谱",
+    "generating": "正在生成知识图谱...",
+    "generate_btn": "从知识库生成图谱",
+    "type_concept": "概念",
+    "type_project": "项目",
+    "type_file": "文件",
+    "type_tag": "标签",
+    "type_person": "人物",
+    "type_topic": "主题",
+    "type_entity": "实体",
+    "type_organization": "组织",
+    "type_location": "地点",
+    "type_event": "事件",
+    "type_technology": "技术",
+    "stats_summary": "{nodes} 节点 · {edges} 关系"
   },
   "modal": {
     "delete_title": "删除对话",
@@ -254,6 +276,7 @@
     "empty_title": "你好，我是 Bob",
     "empty_subtitle": "有什么可以帮你的？",
     "export_success": "对话已导出到：",
+    "thinking": "思考中...",
     "error_title": "请求失败",
     "drop_hint_full": "添加附件 / 关注文件夹",
     "parsing": "解析中...",
@@ -424,7 +447,9 @@
     "high": "高"
   },
   "todo": {
-    "empty": "还没有待办事项，快去对我说添加任务吧！"
+    "empty": "还没有待办事项，快去对我说添加任务吧！",
+    "show_completed": "显示已完成",
+    "completed_at": "完成于 {time}"
   },
   "timeline": {
     "today": "今天",

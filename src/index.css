@@ -1,4 +1,4 @@
-﻿/*
+/*
  * bob-agent 鈥?璁捐绯荤粺
  *
  * 鏆楄壊浼樺厛 路 Premium 璐ㄦ劅 路 寰姩鐢?
@@ -58,6 +58,17 @@ a:hover {
   --color-warning:  #d97706;
   --color-success:  #10b981;
 
+  /* 知识图谱主题色 (Dark) */
+  --kg-node-tag:       #22d3ee;
+  --kg-node-project:   #4ade80;
+  --kg-node-file:      #94a3b8;
+  --kg-node-concept:   #818cf8;
+  --kg-node-person:    #fbbf24;
+  --kg-node-topic:     #c084fc;
+  --kg-edge:           rgba(148, 163, 184, 0.45);
+  --kg-edge-highlight: var(--accent-primary);
+  --kg-font:           #94a3b8;
+
   --surface-glass:  rgba(255, 255, 255, 0.04);
   --surface-card:   rgba(255, 255, 255, 0.06);
   --surface-input:  rgba(255, 255, 255, 0.08);
@@ -101,6 +112,17 @@ a:hover {
   --color-error:    #ef4444;
   --color-warning:  #f59e0b;
   --color-success:  #10b981;
+
+  /* 知识图谱主题色 (Light) */
+  --kg-node-tag:       #0891b2;
+  --kg-node-project:   #16a34a;
+  --kg-node-file:      #64748b;
+  --kg-node-concept:   #4f46e5;
+  --kg-node-person:    #d97706;
+  --kg-node-topic:     #9333ea;
+  --kg-edge:           rgba(71, 85, 105, 0.3);
+  --kg-edge-highlight: var(--accent-primary);
+  --kg-font:           #64748b;
 
   --surface-glass:  rgba(0, 0, 0, 0.04);
   --surface-card:   rgba(0, 0, 0, 0.02);
@@ -294,7 +316,7 @@ a:hover {
   --overlay-bg:       rgba(0, 0, 0, 0.5);
 
   /* 鈹€鈹€ 鎺掔増 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€ */
-  --font-sans:  'Inter', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-sans:  system-ui, -apple-system, 'Segoe UI', Roboto, 'Microsoft YaHei', 'PingFang SC', sans-serif;
   --font-mono:  'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
 
   --text-xs:    0.75rem;   /* 12px */
@@ -348,15 +370,18 @@ a:hover {
 }
 
 /* 鈺愨晲鈺?鍩虹鏍峰紡 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲 */
-html, body {
+html {
+  height: 100%;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+body {
   height: 100%;
   font-family: var(--font-sans);
   font-size: var(--text-base);
   line-height: var(--leading-normal);
   color: var(--text-primary);
   background: transparent;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
   overflow: hidden;
   user-select: none;
 }
@@ -370,6 +395,9 @@ html.theme-transitioning {
               --accent-primary 0.8s ease, --accent-secondary 0.8s ease, --accent-tertiary 0.8s ease !important;
 }
 /* -- UI Scale ---------------------------------------------- */
+html {
+  font-size: 16px; /* 默认基准，与 compact 一致 */
+}
 html[data-ui-scale="compact"] {
   font-size: 16px;
 }

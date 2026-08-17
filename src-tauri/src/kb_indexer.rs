@@ -1,6 +1,7 @@
 use serde_json::{json, Value};
 use std::fs;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
+use crate::db::DbState;
 
 /// LLM-Wiki 知识库引擎 — Phase B: 异步 Ingest 引擎
 ///
@@ -18,7 +19,10 @@ const INGEST_PROMPT: &str = r#"你是一个文件摘要助手。请严格按以�
   "summary": "不超过 300 字的核心内容摘要",
   "keywords": ["关键词1", "关键词2", "关键词3", "关键词4", "关键词5"],
   "entities": [
-    {"name": "实体名称", "type": "人物|组织|概念|地点|政策", "description": "一句话描述"}
+    {"name": "实体名称", "type": "人物|组织|概念|地点|政策|技术|项目", "description": "一句话描述"}
+  ],
+  "relations": [
+    {"source": "实体A名称", "target": "实体B名称", "relation": "uses|depends_on|contains|related_to|implements|created_by", "confidence": 0.9}
   ],
   "data_points": [
     "关键数据点1: 具体数值或事实",
@@ -26,6 +30,7 @@ const INGEST_PROMPT: &str = r#"你是一个文件摘要助手。请严格按以�
   ]
 }
 
+注意：relations 中的 source 和 target 必须是 entities 中已定义的实体名称。
 以下是文件的原始文本（可能有 OCR 乱码，请忽略排版错误）：
 "#;
 
@@ -414,6 +419,9 @@ pub async fn system_build_kb(app: AppHandle, folder_path: String, _plan: String)
                     .map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
                     .unwrap_or_default();
 
+                // M17: 收集实体信息用于图谱写入
+                let mut entity_names_for_kg: Vec<(String, String, String)> = Vec::new();
+
                 // 写入 Wiki
                 write_source_page(&file.file_name, &file.file_type, &summary, &keywords, &data_points);
 
@@ -425,11 +433,26 @@ pub async fn system_build_kb(app: AppHandle, folder_path: String, _plan: String)
                 // 处理实体
                 if let Some(entities) = result.get("entities").and_then(|v| v.as_array()) {
                     for entity in entities {
-                        if let (Some(name), Some(etype), Some(desc)) = (
+                        if let (Some(name), Some(raw_etype), Some(desc)) = (
                             entity.get("name").and_then(|v| v.as_str()),
                             entity.get("type").and_then(|v| v.as_str()),
                             entity.get("description").and_then(|v| v.as_str()),
                         ) {
+                            let etype = match raw_etype.to_lowercase().as_str() {
+                                "concept" | "概念" | "名词" => "concept",
+                                "project" | "项目" => "project",
+                                "person" | "人物" | "人名" | "author" | "作者" => "person",
+                                "organization" | "组织" | "机构" | "公司" => "organization",
+                                "location" | "地点" | "位置" => "location",
+                                "event" | "事件" => "event",
+                                "technology" | "技术" => "technology",
+                                "file" | "文件" => "file",
+                                "tag" | "标签" => "tag",
+                                "topic" | "主题" => "topic",
+                                "entity" | "实体" => "entity",
+                                _ => "concept"
+                            };
+
                             // TODO: 未来可以合并同名实体页
                             let entity_path = super::get_wiki_dir().join("entities").join(format!("{}.md", name));
                             if !entity_path.exists() {
@@ -439,6 +462,50 @@ pub async fn system_build_kb(app: AppHandle, folder_path: String, _plan: String)
                                     file.file_name.rsplit_once('.').map(|(n, _)| n).unwrap_or(&file.file_name)
                                 );
                                 let _ = fs::write(&entity_path, entity_content);
+                            }
+
+                            // M17: 写入知识图谱节点
+                            entity_names_for_kg.push((name.to_string(), etype.to_string(), desc.to_string()));
+                        }
+                    }
+                }
+
+                // M17: 写入知识图谱 (kg_nodes + kg_edges)
+                if let Some(db_state) = app.try_state::<DbState>() {
+                    if let Ok(conn) = db_state.0.lock() {
+                        // 写入实体节点
+                        for (name, etype, desc) in &entity_names_for_kg {
+                            let node_id = crate::kg::resolve_node_id(&conn, name, etype);
+                            let _ = crate::kg::upsert_node(&conn, &node_id, name, etype, desc, &file.file_name);
+                        }
+                        // 写入文件节点（文件本身也是一个节点）
+                        let file_node_id = format!("file_{}", file.file_name.to_lowercase().replace(' ', "_").replace('.', "_"));
+                        let _ = crate::kg::upsert_node(&conn, &file_node_id, &file.file_name, "file", &summary, &file.file_name);
+                        // 文件 -> 实体 边 (contains)
+                        for (name, etype, _) in &entity_names_for_kg {
+                            let node_id = crate::kg::resolve_node_id(&conn, name, etype);
+                            let _ = crate::kg::insert_edge(&conn, &file_node_id, &node_id, "contains", 0.9);
+                        }
+                        // 写入 LLM 提取的 relations
+                        if let Some(relations) = result.get("relations").and_then(|v| v.as_array()) {
+                            for rel in relations {
+                                if let (Some(src_name), Some(tgt_name), Some(relation)) = (
+                                    rel.get("source").and_then(|v| v.as_str()),
+                                    rel.get("target").and_then(|v| v.as_str()),
+                                    rel.get("relation").and_then(|v| v.as_str()),
+                                ) {
+                                    let confidence = rel.get("confidence").and_then(|v| v.as_f64()).unwrap_or(0.8);
+                                    // 尝试匹配已有实体 ID
+                                    let src_id = entity_names_for_kg.iter()
+                                        .find(|(n, _, _)| n == src_name)
+                                        .map(|(n, t, _)| format!("{}_{}", t, n.to_lowercase().replace(' ', "_")))
+                                        .unwrap_or_else(|| format!("concept_{}", src_name.to_lowercase().replace(' ', "_")));
+                                    let tgt_id = entity_names_for_kg.iter()
+                                        .find(|(n, _, _)| n == tgt_name)
+                                        .map(|(n, t, _)| format!("{}_{}", t, n.to_lowercase().replace(' ', "_")))
+                                        .unwrap_or_else(|| format!("concept_{}", tgt_name.to_lowercase().replace(' ', "_")));
+                                    let _ = crate::kg::insert_edge(&conn, &src_id, &tgt_id, relation, confidence);
+                                }
                             }
                         }
                     }

@@ -158,6 +158,22 @@
           </div>
         </div>
 
+        <!-- ═══ 抽屉 2.5: 知识图谱 ═══ -->
+        <div class="drawer-header" :class="{ active: activeDrawer === 'knowledge' }" @click="activeDrawer = 'knowledge'">
+          <div class="drawer-header-left">
+            <Waypoints :size="14" />
+            <span>{{ $t('nav.knowledge') || '知识图谱' }}</span>
+          </div>
+          <ChevronDown v-if="activeDrawer === 'knowledge'" :size="14" class="drawer-chevron" />
+          <ChevronRight v-else :size="14" class="drawer-chevron" />
+        </div>
+        <div v-show="activeDrawer === 'knowledge'" class="drawer-content">
+          <div class="drawer-placeholder">
+            <Waypoints :size="24" style="opacity: 0.3;" />
+            <span>{{ $t('nav.knowledge_hint') || '实体与关联网络' }}</span>
+          </div>
+        </div>
+
         <!-- ═══ 抽屉 3: 设置 ═══ -->
         <div class="drawer-header" :class="{ active: activeDrawer === 'settings' }" @click="activeDrawer = 'settings'">
           <div class="drawer-header-left">
@@ -206,6 +222,7 @@
           @update-title="updateConversationTitle"
         />
         <InboxView v-if="activeDrawer === 'schedule'" />
+        <KnowledgeGraphView v-if="activeDrawer === 'knowledge'" />
         <SettingsView
           v-if="activeDrawer === 'settings'"
           :activePanel="activeSettingsPanel"
@@ -236,9 +253,10 @@ import { ref, onMounted, onUnmounted, computed, nextTick, provide } from 'vue';
 import ChatView from './views/ChatView.vue';
 import InboxView from './views/InboxView.vue';
 import SettingsView from './views/SettingsView.vue';
+import KnowledgeGraphView from './views/KnowledgeGraphView.vue';
 import SetupWizard from './components/SetupWizard.vue';
 import QuickNoteOverlay from './components/QuickNoteOverlay.vue';
-import { Inbox, Settings, Plus, X, Sun, Moon, ChevronLeft, ChevronRight, ChevronDown, Search, MessageSquare, CalendarDays, Brain, Plug, FolderOpen, Palette, Info, Sunrise } from 'lucide-vue-next';
+import { Inbox, Settings, Plus, X, Sun, Moon, ChevronLeft, ChevronRight, ChevronDown, Search, MessageSquare, CalendarDays, Brain, Plug, FolderOpen, Palette, Info, Sunrise, Waypoints } from 'lucide-vue-next';
 import { useI18n } from 'vue-i18n';
 
 import { getCurrentWindow } from '@tauri-apps/api/window';

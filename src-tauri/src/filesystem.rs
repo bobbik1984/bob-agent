@@ -2,13 +2,14 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
+use std::time::UNIX_EPOCH;
 use walkdir::{DirEntry, WalkDir};
 
 #[tauri::command]
 pub fn system_get_file_meta(path: String) -> Value {
     let p = Path::new(&path);
     if !p.exists() {
-        return json!({ "error": "File not found" });
+        return json!({ "exists": false, "error": "File not found" });
     }
 
     let name = p.file_name()
@@ -18,14 +19,45 @@ pub fn system_get_file_meta(path: String) -> Value {
 
     let meta = match fs::metadata(&path) {
         Ok(m) => m,
-        Err(_) => return json!({ "error": "Failed to read metadata" }),
+        Err(_) => return json!({ "exists": false, "error": "Failed to read metadata" }),
     };
 
     let is_dir = meta.is_dir();
-    
+
+    // 提取扩展名
+    let ext = p.extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+
+    // 映射为前端图标类型
+    let file_type = if is_dir {
+        "folder"
+    } else {
+        match ext.as_str() {
+            "doc" | "docx" | "pdf" | "txt" | "md" | "rtf" | "odt" => "document",
+            "xls" | "xlsx" | "csv" | "ods" => "spreadsheet",
+            "js" | "ts" | "rs" | "py" | "html" | "css" | "json" | "yaml" | "toml" | "vue" | "jsx" | "tsx" => "code",
+            "zip" | "rar" | "7z" | "tar" | "gz" => "archive",
+            "png" | "jpg" | "jpeg" | "gif" | "bmp" | "svg" | "webp" | "ico" => "image",
+            "mp4" | "avi" | "mov" | "mkv" | "webm" => "video",
+            "ppt" | "pptx" | "odp" => "document",
+            _ => "file",
+        }
+    };
+
+    // 提取修改时间 (毫秒时间戳)
+    let mtime = meta.modified().ok()
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as u64);
+
     json!({
+        "exists": true,
         "name": name,
+        "ext": ext,
+        "type": file_type,
         "size": meta.len(),
+        "mtime": mtime,
         "isDir": is_dir,
         "isDirectory": is_dir
     })

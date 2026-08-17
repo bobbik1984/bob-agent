@@ -30,6 +30,8 @@ rusqlite = { version = "0.39.0", features = ["bundled"] }
 tokio = { version = "1.52.3", features = ["full"] }
 tokio-stream = "0.1"
 futures-util = "0.3.32"
+futures = "0.3"
+bytes = "1"
 reqwest = { version = "0.13.3", features = ["stream", "json"] }
 axum = { version = "0.8", features = ["http2"] }
 walkdir = "2.5.0"
@@ -62,6 +64,15 @@ jsonwebtoken = "9"
 chromiumoxide = { version = "0.7", features = ["tokio-runtime"], default-features = false }
 tauri-plugin-notification = "2.0.0-beta.0"
 once_cell = "1.19"
+rust_xlsxwriter = "0.66.0"
+docx-rs = "0.4.20"
+open = "5.3.5"
+command-group = { version = "5.0.1", features = ["with-tokio"] }
+socket2 = "0.6.4"
+trash = "5.2.3"
+lazy_static = "1.5.0"
+tokio-tungstenite = { version = "0.29.0", features = ["rustls-tls-native-roots"] }
+serde_yaml = "0.9.34"
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.52", features = ["Win32_System_JobObjects", "Win32_Foundation", "Win32_System_Threading", "Win32_Security"] }
+windows-sys = { version = "0.52", features = ["Win32_System_JobObjects", "Win32_Foundation", "Win32_System_Threading", "Win32_Security", "Win32_UI_WindowsAndMessaging", "Win32_System_DataExchange"] }

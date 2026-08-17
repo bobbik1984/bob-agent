@@ -155,9 +155,12 @@ const handleThemeChange = (e) => {
 window.addEventListener('bob-theme-changed', handleThemeChange);
 
 onMounted(() => {
-  // 恢复用户选择的语言
-  currentLocale.value = props.config.language || 'zh-CN';
-  locale.value = currentLocale.value;
+  // 从全局 locale 同步（而非 props.config，因为异步加载可能尚未就绪）
+  currentLocale.value = props.config.language || locale.value || 'zh-CN';
+  // 不要覆写 locale.value，仅在用户有明确保存的语言时才同步
+  if (props.config.language) {
+    locale.value = props.config.language;
+  }
 
   // 强制同步 DOM 当前的主题（修复标题栏快速切换导致的状态不同步）
   const domTheme = document.documentElement.getAttribute('data-theme');

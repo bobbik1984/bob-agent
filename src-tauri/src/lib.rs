@@ -23,6 +23,10 @@ mod connector;
 mod lark;
 mod google_calendar;
 mod gmail;
+mod exports;
+mod telegram;
+mod discord;
+mod kg;
 
 use serde_json::{json, Value};
 use std::fs;
@@ -110,6 +114,53 @@ pub(crate) fn now_ms() -> i64 {
 // ═══════════════════════════════════════════════════════════
 
 #[tauri::command]
+async fn system_take_screenshot(app_handle: tauri::AppHandle) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        use windows_sys::Win32::System::DataExchange::GetClipboardSequenceNumber;
+        use std::time::Duration;
+        use tauri::Manager;
+
+        // 获取主窗口
+        let window = app_handle.get_webview_window("main");
+        
+        // 记录截图前的剪贴板序列号
+        let initial_seq = unsafe { GetClipboardSequenceNumber() };
+
+        // 隐藏主窗口
+        if let Some(w) = &window {
+            let _ = w.hide();
+        }
+
+        std::process::Command::new("SnippingTool.exe")
+            .arg("/clip")
+            .status()
+            .map_err(|e| e.to_string())?;
+
+        // 轮询剪贴板变化，最多等待 15 秒（60 * 250ms）
+        for _ in 0..60 {
+            std::thread::sleep(Duration::from_millis(250));
+            let current_seq = unsafe { GetClipboardSequenceNumber() };
+            // 如果剪贴板序列号发生变化，说明系统截图已经将图片塞进剪贴板了
+            if current_seq != initial_seq {
+                break;
+            }
+        }
+
+        // 额外给剪贴板一点时间确保写入完成
+        std::thread::sleep(Duration::from_millis(300));
+
+        // 截图结束（或等待超时），恢复主窗口
+        if let Some(w) = &window {
+            let _ = w.show();
+            let _ = w.unminimize();
+            let _ = w.set_focus();
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
 fn system_is_setup_complete() -> bool {
     let config = read_config();
     config.get("onboarded").and_then(|v| v.as_bool()).unwrap_or(false)
@@ -145,13 +196,13 @@ fn config_get_all() -> Value {
 // ═══════════════════════════════════════════════════════════
 
 #[tauri::command]
-async fn llm_chat(messages: Vec<Value>, conversation_id: Option<String>, app: tauri::AppHandle) -> Value {
-    llm::stream_chat(app, messages, conversation_id, None).await
+async fn llm_chat(messages: Vec<Value>, conversation_id: Option<String>, global_file_access: bool, agent_mode: String, app: tauri::AppHandle) -> Value {
+    llm::stream_chat(app, messages, conversation_id, None, global_file_access, agent_mode).await
 }
 
 #[tauri::command]
-async fn llm_vision(messages: Vec<Value>, image_base64: String, conversation_id: Option<String>, app: tauri::AppHandle) -> Value {
-    llm::stream_vision(app, messages, image_base64, conversation_id).await
+async fn llm_vision(messages: Vec<Value>, image_base64: String, conversation_id: Option<String>, global_file_access: bool, agent_mode: String, app: tauri::AppHandle) -> Value {
+    llm::stream_vision(app, messages, image_base64, conversation_id, global_file_access, agent_mode).await
 }
 
 #[tauri::command]
@@ -290,6 +341,75 @@ fn system_show_in_folder(file_path: String) -> bool {
         file_path.clone()
     };
     open_path_in_explorer(&folder)
+}
+
+use serde::Deserialize;
+use std::collections::HashMap;
+
+#[derive(Deserialize)]
+struct EntityRegistry {
+    projects: Option<HashMap<String, ProjectInfo>>,
+}
+
+#[derive(Deserialize)]
+struct ProjectInfo {
+    aliases: Option<Vec<String>>,
+    path: Option<String>,
+    index_file: Option<String>,
+}
+
+#[tauri::command]
+fn system_check_project_index(project_name: String) -> Option<String> {
+    // 1. 尝试从全局实体注册表加载别名和准确路径
+    let registry_path = r"D:\OneDrive\Learning\Code\Gemini\Assistant\common\knowledge\entity_registry.yaml";
+    if let Ok(content) = std::fs::read_to_string(registry_path) {
+        if let Ok(registry) = serde_yaml::from_str::<EntityRegistry>(&content) {
+            if let Some(projects) = registry.projects {
+                for (key, info) in &projects {
+                    let mut matches = key == &project_name;
+                    if let Some(aliases) = &info.aliases {
+                        if aliases.contains(&project_name) {
+                            matches = true;
+                        }
+                    }
+                    if matches {
+                        if let (Some(p), Some(idx)) = (&info.path, &info.index_file) {
+                            let full_path = format!("{}\\{}", p, idx);
+                            if std::path::Path::new(&full_path).exists() {
+                                return Some(full_path);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 2. Fallback：如果注册表里没写，走默认的模糊探测逻辑
+    let base_paths = vec![
+        r"D:\OneDrive\Projects",
+        r"E:\OneDrive\Projects",
+        r"C:\OneDrive\Projects",
+    ];
+    let possible_files = vec!["index.html", "template.html"];
+    
+    let mut names_to_check = vec![project_name.clone()];
+    if !project_name.ends_with("项目") {
+        names_to_check.push(format!("{}项目", project_name));
+        names_to_check.push(format!("{}商业项目", project_name));
+    }
+    
+    for base in base_paths {
+        for name in &names_to_check {
+            for file in &possible_files {
+                let path = format!("{}\\{}\\{}", base, name, file);
+                if std::path::Path::new(&path).exists() {
+                    return Some(path);
+                }
+            }
+        }
+    }
+    None
 }
 
 /// 跨平台打开文件/文件夹
@@ -570,16 +690,20 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_notification::init())
-        // ── bob:// 本地文件协议：让聊天气泡原生渲染本地图片/视频 ──
+        // ── bob 本地文件协议：让聊天气泡原生渲染本地图片/视频 ──
         .register_uri_scheme_protocol("bob", |_app, request| {
             let uri = request.uri().to_string();
+            println!("[bob-protocol] Incoming URI: {}", uri);
             let raw_path = uri
-                .strip_prefix("bob://localhost/")
+                .strip_prefix("http://bob.localhost/")
+                .or_else(|| uri.strip_prefix("https://bob.localhost/"))
+                .or_else(|| uri.strip_prefix("bob://localhost/"))
                 .or_else(|| uri.strip_prefix("bob://"))
                 .unwrap_or("");
             // 去掉可能的 query string
             let raw_path = raw_path.split('?').next().unwrap_or(raw_path);
             let decoded = percent_decode_str(raw_path).decode_utf8_lossy().to_string();
+            println!("[bob-protocol] Parsed path: {}", decoded);
             let file_path = std::path::Path::new(&decoded);
 
             if !file_path.exists() || !file_path.is_file() {
@@ -608,10 +732,12 @@ pub fn run() {
                 Ok(data) => tauri::http::Response::builder()
                     .status(200)
                     .header("Content-Type", mime)
+                    .header("Access-Control-Allow-Origin", "*")
                     .body(data)
                     .unwrap(),
                 Err(_) => tauri::http::Response::builder()
                     .status(500)
+                    .header("Access-Control-Allow-Origin", "*")
                     .body(b"Read Error".to_vec())
                     .unwrap(),
             }
@@ -693,6 +819,7 @@ pub fn run() {
             system_get_log_path,
             system_open_file,
             system_show_in_folder,
+            system_check_project_index,
             system_get_tool_statuses,
             db::system_factory_reset,
             // Outbox (声明式配置)
@@ -729,6 +856,20 @@ pub fn run() {
             connector::connector_disconnect,
             // 聊天就绪校验
             llm::system_validate_chat_ready,
+            system_take_screenshot,
+            // Telegram Bot
+            telegram::system_save_telegram_token,
+            telegram::system_get_telegram_token,
+            // Discord Bot
+            discord::system_save_discord_token,
+            discord::system_get_discord_token,
+            // M17: 知识图谱
+            kg::kg_get_full_graph,
+            kg::kg_query,
+            kg::kg_stats,
+            kg::kg_delete_node_cmd,
+            kg::kg_merge_nodes,
+            kg::kg_backfill,
         ])
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             // 如果已经有一个实例在运行，就把已有窗口唤出来
@@ -754,12 +895,18 @@ pub fn run() {
         })
         .setup(|app| {
             app.handle().plugin(tauri_plugin_shell::init())?;
-            if cfg!(debug_assertions) {
-                app.handle().plugin(
-                    tauri_plugin_log::Builder::default()
-                        .level(log::LevelFilter::Info)
-                        .build(),
-                )?;
+            // 日志：debug 输出到终端 + 文件，release 仅输出到文件
+            {
+                use tauri_plugin_log::{Target, TargetKind};
+                let mut log_builder = tauri_plugin_log::Builder::default()
+                    .level(log::LevelFilter::Info)
+                    .max_file_size(2_000_000) // 单文件最大 2MB，自动轮转
+                    .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepAll)
+                    .target(Target::new(TargetKind::LogDir { file_name: Some("bob".into()) }));
+                if cfg!(debug_assertions) {
+                    log_builder = log_builder.target(Target::new(TargetKind::Stdout));
+                }
+                app.handle().plugin(log_builder.build())?;
             }
 
             // 读取用户上次保存的主题，动态设置原生窗口底色，防止在亮色模式下启动闪黑屏
@@ -784,6 +931,18 @@ pub fn run() {
             let scheduler_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 scheduler::start_scheduler(scheduler_handle).await;
+            });
+
+            // 启动 Telegram Bot (T-1500)
+            let tg_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                telegram::init(tg_handle).await;
+            });
+
+            // 启动 Discord Bot (T-1501)
+            let discord_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                discord::init(discord_handle).await;
             });
 
             // ── 清理遗留的 "vaulted" 标记 ──

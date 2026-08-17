@@ -54,9 +54,9 @@ window.electronAPI = {
 
   // ── LLM 通信 (Rust 引擎) ─────────────────────────────
   sendChat: (messages, globalFileAccess, agentMode, conversationId) => 
-    invoke('llm_chat', { messages, conversationId }),
+    invoke('llm_chat', { messages, conversationId, globalFileAccess, agentMode }),
   sendVision: (messages, imageBase64, globalFileAccess, agentMode, conversationId) => 
-    invoke('llm_vision', { messages, imageBase64, conversationId }),
+    invoke('llm_vision', { messages, imageBase64, conversationId, globalFileAccess, agentMode }),
   stopGeneration: async () => { /* 待实现 AbortController */ },
   getModels: async (provider) => {
     try {
@@ -143,7 +143,9 @@ window.electronAPI = {
   scanFolder: async (folderPath) => invoke('system_scan_folder', { folderPath }),
   estimateKB: async (folderPath) => invoke('system_estimate_kb', { folderPath }),
   buildKB: async (folderPath, plan) => invoke('system_build_kb', { folderPath, plan }),
-  migrateWikiDir: async (oldDir, newDir, mode) => invoke('system_migrate_wiki_dir', { oldDir, newDir, mode }),
+  openLlmEngineDir: () => invoke('system_open_llm_engine_dir'),
+  migrateWikiDir: (oldDir, newDir, mode) => invoke('system_migrate_wiki_dir', { oldDir, newDir, mode }),
+  checkProjectIndex: (projectName) => invoke('system_check_project_index', { projectName }),
   
   // LLM-Wiki 知识库引擎事件
   onKBProgress: (callback) => {
@@ -195,7 +197,26 @@ window.electronAPI = {
 
   // ── 系统工具 (Rust 原生) ───────────────────────────────
   updateTheme: (theme) => console.log('Mock: updateTheme', theme), // TODO T-608
-  getClipboardImage: async () => null,                 // TODO T-608
+  getClipboardImage: async () => {
+    try {
+      const items = await navigator.clipboard.read();
+      for (const item of items) {
+        for (const type of item.types) {
+          if (type.startsWith('image/')) {
+            const blob = await item.getType(type);
+            return new Promise((resolve) => {
+              const reader = new FileReader();
+              reader.onload = (e) => resolve(e.target.result.replace(/^data:image\/\w+;base64,/, ''));
+              reader.readAsDataURL(blob);
+            });
+          }
+        }
+      }
+    } catch (e) {
+      console.error('getClipboardImage error:', e);
+    }
+    return null;
+  },
   showNotification: async (title, body) => console.log('Mock: notification', title, body), // TODO T-608
   openFile: async (filePath) => invoke('system_open_file', { filePath }),
   showInFolder: async (filePath) => invoke('system_show_in_folder', { filePath }),
@@ -255,6 +276,14 @@ window.electronAPI = {
   wechatCheckLoginStatus: async (qrcode) => invoke('wechat_check_login_status', { qrcode }),
   wechatGetCurrentStatus: async () => invoke('wechat_get_current_status'),
 
+  // Telegram API
+  telegramSaveToken: async (token) => invoke('system_save_telegram_token', { token }),
+  telegramGetToken: async () => invoke('system_get_telegram_token'),
+
+  // Discord API
+  discordSaveToken: async (token) => invoke('system_save_discord_token', { token }),
+  discordGetToken: async () => invoke('system_get_discord_token'),
+
   // ── 浏览器增强 (CDP Browser Enhancement) ─────────────────
   browserDetect: async () => invoke('system_browser_detect'),
   browserEnable: async () => invoke('system_browser_enable'),
@@ -271,9 +300,17 @@ window.electronAPI = {
 
   // ── 聊天就绪校验 (T-1305) ──────────────────────────────
   validateChatReady: async () => invoke('system_validate_chat_ready'),
+  takeScreenshot: async () => invoke('system_take_screenshot'),
+
+  // ── M17: 知识图谱 (Knowledge Graph) ────────────────
+  kgGetFullGraph: async () => invoke('kg_get_full_graph'),
+  kgQuery: async (term, maxHops) => invoke('kg_query', { term, maxHops }),
+  kgStats: async () => invoke('kg_stats'),
+  kgDeleteNode: async (nodeId) => invoke('kg_delete_node_cmd', { nodeId }),
+  kgBackfill: async () => invoke('kg_backfill'),
 
   // Generic invoke passthrough for components that call invoke directly
   invoke: (cmd, args) => invoke(cmd, args || {}),
 };
 
-console.log('Tauri Bridge v5.7: 69 Rust-native IPC — T-1306/1307/1308 P2.');
+console.log('Tauri Bridge v5.8: 73 Rust-native IPC — M17 Knowledge Graph.');

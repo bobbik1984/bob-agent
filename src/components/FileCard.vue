@@ -122,6 +122,12 @@ function openFile() {
 onMounted(async () => {
   try {
     const result = await window.electronAPI.getFileMeta(props.filePath);
+    // 防御：后端可能未显式返回 exists 字段，从 error 字段推断
+    if (result.error) {
+      result.exists = false;
+    } else if (result.exists === undefined) {
+      result.exists = true;
+    }
     meta.value = result;
   } catch (err) {
     console.error('[FileCard] 获取文件元数据失败:', err);
