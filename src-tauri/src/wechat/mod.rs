@@ -1,6 +1,6 @@
 //! wechat module
 //!
-//! Rust native WeChat gateway implementation for Bob-Agent.
+//! Rust native WeChat gateway implementation for Bob.agent.
 
 pub mod accounts;
 pub mod api;

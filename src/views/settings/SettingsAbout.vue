@@ -51,7 +51,7 @@
     </div>
 
     <!-- 诊断结果 -->
-    <div v-if="diagnosticResult" style="margin-top: 16px; padding: 12px; border-radius: 8px; background: var(--bg-hover);">
+    <div v-if="diagnosticResult" style="margin-top: 16px; padding: 12px; border-radius: var(--radius-default); background: var(--bg-hover);">
       <div v-if="diagnosticResult.healthy" style="display: flex; align-items: center; gap: 8px; color: var(--color-success, #10b981);">
         <CheckCircle2 :size="16" />
         <span style="font-size: 13px; font-weight: 500;">{{ $t('settings.diagnostics_healthy') }}</span>
@@ -81,7 +81,7 @@
         <div class="briefing-header">
           <div class="briefing-icon"><BookOpen :size="18" /></div>
           <div class="briefing-title" style="flex: 1; font-size: 14px; font-weight: 600; color: var(--text-primary);">{{ $t('settings.open_docs') }}</div>
-          <button class="briefing-close" @click="showHelpModal = false" style="background: none; border: none; color: var(--text-tertiary); cursor: pointer; padding: 4px; border-radius: 4px; display: flex; align-items: center; justify-content: center;">
+          <button class="briefing-close" @click="showHelpModal = false" style="background: none; border: none; color: var(--text-tertiary); cursor: pointer; padding: 4px; border-radius: var(--radius-default); display: flex; align-items: center; justify-content: center;">
             <X :size="14" />
           </button>
         </div>
@@ -92,6 +92,9 @@
 </template>
 
 <script setup>
+import { useDialog } from '@/composables/useDialog.js';
+const { showConfirm, showAlert, showPrompt } = useDialog();
+
 import { ref, onMounted } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { renderMarkdownSimple } from '@/utils/markdown';
@@ -120,20 +123,20 @@ async function openDocs() {
   }
 }
 
-function openDataDir() {
+async function openDataDir() {
   if (window.appAPI.openDataDir) {
     window.appAPI.openDataDir();
   }
 }
 
-function openLogDir() {
+async function openLogDir() {
   if (window.appAPI.openLogDir) {
     window.appAPI.openLogDir();
   }
 }
 
 async function factoryReset() {
-  if (confirm(t('modal.factory_reset_warning'))) {
+  if (await showConfirm(t('modal.factory_reset_warning'))) {
     if (window.appAPI.factoryReset) {
       await window.appAPI.factoryReset();
     }
@@ -168,10 +171,10 @@ async function fixIssue(code) {
   try {
     const res = await window.appAPI.autoFix(code);
     if (res?.ok) {
-      alert("自愈修复成功：" + res.message);
+      await showAlert("自愈修复成功：" + res.message);
       await runDiagnostics(); // re-run diagnostics after fix
     } else {
-      alert("修复失败：" + (res?.message || '未知错误'));
+      await showAlert("修复失败：" + (res?.message || '未知错误'));
     }
   } catch (e) {
     console.error("AutoFix failed", e);
@@ -219,7 +222,7 @@ async function fixIssue(code) {
   max-height: 80vh;
   background: var(--bg-secondary);
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-default);
   box-shadow: var(--shadow-lg);
   display: flex;
   flex-direction: column;
@@ -296,7 +299,7 @@ async function fixIssue(code) {
   font-size: 12px;
   background: var(--bg-hover);
   padding: 2px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-default);
 }
 
 .help-body :deep(table) {

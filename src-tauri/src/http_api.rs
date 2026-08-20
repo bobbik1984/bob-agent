@@ -1,4 +1,4 @@
-//! http_api.rs — Bob-Agent 本地 HTTP 服务
+//! http_api.rs — Bob.agent 本地 HTTP 服务
 //!
 //! 监听 127.0.0.1:3721，暴露以下端点供 wechat-bot-bridge 调用：
 //!
@@ -361,7 +361,7 @@ async fn handle_get_conversations(State(state): State<ApiState>) -> impl IntoRes
 
 async fn handle_health() -> impl IntoResponse {
     Json(
-        json!({ "status": "ok", "service": "bob-agent-api", "version": env!("CARGO_PKG_VERSION") }),
+        json!({ "status": "ok", "service": "bob.agent-api", "version": env!("CARGO_PKG_VERSION") }),
     )
 }
 
@@ -672,10 +672,10 @@ async fn handle_sync_pull(
 ) -> impl IntoResponse {
     crate::sync_engine::register_device(&state.app, &headers, addr);
     // Export full sync schema (config + SQLite rows)
-    let sync_data = match crate::sync_engine::export_sync_data(&state.app) {
+    let sync_data = match crate::sync_engine::export_sync_data(&state.app, 0, false) {
         Ok(data) => data,
         Err(e) => {
-            log::error!("[http_api] Failed to export sync data: {}", e);
+            log::error!("Failed to export sync data: {}", e);
             return axum::Json(serde_json::json!({
                 "status": "error",
                 "message": e

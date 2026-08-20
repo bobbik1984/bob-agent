@@ -1,5 +1,32 @@
 node_modules/
+.pnp.*
 dist/
+out/
+.env
+*.exe
+*.msi
+*.db
+*.db-journal
+*.db-wal
+data/
+scratch/
+resources/llm-engine/
+*.gguf
+*.dll
+*.zip
+
+dist-release/
+
+# Temporary test and utility directories
+keyring_test/
+references/
+temp_zip_extract/
+
+# AI Agent workspace guides and guidelines
+AGENTS.md
+
+# Security/Jules audit and review files
+*AUDIT_REPORT*.md
 out/
 .env
 *.exe
@@ -38,7 +65,29 @@ fix_*.py
 fix.py
 read_*.py
 test_*.js
+test_*.py
+test_*.rs
+test_*.html
+patch*.py
+patch*.js
 *.tmp
+*.log
+*.txt
+*.docx
+temp_build/
+debug/
+error/
+deploy/
+relay/
+test_ping/
+tests/
+design_assets/
+web-drop/
+*.pdb
+Cargo_*.toml
+bob-relay.*
+bob-services.*
+old_sync.rs
 db_output.txt
 implementation_plan.md
 # Removed from tracking to shrink repo size

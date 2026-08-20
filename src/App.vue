@@ -1,8 +1,11 @@
 <template>
-  <div class="app-shell">
+  <div
+    class="app-shell"
+    :class="[{ 'is-mobile': isMobile }, `layout-${layoutMode}`, `terminal-${terminalKind}`]"
+  >
     <!-- 启动画面已移至 index.html (Native Splash) -->
-    <!-- 标题栏拖拽区域 -->
-    <div class="titlebar titlebar-drag">
+    <!-- 标题栏拖拽区域 (Desktop) -->
+    <div v-if="isTauri && !isNativeMobile" class="titlebar titlebar-drag">
       <div class="titlebar-left titlebar-no-drag">
         <svg class="app-logo" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 152.85 99.94" @click="openQuickNote">
           <g>
@@ -37,16 +40,18 @@
 
     <!-- 主界面 -->
     <div v-else class="main-layout">
-      <!-- 侧栏 -->
+      <!-- 侧栏 (Desktop & Mobile Drawer) -->
+      <div v-if="isMobile && mobileDrawerOpen" class="mobile-drawer-overlay animate-fade-in" @click="mobileDrawerOpen = false"></div>
       <aside 
         class="sidebar"
-        :style="{
-          width: isSidebarCollapsed ? '0px' : sidebarWidth + 'px',
-          minWidth: isSidebarCollapsed ? '0px' : '200px'
+        :class="{
+          'mobile-drawer': isMobile,
+          'mobile-drawer-open': isMobile && mobileDrawerOpen
         }"
+        :style="!isMobile ? { width: isSidebarCollapsed ? '0px' : sidebarWidth + 'px', minWidth: isSidebarCollapsed ? '0px' : '200px' } : {}"
       >
         <!-- ═══ 抽屉 1: 对话 ═══ -->
-        <div class="drawer-header" :class="{ active: activeDrawer === 'chat' }" @click="activeDrawer = 'chat'">
+        <div v-show="!isMobile" class="drawer-header" :class="{ active: activeDrawer === 'chat' }" @click="activeDrawer = 'chat'">
           <div class="drawer-header-left">
             <MessageSquare :size="14" />
             <span>{{ $t('nav.conversations') || '对话' }}</span>
@@ -111,7 +116,7 @@
                 :key="conv.id"
                 class="conversation-item"
                 :class="{ active: activeConversationId === conv.id && activeDrawer === 'chat' }"
-                @click="switchConversation(conv.id); activeDrawer = 'chat'"
+                @click="switchConversation(conv.id); activeDrawer = 'chat'; if (isMobile) { mobileDrawerOpen = false; }"
                 @dblclick.stop="startRename(conv)"
               >
                 <div class="conv-body">
@@ -142,7 +147,7 @@
         </div>
 
         <!-- ═══ 抽屉 2: 日程 ═══ -->
-        <div class="drawer-header" :class="{ active: activeDrawer === 'schedule' }" @click="activeDrawer = 'schedule'">
+        <div v-show="!isMobile" class="drawer-header" :class="{ active: activeDrawer === 'schedule' }" @click="activeDrawer = 'schedule'">
           <div class="drawer-header-left">
             <CalendarDays :size="14" />
             <span>{{ $t('nav.schedule') || '日程' }}</span>
@@ -151,31 +156,59 @@
           <ChevronDown v-if="activeDrawer === 'schedule'" :size="14" class="drawer-chevron" />
           <ChevronRight v-else :size="14" class="drawer-chevron" />
         </div>
-        <div v-show="activeDrawer === 'schedule'" class="drawer-content">
-          <div class="drawer-placeholder">
-            <CalendarDays :size="24" style="opacity: 0.3;" />
-            <span>{{ $t('nav.schedule_hint') || '日程与待办事项' }}</span>
+        <div v-show="!isMobile && activeDrawer === 'schedule'" class="drawer-content">
+          <div class="settings-nav">
+            <button
+              v-for="item in scheduleNavItems"
+              :key="item.id"
+              class="settings-nav-item"
+              :class="{ active: activeSchedulePanel === item.id }"
+              @click="activeSchedulePanel = item.id"
+            >
+              <component :is="item.icon" :size="16" />
+              <span>{{ item.label }}</span>
+            </button>
           </div>
         </div>
 
+        <!-- ═══ 抽屉 2.25: 持续工作 ═══ -->
+        <div v-show="!isMobile" class="drawer-header" :class="{ active: activeDrawer === 'work' }" @click="activeDrawer = 'work'">
+          <div class="drawer-header-left">
+            <BriefcaseBusiness :size="14" />
+            <span>{{ $t('nav.work') || '工作' }}</span>
+          </div>
+          <ChevronDown v-if="activeDrawer === 'work'" :size="14" class="drawer-chevron" />
+          <ChevronRight v-else :size="14" class="drawer-chevron" />
+        </div>
+        <div v-show="!isMobile && activeDrawer === 'work'" class="drawer-content">
+          <nav class="settings-nav">
+            <button
+              v-for="item in workNavItems"
+              :key="item.id"
+              class="settings-nav-item"
+              :class="{ active: activeWorkPanel === item.id }"
+              @click="activeWorkPanel = item.id"
+            >
+              <component :is="item.icon" :size="16" />
+              <span>{{ item.label }}</span>
+            </button>
+          </nav>
+        </div>
+
         <!-- ═══ 抽屉 2.5: 知识图谱 ═══ -->
-        <div class="drawer-header" :class="{ active: activeDrawer === 'knowledge' }" @click="activeDrawer = 'knowledge'">
+        <div v-show="!isMobile" class="drawer-header" :class="{ active: activeDrawer === 'knowledge' }" @click="activeDrawer = 'knowledge'">
           <div class="drawer-header-left">
             <Waypoints :size="14" />
-            <span>{{ $t('nav.knowledge') || '知识图谱' }}</span>
+            <span>{{ $t('nav.knowledge') || '知识' }}</span>
           </div>
           <ChevronDown v-if="activeDrawer === 'knowledge'" :size="14" class="drawer-chevron" />
           <ChevronRight v-else :size="14" class="drawer-chevron" />
         </div>
-        <div v-show="activeDrawer === 'knowledge'" class="drawer-content">
-          <div class="drawer-placeholder">
-            <Waypoints :size="24" style="opacity: 0.3;" />
-            <span>{{ $t('nav.knowledge_hint') || '实体与关联网络' }}</span>
-          </div>
+        <div v-show="!isMobile && activeDrawer === 'knowledge'" class="drawer-content" id="kg-sidebar-portal" style="display: flex; flex-direction: column; height: 100%;">
         </div>
 
         <!-- ═══ 抽屉 3: 设置 ═══ -->
-        <div class="drawer-header" :class="{ active: activeDrawer === 'settings' }" @click="activeDrawer = 'settings'">
+        <div v-show="!isMobile" class="drawer-header" :class="{ active: activeDrawer === 'settings' }" @click="activeDrawer = 'settings'">
           <div class="drawer-header-left">
             <Settings :size="14" />
             <span>{{ $t('nav.settings') }}</span>
@@ -183,7 +216,7 @@
           <ChevronDown v-if="activeDrawer === 'settings'" :size="14" class="drawer-chevron" />
           <ChevronRight v-else :size="14" class="drawer-chevron" />
         </div>
-        <div v-show="activeDrawer === 'settings'" class="drawer-content">
+        <div v-show="!isMobile && activeDrawer === 'settings'" class="drawer-content">
           <nav class="settings-nav">
             <button
               v-for="item in settingsNavItems"
@@ -204,6 +237,7 @@
 
       <!-- 侧边栏居中折叠按钮 -->
       <button 
+        v-if="!isMobile"
         class="sidebar-collapse-float" 
         :class="{ 'is-collapsed': isSidebarCollapsed }"
         :style="{ left: isSidebarCollapsed ? '0px' : sidebarWidth + 'px' }" 
@@ -215,19 +249,52 @@
 
       <!-- 内容区 -->
       <main class="content">
-        <ChatView
-          v-show="activeDrawer === 'chat'"
-          ref="chatViewRef"
-          :conversationId="activeConversationId"
-          @update-title="updateConversationTitle"
-        />
-        <InboxView v-if="activeDrawer === 'schedule'" />
-        <KnowledgeGraphView v-if="activeDrawer === 'knowledge'" />
-        <SettingsView
-          v-if="activeDrawer === 'settings'"
-          :activePanel="activeSettingsPanel"
-          @config-changed="onConfigChanged"
-        />
+        <!-- 移动端 Settings 顶部导航 -->
+        <div v-if="isMobile && activeDrawer === 'settings'" class="mobile-tab-grid">
+          <button
+            v-for="item in settingsNavItems"
+            :key="item.id"
+            class="mobile-tab-item"
+            :class="{ active: activeSettingsPanel === item.id }"
+            @click="activeSettingsPanel = item.id"
+          >
+            <component :is="item.icon" :size="18" class="tab-icon" />
+            <span>{{ item.label }}</span>
+          </button>
+        </div>
+
+        <div class="view-wrapper" v-show="activeDrawer === 'chat'">
+          <ChatView
+            ref="chatViewRef"
+            :conversationId="activeConversationId"
+            @update-title="updateConversationTitle"
+            @open-drawer="mobileDrawerOpen = true"
+          />
+        </div>
+        <div class="view-wrapper" v-show="activeDrawer === 'schedule'">
+          <InboxView 
+            :activePanel="activeSchedulePanel" 
+            @update:activePanel="activeSchedulePanel = $event"
+            @toggle-sidebar="mobileDrawerOpen = !mobileDrawerOpen" 
+          />
+        </div>
+        <div class="view-wrapper" v-show="activeDrawer === 'work'">
+          <WorkView
+            :active-panel="activeWorkPanel"
+            @update:active-panel="activeWorkPanel = $event"
+          />
+        </div>
+        <div class="view-wrapper" v-show="activeDrawer === 'knowledge'">
+          <KnowledgeGraphView 
+            @toggle-sidebar="mobileDrawerOpen = !mobileDrawerOpen"
+          />
+        </div>
+        <div class="view-wrapper" v-show="activeDrawer === 'settings'">
+          <SettingsView
+            :activePanel="activeSettingsPanel"
+            @config-changed="onConfigChanged"
+          />
+        </div>
       </main>
     </div>
 
@@ -243,45 +310,177 @@
       </div>
     </div>
 
+    <!-- 移动端悬浮球 (灵光一现) -->
+    <div v-if="isMobile && isSetupComplete" 
+         class="mobile-fab" 
+         role="button"
+         tabindex="0"
+         :aria-label="$t('quicknote.open')"
+         :class="{ 'is-idle': fabIsIdle, 'is-dragging': isFabDragging }"
+         :style="fabStyle"
+         @pointerdown="onFabPointerDown"
+         @pointermove="onFabPointerMove"
+         @pointerup="onFabPointerUp"
+         @pointercancel="onFabPointerUp"
+         @keydown.enter.prevent="openQuickNote"
+         @keydown.space.prevent="openQuickNote"
+         @click.prevent>
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 152.85 99.94">
+        <g><path fill="currentColor" d="M166.3,82.45a29.91,29.91,0,0,1-52.92,19.11,29.91,29.91,0,0,1-46,0A29.91,29.91,0,0,1,14.45,82.45V15.72a2.3,2.3,0,0,1,2.3-2.3H26a2.3,2.3,0,0,1,2.3,2.3V57.24a29.92,29.92,0,0,1,39.12,6.09,29.91,29.91,0,0,1,39.11-6.09V15.72a2.3,2.3,0,0,1,2.3-2.3H118a2.3,2.3,0,0,1,2.3,2.3V57.24a29.92,29.92,0,0,1,46,25.21Zm-13.8,0a16.11,16.11,0,1,0-16.11,16.1A16.11,16.11,0,0,0,152.5,82.45Zm-46,0a16.11,16.11,0,1,0-16.1,16.1A16.1,16.1,0,0,0,106.48,82.45Zm-46,0a16.11,16.11,0,1,0-16.11,16.1A16.11,16.11,0,0,0,60.47,82.45Z" transform="translate(-13.95 -12.92)"/></g>
+      </svg>
+    </div>
+
     <!-- 闪念速记浮层 -->
-    <QuickNoteOverlay ref="quickNoteRef" />
+    <QuickNoteOverlay
+      ref="quickNoteRef"
+      :today-count="dailyBrief.snapshot.value?.actionableCount || 0"
+      @open-today="openTodayFromQuickNote"
+    />
+
+    <TodayLayerSurface
+      :visible="dailyBrief.isVisible.value"
+      :snapshot="dailyBrief.snapshot.value"
+      :loading="dailyBrief.loading.value"
+      :refreshing="dailyBrief.refreshing.value"
+      :error-code="dailyBrief.errorCode.value"
+      @ready="handleTodayReady"
+      @close="dailyBrief.closeTodayLayer"
+      @refresh="dailyBrief.refresh"
+      @action="handleTodayBriefAction"
+    />
+
+    <!-- 底部导航 (Mobile) -->
+    <BottomNavigation 
+      v-if="isMobile && isSetupComplete" 
+      :active-drawer="activeDrawer" 
+      @update:active-drawer="activeDrawer = $event" 
+    />
+    
+    <!-- 全局对话框 -->
+    <GlobalDialog />
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, computed, nextTick, provide } from 'vue';
+import { ref, onMounted, onUnmounted, computed, nextTick, provide, inject } from 'vue';
 import ChatView from './views/ChatView.vue';
 import InboxView from './views/InboxView.vue';
 import SettingsView from './views/SettingsView.vue';
 import KnowledgeGraphView from './views/KnowledgeGraphView.vue';
+import WorkView from './views/WorkView.vue';
 import SetupWizard from './components/SetupWizard.vue';
 import QuickNoteOverlay from './components/QuickNoteOverlay.vue';
-import { Inbox, Settings, Plus, X, Sun, Moon, ChevronLeft, ChevronRight, ChevronDown, Search, MessageSquare, CalendarDays, Brain, Plug, FolderOpen, Palette, Info, Sunrise, Waypoints } from 'lucide-vue-next';
+import TodayLayerSurface from './components/TodayLayerSurface.vue';
+import BottomNavigation from './components/BottomNavigation.vue';
+import GlobalDialog from './components/GlobalDialog.vue';
+import { Inbox, Settings, Plus, X, Sun, Moon, ChevronLeft, ChevronRight, ChevronDown, Search, MessageSquare, CalendarDays, Brain, Plug, FolderOpen, Palette, Info, Sunrise, Waypoints, Menu, Smartphone, Calendar, CheckSquare, Timer, BriefcaseBusiness } from 'lucide-vue-next';
 import { useI18n } from 'vue-i18n';
-
-import { getCurrentWindow } from '@tauri-apps/api/window';
+import { listen } from '@tauri-apps/api/event';
+import { getModelMeta } from '@/composables/useModelSwitcher';
+import { useDailyBrief } from '@/composables/useDailyBrief.js';
+import { createLayoutState } from '@/layout/layout-mode.js';
+import { DEFAULT_WORK_VIEW, WORK_VIEW_ITEMS } from '@/work/work-view-navigation.js';
 
 // Tauri Window API (用于自定义窗口按钮)
-const appWindow = getCurrentWindow();
-function minimizeWindow() { appWindow.minimize(); }
-function toggleMaximize() { appWindow.toggleMaximize(); }
-function closeWindow() { appWindow.hide(); } 
+function minimizeWindow() { window.appAPI.minimizeWindow(); }
+function toggleMaximize() { window.appAPI.toggleMaximize(); }
+function closeWindow() { window.appAPI.hideWindow(); } 
 
 const { locale, t } = useI18n();
 
 // ── 状态 ─────────────────────────────────────────────
 const isSetupComplete = ref(false);
 const currentView = ref('chat');  // legacy — kept for backward compat during transition
-const activeDrawer = ref('chat');         // 'chat' | 'schedule' | 'settings'
+const activeDrawer = ref('chat');         // 'chat' | 'schedule' | 'work' | 'knowledge' | 'settings'
+provide('activeDrawer', activeDrawer);
 const activeSettingsPanel = ref('model'); // 'model' | 'connections' | 'workspace' | 'daily_routine' | 'appearance' | 'about'
+const activeSchedulePanel = ref('timeline'); // 'timeline' | 'todo' | 'cron'
+const activeWorkPanel = ref(DEFAULT_WORK_VIEW);
 const chatViewRef = ref(null);
 const quickNoteRef = ref(null);
+const dailyBrief = useDailyBrief();
+const mobileDrawerOpen = ref(false);
+provide('dailyBrief', dailyBrief);
+provide('openTodayLayer', dailyBrief.openTodayLayer);
+
+const lastSyncTime = ref(localStorage.getItem('bob-last-sync-time') || '');
+const lastSyncStatus = ref(localStorage.getItem('bob-last-sync-status') || '');
+provide('lastSyncTime', lastSyncTime);
+provide('lastSyncStatus', lastSyncStatus);
+
+// ── 响应式移动端检测 (宽高比 1:1 断点) ──
+const initialLayout = createLayoutState({
+  width: window.innerWidth,
+  height: window.innerHeight,
+  userAgent: navigator.userAgent,
+});
+const terminalKind = initialLayout.terminalKind;
+const viewportShape = ref(initialLayout.viewportShape);
+const layoutMode = ref(initialLayout.layoutMode);
+// Compatibility flag: existing navigation treats non-wide layouts as compact.
+const isMobile = ref(initialLayout.compactNavigation);
+provide('isMobile', isMobile);
+provide('terminalKind', terminalKind);
+provide('viewportShape', viewportShape);
+provide('layoutMode', layoutMode);
+
+const isNativeMobile = terminalKind === 'native-mobile';
+provide('isNativeMobile', isNativeMobile);
+const isTauri = !!window.__TAURI_INTERNALS__;
+
+let resizeDebounce;
+function onResizeHandler() {
+  clearTimeout(resizeDebounce);
+  resizeDebounce = setTimeout(() => {
+    const nextLayout = createLayoutState({
+      width: window.innerWidth,
+      height: window.innerHeight,
+      userAgent: navigator.userAgent,
+    });
+    viewportShape.value = nextLayout.viewportShape;
+    layoutMode.value = nextLayout.layoutMode;
+    isMobile.value = nextLayout.compactNavigation;
+  }, 100);
+}
 
 // ── 闪念速记：全局 provide，子组件 inject 后调用即可 ──
 function openQuickNote() {
   quickNoteRef.value?.open();
 }
 provide('openQuickNote', openQuickNote);
+
+function openTodayFromQuickNote(returnContext) {
+  void dailyBrief.openTodayLayer('quick_note', returnContext);
+}
+
+function handleTodayReady() {
+  const fromQuickNote = dailyBrief.surface.entrySource === 'quick_note';
+  dailyBrief.notifyReady();
+  void dailyBrief.ensureLoaded().then(() => dailyBrief.markSeen());
+  if (fromQuickNote) quickNoteRef.value?.close({ preserveDraft: true, force: true });
+}
+
+async function handleTodayBriefAction(item) {
+  const action = item?.action;
+  if (!action || action.kind === 'none') return;
+  if (action.kind === 'open_calendar') {
+    activeDrawer.value = 'schedule';
+    activeSchedulePanel.value = 'timeline';
+  } else if (action.kind === 'open_todo') {
+    activeDrawer.value = 'schedule';
+    activeSchedulePanel.value = 'todo';
+  } else if (action.kind === 'continue_conversation' && action.targetId) {
+    activeDrawer.value = 'chat';
+    await switchConversation(action.targetId);
+  } else if (['open_goal', 'open_work_object', 'respond_approval'].includes(action.kind)) {
+    activeDrawer.value = 'work';
+    window.dispatchEvent(new CustomEvent('today-brief-action', { detail: item }));
+  } else {
+    window.dispatchEvent(new CustomEvent('today-brief-action', { detail: item }));
+  }
+  dailyBrief.closeTodayLayer();
+}
+provide('handleTodayBriefAction', handleTodayBriefAction);
 
 
 import { watch } from 'vue';
@@ -356,7 +555,7 @@ function stopResize() {
   document.removeEventListener('mouseup', stopResize);
   document.body.style.cursor = '';
   document.body.style.userSelect = '';
-  window.electronAPI.setConfig('sidebarWidth', sidebarWidth.value);
+  window.appAPI.setConfig('sidebarWidth', sidebarWidth.value);
 }
 
 function toggleSidebar() {
@@ -380,9 +579,9 @@ async function toggleTheme() {
 
   localStorage.setItem('bob-theme', currentTheme.value);
   window.dispatchEvent(new CustomEvent('bob-theme-changed', { detail: currentTheme.value }));
-  window.electronAPI.setConfig('theme', currentTheme.value);
-  if (window.electronAPI.updateTheme) {
-    window.electronAPI.updateTheme(currentTheme.value);
+  window.appAPI.setConfig('theme', currentTheme.value);
+  if (window.appAPI.updateTheme) {
+    window.appAPI.updateTheme(currentTheme.value);
   }
 }
 
@@ -391,46 +590,192 @@ const bottomNavItems = computed(() => [
   { id: 'settings', icon: Settings, label: t('nav.settings') },
 ]);
 
+
+const scheduleNavItems = computed(() => [
+  { id: 'timeline', icon: Calendar, label: t('inbox.this_week') || '本周日程' },
+  { id: 'todo', icon: CheckSquare, label: t('inbox.todo_list') || '待办事项' },
+  { id: 'cron', icon: Timer, label: t('inbox.auto_tasks') || '计划任务' },
+]);
+
+const workNavItems = computed(() => WORK_VIEW_ITEMS.map(item => ({
+  ...item,
+  label: t(item.labelKey),
+})));
+
+const modelInfo = computed(() => {
+  if (!currentModel.value) return { name: t('app.not_configured'), logo: null };
+  const meta = getModelMeta(currentModel.value);
+  if (!meta.name || meta.name.toLowerCase() === currentModel.value.toLowerCase()) {
+    // Keep raw name if getModelMeta returns raw id
+    return { name: currentModel.value, logo: meta.logo };
+  }
+  return meta;
+});
+
 // 设置抽屉导航菜单项
 const settingsNavItems = computed(() => [
   { id: 'model', icon: Brain, label: t('settings.nav_model') || '模型基础设置' },
   { id: 'connections', icon: Plug, label: t('settings.nav_connections') || '连接中心' },
-  { id: 'workspace', icon: FolderOpen, label: t('settings.nav_workspace') || '工作间' },
+  { id: 'workspace', icon: FolderOpen, label: t('settings.nav_workspace') || '工作区' },
   { id: 'daily_routine', icon: Sunrise, label: t('settings.nav_daily_routine') || '每日工作' },
   { id: 'appearance', icon: Palette, label: t('settings.nav_appearance') || '外观与语言' },
   { id: 'about', icon: Info, label: t('settings.nav_about') || '关于' },
 ]);
 
-const modelInfo = computed(() => {
-  if (!currentModel.value) return { name: t('app.not_configured'), logo: null };
-  const name = currentModel.value.toLowerCase();
-  
-  if (name.includes('deepseek')) return { name: 'DeepSeek', logo: '/logos/deepseek.png' };
-  if (name.includes('gpt-') || name.includes('o3') || name.includes('o4')) return { name: 'OpenAI', logo: '/logos/openai.png' };
-  if (name.includes('claude')) return { name: 'Claude', logo: '/logos/claude.png' };
-  if (name.includes('gemini')) return { name: 'Gemini', logo: '/logos/google.png' };
-  if (name.includes('qwen')) return { name: 'Qwen', logo: '/logos/qwen.png' };
-  if (name.includes('doubao') || name.includes('seed')) return { name: 'Doubao', logo: '/logos/doubao.png' };
-  if (name.includes('glm')) return { name: 'GLM', logo: '/logos/glm.svg' };
-  if (name.includes('kimi')) return { name: 'Kimi', logo: '/logos/kimi.png' };
-  if (name.includes('minimax')) return { name: 'MiniMax', logo: '/logos/minimax.png' };
-  if (name.includes('llama') || name.includes('local-')) return { name: 'Local', logo: null };
-  return { name: currentModel.value, logo: null };
-});
 
 // ── 生命周期 ─────────────────────────────────────────
 let unlistenConfigReconciled = null;
 let unlistenRemoteMessage = null;
+let unlistenSync = null;
+let unlistenBriefGoal = null;
+let unlistenBriefCalendar = null;
+let unlistenBriefDream = null;
+let briefRefreshTimer = null;
+
+function scheduleDailyBriefRefresh() {
+  clearTimeout(briefRefreshTimer);
+  briefRefreshTimer = setTimeout(() => { void dailyBrief.refresh(); }, 250);
+}
+
+function handleBackButton() {
+  // 1. 模态弹窗层
+  if (showDeleteModal.value) {
+    cancelDeleteChat();
+    return true;
+  }
+  
+  // 2. Today Layer
+  if (dailyBrief.isMounted.value) {
+    dailyBrief.closeTodayLayer();
+    return true;
+  }
+
+  // 3. 全局覆盖层 (闪念速记)
+  if (quickNoteRef.value && quickNoteRef.value.visible) {
+    quickNoteRef.value.close();
+    return true;
+  }
+  
+  // 4. 移动端侧边抽屉层
+  if (isMobile.value && mobileDrawerOpen.value) {
+    mobileDrawerOpen.value = false;
+    return true;
+  }
+  
+  // 4. 子组件自定义拦截 (分发 android-back-pressed 事件)
+  if (document.body.classList.contains('scanner-active')) {
+    return false;
+  }
+  // 任何子组件可以通过 e.preventDefault() 阻止默认的后退兜底行为
+  const backEvent = new CustomEvent('android-back-pressed', { cancelable: true });
+  const canceled = !window.dispatchEvent(backEvent);
+  if (canceled) {
+    return true;
+  }
+
+  // 5. 跨标签页降级 (如果不在主对话页，先退回主对话页)
+  if (isMobile.value && activeDrawer.value !== 'chat') {
+    activeDrawer.value = 'chat';
+    return true;
+  }
+  
+  // 6. 兜底：退到系统后台保留运行
+  if (window.appAPI && window.appAPI.hideWindow) {
+    window.appAPI.hideWindow();
+  }
+  
+  return true;
+}
 
 onMounted(async () => {
+  // 兜底：无论初始化是否异常，最多 1s 后强制淡出开屏动画
+  setTimeout(() => {
+    const splash = document.getElementById('native-splash');
+    if (splash) {
+      splash.style.opacity = '0';
+      splash.style.transition = 'opacity 0.6s ease';
+      setTimeout(() => splash.remove(), 600);
+    }
+  }, 1000);
+
+  if (isNativeMobile) {
+    const checkSharedIntents = async () => {
+      try {
+        const intents = await window.appAPI.getSharedIntents();
+        if (intents && intents.length > 0) {
+          let savedCount = 0;
+          let failedCount = 0;
+          for (const intent of intents) {
+            try {
+              const result = intent.type === 'text'
+                ? await window.appAPI.captureQuickNote(intent.content, 'mobile_share', 'android', `android-share:${intent.filename}`)
+                : await window.appAPI.captureMobileImage(intent.filename);
+              if (result?.ok) {
+                savedCount += 1;
+                // 只有 Journal 与笔记/受管图片均提交成功后才清除临时分享缓存。
+                await window.appAPI.clearSharedIntent(intent.filename);
+              } else {
+                failedCount += 1;
+              }
+            } catch (error) {
+              failedCount += 1;
+              console.warn('Shared item capture failed; source cache retained:', error);
+            }
+          }
+          if (savedCount > 0) {
+            window.dispatchEvent(new CustomEvent('toast', { detail: { type: 'success', message: t('app.capture_saved', { count: savedCount }) } }));
+          }
+          if (failedCount > 0) {
+            window.dispatchEvent(new CustomEvent('toast', { detail: { type: 'error', message: t('app.capture_failed', { count: failedCount }) } }));
+          }
+        }
+      } catch (e) {
+        console.warn('Share intent check failed:', e);
+      }
+    };
+    checkSharedIntents();
+    window.addEventListener('focus', checkSharedIntents);
+  }
+  if (window.__TAURI_IPC__) {
+    try {
+      unlistenSync = await listen('sync:completed', (event) => {
+        if (event.payload && event.payload.timestamp) {
+          lastSyncTime.value = event.payload.timestamp.toString();
+          lastSyncStatus.value = 'success';
+          localStorage.setItem('bob-last-sync-time', lastSyncTime.value);
+          localStorage.setItem('bob-last-sync-status', 'success');
+          console.log(`[Sync] sync:completed received (${event.payload.direction}), updated lastSyncTime.`);
+        }
+      });
+    } catch (e) {
+      console.warn('Failed to listen to sync:completed', e);
+    }
+  }
+
+  // ── 响应式布局监听 ──
+  window.addEventListener('resize', onResizeHandler);
+  
+  window.addEventListener('switch-view', (e) => {
+    onNavClick(e.detail);
+  });
+
+  if (isMobile.value) {
+    // 拦截 Android 物理返回键
+    history.pushState(null, '', location.href);
+    window.addEventListener('popstate', (e) => {
+      history.pushState(null, '', location.href);
+      handleBackButton();
+    });
+  }
+
   // ── 拦截 F5 / Ctrl+R：桌面应用不需要硬刷新，改为软重载 ──
   document.addEventListener('keydown', async (e) => {
     if (e.key === 'F5' || (e.ctrlKey && e.key === 'r')) {
       e.preventDefault();
       // 软重载：重新拉取对话列表和配置，等同于重新打开应用
       await loadConversations();
-      currentModel.value = await window.electronAPI.getConfig('model') || '';
-      const theme = await window.electronAPI.getConfig('theme');
+      currentModel.value = await window.appAPI.getConfig('model') || '';
+      const theme = await window.appAPI.getConfig('theme');
       if (theme) {
         currentTheme.value = theme;
         document.documentElement.setAttribute('data-theme', theme);
@@ -440,31 +785,32 @@ onMounted(async () => {
   });
 
   // 检查是否已配置
-  isSetupComplete.value = await window.electronAPI.isSetupComplete();
+  isSetupComplete.value = await window.appAPI.isSetupComplete();
   if (DEBUG_ONBOARDING === 0) {
     isSetupComplete.value = false;
   }
 
   if (isSetupComplete.value) {
     await loadConversations();
-    currentModel.value = await window.electronAPI.getConfig('model') || '';
+    void dailyBrief.ensureLoaded();
+    currentModel.value = await window.appAPI.getConfig('model') || '';
     // 恢复 UI 缩放偏好和主题和侧边栏宽度
-    const savedWidth = await window.electronAPI.getConfig('sidebarWidth');
+    const savedWidth = await window.appAPI.getConfig('sidebarWidth');
     if (savedWidth) sidebarWidth.value = savedWidth;
 
-    const uiScale = await window.electronAPI.getConfig('uiScale');
+    const uiScale = await window.appAPI.getConfig('uiScale');
     if (uiScale) {
       document.documentElement.setAttribute('data-ui-scale', uiScale);
     }
-    const theme = await window.electronAPI.getConfig('theme');
+    const theme = await window.appAPI.getConfig('theme');
     if (theme) {
       currentTheme.value = theme;
       document.documentElement.setAttribute('data-theme', theme);
-      if (window.electronAPI.updateTheme) {
-        window.electronAPI.updateTheme(theme);
+      if (window.appAPI.updateTheme) {
+        window.appAPI.updateTheme(theme);
       }
     }
-    const accentColor = await window.electronAPI.getConfig('accentColor');
+    const accentColor = await window.appAPI.getConfig('accentColor');
     if (accentColor) {
       localStorage.setItem('bob-accent', accentColor);
       document.documentElement.style.setProperty('--user-accent', accentColor);
@@ -475,18 +821,88 @@ onMounted(async () => {
       document.documentElement.style.setProperty('--user-accent-rgb', `${r}, ${g}, ${b}`);
     }
     // 恢复用户语言偏好
-    const savedLang = await window.electronAPI.getConfig('language');
+    const savedLang = await window.appAPI.getConfig('language');
     if (savedLang) locale.value = savedLang;
+
+    // Auto-Discovery: Trigger sync on startup if paired
+    const pairingPayload = await window.appAPI.getConfig('pairing_payload');
+    if (pairingPayload) {
+      console.log('[Sync] 检测到已配对设备，启动后台双向同步...');
+      const doSync = () => {
+        if (window.appAPI.triggerMobileSync) {
+          window.appAPI.triggerMobileSync(pairingPayload).then(() => {
+            console.log('[Sync] 后台同步成功！');
+            lastSyncStatus.value = 'success';
+            localStorage.setItem('bob-last-sync-time', Date.now().toString());
+            localStorage.setItem('bob-last-sync-status', 'success');
+          }).catch(e => {
+            console.warn('[Sync] 后台同步失败 (对方可能处于离线状态)，启动静默UDP监听...', e);
+            lastSyncStatus.value = 'error';
+            localStorage.setItem('bob-last-sync-status', 'error');
+            window.appAPI.triggerMobileSync({ ...pairingPayload, listen_only: true }).catch(err => console.error(err));
+          });
+        }
+      };
+      
+      doSync();
+
+      // Listen for visibility change (wake up from background)
+      window.addEventListener('online', () => {
+        console.log('[Network] Online event detected, forcing Relay reconnect...');
+        if (window.__TAURI__) window.__TAURI__.invoke('force_relay_reconnect');
+      });
+
+      // Listen for visibility change (wake up from background)
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+          if (window.__TAURI__) window.__TAURI__.invoke('force_relay_reconnect');
+          const lastSync = parseInt(localStorage.getItem('bob-last-sync-time') || '0');
+          if (Date.now() - lastSync > 60000) { // 1分钟防抖
+            console.log('[Sync] 移动端恢复前台，主动触发同步...');
+            doSync();
+          }
+        }
+      });
+      
+      // Listen for Relay wakeup signal from PC
+      listen('sync:wakeup', (event) => {
+        console.log('[Sync] 收到 PC 端唤醒信令，立即触发同步...', event);
+        doSync();
+      });
+
+    } else {
+      // PC 端：主动向所有已配对设备发送唤醒信令
+      try {
+        if (window.appAPI.getConnectedDevices && window.appAPI.triggerWakeupViaRelay) {
+          const devices = await window.appAPI.getConnectedDevices();
+          if (devices && devices.length > 0) {
+            console.log(`[Sync] PC端启动，向 ${devices.length} 个配对设备发送上线唤醒信令...`);
+            for (const dev of devices) {
+              window.appAPI.triggerWakeupViaRelay(dev.device_id).catch(err => console.error('Wakeup error:', err));
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('Failed to wake up devices:', err);
+      }
+    }
   }
+
+  unlistenBriefCalendar = window.appAPI.onCalendarUpdated?.(scheduleDailyBriefRefresh) || null;
+  unlistenBriefDream = window.appAPI.onDreamCompleted?.(scheduleDailyBriefRefresh) || null;
+  if (window.appAPI.listenEvent) {
+    unlistenBriefGoal = await window.appAPI.listenEvent('goal:runtime-state', scheduleDailyBriefRefresh);
+  }
+  window.addEventListener('sync:refresh-events', scheduleDailyBriefRefresh);
 
   // 本地存储同步主题，供 index.html 启动瞬间读取
   if (currentTheme.value) localStorage.setItem('bob-theme', currentTheme.value);
 
   // 显示并聚焦原生窗口，防止藏在后台
   // 注意：不要使用 await，否则任何调用失败（比如窗口并未最小化而引发的异常）都会阻塞后续的开屏动画移除
-  appWindow.unminimize().catch(() => {});
-  appWindow.show().catch(() => {});
-  appWindow.setFocus().catch(() => {});
+  window.appAPI.unminimizeWindow().catch(() => {});
+  window.appAPI.showWindow().catch(() => {});
+  window.appAPI.focusWindow().catch(() => {});
 
   // 启动画面淡出 — 原生 Splash 渐隐 1 秒
   setTimeout(() => { 
@@ -499,8 +915,8 @@ onMounted(async () => {
   }, 1000);
 
   // ── Outbox Reconciler 事件监听 (T-813) ─────────────
-  if (window.electronAPI.onConfigReconciled) {
-    unlistenConfigReconciled = window.electronAPI.onConfigReconciled((payload) => {
+  if (window.appAPI.onConfigReconciled) {
+    unlistenConfigReconciled = window.appAPI.onConfigReconciled((payload) => {
       const count = payload?.applied || 0;
       console.log(`[Reconciler] ${count} 条配置已生效，刷新 UI...`);
       // 刷新 ChatView 模型指示器
@@ -508,15 +924,18 @@ onMounted(async () => {
         chatViewRef.value.refreshModel();
       }
       // 重新加载当前模型
-      window.electronAPI.getConfig('model').then(m => {
+      window.appAPI.getConfig('model').then(m => {
         if (m) currentModel.value = m;
       });
+      
+      // 全局广播同步完成，触发各视图刷新数据
+      window.dispatchEvent(new CustomEvent('sync:refresh-events'));
     });
   }
 
   // ── 远程消息通知：微信等通道产生新消息时刷新侧边栏 ──────
-  if (window.electronAPI.onRemoteNewMessage) {
-    unlistenRemoteMessage = await window.electronAPI.onRemoteNewMessage((event) => {
+  if (window.appAPI.onRemoteNewMessage) {
+    unlistenRemoteMessage = await window.appAPI.onRemoteNewMessage((event) => {
       const convId = event?.payload?.conversation_id || event?.conversation_id;
       console.log(`[Remote] 收到远程新消息通知, conv_id=${convId}`);
       // 刷新侧边栏对话列表（新对话出现 / 时间戳更新）
@@ -525,8 +944,8 @@ onMounted(async () => {
   }
 
   // T-1303: 全局监听 Cron 任务完成事件，更新导航栏红点
-  if (window.electronAPI.onSchedulerCompleted) {
-    unlistenSchedulerGlobal = window.electronAPI.onSchedulerCompleted((payload) => {
+  if (window.appAPI.onSchedulerCompleted) {
+    unlistenSchedulerGlobal = window.appAPI.onSchedulerCompleted((payload) => {
       console.log('[App] scheduler:completed', payload?.title);
       cronNotifCount.value += 1;
     });
@@ -534,15 +953,23 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
+  window.removeEventListener('resize', onResizeHandler);
+  clearTimeout(resizeDebounce);
   if (unlistenConfigReconciled) unlistenConfigReconciled();
   if (unlistenRemoteMessage) unlistenRemoteMessage();
+  if (unlistenSync) unlistenSync();
   if (unlistenSchedulerGlobal) unlistenSchedulerGlobal();
+  if (unlistenBriefGoal) unlistenBriefGoal();
+  if (unlistenBriefCalendar) unlistenBriefCalendar();
+  if (unlistenBriefDream) unlistenBriefDream();
+  window.removeEventListener('sync:refresh-events', scheduleDailyBriefRefresh);
+  clearTimeout(briefRefreshTimer);
   if (searchDebounce) clearTimeout(searchDebounce);
 });
 
 // ── 对话管理 ─────────────────────────────────────────
 async function loadConversations() {
-  conversations.value = await window.electronAPI.getConversations();
+  conversations.value = await window.appAPI.getConversations();
   // 没有对话就创建一个
   if (conversations.value.length === 0) {
     await createNewChat();
@@ -553,17 +980,20 @@ async function loadConversations() {
 
 async function createNewChat() {
   if (activeConversationId.value) {
-    window.electronAPI.summarizeSession(activeConversationId.value).catch(e => console.error(e));
+    window.appAPI.summarizeSession(activeConversationId.value).catch(e => console.error(e));
   }
-  const conv = await window.electronAPI.createConversation(t('chat.new_conversation'), currentModel.value);
+  const conv = await window.appAPI.createConversation(t('chat.new_conversation'), currentModel.value);
   conversations.value.unshift(conv);
   activeConversationId.value = conv.id;
+  if (isMobile.value) {
+    mobileDrawerOpen.value = false;
+  }
 }
 
 function switchConversation(id) {
   if (activeConversationId.value && activeConversationId.value !== id) {
     // Trigger background summarization for the old conversation
-    window.electronAPI.summarizeSession(activeConversationId.value).catch(err => {
+    window.appAPI.summarizeSession(activeConversationId.value).catch(err => {
       console.error('Background session summarization failed:', err);
     });
   }
@@ -582,7 +1012,7 @@ async function confirmDeleteChat() {
   const id = pendingDeleteId.value;
   if (!id) return;
   
-  await window.electronAPI.deleteConversation(id);
+  await window.appAPI.deleteConversation(id);
   conversations.value = conversations.value.filter(c => c.id !== id);
   
   if (activeConversationId.value === id) {
@@ -618,7 +1048,7 @@ async function confirmRename(conv) {
   if (newTitle && newTitle !== conv.title) {
     conv.title = newTitle;
     // 持久化到 conversations 表
-    await window.electronAPI.renameConversation(conv.id, newTitle);
+    await window.appAPI.renameConversation(conv.id, newTitle);
   }
   renamingId.value = null;
   renameText.value = '';
@@ -660,16 +1090,16 @@ async function onSetupComplete(payload) {
   const startRect = payload?.startRect;
 
   // 优先使用向导传来的值（debug 模式下后端没有保存）
-  const theme = payload?.theme || await window.electronAPI.getConfig('theme');
+  const theme = payload?.theme || await window.appAPI.getConfig('theme');
   if (theme) {
     currentTheme.value = theme;
     document.documentElement.setAttribute('data-theme', theme);
     localStorage.setItem('bob-theme', theme);
-    if (window.electronAPI.updateTheme) {
-      window.electronAPI.updateTheme(theme);
+    if (window.appAPI.updateTheme) {
+      window.appAPI.updateTheme(theme);
     }
   }
-  const accentColor = payload?.accentColor || await window.electronAPI.getConfig('accentColor');
+  const accentColor = payload?.accentColor || await window.appAPI.getConfig('accentColor');
   if (accentColor) {
     localStorage.setItem('bob-accent', accentColor);
     document.documentElement.style.setProperty('--user-accent', accentColor);
@@ -682,7 +1112,7 @@ async function onSetupComplete(payload) {
 
   // 切换到聊天界面
   isSetupComplete.value = true;
-  currentModel.value = await window.electronAPI.getConfig('model') || '';
+  currentModel.value = await window.appAPI.getConfig('model') || '';
   await loadConversations();
 
   // 如果有起始坐标，执行精确飞行动画
@@ -748,7 +1178,7 @@ async function onSetupComplete(payload) {
 }
 
 async function onConfigChanged() {
-  currentModel.value = await window.electronAPI.getConfig('model') || '';
+  currentModel.value = await window.appAPI.getConfig('model') || '';
 }
 
 // T-1301: 搜索逻辑 (300ms debounce)
@@ -763,7 +1193,7 @@ function onSearchInput() {
   isSearching.value = true;
   searchDebounce = setTimeout(async () => {
     try {
-      searchResults.value = await window.electronAPI.searchMessages(q);
+      searchResults.value = await window.appAPI.searchMessages(q);
     } catch (err) {
       console.error('[Search] FTS error:', err);
       searchResults.value = [];
@@ -815,9 +1245,109 @@ function onNavClick(viewId) {
     cronNotifCount.value = 0;
   }
 }
+
+// ── Mobile FAB (灵光一现悬浮球) 逻辑 ──
+const fabX = ref(null);
+const fabY = ref(null);
+const isFabDragging = ref(false);
+const fabIsIdle = ref(true);
+let fabTimer = null;
+let dragStartX = 0;
+let dragStartY = 0;
+let initialFabX = 0;
+let initialFabY = 0;
+let isMoved = false;
+
+const fabStyle = computed(() => {
+  if (fabX.value === null || fabY.value === null) return {};
+  return {
+    left: `${fabX.value}px`,
+    top: `${fabY.value}px`,
+    right: 'auto',
+    bottom: 'auto'
+  };
+});
+
+function onFabPointerDown(e) {
+  dragStartX = e.clientX;
+  dragStartY = e.clientY;
+  isMoved = false;
+  
+  const rect = e.currentTarget.getBoundingClientRect();
+  initialFabX = rect.left;
+  initialFabY = rect.top;
+
+  fabIsIdle.value = false;
+  clearTimeout(fabTimer);
+  
+  // Capture pointer to track outside the button
+  e.currentTarget.setPointerCapture(e.pointerId);
+}
+
+function onFabPointerMove(e) {
+  if (!e.currentTarget.hasPointerCapture(e.pointerId)) return;
+  
+  const deltaX = e.clientX - dragStartX;
+  const deltaY = e.clientY - dragStartY;
+
+  // 手机触控天然抖动大，阈值设为 15px 防止误判为拖拽
+  const dragThreshold = 15;
+  if (Math.abs(deltaX) > dragThreshold || Math.abs(deltaY) > dragThreshold) {
+    isMoved = true;
+    isFabDragging.value = true;
+  }
+
+  if (isMoved) {
+    fabX.value = initialFabX + deltaX;
+    fabY.value = initialFabY + deltaY;
+    
+    // 边界检测
+    const maxW = window.innerWidth - 48; // fab 宽 48
+    const maxH = window.innerHeight - 48;
+    if (fabX.value < 0) fabX.value = 0;
+    if (fabX.value > maxW) fabX.value = maxW;
+    if (fabY.value < 0) fabY.value = 0;
+    if (fabY.value > maxH) fabY.value = maxH;
+  }
+}
+
+function onFabPointerUp(e) {
+  if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+    e.currentTarget.releasePointerCapture(e.pointerId);
+  }
+  
+  isFabDragging.value = false;
+  if (!isMoved) {
+    e.preventDefault(); // 阻断浏览器合成 click 穿透
+    // 纯点击，唤起速记面板
+    openQuickNote();
+  } else {
+    // 拖拽结束，自动吸附到屏幕边缘
+    const center = window.innerWidth / 2;
+    if (fabX.value < center) {
+      fabX.value = 16;
+    } else {
+      fabX.value = window.innerWidth - 48 - 16;
+    }
+  }
+
+  // 重置闲置计时器 (1秒后恢复半显)
+  fabTimer = setTimeout(() => {
+    fabIsIdle.value = true;
+  }, 1000);
+}
+
 </script>
 
 <style scoped>
+.view-wrapper {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
 .app-shell {
   height: 100%;
   display: flex;
@@ -871,7 +1401,7 @@ function onNavClick(viewId) {
   align-items: center;
   justify-content: center;
   border: none;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-default);
   background: transparent;
   color: var(--text-tertiary);
   cursor: pointer;
@@ -930,7 +1460,7 @@ function onNavClick(viewId) {
 }
 
 .sidebar-resizer:hover::after, .sidebar-resizer:active::after {
-  background: var(--accent-primary);
+  background: var(--user-accent, var(--accent-primary));
 }
 
 .sidebar-collapse-float {
@@ -942,7 +1472,7 @@ function onNavClick(viewId) {
   background: var(--surface-glass);
   border: 1px solid var(--border-subtle);
   border-right: none;
-  border-radius: 4px 0 0 4px;
+  border-radius: var(--radius-default) 0 0 var(--radius-default);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -961,7 +1491,7 @@ function onNavClick(viewId) {
   transform: translateY(-50%);
   border-right: 1px solid var(--border-subtle);
   border-left: none;
-  border-radius: 0 4px 4px 0;
+  border-radius: 0 var(--radius-default) var(--radius-default) 0;
   background: var(--bg-primary);
   box-shadow: var(--shadow-sm);
 }
@@ -982,7 +1512,7 @@ function onNavClick(viewId) {
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-default);
   border: 1px solid var(--border-subtle);
   background: transparent;
   color: var(--text-secondary);
@@ -1003,7 +1533,7 @@ function onNavClick(viewId) {
   align-items: center;
   justify-content: center;
   gap: 6px;
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-default);
   border: 1px dashed var(--border-subtle);
   background: transparent;
   color: var(--text-secondary);
@@ -1045,11 +1575,11 @@ function onNavClick(viewId) {
   height: 34px;
   background: var(--surface-input, var(--bg-tertiary));
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-default);
 }
 
 .sidebar-search.expanded:focus-within {
-  border-color: var(--accent-primary);
+  border-color: var(--user-accent, var(--accent-primary));
 }
 
 .search-icon {
@@ -1080,7 +1610,7 @@ function onNavClick(viewId) {
   align-items: center;
   justify-content: center;
   color: var(--text-muted);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-default);
   flex-shrink: 0;
 }
 
@@ -1105,7 +1635,7 @@ function onNavClick(viewId) {
 
 .search-result-item {
   padding: var(--space-2) var(--space-3);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-default);
   cursor: pointer;
   transition: background var(--duration-fast);
   margin-bottom: 2px;
@@ -1136,9 +1666,9 @@ function onNavClick(viewId) {
 }
 
 .search-result-snippet :deep(mark) {
-  background: color-mix(in srgb, var(--accent-primary) 25%, transparent);
+  background: color-mix(in srgb, var(--user-accent, var(--accent-primary)) 25%, transparent);
   color: var(--accent-tertiary);
-  border-radius: 2px;
+  border-radius: var(--radius-default);
   padding: 0 1px;
 }
 
@@ -1174,8 +1704,8 @@ function onNavClick(viewId) {
   font-weight: 600;
   text-align: center;
   background: var(--error, #e74c3c);
-  color: #fff;
-  border-radius: 7px;
+  color: var(--text-inverse);
+  border-radius: var(--radius-default);
   padding: 0 3px;
 }
 
@@ -1204,7 +1734,7 @@ function onNavClick(viewId) {
   width: 100%;
   padding: var(--space-2) var(--space-3);
   border: none;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-default);
   background: transparent;
   color: var(--text-secondary);
   font-family: var(--font-sans);
@@ -1275,7 +1805,7 @@ function onNavClick(viewId) {
   color: var(--text-tertiary);
   transition: all var(--duration-fast);
   background: var(--bg-secondary);
-  border-radius: 2px;
+  border-radius: var(--radius-default);
 }
 
 .conversation-item:hover .delete-btn {
@@ -1293,8 +1823,23 @@ function onNavClick(viewId) {
 }
 
 .conversation-item.active {
-  background: var(--bg-tertiary);
-  color: var(--text-primary);
+  background: var(--user-accent, var(--accent-primary));
+  color: var(--text-inverse);
+}
+
+.conversation-item.active .conv-time,
+.conversation-item.active .conv-row-2,
+.conversation-item.active .delete-btn {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.conversation-item.active .delete-btn {
+  background: transparent;
+}
+
+.conversation-item.active .delete-btn:hover {
+  color: var(--text-inverse);
+  background: rgba(255, 255, 255, 0.2);
 }
 
 /* ── 侧栏底部导航 ─────────────────────────────────── */
@@ -1313,7 +1858,7 @@ function onNavClick(viewId) {
   gap: var(--space-3);
   padding: var(--space-2) var(--space-3);
   border: none;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-default);
   background: transparent;
   color: var(--text-secondary);
   font-family: var(--font-sans);
@@ -1342,15 +1887,15 @@ function onNavClick(viewId) {
 }
 
 .nav-item.active .nav-icon {
-  color: var(--accent-primary);
+  color: var(--user-accent, var(--accent-primary));
 }
 
 /* ── 对话重命名 ─────────────────────────────────────── */
 .rename-input {
   flex: 1;
   background: var(--bg-tertiary);
-  border: 1px solid var(--accent-primary);
-  border-radius: var(--radius-sm);
+  border: 1px solid var(--user-accent, var(--accent-primary));
+  border-radius: var(--radius-default);
   color: var(--text-primary);
   font-family: var(--font-sans);
   font-size: var(--text-sm);
@@ -1363,6 +1908,19 @@ function onNavClick(viewId) {
   flex: 1;
   overflow: hidden;
   background: var(--bg-root);
+  display: flex;
+  flex-direction: column;
+}
+.app-shell.is-mobile .content {
+  padding-bottom: calc(60px + env(safe-area-inset-bottom, 0px));
+}
+.app-shell.is-mobile .content > * {
+  flex: 1;
+  min-height: 0;
+}
+.app-shell.is-mobile .content > .mobile-tab-grid {
+  flex: none !important;
+  height: auto !important;
 }
 
 /* ── 启动画面 ──────────────────────────────────────── */
@@ -1400,7 +1958,7 @@ function onNavClick(viewId) {
   width: 48px;
   height: 2px;
   background: var(--border-subtle, #333);
-  border-radius: 1px;
+  border-radius: var(--radius-default);
   overflow: hidden;
   position: relative;
 }
@@ -1411,7 +1969,7 @@ function onNavClick(viewId) {
   inset: 0;
   width: 50%;
   background: var(--accent-primary, #6366f1);
-  border-radius: 1px;
+  border-radius: var(--radius-default);
   animation: splash-slide 1.2s ease-in-out infinite;
 }
 
@@ -1477,9 +2035,9 @@ function onNavClick(viewId) {
   font-size: 10px;
   font-weight: 600;
   text-align: center;
-  background: var(--color-error, var(--error, #e74c3c));
+  background: var(--color-error);
   color: var(--bg-root);
-  border-radius: 8px;
+  border-radius: var(--radius-default);
   padding: 0 4px;
 }
 
@@ -1516,7 +2074,7 @@ function onNavClick(viewId) {
   gap: 10px;
   padding: var(--space-2) var(--space-3);
   border: none;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-default);
   background: transparent;
   color: var(--text-secondary);
   font-family: var(--font-sans);
@@ -1537,6 +2095,151 @@ function onNavClick(viewId) {
 }
 
 .settings-nav-item.active svg {
-  color: var(--accent-primary);
+  color: var(--user-accent, var(--accent-primary));
+}
+/* ── Mobile Drawer ────────────────────────────────────────── */
+.mobile-drawer-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  z-index: 199;
+}
+
+.mobile-drawer {
+  position: fixed;
+  top: 0;
+  left: -280px;
+  width: 280px;
+  height: 100%;
+  z-index: 200;
+  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  padding-top: env(safe-area-inset-top, 20px);
+  background: var(--bg-secondary);
+}
+
+.mobile-drawer-open {
+  transform: translateX(280px);
+  box-shadow: 2px 0 12px rgba(0,0,0,0.2);
+}
+
+.mobile-chat-list-view {
+  position: static !important;
+  width: 100% !important;
+  flex: 1;
+  height: 100% !important;
+  transform: none !important;
+  box-shadow: none !important;
+  border-right: none !important;
+  z-index: 1 !important;
+  padding-top: env(safe-area-inset-top, 20px) !important;
+}
+
+/* 隐藏手机侧边栏中的部分多余信息（如大号 logo） */
+.app-shell.is-mobile .sidebar-top .app-logo {
+  display: none;
+}
+
+/* ── Mobile UX: Global Safe Area & Readability ── */
+.app-shell.is-mobile {
+  padding-top: env(safe-area-inset-top, 0px);
+  position: relative;
+}
+
+.app-shell.is-mobile::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: env(safe-area-inset-top, 0px);
+  background-color: #000000;
+  z-index: 9999;
+}
+
+.app-shell.is-mobile .sidebar-top {
+  padding: 12px 16px;
+}
+
+.app-shell.is-mobile .conversation-item {
+  padding: 12px 16px;
+  gap: 12px;
+}
+
+.app-shell.is-mobile .conv-title {
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.app-shell.is-mobile .conv-row-2 {
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.app-shell.is-mobile .conv-time {
+  font-size: 12px;
+}
+
+/* ── Mobile FAB (悬浮气泡) ── */
+.mobile-fab {
+  position: fixed;
+  z-index: 9999;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: var(--surface-glass);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--border-subtle);
+  color: var(--user-accent, var(--text-primary));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+  transition: opacity 0.3s ease, transform 0.15s cubic-bezier(0.34, 1.56, 0.64, 1), background 0.3s ease;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+  outline: none;
+  
+  /* 默认位置 (初始) */
+  right: 16px;
+  bottom: calc(170px + env(safe-area-inset-bottom, 0px));
+  touch-action: none;
+}
+
+.mobile-fab svg {
+  width: 24px;
+  height: auto;
+  pointer-events: none;
+}
+
+.mobile-fab.is-idle {
+  opacity: 0.5;
+}
+
+.mobile-fab:hover {
+  opacity: 1 !important;
+}
+
+.mobile-fab:not(.is-idle) {
+  opacity: 1;
+}
+
+.mobile-fab.is-dragging {
+  transform: scale(1.1);
+  transition: transform 0.1s ease, opacity 0.1s ease;
+  /* 取消 transition left/top 防止拖拽卡顿 */
+}
+
+/* 释放后自动吸附使用 transition */
+.mobile-fab:not(.is-dragging) {
+  transition: opacity 0.3s ease, transform 0.15s ease, left 0.3s ease, top 0.3s ease;
+}
+
+.mobile-fab:active {
+  background: var(--surface-card);
+  transform: scale(0.92);
 }
 </style>

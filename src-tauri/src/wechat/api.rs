@@ -22,7 +22,7 @@ fn random_wechat_uin() -> String {
 pub fn build_base_info() -> BaseInfo {
     BaseInfo {
         channel_version: Some("2.4.3".to_string()),
-        bot_agent: Some("Bob-Agent (Rust)".to_string()),
+        bot_agent: Some("Bob.agent (Rust)".to_string()),
     }
 }
 

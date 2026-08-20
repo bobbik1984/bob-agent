@@ -1,6 +1,7 @@
 {
-  "name": "bob-agent",
-  "version": "0.32.0",
+  "name": "bob.agent",
+  "version": "0.9.5",
+  "packageManager": "pnpm@11.13.0",
   "description": "AI 桌面私人秘书 — 智能对话 + 图片识别 + 日程管理 + 文件分析",
   "scripts": {
     "dev": "vite",
@@ -13,25 +14,37 @@
     "lint": "eslint src/ src-tauri/"
   },
   "dependencies": {
-    "@tauri-apps/api": "^2.0.1",
-    "@tauri-apps/plugin-clipboard-manager": "~2.0.0",
-    "@tauri-apps/plugin-dialog": "~2.0.0",
+    "@tauri-apps/api": "^2.11.1",
+    "@tauri-apps/plugin-barcode-scanner": "^2.4.5",
+    "@tauri-apps/plugin-clipboard-manager": "~2.3.2",
+    "@tauri-apps/plugin-dialog": "~2.7.2",
     "@tauri-apps/plugin-notification": "^2.3.3",
+    "@tiptap/core": "^3.30.1",
+    "@tiptap/extension-image": "^3.30.2",
+    "@tiptap/extension-link": "^3.30.2",
+    "@tiptap/extension-placeholder": "^3.30.2",
+    "@tiptap/extension-task-item": "^3.30.2",
+    "@tiptap/extension-task-list": "^3.30.2",
+    "@tiptap/pm": "^3.30.1",
+    "@tiptap/starter-kit": "^3.30.1",
+    "@tiptap/vue-3": "^3.30.1",
     "dompurify": "^3.4.2",
     "highlight.js": "^11.10.0",
     "lucide-vue-next": "^1.0.0",
     "marked": "^14.0.0",
     "marked-highlight": "^2.2.0",
+    "qrcode.vue": "^3.10.0",
+    "tiptap-markdown": "^0.9.0",
     "vis-data": "^8.0.4",
     "vis-network": "^10.1.0",
     "vue-i18n": "^11.4.2"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2.0.0-rc.18",
-    "@vitejs/plugin-vue": "^5.2.0",
+    "@tauri-apps/cli": "^2.11.4",
+    "@vitejs/plugin-vue": "^5.2.4",
     "adm-zip": "^0.5.17",
     "archiver": "^8.0.0",
-    "vite": "^6.0.0",
+    "vite": "6.0.0",
     "vitest": "^2.1.0",
     "vue": "^3.5.0"
   }

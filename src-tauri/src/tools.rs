@@ -2527,3 +2527,12 @@ async fn tool_browse_page(app: &tauri::AppHandle, args: &Value) -> Value {
         }),
     }
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolRisk {
+    R0,
+    R1,
+    R2,
+    R3,
+}
+

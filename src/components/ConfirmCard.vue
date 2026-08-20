@@ -31,7 +31,7 @@
     </div>
 
     <div class="card-footer">
-      <button class="btn btn-ghost" @click="$emit('cancel')">{{ $t('confirm_card.cancel') }}</button>
+      <button class="btn btn-secondary" @click="$emit('cancel')">{{ $t('confirm_card.cancel') }}</button>
       <button class="btn btn-primary" @click="$emit('confirm', event)">{{ $t('confirm_card.confirm') }}</button>
     </div>
   </div>
@@ -151,31 +151,4 @@ const priorityLabel = computed(() => {
   gap: var(--space-2);
 }
 
-.btn {
-  padding: var(--space-2) var(--space-4);
-  font-size: var(--text-sm);
-  border-radius: var(--radius-md);
-  cursor: pointer;
-  border: 1px solid transparent;
-}
-
-.btn-ghost {
-  background: transparent;
-  color: var(--text-secondary);
-}
-
-.btn-ghost:hover {
-  background: var(--surface-hover);
-}
-
-.btn-primary {
-  background: transparent;
-  color: var(--text-primary);
-  border: 1px solid var(--border-default);
-}
-
-.btn-primary:hover {
-  border-color: var(--text-secondary);
-  background: var(--surface-hover);
-}
 </style>

@@ -1,47 +1,149 @@
 <template>
-  <div class="kg-view">
-    <!-- 顶部工具栏 -->
-    <header class="kg-toolbar">
-      <div class="kg-toolbar-left">
-        <Waypoints :size="18" />
-        <h2>{{ $t('kg.title') || '知识图谱' }}</h2>
-        <span v-if="stats" class="kg-stat-badge">
-          {{ $t('kg.stats_summary', { nodes: stats.node_count, edges: stats.edge_count }) }}
-        </span>
-      </div>
-      <div class="kg-toolbar-right">
-        <div class="kg-search-box">
-          <Search :size="14" />
-          <input
-            v-model="searchTerm"
-            :placeholder="$t('kg.search_placeholder') || '搜索节点...'"
-            @keyup.enter="doSearch"
+  <div class="kg-view" :class="isMobile ? 'kg-mobile-col' : 'layout-row'">
+    <!-- 移动端二级导航 Tab 栏 -->
+    <div v-if="isMobile" class="mobile-tab-grid">
+      <button class="mobile-tab-item" :class="{ active: currentMode === 'graph' }" @click="currentMode = 'graph'">
+        <Waypoints :size="20" class="tab-icon" />
+        <span>图谱</span>
+      </button>
+      <button class="mobile-tab-item" :class="{ active: currentMode === 'notebook' }" @click="currentMode = 'notebook'">
+        <FileText :size="20" class="tab-icon" />
+        <span>笔记</span>
+      </button>
+      <button class="mobile-tab-item" :class="{ active: currentMode === 'ticket' }" @click="currentMode = 'ticket'">
+        <Ticket :size="20" class="tab-icon" />
+        <span>{{ $t('ticket.my_tickets') || '票夹' }}</span>
+      </button>
+    </div>
+
+    <!-- 侧边栏传送门 -->
+    <Teleport to="#kg-sidebar-portal" v-if="isMounted">
+      <div class="kg-sidebar-wrapper">
+        <div class="kg-sidebar-header">
+          <div class="mode-toggle">
+            <button :class="{ active: currentMode === 'graph' }" @click="currentMode = 'graph'">
+              <Waypoints :size="16" /> {{ $t('kg.graph_view') }}
+            </button>
+            <button :class="{ active: currentMode === 'notebook' }" @click="currentMode = 'notebook'">
+              <FileText :size="16" /> {{ $t('kg.notebook_view') }}
+            </button>
+            <button :class="{ active: currentMode === 'ticket' }" @click="currentMode = 'ticket'">
+              <Ticket :size="16" /> {{ $t('ticket.my_tickets') || '票夹' }}
+            </button>
+          </div>
+        </div>
+
+        <!-- 图谱侧边栏内容 -->
+        <div v-show="currentMode === 'graph'" class="kg-sidebar-content graph-sidebar">
+          <div v-if="topProjects.length > 0" class="kg-project-list">
+            <h3 class="kg-project-list-title">{{ $t('kg.top_projects') || '主要项目' }}</h3>
+            <button
+              v-for="proj in topProjects"
+              :key="proj.id"
+              class="kg-project-item"
+              :class="{ active: selectedNode?.id === proj.id }"
+              @click="focusNode(proj.id)"
+            >
+              <span class="project-icon" :style="{ color: kgColors['project'] || kgColors['Project'] || 'var(--user-accent, var(--accent-primary))' }">
+                <Star :size="14" fill="currentColor" />
+              </span>
+              <span class="project-name">{{ proj.label }}</span>
+              <span class="project-degree">{{ proj.degree }}</span>
+            </button>
+          </div>
+          <div v-else class="kg-project-list-empty">
+            <span v-if="loading">{{ te('kg.loading') ? t('kg.loading') : '加载中...' }}</span>
+            <span v-else>{{ te('kg.no_projects') ? t('kg.no_projects') : '暂无项目节点' }}</span>
+          </div>
+
+          <!-- 来源批次列表 -->
+          <div v-if="stats && stats.source_batches && stats.source_batches.length > 0" class="kg-project-list" style="margin-top: 16px;">
+            <h3 class="kg-project-list-title">来源批次</h3>
+            <button
+              v-for="batch in stats.source_batches"
+              :key="batch.batch_id"
+              class="kg-project-item"
+              :class="{ active: selectedNode?.id === 'source_' + batch.batch_id }"
+              @click="focusNode('source_' + batch.batch_id)"
+            >
+              <span class="project-icon" :style="{ color: kgColors['source'] || 'var(--user-accent, var(--accent-primary))' }">
+                <Package :size="14" />
+              </span>
+              <span class="project-name" :title="batch.folder_path">{{ batch.folder_name }}</span>
+              <span class="project-degree">{{ batch.file_count }}</span>
+            </button>
+          </div>
+          
+          <div class="kg-sidebar-footer">
+            <span v-if="stats" class="kg-stat-badge">
+              {{ $t('kg.stats_summary', { nodes: stats.node_count, edges: stats.edge_count }) }}
+            </span>
+            <button class="kg-add-btn" @click="openFolderPicker" :title="$t('kg.add_folder') || '添加知识库'">
+              <Plus :size="16" />
+            </button>
+          </div>
+        </div>
+
+        <!-- 笔记侧边栏内容 -->
+        <div v-show="currentMode === 'notebook'" class="kg-sidebar-content notebook-sidebar-content">
+          <NoteExplorer 
+            v-if="!isMobile"
+            ref="noteExplorerRef"
+            :selectedNoteId="selectedNoteId"
+            @select="handleNoteSelect"
           />
         </div>
-        <div class="kg-type-filters">
-          <button
-            v-for="t in typeFilters"
-            :key="t.type"
-            class="kg-filter-chip"
-            :class="{ active: activeTypes.has(t.type) }"
-            @click="toggleType(t.type)"
-          >
-            <span class="chip-shape" :style="{ color: kgColors[t.type] || 'var(--text-muted)' }">
-              {{ getTypeShapeIcon(t.type) }}
-            </span>
-            {{ getTypeName(t.type) }} ({{ t.count }})
-          </button>
-        </div>
-        <button class="kg-add-btn" @click="openFolderPicker" :title="$t('kg.add_folder') || '添加知识库'">
-          <Plus :size="16" />
-        </button>
       </div>
-    </header>
+    </Teleport>
 
-    <!-- 主体：图谱画布 + Inspector -->
-    <div class="kg-body">
-      <!-- vis.js 画布 + 拖拽覆盖层 -->
-      <div
+    <!-- 右侧主体区域 -->
+    <main class="kg-main-content">
+      <!-- 主体：图谱画布 + Inspector -->
+      <div v-show="currentMode === 'graph'" class="kg-body">
+        
+        <!-- Search Overlay -->
+        <div class="kg-overlay-search" :class="{ expanded: kgSearchExpanded }">
+          <div class="kg-search-box">
+            <button v-show="!kgSearchExpanded" class="btn-icon" @click="expandSearch" title="搜索">
+              <Search :size="16" />
+            </button>
+            <div v-show="kgSearchExpanded" style="display: flex; align-items: center; gap: 8px; width: 100%;">
+              <Search :size="14" style="color: var(--text-muted); flex-shrink: 0;" />
+              <input
+                v-model="searchTerm"
+                :placeholder="$t('kg.search_placeholder') || '节点...'"
+                @keyup.enter="doSearch"
+                @blur="kgSearchExpanded = false"
+                @keydown.esc="kgSearchExpanded = false"
+                ref="searchInputRef"
+              />
+            </div>
+          </div>
+        </div>
+
+        <!-- Legend Overlay -->
+        <div class="kg-overlay-legend">
+          <div class="kg-type-filters">
+            <button
+              v-for="t in typeFilters"
+              :key="t.type"
+              class="kg-filter-chip"
+              :class="{ active: activeTypes.has(t.type) }"
+              @click="toggleType(t.type)"
+            >
+              <span style="display: flex; align-items: center; gap: 6px;">
+                <span class="chip-shape" :style="{ color: kgColors[t.type] || 'var(--text-muted)' }">
+                  {{ getTypeShapeIcon(t.type) }}
+                </span>
+                <span>{{ getTypeName(t.type) }}</span>
+              </span>
+              <span style="font-variant-numeric: tabular-nums; opacity: 0.8;">{{ t.count }}</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- vis.js 画布 + 拖拽覆盖层 -->
+        <div
         ref="networkContainer"
         class="kg-canvas"
         @dragover.prevent="onDragOver"
@@ -60,7 +162,7 @@
       <aside v-if="selectedNode" class="kg-inspector" :style="{ width: inspectorWidth + 'px' }">
         <div class="inspector-header">
           <span class="inspector-type-badge" :style="{ background: kgColors[selectedNode.type] || 'var(--text-muted)' }">
-            {{ getTypeShapeIcon(selectedNode.type) }} {{ selectedNode.type }}
+            {{ getTypeShapeIcon(selectedNode.type) }} {{ getTypeName(selectedNode.type) }}
           </span>
           <div style="display:flex; gap: 4px;">
             <button class="btn-icon inspector-merge" :class="{ active: mergeMode }" @click="toggleMergeMode" title="关联/合并至...">
@@ -84,8 +186,14 @@
         </div>
 
         <div v-if="projectIndexPath" style="margin-bottom: var(--space-4);">
-          <button class="btn" style="width: 100%; display: flex; justify-content: center; align-items: center; gap: 6px; background-color: var(--user-accent); color: white; border: none;" @click="openProjectPortal">
+          <button class="btn" style="width: 100%; display: flex; justify-content: center; align-items: center; gap: 6px; background-color: var(--user-accent); color: var(--text-inverse); border: none;" @click="openProjectPortal">
             <ExternalLink :size="14" /> 进入项目协作门户
+          </button>
+        </div>
+
+        <div v-if="selectedNode.type === 'source'" style="margin-bottom: var(--space-4);">
+          <button class="btn btn-danger" style="width: 100%; display: flex; justify-content: center; align-items: center; gap: 6px;" @click="removeSourceBatch(selectedNode)">
+            <Trash2 :size="14" /> 彻底清除该来源批次
           </button>
         </div>
 
@@ -100,7 +208,7 @@
             <input type="text" v-model="mergeSearchTerm" placeholder="搜索目标节点..." class="merge-search-input" />
             <label class="merge-checkbox">
               <input type="checkbox" v-model="mergeFilterSameType" />
-              仅同类型 ({{ selectedNode.type }})
+              仅同类型 ({{ getTypeName(selectedNode.type) }})
             </label>
           </div>
           
@@ -140,35 +248,273 @@
             暂无关联
           </div>
         </div>
+
+        <!-- P1-4: 相关笔记 -->
+        <div class="inspector-section" v-if="inspectorRelatedNotes.length > 0">
+          <h4>📓 {{ $t('kg.notebook_view') }}</h4>
+          <div class="relation-item" v-for="note in inspectorRelatedNotes" :key="note.path"
+               @click="openRelatedNote(note.path)">
+            <div class="relation-icon" style="color: var(--user-accent);">📄</div>
+            <div class="relation-info">
+              <span class="relation-label">{{ note.title || note.path }}</span>
+              <span class="relation-type" v-if="note.snippet">{{ note.snippet }}</span>
+            </div>
+          </div>
+        </div>
       </aside>
     </div>
 
-    <!-- 空状态 / 生成中 -->
-    <div v-if="!loading && stats && stats.node_count === 0 && !backfilling" class="kg-empty">
+
+    <!-- 笔记工作台 -->
+    <div v-if="currentMode === 'notebook'" class="notebook-body">
+      <!-- 移动端侧边栏 (抽屉+工具栏) -->
+      <NoteExplorer 
+        v-if="isMobile"
+        ref="noteExplorerRefMobile"
+        :selectedNoteId="selectedNoteId"
+        @select="handleNoteSelect"
+      />
+      
+      <div class="notebook-editor-area">
+        <div v-if="!selectedNoteId" class="notebook-empty-state">
+          {{ isMobile ? '请在菜单中选择或新建一篇笔记' : '请在左侧选择或新建一篇笔记' }}
+        </div>
+        <template v-else>
+          <div v-if="isLoadingNote" class="notebook-empty-state">
+            <RefreshCw :size="32" class="animate-spin" style="opacity: 0.4; margin-bottom: 12px;" />
+            <p style="color: var(--text-secondary); font-size: 14px;">正在全速解析，请稍候...</p>
+          </div>
+          <TiptapEditor 
+            v-show="!isLoadingNote"
+            v-model="currentNoteContent"
+            :saveStatus="saveStatus"
+            :tags="currentNoteTags"
+            @save="saveCurrentNote"
+            @update:tags="handleTagsUpdate"
+            @wikilink-click="handleWikilinkClick"
+          />
+        </template>
+
+        <!-- P2-2: 反向链接面板 -->
+        <div v-if="selectedNoteId && backlinks.length > 0" class="backlinks-panel">
+          <div class="backlinks-header" @click="showBacklinks = !showBacklinks">
+            <ChevronRight :size="14" class="caret" :class="{ open: showBacklinks }" />
+            🔗 {{ t('notebook.tags') === 'Tags' ? 'Backlinks' : '反向链接' }} ({{ backlinks.length }})
+          </div>
+          <div v-show="showBacklinks" class="backlinks-list">
+            <div v-for="bl in backlinks" :key="bl.path" class="backlink-item" @click="handleNoteSelect(bl.path)">
+              <span class="backlink-title">{{ bl.title }}</span>
+              <span class="backlink-context" v-if="bl.context">{{ bl.context }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="currentMode === 'ticket'" class="ticket-body" style="flex:1; overflow-y:auto; padding:24px; background-color: var(--bg-primary);">
+      <div v-if="ticketNodes.length === 0" class="notebook-empty-state">
+        {{ $t('ticket.empty') || '票夹为空' }}
+      </div>
+      <div v-else style="display:grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; align-items: stretch;">
+        <TicketCard v-for="node in ticketNodes" :key="node.id" :node="node" />
+      </div>
+    </div>
+
+    <!-- 图谱空状态 / 生成中 -->
+    <div v-if="currentMode === 'graph' && !loading && stats && stats.node_count === 0 && !backfilling" class="kg-empty">
       <Waypoints :size="48" style="opacity: 0.2;" />
       <p>{{ $t('kg.empty') }}</p>
       <p class="kg-empty-hint">{{ $t('kg.empty_hint') }}</p>
     </div>
-    <div v-if="backfilling" class="kg-empty">
-      <RefreshCw :size="32" class="spin" style="opacity: 0.4;" />
+    <div v-if="currentMode === 'graph' && backfilling" class="kg-empty">
+      <RefreshCw :size="32" class="animate-spin" style="opacity: 0.4;" />
       <p>{{ $t('kg.generating') }}</p>
     </div>
+    </main>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, onBeforeUnmount, watch, computed } from 'vue';
+import { ref, onMounted, onBeforeUnmount, watch, computed, inject } from 'vue';
+import NoteExplorer from '../components/NoteExplorer.vue';
+import TicketCard from '../components/TicketCard.vue';
+import TiptapEditor from '../components/TiptapEditor.vue';
 import { useI18n } from 'vue-i18n';
+import { useDialog } from '../composables/useDialog';
+import { listen } from '@tauri-apps/api/event';
 import { Network } from 'vis-network';
 import { DataSet } from 'vis-data';
-import { Waypoints, Search, X, FileText, RefreshCw, Plus, Link, ExternalLink } from 'lucide-vue-next';
+import { Waypoints, Search, X, FileText, RefreshCw, Plus, Link, ExternalLink, Trash2, ChevronRight, Menu, ChevronDown, Star, Package, Ticket } from 'lucide-vue-next';
+
+const emit = defineEmits(['toggle-sidebar']);
+
+const isMobile = inject('isMobile');
+const showMobileMenu = ref(false);
+
+// ── 笔记模式逻辑 ─────────────────────────────────────
+const isMounted = ref(false);
+
+onMounted(() => {
+  isMounted.value = true;
+});
+
+let saveTimeout = null;
+let pendingSaveFn = null;
+
+async function handleNoteSelect(id) {
+  // Flush any pending save for the previous note synchronously
+  if (saveTimeout && pendingSaveFn) {
+    clearTimeout(saveTimeout);
+    saveTimeout = null;
+    await pendingSaveFn();
+  }
+
+  selectedNoteId.value = id;
+  if (!id) {
+    currentNoteContent.value = '';
+    currentNoteTags.value = [];
+    backlinks.value = [];
+    currentNoteFrontmatter = null;
+    return;
+  }
+  
+  try {
+    isLoadingNote.value = true;
+    currentNoteContent.value = '';
+    
+    // Let Vue and browser update the UI (highlight the clicked note and show loader immediately)
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    
+    // Abort if user clicked another note while yielding
+    if (selectedNoteId.value !== id) {
+      if (selectedNoteId.value === id) isLoadingNote.value = false; // only reset if we are the last one, wait, actually let the new click handle it
+      return;
+    }
+
+    const res = await window.appAPI.notebookReadNote(id);
+    
+    // Abort if user clicked another note while reading from disk
+    if (selectedNoteId.value !== id) return;
+
+    if (res.ok) {
+      currentNoteContent.value = res.content;
+      currentNoteFrontmatter = res.frontmatter;
+      currentNoteTags.value = res.frontmatter?.tags || [];
+      // P2-2: Load backlinks asynchronously
+      loadBacklinks(id);
+      // Yield to browser one more time so Vue updates Tiptap editor props and Tiptap parses it
+      // BEFORE we remove the loading spinner. This ensures the spinner stays ON while Tiptap parses!
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    } else {
+      console.error("Read note failed:", res.error);
+    }
+  } catch (e) {
+    console.error("Read note error:", e);
+  } finally {
+    if (selectedNoteId.value === id) {
+      isLoadingNote.value = false;
+    }
+  }
+}
+
+async function saveCurrentNote(markdown) {
+  if (!selectedNoteId.value) return;
+  const id = selectedNoteId.value;
+  
+  if (saveTimeout) clearTimeout(saveTimeout);
+  saveStatus.value = '保存中...';
+
+  pendingSaveFn = async () => {
+    try {
+      await window.appAPI.notebookSaveNote(id, markdown);
+      saveStatus.value = '已自动保存';
+      setTimeout(() => {
+        if (saveStatus.value === '已自动保存') saveStatus.value = '';
+      }, 3000);
+    } catch (e) {
+      console.error("Save note failed:", e);
+      saveStatus.value = '保存出错';
+    }
+  };
+
+  saveTimeout = setTimeout(async () => {
+    if (pendingSaveFn) {
+      await pendingSaveFn();
+      pendingSaveFn = null;
+    }
+  }, 1000);
+}
+
+async function handleTagsUpdate(newTags) {
+  if (!selectedNoteId.value) return;
+  currentNoteTags.value = newTags;
+  try {
+    await window.appAPI.notebookUpdateTags(selectedNoteId.value, newTags);
+  } catch (e) {
+    console.error('Failed to update tags:', e);
+  }
+}
+
+// P2-2: Backlinks
+const backlinks = ref([]);
+const showBacklinks = ref(true);
+
+async function loadBacklinks(notePath) {
+  try {
+    const res = await window.appAPI.notebookGetBacklinks(notePath);
+    if (res && res.ok) {
+      backlinks.value = res.backlinks || [];
+    }
+  } catch (e) {
+    console.error('Failed to load backlinks:', e);
+    backlinks.value = [];
+  }
+}
+
+// P2-1: Wikilink click → navigate to target note
+async function handleWikilinkClick(targetTitle) {
+  // Search for the note by title
+  try {
+    const res = await window.appAPI.notebookSearch(targetTitle);
+    if (res && res.ok && res.results && res.results.length > 0) {
+      // Found existing note — navigate to it
+      handleNoteSelect(res.results[0].path);
+    } else {
+      // Note doesn't exist — create it
+      const createRes = await window.appAPI.notebookCreateNote(targetTitle, []);
+      if (createRes.ok) {
+        if (noteExplorerRef.value) noteExplorerRef.value.refresh();
+        handleNoteSelect(createRes.path);
+      }
+    }
+  } catch (e) {
+    console.error('Wikilink navigate failed:', e);
+  }
+}
 
 // ── 状态 ────────────────────────────────────────────────
 const { t, te } = useI18n();
 
+const currentMode = ref('graph'); // 'graph' or 'notebook'
+const noteExplorerRef = ref(null);
+const selectedNoteId = ref(null);
+const currentNoteContent = ref('');
+const currentNoteTags = ref([]);
+const isLoadingNote = ref(false);
+const saveStatus = ref('');
+let currentNoteFrontmatter = null;
+
 const networkContainer = ref(null);
 const stats = ref(null);
 const searchTerm = ref('');
+const kgSearchExpanded = ref(false);
+const searchInputRef = ref(null);
+function expandSearch() {
+  kgSearchExpanded.value = true;
+  setTimeout(() => {
+    if (searchInputRef.value) searchInputRef.value.focus();
+  }, 150); // slight delay to allow transition to start/finish
+}
 const selectedNode = ref(null);
 const selectedRelations = ref([]);
 const projectIndexPath = ref(null);
@@ -177,19 +523,34 @@ const activeTypes = ref(new Set());
 const backfilling = ref(false);
 const isDragOver = ref(false);
 
+const inspectorRelatedNotes = ref([]);
+
 watch(() => selectedNode.value, async (newVal) => {
   projectIndexPath.value = null;
-  if (newVal && (newVal.type === 'Project' || newVal.type === 'project')) {
+  inspectorRelatedNotes.value = [];
+  if (!newVal) return;
+
+  // Check project index
+  if (newVal.type === 'Project' || newVal.type === 'project') {
     try {
-      const path = await window.electronAPI.checkProjectIndex(newVal.label);
-      if (path) {
-        projectIndexPath.value = path;
-      }
-    } catch (e) {
-      console.error(e);
-    }
+      const path = await window.appAPI.checkProjectIndex(newVal.label);
+      if (path) projectIndexPath.value = path;
+    } catch (e) { console.error(e); }
   }
+
+  // P1-4: Search for related notes by node label
+  try {
+    const res = await window.appAPI.notebookSearch(newVal.label);
+    if (res && res.ok && res.results) {
+      inspectorRelatedNotes.value = res.results.slice(0, 5);
+    }
+  } catch (e) { console.error('Related notes search failed:', e); }
 });
+
+function openRelatedNote(notePath) {
+  currentMode.value = 'notebook';
+  handleNoteSelect(notePath);
+}
 
 const mergeMode = ref(false);
 const mergeTargetId = ref('');
@@ -202,13 +563,65 @@ const isResizingInspector = ref(false);
 let network = null;
 let nodesDataSet = null;
 let edgesDataSet = null;
-let allGraphData = null;
+import { shallowRef } from 'vue';
+const allGraphData = shallowRef(null);
 
 const allNodesList = computed(() => {
-  if (!allGraphData) return [];
-  return allGraphData.nodes
+  const _trigger = stats.value;
+  if (!allGraphData.value) return [];
+  return allGraphData.value.nodes
     .filter(n => n.id !== selectedNode.value?.id)
     .sort((a,b) => a.label.localeCompare(b.label));
+});
+
+const ticketNodes = computed(() => {
+  const _trigger = stats.value;
+  if (!allGraphData.value || !allGraphData.value.nodes) return [];
+  return allGraphData.value.nodes
+    .filter(n => n.node_type === 'ticket' || n.type === 'ticket' || n.type === 'Ticket')
+    .sort((a,b) => {
+      let aMeta = {};
+      let bMeta = {};
+      try { aMeta = typeof a.metadata === 'string' && a.metadata ? JSON.parse(a.metadata) : (a.metadata || {}); } catch(e) {}
+      try { bMeta = typeof b.metadata === 'string' && b.metadata ? JSON.parse(b.metadata) : (b.metadata || {}); } catch(e) {}
+      
+      const now = new Date();
+      const dateA = aMeta.start_time ? new Date(aMeta.start_time) : null;
+      const dateB = bMeta.start_time ? new Date(bMeta.start_time) : null;
+      
+      if (!dateA && !dateB) return 0;
+      if (!dateA) return 1;
+      if (!dateB) return -1;
+      
+      const isAExpired = dateA < now;
+      const isBExpired = dateB < now;
+      
+      if (!isAExpired && isBExpired) return -1;
+      if (isAExpired && !isBExpired) return 1;
+      
+      if (!isAExpired && !isBExpired) {
+        return dateA - dateB; // Upcoming: closer to today first (ascending)
+      }
+      
+      return dateB - dateA; // Expired: closer to today first (descending)
+    });
+});
+
+const topProjects = computed(() => {
+  const _trigger = stats.value; // Force reactivity since allGraphData is not a ref
+  if (!allGraphData.value || !allGraphData.value.nodes) return [];
+  const projectNodes = allGraphData.value.nodes.filter(n => n.type === 'Project' || n.type === 'project');
+  const degreeMap = new Map();
+  if (allGraphData.value.edges) {
+    allGraphData.value.edges.forEach(edge => {
+      degreeMap.set(edge.source, (degreeMap.get(edge.source) || 0) + 1);
+      degreeMap.set(edge.target, (degreeMap.get(edge.target) || 0) + 1);
+    });
+  }
+  return projectNodes
+    .map(n => ({ ...n, degree: degreeMap.get(n.id) || 0 }))
+    .sort((a, b) => b.degree - a.degree)
+    .slice(0, 10); // Display top 10 projects
 });
 
 const filteredMergeNodes = computed(() => {
@@ -239,7 +652,7 @@ function startResizeInspector(e) {
   document.body.style.userSelect = 'none';
 }
 
-function handleResizeInspector(e) {
+async function handleResizeInspector(e) {
   if (!isResizingInspector.value) return;
   // Panel is on the right, so width is (screen width - mouse X)
   let newWidth = window.innerWidth - e.clientX;
@@ -248,7 +661,7 @@ function handleResizeInspector(e) {
   inspectorWidth.value = newWidth;
 }
 
-function stopResizeInspector() {
+async function stopResizeInspector() {
   isResizingInspector.value = false;
   document.removeEventListener('mousemove', handleResizeInspector);
   document.removeEventListener('mouseup', stopResizeInspector);
@@ -261,11 +674,11 @@ async function confirmMerge() {
   const targetNode = allNodesList.value.find(n => n.id === mergeTargetId.value);
   if (!targetNode) return;
   
-  const yes = window.confirm(`确定要将【${selectedNode.value.label}】合并至【${targetNode.label}】吗？\n\n合并后，当前节点将被删除，其所有关联关系将转移到目标节点上。`);
+  const yes = await showConfirm(`确定要将【${selectedNode.value.label}】合并至【${targetNode.label}】吗？\n\n合并后，当前节点将被删除，其所有关联关系将转移到目标节点上。`);
   if (!yes) return;
   
   try {
-    const res = await window.electronAPI.invoke('kg_merge_nodes', {
+    const res = await window.appAPI.invoke('kg_merge_nodes', {
       payload: {
         primary_id: targetNode.id,
         alias_id: selectedNode.value.id
@@ -277,7 +690,7 @@ async function confirmMerge() {
     selectedNode.value = null;
     await loadGraph();
   } catch (e) {
-    alert("合并失败: " + e);
+    await showAlert("合并失败: " + e);
   }
 }
 
@@ -294,6 +707,7 @@ function updateKgColors() {
     concept: get('--kg-node-concept') || '#4f46e5',
     person: get('--kg-node-person') || '#d97706',
     topic: get('--kg-node-topic') || '#9333ea',
+    note: get('--kg-node-note') || '#eab308',
     edge: get('--kg-edge') || 'rgba(100, 116, 139, 0.25)',
     edgeHl: get('--kg-edge-highlight') || get('--accent-primary') || '#6366f1',
     font: get('--kg-font') || '#64748b',
@@ -312,6 +726,7 @@ const typeShapes = {
   tag: { vis: 'diamond', icon: '◆' },
   person: { vis: 'triangleDown', icon: '▼' },
   topic: { vis: 'hexagon', icon: '⬢' },
+  note: { vis: 'box', icon: '▤' },
 };
 
 function getTypeShapeIcon(type) {
@@ -347,10 +762,10 @@ function buildNetworkOptions() {
     physics: {
       solver: 'barnesHut',
       barnesHut: { 
-        gravitationalConstant: -12000, // 更强的节点斥力 (默认是 -2000)
-        centralGravity: 0.05,          // 较弱的中心引力
-        springLength: 250,             // 更长的边距 (默认 100)
-        springConstant: 0.04,
+        gravitationalConstant: -6000,  // 稍微减少排斥力使图谱更紧凑 (之前是-12000，默认-2000)
+        centralGravity: 0.08,          // 稍微增加向心力
+        springLength: 150,             // 缩短连线基本长度 (之前是250，默认100)
+        springConstant: 0.05,          // 稍微增强连线拉力
         damping: 0.2 
       },
       stabilization: { enabled: true, iterations: 80, fit: true },
@@ -371,49 +786,117 @@ function buildNetworkOptions() {
 
 let tauriDragUnlistens = [];
 
-function openSourceFile(path) {
+async function openSourceFile(path) {
   if (!path) return;
-  if (window.electronAPI && window.electronAPI.openFile) {
-    window.electronAPI.openFile(path).catch(err => {
+  if (window.appAPI && window.appAPI.openFile) {
+    window.appAPI.openFile(path).catch(err => {
       console.error('Failed to open file:', err);
     });
   } else {
-    alert(`无法直接打开文件: ${path}`);
+    await showAlert(`无法直接打开文件: ${path}`);
   }
 }
 
 function openProjectPortal() {
   if (projectIndexPath.value) {
-    window.electronAPI.openFile(projectIndexPath.value);
+    window.appAPI.openFile(projectIndexPath.value);
   }
 }
 
 // ── 初始化 ──────────────────────────────────────────────
+function onAndroidBackPressed(e) {
+  if (showMobileMenu.value) {
+    showMobileMenu.value = false;
+    e.preventDefault();
+  } else if (mergeMode.value) {
+    mergeMode.value = false;
+    e.preventDefault();
+  } else if (selectedNode.value) {
+    selectedNode.value = null;
+    e.preventDefault();
+  } else if (currentMode.value === 'notebook' && selectedNoteId.value) {
+    selectedNoteId.value = null;
+    e.preventDefault();
+  }
+}
+
+function resizeNetwork() {
+  if (network) {
+    network.redraw();
+    network.fit();
+  }
+}
+
 onMounted(async () => {
+  window.addEventListener('resize', resizeNetwork);
+  
+  window.addEventListener('open-ticket-view', (e) => {
+    currentMode.value = 'ticket';
+    if (e.detail) {
+      setTimeout(() => {
+        window.dispatchEvent(new CustomEvent('ticket-card-open', { detail: e.detail }));
+      }, 100);
+    }
+  });
+
+  // Auto-refresh ticket list when a new ticket is created from chat
+  window.addEventListener('ticket-created', async () => {
+    try {
+      const [graphData, statsData] = await Promise.all([
+        window.appAPI.kgGetFullGraph(),
+        window.appAPI.kgStats(),
+      ]);
+      stats.value = statsData;
+      allGraphData.value = graphData;
+    } catch (e) {
+      console.warn('[KG] ticket-created refresh failed:', e);
+    }
+  });
+
+  if (window.__TAURI_IPC__) {
+    try {
+      listen('kg-updated', async () => {
+        console.log('[KG] Auto-refreshing knowledge base due to kg-updated event...');
+        try {
+          await loadGraph();
+        } catch (e) {
+          console.warn('[KG] auto-refresh failed:', e);
+        }
+      }).then(unlisten => {
+        tauriDragUnlistens.push(unlisten);
+      });
+    } catch (e) {
+      console.warn('Failed to listen to kg-updated', e);
+    }
+  }
+
+  window.addEventListener('android-back-pressed', onAndroidBackPressed);
   updateKgColors();
   await loadGraph();
   loading.value = false;
 
   // 注册 Tauri 原生拖拽监听 (因为全局已接管 native OS drop)
-  if (window.electronAPI.onDragEnter) {
-    window.electronAPI.onDragEnter(async () => {
+  if (window.appAPI.onDragEnter) {
+    window.appAPI.onDragEnter(async () => {
       isDragOver.value = true;
     }).then(u => tauriDragUnlistens.push(u));
 
-    window.electronAPI.onDragLeave(async () => {
+    window.appAPI.onDragLeave(async () => {
       isDragOver.value = false;
     }).then(u => tauriDragUnlistens.push(u));
 
-    window.electronAPI.onDragDrop(async (e) => {
+    window.appAPI.onDragDrop(async (e) => {
       isDragOver.value = false;
+      const kgView = document.querySelector('.kg-view');
+      if (kgView && kgView.offsetParent === null) return;
       if (e.payload && e.payload.paths && e.payload.paths.length > 0) {
         const path = e.payload.paths[0];
         let yes = false;
         try {
-          const { ask } = await import('@tauri-apps/plugin-dialog');
+          // using useDialog
           
           // 先预估成本
-          const estimate = await window.electronAPI.estimateKB(path);
+          const estimate = await window.appAPI.estimateKB(path);
           let msg = `是否要从该路径提取知识点并加入图谱？\n\n${path}\n\n`;
           
           if (estimate && !estimate.error) {
@@ -426,9 +909,9 @@ onMounted(async () => {
             msg += `【预估失败】\n${estimate.error}\n`;
           }
 
-          yes = await ask(msg, {
+          yes = await useDialog().showConfirm({
             title: '提取前确认 (包含成本预估)',
-            type: 'info'
+            message: msg
           });
         } catch (err) {
           yes = window.confirm(`是否要从该路径提取知识点并加入图谱？\n\n${path}`);
@@ -443,6 +926,7 @@ onMounted(async () => {
 });
 
 onBeforeUnmount(() => {
+  window.removeEventListener('android-back-pressed', onAndroidBackPressed);
   if (network) {
     network.destroy();
     network = null;
@@ -454,17 +938,14 @@ async function loadGraph() {
   try {
     // 加载统计和完整图谱
     const [graphData, statsData] = await Promise.all([
-      window.electronAPI.kgGetFullGraph(),
-      window.electronAPI.kgStats(),
+      window.appAPI.kgGetFullGraph(),
+      window.appAPI.kgStats(),
     ]);
     stats.value = statsData;
-    allGraphData = graphData;
+    allGraphData.value = graphData;
 
     if (graphData.nodes?.length > 0) {
       renderNetwork(graphData);
-    } else {
-      // 图谱为空，自动从现有 wiki_fts 生成
-      await doBackfill();
     }
   } catch (e) {
     console.error('KG load failed:', e);
@@ -483,7 +964,7 @@ function renderNetwork(data) {
       color: {
         background: color,
         border: color,
-        highlight: { background: color, border: '#fff' },
+        highlight: { background: color, border: 'var(--text-inverse)' },
       },
       title: `${n.label} (${n.type})${n.summary ? '\n' + n.summary : ''}`,
       opacity: 1.0,
@@ -643,12 +1124,12 @@ function resetFocus() {
 }
 
 function loadRelations(nodeId) {
-  if (!allGraphData) return;
+  if (!allGraphData.value) return;
   const rels = [];
-  for (const e of allGraphData.edges) {
+  for (const e of allGraphData.value.edges) {
     const neighborId = e.source === nodeId ? e.target : e.target === nodeId ? e.source : null;
     if (!neighborId) continue;
-    const neighborNode = allGraphData.nodes.find(n => n.id === neighborId);
+    const neighborNode = allGraphData.value.nodes.find(n => n.id === neighborId);
     if (neighborNode) {
       rels.push({
         id: neighborNode.id,
@@ -692,14 +1173,14 @@ function focusNode(nodeId) {
   }
 }
 
-function toggleType(type) {
+async function toggleType(type) {
   const s = new Set(activeTypes.value);
   if (s.has(type)) s.delete(type); else s.add(type);
   activeTypes.value = s;
   applyTypeFilter();
 }
 
-function applyTypeFilter() {
+async function applyTypeFilter() {
   if (!nodesDataSet || !edgesDataSet) return;
 
   const showAll = activeTypes.value.size === 0;
@@ -728,15 +1209,15 @@ function applyTypeFilter() {
 async function doBackfill() {
   backfilling.value = true;
   try {
-    const result = await window.electronAPI.kgBackfill();
+    const result = await window.appAPI.kgBackfill();
     console.log('KG backfill result:', result);
     // 直接获取并渲染，不调 loadGraph (避免递归)
     const [graphData, statsData] = await Promise.all([
-      window.electronAPI.kgGetFullGraph(),
-      window.electronAPI.kgStats(),
+      window.appAPI.kgGetFullGraph(),
+      window.appAPI.kgStats(),
     ]);
     stats.value = statsData;
-    allGraphData = graphData;
+    allGraphData.value = graphData;
     if (graphData.nodes?.length > 0) {
       renderNetwork(graphData);
     }
@@ -748,17 +1229,17 @@ async function doBackfill() {
 }
 
 // ── 拖拽添加 + 文件夹选择 ────────────────────────────────
-function onDragOver(e) {
+async function onDragOver(e) {
   isDragOver.value = true;
 }
 
-function onDragLeave() {
+async function onDragLeave() {
   isDragOver.value = false;
 }
 
 async function confirmExtract(path) {
   try {
-    const est = await window.electronAPI.invoke('system_estimate_kb', { folderPath: path });
+    const est = await window.appAPI.invoke('system_estimate_kb', { folderPath: path });
     
     let msg = `是否要从该路径提取知识点并加入图谱？\n\n路径: ${path}`;
     if (est) {
@@ -769,10 +1250,9 @@ async function confirmExtract(path) {
       msg += `\n预估费用: 约 ￥${est.estimated_cost_core_rmb.toFixed(4)}`;
     }
 
-    const { ask } = await import('@tauri-apps/plugin-dialog');
-    const yes = await ask(msg, {
+    const yes = await useDialog().showConfirm({
       title: '提取前确认及成本预估',
-      type: 'info'
+      message: msg
     });
     
     if (yes) {
@@ -780,7 +1260,7 @@ async function confirmExtract(path) {
     }
   } catch (err) {
     console.error(err);
-    const yes = window.confirm(`是否要从该路径提取知识点并加入图谱？\n\n${path}`);
+    const yes = await showConfirm(`是否要从该路径提取知识点并加入图谱？\n\n${path}`);
     if (yes) {
       await buildKBAndRefresh(path);
     }
@@ -815,15 +1295,15 @@ async function buildKBAndRefresh(folderPath) {
   backfilling.value = true;
   try {
     // 调用现有的 KB 构建管线
-    await window.electronAPI.invoke('system_build_kb', { folderPath, plan: '' });
+    await window.appAPI.invoke('system_build_kb', { folderPath, plan: '' });
     // KB 构建完成后回填图谱并刷新
-    await window.electronAPI.kgBackfill();
+    await window.appAPI.kgBackfill();
     const [graphData, statsData] = await Promise.all([
-      window.electronAPI.kgGetFullGraph(),
-      window.electronAPI.kgStats(),
+      window.appAPI.kgGetFullGraph(),
+      window.appAPI.kgStats(),
     ]);
     stats.value = statsData;
-    allGraphData = graphData;
+    allGraphData.value = graphData;
     if (graphData.nodes?.length > 0) {
       if (network) network.destroy();
       renderNetwork(graphData);
@@ -834,38 +1314,108 @@ async function buildKBAndRefresh(folderPath) {
     backfilling.value = false;
   }
 }
+
+async function removeSourceBatch(node) {
+  if (!node || node.type !== 'source') return;
+  // 从 source 节点取出 batch_id (通常是 node.source_batches 的内容之一，或者可以直接通过 node.id 的 source_ 前缀后获取)
+  // 如果是 source 节点，它的 id 形式是 source_<batch_id>
+  const batchId = node.id.replace('source_', '');
+  
+  if (await showConfirm(`确定要彻底清除来源批次 "${node.label}" 及其相关联的所有知识点吗？\n警告：此操作不可逆！`)) {
+    try {
+      loading.value = true;
+      const res = await window.appAPI.systemRemoveSource(batchId);
+      if (res && res.ok) {
+        console.log(`Successfully deleted ${res.nodes_deleted} nodes and ${res.edges_deleted} edges.`);
+        selectedNode.value = null;
+        // 刷新图谱
+        const [graphData, statsData] = await Promise.all([
+          window.appAPI.kgGetFullGraph(),
+          window.appAPI.kgStats(),
+        ]);
+        stats.value = statsData;
+        allGraphData.value = graphData;
+        if (graphData.nodes?.length > 0) {
+          if (network) network.destroy();
+          renderNetwork(graphData);
+        } else {
+          if (network) {
+            network.destroy();
+            network = null;
+          }
+        }
+      } else {
+        await showAlert(res?.message || '删除失败');
+      }
+    } catch (e) {
+      console.error('Failed to remove source batch:', e);
+      await showAlert('删除发生错误');
+    } finally {
+      loading.value = false;
+    }
+  }
+}
 </script>
 
 <style scoped>
-.kg-view {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  background: var(--bg-primary);
+.kg-mobile-col {
+  flex-direction: column !important;
 }
 
-/* ── 工具栏 ──────────────────────────────────── */
-.kg-toolbar {
+.kg-view {
+  display: flex;
+  flex-direction: row;
+  height: 100%;
+  background: var(--bg-primary);
+  overflow: hidden;
+}
+
+/* ── 侧边栏 (Sidebar) ──────────────────────────────────── */
+.kg-sidebar-wrapper {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  background: transparent;
+  height: 100%;
+}
+
+.kg-sidebar-header {
+  padding: 16px 16px 12px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.kg-sidebar-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+
+.graph-sidebar {
+  padding: 16px;
+  gap: 16px;
+}
+
+.notebook-sidebar-content {
+  padding: 0;
+}
+
+.kg-sidebar-footer {
+  margin-top: auto;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: var(--space-3) var(--space-4);
-  border-bottom: 1px solid var(--border-subtle);
-  gap: var(--space-3);
-  flex-wrap: wrap;
+  padding: 16px;
+  border-top: 1px dashed var(--border-subtle);
 }
 
-.kg-toolbar-left {
+.kg-main-content {
+  flex: 1;
   display: flex;
-  align-items: center;
-  gap: var(--space-2);
-}
-
-.kg-toolbar-left h2 {
-  font-size: var(--text-base);
-  font-weight: 600;
-  color: var(--text-primary);
-  margin: 0;
+  flex-direction: column;
+  min-width: 0;
+  height: 100%;
+  position: relative;
 }
 
 .kg-stat-badge {
@@ -876,60 +1426,171 @@ async function buildKBAndRefresh(folderPath) {
   border-radius: 99px;
 }
 
-.kg-toolbar-right {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
+.kg-overlay-search {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  z-index: 10;
+}
+
+.kg-overlay-legend {
+  position: absolute;
+  bottom: 16px;
+  left: 16px;
+  z-index: 10;
+  max-width: 400px;
 }
 
 .kg-search-box {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
-  background: var(--bg-secondary);
+  background: var(--bg-primary);
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-default);
+  padding: 6px 16px;
+  width: 240px;
+  height: 40px;
+  box-sizing: border-box;
+  box-shadow: var(--shadow-sm);
+  transition: all 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+  overflow: hidden;
+}
+
+.kg-overlay-search:not(.expanded) .kg-search-box {
+  width: 40px;
+  padding: 0;
+  justify-content: center;
+}
+
+.kg-overlay-search:not(.expanded) .btn-icon {
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-default);
 }
 
 .kg-search-box input {
   border: none;
   background: transparent;
   color: var(--text-primary);
-  font-size: var(--text-sm);
+  font-size: 12px;
+  height: 28px;
   outline: none;
-  width: 160px;
+  flex: 1;
+  min-width: 0;
 }
 
 .kg-type-filters {
   display: flex;
+  flex-direction: column;
+  align-items: stretch;
   gap: var(--space-1);
-  flex-wrap: wrap;
 }
 
 .kg-filter-chip {
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 2px 10px;
-  border-radius: 99px;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 4px 10px;
+  border-radius: var(--radius-default);
   border: 1px solid var(--border-subtle);
-  background: transparent;
+  background: var(--bg-primary);
   color: var(--text-secondary);
   font-size: var(--text-xs);
   cursor: pointer;
   transition: all var(--duration-fast);
+  box-shadow: var(--shadow-sm);
+}
+
+.kg-filter-chip:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
 }
 
 .kg-filter-chip.active {
-  background: var(--bg-tertiary);
+  background: var(--bg-secondary);
   border-color: var(--accent-primary);
   color: var(--text-primary);
+}
+
+/* Project List in Sidebar */
+.kg-project-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.kg-project-list-title {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  margin-bottom: 8px;
+  padding-left: 8px;
+  font-weight: 600;
+}
+
+.kg-project-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border: none;
+  background: transparent;
+  border-radius: var(--radius-default);
+  cursor: pointer;
+  transition: all 0.2s;
+  text-align: left;
+}
+
+.kg-project-item:hover {
+  background: var(--bg-hover);
+}
+
+.kg-project-item.active {
+  background: var(--surface-input);
+}
+
+.project-icon {
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.project-name {
+  flex: 1;
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-degree {
+  font-size: 10px;
+  color: var(--text-muted);
+  background: var(--bg-tertiary);
+  padding: 2px 6px;
+  border-radius: var(--radius-default);
+}
+
+.kg-project-list-empty {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  padding: 16px 8px;
 }
 
 .chip-shape {
   font-size: 10px;
   line-height: 1;
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  width: 14px;
 }
 
 /* ── 主体 ──────────────────────────────────── */
@@ -959,7 +1620,7 @@ async function buildKBAndRefresh(folderPath) {
   justify-content: center;
   width: 32px;
   height: 32px;
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-default);
   border: 1px solid var(--border-subtle);
   background: transparent;
   color: var(--text-secondary);
@@ -970,7 +1631,7 @@ async function buildKBAndRefresh(folderPath) {
 
 .kg-add-btn:hover {
   background: var(--accent-primary);
-  color: #fff;
+  color: var(--text-inverse);
   border-color: var(--accent-primary);
 }
 
@@ -1035,7 +1696,7 @@ async function buildKBAndRefresh(folderPath) {
 
 .inspector-merge-panel {
   background: var(--bg-tertiary);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-default);
   padding: var(--space-3);
   margin-bottom: var(--space-4);
   border: 1px solid var(--border-subtle);
@@ -1059,7 +1720,7 @@ async function buildKBAndRefresh(folderPath) {
 .merge-search-input {
   width: 100%;
   padding: 6px;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-default);
   border: 1px solid var(--border-subtle);
   background: var(--bg-primary);
   color: var(--text-primary);
@@ -1082,7 +1743,7 @@ async function buildKBAndRefresh(folderPath) {
   max-height: 150px;
   overflow-y: auto;
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-default);
   background: var(--bg-primary);
   margin-bottom: var(--space-3);
 }
@@ -1108,7 +1769,7 @@ async function buildKBAndRefresh(folderPath) {
 
 .merge-list-item.selected {
   background: var(--user-accent);
-  color: white;
+  color: var(--text-inverse);
 }
 
 .merge-item-icon {
@@ -1130,7 +1791,7 @@ async function buildKBAndRefresh(folderPath) {
 .merge-actions button {
   flex: 1;
   padding: 4px 8px;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-default);
   font-size: var(--text-xs);
   cursor: pointer;
   border: none;
@@ -1139,7 +1800,7 @@ async function buildKBAndRefresh(folderPath) {
 
 .merge-actions .btn-primary {
   background: var(--user-accent);
-  color: white;
+  color: var(--text-inverse);
 }
 
 .merge-actions .btn-primary:disabled {
@@ -1160,7 +1821,7 @@ async function buildKBAndRefresh(folderPath) {
 
 .inspector-type-badge {
   font-size: var(--text-xs);
-  color: #fff;
+  color: var(--text-inverse);
   padding: 2px 10px;
   border-radius: 99px;
   font-weight: 500;
@@ -1206,7 +1867,7 @@ async function buildKBAndRefresh(folderPath) {
   align-items: center;
   gap: var(--space-2);
   padding: var(--space-2);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-default);
   cursor: pointer;
   transition: background var(--duration-fast);
 }
@@ -1243,7 +1904,7 @@ async function buildKBAndRefresh(folderPath) {
   color: var(--text-muted);
   background: var(--bg-tertiary);
   padding: 1px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-default);
 }
 
 .inspector-empty {
@@ -1279,7 +1940,7 @@ async function buildKBAndRefresh(folderPath) {
   align-items: center;
   gap: var(--space-2);
   padding: var(--space-2) var(--space-4);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-default);
   border: 1px solid var(--accent-primary);
   background: transparent;
   color: var(--accent-primary);
@@ -1290,7 +1951,7 @@ async function buildKBAndRefresh(folderPath) {
 
 .kg-backfill-btn:hover:not(:disabled) {
   background: var(--accent-primary);
-  color: #fff;
+  color: var(--text-inverse);
 }
 
 .kg-backfill-btn:disabled {
@@ -1298,12 +1959,338 @@ async function buildKBAndRefresh(folderPath) {
   cursor: not-allowed;
 }
 
-.spin {
-  animation: spin 1s linear infinite;
+
+
+.mode-toggle {
+  display: flex;
+  background-color: var(--bg-tertiary);
+  border-radius: var(--radius-default);
+  padding: 2px;
+  gap: 2px;
+  overflow-x: auto;
+}
+.mode-toggle button {
+  flex: 1;
+  background: transparent;
+  border: none;
+  padding: 6px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border-radius: var(--radius-default);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-weight: 500;
+  transition: all 0.2s;
+}
+.mode-toggle button:hover {
+  color: var(--text-primary);
+}
+.mode-toggle button.active {
+  background-color: var(--bg-primary);
+  color: var(--user-accent);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
 }
 
-@keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
+.notebook-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+.notebook-editor-area {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 0;
+  background-color: var(--bg-primary);
+}
+
+.notebook-empty-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  color: var(--text-muted);
+  font-size: 1.1em;
+}
+
+/* ── P2-2: Backlinks Panel ── */
+.backlinks-panel {
+  border-top: 1px solid var(--border-subtle);
+  padding: 8px 16px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+.backlinks-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-family: var(--font-sans);
+  color: var(--text-tertiary);
+  cursor: pointer;
+  padding: 4px 0;
+  user-select: none;
+}
+.backlinks-header:hover { color: var(--text-secondary); }
+.backlinks-header .caret {
+  transition: transform 0.2s;
+}
+.backlinks-header .caret.open {
+  transform: rotate(90deg);
+}
+.backlinks-list {
+  margin-top: 6px;
+}
+.backlink-item {
+  display: flex;
+  flex-direction: column;
+  padding: 6px 10px;
+  border-radius: var(--radius-default);
+  cursor: pointer;
+  transition: background 0.15s;
+  margin-bottom: 2px;
+}
+.backlink-item:hover {
+  background-color: var(--bg-tertiary);
+}
+.backlink-title {
+  font-size: 13px;
+  color: var(--user-accent);
+  font-family: var(--font-sans);
+}
+.backlink-context {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  margin-top: 2px;
+  white-space: nowrap;
+  background: var(--bg-tertiary);
+}
+
+.relation-icon {
+  font-size: 10px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+}
+
+.relation-info {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.relation-label {
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+  flex: 1;
+}
+
+.relation-type {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  background: var(--bg-tertiary);
+  padding: 1px 6px;
+  border-radius: var(--radius-default);
+}
+
+.inspector-empty {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  text-align: center;
+  padding: var(--space-4);
+}
+
+/* ── 空状态 ──────────────────────────────────── */
+.kg-empty {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.kg-empty p {
+  margin: var(--space-2) 0;
+  font-size: var(--text-base);
+}
+
+.kg-empty-hint {
+  font-size: var(--text-sm) !important;
+  opacity: 0.6;
+}
+
+.kg-backfill-btn {
+  margin-top: var(--space-4);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-default);
+  border: 1px solid var(--accent-primary);
+  background: transparent;
+  color: var(--accent-primary);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  transition: all var(--duration-fast);
+}
+
+.kg-backfill-btn:hover:not(:disabled) {
+  background: var(--accent-primary);
+  color: var(--text-inverse);
+}
+
+.kg-backfill-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+
+
+.mode-toggle {
+  display: flex;
+  background-color: var(--bg-tertiary);
+  border-radius: var(--radius-default);
+  padding: 2px;
+  gap: 2px;
+}
+.mode-toggle button {
+  flex: 1;
+  background: transparent;
+  border: none;
+  padding: 6px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border-radius: var(--radius-default);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-weight: 500;
+  transition: all 0.2s;
+}
+.mode-toggle button:hover {
+  color: var(--text-primary);
+}
+.mode-toggle button.active {
+  background-color: var(--bg-primary);
+  color: var(--user-accent);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+
+.notebook-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+.notebook-editor-area {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 0;
+  background-color: var(--bg-primary);
+}
+
+.notebook-empty-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  color: var(--text-muted);
+  font-size: 1.1em;
+}
+
+/* ── P2-2: Backlinks Panel ── */
+.backlinks-panel {
+  border-top: 1px solid var(--border-subtle);
+  padding: 8px 16px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+.backlinks-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-family: var(--font-sans);
+  color: var(--text-tertiary);
+  cursor: pointer;
+  padding: 4px 0;
+  user-select: none;
+}
+.backlinks-header:hover { color: var(--text-secondary); }
+.backlinks-header .caret {
+  transition: transform 0.2s;
+}
+.backlinks-header .caret.open {
+  transform: rotate(90deg);
+}
+.backlinks-list {
+  margin-top: 6px;
+}
+.backlink-item {
+  display: flex;
+  flex-direction: column;
+  padding: 6px 10px;
+  border-radius: var(--radius-default);
+  cursor: pointer;
+  transition: background 0.15s;
+  margin-bottom: 2px;
+}
+.backlink-item:hover {
+  background-color: var(--bg-tertiary);
+}
+.backlink-title {
+  font-size: 13px;
+  color: var(--user-accent);
+  font-family: var(--font-sans);
+}
+.backlink-context {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── Mobile UI Adjustments ────────────────────────────────── */
+.kg-mobile-col.kg-view {
+  padding: 0;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.kg-mobile-col .kg-overlay-legend {
+  bottom: calc(80px + env(safe-area-inset-bottom, 20px)) !important;
+  max-height: 40vh;
+  overflow-y: auto;
+  padding-bottom: 12px;
+}
+
+.kg-mobile-col .kg-overlay-search.expanded {
+  left: 16px !important;
+  right: 16px !important;
+  top: 16px !important;
+  width: auto !important;
+}
+
+.kg-mobile-col .kg-overlay-search.expanded .kg-search-box {
+  width: 100% !important;
 }
 </style>

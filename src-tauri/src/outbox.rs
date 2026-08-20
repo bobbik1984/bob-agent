@@ -81,7 +81,7 @@ pub fn write_outbox(operations: Vec<Value>) -> Value {
     }
 
     let outbox = json!({
-        "$schema": "bob-agent/outbox/v1",
+        "$schema": "bob.agent/outbox/v1",
         "timestamp": super::now_ms(),
         "source": "llm-tool-call",
         "operations": operations

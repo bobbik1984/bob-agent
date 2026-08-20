@@ -1,53 +1,59 @@
 <template>
-  <div class="inbox-view">
-    <div class="inbox-content-wrapper">
-      <div class="inbox-header">
-        <h2 class="inbox-title">
-          <Calendar :size="24" class="title-icon" />{{ $t('inbox.title') }}</h2>
-      </div>
+  <div class="app-page-view inbox-view" :class="{ 'is-mobile': isMobile }">
+    <!-- 移动端二级导航 Tab 栏 -->
+    <div v-if="isMobile" class="mobile-tab-grid">
+      <button class="mobile-tab-item" :class="{ active: activeTab === 'timeline' }" @click="activeTab = 'timeline'">
+        <Calendar :size="20" class="tab-icon" />
+        <span>日程</span>
+      </button>
+      <button class="mobile-tab-item" :class="{ active: activeTab === 'todo' }" @click="activeTab = 'todo'">
+        <div style="position: relative; display: inline-flex;">
+          <CheckSquare :size="20" class="tab-icon" />
+          <span v-if="overdueEvents.length > 0" class="red-dot" style="top: -2px; right: -6px;"></span>
+        </div>
+        <span>待办</span>
+      </button>
+      <button class="mobile-tab-item" :class="{ active: activeTab === 'cron' }" @click="activeTab = 'cron'">
+        <Zap :size="20" class="tab-icon" />
+        <span>自动任务</span>
+      </button>
+    </div>
 
+    <div class="app-page-scroll inbox-content-wrapper" :class="{ 'is-timeline-tab': activeTab === 'timeline' && isMobile }">
       <div v-if="isLoading" class="loading-state">
         <Loader2 :size="24" class="animate-spin" />
         <span>{{ $t('inbox.loading') }}</span>
       </div>
 
-      <div v-else class="inbox-content">
-        <!-- T-1307: 待办提醒横幅 -->
-        <div v-if="reminders.length > 0" class="reminder-section">
-          <div
-            v-for="(r, ri) in reminders"
-            :key="r.id || ri"
-            class="reminder-alert"
-          >
-            <Bell :size="14" class="reminder-icon" />
-            <span class="reminder-text">
-              <strong>{{ r.title }}</strong>
-              <span v-if="r.date" class="reminder-date">{{ r.date }}</span>
-            </span>
-            <button class="reminder-dismiss" @click="dismissReminder(ri)">&times;</button>
-          </div>
-        </div>
-        <!-- 过期事件区域 -->
-        <div v-if="overdueEvents.length > 0" class="section">
+      <div v-else class="app-page-scroll-content inbox-content">
+
+        <!-- 过期事件 -->
+        <div v-if="overdueEvents.length > 0 && activeTab === 'todo'" class="section">
           <h3 class="section-title" style="color: var(--color-error)">
             <AlertTriangle :size="16" class="section-icon" />
-            {{ $t('inbox.overdue_events') || '过期的日程' }}
+            {{ $t('inbox.overdue_events') || '过期日程' }}
           </h3>
-          <TodoList :todos="overdueEvents" @update-status="onTodoStatusUpdate" />
+          <TodoList :todos="overdueEvents" @update-status="onTodoStatusUpdate" @delete-todo="onTodoDelete" @create-todo="onCreateEvent" />
         </div>
 
-        <div class="section">
-          <h3 class="section-title">{{ $t('inbox.this_week') }}</h3>
+        <div v-if="activeTab === 'timeline'" class="section">
+          <h3 class="section-title">
+            <Calendar :size="16" class="section-icon" />
+            {{ $t('inbox.this_week') || '本周日程' }}
+          </h3>
           <WeekTimeline :weekEvents="events" @create-event="onCreateEvent" />
         </div>
 
-        <div class="section">
-          <h3 class="section-title">{{ $t('inbox.todo_list') }}</h3>
-          <TodoList :todos="todos" @update-status="onTodoStatusUpdate" />
+        <div v-if="activeTab === 'todo'" class="section">
+          <h3 class="section-title">
+            <CheckSquare :size="16" class="section-icon" />
+            {{ $t('inbox.todo_list') }}
+          </h3>
+          <TodoList :todos="todos" @update-status="onTodoStatusUpdate" @delete-todo="onTodoDelete" @create-todo="onCreateEvent" />
         </div>
 
-        <!-- T-1211: 自动任务区域 -->
-        <div class="section">
+        <!-- T-1211: 自动任务 -->
+        <div v-if="activeTab === 'cron'" class="section">
           <h3 class="section-title">
             <Timer :size="16" class="section-icon" />
             {{ $t('inbox.auto_tasks') }}
@@ -70,7 +76,6 @@
               <div class="cron-main">
                 <div class="cron-title-row">
                   <span class="cron-title">{{ job.title || $t('inbox.unnamed_task') }}</span>
-                  <code class="cron-expr">{{ job.cron_expr }}</code>
                 </div>
                 <div class="cron-desc">{{ describeCron(job.cron_expr) }}</div>
                 <div class="cron-prompt">{{ job.prompt_template }}</div>
@@ -104,13 +109,24 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { ref, onMounted, onUnmounted, computed, inject } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { AlertTriangle, Calendar, Loader2, Timer, Clock, Pause, Play, Trash2, Bell } from 'lucide-vue-next';
+import { listen } from '@tauri-apps/api/event';
+import { formatRelativeTime as formatTime } from '@/utils/date';
+import { AlertTriangle, Calendar, Loader2, Timer, Clock, Pause, Play, Trash2, Bell, Menu, CheckSquare, Zap } from 'lucide-vue-next';
 import WeekTimeline from '../components/WeekTimeline.vue';
 import TodoList from '../components/TodoList.vue';
 
+const props = defineProps({
+  activePanel: { type: String, default: 'timeline' }
+});
+const emit = defineEmits(['toggle-sidebar', 'update:activePanel']);
 const { t, locale } = useI18n();
+const isMobile = inject('isMobile');
+const activeTab = computed({
+  get: () => props.activePanel,
+  set: (val) => emit('update:activePanel', val)
+});
 
 const isLoading = ref(true);
 const events = ref([]);
@@ -123,14 +139,15 @@ const overdueEvents = computed(() => {
   const pad = (n) => String(n).padStart(2, '0');
   const todayStr = `${today.getFullYear()}-${pad(today.getMonth()+1)}-${pad(today.getDate())}`;
 
-  return events.value.filter(e => e.status === 'pending' && e.date && e.date < todayStr);
+  return events.value.filter(e => e.status === 'pending' && e.date && e.date < todayStr && !e.linked_ticket_id);
 });
 
 onMounted(async () => {
+  window.addEventListener('sync:refresh-events', reloadEvents);
   try {
     const [allEvents, cronResult] = await Promise.all([
-      window.electronAPI.listEvents(),
-      window.electronAPI.listCronJobs(),
+      window.appAPI.listEvents(),
+      window.appAPI.listCronJobs(),
     ]);
 
     // 过滤分配
@@ -150,10 +167,10 @@ onMounted(async () => {
 // 监听 scheduler:completed 实时刷新
 let unlistenScheduler = null;
 onMounted(() => {
-  unlistenScheduler = window.electronAPI.onSchedulerCompleted?.((payload) => {
+  unlistenScheduler = window.appAPI.onSchedulerCompleted?.((payload) => {
     console.log('[InboxView] scheduler:completed', payload);
     // 刷新 cron job 列表（更新 last_run 等）
-    window.electronAPI.listCronJobs().then(result => {
+    window.appAPI.listCronJobs().then(result => {
       if (result?.jobs) cronJobs.value = result.jobs;
     });
   });
@@ -162,10 +179,12 @@ onUnmounted(() => {
   if (unlistenScheduler) unlistenScheduler();
 });
 
+
+
 // T-1307: 监听待办提醒事件
 let unlistenReminder = null;
 onMounted(() => {
-  unlistenReminder = window.electronAPI.onTodoReminder?.((payload) => {
+  unlistenReminder = window.appAPI.onTodoReminder?.((payload) => {
     // 避免重复
     if (!reminders.value.find(r => r.id === payload.id)) {
       reminders.value.push(payload);
@@ -176,7 +195,32 @@ onUnmounted(() => {
   if (unlistenReminder) unlistenReminder();
 });
 
-function dismissReminder(index) {
+
+  const reloadEvents = async () => {
+    try {
+      const allEvents = await window.appAPI.listEvents();
+      events.value = allEvents.filter(e => e.type === 'event');
+      todos.value = allEvents.filter(e => e.type === 'todo');
+    } catch (err) {
+      console.error('Failed to reload events', err);
+    }
+  };
+
+  let unlistenCalendar = null;
+  onMounted(() => {
+    window.addEventListener('ticket-created', reloadEvents);
+    if (window.appAPI.onCalendarUpdated) {
+      unlistenCalendar = window.appAPI.onCalendarUpdated(reloadEvents);
+    }
+  });
+
+  onUnmounted(() => {
+    window.removeEventListener('sync:refresh-events', reloadEvents);
+    window.removeEventListener('ticket-created', reloadEvents);
+    if (unlistenCalendar) unlistenCalendar();
+  });
+
+  function dismissReminder(index) {
   reminders.value.splice(index, 1);
 }
 
@@ -188,12 +232,17 @@ function onTodoStatusUpdate({ id, status }) {
   }
 }
 
+function onTodoDelete(id) {
+  todos.value = todos.value.filter(t => t.id !== id);
+  events.value = events.value.filter(e => e.id !== id);
+}
+
 async function onCreateEvent(payload) {
   try {
-    const res = await window.electronAPI.confirmEvent(payload);
+    const res = await window.appAPI.confirmEvent(payload);
     if (res?.ok) {
       // reload events
-      const allEvents = await window.electronAPI.listEvents();
+      const allEvents = await window.appAPI.listEvents();
       events.value = allEvents.filter(e => e.type === 'event');
       todos.value = allEvents.filter(e => e.type === 'todo');
     }
@@ -204,27 +253,19 @@ async function onCreateEvent(payload) {
 
 async function toggleJob(job) {
   const newEnabled = !job.enabled;
-  const result = await window.electronAPI.toggleCronJob(job.id, newEnabled);
+  const result = await window.appAPI.toggleCronJob(job.id, newEnabled);
   if (result?.ok) {
     job.enabled = newEnabled;
   }
 }
 
 async function deleteJob(job) {
-  const result = await window.electronAPI.removeCronJob(job.id);
+  const result = await window.appAPI.removeCronJob(job.id);
   if (result?.ok) {
     cronJobs.value = cronJobs.value.filter(j => j.id !== job.id);
   }
 }
 
-function formatTime(ms) {
-  if (!ms) return '';
-  const d = new Date(ms);
-  const now = new Date();
-  const isToday = d.toDateString() === now.toDateString();
-  const time = d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
-  return isToday ? `今天 ${time}` : d.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' }) + ' ' + time;
-}
 
 // 将 cron 表达式翻译为人类可读描述
 function describeCron(expr) {
@@ -277,22 +318,14 @@ function describeCron(expr) {
 
 <style scoped>
 .inbox-view {
-  flex: 1;
   min-width: 0;
-  height: 100%;
-  overflow-y: auto;
-  padding: var(--space-6) var(--space-8);
 }
 
 .inbox-content-wrapper {
-  max-width: 1000px;
-  width: 100%;
-  margin: 0 auto;
-  padding: 0;
+  /* Used as app-page-scroll */
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  gap: var(--space-6);
 }
 
 .inbox-header {
@@ -302,31 +335,16 @@ function describeCron(expr) {
 .inbox-title {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
-  font-size: var(--text-2xl);
-  font-weight: 600;
-  color: var(--text-primary);
-}
-
-.title-icon {
-  color: var(--text-secondary);
-}
-
-.inbox-subtitle {
-  color: var(--text-tertiary);
-  margin-top: var(--space-2);
-}
-
-.loading-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
   gap: var(--space-3);
   color: var(--text-tertiary);
   padding: var(--space-8);
 }
 
 .inbox-content {
+  /* Used as app-page-scroll-content */
+  max-width: 1000px;
+  width: 100%;
+  margin: 0 auto;
   display: flex;
   flex-direction: column;
   gap: var(--space-6);
@@ -336,72 +354,81 @@ function describeCron(expr) {
   font-size: var(--text-lg);
   font-weight: 600;
   color: var(--text-secondary);
-  margin-bottom: var(--space-3);
+  margin: 0 0 var(--space-3) 0;
+  height: 36px;
   display: flex;
   align-items: center;
   gap: 6px;
 }
 
-
+.section-icon {
+  color: var(--text-tertiary);
+}
 
 .cron-count {
+  background: var(--surface-tertiary);
+  color: var(--text-secondary);
   font-size: 11px;
-  font-weight: 500;
-  background: var(--accent-primary);
-  color: var(--bg-primary);
-  border-radius: 10px;
-  padding: 0 7px;
-  line-height: 18px;
-  margin-left: 4px;
+  padding: 2px 6px;
+  border-radius: 12px;
+  margin-left: 8px;
 }
 
 /* ── 空状态 ── */
 .empty-cron {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px;
+  color: var(--text-muted);
+  background: var(--surface-secondary);
+  border-radius: var(--radius-lg);
+  border: 1px dashed var(--border-primary);
   text-align: center;
-  padding: var(--space-6) var(--space-4);
-  color: var(--text-tertiary);
 }
 
-.empty-icon {
-  opacity: 0.3;
-  margin-bottom: var(--space-2);
+.empty-cron .empty-icon {
+  margin-bottom: 12px;
+  opacity: 0.5;
 }
 
-.empty-hint {
+.empty-cron .empty-hint {
   font-size: 12px;
-  opacity: 0.7;
   margin-top: 4px;
 }
 
-/* ── Cron 卡片列表 ── */
+/* ── 自动任务列表 ── */
 .cron-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+  display: grid;
+  gap: 12px;
 }
 
 .cron-card {
   display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  padding: 12px 14px;
-  background: var(--surface-secondary);
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px;
+  background: var(--surface-card);
   border: 1px solid var(--border-primary);
-  border-radius: var(--radius-lg, 10px);
-  transition: opacity 0.2s, border-color 0.2s;
-}
-
-.cron-card.disabled {
-  opacity: 0.45;
+  border-radius: var(--radius-lg);
+  transition: all 0.2s;
 }
 
 .cron-card:hover {
-  border-color: var(--accent-primary);
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-sm);
+}
+
+.cron-card.disabled {
+  opacity: 0.6;
+  background: var(--surface-secondary);
 }
 
 .cron-main {
   flex: 1;
   min-width: 0;
+  padding-right: 16px;
 }
 
 .cron-title-row {
@@ -412,74 +439,59 @@ function describeCron(expr) {
 }
 
 .cron-title {
-  font-weight: 600;
-  font-size: 14px;
+  font-weight: 500;
   color: var(--text-primary);
-}
-
-.cron-expr {
-  font-size: 11px;
-  font-family: var(--font-mono);
-  background: var(--surface-input);
-  padding: 1px 6px;
-  border-radius: 4px;
-  color: var(--text-muted);
 }
 
 .cron-desc {
   font-size: 12px;
-  color: var(--accent-primary);
-  margin-bottom: 4px;
+  color: var(--user-accent, var(--accent-primary));
+  font-family: var(--font-mono);
+  margin-bottom: 6px;
 }
 
 .cron-prompt {
-  font-size: 12px;
-  color: var(--text-tertiary);
+  font-size: 13px;
+  color: var(--text-secondary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 100%;
 }
 
 .cron-meta {
   font-size: 11px;
-  color: var(--text-muted);
-  margin-top: 4px;
-  opacity: 0.7;
+  color: var(--text-tertiary);
+  margin-top: 8px;
 }
 
-/* ── 操作按钮 ── */
 .cron-actions {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
-  flex-shrink: 0;
+  gap: 8px;
 }
 
-.cron-toggle, .cron-delete {
+.cron-toggle,
+.cron-delete {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
-  border-radius: var(--radius-sm, 6px);
-  border: 1px solid var(--border-primary);
-  background: var(--surface-primary);
-  color: var(--text-muted);
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  border: none;
+  background: var(--surface-tertiary);
+  color: var(--text-secondary);
   cursor: pointer;
-  transition: all 0.15s;
+  transition: all 0.2s;
 }
 
 .cron-toggle:hover {
-  color: var(--accent-primary);
-  border-color: var(--accent-primary);
-  background: color-mix(in srgb, var(--accent-primary) 8%, transparent);
+  background: var(--surface-hover);
+  color: var(--text-primary);
 }
 
 .cron-delete:hover {
+  background: color-mix(in srgb, var(--color-error) 15%, transparent);
   color: var(--color-error);
-  border-color: var(--color-error);
-  background: color-mix(in srgb, var(--color-error) 8%, transparent);
 }
 
 /* ── T-1307: 待办提醒 ── */
@@ -534,5 +546,27 @@ function describeCron(expr) {
 
 .reminder-dismiss:hover {
   opacity: 1;
+}
+
+.red-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  background: var(--color-error);
+  border-radius: 50%;
+  position: absolute;
+  top: 8px;
+  right: 12px;
+}
+
+.inbox-view.is-mobile .inbox-content-wrapper.is-timeline-tab .inbox-content {
+  padding: 12px 0 0 0 !important;
+}
+.inbox-view.is-mobile .inbox-content-wrapper.is-timeline-tab .section {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  margin: 0 !important;
 }
 </style>

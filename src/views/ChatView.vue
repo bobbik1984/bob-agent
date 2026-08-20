@@ -1,5 +1,5 @@
 <template>
-  <div class="chat-view">
+  <div class="chat-view" :class="{ 'is-mobile': isMobile }" @touchstart="handleTouchStart" @touchend="handleTouchEnd">
     <!-- Lightbox for Image Zoom -->
     <div v-if="zoomedImage" class="image-lightbox" @click="zoomedImage = null; imageScale = 1; imageTranslateX = 0; imageTranslateY = 0;" @wheel.prevent="handleImageWheel" @mousemove="handleImageMouseMove" @mouseup="handleImageMouseUp" @mouseleave="handleImageMouseUp">
       <img :src="zoomedImage" :style="{ transform: `translate(${imageTranslateX}px, ${imageTranslateY}px) scale(${imageScale})` }" @click.stop @mousedown="handleImageMouseDown" />
@@ -11,16 +11,102 @@
       <span class="health-icon">{{ healthBanner.severity === 'error' ? '!' : 'i' }}</span>
       <span class="health-text">{{ healthBanner.message }}</span>
       <button v-if="healthBanner.fixable" class="health-fix-btn" @click="handleAutoFix(healthBanner.code)">修复</button>
-      <button class="health-dismiss-btn" @click="healthBanner = null">&times;</button>
+      <button class="health-dismiss-btn" @click="dismissHealthBanner(healthBanner.code)">&times;</button>
+    </div>
+
+    <!-- Boarding Pass Modal -->
+    <div v-if="pendingBoardingPass" class="bp-modal-overlay" @click.self="dismissBoardingPass">
+      <div class="boarding-pass-modern-card">
+        <div class="bp-modern-header">
+          <span class="bp-modern-icon">✈</span>
+          <span>Boarding Pass</span>
+        </div>
+
+        <div class="bp-route-row">
+          <span class="bp-airport-code">{{ pendingBoardingPass.origin }}</span>
+          <span class="bp-route-arrow">→</span>
+          <span class="bp-airport-code">{{ pendingBoardingPass.destination }}</span>
+        </div>
+
+        <div class="bp-modern-divider"></div>
+
+        <div class="bp-detail-grid">
+          <div class="bp-modern-field">
+            <div class="bp-modern-label">Passenger Name</div>
+            <div class="bp-modern-value">{{ pendingBoardingPass.passenger_name }}</div>
+          </div>
+          <div class="bp-modern-field">
+            <div class="bp-modern-label">Flight</div>
+            <div class="bp-modern-value">{{ pendingBoardingPass.carrier }} {{ pendingBoardingPass.flight_number }}</div>
+          </div>
+          <div class="bp-modern-field">
+            <div class="bp-modern-label">Date</div>
+            <div class="bp-modern-value">{{ pendingBoardingPass.date }}</div>
+          </div>
+          <div class="bp-modern-field" v-if="pendingBoardingPass.departure_time">
+            <div class="bp-modern-label">Time</div>
+            <div class="bp-modern-value">{{ pendingBoardingPass.departure_time }}</div>
+          </div>
+          <div class="bp-modern-field">
+            <div class="bp-modern-label">Seat</div>
+            <div class="bp-modern-value">{{ pendingBoardingPass.seat }}</div>
+          </div>
+          <div class="bp-modern-field">
+            <div class="bp-modern-label">PNR</div>
+            <div class="bp-modern-value">{{ pendingBoardingPass.pnr }}</div>
+          </div>
+        </div>
+
+        <div class="bp-modern-qr-section">
+          <div class="bp-modern-qr-wrapper">
+             <qrcode-vue v-if="pendingBoardingPass.raw_data" :value="pendingBoardingPass.raw_data" :size="200" level="M" />
+          </div>
+        </div>
+
+        <div class="bp-modern-actions">
+          <button class="bp-modern-btn bp-modern-btn-confirm" @click="confirmBoardingPass">存入票夹</button>
+          <button class="bp-modern-btn bp-modern-btn-dismiss" @click="dismissBoardingPass">忽略</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 移动端专属顶部栏 -->
+    <div v-if="isMobile" class="mobile-header">
+      <button class="mobile-hamburger" @click="emit('open-drawer')">
+        <Menu :size="24" />
+      </button>
+      <div class="mobile-header-center">
+        <input 
+          v-if="isEditingTitle"
+          ref="titleInputRef"
+          v-model="editTitleText"
+          class="mobile-header-title-input"
+          @blur="saveTitle"
+          @keydown.enter="saveTitle"
+          @keydown.esc="cancelTitleEdit"
+        />
+        <span 
+          v-else
+          class="mobile-header-title" 
+          @click="startTitleEdit"
+          title="点击修改标题"
+        >
+          {{ conversationTitle }}
+        </span>
+      </div>
+      <div class="mobile-header-right">
+        <span class="cost-indicator" v-if="sessionCost > 0" style="font-size: 12px; color: var(--text-tertiary);">¥{{ sessionCost.toFixed(4) }}</span>
+        <button class="today-chat-entry" :title="t('today.title')" @click="openTodayLayer('chat_header')">
+          <CalendarRange :size="16" />
+        </button>
+      </div>
     </div>
     <!-- 消息区域 -->
     <div class="messages-area" ref="messagesArea">
-      <!-- 统一的页面标题 -->
-      <div v-if="messages.length > 0" class="view-header" :style="{ opacity: logoOpacity }">
-        <h2 class="view-title">
-          <div class="title-bob-logo bob-clickable" @click="openQuickNote"></div>
-        </h2>
-      </div>
+      <button v-if="messages.length > 0 && !isMobile" class="today-chat-entry today-chat-entry-desktop" :title="t('today.title')" @click="openTodayLayer('chat_header')">
+        <CalendarRange :size="15" />
+      </button>
+      
 
       <!-- 空状态：背景 logo（绝对定位，不参与 flex 布局） -->
       <div v-if="messages.length === 0" class="empty-logo-wrapper">
@@ -29,10 +115,14 @@
 
       <!-- 空状态：前景内容（晨间汇报等） -->
       <div v-if="messages.length === 0" class="empty-state animate-fade-in">
-        <!-- 晨间汇报卡片 -->
-        <MorningBriefing
-          @chat="onBriefingChat"
-          @dismiss="() => {}"
+        <TodayBriefCard
+          :snapshot="dailyBriefSnapshot"
+          :loading="dailyBriefLoading"
+          :error-code="dailyBriefError"
+          compact
+          @expand="openTodayLayer('empty_chat')"
+          @action="handleTodayBriefAction"
+          @refresh="dailyBrief?.refresh()"
         />
       </div>
 
@@ -58,19 +148,16 @@
               @confirm="(e) => handleConfirmEvent(e, msg)"
               @cancel="() => handleCancelEvent(msg)"
             />
-          </template>
+          
+    
+    </template>
 
-          <!-- T-1306: 行动项卡片 -->
-          <template v-else-if="msg.type === 'action-item-card'">
-            <ActionItemCard
-              :item="msg.actionItem"
-              @save="(item) => handleSaveActionItem(item, msg)"
-              @dismiss="() => handleDismissActionItem(msg)"
-            />
-          </template>
+
+
+
 
           <!-- 思维链折叠 -->
-          <div v-if="msg.thinking && !msg._isError && msg.type !== 'confirm-card' && msg.type !== 'action-item-card'" class="thinking-card" :class="{ expanded: msg._thinkingExpanded }">
+          <div v-if="msg.thinking && !msg._isError && msg.type !== 'confirm-card'" class="thinking-card" :class="{ expanded: msg._thinkingExpanded }">
             <button class="thinking-toggle" @click="msg._thinkingExpanded = !msg._thinkingExpanded">
               <ChevronRight :size="14" class="thinking-arrow" :class="{ 'expanded': msg._thinkingExpanded }" />
               <span>Thought process</span>
@@ -88,15 +175,48 @@
             </div>
           </div>
           <!-- 消息内容（block 数组渲染：text + file-card 交替）-->
-          <div v-if="!msg._isError && msg.type !== 'confirm-card' && msg.type !== 'action-item-card' && msg.content" class="message-content selectable" @click="onMessageLinkClick">
+          <div v-if="!msg._isError && msg.type !== 'confirm-card' && msg.type !== 'action-item-card' && msg.content" class="message-content selectable">
             <template v-for="(block, bi) in renderMessageBlocks(msg.content)" :key="bi">
               <div v-if="block.type === 'html'" v-html="block.content"></div>
+              <CodeBlock v-else-if="block.type === 'code'" :code="block.code" :lang="block.lang" />
               <FileCard v-else-if="block.type === 'file'" :filePath="block.path" />
             </template>
           </div>
 
-          <!-- 图片预览 -->
-          <div v-if="msg.image_base64" class="message-image">
+          <section v-if="msg._goal" class="goal-runtime-chat-card" aria-live="polite">
+            <div class="goal-runtime-chat-head">
+              <Target :size="15" />
+              <strong>{{ t(`goal.status_${msg._goal.status}`, msg._goal.status) }}</strong>
+              <span>{{ t(`goal.phase_${msg._goal.phase}`, msg._goal.phase) }}</span>
+            </div>
+            <p v-if="msg._goal.nextAction">{{ msg._goal.nextAction.startsWith?.('goal.') ? t(msg._goal.nextAction) : msg._goal.nextAction }}</p>
+            <p v-if="msg._goal.runtimeError" class="goal-runtime-error">{{ msg._goal.runtimeError }}</p>
+            <div v-if="msg._goal.approval" class="goal-runtime-chat-actions">
+              <button
+                v-for="choice in msg._goal.approval.choices"
+                :key="choice.choiceId"
+                type="button"
+                class="goal-choice-button"
+                :class="{ primary: choice.semantic === 'approve' || choice.semantic === 'select_option' }"
+                :disabled="goalActionBusy === msg._goal.runId"
+                @click="handleChatGoalApproval(msg, choice)"
+              >{{ t(choice.labelKey) }}</button>
+            </div>
+          </section>
+
+          <!-- 图片预览 (多图数组优先) -->
+          <div v-if="msg.image_base64s && msg.image_base64s.length > 0" class="message-images-grid" style="display: flex; gap: 8px; flex-wrap: wrap;">
+            <div v-for="(b64, imgIdx) in msg.image_base64s" :key="imgIdx" class="message-image">
+              <img 
+                :src="'data:image/png;base64,' + b64" 
+                alt="用户图片" 
+                @click="zoomedImage = 'data:image/png;base64,' + b64; imageScale = 1; imageTranslateX = 0; imageTranslateY = 0;"
+                style="cursor: zoom-in; max-height: 200px; border-radius: var(--radius-default);"
+              />
+            </div>
+          </div>
+          <!-- 图片预览 (单图旧版兼容，仅在没有 image_base64s 时显示) -->
+          <div v-else-if="msg.image_base64" class="message-image">
             <img 
               :src="'data:image/png;base64,' + msg.image_base64" 
               alt="用户图片" 
@@ -110,13 +230,31 @@
               🧬
             </div>
             <div v-if="msg.from_channel" class="source-label">
-              <Smartphone v-if="msg.from_channel === 'wechat'" :size="10" />
+              <Smartphone v-if="msg.from_channel === 'wechat' || (msg.from_channel !== 'wechat' && isMobile)" :size="10" />
               <Monitor v-else :size="10" />
-              <span>{{ msg.from_channel === 'wechat' ? 'WeChat' : 'Desktop' }}</span>
+              <span>{{ msg.from_channel === 'wechat' ? 'WeChat' : (isMobile ? 'Mobile' : 'Desktop') }}</span>
             </div>
             <div v-if="msg.role === 'assistant' && msg._modelLabel" class="model-label">
               {{ msg._modelLabel }}
             </div>
+            <div
+              v-if="msg.role === 'assistant' && msg._route"
+              class="route-label"
+              :title="$t('chat.route_hint', { confidence: Math.round((msg._route.confidence || 0) * 100) })"
+            >
+              <Zap v-if="msg._route.mode === 'direct'" :size="10" />
+              <Sparkles v-else-if="msg._route.mode === 'deep'" :size="10" />
+              <Target v-else :size="10" />
+              <span>{{ $t(`chat.route_${msg._route.mode}`) }}</span>
+            </div>
+            <button
+              v-if="msg.role === 'assistant' && msg.content"
+              class="copy-rich-btn"
+              title="存为笔记"
+              @click="clipMessageToNote(msg)"
+            >
+              <BookmarkPlus :size="12" />
+            </button>
             <!-- T-1201: 富文本复制按钮 -->
             <button
               v-if="msg.role === 'assistant' && msg.content"
@@ -147,7 +285,7 @@
               <span>{{ $t('chat.thinking') || 'Thinking...' }}</span>
             </button>
             <div v-if="streamThinkingExpanded" ref="streamThinkingRef" class="thinking-content stream-thinking-content selectable">
-              {{ streamThinking }}
+              {{ streamThinking }}<span class="typing-cursor"></span>
             </div>
           </div>
           <!-- 工具调用状态 -->
@@ -197,7 +335,7 @@
           <div v-if="cdnUpload.active" class="cdn-upload-progress">
             <div class="cdn-upload-info">
               <FileUp :size="14" />
-              <span class="cdn-upload-name">{{ cdnUpload.fileName }}</span>
+              <span class="cdn-upload-name">{{ cdnUpload.fileName }} <span v-if="cdnUpload.attempt && cdnUpload.attempt > 1" style="color: var(--user-accent); font-size: 0.9em;">(重试 {{ cdnUpload.attempt }}/3)</span></span>
               <span class="cdn-upload-percent">{{ cdnUpload.percent }}%</span>
             </div>
             <div class="cdn-upload-bar-track">
@@ -207,7 +345,13 @@
               {{ formatBytes(cdnUpload.bytesSent) }} / {{ formatBytes(cdnUpload.totalBytes) }}
             </div>
           </div>
-          <div v-if="streamContent" class="message-content selectable" v-html="renderMarkdown(streamContent)"></div>
+          <div v-if="streamContent" class="message-content selectable">
+            <template v-for="(block, bi) in renderMessageBlocks(streamContent)" :key="bi">
+              <div v-if="block.type === 'html'" v-html="block.content"></div>
+              <CodeBlock v-else-if="block.type === 'code'" :code="block.code" :lang="block.lang" />
+              <FileCard v-else-if="block.type === 'file'" :filePath="block.path" />
+            </template>
+          </div>
           <!-- 流式元数据：模型标注 + 记忆标志 -->
           <div class="message-meta-row" v-if="currentModelName || streamContent.includes('<|mem|>')">
             <div v-if="streamContent.includes('<|mem|>')" class="memory-indicator" title="已自动提炼知识到脑库">
@@ -259,7 +403,7 @@
 
     <!-- 输入区 -->
     <div class="input-area">
-      <div class="quick-actions-bar" v-if="inputText.trim().length > 0">
+      <div class="quick-actions-bar" v-if="inputText.trim().length > 0 && !isMobile">
         <div class="actions-spacer"></div>
         <button
           class="btn-parse-event"
@@ -275,8 +419,8 @@
         <!-- 图片预览 -->
         <div v-if="pendingImages.length > 0" class="inline-images-preview" style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px;">
           <div v-for="(img, idx) in pendingImages" :key="idx" class="inline-image-preview" style="position: relative;">
-            <img :src="'data:image/png;base64,' + img" alt="Pending Image" style="max-height: 100px; border-radius: 4px;" />
-            <button class="image-remove-inline btn-icon" @click="pendingImages.splice(idx, 1)" style="position: absolute; top: 0; right: 0; background: rgba(0,0,0,0.5); color: white; padding: 2px; border-radius: 50%;"><X :size="10" /></button>
+            <img :src="'data:image/png;base64,' + img" alt="Pending Image" style="max-height: 100px; border-radius: var(--radius-default);" />
+            <button class="image-remove-inline btn-icon" @click="pendingImages.splice(idx, 1)" style="position: absolute; top: -6px; right: -6px; background: var(--text-primary); color: var(--bg-primary); padding: 2px; border-radius: 50%; box-shadow: 0 2px 4px rgba(0,0,0,0.2);"><X :size="12" /></button>
           </div>
         </div>
         <!-- 待发送文件预览 -->
@@ -288,12 +432,27 @@
           </div>
         </div>
         <!-- 文本输入 -->
-        <div class="input-wrapper" style="position: relative;">
-          <!-- 悬浮 @ 菜单 -->
-          <div v-if="showMentionMenu" class="mention-menu">
-            <div class="mention-menu-item" @click="handleMentionSelect">
-              <span>📁 浏览本地文件...</span>
-              <span class="mention-shortcut">Enter</span>
+        <div class="input-wrapper" :class="{ 'is-recording-wrapper': isRecording }" style="position: relative;">
+          <!-- 移动端 + 按钮 -->
+          <button v-if="isMobile" class="mobile-plus-btn" @click="showMobileTools = true; mobileSheetState = 'main'">
+            <Plus :size="20" />
+          </button>
+          <!-- 悬浮指令菜单 (Slash/Mention) -->
+          <div v-if="showCommandMenu" class="mention-menu">
+            <div 
+              v-for="(cmd, index) in commandList" 
+              :key="cmd.id"
+              class="mention-menu-item"
+              :class="{ active: index === activeCommandIndex }"
+              @click="executeCommand(index)"
+              @mouseenter="activeCommandIndex = index"
+            >
+              <span style="display: flex; align-items: center; gap: 8px;">
+                <component :is="cmd.icon" :size="14" style="opacity: 0.7; flex-shrink: 0;" />
+                <span>{{ cmd.label }}</span>
+              </span>
+              <span v-if="cmd.description" style="color: var(--text-tertiary); font-size: 0.85em; margin-left: 8px;">{{ cmd.description }}</span>
+              <span class="mention-shortcut" v-if="index === activeCommandIndex">Enter</span>
             </div>
           </div>
           <textarea
@@ -301,16 +460,37 @@
             v-model="inputText"
             class="chat-input"
             :placeholder="$t('chat.input_placeholder')"
-            rows="3"
+            :rows="isMobile ? 1 : 3"
+            enterkeyhint="send"
             @keydown="handleKeydown"
             @input="handleInput"
             @paste="handlePaste"
           ></textarea>
+          <!-- Mobile 发送按钮 -->
+          <div v-if="isMobile" class="mobile-send-btn-wrap">
+            <button v-if="isStreaming" class="action-btn stop-btn" @click="stopGeneration" :title="$t('chat.stop')"><span class="icon-stop"></span></button>
+            <button v-else-if="!inputText.trim()" 
+              class="action-btn mic-btn" 
+              :class="{ 'is-recording': isRecording }"
+              @touchstart.prevent="startVoiceRecording"
+              @touchend.prevent="stopVoiceRecording"
+              @touchcancel.prevent="cancelVoiceRecording"
+              @contextmenu.prevent
+            >
+              <Mic :size="16" />
+            </button>
+            <button v-else class="action-btn send-btn" :disabled="!canSend || !chatReady" @click="sendMessage" :title="chatReadyMsg || $t('chat.send')">
+              <span class="icon-send"></span>
+            </button>
+          </div>
         </div>
         <!-- 底部工具栏 -->
-        <div class="input-toolbar">
+        <div v-if="!isMobile" class="input-toolbar">
           <button class="toolbar-item attach-btn" :title="$t('chat.attach_tooltip')" @click="handleAttach">
             <Paperclip :size="14" />
+          </button>
+          <button class="toolbar-item attach-btn" :title="$t('chat.cmd_save_note_tooltip') || '作为笔记速记'" @click="handleSaveToNote">
+            <Bookmark :size="14" />
           </button>
           <button class="toolbar-item attach-btn" title="截取屏幕" @click="handleScreenshot" :disabled="isScreenshotting">
             <Camera :size="14" />
@@ -361,12 +541,18 @@
           <!-- 代理模式切换器 -->
           <div class="model-switcher-wrap">
             <button class="toolbar-item model-indicator" @click="showAgentModeSwitcher = !showAgentModeSwitcher">
-              <Shield v-if="agentMode === 'insight'" :size="12" style="color: var(--text-tertiary);" />
-              <Zap v-else :size="12" style="color: var(--accent-primary);" />
-              <span>{{ agentMode === 'insight' ? $t('chat.mode_qa') : $t('chat.mode_act') }}</span>
+              <Sparkles v-if="agentMode === 'auto'" :size="12" style="color: var(--accent-primary);" />
+              <Shield v-else-if="agentMode === 'insight'" :size="12" style="color: var(--text-tertiary);" />
+              <Zap v-else-if="agentMode === 'yolo'" :size="12" style="color: var(--accent-primary);" />
+              <Target v-else :size="12" style="color: var(--color-warning);" />
+              <span>{{ { auto: $t('chat.mode_auto'), insight: $t('chat.mode_qa'), yolo: $t('chat.mode_act'), goal: $t('chat.mode_goal') }[agentMode] || $t('chat.mode_auto') }}</span>
               <ChevronUp :size="10" class="chevron-icon" />
             </button>
             <div v-if="showAgentModeSwitcher" class="model-popup">
+              <button class="model-option" :class="{ active: agentMode === 'auto' }" @click="agentMode = 'auto'; showAgentModeSwitcher = false">
+                <Sparkles :size="14" style="margin-right: 8px;" />
+                <span class="model-option-label">{{ $t('chat.mode_auto_desc') }}</span>
+              </button>
               <button class="model-option" :class="{ active: agentMode === 'insight' }" @click="agentMode = 'insight'; showAgentModeSwitcher = false">
                 <Shield :size="14" style="margin-right: 8px;" />
                 <span class="model-option-label">{{ $t('chat.mode_qa_desc') }}</span>
@@ -374,6 +560,10 @@
               <button class="model-option" :class="{ active: agentMode === 'yolo' }" @click="agentMode = 'yolo'; showAgentModeSwitcher = false">
                 <Zap :size="14" style="margin-right: 8px;" />
                 <span class="model-option-label">{{ $t('chat.mode_act_desc') }}</span>
+              </button>
+              <button class="model-option" :class="{ active: agentMode === 'goal' }" @click="agentMode = 'goal'; showAgentModeSwitcher = false">
+                <Target :size="14" style="margin-right: 8px;" />
+                <span class="model-option-label">{{ $t('chat.mode_goal_desc') }}</span>
               </button>
             </div>
           </div>
@@ -416,57 +606,290 @@
       </div>
     </div>
   </div>
+
+    
+
+
+    <!-- 移动端底部抽屉 (Bottom Sheet) -->
+    <Teleport to="body">
+      <div v-if="isMobile && showMobileTools" class="mobile-sheet-overlay" @click="showMobileTools = false"></div>
+      <transition name="slide-up">
+        <div v-if="isMobile && showMobileTools" class="mobile-bottom-sheet">
+          <div v-show="mobileSheetState !== 'main'" class="sheet-header">
+            <button v-if="mobileSheetState === 'models'" class="sheet-back-btn" @click="mobileSheetState = 'providers'">
+              <ChevronLeft :size="20" /> <span style="margin-left:4px">{{ $t('chat.back') || '返回' }}</span>
+            </button>
+            <button v-else-if="mobileSheetState === 'providers' || mobileSheetState === 'agentMode'" class="sheet-back-btn" @click="mobileSheetState = 'main'">
+              <ChevronLeft :size="20" /> <span style="margin-left:4px">{{ $t('chat.back') || '返回' }}</span>
+            </button>
+            
+            <div class="sheet-title" style="font-size: 14px; font-weight: 600; color: var(--text-primary);">
+              {{
+                mobileSheetState === 'main' ? '快捷功能' :
+                mobileSheetState === 'providers' ? '选择供应商' :
+                mobileSheetState === 'models' ? '选择具体模型' : '选择执行形式'
+              }}
+            </div>
+          </div>
+          <div v-if="mobileSheetState === 'main'" class="sheet-content main-grid" style="grid-template-columns: repeat(3, 1fr); padding-bottom: 24px;">
+            <!-- 1. 添加附件 -->
+            <button class="sheet-grid-item" @click="handleAttach(); showMobileTools = false;">
+              <div class="grid-icon-wrap" style="background: rgba(var(--user-accent-rgb, 39, 118, 187), 0.1); color: var(--accent-primary);">
+                <Paperclip :size="24" />
+              </div>
+              <span class="grid-item-label">{{ $t('chat.mobile_attach') }}</span>
+            </button>
+            
+            <!-- 2. 选择模型 -->
+            <button class="sheet-grid-item" @click="mobileSheetState = 'providers'">
+              <div class="grid-icon-wrap" style="background: rgba(var(--user-accent-rgb, 39, 118, 187), 0.1); color: var(--accent-primary);">
+                <Cpu :size="24" />
+              </div>
+              <span class="grid-item-label">{{ $t('chat.mobile_select_model') }}</span>
+            </button>
+            
+            <!-- 3. 执行形式 -->
+            <button class="sheet-grid-item" @click="mobileSheetState = 'agentMode'">
+              <div class="grid-icon-wrap" style="background: rgba(var(--user-accent-rgb, 39, 118, 187), 0.1); color: var(--accent-primary);">
+                <Zap :size="24" />
+              </div>
+              <span class="grid-item-label">{{ $t('chat.mobile_agent_mode') }}</span>
+            </button>
+          </div>
+          <div v-else-if="mobileSheetState === 'providers'" class="sheet-content list-view">
+            <button v-for="p in modelProviderList" :key="p.id" class="sheet-list-item" :class="{ active: switcherProvider === p.id }" @click="switcherProvider = p.id; mobileSheetState = 'models'">
+              <img v-if="getModelLogo(p.id)" :src="getModelLogo(p.id)" class="model-logo-sm" />
+              <div class="item-info">
+                <span class="item-name">{{ p.name }}</span>
+                <span class="item-count">{{ p.count }} Models</span>
+              </div>
+              <ChevronRight :size="16" class="text-tertiary" />
+            </button>
+            <div v-if="modelProviderList.length === 0" class="sheet-empty">{{ $t('chat.no_models') || '暂无可用模型，请先配置 API Key' }}</div>
+          </div>
+          <div v-else-if="mobileSheetState === 'models'" class="sheet-content list-view">
+            <button v-for="m in switcherModels" :key="m.id" class="sheet-list-item" :class="{ active: currentModelRaw === m.id }" @click="switchModel(m.id); showMobileTools = false; mobileSheetState = 'main'">
+              <span class="item-name">{{ m.displayName }}</span>
+              <Check v-if="currentModelRaw === m.id" :size="16" class="text-accent" />
+            </button>
+            <div v-if="switcherModels.length === 0" class="sheet-empty">{{ $t('chat.no_models') || '无可用模型' }}</div>
+          </div>
+          <div v-else-if="mobileSheetState === 'agentMode'" class="sheet-content list-view">
+            <button class="sheet-list-item" :class="{ active: agentMode === 'auto' }" @click="agentMode = 'auto'; showMobileTools = false; mobileSheetState = 'main'">
+              <Sparkles :size="20" style="margin-right: 12px;" />
+              <span class="item-name">{{ $t('chat.mode_auto_desc') }}</span>
+              <Check v-if="agentMode === 'auto'" :size="16" class="text-accent" />
+            </button>
+            <button class="sheet-list-item" :class="{ active: agentMode === 'insight' }" @click="agentMode = 'insight'; showMobileTools = false; mobileSheetState = 'main'">
+              <Shield :size="20" style="margin-right: 12px;" />
+              <span class="item-name">{{ $t('chat.mode_qa_desc') }}</span>
+              <Check v-if="agentMode === 'insight'" :size="16" class="text-accent" />
+            </button>
+            <button class="sheet-list-item" :class="{ active: agentMode === 'yolo' }" @click="agentMode = 'yolo'; showMobileTools = false; mobileSheetState = 'main'">
+              <Zap :size="20" style="margin-right: 12px;" />
+              <span class="item-name">{{ $t('chat.mode_act_desc') }}</span>
+              <Check v-if="agentMode === 'yolo'" :size="16" class="text-accent" />
+            </button>
+            <button class="sheet-list-item" :class="{ active: agentMode === 'goal' }" @click="agentMode = 'goal'; showMobileTools = false; mobileSheetState = 'main'">
+              <Target :size="20" style="margin-right: 12px;" />
+              <span class="item-name">{{ $t('chat.mode_goal_desc') }}</span>
+              <Check v-if="agentMode === 'goal'" :size="16" class="text-accent" />
+            </button>
+          </div>
+        </div>
+      </transition>
+    </Teleport>
+
+    <!-- Custom Offline Engine Modal -->
+    <Teleport to="body">
+      <div v-if="showOfflineEngineModal" class="modal-overlay">
+        <div class="modal-content custom-confirm-modal">
+          <div class="modal-header">
+            <h3>启动本地引擎</h3>
+          </div>
+          <div class="modal-body">
+            <p>本地模型 <strong>{{ pendingOfflineEngineModel?.displayName }}</strong> 尚未启动，或正在运行其他模型。</p>
+            <p>是否立即启动？（需要约 5-10 秒加载至内存）</p>
+          </div>
+          <div class="modal-footer">
+            <button class="btn btn-secondary" @click="showOfflineEngineModal = false">取消</button>
+            <button class="btn btn-primary" @click="startOfflineEngineFromModal">立即启动</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
 </template>
 
 <script>
-import { marked } from 'marked';
-import hljs from 'highlight.js';
-import { markedHighlight } from 'marked-highlight';
-import DOMPurify from 'dompurify';
-
-// 允许渲染 file://, bob:// 和本地磁盘路径 (用于图片/视频/链接)
-DOMPurify.addHook('uponSanitizeAttribute', function (node, data) {
-  if (data.attrName === 'href' || data.attrName === 'src') {
-    const val = data.attrValue;
-    if (val.startsWith('file://') || val.startsWith('bob://') || val.startsWith('asset://') || val.startsWith('http://bob.localhost/') || val.startsWith('https://bob.localhost/') || val.startsWith('http://asset.localhost/') || /^[A-Za-z]:[\\\/]/.test(val)) {
-      data.keepAttr = true;
-      data.forceKeepAttr = true;
-    }
-  }
-});
-
-marked.use(markedHighlight({
-  langPrefix: 'hljs language-',
-  highlight(code, lang) {
-    const language = hljs.getLanguage(lang) ? lang : 'plaintext';
-    return hljs.highlight(code, { language }).value;
-  }
-}));
-marked.setOptions({ breaks: true, gfm: true });
+import '@/utils/markdown';
 </script>
 
 <script setup>
-import { ref, watch, onMounted, onUnmounted, nextTick, inject } from 'vue';
-import { Sparkles, FileText, Camera, Calendar, User, ChevronRight, ChevronDown, ChevronUp, X, FileUp, Paperclip, Loader2, Shield, Zap, Lock, Unlock, Download, Smartphone, Monitor, ClipboardCopy, Check } from 'lucide-vue-next';
+import { ref, watch, onMounted, onUnmounted, nextTick, inject, computed } from 'vue';
+import { useI18n } from 'vue-i18n';
+import QrcodeVue from 'qrcode.vue';
+import { Sparkles, FileText, Camera, Calendar, CalendarRange, User, ChevronRight, ChevronDown, ChevronUp, ChevronLeft, X, FileUp, Paperclip, Bookmark, Loader2, Shield, Zap, Target, Lock, Unlock, Download, Smartphone, Monitor, ClipboardCopy, Check, BookmarkPlus, Plus, Menu, Cpu, Play, PenLine, BookOpen, Pin, Mic } from 'lucide-vue-next';
 import ConfirmCard from '../components/ConfirmCard.vue';
 import FileCard from '../components/FileCard.vue';
+import CodeBlock from '../components/CodeBlock.vue';
 import SearchCard from '../components/SearchCard.vue';
 import BrowserEnableCard from '../components/BrowserEnableCard.vue';
 import FolderDropCard from '../components/FolderDropCard.vue';
 import KBEstimateCard from '../components/KBEstimateCard.vue';
-import MorningBriefing from '../components/MorningBriefing.vue';
-import ActionItemCard from '../components/ActionItemCard.vue';
+import TodayBriefCard from '../components/TodayBriefCard.vue';
+
 
 import { useChat } from '../composables/useChat.js';
 import { useModelSwitcher } from '../composables/useModelSwitcher.js';
 import { useDragDrop } from '../composables/useDragDrop.js';
 
+const isEditingTitle = ref(false);
+const titleInputRef = ref(null);
+const editTitleText = ref('');
+const goalActionBusy = ref('');
 
+function chatGoalKey(scope) {
+  const value = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  return `chat:${scope}:${value}`;
+}
+
+async function handleChatGoalApproval(message, choice) {
+  const goal = message._goal;
+  if (!goal?.approval) return;
+  goalActionBusy.value = goal.runId;
+  try {
+    const outcome = await window.appAPI.goalRuntimeDecideApproval({
+      approvalId: goal.approval.approvalId,
+      choiceId: choice.choiceId,
+      expectedRevision: goal.approval.revision,
+      actor: 'user', deviceId: isMobile.value ? 'mobile' : 'desktop',
+      inputModality: 'pointer', trustedDevice: !isMobile.value,
+      idempotencyKey: chatGoalKey('approval'),
+    });
+    message._goal = { ...goal, ...outcome.run, approval: null };
+    if (outcome.run?.status === 'ready' && ['approve', 'select_option'].includes(choice.semantic)) {
+      const continued = await window.appAPI.goalRuntimeContinue({
+        runId: outcome.run.runId,
+        expectedRevision: outcome.run.revision,
+        idempotencyKey: chatGoalKey('continue'),
+      });
+      if (continued?.goal) message._goal = { ...message._goal, ...continued.goal, approval: continued.goal.approval || null };
+    }
+  } catch (error) {
+    console.error('[Goal Runtime] approval failed:', error);
+  } finally {
+    goalActionBusy.value = '';
+  }
+}
+
+
+const isRecording = ref(false);
+let startTextCache = '';
+
+async function startVoiceRecording(e) {
+  if (isRecording.value) return;
+  try {
+    isRecording.value = true;
+    startTextCache = inputText.value;
+    if (navigator.vibrate) navigator.vibrate(50);
+    if (window.appAPI && window.appAPI.invoke) {
+      await window.appAPI.invoke('plugin:speech-recognizer|startListening', { language: 'zh-CN' });
+    }
+  } catch (err) {
+    console.error("Speech start error:", err);
+    isRecording.value = false;
+    if (err === 'require_permission') {
+      window.dispatchEvent(new CustomEvent('send-message-to-bob', { detail: '⚠️ Bob 需要麦克风权限才能听见您的声音。系统正在请求权限，请点击允许后重试。' }));
+    }
+  }
+}
+
+async function stopVoiceRecording(e) {
+  if (!isRecording.value) return;
+  try {
+    isRecording.value = false;
+    if (navigator.vibrate) navigator.vibrate(30);
+    if (window.appAPI && window.appAPI.invoke) {
+      await window.appAPI.invoke('plugin:speech-recognizer|stopListening');
+    }
+  } catch (err) {
+    console.error("Speech stop error:", err);
+  }
+}
+
+async function cancelVoiceRecording(e) {
+  if (!isRecording.value) return;
+  try {
+    isRecording.value = false;
+    inputText.value = startTextCache;
+    if (navigator.vibrate) navigator.vibrate([30, 50, 30]);
+    if (window.appAPI && window.appAPI.invoke) {
+      await window.appAPI.invoke('plugin:speech-recognizer|cancelListening');
+    }
+  } catch (err) {
+    console.error("Speech cancel error:", err);
+  }
+}
+
+function startTitleEdit() {
+  editTitleText.value = conversationTitle.value;
+  isEditingTitle.value = true;
+  nextTick(() => {
+    if (titleInputRef.value) titleInputRef.value.focus();
+  });
+}
+
+function saveTitle() {
+  if (!isEditingTitle.value) return;
+  isEditingTitle.value = false;
+  const newTitle = editTitleText.value.trim();
+  if (newTitle && newTitle !== conversationTitle.value) {
+    emit('update-title', { id: props.conversationId, title: newTitle });
+  }
+}
+
+function cancelTitleEdit() {
+  isEditingTitle.value = false;
+}
+
+const showOfflineEngineModal = ref(false);
+const pendingOfflineEngineModel = ref(null);
+let engineJustStarted = false;
+
+async function startOfflineEngineFromModal() {
+  if (!pendingOfflineEngineModel.value) return;
+  const currentModelObj = pendingOfflineEngineModel.value;
+  showOfflineEngineModal.value = false;
+  
+  messages.value.push({ role: 'system', content: `⚙️ 正在启动本地模型 ${currentModelObj.displayName}...` });
+  scrollToBottom();
+  
+  try {
+    const res = await window.appAPI.startOfflineEngine(currentModelObj.id);
+    if (res && res.error) {
+       messages.value.push({ role: 'system', content: `❌ 本地模型启动失败: ${res.error}` });
+    } else {
+       messages.value.push({ role: 'system', content: `✅ 本地模型已就绪。` });
+       // Set bypass flag so sendMessage() skips the engine re-check
+       engineJustStarted = true;
+       sendMessage();
+    }
+  } catch (e) {
+    console.error('Failed to start offline engine', e);
+    messages.value.push({ role: 'system', content: `❌ 本地模型启动失败: ${e}` });
+  }
+  scrollToBottom();
+}
+
+
+
+const { t } = useI18n();
 
 const props = defineProps({
   conversationId: String,
 });
-const emit = defineEmits(['update-title']);
+const emit = defineEmits(['update-title', 'open-drawer']);
 
 // ── DOM refs (留在组件层) ─────────────────────────────
 const messagesArea = ref(null);
@@ -511,19 +934,121 @@ function handleImageMouseUp(e) {
   isDraggingImage = false;
 }
 
-const showMentionMenu = ref(false);
-let mentionTriggerIndex = -1;
+const showCommandMenu = ref(false);
+const showMobileTools = ref(false);
+const mobileSheetState = ref('main');
+const commandTriggerIndex = ref(-1);
+const commandType = ref(''); // 'slash' or 'mention'
+const activeCommandIndex = ref(0);
+
+const commandList = computed(() => {
+  if (commandType.value === 'slash') {
+    return [
+      { id: 'memo', icon: PenLine, label: t('chat.cmd_memo') || '/memo', description: t('chat.cmd_memo_desc') || '作为闪念笔记保存，不发给AI', action: () => insertSlashCommand('/memo ') },
+      { id: 'note', icon: BookOpen, label: '/note', description: t('chat.cmd_note_desc') || '新建笔记并打开编辑器', action: () => insertSlashCommand('/note ') },
+      { id: 'clip', icon: Pin, label: '/clip', description: t('chat.cmd_clip_desc') || '将AI最近回复保存为笔记', action: () => handleClipCommand() },
+    ];
+  } else {
+    return [
+      { id: 'file', icon: Paperclip, label: t('chat.cmd_file') || '引用本地文件/图片', description: '', action: async () => { 
+          await handleAttach(); 
+          if (commandTriggerIndex.value >= 0) {
+            inputText.value = inputText.value.substring(0, commandTriggerIndex.value) + inputText.value.substring(commandTriggerIndex.value + 1);
+          }
+      } }
+    ];
+  }
+});
+
+function executeCommand(index) {
+  if (index >= 0 && index < commandList.value.length) {
+    commandList.value[index].action();
+    showCommandMenu.value = false;
+    commandTriggerIndex.value = -1;
+  }
+}
+
+function insertSlashCommand(cmdStr) {
+  const text = inputText.value;
+  const triggerIdx = commandTriggerIndex.value;
+  inputText.value = text.substring(0, triggerIdx) + cmdStr + text.substring(triggerIdx + 1);
+  nextTick(() => {
+    if (inputRef.value) {
+      inputRef.value.focus();
+      const newPos = triggerIdx + cmdStr.length;
+      inputRef.value.setSelectionRange(newPos, newPos);
+    }
+  });
+}
+
+async function onOpenMobileModelSwitcher() {
+  await toggleModelSwitcher();
+  showModelSwitcher.value = false;
+  mobileSheetState.value = 'providers';
+  showMobileTools.value = true;
+}
+
+function handleSaveToNote() {
+  const text = inputText.value.trim();
+  if (!text) {
+    window.appAPI?.showNotification(t('app.notification_title') || '提示', t('chat.cmd_note_empty') || '请先输入内容再保存为笔记');
+    return;
+  }
+  // 在原本内容前强制加上 /memo 并触发发送
+  inputText.value = '/memo ' + text;
+  sendMessage();
+}
+
+// P3-3: /clip 命令按钮处理
+function handleClipCommand() {
+  showCommandMenu.value = false;
+  inputText.value = '/clip';
+  sendMessage();
+}
 
 // ── 闪念速记入口 (从 App.vue provide) ─────────────────
 const openQuickNote = inject('openQuickNote', () => {});
+const dailyBrief = inject('dailyBrief', null);
+const openTodayLayer = inject('openTodayLayer', () => Promise.resolve(false));
+const handleTodayBriefAction = inject('handleTodayBriefAction', () => {});
+const dailyBriefSnapshot = computed(() => dailyBrief?.snapshot?.value || null);
+const dailyBriefLoading = computed(() => dailyBrief?.loading?.value || false);
+const dailyBriefError = computed(() => dailyBrief?.errorCode?.value || '');
+void dailyBrief?.ensureLoaded?.();
+const isMobile = inject('isMobile', ref(false));
+const conversationTitle = ref('');
+
+// ── 手势返回 (T-2225) ──────────────────────────────
+let touchStartX = 0;
+let touchStartY = 0;
+function handleTouchStart(e) {
+  if (!isMobile.value) return;
+  touchStartX = e.changedTouches[0].screenX;
+  touchStartY = e.changedTouches[0].screenY;
+}
+function handleTouchEnd(e) {
+  if (!isMobile.value) return;
+  const touchEndX = e.changedTouches[0].screenX;
+  const touchEndY = e.changedTouches[0].screenY;
+  if (touchStartX < 40 && touchEndX - touchStartX > 50 && Math.abs(touchEndY - touchStartY) < 50) {
+    emit('open-drawer');
+  }
+}
 
 // ── 本地 UI 状态 ─────────────────────────────────────
 const globalFileAccess = ref(false);
-const agentMode = ref('insight');
+const agentMode = ref('auto');
 const showAgentModeSwitcher = ref(false);
 
 // ── T-1304: Doctor 健康横幅 ──────────────────────────
 const healthBanner = ref(null);
+
+function dismissHealthBanner(code) {
+  healthBanner.value = null;
+  if (code) {
+    localStorage.setItem('dismissed_banner_' + code, Date.now().toString());
+  }
+}
 
 // ── T-1305: 聊天就绪守卫 ─────────────────────────────
 const chatReady = ref(true);  // fail-open: 默认可发送
@@ -555,19 +1080,21 @@ const {
 const {
   messages, displayMessages, inputText, isStreaming, streamContent, streamThinking,
   activeTools, isParsing, sessionCost, canSend,
-  loadMessages, onBriefingChat, sendMessage: _sendMessage,
+  loadMessages, sendMessage: _sendMessage,
   handleStreamChunk, stopGeneration, exportConversation,
   renderMarkdown, renderMessageBlocks,
   parseTextAsEvent: _parseTextAsEvent,
   handleConfirmEvent, handleCancelEvent,
-  handleSaveActionItem, handleDismissActionItem,
+  clipMessageToNote,
 } = useChat(props, emit, { scrollToBottom, currentModelName, globalFileAccess, agentMode });
 
 // 拖拽/附件
 const {
   isDragging, pendingImages, pendingFiles, pendingFolderInfo, pendingKBEstimate,
-  handleAttach, handlePaste, onDragEnter, handleDrop, handleTauriDrop,
+  pendingBoardingPass,
+  handleAction, handleAttach, handlePaste, onDragEnter, handleDrop, handleTauriDrop,
   cancelFolderTrack, confirmFolderTrack, cancelKBEstimate, startKBBuild,
+  confirmBoardingPass, dismissBoardingPass,
   setupTauriDragListeners,
 } = useDragDrop({
   messages, inputText, scrollToBottom, globalFileAccess, agentMode,
@@ -576,7 +1103,40 @@ const {
 
 // ── 模板绑定的包装函数 ──────────────────────────────
   // sendMessage 需要传入 pendingImage/pendingFiles/resetTextareaHeight
-  async function sendMessage() {
+  
+let speechUnlistenPartial = null;
+let speechUnlistenFinal = null;
+
+async function toggleSpeechRecognition() {
+    try {
+        if (isListening.value) {
+            await window.appAPI.invoke('plugin:speech|stop_listening');
+            isListening.value = false;
+        } else {
+            // Setup listeners once
+            if (!speechUnlistenPartial) {
+                speechUnlistenPartial = await window.appAPI.listen('speech_partial', (event) => {
+                    inputText.value = event.payload.text;
+                });
+            }
+            if (!speechUnlistenFinal) {
+                speechUnlistenFinal = await window.appAPI.listen('speech_final', (event) => {
+                    inputText.value = event.payload.text;
+                    isListening.value = false;
+                });
+            }
+            // Start
+            await window.appAPI.invoke('plugin:speech|start_listening');
+            isListening.value = true;
+        }
+    } catch (err) {
+        console.error('Speech recognition error:', err);
+        isListening.value = false;
+        alert('无法启动语音识别: ' + err);
+    }
+}
+
+async function sendMessage() {
     // 自动探测文本中的绝对路径，转为附件
     const txt = inputText.value || '';
     const pathRegex = /([a-zA-Z]:\\[^"'<>|*?]+?\.(?:pdf|txt|md|csv|json|yaml|yml|log|py|js|rs|ts|vue|html|css|docx|xlsx|png|jpg|jpeg|gif|webp))/gi;
@@ -607,6 +1167,21 @@ const {
       }
     }
 
+    if (currentModelObj && currentModelObj.provider === 'offline' && !engineJustStarted) {
+      try {
+        const engineStatus = await window.appAPI.invoke('get_offline_engine_status');
+        if (engineStatus.status !== 'running' || engineStatus.model !== currentModelObj.id) {
+          pendingOfflineEngineModel.value = currentModelObj;
+          showOfflineEngineModal.value = true;
+          return;
+        }
+      } catch (e) {
+        console.error(e);
+        return;
+      }
+    }
+    engineJustStarted = false;
+
     _sendMessage(pendingImages, pendingFiles, resetTextareaHeight, async ({ userMessage, filesToRead, streamThinking }) => {
       // 检查是否有 pdf 需要走 vision 通道渲染为图片
       if (hasVision && filesToRead.length > 0) {
@@ -617,7 +1192,7 @@ const {
           for (const pdfFile of pdfFiles) {
             const pdfPath = pdfFile.path;
             try {
-              const b64Array = await window.electronAPI.invoke('system_render_pdf_to_images', { path: pdfPath });
+              const b64Array = await window.appAPI.invoke('system_render_pdf_to_images', { path: pdfPath });
               if (b64Array && b64Array.length > 0) {
                 if (!userMessage.image_base64s) userMessage.image_base64s = [];
                 userMessage.image_base64s.push(...b64Array);
@@ -643,6 +1218,24 @@ function parseTextAsEvent() {
 }
 
 // ── T-1201: 富文本复制 ──────────────────────────────
+async function saveToNote(msg) {
+  if (!msg.content) return;
+  try {
+    const noteText = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
+    // 过滤掉内部标签，如 <|mem|>
+    const cleanText = noteText.replace(/<\|mem\|>/g, '').trim();
+    if (!cleanText) return;
+    
+    const res = await window.appAPI.notebookAppendDaily(cleanText);
+    if (res && res.ok) {
+      msg._savedToNote = true;
+      // 可以在此处弹出全局 notification，但最简单的是 UI 响应
+    }
+  } catch (e) {
+    console.error('Save to note failed:', e);
+  }
+}
+
 async function copyRichText(msg) {
   try {
     const html = renderMarkdown(msg.content);
@@ -670,7 +1263,7 @@ async function copyRichText(msg) {
 // ── 浏览器增强确认 ──────────────────────────────────
 async function handleBrowserEnable(data, tool) {
   try {
-    await window.electronAPI.browserEnable();
+    await window.appAPI.browserEnable();
     tool._browserEnable = null;
     tool.result = '✅ 浏览器已启用，正在重新加载页面...';
   } catch (err) {
@@ -682,7 +1275,7 @@ async function handleBrowserEnable(data, tool) {
 // ── T-1304: 自动修复处理 ─────────────────────────────
 async function handleAutoFix(code) {
   try {
-    const result = await window.electronAPI.autoFix(code);
+    const result = await window.appAPI.autoFix(code);
     if (result?.ok) {
       healthBanner.value = null;
     } else {
@@ -701,21 +1294,21 @@ function handleInput(event) {
   const cursorIndex = inputRef.value?.selectionStart || 0;
   const textBeforeCursor = text.substring(0, cursorIndex);
   
-  if (/(?:^|\s)@$/.test(textBeforeCursor)) {
-    showMentionMenu.value = true;
-    mentionTriggerIndex = cursorIndex - 1;
-  } else {
-    showMentionMenu.value = false;
-  }
-}
+  const slashMatch = /(?:^|\n|\s)\/$/.test(textBeforeCursor);
+  const mentionMatch = /(?:^|\n|\s)@$/.test(textBeforeCursor);
 
-async function handleMentionSelect() {
-  showMentionMenu.value = false;
-  await handleAttach();
-  if (mentionTriggerIndex >= 0) {
-    const text = inputText.value;
-    inputText.value = text.substring(0, mentionTriggerIndex) + text.substring(mentionTriggerIndex + 1);
-    mentionTriggerIndex = -1;
+  if (slashMatch) {
+    showCommandMenu.value = true;
+    commandType.value = 'slash';
+    commandTriggerIndex.value = cursorIndex - 1;
+    activeCommandIndex.value = 0;
+  } else if (mentionMatch) {
+    showCommandMenu.value = true;
+    commandType.value = 'mention';
+    commandTriggerIndex.value = cursorIndex - 1;
+    activeCommandIndex.value = 0;
+  } else {
+    showCommandMenu.value = false;
   }
 }
 
@@ -725,8 +1318,6 @@ async function handleScreenshot() {
   if (isScreenshotting.value) return; // 防止重复点击
   isScreenshotting.value = true;
   try {
-    const { getCurrentWindow } = await import('@tauri-apps/api/window');
-    const appWindow = getCurrentWindow();
     
     // 记录截图前的剪贴板状态，用于检测用户是否取消了截图
     let prevClipHash = '';
@@ -738,7 +1329,7 @@ async function handleScreenshot() {
     } catch (_) { /* 剪贴板可能为空 */ }
 
     // 截图期间的窗口隐藏、等待和恢复逻辑已经全部移到了 Rust 后端
-    await window.electronAPI.takeScreenshot();
+    await window.appAPI.takeScreenshot();
 
     // 彻底抛弃 Tauri 官方的 readImage 插件！
     // 它在处理部分 Windows Snipping Tool 的 DIB 图像时，会导致 Rust 线程死锁或 IPC 序列化永久挂起。
@@ -777,15 +1368,25 @@ async function handleScreenshot() {
 }
 
 function handleKeydown(event) {
-  if (showMentionMenu.value) {
+  if (showCommandMenu.value) {
     if (event.key === 'Enter') {
       event.preventDefault();
-      handleMentionSelect();
+      executeCommand(activeCommandIndex.value);
       return;
     }
     if (event.key === 'Escape') {
       event.preventDefault();
-      showMentionMenu.value = false;
+      showCommandMenu.value = false;
+      return;
+    }
+    if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      activeCommandIndex.value = (activeCommandIndex.value > 0) ? activeCommandIndex.value - 1 : commandList.value.length - 1;
+      return;
+    }
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      activeCommandIndex.value = (activeCommandIndex.value < commandList.value.length - 1) ? activeCommandIndex.value + 1 : 0;
       return;
     }
   }
@@ -837,12 +1438,12 @@ function onMessageLinkClick(e) {
   if (href.startsWith('file://') || /^[A-Za-z]:[\\\/]/.test(href)) {
     let filePath = href.replace('file:///', '');
     try { filePath = decodeURIComponent(filePath); } catch(e){}
-    window.electronAPI.openFile(filePath).catch(err => {
+    window.appAPI.openFile(filePath).catch(err => {
       console.error('打开文件失败:', err);
     });
   } else {
-    if (window.electronAPI.openExternal) {
-      window.electronAPI.openExternal(href);
+    if (window.appAPI.openExternal) {
+      window.appAPI.openExternal(href);
     }
   }
 }
@@ -875,12 +1476,60 @@ let cleanupStreamListener = null;
 let tauriDragUnlistens = [];
 let remoteMessageUnlisten = null;
 
+function onAndroidBackPressed(e) {
+  if (showOfflineEngineModal.value) {
+    showOfflineEngineModal.value = false;
+    e.preventDefault();
+  } else if (showCommandMenu.value) {
+    showCommandMenu.value = false;
+    e.preventDefault();
+  } else if (showMobileTools.value) {
+    showMobileTools.value = false;
+    e.preventDefault();
+  } else if (showAgentModeSwitcher.value) {
+    showAgentModeSwitcher.value = false;
+    e.preventDefault();
+  } else if (showModelSwitcher.value) {
+    showModelSwitcher.value = false;
+    e.preventDefault();
+  }
+}
+
+function onSendMessageToBob(e) {
+  if (e.detail) {
+    inputText.value = e.detail;
+    sendMessage();
+  }
+}
+
+function onDetectBoardingPass(e) {
+  if (e.detail) {
+    pendingBoardingPass.value = e.detail;
+  }
+}
+
 onMounted(async () => {
-  cleanupStreamListener = window.electronAPI.onStreamChunk(handleStreamChunk);
+  if (window.appAPI && window.appAPI.listen) {
+    window.appAPI.listen('speech:partial', (e) => {
+      inputText.value = startTextCache + e.payload.text;
+    });
+    window.appAPI.listen('speech:result', (e) => {
+      inputText.value = startTextCache + e.payload.text;
+    });
+    window.appAPI.listen('speech:error', (e) => {
+      console.warn('Speech error:', e.payload);
+      isRecording.value = false;
+    });
+  }
+  window.addEventListener('open-mobile-model-switcher', onOpenMobileModelSwitcher);
+  window.addEventListener('android-back-pressed', onAndroidBackPressed);
+  window.addEventListener('send-message-to-bob', onSendMessageToBob);
+  window.addEventListener('detect-boarding-pass', onDetectBoardingPass);
+  cleanupStreamListener = window.appAPI.onStreamChunk(handleStreamChunk);
 
   // 远程消息监听
-  if (window.electronAPI.onRemoteNewMessage) {
-    remoteMessageUnlisten = await window.electronAPI.onRemoteNewMessage((event) => {
+  if (window.appAPI.onRemoteNewMessage) {
+    remoteMessageUnlisten = await window.appAPI.onRemoteNewMessage((event) => {
       const payload = event?.payload || event;
       const convId = payload?.conversation_id || event?.conversation_id;
       if (convId && convId === props.conversationId) {
@@ -898,19 +1547,18 @@ onMounted(async () => {
 
   // CDN 上传进度监听
   if (window.__TAURI_INTERNALS__) {
-    const { listen } = await import('@tauri-apps/api/event');
-    cdnUnlistens.push(await listen('cdn:upload-start', (e) => {
-      cdnUpload.value = { active: true, fileName: e.payload.file_name, percent: 0, bytesSent: 0, totalBytes: e.payload.total_bytes };
+    cdnUnlistens.push(await window.appAPI.listenEvent('cdn:upload-start', (e) => {
+      cdnUpload.value = { active: true, fileName: e.payload.file_name, percent: 0, bytesSent: 0, totalBytes: e.payload.total_bytes, attempt: 1 };
     }));
-    cdnUnlistens.push(await listen('cdn:upload-progress', (e) => {
+    cdnUnlistens.push(await window.appAPI.listenEvent('cdn:upload-progress', (e) => {
       cdnUpload.value.percent = e.payload.percent;
       cdnUpload.value.bytesSent = e.payload.bytes_sent;
     }));
-    cdnUnlistens.push(await listen('cdn:upload-done', () => {
+    cdnUnlistens.push(await window.appAPI.listenEvent('cdn:upload-done', () => {
       cdnUpload.value.percent = 100;
       setTimeout(() => { cdnUpload.value.active = false; }, 1500);
     }));
-    cdnUnlistens.push(await listen('cdn:upload-error', () => {
+    cdnUnlistens.push(await window.appAPI.listenEvent('cdn:upload-error', () => {
       cdnUpload.value.active = false;
     }));
   }
@@ -920,10 +1568,16 @@ onMounted(async () => {
 
   // T-1304: 启动健康检查
   try {
-    const health = await window.electronAPI.healthCheck();
+    const health = await window.appAPI.healthCheck();
     if (health && !health.healthy) {
       const firstIssue = health.issues?.[0];
       if (firstIssue) {
+        const lastDismissed = localStorage.getItem('dismissed_banner_' + firstIssue.code);
+        if (lastDismissed) {
+          const hoursPassed = (Date.now() - parseInt(lastDismissed, 10)) / (1000 * 60 * 60);
+          if (hoursPassed < 24) return;
+        }
+
         healthBanner.value = {
           severity: firstIssue.severity,
           message: firstIssue.message,
@@ -938,7 +1592,7 @@ onMounted(async () => {
 
   // T-1305: 聊天就绪校验
   try {
-    const ready = await window.electronAPI.validateChatReady();
+    const ready = await window.appAPI.validateChatReady();
     chatReady.value = ready?.ready !== false;  // fail-open
     chatReadyMsg.value = ready?.message || '';
   } catch (e) {
@@ -961,6 +1615,10 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
+  window.removeEventListener('open-mobile-model-switcher', onOpenMobileModelSwitcher);
+  window.removeEventListener('android-back-pressed', onAndroidBackPressed);
+  window.removeEventListener('send-message-to-bob', onSendMessageToBob);
+  window.removeEventListener('detect-boarding-pass', onDetectBoardingPass);
   if (cleanupStreamListener) cleanupStreamListener();
   if (remoteMessageUnlisten) remoteMessageUnlisten();
   document.removeEventListener('dragenter', onDragEnter);
@@ -980,15 +1638,17 @@ onUnmounted(() => {
 // 切换对话时重新加载消息
 watch(() => props.conversationId, async () => {
   if (props.conversationId) {
-    const conv = await window.electronAPI.getConversation(props.conversationId);
-    sessionCost.value = conv?.cost || 0;
+    const conv = await window.appAPI.getConversation(props.conversationId);
+    sessionCost.value = conv?.cost || conv?.total_cost || 0;
+    conversationTitle.value = conv?.title || '新对话';
   } else {
     sessionCost.value = 0;
+    conversationTitle.value = '';
   }
 
   loadMessages();
   globalFileAccess.value = false;
-  currentModelRaw.value = (await window.electronAPI.getActiveModels())?.main || '';
+  currentModelRaw.value = (await window.appAPI.getActiveModels())?.main || '';
 }, { immediate: true });
 
 // streamThinking 自动滚动到底部
@@ -1062,7 +1722,7 @@ defineExpose({
 .health-fix-btn {
   background: none;
   border: 1px solid currentColor;
-  border-radius: 4px;
+  border-radius: var(--radius-default);
   padding: 2px 8px;
   font-size: 11px;
   cursor: pointer;
@@ -1093,6 +1753,34 @@ defineExpose({
   flex-direction: column;
   gap: var(--space-5);
   position: relative;  /* 为绝对定位的 logo 背景层提供锚点 */
+}
+
+.today-chat-entry {
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  padding: 0;
+  color: var(--text-secondary);
+  background: transparent;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.today-chat-entry:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.today-chat-entry-desktop {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  align-self: flex-end;
+  margin-bottom: calc(-1 * var(--space-5));
 }
 
 .view-header {
@@ -1158,6 +1846,10 @@ defineExpose({
   overflow: hidden;  /* 裁剪超出容器的内容 */
 }
 
+.empty-state :deep(.today-card) {
+  max-width: 480px;
+}
+
 .empty-bob-logo {
   width: 100%;
   /* 保持 bob_bob.svg 的宽高比 152.9:99.9 */
@@ -1202,7 +1894,7 @@ defineExpose({
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-default);
   flex-shrink: 0;
   margin-top: 4px;
   font-size: 12px;
@@ -1263,7 +1955,7 @@ defineExpose({
   font-family: var(--font-mono);
   font-size: 0.95em;
   padding: 0 2px;
-  border-radius: 2px;
+  border-radius: var(--radius-default);
   background: transparent;
   color: var(--text-primary);
 }
@@ -1344,6 +2036,22 @@ defineExpose({
   scroll-behavior: smooth;
 }
 
+/* 思考状态输入光标动画 */
+.typing-cursor {
+  display: inline-block;
+  width: 6px;
+  height: 14px;
+  background-color: var(--accent-primary);
+  margin-left: 4px;
+  vertical-align: middle;
+  animation: blink-cursor 1s step-end infinite;
+}
+
+@keyframes blink-cursor {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
 /* ── 文件卡片 ───────────────────────────────────────── */
 .message-content a[href^="file://"],
 .message-content a[href^="C:\\"],
@@ -1356,7 +2064,7 @@ defineExpose({
   padding: 4px 10px;
   background: color-mix(in srgb, var(--accent-primary) 10%, transparent);
   border: 1px solid color-mix(in srgb, var(--accent-primary) 30%, transparent);
-  border-radius: 6px;
+  border-radius: var(--radius-default);
   text-decoration: none;
   color: var(--accent-primary);
   font-weight: 500;
@@ -1386,7 +2094,7 @@ defineExpose({
 
 /* ── 消息图片 ───────────────────────────────────────── */
 .message-image {
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-default);
   overflow: hidden;
 }
 
@@ -1397,7 +2105,7 @@ defineExpose({
   max-height: 240px;
   display: block;
   object-fit: contain;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-default);
 }
 
 /* ── 图片预览条 ─────────────────────────────────────── */
@@ -1414,7 +2122,7 @@ defineExpose({
   position: relative;
   width: 48px;
   height: 48px;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-default);
   overflow: hidden;
   border: 1px solid var(--border-default);
 }
@@ -1433,7 +2141,7 @@ defineExpose({
   height: 20px;
   font-size: 10px;
   background: var(--color-error);
-  color: white;
+  color: var(--text-inverse);
   border-radius: 50%;
 }
 
@@ -1450,7 +2158,7 @@ defineExpose({
   padding: 12px 16px;
   background: color-mix(in srgb, var(--color-error, #ef4444) 8%, var(--bg-secondary));
   border: 1px solid color-mix(in srgb, var(--color-error, #ef4444) 20%, transparent);
-  border-radius: 8px;
+  border-radius: var(--radius-default);
   margin: 4px 0;
 }
 
@@ -1459,7 +2167,7 @@ defineExpose({
   height: 22px;
   border-radius: 50%;
   background: var(--color-error, #ef4444);
-  color: white;
+  color: var(--text-inverse);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1496,7 +2204,7 @@ defineExpose({
   margin: 8px 0;
   padding: 10px 14px;
   background: var(--bg-secondary);
-  border-radius: 8px;
+  border-radius: var(--radius-default);
   border-left: 2px solid var(--accent-primary);
   animation: fadeIn 0.2s ease;
 }
@@ -1527,13 +2235,13 @@ defineExpose({
   width: 100%;
   height: 4px;
   background: var(--bg-tertiary);
-  border-radius: 2px;
+  border-radius: var(--radius-default);
   overflow: hidden;
 }
 .cdn-upload-bar-fill {
   height: 100%;
   background: var(--accent-primary);
-  border-radius: 2px;
+  border-radius: var(--radius-default);
   transition: width 0.15s ease;
 }
 .cdn-upload-detail {
@@ -1608,7 +2316,7 @@ defineExpose({
   margin-top: 6px;
   padding: 8px 10px;
   background: var(--bg-secondary);
-  border-radius: 6px;
+  border-radius: var(--radius-default);
   font-size: 11px;
   font-family: var(--font-mono, monospace);
   color: var(--text-tertiary);
@@ -1635,7 +2343,7 @@ defineExpose({
   margin-top: 6px;
   font-size: 10px;
   padding: 2px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-default);
   background: transparent;
   border: 1px solid var(--border-subtle);
   color: var(--text-tertiary);
@@ -1697,13 +2405,14 @@ defineExpose({
 
 /* ── 输入区 ─────────────────────────────────────────── */
 .quick-actions-bar {
+  position: absolute;
+  bottom: 100%;
+  right: var(--space-8);
   display: flex;
   justify-content: flex-end;
   align-items: center;
   margin-bottom: var(--space-2);
-  max-width: 1000px;
-  margin-left: auto;
-  margin-right: auto;
+  z-index: 100;
 }
 
 .actions-spacer {
@@ -1722,7 +2431,7 @@ defineExpose({
   height: 22px;
   padding: 0 6px;
   border: none;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-default);
   background: transparent;
   color: var(--text-tertiary);
   font-size: var(--text-xs);
@@ -1746,7 +2455,7 @@ defineExpose({
   width: 12px;
   height: 12px;
   object-fit: contain;
-  border-radius: 2px;
+  border-radius: var(--radius-default);
 }
 
 /* ── 模型切换弹窗 ─────────────────────────────────── */
@@ -1759,7 +2468,7 @@ defineExpose({
   min-width: 300px;
   background: var(--bg-primary);
   border: 1px solid var(--border-default);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-default);
   box-shadow: var(--shadow-lg);
   z-index: 200;
   overflow: hidden;
@@ -1772,13 +2481,12 @@ defineExpose({
 
 /* 左侧：供应商列表 */
 .model-popup-providers {
-  width: max-content;
-  min-width: 120px;
-  max-width: 160px;
+  width: 140px;
   flex-shrink: 0;
   border-right: 1px solid var(--border-subtle);
   overflow-y: auto;
   overflow-x: hidden;
+  scrollbar-gutter: stable;
   padding: var(--space-1);
   background: var(--bg-secondary);
 }
@@ -1790,7 +2498,7 @@ defineExpose({
   width: 100%;
   padding: 5px 8px;
   border: none;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-default);
   background: transparent;
   color: var(--text-secondary);
   font-family: var(--font-sans);
@@ -1804,8 +2512,8 @@ defineExpose({
 .model-provider-name {
   flex: 1;
   white-space: nowrap;
-  overflow: hidden;
   text-overflow: ellipsis;
+  overflow: hidden;
   min-width: 0;
 }
 
@@ -1817,7 +2525,7 @@ defineExpose({
 .model-provider-btn.active {
   background: var(--bg-tertiary);
   color: var(--text-primary);
-  font-weight: 500;
+  font-weight: 600;
 }
 
 .provider-count {
@@ -1831,6 +2539,7 @@ defineExpose({
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
+  scrollbar-gutter: stable;
   padding: var(--space-1);
   min-width: 0;
 }
@@ -1842,7 +2551,7 @@ defineExpose({
   width: 100%;
   padding: 6px 10px;
   border: none;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-default);
   background: transparent;
   color: var(--text-secondary);
   font-family: var(--font-sans);
@@ -1900,6 +2609,7 @@ defineExpose({
 }
 
 .input-area {
+  position: relative;
   padding: var(--space-4) var(--space-8) var(--space-6);
 }
 
@@ -1912,7 +2622,7 @@ defineExpose({
   box-sizing: border-box;
   background: var(--surface-card);
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-default);
   padding: var(--space-2) var(--space-3);
   transition: border-color var(--duration-fast) var(--ease-out);
 }
@@ -1942,7 +2652,7 @@ defineExpose({
   gap: 6px;
   background: var(--surface-card);
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-default);
   padding: 4px 8px 4px 6px;
   font-size: 11px;
   color: var(--text-secondary);
@@ -1964,7 +2674,7 @@ defineExpose({
   color: var(--text-tertiary);
   cursor: pointer;
   padding: 2px;
-  border-radius: var(--radius-xs);
+  border-radius: var(--radius-default);
 }
 
 .file-remove-btn:hover {
@@ -1977,7 +2687,7 @@ defineExpose({
   height: auto;
   max-width: 64px;
   max-height: 48px;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-default);
   border: 1px solid var(--border-subtle);
   object-fit: contain;
 }
@@ -1990,7 +2700,7 @@ defineExpose({
   height: 16px;
   font-size: 8px;
   background: var(--color-error);
-  color: white;
+  color: var(--text-inverse);
   border-radius: 50%;
   display: flex;
   align-items: center;
@@ -2030,8 +2740,9 @@ defineExpose({
 .input-toolbar {
   display: flex;
   align-items: center;
-  gap: 2px;
-  padding-top: var(--space-1);
+  flex-wrap: wrap;
+  gap: 4px;
+  padding-top: var(--space-2);
 }
 
 .toolbar-spacer {
@@ -2051,7 +2762,7 @@ defineExpose({
   justify-content: center;
   width: 17px;
   height: 17px;
-  border-radius: 2px;
+  border-radius: var(--radius-default);
   border: 1px solid var(--border-default);
   background: transparent;
   cursor: pointer;
@@ -2146,7 +2857,7 @@ defineExpose({
   margin-top: 2px;
 }
 
-.model-label, .source-label {
+.model-label, .source-label, .route-label {
   font-size: 11px;
   color: var(--text-muted);
   opacity: 0.5;
@@ -2172,6 +2883,36 @@ defineExpose({
   align-items: center;
   gap: 4px;
 }
+.goal-runtime-chat-card {
+  max-width: 520px;
+  margin-top: 9px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--accent-primary) 24%, var(--border-subtle));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--surface-card) 88%, transparent);
+}
+.goal-runtime-chat-head { display: flex; align-items: center; gap: 7px; color: var(--text-secondary); }
+.goal-runtime-chat-head strong { color: var(--text-primary); font-size: 12px; }
+.goal-runtime-chat-head span { margin-left: auto; color: var(--text-muted); font-size: 10px; }
+.goal-runtime-chat-card p { margin: 6px 0 0; color: var(--text-tertiary); font-size: 11px; }
+.goal-runtime-chat-card .goal-runtime-error { font-family: var(--font-mono); color: var(--text-secondary); }
+.goal-runtime-chat-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
+.goal-choice-button {
+  min-height: 29px; padding: 0 10px; border: 1px solid var(--border-subtle); border-radius: 8px;
+  color: var(--text-secondary); background: transparent; font: inherit; font-size: 11px; cursor: pointer;
+}
+.goal-choice-button.primary {
+  color: var(--accent-primary);
+  border-color: color-mix(in srgb, var(--accent-primary) 42%, var(--border-subtle));
+  background: color-mix(in srgb, var(--accent-primary) 8%, transparent);
+}
+.goal-choice-button:disabled { opacity: .55; cursor: wait; }
+
+.route-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
 
 /* T-1201: 富文本复制按钮 */
 .copy-rich-btn {
@@ -2182,7 +2923,7 @@ defineExpose({
   border: none;
   cursor: pointer;
   color: var(--text-muted);
-  opacity: 0;
+  opacity: 0.3;
   padding: 2px;
   border-radius: var(--radius-xs, 3px);
   transition: opacity 0.2s, color 0.2s, background 0.2s;
@@ -2190,7 +2931,7 @@ defineExpose({
 }
 
 .message-body:hover .copy-rich-btn {
-  opacity: 0.5;
+  opacity: 0.6;
 }
 
 .copy-rich-btn:hover {
@@ -2255,15 +2996,15 @@ defineExpose({
   margin-bottom: 8px;
   background-color: var(--bg-secondary);
   border: 1px solid var(--border-light);
-  border-radius: 8px;
+  border-radius: var(--radius-default);
   padding: 4px;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+  box-shadow: 0 4px 12px var(--shadow-color, rgba(0,0,0,0.1));
   z-index: 100;
   min-width: 200px;
 }
 .mention-menu-item {
   padding: 8px 12px;
-  border-radius: 6px;
+  border-radius: var(--radius-default);
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -2279,7 +3020,7 @@ defineExpose({
   color: var(--text-tertiary);
   background-color: var(--bg-root);
   padding: 2px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-default);
 }
 
 /* Image Lightbox */
@@ -2289,7 +3030,7 @@ defineExpose({
   left: 0;
   width: 100vw;
   height: 100vh;
-  background-color: rgba(0, 0, 0, 0.85);
+  background-color: var(--overlay-bg);
   display: flex;
   justify-content: center;
   align-items: center;
@@ -2301,8 +3042,8 @@ defineExpose({
   max-width: 90vw;
   max-height: 90vh;
   object-fit: contain;
-  border-radius: 8px;
-  box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+  border-radius: var(--radius-default);
+  box-shadow: 0 10px 30px var(--shadow-lg);
   cursor: grab;
   transition: transform 0.1s ease-out;
 }
@@ -2316,7 +3057,7 @@ defineExpose({
   right: 20px;
   background: transparent;
   border: none;
-  color: white;
+  color: var(--text-inverse);
   font-size: 40px;
   line-height: 1;
   cursor: pointer;
@@ -2326,4 +3067,400 @@ defineExpose({
 .lightbox-close:hover {
   opacity: 1;
 }
+
+/* ── Mobile Input Alignment (Absolute Positioning) ── */
+.mobile-plus-btn {
+  position: absolute;
+  left: 0;
+  top: 2px;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  padding: 0;
+  flex-shrink: 0;
+  cursor: pointer;
+  z-index: 10;
+}
+.mobile-send-btn-wrap {
+  position: absolute;
+  right: 0;
+  top: 2px;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  z-index: 10;
+}
+.mobile-mode-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  width: 28px;
+  height: 28px;
+  cursor: pointer;
+  padding: 0;
+}
+.chat-view.is-mobile .input-row {
+  position: relative;
+  align-items: flex-end !important;
+  padding: 8px 12px;
+}
+.chat-view.is-mobile .input-wrapper {
+  padding-left: 36px;
+  padding-right: 36px;
+  width: 100%;
+  box-sizing: border-box;
+}
+.chat-view.is-mobile .chat-input {
+  display: block;
+  box-sizing: border-box;
+  min-height: 36px;
+  line-height: 24px;
+  padding: 6px 0;
+}
+
+/* ── Mobile Bottom Sheet ────────────────────────────────────────── */
+.mobile-sheet-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  z-index: 999;
+  backdrop-filter: blur(2px);
+}
+.mobile-bottom-sheet {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: var(--bg-primary);
+  border-top: 1px solid var(--border-subtle);
+  z-index: 1000;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  padding-bottom: env(safe-area-inset-bottom);
+  box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.25);
+  transition: all 0.3s ease;
+}
+.sheet-header {
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.sheet-drag-handle {
+  width: 40px;
+  height: 4px;
+  background: var(--border-strong);
+  border-radius: var(--radius-default);
+  opacity: 0.6;
+}
+.sheet-back-btn {
+  position: absolute;
+  left: 12px;
+  display: flex;
+  align-items: center;
+  background: transparent;
+  border: none;
+  color: var(--text-primary);
+  font-size: 14px;
+  padding: 8px;
+  cursor: pointer;
+}
+.sheet-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 16px 24px;
+}
+.main-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16px;
+  padding-top: 12px;
+}
+.sheet-grid-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  background: transparent;
+  border: none;
+  color: var(--text-primary);
+  font-size: 11px;
+  cursor: pointer;
+}
+.grid-icon-wrap {
+  width: 56px;
+  height: 56px;
+  border-radius: var(--radius-default);
+  background: var(--bg-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-primary);
+  transition: background 0.2s;
+}
+.sheet-grid-item:active .grid-icon-wrap {
+  background: var(--surface-glass);
+}
+.list-view {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 8px;
+}
+.sheet-list-item {
+  display: flex;
+  align-items: center;
+  padding: 12px 16px;
+  background: var(--bg-secondary);
+  border: none;
+  border-radius: var(--radius-default);
+  color: var(--text-primary);
+  cursor: pointer;
+  text-align: left;
+}
+.sheet-list-item.active {
+  border: 1px solid var(--accent-primary);
+  background: rgba(var(--accent-primary-rgb), 0.1);
+}
+.item-info {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  flex: 1;
+  margin-left: 12px;
+}
+.item-name {
+  font-size: 15px;
+  font-weight: 500;
+}
+.item-count {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  margin-top: 2px;
+}
+.text-tertiary {
+  color: var(--text-tertiary);
+}
+.text-accent {
+  color: var(--accent-primary);
+}
+.sheet-empty {
+  padding: 24px;
+  text-align: center;
+  color: var(--text-tertiary);
+}
+.slide-up-enter-active,
+.slide-up-leave-active {
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.slide-up-enter-from,
+.slide-up-leave-to {
+  transform: translateY(100%);
+}
+
+
+
+/* ── Mobile Bottom Sheet ────────────────────────────────────────── */
+
+/* ── Boarding Pass Confirmation Card ───────────────────────────── */
+.bp-modal-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  backdrop-filter: blur(4px);
+}
+.boarding-pass-modern-card {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-default);
+  padding: 20px;
+  width: 90%;
+  max-width: 340px;
+  box-shadow: 0 16px 40px rgba(0,0,0,0.3);
+  animation: modalPop 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  font-family: var(--font-sans, system-ui, sans-serif);
+}
+@keyframes modalPop {
+  from { opacity: 0; transform: scale(0.9); }
+  to { opacity: 1; transform: scale(1); }
+}
+.bp-modern-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8em;
+  font-weight: 500;
+  opacity: 0.7;
+  margin-bottom: 8px;
+  justify-content: flex-end;
+}
+.bp-modern-icon {
+  font-size: 1em;
+}
+.bp-route-row {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+.bp-airport-code {
+  font-size: 1.6em;
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+.bp-route-arrow {
+  font-size: 1.1em;
+  opacity: 0.5;
+}
+.bp-detail-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 12px 8px;
+}
+.bp-modern-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.bp-modern-label {
+  font-size: 0.7em;
+  opacity: 0.6;
+  letter-spacing: 0.3px;
+}
+.bp-modern-value {
+  font-size: 1.05em;
+  font-weight: 600;
+}
+.bp-modern-divider {
+  height: 1px;
+  background: var(--border-default);
+  margin: 10px 0;
+}
+.bp-modern-qr-section {
+  margin-top: 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.bp-modern-qr-wrapper {
+  background: var(--text-primary);
+  padding: 10px;
+  border-radius: var(--radius-default);
+}
+.bp-modern-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 16px;
+}
+.bp-modern-btn {
+  flex: 1;
+  padding: 10px;
+  border-radius: var(--radius-default);
+  border: none;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.2s;
+  font-size: 0.9em;
+}
+.bp-modern-btn:hover {
+  opacity: 0.85;
+}
+.bp-modern-btn-confirm {
+  background: var(--user-accent, #4f8cf7);
+  color: var(--text-primary);
+}
+.bp-modern-btn-dismiss {
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+}
+
+/* 语音输入样式 */
+.is-recording-wrapper {
+  background: var(--bg-secondary) !important;
+  box-shadow: inset 0 0 20px rgba(var(--user-accent-rgb, 39,118,187), 0.05);
+  border-color: rgba(var(--user-accent-rgb, 39,118,187), 0.3) !important;
+  transition: all 0.3s ease;
+}
+
+.mic-btn {
+  background: transparent;
+  border: 1px solid var(--border-default);
+  color: var(--text-secondary);
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  width: 32px;
+  height: 32px;
+}
+
+.mic-btn.is-recording {
+  background: var(--bg-tertiary);
+  color: var(--user-accent, var(--accent-primary));
+  border-color: var(--user-accent, var(--accent-primary));
+  animation: pulse-mic 1.5s infinite;
+}
+
+@keyframes pulse-mic {
+  0% { box-shadow: 0 0 0 0 rgba(var(--user-accent-rgb, 39,118,187), 0.4); }
+  70% { box-shadow: 0 0 0 10px rgba(var(--user-accent-rgb, 39,118,187), 0); }
+  100% { box-shadow: 0 0 0 0 rgba(var(--user-accent-rgb, 39,118,187), 0); }
+}
+
+/* ── Mobile UI Optimizations ── */
+.chat-view.is-mobile .messages-area {
+  padding: var(--space-4) var(--space-3);
+}
+
+.chat-view.is-mobile .message-row {
+  gap: 6px; /* 减小头像和气泡之间的间距 */
+}
+
+.chat-view.is-mobile .message-body {
+  max-width: 92%; /* 让气泡占据更多横向空间 */
+}
+
+.chat-view.is-mobile .message-avatar {
+  width: 24px;
+  height: 24px;
+  font-size: 10px;
+  margin-top: 2px;
+}
+
+.chat-view.is-mobile .message-user .message-content,
+.chat-view.is-mobile .message-assistant .message-content {
+  padding: 8px 12px; /* 减小气泡内部的内边距，让内容更紧凑 */
+  font-size: 14px; /* 确保字体在手机上大小适中且不会显得空旷 */
+}
+
+.mic-btn.listening {
+  color: var(--color-danger);
+  animation: breathe 1.5s infinite;
+}
+@keyframes breathe {
+  0% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.1); opacity: 0.8; }
+  100% { transform: scale(1); opacity: 1; }
+}
 </style>
+

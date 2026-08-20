@@ -18,7 +18,7 @@ pub async fn system_fetch_url(url: String) -> Value {
 
     let client = match Client::builder()
         .timeout(std::time::Duration::from_secs(10))
-        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Bob-Agent/1.0")
+        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Bob.agent/1.0")
         .build()
     {
         Ok(c) => c,

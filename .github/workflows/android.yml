@@ -1,0 +1,112 @@
+name: Bob-Mobile Android CI
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build-android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install NDK
+        run: sdkmanager "ndk;27.0.12077973"
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/share/boost
+          sudo apt-get clean
+          df -h
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Initialize Android Project & Inject Permissions
+        run: |
+          if [ ! -d "src-tauri/gen/android" ]; then
+            echo "Android project not found. Initializing..."
+            npx tauri android init --ci
+            
+            echo "Injecting native permissions and portrait lock..."
+            MANIFEST="src-tauri/gen/android/app/src/main/AndroidManifest.xml"
+            sed -i '/<\/manifest>/i \
+            <uses-permission android:name="android.permission.INTERNET"/>\n\
+            <uses-permission android:name="android.permission.RECORD_AUDIO"/>\n\
+            <uses-permission android:name="android.permission.CAMERA"/>\n\
+            <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>\n\
+            <uses-permission android:name="android.permission.VIBRATE"/>\n\
+            <uses-permission android:name="android.permission.WAKE_LOCK"/>\n\
+            <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>' $MANIFEST
+            
+            echo "Setting icon background to white and patching all default purple colors..."
+            python scripts/patch_android_colors.py
+            
+            # Lock portrait mode in activity
+            sed -i '/<activity/a \            android:screenOrientation="portrait"' $MANIFEST
+            
+            echo "Injecting ShareActivity intent filter..."
+            python scripts/patch_android_intent.py
+            
+            echo "Copying ShareActivity.kt to package dir..."
+            mkdir -p src-tauri/gen/android/app/src/main/java/bob/agent
+            cp scripts/android_patches/ShareActivity.kt src-tauri/gen/android/app/src/main/java/bob/agent/
+          else
+            echo "Android project already initialized."
+          fi
+
+      - name: Workaround NDK libgcc removal
+        run: |
+          NDK_TOOLCHAIN=$ANDROID_HOME/ndk/27.0.12077973/toolchains/llvm/prebuilt/linux-x86_64
+          # Find the clang resource lib directory for aarch64
+          CLANG_VER=$(ls $NDK_TOOLCHAIN/lib/clang/ | head -1)
+          LIB_DIR="$NDK_TOOLCHAIN/lib/clang/$CLANG_VER/lib/linux/aarch64"
+          if [ -d "$LIB_DIR" ] && [ -f "$LIB_DIR/libunwind.a" ] && [ ! -f "$LIB_DIR/libgcc.a" ]; then
+            cp "$LIB_DIR/libunwind.a" "$LIB_DIR/libgcc.a"
+            echo "Created libgcc.a symlink workaround"
+          else
+            echo "libgcc workaround not needed or dir not found"
+          fi
+
+      - name: Patch Android Icons (kill purple, force @mipmap refs)
+        run: python scripts/patch_android_icons.py
+
+      - name: Build APK
+        run: |
+          mkdir -p resources/llm-engine
+          touch resources/llm-engine/dummy.exe resources/llm-engine/dummy.dll resources/llm-engine/dummy.disabled
+          mkdir -p skills
+          touch src-tauri/pdfium.dll
+          npx tauri android build --target aarch64
+        env:
+          NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/27.0.12077973
+          CC_aarch64_linux_android: ${{ env.ANDROID_HOME }}/ndk/27.0.12077973/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android30-clang
+          CXX_aarch64_linux_android: ${{ env.ANDROID_HOME }}/ndk/27.0.12077973/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android30-clang++
+          AR_aarch64_linux_android: ${{ env.ANDROID_HOME }}/ndk/27.0.12077973/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bob-mobile-apk
+          path: src-tauri/gen/android/app/build/outputs/apk/**/*.apk

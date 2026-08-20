@@ -28,6 +28,39 @@ mod exports;
 mod telegram;
 mod discord;
 mod kg;
+mod notebook;
+mod sync_engine;
+mod im_sessions;
+mod tunnel;
+mod web_drop;
+mod file_share;
+mod goal;
+mod candle_engine;
+mod knowledge_schema;
+mod knowledge_committer;
+mod knowledge_audit;
+mod work_core;
+mod goal_runtime;
+mod daily_brief;
+mod capability;
+mod tool_confirm;
+mod sync_protocol;
+mod sync_history;
+mod sync_resolver;
+mod sync_diagnostics;
+mod skills_sync;
+mod lan_sync;
+mod capture;
+mod capture_router;
+mod complexity_router;
+mod assertions;
+mod action_selector;
+mod execution_error;
+mod result_receipt;
+mod model_manager;
+mod assistant_context;
+mod barcode;
+mod crypto;
 
 use serde_json::{json, Value};
 use std::fs;
@@ -41,7 +74,7 @@ use percent_encoding::percent_decode_str;
 
 pub(crate) fn get_data_dir() -> PathBuf {
     let mut path = dirs::data_dir().unwrap_or_else(|| PathBuf::from("."));
-    path.push("bob-agent");
+    path.push("bob.agent");
     fs::create_dir_all(&path).unwrap_or_default();
     path
 }
@@ -63,7 +96,7 @@ pub(crate) fn write_log_with_rotation(log_path: &Path, message: &str, max_size_b
 }
 
 /// 知识库 Wiki 目录：优先读取用户在设置面板中配置的 wikiDir，
-/// 未配置时 fallback 到 AppData/bob-agent/wiki/
+/// 未配置时 fallback 到 AppData/bob.agent/wiki/
 pub(crate) fn get_wiki_dir() -> PathBuf {
     let config = read_config();
     if let Some(wiki_dir) = config.get("wikiDir").and_then(|v| v.as_str()) {
@@ -96,6 +129,14 @@ fn write_config(config: &Value) {
     let path = get_config_path();
     if let Ok(data) = serde_json::to_string_pretty(config) {
         let _ = fs::write(path, data);
+    }
+}
+
+pub(crate) fn get_external_skills_dir_or_default(config: &Value) -> PathBuf {
+    if let Some(path) = config.get("external_skills_dir").and_then(|v| v.as_str()) {
+        PathBuf::from(path)
+    } else {
+        get_data_dir().join("skills")
     }
 }
 
@@ -694,6 +735,8 @@ pub fn run() {
         .manage(sidecar::SidecarState { child: Mutex::new(None) })
         .manage(wechat_state.clone())
         .manage(browser_state.clone())
+        .manage(crypto::DeviceIdentityState(std::sync::Mutex::new(None)))
+        .manage(std::sync::Arc::new(sync_engine::DeviceRegistry::load()))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_notification::init())
@@ -878,6 +921,70 @@ pub fn run() {
             kg::kg_delete_node_cmd,
             kg::kg_merge_nodes,
             kg::kg_backfill,
+            sync_diagnostics::get_sync_connectivity_snapshot,
+            sync_engine::get_connected_devices,
+            sync_engine::disconnect_device,
+            sync_engine::trigger_mobile_sync,
+            sync_engine::write_mobile_outbox,
+            sync_engine::trigger_wakeup_via_relay,
+            sync_engine::relay_handshake,
+            sync_engine::get_sync_logs,
+            sync_engine::get_shared_intents,
+            sync_engine::clear_shared_intent,
+            sync_engine::get_p2p_relay_status,
+            sync_engine::force_relay_reconnect,
+            sync_history::get_sync_runs,
+            sync_history::get_sync_trace_events,
+            dream::system_get_tag_proposals,
+            dream::system_clear_tag_proposals,
+            model_manager::download_model,
+            model_manager::check_model_downloaded,
+            model_manager::pause_download,
+            model_manager::delete_local_model,
+            // 持续工作核心 (Work Core)
+            work_core::commands::work_project_list,
+            work_core::commands::work_project_create,
+            work_core::commands::work_project_get,
+            work_core::commands::work_object_create,
+            work_core::commands::work_object_update_status,
+            work_core::commands::work_object_delete,
+            work_core::commands::work_relation_create,
+            work_core::commands::work_project_export_snapshot,
+            work_core::commands::work_project_link_list_pending,
+            work_core::commands::work_project_link_resolve,
+            work_core::commands::work_project_link_dismiss,
+            work_core::commands::work_external_link_list,
+            work_core::commands::work_change_review_list,
+            work_core::commands::work_change_review_action,
+            // 目标运行时 (Goal Runtime)
+            goal_runtime::commands::goal_runtime_list,
+            goal_runtime::commands::goal_runtime_get,
+            goal_runtime::commands::goal_runtime_list_events,
+            goal_runtime::commands::goal_runtime_continue,
+            goal_runtime::commands::goal_runtime_defer,
+            goal_runtime::commands::goal_runtime_cancel,
+            goal_runtime::commands::goal_runtime_decide_approval,
+            // 每日简报 (Daily Brief)
+            daily_brief::commands::daily_brief_get,
+            daily_brief::commands::daily_brief_refresh,
+            daily_brief::commands::daily_brief_mark_seen,
+            // 笔记本 (Notebook)
+            notebook::notebook_list_notes,
+            notebook::notebook_read_note,
+            notebook::notebook_save_note,
+            notebook::notebook_create_note,
+            notebook::notebook_delete_note,
+            notebook::notebook_move_note,
+            notebook::notebook_rename_note,
+            notebook::notebook_search,
+            notebook::notebook_append_daily,
+            notebook::notebook_save_asset,
+            notebook::notebook_create_folder,
+            notebook::notebook_list_all_tags,
+            notebook::notebook_update_tags,
+            notebook::notebook_get_backlinks,
+            notebook::notebook_merge_tags,
+            notebook::notebook_reject_tag_merge
         ])
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             // 如果已经有一个实例在运行，就把已有窗口唤出来
@@ -902,6 +1009,7 @@ pub fn run() {
             _ => {}
         })
         .setup(|app| {
+            use tauri::Manager;
             app.handle().plugin(tauri_plugin_shell::init())?;
             // 日志：debug 输出到终端 + 文件，release 仅输出到文件
             {
@@ -1051,7 +1159,8 @@ pub fn run() {
                 wechat::monitor::start_monitor(wechat_state.inner().clone());
             }
 
-            // ── T-304: 全局快捷键 Ctrl+Shift+B 唤起窗口 ──
+            // ── T-304: 全局快捷键 Ctrl+Shift+B 唤起窗口 (仅限桌面端) ──
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
             {
                 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
                 use tauri::Manager;
@@ -1072,52 +1181,55 @@ pub fn run() {
                 app.global_shortcut().register(shortcut)?;
             }
 
-            // ── System Tray Initialization ──
-            use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-            use tauri::menu::{Menu, MenuItem};
-            use tauri::Manager;
+            // ── System Tray Initialization (仅限桌面端) ──
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            {
+                use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+                use tauri::menu::{Menu, MenuItem};
+                use tauri::Manager;
 
-            let quit_i = MenuItem::with_id(app, "quit", "退出 Bob", true, None::<&str>)?;
-            let show_i = MenuItem::with_id(app, "show", "显示面板", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&show_i, &quit_i])?;
+                let quit_i = MenuItem::with_id(app, "quit", "退出 Bob", true, None::<&str>)?;
+                let show_i = MenuItem::with_id(app, "show", "显示面板", true, None::<&str>)?;
+                let menu = Menu::with_items(app, &[&show_i, &quit_i])?;
 
-            let _tray = TrayIconBuilder::new()
-                .icon(app.default_window_icon().unwrap().clone())
-                .tooltip("Bob Agent")
-                .menu(&menu)
-                .on_menu_event(|app, event| match event.id.as_ref() {
-                    "quit" => {
-                        // 退出前杀掉离线引擎
-                        let state = app.state::<crate::sidecar::SidecarState>();
-                        if let Ok(mut child_lock) = state.child.lock() {
-                            if let Some(mut child) = child_lock.take() {
-                                let _ = child.kill();
+                let _tray = TrayIconBuilder::new()
+                    .icon(app.default_window_icon().unwrap().clone())
+                    .tooltip("Bob Agent")
+                    .menu(&menu)
+                    .on_menu_event(|app, event| match event.id.as_ref() {
+                        "quit" => {
+                            // 退出前杀掉离线引擎
+                            let state = app.state::<crate::sidecar::SidecarState>();
+                            if let Ok(mut child_lock) = state.child.lock() {
+                                if let Some(mut child) = child_lock.take() {
+                                    let _ = child.kill();
+                                }
+                            }
+                            std::process::exit(0);
+                        },
+                        "show" => {
+                            if let Some(window) = app.get_webview_window("main") {
+                                let _ = window.show();
+                                let _ = window.set_focus();
                             }
                         }
-                        std::process::exit(0);
-                    },
-                    "show" => {
-                        if let Some(window) = app.get_webview_window("main") {
-                            let _ = window.show();
-                            let _ = window.set_focus();
+                        _ => {}
+                    })
+                    .on_tray_icon_event(|tray, event| match event {
+                        TrayIconEvent::Click {
+                            button: MouseButton::Left,
+                            button_state: MouseButtonState::Up,
+                            ..
+                        } => {
+                            if let Some(window) = tray.app_handle().get_webview_window("main") {
+                                let _ = window.show();
+                                let _ = window.set_focus();
+                            }
                         }
-                    }
-                    _ => {}
-                })
-                .on_tray_icon_event(|tray, event| match event {
-                    TrayIconEvent::Click {
-                        button: MouseButton::Left,
-                        button_state: MouseButtonState::Up,
-                        ..
-                    } => {
-                        if let Some(window) = tray.app_handle().get_webview_window("main") {
-                            let _ = window.show();
-                            let _ = window.set_focus();
-                        }
-                    }
-                    _ => {}
-                })
-                .build(app)?;
+                        _ => {}
+                    })
+                    .build(app)?;
+            }
 
             Ok(())
         })

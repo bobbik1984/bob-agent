@@ -17,7 +17,8 @@
           <Monitor :size="20" class="role-icon" style="color: var(--accent-primary);" />
           <div class="role-info">
             <span class="role-label">{{ $t('model_hub.main_model') }}</span>
-            <span class="role-model-name">{{ getModelDisplay(activeMain) }}</span>
+            <span v-if="getModelEntry(activeMain)" class="role-provider-name">{{ getModelEntry(activeMain).providerName }}</span>
+            <span class="role-model-name">{{ getModelEntry(activeMain) ? getModelEntry(activeMain).displayName : (activeMain || $t('model_hub.not_set')) }}</span>
           </div>
         </div>
       </div>
@@ -25,8 +26,19 @@
         <div class="role-header">
           <Tractor :size="20" class="role-icon" style="color: var(--accent-primary); opacity: 0.8;" />
           <div class="role-info">
-            <span class="role-label">{{ $t('model_hub.clerk_model') }}</span>
-            <span class="role-model-name">{{ getModelDisplay(activeClerk) }}</span>
+            <span class="role-label">{{ $t('model_hub.clerk_model') || 'Clerk' }}</span>
+            <span v-if="getModelEntry(activeClerk)" class="role-provider-name">{{ getModelEntry(activeClerk).providerName }}</span>
+            <span class="role-model-name">{{ getModelEntry(activeClerk) ? getModelEntry(activeClerk).displayName : (activeClerk || $t('model_hub.not_set')) }}</span>
+          </div>
+        </div>
+      </div>
+      <div class="role-card" :class="{ active: expandedRole === 'vision' }" @click="toggleRole('vision')">
+        <div class="role-header">
+          <Eye :size="20" class="role-icon" style="color: var(--accent-primary); opacity: 0.8;" />
+          <div class="role-info">
+            <span class="role-label">{{ $t('model_hub.vision_model') || 'Vision' }}</span>
+            <span v-if="getModelEntry(activeVision)" class="role-provider-name">{{ getModelEntry(activeVision).providerName }}</span>
+            <span class="role-model-name">{{ getModelEntry(activeVision) ? getModelEntry(activeVision).displayName : (activeVision || $t('model_hub.not_set')) }}</span>
           </div>
         </div>
       </div>
@@ -35,7 +47,7 @@
     <!-- 模型池列表 -->
     <div class="model-list-container" v-if="pool.length > 0 && expandedRole">
       <div class="model-list-hint">
-        {{ expandedRole === 'main' ? $t('model_hub.assign_hint_main') : $t('model_hub.assign_hint_clerk') }}
+        {{ expandedRole === 'main' ? $t('model_hub.assign_hint_main') : (expandedRole === 'clerk' ? $t('model_hub.assign_hint_clerk') : $t('model_hub.assign_hint_vision')) }}
       </div>
       <div class="provider-selector">
         <label>{{ $t('model_hub.select_provider') }}</label>
@@ -87,6 +99,7 @@
           :class="{
             'is-main': m.id === activeMain,
             'is-clerk': m.id === activeClerk,
+            'is-vision': m.id === activeVision,
             'is-selectable': expandedRole,
           }"
           @click="expandedRole ? assign(m.id, expandedRole) : null"
@@ -102,6 +115,9 @@
             <span v-if="m.id === activeClerk" class="role-tag clerk" :title="$t('model_hub.role_clerk')">
               <Tractor :size="14" />
             </span>
+            <span v-if="m.id === activeVision" class="role-tag vision" :title="$t('model_hub.role_vision') || 'Vision'">
+              <Eye :size="14" />
+            </span>
           </div>
         </div>
       </div>
@@ -115,7 +131,7 @@
 
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue';
-import { Cpu, RefreshCw, Monitor, Tractor } from 'lucide-vue-next';
+import { Cpu, RefreshCw, Monitor, Tractor, Eye } from 'lucide-vue-next';
 import { useI18n } from 'vue-i18n';
 import CustomSelect from './CustomSelect.vue';
 
@@ -126,6 +142,7 @@ const emit = defineEmits(['model-changed']);
 const pool = ref([]);
 const activeMain = ref('');
 const activeClerk = ref('');
+const activeVision = ref('');
 const activeProvider = ref('');
 const expandedRole = ref(null);
 const isScanning = ref(false);
@@ -188,7 +205,7 @@ function toggleRole(role) {
     expandedRole.value = null;
   } else {
     expandedRole.value = role;
-    const activeModelId = role === 'main' ? activeMain.value : activeClerk.value;
+    const activeModelId = role === 'main' ? activeMain.value : (role === 'clerk' ? activeClerk.value : activeVision.value);
     const entry = getModelEntry(activeModelId);
     if (entry) {
       activeProvider.value = entry.provider;
@@ -200,7 +217,8 @@ async function assign(modelId, role) {
   const result = await window.appAPI.assignModelRole(modelId, role);
   if (result?.ok) {
     if (role === 'main') activeMain.value = modelId;
-    else activeClerk.value = modelId;
+    else if (role === 'clerk') activeClerk.value = modelId;
+    else if (role === 'vision') activeVision.value = modelId;
     expandedRole.value = null;
     emit('model-changed');
   }
@@ -285,6 +303,7 @@ onMounted(async () => {
   const active = await window.appAPI.getActiveModels();
   activeMain.value = active?.main || '';
   activeClerk.value = active?.clerk || '';
+  activeVision.value = active?.vision || '';
   await refreshKeyStatus();
   
   if (providerList.value.length > 0) {
@@ -334,7 +353,7 @@ onMounted(async () => {
 /* ── Role Cards ──────────────────────────────── */
 .role-cards {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, 1fr);
   gap: var(--space-3);
 }
 @media (max-width: 600px) {
@@ -383,6 +402,16 @@ onMounted(async () => {
   color: var(--text-tertiary);
   text-transform: uppercase;
   letter-spacing: 0.5px;
+  margin-bottom: 2px;
+}
+
+.role-provider-name {
+  font-size: 13px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: 2px;
 }
 
 .role-model-name {
@@ -449,6 +478,7 @@ onMounted(async () => {
 .model-row.is-selectable:hover { background: color-mix(in srgb, var(--accent-primary) 12%, var(--bg-primary)); }
 .model-row.is-main { background: color-mix(in srgb, var(--accent-primary) 8%, var(--bg-primary)); }
 .model-row.is-clerk { background: color-mix(in srgb, var(--accent-primary) 5%, var(--bg-primary)); }
+.model-row.is-vision { background: color-mix(in srgb, var(--accent-primary) 5%, var(--bg-primary)); }
 
 .model-name-col {
   display: flex;
@@ -511,6 +541,10 @@ onMounted(async () => {
   color: var(--accent-primary);
 }
 .role-tag.clerk {
+  color: var(--accent-primary);
+  opacity: 0.8;
+}
+.role-tag.vision {
   color: var(--accent-primary);
   opacity: 0.8;
 }

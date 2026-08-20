@@ -58,6 +58,9 @@ a:hover {
   --color-warning:  #d97706;
   --color-success:  #10b981;
 
+  /* 统一卡片与面板倒角 (统一圆润度) */
+  --radius-default: 4px;
+
   /* 知识图谱主题色 (Dark) */
   --kg-node-tag:       #22d3ee;
   --kg-node-project:   #4ade80;
@@ -144,6 +147,10 @@ a:hover {
   --accent-glow:       rgba(0, 0, 0, 0.1);
   --gradient-brand:    linear-gradient(135deg, #1a1a1a 0%, #595959 100%);
   --gradient-subtle:   rgba(0, 0, 0, 0.03);
+
+  /* 品牌色明亮模式适配 */
+  --brand-alpha-bg:    12%; /* 明亮模式下背景色更淡更清爽 */
+  --overlay-scrim:     rgb(0 0 0 / 50%);
 
   --logo-filter:       none;
   --logo-color:        var(--user-accent);
@@ -526,7 +533,8 @@ html[data-ui-scale="comfortable"] {
   align-items: center;
   justify-content: center;
   gap: var(--space-2);
-  padding: var(--space-2) var(--space-4);
+  min-height: 32px;
+  padding: 0 var(--space-4);
   border: none;
   border-radius: var(--radius-md);
   font-family: var(--font-sans);
@@ -535,6 +543,18 @@ html[data-ui-scale="comfortable"] {
   cursor: pointer;
   transition: all var(--duration-fast) var(--ease-out);
   outline: none;
+}
+
+.btn:focus-visible,
+.btn-icon:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--user-accent, var(--accent-primary)) 55%, transparent);
+  outline-offset: 2px;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+  pointer-events: none;
 }
 
 .btn:active {
@@ -553,16 +573,41 @@ html[data-ui-scale="comfortable"] {
   transform: translateY(-1px);
 }
 
+.btn-secondary,
 .btn-ghost {
   background: transparent;
   color: var(--text-secondary);
   border: 1px solid var(--border-subtle);
 }
 
+.btn-secondary:hover,
 .btn-ghost:hover {
   background: var(--surface-glass);
   color: var(--text-primary);
   border-color: var(--border-default);
+}
+
+.btn-compact {
+  min-height: 28px;
+  padding: 0 var(--space-3);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+
+.btn-selected {
+  color: var(--user-accent, var(--accent-primary));
+  border-color: color-mix(in srgb, var(--user-accent, var(--accent-primary)) 38%, var(--border-subtle));
+  background: color-mix(in srgb, var(--user-accent, var(--accent-primary)) 9%, transparent);
+}
+
+.btn-danger-outline {
+  color: var(--color-error);
+  border: 1px solid color-mix(in srgb, var(--color-error) 55%, var(--border-subtle));
+  background: transparent;
+}
+
+.btn-danger-outline:hover {
+  background: color-mix(in srgb, var(--color-error) 8%, transparent);
 }
 
 .btn-icon {
@@ -834,22 +879,6 @@ details[open] > summary.section-title {
 }
 
 /* 鈺愨晲鈺?Markdown 鏍峰紡 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?*/
-.message-content pre {
-  margin: var(--space-3) 0;
-  border-radius: var(--radius-md);
-  background: var(--bg-tertiary);
-  overflow-x: auto;
-}
-
-.message-content pre > code {
-  display: block;
-  padding: var(--space-4);
-  font-family: var(--font-mono);
-  font-size: 0.9em;
-  background: transparent;
-  border-radius: 0;
-  overflow-x: auto;
-}
 
 .message-content code {
   font-family: var(--font-mono);
@@ -1013,8 +1042,8 @@ code.hljs {
 }
 
 .modal-card {
-  background: var(--bg-surface);
-  border: 1px solid var(--border-color);
+  background: var(--bg-primary);
+  border: 1px solid var(--border-default);
   border-radius: var(--radius-lg);
   padding: var(--space-6);
   width: 90%;
@@ -1094,7 +1123,7 @@ code.hljs {
 .animate-spin { animation: spin 1s linear infinite; }
 
 /* ── Mobile Layout Global Rules ── */
-@media (max-aspect-ratio: 1/1) {
+
   .mobile-header {
     display: flex;
     align-items: center;
@@ -1194,7 +1223,6 @@ code.hljs {
     max-width: 100%;
     font-size: 10px;
   }
-}
 
 .btn-primary-outline {
   background: rgba(var(--user-accent-rgb, 39,118,187), 0.1);
@@ -1231,4 +1259,274 @@ body.scanner-active::after {
   text-shadow: 0 1px 4px rgba(0,0,0,0.8);
   pointer-events: none;
   z-index: 9999;
+}
+
+/* == Unified Page Layout == */
+.app-page-view { height: 100%; display: flex; flex-direction: column; background: var(--bg-root); overflow: hidden; }
+.app-page-scroll { flex: 1; overflow-y: auto; overflow-x: hidden; padding: var(--space-6) var(--space-8); scrollbar-gutter: stable; -webkit-overflow-scrolling: touch; }
+.app-page-scroll-content { width: 100%; margin: 0 auto; display: flex; flex-direction: column; }
+@media (max-width: 768px) { .app-page-scroll { padding: 12px 16px !important; padding-bottom: calc(60px + env(safe-area-inset-bottom, 16px)) !important; } }
+
+
+/* ── Components / Patterns (Design System API Stage 1) ── */
+/* 
+ * NOTE: 这一层是 Bob Agent CSS 架构中的第 4 层。
+ * 只有在两处以上稳定复用的交互范式才允许进入此区域。 
+ */
+
+/* 1. Card Primitives */
+.card {
+  background: var(--surface-card);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg, 8px);
+  padding: 16px;
+  overflow: hidden;
+}
+.card--interactive {
+  transition: border-color 0.2s ease, background 0.2s ease;
+  cursor: pointer;
+}
+.card--interactive:hover {
+  background: var(--surface-input);
+  border-color: var(--border-strong);
+}
+
+/* 2. Icon Box Primitives */
+.icon-box {
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-md, 6px);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.icon-box--brand {
+  /* Fallback 机制：如果忘记配置 --brand-color，默认退化为次要文本色，防止穿模 */
+  color: var(--brand-color, var(--text-secondary));
+  background: color-mix(
+    in srgb, 
+    var(--brand-color, var(--text-secondary)) var(--brand-alpha-bg), 
+    transparent
+  );
+}
+/* Brand Token Bindings */
+.brand-wechat { --brand-color: var(--brand-wechat); }
+.brand-telegram { --brand-color: var(--brand-telegram); }
+.brand-discord { --brand-color: var(--brand-discord); }
+
+/* 3. List / Settings Group Patterns */
+.list-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+
+.list-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-default);
+  transition: border-color 0.2s, background 0.2s;
+}
+
+.list-item--interactive {
+  cursor: pointer;
+}
+.list-item--interactive:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-strong);
+}
+.list-item.active {
+  border-color: var(--user-accent, var(--accent-primary));
+  background: var(--bg-active);
+}
+
+.list-item__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+}
+
+.list-item__content {
+  flex: 1;
+  min-width: 0; /* 防止文本溢出撑破 flex */
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.list-item__title {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.list-item__description {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  line-height: 1.4;
+}
+
+.list-item__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+/* 4. Settings Row Pattern */
+.settings-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.settings-row:last-child {
+  border-bottom: none;
+}
+.settings-row__info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+  padding-right: 16px;
+}
+.settings-row__title {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+.settings-row__desc {
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+.settings-row__control {
+  flex-shrink: 0;
+}
+
+/* 5. Notification Badges */
+.badge-count {
+  position: absolute;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  box-shadow: 0 0 0 2px var(--bg-root);
+  z-index: 10;
+}
+.badge-count.danger {
+  background: var(--color-error);
+  color: var(--text-inverse);
+}
+.badge-count.muted {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-subtle);
+}
+
+/* 6. Switch Toggle & Status Dot */
+.switch-toggle {
+  width: 36px;
+  height: 20px;
+  background: var(--bg-tertiary);
+  border-radius: 20px;
+  position: relative;
+  cursor: pointer;
+  transition: 0.3s;
+  border: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+}
+.switch-toggle::after {
+  content: '';
+  position: absolute;
+  top: 1px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  background: var(--text-secondary);
+  border-radius: 50%;
+  transition: 0.3s;
+}
+.switch-toggle.active {
+  background: var(--user-accent);
+  border-color: transparent;
+}
+.switch-toggle.active::after {
+  transform: translateX(16px);
+  background: var(--text-inverse);
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--border-strong);
+  flex-shrink: 0;
+}
+.status-dot.active {
+  background: var(--user-accent);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--user-accent) 50%, transparent);
+}
+
+/* ── Stage 2.5 New Patterns ── */
+
+/* Parent Stack Spacing */
+.settings-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5, 20px);
+}
+.settings-stack--dense {
+  gap: var(--space-2, 8px);
+}
+
+/* Inline Action Groups */
+.settings-action-group {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2, 8px);
+}
+
+/* Icon Box Glyph */
+.icon-box__glyph {
+  width: var(--icon-glyph-size, 20px);
+  height: var(--icon-glyph-size, 20px);
+}
+
+/* Ghost Icon Button */
+.btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-default);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.btn-icon--ghost {
+  background: transparent;
+  border: none;
+  color: var(--text-tertiary);
+  padding: 4px;
+}
+.btn-icon--ghost:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
 }

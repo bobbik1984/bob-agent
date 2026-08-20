@@ -13,7 +13,7 @@
             class="quicknote-input"
             :placeholder="placeholder"
             @keydown.enter="submit"
-            @keydown.escape="close"
+            @keydown.escape="close({ force: true })"
             autocomplete="off"
             spellcheck="false"
           />
@@ -36,6 +36,12 @@
             <QrCode :size="15" />
             <span>{{ $t('quicknote.scan_pairing') }}</span>
           </button>
+
+          <button class="quicknote-bottom-btn" @click="openTodayLayer">
+            <CalendarRange :size="15" />
+            <span>{{ $t('quicknote.daily_brief') }}</span>
+            <span v-if="todayCount > 0" class="quicknote-count">{{ todayCount > 9 ? '9+' : todayCount }}</span>
+          </button>
         </div>
       </div>
     </Transition>
@@ -43,11 +49,16 @@
 </template>
 
 <script setup>
+import { useDialog } from '@/composables/useDialog.js';
+const { showConfirm, showAlert, showPrompt } = useDialog();
+
 import { ref, nextTick, onMounted, onUnmounted } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { Check, Cpu, QrCode } from 'lucide-vue-next';
+import { CalendarRange, Check, Cpu, QrCode } from 'lucide-vue-next';
 
 const { t: $t } = useI18n();
+defineProps({ todayCount: { type: Number, default: 0 } });
+const emit = defineEmits(['open-today']);
 
 const visible = ref(false);
 const text = ref('');
@@ -57,11 +68,13 @@ const inputRef = ref(null);
 const placeholder = ref('灵光一现');
 
 let _justOpened = false;
+let _draftPreserved = false;
 
 function open() {
   visible.value = true;
   showSaved.value = false;
-  text.value = '';
+  if (!_draftPreserved) text.value = '';
+  _draftPreserved = false;
   _justOpened = true;
   setTimeout(() => {
     _justOpened = false;
@@ -71,7 +84,11 @@ function open() {
   });
 }
 
-function openModelSwitcher() {
+function openTodayLayer() {
+  emit('open-today', { draft: text.value });
+}
+
+async function openModelSwitcher() {
   window.dispatchEvent(new CustomEvent('open-mobile-model-switcher'));
   close();
 }
@@ -88,32 +105,86 @@ async function openScanPairing() {
       if (code) {
         try {
           const payload = JSON.parse(code);
-          await window.appAPI.setConfig('pairing_payload', payload);
-          console.log('Saved pairing payload from FAB:', payload);
-          if (window.appAPI.triggerMobileSync) {
-            const syncTimeout = new Promise((_, reject) => setTimeout(() => reject(new Error('Sync Timeout')), 15000));
-            await Promise.race([
-              window.appAPI.triggerMobileSync(payload),
-              syncTimeout
-            ]);
+          if (payload && payload.device_id) {
+            await window.appAPI.setConfig('pairing_payload', payload);
+            console.log('Saved pairing payload from FAB:', payload);
+            if (window.appAPI.triggerMobileSync) {
+              const syncTimeout = new Promise((_, reject) => setTimeout(() => reject(new Error('Sync Timeout')), 15000));
+              await Promise.race([
+                window.appAPI.triggerMobileSync(payload),
+                syncTimeout
+              ]);
+              window.dispatchEvent(new CustomEvent('send-message-to-bob', { detail: `成功扫描到配对码，正尝试与设备 ${payload.device_id.substring(0,8)} 建立连接。` }));
+            }
+            return;
           }
         } catch (e) {
-          console.error('Invalid QR Code JSON:', code);
+          // 不是 JSON，继续判断其他类型
         }
+
+        // 判断是否是网址 URL
+        if (code.startsWith('http://') || code.startsWith('https://')) {
+          console.log('Detected URL in scanner:', code);
+          const msg = `我刚刚扫描了一个网页：\n${code}\n请帮我提取主要信息并作为笔记保存。`;
+          window.dispatchEvent(new CustomEvent('send-message-to-bob', { detail: msg }));
+          return;
+        }
+
+        // 检查是否是标准登机牌 (BCBP)
+        if (window.appAPI?.systemParseBcbp && code.startsWith('M1')) {
+          try {
+            const bcbpInfo = await window.appAPI.systemParseBcbp(code);
+            if (bcbpInfo) {
+              // 解析儒略日
+              const day = parseInt(bcbpInfo.date, 10);
+              let dateStr = '';
+              if (!isNaN(day) && day >= 1 && day <= 366) {
+                const year = new Date().getFullYear();
+                const d = new Date(year, 0, day);
+                dateStr = `${year}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+              }
+              
+              const bpData = {
+                raw_data: code,
+                format: 'unknown',
+                passenger_name: bcbpInfo.passenger_name,
+                pnr: bcbpInfo.pnr,
+                origin: bcbpInfo.origin,
+                destination: bcbpInfo.destination,
+                carrier: bcbpInfo.carrier,
+                flight_number: bcbpInfo.flight_number,
+                date: dateStr,
+                seat: bcbpInfo.seat.replace(/^0+/, ''),
+              };
+              
+              console.log('Detected BCBP in mobile scanner:', bpData);
+              window.dispatchEvent(new CustomEvent('detect-boarding-pass', { detail: bpData }));
+              return;
+            }
+          } catch (parseErr) {
+            console.warn('BCBP parse failed:', parseErr);
+          }
+        }
+
+        // 默认作为通用条码放入票夹
+        console.log('Not a pairing JSON or BCBP, treating as generic barcode:', code);
+        const msg = `我刚刚扫描了一个条码，内容是：\n${code}\n请帮我解析并放入票夹`;
+        window.dispatchEvent(new CustomEvent('send-message-to-bob', { detail: msg }));
       }
     } catch (err) {
       document.body.classList.remove('scanner-active');
       console.error('Scan failed:', err);
     }
   } else {
-    alert($t('setup.scanner_not_supported') || '当前环境不支持扫码');
+    await showAlert($t('setup.scanner_not_supported') || '当前环境不支持扫码');
   }
 }
 
-function close() {
-  if (_justOpened) return;
+function close({ preserveDraft = false, force = false } = {}) {
+  if (_justOpened && !force) return;
   visible.value = false;
-  text.value = '';
+  _draftPreserved = preserveDraft;
+  if (!preserveDraft) text.value = '';
 }
 
 async function submit() {
@@ -124,8 +195,8 @@ async function submit() {
   }
 
   try {
-    // 通过 IPC 写入速记文件
-    await window.appAPI.notebookAppendDaily(content);
+    // 先进入持久 Capture Journal，再由统一入口写入每日速记。
+    await window.appAPI.captureQuickNote(content, 'quick_note');
   } catch (err) {
     console.warn('[QuickNote] IPC fallback:', err);
   }
@@ -157,6 +228,7 @@ onUnmounted(() => document.removeEventListener('keydown', onGlobalKey));
 <style scoped>
 /* ── 背景遮罩 + 毛玻璃 ── */
 .quicknote-overlay {
+  --quicknote-width: min(560px, calc(100vw - 48px));
   position: fixed;
   inset: 0;
   z-index: 9999;
@@ -171,16 +243,20 @@ onUnmounted(() => document.removeEventListener('keydown', onGlobalKey));
 
 /* ── 输入条 ── */
 .quicknote-bar {
+  position: absolute;
+  top: 50%;
+  left: 50%;
   display: flex;
   align-items: center;
   gap: 0;
-  width: min(560px, 85vw);
+  width: var(--quicknote-width);
   height: 48px;
   background: var(--bg-primary);
   border: 1px solid var(--border-default);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-default);
   overflow: hidden;
   box-shadow: var(--shadow-lg), 0 0 0 1px var(--border-subtle);
+  transform: translate(-50%, -50%);
 }
 
 /* Bob 图标（胶囊左端） */
@@ -229,37 +305,46 @@ onUnmounted(() => document.removeEventListener('keydown', onGlobalKey));
 
 /* ── 已记录反馈 ── */
 .quicknote-saved {
+  position: absolute;
+  top: calc(50% + 38px);
+  left: 50%;
   display: flex;
   align-items: center;
   gap: 6px;
-  margin-top: 16px;
+  margin: 0;
   font-size: 13px;
   color: var(--accent-primary);
   opacity: 0.9;
+  transform: translateX(-50%);
 }
 
 /* ── 底部快捷栏 ── */
 .quicknote-bottom-bar {
   position: absolute;
   bottom: calc(24px + env(safe-area-inset-bottom, 0px));
-  left: 24px;
-  right: 24px;
-  display: flex;
-  justify-content: space-between;
+  left: 50%;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  gap: 8px;
+  width: var(--quicknote-width);
   align-items: center;
   pointer-events: none;
+  transform: translateX(-50%);
 }
 
 .quicknote-bottom-btn {
   pointer-events: auto;
   display: flex;
   align-items: center;
-  gap: 8px;
+  justify-content: center;
+  gap: 7px;
+  min-width: 0;
   height: 40px;
   padding: 0 16px;
   background: var(--bg-secondary);
   border: 1px solid var(--border-default);
-  border-radius: 20px;
+  border-radius: var(--radius-default);
   color: var(--text-secondary);
   font-size: 13px;
   font-weight: 500;
@@ -281,6 +366,21 @@ onUnmounted(() => document.removeEventListener('keydown', onGlobalKey));
   background: var(--bg-primary);
 }
 
+.quicknote-count {
+  display: inline-grid;
+  place-items: center;
+  align-self: center;
+  min-width: 20px;
+  height: 18px;
+  box-sizing: border-box;
+  padding: 0 5px;
+  color: var(--text-primary);
+  background: var(--border-subtle);
+  border-radius: var(--radius-full);
+  font-size: 10px;
+  line-height: 1;
+}
+
 /* ── 动画 ── */
 .quicknote-enter-active {
   transition: opacity 0.2s ease-out;
@@ -300,11 +400,11 @@ onUnmounted(() => document.removeEventListener('keydown', onGlobalKey));
   transition: transform 0.15s ease-in, opacity 0.12s;
 }
 .quicknote-enter-from .quicknote-bar {
-  transform: scale(0.92) translateY(8px);
+  transform: translate(-50%, -50%) translateY(8px) scale(0.92);
   opacity: 0;
 }
 .quicknote-leave-to .quicknote-bar {
-  transform: scale(0.96) translateY(4px);
+  transform: translate(-50%, -50%) translateY(4px) scale(0.96);
   opacity: 0;
 }
 
@@ -331,7 +431,7 @@ onUnmounted(() => document.removeEventListener('keydown', onGlobalKey));
 }
 .quicknote-hint-enter-from {
   opacity: 0;
-  transform: translateY(4px);
+  transform: translateX(-50%) translateY(4px);
 }
 .quicknote-hint-leave-to {
   opacity: 0;

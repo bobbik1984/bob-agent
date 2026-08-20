@@ -1,4 +1,6 @@
 <template>
+  <div class="settings-stack">
+
   <!-- 📱 通讯渠道 (Communication Channels) -->
   <section class="settings-section card">
     <h3 class="section-title">
@@ -7,10 +9,78 @@
     </h3>
     
     <div class="service-cards-grid">
-      <!-- WeChat -->
-      <div class="service-card" :class="{ active: mobileChannel === 'wechat' }">
-        <div class="service-card-header" @click="mobileChannel === 'wechat' ? openWechatModal() : mobileChannel = 'wechat'" style="cursor: pointer; margin-bottom: 0;">
-          <div class="service-icon" style="background: rgba(7,193,96,0.1); color: #07c160; display: flex; align-items: center; justify-content: center;">
+      <!-- 🔄 多端同步 (P2P Sync) -->
+      <div class="service-card static-card" >
+        <div class="service-card-header">
+          <div class="service-icon" :style="{ background: isUnlocked ? 'rgba(var(--user-accent-rgb, 39,118,187), 0.1)' : 'var(--bg-tertiary)', color: isUnlocked ? 'var(--user-accent)' : 'var(--text-muted)' }">
+            <Smartphone :size="20" />
+          </div>
+          <div class="service-info">
+            <span class="service-name">{{ $t('settings.p2p_pairing') }}</span>
+            <span class="service-sub" style="display: flex; gap: 8px; align-items: center;">{{ !isUnlocked ? $t('settings.p2p_auth_desc_new') : $t('settings.p2p_pairing_desc') }}
+              <span v-if="lastSyncTime" style="font-size: 10px; padding: 2px 6px; background: var(--bg-tertiary); border-radius: var(--radius-default); color: var(--text-secondary);">最后同步: {{ formatSyncTime(lastSyncTime) }}</span></span>
+          </div>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+            <button 
+              class="device-indicator-btn"
+              @click.stop="openSyncLogs" 
+              title="查看同步日志"
+            >
+              <Info :size="12" />
+            </button>
+            <button 
+              class="device-indicator-btn"
+              @click.stop="showDevicesModal = true" 
+              :title="`上次同步状态: ${lastSyncStatus === 'success' ? '成功' : (lastSyncStatus === 'error' ? '失败' : '未知')}`"
+              :style="{ color: lastSyncStatus === 'success' ? 'var(--user-accent)' : (lastSyncStatus === 'error' ? 'var(--color-error)' : 'var(--text-muted)') }"
+            >
+              <Monitor v-if="isNativeMobile" :size="14" />
+              <Smartphone v-else :size="14" />
+            </button>
+            <span class="service-status-dot" :class="overallConnectionClass" :title="overallConnectionLabel"></span>
+          </div>
+        </div>
+        
+        <div class="service-card-footer">
+          <div v-if="!isUnlocked" style="display: flex; gap: 8px; width: 100%;">
+            <template v-if="isNativeMobile">
+              <button class="btn btn-primary-outline btn-sm" style="flex: 1; justify-content: center;" @click="handleMobileScan" title="扫码配对">
+                <Scan :size="13" style="margin-right: 6px;" /> 扫码配对
+              </button>
+            </template>
+            <template v-else>
+              <input v-model="pinInput" type="password" class="input" maxlength="6" placeholder="PIN" style="flex: 1; min-width: 0; height: 28px; padding: 4px 8px; font-size: 12px; border-radius: var(--radius-default);" @keyup.enter="handlePinSubmit" />
+              <button class="btn btn-primary-outline btn-sm" style="padding: 0 10px; flex-shrink: 0; height: 28px;" :disabled="pinInput.length < 4" @click="handlePinSubmit" :title="isInitialized ? $t('settings.p2p_btn_unlock') : '设置 PIN 码'">
+                <Lock v-if="isInitialized" :size="13" />
+                <Check v-else :size="13" />
+              </button>
+              <button class="btn btn-ghost btn-sm" style="padding: 0 8px; flex-shrink: 0; height: 28px; opacity: 0.5; cursor: not-allowed;" disabled title="解锁后查看二维码">
+                <QrCode :size="13" />
+              </button>
+            </template>
+          </div>
+          <div v-else style="display: flex; gap: 8px; width: 100%;">
+            <template v-if="isNativeMobile">
+              <button class="btn btn-primary-outline btn-sm" style="flex: 1; justify-content: center;" @click="handleMobileScan" title="重新扫码配对">
+                <Scan :size="13" style="margin-right: 6px;" /> 重新扫码
+              </button>
+            </template>
+            <template v-else>
+              <button class="btn btn-primary-outline btn-sm" style="flex: 1; justify-content: center; height: 28px;" @click="showP2pModal = true">
+                <QrCode :size="13" style="margin-right: 6px;" /> 配对二维码
+              </button>
+            </template>
+            <button class="btn btn-danger-outline btn-sm" style="padding: 5px 8px; height: 28px; flex-shrink: 0;" @click="handleReset" :title="$t('settings.p2p_btn_destroy')">
+              <X :size="13" />
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- WeChat (Inline on Desktop) -->
+      <div v-if="!hideDesktopChannels" class="service-card static-card" >
+        <div class="service-card-header">
+          <div class="service-icon icon-box--brand brand-wechat" style="display: flex; align-items: center; justify-content: center;">
             <svg viewBox="-51.45 -69.25 445.9 415.5" xmlns="http://www.w3.org/2000/svg" style="width: 20px; height: 20px; fill: currentColor;">
               <g fill="currentColor" fill-rule="evenodd">
                 <path d="M274 167c-7.778 0-14-6.222-14-14s6.222-14 14-14 14 6.222 14 14c0 7.389-6.222 14-14 14m-69 0c-7.778 0-14-6.222-14-14s6.222-14 14-14 14 6.222 14 14c0 7.389-6.222 14-14 14m102.39 78.581C329.216 229.871 343 206.5 343 180.827 343 133.316 297.052 95 240 95s-103 38.316-103 85.827c0 47.512 45.948 85.828 103 85.828 11.87 0 22.974-1.533 33.695-4.598.766-.383 1.915-.383 3.063-.383 1.915 0 3.83.766 5.361 1.532l22.591 13.028c.766.383 1.149.766 1.915.766a3.433 3.433 0 003.446-3.448c0-.767-.383-1.533-.383-2.683 0-.383-3.063-10.728-4.595-17.242-.383-.766-.383-1.532-.383-2.299-.383-2.682.766-4.597 2.68-5.747"/>
@@ -20,68 +90,255 @@
           </div>
           <div class="service-info">
             <span class="service-name">{{ $t('settings.channel_wechat') }}</span>
-            <span class="service-sub" v-if="mobileChannel === 'wechat'" style="color: var(--user-accent);">{{ wechatConnected ? '点击重新绑定' : '点击扫描二维码' }}</span>
-            <span class="service-sub" v-else>微信公众号/个人号</span>
+            <span class="service-sub" style="display: flex; gap: 8px; align-items: center;">{{ $t('settings.channel_wechat_desc') }}</span>
           </div>
-          <span class="service-status-dot" :class="mobileChannel === 'wechat' ? 'dot-connected' : 'dot-disconnected'"></span>
+          <span class="service-status-dot" :class="wechatConnected ? 'dot-connected' : 'dot-disconnected'"></span>
+        </div>
+        <div class="service-card-footer">
+          <button v-if="wechatConnected" class="btn btn-primary-outline btn-sm" @click="openWechatModal()">
+            {{ $t('settings.channel_wechat_rebind') }}
+          </button>
+          <button v-else class="btn btn-primary-outline btn-sm" @click="openWechatModal()">
+            <Scan :size="13" /> {{ $t('settings.channel_wechat_scan') }}
+          </button>
         </div>
       </div>
 
-      <!-- Telegram -->
-      <div class="service-card" :class="{ active: mobileChannel === 'telegram' }">
-        <div class="service-card-header" @click="mobileChannel = 'telegram'" style="cursor: pointer; margin-bottom: 0;">
-          <div class="service-icon" style="background: rgba(42,171,238,0.1); color: #2aabee; display: flex; align-items: center; justify-content: center;">
+      <!-- Telegram (Inline on Desktop) -->
+      <div v-if="!hideDesktopChannels" class="service-card static-card" >
+        <div class="service-card-header">
+          <div class="service-icon icon-box--brand brand-telegram" style="display: flex; align-items: center; justify-content: center;">
             <svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg" style="width: 18px; height: 18px; fill: currentColor;">
               <path d="M29.919 6.163l-4.225 19.925c-0.319 1.406-1.15 1.756-2.331 1.094l-6.438-4.744-3.106 2.988c-0.344 0.344-0.631 0.631-1.294 0.631l0.463-6.556 11.931-10.781c0.519-0.462-0.113-0.719-0.806-0.256l-14.75 9.288-6.35-1.988c-1.381-0.431-1.406-1.381 0.288-2.044l24.837-9.569c1.15-0.431 2.156 0.256 1.781 2.013z"/>
             </svg>
           </div>
           <div class="service-info">
             <span class="service-name">{{ $t('settings.channel_telegram') }}</span>
-            <span class="service-sub">Telegram Bot</span>
+            <span class="service-sub" style="display: flex; gap: 8px; align-items: center;">Telegram Bot</span>
           </div>
-          <span class="service-status-dot" :class="mobileChannel === 'telegram' ? 'dot-connected' : 'dot-disconnected'"></span>
+          <span class="service-status-dot" :class="tgToken ? 'dot-connected' : 'dot-disconnected'"></span>
         </div>
-        <div class="service-card-body" v-if="mobileChannel === 'telegram'" style="border-top: 1px solid var(--border-default); padding-top: 12px; margin-top: 14px;">
-          <div class="input-group" style="margin-bottom: 0;">
-            <label style="font-size: 0.85em; color: var(--text-secondary); margin-bottom: 6px; display: block;">Bot Token</label>
+        
+        <Transition name="slide-fade">
+          <div v-if="mobileChannel === 'telegram'" class="lark-credential-form">
+            <div class="form-group" style="margin-bottom: 10px;">
+              <label class="form-label">Bot Token</label>
+              <input v-model="tgToken" type="password" class="input" placeholder="123456789:ABCdefGHIjklMNO..." />
+              <p class="field-hint" style="margin-top: 8px; margin-bottom: 0;">{{ $t('settings.channel_tg_hint') }}</p>
+            </div>
             <div style="display: flex; gap: 8px;">
-              <input type="password" v-model="tgToken" placeholder="123456789:ABCdefGHIjklMNO..." class="input" style="flex: 1; min-width: 0;" />
-              <button class="btn btn-primary" @click="activateMobileChannel('telegram')" style="flex-shrink: 0; white-space: nowrap;">
-                <svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg" style="width: 14px; height: 14px; fill: currentColor; flex-shrink: 0;"><path d="M29.919 6.163l-4.225 19.925c-0.319 1.406-1.15 1.756-2.331 1.094l-6.438-4.744-3.106 2.988c-0.344 0.344-0.631 0.631-1.294 0.631l0.463-6.556 11.931-10.781c0.519-0.462-0.113-0.719-0.806-0.256l-14.75 9.288-6.35-1.988c-1.381-0.431-1.406-1.381 0.288-2.044l24.837-9.569c1.15-0.431 2.156 0.256 1.781 2.013z"/></svg> {{ $t('settings.channel_activate') }}
+              <button class="btn btn-primary btn-sm" @click="activateMobileChannel('telegram')" :disabled="!tgToken">
+                <Check :size="13" /> {{ $t('settings.channel_activate') }}
+              </button>
+              <button class="btn btn-sm" @click="mobileChannel = ''">
+                {{ $t('settings.mcp_cancel') }}
               </button>
             </div>
-            <p class="field-hint" style="margin-top: 8px; margin-bottom: 0;">{{ $t('settings.channel_tg_hint') }}</p>
           </div>
+        </Transition>
+
+        <div class="service-card-footer">
+          <button v-if="tgToken" class="btn btn-danger-outline btn-sm" @click="mobileChannel = mobileChannel === 'telegram' ? '' : 'telegram'">
+            <Unlink :size="13" /> 修改 Token
+          </button>
+          <button v-else class="btn btn-primary-outline btn-sm" @click="mobileChannel = mobileChannel === 'telegram' ? '' : 'telegram'">
+            <KeyRound :size="13" /> {{ $t('settings.conn_connect') }}
+          </button>
         </div>
       </div>
 
-      <!-- Discord -->
-      <div class="service-card" :class="{ active: mobileChannel === 'discord' }">
-        <div class="service-card-header" @click="mobileChannel = 'discord'" style="cursor: pointer; margin-bottom: 0;">
-          <div class="service-icon" style="background: rgba(88,101,242,0.1); color: #5865F2; display: flex; align-items: center; justify-content: center;">
+      <!-- Discord (Inline on Desktop) -->
+      <div v-if="!hideDesktopChannels" class="service-card static-card" >
+        <div class="service-card-header">
+          <div class="service-icon icon-box--brand brand-discord" style="display: flex; align-items: center; justify-content: center;">
             <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" style="width: 20px; height: 20px; fill: currentColor;">
               <path d="M18.59 5.88997C17.36 5.31997 16.05 4.89997 14.67 4.65997C14.5 4.95997 14.3 5.36997 14.17 5.69997C12.71 5.47997 11.26 5.47997 9.83001 5.69997C9.69001 5.36997 9.49001 4.95997 9.32001 4.65997C7.94001 4.89997 6.63001 5.31997 5.40001 5.88997C2.92001 9.62997 2.25001 13.28 2.58001 16.87C4.23001 18.1 5.82001 18.84 7.39001 19.33C7.78001 18.8 8.12001 18.23 8.42001 17.64C7.85001 17.43 7.31001 17.16 6.80001 16.85C6.94001 16.75 7.07001 16.64 7.20001 16.54C10.33 18 13.72 18 16.81 16.54C16.94 16.65 17.07 16.75 17.21 16.85C16.7 17.16 16.15 17.42 15.59 17.64C15.89 18.23 16.23 18.8 16.62 19.33C18.19 18.84 19.79 18.1 21.43 16.87C21.82 12.7 20.76 9.08997 18.61 5.88997H18.59ZM8.84001 14.67C7.90001 14.67 7.13001 13.8 7.13001 12.73C7.13001 11.66 7.88001 10.79 8.84001 10.79C9.80001 10.79 10.56 11.66 10.55 12.73C10.55 13.79 9.80001 14.67 8.84001 14.67ZM15.15 14.67C14.21 14.67 13.44 13.8 13.44 12.73C13.44 11.66 14.19 10.79 15.15 10.79C16.11 10.79 16.87 11.66 16.86 12.73C16.86 13.79 16.11 14.67 15.15 14.67Z"/>
             </svg>
           </div>
           <div class="service-info">
             <span class="service-name">{{ $t('settings.channel_discord') }}</span>
-            <span class="service-sub">Discord Bot</span>
+            <span class="service-sub" style="display: flex; gap: 8px; align-items: center;">Discord Bot</span>
           </div>
-          <span class="service-status-dot" :class="mobileChannel === 'discord' ? 'dot-connected' : 'dot-disconnected'"></span>
+          <span class="service-status-dot" :class="discordToken ? 'dot-connected' : 'dot-disconnected'"></span>
         </div>
-        <div class="service-card-body" v-if="mobileChannel === 'discord'" style="border-top: 1px solid var(--border-default); padding-top: 12px; margin-top: 14px;">
-          <div class="input-group" style="margin-bottom: 0;">
-            <label style="font-size: 0.85em; color: var(--text-secondary); margin-bottom: 6px; display: block;">Bot Token</label>
+        
+        <Transition name="slide-fade">
+          <div v-if="mobileChannel === 'discord'" class="lark-credential-form">
+            <div class="form-group" style="margin-bottom: 10px;">
+              <label class="form-label">Bot Token</label>
+              <input v-model="discordToken" type="password" class="input" placeholder="OTg3NjU0MzIx.ABC.defGHIjklMNO..." />
+              <p class="field-hint" style="margin-top: 8px; margin-bottom: 0;">{{ $t('settings.channel_discord_hint') }}</p>
+            </div>
             <div style="display: flex; gap: 8px;">
-              <input type="password" v-model="discordToken" placeholder="OTg3NjU0MzIx.ABC.defGHIjklMNO..." class="input" style="flex: 1; min-width: 0;" />
-              <button class="btn btn-primary" @click="activateMobileChannel('discord')" style="flex-shrink: 0; white-space: nowrap;">
-                <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" style="width: 14px; height: 14px; fill: currentColor; flex-shrink: 0;"><path d="M18.59 5.88997C17.36 5.31997 16.05 4.89997 14.67 4.65997C14.5 4.95997 14.3 5.36997 14.17 5.69997C12.71 5.47997 11.26 5.47997 9.83001 5.69997C9.69001 5.36997 9.49001 4.95997 9.32001 4.65997C7.94001 4.89997 6.63001 5.31997 5.40001 5.88997C2.92001 9.62997 2.25001 13.28 2.58001 16.87C4.23001 18.1 5.82001 18.84 7.39001 19.33C7.78001 18.8 8.12001 18.23 8.42001 17.64C7.85001 17.43 7.31001 17.16 6.80001 16.85C6.94001 16.75 7.07001 16.64 7.20001 16.54C10.33 18 13.72 18 16.81 16.54C16.94 16.65 17.07 16.75 17.21 16.85C16.7 17.16 16.15 17.42 15.59 17.64C15.89 18.23 16.23 18.8 16.62 19.33C18.19 18.84 19.79 18.1 21.43 16.87C21.82 12.7 20.76 9.08997 18.61 5.88997H18.59ZM8.84001 14.67C7.90001 14.67 7.13001 13.8 7.13001 12.73C7.13001 11.66 7.88001 10.79 8.84001 10.79C9.80001 10.79 10.56 11.66 10.55 12.73C10.55 13.79 9.80001 14.67 8.84001 14.67ZM15.15 14.67C14.21 14.67 13.44 13.8 13.44 12.73C13.44 11.66 14.19 10.79 15.15 10.79C16.11 10.79 16.87 11.66 16.86 12.73C16.86 13.79 16.11 14.67 15.15 14.67Z"/></svg> {{ $t('settings.channel_activate') }}
+              <button class="btn btn-primary btn-sm" @click="activateMobileChannel('discord')" :disabled="!discordToken">
+                <Check :size="13" /> {{ $t('settings.channel_activate') }}
+              </button>
+              <button class="btn btn-sm" @click="mobileChannel = ''">
+                {{ $t('settings.mcp_cancel') }}
               </button>
             </div>
-            <p class="field-hint" style="margin-top: 8px; margin-bottom: 0;">{{ $t('settings.channel_discord_hint') }}</p>
           </div>
+        </Transition>
+
+        <div class="service-card-footer">
+          <button v-if="discordToken" class="btn btn-danger-outline btn-sm" @click="mobileChannel = mobileChannel === 'discord' ? '' : 'discord'">
+            <Unlink :size="13" /> 修改 Token
+          </button>
+          <button v-else class="btn btn-primary-outline btn-sm" @click="mobileChannel = mobileChannel === 'discord' ? '' : 'discord'">
+            <KeyRound :size="13" /> {{ $t('settings.conn_connect') }}
+          </button>
         </div>
       </div>
+    </div>
+  </section>
+
+  <!-- 🖥️ 桌面端专属通道 (Desktop Channels - Folded on Mobile) -->
+  <details v-if="hideDesktopChannels" class="settings-section card custom-model-override">
+    <summary class="section-title">
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <Monitor :size="16" class="section-icon" style="opacity: 0.6;" />
+        <span>{{ $t('settings.desktop_channels_title', '桌面端专属通道') }}</span>
+      </div>
+      <ChevronDown :size="16" class="details-chevron" />
+    </summary>
+    
+    <div class="service-cards-grid">
+      <!-- WeChat -->
+      <div class="service-card static-card" >
+        <div class="service-card-header">
+          <div class="service-icon icon-box--brand brand-wechat" style="display: flex; align-items: center; justify-content: center;">
+            <svg viewBox="-51.45 -69.25 445.9 415.5" xmlns="http://www.w3.org/2000/svg" style="width: 20px; height: 20px; fill: currentColor;">
+              <g fill="currentColor" fill-rule="evenodd">
+                <path d="M274 167c-7.778 0-14-6.222-14-14s6.222-14 14-14 14 6.222 14 14c0 7.389-6.222 14-14 14m-69 0c-7.778 0-14-6.222-14-14s6.222-14 14-14 14 6.222 14 14c0 7.389-6.222 14-14 14m102.39 78.581C329.216 229.871 343 206.5 343 180.827 343 133.316 297.052 95 240 95s-103 38.316-103 85.827c0 47.512 45.948 85.828 103 85.828 11.87 0 22.974-1.533 33.695-4.598.766-.383 1.915-.383 3.063-.383 1.915 0 3.83.766 5.361 1.532l22.591 13.028c.766.383 1.149.766 1.915.766a3.433 3.433 0 003.446-3.448c0-.767-.383-1.533-.383-2.683 0-.383-3.063-10.728-4.595-17.242-.383-.766-.383-1.532-.383-2.299-.383-2.682.766-4.597 2.68-5.747"/>
+                <path d="M164 86c-8.93 0-16-7.07-16-16s7.07-16 16-16 16 7.07 16 16c0 8.558-7.07 16-16 16m-82 0c-8.93 0-16-7.07-16-16s7.07-16 16-16 16 7.07 16 16c0 8.558-7.07 16-16 16m41.96-86C55.646 0 0 45.895 0 102.88c0 30.98 16.502 58.899 42.983 77.64 1.919 1.53 3.454 3.824 3.454 6.884 0 .764-.384 1.912-.384 2.677-1.919 7.649-5.373 20.27-5.757 20.652-.383 1.148-.767 1.913-.767 3.06 0 2.295 1.919 4.207 4.221 4.207.768 0 1.535-.382 2.303-.765l27.248-15.68c1.919-1.148 4.222-1.913 6.524-1.913 1.152 0 2.303 0 3.454.383 12.665 3.442 26.48 5.736 40.297 5.736h6.908c-2.687-8.031-4.222-16.445-4.222-25.242 0-51.631 50.658-93.701 112.83-93.701H246C237.173 37.48 185.747 0 123.96 0"/>
+              </g>
+            </svg>
+          </div>
+          <div class="service-info">
+            <span class="service-name">{{ $t('settings.channel_wechat') }}</span>
+            <span class="service-sub" style="display: flex; gap: 8px; align-items: center;">{{ $t('settings.channel_wechat_desc') }}</span>
+          </div>
+          <span class="service-status-dot" :class="wechatConnected ? 'dot-connected' : 'dot-disconnected'"></span>
+        </div>
+        <div class="service-card-footer">
+          <button v-if="wechatConnected" class="btn btn-primary-outline btn-sm" @click="openWechatModal()">
+            {{ $t('settings.channel_wechat_rebind') }}
+          </button>
+          <button v-else class="btn btn-primary-outline btn-sm" @click="openWechatModal()">
+            <Scan :size="13" /> {{ $t('settings.channel_wechat_scan') }}
+          </button>
+        </div>
+      </div>
+
+      <!-- Telegram -->
+      <div class="service-card static-card" >
+        <div class="service-card-header">
+          <div class="service-icon icon-box--brand brand-telegram" style="display: flex; align-items: center; justify-content: center;">
+            <svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg" style="width: 18px; height: 18px; fill: currentColor;">
+              <path d="M29.919 6.163l-4.225 19.925c-0.319 1.406-1.15 1.756-2.331 1.094l-6.438-4.744-3.106 2.988c-0.344 0.344-0.631 0.631-1.294 0.631l0.463-6.556 11.931-10.781c0.519-0.462-0.113-0.719-0.806-0.256l-14.75 9.288-6.35-1.988c-1.381-0.431-1.406-1.381 0.288-2.044l24.837-9.569c1.15-0.431 2.156 0.256 1.781 2.013z"/>
+            </svg>
+          </div>
+          <div class="service-info">
+            <span class="service-name">{{ $t('settings.channel_telegram') }}</span>
+            <span class="service-sub" style="display: flex; gap: 8px; align-items: center;">Telegram Bot</span>
+          </div>
+          <span class="service-status-dot" :class="tgToken ? 'dot-connected' : 'dot-disconnected'"></span>
+        </div>
+        
+        <Transition name="slide-fade">
+          <div v-if="mobileChannel === 'telegram'" class="lark-credential-form">
+            <div class="form-group" style="margin-bottom: 10px;">
+              <label class="form-label">Bot Token</label>
+              <input v-model="tgToken" type="password" class="input" placeholder="123456789:ABCdefGHIjklMNO..." />
+              <p class="field-hint" style="margin-top: 8px; margin-bottom: 0;">{{ $t('settings.channel_tg_hint') }}</p>
+            </div>
+            <div style="display: flex; gap: 8px;">
+              <button class="btn btn-primary btn-sm" @click="activateMobileChannel('telegram')" :disabled="!tgToken">
+                <Check :size="13" /> {{ $t('settings.channel_activate') }}
+              </button>
+              <button class="btn btn-sm" @click="mobileChannel = ''">
+                {{ $t('settings.mcp_cancel') }}
+              </button>
+            </div>
+          </div>
+        </Transition>
+
+        <div class="service-card-footer">
+          <button v-if="tgToken" class="btn btn-danger-outline btn-sm" @click="mobileChannel = mobileChannel === 'telegram' ? '' : 'telegram'">
+            <Unlink :size="13" /> 修改 Token
+          </button>
+          <button v-else class="btn btn-primary-outline btn-sm" @click="mobileChannel = mobileChannel === 'telegram' ? '' : 'telegram'">
+            <KeyRound :size="13" /> {{ $t('settings.conn_connect') }}
+          </button>
+        </div>
+      </div>
+
+      <!-- Discord -->
+      <div class="service-card static-card" >
+        <div class="service-card-header">
+          <div class="service-icon icon-box--brand brand-discord" style="display: flex; align-items: center; justify-content: center;">
+            <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" style="width: 20px; height: 20px; fill: currentColor;">
+              <path d="M18.59 5.88997C17.36 5.31997 16.05 4.89997 14.67 4.65997C14.5 4.95997 14.3 5.36997 14.17 5.69997C12.71 5.47997 11.26 5.47997 9.83001 5.69997C9.69001 5.36997 9.49001 4.95997 9.32001 4.65997C7.94001 4.89997 6.63001 5.31997 5.40001 5.88997C2.92001 9.62997 2.25001 13.28 2.58001 16.87C4.23001 18.1 5.82001 18.84 7.39001 19.33C7.78001 18.8 8.12001 18.23 8.42001 17.64C7.85001 17.43 7.31001 17.16 6.80001 16.85C6.94001 16.75 7.07001 16.64 7.20001 16.54C10.33 18 13.72 18 16.81 16.54C16.94 16.65 17.07 16.75 17.21 16.85C16.7 17.16 16.15 17.42 15.59 17.64C15.89 18.23 16.23 18.8 16.62 19.33C18.19 18.84 19.79 18.1 21.43 16.87C21.82 12.7 20.76 9.08997 18.61 5.88997H18.59ZM8.84001 14.67C7.90001 14.67 7.13001 13.8 7.13001 12.73C7.13001 11.66 7.88001 10.79 8.84001 10.79C9.80001 10.79 10.56 11.66 10.55 12.73C10.55 13.79 9.80001 14.67 8.84001 14.67ZM15.15 14.67C14.21 14.67 13.44 13.8 13.44 12.73C13.44 11.66 14.19 10.79 15.15 10.79C16.11 10.79 16.87 11.66 16.86 12.73C16.86 13.79 16.11 14.67 15.15 14.67Z"/>
+            </svg>
+          </div>
+          <div class="service-info">
+            <span class="service-name">{{ $t('settings.channel_discord') }}</span>
+            <span class="service-sub" style="display: flex; gap: 8px; align-items: center;">Discord Bot</span>
+          </div>
+          <span class="service-status-dot" :class="discordToken ? 'dot-connected' : 'dot-disconnected'"></span>
+        </div>
+        
+        <Transition name="slide-fade">
+          <div v-if="mobileChannel === 'discord'" class="lark-credential-form">
+            <div class="form-group" style="margin-bottom: 10px;">
+              <label class="form-label">Bot Token</label>
+              <input v-model="discordToken" type="password" class="input" placeholder="OTg3NjU0MzIx.ABC.defGHIjklMNO..." />
+              <p class="field-hint" style="margin-top: 8px; margin-bottom: 0;">{{ $t('settings.channel_discord_hint') }}</p>
+            </div>
+            <div style="display: flex; gap: 8px;">
+              <button class="btn btn-primary btn-sm" @click="activateMobileChannel('discord')" :disabled="!discordToken">
+                <Check :size="13" /> {{ $t('settings.channel_activate') }}
+              </button>
+              <button class="btn btn-sm" @click="mobileChannel = ''">
+                {{ $t('settings.mcp_cancel') }}
+              </button>
+            </div>
+          </div>
+        </Transition>
+
+        <div class="service-card-footer">
+          <button v-if="discordToken" class="btn btn-danger-outline btn-sm" @click="mobileChannel = mobileChannel === 'discord' ? '' : 'discord'">
+            <Unlink :size="13" /> 修改 Token
+          </button>
+          <button v-else class="btn btn-primary-outline btn-sm" @click="mobileChannel = mobileChannel === 'discord' ? '' : 'discord'">
+            <KeyRound :size="13" /> {{ $t('settings.conn_connect') }}
+          </button>
+        </div>
+      </div>
+    </div>
+  </details>
+
+  <!-- 🚇 内网穿墙隧道 (Network Proxy) -->
+  <section class="settings-section card">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+      <h3 class="section-title" style="margin-bottom: 0;">
+        <Network :size="16" class="section-icon" />
+        {{ $t('settings.proxy_tunnel_name') }}
+      </h3>
+      
+      <!-- 运行状态与延迟显示 -->
+      <div v-if="proxyTunnelEnabled" style="display: flex; align-items: center; gap: 8px; margin-right: auto; margin-left: 16px; font-size: 0.85em; color: var(--text-secondary);">
+        <span class="service-status-dot" :class="tunnelStatus.connected ? 'dot-connected' : 'dot-disconnected'"></span>
+        <span>{{ tunnelStatus.connected ? `已连接 (${tunnelStatus.latency}ms)` : '已断开' }}</span>
+      </div>
+
+      <label class="mcp-switch">
+        <input type="checkbox" :checked="proxyTunnelEnabled" @change="toggleProxyTunnel" />
+        <span class="mcp-slider"></span>
+      </label>
+    </div>
+    <div class="field-hint" style="margin-top: -8px; margin-bottom: 0; margin-left: 28px; color: var(--text-secondary);">
+      {{ $t('settings.proxy_tunnel_desc') }}
     </div>
   </section>
 
@@ -94,28 +351,16 @@
 
     <div class="service-cards-grid">
       <!-- 飞书 (Feishu / Lark) -->
-      <div class="service-card" :class="{ connected: isConnected('lark') }">
+      <div class="service-card static-card" :class="{ connected: isConnected('lark') }">
         <div class="service-card-header">
           <div class="service-icon lark-icon">
-            <img src="/logos/feishu.svg" style="width: 22px; height: 22px; object-fit: contain;" alt="Feishu" />
+            <img :src="getAssetUrl('feishu.svg')" style="width: 22px; height: 22px; object-fit: contain;" alt="Feishu" />
           </div>
           <div class="service-info">
             <span class="service-name">{{ $t('settings.conn_lark_name') }}</span>
-            <span class="service-sub">{{ $t('settings.conn_lark_desc') }}</span>
+            <span class="service-sub" style="display: flex; gap: 8px; align-items: center;">{{ $t('settings.conn_lark_desc') }}</span>
           </div>
           <span class="service-status-dot" :class="isConnected('lark') ? 'dot-connected' : 'dot-disconnected'"></span>
-        </div>
-
-        <div class="service-card-body">
-          <span class="service-status-text">
-            <template v-if="isConnected('lark')">
-              {{ $t('settings.conn_connected') }}
-              <span v-if="connectorStatuses['lark']?.connected_at" class="connected-time">
-                · {{ connectorStatuses['lark'].connected_at }}
-              </span>
-            </template>
-            <template v-else>{{ $t('settings.conn_not_configured') }}</template>
-          </span>
         </div>
 
         <!-- 飞书凭证表单 (内联展开) -->
@@ -165,6 +410,39 @@
         </div>
       </div>
 
+      <!-- Google Calendar (Native) -->
+      <div class="service-card static-card" :class="{ connected: isConnected('google') }">
+        <div class="service-card-header">
+          <div class="service-icon" style="background: transparent;">
+            <img :src="getAssetUrl('google.svg')" style="width: 22px; height: 22px; object-fit: contain;" alt="Google" />
+          </div>
+          <div class="service-info">
+            <span class="service-name">Google Calendar</span>
+            <span class="service-sub" style="display: flex; gap: 8px; align-items: center;">{{ $t('settings.conn_native_integration') }}</span>
+          </div>
+          <span class="service-status-dot" :class="isConnected('google') ? 'dot-connected' : 'dot-disconnected'"></span>
+        </div>
+
+        <div class="service-card-footer">
+          <button
+            v-if="isConnected('google')"
+            class="btn btn-danger-outline btn-sm"
+            @click="disconnectService('google')"
+          >
+            <Unlink :size="13" />
+            {{ $t('settings.conn_disconnect') }}
+          </button>
+          <button
+            v-else
+            class="btn btn-primary btn-sm"
+            @click="connectGoogleNative"
+            :disabled="connectingService === 'google'"
+          >
+            <KeyRound :size="13" />
+            {{ $t('settings.conn_select_credential') }}
+          </button>
+        </div>
+      </div>
 
     </div>
   </section>
@@ -183,16 +461,16 @@
         :key="name"
         class="service-card active"
       >
-        <div class="service-card-header" style="margin-bottom: 0;">
+        <div class="service-card-header">
           <div class="service-icon" style="background: rgba(142, 142, 147, 0.1); color: var(--text-secondary); display: flex; align-items: center; justify-content: center;">
-            <img v-if="name.toLowerCase().includes('google')" src="/logos/google.svg" style="width: 20px; height: 20px; object-fit: contain;" />
-            <img v-else-if="name.toLowerCase().includes('outlook')" src="/logos/outlook.svg" style="width: 20px; height: 20px; object-fit: contain;" />
+            <img v-if="name.toLowerCase().includes('google')" :src="getAssetUrl('google.svg')" style="width: 20px; height: 20px; object-fit: contain;" />
+            <img v-else-if="name.toLowerCase().includes('outlook')" :src="getAssetUrl('outlook.svg')" style="width: 20px; height: 20px; object-fit: contain;" />
             <Terminal v-else :size="18" />
           </div>
           <div class="service-info" style="min-width: 0; padding-right: 8px;">
             <span class="service-name" style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block;" :title="name">{{ name === 'GoogleCalendar' ? 'Google Calendar' : (name === 'Outlook365' ? 'Outlook 365' : name) }}</span>
             <span class="service-sub" style="font-size: 0.75em; color: var(--text-tertiary); display: flex; align-items: center; gap: 4px;">
-              {{ name.toLowerCase().includes('google') || name.toLowerCase().includes('outlook') ? '系统预设' : '自定义配置' }}
+              {{ name.toLowerCase().includes('google') || name.toLowerCase().includes('outlook') ? $t('settings.mcp_preset') : $t('settings.mcp_custom') }}
             </span>
           </div>
           <label class="mcp-switch" title="断开连接">
@@ -200,37 +478,20 @@
             <span class="mcp-slider"></span>
           </label>
         </div>
-        <div v-if="!name.toLowerCase().includes('google') && !name.toLowerCase().includes('outlook')" class="service-card-body" style="border-top: 1px solid var(--border-subtle); padding-top: 8px; margin-top: 8px; font-family: monospace; font-size: 0.7em; word-break: break-all; color: var(--text-secondary);">
+        <div v-if="!name.toLowerCase().includes('google') && !name.toLowerCase().includes('outlook')" class="service-card-body mcp-cmd-preview">
           {{ cfg.command }} {{ (cfg.args || []).join(' ') }}
-        </div>
-      </div>
-
-      <!-- Quick Add Google Calendar MCP -->
-      <div v-if="!showAddMcp && !mcpServers['GoogleCalendar']" class="service-card preset-card" @click="addGoogleCalendarMcp">
-        <div class="service-card-header" style="margin-bottom: 0;">
-          <div class="service-icon" style="background: transparent;">
-            <img src="/logos/google.svg" style="width: 20px; height: 20px; filter: grayscale(1); opacity: 0.6;" alt="Google" />
-          </div>
-          <div class="service-info">
-            <span class="service-name" style="color: var(--text-secondary);">Google Calendar</span>
-            <span class="service-sub">快速接入</span>
-          </div>
-          <label class="mcp-switch" title="接入服务" @click.prevent>
-            <input type="checkbox" :checked="false" />
-            <span class="mcp-slider"></span>
-          </label>
         </div>
       </div>
 
       <!-- Quick Add Outlook MCP -->
       <div v-if="!showAddMcp && !mcpServers['Outlook365']" class="service-card preset-card" @click="addOutlookMcpPreset">
-        <div class="service-card-header" style="margin-bottom: 0;">
+        <div class="service-card-header">
           <div class="service-icon" style="background: transparent;">
-            <img src="/logos/outlook.svg" style="width: 20px; height: 20px; filter: grayscale(1); opacity: 0.6;" alt="Outlook" />
+            <img :src="getAssetUrl('outlook.svg')" style="width: 20px; height: 20px; filter: grayscale(1); opacity: 0.6;" alt="Outlook" />
           </div>
           <div class="service-info">
             <span class="service-name" style="color: var(--text-secondary);">Outlook 365</span>
-            <span class="service-sub">快速接入</span>
+            <span class="service-sub" style="display: flex; gap: 8px; align-items: center;">{{ $t('settings.conn_quick_connect') }}</span>
           </div>
           <label class="mcp-switch" title="接入服务" @click.prevent>
             <input type="checkbox" :checked="false" />
@@ -241,20 +502,20 @@
 
       <!-- 添加自定义 MCP Server 卡片 -->
       <div v-if="!showAddMcp" class="service-card preset-card" @click="showAddMcp = true">
-        <div class="service-card-header" style="margin-bottom: 0;">
+        <div class="service-card-header">
           <div class="service-icon" style="background: transparent; color: var(--text-tertiary);">
             <Plus :size="20" />
           </div>
           <div class="service-info">
             <span class="service-name" style="color: var(--text-secondary);">{{ $t('settings.mcp_add') }}</span>
-            <span class="service-sub">自定义配置</span>
+            <span class="service-sub" style="display: flex; gap: 8px; align-items: center;">{{ $t('settings.mcp_custom') }}</span>
           </div>
         </div>
       </div>
       
       <!-- 添加表单卡片 -->
       <div v-else class="service-card active" style="grid-column: 1 / -1;">
-        <div class="service-card-body" style="padding: 12px; margin-top: 0; display: flex; flex-direction: column; gap: 8px;">
+        <div class="service-card-body mcp-add-form-body">
           <div class="form-group" style="margin: 0;">
             <label class="form-label" style="font-size: 0.8em; margin-bottom: 4px;">{{ $t('settings.mcp_name') }}</label>
             <input v-model="newMcp.name" class="input" placeholder="例如 filesystem" style="padding: 4px 8px; font-size: 0.85em;" />
@@ -266,12 +527,12 @@
           <div class="form-group" style="margin: 0;">
             <label class="form-label" style="font-size: 0.8em; margin-bottom: 4px;">{{ $t('settings.mcp_args') }}</label>
             <input v-model="newMcp.args" class="input" placeholder="-y @modelcontextprotocol/server-filesystem /path" style="padding: 4px 8px; font-size: 0.85em;" />
-            <div v-if="newMcp.name === 'Outlook365'" style="margin-top: 6px; font-size: 0.75em; color: var(--text-tertiary); line-height: 1.5; background: var(--bg-root); padding: 8px; border-radius: 6px;">
+            <div v-if="newMcp.name === 'Outlook365'" style="margin-top: 6px; font-size: 0.75em; color: var(--text-tertiary); line-height: 1.5; background: var(--bg-root); padding: 8px; border-radius: var(--radius-default);">
               <div style="display: flex; align-items: center; margin-bottom: 4px; color: var(--text-secondary);">
-                <Info :size="14" style="margin-right: 4px;" /> <b>配置指南 (请复制链接至浏览器打开)</b>
+                <Info :size="14" style="margin-right: 4px;" /> <b>{{ $t('settings.mcp_outlook_guide') }}</b>
               </div>
               <div style="display: flex; align-items: center; gap: 6px; margin-top: 4px;">
-                <span>1. 注册应用：</span>
+                <span>{{ $t('settings.mcp_outlook_step1') }}</span>
                 <span style="user-select: text; color: var(--color-primary);">https://portal.azure.com/</span>
                 <button class="btn btn-sm" style="padding: 4px; border: none; background: transparent; cursor: pointer; color: var(--text-tertiary);" @click.stop="copyUrl('https://portal.azure.com/')">
                   <Check v-if="copiedUrl === 'https://portal.azure.com/'" :size="14" style="color: var(--color-success);" />
@@ -279,7 +540,7 @@
                 </button>
               </div>
               <div style="display: flex; align-items: center; gap: 6px; margin-top: 4px;">
-                <span>2. 详细教程：</span>
+                <span>{{ $t('settings.mcp_outlook_step2') }}</span>
                 <span style="user-select: text; color: var(--color-primary);">https://github.com/smithery-ai/mcp-server-outlook</span>
                 <button class="btn btn-sm" style="padding: 4px; border: none; background: transparent; cursor: pointer; color: var(--text-tertiary);" @click.stop="copyUrl('https://github.com/smithery-ai/mcp-server-outlook')">
                   <Check v-if="copiedUrl === 'https://github.com/smithery-ai/mcp-server-outlook'" :size="14" style="color: var(--color-success);" />
@@ -289,7 +550,7 @@
             </div>
           </div>
         </div>
-        <div class="service-card-footer" style="padding: 0 12px 12px; gap: 8px; margin-top: auto;">
+        <div class="service-card-footer mcp-add-form-footer">
           <button class="btn btn-primary btn-sm" @click="addMcpServer" :disabled="!newMcp.name || !newMcp.command" style="flex: 1; justify-content: center;">
             <Check :size="13" /> {{ $t('settings.mcp_save') }}
           </button>
@@ -301,6 +562,107 @@
     </div>
   </section>
 
+  </div>
+
+  <!-- P2P 配对二维码弹窗 -->
+  <Transition name="briefing-fade">
+    <div v-if="showP2pModal" class="wechat-modal-overlay">
+      <div class="morning-briefing wechat-qr-modal" style="width: 460px;">
+        <div class="briefing-header">
+          <div class="briefing-icon"><Smartphone :size="18" /></div>
+          <div class="briefing-title" style="flex: 1; font-size: 14px; font-weight: 600; color: var(--text-primary);">{{ $t('settings.p2p_pairing') }}</div>
+          <button class="briefing-close" @click="showP2pModal = false" title="关闭" style="background: none; border: none; color: var(--text-tertiary); cursor: pointer; padding: 4px; border-radius: var(--radius-default); display: flex; align-items: center; justify-content: center;">
+            <X :size="14" />
+          </button>
+        </div>
+        <div class="briefing-body" style="padding: 24px; display: flex; flex-direction: column;">
+          <div style="display: flex; gap: 32px; align-items: stretch;">
+            <!-- 左侧设备信息 -->
+            <div style="flex: 1; display: flex; flex-direction: column; gap: 12px; justify-content: center;">
+              <div class="form-group" style="margin-bottom: 0;">
+                <label class="form-label" style="font-size: 0.8em;">{{ $t('settings.p2p_pc_device_id') }}</label>
+                <input type="text" readonly class="input" :value="pairingInfo.device_id || $t('settings.loading')" style="width: 100%; font-family: monospace; font-size: 0.8em; color: var(--text-tertiary); padding: 6px 8px;" />
+              </div>
+              <div class="form-group" style="margin-bottom: 0;">
+                <label class="form-label" style="font-size: 0.8em;">{{ $t('settings.p2p_local_ip') }}</label>
+                <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+                  <span v-for="ip in pairingInfo.local_ips" :key="ip" class="tag" style="background: var(--bg-tertiary); padding: 2px 8px; border-radius: var(--radius-default); font-size: 0.8em;">
+                    {{ ip }}
+                  </span>
+                  <span v-if="!pairingInfo.local_ips || pairingInfo.local_ips.length === 0" style="color: var(--text-tertiary); font-size: 0.8em;">{{ $t('settings.p2p_no_network') }}</span>
+                </div>
+              </div>
+              <div class="form-group" style="margin-bottom: 0;">
+                <label class="form-label" style="font-size: 0.8em;">{{ $t('settings.p2p_relay_server') }}</label>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <span class="service-status-dot" :class="p2pRelayConnected ? 'dot-connected' : 'dot-disconnected'"></span>
+                  <span style="font-size: 0.8em;">{{ pairingInfo.relay || 'wss://relay.bobbik.org' }}</span>
+                </div>
+              </div>
+            </div>
+            
+            <!-- 右侧二维码或成功状态 -->
+            <div style="width: 160px; display: flex; flex-direction: column; align-items: center; justify-content: center; background: white; padding: 12px; border-radius: var(--radius-default); box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
+              <div v-if="pairingSuccessInfo" style="display: flex; flex-direction: column; align-items: center; justify-content: center; width: 136px; height: 136px; background: var(--bg-tertiary); color: var(--color-success); border-radius: var(--radius-default);">
+                <div style="background: var(--color-success); border-radius: 50%; width: 48px; height: 48px; display: flex; align-items: center; justify-content: center; margin-bottom: 12px;">
+                  <Check style="color: white;" :size="24" />
+                </div>
+                <span style="color: var(--text-primary); font-size: 13px; font-weight: 600; text-align: center; line-height: 1.3;">已连接<br/><span style="color: var(--text-secondary); font-size: 11px;">{{ pairingSuccessInfo.device_id.substring(0,8) }}...</span></span>
+              </div>
+              <qrcode-vue v-else-if="qrPayload" :value="qrPayload" :size="136" level="M" />
+              <div v-else style="width: 136px; height: 136px; display: flex; align-items: center; justify-content: center; background: var(--bg-tertiary); border-radius: var(--radius-default);">
+                <span style="color: var(--text-tertiary); font-size: 0.8em;">{{ $t('settings.p2p_generating') }}</span>
+              </div>
+            </div>
+          </div>
+          <p style="color: var(--text-secondary); font-size: 0.85em; margin-top: 20px; text-align: center;">
+            {{ $t('settings.p2p_scan_hint') }}
+          </p>
+        </div>
+      </div>
+    </div>
+  </Transition>
+
+  <!-- 📱 已连接设备列表弹窗 -->
+  <Transition name="briefing-fade">
+    <div v-if="showDevicesModal" class="wechat-modal-overlay" @click.self="showDevicesModal = false">
+      <div class="morning-briefing wechat-qr-modal" style="width: 420px; border-radius: var(--radius-default); background: var(--bg-secondary); border: 1px solid var(--border-subtle); overflow: hidden; box-shadow: var(--shadow-lg);">
+        <div class="briefing-header" style="display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid var(--border-subtle); background: var(--bg-tertiary);">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <div class="briefing-icon" style="color: var(--user-accent, var(--accent-primary)); display: flex; align-items: center;"><Smartphone :size="18" /></div>
+            <div class="briefing-title" style="font-size: 14px; font-weight: 600; color: var(--text-primary);">{{ $t('settings.pairing_device_list') }}</div>
+          </div>
+          <button class="briefing-close" @click="showDevicesModal = false" title="关闭" style="background: none; border: none; color: var(--text-tertiary); cursor: pointer; padding: 4px; border-radius: var(--radius-default); display: flex; align-items: center; justify-content: center;">
+            <X :size="14" />
+          </button>
+        </div>
+        
+        <div class="briefing-body" style="padding: 20px; display: flex; flex-direction: column; gap: 12px; max-height: 400px; overflow-y: auto;">
+          <div v-for="dev in connectedDevices" :key="dev.device_id" style="display: flex; flex-direction: column; gap: 6px; background: var(--bg-tertiary); padding: 12px; border-radius: var(--radius-default); border: 1px solid var(--border-subtle);">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <div style="display: flex; align-items: center; gap: 6px;">
+                <span class="status-dot" :class="isDeviceOnline(dev) ? 'dot-connected' : 'dot-disconnected'" style="width: 8px; height: 8px; border-radius: 50%;"></span>
+                <span style="font-size: 13px; font-weight: 600; color: var(--text-primary);">{{ dev.device_name || (dev.platform === 'android' ? 'Android Device' : dev.platform) }}</span>
+                <span style="font-size: 11px; color: var(--text-tertiary); font-family: monospace;">({{ dev.device_id.substring(0, 8) }})</span>
+                <span v-if="dev.syncStatus === 'syncing'" style="font-size: 10px; padding: 2px 6px; background: var(--color-success); border-radius: var(--radius-default); color: white; margin-left: 6px;">🔄 正在同步</span>
+              </div>
+              <button class="btn btn-danger-outline btn-sm" style="padding: 4px 8px; font-size: 11px;" @click="handleDisconnectDevice(dev)" title="{{ $t('settings.pairing_device_unbind') }}">
+                <Unlink :size="11" /> 解绑
+              </button>
+            </div>
+            <div style="font-size: 11px; color: var(--text-secondary); margin-left: 14px; display: flex; flex-direction: column; gap: 2px;">
+              <div>IP 地址: {{ dev.ip_address }}</div>
+              <div>最后活跃: {{ formatTime(dev.last_seen) }}</div>
+            </div>
+          </div>
+          <div v-if="connectedDevices.length === 0" style="text-align: center; padding: 20px; color: var(--text-tertiary); font-size: 13px;">
+            暂无已配对设备
+          </div>
+        </div>
+      </div>
+    </div>
+  </Transition>
+
   <!-- 微信扫码弹窗 -->
   <Transition name="briefing-fade">
     <div v-if="showWechatModal" class="wechat-modal-overlay">
@@ -308,42 +670,756 @@
         <div class="briefing-header">
           <div class="briefing-icon"><MessageSquare :size="18" /></div>
           <div class="briefing-title" style="flex: 1; font-size: 14px; font-weight: 600; color: var(--text-primary);">{{ $t('settings.wechat_bind_title') }}</div>
-          <button class="briefing-close" @click="closeWechatModal" title="关闭" style="background: none; border: none; color: var(--text-tertiary); cursor: pointer; padding: 4px; border-radius: 4px; display: flex; align-items: center; justify-content: center;">
+          <button class="briefing-close" @click="closeWechatModal" title="关闭" style="background: none; border: none; color: var(--text-tertiary); cursor: pointer; padding: 4px; border-radius: var(--radius-default); display: flex; align-items: center; justify-content: center;">
             <X :size="14" />
           </button>
         </div>
         <div class="briefing-body" style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 32px;">
           <div v-if="!qrCodeUrl && !wechatConnected" class="qr-placeholder" style="display: flex; flex-direction: column; align-items: center;">
-            <Loader2 class="spin" :size="32" style="color: var(--text-tertiary)" />
+            <Loader2 class="animate-spin" :size="32" style="color: var(--text-tertiary)" />
             <p style="margin-top: 12px; font-size: 13px; color: var(--text-secondary);">{{ $t('settings.wechat_loading_qr') }}</p>
           </div>
           <div v-else-if="wechatConnected" class="qr-success" style="text-align: center; display: flex; flex-direction: column; align-items: center;">
-            <div style="width: 64px; height: 64px; border-radius: 32px; background-color: rgba(var(--user-accent-rgb, 39, 118, 187), 0.1); color: var(--user-accent); display: flex; align-items: center; justify-content: center;"><Check :size="32" /></div>
+            <div style="width: 64px; height: 64px; border-radius: var(--radius-default); background-color: rgba(var(--user-accent-rgb, 39, 118, 187), 0.1); color: var(--user-accent); display: flex; align-items: center; justify-content: center;"><Check :size="32" /></div>
             <h3 style="margin-top: 16px; color: var(--user-accent);">{{ $t('settings.wechat_bind_success') }}</h3>
             <p style="color: var(--text-secondary); font-size: 13px; margin-top: 4px;">{{ $t('settings.wechat_bind_success_desc') }}</p>
           </div>
           <div v-else class="qr-box" style="text-align: center;">
-            <img :src="qrCodeUrl" style="width: 200px; height: 200px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);" alt="Wechat Login QR" />
+            <img :src="qrCodeUrl" style="width: 200px; height: 200px; border-radius: var(--radius-default); box-shadow: 0 4px 12px rgba(0,0,0,0.15);" alt="Wechat Login QR" />
             <p style="margin-top: 16px; font-size: 14px; color: var(--text-secondary); font-weight: 500;">{{ $t('settings.wechat_scan_hint') }}</p>
           </div>
         </div>
       </div>
     </div>
   </Transition>
-</template>
 
+  <!-- ── Pairing Progress Overlay ── -->
+  <Transition name="modal-fade">
+    <div v-if="showPairingProgress" class="pairing-overlay">
+      <div class="pairing-progress-card">
+        <div class="pairing-progress-header">
+          <Link2 class="pairing-progress-icon" :size="21" aria-hidden="true" />
+          <span>{{ pairingDone ? (pairingError ? $t('settings.pairing_failed') : $t('settings.pairing_success')) : $t('settings.pairing_in_progress') }}</span>
+        </div>
+
+        <SyncTriangleTopology
+          :paths="diagnosticPaths"
+          :nodes="diagnosticNodes"
+          :labels="{ mobile: 'Mobile', relay: 'Relay', pc: 'PC', lan: 'LAN' }"
+          :aria-label="t('settings.p2p_pairing')"
+        />
+
+        <div v-if="showIncrementalProgress" class="pairing-sync-progress">
+          <div class="pairing-sync-progress__head">
+            <span>{{ incrementalProgressLabel }}</span>
+            <strong>{{ incrementalProgressPercent }}%</strong>
+          </div>
+          <div class="pairing-sync-progress__track"><div :style="{ width: `${incrementalProgressPercent}%` }"></div></div>
+          <p>{{ incrementalProgressDetail }}</p>
+        </div>
+
+        <div v-if="pairingError" class="topo-error-box">
+          <ShieldAlert :size="16"/>
+          <span>{{ currentErrorDetail }}</span>
+        </div>
+
+        <div class="pairing-progress-footer">
+          <button v-if="pairingDone" class="btn btn-primary-outline" @click="closePairingProgress">
+            关闭
+          </button>
+          <button v-else class="btn btn-secondary-outline" @click="closePairingProgress">
+            取消
+          </button>
+        </div>
+      </div>
+    </div>
+  </Transition>
+
+  <!-- 同步日志 Modal -->
+  <Transition name="briefing-fade">
+    <div v-if="showSyncLogsModal" class="wechat-modal-overlay" @click.self="showSyncLogsModal = false" style="z-index: 10000;">
+      <div class="morning-briefing wechat-qr-modal" style="width: 500px; max-width: 90vw; border-radius: var(--radius-default); background: var(--bg-secondary); border: 1px solid var(--border-subtle); overflow: hidden; box-shadow: var(--shadow-lg);">
+        <div class="briefing-header" style="display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid var(--border-subtle); background: var(--bg-tertiary);">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <div class="briefing-icon" style="color: var(--text-primary); display: flex; align-items: center;"><Info :size="18" /></div>
+            <div class="briefing-title" style="font-size: 14px; font-weight: 600; color: var(--text-primary);">{{ $t('settings.pairing_logs_title') }}</div>
+          </div>
+          <button class="briefing-close" @click="showSyncLogsModal = false" title="关闭" style="background: none; border: none; color: var(--text-tertiary); cursor: pointer; padding: 4px; border-radius: var(--radius-default); display: flex; align-items: center; justify-content: center;">
+            <X :size="14" />
+          </button>
+        </div>
+        
+        <div style="padding: 16px; display: flex; flex-direction: column; gap: 8px; max-height: 60vh; overflow-y: auto;">
+          <div v-if="syncLogs.length === 0" style="text-align: center; color: var(--text-tertiary); padding: 20px;">
+            {{ $t('settings.pairing_logs_empty') }}
+          </div>
+          <div v-else v-for="(log, idx) in syncLogs" :key="idx" style="border: 1px solid var(--border-subtle); border-radius: var(--radius-default); padding: 12px; background: var(--bg-primary);">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+              <div style="display: flex; gap: 6px; align-items: center;">
+                <span v-if="log.status === 'success'" style="color: var(--color-success); display: flex;"><CheckCircle :size="14"/></span>
+                <span v-else-if="log.status === 'failed'" style="color: var(--color-error); display: flex;"><XCircle :size="14"/></span>
+                <span v-else style="color: var(--text-tertiary); display: flex;"><Info :size="14"/></span>
+                <span style="font-weight: 600; font-size: 13px;">{{ log.summary || (log.status === 'success' ? $t('settings.activity_sync_success') : $t('settings.activity_sync_failed')) }}</span>
+              </div>
+              <span style="font-size: 12px; color: var(--text-tertiary);">{{ new Date(log.finished_at).toLocaleString() }}</span>
+            </div>
+            <div style="font-size: 13px; color: var(--text-secondary);">
+              {{ log.transport ? `${log.transport.toUpperCase()} · ` : '' }}{{ formatSyncLogDetail(log) }}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </Transition>
+
+</template>
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue';
+const getAssetUrl = (name) => `/logos/${name}`;
+import { ref, onMounted, onUnmounted, computed, inject, watch } from 'vue';
 import { open } from '@tauri-apps/plugin-dialog';
+import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
+import QrcodeVue from 'qrcode.vue';
+import { useI18n } from 'vue-i18n';
 import {
   Smartphone, Unplug, X, Plus, Loader2, MessageSquare, Check,
-  Building2, ExternalLink, Unlink, KeyRound, Terminal, Info, Copy
+  Building2, ExternalLink, Unlink, KeyRound, Network, Info, Copy,
+  ShieldAlert, TriangleAlert, QrCode, Lock, Unlock, Scan,
+  Monitor, ChevronDown, Cloud, Link2
+  , CheckCircle, XCircle
 } from 'lucide-vue-next';
+import SyncTriangleTopology from '../../components/sync/SyncTriangleTopology.vue';
+
+const { t } = useI18n();
 
 const props = defineProps({
   config: { type: Object, required: true },
 });
 const emit = defineEmits(['config-changed']);
+
+const isNativeMobile = inject('isNativeMobile', false);
+const isMobile = inject('isMobile', ref(false));
+const lastSyncTime = inject('lastSyncTime', ref(''));
+const lastSyncStatus = inject('lastSyncStatus', ref(''));
+const hideDesktopChannels = computed(() => isNativeMobile || isMobile.value);
+
+import { useDialog } from '@/composables/useDialog.js';
+
+const { showConfirm, showAlert } = useDialog();
+
+// ── Pairing Progress Overlay State ──
+const showPairingProgress = ref(false);
+const pairingDone = ref(false);
+const pairingError = ref(false);
+const syncProgressState = ref({});
+
+const pairingSteps = ref([]);
+
+const lanStep = computed(() => pairingSteps.value.find(s => s.id === 'lan_sync'));
+const relayConnectStep = computed(() => pairingSteps.value.find(s => s.id === 'relay_connect'));
+const relayNotifyStep = computed(() => pairingSteps.value.find(s => s.id === 'relay_notify'));
+const relayAckStep = computed(() => pairingSteps.value.find(s => s.id === 'relay_ack'));
+const relaySyncStep = computed(() => pairingSteps.value.find(s => s.id === 'relay_sync'));
+const showIncrementalProgress = computed(() => relayAckStep.value?.status === 'done' || ['running','done','error'].includes(relaySyncStep.value?.status));
+const incrementalProgressPercent = computed(() => {
+  if (relaySyncStep.value?.status === 'done') return 100;
+  if (relaySyncStep.value?.status === 'error') return Number(syncProgressState.value.progress || 64);
+  if (relaySyncStep.value?.status === 'running') return Number(syncProgressState.value.progress || 36);
+  if (relayAckStep.value?.status === 'done') return 8;
+  return 0;
+});
+const incrementalProgressLabel = computed(() => relaySyncStep.value?.status === 'done' ? '增量同步完成' : relaySyncStep.value?.status === 'error' ? '增量同步未完成' : '检查并同步增量');
+const incrementalProgressDetail = computed(() => relaySyncStep.value?.detail || syncProgressState.value.detail || (relayAckStep.value?.status === 'done' ? '配对已确认，正在比较双方同步游标。' : '等待增量检查。'));
+
+const lanPathClass = computed(() => {
+  if (!lanStep.value) return 'path-inactive';
+  if (lanStep.value.status === 'running') return 'path-active';
+  if (lanStep.value.status === 'done') return 'path-success';
+  if (lanStep.value.status === 'error') return 'path-error';
+  return 'path-inactive';
+});
+
+const relayPathLeftClass = computed(() => {
+  if (relayConnectStep.value?.status === 'error' || relayNotifyStep.value?.status === 'error') return 'path-error';
+  if (relayConnectStep.value?.status === 'running' || relayNotifyStep.value?.status === 'running' || relayAckStep.value?.status === 'running' || relaySyncStep.value?.status === 'running') return 'path-active';
+  if (relaySyncStep.value?.status === 'done') return 'path-success';
+  return 'path-inactive';
+});
+
+const relayPathRightClass = computed(() => {
+  if (relayAckStep.value?.status === 'error' || relaySyncStep.value?.status === 'error') return 'path-error';
+  if (relayAckStep.value?.status === 'running' || relaySyncStep.value?.status === 'running') return 'path-active';
+  if (relaySyncStep.value?.status === 'done') return 'path-success';
+  return 'path-inactive';
+});
+
+const relayNodeClass = computed(() => {
+  if (relayConnectStep.value?.status === 'error' || relayNotifyStep.value?.status === 'error' || relayAckStep.value?.status === 'error' || relaySyncStep.value?.status === 'error') return 'error';
+  if (relaySyncStep.value?.status === 'done') return 'success';
+  if (relayConnectStep.value?.status === 'running' || relayNotifyStep.value?.status === 'running' || relayAckStep.value?.status === 'running' || relaySyncStep.value?.status === 'running') return 'active';
+  return '';
+});
+
+const mobileClass = computed(() => {
+  return pairingError.value ? 'error' : (pairingDone.value ? 'success' : 'active');
+});
+
+const pcClass = computed(() => {
+  return (relayAckStep.value?.status === 'error' || relaySyncStep.value?.status === 'error') ? 'error' : (pairingDone.value ? 'success' : (relayAckStep.value?.status === 'running' || lanStep.value?.status === 'running' || relaySyncStep.value?.status === 'running' ? 'active' : ''));
+});
+
+const currentErrorDetail = computed(() => {
+  const priority = ['relay_sync', 'relay_ack', 'relay_notify', 'relay_connect', 'lan_sync', 'save_config', 'parse'];
+  const errStep = priority
+    .map(id => pairingSteps.value.find(step => step.id === id && step.status === 'error'))
+    .find(Boolean);
+    return errStep?.detail || t('settings.pairing_failed');
+});
+
+const normalizeLegacyStatus = (status) => ({
+  done: 'success', error: 'failed', running: 'running', skipped: 'skipped', pending: 'pending',
+}[status] || 'unknown');
+
+// Legacy pairing events do not carry per-hop Relay receipts. Only an end-to-end
+// acknowledgement can prove the return path; otherwise the unobserved hops stay unknown.
+const diagnosticPaths = computed(() => {
+  const forceSuccess = pairingDone.value && !pairingError.value;
+  const mapStatus = (status) => forceSuccess && (status === 'running' || status === 'success') ? 'success' : status;
+
+  const observed = connectivitySnapshot.value.active_trace?.paths;
+  if (observed) {
+    return {
+      lan_direct: mapStatus(observed.lan_direct?.status || 'unknown'),
+      mobile_to_relay: mapStatus(observed.mobile_to_relay?.status || 'unknown'),
+      relay_to_pc: mapStatus(observed.relay_to_pc?.status || 'unknown'),
+      pc_to_relay: mapStatus(observed.pc_to_relay?.status || 'unknown'),
+      relay_to_mobile: mapStatus(observed.relay_to_mobile?.status || 'unknown'),
+    };
+  }
+  const relayRoundTripSucceeded = relayAckStep.value?.status === 'done';
+  const relayRoundTripRunning = ['running', 'done'].includes(relayConnectStep.value?.status)
+    || ['running', 'done'].includes(relayNotifyStep.value?.status);
+    
+  const mapLegacy = (status) => forceSuccess && (status === 'running' || status === 'success') ? 'success' : status;
+  return {
+    lan_direct: mapLegacy(normalizeLegacyStatus(lanStep.value?.status)),
+    mobile_to_relay: mapLegacy(normalizeLegacyStatus(relayConnectStep.value?.status)),
+    relay_to_pc: mapLegacy(relayRoundTripSucceeded ? 'success' : (relayRoundTripRunning ? 'running' : 'unknown')),
+    pc_to_relay: mapLegacy(relayRoundTripSucceeded ? 'success' : 'unknown'),
+    relay_to_mobile: mapLegacy(relayRoundTripSucceeded ? 'success' : 'unknown'),
+  };
+});
+
+const diagnosticNodes = computed(() => ({
+  mobile: mobilePeerOnline.value ? 'success' : (pairingDone.value && !pairingError.value ? 'success' : 'unknown'),
+  relay: connectivitySnapshot.value.relay === 'registered' ? 'success' : (connectivitySnapshot.value.relay === 'connecting' ? 'running' : 'failed'),
+  pc: connectivitySnapshot.value.local_identity === 'ready' ? 'success' : (relayAckStep.value?.status === 'done' || lanStep.value?.status === 'done'
+    ? 'success'
+    : (relayAckStep.value?.status === 'error' ? 'unknown' : 'pending')),
+}));
+
+async function initPairingSteps() {
+    pairingSteps.value = [
+    { id: 'parse',         label: t('settings.step_parse'),         status: 'pending', detail: '' },
+    { id: 'save_config',   label: t('settings.step_save_config'),       status: 'pending', detail: '' },
+    { id: 'lan_sync',      label: t('settings.step_lan_sync'),   status: 'pending', detail: '' },
+    { id: 'relay_connect', label: t('settings.step_relay_connect'),         status: 'pending', detail: '' },
+    { id: 'relay_notify',  label: t('settings.step_relay_notify'),         status: 'pending', detail: '' },
+    { id: 'relay_ack',     label: t('settings.step_relay_ack'),         status: 'pending', detail: '' },
+    { id: 'relay_sync',    label: t('settings.step_relay_sync'),         status: 'pending', detail: '' },
+  ];
+  pairingDone.value = false;
+  pairingError.value = false;
+}
+
+async function updateStep(id, status, detail) {
+  const step = pairingSteps.value.find(s => s.id === id);
+  if (step) {
+    step.status = status;
+    if (detail !== undefined) step.detail = detail;
+  }
+}
+
+async function closePairingProgress() {
+  showPairingProgress.value = false;
+  if (pairingDone.value && !pairingError.value) {
+    fetchConnectedDevices().then(() => {
+      if (isNativeMobile && connectedDevices.value.length > 0) {
+        isUnlocked.value = true;
+      }
+    });
+  }
+}
+
+const handleMobileScan = async () => {
+  if (window.appAPI?.scanQrCode) {
+    document.body.classList.add('scanner-active');
+    
+    let unlistenProgress = null;
+    if (window.__TAURI_IPC__) {
+      unlistenProgress = await listen('sync:progress', (event) => {
+        if (event.payload && typeof event.payload === 'object') {
+          syncProgressState.value = { ...syncProgressState.value, ...event.payload };
+          
+          if (event.payload.stage === 'done' || event.payload.stage === 'error') {
+            setTimeout(() => { showProgress.value = false; }, 3000);
+          }
+        }
+      });
+    }
+
+    const code = await window.appAPI.scanQrCode();
+    document.body.classList.remove('scanner-active');
+    
+    if (!code) return;
+
+    let payload;
+    try {
+      payload = JSON.parse(code);
+    } catch (e) {
+      await showAlert("二维码内容无法解析: " + e);
+      return;
+    }
+
+    const existingPayload = await window.appAPI.getConfig('pairing_payload');
+    if (existingPayload && existingPayload.device_id && existingPayload.device_id !== payload.device_id) {
+      const isOverride = await showConfirm(`⚠️ 身份不匹配\n\n您正在扫描一个新的 PC (ID: ${payload.device_id.substring(0, 8)})\n但本机已绑定了另一个 PC (ID: ${existingPayload.device_id.substring(0, 8)})\n\n是否覆盖现有配对？(可能会导致同步记录分叉)`);
+      if (!isOverride) return;
+    } else {
+      const confirmed = await showConfirm(`发现设备 PC (ID: ${payload.device_id.substring(0, 8)}...)，是否连接并同步？`);
+      if (!confirmed) return;
+    }
+
+    // Show progress overlay
+    initPairingSteps();
+    showPairingProgress.value = true;
+    updateStep('parse', 'done', '');
+
+    // Listen for Rust-side progress events
+    try {
+      unlistenProgress = await listen('sync:progress', (event) => {
+        const { stage, status, detail } = event.payload;
+        syncProgressState.value = { ...syncProgressState.value, ...event.payload };
+        updateStep(stage, status, detail || '');
+      });
+    } catch (e) {
+      console.warn('Could not listen to sync:progress events:', e);
+    }
+
+    try {
+      // Step 2: Save config
+      updateStep('save_config', 'running', '');
+      await window.appAPI.setConfig('pairing_payload', payload);
+      updateStep('save_config', 'done', '');
+
+            // Step 3: 尝试局域网直连同步 (LAN Sync)
+      if (window.appAPI.triggerMobileSync) {
+        updateStep('lan_sync', 'running', '');
+        let lanSuccess = false;
+        try {
+          const syncTimeout = new Promise((_, reject) => setTimeout(() => reject(new Error('Sync Timeout')), 15000));
+          
+          // Force LAN only for this attempt
+          const lanPayload = { ...payload, skip_relay: true };
+          
+          await Promise.race([
+            window.appAPI.triggerMobileSync(lanPayload),
+            syncTimeout
+          ]);
+          
+          const lanStep = pairingSteps.value.find(s => s.id === 'lan_sync');
+          if (lanStep && (lanStep.status === 'done' || lanStep.status === 'running')) {
+            updateStep('lan_sync', 'done', '');
+            lanSuccess = true;
+          }
+        } catch (e) {
+          updateStep('lan_sync', 'error', 'Error: ' + String(e));
+        }
+
+        if (lanSuccess) {
+          updateStep('relay_connect', 'skipped', '局域网已连接，无需外网穿透');
+          updateStep('relay_notify', 'skipped', '');
+          updateStep('relay_ack', 'skipped', '');
+          updateStep('relay_sync', 'skipped', '');
+          pairingDone.value = true;
+          pairingError.value = false;
+          return;
+        }
+      }
+
+      // Step 4: 局域网失败，尝试外网隧道握手 (Relay Handshake)
+      if (window.appAPI.relayHandshake) {
+        updateStep('relay_connect', 'running', '');
+        try {
+          const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Relay Timeout')), 30000));
+          await Promise.race([
+            window.appAPI.relayHandshake(payload.device_id, payload.public_key),
+            timeoutPromise
+          ]);
+          // done states are managed by sync:progress
+        } catch (e) {
+          console.warn('Relay handshake failed', e);
+          const errStr = String(e);
+          if (errStr.includes('ERR-PAIRING-01') || errStr.includes('Relay Timeout')) {
+              updateStep('relay_connect', 'error', 'Error: 手机连不上中继服务器');
+          } else if (errStr.includes('ERR-PAIRING-02')) {
+              updateStep('relay_notify', 'error', 'Error: 无法发送配对请求');
+          } else if (errStr.includes('ERR-PAIRING-03') || errStr.includes('ERR-PAIRING-04') || errStr.includes('Target device is offline')) {
+              updateStep('relay_ack', 'error', 'Error: PC无响应 (可能未联网或掉线)');
+          } else {
+              updateStep('relay_connect', 'error', 'Error: ' + errStr);
+          }
+          pairingDone.value = true;
+          pairingError.value = true;
+          return; // If handshake fails, no point in syncing
+        }
+      }
+
+      // Step 5: 外网隧道同步 (Relay Sync)
+      if (window.appAPI.triggerMobileSync) {
+        updateStep('relay_sync', 'running', '');
+        try {
+          const syncTimeout = new Promise((_, reject) => setTimeout(() => reject(new Error('Sync Timeout')), 45000));
+          const relayPayload = { ...payload, skip_relay: false, local_ips: [] }; // Force Relay
+          
+          await Promise.race([
+            window.appAPI.triggerMobileSync(relayPayload),
+            syncTimeout
+          ]);
+          
+          const relayStep = pairingSteps.value.find(s => s.id === 'relay_sync');
+          if (relayStep && (relayStep.status === 'done' || relayStep.status === 'running')) {
+            updateStep('relay_sync', 'done', '');
+          }
+          pairingDone.value = true;
+          pairingError.value = false;
+        } catch (e) {
+          updateStep('relay_sync', 'error', 'Error: ' + String(e));
+          pairingDone.value = true;
+          pairingError.value = true;
+        }
+      }
+
+    } catch (e) {
+      pairingDone.value = true;
+      pairingError.value = true;
+    } finally {
+      if (unlistenProgress) unlistenProgress();
+    }
+  } else {
+    await showAlert(t('setup.scanner_not_supported') || '当前环境不支持扫码');
+  }
+};
+
+// ── Proxy Tunnel (Goal 20) ──
+const proxyTunnelEnabled = ref(props.config.proxyTunnelEnabled || false);
+const tunnelStatus = ref({ connected: false, latency: 0 });
+let tunnelInterval = null;
+
+async function toggleProxyTunnel() {
+  proxyTunnelEnabled.value = !proxyTunnelEnabled.value;
+  emit('config-changed', { proxyTunnelEnabled: proxyTunnelEnabled.value });
+}
+
+async function updateTunnelStatus() {
+  if (!proxyTunnelEnabled.value) {
+    tunnelStatus.value = { connected: false, latency: 0 };
+    return;
+  }
+  try {
+    const res = await invoke('check_tunnel_status');
+    if (res && res.connected) {
+      tunnelStatus.value = { connected: true, latency: res.latency_ms };
+    } else {
+      tunnelStatus.value = { connected: false, latency: 0 };
+    }
+  } catch (e) {
+    tunnelStatus.value = { connected: false, latency: 0 };
+  }
+}
+
+watch(proxyTunnelEnabled, (val) => {
+  if (val) {
+    updateTunnelStatus();
+    if (!tunnelInterval) {
+      tunnelInterval = setInterval(updateTunnelStatus, 8000);
+    }
+  } else {
+    if (tunnelInterval) {
+      clearInterval(tunnelInterval);
+      tunnelInterval = null;
+    }
+    tunnelStatus.value = { connected: false, latency: 0 };
+  }
+});
+
+// ── P2P Sync (多端同步) ──
+const isInitialized = ref(true); // Will fetch from backend
+const isUnlocked = ref(false);
+const showP2pModal = ref(false);
+const showDevicesModal = ref(false);
+
+const showSyncLogsModal = ref(false);
+const syncLogs = ref([]);
+const connectivitySnapshot = ref({ local_identity: 'uninitialized', relay: 'disconnected', peers: [] });
+
+const mobilePeerOnline = computed(() => connectivitySnapshot.value.peers?.some(peer => peer.presence === 'online'));
+const overallConnectionClass = computed(() => {
+  if (connectivitySnapshot.value.relay === 'registered') return 'dot-connected';
+  if (connectivitySnapshot.value.relay === 'connecting') return 'dot-warning';
+  return 'dot-disconnected';
+});
+const overallConnectionLabel = computed(() => {
+  if (connectivitySnapshot.value.relay === 'registered') return 'Relay 基建已连接';
+  if (connectivitySnapshot.value.relay === 'connecting') return 'Relay 连接中...';
+  return 'Relay 未连接';
+});
+
+const openSyncLogs = async () => {
+  try {
+    const [runsResult, legacyResult, captureResult] = await Promise.allSettled([
+      window.appAPI.getSyncRuns(),
+      window.appAPI.getSyncLogs(),
+      window.appAPI.captureActivityList(50),
+    ]);
+    const runs = runsResult.status === 'fulfilled' && Array.isArray(runsResult.value)
+      ? runsResult.value
+      : [];
+    const legacy = legacyResult.status === 'fulfilled' && Array.isArray(legacyResult.value)
+      ? legacyResult.value.map((log) => ({
+          finished_at: log.timestamp,
+          status: log.status === 'done' ? 'success' : (log.status === 'error' ? 'failed' : log.status),
+          summary: log.action || t('settings.activity_sync'),
+          detail: log.detail || '',
+        }))
+      : [];
+    const captureActivities = captureResult.status === 'fulfilled' && Array.isArray(captureResult.value)
+      ? captureResult.value.map(formatCaptureActivity)
+      : [];
+    syncLogs.value = [...runs, ...legacy, ...captureActivities]
+      .sort((left, right) => Number(right.finished_at || 0) - Number(left.finished_at || 0))
+      .slice(0, 50);
+  } catch (e) {
+    console.error("Failed to load sync logs:", e);
+    syncLogs.value = [];
+  }
+  showSyncLogsModal.value = true;
+};
+
+const formatActivityBytes = (value) => {
+  const bytes = Number(value || 0);
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+};
+
+const captureEntryPointLabel = (entryPoint) => {
+  const keys = {
+    quick_note: 'capture_entry_quick_note',
+    chat_memo: 'capture_entry_chat_memo',
+    mobile_share: 'capture_entry_mobile_share',
+    mobile_image_share: 'capture_entry_mobile_image',
+    chat_article_save: 'capture_entry_article',
+    save_to_notes: 'capture_entry_article',
+  };
+  return keys[entryPoint] ? t(`settings.${keys[entryPoint]}`) : (entryPoint || '-');
+};
+
+const formatCaptureActivity = (event) => {
+  const params = event.params || {};
+  const code = event.eventCode || '';
+  const titleKeys = {
+    'capture.received': 'capture_event_received',
+    'capture.committed': 'capture_event_committed',
+    'capture.failed': 'capture_event_failed',
+    'capture.recovered': 'capture_event_recovered',
+    'capture.synced': 'capture_event_synced',
+    'capture.image_saved': 'capture_event_image_saved',
+    'capture.pending_enrichment': 'capture_event_pending_enrichment',
+    'capture.needs_clarification': 'capture_event_needs_clarification',
+    'capture.enrichment_deferred': 'capture_event_enrichment_deferred',
+    'capture.enrichment_failed': 'capture_event_enrichment_failed',
+    'capture.action_committed': 'capture_event_action_committed',
+    'capture.knowledge_committed': 'capture_event_knowledge_committed',
+  };
+  let detail = '';
+  if (code === 'capture.received') detail = t('settings.capture_detail_received', { entryPoint: captureEntryPointLabel(params.entryPoint || event.sourceDevice) });
+  else if (code === 'capture.committed') detail = t('settings.capture_detail_committed', { destination: params.destination || '-' });
+  else if (code === 'capture.failed') detail = t('settings.capture_detail_failed', { stage: params.stage || '-' });
+  else if (code === 'capture.recovered') detail = t('settings.capture_detail_recovered');
+  else if (code === 'capture.synced') detail = t('settings.capture_detail_synced');
+  else if (code === 'capture.image_saved') detail = t('settings.capture_detail_image_saved', { fileName: params.fileName || '-', size: formatActivityBytes(params.size) });
+  else if (code === 'capture.pending_enrichment') detail = t('settings.capture_detail_pending_enrichment');
+  else if (code === 'capture.needs_clarification') detail = t('settings.capture_detail_needs_clarification');
+  else if (code === 'capture.enrichment_deferred') detail = t('settings.capture_detail_enrichment_deferred');
+  else if (code === 'capture.enrichment_failed') detail = t('settings.capture_detail_enrichment_failed');
+  else if (code === 'capture.action_committed') detail = t('settings.capture_detail_action_committed', { destination: params.destination || '-' });
+  else if (code === 'capture.knowledge_committed') detail = t('settings.capture_detail_knowledge_committed', { destination: params.destination || '-' });
+  return {
+    finished_at: event.createdAt,
+    status: event.status === 'failed' ? 'failed' : (event.status === 'success' ? 'success' : 'info'),
+    summary: t(`settings.${titleKeys[code] || 'capture_event_unknown'}`),
+    detail,
+  };
+};
+
+const formatSyncLogDetail = (log) => {
+  if (log.detail) return log.detail;
+  if (log.error_code) return log.error_code;
+  if (log.summary?.includes('配对') || log.summary?.includes('连接')) return t('settings.activity_confirmed');
+  if (log.status === 'success') return t('settings.activity_written');
+  if (log.status === 'running') return t('settings.activity_running');
+  return t('settings.activity_no_write');
+};
+
+const pinInput = ref('');
+const pairingInfo = ref({
+  device_id: '',
+  local_ips: [],
+  port: 8080,
+  relay: ''
+});
+const pairingSuccessInfo = ref(null);
+const p2pRelayConnected = ref(false);
+let p2pRelayInterval = null;
+
+const qrPayload = computed(() => {
+  if (!pairingInfo.value.device_id) return '';
+  return JSON.stringify(pairingInfo.value);
+});
+
+const handlePinSubmit = async () => {
+  if (pinInput.value.length < 4) return;
+  try {
+    if (isInitialized.value) {
+      await invoke('unlock_device_keys', { pin: pinInput.value });
+    } else {
+      await invoke('init_device_keys', { pin: pinInput.value });
+      isInitialized.value = true;
+    }
+    isUnlocked.value = true;
+    pinInput.value = '';
+    await fetchPairingInfo();
+  } catch (error) {
+    await showAlert(t('settings.p2p_alert_pin_err') + error);
+  }
+};
+
+const handleReset = async () => {
+  const confirmed = await showConfirm(t('settings.p2p_alert_reset'));
+  if (confirmed) {
+    try {
+      await invoke('reset_device_keys');
+      isInitialized.value = false;
+      isUnlocked.value = false;
+      pinInput.value = '';
+      connectedDevices.value = [];
+    } catch (error) {
+      await showAlert(t('settings.p2p_alert_reset_err') + error);
+    }
+  }
+};
+
+const handleDisconnectDevice = async (dev) => {
+  const confirmed = await showConfirm(`确定要解绑设备 ${dev.platform} (${dev.device_id.substring(0, 8)}) 吗？`);
+  if (confirmed) {
+    try {
+      await invoke('disconnect_device', { deviceId: dev.device_id });
+      await fetchConnectedDevices();
+      if (connectedDevices.value.length === 0) {
+        showDevicesModal.value = false;
+        isUnlocked.value = false;
+      }
+    } catch (e) {
+      console.error('Failed to disconnect device', e);
+    }
+  }
+};
+
+const fetchPairingInfo = async () => {
+  try {
+    pairingInfo.value = await invoke('get_pairing_payload');
+  } catch (error) {
+    console.error('获取配对信息失败', error);
+  }
+};
+
+const connectedDevices = ref([]);
+let unlistenDeviceConnected = null;
+let unlistenDeviceSyncing = null;
+
+const fetchConnectedDevices = async () => {
+  try {
+    connectedDevices.value = await invoke('get_connected_devices');
+  } catch (e) {
+    console.error('Failed to get connected devices', e);
+  }
+};
+
+const isDeviceOnline = (dev) => {
+  // Consider online if seen within last 2 minutes (120000ms)
+  return Date.now() - dev.last_seen < 120000;
+};
+
+const formatSyncTime = (tsStr) => {
+  if (!tsStr) return '未知';
+  const ts = parseInt(tsStr);
+  if (isNaN(ts)) return '未知';
+  const d = new Date(ts);
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+};
+
+const formatTime = (ts) => {
+  const d = new Date(ts);
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+};
+
+onMounted(async () => {
+  // Existing init code if any
+  await fetchConnectedDevices();
+  if (isNativeMobile) {
+    isUnlocked.value = true;
+  } else {
+    unlistenDeviceConnected = await listen('sync:device_connected', (event) => {
+      fetchConnectedDevices();
+      const dev = event.payload;
+      if (dev && dev.platform) {
+        pairingSuccessInfo.value = dev;
+        setTimeout(() => {
+          showP2pModal.value = false;
+          pairingSuccessInfo.value = null; // reset for next time
+        }, 3000);
+      } else {
+        showP2pModal.value = false;
+      }
+    });
+    unlistenDeviceSyncing = await listen('sync:device_syncing', (event) => {
+      if (event.payload && event.payload.device_id) {
+        const dev = connectedDevices.value.find(d => d.device_id === event.payload.device_id);
+        if (dev) {
+          dev.syncStatus = event.payload.status;
+        }
+      }
+    });
+  }
+  await fetchPairingInfo();
+});
+
+onUnmounted(() => {
+  if (unlistenDeviceConnected) {
+    unlistenDeviceConnected();
+  }
+  if (unlistenDeviceSyncing) {
+    unlistenDeviceSyncing();
+  }
+  // 确保在组件卸载时取消原生的二维码扫描（修复左滑返回卡死的 Bug）
+  if (document.body.classList.contains('scanner-active')) {
+    document.body.classList.remove('scanner-active');
+    if (window.appAPI && window.appAPI.cancelQrCode) {
+      window.appAPI.cancelQrCode();
+    }
+  }
+});
 
 // ── Mobile channels ──
 const mobileChannel = ref('wechat');
@@ -370,25 +1446,25 @@ async function copyUrl(url) {
 async function activateMobileChannel(channel) {
   if (channel === 'telegram') {
     if (!tgToken.value) {
-      alert('请填写 Telegram Bot Token');
+      await showAlert('请填写 Telegram Bot Token');
       return;
     }
     try {
-      await window.electronAPI.telegramSaveToken(tgToken.value);
-      alert('Telegram 绑定成功！机器人已在后台启动。');
+      await window.appAPI.telegramSaveToken(tgToken.value);
+      await showAlert('Telegram 绑定成功！机器人已在后台启动。');
     } catch(e) {
-      alert('绑定失败: ' + e);
+      await showAlert('绑定失败: ' + e);
     }
   } else if (channel === 'discord') {
     if (!discordToken.value) {
-      alert('请填写 Discord Bot Token');
+      await showAlert('请填写 Discord Bot Token');
       return;
     }
     try {
-      await window.electronAPI.discordSaveToken(discordToken.value);
-      alert('Discord 绑定成功！机器人已在后台启动。');
+      await window.appAPI.discordSaveToken(discordToken.value);
+      await showAlert('Discord 绑定成功！机器人已在后台启动。');
     } catch(e) {
-      alert('绑定失败: ' + e);
+      await showAlert('绑定失败: ' + e);
     }
   }
 }
@@ -399,7 +1475,7 @@ async function openWechatModal() {
   await loadWechatQrCode();
 }
 
-function closeWechatModal() {
+async function closeWechatModal() {
   showWechatModal.value = false;
   if (wechatPollTimer) {
     clearTimeout(wechatPollTimer);
@@ -409,10 +1485,10 @@ function closeWechatModal() {
 }
 
 async function loadWechatQrCode() {
-  if (!window.electronAPI) return;
+  if (!window.appAPI) return;
   qrCodeUrl.value = '';
   try {
-    const res = await window.electronAPI.wechatGetLoginQr();
+    const res = await window.appAPI.wechatGetLoginQr();
     if (res && res.qrcode_img_content) {
       const content = res.qrcode_img_content;
       if (content.startsWith('data:')) {
@@ -442,7 +1518,7 @@ async function loadWechatQrCode() {
 async function pollWechatQrStatus() {
   if (!showWechatModal.value || wechatConnected.value) return;
   try {
-    const res = await window.electronAPI.wechatCheckLoginStatus(rawQrCode.value);
+    const res = await window.appAPI.wechatCheckLoginStatus(rawQrCode.value);
     if (res && (res.status === 'confirmed' || res.status === 'binded_redirect')) {
       wechatConnected.value = true;
       if (wechatPollTimer) clearTimeout(wechatPollTimer);
@@ -462,14 +1538,14 @@ const connectingService = ref('');
 const showLarkForm = ref(false);
 const larkCreds = ref({ app_id: '', app_secret: '' });
 
-function isConnected(name) {
+async function isConnected(name) {
   return connectorStatuses.value[name]?.status === 'connected';
 }
 
 async function loadConnectorStatuses() {
-  if (!window.electronAPI.connectorList) return;
+  if (!window.appAPI.connectorList) return;
   try {
-    const list = await window.electronAPI.connectorList();
+    const list = await window.appAPI.connectorList();
     for (const c of list) {
       connectorStatuses.value[c.name] = c;
     }
@@ -479,19 +1555,19 @@ async function loadConnectorStatuses() {
 }
 
 async function connectOAuth(name) {
-  if (!window.electronAPI.connectorStartOAuth) return;
+  if (!window.appAPI.connectorStartOAuth) return;
   connectingService.value = name;
   try {
-    const res = await window.electronAPI.connectorStartOAuth(name);
+    const res = await window.appAPI.connectorStartOAuth(name);
     if (res && res.url) {
       // 使用默认浏览器打开 OAuth 授权页面
-      window.open(res.url, '_blank');
+      window.appAPI.openExternal(res.url);
     } else if (res && res.error) {
-      alert('OAuth Error: ' + res.error);
+      await showAlert('OAuth Error: ' + res.error);
     }
   } catch (e) {
     console.error('OAuth start failed:', e);
-    alert('连接失败: ' + e);
+    await showAlert('连接失败: ' + e);
   } finally {
     connectingService.value = '';
     // 延迟刷新状态，等用户完成 OAuth 回调
@@ -500,10 +1576,10 @@ async function connectOAuth(name) {
 }
 
 async function saveLarkCredentials() {
-  if (!window.electronAPI.connectorSaveCredentials) return;
+  if (!window.appAPI.connectorSaveCredentials) return;
   connectingService.value = 'lark';
   try {
-    await window.electronAPI.connectorSaveCredentials('lark', {
+    await window.appAPI.connectorSaveCredentials('lark', {
       app_id: larkCreds.value.app_id,
       app_secret: larkCreds.value.app_secret,
     });
@@ -512,16 +1588,16 @@ async function saveLarkCredentials() {
     await loadConnectorStatuses();
   } catch (e) {
     console.error('Failed to save Lark credentials:', e);
-    alert('保存失败: ' + e);
+    await showAlert('保存失败: ' + e);
   } finally {
     connectingService.value = '';
   }
 }
 
 async function disconnectService(name) {
-  if (!window.electronAPI.connectorDisconnect) return;
+  if (!window.appAPI.connectorDisconnect) return;
   try {
-    await window.electronAPI.connectorDisconnect(name);
+    await window.appAPI.connectorDisconnect(name);
     delete connectorStatuses.value[name];
   } catch (e) {
     console.error('Disconnect failed:', e);
@@ -534,8 +1610,8 @@ const showAddMcp = ref(false);
 const newMcp = ref({ name: '', command: '', args: '' });
 
 async function loadMcpConfig() {
-  if (!window.electronAPI.getMcpConfig) return;
-  const config = await window.electronAPI.getMcpConfig();
+  if (!window.appAPI.getMcpConfig) return;
+  const config = await window.appAPI.getMcpConfig();
   mcpServers.value = config.mcpServers || {};
 }
 
@@ -547,13 +1623,13 @@ async function addMcpServer() {
     command: newMcp.value.command.trim(),
     args: newMcp.value.args.trim().split(/\s+/).filter(Boolean),
   };
-  await window.electronAPI.setMcpConfig({ mcpServers: updated });
+  await window.appAPI.setMcpConfig({ mcpServers: updated });
   mcpServers.value = updated;
   newMcp.value = { name: '', command: '', args: '' };
   showAddMcp.value = false;
 }
 
-async function addGoogleCalendarMcp() {
+async function connectGoogleNative() {
   try {
     const selectedPath = await open({
       multiple: false,
@@ -562,20 +1638,22 @@ async function addGoogleCalendarMcp() {
     });
     
     if (selectedPath) {
-      const name = 'GoogleCalendar';
-      const updated = { ...mcpServers.value };
-      updated[name] = {
-        command: 'npx',
-        args: ['-y', '@cocal/google-calendar-mcp'],
-        env: {
-          'GOOGLE_OAUTH_CREDENTIALS': selectedPath
-        }
-      };
-      await window.electronAPI.setMcpConfig({ mcpServers: updated });
-      mcpServers.value = updated;
+      connectingService.value = 'google';
+      const res = await window.appAPI.connectorSaveCredentials('google', {
+        file_path: selectedPath
+      });
+      if (res && res.error) {
+        await showAlert('配置失败: ' + res.error);
+        connectingService.value = '';
+        return;
+      }
+      await loadConnectorStatuses();
+      await connectOAuth('google');
     }
   } catch (err) {
-    console.error('Failed to add Google Calendar MCP', err);
+    console.error('Failed to configure Google Calendar natively', err);
+    await showAlert('配置失败: ' + err);
+    connectingService.value = '';
   }
 }
 
@@ -591,7 +1669,7 @@ function addOutlookMcpPreset() {
 async function removeMcpServer(name) {
   const updated = { ...mcpServers.value };
   delete updated[name];
-  await window.electronAPI.setMcpConfig({ mcpServers: updated });
+  await window.appAPI.setMcpConfig({ mcpServers: updated });
   mcpServers.value = updated;
 }
 
@@ -599,31 +1677,56 @@ async function removeMcpServer(name) {
 onMounted(async () => {
   await loadMcpConfig();
   await loadConnectorStatuses();
-  if (window.electronAPI.wechatGetCurrentStatus) {
+  
+  // P2P Key Initialization check
+  try {
+    isInitialized.value = await invoke('check_device_keys_initialized');
+  } catch(e) {
+    console.error('Failed to check key initialization', e);
+  }
+  if (window.appAPI.wechatGetCurrentStatus) {
     try {
-      const res = await window.electronAPI.wechatGetCurrentStatus();
+      const res = await window.appAPI.wechatGetCurrentStatus();
       if (res && res.connected) {
         wechatConnected.value = true;
       }
     } catch(err) {}
   }
   
-  if (window.electronAPI.telegramGetToken) {
+  if (window.appAPI.telegramGetToken) {
     try {
-      const res = await window.electronAPI.telegramGetToken();
+      const res = await window.appAPI.telegramGetToken();
       if (res && res.token) {
         tgToken.value = res.token;
       }
     } catch(err) {}
   }
 
-  if (window.electronAPI.discordGetToken) {
+  if (window.appAPI.discordGetToken) {
     try {
-      const res = await window.electronAPI.discordGetToken();
+      const res = await window.appAPI.discordGetToken();
       if (res && res.token) {
         discordToken.value = res.token;
       }
     } catch(err) {}
+  }
+
+  // P2P Relay connection status
+  const updateP2pRelayStatus = async () => {
+    try {
+        connectivitySnapshot.value = await window.appAPI.getSyncConnectivitySnapshot();
+      p2pRelayConnected.value = connectivitySnapshot.value.relay === 'registered';
+    } catch (e) {
+      p2pRelayConnected.value = false;
+    }
+  };
+  updateP2pRelayStatus();
+  p2pRelayInterval = setInterval(updateP2pRelayStatus, 5000);
+
+  // 隧道延迟检测轮询
+  if (proxyTunnelEnabled.value) {
+    updateTunnelStatus();
+    tunnelInterval = setInterval(updateTunnelStatus, 8000);
   }
 });
 
@@ -632,12 +1735,26 @@ onUnmounted(() => {
     clearTimeout(wechatPollTimer);
     wechatPollTimer = null;
   }
+  if (tunnelInterval) {
+    clearInterval(tunnelInterval);
+    tunnelInterval = null;
+  }
+  if (p2pRelayInterval) {
+    clearInterval(p2pRelayInterval);
+    p2pRelayInterval = null;
+  }
 });
 </script>
 
 <style scoped>
 .settings-section {
-  margin-bottom: var(--space-5);
+  margin-bottom: 0;
+}
+
+.field-hint {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  line-height: 1.4;
 }
 
 .section-title {
@@ -671,19 +1788,20 @@ onUnmounted(() => {
 
 /* ── Service Card Active State (For Mutually Exclusive Cards) ── */
 .service-card.active {
-  border-color: var(--user-accent, var(--accent-primary, #4facfe));
-  box-shadow: 0 0 0 1px var(--user-accent, var(--accent-primary, #4facfe));
+  border-color: var(--user-accent, var(--accent-primary));
+  box-shadow: 0 0 0 1px var(--user-accent, var(--accent-primary));
 }
 
 /* ── Office service cards grid ── */
 .service-cards-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: 12px;
+  align-items: start;
 }
 @media (max-width: 900px) {
   .service-cards-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   }
 }
 @media (max-width: 600px) {
@@ -697,8 +1815,8 @@ onUnmounted(() => {
   border-style: dashed;
 }
 .preset-card:hover {
-  border-color: var(--user-accent, var(--accent-primary, #4facfe));
-  background: color-mix(in srgb, var(--user-accent, var(--accent-primary, #4facfe)) 5%, transparent);
+  border-color: var(--user-accent, var(--accent-primary));
+  background: color-mix(in srgb, var(--user-accent, var(--accent-primary)) 5%, transparent);
 }
 
 .mcp-switch {
@@ -723,7 +1841,7 @@ onUnmounted(() => {
   bottom: 0;
   background-color: color-mix(in srgb, var(--color-success) 80%, transparent);
   transition: .3s;
-  border-radius: 34px;
+  border-radius: var(--radius-default);
 }
 .mcp-slider:before {
   position: absolute;
@@ -732,7 +1850,7 @@ onUnmounted(() => {
   width: 14px;
   left: 2px;
   bottom: 2px;
-  background-color: white;
+  background-color: var(--text-inverse);
   transition: .3s;
   border-radius: 50%;
   box-shadow: 0 1px 2px rgba(0,0,0,0.2);
@@ -751,7 +1869,7 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-default);
   background: var(--bg-secondary);
   padding: 12px 16px;
   transition: border-color var(--duration-fast) var(--ease-out),
@@ -768,14 +1886,39 @@ onUnmounted(() => {
 .service-card-header {
   display: flex;
   align-items: center;
-  gap: 10px;
+  justify-content: space-between;
+  width: 100%;
   margin-bottom: 8px;
+  gap: 12px;
+}
+
+.device-indicator-btn {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-subtle);
+  color: var(--user-accent, var(--accent-primary));
+  padding: 4px;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  width: 22px;
+  height: 22px;
+  box-shadow: var(--shadow-sm);
+  flex-shrink: 0;
+}
+
+.device-indicator-btn:hover {
+  background: var(--user-accent, var(--accent-primary));
+  color: var(--bg-primary);
+  border-color: var(--user-accent, var(--accent-primary));
 }
 
 .service-icon {
   width: 36px;
   height: 36px;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-default);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -816,6 +1959,9 @@ onUnmounted(() => {
 .dot-connected {
   background: var(--color-success);
 }
+.dot-warning {
+  background: var(--color-warning);
+}
 .dot-disconnected {
   background: var(--text-muted);
 }
@@ -846,19 +1992,6 @@ onUnmounted(() => {
   gap: 4px;
 }
 
-.btn-danger-outline {
-  background: transparent;
-  color: var(--color-error);
-  border: 1px solid color-mix(in srgb, var(--color-error) 35%, transparent);
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  transition: all var(--duration-fast) var(--ease-out);
-}
-.btn-danger-outline:hover {
-  background: color-mix(in srgb, var(--color-error) 10%, transparent);
-  border-color: var(--color-error);
-}
-
 /* ── 飞书凭证表单展开 ── */
 .lark-credential-form {
   padding: 12px;
@@ -866,7 +1999,7 @@ onUnmounted(() => {
   margin-bottom: 8px;
   background: var(--surface-glass);
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-default);
 }
 
 .slide-fade-enter-active {
@@ -924,10 +2057,6 @@ onUnmounted(() => {
   color: var(--text-primary);
 }
 
-.spin {
-  animation: spin 1s linear infinite;
-}
-@keyframes spin { 100% { transform: rotate(360deg); } }
 
 /* Transition */
 .briefing-fade-enter-active {
@@ -944,4 +2073,385 @@ onUnmounted(() => {
   opacity: 0;
   transform: scale(0.95);
 }
+
+.static-card {
+  cursor: default !important;
+  pointer-events: auto !important;
+}
+.static-card:hover {
+  transform: none !important;
+  border-color: var(--border-subtle) !important;
+  box-shadow: none !important;
+}
+.static-card.connected {
+  border-color: var(--border-subtle) !important;
+}
+/* ── Pairing Progress Overlay ── */
+
+.pairing-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(4px);
+}
+
+.pairing-progress-card {
+  background: var(--bg-primary);
+  border-radius: var(--radius-default);
+  box-shadow: var(--shadow-lg);
+  padding: 20px;
+  width: min(calc(100vw - 40px), 380px);
+  max-width: none;
+  box-sizing: border-box;
+}
+
+.pairing-progress-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 10px;
+}
+
+.pairing-progress-icon {
+  font-size: 1.3rem;
+}
+
+.topology-diagram {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  position: relative;
+  margin-bottom: 24px;
+  padding: 10px 0;
+}
+
+.topo-node {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  z-index: 2;
+  color: var(--text-secondary);
+  transition: all 0.3s ease;
+  width: 60px;
+}
+
+.topo-node span {
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.topo-node .icon-box {
+  width: 48px;
+  height: 48px;
+  border-radius: var(--radius-default);
+  background: var(--bg-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid var(--border-subtle);
+  transition: all 0.3s ease;
+  color: var(--text-secondary);
+}
+
+.topo-node.active { color: var(--user-accent); }
+.topo-node.active .icon-box {
+  border-color: var(--user-accent);
+  color: var(--user-accent);
+  box-shadow: 0 0 12px rgba(var(--user-accent-rgb, 39, 118, 187), 0.3);
+}
+
+.topo-node.success { color: var(--color-success); }
+.topo-node.success .icon-box {
+  border-color: var(--color-success);
+  color: var(--color-success);
+}
+
+.topo-node.error { color: var(--color-error); }
+.topo-node.error .icon-box {
+  border-color: var(--color-error);
+  color: var(--color-error);
+}
+
+.topo-paths {
+  flex: 1;
+  position: relative;
+  height: 80px;
+  margin: 0 12px;
+}
+
+.topo-path-direct {
+  position: absolute;
+  top: 10px;
+  left: 0; right: 0;
+  height: 20px;
+  display: flex;
+  justify-content: center;
+}
+
+.path-label {
+  position: absolute;
+  top: -16px;
+  font-size: 10px;
+  color: var(--text-tertiary);
+  background: var(--bg-primary);
+  padding: 0 4px;
+  z-index: 1;
+}
+
+.path-line {
+  position: absolute;
+  top: 50%;
+  left: 0; right: 0;
+  height: 2px;
+  background: var(--border-subtle);
+  transform: translateY(-50%);
+}
+
+.topo-path-relay {
+  position: absolute;
+  bottom: 0;
+  left: 0; right: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.relay-leg {
+  flex: 1;
+  position: relative;
+  height: 40px;
+}
+.relay-leg .path-line {
+  top: 50%;
+}
+
+.path-active .path-line {
+  background: transparent;
+  border-top: 2px dashed var(--user-accent);
+  animation: march 1s linear infinite;
+}
+
+.path-success .path-line {
+  background: var(--color-success);
+}
+
+.path-error .path-line {
+  background: var(--color-error);
+}
+
+.path-inactive { opacity: 0.3; }
+
+@keyframes march {
+  0% { background-position: 0 0; }
+  100% { background-position: 20px 0; }
+}
+
+.data-packet {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 6px;
+  height: 6px;
+  background: var(--user-accent);
+  border-radius: 50%;
+  transform: translateY(-50%);
+  box-shadow: 0 0 6px var(--user-accent);
+  animation: fly 1.2s linear infinite;
+  opacity: 0;
+}
+
+.delay-packet {
+  animation-delay: 0.6s;
+}
+
+@keyframes fly {
+  0% { left: 0%; opacity: 0; }
+  15% { opacity: 1; }
+  85% { opacity: 1; }
+  100% { left: 100%; opacity: 0; }
+}
+
+.topo-error-box {
+  background: rgba(var(--color-error-rgb, 220, 53, 69), 0.1);
+  color: var(--color-error);
+  padding: 12px;
+  border-radius: var(--radius-default);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  margin-bottom: 20px;
+}
+
+.pairing-progress-footer {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.pairing-sync-progress { margin: 0 2px 14px; }
+.pairing-sync-progress__head { display:flex;justify-content:space-between;color:var(--text-secondary);font-size:12px;margin-bottom:6px; }
+.pairing-sync-progress__track { height:7px;background:var(--bg-tertiary);border-radius:999px;overflow:hidden; }
+.pairing-sync-progress__track div { height:100%;background:var(--user-accent);border-radius:inherit;transition:width .35s ease; }
+.pairing-sync-progress p { margin:6px 0 0;color:var(--text-tertiary);font-size:11px; }
+
+.custom-model-override[open] .service-cards-grid {
+  margin-top: var(--space-4);
+}
+
+.mcp-cmd-preview {
+  border-top: 1px solid var(--border-subtle);
+  padding-top: var(--space-2);
+  margin-top: var(--space-2);
+  font-family: var(--font-mono, monospace);
+  font-size: var(--text-xs);
+  word-break: break-all;
+  color: var(--text-secondary);
+}
+
+.mcp-add-form-body {
+  padding: var(--space-3);
+  margin-top: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.mcp-add-form-footer {
+  padding: 0 var(--space-3) var(--space-3);
+  gap: var(--space-2);
+  margin-top: auto;
+}
+
+</style>
+
+
+<style scoped>
+.minimalist-style {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 45px 40px 25px; /* Give more top padding for the arc */
+}
+.lan-arc-line {
+  position: absolute;
+  top: 10px;
+  left: 64px; /* Centers with the first icon (padding-left 40 + half-width 24) */
+  right: 64px; /* Centers with the last icon */
+  width: auto;
+  height: 35px; /* Bottom ends at 45px, exactly where the icons start */
+  z-index: 1;
+  overflow: visible;
+}
+.lan-arc-line.path-inactive {
+  color: var(--border-subtle);
+}
+.lan-arc-line.path-active {
+  color: var(--user-accent);
+  stroke-dasharray: 4,4;
+  animation: arc-flow 1s linear infinite;
+}
+.lan-arc-line.path-success {
+  color: var(--color-success);
+  stroke-dasharray: none;
+}
+.lan-arc-line.path-error {
+  color: var(--color-error);
+  stroke-dasharray: none;
+}
+@keyframes arc-flow {
+  0% { stroke-dashoffset: 8; }
+  100% { stroke-dashoffset: 0; }
+}
+
+.minimalist-style .topo-node {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  color: var(--text-tertiary);
+  z-index: 2;
+  border: none;
+  background: transparent;
+}
+.minimalist-style .topo-node.active {
+  color: var(--user-accent);
+}
+.minimalist-style .topo-node.success {
+  color: var(--color-success);
+}
+.minimalist-style .topo-node.error {
+  color: var(--color-error);
+}
+
+.minimalist-style .topo-paths {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 10px;
+  position: relative;
+}
+.minimalist-style .topo-path-relay {
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+.minimalist-style .relay-leg {
+  flex: 1;
+  position: relative;
+}
+.minimalist-style .relay-leg .path-line {
+  height: 2px;
+  width: 100%;
+  background: var(--border-subtle);
+  border-radius: var(--radius-default);
+}
+.minimalist-style .relay-leg.path-active .path-line {
+  background: var(--user-accent);
+}
+.minimalist-style .relay-leg.path-success .path-line {
+  background: var(--color-success);
+}
+.minimalist-style .relay-leg.path-error .path-line {
+  background: var(--color-error);
+}
+
+.custom-model-override[open] .service-cards-grid {
+  margin-top: var(--space-4);
+}
+
+.mcp-cmd-preview {
+  border-top: 1px solid var(--border-subtle);
+  padding-top: var(--space-2);
+  margin-top: var(--space-2);
+  font-family: var(--font-mono, monospace);
+  font-size: var(--text-xs);
+  word-break: break-all;
+  color: var(--text-secondary);
+}
+
+.mcp-add-form-body {
+  padding: var(--space-3);
+  margin-top: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.mcp-add-form-footer {
+  padding: 0 var(--space-3) var(--space-3);
+  gap: var(--space-2);
+  margin-top: auto;
+}
+
 </style>

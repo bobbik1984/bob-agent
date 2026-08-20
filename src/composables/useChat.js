@@ -1,3 +1,5 @@
+import { useDialog } from '@/composables/useDialog.js';
+const { showConfirm, showAlert, showPrompt } = useDialog();
 /**
  * useChat — 核心聊天逻辑 composable
  *
@@ -56,12 +58,6 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
     setTimeout(scrollToBottom, 1200);
   }
 
-  // ── 晨间汇报交互 ──────────────────────────────────
-  function onBriefingChat(briefingContent) {
-    inputText.value = `关于你刚才的晨间回顾，我想继续聊聊：\n\n${briefingContent}`;
-    nextTick(() => sendMessage());
-  }
-
   // ── 发送消息 ─────────────────────────────────────
   async function sendMessage(pendingImages, pendingFiles, resetTextareaHeight, beforeApiCallHook = null) {
     let text = inputText.value.trim();
@@ -73,7 +69,7 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
       const noteContent = text.replace(/^\/memo\s+/, '').trim();
       if (noteContent) {
         try {
-          const res = await window.appAPI.notebookAppendDaily(noteContent);
+          const res = await window.appAPI.captureQuickNote(noteContent, 'chat_memo');
           if (res && res.ok) {
             messages.value.push({ role: 'user', content: text });
             messages.value.push({ 
@@ -190,9 +186,11 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
     const imageBase64s = [...pendingImages.value];
 
     const userMessage = {
+      id: Date.now().toString(),
       role: 'user',
-      content: text || (imageBase64s.length > 0 ? '看图片' : '继续'),
+      content: text || (imageBase64s.length > 0 ? '看图' : '继续'),
       image_base64s: imageBase64s.length > 0 ? imageBase64s : null,
+      image_base64: imageBase64s.length > 0 ? imageBase64s[0] : null,
     };
 
     // 存到 UI 中
@@ -283,7 +281,7 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
         }
       }
 
-      if (result.error) {
+      if (result.error && !result.goal) {
         messages.value.push({
           role: 'assistant',
           content: result.error,
@@ -331,6 +329,8 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
           thinking: finalThinking,
           _thinkingExpanded: false,
           _modelLabel: currentModelName.value || result.model || '',
+          _route: result.route || null,
+          _goal: result.goal || null,
         };
 
         messages.value.push(assistantMsg);
@@ -432,7 +432,7 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
   }
 
   async function stopGeneration() {
-    await window.appAPI.stopGeneration();
+    await window.appAPI.stopGeneration(props.conversationId);
     isStreaming.value = false;
   }
 
@@ -549,50 +549,76 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
 
   function renderMessageBlocks(text) {
     if (!text) return [{ type: 'html', content: '' }];
-    const html = renderMarkdown(text);
-    FILE_LINK_RE.lastIndex = 0;
-    if (!FILE_LINK_RE.test(html)) {
-      return [{ type: 'html', content: html }];
-    }
-    const blocks = [];
+    
+    // 1. 前置切分：从原始 Markdown 中剥离代码块 (支持流式未闭合的情况)
+    const codeBlockRegex = /(?<=^|\n)```([^\n]*)(?:\n([\s\S]*?))?(?:\n```|```|$)/g;
+    const initialBlocks = [];
     let lastIndex = 0;
-    const seenFilePaths = new Set(); // 去重：同一文件路径只渲染一个 FileCard
-    FILE_LINK_RE.lastIndex = 0;
     let match;
-    while ((match = FILE_LINK_RE.exec(html)) !== null) {
-      // 跳过 <table> 内部的文件链接——拆分会破坏表格 HTML 结构
-      const before = html.slice(Math.max(0, match.index - 500), match.index);
-      const tableOpens = (before.match(/<table/gi) || []).length;
-      const tableCloses = (before.match(/<\/table/gi) || []).length;
-      if (tableOpens > tableCloses) continue; // 在表格内部，跳过
-
-      let filePath = match[1];
-      if (filePath.startsWith('file:///')) {
-        filePath = filePath.replace('file:///', '');
-      }
-      try { filePath = decodeURIComponent(filePath); } catch(e) {}
-      filePath = filePath.replace(/\//g, '\\');
-
-      // 去重：如果已有相同路径的 FileCard，则将此链接保留为普通 HTML 而非拆分
-      const normalizedKey = filePath.toLowerCase();
-      if (seenFilePaths.has(normalizedKey)) {
-        continue; // 跳过重复的，保留原始 <a> 标签在 HTML 中
-      }
-      seenFilePaths.add(normalizedKey);
-
+    while ((match = codeBlockRegex.exec(text)) !== null) {
       if (match.index > lastIndex) {
-        blocks.push({ type: 'html', content: html.slice(lastIndex, match.index) });
+        initialBlocks.push({ type: 'markdown', text: text.slice(lastIndex, match.index) });
       }
-      blocks.push({ type: 'file', path: filePath });
+      initialBlocks.push({ type: 'code', lang: match[1].trim(), code: match[2] || '' });
       lastIndex = match.index + match[0].length;
     }
-    if (lastIndex < html.length) {
-      blocks.push({ type: 'html', content: html.slice(lastIndex) });
+    if (lastIndex < text.length) {
+      initialBlocks.push({ type: 'markdown', text: text.slice(lastIndex) });
     }
+
+    // 2. 将纯文本段走 marked 渲染，并进行文件卡片的二次拆分
+    const finalBlocks = [];
+    const seenFilePaths = new Set();
+    
+    for (const block of initialBlocks) {
+      if (block.type === 'code') {
+        finalBlocks.push(block);
+        continue;
+      }
+      
+      const html = renderMarkdown(block.text);
+      FILE_LINK_RE.lastIndex = 0;
+      if (!FILE_LINK_RE.test(html)) {
+        finalBlocks.push({ type: 'html', content: html });
+        continue;
+      }
+      
+      // 存在文件链接时的二次拆分
+      FILE_LINK_RE.lastIndex = 0;
+      let lastHtmlIndex = 0;
+      let fileMatch;
+      while ((fileMatch = FILE_LINK_RE.exec(html)) !== null) {
+        // 跳过 <table> 内部的文件链接——拆分会破坏表格 HTML 结构
+        const before = html.slice(Math.max(0, fileMatch.index - 500), fileMatch.index);
+        const tableOpens = (before.match(/<table/gi) || []).length;
+        const tableCloses = (before.match(/<\/table/gi) || []).length;
+        if (tableOpens > tableCloses) continue;
+        
+        let filePath = fileMatch[1];
+        if (filePath.startsWith('file:///')) filePath = filePath.replace('file:///', '');
+        try { filePath = decodeURIComponent(filePath); } catch(e) {}
+        filePath = filePath.replace(/\//g, '\\');
+        
+        // 去重：如果已有相同路径的 FileCard，则将此链接保留为普通 HTML 而非拆分
+        const normalizedKey = filePath.toLowerCase();
+        if (seenFilePaths.has(normalizedKey)) continue;
+        seenFilePaths.add(normalizedKey);
+        
+        if (fileMatch.index > lastHtmlIndex) {
+          finalBlocks.push({ type: 'html', content: html.slice(lastHtmlIndex, fileMatch.index) });
+        }
+        finalBlocks.push({ type: 'file', path: filePath });
+        lastHtmlIndex = fileMatch.index + fileMatch[0].length;
+      }
+      if (lastHtmlIndex < html.length) {
+        finalBlocks.push({ type: 'html', content: html.slice(lastHtmlIndex) });
+      }
+    }
+    
     // 将所有 FileCard 统一沉底到消息末尾，用户无需滚屏回翻即可点击
-    const htmlBlocks = blocks.filter(b => b.type === 'html');
-    const fileBlocks = blocks.filter(b => b.type === 'file');
-    return [...htmlBlocks, ...fileBlocks];
+    const nonFileBlocks = finalBlocks.filter(b => b.type !== 'file');
+    const fileBlocks = finalBlocks.filter(b => b.type === 'file');
+    return [...nonFileBlocks, ...fileBlocks];
   }
 
   // ── 日程解析 ─────────────────────────────────────
@@ -630,7 +656,7 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
     }
   }
 
-  function handleCancelEvent(msgObj) {
+  async function handleCancelEvent(msgObj) {
     msgObj.content = '已取消保存';
     msgObj.type = 'text';
   }
@@ -645,7 +671,7 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
         ? msg.content.replace(/<\|mem\|>/g, '').trim()
         : '';
       const defaultTitle = clipContent.substring(0, 40).replace(/[#\n*]/g, '').trim() || 'AI片段';
-      const clipTitle = prompt('请输入笔记标题:', defaultTitle);
+      const clipTitle = await showPrompt('请输入笔记标题:', defaultTitle);
       if (!clipTitle) return;
 
       const res = await window.appAPI.notebookCreateNote(clipTitle, ['ai-clip'], 'sources');
@@ -675,7 +701,6 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
     canSend,
     // 方法
     loadMessages,
-    onBriefingChat,
     sendMessage,
     handleStreamChunk,
     stopGeneration,

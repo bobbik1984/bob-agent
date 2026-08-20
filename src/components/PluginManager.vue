@@ -2,7 +2,12 @@
   <div v-if="isOpen" class="modal-overlay" @click.self="close">
     <div class="pm-modal">
       <div class="pm-header">
-        <h2>{{ $t('plugin.title') }}</h2>
+        <div class="pm-header-left">
+          <h2>{{ $t('plugin.title') }}</h2>
+          <button class="pm-import-btn" @click="importSkillsZip" :title="$t('plugin.import_zip') || '导入技能包'">
+            <Upload :size="14" />
+          </button>
+        </div>
         <button class="pm-close" @click="close"><X :size="16" /></button>
       </div>
 
@@ -79,9 +84,12 @@
 </template>
 
 <script setup>
+import { useDialog } from '@/composables/useDialog.js';
+const { showConfirm, showAlert, showPrompt } = useDialog();
+
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { X, Loader2, ChevronRight, Box, User, Wrench, AlertTriangle, Zap } from 'lucide-vue-next';
+import { X, Loader2, ChevronRight, Box, User, Wrench, AlertTriangle, Zap, Upload } from 'lucide-vue-next';
 
 const { t } = useI18n();
 
@@ -108,7 +116,7 @@ const pluginGroups = computed(() => {
   return groups.filter(g => g.items.length > 0);
 });
 
-const formatTypeLabel = (p) => {
+const formatTypeLabel = async (p) => {
   if (p.type === 'tool') return t('plugin.type_native') || '内置能力';
   if (p.type === 'skill') return p.is_official ? (t('plugin.type_official') || '官方技能') : (t('plugin.type_custom') || '自定义技能');
   return p.typeLabel;
@@ -138,6 +146,17 @@ const installPlugin = async (id) => {
     progressLogs.value[id] += '\n安装失败: ' + err.message;
   } finally {
     installing.value[id] = false;
+  }
+};
+
+const importSkillsZip = async () => {
+  try {
+    const imported = await window.appAPI.importSkillsZip();
+    if (imported) {
+      await fetchPlugins();
+    }
+  } catch (err) {
+    await showAlert("导入失败: " + err);
   }
 };
 
@@ -206,6 +225,31 @@ onUnmounted(() => {
   font-size: var(--text-sm);
   font-weight: 600;
   color: var(--text-primary);
+}
+
+.pm-header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.pm-import-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface-card);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  padding: 4px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all var(--duration-fast);
+}
+
+.pm-import-btn:hover {
+  background: var(--surface-glass);
+  color: var(--text-primary);
+  border-color: var(--border-hover);
 }
 
 .pm-close {

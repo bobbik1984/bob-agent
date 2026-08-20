@@ -1,7 +1,7 @@
 <template>
   <!-- Bob 的工作间（目录管理） -->
   <details class="settings-section card custom-model-override">
-    <summary class="section-title" style="cursor: pointer; display: flex; align-items: center; justify-content: space-between; margin-bottom: 0;">
+    <summary class="section-title">
       <div style="display: flex; align-items: center; gap: 8px;">
         <HardDrive :size="16" class="section-icon" style="opacity: 0.6;" />
         {{ $t('settings.bob_workspace') }}
@@ -11,7 +11,7 @@
 
 
     <!-- 工作目录 (workspaceDir) -->
-    <div class="details-section">
+    <div v-if="!isNativeMobile" class="details-section">
       <label class="form-label" style="font-size: 0.85em; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
         <FolderOpen :size="14" style="opacity: 0.6;" />
         {{ $t('settings.workspace') }}
@@ -38,7 +38,7 @@
       </button>
     </div>
 
-    <div class="details-section">
+    <div v-if="!isNativeMobile" class="details-section">
       <!-- 关注的文件夹 -->
       <label class="form-label" style="font-size: 0.85em; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
         <FolderHeart :size="14" style="opacity: 0.6;" />
@@ -90,59 +90,81 @@
         </div>
       </div>
 
-      <!-- 知识库目录 (wikiDir) -->
-      <label class="form-label" style="font-size: 0.85em; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
-        <FileText :size="14" style="opacity: 0.6;" />
-        {{ $t('settings.wiki_dir') }}
+      <!-- 设备名称 (deviceName) -->
+      <label class="form-label" style="font-size: 0.85em; margin-bottom: 6px; display: flex; align-items: center; gap: 6px; margin-top: 24px;">
+        <Smartphone :size="14" style="opacity: 0.6;" />
+        设备名称
       </label>
 
       <div class="form-group workspace-group">
-        <input
-          v-model="config.wikiDir"
-          class="input"
-          :placeholder="$t('settings.wiki_dir_placeholder')"
-          readonly
-        />
-        <button class="btn btn-primary browse-btn" @click="selectWikiDir">
-          <FolderOpen :size="14" />
-          <span>{{ $t('settings.browse') }}</span>
-        </button>
+        <div class="path-display" style="display: flex; gap: 8px;">
+          <input 
+            v-model="config.deviceName" 
+            class="input" 
+            placeholder="例如: ThinkPad X1 (留空则使用设备 ID)" 
+            @change="saveConfig('deviceName', config.deviceName)"
+            style="flex: 1;"
+          />
+        </div>
       </div>
-      <button
-        v-if="config.wikiDir"
-        class="btn-clear"
-        @click="clearWikiDir"
-      >
-        {{ $t('settings.clear_wiki') }}
-      </button>
+
+      <!-- 知识库目录 (wikiDir) -->
+      <template v-if="!isNativeMobile">
+        <label class="form-label" style="font-size: 0.85em; margin-bottom: 6px; display: flex; align-items: center; gap: 6px; margin-top: 24px;">
+          <FileText :size="14" style="opacity: 0.6;" />
+          {{ $t('settings.wiki_dir') }}
+        </label>
+
+        <div class="form-group workspace-group">
+          <input
+            v-model="config.wikiDir"
+            class="input"
+            :placeholder="$t('settings.wiki_dir_placeholder')"
+            readonly
+          />
+          <button class="btn btn-primary browse-btn" @click="selectWikiDir">
+            <FolderOpen :size="14" />
+            <span>{{ $t('settings.browse') }}</span>
+          </button>
+        </div>
+        <button
+          v-if="config.wikiDir"
+          class="btn-clear"
+          @click="clearWikiDir"
+        >
+          {{ $t('settings.clear_wiki') }}
+        </button>
+      </template>
     </div>
 
     <div class="details-section">
       <!-- 技能目录 (externalSkillsDir) -->
-      <label class="form-label" style="font-size: 0.85em; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
-        <Puzzle :size="14" style="opacity: 0.6;" />
-        {{ $t('settings.skills') }}
-      </label>
+      <template v-if="!isNativeMobile">
+        <label class="form-label" style="font-size: 0.85em; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
+          <Puzzle :size="14" style="opacity: 0.6;" />
+          {{ $t('settings.skills') }}
+        </label>
 
-      <div class="form-group workspace-group">
-        <input
-          v-model="config.externalSkillsDir"
-          class="input"
-          :placeholder="$t('settings.skills_placeholder')"
-          readonly
-        />
-        <button class="btn btn-primary browse-btn" @click="selectExternalSkillsDir">
-          <FolderOpen :size="14" />
-          <span>{{ $t('settings.browse') }}</span>
+        <div class="form-group workspace-group">
+          <input
+            v-model="config.externalSkillsDir"
+            class="input"
+            :placeholder="$t('settings.skills_placeholder')"
+            readonly
+          />
+          <button class="btn btn-primary browse-btn" @click="selectExternalSkillsDir">
+            <FolderOpen :size="14" />
+            <span>{{ $t('settings.browse') }}</span>
+          </button>
+        </div>
+        <button
+          v-if="config.externalSkillsDir"
+          class="btn-clear"
+          @click="clearExternalSkillsDir"
+        >
+          {{ $t('settings.clear_skills') }}
         </button>
-      </div>
-      <button
-        v-if="config.externalSkillsDir"
-        class="btn-clear"
-        @click="clearExternalSkillsDir"
-      >
-        {{ $t('settings.clear_skills') }}
-      </button>
+      </template>
 
       <div class="plugin-manager-entry details-section">
 
@@ -159,7 +181,7 @@
 
   <!-- T-1302: 记忆管理 -->
   <details class="settings-section card custom-model-override">
-    <summary class="section-title" style="cursor: pointer; display: flex; align-items: center; justify-content: space-between; margin-bottom: 0;">
+    <summary class="section-title">
       <div style="display: flex; align-items: center; gap: 8px;">
         <Brain :size="16" class="section-icon" />
         {{ $t('settings.memory_title') }}
@@ -206,7 +228,7 @@
 
   <!-- 进化引擎看板 -->
   <details class="settings-section card custom-model-override">
-    <summary class="section-title" style="cursor: pointer; display: flex; align-items: center; justify-content: space-between; margin-bottom: 0;">
+    <summary class="section-title">
       <div style="display: flex; align-items: center; gap: 8px;">
         <Dna :size="16" class="section-icon" />
         {{ $t('settings.evolution_title') || '进化引擎' }}
@@ -330,10 +352,16 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue';
+import { useDialog } from '@/composables/useDialog.js';
+const { showConfirm, showAlert, showPrompt } = useDialog();
+
+import { ref, onMounted, inject } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { HardDrive, FolderOpen, FolderHeart, FileText, Puzzle, Layers, X, Plus, ChevronDown, Trash2, Brain, BookOpen, Loader2, Dna, Moon, Cloud } from 'lucide-vue-next';
+import { formatDateTime as formatMemoryTime, formatFuzzyTime as formatEvoTime } from '@/utils/date';
+import { HardDrive, FolderOpen, FolderHeart, FileText, Puzzle, Layers, X, Plus, ChevronDown, Trash2, Brain, BookOpen, Loader2, Dna, Moon, Cloud, Smartphone } from 'lucide-vue-next';
 import PluginManager from '../../components/PluginManager.vue';
+
+const isNativeMobile = inject('isNativeMobile', false);
 
 const props = defineProps({
   config: { type: Object, required: true },
@@ -346,12 +374,12 @@ const showPluginManager = ref(false);
 const trackedFolders = ref([]);
 
 async function saveConfig(key, value) {
-  await window.electronAPI.setConfig(key, value);
+  await window.appAPI.setConfig(key, value);
   emit('config-changed');
 }
 
 async function selectWorkspaceDir() {
-  const dirPath = await window.electronAPI.selectWorkspaceDir();
+  const dirPath = await window.appAPI.selectWorkspaceDir();
   if (dirPath) {
     props.config.workspaceDir = dirPath;
     await saveConfig('workspaceDir', dirPath);
@@ -370,7 +398,7 @@ const migrationMode = ref('copy_merge');
 const isMigrating = ref(false);
 const migrationError = ref('');
 
-function cancelWikiMigration() {
+async function cancelWikiMigration() {
   if (isMigrating.value) return;
   showWikiMigrationModal.value = false;
   pendingWikiDir.value = '';
@@ -381,7 +409,7 @@ async function confirmWikiMigration() {
   isMigrating.value = true;
   migrationError.value = '';
   try {
-    const res = await window.electronAPI.migrateWikiDir(
+    const res = await window.appAPI.migrateWikiDir(
       props.config.wikiDir || '',
       pendingWikiDir.value,
       migrationMode.value
@@ -391,7 +419,7 @@ async function confirmWikiMigration() {
       await saveConfig('wikiDir', pendingWikiDir.value);
       showWikiMigrationModal.value = false;
       pendingWikiDir.value = '';
-      alert(t('settings.wiki_migrate_success'));
+      await showAlert(t('settings.wiki_migrate_success'));
     } else {
       migrationError.value = res?.error || t('settings.wiki_migrate_error_unknown');
     }
@@ -403,7 +431,7 @@ async function confirmWikiMigration() {
 }
 
 async function selectWikiDir() {
-  const dirPath = await window.electronAPI.selectDir();
+  const dirPath = await window.appAPI.selectDir();
   if (dirPath) {
     if (dirPath === props.config.wikiDir) return;
     pendingWikiDir.value = dirPath;
@@ -418,7 +446,7 @@ async function clearWikiDir() {
 
 // ── External Skills Dir ──
 async function selectExternalSkillsDir() {
-  const dirPath = await window.electronAPI.selectDir();
+  const dirPath = await window.appAPI.selectDir();
   if (dirPath) {
     props.config.externalSkillsDir = dirPath;
     await saveConfig('externalSkillsDir', dirPath);
@@ -432,19 +460,19 @@ async function clearExternalSkillsDir() {
 
 // ── 文件夹跟踪 ──
 async function loadTrackedFolders() {
-  trackedFolders.value = await window.electronAPI.getTrackedFolders();
+  trackedFolders.value = await window.appAPI.getTrackedFolders();
 }
 
 async function addFolder() {
-  const dirPath = await window.electronAPI.selectFolderToTrack();
+  const dirPath = await window.appAPI.selectFolderToTrack();
   if (dirPath) {
-    await window.electronAPI.addTrackedFolder(dirPath);
+    await window.appAPI.addTrackedFolder(dirPath);
     await loadTrackedFolders();
   }
 }
 
 async function removeFolder(folderPath) {
-  await window.electronAPI.removeTrackedFolder(folderPath);
+  await window.appAPI.removeTrackedFolder(folderPath);
   await loadTrackedFolders();
 }
 
@@ -453,10 +481,10 @@ const memoryLoading = ref(false);
 const memoryEntries = ref([]);
 
 async function loadMemoryEntries() {
-  if (!window.electronAPI.getMemoryEntries) return;
+  if (!window.appAPI.getMemoryEntries) return;
   memoryLoading.value = true;
   try {
-    const entries = await window.electronAPI.getMemoryEntries();
+    const entries = await window.appAPI.getMemoryEntries();
     memoryEntries.value = entries || [];
   } catch (e) {
     console.error('Failed to load memory entries', e);
@@ -467,9 +495,9 @@ async function loadMemoryEntries() {
 }
 
 async function deleteMemoryEntry(entry) {
-  if (!confirm(t('settings.memory_delete_confirm'))) return;
+  if (!(await showConfirm(t('settings.memory_delete_confirm')))) return;
   try {
-    await window.electronAPI.deleteMemoryEntry(entry.type, entry.id);
+    await window.appAPI.deleteMemoryEntry(entry.type, entry.id);
     memoryEntries.value = memoryEntries.value.filter(
       e => !(e.type === entry.type && e.id === entry.id)
     );
@@ -487,21 +515,17 @@ function formatMemoryTitle(title) {
   return cleaned;
 }
 
-function formatMemoryTime(ts) {
-  if (!ts) return '';
-  const d = new Date(ts > 1e11 ? ts : ts * 1000);
-  return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-}
+
 
 // ── 进化引擎看板 ──
 const evoLoading = ref(false);
 const evoStats = ref({});
 
 async function loadEvolutionStats() {
-  if (!window.electronAPI.getEvolutionStats) return;
+  if (!window.appAPI.getEvolutionStats) return;
   evoLoading.value = true;
   try {
-    const data = await window.electronAPI.getEvolutionStats();
+    const data = await window.appAPI.getEvolutionStats();
     evoStats.value = data || {};
   } catch (e) {
     console.error('Failed to load evolution stats', e);
@@ -518,18 +542,7 @@ function formatTokenCount(tokIn, tokOut) {
   return (total / 1_000_000).toFixed(2) + 'M';
 }
 
-function formatEvoTime(ts) {
-  if (!ts) return '';
-  const d = new Date(ts > 1e11 ? ts : ts * 1000);
-  const now = new Date();
-  const diffMs = now - d;
-  const diffH = Math.floor(diffMs / 3_600_000);
-  if (diffH < 1) return '刚刚';
-  if (diffH < 24) return `${diffH}小时前`;
-  const diffD = Math.floor(diffH / 24);
-  if (diffD < 7) return `${diffD}天前`;
-  return d.toLocaleDateString();
-}
+
 
 // ── Init ──
 onMounted(async () => {

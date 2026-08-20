@@ -1,3 +1,5 @@
+import { useDialog } from '@/composables/useDialog.js';
+const { showConfirm, showAlert, showPrompt } = useDialog();
 // ═══════════════════════════════════════════════════════════
 // Bob-Agent Tauri Bridge — 完整适配器层
 // Tauri v2 IPC Bridge — 将所有前端 window.appAPI 调用映射到 Rust @tauri-apps/api/core invoke
@@ -22,6 +24,25 @@ if (IS_TAURI) {
   save = dialog.save;
   listen = event.listen;
   getCurrentWindow = win.getCurrentWindow;
+
+  // ── R2/R3 工具风险确认 ──────────────────────────────────
+  listen('tool:confirm_required', async (event) => {
+    const { request_id, tool_name, args_preview, risk_level } = event.payload;
+    const isR3 = risk_level === 'R3';
+    
+    const approved = await showConfirm({
+      title: isR3 ? '⚠️ 高危操作确认' : '敏感操作确认',
+      message: `Bob 请求执行${isR3 ? '高危' : '敏感'}工具：\n\n🔧 ${tool_name}\n📋 ${args_preview.substring(0, 200)}`,
+      confirmText: isR3 ? '确认执行' : '允许',
+      cancelText: '拒绝',
+      confirmClass: isR3 ? 'btn-danger' : '',
+    });
+    
+    await invoke('tool_confirm_response', { 
+      requestId: request_id, 
+      approved: !!approved 
+    });
+  });
 } else {
   // ── 浏览器 Mock 环境 ──────────────────────────────────
   console.log('%c[Bridge] Running in BROWSER mock mode', 'color: #f59e0b; font-weight: bold;');
@@ -86,6 +107,131 @@ if (IS_TAURI) {
     ],
   };
 
+  const MOCK_WORK_PROJECTS = [];
+  const MOCK_WORK_AGGREGATES = {};
+  const MOCK_PROJECT_LINK_CANDIDATES = [];
+  const MOCK_CHANGE_REVIEWS = [];
+  const MOCK_GOAL_RUNTIMES = [];
+
+  const emptyWorkAggregate = (project) => ({
+    project,
+    responsibilities: [], goals: [], milestones: [], tasks: [], decisions: [],
+    artifacts: [], evidence: [], risks: [], changes: [], commitments: [], recentEvents: [],
+  });
+
+  const workPreviewParams = typeof location !== 'undefined' ? new URLSearchParams(location.search) : new URLSearchParams();
+  if (workPreviewParams.get('workCandidates') === '1' || workPreviewParams.get('workChanges') === '1' || workPreviewParams.get('goalRuntime') === '1') {
+    const now = Date.now();
+    const previewProject = {
+      schemaVersion: 1, id: 'project_mock_bob', title: 'Bob 产品升级', mission: '让复杂工作不断线',
+      status: 'active', currentPhase: 'Phase 2', summary: null, sourceRef: null, metadata: {},
+      revision: 1, createdAt: now, updatedAt: now, deletedAt: null,
+    };
+    MOCK_WORK_PROJECTS.push(previewProject);
+    MOCK_WORK_AGGREGATES[previewProject.id] = emptyWorkAggregate(previewProject);
+    if (workPreviewParams.get('goalRuntime') === '1') {
+      const goal = {
+        schemaVersion: 1, id: 'goal_mock_runtime', kind: 'goal', projectId: previewProject.id,
+        parentId: null, title: '完成 Phase 5 验证', status: 'ready', description: null,
+        data: { outcome: 'Phase 5 通过恢复与证据验收' }, sourceCaptureId: null,
+        revision: 1, createdAt: now, updatedAt: now, deletedAt: null,
+      };
+      MOCK_WORK_AGGREGATES[previewProject.id].goals.push(goal);
+      MOCK_GOAL_RUNTIMES.push({
+        goal,
+        run: {
+          runId: 'goal_run_mock', goalId: goal.id, projectId: previewProject.id,
+          status: 'waiting_user', phase: 'verify', verificationState: 'pending', risk: 'r0',
+          modelCallsUsed: 1, toolCallsUsed: 0, repairsUsed: 0, runtimeSecondsUsed: 4,
+          latestCheckpointId: 'checkpoint_mock', leaseOwner: null, leaseExpiresAt: null,
+          recoveryCount: 0, lastErrorCode: null, lastErrorDetail: null,
+          nextAction: 'goal.next_waiting_choice', revision: 3, createdAt: now, updatedAt: now, finishedAt: null,
+        },
+        pendingApproval: {
+          approvalId: 'approval_mock', runId: 'goal_run_mock', summary: 'goal.summary_accept_result',
+          risk: 'r0', trustedDeviceRequired: false, status: 'pending', revision: 1,
+          choices: [
+            { choiceId: 'accept_result', labelKey: 'goal.approval_accept_result', semantic: 'approve', payload: { purpose: 'user_acceptance', ruleId: 'user_acceptance' } },
+            { choiceId: 'continue', labelKey: 'goal.approval_continue', semantic: 'defer', payload: { purpose: 'continue_work' } },
+            { choiceId: 'cancel', labelKey: 'goal.approval_cancel', semantic: 'reject', payload: {} },
+          ],
+        },
+      });
+    }
+    MOCK_PROJECT_LINK_CANDIDATES.push(
+      {
+        id: 'project_link_mock_ambiguous', captureId: 'mock_ambiguous', intent: 'work_task', title: '整理同步回放',
+        proposal: {}, projectHint: 'Bob', candidateProjectIds: [], selectedProjectId: null, status: 'pending',
+        reasonCode: 'ambiguous_project', confidence: 0.92, resolvedObjectId: null, revision: 1, createdAt: now, updatedAt: now,
+      },
+      {
+        id: 'project_link_mock_decision', captureId: 'mock_decision', intent: 'decision', title: '保留当前同步架构',
+        proposal: {}, projectHint: 'Bob 产品升级', candidateProjectIds: ['project_mock_bob'], selectedProjectId: 'project_mock_bob', status: 'pending',
+        reasonCode: 'missing_decision_reason', confidence: 0.96, resolvedObjectId: null, revision: 1, createdAt: now - 1000, updatedAt: now - 1000,
+      },
+    );
+    if (workPreviewParams.get('workChanges') === '1') {
+      const aggregate = MOCK_WORK_AGGREGATES[previewProject.id];
+      aggregate.decisions.push({
+        schemaVersion: 1, id: 'decision_mock_architecture', kind: 'decision', projectId: previewProject.id,
+        parentId: null, title: '保留现有 Tauri 客户端', status: 'accepted', description: null,
+        data: { decision: '保留现有 Tauri 客户端', reason: '保持零依赖安装', evidence: ['artifact_mock_report'] },
+        sourceCaptureId: null, revision: 1, createdAt: now, updatedAt: now, deletedAt: null,
+      });
+      aggregate.changes.push({
+        schemaVersion: 1, id: 'change_mock_report', kind: 'change', projectId: previewProject.id,
+        parentId: null, title: '新版架构报告', status: 'needs_review', description: null,
+        data: { changeType: 'file_content_changed', externalId: 'D:/docs/architecture.md' },
+        sourceCaptureId: null, revision: 1, createdAt: now, updatedAt: now, deletedAt: null,
+      });
+      MOCK_CHANGE_REVIEWS.push({
+        id: 'change_review_mock_decision', projectId: previewProject.id, changeId: 'change_mock_report',
+        targetObjectId: 'decision_mock_architecture', targetKind: 'decision',
+        relationSourceId: 'decision_mock_architecture', relationTargetId: 'change_mock_report',
+        proposedRelation: 'affected_by', reasonCode: 'decision_evidence_changed', explanation: null,
+        evidenceRefs: ['artifact_mock_report'], confidence: 1, status: 'pending', resolutionNote: null,
+        revision: 1, createdAt: now, updatedAt: now, resolvedAt: null,
+      });
+    }
+  }
+
+  const mockDailyBrief = (localDate = new Date().toISOString().slice(0, 10)) => ({
+    schemaVersion: 1,
+    snapshotId: `daily:${localDate}:1`,
+    localDate,
+    revision: 1,
+    generatedAt: Date.now(),
+    status: 'fresh',
+    focusItem: {
+      itemId: 'brief:goal_runtime:mock-review', canonicalRef: 'goal:mock-review', source: 'goal_runtime',
+      sourceId: 'mock-review', sourceRevision: '1', kind: 'approval', title: '确认 Bob Phase 5 的验收结果',
+      titleKey: null, summary: '验证记录已经齐备，等待确认下一步。', summaryKey: null, messageArgs: {},
+      priority: 1000, requiresAttention: true, occurredAt: Date.now(), dueAt: null,
+      action: { kind: 'respond_approval', targetType: 'goal_approval', targetId: 'mock-approval', payload: { runId: 'mock-review' } },
+      reasonCodes: ['brief.reason.waiting_user'], evidenceRefs: ['goal_run:mock-review@1'],
+    },
+    attentionItems: [{
+      itemId: 'brief:todo:mock-todo', canonicalRef: 'todo:mock-todo', source: 'todo', sourceId: 'mock-todo',
+      sourceRevision: '1', kind: 'due', title: '整理本周产品评审材料', titleKey: null,
+      summary: '今天到期', summaryKey: null, messageArgs: {}, priority: 800, requiresAttention: true,
+      occurredAt: Date.now(), dueAt: Date.now(), action: { kind: 'open_todo', targetType: 'todo', targetId: 'mock-todo', payload: {} },
+      reasonCodes: ['brief.reason.due_today'], evidenceRefs: [],
+    }],
+    detailItems: [{
+      itemId: 'brief:conversation:mock-conv-2', canonicalRef: 'conversation:mock-conv-2', source: 'conversation',
+      sourceId: 'mock-conv-2', sourceRevision: '1', kind: 'continue_conversation', title: '项目讨论',
+      titleKey: 'brief.item.continue_conversation', summary: '继续上次的架构讨论', summaryKey: null, messageArgs: {},
+      priority: 390, requiresAttention: false, occurredAt: Date.now(), dueAt: null,
+      action: { kind: 'continue_conversation', targetType: 'conversation', targetId: 'mock-conv-2', payload: null },
+      reasonCodes: ['brief.reason.recent_conversation'], evidenceRefs: [],
+    }],
+    sectionCounts: { attention: 2, today: 1, inProgress: 1, changes: 0, insights: 0 },
+    actionableCount: 2,
+    changedSinceLastSeen: ['brief:goal_runtime:mock-review', 'brief:todo:mock-todo'],
+    sourceHealth: [],
+    warnings: [],
+  });
+
   // Mock invoke — 根据命令返回合理的假数据
   invoke = async (cmd, args) => {
     // console.log(`[Mock invoke] ${cmd}`, args);
@@ -97,6 +243,204 @@ if (IS_TAURI) {
       case 'system_health_check': return { ok: true, checks: [] };
       case 'system_validate_chat_ready': return { ready: true };
       case 'system_get_evolution_stats': return { total_sessions: 5, total_tools: 12 };
+      case 'daily_brief_get': return mockDailyBrief(args?.dateContext?.localDate);
+      case 'daily_brief_refresh': return mockDailyBrief(args?.dateContext?.localDate);
+      case 'daily_brief_mark_seen': return true;
+      case 'work_project_list': return [...MOCK_WORK_PROJECTS];
+      case 'work_project_create': {
+        const now = Date.now();
+        const input = args?.input || {};
+        const project = {
+          schemaVersion: 1,
+          id: input.projectId || `project_mock_${now}`,
+          title: input.title || '未命名项目',
+          mission: input.mission || '',
+          status: 'active',
+          currentPhase: input.currentPhase || null,
+          summary: input.summary || null,
+          sourceRef: input.sourceRef || null,
+          metadata: input.metadata || {},
+          revision: 1,
+          createdAt: now,
+          updatedAt: now,
+          deletedAt: null,
+        };
+        MOCK_WORK_PROJECTS.unshift(project);
+        MOCK_WORK_AGGREGATES[project.id] = emptyWorkAggregate(project);
+        return project;
+      }
+      case 'work_project_get': return MOCK_WORK_AGGREGATES[args?.projectId] || null;
+      case 'goal_runtime_list': return MOCK_GOAL_RUNTIMES.filter(item => !args?.projectId || item.run.projectId === args.projectId);
+      case 'goal_runtime_get': {
+        const item = MOCK_GOAL_RUNTIMES.find(entry => entry.run.runId === args?.runId);
+        return item ? { ...item, evidence: [], events: [] } : null;
+      }
+      case 'goal_runtime_list_events': return [];
+      case 'goal_runtime_continue': {
+        const item = MOCK_GOAL_RUNTIMES.find(entry => entry.run.runId === args?.input?.runId);
+        if (item) { item.run.status = 'running'; item.run.phase = 'observe'; item.run.revision += 1; item.pendingApproval = null; }
+        return { content: '目标已继续执行。', goal: item?.run || null };
+      }
+      case 'goal_runtime_defer': {
+        const item = MOCK_GOAL_RUNTIMES.find(entry => entry.run.runId === args?.input?.runId);
+        if (item) { item.run.status = 'waiting_user'; item.run.revision += 1; }
+        return item?.run || null;
+      }
+      case 'goal_runtime_cancel': {
+        const item = MOCK_GOAL_RUNTIMES.find(entry => entry.run.runId === args?.input?.runId);
+        if (item) { item.run.status = 'cancelled'; item.run.revision += 1; item.pendingApproval = null; }
+        return item?.run || null;
+      }
+      case 'goal_runtime_decide_approval': {
+        const item = MOCK_GOAL_RUNTIMES.find(entry => entry.pendingApproval?.approvalId === args?.input?.approvalId);
+        if (!item) throw new Error('选择已经处理');
+        const choice = item.pendingApproval.choices.find(entry => entry.choiceId === args.input.choiceId);
+        item.pendingApproval.status = 'resolved';
+        item.pendingApproval.selectedChoiceId = choice?.choiceId || null;
+        item.run.status = choice?.semantic === 'reject' ? 'cancelled' : choice?.payload?.purpose === 'user_acceptance' ? 'done' : 'ready';
+        item.run.verificationState = item.run.status === 'done' ? 'verified' : item.run.verificationState;
+        item.run.nextAction = item.run.status === 'done' || item.run.status === 'cancelled' ? null : item.run.nextAction;
+        if (item.run.status === 'done' || item.run.status === 'cancelled') item.goal.status = item.run.status;
+        item.run.revision += 1;
+        item.pendingApproval = null;
+        return { approval: { status: 'resolved' }, run: item.run };
+      }
+      case 'work_object_create': {
+        const input = args?.input || {};
+        const aggregate = MOCK_WORK_AGGREGATES[input.projectId];
+        if (!aggregate) throw new Error('项目不存在');
+        const now = Date.now();
+        const object = {
+          schemaVersion: 1,
+          id: `${input.kind || 'task'}_mock_${now}`,
+          kind: input.kind || 'task',
+          projectId: input.projectId,
+          parentId: input.parentId || null,
+          title: input.title || '未命名工作项',
+          status: input.status || (input.kind === 'decision' ? 'accepted' : 'pending'),
+          description: input.description || null,
+          data: input.data || {},
+          sourceCaptureId: input.sourceCaptureId || null,
+          revision: 1,
+          createdAt: now,
+          updatedAt: now,
+          deletedAt: null,
+        };
+        const collections = {
+          responsibility: 'responsibilities', goal: 'goals', milestone: 'milestones',
+          task: 'tasks', decision: 'decisions', artifact: 'artifacts', evidence: 'evidence',
+          risk: 'risks', change: 'changes', commitment: 'commitments',
+        };
+        const collection = collections[input.kind];
+        if (aggregate[collection]) aggregate[collection].unshift(object);
+        aggregate.project.revision += 1;
+        aggregate.project.updatedAt = now;
+        return object;
+      }
+      case 'work_object_update_status': {
+        const input = args?.input || {};
+        for (const aggregate of Object.values(MOCK_WORK_AGGREGATES)) {
+          for (const collection of ['responsibilities', 'goals', 'milestones', 'tasks', 'decisions', 'artifacts', 'evidence', 'risks', 'changes', 'commitments']) {
+            const object = aggregate[collection].find(item => item.id === input.objectId);
+            if (object) {
+              object.status = input.status;
+              object.revision += 1;
+              object.updatedAt = Date.now();
+              aggregate.project.revision += 1;
+              aggregate.project.updatedAt = object.updatedAt;
+              return object;
+            }
+          }
+        }
+        throw new Error('工作对象不存在');
+      }
+      case 'work_object_delete': {
+        const input = args?.input || {};
+        for (const aggregate of Object.values(MOCK_WORK_AGGREGATES)) {
+          for (const collection of ['responsibilities', 'goals', 'milestones', 'tasks', 'decisions', 'artifacts', 'evidence', 'risks', 'changes', 'commitments']) {
+            const index = aggregate[collection].findIndex(item => item.id === input.objectId);
+            if (index >= 0) {
+              aggregate.project.revision += 1;
+              aggregate.project.updatedAt = Date.now();
+              return aggregate[collection].splice(index, 1)[0];
+            }
+          }
+        }
+        throw new Error('工作对象不存在');
+      }
+      case 'work_relation_create': return { id: `relation_mock_${Date.now()}`, ...(args?.input || {}), createdAt: Date.now(), deletedAt: null };
+      case 'work_project_export_snapshot': return { projectId: args?.projectId, path: `notes/projects/${args?.projectId}/_PROJECT_STATE.md`, bytesWritten: 0 };
+      case 'work_project_link_list_pending': return MOCK_PROJECT_LINK_CANDIDATES.filter(item => item.status === 'pending').slice(0, args?.limit || 20);
+      case 'work_project_link_resolve': {
+        const input = args?.input || {};
+        const candidate = MOCK_PROJECT_LINK_CANDIDATES.find(item => item.id === input.candidateId);
+        if (!candidate) throw new Error('PROJECT_LINK_NOT_FOUND');
+        if (candidate.revision !== input.expectedRevision) throw new Error('PROJECT_LINK_REVISION_CONFLICT');
+        candidate.status = 'resolved';
+        candidate.selectedProjectId = input.projectId;
+        candidate.reasonCode = 'user_resolved';
+        candidate.revision += 1;
+        candidate.updatedAt = Date.now();
+        return { candidate, object: null };
+      }
+      case 'work_project_link_dismiss': {
+        const input = args?.input || {};
+        const candidate = MOCK_PROJECT_LINK_CANDIDATES.find(item => item.id === input.candidateId);
+        if (!candidate) throw new Error('PROJECT_LINK_NOT_FOUND');
+        if (candidate.revision !== input.expectedRevision) throw new Error('PROJECT_LINK_REVISION_CONFLICT');
+        candidate.status = 'dismissed';
+        candidate.reasonCode = 'user_dismissed';
+        candidate.revision += 1;
+        return candidate;
+      }
+      case 'work_external_link_list': return [];
+      case 'work_change_review_list': {
+        const projectId = args?.projectId;
+        const status = args?.status;
+        return MOCK_CHANGE_REVIEWS
+          .filter(item => !projectId || item.projectId === projectId)
+          .filter(item => !status || item.status === status)
+          .slice(0, args?.limit || 20);
+      }
+      case 'work_change_review_action': {
+        const input = args?.input || {};
+        const review = MOCK_CHANGE_REVIEWS.find(item => item.id === input.reviewId);
+        if (!review) throw new Error('CHANGE_REVIEW_NOT_FOUND');
+        const nextStatus = { accept: 'accepted', reject: 'rejected', defer: 'deferred', reopen: 'pending' }[input.action];
+        if (!nextStatus) throw new Error('CHANGE_REVIEW_ACTION_INVALID');
+        if (review.status === nextStatus) return { review, relationCreated: false };
+        if (review.revision !== input.expectedRevision) throw new Error('CHANGE_REVIEW_REVISION_CONFLICT');
+        review.status = nextStatus;
+        review.resolutionNote = input.note || null;
+        review.revision += 1;
+        review.updatedAt = Date.now();
+        review.resolvedAt = ['accepted', 'rejected'].includes(nextStatus) ? Date.now() : null;
+        return { review, relationCreated: input.action === 'accept' };
+      }
+      case 'capture_ingest': return { ok: true, duplicate: false, capture: { captureId: 'mock-capture-' + Date.now(), status: 'received' } };
+      case 'capture_process_pending': return { ok: true, processed: 0, committed: 0, needsClarification: 0, awaitingPipeline: 0, deferred: 0 };
+      case 'capture_quick_note': return { ok: true, duplicate: false, captureId: 'mock-capture-' + Date.now(), status: 'committed', path: 'daily/mock.md' };
+      case 'capture_list': return [];
+      case 'capture_retry': return { ok: true, alreadyComplete: false, capture: { captureId: args.captureId, status: 'committed' } };
+      case 'capture_diagnostics': return { pendingCount: 0, failedCount: 0, recentFailed: [] };
+      case 'knowledge_audit_run': return {
+        schema_version: 1,
+        scanned_at: new Date().toISOString(),
+        read_only: true,
+        roots: [],
+        file_count: 0,
+        files: [],
+        exact_duplicates: [],
+        source_duplicates: [],
+        same_title_candidates: [],
+        broken_wikilinks: {},
+        read_errors: [],
+        suggested_target_counts: {},
+      };
+      case 'capture_activity_list': return [];
+      case 'capture_mobile_image': return { ok: true, duplicate: false, captureId: 'mock-image-' + Date.now(), managedPath: 'assets/captures/images/mock.png' };
+      case 'get_shared_intents': return [];
+      case 'clear_shared_intent': return null;
 
       // 配置
       case 'config_get': return MOCK_CONFIG[args?.key] ?? null;
@@ -154,8 +498,14 @@ if (IS_TAURI) {
       case 'llm_get_active_models': return { primary: 'deepseek-chat', clerk: null, vision: null };
       case 'llm_rescan_models': return true;
       case 'llm_refresh_models': return true;
-      case 'llm_get_registry': return { providers: {} };
+      case 'llm_get_registry': return { providers: [] };
       case 'llm_save_registry': return true;
+
+      // 本地模型（浏览器预览不访问磁盘或启动推理进程）
+      case 'check_model_downloaded': return false;
+      case 'pause_download': return true;
+      case 'delete_local_model': return true;
+      case 'download_model': return { success: false, error: 'Browser preview does not download models' };
 
       // 日历
       case 'system_list_events': return [];
@@ -241,6 +591,7 @@ if (IS_TAURI) {
       case 'wechat_get_current_status': return { connected: false };
       case 'system_save_telegram_token': case 'system_save_discord_token': return true;
       case 'system_get_telegram_token': case 'system_get_discord_token': return '';
+      case 'get_connected_devices': return [];
 
       // 浏览器增强
       case 'system_browser_detect': return { found: false };
@@ -312,6 +663,32 @@ window.appAPI = {
   unminimizeWindow: () => getCurrentWindow().unminimize(),
   listenEvent: (event, handler) => listen(event, handler),
 
+  // ── 持续工作核心 (Work Core) ─────────────────────────
+  workProjectList: () => invoke('work_project_list'),
+  workProjectCreate: (input) => invoke('work_project_create', { input }),
+  workProjectGet: (projectId) => invoke('work_project_get', { projectId }),
+  workObjectCreate: (input) => invoke('work_object_create', { input }),
+  workObjectUpdateStatus: (input) => invoke('work_object_update_status', { input }),
+  workObjectDelete: (input) => invoke('work_object_delete', { input }),
+  workRelationCreate: (input) => invoke('work_relation_create', { input }),
+  workProjectExportSnapshot: (projectId) => invoke('work_project_export_snapshot', { projectId }),
+  workProjectLinkListPending: (limit = 20) => invoke('work_project_link_list_pending', { limit }),
+  workProjectLinkResolve: (input) => invoke('work_project_link_resolve', { input }),
+  workProjectLinkDismiss: (input) => invoke('work_project_link_dismiss', { input }),
+  workExternalLinkList: (projectId) => invoke('work_external_link_list', { projectId }),
+  workChangeReviewList: ({ projectId = null, status = null, limit = 20 } = {}) => invoke('work_change_review_list', { projectId, status, limit }),
+  workChangeReviewAction: (input) => invoke('work_change_review_action', { input }),
+  goalRuntimeList: ({ projectId = null, limit = 50 } = {}) => invoke('goal_runtime_list', { projectId, limit }),
+  goalRuntimeGet: (runId) => invoke('goal_runtime_get', { runId }),
+  goalRuntimeListEvents: (runId, limit = 50) => invoke('goal_runtime_list_events', { runId, limit }),
+  goalRuntimeContinue: (input) => invoke('goal_runtime_continue', { input }),
+  goalRuntimeDefer: (input) => invoke('goal_runtime_defer', { input }),
+  goalRuntimeCancel: (input) => invoke('goal_runtime_cancel', { input }),
+  goalRuntimeDecideApproval: (input) => invoke('goal_runtime_decide_approval', { input }),
+  dailyBriefGet: (dateContext) => invoke('daily_brief_get', { dateContext }),
+  dailyBriefRefresh: (dateContext) => invoke('daily_brief_refresh', { dateContext }),
+  dailyBriefMarkSeen: (snapshotId, revision) => invoke('daily_brief_mark_seen', { snapshotId, revision }),
+
   // ── 系统 & 配置 (Mapped to Rust) ─────────────────────
   openExternal: (url) => IS_TAURI ? invoke('plugin:shell|open', { path: url }) : window.open(url, '_blank'),
   isSetupComplete: () => invoke('system_is_setup_complete'),
@@ -361,7 +738,13 @@ window.appAPI = {
     invoke('llm_chat', { messages, conversationId, globalFileAccess, agentMode }),
   sendVision: (messages, imageBase64s, globalFileAccess, agentMode, conversationId) => 
     invoke('llm_vision', { messages, imageBase64s, conversationId, globalFileAccess, agentMode }),
-  stopGeneration: async () => { /* 待实现 AbortController */ },
+  stopGeneration: async (convId) => {
+    try {
+      await invoke('abort_generation', { convId: convId || '' });
+    } catch (err) {
+      console.error('abort_generation error:', err);
+    }
+  },
   getModels: async (provider) => {
     try {
       return await invoke('llm_get_models', { provider: provider || null });
@@ -402,11 +785,19 @@ window.appAPI = {
   saveRegistry: (registry) => invoke('llm_save_registry', { registry }),
 
   // ── 日历 / 日程 (Rust 原生 T-605) ──────────────────────
+  onCalendarUpdated: (callback) => {
+    let unlisten = null;
+    listen('calendar-updated', (event) => {
+      callback(IS_TAURI ? event.payload : event);
+    }).then(fn => { unlisten = fn; });
+    return () => { if (unlisten) { unlisten(); unlisten = null; } };
+  },
   listEvents: async () => invoke('system_list_events'),
   parseEvent: async (text) => invoke('system_parse_event', { text }),
   confirmEvent: async (event) => invoke('system_confirm_event', { event }),
   deleteEvent: async (id) => invoke('system_delete_event', { id }),
   updateEventStatus: async (id, status) => invoke('system_update_event_status', { id, status }),
+  updateEventDescription: async (id, description) => invoke('system_update_event_description', { id, description }),
   updateEventTime: async (id, startTime, endTime) => invoke('system_update_event_time', { id, startTime, endTime }),
 
   // ── Cron 定时任务 (Rust 原生 T-1211) ───────────────
@@ -549,6 +940,17 @@ window.appAPI = {
 
   // ── 插件系统 (Rust 原生) ───────────────────────────────
   getPlugins: async () => invoke('system_get_plugins'),
+  importSkillsZip: async () => {
+    const selected = await open({
+      multiple: false,
+      filters: [{ name: 'Zip files', extensions: ['zip'] }]
+    });
+    if (selected) {
+      await invoke('import_skills_zip', { path: selected });
+      return true;
+    }
+    return false;
+  },
   installPlugin: async (id) => true,                   // TODO T-603 (安装逻辑)
   onPluginProgress: (callback) => {
     console.log('Mock: onPluginProgress listener bound'); // TODO T-603
@@ -574,6 +976,14 @@ window.appAPI = {
   stopOfflineEngine: async () => invoke('stop_offline_engine'),
   getOfflineEngineStatus: async () => invoke('get_offline_engine_status'),
   openLlamaEngineDir: () => invoke('system_open_llm_engine_dir'),
+  openModelsDir: async () => {
+    if (!IS_TAURI) return false;
+    const { appDataDir, join } = await import('@tauri-apps/api/path');
+    const dataDir = await appDataDir();
+    const modelsPath = await join(dataDir, 'models');
+    await invoke('plugin:shell|open', { path: modelsPath });
+    return true;
+  },
 
   // ── 微信助理 (Rust 原生 WeChat Gateway) ─────────────────
   wechatGetLoginQr: async () => invoke('wechat_get_login_qr'),
@@ -611,8 +1021,19 @@ window.appAPI = {
   kgQuery: async (term, maxHops) => invoke('kg_query', { term, maxHops }),
   kgStats: async () => invoke('kg_stats'),
   kgDeleteNode: async (nodeId) => invoke('kg_delete_node_cmd', { nodeId }),
+  kgUpdateTicket: async (nodeId, newTitle, newMetadata) => invoke('kg_update_ticket_cmd', { nodeId, newTitle, newMetadata }),
   kgBackfill: async () => invoke('kg_backfill'),
   systemRemoveSource: async (batchId) => invoke('system_remove_source', { batchId }),
+
+  // ── 票据直接创建 (绕过 LLM, 用于 rxing BCBP 自动识别) ──
+  createTicketDirect: async (args) => {
+    try {
+      return await invoke('system_create_ticket', { args });
+    } catch (err) {
+      console.error('[TauriBridge] createTicketDirect err:', err);
+      throw err;
+    }
+  },
 
   // ── 智能笔记 (Notebook) ──────────────────────────────
   notebookListNotes:   async () => invoke('notebook_list_notes'),
@@ -624,6 +1045,17 @@ window.appAPI = {
   notebookRenameNote:  async (oldPath, newTitle) => invoke('notebook_rename_note', { oldPath, newTitle }),
   notebookSearch:      async (query) => invoke('notebook_search', { query }),
   notebookAppendDaily: async (content) => invoke('notebook_append_daily', { content }),
+  captureIngest: async (input) => invoke('capture_ingest', { input }),
+  captureProcessPending: async (limit = 10) => invoke('capture_process_pending', { limit }),
+  captureQuickNote: async (content, entryPoint = 'quick_note', sourceDevice = null, idempotencyKey = null) => invoke('capture_quick_note', { content, entryPoint, sourceDevice, idempotencyKey }),
+  captureList: async (limit = 50) => invoke('capture_list', { limit }),
+  captureRetry: async (captureId) => invoke('capture_retry', { captureId }),
+  captureDiagnostics: async () => invoke('capture_diagnostics'),
+  knowledgeAuditRun: async () => invoke('knowledge_audit_run'),
+  captureActivityList: async (limit = 50) => invoke('capture_activity_list', { limit }),
+  captureMobileImage: async (filename) => invoke('capture_mobile_image', { filename }),
+  getSharedIntents: async () => invoke('get_shared_intents'),
+  clearSharedIntent: async (filename) => invoke('clear_shared_intent', { filename }),
   notebookSaveAsset:   async (fileName, data) => invoke('notebook_save_asset', { fileName, data }),
   notebookCreateFolder: async (name) => invoke('notebook_create_folder', { name }),
   notebookListAllTags: async () => invoke('notebook_list_all_tags'),
@@ -634,10 +1066,17 @@ window.appAPI = {
 
   // ── 同步引擎 (Phase 3 Mobile Sync) ──────────
   triggerMobileSync: async (payload) => invoke('trigger_mobile_sync', { payload }),
+  triggerWakeupViaRelay: async (deviceId) => invoke('trigger_wakeup_via_relay', { deviceId }),
   writeMobileOutbox: async (operations) => invoke('write_mobile_outbox', { operations }),
-  relayHandshake: async (targetDeviceId) => invoke('relay_handshake', { targetDeviceId }),
+  relayHandshake: async (targetDeviceId, authCode) => invoke('relay_handshake', { targetDeviceId, authCode }),
+  getConnectedDevices: async () => invoke('get_connected_devices'),
+  getSyncConnectivitySnapshot: async () => invoke('get_sync_connectivity_snapshot'),
+  getSyncRuns: async () => invoke('get_sync_runs'),
+  getSyncTraceEvents: async (traceId) => invoke('get_sync_trace_events', { traceId }),
+  getSyncLogs: async () => invoke('get_sync_logs'),
 
   // ── 扫码 (Mobile Only) ──────────────────────
+  systemParseBcbp: async (raw) => invoke('system_parse_bcbp', { raw }),
   scanQrCode: async () => {
     if (!IS_TAURI) return null;
     try {
@@ -647,7 +1086,7 @@ window.appAPI = {
         perm = await requestPermissions();
       }
       if (perm !== 'granted') {
-        alert("需要相机权限才能扫码");
+        await showAlert("需要相机权限才能扫码");
         return null;
       }
       const result = await scan({ windowed: true, formats: ['QR_CODE'] });
@@ -667,8 +1106,27 @@ window.appAPI = {
     }
   },
 
+  systemSaveTempImage: async (base64Data) => {
+    try {
+      return await invoke('system_save_temp_image', { base64Data });
+    } catch (err) {
+      console.error('[TauriBridge] systemSaveTempImage err:', err);
+      throw err;
+    }
+  },
+
+  systemDecodeBarcodeBase64: async (base64Str) => {
+    try {
+      return await invoke('system_decode_barcode_base64', { base64Str });
+    } catch (err) {
+      console.error('[TauriBridge] systemDecodeBarcodeBase64 err:', err);
+      throw err;
+    }
+  },
+
   // Generic invoke passthrough for components that call invoke directly
   invoke: (cmd, args) => invoke(cmd, args || {}),
+  listen: (evt, handler) => (listen ? listen(evt, handler) : Promise.resolve(() => {})),
 };
 
 console.log(`Tauri Bridge v6.0: 73 IPC — ${IS_TAURI ? 'Tauri native' : 'Browser mock'} mode.`);

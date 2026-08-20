@@ -215,7 +215,7 @@ impl McpManager {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {},
                 "clientInfo": {
-                    "name": "bob-agent",
+                    "name": "bob.agent",
                     "version": "0.4.0"
                 }
             }

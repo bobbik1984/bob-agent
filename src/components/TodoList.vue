@@ -1,24 +1,33 @@
 <template>
   <div class="todo-list">
-    <div class="todo-header" v-if="todos.some(t => t.status === 'done')">
-      <label class="toggle-completed">
+    <div class="todo-header">
+      <button class="add-todo-btn" @click="addTodoViaDialog" :title="$t('todo.add') || '添加待办'">
+        <Plus :size="16" />
+      </button>
+      <label class="toggle-completed" v-if="todos.some(t => t.status === 'done')">
         <input type="checkbox" v-model="showCompleted" />
         <span class="toggle-text">{{ $t('todo.show_completed') }}</span>
       </label>
     </div>
+
     <div v-if="visibleTodos.length === 0" class="empty-state">{{ $t('todo.empty') }}</div>
     <div
       v-for="todo in visibleTodos"
       :key="todo.id"
-      class="todo-item"
-      :class="{ 'is-done': todo.status === 'done' }"
+      class="todo-item-wrapper"
     >
-      <input
-        type="checkbox"
-        class="todo-checkbox"
-        :checked="todo.status === 'done'"
-        @change="toggleStatus(todo)"
-      />
+      <div 
+        class="todo-item"
+        :class="{ 'is-done': todo.status === 'done', 'is-expanded': expandedIds.has(todo.id) }"
+        @click="toggleExpand(todo.id)"
+      >
+        <input
+          type="checkbox"
+          class="todo-checkbox"
+          :checked="todo.status === 'done'"
+          @change.stop="toggleStatus(todo)"
+          @click.stop
+        />
       <div class="todo-content">
         <div class="todo-main">
           <span class="todo-title">{{ todo.title }}</span>
@@ -26,8 +35,33 @@
             ({{ $t('todo.completed_at', { time: formatTime(todo.completed_at) }) }})
           </span>
         </div>
-        <span class="todo-priority" :class="todo.priority || 'medium'">
-          {{ getPriorityLabel(todo.priority) }}
+        <div class="todo-actions">
+          <span class="todo-priority" :class="todo.priority || 'medium'">
+            {{ getPriorityLabel(todo.priority) }}
+          </span>
+          <button class="todo-delete-btn" @click.stop="deleteTodo(todo)" :title="$t('todo.delete') || '删除'">
+            <X :size="14" />
+          </button>
+        </div>
+      </div>
+      </div>
+      <div v-if="expandedIds.has(todo.id)" class="todo-details">
+        <textarea
+          v-if="editingDescId === todo.id"
+          v-model="editDescDraft"
+          @blur="saveDesc(todo)"
+          @keydown.ctrl.enter="saveDesc(todo)"
+          @click.stop
+          class="todo-desc-edit"
+          ref="descInputRefs"
+        ></textarea>
+        <span 
+          v-else 
+          class="todo-desc-text" 
+          @click.stop="startEditingDesc(todo)"
+          :class="{ 'is-empty': !todo.description }"
+        >
+          {{ todo.description || '点击添加描述...' }}
         </span>
       </div>
     </div>
@@ -35,10 +69,13 @@
 </template>
 
 <script setup>
-import { computed, ref } from 'vue';
+import { computed, ref, nextTick } from 'vue';
 import { useI18n } from 'vue-i18n';
+import { X, Plus } from 'lucide-vue-next';
+import { useDialog } from '@/composables/useDialog.js';
 
 const { t } = useI18n();
+const { showConfirm, showPrompt } = useDialog();
 
 const props = defineProps({
   todos: {
@@ -47,9 +84,80 @@ const props = defineProps({
   }
 });
 
-const emit = defineEmits(['update-status']);
+const emit = defineEmits(['update-status', 'delete-todo', 'create-todo']);
 
 const showCompleted = ref(false);
+const expandedIds = ref(new Set());
+
+const editingDescId = ref(null);
+const editDescDraft = ref('');
+const descInputRefs = ref([]);
+
+async function addTodoViaDialog() {
+  const result = await showPrompt({
+    title: t('inbox.new_todo') || '新待办',
+    placeholder: t('todo.title_placeholder') || '待办事项...',
+    showDescription: true,
+    descriptionPlaceholder: t('todo.desc_placeholder') || '详情描述 (可选)...',
+    confirmText: t('modal.confirm') || '确定',
+    cancelText: t('modal.cancel') || '取消'
+  });
+
+  if (result && result.title && result.title.trim()) {
+    const pad = (n) => String(n).padStart(2, '0');
+    const d = new Date();
+    const dateStr = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+
+    emit('create-todo', {
+      title: result.title.trim(),
+      description: (result.description || '').trim(),
+      type: 'todo',
+      date: dateStr
+    });
+  }
+}
+
+function startEditingDesc(todo) {
+  editingDescId.value = todo.id;
+  editDescDraft.value = todo.description || '';
+  nextTick(() => {
+    // 聚焦到对应的 textarea
+    if (descInputRefs.value) {
+      let inputs = Array.isArray(descInputRefs.value) ? descInputRefs.value : [descInputRefs.value];
+      const el = inputs.find(el => el && el.value === editDescDraft.value);
+      if (el) el.focus();
+      else if (inputs.length > 0 && inputs[0]) inputs[0].focus();
+    }
+  });
+}
+
+async function saveDesc(todo) {
+  if (editingDescId.value !== todo.id) return;
+  const newDescStr = editDescDraft.value.trim();
+  
+  if (newDescStr !== todo.description) {
+    try {
+      if (window.appAPI && window.appAPI.updateEventDescription) {
+        await window.appAPI.updateEventDescription(todo.id, newDescStr);
+        todo.description = newDescStr;
+      }
+    } catch (err) {
+      console.error('更新描述失败', err);
+    }
+  }
+  
+  editingDescId.value = null;
+}
+
+function toggleExpand(id) {
+  const newSet = new Set(expandedIds.value);
+  if (newSet.has(id)) {
+    newSet.delete(id);
+  } else {
+    newSet.add(id);
+  }
+  expandedIds.value = newSet;
+}
 
 const visibleTodos = computed(() => {
   return props.todos
@@ -61,7 +169,7 @@ const visibleTodos = computed(() => {
     });
 });
 
-function formatTime(timestamp) {
+async function formatTime(timestamp) {
   if (!timestamp) return '';
   const d = new Date(timestamp * 1000);
   return `${d.getMonth() + 1}-${d.getDate()} ${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
@@ -70,10 +178,30 @@ function formatTime(timestamp) {
 async function toggleStatus(todo) {
   const newStatus = todo.status === 'done' ? 'pending' : 'done';
   try {
-    await window.electronAPI.updateEventStatus(todo.id, newStatus);
+    await window.appAPI.updateEventStatus(todo.id, newStatus);
     emit('update-status', { id: todo.id, status: newStatus });
   } catch (err) {
     console.error('更新待办状态失败', err);
+  }
+}
+
+async function deleteTodo(todo) {
+  const confirmed = await showConfirm({
+    title: t('todo.delete_title') || '删除待办',
+    message: t('todo.confirm_delete') || '确定要删除这条待办吗？',
+    confirmText: t('common.confirm') || '确定',
+    cancelText: t('common.cancel') || '取消'
+  });
+
+  if (confirmed) {
+    try {
+      if (window.appAPI && window.appAPI.deleteEvent) {
+        await window.appAPI.deleteEvent(todo.id);
+        emit('delete-todo', todo.id);
+      }
+    } catch (err) {
+      console.error('删除待办失败', err);
+    }
   }
 }
 
@@ -94,6 +222,13 @@ function getPriorityLabel(priority) {
   padding: var(--space-4);
 }
 
+.inbox-view.is-mobile .todo-list {
+  background: transparent !important;
+  border: none !important;
+  padding: 0 !important;
+  border-radius: 0 !important;
+}
+
 .empty-state {
   color: var(--text-tertiary);
   text-align: center;
@@ -101,19 +236,69 @@ function getPriorityLabel(priority) {
   font-size: var(--text-sm);
 }
 
-.todo-item {
+.todo-item-wrapper {
   display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-2) var(--space-3);
+  flex-direction: column;
+  gap: 4px;
   background: var(--bg-primary);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
   transition: all 0.2s;
 }
 
-.todo-item:hover {
+.todo-item-wrapper:hover {
   border-color: var(--accent-primary);
+}
+
+.todo-details {
+  padding: 0 12px 12px 38px;
+  font-size: 12px;
+  color: var(--text-tertiary);
+  line-height: 1.5;
+}
+
+.todo-desc-text {
+  display: block;
+  white-space: pre-wrap;
+  cursor: text;
+  padding: 4px;
+  border-radius: var(--radius-sm);
+  transition: background 0.2s;
+  min-height: 20px;
+}
+
+.todo-desc-text:hover {
+  background: var(--surface-secondary);
+}
+
+.todo-desc-text.is-empty {
+  font-style: italic;
+  opacity: 0.6;
+}
+
+.todo-desc-edit {
+  width: 100%;
+  min-height: 60px;
+  background: var(--surface-input);
+  border: 1px solid var(--accent-primary);
+  border-radius: var(--radius-sm);
+  padding: 6px;
+  color: var(--text-primary);
+  font-size: 12px;
+  resize: vertical;
+  font-family: inherit;
+}
+
+.todo-desc-edit:focus {
+  outline: none;
+}
+
+.todo-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  cursor: pointer;
 }
 
 .todo-item.is-done {
@@ -137,6 +322,37 @@ function getPriorityLabel(priority) {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  min-width: 0;
+}
+
+.todo-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.todo-delete-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-sm);
+  border: none;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  opacity: 0;
+  transition: all 0.2s;
+}
+
+.todo-item:hover .todo-delete-btn {
+  opacity: 1;
+}
+
+.todo-delete-btn:hover {
+  background: color-mix(in srgb, var(--error) 15%, transparent);
+  color: var(--error);
 }
 
 .todo-main {
@@ -152,9 +368,30 @@ function getPriorityLabel(priority) {
 
 .todo-header {
   display: flex;
-  justify-content: flex-end;
+  justify-content: space-between;
+  align-items: center;
   padding-bottom: 8px;
 }
+
+.add-todo-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  transition: all 0.2s;
+}
+
+.add-todo-btn:hover {
+  background-color: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+
 
 .toggle-completed {
   font-size: 12px;

@@ -48,7 +48,7 @@ fn ensure_wiki_structure() {
     let index_path = wiki.join("index.md");
     if !index_path.exists() {
         let _ = fs::write(&index_path,
-            "# 知识库索引\n\n> 此文件由 Bob-Agent LLM-Wiki 引擎自动维护。\n\n## Sources (文件摘要)\n\n## Entities (实体/概念)\n\n## Projects (项目综述)\n\n"
+            "# 知识库索引\n\n> 此文件由 Bob.agent LLM-Wiki 引擎自动维护。\n\n## Sources (文件摘要)\n\n## Entities (实体/概念)\n\n## Projects (项目综述)\n\n"
         );
     }
 

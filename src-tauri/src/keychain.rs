@@ -1,6 +1,6 @@
 /// OS Keychain 模块 — 已停用
 ///
-/// API Key 现在直接明文存储在 AppData/bob-agent/config.json 中。
+/// API Key 现在直接明文存储在 AppData/bob.agent/config.json 中。
 /// 本模块保留为空壳，避免破坏 Cargo 编译依赖。
 ///
 /// 如需重新启用 OS Keychain，恢复此文件中的实现代码即可。

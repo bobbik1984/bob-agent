@@ -112,8 +112,8 @@ pub async fn start_discord_bot(app: AppHandle, token: String) {
                             "intents": intents,
                             "properties": {
                                 "os": "windows",
-                                "browser": "bob-agent",
-                                "device": "bob-agent"
+                                "browser": "bob.agent",
+                                "device": "bob.agent"
                             }
                         }
                     });
