@@ -41,7 +41,7 @@ jobs:
           targets: aarch64-linux-android
 
       - name: Install dependencies
-        run: npm install
+        run: npm install --legacy-peer-deps
 
       - name: Initialize Android Project & Inject Permissions
         run: |
