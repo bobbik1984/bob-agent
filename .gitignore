@@ -68,8 +68,8 @@ test_*.js
 test_*.py
 test_*.rs
 test_*.html
-patch*.py
-patch*.js
+/patch*.py
+/patch*.js
 *.tmp
 *.log
 *.txt
