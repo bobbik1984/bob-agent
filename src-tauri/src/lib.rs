@@ -468,6 +468,11 @@ fn open_path_in_explorer(path: &str) -> bool {
     {
         std::process::Command::new("xdg-open").arg(path).spawn().is_ok()
     }
+    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+    {
+        let _ = path;
+        false
+    }
 }
 
 #[tauri::command]
