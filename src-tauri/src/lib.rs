@@ -730,7 +730,7 @@ pub fn run() {
 
     let browser_state = std::sync::Arc::new(browser::BrowserState::new());
 
-    tauri::Builder::default()
+    let mut builder = tauri::Builder::default()
         .manage(db::DbState(Mutex::new(db)))
         .manage(sidecar::SidecarState { child: Mutex::new(None) })
         .manage(wechat_state.clone())
@@ -985,8 +985,11 @@ pub fn run() {
             notebook::notebook_get_backlinks,
             notebook::notebook_merge_tags,
             notebook::notebook_reject_tag_merge
-        ])
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+        ]);
+
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             // 如果已经有一个实例在运行，就把已有窗口唤出来
             use tauri::Manager;
             if let Some(window) = app.get_webview_window("main") {
@@ -994,7 +997,10 @@ pub fn run() {
                 let _ = window.unminimize();
                 let _ = window.set_focus();
             }
-        }))
+        }));
+    }
+
+    builder
         .on_window_event(|window, event| match event {
             tauri::WindowEvent::CloseRequested { api, .. } => {
                 // 开发模式：点 ✕ 真正关闭，方便反复调试
