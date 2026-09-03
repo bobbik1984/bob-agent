@@ -6,6 +6,9 @@ on:
       - main
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build-android:
     runs-on: ubuntu-latest
@@ -105,8 +108,80 @@ jobs:
           CXX_aarch64_linux_android: ${{ env.ANDROID_HOME }}/ndk/27.0.12077973/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android30-clang++
           AR_aarch64_linux_android: ${{ env.ANDROID_HOME }}/ndk/27.0.12077973/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar
 
+      - name: Sign APK
+        if: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          echo "Decoding release keystore..."
+          echo "$KEYSTORE_BASE64" | base64 -d > /tmp/bobbik-release.p12
+
+          # Locate built APK
+          UNSIGNED_APK=$(find src-tauri/gen/android/app/build/outputs/apk -name "*unsigned.apk" | head -n 1)
+          if [ -z "$UNSIGNED_APK" ]; then
+            UNSIGNED_APK=$(find src-tauri/gen/android/app/build/outputs/apk -name "*.apk" | head -n 1)
+          fi
+          echo "Target APK to sign: $UNSIGNED_APK"
+
+          # Locate apksigner in Android SDK build-tools
+          APKSIGNER=$(find $ANDROID_HOME/build-tools -name apksigner | sort -V | tail -n 1)
+          echo "Using apksigner: $APKSIGNER"
+
+          # Get version from package.json
+          VERSION=$(node -p "require('./package.json').version")
+          SIGNED_APK="bob-v${VERSION}-signed.apk"
+
+          # Sign APK (PKCS12 format)
+          $APKSIGNER sign \
+            --ks /tmp/bobbik-release.p12 \
+            --ks-type PKCS12 \
+            --ks-key-alias "$KEY_ALIAS" \
+            --ks-pass "pass:$KEYSTORE_PASSWORD" \
+            --key-pass "pass:$KEYSTORE_PASSWORD" \
+            --out "$SIGNED_APK" \
+            "$UNSIGNED_APK"
+
+          # Verify signature
+          $APKSIGNER verify --verbose "$SIGNED_APK"
+
+          # Provide fixed name copy for persistent direct download
+          cp "$SIGNED_APK" bob-mobile-latest.apk
+
+          # Clean up decrypted keystore
+          rm -f /tmp/bobbik-release.p12
+
+          echo "SIGNED_APK=$SIGNED_APK" >> $GITHUB_ENV
+          echo "APP_VERSION=$VERSION" >> $GITHUB_ENV
+
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: bob-mobile-apk
-          path: src-tauri/gen/android/app/build/outputs/apk/**/*.apk
+          path: |
+            src-tauri/gen/android/app/build/outputs/apk/**/*.apk
+            bob-*-signed.apk
+            bob-mobile-latest.apk
+
+      - name: Publish Signed APK to GitHub Releases
+        if: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest-mobile
+          name: "Bob Mobile Latest (v${{ env.APP_VERSION }})"
+          body: |
+            ### 📱 Bob Mobile Android 自动构建安装包
+            - **应用版本**：`v${{ env.APP_VERSION }}`
+            - **代码提交**：`${{ github.sha }}`
+            - **打包时间**：`${{ github.event.head_commit.timestamp }}`
+
+            > 💡 **直接安装**：此 APK 已通过官方证书完成签名。Android 手机端直接下载下方 `bob-mobile-latest.apk` 即可直接点击覆盖安装升级，无需在电脑端解压或二次签名。
+          draft: false
+          prerelease: true
+          files: |
+            bob-*-signed.apk
+            bob-mobile-latest.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
