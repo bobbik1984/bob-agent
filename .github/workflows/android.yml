@@ -109,12 +109,18 @@ jobs:
           AR_aarch64_linux_android: ${{ env.ANDROID_HOME }}/ndk/27.0.12077973/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar
 
       - name: Sign APK
-        if: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+        id: sign_step
         env:
           KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
         run: |
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "Skipping signing: ANDROID_KEYSTORE_BASE64 secret is not configured."
+            echo "signed=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
           echo "Decoding release keystore..."
           echo "$KEYSTORE_BASE64" | base64 -d > /tmp/bobbik-release.p12
 
@@ -154,6 +160,7 @@ jobs:
 
           echo "SIGNED_APK=$SIGNED_APK" >> $GITHUB_ENV
           echo "APP_VERSION=$VERSION" >> $GITHUB_ENV
+          echo "signed=true" >> $GITHUB_OUTPUT
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
@@ -165,7 +172,7 @@ jobs:
             bob-mobile-latest.apk
 
       - name: Publish Signed APK to GitHub Releases
-        if: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+        if: steps.sign_step.outputs.signed == 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: latest-mobile
