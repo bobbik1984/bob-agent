@@ -1029,13 +1029,20 @@ pub fn run() {
     builder
         .on_window_event(|window, event| match event {
             tauri::WindowEvent::CloseRequested { api, .. } => {
-                // 开发模式：点 ✕ 真正关闭，方便反复调试
-                // 正式打包：点 ✕ 只是隐藏到托盘
-                if cfg!(debug_assertions) {
-                    // dev mode — 直接关闭
-                } else {
-                    let _ = window.hide();
-                    api.prevent_close();
+                #[cfg(not(any(target_os = "android", target_os = "ios")))]
+                {
+                    // 开发模式：点 ✕ 真正关闭，方便反复调试
+                    // 正式打包：点 ✕ 只是隐藏到托盘
+                    if cfg!(debug_assertions) {
+                        // dev mode — 直接关闭
+                    } else {
+                        let _ = window.hide();
+                        api.prevent_close();
+                    }
+                }
+                #[cfg(any(target_os = "android", target_os = "ios"))]
+                {
+                    let _ = (window, api);
                 }
             }
             _ => {}
@@ -1068,7 +1075,8 @@ pub fn run() {
                 app.handle().plugin(log_builder.build())?;
             }
 
-            // 读取用户上次保存的主题，动态设置原生窗口底色，防止在亮色模式下启动闪黑屏
+            // 读取用户上次保存的主题，动态设置原生窗口底色，防止在亮色模式下启动闪黑屏 (仅限桌面端)
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
             if let Some(window) = app.get_webview_window("main") {
                 let config = read_config();
                 if let Some(theme) = config.get("theme").and_then(|v| v.as_str()) {
@@ -1164,10 +1172,11 @@ pub fn run() {
                 }
             }
 
-            // ── T-1004: 冷热记忆迁移 (启动时同步执行，极快) ──
-            dream::migrate_stale_sessions();
-            // ── T-1412: 记忆置信度衰减 (顺带处理) ──
-            dream::decay_stale_confidence();
+            // ── T-1004: 冷热记忆迁移 & 置信度衰减 (异步后台执行，不阻塞 UI 挂载) ──
+            tauri::async_runtime::spawn(async move {
+                dream::migrate_stale_sessions();
+                dream::decay_stale_confidence();
+            });
 
             // ── T-1003: 异步记忆压缩 (后台 Clerk 模型提炼) ──
             let dream_handle = app.handle().clone();

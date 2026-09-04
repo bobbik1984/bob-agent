@@ -33,7 +33,7 @@ tokio-stream = "0.1"
 futures-util = "0.3.32"
 futures = "0.3"
 bytes = "1"
-reqwest = { version = "0.13.3", features = ["stream", "json"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-webpki-roots", "stream", "json"] }
 axum = { version = "0.8", features = ["http2", "ws"] }
 walkdir = "2.5.0"
 scraper = "0.22"
