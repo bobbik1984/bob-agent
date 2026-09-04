@@ -138,9 +138,29 @@ fn get_config_path() -> PathBuf {
 
 fn read_config() -> Value {
     let path = get_config_path();
-    if let Ok(data) = fs::read_to_string(path) {
+    if let Ok(data) = fs::read_to_string(&path) {
         if let Ok(json) = serde_json::from_str(&data) {
             return json;
+        }
+    }
+    #[cfg(target_os = "android")]
+    {
+        // 尝试从其他可能的历史沙盒候选路径中自动恢复 config.json
+        let candidates = [
+            PathBuf::from("/data/user/0/bob.agent/config.json"),
+            PathBuf::from("/data/data/bob.agent/config.json"),
+            PathBuf::from("/data/user/0/bob.agent/files/config.json"),
+            PathBuf::from("/data/data/bob.agent/files/config.json"),
+        ];
+        for cand in &candidates {
+            if cand != &path && cand.exists() {
+                if let Ok(data) = fs::read_to_string(cand) {
+                    if let Ok(json) = serde_json::from_str(&data) {
+                        let _ = fs::write(&path, &data);
+                        return json;
+                    }
+                }
+            }
         }
     }
     serde_json::json!({})
@@ -1054,8 +1074,13 @@ pub fn run() {
             #[cfg(any(target_os = "android", target_os = "ios"))]
             {
                 if let Ok(app_dir) = app.path().app_data_dir() {
-                    let _ = fs::create_dir_all(&app_dir);
-                    let _ = DATA_DIR.set(app_dir);
+                    #[cfg(target_os = "android")]
+                    let target_dir = app_dir.join("files");
+                    #[cfg(not(target_os = "android"))]
+                    let target_dir = app_dir;
+
+                    let _ = fs::create_dir_all(&target_dir);
+                    let _ = DATA_DIR.set(target_dir);
                 }
             }
 

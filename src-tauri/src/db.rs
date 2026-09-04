@@ -1,5 +1,6 @@
 use rusqlite::{params, Connection};
 use serde_json::Value;
+use std::path::PathBuf;
 use std::sync::Mutex;
 use tauri::State;
 
@@ -9,6 +10,79 @@ pub fn init_db(data_dir: &std::path::Path) -> Connection {
     let db_path = data_dir.join("bob.db");
 
     let db_backup = data_dir.join("bob.db.bak");
+
+    // ==========================================
+    // 0. 跨版本数据无感迁移与继承 (Android 遗留数据库自动寻址)
+    // ==========================================
+    #[cfg(target_os = "android")]
+    {
+        let needs_migration = if !db_path.exists() {
+            true
+        } else if let Ok(probe) = Connection::open(&db_path) {
+            let has_table: i64 = probe
+                .query_row(
+                    "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='messages';",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap_or(0);
+            if has_table == 0 {
+                true
+            } else {
+                let msg_count: i64 = probe
+                    .query_row("SELECT count(*) FROM messages;", [], |r| r.get(0))
+                    .unwrap_or(0);
+                msg_count == 0
+            }
+        } else {
+            false
+        };
+
+        if needs_migration {
+            let legacy_candidates = [
+                // 旧版本基于 dirs::data_dir() 解析出的 XDG 目录
+                PathBuf::from("/data/user/0/bob.agent/.local/share/bob.agent/bob.db"),
+                PathBuf::from("/data/user/0/bob.agent/.local/share/bob-agent/bob.db"),
+                PathBuf::from("/data/data/bob.agent/.local/share/bob.agent/bob.db"),
+                PathBuf::from("/data/data/bob.agent/.local/share/bob-agent/bob.db"),
+                // 旧版本基于 $HOME 解析出的内部子目录
+                PathBuf::from("/data/user/0/bob.agent/bob.agent/bob.db"),
+                PathBuf::from("/data/user/0/bob.agent/bob-agent/bob.db"),
+                PathBuf::from("/data/data/bob.agent/bob.agent/bob.db"),
+                PathBuf::from("/data/data/bob.agent/bob-agent/bob.db"),
+                // Android 根目录下的历史库
+                PathBuf::from("/data/user/0/bob.agent/bob.db"),
+                PathBuf::from("/data/data/bob.agent/bob.db"),
+            ];
+
+            for cand in &legacy_candidates {
+                if cand != &db_path && cand.exists() {
+                    if let Ok(meta) = std::fs::metadata(cand) {
+                        if meta.len() > 0 {
+                            log::info!(
+                                "Found legacy bob.db at {:?} ({} bytes), migrating to {:?}",
+                                cand,
+                                meta.len(),
+                                db_path
+                            );
+                            let _ = std::fs::create_dir_all(data_dir);
+                            if db_path.exists() {
+                                let _ = std::fs::rename(&db_path, data_dir.join("bob.db.empty"));
+                            }
+                            if std::fs::copy(cand, &db_path).is_ok() {
+                                log::info!("Successfully migrated legacy database from {:?}", cand);
+                                let cand_wal = cand.with_extension("db-wal");
+                                if cand_wal.exists() {
+                                    let _ = std::fs::copy(&cand_wal, db_path.with_extension("db-wal"));
+                                }
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     // ==========================================
     // 1. 无感自检与自愈 (Self-Healing)
@@ -109,6 +183,24 @@ pub fn init_db(data_dir: &std::path::Path) -> Connection {
 
     // 初始化 Cron 调度表 (T-1211)
     crate::scheduler::init_cron_table(&conn);
+
+    // 初始化工作台与项目管理表 (Work Core)
+    if let Err(e) = crate::work_core::init_work_core_tables(&conn) {
+        log::error!("Failed to init work_core tables: {}", e);
+    }
+
+    // 初始化目标运行引擎表 (Goal Runtime)
+    if let Err(e) = crate::goal_runtime::init_goal_runtime_tables(&conn) {
+        log::error!("Failed to init goal_runtime tables: {}", e);
+    }
+
+    // 初始化捕获流表 (Capture)
+    crate::capture::init_capture_tables(&conn);
+
+    // 初始化每日简报表 (Daily Brief)
+    if let Err(e) = crate::daily_brief::init_daily_brief_tables(&conn) {
+        log::error!("Failed to init daily_brief tables: {}", e);
+    }
 
     // LLM-Wiki 知识库全文搜索索引 (FTS5)
     conn.execute_batch(
