@@ -605,7 +605,9 @@
     "region": "Region",
     "vision_model": "Vision Model",
     "assign_hint_vision": "Click a model below to assign as Vision",
-    "role_vision": "Vision"
+    "role_vision": "Vision",
+    "discovered": "New",
+    "discovered_hint": "Discovered via provider API"
   },
   "file_card": {
     "just_now": "just now",

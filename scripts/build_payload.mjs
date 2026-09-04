@@ -44,7 +44,7 @@ function buildPayload() {
 
   // 确保先编译出最新的 bob.exe
   if (!fs.existsSync(TARGETS[0].src)) {
-    console.error('❌ 找不到 bob.exe，请先运行 npm run tauri build 构建 Release 版本。');
+    console.error('❌ 找不到 bob.exe，请先运行 pnpm run tauri build 构建 Release 版本。');
     process.exit(1);
   }
 

@@ -53,12 +53,12 @@
 
 ---
 
-## 命令
+## 命令（统一使用 pnpm 避免 OneDrive 同步风暴）
 
 ```bash
 # ─── Tauri 开发（主线，日常使用这个） ───
-npm run dev:tauri        # 启动 Tauri 开发模式（Vite 热更新 + Rust 编译）
-npm run build:tauri      # 构建 Tauri 生产版本（~15MB 安装包）
+pnpm dev:tauri        # 启动 Tauri 开发模式（Vite 热更新 + Rust 编译）
+pnpm build:tauri      # 构建 Tauri 生产版本（~15MB 安装包）
 
 # ─── Rust 侧独立命令 ───
 cd src-tauri && cargo build          # 仅编译 Rust 后端
@@ -66,10 +66,14 @@ cd src-tauri && cargo check          # 快速语法检查（不生成二进制�
 cd src-tauri && cargo test           # 运行 Rust 单元测试
 
 # ─── 前端与测试 ───
-npm run build            # 仅构建前端 (vite build)
-npm test                 # 运行 Vitest 测试
-npm run lint             # ESLint 检查
+pnpm build            # 仅构建前端 (vite build)
+pnpm test             # 运行 Vitest 测试
+pnpm lint             # ESLint 检查
 ```
+
+> **🛡️ 包管理器与 OneDrive 隔离铁律**：
+> 本工作区位于 OneDrive 实时同步目录中。**绝对禁止**使用 npm 安装或构建（npm 会产生数万个散碎文件引发 OneDrive 同步风暴与文件锁定）。
+> **必须**且只能使用 `pnpm`。依赖已通过根目录 `pnpm-workspace.yaml` 将根工程与 `installer` 统一纳管。
 
 ### 🔴 安装包编译工作流 (Bootstrapper Pipeline)
 
@@ -85,10 +89,10 @@ scripts\release.bat
 
 | 步骤 | 操作 | 说明 |
 |:---:|------|------|
-| 1/6 | `npm run tauri build` | 编译主程序 `bob.exe` (Release) |
+| 1/6 | `pnpm run tauri build` | 编译主程序 `bob.exe` (Release) |
 | 2/6 | `node scripts/build_payload.mjs` | 将 bob.exe + pdfium.dll + skills 打包为 payload.zip |
 | 3/6 | 复制 payload.zip → installer | 供安装器嵌入 |
-| 4/6 | `cd installer && npm run tauri build` | 编译带 Bob Logo 的独立安装器 |
+| 4/6 | `cd installer && pnpm run tauri build` | 编译带 Bob Logo 的独立安装器 |
 | 5/6 | 收集产物 → `dist-release/` | 归集最终可分发文件 |
 | 6/6 | 清理中间文件 | 删除 payload.zip、bundle 临时目录 |
 

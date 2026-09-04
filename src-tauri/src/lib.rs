@@ -72,11 +72,32 @@ use percent_encoding::percent_decode_str;
 // 数据目录与配置管理
 // ═══════════════════════════════════════════════════════════
 
+static DATA_DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
 pub(crate) fn get_data_dir() -> PathBuf {
-    let mut path = dirs::data_dir().unwrap_or_else(|| PathBuf::from("."));
-    path.push("bob.agent");
-    fs::create_dir_all(&path).unwrap_or_default();
-    path
+    if let Some(dir) = DATA_DIR.get() {
+        return dir.clone();
+    }
+    #[cfg(target_os = "android")]
+    {
+        // 优先使用 Android 标准沙盒内部存储目录
+        let p = PathBuf::from("/data/data/bob.agent/files");
+        if fs::create_dir_all(&p).is_ok() {
+            return p;
+        }
+        let p2 = PathBuf::from("/data/user/0/bob.agent/files");
+        if fs::create_dir_all(&p2).is_ok() {
+            return p2;
+        }
+        p
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let mut path = dirs::data_dir().unwrap_or_else(|| PathBuf::from("."));
+        path.push("bob.agent");
+        fs::create_dir_all(&path).unwrap_or_default();
+        path
+    }
 }
 
 /// 日志自动大小截断与轮询旋转写入助手 (T-1310)
@@ -1021,6 +1042,16 @@ pub fn run() {
         })
         .setup(|app| {
             use tauri::Manager;
+
+            // 解决移动端沙盒路径注入
+            #[cfg(any(target_os = "android", target_os = "ios"))]
+            {
+                if let Ok(app_dir) = app.path().app_data_dir() {
+                    let _ = fs::create_dir_all(&app_dir);
+                    let _ = DATA_DIR.set(app_dir);
+                }
+            }
+
             app.handle().plugin(tauri_plugin_shell::init())?;
             // 日志：debug 输出到终端 + 文件，release 仅输出到文件
             {
@@ -1156,14 +1187,16 @@ pub fn run() {
                 mcp::init_from_saved_config().await;
             });
 
-            // ── 浏览器增强空闲回收 ──
+            // ── 浏览器增强空闲回收 (仅限桌面端) ──
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
             {
                 use tauri::Manager;
                 let bs = app.state::<std::sync::Arc<browser::BrowserState>>();
                 browser::start_idle_watcher(bs.inner().clone());
             }
 
-            // ── 启动本地微信机器人 ──
+            // ── 启动本地微信机器人 (仅限桌面端) ──
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
             {
                 let wechat_state = app.state::<std::sync::Arc<wechat::WechatState>>();
                 *wechat_state.app.write().unwrap() = Some(app.handle().clone());

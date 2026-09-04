@@ -1530,3 +1530,96 @@ body.scanner-active::after {
   color: var(--text-primary);
   background: var(--bg-hover);
 }
+
+/* ── 7. Icon Scales & Optical Compensation ── */
+.icon-sm { width: 14px; height: 14px; stroke-width: 2px; }
+.icon-md { width: 18px; height: 18px; stroke-width: 1.75px; }
+.icon-lg { width: 22px; height: 22px; stroke-width: 1.5px; }
+.icon-xl { width: 26px; height: 26px; stroke-width: 1.5px; }
+
+/* ── 8. Icon Badge Button & Wrapper Container ── */
+.icon-badge-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-default);
+  background: var(--surface-glass);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+}
+.icon-badge-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  border-color: var(--border-default);
+}
+.icon-badge-btn .badge-count {
+  top: -4px;
+  right: -4px;
+}
+
+/* ── 9. Work & Flow Pills ── */
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.4;
+  border: 1px solid transparent;
+}
+.status-pill.planned {
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  border-color: var(--border-subtle);
+}
+.status-pill.active {
+  background: color-mix(in srgb, var(--user-accent, var(--accent-primary)) 15%, transparent);
+  color: var(--user-accent, var(--accent-primary));
+  border-color: color-mix(in srgb, var(--user-accent, var(--accent-primary)) 30%, transparent);
+}
+.status-pill.blocked {
+  background: color-mix(in srgb, var(--color-error) 15%, transparent);
+  color: var(--color-error);
+  border-color: color-mix(in srgb, var(--color-error) 30%, transparent);
+}
+.status-pill.done {
+  background: color-mix(in srgb, var(--color-success) 15%, transparent);
+  color: var(--color-success);
+  border-color: color-mix(in srgb, var(--color-success) 30%, transparent);
+}
+
+/* ── 10. Result Receipt Card ── */
+.receipt-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: var(--radius-default);
+  background: var(--surface-card);
+  border: 1px solid var(--border-subtle);
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.receipt-card__icon {
+  color: var(--color-success);
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+.receipt-card__content {
+  flex: 1;
+  min-width: 0;
+}
+.receipt-card__title {
+  font-weight: 500;
+  color: var(--text-primary);
+  margin-bottom: 2px;
+}
+

@@ -37,4 +37,7 @@ export default defineConfig({
   optimizeDeps: {
     entries: ['index.html'],
   },
+  test: {
+    include: ['src/**/*.{test,spec}.?(c|m)[jt]s?(x)'],
+  },
 });

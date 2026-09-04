@@ -21,9 +21,9 @@ echo  ========================================
 echo.
 
 :: -- Step 1: Build main app (Release) ----------------------
-echo [1/6] Building main app (npm run tauri build)...
+echo [1/6] Building main app (pnpm run tauri build)...
 cd /d "%ROOT%"
-call npm run tauri build
+call pnpm run tauri build
 if errorlevel 1 (
     echo [FAIL] Main app build failed!
     pause
@@ -50,9 +50,9 @@ echo [OK] Payload synced.
 
 :: -- Step 4: Build installer -------------------------------
 echo.
-echo [4/6] Building installer (installer\npm run tauri build)...
+echo [4/6] Building installer (installer\pnpm run tauri build)...
 cd /d "%ROOT%\installer"
-call npm run tauri build
+call pnpm run tauri build
 if errorlevel 1 (
     echo [FAIL] Installer build failed!
     pause

@@ -1,16 +1,27 @@
 """
 generate_android_icons.py
-从 src-tauri/icons/icon.png (由 npx tauri icon 生成) 出发，
-为 Android 生成完整的自适应图标 (adaptive icon) 和旧版图标。
+─────────────────────────
+以 public/bob_white.png 为唯一真理源 (SSOT)，
+自动为 Android 生成完整的自适应图标 (adaptive icon) 和旧版图标。
 
-本脚本在本地运行，生成的文件提交到 git。
-CI 中由 patch_android_icons.py 负责将这些文件复制到 gen/ 目录。
+设计规范：
+1. 自适应图标 (Adaptive Icons, API 26+)：
+   - 画布总宽: 108dp (xxxhdpi 对应 432px)
+   - 系统可见圆盘遮罩: 直径 72dp (288px)
+   - 核心安全区: 直径 66dp
+   - LOGO 占比: 锁定为画布的 50% (例如 432px 画布上，Logo 宽 216px，高约 141px)，
+     在圆形遮罩下留出充裕的呼吸留白，与 ChatGPT / Claude 视觉比例完美对齐。
+2. 背景层：纯白不透明 (#FFFFFF)。
+3. 旧版单层图标 (Legacy Icons)：纯白底座 + 62% 居中 Logo。
 """
 import os
+import numpy as np
 from PIL import Image, ImageDraw
 
-ANDROID_DIR = "src-tauri/icons/android"
-SOURCE_ICON = "src-tauri/icons/icon.png"
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ANDROID_DIR = os.path.join(PROJECT_ROOT, "src-tauri", "icons", "android")
+SOURCE_IMAGE = os.path.join(PROJECT_ROOT, "public", "bob_white.png")
+FALLBACK_ICON = os.path.join(PROJECT_ROOT, "src-tauri", "icons", "icon.png")
 
 # Android 各密度的尺寸规范
 DENSITIES = {
@@ -21,18 +32,32 @@ DENSITIES = {
     "mipmap-xxxhdpi": {"legacy": 192, "adaptive": 432},
 }
 
-# Logo 在自适应图标安全区中的占比
-# 因为我们不再暴力剔除 SVG 内边距，所以让 1024x1024 画布完全贴合安卓的安全遮罩圆圈
-# 安卓安全区 = 72dp，总画布 = 108dp，比例约为 66.6%
-# 这样 SVG 内部原本多大的蓝字，在这里就是多大
-LOGO_SCALE = 0.666
+# 比例锁死：保证自适应图标在任何圆形/异形遮罩下绝不撑爆、绝不切断
+LOGO_SCALE_ADAPTIVE = 0.50
+LOGO_SCALE_LEGACY = 0.62
 
 
 def load_and_crop_logo():
-    """加载源图标并裁剪掉四周的透明留白"""
-    img = Image.open(SOURCE_ICON).convert("RGBA")
-    print(f"Source logo loaded: {img.size[0]}x{img.size[1]} (Preserving padding)")
-    print(f"Source logo cropped to: {img.size[0]}x{img.size[1]}")
+    """从母图提取蓝色 Logo 主体并剔除透明/白色边缘，以实现严格的居中与安全区计算"""
+    if os.path.exists(SOURCE_IMAGE):
+        raw = Image.open(SOURCE_IMAGE).convert("RGBA")
+        arr = np.array(raw)
+        # 寻找非白色的蓝色像素主体 (r < 240 或 g < 240 或 b < 240)
+        is_blue = (arr[:, :, 0] < 240) | (arr[:, :, 1] < 240) | (arr[:, :, 2] < 240)
+        arr[:, :, 3] = np.where(is_blue, 255, 0)
+        img = Image.fromarray(arr)
+        bbox = img.getbbox()
+        if bbox:
+            cropped = img.crop(bbox)
+            print(f"Loaded from {SOURCE_IMAGE}")
+            print(f"Extracted blue logo bbox: {bbox} -> size: {cropped.size[0]}x{cropped.size[1]}")
+            return cropped
+
+    print(f"Fallback to {FALLBACK_ICON}")
+    img = Image.open(FALLBACK_ICON).convert("RGBA")
+    bbox = img.getbbox()
+    if bbox:
+        return img.crop(bbox)
     return img
 
 
@@ -57,9 +82,9 @@ def generate_adaptive_background(size, out_path):
 
 
 def generate_adaptive_foreground(logo, size, out_path):
-    """透明画布 + 居中 Logo（占画布 LOGO_SCALE 比例）"""
+    """透明画布 + 居中 Logo (严格控制在 LOGO_SCALE_ADAPTIVE 安全区内)"""
     fg = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    logo_max = int(size * LOGO_SCALE)
+    logo_max = int(size * LOGO_SCALE_ADAPTIVE)
     resized = resize_logo(logo, logo_max)
     offset = center_offset(size, resized.size)
     fg.paste(resized, offset, resized)
@@ -67,9 +92,9 @@ def generate_adaptive_foreground(logo, size, out_path):
 
 
 def generate_legacy_square(logo, size, out_path):
-    """旧版方形图标：白底 + 居中 Logo"""
+    """旧版方形图标：纯白底座 + 居中 Logo"""
     canvas = Image.new("RGBA", (size, size), (255, 255, 255, 255))
-    logo_max = int(size * LOGO_SCALE)
+    logo_max = int(size * LOGO_SCALE_LEGACY)
     resized = resize_logo(logo, logo_max)
     offset = center_offset(size, resized.size)
     canvas.paste(resized, offset, resized)
@@ -79,11 +104,9 @@ def generate_legacy_square(logo, size, out_path):
 def generate_legacy_round(logo, size, out_path):
     """旧版圆形图标：白色圆盘 + 居中 Logo，四角透明"""
     canvas = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    # 画白色圆盘
     draw = ImageDraw.Draw(canvas)
     draw.ellipse((0, 0, size - 1, size - 1), fill=(255, 255, 255, 255))
-    # 放置 Logo
-    logo_max = int(size * LOGO_SCALE)
+    logo_max = int(size * LOGO_SCALE_LEGACY)
     resized = resize_logo(logo, logo_max)
     offset = center_offset(size, resized.size)
     canvas.paste(resized, offset, resized)
@@ -95,7 +118,6 @@ def generate_xml_files():
     xml_dir = os.path.join(ANDROID_DIR, "mipmap-anydpi-v26")
     os.makedirs(xml_dir, exist_ok=True)
 
-    # 使用 @mipmap/ 引用 PNG 背景图，而不是 @color/ 引用颜色值
     xml_content = '<?xml version="1.0" encoding="utf-8"?>\n' \
                   '<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">\n' \
                   '  <foreground android:drawable="@mipmap/ic_launcher_foreground"/>\n' \
@@ -108,7 +130,7 @@ def generate_xml_files():
             f.write(xml_content)
         print(f"  Written: {path}")
 
-    # 同时提供 values/ 下的颜色定义作为后备
+    # 同时提供 values/ 下的白色背景颜色定义作为后备
     values_dir = os.path.join(ANDROID_DIR, "values")
     os.makedirs(values_dir, exist_ok=True)
     color_xml = '<?xml version="1.0" encoding="utf-8"?>\n' \
@@ -122,14 +144,9 @@ def generate_xml_files():
 
 
 def main():
-    if not os.path.exists(SOURCE_ICON):
-        print(f"Error: Source icon not found at {SOURCE_ICON}")
-        print("Please run 'npx tauri icon public/bob_logo_square.svg' first.")
-        return
-
     logo = load_and_crop_logo()
 
-    print("\nGenerating Android icons...")
+    print("\nGenerating Android icons with locked Safe-Zone ratios...")
     for density_name, dims in DENSITIES.items():
         out_dir = os.path.join(ANDROID_DIR, density_name)
         os.makedirs(out_dir, exist_ok=True)
@@ -137,7 +154,7 @@ def main():
         adaptive_size = dims["adaptive"]
         legacy_size = dims["legacy"]
 
-        print(f"\n  [{density_name}] adaptive={adaptive_size}dp, legacy={legacy_size}dp")
+        print(f"  [{density_name}] adaptive={adaptive_size}px (logo: {int(adaptive_size*LOGO_SCALE_ADAPTIVE)}px), legacy={legacy_size}px")
 
         generate_adaptive_background(
             adaptive_size, os.path.join(out_dir, "ic_launcher_background.png"))
@@ -148,11 +165,10 @@ def main():
         generate_legacy_round(
             logo, legacy_size, os.path.join(out_dir, "ic_launcher_round.png"))
 
-    print("\nGenerating XML files...")
+    print("\nGenerating XML configuration files...")
     generate_xml_files()
 
-    print("\n✅ All Android icons generated successfully!")
-    print("Next: commit and push, then patch_android_icons.py will handle CI deployment.")
+    print("\n✅ All Android icons regenerated successfully with SSOT Safe-Zone!")
 
 
 if __name__ == "__main__":

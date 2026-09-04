@@ -105,7 +105,10 @@
           @click="expandedRole ? assign(m.id, expandedRole) : null"
         >
           <div class="model-name-col">
-            <span class="model-display-name">{{ m.displayName }}</span>
+            <div style="display: flex; align-items: center; gap: 6px;">
+              <span class="model-display-name">{{ m.displayName }}</span>
+              <span v-if="m.discovered" class="discovered-badge" :title="$t('model_hub.discovered_hint')">{{ $t('model_hub.discovered') }}</span>
+            </div>
             <span class="model-id-tag">{{ m.modelId }}</span>
           </div>
           <div class="model-actions-col">
@@ -499,6 +502,19 @@ onMounted(async () => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.discovered-badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 10px;
+  font-weight: 500;
+  padding: 1px 6px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--user-accent, var(--accent-primary)) 15%, transparent);
+  color: var(--user-accent, var(--accent-primary));
+  border: 1px solid color-mix(in srgb, var(--user-accent, var(--accent-primary)) 30%, transparent);
+  line-height: 1.2;
 }
 
 .model-actions-col {

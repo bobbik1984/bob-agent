@@ -57,8 +57,16 @@ pub fn init_db(data_dir: &std::path::Path) -> Connection {
     // ==========================================
     // 2. 正式开辟全局连接
     // ==========================================
-    let conn = Connection::open(&db_path)
-        .expect("Failed to open SQLite database even after self-healing attempts");
+    let conn = match Connection::open(&db_path) {
+        Ok(c) => c,
+        Err(e) => {
+            log::error!(
+                "Failed to open SQLite database at {:?}: {}. Gracefully falling back to in-memory db.",
+                db_path, e
+            );
+            Connection::open_in_memory().expect("In-memory SQLite database connection must always succeed")
+        }
+    };
 
     conn.execute_batch(
         "

@@ -1,5 +1,7 @@
 packages:
   - "."
+  - "installer"
+  - "relay"
 
 allowBuilds:
   esbuild: true

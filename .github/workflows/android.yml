@@ -131,15 +131,23 @@ jobs:
           fi
           echo "Target APK to sign: $UNSIGNED_APK"
 
-          # Locate apksigner in Android SDK build-tools
+          # Locate zipalign and apksigner in Android SDK build-tools
+          ZIPALIGN=$(find $ANDROID_HOME/build-tools -name zipalign | sort -V | tail -n 1)
           APKSIGNER=$(find $ANDROID_HOME/build-tools -name apksigner | sort -V | tail -n 1)
+          echo "Using zipalign: $ZIPALIGN"
           echo "Using apksigner: $APKSIGNER"
 
           # Get version from package.json
           VERSION=$(node -p "require('./package.json').version")
+          ALIGNED_APK="bob-v${VERSION}-aligned.apk"
           SIGNED_APK="bob-v${VERSION}-signed.apk"
 
-          # Sign APK (PKCS12 format)
+          # Step 1: 4KB page alignment (mandatory for Android 11+ dynamic libraries)
+          echo "Aligning APK to 4KB page boundaries..."
+          $ZIPALIGN -p -f 4 "$UNSIGNED_APK" "$ALIGNED_APK"
+
+          # Step 2: Sign APK (PKCS12 format)
+          echo "Signing aligned APK..."
           $APKSIGNER sign \
             --ks /tmp/bobbik-release.p12 \
             --ks-type PKCS12 \
@@ -147,9 +155,13 @@ jobs:
             --ks-pass "pass:$KEYSTORE_PASSWORD" \
             --key-pass "pass:$KEYSTORE_PASSWORD" \
             --out "$SIGNED_APK" \
-            "$UNSIGNED_APK"
+            "$ALIGNED_APK"
 
-          # Verify signature
+          # Step 3: Verification gates (fail build if unaligned or invalid signature)
+          echo "Verifying 4KB page alignment..."
+          $ZIPALIGN -c 4 "$SIGNED_APK"
+
+          echo "Verifying APK signature..."
           $APKSIGNER verify --verbose "$SIGNED_APK"
 
           # Provide fixed name copy for persistent direct download

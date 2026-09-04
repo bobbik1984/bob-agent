@@ -605,7 +605,9 @@
     "region": "区域",
     "vision_model": "视觉模型",
     "assign_hint_vision": "点击下方模型将其设为「视觉」",
-    "role_vision": "视觉"
+    "role_vision": "视觉",
+    "discovered": "新发现",
+    "discovered_hint": "云端实时自动发现"
   },
   "file_card": {
     "just_now": "刚刚",

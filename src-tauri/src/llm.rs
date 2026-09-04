@@ -237,7 +237,7 @@ fn is_chat_model(model_id: &str) -> bool {
     if exact_blocklist.contains(&id.as_str()) {
         return false;
     }
-    // 关键词黑名单
+    // 关键词黑名单（只拦截非文本/非对话模型）
     let blocklist = [
         "embed",
         "embedding",
@@ -252,18 +252,8 @@ fn is_chat_model(model_id: &str) -> bool {
         "video",
         "sora",
         "moderation",
-        "text-davinci",
-        "text-curie",
-        "text-babbage",
-        "text-ada",
-        "code-davinci",
-        "code-cushman",
-        "instruct",
-        "realtime",
         "transcription",
         "translation",
-        "search",
-        "codex",
     ];
     for kw in &blocklist {
         if id.contains(kw) {
@@ -271,6 +261,18 @@ fn is_chat_model(model_id: &str) -> bool {
         }
     }
     true
+}
+
+/// 智能推导模型是否具备视觉 (Vision) 理解能力
+fn infer_vision_support(model_id: &str) -> bool {
+    let id = model_id.to_lowercase();
+    id.contains("vl")
+        || id.contains("vision")
+        || id.contains("omni")
+        || id.contains("4o")
+        || id.contains("gemini")
+        || id.contains("claude-3")
+        || id.contains("claude-4")
 }
 
 pub async fn refresh_models_on_startup() {
@@ -370,12 +372,14 @@ pub async fn refresh_models_on_startup() {
                 {
                     new_models.push(existing.clone());
                 } else {
-                    // New model discovered — 自动发现默认 visible: false
+                    // New model discovered — 自动发现默认 visible: true，并智能识别 vision
+                    let is_vision = infer_vision_support(model_id);
                     new_models.push(json!({
                         "id": model_id,
                         "name": model_id,
-                        "vision": false,
-                        "visible": false,
+                        "vision": is_vision,
+                        "visible": true,
+                        "discovered": true,
                         "pricing": { "input": 0.0, "output": 0.0 }
                     }));
                 }
@@ -504,12 +508,14 @@ pub async fn refresh_models_for_provider(provider_id: String) -> Value {
             {
                 new_models.push(existing.clone());
             } else {
-                // 手动刷新发现的新模型也默认 visible: false
+                // 手动刷新发现的新模型默认 visible: true，并智能识别 vision
+                let is_vision = infer_vision_support(model_id);
                 new_models.push(json!({
                     "id": model_id,
                     "name": model_id,
-                    "vision": false,
-                    "visible": false,
+                    "vision": is_vision,
+                    "visible": true,
+                    "discovered": true,
                     "pricing": { "input": 0.0, "output": 0.0 }
                 }));
             }
@@ -663,6 +669,10 @@ pub fn get_model_pool() -> Value {
                         .get("visible")
                         .and_then(|v| v.as_bool())
                         .unwrap_or(true);
+                    let discovered = model
+                        .get("discovered")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
                     let pricing = model
                         .get("pricing")
                         .cloned()
@@ -680,7 +690,8 @@ pub fn get_model_pool() -> Value {
                         "provider": provider_id,
                         "providerName": provider_name,
                         "vision": vision,
-                        "pricing": pricing
+                        "pricing": pricing,
+                        "discovered": discovered
                     });
 
                     if is_default {
