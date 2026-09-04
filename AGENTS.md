@@ -75,33 +75,49 @@ pnpm lint             # ESLint 检查
 > 本工作区位于 OneDrive 实时同步目录中。**绝对禁止**使用 npm 安装或构建（npm 会产生数万个散碎文件引发 OneDrive 同步风暴与文件锁定）。
 > **必须**且只能使用 `pnpm`。依赖已通过根目录 `pnpm-workspace.yaml` 将根工程与 `installer` 统一纳管。
 
-### 🔴 安装包编译工作流 (Bootstrapper Pipeline)
+### 🔴 多端统一打包与发布工作流 (Multi-Target Release Pipeline)
 
-本项目的安装器使用的是**双 Tauri 嵌套架构**（Bootstrapper 模式），以实现极其定制化的暗黑风格安装引导（无边框、无系统灰条）。**绝对禁止**使用默认的 Tauri Bundle (NSIS/MSI) 直接分发主程序。
+为了兼顾 PC 桌面端的高效打包与移动端 (Android) 的零本地负担，项目采用了**端解耦 + 云地协同**的统一发布架构：
+- **PC 桌面端**：采用**双 Tauri 嵌套架构**（Bootstrapper 模式），由本地编译主应用并注入暗黑极简安装器，生成 `bob-installer.exe` 和 `bob-agent-portable.zip`。
+- **Android 移动端**：由 **GitHub Actions (Ubuntu 云端)** 负责 Rust aarch64 交叉编译、NDK 链接、4KB Page Zipalign 及 V2/V3 签名，本地通过脚本自动监控 CI、拉取最新 APK 并通过 ADB 直装真机。
 
-#### 一键发布（推荐）
+#### 统一发布入口：`scripts\release.bat`
+
+直接双击或运行 `scripts\release.bat` 会弹出交互式终端菜单，也可通过命令行参数静默执行：
 
 ```bash
+# 交互式菜单（默认，支持选项 1-4，Q）
 scripts\release.bat
+
+# [1] 全套打包：PC 安装包 + 便携包 + 安卓 APK 同步与 ADB 真机直装
+scripts\release.bat --all    # 或 -a, 1
+
+# [2] 仅打包 PC 版：仅编译生成 bob-installer.exe 与便携版 zip
+scripts\release.bat --pc     # 或 -p, 2
+
+# [3] 仅同步/打包安卓版：监控/拉取云端已签名 APK，自动通过 ADB 安装至手机
+scripts\release.bat --apk    # 或 -m, 3
+
+# [4] 运行安卓真机闪退与运行时诊断：自动抓取 Pixel/Android 崩溃堆栈
+scripts\release.bat --diag   # 或 -d, 4
 ```
 
-运行后会**自动依次执行**以下 6 步，最终产物统一收集到 `dist-release/` 目录并自动打开文件夹：
+#### 各模式执行流程说明
 
-| 步骤 | 操作 | 说明 |
-|:---:|------|------|
-| 1/6 | `pnpm run tauri build` | 编译主程序 `bob.exe` (Release) |
-| 2/6 | `node scripts/build_payload.mjs` | 将 bob.exe + pdfium.dll + skills 打包为 payload.zip |
-| 3/6 | 复制 payload.zip → installer | 供安装器嵌入 |
-| 4/6 | `cd installer && pnpm run tauri build` | 编译带 Bob Logo 的独立安装器 |
-| 5/6 | 收集产物 → `dist-release/` | 归集最终可分发文件 |
-| 6/6 | 清理中间文件 | 删除 payload.zip、bundle 临时目录 |
+| 模式 | 核心步骤 | 输出产物 / 行为 |
+|:---|:---|:---|
+| **全套打包 (`--all`)** | 依次执行 PC 编译 (6 步) + 云端 APK 同步与 ADB 安装 | 归集 `bob-installer.exe`、`bob-agent-portable.zip` 与 `bob-mobile-latest.apk`，自动打开 `dist-release\` |
+| **仅 PC 版 (`--pc`)** | 1. 编译主程序 `bob.exe`<br>2. 打包 `payload.zip`<br>3. 注入安装器工程<br>4. 编译独立安装器<br>5. 归档至 `dist-release\`<br>6. 清理临时文件 | `dist-release\bob-installer.exe` (~25MB)<br>`dist-release\bob-agent-portable.zip` (~15MB) |
+| **仅安卓版 (`--apk`)** | 1. 检测 GitHub Actions 构建状态（若 CI 正在编译则自动挂起轮询等待）<br>2. 自动拉取已通过 4KB 对齐和签名的最新 APK<br>3. 检测 ADB（自动扫描 Pixel 工具链/系统环境）<br>4. 覆盖安装到真机并自动启动 `MainActivity` | `dist-release\bob-mobile-latest.apk` (~48MB)<br>真机覆盖安装并唤醒 |
+| **真机诊断 (`--diag`)** | 启动 `diagnose_crash.ps1`，清空 logcat 缓冲区，前台唤醒应用并捕获 SIGABRT、FATAL 与 Rust Panic 日志 | 控制台高亮输出崩溃堆栈与排查定位 |
 
-#### 最终产物
+#### 最终产物目录结构
 
 ```
 dist-release/
-├── bob-installer.exe          # 带 Bob Logo 的独立安装器（~25MB）
-└── bob-agent-portable.zip     # 绿色免安装版（~15MB）
+├── bob-installer.exe          # 带 Bob Logo 的 PC 独立安装器（~25MB）
+├── bob-agent-portable.zip     # PC 绿色免安装版（~15MB）
+└── bob-mobile-latest.apk      # Android 官方已签名 APK（~48MB，支持 4KB 对齐）
 ```
 
 > ⚠️ `dist-release/` 已被 `.gitignore` 排除，二进制产物不入版本控制。
