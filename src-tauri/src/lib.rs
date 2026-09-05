@@ -769,6 +769,43 @@ fn system_render_pdf_to_images(path: String) -> Result<Vec<String>, String> {
     crate::pdf_renderer::render_pdf_to_images(&path, 20)
 }
 
+#[tauri::command]
+fn abort_generation(conv_id: Option<String>) -> Result<(), String> {
+    log::info!("[LLM] abort_generation called for conv_id: {:?}", conv_id);
+    Ok(())
+}
+
+#[tauri::command]
+fn system_save_temp_image(base64_data: String) -> Result<String, String> {
+    use base64::Engine;
+    let clean_b64 = if let Some(idx) = base64_data.find(";base64,") {
+        &base64_data[idx + 8..]
+    } else {
+        &base64_data
+    };
+    let engine = base64::engine::general_purpose::STANDARD;
+    let bytes = engine
+        .decode(clean_b64.trim())
+        .map_err(|e| format!("Base64 decode error: {}", e))?;
+
+    let temp_dir = std::env::temp_dir().join("bob_temp_images");
+    let _ = std::fs::create_dir_all(&temp_dir);
+    let file_name = format!("img_{}_{}.png", now_ms(), rand::random::<u32>());
+    let file_path = temp_dir.join(file_name);
+    std::fs::write(&file_path, bytes).map_err(|e| format!("Failed to write temp image: {}", e))?;
+    Ok(file_path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+fn import_skills_zip(path: String) -> Result<bool, String> {
+    let bytes = std::fs::read(&path).map_err(|e| format!("Failed to read zip: {}", e))?;
+    let config = read_config();
+    let target_dir = get_external_skills_dir_or_default(&config);
+    std::fs::create_dir_all(&target_dir).map_err(|e| format!("Failed to create target dir: {}", e))?;
+    skills_sync::unpack_skills(&bytes, &target_dir)?;
+    Ok(true)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let db = db::init_db(&get_data_dir());
@@ -803,6 +840,12 @@ pub fn run() {
         .manage(browser_state.clone())
         .manage(crypto::DeviceIdentityState(std::sync::Mutex::new(None)))
         .manage(std::sync::Arc::new(sync_engine::DeviceRegistry::load()))
+        .manage(tool_confirm::ToolConfirmState::new())
+        .manage(candle_engine::CandleState {
+            engine: std::sync::Mutex::new(None),
+            is_running: std::sync::Mutex::new(false),
+            current_model: std::sync::Mutex::new(String::new()),
+        })
         .plugin(log_builder.build())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
@@ -1052,7 +1095,47 @@ pub fn run() {
             notebook::notebook_update_tags,
             notebook::notebook_get_backlinks,
             notebook::notebook_merge_tags,
-            notebook::notebook_reject_tag_merge
+            notebook::notebook_reject_tag_merge,
+            // 补全与设备配对 (Crypto / P2P Pairing)
+            crypto::check_device_keys_initialized,
+            crypto::init_device_keys,
+            crypto::unlock_device_keys,
+            crypto::reset_device_keys,
+            crypto::get_pairing_payload,
+            // 条码与登机牌解析 (Barcode / BCBP)
+            barcode::system_decode_barcode,
+            barcode::system_decode_barcode_base64,
+            barcode::system_parse_bcbp,
+            // 隧道与 WebDrop
+            tunnel::check_tunnel_status,
+            web_drop::start_web_drop,
+            // 捕获系统 (Capture System)
+            capture::capture_ingest,
+            capture_router::capture_process_pending,
+            capture::capture_quick_note,
+            capture::capture_list,
+            capture::capture_retry,
+            capture::capture_diagnostics,
+            capture::capture_activity_list,
+            capture::capture_mobile_image,
+            // 知识库审计与源管理
+            knowledge_audit::knowledge_audit_run,
+            kb_indexer::system_remove_source,
+            // 工具审批交互
+            tool_confirm::tool_confirm_response,
+            // 本地离线 Candle 引擎
+            candle_engine::candle_start_offline_engine,
+            candle_engine::candle_stop_offline_engine,
+            candle_engine::candle_get_offline_engine_status,
+            // 日程管理描述更新
+            calendar::system_update_event_description,
+            // 知识图谱票据扩展
+            kg::kg_update_ticket_cmd,
+            kg::system_create_ticket,
+            // 辅助系统命令
+            abort_generation,
+            system_save_temp_image,
+            import_skills_zip
         ]);
 
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -1066,6 +1149,11 @@ pub fn run() {
                 let _ = window.set_focus();
             }
         }));
+    }
+
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    {
+        builder = builder.plugin(tauri_plugin_barcode_scanner::init());
     }
 
     builder

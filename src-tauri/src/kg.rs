@@ -657,3 +657,89 @@ pub fn kg_merge_nodes(
     }
     Ok(json!({ "ok": true }))
 }
+
+/// 更新票据节点标题与元数据
+#[tauri::command]
+pub fn kg_update_ticket_cmd(
+    db: State<'_, DbState>,
+    node_id: String,
+    new_title: Option<String>,
+    new_metadata: Option<Value>,
+) -> Value {
+    let conn = match db.0.lock() {
+        Ok(c) => c,
+        Err(_) => return json!({"error": "DB lock failed"}),
+    };
+    let meta_str = new_metadata.map(|v| v.to_string());
+    let res = if let Some(title) = new_title {
+        if let Some(m) = meta_str {
+            conn.execute(
+                "UPDATE kg_nodes SET label = ?1, metadata = ?2 WHERE id = ?3",
+                params![title, m, node_id],
+            )
+        } else {
+            conn.execute(
+                "UPDATE kg_nodes SET label = ?1 WHERE id = ?2",
+                params![title, node_id],
+            )
+        }
+    } else if let Some(m) = meta_str {
+        conn.execute(
+            "UPDATE kg_nodes SET metadata = ?1 WHERE id = ?2",
+            params![m, node_id],
+        )
+    } else {
+        Ok(0)
+    };
+    match res {
+        Ok(_) => json!({"ok": true}),
+        Err(e) => json!({"error": e.to_string()}),
+    }
+}
+
+/// 票据直接创建 (绕过 LLM，用于 rxing BCBP 自动识别与直存)
+#[tauri::command]
+pub fn system_create_ticket(
+    db: State<'_, DbState>,
+    args: Value,
+) -> Result<Value, String> {
+    let conn = match db.0.lock() {
+        Ok(c) => c,
+        Err(_) => return Err("DB lock failed".to_string()),
+    };
+    let now = crate::now_ms();
+    let ticket_id = format!("ticket_{}", now);
+    let title = args
+        .get("title")
+        .and_then(|v| v.as_str())
+        .unwrap_or("Untitled Ticket");
+    let category = args
+        .get("category")
+        .and_then(|v| v.as_str())
+        .unwrap_or("ticket");
+    let venue = args.get("venue").and_then(|v| v.as_str()).unwrap_or("");
+    let summary = format!("[{}] {}", category, venue);
+    let meta_str = args.to_string();
+
+    conn.execute(
+        "INSERT INTO kg_nodes (id, label, node_type, summary, source, source_batches, metadata)
+         VALUES (?1, ?2, 'ticket', ?3, 'direct_import', '[]', ?4)",
+        params![ticket_id, title, summary, meta_str],
+    )
+    .map_err(|e| format!("Failed to insert ticket into kg_nodes: {}", e))?;
+
+    // 如果有 start_time，同时也加入 events 表
+    if let Some(st) = args.get("start_time").and_then(|v| v.as_str()) {
+        if !st.is_empty() {
+            let date = st.split(' ').next().unwrap_or(st);
+            let evt_id = format!("evt-{}", now);
+            let _ = conn.execute(
+                "INSERT INTO events (id, title, type, status, date, start_time, end_time, description, created_at, updated_at, linked_ticket_id)
+                 VALUES (?1, ?2, 'event', 'pending', ?3, ?4, '', ?5, ?6, ?6, ?7)",
+                params![evt_id, title, date, st, summary, now, ticket_id],
+            );
+        }
+    }
+
+    Ok(json!({ "ok": true, "ticket_id": ticket_id }))
+}

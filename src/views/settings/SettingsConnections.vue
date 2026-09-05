@@ -47,6 +47,9 @@
               <button class="btn btn-primary-outline btn-sm" style="flex: 1; justify-content: center;" @click="handleMobileScan" title="扫码配对">
                 <Scan :size="13" style="margin-right: 6px;" /> 扫码配对
               </button>
+              <button class="btn btn-secondary-outline btn-sm" style="padding: 0 8px; height: 28px; flex-shrink: 0;" @click="showManualPairModal = true" title="手动粘贴配对码">
+                <KeyRound :size="13" />
+              </button>
             </template>
             <template v-else>
               <input v-model="pinInput" type="password" class="input" maxlength="6" placeholder="PIN" style="flex: 1; min-width: 0; height: 28px; padding: 4px 8px; font-size: 12px; border-radius: var(--radius-default);" @keyup.enter="handlePinSubmit" />
@@ -63,6 +66,9 @@
             <template v-if="isNativeMobile">
               <button class="btn btn-primary-outline btn-sm" style="flex: 1; justify-content: center;" @click="handleMobileScan" title="重新扫码配对">
                 <Scan :size="13" style="margin-right: 6px;" /> 重新扫码
+              </button>
+              <button class="btn btn-secondary-outline btn-sm" style="padding: 0 8px; height: 28px; flex-shrink: 0;" @click="showManualPairModal = true" title="手动粘贴配对码">
+                <KeyRound :size="13" />
               </button>
             </template>
             <template v-else>
@@ -615,9 +621,47 @@
               </div>
             </div>
           </div>
-          <p style="color: var(--text-secondary); font-size: 0.85em; margin-top: 20px; text-align: center;">
+          <div v-if="qrPayload" style="margin-top: 14px; display: flex; justify-content: center;">
+            <button class="btn btn-secondary-outline btn-sm" style="font-size: 12px; gap: 6px;" @click="copyQrPayload">
+              <Copy :size="13" /> 复制配对文本
+            </button>
+          </div>
+          <p style="color: var(--text-secondary); font-size: 0.85em; margin-top: 14px; text-align: center;">
             {{ $t('settings.p2p_scan_hint') }}
           </p>
+        </div>
+      </div>
+    </div>
+  </Transition>
+
+  <!-- 🔑 手动粘贴配对码弹窗 -->
+  <Transition name="briefing-fade">
+    <div v-if="showManualPairModal" class="wechat-modal-overlay" @click.self="showManualPairModal = false">
+      <div class="morning-briefing wechat-qr-modal" style="width: 400px; max-width: 90vw; border-radius: var(--radius-default); background: var(--bg-secondary); border: 1px solid var(--border-subtle); overflow: hidden; box-shadow: var(--shadow-lg);">
+        <div class="briefing-header" style="display: flex; align-items: center; justify-content: space-between; padding: 14px 16px; border-bottom: 1px solid var(--border-subtle); background: var(--bg-tertiary);">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <KeyRound :size="16" style="color: var(--user-accent, var(--accent-primary));" />
+            <div style="font-size: 13px; font-weight: 600; color: var(--text-primary);">手动粘贴配对码</div>
+          </div>
+          <button class="briefing-close" @click="showManualPairModal = false" style="background: none; border: none; color: var(--text-tertiary); cursor: pointer; padding: 4px;">
+            <X :size="14" />
+          </button>
+        </div>
+        <div style="padding: 16px; display: flex; flex-direction: column; gap: 12px;">
+          <p style="font-size: 12px; color: var(--text-secondary); margin: 0; line-height: 1.4;">
+            若相机无法扫码，可在电脑端点击“复制配对文本”，然后粘贴到下方完成配对。
+          </p>
+          <textarea
+            v-model="manualPairInput"
+            class="input"
+            rows="4"
+            placeholder='在此粘贴配对 JSON 数据 (例如 {"device_id": "...", ...})'
+            style="width: 100%; font-family: monospace; font-size: 11px; padding: 8px; resize: none; border-radius: var(--radius-default);"
+          ></textarea>
+          <div style="display: flex; gap: 8px; justify-content: flex-end;">
+            <button class="btn btn-secondary-outline btn-sm" @click="showManualPairModal = false">取消</button>
+            <button class="btn btn-primary-outline btn-sm" :disabled="!manualPairInput.trim()" @click="handleManualPairSubmit">确定配对</button>
+          </div>
         </div>
       </div>
     </div>
@@ -951,163 +995,179 @@ async function closePairingProgress() {
   }
 }
 
+const showManualPairModal = ref(false);
+const manualPairInput = ref('');
+
+const copyQrPayload = async () => {
+  if (!qrPayload.value) return;
+  try {
+    if (navigator?.clipboard?.writeText) {
+      await navigator.clipboard.writeText(qrPayload.value);
+    } else if (window.appAPI?.copyToClipboard) {
+      await window.appAPI.copyToClipboard(qrPayload.value);
+    }
+    await showAlert("已复制配对代码到剪贴板！可在手机端点击钥匙图标手动粘贴完成配对。");
+  } catch (e) {
+    await showAlert("复制失败: " + e);
+  }
+};
+
+const handleManualPairSubmit = async () => {
+  const code = manualPairInput.value.trim();
+  if (!code) return;
+  showManualPairModal.value = false;
+  manualPairInput.value = '';
+  await processPairingCode(code);
+};
+
 const handleMobileScan = async () => {
   if (window.appAPI?.scanQrCode) {
     document.body.classList.add('scanner-active');
-    
-    let unlistenProgress = null;
-    if (window.__TAURI_IPC__) {
-      unlistenProgress = await listen('sync:progress', (event) => {
-        if (event.payload && typeof event.payload === 'object') {
-          syncProgressState.value = { ...syncProgressState.value, ...event.payload };
-          
-          if (event.payload.stage === 'done' || event.payload.stage === 'error') {
-            setTimeout(() => { showProgress.value = false; }, 3000);
-          }
-        }
-      });
-    }
-
     const code = await window.appAPI.scanQrCode();
     document.body.classList.remove('scanner-active');
-    
     if (!code) return;
-
-    let payload;
-    try {
-      payload = JSON.parse(code);
-    } catch (e) {
-      await showAlert("二维码内容无法解析: " + e);
-      return;
-    }
-
-    const existingPayload = await window.appAPI.getConfig('pairing_payload');
-    if (existingPayload && existingPayload.device_id && existingPayload.device_id !== payload.device_id) {
-      const isOverride = await showConfirm(`⚠️ 身份不匹配\n\n您正在扫描一个新的 PC (ID: ${payload.device_id.substring(0, 8)})\n但本机已绑定了另一个 PC (ID: ${existingPayload.device_id.substring(0, 8)})\n\n是否覆盖现有配对？(可能会导致同步记录分叉)`);
-      if (!isOverride) return;
-    } else {
-      const confirmed = await showConfirm(`发现设备 PC (ID: ${payload.device_id.substring(0, 8)}...)，是否连接并同步？`);
-      if (!confirmed) return;
-    }
-
-    // Show progress overlay
-    initPairingSteps();
-    showPairingProgress.value = true;
-    updateStep('parse', 'done', '');
-
-    // Listen for Rust-side progress events
-    try {
-      unlistenProgress = await listen('sync:progress', (event) => {
-        const { stage, status, detail } = event.payload;
-        syncProgressState.value = { ...syncProgressState.value, ...event.payload };
-        updateStep(stage, status, detail || '');
-      });
-    } catch (e) {
-      console.warn('Could not listen to sync:progress events:', e);
-    }
-
-    try {
-      // Step 2: Save config
-      updateStep('save_config', 'running', '');
-      await window.appAPI.setConfig('pairing_payload', payload);
-      updateStep('save_config', 'done', '');
-
-            // Step 3: 尝试局域网直连同步 (LAN Sync)
-      if (window.appAPI.triggerMobileSync) {
-        updateStep('lan_sync', 'running', '');
-        let lanSuccess = false;
-        try {
-          const syncTimeout = new Promise((_, reject) => setTimeout(() => reject(new Error('Sync Timeout')), 15000));
-          
-          // Force LAN only for this attempt
-          const lanPayload = { ...payload, skip_relay: true };
-          
-          await Promise.race([
-            window.appAPI.triggerMobileSync(lanPayload),
-            syncTimeout
-          ]);
-          
-          const lanStep = pairingSteps.value.find(s => s.id === 'lan_sync');
-          if (lanStep && (lanStep.status === 'done' || lanStep.status === 'running')) {
-            updateStep('lan_sync', 'done', '');
-            lanSuccess = true;
-          }
-        } catch (e) {
-          updateStep('lan_sync', 'error', 'Error: ' + String(e));
-        }
-
-        if (lanSuccess) {
-          updateStep('relay_connect', 'skipped', '局域网已连接，无需外网穿透');
-          updateStep('relay_notify', 'skipped', '');
-          updateStep('relay_ack', 'skipped', '');
-          updateStep('relay_sync', 'skipped', '');
-          pairingDone.value = true;
-          pairingError.value = false;
-          return;
-        }
-      }
-
-      // Step 4: 局域网失败，尝试外网隧道握手 (Relay Handshake)
-      if (window.appAPI.relayHandshake) {
-        updateStep('relay_connect', 'running', '');
-        try {
-          const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Relay Timeout')), 30000));
-          await Promise.race([
-            window.appAPI.relayHandshake(payload.device_id, payload.public_key),
-            timeoutPromise
-          ]);
-          // done states are managed by sync:progress
-        } catch (e) {
-          console.warn('Relay handshake failed', e);
-          const errStr = String(e);
-          if (errStr.includes('ERR-PAIRING-01') || errStr.includes('Relay Timeout')) {
-              updateStep('relay_connect', 'error', 'Error: 手机连不上中继服务器');
-          } else if (errStr.includes('ERR-PAIRING-02')) {
-              updateStep('relay_notify', 'error', 'Error: 无法发送配对请求');
-          } else if (errStr.includes('ERR-PAIRING-03') || errStr.includes('ERR-PAIRING-04') || errStr.includes('Target device is offline')) {
-              updateStep('relay_ack', 'error', 'Error: PC无响应 (可能未联网或掉线)');
-          } else {
-              updateStep('relay_connect', 'error', 'Error: ' + errStr);
-          }
-          pairingDone.value = true;
-          pairingError.value = true;
-          return; // If handshake fails, no point in syncing
-        }
-      }
-
-      // Step 5: 外网隧道同步 (Relay Sync)
-      if (window.appAPI.triggerMobileSync) {
-        updateStep('relay_sync', 'running', '');
-        try {
-          const syncTimeout = new Promise((_, reject) => setTimeout(() => reject(new Error('Sync Timeout')), 45000));
-          const relayPayload = { ...payload, skip_relay: false, local_ips: [] }; // Force Relay
-          
-          await Promise.race([
-            window.appAPI.triggerMobileSync(relayPayload),
-            syncTimeout
-          ]);
-          
-          const relayStep = pairingSteps.value.find(s => s.id === 'relay_sync');
-          if (relayStep && (relayStep.status === 'done' || relayStep.status === 'running')) {
-            updateStep('relay_sync', 'done', '');
-          }
-          pairingDone.value = true;
-          pairingError.value = false;
-        } catch (e) {
-          updateStep('relay_sync', 'error', 'Error: ' + String(e));
-          pairingDone.value = true;
-          pairingError.value = true;
-        }
-      }
-
-    } catch (e) {
-      pairingDone.value = true;
-      pairingError.value = true;
-    } finally {
-      if (unlistenProgress) unlistenProgress();
-    }
+    await processPairingCode(code);
   } else {
     await showAlert(t('setup.scanner_not_supported') || '当前环境不支持扫码');
+  }
+};
+
+const processPairingCode = async (code) => {
+  let unlistenProgress = null;
+  if (window.__TAURI_IPC__) {
+    unlistenProgress = await listen('sync:progress', (event) => {
+      if (event.payload && typeof event.payload === 'object') {
+        syncProgressState.value = { ...syncProgressState.value, ...event.payload };
+        if (event.payload.stage === 'done' || event.payload.stage === 'error') {
+          setTimeout(() => { showProgress.value = false; }, 3000);
+        }
+      }
+    });
+  }
+
+  let payload;
+  try {
+    payload = JSON.parse(code);
+  } catch (e) {
+    await showAlert("配对内容无法解析 (非标准 JSON): " + e);
+    return;
+  }
+
+  const existingPayload = await window.appAPI.getConfig('pairing_payload');
+  if (existingPayload && existingPayload.device_id && existingPayload.device_id !== payload.device_id) {
+    const isOverride = await showConfirm(`⚠️ 身份不匹配\n\n您正在配对一个新的 PC (ID: ${payload.device_id.substring(0, 8)})\n但本机已绑定了另一个 PC (ID: ${existingPayload.device_id.substring(0, 8)})\n\n是否覆盖现有配对？(可能会导致同步记录分叉)`);
+    if (!isOverride) return;
+  } else {
+    const confirmed = await showConfirm(`发现设备 PC (ID: ${payload.device_id.substring(0, 8)}...)，是否连接并同步？`);
+    if (!confirmed) return;
+  }
+
+  initPairingSteps();
+  showPairingProgress.value = true;
+  updateStep('parse', 'done', '');
+
+  try {
+    unlistenProgress = await listen('sync:progress', (event) => {
+      const { stage, status, detail } = event.payload;
+      syncProgressState.value = { ...syncProgressState.value, ...event.payload };
+      updateStep(stage, status, detail || '');
+    });
+  } catch (e) {
+    console.warn('Could not listen to sync:progress events:', e);
+  }
+
+  try {
+    updateStep('save_config', 'running', '');
+    await window.appAPI.setConfig('pairing_payload', payload);
+    updateStep('save_config', 'done', '');
+
+    // Step 3: 尝试局域网直连同步 (LAN Sync)
+    if (window.appAPI.triggerMobileSync) {
+      updateStep('lan_sync', 'running', '');
+      let lanSuccess = false;
+      try {
+        const syncTimeout = new Promise((_, reject) => setTimeout(() => reject(new Error('Sync Timeout')), 15000));
+        const lanPayload = { ...payload, skip_relay: true };
+        await Promise.race([
+          window.appAPI.triggerMobileSync(lanPayload),
+          syncTimeout
+        ]);
+        const lanStep = pairingSteps.value.find(s => s.id === 'lan_sync');
+        if (lanStep && (lanStep.status === 'done' || lanStep.status === 'running')) {
+          updateStep('lan_sync', 'done', '');
+          lanSuccess = true;
+        }
+      } catch (e) {
+        updateStep('lan_sync', 'error', 'Error: ' + String(e));
+      }
+
+      if (lanSuccess) {
+        updateStep('relay_connect', 'skipped', '局域网已连接，无需外网穿透');
+        updateStep('relay_notify', 'skipped', '');
+        updateStep('relay_ack', 'skipped', '');
+        updateStep('relay_sync', 'skipped', '');
+        pairingDone.value = true;
+        pairingError.value = false;
+        fetchConnectedDevices();
+        return;
+      }
+    }
+
+    // Step 4: 局域网失败，尝试外网隧道握手 (Relay Handshake)
+    if (window.appAPI.relayHandshake) {
+      updateStep('relay_connect', 'running', '');
+      try {
+        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Relay Timeout')), 30000));
+        await Promise.race([
+          window.appAPI.relayHandshake(payload.device_id, payload.public_key),
+          timeoutPromise
+        ]);
+      } catch (e) {
+        console.warn('Relay handshake failed', e);
+        const errStr = String(e);
+        if (errStr.includes('ERR-PAIRING-01') || errStr.includes('Relay Timeout')) {
+          updateStep('relay_connect', 'error', 'Error: 手机连不上中继服务器');
+        } else if (errStr.includes('ERR-PAIRING-02')) {
+          updateStep('relay_notify', 'error', 'Error: 无法发送配对请求');
+        } else if (errStr.includes('ERR-PAIRING-03') || errStr.includes('ERR-PAIRING-04') || errStr.includes('Target device is offline')) {
+          updateStep('relay_ack', 'error', 'Error: PC无响应 (可能未联网或掉线)');
+        } else {
+          updateStep('relay_connect', 'error', 'Error: ' + errStr);
+        }
+        pairingDone.value = true;
+        pairingError.value = true;
+        return;
+      }
+    }
+
+    // Step 5: 外网隧道同步 (Relay Sync)
+    if (window.appAPI.triggerMobileSync) {
+      updateStep('relay_sync', 'running', '');
+      try {
+        const syncTimeout = new Promise((_, reject) => setTimeout(() => reject(new Error('Sync Timeout')), 45000));
+        const relayPayload = { ...payload, skip_relay: false, local_ips: [] };
+        await Promise.race([
+          window.appAPI.triggerMobileSync(relayPayload),
+          syncTimeout
+        ]);
+        const relayStep = pairingSteps.value.find(s => s.id === 'relay_sync');
+        if (relayStep && (relayStep.status === 'done' || relayStep.status === 'running')) {
+          updateStep('relay_sync', 'done', '');
+        }
+        pairingDone.value = true;
+        pairingError.value = false;
+      } catch (e) {
+        updateStep('relay_sync', 'error', 'Error: ' + String(e));
+        pairingDone.value = true;
+        pairingError.value = true;
+      }
+    }
+
+  } catch (e) {
+    pairingDone.value = true;
+    pairingError.value = true;
+  } finally {
+    if (unlistenProgress) unlistenProgress();
   }
 };
 

@@ -204,6 +204,26 @@ pub fn system_update_event_time(
     true
 }
 
+/// 更新事件描述
+#[tauri::command]
+pub fn system_update_event_description(
+    id: String,
+    description: String,
+    db: tauri::State<'_, crate::db::DbState>,
+) -> bool {
+    let conn = match db.0.lock() {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+    let now = super::now_ms();
+    conn.execute(
+        "UPDATE events SET description = ?1, updated_at = ?2 WHERE id = ?3",
+        params![description, now, id],
+    )
+    .unwrap_or(0);
+    true
+}
+
 /// 简易日期生成（避免引入 chrono 依赖）
 fn chrono_like_today() -> String {
     let now = std::time::SystemTime::now()
