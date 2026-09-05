@@ -1,6 +1,6 @@
 # Bob Agent 用户手册 / User Guide
 
-> **Version v0.4 (Tauri v2)**
+> **Version v0.9.5 (Tauri v2)**
 >
 > 你的桌面幽灵副手，隐于系统托盘，使命必达。
 
@@ -23,6 +23,8 @@
 13. [快捷键 / Keyboard Shortcuts](#13-快捷键--keyboard-shortcuts)
 14. [故障排查 / Troubleshooting](#14-故障排查--troubleshooting)
 15. [数据与隐私 / Data & Privacy](#15-数据与隐私--data--privacy)
+16. [持续工作台 / Work Core](#16-持续工作台--work-core)
+17. [移动前哨站 / Mobile Companion](#17-移动前哨站--mobile-companion)
 
 ---
 
@@ -30,7 +32,8 @@
 
 ### 系统要求 / System Requirements
 
-- **操作系统**：Windows 10 / 11（64-bit）
+- **桌面操作系统**：Windows 10 / 11（64-bit）
+- **移动端操作系统**：Android 10+ (可选伴侣端)
 - **API Key**：至少配置一个大模型供应商的 API Key（如 DeepSeek、OpenAI、通义千问等）
 
 > 💡 如果暂时没有付费 Key，可以使用 ModelScope（魔搭社区）的免费 API Key 开始体验。
@@ -492,3 +495,23 @@ Bob 拥有一个精心设计的三层记忆系统，让他真正"记住"你：
 ---
 
 > **Bob Agent — 隐于桌面，使命必达。**
+
+---
+
+## 16. 持续工作台 / Work Core
+
+Work Core 是 Bob 面向复杂日常业务长期推进的核心中枢：
+
+- **项目管理 (Projects)**：打破单次长会话的记忆遗忘，围绕具体业务目标（如“产品研发”、“月度结账”）建立长期追踪项目。
+- **任务与决策流 (Tasks & Decisions)**：在对话中达成的重要结论和架构决策，可一键或自动沉淀为确定性决策记录，支持阶段里程碑评审。
+- **Today Layer (晨报聚焦)**：启动时在同一弹层聚合当天最重要的焦点、待办与审批事项，断网毫秒级生成，无需浪费 Token。
+
+---
+
+## 17. 移动前哨站 / Mobile Companion
+
+通过官方 `bob-mobile-latest.apk`，手机将化身 Bob 的移动端前哨：
+
+- **无感扫码配对**：电脑端呼出配对向导，手机连接同一 Wi-Fi 扫码，自动通过 Ed25519 握手与 X25519-AES-GCM 加密建立安全通道。
+- **断网双向同步**：日程、随手记灵感卡片与知识笔记在手机与电脑间秒级合并；外出断网依然可查，重新连网后自动双向对齐。
+- **远程无头调用 (Headless)**：在户外可通过手机下发排查指令，电脑端在后台无头执行并回传分析报告。

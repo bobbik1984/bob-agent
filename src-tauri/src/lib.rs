@@ -776,6 +776,26 @@ pub fn run() {
 
     let browser_state = std::sync::Arc::new(browser::BrowserState::new());
 
+    let mut log_builder = tauri_plugin_log::Builder::default()
+        .level(log::LevelFilter::Info)
+        .max_file_size(2_000_000) // 单文件最大 2MB，自动轮转
+        .timezone_strategy(tauri_plugin_log::TimezoneStrategy::UseLocal)
+        .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepAll);
+
+    #[cfg(target_os = "android")]
+    {
+        // Android 端使用 TargetKind::Stdout，直接由 tauri-plugin-log 映射至 android_logger (__android_log_write)
+        // 绝对严禁使用 TargetKind::LogDir（会触发 run_mobile_plugin 同步阻塞等待 Android UI Looper，导致与 WebView 互斥死锁引发 ANR）
+        log_builder = log_builder.target(tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout));
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        log_builder = log_builder.target(tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir { file_name: Some("bob".into()) }));
+        if cfg!(debug_assertions) {
+            log_builder = log_builder.target(tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout));
+        }
+    }
+
     let mut builder = tauri::Builder::default()
         .manage(db::DbState(Mutex::new(db)))
         .manage(sidecar::SidecarState { child: Mutex::new(None) })
@@ -783,6 +803,8 @@ pub fn run() {
         .manage(browser_state.clone())
         .manage(crypto::DeviceIdentityState(std::sync::Mutex::new(None)))
         .manage(std::sync::Arc::new(sync_engine::DeviceRegistry::load()))
+        .plugin(log_builder.build())
+        .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_notification::init())
@@ -1070,34 +1092,19 @@ pub fn run() {
         .setup(|app| {
             use tauri::Manager;
 
-            // 解决移动端沙盒路径注入
-            #[cfg(any(target_os = "android", target_os = "ios"))]
+            // 解决移动端沙盒路径注入 (零 IPC，直接赋权原生安全路径)
+            #[cfg(target_os = "android")]
+            {
+                let target_dir = PathBuf::from("/data/user/0/bob.agent/files");
+                let _ = fs::create_dir_all(&target_dir);
+                let _ = DATA_DIR.set(target_dir);
+            }
+            #[cfg(target_os = "ios")]
             {
                 if let Ok(app_dir) = app.path().app_data_dir() {
-                    #[cfg(target_os = "android")]
-                    let target_dir = app_dir.join("files");
-                    #[cfg(not(target_os = "android"))]
-                    let target_dir = app_dir;
-
-                    let _ = fs::create_dir_all(&target_dir);
-                    let _ = DATA_DIR.set(target_dir);
+                    let _ = fs::create_dir_all(&app_dir);
+                    let _ = DATA_DIR.set(app_dir);
                 }
-            }
-
-            app.handle().plugin(tauri_plugin_shell::init())?;
-            // 日志：debug 输出到终端 + 文件，release 仅输出到文件
-            {
-                use tauri_plugin_log::{Target, TargetKind, TimezoneStrategy};
-                let mut log_builder = tauri_plugin_log::Builder::default()
-                    .level(log::LevelFilter::Info)
-                    .max_file_size(2_000_000) // 单文件最大 2MB，自动轮转
-                    .timezone_strategy(TimezoneStrategy::UseLocal)
-                    .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepAll)
-                    .target(Target::new(TargetKind::LogDir { file_name: Some("bob".into()) }));
-                if cfg!(debug_assertions) {
-                    log_builder = log_builder.target(Target::new(TargetKind::Stdout));
-                }
-                app.handle().plugin(log_builder.build())?;
             }
 
             // 读取用户上次保存的主题，动态设置原生窗口底色，防止在亮色模式下启动闪黑屏 (仅限桌面端)
@@ -1179,8 +1186,9 @@ pub fn run() {
                 llm::refresh_models_on_startup().await;
             });
 
-            // ── 内置技能库初始化 ──
+            // ── 内置技能库初始化 (仅限桌面端，移动端技能内嵌于 APK) ──
             // 记录安装包资源中 skills 目录的绝对路径，用于“双轨合并读取”架构
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
             {
                 use tauri::Manager;
                 let mut cfg = read_config();

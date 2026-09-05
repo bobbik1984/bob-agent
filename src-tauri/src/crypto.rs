@@ -20,6 +20,14 @@ struct EncryptedKeyData {
 }
 
 fn get_keys_path(app: &AppHandle) -> PathBuf {
+    #[cfg(target_os = "android")]
+    {
+        let _ = app;
+        crate::get_data_dir()
+            .join("workspace_config")
+            .join("device_identity.json")
+    }
+    #[cfg(not(target_os = "android"))]
     app.path()
         .app_data_dir()
         .unwrap_or_else(|_| PathBuf::from("."))

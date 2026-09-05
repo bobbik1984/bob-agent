@@ -190,11 +190,16 @@ Tauri Commands:
 安全防线: 6 层校验 (op 白名单 + provider 合法性 + key 长度 + config key 白名单 + 备份 + 审计日志)
 ```
 
-### 5. 其他模块
+### 5. 核心业务与基础设施模块
 
 | 模块 | 职责 |
 |------|------|
 | `lib.rs` | 入口 + config CRUD + DB 初始化 + 所有 Tauri Command 注册 + 系统托盘 + 全局快捷键 (Ctrl+Shift+B) + 单实例锁 |
+| `work_core/` | 持续工作台 (Continuous Work Core)：工作项目、任务、决策、里程碑与执行流状态机 |
+| `daily_brief/` | Conversation-first Today Layer：启动即见今日首要焦点与关注项，无感聚合日程待办 |
+| `goal_runtime/` | Goal Mode 执行引擎：Maker-Checker 运行时状态机、审批流决策与证据链跟踪 |
+| `sync_engine.rs` | 移动端多级降级同步引擎：局域网直连、中继穿透与离线双向 SQLite 合并 |
+| `mcp.rs` | 原生 MCP stdio 客户端 (JSON-RPC 2.0)，管理 MCP 外部子进程工具发现与调用 |
 | `filesystem.rs` | 文件读取/扫描/文件夹跟踪 |
 | `web.rs` | reqwest + scraper 网页抓取 |
 | `plugins.rs` | 技能/插件扫描 (SKILL.md YAML frontmatter) |
@@ -211,7 +216,7 @@ Tauri v2 采用 `invoke()` (前端→Rust) + `app.emit()` (Rust→前端) 双通
 
 ```javascript
 // src/tauri-bridge.js — 适配器层
-window.electronAPI = {
+window.appAPI = {
   // 同步调用 Rust Command
   getConversations: () => invoke('db_conversations'),
   listEvents:      () => invoke('system_list_events'),
@@ -222,24 +227,30 @@ window.electronAPI = {
 };
 ```
 
-> **铁律**: Vue 组件统一调用 `window.electronAPI.xxx()`，不直接 import `@tauri-apps/api`。
+> **铁律**: Vue 组件统一调用 `window.appAPI.xxx()`，不直接 import `@tauri-apps/api`。
 > 所有 Tauri 特有 API 仅在 `tauri-bridge.js` 中使用。
 
 ---
 
 ## IPC 实现状态速查表
 
-### 🟢 已用 Rust 实现（真实调用）
+### 🟢 已用 Rust / 标准 API 实现（真实调用）
 
-| 分类 | 前端调用 | Rust Command | 说明 |
+| 分类 | 前端调用 | Rust Command / 实现方式 | 说明 |
 |:---|:---|:---|:---|
 | 配置 | `isSetupComplete()` | `system_is_setup_complete` | config.json 判断 |
 | 配置 | `getConfig/setConfig/getAllConfig` | `config_get/set/get_all` | 键值 CRUD |
+| 工作 | `workProjectList/Create/Get/...` | `work_project_*` / `work_object_*` | Work Core 状态机 |
+| 晨报 | `dailyBriefGet/Refresh/MarkSeen` | `daily_brief_*` | Today Layer 聚合 |
+| 目标 | `goalRuntimeList/Get/Continue/...` | `goal_runtime_*` | Goal Mode 运行时 |
+| 同步 | `triggerMobileSync/relayHandshake/...` | `sync_*` / `relay_*` | 多端双向同步 |
 | 对话 | `getConversations/create/delete/rename` | `db_conversation_*` | rusqlite CRUD |
 | 消息 | `getMessages/addMessage` | `db_messages/db_message_add` | rusqlite |
 | LLM | `sendChat/sendVision` | `llm_chat/llm_vision` | reqwest SSE + Tool Calling |
 | LLM | `getModelPool/getActiveModels/assignModelRole` | `llm_get_*` | ModelHub |
-| 凭证 | `getApiKeys/setApiKey` | `system_get/set_api_key` | config.json 存储 |
+| 凭证 | `getApiKeys/setApiKey` | `system_get/set_api_key` | 本地受保护 config.json |
+| MCP | `getMcpConfig/setMcpConfig` | `mcp_get_config / mcp_set_config` | Rust 原生 stdio 管理 |
+| 剪贴板 | `getClipboardImage` | `navigator.clipboard.read()` | Web 标准图片读取并转 Base64 |
 | 日程 | `listEvents/confirmEvent/deleteEvent/...` | `system_list/confirm/delete_event` | calendar.rs SQLite |
 | 文件 | `readFile/scanFolder/getFileMeta` | `filesystem::system_*` | walkdir + fs |
 | 文件夹 | `getTrackedFolders/add/remove` | `filesystem::system_*_tracked_*` | config 持久化 |
@@ -254,17 +265,17 @@ window.electronAPI = {
 
 | 接口 | 说明 |
 |:---|:---|
-| `updateTheme` | 主题热切换（目前 console.log） |
-| `getClipboardImage` | 剪贴板图片读取（返回 null） |
+| `updateTheme` | 主题热切换（目前 console.log，由 CSS Variables 接管） |
 | `showNotification` | 桌面通知（console.log） |
-| `getMcpConfig/setMcpConfig` | MCP 服务器配置 |
-| `installPlugin` | 插件安装逻辑 |
+| `installPlugin` | 插件在线安装逻辑 |
 
 ---
 
 ## 数据库 Schema (SQLite / rusqlite)
 
-数据库位于 `%LOCALAPPDATA%/bob-agent/bob.db`：
+数据库物理存储路径：
+- **Windows**: `%APPDATA%\bob.agent\bob.db`
+- **Android**: `/data/data/bob.agent/files/bob.db`（具备旧版遗留路径自动寻址迁移）
 
 ```sql
 -- 对话历史

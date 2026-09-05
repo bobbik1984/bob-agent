@@ -1,0 +1,241 @@
+# ==============================================================================
+# Bob-Agent <-> Cloud-Agent 统一数据交换契约规范 (UDES - Project Delegation Spec)
+# Version: 1.0.0
+# Maintainer: Bob Core Architecture Team
+# Purpose: 为端侧 Bob (Work Core) 与云端执行群 (OpenClaw / VPS Workers) 提供解耦互联契约
+# ==============================================================================
+
+schema_version: 1
+
+# ------------------------------------------------------------------------------
+# 1. 任务派遣包契约 (ProjectTaskPacket)
+# 端侧发起任务时，生成此文件并写入 /interchange/requests/ 或通过 WebSocket 推送
+# ------------------------------------------------------------------------------
+project_task_packet:
+  description: "端侧向云端派发的自主长任务全量上下文"
+  type: object
+  required:
+    - schema_version
+    - packet_id
+    - project_id
+    - created_at
+    - source_device
+    - objective
+  properties:
+    schema_version:
+      type: integer
+      example: 1
+    packet_id:
+      type: string
+      description: "全局唯一派遣包 ID，用于幂等执行与追踪"
+      example: "pkt_20260905_a1b2c3d4"
+    project_id:
+      type: string
+      description: "所属项目 ID (在 Bob Work Core 中的项目标识符)"
+      example: "proj_quant_radar"
+    source_device:
+      type: string
+      description: "发起任务的端侧设备名或公钥指纹"
+      example: "thinkpad-x1c"
+    priority:
+      type: string
+      enum: [low, normal, high, critical]
+      default: normal
+    created_at:
+      type: integer
+      description: "毫秒时间戳"
+      example: 1788540000000
+
+    # 项目环境上下文 (自包含快照，云端 Worker 无需反查端侧数据库)
+    context:
+      type: object
+      properties:
+        mission:
+          type: string
+          description: "项目宏观使命与总体战略目标"
+        current_phase:
+          type: string
+          description: "当前项目生命周期阶段 (Discovery / Planning / Execution / Review)"
+        milestone_id:
+          type: string
+          description: "当前关联的里程碑 ID"
+        active_decisions:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string }
+              decision: { type: string }
+              reason: { type: string }
+        constraints_and_rules:
+          type: array
+          items: { type: string }
+          description: "项目强制遵守的编码/行为准则 (如 AGENTS.md 约束)"
+
+    # 具体指派任务
+    objective:
+      type: object
+      required:
+        - task_id
+        - task_title
+        - instruction
+      properties:
+        task_id:
+          type: string
+          example: "task_104"
+        task_title:
+          type: string
+          example: "编写多源热备切换模块与单元测试"
+        instruction:
+          type: string
+          description: "详细执行提示词与目标规范"
+        acceptance_criteria:
+          type: array
+          items: { type: string }
+          description: "验收标准（全量满足方可交付）"
+
+    # 算力配额与工具权限限制
+    constraints:
+      type: object
+      properties:
+        model_budget:
+          type: string
+          description: "推荐/限制使用的云端大模型 (需符合 unified_model_registry)"
+          example: "deepseek-reasoner"
+        max_tokens:
+          type: integer
+          default: 32000
+        timeout_seconds:
+          type: integer
+          default: 900
+        allowed_tools:
+          type: array
+          items: { type: string }
+          example: ["git_diff", "python_test", "web_search"]
+
+    # 回调通道
+    callback:
+      type: object
+      properties:
+        relay_channel:
+          type: string
+          description: "WebSocket 流式回传频道"
+          example: "ws://relay.bobbik.org:3722/channel/pkt_20260905_a1b2c3d4"
+        file_drop_path:
+          type: string
+          description: "离线落盘结果目录 (基于 Syncthing)"
+          example: "Assistant/common/interchange/results/"
+
+# ------------------------------------------------------------------------------
+# 2. 运行时心跳与思考流契约 (ExecutionHeartbeat)
+# 云端执行期间，通过 WebSocket 或日志轮询持续回传
+# ------------------------------------------------------------------------------
+execution_heartbeat:
+  description: "云端任务执行状态与流式思考进度"
+  type: object
+  required:
+    - packet_id
+    - timestamp
+    - status
+  properties:
+    packet_id:
+      type: string
+    timestamp:
+      type: integer
+    status:
+      type: string
+      enum: [queued, running, waiting_approval, completed, failed]
+    step:
+      type: integer
+      description: "当前步骤序号"
+    total_steps:
+      type: integer
+      description: "预估总步骤"
+    current_activity:
+      type: string
+      description: "当前正在执行的动作 (如 Running pytest...)"
+    thinking_snippet:
+      type: string
+      description: "模型的思维链片段 (可选)"
+    logs_snippet:
+      type: string
+      description: "最新的执行日志摘要"
+
+# ------------------------------------------------------------------------------
+# 3. 产物交付与变更审查契约 (ChangeReviewReceipt)
+# 云端完成长任务后落盘或推送，端侧用户在 Review Queue 中审批合并
+# ------------------------------------------------------------------------------
+change_review_receipt:
+  description: "云端产物回执与变更待审提案 (受保护，严禁静默直接篡改端侧)"
+  type: object
+  required:
+    - schema_version
+    - review_id
+    - packet_id
+    - project_id
+    - created_at
+    - summary
+    - payload_type
+    - payload
+  properties:
+    schema_version:
+      type: integer
+      example: 1
+    review_id:
+      type: string
+      example: "cr_20260905_9988"
+    packet_id:
+      type: string
+      example: "pkt_20260905_a1b2c3d4"
+    project_id:
+      type: string
+      example: "proj_quant_radar"
+    created_at:
+      type: integer
+    executor:
+      type: string
+      description: "执行节点与 Agent 标识"
+      example: "VPS2-CodeRunner-Worker"
+    summary:
+      type: string
+      description: "人类可读的完成概述与关键结论"
+
+    payload_type:
+      type: string
+      enum:
+        - git_patch          # 代码补丁 (git diff)
+        - markdown_artifact  # 调研报告、说明书、Markdown 文档
+        - structured_signal  # 量化交易信号、实体结构化数据
+        - decision_proposal  # 架构决策提议 (需写入 Decision 记录)
+
+    payload:
+      type: object
+      description: "具体交付内容载荷"
+      properties:
+        diff:
+          type: string
+          description: "若为 git_patch，为标准 Unified Diff"
+        content:
+          type: string
+          description: "若为文档，为完整 Markdown 内容"
+        signals:
+          type: array
+          description: "若为信号，为结构化键值对列表"
+        verification_report:
+          type: string
+          description: "云端执行的单元测试或验证结果输出"
+
+    required_actions:
+      type: array
+      items:
+        type: object
+        properties:
+          action:
+            type: string
+            enum: [apply_patch, save_artifact, update_task_status, record_decision]
+          target_path:
+            type: string
+          task_id:
+            type: string
+          new_status:
+            type: string

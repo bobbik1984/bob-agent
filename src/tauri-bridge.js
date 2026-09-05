@@ -653,14 +653,16 @@ if (IS_TAURI) {
 // window.appAPI — 统一接口层（Tauri 和浏览器共用）
 // ═══════════════════════════════════════════════════════════
 
+const isMobileDevice = typeof navigator !== 'undefined' && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+
 window.appAPI = {
-  // ── 窗口与事件控制 ──────────────────────────────────
-  minimizeWindow: () => getCurrentWindow().minimize(),
-  toggleMaximize: () => getCurrentWindow().toggleMaximize(),
-  hideWindow: () => getCurrentWindow().hide(),
-  showWindow: () => getCurrentWindow().show(),
-  focusWindow: () => getCurrentWindow().setFocus(),
-  unminimizeWindow: () => getCurrentWindow().unminimize(),
+  // ── 窗口与事件控制 (移动端安全空操作) ──────────────────
+  minimizeWindow: () => isMobileDevice ? Promise.resolve() : getCurrentWindow().minimize(),
+  toggleMaximize: () => isMobileDevice ? Promise.resolve() : getCurrentWindow().toggleMaximize(),
+  hideWindow: () => isMobileDevice ? Promise.resolve() : getCurrentWindow().hide(),
+  showWindow: () => isMobileDevice ? Promise.resolve() : getCurrentWindow().show(),
+  focusWindow: () => isMobileDevice ? Promise.resolve() : getCurrentWindow().setFocus(),
+  unminimizeWindow: () => isMobileDevice ? Promise.resolve() : getCurrentWindow().unminimize(),
   listenEvent: (event, handler) => listen(event, handler),
 
   // ── 持续工作核心 (Work Core) ─────────────────────────
