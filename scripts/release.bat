@@ -34,6 +34,9 @@ if /i "%ARG%"=="2"     goto DO_PC
 if /i "%ARG%"=="--apk" goto DO_APK
 if /i "%ARG%"=="-m"    goto DO_APK
 if /i "%ARG%"=="3"     goto DO_APK
+if /i "%ARG%"=="--publish" goto DO_PUBLISH
+if /i "%ARG%"=="-pub"      goto DO_PUBLISH
+if /i "%ARG%"=="5"          goto DO_PUBLISH
 if /i "%ARG%"=="--diag" goto DO_DIAG
 if /i "%ARG%"=="-d"     goto DO_DIAG
 if /i "%ARG%"=="4"      goto DO_DIAG
@@ -49,6 +52,7 @@ echo   --all, -a, 1    全套打包 (PC 安装包/便携包 + 安卓 APK 同步�
 echo   --pc,  -p, 2    仅打包 PC 版 (bob-installer.exe + bob-agent-portable.zip)
 echo   --apk, -m, 3    仅同步/安装安卓版 (下载最新签名 APK + ADB 直装)
 echo   --diag, -d, 4   运行真机闪退与 Rust 日志诊断
+echo   --publish, -pub, 5 正式全渠道发版 (PC编译 + 安卓同步 + 官网部署 + GitHub Release)
 echo   --help, -h      显示本帮助信息
 echo.
 exit /b 0
@@ -75,15 +79,19 @@ echo.
 echo   [4] 运行安卓真机闪退诊断 (ADB Crash Diagnostic)
 echo       - 捕获真机 Crash、SIGABRT 与 Rust 运行时日志
 echo.
+echo   [5] 正式全渠道发版 (All-in-One Full Release)
+echo       - 编译 PC 版 + 同步安卓 APK + 部署官网 (bob.bobbik.org) + 发布 GitHub Release
+echo.
 echo   [Q] 退出 (Exit)
 echo.
 echo ===========================================================
-set /p "CHOICE=请输入选项 [1-4, Q] (默认 1): "
+set /p "CHOICE=请输入选项 [1-5, Q] (默认 1): "
 if "%CHOICE%"=="" set "CHOICE=1"
 if /i "%CHOICE%"=="1" goto DO_ALL
 if /i "%CHOICE%"=="2" goto DO_PC
 if /i "%CHOICE%"=="3" goto DO_APK
 if /i "%CHOICE%"=="4" goto DO_DIAG
+if /i "%CHOICE%"=="5" goto DO_PUBLISH
 if /i "%CHOICE%"=="q" exit /b 0
 echo 无效选项: %CHOICE%
 pause
@@ -106,6 +114,38 @@ if errorlevel 1 goto FAIL
 goto FINISH_ALL
 
 :: ===========================================================
+:: ===========================================================
+:: 正式全渠道发版 (All-in-One Full Release)
+:: ===========================================================
+:DO_PUBLISH
+echo.
+echo ===========================================================
+echo   [模式 5] 正式全渠道发版 (PC编译 + 安卓同步 + 官网同步 + GitHub Release)
+echo ===========================================================
+call :BUILD_PC_ROUTINE
+if errorlevel 1 goto FAIL
+
+call :SYNC_APK_ROUTINE
+if errorlevel 1 goto FAIL
+
+echo.
+echo >>> [PUBLISH 1/2] 同步构建产物至官网与下载中心 (bob.bobbik.org)...
+python "%ROOT%\website\sync_deploy.py"
+if errorlevel 1 (
+    echo [FAIL] 官网同步失败！
+    goto FAIL
+)
+
+echo.
+echo >>> [PUBLISH 2/2] 上传全平台产物至 GitHub Release...
+python "%ROOT%\scripts\upload_github_release.py"
+if errorlevel 1 (
+    echo [FAIL] GitHub Release 上传失败！
+    goto FAIL
+)
+
+goto FINISH_PUBLISH
+
 :: 仅打包 PC 版 (PC Only)
 :: ===========================================================
 :DO_PC
