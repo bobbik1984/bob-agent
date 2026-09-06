@@ -129,7 +129,7 @@ call :SYNC_APK_ROUTINE
 if errorlevel 1 goto FAIL
 
 echo.
-echo >>> [PUBLISH 1/2] 同步构建产物至官网与下载中心 (bob.bobbik.org)...
+echo ==> [PUBLISH 1/2] 同步构建产物至官网与下载中心 (bob.bobbik.org)...
 python "%ROOT%\website\sync_deploy.py"
 if errorlevel 1 (
     echo [FAIL] 官网同步失败！
@@ -137,7 +137,7 @@ if errorlevel 1 (
 )
 
 echo.
-echo >>> [PUBLISH 2/2] 上传全平台产物至 GitHub Release...
+echo ==> [PUBLISH 2/2] 上传全平台产物至 GitHub Release...
 python "%ROOT%\scripts\upload_github_release.py"
 if errorlevel 1 (
     echo [FAIL] GitHub Release 上传失败！
@@ -188,7 +188,7 @@ exit /b 0
 :: ===========================================================
 :BUILD_PC_ROUTINE
 echo.
-echo >>> [PC 1/6] 编译主应用 (pnpm run tauri build)...
+echo ==> [PC 1/6] 编译主应用 (pnpm run tauri build)...
 cd /d "%ROOT%"
 call pnpm run tauri build
 if errorlevel 1 (
@@ -198,7 +198,7 @@ if errorlevel 1 (
 echo [OK] PC 主应用编译完成。
 
 echo.
-echo >>> [PC 2/6] 生成安装 Payload (node scripts/build_payload.mjs)...
+echo ==> [PC 2/6] 生成安装 Payload (node scripts/build_payload.mjs)...
 call node scripts/build_payload.mjs
 if errorlevel 1 (
     echo [FAIL] Payload 生成失败！
@@ -207,12 +207,12 @@ if errorlevel 1 (
 echo [OK] Payload 生成成功。
 
 echo.
-echo >>> [PC 3/6] 同步 Payload 至安装器工程...
+echo ==> [PC 3/6] 同步 Payload 至安装器工程...
 copy /y "%ROOT%\payload.zip" "%ROOT%\installer\src-tauri\payload.zip" >nul
 echo [OK] Payload 已同步。
 
 echo.
-echo >>> [PC 4/6] 编译轻量级安装器 (installer\pnpm run tauri build)...
+echo ==> [PC 4/6] 编译轻量级安装器 (installer\pnpm run tauri build)...
 cd /d "%ROOT%\installer"
 call pnpm run tauri build
 if errorlevel 1 (
@@ -222,7 +222,7 @@ if errorlevel 1 (
 echo [OK] 安装器编译完成。
 
 echo.
-echo >>> [PC 5/6] 归档产物至 dist-release\...
+echo ==> [PC 5/6] 归档产物至 dist-release\...
 cd /d "%ROOT%"
 if not exist "%DIST_DIR%" mkdir "%DIST_DIR%"
 copy /y "%ROOT%\installer\src-tauri\target\release\bob-installer.exe" "%DIST_DIR%\bob-installer.exe" >nul
@@ -232,7 +232,7 @@ echo      - %DIST_DIR%\bob-installer.exe
 echo      - %DIST_DIR%\bob-agent-portable.zip
 
 echo.
-echo >>> [PC 6/6] 清理中间临时文件...
+echo ==> [PC 6/6] 清理中间临时文件...
 del /q "%ROOT%\payload.zip" 2>nul
 del /q "%ROOT%\installer\src-tauri\payload.zip" 2>nul
 if exist "%ROOT%\src-tauri\target\release\bundle" rd /s /q "%ROOT%\src-tauri\target\release\bundle" 2>nul
@@ -245,7 +245,7 @@ exit /b 0
 :: ===========================================================
 :SYNC_APK_ROUTINE
 echo.
-echo >>> [APK] 检查云端 CI 状态并拉取最新已签名 APK...
+echo ==> [APK] 检查云端 CI 状态并拉取最新已签名 APK...
 powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%\scripts\download_signed_apk.ps1"
 if errorlevel 1 (
     echo [FAIL] 安卓 APK 同步或安装失败！
