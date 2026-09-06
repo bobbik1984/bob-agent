@@ -254,8 +254,20 @@ if errorlevel 1 (
 exit /b 0
 
 :: ===========================================================
-:: 完成与退出
-:: ===========================================================
+:FINISH_PUBLISH
+echo.
+echo ===========================================================
+echo    全渠道发版完成 (Full Release Completed)!
+echo ===========================================================
+echo.
+echo  PC 安装包:    dist-release\bob-installer.exe
+echo  PC 便携版:    dist-release\bob-agent-portable.zip
+echo  安卓 APK:     dist-release\bob-mobile-latest.apk
+echo  官方站点:     https://bob.bobbik.org
+echo  Release页面:  https://github.com/bobbik1984/bob-agent/releases/tag/v0.9.5
+echo.
+goto SHOW_EXPLORER
+
 :FINISH_ALL
 echo.
 echo ===========================================================
