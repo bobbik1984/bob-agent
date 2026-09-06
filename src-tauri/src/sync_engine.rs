@@ -1660,11 +1660,52 @@ async fn connect_websocket_robust(
     String,
 > {
     log::info!(
-        "[WS Robust] Connecting to {} using standard connect_async",
+        "[WS Robust] Connecting to {} with IPv4 priority",
         ws_url
     );
-    tokio_tungstenite::connect_async(ws_url)
+
+    let request = ws_url.into_client_request().map_err(|e| e.to_string())?;
+    let host = request.uri().host().unwrap_or("relay.bobbik.org").to_string();
+    let port = request.uri().port_u16().unwrap_or(443);
+
+    // Resolve DNS and sort so IPv4 comes first (avoids IPv6 blackholes behind VPNs)
+    let addrs_lookup = tokio::net::lookup_host(format!("{}:{}", host, port)).await;
+    let mut addrs: Vec<std::net::SocketAddr> = match addrs_lookup {
+        Ok(iter) => iter.collect(),
+        Err(e) => {
+            log::warn!("[WS Robust] DNS lookup failed for {}:{}: {}, fallback to connect_async", host, port, e);
+            return tokio::time::timeout(std::time::Duration::from_secs(10), tokio_tungstenite::connect_async(request))
+                .await
+                .map_err(|_| "WS connection timeout after 10s".to_string())?
+                .map_err(|e| e.to_string());
+        }
+    };
+
+    addrs.sort_by_key(|addr| !addr.is_ipv4());
+
+    let mut connected_stream = None;
+    for addr in addrs {
+        log::info!("[WS Robust] Attempting TCP connect to {} ({})", host, addr);
+        match tokio::time::timeout(std::time::Duration::from_secs(4), TcpStream::connect(addr)).await {
+            Ok(Ok(stream)) => {
+                log::info!("[WS Robust] TCP connected successfully to {} ({})", host, addr);
+                connected_stream = Some(stream);
+                break;
+            }
+            Ok(Err(e)) => {
+                log::warn!("[WS Robust] TCP connect failed to {}: {}", addr, e);
+            }
+            Err(_) => {
+                log::warn!("[WS Robust] TCP connect timed out after 4s to {}", addr);
+            }
+        }
+    }
+
+    let stream = connected_stream.ok_or_else(|| format!("Could not connect to any address for {}:{}", host, port))?;
+
+    tokio::time::timeout(std::time::Duration::from_secs(10), tokio_tungstenite::client_async_tls(request, stream))
         .await
+        .map_err(|_| "WS TLS handshake timed out after 10s".to_string())?
         .map_err(|e| e.to_string())
 }
 

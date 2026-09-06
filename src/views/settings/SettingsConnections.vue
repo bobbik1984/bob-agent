@@ -954,13 +954,22 @@ const diagnosticPaths = computed(() => {
   };
 });
 
-const diagnosticNodes = computed(() => ({
-  mobile: mobilePeerOnline.value ? 'success' : (pairingDone.value && !pairingError.value ? 'success' : 'unknown'),
-  relay: connectivitySnapshot.value.relay === 'registered' ? 'success' : (connectivitySnapshot.value.relay === 'connecting' ? 'running' : 'failed'),
-  pc: connectivitySnapshot.value.local_identity === 'ready' ? 'success' : (relayAckStep.value?.status === 'done' || lanStep.value?.status === 'done'
-    ? 'success'
-    : (relayAckStep.value?.status === 'error' ? 'unknown' : 'pending')),
-}));
+const diagnosticNodes = computed(() => {
+  const isMob = isNativeMobile || isMobile.value;
+  const localReady = connectivitySnapshot.value.local_identity === 'ready';
+  const peerSuccess = relayAckStep.value?.status === 'done' || lanStep.value?.status === 'done' || (pairingDone.value && !pairingError.value);
+  const peerError = relayAckStep.value?.status === 'error' || lanStep.value?.status === 'error' || (pairingDone.value && pairingError.value);
+
+  return {
+    mobile: isMob 
+      ? (localReady ? 'success' : 'pending')
+      : (mobilePeerOnline.value || peerSuccess ? 'success' : (peerError ? 'failed' : 'unknown')),
+    relay: connectivitySnapshot.value.relay === 'registered' ? 'success' : (connectivitySnapshot.value.relay === 'connecting' ? 'running' : 'failed'),
+    pc: !isMob
+      ? (localReady ? 'success' : 'pending')
+      : (peerSuccess ? 'success' : (peerError ? 'failed' : (relayAckStep.value?.status === 'running' ? 'running' : 'unknown'))),
+  };
+});
 
 async function initPairingSteps() {
     pairingSteps.value = [
@@ -1125,12 +1134,12 @@ const processPairingCode = async (code) => {
       } catch (e) {
         console.warn('Relay handshake failed', e);
         const errStr = String(e);
-        if (errStr.includes('ERR-PAIRING-01') || errStr.includes('Relay Timeout')) {
-          updateStep('relay_connect', 'error', 'Error: 手机连不上中继服务器');
+        if (errStr.includes('ERR-PAIRING-01')) {
+          updateStep('relay_connect', 'error', 'Error: 手机中继未就绪 (正在重连)');
+        } else if (errStr.includes('Relay Timeout') || errStr.includes('ERR-PAIRING-03') || errStr.includes('ERR-PAIRING-04') || errStr.includes('Target device is offline')) {
+          updateStep('relay_ack', 'error', 'Error: PC未响应 (电脑未连接中继或掉线)');
         } else if (errStr.includes('ERR-PAIRING-02')) {
-          updateStep('relay_notify', 'error', 'Error: 无法发送配对请求');
-        } else if (errStr.includes('ERR-PAIRING-03') || errStr.includes('ERR-PAIRING-04') || errStr.includes('Target device is offline')) {
-          updateStep('relay_ack', 'error', 'Error: PC无响应 (可能未联网或掉线)');
+          updateStep('relay_notify', 'error', 'Error: 无法通过中继发送配对请求');
         } else {
           updateStep('relay_connect', 'error', 'Error: ' + errStr);
         }
