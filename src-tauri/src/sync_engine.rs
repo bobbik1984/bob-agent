@@ -185,6 +185,11 @@ pub fn register_device(app: &AppHandle, headers: &axum::http::HeaderMap, ip: std
         headers.get("x-device-id").and_then(|v| v.to_str().ok()),
         headers.get("x-platform").and_then(|v| v.to_str().ok()),
     ) {
+        let my_device_id = crate::read_config().get("device_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        if !my_device_id.is_empty() && device_id == my_device_id {
+            log::debug!("[Sync Engine] Skipping register_device for self device_id: {}", device_id);
+            return;
+        }
         let registry = app.state::<Arc<DeviceRegistry>>();
         let device_name = headers
             .get("x-device-name")
@@ -516,6 +521,11 @@ pub async fn trigger_wakeup_via_relay(app: AppHandle, device_id: String) -> Resu
         .and_then(|v| v.as_str())
         .unwrap_or("unknown")
         .to_string();
+
+    if !my_device_id.is_empty() && device_id == my_device_id {
+        log::debug!("[Sync Engine] Skipping wakeup for self device_id: {}", device_id);
+        return Ok(());
+    }
 
     log_sync_action(
         "Relay Wakeup",
@@ -1703,10 +1713,27 @@ async fn connect_websocket_robust(
 
     let stream = connected_stream.ok_or_else(|| format!("Could not connect to any address for {}:{}", host, port))?;
 
-    tokio::time::timeout(std::time::Duration::from_secs(10), tokio_tungstenite::client_async_tls(request, stream))
-        .await
-        .map_err(|_| "WS TLS handshake timed out after 10s".to_string())?
-        .map_err(|e| e.to_string())
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let mut root_store = rustls::RootCertStore::empty();
+    root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+    let client_config = rustls::ClientConfig::builder_with_provider(std::sync::Arc::new(rustls::crypto::ring::default_provider()))
+        .with_safe_default_protocol_versions()
+        .map_err(|e| format!("TLS protocol config error: {}", e))?
+        .with_root_certificates(root_store)
+        .with_no_client_auth();
+    let connector = tokio_tungstenite::Connector::Rustls(std::sync::Arc::new(client_config));
+
+    log::info!("[WS Robust] Initiating TLS handshake with {}", host);
+    let ws_stream = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        tokio_tungstenite::client_async_tls_with_config(request, stream, None, Some(connector)),
+    )
+    .await
+    .map_err(|_| "WS TLS handshake timed out after 10s".to_string())?
+    .map_err(|e| format!("WS TLS handshake failed: {}", e))?;
+
+    log::info!("[WS Robust] TLS handshake and WebSocket upgrade succeeded for {}", host);
+    Ok(ws_stream)
 }
 
 pub fn start_relay_listener(app: AppHandle) {

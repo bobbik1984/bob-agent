@@ -682,7 +682,7 @@
         </div>
         
         <div class="briefing-body" style="padding: 20px; display: flex; flex-direction: column; gap: 12px; max-height: 400px; overflow-y: auto;">
-          <div v-for="dev in connectedDevices" :key="dev.device_id" style="display: flex; flex-direction: column; gap: 6px; background: var(--bg-tertiary); padding: 12px; border-radius: var(--radius-default); border: 1px solid var(--border-subtle);">
+          <div v-for="dev in displayConnectedDevices" :key="dev.device_id" style="display: flex; flex-direction: column; gap: 6px; background: var(--bg-tertiary); padding: 12px; border-radius: var(--radius-default); border: 1px solid var(--border-subtle);">
             <div style="display: flex; justify-content: space-between; align-items: center;">
               <div style="display: flex; align-items: center; gap: 6px;">
                 <span class="status-dot" :class="isDeviceOnline(dev) ? 'dot-connected' : 'dot-disconnected'" style="width: 8px; height: 8px; border-radius: 50%;"></span>
@@ -699,7 +699,7 @@
               <div>最后活跃: {{ formatTime(dev.last_seen) }}</div>
             </div>
           </div>
-          <div v-if="connectedDevices.length === 0" style="text-align: center; padding: 20px; color: var(--text-tertiary); font-size: 13px;">
+          <div v-if="displayConnectedDevices.length === 0" style="text-align: center; padding: 20px; color: var(--text-tertiary); font-size: 13px;">
             暂无已配对设备
           </div>
         </div>
@@ -1414,6 +1414,10 @@ const fetchPairingInfo = async () => {
 };
 
 const connectedDevices = ref([]);
+const displayConnectedDevices = computed(() => {
+  const myId = pairingInfo.value.device_id;
+  return connectedDevices.value.filter(d => !myId || d.device_id !== myId);
+});
 let unlistenDeviceConnected = null;
 let unlistenDeviceSyncing = null;
 

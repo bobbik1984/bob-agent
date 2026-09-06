@@ -808,6 +808,7 @@ fn import_skills_zip(path: String) -> Result<bool, String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
     let db = db::init_db(&get_data_dir());
     let wechat_state = std::sync::Arc::new(wechat::WechatState::new());
 

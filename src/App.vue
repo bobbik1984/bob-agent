@@ -879,10 +879,13 @@ onMounted(async () => {
       try {
         if (window.appAPI.getConnectedDevices && window.appAPI.triggerWakeupViaRelay) {
           const devices = await window.appAPI.getConnectedDevices();
+          const myDevId = (await window.appAPI.getConfig?.('device_id')) || '';
           if (devices && devices.length > 0) {
             console.log(`[Sync] PC端启动，向 ${devices.length} 个配对设备发送上线唤醒信令...`);
             for (const dev of devices) {
-              window.appAPI.triggerWakeupViaRelay(dev.device_id).catch(err => console.error('Wakeup error:', err));
+              if (dev.device_id && dev.device_id !== myDevId) {
+                window.appAPI.triggerWakeupViaRelay(dev.device_id).catch(err => console.error('Wakeup error:', err));
+              }
             }
           }
         }

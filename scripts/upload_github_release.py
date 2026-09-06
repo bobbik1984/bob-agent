@@ -37,7 +37,7 @@ def get_github_token():
             stderr=subprocess.PIPE,
             text=True
         )
-        out, _ = p.communicate("protocol=https\nhost=github.com\n")
+        out, _ = p.communicate("protocol=https\nhost=github.com\n\n")
         for line in out.splitlines():
             if line.startswith("password="):
                 tok = line.split("=", 1)[1].strip()
