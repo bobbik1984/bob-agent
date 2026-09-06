@@ -930,6 +930,116 @@ const diagnosticPaths = computed(() => {
   const forceSuccess = pairingDone.value && !pairingError.value;
   const mapStatus = (status) => forceSuccess && (status === 'running' || status === 'success') ? 'success' : status;
 
+  // When pairing progress modal is active, drive topology dynamically from pairingSteps!
+  if (showPairingProgress.value) {
+    const lanStat = lanStep.value?.status;
+    const connectStat = relayConnectStep.value?.status;
+    const notifyStat = relayNotifyStep.value?.status;
+    const ackStat = relayAckStep.value?.status;
+    const syncStat = relaySyncStep.value?.status;
+
+    // Phase 1: LAN direct check
+    if (lanStat === 'running') {
+      return {
+        lan_direct: 'running',
+        mobile_to_relay: 'unknown',
+        relay_to_pc: 'unknown',
+        pc_to_relay: 'unknown',
+        relay_to_mobile: 'unknown',
+      };
+    }
+    if (lanStat === 'done') {
+      return {
+        lan_direct: 'success',
+        mobile_to_relay: 'unknown',
+        relay_to_pc: 'unknown',
+        pc_to_relay: 'unknown',
+        relay_to_mobile: 'unknown',
+      };
+    }
+
+    // LAN failed or skipped; transitioning to Relay
+    // Phase 2: Mobile -> Relay connection
+    if (connectStat === 'running') {
+      return {
+        lan_direct: 'failed',
+        mobile_to_relay: 'running',
+        relay_to_pc: 'unknown',
+        pc_to_relay: 'unknown',
+        relay_to_mobile: 'unknown',
+      };
+    }
+    if (connectStat === 'error') {
+      return {
+        lan_direct: 'failed',
+        mobile_to_relay: 'failed',
+        relay_to_pc: 'unknown',
+        pc_to_relay: 'unknown',
+        relay_to_mobile: 'unknown',
+      };
+    }
+
+    // Phase 3: Relay -> PC notification
+    if (notifyStat === 'running') {
+      return {
+        lan_direct: 'failed',
+        mobile_to_relay: 'success',
+        relay_to_pc: 'running',
+        pc_to_relay: 'unknown',
+        relay_to_mobile: 'unknown',
+      };
+    }
+    if (notifyStat === 'error') {
+      return {
+        lan_direct: 'failed',
+        mobile_to_relay: 'success',
+        relay_to_pc: 'failed',
+        pc_to_relay: 'unknown',
+        relay_to_mobile: 'unknown',
+      };
+    }
+
+    // Phase 4: PC Ack waiting / roundtrip
+    if (ackStat === 'running') {
+      return {
+        lan_direct: 'failed',
+        mobile_to_relay: 'success',
+        relay_to_pc: 'running',
+        pc_to_relay: 'running',
+        relay_to_mobile: 'unknown',
+      };
+    }
+    if (ackStat === 'error') {
+      return {
+        lan_direct: 'failed',
+        mobile_to_relay: 'success',
+        relay_to_pc: 'failed',
+        pc_to_relay: 'failed',
+        relay_to_mobile: 'unknown',
+      };
+    }
+
+    // Phase 5: Ack succeeded or Syncing
+    if (ackStat === 'done' || syncStat === 'running' || syncStat === 'done') {
+      return {
+        lan_direct: 'failed',
+        mobile_to_relay: 'success',
+        relay_to_pc: 'success',
+        pc_to_relay: 'success',
+        relay_to_mobile: 'success',
+      };
+    }
+
+    return {
+      lan_direct: 'unknown',
+      mobile_to_relay: 'unknown',
+      relay_to_pc: 'unknown',
+      pc_to_relay: 'unknown',
+      relay_to_mobile: 'unknown',
+    };
+  }
+
+  // Not in pairing modal: default settings overview
   const observed = connectivitySnapshot.value.active_trace?.paths;
   if (observed) {
     return {
@@ -940,34 +1050,66 @@ const diagnosticPaths = computed(() => {
       relay_to_mobile: mapStatus(observed.relay_to_mobile?.status || 'unknown'),
     };
   }
-  const relayRoundTripSucceeded = relayAckStep.value?.status === 'done';
-  const relayRoundTripRunning = ['running', 'done'].includes(relayConnectStep.value?.status)
-    || ['running', 'done'].includes(relayNotifyStep.value?.status);
-    
-  const mapLegacy = (status) => forceSuccess && (status === 'running' || status === 'success') ? 'success' : status;
+
   return {
-    lan_direct: mapLegacy(normalizeLegacyStatus(lanStep.value?.status)),
-    mobile_to_relay: mapLegacy(normalizeLegacyStatus(relayConnectStep.value?.status)),
-    relay_to_pc: mapLegacy(relayRoundTripSucceeded ? 'success' : (relayRoundTripRunning ? 'running' : 'unknown')),
-    pc_to_relay: mapLegacy(relayRoundTripSucceeded ? 'success' : 'unknown'),
-    relay_to_mobile: mapLegacy(relayRoundTripSucceeded ? 'success' : 'unknown'),
+    lan_direct: 'unknown',
+    mobile_to_relay: connectivitySnapshot.value.relay === 'registered' ? 'success' : 'unknown',
+    relay_to_pc: mobilePeerOnline.value ? 'success' : 'unknown',
+    pc_to_relay: mobilePeerOnline.value ? 'success' : 'unknown',
+    relay_to_mobile: mobilePeerOnline.value ? 'success' : 'unknown',
   };
 });
 
 const diagnosticNodes = computed(() => {
   const isMob = isNativeMobile || isMobile.value;
-  const localReady = connectivitySnapshot.value.local_identity === 'ready';
-  const peerSuccess = relayAckStep.value?.status === 'done' || lanStep.value?.status === 'done' || (pairingDone.value && !pairingError.value);
-  const peerError = relayAckStep.value?.status === 'error' || lanStep.value?.status === 'error' || (pairingDone.value && pairingError.value);
 
+  if (showPairingProgress.value) {
+    const lanStat = lanStep.value?.status;
+    const connectStat = relayConnectStep.value?.status;
+    const notifyStat = relayNotifyStep.value?.status;
+    const ackStat = relayAckStep.value?.status;
+    const syncStat = relaySyncStep.value?.status;
+
+    // Mobile node: active during pairing, error if pairing failed
+    const mobileNodeState = pairingError.value ? 'failed' : 'success';
+
+    // Relay node (Cloud):
+    // MUST remain 'unknown' (gray/dormant) while in Step 1 (lan_sync)!
+    // Only activates when relay_connect begins!
+    let relayNodeState = 'unknown';
+    if (connectStat === 'running') {
+      relayNodeState = 'running';
+    } else if (connectStat === 'error') {
+      relayNodeState = 'failed';
+    } else if (connectStat === 'done' || ['running', 'done', 'error'].includes(notifyStat) || ['running', 'done', 'error'].includes(ackStat) || ['running', 'done', 'error'].includes(syncStat)) {
+      relayNodeState = 'success';
+    }
+
+    // PC node:
+    let pcNodeState = 'unknown';
+    if (lanStat === 'done') {
+      pcNodeState = 'success';
+    } else if (ackStat === 'running') {
+      pcNodeState = 'running';
+    } else if (ackStat === 'error') {
+      pcNodeState = 'failed';
+    } else if (ackStat === 'done' || syncStat === 'done' || (pairingDone.value && !pairingError.value)) {
+      pcNodeState = 'success';
+    }
+
+    return {
+      mobile: mobileNodeState,
+      relay: relayNodeState,
+      pc: pcNodeState,
+    };
+  }
+
+  // Not in pairing modal: default settings overview
+  const localReady = connectivitySnapshot.value.local_identity === 'ready';
   return {
-    mobile: isMob 
-      ? (localReady ? 'success' : 'pending')
-      : (mobilePeerOnline.value || peerSuccess ? 'success' : (peerError ? 'failed' : 'unknown')),
+    mobile: isMob ? (localReady ? 'success' : 'pending') : (mobilePeerOnline.value ? 'success' : 'unknown'),
     relay: connectivitySnapshot.value.relay === 'registered' ? 'success' : (connectivitySnapshot.value.relay === 'connecting' ? 'running' : 'failed'),
-    pc: !isMob
-      ? (localReady ? 'success' : 'pending')
-      : (peerSuccess ? 'success' : (peerError ? 'failed' : (relayAckStep.value?.status === 'running' ? 'running' : 'unknown'))),
+    pc: !isMob ? (localReady ? 'success' : 'pending') : (mobilePeerOnline.value ? 'success' : 'unknown'),
   };
 });
 
@@ -1135,13 +1277,15 @@ const processPairingCode = async (code) => {
         console.warn('Relay handshake failed', e);
         const errStr = String(e);
         if (errStr.includes('ERR-PAIRING-01')) {
-          updateStep('relay_connect', 'error', 'Error: 手机中继未就绪 (正在重连)');
-        } else if (errStr.includes('Relay Timeout') || errStr.includes('ERR-PAIRING-03') || errStr.includes('ERR-PAIRING-04') || errStr.includes('Target device is offline')) {
-          updateStep('relay_ack', 'error', 'Error: PC未响应 (电脑未连接中继或掉线)');
-        } else if (errStr.includes('ERR-PAIRING-02')) {
-          updateStep('relay_notify', 'error', 'Error: 无法通过中继发送配对请求');
+          updateStep('relay_connect', 'error', '手机未连接中继服务器 (ERR-PAIRING-01: 检查手机网络)');
+        } else if (errStr.includes('ERR-PAIRING-02') || errStr.includes('Target device is offline') || errStr.includes('RLY-TARGET-OFFLINE')) {
+          updateStep('relay_notify', 'error', '电脑端未在线 (ERR-PAIRING-02: 电脑未开启Bob或中继掉线)');
+        } else if (errStr.includes('ERR-PAIRING-03') || errStr.includes('Relay Timeout') || errStr.includes('Relay 请求超时')) {
+          updateStep('relay_ack', 'error', '等待电脑响应超时 (ERR-PAIRING-03: PC未在10秒内确认)');
+        } else if (errStr.includes('ERR-PAIRING-04') || errStr.includes('Unauthorized')) {
+          updateStep('relay_ack', 'error', '电脑拒绝配对 (ERR-PAIRING-04: 二维码安全凭证已过期或不匹配)');
         } else {
-          updateStep('relay_connect', 'error', 'Error: ' + errStr);
+          updateStep('relay_connect', 'error', '配对失败: ' + errStr);
         }
         pairingDone.value = true;
         pairingError.value = true;

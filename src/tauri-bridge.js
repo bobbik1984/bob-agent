@@ -1081,6 +1081,36 @@ window.appAPI = {
   systemParseBcbp: async (raw) => invoke('system_parse_bcbp', { raw }),
   scanQrCode: async () => {
     if (!IS_TAURI) return null;
+    let cancelBtn = document.getElementById('qr-scanner-cancel-btn');
+    if (!cancelBtn) {
+      cancelBtn = document.createElement('button');
+      cancelBtn.id = 'qr-scanner-cancel-btn';
+      cancelBtn.className = 'scanner-floating-cancel-btn';
+      cancelBtn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg> 返回';
+      cancelBtn.onclick = async () => {
+        document.body.classList.remove('scanner-active');
+        if (cancelBtn) cancelBtn.style.display = 'none';
+        try {
+          const { cancel } = await import('@tauri-apps/plugin-barcode-scanner');
+          await cancel();
+        } catch (_) {}
+      };
+      document.body.appendChild(cancelBtn);
+    }
+    cancelBtn.style.display = 'flex';
+
+    // Push history state so Android edge swipe and back button trigger popstate
+    history.pushState({ isQrScanner: true }, '', location.href);
+    const onPopState = async () => {
+      document.body.classList.remove('scanner-active');
+      if (cancelBtn) cancelBtn.style.display = 'none';
+      try {
+        const { cancel } = await import('@tauri-apps/plugin-barcode-scanner');
+        await cancel();
+      } catch (_) {}
+    };
+    window.addEventListener('popstate', onPopState, { once: true });
+
     try {
       const { scan, checkPermissions, requestPermissions } = await import('@tauri-apps/plugin-barcode-scanner');
       let perm = await checkPermissions();
@@ -1096,6 +1126,12 @@ window.appAPI = {
     } catch (e) {
       console.error("scanQrCode error:", e);
       return null;
+    } finally {
+      if (cancelBtn) cancelBtn.style.display = 'none';
+      window.removeEventListener('popstate', onPopState);
+      if (history.state?.isQrScanner) {
+        history.back();
+      }
     }
   },
   cancelQrCode: async () => {

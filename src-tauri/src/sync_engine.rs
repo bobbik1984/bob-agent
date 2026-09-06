@@ -613,6 +613,12 @@ pub async fn relay_handshake(
 
     let _ = app.emit(
         "sync:progress",
+        serde_json::json!({"stage": "relay_connect", "status": "running"}),
+    );
+    tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+
+    let _ = app.emit(
+        "sync:progress",
         serde_json::json!({"stage": "relay_connect", "status": "done"}),
     );
 
@@ -1900,6 +1906,24 @@ pub fn start_relay_listener(app: AppHandle) {
                                                 continue;
                                             }
                                         }
+                                    } else if json.get("type").and_then(|v| v.as_str()) == Some("ack") {
+                                        // Resilient fallback: If an Ack arrived without ref_message_id (e.g. legacy relay proxy),
+                                        // and there is an active waiter expecting RelayTerminal::Ack, match and resolve it.
+                                        let mut pending = PENDING_REQUESTS.write().unwrap();
+                                        let ack_waiter_key = pending.iter().find_map(|(k, v)| {
+                                            if matches!(v.terminal, RelayTerminal::Ack) {
+                                                Some(k.clone())
+                                            } else {
+                                                None
+                                            }
+                                        });
+                                        if let Some(key) = ack_waiter_key {
+                                            if let Some(waiter) = pending.remove(&key) {
+                                                log::info!("[Sync Engine] Matched Ack via terminal fallback for request {}", key);
+                                                let _ = waiter.tx.send(json.clone());
+                                                continue;
+                                            }
+                                        }
                                     }
 
                                     if let Some(msg_type) = json.get("type").and_then(|v| v.as_str()) {
@@ -1927,7 +1951,12 @@ pub fn start_relay_listener(app: AppHandle) {
                                                 let mut ack = serde_json::json!({
                                                     "type": "ack",
                                                     "target_device_id": from_id,
-                                                    "error": "Unauthorized"
+                                                    "error": "Unauthorized",
+                                                    "message_id": format!("msg-ack-{}", &uuid::Uuid::new_v4().to_string().replace("-", "")[..8]),
+                                                    "ref_message_id": json.get("message_id").and_then(|v| v.as_str()).unwrap_or_default(),
+                                                    "protocol_version": SYNC_PROTOCOL_VERSION,
+                                                    "trace_id": json.get("trace_id").and_then(|v| v.as_str()).unwrap_or_default(),
+                                                    "sync_id": json.get("sync_id").and_then(|v| v.as_str()).unwrap_or_default(),
                                                 });
                                                 copy_trace_fields(&json, &mut ack, true);
                                                 let _ = tx_mpsc.send(Message::Text(ack.to_string().into())).await;
@@ -1951,6 +1980,11 @@ pub fn start_relay_listener(app: AppHandle) {
                                             let mut ack = serde_json::json!({
                                                 "type": "ack",
                                                 "target_device_id": from_id,
+                                                "message_id": format!("msg-ack-{}", &uuid::Uuid::new_v4().to_string().replace("-", "")[..8]),
+                                                "ref_message_id": json.get("message_id").and_then(|v| v.as_str()).unwrap_or_default(),
+                                                "protocol_version": SYNC_PROTOCOL_VERSION,
+                                                "trace_id": json.get("trace_id").and_then(|v| v.as_str()).unwrap_or_default(),
+                                                "sync_id": json.get("sync_id").and_then(|v| v.as_str()).unwrap_or_default(),
                                             });
                                             copy_trace_fields(&json, &mut ack, true);
                                             let _ = tx_mpsc.send(Message::Text(ack.to_string().into())).await;
