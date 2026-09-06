@@ -1232,6 +1232,18 @@ pub fn run() {
                 discord::init(discord_handle).await;
             });
 
+            // ── 本地 HTTP API (仅限桌面端 PC: 启动 127.0.0.1:3721 及 0.0.0.0:3722 供局域网同步) ──
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            {
+                http_api::start_http_server(app.handle().clone());
+            }
+
+            // ── 启动中继服务器 WebSocket 长连接后台守护 (全平台: PC 与移动端均需连接 Relay) ──
+            sync_engine::start_relay_listener(app.handle().clone());
+
+            // ── 启动后台冲突自动合并任务 (Ghost Merger) ──
+            sync_resolver::start_ghost_merger_task(app.handle().clone());
+
             // ── 清理遗留的 "vaulted" 标记 ──
             // 架构已从 OS Keychain 迁回 config.json 明文存储。
             // 旧版本中被标记为 "vaulted" 的 Key 实际上已从 config.json 中丢失，

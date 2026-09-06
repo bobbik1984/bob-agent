@@ -1676,24 +1676,26 @@ pub fn start_relay_listener(app: AppHandle) {
             );
             // Re-fetch device_id on every reconnect attempt to handle Identity resets
             let mut current_device_id = String::new();
-            for _ in 0..10 {
-                let config = crate::read_config();
+            {
+                let mut config = crate::read_config();
                 if let Some(id) = config.get("device_id").and_then(|v| v.as_str()) {
-                    current_device_id = id.to_string();
-                    break;
+                    if !id.trim().is_empty() {
+                        current_device_id = id.trim().to_string();
+                    }
                 }
-                tokio::time::sleep(std::time::Duration::from_secs(3)).await;
-            }
-            if current_device_id.is_empty() {
-                crate::sync_diagnostics::set_local_identity(
-                    crate::sync_diagnostics::LocalIdentityState::Uninitialized,
-                );
-                crate::sync_diagnostics::set_relay_state(
-                    crate::sync_diagnostics::RelayConnectionState::Disconnected,
-                );
-                log::warn!("[Sync Engine] start_relay_listener: could not get device_id, retrying in 5s...");
-                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-                continue;
+                if current_device_id.is_empty() {
+                    let new_id = format!(
+                        "{}-{}",
+                        std::env::consts::OS,
+                        &uuid::Uuid::new_v4().to_string().replace("-", "")[..12]
+                    );
+                    if let Some(obj) = config.as_object_mut() {
+                        obj.insert("device_id".to_string(), serde_json::json!(&new_id));
+                        crate::write_config(&config);
+                    }
+                    current_device_id = new_id;
+                    log::info!("[Sync Engine] Auto-generated device_id for relay: {}", current_device_id);
+                }
             }
             crate::sync_diagnostics::set_local_identity(
                 crate::sync_diagnostics::LocalIdentityState::Ready,
