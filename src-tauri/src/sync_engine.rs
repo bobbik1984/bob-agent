@@ -533,10 +533,15 @@ pub async fn trigger_wakeup_via_relay(app: AppHandle, device_id: String) -> Resu
         &format!("Attempting to wake up device: {}", device_id),
     );
 
+    let candidate_ips = crate::crypto::get_candidate_ips();
     let msg = serde_json::json!({
         "type": "wakeup",
         "target_device_id": device_id,
-        "from_device_id": my_device_id
+        "from_device_id": my_device_id,
+        "payload": {
+            "local_ips": candidate_ips,
+            "port": 3722
+        }
     });
 
     let relay_tx = {
@@ -615,12 +620,13 @@ pub async fn relay_handshake(
         "sync:progress",
         serde_json::json!({"stage": "relay_connect", "status": "running"}),
     );
-    tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+    tokio::time::sleep(std::time::Duration::from_millis(800)).await;
 
     let _ = app.emit(
         "sync:progress",
         serde_json::json!({"stage": "relay_connect", "status": "done"}),
     );
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
 
     // ── Stage 3b & 3c: Send notify to PC via Relay and wait for Ack ──
     let _ = app.emit(
@@ -2009,7 +2015,8 @@ pub fn start_relay_listener(app: AppHandle) {
 
                                             // Emit to frontend to trigger mobile sync
                                             let _ = app.emit("sync:wakeup", serde_json::json!({
-                                                "device_id": from_id
+                                                "device_id": from_id,
+                                                "payload": json.get("payload")
                                             }));
                                         } else if msg_type == "proxy" {
                                             if let Some(inner_payload) = json.get("payload") {

@@ -841,6 +841,7 @@ pub fn run() {
         .manage(browser_state.clone())
         .manage(crypto::DeviceIdentityState(std::sync::Mutex::new(None)))
         .manage(std::sync::Arc::new(sync_engine::DeviceRegistry::load()))
+        .manage(std::sync::Arc::new(lan_sync::LanSyncEngine::new(String::new())))
         .manage(tool_confirm::ToolConfirmState::new())
         .manage(candle_engine::CandleState {
             engine: std::sync::Mutex::new(None),

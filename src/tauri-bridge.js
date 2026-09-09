@@ -1076,6 +1076,7 @@ window.appAPI = {
   getSyncRuns: async () => invoke('get_sync_runs'),
   getSyncTraceEvents: async (traceId) => invoke('get_sync_trace_events', { traceId }),
   getSyncLogs: async () => invoke('get_sync_logs'),
+  forceRelayReconnect: async () => invoke('force_relay_reconnect'),
 
   // ── 扫码 (Mobile Only) ──────────────────────
   systemParseBcbp: async (raw) => invoke('system_parse_bcbp', { raw }),
@@ -1130,6 +1131,7 @@ window.appAPI = {
       if (cancelBtn) cancelBtn.style.display = 'none';
       window.removeEventListener('popstate', onPopState);
       if (history.state?.isQrScanner) {
+        window.__isInternalScannerBack = true;
         history.back();
       }
     }

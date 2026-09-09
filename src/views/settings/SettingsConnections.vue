@@ -951,6 +951,17 @@ const diagnosticPaths = computed(() => {
     if (lanStat === 'done') {
       return {
         lan_direct: 'success',
+        mobile_to_relay: 'skipped',
+        relay_to_pc: 'skipped',
+        pc_to_relay: 'skipped',
+        relay_to_mobile: 'skipped',
+      };
+    }
+
+    // LAN failed or skipped; transitioning to Relay
+    if (lanStat === 'error' && connectStat === 'pending') {
+      return {
+        lan_direct: 'failed',
         mobile_to_relay: 'unknown',
         relay_to_pc: 'unknown',
         pc_to_relay: 'unknown',
@@ -958,7 +969,6 @@ const diagnosticPaths = computed(() => {
       };
     }
 
-    // LAN failed or skipped; transitioning to Relay
     // Phase 2: Mobile -> Relay connection
     if (connectStat === 'running') {
       return {
@@ -1005,7 +1015,7 @@ const diagnosticPaths = computed(() => {
         lan_direct: 'failed',
         mobile_to_relay: 'success',
         relay_to_pc: 'running',
-        pc_to_relay: 'running',
+        pc_to_relay: 'unknown',
         relay_to_mobile: 'unknown',
       };
     }
@@ -1077,7 +1087,9 @@ const diagnosticNodes = computed(() => {
     // MUST remain 'unknown' (gray/dormant) while in Step 1 (lan_sync)!
     // Only activates when relay_connect begins!
     let relayNodeState = 'unknown';
-    if (connectStat === 'running') {
+    if (lanStat === 'done') {
+      relayNodeState = 'skipped';
+    } else if (connectStat === 'running') {
       relayNodeState = 'running';
     } else if (connectStat === 'error') {
       relayNodeState = 'failed';
@@ -1089,9 +1101,9 @@ const diagnosticNodes = computed(() => {
     let pcNodeState = 'unknown';
     if (lanStat === 'done') {
       pcNodeState = 'success';
-    } else if (ackStat === 'running') {
+    } else if (notifyStat === 'running' || ackStat === 'running') {
       pcNodeState = 'running';
-    } else if (ackStat === 'error') {
+    } else if (ackStat === 'error' || notifyStat === 'error') {
       pcNodeState = 'failed';
     } else if (ackStat === 'done' || syncStat === 'done' || (pairingDone.value && !pairingError.value)) {
       pcNodeState = 'success';
@@ -1236,6 +1248,7 @@ const processPairingCode = async (code) => {
     if (window.appAPI.triggerMobileSync) {
       updateStep('lan_sync', 'running', '');
       let lanSuccess = false;
+      const lanStartTime = Date.now();
       try {
         const syncTimeout = new Promise((_, reject) => setTimeout(() => reject(new Error('Sync Timeout')), 15000));
         const lanPayload = { ...payload, skip_relay: true };
@@ -1261,6 +1274,12 @@ const processPairingCode = async (code) => {
         pairingError.value = false;
         fetchConnectedDevices();
         return;
+      } else {
+        // LAN 失败后，保留至少 700ms 视觉过渡，使用户能看清底边失败，再切入外网中继
+        const elapsed = Date.now() - lanStartTime;
+        if (elapsed < 800) {
+          await new Promise(r => setTimeout(r, 800 - elapsed));
+        }
       }
     }
 

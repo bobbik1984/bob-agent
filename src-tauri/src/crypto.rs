@@ -197,7 +197,7 @@ pub struct PairingPayload {
     pub relay: String,
 }
 
-fn get_candidate_ips() -> Vec<String> {
+pub fn get_candidate_ips() -> Vec<String> {
     let mut ips = Vec::new();
     
     #[cfg(target_os = "windows")]

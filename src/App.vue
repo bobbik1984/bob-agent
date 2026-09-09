@@ -767,6 +767,10 @@ onMounted(async () => {
     // 拦截 Android 物理返回键
     history.pushState(null, '', location.href);
     window.addEventListener('popstate', (e) => {
+      if (window.__isInternalScannerBack) {
+        window.__isInternalScannerBack = false;
+        return;
+      }
       history.pushState(null, '', location.href);
       handleBackButton();
     });
@@ -850,16 +854,20 @@ onMounted(async () => {
       
       doSync();
 
-      // Listen for visibility change (wake up from background)
+      // 全平台网络恢复监听
       window.addEventListener('online', () => {
         console.log('[Network] Online event detected, forcing Relay reconnect...');
-        if (window.__TAURI__) window.__TAURI__.invoke('force_relay_reconnect');
+        if (window.appAPI?.forceRelayReconnect) {
+          window.appAPI.forceRelayReconnect().catch(err => console.warn('Force reconnect error:', err));
+        }
       });
 
-      // Listen for visibility change (wake up from background)
+      // 移动端锁屏唤醒监听 (从后台恢复)
       document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'visible') {
-          if (window.__TAURI__) window.__TAURI__.invoke('force_relay_reconnect');
+          if (window.appAPI?.forceRelayReconnect) {
+            window.appAPI.forceRelayReconnect().catch(err => console.warn('Force reconnect error:', err));
+          }
           const lastSync = parseInt(localStorage.getItem('bob-last-sync-time') || '0');
           if (Date.now() - lastSync > 60000) { // 1分钟防抖
             console.log('[Sync] 移动端恢复前台，主动触发同步...');
@@ -869,29 +877,56 @@ onMounted(async () => {
       });
       
       // Listen for Relay wakeup signal from PC
-      listen('sync:wakeup', (event) => {
+      listen('sync:wakeup', async (event) => {
         console.log('[Sync] 收到 PC 端唤醒信令，立即触发同步...', event);
+        // 动态更新已配对 PC 的最新候选局域网 IP（应对路由器 DHCP 重新分配 IP 场景）
+        const latestPayload = event.payload?.payload;
+        if (latestPayload?.local_ips && Array.isArray(latestPayload.local_ips) && latestPayload.local_ips.length > 0) {
+          try {
+            const currentConfig = await window.appAPI.getConfig('pairing_payload');
+            if (currentConfig) {
+              currentConfig.local_ips = latestPayload.local_ips;
+              if (latestPayload.port) currentConfig.port = latestPayload.port;
+              await window.appAPI.setConfig('pairing_payload', currentConfig);
+              console.log('[Sync] 动态刷新已配对 PC 的局域网 IP:', currentConfig.local_ips);
+            }
+          } catch (err) {
+            console.warn('Failed to update pairing payload local_ips:', err);
+          }
+        }
         doSync();
       });
 
     } else {
-      // PC 端：主动向所有已配对设备发送唤醒信令
-      try {
-        if (window.appAPI.getConnectedDevices && window.appAPI.triggerWakeupViaRelay) {
-          const devices = await window.appAPI.getConnectedDevices();
-          const myDevId = (await window.appAPI.getConfig?.('device_id')) || '';
-          if (devices && devices.length > 0) {
-            console.log(`[Sync] PC端启动，向 ${devices.length} 个配对设备发送上线唤醒信令...`);
-            for (const dev of devices) {
-              if (dev.device_id && dev.device_id !== myDevId) {
-                window.appAPI.triggerWakeupViaRelay(dev.device_id).catch(err => console.error('Wakeup error:', err));
+      // PC 端：网络恢复或上线时向所有已配对设备发送唤醒信令
+      const notifyPairedDevices = async () => {
+        try {
+          if (window.appAPI?.getConnectedDevices && window.appAPI?.triggerWakeupViaRelay) {
+            const devices = await window.appAPI.getConnectedDevices();
+            const myDevId = (await window.appAPI.getConfig?.('device_id')) || '';
+            if (devices && devices.length > 0) {
+              console.log(`[Sync] PC端向 ${devices.length} 个配对设备发送上线唤醒信令...`);
+              for (const dev of devices) {
+                if (dev.device_id && dev.device_id !== myDevId) {
+                  window.appAPI.triggerWakeupViaRelay(dev.device_id).catch(err => console.error('Wakeup error:', err));
+                }
               }
             }
           }
+        } catch (err) {
+          console.warn('Failed to wake up devices:', err);
         }
-      } catch (err) {
-        console.warn('Failed to wake up devices:', err);
-      }
+      };
+
+      notifyPairedDevices();
+
+      window.addEventListener('online', () => {
+        console.log('[Network] PC online detected, reconnecting Relay and notifying peers...');
+        if (window.appAPI?.forceRelayReconnect) {
+          window.appAPI.forceRelayReconnect().catch(() => {});
+        }
+        setTimeout(notifyPairedDevices, 1500);
+      });
     }
   }
 

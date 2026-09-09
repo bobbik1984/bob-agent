@@ -1,0 +1,119 @@
+name: Bob Desktop Windows CI
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Setup Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Rust Cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            src-tauri
+            installer/src-tauri
+
+      - name: Install Root Dependencies
+        run: npm install --legacy-peer-deps
+
+      - name: Install Installer Dependencies
+        working-directory: installer
+        run: npm install --legacy-peer-deps
+
+      - name: Prepare Assets & PDFium
+        shell: powershell
+        run: |
+          # 1. 自动拉取与解压官方 PDFium 二进制
+          powershell -ExecutionPolicy Bypass -File scripts/install_pdfium.ps1
+          
+          # 2. 占位 dummy 外部二进制资源（满足 tauri.conf.json 资源校验）
+          New-Item -ItemType Directory -Force -Path "resources\llm-engine"
+          New-Item -ItemType File -Force -Path "resources\llm-engine\dummy.exe"
+          New-Item -ItemType File -Force -Path "resources\llm-engine\dummy.dll"
+          New-Item -ItemType File -Force -Path "resources\llm-engine\dummy.disabled"
+          New-Item -ItemType Directory -Force -Path "skills"
+
+      - name: Step 1 - Build Main App Binary (bob.exe)
+        run: npx tauri build --no-bundle
+
+      - name: Step 2 - Generate Payload ZIP
+        run: node scripts/build_payload.mjs
+
+      - name: Step 3 - Inject Payload into Installer
+        shell: powershell
+        run: |
+          Copy-Item "payload.zip" "installer/src-tauri/payload.zip" -Force
+
+      - name: Step 4 - Build Standalone Installer (bob-installer.exe)
+        working-directory: installer
+        run: npx tauri build --no-bundle
+
+      - name: Step 5 - Collect & Organize Release Artifacts
+        shell: powershell
+        run: |
+          $ver = (Get-Content package.json | ConvertFrom-Json).version
+          New-Item -ItemType Directory -Force -Path "dist-release"
+          
+          # 归档安装器
+          Copy-Item "installer/src-tauri/target/release/bob-installer.exe" "dist-release/bob-v${ver}-installer.exe"
+          Copy-Item "installer/src-tauri/target/release/bob-installer.exe" "dist-release/bob-installer.exe"
+          
+          # 归档绿色便携包
+          Copy-Item "payload.zip" "dist-release/bob-v${ver}-portable.zip"
+          Copy-Item "payload.zip" "dist-release/bob-agent-portable.zip"
+          
+          echo "APP_VERSION=$ver" >> $env:GITHUB_ENV
+
+      - name: Upload Windows Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: bob-desktop-windows
+          path: |
+            dist-release/*.exe
+            dist-release/*.zip
+
+      - name: Publish Windows Release to GitHub Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest-desktop
+          name: "Bob Desktop Windows Latest (v${{ env.APP_VERSION }})"
+          body: |
+            ### 💻 Bob Desktop Windows 官方自动构建发布
+            - **应用版本**：`v${{ env.APP_VERSION }}`
+            - **代码提交**：`${{ github.sha }}`
+            - **构建时间**：`${{ github.event.head_commit.timestamp }}`
+
+            #### 📦 资产列表：
+            - `bob-installer.exe`：官方轻量级图形化极速安装程序（推荐）
+            - `bob-agent-portable.zip`：官方免安装绿色便携包（解压即用）
+          draft: false
+          prerelease: true
+          files: |
+            dist-release/bob-v*-installer.exe
+            dist-release/bob-installer.exe
+            dist-release/bob-v*-portable.zip
+            dist-release/bob-agent-portable.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
