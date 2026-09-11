@@ -75,50 +75,53 @@ pnpm lint             # ESLint 检查
 > 本工作区位于 OneDrive 实时同步目录中。**绝对禁止**使用 npm 安装或构建（npm 会产生数万个散碎文件引发 OneDrive 同步风暴与文件锁定）。
 > **必须**且只能使用 `pnpm`。依赖已通过根目录 `pnpm-workspace.yaml` 将根工程与 `installer` 统一纳管。
 
-### 🔴 多端统一打包与发布工作流 (Multi-Target Release Pipeline)
+### 🔴 自动化全套打包与发版标准流水线 (SOP: Full Release Pipeline)
 
-为了兼顾 PC 桌面端的高效打包与移动端 (Android) 的零本地负担，项目采用了**端解耦 + 云地协同**的统一发布架构：
-- **PC 桌面端**：采用**双 Tauri 嵌套架构**（Bootstrapper 模式），由本地编译主应用并注入暗黑极简安装器，生成 `bob-installer.exe` 和 `bob-agent-portable.zip`。
-- **Android 移动端**：由 **GitHub Actions (Ubuntu 云端)** 负责 Rust aarch64 交叉编译、NDK 链接、4KB Page Zipalign 及 V2/V3 签名，本地通过脚本自动监控 CI、拉取最新 APK 并通过 ADB 直装真机。
+> **🎯 极简指令唤醒契约**：
+> 当用户在对话中发送类似 **“执行全套打包流程”**、**“全套打包”**、**“云端打包发布”** 等指令时，Agent **必须严格按照以下 5 步 SOP 自主闭环执行**。
+> **🧱 严禁在本地执行 `tauri build`**（遵守重型操作防火墙，编译全部由 GitHub Actions 云端 Runner 承担，零占用本地算力）。
 
-#### 统一发布入口：`scripts\release.bat`
+#### 5 步标准化流水线 (Agent 执行手册)：
+1. **测试预检**：运行 `pnpm test`，确保前端与核心逻辑测试 100% 通过；检查工作区 Git 状态。
+2. **提交与推送**：将待发布的变动以 `[bob-agent] <功能描述>` 格式提交，并 `git push origin main`。
+   - 推送至 `main` 分支会自动并行触发云端双打包：
+     - 💻 Windows 桌面端 CI (`.github/workflows/windows.yml`)
+     - 📱 Android 移动端 CI (`.github/workflows/android.yml`)
+3. **监控 CI 状态**：通过 GitHub Actions 探针（调用 `python scripts/monitor_ci.py` 或 API）监控双端执行进度，直至全部状态为 `completed` 且结论为 `success`。
+4. **拉取与官网同步**：执行 `python scripts/pull_cloud_artifacts.py`（或命令行 `scripts\release.bat 6`）：
+   - 自动将云端带版本号的安装包下载至本地 `dist-release/` 归档（如 `bob-v0.9.5-installer.exe`、`bob-v0.9.5-portable.zip`、`bob-v0.9.5-signed.apk`）；
+   - 自动触发 `website/sync_deploy.py`，将最新版本文件智能映射为官网标准统一命名（`bob-installer.exe`、`bob-agent-portable.zip`、`bob-mobile-latest.apk`）并推送到 VPS1 部署中心。
+5. **验收交付汇报**：向用户输出简洁的交付报告，附上 GitHub Releases 链接与本地/官网下载状态。
 
-直接双击或运行 `scripts\release.bat` 会弹出交互式终端菜单，也可通过命令行参数静默执行：
+#### 统一发布管理脚本：`scripts\release.bat`
 
 ```bash
-# 交互式菜单（默认，支持选项 1-4，Q）
+# 交互式菜单（默认，支持选项 1-6，Q）
 scripts\release.bat
 
-# [1] 全套打包：PC 安装包 + 便携包 + 安卓 APK 同步与 ADB 真机直装
+# [6] 从云端拉取全平台产物并分发官网 (推荐，下载带版本号产物 + 官网改名同步)
+scripts\release.bat --pull   # 或 -pl, 6
+
+# [1] 本地全套打包：本地编译 PC + 同步云端已签名 APK
 scripts\release.bat --all    # 或 -a, 1
 
-# [2] 仅打包 PC 版：仅编译生成 bob-installer.exe 与便携版 zip
+# [2] 仅本地打包 PC 版：本地编译生成 bob-installer.exe 与便携版 zip
 scripts\release.bat --pc     # 或 -p, 2
 
-# [3] 仅同步/打包安卓版：监控/拉取云端已签名 APK，自动通过 ADB 安装至手机
+# [3] 仅同步/安装安卓版：下载云端最新 APK 并通过 ADB 直装真机
 scripts\release.bat --apk    # 或 -m, 3
 
 # [4] 运行安卓真机闪退与运行时诊断：自动抓取 Pixel/Android 崩溃堆栈
 scripts\release.bat --diag   # 或 -d, 4
 ```
 
-#### 各模式执行流程说明
+#### 各端产物与命名映射契约
 
-| 模式 | 核心步骤 | 输出产物 / 行为 |
-|:---|:---|:---|
-| **全套打包 (`--all`)** | 依次执行 PC 编译 (6 步) + 云端 APK 同步与 ADB 安装 | 归集 `bob-installer.exe`、`bob-agent-portable.zip` 与 `bob-mobile-latest.apk`，自动打开 `dist-release\` |
-| **仅 PC 版 (`--pc`)** | 1. 编译主程序 `bob.exe`<br>2. 打包 `payload.zip`<br>3. 注入安装器工程<br>4. 编译独立安装器<br>5. 归档至 `dist-release\`<br>6. 清理临时文件 | `dist-release\bob-installer.exe` (~25MB)<br>`dist-release\bob-agent-portable.zip` (~15MB) |
-| **仅安卓版 (`--apk`)** | 1. 检测 GitHub Actions 构建状态（若 CI 正在编译则自动挂起轮询等待）<br>2. 自动拉取已通过 4KB 对齐和签名的最新 APK<br>3. 检测 ADB（自动扫描 Pixel 工具链/系统环境）<br>4. 覆盖安装到真机并自动启动 `MainActivity` | `dist-release\bob-mobile-latest.apk` (~48MB)<br>真机覆盖安装并唤醒 |
-| **真机诊断 (`--diag`)** | 启动 `diagnose_crash.ps1`，清空 logcat 缓冲区，前台唤醒应用并捕获 SIGABRT、FATAL 与 Rust Panic 日志 | 控制台高亮输出崩溃堆栈与排查定位 |
-
-#### 最终产物目录结构
-
-```
-dist-release/
-├── bob-installer.exe          # 带 Bob Logo 的 PC 独立安装器（~25MB）
-├── bob-agent-portable.zip     # PC 绿色免安装版（~15MB）
-└── bob-mobile-latest.apk      # Android 官方已签名 APK（~48MB，支持 4KB 对齐）
-```
+| 端别 | GitHub Releases 资产 (带明确版本号，无重复) | 本地 `dist-release/` (历史留存) | 官网下载中心 VPS1 (统一固定名) |
+|:---|:---|:---|:---|
+| **Windows 安装包** | `bob-v{version}-installer.exe` | `bob-v{version}-installer.exe` | `bob-installer.exe` |
+| **Windows 便携包** | `bob-v{version}-portable.zip` | `bob-v{version}-portable.zip` | `bob-agent-portable.zip` |
+| **Android APK** | `bob-v{version}-signed.apk` | `bob-v{version}-signed.apk` | `bob-mobile-latest.apk` |
 
 > ⚠️ `dist-release/` 已被 `.gitignore` 排除，二进制产物不入版本控制。
 
