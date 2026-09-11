@@ -195,12 +195,11 @@ jobs:
             - **代码提交**：`${{ github.sha }}`
             - **打包时间**：`${{ github.event.head_commit.timestamp }}`
 
-            > 💡 **直接安装**：此 APK 已通过官方证书完成签名。Android 手机端直接下载下方 `bob-mobile-latest.apk` 即可直接点击覆盖安装升级，无需在电脑端解压或二次签名。
+            > 💡 **直接安装**：此 APK 已通过官方证书完成签名。Android 手机端直接下载下方 `bob-v${{ env.APP_VERSION }}-signed.apk` 即可直接点击覆盖安装升级，无需在电脑端解压或二次签名。
           draft: false
           prerelease: true
           files: |
             bob-*-signed.apk
-            bob-mobile-latest.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

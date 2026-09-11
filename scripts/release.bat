@@ -37,6 +37,9 @@ if /i "%ARG%"=="3"     goto DO_APK
 if /i "%ARG%"=="--publish" goto DO_PUBLISH
 if /i "%ARG%"=="-pub"      goto DO_PUBLISH
 if /i "%ARG%"=="5"          goto DO_PUBLISH
+if /i "%ARG%"=="--pull"    goto DO_PULL
+if /i "%ARG%"=="-pl"       goto DO_PULL
+if /i "%ARG%"=="6"         goto DO_PULL
 if /i "%ARG%"=="--diag" goto DO_DIAG
 if /i "%ARG%"=="-d"     goto DO_DIAG
 if /i "%ARG%"=="4"      goto DO_DIAG
@@ -53,6 +56,7 @@ echo   --pc,  -p, 2    仅打包 PC 版 (bob-installer.exe + bob-agent-portable.
 echo   --apk, -m, 3    仅同步/安装安卓版 (下载最新签名 APK + ADB 直装)
 echo   --diag, -d, 4   运行真机闪退与 Rust 日志诊断
 echo   --publish, -pub, 5 正式全渠道发版 (PC编译 + 安卓同步 + 官网部署 + GitHub Release)
+echo   --pull, -pl, 6  从云端同步全平台产物并分发官网 (下载带版本号产物 + 官网改名同步)
 echo   --help, -h      显示本帮助信息
 echo.
 exit /b 0
@@ -82,16 +86,21 @@ echo.
 echo   [5] 正式全渠道发版 (All-in-One Full Release)
 echo       - 编译 PC 版 + 同步安卓 APK + 部署官网 (bob.bobbik.org) + 发布 GitHub Release
 echo.
+echo   [6] 从云端拉取全平台产物并分发官网 (Pull Cloud CI & Deploy to Website)
+echo       - 从 GitHub Releases 下载最新带版本号的 PC 安装包/便携包与安卓 APK
+echo       - 存入本地 dist-release 并标准化重命名推送到官网 VPS1
+echo.
 echo   [Q] 退出 (Exit)
 echo.
 echo ===========================================================
-set /p "CHOICE=请输入选项 [1-5, Q] (默认 1): "
+set /p "CHOICE=请输入选项 [1-6, Q] (默认 1): "
 if "%CHOICE%"=="" set "CHOICE=1"
 if /i "%CHOICE%"=="1" goto DO_ALL
 if /i "%CHOICE%"=="2" goto DO_PC
 if /i "%CHOICE%"=="3" goto DO_APK
 if /i "%CHOICE%"=="4" goto DO_DIAG
 if /i "%CHOICE%"=="5" goto DO_PUBLISH
+if /i "%CHOICE%"=="6" goto DO_PULL
 if /i "%CHOICE%"=="q" exit /b 0
 echo 无效选项: %CHOICE%
 pause
@@ -145,6 +154,18 @@ if errorlevel 1 (
 )
 
 goto FINISH_PUBLISH
+
+:: ===========================================================
+:: 从云端同步全平台产物并分发官网 (Pull Cloud CI)
+:: ===========================================================
+:DO_PULL
+echo.
+echo ===========================================================
+echo   [模式 6] 从云端拉取最新带版本号产物并同步官网
+echo ===========================================================
+python "%ROOT%\scripts\pull_cloud_artifacts.py"
+if errorlevel 1 goto FAIL
+goto FINISH_PULL
 
 :: 仅打包 PC 版 (PC Only)
 :: ===========================================================
@@ -298,6 +319,17 @@ echo    安卓 APK 同步完成!
 echo ===========================================================
 echo.
 echo  安卓 APK:     dist-release\bob-mobile-latest.apk
+echo.
+goto SHOW_EXPLORER
+
+:FINISH_PULL
+echo.
+echo ===========================================================
+echo    云端产物同步与官网分发完成!
+echo ===========================================================
+echo.
+echo  本地目录:   dist-release\ (保留带版本号的安装包与便携包)
+echo  官网地址:   https://bob.bobbik.org (标准化统一命名直链)
 echo.
 goto SHOW_EXPLORER
 

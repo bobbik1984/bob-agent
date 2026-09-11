@@ -76,13 +76,9 @@ jobs:
           $ver = (Get-Content package.json | ConvertFrom-Json).version
           New-Item -ItemType Directory -Force -Path "dist-release"
           
-          # 归档安装器
+          # 归档安装器与便携包（带明确版本号）
           Copy-Item "installer/src-tauri/target/release/bob-installer.exe" "dist-release/bob-v${ver}-installer.exe"
-          Copy-Item "installer/src-tauri/target/release/bob-installer.exe" "dist-release/bob-installer.exe"
-          
-          # 归档绿色便携包
           Copy-Item "payload.zip" "dist-release/bob-v${ver}-portable.zip"
-          Copy-Item "payload.zip" "dist-release/bob-agent-portable.zip"
           
           echo "APP_VERSION=$ver" >> $env:GITHUB_ENV
 
@@ -106,14 +102,12 @@ jobs:
             - **构建时间**：`${{ github.event.head_commit.timestamp }}`
 
             #### 📦 资产列表：
-            - `bob-installer.exe`：官方轻量级图形化极速安装程序（推荐）
-            - `bob-agent-portable.zip`：官方免安装绿色便携包（解压即用）
+            - `bob-v${{ env.APP_VERSION }}-installer.exe`：官方轻量级图形化安装程序（推荐）
+            - `bob-v${{ env.APP_VERSION }}-portable.zip`：官方免安装绿色便携包（解压即用）
           draft: false
           prerelease: true
           files: |
             dist-release/bob-v*-installer.exe
-            dist-release/bob-installer.exe
             dist-release/bob-v*-portable.zip
-            dist-release/bob-agent-portable.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
