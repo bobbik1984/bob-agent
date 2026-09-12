@@ -18,6 +18,29 @@ ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 DIST_DIR = os.path.join(ROOT_DIR, "dist-release")
 REPO = "bobbik1984/bob-agent"
 
+def get_github_token():
+    token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+    if token:
+        return token.strip()
+    try:
+        p = subprocess.Popen(
+            ["git", "credential", "fill"],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True
+        )
+        out, _ = p.communicate("protocol=https\nhost=github.com\n\n")
+        for line in out.splitlines():
+            if line.startswith("password="):
+                tok = line.split("=", 1)[1].strip()
+                if tok:
+                    return tok
+    except Exception:
+        pass
+    return None
+
+
 def download_file(url, target_path):
     print(f"  正在下载: {os.path.basename(target_path)} ...")
     ctx = ssl.create_default_context()
@@ -47,7 +70,11 @@ def download_file(url, target_path):
 def fetch_release_assets(tag):
     url = f"https://api.github.com/repos/{REPO}/releases/tags/{tag}"
     ctx = ssl.create_default_context()
-    req = urllib.request.Request(url, headers={"User-Agent": "Bob-Artifact-Puller"})
+    headers = {"User-Agent": "Bob-Artifact-Puller"}
+    tok = get_github_token()
+    if tok:
+        headers["Authorization"] = f"token {tok}"
+    req = urllib.request.Request(url, headers=headers)
     try:
         with urllib.request.urlopen(req, context=ctx) as resp:
             data = json.loads(resp.read().decode("utf-8"))
@@ -56,18 +83,30 @@ def fetch_release_assets(tag):
         print(f"  [WARN] 获取 Release {tag} 失败: {e}")
         return []
 
+def get_current_version():
+    pkg = os.path.join(ROOT_DIR, "package.json")
+    if os.path.exists(pkg):
+        try:
+            with open(pkg, "r", encoding="utf-8") as f:
+                return json.load(f).get("version", "")
+        except Exception:
+            pass
+    return ""
+
 def main():
     print("===========================================================")
     print("   Bob Agent 云端全平台构建产物同步与分发中心")
     print("===========================================================")
     os.makedirs(DIST_DIR, exist_ok=True)
+    cur_ver = get_current_version()
 
     # 1. 获取 Windows 桌面端产物
     print("\n[1/3] 检索 Windows 桌面端云端最新构建产物 (latest-desktop)...")
     desktop_assets = fetch_release_assets("latest-desktop")
-    # 优先下载带版本号的文件，防止冗余
+    version_desktop = [a for a in desktop_assets if cur_ver and f"bob-v{cur_ver}-" in a["name"]]
+    desktop_targets = version_desktop if version_desktop else desktop_assets
     downloaded_any = False
-    for a in desktop_assets:
+    for a in desktop_targets:
         name = a["name"]
         if name.startswith("bob-v") and (name.endswith("-installer.exe") or name.endswith("-portable.zip")):
             target = os.path.join(DIST_DIR, name)
@@ -85,8 +124,10 @@ def main():
     # 2. 获取 Android 移动端产物
     print("\n[2/3] 检索 Android 移动端云端最新构建产物 (latest-mobile)...")
     mobile_assets = fetch_release_assets("latest-mobile")
+    version_mobile = [a for a in mobile_assets if cur_ver and f"bob-v{cur_ver}-" in a["name"]]
+    mobile_targets = version_mobile if version_mobile else mobile_assets
     downloaded_mobile = False
-    for a in mobile_assets:
+    for a in mobile_targets:
         name = a["name"]
         if name.startswith("bob-v") and name.endswith("-signed.apk"):
             target = os.path.join(DIST_DIR, name)

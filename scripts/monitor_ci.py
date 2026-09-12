@@ -12,8 +12,38 @@ import json
 import ssl
 import urllib.request
 
+import subprocess
+import os
+
 REPO = "bobbik1984/bob-agent"
+
+def get_github_token():
+    token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+    if token:
+        return token.strip()
+    try:
+        p = subprocess.Popen(
+            ["git", "credential", "fill"],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True
+        )
+        out, _ = p.communicate("protocol=https\nhost=github.com\n\n")
+        for line in out.splitlines():
+            if line.startswith("password="):
+                tok = line.split("=", 1)[1].strip()
+                if tok:
+                    return tok
+    except Exception:
+        pass
+    return None
+
 HEADERS = {"User-Agent": "Bob-CI-Monitor"}
+_token = get_github_token()
+if _token:
+    HEADERS["Authorization"] = f"token {_token}"
+
 
 def get_latest_runs():
     ctx = ssl.create_default_context()
