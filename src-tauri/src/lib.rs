@@ -119,17 +119,34 @@ pub(crate) fn write_log_with_rotation(log_path: &Path, message: &str, max_size_b
 /// 知识库 Wiki 目录：优先读取用户在设置面板中配置的 wikiDir，
 /// 未配置时 fallback 到 AppData/bob.agent/wiki/
 pub(crate) fn get_wiki_dir() -> PathBuf {
-    let config = read_config();
-    if let Some(wiki_dir) = config.get("wikiDir").and_then(|v| v.as_str()) {
-        if !wiki_dir.is_empty() {
-            let p = PathBuf::from(wiki_dir);
-            let _ = fs::create_dir_all(&p);
-            return p;
-        }
+    #[cfg(target_os = "android")]
+    {
+        let dir = get_data_dir().join("wiki");
+        let _ = fs::create_dir_all(&dir);
+        return dir;
     }
-    let dir = get_data_dir().join("wiki");
-    let _ = fs::create_dir_all(&dir);
-    dir
+    #[cfg(not(target_os = "android"))]
+    {
+        let config = read_config();
+        if let Some(wiki_dir) = config.get("wikiDir").and_then(|v| v.as_str()) {
+            if !wiki_dir.is_empty() {
+                let is_cross_platform_valid = if cfg!(unix) {
+                    !wiki_dir.contains(':') && wiki_dir.starts_with('/')
+                } else {
+                    true
+                };
+                if is_cross_platform_valid {
+                    let p = PathBuf::from(wiki_dir);
+                    if fs::create_dir_all(&p).is_ok() {
+                        return p;
+                    }
+                }
+            }
+        }
+        let dir = get_data_dir().join("wiki");
+        let _ = fs::create_dir_all(&dir);
+        dir
+    }
 }
 
 fn get_config_path() -> PathBuf {
@@ -139,7 +156,20 @@ fn get_config_path() -> PathBuf {
 fn read_config() -> Value {
     let path = get_config_path();
     if let Ok(data) = fs::read_to_string(&path) {
-        if let Ok(json) = serde_json::from_str(&data) {
+        if let Ok(mut json) = serde_json::from_str::<Value>(&data) {
+            #[cfg(target_os = "android")]
+            {
+                // 如果是 Android，在内存中直接过滤掉误同步过来的 Windows 绝对路径
+                if let Some(obj) = json.as_object_mut() {
+                    for key in &["workspaceDir", "wikiDir", "browserPath", "bundledSkillsDir", "offlineModelPath"] {
+                        if let Some(val) = obj.get(*key).and_then(|v| v.as_str()) {
+                            if val.contains(':') || val.contains('\\') || !val.starts_with('/') {
+                                obj.remove(*key);
+                            }
+                        }
+                    }
+                }
+            }
             return json;
         }
     }
@@ -155,7 +185,16 @@ fn read_config() -> Value {
         for cand in &candidates {
             if cand != &path && cand.exists() {
                 if let Ok(data) = fs::read_to_string(cand) {
-                    if let Ok(json) = serde_json::from_str(&data) {
+                    if let Ok(mut json) = serde_json::from_str::<Value>(&data) {
+                        if let Some(obj) = json.as_object_mut() {
+                            for key in &["workspaceDir", "wikiDir", "browserPath", "bundledSkillsDir", "offlineModelPath"] {
+                                if let Some(val) = obj.get(*key).and_then(|v| v.as_str()) {
+                                    if val.contains(':') || val.contains('\\') || !val.starts_with('/') {
+                                        obj.remove(*key);
+                                    }
+                                }
+                            }
+                        }
                         let _ = fs::write(&path, &data);
                         return json;
                     }
@@ -164,6 +203,50 @@ fn read_config() -> Value {
         }
     }
     serde_json::json!({})
+}
+
+/// 启动自愈：清理当前平台上非法的历史跨端路径配置 (例如 Android 上的 Windows 盘符)
+pub(crate) fn sanitize_platform_config() {
+    let mut config = read_config();
+    let mut changed = false;
+
+    #[cfg(target_os = "android")]
+    {
+        let path_keys = ["workspaceDir", "wikiDir", "browserPath", "bundledSkillsDir", "offlineModelPath"];
+        if let Some(obj) = config.as_object_mut() {
+            for key in &path_keys {
+                if let Some(val) = obj.get(*key).and_then(|v| v.as_str()) {
+                    if val.contains(':') || val.contains('\\') || !val.starts_with('/') {
+                        log::warn!("[Sanitize] 手机端自愈：清除无效的 Windows 路径 key '{}': {}", key, val);
+                        obj.remove(*key);
+                        changed = true;
+                    }
+                }
+            }
+        }
+    }
+
+    #[cfg(not(target_os = "android"))]
+    {
+        #[cfg(unix)]
+        {
+            let path_keys = ["workspaceDir", "wikiDir", "browserPath", "bundledSkillsDir"];
+            if let Some(obj) = config.as_object_mut() {
+                for key in &path_keys {
+                    if let Some(val) = obj.get(*key).and_then(|v| v.as_str()) {
+                        if val.contains(':') || val.contains('\\') {
+                            obj.remove(*key);
+                            changed = true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if changed {
+        write_config(&config);
+    }
 }
 
 fn write_config(config: &Value) {
@@ -1196,6 +1279,9 @@ pub fn run() {
                     let _ = DATA_DIR.set(app_dir);
                 }
             }
+
+            // 执行跨端路径自愈清洗（例如清除从 PC 误同步到 Android 的 Windows 盘符）
+            sanitize_platform_config();
 
             // 读取用户上次保存的主题，动态设置原生窗口底色，防止在亮色模式下启动闪黑屏 (仅限桌面端)
             #[cfg(not(any(target_os = "android", target_os = "ios")))]

@@ -649,7 +649,7 @@ pub async fn relay_handshake(
 
     match send_relay_request_and_wait(
         msg,
-        tokio::time::Duration::from_secs(10),
+        tokio::time::Duration::from_secs(25),
         RelayTerminal::Ack,
     )
     .await
@@ -837,8 +837,83 @@ pub fn export_sync_data(
     })
 }
 
+/// 跨端智能配置合并：严格隔离设备本地专属配置，仅合并跨端白名单配置 (API Key / 模型 / 主题等)
+pub fn merge_synced_config(local: &serde_json::Value, remote: &serde_json::Value) -> serde_json::Value {
+    let mut merged = local.clone();
+    let local_obj = match merged.as_object_mut() {
+        Some(o) => o,
+        None => return remote.clone(),
+    };
+
+    let remote_obj = match remote.as_object() {
+        Some(o) => o,
+        None => return merged,
+    };
+
+    // 1. 合并 API Keys (保留本地已有，追加对端新增，且不覆盖为空)
+    if let Some(remote_keys) = remote_obj.get("apiKeys").and_then(|v| v.as_object()) {
+        let local_keys = local_obj
+            .entry("apiKeys".to_string())
+            .or_insert_with(|| serde_json::json!({}));
+        if let Some(local_keys_obj) = local_keys.as_object_mut() {
+            for (provider, key_val) in remote_keys {
+                if let Some(s) = key_val.as_str() {
+                    if !s.trim().is_empty() {
+                        local_keys_obj.insert(provider.clone(), key_val.clone());
+                    }
+                }
+            }
+        }
+    }
+
+    // 2. 合并允许跨设备漫游的偏好设置项 (白名单)
+    let safe_roaming_keys = [
+        "model",
+        "clerkModel",
+        "visionModel",
+        "provider",
+        "theme",
+        "language",
+        "accentColor",
+        "weatherCity",
+    ];
+
+    for key in &safe_roaming_keys {
+        if let Some(val) = remote_obj.get(*key) {
+            if !val.is_null() {
+                if let Some(s) = val.as_str() {
+                    if !s.trim().is_empty() {
+                        local_obj.insert(key.to_string(), val.clone());
+                    }
+                } else {
+                    local_obj.insert(key.to_string(), val.clone());
+                }
+            }
+        }
+    }
+
+    // 3. 设备本地专属配置绝对隔离 (严禁覆盖):
+    // device_id, device_name, workspaceDir, wikiDir, browserPath, bundledSkillsDir, offlineModelPath, paired_devices, etc.
+
+    // 4. 对合并后的配置执行当前平台的路径净化 (防止本地已被污染的 Windows 路径残留)
+    #[cfg(target_os = "android")]
+    {
+        for key in &["workspaceDir", "wikiDir", "browserPath", "bundledSkillsDir", "offlineModelPath"] {
+            if let Some(val) = local_obj.get(*key).and_then(|v| v.as_str()) {
+                if val.contains(':') || val.contains('\\') || !val.starts_with('/') {
+                    local_obj.remove(*key);
+                }
+            }
+        }
+    }
+
+    merged
+}
+
 pub fn import_sync_data(app: &AppHandle, data: SyncData, last_sync_ts: i64) -> Result<(), String> {
-    crate::write_config(&data.config);
+    let current_config = crate::read_config();
+    let merged_config = merge_synced_config(&current_config, &data.config);
+    crate::write_config(&merged_config);
     let db = app.state::<crate::db::DbState>();
     let mut conn = db.0.lock().map_err(|_| "Failed to lock db")?;
     let tx_sql = conn.transaction().map_err(|e| e.to_string())?;
@@ -1452,7 +1527,7 @@ async fn do_active_sync(
                                     if let Ok(bytes) = r.bytes().await {
                                         let _ = crate::skills_sync::unpack_skills(
                                             &bytes,
-                                            &crate::get_data_dir().join("notebook").join("notes"),
+                                            &crate::notebook::get_notes_dir(),
                                         );
                                     }
                                 });
@@ -1461,7 +1536,9 @@ async fn do_active_sync(
                                 app.emit("config:reconciled", serde_json::json!({"applied": 1}));
                         }
                     } else if let Some(config_val) = json.get("config") {
-                        crate::write_config(&config_val);
+                        let current_config = crate::read_config();
+                        let merged_config = merge_synced_config(&current_config, config_val);
+                        crate::write_config(&merged_config);
                         let _ = app.emit("config:reconciled", serde_json::json!({"applied": 1}));
                     }
                 }

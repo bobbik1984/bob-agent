@@ -164,12 +164,19 @@ fn resolve_write_path(path: &str, global_file_access: bool) -> Result<PathBuf, S
         let target = if path.starts_with("wiki/") || path.starts_with("wiki\\") {
             let rel = &path[5..];
             super::get_wiki_dir().join(rel)
-        } else if let Some(ws) = config
-            .get("workspaceDir")
-            .and_then(|v| v.as_str())
-            .filter(|s| !s.is_empty())
-        {
-            PathBuf::from(ws).join(p)
+        } else if path.starts_with("notes/") || path.starts_with("notes\\") {
+            let rel = &path[6..];
+            super::notebook::get_notes_dir().join(rel)
+        } else if !cfg!(target_os = "android") {
+            if let Some(ws) = config
+                .get("workspaceDir")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty() && (!cfg!(unix) || (!s.contains(':') && s.starts_with('/'))))
+            {
+                PathBuf::from(ws).join(p)
+            } else {
+                super::get_data_dir().join(p)
+            }
         } else {
             super::get_data_dir().join(p)
         };
@@ -184,15 +191,22 @@ fn resolve_write_path(path: &str, global_file_access: bool) -> Result<PathBuf, S
 
         let safe_wiki =
             fs::canonicalize(super::get_wiki_dir()).unwrap_or_else(|_| super::get_wiki_dir());
+        let safe_notes =
+            fs::canonicalize(super::notebook::get_notes_dir()).unwrap_or_else(|_| super::notebook::get_notes_dir());
         let safe_data =
             fs::canonicalize(super::get_data_dir()).unwrap_or_else(|_| super::get_data_dir());
-        let safe_ws = config
-            .get("workspaceDir")
-            .and_then(|v| v.as_str())
-            .filter(|s| !s.is_empty())
-            .map(|s| fs::canonicalize(s).unwrap_or_else(|_| PathBuf::from(s)));
+        let safe_ws = if !cfg!(target_os = "android") {
+            config
+                .get("workspaceDir")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty() && (!cfg!(unix) || (!s.contains(':') && s.starts_with('/'))))
+                .map(|s| fs::canonicalize(s).unwrap_or_else(|_| PathBuf::from(s)))
+        } else {
+            None
+        };
 
         let is_safe = canon_parent.starts_with(&safe_wiki)
+            || canon_parent.starts_with(&safe_notes)
             || canon_parent.starts_with(&safe_data)
             || safe_ws.map_or(false, |ws| canon_parent.starts_with(&ws));
 
@@ -1341,9 +1355,27 @@ async fn execute_tool_inner(
                             }
                         }
 
+                        // Also update notes_fts and emit event
+                        use tauri::{Emitter, Manager};
+                        if let Some(db) = app.try_state::<crate::db::DbState>() {
+                            if let Ok(conn) = db.0.lock() {
+                                let _ = conn.execute(
+                                    "DELETE FROM notes_fts WHERE note_path = ?1",
+                                    rusqlite::params![path],
+                                );
+                                let tags_str = tags.join(" ");
+                                let _ = conn.execute(
+                                    "INSERT INTO notes_fts (note_path, title, content, tags) VALUES (?1, ?2, ?3, ?4)",
+                                    rusqlite::params![path, title, content, &tags_str],
+                                );
+                            }
+                        }
+                        let _ = app.emit("notebook:updated", json!({ "action": "created", "path": path }));
+
                         json!({ "ok": format!("笔记「{}」已保存到 sources/", title), "path": path })
                     } else {
-                        json!({ "error": "创建笔记失败" })
+                        let err_msg = res["error"].as_str().unwrap_or("未知原因");
+                        json!({ "error": format!("创建笔记失败: {}", err_msg) })
                     }
                 }
                 Err(e) => json!({ "error": format!("创建笔记失败: {}", e) }),

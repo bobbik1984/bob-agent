@@ -1900,12 +1900,18 @@ pub(crate) async fn stream_internal(
     let mut full_messages: Vec<Value> = Vec::new();
     if !has_system {
         let config = super::read_config();
-        let configured_workspace = config
-            .get("workspaceDir")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        let current_dir = if !configured_workspace.is_empty() {
+        let configured_workspace = if cfg!(target_os = "android") {
+            ""
+        } else {
+            config
+                .get("workspaceDir")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+        };
+        let current_dir = if !configured_workspace.is_empty() && (!cfg!(unix) || (!configured_workspace.contains(':') && configured_workspace.starts_with('/'))) {
             configured_workspace.to_string()
+        } else if cfg!(target_os = "android") {
+            super::get_data_dir().to_string_lossy().into_owned()
         } else {
             std::env::current_exe()
                 .ok()

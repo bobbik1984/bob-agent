@@ -65,18 +65,35 @@ fn resolve_note_path(path: &str) -> PathBuf {
 
 /// T-1901: 获取笔记根目录
 pub fn get_notes_dir() -> PathBuf {
-    let config = crate::read_config();
-    let dir = if let Some(workspace_dir) = config.get("workspaceDir").and_then(|v| v.as_str()) {
-        if !workspace_dir.is_empty() {
-            PathBuf::from(workspace_dir).join("notes")
-        } else {
-            crate::get_data_dir().join("notes")
+    #[cfg(target_os = "android")]
+    {
+        let dir = crate::get_data_dir().join("notes");
+        let _ = fs::create_dir_all(&dir);
+        return dir;
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let config = crate::read_config();
+        if let Some(workspace_dir) = config.get("workspaceDir").and_then(|v| v.as_str()) {
+            if !workspace_dir.is_empty() {
+                // 如果在 Unix/Linux 系统上，Windows 盘符 (如 D:\) 是非法的
+                let is_cross_platform_valid = if cfg!(unix) {
+                    !workspace_dir.contains(':') && workspace_dir.starts_with('/')
+                } else {
+                    true
+                };
+                if is_cross_platform_valid {
+                    let dir = PathBuf::from(workspace_dir).join("notes");
+                    if fs::create_dir_all(&dir).is_ok() {
+                        return dir;
+                    }
+                }
+            }
         }
-    } else {
-        crate::get_data_dir().join("notes")
-    };
-    let _ = fs::create_dir_all(&dir);
-    dir
+        let dir = crate::get_data_dir().join("notes");
+        let _ = fs::create_dir_all(&dir);
+        dir
+    }
 }
 
 pub fn get_daily_notes_dir() -> PathBuf {

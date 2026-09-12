@@ -1300,7 +1300,7 @@ const processPairingCode = async (code) => {
         } else if (errStr.includes('ERR-PAIRING-02') || errStr.includes('Target device is offline') || errStr.includes('RLY-TARGET-OFFLINE')) {
           updateStep('relay_notify', 'error', '电脑端未在线 (ERR-PAIRING-02: 电脑未开启Bob或中继掉线)');
         } else if (errStr.includes('ERR-PAIRING-03') || errStr.includes('Relay Timeout') || errStr.includes('Relay 请求超时')) {
-          updateStep('relay_ack', 'error', '等待电脑响应超时 (ERR-PAIRING-03: PC未在10秒内确认)');
+          updateStep('relay_ack', 'error', '等待电脑响应超时 (ERR-PAIRING-03: PC未在25秒内确认)');
         } else if (errStr.includes('ERR-PAIRING-04') || errStr.includes('Unauthorized')) {
           updateStep('relay_ack', 'error', '电脑拒绝配对 (ERR-PAIRING-04: 二维码安全凭证已过期或不匹配)');
         } else {
