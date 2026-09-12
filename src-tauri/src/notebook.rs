@@ -27,7 +27,7 @@ pub struct NoteInfo {
     pub preview: String,
 }
 
-fn parse_frontmatter_and_content(raw_content: &str) -> (NoteFrontmatter, String) {
+pub(crate) fn parse_frontmatter_and_content(raw_content: &str) -> (NoteFrontmatter, String) {
     let mut frontmatter = NoteFrontmatter::default();
     let mut content = raw_content.to_string();
 

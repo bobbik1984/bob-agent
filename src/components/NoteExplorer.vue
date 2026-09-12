@@ -220,7 +220,8 @@
 import { useDialog } from '@/composables/useDialog.js';
 const { showConfirm, showAlert, showPrompt } = useDialog();
 
-import { ref, onMounted, computed, defineEmits, defineProps, inject } from 'vue';
+import { ref, onMounted, onUnmounted, computed, defineEmits, defineProps, inject } from 'vue';
+import { listen } from '@tauri-apps/api/event';
 import { Folder, FolderPlus, CalendarDays, ChevronRight, FileText, Plus, X, RefreshCw, Tag, ArrowUpFromLine, Search, Menu } from 'lucide-vue-next';
 import { useI18n } from 'vue-i18n';
 
@@ -317,8 +318,28 @@ const loadTags = async () => {
   }
 };
 
-onMounted(() => {
+let unlistenUpdate = null;
+let unlistenSync = null;
+
+onMounted(async () => {
   loadNotes();
+  try {
+    unlistenUpdate = await listen('notebook:updated', () => {
+      console.log('[NoteExplorer] notebook:updated received, refreshing...');
+      loadNotes();
+    });
+    unlistenSync = await listen('sync:completed', () => {
+      console.log('[NoteExplorer] sync:completed received, refreshing...');
+      loadNotes();
+    });
+  } catch (e) {
+    // Non-tauri / web mode fallback
+  }
+});
+
+onUnmounted(() => {
+  if (unlistenUpdate) unlistenUpdate();
+  if (unlistenSync) unlistenSync();
 });
 
 const toggleSection = async (sec) => {

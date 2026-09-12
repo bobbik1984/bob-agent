@@ -703,6 +703,16 @@ pub async fn relay_handshake(
     }
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct NoteFilePayload {
+    pub path: String,                   // 相对路径，如 "topics/建造商场模拟游戏.md", "daily/2026-09-12.md", "wiki/sources/xxx.md"
+    #[serde(default)]
+    pub content: String,                // UTF-8 文本内容
+    #[serde(default)]
+    pub content_base64: Option<String>, // 二进制资源 (如 assets/ 下的图片)
+    pub updated_at: i64,                // 修改时间戳 (毫秒)
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 pub struct SyncData {
     pub config: serde_json::Value,
@@ -718,7 +728,110 @@ pub struct SyncData {
     pub wiki_fts: Vec<serde_json::Value>,
     #[serde(default)]
     pub tombstones: Vec<serde_json::Value>,
+    #[serde(default)]
+    pub notes: Vec<NoteFilePayload>,
 }
+
+/// 导出笔记与资料物理文件载荷
+pub fn export_notes_payload(since_ts: i64) -> Vec<NoteFilePayload> {
+    use base64::Engine;
+    use walkdir::WalkDir;
+
+    let mut payloads = Vec::new();
+    let notes_dir = crate::notebook::get_notes_dir();
+
+    // 1. 扫描笔记目录 (daily, topics, projects, custom, assets 等)
+    if notes_dir.exists() {
+        for entry in WalkDir::new(&notes_dir).into_iter().filter_map(Result::ok) {
+            if entry.file_type().is_file() {
+                let path = entry.path();
+                let mtime_ms = entry
+                    .metadata()
+                    .ok()
+                    .and_then(|m| m.modified().ok())
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|d| d.as_millis() as i64)
+                    .unwrap_or(0);
+
+                if since_ts > 0 && mtime_ms < since_ts {
+                    continue;
+                }
+
+                if let Ok(rel) = path.strip_prefix(&notes_dir) {
+                    let rel_str = rel.to_string_lossy().replace('\\', "/");
+                    if rel_str.is_empty() {
+                        continue;
+                    }
+
+                    let ext = path
+                        .extension()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("")
+                        .to_lowercase();
+                    let is_binary = matches!(
+                        ext.as_str(),
+                        "png" | "jpg" | "jpeg" | "gif" | "webp" | "ico" | "bmp" | "pdf" | "zip"
+                    );
+
+                    if is_binary {
+                        if let Ok(bytes) = std::fs::read(path) {
+                            let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+                            payloads.push(NoteFilePayload {
+                                path: rel_str,
+                                content: String::new(),
+                                content_base64: Some(b64),
+                                updated_at: mtime_ms,
+                            });
+                        }
+                    } else if let Ok(text) = std::fs::read_to_string(path) {
+                        payloads.push(NoteFilePayload {
+                            path: rel_str,
+                            content: text,
+                            content_base64: None,
+                            updated_at: mtime_ms,
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    // 2. 扫描 wiki_dir/sources 目录 (知识库资料文档，在笔记面板中展示)
+    let wiki_sources_dir = crate::get_wiki_dir().join("sources");
+    if wiki_sources_dir.exists() {
+        for entry in WalkDir::new(&wiki_sources_dir).into_iter().filter_map(Result::ok) {
+            if entry.file_type().is_file() {
+                let path = entry.path();
+                let mtime_ms = entry
+                    .metadata()
+                    .ok()
+                    .and_then(|m| m.modified().ok())
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|d| d.as_millis() as i64)
+                    .unwrap_or(0);
+
+                if since_ts > 0 && mtime_ms < since_ts {
+                    continue;
+                }
+
+                if let Ok(rel) = path.strip_prefix(&wiki_sources_dir) {
+                    let rel_str = format!("wiki/sources/{}", rel.to_string_lossy().replace('\\', "/"));
+                    if let Ok(text) = std::fs::read_to_string(path) {
+                        payloads.push(NoteFilePayload {
+                            path: rel_str,
+                            content: text,
+                            content_base64: None,
+                            updated_at: mtime_ms,
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    payloads
+}
+
 
 pub fn export_sync_data(
     app: &AppHandle,
@@ -822,6 +935,8 @@ pub fn export_sync_data(
     )
     .unwrap_or_default();
 
+    let notes = export_notes_payload(since_ts);
+
     Ok(SyncData {
         config,
         settings,
@@ -834,6 +949,7 @@ pub fn export_sync_data(
         kg_edges,
         wiki_fts,
         tombstones,
+        notes,
     })
 }
 
@@ -1207,6 +1323,81 @@ pub fn import_sync_data(app: &AppHandle, data: SyncData, last_sync_ts: i64) -> R
     )
     .map_err(|e| e.to_string())?;
 
+    // 8. 导入笔记与资料物理文件及更新 FTS
+    let mut imported_notes_count = 0;
+    if !data.notes.is_empty() {
+        use base64::Engine;
+        let notes_dir = crate::notebook::get_notes_dir();
+        let wiki_dir = crate::get_wiki_dir();
+
+        for note in &data.notes {
+            let target_path = if note.path.starts_with("wiki/") || note.path.starts_with("wiki\\") {
+                let rel = &note.path[5..];
+                wiki_dir.join(rel)
+            } else {
+                notes_dir.join(&note.path)
+            };
+
+            if let Some(parent) = target_path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+
+            let should_write = if target_path.exists() {
+                if let Ok(meta) = std::fs::metadata(&target_path) {
+                    if let Ok(local_mod) = meta.modified() {
+                        let local_ms = local_mod
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map(|d| d.as_millis() as i64)
+                            .unwrap_or(0);
+                        note.updated_at >= local_ms
+                    } else {
+                        true
+                    }
+                } else {
+                    true
+                }
+            } else {
+                true
+            };
+
+            if should_write {
+                let write_res = if let Some(ref b64) = note.content_base64 {
+                    if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(b64) {
+                        std::fs::write(&target_path, bytes)
+                    } else {
+                        std::fs::write(&target_path, &note.content)
+                    }
+                } else {
+                    std::fs::write(&target_path, &note.content)
+                };
+
+                if write_res.is_ok() {
+                    imported_notes_count += 1;
+                    if target_path.extension().map_or(false, |ext| ext == "md") {
+                        let (fm, text) = crate::notebook::parse_frontmatter_and_content(&note.content);
+                        let title = if fm.title.is_empty() {
+                            target_path
+                                .file_stem()
+                                .map(|s| s.to_string_lossy().to_string())
+                                .unwrap_or_default()
+                        } else {
+                            fm.title
+                        };
+                        let tags = fm.tags.join(" ");
+                        let _ = tx_sql.execute(
+                            "DELETE FROM notes_fts WHERE note_path = ?1",
+                            rusqlite::params![&note.path],
+                        );
+                        let _ = tx_sql.execute(
+                            "INSERT INTO notes_fts (note_path, title, content, tags) VALUES (?1, ?2, ?3, ?4)",
+                            rusqlite::params![&note.path, &title, &text, &tags],
+                        );
+                    }
+                }
+            }
+        }
+    }
+
     tx_sql.commit().map_err(|e| e.to_string())?;
 
     // Append to sync_history.json
@@ -1224,7 +1415,8 @@ pub fn import_sync_data(app: &AppHandle, data: SyncData, last_sync_ts: i64) -> R
         + data.captures.len()
         + data.cron_jobs.len()
         + data.kg_nodes.len()
-        + data.kg_edges.len();
+        + data.kg_edges.len()
+        + imported_notes_count;
     let mut detail_parts = Vec::new();
     if data.conversations.len() > 0 {
         detail_parts.push(format!("会话 {} 项", data.conversations.len()));
@@ -1247,6 +1439,9 @@ pub fn import_sync_data(app: &AppHandle, data: SyncData, last_sync_ts: i64) -> R
     if data.kg_nodes.len() > 0 {
         detail_parts.push(format!("知识节点 {} 项", data.kg_nodes.len()));
     }
+    if imported_notes_count > 0 {
+        detail_parts.push(format!("笔记 {} 篇", imported_notes_count));
+    }
 
     let detail_str = if detail_parts.is_empty() {
         "成功合并云端数据 (无新增)".to_string()
@@ -1267,7 +1462,8 @@ pub fn import_sync_data(app: &AppHandle, data: SyncData, last_sync_ts: i64) -> R
                 "settings": data.settings.len(),
                 "cron_jobs": data.cron_jobs.len(),
                 "kg_nodes": data.kg_nodes.len(),
-                "kg_edges": data.kg_edges.len()
+                "kg_edges": data.kg_edges.len(),
+                "notes": imported_notes_count
             },
             "total_records": total_records,
             "detail": detail_str
@@ -1280,6 +1476,11 @@ pub fn import_sync_data(app: &AppHandle, data: SyncData, last_sync_ts: i64) -> R
     if let Ok(json_str) = serde_json::to_string_pretty(&history) {
         let _ = std::fs::write(&history_path, json_str);
     }
+
+    if imported_notes_count > 0 {
+        let _ = app.emit("notebook:updated", serde_json::json!({ "count": imported_notes_count }));
+    }
+    let _ = app.emit("sync:completed", serde_json::json!({ "status": "ok", "total_records": total_records }));
 
     Ok(())
 }
@@ -1492,46 +1693,8 @@ async fn do_active_sync(
                                 let _ = conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('last_sync_ts', ?1)", rusqlite::params![now.to_string()]);
                             }
 
-                            let _ = app.emit(
-                                "sync:progress",
-                                serde_json::json!({"stage": "skills_sync", "status": "running"}),
-                            );
-                            let _ = client_full
-                                .get(format!("{}/v1/sync/skills/download", base_url))
-                                .header("X-Device-Id", &my_device_id)
-                                .header("X-Device-Name", &my_device_name)
-                                .header("Authorization", &payload.public_key)
-                                .send()
-                                .await
-                                .map(|r| async {
-                                    if let Ok(bytes) = r.bytes().await {
-                                        let _ = crate::skills_sync::unpack_skills(
-                                            &bytes,
-                                            &crate::get_external_skills_dir_or_default(&config),
-                                        );
-                                    }
-                                });
-
-                            let _ = app.emit(
-                                "sync:progress",
-                                serde_json::json!({"stage": "notes_sync", "status": "running"}),
-                            );
-                            let _ = client_full
-                                .get(format!("{}/v1/sync/notes/download", base_url))
-                                .header("X-Device-Id", &my_device_id)
-                                .header("X-Device-Name", &my_device_name)
-                                .header("Authorization", &payload.public_key)
-                                .send()
-                                .await
-                                .map(|r| async {
-                                    if let Ok(bytes) = r.bytes().await {
-                                        let _ = crate::skills_sync::unpack_skills(
-                                            &bytes,
-                                            &crate::notebook::get_notes_dir(),
-                                        );
-                                    }
-                                });
-
+                            let _ =
+                                app.emit("notebook:updated", serde_json::json!({"applied": 1}));
                             let _ =
                                 app.emit("config:reconciled", serde_json::json!({"applied": 1}));
                         }
@@ -2168,6 +2331,19 @@ pub fn start_relay_listener(app: AppHandle) {
                                                             log::info!("[Sync Engine] Pushing {} operations to PC outbox via Relay", arr.len());
                                                             crate::outbox::write_outbox(arr.clone());
 
+                                                            let mut commit_ack = serde_json::json!({
+                                                                "type": "commit_ack",
+                                                                "target_device_id": from_id,
+                                                            });
+                                                            copy_trace_fields(&json, &mut commit_ack, true);
+                                                            let _ = tx_mpsc.send(Message::Text(commit_ack.to_string().into())).await;
+                                                        }
+                                                    }
+                                                } else if action == "push_db" {
+                                                    log::info!("[Sync Engine] Received proxy push_db request from {}", from_id);
+                                                    if let Some(data_val) = inner_payload.get("data") {
+                                                        if let Ok(sync_data) = serde_json::from_value::<SyncData>(data_val.clone()) {
+                                                            let _ = import_sync_data(&app, sync_data, 0);
                                                             let mut commit_ack = serde_json::json!({
                                                                 "type": "commit_ack",
                                                                 "target_device_id": from_id,

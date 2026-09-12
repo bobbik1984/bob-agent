@@ -707,6 +707,23 @@ async fn handle_sync_push(
     }))
 }
 
+async fn handle_sync_push_db(
+    axum::extract::State(state): axum::extract::State<ApiState>,
+    axum::extract::ConnectInfo(addr): axum::extract::ConnectInfo<std::net::SocketAddr>,
+    headers: axum::http::HeaderMap,
+    axum::extract::Json(payload): axum::extract::Json<crate::sync_engine::SyncData>,
+) -> impl IntoResponse {
+    crate::sync_engine::register_device(&state.app, &headers, addr);
+    log::info!("[http_api] Received mobile push_db data");
+    match crate::sync_engine::import_sync_data(&state.app, payload, 0) {
+        Ok(()) => axum::Json(serde_json::json!({ "status": "ok" })),
+        Err(e) => {
+            log::error!("[http_api] Failed to import mobile push_db data: {}", e);
+            axum::Json(serde_json::json!({ "status": "error", "message": e }))
+        }
+    }
+}
+
 // ═══════════════════════════════════════════════════════════
 // 路由组装 & 服务启动
 // ═══════════════════════════════════════════════════════════
@@ -750,6 +767,7 @@ pub fn start_http_server(app: AppHandle) {
         .route("/v1/sync", get(handle_sync_ws))
         .route("/v1/sync/pull", get(handle_sync_pull))
         .route("/v1/sync/push", post(handle_sync_push))
+        .route("/v1/sync/push_db", post(handle_sync_push_db))
         .with_state(public_state);
 
     tauri::async_runtime::spawn(async move {
