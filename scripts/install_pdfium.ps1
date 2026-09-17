@@ -1,15 +1,8 @@
 $ErrorActionPreference = "Stop"
 
 $repo = "bblanchon/pdfium-binaries"
-Write-Host "Fetching latest release information..."
-$releaseUrl = "https://api.github.com/repos/$repo/releases/latest"
-$releaseInfo = Invoke-RestMethod -Uri $releaseUrl
-$tag = $releaseInfo.tag_name
-
-Write-Host "Latest tag: $tag"
-
 $fileName = "pdfium-win-x64.tgz"
-$downloadUrl = "https://github.com/$repo/releases/download/$tag/$fileName"
+$downloadUrl = "https://github.com/$repo/releases/latest/download/$fileName"
 
 $targetDir = Join-Path $PSScriptRoot "..\src-tauri"
 $tgzPath = Join-Path $targetDir $fileName
