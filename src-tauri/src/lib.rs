@@ -156,6 +156,7 @@ fn get_config_path() -> PathBuf {
 fn read_config() -> Value {
     let path = get_config_path();
     if let Ok(data) = fs::read_to_string(&path) {
+        #[allow(unused_mut)]
         if let Ok(mut json) = serde_json::from_str::<Value>(&data) {
             #[cfg(target_os = "android")]
             {
@@ -207,7 +208,9 @@ fn read_config() -> Value {
 
 /// 启动自愈：清理当前平台上非法的历史跨端路径配置 (例如 Android 上的 Windows 盘符)
 pub(crate) fn sanitize_platform_config() {
+    #[allow(unused_mut)]
     let mut config = read_config();
+    #[allow(unused_mut)]
     let mut changed = false;
 
     #[cfg(target_os = "android")]
@@ -222,6 +225,23 @@ pub(crate) fn sanitize_platform_config() {
                         changed = true;
                     }
                 }
+            }
+
+            // 手机端独立永久身份校验与自愈：
+            // 确保 device_id 存在且符合 android- 格式。如果缺失，或曾被误同步成 PC 的 44 位 Base64 公钥 (以=结尾)，重新生成唯一干净的 ID
+            let needs_new_id = match obj.get("device_id").and_then(|v| v.as_str()) {
+                Some(id) => {
+                    let trimmed = id.trim();
+                    trimmed.is_empty() || (trimmed.len() == 44 && trimmed.ends_with('=')) || !trimmed.starts_with("android-")
+                }
+                None => true,
+            };
+
+            if needs_new_id {
+                let new_id = format!("android-{}", &uuid::Uuid::new_v4().to_string().replace("-", "")[..12]);
+                log::warn!("[Sanitize] 手机端自愈：生成/重置手机独立永久设备身份: {}", new_id);
+                obj.insert("device_id".to_string(), serde_json::json!(new_id));
+                changed = true;
             }
         }
     }

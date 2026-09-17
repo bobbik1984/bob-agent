@@ -165,7 +165,34 @@ impl DeviceRegistry {
 #[command]
 pub async fn get_connected_devices(app: AppHandle) -> Result<Vec<ConnectedDevice>, String> {
     let registry = app.state::<Arc<DeviceRegistry>>();
-    Ok(registry.get_all())
+    let mut list = registry.get_all();
+
+    // 智能双向名册补全 (特别是移动端作为 Client 时)：
+    // 如果 config.json 中存在已配对的 PC (pairing_payload)，但 DeviceRegistry 尚未登记该 PC，自动合成并落盘登记
+    let config = crate::read_config();
+    if let Some(payload) = config.get("pairing_payload").and_then(|v| v.as_object()) {
+        if let Some(pc_id) = payload.get("device_id").and_then(|v| v.as_str()).filter(|s| !s.trim().is_empty()) {
+            if !list.iter().any(|d| d.device_id == pc_id) {
+                let ip_addr = payload.get("local_ips")
+                    .and_then(|v| v.as_array())
+                    .and_then(|arr| arr.first())
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("relay")
+                    .to_string();
+                let pc_dev = ConnectedDevice {
+                    device_id: pc_id.to_string(),
+                    platform: "windows".to_string(),
+                    ip_address: ip_addr,
+                    last_seen: crate::now_ms(),
+                    device_name: Some("已配对电脑 (PC)".to_string()),
+                };
+                registry.update_device(pc_dev.clone());
+                list.push(pc_dev);
+            }
+        }
+    }
+
+    Ok(list)
 }
 
 #[command]
@@ -176,6 +203,19 @@ pub async fn disconnect_device(app: AppHandle, device_id: String) -> Result<(), 
         devices.remove(&device_id);
     }
     registry.save();
+
+    // 如果被解绑的设备是当前配对目标 (pairing_payload)，同步清理 config.json 中的配对载荷
+    let mut config = crate::read_config();
+    if let Some(pp) = config.get("pairing_payload").and_then(|v| v.as_object()) {
+        if pp.get("device_id").and_then(|v| v.as_str()) == Some(&device_id) {
+            if let Some(obj) = config.as_object_mut() {
+                obj.remove("pairing_payload");
+                crate::write_config(&config);
+                log::info!("[Sync Engine] Removed pairing_payload for disconnected device {}", device_id);
+            }
+        }
+    }
+
     let _ = app.emit("sync:device_disconnected", device_id);
     Ok(())
 }
@@ -687,6 +727,14 @@ pub async fn relay_handshake(
                 "Relay 配对成功",
                 None,
             );
+            let registry = app.state::<Arc<DeviceRegistry>>();
+            registry.update_device(ConnectedDevice {
+                device_id: target_device_id.clone(),
+                platform: "windows".to_string(),
+                ip_address: "relay".to_string(),
+                last_seen: crate::now_ms(),
+                device_name: Some("已配对电脑 (PC)".to_string()),
+            });
             Ok(())
         }
         Err(e) => {
@@ -1485,6 +1533,28 @@ pub fn import_sync_data(app: &AppHandle, data: SyncData, last_sync_ts: i64) -> R
     }
     let _ = app.emit("sync:completed", serde_json::json!({ "status": "ok", "total_records": total_records }));
 
+    // 智能更新对端设备在名册中的活跃时间与网络端点
+    let config = crate::read_config();
+    if let Some(pp) = config.get("pairing_payload").and_then(|v| v.as_object()) {
+        if let Some(pc_id) = pp.get("device_id").and_then(|v| v.as_str()).filter(|s| !s.trim().is_empty()) {
+            if let Some(registry) = app.try_state::<Arc<DeviceRegistry>>() {
+                let ip_addr = pp.get("local_ips")
+                    .and_then(|v| v.as_array())
+                    .and_then(|arr| arr.first())
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("relay")
+                    .to_string();
+                registry.update_device(ConnectedDevice {
+                    device_id: pc_id.to_string(),
+                    platform: "windows".to_string(),
+                    ip_address: ip_addr,
+                    last_seen: crate::now_ms(),
+                    device_name: Some("已配对电脑 (PC)".to_string()),
+                });
+            }
+        }
+    }
+
     Ok(())
 }
 
@@ -1768,6 +1838,16 @@ async fn do_active_sync(
                 .await;
         }
 
+        if let Some(registry) = app.try_state::<Arc<DeviceRegistry>>() {
+            registry.update_device(ConnectedDevice {
+                device_id: payload.device_id.clone(),
+                platform: "windows".to_string(),
+                ip_address: payload.local_ips.first().cloned().unwrap_or_else(|| "LAN".to_string()),
+                last_seen: crate::now_ms(),
+                device_name: Some("已配对电脑 (PC)".to_string()),
+            });
+        }
+
         let _ = app.emit(
             "sync:progress",
             serde_json::json!({"stage": "lan_sync", "status": "done"}),
@@ -1892,6 +1972,16 @@ async fn do_active_sync(
                 RelayTerminal::CommitAck,
             )
             .await;
+        }
+
+        if let Some(registry) = app.try_state::<Arc<DeviceRegistry>>() {
+            registry.update_device(ConnectedDevice {
+                device_id: payload.device_id.clone(),
+                platform: "windows".to_string(),
+                ip_address: "relay".to_string(),
+                last_seen: crate::now_ms(),
+                device_name: Some("已配对电脑 (PC)".to_string()),
+            });
         }
 
         let _ = app.emit(

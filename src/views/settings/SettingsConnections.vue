@@ -686,7 +686,7 @@
             <div style="display: flex; justify-content: space-between; align-items: center;">
               <div style="display: flex; align-items: center; gap: 6px;">
                 <span class="status-dot" :class="isDeviceOnline(dev) ? 'dot-connected' : 'dot-disconnected'" style="width: 8px; height: 8px; border-radius: 50%;"></span>
-                <span style="font-size: 13px; font-weight: 600; color: var(--text-primary);">{{ dev.device_name || (dev.platform === 'android' ? 'Android Device' : dev.platform) }}</span>
+                <span style="font-size: 13px; font-weight: 600; color: var(--text-primary);">{{ dev.device_name || (dev.platform === 'android' ? 'Android Device' : (dev.platform === 'windows' ? 'Windows PC' : dev.platform)) }}</span>
                 <span style="font-size: 11px; color: var(--text-tertiary); font-family: monospace;">({{ dev.device_id.substring(0, 8) }})</span>
                 <span v-if="dev.syncStatus === 'syncing'" style="font-size: 10px; padding: 2px 6px; background: var(--color-success); border-radius: var(--radius-default); color: white; margin-left: 6px;">🔄 正在同步</span>
               </div>
@@ -695,7 +695,7 @@
               </button>
             </div>
             <div style="font-size: 11px; color: var(--text-secondary); margin-left: 14px; display: flex; flex-direction: column; gap: 2px;">
-              <div>IP 地址: {{ dev.ip_address }}</div>
+              <div>网络端点: {{ dev.ip_address }}</div>
               <div>最后活跃: {{ formatTime(dev.last_seen) }}</div>
             </div>
           </div>
@@ -1553,14 +1553,20 @@ const handleReset = async () => {
 };
 
 const handleDisconnectDevice = async (dev) => {
-  const confirmed = await showConfirm(`确定要解绑设备 ${dev.platform} (${dev.device_id.substring(0, 8)}) 吗？`);
+  const devLabel = dev.device_name || (dev.platform === 'windows' ? 'Windows PC' : dev.platform);
+  const confirmed = await showConfirm(`确定要解绑设备 ${devLabel} (${dev.device_id.substring(0, 8)}) 吗？`);
   if (confirmed) {
     try {
       await invoke('disconnect_device', { deviceId: dev.device_id });
       await fetchConnectedDevices();
       if (connectedDevices.value.length === 0) {
         showDevicesModal.value = false;
-        isUnlocked.value = false;
+        if (!isNativeMobile) {
+          isUnlocked.value = false;
+        }
+      }
+      if (isNativeMobile) {
+        await fetchPairingInfo();
       }
     } catch (e) {
       console.error('Failed to disconnect device', e);
