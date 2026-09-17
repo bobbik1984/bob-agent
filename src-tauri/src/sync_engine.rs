@@ -1480,6 +1480,9 @@ pub fn import_sync_data(app: &AppHandle, data: SyncData, last_sync_ts: i64) -> R
     if imported_notes_count > 0 {
         let _ = app.emit("notebook:updated", serde_json::json!({ "count": imported_notes_count }));
     }
+    if data.events.len() > 0 {
+        let _ = app.emit("calendar-updated", serde_json::json!({ "action": "sync", "count": data.events.len() }));
+    }
     let _ = app.emit("sync:completed", serde_json::json!({ "status": "ok", "total_records": total_records }));
 
     Ok(())

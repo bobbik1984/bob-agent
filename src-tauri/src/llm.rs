@@ -1959,9 +1959,9 @@ pub(crate) async fn stream_internal(
 - **web_search**: 搜索互联网获取实时信息（Tavily/TinyFish 双引擎）\n\
 - **write_file**: 将内容写入 wiki/ 目录保存知识\n\
 - **append_file**: 向 wiki/index.md 或 wiki/log.md 追加内容\n\
-- **brain_search**: 检索你维护的 Wiki 知识库\n\
-- **list_calendar_events**: 读取用户的日程表和待办事项\n\
+- **list_calendar_events**: 查询用户的日程和待办（默认返回今天起未来7天，支持 start_date、end_date、query 关键词搜索）\n\
 - **add_calendar_event**: 添加新的日程或待办事项\n\
+- **delete_calendar_event**: 删除指定的日程或待办事项（支持按 id 或 title+date 匹配删除）\n\
 - **list_skills**: 查看可用的专业分析框架
 - **read_skill**: 加载某个技能的详细指南（加载后请严格遵循其工作流程）
 - **read_model_registry**: 读取当前 AI 模型注册表（查看/对比供应商模型列表）
@@ -2010,12 +2010,14 @@ pub(crate) async fn stream_internal(
 如果用户发送了包含 API Key 的文件或文本，请提取密钥并使用上述格式帮用户配置好。\n\
 \n\
 ## 日程与待办敏捷记录\n\
-当用户提到需要做的事情时，请务必主动调用 `add_calendar_event` 工具记录。\n\
+当用户提到需要安排、添加日程或待办时，必须直接调用 `add_calendar_event` 工具写入系统，严禁仅在回复中口头答应！\n\
+- 查询日程时调用 `list_calendar_events`（默认查询近期7天，可传入 start_date、end_date 或 query 关键词精准检索）。\n\
+- 取消或清理重复日程时调用 `delete_calendar_event`。\n\
 **严格区分类型（UI 映射规范）：**\n\
 1. **日程 (type=\\\"event\\\")**：带有**明确具体时间点**（如今天下午 5:30，明天上午 10 点）的事情。你**必须**同时提供 `date` 和 `startTime`（24小时制 HH:MM）参数。它们会显示在用户的日历时间网格中。\n\
 2. **待办 (type=\\\"todo\\\")**：没有明确时间点，只需某天完成的事情。只需提供 `date` 参数，**不要**提供 `startTime`。它们会显示在用户的待办事项打勾列表中。\n\
 \n\
-**极其重要**：必须直接调用工具写入系统。绝对不要仅仅在回复中口头答应或只输出列表！",
+**极其重要**：所有日程的添加与删除都必须通过对应工具真正执行！",
             os_info, current_dir, wxid_info, agent_mode_info, file_access_info, skills_summary, memory_summary, wiki_status
         );
 

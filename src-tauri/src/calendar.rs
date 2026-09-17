@@ -1,5 +1,6 @@
 use rusqlite::params;
 use serde_json::{json, Value};
+use tauri::Emitter;
 
 /// T-605: 日程管理引擎 — 基于 SQLite 的事件/待办系统
 ///
@@ -107,7 +108,11 @@ pub fn system_parse_event(text: String) -> Value {
 
 /// 确认并保存事件到数据库
 #[tauri::command]
-pub fn system_confirm_event(event: Value, db: tauri::State<'_, crate::db::DbState>) -> Value {
+pub fn system_confirm_event(
+    event: Value,
+    db: tauri::State<'_, crate::db::DbState>,
+    app: tauri::AppHandle,
+) -> Value {
     let conn = match db.0.lock() {
         Ok(c) => c,
         Err(_) => return json!({ "ok": false, "error": "数据库锁失败" }),
@@ -138,20 +143,31 @@ pub fn system_confirm_event(event: Value, db: tauri::State<'_, crate::db::DbStat
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
         params![id, title, etype, status, date, start_time, end_time, description, now, now, linked_ticket_id],
     ) {
-        Ok(_) => json!({ "ok": true, "id": id }),
+        Ok(_) => {
+            let _ = app.emit("calendar-updated", json!({ "action": "create", "id": &id }));
+            json!({ "ok": true, "id": id })
+        }
         Err(e) => json!({ "ok": false, "error": format!("{}", e) }),
     }
 }
 
 /// 删除事件
 #[tauri::command]
-pub fn system_delete_event(id: String, db: tauri::State<'_, crate::db::DbState>) -> bool {
+pub fn system_delete_event(
+    id: String,
+    db: tauri::State<'_, crate::db::DbState>,
+    app: tauri::AppHandle,
+) -> bool {
     let conn = match db.0.lock() {
         Ok(c) => c,
         Err(_) => return false,
     };
-    conn.execute("DELETE FROM events WHERE id = ?1", params![id])
+    let count = conn
+        .execute("DELETE FROM events WHERE id = ?1", params![id])
         .unwrap_or(0);
+    if count > 0 {
+        let _ = app.emit("calendar-updated", json!({ "action": "delete", "id": &id }));
+    }
     true
 }
 
@@ -161,6 +177,7 @@ pub fn system_update_event_status(
     id: String,
     status: String,
     db: tauri::State<'_, crate::db::DbState>,
+    app: tauri::AppHandle,
 ) -> bool {
     let conn = match db.0.lock() {
         Ok(c) => c,
@@ -181,6 +198,7 @@ pub fn system_update_event_status(
         params![status, completed_at, id],
     )
     .unwrap_or(0);
+    let _ = app.emit("calendar-updated", json!({ "action": "update_status", "id": &id }));
     true
 }
 
@@ -191,6 +209,7 @@ pub fn system_update_event_time(
     start_time: String,
     end_time: String,
     db: tauri::State<'_, crate::db::DbState>,
+    app: tauri::AppHandle,
 ) -> bool {
     let conn = match db.0.lock() {
         Ok(c) => c,
@@ -201,6 +220,7 @@ pub fn system_update_event_time(
         params![start_time, end_time, id],
     )
     .unwrap_or(0);
+    let _ = app.emit("calendar-updated", json!({ "action": "update_time", "id": &id }));
     true
 }
 
@@ -210,6 +230,7 @@ pub fn system_update_event_description(
     id: String,
     description: String,
     db: tauri::State<'_, crate::db::DbState>,
+    app: tauri::AppHandle,
 ) -> bool {
     let conn = match db.0.lock() {
         Ok(c) => c,
@@ -221,6 +242,7 @@ pub fn system_update_event_description(
         params![description, now, id],
     )
     .unwrap_or(0);
+    let _ = app.emit("calendar-updated", json!({ "action": "update_description", "id": &id }));
     true
 }
 

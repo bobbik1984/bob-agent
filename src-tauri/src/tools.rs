@@ -542,10 +542,15 @@ fn get_builtin_tool_schemas() -> Vec<Value> {
             "type": "function",
             "function": {
                 "name": "list_calendar_events",
-                "description": "列出用户的本地日程表（日历）和待办事项（未完成的）。当用户问'我今天有什么事'、'我的待办事项有哪些'时调用此工具。",
+                "description": "查询用户的本地日程表（日历）和待办事项。支持按时间段（某天、时间范围）或关键词搜索。未指定日期且无关键词时，默认返回今天及未来 7 天内的活跃安排。",
                 "parameters": {
                     "type": "object",
-                    "properties": {}
+                    "properties": {
+                        "start_date": { "type": "string", "description": "起始日期，格式 YYYY-MM-DD（如 '2026-09-18'）。若只想查某特定某天，可仅传此参数" },
+                        "end_date": { "type": "string", "description": "截止日期，格式 YYYY-MM-DD。若不传且传了 start_date，则默认仅查 start_date 当天；若两者都不传，默认查询今天起未来 7 天" },
+                        "query": { "type": "string", "description": "关键词搜索（可选，模糊匹配标题或描述内容，如 '北站'、'策划会'）" },
+                        "include_done": { "type": "boolean", "description": "是否包含已完成的事项，默认 false" }
+                    }
                 }
             }
         }),
@@ -565,6 +570,21 @@ fn get_builtin_tool_schemas() -> Vec<Value> {
                         "description": { "type": "string", "description": "详细描述或补充说明" }
                     },
                     "required": ["title", "type", "date"]
+                }
+            }
+        }),
+        json!({
+            "type": "function",
+            "function": {
+                "name": "delete_calendar_event",
+                "description": "删除指定的日程或待办事项。可以通过事件 ID 精确删除，或通过标题和日期匹配删除（如清理重复日程）。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "id": { "type": "string", "description": "要删除的事件 ID，如 'evt-1789576174948'" },
+                        "title": { "type": "string", "description": "事件标题（当不知道 ID 时使用）" },
+                        "date": { "type": "string", "description": "事件日期 YYYY-MM-DD（辅助精确定位）" }
+                    }
                 }
             }
         }),
@@ -990,8 +1010,9 @@ async fn execute_tool_inner(
             let content = args.get("content").and_then(|v| v.as_str()).unwrap_or("");
             tool_append_file(path, content, global_file_access).await
         }
-        "list_calendar_events" => tool_list_calendar_events(app),
+        "list_calendar_events" => tool_list_calendar_events(app, args),
         "add_calendar_event" => tool_add_calendar_event(app, args),
+        "delete_calendar_event" => tool_delete_calendar_event(app, args),
         "build_knowledge_base" => {
             let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
             // 直接触发异步的知识库构建引擎
@@ -2164,8 +2185,8 @@ async fn tool_brain_search(query: &str) -> Value {
     }
 }
 
-/// list_calendar_events — 列出本地日程/待办
-fn tool_list_calendar_events(app: &tauri::AppHandle) -> Value {
+/// list_calendar_events — 查询本地日程/待办（支持时间范围与关键词过滤）
+fn tool_list_calendar_events(app: &tauri::AppHandle, args: &Value) -> Value {
     use tauri::Manager;
     let db = app.state::<crate::db::DbState>();
     let conn = match db.0.lock() {
@@ -2173,24 +2194,122 @@ fn tool_list_calendar_events(app: &tauri::AppHandle) -> Value {
         Err(_) => return json!({ "error": "数据库锁失败" }),
     };
 
-    let mut stmt = match conn.prepare(
-        "SELECT id, title, type, status, date, start_time, end_time, description 
-         FROM events WHERE status != 'done' AND status != 'cancelled' ORDER BY date ASC, start_time ASC"
-    ) {
-        Ok(s) => s,
-        Err(e) => return json!({ "error": format!("查询失败: {}", e) }),
+    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+    let query_opt = args
+        .get("query")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty());
+    let start_date_raw = args
+        .get("start_date")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty());
+    let end_date_raw = args
+        .get("end_date")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty());
+    let include_done = args
+        .get("include_done")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let limit = args
+        .get("limit")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(30)
+        .min(100) as usize;
+
+    let (start_date, end_date) = match (start_date_raw, end_date_raw) {
+        (Some(s), Some(e)) => (Some(s.to_string()), Some(e.to_string())),
+        (Some(s), None) => (Some(s.to_string()), Some(s.to_string())), // 单天查询
+        (None, Some(e)) => (Some(today.clone()), Some(e.to_string())),
+        (None, None) => {
+            if query_opt.is_some() {
+                // 有关键词搜索且未传日期范围时，放开时间限制
+                (None, None)
+            } else {
+                // 默认查询今天以及未来 7 天
+                let next_week = (chrono::Local::now() + chrono::Duration::days(7))
+                    .format("%Y-%m-%d")
+                    .to_string();
+                (Some(today.clone()), Some(next_week))
+            }
+        }
     };
 
-    let rows = match stmt.query_map([], |row| {
+    let mut sql = String::from(
+        "SELECT id, title, type, status, COALESCE(date, SUBSTR(start_time, 1, 10)) AS eff_date, start_time, end_time, description FROM events WHERE 1=1",
+    );
+    let mut params_vec: Vec<String> = Vec::new();
+
+    if !include_done {
+        sql.push_str(" AND status != 'done' AND status != 'cancelled'");
+    }
+
+    if let Some(ref s) = start_date {
+        params_vec.push(s.clone());
+        sql.push_str(&format!(" AND (eff_date >= ?{})", params_vec.len()));
+    }
+
+    if let Some(ref e) = end_date {
+        params_vec.push(e.clone());
+        sql.push_str(&format!(" AND (eff_date <= ?{})", params_vec.len()));
+    }
+
+    if let Some(q) = query_opt {
+        params_vec.push(format!("%{}%", q));
+        let p_idx = params_vec.len();
+        sql.push_str(&format!(" AND (title LIKE ?{p_idx} OR description LIKE ?{p_idx})"));
+    }
+
+    sql.push_str(" ORDER BY eff_date ASC, start_time ASC LIMIT ");
+    sql.push_str(&limit.to_string());
+
+    let mut stmt = match conn.prepare(&sql) {
+        Ok(s) => s,
+        Err(e) => return json!({ "error": format!("查询预编译失败: {}", e) }),
+    };
+
+    let rows = match stmt.query_map(rusqlite::params_from_iter(params_vec.iter()), |row| {
+        let date_val: Option<String> = row.get(4).unwrap_or(None);
+        let start_time_val: Option<String> = row.get(5).unwrap_or(None);
+        let end_time_val: Option<String> = row.get(6).unwrap_or(None);
+        let desc_val: Option<String> = row.get(7).unwrap_or(None);
+
+        let time_display = match (&start_time_val, &end_time_val) {
+            (Some(st), Some(et)) => {
+                let s = st.split_whitespace().last().unwrap_or(st);
+                let e = et.split_whitespace().last().unwrap_or(et);
+                let s_short = if s.len() >= 5 { &s[..5] } else { s };
+                let e_short = if e.len() >= 5 { &e[..5] } else { e };
+                Some(format!("{}-{}", s_short, e_short))
+            }
+            (Some(st), None) => {
+                let s = st.split_whitespace().last().unwrap_or(st);
+                let s_short = if s.len() >= 5 { &s[..5] } else { s };
+                Some(s_short.to_string())
+            }
+            _ => None,
+        };
+
+        let desc_trimmed = desc_val.map(|d| {
+            if d.chars().count() > 150 {
+                let prefix: String = d.chars().take(150).collect();
+                format!("{}...", prefix)
+            } else {
+                d
+            }
+        });
+
         Ok(json!({
             "id": row.get::<_, String>(0)?,
             "title": row.get::<_, String>(1)?,
             "type": row.get::<_, String>(2)?,
             "status": row.get::<_, String>(3)?,
-            "date": row.get::<_, Option<String>>(4).unwrap_or(None),
-            "start_time": row.get::<_, Option<String>>(5).unwrap_or(None),
-            "end_time": row.get::<_, Option<String>>(6).unwrap_or(None),
-            "description": row.get::<_, Option<String>>(7).unwrap_or(None),
+            "date": date_val,
+            "time": time_display,
+            "description": desc_trimmed,
         }))
     }) {
         Ok(r) => r,
@@ -2199,9 +2318,19 @@ fn tool_list_calendar_events(app: &tauri::AppHandle) -> Value {
 
     let events: Vec<Value> = rows.filter_map(|r| r.ok()).collect();
     if events.is_empty() {
-        json!({ "message": "目前没有任何未完成的日程或待办事项。" })
+        let msg = if let Some(q) = query_opt {
+            format!("未找到与 '{}' 相关的日程或待办事项。", q)
+        } else if let (Some(s), Some(e)) = (start_date, end_date) {
+            format!("在 {} 至 {} 期间没有任何待办或日程安排。", s, e)
+        } else {
+            "目前没有任何活跃的日程或待办事项。".to_string()
+        };
+        json!({ "message": msg, "events": [] })
     } else {
-        json!({ "events": events })
+        json!({
+            "count": events.len(),
+            "events": events
+        })
     }
 }
 
@@ -2262,8 +2391,63 @@ fn tool_add_calendar_event(app: &tauri::AppHandle, args: &Value) -> Value {
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
         rusqlite::params![id, title, etype, status, date_str, db_start_time, db_end_time, description, super::now_ms()],
     ) {
-        Ok(_) => json!({ "ok": true, "id": id, "message": format!("成功添加日程：{}", title) }),
+        Ok(_) => {
+            let _ = app.emit("calendar-updated", json!({ "action": "add", "id": &id }));
+            json!({ "ok": true, "id": id, "message": format!("成功添加日程：{}", title) })
+        }
         Err(e) => json!({ "error": format!("添加日程失败：{}", e) }),
+    }
+}
+
+/// delete_calendar_event — 删除日程/待办
+fn tool_delete_calendar_event(app: &tauri::AppHandle, args: &Value) -> Value {
+    use tauri::Manager;
+    let db = app.state::<crate::db::DbState>();
+    let conn = match db.0.lock() {
+        Ok(c) => c,
+        Err(_) => return json!({ "error": "数据库锁失败" }),
+    };
+
+    let id_opt = args
+        .get("id")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty());
+    let title_opt = args
+        .get("title")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty());
+    let date_opt = args
+        .get("date")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty());
+
+    let deleted = if let Some(id) = id_opt {
+        conn.execute("DELETE FROM events WHERE id = ?1", rusqlite::params![id])
+            .unwrap_or(0)
+    } else if let (Some(title), Some(date)) = (title_opt, date_opt) {
+        conn.execute(
+            "DELETE FROM events WHERE title LIKE ?1 AND date = ?2",
+            rusqlite::params![format!("%{}%", title), date],
+        )
+        .unwrap_or(0)
+    } else if let Some(title) = title_opt {
+        conn.execute(
+            "DELETE FROM events WHERE title = ?1",
+            rusqlite::params![title],
+        )
+        .unwrap_or(0)
+    } else {
+        return json!({ "error": "请提供要删除的日程 ID (id) 或标题 (title)" });
+    };
+
+    if deleted > 0 {
+        let _ = app.emit("calendar-updated", json!({ "action": "delete", "count": deleted }));
+        json!({ "ok": true, "deleted_count": deleted, "message": format!("已成功删除 {} 条日程事项。", deleted) })
+    } else {
+        json!({ "ok": false, "deleted_count": 0, "message": "未找到匹配的日程条目，可能已被删除或不存在。" })
     }
 }
 

@@ -109,7 +109,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, computed, inject } from 'vue';
+import { ref, onMounted, onUnmounted, computed, inject, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { listen } from '@tauri-apps/api/event';
 import { formatRelativeTime as formatTime } from '@/utils/date';
@@ -212,6 +212,18 @@ onUnmounted(() => {
     if (window.appAPI.onCalendarUpdated) {
       unlistenCalendar = window.appAPI.onCalendarUpdated(reloadEvents);
     }
+  });
+
+  const activeDrawer = inject('activeDrawer', null);
+  if (activeDrawer) {
+    watch(activeDrawer, (newVal) => {
+      if (newVal === 'schedule') {
+        reloadEvents();
+      }
+    });
+  }
+  watch(() => props.activePanel, () => {
+    reloadEvents();
   });
 
   onUnmounted(() => {
