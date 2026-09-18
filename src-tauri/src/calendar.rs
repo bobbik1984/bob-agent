@@ -29,6 +29,12 @@ pub fn init_events_table(conn: &rusqlite::Connection) {
     // T-1307: 迁移列兼容（已存在则静默忽略）
     conn.execute_batch(
         "
+        CREATE TABLE IF NOT EXISTS sync_tombstones (
+            table_name TEXT NOT NULL,
+            record_key TEXT NOT NULL,
+            deleted_at INTEGER NOT NULL,
+            PRIMARY KEY (table_name, record_key)
+        );
         ALTER TABLE events ADD COLUMN last_notified INTEGER DEFAULT 0;
         ALTER TABLE events ADD COLUMN completed_at INTEGER DEFAULT 0;
         ALTER TABLE events ADD COLUMN linked_ticket_id TEXT;
@@ -36,6 +42,12 @@ pub fn init_events_table(conn: &rusqlite::Connection) {
     ",
     )
     .unwrap_or_default();
+
+    // 修复历史未写入 updated_at 的记录，确保 LWW 判定和增量导出正常工作
+    let _ = conn.execute(
+        "UPDATE events SET updated_at = created_at WHERE updated_at IS NULL OR updated_at = 0",
+        [],
+    );
 }
 
 /// 列出所有事件和待办
@@ -162,10 +174,15 @@ pub fn system_delete_event(
         Ok(c) => c,
         Err(_) => return false,
     };
+    let now = super::now_ms();
     let count = conn
         .execute("DELETE FROM events WHERE id = ?1", params![id])
         .unwrap_or(0);
     if count > 0 {
+        let _ = conn.execute(
+            "INSERT OR REPLACE INTO sync_tombstones (table_name, record_key, deleted_at) VALUES ('events', ?1, ?2)",
+            params![id, now],
+        );
         let _ = app.emit("calendar-updated", json!({ "action": "delete", "id": &id }));
     }
     true
@@ -192,10 +209,11 @@ pub fn system_update_event_status(
     } else {
         0
     };
+    let now = super::now_ms();
 
     conn.execute(
-        "UPDATE events SET status = ?1, completed_at = ?2 WHERE id = ?3",
-        params![status, completed_at, id],
+        "UPDATE events SET status = ?1, completed_at = ?2, updated_at = ?3 WHERE id = ?4",
+        params![status, completed_at, now, id],
     )
     .unwrap_or(0);
     let _ = app.emit("calendar-updated", json!({ "action": "update_status", "id": &id }));
@@ -215,9 +233,10 @@ pub fn system_update_event_time(
         Ok(c) => c,
         Err(_) => return false,
     };
+    let now = super::now_ms();
     conn.execute(
-        "UPDATE events SET start_time = ?1, end_time = ?2 WHERE id = ?3",
-        params![start_time, end_time, id],
+        "UPDATE events SET start_time = ?1, end_time = ?2, updated_at = ?3 WHERE id = ?4",
+        params![start_time, end_time, now, id],
     )
     .unwrap_or(0);
     let _ = app.emit("calendar-updated", json!({ "action": "update_time", "id": &id }));

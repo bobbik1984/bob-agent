@@ -37,7 +37,7 @@
         </div>
 
         <div v-if="activeTab === 'timeline'" class="section">
-          <h3 class="section-title">
+          <h3 class="section-title" v-if="!isMobile">
             <Calendar :size="16" class="section-icon" />
             {{ $t('inbox.this_week') || '本周日程' }}
           </h3>
@@ -571,14 +571,28 @@ function describeCron(expr) {
   right: 12px;
 }
 
-.inbox-view.is-mobile .inbox-content-wrapper.is-timeline-tab .inbox-content {
-  padding: 12px 0 0 0 !important;
+.inbox-view.is-mobile .inbox-content-wrapper.is-timeline-tab {
+  overflow: hidden !important;
+  padding: 0 !important;
+  flex: 1;
+  height: 100%;
+  min-height: 0;
 }
+
+.inbox-view.is-mobile .inbox-content-wrapper.is-timeline-tab .inbox-content {
+  padding: 0 !important;
+  flex: 1;
+  height: 100%;
+  min-height: 0;
+  max-width: none;
+}
+
 .inbox-view.is-mobile .inbox-content-wrapper.is-timeline-tab .section {
   flex: 1;
   display: flex;
   flex-direction: column;
   min-height: 0;
+  height: 100%;
   margin: 0 !important;
 }
 </style>

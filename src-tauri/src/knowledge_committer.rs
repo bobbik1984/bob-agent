@@ -27,7 +27,7 @@ fn normalized_project_name(value: &str) -> String {
         .trim()
         .to_lowercase()
         .chars()
-        .filter(|ch| !ch.is_whitespace() && !matches!(ch, '-' | '_' | '·'))
+        .filter(|ch| !ch.is_whitespace() && !matches!(ch, '-' | '_' | '·' | '.'))
         .collect()
 }
 

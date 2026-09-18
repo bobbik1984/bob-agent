@@ -1276,9 +1276,11 @@ async fn phase_notebook_digest(_app: &AppHandle) -> i64 {
                             "action" => {
                                 if let Some(title) = intent.get("title").and_then(|v| v.as_str()) {
                                     // 添加到 events 表中
+                                    let now = super::now_ms();
+                                    let evt_id = format!("evt-{}", now);
                                     let _ = conn.execute(
-                                        "INSERT INTO events (title, event_type, status, created_at, date) VALUES (?1, 'todo', 'pending', ?2, ?3)",
-                                        rusqlite::params![title, super::now_ms(), chrono::Local::now().format("%Y-%m-%d").to_string()]
+                                        "INSERT INTO events (id, title, type, status, date, created_at, updated_at) VALUES (?1, ?2, 'todo', 'pending', ?3, ?4, ?4)",
+                                        rusqlite::params![evt_id, title, chrono::Local::now().format("%Y-%m-%d").to_string(), now]
                                     );
                                 }
                             }

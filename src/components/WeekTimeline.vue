@@ -3,10 +3,6 @@
     <!-- 导航控制栏 -->
     <div class="timeline-header-row">
       <div class="timeline-title-area">
-        <div v-if="isMobile" class="mobile-section-title">
-          <Calendar :size="16" class="section-icon" />
-          本周日程
-        </div>
         <div class="current-month-display">
           {{ currentMonthDisplay }}
         </div>
@@ -198,15 +194,29 @@ function updateCurrentTime() {
   currentTimeTop.value = (nowTracker.value.getHours() + nowTracker.value.getMinutes() / 60) * PIXELS_PER_HOUR;
 }
 
-function scrollToCurrentTime() {
-  if (scrollContainer.value) {
-    const now = new Date();
-    const currentH = now.getHours() + now.getMinutes() / 60;
-    const viewportH = scrollContainer.value.clientHeight;
-    if (viewportH === 0) return;
-    const offsetRows = viewportH / PIXELS_PER_HOUR / 3;
-    let scrollY = Math.max(0, currentH - offsetRows) * PIXELS_PER_HOUR;
-    scrollContainer.value.scrollTo({ top: scrollY, behavior: 'smooth' });
+let resizeObserver = null;
+let hasAutoScrolled = false;
+
+function scrollToCurrentTime(smooth = false) {
+  const container = scrollContainer.value;
+  if (!container) return;
+  const now = new Date();
+  const currentH = now.getHours() + now.getMinutes() / 60;
+  const viewportH = container.clientHeight;
+  if (viewportH === 0) {
+    // 容器尚未渲染完成或处于不可见状态，稍后重试
+    setTimeout(() => scrollToCurrentTime(smooth), 150);
+    return;
+  }
+  const offsetRows = Math.max(1, viewportH / PIXELS_PER_HOUR / 3);
+  const scrollY = Math.max(0, (currentH - offsetRows) * PIXELS_PER_HOUR);
+  try {
+    container.scrollTo({ top: scrollY, behavior: smooth ? 'smooth' : 'auto' });
+  } catch (e) {
+    container.scrollTop = scrollY;
+  }
+  if (!smooth) {
+    container.scrollTop = scrollY;
   }
 }
 
@@ -214,20 +224,42 @@ onMounted(() => {
   updateCurrentTime();
   timeInterval = setInterval(updateCurrentTime, 60000); // 每分钟更新
   
-  // 智能滚动：优先让当前时间线可见，其次考虑最早事件
-  setTimeout(scrollToCurrentTime, 300); // 延迟执行以确保 DOM 已完成渲染且过渡动画结束
+  if (scrollContainer.value && typeof ResizeObserver !== 'undefined') {
+    resizeObserver = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        if (entry.contentRect.height > 0 && !hasAutoScrolled) {
+          hasAutoScrolled = true;
+          scrollToCurrentTime(false);
+        }
+      }
+    });
+    resizeObserver.observe(scrollContainer.value);
+  }
+  
+  // 智能滚动保底：优先让当前时间线可见
+  setTimeout(() => scrollToCurrentTime(false), 200);
 });
 
 if (activeDrawer) {
   watch(activeDrawer, (newVal) => {
     if (newVal === 'schedule') {
-      setTimeout(scrollToCurrentTime, 300);
+      setTimeout(() => scrollToCurrentTime(false), 150);
     }
   });
 }
 
+watch(weekOffset, (newVal) => {
+  if (newVal === 0) {
+    setTimeout(() => scrollToCurrentTime(true), 100);
+  }
+});
+
 onUnmounted(() => {
   if (timeInterval) clearInterval(timeInterval);
+  if (resizeObserver) {
+    resizeObserver.disconnect();
+    resizeObserver = null;
+  }
 });
 
 // ── 事件详情弹窗 ──────────────────────────────────
@@ -1145,19 +1177,6 @@ const currentMonthDisplay = computed(() => {
 .week-timeline.is-mobile-view .timeline-controls {
   margin: 0 !important;
   padding: 0 !important;
-}
-
-.week-timeline.is-mobile-view .mobile-section-title {
-  font-size: var(--text-lg);
-  font-weight: 600;
-  color: var(--text-secondary);
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.week-timeline.is-mobile-view .section-icon {
-  opacity: 0.8;
 }
 
 .week-timeline.is-mobile-view .calendar-header {

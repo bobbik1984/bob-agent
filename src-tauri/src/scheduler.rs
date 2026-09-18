@@ -572,16 +572,17 @@ async fn execute_cron_job(app: &AppHandle, job_id: &str, title: &str, prompt: &s
         let today = chrono::Local::now().format("%Y-%m-%d").to_string();
         let time_now = chrono::Local::now().format("%H:%M").to_string();
         let desc_preview: String = response_text.chars().take(200).collect();
+        let now = super::now_ms();
         let _ = conn.execute(
-            "INSERT INTO events (id, title, type, status, date, start_time, description, created_at)
-             VALUES (?1, ?2, 'cron_result', 'done', ?3, ?4, ?5, ?6)",
+            "INSERT INTO events (id, title, type, status, date, start_time, description, created_at, updated_at)
+             VALUES (?1, ?2, 'cron_result', 'done', ?3, ?4, ?5, ?6, ?6)",
             params![
                 event_id,
                 format!("[Cron] {}", title),
                 today,
                 time_now,
                 desc_preview,
-                super::now_ms(),
+                now,
             ],
         );
     }

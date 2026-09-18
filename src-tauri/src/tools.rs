@@ -2386,10 +2386,11 @@ fn tool_add_calendar_event(app: &tauri::AppHandle, args: &Value) -> Value {
         .and_then(|v| v.as_str())
         .unwrap_or("");
 
+    let now = super::now_ms();
     match conn.execute(
-        "INSERT INTO events (id, title, type, status, date, start_time, end_time, description, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-        rusqlite::params![id, title, etype, status, date_str, db_start_time, db_end_time, description, super::now_ms()],
+        "INSERT INTO events (id, title, type, status, date, start_time, end_time, description, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+        rusqlite::params![id, title, etype, status, date_str, db_start_time, db_end_time, description, now, now],
     ) {
         Ok(_) => {
             let _ = app.emit("calendar-updated", json!({ "action": "add", "id": &id }));
@@ -2424,24 +2425,41 @@ fn tool_delete_calendar_event(app: &tauri::AppHandle, args: &Value) -> Value {
         .map(|s| s.trim())
         .filter(|s| !s.is_empty());
 
-    let deleted = if let Some(id) = id_opt {
-        conn.execute("DELETE FROM events WHERE id = ?1", rusqlite::params![id])
-            .unwrap_or(0)
+    let ids_to_delete: Vec<String> = if let Some(id) = id_opt {
+        vec![id.to_string()]
     } else if let (Some(title), Some(date)) = (title_opt, date_opt) {
-        conn.execute(
-            "DELETE FROM events WHERE title LIKE ?1 AND date = ?2",
-            rusqlite::params![format!("%{}%", title), date],
-        )
-        .unwrap_or(0)
+        if let Ok(mut stmt) = conn.prepare("SELECT id FROM events WHERE title LIKE ?1 AND date = ?2") {
+            stmt.query_map(rusqlite::params![format!("%{}%", title), date], |r| r.get(0))
+                .map(|rows| rows.filter_map(|r| r.ok()).collect())
+                .unwrap_or_default()
+        } else {
+            vec![]
+        }
     } else if let Some(title) = title_opt {
-        conn.execute(
-            "DELETE FROM events WHERE title = ?1",
-            rusqlite::params![title],
-        )
-        .unwrap_or(0)
+        if let Ok(mut stmt) = conn.prepare("SELECT id FROM events WHERE title = ?1") {
+            stmt.query_map(rusqlite::params![title], |r| r.get(0))
+                .map(|rows| rows.filter_map(|r| r.ok()).collect())
+                .unwrap_or_default()
+        } else {
+            vec![]
+        }
     } else {
         return json!({ "error": "请提供要删除的日程 ID (id) 或标题 (title)" });
     };
+
+    let now = super::now_ms();
+    let mut deleted = 0;
+    for id in &ids_to_delete {
+        if let Ok(c) = conn.execute("DELETE FROM events WHERE id = ?1", rusqlite::params![id]) {
+            if c > 0 {
+                deleted += c;
+                let _ = conn.execute(
+                    "INSERT OR REPLACE INTO sync_tombstones (table_name, record_key, deleted_at) VALUES ('events', ?1, ?2)",
+                    rusqlite::params![id, now],
+                );
+            }
+        }
+    }
 
     if deleted > 0 {
         let _ = app.emit("calendar-updated", json!({ "action": "delete", "count": deleted }));

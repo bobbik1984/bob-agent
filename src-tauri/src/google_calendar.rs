@@ -441,16 +441,18 @@ pub async fn start_background_sync(app_handle: tauri::AppHandle) {
                 }
                 let local_id = format!("gcal-{}", event_id);
 
+                let now = super::now_ms();
                 // Upsert
                 let _ = conn.execute(
-                    "INSERT INTO events (id, title, type, status, start_time, end_time, description, created_at)
-                     VALUES (?1, ?2, 'event', 'pending', ?3, ?4, ?5, ?6)
+                    "INSERT INTO events (id, title, type, status, start_time, end_time, description, created_at, updated_at)
+                     VALUES (?1, ?2, 'event', 'pending', ?3, ?4, ?5, ?6, ?6)
                      ON CONFLICT(id) DO UPDATE SET
                         title = excluded.title,
                         start_time = excluded.start_time,
                         end_time = excluded.end_time,
-                        description = excluded.description",
-                    rusqlite::params![local_id, summary, start_time, end_time, location, super::now_ms()],
+                        description = excluded.description,
+                        updated_at = excluded.updated_at",
+                    rusqlite::params![local_id, summary, start_time, end_time, location, now],
                 );
             }
         }
