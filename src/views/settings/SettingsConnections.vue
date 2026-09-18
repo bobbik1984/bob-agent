@@ -1316,7 +1316,7 @@ const processPairingCode = async (code) => {
     if (window.appAPI.triggerMobileSync) {
       updateStep('relay_sync', 'running', '');
       try {
-        const syncTimeout = new Promise((_, reject) => setTimeout(() => reject(new Error('Sync Timeout')), 45000));
+        const syncTimeout = new Promise((_, reject) => setTimeout(() => reject(new Error('Sync Timeout')), 60000));
         const relayPayload = { ...payload, skip_relay: false, local_ips: [] };
         await Promise.race([
           window.appAPI.triggerMobileSync(relayPayload),
@@ -1328,8 +1328,13 @@ const processPairingCode = async (code) => {
         }
         pairingDone.value = true;
         pairingError.value = false;
+        fetchConnectedDevices();
+        if (isNativeMobile) {
+          fetchPairingInfo();
+        }
       } catch (e) {
-        updateStep('relay_sync', 'error', 'Error: ' + String(e));
+        const errStr = e instanceof Error ? e.message : String(e);
+        updateStep('relay_sync', 'error', errStr);
         pairingDone.value = true;
         pairingError.value = true;
       }

@@ -1968,7 +1968,7 @@ async fn do_active_sync(
             });
             let _ = send_relay_request_and_wait(
                 push_db_req,
-                tokio::time::Duration::from_secs(45),
+                tokio::time::Duration::from_secs(25),
                 RelayTerminal::CommitAck,
             )
             .await;
@@ -2227,7 +2227,10 @@ pub fn start_relay_listener(app: AppHandle) {
                                         let is_match = if let Some(waiter) = pending.get(ref_msg_id) {
                                             let term_match = match waiter.terminal {
                                                 RelayTerminal::Ack => json.get("type").and_then(|v| v.as_str()) == Some("ack"),
-                                                RelayTerminal::CommitAck => json.get("type").and_then(|v| v.as_str()) == Some("commit_ack"),
+                                                RelayTerminal::CommitAck => {
+                                                    let t = json.get("type").and_then(|v| v.as_str());
+                                                    t == Some("commit_ack") || t == Some("ack")
+                                                },
                                                 RelayTerminal::ProxyResponse => {
                                                     json.get("type").and_then(|v| v.as_str()) == Some("proxy") &&
                                                     json.get("payload").and_then(|p| p.get("action")).map(|v| v.as_str() == Some("pull_response") || v.as_str() == Some("error")).unwrap_or(false)
@@ -2245,12 +2248,12 @@ pub fn start_relay_listener(app: AppHandle) {
                                                 continue;
                                             }
                                         }
-                                    } else if json.get("type").and_then(|v| v.as_str()) == Some("ack") {
+                                    } else if json.get("type").and_then(|v| v.as_str()) == Some("ack") || json.get("type").and_then(|v| v.as_str()) == Some("commit_ack") {
                                         // Resilient fallback: If an Ack arrived without ref_message_id (e.g. legacy relay proxy),
-                                        // and there is an active waiter expecting RelayTerminal::Ack, match and resolve it.
+                                        // and there is an active waiter expecting RelayTerminal::Ack or RelayTerminal::CommitAck, match and resolve it.
                                         let mut pending = PENDING_REQUESTS.write().unwrap();
                                         let ack_waiter_key = pending.iter().find_map(|(k, v)| {
-                                            if matches!(v.terminal, RelayTerminal::Ack) {
+                                            if matches!(v.terminal, RelayTerminal::Ack | RelayTerminal::CommitAck) {
                                                 Some(k.clone())
                                             } else {
                                                 None
@@ -2258,7 +2261,7 @@ pub fn start_relay_listener(app: AppHandle) {
                                         });
                                         if let Some(key) = ack_waiter_key {
                                             if let Some(waiter) = pending.remove(&key) {
-                                                log::info!("[Sync Engine] Matched Ack via terminal fallback for request {}", key);
+                                                log::info!("[Sync Engine] Matched Ack/CommitAck via terminal fallback for request {}", key);
                                                 let _ = waiter.tx.send(json.clone());
                                                 continue;
                                             }
@@ -2425,24 +2428,26 @@ pub fn start_relay_listener(app: AppHandle) {
                                                             crate::outbox::write_outbox(arr.clone());
 
                                                             let mut commit_ack = serde_json::json!({
-                                                                "type": "commit_ack",
+                                                                "type": "ack",
                                                                 "target_device_id": from_id,
+                                                                "payload": {
+                                                                    "status": "committed",
+                                                                    "action": "commit_ack"
+                                                                }
                                                             });
                                                             copy_trace_fields(&json, &mut commit_ack, true);
                                                             let _ = tx_mpsc.send(Message::Text(commit_ack.to_string().into())).await;
-                                                        }
-                                                    }
-                                                } else if action == "push_db" {
-                                                    log::info!("[Sync Engine] Received proxy push_db request from {}", from_id);
-                                                    if let Some(data_val) = inner_payload.get("data") {
-                                                        if let Ok(sync_data) = serde_json::from_value::<SyncData>(data_val.clone()) {
-                                                            let _ = import_sync_data(&app, sync_data, 0);
-                                                            let mut commit_ack = serde_json::json!({
+
+                                                            let mut legacy_ack = serde_json::json!({
                                                                 "type": "commit_ack",
                                                                 "target_device_id": from_id,
+                                                                "payload": {
+                                                                    "status": "committed",
+                                                                    "action": "commit_ack"
+                                                                }
                                                             });
-                                                            copy_trace_fields(&json, &mut commit_ack, true);
-                                                            let _ = tx_mpsc.send(Message::Text(commit_ack.to_string().into())).await;
+                                                            copy_trace_fields(&json, &mut legacy_ack, true);
+                                                            let _ = tx_mpsc.send(Message::Text(legacy_ack.to_string().into())).await;
                                                         }
                                                     }
                                                 } else if action == "rpc_request" {
@@ -2537,11 +2542,26 @@ pub fn start_relay_listener(app: AppHandle) {
                                                                 );
 
                                                                 let mut commit_ack = serde_json::json!({
-                                                                    "type": "commit_ack",
+                                                                    "type": "ack",
                                                                     "target_device_id": from_id,
+                                                                    "payload": {
+                                                                        "status": "committed",
+                                                                        "action": "commit_ack"
+                                                                    }
                                                                 });
                                                                 copy_trace_fields(&json, &mut commit_ack, true);
                                                                 let _ = tx_mpsc.send(Message::Text(commit_ack.to_string().into())).await;
+
+                                                                let mut legacy_ack = serde_json::json!({
+                                                                    "type": "commit_ack",
+                                                                    "target_device_id": from_id,
+                                                                    "payload": {
+                                                                        "status": "committed",
+                                                                        "action": "commit_ack"
+                                                                    }
+                                                                });
+                                                                copy_trace_fields(&json, &mut legacy_ack, true);
+                                                                let _ = tx_mpsc.send(Message::Text(legacy_ack.to_string().into())).await;
                                                             }
                                                         }
                                                     }
