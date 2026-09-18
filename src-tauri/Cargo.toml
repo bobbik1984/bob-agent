@@ -1,7 +1,7 @@
 [package]
 default-run = "bob"
 name = "bob"
-version = "0.9.5-g"
+version = "0.9.5-h"
 description = "A Tauri App"
 authors = ["you"]
 license = ""

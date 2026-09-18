@@ -2081,6 +2081,58 @@ async fn connect_websocket_robust(
     Ok(ws_stream)
 }
 
+fn is_peer_authorized(
+    app: &AppHandle,
+    from_id: &str,
+    provided_auth: Option<&str>,
+) -> bool {
+    let clean_provided_auth = provided_auth.unwrap_or("").trim();
+
+    // 1. 获取本机的合法公钥/设备身份标识
+    // A. 尝试从内存中已解锁的秘钥对读取公钥
+    let unlocked_pubkey = crate::crypto::get_pairing_payload(app.state::<crate::crypto::DeviceIdentityState>())
+        .ok()
+        .map(|p| p.public_key);
+
+    // B. 若未通过 PIN 解锁，从持久化的 config.json 中读取 device_id (即本机的 Base64 格式 Ed25519 公钥)
+    let config_device_id = crate::read_config()
+        .get("device_id")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_string());
+
+    // 2. 检查对方提供的 auth_code 是否匹配本机的公钥
+    let auth_matches = match (&unlocked_pubkey, &config_device_id) {
+        (Some(pk), _) if !pk.is_empty() && pk == clean_provided_auth => true,
+        (_, Some(cid)) if !cid.is_empty() && cid == clean_provided_auth => true,
+        _ => false,
+    };
+
+    // 3. 检查对方设备是否已经登记在配对设备库 (DeviceRegistry) 中
+    let is_registered = {
+        let registry = app.state::<Arc<DeviceRegistry>>();
+        registry.devices.read().map(|d| d.contains_key(from_id)).unwrap_or(false)
+    };
+
+    if auth_matches {
+        log::info!("[Sync Engine] Peer {} authorized via matching public key auth code", from_id);
+        return true;
+    }
+
+    if is_registered {
+        log::info!("[Sync Engine] Peer {} is pre-registered in DeviceRegistry, granting access", from_id);
+        return true;
+    }
+
+    log::warn!(
+        "[Sync Engine] Peer {} authorization failed (auth_matches={}, is_registered={}, provided_auth_len={})",
+        from_id,
+        auth_matches,
+        is_registered,
+        clean_provided_auth.len()
+    );
+    false
+}
+
 pub fn start_relay_listener(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
         loop {
@@ -2275,14 +2327,8 @@ pub fn start_relay_listener(app: AppHandle) {
 
                                             // Verify auth code
                                             let provided_auth = json.get("payload").and_then(|p| p.get("auth_code")).and_then(|a| a.as_str());
-                                            let expected_auth_res = crate::crypto::get_pairing_payload(app.state::<crate::crypto::DeviceIdentityState>());
-                                            let expected_auth = expected_auth_res.as_ref().map(|p| p.public_key.as_str()).unwrap_or_default();
-                                            if provided_auth != Some(expected_auth) {
-                                                if expected_auth_res.is_err() {
-                                                    log::error!("[Sync Engine] Auth code mismatch in notify from {}: Local keys are locked/unavailable", from_id);
-                                                } else {
-                                                    log::error!("[Sync Engine] Auth code mismatch in notify from {}", from_id);
-                                                }
+                                            if !is_peer_authorized(&app, from_id, provided_auth) {
+                                                log::error!("[Sync Engine] Auth verification failed in notify from {}: peer neither presented valid local public key nor exists in DeviceRegistry", from_id);
                                                 let _ = crate::sync_history::record_activity(
                                                     DiagnosticStatus::Failed,
                                                     Some(TransportKind::Relay),
@@ -2360,14 +2406,8 @@ pub fn start_relay_listener(app: AppHandle) {
 
                                                 // Verify auth code for proxy
                                                 let provided_auth = inner_payload.get("auth_code").and_then(|a| a.as_str());
-                                                let expected_auth_res = crate::crypto::get_pairing_payload(app.state::<crate::crypto::DeviceIdentityState>());
-                                                let expected_auth = expected_auth_res.as_ref().map(|p| p.public_key.as_str()).unwrap_or_default();
-                                                if provided_auth != Some(expected_auth) {
-                                                    if expected_auth_res.is_err() {
-                                                        log::error!("[Sync Engine] Auth code mismatch in proxy from {}: Local keys are locked/unavailable", from_id);
-                                                    } else {
-                                                        log::error!("[Sync Engine] Auth code mismatch in proxy from {}", from_id);
-                                                    }
+                                                if !is_peer_authorized(&app, from_id, provided_auth) {
+                                                    log::error!("[Sync Engine] Auth verification failed in proxy from {}: peer neither presented valid local public key nor exists in DeviceRegistry", from_id);
                                                     let err_resp = serde_json::json!({
                                                         "type": "proxy",
                                                         "target_device_id": from_id,

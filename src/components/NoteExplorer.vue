@@ -910,6 +910,14 @@ defineExpose({ refresh: loadNotes });
   transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   box-shadow: 0 -4px 20px rgba(0,0,0,0.1);
   border-top: 1px solid var(--border-subtle);
+  border-top-left-radius: 16px;
+  border-top-right-radius: 16px;
+}
+
+.explorer-content-wrapper.is-mobile .explorer-content {
+  padding-bottom: calc(76px + env(safe-area-inset-bottom, 16px));
+  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
 }
 
 .explorer-content-wrapper.drawer-open {

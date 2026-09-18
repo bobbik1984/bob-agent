@@ -1,7 +1,7 @@
 {
   "$schema": "./gen/schemas/desktop-schema.json",
   "productName": "bob",
-  "version": "0.9.5-g",
+  "version": "0.9.5-h",
   "identifier": "bob.agent",
   "build": {
     "frontendDist": "../dist",
