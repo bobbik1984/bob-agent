@@ -14,9 +14,9 @@
 
 | 端别 | 候选版本命名规范 | 构建 Commit Hash | 产物形态 | 当前就绪状态 |
 |:---|:---|:---|:---|:---|
-| **PC 生产候选端** | `bob-v0.9.6-candidate-pc` | `d7c582ba584bc69dde2e4a822ba673f27e708a5c` | `dist-release/bob-v0.9.6-candidate-pc-installer.exe`<br>SHA256: `68D3012384021C3E0B1985C6202C5C695FF4545C0D76D85BAF1EFCEA91FA73B4`<br>便携版: `dist-release/bob-v0.9.6-candidate-pc-portable.zip`<br>SHA256: `9045BE6136143763EA6B511008D5E5B54E8C323A8BDA92852E233289C06DB4BC`<br>独立程序: `dist-release/bob-v0.9.6-candidate-pc.exe`<br>SHA256: `611CE231E8B94565D065F02F696D9C22549EBE5A1D7568138DC4F57DA09C91EA` | **已就绪** (经官方 custom installer + build_payload.mjs 规范流水线构建，默认无故障注入代码) |
-| **PC 专用诊断端** | `bob-v0.9.6-diagnostic-pc` | `d7c582ba584bc69dde2e4a822ba673f27e708a5c` | `dist-release/bob-v0.9.6-diagnostic-pc.exe`<br>SHA256: `25FBAEC87F6B55B6455DAEB3BB45599D9ECA15B4640FEC473B2CCBC8E5066ABA` | **已就绪** (包含 `fault-injection` 特性门禁与启动缺参 Fail-Closed 防护) |
-| **Android 移动端** | `bob-v0.9.6-candidate-android` | `d7c582ba584bc69dde2e4a822ba673f27e708a5c` | `bob-v0.9.6-signed.apk` | 待构建/签名 (ThinkPad 宿主无 Android SDK，待 CI 自动化构建或用户指定方式) |
+| **PC 生产候选端** | `bob-v0.9.6-candidate-pc` | `86ce393ed2611dd6c588b4e8b780c85c8da95f53` | `dist-release/bob-v0.9.6-candidate-pc-installer.exe`<br>便携版: `dist-release/bob-v0.9.6-candidate-pc-portable.zip`<br>以及 GitHub Actions CI 产出物 (`bob-desktop-windows`) | **已推送 CI 构建** (经官方 `windows.yml` 流水线构建，默认无故障注入代码) |
+| **PC 专用诊断端** | `bob-v0.9.6-diagnostic-pc` | `86ce393ed2611dd6c588b4e8b780c85c8da95f53` | `dist-release/bob-v0.9.6-diagnostic-pc.exe`<br>SHA256: `25FBAEC87F6B55B6455DAEB3BB45599D9ECA15B4640FEC473B2CCBC8E5066ABA` | **已本地生成就绪** (包含 `fault-injection` 特性门禁与启动缺参 Fail-Closed 防护，专供 Case 07 测试) |
+| **Android 移动端** | `bob-v0.9.6-candidate-android` | `86ce393ed2611dd6c588b4e8b780c85c8da95f53` | `bob-v0.9.6-signed.apk` (来自 GitHub Actions CI `latest-mobile`) | **已推送 CI 构建** (由 `android.yml` 在 Ubuntu 云端自动完成 NDK/Rust 编译、4KB 对齐与 Release 签名) |
 | **协议版本** | `SYNC_PROTOCOL_VERSION: "0.9.6-sec01"` | 契约对齐 | JSON / WebSocket / Ed25519 PoP | 源码已冻结 |
 
 ### 1.2 专用测试工作区与数据库隔离防护方案 (Asset & DB Isolation SOP)
