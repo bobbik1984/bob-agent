@@ -6,7 +6,7 @@ use ed25519_dalek::{SigningKey, VerifyingKey};
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use tauri::{AppHandle, Manager};
 
@@ -88,15 +88,16 @@ pub fn init_device_keys(
     if let Some(parent) = path.parent() {
         let _ = fs::create_dir_all(parent);
     }
-
     let data = EncryptedKeyData {
         salt,
         nonce: nonce_str,
         ciphertext: BASE64.encode(ciphertext),
     };
-
-    let json_str = serde_json::to_string_pretty(&data).map_err(|e| e.to_string())?;
-    fs::write(path, json_str).map_err(|e| e.to_string())?;
+    fs::write(
+        path,
+        serde_json::to_string_pretty(&data).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())?;
 
     // 6. Keep in memory
     *state.0.lock().unwrap() = Some(signing_key.clone());
@@ -105,11 +106,11 @@ pub fn init_device_keys(
     let verifying_key = VerifyingKey::from(&signing_key);
     let b64_pub = BASE64.encode(verifying_key.to_bytes());
     
-    let mut app_config = crate::read_config();
+    let mut app_config = crate::read_config_checked()?;
     if let Some(obj) = app_config.as_object_mut() {
         obj.insert("device_id".to_string(), serde_json::json!(b64_pub));
     }
-    crate::write_config(&app_config);
+    crate::write_config_checked(&app_config)?;
 
     Ok(())
 }
@@ -122,31 +123,31 @@ pub fn unlock_device_keys(
 ) -> Result<(), String> {
     let path = get_keys_path(&app);
     if !path.exists() {
-        return Err("Keys not initialized.".to_string());
+        return Err("Keys not initialized. Use init_device_keys first.".to_string());
     }
 
-    let json_str = fs::read_to_string(path).map_err(|e| e.to_string())?;
-    let data: EncryptedKeyData = serde_json::from_str(&json_str).map_err(|e| e.to_string())?;
-
-    let nonce_bytes = BASE64.decode(data.nonce).map_err(|e| e.to_string())?;
-    let ciphertext = BASE64.decode(data.ciphertext).map_err(|e| e.to_string())?;
+    let file_content = fs::read_to_string(path).map_err(|e| e.to_string())?;
+    let data: EncryptedKeyData =
+        serde_json::from_str(&file_content).map_err(|e| e.to_string())?;
 
     let aes_key = derive_key(&pin, &data.salt)?;
     let cipher = Aes256Gcm::new_from_slice(&aes_key).map_err(|e| e.to_string())?;
+
+    let nonce_bytes = BASE64.decode(&data.nonce).map_err(|e| e.to_string())?;
     let nonce = Nonce::from_slice(&nonce_bytes);
 
-    let key_bytes = cipher
+    let ciphertext = BASE64.decode(&data.ciphertext).map_err(|e| e.to_string())?;
+    let decrypted = cipher
         .decrypt(nonce, ciphertext.as_ref())
-        .map_err(|_| "Incorrect PIN".to_string())?;
+        .map_err(|_| "Invalid PIN or corrupted key file.".to_string())?;
 
-    if key_bytes.len() != 32 {
-        return Err("Invalid decrypted key length".to_string());
+    if decrypted.len() != 32 {
+        return Err("Corrupted private key length.".to_string());
     }
 
-    let mut fixed_key = [0u8; 32];
-    fixed_key.copy_from_slice(&key_bytes);
-
-    let signing_key = SigningKey::from_bytes(&fixed_key);
+    let mut key_bytes = [0u8; 32];
+    key_bytes.copy_from_slice(&decrypted);
+    let signing_key = SigningKey::from_bytes(&key_bytes);
 
     // Keep in memory
     *state.0.lock().unwrap() = Some(signing_key.clone());
@@ -155,11 +156,186 @@ pub fn unlock_device_keys(
     let verifying_key = VerifyingKey::from(&signing_key);
     let b64_pub = BASE64.encode(verifying_key.to_bytes());
     
-    let mut app_config = crate::read_config();
+    let mut app_config = crate::read_config_checked()?;
     if let Some(obj) = app_config.as_object_mut() {
         obj.insert("device_id".to_string(), serde_json::json!(b64_pub));
     }
-    crate::write_config(&app_config);
+    crate::write_config_checked(&app_config)?;
+
+    Ok(())
+}
+
+/// SEC-01 重置设备秘钥核心逻辑 (可恢复状态机, Fail-Closed):
+/// Phase 1 (Prepare): 提取完整私钥与身份，使用未破坏的内存私钥为每个受信任对端生成已签名撤销证书，写入 identity_reset_journal ('prepared')
+/// Phase 2 (Stage): 开启单笔 SQLite 事务，暂存带有签名的 peer_revocation_outbox，撤销所有可信对端并清空会话与缓存，更新 journal ('db_committed')
+/// Phase 3 (Config Commit): 移除 config 中的 device_id 与 pairing_payload，通过 write_config_fn 严格持久化
+/// Phase 4 (Destroy Key): 物理删除密钥文件并清空内存私钥。若删除失败则标记 journal 为 'degraded' 并阻断新配对
+/// Phase 5 (Committed): 更新 journal 为 'committed'
+fn validate_reset_identity_binding(
+    config: &serde_json::Value,
+    derived_id: Option<&str>,
+) -> Result<(), String> {
+    if let (Some(derived), Some(configured)) = (
+        derived_id,
+        config.get("device_id").and_then(|d| d.as_str()).filter(|s| !s.trim().is_empty()),
+    ) {
+        if derived != configured {
+            return Err("旧私钥公钥与配置中的设备 ID 不一致，拒绝重置身份 (SEC-01 Fail-Closed)".to_string());
+        }
+    }
+    Ok(())
+}
+
+pub fn reset_device_keys_core<F>(
+    key_path: Option<&Path>,
+    memory_state: &std::sync::Mutex<Option<SigningKey>>,
+    mut write_config_fn: F,
+    conn: &mut rusqlite::Connection,
+    now_ms: i64,
+) -> Result<(), String>
+where
+    F: FnMut(&mut serde_json::Value) -> Result<(), String>,
+{
+    // Phase 1: Prepare (在私钥完整未破坏前提取并预签名)
+    let (sk_opt, local_pubkey_b64) = {
+        let guard = memory_state.lock().map_err(|e| format!("Memory key state poisoned: {}", e))?;
+        (guard.clone(), guard.as_ref().map(|sk| {
+            let vk = VerifyingKey::from(sk);
+            BASE64.encode(vk.to_bytes())
+        }))
+    };
+
+    let config_before = crate::read_config_checked()?;
+    validate_reset_identity_binding(&config_before, local_pubkey_b64.as_deref())?;
+
+    let revoked_id = match local_pubkey_b64.clone() {
+        Some(id) if !id.trim().is_empty() => id,
+        _ => {
+            config_before.get("device_id")
+                .and_then(|d| d.as_str())
+                .filter(|s| !s.trim().is_empty())
+                .map(|s| s.to_string())
+                .ok_or_else(|| "无法获取本机设备 ID 用于撤销证书生成与重置 (SEC-01 fail-closed)".to_string())?
+        }
+    };
+
+    // 查询当前所有处于 trusted 状态的对端
+    let mut trusted_peers = Vec::new();
+    {
+        let mut stmt = conn.prepare("SELECT device_id FROM trusted_devices WHERE status = 'trusted'")
+            .map_err(|e| format!("查询可信设备失败: {}", e))?;
+        let rows = stmt.query_map([], |r| r.get::<_, String>(0))
+            .map_err(|e| format!("读取可信设备失败: {}", e))?;
+        for r in rows {
+            trusted_peers.push(r.map_err(|e| format!("解析可信设备失败: {}", e))?);
+        }
+    }
+
+    // 关键安全门禁 (P0): 若存在任何处于 trusted 状态的可信对端，必须要求本地旧私钥处于解锁状态 (sk_opt 必须为 Some)，
+    // 且核对其派生公钥与配置 device_id 一致；否则在写 journal、数据库、配置或密钥文件前 Fail-Closed 阻断。
+    if !trusted_peers.is_empty() {
+        if sk_opt.is_none() {
+            return Err("存在处于 trusted 状态的可信对端，但旧私钥尚未解锁，无法签发持钥撤销证明，拒绝重置身份 (SEC-01 Fail-Closed)".to_string());
+        }
+    }
+
+    // 在私钥未破坏前，为每个可信对端生成持钥签名的撤销证书
+    let mut certs = Vec::new();
+    if let Some(ref sk) = sk_opt {
+        for peer_id in &trusted_peers {
+            certs.push(crate::device_trust::create_device_revocation_certificate(
+                sk, peer_id, "local_key_reset", now_ms
+            ));
+        }
+    }
+
+    // 记录 prepared 状态至 identity_reset_journal
+    let journal_id: i64 = {
+        conn.execute(
+            "INSERT INTO identity_reset_journal (state, revoked_device_id, created_at, updated_at, error) VALUES ('prepared', ?, ?, ?, NULL)",
+            rusqlite::params![&revoked_id, now_ms, now_ms],
+        ).map_err(|e| format!("写入重置日志 prepared 失败: {}", e))?;
+        conn.last_insert_rowid()
+    };
+
+    // Phase 2: Stage Revocations & DB Transaction
+    let reset_db_res = crate::device_trust::reset_device_identity_in_db_with_certs(
+        conn, journal_id, &certs, Some(&revoked_id), now_ms
+    );
+    if let Err(e) = reset_db_res {
+        let _ = conn.execute(
+            "UPDATE identity_reset_journal SET state = 'degraded_pre_db', updated_at = ?, error = ? WHERE id = ?",
+            rusqlite::params![now_ms, &e, journal_id],
+        );
+        // 关键断言：DB 失败时，事务整体回滚，密钥文件与内存私钥均未被触碰，保持完全未破坏
+        return Err(format!("数据库重置事务失败 (事务已整体回滚，密钥与内存保持未破坏): {}", e));
+    }
+
+    // Phase 3: Config Commit
+    let mut config = crate::read_config_checked()?;
+    if let Some(obj) = config.as_object_mut() {
+        obj.remove("device_id");
+        obj.remove("pairing_payload");
+    }
+    if let Err(cfg_err) = write_config_fn(&mut config) {
+        let err_msg = format!("配置持久化失败: {}", cfg_err);
+        let _ = conn.execute(
+            "UPDATE identity_reset_journal SET state = 'degraded_post_db', updated_at = ?, error = ? WHERE id = ?",
+            rusqlite::params![now_ms, &err_msg, journal_id],
+        );
+        // 关键断言：配置写盘失败时，密钥文件与内存私钥均未被触碰，但进入 degraded_post_db 状态阻断新配对
+        return Err(format!("{} (数据库已提交撤销出件箱，但配置写盘失败，进入 degraded_post_db 状态)", err_msg));
+    }
+
+    let stage_updated = conn.execute(
+        "UPDATE identity_reset_journal SET state = 'config_committed', updated_at = ? WHERE id = ?",
+        rusqlite::params![now_ms, journal_id],
+    ).map_err(|e| format!("配置提交后更新重置日志失败，保留旧私钥: {}", e))?;
+    if stage_updated != 1 {
+        return Err("配置提交后重置日志未更新，保留旧私钥".to_string());
+    }
+
+    // Phase 4: Destroy Key (此时且仅在此刻物理销毁密钥并清空内存)
+    if let Some(path) = key_path {
+        if path.exists() {
+            if let Err(fs_err) = std::fs::remove_file(path) {
+                let err_msg = format!("物理删除密钥文件失败: {}", fs_err);
+                let _ = conn.execute(
+                    "UPDATE identity_reset_journal SET state = 'degraded_key_destroy', updated_at = ?, error = ? WHERE id = ?",
+                    rusqlite::params![now_ms, &err_msg, journal_id],
+                );
+                return Err(format!("{} (系统进入 degraded_key_destroy 状态)", err_msg));
+            }
+        }
+    }
+
+    // 清空内存私钥
+    {
+        let mut guard = memory_state.lock().map_err(|e| format!("Memory key state poisoned: {}", e))?;
+        *guard = None;
+    }
+
+    // Phase 5: Committed
+    let affected = conn.execute(
+        "UPDATE identity_reset_journal SET state = 'committed', updated_at = ? WHERE id = ?",
+        rusqlite::params![now_ms, journal_id],
+    ).map_err(|e| {
+        let err_msg = format!("Phase 5 更新重置日志 committed 状态失败: {}", e);
+        let _ = conn.execute(
+            "UPDATE identity_reset_journal SET state = 'degraded_post_db', updated_at = ?, error = ? WHERE id = ?",
+            rusqlite::params![now_ms, &err_msg, journal_id],
+        );
+        err_msg
+    })?;
+
+    if affected == 0 {
+        let err_msg = format!("Phase 5 未找到待提交的重置日志记录 (id: {})", journal_id);
+        let _ = conn.execute(
+            "UPDATE identity_reset_journal SET state = 'degraded_post_db', updated_at = ?, error = ? WHERE id = ?",
+            rusqlite::params![now_ms, &err_msg, journal_id],
+        );
+        return Err(err_msg);
+    }
 
     Ok(())
 }
@@ -169,16 +345,23 @@ pub fn reset_device_keys(
     app: AppHandle,
     state: tauri::State<'_, DeviceIdentityState>,
 ) -> Result<(), String> {
-    // 1. Tell VPS to unregister (placeholder for now, will implement when relay is ready)
-    // 2. Remove local file
     let path = get_keys_path(&app);
-    if path.exists() {
-        let _ = fs::remove_file(path);
-    }
+    let key_path_opt = if path.exists() { Some(path.as_path()) } else { None };
 
-    // 3. Clear memory
-    *state.0.lock().unwrap() = None;
+    let db_state = app.try_state::<crate::db::DbState>()
+        .ok_or_else(|| "Database state not available for identity reset".to_string())?;
+    let mut conn = db_state.0.lock()
+        .map_err(|e| format!("Database lock poisoned: {}", e))?;
 
+    reset_device_keys_core(
+        key_path_opt,
+        &state.0,
+        |cfg| crate::write_config_checked(cfg),
+        &mut conn,
+        crate::now_ms(),
+    )?;
+
+    // Trigger relay reconnect
     if let Some(tx) = crate::sync_engine::RELAY_RECONNECT_TRIGGER.lock().unwrap().as_ref() {
         let _ = tx.try_send(());
     }
@@ -188,8 +371,16 @@ pub fn reset_device_keys(
 
 use std::net::UdpSocket;
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct PairingPayload {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub protocol_version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub invitation_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub secret: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub issuer_device_id: Option<String>,
     pub device_id: String,
     pub public_key: String,
     pub local_ips: Vec<String>,
@@ -296,6 +487,7 @@ fn get_local_ip_fallback() -> Option<String> {
 #[tauri::command]
 pub fn get_pairing_payload(
     state: tauri::State<'_, DeviceIdentityState>,
+    db: tauri::State<'_, crate::db::DbState>,
 ) -> Result<PairingPayload, String> {
     let guard = state.0.lock().unwrap();
     let signing_key = guard.as_ref().ok_or("Keys not unlocked")?;
@@ -310,19 +502,61 @@ pub fn get_pairing_payload(
         .map(|_| "wss://relay.bobbik.org")
         .unwrap_or("wss://relay.bobbik.org");
 
-    Ok(PairingPayload {
-        device_id: b64_pub.clone(),
-        public_key: b64_pub,
-        local_ips,
-        port: 3722,
-        relay: relay.to_string(),
-    })
+    let now_ms = crate::now_ms();
+    let invitation_opt = if let Ok(conn) = db.0.lock() {
+        crate::device_trust::create_pairing_invitation(
+            &conn,
+            &b64_pub,
+            None,
+            crate::device_trust::DEFAULT_INVITATION_TTL_MS,
+            relay,
+            local_ips.clone(),
+            3722,
+            now_ms,
+        ).ok()
+    } else {
+        None
+    };
+
+    if let Some(inv) = invitation_opt {
+        Ok(PairingPayload {
+            protocol_version: Some(inv.protocol_version),
+            invitation_id: Some(inv.invitation_id),
+            secret: Some(inv.secret),
+            issuer_device_id: Some(inv.issuer_device_id),
+            device_id: b64_pub.clone(),
+            public_key: b64_pub,
+            local_ips,
+            port: 3722,
+            relay: relay.to_string(),
+        })
+    } else {
+        Ok(PairingPayload {
+            protocol_version: None,
+            invitation_id: None,
+            secret: None,
+            issuer_device_id: None,
+            device_id: b64_pub.clone(),
+            public_key: b64_pub,
+            local_ips,
+            port: 3722,
+            relay: relay.to_string(),
+        })
+    }
 }
 
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_sec01_reset_rejects_configured_identity_mismatch() {
+        let config = serde_json::json!({"device_id": "different-public-key"});
+        let err = validate_reset_identity_binding(&config, Some("actual-public-key")).unwrap_err();
+        assert!(err.contains("不一致"));
+        assert!(validate_reset_identity_binding(&config, Some("different-public-key")).is_ok());
+    }
 
     #[test]
     fn test_lan_candidate_sorting() {
@@ -339,5 +573,95 @@ mod tests {
         });
         
         assert_eq!(ips[0], "192.168.1.100");
+    }
+
+    #[tokio::test]
+    async fn test_sec01_crypto_reset_keys_locked_private_key_with_trusted_peers_fails_closed() {
+        let _test_lock = crate::CONFIG_OP_TEST_MUTEX.lock().unwrap();
+        let baseline_real = crate::http_api::tests::RealConfigBaseline::capture();
+
+        let temp_dir = std::env::temp_dir().join(format!("bob_cfg_sec01_locked_key_{}", uuid::Uuid::new_v4()));
+        let _ = std::fs::create_dir_all(&temp_dir);
+        let cfg_path = temp_dir.join("config.json");
+        let key_path = temp_dir.join("device_identity.json");
+        crate::set_test_config_path_override(Some(cfg_path.clone()));
+        let _guard = crate::http_api::tests::TestConfigOverrideGuard;
+
+        // 1. 初始化磁盘配置与密钥文件
+        let orig_device_id = "initial_pc_device_id_12345";
+        let initial_cfg = serde_json::json!({
+            "device_id": orig_device_id,
+            "pairing_payload": "some_payload"
+        });
+        std::fs::write(&cfg_path, serde_json::to_string_pretty(&initial_cfg).unwrap().as_bytes()).unwrap();
+
+        let original_key_content = b"ORIGINAL_ENCRYPTED_OR_LOCKED_KEY_DATA";
+        std::fs::write(&key_path, original_key_content).unwrap();
+
+        // 2. 初始化数据库并添加处于 trusted 状态的可信对端
+        let db_path = temp_dir.join("locked_key_test.db");
+        let mut conn = rusqlite::Connection::open(&db_path).unwrap();
+        crate::device_trust::init_device_trust_tables(&conn).unwrap();
+
+        let now = crate::now_ms();
+        conn.execute(
+            "INSERT INTO trusted_devices (device_id, device_name, public_key, platform, status, paired_at, last_authenticated_at) VALUES ('peer_mobile_1', 'Phone', 'pub_phone_1', 'mobile', 'trusted', ?1, ?1)",
+            rusqlite::params![now],
+        ).unwrap();
+
+        // 3. 内存密钥尚未解锁 (SigningKey 为 None)
+        let memory_state = std::sync::Arc::new(std::sync::Mutex::new(None));
+
+        // 4. 执行重置 -> 必须严格被阻断 (Fail-Closed)
+        let reset_res = reset_device_keys_core(
+            Some(&key_path),
+            &memory_state,
+            |cfg| crate::write_config_checked(cfg),
+            &mut conn,
+            now + 10,
+        );
+
+        assert!(reset_res.is_err(), "存在可信对端但私钥未解锁时必须严格拒绝重置身份");
+        let err_msg = reset_res.unwrap_err();
+        assert!(err_msg.contains("旧私钥尚未解锁"), "错误信息必须明确指出旧私钥未解锁: {}", err_msg);
+
+        // 5. 关键安全断言：所有存储实现零变化 (Zero Side Effects)
+        // a. 磁盘密钥文件必须完好无损
+        assert!(key_path.exists(), "磁盘密钥文件绝对不能被删除");
+        let current_key_content = std::fs::read(&key_path).unwrap();
+        assert_eq!(current_key_content, original_key_content, "磁盘密钥文件内容绝对不能被修改");
+
+        // b. 磁盘配置文件中的 device_id 与 pairing_payload 必须完好无损
+        let current_cfg = crate::read_config_checked().unwrap();
+        assert_eq!(current_cfg.get("device_id").and_then(|d| d.as_str()), Some(orig_device_id), "配置中的 device_id 必须保持完好");
+        assert_eq!(current_cfg.get("pairing_payload").and_then(|d| d.as_str()), Some("some_payload"), "配置中的 pairing_payload 必须保持完好");
+
+        // c. 数据库中可信设备必须依然保持 trusted，绝不能被提前撤销
+        let peer_status: String = conn.query_row(
+            "SELECT status FROM trusted_devices WHERE device_id = 'peer_mobile_1'",
+            [],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(peer_status, "trusted", "可信对端状态必须保持 trusted");
+
+        // d. 重置日志表必须没有任何记录写入
+        let journal_count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM identity_reset_journal",
+            [],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(journal_count, 0, "identity_reset_journal 绝对不能写入任何脏记录");
+
+        // e. 出件箱必须没有任何未签名的空记录
+        let outbox_count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM peer_revocation_outbox",
+            [],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(outbox_count, 0, "peer_revocation_outbox 必须为空");
+
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        baseline_real.assert_unchanged();
     }
 }

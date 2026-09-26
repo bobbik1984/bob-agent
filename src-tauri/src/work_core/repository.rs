@@ -281,6 +281,76 @@ fn default_status(kind: WorkObjectKind) -> &'static str {
     }
 }
 
+pub const PERSONAL_PROJECT_ID: &str = "project_personal_inbox";
+
+pub fn ensure_personal_workspace(conn: &mut Connection) -> Result<String, String> {
+    if get_project(conn, PERSONAL_PROJECT_ID)?.is_some() {
+        return Ok(PERSONAL_PROJECT_ID.into());
+    }
+    let project = create_project(
+        conn,
+        CreateProjectInput {
+            project_id: Some(PERSONAL_PROJECT_ID.into()),
+            title: "个人工作区".into(),
+            mission: "保存尚未归入正式项目的持续工作与跨端协作任务".into(),
+            current_phase: Some("持续处理".into()),
+            summary: Some("Bob 自动创建的统一工作记录收件区".into()),
+            source_ref: None,
+            metadata: json!({ "systemManaged": true }),
+            actor: Some("bob".into()),
+            idempotency_key: "goal-runtime-personal-workspace-v1".into(),
+        },
+    )?;
+    Ok(project.id)
+}
+
+pub fn record_work_event_in_tx(
+    tx: &Transaction<'_>,
+    project_id: &str,
+    object_id: Option<&str>,
+    event_type: &str,
+    actor: &str,
+    payload: &Value,
+    idempotency_key: Option<&str>,
+) -> Result<(), String> {
+    let now = now_ms();
+    touch_project(tx, project_id, now)?;
+    append_event(
+        tx,
+        project_id,
+        object_id,
+        event_type,
+        actor,
+        payload,
+        idempotency_key,
+        now,
+    )?;
+    Ok(())
+}
+
+pub fn record_work_event(
+    conn: &mut Connection,
+    project_id: &str,
+    object_id: Option<&str>,
+    event_type: &str,
+    actor: &str,
+    payload: &Value,
+    idempotency_key: Option<&str>,
+) -> Result<(), String> {
+    let tx = conn.transaction().map_err(|error| error.to_string())?;
+    record_work_event_in_tx(
+        &tx,
+        project_id,
+        object_id,
+        event_type,
+        actor,
+        payload,
+        idempotency_key,
+    )?;
+    tx.commit().map_err(|error| error.to_string())?;
+    Ok(())
+}
+
 pub fn get_project(conn: &Connection, project_id: &str) -> Result<Option<WorkProject>, String> {
     conn.query_row(
         "SELECT id, schema_version, title, mission, status, current_phase, summary, source_ref, metadata_json, revision, created_at, updated_at, deleted_at FROM work_projects WHERE id = ?1",
@@ -396,7 +466,7 @@ pub fn create_object(
     Ok(object)
 }
 
-pub(crate) fn create_object_in_tx(
+pub fn create_object_in_tx(
     tx: &Transaction<'_>,
     input: CreateWorkObjectInput,
 ) -> Result<WorkObject, String> {
@@ -500,7 +570,7 @@ fn transition_allowed(from: &str, to: &str) -> bool {
             "blocked" | "needs_review" | "done" | "failed" | "cancelled"
         ),
         "blocked" => matches!(to, "ready" | "running" | "failed" | "cancelled"),
-        "needs_review" => matches!(to, "accepted" | "running" | "failed"),
+        "needs_review" => matches!(to, "accepted" | "running" | "failed" | "cancelled"),
         "accepted" => matches!(to, "superseded" | "archived"),
         "failed" => matches!(to, "ready" | "running" | "cancelled"),
         "on_hold" => matches!(to, "active" | "archived" | "cancelled"),
@@ -510,17 +580,17 @@ fn transition_allowed(from: &str, to: &str) -> bool {
     }
 }
 
-fn update_object_status_inner(
-    conn: &mut Connection,
+pub fn update_object_status_in_tx(
+    tx: &Transaction<'_>,
     input: UpdateWorkStatusInput,
     runtime_authorized: bool,
 ) -> Result<WorkObject, String> {
     validate_status(&input.status)?;
     require_idempotency_key(&input.idempotency_key)?;
-    if let Some(existing) = read_receipt(conn, &input.idempotency_key, STATUS_OPERATION)? {
+    if let Some(existing) = read_receipt(tx, &input.idempotency_key, STATUS_OPERATION)? {
         return Ok(existing);
     }
-    let current = get_object(conn, &input.object_id)?
+    let current = get_object(tx, &input.object_id)?
         .ok_or_else(|| format!("工作对象不存在: {}", input.object_id))?;
     if current.deleted_at.is_some() {
         return Err("不能更新已删除工作对象".into());
@@ -543,7 +613,6 @@ fn update_object_status_inner(
     updated.revision += 1;
     updated.updated_at = now;
     let actor = actor_or_bob(input.actor.as_deref());
-    let tx = conn.transaction().map_err(|error| error.to_string())?;
     let changed = tx
         .execute(
             "UPDATE work_objects SET status = ?2, revision = ?3, updated_at = ?4 WHERE id = ?1 AND revision = ?5 AND deleted_at IS NULL",
@@ -559,9 +628,9 @@ fn update_object_status_inner(
     if changed != 1 {
         return Err("revision 冲突：对象已被其他操作更新".into());
     }
-    touch_project(&tx, &updated.project_id, now)?;
+    touch_project(tx, &updated.project_id, now)?;
     append_event(
-        &tx,
+        tx,
         &updated.project_id,
         Some(&updated.id),
         &format!("{}.status_changed", updated.kind.as_str()),
@@ -571,13 +640,23 @@ fn update_object_status_inner(
         now,
     )?;
     save_receipt(
-        &tx,
+        tx,
         &input.idempotency_key,
         STATUS_OPERATION,
         &updated.id,
         &updated,
         now,
     )?;
+    Ok(updated)
+}
+
+fn update_object_status_inner(
+    conn: &mut Connection,
+    input: UpdateWorkStatusInput,
+    runtime_authorized: bool,
+) -> Result<WorkObject, String> {
+    let tx = conn.transaction().map_err(|error| error.to_string())?;
+    let updated = update_object_status_in_tx(&tx, input, runtime_authorized)?;
     tx.commit().map_err(|error| error.to_string())?;
     Ok(updated)
 }
@@ -1204,5 +1283,119 @@ mod tests {
             project.source_ref.as_deref(),
             Some("notes/projects/existing/README.md")
         );
+    }
+
+    #[test]
+    fn remote_rpc_events_and_change_objects_record_cleanly_into_work_journal() {
+        let mut conn = database();
+        let pid = ensure_personal_workspace(&mut conn).unwrap();
+        assert_eq!(pid, PERSONAL_PROJECT_ID);
+
+        // 1. 记录远程指令执行事件
+        record_work_event(
+            &mut conn,
+            &pid,
+            None,
+            "remote.instruction.executed",
+            "remote:mobile-001",
+            &json!({
+                "requestId": "req-test-1",
+                "instruction": "修改测试文件",
+                "elapsedMs": 350,
+                "status": "needs_approval",
+                "executorDevice": "ThinkPad X1",
+            }),
+            Some("event_req-test-1"),
+        )
+        .unwrap();
+
+        // 2. 创建 Change 工作对象
+        let change = create_object(
+            &mut conn,
+            CreateWorkObjectInput {
+                kind: WorkObjectKind::Change,
+                project_id: pid.clone(),
+                parent_id: None,
+                title: "远程修改提案: src/main.rs".into(),
+                status: Some("needs_review".into()),
+                description: Some("修改测试文件变更提案 (+5 -2)".into()),
+                data: json!({
+                    "changeId": "chg-001",
+                    "filePath": "src/main.rs",
+                    "diff": "--- a/src/main.rs\n+++ b/src/main.rs\n+fn main() {}",
+                    "additions": 5,
+                    "deletions": 2,
+                    "requestId": "req-test-1",
+                }),
+                source_capture_id: None,
+                actor: Some("remote:mobile-001".into()),
+                idempotency_key: "obj_change_chg-001".into(),
+            },
+        )
+        .unwrap();
+        assert_eq!(change.kind, WorkObjectKind::Change);
+        assert_eq!(change.status, "needs_review");
+
+        // 3. 批准变更：状态变为 accepted
+        let updated_change = update_object_status(
+            &mut conn,
+            UpdateWorkStatusInput {
+                object_id: change.id.clone(),
+                expected_revision: 1,
+                status: "accepted".into(),
+                actor: Some("remote:mobile-001".into()),
+                idempotency_key: "status_approve_chg-001".into(),
+            },
+        )
+        .unwrap();
+        assert_eq!(updated_change.status, "accepted");
+
+        // 4. 创建变更对应的 Artifact
+        let artifact = create_object(
+            &mut conn,
+            CreateWorkObjectInput {
+                kind: WorkObjectKind::Artifact,
+                project_id: pid.clone(),
+                parent_id: Some(change.id.clone()),
+                title: "远程变更产物: src/main.rs".into(),
+                status: Some("active".into()),
+                description: Some("已应用变更产物".into()),
+                data: json!({
+                    "filePath": "src/main.rs",
+                    "changeId": "chg-001",
+                    "additions": 5,
+                    "deletions": 2,
+                }),
+                source_capture_id: None,
+                actor: Some("remote:mobile-001".into()),
+                idempotency_key: "obj_artifact_chg-001".into(),
+            },
+        )
+        .unwrap();
+        assert_eq!(artifact.kind, WorkObjectKind::Artifact);
+        assert_eq!(artifact.parent_id.as_deref(), Some(change.id.as_str()));
+
+        // 5. 记录远程变更已批准事件
+        record_work_event(
+            &mut conn,
+            &pid,
+            Some(&change.id),
+            "remote.change.approved",
+            "remote:mobile-001",
+            &json!({ "changeId": "chg-001", "status": "applied" }),
+            Some("event_approved_chg-001"),
+        )
+        .unwrap();
+
+        // 6. 验证事件列表与项目聚合
+        let events = list_project_events(&conn, &pid, 20).unwrap();
+        assert!(events.len() >= 2);
+        let event_types: Vec<&str> = events.iter().map(|e| e.event_type.as_str()).collect();
+        assert!(event_types.contains(&"remote.instruction.executed"));
+        assert!(event_types.contains(&"remote.change.approved"));
+
+        let aggregate = get_project_aggregate(&conn, &pid).unwrap();
+        assert_eq!(aggregate.changes.len(), 1);
+        assert_eq!(aggregate.artifacts.len(), 1);
     }
 }

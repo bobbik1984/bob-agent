@@ -17,6 +17,15 @@ const latestEvent = computed(() => props.aggregate.recentEvents?.[0]);
 function eventLabel(event) {
   const type = event?.eventType || '';
   if (type === 'project.created') return t('work.event_project_created');
+  if (type === 'remote.instruction.executed') {
+    const dev = event.payload?.executorDevice;
+    return dev ? t('work.event_remote_instruction_executed_with_device', { device: dev }) : t('work.event_remote_instruction_executed');
+  }
+  if (type === 'remote.change.approved') return t('work.event_remote_change_approved');
+  if (type === 'remote.change.rejected') return t('work.event_remote_change_rejected');
+  if (type === 'remote.task.cancelled') return t('work.event_remote_task_cancelled');
+  if (type === 'change.created') return t('work.event_change_created');
+  if (type === 'artifact.created') return t('work.event_artifact_created');
   if (type.endsWith('.created')) return t('work.event_item_created');
   if (type.endsWith('.status_changed')) return t('work.event_status_changed');
   if (type === 'relation.created') return t('work.event_relation_created');

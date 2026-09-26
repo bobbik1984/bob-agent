@@ -1,7 +1,7 @@
 use serde_json::{json, Value};
 use std::fs;
 use std::path::PathBuf;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
 /// 里程碑 8: 声明式配置 + 单向调谐 (Outbox/Reconciler)
 ///
@@ -31,9 +31,13 @@ const ALLOWED_OPS: &[&str] = &[
 const SAFE_CONFIG_KEYS: &[&str] = &[
     "model",        // 主力模型
     "clerkModel",   // 助理模型
+    "visionModel",  // 视觉模型
+    "provider",     // 供应商
     "theme",        // 主题
     "uiScale",      // UI 缩放
     "language",     // 语言
+    "accentColor",  // 强调色
+    "weatherCity",  // 天气城市
     "workspaceDir", // 工作目录
 ];
 
@@ -187,26 +191,10 @@ fn validate_operation(op: &Value) -> Result<(), String> {
 // T-804: 核心调谐逻辑
 // ═══════════════════════════════════════════════════════════
 
-/// 读取 Outbox → 逐条校验 → 合并到 config.json
+/// 读取操作列表 → 逐条校验 → 合并到 config.json
 /// 返回成功应用的操作数量
-fn reconcile() -> Result<usize, String> {
-    let outbox_path = get_outbox_path();
-
-    // 读取 Outbox
-    let content =
-        fs::read_to_string(&outbox_path).map_err(|e| format!("读取 Outbox 失败: {}", e))?;
-
-    let outbox: Value =
-        serde_json::from_str(&content).map_err(|e| format!("Outbox JSON 解析失败: {}", e))?;
-
-    let operations = outbox
-        .get("operations")
-        .and_then(|v| v.as_array())
-        .ok_or("Outbox 缺少 'operations' 数组")?;
-
+pub fn apply_operations(operations: &[Value]) -> Result<usize, String> {
     if operations.is_empty() {
-        // 空操作列表，直接清理
-        let _ = fs::remove_file(&outbox_path);
         return Ok(0);
     }
 
@@ -216,13 +204,13 @@ fn reconcile() -> Result<usize, String> {
         let _ = fs::copy(&config_path, get_backup_config_path());
     }
 
-    let mut config = super::read_config();
+    let mut config = super::read_config_checked()?;
     let mut applied = 0usize;
     let mut audit_entries: Vec<String> = Vec::new();
     let timestamp = chrono_like_now();
 
     audit_entries.push(format!(
-        "[{}] RECONCILE START — outbox contains {} operations",
+        "[{}] RECONCILE START — batch contains {} operations",
         timestamp,
         operations.len()
     ));
@@ -245,9 +233,10 @@ fn reconcile() -> Result<usize, String> {
         }
     }
 
-    // 写入 config (仅当有成功操作时)
+    // 写入 config (仅当有成功操作时，严格检查写入结果，失败立即冒泡)
     if applied > 0 {
-        super::write_config(&config);
+        super::write_config_checked(&config)
+            .map_err(|e| format!("写入配置失败: {}", e))?;
     }
 
     audit_entries.push(format!(
@@ -259,6 +248,37 @@ fn reconcile() -> Result<usize, String> {
 
     // 写入审计日志 (追加模式)
     write_audit_log(&audit_entries);
+
+    Ok(applied)
+}
+
+/// 读取 Outbox → 逐条校验 → 合并到 config.json (兼容单文件模式)
+/// 返回成功应用的操作数量
+pub fn reconcile() -> Result<usize, String> {
+    let outbox_path = get_outbox_path();
+    if !outbox_path.exists() {
+        return Ok(0);
+    }
+
+    // 读取 Outbox
+    let content =
+        fs::read_to_string(&outbox_path).map_err(|e| format!("读取 Outbox 失败: {}", e))?;
+
+    let outbox: Value =
+        serde_json::from_str(&content).map_err(|e| format!("Outbox JSON 解析失败: {}", e))?;
+
+    let operations = outbox
+        .get("operations")
+        .and_then(|v| v.as_array())
+        .ok_or("Outbox 缺少 'operations' 数组")?;
+
+    if operations.is_empty() {
+        // 空操作列表，直接清理
+        let _ = fs::remove_file(&outbox_path);
+        return Ok(0);
+    }
+
+    let applied = apply_operations(operations)?;
 
     // 清理 Outbox (已消费)
     let _ = fs::remove_file(&outbox_path);
@@ -361,28 +381,42 @@ pub async fn start_reconciler(app: AppHandle) {
     loop {
         ticker.tick().await;
 
+        // 1. 检查兼容单文件 Outbox
         let outbox_path = get_outbox_path();
-        if !outbox_path.exists() {
-            continue;
-        }
-
-        match reconcile() {
-            Ok(count) => {
-                if count > 0 {
-                    log::info!("Reconciler: {} operations applied successfully", count);
-                    let _ = app.emit("config:reconciled", json!({ "applied": count }));
+        if outbox_path.exists() {
+            match reconcile() {
+                Ok(count) => {
+                    if count > 0 {
+                        log::info!("Reconciler: {} operations applied successfully from file", count);
+                        let _ = app.emit("config:reconciled", json!({ "applied": count }));
+                    }
+                }
+                Err(e) => {
+                    log::warn!("Reconciler: file reconcile failed: {}", e);
+                    let _ = fs::remove_file(&outbox_path);
+                    let timestamp = chrono_like_now();
+                    write_audit_log(&[format!(
+                        "[{}] ❌ RECONCILE ERROR: {} — outbox removed",
+                        timestamp, e
+                    )]);
                 }
             }
-            Err(e) => {
-                log::warn!("Reconciler: reconcile failed: {}", e);
-                // 损坏的 Outbox 也要清理，避免无限重试
-                let _ = fs::remove_file(&outbox_path);
-                // 记录错误到审计日志
-                let timestamp = chrono_like_now();
-                write_audit_log(&[format!(
-                    "[{}] ❌ RECONCILE ERROR: {} — outbox removed",
-                    timestamp, e
-                )]);
+        }
+
+        // 2. 消费 SQLite staged outbox（Durable Outbox 真理源）
+        if let Some(db_state) = app.try_state::<crate::db::DbState>() {
+            if let Ok(mut conn) = db_state.0.lock() {
+                match crate::device_trust::drain_staged_outbox(&mut *conn, super::now_ms()) {
+                    Ok(count) => {
+                        if count > 0 {
+                            log::info!("Reconciler: {} operations applied from staged outbox", count);
+                            let _ = app.emit("config:reconciled", json!({ "applied": count }));
+                        }
+                    }
+                    Err(e) => {
+                        log::warn!("Reconciler: drain_staged_outbox failed: {}", e);
+                    }
+                }
             }
         }
     }

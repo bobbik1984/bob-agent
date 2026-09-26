@@ -4,7 +4,7 @@ use std::fs;
 use std::hash::{Hash, Hasher};
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use tauri::Emitter;
+use tauri::{Emitter, Manager};
 
 // ═══════════════════════════════════════════════════════════
 // T-1401: 工具调用循环熔断器 (Circuit Breaker)
@@ -869,6 +869,45 @@ fn get_builtin_tool_schemas() -> Vec<Value> {
 // T-902: 工具执行调度器
 // ═══════════════════════════════════════════════════════════
 
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ToolExecutionPolicy {
+    pub read_only: bool,
+    pub staged_mode: bool,
+    pub request_id: Option<String>,
+    pub project_id: Option<String>,
+}
+
+pub fn is_mutating_tool(name: &str) -> bool {
+    matches!(
+        name,
+        "write_file"
+            | "append_file"
+            | "create_directory"
+            | "move_file"
+            | "copy_file"
+            | "delete_file"
+            | "rename_file"
+            | "update_model_registry"
+            | "add_cron_job"
+            | "remove_cron_job"
+            | "toggle_cron_job"
+            | "export_html"
+            | "export_xlsx"
+            | "export_docx"
+            | "export_pptx"
+            | "save_to_notes"
+            | "send_wechat_file"
+            | "run_shell"
+            | "execute_shell_command"
+            | "add_calendar_event"
+            | "delete_calendar_event"
+            | "google_calendar_create_event"
+            | "gmail_create_draft"
+            | "lark_send_message"
+            | "lark_create_bitable_record"
+    )
+}
+
 /// 执行指定工具并返回结果
 /// `from_user`: 当工具调用源自微信会话时，传入消息发送者的加密 wxid
 pub async fn execute_tool(
@@ -878,6 +917,167 @@ pub async fn execute_tool(
     from_user: Option<&str>,
     global_file_access: bool,
 ) -> Value {
+    execute_tool_with_policy(
+        app,
+        name,
+        args,
+        from_user,
+        global_file_access,
+        ToolExecutionPolicy::default(),
+    )
+    .await
+}
+
+/// 支持受控策略与只读拦截的工具执行器
+pub async fn execute_tool_with_policy(
+    app: &tauri::AppHandle,
+    name: &str,
+    args: &Value,
+    from_user: Option<&str>,
+    global_file_access: bool,
+    policy: ToolExecutionPolicy,
+) -> Value {
+    // 1. 只读策略拦截: 凡具有外部修改/写入副作用的工具，一律硬拒绝
+    if policy.read_only && is_mutating_tool(name) {
+        log::warn!("[Tool Security] Tool '{}' blocked by read_only policy", name);
+        let err_resp = json!({
+            "error": format!("操作被拒绝：当前指令处于只读安全模式 (Read-Only Mode)，禁止执行工具 '{}' 及任何文件写入或修改操作。", name)
+        });
+        audit_tool_call(name, args, "BLOCKED: read_only policy");
+        return err_resp;
+    }
+
+    // 2. 受控修改策略拦截: write_file 与 append_file 拦截为暂存提案并直接落库
+    if policy.staged_mode {
+        if name == "write_file" || name == "append_file" {
+            let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
+            let content_arg = args.get("content").and_then(|v| v.as_str()).unwrap_or("");
+            let old_content = if std::path::Path::new(path).exists() {
+                std::fs::read_to_string(path).unwrap_or_default()
+            } else {
+                String::new()
+            };
+            let new_content = if name == "write_file" {
+                content_arg.to_string()
+            } else {
+                format!("{}{}", old_content, content_arg)
+            };
+
+            let (diff, adds, dels) = crate::sync_engine::generate_unified_diff(path, &old_content, &new_content);
+            let old_content_hash = crate::sync_engine::compute_content_hash(&old_content);
+            let change_id = format!("staged_{}", uuid::Uuid::new_v4());
+            let req_id = policy.request_id.clone().unwrap_or_default();
+            let proj_id = policy.project_id.clone().unwrap_or_default();
+            let now = crate::now_ms();
+
+            log::info!("[Tool Staged] Intercepted {} to {} (+{} -{}), staged as {}", name, path, adds, dels, change_id);
+
+            // 1. 创建结构化 StagedChange 对象
+            let mut staged = crate::sync_engine::StagedChange {
+                change_id: change_id.clone(),
+                request_id: req_id.clone(),
+                project_id: proj_id.clone(),
+                file_path: path.to_string(),
+                old_content: old_content.clone(),
+                new_content: new_content.clone(),
+                old_content_hash: old_content_hash.clone(),
+                diff: diff.clone(),
+                summary: format!("{} 文件: {}", if name == "write_file" { "修改" } else { "追加" }, path),
+                additions: adds,
+                deletions: dels,
+                status: "pending".to_string(),
+                work_object_id: None,
+                created_at: now,
+                applied_at: None,
+            };
+
+            // 2. 创建关联的 Work Object (Change) 并落库 SQLite
+            if let Some(db_state) = app.try_state::<crate::db::DbState>() {
+                if let Ok(mut conn) = db_state.0.lock() {
+                    let pid = if !proj_id.is_empty() {
+                        proj_id.clone()
+                    } else {
+                        crate::work_core::repository::ensure_personal_workspace(&mut conn)
+                            .unwrap_or_else(|_| "project_personal_inbox".to_string())
+                    };
+
+                    let obj_res = crate::work_core::repository::create_object(
+                        &mut conn,
+                        crate::work_core::models::CreateWorkObjectInput {
+                            kind: crate::work_core::models::WorkObjectKind::Change,
+                            project_id: pid.clone(),
+                            parent_id: None,
+                            title: format!("待审阅修改提案: {}", path),
+                            status: Some("needs_review".into()),
+                            description: Some(format!("待审批的修改 (+{} -{})", adds, dels)),
+                            data: serde_json::json!({
+                                "filePath": path,
+                                "changeId": change_id,
+                                "additions": adds,
+                                "deletions": dels,
+                                "diff": diff,
+                            }),
+                            source_capture_id: None,
+                            actor: Some("remote:agent".to_string()),
+                            idempotency_key: format!("obj_change_{}", change_id),
+                        },
+                    );
+
+                    if let Ok(obj) = obj_res {
+                        staged.work_object_id = Some(obj.id);
+                    }
+
+                    // 保存提案到 SQLite
+                    let _ = crate::sync_engine::save_staged_change(&conn, &staged);
+
+                    // 记录 work_event
+                    let _ = crate::work_core::repository::record_work_event(
+                        &mut conn,
+                        &pid,
+                        staged.work_object_id.as_deref(),
+                        "remote.change.proposed",
+                        "remote:agent",
+                        &serde_json::json!({
+                            "changeId": change_id,
+                            "filePath": path,
+                            "additions": adds,
+                            "deletions": dels,
+                            "status": "pending",
+                        }),
+                        Some(&format!("event_change_proposed_{}", change_id)),
+                    );
+                }
+            }
+
+            // 3. 注册到全局内存 STAGED_CHANGES
+            {
+                let mut map = crate::sync_engine::STAGED_CHANGES.lock().unwrap();
+                map.insert(change_id.clone(), staged);
+            }
+
+            let resp = json!({
+                "ok": true,
+                "staged": true,
+                "change_id": change_id,
+                "file_path": path,
+                "diff": diff,
+                "additions": adds,
+                "deletions": dels,
+                "old_content_hash": old_content_hash,
+                "message": format!("文件修改已在受控模式下拦截并生成变更提案 (+{} -{})，提案已持久化入库，待移动端用户审批，尚未写入磁盘。", adds, dels)
+            });
+            audit_tool_call(name, args, "STAGED: tool intercepted & persisted");
+            return resp;
+        } else if is_mutating_tool(name) {
+            log::warn!("[Tool Security] Tool '{}' blocked in staged_mode", name);
+            let err_resp = json!({
+                "error": format!("操作被拒绝：当前处于受控协同模式，仅允许通过 write_file/append_file 提出代码或文件暂存提案，禁止执行破坏性工具 '{}'。", name)
+            });
+            audit_tool_call(name, args, "BLOCKED: staged_mode only allows staged writes");
+            return err_resp;
+        }
+    }
+
     // 工具级超时控制：媒体上传类工具给 120 秒，其他给 30 秒
     let timeout_secs = match name {
         "send_wechat_file" => 600, // 大文件上传可能耗时很长，与 CDN 动态超时匹配

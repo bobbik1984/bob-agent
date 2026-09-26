@@ -2,8 +2,18 @@ import { defineConfig } from 'vite';
 import vue from '@vitejs/plugin-vue';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
+import { accessSync, constants } from 'node:fs';
 
-const viteCacheDir = process.env.DEV_CACHE_ROOT
+const isDirWritable = (dir) => {
+  try {
+    accessSync(dir, constants.W_OK);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const viteCacheDir = (process.env.DEV_CACHE_ROOT && isDirWritable(process.env.DEV_CACHE_ROOT))
   ? resolve(process.env.DEV_CACHE_ROOT, 'node', 'vite-cache', 'bob.agent')
   : resolve(tmpdir(), 'bob.agent', 'vite-cache');
 
@@ -39,5 +49,6 @@ export default defineConfig({
   },
   test: {
     include: ['src/**/*.{test,spec}.?(c|m)[jt]s?(x)'],
+    cache: false,
   },
 });

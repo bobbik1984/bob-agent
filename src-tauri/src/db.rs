@@ -131,7 +131,7 @@ pub fn init_db(data_dir: &std::path::Path) -> Connection {
     // ==========================================
     // 2. 正式开辟全局连接
     // ==========================================
-    let conn = match Connection::open(&db_path) {
+    let mut conn = match Connection::open(&db_path) {
         Ok(c) => c,
         Err(e) => {
             log::error!(
@@ -187,6 +187,11 @@ pub fn init_db(data_dir: &std::path::Path) -> Connection {
     // 初始化工作台与项目管理表 (Work Core)
     if let Err(e) = crate::work_core::init_work_core_tables(&conn) {
         log::error!("Failed to init work_core tables: {}", e);
+    }
+
+    // 初始化远程受控修改暂存表 (Staged Changes) 与崩溃恢复表 (Staged Write Recovery WAL)
+    if let Err(e) = initialize_staged_recovery(&mut conn) {
+        log::error!("Staged recovery initialization encountered failure: {}", e);
     }
 
     // 初始化目标运行引擎表 (Goal Runtime)
@@ -374,7 +379,38 @@ pub fn init_db(data_dir: &std::path::Path) -> Connection {
         UPDATE kg_nodes SET node_type = 'technology' WHERE node_type IN ('Technology', '技术');
     ").unwrap_or_default();
 
+    if let Err(e) = crate::device_trust::init_device_trust_tables(&conn) {
+        log::error!("初始化设备信任表失败: {}", e);
+    }
+
     conn
+}
+
+pub fn initialize_staged_recovery(conn: &mut Connection) -> Result<crate::sync_engine::RecoverySummary, String> {
+    if let Err(e) = crate::sync_engine::init_staged_changes_table(conn) {
+        log::error!("Failed to init staged_changes tables: {}", e);
+        crate::sync_engine::set_recovery_degraded(true, Some(&format!("初始化暂存变更表失败: {}", e)));
+        return Err(format!("初始化暂存变更表失败: {}", e));
+    }
+
+    if let Err(e) = crate::sync_engine::init_staged_write_recovery_table(conn) {
+        log::error!("Failed to init staged_write_recovery table: {}", e);
+        crate::sync_engine::set_recovery_degraded(true, Some(&format!("初始化崩溃恢复表失败: {}", e)));
+        return Err(format!("初始化崩溃恢复表失败: {}", e));
+    }
+
+    // 初始化成功后才调用恢复
+    match crate::sync_engine::recover_interrupted_staged_writes(conn) {
+        Ok(summary) => {
+            log::info!("Interrupted staged writes recovery complete: {:?}", summary);
+            Ok(summary)
+        }
+        Err(e) => {
+            log::error!("Failed to recover interrupted staged writes: {}", e);
+            crate::sync_engine::set_recovery_degraded(true, Some(&format!("执行启动崩溃恢复失败: {}", e)));
+            Err(format!("执行启动崩溃恢复失败: {}", e))
+        }
+    }
 }
 
 #[tauri::command]

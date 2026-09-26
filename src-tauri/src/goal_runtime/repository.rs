@@ -13,7 +13,7 @@ use super::models::{
     TransitionRunInput, VerificationState, GOAL_RUNTIME_SCHEMA_VERSION,
 };
 
-pub const PERSONAL_PROJECT_ID: &str = "project_personal_inbox";
+pub use crate::work_core::repository::{ensure_personal_workspace, PERSONAL_PROJECT_ID};
 
 const CREATE_RUN_OPERATION: &str = "goal.run.create";
 const TRANSITION_OPERATION: &str = "goal.run.transition";
@@ -327,26 +327,7 @@ fn append_event(
     Ok(event)
 }
 
-pub fn ensure_personal_workspace(conn: &mut Connection) -> Result<String, String> {
-    if crate::work_core::repository::get_project(conn, PERSONAL_PROJECT_ID)?.is_some() {
-        return Ok(PERSONAL_PROJECT_ID.into());
-    }
-    let project = crate::work_core::repository::create_project(
-        conn,
-        CreateProjectInput {
-            project_id: Some(PERSONAL_PROJECT_ID.into()),
-            title: "个人工作区".into(),
-            mission: "保存尚未归入正式项目的持续工作".into(),
-            current_phase: Some("持续处理".into()),
-            summary: Some("Bob 自动创建的低摩擦 Goal 收件区".into()),
-            source_ref: None,
-            metadata: json!({ "systemManaged": true }),
-            actor: Some("bob".into()),
-            idempotency_key: "goal-runtime-personal-workspace-v1".into(),
-        },
-    )?;
-    Ok(project.id)
-}
+
 
 pub fn get_run(conn: &Connection, run_id: &str) -> Result<Option<GoalRun>, String> {
     conn.query_row(

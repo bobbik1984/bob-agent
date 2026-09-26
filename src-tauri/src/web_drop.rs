@@ -82,7 +82,11 @@ pub async fn start_web_drop(file_path: String) -> Result<String, String> {
         "https://bob.bobbik.org/transfer/?v=2#{}.{}",
         room_id, key_b64
     );
-    log::info!("[web_drop] Share URL generated: {}", share_url);
+    // SEC-03 日志凭据防护：绝对不向日志输出 URL 中的 AES-128 解密密钥
+    log::info!(
+        "[web_drop] Share URL generated: https://bob.bobbik.org/transfer/?v=2#{}.[REDACTED_KEY]",
+        room_id
+    );
 
     let path_buf = path.to_path_buf();
     let room_id_clone = room_id.clone();

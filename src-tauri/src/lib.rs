@@ -11,7 +11,7 @@ mod tools;
 mod kb_extractor;
 mod kb_indexer;
 mod db;
-mod http_api;
+pub mod http_api;
 mod wechat;
 mod keychain;
 mod browser;
@@ -29,7 +29,7 @@ mod telegram;
 mod discord;
 mod kg;
 mod notebook;
-mod sync_engine;
+pub mod sync_engine;
 mod im_sessions;
 mod tunnel;
 mod web_drop;
@@ -60,7 +60,12 @@ mod result_receipt;
 mod model_manager;
 mod assistant_context;
 mod barcode;
-mod crypto;
+pub mod crypto;
+pub mod device_trust;
+#[cfg(any(test, feature = "fault-injection"))]
+pub mod diagnostic_profile;
+#[cfg(any(test, feature = "fault-injection"))]
+pub mod fault_injection;
 
 use serde_json::{json, Value};
 use std::fs;
@@ -73,6 +78,21 @@ use percent_encoding::percent_decode_str;
 // ═══════════════════════════════════════════════════════════
 
 static DATA_DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+#[cfg(any(test, feature = "fault-injection"))]
+pub fn set_custom_data_dir(path: PathBuf) -> Result<(), String> {
+    if let Some(existing) = DATA_DIR.get() {
+        if existing != &path {
+            return Err(format!(
+                "DATA_DIR already initialized to {:?}, cannot override to {:?}",
+                existing, path
+            ));
+        }
+        Ok(())
+    } else {
+        DATA_DIR.set(path).map_err(|e| format!("Failed to set DATA_DIR: {:?}", e))
+    }
+}
 
 pub(crate) fn get_data_dir() -> PathBuf {
     if let Some(dir) = DATA_DIR.get() {
@@ -149,61 +169,310 @@ pub(crate) fn get_wiki_dir() -> PathBuf {
     }
 }
 
-fn get_config_path() -> PathBuf {
+#[cfg(test)]
+thread_local! {
+    static TEST_CONFIG_PATH_OVERRIDE_TL: std::cell::RefCell<Option<PathBuf>> = std::cell::RefCell::new(None);
+    static INJECT_CONFIG_WRITE_ERROR_TL: std::cell::Cell<bool> = std::cell::Cell::new(false);
+    static INJECT_CONFIG_WRITE_STAGE_TL: std::cell::Cell<u8> = std::cell::Cell::new(0);
+}
+
+#[cfg(test)]
+static TEST_CONFIG_PATH_OVERRIDE: std::sync::Mutex<Option<PathBuf>> = std::sync::Mutex::new(None);
+
+#[cfg(test)]
+pub(crate) fn set_test_config_path_override(p: Option<PathBuf>) {
+    TEST_CONFIG_PATH_OVERRIDE_TL.with(|cell| {
+        *cell.borrow_mut() = p.clone();
+    });
+    let mut guard = match TEST_CONFIG_PATH_OVERRIDE.lock() {
+        Ok(g) => g,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    *guard = p;
+}
+
+#[cfg(test)]
+static INJECT_SYNC_DIR_ERROR: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+#[cfg(test)]
+pub(crate) fn set_inject_sync_dir_error(enabled: bool) {
+    INJECT_SYNC_DIR_ERROR.store(enabled, std::sync::atomic::Ordering::SeqCst);
+}
+
+#[cfg(test)]
+pub(crate) fn check_injected_sync_dir_error() -> Option<String> {
+    if INJECT_SYNC_DIR_ERROR.load(std::sync::atomic::Ordering::SeqCst) {
+        Some("Injected directory sync failure".to_string())
+    } else {
+        None
+    }
+}
+
+#[cfg(unix)]
+pub(crate) fn sync_dir_metadata(dir: &Path) -> Result<(), String> {
+    #[cfg(test)]
+    {
+        if let Some(err) = check_injected_sync_dir_error() {
+            return Err(err);
+        }
+    }
+    if !dir.exists() {
+        return Ok(());
+    }
+    let f = fs::File::open(dir)
+        .map_err(|e| format!("Failed to open directory {:?} for sync: {}", dir, e))?;
+    f.sync_all()
+        .map_err(|e| format!("Failed to sync directory {:?}: {}", dir, e))?;
+    Ok(())
+}
+
+#[cfg(windows)]
+pub(crate) fn sync_dir_metadata(dir: &Path) -> Result<(), String> {
+    #[cfg(test)]
+    {
+        if let Some(err) = check_injected_sync_dir_error() {
+            return Err(err);
+        }
+    }
+    if !dir.exists() {
+        return Ok(());
+    }
+    use std::os::windows::fs::OpenOptionsExt;
+    const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x02000000;
+    let file = std::fs::OpenOptions::new()
+        .write(true)
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+        .open(dir)
+        .map_err(|e| format!("Failed to open directory {:?} for sync: {}", dir, e))?;
+    file.sync_all()
+        .map_err(|e| format!("Failed to sync directory {:?}: {}", dir, e))?;
+    Ok(())
+}
+
+#[cfg(not(any(unix, windows)))]
+pub(crate) fn sync_dir_metadata(_dir: &Path) -> Result<(), String> {
+    #[cfg(test)]
+    {
+        if let Some(err) = check_injected_sync_dir_error() {
+            return Err(err);
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn is_valid_json_file(path: &Path) -> bool {
+    if !path.exists() || !path.is_file() {
+        return false;
+    }
+    match fs::read_to_string(path) {
+        Ok(content) => {
+            let trimmed = content.trim();
+            if trimmed.is_empty() {
+                return false;
+            }
+            serde_json::from_str::<Value>(trimmed).is_ok()
+        }
+        Err(_) => false,
+    }
+}
+
+fn safe_remove_if_exists(p: &Path) -> std::io::Result<()> {
+    match fs::remove_file(p) {
+        Ok(_) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(e),
+    }
+}
+
+pub(crate) fn recover_config_file_integrity_at(path: &Path) -> Result<(), String> {
+    let parent = match path.parent() {
+        Some(p) => p,
+        None => return Ok(()),
+    };
+    if !parent.exists() {
+        return Ok(());
+    }
+
+    let file_name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("config.json");
+    let pending_path = parent.join(format!("{}.pending", file_name));
+    let backup_path = parent.join(format!("{}.backup", file_name));
+    let quarantine_path = parent.join(format!("{}.corrupted", file_name));
+
+    let canonical_exists = path.exists();
+    let canonical_valid = is_valid_json_file(path);
+    let pending_exists = pending_path.exists();
+    let pending_valid = is_valid_json_file(&pending_path);
+    let backup_exists = backup_path.exists();
+    let backup_valid = is_valid_json_file(&backup_path);
+
+    // Case 1: 正式配置有效：清理残留的 backup 与 pending 临时文件
+    if canonical_valid {
+        if backup_exists {
+            safe_remove_if_exists(&backup_path)
+                .map_err(|e| format!("Failed to remove stale backup config {:?}: {}", backup_path, e))?;
+            sync_dir_metadata(parent)?;
+        }
+        if pending_exists {
+            safe_remove_if_exists(&pending_path)
+                .map_err(|e| format!("Failed to remove stale pending config {:?}: {}", pending_path, e))?;
+            sync_dir_metadata(parent)?;
+        }
+        return Ok(());
+    }
+
+    // Case 2: 正式配置损坏或缺失，但 pending 有效（优先级 1：包含最新已提交数据）
+    if pending_valid {
+        if canonical_exists {
+            if quarantine_path.exists() {
+                safe_remove_if_exists(&quarantine_path)
+                    .map_err(|e| format!("Failed to remove existing quarantine file {:?}: {}", quarantine_path, e))?;
+                sync_dir_metadata(parent)?;
+            }
+            fs::rename(path, &quarantine_path)
+                .map_err(|e| format!("Failed to quarantine corrupted config {:?} to {:?}: {}", path, quarantine_path, e))?;
+            sync_dir_metadata(parent)?;
+        }
+        if pending_path.exists() {
+            if let Err(e) = fs::rename(&pending_path, path) {
+                if e.kind() != std::io::ErrorKind::NotFound {
+                    return Err(format!("Failed to promote pending config {:?} to canonical {:?}: {}", pending_path, path, e));
+                }
+            } else {
+                sync_dir_metadata(parent)?;
+            }
+        }
+
+        if backup_exists {
+            safe_remove_if_exists(&backup_path)
+                .map_err(|e| format!("Failed to remove backup config {:?} after pending promotion: {}", backup_path, e))?;
+            sync_dir_metadata(parent)?;
+        }
+        return Ok(());
+    }
+
+    // Case 3: 正式配置损坏或缺失，pending 无效，但 backup 有效（优先级 2：从备份恢复）
+    if backup_valid {
+        if canonical_exists {
+            if quarantine_path.exists() {
+                safe_remove_if_exists(&quarantine_path)
+                    .map_err(|e| format!("Failed to remove existing quarantine file {:?}: {}", quarantine_path, e))?;
+                sync_dir_metadata(parent)?;
+            }
+            fs::rename(path, &quarantine_path)
+                .map_err(|e| format!("Failed to quarantine corrupted config {:?} to {:?}: {}", path, quarantine_path, e))?;
+            sync_dir_metadata(parent)?;
+        }
+        if backup_path.exists() {
+            if let Err(e) = fs::rename(&backup_path, path) {
+                if e.kind() != std::io::ErrorKind::NotFound {
+                    return Err(format!("Failed to restore backup config {:?} to canonical {:?}: {}", backup_path, path, e));
+                }
+            } else {
+                sync_dir_metadata(parent)?;
+            }
+        }
+
+        if pending_exists {
+            safe_remove_if_exists(&pending_path)
+                .map_err(|e| format!("Failed to remove invalid pending config {:?}: {}", pending_path, e))?;
+            sync_dir_metadata(parent)?;
+        }
+        return Ok(());
+    }
+
+    // Case 4: 三者全部缺失（新安装未初始化干净状态）
+    if !canonical_exists && !pending_exists && !backup_exists {
+        return Ok(());
+    }
+
+    // Case 5: 存在损坏文件，但 canonical、pending、backup 全部无效或不可读
+    // 关键契约：Fail-Closed！严禁删除任何文件！保留完整原始现场供取证与人工排查，返回结构化 Err
+    Err(format!(
+        "Irrecoverable config integrity failure at {:?}: canonical (exists: {}, valid: false), pending (exists: {}, valid: false), backup (exists: {}, valid: false). All original files preserved.",
+        path, canonical_exists, pending_exists, backup_exists
+    ))
+}
+
+pub(crate) fn recover_config_file_integrity() -> Result<(), String> {
+    recover_config_file_integrity_at(&get_config_path())
+}
+
+pub(crate) fn get_config_path() -> PathBuf {
+    #[cfg(test)]
+    {
+        if let Some(p) = TEST_CONFIG_PATH_OVERRIDE_TL.with(|cell| cell.borrow().clone()) {
+            return p;
+        }
+        thread_local! {
+            static THREAD_ISOLATED_CFG: std::cell::RefCell<Option<PathBuf>> = std::cell::RefCell::new(None);
+        }
+        return THREAD_ISOLATED_CFG.with(|cell| {
+            let mut b = cell.borrow_mut();
+            if let Some(ref p) = *b {
+                p.clone()
+            } else {
+                let tid = format!("{:?}", std::thread::current().id())
+                    .chars()
+                    .filter(|c| c.is_alphanumeric())
+                    .collect::<String>();
+                let p = std::env::temp_dir().join(format!("bob_test_cfg_tid_{}.json", tid));
+                *b = Some(p.clone());
+                p
+            }
+        });
+    }
+    #[allow(unreachable_code)]
     get_data_dir().join("config.json")
 }
 
-fn read_config() -> Value {
-    let path = get_config_path();
-    if let Ok(data) = fs::read_to_string(&path) {
-        #[allow(unused_mut)]
-        if let Ok(mut json) = serde_json::from_str::<Value>(&data) {
-            #[cfg(target_os = "android")]
-            {
-                // 如果是 Android，在内存中直接过滤掉误同步过来的 Windows 绝对路径
-                if let Some(obj) = json.as_object_mut() {
-                    for key in &["workspaceDir", "wikiDir", "browserPath", "bundledSkillsDir", "offlineModelPath"] {
-                        if let Some(val) = obj.get(*key).and_then(|v| v.as_str()) {
-                            if val.contains(':') || val.contains('\\') || !val.starts_with('/') {
-                                obj.remove(*key);
-                            }
-                        }
-                    }
-                }
-            }
-            return json;
-        }
+pub(crate) fn read_config_checked_at(path: &Path) -> Result<Value, String> {
+    recover_config_file_integrity_at(path)?;
+    if !path.exists() {
+        return Ok(serde_json::json!({}));
+    }
+    let data = fs::read_to_string(path)
+        .map_err(|e| format!("Failed to read config file {:?}: {}", path, e))?;
+    let mut json = serde_json::from_str::<Value>(&data)
+        .map_err(|e| format!("Failed to parse config file {:?} as JSON: {}", path, e))?;
+    if !json.is_object() {
+        return Err(format!(
+            "SEC-01/03 Fail-Closed: Config file {:?} must contain a JSON Object, but got non-object value",
+            path
+        ));
     }
     #[cfg(target_os = "android")]
     {
-        // 尝试从其他可能的历史沙盒候选路径中自动恢复 config.json
-        let candidates = [
-            PathBuf::from("/data/user/0/bob.agent/config.json"),
-            PathBuf::from("/data/data/bob.agent/config.json"),
-            PathBuf::from("/data/user/0/bob.agent/files/config.json"),
-            PathBuf::from("/data/data/bob.agent/files/config.json"),
-        ];
-        for cand in &candidates {
-            if cand != &path && cand.exists() {
-                if let Ok(data) = fs::read_to_string(cand) {
-                    if let Ok(mut json) = serde_json::from_str::<Value>(&data) {
-                        if let Some(obj) = json.as_object_mut() {
-                            for key in &["workspaceDir", "wikiDir", "browserPath", "bundledSkillsDir", "offlineModelPath"] {
-                                if let Some(val) = obj.get(*key).and_then(|v| v.as_str()) {
-                                    if val.contains(':') || val.contains('\\') || !val.starts_with('/') {
-                                        obj.remove(*key);
-                                    }
-                                }
-                            }
-                        }
-                        let _ = fs::write(&path, &data);
-                        return json;
+        if let Some(obj) = json.as_object_mut() {
+            for key in &["workspaceDir", "wikiDir", "browserPath", "bundledSkillsDir", "offlineModelPath"] {
+                if let Some(val) = obj.get(*key).and_then(|v| v.as_str()) {
+                    if val.contains(':') || val.contains('\\') || !val.starts_with('/') {
+                        obj.remove(*key);
                     }
                 }
             }
         }
     }
-    serde_json::json!({})
+    Ok(json)
+}
+
+pub(crate) fn read_config_checked() -> Result<Value, String> {
+    read_config_checked_at(&get_config_path())
+}
+
+/// Non-critical fallback configuration reader for background UI or non-security tasks.
+/// WARNING: DO NOT USE IN SECURITY-CRITICAL PATHS (SEC-01, Key Management, DB Sync, Outbox, Auth).
+/// Security-critical paths MUST use `read_config_checked()`.
+pub(crate) fn read_config() -> Value {
+    match read_config_checked() {
+        Ok(val) => val,
+        Err(e) => {
+            log::error!("[Config] read_config fallback after checked read failed: {}", e);
+            serde_json::json!({})
+        }
+    }
 }
 
 /// 启动自愈：清理当前平台上非法的历史跨端路径配置 (例如 Android 上的 Windows 盘符)
@@ -225,23 +494,6 @@ pub(crate) fn sanitize_platform_config() {
                         changed = true;
                     }
                 }
-            }
-
-            // 手机端独立永久身份校验与自愈：
-            // 确保 device_id 存在且符合 android- 格式。如果缺失，或曾被误同步成 PC 的 44 位 Base64 公钥 (以=结尾)，重新生成唯一干净的 ID
-            let needs_new_id = match obj.get("device_id").and_then(|v| v.as_str()) {
-                Some(id) => {
-                    let trimmed = id.trim();
-                    trimmed.is_empty() || (trimmed.len() == 44 && trimmed.ends_with('=')) || !trimmed.starts_with("android-")
-                }
-                None => true,
-            };
-
-            if needs_new_id {
-                let new_id = format!("android-{}", &uuid::Uuid::new_v4().to_string().replace("-", "")[..12]);
-                log::warn!("[Sanitize] 手机端自愈：生成/重置手机独立永久设备身份: {}", new_id);
-                obj.insert("device_id".to_string(), serde_json::json!(new_id));
-                changed = true;
             }
         }
     }
@@ -269,11 +521,157 @@ pub(crate) fn sanitize_platform_config() {
     }
 }
 
-fn write_config(config: &Value) {
-    let path = get_config_path();
-    if let Ok(data) = serde_json::to_string_pretty(config) {
-        let _ = fs::write(path, data);
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ConfigWriteFailureStage {
+    None,
+    AfterPendingWrite,
+    AfterBackupMove,
+    AfterPendingCommit,
+}
+
+#[cfg(test)]
+static INJECT_CONFIG_WRITE_ERROR: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+#[cfg(test)]
+static INJECT_CONFIG_WRITE_STAGE: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+pub(crate) static CONFIG_OP_TEST_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+#[cfg(test)]
+pub(crate) fn lock_config_test_mutex() -> std::sync::MutexGuard<'static, ()> {
+    match CONFIG_OP_TEST_MUTEX.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
     }
+}
+
+#[cfg(test)]
+pub(crate) fn set_inject_config_write_error(fail: bool) {
+    INJECT_CONFIG_WRITE_ERROR_TL.with(|c| c.set(fail));
+    INJECT_CONFIG_WRITE_ERROR.store(fail, std::sync::atomic::Ordering::SeqCst);
+}
+
+#[cfg(test)]
+pub(crate) fn set_config_write_failure_stage(stage: ConfigWriteFailureStage) {
+    let val: u8 = match stage {
+        ConfigWriteFailureStage::None => 0,
+        ConfigWriteFailureStage::AfterPendingWrite => 1,
+        ConfigWriteFailureStage::AfterBackupMove => 2,
+        ConfigWriteFailureStage::AfterPendingCommit => 3,
+    };
+    INJECT_CONFIG_WRITE_STAGE_TL.with(|c| c.set(val));
+    INJECT_CONFIG_WRITE_STAGE.store(val, std::sync::atomic::Ordering::SeqCst);
+}
+
+#[cfg(test)]
+pub(crate) fn get_config_write_failure_stage() -> ConfigWriteFailureStage {
+    let val = INJECT_CONFIG_WRITE_STAGE_TL.with(|c| c.get());
+    match val {
+        1 => ConfigWriteFailureStage::AfterPendingWrite,
+        2 => ConfigWriteFailureStage::AfterBackupMove,
+        3 => ConfigWriteFailureStage::AfterPendingCommit,
+        _ => ConfigWriteFailureStage::None,
+    }
+}
+
+pub(crate) fn write_config_checked_at(path: &Path, config: &Value) -> Result<(), String> {
+    #[cfg(test)]
+    {
+        if INJECT_CONFIG_WRITE_ERROR_TL.with(|c| c.get()) {
+            return Err("Fault injection: simulated config write failure (EIO / AccessDenied)".to_string());
+        }
+    }
+
+    use std::io::Write;
+    let parent = path
+        .parent()
+        .ok_or_else(|| "Config path has no parent directory".to_string())?;
+    fs::create_dir_all(parent)
+        .map_err(|e| format!("Failed to create config directory {:?}: {}", parent, e))?;
+
+    // 写入前首先运行确定性自愈，清理或恢复任何历史残留状态
+    recover_config_file_integrity_at(path)?;
+
+    let data = serde_json::to_string_pretty(config)
+        .map_err(|e| format!("Failed to serialize config: {}", e))?;
+
+    let file_name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("config.json");
+    let pending_path = parent.join(format!("{}.pending", file_name));
+    let backup_path = parent.join(format!("{}.backup", file_name));
+
+    // 步骤 1：写入 pending 文件并 fsync + 父目录元数据同步
+    let mut file = fs::File::create(&pending_path)
+        .map_err(|e| format!("Failed to create pending config file {:?}: {}", pending_path, e))?;
+    file.write_all(data.as_bytes())
+        .map_err(|e| format!("Failed to write pending config data: {}", e))?;
+    file.flush()
+        .map_err(|e| format!("Failed to flush pending config file: {}", e))?;
+    file.sync_all()
+        .map_err(|e| format!("Failed to sync pending config file: {}", e))?;
+    drop(file);
+    sync_dir_metadata(parent)?;
+
+    #[cfg(test)]
+    {
+        if get_config_write_failure_stage() == ConfigWriteFailureStage::AfterPendingWrite {
+            return Err("Fault injection: interrupted after pending write (Stage 1)".to_string());
+        }
+    }
+
+    // 步骤 2：若原 config 存在，重命名为 backup_path + 父目录元数据同步
+    if path.exists() {
+        fs::rename(path, &backup_path)
+            .map_err(|e| format!("Failed to rename old config to backup: {}", e))?;
+        sync_dir_metadata(parent)?;
+    }
+
+    #[cfg(test)]
+    {
+        if get_config_write_failure_stage() == ConfigWriteFailureStage::AfterBackupMove {
+            return Err("Fault injection: interrupted after backup move (Stage 2: canonical config missing)".to_string());
+        }
+    }
+
+    // 步骤 3：原子重命名 pending_path -> path + 父目录元数据同步
+    if let Err(e) = fs::rename(&pending_path, path) {
+        // 提交失败时，尝试恢复 backup
+        if backup_path.exists() {
+            if let Err(restore_err) = fs::rename(&backup_path, path) {
+                return Err(format!(
+                    "CRITICAL: Failed to commit pending config ({}) AND failed to restore backup config ({})",
+                    e, restore_err
+                ));
+            }
+            sync_dir_metadata(parent)?;
+        }
+        return Err(format!("Failed to commit new config file: {}", e));
+    }
+    sync_dir_metadata(parent)?;
+
+    #[cfg(test)]
+    {
+        if get_config_write_failure_stage() == ConfigWriteFailureStage::AfterPendingCommit {
+            return Err("Fault injection: interrupted after pending commit before backup cleanup (Stage 3)".to_string());
+        }
+    }
+
+    // 步骤 4：显式删除 backup_path + 父目录元数据同步（严禁吞错）
+    if backup_path.exists() {
+        fs::remove_file(&backup_path)
+            .map_err(|e| format!("Failed to remove backup config file: {}", e))?;
+        sync_dir_metadata(parent)?;
+    }
+
+    Ok(())
+}
+
+pub(crate) fn write_config_checked(config: &Value) -> Result<(), String> {
+    write_config_checked_at(&get_config_path(), config)
+}
+
+pub(crate) fn write_config(config: &Value) {
+    let _ = write_config_checked(config);
 }
 
 pub(crate) fn get_external_skills_dir_or_default(config: &Value) -> PathBuf {
@@ -911,6 +1309,14 @@ fn import_skills_zip(path: String) -> Result<bool, String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg(feature = "fault-injection")]
+    {
+        if let Err(e) = diagnostic_profile::ensure_diagnostic_profile_initialized() {
+            eprintln!("[DiagnosticProfile] FATAL: 诊断构建启动阻断: {}", e);
+            log::error!("[DiagnosticProfile] FATAL: {}", e);
+            std::process::exit(1);
+        }
+    }
     let _ = rustls::crypto::ring::default_provider().install_default();
     let db = db::init_db(&get_data_dir());
     let wechat_state = std::sync::Arc::new(wechat::WechatState::new());
@@ -1140,6 +1546,11 @@ pub fn run() {
             sync_diagnostics::get_sync_connectivity_snapshot,
             sync_engine::get_connected_devices,
             sync_engine::disconnect_device,
+            sync_engine::check_device_online,
+            sync_engine::dispatch_remote_instruction,
+            sync_engine::dispatch_remote_approval,
+            sync_engine::cancel_remote_instruction,
+            sync_engine::fetch_remote_capabilities,
             sync_engine::trigger_mobile_sync,
             sync_engine::write_mobile_outbox,
             sync_engine::trigger_wakeup_via_relay,
@@ -1151,6 +1562,14 @@ pub fn run() {
             sync_engine::force_relay_reconnect,
             sync_history::get_sync_runs,
             sync_history::get_sync_trace_events,
+            // SEC-01: 设备发现与可信身份分离 (Device Trust)
+            device_trust::sec01_create_pairing_invitation,
+            device_trust::sec01_parse_pairing_invitation,
+            device_trust::sec01_create_proof_of_possession,
+            device_trust::sec01_revoke_trusted_device,
+            device_trust::sec01_get_trusted_devices,
+            device_trust::sec01_is_device_trusted,
+            device_trust::sec01_pair_device,
             dream::system_get_tag_proposals,
             dream::system_clear_tag_proposals,
             model_manager::download_model,
@@ -1172,6 +1591,7 @@ pub fn run() {
             work_core::commands::work_external_link_list,
             work_core::commands::work_change_review_list,
             work_core::commands::work_change_review_action,
+            work_core::commands::work_event_list,
             // 目标运行时 (Goal Runtime)
             goal_runtime::commands::goal_runtime_list,
             goal_runtime::commands::goal_runtime_get,

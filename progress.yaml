@@ -1,6 +1,6 @@
 project:
   name: bob-agent
-  version: '0.5.0'
+  version: 0.9.6
   status: active
   tech:
   - Tauri
@@ -8,7 +8,8 @@ project:
   - Vue 3
   - Desktop
   - Android
-  updated: '2026-07-05'
+  current_task: 'BOB-AGENT-TRACK-A-A3-PASSED-A4-PREPARING (A3_LOCAL_REVIEW_PASSED / A4_DEVICE_TESTS_UNEXECUTED_LOCKED)'
+  development_plan: docs/superpowers/plans/2026-09-22-track-a-security-and-client.md
 phases:
 - name: V0.5 知识图谱 Source-Hub 重构
   tasks:
@@ -60,5 +61,33 @@ phases:
     status: done
   - text: T-2239 优化移动端消息来源标识 (用手机图标替代 Desktop)
     status: done
-  - text: T-2301 扫码配对 MVP (局域网直连 + VPS 信令降级 + Ed25519 握手)
+  - text: T-2301 配对入口与 LAN/Relay 通路（不代表持钥鉴权或同步 E2EE 验收）
+    status: done
+- name: Phase 6 移动端远程执行设备协同 (Mobile-to-PC Agent Delegation)
+  tasks:
+  - text: 阶段一：输入框上方执行设备状态轨与切换器 (UI Rail & Device Selector)
+    status: done
+  - text: 阶段一：加号扩展菜单精简重构为三项 (附件 / 执行设备 / 对话模型)
+    status: done
+  - text: 阶段一：会话级执行设备粘性绑定与离线显式报错防御
+    status: done
+  - text: 阶段一：移动端与 PC 端 RPC 指令协议与只读无头 Agent 闭环
+    status: done
+  - text: 阶段二：PC 端修改与审阅闭环 (Diff 预览、手机确认与显式停止 Ack)
+    status: done
+  - text: 阶段三：模型与 Harness 设备能力动态发现与本地密钥隔离
+    status: done
+  - text: 阶段四：接入统一工作记录 (Work Object / Journal / Evidence)
+    status: done
+  - text: A1 / P6-H 恢复、审批与取消闭环加固（已通过独立复核：A1_RECOVERY_STATE_MACHINE_ACCEPTED / P6_H_GATE_PASSED；53 项同步恢复测试全绿）
+    status: done
+  - text: A2 / SEC-01 设备发现与信任分离、持钥认证、防重放及撤销 (R16 本地自复核与 sha2 依赖授权完成；Rust 全目标库测试 308 项、实际 Relay 1 项、前端 53 项通过；本地节点通过，真机验收归 A4，公网 Relay 未测)
+    status: done
+  - text: A3 / SEC-02 同步与远程执行加密边界验收（审计LAN/Relay/RPC/Web Drop边界；LAN REST补齐信封，WS绑定主体，LAN/Relay推送重构为确认回执才删outbox，推送失败阻断成功并显式报告“部分同步失败”，澄清Relay非E2EE，测试校准为发送端持久化状态机）
+    status: done
+  - text: A3 / SEC-03 同步载荷与日志凭据泄漏防护（严格正向白名单过滤未知字段与嵌套凭据，非对象配置Fail-Closed阻断自愈，统一ALLOWED_REMOTE_PUSH_OPS为set_config消除执行器割裂，接收端无法识别合法JSON漏洞Fail-Closed阻断，提交回执升级为强类型契约严格区分applied与pending_apply，状态查询失败Fail-Closed降级为pending_apply，缺失stage回执强验拒斥，幂等更新防吞错，Relay生产接收端真落盘驱动与回执透传，穿透真实生产分发入口回归，ActiveSyncOutcome状态机收口消除虚假完成诊断，配对流与首次同步严格解耦防止失败误报，迟到事件单向推进防护直连生产applyStepTransition并测试，本地导入历史真实化，穿透测试切入真实生产函数，App.vue启动同步仅明确applied标记成功、未知回执报错且阻断时间更新，修复Vitest沙箱缓存只读退出码1，全套自动化测试全绿；A3 本地复核通过，A4 真机验收尚未执行）
+    status: done
+  - text: A4 / P6-DEVICE 固定双端版本的真实手机—PC安全与恢复验收（尚未执行，保持 LOCKED）
+    status: todo
+  - text: A5 可选 X1T 客户端接入（A4与B线接口/成果闭环通过后；复用而非重建适配器）
     status: todo

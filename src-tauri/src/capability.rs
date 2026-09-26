@@ -20,7 +20,7 @@ pub(crate) struct Capability {
     pub reason_code: String,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct CapabilitySnapshot {
     pub platform: String,
@@ -48,7 +48,7 @@ impl CapabilitySnapshot {
         )
     }
 
-    fn detect(
+    pub(crate) fn detect(
         platform: &str,
         request_from_mobile: bool,
         global_file_access: bool,
@@ -212,6 +212,81 @@ fn detected_without_adapter(id: &str, detected: bool, platform_supported: bool) 
     }
 }
 
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SafeModelInfo {
+    pub id: String,
+    pub display_name: String,
+    pub provider: String,
+    pub provider_name: String,
+    pub vision: bool,
+    pub is_default: bool,
+}
+
+pub(crate) fn filter_safe_models(
+    pool: &serde_json::Value,
+    keys: &serde_json::Value,
+    default_model: &str,
+) -> Vec<SafeModelInfo> {
+    let mut safe_models = Vec::new();
+    if let Some(arr) = pool.as_array() {
+        for m in arr {
+            let provider = m.get("provider").and_then(|v| v.as_str()).unwrap_or("");
+            let has_key = keys
+                .get(provider)
+                .and_then(|v| v.as_str())
+                .map(|s| !s.trim().is_empty())
+                .unwrap_or(false);
+            let is_offline = provider == "offline";
+
+            if has_key || is_offline {
+                let id = m.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                if id.is_empty() {
+                    continue;
+                }
+                let display_name = m
+                    .get("displayName")
+                    .or_else(|| m.get("label"))
+                    .or_else(|| m.get("name"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or(&id)
+                    .to_string();
+                let provider_name = m
+                    .get("providerName")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or(provider)
+                    .to_string();
+                let vision = m.get("vision").and_then(|v| v.as_bool()).unwrap_or(false);
+                let is_default = id == default_model
+                    || m.get("default").and_then(|v| v.as_bool()).unwrap_or(false);
+
+                safe_models.push(SafeModelInfo {
+                    id,
+                    display_name,
+                    provider: provider.to_string(),
+                    provider_name,
+                    vision,
+                    is_default,
+                });
+            }
+        }
+    }
+    safe_models
+}
+
+pub(crate) fn get_safe_model_pool_for_remote() -> (Vec<SafeModelInfo>, String) {
+    let pool = crate::llm::get_model_pool();
+    let keys = crate::llm::get_api_keys();
+    let config = crate::read_config();
+    let default_model = config
+        .get("model")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    (filter_safe_models(&pool, &keys, &default_model), default_model)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -238,5 +313,48 @@ mod tests {
         let capability = detected_without_adapter("powershell", true, true);
         assert_eq!(capability.state, CapabilityState::Degraded);
         assert_eq!(capability.reason_code, "capability.adapter_missing");
+    }
+
+    #[test]
+    fn safe_model_pool_filters_unconfigured_providers_and_never_leaks_keys() {
+        let pool = serde_json::json!([
+            {
+                "id": "deepseek-chat",
+                "displayName": "DeepSeek-V3",
+                "provider": "deepseek",
+                "providerName": "DeepSeek",
+                "apiKey": "sk-secret-deepseek",
+                "vision": false
+            },
+            {
+                "id": "gpt-4o",
+                "displayName": "GPT-4o",
+                "provider": "openai",
+                "providerName": "OpenAI",
+                "apiKey": "sk-secret-openai",
+                "vision": true
+            },
+            {
+                "id": "local-phi3",
+                "displayName": "Phi-3 Mini",
+                "provider": "offline",
+                "providerName": "Offline",
+                "vision": false
+            }
+        ]);
+        let keys = serde_json::json!({
+            "deepseek": "sk-local-pc-key"
+        });
+        let safe = filter_safe_models(&pool, &keys, "deepseek-chat");
+        assert_eq!(safe.len(), 2);
+        assert_eq!(safe[0].id, "deepseek-chat");
+        assert!(safe[0].is_default);
+        assert_eq!(safe[1].id, "local-phi3");
+        assert!(safe.iter().all(|m| m.provider != "openai"));
+
+        let serialized = serde_json::to_string(&safe).unwrap();
+        assert!(!serialized.contains("apiKey"));
+        assert!(!serialized.contains("sk-secret"));
+        assert!(!serialized.contains("sk-local-pc-key"));
     }
 }

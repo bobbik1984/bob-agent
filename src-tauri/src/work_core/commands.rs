@@ -7,7 +7,7 @@ use super::decision_change::{
 };
 use super::models::{
     CreateProjectInput, CreateRelationInput, CreateWorkObjectInput, DeleteWorkObjectInput,
-    ProjectAggregate, UpdateWorkStatusInput, WorkObject, WorkProject, WorkRelation,
+    ProjectAggregate, UpdateWorkStatusInput, WorkEvent, WorkObject, WorkProject, WorkRelation,
 };
 use super::project_links::{
     self, DismissProjectLinkInput, ExternalLink, ProjectLinkCandidate, ProjectLinkOutcome,
@@ -179,4 +179,15 @@ pub fn work_change_review_action(
     let outcome = decision_change::apply_review_action(&mut conn, input)?;
     project_links::refresh_project_snapshot(&conn, &outcome.review.project_id);
     Ok(outcome)
+}
+
+#[tauri::command]
+pub fn work_event_list(
+    db: State<'_, DbState>,
+    project_id: Option<String>,
+    limit: Option<usize>,
+) -> Result<Vec<WorkEvent>, String> {
+    let conn = db.0.lock().map_err(|error| error.to_string())?;
+    let pid = project_id.unwrap_or_else(|| repository::PERSONAL_PROJECT_ID.to_string());
+    repository::list_project_events(&conn, &pid, limit.unwrap_or(50))
 }

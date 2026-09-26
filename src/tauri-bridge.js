@@ -417,6 +417,10 @@ if (IS_TAURI) {
         review.resolvedAt = ['accepted', 'rejected'].includes(nextStatus) ? Date.now() : null;
         return { review, relationCreated: input.action === 'accept' };
       }
+      case 'work_event_list': {
+        const projectId = args?.projectId || 'project_personal_inbox';
+        return (MOCK_WORK_AGGREGATES[projectId]?.recentEvents || []).slice(0, args?.limit || 50);
+      }
       case 'capture_ingest': return { ok: true, duplicate: false, capture: { captureId: 'mock-capture-' + Date.now(), status: 'received' } };
       case 'capture_process_pending': return { ok: true, processed: 0, committed: 0, needsClarification: 0, awaitingPipeline: 0, deferred: 0 };
       case 'capture_quick_note': return { ok: true, duplicate: false, captureId: 'mock-capture-' + Date.now(), status: 'committed', path: 'daily/mock.md' };
@@ -590,8 +594,119 @@ if (IS_TAURI) {
       case 'wechat_check_login_status': return { status: 'disconnected' };
       case 'wechat_get_current_status': return { connected: false };
       case 'system_save_telegram_token': case 'system_save_discord_token': return true;
-      case 'system_get_telegram_token': case 'system_get_discord_token': return '';
-      case 'get_connected_devices': return [];
+      case 'get_connected_devices': return [
+        { device_id: 'mock-pc-1', platform: 'windows', ip_address: '192.168.1.100', last_seen: Date.now(), device_name: 'ThinkPad X1' }
+      ];
+      case 'check_device_online': return true;
+      case 'fetch_remote_capabilities': {
+        return {
+          action: 'rpc_capabilities_response',
+          status: 'success',
+          device_id: args?.targetDeviceId || 'mock-pc-1',
+          device_name: 'ThinkPad X1',
+          platform: 'windows',
+          file_scope: 'global_authorized',
+          capabilities: [
+            { id: 'calendar', state: 'available', reason_code: 'capability.adapter_ready' },
+            { id: 'knowledge', state: 'available', reason_code: 'capability.adapter_ready' },
+            { id: 'web', state: 'available', reason_code: 'capability.adapter_ready' },
+            { id: 'desktop_browser', state: 'available', reason_code: 'capability.adapter_ready' },
+            { id: 'document_export', state: 'available', reason_code: 'capability.adapter_ready' },
+            { id: 'powershell', state: 'degraded', reason_code: 'capability.adapter_missing' },
+            { id: 'git', state: 'available', reason_code: 'capability.adapter_ready' }
+          ],
+          available_models: [
+            { id: 'deepseek::deepseek-chat', displayName: 'DeepSeek-V3', provider: 'deepseek', providerName: 'DeepSeek', vision: false, isDefault: true },
+            { id: 'deepseek::deepseek-reasoner', displayName: 'DeepSeek-R1', provider: 'deepseek', providerName: 'DeepSeek', vision: false, isDefault: false },
+            { id: 'anthropic::claude-3-5-sonnet', displayName: 'Claude 3.5 Sonnet', provider: 'anthropic', providerName: 'Claude', vision: true, isDefault: false }
+          ],
+          default_model: 'deepseek::deepseek-chat',
+          timestamp: Date.now()
+        };
+      }
+      case 'dispatch_remote_instruction': {
+        const isModify = !args.readOnly || (args.instruction && (args.instruction.includes('修改') || args.instruction.includes('diff')));
+        const modelNote = args.model ? ` [模型: ${args.model}]` : '';
+        const reqId = args.requestId || 'mock-req-id';
+        if (isModify) {
+          return {
+            action: 'rpc_response',
+            request_id: reqId,
+            status: 'needs_approval',
+            result: `已在 PC 端 (ThinkPad X1${modelNote}) 分析并生成修改提案，请审阅以下 Diff。`,
+            change: {
+              change_id: 'mock-change-id',
+              request_id: reqId,
+              file_path: 'src/utils/calc.ts',
+              diff: '--- a/src/utils/calc.ts\n+++ b/src/utils/calc.ts\n@@ -1,3 +1,5 @@\n export function add(a, b) {\n+  console.log("Adding numbers", a, b);\n   return a + b;\n+\n }',
+              summary: '添加计算日志',
+              additions: 2,
+              deletions: 0,
+              status: 'pending'
+            },
+            elapsed_ms: 1180,
+            executor_device: 'ThinkPad X1'
+          };
+        }
+        return {
+          action: 'rpc_response',
+          request_id: reqId,
+          status: 'success',
+          result: `已在 PC 端 (ThinkPad X1${modelNote}) 完成指令执行：工作区只读分析完毕。`,
+          elapsed_ms: 1180,
+          executor_device: 'ThinkPad X1'
+        };
+      }
+      case 'dispatch_remote_approval': return {
+        action: 'rpc_response',
+        request_id: args.requestId || 'mock-req-id',
+        outcome: {
+          status: args.decision === 'approve' ? 'applied' : 'rejected',
+          change_id: args.changeId,
+          message: args.decision === 'approve' ? '修改已成功应用到文件' : '修改提案已被拒绝并丢弃'
+        }
+      };
+      case 'cancel_remote_instruction': return {
+        action: 'rpc_cancel_ack',
+        request_id: args.requestId,
+        status: 'cancelled',
+        confirmed: true
+      };
+
+      case 'sec01_pair_device': {
+        const raw = (args?.rawInvitation || '').trim();
+        let payload;
+        if (raw.startsWith('{')) {
+          try {
+            payload = JSON.parse(raw);
+          } catch (e) {
+            throw new Error('无法解析 JSON 配对邀请: ' + e.message);
+          }
+        } else if (raw.startsWith('bob://pair') || raw.startsWith('http://') || raw.startsWith('https://')) {
+          const qIndex = raw.indexOf('?');
+          if (qIndex === -1) throw new Error('缺少查询参数');
+          const params = new URLSearchParams(raw.slice(qIndex + 1));
+          payload = {
+            device_id: params.get('iss') || params.get('dev') || '',
+            issuer_device_id: params.get('iss') || '',
+            invitation_id: params.get('id') || '',
+            secret: params.get('sec') || '',
+            relay: params.get('rly') || 'wss://relay.bobbik.org',
+            local_ips: (params.get('ips') || '').split(',').map(s => s.trim()).filter(Boolean),
+            port: parseInt(params.get('p') || '3722', 10),
+          };
+        } else {
+          throw new Error('未知的配对邀请格式');
+        }
+        if (!payload.invitation_id || !payload.secret) {
+          throw new Error('配对邀请缺少关键凭证 (id 或 sec)');
+        }
+        return {
+          transport: 'lan',
+          target_device_id: payload.issuer_device_id || payload.device_id || 'pc-mock',
+          session_id: 'mock_session_' + Date.now(),
+        };
+      }
 
       // 浏览器增强
       case 'system_browser_detect': return { found: false };
@@ -680,6 +795,7 @@ window.appAPI = {
   workExternalLinkList: (projectId) => invoke('work_external_link_list', { projectId }),
   workChangeReviewList: ({ projectId = null, status = null, limit = 20 } = {}) => invoke('work_change_review_list', { projectId, status, limit }),
   workChangeReviewAction: (input) => invoke('work_change_review_action', { input }),
+  workEventList: (projectId = null, limit = 50) => invoke('work_event_list', { projectId, limit }),
   goalRuntimeList: ({ projectId = null, limit = 50 } = {}) => invoke('goal_runtime_list', { projectId, limit }),
   goalRuntimeGet: (runId) => invoke('goal_runtime_get', { runId }),
   goalRuntimeListEvents: (runId, limit = 50) => invoke('goal_runtime_list_events', { runId, limit }),
@@ -1072,11 +1188,24 @@ window.appAPI = {
   writeMobileOutbox: async (operations) => invoke('write_mobile_outbox', { operations }),
   relayHandshake: async (targetDeviceId, authCode) => invoke('relay_handshake', { targetDeviceId, authCode }),
   getConnectedDevices: async () => invoke('get_connected_devices'),
+  dispatchRemoteInstruction: async (targetDeviceId, conversationId, instruction, readOnly = true, model = null, requestId = null, projectId = null) => invoke('dispatch_remote_instruction', { targetDeviceId, conversationId, instruction, readOnly, model, requestId, projectId }),
+  dispatchRemoteApproval: async (targetDeviceId, changeId, decision, requestId) => invoke('dispatch_remote_approval', { targetDeviceId, changeId, decision, requestId }),
+  cancelRemoteInstruction: async (targetDeviceId, requestId) => invoke('cancel_remote_instruction', { targetDeviceId, requestId }),
+  fetchRemoteCapabilities: async (targetDeviceId) => invoke('fetch_remote_capabilities', { targetDeviceId }),
   getSyncConnectivitySnapshot: async () => invoke('get_sync_connectivity_snapshot'),
   getSyncRuns: async () => invoke('get_sync_runs'),
   getSyncTraceEvents: async (traceId) => invoke('get_sync_trace_events', { traceId }),
   getSyncLogs: async () => invoke('get_sync_logs'),
   forceRelayReconnect: async () => invoke('force_relay_reconnect'),
+
+  // ── 设备发现与可信身份分离 (A2 / SEC-01 Device Trust) ──
+  sec01CreatePairingInvitation: async (targetConstraint = null, ttlMs = null) => invoke('sec01_create_pairing_invitation', { targetConstraint, ttlMs }),
+  sec01ParsePairingInvitation: async (rawInvitation) => invoke('sec01_parse_pairing_invitation', { rawInvitation }),
+  sec01CreateProofOfPossession: async (invitation, deviceName = null) => invoke('sec01_create_proof_of_possession', { invitation, deviceName }),
+  sec01RevokeTrustedDevice: async (deviceId, reason = null) => invoke('sec01_revoke_trusted_device', { deviceId, reason }),
+  sec01GetTrustedDevices: async () => invoke('sec01_get_trusted_devices'),
+  sec01IsDeviceTrusted: async (deviceId) => invoke('sec01_is_device_trusted', { deviceId }),
+  sec01PairDevice: async (rawInvitation) => invoke('sec01_pair_device', { rawInvitation }),
 
   // ── 扫码 (Mobile Only) ──────────────────────
   systemParseBcbp: async (raw) => invoke('system_parse_bcbp', { raw }),

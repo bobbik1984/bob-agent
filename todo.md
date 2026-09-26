@@ -1,11 +1,28 @@
 # Bob 当前开发清单
 
-> 当前发布线：v0.9.2
+> 双线计划（2026-09-22）：[A 线独立开发步骤](docs/superpowers/plans/2026-09-22-track-a-security-and-client.md)。A1、A2 已通过；A3 本地复核通过（Round 9：启动自动同步仅限 applied 宣称成功、未知回执报错且不更新时间、迟到事件防御直连生产 applyStepTransition 状态机并测试、Vitest 沙箱 Exit Code 0 保证；全套测试全绿）；A4 真机验收尚未执行（需用户协同参与设备操作，目前保持 LOCKED；不宣称公网 Relay 或物理手机已通过）；A5 X1T 客户端为可选后续，不阻塞 Online B 线。
+
+> 当前发布线：v0.9.6
 > 产品方向：`docs/PRODUCT_VISION.md`
 > 阶段顺序：`docs/BOB_EVOLUTION_ROADMAP.md`
-> 当前计划：`docs/superpowers/plans/2026-08-15-phase-5-5-reliable-personal-agent-loop-plan.md`
+> 当前计划：`docs/superpowers/plans/2026-09-21-mobile-pc-remote-delegation-plan.md`
 
 本文件只保存当前实施批次和紧邻下一批的任务。目标架构不得写成已实现能力。
+
+## 2026-09-22 安全审计收口（优先于新增 Harness）
+
+当前实现已有恢复日志和生产取消核心，不机械沿用上一轮缺陷结论。以下安全与真机质量门尚未通过；下方历史勾选只记录实现，不代表整条通道已安全验收。
+
+- [x] A1 / P6-H 恢复、审批与取消闭环加固（A1_RECOVERY_STATE_MACHINE_ACCEPTED / P6_H_GATE_PASSED；53 项同步恢复测试全绿）
+- [x] A2 / SEC-01 设备发现与可信身份分离（R16 本地自复核通过、sha2 依赖已获授权；[R13 独立复核](docs/evidence/track-a/A2-independent-review-20260923.md) / [R16 证据](docs/evidence/track-a/A2-r16-self-review.md)）。撤销出件箱已接入 Relay/LAN 重试与签名 Ack，长期离线证书、生产 handler 复用和恢复 Fail-Closed 已整改；A2 本地节点已完成；真机验收归 A4。A3 仅开放本地审计与设计，A4 继续锁定。
+- [x] A3 / SEC-02 分开审查 LAN/Relay 同步、远程指令、Web Drop 加密边界（[A3 证据](docs/evidence/track-a/A3-transport-data-boundary-review.md)）：实事求是断定 LAN (明文 HTTP + Ed25519 签名) 与 Relay (TLS 终结于中继服务器，明文 JSON) 均非 E2EE，Relay 节点对中转载荷完全可见；仅 Web Drop (WebRTC DTLS / AES-128-GCM Hash 密钥) 实现端到端加密；修复 LAN REST 请求缺少签名信封漏洞，补齐 WebSocket 连接主体绑定；重构 LAN/Relay Outbox 推送协议为“确认收到对端 commit_ack 才删本地暂存”，在网络失败、HTTP 400/401/500 或无回执时严格保留待重试；推送失败全面阻断并不再误报完成，向界面显式报告“部分同步失败”，底层返回 Err；测试校准为发送端持久化状态机。
+- [x] A3 / SEC-03 同步载荷脱敏、日志凭据防护与接收端语义闭环（[A3 证据](docs/evidence/track-a/A3-transport-data-boundary-review.md)）：彻底废除黑名单模式，改为严格正向白名单 (Constructive Allowlists)；`export_sync_data_from_conn` 从零构造安全配置，剥离所有未知键与嵌套凭据，自定义模型仅保留脱敏元数据，settings 采用 `WHERE key IN (...)` 显式白名单；非对象配置在 `read_config_checked_at`、`merge_synced_config`、`import_sync_data_to_conn_atomic` 实施统一 Fail-Closed 阻断，杜绝未清洗远端配置倒灌；统一 `ALLOWED_REMOTE_PUSH_OPS` 为 `&["set_config"]` 消除与底层执行器割裂；根治接收端无法识别合法 JSON 漏洞 (Fail-Closed HTTP 400)，禁止静默丢弃；确立 `PushCommitReceipt` 强类型契约，严格区分 `applied`（已生效）与 `pending_apply`（待应用）并阻止界面打勾；磁盘写入失败与重试收敛通过端到端测试验证；完成 `ActiveSyncOutcome` 强类型返回值升级，诊断与历史记录严格区分 `applied` 与 `pending_apply` 绝不虚报成功；解耦配对与首次同步状态，修复首次同步失败或非预期时仍报成功漏洞；连接面板准确映射状态并实现迟到事件防护；本地导入历史接入 `build_sync_import_history_entry` 绝不提前宣称成功；单元测试切入真实生产处理函数全覆盖验证；修复 App.vue 启动自动同步非 applied 误报成功漏洞 (仅限明确 status === 'applied' 标记成功与更新时间，未知/非预期/空值报错阻断时间戳更新并启动静默监听)；消除测试用例内状态复制，提取并接入生产 `applyStepTransition` 函数；修复 Vitest 缓存目录只读引发的 Exit Code 1 缺陷；全套 Rust (36项http_api + 48项device_trust + 61项sync_engine) 与 62 项前端自动化测试全绿通过。A3 本地复核通过；A4 真机验收尚未执行，A4 保持锁定。
+
+
+- [ ] P6-DEVICE 固定双端版本，验收真实手机—PC 指令、追问、批准/拒绝、停止、断线、撤销和重启恢复；本地单元测试不代替真机。
+- [ ] P6-DOC 验收后才更新完成状态和 README 安全声明，区分工作树、测试报告与已发布产物。
+- [ ] DSH-ACP（上述收口之后）：评估独立 ACP Adapter，先只读后受控修改；只复用 MCP 的进程/传输设施，Bob 保留项目、权限、Review 和工作记录权威。
+- [ ] TRANSPORT-OPTION（后续可选）：评估 Tailscale/受控代理，不作为开源用户必装条件、不代替应用授权；Noise 等方案尚未选型。
 
 ## 已完成主线：Phase 0–4 Work Core、变更审查与复杂度路由
 
@@ -145,6 +162,48 @@
 - [ ] 通过五个日常场景、故障注入、PC/Android 真机、体积与资源质量门。
 
 **验收**：Bob 能从目的恢复正确对象，感知真实能力，选择最轻路径，以回执证明完成，并在不污染人格和不增加用户配置的前提下成长。
+
+## 已完成主线：跨端扫码配对与双向同步闭环 (v0.9.5-h)
+
+- [x] T-2301 扫码配对 MVP (局域网直连 + VPS 信令降级 + Ed25519 握手)
+- [ ] 跨端配对授权安全整改见 SEC-01：既有公钥字符串/名册放行不证明身份，撤回“根治”的验收表述。
+- [x] 修复移动端日程自动聚焦到当前时间红线与重复标题 Bug
+- [x] 修复移动端笔记列表底部安全区遮挡问题 ( safe-area bottom padding )
+
+## 当前执行主线：Phase 6 移动端远程执行设备协同 (Mobile-to-PC Agent Delegation)
+
+### 阶段一：设备选择与只读闭环 (Phase 1: Device Selection & Read-Only Loop)
+- [x] **阶段一：输入框上方执行设备状态轨与切换器 (UI Rail & Device Selector)**：输入框上方紧凑常驻胶囊 `[💻 设备名 · 在线 ▾]`，触控区域 $\ge 44\text{px}$，使用纯 SVG 图标与实色表面，点击弹出设备选择底栏。
+- [x] **阶段一：加号扩展菜单精简重构为三项 (附件 / 执行设备 / 对话模型)**：移动端聊天输入框 `+` 弹层收敛为“📎 添加附件”、“💻 选择执行设备”、“🧠 当前对话模型”。
+- [x] **阶段一：会话级执行设备粘性绑定与离线显式报错防御**：支持首条指令 `@pc` 或手动选择设备后后续追问沿用设备；切到历史会话恢复绑定；目标设备离线时显式提示错误并提供重试/切换，绝对严禁静默回退手机。
+- [x] **阶段一：移动端与 PC 端 RPC 指令协议与只读无头 Agent 闭环**：移动端封装含 `task_id`、`conversation_id`、`instruction`、`target_device_id` 的 RPC 消息；PC 端后台无头 Agent 调度执行只读文件读取与分析，返回结构化结果并记录日志。
+### 阶段二：PC 端修改与审阅闭环 (Phase 2: Diff Preview, Mobile Review & Stop Ack)
+- [x] **PC 端受控修改暂存与 Diff 计算**：写操作严禁静默覆写用户工作区文件，统一生成 Unified Diff 并在内存中暂存为 `StagedChange`，返回 `needs_approval`。
+- [x] **移动端 Diff 审阅卡片 (`DiffReviewCard.vue`)**：支持路径缩略、`+N -M` 统计、语法增删高亮、超长行折叠、$\ge 44\text{px}$ 批准与拒绝触控交互。
+- [x] **双向审批 RPC 流 (`rpc_approval_decision`)**：手机端批准后，PC 原子落盘并返回 `applied`；拒绝则销毁暂存并返回 `rejected`。
+- [x] **显式中断与 Stop Ack (`rpc_cancel` / `rpc_cancel_ack`)**：手机端点击停止时向 PC 发送取消指令，PC 依托 Tokio Watch 通道即时中断正在运行的 Agent 任务并回传确认，确保双端状态 100% 对齐。
+### 阶段三：模型与 Harness 设备能力动态发现与本地密钥隔离 (Phase 3: Capability Discovery & Session Model Isolation)
+- [x] **本地密钥隔离与模型过滤铁律 (`SafeModelInfo`)**：双端各自管理本地 API Key，网络传输严禁携带任何 API 密钥或凭证；PC 动态脱敏并只返回已配置可用供应商的安全模型元数据。
+- [x] **跨设备能力探针 (`rpc_discover_capabilities`)**：手机端向 PC 发起能力探测，PC 动态返回硬件与环境 Harness 快照（工作区全权限、系统终端、桌面浏览器、Git 管理、专业文档导出）。
+- [x] **会话模型独立性与跟随设备重置**：手机端执行设备选定 PC 时，加号模型菜单动态展示 PC 可用模型列表；支持独立为当前会话指定生效模型，或随时重置为“跟随电脑默认模型”。
+- [x] **执行轨状态与模型铭牌联动**：输入框上方执行轨直接展示当前会话在目标电脑生效的模型徽章，点击可直接拉起模型抽屉切换。
+### 阶段四：接入统一工作记录 (Work Object / Journal / Evidence)
+- [x] **跨端指令执行日志追加 (`remote.instruction.executed`)**：PC 端收到并执行移动端下发的指令后，原子写入 `work_events` 表，记录请求 ID、来源设备、执行耗时、生效模型及状态。
+- [x] **变更对象化与证据链管理 (`WorkObjectKind::Change` & `Artifact`)**：当远程指令产生代码/文件修改时，自动创建 `Change` 工作对象（`needs_review`）；用户批准后状态推进至 `accepted` 并生成对应的 `Artifact` 工作产物与回执证据。
+- [x] **中途取消与中止工作流对齐 (`remote.task.cancelled`)**：移动端点击停止后，PC 即刻同步更新关联暂存提案状态为 `cancelled`，并写入工作事件日志，保持双端状态强一致。
+- [x] **统一工作视图与看板联动 (`WorkOverview` & `work_event_list`)**：前端 WorkView 动态加载并呈现远程指令与变更事件，多语言提示中英文完整对齐。
+### 阶段五：深度闭环与真实安全加固 (Phase 5: Deep Closed-Loop Hardening / Track A Node A1 P6-H)
+- [x] **真实基线校验与文件落盘引擎**：读取真实磁盘基线计算 Diff 与新内容，审批时校验基线 Hash 防外部篡改，原子写入与读回校验，支持空文件写入。
+- [x] **工具层硬性安全拦截**：`ToolExecutionPolicy` 只读模式硬拦截一切写操作；受控模式拦截写操作转换为 StagedChange。
+- [x] **PC 端多轮对话上下文持久化与历史回放**：基于 `remote_conv_{conversation_id}` 在 PC 端 SQLite 加载历史上下文并双向持久化，支持连续追问。
+- [x] **SQLite 提案持久化与项目路由**：新增 `staged_changes` 表，重启不丢失，写入成功才标记 applied，遵循并透传 projectId。
+- [x] **回滚失败保护与备份绝对留存**：`safe_restore_target_from_backup` 核验字节完全匹配后才删备份；重命名与复制均失败绝不删备份并触发全局降级。
+- [x] **完整文件—数据库一致性与崩溃恢复自愈**：建立 `staged_write_recovery` 预写日志与应用启动自愈；applied 状态核验磁盘目标，外部冲突保留准入锁，崩溃自愈具幂等性。
+- [x] **准入控制 Fail-Closed 与全局降级**：路径恢复阻塞查询失败硬性拒绝写入与审批；自愈故障全局降级拦截后续写操作。
+- [x] **取消确认消除误报分支**：实现 `cancel_active_rpc_task_core`，严格区分确认中止 (`done=true`)、超时 (`confirmed: false`)、通道异常与未知任务，杜绝误报。
+- [x] **自动化测试矩阵与故障注入全绿**：53 项 Rust 同步恢复测试、32 项 Work Core 事务测试与 44 项 Vitest 前端测试全绿。
+- [x] **A1 独立复核与后续流转**：独立复核通过（A1_RECOVERY_STATE_MACHINE_ACCEPTED / P6_H_GATE_PASSED / PHASE_6_IN_PROGRESS / A2_SEC_01_AUTHORIZED_IN_LOCAL_SCOPE）。
+- [x] **A2 / SEC-01 设备发现与可信身份分离**：R16 本地自复核及 sha2 依赖授权完成；Rust 全目标库测试 308 通过（1 ignored）、实际 Relay 测试 1 通过、前端 53 通过。A2 本地节点通过；真机与公网 Relay 未执行，不视作发布验收。A3 可开展本地传输与数据边界审计，A4 保持锁定。[R16 证据](docs/evidence/track-a/A2-r16-self-review.md)。
 
 ## v0.8.0 遗留质量门
 

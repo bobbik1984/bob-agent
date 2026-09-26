@@ -152,7 +152,8 @@ impl WechatApi {
         let headers = self.build_headers();
         let body_json = serde_json::to_string(&req).unwrap_or_default();
 
-        log::info!("[wechat-api] sendmessage POST {} body: {}", url, body_json);
+        // SEC-03 日志凭据与敏感内容防护：不记录包含用户敏感对话的原样请求体
+        log::info!("[wechat-api] sendmessage POST {} (payload len: {} bytes)", url, body_json.len());
 
         let res = crate::tunnel::send_request(
             reqwest::Method::POST,
@@ -168,9 +169,9 @@ impl WechatApi {
         let text = res.text().await.unwrap_or_default();
 
         log::info!(
-            "[wechat-api] sendmessage response: status={} body={}",
+            "[wechat-api] sendmessage response: status={} (len: {} bytes)",
             status,
-            text
+            text.len()
         );
 
         if !status.is_success() {

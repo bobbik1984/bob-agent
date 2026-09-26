@@ -378,6 +378,7 @@ import { useI18n } from 'vue-i18n';
 import { listen } from '@tauri-apps/api/event';
 import { getModelMeta } from '@/composables/useModelSwitcher';
 import { useDailyBrief } from '@/composables/useDailyBrief.js';
+import { handleStartupSyncOutcome } from '@/sync/pairing-flow.js';
 import { createLayoutState } from '@/layout/layout-mode.js';
 import { DEFAULT_WORK_VIEW, WORK_VIEW_ITEMS } from '@/work/work-view-navigation.js';
 
@@ -838,11 +839,19 @@ onMounted(async () => {
       console.log('[Sync] 检测到已配对设备，启动后台双向同步...');
       const doSync = () => {
         if (window.appAPI.triggerMobileSync) {
-          window.appAPI.triggerMobileSync(pairingPayload).then(() => {
-            console.log('[Sync] 后台同步成功！');
-            lastSyncStatus.value = 'success';
-            localStorage.setItem('bob-last-sync-time', Date.now().toString());
-            localStorage.setItem('bob-last-sync-status', 'success');
+          window.appAPI.triggerMobileSync(pairingPayload).then((res) => {
+            const outcome = handleStartupSyncOutcome(res, {
+              setLastSyncStatus: (val) => { lastSyncStatus.value = val; },
+              setLastSyncTime: (val) => { lastSyncTime.value = val; },
+            });
+            if (outcome.status === 'applied') {
+              console.log('[Sync] 后台同步已应用成功！');
+            } else if (outcome.status === 'pending_apply') {
+              console.log('[Sync] 后台同步已可靠入队，待目标设备应用');
+            } else {
+              console.warn('[Sync] 后台同步收到非预期/未知回执，判定失败并启动静默监听:', res);
+              window.appAPI.triggerMobileSync({ ...pairingPayload, listen_only: true }).catch(err => console.error(err));
+            }
           }).catch(e => {
             console.warn('[Sync] 后台同步失败 (对方可能处于离线状态)，启动静默UDP监听...', e);
             lastSyncStatus.value = 'error';

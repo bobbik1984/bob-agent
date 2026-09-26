@@ -176,12 +176,26 @@
           </div>
           <!-- 消息内容（block 数组渲染：text + file-card 交替）-->
           <div v-if="!msg._isError && msg.type !== 'confirm-card' && msg.type !== 'action-item-card' && msg.content" class="message-content selectable">
+            <div v-if="msg.executor_device" class="remote-device-badge">
+              <Laptop :size="12" />
+              <span>{{ msg.executor_device }}</span>
+              <span v-if="msg.elapsed_ms" class="elapsed-text">({{ (msg.elapsed_ms / 1000).toFixed(1) }}s)</span>
+            </div>
             <template v-for="(block, bi) in renderMessageBlocks(msg.content)" :key="bi">
               <div v-if="block.type === 'html'" v-html="block.content"></div>
               <CodeBlock v-else-if="block.type === 'code'" :code="block.code" :lang="block.lang" />
               <FileCard v-else-if="block.type === 'file'" :filePath="block.path" />
             </template>
           </div>
+
+          <!-- 远程 PC Diff 审阅卡片 -->
+          <DiffReviewCard
+            v-if="msg.change"
+            :change="msg.change"
+            :isProcessing="msg._isApplying"
+            @approve="handleApproveRemoteChange(msg)"
+            @reject="handleRejectRemoteChange(msg)"
+          />
 
           <section v-if="msg._goal" class="goal-runtime-chat-card" aria-live="polite">
             <div class="goal-runtime-chat-head">
@@ -403,6 +417,32 @@
 
     <!-- 输入区 -->
     <div class="input-area">
+      <!-- 移动端执行设备状态指示轨 (触控区 >= 44px, 纯 SVG, 实色表面) -->
+      <div v-if="isMobile" class="execution-device-rail">
+        <button class="device-pill-btn" @click="openDeviceSelector" :title="$t('chat.execution_device_tip')">
+          <Laptop v-if="currentExecutionDevice.type === 'pc'" :size="14" class="device-type-icon" />
+          <Smartphone v-else :size="14" class="device-type-icon" />
+          <span class="device-name-text">{{ currentExecutionDevice.name }}</span>
+          <span class="device-status-dot" :class="{ 'is-executing': isExecutingRemotely, 'is-online': currentExecutionDevice.online }"></span>
+          <ChevronDown :size="12" class="chevron-icon" />
+        </button>
+
+        <button
+          v-if="currentExecutionDevice.type === 'pc'"
+          class="device-model-badge"
+          @click="openModelSelectorForCurrentDevice"
+          :title="$t('chat.active_device_model')"
+        >
+          <Cpu :size="13" />
+          <span>{{ currentActiveModelDisplayName }}</span>
+        </button>
+
+        <span v-if="isExecutingRemotely" class="executing-badge">
+          <Loader2 :size="12" class="animate-spin" />
+          <span>{{ currentExecutionDevice.name }} {{ $t('chat.remote_executing') }}</span>
+        </span>
+      </div>
+
       <div class="quick-actions-bar" v-if="inputText.trim().length > 0 && !isMobile">
         <div class="actions-spacer"></div>
         <button
@@ -468,7 +508,7 @@
           ></textarea>
           <!-- Mobile 发送按钮 -->
           <div v-if="isMobile" class="mobile-send-btn-wrap">
-            <button v-if="isStreaming" class="action-btn stop-btn" @click="stopGeneration" :title="$t('chat.stop')"><span class="icon-stop"></span></button>
+            <button v-if="isStreaming" class="action-btn stop-btn" @click="handleStopChat" :title="$t('chat.stop')"><span class="icon-stop"></span></button>
             <button v-else-if="!inputText.trim()" 
               class="action-btn mic-btn" 
               :class="{ 'is-recording': isRecording }"
@@ -588,7 +628,7 @@
           <button
             v-if="isStreaming"
             class="action-btn stop-btn"
-            @click="stopGeneration"
+            @click="handleStopChat"
             :title="$t('chat.stop')"
           >
             <span class="icon-stop"></span>
@@ -619,15 +659,16 @@
             <button v-if="mobileSheetState === 'models'" class="sheet-back-btn" @click="mobileSheetState = 'providers'">
               <ChevronLeft :size="20" /> <span style="margin-left:4px">{{ $t('chat.back') || '返回' }}</span>
             </button>
-            <button v-else-if="mobileSheetState === 'providers' || mobileSheetState === 'agentMode'" class="sheet-back-btn" @click="mobileSheetState = 'main'">
+            <button v-else-if="mobileSheetState === 'providers' || mobileSheetState === 'agentMode' || mobileSheetState === 'devices'" class="sheet-back-btn" @click="mobileSheetState = 'main'">
               <ChevronLeft :size="20" /> <span style="margin-left:4px">{{ $t('chat.back') || '返回' }}</span>
             </button>
             
             <div class="sheet-title" style="font-size: 14px; font-weight: 600; color: var(--text-primary);">
               {{
                 mobileSheetState === 'main' ? '快捷功能' :
-                mobileSheetState === 'providers' ? '选择供应商' :
-                mobileSheetState === 'models' ? '选择具体模型' : '选择执行形式'
+                mobileSheetState === 'devices' ? $t('chat.select_exec_device') :
+                mobileSheetState === 'providers' ? `${$t('chat.mobile_select_model')} · ${currentExecutionDevice.name}` :
+                mobileSheetState === 'models' ? `${switcherProviderName || '选择模型'} · ${currentExecutionDevice.name}` : '选择执行形式'
               }}
             </div>
           </div>
@@ -640,24 +681,78 @@
               <span class="grid-item-label">{{ $t('chat.mobile_attach') }}</span>
             </button>
             
-            <!-- 2. 选择模型 -->
-            <button class="sheet-grid-item" @click="mobileSheetState = 'providers'">
+            <!-- 2. 选择执行设备 -->
+            <button class="sheet-grid-item" @click="openDeviceSelector">
+              <div class="grid-icon-wrap" style="background: rgba(var(--user-accent-rgb, 39, 118, 187), 0.1); color: var(--accent-primary);">
+                <Laptop :size="24" />
+              </div>
+              <span class="grid-item-label">{{ $t('chat.mobile_exec_device') }}</span>
+            </button>
+            
+            <!-- 3. 当前对话模型 -->
+            <button class="sheet-grid-item" @click="openModelSelectorForCurrentDevice">
               <div class="grid-icon-wrap" style="background: rgba(var(--user-accent-rgb, 39, 118, 187), 0.1); color: var(--accent-primary);">
                 <Cpu :size="24" />
               </div>
               <span class="grid-item-label">{{ $t('chat.mobile_select_model') }}</span>
             </button>
-            
-            <!-- 3. 执行形式 -->
-            <button class="sheet-grid-item" @click="mobileSheetState = 'agentMode'">
-              <div class="grid-icon-wrap" style="background: rgba(var(--user-accent-rgb, 39, 118, 187), 0.1); color: var(--accent-primary);">
-                <Zap :size="24" />
+          </div>
+          <div v-else-if="mobileSheetState === 'devices'" class="sheet-content list-view">
+            <!-- 1. 本机 (手机) -->
+            <button class="sheet-list-item device-item" :class="{ active: currentExecutionDevice.id === 'local' }" @click="selectExecutionDevice('local')">
+              <Smartphone :size="20" class="text-secondary" style="margin-right: 12px; flex-shrink: 0;" />
+              <div class="item-info">
+                <span class="item-name">{{ isMobile ? $t('chat.local_device_phone') : $t('chat.local_device_pc') }}</span>
+                <span class="item-count">{{ $t('chat.local_device_desc') }}</span>
+                <div class="device-caps-row">
+                  <span v-for="cap in getDeviceCapabilityTags('local')" :key="cap" class="device-cap-badge">{{ cap }}</span>
+                </div>
               </div>
-              <span class="grid-item-label">{{ $t('chat.mobile_agent_mode') }}</span>
+              <Check v-if="currentExecutionDevice.id === 'local'" :size="16" class="text-accent" />
             </button>
+
+            <!-- 2. 已配对 PC 设备列表 -->
+            <button v-for="dev in pairedPcDevices" :key="dev.device_id" class="sheet-list-item device-item" :class="{ active: currentExecutionDevice.id === dev.device_id }" @click="selectExecutionDevice(dev.device_id)">
+              <Laptop :size="20" class="text-secondary" style="margin-right: 12px; flex-shrink: 0;" />
+              <div class="item-info">
+                <div style="display: flex; align-items: center; gap: 6px;">
+                  <span class="item-name">{{ dev.device_name || '已配对电脑 (PC)' }}</span>
+                  <span class="device-status-dot" :class="{ 'is-online': (Date.now() - (dev.last_seen || 0)) < 120000 }"></span>
+                </div>
+                <span class="item-count">{{ dev.ip_address || 'Relay' }} · {{ (Date.now() - (dev.last_seen || 0)) < 120000 ? $t('chat.device_online') : $t('chat.device_offline') }}</span>
+                <div v-if="getDeviceCapabilityTags(dev.device_id).length > 0" class="device-caps-row">
+                  <span v-for="cap in getDeviceCapabilityTags(dev.device_id)" :key="cap" class="device-cap-badge">{{ cap }}</span>
+                </div>
+              </div>
+              <Check v-if="currentExecutionDevice.id === dev.device_id" :size="16" class="text-accent" />
+            </button>
+
+            <div v-if="pairedPcDevices.length === 0" class="sheet-empty">
+              {{ $t('chat.no_paired_pc') }}
+            </div>
           </div>
           <div v-else-if="mobileSheetState === 'providers'" class="sheet-content list-view">
-            <button v-for="p in modelProviderList" :key="p.id" class="sheet-list-item" :class="{ active: switcherProvider === p.id }" @click="switcherProvider = p.id; mobileSheetState = 'models'">
+            <!-- 远程电脑时，支持恢复为跟随电脑默认模型 -->
+            <button
+              v-if="currentExecutionDevice.id !== 'local'"
+              class="sheet-list-item"
+              :class="{ active: !currentSessionModelOverride }"
+              @click="resetSessionModelToDefault"
+            >
+              <RotateCcw :size="18" class="text-tertiary" style="margin-right: 12px; flex-shrink: 0;" />
+              <div class="item-info">
+                <span class="item-name">{{ $t('chat.follow_device_default_model') }}</span>
+                <span class="item-count">{{ currentPcDefaultModelName ? `(${currentPcDefaultModelName})` : $t('chat.follow_device_default_model_desc') }}</span>
+              </div>
+              <Check v-if="!currentSessionModelOverride" :size="16" class="text-accent" />
+            </button>
+
+            <div v-if="isLoadingCapabilities" class="sheet-loading" style="padding: 16px; text-align: center; color: var(--text-tertiary);">
+              <Loader2 :size="16" class="animate-spin" style="margin-right: 6px; display: inline-block; vertical-align: middle;" />
+              <span>{{ $t('chat.device_probing') }}</span>
+            </div>
+
+            <button v-for="p in activeSheetProviderList" :key="p.id" class="sheet-list-item" :class="{ active: switcherProvider === p.id }" @click="switcherProvider = p.id; mobileSheetState = 'models'">
               <img v-if="getModelLogo(p.id)" :src="getModelLogo(p.id)" class="model-logo-sm" />
               <div class="item-info">
                 <span class="item-name">{{ p.name }}</span>
@@ -665,14 +760,17 @@
               </div>
               <ChevronRight :size="16" class="text-tertiary" />
             </button>
-            <div v-if="modelProviderList.length === 0" class="sheet-empty">{{ $t('chat.no_models') || '暂无可用模型，请先配置 API Key' }}</div>
+            <div v-if="!isLoadingCapabilities && activeSheetProviderList.length === 0" class="sheet-empty">{{ $t('chat.no_models') || '暂无可用模型，请先配置 API Key' }}</div>
           </div>
           <div v-else-if="mobileSheetState === 'models'" class="sheet-content list-view">
-            <button v-for="m in switcherModels" :key="m.id" class="sheet-list-item" :class="{ active: currentModelRaw === m.id }" @click="switchModel(m.id); showMobileTools = false; mobileSheetState = 'main'">
-              <span class="item-name">{{ m.displayName }}</span>
-              <Check v-if="currentModelRaw === m.id" :size="16" class="text-accent" />
+            <button v-for="m in activeSheetModelsByProvider" :key="m.id" class="sheet-list-item" :class="{ active: isModelSelectedInSheet(m.id) }" @click="handleSelectSheetModel(m.id)">
+              <div class="item-info">
+                <span class="item-name">{{ m.displayName }}</span>
+                <span v-if="m.vision" class="item-count">Vision</span>
+              </div>
+              <Check v-if="isModelSelectedInSheet(m.id)" :size="16" class="text-accent" />
             </button>
-            <div v-if="switcherModels.length === 0" class="sheet-empty">{{ $t('chat.no_models') || '无可用模型' }}</div>
+            <div v-if="activeSheetModelsByProvider.length === 0" class="sheet-empty">{{ $t('chat.no_models') || '无可用模型' }}</div>
           </div>
           <div v-else-if="mobileSheetState === 'agentMode'" class="sheet-content list-view">
             <button class="sheet-list-item" :class="{ active: agentMode === 'auto' }" @click="agentMode = 'auto'; showMobileTools = false; mobileSheetState = 'main'">
@@ -726,11 +824,12 @@ import '@/utils/markdown';
 </script>
 
 <script setup>
-import { ref, watch, onMounted, onUnmounted, nextTick, inject, computed } from 'vue';
+import { ref, reactive, watch, onMounted, onUnmounted, nextTick, inject, computed } from 'vue';
 import { useI18n } from 'vue-i18n';
 import QrcodeVue from 'qrcode.vue';
-import { Sparkles, FileText, Camera, Calendar, CalendarRange, User, ChevronRight, ChevronDown, ChevronUp, ChevronLeft, X, FileUp, Paperclip, Bookmark, Loader2, Shield, Zap, Target, Lock, Unlock, Download, Smartphone, Monitor, ClipboardCopy, Check, BookmarkPlus, Plus, Menu, Cpu, Play, PenLine, BookOpen, Pin, Mic } from 'lucide-vue-next';
+import { Sparkles, FileText, Camera, Calendar, CalendarRange, User, ChevronRight, ChevronDown, ChevronUp, ChevronLeft, X, FileUp, Paperclip, Bookmark, Loader2, Shield, Zap, Target, Lock, Unlock, Download, Smartphone, Monitor, Laptop, ClipboardCopy, Check, BookmarkPlus, Plus, Menu, Cpu, Play, PenLine, BookOpen, Pin, Mic, RotateCcw } from 'lucide-vue-next';
 import ConfirmCard from '../components/ConfirmCard.vue';
+import DiffReviewCard from '../components/DiffReviewCard.vue';
 import FileCard from '../components/FileCard.vue';
 import CodeBlock from '../components/CodeBlock.vue';
 import SearchCard from '../components/SearchCard.vue';
@@ -941,12 +1040,383 @@ const commandTriggerIndex = ref(-1);
 const commandType = ref(''); // 'slash' or 'mention'
 const activeCommandIndex = ref(0);
 
+// ── 执行设备协同状态 (Execution Device State) ───────────────
+const pairedPcDevices = ref([]);
+const selectedDeviceMap = ref({});
+const isExecutingRemotely = ref(false);
+const activeRemoteRequestId = ref(null);
+const activeRemoteTargetId = ref(null);
+const isCancellingRemote = ref(false);
+
+// ── 执行设备能力探针与会话模型隔离 (Device Capabilities & Session Model) ──
+const remoteCapabilitiesMap = ref({});
+const sessionDeviceModelMap = ref({});
+const isLoadingCapabilities = ref(false);
+
+const loadPairedDevices = async () => {
+  try {
+    if (window.appAPI && window.appAPI.getConnectedDevices) {
+      const list = await window.appAPI.getConnectedDevices();
+      pairedPcDevices.value = (list || []).filter(d =>
+        !d.platform || d.platform === 'windows' || d.platform === 'desktop' || d.platform === 'macos' || d.platform === 'linux'
+      );
+    }
+  } catch (e) {
+    console.warn('Failed to load paired devices:', e);
+  }
+};
+
+const fetchDeviceCapabilities = async (deviceId) => {
+  if (!deviceId || deviceId === 'local') return null;
+  const existing = remoteCapabilitiesMap.value[deviceId];
+  if (existing && (Date.now() - (existing._fetchedAt || 0)) < 60_000) {
+    return existing;
+  }
+  isLoadingCapabilities.value = true;
+  try {
+    if (window.appAPI && window.appAPI.fetchRemoteCapabilities) {
+      const res = await window.appAPI.fetchRemoteCapabilities(deviceId);
+      if (res && res.status === 'success') {
+        res._fetchedAt = Date.now();
+        remoteCapabilitiesMap.value[deviceId] = res;
+        return res;
+      }
+    }
+  } catch (err) {
+    console.warn(`Failed to fetch capabilities for ${deviceId}:`, err);
+  } finally {
+    isLoadingCapabilities.value = false;
+  }
+  return null;
+};
+
+const currentExecutionDevice = computed(() => {
+  const convId = props.conversationId || 'default';
+  const devId = selectedDeviceMap.value[convId] || (props.conversationId ? localStorage.getItem('bob_exec_device_' + props.conversationId) : null) || 'local';
+  if (devId === 'local') {
+    return {
+      id: 'local',
+      type: 'phone',
+      name: isMobile.value ? '本机 (手机)' : '本机',
+      online: true,
+    };
+  }
+  const found = pairedPcDevices.value.find(d => d.device_id === devId);
+  if (found) {
+    const isOnline = (Date.now() - (found.last_seen || 0)) < 120_000;
+    return {
+      id: found.device_id,
+      type: 'pc',
+      name: found.device_name || '已配对电脑 (PC)',
+      online: isOnline,
+      raw: found,
+    };
+  }
+  return {
+    id: devId,
+    type: 'pc',
+    name: '已配对电脑 (PC)',
+    online: true,
+  };
+});
+
+// 监听当前执行设备变化，自动预取远程能力
+watch(() => currentExecutionDevice.value.id, (newId) => {
+  if (newId && newId !== 'local') {
+    fetchDeviceCapabilities(newId);
+  }
+}, { immediate: true });
+
+const currentSessionModelOverride = computed(() => {
+  const convId = props.conversationId || 'default';
+  const devId = currentExecutionDevice.value.id;
+  const key = `${convId}_${devId}`;
+  return sessionDeviceModelMap.value[key] || (props.conversationId ? localStorage.getItem('bob_exec_model_' + key) : null) || null;
+});
+
+const currentPcDefaultModelName = computed(() => {
+  if (currentExecutionDevice.value.id === 'local') return null;
+  const remote = remoteCapabilitiesMap.value[currentExecutionDevice.value.id];
+  if (!remote?.default_model) return null;
+  const found = remote.available_models?.find(m => m.id === remote.default_model);
+  return found?.displayName || remote.default_model.split('::')[1] || remote.default_model;
+});
+
+const currentActiveModelDisplayName = computed(() => {
+  if (currentExecutionDevice.value.id === 'local') {
+    return currentModelName.value || '默认模型';
+  }
+  const override = currentSessionModelOverride.value;
+  const remote = remoteCapabilitiesMap.value[currentExecutionDevice.value.id];
+  if (override) {
+    const found = remote?.available_models?.find(m => m.id === override);
+    return found?.displayName || override.split('::')[1] || override;
+  }
+  if (remote?.default_model) {
+    const found = remote?.available_models?.find(m => m.id === remote.default_model);
+    return found?.displayName || remote.default_model.split('::')[1] || remote.default_model;
+  }
+  return '电脑默认模型';
+});
+
+const activeSheetModels = computed(() => {
+  if (currentExecutionDevice.value.id === 'local') {
+    return availableModels.value;
+  }
+  const remote = remoteCapabilitiesMap.value[currentExecutionDevice.value.id];
+  return remote?.available_models || [];
+});
+
+const activeSheetProviderList = computed(() => {
+  const map = {};
+  for (const m of activeSheetModels.value) {
+    const prov = m.provider || 'unknown';
+    if (!map[prov]) map[prov] = { id: prov, name: m.providerName || prov, count: 0 };
+    map[prov].count++;
+  }
+  return Object.values(map);
+});
+
+const activeSheetModelsByProvider = computed(() => {
+  if (!switcherProvider.value) return [];
+  const list = activeSheetModels.value.filter(m => (m.provider || 'unknown') === switcherProvider.value);
+  return list.sort((a, b) => {
+    const nameA = a.displayName || a.id || '';
+    const nameB = b.displayName || b.id || '';
+    return nameA.localeCompare(nameB);
+  });
+});
+
+const switcherProviderName = computed(() => {
+  const found = activeSheetProviderList.value.find(p => p.id === switcherProvider.value);
+  return found?.name || switcherProvider.value;
+});
+
+const openModelSelectorForCurrentDevice = async () => {
+  if (currentExecutionDevice.value.id !== 'local') {
+    await fetchDeviceCapabilities(currentExecutionDevice.value.id);
+  }
+  if (activeSheetProviderList.value.length > 0 && !switcherProvider.value) {
+    switcherProvider.value = activeSheetProviderList.value[0].id;
+  }
+  mobileSheetState.value = 'providers';
+  showMobileTools.value = true;
+};
+
+const handleSelectSheetModel = async (modelId) => {
+  if (currentExecutionDevice.value.id === 'local') {
+    await switchModel(modelId);
+  } else {
+    const convId = props.conversationId || 'default';
+    const devId = currentExecutionDevice.value.id;
+    const key = `${convId}_${devId}`;
+    sessionDeviceModelMap.value[key] = modelId;
+    try {
+      localStorage.setItem('bob_exec_model_' + key, modelId);
+    } catch (e) {}
+  }
+  showMobileTools.value = false;
+  mobileSheetState.value = 'main';
+};
+
+const resetSessionModelToDefault = () => {
+  const convId = props.conversationId || 'default';
+  const devId = currentExecutionDevice.value.id;
+  const key = `${convId}_${devId}`;
+  delete sessionDeviceModelMap.value[key];
+  try {
+    localStorage.removeItem('bob_exec_model_' + key);
+  } catch (e) {}
+  showMobileTools.value = false;
+  mobileSheetState.value = 'main';
+};
+
+const isModelSelectedInSheet = (modelId) => {
+  if (currentExecutionDevice.value.id === 'local') {
+    return currentModelRaw.value === modelId;
+  }
+  return currentSessionModelOverride.value === modelId;
+};
+
+const getDeviceCapabilityTags = (deviceId) => {
+  if (deviceId === 'local') {
+    return [t('chat.cap_sandbox') || '沙盒文件'];
+  }
+  const remote = remoteCapabilitiesMap.value[deviceId];
+  if (!remote) {
+    return [t('chat.cap_global_files') || '工作区全权限', t('chat.cap_terminal') || '系统终端'];
+  }
+  const tags = [];
+  if (remote.file_scope === 'global_authorized' || remote.platform === 'windows' || remote.platform === 'macos' || remote.platform === 'linux') {
+    tags.push(t('chat.cap_global_files') || '工作区全权限');
+  }
+  if (remote.capabilities) {
+    if (remote.capabilities.some(c => c.id === 'desktop_browser' && c.state === 'available')) {
+      tags.push(t('chat.cap_browser') || '桌面浏览器');
+    }
+    if (remote.capabilities.some(c => c.id === 'document_export' && c.state === 'available')) {
+      tags.push(t('chat.cap_export') || '专业文档导出');
+    }
+    if (remote.capabilities.some(c => c.id === 'git' && (c.state === 'available' || c.state === 'degraded'))) {
+      tags.push(t('chat.cap_git') || 'Git版本管理');
+    }
+    if (remote.capabilities.some(c => c.id === 'powershell' && (c.state === 'available' || c.state === 'degraded'))) {
+      tags.push(t('chat.cap_terminal') || '系统终端');
+    }
+  }
+  return tags.length > 0 ? tags : [t('chat.cap_global_files') || '工作区全权限'];
+};
+
+const selectExecutionDevice = (deviceId) => {
+  const convId = props.conversationId || 'default';
+  selectedDeviceMap.value[convId] = deviceId;
+  if (props.conversationId) {
+    try {
+      localStorage.setItem('bob_exec_device_' + props.conversationId, deviceId);
+    } catch (e) {}
+  }
+  if (deviceId !== 'local') {
+    fetchDeviceCapabilities(deviceId);
+  }
+  showMobileTools.value = false;
+  mobileSheetState.value = 'main';
+};
+
+const openDeviceSelector = async () => {
+  await loadPairedDevices();
+  for (const dev of pairedPcDevices.value) {
+    fetchDeviceCapabilities(dev.device_id);
+  }
+  mobileSheetState.value = 'devices';
+  showMobileTools.value = true;
+};
+
+async function handleStopChat() {
+  if (isExecutingRemotely.value && activeRemoteTargetId.value) {
+    await stopRemoteExecution();
+  } else {
+    await stopGeneration();
+  }
+}
+
+async function stopRemoteExecution() {
+  if (isCancellingRemote.value) return;
+  isCancellingRemote.value = true;
+  streamThinking.value = t('chat.remote_cancelling');
+  let cancelConfirmed = false;
+  let cancelTimedOut = false;
+  try {
+    const targetId = activeRemoteTargetId.value;
+    const reqId = activeRemoteRequestId.value;
+    if (targetId && reqId) {
+      const res = await window.appAPI.cancelRemoteInstruction(targetId, reqId);
+      if (res?.confirmed === true || (res?.status === 'cancelled' && res?.confirmed !== false)) {
+        cancelConfirmed = true;
+      } else if (res?.status === 'timeout' || res?.confirmed === false) {
+        cancelTimedOut = true;
+      }
+    }
+  } catch (err) {
+    console.warn('cancelRemoteInstruction error:', err);
+  } finally {
+    const lastMsg = [...messages.value].reverse().find(m => m.role === 'assistant');
+    if (lastMsg) {
+      const cancelTip = cancelConfirmed
+        ? t('chat.remote_stopped_confirmed')
+        : (cancelTimedOut ? t('chat.remote_cancel_timeout') : t('chat.remote_cancel_failed'));
+      lastMsg.content = lastMsg.content ? `${lastMsg.content}\n\n${cancelTip}` : cancelTip;
+      if (lastMsg.change && cancelConfirmed) {
+        lastMsg.change.status = 'cancelled';
+      }
+    }
+    isExecutingRemotely.value = false;
+    isStreaming.value = false;
+    streamThinking.value = '';
+    activeRemoteRequestId.value = null;
+    activeRemoteTargetId.value = null;
+    isCancellingRemote.value = false;
+    scrollToBottom();
+  }
+}
+
+async function handleApproveRemoteChange(msg) {
+  if (!msg.change || msg._isApplying) return;
+  msg._isApplying = true;
+  try {
+    const targetId = currentExecutionDevice.value.id !== 'local' ? currentExecutionDevice.value.id : (pairedPcDevices.value[0]?.device_id || 'pc');
+    const res = await window.appAPI.dispatchRemoteApproval(
+      targetId,
+      msg.change.change_id,
+      'approve',
+      msg.change.request_id
+    );
+    if (res?.outcome?.status === 'applied' || res?.status === 'applied') {
+      msg.change.status = 'applied';
+    } else {
+      const errMsg = res?.outcome?.error || res?.error || res?.outcome?.message || '无法将修改应用至电脑端';
+      showAlert({
+        title: t('chat.diff_apply_failed') || '应用失败',
+        message: errMsg
+      });
+    }
+  } catch (err) {
+    console.error('Failed to approve remote change:', err);
+    showAlert({
+      title: t('chat.diff_apply_failed') || '应用失败',
+      message: `${err}`
+    });
+  } finally {
+    msg._isApplying = false;
+  }
+}
+
+async function handleRejectRemoteChange(msg) {
+  if (!msg.change || msg._isApplying) return;
+  msg._isApplying = true;
+  try {
+    const targetId = currentExecutionDevice.value.id !== 'local' ? currentExecutionDevice.value.id : (pairedPcDevices.value[0]?.device_id || 'pc');
+    const res = await window.appAPI.dispatchRemoteApproval(
+      targetId,
+      msg.change.change_id,
+      'reject',
+      msg.change.request_id
+    );
+    if (res?.outcome?.status === 'rejected' || res?.status === 'rejected') {
+      msg.change.status = 'rejected';
+    } else {
+      const errMsg = res?.outcome?.error || res?.error || res?.outcome?.message || t('chat.diff_reject_failed');
+      showAlert({
+        title: t('chat.diff_reject_failed') || '拒绝提案失败',
+        message: errMsg
+      });
+    }
+  } catch (err) {
+    console.error('Failed to reject remote change:', err);
+    showAlert({
+      title: t('chat.diff_reject_failed') || '拒绝提案失败',
+      message: `${err}`
+    });
+  } finally {
+    msg._isApplying = false;
+  }
+}
+
 const commandList = computed(() => {
   if (commandType.value === 'slash') {
     return [
       { id: 'memo', icon: PenLine, label: t('chat.cmd_memo') || '/memo', description: t('chat.cmd_memo_desc') || '作为闪念笔记保存，不发给AI', action: () => insertSlashCommand('/memo ') },
       { id: 'note', icon: BookOpen, label: '/note', description: t('chat.cmd_note_desc') || '新建笔记并打开编辑器', action: () => insertSlashCommand('/note ') },
       { id: 'clip', icon: Pin, label: '/clip', description: t('chat.cmd_clip_desc') || '将AI最近回复保存为笔记', action: () => handleClipCommand() },
+      { id: 'pc', icon: Laptop, label: '/pc', description: t('chat.cmd_pc_desc') || '切换为电脑端执行', action: () => {
+          if (pairedPcDevices.value.length > 0) {
+            selectExecutionDevice(pairedPcDevices.value[0].device_id);
+          } else {
+            openDeviceSelector();
+          }
+          if (commandTriggerIndex.value >= 0) {
+            inputText.value = inputText.value.substring(0, commandTriggerIndex.value);
+          }
+      } },
     ];
   } else {
     return [
@@ -955,7 +1425,17 @@ const commandList = computed(() => {
           if (commandTriggerIndex.value >= 0) {
             inputText.value = inputText.value.substring(0, commandTriggerIndex.value) + inputText.value.substring(commandTriggerIndex.value + 1);
           }
-      } }
+      } },
+      { id: 'pc', icon: Laptop, label: '@pc', description: '在已配对的电脑端执行指令', action: () => {
+          if (pairedPcDevices.value.length > 0) {
+            selectExecutionDevice(pairedPcDevices.value[0].device_id);
+          } else {
+            openDeviceSelector();
+          }
+          if (commandTriggerIndex.value >= 0) {
+            inputText.value = inputText.value.substring(0, commandTriggerIndex.value);
+          }
+      } },
     ];
   }
 });
@@ -1138,7 +1618,161 @@ async function toggleSpeechRecognition() {
 
 async function sendMessage() {
     // 自动探测文本中的绝对路径，转为附件
-    const txt = inputText.value || '';
+    let txt = inputText.value || '';
+
+    // 1. 检查 @pc / /pc 前缀：若存在则切换执行设备为已配对 PC
+    const pcMatch = txt.match(/^(@pc|\/pc)\s*(.*)/is);
+    if (pcMatch) {
+      inputText.value = pcMatch[2].trim();
+      txt = inputText.value;
+      if (pairedPcDevices.value.length > 0) {
+        selectExecutionDevice(pairedPcDevices.value[0].device_id);
+      } else {
+        await loadPairedDevices();
+        if (pairedPcDevices.value.length > 0) {
+          selectExecutionDevice(pairedPcDevices.value[0].device_id);
+        } else {
+          showAlert({
+            title: '未检测到配对电脑',
+            message: '当前尚未配对任何电脑设备。请在电脑端开启 Bob 并在手机端扫码配对后再试。'
+          });
+          return;
+        }
+      }
+    }
+
+    // 2. 检查是否由远程 PC 执行
+    if (currentExecutionDevice.value.type === 'pc') {
+      const targetPcId = currentExecutionDevice.value.id;
+      const targetPcName = currentExecutionDevice.value.name;
+
+      // 离线铁律 (Offline Guard): 严禁静默回退手机
+      let isOnline = false;
+      try {
+        isOnline = await window.appAPI.checkDeviceOnline(targetPcId);
+      } catch (e) {
+        console.error('Check device online failed', e);
+      }
+
+      if (!isOnline) {
+        const retryOrSwitch = await showConfirm({
+          title: `⚠️ 目标设备 (${targetPcName}) 离线`,
+          message: `无法连接到 ${targetPcName}。请确认电脑已开启 Bob 并连接网络。\n\n点击“重试”重新探测连接，点击“切回手机”将在本机执行。`,
+          confirmText: '重试连接',
+          cancelText: '切回手机',
+        });
+
+        if (retryOrSwitch) {
+          try {
+            const recheck = await window.appAPI.checkDeviceOnline(targetPcId);
+            if (!recheck) {
+              showAlert({
+                title: '连接仍然超时',
+                message: `仍无法连接到 ${targetPcName}，已为您保留当前输入内容。`
+              });
+              return;
+            }
+          } catch (e) {
+            return;
+          }
+        } else {
+          selectExecutionDevice('local');
+          showAlert({
+            title: '已切换为本机执行',
+            message: '后续消息将由手机本机处理。请重新点击发送。'
+          });
+          return;
+        }
+      }
+
+      const instructionToSend = inputText.value.trim();
+      if (!instructionToSend) return;
+
+      // 追加用户消息
+      const userMsg = {
+        id: 'user-' + Date.now(),
+        role: 'user',
+        content: instructionToSend,
+        created_at: new Date().toISOString(),
+      };
+      messages.value.push(userMsg);
+      inputText.value = '';
+      resetTextareaHeight();
+      scrollToBottom();
+
+      // 持久化用户消息
+      if (props.conversationId) {
+        await window.appAPI.addMessage(props.conversationId, 'user', instructionToSend, null);
+      }
+
+      // 追加占位 Assistant 消息
+      const reqId = 'req-' + Date.now();
+      activeRemoteRequestId.value = reqId;
+      activeRemoteTargetId.value = targetPcId;
+
+      const assistantMsg = reactive({
+        id: 'asst-' + Date.now(),
+        request_id: reqId,
+        role: 'assistant',
+        content: '',
+        executor_device: targetPcName,
+        is_remote: true,
+        _thinkingExpanded: false,
+        created_at: new Date().toISOString(),
+      });
+      messages.value.push(assistantMsg);
+      isExecutingRemotely.value = true;
+      isStreaming.value = true;
+      streamThinking.value = t('chat.remote_connecting_exec', { name: targetPcName });
+      scrollToBottom();
+
+      try {
+        const startTime = Date.now();
+        const key = `${props.conversationId || 'default'}_${targetPcId}`;
+        const selectedModel = sessionDeviceModelMap.value[key] || localStorage.getItem('bob_exec_model_' + key) || null;
+        const result = await window.appAPI.dispatchRemoteInstruction(
+          targetPcId,
+          props.conversationId || 'default',
+          instructionToSend,
+          false,
+          selectedModel,
+          reqId,
+          props.projectId || null
+        );
+
+        const elapsed = result?.elapsed_ms || (Date.now() - startTime);
+        const resultText = result?.result || t('chat.remote_empty_response');
+        assistantMsg.content = resultText;
+        assistantMsg.elapsed_ms = elapsed;
+        assistantMsg.executor_device = result?.executor_device || targetPcName;
+        if (selectedModel) {
+          assistantMsg.executor_model = selectedModel;
+        }
+
+        if (result?.change) {
+          assistantMsg.change = result.change;
+        }
+
+        // 持久化助手消息
+        if (props.conversationId) {
+          await window.appAPI.addMessage(props.conversationId, 'assistant', resultText, null);
+          emit('message-sent');
+        }
+      } catch (err) {
+        console.error('Remote dispatch failed:', err);
+        assistantMsg.content = `${t('chat.remote_exec_failed', { error: err })}`;
+        assistantMsg._isError = true;
+      } finally {
+        isExecutingRemotely.value = false;
+        isStreaming.value = false;
+        streamThinking.value = '';
+        activeRemoteRequestId.value = null;
+        activeRemoteTargetId.value = null;
+        scrollToBottom();
+      }
+      return;
+    }
+
     const pathRegex = /([a-zA-Z]:\\[^"'<>|*?]+?\.(?:pdf|txt|md|csv|json|yaml|yml|log|py|js|rs|ts|vue|html|css|docx|xlsx|png|jpg|jpeg|gif|webp))/gi;
     let match;
     while ((match = pathRegex.exec(txt)) !== null) {
@@ -1158,7 +1792,7 @@ async function sendMessage() {
       if (!hasVision) {
         messages.value.push({
           role: 'assistant',
-          content: '当前选定的模型不支持视觉（图像识别）能力，无法处理截图/图像。请切换至支持 vision 的模型（如 GPT-4o, Gemini 等）后再试。',
+          content: t('chat.vision_not_supported'),
           _isError: true,
           _thinkingExpanded: false,
         });
@@ -1509,6 +2143,7 @@ function onDetectBoardingPass(e) {
 }
 
 onMounted(async () => {
+  await loadPairedDevices();
   if (window.appAPI && window.appAPI.listen) {
     window.appAPI.listen('speech:partial', (e) => {
       inputText.value = startTextCache + e.payload.text;
@@ -1641,6 +2276,13 @@ watch(() => props.conversationId, async () => {
     const conv = await window.appAPI.getConversation(props.conversationId);
     sessionCost.value = conv?.cost || conv?.total_cost || 0;
     conversationTitle.value = conv?.title || '新对话';
+    // 恢复会话绑定的执行设备
+    try {
+      const savedDev = localStorage.getItem('bob_exec_device_' + props.conversationId);
+      if (savedDev) {
+        selectedDeviceMap.value[props.conversationId] = savedDev;
+      }
+    } catch (e) {}
   } else {
     sessionCost.value = 0;
     conversationTitle.value = '';
@@ -3461,6 +4103,175 @@ defineExpose({
   0% { transform: scale(1); opacity: 1; }
   50% { transform: scale(1.1); opacity: 0.8; }
   100% { transform: scale(1); opacity: 1; }
+}
+
+/* ── 执行设备状态轨 (Execution Device Rail) ────────────────────────── */
+.execution-device-rail {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  max-width: 1000px;
+  margin: 0 auto 6px auto;
+  padding: 0 4px;
+}
+
+.device-pill-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 4px 12px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: 22px;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--duration-fast, 0.15s) var(--ease-out, ease-out);
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.device-pill-btn:hover {
+  background: var(--surface-card);
+  border-color: var(--border-default);
+}
+
+.device-pill-btn:active {
+  transform: scale(0.98);
+}
+
+.device-type-icon {
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.device-name-text {
+  max-width: 160px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.device-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-tertiary);
+  flex-shrink: 0;
+  transition: background var(--duration-fast, 0.15s);
+}
+
+.device-status-dot.is-online {
+  background: var(--success, #10b981);
+}
+
+.device-status-dot.is-executing {
+  background: var(--accent-primary, #3b82f6);
+  animation: pulse-dot 1.2s infinite ease-in-out;
+}
+
+@keyframes pulse-dot {
+  0% { transform: scale(1); opacity: 1; box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.4); }
+  50% { transform: scale(1.3); opacity: 0.8; box-shadow: 0 0 0 4px rgba(59, 130, 246, 0); }
+  100% { transform: scale(1); opacity: 1; box-shadow: 0 0 0 0 rgba(59, 130, 246, 0); }
+}
+
+.executing-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--accent-primary);
+}
+
+/* 远程设备结果气泡与铭牌 */
+.remote-device-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: rgba(var(--user-accent-rgb, 39, 118, 187), 0.1);
+  color: var(--accent-primary);
+  font-size: 11px;
+  font-weight: 500;
+  margin-bottom: 6px;
+  width: fit-content;
+}
+
+.remote-device-badge .elapsed-text {
+  opacity: 0.75;
+  font-size: 10px;
+}
+
+/* 远程设备会话模型徽章 (Execution Rail Model Badge) */
+.device-model-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 44px;
+  padding: 4px 10px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: 22px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--duration-fast, 0.15s) var(--ease-out, ease-out);
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.device-model-badge:hover {
+  background: var(--surface-card);
+  border-color: var(--border-default);
+  color: var(--text-primary);
+}
+
+.device-model-badge:active {
+  transform: scale(0.98);
+}
+
+.model-badge-icon {
+  color: var(--accent-primary);
+  flex-shrink: 0;
+}
+
+.model-badge-text {
+  max-width: 140px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 设备列表能力标签徽章 (Device Capability Tags) */
+.sheet-list-item.device-item {
+  align-items: flex-start;
+  min-height: 48px;
+  padding: 10px 14px;
+}
+
+.device-caps-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.device-cap-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  font-size: 10px;
+  line-height: 1.2;
+  border: 1px solid var(--border-subtle);
 }
 </style>
 

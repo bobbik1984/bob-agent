@@ -18,21 +18,21 @@
           <div class="service-info">
             <span class="service-name">{{ $t('settings.p2p_pairing') }}</span>
             <span class="service-sub" style="display: flex; gap: 8px; align-items: center;">{{ !isUnlocked ? $t('settings.p2p_auth_desc_new') : $t('settings.p2p_pairing_desc') }}
-              <span v-if="lastSyncTime" style="font-size: 10px; padding: 2px 6px; background: var(--bg-tertiary); border-radius: var(--radius-default); color: var(--text-secondary);">最后同步: {{ formatSyncTime(lastSyncTime) }}</span></span>
+              <span v-if="lastSyncTime" style="font-size: 10px; padding: 2px 6px; background: var(--bg-tertiary); border-radius: var(--radius-default); color: var(--text-secondary);">{{ $t('settings.pairing_last_sync', { time: formatSyncTime(lastSyncTime) }) }}</span></span>
           </div>
                     <div style="display: flex; align-items: center; gap: 8px;">
             <button 
               class="device-indicator-btn"
               @click.stop="openSyncLogs" 
-              title="查看同步日志"
+              :title="$t('settings.pairing_logs_title')"
             >
               <Info :size="12" />
             </button>
             <button 
               class="device-indicator-btn"
               @click.stop="showDevicesModal = true" 
-              :title="`上次同步状态: ${lastSyncStatus === 'success' ? '成功' : (lastSyncStatus === 'error' ? '失败' : '未知')}`"
-              :style="{ color: lastSyncStatus === 'success' ? 'var(--user-accent)' : (lastSyncStatus === 'error' ? 'var(--color-error)' : 'var(--text-muted)') }"
+              :title="$t('settings.pairing_last_status', { status: lastSyncStatus === 'success' ? $t('settings.status_success') : (lastSyncStatus === 'pending' ? $t('settings.status_pending') : (lastSyncStatus === 'error' ? $t('settings.status_failed') : $t('settings.status_unknown'))) })"
+              :style="{ color: lastSyncStatus === 'success' ? 'var(--user-accent)' : (lastSyncStatus === 'pending' ? 'var(--color-warning)' : (lastSyncStatus === 'error' ? 'var(--color-error)' : 'var(--text-muted)')) }"
             >
               <Monitor v-if="isNativeMobile" :size="14" />
               <Smartphone v-else :size="14" />
@@ -44,36 +44,36 @@
         <div class="service-card-footer">
           <div v-if="!isUnlocked" style="display: flex; gap: 8px; width: 100%;">
             <template v-if="isNativeMobile">
-              <button class="btn btn-primary-outline btn-sm" style="flex: 1; justify-content: center;" @click="handleMobileScan" title="扫码配对">
-                <Scan :size="13" style="margin-right: 6px;" /> 扫码配对
+              <button class="btn btn-primary-outline btn-sm" style="flex: 1; justify-content: center;" @click="handleMobileScan" :title="$t('settings.p2p_btn_scan')">
+                <Scan :size="13" style="margin-right: 6px;" /> {{ $t('settings.p2p_btn_scan') }}
               </button>
-              <button class="btn btn-secondary-outline btn-sm" style="padding: 0 8px; height: 28px; flex-shrink: 0;" @click="showManualPairModal = true" title="手动粘贴配对码">
+              <button class="btn btn-secondary-outline btn-sm" style="padding: 0 8px; height: 28px; flex-shrink: 0;" @click="showManualPairModal = true" :title="$t('settings.p2p_manual_paste_title')">
                 <KeyRound :size="13" />
               </button>
             </template>
             <template v-else>
               <input v-model="pinInput" type="password" class="input" maxlength="6" placeholder="PIN" style="flex: 1; min-width: 0; height: 28px; padding: 4px 8px; font-size: 12px; border-radius: var(--radius-default);" @keyup.enter="handlePinSubmit" />
-              <button class="btn btn-primary-outline btn-sm" style="padding: 0 10px; flex-shrink: 0; height: 28px;" :disabled="pinInput.length < 4" @click="handlePinSubmit" :title="isInitialized ? $t('settings.p2p_btn_unlock') : '设置 PIN 码'">
+              <button class="btn btn-primary-outline btn-sm" style="padding: 0 10px; flex-shrink: 0; height: 28px;" :disabled="pinInput.length < 4" @click="handlePinSubmit" :title="isInitialized ? $t('settings.p2p_btn_unlock') : $t('settings.p2p_btn_set_pin')">
                 <Lock v-if="isInitialized" :size="13" />
                 <Check v-else :size="13" />
               </button>
-              <button class="btn btn-ghost btn-sm" style="padding: 0 8px; flex-shrink: 0; height: 28px; opacity: 0.5; cursor: not-allowed;" disabled title="解锁后查看二维码">
+              <button class="btn btn-ghost btn-sm" style="padding: 0 8px; flex-shrink: 0; height: 28px; opacity: 0.5; cursor: not-allowed;" disabled :title="$t('settings.p2p_unlock_to_view_qr')">
                 <QrCode :size="13" />
               </button>
             </template>
           </div>
           <div v-else style="display: flex; gap: 8px; width: 100%;">
             <template v-if="isNativeMobile">
-              <button class="btn btn-primary-outline btn-sm" style="flex: 1; justify-content: center;" @click="handleMobileScan" title="重新扫码配对">
-                <Scan :size="13" style="margin-right: 6px;" /> 重新扫码
+              <button class="btn btn-primary-outline btn-sm" style="flex: 1; justify-content: center;" @click="handleMobileScan" :title="$t('settings.p2p_rescan_title')">
+                <Scan :size="13" style="margin-right: 6px;" /> {{ $t('settings.p2p_rescan') }}
               </button>
-              <button class="btn btn-secondary-outline btn-sm" style="padding: 0 8px; height: 28px; flex-shrink: 0;" @click="showManualPairModal = true" title="手动粘贴配对码">
+              <button class="btn btn-secondary-outline btn-sm" style="padding: 0 8px; height: 28px; flex-shrink: 0;" @click="showManualPairModal = true" :title="$t('settings.p2p_manual_paste_title')">
                 <KeyRound :size="13" />
               </button>
             </template>
             <template v-else>
               <button class="btn btn-primary-outline btn-sm" style="flex: 1; justify-content: center; height: 28px;" @click="showP2pModal = true">
-                <QrCode :size="13" style="margin-right: 6px;" /> 配对二维码
+                <QrCode :size="13" style="margin-right: 6px;" /> {{ $t('settings.p2p_qr_modal_btn') }}
               </button>
             </template>
             <button class="btn btn-danger-outline btn-sm" style="padding: 5px 8px; height: 28px; flex-shrink: 0;" @click="handleReset" :title="$t('settings.p2p_btn_destroy')">
@@ -145,7 +145,7 @@
 
         <div class="service-card-footer">
           <button v-if="tgToken" class="btn btn-danger-outline btn-sm" @click="mobileChannel = mobileChannel === 'telegram' ? '' : 'telegram'">
-            <Unlink :size="13" /> 修改 Token
+            <Unlink :size="13" /> {{ $t('settings.channel_modify_token') }}
           </button>
           <button v-else class="btn btn-primary-outline btn-sm" @click="mobileChannel = mobileChannel === 'telegram' ? '' : 'telegram'">
             <KeyRound :size="13" /> {{ $t('settings.conn_connect') }}
@@ -188,7 +188,7 @@
 
         <div class="service-card-footer">
           <button v-if="discordToken" class="btn btn-danger-outline btn-sm" @click="mobileChannel = mobileChannel === 'discord' ? '' : 'discord'">
-            <Unlink :size="13" /> 修改 Token
+            <Unlink :size="13" /> {{ $t('settings.channel_modify_token') }}
           </button>
           <button v-else class="btn btn-primary-outline btn-sm" @click="mobileChannel = mobileChannel === 'discord' ? '' : 'discord'">
             <KeyRound :size="13" /> {{ $t('settings.conn_connect') }}
@@ -203,7 +203,7 @@
     <summary class="section-title">
       <div style="display: flex; align-items: center; gap: 8px;">
         <Monitor :size="16" class="section-icon" style="opacity: 0.6;" />
-        <span>{{ $t('settings.desktop_channels_title', '桌面端专属通道') }}</span>
+        <span>{{ $t('settings.desktop_channels_title') }}</span>
       </div>
       <ChevronDown :size="16" class="details-chevron" />
     </summary>
@@ -271,7 +271,7 @@
 
         <div class="service-card-footer">
           <button v-if="tgToken" class="btn btn-danger-outline btn-sm" @click="mobileChannel = mobileChannel === 'telegram' ? '' : 'telegram'">
-            <Unlink :size="13" /> 修改 Token
+            <Unlink :size="13" /> {{ $t('settings.channel_modify_token') }}
           </button>
           <button v-else class="btn btn-primary-outline btn-sm" @click="mobileChannel = mobileChannel === 'telegram' ? '' : 'telegram'">
             <KeyRound :size="13" /> {{ $t('settings.conn_connect') }}
@@ -314,7 +314,7 @@
 
         <div class="service-card-footer">
           <button v-if="discordToken" class="btn btn-danger-outline btn-sm" @click="mobileChannel = mobileChannel === 'discord' ? '' : 'discord'">
-            <Unlink :size="13" /> 修改 Token
+            <Unlink :size="13" /> {{ $t('settings.channel_modify_token') }}
           </button>
           <button v-else class="btn btn-primary-outline btn-sm" @click="mobileChannel = mobileChannel === 'discord' ? '' : 'discord'">
             <KeyRound :size="13" /> {{ $t('settings.conn_connect') }}
@@ -335,7 +335,7 @@
       <!-- 运行状态与延迟显示 -->
       <div v-if="proxyTunnelEnabled" style="display: flex; align-items: center; gap: 8px; margin-right: auto; margin-left: 16px; font-size: 0.85em; color: var(--text-secondary);">
         <span class="service-status-dot" :class="tunnelStatus.connected ? 'dot-connected' : 'dot-disconnected'"></span>
-        <span>{{ tunnelStatus.connected ? `已连接 (${tunnelStatus.latency}ms)` : '已断开' }}</span>
+        <span>{{ tunnelStatus.connected ? $t('settings.tunnel_connected', { latency: tunnelStatus.latency }) : $t('settings.tunnel_disconnected') }}</span>
       </div>
 
       <label class="mcp-switch">
@@ -479,7 +479,7 @@
               {{ name.toLowerCase().includes('google') || name.toLowerCase().includes('outlook') ? $t('settings.mcp_preset') : $t('settings.mcp_custom') }}
             </span>
           </div>
-          <label class="mcp-switch" title="断开连接">
+          <label class="mcp-switch" :title="$t('settings.mcp_disconnect')">
             <input type="checkbox" checked @change="removeMcpServer(name)" />
             <span class="mcp-slider"></span>
           </label>
@@ -499,7 +499,7 @@
             <span class="service-name" style="color: var(--text-secondary);">Outlook 365</span>
             <span class="service-sub" style="display: flex; gap: 8px; align-items: center;">{{ $t('settings.conn_quick_connect') }}</span>
           </div>
-          <label class="mcp-switch" title="接入服务" @click.prevent>
+          <label class="mcp-switch" :title="$t('settings.mcp_connect')" @click.prevent>
             <input type="checkbox" :checked="false" />
             <span class="mcp-slider"></span>
           </label>
@@ -524,7 +524,7 @@
         <div class="service-card-body mcp-add-form-body">
           <div class="form-group" style="margin: 0;">
             <label class="form-label" style="font-size: 0.8em; margin-bottom: 4px;">{{ $t('settings.mcp_name') }}</label>
-            <input v-model="newMcp.name" class="input" placeholder="例如 filesystem" style="padding: 4px 8px; font-size: 0.85em;" />
+            <input v-model="newMcp.name" class="input" :placeholder="$t('settings.mcp_name_placeholder')" style="padding: 4px 8px; font-size: 0.85em;" />
           </div>
           <div class="form-group" style="margin: 0;">
             <label class="form-label" style="font-size: 0.8em; margin-bottom: 4px;">{{ $t('settings.mcp_command') }}</label>
@@ -577,7 +577,7 @@
         <div class="briefing-header">
           <div class="briefing-icon"><Smartphone :size="18" /></div>
           <div class="briefing-title" style="flex: 1; font-size: 14px; font-weight: 600; color: var(--text-primary);">{{ $t('settings.p2p_pairing') }}</div>
-          <button class="briefing-close" @click="showP2pModal = false" title="关闭" style="background: none; border: none; color: var(--text-tertiary); cursor: pointer; padding: 4px; border-radius: var(--radius-default); display: flex; align-items: center; justify-content: center;">
+          <button class="briefing-close" @click="showP2pModal = false" :title="$t('common.close')" style="background: none; border: none; color: var(--text-tertiary); cursor: pointer; padding: 4px; border-radius: var(--radius-default); display: flex; align-items: center; justify-content: center;">
             <X :size="14" />
           </button>
         </div>
@@ -613,7 +613,7 @@
                 <div style="background: var(--color-success); border-radius: 50%; width: 48px; height: 48px; display: flex; align-items: center; justify-content: center; margin-bottom: 12px;">
                   <Check style="color: white;" :size="24" />
                 </div>
-                <span style="color: var(--text-primary); font-size: 13px; font-weight: 600; text-align: center; line-height: 1.3;">已连接<br/><span style="color: var(--text-secondary); font-size: 11px;">{{ pairingSuccessInfo.device_id.substring(0,8) }}...</span></span>
+                <span style="color: var(--text-primary); font-size: 13px; font-weight: 600; text-align: center; line-height: 1.3;">{{ $t('settings.p2p_status_connected') }}<br/><span style="color: var(--text-secondary); font-size: 11px;">{{ pairingSuccessInfo.device_id.substring(0,8) }}...</span></span>
               </div>
               <qrcode-vue v-else-if="qrPayload" :value="qrPayload" :size="136" level="M" />
               <div v-else style="width: 136px; height: 136px; display: flex; align-items: center; justify-content: center; background: var(--bg-tertiary); border-radius: var(--radius-default);">
@@ -623,7 +623,7 @@
           </div>
           <div v-if="qrPayload" style="margin-top: 14px; display: flex; justify-content: center;">
             <button class="btn btn-secondary-outline btn-sm" style="font-size: 12px; gap: 6px;" @click="copyQrPayload">
-              <Copy :size="13" /> 复制配对文本
+              <Copy :size="13" /> {{ $t('settings.p2p_btn_copy_qr') }}
             </button>
           </div>
           <p style="color: var(--text-secondary); font-size: 0.85em; margin-top: 14px; text-align: center;">
@@ -641,7 +641,7 @@
         <div class="briefing-header" style="display: flex; align-items: center; justify-content: space-between; padding: 14px 16px; border-bottom: 1px solid var(--border-subtle); background: var(--bg-tertiary);">
           <div style="display: flex; align-items: center; gap: 8px;">
             <KeyRound :size="16" style="color: var(--user-accent, var(--accent-primary));" />
-            <div style="font-size: 13px; font-weight: 600; color: var(--text-primary);">手动粘贴配对码</div>
+            <div style="font-size: 13px; font-weight: 600; color: var(--text-primary);">{{ $t('settings.p2p_manual_paste_title') }}</div>
           </div>
           <button class="briefing-close" @click="showManualPairModal = false" style="background: none; border: none; color: var(--text-tertiary); cursor: pointer; padding: 4px;">
             <X :size="14" />
@@ -649,18 +649,18 @@
         </div>
         <div style="padding: 16px; display: flex; flex-direction: column; gap: 12px;">
           <p style="font-size: 12px; color: var(--text-secondary); margin: 0; line-height: 1.4;">
-            若相机无法扫码，可在电脑端点击“复制配对文本”，然后粘贴到下方完成配对。
+            {{ $t('settings.p2p_manual_paste_desc') }}
           </p>
           <textarea
             v-model="manualPairInput"
             class="input"
             rows="4"
-            placeholder='在此粘贴配对 JSON 数据 (例如 {"device_id": "...", ...})'
+            :placeholder="$t('settings.p2p_manual_placeholder')"
             style="width: 100%; font-family: monospace; font-size: 11px; padding: 8px; resize: none; border-radius: var(--radius-default);"
           ></textarea>
           <div style="display: flex; gap: 8px; justify-content: flex-end;">
-            <button class="btn btn-secondary-outline btn-sm" @click="showManualPairModal = false">取消</button>
-            <button class="btn btn-primary-outline btn-sm" :disabled="!manualPairInput.trim()" @click="handleManualPairSubmit">确定配对</button>
+            <button class="btn btn-secondary-outline btn-sm" @click="showManualPairModal = false">{{ $t('common.cancel') }}</button>
+            <button class="btn btn-primary-outline btn-sm" :disabled="!manualPairInput.trim()" @click="handleManualPairSubmit">{{ $t('settings.p2p_btn_confirm_pair') }}</button>
           </div>
         </div>
       </div>
@@ -676,7 +676,7 @@
             <div class="briefing-icon" style="color: var(--user-accent, var(--accent-primary)); display: flex; align-items: center;"><Smartphone :size="18" /></div>
             <div class="briefing-title" style="font-size: 14px; font-weight: 600; color: var(--text-primary);">{{ $t('settings.pairing_device_list') }}</div>
           </div>
-          <button class="briefing-close" @click="showDevicesModal = false" title="关闭" style="background: none; border: none; color: var(--text-tertiary); cursor: pointer; padding: 4px; border-radius: var(--radius-default); display: flex; align-items: center; justify-content: center;">
+          <button class="briefing-close" @click="showDevicesModal = false" :title="$t('common.close')" style="background: none; border: none; color: var(--text-tertiary); cursor: pointer; padding: 4px; border-radius: var(--radius-default); display: flex; align-items: center; justify-content: center;">
             <X :size="14" />
           </button>
         </div>
@@ -688,19 +688,28 @@
                 <span class="status-dot" :class="isDeviceOnline(dev) ? 'dot-connected' : 'dot-disconnected'" style="width: 8px; height: 8px; border-radius: 50%;"></span>
                 <span style="font-size: 13px; font-weight: 600; color: var(--text-primary);">{{ dev.device_name || (dev.platform === 'android' ? 'Android Device' : (dev.platform === 'windows' ? 'Windows PC' : dev.platform)) }}</span>
                 <span style="font-size: 11px; color: var(--text-tertiary); font-family: monospace;">({{ dev.device_id.substring(0, 8) }})</span>
-                <span v-if="dev.syncStatus === 'syncing'" style="font-size: 10px; padding: 2px 6px; background: var(--color-success); border-radius: var(--radius-default); color: white; margin-left: 6px;">🔄 正在同步</span>
+                <span v-if="dev.is_trusted || dev.status === 'trusted'" style="font-size: 10px; padding: 1px 6px; background: rgba(var(--user-accent-rgb, 39, 118, 187), 0.15); color: var(--user-accent); border-radius: var(--radius-default); border: 1px solid var(--user-accent);">
+                  {{ $t('settings.pairing_device_trusted') }}
+                </span>
+                <span v-else-if="dev.status === 'revoked'" style="font-size: 10px; padding: 1px 6px; background: rgba(239, 68, 68, 0.15); color: var(--color-error); border-radius: var(--radius-default); border: 1px solid var(--color-error);">
+                  {{ $t('settings.pairing_device_revoked') }}
+                </span>
+                <span v-else style="font-size: 10px; padding: 1px 6px; background: var(--bg-tertiary); color: var(--text-tertiary); border-radius: var(--radius-default); border: 1px solid var(--border-subtle);">
+                  {{ $t('settings.pairing_device_untrusted') }}
+                </span>
+                <span v-if="dev.syncStatus === 'syncing'" style="font-size: 10px; padding: 2px 6px; background: var(--color-success); border-radius: var(--radius-default); color: white; margin-left: 6px;">{{ $t('settings.pairing_status_syncing') }}</span>
               </div>
-              <button class="btn btn-danger-outline btn-sm" style="padding: 4px 8px; font-size: 11px;" @click="handleDisconnectDevice(dev)" title="{{ $t('settings.pairing_device_unbind') }}">
-                <Unlink :size="11" /> 解绑
+              <button class="btn btn-danger-outline btn-sm" style="padding: 4px 8px; font-size: 11px;" @click="handleDisconnectDevice(dev)" :title="$t('settings.pairing_device_unbind')">
+                <Unlink :size="11" /> {{ $t('settings.pairing_device_unbind') }}
               </button>
             </div>
             <div style="font-size: 11px; color: var(--text-secondary); margin-left: 14px; display: flex; flex-direction: column; gap: 2px;">
-              <div>网络端点: {{ dev.ip_address }}</div>
-              <div>最后活跃: {{ formatTime(dev.last_seen) }}</div>
+              <div>{{ $t('settings.pairing_endpoint') }}: {{ dev.ip_address }}</div>
+              <div>{{ $t('settings.pairing_last_active') }}: {{ formatTime(dev.last_seen) }}</div>
             </div>
           </div>
           <div v-if="displayConnectedDevices.length === 0" style="text-align: center; padding: 20px; color: var(--text-tertiary); font-size: 13px;">
-            暂无已配对设备
+            {{ $t('settings.pairing_devices_empty') }}
           </div>
         </div>
       </div>
@@ -714,7 +723,7 @@
         <div class="briefing-header">
           <div class="briefing-icon"><MessageSquare :size="18" /></div>
           <div class="briefing-title" style="flex: 1; font-size: 14px; font-weight: 600; color: var(--text-primary);">{{ $t('settings.wechat_bind_title') }}</div>
-          <button class="briefing-close" @click="closeWechatModal" title="关闭" style="background: none; border: none; color: var(--text-tertiary); cursor: pointer; padding: 4px; border-radius: var(--radius-default); display: flex; align-items: center; justify-content: center;">
+          <button class="briefing-close" @click="closeWechatModal" :title="$t('common.close')" style="background: none; border: none; color: var(--text-tertiary); cursor: pointer; padding: 4px; border-radius: var(--radius-default); display: flex; align-items: center; justify-content: center;">
             <X :size="14" />
           </button>
         </div>
@@ -743,7 +752,7 @@
       <div class="pairing-progress-card">
         <div class="pairing-progress-header">
           <Link2 class="pairing-progress-icon" :size="21" aria-hidden="true" />
-          <span>{{ pairingDone ? (pairingError ? $t('settings.pairing_failed') : $t('settings.pairing_success')) : $t('settings.pairing_in_progress') }}</span>
+          <span>{{ pairingHeaderTitle }}</span>
         </div>
 
         <SyncTriangleTopology
@@ -768,11 +777,11 @@
         </div>
 
         <div class="pairing-progress-footer">
-          <button v-if="pairingDone" class="btn btn-primary-outline" @click="closePairingProgress">
-            关闭
+          <button v-if="pairingDone || pairingPendingApply" class="btn btn-primary-outline" @click="closePairingProgress">
+            {{ $t('common.close') }}
           </button>
           <button v-else class="btn btn-secondary-outline" @click="closePairingProgress">
-            取消
+            {{ $t('common.cancel') }}
           </button>
         </div>
       </div>
@@ -788,7 +797,7 @@
             <div class="briefing-icon" style="color: var(--text-primary); display: flex; align-items: center;"><Info :size="18" /></div>
             <div class="briefing-title" style="font-size: 14px; font-weight: 600; color: var(--text-primary);">{{ $t('settings.pairing_logs_title') }}</div>
           </div>
-          <button class="briefing-close" @click="showSyncLogsModal = false" title="关闭" style="background: none; border: none; color: var(--text-tertiary); cursor: pointer; padding: 4px; border-radius: var(--radius-default); display: flex; align-items: center; justify-content: center;">
+          <button class="briefing-close" @click="showSyncLogsModal = false" :title="$t('common.close')" style="background: none; border: none; color: var(--text-tertiary); cursor: pointer; padding: 4px; border-radius: var(--radius-default); display: flex; align-items: center; justify-content: center;">
             <X :size="14" />
           </button>
         </div>
@@ -833,6 +842,7 @@ import {
   , CheckCircle, XCircle
 } from 'lucide-vue-next';
 import SyncTriangleTopology from '../../components/sync/SyncTriangleTopology.vue';
+import { parsePairingInvitation, executePairingWorkflow, applyStepTransition } from '@/sync/pairing-flow.js';
 
 const { t } = useI18n();
 
@@ -855,7 +865,26 @@ const { showConfirm, showAlert } = useDialog();
 const showPairingProgress = ref(false);
 const pairingDone = ref(false);
 const pairingError = ref(false);
+const pairingPendingApply = ref(false);
+const pairingPairedSyncFailed = ref(false);
+const pairingPairedSyncSkipped = ref(false);
 const syncProgressState = ref({});
+
+const pairingHeaderTitle = computed(() => {
+  if (pairingPairedSyncFailed.value) {
+    return t('settings.pairing_paired_sync_failed');
+  }
+  if (pairingPairedSyncSkipped.value) {
+    return t('settings.pairing_paired_sync_skipped');
+  }
+  if (pairingDone.value) {
+    return pairingError.value ? t('settings.pairing_failed') : t('settings.pairing_success');
+  }
+  if (pairingPendingApply.value) {
+    return t('settings.pairing_pending_apply');
+  }
+  return t('settings.pairing_in_progress');
+});
 
 const pairingSteps = ref([]);
 
@@ -872,8 +901,8 @@ const incrementalProgressPercent = computed(() => {
   if (relayAckStep.value?.status === 'done') return 8;
   return 0;
 });
-const incrementalProgressLabel = computed(() => relaySyncStep.value?.status === 'done' ? '增量同步完成' : relaySyncStep.value?.status === 'error' ? '增量同步未完成' : '检查并同步增量');
-const incrementalProgressDetail = computed(() => relaySyncStep.value?.detail || syncProgressState.value.detail || (relayAckStep.value?.status === 'done' ? '配对已确认，正在比较双方同步游标。' : '等待增量检查。'));
+const incrementalProgressLabel = computed(() => relaySyncStep.value?.status === 'done' ? t('settings.sync_inc_done') : relaySyncStep.value?.status === 'error' ? t('settings.sync_inc_error') : t('settings.sync_inc_checking'));
+const incrementalProgressDetail = computed(() => relaySyncStep.value?.detail || syncProgressState.value.detail || (relayAckStep.value?.status === 'done' ? t('settings.sync_inc_ack_detail') : t('settings.sync_inc_wait_detail')));
 
 const lanPathClass = computed(() => {
   if (!lanStep.value) return 'path-inactive';
@@ -1137,19 +1166,18 @@ async function initPairingSteps() {
   ];
   pairingDone.value = false;
   pairingError.value = false;
+  pairingPendingApply.value = false;
+  pairingPairedSyncFailed.value = false;
+  pairingPairedSyncSkipped.value = false;
 }
 
 async function updateStep(id, status, detail) {
-  const step = pairingSteps.value.find(s => s.id === id);
-  if (step) {
-    step.status = status;
-    if (detail !== undefined) step.detail = detail;
-  }
+  applyStepTransition(pairingSteps.value, id, status, detail);
 }
 
 async function closePairingProgress() {
   showPairingProgress.value = false;
-  if (pairingDone.value && !pairingError.value) {
+  if ((pairingDone.value || pairingPendingApply.value) && !pairingError.value) {
     fetchConnectedDevices().then(() => {
       if (isNativeMobile && connectedDevices.value.length > 0) {
         isUnlocked.value = true;
@@ -1169,9 +1197,9 @@ const copyQrPayload = async () => {
     } else if (window.appAPI?.copyToClipboard) {
       await window.appAPI.copyToClipboard(qrPayload.value);
     }
-    await showAlert("已复制配对代码到剪贴板！可在手机端点击钥匙图标手动粘贴完成配对。");
+    await showAlert(t('settings.qr_copied_clipboard'));
   } catch (e) {
-    await showAlert("复制失败: " + e);
+    await showAlert(`${t('settings.qr_copy_failed')}${e}`);
   }
 };
 
@@ -1191,7 +1219,7 @@ const handleMobileScan = async () => {
     if (!code) return;
     await processPairingCode(code);
   } else {
-    await showAlert(t('setup.scanner_not_supported') || '当前环境不支持扫码');
+    await showAlert(t('setup.scanner_not_supported'));
   }
 };
 
@@ -1208,20 +1236,26 @@ const processPairingCode = async (code) => {
     });
   }
 
+  const rawCode = code.trim();
   let payload;
   try {
-    payload = JSON.parse(code);
+    payload = parsePairingInvitation(rawCode);
   } catch (e) {
-    await showAlert("配对内容无法解析 (非标准 JSON): " + e);
+    await showAlert(`${t('settings.p2p_err_parse_unknown')}: ${e.message || e}`);
     return;
   }
 
   const existingPayload = await window.appAPI.getConfig('pairing_payload');
   if (existingPayload && existingPayload.device_id && existingPayload.device_id !== payload.device_id) {
-    const isOverride = await showConfirm(`⚠️ 身份不匹配\n\n您正在配对一个新的 PC (ID: ${payload.device_id.substring(0, 8)})\n但本机已绑定了另一个 PC (ID: ${existingPayload.device_id.substring(0, 8)})\n\n是否覆盖现有配对？(可能会导致同步记录分叉)`);
+    const isOverride = await showConfirm(t('settings.p2p_override_confirm', {
+      newId: payload.device_id.substring(0, 8),
+      oldId: existingPayload.device_id.substring(0, 8),
+    }));
     if (!isOverride) return;
   } else {
-    const confirmed = await showConfirm(`发现设备 PC (ID: ${payload.device_id.substring(0, 8)}...)，是否连接并同步？`);
+    const confirmed = await showConfirm(t('settings.p2p_pair_confirm', {
+      id: payload.device_id.substring(0, 8),
+    }));
     if (!confirmed) return;
   }
 
@@ -1240,109 +1274,111 @@ const processPairingCode = async (code) => {
   }
 
   try {
-    updateStep('save_config', 'running', '');
-    await window.appAPI.setConfig('pairing_payload', payload);
-    updateStep('save_config', 'done', '');
-
-    // Step 3: 尝试局域网直连同步 (LAN Sync)
-    if (window.appAPI.triggerMobileSync) {
-      updateStep('lan_sync', 'running', '');
-      let lanSuccess = false;
-      const lanStartTime = Date.now();
-      try {
-        const syncTimeout = new Promise((_, reject) => setTimeout(() => reject(new Error('Sync Timeout')), 15000));
-        const lanPayload = { ...payload, skip_relay: true };
-        await Promise.race([
-          window.appAPI.triggerMobileSync(lanPayload),
-          syncTimeout
-        ]);
-        const lanStep = pairingSteps.value.find(s => s.id === 'lan_sync');
-        if (lanStep && (lanStep.status === 'done' || lanStep.status === 'running')) {
-          updateStep('lan_sync', 'done', '');
-          lanSuccess = true;
+    const onStepUpdate = (stepId, status, detail) => {
+      if (stepId === 'parse') {
+        updateStep('parse', status, '');
+      } else if (stepId === 'relay_connect') {
+        if (status === 'running') {
+          updateStep('relay_connect', 'running', t('settings.p2p_validating_pop'));
+        } else if (status === 'done') {
+          const transportStr = (detail || 'LAN').toUpperCase();
+          updateStep('relay_connect', 'done', `${t('settings.p2p_pair_established')} (${transportStr})`);
+        } else if (status === 'error') {
+          const errStr = String(detail || '');
+          if (errStr.includes('ERR-PAIRING-01')) {
+            updateStep('relay_connect', 'error', t('settings.p2p_err_relay_unconnected'));
+          } else if (errStr.includes('ERR-PAIRING-02') || errStr.includes('Target device is offline') || errStr.includes('RLY-TARGET-OFFLINE')) {
+            updateStep('relay_notify', 'error', t('settings.p2p_err_pc_offline'));
+          } else if (errStr.includes('ERR-PAIRING-03') || errStr.includes('timed out') || errStr.includes('Timeout')) {
+            updateStep('relay_ack', 'error', t('settings.p2p_err_pc_timeout'));
+          } else if (errStr.includes('ERR-PAIRING-04') || errStr.includes('Unauthorized')) {
+            updateStep('relay_ack', 'error', t('settings.p2p_err_rejected'));
+          } else {
+            updateStep('relay_connect', 'error', `${t('settings.p2p_err_generic')}${errStr}`);
+          }
         }
-      } catch (e) {
-        updateStep('lan_sync', 'error', 'Error: ' + String(e));
+      } else if (stepId === 'save_config') {
+        updateStep('save_config', status, '');
+      } else if (stepId === 'lan_sync' || stepId === 'relay_sync') {
+        if (status === 'running') {
+          updateStep(stepId, 'running', '');
+        } else if (status === 'done') {
+          updateStep(stepId, 'done', detail ? t('settings.sync_ready') : '');
+        } else if (status === 'error' || status === 'partial_error') {
+          updateStep(stepId, 'error', detail || '');
+        } else if (status === 'pending_apply' || status === 'pending') {
+          if (status === 'pending_apply' || (detail && detail.includes('入队'))) {
+            updateStep(stepId, 'pending_apply', detail || t('settings.pairing_pending_apply_detail'));
+          } else {
+            updateStep(stepId, 'pending', detail || '');
+          }
+        }
       }
+    };
 
-      if (lanSuccess) {
-        updateStep('relay_connect', 'skipped', '局域网已连接，无需外网穿透');
-        updateStep('relay_notify', 'skipped', '');
-        updateStep('relay_ack', 'skipped', '');
-        updateStep('relay_sync', 'skipped', '');
-        pairingDone.value = true;
-        pairingError.value = false;
-        fetchConnectedDevices();
-        return;
-      } else {
-        // LAN 失败后，保留至少 700ms 视觉过渡，使用户能看清底边失败，再切入外网中继
-        const elapsed = Date.now() - lanStartTime;
-        if (elapsed < 800) {
-          await new Promise(r => setTimeout(r, 800 - elapsed));
-        }
-      }
-    }
+    const result = await executePairingWorkflow(rawCode, {
+      appAPI: window.appAPI,
+      onStepUpdate,
+      timeoutMs: 30000,
+    });
 
-    // Step 4: 局域网失败，尝试外网隧道握手 (Relay Handshake)
-    if (window.appAPI.relayHandshake) {
-      updateStep('relay_connect', 'running', '');
-      try {
-        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Relay Timeout')), 30000));
-        await Promise.race([
-          window.appAPI.relayHandshake(payload.device_id, payload.public_key),
-          timeoutPromise
-        ]);
-      } catch (e) {
-        console.warn('Relay handshake failed', e);
-        const errStr = String(e);
-        if (errStr.includes('ERR-PAIRING-01')) {
-          updateStep('relay_connect', 'error', '手机未连接中继服务器 (ERR-PAIRING-01: 检查手机网络)');
-        } else if (errStr.includes('ERR-PAIRING-02') || errStr.includes('Target device is offline') || errStr.includes('RLY-TARGET-OFFLINE')) {
-          updateStep('relay_notify', 'error', '电脑端未在线 (ERR-PAIRING-02: 电脑未开启Bob或中继掉线)');
-        } else if (errStr.includes('ERR-PAIRING-03') || errStr.includes('Relay Timeout') || errStr.includes('Relay 请求超时')) {
-          updateStep('relay_ack', 'error', '等待电脑响应超时 (ERR-PAIRING-03: PC未在25秒内确认)');
-        } else if (errStr.includes('ERR-PAIRING-04') || errStr.includes('Unauthorized')) {
-          updateStep('relay_ack', 'error', '电脑拒绝配对 (ERR-PAIRING-04: 二维码安全凭证已过期或不匹配)');
-        } else {
-          updateStep('relay_connect', 'error', '配对失败: ' + errStr);
-        }
-        pairingDone.value = true;
-        pairingError.value = true;
-        return;
+    const hasPendingApply = result?.pending_apply || pairingSteps.value.some(s => s.status === 'pending_apply' || (s.id.includes('sync') && s.detail && s.detail.includes('入队')));
+    const isPaired = Boolean(result?.paired);
+    const isApplied = Boolean(result?.applied) || (Boolean(result?.success) && !hasPendingApply && result?.stage === 'applied');
+    const isSyncFailed = result?.stage === 'failed' || result?.stage === 'unexpected' || pairingSteps.value.some(s => s.id.includes('sync') && s.status === 'error');
+    const isSyncSkipped = result?.stage === 'skipped';
+
+    if (isPaired) {
+      // 只要设备已通过 SEC-01 持钥验证与配置保存，设备列表必须刷新可见
+      fetchConnectedDevices();
+      if (isNativeMobile) {
+        fetchPairingInfo();
       }
     }
 
-    // Step 5: 外网隧道同步 (Relay Sync)
-    if (window.appAPI.triggerMobileSync) {
-      updateStep('relay_sync', 'running', '');
-      try {
-        const syncTimeout = new Promise((_, reject) => setTimeout(() => reject(new Error('Sync Timeout')), 60000));
-        const relayPayload = { ...payload, skip_relay: false, local_ips: [] };
-        await Promise.race([
-          window.appAPI.triggerMobileSync(relayPayload),
-          syncTimeout
-        ]);
-        const relayStep = pairingSteps.value.find(s => s.id === 'relay_sync');
-        if (relayStep && (relayStep.status === 'done' || relayStep.status === 'running')) {
-          updateStep('relay_sync', 'done', '');
-        }
-        pairingDone.value = true;
-        pairingError.value = false;
-        fetchConnectedDevices();
-        if (isNativeMobile) {
-          fetchPairingInfo();
-        }
-      } catch (e) {
-        const errStr = e instanceof Error ? e.message : String(e);
-        updateStep('relay_sync', 'error', errStr);
-        pairingDone.value = true;
-        pairingError.value = true;
-      }
+    if (isPaired && isApplied) {
+      pairingDone.value = true;
+      pairingError.value = false;
+      pairingPendingApply.value = false;
+      pairingPairedSyncFailed.value = false;
+      pairingPairedSyncSkipped.value = false;
+    } else if (isPaired && (hasPendingApply || result?.stage === 'pending_apply')) {
+      // 明确区分已可靠入队与已应用：待应用状态不置 pairingDone 成功
+      pairingDone.value = false;
+      pairingError.value = false;
+      pairingPendingApply.value = true;
+      pairingPairedSyncFailed.value = false;
+      pairingPairedSyncSkipped.value = false;
+    } else if (isPaired && isSyncFailed) {
+      // 设备已配对，但首次同步失败
+      pairingDone.value = true;
+      pairingError.value = true;
+      pairingPendingApply.value = false;
+      pairingPairedSyncFailed.value = true;
+      pairingPairedSyncSkipped.value = false;
+    } else if (isPaired && isSyncSkipped) {
+      // 设备已配对，未执行首次同步
+      pairingDone.value = true;
+      pairingError.value = true;
+      pairingPendingApply.value = false;
+      pairingPairedSyncFailed.value = false;
+      pairingPairedSyncSkipped.value = true;
+    } else {
+      // 配对握手或配置落盘本身失败
+      pairingDone.value = true;
+      pairingError.value = true;
+      pairingPendingApply.value = false;
+      pairingPairedSyncFailed.value = false;
+      pairingPairedSyncSkipped.value = false;
     }
-
-  } catch (e) {
+    return;
+  } catch (err) {
+    console.error('Pairing flow unexpected error:', err);
     pairingDone.value = true;
     pairingError.value = true;
+    pairingPendingApply.value = false;
+    pairingPairedSyncFailed.value = false;
+    pairingPairedSyncSkipped.value = false;
   } finally {
     if (unlistenProgress) unlistenProgress();
   }
@@ -1407,9 +1443,9 @@ const overallConnectionClass = computed(() => {
   return 'dot-disconnected';
 });
 const overallConnectionLabel = computed(() => {
-  if (connectivitySnapshot.value.relay === 'registered') return 'Relay 基建已连接';
-  if (connectivitySnapshot.value.relay === 'connecting') return 'Relay 连接中...';
-  return 'Relay 未连接';
+  if (connectivitySnapshot.value.relay === 'registered') return t('settings.relay_infra_connected');
+  if (connectivitySnapshot.value.relay === 'connecting') return t('settings.relay_infra_connecting');
+  return t('settings.relay_infra_disconnected');
 });
 
 const openSyncLogs = async () => {
@@ -1503,7 +1539,7 @@ const formatCaptureActivity = (event) => {
 const formatSyncLogDetail = (log) => {
   if (log.detail) return log.detail;
   if (log.error_code) return log.error_code;
-  if (log.summary?.includes('配对') || log.summary?.includes('连接')) return t('settings.activity_confirmed');
+  if (log.summary?.includes('配对') || log.summary?.includes('连接') || log.summary?.toLowerCase().includes('pair') || log.summary?.toLowerCase().includes('connect')) return t('settings.activity_confirmed');
   if (log.status === 'success') return t('settings.activity_written');
   if (log.status === 'running') return t('settings.activity_running');
   return t('settings.activity_no_write');
@@ -1559,7 +1595,7 @@ const handleReset = async () => {
 
 const handleDisconnectDevice = async (dev) => {
   const devLabel = dev.device_name || (dev.platform === 'windows' ? 'Windows PC' : dev.platform);
-  const confirmed = await showConfirm(`确定要解绑设备 ${devLabel} (${dev.device_id.substring(0, 8)}) 吗？`);
+  const confirmed = await showConfirm(t('settings.pairing_unbind_confirm', { name: devLabel, id: dev.device_id.substring(0, 8) }));
   if (confirmed) {
     try {
       await invoke('disconnect_device', { deviceId: dev.device_id });
@@ -1583,7 +1619,7 @@ const fetchPairingInfo = async () => {
   try {
     pairingInfo.value = await invoke('get_pairing_payload');
   } catch (error) {
-    console.error('获取配对信息失败', error);
+    console.error('Failed to get pairing payload', error);
   }
 };
 
@@ -1609,9 +1645,9 @@ const isDeviceOnline = (dev) => {
 };
 
 const formatSyncTime = (tsStr) => {
-  if (!tsStr) return '未知';
+  if (!tsStr) return t('settings.status_unknown');
   const ts = parseInt(tsStr);
-  if (isNaN(ts)) return '未知';
+  if (isNaN(ts)) return t('settings.status_unknown');
   const d = new Date(ts);
   return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 };
@@ -1693,25 +1729,25 @@ async function copyUrl(url) {
 async function activateMobileChannel(channel) {
   if (channel === 'telegram') {
     if (!tgToken.value) {
-      await showAlert('请填写 Telegram Bot Token');
+      await showAlert(t('settings.channel_tg_token_empty'));
       return;
     }
     try {
       await window.appAPI.telegramSaveToken(tgToken.value);
-      await showAlert('Telegram 绑定成功！机器人已在后台启动。');
+      await showAlert(t('settings.channel_tg_bind_success'));
     } catch(e) {
-      await showAlert('绑定失败: ' + e);
+      await showAlert(`${t('settings.channel_bind_failed')}: ${e}`);
     }
   } else if (channel === 'discord') {
     if (!discordToken.value) {
-      await showAlert('请填写 Discord Bot Token');
+      await showAlert(t('settings.channel_dc_token_empty'));
       return;
     }
     try {
       await window.appAPI.discordSaveToken(discordToken.value);
-      await showAlert('Discord 绑定成功！机器人已在后台启动。');
+      await showAlert(t('settings.channel_dc_bind_success'));
     } catch(e) {
-      await showAlert('绑定失败: ' + e);
+      await showAlert(`${t('settings.channel_bind_failed')}: ${e}`);
     }
   }
 }
@@ -1814,7 +1850,7 @@ async function connectOAuth(name) {
     }
   } catch (e) {
     console.error('OAuth start failed:', e);
-    await showAlert('连接失败: ' + e);
+    await showAlert(`${t('settings.channel_connect_failed')}: ${e}`);
   } finally {
     connectingService.value = '';
     // 延迟刷新状态，等用户完成 OAuth 回调
@@ -1835,7 +1871,7 @@ async function saveLarkCredentials() {
     await loadConnectorStatuses();
   } catch (e) {
     console.error('Failed to save Lark credentials:', e);
-    await showAlert('保存失败: ' + e);
+    await showAlert(`${t('settings.channel_save_failed')}: ${e}`);
   } finally {
     connectingService.value = '';
   }
@@ -1880,7 +1916,7 @@ async function connectGoogleNative() {
   try {
     const selectedPath = await open({
       multiple: false,
-      title: '选择 Google OAuth credentials.json',
+      title: t('settings.channel_select_google_json'),
       filters: [{ name: 'JSON Credentials', extensions: ['json'] }]
     });
     
@@ -1890,7 +1926,7 @@ async function connectGoogleNative() {
         file_path: selectedPath
       });
       if (res && res.error) {
-        await showAlert('配置失败: ' + res.error);
+        await showAlert(`${t('settings.channel_config_failed')}: ${res.error}`);
         connectingService.value = '';
         return;
       }
@@ -1899,7 +1935,7 @@ async function connectGoogleNative() {
     }
   } catch (err) {
     console.error('Failed to configure Google Calendar natively', err);
-    await showAlert('配置失败: ' + err);
+    await showAlert(`${t('settings.channel_config_failed')}: ${err}`);
     connectingService.value = '';
   }
 }

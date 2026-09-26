@@ -745,7 +745,7 @@ dependencies = [
 
 [[package]]
 name = "bob"
-version = "0.9.5-g"
+version = "0.9.6"
 dependencies = [
  "aes",
  "aes-gcm",
@@ -790,6 +790,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_yaml",
+ "sha2",
  "socket2 0.6.5",
  "tauri",
  "tauri-build",

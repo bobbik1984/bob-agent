@@ -1769,15 +1769,44 @@ pub(crate) async fn stream_internal(
     global_file_access: bool,
     agent_mode: String,
 ) -> Value {
+    stream_internal_with_model(
+        app,
+        messages,
+        conv_id,
+        from_user,
+        global_file_access,
+        agent_mode,
+        None,
+        None,
+    )
+    .await
+}
+
+/// 内部通用流式处理 — 支持 Tool Calling 循环及显式指定模型与安全策略
+pub(crate) async fn stream_internal_with_model(
+    app: AppHandle,
+    messages: Vec<Value>,
+    conv_id: Option<String>,
+    from_user: Option<String>,
+    global_file_access: bool,
+    agent_mode: String,
+    explicit_model: Option<String>,
+    policy: Option<crate::tools::ToolExecutionPolicy>,
+) -> Value {
+    let exec_policy = policy.unwrap_or_default();
     // conv_id 用于标记 llm:chunk 事件属于哪个会话，防止跨会话串流
     let conv_id_for_emit = conv_id.clone().unwrap_or_default();
     // 1. 读取 LLM 配置
     let config = super::read_config();
-    let config_model_id = config
-        .get("model")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
+    let config_model_id = if let Some(m) = explicit_model.filter(|s| !s.trim().is_empty()) {
+        m
+    } else {
+        config
+            .get("model")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string()
+    };
     let (provider, mut api_key, model_override, custom_base_url) =
         read_llm_config_for_model(&config_model_id);
 
@@ -2670,13 +2699,15 @@ pub(crate) async fn stream_internal(
                     let args = args.clone();
                     let fu = from_user_for_tools.clone();
                     let idx = *i;
+                    let policy_copy = exec_policy.clone();
                     async move {
-                        let result = super::tools::execute_tool(
+                        let result = super::tools::execute_tool_with_policy(
                             &app_clone,
                             &name,
                             &args,
                             fu.as_deref(),
                             global_file_access,
+                            policy_copy,
                         )
                         .await;
                         (idx, name, args, result)
@@ -2936,16 +2967,62 @@ pub async fn stream_chat(
     global_file_access: bool,
     agent_mode: String,
 ) -> Value {
-    if agent_mode == "goal" {
-        return crate::goal::execute_goal_loop(app, messages, conv_id).await;
-    }
-    stream_internal(
+    stream_chat_with_model(
         app,
         messages,
         conv_id,
         from_user,
         global_file_access,
         agent_mode,
+        None,
+    )
+    .await
+}
+
+pub async fn stream_chat_with_model(
+    app: AppHandle,
+    messages: Vec<Value>,
+    conv_id: Option<String>,
+    from_user: Option<String>,
+    global_file_access: bool,
+    agent_mode: String,
+    model: Option<String>,
+) -> Value {
+    stream_chat_with_policy(
+        app,
+        messages,
+        conv_id,
+        from_user,
+        global_file_access,
+        agent_mode,
+        model,
+        crate::tools::ToolExecutionPolicy::default(),
+    )
+    .await
+}
+
+pub async fn stream_chat_with_policy(
+    app: AppHandle,
+    messages: Vec<Value>,
+    conv_id: Option<String>,
+    from_user: Option<String>,
+    global_file_access: bool,
+    agent_mode: String,
+    model: Option<String>,
+    policy: crate::tools::ToolExecutionPolicy,
+) -> Value {
+    if agent_mode == "goal" {
+        return crate::goal::execute_goal_loop(app, messages, conv_id).await;
+    }
+    stream_internal_with_model(
+        app,
+        messages,
+        conv_id,
+        from_user,
+        global_file_access,
+        agent_mode,
+        model,
+        Some(policy),
     )
     .await
 }
