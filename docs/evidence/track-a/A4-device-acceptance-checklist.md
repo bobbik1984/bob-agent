@@ -14,7 +14,7 @@
 
 | 端别 | 候选版本命名规范 | 构建 Commit Hash | 产物形态 | 当前就绪状态 |
 |:---|:---|:---|:---|:---|
-| **PC 生产候选端** | `bob-v0.9.6-candidate-pc` | `86ce393ed2611dd6c588b4e8b780c85c8da95f53` | `dist-release/bob-v0.9.6-installer.exe` (43,712,512 字节)<br>SHA256: `E8362E0726CAFBCA2002956AA549A5022D5BB57B6FD35AF451375657C31D5715`<br>便携版: `dist-release/bob-v0.9.6-portable.zip` (33,511,946 字节)<br>SHA256: `3497DAC0E8FC37622D6E00C9F35BA69DF0B3CBBF3BD0F196B0559E1240FA4460` | **已完成官方 CI 构建并下载就绪** (经官方 `windows.yml` 定制安装器流水线构建，无故障注入代码) |
+| **PC 生产候选端** | `bob-v0.9.6-candidate-pc` | `ebb9b6241b12b5963b516fa8f60da308eb0141fc` | `dist-release/bob-v0.9.6-installer.exe` (43,704,320 字节)<br>SHA256: `069666992FEEA45A06C8CF19655966FA4D447189966D929589D092629C4EA2B3`<br>便携版: `dist-release/bob-v0.9.6-portable.zip` (33,503,394 字节)<br>SHA256: `6E4E8A6EE2B95ED46D1A5FD7D1800AC429971DE003565314CB9F959552058D60` | **已完成官方 CI 构建并下载就绪** (经官方 `windows.yml` 定制安装器流水线构建，具备无感自愈与防文件占用升级能力) |
 | **PC 专用诊断端** | `bob-v0.9.6-diagnostic-pc` | `86ce393ed2611dd6c588b4e8b780c85c8da95f53` | `dist-release/bob-v0.9.6-diagnostic-pc.exe` (71,006,720 字节)<br>SHA256: `25FBAEC87F6B55B6455DAEB3BB45599D9ECA15B4640FEC473B2CCBC8E5066ABA` | **已本地生成就绪** (包含 `fault-injection` 特性门禁与启动缺参 Fail-Closed 防护，专供 Case 07 测试) |
 | **Android 移动端** | `bob-v0.9.6-candidate-android` | `86ce393ed2611dd6c588b4e8b780c85c8da95f53` | `dist-release/bob-v0.9.6-signed.apk` (92,799,330 字节)<br>SHA256: `9F9C29477E4342D8203081ABC77C9C37D385AA8F72521D0AE3779064E7447835` | **已完成官方 CI 构建并下载就绪** (经 `android.yml` 在 Ubuntu 云端完成 NDK 编译、4KB 对齐与签名) |
 | **协议版本** | `SYNC_PROTOCOL_VERSION: "0.9.6-sec01"` | 契约对齐 | JSON / WebSocket / Ed25519 PoP | 源码已冻结 |

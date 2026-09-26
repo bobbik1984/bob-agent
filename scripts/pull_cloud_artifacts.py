@@ -43,11 +43,36 @@ def get_github_token():
 
 import time
 
-def download_file(url, target_path, max_retries=5):
+def download_file(url, target_path, max_retries=15):
     print(f"  正在下载: {os.path.basename(target_path)} ...")
+    temp_path = target_path + ".part"
+
+    # 优先使用系统 curl.exe（具备原生 -C - 断点续传和多级连接重试）
+    try:
+        cmd = [
+            "curl.exe",
+            "-L",
+            "-C", "-",
+            "--retry", str(max_retries),
+            "--retry-connrefused",
+            "--retry-delay", "3",
+            "--connect-timeout", "30",
+            "-H", "User-Agent: Bob-Artifact-Puller",
+            "-o", temp_path,
+            url,
+        ]
+        ret = subprocess.run(cmd)
+        if ret.returncode == 0 and os.path.exists(temp_path) and os.path.getsize(temp_path) > 0:
+            if os.path.exists(target_path):
+                os.remove(target_path)
+            os.rename(temp_path, target_path)
+            print("\n    ✓ 下载完成。")
+            return
+    except Exception as e:
+        print(f"  curl.exe 执行异常，回退到 Python 原生下载: {e}")
+
     ctx = ssl.create_default_context()
     block_size = 1024 * 1024  # 1MB
-    temp_path = target_path + ".part"
     downloaded = 0
     if os.path.exists(temp_path):
         downloaded = os.path.getsize(temp_path)
@@ -92,7 +117,7 @@ def download_file(url, target_path, max_retries=5):
             return
         except Exception as e:
             print(f"\n    ⚠️ 下载中断 ({e})，正在尝试第 {attempt}/{max_retries} 次断点续传...")
-            time.sleep(2)
+            time.sleep(3)
             if os.path.exists(temp_path):
                 downloaded = os.path.getsize(temp_path)
 
