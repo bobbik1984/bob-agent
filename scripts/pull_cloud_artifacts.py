@@ -41,31 +41,62 @@ def get_github_token():
     return None
 
 
-def download_file(url, target_path):
+import time
+
+def download_file(url, target_path, max_retries=5):
     print(f"  正在下载: {os.path.basename(target_path)} ...")
     ctx = ssl.create_default_context()
-    req = urllib.request.Request(url, headers={"User-Agent": "Bob-Artifact-Puller"})
-    
-    with urllib.request.urlopen(req, context=ctx) as resp:
-        total_length = resp.headers.get('content-length')
-        total_size = int(total_length) if total_length else None
-        downloaded = 0
-        block_size = 1024 * 1024  # 1MB
-        
-        with open(target_path, 'wb') as f:
-            while True:
-                chunk = resp.read(block_size)
-                if not chunk:
-                    break
-                f.write(chunk)
-                downloaded += len(chunk)
-                if total_size:
-                    pct = (downloaded / total_size) * 100
-                    mb_done = downloaded / (1024 * 1024)
-                    mb_total = total_size / (1024 * 1024)
-                    sys.stdout.write(f"\r    -> 进度: {pct:.1f}% ({mb_done:.1f}MB / {mb_total:.1f}MB)")
-                    sys.stdout.flush()
-    print("\n    ✓ 下载完成。")
+    block_size = 1024 * 1024  # 1MB
+    temp_path = target_path + ".part"
+    downloaded = 0
+    if os.path.exists(temp_path):
+        downloaded = os.path.getsize(temp_path)
+
+    for attempt in range(1, max_retries + 1):
+        try:
+            headers = {"User-Agent": "Bob-Artifact-Puller"}
+            if downloaded > 0:
+                headers["Range"] = f"bytes={downloaded}-"
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, context=ctx, timeout=30) as resp:
+                content_range = resp.headers.get('content-range')
+                total_size = None
+                if content_range and '/' in content_range:
+                    try:
+                        total_size = int(content_range.split('/')[-1])
+                    except Exception:
+                        pass
+                if not total_size:
+                    total_length = resp.headers.get('content-length')
+                    total_size = int(total_length) + downloaded if total_length else None
+
+                mode = 'ab' if downloaded > 0 else 'wb'
+                with open(temp_path, mode) as f:
+                    while True:
+                        chunk = resp.read(block_size)
+                        if not chunk:
+                            break
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        if total_size:
+                            pct = (downloaded / total_size) * 100
+                            mb_done = downloaded / (1024 * 1024)
+                            mb_total = total_size / (1024 * 1024)
+                            sys.stdout.write(f"\r    -> 进度: {pct:.1f}% ({mb_done:.1f}MB / {mb_total:.1f}MB)")
+                            sys.stdout.flush()
+
+            if os.path.exists(target_path):
+                os.remove(target_path)
+            os.rename(temp_path, target_path)
+            print("\n    ✓ 下载完成。")
+            return
+        except Exception as e:
+            print(f"\n    ⚠️ 下载中断 ({e})，正在尝试第 {attempt}/{max_retries} 次断点续传...")
+            time.sleep(2)
+            if os.path.exists(temp_path):
+                downloaded = os.path.getsize(temp_path)
+
+    raise RuntimeError(f"下载文件失败超过最大重试次数: {target_path}")
 
 def fetch_release_assets(tag):
     url = f"https://api.github.com/repos/{REPO}/releases/tags/{tag}"
