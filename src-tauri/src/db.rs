@@ -729,3 +729,71 @@ pub fn system_factory_reset(db: State<DbState>) -> bool {
     let _ = std::fs::remove_file(config_path);
     true
 }
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ExistingUserSummary {
+    pub conversation_count: i64,
+    pub message_count: i64,
+    pub latest_model: Option<String>,
+}
+
+/// 跨版本/升级无感继承探针：检测本地是否已存在历史会话数据
+pub fn detect_existing_history(data_dir: &std::path::Path) -> Option<ExistingUserSummary> {
+    let db_path = data_dir.join("bob.db");
+    if !db_path.exists() {
+        return None;
+    }
+    let conn = rusqlite::Connection::open(&db_path).ok()?;
+
+    let has_conv_table: i64 = conn
+        .query_row(
+            "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='conversations';",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or(0);
+    if has_conv_table == 0 {
+        return None;
+    }
+
+    let conv_count: i64 = conn
+        .query_row(
+            "SELECT count(*) FROM conversations WHERE is_deleted = 0;",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or(0);
+
+    let has_msg_table: i64 = conn
+        .query_row(
+            "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='messages';",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or(0);
+
+    let msg_count: i64 = if has_msg_table > 0 {
+        conn.query_row("SELECT count(*) FROM messages;", [], |r| r.get(0))
+            .unwrap_or(0)
+    } else {
+        0
+    };
+
+    if conv_count == 0 && msg_count == 0 {
+        return None;
+    }
+
+    let latest_model: Option<String> = conn
+        .query_row(
+            "SELECT model FROM conversations WHERE model IS NOT NULL AND model != '' ORDER BY updated_at DESC LIMIT 1;",
+            [],
+            |r| r.get(0),
+        )
+        .ok();
+
+    Some(ExistingUserSummary {
+        conversation_count: conv_count,
+        message_count: msg_count,
+        latest_model,
+    })
+}

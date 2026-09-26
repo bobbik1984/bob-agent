@@ -266,7 +266,7 @@ pub(crate) fn is_valid_json_file(path: &Path) -> bool {
     }
     match fs::read_to_string(path) {
         Ok(content) => {
-            let trimmed = content.trim();
+            let trimmed = content.trim_start_matches('\u{feff}').trim();
             if trimmed.is_empty() {
                 return false;
             }
@@ -435,7 +435,8 @@ pub(crate) fn read_config_checked_at(path: &Path) -> Result<Value, String> {
     }
     let data = fs::read_to_string(path)
         .map_err(|e| format!("Failed to read config file {:?}: {}", path, e))?;
-    let mut json = serde_json::from_str::<Value>(&data)
+    let data_clean = data.trim_start_matches('\u{feff}');
+    let mut json = serde_json::from_str::<Value>(data_clean)
         .map_err(|e| format!("Failed to parse config file {:?} as JSON: {}", path, e))?;
     if !json.is_object() {
         return Err(format!(
@@ -744,11 +745,65 @@ async fn system_take_screenshot(app_handle: tauri::AppHandle) -> Result<(), Stri
     Ok(())
 }
 
+pub(crate) fn system_is_setup_complete_internal(config_path: &Path, data_dir: &Path) -> bool {
+    let mut config = match read_config_checked_at(config_path) {
+        Ok(v) => v,
+        Err(_) => serde_json::json!({}),
+    };
+
+    // 1. 若 config 已明确标记已配置，直接通过
+    if config.get("onboarded").and_then(|v| v.as_bool()).unwrap_or(false) {
+        return true;
+    }
+
+    // 2. 若 config 中已有配置的 model 或非空 apiKeys，判定为已配置并自愈 onboarded 标记
+    let has_model = config
+        .get("model")
+        .and_then(|v| v.as_str())
+        .map(|s| !s.trim().is_empty())
+        .unwrap_or(false);
+    let has_api_keys = config
+        .get("apiKeys")
+        .and_then(|k| k.as_object())
+        .map(|o| !o.is_empty())
+        .unwrap_or(false);
+
+    if has_model || has_api_keys {
+        if let Some(obj) = config.as_object_mut() {
+            obj.insert("onboarded".to_string(), serde_json::json!(true));
+            let _ = write_config_checked_at(config_path, &config);
+        }
+        return true;
+    }
+
+    // 3. 升级与无感继承：深度探针本地 SQLite 数据库 (bob.db)
+    // 防止覆盖安装或 config 缺失/重置时将老用户误判为新用户并弹出向导
+    if let Some(summary) = db::detect_existing_history(data_dir) {
+        log::info!(
+            "[Setup] Detected existing installation from database: {} conversations, {} messages. Auto-healing config...",
+            summary.conversation_count,
+            summary.message_count
+        );
+        if let Some(obj) = config.as_object_mut() {
+            obj.insert("onboarded".to_string(), serde_json::json!(true));
+            if let Some(ref model) = summary.latest_model {
+                let current_model = obj.get("model").and_then(|v| v.as_str()).unwrap_or("");
+                if current_model.trim().is_empty() {
+                    obj.insert("model".to_string(), serde_json::json!(model));
+                }
+            }
+            let _ = write_config_checked_at(config_path, &config);
+        }
+        return true;
+    }
+
+    // 4. 全新用户：未找到配置且未找到历史会话
+    false
+}
+
 #[tauri::command]
 fn system_is_setup_complete() -> bool {
-    let config = read_config();
-    config.get("onboarded").and_then(|v| v.as_bool()).unwrap_or(false)
-        || config.get("model").is_some()
+    system_is_setup_complete_internal(&get_config_path(), &get_data_dir())
 }
 
 #[tauri::command]
@@ -1949,4 +2004,106 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rusqlite::Connection;
+    use std::fs;
+
+    fn make_test_dir(tag: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("bob_setup_{}_{}", tag, uuid::Uuid::new_v4()));
+        let _ = fs::create_dir_all(&dir);
+        dir
+    }
+
+    #[test]
+    fn test_read_config_checked_at_strips_bom() {
+        let temp_dir = make_test_dir("bom");
+        let cfg_path = temp_dir.join("config.json");
+        let bom_content = format!("\u{feff}{{\"theme\": \"dark\", \"accentColor\": \"#3b82f6\"}}");
+        fs::write(&cfg_path, bom_content).unwrap();
+
+        let parsed = read_config_checked_at(&cfg_path).expect("should parse despite BOM");
+        assert_eq!(parsed["theme"], "dark");
+        assert_eq!(parsed["accentColor"], "#3b82f6");
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_system_is_setup_complete_fresh_user() {
+        let temp_dir = make_test_dir("fresh");
+        let cfg_path = temp_dir.join("config.json");
+        let data_dir = temp_dir.join("data");
+        fs::create_dir_all(&data_dir).unwrap();
+
+        assert!(!system_is_setup_complete_internal(&cfg_path, &data_dir));
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_system_is_setup_complete_onboarded_true() {
+        let temp_dir = make_test_dir("onboarded");
+        let cfg_path = temp_dir.join("config.json");
+        let data_dir = temp_dir.join("data");
+        fs::create_dir_all(&data_dir).unwrap();
+        fs::write(&cfg_path, "{\"onboarded\": true}").unwrap();
+
+        assert!(system_is_setup_complete_internal(&cfg_path, &data_dir));
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_system_is_setup_complete_model_autoheals() {
+        let temp_dir = make_test_dir("model");
+        let cfg_path = temp_dir.join("config.json");
+        let data_dir = temp_dir.join("data");
+        fs::create_dir_all(&data_dir).unwrap();
+        fs::write(&cfg_path, "{\"model\": \"deepseek-v4-flash\"}").unwrap();
+
+        assert!(system_is_setup_complete_internal(&cfg_path, &data_dir));
+        let healed = read_config_checked_at(&cfg_path).unwrap();
+        assert_eq!(healed["onboarded"], true);
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_system_is_setup_complete_with_db_history_autoheals() {
+        let temp_dir = make_test_dir("db_history");
+        let cfg_path = temp_dir.join("config.json");
+        let data_dir = temp_dir.join("data");
+        fs::create_dir_all(&data_dir).unwrap();
+
+        // config 仅有外观主题配置，无 onboarded 也无 model
+        fs::write(&cfg_path, "{\"theme\": \"dark\", \"accentColor\": \"#3b82f6\"}").unwrap();
+
+        // 创建含有历史会话的 SQLite 数据库
+        let db_path = data_dir.join("bob.db");
+        let conn = Connection::open(&db_path).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE conversations (
+                id TEXT PRIMARY KEY,
+                title TEXT,
+                model TEXT,
+                updated_at INTEGER,
+                is_deleted INTEGER DEFAULT 0
+            );
+            INSERT INTO conversations (id, title, model, updated_at, is_deleted)
+            VALUES ('conv-1', '测试历史会话', 'deepseek-v4-flash', 1789964906000, 0);",
+        )
+        .unwrap();
+        drop(conn);
+
+        // 执行检测
+        let res = system_is_setup_complete_internal(&cfg_path, &data_dir);
+        assert!(res, "应当检测到历史数据并判定为已配置");
+
+        // 验证 config.json 自愈
+        let healed = read_config_checked_at(&cfg_path).unwrap();
+        assert_eq!(healed["onboarded"], true);
+        assert_eq!(healed["model"], "deepseek-v4-flash");
+        assert_eq!(healed["theme"], "dark");
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
 }

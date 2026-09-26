@@ -1027,6 +1027,14 @@ async function loadConversations() {
   } else if (!activeConversationId.value) {
     activeConversationId.value = conversations.value[0].id;
   }
+  // 防御性恢复：若当前激活模型为空，且历史会话已有模型配置，则平滑对齐并持久化
+  if (!currentModel.value && conversations.value.length > 0) {
+    const candidate = conversations.value.find(c => c.model && c.model.trim() !== '')?.model;
+    if (candidate) {
+      currentModel.value = candidate;
+      await window.appAPI.setConfig('model', candidate);
+    }
+  }
 }
 
 async function createNewChat() {
