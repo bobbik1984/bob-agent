@@ -68,6 +68,8 @@ lazy_static! {
         RwLock::new(HashMap::new());
     pub static ref RELAY_RECONNECT_TRIGGER: Mutex<Option<tokio::sync::mpsc::Sender<()>>> =
         Mutex::new(None);
+    pub static ref RELAY_WAKEUP_NOTIFY: Arc<tokio::sync::Notify> =
+        Arc::new(tokio::sync::Notify::new());
     pub static ref ACTIVE_RPC_TASKS: Arc<Mutex<HashMap<String, ActiveRpcTask>>> =
         Arc::new(Mutex::new(HashMap::new()));
     pub static ref STAGED_CHANGES: Arc<Mutex<HashMap<String, StagedChange>>> =
@@ -1968,6 +1970,15 @@ pub async fn check_device_online(app: AppHandle, target_device_id: String) -> Re
             if relay_connected {
                 return Ok(true);
             }
+
+            // 若中继掉线，触发快速重连探测（最多等 2 秒）
+            force_relay_reconnect();
+            for _ in 0..10 {
+                tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+                if RELAY_TX.read().map(|l| l.is_some()).unwrap_or(false) {
+                    return Ok(true);
+                }
+            }
         }
     }
 
@@ -2007,7 +2018,10 @@ pub async fn dispatch_remote_instruction(
 
     let payload_bytes = crate::device_trust::canonicalize_json_value(&inner_payload);
     let envelope = crate::device_trust::sign_outgoing_rpc(&app, &target_device_id, "rpc_request", &payload_bytes, Some(&req_id))?;
-    inner_payload["envelope"] = serde_json::to_value(&envelope).map_err(|e| e.to_string())?;
+    let env_json = serde_json::to_value(&envelope).map_err(|e| e.to_string())?;
+    inner_payload["envelope"] = env_json.clone();
+    inner_payload["auth_envelope"] = env_json;
+    inner_payload["raw_payload"] = serde_json::json!(String::from_utf8(payload_bytes.clone()).unwrap_or_default());
 
     let request = serde_json::json!({
         "type": "proxy",
@@ -2064,7 +2078,10 @@ pub async fn dispatch_remote_approval(
 
     let payload_bytes = crate::device_trust::canonicalize_json_value(&inner_payload);
     let envelope = crate::device_trust::sign_outgoing_rpc(&app, &target_device_id, "rpc_approval", &payload_bytes, Some(&request_id))?;
-    inner_payload["envelope"] = serde_json::to_value(&envelope).map_err(|e| e.to_string())?;
+    let env_json = serde_json::to_value(&envelope).map_err(|e| e.to_string())?;
+    inner_payload["envelope"] = env_json.clone();
+    inner_payload["auth_envelope"] = env_json;
+    inner_payload["raw_payload"] = serde_json::json!(String::from_utf8(payload_bytes.clone()).unwrap_or_default());
 
     let request = serde_json::json!({
         "type": "proxy",
@@ -2117,7 +2134,10 @@ pub async fn cancel_remote_instruction(
 
     let payload_bytes = crate::device_trust::canonicalize_json_value(&inner_payload);
     let envelope = crate::device_trust::sign_outgoing_rpc(&app, &target_device_id, "rpc_cancel", &payload_bytes, Some(&request_id))?;
-    inner_payload["envelope"] = serde_json::to_value(&envelope).map_err(|e| e.to_string())?;
+    let env_json = serde_json::to_value(&envelope).map_err(|e| e.to_string())?;
+    inner_payload["envelope"] = env_json.clone();
+    inner_payload["auth_envelope"] = env_json;
+    inner_payload["raw_payload"] = serde_json::json!(String::from_utf8(payload_bytes.clone()).unwrap_or_default());
 
     let request = serde_json::json!({
         "type": "proxy",
@@ -2821,16 +2841,28 @@ pub async fn send_relay_request_and_wait(
         });
     }
 
-    let relay_tx = {
+    let mut relay_tx = {
         let lock = RELAY_TX.read().unwrap();
         lock.as_ref().cloned()
     };
+
+    if relay_tx.is_none() {
+        force_relay_reconnect();
+        for _ in 0..25 {
+            tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+            let lock = RELAY_TX.read().unwrap();
+            if lock.is_some() {
+                relay_tx = lock.as_ref().cloned();
+                break;
+            }
+        }
+    }
 
     let send_result = if let Some(tx) = relay_tx {
         tx.send(Message::Text(request.to_string().into())).await
     } else {
         PENDING_REQUESTS.write().unwrap().remove(&message_id);
-        return Err("ERR-SYNC-02: Relay 后台未连接".to_string());
+        return Err("ERR-SYNC-02: Relay 后台未连接 (请检查中继或网络状态)".to_string());
     };
 
     if send_result.is_err() {
@@ -2886,10 +2918,22 @@ pub async fn relay_handshake(
         serde_json::json!({"stage": "relay_connect", "status": "running"}),
     );
 
-    let relay_tx = {
+    let mut relay_tx = {
         let lock = RELAY_TX.read().unwrap();
         lock.as_ref().cloned()
     };
+
+    if relay_tx.is_none() {
+        force_relay_reconnect();
+        for _ in 0..40 {
+            tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+            let lock = RELAY_TX.read().unwrap();
+            if lock.is_some() {
+                relay_tx = lock.as_ref().cloned();
+                break;
+            }
+        }
+    }
 
     if relay_tx.is_none() {
         let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_connect", "status": "error", "detail": "ERR-PAIRING-01: Relay backend not connected"}));
@@ -4981,22 +5025,52 @@ async fn connect_websocket_robust(
         ws_url
     );
 
-    let request = ws_url.into_client_request().map_err(|e| e.to_string())?;
+    let mut request = ws_url.into_client_request().map_err(|e| e.to_string())?;
     let host = request.uri().host().unwrap_or("relay.bobbik.org").to_string();
     let port = request.uri().port_u16().unwrap_or(443);
 
-    // Resolve DNS and sort so IPv4 comes first (avoids IPv6 blackholes behind VPNs)
+    request.headers_mut().insert(
+        tokio_tungstenite::tungstenite::http::header::USER_AGENT,
+        tokio_tungstenite::tungstenite::http::HeaderValue::from_static("Mozilla/5.0 (Linux; Android 14; Mobile) BobAgent/0.9.9"),
+    );
+    if let Ok(host_hdr) = tokio_tungstenite::tungstenite::http::HeaderValue::from_str(&host) {
+        request.headers_mut().insert(tokio_tungstenite::tungstenite::http::header::HOST, host_hdr);
+    }
+    request.headers_mut().insert(
+        tokio_tungstenite::tungstenite::http::header::ORIGIN,
+        tokio_tungstenite::tungstenite::http::HeaderValue::from_static("https://relay.bobbik.org"),
+    );
+
+    // Resolve DNS and sort so IPv4 comes first (avoids IPv6 blackholes behind VPNs & cellular APNs)
     let addrs_lookup = tokio::net::lookup_host(format!("{}:{}", host, port)).await;
     let mut addrs: Vec<std::net::SocketAddr> = match addrs_lookup {
         Ok(iter) => iter.collect(),
         Err(e) => {
-            log::warn!("[WS Robust] DNS lookup failed for {}:{}: {}, fallback to connect_async", host, port, e);
-            return tokio::time::timeout(std::time::Duration::from_secs(10), tokio_tungstenite::connect_async(request))
-                .await
-                .map_err(|_| "WS connection timeout after 10s".to_string())?
-                .map_err(|e| e.to_string());
+            log::warn!("[WS Robust] DNS lookup failed for {}:{}: {}, checking Anycast fallbacks", host, port, e);
+            Vec::new()
         }
     };
+
+    // Cloudflare Anycast IPv4 fallbacks for relay.bobbik.org
+    if host == "relay.bobbik.org" {
+        if let Ok(addr1) = "172.67.212.162:443".parse() {
+            if !addrs.contains(&addr1) {
+                addrs.push(addr1);
+            }
+        }
+        if let Ok(addr2) = "104.21.53.119:443".parse() {
+            if !addrs.contains(&addr2) {
+                addrs.push(addr2);
+            }
+        }
+    }
+
+    if addrs.is_empty() {
+        return tokio::time::timeout(std::time::Duration::from_secs(10), tokio_tungstenite::connect_async(request))
+            .await
+            .map_err(|_| "WS connection timeout after 10s".to_string())?
+            .map_err(|e| e.to_string());
+    }
 
     addrs.sort_by_key(|addr| !addr.is_ipv4());
 
@@ -5087,6 +5161,11 @@ fn extract_relay_payload_bytes(inner_payload: &serde_json::Value, expected_hash:
     if let Some(obj) = inner_clone.as_object_mut() {
         obj.remove("auth_envelope");
         obj.remove("envelope");
+        obj.remove("raw_payload");
+        let can = crate::device_trust::canonicalize_json_value(&inner_clone);
+        if crate::device_trust::compute_sha512(&can) == expected_hash {
+            return can;
+        }
         if let Ok(b) = serde_json::to_vec(&inner_clone) {
             if crate::device_trust::compute_sha512(&b) == expected_hash {
                 return b;
@@ -7507,8 +7586,13 @@ pub fn start_relay_listener(app: AppHandle) {
                 crate::sync_diagnostics::RelayConnectionState::Disconnected,
             );
 
-            // Reconnect backoff
-            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            // Reconnect backoff with immediate wakeup support
+            tokio::select! {
+                _ = tokio::time::sleep(std::time::Duration::from_secs(5)) => {}
+                _ = RELAY_WAKEUP_NOTIFY.notified() => {
+                    log::info!("[Sync Engine] Outer loop woken up immediately to reconnect Relay");
+                }
+            }
         }
     });
 }
@@ -7587,10 +7671,11 @@ pub fn get_p2p_relay_status() -> bool {
 #[tauri::command]
 
 pub fn force_relay_reconnect() {
-    log::info!("[Sync Engine] Force reconnect triggered by frontend network change");
+    log::info!("[Sync Engine] Force reconnect triggered by frontend network change or request wakeup");
     if let Some(tx) = RELAY_RECONNECT_TRIGGER.lock().unwrap().as_ref() {
         let _ = tx.try_send(());
     }
+    RELAY_WAKEUP_NOTIFY.notify_waiters();
 }
 
 #[cfg(test)]
@@ -11383,5 +11468,45 @@ mod tests {
 
         crate::fault_injection::set_simulate_consumption_failure(false);
         let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_extract_relay_payload_bytes_canonical() {
+        let mut inner_payload = serde_json::json!({
+            "action": "rpc_request",
+            "request_id": "req-canonical-001",
+            "instruction": "ls -la",
+            "read_only": true,
+            "envelope": { "dummy": "val" },
+            "auth_envelope": { "dummy": "val" }
+        });
+
+        // Compute hash of canonical JSON without envelopes
+        let mut clean = inner_payload.clone();
+        clean.as_object_mut().unwrap().remove("envelope");
+        clean.as_object_mut().unwrap().remove("auth_envelope");
+        let expected_bytes = crate::device_trust::canonicalize_json_value(&clean);
+        let expected_hash = crate::device_trust::compute_sha512(&expected_bytes);
+
+        // Verify extract_relay_payload_bytes matches
+        let extracted = extract_relay_payload_bytes(&inner_payload, &expected_hash);
+        assert_eq!(extracted, expected_bytes);
+    }
+
+    #[tokio::test]
+    async fn test_relay_wakeup_notify() {
+        let notified = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let notified_clone = notified.clone();
+
+        let handle = tokio::spawn(async move {
+            RELAY_WAKEUP_NOTIFY.notified().await;
+            notified_clone.store(true, std::sync::atomic::Ordering::SeqCst);
+        });
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+        force_relay_reconnect();
+
+        let _ = tokio::time::timeout(tokio::time::Duration::from_millis(500), handle).await;
+        assert!(notified.load(std::sync::atomic::Ordering::SeqCst));
     }
 }

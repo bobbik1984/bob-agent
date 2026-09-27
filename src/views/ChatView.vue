@@ -842,6 +842,9 @@ import TodayBriefCard from '../components/TodayBriefCard.vue';
 import { useChat } from '../composables/useChat.js';
 import { useModelSwitcher } from '../composables/useModelSwitcher.js';
 import { useDragDrop } from '../composables/useDragDrop.js';
+import { useDialog } from '../composables/useDialog.js';
+
+const { showConfirm, showAlert } = useDialog();
 
 const isEditingTitle = ref(false);
 const titleInputRef = ref(null);
