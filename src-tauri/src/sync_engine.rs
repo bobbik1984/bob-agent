@@ -3507,6 +3507,7 @@ pub fn import_sync_data_to_conn_atomic(
 
     // 提取配置差异为白名单操作列表 (Durable Outbox operations)
     let mut config_ops: Vec<serde_json::Value> = Vec::new();
+    let mut staged_req_info: Option<(String, String)> = None;
     if merged_config != current_config {
         if let Some(m_obj) = merged_config.as_object() {
             let c_obj = current_config.as_object();
@@ -3556,6 +3557,7 @@ pub fn import_sync_data_to_conn_atomic(
         } else {
             ("sync_internal".to_string(), format!("req-sync-{}", ulid::Ulid::new()))
         };
+        staged_req_info = Some((session_id.clone(), request_id.clone()));
         let event_id = format!("evt-cfg-{}-{}", session_id, request_id);
 
         let mut enriched_ops = config_ops.clone();
@@ -3960,7 +3962,9 @@ pub fn import_sync_data_to_conn_atomic(
     // 仅在 SQLite 事务成功提交后，通过 durable outbox 统一执行调谐与物化落盘
     let (stage, applied_count, pending_count, delivery_error) = if !config_ops.is_empty() {
         let _ = crate::device_trust::drain_staged_outbox(conn, ts);
-        let (session_id, request_id) = if let Some(ref idem) = idempotency {
+        let (session_id, request_id) = if let Some(ref s) = staged_req_info {
+            (s.0.clone(), s.1.clone())
+        } else if let Some(ref idem) = idempotency {
             (idem.session_id.to_string(), idem.request_id.to_string())
         } else {
             ("sync_internal".to_string(), "req-sync".to_string())

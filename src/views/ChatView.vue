@@ -519,7 +519,7 @@
             >
               <Mic :size="16" />
             </button>
-            <button v-else class="action-btn send-btn" :disabled="!canSend || !chatReady" @click="sendMessage" :title="chatReadyMsg || $t('chat.send')">
+            <button v-else class="action-btn send-btn" :disabled="!canSend || !isInputReady" @click="sendMessage" :title="isInputReady ? $t('chat.send') : (chatReadyMsg || $t('chat.send'))">
               <span class="icon-send"></span>
             </button>
           </div>
@@ -636,9 +636,9 @@
           <button
             v-else
             class="action-btn send-btn"
-            :disabled="!canSend || !chatReady"
+            :disabled="!canSend || !isInputReady"
             @click="sendMessage"
-            :title="chatReadyMsg || $t('chat.send')"
+            :title="isInputReady ? $t('chat.send') : (chatReadyMsg || $t('chat.send'))"
           >
             <span class="icon-send"></span>
           </button>
@@ -1568,6 +1568,15 @@ const {
   clipMessageToNote,
 } = useChat(props, emit, { scrollToBottom, currentModelName, globalFileAccess, agentMode });
 
+const isInputReady = computed(() => {
+  // 1. 若当前指定由已配对 PC 执行，或者输入前缀含有 @pc / /pc，则执行端在 PC，无需手机本地 API Key
+  if (currentExecutionDevice.value?.type === 'pc') return true;
+  const txt = (inputText.value || '').trim();
+  if (txt.match(/^(@pc|\/pc)/i)) return true;
+  // 2. 否则由本机执行，需满足本地模型/Key 就绪条件
+  return chatReady.value;
+});
+
 // 拖拽/附件
 const {
   isDragging, pendingImages, pendingFiles, pendingFolderInfo, pendingKBEstimate,
@@ -2025,9 +2034,12 @@ function handleKeydown(event) {
     }
   }
 
-  if (event.key === 'Enter' && !event.shiftKey) {
+  if ((event.key === 'Enter' || event.keyCode === 13) && !event.shiftKey) {
+    if (event.isComposing) return;
     event.preventDefault();
-    sendMessage();
+    if (canSend.value && isInputReady.value) {
+      sendMessage();
+    }
   }
 }
 

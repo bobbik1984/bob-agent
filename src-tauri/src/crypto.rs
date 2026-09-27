@@ -162,75 +162,67 @@ pub fn ensure_device_identity_unlocked_from_state(
 
 #[tauri::command]
 pub fn check_device_keys_initialized(app: AppHandle) -> bool {
-    let key_path = get_keys_path(&app);
-    if let Some(state) = app.try_state::<DeviceIdentityState>() {
-        if ensure_device_identity_unlocked_core(&key_path, &state.0).is_ok() {
+    let config = crate::read_config();
+    // 优先检查是否已设置本地 UI 门禁 PIN (SEC-01 解耦独立验证)
+    if let Some(hash) = config.get("p2p_pin_hash").and_then(|v| v.as_str()) {
+        if !hash.trim().is_empty() {
             return true;
         }
     }
-    key_path.exists()
+
+    // 向后兼容历史遗留自定义 PIN
+    let key_path = get_keys_path(&app);
+    if key_path.exists() {
+        if let Ok(file_content) = fs::read_to_string(&key_path) {
+            if let Ok(data) = serde_json::from_str::<EncryptedKeyData>(&file_content) {
+                // 若可用 DEFAULT_INTERNAL_PIN 解密，说明仅是开箱自愈生成的默认秘钥，用户尚未设置本地 PIN
+                if let Ok(aes_key) = derive_key(DEFAULT_INTERNAL_PIN, &data.salt) {
+                    if let Ok(cipher) = Aes256Gcm::new_from_slice(&aes_key) {
+                        if let Ok(nonce_bytes) = BASE64.decode(&data.nonce) {
+                            if let Ok(ciphertext) = BASE64.decode(&data.ciphertext) {
+                                if cipher.decrypt(Nonce::from_slice(&nonce_bytes), ciphertext.as_ref()).is_ok() {
+                                    return false;
+                                }
+                            }
+                        }
+                    }
+                }
+                // 无法用默认 PIN 解密，说明历史文件由旧版本用户自定义 PIN 加密
+                return true;
+            }
+        }
+    }
+    false
 }
 
 #[tauri::command]
 pub fn init_device_keys(
     pin: String,
     app: AppHandle,
-    state: tauri::State<'_, DeviceIdentityState>,
+    _state: tauri::State<'_, DeviceIdentityState>,
 ) -> Result<(), String> {
-    let path = get_keys_path(&app);
-    if path.exists() {
-        return Err("Keys already initialized. Use unlock_device_keys instead.".to_string());
+    let clean_pin = pin.trim();
+    if clean_pin.len() < 4 {
+        return Err("PIN 码至少需 4 位数字".to_string());
     }
 
-    // 1. Generate new Ed25519 keypair
-    let mut csprng = rand::rngs::OsRng;
-    let mut key_bytes = [0u8; 32];
-    csprng.fill_bytes(&mut key_bytes);
-    let signing_key = SigningKey::from_bytes(&key_bytes);
+    // 1. 确保底层设备身份密钥就绪（已在内存或自愈生成）
+    let _ = ensure_device_identity_unlocked_for_app(&app)?;
 
-    // 2. Generate Salt & Nonce
+    // 2. 生成本地 PIN 的独立安全 Salt 与 Argon2 哈希
+    let mut csprng = rand::rngs::OsRng;
     let mut salt_bytes = [0u8; 16];
     csprng.fill_bytes(&mut salt_bytes);
     let salt = BASE64.encode(salt_bytes);
-    let mut nonce_bytes = [0u8; 12];
-    csprng.fill_bytes(&mut nonce_bytes);
-    let nonce_str = BASE64.encode(nonce_bytes);
 
-    // 3. Derive AES key from PIN + Salt
-    let aes_key = derive_key(&pin, &salt)?;
-    let cipher = Aes256Gcm::new_from_slice(&aes_key).map_err(|e| e.to_string())?;
+    let pin_hash_bytes = derive_key(clean_pin, &salt)?;
+    let pin_hash = BASE64.encode(pin_hash_bytes);
 
-    // 4. Encrypt the private key
-    let nonce = Nonce::from_slice(&nonce_bytes);
-    let ciphertext = cipher
-        .encrypt(nonce, key_bytes.as_ref())
-        .map_err(|e| e.to_string())?;
-
-    // 5. Save to disk
-    if let Some(parent) = path.parent() {
-        let _ = fs::create_dir_all(parent);
-    }
-    let data = EncryptedKeyData {
-        salt,
-        nonce: nonce_str,
-        ciphertext: BASE64.encode(ciphertext),
-    };
-    fs::write(
-        path,
-        serde_json::to_string_pretty(&data).map_err(|e| e.to_string())?,
-    )
-    .map_err(|e| e.to_string())?;
-
-    // 6. Keep in memory
-    *state.0.lock().unwrap() = Some(signing_key.clone());
-
-    // 7. Sync to config
-    let verifying_key = VerifyingKey::from(&signing_key);
-    let b64_pub = BASE64.encode(verifying_key.to_bytes());
-    
+    // 3. 持久化到 config.json
     let mut app_config = crate::read_config_checked()?;
     if let Some(obj) = app_config.as_object_mut() {
-        obj.insert("device_id".to_string(), serde_json::json!(b64_pub));
+        obj.insert("p2p_pin_salt".to_string(), serde_json::json!(salt));
+        obj.insert("p2p_pin_hash".to_string(), serde_json::json!(pin_hash));
     }
     crate::write_config_checked(&app_config)?;
 
@@ -243,48 +235,66 @@ pub fn unlock_device_keys(
     app: AppHandle,
     state: tauri::State<'_, DeviceIdentityState>,
 ) -> Result<(), String> {
-    let path = get_keys_path(&app);
-    if !path.exists() {
-        return Err("Keys not initialized. Use init_device_keys first.".to_string());
+    let clean_pin = pin.trim();
+    if clean_pin.is_empty() {
+        return Err("请输入 PIN 码".to_string());
     }
 
-    let file_content = fs::read_to_string(path).map_err(|e| e.to_string())?;
-    let data: EncryptedKeyData =
-        serde_json::from_str(&file_content).map_err(|e| e.to_string())?;
+    // 确保底层身份密钥就绪
+    let _ = ensure_device_identity_unlocked_for_app(&app);
 
-    let aes_key = derive_key(&pin, &data.salt)?;
-    let cipher = Aes256Gcm::new_from_slice(&aes_key).map_err(|e| e.to_string())?;
-
-    let nonce_bytes = BASE64.decode(&data.nonce).map_err(|e| e.to_string())?;
-    let nonce = Nonce::from_slice(&nonce_bytes);
-
-    let ciphertext = BASE64.decode(&data.ciphertext).map_err(|e| e.to_string())?;
-    let decrypted = cipher
-        .decrypt(nonce, ciphertext.as_ref())
-        .map_err(|_| "Invalid PIN or corrupted key file.".to_string())?;
-
-    if decrypted.len() != 32 {
-        return Err("Corrupted private key length.".to_string());
-    }
-
-    let mut key_bytes = [0u8; 32];
-    key_bytes.copy_from_slice(&decrypted);
-    let signing_key = SigningKey::from_bytes(&key_bytes);
-
-    // Keep in memory
-    *state.0.lock().unwrap() = Some(signing_key.clone());
-    
-    // Sync to config
-    let verifying_key = VerifyingKey::from(&signing_key);
-    let b64_pub = BASE64.encode(verifying_key.to_bytes());
-    
     let mut app_config = crate::read_config_checked()?;
-    if let Some(obj) = app_config.as_object_mut() {
-        obj.insert("device_id".to_string(), serde_json::json!(b64_pub));
-    }
-    crate::write_config_checked(&app_config)?;
+    let stored_hash_opt = app_config.get("p2p_pin_hash").and_then(|v| v.as_str()).map(|s| s.to_string());
+    let stored_salt_opt = app_config.get("p2p_pin_salt").and_then(|v| v.as_str()).map(|s| s.to_string());
 
-    Ok(())
+    if let (Some(stored_hash), Some(stored_salt)) = (stored_hash_opt, stored_salt_opt) {
+        let candidate_key = derive_key(clean_pin, &stored_salt)?;
+        let candidate_hash = BASE64.encode(candidate_key);
+        if candidate_hash == stored_hash {
+            return Ok(());
+        } else {
+            return Err("PIN 码错误，请重新输入".to_string());
+        }
+    }
+
+    // 向后兼容历史遗留使用 PIN 加密密钥文件的场景
+    let key_path = get_keys_path(&app);
+    if key_path.exists() {
+        let file_content = fs::read_to_string(&key_path).map_err(|e| e.to_string())?;
+        let data: EncryptedKeyData = serde_json::from_str(&file_content).map_err(|e| e.to_string())?;
+
+        let aes_key = derive_key(clean_pin, &data.salt)?;
+        let cipher = Aes256Gcm::new_from_slice(&aes_key).map_err(|e| e.to_string())?;
+        let nonce_bytes = BASE64.decode(&data.nonce).map_err(|e| e.to_string())?;
+        let ciphertext = BASE64.decode(&data.ciphertext).map_err(|e| e.to_string())?;
+        let decrypted = cipher.decrypt(Nonce::from_slice(&nonce_bytes), ciphertext.as_ref())
+            .map_err(|_| "PIN 码错误，请重新输入".to_string())?;
+
+        if decrypted.len() != 32 {
+            return Err("设备秘钥文件长度异常".to_string());
+        }
+
+        let mut key_bytes = [0u8; 32];
+        key_bytes.copy_from_slice(&decrypted);
+        let signing_key = SigningKey::from_bytes(&key_bytes);
+        *state.0.lock().unwrap() = Some(signing_key.clone());
+
+        // 自动迁移保存本地 PIN 独立哈希，实现未来解耦
+        let mut csprng = rand::rngs::OsRng;
+        let mut salt_bytes = [0u8; 16];
+        csprng.fill_bytes(&mut salt_bytes);
+        let new_salt = BASE64.encode(salt_bytes);
+        let new_hash = BASE64.encode(derive_key(clean_pin, &new_salt)?);
+        if let Some(obj) = app_config.as_object_mut() {
+            obj.insert("p2p_pin_salt".to_string(), serde_json::json!(new_salt));
+            obj.insert("p2p_pin_hash".to_string(), serde_json::json!(new_hash));
+        }
+        let _ = crate::write_config_checked(&app_config);
+
+        return Ok(());
+    }
+
+    Err("尚未设置本地 PIN 码，请先设置".to_string())
 }
 
 /// SEC-01 重置设备秘钥核心逻辑 (可恢复状态机, Fail-Closed):
@@ -398,6 +408,8 @@ where
     if let Some(obj) = config.as_object_mut() {
         obj.remove("device_id");
         obj.remove("pairing_payload");
+        obj.remove("p2p_pin_hash");
+        obj.remove("p2p_pin_salt");
     }
     if let Err(cfg_err) = write_config_fn(&mut config) {
         let err_msg = format!("配置持久化失败: {}", cfg_err);

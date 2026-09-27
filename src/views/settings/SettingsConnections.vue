@@ -1268,6 +1268,11 @@ const processPairingCode = async (code) => {
       const { stage, status, detail } = event.payload;
       syncProgressState.value = { ...syncProgressState.value, ...event.payload };
       updateStep(stage, status, detail || '');
+      if (status === 'done' && (stage === 'lan_sync' || stage === 'relay_sync')) {
+        pairingPendingApply.value = false;
+        pairingDone.value = true;
+        pairingError.value = false;
+      }
     });
   } catch (e) {
     console.warn('Could not listen to sync:progress events:', e);
@@ -1428,7 +1433,7 @@ watch(proxyTunnelEnabled, (val) => {
 
 // ── P2P Sync (多端同步) ──
 const isInitialized = ref(true); // Will fetch from backend
-const isUnlocked = ref(true);
+const isUnlocked = ref(isNativeMobile);
 const showP2pModal = ref(false);
 const showDevicesModal = ref(false);
 
@@ -1594,7 +1599,7 @@ const handleReset = async () => {
       connectedDevices.value = [];
       // 重新自动初始化新密钥，实现开箱即用的新身份
       isInitialized.value = await invoke('check_device_keys_initialized');
-      isUnlocked.value = isInitialized.value;
+      isUnlocked.value = isNativeMobile;
       await fetchPairingInfo();
     } catch (error) {
       await showAlert(t('settings.p2p_alert_reset_err') + error);
@@ -1662,8 +1667,18 @@ const formatTime = (ts) => {
 };
 
 onMounted(async () => {
-  // Existing init code if any
-  isUnlocked.value = true;
+  if (isNativeMobile) {
+    isUnlocked.value = true;
+    isInitialized.value = true;
+  } else {
+    try {
+      isInitialized.value = await invoke('check_device_keys_initialized');
+    } catch (e) {
+      console.warn('Failed to check device keys initialized:', e);
+      isInitialized.value = true;
+    }
+    isUnlocked.value = false;
+  }
   await fetchConnectedDevices();
   if (!isNativeMobile) {
     unlistenDeviceConnected = await listen('sync:device_connected', (event) => {
