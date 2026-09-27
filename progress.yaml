@@ -1,6 +1,6 @@
 project:
   name: bob-agent
-  version: 0.9.6
+  version: 0.9.7
   status: active
   tech:
   - Tauri

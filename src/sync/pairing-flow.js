@@ -20,10 +20,11 @@ export function parsePairingInvitation(rawCode) {
       if (!version || typeof version !== 'string' || !version.trim()) {
         throw new Error('Missing or empty protocol version');
       }
-      if (version.trim() !== '0.9.6-sec01') {
+      const v = version.trim();
+      if (v !== '0.9.6-sec01' && v !== '0.9.7-sec01') {
         throw new Error(`Unsupported protocol version: ${version}`);
       }
-      payload.protocol_version = version.trim();
+      payload.protocol_version = v;
 
       if (!payload.device_id && payload.issuer_device_id) {
         payload.device_id = payload.issuer_device_id;
@@ -47,7 +48,8 @@ export function parsePairingInvitation(rawCode) {
     if (!version || !version.trim()) {
       throw new Error('Missing or empty protocol version');
     }
-    if (version.trim() !== '0.9.6-sec01') {
+    const v = version.trim();
+    if (v !== '0.9.6-sec01' && v !== '0.9.7-sec01') {
       throw new Error(`Unsupported protocol version: ${version}`);
     }
     const issuer_id = params.get('iss') || params.get('dev') || '';
