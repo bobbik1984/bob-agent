@@ -1428,9 +1428,16 @@ watch(proxyTunnelEnabled, (val) => {
 
 // ── P2P Sync (多端同步) ──
 const isInitialized = ref(true); // Will fetch from backend
-const isUnlocked = ref(false);
+const isUnlocked = ref(true);
 const showP2pModal = ref(false);
 const showDevicesModal = ref(false);
+
+watch(showP2pModal, async (val) => {
+  if (val) {
+    pairingSuccessInfo.value = null;
+    await fetchPairingInfo();
+  }
+});
 
 const showSyncLogsModal = ref(false);
 const syncLogs = ref([]);
@@ -1583,10 +1590,12 @@ const handleReset = async () => {
   if (confirmed) {
     try {
       await invoke('reset_device_keys');
-      isInitialized.value = false;
-      isUnlocked.value = false;
       pinInput.value = '';
       connectedDevices.value = [];
+      // 重新自动初始化新密钥，实现开箱即用的新身份
+      isInitialized.value = await invoke('check_device_keys_initialized');
+      isUnlocked.value = isInitialized.value;
+      await fetchPairingInfo();
     } catch (error) {
       await showAlert(t('settings.p2p_alert_reset_err') + error);
     }
@@ -1602,13 +1611,8 @@ const handleDisconnectDevice = async (dev) => {
       await fetchConnectedDevices();
       if (connectedDevices.value.length === 0) {
         showDevicesModal.value = false;
-        if (!isNativeMobile) {
-          isUnlocked.value = false;
-        }
       }
-      if (isNativeMobile) {
-        await fetchPairingInfo();
-      }
+      await fetchPairingInfo();
     } catch (e) {
       console.error('Failed to disconnect device', e);
     }
@@ -1659,10 +1663,9 @@ const formatTime = (ts) => {
 
 onMounted(async () => {
   // Existing init code if any
+  isUnlocked.value = true;
   await fetchConnectedDevices();
-  if (isNativeMobile) {
-    isUnlocked.value = true;
-  } else {
+  if (!isNativeMobile) {
     unlistenDeviceConnected = await listen('sync:device_connected', (event) => {
       fetchConnectedDevices();
       const dev = event.payload;
@@ -1964,6 +1967,9 @@ onMounted(async () => {
   // P2P Key Initialization check
   try {
     isInitialized.value = await invoke('check_device_keys_initialized');
+    if (isInitialized.value) {
+      isUnlocked.value = true;
+    }
   } catch(e) {
     console.error('Failed to check key initialization', e);
   }

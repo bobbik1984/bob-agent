@@ -44,9 +44,131 @@ fn derive_key(pin: &str, salt_str: &str) -> Result<[u8; 32], String> {
     Ok(key)
 }
 
+pub const DEFAULT_INTERNAL_PIN: &str = "BOB_INTERNAL_DEVICE_KEY_DEFAULT_v1";
+
+/// 确保本机设备身份密钥已就绪并加载到内存 (Zero-Friction Auto-Init & Auto-Unlock)
+pub fn ensure_device_identity_unlocked_core(
+    key_path: &Path,
+    memory_state: &Mutex<Option<SigningKey>>,
+) -> Result<SigningKey, String> {
+    let mut guard = memory_state.lock().map_err(|e| e.to_string())?;
+    if let Some(ref sk) = *guard {
+        return Ok(sk.clone());
+    }
+
+    if key_path.exists() {
+        if let Ok(file_content) = fs::read_to_string(key_path) {
+            if let Ok(data) = serde_json::from_str::<EncryptedKeyData>(&file_content) {
+                // 优先尝试零摩擦内置默认 PIN 与常见免 PIN 标识
+                for test_pin in [DEFAULT_INTERNAL_PIN, "", "0000", "1234", "123456"] {
+                    if let Ok(aes_key) = derive_key(test_pin, &data.salt) {
+                        if let Ok(cipher) = Aes256Gcm::new_from_slice(&aes_key) {
+                            if let Ok(nonce_bytes) = BASE64.decode(&data.nonce) {
+                                if let Ok(ciphertext) = BASE64.decode(&data.ciphertext) {
+                                    if let Ok(decrypted) = cipher.decrypt(Nonce::from_slice(&nonce_bytes), ciphertext.as_ref()) {
+                                        if decrypted.len() == 32 {
+                                            let mut key_bytes = [0u8; 32];
+                                            key_bytes.copy_from_slice(&decrypted);
+                                            let signing_key = SigningKey::from_bytes(&key_bytes);
+                                            *guard = Some(signing_key.clone());
+
+                                            // 确保持久化 config 中的 device_id 与公钥严格一致
+                                            let verifying_key = VerifyingKey::from(&signing_key);
+                                            let b64_pub = BASE64.encode(verifying_key.to_bytes());
+                                            if let Ok(mut app_config) = crate::read_config_checked() {
+                                                if app_config.get("device_id").and_then(|v| v.as_str()) != Some(&b64_pub) {
+                                                    if let Some(obj) = app_config.as_object_mut() {
+                                                        obj.insert("device_id".to_string(), serde_json::json!(b64_pub));
+                                                    }
+                                                    let _ = crate::write_config_checked(&app_config);
+                                                }
+                                            }
+
+                                            return Ok(signing_key);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return Err("设备秘钥已加密锁定，请先输入 PIN 码解锁".to_string());
+    }
+
+    // 物理密钥文件不存在：自动生成全新 Ed25519 密钥对并透明持久化 (开箱即用)
+    let mut csprng = rand::rngs::OsRng;
+    let mut key_bytes = [0u8; 32];
+    csprng.fill_bytes(&mut key_bytes);
+    let signing_key = SigningKey::from_bytes(&key_bytes);
+
+    let mut salt_bytes = [0u8; 16];
+    csprng.fill_bytes(&mut salt_bytes);
+    let salt = BASE64.encode(salt_bytes);
+    let mut nonce_bytes = [0u8; 12];
+    csprng.fill_bytes(&mut nonce_bytes);
+    let nonce_str = BASE64.encode(nonce_bytes);
+
+    let aes_key = derive_key(DEFAULT_INTERNAL_PIN, &salt)?;
+    let cipher = Aes256Gcm::new_from_slice(&aes_key).map_err(|e| e.to_string())?;
+
+    let nonce = Nonce::from_slice(&nonce_bytes);
+    let ciphertext = cipher
+        .encrypt(nonce, key_bytes.as_ref())
+        .map_err(|e| e.to_string())?;
+
+    if let Some(parent) = key_path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let data = EncryptedKeyData {
+        salt,
+        nonce: nonce_str,
+        ciphertext: BASE64.encode(ciphertext),
+    };
+    fs::write(
+        key_path,
+        serde_json::to_string_pretty(&data).map_err(|e| e.to_string())?,
+    ).map_err(|e| e.to_string())?;
+
+    *guard = Some(signing_key.clone());
+
+    let verifying_key = VerifyingKey::from(&signing_key);
+    let b64_pub = BASE64.encode(verifying_key.to_bytes());
+    if let Ok(mut app_config) = crate::read_config_checked() {
+        if let Some(obj) = app_config.as_object_mut() {
+            obj.insert("device_id".to_string(), serde_json::json!(b64_pub));
+        }
+        let _ = crate::write_config_checked(&app_config);
+    }
+
+    Ok(signing_key)
+}
+
+pub fn ensure_device_identity_unlocked_for_app(app: &AppHandle) -> Result<SigningKey, String> {
+    let key_path = get_keys_path(app);
+    let state = app.try_state::<DeviceIdentityState>()
+        .ok_or_else(|| "DeviceIdentityState 未注册".to_string())?;
+    ensure_device_identity_unlocked_core(&key_path, &state.0)
+}
+
+pub fn ensure_device_identity_unlocked_from_state(
+    app: &AppHandle,
+    state: &DeviceIdentityState,
+) -> Result<SigningKey, String> {
+    let key_path = get_keys_path(app);
+    ensure_device_identity_unlocked_core(&key_path, &state.0)
+}
+
 #[tauri::command]
 pub fn check_device_keys_initialized(app: AppHandle) -> bool {
-    get_keys_path(&app).exists()
+    let key_path = get_keys_path(&app);
+    if let Some(state) = app.try_state::<DeviceIdentityState>() {
+        if ensure_device_identity_unlocked_core(&key_path, &state.0).is_ok() {
+            return true;
+        }
+    }
+    key_path.exists()
 }
 
 #[tauri::command]
@@ -486,13 +608,14 @@ fn get_local_ip_fallback() -> Option<String> {
 
 #[tauri::command]
 pub fn get_pairing_payload(
+    app: AppHandle,
     state: tauri::State<'_, DeviceIdentityState>,
     db: tauri::State<'_, crate::db::DbState>,
 ) -> Result<PairingPayload, String> {
-    let guard = state.0.lock().unwrap();
-    let signing_key = guard.as_ref().ok_or("Keys not unlocked")?;
+    let _ = state;
+    let signing_key = ensure_device_identity_unlocked_for_app(&app)?;
 
-    let verifying_key = VerifyingKey::from(signing_key);
+    let verifying_key = VerifyingKey::from(&signing_key);
     let pub_key_bytes = verifying_key.to_bytes();
     let b64_pub = BASE64.encode(pub_key_bytes);
 

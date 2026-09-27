@@ -104,13 +104,9 @@ pub fn get_local_device_id_checked() -> Result<String, String> {
 /// 解析本机设备 ID (优先从已解锁的 SigningKey 内存状态读取，缺失时回退至 config.json)
 pub fn resolve_local_device_id(app_opt: Option<&AppHandle>) -> String {
     if let Some(app) = app_opt {
-        if let Some(state) = app.try_state::<crate::crypto::DeviceIdentityState>() {
-            if let Ok(guard) = state.0.lock() {
-                if let Some(sk) = guard.as_ref() {
-                    let vk = ed25519_dalek::VerifyingKey::from(sk);
-                    return base64::engine::general_purpose::STANDARD.encode(vk.to_bytes());
-                }
-            }
+        if let Ok(sk) = crate::crypto::ensure_device_identity_unlocked_for_app(app) {
+            let vk = ed25519_dalek::VerifyingKey::from(&sk);
+            return base64::engine::general_purpose::STANDARD.encode(vk.to_bytes());
         }
     }
     get_local_device_id()
@@ -119,13 +115,9 @@ pub fn resolve_local_device_id(app_opt: Option<&AppHandle>) -> String {
 /// 解析本机设备 ID (优先从已解锁的 SigningKey 内存状态读取，缺失时从受保护的 checked 配置读取，Fail-Closed)
 pub fn resolve_local_device_id_checked(app_opt: Option<&AppHandle>) -> Result<String, String> {
     if let Some(app) = app_opt {
-        if let Some(state) = app.try_state::<crate::crypto::DeviceIdentityState>() {
-            if let Ok(guard) = state.0.lock() {
-                if let Some(sk) = guard.as_ref() {
-                    let vk = ed25519_dalek::VerifyingKey::from(sk);
-                    return Ok(base64::engine::general_purpose::STANDARD.encode(vk.to_bytes()));
-                }
-            }
+        if let Ok(sk) = crate::crypto::ensure_device_identity_unlocked_for_app(app) {
+            let vk = ed25519_dalek::VerifyingKey::from(&sk);
+            return Ok(base64::engine::general_purpose::STANDARD.encode(vk.to_bytes()));
         }
     }
     get_local_device_id_checked()
@@ -134,10 +126,8 @@ pub fn resolve_local_device_id_checked(app_opt: Option<&AppHandle>) -> Result<St
 /// 解析本机设备私钥 (优先从已解锁的 SigningKey 内存状态读取)
 pub fn resolve_local_signing_key(app_opt: Option<&AppHandle>) -> Option<SigningKey> {
     if let Some(app) = app_opt {
-        if let Some(state) = app.try_state::<crate::crypto::DeviceIdentityState>() {
-            if let Ok(guard) = state.0.lock() {
-                return guard.clone();
-            }
+        if let Ok(sk) = crate::crypto::ensure_device_identity_unlocked_for_app(app) {
+            return Some(sk);
         }
     }
     None

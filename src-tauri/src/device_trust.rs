@@ -2973,12 +2973,9 @@ pub fn sign_outgoing_rpc(
     request_id: Option<&str>,
 ) -> Result<RpcAuthEnvelope, String> {
     use tauri::Manager;
-    let crypto_state = app.try_state::<crate::crypto::DeviceIdentityState>()
-        .ok_or_else(|| "未找到加密秘钥状态".to_string())?;
-    let guard = crypto_state.0.lock().map_err(|e| format!("秘钥状态加锁失败: {}", e))?;
-    let signing_key = guard.as_ref().ok_or_else(|| "设备秘钥未解锁，无法签署 RPC".to_string())?;
+    let signing_key = crate::crypto::ensure_device_identity_unlocked_for_app(app)?;
 
-    let verifying_key = VerifyingKey::from(signing_key);
+    let verifying_key = VerifyingKey::from(&signing_key);
     let pubkey_b64 = BASE64.encode(verifying_key.to_bytes());
     let local_device_id = pubkey_b64.clone();
 
@@ -2998,7 +2995,7 @@ pub fn sign_outgoing_rpc(
     let now_ms = crate::now_ms();
     sign_outgoing_rpc_envelope(
         &mut conn,
-        signing_key,
+        &signing_key,
         &local_device_id,
         target_device_id,
         action,
@@ -3090,16 +3087,16 @@ pub fn verify_relay_response_auth(
 
 #[tauri::command]
 pub fn sec01_create_pairing_invitation(
+    app: tauri::AppHandle,
     db: tauri::State<'_, crate::db::DbState>,
     crypto_state: tauri::State<'_, crate::crypto::DeviceIdentityState>,
     target_constraint: Option<String>,
     ttl_ms: Option<i64>,
 ) -> Result<PairingInvitationPayload, String> {
     let conn = db.0.lock().map_err(|e| format!("数据库锁定失败: {}", e))?;
-
-    let guard = crypto_state.0.lock().map_err(|e| format!("秘钥状态锁定失败: {}", e))?;
-    let signing_key = guard.as_ref().ok_or_else(|| "设备秘钥未解锁，无法创建配对邀请".to_string())?;
-    let verifying_key = VerifyingKey::from(signing_key);
+    let _ = crypto_state;
+    let signing_key = crate::crypto::ensure_device_identity_unlocked_for_app(&app)?;
+    let verifying_key = VerifyingKey::from(&signing_key);
     let issuer_device_id = BASE64.encode(verifying_key.to_bytes());
 
     let local_ips = crate::crypto::get_candidate_ips();
@@ -3190,14 +3187,15 @@ pub fn create_proof_of_possession_from_signing_key(
 
 #[tauri::command]
 pub fn sec01_create_proof_of_possession(
+    app: tauri::AppHandle,
     crypto_state: tauri::State<'_, crate::crypto::DeviceIdentityState>,
     invitation: PairingInvitationPayload,
     device_name: Option<String>,
 ) -> Result<ProofOfPossession, String> {
-    let guard = crypto_state.0.lock().map_err(|e| format!("秘钥状态锁定失败: {}", e))?;
-    let signing_key = guard.as_ref().ok_or_else(|| "设备秘钥未解锁，无法生成所有权证明".to_string())?;
+    let _ = crypto_state;
+    let signing_key = crate::crypto::ensure_device_identity_unlocked_for_app(&app)?;
     let now_ms = crate::now_ms();
-    create_proof_of_possession_from_signing_key(signing_key, &invitation, device_name, now_ms)
+    create_proof_of_possession_from_signing_key(&signing_key, &invitation, device_name, now_ms)
 }
 
 pub fn create_proof_of_possession_for_app(
@@ -3205,13 +3203,9 @@ pub fn create_proof_of_possession_for_app(
     invitation: &PairingInvitationPayload,
     device_name: Option<String>,
 ) -> Result<ProofOfPossession, String> {
-    use tauri::Manager;
-    let crypto_state = app.try_state::<crate::crypto::DeviceIdentityState>()
-        .ok_or_else(|| "秘钥状态不存在".to_string())?;
-    let guard = crypto_state.0.lock().map_err(|e| format!("秘钥状态锁定失败: {}", e))?;
-    let signing_key = guard.as_ref().ok_or_else(|| "设备秘钥未解锁，无法生成所有权证明".to_string())?;
+    let signing_key = crate::crypto::ensure_device_identity_unlocked_for_app(app)?;
     let now_ms = crate::now_ms();
-    create_proof_of_possession_from_signing_key(signing_key, invitation, device_name, now_ms)
+    create_proof_of_possession_from_signing_key(&signing_key, invitation, device_name, now_ms)
 }
 
 #[tauri::command]

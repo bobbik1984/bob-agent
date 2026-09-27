@@ -1947,6 +1947,23 @@ pub async fn check_device_online(app: AppHandle, target_device_id: String) -> Re
     let config = crate::read_config_checked().map_err(|e| format!("SEC-01 Fail-Closed: 无法读取配置: {}", e))?;
     if let Some(pp) = config.get("pairing_payload").and_then(|v| v.as_object()) {
         if pp.get("device_id").and_then(|v| v.as_str()) == Some(&target_device_id) {
+            // 局域网优先探测 (1.5s 快速超时)
+            if let Some(ips) = pp.get("local_ips").and_then(|v| v.as_array()) {
+                let port = pp.get("port").and_then(|v| v.as_u64()).unwrap_or(3722);
+                if let Ok(client) = reqwest::Client::builder().timeout(std::time::Duration::from_millis(1500)).build() {
+                    for ip_val in ips {
+                        if let Some(ip) = ip_val.as_str() {
+                            let health_url = format!("http://{}:{}/v1/health", ip, port);
+                            if let Ok(res) = client.get(&health_url).send().await {
+                                if res.status().is_success() {
+                                    return Ok(true);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             let relay_connected = RELAY_TX.read().map(|l| l.is_some()).unwrap_or(false);
             if relay_connected {
                 return Ok(true);
@@ -7307,6 +7324,13 @@ pub fn start_relay_listener(app: AppHandle) {
                     }
                     Ok(None) => {}
                     Err(e) => log::error!("[Sync Engine] 撤销身份查询失败，拒绝连接: {}", e),
+                }
+                if current_device_id.is_empty() {
+                    if let Ok(sk) = crate::crypto::ensure_device_identity_unlocked_for_app(&app) {
+                        use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+                        let vk = ed25519_dalek::VerifyingKey::from(&sk);
+                        current_device_id = BASE64.encode(vk.to_bytes());
+                    }
                 }
                 if current_device_id.is_empty() {
                     log::error!("[Sync Engine] SEC-01 Fail-Closed: Local device_id missing in config during relay reconnect. Retrying after backoff...");

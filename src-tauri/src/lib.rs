@@ -1882,6 +1882,11 @@ pub fn run() {
                 http_api::start_http_server(app.handle().clone());
             }
 
+            // ── 确保设备身份密钥就绪并解锁 (Zero-Friction Auto-Init & Auto-Unlock) ──
+            if let Err(e) = crypto::ensure_device_identity_unlocked_for_app(&app.handle()) {
+                log::warn!("[Startup] Failed to auto-unlock device identity: {}", e);
+            }
+
             // ── 启动中继服务器 WebSocket 长连接后台守护 (全平台: PC 与移动端均需连接 Relay) ──
             sync_engine::start_relay_listener(app.handle().clone());
 
