@@ -745,6 +745,48 @@ async fn system_take_screenshot(app_handle: tauri::AppHandle) -> Result<(), Stri
     Ok(())
 }
 
+fn auto_discover_api_keys_into_config(config_obj: &mut serde_json::Map<String, Value>) -> bool {
+    let env_candidates = [
+        ("deepseek", "DEEPSEEK_API_KEY"),
+        ("openai", "OPENAI_API_KEY"),
+        ("anthropic", "ANTHROPIC_API_KEY"),
+        ("anthropic", "CLAUDE_API_KEY"),
+        ("gemini", "GEMINI_API_KEY"),
+        ("gemini", "GOOGLE_API_KEY"),
+        ("siliconflow", "SILICONFLOW_API_KEY"),
+        ("kimi", "MOONSHOT_API_KEY"),
+        ("kimi", "KIMI_API_KEY"),
+        ("zhipu", "ZHIPU_API_KEY"),
+        ("zhipu", "GLM_API_KEY"),
+        ("qwen", "DASHSCOPE_API_KEY"),
+        ("qwen", "QWEN_API_KEY"),
+    ];
+
+    let mut current_api_keys = config_obj
+        .get("apiKeys")
+        .and_then(|v| v.as_object().cloned())
+        .unwrap_or_default();
+    let mut discovered = false;
+
+    for (provider, env_name) in &env_candidates {
+        if !current_api_keys.contains_key(*provider) {
+            if let Ok(val) = std::env::var(env_name) {
+                let trimmed = val.trim();
+                if !trimmed.is_empty() {
+                    current_api_keys.insert(provider.to_string(), serde_json::json!(trimmed));
+                    discovered = true;
+                    log::info!("[Setup] Auto-discovered API Key for {} from {}", provider, env_name);
+                }
+            }
+        }
+    }
+
+    if discovered {
+        config_obj.insert("apiKeys".to_string(), serde_json::json!(current_api_keys));
+    }
+    discovered
+}
+
 pub(crate) fn system_is_setup_complete_internal(config_path: &Path, data_dir: &Path) -> bool {
     let mut config = match read_config_checked_at(config_path) {
         Ok(v) => v,
@@ -753,6 +795,19 @@ pub(crate) fn system_is_setup_complete_internal(config_path: &Path, data_dir: &P
 
     // 1. 若 config 已明确标记已配置，直接通过
     if config.get("onboarded").and_then(|v| v.as_bool()).unwrap_or(false) {
+        // 如果已 onboarded 但缺少 apiKeys，尝试从环境变量静默补齐并写回
+        let has_keys = config
+            .get("apiKeys")
+            .and_then(|k| k.as_object())
+            .map(|o| !o.is_empty())
+            .unwrap_or(false);
+        if !has_keys {
+            if let Some(obj) = config.as_object_mut() {
+                if auto_discover_api_keys_into_config(obj) {
+                    let _ = write_config_checked_at(config_path, &config);
+                }
+            }
+        }
         return true;
     }
 
@@ -771,6 +826,7 @@ pub(crate) fn system_is_setup_complete_internal(config_path: &Path, data_dir: &P
     if has_model || has_api_keys {
         if let Some(obj) = config.as_object_mut() {
             obj.insert("onboarded".to_string(), serde_json::json!(true));
+            auto_discover_api_keys_into_config(obj);
             let _ = write_config_checked_at(config_path, &config);
         }
         return true;
@@ -786,12 +842,17 @@ pub(crate) fn system_is_setup_complete_internal(config_path: &Path, data_dir: &P
         );
         if let Some(obj) = config.as_object_mut() {
             obj.insert("onboarded".to_string(), serde_json::json!(true));
-            if let Some(ref model) = summary.latest_model {
-                let current_model = obj.get("model").and_then(|v| v.as_str()).unwrap_or("");
-                if current_model.trim().is_empty() {
-                    obj.insert("model".to_string(), serde_json::json!(model));
-                }
+            let model_to_set = summary
+                .latest_model
+                .as_deref()
+                .filter(|m| !m.trim().is_empty())
+                .unwrap_or("deepseek-v4-flash");
+            let current_model = obj.get("model").and_then(|v| v.as_str()).unwrap_or("");
+            if current_model.trim().is_empty() {
+                obj.insert("model".to_string(), serde_json::json!(model_to_set));
             }
+            // 自动探针环境变量并将有效 Key 注入到自愈配置中
+            auto_discover_api_keys_into_config(obj);
             let _ = write_config_checked_at(config_path, &config);
         }
         return true;
@@ -2104,6 +2165,50 @@ mod tests {
         assert_eq!(healed["onboarded"], true);
         assert_eq!(healed["model"], "deepseek-v4-flash");
         assert_eq!(healed["theme"], "dark");
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_system_is_setup_complete_autoheals_api_keys_from_env() {
+        let temp_dir = make_test_dir("api_env");
+        let cfg_path = temp_dir.join("config.json");
+        let data_dir = temp_dir.join("data");
+        fs::create_dir_all(&data_dir).unwrap();
+
+        let prev_val = std::env::var("DEEPSEEK_API_KEY").ok();
+        std::env::set_var("DEEPSEEK_API_KEY", "sk-test-env-key-12345");
+
+        let db_path = data_dir.join("bob.db");
+        let conn = Connection::open(&db_path).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE conversations (
+                id TEXT PRIMARY KEY,
+                title TEXT,
+                model TEXT,
+                updated_at INTEGER,
+                is_deleted INTEGER DEFAULT 0
+            );
+            INSERT INTO conversations (id, title, model, updated_at, is_deleted)
+            VALUES ('conv-1', '测试历史会话', 'deepseek-v4-flash', 1789964906000, 0);",
+        )
+        .unwrap();
+        drop(conn);
+
+        let res = system_is_setup_complete_internal(&cfg_path, &data_dir);
+        assert!(res);
+
+        let healed = read_config_checked_at(&cfg_path).unwrap();
+        assert_eq!(healed["onboarded"], true);
+        assert_eq!(healed["model"], "deepseek-v4-flash");
+        assert_eq!(
+            healed["apiKeys"]["deepseek"],
+            "sk-test-env-key-12345"
+        );
+
+        match prev_val {
+            Some(v) => std::env::set_var("DEEPSEEK_API_KEY", v),
+            None => std::env::remove_var("DEEPSEEK_API_KEY"),
+        }
         let _ = fs::remove_dir_all(&temp_dir);
     }
 }

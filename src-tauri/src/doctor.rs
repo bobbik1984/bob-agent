@@ -73,25 +73,33 @@ pub fn system_health_check() -> Value {
         });
     }
 
-    // 3. API Key 检查 — 校验当前选中模型对应的 Provider 是否配了 Key
+    // 3. API Key 检查 — 统一调用 llm::get_api_keys（具备环境变量与历史凭据自动发现与回填能力）
     let config = super::read_config();
     let current_model = config.get("model").and_then(|v| v.as_str()).unwrap_or("");
+    let api_keys_val = super::llm::get_api_keys();
+    let api_keys_map = api_keys_val.as_object();
 
-    let current_provider = if current_model.contains(':') {
-        current_model.split(':').next().unwrap_or("")
+    let has_any_key = api_keys_map
+        .map(|m| {
+            m.values().any(|v| {
+                v.as_str()
+                    .map_or(false, |s| !s.trim().is_empty() && s != "vaulted")
+            })
+        })
+        .unwrap_or(false);
+
+    let (current_provider, provider_key) = if !current_model.is_empty() {
+        let (prov, key, _, _) = super::llm::read_llm_config_for_model(current_model);
+        (prov, key)
     } else {
-        ""
+        (String::new(), String::new())
     };
 
-    if !current_provider.is_empty() && current_provider != "ollama" && current_provider != "custom"
+    if !current_provider.is_empty()
+        && current_provider != "ollama"
+        && current_provider != "custom"
+        && current_provider != "offline"
     {
-        let provider_key = config
-            .get("apiKeys")
-            .and_then(|v| v.as_object())
-            .and_then(|m| m.get(current_provider))
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-
         if provider_key.is_empty() || provider_key == "vaulted" {
             results.push(CheckResult {
                 code: "API_KEY_MISSING".into(),
@@ -103,27 +111,13 @@ pub fn system_health_check() -> Value {
                 fixable: false,
             });
         }
-    } else if current_provider.is_empty() {
-        // 如果连 provider 都解析不出，再走全盘保底检查
-        let has_any_key = config
-            .get("apiKeys")
-            .and_then(|v| v.as_object())
-            .map(|m| {
-                m.values().any(|v| {
-                    v.as_str()
-                        .map_or(false, |s| !s.is_empty() && s != "vaulted")
-                })
-            })
-            .unwrap_or(false);
-
-        if !has_any_key {
-            results.push(CheckResult {
-                code: "NO_API_KEY".into(),
-                severity: "error".into(),
-                message: "未配置任何 API Key，Bob 无法与大模型对话".into(),
-                fixable: false,
-            });
-        }
+    } else if !has_any_key {
+        results.push(CheckResult {
+            code: "NO_API_KEY".into(),
+            severity: "error".into(),
+            message: "未配置任何 API Key，Bob 无法与大模型对话".into(),
+            fixable: false,
+        });
     }
 
     // 4. 主模型配置

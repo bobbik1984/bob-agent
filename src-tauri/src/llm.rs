@@ -793,7 +793,7 @@ pub fn assign_model_role(model_id: String, role: String) -> Value {
 }
 
 pub fn get_api_keys() -> Value {
-    let config = super::read_config();
+    let mut config = super::read_config();
     let mut keys = serde_json::Map::new();
 
     // 直接从 config.json 读取所有 API Key（明文存储）
@@ -816,6 +816,53 @@ pub fn get_api_keys() -> Value {
                     keys.insert(legacy_provider.to_string(), json!(legacy_key));
                 }
             }
+        }
+    }
+
+    // ── 环境变量与系统级凭证自动发现与回填自愈 ──
+    let mut discovered_new = false;
+    let env_candidates = [
+        ("deepseek", "DEEPSEEK_API_KEY"),
+        ("openai", "OPENAI_API_KEY"),
+        ("anthropic", "ANTHROPIC_API_KEY"),
+        ("anthropic", "CLAUDE_API_KEY"),
+        ("gemini", "GEMINI_API_KEY"),
+        ("gemini", "GOOGLE_API_KEY"),
+        ("siliconflow", "SILICONFLOW_API_KEY"),
+        ("kimi", "MOONSHOT_API_KEY"),
+        ("kimi", "KIMI_API_KEY"),
+        ("zhipu", "ZHIPU_API_KEY"),
+        ("zhipu", "GLM_API_KEY"),
+        ("qwen", "DASHSCOPE_API_KEY"),
+        ("qwen", "QWEN_API_KEY"),
+    ];
+
+    for (provider, env_name) in &env_candidates {
+        if !keys.contains_key(*provider) {
+            if let Ok(val) = std::env::var(env_name) {
+                let trimmed = val.trim();
+                if !trimmed.is_empty() {
+                    keys.insert(provider.to_string(), json!(trimmed));
+                    discovered_new = true;
+                    log::info!("[API Key] Automatically discovered {} from {}", provider, env_name);
+                }
+            }
+        }
+    }
+
+    // 若从环境变量发现了未登记的 Key，自动写回 config.json 保证无缝衔接与持久化
+    if discovered_new {
+        if let Some(obj) = config.as_object_mut() {
+            let mut current_api_keys = obj.get("apiKeys")
+                .and_then(|v| v.as_object().cloned())
+                .unwrap_or_default();
+            for (k, v) in &keys {
+                if !current_api_keys.contains_key(k) {
+                    current_api_keys.insert(k.clone(), v.clone());
+                }
+            }
+            obj.insert("apiKeys".to_string(), json!(current_api_keys));
+            super::write_config(&config);
         }
     }
 
