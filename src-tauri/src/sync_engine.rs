@@ -3619,6 +3619,14 @@ pub fn import_sync_data_to_conn_atomic(
             );
             for row in rows {
                 if let Some(obj) = row.as_object() {
+                    // 保护本地私有同步游标：禁止远端 settings 的 last_sync_ts 覆盖本地时间戳导致游标倒流
+                    if table == "settings" {
+                        if let Some(k) = obj.get("key").and_then(|v| v.as_str()) {
+                            if k == "last_sync_ts" {
+                                continue;
+                            }
+                        }
+                    }
                     let mut params = Vec::new();
                     for col in cols {
                         let val = obj.get(*col).unwrap_or(&serde_json::Value::Null);
@@ -3665,7 +3673,10 @@ pub fn import_sync_data_to_conn_atomic(
                     .unwrap_or(0);
 
                 // CONFLICT DETECTION
-                let is_conflict = local_updated_at > last_sync_ts
+                // 会话表属于消息容器，消息本身通过全局唯一 sync_id 实施幂等追加合流；
+                // 会话元数据直接遵循 LWW (最后修改者胜) 更新，严禁分裂出 0 消息的幽灵空壳副本
+                let is_conflict = table != "conversations"
+                    && local_updated_at > last_sync_ts
                     && remote_updated_at > last_sync_ts
                     && local_updated_at != remote_updated_at;
 
