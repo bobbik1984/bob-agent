@@ -14,7 +14,7 @@
     "lint": "eslint src/ src-tauri/"
   },
   "dependencies": {
-    "@tauri-apps/api": "^2.11.1",
+    "@tauri-apps/api": "~2.11.1",
     "@tauri-apps/plugin-barcode-scanner": "^2.4.5",
     "@tauri-apps/plugin-clipboard-manager": "~2.3.2",
     "@tauri-apps/plugin-dialog": "~2.7.2",
