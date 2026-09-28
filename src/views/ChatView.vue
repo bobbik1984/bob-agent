@@ -1114,6 +1114,17 @@ const loadPairedDevices = async () => {
           });
         }
       }
+
+      // 核验当前会话绑定的执行设备有效性，若为已失效/已撤销旧设备则自动自愈迁移
+      const convId = props.conversationId || 'default';
+      const curDevId = selectedDeviceMap.value[convId];
+      if (curDevId && curDevId !== 'local' && !pairedPcDevices.value.some(d => d.device_id === curDevId)) {
+        if (pairedPcDevices.value.length > 0) {
+          selectExecutionDevice(pairedPcDevices.value[0].device_id);
+        } else {
+          selectExecutionDevice('local');
+        }
+      }
     }
   } catch (e) {
     console.warn('Failed to load paired devices:', e);
@@ -1188,10 +1199,38 @@ const currentExecutionDevice = computed(() => {
       raw: found,
     };
   }
+
+  // 自愈：如果缓存的 devId 在当前配对列表中已不存在（例如电脑重装/重置/解绑导致 ID 变更）
+  // 若当前存在有效的配对 PC，自动迁移至当前可用 PC；否则安全回退至 local 本机
+  if (pairedPcDevices.value.length > 0) {
+    const activePc = pairedPcDevices.value[0];
+    const isOnline = activePc._isOnline ?? ((Date.now() - (activePc.last_seen || 0)) < 120_000);
+    if (selectedDeviceMap.value[convId] !== activePc.device_id) {
+      selectedDeviceMap.value[convId] = activePc.device_id;
+      if (props.conversationId) {
+        try { localStorage.setItem('bob_exec_device_' + props.conversationId, activePc.device_id); } catch (_) {}
+      }
+    }
+    return {
+      id: activePc.device_id,
+      type: 'pc',
+      name: activePc.device_name || '已配对电脑 (PC)',
+      online: isOnline,
+      raw: activePc,
+    };
+  }
+
+  // 没有可用 PC，回退至本机
+  if (selectedDeviceMap.value[convId] !== 'local') {
+    selectedDeviceMap.value[convId] = 'local';
+    if (props.conversationId) {
+      try { localStorage.setItem('bob_exec_device_' + props.conversationId, 'local'); } catch (_) {}
+    }
+  }
   return {
-    id: devId,
-    type: 'pc',
-    name: '已配对电脑 (PC)',
+    id: 'local',
+    type: 'phone',
+    name: isMobile.value ? '本机 (手机)' : '本机',
     online: true,
   };
 });
@@ -2364,11 +2403,20 @@ watch(() => props.conversationId, async () => {
     const conv = await window.appAPI.getConversation(props.conversationId);
     sessionCost.value = conv?.cost || conv?.total_cost || 0;
     conversationTitle.value = conv?.title || '新对话';
-    // 恢复会话绑定的执行设备
+    // 恢复会话绑定的执行设备（带有效性核验与自动迁移）
     try {
       const savedDev = localStorage.getItem('bob_exec_device_' + props.conversationId);
       if (savedDev) {
-        selectedDeviceMap.value[props.conversationId] = savedDev;
+        if (savedDev === 'local' || pairedPcDevices.value.some(d => d.device_id === savedDev)) {
+          selectedDeviceMap.value[props.conversationId] = savedDev;
+        } else if (pairedPcDevices.value.length > 0) {
+          const validPcId = pairedPcDevices.value[0].device_id;
+          selectedDeviceMap.value[props.conversationId] = validPcId;
+          localStorage.setItem('bob_exec_device_' + props.conversationId, validPcId);
+        } else {
+          selectedDeviceMap.value[props.conversationId] = 'local';
+          localStorage.setItem('bob_exec_device_' + props.conversationId, 'local');
+        }
       }
     } catch (e) {}
   } else {

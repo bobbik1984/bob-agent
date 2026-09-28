@@ -2789,11 +2789,12 @@ pub fn revoke_peer_device_in_db(
 /// 查询设备是否为受信任状态
 pub fn is_device_trusted(conn: &Connection, device_id: &str) -> bool {
     conn.query_row(
-        "SELECT status FROM trusted_devices WHERE device_id = ?",
+        "SELECT status, revoked_at FROM trusted_devices WHERE device_id = ?",
         [device_id],
         |row| {
             let s: String = row.get(0)?;
-            Ok(s == "trusted")
+            let rev: Option<i64> = row.get(1)?;
+            Ok(s == "trusted" && rev.is_none())
         },
     ).unwrap_or(false)
 }

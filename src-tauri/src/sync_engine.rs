@@ -1975,11 +1975,68 @@ pub async fn disconnect_device(app: AppHandle, device_id: String) -> Result<(), 
     Ok(())
 }
 
+/// 解析并自愈远程 RPC 调用的目标设备 ID（核心逻辑，便于单测与复用）：
+/// 1. 若目标设备在 trusted_devices 中处于 trusted 状态且未被撤销，直接返回该 ID；
+/// 2. 若目标设备未处于 trusted 状态（如本地历史会话记录了 PC 重装/重置/解绑前的旧 ID），
+///    自动检查 pairing_payload 中当前激活绑定的 PC 设备 ID；
+///    若该激活 PC 在 trusted_devices 中有效受信任，自动自愈迁移并返回该激活 PC ID；
+/// 3. 若均无法解析或未受信任，返回明确友好的错误信息。
+pub fn resolve_target_device_id_for_rpc_core(
+    requested_id: &str,
+    is_trusted_fn: impl Fn(&str) -> bool,
+    active_pairing_pc: Option<&str>,
+) -> Result<String, String> {
+    if requested_id == "local" || requested_id.trim().is_empty() {
+        return Err("Cannot dispatch remote instruction to local device".to_string());
+    }
+
+    if is_trusted_fn(requested_id) {
+        return Ok(requested_id.to_string());
+    }
+
+    // 尝试从 active_pairing_pc 自愈
+    if let Some(active_pc_id) = active_pairing_pc.filter(|s| !s.trim().is_empty()) {
+        if active_pc_id != requested_id && is_trusted_fn(active_pc_id) {
+            log::warn!(
+                "[Sync Engine] 目标设备 '{}' 未受信任或已撤销，自动自愈迁移至当前激活受信任的配对 PC: '{}'",
+                requested_id, active_pc_id
+            );
+            return Ok(active_pc_id.to_string());
+        }
+    }
+
+    Err(format!("目标设备未建立信任关系或已被撤销 ({})。请在设置中重新扫码配对电脑。", requested_id))
+}
+
+pub fn resolve_target_device_id_for_rpc(app: &AppHandle, requested_id: &str) -> Result<String, String> {
+    let active_pc = crate::read_config_checked().ok()
+        .and_then(|cfg| cfg.get("pairing_payload").and_then(|v| v.as_object()).cloned())
+        .and_then(|pp| pp.get("device_id").and_then(|v| v.as_str()).map(|s| s.to_string()));
+
+    resolve_target_device_id_for_rpc_core(
+        requested_id,
+        |id| {
+            if let Some(db_state) = app.try_state::<crate::db::DbState>() {
+                if let Ok(conn) = db_state.0.lock() {
+                    crate::device_trust::is_device_trusted(&conn, id)
+                } else {
+                    false
+                }
+            } else {
+                false
+            }
+        },
+        active_pc.as_deref(),
+    )
+}
+
 #[command]
 pub async fn check_device_online(app: AppHandle, target_device_id: String) -> Result<bool, String> {
     if target_device_id == "local" || target_device_id.is_empty() {
         return Ok(true);
     }
+
+    let target_device_id = resolve_target_device_id_for_rpc(&app, &target_device_id).unwrap_or(target_device_id);
 
     let registry = app.state::<Arc<DeviceRegistry>>();
     let now = crate::now_ms();
@@ -2074,11 +2131,8 @@ pub async fn dispatch_remote_instruction(
     request_id: Option<String>,
     project_id: Option<String>,
 ) -> Result<serde_json::Value, String> {
+    let target_device_id = resolve_target_device_id_for_rpc(&app, &target_device_id)?;
     log::info!("[Sync Engine] Dispatching remote instruction to {}: {}", target_device_id, instruction);
-
-    if target_device_id == "local" || target_device_id.is_empty() {
-        return Err("Cannot dispatch remote instruction to local device".to_string());
-    }
 
     let req_id = request_id.filter(|s| !s.trim().is_empty()).unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     let msg_id = uuid::Uuid::new_v4().to_string();
@@ -2138,11 +2192,8 @@ pub async fn dispatch_remote_approval(
     decision: String,
     request_id: String,
 ) -> Result<serde_json::Value, String> {
+    let target_device_id = resolve_target_device_id_for_rpc(&app, &target_device_id)?;
     log::info!("[Sync Engine] Dispatching remote approval to {}: change_id={}, decision={}", target_device_id, change_id, decision);
-
-    if target_device_id == "local" || target_device_id.is_empty() {
-        return Err("Cannot dispatch remote approval to local device".to_string());
-    }
 
     let msg_id = uuid::Uuid::new_v4().to_string();
     let trace_id = uuid::Uuid::new_v4().to_string();
@@ -2196,11 +2247,8 @@ pub async fn cancel_remote_instruction(
     target_device_id: String,
     request_id: String,
 ) -> Result<serde_json::Value, String> {
+    let target_device_id = resolve_target_device_id_for_rpc(&app, &target_device_id)?;
     log::info!("[Sync Engine] Dispatching remote cancellation to {}: request_id={}", target_device_id, request_id);
-
-    if target_device_id == "local" || target_device_id.is_empty() {
-        return Err("Cannot dispatch remote cancel to local device".to_string());
-    }
 
     let msg_id = uuid::Uuid::new_v4().to_string();
     let trace_id = uuid::Uuid::new_v4().to_string();
@@ -2280,6 +2328,9 @@ pub async fn fetch_remote_capabilities(
             "timestamp": crate::now_ms()
         }));
     }
+
+    let target_device_id = resolve_target_device_id_for_rpc(&app, &target_device_id)?;
+    log::info!("[Sync Engine] Probing remote capabilities for device: {}", target_device_id);
 
     let req_id = uuid::Uuid::new_v4().to_string();
     let msg_id = uuid::Uuid::new_v4().to_string();
@@ -11624,5 +11675,32 @@ mod tests {
         let devices = get_connected_devices_core(Some(registry.clone()), Some(&conn));
         assert!(!devices.iter().any(|d| d.device_id == "revoked-pc-old"), "revoked 设备必须被过滤掉");
         assert!(devices.iter().any(|d| d.device_id == "active-pc-1"), "active 设备必须保留");
+    }
+
+    #[test]
+    fn test_resolve_target_device_id_for_rpc_core_behavior() {
+        // 1. 本机/空参数阻断
+        assert!(resolve_target_device_id_for_rpc_core("local", |_| true, Some("active-pc")).is_err());
+        assert!(resolve_target_device_id_for_rpc_core("", |_| true, Some("active-pc")).is_err());
+
+        // 2. 受信任设备直通返回
+        let res = resolve_target_device_id_for_rpc_core("trusted-pc", |id| id == "trusted-pc", Some("other-pc")).unwrap();
+        assert_eq!(res, "trusted-pc");
+
+        // 3. 目标为旧/撤销设备但有受信任的活跃配对 PC，自动自愈迁移
+        let res = resolve_target_device_id_for_rpc_core(
+            "stale-revoked-pc",
+            |id| id == "new-active-pc",
+            Some("new-active-pc"),
+        ).unwrap();
+        assert_eq!(res, "new-active-pc");
+
+        // 4. 目标未受信任且无有效配对 PC，明确拒绝
+        let res_err = resolve_target_device_id_for_rpc_core(
+            "unknown-pc",
+            |_| false,
+            Some("also-untrusted-pc"),
+        );
+        assert!(res_err.is_err());
     }
 }

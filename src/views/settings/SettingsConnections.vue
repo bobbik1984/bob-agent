@@ -1346,6 +1346,20 @@ const processPairingCode = async (code) => {
       if (isNativeMobile) {
         fetchPairingInfo();
       }
+      // 自动迁移所有历史会话的执行设备绑定至新配对的 PC，杜绝旧设备 ID 残留导致鉴权失败
+      try {
+        if (payload?.device_id) {
+          for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (key && key.startsWith('bob_exec_device_')) {
+              const val = localStorage.getItem(key);
+              if (val && val !== 'local' && val !== payload.device_id) {
+                localStorage.setItem(key, payload.device_id);
+              }
+            }
+          }
+        }
+      } catch (_) {}
     }
 
     if (isPaired && isApplied) {
