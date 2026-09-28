@@ -423,7 +423,12 @@
           <Laptop v-if="currentExecutionDevice.type === 'pc'" :size="14" class="device-type-icon" />
           <Smartphone v-else :size="14" class="device-type-icon" />
           <span class="device-name-text">{{ currentExecutionDevice.name }}</span>
-          <span class="device-status-dot" :class="{ 'is-executing': isExecutingRemotely, 'is-online': currentExecutionDevice.online }"></span>
+          <span class="device-status-dot" :class="{
+            'is-executing': isExecutingRemotely,
+            'is-lan': !isExecutingRemotely && currentExecutionDevice.online && currentExecutionDevice.transport === 'lan',
+            'is-relay': !isExecutingRemotely && currentExecutionDevice.online && currentExecutionDevice.transport === 'relay',
+            'is-offline': !isExecutingRemotely && !currentExecutionDevice.online
+          }"></span>
           <ChevronDown :size="12" class="chevron-icon" />
         </button>
 
@@ -724,9 +729,13 @@
               <div class="item-info">
                 <div style="display: flex; align-items: center; gap: 6px;">
                   <span class="item-name">{{ dev.device_name || '已配对电脑 (PC)' }}</span>
-                  <span class="device-status-dot" :class="{ 'is-online': dev._isOnline ?? ((Date.now() - (dev.last_seen || 0)) < 120000) }"></span>
+                  <span class="device-status-dot" :class="{
+                    'is-lan': (dev._isOnline ?? ((Date.now() - (dev.last_seen || 0)) < 120000)) && (dev.last_transport === 'lan' || (dev.ip_address && dev.ip_address !== 'relay' && dev.ip_address !== 'LAN')),
+                    'is-relay': (dev._isOnline ?? ((Date.now() - (dev.last_seen || 0)) < 120000)) && (dev.last_transport === 'relay' || !dev.ip_address || dev.ip_address === 'relay' || dev.ip_address === 'LAN'),
+                    'is-offline': !(dev._isOnline ?? ((Date.now() - (dev.last_seen || 0)) < 120000))
+                  }"></span>
                 </div>
-                <span class="item-count">{{ dev.ip_address || 'Relay' }} · {{ (dev._isOnline ?? ((Date.now() - (dev.last_seen || 0)) < 120000)) ? $t('chat.device_online') : $t('chat.device_offline') }}</span>
+                <span class="item-count">{{ (dev._isOnline ?? ((Date.now() - (dev.last_seen || 0)) < 120000)) ? ((dev.last_transport === 'lan' || (dev.ip_address && dev.ip_address !== 'relay' && dev.ip_address !== 'LAN')) ? `${$t('chat.device_lan_online')} (${dev.ip_address || 'LAN'})` : `${$t('chat.device_relay_online')} (Relay)`) : $t('chat.device_offline') }}</span>
                 <div v-if="getDeviceCapabilityTags(dev.device_id).length > 0" class="device-caps-row">
                   <span v-for="cap in getDeviceCapabilityTags(dev.device_id)" :key="cap" class="device-cap-badge">{{ cap }}</span>
                 </div>
@@ -1186,16 +1195,19 @@ const currentExecutionDevice = computed(() => {
       type: 'phone',
       name: isMobile.value ? '本机 (手机)' : '本机',
       online: true,
+      transport: 'lan',
     };
   }
   const found = pairedPcDevices.value.find(d => d.device_id === devId);
   if (found) {
     const isOnline = found._isOnline ?? ((Date.now() - (found.last_seen || 0)) < 120_000);
+    const transport = isOnline ? (found.last_transport || (found.ip_address && found.ip_address !== 'relay' && found.ip_address !== 'LAN' ? 'lan' : 'relay')) : 'offline';
     return {
       id: found.device_id,
       type: 'pc',
       name: found.device_name || '已配对电脑 (PC)',
       online: isOnline,
+      transport,
       raw: found,
     };
   }
@@ -1205,6 +1217,7 @@ const currentExecutionDevice = computed(() => {
   if (pairedPcDevices.value.length > 0) {
     const activePc = pairedPcDevices.value[0];
     const isOnline = activePc._isOnline ?? ((Date.now() - (activePc.last_seen || 0)) < 120_000);
+    const transport = isOnline ? (activePc.last_transport || (activePc.ip_address && activePc.ip_address !== 'relay' && activePc.ip_address !== 'LAN' ? 'lan' : 'relay')) : 'offline';
     if (selectedDeviceMap.value[convId] !== activePc.device_id) {
       selectedDeviceMap.value[convId] = activePc.device_id;
       if (props.conversationId) {
@@ -1216,6 +1229,7 @@ const currentExecutionDevice = computed(() => {
       type: 'pc',
       name: activePc.device_name || '已配对电脑 (PC)',
       online: isOnline,
+      transport,
       raw: activePc,
     };
   }
@@ -1232,6 +1246,7 @@ const currentExecutionDevice = computed(() => {
     type: 'phone',
     name: isMobile.value ? '本机 (手机)' : '本机',
     online: true,
+    transport: 'lan',
   };
 });
 
@@ -4300,12 +4315,21 @@ defineExpose({
   transition: background var(--duration-fast, 0.15s);
 }
 
-.device-status-dot.is-online {
+.device-status-dot.is-online,
+.device-status-dot.is-lan {
   background: var(--success, #10b981);
 }
 
-.device-status-dot.is-executing {
+.device-status-dot.is-relay {
   background: var(--accent-primary, #3b82f6);
+}
+
+.device-status-dot.is-offline {
+  background: var(--text-tertiary, #9ca3af);
+}
+
+.device-status-dot.is-executing {
+  background: var(--warning, #f59e0b);
   animation: pulse-dot 1.2s infinite ease-in-out;
 }
 

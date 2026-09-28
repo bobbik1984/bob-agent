@@ -628,6 +628,8 @@
     "no_paired_pc": "暂无已配对电脑。请在电脑端开启 Bob 并扫码配对。",
     "device_offline": "离线",
     "device_online": "在线",
+    "device_lan_online": "局域网在线",
+    "device_relay_online": "中继在线",
     "follow_device_default_model": "跟随电脑默认模型",
     "follow_device_default_model_desc": "由执行设备当前配置的模型决定",
     "session_model_override": "当前会话模型：{model}",

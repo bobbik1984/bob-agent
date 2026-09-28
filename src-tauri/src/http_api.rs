@@ -1554,6 +1554,278 @@ async fn handle_sync_push_db(
     }
 }
 
+async fn handle_lan_rpc(
+    axum::extract::State(state): axum::extract::State<ApiState>,
+    axum::extract::ConnectInfo(addr): axum::extract::ConnectInfo<std::net::SocketAddr>,
+    headers: axum::http::HeaderMap,
+    body: axum::body::Bytes,
+) -> impl IntoResponse {
+    let now_ms = crate::now_ms();
+    let local_id = state.test_target_id.clone().unwrap_or_else(get_local_device_id);
+
+    // 1. 解析请求体 JSON
+    let body_json: serde_json::Value = match serde_json::from_slice(&body) {
+        Ok(v) => v,
+        Err(e) => {
+            return (
+                axum::http::StatusCode::BAD_REQUEST,
+                axum::Json(serde_json::json!({
+                    "status": "error",
+                    "message": format!("Invalid JSON body: {}", e)
+                })),
+            ).into_response();
+        }
+    };
+
+    let action = match body_json.get("action").and_then(|v| v.as_str()) {
+        Some(a) => a,
+        None => {
+            return (
+                axum::http::StatusCode::BAD_REQUEST,
+                axum::Json(serde_json::json!({
+                    "status": "error",
+                    "message": "Missing 'action' field in body"
+                })),
+            ).into_response();
+        }
+    };
+
+    // 2. SEC-01 签名与凭证校验 (verify_rest_request_auth_with_target)
+    let auth_outcome = match with_api_state_db(&state, |conn| {
+        verify_rest_request_auth_with_target(conn, &headers, &body, action, &local_id, now_ms)
+    }) {
+        Ok(Ok(outcome)) => outcome,
+        Ok(Err((status, msg))) => {
+            log::warn!("[http_api] Rejected unauthorized LAN RPC ({}) from {}: {}", action, addr, msg);
+            return (
+                status,
+                axum::Json(serde_json::json!({
+                    "status": "error",
+                    "message": msg
+                })),
+            ).into_response();
+        }
+        Err(e) => {
+            log::error!("[http_api] Database error during LAN RPC auth from {}: {}", addr, e);
+            return (
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                axum::Json(serde_json::json!({
+                    "status": "error",
+                    "message": e
+                })),
+            ).into_response();
+        }
+    };
+
+    // 3. 处理幂等缓存
+    let (subject_device_id, session_id, request_id, execution_token) = match auth_outcome {
+        crate::device_trust::AuthVerificationOutcome::IdempotentCached { cached_response } => {
+            log::info!("[http_api] Returning idempotent cached LAN RPC response for {}", addr);
+            return (
+                axum::http::StatusCode::OK,
+                axum::Json(serde_json::from_str::<serde_json::Value>(&cached_response).unwrap_or_else(|_| {
+                    serde_json::json!({ "status": "ok" })
+                })),
+            ).into_response();
+        }
+        crate::device_trust::AuthVerificationOutcome::Authorized {
+            subject_device_id,
+            session_id,
+            request_id,
+            execution_token,
+            ..
+        } => (subject_device_id, session_id, request_id, execution_token),
+    };
+
+    // 4. 自动注册设备活跃 IP 与传输通道
+    let platform = headers.get("x-platform").and_then(|v| v.to_str().ok()).unwrap_or("mobile");
+    let device_name = headers.get("x-device-name").and_then(|v| v.to_str().ok()).map(|s| s.to_string());
+    if let Some(app) = &state.app {
+        let _ = crate::sync_engine::register_authenticated_device(app, &subject_device_id, platform, device_name, addr);
+        crate::sync_engine::update_device_last_transport(app, &subject_device_id, &addr.ip().to_string(), "lan");
+    }
+
+    // 5. 根据 action 分发执行业务
+    let exec_result: Result<serde_json::Value, String> = match action {
+        "rpc_request" => {
+            if let Some(app) = &state.app {
+                crate::sync_engine::execute_rpc_instruction_core(app, &subject_device_id, &body_json).await
+            } else {
+                Err("AppHandle unavailable for RPC execution".to_string())
+            }
+        }
+        "rpc_approval" | "rpc_approval_decision" => {
+            let change_id = body_json.get("change_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let decision = body_json.get("decision").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let from_id = subject_device_id.clone();
+            let outcome_res = with_api_state_db(&state, |conn| {
+                crate::sync_engine::process_approval_decision_core(
+                    conn,
+                    &change_id,
+                    &decision,
+                    &format!("remote:{}", from_id),
+                )
+            });
+            match outcome_res {
+                Ok(outcome_val) => {
+                    if outcome_val.get("status").and_then(|s| s.as_str()) == Some("applied") {
+                        let _ = crate::sync_history::record_activity(
+                            crate::sync_protocol::DiagnosticStatus::Success,
+                            Some(crate::sync_protocol::TransportKind::Lan),
+                            Some(from_id),
+                            &format!("LAN直连已批准并真实应用修改: {}", change_id),
+                            Some("RPC-APPLY-OK".to_string()),
+                        );
+                    } else if outcome_val.get("status").and_then(|s| s.as_str()) == Some("rejected") {
+                        let _ = crate::sync_history::record_activity(
+                            crate::sync_protocol::DiagnosticStatus::Skipped,
+                            Some(crate::sync_protocol::TransportKind::Lan),
+                            Some(from_id),
+                            &format!("LAN直连已拒绝修改提案: {}", change_id),
+                            Some("RPC-REJECT".to_string()),
+                        );
+                    }
+                    Ok(serde_json::json!({
+                        "action": "rpc_response",
+                        "request_id": request_id,
+                        "outcome": outcome_val
+                    }))
+                }
+                Err(e) => Err(e),
+            }
+        }
+        "rpc_cancel" => {
+            let cancel_req_id = body_json.get("request_id").and_then(|v| v.as_str()).unwrap_or(&request_id).to_string();
+            let (_cancel_outcome, is_confirmed, cancel_status, cancel_error_msg) =
+                crate::sync_engine::cancel_active_rpc_task_core(&cancel_req_id, tokio::time::Duration::from_secs(5)).await;
+
+            if is_confirmed {
+                let _ = with_api_state_db(&state, |conn| {
+                    if let Ok(cancelled) = crate::sync_engine::cancel_staged_changes_by_request(conn, &cancel_req_id) {
+                        if let Ok(mut staged) = crate::sync_engine::STAGED_CHANGES.lock() {
+                            for c in &cancelled {
+                                staged.remove(&c.change_id);
+                            }
+                        }
+                    }
+                    let pid = crate::work_core::repository::ensure_personal_workspace(conn).unwrap_or_else(|_| "project_personal_inbox".to_string());
+                    let _ = crate::work_core::repository::record_work_event(
+                        conn,
+                        &pid,
+                        None,
+                        "remote.task.cancelled",
+                        &format!("remote:{}", subject_device_id),
+                        &serde_json::json!({
+                            "requestId": cancel_req_id,
+                            "fromDevice": subject_device_id,
+                            "reason": "User cancelled from mobile"
+                        }),
+                        Some(&format!("event_rpc_cancel_{}", cancel_req_id)),
+                    );
+                    if let Ok(agg) = crate::work_core::repository::get_project_aggregate(conn, &pid) {
+                        let _ = crate::work_core::snapshot::write_project_snapshot(&agg);
+                    }
+                    Ok::<(), String>(())
+                });
+                let _ = crate::sync_history::record_activity(
+                    crate::sync_protocol::DiagnosticStatus::Skipped,
+                    Some(crate::sync_protocol::TransportKind::Lan),
+                    Some(subject_device_id.clone()),
+                    &format!("LAN直连任务已被移动端取消: {}", cancel_req_id),
+                    Some("RPC-CANCEL-ACK".to_string()),
+                );
+            }
+
+            let mut payload_data = serde_json::json!({
+                "action": "rpc_cancel_ack",
+                "request_id": cancel_req_id,
+                "status": cancel_status,
+                "confirmed": is_confirmed
+            });
+            if let Some(err) = cancel_error_msg {
+                payload_data["error"] = serde_json::Value::String(err);
+            }
+            Ok(payload_data)
+        }
+        "rpc_discover_capabilities" => {
+            if let Some(app) = &state.app {
+                let snapshot = crate::capability::CapabilitySnapshot::capture(app, false, true);
+                let (safe_models, default_model) = crate::capability::get_safe_model_pool_for_remote();
+                match crate::read_config_checked() {
+                    Ok(config) => {
+                        let device_name = config.get("device_name")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("本机")
+                            .to_string();
+                        if let Some(local_device_id) = config.get("device_id")
+                            .and_then(|v| v.as_str())
+                            .filter(|s| !s.trim().is_empty())
+                        {
+                            Ok(serde_json::json!({
+                                "action": "rpc_capabilities_response",
+                                "request_id": request_id,
+                                "status": "success",
+                                "device_id": local_device_id,
+                                "device_name": device_name,
+                                "platform": snapshot.platform,
+                                "file_scope": snapshot.file_scope,
+                                "capabilities": snapshot.capabilities,
+                                "available_models": safe_models,
+                                "default_model": default_model,
+                                "timestamp": crate::now_ms()
+                            }))
+                        } else {
+                            Err("SEC-01 Fail-Closed: 本机缺少 device_id".to_string())
+                        }
+                    }
+                    Err(e) => Err(format!("SEC-01 Fail-Closed: 无法读取配置: {}", e)),
+                }
+            } else {
+                Err("AppHandle unavailable for capabilities discovery".to_string())
+            }
+        }
+        other => Err(format!("Unsupported RPC action: {}", other)),
+    };
+
+    // 6. 依据执行结果提交幂等缓存状态并返回 HTTP 响应
+    match exec_result {
+        Ok(resp_payload) => {
+            let resp_str = resp_payload.to_string();
+            let _ = with_api_state_db(&state, |conn| {
+                crate::device_trust::complete_rpc_idempotency(
+                    conn,
+                    &session_id,
+                    &request_id,
+                    &execution_token,
+                    &resp_str,
+                    crate::now_ms(),
+                )
+            });
+            (axum::http::StatusCode::OK, axum::Json(resp_payload)).into_response()
+        }
+        Err(err_msg) => {
+            let err_payload = serde_json::json!({
+                "action": "rpc_response",
+                "request_id": request_id,
+                "status": "error",
+                "error": err_msg
+            });
+            let err_str = err_payload.to_string();
+            let _ = with_api_state_db(&state, |conn| {
+                crate::device_trust::complete_rpc_idempotency(
+                    conn,
+                    &session_id,
+                    &request_id,
+                    &execution_token,
+                    &err_str,
+                    crate::now_ms(),
+                )
+            });
+            (axum::http::StatusCode::OK, axum::Json(err_payload)).into_response()
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
 pub enum PairRequestBody {
@@ -1819,6 +2091,7 @@ pub fn create_public_router_with_state(public_state: ApiState) -> Router {
         .route("/v1/sync/pull", get(handle_sync_pull))
         .route("/v1/sync/push", post(handle_sync_push))
         .route("/v1/sync/push_db", post(handle_sync_push_db))
+        .route("/v1/rpc", post(handle_lan_rpc))
         .with_state(public_state)
 }
 

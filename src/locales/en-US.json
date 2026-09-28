@@ -628,6 +628,8 @@
     "no_paired_pc": "No paired PC found. Please open Bob on PC and scan QR code to pair.",
     "device_offline": "Offline",
     "device_online": "Online",
+    "device_lan_online": "LAN Online",
+    "device_relay_online": "Relay Online",
     "follow_device_default_model": "Follow PC Default Model",
     "follow_device_default_model_desc": "Determined by target device active configuration",
     "session_model_override": "Session Model: {model}",

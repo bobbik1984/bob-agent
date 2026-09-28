@@ -1792,6 +1792,8 @@ pub struct ConnectedDevice {
     pub is_trusted: bool,
     #[serde(default)]
     pub status: Option<String>,
+    #[serde(default)]
+    pub last_transport: Option<String>,
 }
 
 pub struct DeviceRegistry {
@@ -1881,6 +1883,7 @@ pub fn get_connected_devices_core(
                         device_name: Some("已配对电脑 (PC)".to_string()),
                         is_trusted: true,
                         status: Some("trusted".to_string()),
+                        last_transport: None,
                     };
                     if let Some(ref reg) = registry_opt {
                         reg.update_device(pc_dev.clone());
@@ -2041,6 +2044,71 @@ pub fn resolve_target_device_id_for_rpc(app: &AppHandle, requested_id: &str) -> 
     )
 }
 
+fn get_candidate_lan_ips(app: &AppHandle, target_device_id: &str) -> Vec<String> {
+    let mut candidate_ips = Vec::new();
+
+    if let Ok(config) = crate::read_config_checked() {
+        if let Some(pp) = config.get("pairing_payload").and_then(|v| v.as_object()) {
+            if pp.get("device_id").and_then(|v| v.as_str()) == Some(target_device_id) {
+                if let Some(ips) = pp.get("local_ips").and_then(|v| v.as_array()) {
+                    for ip_val in ips {
+                        if let Some(ip) = ip_val.as_str() {
+                            let trimmed = ip.trim();
+                            if !trimmed.is_empty() && trimmed != "relay" && trimmed != "LAN" && !candidate_ips.contains(&trimmed.to_string()) {
+                                candidate_ips.push(trimmed.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if let Some(registry) = app.try_state::<Arc<DeviceRegistry>>() {
+        if let Ok(devices) = registry.devices.read() {
+            if let Some(dev) = devices.get(target_device_id) {
+                let ip = dev.ip_address.trim();
+                if !ip.is_empty() && ip != "relay" && ip != "LAN" && !candidate_ips.contains(&ip.to_string()) {
+                    candidate_ips.push(ip.to_string());
+                }
+            }
+        }
+    }
+
+    candidate_ips
+}
+
+fn get_candidate_lan_port(app: &AppHandle, target_device_id: &str) -> u16 {
+    if let Ok(config) = crate::read_config_checked() {
+        if let Some(pp) = config.get("pairing_payload").and_then(|v| v.as_object()) {
+            if pp.get("device_id").and_then(|v| v.as_str()) == Some(target_device_id) {
+                if let Some(p) = pp.get("port").and_then(|v| v.as_u64()) {
+                    return p as u16;
+                }
+            }
+        }
+    }
+    3722
+}
+
+pub fn update_device_last_transport(app: &AppHandle, target_device_id: &str, ip: &str, transport: &str) {
+    if let Some(registry) = app.try_state::<Arc<DeviceRegistry>>() {
+        let dev_opt = if let Ok(devices) = registry.devices.read() {
+            devices.get(target_device_id).cloned()
+        } else {
+            None
+        };
+        if let Some(mut dev) = dev_opt {
+            dev.last_seen = crate::now_ms();
+            if transport == "lan" && !ip.is_empty() && ip != "relay" && ip != "LAN" {
+                dev.ip_address = ip.to_string();
+            }
+            dev.last_transport = Some(transport.to_string());
+            registry.update_device(dev);
+        }
+    }
+}
+
 #[command]
 pub async fn check_device_online(app: AppHandle, target_device_id: String) -> Result<bool, String> {
     if target_device_id == "local" || target_device_id.is_empty() {
@@ -2058,54 +2126,24 @@ pub async fn check_device_online(app: AppHandle, target_device_id: String) -> Re
         None
     };
 
+    // 1. 快速判定：若最近 30 秒内已有通信或感知记录，直接视为在线，避免频繁网络请求造成日志刷屏
     if let Some(ref dev) = dev_opt {
-        if (now - dev.last_seen) < 120_000 {
+        if (now - dev.last_seen) < 30_000 {
             return Ok(true);
         }
     }
 
-    // 收集所有候选 LAN IP 与端口
-    let mut candidate_ips = Vec::new();
-    let mut port: u16 = 3722;
+    // 2. 局域网优先探测 (1.5s 快速超时)
+    let candidate_ips = get_candidate_lan_ips(&app, &target_device_id);
+    let port = get_candidate_lan_port(&app, &target_device_id);
 
-    if let Ok(config) = crate::read_config_checked() {
-        if let Some(pp) = config.get("pairing_payload").and_then(|v| v.as_object()) {
-            if pp.get("device_id").and_then(|v| v.as_str()) == Some(&target_device_id) {
-                if let Some(ips) = pp.get("local_ips").and_then(|v| v.as_array()) {
-                    for ip_val in ips {
-                        if let Some(ip) = ip_val.as_str() {
-                            if !candidate_ips.contains(&ip.to_string()) {
-                                candidate_ips.push(ip.to_string());
-                            }
-                        }
-                    }
-                }
-                if let Some(p) = pp.get("port").and_then(|v| v.as_u64()) {
-                    port = p as u16;
-                }
-            }
-        }
-    }
-
-    if let Some(ref dev) = dev_opt {
-        let ip = dev.ip_address.trim();
-        if !ip.is_empty() && ip != "relay" && ip != "LAN" && !candidate_ips.contains(&ip.to_string()) {
-            candidate_ips.push(ip.to_string());
-        }
-    }
-
-    // 局域网优先探测 (1.5s 快速超时)
     if !candidate_ips.is_empty() {
         if let Ok(client) = reqwest::Client::builder().timeout(std::time::Duration::from_millis(1500)).build() {
             for ip in &candidate_ips {
                 let health_url = format!("http://{}:{}/v1/health", ip, port);
                 if let Ok(res) = client.get(&health_url).send().await {
                     if res.status().is_success() {
-                        if let Some(mut updated_dev) = dev_opt.clone() {
-                            updated_dev.last_seen = crate::now_ms();
-                            updated_dev.ip_address = ip.clone();
-                            registry.update_device(updated_dev);
-                        }
+                        update_device_last_transport(&app, &target_device_id, ip, "lan");
                         return Ok(true);
                     }
                 }
@@ -2113,22 +2151,147 @@ pub async fn check_device_online(app: AppHandle, target_device_id: String) -> Re
         }
     }
 
-    // 中继通道探针
+    // 3. 中继通道探针：若本地 Relay 已连接，且对端在最近 2 分钟内曾活跃，则视为中继在线
     let relay_connected = RELAY_TX.read().map(|l| l.is_some()).unwrap_or(false);
     if relay_connected {
-        return Ok(true);
+        if let Some(ref dev) = dev_opt {
+            if (now - dev.last_seen) < 120_000 {
+                update_device_last_transport(&app, &target_device_id, "relay", "relay");
+                return Ok(true);
+            }
+        }
     }
 
-    // 若本地中继尚未建连，尝试唤醒并等待探测（最多 3 秒）
-    force_relay_reconnect();
-    for _ in 0..15 {
-        tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
-        if RELAY_TX.read().map(|l| l.is_some()).unwrap_or(false) {
-            return Ok(true);
+    // 若本地中继尚未建连，尝试唤醒并等待探测（最多 2 秒）
+    if !relay_connected {
+        force_relay_reconnect();
+        for _ in 0..10 {
+            tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+            if RELAY_TX.read().map(|l| l.is_some()).unwrap_or(false) {
+                if let Some(ref dev) = dev_opt {
+                    if (now - dev.last_seen) < 120_000 {
+                        update_device_last_transport(&app, &target_device_id, "relay", "relay");
+                        return Ok(true);
+                    }
+                }
+            }
         }
     }
 
     Ok(false)
+}
+
+async fn dispatch_dual_transport_rpc(
+    app: &AppHandle,
+    target_device_id: &str,
+    action: &str,
+    mut inner_payload: serde_json::Value,
+    req_id: &str,
+    terminal: RelayTerminal,
+    timeout_secs: u64,
+) -> Result<serde_json::Value, String> {
+    let payload_bytes = crate::device_trust::canonicalize_json_value(&inner_payload);
+    let envelope = crate::device_trust::sign_outgoing_rpc(app, target_device_id, action, &payload_bytes, Some(req_id))?;
+    let env_json = serde_json::to_value(&envelope).map_err(|e| e.to_string())?;
+    inner_payload["envelope"] = env_json.clone();
+    inner_payload["auth_envelope"] = env_json.clone();
+    inner_payload["raw_payload"] = serde_json::json!(String::from_utf8(payload_bytes.clone()).unwrap_or_default());
+
+    // 1. 尝试局域网直连 (LAN Direct HTTP Priority)
+    let candidate_ips = get_candidate_lan_ips(app, target_device_id);
+    let port = get_candidate_lan_port(app, target_device_id);
+
+    if !candidate_ips.is_empty() {
+        if let Ok(client) = reqwest::Client::builder()
+            .connect_timeout(std::time::Duration::from_millis(2000))
+            .timeout(std::time::Duration::from_secs(timeout_secs))
+            .build()
+        {
+            for ip in &candidate_ips {
+                let url = format!("http://{}:{}/v1/rpc", ip, port);
+                log::info!("[Sync Engine] Trying LAN Direct RPC ({}) to {}", action, url);
+                let post_res = client.post(&url)
+                    .header("content-type", "application/json")
+                    .header("x-rpc-auth-envelope", env_json.to_string())
+                    .header("x-device-id", &envelope.subject_device_id)
+                    .json(&inner_payload)
+                    .send()
+                    .await;
+
+                match post_res {
+                    Ok(resp) if resp.status().is_success() => {
+                        match resp.json::<serde_json::Value>().await {
+                            Ok(payload) => {
+                                if payload.get("status").and_then(|v| v.as_str()) == Some("error") {
+                                    let err_msg = payload.get("error").and_then(|v| v.as_str()).unwrap_or("Remote execution failed");
+                                    return Err(err_msg.to_string());
+                                }
+                                log::info!("[Sync Engine] LAN Direct RPC ({}) to {} succeeded!", action, ip);
+                                update_device_last_transport(app, target_device_id, ip, "lan");
+                                let _ = crate::sync_history::record_activity(
+                                    DiagnosticStatus::Success,
+                                    Some(TransportKind::Lan),
+                                    Some(target_device_id.to_string()),
+                                    &format!("LAN 直连 RPC 完成 ({})", action),
+                                    Some("LAN-RPC-OK".to_string()),
+                                );
+                                return Ok(payload);
+                            }
+                            Err(e) => {
+                                log::warn!("[Sync Engine] LAN Direct RPC response parse error from {}: {}", ip, e);
+                            }
+                        }
+                    }
+                    Ok(resp) => {
+                        log::warn!("[Sync Engine] LAN Direct RPC to {} returned HTTP {}", ip, resp.status());
+                    }
+                    Err(e) => {
+                        log::info!("[Sync Engine] LAN Direct RPC to {} unreachable ({}). Falling back to Relay...", ip, e);
+                    }
+                }
+            }
+        }
+    }
+
+    // 2. 局域网不可达或失败，降级回退至中继通道 (Relay Fallback)
+    log::info!("[Sync Engine] Dispatching RPC ({}) via Relay to {}", action, target_device_id);
+    let msg_id = uuid::Uuid::new_v4().to_string();
+    let trace_id = uuid::Uuid::new_v4().to_string();
+    let request = serde_json::json!({
+        "type": "proxy",
+        "from_device_id": envelope.subject_device_id,
+        "target_device_id": target_device_id,
+        "trace_id": trace_id,
+        "message_id": msg_id,
+        "sync_id": uuid::Uuid::new_v4().to_string(),
+        "protocol_version": SYNC_PROTOCOL_VERSION,
+        "payload": inner_payload
+    });
+
+    let resp = send_relay_request_and_wait(
+        request,
+        tokio::time::Duration::from_secs(timeout_secs),
+        terminal,
+    ).await?;
+
+    if let Some(payload) = resp.get("payload") {
+        if payload.get("status").and_then(|v| v.as_str()) == Some("error") {
+            let err_msg = payload.get("error").and_then(|v| v.as_str()).unwrap_or("Remote execution failed");
+            return Err(err_msg.to_string());
+        }
+        update_device_last_transport(app, target_device_id, "relay", "relay");
+        let _ = crate::sync_history::record_activity(
+            DiagnosticStatus::Success,
+            Some(TransportKind::Relay),
+            Some(target_device_id.to_string()),
+            &format!("Relay 中继 RPC 完成 ({})", action),
+            Some("RELAY-RPC-OK".to_string()),
+        );
+        return Ok(payload.clone());
+    }
+
+    update_device_last_transport(app, target_device_id, "relay", "relay");
+    Ok(resp)
 }
 
 #[command]
@@ -2146,10 +2309,7 @@ pub async fn dispatch_remote_instruction(
     log::info!("[Sync Engine] Dispatching remote instruction to {}: {}", target_device_id, instruction);
 
     let req_id = request_id.filter(|s| !s.trim().is_empty()).unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-    let msg_id = uuid::Uuid::new_v4().to_string();
-    let trace_id = uuid::Uuid::new_v4().to_string();
-
-    let mut inner_payload = serde_json::json!({
+    let inner_payload = serde_json::json!({
         "action": "rpc_request",
         "request_id": req_id,
         "conversation_id": conversation_id,
@@ -2159,40 +2319,15 @@ pub async fn dispatch_remote_instruction(
         "model": model,
     });
 
-    let payload_bytes = crate::device_trust::canonicalize_json_value(&inner_payload);
-    let envelope = crate::device_trust::sign_outgoing_rpc(&app, &target_device_id, "rpc_request", &payload_bytes, Some(&req_id))?;
-    let env_json = serde_json::to_value(&envelope).map_err(|e| e.to_string())?;
-    inner_payload["envelope"] = env_json.clone();
-    inner_payload["auth_envelope"] = env_json;
-    inner_payload["raw_payload"] = serde_json::json!(String::from_utf8(payload_bytes.clone()).unwrap_or_default());
-
-    let request = serde_json::json!({
-        "type": "proxy",
-        "from_device_id": envelope.subject_device_id,
-        "target_device_id": target_device_id,
-        "trace_id": trace_id,
-        "message_id": msg_id,
-        "sync_id": uuid::Uuid::new_v4().to_string(),
-        "protocol_version": SYNC_PROTOCOL_VERSION,
-        "payload": inner_payload
-    });
-
-    let resp = send_relay_request_and_wait(
-        request,
-        tokio::time::Duration::from_secs(60),
+    dispatch_dual_transport_rpc(
+        &app,
+        &target_device_id,
+        "rpc_request",
+        inner_payload,
+        &req_id,
         RelayTerminal::RpcResponse,
-    )
-    .await?;
-
-    if let Some(payload) = resp.get("payload") {
-        if payload.get("status").and_then(|v| v.as_str()) == Some("error") {
-            let err_msg = payload.get("error").and_then(|v| v.as_str()).unwrap_or("Remote execution failed");
-            return Err(err_msg.to_string());
-        }
-        return Ok(payload.clone());
-    }
-
-    Ok(resp)
+        60,
+    ).await
 }
 
 #[command]
@@ -2206,50 +2341,22 @@ pub async fn dispatch_remote_approval(
     let target_device_id = resolve_target_device_id_for_rpc(&app, &target_device_id)?;
     log::info!("[Sync Engine] Dispatching remote approval to {}: change_id={}, decision={}", target_device_id, change_id, decision);
 
-    let msg_id = uuid::Uuid::new_v4().to_string();
-    let trace_id = uuid::Uuid::new_v4().to_string();
-
-    let mut inner_payload = serde_json::json!({
+    let inner_payload = serde_json::json!({
         "action": "rpc_approval",
         "request_id": request_id,
         "change_id": change_id,
         "decision": decision,
     });
 
-    let payload_bytes = crate::device_trust::canonicalize_json_value(&inner_payload);
-    let envelope = crate::device_trust::sign_outgoing_rpc(&app, &target_device_id, "rpc_approval", &payload_bytes, Some(&request_id))?;
-    let env_json = serde_json::to_value(&envelope).map_err(|e| e.to_string())?;
-    inner_payload["envelope"] = env_json.clone();
-    inner_payload["auth_envelope"] = env_json;
-    inner_payload["raw_payload"] = serde_json::json!(String::from_utf8(payload_bytes.clone()).unwrap_or_default());
-
-    let request = serde_json::json!({
-        "type": "proxy",
-        "from_device_id": envelope.subject_device_id,
-        "target_device_id": target_device_id,
-        "trace_id": trace_id,
-        "message_id": msg_id,
-        "sync_id": uuid::Uuid::new_v4().to_string(),
-        "protocol_version": SYNC_PROTOCOL_VERSION,
-        "payload": inner_payload
-    });
-
-    let resp = send_relay_request_and_wait(
-        request,
-        tokio::time::Duration::from_secs(30),
+    dispatch_dual_transport_rpc(
+        &app,
+        &target_device_id,
+        "rpc_approval",
+        inner_payload,
+        &request_id,
         RelayTerminal::RpcResponse,
-    )
-    .await?;
-
-    if let Some(payload) = resp.get("payload") {
-        if payload.get("status").and_then(|v| v.as_str()) == Some("error") {
-            let err_msg = payload.get("error").and_then(|v| v.as_str()).unwrap_or("Remote approval failed");
-            return Err(err_msg.to_string());
-        }
-        return Ok(payload.clone());
-    }
-
-    Ok(resp)
+        30,
+    ).await
 }
 
 #[command]
@@ -2261,48 +2368,20 @@ pub async fn cancel_remote_instruction(
     let target_device_id = resolve_target_device_id_for_rpc(&app, &target_device_id)?;
     log::info!("[Sync Engine] Dispatching remote cancellation to {}: request_id={}", target_device_id, request_id);
 
-    let msg_id = uuid::Uuid::new_v4().to_string();
-    let trace_id = uuid::Uuid::new_v4().to_string();
-
-    let mut inner_payload = serde_json::json!({
+    let inner_payload = serde_json::json!({
         "action": "rpc_cancel",
         "request_id": request_id,
     });
 
-    let payload_bytes = crate::device_trust::canonicalize_json_value(&inner_payload);
-    let envelope = crate::device_trust::sign_outgoing_rpc(&app, &target_device_id, "rpc_cancel", &payload_bytes, Some(&request_id))?;
-    let env_json = serde_json::to_value(&envelope).map_err(|e| e.to_string())?;
-    inner_payload["envelope"] = env_json.clone();
-    inner_payload["auth_envelope"] = env_json;
-    inner_payload["raw_payload"] = serde_json::json!(String::from_utf8(payload_bytes.clone()).unwrap_or_default());
-
-    let request = serde_json::json!({
-        "type": "proxy",
-        "from_device_id": envelope.subject_device_id,
-        "target_device_id": target_device_id,
-        "trace_id": trace_id,
-        "message_id": msg_id,
-        "sync_id": uuid::Uuid::new_v4().to_string(),
-        "protocol_version": SYNC_PROTOCOL_VERSION,
-        "payload": inner_payload
-    });
-
-    let resp = send_relay_request_and_wait(
-        request,
-        tokio::time::Duration::from_secs(15),
+    dispatch_dual_transport_rpc(
+        &app,
+        &target_device_id,
+        "rpc_cancel",
+        inner_payload,
+        &request_id,
         RelayTerminal::RpcResponse,
-    )
-    .await?;
-
-    if let Some(payload) = resp.get("payload") {
-        if payload.get("status").and_then(|v| v.as_str()) == Some("error") {
-            let err_msg = payload.get("error").and_then(|v| v.as_str()).unwrap_or("Remote cancel failed");
-            return Err(err_msg.to_string());
-        }
-        return Ok(payload.clone());
-    }
-
-    Ok(resp)
+        15,
+    ).await
 }
 
 #[command]
@@ -2344,45 +2423,20 @@ pub async fn fetch_remote_capabilities(
     log::info!("[Sync Engine] Probing remote capabilities for device: {}", target_device_id);
 
     let req_id = uuid::Uuid::new_v4().to_string();
-    let msg_id = uuid::Uuid::new_v4().to_string();
-    let trace_id = uuid::Uuid::new_v4().to_string();
-
-    let mut inner_payload = serde_json::json!({
+    let inner_payload = serde_json::json!({
         "action": "rpc_discover_capabilities",
         "request_id": req_id,
     });
 
-    let payload_bytes = crate::device_trust::canonicalize_json_value(&inner_payload);
-    let envelope = crate::device_trust::sign_outgoing_rpc(&app, &target_device_id, "rpc_discover_capabilities", &payload_bytes, Some(&req_id))?;
-    inner_payload["envelope"] = serde_json::to_value(&envelope).map_err(|e| e.to_string())?;
-
-    let request = serde_json::json!({
-        "type": "proxy",
-        "from_device_id": envelope.subject_device_id,
-        "target_device_id": target_device_id,
-        "trace_id": trace_id,
-        "message_id": msg_id,
-        "sync_id": uuid::Uuid::new_v4().to_string(),
-        "protocol_version": SYNC_PROTOCOL_VERSION,
-        "payload": inner_payload
-    });
-
-    let resp = send_relay_request_and_wait(
-        request,
-        tokio::time::Duration::from_secs(15),
+    dispatch_dual_transport_rpc(
+        &app,
+        &target_device_id,
+        "rpc_discover_capabilities",
+        inner_payload,
+        &req_id,
         RelayTerminal::RpcResponse,
-    )
-    .await?;
-
-    if let Some(payload) = resp.get("payload") {
-        if payload.get("status").and_then(|v| v.as_str()) == Some("error") {
-            let err_msg = payload.get("error").and_then(|v| v.as_str()).unwrap_or("Remote capabilities discovery failed");
-            return Err(err_msg.to_string());
-        }
-        return Ok(payload.clone());
-    }
-
-    Ok(resp)
+        15,
+    ).await
 }
 
 pub fn register_authenticated_device_core(
@@ -2407,6 +2461,11 @@ pub fn register_authenticated_device_core(
         false
     };
     let status = if is_trusted { "trusted".to_string() } else { "untrusted".to_string() };
+    let last_transport = if ip_str == "relay" {
+        Some("relay".to_string())
+    } else {
+        Some("lan".to_string())
+    };
     let device = ConnectedDevice {
         device_id: device_id.to_string(),
         platform: platform.to_string(),
@@ -2415,6 +2474,7 @@ pub fn register_authenticated_device_core(
         device_name,
         is_trusted,
         status: Some(status),
+        last_transport,
     };
     if let Some(reg) = registry_opt {
         reg.update_device(device.clone());
@@ -2498,6 +2558,7 @@ pub fn register_device(app: &AppHandle, headers: &axum::http::HeaderMap, ip: std
             device_name,
             is_trusted: false,
             status: Some("discovered".to_string()),
+            last_transport: Some("lan".to_string()),
         };
         registry.update_device(device.clone());
         let _ = app.emit("sync:device_connected", device);
@@ -3238,6 +3299,7 @@ pub async fn relay_handshake(
                 device_name: Some("Paired PC".to_string()),
                 is_trusted: true,
                 status: Some("trusted".to_string()),
+                last_transport: Some("relay".to_string()),
             });
             Ok(session_id)
         }
@@ -4344,6 +4406,7 @@ pub fn import_sync_data(app: &AppHandle, data: SyncData, last_sync_ts: i64) -> R
                     device_name: Some("已配对电脑 (PC)".to_string()),
                     is_trusted: false,
                     status: Some("discovered".to_string()),
+                    last_transport: None,
                 });
             }
         }
@@ -4861,6 +4924,7 @@ async fn do_active_sync(
                 device_name: Some("已配对电脑 (PC)".to_string()),
                 is_trusted: false,
                 status: Some("discovered".to_string()),
+                last_transport: Some("lan".to_string()),
             });
         }
 
@@ -5125,6 +5189,7 @@ async fn do_active_sync(
                 device_name: Some("已配对电脑 (PC)".to_string()),
                 is_trusted: false,
                 status: Some("discovered".to_string()),
+                last_transport: Some("relay".to_string()),
             });
         }
 
@@ -5610,17 +5675,398 @@ fn deliver_authenticated_relay_response(
     Ok(true)
 }
 
+fn notify_waiters_target_offline(receipt_or_err: &serde_json::Value, target_device_id: &str) {
+    let mut pending = match PENDING_REQUESTS.write() {
+        Ok(guard) => guard,
+        Err(_) => return,
+    };
+
+    let ref_msg_id = receipt_or_err
+        .get("ref_message_id")
+        .or_else(|| receipt_or_err.get("message_id"))
+        .and_then(|v| v.as_str());
+
+    if let Some(msg_id) = ref_msg_id {
+        if let Some(waiter) = pending.remove(msg_id) {
+            let err_val = serde_json::json!({
+                "type": "error",
+                "error": format!("ERR-SYNC-02: Target device offline: {}", waiter.expected_peer),
+                "target_device_id": waiter.expected_peer,
+                "ref_message_id": msg_id,
+            });
+            let _ = waiter.tx.send(err_val);
+            return;
+        }
+    }
+
+    let mut to_remove = Vec::new();
+    for (msg_id, waiter) in pending.iter() {
+        if !target_device_id.is_empty() && waiter.expected_peer == target_device_id {
+            to_remove.push(msg_id.clone());
+        }
+    }
+
+    if to_remove.is_empty() && pending.len() == 1 {
+        if let Some(first_key) = pending.keys().next().cloned() {
+            to_remove.push(first_key);
+        }
+    }
+
+    for msg_id in to_remove {
+        if let Some(waiter) = pending.remove(&msg_id) {
+            let err_val = serde_json::json!({
+                "type": "error",
+                "error": format!("ERR-SYNC-02: Target device offline: {}", waiter.expected_peer),
+                "target_device_id": waiter.expected_peer,
+                "ref_message_id": msg_id,
+            });
+            let _ = waiter.tx.send(err_val);
+        }
+    }
+}
+
+pub async fn execute_rpc_instruction_core(
+    app: &AppHandle,
+    from_id: &str,
+    inner_payload: &serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let request_id = inner_payload.get("request_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let conversation_id = inner_payload.get("conversation_id").and_then(|v| v.as_str()).unwrap_or("default").to_string();
+    let project_id_opt = inner_payload.get("project_id").and_then(|v| v.as_str()).map(|s| s.to_string());
+    let instruction = inner_payload.get("instruction").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let read_only = inner_payload.get("read_only").and_then(|v| v.as_bool()).unwrap_or(true);
+    let requested_model = inner_payload.get("model").and_then(|v| v.as_str()).map(|s| s.to_string());
+
+    let (cancel_tx, mut cancel_rx) = tokio::sync::watch::channel(false);
+    let (done_tx, _done_rx) = tokio::sync::watch::channel(false);
+    {
+        ACTIVE_RPC_TASKS.lock().unwrap().insert(request_id.clone(), ActiveRpcTask {
+            cancel_tx,
+            done_rx: _done_rx,
+        });
+    }
+
+    let req_id_for_task = request_id.clone();
+    let start_time = std::time::Instant::now();
+    let pc_conv_id = format!("remote_conv_{}", conversation_id);
+    let mut msgs = Vec::new();
+    let mut resolved_project_id = project_id_opt.clone().unwrap_or_else(|| "project_personal_inbox".to_string());
+
+    // 从 SQLite 恢复上下文历史及解析项目归属
+    if let Some(db_state) = app.try_state::<crate::db::DbState>() {
+        if let Ok(mut conn) = db_state.0.lock() {
+            if project_id_opt.is_none() {
+                if let Ok(pid) = crate::work_core::repository::ensure_personal_workspace(&mut conn) {
+                    resolved_project_id = pid;
+                }
+            }
+
+            let _ = conn.execute(
+                "INSERT OR IGNORE INTO conversations (id, title, created_at, updated_at) VALUES (?1, ?2, ?3, ?4)",
+                rusqlite::params![pc_conv_id, format!("移动端协同: {}", instruction.chars().take(20).collect::<String>()), crate::now_ms(), crate::now_ms()],
+            );
+
+            if let Ok(mut stmt) = conn.prepare(
+                "SELECT role, content FROM messages WHERE conversation_id = ?1 ORDER BY created_at ASC LIMIT 30"
+            ) {
+                if let Ok(rows) = stmt.query_map(rusqlite::params![pc_conv_id], |row| {
+                    Ok(serde_json::json!({
+                        "role": row.get::<_, String>(0)?,
+                        "content": row.get::<_, String>(1)?
+                    }))
+                }) {
+                    for r in rows {
+                        if let Ok(m) = r {
+                            msgs.push(m);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let prompt = if read_only {
+        format!("[移动端 RPC 只读指令]\n{}\n注意：当前处于只读安全模式，仅允许进行文件读取、分析和查询。禁止使用任何文件修改、删除或系统写入工具。", instruction)
+    } else {
+        format!("[移动端 RPC 协同修改指令]\n{}\n注意：当前处于受控协同修改模式。如果需要修改文件，请调用 write_file 工具提出修改（系统将自动拦截并转为待手机审批的变更提案，不会直接覆写磁盘），或在回复中使用标准 diff 格式说明（以 ```diff 块包含 --- a/file 与 +++ b/file 及 +/- 改动行），手机端将审阅该 Diff 并由用户确认批准后再生效。", instruction)
+    };
+
+    msgs.push(serde_json::json!({
+        "role": "user",
+        "content": prompt
+    }));
+
+    let exec_policy = crate::tools::ToolExecutionPolicy {
+        read_only,
+        staged_mode: !read_only,
+        request_id: Some(req_id_for_task.clone()),
+        project_id: Some(resolved_project_id.clone()),
+    };
+
+    log::info!("[Sync Engine] Executing Agent for RPC {} in conv {} (policy: read_only={}, staged={})", req_id_for_task, pc_conv_id, exec_policy.read_only, exec_policy.staged_mode);
+
+    let result = tokio::select! {
+        res = crate::llm::stream_chat_with_policy(
+            app.clone(),
+            msgs,
+            Some(pc_conv_id.clone()),
+            None,
+            true,
+            "standard".to_string(),
+            requested_model.clone(),
+            exec_policy,
+        ) => {
+            if *cancel_rx.borrow() {
+                log::info!("[Sync Engine] Task {} was cancelled during execution", req_id_for_task);
+                let _ = done_tx.send(true);
+                ACTIVE_RPC_TASKS.lock().unwrap().remove(&req_id_for_task);
+                return Err("RPC task was cancelled".to_string());
+            }
+            res
+        }
+        _ = cancel_rx.changed() => {
+            log::info!("[Sync Engine] RPC task {} cancelled via watch channel", req_id_for_task);
+            let _ = done_tx.send(true);
+            ACTIVE_RPC_TASKS.lock().unwrap().remove(&req_id_for_task);
+            return Err("RPC task was cancelled".to_string());
+        }
+    };
+
+    let result_text = if let Some(arr) = result.as_array() {
+        if let Some(last) = arr.last() {
+            last.get("content").and_then(|v| v.as_str()).unwrap_or("Empty response").to_string()
+        } else {
+            "Empty array".to_string()
+        }
+    } else if let Some(content) = result.get("content").and_then(|v| v.as_str()) {
+        content.to_string()
+    } else {
+        result.to_string()
+    };
+
+    let elapsed = start_time.elapsed().as_millis() as u64;
+    let executor_device = match crate::read_config_checked() {
+        Ok(cfg) => cfg.get("device_name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("电脑端 (PC)")
+            .to_string(),
+        Err(e) => {
+            log::error!("[Sync Engine] Config read failed during remote execution result persistence (SEC-01 Fail-Closed): {}", e);
+            let _ = done_tx.send(true);
+            ACTIVE_RPC_TASKS.lock().unwrap().remove(&req_id_for_task);
+            return Err(format!("SEC-01 Fail-Closed: 配置读取失败无法持久化或确认执行结果: {}", e));
+        }
+    };
+
+    // 持久化本次交互至 PC 会话，供下一轮多轮追问
+    if let Some(db_state) = app.try_state::<crate::db::DbState>() {
+        if let Ok(conn) = db_state.0.lock() {
+            let now = crate::now_ms();
+            let _ = conn.execute(
+                "INSERT INTO messages (conversation_id, role, content, from_channel, created_at) VALUES (?1, 'user', ?2, 'remote', ?3)",
+                rusqlite::params![pc_conv_id, prompt, now],
+            );
+            let _ = conn.execute(
+                "INSERT INTO messages (conversation_id, role, content, from_channel, created_at) VALUES (?1, 'assistant', ?2, 'remote', ?3)",
+                rusqlite::params![pc_conv_id, result_text, now + 1],
+            );
+            let _ = conn.execute(
+                "UPDATE conversations SET updated_at = ?1, last_message = ?2 WHERE id = ?3",
+                rusqlite::params![now + 1, result_text.chars().take(80).collect::<String>(), pc_conv_id],
+            );
+        }
+    }
+
+    let mut created_staged_changes: Vec<StagedChange> = Vec::new();
+
+    if !read_only {
+        if let Some(db_state) = app.try_state::<crate::db::DbState>() {
+            if let Ok(conn) = db_state.0.lock() {
+                if let Ok(staged_list) = get_staged_changes_by_request(&conn, &req_id_for_task) {
+                    created_staged_changes = staged_list;
+                }
+            }
+        }
+
+        if created_staged_changes.is_empty() {
+            if let Ok(staged_map) = STAGED_CHANGES.lock() {
+                created_staged_changes = staged_map.values()
+                    .filter(|c| c.request_id == req_id_for_task && c.status == "pending")
+                    .cloned()
+                    .collect();
+            }
+        }
+
+        if created_staged_changes.is_empty() {
+            if let Some((ref file_path, ref diff_content, adds, dels)) = extract_diff_from_text(&result_text) {
+                let old_content = if std::path::Path::new(file_path).exists() {
+                    std::fs::read_to_string(file_path).unwrap_or_default()
+                } else {
+                    String::new()
+                };
+                if let Ok(new_content) = apply_unified_diff(&old_content, diff_content) {
+                    let old_content_hash = compute_content_hash(&old_content);
+                    let change_id = format!("change_{}", uuid::Uuid::new_v4());
+
+                    let mut staged = StagedChange {
+                        change_id: change_id.clone(),
+                        request_id: req_id_for_task.clone(),
+                        project_id: resolved_project_id.clone(),
+                        file_path: file_path.clone(),
+                        old_content,
+                        new_content,
+                        old_content_hash,
+                        diff: diff_content.clone(),
+                        summary: format!("修改文件: {}", file_path),
+                        additions: adds,
+                        deletions: dels,
+                        status: "pending".to_string(),
+                        created_at: crate::now_ms(),
+                        applied_at: None,
+                        work_object_id: None,
+                    };
+
+                    if let Some(db_state) = app.try_state::<crate::db::DbState>() {
+                        if let Ok(mut conn) = db_state.0.lock() {
+                            if let Ok(obj) = crate::work_core::repository::create_object(
+                                &mut conn,
+                                crate::work_core::models::CreateWorkObjectInput {
+                                    kind: crate::work_core::models::WorkObjectKind::Change,
+                                    project_id: resolved_project_id.clone(),
+                                    parent_id: None,
+                                    title: format!("待审阅修改提案: {}", file_path),
+                                    status: Some("needs_review".into()),
+                                    description: Some(format!("待审批的修改 (+{} -{})", adds, dels)),
+                                    data: serde_json::json!({
+                                        "filePath": file_path,
+                                        "changeId": change_id,
+                                        "additions": adds,
+                                        "deletions": dels,
+                                        "diff": diff_content,
+                                    }),
+                                    source_capture_id: None,
+                                    actor: Some(format!("remote:{}", from_id)),
+                                    idempotency_key: format!("obj_change_{}", change_id),
+                                },
+                            ) {
+                                staged.work_object_id = Some(obj.id);
+                            }
+                            let _ = save_staged_change(&conn, &staged);
+                        }
+                    }
+                    if let Ok(mut map) = STAGED_CHANGES.lock() {
+                        map.insert(change_id.clone(), staged.clone());
+                    }
+                    created_staged_changes.push(staged);
+                } else {
+                    log::warn!("[Sync Engine] Failed to apply extracted unified diff for {}", file_path);
+                }
+            }
+        }
+    }
+
+    let (status, change_val, changes_val) = if !created_staged_changes.is_empty() {
+        let first = &created_staged_changes[0];
+        let changes_json: Vec<serde_json::Value> = created_staged_changes.iter().map(|s| serde_json::json!({
+            "change_id": s.change_id,
+            "request_id": s.request_id,
+            "file_path": s.file_path,
+            "diff": s.diff,
+            "summary": s.summary,
+            "additions": s.additions,
+            "deletions": s.deletions,
+            "status": "pending"
+        })).collect();
+
+        (
+            "needs_approval",
+            Some(serde_json::json!({
+                "change_id": first.change_id,
+                "request_id": first.request_id,
+                "file_path": first.file_path,
+                "diff": first.diff,
+                "summary": first.summary,
+                "additions": first.additions,
+                "deletions": first.deletions,
+                "status": "pending"
+            })),
+            Some(serde_json::Value::Array(changes_json))
+        )
+    } else {
+        ("success", None, None)
+    };
+
+    // ── 接入统一工作记录 (Work Object / Journal / Evidence) ──
+    if let Some(db_state) = app.try_state::<crate::db::DbState>() {
+        if let Ok(mut conn) = db_state.0.lock() {
+            let _ = crate::work_core::repository::record_work_event(
+                &mut conn,
+                &resolved_project_id,
+                None,
+                "remote.instruction.executed",
+                &format!("remote:{}", from_id),
+                &serde_json::json!({
+                    "requestId": req_id_for_task,
+                    "fromDevice": from_id,
+                    "instruction": instruction,
+                    "elapsedMs": elapsed,
+                    "status": status,
+                    "executorDevice": executor_device,
+                    "model": requested_model,
+                    "hasChange": !created_staged_changes.is_empty(),
+                    "changesCount": created_staged_changes.len(),
+                }),
+                Some(&format!("event_rpc_exec_{}", req_id_for_task)),
+            );
+
+            if let Ok(agg) = crate::work_core::repository::get_project_aggregate(&conn, &resolved_project_id) {
+                let _ = crate::work_core::snapshot::write_project_snapshot(&agg);
+            }
+        }
+    }
+
+    let mut payload = serde_json::json!({
+        "action": "rpc_response",
+        "request_id": req_id_for_task,
+        "status": status,
+        "result": result_text,
+        "elapsed_ms": elapsed,
+        "executor_device": executor_device
+    });
+    if let Some(c) = change_val {
+        payload["change"] = c;
+    }
+    if let Some(cs) = changes_val {
+        payload["changes"] = cs;
+    }
+
+    let _ = done_tx.send(true);
+    ACTIVE_RPC_TASKS.lock().unwrap().remove(&req_id_for_task);
+
+    Ok(payload)
+}
+
 /// SEC-01 生产入站中继消息核心分发入口 (Fail-Closed, 100% 生产与测试复用)
 pub async fn dispatch_inbound_relay_message_core(
     ctx: &RelayDispatchContext<'_>,
     json: &serde_json::Value,
     tx_mpsc: &tokio::sync::mpsc::Sender<Message>,
 ) -> Result<(), String> {
-    // 1. 拦截路由状态回执 (Diagnostic Receipt)
+    // 1. 拦截路由状态回执 (Diagnostic Receipt) 与 Proxy 错误 (Fast-Fail)
     if let Some(msg_type) = json.get("type").and_then(|v| v.as_str()) {
         if msg_type == "diagnostic_receipt" {
             let peer_id = json.get("from_device_id").and_then(|v| v.as_str()).unwrap_or("unknown");
             record_relay_receipt(json, peer_id);
+            let receipt_status = json.get("receipt").and_then(|v| v.as_str()).unwrap_or("");
+            if receipt_status == "target_offline" || receipt_status == "delivery_failed" {
+                notify_waiters_target_offline(json, peer_id);
+            }
+            return Ok(());
+        }
+        if msg_type == "proxy_error" {
+            let target = json.get("target_device_id").and_then(|v| v.as_str()).unwrap_or("");
+            log::warn!("[Sync Engine] Received proxy_error for target {}: {:?}", target, json.get("message"));
+            notify_waiters_target_offline(json, target);
             return Ok(());
         }
     }
@@ -5775,6 +6221,7 @@ pub async fn dispatch_inbound_relay_message_core(
                         device_name: Some(td.device_name.clone()),
                         is_trusted: true,
                         status: Some("trusted".to_string()),
+                        last_transport: Some("relay".to_string()),
                     });
                     let _ = crate::sync_history::record_activity(
                         DiagnosticStatus::Success,
@@ -5829,6 +6276,7 @@ pub async fn dispatch_inbound_relay_message_core(
                 device_name,
                 is_trusted: false,
                 status: Some("discovered".to_string()),
+                last_transport: Some("relay".to_string()),
             });
             return Ok(());
         }
@@ -5847,6 +6295,7 @@ pub async fn dispatch_inbound_relay_message_core(
                     device_name: device_name.clone(),
                     is_trusted: false,
                     status: Some("discovered".to_string()),
+                    last_transport: Some("relay".to_string()),
                 });
                 return Err(format!("SEC-01 Fail-Closed: Local device identity unavailable during notify: {}", e));
             }
@@ -5864,6 +6313,7 @@ pub async fn dispatch_inbound_relay_message_core(
                     ip_address: "relay".to_string(), last_seen: now_ms,
                     device_name: device_name.clone(), is_trusted: false,
                     status: Some("discovered".to_string()),
+                    last_transport: Some("relay".to_string()),
                 });
                 return Err(format!("SEC-01 notify session creation failed: {e}"));
             }
@@ -5888,6 +6338,7 @@ pub async fn dispatch_inbound_relay_message_core(
             device_name: device_name.clone(),
             is_trusted: true,
             status: Some("trusted".to_string()),
+            last_transport: Some("relay".to_string()),
         });
 
         let _ = crate::sync_history::record_activity(
@@ -6372,357 +6823,45 @@ pub async fn dispatch_inbound_relay_message_core(
         } else if action == "rpc_request" {
             log::info!("[Sync Engine] Received proxy rpc_request from {}", from_id);
             if let Some(app) = ctx.app {
-                let request_id = inner_payload.get("request_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                let conversation_id = inner_payload.get("conversation_id").and_then(|v| v.as_str()).unwrap_or("default").to_string();
-                let project_id_opt = inner_payload.get("project_id").and_then(|v| v.as_str()).map(|s| s.to_string());
-                let instruction = inner_payload.get("instruction").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                let read_only = inner_payload.get("read_only").and_then(|v| v.as_bool()).unwrap_or(true);
-                let requested_model = inner_payload.get("model").and_then(|v| v.as_str()).map(|s| s.to_string());
-                let req_msg_id = json.get("message_id").and_then(|v| v.as_str()).unwrap_or(&request_id).to_string();
+                let req_msg_id = json.get("message_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
                 let req_trace_id = json.get("trace_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
                 let from_id_clone = from_id.to_string();
                 let app_clone = app.clone();
+                let inner_payload_clone = inner_payload.clone();
                 let tx_mpsc_clone = tx_mpsc.clone();
 
-                let (cancel_tx, mut cancel_rx) = tokio::sync::watch::channel(false);
-                let (done_tx, done_rx) = tokio::sync::watch::channel(false);
-                {
-                    ACTIVE_RPC_TASKS.lock().unwrap().insert(request_id.clone(), ActiveRpcTask {
-                        cancel_tx,
-                        done_rx,
-                    });
-                }
-
-                let req_id_for_task = request_id.clone();
                 tauri::async_runtime::spawn(async move {
-                    let start_time = std::time::Instant::now();
-                    let pc_conv_id = format!("remote_conv_{}", conversation_id);
-                    let mut msgs = Vec::new();
-                    let mut resolved_project_id = project_id_opt.clone().unwrap_or_else(|| "project_personal_inbox".to_string());
-
-                    // 从 SQLite 恢复上下文历史及解析项目归属
-                    if let Some(db_state) = app_clone.try_state::<crate::db::DbState>() {
-                        if let Ok(mut conn) = db_state.0.lock() {
-                            if project_id_opt.is_none() {
-                                if let Ok(pid) = crate::work_core::repository::ensure_personal_workspace(&mut conn) {
-                                    resolved_project_id = pid;
-                                }
-                            }
-
-                            let _ = conn.execute(
-                                "INSERT OR IGNORE INTO conversations (id, title, created_at, updated_at) VALUES (?1, ?2, ?3, ?4)",
-                                rusqlite::params![pc_conv_id, format!("移动端协同: {}", instruction.chars().take(20).collect::<String>()), crate::now_ms(), crate::now_ms()],
-                            );
-
-                            if let Ok(mut stmt) = conn.prepare(
-                                "SELECT role, content FROM messages WHERE conversation_id = ?1 ORDER BY created_at ASC LIMIT 30"
-                            ) {
-                                if let Ok(rows) = stmt.query_map(rusqlite::params![pc_conv_id], |row| {
-                                    Ok(serde_json::json!({
-                                        "role": row.get::<_, String>(0)?,
-                                        "content": row.get::<_, String>(1)?
-                                    }))
-                                }) {
-                                    for r in rows {
-                                        if let Ok(m) = r {
-                                            msgs.push(m);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    let prompt = if read_only {
-                        format!("[移动端 RPC 只读指令]\n{}\n注意：当前处于只读安全模式，仅允许进行文件读取、分析和查询。禁止使用任何文件修改、删除或系统写入工具。", instruction)
-                    } else {
-                        format!("[移动端 RPC 协同修改指令]\n{}\n注意：当前处于受控协同修改模式。如果需要修改文件，请调用 write_file 工具提出修改（系统将自动拦截并转为待手机审批的变更提案，不会直接覆写磁盘），或在回复中使用标准 diff 格式说明（以 ```diff 块包含 --- a/file 与 +++ b/file 及 +/- 改动行），手机端将审阅该 Diff 并由用户确认批准后再生效。", instruction)
+                    let payload = match execute_rpc_instruction_core(&app_clone, &from_id_clone, &inner_payload_clone).await {
+                        Ok(p) => p,
+                        Err(e) => serde_json::json!({
+                            "action": "rpc_response",
+                            "request_id": inner_payload_clone.get("request_id").and_then(|v| v.as_str()).unwrap_or(""),
+                            "status": "error",
+                            "error": e,
+                        }),
                     };
 
-                    msgs.push(serde_json::json!({
-                        "role": "user",
-                        "content": prompt
-                    }));
+                    let resp = serde_json::json!({
+                        "type": "proxy",
+                        "target_device_id": from_id_clone,
+                        "ref_message_id": req_msg_id,
+                        "message_id": uuid::Uuid::new_v4().to_string(),
+                        "trace_id": req_trace_id,
+                        "protocol_version": SYNC_PROTOCOL_VERSION,
+                        "payload": payload
+                    });
 
-                    let exec_policy = crate::tools::ToolExecutionPolicy {
-                        read_only,
-                        staged_mode: !read_only,
-                        request_id: Some(req_id_for_task.clone()),
-                        project_id: Some(resolved_project_id.clone()),
-                    };
-
-                    log::info!("[Sync Engine] Executing Agent for RPC {} in conv {} (policy: read_only={}, staged={})", req_id_for_task, pc_conv_id, exec_policy.read_only, exec_policy.staged_mode);
-
-                    tokio::select! {
-                        result = crate::llm::stream_chat_with_policy(
-                            app_clone.clone(),
-                            msgs,
-                            Some(pc_conv_id.clone()),
-                            None,
-                            true,
-                            "standard".to_string(),
-                            requested_model.clone(),
-                            exec_policy,
-                        ) => {
-                            if *cancel_rx.borrow() {
-                                log::info!("[Sync Engine] Task {} was cancelled during execution", req_id_for_task);
-                                let _ = done_tx.send(true);
-                                ACTIVE_RPC_TASKS.lock().unwrap().remove(&req_id_for_task);
-                                return;
-                            }
-
-                            let result_text = if let Some(arr) = result.as_array() {
-                                if let Some(last) = arr.last() {
-                                    last.get("content").and_then(|v| v.as_str()).unwrap_or("Empty response").to_string()
-                                } else {
-                                    "Empty array".to_string()
-                                }
-                            } else if let Some(content) = result.get("content").and_then(|v| v.as_str()) {
-                                content.to_string()
-                            } else {
-                                result.to_string()
-                            };
-
-                            let elapsed = start_time.elapsed().as_millis() as u64;
-                            let executor_device = match crate::read_config_checked() {
-                                Ok(cfg) => cfg.get("device_name")
-                                    .and_then(|v| v.as_str())
-                                    .unwrap_or("电脑端 (PC)")
-                                    .to_string(),
-                                Err(e) => {
-                                    log::error!("[Sync Engine] Config read failed during remote execution result persistence (SEC-01 Fail-Closed): {}", e);
-                                    let err_resp = serde_json::json!({
-                                        "type": "proxy",
-                                        "target_device_id": from_id_clone,
-                                        "ref_message_id": req_msg_id,
-                                        "message_id": uuid::Uuid::new_v4().to_string(),
-                                        "trace_id": req_trace_id,
-                                        "protocol_version": SYNC_PROTOCOL_VERSION,
-                                        "payload": {
-                                            "action": "rpc_response",
-                                            "request_id": req_id_for_task,
-                                            "status": "error",
-                                            "error": format!("SEC-01 Fail-Closed: 配置读取失败无法持久化或确认执行结果: {}", e)
-                                        }
-                                    });
-                                    if let Ok(signed) = sign_relay_response(&app_clone, err_resp) {
-                                        let _ = tx_mpsc_clone.send(Message::Text(signed.to_string().into())).await;
-                                    }
-                                    return;
-                                }
-                            };
-
-                            // 持久化本次交互至 PC 会话，供下一轮多轮追问
-                            if let Some(db_state) = app_clone.try_state::<crate::db::DbState>() {
-                                if let Ok(conn) = db_state.0.lock() {
-                                    let now = crate::now_ms();
-                                    let _ = conn.execute(
-                                        "INSERT INTO messages (conversation_id, role, content, from_channel, created_at) VALUES (?1, 'user', ?2, 'remote', ?3)",
-                                        rusqlite::params![pc_conv_id, prompt, now],
-                                    );
-                                    let _ = conn.execute(
-                                        "INSERT INTO messages (conversation_id, role, content, from_channel, created_at) VALUES (?1, 'assistant', ?2, 'remote', ?3)",
-                                        rusqlite::params![pc_conv_id, result_text, now + 1],
-                                    );
-                                    let _ = conn.execute(
-                                        "UPDATE conversations SET updated_at = ?1, last_message = ?2 WHERE id = ?3",
-                                        rusqlite::params![now + 1, result_text.chars().take(80).collect::<String>(), pc_conv_id],
-                                    );
-                                }
-                            }
-
-                            let mut created_staged_changes: Vec<StagedChange> = Vec::new();
-
-                            if !read_only {
-                                if let Some(db_state) = app_clone.try_state::<crate::db::DbState>() {
-                                    if let Ok(conn) = db_state.0.lock() {
-                                        if let Ok(staged_list) = get_staged_changes_by_request(&conn, &req_id_for_task) {
-                                            created_staged_changes = staged_list;
-                                        }
-                                    }
-                                }
-
-                                if created_staged_changes.is_empty() {
-                                    if let Ok(staged_map) = STAGED_CHANGES.lock() {
-                                        created_staged_changes = staged_map.values()
-                                            .filter(|c| c.request_id == req_id_for_task && c.status == "pending")
-                                            .cloned()
-                                            .collect();
-                                    }
-                                }
-
-                                if created_staged_changes.is_empty() {
-                                    if let Some((ref file_path, ref diff_content, adds, dels)) = extract_diff_from_text(&result_text) {
-                                        let old_content = if std::path::Path::new(file_path).exists() {
-                                            std::fs::read_to_string(file_path).unwrap_or_default()
-                                        } else {
-                                            String::new()
-                                        };
-                                        if let Ok(new_content) = apply_unified_diff(&old_content, diff_content) {
-                                            let old_content_hash = compute_content_hash(&old_content);
-                                            let change_id = format!("change_{}", uuid::Uuid::new_v4());
-
-                                            let mut staged = StagedChange {
-                                                change_id: change_id.clone(),
-                                                request_id: req_id_for_task.clone(),
-                                                project_id: resolved_project_id.clone(),
-                                                file_path: file_path.clone(),
-                                                old_content,
-                                                new_content,
-                                                old_content_hash,
-                                                diff: diff_content.clone(),
-                                                summary: format!("修改文件: {}", file_path),
-                                                additions: adds,
-                                                deletions: dels,
-                                                status: "pending".to_string(),
-                                                created_at: crate::now_ms(),
-                                                applied_at: None,
-                                                work_object_id: None,
-                                            };
-
-                                            if let Some(db_state) = app_clone.try_state::<crate::db::DbState>() {
-                                                if let Ok(mut conn) = db_state.0.lock() {
-                                                    if let Ok(obj) = crate::work_core::repository::create_object(
-                                                        &mut conn,
-                                                        crate::work_core::models::CreateWorkObjectInput {
-                                                            kind: crate::work_core::models::WorkObjectKind::Change,
-                                                            project_id: resolved_project_id.clone(),
-                                                            parent_id: None,
-                                                            title: format!("待审阅修改提案: {}", file_path),
-                                                            status: Some("needs_review".into()),
-                                                            description: Some(format!("待审批的修改 (+{} -{})", adds, dels)),
-                                                            data: serde_json::json!({
-                                                                "filePath": file_path,
-                                                                "changeId": change_id,
-                                                                "additions": adds,
-                                                                "deletions": dels,
-                                                                "diff": diff_content,
-                                                            }),
-                                                            source_capture_id: None,
-                                                            actor: Some(format!("remote:{}", from_id_clone)),
-                                                            idempotency_key: format!("obj_change_{}", change_id),
-                                                        },
-                                                    ) {
-                                                        staged.work_object_id = Some(obj.id);
-                                                    }
-                                                    let _ = save_staged_change(&conn, &staged);
-                                                }
-                                            }
-                                            if let Ok(mut map) = STAGED_CHANGES.lock() {
-                                                map.insert(change_id.clone(), staged.clone());
-                                            }
-                                            created_staged_changes.push(staged);
-                                        } else {
-                                            log::warn!("[Sync Engine] Failed to apply extracted unified diff for {}", file_path);
-                                        }
-                                    }
-                                }
-                            }
-
-                            let (status, change_val, changes_val) = if !created_staged_changes.is_empty() {
-                                let first = &created_staged_changes[0];
-                                let changes_json: Vec<serde_json::Value> = created_staged_changes.iter().map(|s| serde_json::json!({
-                                    "change_id": s.change_id,
-                                    "request_id": s.request_id,
-                                    "file_path": s.file_path,
-                                    "diff": s.diff,
-                                    "summary": s.summary,
-                                    "additions": s.additions,
-                                    "deletions": s.deletions,
-                                    "status": "pending"
-                                })).collect();
-
-                                (
-                                    "needs_approval",
-                                    Some(serde_json::json!({
-                                        "change_id": first.change_id,
-                                        "request_id": first.request_id,
-                                        "file_path": first.file_path,
-                                        "diff": first.diff,
-                                        "summary": first.summary,
-                                        "additions": first.additions,
-                                        "deletions": first.deletions,
-                                        "status": "pending"
-                                    })),
-                                    Some(serde_json::Value::Array(changes_json))
-                                )
-                            } else {
-                                ("success", None, None)
-                            };
-
-                            // ── 接入统一工作记录 (Work Object / Journal / Evidence) ──
-                            if let Some(db_state) = app_clone.try_state::<crate::db::DbState>() {
-                                if let Ok(mut conn) = db_state.0.lock() {
-                                    let _ = crate::work_core::repository::record_work_event(
-                                        &mut conn,
-                                        &resolved_project_id,
-                                        None,
-                                        "remote.instruction.executed",
-                                        &format!("remote:{}", from_id_clone),
-                                        &serde_json::json!({
-                                            "requestId": req_id_for_task,
-                                            "fromDevice": from_id_clone,
-                                            "instruction": instruction,
-                                            "elapsedMs": elapsed,
-                                            "status": status,
-                                            "executorDevice": executor_device,
-                                            "model": requested_model,
-                                            "hasChange": !created_staged_changes.is_empty(),
-                                            "changesCount": created_staged_changes.len(),
-                                        }),
-                                        Some(&format!("event_rpc_exec_{}", req_id_for_task)),
-                                    );
-
-                                    if let Ok(agg) = crate::work_core::repository::get_project_aggregate(&conn, &resolved_project_id) {
-                                        let _ = crate::work_core::snapshot::write_project_snapshot(&agg);
-                                    }
-                                }
-                            }
-
-                            let mut payload = serde_json::json!({
-                                "action": "rpc_response",
-                                "request_id": req_id_for_task,
-                                "status": status,
-                                "result": result_text,
-                                "elapsed_ms": elapsed,
-                                "executor_device": executor_device
-                            });
-                            if let Some(c) = change_val {
-                                payload["change"] = c;
-                            }
-                            if let Some(cs) = changes_val {
-                                payload["changes"] = cs;
-                            }
-
-                            let resp = serde_json::json!({
-                                "type": "proxy",
-                                "target_device_id": from_id_clone,
-                                "ref_message_id": req_msg_id,
-                                "message_id": uuid::Uuid::new_v4().to_string(),
-                                "trace_id": req_trace_id,
-                                "protocol_version": SYNC_PROTOCOL_VERSION,
-                                "payload": payload
-                            });
-
-                            if let Ok(signed) = sign_relay_response(&app_clone, resp) {
-                                let _ = tx_mpsc_clone.send(Message::Text(signed.to_string().into())).await;
-                            }
-
-                            let _ = crate::sync_history::record_activity(
-                                DiagnosticStatus::Success,
-                                Some(TransportKind::Relay),
-                                Some(from_id_clone),
-                                &format!("执行远程指令完成 ({}ms, status={})", elapsed, status),
-                                Some("RPC-EXEC-OK".to_string()),
-                            );
-                        }
-                        _ = cancel_rx.changed() => {
-                            log::info!("[Sync Engine] RPC task {} cancelled via watch channel", req_id_for_task);
-                        }
+                    if let Ok(signed) = sign_relay_response(&app_clone, resp) {
+                        let _ = tx_mpsc_clone.send(Message::Text(signed.to_string().into())).await;
                     }
 
-                    let _ = done_tx.send(true);
-                    ACTIVE_RPC_TASKS.lock().unwrap().remove(&req_id_for_task);
+                    let _ = crate::sync_history::record_activity(
+                        DiagnosticStatus::Success,
+                        Some(TransportKind::Relay),
+                        Some(from_id_clone),
+                        "执行远程指令完成 (Relay)",
+                        Some("RPC-EXEC-OK".to_string()),
+                    );
                 });
             } else {
                 log::warn!("[Sync Engine] AppHandle unavailable for proxy rpc_request");
@@ -7402,8 +7541,12 @@ fn resolve_relay_registration_id(
         [crate::device_trust::MAX_PEER_REVOCATION_ATTEMPTS],
     );
 
-    // 即使已经生成新身份，也必须先用旧身份投递未确认的撤销证书；
-    // 否则新身份的正常连接会令旧身份的出件箱永久得不到对应 Relay 注册。
+    // 优先使用当前配置的活动主身份（若已配置），杜绝因历史未确认的撤销出件箱导致当前节点被锁死在 revocation_only 模式
+    if let Some(live_id) = configured_id.filter(|id| !id.trim().is_empty()) {
+        return Ok(Some((live_id.trim().to_string(), false)));
+    }
+
+    // 若当前未配置活动身份（例如密钥重置中或身份迁移期），才尝试使用旧身份投递未确认的撤销证书 (revocation_only)
     let old_id: Option<String> = conn.query_row(
         "SELECT revoked_device_id FROM peer_revocation_outbox WHERE status IN ('pending', 'sent') AND attempts < ?1 ORDER BY id LIMIT 1",
         [crate::device_trust::MAX_PEER_REVOCATION_ATTEMPTS],
@@ -7415,8 +7558,7 @@ fn resolve_relay_registration_id(
         }
         return Ok(Some((id, true)));
     }
-    Ok(configured_id.filter(|id| !id.trim().is_empty())
-        .map(|id| (id.trim().to_string(), false)))
+    Ok(None)
 }
 
 fn queue_peer_revocations_for_relay(
@@ -7864,8 +8006,8 @@ mod tests {
         ).unwrap();
         assert_eq!(resolve_relay_registration_id(&conn, None).unwrap(), Some((old_id.clone(), true)));
         let new_id = "new-device-id";
-        assert_eq!(resolve_relay_registration_id(&conn, Some(new_id)).unwrap(), Some((old_id.clone(), true)),
-            "新身份已配置时仍必须先投递旧身份的撤销证书");
+        assert_eq!(resolve_relay_registration_id(&conn, Some(new_id)).unwrap(), Some((new_id.to_string(), false)),
+            "新身份配置后优先连接并保持业务在线，撤销出件箱由后台伴随通道投递");
         let (tx, mut rx) = tokio::sync::mpsc::channel(2);
         assert_eq!(queue_peer_revocations_for_relay(&conn, &tx, Some(&old_id), 2_000).unwrap(), 1);
         let frame = rx.try_recv().unwrap().into_text().unwrap();
@@ -11705,6 +11847,7 @@ mod tests {
             device_name: Some("Active PC".to_string()),
             is_trusted: true,
             status: Some("trusted".to_string()),
+            last_transport: Some("lan".to_string()),
         });
         // Insert revoked PC
         registry.update_device(ConnectedDevice {
@@ -11715,6 +11858,7 @@ mod tests {
             device_name: Some("Old Revoked PC".to_string()),
             is_trusted: false,
             status: Some("revoked".to_string()),
+            last_transport: None,
         });
 
         let conn = rusqlite::Connection::open_in_memory().unwrap();

@@ -12,7 +12,7 @@ import urllib.error
 
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 DIST_DIR = os.path.join(ROOT_DIR, "dist-release")
-VERSION = "0.9.12"
+VERSION = "0.9.13"
 
 def get_token():
     try:
