@@ -2279,6 +2279,8 @@ pub struct PeerRevocationOutboxItem {
     pub created_at: i64,
 }
 
+pub const MAX_PEER_REVOCATION_ATTEMPTS: i64 = 3;
+
 pub fn get_pending_peer_revocations(
     conn: &Connection,
     limit: usize,
@@ -2286,12 +2288,12 @@ pub fn get_pending_peer_revocations(
     let mut stmt = conn.prepare(
         "SELECT id, event_id, target_peer_id, revoked_device_id, revocation_payload, status, attempts, created_at
          FROM peer_revocation_outbox
-         WHERE status = 'pending'
+         WHERE status = 'pending' AND attempts < ?1
          ORDER BY id ASC
-         LIMIT ?"
+         LIMIT ?2"
     ).map_err(|e| format!("查询待分发撤销失败: {}", e))?;
 
-    let rows = stmt.query_map(params![limit as i64], |row| {
+    let rows = stmt.query_map(params![MAX_PEER_REVOCATION_ATTEMPTS, limit as i64], |row| {
         Ok(PeerRevocationOutboxItem {
             id: row.get(0)?,
             event_id: row.get(1)?,
@@ -2658,10 +2660,23 @@ pub fn mark_peer_revocation_failed(
     id: i64,
     err_msg: &str,
 ) -> Result<(), String> {
-    conn.execute(
-        "UPDATE peer_revocation_outbox SET status = 'pending', last_error = ? WHERE id = ? AND status = 'sent'",
-        params![err_msg, id],
-    ).map_err(|e| format!("更新撤销出件箱重试状态失败: {}", e))?;
+    let attempts: i64 = conn.query_row(
+        "SELECT attempts FROM peer_revocation_outbox WHERE id = ?",
+        [id],
+        |row| row.get(0),
+    ).unwrap_or(0);
+
+    if attempts >= MAX_PEER_REVOCATION_ATTEMPTS {
+        conn.execute(
+            "UPDATE peer_revocation_outbox SET status = 'failed', last_error = ? WHERE id = ?",
+            params![format!("{}: 已达最大重试次数 (attempts: {})", err_msg, attempts), id],
+        ).map_err(|e| format!("更新撤销出件箱失败状态失败: {}", e))?;
+    } else {
+        conn.execute(
+            "UPDATE peer_revocation_outbox SET status = 'pending', last_error = ? WHERE id = ? AND status = 'sent'",
+            params![err_msg, id],
+        ).map_err(|e| format!("更新撤销出件箱重试状态失败: {}", e))?;
+    }
     Ok(())
 }
 
@@ -2671,9 +2686,15 @@ pub fn revert_stale_sent_revocations(
     now_ms: i64,
 ) -> Result<usize, String> {
     let cutoff = now_ms - timeout_ms;
+    // 超过最大重试次数直接标记为 failed，避免死锁阻止正常身份接入
+    conn.execute(
+        "UPDATE peer_revocation_outbox SET status = 'failed', last_error = 'Peer unreachable after max attempts' WHERE ((status = 'sent' AND (sent_at IS NULL OR sent_at < ?1)) OR status = 'pending') AND attempts >= ?2",
+        params![cutoff, MAX_PEER_REVOCATION_ATTEMPTS],
+    ).map_err(|e| format!("标记超限撤销为失败失败: {}", e))?;
+
     let count = conn.execute(
-        "UPDATE peer_revocation_outbox SET status = 'pending' WHERE status = 'sent' AND (sent_at IS NULL OR sent_at < ?)",
-        params![cutoff],
+        "UPDATE peer_revocation_outbox SET status = 'pending' WHERE status = 'sent' AND (sent_at IS NULL OR sent_at < ?1) AND attempts < ?2",
+        params![cutoff, MAX_PEER_REVOCATION_ATTEMPTS],
     ).map_err(|e| format!("回退超时发送中撤销记录失败: {}", e))?;
     Ok(count)
 }

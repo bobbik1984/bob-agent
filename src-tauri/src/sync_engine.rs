@@ -1794,9 +1794,18 @@ pub struct ConnectedDevice {
     pub status: Option<String>,
 }
 
-#[derive(Default)]
 pub struct DeviceRegistry {
     pub devices: RwLock<HashMap<String, ConnectedDevice>>,
+    pub storage_path: Option<std::path::PathBuf>,
+}
+
+impl Default for DeviceRegistry {
+    fn default() -> Self {
+        Self {
+            devices: RwLock::new(HashMap::new()),
+            storage_path: None,
+        }
+    }
 }
 
 impl DeviceRegistry {
@@ -1812,14 +1821,16 @@ impl DeviceRegistry {
         };
         Self {
             devices: RwLock::new(devices),
+            storage_path: Some(path),
         }
     }
 
     pub fn save(&self) {
-        let path = crate::get_data_dir().join("device_registry.json");
-        if let Ok(devices) = self.devices.read() {
-            if let Ok(json) = serde_json::to_string_pretty(&*devices) {
-                let _ = std::fs::write(path, json);
+        if let Some(ref path) = self.storage_path {
+            if let Ok(devices) = self.devices.read() {
+                if let Ok(json) = serde_json::to_string_pretty(&*devices) {
+                    let _ = std::fs::write(path, json);
+                }
             }
         }
     }
@@ -7385,11 +7396,17 @@ fn resolve_relay_registration_id(
     conn: &Connection,
     configured_id: Option<&str>,
 ) -> Result<Option<(String, bool)>, String> {
+    // 自动标记超过重试上限的孤立撤销记录为 failed，杜绝因离线旧对端导致本端死锁
+    let _ = conn.execute(
+        "UPDATE peer_revocation_outbox SET status = 'failed', last_error = 'Peer unreachable after max attempts' WHERE status IN ('pending', 'sent') AND attempts >= ?1",
+        [crate::device_trust::MAX_PEER_REVOCATION_ATTEMPTS],
+    );
+
     // 即使已经生成新身份，也必须先用旧身份投递未确认的撤销证书；
     // 否则新身份的正常连接会令旧身份的出件箱永久得不到对应 Relay 注册。
     let old_id: Option<String> = conn.query_row(
-        "SELECT revoked_device_id FROM peer_revocation_outbox WHERE status IN ('pending', 'sent') ORDER BY id LIMIT 1",
-        [],
+        "SELECT revoked_device_id FROM peer_revocation_outbox WHERE status IN ('pending', 'sent') AND attempts < ?1 ORDER BY id LIMIT 1",
+        [crate::device_trust::MAX_PEER_REVOCATION_ATTEMPTS],
         |row| row.get(0),
     ).optional().map_err(|e| format!("查询待投递撤销身份失败: {}", e))?;
     if let Some(id) = old_id {
@@ -7412,10 +7429,10 @@ fn queue_peer_revocations_for_relay(
     let mut stmt = conn.prepare(
         "SELECT id, event_id, target_peer_id, revoked_device_id, revocation_payload
          FROM peer_revocation_outbox
-         WHERE status = 'pending' AND (?1 IS NULL OR revoked_device_id = ?1)
+         WHERE status = 'pending' AND attempts < ?1 AND (?2 IS NULL OR revoked_device_id = ?2)
          ORDER BY id LIMIT 50",
     ).map_err(|e| format!("查询待投递撤销失败: {}", e))?;
-    let rows = stmt.query_map([identity_filter], |row| {
+    let rows = stmt.query_map(rusqlite::params![crate::device_trust::MAX_PEER_REVOCATION_ATTEMPTS, identity_filter], |row| {
         Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?,
             row.get::<_, String>(2)?, row.get::<_, String>(3)?, row.get::<_, String>(4)?))
     }).map_err(|e| format!("读取待投递撤销失败: {}", e))?;
@@ -7862,6 +7879,43 @@ mod tests {
         conn.execute("UPDATE peer_revocation_outbox SET status = 'delivered' WHERE event_id = ?1", [&cert.event_id]).unwrap();
         assert_eq!(resolve_relay_registration_id(&conn, Some(new_id)).unwrap(), Some((new_id.to_string(), false)),
             "旧身份撤销已确认后才能恢复新身份的普通 Relay 连接");
+    }
+
+    #[test]
+    fn test_sec01_relay_revocation_outbox_exhausted_attempts_restores_live_identity() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE peer_revocation_outbox (
+                id INTEGER PRIMARY KEY, event_id TEXT, target_peer_id TEXT,
+                revoked_device_id TEXT, revocation_payload TEXT, status TEXT,
+                attempts INTEGER DEFAULT 0, sent_at INTEGER, last_error TEXT
+            );",
+        ).unwrap();
+        let signer = SigningKey::from_bytes(&[18u8; 32]);
+        let old_id = base64::engine::general_purpose::STANDARD.encode(VerifyingKey::from(&signer).to_bytes());
+        let cert = crate::device_trust::create_device_revocation_certificate(
+            &signer, "offline-peer", "key_reset", 1_000,
+        );
+        // 模拟已重试达到上限的孤立撤销记录
+        conn.execute(
+            "INSERT INTO peer_revocation_outbox
+             (event_id, target_peer_id, revoked_device_id, revocation_payload, status, attempts)
+             VALUES (?1, ?2, ?3, ?4, 'pending', 3)",
+            rusqlite::params![cert.event_id, cert.target_device_id, old_id,
+                serde_json::to_string(&cert).unwrap()],
+        ).unwrap();
+
+        let new_id = "new-active-device-id";
+        let resolved = resolve_relay_registration_id(&conn, Some(new_id)).unwrap();
+        assert_eq!(resolved, Some((new_id.to_string(), false)), "超限后必须释放活体身份，绝不能死锁在 revocation_only 模式");
+
+        // 验证该记录已转为 failed
+        let status: String = conn.query_row(
+            "SELECT status FROM peer_revocation_outbox WHERE event_id = ?1",
+            [&cert.event_id],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(status, "failed");
     }
 
     static RECOVERY_TEST_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
