@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Download v0.9.9 release assets from GitHub Releases directly to dist-release/
+Download v0.9.10 release assets from GitHub Releases directly to dist-release/
 """
 import os
 import sys
@@ -12,7 +12,7 @@ import urllib.error
 
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 DIST_DIR = os.path.join(ROOT_DIR, "dist-release")
-VERSION = "0.9.9"
+VERSION = "0.9.10"
 
 def get_token():
     try:

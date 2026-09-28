@@ -712,20 +712,38 @@
             </button>
 
             <!-- 2. 已配对 PC 设备列表 -->
-            <button v-for="dev in pairedPcDevices" :key="dev.device_id" class="sheet-list-item device-item" :class="{ active: currentExecutionDevice.id === dev.device_id }" @click="selectExecutionDevice(dev.device_id)">
+            <div
+              v-for="dev in pairedPcDevices"
+              :key="dev.device_id"
+              class="sheet-list-item device-item"
+              :class="{ active: currentExecutionDevice.id === dev.device_id }"
+              style="cursor: pointer;"
+              @click="selectExecutionDevice(dev.device_id)"
+            >
               <Laptop :size="20" class="text-secondary" style="margin-right: 12px; flex-shrink: 0;" />
               <div class="item-info">
                 <div style="display: flex; align-items: center; gap: 6px;">
                   <span class="item-name">{{ dev.device_name || '已配对电脑 (PC)' }}</span>
-                  <span class="device-status-dot" :class="{ 'is-online': (Date.now() - (dev.last_seen || 0)) < 120000 }"></span>
+                  <span class="device-status-dot" :class="{ 'is-online': dev._isOnline ?? ((Date.now() - (dev.last_seen || 0)) < 120000) }"></span>
                 </div>
-                <span class="item-count">{{ dev.ip_address || 'Relay' }} · {{ (Date.now() - (dev.last_seen || 0)) < 120000 ? $t('chat.device_online') : $t('chat.device_offline') }}</span>
+                <span class="item-count">{{ dev.ip_address || 'Relay' }} · {{ (dev._isOnline ?? ((Date.now() - (dev.last_seen || 0)) < 120000)) ? $t('chat.device_online') : $t('chat.device_offline') }}</span>
                 <div v-if="getDeviceCapabilityTags(dev.device_id).length > 0" class="device-caps-row">
                   <span v-for="cap in getDeviceCapabilityTags(dev.device_id)" :key="cap" class="device-cap-badge">{{ cap }}</span>
                 </div>
               </div>
-              <Check v-if="currentExecutionDevice.id === dev.device_id" :size="16" class="text-accent" />
-            </button>
+              <div style="display: flex; align-items: center; gap: 8px; margin-left: auto;">
+                <button
+                  type="button"
+                  class="btn-icon-subtle"
+                  style="padding: 6px; border-radius: var(--radius-sm); border: none; background: transparent; color: var(--text-tertiary); cursor: pointer;"
+                  :title="$t('settings.pairing_device_unbind')"
+                  @click.stop="handleRemoveDeviceFromDrawer(dev)"
+                >
+                  <Unlink :size="15" />
+                </button>
+                <Check v-if="currentExecutionDevice.id === dev.device_id" :size="16" class="text-accent" />
+              </div>
+            </div>
 
             <div v-if="pairedPcDevices.length === 0" class="sheet-empty">
               {{ $t('chat.no_paired_pc') }}
@@ -827,7 +845,7 @@ import '@/utils/markdown';
 import { ref, reactive, watch, onMounted, onUnmounted, nextTick, inject, computed } from 'vue';
 import { useI18n } from 'vue-i18n';
 import QrcodeVue from 'qrcode.vue';
-import { Sparkles, FileText, Camera, Calendar, CalendarRange, User, ChevronRight, ChevronDown, ChevronUp, ChevronLeft, X, FileUp, Paperclip, Bookmark, Loader2, Shield, Zap, Target, Lock, Unlock, Download, Smartphone, Monitor, Laptop, ClipboardCopy, Check, BookmarkPlus, Plus, Menu, Cpu, Play, PenLine, BookOpen, Pin, Mic, RotateCcw } from 'lucide-vue-next';
+import { Sparkles, FileText, Camera, Calendar, CalendarRange, User, ChevronRight, ChevronDown, ChevronUp, ChevronLeft, X, FileUp, Paperclip, Bookmark, Loader2, Shield, Zap, Target, Lock, Unlock, Download, Smartphone, Monitor, Laptop, ClipboardCopy, Check, BookmarkPlus, Plus, Menu, Cpu, Play, PenLine, BookOpen, Pin, Mic, RotateCcw, Unlink } from 'lucide-vue-next';
 import ConfirmCard from '../components/ConfirmCard.vue';
 import DiffReviewCard from '../components/DiffReviewCard.vue';
 import FileCard from '../components/FileCard.vue';
@@ -1060,12 +1078,67 @@ const loadPairedDevices = async () => {
   try {
     if (window.appAPI && window.appAPI.getConnectedDevices) {
       const list = await window.appAPI.getConnectedDevices();
-      pairedPcDevices.value = (list || []).filter(d =>
-        !d.platform || d.platform === 'windows' || d.platform === 'desktop' || d.platform === 'macos' || d.platform === 'linux'
+      let activePayloadId = null;
+      try {
+        const payload = await window.appAPI.getConfig('pairing_payload');
+        if (payload?.device_id) activePayloadId = payload.device_id;
+      } catch (_) {}
+
+      // 过滤非 PC 设备以及已撤销 (revoked) 设备
+      const pcList = (list || []).filter(d =>
+        (!d.platform || d.platform === 'windows' || d.platform === 'desktop' || d.platform === 'macos' || d.platform === 'linux') &&
+        d.status !== 'revoked'
       );
+
+      // 如果当前存在明确的 activePayloadId，优先保留该活跃配对 PC，排除未受信任的旧幽灵 PC
+      if (activePayloadId) {
+        const activeDev = pcList.find(d => d.device_id === activePayloadId);
+        if (activeDev) {
+          pairedPcDevices.value = pcList.filter(d =>
+            d.device_id === activePayloadId || d.is_trusted || d.status === 'trusted'
+          );
+        } else {
+          pairedPcDevices.value = pcList;
+        }
+      } else {
+        pairedPcDevices.value = pcList;
+      }
+
+      // 实时探针各 PC 的真实在线状态
+      for (const dev of pairedPcDevices.value) {
+        if (window.appAPI?.checkDeviceOnline) {
+          window.appAPI.checkDeviceOnline(dev.device_id).then(online => {
+            dev._isOnline = online;
+          }).catch(() => {
+            dev._isOnline = false;
+          });
+        }
+      }
     }
   } catch (e) {
     console.warn('Failed to load paired devices:', e);
+  }
+};
+
+const handleRemoveDeviceFromDrawer = async (dev) => {
+  const confirmed = await showConfirm({
+    title: t('settings.pairing_device_unbind') || '解绑设备',
+    message: t('settings.pairing_unbind_confirm', { name: dev.device_name || '已配对电脑 (PC)', id: dev.device_id.substring(0, 8) }) || '确定要解绑并移除此设备吗？',
+    confirmText: t('settings.pairing_device_unbind') || '解绑',
+    cancelText: t('common.cancel') || '取消',
+  });
+  if (confirmed) {
+    try {
+      if (window.appAPI?.disconnectDevice) {
+        await window.appAPI.disconnectDevice(dev.device_id);
+      }
+      if (currentExecutionDevice.value.id === dev.device_id) {
+        selectExecutionDevice('local');
+      }
+      await loadPairedDevices();
+    } catch (e) {
+      console.error('Failed to disconnect device:', e);
+    }
   }
 };
 
@@ -1106,7 +1179,7 @@ const currentExecutionDevice = computed(() => {
   }
   const found = pairedPcDevices.value.find(d => d.device_id === devId);
   if (found) {
-    const isOnline = (Date.now() - (found.last_seen || 0)) < 120_000;
+    const isOnline = found._isOnline ?? ((Date.now() - (found.last_seen || 0)) < 120_000);
     return {
       id: found.device_id,
       type: 'pc',

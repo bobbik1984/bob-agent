@@ -1252,6 +1252,13 @@ const processPairingCode = async (code) => {
       oldId: existingPayload.device_id.substring(0, 8),
     }));
     if (!isOverride) return;
+    try {
+      if (window.appAPI?.disconnectDevice) {
+        await window.appAPI.disconnectDevice(existingPayload.device_id);
+      }
+    } catch (e) {
+      console.warn('Failed to cleanup old paired device:', e);
+    }
   } else {
     const confirmed = await showConfirm(t('settings.p2p_pair_confirm', {
       id: payload.device_id.substring(0, 8),

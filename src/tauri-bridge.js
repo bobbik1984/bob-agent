@@ -1197,6 +1197,8 @@ window.appAPI = {
   getSyncTraceEvents: async (traceId) => invoke('get_sync_trace_events', { traceId }),
   getSyncLogs: async () => invoke('get_sync_logs'),
   forceRelayReconnect: async () => invoke('force_relay_reconnect'),
+  checkDeviceOnline: async (targetDeviceId) => invoke('check_device_online', { targetDeviceId }),
+  disconnectDevice: async (deviceId) => invoke('disconnect_device', { deviceId }),
 
   // ── 设备发现与可信身份分离 (A2 / SEC-01 Device Trust) ──
   sec01CreatePairingInvitation: async (targetConstraint = null, ttlMs = null) => invoke('sec01_create_pairing_invitation', { targetConstraint, ttlMs }),

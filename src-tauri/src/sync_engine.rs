@@ -1850,9 +1850,11 @@ pub fn get_connected_devices_core(
         Vec::new()
     };
 
+    let mut active_payload_pc_id = None;
     if let Ok(config) = crate::read_config_checked() {
         if let Some(payload) = config.get("pairing_payload").and_then(|v| v.as_object()) {
             if let Some(pc_id) = payload.get("device_id").and_then(|v| v.as_str()).filter(|s| !s.trim().is_empty()) {
+                active_payload_pc_id = Some(pc_id.to_string());
                 if !list.iter().any(|d| d.device_id == pc_id) {
                     let ip_addr = payload.get("local_ips")
                         .and_then(|v| v.as_array())
@@ -1866,8 +1868,8 @@ pub fn get_connected_devices_core(
                         ip_address: ip_addr,
                         last_seen: crate::now_ms(),
                         device_name: Some("已配对电脑 (PC)".to_string()),
-                        is_trusted: false,
-                        status: Some("discovered".to_string()),
+                        is_trusted: true,
+                        status: Some("trusted".to_string()),
                     };
                     if let Some(ref reg) = registry_opt {
                         reg.update_device(pc_dev.clone());
@@ -1882,13 +1884,42 @@ pub fn get_connected_devices_core(
         for dev in list.iter_mut() {
             let is_trusted = crate::device_trust::is_device_trusted(conn, &dev.device_id);
             dev.is_trusted = is_trusted;
-            dev.status = Some(if is_trusted { "trusted".to_string() } else { "untrusted".to_string() });
+            let db_status: Option<String> = conn.query_row(
+                "SELECT status FROM trusted_devices WHERE device_id = ?1",
+                [&dev.device_id],
+                |row| row.get(0),
+            ).ok();
+            if let Some(status) = db_status {
+                dev.status = Some(status);
+            } else {
+                dev.status = Some(if is_trusted { "trusted".to_string() } else { "untrusted".to_string() });
+            }
         }
     } else {
         for dev in list.iter_mut() {
             dev.is_trusted = false;
             dev.status = Some("untrusted".to_string());
         }
+    }
+
+    // 1. 过滤已撤销 (revoked) 设备，绝不在设备列表中陈列已被废弃的历史记录
+    list.retain(|d| d.status.as_deref() != Some("revoked"));
+
+    // 2. 如果当前有活跃配对 PC，自动从注册表中清理掉其他陈旧且未受信任的幽灵 PC 记录
+    if let Some(ref active_id) = active_payload_pc_id {
+        list.retain(|d| {
+            let is_other_pc = (d.platform == "windows" || d.platform == "desktop") && &d.device_id != active_id;
+            if is_other_pc && !d.is_trusted && d.status.as_deref() != Some("trusted") {
+                if let Some(ref reg) = registry_opt {
+                    if let Ok(mut devs) = reg.devices.write() {
+                        devs.remove(&d.device_id);
+                    }
+                    reg.save();
+                }
+                return false;
+            }
+            true
+        });
     }
 
     list
@@ -1925,6 +1956,21 @@ pub async fn disconnect_device(app: AppHandle, device_id: String) -> Result<(), 
         }
     }
 
+    // 在数据库中将该设备设为已撤销 (revoked) 并失效关联会话
+    if let Some(db_state) = app.try_state::<crate::db::DbState>() {
+        if let Ok(conn) = db_state.0.lock() {
+            let now = crate::now_ms();
+            let _ = conn.execute(
+                "UPDATE trusted_devices SET status = 'revoked', revoked_at = ?1, revocation_reason = 'user_disconnect' WHERE device_id = ?2",
+                rusqlite::params![now, device_id],
+            );
+            let _ = conn.execute(
+                "UPDATE authenticated_sessions SET is_active = 0 WHERE subject_device_id = ?1 OR issuer_device_id = ?1",
+                rusqlite::params![device_id],
+            );
+        }
+    }
+
     let _ = app.emit("sync:device_disconnected", device_id);
     Ok(())
 }
@@ -1937,48 +1983,80 @@ pub async fn check_device_online(app: AppHandle, target_device_id: String) -> Re
 
     let registry = app.state::<Arc<DeviceRegistry>>();
     let now = crate::now_ms();
-    if let Ok(devices) = registry.devices.read() {
-        if let Some(dev) = devices.get(&target_device_id) {
-            if (now - dev.last_seen) < 120_000 {
-                return Ok(true);
-            }
+
+    let dev_opt = if let Ok(devices) = registry.devices.read() {
+        devices.get(&target_device_id).cloned()
+    } else {
+        None
+    };
+
+    if let Some(ref dev) = dev_opt {
+        if (now - dev.last_seen) < 120_000 {
+            return Ok(true);
         }
     }
 
-    // Also check pairing_payload in config.json
-    let config = crate::read_config_checked().map_err(|e| format!("SEC-01 Fail-Closed: 无法读取配置: {}", e))?;
-    if let Some(pp) = config.get("pairing_payload").and_then(|v| v.as_object()) {
-        if pp.get("device_id").and_then(|v| v.as_str()) == Some(&target_device_id) {
-            // 局域网优先探测 (1.5s 快速超时)
-            if let Some(ips) = pp.get("local_ips").and_then(|v| v.as_array()) {
-                let port = pp.get("port").and_then(|v| v.as_u64()).unwrap_or(3722);
-                if let Ok(client) = reqwest::Client::builder().timeout(std::time::Duration::from_millis(1500)).build() {
+    // 收集所有候选 LAN IP 与端口
+    let mut candidate_ips = Vec::new();
+    let mut port: u16 = 3722;
+
+    if let Ok(config) = crate::read_config_checked() {
+        if let Some(pp) = config.get("pairing_payload").and_then(|v| v.as_object()) {
+            if pp.get("device_id").and_then(|v| v.as_str()) == Some(&target_device_id) {
+                if let Some(ips) = pp.get("local_ips").and_then(|v| v.as_array()) {
                     for ip_val in ips {
                         if let Some(ip) = ip_val.as_str() {
-                            let health_url = format!("http://{}:{}/v1/health", ip, port);
-                            if let Ok(res) = client.get(&health_url).send().await {
-                                if res.status().is_success() {
-                                    return Ok(true);
-                                }
+                            if !candidate_ips.contains(&ip.to_string()) {
+                                candidate_ips.push(ip.to_string());
                             }
                         }
                     }
                 }
-            }
-
-            let relay_connected = RELAY_TX.read().map(|l| l.is_some()).unwrap_or(false);
-            if relay_connected {
-                return Ok(true);
-            }
-
-            // 若中继掉线，触发快速重连探测（最多等 2 秒）
-            force_relay_reconnect();
-            for _ in 0..10 {
-                tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
-                if RELAY_TX.read().map(|l| l.is_some()).unwrap_or(false) {
-                    return Ok(true);
+                if let Some(p) = pp.get("port").and_then(|v| v.as_u64()) {
+                    port = p as u16;
                 }
             }
+        }
+    }
+
+    if let Some(ref dev) = dev_opt {
+        let ip = dev.ip_address.trim();
+        if !ip.is_empty() && ip != "relay" && ip != "LAN" && !candidate_ips.contains(&ip.to_string()) {
+            candidate_ips.push(ip.to_string());
+        }
+    }
+
+    // 局域网优先探测 (1.5s 快速超时)
+    if !candidate_ips.is_empty() {
+        if let Ok(client) = reqwest::Client::builder().timeout(std::time::Duration::from_millis(1500)).build() {
+            for ip in &candidate_ips {
+                let health_url = format!("http://{}:{}/v1/health", ip, port);
+                if let Ok(res) = client.get(&health_url).send().await {
+                    if res.status().is_success() {
+                        if let Some(mut updated_dev) = dev_opt.clone() {
+                            updated_dev.last_seen = crate::now_ms();
+                            updated_dev.ip_address = ip.clone();
+                            registry.update_device(updated_dev);
+                        }
+                        return Ok(true);
+                    }
+                }
+            }
+        }
+    }
+
+    // 中继通道探针
+    let relay_connected = RELAY_TX.read().map(|l| l.is_some()).unwrap_or(false);
+    if relay_connected {
+        return Ok(true);
+    }
+
+    // 若本地中继尚未建连，尝试唤醒并等待探测（最多 3 秒）
+    force_relay_reconnect();
+    for _ in 0..15 {
+        tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+        if RELAY_TX.read().map(|l| l.is_some()).unwrap_or(false) {
+            return Ok(true);
         }
     }
 
@@ -11508,5 +11586,43 @@ mod tests {
 
         let _ = tokio::time::timeout(tokio::time::Duration::from_millis(500), handle).await;
         assert!(notified.load(std::sync::atomic::Ordering::SeqCst));
+    }
+
+    #[test]
+    fn test_get_connected_devices_core_filters_revoked_and_prunes_stale_pcs() {
+        let registry = Arc::new(DeviceRegistry::default());
+        // Insert active PC
+        registry.update_device(ConnectedDevice {
+            device_id: "active-pc-1".to_string(),
+            platform: "windows".to_string(),
+            ip_address: "172.25.140.173".to_string(),
+            last_seen: crate::now_ms(),
+            device_name: Some("Active PC".to_string()),
+            is_trusted: true,
+            status: Some("trusted".to_string()),
+        });
+        // Insert revoked PC
+        registry.update_device(ConnectedDevice {
+            device_id: "revoked-pc-old".to_string(),
+            platform: "windows".to_string(),
+            ip_address: "192.168.1.115".to_string(),
+            last_seen: crate::now_ms() - 500_000,
+            device_name: Some("Old Revoked PC".to_string()),
+            is_trusted: false,
+            status: Some("revoked".to_string()),
+        });
+
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::device_trust::init_device_trust_tables(&conn).unwrap();
+        let now = crate::now_ms();
+        conn.execute(
+            "INSERT INTO trusted_devices (device_id, public_key, device_name, platform, paired_at, last_authenticated_at, status, revoked_at)
+             VALUES ('revoked-pc-old', 'pk1', 'Old Revoked PC', 'windows', ?1, ?1, 'revoked', ?1)",
+            [now],
+        ).unwrap();
+
+        let devices = get_connected_devices_core(Some(registry.clone()), Some(&conn));
+        assert!(!devices.iter().any(|d| d.device_id == "revoked-pc-old"), "revoked 设备必须被过滤掉");
+        assert!(devices.iter().any(|d| d.device_id == "active-pc-1"), "active 设备必须保留");
     }
 }
