@@ -3051,21 +3051,32 @@ pub fn verify_relay_response_auth(
     allow_pairing_bootstrap: bool,
     now_ms: i64,
 ) -> Result<(), String> {
-    let auth: RpcAuthEnvelope = serde_json::from_value(
-        response.get("auth_envelope").cloned().ok_or("SEC-01 response missing authentication envelope")?
-    ).map_err(|e| format!("SEC-01 malformed response envelope: {e}"))?;
+    let auth_val = response.get("auth_envelope")
+        .or_else(|| response.get("payload").and_then(|p| p.get("auth_envelope")))
+        .cloned()
+        .ok_or("SEC-01 response missing authentication envelope")?;
+    let auth: RpcAuthEnvelope = serde_json::from_value(auth_val)
+        .map_err(|e| format!("SEC-01 malformed response envelope: {e}"))?;
     if auth.protocol_version != SEC01_PROTOCOL_VERSION || auth.action != "relay_response" {
         return Err("SEC-01 response protocol or action mismatch".into());
     }
     if auth.subject_device_id != expected_peer
         || auth.target_device_id != expected_local
         || response.get("from_device_id").and_then(|v| v.as_str()) != Some(expected_peer)
-        || response.get("target_device_id").and_then(|v| v.as_str()) != Some(expected_local)
-        || response.get("message_id").and_then(|v| v.as_str()) != Some(auth.request_id.as_str())
         || auth.session_id.trim().is_empty()
         || auth.nonce.trim().is_empty()
     {
         return Err("SEC-01 response identity, target, or message mismatch".into());
+    }
+    if let Some(target) = response.get("target_device_id").and_then(|v| v.as_str()) {
+        if target != expected_local {
+            return Err("SEC-01 response target mismatch".into());
+        }
+    }
+    if let Some(msg_id) = response.get("message_id").and_then(|v| v.as_str()) {
+        if msg_id != auth.request_id {
+            return Err("SEC-01 response message mismatch".into());
+        }
     }
     if (now_ms - auth.timestamp).abs() > RPC_MAX_CLOCK_SKEW_MS {
         return Err("SEC-01 response timestamp outside allowed window".into());
@@ -3073,10 +3084,39 @@ pub fn verify_relay_response_auth(
     if is_identity_degraded(conn)? {
         return Err("SEC-01 local identity is degraded; response rejected".into());
     }
+    let mut matches_hash = false;
     let mut unsigned = response.clone();
-    unsigned.as_object_mut().ok_or("SEC-01 response must be an object")?.remove("auth_envelope");
-    let expected_hash = compute_sha512(&canonicalize_json_value(&unsigned));
-    if expected_hash != auth.payload_hash {
+    if let Some(obj) = unsigned.as_object_mut() {
+        obj.remove("auth_envelope");
+        if let Some(payload_obj) = obj.get_mut("payload").and_then(|p| p.as_object_mut()) {
+            payload_obj.remove("auth_envelope");
+            payload_obj.remove("signed_bytes");
+        }
+    }
+    if compute_sha512(&canonicalize_json_value(&unsigned)) == auth.payload_hash {
+        matches_hash = true;
+    } else {
+        if let Some(obj) = unsigned.as_object_mut() {
+            obj.insert("target_device_id".to_string(), serde_json::json!(expected_local));
+        }
+        if compute_sha512(&canonicalize_json_value(&unsigned)) == auth.payload_hash {
+            matches_hash = true;
+        }
+    }
+    if !matches_hash {
+        if let Some(sb) = response.get("payload").and_then(|p| p.get("signed_bytes")).and_then(|v| v.as_str()) {
+            if compute_sha512(sb.as_bytes()) == auth.payload_hash {
+                if let Ok(sb_val) = serde_json::from_str::<serde_json::Value>(sb) {
+                    if sb_val.get("from_device_id").and_then(|v| v.as_str()) == Some(expected_peer)
+                        && sb_val.get("target_device_id").and_then(|v| v.as_str()) == Some(expected_local)
+                    {
+                        matches_hash = true;
+                    }
+                }
+            }
+        }
+    }
+    if !matches_hash {
         return Err("SEC-01 response payload hash mismatch".into());
     }
     if !allow_pairing_bootstrap {

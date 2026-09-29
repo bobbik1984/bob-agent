@@ -1062,30 +1062,45 @@ pub fn verify_rest_request_auth_with_target(
         ));
     }
 
-    // 6. 确定参与验签的有效载荷字�?
-    let payload_bytes: Vec<u8> = if is_from_header {
-        if body_bytes.is_empty() {
-            if envelope.payload_hash == crate::device_trust::compute_sha512(b"") {
-                b"".to_vec()
-            } else {
-                b"{}".to_vec()
-            }
+    // 6. 确定参与验签的有效载荷字节
+    let payload_bytes: Vec<u8> = if body_bytes.is_empty() {
+        if envelope.payload_hash == crate::device_trust::compute_sha512(b"") {
+            b"".to_vec()
         } else {
-            body_bytes.to_vec()
+            b"{}".to_vec()
         }
-    } else {
-        // Envelope 来自 Body，提取除�?envelope 字段后的载荷
-        if let Ok(mut val) = serde_json::from_slice::<Value>(body_bytes) {
-            if let Some(obj) = val.as_object_mut() {
-                obj.remove("auth_envelope");
-                obj.remove("envelope");
-                serde_json::to_vec(&val).unwrap_or_default()
+    } else if crate::device_trust::compute_sha512(body_bytes) == envelope.payload_hash {
+        body_bytes.to_vec()
+    } else if let Ok(mut val) = serde_json::from_slice::<Value>(body_bytes) {
+        if let Some(raw_s) = val.get("raw_payload").and_then(|v| v.as_str()) {
+            if crate::device_trust::compute_sha512(raw_s.as_bytes()) == envelope.payload_hash {
+                raw_s.as_bytes().to_vec()
+            } else {
+                raw_s.as_bytes().to_vec()
+            }
+        } else if let Some(obj) = val.as_object_mut() {
+            obj.remove("auth_envelope");
+            obj.remove("envelope");
+            obj.remove("raw_payload");
+            let can = crate::device_trust::canonicalize_json_value(&val);
+            if crate::device_trust::compute_sha512(&can) == envelope.payload_hash {
+                can
+            } else if let Ok(b) = serde_json::to_vec(&val) {
+                if crate::device_trust::compute_sha512(&b) == envelope.payload_hash {
+                    b
+                } else if !is_from_header {
+                    b
+                } else {
+                    body_bytes.to_vec()
+                }
             } else {
                 body_bytes.to_vec()
             }
         } else {
             body_bytes.to_vec()
         }
+    } else {
+        body_bytes.to_vec()
     };
 
     // 7. 密码学全要素校验（会话、签名、重放、撤销�?
@@ -5855,5 +5870,80 @@ pub mod tests {
         assert_eq!(runs_c[0].summary.as_deref(), Some("已通过 Relay 接收并应用移动端数据"));
 
         crate::set_inject_config_write_error(false);
+    }
+
+    #[tokio::test]
+    async fn test_sec01_lan_rpc_request_auth_raw_payload_and_canonical_matching() {
+        let ctx = setup_test_context();
+        let mut conn = ctx.db.lock().unwrap();
+        let now = crate::now_ms();
+        let req_id = "req-lan-rpc-001";
+
+        let mut inner_payload = serde_json::json!({
+            "action": "rpc_request",
+            "request_id": req_id,
+            "instruction": "pc在线吗？ 查看一下工作目录的结构",
+            "read_only": true
+        });
+
+        // 1. 模拟 dispatch_dual_transport_rpc 签名与组装请求
+        let payload_bytes = crate::device_trust::canonicalize_json_value(&inner_payload);
+        let envelope = make_test_envelope(&ctx, "rpc_request", req_id, &payload_bytes, now);
+        let env_json = serde_json::to_value(&envelope).unwrap();
+
+        inner_payload["envelope"] = env_json.clone();
+        inner_payload["auth_envelope"] = env_json.clone();
+        inner_payload["raw_payload"] = serde_json::json!(String::from_utf8(payload_bytes.clone()).unwrap());
+
+        let body_bytes = serde_json::to_vec(&inner_payload).unwrap();
+
+        let mut headers = axum::http::HeaderMap::new();
+        headers.insert("x-rpc-auth-envelope", env_json.to_string().parse().unwrap());
+        headers.insert("x-device-id", ctx.mobile_device_id.parse().unwrap());
+
+        // 2. 校验正向测试：必须通过鉴权且返回 Authorized
+        let outcome = verify_rest_request_auth_with_target(
+            &mut conn,
+            &headers,
+            &body_bytes,
+            "rpc_request",
+            &ctx.target_device_id,
+            now,
+        );
+        match outcome {
+            Ok(AuthVerificationOutcome::Authorized { subject_device_id, session_id, request_id, .. }) => {
+                assert_eq!(subject_device_id, ctx.mobile_device_id);
+                assert_eq!(session_id, ctx.session_id);
+                assert_eq!(request_id, req_id);
+            }
+            res => panic!("Expected Authorized outcome, got {:?}", res),
+        }
+
+        // 3. 负向测试：篡改 body 中的指令内容必须被拒绝 (Fail-Closed)
+        let mut tampered_payload = inner_payload.clone();
+        tampered_payload["instruction"] = serde_json::json!("rm -rf /");
+        tampered_payload["raw_payload"] = serde_json::json!("tampered");
+        let tampered_bytes = serde_json::to_vec(&tampered_payload).unwrap();
+
+        let tampered_outcome = verify_rest_request_auth_with_target(
+            &mut conn,
+            &headers,
+            &tampered_bytes,
+            "rpc_request",
+            &ctx.target_device_id,
+            now,
+        );
+        assert!(tampered_outcome.is_err(), "Tampered payload must be rejected");
+
+        // 4. 负向测试：Action 不匹配必须被拦截
+        let action_mismatch_outcome = verify_rest_request_auth_with_target(
+            &mut conn,
+            &headers,
+            &body_bytes,
+            "push",
+            &ctx.target_device_id,
+            now,
+        );
+        assert!(action_mismatch_outcome.is_err(), "Action mismatch must be rejected");
     }
 }

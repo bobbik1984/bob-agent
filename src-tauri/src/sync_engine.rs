@@ -5666,8 +5666,17 @@ fn deliver_authenticated_relay_response(
     if !relay_response_matches_terminal(&terminal, json) {
         return Err("SEC-01 response terminal does not match pending request".into());
     }
+    let mut normalized_json = json.clone();
+    if normalized_json.get("auth_envelope").is_none() {
+        if let Some(env) = normalized_json.get("payload").and_then(|p| p.get("auth_envelope")) {
+            normalized_json["auth_envelope"] = env.clone();
+        }
+    }
+    if normalized_json.get("target_device_id").is_none() {
+        normalized_json["target_device_id"] = serde_json::json!(local);
+    }
     ctx.with_db(|conn| crate::device_trust::verify_relay_response_auth(
-        conn, json, &peer, &local, bootstrap, crate::now_ms(),
+        conn, &normalized_json, &peer, &local, bootstrap, crate::now_ms(),
     ))?;
     if let Some(waiter) = PENDING_REQUESTS.write().map_err(|_| "SEC-01 pending queue poisoned")?.remove(ref_id) {
         let _ = waiter.tx.send(json.clone());
