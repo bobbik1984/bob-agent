@@ -1,46 +1,48 @@
 <template>
-  <div v-if="state.isVisible" class="modal-overlay" @click.self="handleOverlayClick">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h3>{{ state.title }}</h3>
-      </div>
-      <div class="modal-body">
-        <p v-if="state.message">{{ state.message }}</p>
-        <div v-if="state.type === 'prompt'" class="prompt-input-wrapper">
-          <input 
-            type="text"
-            v-model="state.inputValue" 
-            :placeholder="state.inputPlaceholder"
-            @keyup.enter="!state.showDescription && confirm()"
-            class="prompt-input"
-            autofocus
-          />
-          <textarea
-            v-if="state.showDescription"
-            v-model="state.descriptionValue"
-            :placeholder="state.descriptionPlaceholder"
-            class="prompt-textarea"
-            rows="3"
-          ></textarea>
+  <Teleport to="body">
+    <div v-if="state.isVisible" class="modal-overlay" @click.self="handleOverlayClick">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3>{{ state.title }}</h3>
+        </div>
+        <div class="modal-body">
+          <p v-if="state.message">{{ state.message }}</p>
+          <div v-if="state.type === 'prompt'" class="prompt-input-wrapper">
+            <input
+              type="text"
+              v-model="state.inputValue"
+              :placeholder="state.inputPlaceholder"
+              @keyup.enter="!state.showDescription && confirm()"
+              class="prompt-input"
+              autofocus
+            />
+            <textarea
+              v-if="state.showDescription"
+              v-model="state.descriptionValue"
+              :placeholder="state.descriptionPlaceholder"
+              class="prompt-textarea"
+              rows="3"
+            ></textarea>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button
+            v-if="state.type === 'confirm' || state.type === 'prompt'"
+            class="btn btn-secondary"
+            @click="cancel"
+          >
+            {{ state.cancelText }}
+          </button>
+          <button
+            :class="['btn', state.confirmClass || 'btn-primary']"
+            @click="confirm"
+          >
+            {{ state.confirmText }}
+          </button>
         </div>
       </div>
-      <div class="modal-footer">
-        <button 
-          v-if="state.type === 'confirm' || state.type === 'prompt'" 
-          class="btn btn-secondary"
-          @click="cancel"
-        >
-          {{ state.cancelText }}
-        </button>
-        <button 
-          :class="['btn', state.confirmClass || 'btn-primary']"
-          @click="confirm"
-        >
-          {{ state.confirmText }}
-        </button>
-      </div>
     </div>
-  </div>
+  </Teleport>
 </template>
 
 <script setup>
@@ -68,7 +70,7 @@ const handleOverlayClick = () => {
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 9999;
+  z-index: 100000;
   backdrop-filter: blur(4px);
 }
 

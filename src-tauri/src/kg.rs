@@ -50,8 +50,8 @@ pub fn upsert_node(
 /// 能够自动处理已被合并的 alias 映射
 pub fn resolve_node_id(conn: &rusqlite::Connection, name: &str, etype: &str) -> String {
     let query = "
-        SELECT id FROM kg_nodes 
-        WHERE label = ?1 
+        SELECT id FROM kg_nodes
+        WHERE label = ?1
            OR EXISTS (SELECT 1 FROM json_each(kg_nodes.metadata, '$.aliases') WHERE value = ?1)
         LIMIT 1
     ";
@@ -257,14 +257,14 @@ pub fn query_subgraph(conn: &rusqlite::Connection, term: &str, max_hops: usize) 
     // Step 1: 找到匹配的种子节点 (label 或 id 模糊匹配)
     let like_term = format!("%{}%", term);
     let mut stmt = match conn.prepare(
-        "SELECT id, label, node_type, summary, source FROM kg_nodes
+        "SELECT id, label, node_type, summary, source, metadata FROM kg_nodes
          WHERE id LIKE ?1 OR label LIKE ?1 LIMIT 20",
     ) {
         Ok(s) => s,
         Err(e) => return json!({"error": format!("query failed: {}", e)}),
     };
 
-    let seeds: Vec<(String, String, String, String, String)> =
+    let seeds: Vec<(String, String, String, String, String, String)> =
         match stmt.query_map(params![like_term], |row| {
             Ok((
                 row.get::<_, String>(0)?,
@@ -272,6 +272,7 @@ pub fn query_subgraph(conn: &rusqlite::Connection, term: &str, max_hops: usize) 
                 row.get::<_, String>(2)?,
                 row.get::<_, String>(3)?,
                 row.get::<_, String>(4)?,
+                row.get::<_, Option<String>>(5)?.unwrap_or_default(),
             ))
         }) {
             Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
@@ -288,14 +289,14 @@ pub fn query_subgraph(conn: &rusqlite::Connection, term: &str, max_hops: usize) 
     let mut result_nodes: HashMap<String, Value> = HashMap::new();
     let mut result_edges: Vec<Value> = Vec::new();
 
-    for (id, label, node_type, summary, source) in &seeds {
+    for (id, label, node_type, summary, source, metadata) in &seeds {
         visited.insert(id.clone());
         queue.push_back((id.clone(), 0));
         result_nodes.insert(
             id.clone(),
             json!({
                 "id": id, "label": label, "type": node_type,
-                "summary": summary, "source": source, "is_seed": true
+                "summary": summary, "source": source, "metadata": metadata, "is_seed": true
             }),
         );
     }
@@ -336,7 +337,7 @@ pub fn query_subgraph(conn: &rusqlite::Connection, term: &str, max_hops: usize) 
 
                     // 加载邻居节点信息
                     if let Ok(mut n_stmt) = conn.prepare(
-                        "SELECT id, label, node_type, summary, source FROM kg_nodes WHERE id = ?1",
+                        "SELECT id, label, node_type, summary, source, metadata FROM kg_nodes WHERE id = ?1",
                     ) {
                         if let Ok(Some(row)) = n_stmt.query_row(params![neighbor], |row| {
                             Ok(Some(json!({
@@ -345,6 +346,7 @@ pub fn query_subgraph(conn: &rusqlite::Connection, term: &str, max_hops: usize) 
                                 "type": row.get::<_, String>(2)?,
                                 "summary": row.get::<_, String>(3)?,
                                 "source": row.get::<_, String>(4)?,
+                                "metadata": row.get::<_, Option<String>>(5)?.unwrap_or_default(),
                                 "is_seed": false
                             })))
                         }) {
@@ -454,15 +456,17 @@ pub fn get_stats(conn: &rusqlite::Connection) -> Value {
 /// 获取完整图谱 (节点 + 边)，用于前端 vis.js 渲染
 pub fn get_full_graph(conn: &rusqlite::Connection) -> Value {
     let mut nodes: Vec<Value> = Vec::new();
-    if let Ok(mut stmt) = conn.prepare("SELECT id, label, node_type, summary, source FROM kg_nodes")
+    if let Ok(mut stmt) = conn.prepare("SELECT id, label, node_type, summary, source, metadata FROM kg_nodes")
     {
         if let Ok(rows) = stmt.query_map([], |row| {
+            let meta_str: String = row.get::<_, Option<String>>(5)?.unwrap_or_default();
             Ok(json!({
                 "id": row.get::<_, String>(0)?,
                 "label": row.get::<_, String>(1)?,
                 "type": row.get::<_, String>(2)?,
                 "summary": row.get::<_, String>(3)?,
-                "source": row.get::<_, String>(4)?
+                "source": row.get::<_, String>(4)?,
+                "metadata": meta_str
             }))
         }) {
             nodes = rows.filter_map(|r| r.ok()).collect();
@@ -742,4 +746,42 @@ pub fn system_create_ticket(
     }
 
     Ok(json!({ "ok": true, "ticket_id": ticket_id }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rusqlite::Connection;
+
+    #[test]
+    fn test_get_full_graph_returns_metadata() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE kg_nodes (
+                id TEXT PRIMARY KEY,
+                label TEXT NOT NULL,
+                node_type TEXT NOT NULL,
+                summary TEXT DEFAULT '',
+                source TEXT DEFAULT '',
+                metadata TEXT DEFAULT '{}'
+            );
+            CREATE TABLE kg_edges (
+                source_id TEXT,
+                target_id TEXT,
+                relation TEXT,
+                confidence REAL
+            );
+            INSERT INTO kg_nodes (id, label, node_type, summary, source, metadata)
+            VALUES ('node_1', 'CA1376', 'ticket', 'flight ticket', 'user', '{\"category\":\"flight\",\"start_time\":\"2026-08-22\"}');",
+        ).unwrap();
+
+        let graph = get_full_graph(&conn);
+        let nodes = graph["nodes"].as_array().expect("nodes array");
+        assert_eq!(nodes.len(), 1);
+        let node = &nodes[0];
+        assert_eq!(node["id"], "node_1");
+        assert_eq!(node["label"], "CA1376");
+        assert_eq!(node["type"], "ticket");
+        assert_eq!(node["metadata"], "{\"category\":\"flight\",\"start_time\":\"2026-08-22\"}");
+    }
 }
