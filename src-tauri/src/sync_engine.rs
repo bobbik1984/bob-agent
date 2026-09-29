@@ -1919,7 +1919,25 @@ pub fn get_connected_devices_core(
     // 1. 过滤已撤销 (revoked) 设备，绝不在设备列表中陈列已被废弃的历史记录
     list.retain(|d| d.status.as_deref() != Some("revoked"));
 
-    // 2. 如果当前有活跃配对 PC，自动从注册表中清理掉其他陈旧且未受信任的幽灵 PC 记录
+    // 2. 从 DeviceRegistry 中彻底清理已撤销的幽灵设备
+    if let (Some(ref reg), Some(conn)) = (&registry_opt, db_conn_opt) {
+        if let Ok(mut devs) = reg.devices.write() {
+            let before_len = devs.len();
+            devs.retain(|_, d| {
+                let db_status: Option<String> = conn.query_row(
+                    "SELECT status FROM trusted_devices WHERE device_id = ?1",
+                    [&d.device_id],
+                    |row| row.get(0),
+                ).ok();
+                db_status.as_deref() != Some("revoked")
+            });
+            if devs.len() != before_len {
+                reg.save();
+            }
+        }
+    }
+
+    // 3. 如果当前有活跃配对 PC，自动从注册表中清理掉其他陈旧且未受信任的幽灵 PC 记录
     if let Some(ref active_id) = active_payload_pc_id {
         list.retain(|d| {
             let is_other_pc = (d.platform == "windows" || d.platform == "desktop") && &d.device_id != active_id;
@@ -3304,15 +3322,22 @@ pub async fn relay_handshake(
             Ok(session_id)
         }
         Err(e) => {
-            let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_ack", "status": "error", "detail": format!("ERR-PAIRING-03: {}", e)}));
+            let err_code = if e.contains("Target device offline") || e.contains("RLY-TARGET-OFFLINE") {
+                "ERR-PAIRING-02"
+            } else if e.contains("SEC-01") || e.contains("Unauthorized") || e.contains("mismatch") {
+                "ERR-PAIRING-04"
+            } else {
+                "ERR-PAIRING-03"
+            };
+            let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_ack", "status": "error", "detail": format!("{}: {}", err_code, e)}));
             let _ = crate::sync_history::record_activity(
-                DiagnosticStatus::Timeout,
+                if err_code == "ERR-PAIRING-03" { DiagnosticStatus::Timeout } else { DiagnosticStatus::Failed },
                 Some(TransportKind::Relay),
                 Some(target_device_id.clone()),
-                "Target device response timed out",
-                Some("ERR-PAIRING-03".to_string()),
+                if err_code == "ERR-PAIRING-02" { "Target device is offline" } else if err_code == "ERR-PAIRING-04" { "Pairing authentication failed" } else { "Target device response timed out" },
+                Some(err_code.to_string()),
             );
-            Err(format!("ERR-PAIRING-03: {}", e))
+            Err(format!("{}: {}", err_code, e))
         }
     }
 }
@@ -10232,6 +10257,86 @@ mod tests {
         assert!(PENDING_REQUESTS.read().unwrap().contains_key(&ref_id));
         assert!(deliver_authenticated_relay_response(&ctx, &ack).unwrap());
         assert_eq!(rx.await.unwrap(), ack);
+    }
+
+    #[tokio::test]
+    async fn test_sec01_pairing_ack_with_full_trace_fields_and_forwarding_succeeds() {
+        let (peer_key, peer) = sec01_test_identity();
+        let (_, local) = sec01_test_identity();
+        let conn = Connection::open_in_memory().unwrap();
+        crate::device_trust::init_device_trust_tables(&conn).unwrap();
+        let ref_id = uuid::Uuid::new_v4().to_string();
+
+        let request = json!({
+            "type": "notify",
+            "from_device_id": local,
+            "target_device_id": peer,
+            "protocol_version": 2,
+            "trace_id": "trace-pairing-test-1",
+            "message_id": ref_id,
+            "sync_id": "sync-pairing-test-1",
+            "payload": {
+                "pop": { "purpose": "pairing_establishment" }
+            }
+        });
+
+        let mut ack = serde_json::json!({
+            "type": "ack",
+            "target_device_id": local,
+            "message_id": format!("msg-ack-{}", &uuid::Uuid::new_v4().to_string().replace("-", "")[..8]),
+            "ref_message_id": ref_id,
+            "protocol_version": SYNC_PROTOCOL_VERSION,
+            "trace_id": "trace-pairing-test-1",
+            "sync_id": "sync-pairing-test-1",
+            "payload": {
+                "status": "trusted",
+                "session_id": "test-session-uuid",
+                "device_id": peer,
+                "device_name": "Bob PC",
+            }
+        });
+        copy_trace_fields(&request, &mut ack, true);
+
+        let signed_ack = build_signed_relay_response(ack, &peer, |target, bytes, msg_id| {
+            let mut test_conn = Connection::open_in_memory().unwrap();
+            crate::device_trust::init_device_trust_tables(&test_conn).unwrap();
+            test_conn.execute(
+                "INSERT INTO trusted_devices (device_id, public_key, platform, device_name, status, paired_at, last_authenticated_at) VALUES (?1, ?1, 'windows', 'Bob PC', 'trusted', ?2, ?2)",
+                rusqlite::params![local, crate::now_ms()],
+            ).unwrap();
+            crate::device_trust::sign_outgoing_rpc_envelope(
+                &mut test_conn, &peer_key, &peer, target, "relay_response", bytes, Some(msg_id), crate::now_ms(),
+            )
+        }).unwrap();
+
+        let forwarded = serde_json::json!({
+            "type": "ack",
+            "from_device_id": peer,
+            "target_device_id": local,
+            "auth_envelope": signed_ack["auth_envelope"],
+            "protocol_version": signed_ack["protocol_version"],
+            "payload": signed_ack["payload"],
+            "ref_message_id": signed_ack["ref_message_id"],
+            "message_id": signed_ack["message_id"],
+            "trace_id": signed_ack["trace_id"],
+            "sync_id": signed_ack["sync_id"],
+            "flow_phase": signed_ack["flow_phase"],
+        });
+
+        let ctx = RelayDispatchContext::for_test(Some(Arc::new(Mutex::new(conn))), None);
+        let (tx, rx) = oneshot::channel();
+        PENDING_REQUESTS.write().unwrap().insert(ref_id.clone(), RelayRequestWaiter {
+            tx,
+            terminal: RelayTerminal::Ack,
+            expected_peer: peer.clone(),
+            expected_local: local.clone(),
+            allow_pairing_bootstrap: true,
+        });
+
+        assert!(deliver_authenticated_relay_response(&ctx, &forwarded).unwrap());
+        let delivered = rx.await.unwrap();
+        assert_eq!(delivered["ref_message_id"], ref_id);
+        assert_eq!(delivered["payload"]["status"], "trusted");
     }
 
     #[test]
