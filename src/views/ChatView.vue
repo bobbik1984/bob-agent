@@ -238,8 +238,8 @@
               style="cursor: zoom-in;"
             />
           </div>
-          <!-- 元数据标注：模型 & 来源 & 复制 & 记忆标志 -->
-          <div class="message-meta-row" v-if="msg.role === 'assistant' || msg.from_channel">
+          <!-- 元数据标注：模型 & 来源 & 时间戳 & 复制 & 记忆标志 -->
+          <div class="message-meta-row" v-if="msg.role === 'assistant' || msg.from_channel || msg.created_at">
             <div v-if="msg.content && msg.content.includes('<|mem|>')" class="memory-indicator" title="已自动提炼知识到脑库">
               🧬
             </div>
@@ -261,6 +261,9 @@
               <Target v-else :size="10" />
               <span>{{ $t(`chat.route_${msg._route.mode}`) }}</span>
             </div>
+            <span v-if="msg.created_at" class="message-timestamp">
+              {{ formatMessageTime(msg.created_at) }}
+            </span>
             <button
               v-if="msg.role === 'assistant' && msg.content"
               class="copy-rich-btn"
@@ -2245,6 +2248,25 @@ function formatBytes(bytes) {
   return (bytes / 1048576).toFixed(1) + ' MB';
 }
 
+function formatMessageTime(val) {
+  if (!val) return '';
+  const date = typeof val === 'number' ? new Date(val) : new Date(val);
+  if (isNaN(date.getTime())) return '';
+  const now = new Date();
+  const isToday = date.getFullYear() === now.getFullYear() &&
+                  date.getMonth() === now.getMonth() &&
+                  date.getDate() === now.getDate();
+  const hours = date.getHours().toString().padStart(2, '0');
+  const minutes = date.getMinutes().toString().padStart(2, '0');
+  const timeStr = `${hours}:${minutes}`;
+  if (isToday) {
+    return timeStr;
+  }
+  const month = (date.getMonth() + 1).toString().padStart(2, '0');
+  const day = date.getDate().toString().padStart(2, '0');
+  return `${month}-${day} ${timeStr}`;
+}
+
 let cdnUnlistens = [];
 
 // ── 生命周期 ─────────────────────────────────────────
@@ -3657,6 +3679,17 @@ defineExpose({
   font-family: var(--font-mono);
   user-select: none;
   letter-spacing: 0.02em;
+}
+
+.message-timestamp {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  opacity: 0.7;
+  font-family: var(--font-mono);
+  user-select: none;
+  letter-spacing: 0.02em;
+  display: inline-flex;
+  align-items: center;
 }
 
 /* 进化引擎: 记忆提炼彩蛋标志 */

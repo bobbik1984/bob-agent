@@ -191,6 +191,7 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
       content: text || (imageBase64s.length > 0 ? '看图' : '继续'),
       image_base64s: imageBase64s.length > 0 ? imageBase64s : null,
       image_base64: imageBase64s.length > 0 ? imageBase64s[0] : null,
+      created_at: Date.now(),
     };
 
     // 存到 UI 中
@@ -287,6 +288,7 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
           content: result.error,
           _isError: true,
           _thinkingExpanded: false,
+          created_at: Date.now(),
         });
       } else {
         // ── 竞态修复: 取 Rust 后端 result 与前端流式累积的较长者 ──
@@ -331,6 +333,7 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
           _modelLabel: currentModelName.value || result.model || '',
           _route: result.route || null,
           _goal: result.goal || null,
+          created_at: Date.now(),
         };
 
         messages.value.push(assistantMsg);
@@ -356,6 +359,7 @@ export function useChat(props, emit, { scrollToBottom, currentModelName, globalF
         content: err.message,
         _isError: true,
         _thinkingExpanded: false,
+        created_at: Date.now(),
       });
     } finally {
       isStreaming.value = false;
