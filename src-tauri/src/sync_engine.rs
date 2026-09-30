@@ -7648,6 +7648,7 @@ fn is_allowed_lan_revocation_ip(ip: std::net::IpAddr) -> bool {
 
 fn start_peer_revocation_lan_retry(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
         let client = match reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(5)).build() {
             Ok(client) => client,
@@ -7702,8 +7703,11 @@ fn start_peer_revocation_lan_retry(app: AppHandle) {
 }
 
 pub fn start_relay_listener(app: AppHandle) {
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     start_peer_revocation_lan_retry(app.clone());
     tauri::async_runtime::spawn(async move {
+        // 让应用主窗口与 WebView 先完成首帧渲染，防抖 3 秒后再开始中继长连接握手
+        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
         loop {
             crate::sync_diagnostics::set_relay_state(
                 crate::sync_diagnostics::RelayConnectionState::Connecting,
