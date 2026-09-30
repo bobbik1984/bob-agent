@@ -13,6 +13,12 @@ jobs:
   build-android:
     runs-on: ubuntu-latest
     steps:
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/share/boost
+          sudo apt-get clean
+          df -h
+
       - uses: actions/checkout@v4
 
       - name: Setup Node.js
@@ -26,19 +32,20 @@ jobs:
           distribution: 'zulu'
           java-version: '17'
 
-      - name: Setup Android SDK
+      - name: Setup Android SDK & NDK
         uses: android-actions/setup-android@v4
         with:
-          packages: 'platform-tools'
+          packages: |
+            platform-tools
+            ndk;27.0.12077973
 
-      - name: Install NDK
-        run: sdkmanager "ndk;27.0.12077973"
-
-      - name: Free disk space
+      - name: Verify NDK Installation
         run: |
-          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/share/boost
-          sudo apt-get clean
-          df -h
+          if [ ! -d "$ANDROID_HOME/ndk/27.0.12077973" ]; then
+            echo "NDK 27 not found in expected path, installing via yes | sdkmanager..."
+            yes | sdkmanager "ndk;27.0.12077973"
+          fi
+          echo "NDK 27 successfully installed at $ANDROID_HOME/ndk/27.0.12077973"
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable

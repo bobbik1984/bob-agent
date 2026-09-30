@@ -147,8 +147,9 @@ fn write_uninstall_registry(install_dir: &str, bob_exe: &Path) -> Result<(), Str
         .create_subkey(uninstall_path)
         .map_err(|e| format!("无法创建注册表项: {}", e))?;
 
+    let version = env!("CARGO_PKG_VERSION");
     let _ = key.set_value("DisplayName", &"Bob Agent");
-    let _ = key.set_value("DisplayVersion", &"0.3.1");
+    let _ = key.set_value("DisplayVersion", &version);
     let _ = key.set_value("Publisher", &"xm_bo");
     let _ = key.set_value("InstallLocation", &install_dir);
     let _ = key.set_value(
@@ -159,6 +160,12 @@ fn write_uninstall_registry(install_dir: &str, bob_exe: &Path) -> Result<(), Str
     let _ = key.set_value("NoRepair", &1u32);
 
     Ok(())
+}
+
+/// 获取安装器当前版本
+#[tauri::command]
+fn get_app_version() -> String {
+    env!("CARGO_PKG_VERSION").to_string()
 }
 
 /// 启动已安装的 Bob 程序
@@ -182,8 +189,16 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .setup(|app| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             get_default_install_dir,
+            get_app_version,
             select_install_dir,
             install,
             launch_bob,

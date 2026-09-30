@@ -17,7 +17,7 @@
       <div class="wizard-body">
         <!-- Step 1: 选择安装目录 -->
         <div v-if="step === 1" class="page page-center animate-fade-in">
-          <div class="version-tag">v0.3.1</div>
+          <div class="version-tag">v{{ appVersion }}</div>
           <div class="workspace-row">
             <div class="workspace-input" :class="{ filled: installDir }" @click="selectDir">
               {{ installDir || '选择安装目录...' }}
@@ -78,20 +78,35 @@ import { listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 
 const step = ref(1);
+const appVersion = ref('0.9.18');
 const installDir = ref('');
 const progress = ref(0);
 const statusText = ref('正在解压文件...');
 const showCancelDialog = ref(false);
 
 onMounted(async () => {
-  installDir.value = await invoke('get_default_install_dir');
+  try {
+    appVersion.value = await invoke('get_app_version');
+  } catch (e) {
+    console.warn('Failed to get app version:', e);
+  }
 
-  await listen('install-progress', (event) => {
-    progress.value = event.payload;
-    if (progress.value >= 100) {
-      statusText.value = '正在创建快捷方式...';
-    }
-  });
+  try {
+    installDir.value = await invoke('get_default_install_dir');
+  } catch (e) {
+    console.warn('Failed to get default install dir:', e);
+  }
+
+  try {
+    await listen('install-progress', (event) => {
+      progress.value = event.payload;
+      if (progress.value >= 100) {
+        statusText.value = '正在创建快捷方式...';
+      }
+    });
+  } catch (e) {
+    console.warn('Failed to attach install-progress listener:', e);
+  }
 });
 
 async function selectDir() {
@@ -202,10 +217,13 @@ html, body {
   height: 100%;
   padding: 48px 48px 32px;
   background: var(--bg-root);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.6);
 }
 
 /* ── Logo ── */
