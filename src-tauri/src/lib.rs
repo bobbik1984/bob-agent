@@ -2013,7 +2013,9 @@ pub fn run() {
                         })
                         .build(),
                 )?;
-                app.global_shortcut().register(shortcut)?;
+                if let Err(e) = app.global_shortcut().register(shortcut) {
+                    eprintln!("[warn] Failed to register global shortcut Ctrl+Shift+B: {}", e);
+                }
             }
 
             // ── System Tray Initialization (仅限桌面端) ──

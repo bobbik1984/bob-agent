@@ -12,9 +12,31 @@ static PAYLOAD: &[u8] = include_bytes!("../payload.zip");
 /// 获取默认安装路径
 #[tauri::command]
 fn get_default_install_dir() -> String {
+    // 优先读取注册表中的既有安装路径（支持平滑无缝升级）
+    if let Ok(reg_dir) = read_existing_install_dir() {
+        if Path::new(&reg_dir).exists() {
+            return reg_dir;
+        }
+    }
     let local_app_data = std::env::var("LOCALAPPDATA")
         .unwrap_or_else(|_| "C:\\Users\\Default\\AppData\\Local".to_string());
     format!("{}\\Programs\\BobAgent", local_app_data)
+}
+
+/// 尝试从注册表读取历史安装路径
+fn read_existing_install_dir() -> Result<String, String> {
+    use winreg::enums::*;
+    use winreg::RegKey;
+
+    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+    let uninstall_path = "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\BobAgent";
+    let key = hkcu.open_subkey(uninstall_path).map_err(|e| e.to_string())?;
+    let loc: String = key.get_value("InstallLocation").map_err(|e| e.to_string())?;
+    if !loc.trim().is_empty() {
+        Ok(loc)
+    } else {
+        Err("empty location".to_string())
+    }
 }
 
 /// 选择安装目录（调用系统原生文件对话框）
