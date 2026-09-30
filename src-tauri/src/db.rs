@@ -168,8 +168,12 @@ pub fn init_db(data_dir: &std::path::Path) -> Connection {
     )
     .expect("Failed to initialize database tables");
 
-    // 启用 WAL 模式（并发读写性能更佳）
+    // 启用 WAL 模式与并发防锁超时（5000ms），保障前端 IPC 与后台守护互不阻塞
+    conn.busy_timeout(std::time::Duration::from_millis(5000))
+        .unwrap_or_default();
     conn.execute_batch("PRAGMA journal_mode=WAL;")
+        .unwrap_or_default();
+    conn.execute_batch("PRAGMA busy_timeout=5000;")
         .unwrap_or_default();
     conn.execute_batch("PRAGMA foreign_keys=ON;")
         .unwrap_or_default();
@@ -744,6 +748,7 @@ pub fn detect_existing_history(data_dir: &std::path::Path) -> Option<ExistingUse
         return None;
     }
     let conn = rusqlite::Connection::open(&db_path).ok()?;
+    let _ = conn.busy_timeout(std::time::Duration::from_millis(3000));
 
     let has_conv_table: i64 = conn
         .query_row(

@@ -834,6 +834,17 @@ pub(crate) fn system_is_setup_complete_internal(config_path: &Path, data_dir: &P
         return true;
     }
 
+    // 2.5 移动端配对继承：若 config 中已有 pairing_payload (已通过扫码与 PC 配对)，判定为已配置并自愈 onboarded 标记
+    if config.get("pairing_payload").is_some() {
+        log::info!("[Setup] Detected existing pairing_payload, auto-healing onboarded state to true");
+        if let Some(obj) = config.as_object_mut() {
+            obj.insert("onboarded".to_string(), serde_json::json!(true));
+            auto_discover_api_keys_into_config(obj);
+            let _ = write_config_checked_at(config_path, &config);
+        }
+        return true;
+    }
+
     // 3. 升级与无感继承：深度探针本地 SQLite 数据库 (bob.db)
     // 防止覆盖安装或 config 缺失/重置时将老用户误判为新用户并弹出向导
     if let Some(summary) = db::detect_existing_history(data_dir) {

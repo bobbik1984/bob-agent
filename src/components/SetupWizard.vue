@@ -181,15 +181,22 @@ onMounted(async () => {
   // 先拍快照：从已有配置（而非 tempConfig）直接拍摄，防止用户在加载期间修改 tempConfig 导致快照被污染
   const snapshotBase = { ...tempConfig.value };
   if (window.appAPI) {
-    const saved = await window.appAPI.getAllConfig();
-    if (saved) {
-      // 用已有配置覆盖 snapshotBase 和 tempConfig
-      if (saved.language) { snapshotBase.language = saved.language; tempConfig.value.language = saved.language; locale.value = saved.language; }
-      if (saved.theme) { snapshotBase.theme = saved.theme; tempConfig.value.theme = saved.theme; }
-      if (saved.accentColor) { snapshotBase.accentColor = saved.accentColor; tempConfig.value.accentColor = saved.accentColor; }
-      if (saved.workspaceDir) { snapshotBase.workspaceDir = saved.workspaceDir; tempConfig.value.workspaceDir = saved.workspaceDir; }
-      if (saved.provider) { snapshotBase.provider = saved.provider; tempConfig.value.provider = saved.provider; }
-      // apiKey 不从配置回填（安全考虑，存在 apiKeys 子对象中）
+    try {
+      const saved = await Promise.race([
+        window.appAPI.getAllConfig(),
+        new Promise(resolve => setTimeout(() => resolve(null), 1200))
+      ]);
+      if (saved) {
+        // 用已有配置覆盖 snapshotBase 和 tempConfig
+        if (saved.language) { snapshotBase.language = saved.language; tempConfig.value.language = saved.language; locale.value = saved.language; }
+        if (saved.theme) { snapshotBase.theme = saved.theme; tempConfig.value.theme = saved.theme; }
+        if (saved.accentColor) { snapshotBase.accentColor = saved.accentColor; tempConfig.value.accentColor = saved.accentColor; }
+        if (saved.workspaceDir) { snapshotBase.workspaceDir = saved.workspaceDir; tempConfig.value.workspaceDir = saved.workspaceDir; }
+        if (saved.provider) { snapshotBase.provider = saved.provider; tempConfig.value.provider = saved.provider; }
+        // apiKey 不从配置回填（安全考虑，存在 apiKeys 子对象中）
+      }
+    } catch (e) {
+      console.warn('[SetupWizard] getAllConfig probe error:', e);
     }
   }
   // 将主题和色彩应用到 DOM（使用已有配置或默认值）
@@ -341,11 +348,38 @@ async function finishOnboarding() {
 
 <style scoped>
 .onboarding-layout {
-  height: 100vh;
+  min-height: 100vh;
+  min-height: 100dvh;
+  height: auto;
+  max-height: 100vh;
+  max-height: 100dvh;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
   display: flex;
   align-items: center;
   justify-content: center;
   background-color: var(--bg-root);
+  padding: 24px 16px;
+  box-sizing: border-box;
+}
+
+@media (max-width: 768px) {
+  .onboarding-layout {
+    padding-top: max(20px, env(safe-area-inset-top, 20px));
+    padding-bottom: max(20px, env(safe-area-inset-bottom, 20px));
+    align-items: flex-start;
+  }
+  .wizard-logo {
+    margin: 16px auto 24px !important;
+    height: 72px !important;
+  }
+  .wizard-body {
+    min-height: auto !important;
+  }
+  .wizard-nav {
+    margin-top: 24px !important;
+    margin-bottom: 16px !important;
+  }
 }
 
 .onboarding-card {
@@ -424,7 +458,7 @@ async function finishOnboarding() {
   gap: 8px;
   padding: 14px;
   background-color: var(--bg-secondary);
-  border: 2px solid var(--border-color);
+  border: 2px solid var(--border-default);
   border-radius: var(--radius-default);
   color: var(--text-primary);
   cursor: pointer;
@@ -476,7 +510,7 @@ async function finishOnboarding() {
   flex: 1;
   padding: 12px 16px;
   background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--border-default);
   border-radius: var(--radius-default);
   color: var(--text-tertiary);
   font-size: 14px;
@@ -493,7 +527,7 @@ async function finishOnboarding() {
 .workspace-btn {
   padding: 12px 16px;
   background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--border-default);
   border-radius: var(--radius-default);
   color: var(--text-secondary);
   font-size: 16px;
@@ -557,7 +591,7 @@ async function finishOnboarding() {
   cursor: pointer;
   inset: 0;
   background-color: var(--bg-secondary);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--border-default);
   transition: .3s;
 }
 
@@ -637,7 +671,7 @@ input:checked + .slider:before {
   align-items: center;
   justify-content: center;
   background: transparent;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--border-default);
   border-radius: 50%;
   color: var(--text-secondary);
   cursor: pointer;

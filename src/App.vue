@@ -390,7 +390,13 @@ function closeWindow() { window.appAPI.hideWindow(); }
 const { locale, t } = useI18n();
 
 // ── 状态 ─────────────────────────────────────────────
-const isSetupComplete = ref(false);
+// 初始状态探针：若本地已有配置或主题/着色缓存，第0帧即可认定已配置，消除闪现向导或被未决IPC卡死在白底屏
+const cachedOnboarded = typeof localStorage !== 'undefined' && (
+  localStorage.getItem('bob-onboarded') === 'true' ||
+  !!localStorage.getItem('bob-theme') ||
+  !!localStorage.getItem('bob-accent')
+);
+const isSetupComplete = ref(cachedOnboarded);
 const currentView = ref('chat');  // legacy — kept for backward compat during transition
 const activeDrawer = ref('chat');         // 'chat' | 'schedule' | 'work' | 'knowledge' | 'settings'
 provide('activeDrawer', activeDrawer);
@@ -793,177 +799,196 @@ onMounted(async () => {
     }
   });
 
-  // 检查是否已配置
-  isSetupComplete.value = await window.appAPI.isSetupComplete();
-  if (DEBUG_ONBOARDING === 0) {
-    isSetupComplete.value = false;
-  }
-
-  if (isSetupComplete.value) {
-    await loadConversations();
-    void dailyBrief.ensureLoaded();
-    currentModel.value = await window.appAPI.getConfig('model') || '';
-    // 恢复 UI 缩放偏好和主题和侧边栏宽度
-    const savedWidth = await window.appAPI.getConfig('sidebarWidth');
-    if (savedWidth) sidebarWidth.value = savedWidth;
-
-    const uiScale = await window.appAPI.getConfig('uiScale');
-    if (uiScale) {
-      document.documentElement.setAttribute('data-ui-scale', uiScale);
-    }
-    const theme = await window.appAPI.getConfig('theme');
-    if (theme) {
-      currentTheme.value = theme;
-      document.documentElement.setAttribute('data-theme', theme);
-      if (window.appAPI.updateTheme) {
-        window.appAPI.updateTheme(theme);
+  // 检查是否已配置（带 1500ms 超时保护，防止 SQLite 或 IPC 阻塞）
+  try {
+    const isComplete = await Promise.race([
+      window.appAPI.isSetupComplete(),
+      new Promise(resolve => setTimeout(() => resolve(cachedOnboarded), 1500))
+    ]);
+    if (DEBUG_ONBOARDING === 0) {
+      isSetupComplete.value = false;
+    } else {
+      isSetupComplete.value = Boolean(isComplete);
+      if (isComplete) {
+        localStorage.setItem('bob-onboarded', 'true');
       }
     }
-    const accentColor = await window.appAPI.getConfig('accentColor');
-    if (accentColor) {
-      localStorage.setItem('bob-accent', accentColor);
-      document.documentElement.style.setProperty('--user-accent', accentColor);
-      const hex = accentColor.replace('#', '');
-      const r = parseInt(hex.substring(0, 2), 16);
-      const g = parseInt(hex.substring(2, 4), 16);
-      const b = parseInt(hex.substring(4, 6), 16);
-      document.documentElement.style.setProperty('--user-accent-rgb', `${r}, ${g}, ${b}`);
-    }
-    // 恢复用户语言偏好
-    const savedLang = await window.appAPI.getConfig('language');
-    if (savedLang) locale.value = savedLang;
-
-    // Auto-Discovery: Trigger sync on startup if paired
-    const pairingPayload = await window.appAPI.getConfig('pairing_payload');
-    if (pairingPayload) {
-      console.log('[Sync] 检测到已配对设备，启动后台双向同步...');
-      const doSync = () => {
-        if (window.appAPI.triggerMobileSync) {
-          window.appAPI.triggerMobileSync(pairingPayload).then((res) => {
-            const outcome = handleStartupSyncOutcome(res, {
-              setLastSyncStatus: (val) => { lastSyncStatus.value = val; },
-              setLastSyncTime: (val) => { lastSyncTime.value = val; },
-            });
-            if (outcome.status === 'applied') {
-              console.log('[Sync] 后台同步已应用成功！');
-            } else if (outcome.status === 'pending_apply') {
-              console.log('[Sync] 后台同步已可靠入队，待目标设备应用');
-            } else {
-              console.warn('[Sync] 后台同步收到非预期/未知回执，判定失败并启动静默监听:', res);
-              window.appAPI.triggerMobileSync({ ...pairingPayload, listen_only: true }).catch(err => console.error(err));
-            }
-          }).catch(e => {
-            console.warn('[Sync] 后台同步失败 (对方可能处于离线状态)，启动静默UDP监听...', e);
-            lastSyncStatus.value = 'error';
-            localStorage.setItem('bob-last-sync-status', 'error');
-            window.appAPI.triggerMobileSync({ ...pairingPayload, listen_only: true }).catch(err => console.error(err));
-          });
-        }
-      };
-      
-      doSync();
-
-      // 全平台网络恢复监听
-      window.addEventListener('online', () => {
-        console.log('[Network] Online event detected, forcing Relay reconnect...');
-        if (window.appAPI?.forceRelayReconnect) {
-          window.appAPI.forceRelayReconnect().catch(err => console.warn('Force reconnect error:', err));
-        }
-      });
-
-      // 移动端锁屏唤醒监听 (从后台恢复)
-      document.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'visible') {
-          if (window.appAPI?.forceRelayReconnect) {
-            window.appAPI.forceRelayReconnect().catch(err => console.warn('Force reconnect error:', err));
-          }
-          const lastSync = parseInt(localStorage.getItem('bob-last-sync-time') || '0');
-          if (Date.now() - lastSync > 60000) { // 1分钟防抖
-            console.log('[Sync] 移动端恢复前台，主动触发同步...');
-            doSync();
-          }
-        }
-      });
-      
-      // Listen for Relay wakeup signal from PC
-      listen('sync:wakeup', async (event) => {
-        console.log('[Sync] 收到 PC 端唤醒信令，立即触发同步...', event);
-        // 动态更新已配对 PC 的最新候选局域网 IP（应对路由器 DHCP 重新分配 IP 场景）
-        const latestPayload = event.payload?.payload;
-        if (latestPayload?.local_ips && Array.isArray(latestPayload.local_ips) && latestPayload.local_ips.length > 0) {
-          try {
-            const currentConfig = await window.appAPI.getConfig('pairing_payload');
-            if (currentConfig) {
-              currentConfig.local_ips = latestPayload.local_ips;
-              if (latestPayload.port) currentConfig.port = latestPayload.port;
-              await window.appAPI.setConfig('pairing_payload', currentConfig);
-              console.log('[Sync] 动态刷新已配对 PC 的局域网 IP:', currentConfig.local_ips);
-            }
-          } catch (err) {
-            console.warn('Failed to update pairing payload local_ips:', err);
-          }
-        }
-        doSync();
-      });
-
-    } else {
-      // PC 端：网络恢复或上线时向所有已配对设备发送唤醒信令
-      const notifyPairedDevices = async () => {
-        try {
-          if (window.appAPI?.getConnectedDevices && window.appAPI?.triggerWakeupViaRelay) {
-            const devices = await window.appAPI.getConnectedDevices();
-            const myDevId = (await window.appAPI.getConfig?.('device_id')) || '';
-            if (devices && devices.length > 0) {
-              console.log(`[Sync] PC端向 ${devices.length} 个配对设备发送上线唤醒信令...`);
-              for (const dev of devices) {
-                if (dev.device_id && dev.device_id !== myDevId) {
-                  window.appAPI.triggerWakeupViaRelay(dev.device_id).catch(err => console.error('Wakeup error:', err));
-                }
-              }
-            }
-          }
-        } catch (err) {
-          console.warn('Failed to wake up devices:', err);
-        }
-      };
-
-      notifyPairedDevices();
-
-      window.addEventListener('online', () => {
-        console.log('[Network] PC online detected, reconnecting Relay and notifying peers...');
-        if (window.appAPI?.forceRelayReconnect) {
-          window.appAPI.forceRelayReconnect().catch(() => {});
-        }
-        setTimeout(notifyPairedDevices, 1500);
-      });
-    }
+  } catch (err) {
+    console.warn('[App] isSetupComplete probe fallback to cached:', err);
+    isSetupComplete.value = cachedOnboarded;
   }
-
-  unlistenBriefCalendar = window.appAPI.onCalendarUpdated?.(scheduleDailyBriefRefresh) || null;
-  unlistenBriefDream = window.appAPI.onDreamCompleted?.(scheduleDailyBriefRefresh) || null;
-  if (window.appAPI.listenEvent) {
-    unlistenBriefGoal = await window.appAPI.listenEvent('goal:runtime-state', scheduleDailyBriefRefresh);
-  }
-  window.addEventListener('sync:refresh-events', scheduleDailyBriefRefresh);
 
   // 本地存储同步主题，供 index.html 启动瞬间读取
   if (currentTheme.value) localStorage.setItem('bob-theme', currentTheme.value);
 
   // 显示并聚焦原生窗口，防止藏在后台
-  // 注意：不要使用 await，否则任何调用失败（比如窗口并未最小化而引发的异常）都会阻塞后续的开屏动画移除
   window.appAPI.unminimizeWindow().catch(() => {});
   window.appAPI.showWindow().catch(() => {});
   window.appAPI.focusWindow().catch(() => {});
 
-  // 启动画面淡出 — 原生 Splash 渐隐 1 秒
-  setTimeout(() => { 
+  // 启动画面淡出 — 原生 Splash 快速渐隐，绝不阻塞用户界面渲染
+  setTimeout(() => {
     showSplash.value = false;
     const splash = document.getElementById('native-splash');
     if (splash) {
+      splash.style.transition = 'opacity 0.4s ease';
       splash.style.opacity = '0';
-      setTimeout(() => splash.remove(), 1000); // 等待 CSS 1s transition 结束
+      setTimeout(() => splash.remove(), 400);
     }
-  }, 1000);
+  }, 300);
+
+  // ── 后台插件式服务（完全解耦，绝不阻塞第0帧渲染） ──
+  const runBackgroundInit = async () => {
+    try {
+      if (isSetupComplete.value) {
+        // 1. 异步加载会话与 Daily Brief
+        loadConversations().catch(err => console.warn('[App] loadConversations error:', err));
+        void dailyBrief.ensureLoaded();
+
+        // 2. 批量拉取配置 (getAllConfig)，单次 IPC 替代高延迟串行多次拉取
+        const allConfig = (await window.appAPI.getAllConfig().catch(() => ({}))) || {};
+        if (allConfig.model) currentModel.value = allConfig.model;
+        if (allConfig.sidebarWidth) sidebarWidth.value = allConfig.sidebarWidth;
+        if (allConfig.uiScale) {
+          document.documentElement.setAttribute('data-ui-scale', allConfig.uiScale);
+        }
+        if (allConfig.theme) {
+          currentTheme.value = allConfig.theme;
+          document.documentElement.setAttribute('data-theme', allConfig.theme);
+          localStorage.setItem('bob-theme', allConfig.theme);
+          if (window.appAPI.updateTheme) window.appAPI.updateTheme(allConfig.theme);
+        }
+        if (allConfig.accentColor) {
+          localStorage.setItem('bob-accent', allConfig.accentColor);
+          document.documentElement.style.setProperty('--user-accent', allConfig.accentColor);
+          const hex = allConfig.accentColor.replace('#', '');
+          const r = parseInt(hex.substring(0, 2), 16);
+          const g = parseInt(hex.substring(2, 4), 16);
+          const b = parseInt(hex.substring(4, 6), 16);
+          document.documentElement.style.setProperty('--user-accent-rgb', `${r}, ${g}, ${b}`);
+        }
+        if (allConfig.language) locale.value = allConfig.language;
+
+        // 3. 配对与同步机制
+        const pairingPayload = allConfig.pairing_payload;
+        if (pairingPayload) {
+          console.log('[Sync] 检测到已配对设备，启动后台双向同步...');
+          const doSync = () => {
+            if (window.appAPI.triggerMobileSync) {
+              window.appAPI.triggerMobileSync(pairingPayload).then((res) => {
+                const outcome = handleStartupSyncOutcome(res, {
+                  setLastSyncStatus: (val) => { lastSyncStatus.value = val; },
+                  setLastSyncTime: (val) => { lastSyncTime.value = val; },
+                });
+                if (outcome.status === 'applied') {
+                  console.log('[Sync] 后台同步已应用成功！');
+                } else if (outcome.status === 'pending_apply') {
+                  console.log('[Sync] 后台同步已可靠入队，待目标设备应用');
+                } else {
+                  console.warn('[Sync] 后台同步收到非预期/未知回执，判定失败并启动静默监听:', res);
+                  window.appAPI.triggerMobileSync({ ...pairingPayload, listen_only: true }).catch(err => console.error(err));
+                }
+              }).catch(e => {
+                console.warn('[Sync] 后台同步失败 (对方可能处于离线状态)，启动静默UDP监听...', e);
+                lastSyncStatus.value = 'error';
+                localStorage.setItem('bob-last-sync-status', 'error');
+                window.appAPI.triggerMobileSync({ ...pairingPayload, listen_only: true }).catch(err => console.error(err));
+              });
+            }
+          };
+
+          doSync();
+
+          // 全平台网络恢复监听
+          window.addEventListener('online', () => {
+            console.log('[Network] Online event detected, forcing Relay reconnect...');
+            if (window.appAPI?.forceRelayReconnect) {
+              window.appAPI.forceRelayReconnect().catch(err => console.warn('Force reconnect error:', err));
+            }
+          });
+
+          // 移动端锁屏唤醒监听 (从后台恢复)
+          document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible') {
+              if (window.appAPI?.forceRelayReconnect) {
+                window.appAPI.forceRelayReconnect().catch(err => console.warn('Force reconnect error:', err));
+              }
+              const lastSync = parseInt(localStorage.getItem('bob-last-sync-time') || '0');
+              if (Date.now() - lastSync > 60000) { // 1分钟防抖
+                console.log('[Sync] 移动端恢复前台，主动触发同步...');
+                doSync();
+              }
+            }
+          });
+
+          // Listen for Relay wakeup signal from PC
+          listen('sync:wakeup', async (event) => {
+            console.log('[Sync] 收到 PC 端唤醒信令，立即触发同步...', event);
+            // 动态更新已配对 PC 的最新候选局域网 IP（应对路由器 DHCP 重新分配 IP 场景）
+            const latestPayload = event.payload?.payload;
+            if (latestPayload?.local_ips && Array.isArray(latestPayload.local_ips) && latestPayload.local_ips.length > 0) {
+              try {
+                const currentConfig = await window.appAPI.getConfig('pairing_payload');
+                if (currentConfig) {
+                  currentConfig.local_ips = latestPayload.local_ips;
+                  if (latestPayload.port) currentConfig.port = latestPayload.port;
+                  await window.appAPI.setConfig('pairing_payload', currentConfig);
+                  console.log('[Sync] 动态刷新已配对 PC 的局域网 IP:', currentConfig.local_ips);
+                }
+              } catch (err) {
+                console.warn('Failed to update pairing payload local_ips:', err);
+              }
+            }
+            doSync();
+          });
+
+        } else {
+          // PC 端：网络恢复或上线时向所有已配对设备发送唤醒信令
+          const notifyPairedDevices = async () => {
+            try {
+              if (window.appAPI?.getConnectedDevices && window.appAPI?.triggerWakeupViaRelay) {
+                const devices = await window.appAPI.getConnectedDevices();
+                const myDevId = (await window.appAPI.getConfig?.('device_id')) || '';
+                if (devices && devices.length > 0) {
+                  console.log(`[Sync] PC端向 ${devices.length} 个配对设备发送上线唤醒信令...`);
+                  for (const dev of devices) {
+                    if (dev.device_id && dev.device_id !== myDevId) {
+                      window.appAPI.triggerWakeupViaRelay(dev.device_id).catch(err => console.error('Wakeup error:', err));
+                    }
+                  }
+                }
+              }
+            } catch (err) {
+              console.warn('Failed to wake up devices:', err);
+            }
+          };
+
+          notifyPairedDevices();
+
+          window.addEventListener('online', () => {
+            console.log('[Network] PC online detected, reconnecting Relay and notifying peers...');
+            if (window.appAPI?.forceRelayReconnect) {
+              window.appAPI.forceRelayReconnect().catch(() => {});
+            }
+            setTimeout(notifyPairedDevices, 1500);
+          });
+        }
+      }
+    } catch (e) {
+      console.warn('[App] runBackgroundInit encountered non-fatal error:', e);
+    }
+  };
+
+  runBackgroundInit();
+
+  unlistenBriefCalendar = window.appAPI.onCalendarUpdated?.(scheduleDailyBriefRefresh) || null;
+  unlistenBriefDream = window.appAPI.onDreamCompleted?.(scheduleDailyBriefRefresh) || null;
+  if (window.appAPI.listenEvent) {
+    window.appAPI.listenEvent('goal:runtime-state', scheduleDailyBriefRefresh).then(unsub => {
+      unlistenBriefGoal = unsub;
+    }).catch(err => console.warn('Failed to listen to goal:runtime-state', err));
+  }
+  window.addEventListener('sync:refresh-events', scheduleDailyBriefRefresh);
 
   // ── Outbox Reconciler 事件监听 (T-813) ─────────────
   if (window.appAPI.onConfigReconciled) {
@@ -986,12 +1011,14 @@ onMounted(async () => {
 
   // ── 远程消息通知：微信等通道产生新消息时刷新侧边栏 ──────
   if (window.appAPI.onRemoteNewMessage) {
-    unlistenRemoteMessage = await window.appAPI.onRemoteNewMessage((event) => {
+    window.appAPI.onRemoteNewMessage((event) => {
       const convId = event?.payload?.conversation_id || event?.conversation_id;
       console.log(`[Remote] 收到远程新消息通知, conv_id=${convId}`);
       // 刷新侧边栏对话列表（新对话出现 / 时间戳更新）
       loadConversations();
-    });
+    }).then(unsub => {
+      unlistenRemoteMessage = unsub;
+    }).catch(err => console.warn('[App] onRemoteNewMessage listener error:', err));
   }
 
   // T-1303: 全局监听 Cron 任务完成事件，更新导航栏红点
@@ -1171,6 +1198,7 @@ async function onSetupComplete(payload) {
 
   // 切换到聊天界面
   isSetupComplete.value = true;
+  localStorage.setItem('bob-onboarded', 'true');
   currentModel.value = await window.appAPI.getConfig('model') || '';
   await loadConversations();
 
