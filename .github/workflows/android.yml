@@ -32,20 +32,24 @@ jobs:
           distribution: 'zulu'
           java-version: '17'
 
-      - name: Setup Android SDK & NDK
+      - name: Setup Android SDK
         uses: android-actions/setup-android@v4
         with:
-          packages: |
-            platform-tools
-            ndk;27.0.12077973
+          packages: 'platform-tools'
 
-      - name: Verify NDK Installation
+      - name: Install NDK
         run: |
+          for i in 1 2 3; do
+            echo "Attempt $i to install NDK 27.0.12077973..."
+            yes | sdkmanager --install "ndk;27.0.12077973" && break || sleep 5
+          done
           if [ ! -d "$ANDROID_HOME/ndk/27.0.12077973" ]; then
-            echo "NDK 27 not found in expected path, installing via yes | sdkmanager..."
-            yes | sdkmanager "ndk;27.0.12077973"
+            echo "NDK 27 not found after sdkmanager, checking preinstalled NDKs..."
+            ls -la "$ANDROID_HOME/ndk" || true
+            exit 1
           fi
-          echo "NDK 27 successfully installed at $ANDROID_HOME/ndk/27.0.12077973"
+          echo "NDK 27 installed successfully:"
+          ls -la "$ANDROID_HOME/ndk/27.0.12077973"
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
