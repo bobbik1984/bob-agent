@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - diagnostics/android-startup-20261001
+      - mobile-pc-recovery-0923
   workflow_dispatch:
 
 permissions:
