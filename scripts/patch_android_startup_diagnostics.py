@@ -18,6 +18,19 @@ METHOD = """    override fun onCreate(savedInstanceState: android.os.Bundle?) {
 def patch_main_activity(source: str) -> str:
     if MARKER in source:
         return source
+    existing_on_create = re.search(
+        r"override\s+fun\s+onCreate\s*\([^)]*\)\s*\{", source
+    )
+    if existing_on_create is not None:
+        diagnostic_lines = (
+            "\n        android.webkit.WebView.setWebContentsDebuggingEnabled(true)"
+            '\n        android.util.Log.i("BOB_BOOT_DIAG", "native-activity-oncreate")'
+        )
+        return (
+            source[: existing_on_create.end()]
+            + diagnostic_lines
+            + source[existing_on_create.end() :]
+        )
     pattern = r"class\s+MainActivity\s*:\s*TauriActivity\(\)\s*(\{)?"
     match = re.search(pattern, source)
     if match is None:
