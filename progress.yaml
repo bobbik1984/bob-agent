@@ -1,6 +1,6 @@
 project:
   name: bob-agent
-  version: 0.9.7
+  version: 0.9.24
   status: active
   tech:
   - Tauri
@@ -8,9 +8,27 @@ project:
   - Vue 3
   - Desktop
   - Android
-  current_task: 'BOB-AGENT-TRACK-A-A3-PASSED-A4-PREPARING (A3_LOCAL_REVIEW_PASSED / A4_DEVICE_TESTS_UNEXECUTED_LOCKED)'
-  development_plan: docs/superpowers/plans/2026-09-22-track-a-security-and-client.md
+  current_task: 'MOBILE-PC-REBUILD-S1 (0.9.24 双端候选代码与本地测试就绪；云端双构建和双端安装验收未完成)'
+  development_plan: docs/superpowers/plans/2026-10-01-mobile-pc-startup-baseline-plan.md
 phases:
+- name: 手机→PC 稳定重建（独立施工线，基于 v0.9.15）
+  tasks:
+  - text: S0 保留历史诊断分支、核验 v0.9.15 基线与已装 APK
+    status: done
+  - text: S1 0.9.22 同包覆盖安装后的 Pixel 8 三次启动与旧会话可见性
+    status: done
+  - text: 双端统一版本源、安装器 0.9.22 元数据对齐与候选 CI 发布隔离（本地测试通过）
+    status: done
+  - text: 0.9.24 同提交 PC/Android 云端候选构建与产物核验
+    status: active
+  - text: 双端真机验收后的版本化 Release 与官网晋级流程
+    status: todo
+  - text: S1 未配对、无网、PC 离线与完整首屏失败状态矩阵
+    status: todo
+  - text: S2 按需求重新接入可信配对与手机到 PC 的只读委派
+    status: todo
+  - text: S3 受控修改、审批、取消及断线恢复真机闭环
+    status: todo
 - name: V0.5 知识图谱 Source-Hub 重构
   tasks:
   - text: 数据库 Schema 升级，新增 source_batches
@@ -79,14 +97,14 @@ phases:
     status: done
   - text: 阶段四：接入统一工作记录 (Work Object / Journal / Evidence)
     status: done
-  - text: A1 / P6-H 恢复、审批与取消闭环加固（已通过独立复核：A1_RECOVERY_STATE_MACHINE_ACCEPTED / P6_H_GATE_PASSED；53 项同步恢复测试全绿）
-    status: done
-  - text: A2 / SEC-01 设备发现与信任分离、持钥认证、防重放及撤销 (R16 本地自复核与 sha2 依赖授权完成；Rust 全目标库测试 308 项、实际 Relay 1 项、前端 53 项通过；本地节点通过，真机验收归 A4，公网 Relay 未测)
-    status: done
-  - text: A3 / SEC-02 同步与远程执行加密边界验收（审计LAN/Relay/RPC/Web Drop边界；LAN REST补齐信封，WS绑定主体，LAN/Relay推送重构为确认回执才删outbox，推送失败阻断成功并显式报告“部分同步失败”，澄清Relay非E2EE，测试校准为发送端持久化状态机）
-    status: done
-  - text: A3 / SEC-03 同步载荷与日志凭据泄漏防护（严格正向白名单过滤未知字段与嵌套凭据，非对象配置Fail-Closed阻断自愈，统一ALLOWED_REMOTE_PUSH_OPS为set_config消除执行器割裂，接收端无法识别合法JSON漏洞Fail-Closed阻断，提交回执升级为强类型契约严格区分applied与pending_apply，状态查询失败Fail-Closed降级为pending_apply，缺失stage回执强验拒斥，幂等更新防吞错，Relay生产接收端真落盘驱动与回执透传，穿透真实生产分发入口回归，ActiveSyncOutcome状态机收口消除虚假完成诊断，配对流与首次同步严格解耦防止失败误报，迟到事件单向推进防护直连生产applyStepTransition并测试，本地导入历史真实化，穿透测试切入真实生产函数，App.vue启动同步仅明确applied标记成功、未知回执报错且阻断时间更新，修复Vitest沙箱缓存只读退出码1，全套自动化测试全绿；A3 本地复核通过，A4 真机验收尚未执行）
-    status: done
+  - text: A1 / P6-H 后续线路的恢复、审批与取消加固（本基线未继承后续实现，须按 S3 重新评估）
+    status: todo
+  - text: A2 / SEC-01 后续线路的持钥建信、防重放与撤销（本基线未继承后续实现，须按 S2 重新评估）
+    status: todo
+  - text: A3 / SEC-02 后续线路的传输边界（本基线未继承后续实现，须按 S2/S3 重新评估）
+    status: todo
+  - text: A3 / SEC-03 后续线路的同步脱敏与回执语义（本基线未继承后续实现，须按 S2/S3 重新评估）
+    status: todo
   - text: A4 / P6-DEVICE 固定双端版本的真实手机—PC安全与恢复验收（尚未执行，保持 LOCKED）
     status: todo
   - text: A5 可选 X1T 客户端接入（A4与B线接口/成果闭环通过后；复用而非重建适配器）

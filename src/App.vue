@@ -381,6 +381,22 @@ import { useDailyBrief } from '@/composables/useDailyBrief.js';
 import { handleStartupSyncOutcome } from '@/sync/pairing-flow.js';
 import { createLayoutState } from '@/layout/layout-mode.js';
 import { DEFAULT_WORK_VIEW, WORK_VIEW_ITEMS } from '@/work/work-view-navigation.js';
+import { normalizeAccentColor } from '@/constants/theme.js';
+
+function restoreAccentColor(value) {
+  const color = normalizeAccentColor(value);
+  if (!color) {
+    localStorage.removeItem('bob-accent');
+    document.documentElement.style.removeProperty('--user-accent');
+    document.documentElement.style.removeProperty('--user-accent-rgb');
+    return;
+  }
+  localStorage.setItem('bob-accent', color);
+  document.documentElement.style.setProperty('--user-accent', color);
+  const hex = color.slice(1);
+  const rgb = [0, 2, 4].map(offset => parseInt(hex.slice(offset, offset + 2), 16));
+  document.documentElement.style.setProperty('--user-accent-rgb', rgb.join(', '));
+}
 
 // Tauri Window API (用于自定义窗口按钮)
 function minimizeWindow() { window.appAPI.minimizeWindow(); }
@@ -820,15 +836,7 @@ onMounted(async () => {
       }
     }
     const accentColor = await window.appAPI.getConfig('accentColor');
-    if (accentColor) {
-      localStorage.setItem('bob-accent', accentColor);
-      document.documentElement.style.setProperty('--user-accent', accentColor);
-      const hex = accentColor.replace('#', '');
-      const r = parseInt(hex.substring(0, 2), 16);
-      const g = parseInt(hex.substring(2, 4), 16);
-      const b = parseInt(hex.substring(4, 6), 16);
-      document.documentElement.style.setProperty('--user-accent-rgb', `${r}, ${g}, ${b}`);
-    }
+    restoreAccentColor(accentColor);
     // 恢复用户语言偏好
     const savedLang = await window.appAPI.getConfig('language');
     if (savedLang) locale.value = savedLang;
@@ -1159,15 +1167,7 @@ async function onSetupComplete(payload) {
     }
   }
   const accentColor = payload?.accentColor || await window.appAPI.getConfig('accentColor');
-  if (accentColor) {
-    localStorage.setItem('bob-accent', accentColor);
-    document.documentElement.style.setProperty('--user-accent', accentColor);
-    const hex = accentColor.replace('#', '');
-    const r = parseInt(hex.substring(0, 2), 16);
-    const g = parseInt(hex.substring(2, 4), 16);
-    const b = parseInt(hex.substring(4, 6), 16);
-    document.documentElement.style.setProperty('--user-accent-rgb', `${r}, ${g}, ${b}`);
-  }
+  restoreAccentColor(accentColor);
 
   // 切换到聊天界面
   isSetupComplete.value = true;

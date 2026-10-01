@@ -571,6 +571,7 @@
     "status_pending": "Pending apply",
     "status_unknown": "Unknown",
     "pairing_unbind_confirm": "Are you sure you want to unbind device {name} ({id})?",
+    "pairing_unbind_failed": "Could not complete unbinding: {reason}",
     "relay_infra_connected": "Relay infrastructure connected",
     "relay_infra_connecting": "Connecting to Relay...",
     "relay_infra_disconnected": "Relay disconnected",

@@ -124,7 +124,7 @@ import { ref, computed, watch, onMounted, onUnmounted, inject } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { Moon, Sun, ChevronLeft, ChevronRight, Loader2, Rocket, Check, Smartphone, QrCode } from 'lucide-vue-next';
 import CustomSelect from './CustomSelect.vue';
-import { ACCENT_COLORS } from '@/constants/theme.js';
+import { ACCENT_COLORS, BOB_BRAND_BLUE } from '@/constants/theme.js';
 
 const { locale, t: $t } = useI18n();
 const isMobile = inject('isMobile', false);
@@ -156,7 +156,7 @@ let pollTimer = null;
 const tempConfig = ref({
   language: locale.value,
   theme: 'dark',
-  accentColor: '#2776bb',
+  accentColor: BOB_BRAND_BLUE,
   workspaceDir: '',
   provider: 'deepseek',
   apiKey: ''

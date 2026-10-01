@@ -571,6 +571,7 @@
     "status_pending": "待应用",
     "status_unknown": "未知",
     "pairing_unbind_confirm": "确定要解绑设备 {name} ({id}) 吗？",
+    "pairing_unbind_failed": "解绑未完成：{reason}",
     "relay_infra_connected": "Relay 基建已连接",
     "relay_infra_connecting": "Relay 连接中...",
     "relay_infra_disconnected": "Relay 未连接",

@@ -3,8 +3,15 @@
  * SetupWizard.vue 和 SettingsView.vue 都从这里读取。
  */
 
+export const BOB_BRAND_BLUE = '#2776BB'; // public/bob_logo.svg 的原始填充色
+
+export function normalizeAccentColor(value) {
+  if (typeof value !== 'string' || !/^#[\da-f]{6}$/i.test(value)) return null;
+  return value.toUpperCase();
+}
+
 export const ACCENT_COLORS = [
-  { name: 'MallOS 蓝', nameKey: 'settings.color_mallos_blue', value: '#2776bb' },
+  { name: 'MallOS 蓝', nameKey: 'settings.color_mallos_blue', value: BOB_BRAND_BLUE },
   { name: '湖蓝', nameKey: 'settings.color_lake_blue', value: '#57B5C3' },
   { name: '活力橙', nameKey: 'settings.color_vivid_orange', value: '#FD6331' },
   { name: '朱红', nameKey: 'settings.color_vermilion', value: '#E93C35' },

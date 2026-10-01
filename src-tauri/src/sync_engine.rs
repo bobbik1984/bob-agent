@@ -1837,6 +1837,14 @@ impl DeviceRegistry {
         }
     }
 
+    fn save_checked(&self) -> Result<(), String> {
+        let Some(path) = &self.storage_path else { return Ok(()); };
+        let devices = self.devices.read().map_err(|e| format!("读取设备名册失败: {}", e))?;
+        let json = serde_json::to_string_pretty(&*devices)
+            .map_err(|e| format!("序列化设备名册失败: {}", e))?;
+        std::fs::write(path, json).map_err(|e| format!("保存设备名册失败: {}", e))
+    }
+
     pub fn update_device(&self, device: ConnectedDevice) {
         {
             let mut devices = self.devices.write().unwrap();
@@ -1950,42 +1958,41 @@ pub async fn get_connected_devices(app: AppHandle) -> Result<Vec<ConnectedDevice
 #[command]
 pub async fn disconnect_device(app: AppHandle, device_id: String) -> Result<(), String> {
     let registry = app.state::<Arc<DeviceRegistry>>();
-    {
-        let mut devices = registry.devices.write().unwrap();
-        devices.remove(&device_id);
-    }
-    registry.save();
-
-    if let Ok(mut config) = crate::read_config_checked() {
-        if let Some(pp) = config.get("pairing_payload").and_then(|v| v.as_object()) {
-            if pp.get("device_id").and_then(|v| v.as_str()) == Some(&device_id) {
-                if let Some(obj) = config.as_object_mut() {
-                    obj.remove("pairing_payload");
-                    if let Err(e) = crate::write_config_checked(&config) {
-                        log::error!("[Sync Engine] 保存解绑后的配置失败: {}", e);
-                    }
-                    log::info!("[Sync Engine] Removed pairing_payload for disconnected device {}", device_id);
-                }
-            }
-        }
-    }
-
-    // 在数据库中将该设备设为已撤销 (revoked) 并失效关联会话
-    if let Some(db_state) = app.try_state::<crate::db::DbState>() {
-        if let Ok(conn) = db_state.0.lock() {
-            let now = crate::now_ms();
-            let _ = conn.execute(
-                "UPDATE trusted_devices SET status = 'revoked', revoked_at = ?1, revocation_reason = 'user_disconnect' WHERE device_id = ?2",
-                rusqlite::params![now, device_id],
-            );
-            let _ = conn.execute(
-                "UPDATE authenticated_sessions SET is_active = 0 WHERE subject_device_id = ?1 OR issuer_device_id = ?1",
-                rusqlite::params![device_id],
-            );
-        }
-    }
+    let db_state = app.try_state::<crate::db::DbState>()
+        .ok_or("设备数据库不可用，无法确认解绑".to_string())?;
+    let mut conn = db_state.0.lock().map_err(|e| format!("锁定设备数据库失败: {}", e))?;
+    let mut config = crate::read_config_checked()?;
+    disconnect_device_core(&registry, &mut conn, &mut config, &device_id, crate::write_config_checked)?;
 
     let _ = app.emit("sync:device_disconnected", device_id);
+    Ok(())
+}
+
+fn disconnect_device_core(
+    registry: &DeviceRegistry,
+    conn: &mut rusqlite::Connection,
+    config: &mut serde_json::Value,
+    device_id: &str,
+    persist_config: impl FnOnce(&serde_json::Value) -> Result<(), String>,
+) -> Result<(), String> {
+    if device_id.trim().is_empty() {
+        return Err("设备 ID 为空，拒绝解绑".to_string());
+    }
+    // 先撤销信任。后续持久化失败时，也不会留下仍可调用的旧会话。
+    crate::device_trust::revoke_trusted_device(conn, device_id, Some("user_disconnect"), crate::now_ms())?;
+
+    let is_current_pairing = config.get("pairing_payload")
+        .and_then(|value| value.get("device_id"))
+        .and_then(|value| value.as_str()) == Some(device_id);
+    if is_current_pairing {
+        config.as_object_mut().ok_or("配置不是对象，拒绝解绑".to_string())?
+            .remove("pairing_payload");
+        persist_config(config)?;
+    }
+
+    registry.devices.write().map_err(|e| format!("锁定设备名册失败: {}", e))?
+        .remove(device_id);
+    registry.save_checked()?;
     Ok(())
 }
 
@@ -11882,6 +11889,64 @@ mod tests {
         let devices = get_connected_devices_core(Some(registry.clone()), Some(&conn));
         assert!(!devices.iter().any(|d| d.device_id == "revoked-pc-old"), "revoked 设备必须被过滤掉");
         assert!(devices.iter().any(|d| d.device_id == "active-pc-1"), "active 设备必须保留");
+    }
+
+    #[test]
+    fn test_disconnect_device_core_revokes_session_and_removes_active_pairing() {
+        let registry = DeviceRegistry::default();
+        registry.update_device(ConnectedDevice {
+            device_id: "pc-to-unbind".to_string(), platform: "windows".to_string(),
+            ip_address: "relay".to_string(), last_seen: crate::now_ms(),
+            device_name: None, is_trusted: true, status: Some("trusted".to_string()), last_transport: None,
+        });
+        let mut conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::device_trust::init_device_trust_tables(&conn).unwrap();
+        let now = crate::now_ms();
+        conn.execute(
+            "INSERT INTO trusted_devices (device_id, public_key, device_name, platform, paired_at, last_authenticated_at, status)
+             VALUES ('pc-to-unbind', 'pk', 'PC', 'windows', ?1, ?1, 'trusted')", [now],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO authenticated_sessions (session_id, subject_device_id, issuer_device_id, created_at, expires_at, last_activity_at, is_active)
+             VALUES ('session-to-unbind', 'pc-to-unbind', 'phone', ?1, ?1, ?1, 1)", [now],
+        ).unwrap();
+        let mut config = serde_json::json!({"pairing_payload": {"device_id": "pc-to-unbind"}});
+        disconnect_device_core(&registry, &mut conn, &mut config, "pc-to-unbind", |_| Ok(())).unwrap();
+        assert!(config.get("pairing_payload").is_none());
+        assert!(registry.get_all().is_empty());
+        let status: String = conn.query_row(
+            "SELECT status FROM trusted_devices WHERE device_id = 'pc-to-unbind'", [], |row| row.get(0),
+        ).unwrap();
+        assert_eq!(status, "revoked");
+        let active: i64 = conn.query_row(
+            "SELECT is_active FROM authenticated_sessions WHERE session_id = 'session-to-unbind'", [], |row| row.get(0),
+        ).unwrap();
+        assert_eq!(active, 0);
+    }
+
+    #[test]
+    fn test_disconnect_device_core_config_failure_never_reports_success() {
+        let registry = DeviceRegistry::default();
+        registry.update_device(ConnectedDevice {
+            device_id: "pc-to-unbind".to_string(), platform: "windows".to_string(),
+            ip_address: "relay".to_string(), last_seen: crate::now_ms(),
+            device_name: None, is_trusted: true, status: Some("trusted".to_string()), last_transport: None,
+        });
+        let mut conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::device_trust::init_device_trust_tables(&conn).unwrap();
+        let now = crate::now_ms();
+        conn.execute(
+            "INSERT INTO trusted_devices (device_id, public_key, device_name, platform, paired_at, last_authenticated_at, status)
+             VALUES ('pc-to-unbind', 'pk', 'PC', 'windows', ?1, ?1, 'trusted')", [now],
+        ).unwrap();
+        let mut config = serde_json::json!({"pairing_payload": {"device_id": "pc-to-unbind"}});
+        let error = disconnect_device_core(&registry, &mut conn, &mut config, "pc-to-unbind", |_| Err("disk full".to_string())).unwrap_err();
+        assert!(error.contains("disk full"));
+        assert_eq!(registry.get_all().len(), 1, "保存失败时不得报告名册已清理");
+        let status: String = conn.query_row(
+            "SELECT status FROM trusted_devices WHERE device_id = 'pc-to-unbind'", [], |row| row.get(0),
+        ).unwrap();
+        assert_eq!(status, "revoked", "失败时应优先失效旧信任");
     }
 
     #[test]

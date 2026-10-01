@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build-android:
@@ -20,6 +20,9 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
+
+      - name: Verify one version for both platforms
+        run: node scripts/version-contract.mjs candidate
 
       - name: Setup Java
         uses: actions/setup-java@v4
@@ -170,9 +173,6 @@ jobs:
           $APKSIGNER verify --print-certs "$SIGNED_APK" | grep 'SHA-256 digest'
           sha256sum "$SIGNED_APK"
 
-          # Provide fixed name copy for persistent direct download
-          cp "$SIGNED_APK" bob-mobile-latest.apk
-
           # Clean up decrypted keystore
           rm -f /tmp/bobbik-release.p12
 
@@ -183,29 +183,6 @@ jobs:
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: bob-mobile-apk
-          path: |
-            src-tauri/gen/android/app/build/outputs/apk/**/*.apk
-            bob-*-signed.apk
-            bob-mobile-latest.apk
-
-      - name: Publish Signed APK to GitHub Releases
-        if: steps.sign_step.outputs.signed == 'true' && github.ref == 'refs/heads/main'
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: latest-mobile
-          name: "Bob Mobile Latest (v${{ env.APP_VERSION }})"
-          body: |
-            ### 📱 Bob Mobile Android 自动构建安装包
-            - **应用版本**：`v${{ env.APP_VERSION }}`
-            - **代码提交**：`${{ github.sha }}`
-            - **打包时间**：`${{ github.event.head_commit.timestamp }}`
-
-            > 💡 **直接安装**：此 APK 已通过官方证书完成签名。Android 手机端直接下载下方 `bob-v${{ env.APP_VERSION }}-signed.apk` 即可直接点击覆盖安装升级，无需在电脑端解压或二次签名。
-          draft: false
-          prerelease: true
-          files: |
-            bob-*-signed.apk
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          name: bob-mobile-apk-v${{ env.APP_VERSION }}-${{ github.sha }}
+          path: bob-v${{ env.APP_VERSION }}-signed.apk
 

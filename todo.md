@@ -1,6 +1,19 @@
 # Bob 当前开发清单
 
-> 双线计划（2026-09-22）：[A 线独立开发步骤](docs/superpowers/plans/2026-09-22-track-a-security-and-client.md)。A1、A2 已通过；A3 本地复核通过（Round 9：启动自动同步仅限 applied 宣称成功、未知回执报错且不更新时间、迟到事件防御直连生产 applyStepTransition 状态机并测试、Vitest 沙箱 Exit Code 0 保证；全套测试全绿）；A4 真机验收尚未执行（需用户协同参与设备操作，目前保持 LOCKED；不宣称公网 Relay 或物理手机已通过）；A5 X1T 客户端为可选后续，不阻塞 Online B 线。
+> 当前工作树是从 v0.9.15 建立的 `mobile-pc-rebuild` 独立施工线，不包含旧 A1/A2/A3 后续版本的全部代码。下面原双线勾选和测试数是历史线路记录，**不能当作本施工线已具备或已验收的能力**；当前状态以 [稳定重建计划](docs/superpowers/plans/2026-10-01-mobile-pc-startup-baseline-plan.md)、[真机启动证据](docs/evidence/track-a/S1-inplace-upgrade-preflight.md) 与本分支 `progress.yaml` 为准。
+
+## 当前施工：手机→PC 稳定重建
+
+- [x] 以 v0.9.15 为代码基线建立独立施工线；保留旧诊断线与手机原数据。
+- [x] 0.9.22 候选签名包在 Pixel 8 同包名保留数据覆盖安装；三次启动进入实际对话界面，旧会话可见。不据此断定旧卡屏的唯一根因。
+- [x] 统一主应用与 PC 安装器的 0.9.22 版本元数据，并为双端候选 CI 加只读版本门禁及 Artifact-only 发布隔离；本地验证通过，尚未执行双端云端构建。[证据](docs/evidence/track-a/S1-dual-platform-version-contract.md)
+- [ ] 完成 S1 未配对、无网、PC 离线、错误配置与失败晚到事件的启动矩阵；高风险工具监听也需实机验证。
+- [/] 0.9.24 已完成双端版本同步与本地测试；待同一提交的 PC 安装包、签名 APK、SHA 与签名核验。用户已授权创建候选预发布；双端安装验收前不更新官网稳定入口。
+- [/] 手机解绑后移除撤销入口、对话标题居中与默认 Logo 品牌蓝：代码及自动化测试通过，待新候选包实机核对。
+- [ ] 按已确认的用户流程重新接入可信设备配对与手机→PC 只读委派；不整批拣选旧 A2/A3 提交。
+- [ ] 只读委派通过后，再接入受控修改、审批、停止与断线恢复，最后做完整双端真机验收。
+
+> 历史双线计划（2026-09-22）：[A 线独立开发步骤](docs/superpowers/plans/2026-09-22-track-a-security-and-client.md)。以下内容保留作旧线路参考，不作为当前重建分支的完成状态。
 
 > 当前发布线：v0.9.6
 > 产品方向：`docs/PRODUCT_VISION.md`

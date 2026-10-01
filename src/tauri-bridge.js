@@ -1,5 +1,6 @@
 import { useDialog } from '@/composables/useDialog.js';
 import { registerToolConfirmListener } from './startup/deferred-tool-confirm.js';
+import { BOB_BRAND_BLUE } from './constants/theme.js';
 const { showConfirm, showAlert, showPrompt } = useDialog();
 // ═══════════════════════════════════════════════════════════
 // Bob-Agent Tauri Bridge — 完整适配器层
@@ -64,7 +65,7 @@ if (IS_TAURI) {
 
   const MOCK_CONFIG = {
     theme: 'dark',
-    accentColor: '#2776BB',
+    accentColor: BOB_BRAND_BLUE,
     uiScale: '100',
     locale: 'zh-CN',
     offlineModelPath: '',

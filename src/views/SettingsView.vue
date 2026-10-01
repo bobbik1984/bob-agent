@@ -48,6 +48,7 @@ import SettingsWorkspace from './settings/SettingsWorkspace.vue';
 import SettingsAppearance from './settings/SettingsAppearance.vue';
 import SettingsAbout from './settings/SettingsAbout.vue';
 import SettingsDailyRoutine from './settings/SettingsDailyRoutine.vue';
+import { BOB_BRAND_BLUE } from '@/constants/theme.js';
 
 const props = defineProps({
   activePanel: { type: String, default: 'model' }
@@ -59,7 +60,7 @@ const config = reactive({
   offlineModelPath: '',
   theme: 'dark',
   uiScale: '100',
-  accentColor: '#2776BB',
+  accentColor: BOB_BRAND_BLUE,
   weatherCity: '',
 });
 
