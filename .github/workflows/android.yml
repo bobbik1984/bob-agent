@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - diagnostics/android-startup-20261001
   workflow_dispatch:
 
 permissions:
@@ -61,12 +62,12 @@ jobs:
 
       - name: Initialize Android Project & Inject Permissions
         run: |
-          if [ ! -d "src-tauri/gen/android" ]; then
+          MANIFEST="src-tauri/gen/android/app/src/main/AndroidManifest.xml"
+          if [ ! -f "$MANIFEST" ]; then
             echo "Android project not found. Initializing..."
             npx tauri android init --ci
             
             echo "Injecting native permissions and portrait lock..."
-            MANIFEST="src-tauri/gen/android/app/src/main/AndroidManifest.xml"
             sed -i '/<\/manifest>/i \
             <uses-permission android:name="android.permission.INTERNET"/>\n\
             <uses-permission android:name="android.permission.RECORD_AUDIO"/>\n\
@@ -91,6 +92,10 @@ jobs:
           else
             echo "Android project already initialized."
           fi
+
+      - name: Enable startup diagnostics in generated Android activity
+        if: github.ref == 'refs/heads/diagnostics/android-startup-20261001'
+        run: python scripts/patch_android_startup_diagnostics.py
 
       - name: Workaround NDK libgcc removal
         run: |
@@ -129,9 +134,8 @@ jobs:
           KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
         run: |
           if [ -z "$KEYSTORE_BASE64" ]; then
-            echo "Skipping signing: ANDROID_KEYSTORE_BASE64 secret is not configured."
-            echo "signed=false" >> $GITHUB_OUTPUT
-            exit 0
+            echo "Release keystore secret is required for safe in-place diagnostic installation."
+            exit 1
           fi
 
           echo "Decoding release keystore..."
@@ -177,6 +181,10 @@ jobs:
           echo "Verifying APK signature..."
           $APKSIGNER verify --verbose "$SIGNED_APK"
 
+          echo "Signer certificate digest:"
+          $APKSIGNER verify --print-certs "$SIGNED_APK" | grep 'SHA-256 digest'
+          sha256sum "$SIGNED_APK"
+
           # Provide fixed name copy for persistent direct download
           cp "$SIGNED_APK" bob-mobile-latest.apk
 
@@ -190,14 +198,14 @@ jobs:
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: bob-mobile-apk
+          name: bob-mobile-startup-diagnostic
           path: |
             src-tauri/gen/android/app/build/outputs/apk/**/*.apk
             bob-*-signed.apk
             bob-mobile-latest.apk
 
       - name: Publish Signed APK to GitHub Releases
-        if: steps.sign_step.outputs.signed == 'true'
+        if: steps.sign_step.outputs.signed == 'true' && github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: latest-mobile

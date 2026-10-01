@@ -1438,6 +1438,8 @@ fn import_skills_zip(path: String) -> Result<bool, String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg(target_os = "android")]
+    eprintln!("[BOB_BOOT_DIAG] rust-run-begin");
     #[cfg(feature = "fault-injection")]
     {
         if let Err(e) = diagnostic_profile::ensure_diagnostic_profile_initialized() {
@@ -1448,6 +1450,8 @@ pub fn run() {
     }
     let _ = rustls::crypto::ring::default_provider().install_default();
     let db = db::init_db(&get_data_dir());
+    #[cfg(target_os = "android")]
+    eprintln!("[BOB_BOOT_DIAG] rust-db-init-complete");
     let wechat_state = std::sync::Arc::new(wechat::WechatState::new());
 
     let browser_state = std::sync::Arc::new(browser::BrowserState::new());
@@ -1832,6 +1836,8 @@ pub fn run() {
             _ => {}
         })
         .setup(|app| {
+            #[cfg(target_os = "android")]
+            eprintln!("[BOB_BOOT_DIAG] rust-setup-begin");
             use tauri::Manager;
 
             // 解决移动端沙盒路径注入 (零 IPC，直接赋权原生安全路径)
@@ -2083,6 +2089,8 @@ pub fn run() {
                     .build(app)?;
             }
 
+            #[cfg(target_os = "android")]
+            eprintln!("[BOB_BOOT_DIAG] rust-setup-complete");
             Ok(())
         })
         .run(tauri::generate_context!())

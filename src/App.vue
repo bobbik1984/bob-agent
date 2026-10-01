@@ -699,6 +699,7 @@ function handleBackButton() {
 }
 
 onMounted(async () => {
+  window.__bobBootDiag?.('app-onmounted-begin');
   // 兜底：无论初始化是否异常，最多 1s 后强制淡出开屏动画
   setTimeout(() => {
     const splash = document.getElementById('native-splash');
@@ -801,6 +802,7 @@ onMounted(async () => {
 
   // 检查是否已配置（带 1500ms 超时保护，防止 SQLite 或 IPC 阻塞）
   try {
+    window.__bobBootDiag?.('setup-probe-begin');
     const isComplete = await Promise.race([
       window.appAPI.isSetupComplete(),
       new Promise(resolve => setTimeout(() => resolve(cachedOnboarded), 1500))
@@ -817,6 +819,7 @@ onMounted(async () => {
     console.warn('[App] isSetupComplete probe fallback to cached:', err);
     isSetupComplete.value = cachedOnboarded;
   }
+  window.__bobBootDiag?.('setup-probe-complete');
 
   // 本地存储同步主题，供 index.html 启动瞬间读取
   if (currentTheme.value) localStorage.setItem('bob-theme', currentTheme.value);
@@ -828,6 +831,7 @@ onMounted(async () => {
 
   // 启动画面淡出 — 原生 Splash 快速渐隐，绝不阻塞用户界面渲染
   setTimeout(() => {
+    window.__bobBootDiag?.('app-splash-remove-scheduled');
     showSplash.value = false;
     const splash = document.getElementById('native-splash');
     if (splash) {

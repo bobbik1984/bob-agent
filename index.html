@@ -96,15 +96,21 @@
   <div id="app"></div>
     <script>
     (function() {
+      window.__bobBootDiag = function(stage) {
+        // Diagnostic branch only: fixed stage identifiers, never user content.
+        console.info('[BOB_BOOT_DIAG] ' + stage);
+      };
+      window.__bobBootDiag('html-inline-start');
       window.addEventListener('error', function(e) {
-        console.error('[index.html error]', e.error || e.message);
+        window.__bobBootDiag('window-error:' + ((e.error && e.error.name) || 'unknown'));
       });
       window.addEventListener('unhandledrejection', function(e) {
-        console.warn('[index.html unhandledrejection]', e.reason);
+        window.__bobBootDiag('unhandled-rejection:' + ((e.reason && e.reason.name) || 'unknown'));
       });
       // 🛡️ 原生保底启动防护：无论 Vue 是否挂载成功，最多 2.5 秒强制淡出并彻底移除 native-splash
       setTimeout(function() {
         var splash = document.getElementById('native-splash');
+        window.__bobBootDiag('html-splash-timeout:' + (splash ? 'present' : 'gone'));
         if (splash) {
           splash.style.transition = 'opacity 0.5s ease';
           splash.style.opacity = '0';
@@ -113,8 +119,11 @@
           }, 500);
         }
       }, 2500);
+      setTimeout(function() {
+        window.__bobBootDiag('html-8s-check:app-children=' + document.getElementById('app').childElementCount + ':splash=' + !!document.getElementById('native-splash'));
+      }, 8000);
     })();
   </script>
-  <script type="module" src="/src/main.js"></script>
+  <script type="module" src="/src/diagnostic-bootstrap.js"></script>
 </body>
 </html>
