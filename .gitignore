@@ -100,6 +100,9 @@ implementation_plan.md
 !/docs/superpowers/plans/
 /docs/superpowers/plans/*
 !/docs/superpowers/plans/2026-09-22-track-a-security-and-client.md
+!/docs/superpowers/specs/
+/docs/superpowers/specs/*
+!/docs/superpowers/specs/2026-10-01-android-startup-diagnostic-design.md
 /website/
 /references/
 /resources/
