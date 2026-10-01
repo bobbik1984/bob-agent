@@ -1,4 +1,5 @@
 import { useDialog } from '@/composables/useDialog.js';
+import { registerToolConfirmListener } from './startup/deferred-tool-confirm.js';
 const { showConfirm, showAlert, showPrompt } = useDialog();
 // ═══════════════════════════════════════════════════════════
 // Bob-Agent Tauri Bridge — 完整适配器层
@@ -24,25 +25,6 @@ if (IS_TAURI) {
   save = dialog.save;
   listen = event.listen;
   getCurrentWindow = win.getCurrentWindow;
-
-  // ── R2/R3 工具风险确认 ──────────────────────────────────
-  listen('tool:confirm_required', async (event) => {
-    const { request_id, tool_name, args_preview, risk_level } = event.payload;
-    const isR3 = risk_level === 'R3';
-    
-    const approved = await showConfirm({
-      title: isR3 ? '⚠️ 高危操作确认' : '敏感操作确认',
-      message: `Bob 请求执行${isR3 ? '高危' : '敏感'}工具：\n\n🔧 ${tool_name}\n📋 ${args_preview.substring(0, 200)}`,
-      confirmText: isR3 ? '确认执行' : '允许',
-      cancelText: '拒绝',
-      confirmClass: isR3 ? 'btn-danger' : '',
-    });
-    
-    await invoke('tool_confirm_response', { 
-      requestId: request_id, 
-      approved: !!approved 
-    });
-  });
 } else {
   // ── 浏览器 Mock 环境 ──────────────────────────────────
   console.log('%c[Bridge] Running in BROWSER mock mode', 'color: #f59e0b; font-weight: bold;');
@@ -762,6 +744,19 @@ if (IS_TAURI) {
     setFocus: async () => {},
     unminimize: async () => {},
   });
+}
+
+let toolConfirmRegistration = null;
+export function startPostMountBridgeListeners() {
+  if (!IS_TAURI) return Promise.resolve();
+  if (!toolConfirmRegistration) {
+    toolConfirmRegistration = registerToolConfirmListener({ listen, invoke, showConfirm })
+      .catch((error) => {
+        toolConfirmRegistration = null;
+        throw error;
+      });
+  }
+  return toolConfirmRegistration;
 }
 
 // ═══════════════════════════════════════════════════════════
