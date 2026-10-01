@@ -98,14 +98,15 @@
     (function() {
       window.__bobBootDiag = function(stage) {
         // Diagnostic branch only: fixed stage identifiers, never user content.
+        document.title = 'BOB_BOOT_DIAG:' + stage;
         console.info('[BOB_BOOT_DIAG] ' + stage);
       };
       window.__bobBootDiag('html-inline-start');
       window.addEventListener('error', function(e) {
-        window.__bobBootDiag('window-error:' + ((e.error && e.error.name) || 'unknown'));
+        window.__bobBootDiag('window-error');
       });
       window.addEventListener('unhandledrejection', function(e) {
-        window.__bobBootDiag('unhandled-rejection:' + ((e.reason && e.reason.name) || 'unknown'));
+        window.__bobBootDiag('unhandled-rejection');
       });
       // 🛡️ 原生保底启动防护：无论 Vue 是否挂载成功，最多 2.5 秒强制淡出并彻底移除 native-splash
       setTimeout(function() {
