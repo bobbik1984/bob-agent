@@ -311,12 +311,23 @@
       </div>
     </div>
 
-    <div v-if="currentMode === 'ticket'" class="ticket-body" style="flex:1; overflow-y:auto; padding:24px; background-color: var(--bg-primary);">
+    <div v-if="currentMode === 'ticket'" class="ticket-body">
       <div v-if="ticketNodes.length === 0" class="notebook-empty-state">
-        {{ $t('ticket.empty') || '票夹为空' }}
+        {{ $t('ticket.empty') }}
       </div>
-      <div v-else style="display:grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; align-items: stretch;">
-        <TicketCard v-for="node in ticketNodes" :key="node.id" :node="node" />
+      <div v-else class="wallet-layout">
+        <section v-if="walletGroups.upcoming.length" class="wallet-section">
+          <h2>{{ $t('ticket.group_upcoming') }} <span>{{ walletGroups.upcoming.length }}</span></h2>
+          <div class="wallet-stack"><TicketCard v-for="node in walletGroups.upcoming" :key="node.id" :node="node" /></div>
+        </section>
+        <section v-if="walletGroups.undated.length" class="wallet-section">
+          <h2>{{ $t('ticket.group_undated') }} <span>{{ walletGroups.undated.length }}</span></h2>
+          <div class="wallet-stack"><TicketCard v-for="node in walletGroups.undated" :key="node.id" :node="node" /></div>
+        </section>
+        <section v-if="walletGroups.expired.length" class="wallet-section wallet-section-expired">
+          <h2>{{ $t('ticket.group_expired') }} <span>{{ walletGroups.expired.length }}</span></h2>
+          <div class="wallet-stack"><TicketCard v-for="node in walletGroups.expired" :key="node.id" :node="node" /></div>
+        </section>
       </div>
     </div>
 
@@ -338,6 +349,7 @@
 import { ref, onMounted, onBeforeUnmount, watch, computed, inject } from 'vue';
 import NoteExplorer from '../components/NoteExplorer.vue';
 import TicketCard from '../components/TicketCard.vue';
+import { groupWalletTickets } from '../tickets/wallet.js';
 import TiptapEditor from '../components/TiptapEditor.vue';
 import { useI18n } from 'vue-i18n';
 import { useDialog } from '../composables/useDialog';
@@ -578,34 +590,9 @@ const ticketNodes = computed(() => {
   const _trigger = stats.value;
   if (!allGraphData.value || !allGraphData.value.nodes) return [];
   return allGraphData.value.nodes
-    .filter(n => n.node_type === 'ticket' || n.type === 'ticket' || n.type === 'Ticket')
-    .sort((a,b) => {
-      let aMeta = {};
-      let bMeta = {};
-      try { aMeta = typeof a.metadata === 'string' && a.metadata ? JSON.parse(a.metadata) : (a.metadata || {}); } catch(e) {}
-      try { bMeta = typeof b.metadata === 'string' && b.metadata ? JSON.parse(b.metadata) : (b.metadata || {}); } catch(e) {}
-      
-      const now = new Date();
-      const dateA = aMeta.start_time ? new Date(aMeta.start_time) : null;
-      const dateB = bMeta.start_time ? new Date(bMeta.start_time) : null;
-      
-      if (!dateA && !dateB) return 0;
-      if (!dateA) return 1;
-      if (!dateB) return -1;
-      
-      const isAExpired = dateA < now;
-      const isBExpired = dateB < now;
-      
-      if (!isAExpired && isBExpired) return -1;
-      if (isAExpired && !isBExpired) return 1;
-      
-      if (!isAExpired && !isBExpired) {
-        return dateA - dateB; // Upcoming: closer to today first (ascending)
-      }
-      
-      return dateB - dateA; // Expired: closer to today first (descending)
-    });
+    .filter(n => String(n.node_type || n.type).toLowerCase() === 'ticket');
 });
+const walletGroups = computed(() => groupWalletTickets(ticketNodes.value));
 
 const topProjects = computed(() => {
   const _trigger = stats.value; // Force reactivity since allGraphData is not a ref
@@ -1358,6 +1345,15 @@ async function removeSourceBatch(node) {
 </script>
 
 <style scoped>
+.ticket-body { flex: 1; overflow-y: auto; padding: 26px 18px 56px; background: var(--bg-primary); }
+.wallet-layout { max-width: 560px; margin: 0 auto; display: flex; flex-direction: column; gap: 46px; }
+.wallet-section h2 { display: flex; align-items: baseline; gap: 10px; margin: 0 2px 18px; color: var(--text-primary); font-size: 20px; font-weight: 650; }
+.wallet-section h2 span { color: var(--text-tertiary); font-size: 14px; font-weight: 500; }
+.wallet-section-expired { padding-top: 30px; border-top: 1px solid var(--border-subtle); }
+.wallet-stack { display: flex; flex-direction: column; padding-bottom: 4px; }
+.wallet-stack > :not(:first-child) { margin-top: -115px; }
+.wallet-stack > :last-child { margin-bottom: 0; }
+@media (max-width: 600px) { .ticket-body { padding: 22px 14px 48px; } .wallet-layout { gap: 40px; } }
 .kg-mobile-col {
   flex-direction: column !important;
 }

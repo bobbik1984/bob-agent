@@ -1,46 +1,14 @@
 <template>
-  <div class="ticket-card-wrapper" :class="{ 'is-expired': isExpired }" @click="showDetail = true" style="cursor: pointer;">
-    <div class="ticket-header">
-      <div class="ticket-title-row" style="align-items: flex-start;">
-        <component :is="categoryIcon" class="category-icon" style="margin-top: 2px;" />
-        
-        <div v-if="isTravel" class="ticket-title" style="display: flex; align-items: flex-start; justify-content: space-between; flex: 1; padding-right: 8px;">
-          <div style="display: flex; flex-direction: column; align-items: center; flex: 1;">
-            <span style="font-size: 1.1em; font-weight: 600;">{{ originLabel }}</span>
-            <span style="font-size: 0.75em; opacity: 0.7; font-weight: normal; margin-top: 2px;">{{ metadata.flight_info?.origin_terminal || '' }}</span>
-            <span v-if="metadata.start_time" style="font-size: 0.75em; opacity: 0.7; font-weight: normal; margin-top: 4px;">{{ metadata.start_time.split(' ')[0] }}</span>
-            <span v-if="metadata.start_time && metadata.start_time.includes(' ') && metadata.start_time.split(' ')[1] !== '00:00:00'" style="font-size: 1.1em; font-weight: 500; margin-top: 2px;">{{ formatTimeOnly(metadata.start_time) }}</span>
-          </div>
-          <div style="display: flex; flex-direction: column; align-items: center; padding: 0 8px;">
-            <component :is="categoryIcon" style="width: 16px; height: 16px; opacity: 0.5; margin-top: 2px;" />
-            <span style="font-size: 0.75em; font-weight: 500; color: var(--text-primary); margin-top: 6px;">{{ metadata.flight_info?.flight_number || '' }}</span>
-          </div>
-          <div style="display: flex; flex-direction: column; align-items: center; flex: 1;">
-            <span style="font-size: 1.1em; font-weight: 600;">{{ destinationLabel }}</span>
-            <span style="font-size: 0.75em; opacity: 0.7; font-weight: normal; margin-top: 2px;">{{ metadata.flight_info?.destination_terminal || '' }}</span>
-            <span v-if="metadata.end_time" style="font-size: 0.75em; opacity: 0.7; font-weight: normal; margin-top: 4px;">{{ metadata.end_time.split(' ')[0] }}</span>
-            <span v-else-if="metadata.start_time" style="font-size: 0.75em; opacity: 0.7; font-weight: normal; margin-top: 4px; visibility: hidden;">{{ metadata.start_time.split(' ')[0] }}</span>
-            
-            <span v-if="metadata.end_time && metadata.end_time.includes(' ') && metadata.end_time.split(' ')[1] !== '00:00:00'" style="font-size: 1.1em; font-weight: 500; margin-top: 2px;">{{ formatTimeOnly(metadata.end_time) }}</span>
-          </div>
-        </div>
-        <span v-else class="ticket-title">{{ node.label }}</span>
-        
-        <span class="ticket-status" :class="ticketStatusClass"></span>
-      </div>
-      <div class="ticket-concise-details" style="display: flex; flex-direction: column; gap: 6px; margin-top: 8px; font-size: 13px; color: var(--text-secondary); padding-left: 33px;">
-        <div v-if="!isTravel && metadata.start_time" style="display: flex; justify-content: space-between; align-items: center;">
-          <span>{{ metadata.start_time.split(' ')[0] }}</span>
-          <span v-if="metadata.start_time.includes(' ') && metadata.start_time.split(' ')[1] !== '00:00:00'" style="font-weight: 500; color: var(--text-primary);">{{ formatTimeOnly(metadata.start_time) }}</span>
-        </div>
-        
-        <div v-if="!isTravel && (metadata.venue || seatLabel)" style="display: flex; justify-content: space-between; align-items: center;">
-          <span v-if="metadata.venue" style="text-overflow: ellipsis; overflow: hidden; white-space: nowrap; max-width: 120px;">{{ metadata.venue }}</span>
-          <span v-if="seatLabel" style="font-weight: 500; color: var(--text-primary);">{{ seatLabel }}</span>
-        </div>
-      </div>
+  <button class="ticket-card-wrapper" :class="[`ticket-${category}`, { 'is-expired': isExpired }]" type="button" @click="showDetail = true" :aria-label="`${t('ticket.open')} ${node.label}`">
+    <div class="ticket-card-top">
+      <component :is="categoryIcon" class="category-icon" :aria-label="t(`ticket.category_${category}`)" role="img" />
+      <span class="ticket-card-date">{{ ticketDateLabel }}</span>
     </div>
-  </div>
+    <div class="ticket-card-main">
+      <strong class="ticket-card-title">{{ isTravel && originLabel && destinationLabel ? `${originLabel} → ${destinationLabel}` : node.label }}</strong>
+      <span class="ticket-card-subtitle">{{ isTravel ? (metadata.flight_info?.flight_number || node.label) : (metadata.venue || seatLabel || node.label) }}</span>
+    </div>
+  </button>
 
   <!-- Detail Modal -->
   <Teleport to="body">
@@ -48,7 +16,7 @@
       <div class="boarding-pass-modern-card">
         <div class="bp-modern-header">
           <span class="bp-modern-icon"><component :is="categoryIcon" style="width:14px;height:14px;" /></span>
-          <span>{{ isTravel ? 'Boarding Pass' : (metadata.category || 'Ticket') }}</span>
+          <span>{{ node.label }}</span>
         </div>
 
         <div class="bp-route-row" v-if="isTravel">
@@ -127,11 +95,13 @@
           </div>
         </div>
 
-        <div class="bp-modern-qr-section" v-if="metadata.barcode_data">
+        <div class="bp-modern-qr-section" v-if="barcodeData && isQrBarcode">
           <div class="bp-modern-qr-wrapper">
-            <qrcode-vue :value="metadata.barcode_data" :size="200" level="M" />
+            <qrcode-vue :value="barcodeData" :size="200" level="M" />
           </div>
         </div>
+        <p v-else-if="barcodeData" class="bp-barcode-notice">{{ t('ticket.other_barcode_format') }}</p>
+        <p v-else class="bp-barcode-notice">{{ t('ticket.barcode_not_saved') }}</p>
 
         <div class="bp-modern-actions">
           <button class="bp-modern-btn bp-modern-btn-danger" @click="deleteTicket" title="删除">
@@ -151,9 +121,10 @@ import { useDialog } from '@/composables/useDialog.js';
 const { showConfirm, showAlert, showPrompt } = useDialog();
 
 import { computed, ref, watch, onMounted, onUnmounted } from 'vue';
-import { Plane, Film, Ticket, Calendar, Train, ArrowRight, CreditCard, Music, ChevronDown, Trash2 } from 'lucide-vue-next';
+import { PlaneTakeoff, Film, Ticket, Calendar, Train, ArrowRight, CreditCard, Music, ChevronDown, Trash2 } from 'lucide-vue-next';
 import QrcodeVue from 'qrcode.vue';
 import { useI18n } from 'vue-i18n';
+import { ticketMetadata, ticketCategory, ticketBarcode, ticketGroup } from '@/tickets/wallet.js';
 
 const props = defineProps({
   node: {
@@ -238,7 +209,7 @@ const startEdit = async () => {
     seat: seatLabel.value,
     pnr: metadata.value.flight_info?.pnr || '',
     venue: metadata.value.venue || '',
-    barcode_data: metadata.value.barcode_data || ''
+    barcode_data: ticketBarcode(props.node)
   };
   isEditing.value = true;
 };
@@ -259,11 +230,10 @@ const saveEdit = async () => {
       newEndTime += ' 00:00:00';
     }
 
-    let newMetadata = { ...metadata.value };
+    let newMetadata = { ...metadata.value, flight_info: { ...(metadata.value.flight_info || {}) } };
     newMetadata.start_time = newStartTime;
     newMetadata.end_time = newEndTime;
     newMetadata.venue = editForm.value.venue;
-    newMetadata.barcode_data = editForm.value.barcode_data;
     if (metadata.value.passenger_name !== undefined) newMetadata.passenger_name = editForm.value.passenger_name;
     
     if (isTravel.value) {
@@ -280,7 +250,8 @@ const saveEdit = async () => {
     }
     
     const newTitle = editForm.value.title || props.node.label;
-    await window.appAPI.kgUpdateTicket(props.node.id, newTitle, newMetadata);
+    const result = await window.appAPI.kgUpdateTicket(props.node.id, newTitle, newMetadata);
+    if (result?.error || result?.ok === false) throw new Error(result.error || 'Ticket update failed');
     
     if (isAddedToCalendar.value && window.appAPI.listEvents) {
       try {
@@ -317,38 +288,20 @@ const saveEdit = async () => {
     }
   });
 
-const metadata = computed(() => {
-  console.log("TicketCard node.label:", props.node.label);
-  console.log("TicketCard raw metadata:", props.node.metadata);
-  if (typeof props.node.metadata === 'string') {
-    try {
-      const parsed = JSON.parse(props.node.metadata);
-      console.log("TicketCard parsed metadata:", parsed);
-      return parsed;
-    } catch (e) {
-      console.error("TicketCard JSON parse error:", e);
-      return {};
-    }
-  }
-  return props.node.metadata || {};
-});
-
-const isExpired = computed(() => {
-  if (!metadata.value.start_time) return false;
-  // Handle both "YYYY-MM-DD HH:MM:SS" and "YYYY-MM-DD" formats
-  const dtStr = metadata.value.start_time.replace(' ', 'T');
-  const startTime = new Date(dtStr).getTime();
-  if (isNaN(startTime)) return false;
-  return Date.now() > startTime + 24 * 3600 * 1000;
-});
+const metadata = computed(() => ticketMetadata(props.node));
+const category = computed(() => ticketCategory(props.node));
+const barcodeData = computed(() => ticketBarcode(props.node));
+const isQrBarcode = computed(() => !metadata.value.barcode_type || ['qr', 'qr_code', 'qrcode'].includes(String(metadata.value.barcode_type).toLowerCase()));
+const ticketDateLabel = computed(() => formatDateTime(metadata.value.start_time || metadata.value.date) || t('ticket.undated'));
+const isExpired = computed(() => ticketGroup(props.node) === 'expired');
 
 const isTravel = computed(() => {
-  return metadata.value.category === 'flight' || metadata.value.category === 'train';
+  return category.value === 'flight' || category.value === 'train';
 });
 
 const categoryIcon = computed(() => {
-  switch (metadata.value.category) {
-    case 'flight': return Plane;
+  switch (category.value) {
+    case 'flight': return PlaneTakeoff;
     case 'movie': return Film;
     case 'train': return Train;
     case 'membership': return CreditCard;
@@ -436,25 +389,46 @@ onUnmounted(() => {
 
 <style scoped>
 .ticket-card-wrapper {
-  background-color: var(--bg-tertiary);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-default);
+  background: var(--ticket-general);
+  border: 1px solid var(--ticket-edge);
+  border-radius: 18px;
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  justify-content: space-between;
   width: 100%;
-  height: 110px;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
-  color: var(--text-primary);
+  height: 190px;
+  padding: 18px 20px 22px;
+  box-shadow: 0 8px 20px var(--ticket-shadow);
+  color: var(--ticket-ink);
   font-family: 'Inter', system-ui, sans-serif;
+  text-align: left;
+  cursor: pointer;
+  transition: transform 180ms ease, box-shadow 180ms ease;
 }
 
+.ticket-card-wrapper:hover { transform: translateY(-3px); }
+.ticket-card-wrapper:focus-visible { outline: 3px solid var(--user-accent); outline-offset: 3px; }
+.ticket-flight { background: var(--ticket-flight); }
+.ticket-train { background: var(--ticket-train); }
+.ticket-movie { background: var(--ticket-movie); }
+.ticket-exhibition { background: var(--ticket-exhibition); }
+.ticket-concert { background: var(--ticket-concert); }
+.ticket-membership { background: var(--ticket-membership); }
 .ticket-card-wrapper.is-expired {
-  opacity: 0.5;
+  background: var(--ticket-expired);
+  color: var(--ticket-expired-ink);
 }
 
-.ticket-card-wrapper.is-expired .category-icon {
-  background: var(--text-muted, #999);
+.ticket-card-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.ticket-card-top .category-icon { width: 27px; height: 27px; padding: 0; background: none; color: inherit; }
+.ticket-card-date { font-size: 12px; font-weight: 600; letter-spacing: .02em; }
+.ticket-card-main { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.ticket-card-title { font-size: clamp(19px, 4vw, 25px); line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ticket-card-subtitle { font-size: 13px; opacity: .85; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (prefers-reduced-motion: reduce) {
+  .ticket-card-wrapper { transition: none; }
+  .ticket-card-wrapper:hover { transform: none; }
 }
 
 .ticket-subtitle {
@@ -632,6 +606,7 @@ onUnmounted(() => {
   flex-direction: column;
   align-items: center;
 }
+.bp-barcode-notice { margin-top: 16px; color: var(--text-secondary); font-size: 12px; line-height: 1.5; text-align: center; }
 .bp-modern-qr-wrapper {
   background: var(--text-primary);
   padding: 10px;

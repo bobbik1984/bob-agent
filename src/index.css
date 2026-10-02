@@ -47,6 +47,19 @@ a:hover {
 
 :root {
   --bob-brand-blue: #2776BB;
+  /* 票夹：整张实色卡片，过往票据只保留灰度层级。 */
+  --ticket-flight: #759bc1;
+  --ticket-train: #83aa91;
+  --ticket-movie: #aa8eaf;
+  --ticket-exhibition: #c19b82;
+  --ticket-concert: #ad91a1;
+  --ticket-membership: #8a9eae;
+  --ticket-general: #899da9;
+  --ticket-expired: #b5b7ba;
+  --ticket-ink: #17272d;
+  --ticket-expired-ink: #3d4145;
+  --ticket-edge: rgba(0, 0, 0, 0.08);
+  --ticket-shadow: rgba(0, 0, 0, 0.17);
   /* 鈹€鈹€ 鑹叉澘锛堢函鐏板害锛屾棤钃濊壊锛?鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€ */
   --bg-root:        #0c0c0c;
   --bg-primary:     #141414;

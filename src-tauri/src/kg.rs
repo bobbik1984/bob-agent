@@ -454,7 +454,7 @@ pub fn get_stats(conn: &rusqlite::Connection) -> Value {
 /// 获取完整图谱 (节点 + 边)，用于前端 vis.js 渲染
 pub fn get_full_graph(conn: &rusqlite::Connection) -> Value {
     let mut nodes: Vec<Value> = Vec::new();
-    if let Ok(mut stmt) = conn.prepare("SELECT id, label, node_type, summary, source FROM kg_nodes")
+    if let Ok(mut stmt) = conn.prepare("SELECT id, label, node_type, summary, source, CASE WHEN lower(node_type) = 'ticket' THEN metadata ELSE NULL END FROM kg_nodes")
     {
         if let Ok(rows) = stmt.query_map([], |row| {
             Ok(json!({
@@ -462,7 +462,8 @@ pub fn get_full_graph(conn: &rusqlite::Connection) -> Value {
                 "label": row.get::<_, String>(1)?,
                 "type": row.get::<_, String>(2)?,
                 "summary": row.get::<_, String>(3)?,
-                "source": row.get::<_, String>(4)?
+                "source": row.get::<_, String>(4)?,
+                "metadata": row.get::<_, Option<String>>(5)?
             }))
         }) {
             nodes = rows.filter_map(|r| r.ok()).collect();
@@ -670,31 +671,51 @@ pub fn kg_update_ticket_cmd(
         Ok(c) => c,
         Err(_) => return json!({"error": "DB lock failed"}),
     };
-    let meta_str = new_metadata.map(|v| v.to_string());
-    let res = if let Some(title) = new_title {
-        if let Some(m) = meta_str {
-            conn.execute(
-                "UPDATE kg_nodes SET label = ?1, metadata = ?2 WHERE id = ?3",
-                params![title, m, node_id],
-            )
-        } else {
-            conn.execute(
-                "UPDATE kg_nodes SET label = ?1 WHERE id = ?2",
-                params![title, node_id],
-            )
-        }
-    } else if let Some(m) = meta_str {
-        conn.execute(
-            "UPDATE kg_nodes SET metadata = ?1 WHERE id = ?2",
-            params![m, node_id],
-        )
-    } else {
-        Ok(0)
-    };
-    match res {
-        Ok(_) => json!({"ok": true}),
-        Err(e) => json!({"error": e.to_string()}),
+    match update_ticket_node(&conn, &node_id, new_title.as_deref(), new_metadata) {
+        Ok(()) => json!({"ok": true}),
+        Err(e) => json!({"error": e}),
     }
+}
+
+fn update_ticket_node(
+    conn: &rusqlite::Connection,
+    node_id: &str,
+    new_title: Option<&str>,
+    new_metadata: Option<Value>,
+) -> Result<(), String> {
+    use rusqlite::OptionalExtension;
+    let existing: String = conn
+        .query_row(
+            "SELECT COALESCE(metadata, '{}') FROM kg_nodes WHERE id = ?1 AND lower(node_type) = 'ticket'",
+            [node_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "Ticket not found".to_string())?;
+
+    let metadata = if let Some(incoming) = new_metadata {
+        let incoming = incoming.as_object().ok_or("Ticket metadata must be an object")?;
+        let mut original: Value = serde_json::from_str(&existing)
+            .map_err(|_| "Stored ticket metadata is invalid; refusing to overwrite it")?;
+        let original_map = original.as_object_mut().ok_or("Stored ticket metadata is not an object")?;
+        for (key, value) in incoming {
+            let protected = matches!(key.as_str(), "barcode_data" | "barcode_type" | "category");
+            if protected && (value.is_null() || value.as_str().is_some_and(|s| s.trim().is_empty())) {
+                continue;
+            }
+            original_map.insert(key.clone(), value.clone());
+        }
+        Some(original.to_string())
+    } else {
+        None
+    };
+    let rows = conn.execute(
+        "UPDATE kg_nodes SET label = COALESCE(?1, label), metadata = COALESCE(?2, metadata) WHERE id = ?3 AND lower(node_type) = 'ticket'",
+        params![new_title, metadata, node_id],
+    ).map_err(|e| e.to_string())?;
+    if rows != 1 { return Err("Ticket update did not affect exactly one row".to_string()); }
+    Ok(())
 }
 
 /// 票据直接创建 (绕过 LLM，用于 rxing BCBP 自动识别与直存)
@@ -742,4 +763,37 @@ pub fn system_create_ticket(
     }
 
     Ok(json!({ "ok": true, "ticket_id": ticket_id }))
+}
+
+#[cfg(test)]
+mod ticket_persistence_tests {
+    use super::*;
+
+    fn test_db() -> rusqlite::Connection {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch("CREATE TABLE kg_nodes (id TEXT PRIMARY KEY, label TEXT, node_type TEXT, summary TEXT, source TEXT, metadata TEXT); CREATE TABLE kg_edges (source_id TEXT, target_id TEXT, relation TEXT, confidence REAL);").unwrap();
+        conn.execute("INSERT INTO kg_nodes VALUES (?1, ?2, 'ticket', '', '', ?3)", params!["ticket-1", "Flight", r#"{"category":"flight","barcode_data":"private-qr","start_time":"2026-10-02"}"#]).unwrap();
+        conn
+    }
+
+    #[test]
+    fn graph_returns_existing_ticket_metadata() {
+        let conn = test_db();
+        let graph = get_full_graph(&conn);
+        let meta: Value = serde_json::from_str(graph["nodes"][0]["metadata"].as_str().unwrap()).unwrap();
+        assert_eq!(meta["category"], "flight");
+        assert_eq!(meta["barcode_data"], "private-qr");
+    }
+
+    #[test]
+    fn partial_ticket_edit_preserves_category_and_barcode() {
+        let conn = test_db();
+        update_ticket_node(&conn, "ticket-1", Some("Updated"), Some(json!({"venue":"Gate 5", "barcode_data":"", "category":null}))).unwrap();
+        let raw: String = conn.query_row("SELECT metadata FROM kg_nodes WHERE id = 'ticket-1'", [], |r| r.get(0)).unwrap();
+        let meta: Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(meta["category"], "flight");
+        assert_eq!(meta["barcode_data"], "private-qr");
+        assert_eq!(meta["venue"], "Gate 5");
+        assert!(update_ticket_node(&conn, "ticket-1", None, Some(json!(["invalid"]))).is_err());
+    }
 }

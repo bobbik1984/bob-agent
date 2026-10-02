@@ -136,7 +136,7 @@ export function useDragDrop({ messages, inputText, scrollToBottom, globalFileAcc
         venue: `${bp.origin} - ${bp.destination}`,
         seat_info: bp.seat,
         barcode_data: bp.raw_data,
-        barcode_type: 'qr',
+        barcode_type: bp.format || 'qr',
         flight_info: {
           flight_number: `${bp.carrier}${bp.flight_number}`,
           carrier: bp.carrier,
