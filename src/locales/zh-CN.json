@@ -1032,7 +1032,15 @@
     "date": "日期",
     "time": "时间",
     "pnr": "PNR",
-    "venue": "场馆"
+    "venue": "场馆",
+    "on_time": "准点运行",
+    "tap_qr": "点击查看大图二维码",
+    "coach_space": "车厢/空间",
+    "completed": "已结束",
+    "hall": "影厅",
+    "boarding_now": "正在检票",
+    "can_enter": "可入场",
+    "starting": "开始登机"
   },
   "calendar": {
     "view_ticket": "查看凭证",

@@ -8,6 +8,7 @@ import {
   ticketCardTitle,
   ticketCardSubtitle,
   ticketFormattedDate,
+  ticketFormattedDateWithWeekday,
   ticketFormattedTime
 } from './wallet.js';
 
@@ -47,6 +48,7 @@ describe('ticket wallet projection', () => {
     expect(ticketCardTitle(flight)).toBe('上海 → 北京');
     expect(ticketCardSubtitle(flight)).toBe('MU5112 · 虹桥 T2');
     expect(ticketFormattedDate(flight)).toBe('10月8日');
+    expect(ticketFormattedDateWithWeekday(flight)).toBe('10月8日 周四');
     expect(ticketFormattedTime(flight)).toBe('09:20');
 
     const rail = {

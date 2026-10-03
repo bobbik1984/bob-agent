@@ -127,18 +127,31 @@ export function ticketCardSubtitle(node) {
   return meta.venue || meta.summary || node?.summary || '';
 }
 
-export function ticketFormattedDate(node) {
+export function ticketFormattedDate(node, includeWeekday = false) {
   const meta = ticketMetadata(node);
   const raw = meta.start_time || meta.date;
   if (!raw) return '';
   const str = String(raw).split(' ')[0];
   const parts = str.split('-');
   if (parts.length === 3) {
+    const year = parseInt(parts[0], 10);
     const month = parseInt(parts[1], 10);
     const day = parseInt(parts[2], 10);
-    if (month && day) return `${month}月${day}日`;
+    if (month && day) {
+      if (includeWeekday && year) {
+        const dt = new Date(year, month - 1, day);
+        const weekdays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+        const wk = Number.isFinite(dt.getTime()) ? ` ${weekdays[dt.getDay()]}` : '';
+        return `${month}月${day}日${wk}`;
+      }
+      return `${month}月${day}日`;
+    }
   }
   return str;
+}
+
+export function ticketFormattedDateWithWeekday(node) {
+  return ticketFormattedDate(node, true);
 }
 
 export function ticketFormattedTime(node) {

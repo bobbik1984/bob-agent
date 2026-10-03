@@ -1032,7 +1032,15 @@
     "date": "Date",
     "time": "Time",
     "pnr": "PNR",
-    "venue": "Venue"
+    "venue": "Venue",
+    "on_time": "On time",
+    "tap_qr": "Tap to view full QR",
+    "coach_space": "Coach/Space",
+    "completed": "Completed",
+    "hall": "Hall",
+    "boarding_now": "Boarding now",
+    "can_enter": "Admission open",
+    "starting": "Boarding started"
   },
   "calendar": {
     "view_ticket": "View Ticket",
