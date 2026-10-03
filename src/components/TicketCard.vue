@@ -1,149 +1,224 @@
 <template>
-  <button class="ticket-card-wrapper" :class="[`ticket-${category}`, { 'is-expired': isExpired }]" type="button" @click="showDetail = true" :aria-label="`${t('ticket.open')} ${node.label}`">
-    <div class="ticket-card-top">
-      <component :is="categoryIcon" class="category-icon" :aria-label="t(`ticket.category_${category}`)" role="img" />
-      <span class="ticket-card-date">{{ ticketDateLabel }}</span>
+  <button
+    type="button"
+    class="pass"
+    :class="[kind, { 'is-expired': isExpired }]"
+    :style="{ zIndex: index + 1 }"
+    @click="openDetail"
+    :aria-label="`${t('ticket.open') || '查看'} ${cardTitle}，${cardDate}`"
+  >
+    <div class="head">
+      <span class="icon">
+        <svg :class="{ 'flight-symbol': kind === 'flight' }" viewBox="0 0 24 24" aria-hidden="true" v-html="svgPath"></svg>
+      </span>
+      <span class="identity">
+        <strong>{{ cardTitle }}</strong>
+        <small>{{ cardSubtitle }}</small>
+      </span>
+      <span class="when">{{ cardDate }}</span>
     </div>
-    <div class="ticket-card-main">
-      <strong class="ticket-card-title">{{ isTravel && originLabel && destinationLabel ? `${originLabel} → ${destinationLabel}` : node.label }}</strong>
-      <span class="ticket-card-subtitle">{{ isTravel ? (metadata.flight_info?.flight_number || node.label) : (metadata.venue || seatLabel || node.label) }}</span>
+    <div class="body-title">{{ cardTitle }}</div>
+    <div class="body-sub">{{ cardSubtitle }}</div>
+    <div class="foot">
+      <span>{{ cardTime }}</span>
+      <span>{{ statusLabel }}</span>
     </div>
   </button>
 
   <!-- Detail Modal -->
   <Teleport to="body">
-    <div v-if="showDetail" class="bp-modal-overlay" @click.self="showDetail = false">
-      <div class="boarding-pass-modern-card">
-        <div class="bp-modern-header">
-          <span class="bp-modern-icon"><component :is="categoryIcon" style="width:14px;height:14px;" /></span>
-          <span>{{ node.label }}</span>
+    <div v-if="showDetail" class="veil" @click.self="closeDetail">
+      <div class="detail" :class="[kind, { 'expired-detail': isExpired }]">
+        <div class="head">
+          <span class="icon">
+            <svg :class="{ 'flight-symbol': kind === 'flight' }" viewBox="0 0 24 24" aria-hidden="true" v-html="svgPath"></svg>
+          </span>
+          <span class="identity">
+            <strong>{{ cardTitle }}</strong>
+            <small>{{ cardSubtitle }}</small>
+          </span>
+          <span class="when">{{ cardDate }}</span>
+        </div>
+        <h3>{{ cardTitle }}</h3>
+        <p>{{ cardSubtitle }}</p>
+        <dl>
+          <div>
+            <dt>{{ t('ticket.date') || '日期' }}</dt>
+            <dd>{{ cardDate }}</dd>
+          </div>
+          <div>
+            <dt>{{ t('ticket.time') || '时间' }}</dt>
+            <dd>{{ cardTime }}</dd>
+          </div>
+          <div>
+            <dt>{{ t('ticket.info') || '票据信息' }}</dt>
+            <dd>{{ cardInfoDetail || cardSubtitle || '—' }}</dd>
+          </div>
+          <div>
+            <dt>{{ t('ticket.status') || '状态' }}</dt>
+            <dd>{{ statusLabel }}</dd>
+          </div>
+        </dl>
+
+        <!-- QR Code Section if available -->
+        <div v-if="barcodeData && isQrBarcode" class="detail-qr-section">
+          <div class="detail-qr-box">
+            <qrcode-vue :value="barcodeData" :size="150" level="M" />
+          </div>
+          <div v-if="barcodeData.length <= 40" class="detail-qr-caption">{{ barcodeData }}</div>
+        </div>
+        <div v-else-if="barcodeData" class="detail-barcode-text">
+          {{ barcodeData }}
         </div>
 
-        <div class="bp-route-row" v-if="isTravel">
-          <div class="bp-airport-group is-origin">
-            <input v-if="isEditing" v-model="editForm.origin" class="bp-edit-input bp-airport-code" style="width: 85px; text-align: center;" />
-            <span v-else class="bp-airport-code">{{ originLabel }}</span>
-            <input v-if="isEditing" v-model="editForm.originTerminal" class="bp-edit-input" placeholder="Terminal" style="width: 85px; font-size: 1.05em; text-align: center; height: 26px; box-sizing: border-box;" />
-            <div v-else class="bp-terminal" style="height: 26px; line-height: 26px;">{{ metadata.flight_info?.origin_terminal || '' }}</div>
-            
-            <input type="text" v-if="isEditing" v-model="editForm.date" @input="formatDateInput('date')" class="bp-edit-input" placeholder="YYYY-MM-DD" maxlength="10" style="width: 115px; font-size: 0.85em; text-align: center; padding: 2px; height: 22px; box-sizing: border-box;" />
-            <div v-else style="font-size: 0.85em; opacity: 0.7; height: 22px; line-height: 22px; text-align: center;">{{ metadata.start_time ? metadata.start_time.split(' ')[0] : '' }}</div>
-            
-            <input type="text" v-if="isEditing" v-model="editForm.time" @input="formatTimeInput('time')" class="bp-edit-input" placeholder="HH:MM" maxlength="5" style="width: 90px; font-size: 1.1em; font-weight: 500; text-align: center; padding: 2px; height: 26px; box-sizing: border-box;" />
-            <div v-else style="font-size: 1.2em; font-weight: 600; height: 26px; line-height: 26px; text-align: center;">{{ (metadata.start_time && metadata.start_time.includes(' ') && metadata.start_time.split(' ')[1] !== '00:00:00') ? formatTimeOnly(metadata.start_time) : '' }}</div>
+        <!-- Inline Edit Form when editing -->
+        <div v-if="isEditing" class="detail-edit-form">
+          <div class="edit-field">
+            <label>{{ t('ticket.title') || '标题' }}</label>
+            <input v-model="editForm.title" class="edit-input" />
           </div>
-          
-          <div class="bp-route-center">
-            <component :is="categoryIcon" style="width: 20px; height: 20px;" />
+          <div class="edit-grid-2">
+            <div class="edit-field">
+              <label>{{ t('ticket.date') || '日期' }}</label>
+              <input v-model="editForm.date" @input="formatDateInput('date')" class="edit-input" placeholder="YYYY-MM-DD" maxlength="10" />
+            </div>
+            <div class="edit-field">
+              <label>{{ t('ticket.time') || '时间' }}</label>
+              <input v-model="editForm.time" @input="formatTimeInput('time')" class="edit-input" placeholder="HH:MM" maxlength="5" />
+            </div>
           </div>
-          
-          <div class="bp-airport-group is-destination">
-            <input v-if="isEditing" v-model="editForm.destination" class="bp-edit-input bp-airport-code" style="width: 85px; text-align: center;" />
-            <span v-else class="bp-airport-code">{{ destinationLabel }}</span>
-            <input v-if="isEditing" v-model="editForm.destinationTerminal" class="bp-edit-input" placeholder="Terminal" style="width: 85px; font-size: 1.05em; text-align: center; height: 26px; box-sizing: border-box;" />
-            <div v-else class="bp-terminal" style="height: 26px; line-height: 26px;">{{ metadata.flight_info?.destination_terminal || '' }}</div>
-            
-            <input type="text" v-if="isEditing" v-model="editForm.endDate" @input="formatDateInput('endDate')" class="bp-edit-input" placeholder="YYYY-MM-DD" maxlength="10" style="width: 115px; font-size: 0.85em; text-align: center; padding: 2px; height: 22px; box-sizing: border-box;" />
-            <div v-else style="font-size: 0.85em; opacity: 0.7; height: 22px; line-height: 22px; text-align: center;">{{ metadata.end_time ? metadata.end_time.split(' ')[0] : '' }}</div>
-            
-            <input type="text" v-if="isEditing" v-model="editForm.endTime" @input="formatTimeInput('endTime')" class="bp-edit-input" placeholder="HH:MM" maxlength="5" style="width: 90px; font-size: 1.1em; font-weight: 500; text-align: center; padding: 2px; height: 26px; box-sizing: border-box;" />
-            <div v-else style="font-size: 1.2em; font-weight: 600; height: 26px; line-height: 26px; text-align: center;">{{ (metadata.end_time && metadata.end_time.includes(' ') && metadata.end_time.split(' ')[1] !== '00:00:00') ? formatTimeOnly(metadata.end_time) : '' }}</div>
+          <div class="edit-grid-2" v-if="kind === 'flight' || kind === 'rail'">
+            <div class="edit-field">
+              <label>出发</label>
+              <input v-model="editForm.origin" class="edit-input" />
+            </div>
+            <div class="edit-field">
+              <label>到达</label>
+              <input v-model="editForm.destination" class="edit-input" />
+            </div>
           </div>
-        </div>
-        <div class="bp-route-row" v-else style="display: flex; flex-direction: column; gap: 8px;">
-          <input v-if="isEditing" v-model="editForm.title" class="bp-edit-input bp-airport-code" style="width: 100%;" />
-          <span v-else class="bp-airport-code" style="font-size:1.6em; white-space: normal; height: auto; line-height: 1.2;">{{ node.label }}</span>
-        </div>
-
-        <div class="bp-modern-divider"></div>
-
-        <div class="bp-detail-grid">
-          <div class="bp-modern-field" v-if="isTravel || metadata.passenger_name || isEditing">
-            <div class="bp-modern-label">{{ $t('ticket.passenger') || 'Passenger' }}</div>
-            <input v-if="isEditing" v-model="editForm.passenger_name" class="bp-edit-input" />
-            <div v-else class="bp-modern-value">{{ metadata.flight_info?.passenger_name || metadata.passenger_name || '' }}</div>
+          <div class="edit-grid-2">
+            <div class="edit-field" v-if="kind === 'flight' || kind === 'rail'">
+              <label>{{ kind === 'flight' ? '航班号' : '车次' }}</label>
+              <input v-model="editForm.flight_number" class="edit-input" />
+            </div>
+            <div class="edit-field">
+              <label>{{ t('ticket.seat') || '座位' }}</label>
+              <input v-model="editForm.seat" class="edit-input" />
+            </div>
           </div>
-          <div class="bp-modern-field" v-if="isTravel">
-            <div class="bp-modern-label">{{ $t('ticket.flight') || 'Flight' }}</div>
-            <input v-if="isEditing" v-model="editForm.flight_number" class="bp-edit-input" />
-            <div v-else class="bp-modern-value">{{ metadata.flight_info?.flight_number || '' }}</div>
+          <div class="edit-field" v-if="kind !== 'flight' && kind !== 'rail'">
+            <label>{{ t('ticket.venue') || '场馆/地点' }}</label>
+            <input v-model="editForm.venue" class="edit-input" />
           </div>
-          <div class="bp-modern-field" v-if="!isTravel">
-            <div class="bp-modern-label">{{ $t('ticket.date') || 'Date' }}</div>
-            <input type="text" v-if="isEditing" v-model="editForm.date" @input="formatDateInput('date')" class="bp-edit-input" placeholder="YYYY-MM-DD" maxlength="10" />
-            <div v-else class="bp-modern-value">{{ metadata.start_time ? metadata.start_time.split(' ')[0] : '' }}</div>
-          </div>
-          <div class="bp-modern-field" v-if="!isTravel">
-            <div class="bp-modern-label">{{ $t('ticket.time') || 'Time' }}</div>
-            <input type="text" v-if="isEditing" v-model="editForm.time" @input="formatTimeInput('time')" class="bp-edit-input" placeholder="HH:MM" maxlength="5" />
-            <div v-else class="bp-modern-value">{{ (metadata.start_time && metadata.start_time.includes(' ') && metadata.start_time.split(' ')[1] !== '00:00:00') ? formatTimeOnly(metadata.start_time) : '' }}</div>
-          </div>
-          <div class="bp-modern-field">
-            <div class="bp-modern-label">{{ $t('ticket.seat') || 'Seat' }}</div>
-            <input v-if="isEditing" v-model="editForm.seat" class="bp-edit-input" />
-            <div v-else class="bp-modern-value">{{ seatLabel || '' }}</div>
-          </div>
-          <div class="bp-modern-field" v-if="isTravel">
-            <div class="bp-modern-label">{{ $t('ticket.pnr') || 'PNR' }}</div>
-            <input v-if="isEditing" v-model="editForm.pnr" class="bp-edit-input" />
-            <div v-else class="bp-modern-value">{{ metadata.flight_info?.pnr || '' }}</div>
-          </div>
-          <div class="bp-modern-field" v-if="!isTravel" style="grid-column: span 3; align-items: flex-start;">
-            <div class="bp-modern-label">{{ $t('ticket.venue') || 'Venue' }}</div>
-            <input v-if="isEditing" v-model="editForm.venue" class="bp-edit-input" style="text-align: left;" />
-            <div v-else class="bp-modern-value" style="text-align: left;">{{ metadata.venue || '' }}</div>
+          <div class="edit-buttons">
+            <button class="edit-submit-btn" @click="saveEdit">{{ t('common.save') || '保存' }}</button>
+            <button class="edit-cancel-btn" @click="isEditing = false">{{ t('common.cancel') || '取消' }}</button>
           </div>
         </div>
 
-        <div class="bp-modern-qr-section" v-if="barcodeData && isQrBarcode">
-          <div class="bp-modern-qr-wrapper">
-            <qrcode-vue :value="barcodeData" :size="200" level="M" />
-          </div>
-        </div>
-        <p v-else-if="barcodeData" class="bp-barcode-notice">{{ t('ticket.other_barcode_format') }}</p>
-        <p v-else class="bp-barcode-notice">{{ t('ticket.barcode_not_saved') }}</p>
-
-        <div class="bp-modern-actions">
-          <button class="bp-modern-btn bp-modern-btn-danger" @click="deleteTicket" title="删除">
-            <Trash2 style="width:16px;height:16px;" />
+        <!-- Card bottom action bar: delete and edit -->
+        <div v-if="!isEditing" class="detail-actions">
+          <button class="detail-act-btn detail-del-btn" @click="deleteTicket" title="删除票据">
+            <Trash2 :size="15" />
           </button>
-          <button v-if="!isEditing" class="bp-modern-btn bp-modern-btn-primary" @click="startEdit">编辑</button>
-          <button v-if="isEditing" class="bp-modern-btn bp-modern-btn-primary" @click="saveEdit">保存</button>
-          <button class="bp-modern-btn bp-modern-btn-dismiss" @click="showDetail = false">关闭</button>
+          <button class="detail-act-btn detail-edit-btn" @click="startEdit">
+            编辑
+          </button>
         </div>
       </div>
+
+      <!-- Close button -->
+      <button class="close" type="button" @click="closeDetail">
+        {{ t('ticket.close_ticket') || '收起票据' }}
+      </button>
     </div>
   </Teleport>
 </template>
 
 <script setup>
 import { useDialog } from '@/composables/useDialog.js';
-const { showConfirm, showAlert, showPrompt } = useDialog();
+const { showConfirm, showAlert } = useDialog();
 
 import { computed, ref, watch, onMounted, onUnmounted } from 'vue';
-import { PlaneTakeoff, Film, Ticket, Calendar, Train, ArrowRight, CreditCard, Music, ChevronDown, Trash2 } from 'lucide-vue-next';
+import { Trash2 } from 'lucide-vue-next';
 import QrcodeVue from 'qrcode.vue';
 import { useI18n } from 'vue-i18n';
-import { ticketMetadata, ticketCategory, ticketBarcode, ticketGroup } from '@/tickets/wallet.js';
+import {
+  ticketMetadata,
+  ticketKind,
+  ticketBarcode,
+  ticketGroup,
+  ticketCardTitle,
+  ticketCardSubtitle,
+  ticketFormattedDate,
+  ticketFormattedTime
+} from '@/tickets/wallet.js';
 
 const props = defineProps({
   node: {
     type: Object,
     required: true
+  },
+  index: {
+    type: Number,
+    default: 0
   }
 });
 
 const { t } = useI18n();
 
-const expanded = ref(false);
 const showDetail = ref(false);
 const isEditing = ref(false);
 const editForm = ref({});
 const isAddedToCalendar = ref(false);
 
+const SVG_PATHS = {
+  flight: '<path d="M12 2c.55 0 1 .45 1 1v7l7.5 4v2L13 14v5l2 1.5V22l-3-1-3 1v-1.5l2-1.5v-5l-7.5 2v-2L11 10V3c0-.55.45-1 1-1Z"/>',
+  rail: '<rect x="5" y="3" width="14" height="16" rx="3"/><path d="M5 10h14M8 22l2-3m6 0 2 3M9 6h1m4 0h1"/>',
+  film: '<rect x="3" y="5" width="18" height="15" rx="2"/><path d="M3 10h18M8 5l3 5m3-5 3 5"/>',
+  museum: '<path d="M3 9l9-5 9 5M4 10h16M6 10v9m4-9v9m4-9v9m4-9v9M3 20h18"/>'
+};
+
+const kind = computed(() => ticketKind(props.node));
+const svgPath = computed(() => SVG_PATHS[kind.value] || SVG_PATHS.flight);
+
+const cardTitle = computed(() => ticketCardTitle(props.node));
+const cardSubtitle = computed(() => ticketCardSubtitle(props.node));
+const cardDate = computed(() => ticketFormattedDate(props.node) || t('ticket.undated') || '待定');
+const cardTime = computed(() => ticketFormattedTime(props.node) || '—');
+
+const isExpired = computed(() => ticketGroup(props.node) === 'expired');
+const statusLabel = computed(() => {
+  if (isExpired.value) return t('ticket.status_expired') || '已过期';
+  return t('ticket.status_upcoming') || '即将使用';
+});
+
+const metadata = computed(() => ticketMetadata(props.node));
+const barcodeData = computed(() => ticketBarcode(props.node));
+const isQrBarcode = computed(() => !metadata.value.barcode_type || ['qr', 'qr_code', 'qrcode'].includes(String(metadata.value.barcode_type).toLowerCase()));
+
+const cardInfoDetail = computed(() => {
+  const parts = [];
+  if (metadata.value.flight_info?.flight_number) parts.push(metadata.value.flight_info.flight_number);
+  if (metadata.value.flight_info?.origin_terminal) parts.push(metadata.value.flight_info.origin_terminal);
+  if (metadata.value.venue) parts.push(metadata.value.venue);
+  if (metadata.value.seat_info || metadata.value.flight_info?.seat) parts.push(metadata.value.seat_info || metadata.value.flight_info?.seat);
+  return parts.length > 0 ? parts.join(' · ') : cardSubtitle.value;
+});
+
+const openDetail = () => {
+  showDetail.value = true;
+};
+
+const closeDetail = () => {
+  showDetail.value = false;
+  isEditing.value = false;
+};
+
 const formatDateInput = (field) => {
   let val = editForm.value[field] || '';
-  val = val.replace(/\D/g, ''); 
+  val = val.replace(/\D/g, '');
   if (val.length > 8) val = val.substring(0, 8);
   if (val.length >= 7) {
     val = val.substring(0, 4) + '-' + val.substring(4, 6) + '-' + val.substring(6, 8);
@@ -153,9 +228,9 @@ const formatDateInput = (field) => {
   editForm.value[field] = val;
 };
 
-const formatTimeInput = async (field) => {
+const formatTimeInput = (field) => {
   let val = editForm.value[field] || '';
-  val = val.replace(/\D/g, ''); 
+  val = val.replace(/\D/g, '');
   if (val.length > 4) val = val.substring(0, 4);
   if (val.length >= 3) {
     val = val.substring(0, 2) + ':' + val.substring(2, 4);
@@ -164,52 +239,26 @@ const formatTimeInput = async (field) => {
 };
 
 const checkCalendar = async () => {
-  if (window.appAPI.listEvents) {
+  if (window.appAPI && window.appAPI.listEvents) {
     try {
       const allEvents = await window.appAPI.listEvents();
       isAddedToCalendar.value = allEvents.some(e => e.linked_ticket_id === props.node.id);
-    } catch(e) {
-      console.error("checkCalendar err", e);
+    } catch (e) {
+      console.error('checkCalendar err', e);
     }
   }
 };
 
-const addToCalendar = async () => {
-  if (isAddedToCalendar.value) return;
-  try {
-    const payload = {
-      title: props.node.label,
-      type: 'event',
-      status: 'pending',
-      date: metadata.value.start_time ? metadata.value.start_time.split(' ')[0] : '',
-      startTime: metadata.value.start_time || '',
-      endTime: metadata.value.end_time || '',
-      linked_ticket_id: props.node.id
-    };
-    await window.appAPI.confirmEvent(payload);
-    isAddedToCalendar.value = true;
-  } catch(e) {
-    console.error("Failed to add to calendar", e);
-  }
-};
-
-const startEdit = async () => {
+const startEdit = () => {
   editForm.value = {
-    title: props.node.label,
-    origin: originLabel.value,
-    originTerminal: metadata.value.flight_info?.origin_terminal || '',
-    destination: destinationLabel.value,
-    destinationTerminal: metadata.value.flight_info?.destination_terminal || '',
-    date: metadata.value.start_time ? metadata.value.start_time.split(' ')[0] : '',
-    time: (metadata.value.start_time && metadata.value.start_time.includes(' ')) ? metadata.value.start_time.split(' ')[1].substring(0,5) : '',
-    endDate: metadata.value.end_time ? metadata.value.end_time.split(' ')[0] : '',
-    endTime: (metadata.value.end_time && metadata.value.end_time.includes(' ')) ? metadata.value.end_time.split(' ')[1].substring(0,5) : '',
+    title: cardTitle.value,
+    origin: metadata.value.flight_info?.origin || '',
+    destination: metadata.value.flight_info?.destination || '',
     flight_number: metadata.value.flight_info?.flight_number || '',
-    passenger_name: metadata.value.flight_info?.passenger_name || metadata.value.passenger_name || '',
-    seat: seatLabel.value,
-    pnr: metadata.value.flight_info?.pnr || '',
+    seat: metadata.value.flight_info?.seat || metadata.value.seat_info || '',
     venue: metadata.value.venue || '',
-    barcode_data: ticketBarcode(props.node)
+    date: metadata.value.start_time ? metadata.value.start_time.split(' ')[0] : (metadata.value.date || ''),
+    time: (metadata.value.start_time && metadata.value.start_time.includes(' ')) ? metadata.value.start_time.split(' ')[1].substring(0, 5) : (metadata.value.time || ''),
   };
   isEditing.value = true;
 };
@@ -222,59 +271,28 @@ const saveEdit = async () => {
     } else if (newStartTime) {
       newStartTime += ' 00:00:00';
     }
-    
-    let newEndTime = editForm.value.endDate;
-    if (editForm.value.endTime) {
-      newEndTime += ' ' + editForm.value.endTime + ':00';
-    } else if (newEndTime) {
-      newEndTime += ' 00:00:00';
+
+    const newMetadata = { ...metadata.value, flight_info: { ...(metadata.value.flight_info || {}) } };
+    newMetadata.start_time = newStartTime;
+    newMetadata.venue = editForm.value.venue;
+    if (editForm.value.seat) {
+      newMetadata.seat_info = editForm.value.seat;
+      newMetadata.flight_info.seat = editForm.value.seat;
+    }
+    if (editForm.value.flight_number) {
+      newMetadata.flight_info.flight_number = editForm.value.flight_number;
+    }
+    if (editForm.value.origin) {
+      newMetadata.flight_info.origin = editForm.value.origin;
+    }
+    if (editForm.value.destination) {
+      newMetadata.flight_info.destination = editForm.value.destination;
     }
 
-    let newMetadata = { ...metadata.value, flight_info: { ...(metadata.value.flight_info || {}) } };
-    newMetadata.start_time = newStartTime;
-    newMetadata.end_time = newEndTime;
-    newMetadata.venue = editForm.value.venue;
-    if (metadata.value.passenger_name !== undefined) newMetadata.passenger_name = editForm.value.passenger_name;
-    
-    if (isTravel.value) {
-      if (!newMetadata.flight_info) newMetadata.flight_info = {};
-      newMetadata.flight_info.origin = editForm.value.origin;
-      newMetadata.flight_info.origin_terminal = editForm.value.originTerminal;
-      newMetadata.flight_info.destination = editForm.value.destination;
-      newMetadata.flight_info.destination_terminal = editForm.value.destinationTerminal;
-      newMetadata.flight_info.flight_number = editForm.value.flight_number;
-      newMetadata.flight_info.passenger_name = editForm.value.passenger_name;
-      newMetadata.flight_info.seat = editForm.value.seat;
-      newMetadata.flight_info.pnr = editForm.value.pnr;
-      newMetadata.seat_info = editForm.value.seat;
-    }
-    
     const newTitle = editForm.value.title || props.node.label;
     const result = await window.appAPI.kgUpdateTicket(props.node.id, newTitle, newMetadata);
     if (result?.error || result?.ok === false) throw new Error(result.error || 'Ticket update failed');
-    
-    if (isAddedToCalendar.value && window.appAPI.listEvents) {
-      try {
-        const allEvents = await window.appAPI.listEvents();
-        const event = allEvents.find(e => e.linked_ticket_id === props.node.id);
-        if (event && window.appAPI.deleteEvent) {
-          await window.appAPI.deleteEvent(event.id);
-          const payload = {
-            title: newTitle,
-            type: 'event',
-            status: 'pending',
-            linked_ticket_id: props.node.id,
-            date: newStartTime ? newStartTime.split(' ')[0] : '',
-            startTime: newStartTime || '',
-            endTime: newEndTime || ''
-          };
-          await window.appAPI.confirmEvent(payload);
-        }
-      } catch (e) {
-        console.error("Failed to sync calendar on edit", e);
-      }
-    }
-    
+
     isEditing.value = false;
     window.dispatchEvent(new CustomEvent('ticket-created'));
   } catch (e) {
@@ -282,51 +300,12 @@ const saveEdit = async () => {
   }
 };
 
-  watch(showDetail, (newVal) => {
-    if (newVal) {
-      checkCalendar();
-    }
-  });
-
-const metadata = computed(() => ticketMetadata(props.node));
-const category = computed(() => ticketCategory(props.node));
-const barcodeData = computed(() => ticketBarcode(props.node));
-const isQrBarcode = computed(() => !metadata.value.barcode_type || ['qr', 'qr_code', 'qrcode'].includes(String(metadata.value.barcode_type).toLowerCase()));
-const ticketDateLabel = computed(() => formatDateTime(metadata.value.start_time || metadata.value.date) || t('ticket.undated'));
-const isExpired = computed(() => ticketGroup(props.node) === 'expired');
-
-const isTravel = computed(() => {
-  return category.value === 'flight' || category.value === 'train';
-});
-
-const categoryIcon = computed(() => {
-  switch (category.value) {
-    case 'flight': return PlaneTakeoff;
-    case 'movie': return Film;
-    case 'train': return Train;
-    case 'membership': return CreditCard;
-    case 'concert': return Music;
-    case 'exhibition': return Ticket;
-    default: return Ticket;
-  }
-});
-
-const displayStatus = computed(() => {
-  if (isExpired.value) return t('ticket.status_expired') || 'Expired';
-  if (metadata.value.status === 'upcoming') return t('ticket.status_upcoming') || 'Upcoming';
-  return metadata.value.status || '';
-});
-
-const ticketStatusClass = computed(() => {
-  return isExpired.value ? 'status-expired' : 'status-active';
-});
-
 const deleteTicket = async () => {
   if (await showConfirm('确定要删除此票据吗？')) {
     try {
       await window.appAPI.kgDeleteNode(props.node.id);
       showDetail.value = false;
-      window.dispatchEvent(new CustomEvent('ticket-created')); // triggers a refresh in KnowledgeGraphView
+      window.dispatchEvent(new CustomEvent('ticket-created'));
     } catch (e) {
       console.error('Failed to delete ticket', e);
       await showAlert('删除失败');
@@ -334,49 +313,17 @@ const deleteTicket = async () => {
   }
 };
 
-const originLabel = computed(() => {
-  if (metadata.value.flight_info?.origin) return metadata.value.flight_info.origin;
-  return metadata.value.venue?.split('-')[0] || '';
-});
-
-const destinationLabel = computed(() => {
-  if (metadata.value.flight_info?.destination) return metadata.value.flight_info.destination;
-  return metadata.value.venue?.split('-')[1] || '';
-});
-
-const seatLabel = computed(() => {
-  if (metadata.value.seat_info) return metadata.value.seat_info;
-  if (metadata.value.flight_info?.seat) return metadata.value.flight_info.seat;
-  return '';
-});
-
-const hasSubInfo = computed(() => {
-  return seatLabel.value || metadata.value.flight_info?.carrier || metadata.value.flight_info?.pnr;
-});
-
-const formatDateTime = (timeStr) => {
-  if (!timeStr) return '';
-  const parts = timeStr.split(' ');
-  if (parts.length > 1 && parts[1] !== '00:00:00') {
-    return `${parts[0]} ${parts[1].substring(0, 5)}`;
-  }
-  return parts[0];
-};
-
-const formatTimeOnly = (timeStr) => {
-  if (!timeStr) return '';
-  const parts = timeStr.split(' ');
-  if (parts.length > 1) {
-    return parts[1].substring(0, 5);
-  }
-  return '';
-};
-
 const handleTicketOpen = (e) => {
   if (e.detail === props.node.id) {
     showDetail.value = true;
   }
 };
+
+watch(showDetail, (newVal) => {
+  if (newVal) {
+    checkCalendar();
+  }
+});
 
 onMounted(() => {
   window.addEventListener('ticket-card-open', handleTicketOpen);
@@ -388,300 +335,352 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-.ticket-card-wrapper {
-  background: var(--ticket-general);
-  border: 1px solid var(--ticket-edge);
-  border-radius: 18px;
+/* ── Deck Pass Card (1:1 with mockup) ── */
+.pass {
+  position: relative;
+  width: 100%;
+  height: 238px;
+  border: 1px solid #ffffff42;
+  border-radius: 22px;
+  padding: 14px 16px;
+  color: #fff;
+  text-align: left;
+  box-shadow: 0 7px 17px #10243228;
+  cursor: pointer;
+  transition: transform .18s ease, box-shadow .18s ease;
   overflow: hidden;
+  touch-action: manipulation;
+  box-sizing: border-box;
+  display: block;
+  font-family: inherit;
+}
+.pass:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 11px 20px #10243235;
+}
+.pass:focus-visible {
+  outline: 3px solid var(--brand, #90bafa);
+  outline-offset: 2px;
+}
+.pass.flight { background: var(--flight, #6593bc); }
+.pass.rail { background: var(--rail, #5eaa96); }
+.pass.film { background: var(--film, #b57f9d); }
+.pass.museum { background: var(--museum, #d29b76); }
+.pass.general { background: var(--flight, #6593bc); }
+
+/* Expired: desaturate from original category color! */
+.pass.is-expired {
+  filter: grayscale(.63) saturate(.77) brightness(.97);
+}
+.pass.is-expired:hover {
+  filter: grayscale(.48) saturate(.84) brightness(.98);
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  height: 51px;
+}
+.icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 37px;
+  height: 37px;
+  border-radius: 50%;
+  background: #ffffff2e;
+}
+.icon svg {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.icon svg.flight-symbol {
+  fill: currentColor;
+  stroke: none;
+}
+.identity {
+  min-width: 0;
+  flex: 1;
+}
+.identity strong {
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 15px;
+  line-height: 1.25;
+  font-weight: 700;
+  color: #fff;
+}
+.identity small {
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 11px;
+  opacity: .8;
+  margin-top: 2px;
+  color: #fff;
+}
+.when {
+  align-self: flex-start;
+  padding-top: 5px;
+  font-size: 11px;
+  white-space: nowrap;
+  opacity: .85;
+  color: #fff;
+}
+
+.body-title {
+  margin-top: 31px;
+  font-size: 23px;
+  line-height: 1.2;
+  font-weight: 800;
+  letter-spacing: -.04em;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: #fff;
+}
+.body-sub {
+  margin-top: 9px;
+  font-size: 13px;
+  opacity: .88;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: #fff;
+}
+.foot {
+  display: flex;
+  justify-content: space-between;
+  border-top: 1px solid #ffffff79;
+  margin-top: 24px;
+  padding-top: 11px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #fff;
+}
+
+/* ── Modal View (1:1 with mockup) ── */
+.veil {
+  position: fixed;
+  z-index: 9999;
+  inset: 0;
+  background: #13212dbf;
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
-  width: 100%;
-  height: 190px;
-  padding: 18px 20px 22px;
-  box-shadow: 0 8px 20px var(--ticket-shadow);
-  color: var(--ticket-ink);
-  font-family: 'Inter', system-ui, sans-serif;
-  text-align: left;
-  cursor: pointer;
-  transition: transform 180ms ease, box-shadow 180ms ease;
-}
-
-.ticket-card-wrapper:hover { transform: translateY(-3px); }
-.ticket-card-wrapper:focus-visible { outline: 3px solid var(--user-accent); outline-offset: 3px; }
-.ticket-flight { background: var(--ticket-flight); }
-.ticket-train { background: var(--ticket-train); }
-.ticket-movie { background: var(--ticket-movie); }
-.ticket-exhibition { background: var(--ticket-exhibition); }
-.ticket-concert { background: var(--ticket-concert); }
-.ticket-membership { background: var(--ticket-membership); }
-.ticket-card-wrapper.is-expired {
-  background: var(--ticket-expired);
-  color: var(--ticket-expired-ink);
-}
-
-.ticket-card-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.ticket-card-top .category-icon { width: 27px; height: 27px; padding: 0; background: none; color: inherit; }
-.ticket-card-date { font-size: 12px; font-weight: 600; letter-spacing: .02em; }
-.ticket-card-main { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-.ticket-card-title { font-size: clamp(19px, 4vw, 25px); line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ticket-card-subtitle { font-size: 13px; opacity: .85; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-@media (prefers-reduced-motion: reduce) {
-  .ticket-card-wrapper { transition: none; }
-  .ticket-card-wrapper:hover { transform: none; }
-}
-
-.ticket-subtitle {
-  font-size: 12px;
-  color: var(--text-tertiary);
-  margin-top: 4px;
-  padding-left: 33px;
-}
-
-.ticket-header {
-  padding: 10px 14px;
-}
-
-.ticket-title-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.category-icon {
-  width: 18px;
-  height: 18px;
-  padding: 5px;
-  border-radius: var(--radius-default);
-  background: var(--user-accent, #4f8cf7);
-  color: var(--text-primary);
-  box-sizing: content-box;
-  flex-shrink: 0;
-}
-
-.ticket-title {
-  font-weight: 600;
-  font-size: 14px;
-  flex: 1;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.ticket-status {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-
-.status-active {
-  background-color: var(--color-success);
-}
-
-.status-expired {
-  background-color: var(--text-muted, #999);
-}
-
-/* ── Detail Modal (reuse ChatView boarding pass style names) ── */
-.bp-modal-overlay {
-  position: fixed;
-  top: 0; left: 0; right: 0; bottom: 0;
-  background: rgba(0,0,0,0.5);
-  display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 9999;
-  backdrop-filter: blur(4px);
-}
-.boarding-pass-modern-card {
-  background: var(--bg-tertiary);
-  color: var(--text-primary);
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-default);
   padding: 20px;
-  width: 90%;
-  max-width: 340px;
-  box-shadow: 0 16px 40px rgba(0,0,0,0.3);
-  animation: modalPop 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-  font-family: var(--font-sans, system-ui, sans-serif);
+  overflow-y: auto;
+  box-sizing: border-box;
 }
-@keyframes modalPop {
-  from { opacity: 0; transform: scale(0.9); }
-  to { opacity: 1; transform: scale(1); }
+.detail {
+  position: relative;
+  width: min(100%, 390px);
+  min-height: 414px;
+  border-radius: 23px;
+  padding: 22px;
+  color: #fff;
+  box-shadow: 0 18px 38px #0e1c2e66;
+  border: 1px solid #ffffff42;
+  box-sizing: border-box;
+  text-align: left;
 }
-.bp-modern-header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 0.8em;
-  font-weight: 500;
-  opacity: 0.7;
-  margin-bottom: 8px;
-  justify-content: flex-start;
+.detail.flight { background: var(--flight, #6593bc); }
+.detail.rail { background: var(--rail, #5eaa96); }
+.detail.film { background: var(--film, #b57f9d); }
+.detail.museum { background: var(--museum, #d29b76); }
+.detail.general { background: var(--flight, #6593bc); }
+.detail.expired-detail { filter: grayscale(.55) saturate(.8); }
+
+.detail h3 {
+  font-size: 25px;
+  line-height: 1.18;
+  letter-spacing: -.04em;
+  margin: 32px 0 8px;
+  font-weight: 800;
+  color: #fff;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.bp-modern-icon {
-  display: flex;
-  align-items: center;
+.detail p {
+  margin: 0;
+  opacity: .85;
+  font-size: 14px;
+  color: #fff;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.bp-route-row {
+.detail dl {
   display: grid;
-  grid-template-columns: 1fr auto 1fr;
-  align-items: start;
-  gap: 12px;
-  margin-top: 10px;
-  margin-bottom: 24px;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+  margin: 28px 0 0;
+  padding-top: 15px;
+  border-top: 1px solid #ffffff80;
 }
-.bp-route-center {
-  opacity: 0.5;
-  margin-top: 6px;
+.detail dt {
+  font-size: 11px;
+  opacity: .75;
+  color: #fff;
 }
-.bp-airport-code {
-  font-size: 1.6em;
+.detail dd {
+  margin: 3px 0 0;
+  font-size: 14px;
   font-weight: 700;
-  letter-spacing: 1px;
-  height: 34px;
-  line-height: 34px;
-  display: inline-block;
+  color: #fff;
 }
-.bp-route-arrow {
-  font-size: 1.1em;
-  opacity: 0.5;
+
+.detail-qr-section {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-top: 24px;
+  padding-top: 18px;
+  border-top: 1px solid #ffffff42;
 }
-.bp-detail-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 20px 12px;
+.detail-qr-box {
+  background: #ffffff;
+  padding: 12px;
+  border-radius: 12px;
+  display: inline-flex;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
 }
-.bp-modern-field {
+.detail-qr-caption {
+  font-size: 11px;
+  margin-top: 8px;
+  opacity: 0.8;
+  letter-spacing: 0.5px;
+}
+.detail-barcode-text {
+  margin-top: 18px;
+  padding: 8px 12px;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 8px;
+  font-size: 12px;
+  font-family: monospace;
+  text-align: center;
+  word-break: break-all;
+}
+
+.detail-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 22px;
+  padding-top: 14px;
+  border-top: 1px solid #ffffff30;
+}
+.detail-act-btn {
+  background: rgba(255, 255, 255, 0.22);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  color: #fff;
+  border-radius: 14px;
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: background .15s ease;
+}
+.detail-act-btn:hover {
+  background: rgba(255, 255, 255, 0.35);
+}
+.detail-del-btn {
+  background: rgba(220, 38, 38, 0.35);
+  border-color: rgba(220, 38, 38, 0.5);
+}
+.detail-del-btn:hover {
+  background: rgba(220, 38, 38, 0.6);
+}
+
+.close {
+  border: 0;
+  border-radius: 18px;
+  background: #ffffff;
+  color: #1a2832;
+  padding: 9px 28px;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  margin-top: 20px;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.25);
+  transition: transform .15s ease;
+}
+.close:hover {
+  transform: translateY(-1px);
+}
+
+/* Edit form */
+.detail-edit-form {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid #ffffff40;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.edit-field {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  min-height: 48px;
 }
-.bp-modern-field:nth-child(3n+1) {
-  align-items: flex-start;
+.edit-field label {
+  font-size: 11px;
+  opacity: .8;
 }
-.bp-modern-field:nth-child(3n+1) .bp-modern-value,
-.bp-modern-field:nth-child(3n+1) .bp-edit-input {
-  text-align: left;
-}
-.bp-modern-field:nth-child(3n+2) {
-  align-items: center;
-}
-.bp-modern-field:nth-child(3n+2) .bp-modern-value,
-.bp-modern-field:nth-child(3n+2) .bp-edit-input {
-  text-align: center;
-}
-.bp-modern-field:nth-child(3n) {
-  align-items: flex-end;
-}
-.bp-modern-field:nth-child(3n) .bp-modern-value,
-.bp-modern-field:nth-child(3n) .bp-edit-input {
-  text-align: right;
-}
-.bp-modern-label {
-  font-size: 0.75em;
-  opacity: 0.7;
-  letter-spacing: 0.3px;
-}
-.bp-modern-value {
-  font-size: 1.15em;
-  font-weight: 700;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  height: 28px;
-  line-height: 28px;
-  width: 100%;
-}
-.bp-modern-divider {
-  height: 1px;
-  background: var(--border-default);
-  margin: 10px 0;
-}
-.bp-modern-qr-section {
-  margin-top: 16px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-}
-.bp-barcode-notice { margin-top: 16px; color: var(--text-secondary); font-size: 12px; line-height: 1.5; text-align: center; }
-.bp-modern-qr-wrapper {
-  background: var(--text-primary);
-  padding: 10px;
-  border-radius: var(--radius-default);
-}
-.bp-modern-actions {
-  display: flex;
-  gap: 10px;
-  margin-top: 16px;
-}
-.bp-modern-btn {
-  flex: 1;
-  padding: 10px;
-  border-radius: var(--radius-default);
-  border: none;
-  font-weight: 600;
-  cursor: pointer;
-  transition: opacity 0.2s;
-  font-size: 0.9em;
-}
-.bp-modern-btn:hover {
-  opacity: 0.85;
-}
-.bp-modern-btn-dismiss {
-  background: var(--bg-secondary);
-  color: var(--text-secondary);
-}
-.bp-modern-btn-danger {
-  background: var(--color-error, #f44336);
-  color: var(--text-primary);
-  flex: none;
-  width: 44px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.bp-edit-input {
-  background: var(--bg-primary);
-  border: 1px solid var(--border-default);
-  color: var(--text-primary);
-  border-radius: var(--radius-default);
-  padding: 4px 8px;
-  font-size: 1.05em;
-  width: 100%;
-  box-sizing: border-box;
-  font-family: inherit;
-  height: 28px;
-}
-.bp-edit-input:focus {
+.edit-input {
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 8px;
+  padding: 6px 10px;
+  color: #fff;
+  font-size: 13px;
   outline: none;
-  border-color: var(--accent-primary);
 }
-.bp-modern-btn-primary {
-  background: var(--accent-primary);
-  color: var(--text-primary);
+.edit-input:focus {
+  border-color: #fff;
 }
-
-
-.bp-airport-group {
+.edit-grid-2 {
   display: grid;
-  grid-template-rows: 34px 30px 32px 30px;
-  align-items: center;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
 }
-.bp-airport-group.is-origin {
-  justify-items: start;
+.edit-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
 }
-.bp-airport-group.is-destination {
-  justify-items: end;
+.edit-submit-btn {
+  background: #fff;
+  color: #1a2832;
+  border: none;
+  border-radius: 12px;
+  padding: 6px 16px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
 }
-.bp-terminal {
-  font-size: 1.1em;
-  font-weight: 500;
-  opacity: 0.7;
-  margin-top: 4px;
+.edit-cancel-btn {
+  background: rgba(255, 255, 255, 0.2);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 12px;
+  padding: 6px 14px;
+  font-size: 13px;
+  cursor: pointer;
 }
-
 </style>

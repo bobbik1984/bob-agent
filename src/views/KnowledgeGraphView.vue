@@ -317,16 +317,31 @@
       </div>
       <div v-else class="wallet-layout">
         <section v-if="walletGroups.upcoming.length" class="wallet-section">
-          <h2>{{ $t('ticket.group_upcoming') }} <span>{{ walletGroups.upcoming.length }}</span></h2>
-          <div class="wallet-stack"><TicketCard v-for="node in walletGroups.upcoming" :key="node.id" :node="node" /></div>
+          <div class="section-head">
+            <span>{{ $t('ticket.group_upcoming') || '待使用' }}</span>
+            <span>{{ walletGroups.upcoming.length }} {{ $t('ticket.count_unit') || '张' }} · {{ $t('ticket.bright_colors') || '色彩明亮' }}</span>
+          </div>
+          <div class="wallet-stack">
+            <TicketCard v-for="(node, index) in walletGroups.upcoming" :key="node.id" :node="node" :index="index" />
+          </div>
         </section>
         <section v-if="walletGroups.undated.length" class="wallet-section">
-          <h2>{{ $t('ticket.group_undated') }} <span>{{ walletGroups.undated.length }}</span></h2>
-          <div class="wallet-stack"><TicketCard v-for="node in walletGroups.undated" :key="node.id" :node="node" /></div>
+          <div class="section-head">
+            <span>{{ $t('ticket.group_undated') || '未定日期' }}</span>
+            <span>{{ walletGroups.undated.length }} {{ $t('ticket.count_unit') || '张' }}</span>
+          </div>
+          <div class="wallet-stack">
+            <TicketCard v-for="(node, index) in walletGroups.undated" :key="node.id" :node="node" :index="index" />
+          </div>
         </section>
-        <section v-if="walletGroups.expired.length" class="wallet-section wallet-section-expired">
-          <h2>{{ $t('ticket.group_expired') }} <span>{{ walletGroups.expired.length }}</span></h2>
-          <div class="wallet-stack"><TicketCard v-for="node in walletGroups.expired" :key="node.id" :node="node" /></div>
+        <section v-if="walletGroups.expired.length" class="wallet-section wallet-section-expired archive-section">
+          <div class="section-head">
+            <span>{{ $t('ticket.group_expired') || '已过期' }}</span>
+            <span>{{ walletGroups.expired.length }} {{ $t('ticket.count_unit') || '张' }} · {{ $t('ticket.muted_archive') || '灰度收纳' }}</span>
+          </div>
+          <div class="wallet-stack expired">
+            <TicketCard v-for="(node, index) in walletGroups.expired" :key="node.id" :node="node" :index="index" />
+          </div>
         </section>
       </div>
     </div>
@@ -1345,15 +1360,17 @@ async function removeSourceBatch(node) {
 </script>
 
 <style scoped>
-.ticket-body { flex: 1; overflow-y: auto; padding: 26px 18px 56px; background: var(--bg-primary); }
-.wallet-layout { max-width: 560px; margin: 0 auto; display: flex; flex-direction: column; gap: 46px; }
-.wallet-section h2 { display: flex; align-items: baseline; gap: 10px; margin: 0 2px 18px; color: var(--text-primary); font-size: 20px; font-weight: 650; }
-.wallet-section h2 span { color: var(--text-tertiary); font-size: 14px; font-weight: 500; }
-.wallet-section-expired { padding-top: 30px; border-top: 1px solid var(--border-subtle); }
+.ticket-body { flex: 1; overflow-y: auto; padding: 20px 18px 60px; background: var(--bg-primary); }
+.wallet-layout { max-width: 420px; margin: 0 auto; display: flex; flex-direction: column; gap: 36px; }
+.section-head { display: flex; align-items: center; justify-content: space-between; margin: 7px 3px 12px; font-size: 13px; font-weight: 800; color: var(--text-primary); }
+.section-head span:last-child { font-size: 11px; font-weight: 500; color: var(--text-tertiary); }
+.archive-section { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border-subtle); }
+.archive-section .section-head { color: var(--text-tertiary); }
 .wallet-stack { display: flex; flex-direction: column; padding-bottom: 4px; }
-.wallet-stack > :not(:first-child) { margin-top: -115px; }
+.wallet-stack > :not(:first-child) { margin-top: -156px; }
 .wallet-stack > :last-child { margin-bottom: 0; }
-@media (max-width: 600px) { .ticket-body { padding: 22px 14px 48px; } .wallet-layout { gap: 40px; } }
+.wallet-stack > *:hover { z-index: 50 !important; }
+@media (max-width: 600px) { .ticket-body { padding: 16px 12px 48px; } .wallet-layout { gap: 32px; max-width: 100%; } }
 .kg-mobile-col {
   flex-direction: column !important;
 }
