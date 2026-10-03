@@ -1,9 +1,6 @@
 import { useDialog } from '@/composables/useDialog.js';
-import { invoke as tauriInvoke } from '@tauri-apps/api/core';
-import { open as tauriOpen, save as tauriSave } from '@tauri-apps/plugin-dialog';
-import { listen as tauriListen } from '@tauri-apps/api/event';
-import { getCurrentWindow as tauriGetCurrentWindow } from '@tauri-apps/api/window';
-
+import { registerToolConfirmListener } from './startup/deferred-tool-confirm.js';
+import { BOB_BRAND_BLUE } from './constants/theme.js';
 const { showConfirm, showAlert, showPrompt } = useDialog();
 // ═══════════════════════════════════════════════════════════
 // Bob-Agent Tauri Bridge — 完整适配器层
@@ -19,37 +16,16 @@ const IS_TAURI = typeof window !== 'undefined' && !!window.__TAURI_INTERNALS__;
 let invoke, open, save, listen, getCurrentWindow;
 
 if (IS_TAURI) {
-  // 真实 Tauri 环境 — 同步绑定静态模块，消除 Top-level Await 造成的启动阻塞
-  invoke = tauriInvoke;
-  open = tauriOpen;
-  save = tauriSave;
-  listen = tauriListen;
-  getCurrentWindow = tauriGetCurrentWindow;
-
-  // ── R2/R3 工具风险确认 ──────────────────────────────────
-  try {
-    listen('tool:confirm_required', async (event) => {
-      const { request_id, tool_name, args_preview, risk_level } = event.payload;
-      const isR3 = risk_level === 'R3';
-
-      const approved = await showConfirm({
-        title: isR3 ? '⚠️ 高危操作确认' : '敏感操作确认',
-        message: `Bob 请求执行${isR3 ? '高危' : '敏感'}工具：\n\n🔧 ${tool_name}\n📋 ${args_preview.substring(0, 200)}`,
-        confirmText: isR3 ? '确认执行' : '允许',
-        cancelText: '拒绝',
-        confirmClass: isR3 ? 'btn-danger' : '',
-      });
-
-      await invoke('tool_confirm_response', {
-        requestId: request_id,
-        approved: !!approved
-      });
-    }).catch(err => {
-      console.warn('[Bridge] tool:confirm_required registration warning:', err);
-    });
-  } catch (err) {
-    console.warn('[Bridge] Failed to register tool confirm listener:', err);
-  }
+  // 真实 Tauri 环境 — 动态 import 确保浏览器不会加载这些模块
+  const core = await import('@tauri-apps/api/core');
+  const dialog = await import('@tauri-apps/plugin-dialog');
+  const event = await import('@tauri-apps/api/event');
+  const win = await import('@tauri-apps/api/window');
+  invoke = core.invoke;
+  open = dialog.open;
+  save = dialog.save;
+  listen = event.listen;
+  getCurrentWindow = win.getCurrentWindow;
 } else {
   // ── 浏览器 Mock 环境 ──────────────────────────────────
   console.log('%c[Bridge] Running in BROWSER mock mode', 'color: #f59e0b; font-weight: bold;');
@@ -89,7 +65,7 @@ if (IS_TAURI) {
 
   const MOCK_CONFIG = {
     theme: 'dark',
-    accentColor: '#2776BB',
+    accentColor: BOB_BRAND_BLUE,
     uiScale: '100',
     locale: 'zh-CN',
     offlineModelPath: '',
@@ -769,6 +745,19 @@ if (IS_TAURI) {
     setFocus: async () => {},
     unminimize: async () => {},
   });
+}
+
+let toolConfirmRegistration = null;
+export function startPostMountBridgeListeners() {
+  if (!IS_TAURI) return Promise.resolve();
+  if (!toolConfirmRegistration) {
+    toolConfirmRegistration = registerToolConfirmListener({ listen, invoke, showConfirm })
+      .catch((error) => {
+        toolConfirmRegistration = null;
+        throw error;
+      });
+  }
+  return toolConfirmRegistration;
 }
 
 // ═══════════════════════════════════════════════════════════

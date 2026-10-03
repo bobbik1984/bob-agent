@@ -1,7 +1,7 @@
 {
   "name": "installer",
   "private": true,
-  "version": "0.9.20",
+  "version": "0.9.24",
   "type": "module",
   "scripts": {
     "dev": "vite",

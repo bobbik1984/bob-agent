@@ -308,7 +308,7 @@ dependencies = [
 
 [[package]]
 name = "bob-installer"
-version = "0.9.20"
+version = "0.9.24"
 dependencies = [
  "mslnk",
  "serde",

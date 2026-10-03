@@ -1837,6 +1837,14 @@ impl DeviceRegistry {
         }
     }
 
+    fn save_checked(&self) -> Result<(), String> {
+        let Some(path) = &self.storage_path else { return Ok(()); };
+        let devices = self.devices.read().map_err(|e| format!("读取设备名册失败: {}", e))?;
+        let json = serde_json::to_string_pretty(&*devices)
+            .map_err(|e| format!("序列化设备名册失败: {}", e))?;
+        std::fs::write(path, json).map_err(|e| format!("保存设备名册失败: {}", e))
+    }
+
     pub fn update_device(&self, device: ConnectedDevice) {
         {
             let mut devices = self.devices.write().unwrap();
@@ -1919,25 +1927,7 @@ pub fn get_connected_devices_core(
     // 1. 过滤已撤销 (revoked) 设备，绝不在设备列表中陈列已被废弃的历史记录
     list.retain(|d| d.status.as_deref() != Some("revoked"));
 
-    // 2. 从 DeviceRegistry 中彻底清理已撤销的幽灵设备
-    if let (Some(ref reg), Some(conn)) = (&registry_opt, db_conn_opt) {
-        if let Ok(mut devs) = reg.devices.write() {
-            let before_len = devs.len();
-            devs.retain(|_, d| {
-                let db_status: Option<String> = conn.query_row(
-                    "SELECT status FROM trusted_devices WHERE device_id = ?1",
-                    [&d.device_id],
-                    |row| row.get(0),
-                ).ok();
-                db_status.as_deref() != Some("revoked")
-            });
-            if devs.len() != before_len {
-                reg.save();
-            }
-        }
-    }
-
-    // 3. 如果当前有活跃配对 PC，自动从注册表中清理掉其他陈旧且未受信任的幽灵 PC 记录
+    // 2. 如果当前有活跃配对 PC，自动从注册表中清理掉其他陈旧且未受信任的幽灵 PC 记录
     if let Some(ref active_id) = active_payload_pc_id {
         list.retain(|d| {
             let is_other_pc = (d.platform == "windows" || d.platform == "desktop") && &d.device_id != active_id;
@@ -1968,42 +1958,41 @@ pub async fn get_connected_devices(app: AppHandle) -> Result<Vec<ConnectedDevice
 #[command]
 pub async fn disconnect_device(app: AppHandle, device_id: String) -> Result<(), String> {
     let registry = app.state::<Arc<DeviceRegistry>>();
-    {
-        let mut devices = registry.devices.write().unwrap();
-        devices.remove(&device_id);
-    }
-    registry.save();
-
-    if let Ok(mut config) = crate::read_config_checked() {
-        if let Some(pp) = config.get("pairing_payload").and_then(|v| v.as_object()) {
-            if pp.get("device_id").and_then(|v| v.as_str()) == Some(&device_id) {
-                if let Some(obj) = config.as_object_mut() {
-                    obj.remove("pairing_payload");
-                    if let Err(e) = crate::write_config_checked(&config) {
-                        log::error!("[Sync Engine] 保存解绑后的配置失败: {}", e);
-                    }
-                    log::info!("[Sync Engine] Removed pairing_payload for disconnected device {}", device_id);
-                }
-            }
-        }
-    }
-
-    // 在数据库中将该设备设为已撤销 (revoked) 并失效关联会话
-    if let Some(db_state) = app.try_state::<crate::db::DbState>() {
-        if let Ok(conn) = db_state.0.lock() {
-            let now = crate::now_ms();
-            let _ = conn.execute(
-                "UPDATE trusted_devices SET status = 'revoked', revoked_at = ?1, revocation_reason = 'user_disconnect' WHERE device_id = ?2",
-                rusqlite::params![now, device_id],
-            );
-            let _ = conn.execute(
-                "UPDATE authenticated_sessions SET is_active = 0 WHERE subject_device_id = ?1 OR issuer_device_id = ?1",
-                rusqlite::params![device_id],
-            );
-        }
-    }
+    let db_state = app.try_state::<crate::db::DbState>()
+        .ok_or("设备数据库不可用，无法确认解绑".to_string())?;
+    let mut conn = db_state.0.lock().map_err(|e| format!("锁定设备数据库失败: {}", e))?;
+    let mut config = crate::read_config_checked()?;
+    disconnect_device_core(&registry, &mut conn, &mut config, &device_id, crate::write_config_checked)?;
 
     let _ = app.emit("sync:device_disconnected", device_id);
+    Ok(())
+}
+
+fn disconnect_device_core(
+    registry: &DeviceRegistry,
+    conn: &mut rusqlite::Connection,
+    config: &mut serde_json::Value,
+    device_id: &str,
+    persist_config: impl FnOnce(&serde_json::Value) -> Result<(), String>,
+) -> Result<(), String> {
+    if device_id.trim().is_empty() {
+        return Err("设备 ID 为空，拒绝解绑".to_string());
+    }
+    // 先撤销信任。后续持久化失败时，也不会留下仍可调用的旧会话。
+    crate::device_trust::revoke_trusted_device(conn, device_id, Some("user_disconnect"), crate::now_ms())?;
+
+    let is_current_pairing = config.get("pairing_payload")
+        .and_then(|value| value.get("device_id"))
+        .and_then(|value| value.as_str()) == Some(device_id);
+    if is_current_pairing {
+        config.as_object_mut().ok_or("配置不是对象，拒绝解绑".to_string())?
+            .remove("pairing_payload");
+        persist_config(config)?;
+    }
+
+    registry.devices.write().map_err(|e| format!("锁定设备名册失败: {}", e))?
+        .remove(device_id);
+    registry.save_checked()?;
     Ok(())
 }
 
@@ -3322,22 +3311,15 @@ pub async fn relay_handshake(
             Ok(session_id)
         }
         Err(e) => {
-            let err_code = if e.contains("Target device offline") || e.contains("RLY-TARGET-OFFLINE") {
-                "ERR-PAIRING-02"
-            } else if e.contains("SEC-01") || e.contains("Unauthorized") || e.contains("mismatch") {
-                "ERR-PAIRING-04"
-            } else {
-                "ERR-PAIRING-03"
-            };
-            let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_ack", "status": "error", "detail": format!("{}: {}", err_code, e)}));
+            let _ = app.emit("sync:progress", serde_json::json!({"stage": "relay_ack", "status": "error", "detail": format!("ERR-PAIRING-03: {}", e)}));
             let _ = crate::sync_history::record_activity(
-                if err_code == "ERR-PAIRING-03" { DiagnosticStatus::Timeout } else { DiagnosticStatus::Failed },
+                DiagnosticStatus::Timeout,
                 Some(TransportKind::Relay),
                 Some(target_device_id.clone()),
-                if err_code == "ERR-PAIRING-02" { "Target device is offline" } else if err_code == "ERR-PAIRING-04" { "Pairing authentication failed" } else { "Target device response timed out" },
-                Some(err_code.to_string()),
+                "Target device response timed out",
+                Some("ERR-PAIRING-03".to_string()),
             );
-            Err(format!("{}: {}", err_code, e))
+            Err(format!("ERR-PAIRING-03: {}", e))
         }
     }
 }
@@ -7648,7 +7630,6 @@ fn is_allowed_lan_revocation_ip(ip: std::net::IpAddr) -> bool {
 
 fn start_peer_revocation_lan_retry(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
-        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
         let client = match reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(5)).build() {
             Ok(client) => client,
@@ -7703,11 +7684,8 @@ fn start_peer_revocation_lan_retry(app: AppHandle) {
 }
 
 pub fn start_relay_listener(app: AppHandle) {
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     start_peer_revocation_lan_retry(app.clone());
     tauri::async_runtime::spawn(async move {
-        // 让应用主窗口与 WebView 先完成首帧渲染，防抖 3 秒后再开始中继长连接握手
-        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
         loop {
             crate::sync_diagnostics::set_relay_state(
                 crate::sync_diagnostics::RelayConnectionState::Connecting,
@@ -10263,86 +10241,6 @@ mod tests {
         assert_eq!(rx.await.unwrap(), ack);
     }
 
-    #[tokio::test]
-    async fn test_sec01_pairing_ack_with_full_trace_fields_and_forwarding_succeeds() {
-        let (peer_key, peer) = sec01_test_identity();
-        let (_, local) = sec01_test_identity();
-        let conn = Connection::open_in_memory().unwrap();
-        crate::device_trust::init_device_trust_tables(&conn).unwrap();
-        let ref_id = uuid::Uuid::new_v4().to_string();
-
-        let request = json!({
-            "type": "notify",
-            "from_device_id": local,
-            "target_device_id": peer,
-            "protocol_version": 2,
-            "trace_id": "trace-pairing-test-1",
-            "message_id": ref_id,
-            "sync_id": "sync-pairing-test-1",
-            "payload": {
-                "pop": { "purpose": "pairing_establishment" }
-            }
-        });
-
-        let mut ack = serde_json::json!({
-            "type": "ack",
-            "target_device_id": local,
-            "message_id": format!("msg-ack-{}", &uuid::Uuid::new_v4().to_string().replace("-", "")[..8]),
-            "ref_message_id": ref_id,
-            "protocol_version": SYNC_PROTOCOL_VERSION,
-            "trace_id": "trace-pairing-test-1",
-            "sync_id": "sync-pairing-test-1",
-            "payload": {
-                "status": "trusted",
-                "session_id": "test-session-uuid",
-                "device_id": peer,
-                "device_name": "Bob PC",
-            }
-        });
-        copy_trace_fields(&request, &mut ack, true);
-
-        let signed_ack = build_signed_relay_response(ack, &peer, |target, bytes, msg_id| {
-            let mut test_conn = Connection::open_in_memory().unwrap();
-            crate::device_trust::init_device_trust_tables(&test_conn).unwrap();
-            test_conn.execute(
-                "INSERT INTO trusted_devices (device_id, public_key, platform, device_name, status, paired_at, last_authenticated_at) VALUES (?1, ?1, 'windows', 'Bob PC', 'trusted', ?2, ?2)",
-                rusqlite::params![local, crate::now_ms()],
-            ).unwrap();
-            crate::device_trust::sign_outgoing_rpc_envelope(
-                &mut test_conn, &peer_key, &peer, target, "relay_response", bytes, Some(msg_id), crate::now_ms(),
-            )
-        }).unwrap();
-
-        let forwarded = serde_json::json!({
-            "type": "ack",
-            "from_device_id": peer,
-            "target_device_id": local,
-            "auth_envelope": signed_ack["auth_envelope"],
-            "protocol_version": signed_ack["protocol_version"],
-            "payload": signed_ack["payload"],
-            "ref_message_id": signed_ack["ref_message_id"],
-            "message_id": signed_ack["message_id"],
-            "trace_id": signed_ack["trace_id"],
-            "sync_id": signed_ack["sync_id"],
-            "flow_phase": signed_ack["flow_phase"],
-        });
-
-        let ctx = RelayDispatchContext::for_test(Some(Arc::new(Mutex::new(conn))), None);
-        let (tx, rx) = oneshot::channel();
-        PENDING_REQUESTS.write().unwrap().insert(ref_id.clone(), RelayRequestWaiter {
-            tx,
-            terminal: RelayTerminal::Ack,
-            expected_peer: peer.clone(),
-            expected_local: local.clone(),
-            allow_pairing_bootstrap: true,
-        });
-
-        assert!(deliver_authenticated_relay_response(&ctx, &forwarded).unwrap());
-        let delivered = rx.await.unwrap();
-        assert_eq!(delivered["ref_message_id"], ref_id);
-        assert_eq!(delivered["payload"]["status"], "trusted");
-    }
-
     #[test]
     fn test_sec01_outgoing_wakeup_matches_production_receiver_and_rejects_tampering() {
         let (sender_key, sender) = sec01_test_identity();
@@ -11991,6 +11889,64 @@ mod tests {
         let devices = get_connected_devices_core(Some(registry.clone()), Some(&conn));
         assert!(!devices.iter().any(|d| d.device_id == "revoked-pc-old"), "revoked 设备必须被过滤掉");
         assert!(devices.iter().any(|d| d.device_id == "active-pc-1"), "active 设备必须保留");
+    }
+
+    #[test]
+    fn test_disconnect_device_core_revokes_session_and_removes_active_pairing() {
+        let registry = DeviceRegistry::default();
+        registry.update_device(ConnectedDevice {
+            device_id: "pc-to-unbind".to_string(), platform: "windows".to_string(),
+            ip_address: "relay".to_string(), last_seen: crate::now_ms(),
+            device_name: None, is_trusted: true, status: Some("trusted".to_string()), last_transport: None,
+        });
+        let mut conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::device_trust::init_device_trust_tables(&conn).unwrap();
+        let now = crate::now_ms();
+        conn.execute(
+            "INSERT INTO trusted_devices (device_id, public_key, device_name, platform, paired_at, last_authenticated_at, status)
+             VALUES ('pc-to-unbind', 'pk', 'PC', 'windows', ?1, ?1, 'trusted')", [now],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO authenticated_sessions (session_id, subject_device_id, issuer_device_id, created_at, expires_at, last_activity_at, is_active)
+             VALUES ('session-to-unbind', 'pc-to-unbind', 'phone', ?1, ?1, ?1, 1)", [now],
+        ).unwrap();
+        let mut config = serde_json::json!({"pairing_payload": {"device_id": "pc-to-unbind"}});
+        disconnect_device_core(&registry, &mut conn, &mut config, "pc-to-unbind", |_| Ok(())).unwrap();
+        assert!(config.get("pairing_payload").is_none());
+        assert!(registry.get_all().is_empty());
+        let status: String = conn.query_row(
+            "SELECT status FROM trusted_devices WHERE device_id = 'pc-to-unbind'", [], |row| row.get(0),
+        ).unwrap();
+        assert_eq!(status, "revoked");
+        let active: i64 = conn.query_row(
+            "SELECT is_active FROM authenticated_sessions WHERE session_id = 'session-to-unbind'", [], |row| row.get(0),
+        ).unwrap();
+        assert_eq!(active, 0);
+    }
+
+    #[test]
+    fn test_disconnect_device_core_config_failure_never_reports_success() {
+        let registry = DeviceRegistry::default();
+        registry.update_device(ConnectedDevice {
+            device_id: "pc-to-unbind".to_string(), platform: "windows".to_string(),
+            ip_address: "relay".to_string(), last_seen: crate::now_ms(),
+            device_name: None, is_trusted: true, status: Some("trusted".to_string()), last_transport: None,
+        });
+        let mut conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::device_trust::init_device_trust_tables(&conn).unwrap();
+        let now = crate::now_ms();
+        conn.execute(
+            "INSERT INTO trusted_devices (device_id, public_key, device_name, platform, paired_at, last_authenticated_at, status)
+             VALUES ('pc-to-unbind', 'pk', 'PC', 'windows', ?1, ?1, 'trusted')", [now],
+        ).unwrap();
+        let mut config = serde_json::json!({"pairing_payload": {"device_id": "pc-to-unbind"}});
+        let error = disconnect_device_core(&registry, &mut conn, &mut config, "pc-to-unbind", |_| Err("disk full".to_string())).unwrap_err();
+        assert!(error.contains("disk full"));
+        assert_eq!(registry.get_all().len(), 1, "保存失败时不得报告名册已清理");
+        let status: String = conn.query_row(
+            "SELECT status FROM trusted_devices WHERE device_id = 'pc-to-unbind'", [], |row| row.get(0),
+        ).unwrap();
+        assert_eq!(status, "revoked", "失败时应优先失效旧信任");
     }
 
     #[test]

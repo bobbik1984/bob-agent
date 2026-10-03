@@ -1905,10 +1905,10 @@ pub fn revoke_trusted_device(
     ).map_err(|e| format!("更新设备撤销状态失败: {}", e))?;
 
     // 2. 使关联所有会话立即失效
-    let _ = tx.execute(
-        "UPDATE authenticated_sessions SET is_active = 0 WHERE subject_device_id = ?",
+    tx.execute(
+        "UPDATE authenticated_sessions SET is_active = 0 WHERE subject_device_id = ?1 OR issuer_device_id = ?1",
         params![device_id],
-    );
+    ).map_err(|e| format!("失效设备会话失败: {}", e))?;
 
     tx.commit().map_err(|e| format!("提交撤销事务失败: {}", e))?;
     log::info!("[Device Trust] 设备 {} 已成功撤销 (匹配条目: {})", device_id, updated);

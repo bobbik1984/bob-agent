@@ -4,10 +4,11 @@ on:
   push:
     branches:
       - main
+      - mobile-pc-rebuild
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build-windows:
@@ -22,6 +23,9 @@ jobs:
         with:
           node-version: 20
           cache: 'npm'
+
+      - name: Verify one version for both platforms
+        run: node scripts/version-contract.mjs candidate
 
       - name: Setup Rust Toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -85,29 +89,7 @@ jobs:
       - name: Upload Windows Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: bob-desktop-windows
+          name: bob-desktop-windows-v${{ env.APP_VERSION }}-${{ github.sha }}
           path: |
-            dist-release/*.exe
-            dist-release/*.zip
-
-      - name: Publish Windows Release to GitHub Releases
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: latest-desktop
-          name: "Bob Desktop Windows Latest (v${{ env.APP_VERSION }})"
-          body: |
-            ### 💻 Bob Desktop Windows 官方自动构建发布
-            - **应用版本**：`v${{ env.APP_VERSION }}`
-            - **代码提交**：`${{ github.sha }}`
-            - **构建时间**：`${{ github.event.head_commit.timestamp }}`
-
-            #### 📦 资产列表：
-            - `bob-v${{ env.APP_VERSION }}-installer.exe`：官方轻量级图形化安装程序（推荐）
-            - `bob-v${{ env.APP_VERSION }}-portable.zip`：官方免安装绿色便携包（解压即用）
-          draft: false
-          prerelease: true
-          files: |
-            dist-release/bob-v*-installer.exe
-            dist-release/bob-v*-portable.zip
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+            dist-release/bob-v${{ env.APP_VERSION }}-installer.exe
+            dist-release/bob-v${{ env.APP_VERSION }}-portable.zip

@@ -495,14 +495,6 @@ pub fn reset_device_keys(
         crate::now_ms(),
     )?;
 
-    // SEC-01: 身份重置时彻底清空设备名册，杜绝幽灵设备历史记录残留
-    if let Some(registry) = app.try_state::<std::sync::Arc<crate::sync_engine::DeviceRegistry>>() {
-        if let Ok(mut devs) = registry.devices.write() {
-            devs.clear();
-        }
-        registry.save();
-    }
-
     // Trigger relay reconnect
     if let Some(tx) = crate::sync_engine::RELAY_RECONNECT_TRIGGER.lock().unwrap().as_ref() {
         let _ = tx.try_send(());

@@ -50,8 +50,8 @@ pub fn upsert_node(
 /// 能够自动处理已被合并的 alias 映射
 pub fn resolve_node_id(conn: &rusqlite::Connection, name: &str, etype: &str) -> String {
     let query = "
-        SELECT id FROM kg_nodes
-        WHERE label = ?1
+        SELECT id FROM kg_nodes 
+        WHERE label = ?1 
            OR EXISTS (SELECT 1 FROM json_each(kg_nodes.metadata, '$.aliases') WHERE value = ?1)
         LIMIT 1
     ";
@@ -257,14 +257,14 @@ pub fn query_subgraph(conn: &rusqlite::Connection, term: &str, max_hops: usize) 
     // Step 1: 找到匹配的种子节点 (label 或 id 模糊匹配)
     let like_term = format!("%{}%", term);
     let mut stmt = match conn.prepare(
-        "SELECT id, label, node_type, summary, source, metadata FROM kg_nodes
+        "SELECT id, label, node_type, summary, source FROM kg_nodes
          WHERE id LIKE ?1 OR label LIKE ?1 LIMIT 20",
     ) {
         Ok(s) => s,
         Err(e) => return json!({"error": format!("query failed: {}", e)}),
     };
 
-    let seeds: Vec<(String, String, String, String, String, String)> =
+    let seeds: Vec<(String, String, String, String, String)> =
         match stmt.query_map(params![like_term], |row| {
             Ok((
                 row.get::<_, String>(0)?,
@@ -272,7 +272,6 @@ pub fn query_subgraph(conn: &rusqlite::Connection, term: &str, max_hops: usize) 
                 row.get::<_, String>(2)?,
                 row.get::<_, String>(3)?,
                 row.get::<_, String>(4)?,
-                row.get::<_, Option<String>>(5)?.unwrap_or_default(),
             ))
         }) {
             Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
@@ -289,14 +288,14 @@ pub fn query_subgraph(conn: &rusqlite::Connection, term: &str, max_hops: usize) 
     let mut result_nodes: HashMap<String, Value> = HashMap::new();
     let mut result_edges: Vec<Value> = Vec::new();
 
-    for (id, label, node_type, summary, source, metadata) in &seeds {
+    for (id, label, node_type, summary, source) in &seeds {
         visited.insert(id.clone());
         queue.push_back((id.clone(), 0));
         result_nodes.insert(
             id.clone(),
             json!({
                 "id": id, "label": label, "type": node_type,
-                "summary": summary, "source": source, "metadata": metadata, "is_seed": true
+                "summary": summary, "source": source, "is_seed": true
             }),
         );
     }
@@ -337,7 +336,7 @@ pub fn query_subgraph(conn: &rusqlite::Connection, term: &str, max_hops: usize) 
 
                     // 加载邻居节点信息
                     if let Ok(mut n_stmt) = conn.prepare(
-                        "SELECT id, label, node_type, summary, source, metadata FROM kg_nodes WHERE id = ?1",
+                        "SELECT id, label, node_type, summary, source FROM kg_nodes WHERE id = ?1",
                     ) {
                         if let Ok(Some(row)) = n_stmt.query_row(params![neighbor], |row| {
                             Ok(Some(json!({
@@ -346,7 +345,6 @@ pub fn query_subgraph(conn: &rusqlite::Connection, term: &str, max_hops: usize) 
                                 "type": row.get::<_, String>(2)?,
                                 "summary": row.get::<_, String>(3)?,
                                 "source": row.get::<_, String>(4)?,
-                                "metadata": row.get::<_, Option<String>>(5)?.unwrap_or_default(),
                                 "is_seed": false
                             })))
                         }) {
@@ -456,17 +454,16 @@ pub fn get_stats(conn: &rusqlite::Connection) -> Value {
 /// 获取完整图谱 (节点 + 边)，用于前端 vis.js 渲染
 pub fn get_full_graph(conn: &rusqlite::Connection) -> Value {
     let mut nodes: Vec<Value> = Vec::new();
-    if let Ok(mut stmt) = conn.prepare("SELECT id, label, node_type, summary, source, metadata FROM kg_nodes")
+    if let Ok(mut stmt) = conn.prepare("SELECT id, label, node_type, summary, source, CASE WHEN lower(node_type) = 'ticket' THEN metadata ELSE NULL END FROM kg_nodes")
     {
         if let Ok(rows) = stmt.query_map([], |row| {
-            let meta_str: String = row.get::<_, Option<String>>(5)?.unwrap_or_default();
             Ok(json!({
                 "id": row.get::<_, String>(0)?,
                 "label": row.get::<_, String>(1)?,
                 "type": row.get::<_, String>(2)?,
                 "summary": row.get::<_, String>(3)?,
                 "source": row.get::<_, String>(4)?,
-                "metadata": meta_str
+                "metadata": row.get::<_, Option<String>>(5)?
             }))
         }) {
             nodes = rows.filter_map(|r| r.ok()).collect();
@@ -674,31 +671,51 @@ pub fn kg_update_ticket_cmd(
         Ok(c) => c,
         Err(_) => return json!({"error": "DB lock failed"}),
     };
-    let meta_str = new_metadata.map(|v| v.to_string());
-    let res = if let Some(title) = new_title {
-        if let Some(m) = meta_str {
-            conn.execute(
-                "UPDATE kg_nodes SET label = ?1, metadata = ?2 WHERE id = ?3",
-                params![title, m, node_id],
-            )
-        } else {
-            conn.execute(
-                "UPDATE kg_nodes SET label = ?1 WHERE id = ?2",
-                params![title, node_id],
-            )
-        }
-    } else if let Some(m) = meta_str {
-        conn.execute(
-            "UPDATE kg_nodes SET metadata = ?1 WHERE id = ?2",
-            params![m, node_id],
-        )
-    } else {
-        Ok(0)
-    };
-    match res {
-        Ok(_) => json!({"ok": true}),
-        Err(e) => json!({"error": e.to_string()}),
+    match update_ticket_node(&conn, &node_id, new_title.as_deref(), new_metadata) {
+        Ok(()) => json!({"ok": true}),
+        Err(e) => json!({"error": e}),
     }
+}
+
+fn update_ticket_node(
+    conn: &rusqlite::Connection,
+    node_id: &str,
+    new_title: Option<&str>,
+    new_metadata: Option<Value>,
+) -> Result<(), String> {
+    use rusqlite::OptionalExtension;
+    let existing: String = conn
+        .query_row(
+            "SELECT COALESCE(metadata, '{}') FROM kg_nodes WHERE id = ?1 AND lower(node_type) = 'ticket'",
+            [node_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "Ticket not found".to_string())?;
+
+    let metadata = if let Some(incoming) = new_metadata {
+        let incoming = incoming.as_object().ok_or("Ticket metadata must be an object")?;
+        let mut original: Value = serde_json::from_str(&existing)
+            .map_err(|_| "Stored ticket metadata is invalid; refusing to overwrite it")?;
+        let original_map = original.as_object_mut().ok_or("Stored ticket metadata is not an object")?;
+        for (key, value) in incoming {
+            let protected = matches!(key.as_str(), "barcode_data" | "barcode_type" | "category");
+            if protected && (value.is_null() || value.as_str().is_some_and(|s| s.trim().is_empty())) {
+                continue;
+            }
+            original_map.insert(key.clone(), value.clone());
+        }
+        Some(original.to_string())
+    } else {
+        None
+    };
+    let rows = conn.execute(
+        "UPDATE kg_nodes SET label = COALESCE(?1, label), metadata = COALESCE(?2, metadata) WHERE id = ?3 AND lower(node_type) = 'ticket'",
+        params![new_title, metadata, node_id],
+    ).map_err(|e| e.to_string())?;
+    if rows != 1 { return Err("Ticket update did not affect exactly one row".to_string()); }
+    Ok(())
 }
 
 /// 票据直接创建 (绕过 LLM，用于 rxing BCBP 自动识别与直存)
@@ -749,39 +766,34 @@ pub fn system_create_ticket(
 }
 
 #[cfg(test)]
-mod tests {
+mod ticket_persistence_tests {
     use super::*;
-    use rusqlite::Connection;
+
+    fn test_db() -> rusqlite::Connection {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch("CREATE TABLE kg_nodes (id TEXT PRIMARY KEY, label TEXT, node_type TEXT, summary TEXT, source TEXT, metadata TEXT); CREATE TABLE kg_edges (source_id TEXT, target_id TEXT, relation TEXT, confidence REAL);").unwrap();
+        conn.execute("INSERT INTO kg_nodes VALUES (?1, ?2, 'ticket', '', '', ?3)", params!["ticket-1", "Flight", r#"{"category":"flight","barcode_data":"private-qr","start_time":"2026-10-02"}"#]).unwrap();
+        conn
+    }
 
     #[test]
-    fn test_get_full_graph_returns_metadata() {
-        let conn = Connection::open_in_memory().unwrap();
-        conn.execute_batch(
-            "CREATE TABLE kg_nodes (
-                id TEXT PRIMARY KEY,
-                label TEXT NOT NULL,
-                node_type TEXT NOT NULL,
-                summary TEXT DEFAULT '',
-                source TEXT DEFAULT '',
-                metadata TEXT DEFAULT '{}'
-            );
-            CREATE TABLE kg_edges (
-                source_id TEXT,
-                target_id TEXT,
-                relation TEXT,
-                confidence REAL
-            );
-            INSERT INTO kg_nodes (id, label, node_type, summary, source, metadata)
-            VALUES ('node_1', 'CA1376', 'ticket', 'flight ticket', 'user', '{\"category\":\"flight\",\"start_time\":\"2026-08-22\"}');",
-        ).unwrap();
-
+    fn graph_returns_existing_ticket_metadata() {
+        let conn = test_db();
         let graph = get_full_graph(&conn);
-        let nodes = graph["nodes"].as_array().expect("nodes array");
-        assert_eq!(nodes.len(), 1);
-        let node = &nodes[0];
-        assert_eq!(node["id"], "node_1");
-        assert_eq!(node["label"], "CA1376");
-        assert_eq!(node["type"], "ticket");
-        assert_eq!(node["metadata"], "{\"category\":\"flight\",\"start_time\":\"2026-08-22\"}");
+        let meta: Value = serde_json::from_str(graph["nodes"][0]["metadata"].as_str().unwrap()).unwrap();
+        assert_eq!(meta["category"], "flight");
+        assert_eq!(meta["barcode_data"], "private-qr");
+    }
+
+    #[test]
+    fn partial_ticket_edit_preserves_category_and_barcode() {
+        let conn = test_db();
+        update_ticket_node(&conn, "ticket-1", Some("Updated"), Some(json!({"venue":"Gate 5", "barcode_data":"", "category":null}))).unwrap();
+        let raw: String = conn.query_row("SELECT metadata FROM kg_nodes WHERE id = 'ticket-1'", [], |r| r.get(0)).unwrap();
+        let meta: Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(meta["category"], "flight");
+        assert_eq!(meta["barcode_data"], "private-qr");
+        assert_eq!(meta["venue"], "Gate 5");
+        assert!(update_ticket_node(&conn, "ticket-1", None, Some(json!(["invalid"]))).is_err());
     }
 }

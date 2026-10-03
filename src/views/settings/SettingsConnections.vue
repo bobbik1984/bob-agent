@@ -31,8 +31,8 @@
             <button 
               class="device-indicator-btn"
               @click.stop="showDevicesModal = true" 
-              :title="displayConnectedDevices.length === 0 ? $t('settings.pairing_devices_empty') : $t('settings.pairing_last_status', { status: lastSyncStatus === 'success' ? $t('settings.status_success') : (lastSyncStatus === 'pending' ? $t('settings.status_pending') : (lastSyncStatus === 'error' ? $t('settings.status_failed') : $t('settings.status_unknown'))) })"
-              :style="{ color: displayConnectedDevices.length === 0 ? 'var(--text-muted)' : (lastSyncStatus === 'success' ? 'var(--user-accent)' : (lastSyncStatus === 'pending' ? 'var(--color-warning)' : (lastSyncStatus === 'error' ? 'var(--color-error)' : 'var(--text-muted)'))) }"
+              :title="$t('settings.pairing_last_status', { status: lastSyncStatus === 'success' ? $t('settings.status_success') : (lastSyncStatus === 'pending' ? $t('settings.status_pending') : (lastSyncStatus === 'error' ? $t('settings.status_failed') : $t('settings.status_unknown'))) })"
+              :style="{ color: lastSyncStatus === 'success' ? 'var(--user-accent)' : (lastSyncStatus === 'pending' ? 'var(--color-warning)' : (lastSyncStatus === 'error' ? 'var(--color-error)' : 'var(--text-muted)')) }"
             >
               <Monitor v-if="isNativeMobile" :size="14" />
               <Smartphone v-else :size="14" />
@@ -76,7 +76,7 @@
                 <QrCode :size="13" style="margin-right: 6px;" /> {{ $t('settings.p2p_qr_modal_btn') }}
               </button>
             </template>
-            <button v-if="displayConnectedDevices.length > 0" class="btn btn-danger-outline btn-sm" style="padding: 5px 8px; height: 28px; flex-shrink: 0;" @click="handleReset" :title="$t('settings.p2p_btn_destroy')">
+            <button v-if="!isNativeMobile || hasActivePairing" class="btn btn-danger-outline btn-sm" style="padding: 5px 8px; height: 28px; flex-shrink: 0;" @click="handleReset" :title="$t('settings.p2p_btn_destroy')">
               <X :size="13" />
             </button>
           </div>
@@ -699,7 +699,7 @@
                 </span>
                 <span v-if="dev.syncStatus === 'syncing'" style="font-size: 10px; padding: 2px 6px; background: var(--color-success); border-radius: var(--radius-default); color: white; margin-left: 6px;">{{ $t('settings.pairing_status_syncing') }}</span>
               </div>
-              <button class="btn btn-danger-outline btn-sm" style="padding: 4px 8px; font-size: 11px;" @click="handleDisconnectDevice(dev)" :title="$t('settings.pairing_device_unbind')">
+              <button v-if="dev.is_trusted || dev.status === 'trusted'" class="btn btn-danger-outline btn-sm" style="padding: 4px 8px; font-size: 11px;" @click="handleDisconnectDevice(dev)" :title="$t('settings.pairing_device_unbind')">
                 <Unlink :size="11" /> {{ $t('settings.pairing_device_unbind') }}
               </button>
             </div>
@@ -843,6 +843,7 @@ import {
 } from 'lucide-vue-next';
 import SyncTriangleTopology from '../../components/sync/SyncTriangleTopology.vue';
 import { parsePairingInvitation, executePairingWorkflow, applyStepTransition } from '@/sync/pairing-flow.js';
+import { displayConnectedDevices as filterDisplayConnectedDevices, hasActivePairedDevice } from '@/sync/connected-devices.js';
 
 const { t } = useI18n();
 
@@ -1618,8 +1619,6 @@ const handleReset = async () => {
       await invoke('reset_device_keys');
       pinInput.value = '';
       connectedDevices.value = [];
-      lastSyncStatus.value = '';
-      try { localStorage.removeItem('bob-last-sync-status'); } catch (_) {}
       // 重新自动初始化新密钥，实现开箱即用的新身份
       isInitialized.value = await invoke('check_device_keys_initialized');
       isUnlocked.value = isNativeMobile;
@@ -1636,15 +1635,16 @@ const handleDisconnectDevice = async (dev) => {
   if (confirmed) {
     try {
       await invoke('disconnect_device', { deviceId: dev.device_id });
+      connectedDevices.value = connectedDevices.value.filter(device => device.device_id !== dev.device_id);
       await fetchConnectedDevices();
-      if (connectedDevices.value.length === 0) {
+      if (displayConnectedDevices.value.length === 0) {
         showDevicesModal.value = false;
-        lastSyncStatus.value = '';
-        try { localStorage.removeItem('bob-last-sync-status'); } catch (_) {}
       }
       await fetchPairingInfo();
     } catch (e) {
       console.error('Failed to disconnect device', e);
+      await fetchConnectedDevices();
+      await showAlert(t('settings.pairing_unbind_failed', { reason: String(e) }));
     }
   }
 };
@@ -1660,8 +1660,9 @@ const fetchPairingInfo = async () => {
 const connectedDevices = ref([]);
 const displayConnectedDevices = computed(() => {
   const myId = pairingInfo.value.device_id;
-  return connectedDevices.value.filter(d => (!myId || d.device_id !== myId) && d.is_trusted && d.status === 'trusted');
+  return filterDisplayConnectedDevices(connectedDevices.value, myId, isNativeMobile);
 });
+const hasActivePairing = computed(() => hasActivePairedDevice(connectedDevices.value, pairingInfo.value.device_id));
 let unlistenDeviceConnected = null;
 let unlistenDeviceSyncing = null;
 

@@ -1,196 +1,137 @@
 <template>
-  <div
-    class="wallet-pass-card"
-    :class="[
-      themeClass,
-      { 'is-expired': isExpired, 'is-stacked': isStacked }
-    ]"
-    :style="stackStyle"
+  <button
+    type="button"
+    class="pass"
+    :class="[kind, { 'is-expired': isExpired }]"
+    :style="{ zIndex: index + 1 }"
     @click="openDetail"
+    :aria-label="`${t('ticket.open') || '查看'} ${cardTitle}，${cardDate}`"
   >
-    <!-- Ticket Stub Notch (Classic Passbook cutout for movie/events) -->
-    <div v-if="isMovie || isExhibition" class="notch notch-left"></div>
-    <div v-if="isMovie || isExhibition" class="notch notch-right"></div>
-
-    <!-- Pass Header Band -->
-    <div class="pass-header">
-      <div class="pass-badge">
-        <component :is="categoryIcon" class="pass-icon" />
-        <span class="pass-type-label">{{ categoryLabel }}</span>
-        <span v-if="flightOrTrainNumber" class="pass-number-tag">{{ flightOrTrainNumber }}</span>
-      </div>
-
-      <div class="pass-status-pill" :class="ticketStatusClass">
-        <span class="status-dot"></span>
-        <span class="status-text">{{ displayStatus }}</span>
-      </div>
+    <div class="head">
+      <span class="icon">
+        <svg :class="{ 'flight-symbol': kind === 'flight' }" viewBox="0 0 24 24" aria-hidden="true" v-html="svgPath"></svg>
+      </span>
+      <span class="identity">
+        <strong>{{ cardTitle }}</strong>
+        <small>{{ cardSubtitle }}</small>
+      </span>
+      <span class="when">{{ cardDate }}</span>
     </div>
+    <div class="body-title">{{ cardTitle }}</div>
+    <div class="body-sub">{{ cardSubtitle }}</div>
+    <div class="foot">
+      <span>{{ cardTime }}</span>
+      <span>{{ statusLabel }}</span>
+    </div>
+  </button>
 
-    <!-- Pass Route / Main Event Section -->
-    <div class="pass-main">
-      <template v-if="isTravel">
-        <div class="pass-route-row">
-          <div class="route-city origin">
-            <span class="city-code">{{ originLabel || '出发' }}</span>
-            <span v-if="metadata.flight_info?.origin_terminal" class="city-terminal">{{ metadata.flight_info.origin_terminal }}</span>
+  <!-- Detail Modal -->
+  <Teleport to="body">
+    <div v-if="showDetail" class="veil" @click.self="closeDetail">
+      <div class="detail" :class="[kind, { 'expired-detail': isExpired }]">
+        <div class="head">
+          <span class="icon">
+            <svg :class="{ 'flight-symbol': kind === 'flight' }" viewBox="0 0 24 24" aria-hidden="true" v-html="svgPath"></svg>
+          </span>
+          <span class="identity">
+            <strong>{{ cardTitle }}</strong>
+            <small>{{ cardSubtitle }}</small>
+          </span>
+          <span class="when">{{ cardDate }}</span>
+        </div>
+        <h3>{{ cardTitle }}</h3>
+        <p>{{ cardSubtitle }}</p>
+        <dl>
+          <div>
+            <dt>{{ t('ticket.date') || '日期' }}</dt>
+            <dd>{{ cardDate }}</dd>
           </div>
+          <div>
+            <dt>{{ t('ticket.time') || '时间' }}</dt>
+            <dd>{{ cardTime }}</dd>
+          </div>
+          <div>
+            <dt>{{ t('ticket.info') || '票据信息' }}</dt>
+            <dd>{{ cardInfoDetail || cardSubtitle || '—' }}</dd>
+          </div>
+          <div>
+            <dt>{{ t('ticket.status') || '状态' }}</dt>
+            <dd>{{ statusLabel }}</dd>
+          </div>
+        </dl>
 
-          <div class="route-transit">
-            <component :is="categoryIcon" class="transit-icon" />
-            <div class="transit-line">
-              <span class="transit-arrow">➔</span>
+        <!-- QR Code Section if available -->
+        <div v-if="barcodeData && isQrBarcode" class="detail-qr-section">
+          <div class="detail-qr-box">
+            <qrcode-vue :value="barcodeData" :size="150" level="M" />
+          </div>
+          <div v-if="barcodeData.length <= 40" class="detail-qr-caption">{{ barcodeData }}</div>
+        </div>
+        <div v-else-if="barcodeData" class="detail-barcode-text">
+          {{ barcodeData }}
+        </div>
+
+        <!-- Inline Edit Form when editing -->
+        <div v-if="isEditing" class="detail-edit-form">
+          <div class="edit-field">
+            <label>{{ t('ticket.title') || '标题' }}</label>
+            <input v-model="editForm.title" class="edit-input" />
+          </div>
+          <div class="edit-grid-2">
+            <div class="edit-field">
+              <label>{{ t('ticket.date') || '日期' }}</label>
+              <input v-model="editForm.date" @input="formatDateInput('date')" class="edit-input" placeholder="YYYY-MM-DD" maxlength="10" />
+            </div>
+            <div class="edit-field">
+              <label>{{ t('ticket.time') || '时间' }}</label>
+              <input v-model="editForm.time" @input="formatTimeInput('time')" class="edit-input" placeholder="HH:MM" maxlength="5" />
             </div>
           </div>
-
-          <div class="route-city destination">
-            <span class="city-code">{{ destinationLabel || '到达' }}</span>
-            <span v-if="metadata.flight_info?.destination_terminal" class="city-terminal">{{ metadata.flight_info.destination_terminal }}</span>
+          <div class="edit-grid-2" v-if="kind === 'flight' || kind === 'rail'">
+            <div class="edit-field">
+              <label>出发</label>
+              <input v-model="editForm.origin" class="edit-input" />
+            </div>
+            <div class="edit-field">
+              <label>到达</label>
+              <input v-model="editForm.destination" class="edit-input" />
+            </div>
           </div>
-        </div>
-      </template>
-
-      <template v-else>
-        <div class="pass-event-row">
-          <div class="event-title" :title="node.label">{{ node.label }}</div>
-          <div v-if="metadata.venue" class="event-venue" :title="metadata.venue">
-            <MapPin :size="12" style="flex-shrink: 0;" />
-            <span>{{ metadata.venue }}</span>
+          <div class="edit-grid-2">
+            <div class="edit-field" v-if="kind === 'flight' || kind === 'rail'">
+              <label>{{ kind === 'flight' ? '航班号' : '车次' }}</label>
+              <input v-model="editForm.flight_number" class="edit-input" />
+            </div>
+            <div class="edit-field">
+              <label>{{ t('ticket.seat') || '座位' }}</label>
+              <input v-model="editForm.seat" class="edit-input" />
+            </div>
           </div>
-        </div>
-      </template>
-    </div>
-
-    <!-- Pass Key Info Footer (Always visible in stack preview!) -->
-    <div class="pass-footer">
-      <div class="info-cell" v-if="departureDateStr">
-        <span class="info-label">{{ isTravel ? '出发日期' : '日期' }}</span>
-        <span class="info-value">{{ departureDateStr }}</span>
-      </div>
-
-      <div class="info-cell" v-if="departureTimeStr">
-        <span class="info-label">{{ isTravel ? '出发时间' : '时间' }}</span>
-        <span class="info-value time-highlight">{{ departureTimeStr }}</span>
-      </div>
-
-      <div class="info-cell" v-if="seatLabel">
-        <span class="info-label">座位</span>
-        <span class="info-value seat-tag">{{ seatLabel }}</span>
-      </div>
-
-      <div class="info-cell passenger-cell" v-if="passengerName">
-        <span class="info-label">乘车/机人</span>
-        <span class="info-value">{{ passengerName }}</span>
-      </div>
-
-      <div class="pass-mini-barcode" v-if="metadata.barcode_data" title="包含扫码凭证">
-        <QrCode :size="15" />
-      </div>
-    </div>
-  </div>
-
-  <!-- Detail Modal (Boarding Pass / Ticket Inspector) -->
-  <Teleport to="body">
-    <div v-if="showDetail" class="bp-modal-overlay" @click.self="showDetail = false">
-      <div class="boarding-pass-modern-card" :class="themeClass">
-        <div class="bp-modern-header">
-          <span class="bp-modern-icon"><component :is="categoryIcon" style="width:16px;height:16px;" /></span>
-          <span>{{ modalHeaderTitle }}</span>
-        </div>
-
-        <div class="bp-route-row" v-if="isTravel">
-          <div class="bp-airport-group is-origin">
-            <input v-if="isEditing" v-model="editForm.origin" class="bp-edit-input bp-airport-code" style="width: 85px; text-align: center;" />
-            <span v-else class="bp-airport-code">{{ originLabel || '出发' }}</span>
-            <input v-if="isEditing" v-model="editForm.originTerminal" class="bp-edit-input" placeholder="航站楼" style="width: 85px; font-size: 1.05em; text-align: center; height: 26px; box-sizing: border-box;" />
-            <div v-else class="bp-terminal" style="height: 26px; line-height: 26px;">{{ metadata.flight_info?.origin_terminal || '' }}</div>
-
-            <input type="text" v-if="isEditing" v-model="editForm.date" @input="formatDateInput('date')" class="bp-edit-input" placeholder="YYYY-MM-DD" maxlength="10" style="width: 115px; font-size: 0.85em; text-align: center; padding: 2px; height: 22px; box-sizing: border-box;" />
-            <div v-else style="font-size: 0.85em; opacity: 0.7; height: 22px; line-height: 22px; text-align: center;">{{ departureDateStr }}</div>
-
-            <input type="text" v-if="isEditing" v-model="editForm.time" @input="formatTimeInput('time')" class="bp-edit-input" placeholder="HH:MM" maxlength="5" style="width: 90px; font-size: 1.1em; font-weight: 500; text-align: center; padding: 2px; height: 26px; box-sizing: border-box;" />
-            <div v-else style="font-size: 1.2em; font-weight: 600; height: 26px; line-height: 26px; text-align: center;">{{ departureTimeStr }}</div>
+          <div class="edit-field" v-if="kind !== 'flight' && kind !== 'rail'">
+            <label>{{ t('ticket.venue') || '场馆/地点' }}</label>
+            <input v-model="editForm.venue" class="edit-input" />
           </div>
-
-          <div class="bp-route-center">
-            <component :is="categoryIcon" style="width: 24px; height: 24px;" />
-          </div>
-
-          <div class="bp-airport-group is-destination">
-            <input v-if="isEditing" v-model="editForm.destination" class="bp-edit-input bp-airport-code" style="width: 85px; text-align: center;" />
-            <span v-else class="bp-airport-code">{{ destinationLabel || '到达' }}</span>
-            <input v-if="isEditing" v-model="editForm.destinationTerminal" class="bp-edit-input" placeholder="航站楼" style="width: 85px; font-size: 1.05em; text-align: center; height: 26px; box-sizing: border-box;" />
-            <div v-else class="bp-terminal" style="height: 26px; line-height: 26px;">{{ metadata.flight_info?.destination_terminal || '' }}</div>
-
-            <input type="text" v-if="isEditing" v-model="editForm.endDate" @input="formatDateInput('endDate')" class="bp-edit-input" placeholder="YYYY-MM-DD" maxlength="10" style="width: 115px; font-size: 0.85em; text-align: center; padding: 2px; height: 22px; box-sizing: border-box;" />
-            <div v-else style="font-size: 0.85em; opacity: 0.7; height: 22px; line-height: 22px; text-align: center;">{{ arrivalDateStr }}</div>
-
-            <input type="text" v-if="isEditing" v-model="editForm.endTime" @input="formatTimeInput('endTime')" class="bp-edit-input" placeholder="HH:MM" maxlength="5" style="width: 90px; font-size: 1.1em; font-weight: 500; text-align: center; padding: 2px; height: 26px; box-sizing: border-box;" />
-            <div v-else style="font-size: 1.2em; font-weight: 600; height: 26px; line-height: 26px; text-align: center;">{{ arrivalTimeStr }}</div>
-          </div>
-        </div>
-        <div class="bp-route-row" v-else style="display: flex; flex-direction: column; gap: 8px;">
-          <input v-if="isEditing" v-model="editForm.title" class="bp-edit-input bp-airport-code" style="width: 100%;" />
-          <span v-else class="bp-airport-code" style="font-size:1.4em; white-space: normal; height: auto; line-height: 1.3;">{{ node.label }}</span>
-        </div>
-
-        <div class="bp-modern-divider"></div>
-
-        <div class="bp-detail-grid">
-          <div class="bp-modern-field" v-if="isTravel || passengerName || isEditing">
-            <div class="bp-modern-label">{{ $t('ticket.passenger') || '乘车/乘机人' }}</div>
-            <input v-if="isEditing" v-model="editForm.passenger_name" class="bp-edit-input" />
-            <div v-else class="bp-modern-value">{{ passengerName || '—' }}</div>
-          </div>
-          <div class="bp-modern-field" v-if="isTravel">
-            <div class="bp-modern-label">{{ isFlight ? ($t('ticket.flight') || '航班号') : ($t('ticket.train') || '车次') }}</div>
-            <input v-if="isEditing" v-model="editForm.flight_number" class="bp-edit-input" />
-            <div v-else class="bp-modern-value">{{ flightOrTrainNumber || '—' }}</div>
-          </div>
-          <div class="bp-modern-field" v-if="!isTravel">
-            <div class="bp-modern-label">{{ $t('ticket.date') || '日期' }}</div>
-            <input type="text" v-if="isEditing" v-model="editForm.date" @input="formatDateInput('date')" class="bp-edit-input" placeholder="YYYY-MM-DD" maxlength="10" />
-            <div v-else class="bp-modern-value">{{ departureDateStr || '—' }}</div>
-          </div>
-          <div class="bp-modern-field" v-if="!isTravel">
-            <div class="bp-modern-label">{{ $t('ticket.time') || '时间' }}</div>
-            <input type="text" v-if="isEditing" v-model="editForm.time" @input="formatTimeInput('time')" class="bp-edit-input" placeholder="HH:MM" maxlength="5" />
-            <div v-else class="bp-modern-value">{{ departureTimeStr || '—' }}</div>
-          </div>
-          <div class="bp-modern-field">
-            <div class="bp-modern-label">{{ $t('ticket.seat') || '座位' }}</div>
-            <input v-if="isEditing" v-model="editForm.seat" class="bp-edit-input" />
-            <div v-else class="bp-modern-value">{{ seatLabel || '—' }}</div>
-          </div>
-          <div class="bp-modern-field" v-if="isTravel">
-            <div class="bp-modern-label">{{ $t('ticket.pnr') || '票号/预约' }}</div>
-            <input v-if="isEditing" v-model="editForm.pnr" class="bp-edit-input" />
-            <div v-else class="bp-modern-value">{{ metadata.flight_info?.pnr || '—' }}</div>
-          </div>
-          <div class="bp-modern-field" v-if="!isTravel" style="grid-column: span 3; align-items: flex-start;">
-            <div class="bp-modern-label">{{ $t('ticket.venue') || '场馆/地点' }}</div>
-            <input v-if="isEditing" v-model="editForm.venue" class="bp-edit-input" style="text-align: left;" />
-            <div v-else class="bp-modern-value" style="text-align: left;">{{ metadata.venue || '—' }}</div>
+          <div class="edit-buttons">
+            <button class="edit-submit-btn" @click="saveEdit">{{ t('common.save') || '保存' }}</button>
+            <button class="edit-cancel-btn" @click="isEditing = false">{{ t('common.cancel') || '取消' }}</button>
           </div>
         </div>
 
-        <!-- QR Code Section: Fixed High-Contrast White Background for Scanners -->
-        <div class="bp-modern-qr-section" v-if="metadata.barcode_data">
-          <div class="bp-modern-qr-wrapper">
-            <qrcode-vue :value="metadata.barcode_data" :size="180" level="M" />
-          </div>
-          <div class="bp-qr-hint">出示扫码乘车 / 乘机 / 核销</div>
-          <div v-if="metadata.barcode_data.length <= 40" class="bp-qr-code-text">{{ metadata.barcode_data }}</div>
-        </div>
-
-        <div class="bp-modern-actions">
-          <button class="bp-modern-btn bp-modern-btn-danger" @click="deleteTicket" title="删除票据">
-            <Trash2 style="width:16px;height:16px;" />
+        <!-- Card bottom action bar: delete and edit -->
+        <div v-if="!isEditing" class="detail-actions">
+          <button class="detail-act-btn detail-del-btn" @click="deleteTicket" title="删除票据">
+            <Trash2 :size="15" />
           </button>
-          <button v-if="!isEditing" class="bp-modern-btn bp-modern-btn-primary" @click="startEdit">编辑</button>
-          <button v-if="isEditing" class="bp-modern-btn bp-modern-btn-primary" @click="saveEdit">保存</button>
-          <button class="bp-modern-btn bp-modern-btn-dismiss" @click="showDetail = false">关闭</button>
+          <button class="detail-act-btn detail-edit-btn" @click="startEdit">
+            编辑
+          </button>
         </div>
       </div>
+
+      <!-- Close button -->
+      <button class="close" type="button" @click="closeDetail">
+        {{ t('ticket.close_ticket') || '收起票据' }}
+      </button>
     </div>
   </Teleport>
 </template>
@@ -200,26 +141,28 @@ import { useDialog } from '@/composables/useDialog.js';
 const { showConfirm, showAlert } = useDialog();
 
 import { computed, ref, watch, onMounted, onUnmounted } from 'vue';
-import { Plane, Film, Ticket, Calendar, Train, CreditCard, Music, Trash2, MapPin, QrCode } from 'lucide-vue-next';
+import { Trash2 } from 'lucide-vue-next';
 import QrcodeVue from 'qrcode.vue';
 import { useI18n } from 'vue-i18n';
+import {
+  ticketMetadata,
+  ticketKind,
+  ticketBarcode,
+  ticketGroup,
+  ticketCardTitle,
+  ticketCardSubtitle,
+  ticketFormattedDate,
+  ticketFormattedTime
+} from '@/tickets/wallet.js';
 
 const props = defineProps({
   node: {
     type: Object,
     required: true
   },
-  isStacked: {
-    type: Boolean,
-    default: false
-  },
   index: {
     type: Number,
     default: 0
-  },
-  total: {
-    type: Number,
-    default: 1
   }
 });
 
@@ -230,202 +173,49 @@ const isEditing = ref(false);
 const editForm = ref({});
 const isAddedToCalendar = ref(false);
 
+const SVG_PATHS = {
+  flight: '<path d="M12 2c.55 0 1 .45 1 1v7l7.5 4v2L13 14v5l2 1.5V22l-3-1-3 1v-1.5l2-1.5v-5l-7.5 2v-2L11 10V3c0-.55.45-1 1-1Z"/>',
+  rail: '<rect x="5" y="3" width="14" height="16" rx="3"/><path d="M5 10h14M8 22l2-3m6 0 2 3M9 6h1m4 0h1"/>',
+  film: '<rect x="3" y="5" width="18" height="15" rx="2"/><path d="M3 10h18M8 5l3 5m3-5 3 5"/>',
+  museum: '<path d="M3 9l9-5 9 5M4 10h16M6 10v9m4-9v9m4-9v9m4-9v9M3 20h18"/>'
+};
+
+const kind = computed(() => ticketKind(props.node));
+const svgPath = computed(() => SVG_PATHS[kind.value] || SVG_PATHS.flight);
+
+const cardTitle = computed(() => ticketCardTitle(props.node));
+const cardSubtitle = computed(() => ticketCardSubtitle(props.node));
+const cardDate = computed(() => ticketFormattedDate(props.node) || t('ticket.undated') || '待定');
+const cardTime = computed(() => ticketFormattedTime(props.node) || '—');
+
+const isExpired = computed(() => ticketGroup(props.node) === 'expired');
+const statusLabel = computed(() => {
+  if (isExpired.value) return t('ticket.status_expired') || '已过期';
+  return t('ticket.status_upcoming') || '即将使用';
+});
+
+const metadata = computed(() => ticketMetadata(props.node));
+const barcodeData = computed(() => ticketBarcode(props.node));
+const isQrBarcode = computed(() => !metadata.value.barcode_type || ['qr', 'qr_code', 'qrcode'].includes(String(metadata.value.barcode_type).toLowerCase()));
+
+const cardInfoDetail = computed(() => {
+  const parts = [];
+  if (metadata.value.flight_info?.flight_number) parts.push(metadata.value.flight_info.flight_number);
+  if (metadata.value.flight_info?.origin_terminal) parts.push(metadata.value.flight_info.origin_terminal);
+  if (metadata.value.venue) parts.push(metadata.value.venue);
+  if (metadata.value.seat_info || metadata.value.flight_info?.seat) parts.push(metadata.value.seat_info || metadata.value.flight_info?.seat);
+  return parts.length > 0 ? parts.join(' · ') : cardSubtitle.value;
+});
+
 const openDetail = () => {
   showDetail.value = true;
 };
 
-// ── Metadata & Intelligent Categorization ───────────────────────
-const metadata = computed(() => {
-  if (typeof props.node.metadata === 'string') {
-    try {
-      return JSON.parse(props.node.metadata);
-    } catch (e) {
-      console.error("TicketCard JSON parse error:", e);
-      return {};
-    }
-  }
-  return props.node.metadata || {};
-});
+const closeDetail = () => {
+  showDetail.value = false;
+  isEditing.value = false;
+};
 
-const detectedCategory = computed(() => {
-  const cat = (metadata.value.category || '').toLowerCase();
-  if (cat === 'flight' || cat === 'air') return 'flight';
-  if (cat === 'train' || cat === 'rail') return 'train';
-  if (cat === 'movie' || cat === 'film' || cat === 'cinema') return 'movie';
-  if (cat === 'concert' || cat === 'music' || cat === 'show') return 'concert';
-  if (cat === 'exhibition' || cat === 'museum' || cat === 'expo') return 'exhibition';
-  if (cat === 'membership' || cat === 'card') return 'membership';
-
-  // Smart heuristic inference from title/summary
-  const text = `${props.node.label || ''} ${props.node.summary || ''} ${metadata.value.venue || ''}`;
-  if (/(\b[GDCKZTX]\d{1,4}\b)|(\([GDCKZTX\d]+\))|高铁|动车|列车|火车站|车次/i.test(text)) {
-    return 'train';
-  }
-  if (/电影|影城|影院|放映|激光厅|IMAX/i.test(text)) {
-    return 'movie';
-  }
-  if (/音乐|演唱会|大剧院|演出|话剧|音乐节/i.test(text)) {
-    return 'concert';
-  }
-  if (/展|博物馆|美术馆|博览会|门票/i.test(text)) {
-    return 'exhibition';
-  }
-  if (/(\b[A-Z]{2}\s?\d{3,4}\b)|(\b[A-Z][0-9]\s?\d{3,4}\b)|(\b[0-9][A-Z]\s?\d{3,4}\b)|([A-Z]{3}\s*[-–➔✈]\s*[A-Z]{3})|航班|机票|登机牌/i.test(text)) {
-    return 'flight';
-  }
-  return 'ticket';
-});
-
-const isFlight = computed(() => detectedCategory.value === 'flight');
-const isTrain = computed(() => detectedCategory.value === 'train');
-const isTravel = computed(() => isFlight.value || isTrain.value);
-const isMovie = computed(() => detectedCategory.value === 'movie');
-const isConcert = computed(() => detectedCategory.value === 'concert');
-const isExhibition = computed(() => detectedCategory.value === 'exhibition');
-
-const themeClass = computed(() => {
-  switch (detectedCategory.value) {
-    case 'flight': return 'theme-flight';
-    case 'train': return 'theme-train';
-    case 'movie': return 'theme-movie';
-    case 'concert': return 'theme-concert';
-    case 'exhibition': return 'theme-exhibition';
-    default: return 'theme-general';
-  }
-});
-
-const categoryIcon = computed(() => {
-  switch (detectedCategory.value) {
-    case 'flight': return Plane;
-    case 'train': return Train;
-    case 'movie': return Film;
-    case 'concert': return Music;
-    case 'exhibition': return Ticket;
-    case 'membership': return CreditCard;
-    default: return Ticket;
-  }
-});
-
-const categoryLabel = computed(() => {
-  switch (detectedCategory.value) {
-    case 'flight': return '航班机票';
-    case 'train': return '高铁动车';
-    case 'movie': return '电影客票';
-    case 'concert': return '演出门票';
-    case 'exhibition': return '展览门票';
-    case 'membership': return '会员卡券';
-    default: return '通行凭证';
-  }
-});
-
-const modalHeaderTitle = computed(() => {
-  if (isFlight.value) return 'Boarding Pass · 登机牌';
-  if (isTrain.value) return 'Train Ticket · 高铁票';
-  if (isMovie.value) return 'Movie Pass · 电影票';
-  return 'Passbook · 票据凭证';
-});
-
-// ── Smart Route & Details ───────────────────────────────────────
-const originLabel = computed(() => {
-  if (metadata.value.flight_info?.origin) return metadata.value.flight_info.origin;
-  if (metadata.value.venue && metadata.value.venue.includes('-')) return metadata.value.venue.split('-')[0].trim();
-  const label = props.node.label || '';
-  if (label.includes('➔')) return label.split('➔')[0].trim();
-  if (label.includes('->')) return label.split('->')[0].trim();
-  const match = label.match(/([A-Z]{3})\s*[-–]\s*([A-Z]{3})/i);
-  if (match) return match[1].toUpperCase();
-  return '';
-});
-
-const destinationLabel = computed(() => {
-  if (metadata.value.flight_info?.destination) return metadata.value.flight_info.destination;
-  if (metadata.value.venue && metadata.value.venue.includes('-')) return metadata.value.venue.split('-')[1].trim();
-  const label = props.node.label || '';
-  if (label.includes('➔')) {
-    return label.split('➔')[1].replace(/\(.*?\)/g, '').trim();
-  }
-  if (label.includes('->')) {
-    return label.split('->')[1].replace(/\(.*?\)/g, '').trim();
-  }
-  const match = label.match(/([A-Z]{3})\s*[-–]\s*([A-Z]{3})/i);
-  if (match) return match[2].toUpperCase();
-  return '';
-});
-
-const flightOrTrainNumber = computed(() => {
-  if (metadata.value.flight_info?.flight_number) return metadata.value.flight_info.flight_number;
-  const label = props.node.label || '';
-  const trainMatch = label.match(/\(([GDCKZTX\d]+)\)/i) || label.match(/\b([GDCKZTX]\d{1,4})\b/i);
-  if (trainMatch) return trainMatch[1];
-  const flightMatch = label.match(/\b([A-Z0-9]{2}\s?\d{3,4})\b/i);
-  if (flightMatch) return flightMatch[1];
-  return '';
-});
-
-const passengerName = computed(() => {
-  return metadata.value.flight_info?.passenger_name || metadata.value.passenger_name || '';
-});
-
-const seatLabel = computed(() => {
-  if (metadata.value.seat_info) return metadata.value.seat_info;
-  if (metadata.value.flight_info?.seat) return metadata.value.flight_info.seat;
-  return '';
-});
-
-const departureDateStr = computed(() => {
-  if (!metadata.value.start_time) return '';
-  return metadata.value.start_time.split(' ')[0];
-});
-
-const departureTimeStr = computed(() => {
-  if (!metadata.value.start_time) return '';
-  const parts = metadata.value.start_time.split(' ');
-  if (parts.length > 1 && parts[1] !== '00:00:00') {
-    return parts[1].substring(0, 5);
-  }
-  return '';
-});
-
-const arrivalDateStr = computed(() => {
-  if (!metadata.value.end_time) return '';
-  return metadata.value.end_time.split(' ')[0];
-});
-
-const arrivalTimeStr = computed(() => {
-  if (!metadata.value.end_time) return '';
-  const parts = metadata.value.end_time.split(' ');
-  if (parts.length > 1 && parts[1] !== '00:00:00') {
-    return parts[1].substring(0, 5);
-  }
-  return '';
-});
-
-const isExpired = computed(() => {
-  if (!metadata.value.start_time) return false;
-  const dtStr = metadata.value.start_time.replace(' ', 'T');
-  const startTime = new Date(dtStr).getTime();
-  if (isNaN(startTime)) return false;
-  return Date.now() > startTime + 24 * 3600 * 1000;
-});
-
-const displayStatus = computed(() => {
-  if (isExpired.value) return '已过期';
-  if (metadata.value.status === 'upcoming') return '有效';
-  return metadata.value.status || '有效';
-});
-
-const ticketStatusClass = computed(() => {
-  return isExpired.value ? 'status-expired' : 'status-active';
-});
-
-const stackStyle = computed(() => {
-  if (!props.isStacked) return {};
-  return {
-    zIndex: props.index + 1
-  };
-});
-
-// ── Edit & Actions ──────────────────────────────────────────────
 const formatDateInput = (field) => {
   let val = editForm.value[field] || '';
   val = val.replace(/\D/g, '');
@@ -453,29 +243,22 @@ const checkCalendar = async () => {
     try {
       const allEvents = await window.appAPI.listEvents();
       isAddedToCalendar.value = allEvents.some(e => e.linked_ticket_id === props.node.id);
-    } catch(e) {
-      console.error("checkCalendar err", e);
+    } catch (e) {
+      console.error('checkCalendar err', e);
     }
   }
 };
 
 const startEdit = () => {
   editForm.value = {
-    title: props.node.label,
-    origin: originLabel.value,
-    originTerminal: metadata.value.flight_info?.origin_terminal || '',
-    destination: destinationLabel.value,
-    destinationTerminal: metadata.value.flight_info?.destination_terminal || '',
-    date: departureDateStr.value,
-    time: departureTimeStr.value,
-    endDate: arrivalDateStr.value,
-    endTime: arrivalTimeStr.value,
-    flight_number: flightOrTrainNumber.value,
-    passenger_name: passengerName.value,
-    seat: seatLabel.value,
-    pnr: metadata.value.flight_info?.pnr || '',
+    title: cardTitle.value,
+    origin: metadata.value.flight_info?.origin || '',
+    destination: metadata.value.flight_info?.destination || '',
+    flight_number: metadata.value.flight_info?.flight_number || '',
+    seat: metadata.value.flight_info?.seat || metadata.value.seat_info || '',
     venue: metadata.value.venue || '',
-    barcode_data: metadata.value.barcode_data || ''
+    date: metadata.value.start_time ? metadata.value.start_time.split(' ')[0] : (metadata.value.date || ''),
+    time: (metadata.value.start_time && metadata.value.start_time.includes(' ')) ? metadata.value.start_time.split(' ')[1].substring(0, 5) : (metadata.value.time || ''),
   };
   isEditing.value = true;
 };
@@ -489,35 +272,26 @@ const saveEdit = async () => {
       newStartTime += ' 00:00:00';
     }
 
-    let newEndTime = editForm.value.endDate;
-    if (editForm.value.endTime) {
-      newEndTime += ' ' + editForm.value.endTime + ':00';
-    } else if (newEndTime) {
-      newEndTime += ' 00:00:00';
-    }
-
-    let newMetadata = { ...metadata.value };
+    const newMetadata = { ...metadata.value, flight_info: { ...(metadata.value.flight_info || {}) } };
     newMetadata.start_time = newStartTime;
-    newMetadata.end_time = newEndTime;
     newMetadata.venue = editForm.value.venue;
-    newMetadata.barcode_data = editForm.value.barcode_data;
-    if (metadata.value.passenger_name !== undefined) newMetadata.passenger_name = editForm.value.passenger_name;
-
-    if (isTravel.value) {
-      if (!newMetadata.flight_info) newMetadata.flight_info = {};
-      newMetadata.flight_info.origin = editForm.value.origin;
-      newMetadata.flight_info.origin_terminal = editForm.value.originTerminal;
-      newMetadata.flight_info.destination = editForm.value.destination;
-      newMetadata.flight_info.destination_terminal = editForm.value.destinationTerminal;
-      newMetadata.flight_info.flight_number = editForm.value.flight_number;
-      newMetadata.flight_info.passenger_name = editForm.value.passenger_name;
-      newMetadata.flight_info.seat = editForm.value.seat;
-      newMetadata.flight_info.pnr = editForm.value.pnr;
+    if (editForm.value.seat) {
       newMetadata.seat_info = editForm.value.seat;
+      newMetadata.flight_info.seat = editForm.value.seat;
+    }
+    if (editForm.value.flight_number) {
+      newMetadata.flight_info.flight_number = editForm.value.flight_number;
+    }
+    if (editForm.value.origin) {
+      newMetadata.flight_info.origin = editForm.value.origin;
+    }
+    if (editForm.value.destination) {
+      newMetadata.flight_info.destination = editForm.value.destination;
     }
 
     const newTitle = editForm.value.title || props.node.label;
-    await window.appAPI.kgUpdateTicket(props.node.id, newTitle, newMetadata);
+    const result = await window.appAPI.kgUpdateTicket(props.node.id, newTitle, newMetadata);
+    if (result?.error || result?.ok === false) throw new Error(result.error || 'Ticket update failed');
 
     isEditing.value = false;
     window.dispatchEvent(new CustomEvent('ticket-created'));
@@ -561,496 +335,352 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-/* ── Apple Wallet / Passbook Card Stacking Design ── */
-.wallet-pass-card {
+/* ── Deck Pass Card (1:1 with mockup) ── */
+.pass {
   position: relative;
-  border-radius: 16px;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
   width: 100%;
-  min-height: 140px;
-  padding: 16px 18px;
-  box-sizing: border-box;
-  color: #ffffff;
+  height: 238px;
+  border: 1px solid #ffffff42;
+  border-radius: 22px;
+  padding: 14px 16px;
+  color: #fff;
+  text-align: left;
+  box-shadow: 0 7px 17px #10243228;
   cursor: pointer;
-  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.16), 0 1px 3px rgba(0, 0, 0, 0.08);
-  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.25s cubic-bezier(0.16, 1, 0.3, 1);
-  user-select: none;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  transition: transform .18s ease, box-shadow .18s ease;
+  overflow: hidden;
+  touch-action: manipulation;
+  box-sizing: border-box;
+  display: block;
+  font-family: inherit;
+}
+.pass:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 11px 20px #10243235;
+}
+.pass:focus-visible {
+  outline: 3px solid var(--brand, #90bafa);
+  outline-offset: 2px;
+}
+.pass.flight { background: var(--flight, #6593bc); }
+.pass.rail { background: var(--rail, #5eaa96); }
+.pass.film { background: var(--film, #b57f9d); }
+.pass.museum { background: var(--museum, #d29b76); }
+.pass.general { background: var(--flight, #6593bc); }
+
+/* Expired: desaturate from original category color! */
+.pass.is-expired {
+  filter: grayscale(.63) saturate(.77) brightness(.97);
+}
+.pass.is-expired:hover {
+  filter: grayscale(.48) saturate(.84) brightness(.98);
 }
 
-.wallet-pass-card:hover {
-  transform: translateY(-4px);
-  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.25);
-}
-
-/* Stack mode specific overlapping */
-.wallet-pass-card.is-stacked {
-  margin-top: -80px;
-}
-.wallet-pass-card.is-stacked:first-child {
-  margin-top: 0;
-}
-.wallet-pass-card.is-stacked:hover {
-  transform: translateY(-24px) scale(1.01);
-  z-index: 99 !important;
-  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.38);
-}
-
-/* Category Themes (Rich saturated gradients) */
-.theme-flight {
-  background: linear-gradient(135deg, #0f2b5c 0%, #1d4ed8 60%, #3b82f6 100%);
-}
-.theme-train {
-  background: linear-gradient(135deg, #064e3b 0%, #047857 60%, #10b981 100%);
-}
-.theme-movie {
-  background: linear-gradient(135deg, #4c0519 0%, #9f1239 60%, #ec4899 100%);
-}
-.theme-concert {
-  background: linear-gradient(135deg, #78350f 0%, #b45309 60%, #f59e0b 100%);
-}
-.theme-exhibition {
-  background: linear-gradient(135deg, #3b0764 0%, #6d28d9 60%, #8b5cf6 100%);
-}
-.theme-general {
-  background: linear-gradient(135deg, #1e293b 0%, #334155 60%, #475569 100%);
-}
-
-.wallet-pass-card.is-expired {
-  filter: grayscale(0.7) opacity(0.85);
-}
-
-/* Perforated ticket notches for movie/exhibitions */
-.notch {
-  position: absolute;
-  top: 50%;
-  width: 14px;
-  height: 24px;
-  background-color: var(--bg-primary);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  transform: translateY(-50%);
-  z-index: 3;
-}
-.notch-left {
-  left: -8px;
-  border-radius: 0 14px 14px 0;
-  border-left: none;
-}
-.notch-right {
-  right: -8px;
-  border-radius: 14px 0 0 14px;
-  border-right: none;
-}
-
-/* Pass Header */
-.pass-header {
+.head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  margin-bottom: 8px;
+  gap: 11px;
+  height: 51px;
 }
-
-.pass-badge {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  background: rgba(0, 0, 0, 0.22);
-  backdrop-filter: blur(8px);
-  padding: 4px 10px;
-  border-radius: 20px;
-  border: 1px solid rgba(255, 255, 255, 0.15);
-}
-
-.pass-icon {
-  width: 14px;
-  height: 14px;
-}
-
-.pass-type-label {
-  font-size: 0.75rem;
-  font-weight: 600;
-  letter-spacing: 0.5px;
-}
-
-.pass-number-tag {
-  font-size: 0.75rem;
-  font-weight: 700;
-  background: rgba(255, 255, 255, 0.2);
-  padding: 1px 6px;
-  border-radius: 10px;
-  letter-spacing: 0.5px;
-}
-
-.pass-status-pill {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  background: rgba(0, 0, 0, 0.25);
-  padding: 3px 8px;
-  border-radius: 12px;
-  font-size: 0.7rem;
-  font-weight: 500;
-}
-.status-dot {
-  width: 6px;
-  height: 6px;
+.icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 37px;
+  height: 37px;
   border-radius: 50%;
+  background: #ffffff2e;
 }
-.status-active .status-dot {
-  background-color: #34d399;
-  box-shadow: 0 0 8px #34d399;
+.icon svg {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
-.status-expired .status-dot {
-  background-color: #9ca3af;
+.icon svg.flight-symbol {
+  fill: currentColor;
+  stroke: none;
 }
-
-/* Pass Main Section */
-.pass-main {
-  margin: 6px 0 10px;
-}
-
-.pass-route-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.route-city {
-  display: flex;
-  flex-direction: column;
-}
-.route-city.origin {
-  align-items: flex-start;
-}
-.route-city.destination {
-  align-items: flex-end;
-}
-
-.city-code {
-  font-size: 1.35rem;
-  font-weight: 700;
-  letter-spacing: 0.5px;
-}
-
-.city-terminal {
-  font-size: 0.7rem;
-  opacity: 0.8;
-  margin-top: 1px;
-}
-
-.route-transit {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
+.identity {
+  min-width: 0;
   flex: 1;
-  padding: 0 12px;
 }
-
-.transit-icon {
-  width: 14px;
-  height: 14px;
-  opacity: 0.75;
-}
-
-.transit-line {
-  position: relative;
-  width: 100%;
-  max-width: 90px;
-  height: 1px;
-  background: rgba(255, 255, 255, 0.3);
-  margin-top: 4px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.transit-arrow {
-  font-size: 9px;
-  opacity: 0.8;
-}
-
-.pass-event-row {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.event-title {
-  font-size: 1.15rem;
-  font-weight: 700;
-  white-space: nowrap;
+.identity strong {
+  display: block;
   overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.event-venue {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 0.78rem;
-  opacity: 0.85;
   white-space: nowrap;
-  overflow: hidden;
   text-overflow: ellipsis;
-}
-
-/* Pass Footer Info Strip */
-.pass-footer {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding-top: 8px;
-  border-top: 1px dashed rgba(255, 255, 255, 0.2);
-}
-
-.info-cell {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
-
-.info-label {
-  font-size: 0.65rem;
-  opacity: 0.7;
-  letter-spacing: 0.3px;
-  text-transform: uppercase;
-}
-
-.info-value {
-  font-size: 0.88rem;
-  font-weight: 600;
-  white-space: nowrap;
-}
-
-.time-highlight {
-  font-size: 1.05rem;
+  font-size: 15px;
+  line-height: 1.25;
   font-weight: 700;
+  color: #fff;
+}
+.identity small {
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 11px;
+  opacity: .8;
+  margin-top: 2px;
+  color: #fff;
+}
+.when {
+  align-self: flex-start;
+  padding-top: 5px;
+  font-size: 11px;
+  white-space: nowrap;
+  opacity: .85;
+  color: #fff;
 }
 
-.seat-tag {
-  background: rgba(255, 255, 255, 0.2);
-  padding: 1px 6px;
-  border-radius: 4px;
-  font-size: 0.78rem;
+.body-title {
+  margin-top: 31px;
+  font-size: 23px;
+  line-height: 1.2;
+  font-weight: 800;
+  letter-spacing: -.04em;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: #fff;
 }
-
-.passenger-cell {
-  margin-left: auto;
+.body-sub {
+  margin-top: 9px;
+  font-size: 13px;
+  opacity: .88;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: #fff;
 }
-
-.pass-mini-barcode {
+.foot {
   display: flex;
-  align-items: center;
-  opacity: 0.75;
+  justify-content: space-between;
+  border-top: 1px solid #ffffff79;
+  margin-top: 24px;
+  padding-top: 11px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #fff;
 }
 
-/* ── Detail Modal ── */
-.bp-modal-overlay {
+/* ── Modal View (1:1 with mockup) ── */
+.veil {
   position: fixed;
-  top: 0; left: 0; right: 0; bottom: 0;
-  background: rgba(0, 0, 0, 0.65);
-  display: flex;
-  align-items: center;
-  justify-content: center;
   z-index: 9999;
-  backdrop-filter: blur(6px);
-}
-
-.boarding-pass-modern-card {
-  background: var(--bg-tertiary);
-  color: var(--text-primary);
-  border: 1px solid var(--border-default);
-  border-radius: 18px;
-  padding: 22px;
-  width: 90%;
-  max-width: 360px;
-  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.4);
-  animation: modalPop 0.28s cubic-bezier(0.16, 1, 0.3, 1);
-  font-family: var(--font-sans, system-ui, sans-serif);
-}
-
-@keyframes modalPop {
-  from { opacity: 0; transform: scale(0.92); }
-  to { opacity: 1; transform: scale(1); }
-}
-
-.bp-modern-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 0.85rem;
-  font-weight: 600;
-  opacity: 0.8;
-  margin-bottom: 12px;
-}
-
-.bp-modern-icon {
-  display: flex;
-  align-items: center;
-}
-
-.bp-route-row {
-  display: grid;
-  grid-template-columns: 1fr auto 1fr;
-  align-items: start;
-  gap: 12px;
-  margin: 12px 0 18px;
-}
-
-.bp-route-center {
-  opacity: 0.5;
-  margin-top: 6px;
-}
-
-.bp-airport-code {
-  font-size: 1.55rem;
-  font-weight: 700;
-  letter-spacing: 1px;
-  height: 34px;
-  line-height: 34px;
-  display: inline-block;
-}
-
-.bp-detail-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 16px 12px;
-}
-
-.bp-modern-field {
+  inset: 0;
+  background: #13212dbf;
   display: flex;
   flex-direction: column;
-  gap: 3px;
-  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  overflow-y: auto;
+  box-sizing: border-box;
 }
-
-.bp-modern-field:nth-child(3n+1) { align-items: flex-start; text-align: left; }
-.bp-modern-field:nth-child(3n+2) { align-items: center; text-align: center; }
-.bp-modern-field:nth-child(3n) { align-items: flex-end; text-align: right; }
-
-.bp-modern-label {
-  font-size: 0.72rem;
-  color: var(--text-tertiary);
-  letter-spacing: 0.3px;
+.detail {
+  position: relative;
+  width: min(100%, 390px);
+  min-height: 414px;
+  border-radius: 23px;
+  padding: 22px;
+  color: #fff;
+  box-shadow: 0 18px 38px #0e1c2e66;
+  border: 1px solid #ffffff42;
+  box-sizing: border-box;
+  text-align: left;
 }
+.detail.flight { background: var(--flight, #6593bc); }
+.detail.rail { background: var(--rail, #5eaa96); }
+.detail.film { background: var(--film, #b57f9d); }
+.detail.museum { background: var(--museum, #d29b76); }
+.detail.general { background: var(--flight, #6593bc); }
+.detail.expired-detail { filter: grayscale(.55) saturate(.8); }
 
-.bp-modern-value {
-  font-size: 1.05rem;
-  font-weight: 700;
-  white-space: nowrap;
+.detail h3 {
+  font-size: 25px;
+  line-height: 1.18;
+  letter-spacing: -.04em;
+  margin: 32px 0 8px;
+  font-weight: 800;
+  color: #fff;
   overflow: hidden;
   text-overflow: ellipsis;
-  width: 100%;
+  white-space: nowrap;
+}
+.detail p {
+  margin: 0;
+  opacity: .85;
+  font-size: 14px;
+  color: #fff;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.detail dl {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+  margin: 28px 0 0;
+  padding-top: 15px;
+  border-top: 1px solid #ffffff80;
+}
+.detail dt {
+  font-size: 11px;
+  opacity: .75;
+  color: #fff;
+}
+.detail dd {
+  margin: 3px 0 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: #fff;
 }
 
-.bp-modern-divider {
-  height: 1px;
-  background: var(--border-default);
-  margin: 12px 0;
-}
-
-/* High Contrast QR Section */
-.bp-modern-qr-section {
-  margin-top: 18px;
+.detail-qr-section {
   display: flex;
   flex-direction: column;
   align-items: center;
+  margin-top: 24px;
+  padding-top: 18px;
+  border-top: 1px solid #ffffff42;
 }
-
-.bp-modern-qr-wrapper {
-  background: #ffffff !important;
-  color: #000000 !important;
-  padding: 14px;
+.detail-qr-box {
+  background: #ffffff;
+  padding: 12px;
   border-radius: 12px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
   display: inline-flex;
-  align-items: center;
-  justify-content: center;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
 }
-
-.bp-qr-hint {
-  font-size: 0.75rem;
-  color: var(--text-secondary);
+.detail-qr-caption {
+  font-size: 11px;
   margin-top: 8px;
   opacity: 0.8;
-}
-
-.bp-qr-code-text {
-  font-size: 0.78rem;
-  font-family: monospace;
-  color: var(--text-tertiary);
-  margin-top: 4px;
   letter-spacing: 0.5px;
 }
-
-.bp-modern-actions {
-  display: flex;
-  gap: 10px;
-  margin-top: 20px;
+.detail-barcode-text {
+  margin-top: 18px;
+  padding: 8px 12px;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 8px;
+  font-size: 12px;
+  font-family: monospace;
+  text-align: center;
+  word-break: break-all;
 }
 
-.bp-modern-btn {
-  flex: 1;
-  padding: 10px;
-  border-radius: var(--radius-default);
-  border: none;
+.detail-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 22px;
+  padding-top: 14px;
+  border-top: 1px solid #ffffff30;
+}
+.detail-act-btn {
+  background: rgba(255, 255, 255, 0.22);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  color: #fff;
+  border-radius: 14px;
+  padding: 6px 14px;
+  font-size: 12px;
   font-weight: 600;
   cursor: pointer;
-  transition: opacity 0.2s;
-  font-size: 0.9rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: background .15s ease;
+}
+.detail-act-btn:hover {
+  background: rgba(255, 255, 255, 0.35);
+}
+.detail-del-btn {
+  background: rgba(220, 38, 38, 0.35);
+  border-color: rgba(220, 38, 38, 0.5);
+}
+.detail-del-btn:hover {
+  background: rgba(220, 38, 38, 0.6);
 }
 
-.bp-modern-btn:hover {
-  opacity: 0.88;
+.close {
+  border: 0;
+  border-radius: 18px;
+  background: #ffffff;
+  color: #1a2832;
+  padding: 9px 28px;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  margin-top: 20px;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.25);
+  transition: transform .15s ease;
+}
+.close:hover {
+  transform: translateY(-1px);
 }
 
-.bp-modern-btn-dismiss {
-  background: var(--bg-secondary);
-  color: var(--text-secondary);
-}
-
-.bp-modern-btn-danger {
-  background: var(--color-error, #ef4444);
-  color: #ffffff;
-  flex: none;
-  width: 44px;
+/* Edit form */
+.detail-edit-form {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid #ffffff40;
   display: flex;
-  align-items: center;
-  justify-content: center;
+  flex-direction: column;
+  gap: 12px;
 }
-
-.bp-modern-btn-primary {
-  background: var(--accent-primary, #3b82f6);
-  color: #ffffff;
+.edit-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
-
-.bp-edit-input {
-  background: var(--bg-primary);
-  border: 1px solid var(--border-default);
-  color: var(--text-primary);
-  border-radius: var(--radius-default);
-  padding: 4px 8px;
-  font-size: 1rem;
-  width: 100%;
-  box-sizing: border-box;
-  font-family: inherit;
-  height: 28px;
+.edit-field label {
+  font-size: 11px;
+  opacity: .8;
 }
-
-.bp-airport-group {
+.edit-input {
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 8px;
+  padding: 6px 10px;
+  color: #fff;
+  font-size: 13px;
+  outline: none;
+}
+.edit-input:focus {
+  border-color: #fff;
+}
+.edit-grid-2 {
   display: grid;
-  grid-template-rows: 34px 28px 26px 28px;
-  align-items: center;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
 }
-.bp-airport-group.is-origin { justify-items: start; }
-.bp-airport-group.is-destination { justify-items: end; }
-.bp-terminal {
-  font-size: 1rem;
-  font-weight: 500;
-  opacity: 0.7;
+.edit-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+}
+.edit-submit-btn {
+  background: #fff;
+  color: #1a2832;
+  border: none;
+  border-radius: 12px;
+  padding: 6px 16px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.edit-cancel-btn {
+  background: rgba(255, 255, 255, 0.2);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 12px;
+  padding: 6px 14px;
+  font-size: 13px;
+  cursor: pointer;
 }
 </style>

@@ -46,6 +46,27 @@ a:hover {
 @property --surface-input { syntax: '<color>'; inherits: true; initial-value: rgba(255, 255, 255, 0.08); }
 
 :root {
+  --bob-brand-blue: #2776BB;
+  /* 票夹：整张实色卡片，莫兰迪色彩体系 */
+  --flight: #6593bc;
+  --rail: #5eaa96;
+  --film: #b57f9d;
+  --museum: #d29b76;
+  --brand: #90bafa;
+
+  --ticket-flight: #6593bc;
+  --ticket-train: #5eaa96;
+  --ticket-rail: #5eaa96;
+  --ticket-movie: #b57f9d;
+  --ticket-film: #b57f9d;
+  --ticket-exhibition: #d29b76;
+  --ticket-museum: #d29b76;
+  --ticket-concert: #b57f9d;
+  --ticket-membership: #5eaa96;
+  --ticket-general: #6593bc;
+  --ticket-edge: rgba(255, 255, 255, 0.26);
+  --ticket-shadow: rgba(16, 36, 50, 0.16);
+  --ticket-ink: #ffffff;
   /* 鈹€鈹€ 鑹叉澘锛堢函鐏板害锛屾棤钃濊壊锛?鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€ */
   --bg-root:        #0c0c0c;
   --bg-primary:     #141414;
@@ -156,7 +177,7 @@ a:hover {
   --logo-color:        var(--user-accent);
   --bg-code-inline:    rgba(0, 0, 0, 0.06);
 
-  --user-accent:       #2776bb;
+  --user-accent:       var(--bob-brand-blue);
   --user-accent-rgb:   39, 118, 187;
 }
 
@@ -1125,9 +1146,9 @@ code.hljs {
 /* ── Mobile Layout Global Rules ── */
 
   .mobile-header {
-    display: flex;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 36%) minmax(0, 1fr);
     align-items: center;
-    justify-content: space-between;
     height: 56px;
     padding: 0 16px;
     background: var(--bg-primary);
@@ -1139,9 +1160,9 @@ code.hljs {
   }
 
   .mobile-hamburger, .mobile-header-right {
-    flex: 0 0 32px;
     display: flex;
     align-items: center;
+    min-width: 0;
   }
 
   .mobile-hamburger {
@@ -1157,14 +1178,30 @@ code.hljs {
 
   .mobile-header-right {
     justify-content: flex-end;
+    white-space: nowrap;
+  }
+
+  .mobile-header-right .cost-indicator {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .mobile-header-center {
-    flex: 1;
     display: flex;
     justify-content: center;
     align-items: center;
     position: relative;
+    min-width: 0;
+  }
+
+  .mobile-header-title,
+  .mobile-header-title-input {
+    max-width: 100%;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .mobile-header-title {

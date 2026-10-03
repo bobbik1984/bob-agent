@@ -73,7 +73,7 @@
               <span class="project-degree">{{ batch.file_count }}</span>
             </button>
           </div>
-
+          
           <div class="kg-sidebar-footer">
             <span v-if="stats" class="kg-stat-badge">
               {{ $t('kg.stats_summary', { nodes: stats.node_count, edges: stats.edge_count }) }}
@@ -86,104 +86,12 @@
 
         <!-- 笔记侧边栏内容 -->
         <div v-show="currentMode === 'notebook'" class="kg-sidebar-content notebook-sidebar-content">
-          <NoteExplorer
+          <NoteExplorer 
             v-if="!isMobile"
             ref="noteExplorerRef"
             :selectedNoteId="selectedNoteId"
             @select="handleNoteSelect"
           />
-        </div>
-
-        <!-- 票夹侧边栏内容 (分类过滤与呈现模式) -->
-        <div v-show="currentMode === 'ticket'" class="kg-sidebar-content ticket-sidebar-content">
-          <div class="ticket-sidebar-filter-list">
-            <h3 class="kg-project-list-title">{{ $t('ticket.categories') || '票据分类' }}</h3>
-
-            <button
-              class="ticket-filter-btn"
-              :class="{ active: ticketFilter === 'all' }"
-              @click="ticketFilter = 'all'"
-            >
-              <div class="filter-btn-left">
-                <Ticket :size="15" />
-                <span>全部票据</span>
-              </div>
-              <span class="filter-count">{{ ticketCounts.all }}</span>
-            </button>
-
-            <button
-              class="ticket-filter-btn"
-              :class="{ active: ticketFilter === 'flight' }"
-              @click="ticketFilter = 'flight'"
-            >
-              <div class="filter-btn-left">
-                <Plane :size="15" style="color: #3b82f6;" />
-                <span>航班机票</span>
-              </div>
-              <span class="filter-count">{{ ticketCounts.flight }}</span>
-            </button>
-
-            <button
-              class="ticket-filter-btn"
-              :class="{ active: ticketFilter === 'train' }"
-              @click="ticketFilter = 'train'"
-            >
-              <div class="filter-btn-left">
-                <Train :size="15" style="color: #10b981;" />
-                <span>高铁动车</span>
-              </div>
-              <span class="filter-count">{{ ticketCounts.train }}</span>
-            </button>
-
-            <button
-              class="ticket-filter-btn"
-              :class="{ active: ticketFilter === 'entertainment' }"
-              @click="ticketFilter = 'entertainment'"
-            >
-              <div class="filter-btn-left">
-                <Film :size="15" style="color: #ec4899;" />
-                <span>电影演出</span>
-              </div>
-              <span class="filter-count">{{ ticketCounts.entertainment }}</span>
-            </button>
-
-            <button
-              class="ticket-filter-btn"
-              :class="{ active: ticketFilter === 'expired' }"
-              @click="ticketFilter = 'expired'"
-            >
-              <div class="filter-btn-left">
-                <Calendar :size="15" style="opacity: 0.6;" />
-                <span>历史归档</span>
-              </div>
-              <span class="filter-count">{{ ticketCounts.expired }}</span>
-            </button>
-          </div>
-
-          <!-- 视图模式切换 -->
-          <div class="ticket-view-mode-section">
-            <h3 class="kg-project-list-title">呈现模式</h3>
-            <div class="view-mode-toggle-group">
-              <button
-                class="view-mode-btn"
-                :class="{ active: walletViewMode === 'stack' }"
-                @click="walletViewMode = 'stack'"
-                title="Apple Wallet 卡包层叠视图"
-              >
-                <Layers :size="14" />
-                <span>卡包层叠</span>
-              </button>
-              <button
-                class="view-mode-btn"
-                :class="{ active: walletViewMode === 'grid' }"
-                @click="walletViewMode = 'grid'"
-                title="平铺网格视图"
-              >
-                <Grid :size="14" />
-                <span>平铺网格</span>
-              </button>
-            </div>
-          </div>
         </div>
       </div>
     </Teleport>
@@ -192,7 +100,7 @@
     <main class="kg-main-content">
       <!-- 主体：图谱画布 + Inspector -->
       <div v-show="currentMode === 'graph'" class="kg-body">
-
+        
         <!-- Search Overlay -->
         <div class="kg-overlay-search" :class="{ expanded: kgSearchExpanded }">
           <div class="kg-search-box">
@@ -245,9 +153,9 @@
       ></div>
 
       <!-- Inspector 面板 -->
-      <div
-        v-show="selectedNode"
-        class="inspector-resizer"
+      <div 
+        v-show="selectedNode" 
+        class="inspector-resizer" 
         @mousedown="startResizeInspector"
         :style="{ right: inspectorWidth + 'px' }"
       ></div>
@@ -303,10 +211,10 @@
               仅同类型 ({{ getTypeName(selectedNode.type) }})
             </label>
           </div>
-
+          
           <div class="merge-list">
-            <div
-              v-for="node in filteredMergeNodes"
+            <div 
+              v-for="node in filteredMergeNodes" 
               :key="node.id"
               class="merge-list-item"
               :class="{ selected: mergeTargetId === node.id }"
@@ -360,13 +268,13 @@
     <!-- 笔记工作台 -->
     <div v-if="currentMode === 'notebook'" class="notebook-body">
       <!-- 移动端侧边栏 (抽屉+工具栏) -->
-      <NoteExplorer
+      <NoteExplorer 
         v-if="isMobile"
         ref="noteExplorerRefMobile"
         :selectedNoteId="selectedNoteId"
         @select="handleNoteSelect"
       />
-
+      
       <div class="notebook-editor-area">
         <div v-if="!selectedNoteId" class="notebook-empty-state">
           {{ isMobile ? '请在菜单中选择或新建一篇笔记' : '请在左侧选择或新建一篇笔记' }}
@@ -376,7 +284,7 @@
             <RefreshCw :size="32" class="animate-spin" style="opacity: 0.4; margin-bottom: 12px;" />
             <p style="color: var(--text-secondary); font-size: 14px;">正在全速解析，请稍候...</p>
           </div>
-          <TiptapEditor
+          <TiptapEditor 
             v-show="!isLoadingNote"
             v-model="currentNoteContent"
             :saveStatus="saveStatus"
@@ -404,69 +312,37 @@
     </div>
 
     <div v-if="currentMode === 'ticket'" class="ticket-body">
-      <!-- 票夹顶部工具栏 (移动端或宽屏快速切换) -->
-      <div class="ticket-toolbar">
-        <div class="ticket-toolbar-title-wrap">
-          <span class="ticket-toolbar-title">我的卡包</span>
-          <span class="ticket-count-badge">{{ filteredTickets.length }}</span>
-        </div>
-
-        <!-- 移动端分类筛选胶囊 -->
-        <div v-if="isMobile" class="mobile-ticket-filters">
-          <button class="mobile-filter-chip" :class="{ active: ticketFilter === 'all' }" @click="ticketFilter = 'all'">全部 ({{ ticketCounts.all }})</button>
-          <button class="mobile-filter-chip" :class="{ active: ticketFilter === 'flight' }" @click="ticketFilter = 'flight'">机票 ({{ ticketCounts.flight }})</button>
-          <button class="mobile-filter-chip" :class="{ active: ticketFilter === 'train' }" @click="ticketFilter = 'train'">高铁 ({{ ticketCounts.train }})</button>
-          <button class="mobile-filter-chip" :class="{ active: ticketFilter === 'entertainment' }" @click="ticketFilter = 'entertainment'">演出 ({{ ticketCounts.entertainment }})</button>
-          <button class="mobile-filter-chip" :class="{ active: ticketFilter === 'expired' }" @click="ticketFilter = 'expired'">历史 ({{ ticketCounts.expired }})</button>
-        </div>
-
-        <!-- 视图切换模式按钮 -->
-        <div class="ticket-toolbar-actions">
-          <button
-            class="toolbar-mode-btn"
-            :class="{ active: walletViewMode === 'stack' }"
-            @click="walletViewMode = 'stack'"
-            title="层叠卡包视图 (Apple Wallet / Passbook 经典体验)"
-          >
-            <Layers :size="16" />
-          </button>
-          <button
-            class="toolbar-mode-btn"
-            :class="{ active: walletViewMode === 'grid' }"
-            @click="walletViewMode = 'grid'"
-            title="平铺网格视图"
-          >
-            <Grid :size="16" />
-          </button>
-        </div>
+      <div v-if="ticketNodes.length === 0" class="notebook-empty-state">
+        {{ $t('ticket.empty') }}
       </div>
-
-      <!-- 空状态 -->
-      <div v-if="filteredTickets.length === 0" class="notebook-empty-state" style="margin-top: 40px;">
-        <Ticket :size="48" style="opacity: 0.25; margin-bottom: 12px;" />
-        <p>{{ $t('ticket.empty') || '暂无对应票据' }}</p>
-      </div>
-
-      <!-- 钱包层叠视图 (Apple Wallet / Passbook 经典层叠) -->
-      <div v-else-if="walletViewMode === 'stack'" class="wallet-stack-wrapper">
-        <TicketCard
-          v-for="(node, idx) in filteredTickets"
-          :key="node.id"
-          :node="node"
-          :is-stacked="true"
-          :index="idx"
-          :total="filteredTickets.length"
-        />
-      </div>
-
-      <!-- 网格平铺视图 -->
-      <div v-else class="wallet-grid-wrapper">
-        <TicketCard
-          v-for="node in filteredTickets"
-          :key="node.id"
-          :node="node"
-          :is-stacked="false"
-        />
+      <div v-else class="wallet-layout">
+        <section v-if="walletGroups.upcoming.length" class="wallet-section">
+          <div class="section-head">
+            <span>{{ $t('ticket.group_upcoming') || '待使用' }}</span>
+            <span>{{ walletGroups.upcoming.length }} {{ $t('ticket.count_unit') || '张' }} · {{ $t('ticket.bright_colors') || '色彩明亮' }}</span>
+          </div>
+          <div class="wallet-stack">
+            <TicketCard v-for="(node, index) in walletGroups.upcoming" :key="node.id" :node="node" :index="index" />
+          </div>
+        </section>
+        <section v-if="walletGroups.undated.length" class="wallet-section">
+          <div class="section-head">
+            <span>{{ $t('ticket.group_undated') || '未定日期' }}</span>
+            <span>{{ walletGroups.undated.length }} {{ $t('ticket.count_unit') || '张' }}</span>
+          </div>
+          <div class="wallet-stack">
+            <TicketCard v-for="(node, index) in walletGroups.undated" :key="node.id" :node="node" :index="index" />
+          </div>
+        </section>
+        <section v-if="walletGroups.expired.length" class="wallet-section wallet-section-expired archive-section">
+          <div class="section-head">
+            <span>{{ $t('ticket.group_expired') || '已过期' }}</span>
+            <span>{{ walletGroups.expired.length }} {{ $t('ticket.count_unit') || '张' }} · {{ $t('ticket.muted_archive') || '灰度收纳' }}</span>
+          </div>
+          <div class="wallet-stack expired">
+            <TicketCard v-for="(node, index) in walletGroups.expired" :key="node.id" :node="node" :index="index" />
+          </div>
+        </section>
       </div>
     </div>
 
@@ -488,13 +364,14 @@
 import { ref, onMounted, onBeforeUnmount, watch, computed, inject } from 'vue';
 import NoteExplorer from '../components/NoteExplorer.vue';
 import TicketCard from '../components/TicketCard.vue';
+import { groupWalletTickets } from '../tickets/wallet.js';
 import TiptapEditor from '../components/TiptapEditor.vue';
 import { useI18n } from 'vue-i18n';
 import { useDialog } from '../composables/useDialog';
 import { listen } from '@tauri-apps/api/event';
 import { Network } from 'vis-network';
 import { DataSet } from 'vis-data';
-import { Waypoints, Search, X, FileText, RefreshCw, Plus, Link, ExternalLink, Trash2, ChevronRight, Menu, ChevronDown, Star, Package, Ticket, Layers, Grid, Plane, Train, Film, Calendar } from 'lucide-vue-next';
+import { Waypoints, Search, X, FileText, RefreshCw, Plus, Link, ExternalLink, Trash2, ChevronRight, Menu, ChevronDown, Star, Package, Ticket } from 'lucide-vue-next';
 
 const emit = defineEmits(['toggle-sidebar']);
 
@@ -527,14 +404,14 @@ async function handleNoteSelect(id) {
     currentNoteFrontmatter = null;
     return;
   }
-
+  
   try {
     isLoadingNote.value = true;
     currentNoteContent.value = '';
-
+    
     // Let Vue and browser update the UI (highlight the clicked note and show loader immediately)
     await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-
+    
     // Abort if user clicked another note while yielding
     if (selectedNoteId.value !== id) {
       if (selectedNoteId.value === id) isLoadingNote.value = false; // only reset if we are the last one, wait, actually let the new click handle it
@@ -542,7 +419,7 @@ async function handleNoteSelect(id) {
     }
 
     const res = await window.appAPI.notebookReadNote(id);
-
+    
     // Abort if user clicked another note while reading from disk
     if (selectedNoteId.value !== id) return;
 
@@ -570,7 +447,7 @@ async function handleNoteSelect(id) {
 async function saveCurrentNote(markdown) {
   if (!selectedNoteId.value) return;
   const id = selectedNoteId.value;
-
+  
   if (saveTimeout) clearTimeout(saveTimeout);
   saveStatus.value = '保存中...';
 
@@ -728,96 +605,9 @@ const ticketNodes = computed(() => {
   const _trigger = stats.value;
   if (!allGraphData.value || !allGraphData.value.nodes) return [];
   return allGraphData.value.nodes
-    .filter(n => n.node_type === 'ticket' || n.type === 'ticket' || n.type === 'Ticket')
-    .sort((a,b) => {
-      let aMeta = {};
-      let bMeta = {};
-      try { aMeta = typeof a.metadata === 'string' && a.metadata ? JSON.parse(a.metadata) : (a.metadata || {}); } catch(e) {}
-      try { bMeta = typeof b.metadata === 'string' && b.metadata ? JSON.parse(b.metadata) : (b.metadata || {}); } catch(e) {}
-
-      const now = new Date();
-      const dateA = aMeta.start_time ? new Date(aMeta.start_time) : null;
-      const dateB = bMeta.start_time ? new Date(bMeta.start_time) : null;
-
-      if (!dateA && !dateB) return 0;
-      if (!dateA) return 1;
-      if (!dateB) return -1;
-
-      const isAExpired = dateA < now;
-      const isBExpired = dateB < now;
-
-      if (!isAExpired && isBExpired) return -1;
-      if (isAExpired && !isBExpired) return 1;
-
-      if (!isAExpired && !isBExpired) {
-        return dateA - dateB; // Upcoming: closer to today first (ascending)
-      }
-
-      return dateB - dateA; // Expired: closer to today first (descending)
-    });
+    .filter(n => String(n.node_type || n.type).toLowerCase() === 'ticket');
 });
-
-// ── 票夹分类筛选与显示模式 ────────────────────────────
-const ticketFilter = ref('all'); // 'all' | 'flight' | 'train' | 'entertainment' | 'expired'
-const walletViewMode = ref('stack'); // 'stack' | 'grid'
-
-function getNodeCategory(node) {
-  let meta = {};
-  try {
-    meta = typeof node.metadata === 'string' && node.metadata ? JSON.parse(node.metadata) : (node.metadata || {});
-  } catch (e) {}
-
-  const cat = (meta.category || '').toLowerCase();
-  if (cat === 'flight' || cat === 'air') return 'flight';
-  if (cat === 'train' || cat === 'rail') return 'train';
-  if (cat === 'movie' || cat === 'film' || cat === 'cinema') return 'entertainment';
-  if (cat === 'concert' || cat === 'music' || cat === 'show' || cat === 'exhibition' || cat === 'museum') return 'entertainment';
-
-  const text = `${node.label || ''} ${node.summary || ''} ${meta.venue || ''}`;
-  if (/(\b[GDCKZTX]\d{1,4}\b)|(\([GDCKZTX\d]+\))|高铁|动车|列车|火车站|车次/i.test(text)) return 'train';
-  if (/电影|影城|影院|激光厅|IMAX|放映|音乐|演出|话剧|演唱会|展览|博览/i.test(text)) return 'entertainment';
-  if (/(\b[A-Z]{2}\s?\d{3,4}\b)|(\b[A-Z][0-9]\s?\d{3,4}\b)|(\b[0-9][A-Z]\s?\d{3,4}\b)|([A-Z]{3}\s*[-–➔✈]\s*[A-Z]{3})|航班|机票|登机牌/i.test(text)) return 'flight';
-  return 'general';
-}
-
-function isNodeExpired(node) {
-  let meta = {};
-  try {
-    meta = typeof node.metadata === 'string' && node.metadata ? JSON.parse(node.metadata) : (node.metadata || {});
-  } catch (e) {}
-  if (!meta.start_time) return false;
-  const dtStr = meta.start_time.replace(' ', 'T');
-  const startTime = new Date(dtStr).getTime();
-  if (isNaN(startTime)) return false;
-  return Date.now() > startTime + 24 * 3600 * 1000;
-}
-
-const ticketCounts = computed(() => {
-  const counts = { all: 0, flight: 0, train: 0, entertainment: 0, expired: 0 };
-  ticketNodes.value.forEach(node => {
-    counts.all++;
-    if (isNodeExpired(node)) {
-      counts.expired++;
-    }
-    const cat = getNodeCategory(node);
-    if (cat === 'flight') counts.flight++;
-    else if (cat === 'train') counts.train++;
-    else if (cat === 'entertainment') counts.entertainment++;
-  });
-  return counts;
-});
-
-const filteredTickets = computed(() => {
-  return ticketNodes.value.filter(node => {
-    if (ticketFilter.value === 'all') return true;
-    if (ticketFilter.value === 'expired') return isNodeExpired(node);
-    const cat = getNodeCategory(node);
-    if (ticketFilter.value === 'flight') return cat === 'flight';
-    if (ticketFilter.value === 'train') return cat === 'train';
-    if (ticketFilter.value === 'entertainment') return cat === 'entertainment';
-    return true;
-  });
-});
+const walletGroups = computed(() => groupWalletTickets(ticketNodes.value));
 
 const topProjects = computed(() => {
   const _trigger = stats.value; // Force reactivity since allGraphData is not a ref
@@ -885,10 +675,10 @@ async function confirmMerge() {
   if (!mergeTargetId.value || !selectedNode.value) return;
   const targetNode = allNodesList.value.find(n => n.id === mergeTargetId.value);
   if (!targetNode) return;
-
+  
   const yes = await showConfirm(`确定要将【${selectedNode.value.label}】合并至【${targetNode.label}】吗？\n\n合并后，当前节点将被删除，其所有关联关系将转移到目标节点上。`);
   if (!yes) return;
-
+  
   try {
     const res = await window.appAPI.invoke('kg_merge_nodes', {
       payload: {
@@ -897,7 +687,7 @@ async function confirmMerge() {
       }
     });
     if (!res.ok) throw new Error(res.error || 'Unknown error');
-
+    
     mergeMode.value = false;
     selectedNode.value = null;
     await loadGraph();
@@ -973,12 +763,12 @@ function buildNetworkOptions() {
     },
     physics: {
       solver: 'barnesHut',
-      barnesHut: {
+      barnesHut: { 
         gravitationalConstant: -6000,  // 稍微减少排斥力使图谱更紧凑 (之前是-12000，默认-2000)
         centralGravity: 0.08,          // 稍微增加向心力
         springLength: 150,             // 缩短连线基本长度 (之前是250，默认100)
         springConstant: 0.05,          // 稍微增强连线拉力
-        damping: 0.2
+        damping: 0.2 
       },
       stabilization: { enabled: true, iterations: 80, fit: true },
       maxVelocity: 50,
@@ -1041,7 +831,7 @@ function resizeNetwork() {
 
 onMounted(async () => {
   window.addEventListener('resize', resizeNetwork);
-
+  
   window.addEventListener('open-ticket-view', (e) => {
     currentMode.value = 'ticket';
     if (e.detail) {
@@ -1106,11 +896,11 @@ onMounted(async () => {
         let yes = false;
         try {
           // using useDialog
-
+          
           // 先预估成本
           const estimate = await window.appAPI.estimateKB(path);
           let msg = `是否要从该路径提取知识点并加入图谱？\n\n${path}\n\n`;
-
+          
           if (estimate && !estimate.error) {
             msg += `【扫描结果】\n`;
             msg += `- 支持的文件: ${estimate.convertable_files} 个\n`;
@@ -1128,7 +918,7 @@ onMounted(async () => {
         } catch (err) {
           yes = window.confirm(`是否要从该路径提取知识点并加入图谱？\n\n${path}`);
         }
-
+        
         if (yes) {
           await buildKBAndRefresh(path);
         }
@@ -1200,7 +990,7 @@ function renderNetwork(data) {
   network.on('selectNode', (params) => {
     if (params.nodes.length > 0) {
       const nodeId = params.nodes[0];
-
+      
       if (mergeMode.value) {
         if (nodeId !== selectedNode.value?.id) {
           mergeTargetId.value = nodeId;
@@ -1227,7 +1017,7 @@ function renderNetwork(data) {
       }
       return;
     }
-
+    
     selectedNode.value = null;
     selectedRelations.value = [];
     resetFocus();
@@ -1369,14 +1159,14 @@ function doSearch() {
 function focusNode(nodeId) {
   if (!network) return;
   network.selectNodes([nodeId]);
-
+  
   // 考虑到 Inspector 使用了 absolute 定位会遮挡右侧，相机往左偏移 inspector 宽度的一半
-  network.focus(nodeId, {
-    scale: 1.2,
+  network.focus(nodeId, { 
+    scale: 1.2, 
     offset: { x: -(inspectorWidth.value / 2), y: 0 },
-    animation: true
+    animation: true 
   });
-
+  
   const node = nodesDataSet.get(nodeId);
   if (node?._raw) {
     selectedNode.value = node._raw;
@@ -1396,7 +1186,7 @@ async function applyTypeFilter() {
   if (!nodesDataSet || !edgesDataSet) return;
 
   const showAll = activeTypes.value.size === 0;
-
+  
   const nodeUpdates = [];
   nodesDataSet.forEach(node => {
     const shouldHide = !showAll && !activeTypes.value.has(node._raw.type);
@@ -1452,7 +1242,7 @@ async function onDragLeave() {
 async function confirmExtract(path) {
   try {
     const est = await window.appAPI.invoke('system_estimate_kb', { folderPath: path });
-
+    
     let msg = `是否要从该路径提取知识点并加入图谱？\n\n路径: ${path}`;
     if (est) {
       msg += `\n\n【成本估算】`;
@@ -1466,7 +1256,7 @@ async function confirmExtract(path) {
       title: '提取前确认及成本预估',
       message: msg
     });
-
+    
     if (yes) {
       await buildKBAndRefresh(path);
     }
@@ -1532,7 +1322,7 @@ async function removeSourceBatch(node) {
   // 从 source 节点取出 batch_id (通常是 node.source_batches 的内容之一，或者可以直接通过 node.id 的 source_ 前缀后获取)
   // 如果是 source 节点，它的 id 形式是 source_<batch_id>
   const batchId = node.id.replace('source_', '');
-
+  
   if (await showConfirm(`确定要彻底清除来源批次 "${node.label}" 及其相关联的所有知识点吗？\n警告：此操作不可逆！`)) {
     try {
       loading.value = true;
@@ -1570,6 +1360,17 @@ async function removeSourceBatch(node) {
 </script>
 
 <style scoped>
+.ticket-body { flex: 1; overflow-y: auto; padding: 20px 18px 60px; background: var(--bg-primary); }
+.wallet-layout { max-width: 420px; margin: 0 auto; display: flex; flex-direction: column; gap: 36px; }
+.section-head { display: flex; align-items: center; justify-content: space-between; margin: 7px 3px 12px; font-size: 13px; font-weight: 800; color: var(--text-primary); }
+.section-head span:last-child { font-size: 11px; font-weight: 500; color: var(--text-tertiary); }
+.archive-section { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border-subtle); }
+.archive-section .section-head { color: var(--text-tertiary); }
+.wallet-stack { display: flex; flex-direction: column; padding-bottom: 4px; }
+.wallet-stack > :not(:first-child) { margin-top: -156px; }
+.wallet-stack > :last-child { margin-bottom: 0; }
+.wallet-stack > *:hover { z-index: 50 !important; }
+@media (max-width: 600px) { .ticket-body { padding: 16px 12px 48px; } .wallet-layout { gap: 32px; max-width: 100%; } }
 .kg-mobile-col {
   flex-direction: column !important;
 }
@@ -2504,224 +2305,5 @@ async function removeSourceBatch(node) {
 
 .kg-mobile-col .kg-overlay-search.expanded .kg-search-box {
   width: 100% !important;
-}
-
-/* ── 票夹 Apple Wallet / Passbook 样式与侧边栏 ──────────── */
-.ticket-body {
-  flex: 1;
-  overflow-y: auto;
-  padding: 24px 20px;
-  background-color: var(--bg-primary);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  min-height: 0;
-}
-
-.ticket-toolbar {
-  width: 100%;
-  max-width: 680px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 24px;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
-.ticket-toolbar-title-wrap {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.ticket-toolbar-title {
-  font-size: 1.15rem;
-  font-weight: 700;
-  color: var(--text-primary);
-  letter-spacing: 0.5px;
-}
-
-.ticket-count-badge {
-  font-size: 0.72rem;
-  font-weight: 600;
-  padding: 2px 8px;
-  border-radius: 12px;
-  background: var(--bg-secondary);
-  color: var(--text-secondary);
-  border: 1px solid var(--border-subtle);
-}
-
-.mobile-ticket-filters {
-  display: flex;
-  gap: 6px;
-  overflow-x: auto;
-  padding-bottom: 4px;
-  width: 100%;
-}
-
-.mobile-filter-chip {
-  padding: 5px 12px;
-  font-size: 0.75rem;
-  border-radius: 16px;
-  border: 1px solid var(--border-subtle);
-  background: var(--bg-secondary);
-  color: var(--text-secondary);
-  cursor: pointer;
-  white-space: nowrap;
-  transition: all 0.2s;
-}
-
-.mobile-filter-chip.active {
-  background: var(--user-accent, var(--accent-primary));
-  color: #ffffff;
-  border-color: transparent;
-  font-weight: 600;
-}
-
-.ticket-toolbar-actions {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  background: var(--bg-secondary);
-  padding: 3px;
-  border-radius: var(--radius-default);
-  border: 1px solid var(--border-subtle);
-}
-
-.toolbar-mode-btn {
-  padding: 5px 8px;
-  border-radius: 4px;
-  border: none;
-  background: transparent;
-  color: var(--text-secondary);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  transition: all 0.2s;
-}
-
-.toolbar-mode-btn:hover {
-  color: var(--text-primary);
-}
-
-.toolbar-mode-btn.active {
-  background: var(--bg-tertiary);
-  color: var(--user-accent, var(--accent-primary));
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-}
-
-/* 钱包层叠容器 */
-.wallet-stack-wrapper {
-  width: 100%;
-  max-width: 480px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding-top: 8px;
-  padding-bottom: 80px;
-}
-
-/* 网格平铺容器 */
-.wallet-grid-wrapper {
-  width: 100%;
-  max-width: 1100px;
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-  gap: 18px;
-  align-items: stretch;
-  padding-bottom: 60px;
-}
-
-/* 票据左侧侧边栏内容 */
-.ticket-sidebar-content {
-  padding-top: 8px;
-}
-
-.ticket-sidebar-filter-list {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 12px 14px;
-}
-
-.ticket-filter-btn {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 9px 12px;
-  border-radius: var(--radius-default);
-  border: none;
-  background: transparent;
-  color: var(--text-secondary);
-  cursor: pointer;
-  font-size: 0.88rem;
-  transition: all 0.15s;
-  text-align: left;
-}
-
-.ticket-filter-btn:hover {
-  background: var(--bg-tertiary);
-  color: var(--text-primary);
-}
-
-.ticket-filter-btn.active {
-  background: var(--bg-tertiary);
-  color: var(--user-accent, var(--accent-primary));
-  font-weight: 600;
-}
-
-.filter-btn-left {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.filter-count {
-  font-size: 0.75rem;
-  opacity: 0.7;
-  font-weight: normal;
-}
-
-.ticket-view-mode-section {
-  padding: 16px 14px 12px;
-  border-top: 1px solid var(--border-subtle);
-  margin-top: auto;
-}
-
-.view-mode-toggle-group {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 6px;
-  background: var(--bg-primary);
-  padding: 4px;
-  border-radius: var(--radius-default);
-  border: 1px solid var(--border-subtle);
-}
-
-.view-mode-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  padding: 6px 8px;
-  border-radius: 4px;
-  border: none;
-  background: transparent;
-  color: var(--text-secondary);
-  cursor: pointer;
-  font-size: 0.8rem;
-  transition: all 0.15s;
-}
-
-.view-mode-btn:hover {
-  color: var(--text-primary);
-}
-
-.view-mode-btn.active {
-  background: var(--bg-tertiary);
-  color: var(--user-accent, var(--accent-primary));
-  font-weight: 600;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
 }
 </style>

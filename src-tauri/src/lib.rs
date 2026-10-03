@@ -101,14 +101,12 @@ pub(crate) fn get_data_dir() -> PathBuf {
     #[cfg(target_os = "android")]
     {
         // 优先使用 Android 标准沙盒内部存储目录
-        let p = PathBuf::from("/data/user/0/bob.agent/files");
+        let p = PathBuf::from("/data/data/bob.agent/files");
         if fs::create_dir_all(&p).is_ok() {
-            let _ = DATA_DIR.set(p.clone());
             return p;
         }
-        let p2 = PathBuf::from("/data/data/bob.agent/files");
+        let p2 = PathBuf::from("/data/user/0/bob.agent/files");
         if fs::create_dir_all(&p2).is_ok() {
-            let _ = DATA_DIR.set(p2.clone());
             return p2;
         }
         p
@@ -826,17 +824,6 @@ pub(crate) fn system_is_setup_complete_internal(config_path: &Path, data_dir: &P
         .unwrap_or(false);
 
     if has_model || has_api_keys {
-        if let Some(obj) = config.as_object_mut() {
-            obj.insert("onboarded".to_string(), serde_json::json!(true));
-            auto_discover_api_keys_into_config(obj);
-            let _ = write_config_checked_at(config_path, &config);
-        }
-        return true;
-    }
-
-    // 2.5 移动端配对继承：若 config 中已有 pairing_payload (已通过扫码与 PC 配对)，判定为已配置并自愈 onboarded 标记
-    if config.get("pairing_payload").is_some() {
-        log::info!("[Setup] Detected existing pairing_payload, auto-healing onboarded state to true");
         if let Some(obj) = config.as_object_mut() {
             obj.insert("onboarded".to_string(), serde_json::json!(true));
             auto_discover_api_keys_into_config(obj);
@@ -1895,13 +1882,10 @@ pub fn run() {
                 http_api::start_http_server(app.handle().clone());
             }
 
-            // ── 确保设备身份密钥就绪并解锁 (Zero-Friction Auto-Init & Auto-Unlock，后台异步执行，绝不阻塞应用主窗口与首帧渲染) ──
-            let crypto_handle = app.handle().clone();
-            tauri::async_runtime::spawn(async move {
-                if let Err(e) = crypto::ensure_device_identity_unlocked_for_app(&crypto_handle) {
-                    log::warn!("[Startup] Failed to auto-unlock device identity: {}", e);
-                }
-            });
+            // ── 确保设备身份密钥就绪并解锁 (Zero-Friction Auto-Init & Auto-Unlock) ──
+            if let Err(e) = crypto::ensure_device_identity_unlocked_for_app(&app.handle()) {
+                log::warn!("[Startup] Failed to auto-unlock device identity: {}", e);
+            }
 
             // ── 启动中继服务器 WebSocket 长连接后台守护 (全平台: PC 与移动端均需连接 Relay) ──
             sync_engine::start_relay_listener(app.handle().clone());
@@ -1984,7 +1968,8 @@ pub fn run() {
                 dream::compress_sessions_async(dream_handle).await;
             });
 
-            // ── Phase 2: 本地 HTTP API 已在上方仅限桌面端（PC）按平台隔离启动 ──
+            // ── Phase 2: 启动本地 HTTP API (127.0.0.1:3721) ──
+            http_api::start_http_server(app.handle().clone());
 
             // ── MCP 扩展引擎 ──
             tauri::async_runtime::spawn(async {
@@ -2028,9 +2013,7 @@ pub fn run() {
                         })
                         .build(),
                 )?;
-                if let Err(e) = app.global_shortcut().register(shortcut) {
-                    eprintln!("[warn] Failed to register global shortcut Ctrl+Shift+B: {}", e);
-                }
+                app.global_shortcut().register(shortcut)?;
             }
 
             // ── System Tray Initialization (仅限桌面端) ──

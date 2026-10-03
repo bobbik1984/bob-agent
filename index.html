@@ -94,27 +94,6 @@
     <div class="splash-logo"></div>
   </div>
   <div id="app"></div>
-    <script>
-    (function() {
-      window.addEventListener('error', function(e) {
-        console.error('[index.html error]', e.error || e.message);
-      });
-      window.addEventListener('unhandledrejection', function(e) {
-        console.warn('[index.html unhandledrejection]', e.reason);
-      });
-      // 🛡️ 原生保底启动防护：无论 Vue 是否挂载成功，最多 2.5 秒强制淡出并彻底移除 native-splash
-      setTimeout(function() {
-        var splash = document.getElementById('native-splash');
-        if (splash) {
-          splash.style.transition = 'opacity 0.5s ease';
-          splash.style.opacity = '0';
-          setTimeout(function() {
-            if (splash && splash.parentNode) splash.parentNode.removeChild(splash);
-          }, 500);
-        }
-      }, 2500);
-    })();
-  </script>
   <script type="module" src="/src/main.js"></script>
 </body>
 </html>

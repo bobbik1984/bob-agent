@@ -745,7 +745,7 @@ dependencies = [
 
 [[package]]
 name = "bob"
-version = "0.9.20"
+version = "0.9.24"
 dependencies = [
  "aes",
  "aes-gcm",
