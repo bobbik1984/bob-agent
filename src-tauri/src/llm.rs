@@ -764,7 +764,12 @@ pub fn get_active_models() -> Value {
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string();
-    json!({ "main": main, "clerk": clerk })
+    let vision = config
+        .get("visionModel")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    json!({ "main": main, "clerk": clerk, "vision": vision })
 }
 
 pub fn assign_model_role(model_id: String, role: String) -> Value {
@@ -786,6 +791,8 @@ pub fn assign_model_role(model_id: String, role: String) -> Value {
             }
         } else if role == "clerk" {
             obj.insert("clerkModel".to_string(), json!(model_id));
+        } else if role == "vision" {
+            obj.insert("visionModel".to_string(), json!(model_id));
         }
     }
     super::write_config(&config);
@@ -3105,7 +3112,24 @@ pub async fn stream_vision(
             obj.insert("content".to_string(), Value::Array(content_array));
         }
     }
-    stream_internal(app, messages, conv_id, None, global_file_access, agent_mode).await
+    let config = super::read_config();
+    let vision_model = config
+        .get("visionModel")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
+
+    stream_internal_with_model(
+        app,
+        messages,
+        conv_id,
+        None,
+        global_file_access,
+        agent_mode,
+        vision_model,
+        None,
+    )
+    .await
 }
 
 // ═══════════════════════════════════════════════════════════

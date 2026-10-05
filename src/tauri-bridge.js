@@ -481,8 +481,8 @@ if (IS_TAURI) {
       case 'llm_chat': case 'llm_vision': return 'mock-request-id';
       case 'llm_get_models': return [];
       case 'llm_get_model_pool': return MOCK_MODEL_POOL;
-      case 'llm_assign_model_role': return true;
-      case 'llm_get_active_models': return { primary: 'deepseek-chat', clerk: null, vision: null };
+      case 'llm_assign_model_role': return { ok: true };
+      case 'llm_get_active_models': return { main: 'deepseek-chat', clerk: '', vision: '' };
       case 'llm_rescan_models': return true;
       case 'llm_refresh_models': return true;
       case 'llm_get_registry': return { providers: [] };
@@ -547,6 +547,8 @@ if (IS_TAURI) {
       case 'system_open_log_dir': case 'system_open_data_dir':
       case 'system_open_llm_engine_dir': case 'system_factory_reset':
       case 'system_take_screenshot':
+      case 'system_read_image_base64':
+      case 'system_read_clipboard_image':
         console.log(`[Mock] ${cmd} — desktop only, ignored`); return null;
 
       case 'start_web_drop': return 'https://mock.webdrop.link';
@@ -1009,21 +1011,27 @@ window.appAPI = {
   updateTheme: (theme) => console.log('Mock: updateTheme', theme), // TODO T-608
   getClipboardImage: async () => {
     try {
-      const items = await navigator.clipboard.read();
-      for (const item of items) {
-        for (const type of item.types) {
-          if (type.startsWith('image/')) {
-            const blob = await item.getType(type);
-            return new Promise((resolve) => {
-              const reader = new FileReader();
-              reader.onload = (e) => resolve(e.target.result.replace(/^data:image\/\w+;base64,/, ''));
-              reader.readAsDataURL(blob);
-            });
+      const b64 = await invoke('system_read_clipboard_image');
+      if (b64) return b64;
+    } catch (_) {}
+    if (typeof navigator !== 'undefined' && navigator.clipboard?.read) {
+      try {
+        const items = await navigator.clipboard.read();
+        for (const item of items) {
+          for (const type of item.types) {
+            if (type.startsWith('image/')) {
+              const blob = await item.getType(type);
+              return new Promise((resolve) => {
+                const reader = new FileReader();
+                reader.onload = (e) => resolve(e.target.result.replace(/^data:image\/\w+;base64,/, ''));
+                reader.readAsDataURL(blob);
+              });
+            }
           }
         }
+      } catch (e) {
+        console.warn('getClipboardImage error:', e);
       }
-    } catch (e) {
-      console.error('getClipboardImage error:', e);
     }
     return null;
   },
@@ -1129,6 +1137,8 @@ window.appAPI = {
   // ── 聊天就绪校验 (T-1305) ──────────────────────────────
   validateChatReady: async () => invoke('system_validate_chat_ready'),
   takeScreenshot: async () => invoke('system_take_screenshot'),
+  readImageBase64: async (filePath) => invoke('system_read_image_base64', { filePath }),
+  readClipboardImage: async () => invoke('system_read_clipboard_image'),
 
   // ── M17: 知识图谱 (Knowledge Graph) ────────────────
   kgGetFullGraph: async () => invoke('kg_get_full_graph'),

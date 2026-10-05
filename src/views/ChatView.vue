@@ -244,9 +244,9 @@
               🧬
             </div>
             <div v-if="msg.from_channel" class="source-label">
-              <Smartphone v-if="msg.from_channel === 'wechat' || (msg.from_channel !== 'wechat' && isMobile)" :size="10" />
+              <Smartphone v-if="msg.from_channel === 'wechat' || msg.from_channel === 'mobile'" :size="10" />
               <Monitor v-else :size="10" />
-              <span>{{ msg.from_channel === 'wechat' ? 'WeChat' : (isMobile ? 'Mobile' : 'Desktop') }}</span>
+              <span>{{ msg.from_channel === 'wechat' ? 'WeChat' : (msg.from_channel === 'mobile' ? 'Mobile' : (msg.from_channel === 'remote' ? 'Remote' : 'Desktop')) }}</span>
             </div>
             <div v-if="msg.role === 'assistant' && msg._modelLabel" class="model-label">
               {{ msg._modelLabel }}
@@ -421,7 +421,7 @@
     <!-- 输入区 -->
     <div class="input-area">
       <!-- 移动端执行设备状态指示轨 (触控区 >= 44px, 纯 SVG, 实色表面) -->
-      <div v-if="isMobile" class="execution-device-rail">
+      <div v-if="isNativeMobile" class="execution-device-rail">
         <button class="device-pill-btn" @click="openDeviceSelector" :title="$t('chat.execution_device_tip')">
           <Laptop v-if="currentExecutionDevice.type === 'pc'" :size="14" class="device-type-icon" />
           <Smartphone v-else :size="14" class="device-type-icon" />
@@ -710,7 +710,7 @@
             <button class="sheet-list-item device-item" :class="{ active: currentExecutionDevice.id === 'local' }" @click="selectExecutionDevice('local')">
               <Smartphone :size="20" class="text-secondary" style="margin-right: 12px; flex-shrink: 0;" />
               <div class="item-info">
-                <span class="item-name">{{ isMobile ? $t('chat.local_device_phone') : $t('chat.local_device_pc') }}</span>
+                <span class="item-name">{{ isNativeMobile ? $t('chat.local_device_phone') : $t('chat.local_device_pc') }}</span>
                 <span class="item-count">{{ $t('chat.local_device_desc') }}</span>
                 <div class="device-caps-row">
                   <span v-for="cap in getDeviceCapabilityTags('local')" :key="cap" class="device-cap-badge">{{ cap }}</span>
@@ -895,8 +895,8 @@ async function handleChatGoalApproval(message, choice) {
       approvalId: goal.approval.approvalId,
       choiceId: choice.choiceId,
       expectedRevision: goal.approval.revision,
-      actor: 'user', deviceId: isMobile.value ? 'mobile' : 'desktop',
-      inputModality: 'pointer', trustedDevice: !isMobile.value,
+      actor: 'user', deviceId: isNativeMobile ? 'mobile' : 'desktop',
+      inputModality: isNativeMobile ? 'touch' : 'pointer', trustedDevice: !isNativeMobile,
       idempotencyKey: chatGoalKey('approval'),
     });
     message._goal = { ...goal, ...outcome.run, approval: null };
@@ -1195,8 +1195,8 @@ const currentExecutionDevice = computed(() => {
   if (devId === 'local') {
     return {
       id: 'local',
-      type: 'phone',
-      name: isMobile.value ? '本机 (手机)' : '本机',
+      type: isNativeMobile ? 'phone' : 'pc',
+      name: isNativeMobile ? '本机 (手机)' : '本机 (PC)',
       online: true,
       transport: 'lan',
     };
@@ -1246,8 +1246,8 @@ const currentExecutionDevice = computed(() => {
   }
   return {
     id: 'local',
-    type: 'phone',
-    name: isMobile.value ? '本机 (手机)' : '本机',
+    type: isNativeMobile ? 'phone' : 'pc',
+    name: isNativeMobile ? '本机 (手机)' : '本机 (PC)',
     online: true,
     transport: 'lan',
   };
@@ -1629,6 +1629,7 @@ const dailyBriefLoading = computed(() => dailyBrief?.loading?.value || false);
 const dailyBriefError = computed(() => dailyBrief?.errorCode?.value || '');
 void dailyBrief?.ensureLoaded?.();
 const isMobile = inject('isMobile', ref(false));
+const isNativeMobile = inject('isNativeMobile', false);
 const conversationTitle = ref('');
 
 // ── 手势返回 (T-2225) ──────────────────────────────
@@ -1927,8 +1928,9 @@ async function sendMessage() {
       }
     }
 
+    const activeModels = await window.appAPI.getActiveModels();
     const currentModelObj = availableModels.value.find(m => m.id === currentModelRaw.value);
-    const hasVision = currentModelObj && currentModelObj.vision;
+    const hasVision = (currentModelObj && currentModelObj.vision) || !!activeModels?.vision;
 
     if (pendingImages.value.length > 0) {
       if (!hasVision) {
@@ -2094,47 +2096,11 @@ async function handleScreenshot() {
   if (isScreenshotting.value) return; // 防止重复点击
   isScreenshotting.value = true;
   try {
-    
-    // 记录截图前的剪贴板状态，用于检测用户是否取消了截图
-    let prevClipHash = '';
-    try {
-      const { readImage } = await import('@tauri-apps/plugin-clipboard-manager');
-      const prevImg = await readImage();
-      const prevBytes = await prevImg.rgba();
-      prevClipHash = prevBytes.length.toString();
-    } catch (_) { /* 剪贴板可能为空 */ }
-
-    // 截图期间的窗口隐藏、等待和恢复逻辑已经全部移到了 Rust 后端
-    await window.appAPI.takeScreenshot();
-
-    // 彻底抛弃 Tauri 官方的 readImage 插件！
-    // 它在处理部分 Windows Snipping Tool 的 DIB 图像时，会导致 Rust 线程死锁或 IPC 序列化永久挂起。
-    // 我们强制使用原生 HTML5 navigator.clipboard.read()，并且增加一个 Race 超时机制，防止权限弹窗无人点击导致假死。
-    try {
-      const clipboardItems = await Promise.race([
-        navigator.clipboard.read(),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('Permission prompt timeout or clipboard locked')), 15000))
-      ]);
-
-      for (const item of clipboardItems) {
-        const imageType = item.types.find(t => t.startsWith('image/'));
-        if (imageType) {
-          const blob = await item.getType(imageType);
-          const base64Result = await new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = (e) => resolve(e.target.result.replace(/^data:image\/\w+;base64,/, ''));
-            reader.onerror = reject;
-            reader.readAsDataURL(blob);
-          });
-          if (base64Result) {
-            pendingImages.value.push(base64Result);
-            return; // 成功粘贴图
-          }
-        }
-      }
-      console.log('No image found in native clipboard');
-    } catch (err) {
-      console.warn("Native clipboard read failed (permission denied, timed out, or unreadable):", err);
+    // Rust 后端隐藏窗口 -> 调用系统截图 -> 等待截取完成 -> 原生读取剪贴板图片直接转为 base64 返回
+    // 彻底杜绝 Chromium/WebView2 弹出 "http://tauri.localhost wants to See text and images copied to the clipboard" 浏览器权限弹窗
+    const base64Result = await window.appAPI.takeScreenshot();
+    if (base64Result) {
+      pendingImages.value.push(base64Result);
     }
   } catch (e) {
     console.error('Screenshot failed:', e);

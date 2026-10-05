@@ -699,12 +699,13 @@ pub(crate) fn now_ms() -> i64 {
 // ═══════════════════════════════════════════════════════════
 
 #[tauri::command]
-async fn system_take_screenshot(app_handle: tauri::AppHandle) -> Result<(), String> {
+async fn system_take_screenshot(app_handle: tauri::AppHandle) -> Result<Option<String>, String> {
     #[cfg(target_os = "windows")]
     {
         use windows_sys::Win32::System::DataExchange::GetClipboardSequenceNumber;
         use std::time::Duration;
         use tauri::Manager;
+        use tauri_plugin_clipboard_manager::ClipboardExt;
 
         // 获取主窗口
         let window = app_handle.get_webview_window("main");
@@ -717,17 +718,27 @@ async fn system_take_screenshot(app_handle: tauri::AppHandle) -> Result<(), Stri
             let _ = w.hide();
         }
 
-        std::process::Command::new("SnippingTool.exe")
+        let status = std::process::Command::new("SnippingTool.exe")
             .arg("/clip")
-            .status()
-            .map_err(|e| e.to_string())?;
+            .status();
+
+        if let Err(e) = status {
+            if let Some(w) = &window {
+                let _ = w.show();
+                let _ = w.unminimize();
+                let _ = w.set_focus();
+            }
+            return Err(e.to_string());
+        }
 
         // 轮询剪贴板变化，最多等待 15 秒（60 * 250ms）
+        let mut clipboard_changed = false;
         for _ in 0..60 {
             std::thread::sleep(Duration::from_millis(250));
             let current_seq = unsafe { GetClipboardSequenceNumber() };
             // 如果剪贴板序列号发生变化，说明系统截图已经将图片塞进剪贴板了
             if current_seq != initial_seq {
+                clipboard_changed = true;
                 break;
             }
         }
@@ -741,8 +752,45 @@ async fn system_take_screenshot(app_handle: tauri::AppHandle) -> Result<(), Stri
             let _ = w.unminimize();
             let _ = w.set_focus();
         }
+
+        if !clipboard_changed {
+            return Ok(None);
+        }
+
+        // 从系统剪贴板读取图片并转为 base64，彻底免除前端 WebView 的权限弹窗
+        for _ in 0..6 {
+            if let Ok(img) = app_handle.clipboard().read_image() {
+                let rgba_raw = img.rgba().to_vec();
+                if let Some(rgba_img) = image::RgbaImage::from_raw(img.width(), img.height(), rgba_raw) {
+                    let mut png_bytes = std::io::Cursor::new(Vec::new());
+                    if rgba_img.write_to(&mut png_bytes, image::ImageFormat::Png).is_ok() {
+                        use base64::Engine;
+                        let b64 = base64::engine::general_purpose::STANDARD.encode(png_bytes.into_inner());
+                        return Ok(Some(b64));
+                    }
+                }
+            }
+            std::thread::sleep(Duration::from_millis(150));
+        }
     }
-    Ok(())
+    Ok(None)
+}
+
+#[tauri::command]
+fn system_read_clipboard_image(app_handle: tauri::AppHandle) -> Result<Option<String>, String> {
+    use tauri_plugin_clipboard_manager::ClipboardExt;
+    if let Ok(img) = app_handle.clipboard().read_image() {
+        let rgba_raw = img.rgba().to_vec();
+        if let Some(rgba_img) = image::RgbaImage::from_raw(img.width(), img.height(), rgba_raw) {
+            let mut png_bytes = std::io::Cursor::new(Vec::new());
+            if rgba_img.write_to(&mut png_bytes, image::ImageFormat::Png).is_ok() {
+                use base64::Engine;
+                let b64 = base64::engine::general_purpose::STANDARD.encode(png_bytes.into_inner());
+                return Ok(Some(b64));
+            }
+        }
+    }
+    Ok(None)
 }
 
 fn auto_discover_api_keys_into_config(config_obj: &mut serde_json::Map<String, Value>) -> bool {
@@ -1567,6 +1615,7 @@ pub fn run() {
             filesystem::system_get_file_meta,
             filesystem::system_scan_folder,
             filesystem::system_read_file,
+            filesystem::system_read_image_base64,
             // 文件夹跟踪
             filesystem::system_get_tracked_folders,
             filesystem::system_add_tracked_folder,
@@ -1646,6 +1695,7 @@ pub fn run() {
             // 聊天就绪校验
             llm::system_validate_chat_ready,
             system_take_screenshot,
+            system_read_clipboard_image,
             // Telegram Bot
             telegram::system_save_telegram_token,
             telegram::system_get_telegram_token,

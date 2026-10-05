@@ -20,11 +20,97 @@ export function useDragDrop({ messages, inputText, scrollToBottom, globalFileAcc
   const pendingKBEstimate = ref(null);
   const pendingBoardingPass = ref(null); // rxing BCBP 自动识别结果
 
+// ── HTML5 文件选择器（移动端友好，直接产出 File/Blob，原生支持图库并且零权限弹窗）──
+function openHtmlFilePicker(accept = 'image/*,application/pdf,text/*,.doc,.docx,.xls,.xlsx,.csv') {
+  return new Promise((resolve) => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = accept;
+    input.style.display = 'none';
+    input.onchange = (e) => {
+      const file = e.target.files?.[0];
+      resolve(file || null);
+      input.remove();
+    };
+    input.oncancel = () => {
+      resolve(null);
+      input.remove();
+    };
+    document.body.appendChild(input);
+    input.click();
+  });
+}
+
   // ── 附件选择 ──
   async function handleAttach() {
+    const isMobileDevice = typeof navigator !== 'undefined' && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+
+    if (isMobileDevice) {
+      // 移动端 (Android / iOS): 使用标准 HTML5 拾取器，Android WebView 原生支持图库/相册选择，且 FileReader 可直接读取内存二进制为 base64，彻底规避 content:// 难题
+      try {
+        const file = await openHtmlFilePicker('image/*,application/pdf,text/*,.doc,.docx,.xls,.xlsx,.csv');
+        if (!file) return;
+
+        if (file.type.startsWith('image/') || /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(file.name)) {
+          const reader = new FileReader();
+          reader.onload = (e) => {
+            const base64 = e.target.result.replace(/^data:image\/\w+;base64,/, '');
+            pendingImages.value.push(base64);
+          };
+          reader.readAsDataURL(file);
+          return;
+        }
+
+        // 非图片文件，挂载到待发送列表
+        pendingFiles.value.push({
+          path: file.name,
+          name: file.name,
+          size: file.size,
+          file: file,
+        });
+        return;
+      } catch (err) {
+        console.error('[handleAttach:mobile]', err);
+        return;
+      }
+    }
+
+    // 桌面端 (PC): 调用 Tauri 原生文件选择对话框
     try {
       const result = await window.appAPI.selectFile();
       if (!result) return;
+
+      if (typeof result === 'string') {
+        const isImage = /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(result);
+        if (isImage) {
+          try {
+            const base64 = await window.appAPI.readImageBase64(result);
+            if (base64) {
+              pendingImages.value.push(base64);
+              return;
+            }
+          } catch (err) {
+            console.error('Failed to read image file as base64:', err);
+          }
+        }
+
+        // 非图片文件：挂载为待发送文件卡片 (pendingFiles)，绝不向输入框倾倒 "用户选择了文件: xxx"
+        let meta = null;
+        try {
+          meta = await window.appAPI.getFileMeta(result);
+        } catch (_) {}
+
+        const filename = meta?.name || result.split(/[/\\]/).pop();
+        if (!pendingFiles.value.some(f => f.path === result)) {
+          pendingFiles.value.push({
+            path: result,
+            name: filename,
+            size: meta ? meta.size : 0
+          });
+        }
+        return;
+      }
+
       if (typeof result === 'object' && result.type === 'image' && result.content) {
         pendingImages.value.push(result.content);
         return;
@@ -33,16 +119,8 @@ export function useDragDrop({ messages, inputText, scrollToBottom, globalFileAcc
         inputText.value = `请分析以下文件内容 (${result.name}):\n\n${result.content}`;
         return;
       }
-      if (typeof result === 'string') {
-        inputText.value = `用户选择了文件: ${result}`;
-        return;
-      }
     } catch (e) {
-      console.error('[handleAttach]', e);
-    }
-    const base64 = await window.appAPI.getClipboardImage();
-    if (base64) {
-      pendingImages.value.push(base64);
+      console.error('[handleAttach:desktop]', e);
     }
   }
 
@@ -101,19 +179,6 @@ export function useDragDrop({ messages, inputText, scrollToBottom, globalFileAcc
               }
             } catch (err) {
               // rxing 识别失败（默认情况），意味着需要 Vision 大模型介入
-            }
-          }
-          if (window.appAPI?.systemSaveTempImage) {
-            try {
-              const tempPath = await window.appAPI.systemSaveTempImage(base64);
-              if (tempPath) {
-                if (inputText.value.length > 0 && !inputText.value.endsWith('\n')) {
-                  inputText.value += '\n';
-                }
-                inputText.value += `[ImageLocalPath: ${tempPath.replace(/\\/g, '/')}]`;
-              }
-            } catch (err) {
-              console.error('Failed to save temp image:', err);
             }
           }
         };
@@ -223,19 +288,6 @@ export function useDragDrop({ messages, inputText, scrollToBottom, globalFileAcc
               inputText.value += `[系统自动提取的图片条码内容: ${res.data}]`;
             }
           } catch (err) {}
-        }
-        if (window.appAPI?.systemSaveTempImage) {
-          try {
-            const tempPath = await window.appAPI.systemSaveTempImage(base64);
-            if (tempPath) {
-              if (inputText.value.length > 0 && !inputText.value.endsWith('\n')) {
-                inputText.value += '\n';
-              }
-              inputText.value += `[ImageLocalPath: ${tempPath.replace(/\\/g, '/')}]`;
-            }
-          } catch (err) {
-            console.error('Failed to save temp image:', err);
-          }
         }
       };
       reader.readAsDataURL(file);

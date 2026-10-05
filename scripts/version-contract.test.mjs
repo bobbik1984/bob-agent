@@ -45,7 +45,7 @@ test('current checked-in manifests agree on one product version', () => {
 test('installer version drift fails instead of silently building a mismatched bundle', (t) => {
   const root = fixture(t)
   const file = path.join(root, 'installer/package.json')
-  fs.writeFileSync(file, fs.readFileSync(file, 'utf8').replace('"version": "0.9.24"', '"version": "0.9.7"'), 'utf8')
+  fs.writeFileSync(file, fs.readFileSync(file, 'utf8').replace(/"version":\s*"[^"]+"/, '"version": "0.9.7"'), 'utf8')
   assert.throws(() => applyVersionContract('check', root), /installer\/package\.json/)
   assert.ok(applyVersionContract('sync', root).changed.includes('installer/package.json'))
   assert.deepEqual(applyVersionContract('check', root).changed, [])
@@ -53,19 +53,21 @@ test('installer version drift fails instead of silently building a mismatched bu
 
 test('candidate gate requires a newer Android versionCode than reserved recovery', (t) => {
   const root = fixture(t)
-  const floorFile = path.join(root, 'scripts/version-floor.json')
-  fs.writeFileSync(floorFile, JSON.stringify({ minimumAndroidVersionCode: 9024 }), 'utf8')
-  assert.throws(() => applyVersionContract('candidate', root), /must exceed previous candidate floor 9024/)
   const file = path.join(root, 'package.json')
-  fs.writeFileSync(file, fs.readFileSync(file, 'utf8').replace('"version": "0.9.24"', '"version": "0.9.25"'), 'utf8')
+  const currentVer = JSON.parse(fs.readFileSync(file, 'utf8')).version
+  const currentCode = versionCode(currentVer)
+  const floorFile = path.join(root, 'scripts/version-floor.json')
+  fs.writeFileSync(floorFile, JSON.stringify({ minimumAndroidVersionCode: currentCode }), 'utf8')
+  assert.throws(() => applyVersionContract('candidate', root), new RegExp(`must exceed previous candidate floor ${currentCode}`))
+  fs.writeFileSync(file, fs.readFileSync(file, 'utf8').replace(/"version":\s*"[^"]+"/, '"version": "9.9.9"'), 'utf8')
   applyVersionContract('sync', root)
-  assert.equal(applyVersionContract('candidate', root).code, 9025)
+  assert.equal(applyVersionContract('candidate', root).code, 9009009)
 })
 
 test('invalid product version is rejected before any file is changed', (t) => {
   const root = fixture(t)
   const file = path.join(root, 'package.json')
-  fs.writeFileSync(file, fs.readFileSync(file, 'utf8').replace('"version": "0.9.24"', '"version": "0.9"'), 'utf8')
+  fs.writeFileSync(file, fs.readFileSync(file, 'utf8').replace(/"version":\s*"[^"]+"/, '"version": "0.9"'), 'utf8')
   assert.throws(() => applyVersionContract('sync', root), /Invalid three-part version/)
   assert.throws(() => versionCode('0.9.1000'), /below 1000/)
 })

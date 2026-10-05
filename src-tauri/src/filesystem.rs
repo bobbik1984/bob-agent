@@ -251,3 +251,18 @@ pub fn system_remove_tracked_folder(folder_path: String) -> bool {
     }
     true
 }
+
+#[tauri::command]
+pub fn system_read_image_base64(file_path: String) -> Result<String, String> {
+    use base64::Engine;
+    let p = Path::new(&file_path);
+    if !p.exists() {
+        return Err("文件不存在".to_string());
+    }
+    if p.is_dir() {
+        return Err("不能读取文件夹为图片".to_string());
+    }
+    let bytes = fs::read(p).map_err(|e| format!("读取图片文件失败: {}", e))?;
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+    Ok(b64)
+}
