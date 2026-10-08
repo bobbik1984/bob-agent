@@ -39,6 +39,10 @@ jobs:
             src-tauri
             installer/src-tauri
 
+      - name: Disable domestic Cargo mirror in CI
+        shell: powershell
+        run: Remove-Item -Force -ErrorAction SilentlyContinue .cargo/config.toml
+
       - name: Install Root Dependencies
         run: npm install --legacy-peer-deps
 

@@ -49,6 +49,9 @@ jobs:
         with:
           targets: aarch64-linux-android
 
+      - name: Disable domestic Cargo mirror in CI
+        run: rm -f .cargo/config.toml
+
       - name: Install dependencies
         run: npm install --legacy-peer-deps
 
