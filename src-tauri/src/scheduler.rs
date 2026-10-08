@@ -211,6 +211,9 @@ pub async fn start_scheduler(app: AppHandle) {
 // Daily Routine Pipeline (每日例行流水线)
 // ═══════════════════════════════════════════════════════════
 
+// ── 防重入原子锁：防止每 60 秒 ticker 并发重入 ──
+static ROUTINE_RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 /// 统一的每日例行流水线
 /// 每天只执行一次（基于日期防抖），无论用户何时打开电脑。
 /// 三阶段串行执行：
@@ -218,6 +221,27 @@ pub async fn start_scheduler(app: AppHandle) {
 ///   2. Agentic     — 执行所有 @daily_startup 任务 (日历同步、邮件检查等)
 ///   3. Commit      — 记录今日已完成
 async fn run_daily_routine(app: AppHandle) {
+    if ROUTINE_RUNNING
+        .compare_exchange(
+            false,
+            true,
+            std::sync::atomic::Ordering::SeqCst,
+            std::sync::atomic::Ordering::SeqCst,
+        )
+        .is_err()
+    {
+        log::debug!("[DailyRoutine] Another instance is already in progress, skipping tick");
+        return;
+    }
+
+    struct RoutineGuard;
+    impl Drop for RoutineGuard {
+        fn drop(&mut self) {
+            ROUTINE_RUNNING.store(false, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+    let _guard = RoutineGuard;
+
     let today = chrono::Local::now().format("%Y-%m-%d").to_string();
     let db_path = super::get_data_dir().join("bob.db");
 

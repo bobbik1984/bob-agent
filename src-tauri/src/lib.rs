@@ -894,7 +894,7 @@ pub(crate) fn system_is_setup_complete_internal(config_path: &Path, data_dir: &P
                 .latest_model
                 .as_deref()
                 .filter(|m| !m.trim().is_empty())
-                .unwrap_or("deepseek-v4-flash");
+                .unwrap_or("deepseek-flash");
             let current_model = obj.get("model").and_then(|v| v.as_str()).unwrap_or("");
             if current_model.trim().is_empty() {
                 obj.insert("model".to_string(), serde_json::json!(model_to_set));
@@ -1684,6 +1684,8 @@ pub fn run() {
             doctor::system_auto_fix,
             // 进化引擎
             evolution::system_get_evolution_stats,
+            evolution::system_get_soul_proposal,
+            evolution::system_review_soul_proposal,
             // MCP 扩展引擎
             mcp::mcp_get_config,
             mcp::mcp_set_config,

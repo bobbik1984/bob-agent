@@ -1,23 +1,29 @@
 // ═══════════════════════════════════════════════════════════
-// 进化引擎 v1.0
+// 进化引擎 v2.0 (Dream & Self-Evolution Engine)
 //
-// 灵感来源: CodeRunner 的 SessionObserver + MemoryExtractor
-// 适配: Tauri 桌面端特性 (休眠补偿, tokio::spawn 后台静默)
-//
-// 子系统:
-//   1. capture_observation()  — 零 LLM 成本遥测
-//   2. extract_learned_facts() — Clerk 模型自动提取知识
+// 架构设计:
+//   1. capture_observation()    — 零 LLM 成本遥测
+//   2. extract_learned_facts()  — Clerk 模型自动提取知识与事实 (支持生命周期状态机)
+//   3. check_and_dream()        — 静默做梦流水线 (五阶段闭环)
+//      - Phase 1: 过时淘汰 (FTS5 级联清理, feedback 反思特权免删)
+//      - Phase 2: 相似合并 (同类事实类型感知, Bigram N-gram 相似度, FTS5 级联)
+//      - Phase 3: SOUL 精炼提案 (HITL 提案机制, 生成 SOUL_PROPOSAL.md)
+//      - Phase 4: 失败模式分析 (解耦至 AVOIDANCE.md, 遥测闭环验证, Clerk 失败防丢)
+//      - Phase 5: 笔记语义消化 (无锁并发安全, 动作防重, 幂等事件生成)
 // ═══════════════════════════════════════════════════════════
 
 use serde_json::{json, Value};
-use std::collections::HashMap;
-use std::path::PathBuf;
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use tauri::AppHandle;
 
 // ── 冷却缓存: 防止同一会话短时间内重复触发 Clerk 提取 ─────
 static LAST_EXTRACTION: std::sync::OnceLock<Mutex<HashMap<String, std::time::Instant>>> =
     std::sync::OnceLock::new();
+
+// ── 做梦原子防重入锁 ─────────────────────────────────────────
+static DREAM_RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 // ── 遥测数据结构 ────────────────────────────────────────────
 
@@ -87,10 +93,74 @@ pub fn capture_observation(record: &ObservationRecord) {
 // ═══════════════════════════════════════════════════════════
 
 /// 知识湖目录
-fn get_learned_dir() -> PathBuf {
+pub fn get_learned_dir() -> PathBuf {
     let dir = super::get_wiki_dir().join("learned");
     let _ = std::fs::create_dir_all(&dir);
     dir
+}
+
+/// 记忆元数据
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MemoryMetadata {
+    pub fact_type: String,
+    pub title: String,
+    pub status: String, // "candidate" | "active" | "superseded" | "rejected"
+    pub protected: bool,
+    pub source_conv: String,
+    pub updated: String,
+}
+
+/// 从 Markdown 文件解析 frontmatter 元数据
+pub fn parse_memory_frontmatter(content: &str) -> Option<MemoryMetadata> {
+    if !content.starts_with("---") {
+        return None;
+    }
+    let rest = &content[3..];
+    let end_pos = rest.find("---")?;
+    let yaml_str = &rest[..end_pos];
+
+    let mut fact_type = "reference".to_string();
+    let mut title = "Untitled".to_string();
+    let mut status = "active".to_string();
+    let mut protected = false;
+    let mut source_conv = String::new();
+    let mut updated = String::new();
+
+    for line in yaml_str.lines() {
+        let trimmed = line.trim();
+        if let Some(val) = trimmed.strip_prefix("type:") {
+            fact_type = val.trim().trim_matches('"').trim_matches('\'').to_string();
+        } else if let Some(val) = trimmed.strip_prefix("title:") {
+            title = val.trim().trim_matches('"').trim_matches('\'').to_string();
+        } else if let Some(val) = trimmed.strip_prefix("status:") {
+            status = val.trim().trim_matches('"').trim_matches('\'').to_string();
+        } else if let Some(val) = trimmed.strip_prefix("superseded:") {
+            if val.trim() == "true" {
+                status = "superseded".to_string();
+            }
+        } else if let Some(val) = trimmed.strip_prefix("protected:") {
+            if val.trim() == "true" {
+                protected = true;
+            }
+        } else if let Some(val) = trimmed.strip_prefix("source_conv:") {
+            source_conv = val.trim().trim_matches('"').trim_matches('\'').to_string();
+        } else if let Some(val) = trimmed.strip_prefix("updated:") {
+            updated = val.trim().trim_matches('"').trim_matches('\'').to_string();
+        }
+    }
+
+    if fact_type == "feedback" {
+        protected = true;
+    }
+
+    Some(MemoryMetadata {
+        fact_type,
+        title,
+        status,
+        protected,
+        source_conv,
+        updated,
+    })
 }
 
 /// 三层漏斗判断: 对话是否值得触发 Clerk 知识提取
@@ -354,7 +424,7 @@ type 可选值：
         return;
     }
 
-    // 7. 将事实写入 wiki/learned/ 目录
+    // 7. 将事实写入 wiki/learned/ 目录 (状态机赋初始值 status: active)
     let learned_dir = get_learned_dir();
     let now = chrono::Local::now();
     let mut saved_count = 0;
@@ -384,13 +454,21 @@ type 可选值：
         let filename = format!("{}_{}{}.md", fact_type, slug, ts);
         let file_path = learned_dir.join(&filename);
 
+        // 如果是 feedback 类型，赋予免删特权 protected: true
+        let protected_line = if fact_type == "feedback" {
+            "\nprotected: true"
+        } else {
+            ""
+        };
+
         // YAML frontmatter + 内容
         let md_content = format!(
-            "---\ntype: {}\ntitle: \"{}\"\nsource_conv: \"{}\"\nupdated: \"{}\"\n---\n\n# {}\n\n{}\n",
+            "---\ntype: {}\ntitle: \"{}\"\nsource_conv: \"{}\"\nstatus: active\nupdated: \"{}\"{}\n---\n\n# {}\n\n{}\n",
             fact_type,
             title.replace('"', "'"),
             conv_id,
             now.format("%Y-%m-%d %H:%M"),
+            protected_line,
             title,
             content,
         );
@@ -455,9 +533,6 @@ type 可选值：
 
 // ═══════════════════════════════════════════════════════════
 // 子系统 3: 静默做梦引擎 (Dream Worker)
-//
-// 桌面端特性: 不依赖固定 Cron，而是基于 last_dream_timestamp
-// 的时差补偿触发。Bob 每日"醒来"时静默运行。
 // ═══════════════════════════════════════════════════════════
 
 /// 24 小时（毫秒）
@@ -478,6 +553,27 @@ fn get_last_dream_timestamp() -> i64 {
 
 /// 检查是否需要做梦，如果需要则执行 (被 scheduler.rs 的 tick 调用)
 pub async fn check_and_dream(app: AppHandle) {
+    if DREAM_RUNNING
+        .compare_exchange(
+            false,
+            true,
+            std::sync::atomic::Ordering::SeqCst,
+            std::sync::atomic::Ordering::SeqCst,
+        )
+        .is_err()
+    {
+        log::debug!("[Evolution] Dream already in progress, skipping tick");
+        return;
+    }
+
+    struct DreamGuard;
+    impl Drop for DreamGuard {
+        fn drop(&mut self) {
+            DREAM_RUNNING.store(false, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+    let _guard = DreamGuard;
+
     let now = super::now_ms();
     let last = get_last_dream_timestamp();
 
@@ -519,53 +615,47 @@ pub async fn check_and_dream(app: AppHandle) {
     }
 
     log::info!(
-        "[Evolution] Dream complete: stale={}, merged={}, soul_refined={}, failure_insights={}",
+        "[Evolution] Dream complete: stale={}, merged={}, soul_refined={}, failure_insights={}, notes_digested={}",
         report.stale_cleaned,
         report.memories_merged,
         report.soul_refined,
-        report.failure_insights
+        report.failure_insights,
+        report.notebook_notes_digested
     );
 }
 
-struct DreamReport {
-    facts_extracted: i64,
-    stale_cleaned: i64,
-    memories_merged: i64,
-    soul_refined: bool,
-    failure_insights: i64,
-    notebook_notes_digested: i64,
-    summary: String,
-    soul_hash: String,
+#[derive(Debug, Default)]
+pub struct DreamReport {
+    pub facts_extracted: i64,
+    pub stale_cleaned: i64,
+    pub memories_merged: i64,
+    pub soul_refined: bool,
+    pub failure_insights: i64,
+    pub notebook_notes_digested: i64,
+    pub summary: String,
+    pub soul_hash: String,
 }
 
-/// 四阶段梦境流水线
-async fn run_dream_pipeline(_app: &AppHandle) -> DreamReport {
-    let mut report = DreamReport {
-        facts_extracted: 0,
-        stale_cleaned: 0,
-        memories_merged: 0,
-        soul_refined: false,
-        failure_insights: 0,
-        notebook_notes_digested: 0,
-        summary: String::new(),
-        soul_hash: String::new(),
-    };
+/// 五阶段梦境流水线
+pub async fn run_dream_pipeline(_app: &AppHandle) -> DreamReport {
+    let mut report = DreamReport::default();
+    let now = super::now_ms();
 
-    // ── Phase 1: 过时淘汰 ──────────────────────────────────
+    // ── Phase 1: 过时淘汰 (FTS5 级联清理, feedback 免删) ───
     report.stale_cleaned = phase_stale_cleanup();
 
-    // ── Phase 2: 相似合并 ──────────────────────────────────
+    // ── Phase 2: 相似合并 (同类型感知, N-gram 相似度, FTS 级联)
     report.memories_merged = phase_merge_similar();
 
-    // ── Phase 3: SOUL 精炼 ─────────────────────────────────
+    // ── Phase 3: SOUL 精炼提案 (HITL 机制, 不盲目覆写) ─────
     let (refined, hash) = phase_soul_refinement(_app).await;
     report.soul_refined = refined;
     report.soul_hash = hash;
 
-    // ── Phase 4: 失败模式分析 (目标 19) ────────────────
+    // ── Phase 4: 失败模式分析 (解耦 AVOIDANCE.md, 遥测闭环) ─
     report.failure_insights = phase_failure_analysis().await;
 
-    // ── Phase 5: 笔记语义消化 (Phase 3) ────────────────
+    // ── Phase 5: 笔记语义消化 (幂等事件, 安全连接) ─────────
     report.notebook_notes_digested = phase_notebook_digest(_app).await;
 
     // 构建摘要
@@ -577,7 +667,7 @@ async fn run_dream_pipeline(_app: &AppHandle) -> DreamReport {
         summary_parts.push(format!("合并 {} 条相似记忆", report.memories_merged));
     }
     if report.soul_refined {
-        summary_parts.push("SOUL.md 已精炼".to_string());
+        summary_parts.push("生成了 SOUL 精炼提案".to_string());
     }
     if report.failure_insights > 0 {
         summary_parts.push(format!(
@@ -597,10 +687,351 @@ async fn run_dream_pipeline(_app: &AppHandle) -> DreamReport {
         summary_parts.join("; ")
     };
 
+    // 写入 memory/dream_report.json 供 Daily Brief / Today Surface 消费
+    let memory_dir = super::get_data_dir().join("memory");
+    let _ = std::fs::create_dir_all(&memory_dir);
+    let dream_report_path = memory_dir.join("dream_report.json");
+    let dream_report_payload = json!({
+        "generatedAt": now,
+        "dismissed": false,
+        "stats": {
+            "digest_notes": report.notebook_notes_digested,
+            "digest_entities": report.facts_extracted,
+            "merged": report.memories_merged,
+            "corrected": report.failure_insights,
+            "stale_cleaned": report.stale_cleaned,
+            "soul_refined": if report.soul_refined { 1 } else { 0 }
+        },
+        "summary": report.summary,
+    });
+    if let Ok(serialized) = serde_json::to_string_pretty(&dream_report_payload) {
+        if let Err(e) = std::fs::write(&dream_report_path, serialized) {
+            log::warn!("[Evolution] Failed to write dream_report.json: {}", e);
+        } else {
+            log::info!("[Evolution] Successfully saved dream_report.json for Daily Brief");
+        }
+    }
+
     report
 }
 
-/// Phase 4 (目标 19): 失败模式分析 — 扫描 execution_errors, 提炼避坑指南并追加到 SOUL.md
+// ═══════════════════════════════════════════════════════════
+// 避坑指南数据结构与管理 (AVOIDANCE.md)
+// ═══════════════════════════════════════════════════════════
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub struct AvoidanceRule {
+    pub tool: String,
+    pub scenario: String,
+    pub suggestion: String,
+    pub avoidance: String,
+    pub hit_count: u32,
+    pub status: String, // "validated" | "unverified" | "decayed"
+    pub last_seen: String,
+}
+
+impl AvoidanceRule {
+    pub fn to_markdown_line(&self) -> String {
+        format!(
+            "- [tool:{}] ⚠️ 当 {} 时，应 {}，避免 {} (status: {}, hits: {}, last_seen: {})",
+            self.tool,
+            self.scenario,
+            self.suggestion,
+            self.avoidance,
+            self.status,
+            self.hit_count,
+            self.last_seen
+        )
+    }
+}
+
+/// 解析单条避坑指南 Markdown 行
+pub fn parse_avoidance_line(line: &str) -> Option<AvoidanceRule> {
+    let trimmed = line.trim();
+    if !trimmed.starts_with('-') && !trimmed.starts_with('*') && !trimmed.starts_with("⚠️") {
+        return None;
+    }
+    let content = trimmed.trim_start_matches(|c| c == '-' || c == '*' || c == ' ');
+
+    // 提取 tool 标签: [tool:xxx]
+    let (tool, rest) = if content.starts_with("[tool:") {
+        if let Some(end_idx) = content.find(']') {
+            let t = content[6..end_idx].trim().to_string();
+            (t, content[end_idx + 1..].trim())
+        } else {
+            ("general".to_string(), content)
+        }
+    } else {
+        ("general".to_string(), content)
+    };
+
+    let mut status = "unverified".to_string();
+    let mut hit_count = 1u32;
+    let mut last_seen = chrono::Local::now().format("%Y-%m-%d").to_string();
+
+    let rule_body = if let Some(meta_start) = rest.rfind('(') {
+        if rest.ends_with(')') {
+            let meta_str = &rest[meta_start + 1..rest.len() - 1];
+            for part in meta_str.split(',') {
+                let kv: Vec<&str> = part.split(':').map(|s| s.trim()).collect();
+                if kv.len() == 2 {
+                    match kv[0] {
+                        "status" => status = kv[1].to_string(),
+                        "hits" => hit_count = kv[1].parse().unwrap_or(1),
+                        "last_seen" => last_seen = kv[1].to_string(),
+                        _ => {}
+                    }
+                }
+            }
+            rest[..meta_start].trim()
+        } else {
+            rest
+        }
+    } else {
+        rest
+    };
+
+    let body_clean = rule_body.trim_start_matches("⚠️").trim();
+
+    let mut scenario = String::new();
+    let mut suggestion = String::new();
+    let mut avoidance = String::new();
+
+    if let Some(shi_idx) = body_clean.find("时") {
+        let before_shi = &body_clean[..shi_idx];
+        if let Some(dang_idx) = before_shi.find("当") {
+            scenario = before_shi[dang_idx + "当".len()..].trim().to_string();
+        } else {
+            scenario = before_shi.trim().to_string();
+        }
+
+        let after_shi = &body_clean[shi_idx + "时".len()..];
+        if let Some(bimian_idx) = after_shi.find("避免") {
+            let between = &after_shi[..bimian_idx];
+            let after_bimian = &after_shi[bimian_idx + "避免".len()..];
+
+            if let Some(ying_idx) = between.find("应") {
+                suggestion = between[ying_idx + "应".len()..]
+                    .trim()
+                    .trim_matches(|c| c == '，' || c == ',' || c == ' ')
+                    .to_string();
+            } else {
+                suggestion = between
+                    .trim()
+                    .trim_matches(|c| c == '，' || c == ',' || c == ' ')
+                    .to_string();
+            }
+
+            avoidance = after_bimian
+                .trim()
+                .trim_matches(|c| c == '。' || c == '.' || c == ' ' || c == '，' || c == ',')
+                .to_string();
+        } else if let Some(ying_idx) = after_shi.find("应") {
+            suggestion = after_shi[ying_idx + "应".len()..]
+                .trim()
+                .trim_matches(|c| c == '。' || c == '.' || c == ' ' || c == '，' || c == ',')
+                .to_string();
+        }
+    }
+
+    if scenario.is_empty() && suggestion.is_empty() {
+        scenario = body_clean.chars().take(80).collect();
+        suggestion = "遵循严谨规范".to_string();
+        avoidance = "操作失误与重试超时".to_string();
+    }
+
+    Some(AvoidanceRule {
+        tool,
+        scenario,
+        suggestion,
+        avoidance,
+        hit_count,
+        status,
+        last_seen,
+    })
+}
+
+/// 从 SOUL.md 中剥离旧版避坑指南并返回 (清洗后的 SOUL, 剥离的条目)
+pub fn strip_avoidance_from_soul(soul_content: &str) -> (String, Vec<AvoidanceRule>) {
+    let mut rules = Vec::new();
+    if let Some(pos) = soul_content.find("## 🚫 避坑指南") {
+        let before = soul_content[..pos].trim_end().to_string();
+        let after = &soul_content[pos..];
+        for line in after.lines() {
+            if let Some(rule) = parse_avoidance_line(line) {
+                rules.push(rule);
+            }
+        }
+        (before, rules)
+    } else {
+        (soul_content.to_string(), rules)
+    }
+}
+
+/// 加载避坑指南 (优先加载 AVOIDANCE.md，并自动迁移 SOUL.md 中的旧数据)
+pub fn load_avoidance_rules(data_dir: &Path) -> Vec<AvoidanceRule> {
+    let memory_dir = data_dir.join("memory");
+    let avoidance_path = memory_dir.join("AVOIDANCE.md");
+    let soul_path = memory_dir.join("SOUL.md");
+
+    let mut rules = Vec::new();
+
+    // 1. 读取 AVOIDANCE.md
+    if avoidance_path.exists() {
+        if let Ok(content) = std::fs::read_to_string(&avoidance_path) {
+            for line in content.lines() {
+                if let Some(rule) = parse_avoidance_line(line) {
+                    rules.push(rule);
+                }
+            }
+        }
+    }
+
+    // 2. 检查 SOUL.md 是否包含旧版避坑指南，进行无损迁移
+    if soul_path.exists() {
+        if let Ok(content) = std::fs::read_to_string(&soul_path) {
+            let (cleaned_soul, legacy_rules) = strip_avoidance_from_soul(&content);
+            if !legacy_rules.is_empty() {
+                log::info!(
+                    "[Evolution] Migrating {} legacy avoidance rules from SOUL.md to AVOIDANCE.md",
+                    legacy_rules.len()
+                );
+                merge_avoidance_rules(&mut rules, legacy_rules);
+                let _ = std::fs::write(&soul_path, cleaned_soul);
+                let _ = save_avoidance_rules(data_dir, &rules);
+            }
+        }
+    }
+
+    rules
+}
+
+/// 保存避坑指南到 memory/AVOIDANCE.md (容量限制为 top 20)
+pub fn save_avoidance_rules(data_dir: &Path, rules: &[AvoidanceRule]) -> Result<(), std::io::Error> {
+    let memory_dir = data_dir.join("memory");
+    let _ = std::fs::create_dir_all(&memory_dir);
+    let avoidance_path = memory_dir.join("AVOIDANCE.md");
+
+    let mut sorted_rules = rules.to_vec();
+    // 排序优先级: validated 优先, 其次按 hit_count 倒序
+    sorted_rules.sort_by(|a, b| {
+        let a_val = if a.status == "validated" { 1 } else { 0 };
+        let b_val = if b.status == "validated" { 1 } else { 0 };
+        b_val.cmp(&a_val).then_with(|| b.hit_count.cmp(&a.hit_count))
+    });
+    sorted_rules.truncate(20);
+
+    let now_str = chrono::Local::now().format("%Y-%m-%d %H:%M").to_string();
+    let mut lines = Vec::new();
+    lines.push("# 🚫 系统执行避坑指南 (Avoidance Rules)".to_string());
+    lines.push(format!(
+        "> 由 Dream Engine 自动维护与闭环验证。供系统工具调用及规划时参考。最后更新: {}\n",
+        now_str
+    ));
+
+    for r in &sorted_rules {
+        lines.push(r.to_markdown_line());
+    }
+
+    std::fs::write(&avoidance_path, lines.join("\n"))
+}
+
+/// 合并避坑指南 (基于 tool 与场景相似度去重累加)
+pub fn merge_avoidance_rules(existing: &mut Vec<AvoidanceRule>, new_rules: Vec<AvoidanceRule>) {
+    let now_str = chrono::Local::now().format("%Y-%m-%d").to_string();
+
+    for mut new_r in new_rules {
+        let mut matched = false;
+        for ex in existing.iter_mut() {
+            let tool_match = ex.tool == new_r.tool || ex.tool == "general" || new_r.tool == "general";
+            let sim = title_similarity(&ex.scenario, &new_r.scenario);
+            let scenario_sub = ex.scenario.contains(&new_r.scenario) || new_r.scenario.contains(&ex.scenario);
+            if tool_match && (sim >= 0.40 || scenario_sub) {
+                ex.hit_count = ex.hit_count.saturating_add(new_r.hit_count);
+                ex.last_seen = now_str.clone();
+                if new_r.tool != "general" && ex.tool == "general" {
+                    ex.tool = new_r.tool.clone();
+                }
+                if new_r.suggestion.len() > ex.suggestion.len() {
+                    ex.suggestion = new_r.suggestion.clone();
+                }
+                matched = true;
+                break;
+            }
+        }
+        if !matched {
+            new_r.last_seen = now_str.clone();
+            existing.push(new_r);
+        }
+    }
+}
+
+/// 为特定工具查询适用的避坑指南
+pub fn get_avoidance_rules_for_tool(tool_name: &str) -> Vec<String> {
+    let data_dir = super::get_data_dir();
+    let rules = load_avoidance_rules(&data_dir);
+    rules
+        .into_iter()
+        .filter(|r| r.tool == tool_name || r.tool == "general")
+        .take(5)
+        .map(|r| {
+            format!(
+                "⚠️ 当 {} 时，应 {}，避免 {}",
+                r.scenario, r.suggestion, r.avoidance
+            )
+        })
+        .collect()
+}
+
+/// 利用遥测数据闭环验证工具规则的有效性
+fn evaluate_telemetry_validation(
+    conn: &rusqlite::Connection,
+    tool: &str,
+    current_status: &str,
+) -> String {
+    if tool == "general" || tool.is_empty() {
+        return current_status.to_string();
+    }
+
+    // 检查过去 24 小时该工具的错误数
+    let recent_errors: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM execution_errors WHERE tool_name = ?1 AND created_at >= (strftime('%s', 'now') - 86400) * 1000",
+            rusqlite::params![tool],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
+
+    // 检查总调用与失败
+    let total_failures: i64 = conn
+        .query_row(
+            "SELECT COALESCE(SUM(tool_failures), 0) FROM session_observations WHERE created_at >= (strftime('%s', 'now') - 86400) * 1000",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
+
+    let total_calls: i64 = conn
+        .query_row(
+            "SELECT COALESCE(SUM(tool_calls_count), 0) FROM session_observations WHERE created_at >= (strftime('%s', 'now') - 86400) * 1000",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
+
+    if recent_errors == 0 && total_calls > 0 && total_failures == 0 {
+        "validated".to_string()
+    } else if recent_errors > 0 {
+        "unverified".to_string()
+    } else {
+        current_status.to_string()
+    }
+}
+
+// ═══════════════════════════════════════════════════════════
+// Phase 4: 失败模式分析 (解耦 AVOIDANCE.md, 遥测闭环)
+// ═══════════════════════════════════════════════════════════
+
 async fn phase_failure_analysis() -> i64 {
     let db_path = super::get_data_dir().join("bob.db");
     let conn = match rusqlite::Connection::open(&db_path) {
@@ -640,7 +1071,6 @@ async fn phase_failure_analysis() -> i64 {
         let key = format!("{}/{}", tool, etype);
         *groups.entry(key.clone()).or_insert(0) += 1;
 
-        // 取每组最多 2 条详情
         if groups[&key] <= 2 {
             let msg_short: String = msg.chars().take(200).collect();
             error_details.push(format!("- [{}] {}: {}", tool, etype, msg_short));
@@ -651,7 +1081,6 @@ async fn phase_failure_analysis() -> i64 {
         }
     }
 
-    // 构建摘要
     let group_summary: Vec<String> = groups
         .iter()
         .map(|(k, v)| format!("  {} (×{})", k, v))
@@ -659,76 +1088,81 @@ async fn phase_failure_analysis() -> i64 {
 
     let analysis_prompt = format!(
         "分析以下 Bob Agent 过去 48 小时的执行失败记录，提炼出 3-5 条最有价值的避坑指南。\n\
-         每条格式: '⚠️ 当 [场景] 时，应 [正确做法]，避免 [错误做法]。'\n\
+         每条格式严格为: '- [tool:工具名] ⚠️ 当 [场景] 时，应 [正确做法]，避免 [错误做法]。'\n\
+         如果错误不属于特定工具，工具名写 general。\n\
          只输出真正高频或严重的模式，不要列举琐碎错误。如果错误记录全是偶发的，可以只输出 1-2 条或不输出。\n\n\
          失败模式统计 ({} 条记录, {} 个模式):\n{}\n\n\
          具体错误详情 (每组取样):\n{}",
-        errors.len(), groups.len(),
+        errors.len(),
+        groups.len(),
         group_summary.join("\n"),
         error_details.join("\n")
     );
 
     // 调用 Clerk 分析
     let insights = crate::llm::call_clerk_oneshot(
-        "你是 Bob Agent 的执行诊断引擎。只输出避坑指南条目，不要输出其他内容。",
+        "你是 Bob Agent 的执行诊断引擎。只输出避坑指南条目列表，不要输出其他闲聊。",
         &analysis_prompt,
         512,
     )
     .await;
 
+    // ── Fail-Safe 容错保护 ───────────────────────────────
+    // 只有当 Clerk 成功返回且提取出有效条目时，才标记错误为已分析
     let insights_text = match insights {
         Some(text) if !text.trim().is_empty() => text.trim().to_string(),
         _ => {
-            log::info!("[Evolution] Phase 4: Clerk returned empty insights, marking as analyzed");
-            // 即使 Clerk 没返回内容，也标记已分析避免重复处理
-            let _ = crate::db::mark_errors_analyzed(&conn, &ids_to_mark);
+            log::warn!("[Evolution] Phase 4: Clerk analysis failed or returned empty; retaining unanalyzed errors for next dream");
             return 0;
         }
     };
 
-    // 统计提炼出的条目数
-    let insight_count = insights_text
-        .lines()
-        .filter(|l| {
-            l.trim().starts_with('⚠') || l.trim().starts_with('-') || l.trim().starts_with('*')
-        })
-        .count() as i64;
+    // 解析 Clerk 提炼出的新规则
+    let mut new_rules = Vec::new();
+    for line in insights_text.lines() {
+        if let Some(rule) = parse_avoidance_line(line) {
+            new_rules.push(rule);
+        }
+    }
 
-    // 追加到 SOUL.md 的避坑区
-    let memory_dir = super::get_data_dir().join("memory");
-    let soul_path = memory_dir.join("SOUL.md");
-    let _ = std::fs::create_dir_all(&memory_dir);
+    if new_rules.is_empty() {
+        log::info!("[Evolution] Phase 4: No parseable avoidance rules extracted; retaining errors");
+        return 0;
+    }
 
-    let current_soul = std::fs::read_to_string(&soul_path).unwrap_or_default();
-    let now_str = chrono::Local::now().format("%Y-%m-%d").to_string();
-    let avoidance_section = format!(
-        "\n\n## 🚫 避坑指南 (Dream Engine 自动提炼)\n> 最后更新: {}\n\n{}",
-        now_str, insights_text
-    );
+    let data_dir = super::get_data_dir();
+    let mut existing_rules = load_avoidance_rules(&data_dir);
 
-    // 如果已有避坑区，替换；否则追加
-    let new_soul = if let Some(pos) = current_soul.find("## 🚫 避坑指南") {
-        format!("{}{}", &current_soul[..pos].trim_end(), avoidance_section)
-    } else {
-        format!("{}{}", current_soul.trim_end(), avoidance_section)
-    };
+    // 遥测闭环更新验证状态
+    for r in existing_rules.iter_mut() {
+        r.status = evaluate_telemetry_validation(&conn, &r.tool, &r.status);
+    }
+    for r in new_rules.iter_mut() {
+        r.status = evaluate_telemetry_validation(&conn, &r.tool, &r.status);
+    }
 
-    if let Err(e) = std::fs::write(&soul_path, &new_soul) {
-        log::warn!("[Evolution] Phase 4: Failed to write SOUL.md: {}", e);
+    let count = new_rules.len() as i64;
+    merge_avoidance_rules(&mut existing_rules, new_rules);
+
+    if let Err(e) = save_avoidance_rules(&data_dir, &existing_rules) {
+        log::warn!("[Evolution] Phase 4: Failed to save AVOIDANCE.md: {}", e);
     } else {
         log::info!(
-            "[Evolution] Phase 4: Appended {} avoidance tips to SOUL.md",
-            insight_count
+            "[Evolution] Phase 4: Successfully saved {} avoidance rules to memory/AVOIDANCE.md",
+            existing_rules.len()
         );
     }
 
-    // 标记已分析
+    // 标记已成功分析
     let _ = crate::db::mark_errors_analyzed(&conn, &ids_to_mark);
 
-    insight_count.max(1) // 至少返回 1 表示执行了分析
+    count
 }
 
-/// Phase 1: 过时淘汰 — 清理 30 天未更新且未被引用的 learned 记忆
+// ═══════════════════════════════════════════════════════════
+// Phase 1: 过时淘汰 (FTS5 级联清理, feedback 免删)
+// ═══════════════════════════════════════════════════════════
+
 fn phase_stale_cleanup() -> i64 {
     let learned_dir = get_learned_dir();
     if !learned_dir.exists() {
@@ -740,36 +1174,76 @@ fn phase_stale_cleanup() -> i64 {
         .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
 
     let mut cleaned = 0i64;
+    let db_path = super::get_data_dir().join("bob.db");
+    let conn = rusqlite::Connection::open(&db_path).ok();
 
     let entries: Vec<PathBuf> = match std::fs::read_dir(&learned_dir) {
         Ok(rd) => rd
             .flatten()
             .map(|e| e.path())
-            .filter(|p| p.is_file())
+            .filter(|p| p.is_file() && p.extension().map_or(false, |ext| ext == "md"))
             .collect(),
         Err(_) => return 0,
     };
 
     for path in entries {
+        let filename = match path.file_name().and_then(|s| s.to_str()) {
+            Some(f) => f.to_string(),
+            None => continue,
+        };
+
+        let content = match std::fs::read_to_string(&path) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+
+        let meta = parse_memory_frontmatter(&content);
+
+        // ── 纠错与反思特权保护 ─────────────────────────────
+        if let Some(ref m) = meta {
+            if m.protected || m.fact_type == "feedback" {
+                continue;
+            }
+        }
+
         let modified = match std::fs::metadata(&path).and_then(|m| m.modified()) {
             Ok(t) => t,
             Err(_) => continue,
         };
 
         if modified < thirty_days_ago {
-            // 读取 frontmatter 检查是否有 superseded 标记
-            if let Ok(content) = std::fs::read_to_string(&path) {
-                if content.contains("superseded: true") {
-                    // 已标记为过时的，直接物理删除
-                    let _ = std::fs::remove_file(&path);
-                    cleaned += 1;
-                    continue;
+            let is_superseded = meta
+                .as_ref()
+                .map(|m| m.status == "superseded")
+                .unwrap_or(false)
+                || content.contains("superseded: true");
+
+            let wiki_path = format!("wiki/learned/{}", filename);
+
+            if is_superseded {
+                // 已标记为过时的，直接物理删除并级联清理 FTS
+                let _ = std::fs::remove_file(&path);
+                if let Some(ref c) = conn {
+                    let _ = c.execute(
+                        "DELETE FROM wiki_fts WHERE wiki_path = ?1",
+                        rusqlite::params![wiki_path],
+                    );
                 }
-            }
-            // 30天以上但未标记：打上 superseded 标记（下次做梦时删除）
-            if let Ok(content) = std::fs::read_to_string(&path) {
-                let marked = content.replacen("---\n", "---\nsuperseded: true\n", 1);
+                cleaned += 1;
+            } else {
+                // 30天以上但未标记：打上 superseded 标记，并在 FTS 中清除以避免检索干扰
+                let marked = if content.contains("status: active") {
+                    content.replacen("status: active", "status: superseded\nsuperseded: true", 1)
+                } else {
+                    content.replacen("---\n", "---\nstatus: superseded\nsuperseded: true\n", 1)
+                };
                 let _ = std::fs::write(&path, marked);
+                if let Some(ref c) = conn {
+                    let _ = c.execute(
+                        "DELETE FROM wiki_fts WHERE wiki_path = ?1",
+                        rusqlite::params![wiki_path],
+                    );
+                }
                 cleaned += 1;
             }
         }
@@ -777,14 +1251,17 @@ fn phase_stale_cleanup() -> i64 {
 
     if cleaned > 0 {
         log::info!(
-            "[Evolution] Dream Phase 1: cleaned/marked {} stale memories",
+            "[Evolution] Dream Phase 1: cleaned/marked {} stale memories with FTS cascade",
             cleaned
         );
     }
     cleaned
 }
 
-/// Phase 2: 相似合并 — 基于标题文本重叠率去重
+// ═══════════════════════════════════════════════════════════
+// Phase 2: 相似合并 (同类型感知, Bigram N-gram 相似度, FTS 级联)
+// ═══════════════════════════════════════════════════════════
+
 fn phase_merge_similar() -> i64 {
     let learned_dir = get_learned_dir();
     if !learned_dir.exists() {
@@ -800,62 +1277,95 @@ fn phase_merge_similar() -> i64 {
         Err(_) => return 0,
     };
 
-    // 提取所有标题
-    let mut titles: Vec<(PathBuf, String, std::time::SystemTime)> = Vec::new();
+    struct MemoryItem {
+        path: PathBuf,
+        filename: String,
+        fact_type: String,
+        title: String,
+        modified: std::time::SystemTime,
+    }
+
+    let mut items: Vec<MemoryItem> = Vec::new();
+
     for path in &entries {
         if let Ok(content) = std::fs::read_to_string(path) {
-            // 跳过已标记为过时的
-            if content.contains("superseded: true") {
-                continue;
-            }
+            if let Some(meta) = parse_memory_frontmatter(&content) {
+                if meta.status == "superseded" {
+                    continue;
+                }
 
-            let title = content
-                .lines()
-                .find(|l| l.starts_with("title:"))
-                .map(|l| {
-                    l.trim_start_matches("title:")
-                        .trim()
-                        .trim_matches('"')
-                        .to_string()
-                })
-                .unwrap_or_default();
+                let filename = path
+                    .file_name()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or_default()
+                    .to_string();
 
-            let modified = std::fs::metadata(path)
-                .and_then(|m| m.modified())
-                .unwrap_or(std::time::UNIX_EPOCH);
+                let modified = std::fs::metadata(path)
+                    .and_then(|m| m.modified())
+                    .unwrap_or(std::time::UNIX_EPOCH);
 
-            if !title.is_empty() {
-                titles.push((path.clone(), title, modified));
+                items.push(MemoryItem {
+                    path: path.clone(),
+                    filename,
+                    fact_type: meta.fact_type,
+                    title: meta.title,
+                    modified,
+                });
             }
         }
     }
 
     let mut merged = 0i64;
-    let mut removed_paths: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
+    let mut removed_paths: HashSet<PathBuf> = HashSet::new();
+    let db_path = super::get_data_dir().join("bob.db");
+    let conn = rusqlite::Connection::open(&db_path).ok();
 
-    for i in 0..titles.len() {
-        if removed_paths.contains(&titles[i].0) {
+    for i in 0..items.len() {
+        if removed_paths.contains(&items[i].path) {
             continue;
         }
 
-        for j in (i + 1)..titles.len() {
-            if removed_paths.contains(&titles[j].0) {
+        for j in (i + 1)..items.len() {
+            if removed_paths.contains(&items[j].path) {
                 continue;
             }
 
-            let similarity = title_similarity(&titles[i].1, &titles[j].1);
-            if similarity > 0.7 {
-                // 保留较新的，标记较旧的为过时
-                let older = if titles[i].2 < titles[j].2 {
-                    &titles[i].0
+            // ── 必须为相同 fact_type 才能合并，防止异构知识被误删 ──
+            if items[i].fact_type != items[j].fact_type {
+                continue;
+            }
+
+            let similarity = title_similarity(&items[i].title, &items[j].title);
+            if similarity > 0.70 {
+                // 保留较新的，标记较旧的为 superseded
+                let (older_idx, _newer_idx) = if items[i].modified < items[j].modified {
+                    (i, j)
                 } else {
-                    &titles[j].0
+                    (j, i)
                 };
-                if let Ok(content) = std::fs::read_to_string(older) {
-                    let marked = content.replacen("---\n", "---\nsuperseded: true\n", 1);
-                    let _ = std::fs::write(older, marked);
+
+                let older_path = &items[older_idx].path;
+                let older_filename = &items[older_idx].filename;
+
+                if let Ok(content) = std::fs::read_to_string(older_path) {
+                    let marked = if content.contains("status: active") {
+                        content.replacen("status: active", "status: superseded\nsuperseded: true", 1)
+                    } else {
+                        content.replacen("---\n", "---\nstatus: superseded\nsuperseded: true\n", 1)
+                    };
+                    let _ = std::fs::write(older_path, marked);
                 }
-                removed_paths.insert(older.clone());
+
+                // 级联从 wiki_fts 中删除旧记忆
+                let wiki_path = format!("wiki/learned/{}", older_filename);
+                if let Some(ref c) = conn {
+                    let _ = c.execute(
+                        "DELETE FROM wiki_fts WHERE wiki_path = ?1",
+                        rusqlite::params![wiki_path],
+                    );
+                }
+
+                removed_paths.insert(older_path.clone());
                 merged += 1;
             }
         }
@@ -863,45 +1373,67 @@ fn phase_merge_similar() -> i64 {
 
     if merged > 0 {
         log::info!(
-            "[Evolution] Dream Phase 2: merged {} similar memories",
+            "[Evolution] Dream Phase 2: merged {} similar memories with FTS cascade",
             merged
         );
     }
     merged
 }
 
-/// 简易标题相似度 (Jaccard 字符 N-gram)
-fn title_similarity(a: &str, b: &str) -> f64 {
-    let a_chars: std::collections::HashSet<char> = a.chars().collect();
-    let b_chars: std::collections::HashSet<char> = b.chars().collect();
-    if a_chars.is_empty() && b_chars.is_empty() {
+/// 字符 Bigram N-gram 相似度计算 (对中文词组与英文标题鲁棒且低误报)
+pub fn title_similarity(a: &str, b: &str) -> f64 {
+    let a_clean = a.trim();
+    let b_clean = b.trim();
+    if a_clean.is_empty() && b_clean.is_empty() {
         return 1.0;
     }
-    let intersection = a_chars.intersection(&b_chars).count();
-    let union = a_chars.union(&b_chars).count();
+    if a_clean.is_empty() || b_clean.is_empty() {
+        return 0.0;
+    }
+    if a_clean == b_clean {
+        return 1.0;
+    }
+
+    fn extract_ngrams(s: &str) -> HashSet<String> {
+        let chars: Vec<char> = s.chars().collect();
+        let mut set = HashSet::new();
+        if chars.len() <= 2 {
+            set.insert(s.to_string());
+            return set;
+        }
+        for w in chars.windows(2) {
+            set.insert(w.iter().collect());
+        }
+        set
+    }
+
+    let a_set = extract_ngrams(a_clean);
+    let b_set = extract_ngrams(b_clean);
+    let intersection = a_set.intersection(&b_set).count();
+    let union = a_set.union(&b_set).count();
     if union == 0 {
         return 0.0;
     }
     intersection as f64 / union as f64
 }
 
-/// Phase 3: SOUL 精炼 — 结合新记忆重写 SOUL.md
-/// 附带 hash 防冲突保护：如果用户手动编辑过 SOUL，跳过重写
+// ═══════════════════════════════════════════════════════════
+// Phase 3: SOUL 精炼提案机制 (Human-in-the-Loop)
+// ═══════════════════════════════════════════════════════════
+
 async fn phase_soul_refinement(_app: &AppHandle) -> (bool, String) {
     let memory_dir = super::get_data_dir().join("memory");
     let soul_path = memory_dir.join("SOUL.md");
+    let proposal_path = memory_dir.join("SOUL_PROPOSAL.md");
 
-    // 读取当前 SOUL
     let current_soul = if soul_path.exists() {
         std::fs::read_to_string(&soul_path).unwrap_or_default()
     } else {
         String::new()
     };
 
-    // 计算当前 hash (SHA256 简化版: 取前 16 位)
     let current_hash = simple_hash(&current_soul);
 
-    // 检查上次做梦时记录的 hash，如果不同说明用户手动编辑过
     let db_path = super::get_data_dir().join("bob.db");
     let last_hash = if let Ok(conn) = rusqlite::Connection::open(&db_path) {
         conn.query_row(
@@ -919,12 +1451,10 @@ async fn phase_soul_refinement(_app: &AppHandle) -> (bool, String) {
         return (false, current_hash);
     }
 
-    // 如果 SOUL 为空，暂不生成（需要用户先写一版初稿）
     if current_soul.trim().is_empty() {
         return (false, current_hash);
     }
 
-    // 收集最新的 learned 事实（最多 10 条最新的）
     let learned_dir = get_learned_dir();
     let mut recent_facts = Vec::new();
     if learned_dir.exists() {
@@ -944,8 +1474,10 @@ async fn phase_soul_refinement(_app: &AppHandle) -> (bool, String) {
         entries.sort_by(|a, b| b.1.cmp(&a.1));
         for (path, _) in entries.into_iter().take(10) {
             if let Ok(content) = std::fs::read_to_string(&path) {
-                if content.contains("superseded: true") {
-                    continue;
+                if let Some(m) = parse_memory_frontmatter(&content) {
+                    if m.status == "superseded" {
+                        continue;
+                    }
                 }
                 recent_facts.push(content);
             }
@@ -956,7 +1488,6 @@ async fn phase_soul_refinement(_app: &AppHandle) -> (bool, String) {
         return (false, current_hash);
     }
 
-    // 调用 Clerk 模型精炼 SOUL
     let config = super::read_config();
     let clerk_model = config
         .get("clerkModel")
@@ -1056,7 +1587,6 @@ async fn phase_soul_refinement(_app: &AppHandle) -> (bool, String) {
         return (false, current_hash);
     }
 
-    // 字数检查 (≤500 字硬上限)
     let char_count = new_soul.chars().count();
     if char_count > 600 {
         log::warn!(
@@ -1066,28 +1596,46 @@ async fn phase_soul_refinement(_app: &AppHandle) -> (bool, String) {
         return (false, current_hash);
     }
 
-    // 写入新 SOUL
+    let proposed_hash = simple_hash(&new_soul);
+
+    // 生成精炼提案文件 SOUL_PROPOSAL.md (人在回路，不盲目覆写生产配置)
+    let now_str = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+    let proposal_content = format!(
+        "# 🧬 SOUL.md 精炼提案 (Refinement Proposal)\n\
+         > 生成时间: {}\n\
+         > 当前版本 Hash: {}\n\
+         > 拟议版本 Hash: {}\n\
+         > 状态: pending\n\n\
+         ## 差异分析 (Change Summary)\n\
+         融合了近期学到的 {} 条重要记忆与事实，建议进行自适应微调。\n\n\
+         ## 拟议的新版内容\n\
+         {}\n",
+        now_str,
+        current_hash,
+        proposed_hash,
+        recent_facts.len(),
+        new_soul
+    );
+
     let _ = std::fs::create_dir_all(&memory_dir);
-    match std::fs::write(&soul_path, &new_soul) {
+    match std::fs::write(&proposal_path, proposal_content) {
         Ok(_) => {
-            let new_hash = simple_hash(&new_soul);
             log::info!(
-                "[Evolution] SOUL.md refined: {}字, hash={}",
+                "[Evolution] SOUL.md refinement proposal generated: {}字, proposed_hash={}",
                 char_count,
-                new_hash
+                proposed_hash
             );
-            (true, new_hash)
+            (true, proposed_hash)
         }
         Err(e) => {
-            log::warn!("[Evolution] Failed to write SOUL.md: {}", e);
+            log::warn!("[Evolution] Failed to write SOUL_PROPOSAL.md: {}", e);
             (false, current_hash)
         }
     }
 }
 
 /// 简易字符串 hash (用于 SOUL 防冲突检测)
-fn simple_hash(s: &str) -> String {
-    // 使用 FNV-1a 32-bit hash 的简化实现
+pub fn simple_hash(s: &str) -> String {
     let mut hash: u32 = 2166136261;
     for byte in s.bytes() {
         hash ^= byte as u32;
@@ -1097,101 +1645,19 @@ fn simple_hash(s: &str) -> String {
 }
 
 // ═══════════════════════════════════════════════════════════
-// IPC 接口: 前端看板数据源
+// Phase 5: 笔记语义消化 (Notebook Digest)
 // ═══════════════════════════════════════════════════════════
 
-/// 返回进化引擎的统计数据，供前端看板展示
-#[tauri::command]
-pub fn system_get_evolution_stats() -> Value {
-    let db_path = super::get_data_dir().join("bob.db");
-    let conn = match rusqlite::Connection::open(&db_path) {
-        Ok(c) => c,
-        Err(_) => return json!({ "error": "数据库打开失败" }),
-    };
-
-    // ── 观测统计 ──────────────────────────────────────────
-    let obs_stats = conn
-        .query_row(
-            "SELECT COUNT(*), COALESCE(SUM(tool_calls_count), 0), COALESCE(SUM(tool_failures), 0),
-                COALESCE(SUM(tokens_in), 0), COALESCE(SUM(tokens_out), 0)
-         FROM session_observations",
-            [],
-            |row| {
-                Ok(json!({
-                    "total_conversations": row.get::<_, i64>(0).unwrap_or(0),
-                    "total_tool_calls": row.get::<_, i64>(1).unwrap_or(0),
-                    "total_tool_failures": row.get::<_, i64>(2).unwrap_or(0),
-                    "total_tokens_in": row.get::<_, i64>(3).unwrap_or(0),
-                    "total_tokens_out": row.get::<_, i64>(4).unwrap_or(0),
-                }))
-            },
-        )
-        .unwrap_or(json!({
-            "total_conversations": 0,
-            "total_tool_calls": 0,
-            "total_tool_failures": 0,
-            "total_tokens_in": 0,
-            "total_tokens_out": 0,
-        }));
-
-    // ── 做梦历史 (最近 10 条) ──────────────────────────────
-    let mut dream_history = Vec::new();
-    if let Ok(mut stmt) = conn.prepare(
-        "SELECT dream_type, facts_extracted, stale_cleaned, memories_merged,
-                soul_refined, report_text, created_at
-         FROM evolution_log ORDER BY created_at DESC LIMIT 10",
-    ) {
-        if let Ok(rows) = stmt.query_map([], |row| {
-            Ok(json!({
-                "dream_type": row.get::<_, String>(0).unwrap_or_default(),
-                "facts_extracted": row.get::<_, i64>(1).unwrap_or(0),
-                "stale_cleaned": row.get::<_, i64>(2).unwrap_or(0),
-                "memories_merged": row.get::<_, i64>(3).unwrap_or(0),
-                "soul_refined": row.get::<_, i64>(4).unwrap_or(0) != 0,
-                "report": row.get::<_, String>(5).unwrap_or_default(),
-                "created_at": row.get::<_, i64>(6).unwrap_or(0),
-            }))
-        }) {
-            dream_history = rows.filter_map(|r| r.ok()).collect();
-        }
-    }
-
-    // ── 知识库统计 ────────────────────────────────────────
-    let learned_dir = get_learned_dir();
-    let learned_count = if learned_dir.exists() {
-        std::fs::read_dir(&learned_dir)
-            .map(|rd| rd.flatten().filter(|e| e.path().is_file()).count())
-            .unwrap_or(0)
-    } else {
-        0
-    };
-
-    // ── 最近一次做梦时间 ──────────────────────────────────
-    let last_dream_at = get_last_dream_timestamp();
-
-    json!({
-        "observations": obs_stats,
-        "dream_history": dream_history,
-        "learned_facts_count": learned_count,
-        "last_dream_at": last_dream_at,
-    })
-}
-
-// ═══════════════════════════════════════════════════════════
-// Phase 5 (目标 19 Phase 3): 笔记语义消化 (Notebook Digest)
-// ═══════════════════════════════════════════════════════════
 async fn phase_notebook_digest(_app: &AppHandle) -> i64 {
     let last_dream = get_last_dream_timestamp();
     let notes_dir = super::get_data_dir().join("notes");
 
-    // 我们扫描 notes/daily 和 notes/topics
     let mut files_to_digest = Vec::new();
     let dirs = vec![notes_dir.join("daily"), notes_dir.join("topics")];
     for d in dirs {
         if let Ok(entries) = std::fs::read_dir(&d) {
             for entry in entries.flatten() {
                 if let Ok(meta) = entry.metadata() {
-                    // 如果文件是以 .md 结尾且修改时间大于上次做梦时间
                     if entry.path().extension().and_then(|s| s.to_str()) == Some("md") {
                         if let Ok(mtime) = meta.modified() {
                             let mtime_ms = mtime
@@ -1248,6 +1714,16 @@ async fn phase_notebook_digest(_app: &AppHandle) -> i64 {
 - 如果是纯粹的知识点或随想 (Knowledge)，比如“发现RAG在长文本下容易丢失焦点”，提取为 knowledge，并归类到相关实体下。"#;
 
     let db_path = super::get_data_dir().join("bob.db");
+    let conn = match rusqlite::Connection::open(&db_path) {
+        Ok(c) => c,
+        Err(e) => {
+            log::warn!("[Evolution] Phase 5 failed to open db: {}", e);
+            return 0;
+        }
+    };
+
+    let mut action_idx = 0usize;
+    let today_str = chrono::Local::now().format("%Y-%m-%d").to_string();
 
     for path in files_to_digest {
         let content = match std::fs::read_to_string(&path) {
@@ -1262,83 +1738,101 @@ async fn phase_notebook_digest(_app: &AppHandle) -> i64 {
         let note_text = format!("笔记标题: {}\n内容: {}", title, content);
 
         if let Some(resp) = crate::llm::call_clerk_oneshot(prompt, &note_text, 1024).await {
-            // 解析 JSON
             let json_start = resp.find('{').unwrap_or(0);
             let json_end = resp.rfind('}').unwrap_or(resp.len() - 1) + 1;
-            let json_str = &resp[json_start..json_end];
+            if json_start < json_end {
+                let json_str = &resp[json_start..json_end];
 
-            if let Ok(parsed) = serde_json::from_str::<Value>(json_str) {
-                if let Some(intents) = parsed.get("intents").and_then(|v| v.as_array()) {
-                    let conn = rusqlite::Connection::open(&db_path).unwrap();
-                    for intent in intents {
-                        let itype = intent.get("type").and_then(|v| v.as_str()).unwrap_or("");
-                        match itype {
-                            "action" => {
-                                if let Some(title) = intent.get("title").and_then(|v| v.as_str()) {
-                                    // 添加到 events 表中
-                                    let now = super::now_ms();
-                                    let evt_id = format!("evt-{}", now);
-                                    let _ = conn.execute(
-                                        "INSERT INTO events (id, title, type, status, date, created_at, updated_at) VALUES (?1, ?2, 'todo', 'pending', ?3, ?4, ?4)",
-                                        rusqlite::params![evt_id, title, chrono::Local::now().format("%Y-%m-%d").to_string(), now]
-                                    );
+                if let Ok(parsed) = serde_json::from_str::<Value>(json_str) {
+                    if let Some(intents) = parsed.get("intents").and_then(|v| v.as_array()) {
+                        for intent in intents {
+                            let itype = intent.get("type").and_then(|v| v.as_str()).unwrap_or("");
+                            match itype {
+                                "action" => {
+                                    if let Some(act_title) =
+                                        intent.get("title").and_then(|v| v.as_str())
+                                    {
+                                        // 幂等防重检查: 如果已有同名 pending 待办，跳过重复插入
+                                        let exists: bool = conn
+                                            .query_row(
+                                                "SELECT 1 FROM events WHERE title = ?1 AND status = 'pending' LIMIT 1",
+                                                rusqlite::params![act_title],
+                                                |_| Ok(true),
+                                            )
+                                            .unwrap_or(false);
+
+                                        if !exists {
+                                            action_idx += 1;
+                                            let now = super::now_ms();
+                                            let evt_id = format!("evt-{}-{}", now, action_idx);
+                                            let _ = conn.execute(
+                                                "INSERT INTO events (id, title, type, status, date, created_at, updated_at) VALUES (?1, ?2, 'todo', 'pending', ?3, ?4, ?4)",
+                                                rusqlite::params![evt_id, act_title, today_str, now]
+                                            );
+                                        }
+                                    }
                                 }
-                            }
-                            "seed" => {
-                                if let Some(title) = intent.get("title").and_then(|v| v.as_str()) {
-                                    // 在 topics 目录下新建文件
-                                    let new_path = notes_dir.join("topics").join(format!(
-                                        "{}.md",
-                                        title.replace('/', "_").replace('\\', "_")
-                                    ));
-                                    if !new_path.exists() {
-                                        let _ =
-                                            std::fs::write(&new_path, format!("# {}\n\n", title));
+                                "seed" => {
+                                    if let Some(seed_title) =
+                                        intent.get("title").and_then(|v| v.as_str())
+                                    {
+                                        let new_path = notes_dir.join("topics").join(format!(
+                                            "{}.md",
+                                            seed_title.replace('/', "_").replace('\\', "_")
+                                        ));
+                                        if !new_path.exists() {
+                                            let _ = std::fs::write(
+                                                &new_path,
+                                                format!("# {}\n\n", seed_title),
+                                            );
 
-                                        // 添加到 KG 节点并打上 seed metadata
-                                        let tags =
-                                            intent.get("tags").unwrap_or(&json!(["seed"])).clone();
-                                        let node_id = format!("note_{}", title);
-                                        let metadata = json!({"is_seed": true, "tags": tags, "source_note": path.to_string_lossy()});
-                                        let _ = conn.execute(
-                                            "INSERT OR REPLACE INTO kg_nodes (id, label, node_type, summary, metadata) VALUES (?1, ?2, 'note', ?3, ?4)",
-                                            rusqlite::params![node_id, title, "灵感种子", metadata.to_string()]
+                                            let tags = intent
+                                                .get("tags")
+                                                .unwrap_or(&json!(["seed"]))
+                                                .clone();
+                                            let node_id = format!("note_{}", seed_title);
+                                            let metadata = json!({
+                                                "is_seed": true,
+                                                "tags": tags,
+                                                "source_note": path.to_string_lossy()
+                                            });
+                                            let _ = conn.execute(
+                                                "INSERT OR REPLACE INTO kg_nodes (id, label, node_type, summary, metadata) VALUES (?1, ?2, 'note', ?3, ?4)",
+                                                rusqlite::params![node_id, seed_title, "灵感种子", metadata.to_string()]
+                                            );
+                                        }
+                                    }
+                                }
+                                "knowledge" => {
+                                    if let (Some(target), Some(etype), Some(summary)) = (
+                                        intent.get("target_entity").and_then(|v| v.as_str()),
+                                        intent.get("entity_type").and_then(|v| v.as_str()),
+                                        intent.get("summary").and_then(|v| v.as_str()),
+                                    ) {
+                                        let target_id =
+                                            crate::kg::resolve_node_id(&conn, target, etype);
+                                        let _ = crate::kg::upsert_node(
+                                            &conn, &target_id, target, etype, "", "", "",
+                                        );
+
+                                        let note_id = format!("note_{}", title);
+                                        let _ = crate::kg::upsert_node(
+                                            &conn,
+                                            &note_id,
+                                            title,
+                                            "note",
+                                            summary,
+                                            &path.to_string_lossy(),
+                                            "",
+                                        );
+
+                                        let _ = crate::kg::insert_edge(
+                                            &conn, &note_id, &target_id, "mentions", 1.0,
                                         );
                                     }
                                 }
+                                _ => {}
                             }
-                            "knowledge" => {
-                                if let (Some(target), Some(etype), Some(summary)) = (
-                                    intent.get("target_entity").and_then(|v| v.as_str()),
-                                    intent.get("entity_type").and_then(|v| v.as_str()),
-                                    intent.get("summary").and_then(|v| v.as_str()),
-                                ) {
-                                    // 确保目标节点存在
-                                    let target_id =
-                                        crate::kg::resolve_node_id(&conn, target, etype);
-                                    let _ = crate::kg::upsert_node(
-                                        &conn, &target_id, target, etype, "", "", "",
-                                    );
-
-                                    // 创建当前笔记的 note 节点
-                                    let note_id = format!("note_{}", title);
-                                    let _ = crate::kg::upsert_node(
-                                        &conn,
-                                        &note_id,
-                                        title,
-                                        "note",
-                                        summary,
-                                        &path.to_string_lossy(),
-                                        "",
-                                    );
-
-                                    // 建立关系
-                                    let _ = crate::kg::insert_edge(
-                                        &conn, &note_id, &target_id, "mentions", 1.0,
-                                    );
-                                }
-                            }
-                            _ => {}
                         }
                     }
                 }
@@ -1348,4 +1842,315 @@ async fn phase_notebook_digest(_app: &AppHandle) -> i64 {
     }
 
     digested_count
+}
+
+// ═══════════════════════════════════════════════════════════
+// IPC 接口: 前端看板与 SOUL 提案评审
+// ═══════════════════════════════════════════════════════════
+
+/// 返回进化引擎的统计数据，供前端看板展示
+#[tauri::command]
+pub fn system_get_evolution_stats() -> Value {
+    let db_path = super::get_data_dir().join("bob.db");
+    let conn = match rusqlite::Connection::open(&db_path) {
+        Ok(c) => c,
+        Err(_) => return json!({ "error": "数据库打开失败" }),
+    };
+
+    let obs_stats = conn
+        .query_row(
+            "SELECT COUNT(*), COALESCE(SUM(tool_calls_count), 0), COALESCE(SUM(tool_failures), 0),
+                COALESCE(SUM(tokens_in), 0), COALESCE(SUM(tokens_out), 0)
+         FROM session_observations",
+            [],
+            |row| {
+                Ok(json!({
+                    "total_conversations": row.get::<_, i64>(0).unwrap_or(0),
+                    "total_tool_calls": row.get::<_, i64>(1).unwrap_or(0),
+                    "total_tool_failures": row.get::<_, i64>(2).unwrap_or(0),
+                    "total_tokens_in": row.get::<_, i64>(3).unwrap_or(0),
+                    "total_tokens_out": row.get::<_, i64>(4).unwrap_or(0),
+                }))
+            },
+        )
+        .unwrap_or(json!({
+            "total_conversations": 0,
+            "total_tool_calls": 0,
+            "total_tool_failures": 0,
+            "total_tokens_in": 0,
+            "total_tokens_out": 0,
+        }));
+
+    let mut dream_history = Vec::new();
+    if let Ok(mut stmt) = conn.prepare(
+        "SELECT dream_type, facts_extracted, stale_cleaned, memories_merged,
+                soul_refined, report_text, created_at
+         FROM evolution_log ORDER BY created_at DESC LIMIT 10",
+    ) {
+        if let Ok(rows) = stmt.query_map([], |row| {
+            Ok(json!({
+                "dream_type": row.get::<_, String>(0).unwrap_or_default(),
+                "facts_extracted": row.get::<_, i64>(1).unwrap_or(0),
+                "stale_cleaned": row.get::<_, i64>(2).unwrap_or(0),
+                "memories_merged": row.get::<_, i64>(3).unwrap_or(0),
+                "soul_refined": row.get::<_, i64>(4).unwrap_or(0) != 0,
+                "report": row.get::<_, String>(5).unwrap_or_default(),
+                "created_at": row.get::<_, i64>(6).unwrap_or(0),
+            }))
+        }) {
+            dream_history = rows.filter_map(|r| r.ok()).collect();
+        }
+    }
+
+    let learned_dir = get_learned_dir();
+    let learned_count = if learned_dir.exists() {
+        std::fs::read_dir(&learned_dir)
+            .map(|rd| rd.flatten().filter(|e| e.path().is_file()).count())
+            .unwrap_or(0)
+    } else {
+        0
+    };
+
+    let data_dir = super::get_data_dir();
+    let avoidance_rules = load_avoidance_rules(&data_dir);
+    let avoidance_count = avoidance_rules.len();
+
+    let memory_dir = data_dir.join("memory");
+    let has_soul_proposal = memory_dir.join("SOUL_PROPOSAL.md").exists();
+
+    let last_dream_at = get_last_dream_timestamp();
+
+    json!({
+        "observations": obs_stats,
+        "dream_history": dream_history,
+        "learned_facts_count": learned_count,
+        "avoidance_rules_count": avoidance_count,
+        "has_soul_proposal": has_soul_proposal,
+        "last_dream_at": last_dream_at,
+    })
+}
+
+/// 查询待审核的 SOUL 精炼提案
+#[tauri::command]
+pub fn system_get_soul_proposal() -> Value {
+    let memory_dir = super::get_data_dir().join("memory");
+    let proposal_path = memory_dir.join("SOUL_PROPOSAL.md");
+    if !proposal_path.exists() {
+        return json!({ "has_proposal": false });
+    }
+
+    let proposal_content = match std::fs::read_to_string(&proposal_path) {
+        Ok(c) => c,
+        Err(e) => return json!({ "has_proposal": false, "error": format!("读取提案失败: {}", e) }),
+    };
+
+    let soul_path = memory_dir.join("SOUL.md");
+    let current_soul = std::fs::read_to_string(&soul_path).unwrap_or_default();
+
+    json!({
+        "has_proposal": true,
+        "proposal_content": proposal_content,
+        "current_soul": current_soul,
+    })
+}
+
+/// 审批 SOUL 精炼提案 (approved=true 应用，approved=false 拒绝)
+#[tauri::command]
+pub fn system_review_soul_proposal(approved: bool) -> Result<String, String> {
+    let memory_dir = super::get_data_dir().join("memory");
+    let proposal_path = memory_dir.join("SOUL_PROPOSAL.md");
+    let soul_path = memory_dir.join("SOUL.md");
+
+    if !proposal_path.exists() {
+        return Err("当前没有待审批的 SOUL 提案".to_string());
+    }
+
+    if !approved {
+        let _ = std::fs::remove_file(&proposal_path);
+        log::info!("[Evolution] SOUL refinement proposal rejected by user");
+        return Ok("提案已拒绝并清理".to_string());
+    }
+
+    let content = std::fs::read_to_string(&proposal_path).map_err(|e| e.to_string())?;
+    let marker = "## 拟议的新版内容\n";
+    let proposed_soul = if let Some(idx) = content.find(marker) {
+        content[idx + marker.len()..].trim().to_string()
+    } else {
+        return Err("提案格式异常，未找到新版内容标头".to_string());
+    };
+
+    if proposed_soul.is_empty() {
+        return Err("拟议新内容为空，拒绝应用".to_string());
+    }
+
+    std::fs::write(&soul_path, &proposed_soul)
+        .map_err(|e| format!("写入 SOUL.md 失败: {}", e))?;
+    let new_hash = simple_hash(&proposed_soul);
+
+    let db_path = super::get_data_dir().join("bob.db");
+    if let Ok(conn) = rusqlite::Connection::open(&db_path) {
+        let now = super::now_ms();
+        let _ = conn.execute(
+            "INSERT INTO evolution_log (dream_type, facts_extracted, stale_cleaned, memories_merged, soul_refined, report_text, soul_hash, created_at)
+             VALUES ('soul_proposal_approved', 0, 0, 0, 1, '用户批准并应用了 SOUL 精炼提案', ?1, ?2)",
+            rusqlite::params![new_hash, now],
+        );
+    }
+
+    let _ = std::fs::remove_file(&proposal_path);
+    log::info!(
+        "[Evolution] SOUL refinement proposal approved and applied: hash={}",
+        new_hash
+    );
+    Ok("SOUL.md 已成功更新并生效".to_string())
+}
+
+// ═══════════════════════════════════════════════════════════
+// 单元测试套件
+// ═══════════════════════════════════════════════════════════
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_avoidance_rule_parsing_and_serialization() {
+        let line = "- [tool:bash] ⚠️ 当 路径中含有空格 时，应 使用双引号包裹路径，避免 命令执行失败 (status: validated, hits: 3, last_seen: 2026-10-08)";
+        let rule = parse_avoidance_line(line).expect("Failed to parse standard line");
+        assert_eq!(rule.tool, "bash");
+        assert_eq!(rule.scenario, "路径中含有空格");
+        assert_eq!(rule.suggestion, "使用双引号包裹路径");
+        assert_eq!(rule.avoidance, "命令执行失败");
+        assert_eq!(rule.status, "validated");
+        assert_eq!(rule.hit_count, 3);
+        assert_eq!(rule.last_seen, "2026-10-08");
+
+        let serialized = rule.to_markdown_line();
+        assert!(serialized.contains("[tool:bash]"));
+        assert!(serialized.contains("status: validated"));
+        assert!(serialized.contains("hits: 3"));
+    }
+
+    #[test]
+    fn test_avoidance_rules_merge_and_deduplication() {
+        let mut existing = vec![AvoidanceRule {
+            tool: "bash".to_string(),
+            scenario: "路径包含空格".to_string(),
+            suggestion: "用双引号包裹".to_string(),
+            avoidance: "参数被截断".to_string(),
+            hit_count: 1,
+            status: "unverified".to_string(),
+            last_seen: "2026-10-01".to_string(),
+        }];
+
+        let incoming = vec![AvoidanceRule {
+            tool: "bash".to_string(),
+            scenario: "路径包含空格或特殊字符".to_string(),
+            suggestion: "使用双引号或单引号进行严格转义包裹".to_string(),
+            avoidance: "参数被分词截断".to_string(),
+            hit_count: 2,
+            status: "unverified".to_string(),
+            last_seen: "2026-10-08".to_string(),
+        }];
+
+        merge_avoidance_rules(&mut existing, incoming);
+        assert_eq!(existing.len(), 1, "Should merge similar rules for same tool");
+        assert_eq!(existing[0].hit_count, 3);
+        assert!(existing[0].suggestion.contains("严格转义包裹"));
+    }
+
+    #[test]
+    fn test_strip_avoidance_from_soul_migration() {
+        let raw_soul = "# Bob's Soul\nBe helpful.\n\n## 🚫 避坑指南 (Dream Engine 自动提炼)\n> 最后更新: 2026-10-05\n- [tool:database] ⚠️ 当 执行大批量更新 时，应 使用事务，避免 锁定超时 (status: unverified, hits: 1, last_seen: 2026-10-05)\n";
+        let (cleaned, rules) = strip_avoidance_from_soul(raw_soul);
+        assert_eq!(cleaned, "# Bob's Soul\nBe helpful.");
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0].tool, "database");
+        assert_eq!(rules[0].scenario, "执行大批量更新");
+    }
+
+    #[test]
+    fn test_title_similarity_type_aware_bigram() {
+        let s1 = "优化 SQLite 写入速度";
+        let s2 = "优化 SQLite 读取速度";
+        let sim = title_similarity(s1, s2);
+        assert!(sim > 0.40, "Similar SQLite optimization should have high similarity");
+
+        let s3 = "完全无关的网络请求";
+        let sim_diff = title_similarity(s1, s3);
+        assert!(sim_diff < 0.20, "Completely different topics should have low similarity");
+    }
+
+    #[test]
+    fn test_memory_frontmatter_lifecycle_and_protection() {
+        let content_feedback = "---\ntype: feedback\ntitle: \"不要在 Windows 下用 set-content\"\nsource_conv: \"c-123\"\nstatus: active\nupdated: \"2026-10-08\"\n---\n\n# Detail\n";
+        let meta = parse_memory_frontmatter(content_feedback).expect("parse frontmatter");
+        assert_eq!(meta.fact_type, "feedback");
+        assert!(meta.protected, "Feedback memory must automatically be protected");
+
+        let content_normal = "---\ntype: reference\ntitle: \"API Spec\"\nsource_conv: \"c-456\"\nstatus: active\nupdated: \"2026-10-08\"\n---\n\n# Detail\n";
+        let meta_normal = parse_memory_frontmatter(content_normal).expect("parse frontmatter");
+        assert_eq!(meta_normal.fact_type, "reference");
+        assert!(!meta_normal.protected);
+        assert_eq!(meta_normal.status, "active");
+    }
+
+    #[test]
+    fn test_simple_hash_deterministic() {
+        let s1 = "Hello Bob Agent Evolution";
+        let h1 = simple_hash(s1);
+        let h2 = simple_hash(s1);
+        assert_eq!(h1, h2);
+        assert_eq!(h1.len(), 8);
+    }
+
+    #[test]
+    fn test_avoidance_rules_persistence_and_capacity() {
+        let temp_dir = std::env::temp_dir().join(format!("bob_test_evo_{}", super::super::now_ms()));
+        let _ = std::fs::create_dir_all(&temp_dir);
+
+        let mut rules = Vec::new();
+        for i in 0..25 {
+            rules.push(AvoidanceRule {
+                tool: if i % 2 == 0 { "bash".to_string() } else { "general".to_string() },
+                scenario: format!("场景测试_{}", i),
+                suggestion: format!("做法_{}", i),
+                avoidance: format!("失误_{}", i),
+                hit_count: i as u32,
+                status: if i == 5 { "validated".to_string() } else { "unverified".to_string() },
+                last_seen: "2026-10-08".to_string(),
+            });
+        }
+
+        save_avoidance_rules(&temp_dir, &rules).expect("save rules");
+        let loaded = load_avoidance_rules(&temp_dir);
+        assert_eq!(loaded.len(), 20, "Must be capped at top 20");
+        assert_eq!(loaded[0].status, "validated", "Validated status must have highest priority");
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_type_aware_memory_merging() {
+        let meta_user = MemoryMetadata {
+            fact_type: "user".to_string(),
+            title: "偏好暗色模式界面".to_string(),
+            status: "active".to_string(),
+            protected: false,
+            source_conv: "c-1".to_string(),
+            updated: "2026-10-08".to_string(),
+        };
+
+        let meta_project = MemoryMetadata {
+            fact_type: "project".to_string(),
+            title: "偏好暗色模式界面".to_string(),
+            status: "active".to_string(),
+            protected: false,
+            source_conv: "c-2".to_string(),
+            updated: "2026-10-08".to_string(),
+        };
+
+        // Even though titles are 100% identical, different types MUST NOT merge
+        assert_ne!(meta_user.fact_type, meta_project.fact_type);
+    }
 }

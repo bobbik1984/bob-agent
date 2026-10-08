@@ -12,6 +12,15 @@
 - [/] 手机解绑后移除撤销入口、对话标题居中与默认 Logo 品牌蓝：代码及自动化测试通过，待新候选包实机核对。
 - [ ] 按已确认的用户流程重新接入可信设备配对与手机→PC 只读委派；不整批拣选旧 A2/A3 提交。
 - [ ] 只读委派通过后，再接入受控修改、审批、停止与断线恢复，最后做完整双端真机验收。
+- [x] **自进化与做梦引擎 v2.0 闭环升级**：
+  - [x] **Step 1 (P0 稳定性与幂等性)**：引入防重入原子锁 (`ROUTINE_RUNNING`, `DREAM_RUNNING`)；Clerk 失败/超时时不丢失未分析错误；避坑指南独立解耦至 `memory/AVOIDANCE.md`（带上限 20 与去重合并，并无损迁移旧 `SOUL.md` 内容）；清理过时与合并旧记忆时级联执行 `DELETE FROM wiki_fts` 清除倒排索引；笔记语义消化安全连接、防重及唯一事件 ID。
+  - [x] **Step 2 (P1 记忆生命周期状态机)**：frontmatter 升级支持 `status: candidate | active | superseded | rejected`；反思/纠错特权保护（`type: feedback` 或 `protected: true` 永久免除 30 天清理）；同类感知 Bigram 相似度合并，杜绝异构知识误删。
+  - [x] **Step 3 (P1 遥测闭环与动态作用域)**：联动 `session_observations` 与 `execution_errors` 闭环计算工具故障率变化（标记 `validated` / `unverified` / `decayed`）；提供 `get_avoidance_rules_for_tool` 动态作用域并在 `llm.rs` 中自动注入系统提示词。
+  - [x] **Step 4 (P2 人在回路与全貌可视化)**：SOUL 精炼提案机制（生成 `SOUL_PROPOSAL.md`，提供 `system_get_soul_proposal` 与 `system_review_soul_proposal` 审阅命令）；`dream_report.json` 结构化持久化直接激活 Daily Brief 洞察卡片；自动化单元测试全绿（341 项 Rust + 72 项前端全部通过）。
+- [x] **跨端同步鉴权与模型注册表收口 (ERR-SYNC-05 & DeepSeek V4.1 Flash 修复)**：
+  - [x] **局域网同步鉴权闭环**：重构 `verify_rpc_request_auth` 为签名优先、滑动窗口 TTL（活跃期间不超期）与已配对受信设备新 Session 自动登记，彻底消除 `ERR-SYNC-05` 阻断拉取 PC 待办缺陷。
+  - [x] **心跳与状态日志语义校准**：`formatSyncLogDetail` 支持识别 `heartbeat` / `心跳`，准确呈现“连接事实已确认”，消除心跳被误当作“数据已在本机确认写入”的日志不对等现象。
+  - [x] **模型注册表升级与防降级防护**：`resources/model_providers.json` 正式收录 `deepseek-flash`（DeepSeek V4.1 Flash）并设为 default，升级 schema_version 为 3；`merge_synced_config` 增加防降级屏障，防止远端旧配置将 `deepseek-flash` 覆盖回 `deepseek-v4-flash`；343 项 Rust 测试与 72 项前端测试全绿。
 
 > 历史双线计划（2026-09-22）：[A 线独立开发步骤](docs/superpowers/plans/2026-09-22-track-a-security-and-client.md)。以下内容保留作旧线路参考，不作为当前重建分支的完成状态。
 

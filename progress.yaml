@@ -1,6 +1,6 @@
 project:
   name: bob-agent
-  version: 0.9.24
+  version: 0.9.27
   status: active
   tech:
   - Tauri
@@ -11,6 +11,24 @@ project:
   current_task: 'MOBILE-PC-REBUILD-S1 (0.9.24 双端候选代码与本地测试就绪；云端双构建和双端安装验收未完成)'
   development_plan: docs/superpowers/plans/2026-10-01-mobile-pc-startup-baseline-plan.md
 phases:
+- name: 自进化与做梦引擎闭环升级 v2.0 (Dream & Self-Evolution)
+  tasks:
+  - text: Step 1 (P0 稳定性与幂等性) 防重入原子锁、Clerk 容错保留、解耦 AVOIDANCE.md、FTS 级联清理与笔记消化防重
+    status: done
+  - text: Step 2 (P1 记忆生命周期状态机) Frontmatter 状态机、feedback 反思特权免删、同类感知 Bigram 相似度合并
+    status: done
+  - text: Step 3 (P1 遥测闭环与动态作用域) session_observations 故障率变化闭环判定、get_avoidance_rules_for_tool 作用域与 LLM 提示词注入
+    status: done
+  - text: Step 4 (P2 人在回路与全貌可视化) SOUL_PROPOSAL.md 精炼提案与审批命令、dream_report.json 日报持久化激活、全量单元测试全绿
+    status: done
+- name: 跨端同步鉴权与模型注册表收口 (ERR-SYNC-05 & DeepSeek V4.1 Flash)
+  tasks:
+  - text: 局域网同步鉴权闭环（滑动窗口 TTL、签名优先鉴权与受信对端新 Session 自动注册，消除 ERR-SYNC-05）
+    status: done
+  - text: 心跳与状态日志语义校准（心跳映射为连接事实确认，消除对端不对等认知）
+    status: done
+  - text: 模型注册表收录 deepseek-flash（DeepSeek V4.1 Flash）与同步防降级防护
+    status: done
 - name: 手机→PC 稳定重建（独立施工线，基于 v0.9.15）
   tasks:
   - text: S0 保留历史诊断分支、核验 v0.9.15 基线与已装 APK

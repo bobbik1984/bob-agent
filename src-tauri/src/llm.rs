@@ -157,18 +157,50 @@ fn merge_registry_with_defaults(existing: &mut Value, defaults: &Value) -> bool 
                     }
                 }
 
+                // 同步推荐默认模型标记
+                let def_default_mid = def_models
+                    .iter()
+                    .find(|m| m.get("default").and_then(|v| v.as_bool()) == Some(true))
+                    .and_then(|m| m.get("id").and_then(|v| v.as_str()));
+                if let Some(target_def_id) = def_default_mid {
+                    for m in ext_models.iter_mut() {
+                        let mid = m.get("id").and_then(|v| v.as_str()).unwrap_or("");
+                        let should_be_default = mid == target_def_id;
+                        let cur_default = m.get("default").and_then(|v| v.as_bool()).unwrap_or(false);
+                        if cur_default != should_be_default {
+                            if let Some(o) = m.as_object_mut() {
+                                if should_be_default {
+                                    o.insert("default".to_string(), json!(true));
+                                } else {
+                                    o.remove("default");
+                                }
+                                modified = true;
+                            }
+                        }
+                    }
+                }
+
                 // 可见性迁移：不在推荐列表中且没有 visible 字段的旧模型 -> hidden
                 let curated = default_model_ids.get(def_id);
                 for model in ext_models.iter_mut() {
-                    if model.get("visible").is_some() {
-                        continue;
-                    }
                     let mid = model
                         .get("id")
                         .and_then(|v| v.as_str())
                         .unwrap_or("")
                         .to_string();
                     let is_curated = curated.map_or(false, |ids| ids.contains(&mid));
+                    // 若新版本将其纳入推荐模型，强制确保其 visible: true
+                    if is_curated && model.get("visible").and_then(|v| v.as_bool()) == Some(false) {
+                        if let Some(obj) = model.as_object_mut() {
+                            obj.insert("visible".to_string(), json!(true));
+                            modified = true;
+                            log::info!("Un-hiding newly curated model '{}' in '{}'", mid, def_id);
+                        }
+                        continue;
+                    }
+                    if model.get("visible").is_some() {
+                        continue;
+                    }
                     if let Some(obj) = model.as_object_mut() {
                         obj.insert("visible".to_string(), json!(is_curated));
                         if !is_curated {
@@ -1174,6 +1206,17 @@ fn build_memory_summary() -> String {
         if let Ok(content) = std::fs::read_to_string(&soul_path) {
             lines.push("\n## 你的记忆系统 (Tier 1: 灵魂)".to_string());
             lines.push(content);
+        }
+    }
+
+    // 1.5. 注入系统级避坑经验 (AVOIDANCE.md)
+    let avoidance_path = memory_dir.join("AVOIDANCE.md");
+    if avoidance_path.exists() {
+        if let Ok(content) = std::fs::read_to_string(&avoidance_path) {
+            if !content.trim().is_empty() {
+                lines.push("\n## 🚫 执行避坑指南 (系统经验)".to_string());
+                lines.push(content);
+            }
         }
     }
 

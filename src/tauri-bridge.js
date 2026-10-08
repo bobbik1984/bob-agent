@@ -225,7 +225,9 @@ if (IS_TAURI) {
       case 'system_get_log_path': return '/mock/logs/bob.log';
       case 'system_health_check': return { ok: true, checks: [] };
       case 'system_validate_chat_ready': return { ready: true };
-      case 'system_get_evolution_stats': return { total_sessions: 5, total_tools: 12 };
+      case 'system_get_evolution_stats': return { total_sessions: 5, total_tools: 12, avoidance_rules_count: 3, has_soul_proposal: false };
+      case 'system_get_soul_proposal': return { has_proposal: false };
+      case 'system_review_soul_proposal': return args?.approved ? 'SOUL.md 已成功更新' : '提案已拒绝';
       case 'daily_brief_get': return mockDailyBrief(args?.dateContext?.localDate);
       case 'daily_brief_refresh': return mockDailyBrief(args?.dateContext?.localDate);
       case 'daily_brief_mark_seen': return true;
@@ -1003,6 +1005,8 @@ window.appAPI = {
 
   // ── 进化引擎 (Rust 原生) ───────────────────────────────
   getEvolutionStats: async () => invoke('system_get_evolution_stats'),
+  getSoulProposal: async () => invoke('system_get_soul_proposal'),
+  reviewSoulProposal: async (approved) => invoke('system_review_soul_proposal', { approved }),
 
   // ── 网页抓取 (Rust 原生 T-602) ─────────────────────────
   fetchUrl: async (url) => invoke('system_fetch_url', { url }),

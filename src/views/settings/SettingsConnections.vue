@@ -1573,7 +1573,7 @@ const formatCaptureActivity = (event) => {
 const formatSyncLogDetail = (log) => {
   if (log.detail) return log.detail;
   if (log.error_code) return log.error_code;
-  if (log.summary?.includes('配对') || log.summary?.includes('连接') || log.summary?.toLowerCase().includes('pair') || log.summary?.toLowerCase().includes('connect')) return t('settings.activity_confirmed');
+  if (log.summary?.includes('配对') || log.summary?.includes('连接') || log.summary?.includes('心跳') || log.summary?.toLowerCase().includes('pair') || log.summary?.toLowerCase().includes('connect') || log.summary?.toLowerCase().includes('heartbeat')) return t('settings.activity_confirmed');
   if (log.status === 'success') return t('settings.activity_written');
   if (log.status === 'running') return t('settings.activity_running');
   return t('settings.activity_no_write');

@@ -4273,6 +4273,29 @@ pub mod tests {
         assert_eq!(merged.get("model").and_then(|v| v.as_str()), Some("qwen-max"));
     }
 
+    #[test]
+    pub fn test_sec03_merge_synced_config_protects_deepseek_flash_from_downgrade() {
+        let local_cfg = serde_json::json!({
+            "model": "deepseek-flash",
+            "clerkModel": "deepseek-flash",
+            "theme": "dark"
+        });
+
+        let remote_cfg = serde_json::json!({
+            "model": "deepseek-v4-flash",
+            "clerkModel": "deepseek-v4-flash",
+            "theme": "light"
+        });
+
+        let merged = crate::sync_engine::merge_synced_config(&local_cfg, &remote_cfg);
+
+        // 防降级保护：local 的 deepseek-flash 绝不被 remote 的 deepseek-v4-flash 降级覆盖
+        assert_eq!(merged.get("model").and_then(|v| v.as_str()), Some("deepseek-flash"));
+        assert_eq!(merged.get("clerkModel").and_then(|v| v.as_str()), Some("deepseek-flash"));
+        // 其它允许项正常漫游
+        assert_eq!(merged.get("theme").and_then(|v| v.as_str()), Some("light"));
+    }
+
     // --------------------------------------------------------------------------
     // 18. SEC-03 原子 Push 队列拒绝执行远程 set_api_key 与敏感 set_config (Fail-Closed)
     // --------------------------------------------------------------------------

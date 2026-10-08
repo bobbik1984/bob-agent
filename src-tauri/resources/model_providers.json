@@ -1,6 +1,6 @@
 {
-  "$schema_version": 2,
-  "last_updated": "2026-06-08",
+  "$schema_version": 3,
+  "last_updated": "2026-10-08",
   "providers": [
     {
       "id": "deepseek",
@@ -9,10 +9,46 @@
       "supports_model_list": true,
       "models": [
         {
+          "id": "deepseek-flash",
+          "name": "DeepSeek V4.1 Flash",
+          "vision": true,
+          "default": true,
+          "pricing": {
+            "input": 1.0,
+            "output": 2.0
+          }
+        },
+        {
+          "id": "deepseek-v4.1-flash",
+          "name": "DeepSeek V4.1 Flash (4.1-flash)",
+          "vision": true,
+          "pricing": {
+            "input": 1.0,
+            "output": 2.0
+          }
+        },
+        {
+          "id": "deepseek-chat",
+          "name": "DeepSeek Chat",
+          "vision": false,
+          "pricing": {
+            "input": 2.0,
+            "output": 8.0
+          }
+        },
+        {
+          "id": "deepseek-reasoner",
+          "name": "DeepSeek Reasoner (R1)",
+          "vision": false,
+          "pricing": {
+            "input": 4.0,
+            "output": 16.0
+          }
+        },
+        {
           "id": "deepseek-v4-flash",
           "name": "DeepSeek V4 Flash",
           "vision": true,
-          "default": true,
           "pricing": {
             "input": 1.0,
             "output": 2.0

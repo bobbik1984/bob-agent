@@ -1269,10 +1269,51 @@ pub fn verify_rpc_request_auth(
         return Err("RPC 请求载荷哈希不匹配 (内容可能被篡改)".to_string());
     }
 
-    // 5. 事务检查：幂等性状态机、设备状态、会话有效性与防重放
+    // 5. 事务检查：设备可信状态、密码学验签、防重放、幂等性与会话生命周期
     let tx = conn.transaction().map_err(|e| format!("开启鉴权校验事务失败: {}", e))?;
 
-    // A. 幂等性检查与冲突检测
+    // A. 设备信任状态检查 (SEC-01: 严禁 legacy_unverified 或 revoked)
+    let dev_opt: Option<(String, String, Option<i64>)> = tx.query_row(
+        "SELECT public_key, status, revoked_at FROM trusted_devices WHERE device_id = ?",
+        [&auth.subject_device_id],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+    ).optional().map_err(|e| format!("查询可信设备失败: {}", e))?;
+
+    let (public_key, status, revoked_at) = match dev_opt {
+        Some(d) => d,
+        None => return Err(format!("未识别的未配对设备: {}", auth.subject_device_id)),
+    };
+
+    if status == "revoked" || revoked_at.is_some() {
+        return Err(format!("设备已被撤销，阻断 RPC 请求: {}", auth.subject_device_id));
+    }
+    if status != "trusted" {
+        return Err(format!("设备未通过持钥配对验证 (状态: {}): {}", status, auth.subject_device_id));
+    }
+
+    // B. 密码学签名验证 (确保请求 100% 由持有对应公钥的受信任设备私钥签署)
+    let canonical = canonical_rpc_bytes(
+        &auth.protocol_version,
+        &auth.session_id,
+        &auth.request_id,
+        &auth.subject_device_id,
+        &auth.target_device_id,
+        &auth.action,
+        &auth.payload_hash,
+        &auth.nonce,
+        auth.timestamp,
+    );
+    verify_signature(&public_key, &canonical, &auth.signature)?;
+
+    // C. 防重放 nonce 检查与记录
+    let nonce_inserted = tx.execute(
+        "INSERT INTO rpc_anti_replay (subject_device_id, nonce, timestamp) VALUES (?, ?, ?)",
+        params![auth.subject_device_id, auth.nonce, auth.timestamp],
+    );
+
+    let mut is_retry_takeover = false;
+
+    // D. 幂等性检查与冲突检测
     let cached_row_opt: Option<(String, String, String, String, String, Option<String>, i64, i64, String)> = tx.query_row(
         "SELECT subject_device_id, target_device_id, action, payload_hash, status, response_json, updated_at, lease_generation, execution_token
          FROM rpc_idempotency_cache WHERE session_id = ? AND request_id = ?",
@@ -1282,7 +1323,6 @@ pub fn verify_rpc_request_auth(
 
     let mut current_token = String::new();
     let mut current_gen = 1i64;
-    let mut is_retry_takeover = false;
 
     if let Some((cached_subject, cached_target, cached_action, cached_payload_hash, cached_status, cached_response_opt, cached_updated_at, cached_gen, _cached_token)) = cached_row_opt {
         // 强校验冲突：若相同的 (session_id, request_id) 用于不同的 action、payload_hash、subject 或 target
@@ -1299,25 +1339,6 @@ pub fn verify_rpc_request_auth(
 
         match cached_status.as_str() {
             "completed" => {
-                // 验证签名正确后才返回缓存
-                let dev_pk: String = tx.query_row(
-                    "SELECT public_key FROM trusted_devices WHERE device_id = ? AND status = 'trusted'",
-                    [&auth.subject_device_id],
-                    |row| row.get(0),
-                ).map_err(|_| "幂等重试设备已非可信状态".to_string())?;
-
-                let canonical = canonical_rpc_bytes(
-                    &auth.protocol_version,
-                    &auth.session_id,
-                    &auth.request_id,
-                    &auth.subject_device_id,
-                    &auth.target_device_id,
-                    &auth.action,
-                    &auth.payload_hash,
-                    &auth.nonce,
-                    auth.timestamp,
-                );
-                verify_signature(&dev_pk, &canonical, &auth.signature)?;
                 let cached_response = cached_response_opt.unwrap_or_else(|| "{}".to_string());
                 return Ok(AuthVerificationOutcome::IdempotentCached { cached_response });
             }
@@ -1393,73 +1414,7 @@ pub fn verify_rpc_request_auth(
         current_gen = new_gen;
     }
 
-    // B. 设备信任状态检查 (严禁 legacy_unverified 或 revoked)
-    let dev_opt: Option<(String, String, Option<i64>)> = tx.query_row(
-        "SELECT public_key, status, revoked_at FROM trusted_devices WHERE device_id = ?",
-        [&auth.subject_device_id],
-        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-    ).optional().map_err(|e| format!("查询可信设备失败: {}", e))?;
-
-    let (public_key, status, revoked_at) = match dev_opt {
-        Some(d) => d,
-        None => return Err(format!("未识别的未配对设备: {}", auth.subject_device_id)),
-    };
-
-    if status == "revoked" || revoked_at.is_some() {
-        return Err(format!("设备已被撤销，阻断 RPC 请求: {}", auth.subject_device_id));
-    }
-    if status != "trusted" {
-        return Err(format!("设备未通过持钥配对验证 (状态: {}): {}", status, auth.subject_device_id));
-    }
-
-    // C. 会话状态检查
-    let sess_opt: Option<(String, String, i64, i64)> = tx.query_row(
-        "SELECT subject_device_id, issuer_device_id, expires_at, is_active
-         FROM authenticated_sessions WHERE session_id = ?",
-        [&auth.session_id],
-        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
-    ).optional().map_err(|e| format!("查询会话失败: {}", e))?;
-
-    let (sess_subject, sess_issuer, expires_at, is_active) = match sess_opt {
-        Some(s) => s,
-        None => return Err(format!("会话不存在或已失效: {}", auth.session_id)),
-    };
-
-    if is_active == 0 {
-        return Err(format!("会话已失活或被撤销: {}", auth.session_id));
-    }
-    if now_ms > expires_at {
-        return Err(format!("会话已过期: 过期时间 {}, 当前时间 {}", expires_at, now_ms));
-    }
-    let participants_match = (sess_subject == auth.subject_device_id && sess_issuer == auth.target_device_id)
-        || (sess_issuer == auth.subject_device_id && sess_subject == auth.target_device_id);
-    if !participants_match {
-        return Err(format!(
-            "会话参与设备不匹配: 会话绑定 ({} <-> {}), 请求 ({} -> {})",
-            sess_subject, sess_issuer, auth.subject_device_id, auth.target_device_id
-        ));
-    }
-
-    // D. 签名验证
-    let canonical = canonical_rpc_bytes(
-        &auth.protocol_version,
-        &auth.session_id,
-        &auth.request_id,
-        &auth.subject_device_id,
-        &auth.target_device_id,
-        &auth.action,
-        &auth.payload_hash,
-        &auth.nonce,
-        auth.timestamp,
-    );
-    verify_signature(&public_key, &canonical, &auth.signature)?;
-
-    // E. 防重放 nonce 检查与记录
-    let nonce_inserted = tx.execute(
-        "INSERT INTO rpc_anti_replay (subject_device_id, nonce, timestamp) VALUES (?, ?, ?)",
-        params![auth.subject_device_id, auth.nonce, auth.timestamp],
-    );
-
+    // 校验防重放结果（若不是合法幂等重试且 nonce 发生主键冲突，判定为重放攻击）
     if let Err(rusqlite::Error::SqliteFailure(err, _)) = nonce_inserted {
         if err.code == rusqlite::ErrorCode::ConstraintViolation {
             if !is_retry_takeover {
@@ -1472,11 +1427,53 @@ pub fn verify_rpc_request_auth(
         nonce_inserted.map_err(|e| format!("记录防重放状态失败: {}", e))?;
     }
 
-    // F. 更新会话活跃时间
-    let _ = tx.execute(
-        "UPDATE authenticated_sessions SET last_activity_at = ? WHERE session_id = ?",
-        params![now_ms, auth.session_id],
-    );
+    // E. 会话状态检查与滑动续期 / 自动建立
+    let sess_opt: Option<(String, String, i64, i64)> = tx.query_row(
+        "SELECT subject_device_id, issuer_device_id, expires_at, is_active
+         FROM authenticated_sessions WHERE session_id = ?",
+        [&auth.session_id],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+    ).optional().map_err(|e| format!("查询会话失败: {}", e))?;
+
+    match sess_opt {
+        Some((sess_subject, sess_issuer, _expires_at, is_active)) => {
+            if is_active == 0 {
+                return Err(format!("会话已失活或被撤销: {}", auth.session_id));
+            }
+            let participants_match = (sess_subject == auth.subject_device_id && sess_issuer == auth.target_device_id)
+                || (sess_issuer == auth.subject_device_id && sess_subject == auth.target_device_id);
+            if !participants_match {
+                return Err(format!(
+                    "会话参与设备不匹配: 会话绑定 ({} <-> {}), 请求 ({} -> {})",
+                    sess_subject, sess_issuer, auth.subject_device_id, auth.target_device_id
+                ));
+            }
+            // 滑动续期：每次受信任调用成功，自动延长有效会话窗口
+            let new_expires = now_ms + DEFAULT_SESSION_TTL_MS;
+            tx.execute(
+                "UPDATE authenticated_sessions SET last_activity_at = ?, expires_at = ? WHERE session_id = ?",
+                params![now_ms, new_expires, auth.session_id],
+            ).map_err(|e| format!("更新会话活跃与滑动过期失败: {}", e))?;
+        }
+        None => {
+            // 对端为已配对可信设备（status == 'trusted'）且私钥签名完好，当对端由于会话到期或重启自愈建立新会话时，自动在本机同步注册该会话
+            let expires_at = now_ms + DEFAULT_SESSION_TTL_MS;
+            tx.execute(
+                "INSERT INTO authenticated_sessions (
+                    session_id, subject_device_id, issuer_device_id,
+                    created_at, expires_at, last_activity_at, is_active
+                ) VALUES (?, ?, ?, ?, ?, ?, 1)",
+                params![
+                    auth.session_id,
+                    auth.subject_device_id,
+                    auth.target_device_id,
+                    now_ms,
+                    expires_at,
+                    now_ms,
+                ],
+            ).map_err(|e| format!("自动建立接入会话失败: {}", e))?;
+        }
+    }
 
     tx.commit().map_err(|e| format!("提交鉴权状态失败: {}", e))?;
 
@@ -6986,5 +6983,155 @@ pub mod tests {
         let _ = std::fs::remove_dir_all(&temp_dir);
         baseline_real.assert_unchanged();
     }
-}
 
+    #[test]
+    fn test_sec01_trusted_peer_new_session_auto_registration_and_sliding_expiry() {
+        let mut conn = setup_test_db();
+        let now = 1791460000000i64;
+
+        // 1. 建立已配对可信移动端设备 (status = 'trusted')
+        let (sk_mobile, pk_mobile) = generate_test_keypair();
+        let (_sk_pc, pk_pc) = generate_test_keypair();
+
+        conn.execute(
+            "INSERT INTO trusted_devices (
+                device_id, public_key, device_name, platform, paired_at,
+                last_authenticated_at, status, revoked_at, revocation_reason
+            ) VALUES (?1, ?2, 'Test Mobile', 'android', ?3, ?3, 'trusted', NULL, NULL)",
+            params![pk_mobile, pk_mobile, now],
+        ).unwrap();
+
+        // 2. 模拟移动端在 24 小时会话到期或自愈建立新会话：生成接收端数据库从未见过的 session_id
+        let new_sess_id = format!("sess-{}", uuid::Uuid::new_v4());
+        let req_id1 = format!("req-{}", uuid::Uuid::new_v4());
+        let nonce1 = format!("nonce-{}", uuid::Uuid::new_v4());
+        let action = "pull";
+        let payload = b"";
+        let payload_hash = compute_sha512(payload);
+
+        let canonical1 = canonical_rpc_bytes(
+            SEC01_PROTOCOL_VERSION,
+            &new_sess_id,
+            &req_id1,
+            &pk_mobile,
+            &pk_pc,
+            action,
+            &payload_hash,
+            &nonce1,
+            now,
+        );
+        let sig1 = BASE64.encode(sk_mobile.sign(&canonical1).to_bytes());
+
+        let env1 = RpcAuthEnvelope {
+            protocol_version: SEC01_PROTOCOL_VERSION.to_string(),
+            session_id: new_sess_id.clone(),
+            request_id: req_id1,
+            subject_device_id: pk_mobile.clone(),
+            target_device_id: pk_pc.clone(),
+            action: action.to_string(),
+            payload_hash: payload_hash.clone(),
+            signature: sig1,
+            nonce: nonce1,
+            timestamp: now,
+        };
+
+        // 3. 验证端在会话未预先存在时，必须基于可信持钥签名自动注册该会话并放行 (杜绝 ERR-SYNC-05 阻断)
+        let outcome1 = verify_rpc_request_auth(&mut conn, &env1, payload, &pk_pc, now)
+            .expect("持有效签名的可信设备发起的新会话必须成功建立并验签通过");
+        match outcome1 {
+            AuthVerificationOutcome::Authorized { session_id, .. } => {
+                assert_eq!(session_id, new_sess_id);
+            }
+            _ => panic!("Expected Authorized outcome"),
+        }
+
+        // 检查数据库中已原子建立该活跃会话
+        let (db_subj, db_iss, db_exp, db_act): (String, String, i64, i64) = conn.query_row(
+            "SELECT subject_device_id, issuer_device_id, expires_at, is_active FROM authenticated_sessions WHERE session_id = ?",
+            [&new_sess_id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+        ).expect("authenticated_sessions 必须已持久化新会话");
+        assert_eq!(db_subj, pk_mobile);
+        assert_eq!(db_iss, pk_pc);
+        assert_eq!(db_act, 1);
+        assert_eq!(db_exp, now + DEFAULT_SESSION_TTL_MS);
+
+        // 4. 模拟 1 小时后再次调用：测试滑动过期窗口 (Sliding Window Expiration)
+        let now_plus_1h = now + 3600_000;
+        let req_id2 = format!("req-{}", uuid::Uuid::new_v4());
+        let nonce2 = format!("nonce-{}", uuid::Uuid::new_v4());
+        let canonical2 = canonical_rpc_bytes(
+            SEC01_PROTOCOL_VERSION,
+            &new_sess_id,
+            &req_id2,
+            &pk_mobile,
+            &pk_pc,
+            action,
+            &payload_hash,
+            &nonce2,
+            now_plus_1h,
+        );
+        let sig2 = BASE64.encode(sk_mobile.sign(&canonical2).to_bytes());
+
+        let env2 = RpcAuthEnvelope {
+            protocol_version: SEC01_PROTOCOL_VERSION.to_string(),
+            session_id: new_sess_id.clone(),
+            request_id: req_id2,
+            subject_device_id: pk_mobile.clone(),
+            target_device_id: pk_pc.clone(),
+            action: action.to_string(),
+            payload_hash,
+            signature: sig2,
+            nonce: nonce2,
+            timestamp: now_plus_1h,
+        };
+
+        let outcome2 = verify_rpc_request_auth(&mut conn, &env2, payload, &pk_pc, now_plus_1h)
+            .expect("已有会话的后续调用必须正常通过");
+        match outcome2 {
+            AuthVerificationOutcome::Authorized { session_id, .. } => {
+                assert_eq!(session_id, new_sess_id);
+            }
+            _ => panic!("Expected Authorized outcome"),
+        }
+
+        // 检查滑动窗口是否已被延展到 now_plus_1h + DEFAULT_SESSION_TTL_MS
+        let db_exp_after: i64 = conn.query_row(
+            "SELECT expires_at FROM authenticated_sessions WHERE session_id = ?",
+            [&new_sess_id],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(db_exp_after, now_plus_1h + DEFAULT_SESSION_TTL_MS, "活跃会话必须按滑动窗口自动续期");
+
+        // 5. 负向测试：未配对设备哪怕自造新会话，也必须被拦截
+        let (sk_untrusted, pk_untrusted) = generate_test_keypair();
+        let unk_sess = format!("sess-{}", uuid::Uuid::new_v4());
+        let unk_nonce = format!("nonce-{}", uuid::Uuid::new_v4());
+        let can_untrusted = canonical_rpc_bytes(
+            SEC01_PROTOCOL_VERSION,
+            &unk_sess,
+            "req-untrusted",
+            &pk_untrusted,
+            &pk_pc,
+            action,
+            &compute_sha512(b""),
+            &unk_nonce,
+            now,
+        );
+        let sig_untrusted = BASE64.encode(sk_untrusted.sign(&can_untrusted).to_bytes());
+        let env_untrusted = RpcAuthEnvelope {
+            protocol_version: SEC01_PROTOCOL_VERSION.to_string(),
+            session_id: unk_sess,
+            request_id: "req-untrusted".to_string(),
+            subject_device_id: pk_untrusted,
+            target_device_id: pk_pc.clone(),
+            action: action.to_string(),
+            payload_hash: compute_sha512(b""),
+            signature: sig_untrusted,
+            nonce: unk_nonce,
+            timestamp: now,
+        };
+        let err_untrusted = verify_rpc_request_auth(&mut conn, &env_untrusted, b"", &pk_pc, now).unwrap_err();
+        assert!(err_untrusted.contains("未识别的未配对设备"), "未配对设备必须被拒绝");
+    }
+}

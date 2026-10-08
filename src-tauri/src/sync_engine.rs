@@ -3649,6 +3649,14 @@ pub fn merge_synced_config(local: &serde_json::Value, remote: &serde_json::Value
             if val.is_string() || val.is_boolean() || val.is_number() {
                 if let Some(s) = val.as_str() {
                     if !s.trim().is_empty() {
+                        // 防降级保护：若本地已选用最新的 deepseek-flash，严禁被远端残留的旧版 deepseek-v4-flash 覆盖
+                        if (*key == "model" || *key == "clerkModel" || *key == "visionModel")
+                            && s == "deepseek-v4-flash"
+                            && local_obj.get(*key).and_then(|v| v.as_str()) == Some("deepseek-flash")
+                        {
+                            log::info!("[merge_synced_config] Retaining local modern model 'deepseek-flash' over remote legacy '{}'", s);
+                            continue;
+                        }
                         local_obj.insert((*key).to_string(), val.clone());
                     }
                 } else {
