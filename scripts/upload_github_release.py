@@ -124,6 +124,9 @@ def main():
     existing_assets = {a["name"]: a["id"] for a in release_data.get("assets", [])}
 
     files_to_upload = [
+        os.path.join(DIST_DIR, f"bob-{version}-installer.exe"),
+        os.path.join(DIST_DIR, f"bob-{version}-portable.zip"),
+        os.path.join(DIST_DIR, f"bob-{version}-signed.apk"),
         os.path.join(DIST_DIR, "bob-installer.exe"),
         os.path.join(DIST_DIR, "bob-agent-portable.zip"),
         os.path.join(DIST_DIR, "bob-mobile-latest.apk"),
