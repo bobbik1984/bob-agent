@@ -75,8 +75,8 @@ def get_optional(url, token):
         raise
 
 
-def find_successful_run(workflow, sha, token, deadline):
-    encoded = urllib.parse.urlencode({"branch": "mobile-pc-rebuild", "event": "push", "per_page": 50})
+def find_successful_run(workflow, sha, token, deadline, branch="main"):
+    encoded = urllib.parse.urlencode({"branch": branch, "event": "push", "per_page": 50})
     url = f"{API}/actions/workflows/{workflow}/runs?{encoded}"
     while time.monotonic() < deadline:
         runs = request(url, token).get("workflow_runs", [])
@@ -192,6 +192,7 @@ def upload_asset(release, path, token):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--sha", required=True, help="Exact source commit from both CI runs")
+    parser.add_argument("--branch", default="main", help="Branch owning the exact push runs")
     parser.add_argument("--timeout-minutes", type=int, default=60)
     args = parser.parse_args()
     sha = args.sha.lower()
@@ -205,7 +206,7 @@ def main():
     if get_optional(f"{API}/releases/tags/{urllib.parse.quote(tag)}", token):
         raise RuntimeError(f"Release already exists; refusing to replace {tag}")
     deadline = time.monotonic() + args.timeout_minutes * 60
-    runs = {workflow: find_successful_run(workflow, sha, token, deadline) for workflow in EXPECTED}
+    runs = {workflow: find_successful_run(workflow, sha, token, deadline, args.branch) for workflow in EXPECTED}
     destination = ROOT / "dist-release" / f"candidate-v{version}-{sha[:12]}"
     if destination.exists():
         raise RuntimeError(f"Refusing to overwrite existing candidate directory: {destination}")

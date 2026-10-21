@@ -1,4 +1,35 @@
 {
+  "remote_agent": {
+    "title": "远程 Agent · 接入预览",
+    "scope": "首期支持 DSH 项目、会话与近期文字历史浏览，手动刷新。发送指令、审批、附件和产物接入尚未开放；不会替换现有工作记录。",
+    "endpoint": "DSH 地址（HTTPS，或本机隧道地址）",
+    "token": "连接令牌（也可在上方粘贴 DSH 带令牌链接）",
+    "privacy": "仅连接你信任的个人执行端。DSH 令牌可能具有完整权限；本面板只提供浏览操作。令牌与 Cookie 不写入配置或同步；关闭面板会断开本次连接，不代表撤销远端令牌。",
+    "connect": "连接 DSH", "connecting": "正在连接…",
+    "refresh": "刷新列表", "disconnect": "断开本次连接",
+    "sessions": "项目与会话", "project": "远程项目", "all_sessions": "全部会话",
+    "running": "执行中", "empty": "没有可显示的会话", "loading": "正在读取历史…",
+    "choose": "展开项目与会话，选择已有对话。",
+    "recent_only": "仅展示近期文字记录，较早历史尚未加载。",
+    "role_user": "你", "role_assistant": "Agent",
+    "no_text": "本页没有可展示的文字消息。",
+    "omitted": "有 {count} 条非文字内容或过程记录未在此预览中展示；请在原端查看附件与完整记录。",
+    "refresh_history": "刷新当前会话",
+    "errors": {
+      "REMOTE_NATIVE_REQUIRED": "请在 Bob 桌面端或 Android 应用中连接。网页预览不访问执行端。",
+      "REMOTE_INVALID_URL": "地址无效。请使用 HTTPS 或本机回环 HTTP 地址，不包含账号密码或锚点。",
+      "REMOTE_AUTH": "认证失败或已失效，请检查令牌并重新连接。",
+      "REMOTE_NETWORK": "网络连接失败，请检查地址、隧道及服务是否可用。",
+      "REMOTE_TIMEOUT": "连接响应超时，未确认成功。请重新连接。",
+      "REMOTE_DISCONNECTED": "连接已经断开。请断开本次连接后重新连接，不会自动重发指令。",
+      "REMOTE_PROTOCOL": "执行端返回的协议不匹配或不完整。当前适配目标为 DSH 0.2.1-rc.2。",
+      "REMOTE_REDIRECT": "执行端要求跳转到未授权地址，连接已阻止。",
+      "REMOTE_UNSUPPORTED_ADAPTER": "此类执行端尚未适配。",
+      "REMOTE_UNSUPPORTED_CAPABILITY": "当前适配器未开放这项能力，不会尝试替代调用。",
+      "REMOTE_CONNECTION_LIMIT": "连接数量已达上限，请先关闭其他连接。",
+      "REMOTE_UNKNOWN": "接入未完成，请检查执行端。敏感错误详情不会显示或留存。"
+    }
+  },
   "app": {
     "name": "bob-agent",
     "just_now": "刚刚",

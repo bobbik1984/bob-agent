@@ -771,6 +771,11 @@ export function startPostMountBridgeListeners() {
 const isMobileDevice = typeof navigator !== 'undefined' && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 
 window.appAPI = {
+  // Remote harness is opt-in and native-only; browser previews never fake an authenticated host.
+  remoteAgentConnect: (input) => IS_TAURI ? invoke('remote_agent_connect', { input }) : Promise.reject('REMOTE_NATIVE_REQUIRED'),
+  remoteAgentCatalog: (connectionId) => IS_TAURI ? invoke('remote_agent_catalog', { connectionId }) : Promise.reject('REMOTE_NATIVE_REQUIRED'),
+  remoteAgentHistory: (connectionId, sessionId) => IS_TAURI ? invoke('remote_agent_history', { connectionId, sessionId }) : Promise.reject('REMOTE_NATIVE_REQUIRED'),
+  remoteAgentDisconnect: (connectionId) => IS_TAURI ? invoke('remote_agent_disconnect', { connectionId }) : Promise.resolve(),
   // ── 窗口与事件控制 (移动端安全空操作) ──────────────────
   minimizeWindow: () => isMobileDevice ? Promise.resolve() : getCurrentWindow().minimize(),
   toggleMaximize: () => isMobileDevice ? Promise.resolve() : getCurrentWindow().toggleMaximize(),

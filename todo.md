@@ -1,5 +1,15 @@
 # Bob 当前开发清单
 
+## 当前增量：Work 通用远程 Agent 接入
+
+- [/] RH-00/RH-01：通用原生连接与 DSH 浏览子集已本地验证；项目/会话/近期文字记录预览可用代码已落地，X1T 真实认证与重连未验收，不标节点整体完成。规格：[远程 Harness 接入](docs/REMOTE_HARNESS_INTEGRATION.md)；证据：[本地浏览子集](docs/evidence/remote-agent/RH-01-native-read-preview.md)。
+- [ ] RH-01 目标验证：安排在本地 RH-02 闭环之后，届时经私密输入核对实际端点版本、会话与断线；不以 X1T 凭据为本地开发前置。
+- [/] 0.9.28：用户已授权冻结当前浏览子集，准备 GitHub 同源双端构建；CI、安装验收与后续 RH-02 代码分别记录。
+- [ ] RH-02：先完成真实事件 ready、问题/审批与任务状态，再开放既有会话发送与取消；当前发送能力明确关闭。
+- [ ] RH-03/RH-04：真实 Blender 产物、Work 引用与同源双端候选安装验收，构建/发布另行授权。
+
+本增量不改写下方历史手机→PC 线路的验收结论，不修改 Online Agent/X1T 线上服务，不解除 A4/A5 门禁。
+
 > 当前工作树是从 v0.9.15 建立的 `mobile-pc-rebuild` 独立施工线，不包含旧 A1/A2/A3 后续版本的全部代码。下面原双线勾选和测试数是历史线路记录，**不能当作本施工线已具备或已验收的能力**；当前状态以 [稳定重建计划](docs/superpowers/plans/2026-10-01-mobile-pc-startup-baseline-plan.md)、[真机启动证据](docs/evidence/track-a/S1-inplace-upgrade-preflight.md) 与本分支 `progress.yaml` 为准。
 
 ## 当前施工：手机→PC 稳定重建

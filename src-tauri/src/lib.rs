@@ -40,6 +40,7 @@ mod knowledge_schema;
 mod knowledge_committer;
 mod knowledge_audit;
 mod work_core;
+mod remote_agent;
 mod goal_runtime;
 mod daily_brief;
 mod capability;
@@ -1579,6 +1580,10 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            remote_agent::remote_agent_connect,
+            remote_agent::remote_agent_catalog,
+            remote_agent::remote_agent_history,
+            remote_agent::remote_agent_disconnect,
             // 配置
             system_is_setup_complete,
             config_get,

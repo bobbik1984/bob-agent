@@ -82,6 +82,11 @@ relay/
 test_ping/
 tests/
 !src-tauri/tests/
+!/tests/
+/tests/*
+!/tests/fixtures/
+/tests/fixtures/*
+!/tests/fixtures/remote-agent-preview.html
 design_assets/
 web-drop/
 *.pdb
@@ -93,6 +98,7 @@ db_output.txt
 implementation_plan.md
 # Removed from tracking to shrink repo size
 /docs/*
+!/docs/REMOTE_HARNESS_INTEGRATION.md
 !/docs/evidence/
 !/docs/evidence/**
 !/docs/superpowers/

@@ -2,6 +2,11 @@
   <section class="work-view" :class="[`layout-${layoutMode}`, { 'is-unified': useUnifiedWorkView }]">
     <WorkViewTabs v-if="useUnifiedWorkView && isCompactNavigation" v-model="activeWorkPanel" />
 
+    <button class="mobile-pending-summary" type="button" :aria-expanded="remoteAgentsOpen" @click="remoteAgentsOpen = !remoteAgentsOpen">
+      <span>{{ t('remote_agent.title') }}</span><ChevronDown :size="16" :class="{ rotated: remoteAgentsOpen }" />
+    </button>
+    <RemoteAgentPanel v-if="remoteAgentsOpen" />
+
     <header v-if="!useUnifiedWorkView" class="work-header">
       <div>
         <p class="work-eyebrow">{{ t('work.eyebrow') }}</p>
@@ -462,7 +467,7 @@
 </template>
 
 <script setup>
-import { computed, inject, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
+import { computed, defineAsyncComponent, inject, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import {
   Check, CheckCircle2, ChevronDown, Circle, CircleAlert, FileDown,
@@ -471,6 +476,8 @@ import {
 } from 'lucide-vue-next';
 import WorkOverview from '../components/work/WorkOverview.vue';
 import WorkViewTabs from '../components/work/WorkViewTabs.vue';
+const RemoteAgentPanel = defineAsyncComponent(() => import('../components/work/RemoteAgentPanel.vue'));
+const remoteAgentsOpen = ref(false);
 import WorkProjectAccordion from '../components/work/WorkProjectAccordion.vue';
 import { getMobileProjectCounts, sortProjectsByUpdatedAt, toggleExpandedProjectIds } from '../work/work-view-state.js';
 import { DEFAULT_WORK_VIEW, isWorkView } from '../work/work-view-navigation.js';

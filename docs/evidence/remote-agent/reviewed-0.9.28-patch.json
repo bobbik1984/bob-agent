@@ -1,0 +1,8 @@
+{
+  "project_id": "bob_agent",
+  "basis": "User explicitly authorized freezing current browse subset as 0.9.28 and GitHub dual-platform builds before RH-02. Version contract verified 9028; frontend 79 passed. Build/install and DSH execution acceptance are not claimed.",
+  "files": [
+    {"path":"progress.yaml","sha256":"ad2e0c135f0d9d267dafa91ea5a9c511b805903dba4f654d7abb7d2f56e7ab4a","replacements":[{"old":"  version: 0.9.27","new":"  version: 0.9.28"}]},
+    {"path":"todo.md","sha256":"7cdbf44adf6732ebf2d824cc3eafed6562bb418a096044e863d521c5c39f1834","replacements":[{"old":"- [ ] RH-01 目标验证：通过私密输入获得凭据，核对 X1T 版本、项目、会话及断线现象；不把本机协议夹具当作现场测试。","new":"- [ ] RH-01 目标验证：安排在本地 RH-02 闭环之后，届时经私密输入核对实际端点版本、会话与断线；不以 X1T 凭据为本地开发前置。\n- [/] 0.9.28：用户已授权冻结当前浏览子集，准备 GitHub 同源双端构建；CI、安装验收与后续 RH-02 代码分别记录。"}]}
+  ]
+}

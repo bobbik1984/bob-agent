@@ -1,4 +1,35 @@
 {
+  "remote_agent": {
+    "title": "Remote agents · Connection preview",
+    "scope": "Browse DSH projects, sessions and recent text history with manual refresh. Sending, approvals, attachments and artifacts are not enabled yet. Existing Work records are unchanged.",
+    "endpoint": "DSH address (HTTPS, or a local tunnel)",
+    "token": "Connection token (or paste the DSH token URL above)",
+    "privacy": "Connect only to a trusted personal host. The DSH token may grant full authority; this panel exposes browsing only. Tokens and cookies are not saved or synced. Closing the panel disconnects this session; it does not revoke the remote token.",
+    "connect": "Connect DSH", "connecting": "Connecting…",
+    "refresh": "Refresh list", "disconnect": "Disconnect session",
+    "sessions": "Projects and sessions", "project": "Remote project", "all_sessions": "All sessions",
+    "running": "Running", "empty": "No sessions to display", "loading": "Loading history…",
+    "choose": "Expand projects and sessions to select an existing conversation.",
+    "recent_only": "Recent text records only. Earlier history has not been loaded.",
+    "role_user": "You", "role_assistant": "Agent",
+    "no_text": "No displayable text messages in this page.",
+    "omitted": "{count} non-text or process records are not shown in this preview. Use the original client for attachments and complete records.",
+    "refresh_history": "Refresh conversation",
+    "errors": {
+      "REMOTE_NATIVE_REQUIRED": "Connect using the Bob desktop or Android app. Browser previews do not access hosts.",
+      "REMOTE_INVALID_URL": "Invalid address. Use HTTPS or loopback HTTP, without user credentials or fragments.",
+      "REMOTE_AUTH": "Authentication failed or expired. Check the token and reconnect.",
+      "REMOTE_NETWORK": "Connection failed. Check the address, tunnel and service.",
+      "REMOTE_TIMEOUT": "The response timed out; success is unconfirmed. Reconnect to retry.",
+      "REMOTE_DISCONNECTED": "Disconnected. Close this connection and reconnect. Commands will not be resent automatically.",
+      "REMOTE_PROTOCOL": "The host returned an incompatible or incomplete protocol response. This adapter targets DSH 0.2.1-rc.2.",
+      "REMOTE_REDIRECT": "The host requested an unauthorized redirect. Connection blocked.",
+      "REMOTE_UNSUPPORTED_ADAPTER": "This agent type is not supported yet.",
+      "REMOTE_UNSUPPORTED_CAPABILITY": "This capability is not enabled by the adapter. No fallback call was attempted.",
+      "REMOTE_CONNECTION_LIMIT": "Connection limit reached. Close another connection first.",
+      "REMOTE_UNKNOWN": "Connection incomplete. Check the host. Sensitive error details are not displayed or retained."
+    }
+  },
   "app": {
     "name": "bob-agent",
     "just_now": "just now",
