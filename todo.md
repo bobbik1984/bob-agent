@@ -4,13 +4,15 @@
 
 - [/] RH-00/RH-01：通用原生连接与 DSH 浏览子集已本地验证；项目/会话/近期文字记录预览可用代码已落地，X1T 真实认证与重连未验收，不标节点整体完成。规格：[远程 Harness 接入](docs/REMOTE_HARNESS_INTEGRATION.md)；证据：[本地浏览子集](docs/evidence/remote-agent/RH-01-native-read-preview.md)。
 - [ ] RH-01 目标验证：安排在本地 RH-02 闭环之后，届时经私密输入核对实际端点版本、会话与断线；不以 X1T 凭据为本地开发前置。
-- [/] 0.9.28：用户已授权冻结当前浏览子集，准备 GitHub 同源双端构建；CI、安装验收与后续 RH-02 代码分别记录。
-- [ ] RH-02：先完成真实事件 ready、问题/审批与任务状态，再开放既有会话发送与取消；当前发送能力明确关闭。
+- [x] 0.9.28 候选 Release 发布：冻结提交 `1f23bb58f57bfb4a65082c51ad76db8f9e3541bb` 的双端 CI 成功；三个安装文件完整下载、SHA-256 与 GitHub Release 一致，候选预发布已公开。只完成发布，不代表双端安装或 X1T 验收。[发布证据](docs/evidence/remote-agent/release-0.9.28-candidate.md)。
+- [/] RH-02：后续工作树已实现 ready、既有会话发送、流式回复/折叠推理、一次性批准/拒绝、普通问题与真实取消；适配器 13 项、Rust 全量 356 passed/1 ignored、前端 84 项及手机/桌面 Vue 夹具通过。未知提交不自动重发，取消无确认不标停止；纳入 0.9.29 候选范围，未连接 X1T、未进行双端安装。证据：[RH-02 本地闭环](docs/evidence/remote-agent/RH-02-native-execution.md)。
+- [/] 0.9.29：主应用与安装器版本统一为 0.9.29 / Android 9029；356 项 Rust、84 项前端、5 项版本契约、2 项发布脚本测试及离线双尺寸预览通过。待 GitHub 同源双端 CI 核验。[候选证据](docs/evidence/remote-agent/release-0.9.29-candidate.md)。
+- [ ] RH-02 后续：计时/continued 问题、跨重启请求恢复、历史分页及自动重连；现有普通文字子集先独立候选与目标端点验证，不宣称完整节点完成。
 - [ ] RH-03/RH-04：真实 Blender 产物、Work 引用与同源双端候选安装验收，构建/发布另行授权。
 
 本增量不改写下方历史手机→PC 线路的验收结论，不修改 Online Agent/X1T 线上服务，不解除 A4/A5 门禁。
 
-> 当前工作树是从 v0.9.15 建立的 `mobile-pc-rebuild` 独立施工线，不包含旧 A1/A2/A3 后续版本的全部代码。下面原双线勾选和测试数是历史线路记录，**不能当作本施工线已具备或已验收的能力**；当前状态以 [稳定重建计划](docs/superpowers/plans/2026-10-01-mobile-pc-startup-baseline-plan.md)、[真机启动证据](docs/evidence/track-a/S1-inplace-upgrade-preflight.md) 与本分支 `progress.yaml` 为准。
+> 当前发布线为 `main`，源于从 v0.9.15 建立的 `mobile-pc-rebuild` 稳定重建线，不包含旧 A1/A2/A3 后续版本的全部代码。下面原双线勾选和测试数是历史线路记录，**不能当作本施工线已具备或已验收的能力**；当前状态以 [稳定重建计划](docs/superpowers/plans/2026-10-01-mobile-pc-startup-baseline-plan.md)、[真机启动证据](docs/evidence/track-a/S1-inplace-upgrade-preflight.md) 与本分支 `progress.yaml` 为准。
 
 ## 当前施工：手机→PC 稳定重建
 

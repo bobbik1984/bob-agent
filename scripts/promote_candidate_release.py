@@ -5,6 +5,7 @@ an existing tag, Release, artifact, or local candidate file.
 """
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
 import os
@@ -116,13 +117,44 @@ def download_artifact_zip(artifact, token, destination):
         download_url = error.headers.get("Location")
         if not download_url or not download_url.startswith("https://"):
             raise RuntimeError("Artifact redirect was missing or insecure")
-    with urllib.request.urlopen(
-        urllib.request.Request(download_url, headers={"User-Agent": "Bob-Candidate-Promoter"}),
-        timeout=120,
-    ) as response, destination.open("wb") as output:
-        shutil.copyfileobj(response, output)
     digest = artifact.get("digest", "")
-    if digest.startswith("sha256:") and file_sha256(destination) != digest.partition(":")[2]:
+    size = artifact["size_in_bytes"]
+    if not digest.startswith("sha256:") or size <= 0:
+        raise RuntimeError("Artifact must have a SHA-256 and positive size")
+    offset = destination.stat().st_size if destination.exists() else 0
+    if offset > size or destination.is_symlink():
+        raise RuntimeError("Existing Artifact download is not resumable")
+    ranges = [(start, min(start + 4 * 1024 * 1024, size) - 1)
+              for start in range(offset, size, 4 * 1024 * 1024)]
+
+    def fetch_range(bounds):
+        start, end = bounds
+        for attempt in range(3):
+            try:
+                req = urllib.request.Request(download_url, headers={
+                    "User-Agent": "Bob-Candidate-Promoter", "Accept-Encoding": "identity",
+                    "Range": f"bytes={start}-{end}",
+                })
+                with urllib.request.urlopen(req, timeout=60) as response:
+                    if response.status != 206 or response.headers.get("Content-Range") != f"bytes {start}-{end}/{size}":
+                        raise RuntimeError("Artifact range contract mismatch")
+                    body = response.read(end - start + 2)
+                    if len(body) != end - start + 1:
+                        raise RuntimeError("Artifact range truncated")
+                    return body
+            except (OSError, urllib.error.URLError):
+                if attempt == 2:
+                    raise RuntimeError(f"Artifact range {start}-{end} failed after retries") from None
+                time.sleep(attempt + 1)
+        raise RuntimeError("Artifact range unavailable")
+
+    # Append only validated ranges in order; a failed transfer keeps a contiguous prefix.
+    with ThreadPoolExecutor(max_workers=4) as pool, destination.open("ab") as output:
+        for chunk in pool.map(fetch_range, ranges):
+            output.write(chunk)
+            output.flush()
+            print(f"Downloaded {artifact['name']}: {output.tell()}/{size}", flush=True)
+    if file_sha256(destination) != digest.partition(":")[2]:
         raise RuntimeError(f"Artifact ZIP digest mismatch: {artifact['name']}")
     if not zipfile.is_zipfile(destination):
         raise RuntimeError(f"Artifact is not a ZIP: {artifact['name']}")
@@ -146,9 +178,13 @@ def extract_expected(zip_path, expected_names, destination):
                 raise RuntimeError(f"Expected exactly one {name} in {zip_path.name}, found {len(members)}")
             target = destination / name
             if target.exists():
-                raise RuntimeError(f"Refusing to overwrite existing candidate: {target}")
-            with archive.open(members[0]) as source, target.open("xb") as output:
-                shutil.copyfileobj(source, output)
+                with archive.open(members[0]) as source:
+                    expected_hash = hashlib.file_digest(source, "sha256").hexdigest()
+                if target.is_symlink() or file_sha256(target) != expected_hash:
+                    raise RuntimeError(f"Refusing to overwrite different candidate: {target.name}")
+            else:
+                with archive.open(members[0]) as source, target.open("xb") as output:
+                    shutil.copyfileobj(source, output)
             if target.stat().st_size < 1024 * 1024:
                 raise RuntimeError(f"Unexpectedly small candidate: {name}")
             with target.open("rb") as source:
@@ -160,8 +196,16 @@ def extract_expected(zip_path, expected_names, destination):
             print(f"Verified {name}: {target.stat().st_size} bytes, sha256={file_sha256(target)}", flush=True)
 
 
+def source_text(sha, path):
+    result = subprocess.run(
+        ["git", "-c", f"safe.directory={ROOT.as_posix()}", "show", f"{sha}:{path}"],
+        cwd=ROOT, capture_output=True, encoding="utf-8", check=True,
+    )
+    return result.stdout
+
+
 def release_notes(version, sha):
-    changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    changelog = source_text(sha, "CHANGELOG.md")
     heading = f"## [{version}]"
     if heading not in changelog:
         raise RuntimeError(f"Missing {heading} in CHANGELOG.md")
@@ -194,11 +238,12 @@ def main():
     parser.add_argument("--sha", required=True, help="Exact source commit from both CI runs")
     parser.add_argument("--branch", default="main", help="Branch owning the exact push runs")
     parser.add_argument("--timeout-minutes", type=int, default=60)
+    parser.add_argument("--resume-download", action="store_true", help="Resume verified Artifact ranges; never overwrite a Release or different file")
     args = parser.parse_args()
     sha = args.sha.lower()
     if len(sha) != 40 or any(char not in "0123456789abcdef" for char in sha):
         raise RuntimeError("--sha must be a full 40-character commit hash")
-    version = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))["version"]
+    version = json.loads(source_text(sha, "package.json"))["version"]
     tag = f"v{version}-rc.{sha[:7]}"
     token = credential()
     if get_optional(f"{API}/git/ref/tags/{urllib.parse.quote(tag)}", token):
@@ -208,9 +253,11 @@ def main():
     deadline = time.monotonic() + args.timeout_minutes * 60
     runs = {workflow: find_successful_run(workflow, sha, token, deadline, args.branch) for workflow in EXPECTED}
     destination = ROOT / "dist-release" / f"candidate-v{version}-{sha[:12]}"
-    if destination.exists():
+    if destination.exists() and not args.resume_download:
         raise RuntimeError(f"Refusing to overwrite existing candidate directory: {destination}")
-    destination.mkdir(parents=True)
+    if destination.is_symlink() or destination.is_junction():
+        raise RuntimeError("Candidate directory must not redirect to another location")
+    destination.mkdir(parents=True, exist_ok=args.resume_download)
     expected_files = []
     for workflow, suffixes in EXPECTED.items():
         run = runs[workflow]
@@ -225,12 +272,14 @@ def main():
         names = [f"bob-v{version}-{suffix}" for suffix in suffixes]
         extract_expected(archive, names, destination)
         expected_files.extend(destination / name for name in names)
-        archive.unlink()
+        # Keep the hash-verified archive so a later platform download can be resumed safely.
     checksum = destination / "SHA256SUMS.txt"
-    checksum.write_text(
-        "".join(f"{file_sha256(path)}  {path.name}\n" for path in expected_files),
-        encoding="utf-8",
-    )
+    checksum_text = "".join(f"{file_sha256(path)}  {path.name}\n" for path in expected_files)
+    if checksum.exists() and checksum.read_text(encoding="utf-8") != checksum_text:
+        raise RuntimeError("Refusing to overwrite differing checksums")
+    if not checksum.exists():
+        with checksum.open("x", encoding="utf-8") as output:
+            output.write(checksum_text)
     release = request(f"{API}/releases", token, "POST", {
         "tag_name": tag,
         "target_commitish": sha,

@@ -1583,6 +1583,9 @@ pub fn run() {
             remote_agent::remote_agent_connect,
             remote_agent::remote_agent_catalog,
             remote_agent::remote_agent_history,
+            remote_agent::remote_agent_watch,
+            remote_agent::remote_agent_live,
+            remote_agent::remote_agent_action,
             remote_agent::remote_agent_disconnect,
             // 配置
             system_is_setup_complete,

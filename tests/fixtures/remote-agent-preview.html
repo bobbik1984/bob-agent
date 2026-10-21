@@ -2,22 +2,9 @@
 <html lang="zh-CN">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Remote adapter UI fixture — simulated data</title></head>
 <body><div id="app"></div><script type="module">
-import { createApp, ref } from 'vue';
-import { createI18n } from 'vue-i18n';
-import RemoteAgentPanel from '../../src/components/work/RemoteAgentPanel.vue';
-import zh from '../../src/locales/zh-CN.json';
-import en from '../../src/locales/en-US.json';
-import '../../src/index.css';
-// Test-only fixture. Not a production bridge and not a connected remote host.
-window.__remoteFixtureCalls = [];
-window.appAPI = {
-  remoteAgentConnect: async () => ({ connectionId: 'fixture', adapter: 'dsh', endpoint: 'https://fixture.invalid/', capabilities: { catalog: true, history: true, send: false } }),
-  remoteAgentCatalog: async () => ({ workspaces: [{ workspaceId: 'w1', title: 'Blender · 演示项目', sessionIds: ['s1', 's2'] }], sessions: [{ sessionId: 's1', title: '建筑模型渲染 · 示例', running: false }, { sessionId: 's2', title: '另一条已有会话 · 示例', running: true }] }),
-  remoteAgentHistory: async (_, sessionId) => ({ sessionId, hasMore: true, omittedRecords: 2, messages: [{ id: '1', role: 'user', text: '这是一条界面测试消息，不会发送到远端。' }, { id: '2', role: 'assistant', text: '<img src="file:///private" onerror="window.__unsafe=true">\n这段内容必须作为普通文字展示，不得执行或读取本地文件。\n' + '长记录边界测试'.repeat(20) }] }),
-  remoteAgentDisconnect: async id => { window.__remoteFixtureCalls.push(['disconnect', id]); },
-};
-const app = createApp(RemoteAgentPanel);
-app.provide('isMobile', ref(innerWidth <= 720));
-app.use(createI18n({ legacy: false, locale: new URLSearchParams(location.search).get('lang') || 'zh-CN', messages: { 'zh-CN': zh, 'en-US': en } }));
-app.mount('#app');
+if (location.protocol === 'file:') {
+  document.getElementById('app').innerHTML = '<h1>Bob · Offline preview / 离线预览</h1><p>This is a development fixture. / 这是开发测试入口。</p><a href="../../dist-release/previews/remote-agent-preview.html">Open the self-contained preview / 打开无需服务器的完整预览</a>';
+} else {
+  import('./remote-agent-preview-entry.js');
+}
 </script></body></html>

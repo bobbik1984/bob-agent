@@ -86,3 +86,66 @@ describe('remote agent panel lifetime', () => {
     expect(state.history).toBeNull(); expect(state.historyBusy).toBe(false);
   });
 });
+
+describe('remote live execution', () => {
+  function liveFixture() {
+    const f = fixture();
+    f.api.remoteAgentConnect.mockResolvedValue({ connectionId: 'c1', capabilities: { catalog: true, history: true, send: true } });
+    f.api.remoteAgentWatch = vi.fn(async (_, sessionId) => ({ watchId: `w-${sessionId}`, sessionId, ready: true, phase: 'idle', messages: [], interactions: [] }));
+    f.api.remoteAgentLive = vi.fn(async (_, watchId) => ({ watchId, sessionId: 's1', ready: true, phase: 'running', messages: [], interactions: [], draft: 'streamed' }));
+    f.api.remoteAgentAction = vi.fn(async (_, input) => ({ watchId: input.watchId, sessionId: 's1', ready: true, phase: input.kind === 'cancel' ? 'cancel_requested' : 'accepted', messages: [], interactions: [] }));
+    return f;
+  }
+  it('subscribes before send and does not promote accepted or cancel acknowledgements to completed', async () => {
+    const { api, state, controller } = liveFixture();
+    await controller.connect({});
+    expect(await controller.send('hello', 'r1')).toBe(false);
+    await controller.select('s1');
+    await controller.send('hello', 'r1');
+    expect(api.remoteAgentAction).toHaveBeenCalledWith('c1', { watchId: 'w-s1', kind: 'send', text: 'hello', requestId: 'r1' });
+    expect(state.live.phase).toBe('accepted');
+    await controller.cancel(); expect(state.live.phase).toBe('cancel_requested');
+    await controller.dispose();
+  });
+  it('keeps unknown outcomes visible, disables actions and never automatically retries', async () => {
+    const { api, state, controller } = liveFixture();
+    await controller.connect({}); await controller.select('s1');
+    api.remoteAgentAction.mockRejectedValue('REMOTE_OUTCOME_UNKNOWN');
+    expect(await controller.send('hello', 'r1')).toBe(false);
+    expect(state.live.phase).toBe('unknown'); expect(state.live.ready).toBe(false);
+    expect(await controller.send('hello', 'r2')).toBe(false);
+    expect(api.remoteAgentAction).toHaveBeenCalledTimes(1);
+    await controller.dispose();
+  });
+  it('serializes double clicks and ignores late action responses after session switch', async () => {
+    const { api, state, controller } = liveFixture();
+    await controller.connect({}); await controller.select('s1');
+    const waiting = deferred(); api.remoteAgentAction.mockReturnValue(waiting.promise);
+    const sending = controller.send('hello', 'r1');
+    expect(await controller.send('hello', 'r2')).toBe(false);
+    await controller.select('s2');
+    waiting.resolve({ watchId: 'w-s1', sessionId: 's1', phase: 'completed', ready: true });
+    expect(await sending).toBe(false); expect(state.live.sessionId).toBe('s2');
+    await controller.dispose();
+  });
+  it('polls native live state only and stops after disconnection', async () => {
+    vi.useFakeTimers();
+    try {
+      const { api, state, controller } = liveFixture();
+      await controller.connect({}); await controller.select('s1');
+      await vi.advanceTimersByTimeAsync(250); expect(state.live.draft).toBe('streamed');
+      api.remoteAgentLive.mockRejectedValue('REMOTE_DISCONNECTED');
+      await vi.advanceTimersByTimeAsync(250); expect(state.live.ready).toBe(false);
+      await vi.advanceTimersByTimeAsync(5000); expect(api.remoteAgentLive).toHaveBeenCalledTimes(2);
+      await controller.dispose();
+    } finally { vi.useRealTimers(); }
+  });
+  it('answers only with the currently selected watch and clears interactions on close', async () => {
+    const { api, state, controller } = liveFixture();
+    await controller.connect({}); await controller.select('s1');
+    await controller.answer('event1', 'rejected');
+    expect(api.remoteAgentAction).toHaveBeenCalledWith('c1', { kind: 'answer', watchId: 'w-s1', eventId: 'event1', answer: 'rejected' });
+    await controller.disconnect(); expect(state.live).toBeNull();
+    expect(await controller.answer('event1', 'allowed-once')).toBe(false);
+  });
+});

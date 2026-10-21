@@ -1,6 +1,8 @@
 //! Native remote-Agent boundary. No startup work, local RPC fallback or credential persistence.
 //! Adapter capabilities describe this client's implemented surface, not the host's full authority.
 mod dsh;
+mod live;
+pub use live::LiveView;
 
 use futures_util::future::BoxFuture;
 use once_cell::sync::Lazy;
@@ -51,7 +53,7 @@ pub struct Catalog {
     pub sessions: Vec<RemoteSession>,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HistoryMessage {
     pub id: String,
@@ -73,7 +75,48 @@ pub trait RemoteAgent: Send + Sync {
     fn info(&self) -> ConnectionInfo;
     fn catalog(&self) -> BoxFuture<'_, Result<Catalog, String>>;
     fn history<'a>(&'a self, session_id: &'a str) -> BoxFuture<'a, Result<History, String>>;
+    fn watch<'a>(&'a self, session_id: &'a str) -> BoxFuture<'a, Result<LiveView, String>>;
+    fn live(&self, watch_id: &str) -> Result<LiveView, String>;
+    fn action(&self, input: ActionInput) -> BoxFuture<'_, Result<LiveView, String>>;
     fn close(&self);
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ActionInput {
+    pub watch_id: String,
+    pub kind: String,
+    pub request_id: Option<String>,
+    pub text: Option<String>,
+    pub event_id: Option<String>,
+    pub answer: Option<serde_json::Value>,
+}
+
+#[tauri::command]
+pub async fn remote_agent_watch(
+    connection_id: String,
+    session_id: String,
+) -> Result<LiveView, String> {
+    if session_id.is_empty() || session_id.len() > 512 {
+        return Err("REMOTE_PROTOCOL".into());
+    }
+    get(&connection_id).await?.watch(&session_id).await
+}
+
+#[tauri::command]
+pub async fn remote_agent_live(
+    connection_id: String,
+    watch_id: String,
+) -> Result<LiveView, String> {
+    get(&connection_id).await?.live(&watch_id)
+}
+
+#[tauri::command]
+pub async fn remote_agent_action(
+    connection_id: String,
+    input: ActionInput,
+) -> Result<LiveView, String> {
+    get(&connection_id).await?.action(input).await
 }
 
 static CONNECTIONS: Lazy<Mutex<HashMap<String, Arc<dyn RemoteAgent>>>> =

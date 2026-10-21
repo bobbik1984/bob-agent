@@ -1,6 +1,6 @@
 project:
   name: bob-agent
-  version: 0.9.28
+  version: 0.9.29
   status: active
   tech:
   - Tauri
@@ -8,15 +8,15 @@ project:
   - Vue 3
   - Desktop
   - Android
-  current_task: 'REMOTE-HARNESS-RH00-RH01 (通用连接与 DSH 浏览子集本地验证；X1T 目标验证、指令/审批/产物与双端安装未完成)'
+  current_task: 'REMOTE-HARNESS-RH02 (0.9.28 候选 Release 已发布；0.9.29 DSH 文字执行子集本地验证通过，待同源双端 CI；X1T 与真机未验收)'
   development_plan: docs/REMOTE_HARNESS_INTEGRATION.md
 phases:
 - name: Work 通用远程 Agent 接入
   tasks:
   - text: RH-00/RH-01 通用连接与 DSH 浏览子集（本地测试通过，目标端点与重连尚未验证）
     status: active
-  - text: RH-02 既有会话原生发送、审批与真实任务状态
-    status: todo
+  - text: RH-02 既有会话发送、流回复、一次性审批与真实取消（本地 Rust 13 项、前端及浏览器通过；未发布/未验真机）
+    status: active
   - text: RH-03/RH-04 Blender 产物与 Work 引用、同源双端候选验收
     status: todo
 - name: 自进化与做梦引擎闭环升级 v2.0 (Dream & Self-Evolution)

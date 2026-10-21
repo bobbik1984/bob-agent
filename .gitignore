@@ -87,6 +87,8 @@ tests/
 !/tests/fixtures/
 /tests/fixtures/*
 !/tests/fixtures/remote-agent-preview.html
+!/tests/fixtures/remote-agent-preview-entry.js
+!/scripts/test_promote_candidate_release.py
 design_assets/
 web-drop/
 *.pdb

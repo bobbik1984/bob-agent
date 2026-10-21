@@ -1,0 +1,38 @@
+{
+  "project_id": "bob_agent",
+  "basis": "GitHub Release v0.9.28-rc.1f23bb5 published and all asset SHA256 equal local files; 0.9.29 local Rust/front-end/version/offline-browser checks passed, CI not yet run.",
+  "files": [
+    {
+      "path": "todo.md",
+      "sha256": "49a326a54a6813d7f4783bbb9d392f83f16a4b61dead12b4df5fe3044775278a",
+      "replacements": [
+        {
+          "old": "- [/] 0.9.28：冻结浏览子集提交 `1f23bb58f57bfb4a65082c51ad76db8f9e3541bb` 已推送 main；Windows `39632877788`、Android `39632877750` 同源 CI 成功，安装包已上传 Actions。Release 归集下载被远端中断（WinError 10054），尚未发布，残缺下载保留但不可安装；双端安装未验收。后续 RH-02 不混入此冻结包。[构建与归集证据](docs/evidence/remote-agent/release-0.9.28-candidate.md)。",
+          "new": "- [x] 0.9.28 候选 Release 发布：冻结提交 `1f23bb58f57bfb4a65082c51ad76db8f9e3541bb` 的双端 CI 成功；三个安装文件完整下载、SHA-256 与 GitHub Release 一致，候选预发布已公开。只完成发布，不代表双端安装或 X1T 验收。[发布证据](docs/evidence/remote-agent/release-0.9.28-candidate.md)。"
+        },
+        {
+          "old": "未连接 X1T、未发布此增量、未进行双端安装。",
+          "new": "纳入 0.9.29 候选范围，未连接 X1T、未进行双端安装。"
+        },
+        {
+          "old": "- [ ] RH-02 后续：",
+          "new": "- [/] 0.9.29：主应用与安装器版本统一为 0.9.29 / Android 9029；356 项 Rust、84 项前端、5 项版本契约、2 项发布脚本测试及离线双尺寸预览通过。待 GitHub 同源双端 CI 核验。[候选证据](docs/evidence/remote-agent/release-0.9.29-candidate.md)。\n- [ ] RH-02 后续："
+        }
+      ]
+    },
+    {
+      "path": "progress.yaml",
+      "sha256": "912852e91276e63ff6d10de3ebbdb6ee57a91e571e944c45f11522f9cb9e7f94",
+      "replacements": [
+        {
+          "old": "  version: 0.9.28",
+          "new": "  version: 0.9.29"
+        },
+        {
+          "old": "  current_task: 'REMOTE-HARNESS-RH02 (0.9.28 双端 Actions 产物可用，Release 归集下载中断未发布；后续发送/流回复/审批/取消工作树本地验证，X1T 与真机未验收)'",
+          "new": "  current_task: 'REMOTE-HARNESS-RH02 (0.9.28 候选 Release 已发布；0.9.29 DSH 文字执行子集本地验证通过，待同源双端 CI；X1T 与真机未验收)'"
+        }
+      ]
+    }
+  ]
+}

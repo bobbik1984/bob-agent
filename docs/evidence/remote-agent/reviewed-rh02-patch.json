@@ -1,0 +1,22 @@
+{
+  "project_id": "bob_agent",
+  "basis": "Frozen 1f23bb58f57bfb4a65082c51ad76db8f9e3541bb has successful Windows run 39632877788 and Android run 39632877750; candidate asset promotion remains in progress. Later RH-02 working tree passed 13 adapter tests, full Rust 356 passed/1 ignored, frontend 84 passed, and actual Vue mobile/desktop fixture checks. No X1T or device acceptance claimed.",
+  "files": [
+    {
+      "path": "progress.yaml",
+      "sha256": "89f1546776b1b2c29debb22acae3725ea98c276a86d398da23044f249f6f4212",
+      "replacements": [
+        {"old":"  current_task: 'REMOTE-HARNESS-RH00-RH01 (通用连接与 DSH 浏览子集本地验证；X1T 目标验证、指令/审批/产物与双端安装未完成)'","new":"  current_task: 'REMOTE-HARNESS-RH02 (0.9.28 冻结基线双端 CI 成功；后续工作树发送/流回复/一次性审批/取消本地验证，未进入候选包，X1T 与真机未验收)'"},
+        {"old":"  - text: RH-02 既有会话原生发送、审批与真实任务状态\n    status: todo","new":"  - text: RH-02 既有会话发送、流回复、一次性审批与真实取消（本地 Rust 13 项、前端及浏览器通过；未发布/未验真机）\n    status: active"}
+      ]
+    },
+    {
+      "path": "todo.md",
+      "sha256": "c2fafeba9c01576fff8714c488aca20cd9a0b870de7543914893154e1ca7eb30",
+      "replacements": [
+        {"old":"- [/] 0.9.28：用户已授权冻结当前浏览子集，准备 GitHub 同源双端构建；CI、安装验收与后续 RH-02 代码分别记录。","new":"- [/] 0.9.28：冻结浏览子集提交 `1f23bb58f57bfb4a65082c51ad76db8f9e3541bb` 已推送 main；Windows `39632877788`、Android `39632877750` 同源 CI 成功，候选 Release 产物归集进行中；双端安装未验收。后续 RH-02 不混入此冻结包。"},
+        {"old":"- [ ] RH-02：先完成真实事件 ready、问题/审批与任务状态，再开放既有会话发送与取消；当前发送能力明确关闭。","new":"- [/] RH-02：后续工作树已实现 ready、既有会话发送、流式回复/折叠推理、一次性批准/拒绝、普通问题与真实取消；适配器 13 项、Rust 全量 356 passed/1 ignored、前端 84 项及手机/桌面 Vue 夹具通过。未知提交不自动重发，取消无确认不标停止；未连接 X1T、未发布此增量、未进行双端安装。证据：[RH-02 本地闭环](docs/evidence/remote-agent/RH-02-native-execution.md)。\n- [ ] RH-02 后续：计时/continued 问题、跨重启请求恢复、历史分页及自动重连；现有普通文字子集先独立候选与目标端点验证，不宣称完整节点完成。"}
+      ]
+    }
+  ]
+}

@@ -1,4 +1,4 @@
-//! DSH dsh-v0.2.1-rc.2 browser Remote contract; deliberately read-only Bob surface.
+//! DSH dsh-v0.2.1-rc.2 browser Remote contract, isolated from Bob-to-Bob RPC.
 //! Cookie is native-memory-only. Mux stays serviced even between requests (DSH heartbeat).
 use super::*;
 use futures_util::{SinkExt, StreamExt};
@@ -25,6 +25,11 @@ enum Command {
         reply: Reply,
     },
     Cancel(String),
+    Follow {
+        id: String,
+        session: Option<String>,
+        reply: Reply,
+    },
 }
 
 pub struct Dsh {
@@ -35,6 +40,8 @@ pub struct Dsh {
     commands: mpsc::Sender<Command>,
     alive: Arc<AtomicBool>,
     abort: tokio::task::AbortHandle,
+    state: Arc<std::sync::Mutex<super::live::LiveState>>,
+    action_lock: Mutex<()>,
 }
 
 fn endpoint(input: &str, token: &str) -> Result<(Url, String), String> {
@@ -91,7 +98,7 @@ impl Dsh {
         connect
             .query_pairs_mut()
             .append_pair("token", &secret)
-            .append_pair("interactions", "none");
+            .append_pair("interactions", "answer");
         // Never forward raw transport errors (they may include the token URL).
         let response = client
             .get(connect.clone())
@@ -161,12 +168,27 @@ impl Dsh {
         .map_err(|_| "REMOTE_NETWORK")?;
         let alive = Arc::new(AtomicBool::new(true));
         let worker_alive = alive.clone();
+        let state = Arc::new(std::sync::Mutex::new(super::live::LiveState::default()));
+        let worker_state = state.clone();
         let (commands, mut receiver) = mpsc::channel::<Command>(16);
         let task = tokio::spawn(async move {
             let mut pending: HashMap<String, Reply> = HashMap::new();
+            let mut watch_id: Option<String> = None;
             loop {
                 tokio::select! {
                     command = receiver.recv() => match command {
+                        Some(Command::Follow { id, session, reply }) => {
+                            let (endpoint, args) = if let Some(session) = session {
+                                if let Some(old) = watch_id.replace(id.clone()) {
+                                    if let Some(reply) = pending.remove(&old) { let _ = reply.send(Err("REMOTE_STALE".into())); }
+                                    if socket.send(Message::Text(json!({"type":"cancel","streamId":old}).to_string().into())).await.is_err() { break; }
+                                }
+                                if let Ok(mut state) = worker_state.lock() { state.select(id.clone(), session.clone()); } else { break; }
+                                ("session/follow", json!({"request":{"address":{"kind":"session","sessionId":session},"maxMessages":30,"assistantStream":true}}))
+                            } else { ("$events", json!({})) };
+                            if socket.send(Message::Text(json!({"type":"open","streamId":id,"endpoint":endpoint,"payload":{"args":args}}).to_string().into())).await.is_err() { break; }
+                            pending.insert(id, reply);
+                        }
                         Some(Command::Snapshot { id, endpoint, args, reply }) => {
                             let frame = json!({"type":"open","streamId":id,"endpoint":endpoint,"payload":{"args":args}});
                             if socket.send(Message::Text(frame.to_string().into())).await.is_err() { break; }
@@ -185,6 +207,18 @@ impl Dsh {
                         Some(Ok(Message::Text(text))) => {
                             let Ok(value) = serde_json::from_str::<Value>(&text) else { break; };
                             let Some(id) = value.get("streamId").and_then(Value::as_str) else { break; };
+                            if id == "events" || watch_id.as_deref() == Some(id) {
+                                let result = if value["type"] != "item" { Err(PROTOCOL.to_owned()) }
+                                else if let Ok(mut state) = worker_state.lock() {
+                                    if id == "events" { state.event_channel(&value["value"]) } else { state.follow(&value["value"]) }
+                                } else { Err(PROTOCOL.to_owned()) };
+                                if let Some(reply) = pending.remove(id) { let _ = reply.send(result.clone().map(|_| value["value"].clone())); }
+                                if let Err(error) = result {
+                                    if let Ok(mut state) = worker_state.lock() { state.fail(&error); }
+                                    break;
+                                }
+                                continue;
+                            }
                             if let Some(reply) = pending.remove(id) {
                                 let result = if value["type"] == "item" {
                                     value.get("value").cloned().ok_or_else(|| PROTOCOL.to_string())
@@ -199,6 +233,11 @@ impl Dsh {
                 }
             }
             worker_alive.store(false, Ordering::Release);
+            if let Ok(mut state) = worker_state.lock() {
+                if state.view.error.is_none() {
+                    state.fail("REMOTE_DISCONNECTED");
+                }
+            }
             for (_, reply) in pending {
                 let _ = reply.send(Err("REMOTE_DISCONNECTED".into()));
             }
@@ -211,8 +250,8 @@ impl Dsh {
                 capabilities: Capabilities {
                     catalog: true,
                     history: true,
-                    send: false,
-                    approvals: false,
+                    send: true,
+                    approvals: true,
                     artifacts: false,
                 },
             },
@@ -222,8 +261,26 @@ impl Dsh {
             commands,
             alive,
             abort: task.abort_handle(),
+            state,
+            action_lock: Mutex::new(()),
         };
-        // A socket handshake alone is not readiness. Require a valid workspace baseline.
+        // A socket is not an answerer. Wait for the generation-bound $events ready frame.
+        let (reply, response) = oneshot::channel();
+        adapter
+            .commands
+            .try_send(Command::Follow {
+                id: "events".into(),
+                session: None,
+                reply,
+            })
+            .map_err(|_| "REMOTE_DISCONNECTED")?;
+        let ready = tokio::time::timeout(TIMEOUT, response)
+            .await
+            .map_err(|_| "REMOTE_TIMEOUT")?
+            .map_err(|_| "REMOTE_DISCONNECTED")??;
+        if ready["type"] != "ready" {
+            return Err(PROTOCOL.into());
+        }
         adapter.workspaces().await?;
         Ok(adapter)
     }
@@ -274,14 +331,42 @@ impl Dsh {
     }
 
     async fn list(&self) -> Result<Vec<RemoteSession>, String> {
+        let value = self.rpc("session/list", json!({"_request":{}})).await?;
+        let items = value
+            .get("items")
+            .and_then(Value::as_array)
+            .ok_or(PROTOCOL)?;
+        if items.len() > 5000 {
+            return Err(PROTOCOL.into());
+        }
+        items
+            .iter()
+            .filter(|item| item["origin"] != "subagent")
+            .map(|item| {
+                let id = item["sessionId"].as_str().ok_or(PROTOCOL)?.to_owned();
+                Ok(RemoteSession {
+                    title: item
+                        .pointer("/projections/values/title")
+                        .and_then(Value::as_str)
+                        .unwrap_or(&id)
+                        .to_owned(),
+                    session_id: id,
+                    running: item["running"].as_bool().ok_or(PROTOCOL)?,
+                    updated_at: item["updatedAt"].as_f64().ok_or(PROTOCOL)?,
+                })
+            })
+            .collect()
+    }
+
+    async fn rpc(&self, method: &str, args: Value) -> Result<Value, String> {
         if !self.alive.load(Ordering::Acquire) {
             return Err("REMOTE_DISCONNECTED".into());
         }
         let rpc_id = uuid::Uuid::new_v4().to_string();
-        let response = self.client.post(self.base.join("api/session/list").map_err(|_| PROTOCOL)?)
+        let response = self.client.post(self.base.join(&format!("api/{method}")).map_err(|_| PROTOCOL)?)
             .header(header::COOKIE, &self.cookie)
             .header(header::ORIGIN, self.base.origin().ascii_serialization())
-            .json(&json!({"type":"client-request","rpcId":rpc_id,"method":"session/list","payload":{"args":{"_request":{}}}}))
+            .json(&json!({"type":"client-request","rpcId":rpc_id,"method":method,"payload":{"args":args}}))
             .send().await.map_err(|_| "REMOTE_NETWORK")?;
         if response.status() == 401 || response.status() == 403 {
             self.close();
@@ -306,30 +391,7 @@ impl Dsh {
         {
             return Err(PROTOCOL.into());
         }
-        let items = value
-            .pointer("/result/value/items")
-            .and_then(Value::as_array)
-            .ok_or(PROTOCOL)?;
-        if items.len() > 5000 {
-            return Err(PROTOCOL.into());
-        }
-        items
-            .iter()
-            .filter(|item| item["origin"] != "subagent")
-            .map(|item| {
-                let id = item["sessionId"].as_str().ok_or(PROTOCOL)?.to_owned();
-                Ok(RemoteSession {
-                    title: item
-                        .pointer("/projections/values/title")
-                        .and_then(Value::as_str)
-                        .unwrap_or(&id)
-                        .to_owned(),
-                    session_id: id,
-                    running: item["running"].as_bool().ok_or(PROTOCOL)?,
-                    updated_at: item["updatedAt"].as_f64().ok_or(PROTOCOL)?,
-                })
-            })
-            .collect()
+        Ok(value["result"]["value"].clone())
     }
 }
 
@@ -351,8 +413,104 @@ impl RemoteAgent for Dsh {
             project_history(session_id, &value)
         })
     }
+    fn watch<'a>(&'a self, session_id: &'a str) -> BoxFuture<'a, Result<LiveView, String>> {
+        Box::pin(async move {
+            let _guard = self.action_lock.lock().await;
+            if !self.alive.load(Ordering::Acquire) {
+                return Err("REMOTE_DISCONNECTED".into());
+            }
+            let id = uuid::Uuid::new_v4().to_string();
+            let (reply, response) = oneshot::channel();
+            self.commands
+                .try_send(Command::Follow {
+                    id: id.clone(),
+                    session: Some(session_id.into()),
+                    reply,
+                })
+                .map_err(|_| "REMOTE_DISCONNECTED")?;
+            match tokio::time::timeout(TIMEOUT, response).await {
+                Ok(Ok(Ok(_))) => self.live(&id),
+                _ => {
+                    self.close();
+                    Err("REMOTE_DISCONNECTED".into())
+                }
+            }
+        })
+    }
+    fn live(&self, watch_id: &str) -> Result<LiveView, String> {
+        let state = self.state.lock().map_err(|_| PROTOCOL)?;
+        if state.view.watch_id != watch_id {
+            return Err("REMOTE_STALE".into());
+        }
+        Ok(state.view())
+    }
+    fn action(&self, input: ActionInput) -> BoxFuture<'_, Result<LiveView, String>> {
+        Box::pin(async move {
+            let _guard = self.action_lock.lock().await;
+            let (method, args) = {
+                let mut state = self.state.lock().map_err(|_| PROTOCOL)?;
+                state.check(&input.watch_id)?;
+                match input.kind.as_str() {
+                    "send" => {
+                        let id = input.request_id.as_deref().ok_or(PROTOCOL)?;
+                        let text = input.text.as_deref().ok_or(PROTOCOL)?;
+                        if !state.begin_send(id, text)? {
+                            return Ok(state.view());
+                        }
+                        (
+                            "session/prompt",
+                            json!({"request":{"requestId":id,"sessionId":state.view.session_id,"mode":"queue","content":[{"type":"text","text":text}]}}),
+                        )
+                    }
+                    "cancel" => {
+                        state.begin_cancel()?;
+                        (
+                            "session/cancel",
+                            json!({"request":{"sessionId":state.view.session_id}}),
+                        )
+                    }
+                    "answer" => (
+                        "$events/result",
+                        state.begin_answer(
+                            input.event_id.as_deref().ok_or(PROTOCOL)?,
+                            input.answer.as_ref().ok_or(PROTOCOL)?,
+                        )?,
+                    ),
+                    _ => return Err(PROTOCOL.into()),
+                }
+            };
+            let result = self.rpc(method, args).await;
+            let mut state = self.state.lock().map_err(|_| PROTOCOL)?;
+            match result {
+                Ok(value) if method == "$events/result" || value["accepted"] == true => {
+                    // HTTP acknowledgements cannot overwrite a durable event that arrived first.
+                    if input.kind == "send" && state.view.phase == "sending" {
+                        state.view.phase = "accepted".into();
+                    }
+                    if let Some(id) = input.event_id {
+                        if let Some(item) = state.interactions.get_mut(&id) {
+                            if item.status == "submitting" {
+                                item.status = "answered".into();
+                            }
+                        }
+                    }
+                }
+                _ => {
+                    // Dispatch may have executed before transport failure. Never retry blindly.
+                    let session = state.view.session_id.clone();
+                    state.uncertain.insert(session);
+                    state.fail("REMOTE_OUTCOME_UNKNOWN");
+                    return Err("REMOTE_OUTCOME_UNKNOWN".into());
+                }
+            }
+            Ok(state.view())
+        })
+    }
     fn close(&self) {
         self.alive.store(false, Ordering::Release);
+        if let Ok(mut state) = self.state.lock() {
+            state.fail("REMOTE_DISCONNECTED");
+        }
         self.abort.abort();
     }
 }
@@ -362,16 +520,28 @@ impl Drop for Dsh {
     }
 }
 
-fn project_history(session_id: &str, value: &Value) -> Result<History, String> {
+pub(super) fn project_history(session_id: &str, value: &Value) -> Result<History, String> {
     if value["type"] != "snapshot" || value["header"]["id"] != session_id {
         return Err(PROTOCOL.into());
     }
     let has_more = value["hasMore"].as_bool().ok_or(PROTOCOL)?;
     let records = value["records"].as_array().ok_or(PROTOCOL)?;
-    let mut messages = Vec::new();
+    let mut messages: Vec<HistoryMessage> = Vec::new();
     let mut omitted = 0;
     for record in records {
         let event = &record["event"];
+        if let Some(op) = event.get("surfaceOp").filter(|v| v.is_object()) {
+            let start = op["startSeq"].as_u64().ok_or(PROTOCOL)?;
+            let end = op["endSeq"].as_u64().ok_or(PROTOCOL)?;
+            if op["op"] != "replace" || start > end {
+                return Err(PROTOCOL.into());
+            }
+            messages.retain(|m| {
+                m.id.parse::<u64>()
+                    .map(|id| id < start || id > end)
+                    .unwrap_or(false)
+            });
+        }
         let role = match event["type"].as_str() {
             Some("user/message") => "user",
             Some("assistant/message") => "assistant",
@@ -425,3 +595,7 @@ fn project_history(session_id: &str, value: &Value) -> Result<History, String> {
 #[cfg(test)]
 #[path = "tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "live_tests.rs"]
+mod live_tests;

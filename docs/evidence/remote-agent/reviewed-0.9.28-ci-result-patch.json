@@ -1,0 +1,8 @@
+{
+  "project_id": "bob_agent",
+  "basis": "Both frozen-SHA CI runs completed successfully and public GitHub Artifact metadata verified. Local promotion stopped with WinError 10054 during download before Release creation. RH-02 remains a later unpublished locally tested working tree.",
+  "files": [
+    {"path":"progress.yaml","sha256":"661d03210f7fc3acdb9e27f1bc7a60ee7f424d81350c4d2a6477fd40aaabc2d4","replacements":[{"old":"  current_task: 'REMOTE-HARNESS-RH02 (0.9.28 冻结基线双端 CI 成功；后续工作树发送/流回复/一次性审批/取消本地验证，未进入候选包，X1T 与真机未验收)'","new":"  current_task: 'REMOTE-HARNESS-RH02 (0.9.28 双端 Actions 产物可用，Release 归集下载中断未发布；后续发送/流回复/审批/取消工作树本地验证，X1T 与真机未验收)'"}]},
+    {"path":"todo.md","sha256":"91f9c2fb87c6957e061d42c8464e369722aacca8f1f7510de7f500f4da1660d1","replacements":[{"old":"- [/] 0.9.28：冻结浏览子集提交 `1f23bb58f57bfb4a65082c51ad76db8f9e3541bb` 已推送 main；Windows `39632877788`、Android `39632877750` 同源 CI 成功，候选 Release 产物归集进行中；双端安装未验收。后续 RH-02 不混入此冻结包。","new":"- [/] 0.9.28：冻结浏览子集提交 `1f23bb58f57bfb4a65082c51ad76db8f9e3541bb` 已推送 main；Windows `39632877788`、Android `39632877750` 同源 CI 成功，安装包已上传 Actions。Release 归集下载被远端中断（WinError 10054），尚未发布，残缺下载保留但不可安装；双端安装未验收。后续 RH-02 不混入此冻结包。[构建与归集证据](docs/evidence/remote-agent/release-0.9.28-candidate.md)。"},{"old":"> 当前工作树是从 v0.9.15 建立的 `mobile-pc-rebuild` 独立施工线，不包含旧 A1/A2/A3 后续版本的全部代码。", "new":"> 当前发布线为 `main`，源于从 v0.9.15 建立的 `mobile-pc-rebuild` 稳定重建线，不包含旧 A1/A2/A3 后续版本的全部代码。"}]}
+  ]
+}

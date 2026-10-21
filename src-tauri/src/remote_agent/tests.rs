@@ -96,7 +96,9 @@ async fn server(mode: &'static str) -> (String, tokio::task::JoinHandle<()>) {
                 if frame["type"] == "cancel" { continue; }
                 assert_eq!(frame["type"], "open");
                 if mode == "disconnect" { return; }
-                let value = if frame["endpoint"] == "workspace/follow" {
+                let value = if frame["endpoint"] == "$events" {
+                    json!({"type":"ready","clientId":"client1","host":{"home":"/fixture"}})
+                } else if frame["endpoint"] == "workspace/follow" {
                     assert_eq!(frame["payload"]["args"], json!({}));
                     json!({"type":"baseline","value":{"items":[{"workspaceId":"w1","title":"Project","sessionIds":["s1"]}]}})
                 } else {
@@ -129,7 +131,7 @@ async fn dsh_real_http_and_mux_read_chain_and_close() {
     let dsh = Dsh::connect(&url, "secret-token").await.unwrap();
     let info = serde_json::to_string(&dsh.info()).unwrap();
     assert!(!info.contains("secret"));
-    assert!(!dsh.info().capabilities.send);
+    assert!(dsh.info().capabilities.send);
     let catalog = dsh.catalog().await.unwrap();
     assert_eq!(catalog.workspaces[0].session_ids, ["s1"]);
     assert_eq!(catalog.sessions[0].session_id, "s1");
