@@ -18,8 +18,29 @@
 
 ## GitHub 候选状态
 
-待本次提交推送后记录固定 SHA、两条 Actions run 与 Artifact。此文档不提前声明云端成功。
+- 来源：main 提交 `788ab610122cd46a6b35fb08962c54860ab500e7`，已推送。
+- [Windows CI](https://github.com/bobbik1984/bob-agent/actions/runs/39640877045)：completed / success，应用、独立安装器及候选 Artifact 已生成。
+- [Android CI](https://github.com/bobbik1984/bob-agent/actions/runs/39640877016)：completed / success，版本门禁、APK 编译、签名校验及上传全部成功。
+- 双端 Artifact 均包含 0.9.29 与上述完整 SHA，workflow_run.head_sha 一致；没有因文档补记而替换本次构建来源。
+- 本批按授权生成 GitHub Actions 候选安装包，不另行晋级正式 Release 或覆盖官网稳定下载入口。0.9.28 候选 Release 独立保留。
+
+### 已核验 Windows 归档
+
+- Artifact ID `12364754183`，名称 `bob-desktop-windows-v0.9.29-788ab610122cd46a6b35fb08962c54860ab500e7`；71280264 字节。
+- 完整下载与 GitHub Artifact SHA-256 一致：`46582aaf9897864a89bb2fecf0c397990aa85a2bcba7d3e72f60bc860645da26`。
+- 本机归档：`dist-release/candidate-v0.9.29-788ab610122c/`。
+- `bob-v0.9.29-installer.exe`：44349440 字节，SHA-256 `742a8c9cbc478bb26a424c0bd7bfb8aad12d5008c904d6d5c6250a7f49eb52ef`。
+- `bob-v0.9.29-portable.zip`：34112745 字节，SHA-256 `c0ad065fe229ac74d275a6c48695f49cb5b30fc046af17ec3916ed40e77d5627`。
 
 ## 未验收边界
+
+### 已核验 Android 归档
+
+- Artifact ID `12366192644`，名称 `bob-mobile-apk-v0.9.29-788ab610122cd46a6b35fb08962c54860ab500e7`；34736999 字节。
+- 完整下载与 GitHub Artifact SHA-256 一致：`b3350d79b74afc25e74957eec8db03537fb9b03180323c39c4fd092c278c1dfc`。
+- `bob-v0.9.29-signed.apk`：94290274 字节，SHA-256 `849887762ce95520d168545aabb943ba724cc0bcadabbb04de01b6611e8d15c5`。
+- 与 Windows 存于同一候选归档目录，并附 `SHA256SUMS.txt`。签名及对齐检查在 GitHub Android Runner 执行；本机未安装或启动此 APK。
+
+### 真机与真实端点
 
 CI 成功不等于 PC/Android 安装启动通过，也不等于 X1T 认证、实际模型调用、审批或取消真机通过。文件产物、新建会话、自动重连和跨重启恢复不在本批范围；旧 A4/A5 门禁不变。

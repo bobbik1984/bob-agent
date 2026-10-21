@@ -6,7 +6,7 @@
 - [ ] RH-01 目标验证：安排在本地 RH-02 闭环之后，届时经私密输入核对实际端点版本、会话与断线；不以 X1T 凭据为本地开发前置。
 - [x] 0.9.28 候选 Release 发布：冻结提交 `1f23bb58f57bfb4a65082c51ad76db8f9e3541bb` 的双端 CI 成功；三个安装文件完整下载、SHA-256 与 GitHub Release 一致，候选预发布已公开。只完成发布，不代表双端安装或 X1T 验收。[发布证据](docs/evidence/remote-agent/release-0.9.28-candidate.md)。
 - [/] RH-02：后续工作树已实现 ready、既有会话发送、流式回复/折叠推理、一次性批准/拒绝、普通问题与真实取消；适配器 13 项、Rust 全量 356 passed/1 ignored、前端 84 项及手机/桌面 Vue 夹具通过。未知提交不自动重发，取消无确认不标停止；纳入 0.9.29 候选范围，未连接 X1T、未进行双端安装。证据：[RH-02 本地闭环](docs/evidence/remote-agent/RH-02-native-execution.md)。
-- [/] 0.9.29：主应用与安装器版本统一为 0.9.29 / Android 9029；356 项 Rust、84 项前端、5 项版本契约、2 项发布脚本测试及离线双尺寸预览通过。待 GitHub 同源双端 CI 核验。[候选证据](docs/evidence/remote-agent/release-0.9.29-candidate.md)。
+- [x] 0.9.29 双端候选构建：同一提交 `788ab610122cd46a6b35fb08962c54860ab500e7`，Windows `39640877045` 与 Android `39640877016` 均 completed/success；主应用与安装器为 0.9.29 / Android 9029。356 项 Rust、84 项前端、5 项版本契约、2 项发布脚本测试及离线双尺寸预览通过。只完成候选生成，不代表 X1T 或双端安装验收。[候选证据](docs/evidence/remote-agent/release-0.9.29-candidate.md)。
 - [ ] RH-02 后续：计时/continued 问题、跨重启请求恢复、历史分页及自动重连；现有普通文字子集先独立候选与目标端点验证，不宣称完整节点完成。
 - [ ] RH-03/RH-04：真实 Blender 产物、Work 引用与同源双端候选安装验收，构建/发布另行授权。
 

@@ -1,0 +1,30 @@
+{
+  "project_id": "bob_agent",
+  "basis": "GitHub Actions Windows 39640877045 and Android 39640877016 completed/success; artifact metadata version 0.9.29 and full source SHA match. No target authentication/device acceptance inferred.",
+  "files": [
+    {
+      "path": "todo.md",
+      "sha256": "2a8f482ca981525d9aa188273f54af41ee38f096987df4f637efec5ec4619ab1",
+      "replacements": [
+        {
+          "old": "- [/] 0.9.29：主应用与安装器版本统一为 0.9.29 / Android 9029；356 项 Rust、84 项前端、5 项版本契约、2 项发布脚本测试及离线双尺寸预览通过。待 GitHub 同源双端 CI 核验。[候选证据](docs/evidence/remote-agent/release-0.9.29-candidate.md)。",
+          "new": "- [x] 0.9.29 双端候选构建：同一提交 `788ab610122cd46a6b35fb08962c54860ab500e7`，Windows `39640877045` 与 Android `39640877016` 均 completed/success；主应用与安装器为 0.9.29 / Android 9029。356 项 Rust、84 项前端、5 项版本契约、2 项发布脚本测试及离线双尺寸预览通过。只完成候选生成，不代表 X1T 或双端安装验收。[候选证据](docs/evidence/remote-agent/release-0.9.29-candidate.md)。"
+        }
+      ]
+    },
+    {
+      "path": "progress.yaml",
+      "sha256": "75220898820194944cc0621af8ac24e4dfe331b8d9b3d08a242a5eff66739f17",
+      "replacements": [
+        {
+          "old": "  current_task: 'REMOTE-HARNESS-RH02 (0.9.28 候选 Release 已发布；0.9.29 DSH 文字执行子集本地验证通过，待同源双端 CI；X1T 与真机未验收)'",
+          "new": "  current_task: 'REMOTE-HARNESS-RH02 (0.9.28 候选 Release 已发布；0.9.29 同源 PC/Android CI 成功，DSH 文字子集与离线预览交付；X1T 与真机未验收)'"
+        },
+        {
+          "old": "（本地 Rust 13 项、前端及浏览器通过；未发布/未验真机）",
+          "new": "（本地 Rust 13 项、前端及浏览器通过；0.9.29 双端候选已构建，未验真机）"
+        }
+      ]
+    }
+  ]
+}
