@@ -1,0 +1,4 @@
+<resources>
+    <string name="bob_vault_unlock">Unlock saved Bob connections</string>
+    <string name="bob_vault_subtitle">Use your device screen lock or a supported biometric</string>
+</resources>

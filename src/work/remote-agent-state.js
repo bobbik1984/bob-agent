@@ -1,4 +1,4 @@
-// Adapter-neutral, per-panel lifetime. No credentials, remote records or handles are persisted.
+// Adapter-neutral connection controller; the application service owns its lifetime.
 export function createRemoteAgentController(api, publish) {
   let generation = 0;
   let selection = 0;
@@ -63,7 +63,7 @@ export function createRemoteAgentController(api, publish) {
     }
   };
   return {
-    async connect(input) {
+    async connect(input, open = () => api.remoteAgentConnect(input)) {
       const current = ++generation;
       stopPolling();
       ++selection;
@@ -74,7 +74,7 @@ export function createRemoteAgentController(api, publish) {
       update({ connection: null, catalog: null, history: null, live: null, sessionId: '', busy: true, error: '' });
       let opened;
       try {
-        opened = await api.remoteAgentConnect(input);
+        opened = await open();
         // The caller clears the input immediately; never copy it into controller state.
         if (disposed || current !== generation) { await close(opened); return; }
         if (opened.capabilities?.catalog !== true) throw 'REMOTE_UNSUPPORTED_CAPABILITY';
@@ -82,9 +82,11 @@ export function createRemoteAgentController(api, publish) {
         if (disposed || current !== generation) { await close(opened); return; }
         connection = opened;
         update({ connection, catalog, busy: false });
+        return true;
       } catch (error) {
         await close(opened);
         if (current === generation) update({ busy: false, error: safeError(error) });
+        return false;
       }
     },
     async refresh() {

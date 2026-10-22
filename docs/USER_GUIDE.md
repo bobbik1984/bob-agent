@@ -1,5 +1,23 @@
 # Bob Agent 用户手册 / User Guide
 
+## 0.9.30 远程执行端操作补充（本地实现，安装包尚未交付）
+
+此节适用于包含本轮改动的 0.9.30；不会改变已安装 0.9.29 的界面。
+
+1. 打开 **设置 → 连接 → 远程执行端 → 使用系统解锁**。无需创建 Bob 密码。Android 11+ 弹出手机系统认证，可选系统 PIN、图案、密码或受支持的强指纹/人脸；设备只支持弱人脸时使用系统锁屏凭据。Windows 使用当前登录账户的凭据保护，不额外弹 Bob 密码或强制 Windows Hello。解锁持续到手动锁定连接库或退出应用。取消认证不会清空已保存连接。
+2. 输入容易识别的名称和 DSH 地址。可以粘贴带 Token 的启动链接，也可以分别填地址和 Token；首次认证成功才保存连接。不要将链接或 Token 发给其他人。
+3. 进入 **工作**，选择已保存执行端，在“项目与会话”中选择已有会话。之后发送文字、处理审批或请求取消均在该页面完成，思考过程默认折叠。
+4. 切换页面不会断开；进程重启后解锁，再进入工作页面会按自动重连偏好恢复最近会话。网络故障有限重试；认证过期时到设置更新 Token。保存连接不意味着 Cookie 永久有效。
+5. 若出现“结果不明”的提示，先检查远端历史、运行和审批状态，再点确认已核对；Bob 不会自动重发先前指令。取消受理不等于任务已停止，等待确认。
+6. **断开本次连接**保留配置并关闭自动重连；**忘记连接**移除本机保存的信息。两者均不取消 DSH 上的任务、不删除远端记录，也不在服务端吊销 Cookie。
+7. 原来的本地 **概览、目标、任务、决策、动态**仍在工作页下方的 **项目与工作记录** 中，可展开查看；桌面左侧也保留该入口。远端工作区不会自动覆盖 Bob 原项目。
+
+本轮尚未提供远端新建会话、图片/文件产物读取、完整历史翻页或其他 Agent 适配器。真实 X1T 与手机验收另行记录。
+
+旧试验版若已保存密码库，只在迁移提示出现时输入一次旧密码；迁移失败保留原库。系统密钥不可用时不要卸载或清除数据，先在原设备/账户重试。手机未设置锁屏或低于 Android 11 时不启用连接保存，不降级为明文。Android 认证实际体验尚待候选 APK 验证。
+
+English: In Settings → Connections, choose Unlock with system. Android 11+ uses the system screen-lock credential or supported strong biometrics; Windows uses current-user DPAPI, not a separate Bob password or mandatory Hello prompt. Only an existing preview vault needs its old password once for migration. Cancellation preserves saved data. Work restores sessions without resending commands. Expired DSH authentication requires a new token. Existing local projects and records remain available. This 0.9.30 increment has not yet been packaged or Android-device-tested.
+
 > **Version v0.9.5 (Tauri v2)**
 >
 > 你的桌面幽灵副手，隐于系统托盘，使命必达。

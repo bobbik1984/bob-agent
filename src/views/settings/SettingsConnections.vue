@@ -1,5 +1,6 @@
 <template>
   <div class="settings-stack">
+  <RemoteAgentConnections />
 
   <!-- 📱 通讯渠道 (Communication Channels) -->
   <section class="settings-section card">
@@ -827,6 +828,7 @@
 
 </template>
 <script setup>
+import RemoteAgentConnections from '../../components/work/RemoteAgentConnections.vue';
 const getAssetUrl = (name) => `/logos/${name}`;
 import { ref, onMounted, onUnmounted, computed, inject, watch } from 'vue';
 import { open } from '@tauri-apps/plugin-dialog';

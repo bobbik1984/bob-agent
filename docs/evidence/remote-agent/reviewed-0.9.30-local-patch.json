@@ -1,0 +1,23 @@
+{
+  "project_id": "bob_agent",
+  "basis": "用户授权 0.9.30 连接记忆、安全重连、Work 重组和测试；本地事实见 docs/evidence/remote-agent/RH-02-connection-memory.md。只更新本项目进度，不推送外部看板、不发布或解锁真机门禁。",
+  "files": [
+    {
+      "path": "progress.yaml",
+      "sha256": "b19b06f72a771e957c53edad840b12766b76426a7db8ff6ba20ea346a3f6f91d",
+      "replacements": [
+        { "old": "  version: 0.9.29", "new": "  version: 0.9.30" },
+        { "old": "  current_task: 'REMOTE-HARNESS-RH02 (0.9.28 候选 Release 已发布；0.9.29 同源 PC/Android CI 成功，DSH 文字子集与离线预览交付；X1T 与真机未验收)'", "new": "  current_task: 'REMOTE-HARNESS-RH02 (0.9.30 连接记忆、安全重连与 Work 分层本地通过；Rust 359/1 ignored、前端 96、双尺寸组件通过；未构建发布，X1T/真机待验)'" },
+        { "old": "- name: Work 通用远程 Agent 接入\n  tasks:", "new": "- name: Work 通用远程 Agent 接入\n  tasks:\n  - text: 0.9.30 本地增量：独立加密连接库、有限安全重连、Work 主会话及保留原项目记录（本地测试通过，未打包/现场验收）\n    status: done" }
+      ]
+    },
+    {
+      "path": "todo.md",
+      "sha256": "cb961169c2e9188ca1f34d362f51ef6804e636064d24ed0df34e3c33a3c88af4",
+      "replacements": [
+        { "old": "## 当前增量：Work 通用远程 Agent 接入", "new": "## 当前增量：Work 通用远程 Agent 接入\n\n- [x] 0.9.30 本地实现：连接配置迁入设置，独立加密记忆 Cookie/最近会话，应用级有限安全重连；Work 主执行面板与原项目/工作记录分层保留。Rust 359 passed/1 ignored（远端专项 16），前端 96，版本契约 5，真实 Vue 手机/桌面夹具通过。[证据](docs/evidence/remote-agent/RH-02-connection-memory.md)。尚未生成 0.9.30 安装包或发布。\n- [ ] 0.9.30 候选与现场验收：经发布授权生成同源 PC/APK 后验证进程重启解锁恢复、认证过期、前后台断网、连续会话与未知结果核对；用户反馈初步联通不代替这一轮验收。" },
+        { "old": "- [ ] RH-02 后续：计时/continued 问题、跨重启请求恢复、历史分页及自动重连；现有普通文字子集先独立候选与目标端点验证，不宣称完整节点完成。", "new": "- [ ] RH-02 后续：计时/continued 问题、完整跨重启请求对账、历史分页、新建远端会话；0.9.30 已有有限自动重连及未知结果复核门槛，不等于上述完整恢复能力或整个节点验收完成。" }
+      ]
+    }
+  ]
+}

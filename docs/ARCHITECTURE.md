@@ -5,6 +5,12 @@
 
 ## 总体架构
 
+### 远程执行端连接（0.9.30 本地实现）
+
+设置负责连接配置，Work 负责执行会话；应用级连接服务通过既有 Bridge 调用 Rust 适配器。连接生命周期独立于 Vue 页面；首屏不读取凭证或自动发起远程请求。DSH 拥有远端会话/执行事实，Bob Work Core 继续拥有原项目及工作记录，不自动合并两者。
+
+连接记忆使用独立 `remote-agent-vault.db` AES-256-GCM 加密快照，随机数据密钥由系统封装：Windows CurrentUser DPAPI；Android 11+ Keystore 认证绑定 AES 密钥与 BiometricPrompt CryptoObject。不另设 Bob 密码；Argon2 只保留为旧试验版库的一次性事务迁移。原生插件不暴露前端密钥命令，认证只在用户解锁时于非 UI 阻塞线程调用，取消/密钥不可用均拒绝。Cookie 不进入普通配置、主库同步投影或前端持久存储。Android 原生编译与真机认证尚待候选验证，不能由 Windows 测试推断通过。协议、安全重连与失败边界的权威细则见 [远程 Harness 接入第 8 节](REMOTE_HARNESS_INTEGRATION.md#8-当前实施边界与下一个可执行任务)。
+
 ```
 ┌──────────────────────────────────────────────────────────┐
 │                   Tauri v2 Shell (Rust)                   │

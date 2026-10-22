@@ -1,13 +1,14 @@
 <template>
   <section class="remote-panel" :aria-label="t('remote_agent.title')">
-    <p class="remote-hint">{{ t('remote_agent.scope') }}</p>
-    <form v-if="!state.connection" class="remote-form" @submit.prevent="connect">
-      <label>{{ t('remote_agent.endpoint') }}<input v-model="endpoint" type="url" required autocomplete="off" spellcheck="false" /></label>
-      <label>{{ t('remote_agent.token') }}<input v-model="token" type="password" autocomplete="off" spellcheck="false" /></label>
-      <p class="remote-hint">{{ t('remote_agent.privacy') }}</p>
-      <button type="submit" :disabled="state.busy"><LoaderCircle v-if="state.busy" :size="16" /><Plug v-else :size="16" />{{ t(state.busy ? 'remote_agent.connecting' : 'remote_agent.connect') }}</button>
-    </form>
-    <template v-else>
+    <header class="remote-toolbar">
+      <strong>{{ t('remote_agent.work_title') }}</strong>
+      <select v-if="state.profiles.length" :value="state.selectedProfileId" :aria-label="t('remote_agent.connections')" :disabled="state.busy" @change="controller.connectProfile($event.target.value)"><option value="" disabled>{{ t('remote_agent.choose_connection') }}</option><option v-for="p in state.profiles" :key="p.id" :value="p.id">{{ p.name }}</option></select>
+      <button @click="openConnections"><Settings2 :size="16" />{{ t('remote_agent.manage') }}</button>
+    </header>
+    <p v-if="!state.connection" class="remote-hint">{{ t(state.unlocked ? 'remote_agent.choose_connection' : 'remote_agent.unlock_in_settings') }}</p>
+    <p v-if="state.reconnecting || state.busy" role="status">{{ t('remote_agent.connecting') }}</p>
+    <button v-if="state.selectedProfileId && state.error && !state.busy" @click="controller.connectProfile(state.selectedProfileId)">{{ t('remote_agent.retry') }}</button>
+    <template v-if="state.connection">
       <header class="remote-toolbar">
         <span class="remote-endpoint">{{ state.connection.endpoint }}</span>
         <button type="button" :disabled="state.busy" @click="controller.refresh()"><RefreshCw :size="16" />{{ t('remote_agent.refresh') }}</button>
@@ -45,6 +46,7 @@
         </section>
       </div>
       <section v-if="state.live" class="remote-controls">
+        <aside v-if="controller.needsReview()" class="remote-review"><p>{{ t('remote_agent.review_uncertain') }}</p><button @click="controller.reviewed()">{{ t('remote_agent.reviewed') }}</button></aside>
         <p role="status">{{ t(`remote_agent.phase_${state.live.phase}`) }}</p>
         <p class="remote-hint">{{ t('remote_agent.execution_scope') }}</p>
         <article v-for="item in state.live.interactions" :key="item.eventId" class="remote-message">
@@ -83,29 +85,28 @@
 </template>
 
 <script setup>
-import { computed, inject, onBeforeUnmount, reactive, ref, watch } from 'vue';
+import { computed, inject, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { LoaderCircle, MessageSquare, PanelLeft, Plug, RefreshCw, Unplug, Send, Square } from 'lucide-vue-next';
-import { createRemoteAgentController } from '../../work/remote-agent-state.js';
+import { MessageSquare, PanelLeft, Settings2, RefreshCw, Unplug, Send, Square } from 'lucide-vue-next';
+import { getRemoteAgentService } from '../../work/remote-agent-service.js';
 
 const { t, te } = useI18n();
 const compact = inject('isMobile', ref(false));
-const endpoint = ref('');
-const token = ref('');
+const openConnections = inject('openRemoteConnections', () => {});
 const workspaceId = ref('');
 const message = ref('');
 const answers = reactive({});
 const drafts = new Map();
-const state = reactive({ connection: null, catalog: null, history: null, sessionId: '', busy: false, historyBusy: false, error: '' });
-const controller = createRemoteAgentController(window.appAPI, patch => Object.assign(state, patch));
+const controller = getRemoteAgentService(window.appAPI);
+const state = controller.state;
 watch(() => state.connection && state.sessionId ? `${state.connection.endpoint}:${state.sessionId}` : '', (key, previous) => {
   if (previous) drafts.set(previous, message.value);
   message.value = key ? (drafts.get(key) || '') : '';
   for (const field of Object.keys(answers)) delete answers[field];
 }, { flush: 'sync' });
 watch(() => state.live?.watchId, () => { for (const field of Object.keys(answers)) delete answers[field]; });
-const canSend = computed(() => state.live?.ready && !state.actionBusy && ['idle', 'completed', 'stopped', 'blocked', 'failed'].includes(state.live.phase));
-const canAnswer = item => state.live?.ready && !state.actionBusy && item.status === 'pending';
+const canSend = computed(() => state.live?.ready && !state.error && !state.actionBusy && !controller.needsReview() && ['idle', 'completed', 'stopped', 'blocked', 'failed'].includes(state.live.phase));
+const canAnswer = item => state.live?.ready && !state.error && !state.actionBusy && !controller.needsReview() && item.status === 'pending';
 const selected = (item, q) => answers[`${item.eventId}:${q.id}`] || [];
 function choose(item, q, label, checked) {
   const old = selected(item, q);
@@ -124,16 +125,17 @@ const sessions = computed(() => {
   const project = state.catalog?.workspaces.find(item => item.workspaceId === workspaceId.value);
   return (state.catalog?.sessions || []).filter(item => !project || project.sessionIds.includes(item.sessionId));
 });
-function connect() {
-  const input = { adapter: 'dsh', endpoint: endpoint.value, token: token.value };
-  token.value = '';
-  // Strip pasted query credentials from the visible field immediately, even on failure.
-  try { const url = new URL(endpoint.value); url.search = ''; url.hash = ''; endpoint.value = url.toString(); }
-  catch { endpoint.value = ''; }
-  workspaceId.value = '';
-  void controller.connect(input);
-}
-onBeforeUnmount(() => { token.value = ''; void controller.dispose(); });
+// Restore the selected session's workspace after reconnect; never retain another host's filter.
+watch(() => state.connection?.connectionId, () => { workspaceId.value = ''; });
+watch(() => state.sessionId, id => {
+  const project = state.catalog?.workspaces.find(item => item.sessionIds.includes(id));
+  if (project) workspaceId.value = project.workspaceId;
+});
+const activeDrawer = inject('activeDrawer', ref('work'));
+watch(activeDrawer, value => { if (value === 'work') void controller.resume(); });
+function onForeground() { if (document.visibilityState === 'visible' && activeDrawer.value === 'work') void controller.resume(); }
+onMounted(() => { if (activeDrawer.value === 'work') void controller.resume(); document.addEventListener('visibilitychange', onForeground); });
+onBeforeUnmount(() => document.removeEventListener('visibilitychange', onForeground));
 </script>
 
 <style scoped>
@@ -149,6 +151,8 @@ button:focus-visible, summary:focus-visible { outline: 2px solid var(--accent-pr
 svg { flex-shrink: 0; }
 .remote-hint { color: var(--text-secondary); font-size: .875rem; line-height: 1.6; }
 .remote-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.remote-toolbar select { flex: 1; min-width: 140px; width: auto; }
+.remote-review { padding: 12px; border: 1px solid var(--color-warning); border-radius: 10px; }
 .remote-endpoint { flex: 1 1 180px; overflow-wrap: anywhere; font-size: .875rem; }
 .remote-workspace { display: grid; grid-template-columns: minmax(180px, 30%) minmax(0, 1fr); gap: 16px; margin-top: 16px; }
 .remote-sidebar { min-width: 0; }

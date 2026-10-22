@@ -1509,6 +1509,7 @@ pub fn run() {
     }
 
     let mut builder = tauri::Builder::default()
+        .plugin(tauri_plugin_device_vault::init())
         .manage(db::DbState(Mutex::new(db)))
         .manage(sidecar::SidecarState { child: Mutex::new(None) })
         .manage(wechat_state.clone())
@@ -1581,6 +1582,13 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             remote_agent::remote_agent_connect,
+            remote_agent::remote_agent_profiles,
+            remote_agent::remote_agent_unlock,
+            remote_agent::remote_agent_lock,
+            remote_agent::remote_agent_save,
+            remote_agent::remote_agent_reconnect,
+            remote_agent::remote_agent_profile_update,
+            remote_agent::remote_agent_forget,
             remote_agent::remote_agent_catalog,
             remote_agent::remote_agent_history,
             remote_agent::remote_agent_watch,

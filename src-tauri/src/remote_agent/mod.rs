@@ -1,7 +1,10 @@
-//! Native remote-Agent boundary. No startup work, local RPC fallback or credential persistence.
+//! Native remote-Agent boundary. No startup work or local RPC fallback.
+//! Saved credentials stay in the independent, explicitly unlocked encrypted local vault.
 //! Adapter capabilities describe this client's implemented surface, not the host's full authority.
 mod dsh;
 mod live;
+mod store;
+mod system_protection;
 pub use live::LiveView;
 
 use futures_util::future::BoxFuture;
@@ -24,6 +27,7 @@ pub struct Capabilities {
 #[serde(rename_all = "camelCase")]
 pub struct ConnectionInfo {
     pub connection_id: String,
+    pub profile_id: Option<String>,
     pub adapter: String,
     pub endpoint: String,
     pub capabilities: Capabilities,
@@ -116,11 +120,115 @@ pub async fn remote_agent_action(
     connection_id: String,
     input: ActionInput,
 ) -> Result<LiveView, String> {
-    get(&connection_id).await?.action(input).await
+    let adapter = get(&connection_id).await?;
+    let profile_id = adapter.info().profile_id;
+    let session = adapter.live(&input.watch_id)?.session_id;
+    let guarded = input.kind == "send" || input.kind == "answer";
+    if let Some(id) = profile_id.as_ref().filter(|_| guarded) {
+        let mut guard = store::VAULT.lock().await;
+        let vault = store::unlocked(&mut guard)?;
+        if vault.credential(id)?.0.uncertain_sessions.contains(&session) { return Err("REMOTE_REVIEW_REQUIRED".into()); }
+        vault.update(id, None, None, Some((session.clone(), true)))?;
+    }
+    let result = adapter.action(input).await;
+    if let (Some(id), Ok(view)) = (profile_id.as_ref().filter(|_| guarded), &result) {
+        if view.phase != "unknown" {
+            let mut guard = store::VAULT.lock().await;
+            store::unlocked(&mut guard)?.update(id, None, None, Some((session, false)))?;
+        }
+    }
+    result
 }
 
 static CONNECTIONS: Lazy<Mutex<HashMap<String, Arc<dyn RemoteAgent>>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
+
+// Serialize vault changes and reconnect publication; a forgotten/locked profile cannot reappear.
+static PROFILE_OPERATIONS: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
+
+#[derive(Serialize)]
+pub struct ProfileList { pub unlocked: bool, pub profiles: Vec<store::Profile> }
+
+#[tauri::command]
+pub async fn remote_agent_profiles() -> Result<ProfileList, String> {
+    let guard = store::VAULT.lock().await;
+    Ok(ProfileList { unlocked: guard.is_some(), profiles: guard.as_ref().map(|v| v.list()).unwrap_or_default() })
+}
+
+#[tauri::command]
+pub async fn remote_agent_unlock(app: tauri::AppHandle, legacy_password: Option<String>) -> Result<ProfileList, String> {
+    let _operation = PROFILE_OPERATIONS.lock().await;
+    let path = crate::get_data_dir().join("remote-agent-vault.db");
+    let vault = tokio::task::spawn_blocking(move || store::Vault::unlock_system(path, legacy_password.as_deref(), |envelope| system_protection::unlock(&app, envelope)))
+        .await.map_err(|_| "REMOTE_STORAGE")??;
+    *store::VAULT.lock().await = Some(vault);
+    remote_agent_profiles().await
+}
+
+#[tauri::command]
+pub async fn remote_agent_lock() -> Result<(), String> {
+    let _operation = PROFILE_OPERATIONS.lock().await;
+    for (_, adapter) in CONNECTIONS.lock().await.drain() { adapter.close(); }
+    *store::VAULT.lock().await = None;
+    Ok(())
+}
+
+async fn register(adapter: Arc<dyn RemoteAgent>) -> Result<ConnectionInfo, String> {
+    let info = adapter.info();
+    let mut connections = CONNECTIONS.lock().await;
+    if let Some(id) = &info.profile_id {
+        connections.retain(|_, old| {
+            if old.info().profile_id.as_ref() == Some(id) { old.close(); false } else { true }
+        });
+    }
+    if connections.len() >= 4 { adapter.close(); return Err("REMOTE_CONNECTION_LIMIT".into()); }
+    connections.insert(info.connection_id.clone(), adapter);
+    Ok(info)
+}
+
+#[tauri::command]
+pub async fn remote_agent_save(input: ConnectInput, name: String) -> Result<ConnectionInfo, String> {
+    let _operation = PROFILE_OPERATIONS.lock().await;
+    if input.adapter != "dsh" { return Err("REMOTE_UNSUPPORTED_ADAPTER".into()); }
+    { let mut guard = store::VAULT.lock().await; store::unlocked(&mut guard)?; }
+    let mut adapter = dsh::Dsh::connect(&input.endpoint, &input.token).await?;
+    let result = {
+        let mut guard = store::VAULT.lock().await;
+        store::unlocked(&mut guard)?.save(name, adapter.info().endpoint, adapter.credential())
+    };
+    let profile = match result { Ok(profile) => profile, Err(e) => { adapter.close(); return Err(e); } };
+    adapter.set_profile(profile.id);
+    register(Arc::new(adapter)).await
+}
+
+#[tauri::command]
+pub async fn remote_agent_reconnect(profile_id: String) -> Result<ConnectionInfo, String> {
+    let _operation = PROFILE_OPERATIONS.lock().await;
+    let (profile, cookie) = {
+        let mut guard = store::VAULT.lock().await; store::unlocked(&mut guard)?.credential(&profile_id)?
+    };
+    let mut adapter = dsh::Dsh::reconnect(&profile.endpoint, cookie).await?;
+    adapter.set_profile(profile.id);
+    register(Arc::new(adapter)).await
+}
+
+#[tauri::command]
+pub async fn remote_agent_profile_update(profile_id: String, session_id: Option<String>, auto_reconnect: Option<bool>, reviewed_session: Option<String>) -> Result<(), String> {
+    let _operation = PROFILE_OPERATIONS.lock().await;
+    let mut guard = store::VAULT.lock().await;
+    store::unlocked(&mut guard)?.update(&profile_id, session_id, auto_reconnect, reviewed_session.map(|s| (s,false)))
+}
+
+#[tauri::command]
+pub async fn remote_agent_forget(profile_id: String) -> Result<(), String> {
+    let _operation = PROFILE_OPERATIONS.lock().await;
+    let mut guard = store::VAULT.lock().await;
+    store::unlocked(&mut guard)?.forget(&profile_id)?;
+    CONNECTIONS.lock().await.retain(|_, adapter| {
+        if adapter.info().profile_id.as_ref() == Some(&profile_id) { adapter.close(); false } else { true }
+    });
+    Ok(())
+}
 
 // Do not derive Debug/Serialize: input contains a user credential.
 #[derive(Deserialize)]

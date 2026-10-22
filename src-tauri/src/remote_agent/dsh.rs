@@ -1,5 +1,5 @@
 //! DSH dsh-v0.2.1-rc.2 browser Remote contract, isolated from Bob-to-Bob RPC.
-//! Cookie is native-memory-only. Mux stays serviced even between requests (DSH heartbeat).
+//! Cookie never crosses the frontend bridge. Mux stays serviced between requests.
 use super::*;
 use futures_util::{SinkExt, StreamExt};
 use reqwest::{header, Client, Url};
@@ -134,6 +134,25 @@ impl Dsh {
             return Err(PROTOCOL.into());
         }
         let cookie = cookies[0].clone();
+        Self::resume(base, cookie).await
+    }
+
+    pub(super) fn credential(&self) -> String { self.cookie.clone() }
+    pub(super) fn set_profile(&mut self, id: String) { self.info.profile_id = Some(id); }
+
+    pub(super) async fn reconnect(url: &str, cookie: String) -> Result<Self, String> {
+        let (base, _) = endpoint(url, "validation-only")?;
+        if base.as_str() != url || !cookie.starts_with("dsh-auth-") || !cookie.contains('=')
+            || cookie.len() > 8192 || cookie.chars().any(char::is_control) || cookie.contains(';') {
+            return Err(PROTOCOL.into());
+        }
+        Self::resume(base, cookie).await
+    }
+
+    async fn resume(base: Url, cookie: String) -> Result<Self, String> {
+        let client = Client::builder().redirect(reqwest::redirect::Policy::none())
+            .timeout(TIMEOUT).build().map_err(|_| "REMOTE_NETWORK")?;
+        let mux = base.join("api/remote.mux").map_err(|_| PROTOCOL)?;
         let mut ws_url = mux;
         ws_url
             .set_scheme(if base.scheme() == "https" {
@@ -165,7 +184,11 @@ impl Dsh {
         )
         .await
         .map_err(|_| "REMOTE_TIMEOUT")?
-        .map_err(|_| "REMOTE_NETWORK")?;
+        .map_err(|e| match e {
+            tokio_tungstenite::tungstenite::Error::Http(response)
+                if response.status().as_u16() == 401 || response.status().as_u16() == 403 => "REMOTE_AUTH",
+            _ => "REMOTE_NETWORK",
+        })?;
         let alive = Arc::new(AtomicBool::new(true));
         let worker_alive = alive.clone();
         let state = Arc::new(std::sync::Mutex::new(super::live::LiveState::default()));
@@ -245,6 +268,7 @@ impl Dsh {
         let adapter = Self {
             info: ConnectionInfo {
                 connection_id: uuid::Uuid::new_v4().to_string(),
+                profile_id: None,
                 adapter: "dsh".into(),
                 endpoint: base.to_string(),
                 capabilities: Capabilities {
@@ -524,7 +548,12 @@ pub(super) fn project_history(session_id: &str, value: &Value) -> Result<History
     if value["type"] != "snapshot" || value["header"]["id"] != session_id {
         return Err(PROTOCOL.into());
     }
-    let has_more = value["hasMore"].as_bool().ok_or(PROTOCOL)?;
+    // Follow snapshots omit pagination metadata. Absence is not proof of full history.
+    let has_more = match value.get("hasMore") {
+        None => true,
+        Some(Value::Bool(value)) => *value,
+        _ => return Err(PROTOCOL.into()),
+    };
     let records = value["records"].as_array().ok_or(PROTOCOL)?;
     let mut messages: Vec<HistoryMessage> = Vec::new();
     let mut omitted = 0;

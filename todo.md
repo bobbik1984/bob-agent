@@ -2,12 +2,18 @@
 
 ## 当前增量：Work 通用远程 Agent 接入
 
+- [x] 0.9.30 系统解锁代码与 Windows/前端本地验证：新库取消 Bob 密码，Windows 当前用户 DPAPI、Android 11+ Keystore/CryptoObject 系统认证；旧试验版密码库一次性事务迁移。Rust 363 passed/1 ignored、前端 99、双尺寸页面通过；Android 编译/认证未验证，不能标双端完成。[证据](docs/evidence/remote-agent/RH-02-system-unlock.md)。
+- [ ] 0.9.30 Android 系统解锁候选验收：原生插件 CI 编译与签名包验证；PIN/强指纹或人脸、取消/后台/超时、无锁屏/密钥失效、杀进程重开及旧库迁移。沿用同源 PC/APK 发布门禁，未发布。
+
+- [x] 0.9.30 本地实现：连接配置迁入设置，独立加密记忆 Cookie/最近会话，应用级有限安全重连；Work 主执行面板与原项目/工作记录分层保留。Rust 359 passed/1 ignored（远端专项 16），前端 96，版本契约 5，真实 Vue 手机/桌面夹具通过。[证据](docs/evidence/remote-agent/RH-02-connection-memory.md)。尚未生成 0.9.30 安装包或发布。
+- [ ] 0.9.30 候选与现场验收：经发布授权生成同源 PC/APK 后验证进程重启解锁恢复、认证过期、前后台断网、连续会话与未知结果核对；用户反馈初步联通不代替这一轮验收。
+
 - [/] RH-00/RH-01：通用原生连接与 DSH 浏览子集已本地验证；项目/会话/近期文字记录预览可用代码已落地，X1T 真实认证与重连未验收，不标节点整体完成。规格：[远程 Harness 接入](docs/REMOTE_HARNESS_INTEGRATION.md)；证据：[本地浏览子集](docs/evidence/remote-agent/RH-01-native-read-preview.md)。
 - [ ] RH-01 目标验证：安排在本地 RH-02 闭环之后，届时经私密输入核对实际端点版本、会话与断线；不以 X1T 凭据为本地开发前置。
 - [x] 0.9.28 候选 Release 发布：冻结提交 `1f23bb58f57bfb4a65082c51ad76db8f9e3541bb` 的双端 CI 成功；三个安装文件完整下载、SHA-256 与 GitHub Release 一致，候选预发布已公开。只完成发布，不代表双端安装或 X1T 验收。[发布证据](docs/evidence/remote-agent/release-0.9.28-candidate.md)。
 - [/] RH-02：后续工作树已实现 ready、既有会话发送、流式回复/折叠推理、一次性批准/拒绝、普通问题与真实取消；适配器 13 项、Rust 全量 356 passed/1 ignored、前端 84 项及手机/桌面 Vue 夹具通过。未知提交不自动重发，取消无确认不标停止；纳入 0.9.29 候选范围，未连接 X1T、未进行双端安装。证据：[RH-02 本地闭环](docs/evidence/remote-agent/RH-02-native-execution.md)。
 - [x] 0.9.29 双端候选构建：同一提交 `788ab610122cd46a6b35fb08962c54860ab500e7`，Windows `39640877045` 与 Android `39640877016` 均 completed/success；主应用与安装器为 0.9.29 / Android 9029。356 项 Rust、84 项前端、5 项版本契约、2 项发布脚本测试及离线双尺寸预览通过。只完成候选生成，不代表 X1T 或双端安装验收。[候选证据](docs/evidence/remote-agent/release-0.9.29-candidate.md)。
-- [ ] RH-02 后续：计时/continued 问题、跨重启请求恢复、历史分页及自动重连；现有普通文字子集先独立候选与目标端点验证，不宣称完整节点完成。
+- [ ] RH-02 后续：计时/continued 问题、完整跨重启请求对账、历史分页、新建远端会话；0.9.30 已有有限自动重连及未知结果复核门槛，不等于上述完整恢复能力或整个节点验收完成。
 - [ ] RH-03/RH-04：真实 Blender 产物、Work 引用与同源双端候选安装验收，构建/发布另行授权。
 
 本增量不改写下方历史手机→PC 线路的验收结论，不修改 Online Agent/X1T 线上服务，不解除 A4/A5 门禁。

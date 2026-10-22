@@ -45,6 +45,19 @@ fn history_rejects_wrong_session_and_projects_only_text() {
     assert!(!serde_json::to_string(&history).unwrap().contains("private"));
 }
 
+#[test]
+fn history_tolerates_missing_has_more() {
+    let value = json!({"type":"snapshot","header":{"id":"s1"},"cursor":1,"records":[
+        {"type":"event","event":{"type":"assistant/message","seq":1,"data":{"message":{"content":[{"type":"text","text":"hello"}]}}}}
+    ]});
+    let history = project_history("s1", &value).unwrap();
+    assert_eq!(history.messages.len(), 1);
+    assert!(history.has_more);
+    let mut malformed = value.clone();
+    malformed["hasMore"] = json!("false");
+    assert!(project_history("s1", &malformed).is_err());
+}
+
 async fn server(mode: &'static str) -> (String, tokio::task::JoinHandle<()>) {
     async fn connect(State(mode): State<&'static str>) -> impl IntoResponse {
         if mode == "auth" {
@@ -139,6 +152,11 @@ async fn dsh_real_http_and_mux_read_chain_and_close() {
     assert_eq!(dsh.history("s1").await.unwrap().messages[0].text, "hello");
     dsh.close();
     assert!(dsh.catalog().await.is_err());
+    let resumed = Dsh::reconnect(&url, dsh.credential()).await.unwrap();
+    assert_eq!(resumed.catalog().await.unwrap().sessions[0].session_id, "s1");
+    resumed.close();
+    assert!(Dsh::reconnect("http://public.example/", "dsh-auth-x=a".into()).await.is_err());
+    assert!(Dsh::reconnect(&url, "dsh-auth-x=a; injected=b".into()).await.is_err());
     server.abort();
 }
 

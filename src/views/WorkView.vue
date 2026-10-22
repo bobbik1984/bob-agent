@@ -1,11 +1,9 @@
 <template>
   <section class="work-view" :class="[`layout-${layoutMode}`, { 'is-unified': useUnifiedWorkView }]">
-    <WorkViewTabs v-if="useUnifiedWorkView && isCompactNavigation" v-model="activeWorkPanel" />
-
-    <button class="mobile-pending-summary" type="button" :aria-expanded="remoteAgentsOpen" @click="remoteAgentsOpen = !remoteAgentsOpen">
-      <span>{{ t('remote_agent.title') }}</span><ChevronDown :size="16" :class="{ rotated: remoteAgentsOpen }" />
-    </button>
-    <RemoteAgentPanel v-if="remoteAgentsOpen" />
+    <RemoteAgentPanel />
+    <details ref="recordsPanel" class="work-records" :open="!remoteState.profiles.length">
+      <summary>{{ t('remote_agent.project_records') }}<span v-if="mobilePendingCount"> · {{ mobilePendingCount }}</span></summary>
+      <WorkViewTabs v-if="useUnifiedWorkView" v-model="activeWorkPanel" />
 
     <header v-if="!useUnifiedWorkView" class="work-header">
       <div>
@@ -463,11 +461,12 @@
         </WorkProjectAccordion>
       </div>
     </main>
+    </details>
   </section>
 </template>
 
 <script setup>
-import { computed, defineAsyncComponent, inject, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
+import { computed, defineAsyncComponent, inject, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import {
   Check, CheckCircle2, ChevronDown, Circle, CircleAlert, FileDown,
@@ -477,7 +476,8 @@ import {
 import WorkOverview from '../components/work/WorkOverview.vue';
 import WorkViewTabs from '../components/work/WorkViewTabs.vue';
 const RemoteAgentPanel = defineAsyncComponent(() => import('../components/work/RemoteAgentPanel.vue'));
-const remoteAgentsOpen = ref(false);
+import { getRemoteAgentService } from '../work/remote-agent-service.js';
+const remoteState = getRemoteAgentService(window.appAPI).state;
 import WorkProjectAccordion from '../components/work/WorkProjectAccordion.vue';
 import { getMobileProjectCounts, sortProjectsByUpdatedAt, toggleExpandedProjectIds } from '../work/work-view-state.js';
 import { DEFAULT_WORK_VIEW, isWorkView } from '../work/work-view-navigation.js';
@@ -487,10 +487,14 @@ const props = defineProps({
   activePanel: { type: String, default: DEFAULT_WORK_VIEW, validator: isWorkView },
 });
 const emit = defineEmits(['update:activePanel']);
+const recordsPanel = ref(null);
+watch(() => props.activePanel, () => { if (recordsPanel.value) recordsPanel.value.open = true; });
+function openRecords() {
+  if (recordsPanel.value) { recordsPanel.value.open = true; recordsPanel.value.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+}
 const layoutMode = inject('layoutMode', ref('desktop-wide'));
 const terminalKind = inject('terminalKind', 'desktop');
 const isNativeMobile = terminalKind === 'native-mobile';
-const isCompactNavigation = inject('isMobile', ref(false));
 const useUnifiedWorkView = true;
 const projects = ref([]);
 const aggregate = ref(null);
@@ -917,6 +921,7 @@ function formatTime(timestamp) {
 }
 
 async function handleTodayBriefNavigation(event) {
+  if (recordsPanel.value) recordsPanel.value.open = true;
   const item = event.detail;
   const projectId = item?.action?.payload?.projectId || item?.messageArgs?.projectId;
   const objectId = item?.action?.targetId || item?.action?.payload?.goalId;
@@ -934,6 +939,7 @@ async function handleTodayBriefNavigation(event) {
 }
 
 onMounted(async () => {
+  window.addEventListener('work:open-records', openRecords);
   await loadProjects();
   stopRuntimeListener = await window.appAPI.listenEvent('goal:runtime-state', event => {
     const projectId = event?.payload?.projectId || event?.projectId;
@@ -947,12 +953,15 @@ onMounted(async () => {
   window.addEventListener('today-brief-action', handleTodayBriefNavigation);
 });
 onBeforeUnmount(() => {
+  window.removeEventListener('work:open-records', openRecords);
   stopRuntimeListener?.();
   window.removeEventListener('today-brief-action', handleTodayBriefNavigation);
 });
 </script>
 
 <style scoped>
+.work-records { margin-top: 20px; min-width: 0; }
+.work-records > summary { cursor: pointer; min-height: 44px; padding: 12px; color: var(--text-primary); border-bottom: 1px solid var(--border-color); }
 .work-view { height: 100%; overflow: auto; box-sizing: border-box; background: var(--bg-primary); color: var(--text-primary); padding: clamp(20px, 3vw, 36px); }
 .work-view.is-unified { padding: 0; }
 .work-header, .project-summary, .section-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }

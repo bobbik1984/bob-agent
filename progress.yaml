@@ -1,6 +1,6 @@
 project:
   name: bob-agent
-  version: 0.9.29
+  version: 0.9.30
   status: active
   tech:
   - Tauri
@@ -8,11 +8,15 @@ project:
   - Vue 3
   - Desktop
   - Android
-  current_task: 'REMOTE-HARNESS-RH02 (0.9.28 候选 Release 已发布；0.9.29 同源 PC/Android CI 成功，DSH 文字子集与离线预览交付；X1T 与真机未验收)'
+  current_task: 'REMOTE-HARNESS-RH02 (0.9.30 系统解锁替代 Bob 密码；Windows DPAPI/Rust 363+1 ignored、前端 99、双尺寸通过；Android 原生编译与系统认证真机待验，未发布)'
   development_plan: docs/REMOTE_HARNESS_INTEGRATION.md
 phases:
 - name: Work 通用远程 Agent 接入
   tasks:
+  - text: 0.9.30 系统凭据保护：Windows DPAPI、Android Keystore 与系统认证代码；Windows/前端已测试，Android 原生编译与真机待验
+    status: active
+  - text: 0.9.30 本地增量：独立加密连接库、有限安全重连、Work 主会话及保留原项目记录（本地测试通过，未打包/现场验收）
+    status: done
   - text: RH-00/RH-01 通用连接与 DSH 浏览子集（本地测试通过，目标端点与重连尚未验证）
     status: active
   - text: RH-02 既有会话发送、流回复、一次性审批与真实取消（本地 Rust 13 项、前端及浏览器通过；0.9.29 双端候选已构建，未验真机）

@@ -2,6 +2,16 @@
 
 All notable changes to bob-agent will be documented in this file.
 
+## [0.9.30] - 2026-10-22 (本地开发，未发布)
+
+- 远程执行端配置迁入设置→连接；名称、地址、上次会话及认证 Cookie 保存在独立加密连接库，不参与 Bob 同步。改用 Windows 当前用户 DPAPI / Android 11+ 系统认证与 Keystore，无需另设 Bob 密码；旧试验版库提供一次性迁移。Android 原生编译与真机认证待验，不用重复粘贴有效 DSH Token。
+- Work 以远程会话与执行交互为主，连接不再随页面卸载销毁；原有项目、目标、任务、决策、动态与审阅入口保留在“项目与工作记录”。
+- 临时断线有限退避重连；认证或协议错误停止自动重试；绝不自动重发指令/审批。提交结果不明的会话跨重启保留复核门槛。
+- DSH follow snapshot 缺少 hasMore 时不再报协议错误，也不把近期快照误称完整历史。
+- 主应用与安装器版本统一为 0.9.30，Android versionCode 为 9030。本轮未生成安装包或发布 Release。
+
+本地测试与未验边界见 [连接记忆与 Work 重组证据](docs/evidence/remote-agent/RH-02-connection-memory.md)。
+
 ## [0.9.29] - 2026-10-22 (候选构建)
 
 - Work 的 DSH 直连增加既有会话发送、实时文字回复、默认折叠的推理过程、一次性批准/拒绝和普通问题回答。

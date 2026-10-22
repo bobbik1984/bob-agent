@@ -1,0 +1,4 @@
+<resources>
+    <string name="bob_vault_unlock">解锁 Bob 已保存的连接</string>
+    <string name="bob_vault_subtitle">使用手机锁屏凭据或受支持的生物识别</string>
+</resources>

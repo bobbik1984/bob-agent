@@ -16,3 +16,11 @@ defineProps({ modelValue: { type: String, required: true, validator: isWorkView 
 defineEmits(['update:modelValue']);
 const { t } = useI18n();
 </script>
+
+<style scoped>
+@media (min-width: 721px) {
+  .mobile-tab-grid { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+  .mobile-tab-item { display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 8px 12px; border: 1px solid var(--border-color); border-radius: 10px; background: var(--bg-secondary); color: var(--text-secondary); font: inherit; cursor: pointer; }
+  .mobile-tab-item.active { border-color: var(--accent-primary); color: var(--text-primary); background: var(--bg-tertiary); }
+}
+</style>

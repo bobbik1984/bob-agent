@@ -27,8 +27,22 @@ try {
     const preview = new URL('../dist-release/previews/remote-agent-preview.html', import.meta.url);
     preview.searchParams.set('lang', lang);
     await page.goto(offline ? preview.href : `${base}/tests/fixtures/remote-agent-preview.html?lang=${lang}`);
+    assert.equal(await page.locator('.remote-settings input[type=password]').count(), 0);
+    await page.locator('.remote-settings form button').click();
+    await page.locator('.remote-settings input[maxlength="120"]').fill('Test DSH');
     await page.locator('input[type=url]').fill('https://fixture.invalid/?token=fixture-only');
-    await page.locator('button[type=submit]').click();
+    await page.locator('.remote-settings form button').click();
+    await page.locator('.remote-settings [role=status]').waitFor();
+    await page.locator('[data-nav=work]').click();
+    // Exercise the real WorkView wrapper, not just the remote panel in isolation.
+    await page.locator('.work-records > summary').click();
+    await page.getByText('Existing local project', { exact: true }).waitFor();
+    await page.locator('.work-records > summary').click();
+    await page.evaluate(() => window.dispatchEvent(new CustomEvent('today-brief-action', { detail: { action: { targetId: 'goal1', payload: { projectId: 'local1' } } } })));
+    await page.getByText('Existing local goal', { exact: true }).waitFor();
+    assert.equal(await page.locator('.work-records').evaluate(el => el.open), true);
+    await page.locator('.work-records > summary').click();
+    assert.equal(await page.locator('.remote-panel input[type=password]').count(), 0);
     await page.getByRole('button', { name: '建筑模型渲染 · 示例' }).click();
     await page.locator('.remote-message').last().waitFor();
     assert.equal(await page.locator('.remote-transcript img').count(), 0);
@@ -47,9 +61,10 @@ try {
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
     await page.screenshot({ path: join(output, `${name}.png`), fullPage: true });
     await page.getByRole('button', { name: lang === 'zh-CN' ? '断开本次连接' : 'Disconnect session' }).click();
-    await page.locator('input[type=password]').waitFor();
-    assert.equal(await page.locator('input[type=password]').inputValue(), '');
+    await page.locator('[data-nav=settings]').click();
+    assert.equal(await page.locator('.remote-settings input[type=password]').inputValue(), '');
     assert.equal((await page.locator('input[type=url]').inputValue()).includes('token'), false);
+    assert.equal(await page.locator('.remote-settings article strong').textContent(), 'Test DSH');
     assert.deepEqual(await page.evaluate(() => window.__remoteFixtureCalls), [['send', 'watch'], ['answer', 'watch'], ['cancel', 'watch'], ['disconnect', 'fixture']]);
     assert.deepEqual(errors, []);
     if (offline) assert.deepEqual(networkRequests, []);

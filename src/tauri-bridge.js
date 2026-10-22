@@ -773,6 +773,13 @@ const isMobileDevice = typeof navigator !== 'undefined' && /Android|iPhone|iPad|
 window.appAPI = {
   // Remote harness is opt-in and native-only; browser previews never fake an authenticated host.
   remoteAgentConnect: (input) => IS_TAURI ? invoke('remote_agent_connect', { input }) : Promise.reject('REMOTE_NATIVE_REQUIRED'),
+  remoteAgentProfiles: () => IS_TAURI ? invoke('remote_agent_profiles') : Promise.resolve({ unlocked: false, profiles: [] }),
+  remoteAgentUnlock: (legacyPassword) => IS_TAURI ? invoke('remote_agent_unlock', { legacyPassword: legacyPassword ?? null }) : Promise.reject('REMOTE_NATIVE_REQUIRED'),
+  remoteAgentLock: () => IS_TAURI ? invoke('remote_agent_lock') : Promise.resolve(),
+  remoteAgentSave: (input, name) => IS_TAURI ? invoke('remote_agent_save', { input, name }) : Promise.reject('REMOTE_NATIVE_REQUIRED'),
+  remoteAgentReconnect: (profileId) => IS_TAURI ? invoke('remote_agent_reconnect', { profileId }) : Promise.reject('REMOTE_NATIVE_REQUIRED'),
+  remoteAgentProfileUpdate: (profileId, patch) => IS_TAURI ? invoke('remote_agent_profile_update', { profileId, sessionId: null, autoReconnect: null, reviewedSession: null, ...patch }) : Promise.reject('REMOTE_NATIVE_REQUIRED'),
+  remoteAgentForget: (profileId) => IS_TAURI ? invoke('remote_agent_forget', { profileId }) : Promise.reject('REMOTE_NATIVE_REQUIRED'),
   remoteAgentCatalog: (connectionId) => IS_TAURI ? invoke('remote_agent_catalog', { connectionId }) : Promise.reject('REMOTE_NATIVE_REQUIRED'),
   remoteAgentHistory: (connectionId, sessionId) => IS_TAURI ? invoke('remote_agent_history', { connectionId, sessionId }) : Promise.reject('REMOTE_NATIVE_REQUIRED'),
   remoteAgentWatch: (connectionId, sessionId) => IS_TAURI ? invoke('remote_agent_watch', { connectionId, sessionId }) : Promise.reject('REMOTE_NATIVE_REQUIRED'),

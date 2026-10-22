@@ -182,15 +182,11 @@
         </div>
         <div v-show="!isMobile && activeDrawer === 'work'" class="drawer-content">
           <nav class="settings-nav">
-            <button
-              v-for="item in workNavItems"
-              :key="item.id"
-              class="settings-nav-item"
-              :class="{ active: activeWorkPanel === item.id }"
-              @click="activeWorkPanel = item.id"
-            >
-              <component :is="item.icon" :size="16" />
-              <span>{{ item.label }}</span>
+            <button class="settings-nav-item" @click="openWorkRecords">
+              <BriefcaseBusiness :size="16" /><span>{{ $t('remote_agent.project_records') }}</span>
+            </button>
+            <button class="settings-nav-item" @click="activeSettingsPanel = 'connections'; activeDrawer = 'settings'">
+              <Settings :size="16" /><span>{{ $t('remote_agent.manage') }}</span>
             </button>
           </nav>
         </div>
@@ -380,7 +376,7 @@ import { getModelMeta } from '@/composables/useModelSwitcher';
 import { useDailyBrief } from '@/composables/useDailyBrief.js';
 import { handleStartupSyncOutcome } from '@/sync/pairing-flow.js';
 import { createLayoutState } from '@/layout/layout-mode.js';
-import { DEFAULT_WORK_VIEW, WORK_VIEW_ITEMS } from '@/work/work-view-navigation.js';
+import { DEFAULT_WORK_VIEW } from '@/work/work-view-navigation.js';
 import { normalizeAccentColor } from '@/constants/theme.js';
 
 function restoreAccentColor(value) {
@@ -410,6 +406,7 @@ const isSetupComplete = ref(false);
 const currentView = ref('chat');  // legacy — kept for backward compat during transition
 const activeDrawer = ref('chat');         // 'chat' | 'schedule' | 'work' | 'knowledge' | 'settings'
 provide('activeDrawer', activeDrawer);
+provide('openRemoteConnections', () => { activeSettingsPanel.value = 'connections'; activeDrawer.value = 'settings'; });
 const activeSettingsPanel = ref('model'); // 'model' | 'connections' | 'workspace' | 'daily_routine' | 'appearance' | 'about'
 const activeSchedulePanel = ref('timeline'); // 'timeline' | 'todo' | 'cron'
 const activeWorkPanel = ref(DEFAULT_WORK_VIEW);
@@ -614,10 +611,9 @@ const scheduleNavItems = computed(() => [
   { id: 'cron', icon: Timer, label: t('inbox.auto_tasks') || '计划任务' },
 ]);
 
-const workNavItems = computed(() => WORK_VIEW_ITEMS.map(item => ({
-  ...item,
-  label: t(item.labelKey),
-})));
+function openWorkRecords() {
+  window.dispatchEvent(new CustomEvent('work:open-records'));
+}
 
 const modelInfo = computed(() => {
   if (!currentModel.value) return { name: t('app.not_configured'), logo: null };

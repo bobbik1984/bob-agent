@@ -1,0 +1,21 @@
+{
+  "project_id": "bob_agent",
+  "basis": "用户授权 0.9.30 改用系统解锁并测试；事实见 docs/evidence/remote-agent/RH-02-system-unlock.md。Windows/前端已实测，Android 编译和真机未执行；不发布、不更新外部看板。",
+  "files": [
+    {
+      "path": "progress.yaml",
+      "sha256": "5f4aec1043168dc11df8a5f870345d6052b7ee13ba3760fe9e3a0f4e795e88d7",
+      "replacements": [
+        {"old": "  current_task: 'REMOTE-HARNESS-RH02 (0.9.30 连接记忆、安全重连与 Work 分层本地通过；Rust 359/1 ignored、前端 96、双尺寸组件通过；未构建发布，X1T/真机待验)'", "new": "  current_task: 'REMOTE-HARNESS-RH02 (0.9.30 系统解锁替代 Bob 密码；Windows DPAPI/Rust 363+1 ignored、前端 99、双尺寸通过；Android 原生编译与系统认证真机待验，未发布)'"},
+        {"old": "- name: Work 通用远程 Agent 接入\n  tasks:", "new": "- name: Work 通用远程 Agent 接入\n  tasks:\n  - text: 0.9.30 系统凭据保护：Windows DPAPI、Android Keystore 与系统认证代码；Windows/前端已测试，Android 原生编译与真机待验\n    status: active"}
+      ]
+    },
+    {
+      "path": "todo.md",
+      "sha256": "cc907d61128fb69beecb59bce86992fc7c3e0d13ea5ae036efe14a00865c8dd9",
+      "replacements": [
+        {"old": "## 当前增量：Work 通用远程 Agent 接入", "new": "## 当前增量：Work 通用远程 Agent 接入\n\n- [x] 0.9.30 系统解锁代码与 Windows/前端本地验证：新库取消 Bob 密码，Windows 当前用户 DPAPI、Android 11+ Keystore/CryptoObject 系统认证；旧试验版密码库一次性事务迁移。Rust 363 passed/1 ignored、前端 99、双尺寸页面通过；Android 编译/认证未验证，不能标双端完成。[证据](docs/evidence/remote-agent/RH-02-system-unlock.md)。\n- [ ] 0.9.30 Android 系统解锁候选验收：原生插件 CI 编译与签名包验证；PIN/强指纹或人脸、取消/后台/超时、无锁屏/密钥失效、杀进程重开及旧库迁移。沿用同源 PC/APK 发布门禁，未发布。"}
+      ]
+    }
+  ]
+}
