@@ -1,6 +1,6 @@
 # Bob Agent 用户手册 / User Guide
 
-## 0.9.30 远程执行端操作补充（本地实现，安装包尚未交付）
+## 0.9.30 远程执行端操作补充（双端候选已生成，真机待验）
 
 此节适用于包含本轮改动的 0.9.30；不会改变已安装 0.9.29 的界面。
 
@@ -16,7 +16,9 @@
 
 旧试验版若已保存密码库，只在迁移提示出现时输入一次旧密码；迁移失败保留原库。系统密钥不可用时不要卸载或清除数据，先在原设备/账户重试。手机未设置锁屏或低于 Android 11 时不启用连接保存，不降级为明文。Android 认证实际体验尚待候选 APK 验证。
 
-English: In Settings → Connections, choose Unlock with system. Android 11+ uses the system screen-lock credential or supported strong biometrics; Windows uses current-user DPAPI, not a separate Bob password or mandatory Hello prompt. Only an existing preview vault needs its old password once for migration. Cancellation preserves saved data. Work restores sessions without resending commands. Expired DSH authentication requires a new token. Existing local projects and records remain available. This 0.9.30 increment has not yet been packaged or Android-device-tested.
+English: In Settings → Connections, choose Unlock with system. Android 11+ uses the system screen-lock credential or supported strong biometrics; Windows uses current-user DPAPI, not a separate Bob password or mandatory Hello prompt. Only an existing preview vault needs its old password once for migration. Cancellation preserves saved data. Work restores sessions without resending commands. Expired DSH authentication requires a new token. Existing local projects and records remain available. Same-source Windows and signed Android candidates are built; Android device acceptance remains pending.
+
+候选下载与逐项测试：[0.9.30 交付记录](evidence/remote-agent/release-0.9.30-candidate.md)。
 
 > **Version v0.9.5 (Tauri v2)**
 >

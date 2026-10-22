@@ -1,0 +1,27 @@
+{
+  "project_id": "bob_agent",
+  "basis": "用户授权 GitHub Actions 双端候选构建；同源提交 1d5af0e76f88e7473a5073f14f23fde19e711259 的 Windows 39752315689 / Android 39752315657 均 success。证据 release-0.9.30-candidate.md。仅投影候选构建事实，不标真机通过，不更新官网稳定别名。",
+  "files": [
+    {
+      "path": "progress.yaml",
+      "sha256": "50e94ab989d59fa6296fe52ac457e06a36b8d0a73a01d0e54d824724a1d4a906",
+      "replacements": [
+        {"old": "  current_task: 'REMOTE-HARNESS-RH02 (0.9.30 系统解锁替代 Bob 密码；Windows DPAPI/Rust 363+1 ignored、前端 99、双尺寸通过；Android 原生编译与系统认证真机待验，未发布)'", "new": "  current_task: 'REMOTE-HARNESS-RH02 (0.9.30 同源 1d5af0e 双端 Actions 候选构建成功；系统解锁/连接记忆/Work 分层；Android 系统认证及 DSH 真机待验，未覆盖官网稳定版)'"},
+        {"old": "Windows/前端已测试，Android 原生编译与真机待验", "new": "Windows/前端已测试，Android 原生 CI 编译及签名通过，系统认证真机待验"},
+        {"old": "（本地测试通过，未打包/现场验收）", "new": "（本地测试通过，同源双端候选已构建，现场验收待执行）"}
+      ]
+    },
+    {
+      "path": "todo.md",
+      "sha256": "30ee898a78481b02da1cada64f5055471fd9ee780f7835696b5b8fbbc64037c7",
+      "replacements": [
+        {"old": "## 当前增量：Work 通用远程 Agent 接入", "new": "## 当前增量：Work 通用远程 Agent 接入\n\n- [x] 0.9.30 双端候选构建：同一提交 `1d5af0e76f88e7473a5073f14f23fde19e711259`，Windows Actions `39752315689`、Android `39752315657` 均 success；Android 原生插件已编译并签名。仅交付候选，不代表手机系统认证或 DSH 真机验收。[下载与测试记录](docs/evidence/remote-agent/release-0.9.30-candidate.md)。"},
+        {"old": "Android 编译/认证未验证，不能标双端完成。", "new": "Android 编译已由本轮 CI 验证，系统认证真机未验证，不能标双端使用验收完成。"},
+        {"old": "原生插件 CI 编译与签名包验证；PIN/强指纹或人脸", "new": "原生插件 CI 编译及签名已通过；仍需验证 PIN/强指纹或人脸"},
+        {"old": "沿用同源 PC/APK 发布门禁，未发布。", "new": "同源 PC/APK 候选已生成，真机验收未执行。"},
+        {"old": "尚未生成 0.9.30 安装包或发布。", "new": "本轮已生成 0.9.30 同源双端候选，未覆盖官网稳定版。"},
+        {"old": "经发布授权生成同源 PC/APK 后验证进程重启解锁恢复", "new": "使用已生成同源 PC/APK 验证进程重启解锁恢复"}
+      ]
+    }
+  ]
+}

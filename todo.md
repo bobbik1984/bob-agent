@@ -2,11 +2,13 @@
 
 ## 当前增量：Work 通用远程 Agent 接入
 
-- [x] 0.9.30 系统解锁代码与 Windows/前端本地验证：新库取消 Bob 密码，Windows 当前用户 DPAPI、Android 11+ Keystore/CryptoObject 系统认证；旧试验版密码库一次性事务迁移。Rust 363 passed/1 ignored、前端 99、双尺寸页面通过；Android 编译/认证未验证，不能标双端完成。[证据](docs/evidence/remote-agent/RH-02-system-unlock.md)。
-- [ ] 0.9.30 Android 系统解锁候选验收：原生插件 CI 编译与签名包验证；PIN/强指纹或人脸、取消/后台/超时、无锁屏/密钥失效、杀进程重开及旧库迁移。沿用同源 PC/APK 发布门禁，未发布。
+- [x] 0.9.30 双端候选构建：同一提交 `1d5af0e76f88e7473a5073f14f23fde19e711259`，Windows Actions `39752315689`、Android `39752315657` 均 success；Android 原生插件已编译并签名。仅交付候选，不代表手机系统认证或 DSH 真机验收。[下载与测试记录](docs/evidence/remote-agent/release-0.9.30-candidate.md)。
 
-- [x] 0.9.30 本地实现：连接配置迁入设置，独立加密记忆 Cookie/最近会话，应用级有限安全重连；Work 主执行面板与原项目/工作记录分层保留。Rust 359 passed/1 ignored（远端专项 16），前端 96，版本契约 5，真实 Vue 手机/桌面夹具通过。[证据](docs/evidence/remote-agent/RH-02-connection-memory.md)。尚未生成 0.9.30 安装包或发布。
-- [ ] 0.9.30 候选与现场验收：经发布授权生成同源 PC/APK 后验证进程重启解锁恢复、认证过期、前后台断网、连续会话与未知结果核对；用户反馈初步联通不代替这一轮验收。
+- [x] 0.9.30 系统解锁代码与 Windows/前端本地验证：新库取消 Bob 密码，Windows 当前用户 DPAPI、Android 11+ Keystore/CryptoObject 系统认证；旧试验版密码库一次性事务迁移。Rust 363 passed/1 ignored、前端 99、双尺寸页面通过；Android 编译已由本轮 CI 验证，系统认证真机未验证，不能标双端使用验收完成。[证据](docs/evidence/remote-agent/RH-02-system-unlock.md)。
+- [ ] 0.9.30 Android 系统解锁候选验收：原生插件 CI 编译及签名已通过；仍需验证 PIN/强指纹或人脸、取消/后台/超时、无锁屏/密钥失效、杀进程重开及旧库迁移。同源 PC/APK 候选已生成，真机验收未执行。
+
+- [x] 0.9.30 本地实现：连接配置迁入设置，独立加密记忆 Cookie/最近会话，应用级有限安全重连；Work 主执行面板与原项目/工作记录分层保留。Rust 359 passed/1 ignored（远端专项 16），前端 96，版本契约 5，真实 Vue 手机/桌面夹具通过。[证据](docs/evidence/remote-agent/RH-02-connection-memory.md)。本轮已生成 0.9.30 同源双端候选，未覆盖官网稳定版。
+- [ ] 0.9.30 候选与现场验收：使用已生成同源 PC/APK 验证进程重启解锁恢复、认证过期、前后台断网、连续会话与未知结果核对；用户反馈初步联通不代替这一轮验收。
 
 - [/] RH-00/RH-01：通用原生连接与 DSH 浏览子集已本地验证；项目/会话/近期文字记录预览可用代码已落地，X1T 真实认证与重连未验收，不标节点整体完成。规格：[远程 Harness 接入](docs/REMOTE_HARNESS_INTEGRATION.md)；证据：[本地浏览子集](docs/evidence/remote-agent/RH-01-native-read-preview.md)。
 - [ ] RH-01 目标验证：安排在本地 RH-02 闭环之后，届时经私密输入核对实际端点版本、会话与断线；不以 X1T 凭据为本地开发前置。

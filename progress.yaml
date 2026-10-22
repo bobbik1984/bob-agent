@@ -8,14 +8,14 @@ project:
   - Vue 3
   - Desktop
   - Android
-  current_task: 'REMOTE-HARNESS-RH02 (0.9.30 系统解锁替代 Bob 密码；Windows DPAPI/Rust 363+1 ignored、前端 99、双尺寸通过；Android 原生编译与系统认证真机待验，未发布)'
+  current_task: 'REMOTE-HARNESS-RH02 (0.9.30 同源 1d5af0e 双端 Actions 候选构建成功；系统解锁/连接记忆/Work 分层；Android 系统认证及 DSH 真机待验，未覆盖官网稳定版)'
   development_plan: docs/REMOTE_HARNESS_INTEGRATION.md
 phases:
 - name: Work 通用远程 Agent 接入
   tasks:
-  - text: 0.9.30 系统凭据保护：Windows DPAPI、Android Keystore 与系统认证代码；Windows/前端已测试，Android 原生编译与真机待验
+  - text: 0.9.30 系统凭据保护：Windows DPAPI、Android Keystore 与系统认证代码；Windows/前端已测试，Android 原生 CI 编译及签名通过，系统认证真机待验
     status: active
-  - text: 0.9.30 本地增量：独立加密连接库、有限安全重连、Work 主会话及保留原项目记录（本地测试通过，未打包/现场验收）
+  - text: 0.9.30 本地增量：独立加密连接库、有限安全重连、Work 主会话及保留原项目记录（本地测试通过，同源双端候选已构建，现场验收待执行）
     status: done
   - text: RH-00/RH-01 通用连接与 DSH 浏览子集（本地测试通过，目标端点与重连尚未验证）
     status: active
