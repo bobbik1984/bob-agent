@@ -339,3 +339,71 @@ fn encoded_receipt_expansion_roundtrips_and_limits_match_writer_reader() {
     .unwrap();
     assert!(read_receipt(&f.0, "wrong-owner").is_err());
 }
+
+
+#[test]
+fn catalog_and_multi_session_ipc_commands_persist_and_switch_cleanly() {
+    let f = Fixture::new();
+    let (host, view) = app(Some(LocalApp::open(&f.db()).unwrap()));
+    let boot = invoke(&view, "app_bootstrap", json!({})).unwrap();
+    let default_s = boot["session_id"].as_str().unwrap().to_owned();
+
+    let snap0 = invoke(&view, "app_catalog", json!({})).unwrap();
+    assert_eq!(snap0["selected_conversation_id"], default_s);
+    assert_eq!(snap0["conversations"].as_array().unwrap().len(), 1);
+
+    let snap1 = invoke(
+        &view,
+        "app_project_create",
+        json!({"projectId":"proj-1","title":"Project One"}),
+    )
+    .unwrap();
+    assert_eq!(snap1["projects"].as_array().unwrap().len(), 1);
+
+    let snap2 = invoke(
+        &view,
+        "app_conversation_create",
+        json!({"conversationId":"conv-2","projectId":"proj-1","title":"Second Session"}),
+    )
+    .unwrap();
+    assert_eq!(snap2["selected_conversation_id"], "conv-2");
+    assert_eq!(snap2["conversations"].as_array().unwrap().len(), 2);
+
+    let vs = invoke(
+        &view,
+        "app_view_state_save",
+        json!({"conversationId":"conv-2","draft":"my draft","scrollAnchorMessageId":"m-0","scrollOffset":120,"markRead":false}),
+    )
+    .unwrap();
+    assert_eq!(vs["draft"], "my draft");
+    assert_eq!(vs["draft_revision"], 1);
+    assert_eq!(vs["scroll_offset"], 120);
+
+    invoke(
+        &view,
+        "app_accept",
+        json!({"requestId":"r-c2","messageId":"m-c2","sessionId":"conv-2","content":"hello conv 2","expectedDraftRevision":1}),
+    )
+    .unwrap();
+    let hist2 = invoke(&view, "app_history", json!({"sessionId":"conv-2"})).unwrap();
+    assert_eq!(hist2.as_array().unwrap().len(), 1);
+    assert_eq!(hist2[0]["content"], "hello conv 2");
+
+    let prefs = invoke(
+        &view,
+        "app_preferences_save",
+        json!({"sidebarGroupMode":"device","locale":"en-US","theme":"dark"}),
+    )
+    .unwrap();
+    assert_eq!(prefs["sidebar_group_mode"], "device");
+    assert_eq!(prefs["locale"], "en-US");
+    assert_eq!(prefs["theme"], "dark");
+
+    *host.state::<AppState>().0.lock().unwrap() = None;
+    drop(view);
+    drop(host);
+
+    let (_host, view) = app(Some(LocalApp::open(&f.db()).unwrap()));
+    let reopened_boot = invoke(&view, "app_bootstrap", json!({})).unwrap();
+    assert_eq!(reopened_boot["session_id"], "conv-2");
+}

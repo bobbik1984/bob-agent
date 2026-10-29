@@ -292,7 +292,6 @@ fn handle_request(
                 }
                 if config.policy.expires_at <= at
                     || config.policy.device_id != r.origin_device_id
-                    || config.policy.session_id != r.session_id
                 {
                     return app
                         .host_reject_message(&ctx, r, "HOME_EXECUTION_NOT_APPROVED", at)

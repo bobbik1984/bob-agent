@@ -11,22 +11,65 @@ export function createKernelBridge(invoke, isAvailable) {
     syncHome: () => call('app_home_sync'),
     pairingCapabilities: () => call('app_pairing_capabilities'),
     pairingQrCreate: () => call('app_pairing_qr_create'),
-    pairingQrPropose: invitationCode => call('app_pairing_qr_propose',{invitationCode}),
+    pairingQrPropose: invitationCode => call('app_pairing_qr_propose', { invitationCode }),
     scanPairingCode: () => call('app_scan_pairing_code'),
     pairingDeviceCode: () => call('app_pairing_device_code'),
     pairingReset: () => call('app_pairing_reset'),
     pairingRecover: () => call('app_pairing_recover'),
     pairingStatus: () => call('app_pairing_status'),
-    pairingHomeInvite: (deviceCode, bindAddress, advertisedHost) => call('app_pairing_home_invite', {deviceCode,bindAddress,advertisedHost}),
-    pairingPropose: invitationCode => call('app_pairing_propose', {invitationCode}),
+    pairingHomeInvite: (deviceCode, bindAddress, advertisedHost) =>
+      call('app_pairing_home_invite', { deviceCode, bindAddress, advertisedHost }),
+    pairingPropose: invitationCode => call('app_pairing_propose', { invitationCode }),
     pairingRevoke: () => call('app_pairing_revoke'),
     pairingHomeConfirm: () => call('app_pairing_home_confirm'),
     pairingFinish: () => call('app_pairing_finish'),
     pairingEnableHome: () => call('app_pairing_enable_home'),
     readiness: () => call('app_readiness'),
     history: sessionId => call('app_history', { sessionId }),
-    acceptMessage: request => call('app_accept', { requestId: request.request_id, messageId: request.message_id, sessionId: request.session_id, content: request.content }),
+    acceptMessage: request => {
+      const payload = {
+        requestId: request.request_id,
+        messageId: request.message_id,
+        sessionId: request.session_id,
+        content: request.content,
+      };
+      if (request.expected_draft_revision !== undefined) {
+        payload.expectedDraftRevision = request.expected_draft_revision;
+      }
+      return call('app_accept', payload);
+    },
     prewarm: () => call('app_prewarm'),
+    catalog: () => call('app_catalog'),
+    createProject: (projectId, title) => call('app_project_create', { projectId, title }),
+    createConversation: (conversationId, projectId, title) =>
+      call('app_conversation_create', {
+        conversationId,
+        projectId: projectId ?? null,
+        title: title ?? '',
+      }),
+    selectConversation: conversationId =>
+      call('app_conversation_select', { conversationId }),
+    saveViewState: ({
+      conversationId,
+      draft,
+      scrollAnchorMessageId,
+      scrollOffset,
+      markRead,
+    }) =>
+      call('app_view_state_save', {
+        conversationId,
+        draft: draft ?? null,
+        scrollAnchorMessageId:
+          scrollAnchorMessageId === undefined ? null : scrollAnchorMessageId,
+        scrollOffset: scrollOffset ?? null,
+        markRead: markRead ?? false,
+      }),
+    savePreferences: ({ sidebarGroupMode, locale, theme }) =>
+      call('app_preferences_save', {
+        sidebarGroupMode: sidebarGroupMode ?? null,
+        locale: locale ?? null,
+        theme: theme ?? null,
+      }),
     execute: requestId => call('app_execute', { requestId }),
     executions: sessionId => call('app_executions', { sessionId }),
     cancel: executionId => call('app_cancel', { executionId }),

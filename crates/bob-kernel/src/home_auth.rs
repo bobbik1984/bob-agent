@@ -64,7 +64,7 @@ pub(crate) fn authorize(
         return Err(Error::InvalidTransition);
     }
     home(tx, &ctx.local_home_device_id, ctx.epoch)?;
-    let valid:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM home_device_authorizations a JOIN devices d ON d.id=a.device_id JOIN home_conversation_grants g ON g.device_id=a.device_id WHERE a.device_id=?1 AND a.home_device_id=?2 AND a.home_epoch=?3 AND a.identity_sha256=?4 AND a.revision=?5 AND a.revoked=0 AND d.trust_state='paired' AND length(d.public_key_ref)>0 AND d.public_key_ref=a.paired_key_ref AND g.conversation_id=?6 AND g.expires_at>?7 AND (?8=0 OR g.allow_cancel=1) AND NOT EXISTS(SELECT 1 FROM conversations c WHERE c.id=g.conversation_id AND c.archived_at IS NOT NULL))",params![ctx.authenticated_origin_device_id,ctx.local_home_device_id,ctx.epoch,ctx.identity_sha256,ctx.revision,ctx.authorized_conversation_id,now,cancel],|r|r.get(0))?;
+    let valid: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM home_device_authorizations a JOIN devices d ON d.id=a.device_id JOIN home_conversation_grants g ON g.device_id=a.device_id WHERE a.device_id=?1 AND a.home_device_id=?2 AND a.home_epoch=?3 AND a.identity_sha256=?4 AND a.revision=?5 AND a.revoked=0 AND d.trust_state='paired' AND length(d.public_key_ref)>0 AND d.public_key_ref=a.paired_key_ref AND g.conversation_id=?6 AND g.expires_at>?7 AND (?8=0 OR g.allow_cancel=1) AND NOT EXISTS(SELECT 1 FROM conversations c WHERE c.id=g.conversation_id AND c.archived_at IS NOT NULL))",params![ctx.authenticated_origin_device_id,ctx.local_home_device_id,ctx.epoch,ctx.identity_sha256,ctx.revision,ctx.authorized_conversation_id,now,cancel],|r|r.get(0))?;
     if valid {
         Ok(())
     } else {
@@ -100,11 +100,11 @@ impl Store {
             .db
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         home(&tx, home_id, epoch)?;
-        let paired:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM devices WHERE id=?1 AND trust_state='paired' AND length(public_key_ref)>0)",[device],|r|r.get(0))?;
+        let paired: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM devices WHERE id=?1 AND trust_state='paired' AND length(public_key_ref)>0)",[device],|r|r.get(0))?;
         if !paired {
             return Err(Error::InvalidTransition);
         }
-        let old:Option<(i64,String,i64,String)>=tx.query_row("SELECT revision,identity_sha256,home_epoch,home_device_id FROM home_device_authorizations WHERE device_id=?1",[device],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).optional()?;
+        let old: Option<(i64, String, i64, String)> = tx.query_row("SELECT revision,identity_sha256,home_epoch,home_device_id FROM home_device_authorizations WHERE device_id=?1",[device],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).optional()?;
         if old.as_ref().map(|v| v.0).unwrap_or(0) != expected_revision
             || old.as_ref().is_some_and(|v| v.1 != identity_sha256)
         {
@@ -118,6 +118,10 @@ impl Store {
         if old.as_ref().is_some_and(|v| v.2 != epoch || v.3 != home_id) {
             tx.execute(
                 "DELETE FROM home_conversation_grants WHERE device_id=?1",
+                [device],
+            )?;
+            tx.execute(
+                "DELETE FROM home_device_session_policies WHERE device_id=?1",
                 [device],
             )?;
         }
@@ -146,6 +150,10 @@ impl Store {
             "DELETE FROM home_conversation_grants WHERE device_id=?1",
             [device],
         )?;
+        tx.execute(
+            "DELETE FROM home_device_session_policies WHERE device_id=?1",
+            [device],
+        )?;
         tx.commit()?;
         Ok(revision)
     }
@@ -165,9 +173,19 @@ impl Store {
         }
         let tx = self
             .db
-            .transaction_with_behavior(TransactionBehavior::Deferred)?;
-        let found:Option<(String,i64)>=tx.query_row("SELECT device_id,revision FROM home_device_authorizations WHERE identity_sha256=?1",[observed_identity_sha256],|r|Ok((r.get(0)?,r.get(1)?))).optional()?;
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let found: Option<(String, i64)> = tx.query_row("SELECT device_id,revision FROM home_device_authorizations WHERE identity_sha256=?1",[observed_identity_sha256],|r|Ok((r.get(0)?,r.get(1)?))).optional()?;
         let (device, revision) = found.ok_or(Error::InvalidTransition)?;
+        if !conversation.trim().is_empty() && conversation.len() <= 512 {
+            tx.execute(
+                "INSERT OR IGNORE INTO home_conversation_grants(device_id,conversation_id,expires_at,allow_cancel)
+                 SELECT p.device_id,?4,p.expires_at,p.allow_cancel
+                 FROM home_device_session_policies p
+                 JOIN home_device_authorizations a ON a.device_id=p.device_id
+                 WHERE p.device_id=?1 AND a.home_device_id=?2 AND a.home_epoch=?3 AND a.revoked=0 AND p.expires_at>?5",
+                params![device, home_id, epoch, conversation, now],
+            )?;
+        }
         let ctx = HomeMessageContext {
             local_home_device_id: home_id.into(),
             authenticated_origin_device_id: device,

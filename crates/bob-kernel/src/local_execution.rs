@@ -38,7 +38,7 @@ fn execution_rows(
     origin: &str,
     managed: bool,
 ) -> Result<Vec<LocalExecution>> {
-    let mut q=db.prepare("SELECT e.id,e.request_id,m.id,e.status,m.content_json,e.stop_requested_at IS NOT NULL,d.last_error,e.resolved_json FROM executions e JOIN tasks t ON t.id=e.task_id JOIN messages m ON m.id=t.source_message_id JOIN runner_dispatches d ON d.execution_id=e.id WHERE ((?4=0 AND m.conversation_id=?1 AND m.origin_device_id=?2) OR (?4=1 AND EXISTS(SELECT 1 FROM workspaces w WHERE w.id=e.workspace_id AND w.device_id=?2))) AND d.runner_instance_id=?3 ORDER BY e.rowid")?;
+    let mut q = db.prepare("SELECT e.id,e.request_id,m.id,e.status,m.content_json,e.stop_requested_at IS NOT NULL,d.last_error,e.resolved_json,e.contract_json FROM executions e JOIN tasks t ON t.id=e.task_id JOIN messages m ON m.id=t.source_message_id JOIN runner_dispatches d ON d.execution_id=e.id WHERE ((?4=0 AND m.conversation_id=?1 AND m.origin_device_id=?2) OR (?4=1 AND EXISTS(SELECT 1 FROM workspaces w WHERE w.id=e.workspace_id AND w.device_id=?2))) AND d.runner_instance_id=?3 ORDER BY e.rowid")?;
     let rows = q.query_map(params![session, origin, RUNNER, managed], |r| {
         Ok((
             r.get::<_, String>(0)?,
@@ -49,11 +49,13 @@ fn execution_rows(
             r.get::<_, bool>(5)?,
             r.get::<_, Option<String>>(6)?,
             r.get::<_, Option<String>>(7)?,
+            r.get::<_, String>(8)?,
         ))
     })?;
     let mut result = Vec::new();
     for row in rows {
-        let (id, request_id, message_id, status, content, stop_requested, error, resolved) = row?;
+        let (id, request_id, message_id, status, content, stop_requested, error, resolved, contract) =
+            row?;
         let resolved: serde_json::Value = match resolved {
             Some(s) => serde_json::from_str(&s)?,
             None => serde_json::Value::Null,
@@ -67,10 +69,17 @@ fn execution_rows(
             None
         };
         let content: serde_json::Value = serde_json::from_str(&content)?;
-        let prompt = content["text"]
+        let raw_prompt = content["text"]
             .as_str()
             .ok_or(Error::InvalidTransition)?
             .to_owned();
+        let contract_val: serde_json::Value =
+            serde_json::from_str(&contract).unwrap_or(serde_json::Value::Null);
+        let prompt = contract_val["effective_prompt"]
+            .as_str()
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned)
+            .unwrap_or(raw_prompt);
         result.push(LocalExecution {
             id,
             request_id,
@@ -94,10 +103,8 @@ impl LocalApp {
     }
 
     pub fn local_executions(&self, session_id: &str) -> Result<Vec<LocalExecution>> {
-        if session_id != self.session {
-            return Err(Error::InvalidTransition);
-        }
-        executions(&self.store.db, &self.session, &self.origin)
+        self.ensure_active_conversation(session_id)?;
+        executions(&self.store.db, session_id, &self.origin)
     }
 
     /// Must be called before spawning or releasing a suspended child. A lost
@@ -115,7 +122,7 @@ impl LocalApp {
             .store
             .db
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        if let Some(prior) = executions(&tx, &self.session, &self.origin)?
+        if let Some(prior) = owned_executions(&tx, &self.origin)?
             .into_iter()
             .find(|e| e.request_id == request_id)
         {
@@ -127,18 +134,25 @@ impl LocalApp {
             [&self.origin],
             |r| r.get(0),
         )?;
-        let blocked:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM executions e JOIN runner_dispatches d ON d.execution_id=e.id WHERE d.runner_instance_id=?1 AND e.status IN ('pending','dispatching','running','paused','unknown'))",[RUNNER],|r|r.get(0))?;
+        let blocked: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM executions e JOIN runner_dispatches d ON d.execution_id=e.id WHERE d.runner_instance_id=?1 AND e.status IN ('pending','dispatching','running','paused','unknown'))",[RUNNER],|r|r.get(0))?;
         if !authority || blocked {
             return Err(Error::InvalidTransition);
         }
-        let source:Option<(String,String,Option<String>)>=tx.query_row("SELECT m.id,m.content_json,c.project_id FROM messages m JOIN intent_outbox o ON o.request_id=m.request_id JOIN conversations c ON c.id=m.conversation_id WHERE m.request_id=?1 AND m.conversation_id=?2 AND m.origin_device_id=?3 AND m.role='user' AND o.target_device_id=?3 AND o.send_state='local_saved' AND c.archived_at IS NULL",params![request_id,self.session,self.origin],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).optional()?;
-        let (message_id, content, existing_project) = source.ok_or(Error::InvalidTransition)?;
+        let source: Option<(String, String, Option<String>, String)> = tx
+            .query_row(
+                "SELECT m.id,m.content_json,c.project_id,m.conversation_id FROM messages m JOIN intent_outbox o ON o.request_id=m.request_id JOIN conversations c ON c.id=m.conversation_id WHERE m.request_id=?1 AND m.origin_device_id=?2 AND m.role='user' AND o.target_device_id=?2 AND o.send_state='local_saved' AND c.archived_at IS NULL",
+                params![request_id, self.origin],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )
+            .optional()?;
+        let (message_id, content, existing_project, conv_id) =
+            source.ok_or(Error::InvalidTransition)?;
         let result = create_execution(
             &tx,
             request_id,
             workspace_ref,
             &self.origin,
-            &self.session,
+            &conv_id,
             message_id,
             content,
             existing_project,
@@ -418,7 +432,17 @@ impl LocalApp {
             let reply = reply.unwrap();
             let binding = format!("native:{id}");
             let message = format!("reply:{id}");
-            tx.execute("INSERT INTO native_sessions(id,conversation_id,device_id,workspace_id,service_instance_id,harness,native_session_id,capability_json) SELECT ?1,?2,?3,workspace_id,?4,'codex',?5,?6 FROM executions WHERE id=?7",params![binding,session,self.origin,RUNNER,reply.native_session_id,json!({"ephemeral":true,"read_only":true}).to_string(),id])?;
+            let ns_exists: bool = tx.query_row(
+                "SELECT EXISTS(SELECT 1 FROM native_sessions WHERE device_id=?1 AND service_instance_id=?2 AND harness='codex' AND native_session_id=?3)",
+                params![self.origin, RUNNER, reply.native_session_id],
+                |r| r.get(0),
+            )?;
+            let ns_key = if ns_exists {
+                format!("{}:{id}", reply.native_session_id)
+            } else {
+                reply.native_session_id.clone()
+            };
+            tx.execute("INSERT INTO native_sessions(id,conversation_id,device_id,workspace_id,service_instance_id,harness,native_session_id,capability_json) SELECT ?1,?2,?3,workspace_id,?4,'codex',?5,?6 FROM executions WHERE id=?7",params![binding,session,self.origin,RUNNER,ns_key,json!({"ephemeral":true,"read_only":true}).to_string(),id])?;
             tx.execute("INSERT INTO messages VALUES(?1,?2,?3,NULL,'assistant',?4,?6,?5)",params![message,session,self.origin,json!({"text":reply.text,"reply_to":local.message_id,"execution_id":id,"source":"codex_execution","native_session_id":reply.native_session_id,"evidence_id":evidence_id}).to_string(),now,acceptance])?;
             tx.execute(
                 "INSERT INTO evidence_links VALUES(?1,'message',?2,'reply_source')",
@@ -480,17 +504,74 @@ pub(crate) fn create_execution(
     now: i64,
 ) -> Result<LocalExecution> {
     let content: serde_json::Value = serde_json::from_str(&content)?;
-    let prompt = content["text"]
+    let raw_prompt = content["text"]
         .as_str()
         .filter(|s| !s.trim().is_empty())
         .ok_or(Error::InvalidTransition)?
         .to_owned();
+
+    let has_prior_assistant: bool = tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM messages WHERE conversation_id=?1 AND role='assistant' AND rowid < (SELECT rowid FROM messages WHERE id=?2))",
+        params![session, message_id],
+        |r| r.get(0),
+    )?;
+    let (prompt, continuation_mode, context_message_ids) = if has_prior_assistant {
+        let mut prior_stmt = tx.prepare(
+            "SELECT id, role, content_json
+             FROM messages
+             WHERE conversation_id=?1 AND id!=?2 AND rowid < (SELECT rowid FROM messages WHERE id=?2) AND role IN ('user','assistant')
+             ORDER BY rowid DESC
+             LIMIT 6",
+        )?;
+        let mut prior_rows: Vec<(String, String, String)> = prior_stmt
+            .query_map(params![session, message_id], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        prior_rows.reverse();
+        let mut ctx_ids = Vec::with_capacity(prior_rows.len());
+        let mut ctx_lines = Vec::with_capacity(prior_rows.len());
+        let mut total_chars = 0usize;
+        for (mid, role, cjson) in prior_rows {
+            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&cjson) {
+                if let Some(text) = parsed.get("text").and_then(|v| v.as_str()) {
+                    let snippet: String = text.trim().chars().take(1200).collect();
+                    if !snippet.is_empty() && total_chars + snippet.len() <= 8000 {
+                        total_chars += snippet.len();
+                        ctx_ids.push(mid);
+                        let speaker = if role == "assistant" {
+                            "Assistant"
+                        } else {
+                            "User"
+                        };
+                        ctx_lines.push(format!("{speaker}: {snippet}"));
+                    }
+                }
+            }
+        }
+        if ctx_lines.is_empty() {
+            (raw_prompt, "initial_turn", Vec::new())
+        } else {
+            let combined = format!(
+                "[Conversation Context (bounded_history_context, native_session_resume=false)]\n{}\n\n[Current User Request]\n{}",
+                ctx_lines.join("\n"),
+                raw_prompt
+            );
+            (combined, "bounded_history_context", ctx_ids)
+        }
+    } else {
+        (raw_prompt, "initial_turn", Vec::new())
+    };
+
     let key = digest(request_id.as_bytes());
     let id = format!("local-execution:{key}");
     let task = format!("local-task:{key}");
     let owner_job = format!("Local\\BobReadOnly-{}", id.replace(':', "_"));
     let owner = json!({"job_name":owner_job,"owner_policy":"windows-job-gated-v1"}).to_string();
-    let project = existing_project.unwrap_or_else(|| format!("local-project:{}", session));
+    let user_project = existing_project.filter(|p| !p.starts_with("local-project:"));
+    let project = user_project
+        .clone()
+        .unwrap_or_else(|| format!("local-project:{}", session));
     let workspace = format!(
         "local-workspace:{}",
         digest(format!("{}:{workspace_ref}", home_id).as_bytes())
@@ -507,13 +588,30 @@ pub(crate) fn create_execution(
         "INSERT OR IGNORE INTO project_workspaces VALUES(?1,?2)",
         params![project, workspace],
     )?;
-    // The conversation remains local until a real Home protocol says otherwise.
-    tx.execute(
-        "UPDATE conversations SET project_id=?2 WHERE id=?1 AND project_id IS NULL",
-        params![session, project],
-    )?;
+    // Only bind a user project to the conversation; never pollute conversations.project_id
+    // with internal temporary runner projects (`local-project:*`).
+    if let Some(ref real_project) = user_project {
+        tx.execute(
+            "UPDATE conversations SET project_id=?2 WHERE id=?1 AND project_id IS NULL",
+            params![session, real_project],
+        )?;
+    }
     tx.execute("INSERT INTO tasks(id,project_id,source_message_id,title,status,constraints_json,version,created_at,updated_at) VALUES(?1,?2,?3,'local read-only reply','queued',?4,1,?5,?5)",params![task,project,message_id,json!({"read_only":true,"ephemeral_workspace":true}).to_string(),now])?;
-    let contract=json!({"kind":if remote_grant.is_some(){"home_codex_reply"}else{"local_codex_reply"},"home_readonly_authorization":remote_grant,"source_message_id":message_id,"prompt_sha256":digest(prompt.as_bytes()),"workspace_ref":workspace_ref,"read_only":true,"automatic_retry":false}).to_string();
+    let contract = json!({
+        "kind": if remote_grant.is_some() { "home_codex_reply" } else { "local_codex_reply" },
+        "home_readonly_authorization": remote_grant,
+        "source_message_id": message_id,
+        "conversation_id": session,
+        "continuation_mode": continuation_mode,
+        "native_session_resume": false,
+        "context_message_ids": context_message_ids,
+        "effective_prompt": prompt,
+        "prompt_sha256": digest(prompt.as_bytes()),
+        "workspace_ref": workspace_ref,
+        "read_only": true,
+        "automatic_retry": false
+    })
+    .to_string();
     tx.execute("INSERT INTO executions(id,project_id,task_id,workspace_id,request_id,status,requested_json,contract_json,contract_sha256,version) VALUES(?1,?2,?3,?4,?5,'dispatching',?6,?7,?8,1)",params![id,project,task,workspace,request_id,json!({"harness":"codex","model":"cli_default","sandbox":"read-only"}).to_string(),contract,digest(contract.as_bytes())])?;
     tx.execute(
         "UPDATE executions SET resolved_json=?2 WHERE id=?1",
@@ -529,7 +627,7 @@ pub(crate) fn create_execution(
         |r| r.get(0),
     )?;
     tx.execute("INSERT INTO workspace_leases VALUES(?1,?2,?3,1,'held',?4) ON CONFLICT(workspace_id) DO UPDATE SET execution_id=excluded.execution_id,home_epoch=excluded.home_epoch,fencing_token=workspace_leases.fencing_token+1,state='held',updated_at=excluded.updated_at WHERE workspace_leases.state='released'",params![workspace,id,epoch,now])?;
-    let held:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM workspace_leases WHERE workspace_id=?1 AND execution_id=?2 AND state='held')",params![workspace,id],|r|r.get(0))?;
+    let held: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM workspace_leases WHERE workspace_id=?1 AND execution_id=?2 AND state='held')",params![workspace,id],|r|r.get(0))?;
     if !held {
         return Err(Error::InvalidTransition);
     }

@@ -5,7 +5,7 @@ const deferred = () => { let resolve, reject; const promise = new Promise((a,b) 
 function setup(acceptMessage, prewarm = async () => {}) {
   let ids=0; const shown=[];
   const ui=createSendController({ bridge:{acceptMessage,prewarm},
-    createIntent: content => ({ request_id:`r${++ids}`,message_id:`m${ids}`,content }),
+    createIntent: (content, sentRevision) => ({ request_id:`r${++ids}`,message_id:`m${ids}`,content,expected_draft_revision:sentRevision }),
     onAccepted: receipt => shown.push(receipt) });
   return {ui,shown};
 }
@@ -41,4 +41,15 @@ test('prewarm failure is silent; empty send creates nothing', async () => {
   let calls=0; const {ui}=setup(async x=>{calls++;return x;},async()=>{throw Error('offline');});
   await ui.prewarm(); assert.equal(ui.snapshot().errorKey,null);
   assert.equal(await ui.send(),null); assert.equal(calls,0);
+});
+test('loadDraft restores per-conversation draft and passes expected_draft_revision on send', async () => {
+  let seenIntent=null;
+  const {ui}=setup(async x=>{seenIntent=x;return {...x,draft_revision:3};});
+  ui.loadDraft('restored draft', 2);
+  assert.equal(ui.snapshot().draft,'restored draft');
+  assert.equal(ui.snapshot().revision,2);
+  await ui.send();
+  assert.equal(seenIntent.expected_draft_revision,2);
+  assert.equal(ui.snapshot().draft,'');
+  assert.equal(ui.snapshot().revision,3);
 });

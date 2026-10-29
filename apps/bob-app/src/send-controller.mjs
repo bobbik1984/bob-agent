@@ -12,12 +12,18 @@ export function createSendController({ bridge, createIntent, onAccepted }) {
     return Promise.resolve().then(() => bridge.prewarm()).catch(() => undefined);
   }
   function setDraft(value) { draft = value; revision += 1; }
+  function loadDraft(value, rev = 0) {
+    draft = value ?? '';
+    revision = typeof rev === 'number' && rev >= 0 ? rev : 0;
+    retry = null;
+    lastError = null;
+  }
   function send() {
     if (pending) return pending;
     if (!draft.trim()) return Promise.resolve(null);
     const text = draft;
     const sentRevision = revision;
-    const intent = retry?.revision === revision ? retry.intent : createIntent(text);
+    const intent = retry?.revision === revision ? retry.intent : createIntent(text, sentRevision);
     retry = { revision, intent };
     lastError = null;
     pending = Promise.resolve().then(() => bridge.acceptMessage(intent)).then(receipt => {
@@ -39,6 +45,11 @@ export function createSendController({ bridge, createIntent, onAccepted }) {
     }).finally(() => { pending = null; });
     return pending;
   }
-  return { setDraft, prewarm, send,
-    snapshot: () => ({ draft, saving: pending !== null, errorKey: lastError }) };
+  return {
+    setDraft,
+    loadDraft,
+    prewarm,
+    send,
+    snapshot: () => ({ draft, revision, saving: pending !== null, errorKey: lastError }),
+  };
 }

@@ -27,3 +27,7 @@ pub mod home_execution;
 pub mod home_host;
 
 pub mod home_rejection;
+
+pub mod catalog;
+pub mod online_provider;
+pub mod workspace_handoff;

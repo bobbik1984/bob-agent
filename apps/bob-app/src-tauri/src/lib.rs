@@ -9,12 +9,13 @@ mod home_config;
 mod pairing_commands;
 #[cfg(test)]
 mod home_execution_tests;
-use home_link::{HomeLinkState, app_home_sync};
+use home_link::{app_home_sync, HomeLinkState};
 #[cfg(target_os = "android")]
 mod android_vault;
 mod device_vault;
 mod runner;
 use bob_kernel::app::{AppMessage, AppReadiness, LocalApp};
+use bob_kernel::catalog::{CatalogSnapshot, ConversationViewState, DeviceUiPreferences};
 use bob_kernel::local_execution::LocalExecution;
 use bob_kernel::outbox::LocalAccepted;
 pub use runner::worker_entry;
@@ -85,9 +86,6 @@ async fn app_bootstrap<R: tauri::Runtime>(
             );
         }
         let local = guard.as_mut().ok_or("LOCAL_STORE_UNAVAILABLE")?;
-        let session = local
-            .default_session()
-            .map_err(|_| "LOCAL_STORE_UNAVAILABLE")?;
         for execution in local
             .managed_executions()
             .map_err(|_| "EXECUTION_READ_FAILED")?
@@ -126,7 +124,7 @@ async fn app_bootstrap<R: tauri::Runtime>(
         }
         Ok(Bootstrap {
             session_id: local
-                .default_session()
+                .selected_conversation()
                 .map_err(|_| "LOCAL_STORE_UNAVAILABLE")?,
             provider_status: local.prewarm(),
         })
@@ -141,12 +139,20 @@ async fn app_accept(
     message_id: String,
     session_id: String,
     content: String,
+    expected_draft_revision: Option<i64>,
 ) -> Result<LocalAccepted, &'static str> {
     let state = state.0.clone();
     tauri::async_runtime::spawn_blocking(move || {
         with_app(&state, |app| {
-            app.accept(&request_id, &message_id, &session_id, content, now()?)
-                .map_err(|_| "LOCAL_SAVE_UNCONFIRMED")
+            app.accept_with_draft_revision(
+                &request_id,
+                &message_id,
+                &session_id,
+                content,
+                expected_draft_revision,
+                now()?,
+            )
+            .map_err(|_| "LOCAL_SAVE_UNCONFIRMED")
         })
     })
     .await
@@ -196,6 +202,129 @@ fn app_prewarm() -> &'static str {
 }
 
 #[tauri::command]
+async fn app_catalog(state: State<'_, AppState>) -> Result<CatalogSnapshot, &'static str> {
+    let state = state.0.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        with_app(&state, |app| {
+            app.catalog_snapshot()
+                .map_err(|_| "CATALOG_READ_FAILED")
+        })
+    })
+    .await
+    .map_err(|_| "CATALOG_READ_FAILED")?
+}
+
+#[tauri::command]
+async fn app_project_create(
+    state: State<'_, AppState>,
+    project_id: String,
+    title: String,
+) -> Result<CatalogSnapshot, &'static str> {
+    let state = state.0.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        with_app(&state, |app| {
+            app.create_project(&project_id, &title, now()?)
+                .map_err(|_| "PROJECT_CREATE_FAILED")?;
+            app.catalog_snapshot()
+                .map_err(|_| "CATALOG_READ_FAILED")
+        })
+    })
+    .await
+    .map_err(|_| "PROJECT_CREATE_FAILED")?
+}
+
+#[tauri::command]
+async fn app_conversation_create(
+    state: State<'_, AppState>,
+    conversation_id: String,
+    project_id: Option<String>,
+    title: String,
+) -> Result<CatalogSnapshot, &'static str> {
+    let state = state.0.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        with_app(&state, |app| {
+            app.create_conversation(&conversation_id, project_id.as_deref(), &title, now()?)
+                .map_err(|_| "CONVERSATION_CREATE_FAILED")?;
+            app.catalog_snapshot()
+                .map_err(|_| "CATALOG_READ_FAILED")
+        })
+    })
+    .await
+    .map_err(|_| "CONVERSATION_CREATE_FAILED")?
+}
+
+#[tauri::command]
+async fn app_conversation_select(
+    state: State<'_, AppState>,
+    conversation_id: String,
+) -> Result<CatalogSnapshot, &'static str> {
+    let state = state.0.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        with_app(&state, |app| {
+            app.select_conversation(&conversation_id, now()?)
+                .map_err(|_| "CONVERSATION_SELECT_FAILED")?;
+            app.catalog_snapshot()
+                .map_err(|_| "CATALOG_READ_FAILED")
+        })
+    })
+    .await
+    .map_err(|_| "CONVERSATION_SELECT_FAILED")?
+}
+
+#[tauri::command]
+async fn app_view_state_save(
+    state: State<'_, AppState>,
+    conversation_id: String,
+    draft: Option<String>,
+    scroll_anchor_message_id: Option<Option<String>>,
+    scroll_offset: Option<i64>,
+    mark_read: Option<bool>,
+) -> Result<ConversationViewState, &'static str> {
+    let state = state.0.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        with_app(&state, |app| {
+            let anchor = scroll_anchor_message_id
+                .as_ref()
+                .map(|inner| inner.as_deref());
+            app.save_conversation_view_state(
+                &conversation_id,
+                draft.as_deref(),
+                anchor,
+                scroll_offset,
+                mark_read.unwrap_or(false),
+                now()?,
+            )
+            .map_err(|_| "VIEW_STATE_SAVE_FAILED")
+        })
+    })
+    .await
+    .map_err(|_| "VIEW_STATE_SAVE_FAILED")?
+}
+
+#[tauri::command]
+async fn app_preferences_save(
+    state: State<'_, AppState>,
+    sidebar_group_mode: Option<String>,
+    locale: Option<String>,
+    theme: Option<String>,
+) -> Result<DeviceUiPreferences, &'static str> {
+    let state = state.0.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        with_app(&state, |app| {
+            app.save_ui_preferences(
+                sidebar_group_mode.as_deref(),
+                locale.as_deref(),
+                theme.as_deref(),
+                now()?,
+            )
+            .map_err(|_| "PREFERENCES_SAVE_FAILED")
+        })
+    })
+    .await
+    .map_err(|_| "PREFERENCES_SAVE_FAILED")?
+}
+
+#[tauri::command]
 async fn app_executions(
     state: State<'_, AppState>,
     session_id: String,
@@ -203,10 +332,21 @@ async fn app_executions(
     let state = state.0.clone();
     tauri::async_runtime::spawn_blocking(move || {
         with_app(&state, |app| {
-            let mut result = app.local_executions(&session_id).map_err(|_| "EXECUTION_READ_FAILED")?
-                .into_iter().map(serde_json::to_value).collect::<Result<Vec<_>,_>>().map_err(|_| "EXECUTION_READ_FAILED")?;
-            result.extend(app.remote_executions(&session_id).map_err(|_| "EXECUTION_READ_FAILED")?
-                .into_iter().map(serde_json::to_value).collect::<Result<Vec<_>,_>>().map_err(|_| "EXECUTION_READ_FAILED")?);
+            let mut result = app
+                .local_executions(&session_id)
+                .map_err(|_| "EXECUTION_READ_FAILED")?
+                .into_iter()
+                .map(serde_json::to_value)
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|_| "EXECUTION_READ_FAILED")?;
+            result.extend(
+                app.remote_executions(&session_id)
+                    .map_err(|_| "EXECUTION_READ_FAILED")?
+                    .into_iter()
+                    .map(serde_json::to_value)
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(|_| "EXECUTION_READ_FAILED")?,
+            );
             Ok(result)
         })
     })
@@ -219,15 +359,13 @@ async fn app_cancel(
     runner: State<'_, RunnerState>,
     execution_id: String,
 ) -> Result<serde_json::Value, &'static str> {
-    let remote = with_app(&state.0, |app| {
-        let session = app.default_session().map_err(|_| "LOCAL_STORE_UNAVAILABLE")?;
-        Ok(app.remote_executions(&session).map_err(|_| "EXECUTION_READ_FAILED")?.iter().any(|e|e.id==execution_id))
-    })?;
-    if remote {
-        return with_app(&state.0, |app| {
-            serde_json::to_value(app.request_remote_stop(&execution_id,now()?).map_err(|_|"CANCEL_UNCONFIRMED")?)
-                .map_err(|_|"CANCEL_UNCONFIRMED")
-        });
+    if let Ok(remote_view) = with_app(&state.0, |app| {
+        let view = app
+            .request_remote_stop(&execution_id, now()?)
+            .map_err(|_| "CANCEL_UNCONFIRMED")?;
+        serde_json::to_value(view).map_err(|_| "CANCEL_UNCONFIRMED")
+    }) {
+        return Ok(remote_view);
     }
     // Durable intent first. A signal request is not termination confirmation.
     with_app(&state.0, |app| {
@@ -243,15 +381,12 @@ async fn app_cancel(
         flag.store(true, Ordering::SeqCst);
     }
     with_app(&state.0, |app| {
-        let session = app
-            .default_session()
-            .map_err(|_| "LOCAL_STORE_UNAVAILABLE")?;
-        app.local_executions(&session)
+        app.managed_executions()
             .map_err(|_| "EXECUTION_READ_FAILED")?
             .into_iter()
             .find(|e| e.id == execution_id)
             .ok_or("EXECUTION_NOT_FOUND")
-            .and_then(|e| serde_json::to_value(e).map_err(|_|"EXECUTION_READ_FAILED"))
+            .and_then(|e| serde_json::to_value(e).map_err(|_| "EXECUTION_READ_FAILED"))
     })
 }
 #[tauri::command]
@@ -271,10 +406,7 @@ async fn app_execute<R: tauri::Runtime>(
     let mut active = runner.active.lock().map_err(|_| "RUNNER_UNAVAILABLE")?;
     // One local CLI at a time. Renderer retries can read, but cannot create a second process.
     let existing = with_app(&state.0, |app| {
-        let session = app
-            .default_session()
-            .map_err(|_| "LOCAL_STORE_UNAVAILABLE")?;
-        app.local_executions(&session)
+        app.managed_executions()
             .map_err(|_| "EXECUTION_READ_FAILED")
     })?;
     if let Some(mut execution) = existing.into_iter().find(|e| e.request_id == request_id) {
@@ -369,7 +501,9 @@ async fn app_execute<R: tauri::Runtime>(
 
 fn configure<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
     #[cfg(target_os = "android")]
-    let builder = builder.plugin(android_vault::init()).plugin(android_scanner::init());
+    let builder = builder
+        .plugin(android_vault::init())
+        .plugin(android_scanner::init());
     builder
         .manage(AppState(Arc::new(Mutex::new(None))))
         .manage(RunnerState::default())
@@ -398,6 +532,12 @@ fn configure<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R>
             app_history,
             app_prewarm,
             app_readiness,
+            app_catalog,
+            app_project_create,
+            app_conversation_create,
+            app_conversation_select,
+            app_view_state_save,
+            app_preferences_save,
             app_execute,
             app_executions,
             app_cancel

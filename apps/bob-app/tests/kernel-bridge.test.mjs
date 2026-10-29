@@ -33,3 +33,21 @@ test('Home sync carries no renderer credential or fabricated result',async()=>{
  assert.equal(await bridge.syncHome(),'provider_unconfigured');assert.deepEqual(calls,[{command:'app_home_sync',args:undefined}]);
  const unavailable=createKernelBridge(()=>assert.fail('no native'),()=>false);await assert.rejects(()=>unavailable.syncHome(),/NATIVE_HOST_REQUIRED/);
 });
+
+test('catalog, view-state and preferences IPC map multi-session arguments cleanly',async()=>{
+ const calls=[];const bridge=createKernelBridge(async(command,args)=>{calls.push({command,args});return {ok:true};},()=>true);
+ await bridge.catalog();
+ await bridge.createProject('proj-1','Bob Agent');
+ await bridge.createConversation('conv-2','proj-1','Session 2');
+ await bridge.selectConversation('conv-2');
+ await bridge.saveViewState({conversationId:'conv-2',draft:'hello',scrollAnchorMessageId:'m1',scrollOffset:120,markRead:true});
+ await bridge.savePreferences({sidebarGroupMode:'device',locale:'zh-CN',theme:'dark'});
+ assert.deepEqual(calls,[
+  {command:'app_catalog',args:undefined},
+  {command:'app_project_create',args:{projectId:'proj-1',title:'Bob Agent'}},
+  {command:'app_conversation_create',args:{conversationId:'conv-2',projectId:'proj-1',title:'Session 2'}},
+  {command:'app_conversation_select',args:{conversationId:'conv-2'}},
+  {command:'app_view_state_save',args:{conversationId:'conv-2',draft:'hello',scrollAnchorMessageId:'m1',scrollOffset:120,markRead:true}},
+  {command:'app_preferences_save',args:{sidebarGroupMode:'device',locale:'zh-CN',theme:'dark'}}
+ ]);
+});

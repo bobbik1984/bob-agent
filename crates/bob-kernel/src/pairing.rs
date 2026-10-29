@@ -165,16 +165,54 @@ impl Store {
         allow_cancel: bool,
         now: i64,
     ) -> Result<i64> {
-        self.confirm_pairing_peer_policy(invitation_id, expected_device, expected_pin, conversation, grant_expires_at, allow_cancel, now, false)
+        self.confirm_pairing_peer_policy(
+            invitation_id,
+            expected_device,
+            expected_pin,
+            conversation,
+            grant_expires_at,
+            allow_cancel,
+            now,
+            false,
+        )
     }
     /// Trusted QR-host consent only: a fresh proof may recover the same revoked
-    /// identity. Changing a key, Home or epoch still requires explicit recovery.
+    /// identity, and authorizes multi-conversation admission within the active
+    /// device authorization window.
     #[allow(clippy::too_many_arguments)]
-    pub fn confirm_scanned_pairing_peer(&mut self, invitation_id: &str, expected_device: &str, expected_pin: &str, conversation: &str, grant_expires_at: i64, allow_cancel: bool, now: i64) -> Result<i64> {
-        self.confirm_pairing_peer_policy(invitation_id, expected_device, expected_pin, conversation, grant_expires_at, allow_cancel, now, true)
+    pub fn confirm_scanned_pairing_peer(
+        &mut self,
+        invitation_id: &str,
+        expected_device: &str,
+        expected_pin: &str,
+        conversation: &str,
+        grant_expires_at: i64,
+        allow_cancel: bool,
+        now: i64,
+    ) -> Result<i64> {
+        self.confirm_pairing_peer_policy(
+            invitation_id,
+            expected_device,
+            expected_pin,
+            conversation,
+            grant_expires_at,
+            allow_cancel,
+            now,
+            true,
+        )
     }
     #[allow(clippy::too_many_arguments)]
-    fn confirm_pairing_peer_policy(&mut self, invitation_id: &str, expected_device: &str, expected_pin: &str, conversation: &str, grant_expires_at: i64, allow_cancel: bool, now: i64, recover_same_revoked_key: bool) -> Result<i64> {
+    fn confirm_pairing_peer_policy(
+        &mut self,
+        invitation_id: &str,
+        expected_device: &str,
+        expected_pin: &str,
+        conversation: &str,
+        grant_expires_at: i64,
+        allow_cancel: bool,
+        now: i64,
+        recover_same_revoked_key: bool,
+    ) -> Result<i64> {
         if !id(conversation) || grant_expires_at <= now || !pin(expected_pin) {
             return Err(Error::InvalidTransition);
         }
@@ -197,19 +235,48 @@ impl Store {
             )
             .optional()?;
         let old_auth:Option<(i64,String,String,i64,String,i64)>=tx.query_row("SELECT revision,identity_sha256,home_device_id,home_epoch,paired_key_ref,revoked FROM home_device_authorizations WHERE device_id=?1",[&d],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?))).optional()?;
-        let recovering = recover_same_revoked_key && existing.as_ref().is_some_and(|(_,key)| key.as_deref()==Some(k.as_str())) && old_auth.as_ref().is_some_and(|a|a.1==p && a.2==h && a.3==e && a.4==k && a.5==1);
-        if existing.as_ref().is_some_and(|(state,key)|state!="unpaired" || key.as_ref().is_some_and(|key|key!=&k)) && !recovering { return Err(Error::IdentityConflict); }
-        if old_auth.is_some() && !recovering { return Err(Error::IdentityConflict); }
-        let revision=if recovering {old_auth.as_ref().unwrap().0.checked_add(1).ok_or(Error::InvalidTransition)?} else {1};
+        let recovering = recover_same_revoked_key
+            && existing
+                .as_ref()
+                .is_some_and(|(_, key)| key.as_deref() == Some(k.as_str()))
+            && old_auth
+                .as_ref()
+                .is_some_and(|a| a.1 == p && a.2 == h && a.3 == e && a.4 == k && a.5 == 1);
+        if existing
+            .as_ref()
+            .is_some_and(|(state, key)| state != "unpaired" || key.as_ref().is_some_and(|key| key != &k))
+            && !recovering
+        {
+            return Err(Error::IdentityConflict);
+        }
+        if old_auth.is_some() && !recovering {
+            return Err(Error::IdentityConflict);
+        }
+        let revision = if recovering {
+            old_auth
+                .as_ref()
+                .unwrap()
+                .0
+                .checked_add(1)
+                .ok_or(Error::InvalidTransition)?
+        } else {
+            1
+        };
         tx.execute("INSERT INTO devices(id,label,public_key_ref,trust_state,created_at) VALUES(?1,?1,?2,'paired',?3) ON CONFLICT(id) DO UPDATE SET public_key_ref=excluded.public_key_ref,trust_state='paired'",params![d,k,now])?;
         tx.execute(
             "INSERT INTO home_device_authorizations VALUES(?1,?2,?3,?4,?5,?6,0,?7) ON CONFLICT(device_id) DO UPDATE SET revision=excluded.revision,revoked=0,updated_at=excluded.updated_at",
             params![d, h, e, k, p, revision, now],
         )?;
         tx.execute(
-            "INSERT INTO home_conversation_grants VALUES(?1,?2,?3,?4)",
+            "INSERT INTO home_conversation_grants VALUES(?1,?2,?3,?4) ON CONFLICT(device_id,conversation_id) DO UPDATE SET expires_at=excluded.expires_at,allow_cancel=excluded.allow_cancel",
             params![d, conversation, grant_expires_at, allow_cancel],
         )?;
+        if recover_same_revoked_key {
+            tx.execute(
+                "INSERT INTO home_device_session_policies VALUES(?1,?2,?3) ON CONFLICT(device_id) DO UPDATE SET expires_at=excluded.expires_at,allow_cancel=excluded.allow_cancel",
+                params![d, grant_expires_at, allow_cancel],
+            )?;
+        }
         tx.execute(
             "UPDATE home_pairing_invitations SET state='consumed',confirmed_at=?2 WHERE id=?1",
             params![invitation_id, now],
@@ -226,34 +293,92 @@ impl Store {
 // Native callers share LocalApp's single Store owner; never open a second Store
 // for listener or status operations (open also performs interrupted recovery).
 impl crate::app::LocalApp {
-    pub fn pairing_status(&self, invitation_id:&str, now:i64)->Result<PairingStatus> {
-        let status=self.store.pairing_status(invitation_id,now)?;
-        if status.invitation.home_device_id!=self.origin {return Err(Error::IdentityConflict);}
+    pub fn pairing_status(&self, invitation_id: &str, now: i64) -> Result<PairingStatus> {
+        let status = self.store.pairing_status(invitation_id, now)?;
+        if status.invitation.home_device_id != self.origin {
+            return Err(Error::IdentityConflict);
+        }
         Ok(status)
     }
-    pub fn issue_pairing_invitation(&mut self, invitation:&PairingInvitation, challenge:&[u8], now:i64)->Result<()> {
-        if invitation.home_device_id!=self.origin {return Err(Error::IdentityConflict);}
-        self.store.issue_pairing_invitation(invitation,challenge,now)
+    pub fn issue_pairing_invitation(
+        &mut self,
+        invitation: &PairingInvitation,
+        challenge: &[u8],
+        now: i64,
+    ) -> Result<()> {
+        if invitation.home_device_id != self.origin {
+            return Err(Error::IdentityConflict);
+        }
+        self.store
+            .issue_pairing_invitation(invitation, challenge, now)
     }
-    pub fn propose_pairing_peer(&mut self, invitation_id:&str, challenge:&[u8], peer:&ProvenPairingPeer, now:i64)->Result<()> {
-        self.pairing_status(invitation_id,now)?;
-        self.store.propose_pairing_peer(invitation_id,challenge,peer,now)
+    pub fn propose_pairing_peer(
+        &mut self,
+        invitation_id: &str,
+        challenge: &[u8],
+        peer: &ProvenPairingPeer,
+        now: i64,
+    ) -> Result<()> {
+        self.pairing_status(invitation_id, now)?;
+        self.store
+            .propose_pairing_peer(invitation_id, challenge, peer, now)
     }
     #[allow(clippy::too_many_arguments)]
-    pub fn confirm_pairing_peer(&mut self, invitation_id:&str, expected_device:&str, expected_pin:&str, conversation:&str, grant_expires_at:i64, allow_cancel:bool, now:i64)->Result<i64> {
-        self.pairing_status(invitation_id,now)?;
-        self.store.confirm_pairing_peer(invitation_id,expected_device,expected_pin,conversation,grant_expires_at,allow_cancel,now)
+    pub fn confirm_pairing_peer(
+        &mut self,
+        invitation_id: &str,
+        expected_device: &str,
+        expected_pin: &str,
+        conversation: &str,
+        grant_expires_at: i64,
+        allow_cancel: bool,
+        now: i64,
+    ) -> Result<i64> {
+        self.pairing_status(invitation_id, now)?;
+        self.store.confirm_pairing_peer(
+            invitation_id,
+            expected_device,
+            expected_pin,
+            conversation,
+            grant_expires_at,
+            allow_cancel,
+            now,
+        )
     }
     #[allow(clippy::too_many_arguments)]
-    pub fn confirm_scanned_pairing_peer(&mut self, invitation_id:&str, expected_device:&str, expected_pin:&str, conversation:&str, grant_expires_at:i64, allow_cancel:bool, now:i64)->Result<i64> {
-        self.pairing_status(invitation_id,now)?;
-        self.store.confirm_scanned_pairing_peer(invitation_id,expected_device,expected_pin,conversation,grant_expires_at,allow_cancel,now)
+    pub fn confirm_scanned_pairing_peer(
+        &mut self,
+        invitation_id: &str,
+        expected_device: &str,
+        expected_pin: &str,
+        conversation: &str,
+        grant_expires_at: i64,
+        allow_cancel: bool,
+        now: i64,
+    ) -> Result<i64> {
+        self.pairing_status(invitation_id, now)?;
+        self.store.confirm_scanned_pairing_peer(
+            invitation_id,
+            expected_device,
+            expected_pin,
+            conversation,
+            grant_expires_at,
+            allow_cancel,
+            now,
+        )
     }
-    pub fn cancel_pairing_invitation(&mut self, invitation_id:&str)->Result<()> {
-        self.pairing_status(invitation_id,0)?;
+    pub fn cancel_pairing_invitation(&mut self, invitation_id: &str) -> Result<()> {
+        self.pairing_status(invitation_id, 0)?;
         self.store.cancel_pairing_invitation(invitation_id)
     }
-    pub fn authenticate_home_session(&mut self, home_id:&str, epoch:i64, pin:&str, session:&str, now:i64)->Result<crate::home_auth::HomeMessageContext> {
-        self.authenticate_home_peer(home_id,epoch,pin,session,now)
+    pub fn authenticate_home_session(
+        &mut self,
+        home_id: &str,
+        epoch: i64,
+        pin: &str,
+        session: &str,
+        now: i64,
+    ) -> Result<crate::home_auth::HomeMessageContext> {
+        self.authenticate_home_peer(home_id, epoch, pin, session, now)
     }
 }
