@@ -10,7 +10,7 @@ project:
   - Vue 3
   - Desktop
   - Android
-  current_task: BP2/BP3 扫码自动确认27项原生和20项Node通过，新版云端构建/安装及Pixel闭环待做；公网异地连接未实现
+  current_task: BP2/BP3 扫码简化232abbd已构建并安装Pixel；真实扫码和消息往返待验，公网异地连接未实现
   development_plan: docs/CURRENT_STAGE.md
 phases:
 - name: BP0 真相与保护
