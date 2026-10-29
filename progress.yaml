@@ -10,7 +10,7 @@ project:
   - Vue 3
   - Desktop
   - Android
-  current_task: BP3-01.a/b/c、BP3-02.a 与 BP4-01~03 内核/IPC/前端实现及全量本地回归通过（77项内核、24项传输、29项原生IPC、32项Node、5视口Playwright），已推送 GitHub 构建 Android 候选包
+  current_task: BP3-01.a/b/c、BP3-02.a 与 BP4-01~03 实现与全量回归通过，GitHub Android 固定签名 APK (run 40937679735) 已构建并下载校验通过，待连接 Pixel 8 执行 adb install -r 真机复核
   development_plan: docs/CURRENT_STAGE.md
 phases:
 - name: BP0 真相与保护

@@ -21,7 +21,7 @@
 | 1 · BP3-01.a | 复用内核项目/会话表，补真实目录、新建项目/对话、归属、选择、逐设备草稿和阅读位置；迁移原默认会话，保留原 ID | **已完成代码与内核/IPC测试**：`migrations/0005.sql` + `catalog.rs` 落地；两个项目、各两条对话和原旧对话可切换，同名不合并，重开仍保留各自历史/草稿/选择与 `expected_draft_revision` CAS 防误清 |
 | 2 · BP3-01.b | Home 接纳新会话与项目、精确授权索引、消息/回执的逐会话归属；切换界面不改变运行中请求；补有界历史上下文 | **已完成代码与内核/IPC测试**：`home_device_session_policies` 精确授权索引、逐会话 `history`/`executions`/`request_remote_stop`、有界历史上下文续聊（第二轮引用第一轮、跨会话隔离）通过回归 |
 | 3 · BP3-01.c | 真实侧栏接入上述 IPC；设置首页与设备子页分离，补常规设置及持久偏好 | **已完成代码、32项Node测试与5视口浏览器检查**：新建/切换/按项目与按设备分组及1句原因标签、未读角标、设置首页与设备子页分离（设备图标直达子页、返回设置首页、Escape 焦点归位）、中英/明暗偏好持久化全部通过 |
-| 4 · BP3-01.d | 手机候选验收与打包 | **已通过全部本地前置门禁（内核77项、传输24项、原生IPC 29项、前端Node 32项、Scanner 4项、Vite构建、Playwright 5视口）**；推送 `1.0.1` 触发 GitHub 固定签名与 16KB 门禁构建，待下载 APK 并在 Pixel 8 覆盖安装实测 |
+| 4 · BP3-01.d | 手机候选验收与打包 | **已完成云端构建、固定签名、16KB对齐与下载校验**：源码 `1c36b57`，GitHub run `40937679735` / artifact `12926235871` 成功，ZIP SHA256 `0927a7ff7e30e361a17b4ea850b874e47110dd303583cce9b2134b3f64098b8a`，APK SHA256 `d57237f3b97b7eb6306e4482f2fad727b04e169e11832e02fe7579a28555f273`（已存至 `D:\Code\Archive_Cache\bob-bp3-phone-candidate\app-universal-debug.apk`）；当前本机 ADB 未检测到连接中的 Pixel 设备，插线后即可直接 `adb install -r` 覆盖安装实测 |
 | 5 · BP3-02.a | 现有 Online 兼容接入：先核对服务身份、认证、协议能力及只读项目/任务/成果，后接精确目标续聊 | **已完成内核兼容契约与回归（`online_provider.rs`）**：只读会话目录缓存、`native_resume_verified` vs `bounded_history_context` 诚实降级、对端活跃写入禁止并发抢占均已通过内核测试；生产 Online 端点实时联调待执行 |
 | 6 · BP3-01.e / BP3-02.b | 公网连接与 Online 往返验收 | 待实现/批准部署：不同网络手机→Home→Online→回复/成果；PC离线明确排队、恢复不重复；常开云端 Home 迁移另行决定，不能用网页可达冒充已实现 |
 
@@ -51,7 +51,7 @@
 
 当前授权支持必要的本地开发、已有只读测试范围、云端 Android 构建与手机验证；不自动扩展真实项目写入、现有设备的历史访问范围或云端部署。若新会话协议需要扩大旧配对授权，给出具体范围并集中确认，不能要求每建一条普通新对话都重新配对。X1T/B4、生产服务和其他节点保持原边界。
 
-本节已完成 BP3-01.a/b/c、BP3-02.a 内核与 BP4-01~03 的代码实现及全部本地门禁验证（77项 `bob-kernel`、24项 `bob-transport`、29项 `bob-app` 原生IPC、32项 Node、4项 Scanner、Vite 构建与 Playwright 5视口浏览器检查），并推送 `1.0.1` 触发 GitHub 固定签名 Android APK 构建。下列2026-10-29/30段落为先前施工和验收记录。
+本节已完成 BP3-01.a/b/c、BP3-02.a 内核与 BP4-01~03 的代码实现、全部本地门禁验证（77项 `bob-kernel`、24项 `bob-transport`、29项 `bob-app` 原生IPC、32项 Node、4项 Scanner、Vite 构建与 Playwright 5视口浏览器检查）及 GitHub Actions Android 固定签名 APK 构建与下载校验（run `40937679735` / artifact `12926235871` / APK SHA256 `d57237f3b97b7eb6306e4482f2fad727b04e169e11832e02fe7579a28555f273`）。当前本机 USB 未连接 Pixel 8，未伪造真机安装结果；插线后执行 `adb install -r` 即可完成手机端覆写验证。下列2026-10-29/30段落为先前施工和验收记录。
 
 ## 当前手机可用性审查（Dashboard 收件箱，2026-10-29）
 
