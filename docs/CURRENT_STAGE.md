@@ -9,7 +9,7 @@
 ## 1 已完成事实（接手 Agent 无需重做）
 
 1. **仓库、分支与远端已就绪（WP-00 & WP-04 完成）**：
-   - 本地仓库位于高速区 `<local_code_root>/bob-agent`（不走 OneDrive/Syncthing，靠 GitHub 同步）。
+   - 本地仓库位于高速区 `<local_code_root>/bob-agent-next`（不走 OneDrive/Syncthing，靠 GitHub 同步）。
    - GitHub 远端：`https://github.com/bobbik1984/bob-agent.git`（推送时建议使用 `git -c http.sslBackend=schannel push origin 1.0.1 main`）。
    - 分支结构：
      - `legacy/v0.9`（`a4ff5fd`）：完整封存旧单机 App v0.9.30 代码与 19 个历史 Tag。
