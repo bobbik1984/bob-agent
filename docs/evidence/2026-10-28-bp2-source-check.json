@@ -1,0 +1,25 @@
+{
+  "scope": "source-and-node-controller-only",
+  "baseline": "84cfa92",
+  "nodeTests": {
+    "passed": 6,
+    "failed": 0,
+    "output": "TAP version 13\n# Subtest: local confirmation does not wait for network prewarm\nok 1 - local confirmation does not wait for network prewarm\n  ---\n  duration_ms: 0.8763\n  type: 'test'\n  ...\n# Subtest: double click joins one save; later typing is preserved\nok 2 - double click joins one save; later typing is preserved\n  ---\n  duration_ms: 1.0487\n  type: 'test'\n  ...\n# Subtest: unconfirmed IPC response keeps draft and retries same identity\nok 3 - unconfirmed IPC response keeps draft and retries same identity\n  ---\n  duration_ms: 0.4568\n  type: 'test'\n  ...\n# Subtest: editing after failure generates a new identity\nok 4 - editing after failure generates a new identity\n  ---\n  duration_ms: 0.2295\n  type: 'test'\n  ...\n# Subtest: wrong local receipt does not clear draft or append to view\nok 5 - wrong local receipt does not clear draft or append to view\n  ---\n  duration_ms: 0.3729\n  type: 'test'\n  ...\n# Subtest: prewarm failure is silent; empty send creates nothing\nok 6 - prewarm failure is silent; empty send creates nothing\n  ---\n  duration_ms: 0.1575\n  type: 'test'\n  ...\n1..6\n# tests 6\n# suites 0\n# pass 6\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 70.7636\n"
+  },
+  "rustTests": "not run",
+  "build": "not run",
+  "network": "not run",
+  "sha256": {
+    "crates/bob-kernel/Cargo.toml": "e8f0aa662d2078b98161c8d3513ac83c2f91ad73957cd62acfa35ec7b432e050",
+    "crates/bob-kernel/migrations/0001.sql": "3e92f141f6c2e1eecf9056845a742688db8301f83620b267d54e176c639ddaaa",
+    "crates/bob-kernel/src/lib.rs": "00c84dabe906bfe75b680c6373e54df27fb642bd661cbf5182aa6512c12182c6",
+    "crates/bob-kernel/src/outbox.rs": "32c0865c90f5b5c5d75f74bd3cb518c2c9d6990a3a732e7c1d0d1470a1034a5b",
+    "crates/bob-kernel/src/prewarm.rs": "067e4b758edbc00b7ec5e8de8d675635380abcff164f6542f1b3c6d6c14c80dc",
+    "crates/bob-kernel/tests/durable_outbox.rs": "5eb9915a4c1d7ee76685a757f3d01f35d4671512c4f65c53d19c4d8e36490657",
+    "crates/bob-kernel/tests/prewarm.rs": "9a9214db1381529601ff979c96b3b0849fe5cf2f79fd548fc856ef3e54c0a25f",
+    "apps/bob-app/package.json": "364ec7bcabc7d77e8466d0fdd08c4744a6fdb65a1d24b0102473f63c83084bee",
+    "apps/bob-app/src/send-controller.mjs": "93cc0ff9410273ee4b84edaf97d6d7d55432f21a0d62315e414e53b4526c00a5",
+    "apps/bob-app/tests/send-controller.test.mjs": "fecc40c014e216466e303e43cff374942d49f2346887ed6085cb529b0eff58b0",
+    "Cargo.toml": "e975f8ed039e0a73cf9c21d2434d74e8dbece90b69388ca848f065b6680c4cfe"
+  }
+}

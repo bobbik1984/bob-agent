@@ -1,0 +1,238 @@
+{
+  "date": "2026-10-29",
+  "baseline": "f2bb0d5",
+  "source_sha256": {
+    "crates/bob-kernel/Cargo.toml": "e8f0aa662d2078b98161c8d3513ac83c2f91ad73957cd62acfa35ec7b432e050",
+    "crates/bob-kernel/migrations/0001.sql": "cbf99a86c467aecde17054e7220eb1ea56ba8cb1968421b3428578a8620de308",
+    "crates/bob-kernel/migrations/0002.sql": "a7f6bd64e91a885d9b1f8ac76833c28a8dcfe301c6abfe32ad64a503b55cc278",
+    "crates/bob-kernel/src/app.rs": "0f7afaf86ec9e242c23b9374b592b16148788b7fc5248680ab55bce05421c8fa",
+    "crates/bob-kernel/src/deadline.rs": "226abc56b57412f6b3dff38d6588f19161360f621ddbb7b8e05d667f5aa02765",
+    "crates/bob-kernel/src/dispatch.rs": "9aca6c1125548025eb8a81bae06bd6a90e67e7ad8d7fcb85951a093f46c8e1c9",
+    "crates/bob-kernel/src/inbox.rs": "7f563d2783b1ef43218e31f0937c358e98e057c52f40eb00bb474b3355cbfdb2",
+    "crates/bob-kernel/src/lib.rs": "9cdc55f1cc89d001438358a0c5fb2eea541adaa8d130b6f2764db26fcb69dc7a",
+    "crates/bob-kernel/src/outbox.rs": "f0a531aa159290210e11b3e69785491e1a32f97404a67658e5794997202ab01a",
+    "crates/bob-kernel/src/prewarm.rs": "c1bb2343a57c523434935a127c92be2f098cd03c2cace7f3c8c194f950049c37",
+    "crates/bob-kernel/src/wake.rs": "cd05210100ae63ef5f1708ea4e5a6057440aafa2c2def471bd02b5fa52341ae4",
+    "crates/bob-kernel/tests/app.rs": "be283d961f6c4fde0778fcd196a734ae0fe451d757c06d419e1f0fbb666ec047",
+    "crates/bob-kernel/tests/dispatch.rs": "898e1e591d30b7c6a4fdd00f6697e86485e82bad9b46ddd041323898cb9ed7d2",
+    "crates/bob-kernel/tests/durable_outbox.rs": "0d1256ec1f67307c9f45150f9482411f810fc70b706c59863086127f7b0a9728",
+    "crates/bob-kernel/tests/inbox.rs": "8d71defe2ec7ca476f664d8359e444101f1fae18e1222e2605ead08139ec8fec",
+    "crates/bob-kernel/tests/prewarm.rs": "736c148d598d8bc8de0ce4479b02342c6eea22300ade7afcaa9b2515cb179c7e",
+    "crates/bob-kernel/tests/process_recovery.rs": "140aaa40dba1da20db94b8e5b393fb315e8055b83c239538ceef38c4098194aa",
+    "crates/bob-kernel/tests/wake.rs": "c7274cb76ab4714ea1e758f292f972af1234af361b620bc2b4221455844dd6c7",
+    "apps/bob-app/.npmrc": "46649e6174842b4e02fee7dad40d66efc6f91541f1902b6eb8af6d453f9f53c7",
+    "apps/bob-app/index.html": "6b4a8a14ef3bd188e15dd076224e0d44ddd3e68c67a69229e163b7a8fe8bf826",
+    "apps/bob-app/package.json": "dd0a29e53ee7a548292e67a7bf8f4eeaf68bb896d54b4ecb9472dd5b94d6039c",
+    "apps/bob-app/pnpm-lock.yaml": "337124c440b2b5375f2e2d184a3268b79e06aa744e12fd4c23084226d556d01c",
+    "apps/bob-app/vite.config.js": "08d526bca0f3ee403e6bae09539153358a2a1c09411321d75d520945b7f7219a",
+    "apps/bob-app/src/App.vue": "362a31adb08ef8e201a6532c37edbbb84913b87e7266ca6a76d498db6879dc9f",
+    "apps/bob-app/src/kernel-bridge.mjs": "9d5a12beea6d7fd7b112ddd122d4dcfdfc2d5216fff6ffcfe6a5a557d62ee92a",
+    "apps/bob-app/src/main.js": "dc869d0a33b4ebc07ebb3a8d0042cb966646b99b29a1ac3e451d45ee9bea7800",
+    "apps/bob-app/src/native-bridge.mjs": "9b5a85b7b5df51dfc1fc0c7a9e62bdf0f5e5b84038198580932e0def344de5ae",
+    "apps/bob-app/src/send-controller.mjs": "93cc0ff9410273ee4b84edaf97d6d7d55432f21a0d62315e414e53b4526c00a5",
+    "apps/bob-app/src/style.css": "b4e4a811679888d78ea8a5aa11ada6f4ba6c26e24264118fde777bd6ca680bfd",
+    "apps/bob-app/src-tauri/build.rs": "487059eaf8a947b80f20a9aacac038a5047b2ad69d2401b827376c67d6fe847f",
+    "apps/bob-app/src-tauri/Cargo.lock": "d4c1a62a0f5ce8c1c42cb3161a7f5c3e278b6ca68936310de5dcbcf1b050679e",
+    "apps/bob-app/src-tauri/Cargo.toml": "d53307fce7332c89b4bf62e346cedad61ef0cd6239e4643f0f98a27e387ce848",
+    "apps/bob-app/src-tauri/tauri.conf.json": "36826550a4799e311ff6c7d403c51e7007a4f2906e143ccd2547d8dec435f408",
+    "apps/bob-app/tests/kernel-bridge.test.mjs": "514407e0bea26f3f5f3c9517dea9aea4e632c94c1a13e8e4685b79c31a1ea1e5",
+    "apps/bob-app/tests/send-controller.test.mjs": "fecc40c014e216466e303e43cff374942d49f2346887ed6085cb529b0eff58b0",
+    "apps/bob-app/src-tauri/capabilities/default.json": "a9acc415a8da7c0818b15f371f4cb63e865d51ca274c37afaf3eeb1c0c223961",
+    "apps/bob-app/src-tauri/icons/icon.ico": "2aa45d9977a1f9f9523db981fa384357f664b718fce43da01147592daf82d7af",
+    "apps/bob-app/src-tauri/icons/icon.png": "b0775cba09eadf2fde241b35daa28cdcd03af6d23e99e0decd32b42f13f6d220",
+    "apps/bob-app/src-tauri/src/lib.rs": "c920f719cfe1365daa39e7628677c71712ad56f906e30dda19b4f6a8d57891b6",
+    "apps/bob-app/src-tauri/src/main.rs": "bc011f92a622b3209282fb7912ba966bec90f9093d4c4ff96f61fbe553f6f591",
+    "apps/bob-app/src/locales/en-US.json": "1b0c8d01a862a998058fbdcf62872b1f218f1c8ed7ffa080273f5859b29fd4ce",
+    "apps/bob-app/src/locales/zh-CN.json": "cb2dfde4765fa6e320d7e80bba7b1b57420bb52c6ec6c4d43a9582f193480cf1"
+  },
+  "stage_mismatches": [],
+  "pnpm": "11.13.0",
+  "frontend_build": "passed",
+  "native_check": "passed",
+  "native_dev_compile": "passed",
+  "native_process_start": "passed",
+  "native_interaction": "not_verified_capture_timeout",
+  "phone": "not_run",
+  "real_provider": "not_run",
+  "installer": "not_built",
+  "deployment": false,
+  "native_control_tree": "loaded_provider_unconfigured",
+  "draft_input": "save_enabled_when_nonempty_disabled_when_empty",
+  "message_submit": "not_run_geometry_unavailable",
+  "test_draft": "cleared",
+  "cleanup": "no_bob_app_process_or_1420_listener",
+  "native_ipc_tests": {
+    "passed": 3,
+    "failed": 0,
+    "runtime": "Tauri MockRuntime with real commands and SQLite",
+    "initial_failure": "0xc0000139",
+    "fix": "test-only Common Controls v6 manifest",
+    "ui_acceptance": false
+  },
+  "command_source_sha256": {
+    "apps/bob-app/src-tauri/build.rs": "fa22190e9ea6431575e4313fa2d7e722b8bf37939f8014e94d341530b9d155e3",
+    "apps/bob-app/src-tauri/Cargo.lock": "cb594537585d6c6fed6abc4c496387fed4d916ddeb9d4e4d4537d7bab9677bcd",
+    "apps/bob-app/src-tauri/Cargo.toml": "a8e9a8e5d84897c47424f009c1d5357cf80b9eae4a1babca595b5a0cc0666ca0",
+    "apps/bob-app/src-tauri/tauri.conf.json": "36826550a4799e311ff6c7d403c51e7007a4f2906e143ccd2547d8dec435f408",
+    "apps/bob-app/src-tauri/test.manifest": "cef17b3af5ca89065c8541387bf915a2def59653ba90a8b358a58309b1291c56",
+    "apps/bob-app/src-tauri/capabilities/default.json": "a9acc415a8da7c0818b15f371f4cb63e865d51ca274c37afaf3eeb1c0c223961",
+    "apps/bob-app/src-tauri/icons/icon.ico": "2aa45d9977a1f9f9523db981fa384357f664b718fce43da01147592daf82d7af",
+    "apps/bob-app/src-tauri/icons/icon.png": "b0775cba09eadf2fde241b35daa28cdcd03af6d23e99e0decd32b42f13f6d220",
+    "apps/bob-app/src-tauri/src/lib.rs": "28c83efc7c07f6e0223122c296ee6844305b888d01388f4b5622c6c19b060483",
+    "apps/bob-app/src-tauri/src/main.rs": "bc011f92a622b3209282fb7912ba966bec90f9093d4c4ff96f61fbe553f6f591",
+    "apps/bob-app/src-tauri/src/tests.rs": "1756fedd9a4c29d2caad41e7e1e4e17114140b57a6983c442babb0474aea6806"
+  },
+  "latest_development_process": "running_for_user_manual_check",
+  "latest_checks": {
+    "kernel_passed": 37,
+    "native_ipc_passed": 3,
+    "node_passed": 9,
+    "frontend_build": "passed",
+    "user_manual_save": "reported_and_disk_count_1",
+    "native_restart_history": "observed_same_message_in_real_accessibility_tree",
+    "readiness_ui": "observed_1_saved_1_pending_execution_unavailable",
+    "visual_screenshot": "unavailable",
+    "phone": "not_run",
+    "remote_home": "not_run"
+  },
+  "readiness_source_sha256": {
+    "crates/bob-kernel/src/app.rs": "a5ab43d990bb2fdc88797d1c2e990a2670f04c90817d1d304b6ff5846da4c14c",
+    "crates/bob-kernel/tests/app.rs": "e0b63943e517b832c2733a0c58388ba23946dc7fa03cc7ad4730828bfb2493b5",
+    "apps/bob-app/src/App.vue": "96a4879f53b35f1f818ed0807d3bee00394106b8bcecf4f6f2f06906027ecf59",
+    "apps/bob-app/src-tauri/src/lib.rs": "79df4d8d4960cf1b7f51e21d5d5531c58bf6738b43d3b27cb37949b17d0e2496"
+  },
+  "cli_probe": {
+    "cli_version": "0.165.0-alpha.1.2",
+    "exit_code": 0,
+    "model_calls": 1,
+    "reply": "BOB_REPLY_OK 2+3=5",
+    "tool_events": 0,
+    "actual_model": "unobserved",
+    "integration": "captured_result_replay_not_Bob_dispatch",
+    "window_accessibility": "reply_and_source_label_observed",
+    "kernel_passed": 43,
+    "native_ipc_passed": 4,
+    "node_passed": 9,
+    "frontend_build": "passed",
+    "source_sha256": {
+      "crates/bob-kernel/src/app.rs": "bd962c85b150a88df752753c179c7842d3c991c7e9131aa9e25204e4657c4441",
+      "crates/bob-kernel/src/harness_reply.rs": "358aaad25b106c84fd135a54b6508b13039c21b8293c5c462a27efc3e0245049",
+      "crates/bob-kernel/tests/app.rs": "a4d7e889e19d18025d552f92f1a064acf696815a3ff088ef3dcc7507b920626a",
+      "crates/bob-kernel/tests/harness_reply.rs": "684e1880cdfd85d7a686989f567197a9b8371bc49213338cba1ba03502e0a640",
+      "crates/bob-kernel/tests/fixtures/codex-reply-probe.jsonl": "723274010743485c7e98f9b2fd5c5e3c8474a89963e7a241211c0b9060c7b0ad",
+      "apps/bob-app/src/App.vue": "eaa1f944239be69c751b829da115ae0ad76804b5f07da517bca7b4cbeb5fa000",
+      "apps/bob-app/src-tauri/src/tests.rs": "e7a3c004ed413d6a02e8bba138b60f2e8165d8dba116c396462ffc48d1490a3a"
+    }
+  },
+  "managed_local_execution": {
+    "date": "2026-10-29",
+    "baseline": "f2bb0d5dfd9fd72a762f986348ed6c92b8e172ad plus working changes",
+    "kernel_passed": 54,
+    "native_passed": 8,
+    "node_passed": 17,
+    "real_cli_runs_this_turn": 2,
+    "real_ipc": {
+      "duplicate_after_reopen_no_replay": true,
+      "job_absent_after_completion": true,
+      "reopen_reply_preserved": true,
+      "result": {
+        "duplicate_execution_id_equal": true,
+        "elapsed_ms": 28225,
+        "error": null,
+        "execution_id": "local-execution:931b29a7ecb6b152f93d23d6ca6d969a140fc5facd83b2c579f2e7e874525139",
+        "kind": "genuine_native_IPC_not_UI_click",
+        "reply": "BOB_NATIVE_REAL 11+7=18",
+        "reply_source": "codex_execution",
+        "status": "completed"
+      }
+    },
+    "gui": {
+      "execution_id": "local-execution:fd30fce10817ce4cd285648d91ae4d15025e0a64923f13d621252001345edc69",
+      "reply": "BOB_UI_REPLY_OK 7+8=15",
+      "accessibility_observed": true,
+      "status": "completed",
+      "exit_code": 0,
+      "cleanup_confirmed": true,
+      "reopen": "same reply observed in new native window",
+      "pixel_screenshot": "unavailable",
+      "execution_count_after_reopen": 1
+    },
+    "process_fault_checks": {
+      "kind": "real OS process with fake CLI, not model",
+      "success_timeout_cancel_output_limit_nonzero_exit": "passed",
+      "owner_kill_descendant_cleanup": "passed"
+    },
+    "source_sha256": {
+      "crates/bob-kernel/src/local_execution.rs": "963d6f6a8015d72feb0326c0dea8f13eaf7be6bc9f487e45a05ba8b59fce62a7",
+      "apps/bob-app/src-tauri/src/lib.rs": "2bdffea44a501ef0ba67a8123e4c11ca05cc28c7d693ba4c745ab10bc218eee8",
+      "apps/bob-app/src-tauri/src/runner.rs": "40c5374a8cc6458b9cc4297a749d2475407c841019760ae12b402ba9bc3a8725",
+      "apps/bob-app/src-tauri/src/tests.rs": "bbba84f3d99969373346df723f68a0b03536f3e7454728ffe2979e46a8fef9bc",
+      "apps/bob-app/src-tauri/src/real_cli_tests.rs": "02dd3ed9d4c298fd5a9ea65944c2c5aa5f07799066bd68db0fd39a054c5b97ba",
+      "apps/bob-app/src/App.vue": "564ed3f8739ab4035e21e0081c021c47eed907b97659b717d58ac20f1f06fad8",
+      "apps/bob-app/src/execution-controller.mjs": "2231965a181174a68bd1cd1f12488b633b560a55e88ca4daa154430a538dff42"
+    },
+    "release": false,
+    "real_project_modified": false,
+    "remote_home": "not_verified",
+    "frontend_build": "passed 35 modules",
+    "native_dev_rebuild": "passed"
+  },
+  "home_auth_transport_increment": {
+    "date": "2026-10-29",
+    "baseline": "f2bb0d5dfd9fd72a762f986348ed6c92b8e172ad plus preserved working changes",
+    "checks": {
+      "kernel": {
+        "passed": 59,
+        "ignored_subprocess_fixture": 1
+      },
+      "tls_actual_loopback": {
+        "passed": 11,
+        "remote": false,
+        "identities": "ephemeral test certificates only"
+      },
+      "native": {
+        "passed": 12,
+        "ignored": 4,
+        "models_in_this_suite": 0
+      },
+      "node": {
+        "passed": 17
+      },
+      "vite": {
+        "passed": true,
+        "modules": 35
+      }
+    },
+    "actual_window_runs": [
+      {
+        "id": "local-execution:8758c9f1473ec0c649377417fb728fd09f66e38adf7d72fb596047abd5eb3076",
+        "status": "completed",
+        "stop_requested": false
+      },
+      {
+        "id": "local-execution:671db4606f7b16a7edb13193e7658505d5dcf9e7409ef6b7c1f6e16846dde3d0",
+        "status": "failed",
+        "reason": "timeout",
+        "cleanup_confirmed": true,
+        "stop_requested": false
+      }
+    ],
+    "manual_stop": "not_verified",
+    "pairing": "not_implemented",
+    "android": "not_run",
+    "external_listener": false,
+    "persistent_keys_created": false,
+    "production": false,
+    "source_sha256": {
+      "crates/bob-kernel/src/home_auth.rs": "23f56576c63bce87a503d082a6ee05b88ef821cbafcfe7732aeac29203df8ce4",
+      "crates/bob-kernel/migrations/0003.sql": "4fa231538055dadcafd3da81feb194306255aab6341406b688e1962d3492e9f2",
+      "crates/bob-kernel/src/inbox.rs": "634586d5ec7ddca89718d27f95b3f9b4b08024ed40d6ca7cd6de94013fb78fbe",
+      "crates/bob-kernel/tests/home_auth.rs": "5948ca869bddf9d485852d146d6a13c99565d037b118be4aa020e00d52b55124",
+      "crates/bob-transport/src/lib.rs": "9241e54a9f9cb14b6da8f4f5876a3c780ba3c56e3880bd130449287893f3c91f",
+      "crates/bob-transport/tests/tls.rs": "208419874a3c690d33d357ae6219c20d75d52602e5284372b935409469be7ac5",
+      "apps/bob-app/src-tauri/src/device_vault.rs": "5003e3a77d9d264129ed9a4e32674e716307e61143521e08caa5ac94ef6d79ae",
+      "apps/bob-app/src/App.vue": "c378ddc0afe0198756b3484441ebfd166591c58455b09d21862a78bf9605e77d",
+      "Cargo.lock": "00af366efa0f6190aeffe08e8fb5ab3d1ca9b8ee9da853515f350f01ff781485"
+    }
+  }
+}

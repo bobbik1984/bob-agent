@@ -1,0 +1,23 @@
+{
+  "name": "bob-app",
+  "version": "1.0.1",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.13.0",
+  "scripts": {
+    "dev": "vite --host localhost --port 1420 --strictPort",
+    "build": "vite build",
+    "tauri": "tauri",
+    "test:composer": "node --test tests/send-controller.test.mjs"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "2.11.1",
+    "vue": "3.5.0",
+    "vue-i18n": "11.4.2"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.11.4",
+    "@vitejs/plugin-vue": "5.2.4",
+    "vite": "6.0.0"
+  }
+}

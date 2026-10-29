@@ -1,0 +1,121 @@
+{
+  "scope": "WP-02 in-memory DDL and relational constraints only",
+  "document_sha256": "c5d65b4677b82b1ceafd694122d418c6b716fcbc82fe1b0c2704fcfb732dda3e",
+  "document_hash_basis": "UTF-8 normalized LF",
+  "sql_sha256": "3e92f141f6c2e1eecf9056845a742688db8301f83620b267d54e176c639ddaaa",
+  "sqlite_version": "3.50.4",
+  "table_count": 31,
+  "passed": 25,
+  "failed": 0,
+  "checks": [
+    {
+      "check": "DDL creates with foreign keys enabled",
+      "result": "passed"
+    },
+    {
+      "check": "Cross-project goal rejected",
+      "result": "passed"
+    },
+    {
+      "check": "Milestone requires goal",
+      "result": "passed"
+    },
+    {
+      "check": "Execution cannot use unrelated project workspace",
+      "result": "passed"
+    },
+    {
+      "check": "Observed identity requires evidence reference",
+      "result": "passed"
+    },
+    {
+      "check": "Stop confirmation requires stop request",
+      "result": "passed"
+    },
+    {
+      "check": "Frozen requested config immutable",
+      "result": "passed"
+    },
+    {
+      "check": "Unknown execution retains task exclusion",
+      "result": "passed"
+    },
+    {
+      "check": "Only one lease row per workspace",
+      "result": "passed"
+    },
+    {
+      "check": "Same-task explicit parent version accepted",
+      "result": "passed"
+    },
+    {
+      "check": "Cross-task parent version rejected",
+      "result": "passed"
+    },
+    {
+      "check": "Artifact version update rejected",
+      "result": "passed"
+    },
+    {
+      "check": "Artifact version delete rejected",
+      "result": "passed"
+    },
+    {
+      "check": "Successful check requires evidence reference",
+      "result": "passed"
+    },
+    {
+      "check": "Review cannot reference other execution version",
+      "result": "passed"
+    },
+    {
+      "check": "Message and outbox atomic positive insert",
+      "result": "passed"
+    },
+    {
+      "check": "Failed transaction retains neither partial message nor outbox",
+      "result": "passed"
+    },
+    {
+      "check": "Duplicate request ID constrained",
+      "result": "passed"
+    },
+    {
+      "check": "Malformed payload JSON rejected",
+      "result": "passed"
+    },
+    {
+      "check": "Mutation requires expected version",
+      "result": "passed"
+    },
+    {
+      "check": "Unknown send requires transport evidence",
+      "result": "passed"
+    },
+    {
+      "check": "Peer accepted requires ACK metadata",
+      "result": "passed"
+    },
+    {
+      "check": "Receiver receipt ID unique across reconnect sessions",
+      "result": "passed"
+    },
+    {
+      "check": "Foreign key check clean after fixtures",
+      "result": "passed"
+    },
+    {
+      "check": "SQLite integrity check clean",
+      "result": "passed"
+    }
+  ],
+  "not_run": [
+    "Rust implementation",
+    "disk durability/crash recovery",
+    "network/DSH/CLI calls",
+    "Android/Windows app interaction",
+    "old app/online test suites",
+    "production migration"
+  ],
+  "note": "Synthetic fixtures; these checks do not validate runtime state transitions or exactly-once external effects."
+}

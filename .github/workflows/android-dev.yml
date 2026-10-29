@@ -1,0 +1,66 @@
+name: Android development APK
+on:
+  workflow_dispatch:
+  push:
+    branches: ["1.0.1"]
+    paths: [".github/workflows/android-dev.yml", "apps/bob-app/**", "crates/**", "Cargo.lock", "Cargo.toml"]
+permissions:
+  contents: read
+concurrency:
+  group: android-dev-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: apps/bob-app
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Prepare declared tools
+        run: |
+          echo "CARGO_TARGET_DIR=$RUNNER_TEMP/bob-target" >> "$GITHUB_ENV"
+          echo "GRADLE_USER_HOME=$RUNNER_TEMP/bob-gradle" >> "$GITHUB_ENV"
+          corepack enable
+          corepack prepare pnpm@11.13.0 --activate
+          rustup target add aarch64-linux-android
+          test -n "$ANDROID_HOME"
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          "$SDKMANAGER" "platforms;android-36" "build-tools;36.0.0" "ndk;27.2.12479018"
+          echo "NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
+      - name: Install locked frontend dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Check controllers
+        run: node --test tests/*.test.mjs
+      - name: Generate Android shell
+        run: pnpm exec tauri android init --ci --skip-targets-install
+      - name: Build independent ARM64 development APK
+        run: pnpm exec tauri android build --debug --target aarch64 --apk --ci
+      - name: Collect APK and provenance
+        run: |
+          mkdir -p "$RUNNER_TEMP/bob-apk"
+          find src-tauri/gen/android/app/build/outputs/apk -name '*.apk' -exec cp {} "$RUNNER_TEMP/bob-apk/" \;
+          test -n "$(find "$RUNNER_TEMP/bob-apk" -name '*.apk' -print -quit)"
+          for apk in "$RUNNER_TEMP/bob-apk/"*.apk; do
+            python3 tests/check-apk-alignment.py "$apk"
+            "$ANDROID_HOME/build-tools/36.0.0/zipalign" -c -P 16 -v 4 "$apk"
+          done
+          cd "$RUNNER_TEMP/bob-apk"
+          sha256sum *.apk > SHA256SUMS
+          printf 'commit=%s\nrun=%s\npackage=org.bobagent.nextdev\nkind=debug-not-release\n' "$GITHUB_SHA" "$GITHUB_RUN_ID" > BUILD.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bob-android-dev-${{ github.sha }}
+          path: ${{ runner.temp }}/bob-apk/
+          if-no-files-found: error
+          retention-days: 7

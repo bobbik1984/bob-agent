@@ -1,0 +1,16 @@
+{
+  "baseline": "785649d",
+  "command": "cargo test --offline --locked -p bob-kernel",
+  "platform": "Windows",
+  "passed": 9,
+  "failed": 0,
+  "ignoredFixture": 1,
+  "unixOnly": "not run",
+  "externalCache": true,
+  "networkDownloads": false,
+  "release": false,
+  "sha256": {
+    "Cargo.lock": "8b96e27c88d5f0f6c296c681432d5308a75ff783aab408ea320751fa44f0a75a",
+    "crates/bob-kernel/tests/process_recovery.rs": "432eb2d88cc151aad8cc6ec154548127b6923e01f59f009f9698835f7d4ed734"
+  }
+}

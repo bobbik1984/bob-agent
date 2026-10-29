@@ -1,0 +1,49 @@
+project:
+  name: bob-agent
+  directory: bob-agent
+  version: 1.0.1
+  status: development
+  tier: Production
+  tech:
+  - Rust
+  - Tauri v2
+  - Vue 3
+  - Desktop
+  - Android
+  current_task: BP2/BP3 Home授权/TLS接收与查询及Windows vault已有实现；59内核+11TLS+12原生+17Node通过；首次配对/手机与手动停止仍待验收
+  development_plan: docs/CURRENT_STAGE.md
+phases:
+- name: BP0 真相与保护
+  tasks:
+  - text: 统一项目目录与 Production 文档骨架
+    status: done
+  - text: 前身项目只读盘点（2026-10-28 快照）
+    status: done
+  - text: WP-00 前身项目保护基线（bundle + diff + untracked，已验证）
+    status: done
+  - text: WP-04 仓库初始化、legacy/v0.9 归档与 1.0.1 分支推送 GitHub
+    status: done
+  - text: WP-01 静态深盘完成（同步/Outbox/凭据实现/表与API/测试CI统计；未跑旧测试或全历史secret扫描）
+    status: done
+- name: BP1 架构定案
+  tasks:
+  - text: BOB-D-004/005 确认：单一 Rust 内核，个人环境以 X1C 为 Home 主库
+    status: done
+  - text: BOB-D-008 确认：懒式响应 + 打字静默预热 + 单飞唤醒 + 本地 Outbox 必达契约
+    status: done
+  - text: WP-02 设计草案完成（31表、25项内存DDL约束；未实现，BP1待WP-03）
+    status: done
+  - text: WP-03连接与安全设计获批；真实安全验证未运行，D007镜像仍未决
+    status: done
+- name: BP2 骨架与契约
+  tasks:
+  - text: BP2-01 建立 1.0.1 Rust Workspace (bob-kernel) + Tauri v2 + Vue 3 骨架
+    status: active
+  - text: BP2-02 落地 BOB-D-008 懒式响应、输入框打字预热与本地 Durable Outbox 闭环及测试
+    status: active
+- name: BP3 个人环境 MVP
+  tasks:
+  - text: BP3-01 X1C Home ↔ Android Replica 核心同步与远程文件只读浏览
+    status: active
+  - text: BP3-02 接入 Harness Runner 进程边界并在统一 UI 跑通任务治理闭环
+    status: active

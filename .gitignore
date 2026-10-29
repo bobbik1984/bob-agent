@@ -1,0 +1,38 @@
+# secrets & local config
+.env
+.env.*
+*.pem
+*.key
+
+# databases
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# build outputs & caches (caches should live outside the repo; see AGENTS.md)
+target/
+dist/
+node_modules/
+.pnp.*
+.vite/
+src-tauri/gen/**/build/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/*
+!.vscode/extensions.json
+.idea/
+
+# raw (non-sanitized) evidence never goes into docs/evidence
+private-evidence/
+
+# SQLite sidecars and ownership coordination
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite3-wal
+*.sqlite3-shm
+*.owner-lock

@@ -1,0 +1,20 @@
+[package]
+name = "bob-transport"
+version = "1.0.1"
+edition = "2021"
+rust-version = "1.89"
+publish = false
+
+[dependencies]
+bob-kernel = { path = "../bob-kernel" }
+rustls = { version = "=0.23.43", default-features = false, features = ["std", "ring"] }
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.151"
+sha2 = "=0.10.9"
+thiserror = "=2.0.20"
+
+[dev-dependencies]
+rcgen = { version = "=0.13.2", default-features = false, features = ["crypto", "ring"] }
+
+rusqlite = { version = "=0.39.0", features = ["bundled"] }
+tempfile = "=3.27.0"
