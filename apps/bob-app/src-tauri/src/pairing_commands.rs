@@ -351,25 +351,43 @@ fn save_host(home: &HomeCeremony) -> Result<(), &'static str> {
         grant_expiry: home.grant_expiry.ok_or("PAIRING_CONFIRMATION_REQUIRED")?,
     };
     let body = serde_json::to_vec(&data).map_err(|_| "PAIRING_STORE_UNAVAILABLE")?;
-    for (name, bytes) in [
-        ("home-host.pending", body.clone()),
-        (
-            "home-host.sha256",
-            format!("{:x}", Sha256::digest(&body)).into_bytes(),
-        ),
-    ] {
-        let mut f = std::fs::OpenOptions::new()
+    let seal = format!("{:x}", Sha256::digest(&body)).into_bytes();
+    // Public recovery metadata is durable BEFORE the grant transaction. An exact
+    // retry may complete a previously interrupted save; it cannot replace a peer.
+    fn write_once(path: &std::path::Path, bytes: &[u8]) -> Result<(), &'static str> {
+        match std::fs::symlink_metadata(path) {
+            Ok(m)
+                if m.is_file() && !m.file_type().is_symlink() && m.len() == bytes.len() as u64 =>
+            {
+                if std::fs::read(path).map_err(|_| "PAIRING_HOST_SAVE_UNCONFIRMED")? == bytes {
+                    return Ok(());
+                }
+                return Err("PAIRING_HOST_CHANGED");
+            }
+            Ok(_) => return Err("PAIRING_HOST_CHANGED"),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(_) => return Err("PAIRING_HOST_SAVE_UNCONFIRMED"),
+        }
+        let mut file = std::fs::OpenOptions::new()
             .create_new(true)
             .write(true)
-            .open(root.join(name))
+            .open(path)
             .map_err(|_| "PAIRING_HOST_SAVE_UNCONFIRMED")?;
-        f.write_all(&bytes)
-            .and_then(|_| f.sync_all())
-            .map_err(|_| "PAIRING_HOST_SAVE_UNCONFIRMED")?;
+        file.write_all(bytes)
+            .and_then(|_| file.sync_all())
+            .map_err(|_| "PAIRING_HOST_SAVE_UNCONFIRMED")
     }
-    std::fs::rename(root.join("home-host.pending"), root.join("home-host.json"))
+    let final_path = root.join("home-host.json");
+    if std::fs::symlink_metadata(&final_path).is_ok() {
+        write_once(&final_path, &body)?;
+        return write_once(&root.join("home-host.sha256"), &seal);
+    }
+    write_once(&root.join("home-host.pending"), &body)?;
+    write_once(&root.join("home-host.sha256"), &seal)?;
+    std::fs::rename(root.join("home-host.pending"), final_path)
         .map_err(|_| "PAIRING_HOST_SAVE_UNCONFIRMED")
 }
+
 fn load_host(
     root: &std::path::Path,
     identity: &NativeIdentity,
@@ -425,7 +443,7 @@ fn load_host(
         a.pairing_status(&data.invitation_id, now()?)
             .map_err(|_| "PAIRING_CONFIRMATION_REQUIRED")
     })?;
-    if stored.state != "consumed"
+    if !matches!(stored.state.as_str(), "pending" | "consumed")
         || stored.invitation.home_device_id != local.device_id
         || stored.invitation.home_epoch != data.home_epoch
         || stored.invitation.home_identity_sha256 != local.certificate_sha256
@@ -446,11 +464,13 @@ fn load_host(
         (None, None) if data.version == 1 => None,
         _ => return Err("PAIRING_HOST_CHANGED"),
     };
-    let revoked = with_app(owner, |a| {
-        a.home_pairing_revoked(&data.invitation_id, now()?)
-            .map_err(|_| "PAIRING_HOST_CHANGED")
-    })?;
-    if !revoked {
+    let consumed = stored.state == "consumed";
+    let revoked = consumed
+        && with_app(owner, |a| {
+            a.home_pairing_revoked(&data.invitation_id, now()?)
+                .map_err(|_| "PAIRING_HOST_CHANGED")
+        })?;
+    if consumed && !revoked {
         // Revalidate persisted permission, not the saved UI's claim of confirmation.
         let ctx = with_app(owner, |a| {
             a.authenticate_home_session(
@@ -874,7 +894,15 @@ pub(crate) fn app_pairing_reset(pairing: State<'_, PairingState>) -> Result<(), 
     }
     if let Some(Ceremony::Home(home)) = guard.as_ref() {
         if home.grant_expiry.is_some() || home.host.is_some() {
-            return Err("PAIRING_ALREADY_CONFIRMED");
+            let stored = with_app(&home.owner, |a| {
+                a.pairing_status(&home.invitation.invitation_id, now()?)
+                    .map_err(|_| "PAIRING_STORE_UNAVAILABLE")
+            })?;
+            return Err(if stored.state == "consumed" {
+                "PAIRING_ALREADY_CONFIRMED"
+            } else {
+                "PAIRING_PROVISIONAL_RECOVERY_REQUIRED"
+            });
         }
         with_app(&home.owner, |a| {
             let stored = a
@@ -1012,7 +1040,19 @@ pub(crate) fn app_pairing_home_confirm(
         return Err("PAIRING_HOME_REQUIRED");
     };
     let n = now()?;
-    let expires = n + GRANT_MS;
+    let stored = with_app(&home.owner, |a| {
+        a.pairing_status(&home.invitation.invitation_id, n)
+            .map_err(|_| "PAIRING_STORE_UNAVAILABLE")
+    })?;
+    if stored.state == "consumed" {
+        // Repeated confirmation does not renew or recreate an authorization.
+        return status(guard.as_ref().ok_or("PAIRING_STATE_UNAVAILABLE")?);
+    }
+    if stored.state != "pending" {
+        return Err("PAIRING_CONFIRMATION_REJECTED");
+    }
+    let expires = *home.grant_expiry.get_or_insert(n + GRANT_MS);
+    save_host(home)?;
     with_app(&home.owner, |a| {
         a.confirm_pairing_peer(
             &home.invitation.invitation_id,
@@ -1025,8 +1065,6 @@ pub(crate) fn app_pairing_home_confirm(
         )
         .map_err(|_| "PAIRING_CONFIRMATION_REJECTED")
     })?;
-    home.grant_expiry = Some(expires);
-    save_host(home)?;
     status(guard.as_ref().ok_or("PAIRING_STATE_UNAVAILABLE")?)
 }
 

@@ -120,5 +120,9 @@
   "qrRenderFailed": "Could not display the QR code. Close this invitation and create another.",
   "qrRevoke": "Revoke this phone’s access",
   "qrRevokeHint": "Paired message access lasts 365 days and can be revoked here. Execution permission is separate.",
-  "qrRevoked": "This phone’s access has been revoked."
+  "qrRevoked": "This phone’s access has been revoked.",
+  "qrHomeUnreachable": "Home is unreachable. Check the shared local or private network, then scan again.",
+  "qrNetworkUnavailable": "No reachable local network address was found. Connect to a local or private network first.",
+  "qrProposalUnknown": "The request may have reached Home. Check its confirmation prompt; Bob will check the result without resubmitting.",
+  "qrAlreadyActive": "A pairing attempt is active. Finish or close it before creating another."
 }

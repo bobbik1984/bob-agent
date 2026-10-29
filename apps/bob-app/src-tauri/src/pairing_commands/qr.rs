@@ -146,6 +146,26 @@ pub(crate) struct QrExport {
     pub home_name: String,
     pub addresses: Vec<String>,
 }
+fn export(code: &QrCode) -> Result<QrExport, &'static str> {
+    Ok(QrExport {
+        code: code.encode()?,
+        expires_at: code.x,
+        state: "open",
+        home_name: std::env::var("COMPUTERNAME").unwrap_or_else(|_| "Bob Home".into()),
+        addresses: code.a.iter().map(ToString::to_string).collect(),
+    })
+}
+fn existing_open(ceremony: &Option<Ceremony>) -> Result<Option<QrExport>, &'static str> {
+    match ceremony {
+        None => Ok(None),
+        Some(Ceremony::OpenHome(open))
+            if open.code.x > now()? && !open.stop.load(Ordering::SeqCst) =>
+        {
+            export(&open.code).map(Some)
+        }
+        Some(_) => Err("PAIRING_ALREADY_ACTIVE"),
+    }
+}
 fn allowed_ip(ip: IpAddr) -> bool {
     match ip {
         IpAddr::V4(v) => {
@@ -203,6 +223,12 @@ pub(crate) async fn app_pairing_qr_create<R: tauri::Runtime>(
     if !cfg!(windows) {
         return Err("PAIRING_HOME_UNSUPPORTED");
     }
+    {
+        let guard = pairing.0.lock().map_err(|_| "PAIRING_STATE_UNAVAILABLE")?;
+        if let Some(code) = existing_open(&guard)? {
+            return Ok(code);
+        }
+    }
     let addresses = tauri::async_runtime::spawn_blocking(local_addresses)
         .await
         .map_err(|_| "PAIRING_NETWORK_UNAVAILABLE")??;
@@ -229,8 +255,8 @@ async fn create_at<R: tauri::Runtime>(
         }
     })?;
     let mut guard = pairing.0.lock().map_err(|_| "PAIRING_STATE_UNAVAILABLE")?;
-    if guard.is_some() {
-        return Err("PAIRING_ALREADY_ACTIVE");
+    if let Some(code) = existing_open(&guard)? {
+        return Ok(code);
     }
     let bind_ip = if addresses[0].is_ipv4() {
         IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED)
@@ -276,7 +302,7 @@ async fn create_at<R: tauri::Runtime>(
         f,
         w,
     };
-    let encoded = code.encode()?;
+    code.encode()?; // Bound the actual invitation before publishing listeners.
     let root = app
         .path()
         .app_data_dir()
@@ -339,13 +365,7 @@ async fn create_at<R: tauri::Runtime>(
             }
         }
     }).map_err(|_|"PAIRING_LISTENER_FAILED")?;
-    Ok(QrExport {
-        code: encoded,
-        expires_at: code.x,
-        state: "open",
-        home_name: std::env::var("COMPUTERNAME").unwrap_or_else(|_| "Bob Home".into()),
-        addresses: code.a.iter().map(ToString::to_string).collect(),
-    })
+    export(&code)
 }
 pub(crate) async fn app_pairing_qr_propose<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
@@ -447,7 +467,21 @@ pub(crate) async fn app_pairing_qr_propose<R: tauri::Runtime>(
     .await
     .map_err(|_| "PAIRING_REQUEST_FAILED")?;
     let mut guard = pairing.0.lock().map_err(|_| "PAIRING_STATE_UNAVAILABLE")?;
-    require_replica_attempt(&guard, &attempt, &invitation_id, &["proposing"])?;
+    proposal_outcome(&mut guard, &attempt, &invitation_id, result)
+}
+fn proposal_outcome(
+    guard: &mut Option<Ceremony>,
+    attempt: &str,
+    invitation_id: &str,
+    result: Result<(), &'static str>,
+) -> Result<CeremonyStatus, &'static str> {
+    require_replica_attempt(guard, attempt, invitation_id, &["proposing"])?;
+    if result == Err("PAIRING_HOME_UNREACHABLE") {
+        // Every endpoint failed before an application write. Do not strand a
+        // known-unsent proposal in the ambiguous acknowledgement-recovery state.
+        *guard = None;
+        return Err("PAIRING_HOME_UNREACHABLE");
+    }
     if let Some(Ceremony::Replica { state, .. }) = guard.as_mut() {
         *state = if result.is_ok() { "pending" } else { "unknown" }.into();
     }
@@ -493,6 +527,16 @@ mod tests {
         ))
         .unwrap();
         assert!(code.code.len() < 2000);
+        let again = tauri::async_runtime::block_on(create_at(
+            home.handle(),
+            &home.state::<AppState>(),
+            &home.state::<PairingState>(),
+            vec![std::net::Ipv4Addr::LOCALHOST.into()],
+        ))
+        .unwrap();
+        assert_eq!(again.code, code.code);
+        assert_eq!(again.expires_at, code.expires_at);
+        assert_eq!(again.addresses, code.addresses);
         if let Some(path) = std::env::var_os("BOB_QR_TEST_CODE") {
             std::fs::write(path, &code.code).unwrap();
         }
@@ -510,6 +554,21 @@ mod tests {
             .state,
             "open"
         );
+        let mut unreachable = QrCode::decode(&code.code, now().unwrap()).unwrap();
+        let closed = TcpListener::bind("127.0.0.1:0").unwrap();
+        unreachable.a = vec![closed.local_addr().unwrap()];
+        drop(closed);
+        assert_eq!(
+            tauri::async_runtime::block_on(app_pairing_qr_propose(
+                phone.handle().clone(),
+                phone.state(),
+                phone.state(),
+                unreachable.encode().unwrap()
+            ))
+            .err(),
+            Some("PAIRING_HOME_UNREACHABLE")
+        );
+        assert!(phone.state::<PairingState>().0.lock().unwrap().is_none());
         let proposed = tauri::async_runtime::block_on(app_pairing_qr_propose(
             phone.handle().clone(),
             phone.state(),
@@ -518,6 +577,31 @@ mod tests {
         ))
         .unwrap();
         assert_eq!(proposed.state, "pending");
+        {
+            let state = phone.state::<PairingState>();
+            let guard = state.0.lock().unwrap();
+            let Some(Ceremony::Replica { invitation, .. }) = guard.as_ref() else {
+                panic!("replica");
+            };
+            let mut ambiguous = Some(Ceremony::Replica {
+                invitation: invitation.clone(),
+                attempt_id: "uncertain-attempt".into(),
+                state: "proposing".into(),
+            });
+            assert_eq!(
+                proposal_outcome(
+                    &mut ambiguous,
+                    "uncertain-attempt",
+                    &invitation.invitation_id,
+                    Err("PAIRING_PROPOSAL_UNCONFIRMED")
+                )
+                .err(),
+                Some("PAIRING_PROPOSAL_UNCONFIRMED")
+            );
+            assert!(
+                matches!(ambiguous, Some(Ceremony::Replica { state, .. }) if state == "unknown")
+            );
+        }
         let pending = status(
             home.state::<PairingState>()
                 .0
@@ -536,6 +620,64 @@ mod tests {
             phone.state()
         ))
         .is_err());
+        // A metadata save failure must leave the exact proposal unconsumed.
+        {
+            let state = home.state::<PairingState>();
+            let mut guard = state.0.lock().unwrap();
+            let Some(Ceremony::Home(h)) = guard.as_mut() else {
+                panic!("home");
+            };
+            h.root = roots[0].join("nonexistent-save-parent");
+        }
+        assert_eq!(
+            app_pairing_home_confirm(home.state()).err(),
+            Some("PAIRING_HOST_SAVE_UNCONFIRMED")
+        );
+        {
+            let state = home.state::<PairingState>();
+            let mut guard = state.0.lock().unwrap();
+            let Some(Ceremony::Home(h)) = guard.as_mut() else {
+                panic!("home");
+            };
+            assert_eq!(
+                with_app(&h.owner, |a| Ok(a
+                    .pairing_status(&h.invitation.invitation_id, now().unwrap())
+                    .unwrap()))
+                .unwrap()
+                .state,
+                "pending"
+            );
+            h.root = roots[0].clone();
+            // Simulate process loss after the durable provisional save, before
+            // database confirmation. Repeating this save must be exact/idempotent.
+            save_host(h).unwrap();
+            save_host(h).unwrap();
+        }
+        *home.state::<PairingState>().0.lock().unwrap() = None;
+        *home.state::<AppState>().0.lock().unwrap() = None;
+        std::thread::sleep(Duration::from_millis(150));
+        tauri::async_runtime::block_on(crate::app_bootstrap(home.handle().clone(), home.state()))
+            .unwrap();
+        let resumed = tauri::async_runtime::block_on(app_pairing_status(
+            home.handle().clone(),
+            home.state(),
+            home.state(),
+        ))
+        .unwrap();
+        assert_eq!(resumed.state, "pending");
+        assert_eq!(resumed.candidate_pin, pending.candidate_pin);
+        // Metadata alone never authorizes phone completion or control access.
+        assert!(tauri::async_runtime::block_on(app_pairing_finish(
+            phone.handle().clone(),
+            phone.state(),
+            phone.state(),
+            phone.state()
+        ))
+        .is_err());
+        assert_eq!(
+            app_pairing_home_confirm(home.state()).unwrap().state,
+            "confirmed"
+        );
         assert_eq!(
             app_pairing_home_confirm(home.state()).unwrap().state,
             "confirmed"
@@ -592,6 +734,31 @@ mod tests {
         ))
         .unwrap();
         assert_eq!(revoked.state, "revoked");
+        assert_eq!(
+            tauri::async_runtime::block_on(app_pairing_status(
+                home.handle().clone(),
+                home.state(),
+                home.state()
+            ))
+            .unwrap()
+            .state,
+            "revoked"
+        );
+        *home.state::<PairingState>().0.lock().unwrap() = None;
+        *home.state::<AppState>().0.lock().unwrap() = None;
+        std::thread::sleep(Duration::from_millis(150));
+        tauri::async_runtime::block_on(crate::app_bootstrap(home.handle().clone(), home.state()))
+            .unwrap();
+        assert_eq!(
+            tauri::async_runtime::block_on(app_pairing_status(
+                home.handle().clone(),
+                home.state(),
+                home.state()
+            ))
+            .unwrap()
+            .state,
+            "revoked"
+        );
         *home.state::<PairingState>().0.lock().unwrap() = None;
         *phone.state::<PairingState>().0.lock().unwrap() = None;
         *home.state::<AppState>().0.lock().unwrap() = None;

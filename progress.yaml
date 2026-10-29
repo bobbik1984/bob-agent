@@ -10,7 +10,7 @@ project:
   - Vue 3
   - Desktop
   - Android
-  current_task: BP2/BP3 Home配对与执行接线已实现，原生21/TLS17/Node20及真实只读回复专项通过；Android候选构建中，手机端闭环与停止仍待验收
+  current_task: BP2/BP3 二维码配对候选0e2c869，原生26/bootstrap7/TLS17/Node20通过，Android云端编译中；半配对恢复加固及Pixel扫码/手机闭环待验
   development_plan: docs/CURRENT_STAGE.md
 phases:
 - name: BP0 真相与保护

@@ -120,5 +120,9 @@
   "qrRenderFailed": "二维码生成失败，请结束本次邀请后重新生成。",
   "qrRevoke": "撤销此手机访问",
   "qrRevokeHint": "配对消息访问有效期为 365 天，可在这里撤销。执行许可另行授权。",
-  "qrRevoked": "此手机的访问已撤销。"
+  "qrRevoked": "此手机的访问已撤销。",
+  "qrHomeUnreachable": "暂时无法连接 Home。请检查手机与电脑是否位于同一网络，或已有私有网络是否可用，再重新扫码。",
+  "qrNetworkUnavailable": "未找到手机可访问的本机网络地址。请先连接局域网或已有私有网络。",
+  "qrProposalUnknown": "连接请求可能已到达 Home，请先查看电脑上的确认提示。这里会核对结果，不会重复提交。",
+  "qrAlreadyActive": "已有配对请求，请完成或结束它后再创建新的邀请。"
 }
