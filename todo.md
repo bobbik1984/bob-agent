@@ -20,7 +20,7 @@
 - [ ] **BP3-01**：打通 X1C Home 主库 ↔ 手机 Tauri Android Replica 的会话、捕获、待办与远程文件只读浏览（F4）
 - [ ] **BP3-02**：通过进程边界接入 Harness Runner（DSH / AGY / Codex / Generic API），在统一 UI 中跑通 Task → Execution → Artifact 预览与 Review 闭环
 
-当前证据：内核59项、实际TLS套接字11项、原生12项、Node17项及前端构建通过。Home授权/加密接收与回执查询、Windows DPAPI已实现；测试证书不代表首次配对。真实彩虹回复正常完成；第二轮真实调用超时且清理确认；两轮都没有停止请求，手动停止仍待验收。见[当前施工](docs/CURRENT_STAGE.md)和[shell证据](docs/evidence/2026-10-29-bp2-shell.md)。
+当前证据：5a1b9eb 已实现首次配对、Home原生监听、原子接收/执行准备、结果同步与停止请求投影。最新原生21项、传输17项、Node20项通过；真实Codex只读回复及重开不重派专项通过。Android候选正在GitHub构建，手机配对/发送/离线恢复/停止仍待验收，BP2/BP3不标整体完成。见现有施工与shell证据。
 
 - [/] BP2/BP3：本机只读执行与固定Stop入口；继续完成停止按钮真实操作、窄屏与可用性验收。
 - [/] Home认证基础：持久设备/会话授权、TLS接收及回执查询完成本机验证；继续首次配对、App投递/回复同步和Android Keystore/真机，不以CLI登录或测试证书代替配对。
