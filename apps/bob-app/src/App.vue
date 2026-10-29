@@ -33,6 +33,12 @@ function messageStatus(message) {
 }
 const connectionKey = computed(() => !available ? 'nativeRequired' : executionEnabled.value ? 'codexReadOnlyReady' : homeConfigured.value ? 'homeConfiguredHint' : readiness.value ? 'providerUnconfigured' : 'loading');
 const settingsOpen = ref(false);
+const navigationOpen = ref(false);
+const devicePanel = ref(null);
+const deviceCapabilities = ref(null);
+const currentConversation = computed(() => messages.value.find(m => m.role === 'user')?.content?.slice(0, 60) || t('conversation'));
+async function openDevices() { settingsOpen.value = true; await nextTick(); await devicePanel.value?.openDetails(); }
+
 const settingsPanel = ref(null);
 let settingsTrigger = null;
 watch(settingsOpen, async open => {
@@ -166,6 +172,7 @@ const statusKeys = { reply_saved:'probeReplySaved', local_saved:'localSaved',que
 onMounted(async () => {
   releaseViewport = bindViewport(window, document.documentElement);
   await startup();
+  if (available) deviceCapabilities.value = await kernelBridge.pairingCapabilities().catch(() => null);
   if (!disposed && available) poll = setInterval(() => { void reload(); }, 1500);
 });
 onUnmounted(() => { disposed = true; releaseViewport(); if (poll) clearInterval(poll); });
@@ -173,17 +180,30 @@ onUnmounted(() => { disposed = true; releaseViewport(); if (poll) clearInterval(
 <template>
   <div class="app-shell">
     <header class="topbar">
-      <strong class="brand"><img :src="brandLogo" :alt="t('brand')" /></strong>
+      <button type="button" class="icon-button" :aria-label="t('openNavigation')" :aria-expanded="navigationOpen" @click="navigationOpen=true">☰</button>
       <span class="page-name">{{ t('conversation') }}</span>
-      <button type="button" class="settings-toggle" :aria-expanded="settingsOpen" @click="settingsOpen=!settingsOpen">{{ t('settings') }}</button>
+      <button type="button" class="device-indicator" :class="{paired:homeConfigured,unconfirmed:homeFault}" :aria-label="t(homeFault ? 'deviceStatusUnknown' : homeConfigured ? 'devicePairedDetails' : 'connectDeviceDetails')" @click="openDevices">
+        <svg v-if="deviceCapabilities?.can_scan" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="13" rx="2"/><path d="M8 21h8M12 16v5"/></svg>
+        <svg v-else viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="2" width="12" height="20" rx="2"/><path d="M10 18h4"/></svg>
+        <span class="device-dot" aria-hidden="true"></span>
+      </button>
+      <button type="button" class="icon-button settings-toggle" :aria-label="t('settings')" :aria-expanded="settingsOpen" @click="settingsOpen=!settingsOpen">⋯</button>
     </header>
     <section v-show="settingsOpen" ref="settingsPanel" class="settings-panel" role="dialog" aria-modal="true" :aria-label="t('settings')" @keydown="settingsKeydown">
       <div class="settings-heading"><h2>{{ t('settings') }}</h2><button type="button" :aria-label="t('closeSettings')" @click="settingsOpen=false">×</button></div>
       <label class="language"><span class="visually-hidden">{{ t('language') }}</span><select v-model="locale"><option value="zh-CN">{{ t('chinese') }}</option><option value="en-US">{{ t('english') }}</option></select></label>
-      <HomeConnection v-if="sessionId" :paired="homeConfigured" @changed="reload" @connected="settingsOpen=false;focusPairedComposer()" />
+      <HomeConnection ref="devicePanel" v-if="sessionId" :paired="homeConfigured" @changed="reload" @connected="settingsOpen=false;focusPairedComposer()" />
     </section>
+    <div v-if="navigationOpen" class="navigation-overlay" @keydown.esc="navigationOpen=false">
+      <button type="button" class="navigation-backdrop" :aria-label="t('closeNavigation')" @click="navigationOpen=false"></button>
+      <nav class="navigation-drawer" :aria-label="t('conversations')">
+        <div class="settings-heading"><h2>{{ t('conversations') }}</h2><button type="button" :aria-label="t('closeNavigation')" @click="navigationOpen=false">×</button></div>
+        <button type="button" class="conversation-link" aria-current="page" @click="navigationOpen=false">{{ currentConversation }}</button>
+        <h2>{{ t('projects') }}</h2><p class="navigation-note">{{ t('projectsNotConnected') }}</p>
+      </nav>
+    </div>
     <main class="main">
-      <div class="connection-note" :class="{'home-paired':homeConfigured}" role="status">
+      <div v-if="!homeConfigured || readiness?.pending_messages > 0" class="connection-note" :class="{'home-paired':homeConfigured}" role="status">
         <span>{{ t(connectionKey) }}</span>
         <span v-if="readiness && readiness.pending_messages > 0" class="storage-summary">{{ t(executionEnabled ? 'localExecutionStatus' : 'localStatus', { saved: readiness.saved_messages, pending: readiness.pending_messages }) }}</span>
       </div>
@@ -191,7 +211,7 @@ onUnmounted(() => { disposed = true; releaseViewport(); if (poll) clearInterval(
       <div v-if="homeFault" class="notice" role="status">{{ t('homeSyncUnconfirmed') }}</div>
       <div v-if="executionFault" class="notice" role="alert"><span>{{ t(executionFault) }}</span><button type="button" @click="reload">{{ t('checkStatus') }}</button></div>
       <section ref="historyRegion" class="history" :aria-label="t('conversation')" aria-live="polite" :aria-busy="loading">
-        <p v-if="loading" class="empty">{{ t('loading') }}</p>
+        <div v-if="loading" class="empty loading-brand"><img :src="brandLogo" :alt="t('brand')" /><p>{{ t('loading') }}</p></div>
         <div v-else-if="!messages.length" class="empty"><h1>{{ t('startTitle') }}</h1><p>{{ t(homeConfigured ? 'homeStartHint' : executionEnabled ? 'startExecutionHint' : 'startHint') }}</p></div>
         <article v-for="message in messages" :key="message.id" class="message" :class="{ 'assistant-message': message.role === 'assistant' }">
           <span v-if="message.role === 'assistant'" class="message-state">{{ t(['codex_execution', 'home_codex_execution'].includes(message.source) ? 'assistantLiveReply' : 'assistantReply') }}</span>

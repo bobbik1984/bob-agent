@@ -139,5 +139,13 @@
   "copied": "Copied",
   "copyFailed": "Could not copy. Select the text to copy it.",
   "closeSettings": "Close settings",
-  "deviceStorageReadFailed": "Device secure storage could not be read. A saved pairing does not confirm the current connection. Check the connection again."
+  "deviceStorageReadFailed": "Device secure storage could not be read. A saved pairing does not confirm the current connection. Check the connection again.",
+  "openNavigation": "Open conversations and projects",
+  "closeNavigation": "Close sidebar",
+  "conversations": "Conversations",
+  "projects": "Projects",
+  "projectsNotConnected": "Projects are not connected yet. You can continue this conversation.",
+  "devicePairedDetails": "Device paired. View connection details",
+  "connectDeviceDetails": "Connect device",
+  "deviceStatusUnknown": "Connection unconfirmed. View details"
 }

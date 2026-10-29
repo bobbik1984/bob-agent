@@ -139,5 +139,13 @@
   "copied": "已复制",
   "copyFailed": "复制失败，请选择文字复制",
   "closeSettings": "关闭设置",
-  "deviceStorageReadFailed": "暂时无法读取设备的安全存储。已保存的配对不代表当前连接可用，请重新检查连接。"
+  "deviceStorageReadFailed": "暂时无法读取设备的安全存储。已保存的配对不代表当前连接可用，请重新检查连接。",
+  "openNavigation": "打开对话与项目",
+  "closeNavigation": "关闭侧栏",
+  "conversations": "对话",
+  "projects": "项目",
+  "projectsNotConnected": "项目列表尚未接入。当前对话可以继续使用。",
+  "devicePairedDetails": "设备已配对，查看连接详情",
+  "connectDeviceDetails": "连接设备",
+  "deviceStatusUnknown": "设备连接待核对，查看详情"
 }

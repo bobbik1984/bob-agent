@@ -32,7 +32,10 @@ with sync_playwright() as p:
    page.locator('textarea').fill('Retain this draft')
    history=page.locator('.history').bounding_box()
    assert history['height'] > height*.40, history
-   assert page.locator('.brand img').evaluate('(e)=>e.complete && e.naturalWidth>0')
+   assert not page.locator('.topbar img').count()
+   page.get_by_role('button',name='打开对话与项目' if locale=='zh-CN' else 'Open conversations and projects',exact=True).click()
+   page.locator('.conversation-link').click()
+   assert page.locator('textarea').input_value()=='Retain this draft'
    assert not page.locator('.storage-summary').count()
    page.get_by_role('button',name=labels['copy'],exact=True).click()
    assert page.evaluate('navigator.clipboard.readText()')=='UI fixture reply — copy this exact text.'
@@ -42,6 +45,9 @@ with sync_playwright() as p:
    page.keyboard.press('Escape')
    assert page.get_by_role('button',name=labels['settings'],exact=True).evaluate('(e)=>e===document.activeElement')
    page.get_by_role('button',name=labels['settings'],exact=True).click()
+   page.get_by_role('button',name=labels['close']).click()
+   page.locator('.device-indicator').click()
+   page.locator('.qr-panel').wait_for(state='visible')
    page.get_by_role('button',name=labels['close']).click()
    assert page.locator('textarea').input_value()=='Retain this draft'
    assert page.locator('.history').bounding_box()==history
