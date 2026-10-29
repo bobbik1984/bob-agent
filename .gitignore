@@ -36,3 +36,6 @@ private-evidence/
 *.sqlite3-wal
 *.sqlite3-shm
 *.owner-lock
+
+__pycache__/
+*.pyc
