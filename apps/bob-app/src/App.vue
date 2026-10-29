@@ -1,6 +1,8 @@
 <script setup>
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import HomeConnection from './HomeConnection.vue';
+import { bindViewport } from './viewport.mjs';
+import brandLogo from './assets/bob-logo.svg';
 import { useI18n } from 'vue-i18n';
 import { kernelBridge } from './native-bridge.mjs';
 import { createSendController } from './send-controller.mjs';
@@ -16,6 +18,7 @@ const cancelPending = ref(new Set());
 const dispatchPending = ref(false);
 let poll = null;
 let disposed = false;
+let releaseViewport = () => {};
 const locallyAccepted = new Map();
 let unconfirmedRequest = null;
 const executionController = createExecutionController(kernelBridge);
@@ -29,6 +32,12 @@ function messageStatus(message) {
   return executionStatusKey(messageExecution(message)) || statusKeys[message.send_state] || 'unknown';
 }
 const connectionKey = computed(() => !available ? 'nativeRequired' : executionEnabled.value ? 'codexReadOnlyReady' : homeConfigured.value ? 'homeConfiguredHint' : readiness.value ? 'providerUnconfigured' : 'loading');
+const settingsOpen = ref(false);
+const copyState = ref({});
+async function copyReply(message) {
+  try { await navigator.clipboard.writeText(message.content); copyState.value = {...copyState.value, [message.id]: 'copied'}; }
+  catch { copyState.value = {...copyState.value, [message.id]: 'copyFailed'}; }
+}
 const draft = ref('');
 const saving = ref(false);
 const loading = ref(true);
@@ -139,24 +148,29 @@ function keydown(event) {
 }
 const statusKeys = { reply_saved:'probeReplySaved', local_saved:'localSaved',queued_for_wakeup:'waitingHome',not_dispatched:'waitingHome',dispatching:'sending',dispatched:'waitingReceipt',unknown_send:'unknown',peer_accepted:'homeReceived',rejected:'rejected',cancelled_local:'cancelled',needs_attention:'attention' };
 onMounted(async () => {
+  releaseViewport = bindViewport(window, document.documentElement);
   await startup();
   if (!disposed && available) poll = setInterval(() => { void reload(); }, 1500);
 });
-onUnmounted(() => { disposed = true; if (poll) clearInterval(poll); });
+onUnmounted(() => { disposed = true; releaseViewport(); if (poll) clearInterval(poll); });
 </script>
 <template>
   <div class="app-shell">
     <header class="topbar">
-      <strong class="brand">{{ t('brand') }}</strong>
+      <strong class="brand"><img :src="brandLogo" :alt="t('brand')" /></strong>
       <span class="page-name">{{ t('conversation') }}</span>
-      <label class="language"><span class="visually-hidden">{{ t('language') }}</span><select v-model="locale"><option value="zh-CN">{{ t('chinese') }}</option><option value="en-US">{{ t('english') }}</option></select></label>
+      <button type="button" class="settings-toggle" :aria-expanded="settingsOpen" @click="settingsOpen=!settingsOpen">{{ t('settings') }}</button>
     </header>
+    <section v-show="settingsOpen" class="settings-panel" role="dialog" aria-modal="true" :aria-label="t('settings')" @keydown.esc="settingsOpen=false">
+      <div class="settings-heading"><h2>{{ t('settings') }}</h2><button type="button" :aria-label="t('closeSettings')" @click="settingsOpen=false">×</button></div>
+      <label class="language"><span class="visually-hidden">{{ t('language') }}</span><select v-model="locale"><option value="zh-CN">{{ t('chinese') }}</option><option value="en-US">{{ t('english') }}</option></select></label>
+      <HomeConnection v-if="sessionId" :paired="homeConfigured" @changed="reload" @connected="settingsOpen=false;focusPairedComposer()" />
+    </section>
     <main class="main">
       <div class="connection-note" :class="{'home-paired':homeConfigured}" role="status">
         <span>{{ t(connectionKey) }}</span>
-        <span v-if="readiness" class="storage-summary">{{ t(executionEnabled ? 'localExecutionStatus' : 'localStatus', { saved: readiness.saved_messages, pending: readiness.pending_messages }) }}</span>
+        <span v-if="readiness && readiness.pending_messages > 0" class="storage-summary">{{ t(executionEnabled ? 'localExecutionStatus' : 'localStatus', { saved: readiness.saved_messages, pending: readiness.pending_messages }) }}</span>
       </div>
-      <HomeConnection v-if="sessionId" :paired="homeConfigured" @changed="reload" @connected="focusPairedComposer" />
       <div v-if="fault" class="notice" role="alert"><span>{{ t(fault) }}</span><button type="button" @click="sessionId ? reload() : startup()">{{ t('reload') }}</button></div>
       <div v-if="homeFault" class="notice" role="status">{{ t('homeSyncUnconfirmed') }}</div>
       <div v-if="executionFault" class="notice" role="alert"><span>{{ t(executionFault) }}</span><button type="button" @click="reload">{{ t('checkStatus') }}</button></div>
@@ -166,6 +180,7 @@ onUnmounted(() => { disposed = true; if (poll) clearInterval(poll); });
         <article v-for="message in messages" :key="message.id" class="message" :class="{ 'assistant-message': message.role === 'assistant' }">
           <span v-if="message.role === 'assistant'" class="message-state">{{ t(['codex_execution', 'home_codex_execution'].includes(message.source) ? 'assistantLiveReply' : 'assistantReply') }}</span>
           <p class="message-body">{{ message.content }}</p>
+          <button v-if="message.role === 'assistant'" type="button" class="copy-reply" @click="copyReply(message)">{{ t(copyState[message.id] || 'copyReply') }}</button>
           <span class="message-state">{{ t(messageStatus(message)) }}</span>
           <button v-if="canCancelExecution(messageExecution(message))" type="button" class="cancel-execution" :disabled="cancelPending.has(messageExecution(message).id)" @click="cancel(messageExecution(message))">{{ t(cancelPending.has(messageExecution(message).id) ? 'requestingStop' : 'stopExecution') }}</button>
           <span v-if="messageExecution(message)?.status === 'unknown'" class="message-state">{{ t('noAutomaticReplay') }}</span>
