@@ -20,6 +20,13 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+      - name: Require persistent signing configuration
+        env:
+          SIGNING_KEY: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          SIGNING_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          SIGNING_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          test -n "$SIGNING_KEY" && test -n "$SIGNING_PASSWORD" && test -n "$SIGNING_ALIAS" || { echo "Persistent Android signing secrets are required; refusing random-signature output."; exit 1; }
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
@@ -46,6 +53,20 @@ jobs:
         run: pnpm exec tauri android init --ci --skip-targets-install
       - name: Build independent ARM64 development APK
         run: pnpm exec tauri android build --debug --target aarch64 --apk --ci
+      - name: Sign APK with persistent certificate
+        env:
+          SIGNING_KEY: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          SIGNING_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          SIGNING_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          umask 077
+          KEYSTORE="$RUNNER_TEMP/bob-signing.p12"
+          trap 'rm -f "$KEYSTORE"' EXIT
+          printf '%s' "$SIGNING_KEY" | base64 --decode > "$KEYSTORE"
+          while IFS= read -r -d '' apk; do
+            "$ANDROID_HOME/build-tools/36.0.0/apksigner" sign --ks "$KEYSTORE" --ks-type PKCS12 --ks-key-alias "$SIGNING_ALIAS" --ks-pass env:SIGNING_PASSWORD --key-pass env:SIGNING_PASSWORD "$apk"
+            "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$apk"
+          done < <(find src-tauri/gen/android/app/build/outputs/apk -name '*.apk' -print0)
       - name: Collect APK and provenance
         run: |
           mkdir -p "$RUNNER_TEMP/bob-apk"
