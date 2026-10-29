@@ -574,3 +574,559 @@ fn lookup_wrong_home_pin_rejects_before_application_query() {
     assert!(matches!(error.error, TransportError::PeerMismatch));
     assert!(worker.join().unwrap().is_err());
 }
+
+fn control_store(path: &std::path::Path, pin: &str) -> bob_kernel::outbox::Store {
+    let mut store = bob_kernel::outbox::Store::open(path, 1).unwrap();
+    store
+        .initialize_local_identity("replica", "home", 1, 1)
+        .unwrap();
+    rusqlite::Connection::open(path).unwrap().execute("UPDATE devices SET trust_state='paired',public_key_ref='control-fixture' WHERE id='replica'",[]).unwrap();
+    store
+        .grant_home_conversation("home", 1, "replica", pin, "conversation", 0, 100, true, 1)
+        .unwrap();
+    store
+}
+fn control_execution(path: &std::path::Path) {
+    rusqlite::Connection::open(path).unwrap().execute_batch("PRAGMA foreign_keys=ON;
+    INSERT INTO projects(id,title,status,version,created_at,updated_at) VALUES('project','','active',1,1,1);
+    INSERT INTO workspaces VALUES('workspace','home','fixture','readonly',1);
+    INSERT INTO project_workspaces VALUES('project','workspace');
+    INSERT INTO tasks(id,project_id,source_message_id,title,status,constraints_json,version,created_at,updated_at) VALUES('task','project','message','','running','{}',1,1,1);
+    INSERT INTO executions(id,project_id,task_id,workspace_id,request_id,status,requested_json,contract_json,contract_sha256,version) VALUES('execution','project','task','workspace','request','running','{}','{}','fixture',1);
+    INSERT INTO workspace_leases VALUES('workspace','execution',1,1,'held',1);").unwrap();
+}
+
+#[test]
+fn control_results_cancel_and_reopen_are_bound_to_original_request() {
+    use bob_kernel::dispatch::CancelExecution;
+    use bob_transport::control::HomeRequest;
+    let m = material();
+    let pin = certificate_fingerprint(&m.replica);
+    let d = tempfile::tempdir().unwrap();
+    let path = d.path().join("home.sqlite");
+    let mut store = control_store(&path, &pin);
+    let ctx = store
+        .authenticate_home_session("home", 1, &pin, "conversation", 1)
+        .unwrap();
+    store.receive_message(&ctx, &request(), 2).unwrap();
+    control_execution(&path);
+    let s = server(&m, pin);
+    let c = client(&m, certificate_fingerprint(&m.home));
+    let l = listener();
+    let address = l.local_addr().unwrap();
+    let worker = std::thread::spawn(move || {
+        for _ in 0..5 {
+            s.serve_control_home_once(
+                l.accept().unwrap().0,
+                Limits::default(),
+                &mut store,
+                "home",
+                1,
+                || 3,
+            )
+            .unwrap();
+        }
+    });
+    let result = c
+        .control(
+            address,
+            name(),
+            &HomeRequest::Result(request()),
+            Limits::default(),
+        )
+        .unwrap();
+    let e = result.result.execution.unwrap();
+    assert_eq!(e.status, "running");
+    assert!(!e.stop_requested);
+    assert!(e.reply.is_none());
+    let cancel = CancelExecution {
+        request_id: "cancel-control".into(),
+        session_id: "conversation".into(),
+        origin_device_id: "replica".into(),
+        home_device_id: "home".into(),
+        home_epoch: 1,
+        execution_id: e.execution_id,
+        expected_version: e.version,
+        permission_ref: "fixture-grant".into(),
+    };
+    assert!(
+        c.control(
+            address,
+            name(),
+            &HomeRequest::Cancel(cancel.clone()),
+            Limits::default()
+        )
+        .unwrap()
+        .result
+        .receipt
+        .unwrap()
+        .accepted
+    );
+    assert!(
+        c.control(
+            address,
+            name(),
+            &HomeRequest::LookupCancel(cancel.clone()),
+            Limits::default()
+        )
+        .unwrap()
+        .result
+        .receipt
+        .unwrap()
+        .accepted
+    );
+    assert!(
+        c.control(
+            address,
+            name(),
+            &HomeRequest::Cancel(cancel),
+            Limits::default()
+        )
+        .unwrap()
+        .result
+        .receipt
+        .unwrap()
+        .accepted
+    );
+    let e = c
+        .control(
+            address,
+            name(),
+            &HomeRequest::Result(request()),
+            Limits::default(),
+        )
+        .unwrap()
+        .result
+        .execution
+        .unwrap();
+    assert_eq!(e.status, "running");
+    assert_eq!(e.version, 2);
+    assert!(e.stop_requested);
+    assert!(!e.stop_confirmed);
+    worker.join().unwrap();
+    let mut store = bob_kernel::outbox::Store::open(&path, 4).unwrap();
+    let e = store
+        .lookup_home_result(&ctx, &request(), 4)
+        .unwrap()
+        .execution
+        .unwrap();
+    assert!(e.stop_requested);
+    assert!(!e.stop_confirmed);
+    let db = rusqlite::Connection::open(&path).unwrap();
+    let lease: String = db
+        .query_row("SELECT state FROM workspace_leases", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(lease, "held");
+}
+
+#[test]
+fn result_lookup_rejects_changed_request_and_revoked_grant_and_only_returns_matching_reply() {
+    let m = material();
+    let pin = certificate_fingerprint(&m.replica);
+    let d = tempfile::tempdir().unwrap();
+    let path = d.path().join("home.sqlite");
+    let mut store = control_store(&path, &pin);
+    let ctx = store
+        .authenticate_home_session("home", 1, &pin, "conversation", 1)
+        .unwrap();
+    assert!(store
+        .lookup_home_result(&ctx, &request(), 2)
+        .unwrap()
+        .receipt
+        .is_none());
+    store.receive_message(&ctx, &request(), 2).unwrap();
+    control_execution(&path);
+    let mut changed = request();
+    changed.content = serde_json::json!({"text":"different"});
+    assert!(store.lookup_home_result(&ctx, &changed, 3).is_err());
+    let db = rusqlite::Connection::open(&path).unwrap();
+    db.execute_batch("INSERT INTO messages VALUES('reply','conversation','home',NULL,'assistant','{\"text\":\"actual reply\",\"reply_to\":\"message\",\"execution_id\":\"execution\"}','home',4);
+    INSERT INTO messages VALUES('unrelated','conversation','home',NULL,'assistant','{\"text\":\"wrong reply\",\"reply_to\":\"other\",\"execution_id\":\"execution\"}','home',5);").unwrap();
+    assert!(store
+        .lookup_home_result(&ctx, &request(), 3)
+        .unwrap()
+        .execution
+        .unwrap()
+        .reply
+        .is_none());
+    db.execute(
+        "UPDATE executions SET status='completed',version=2 WHERE id='execution'",
+        [],
+    )
+    .unwrap();
+    let reply = store
+        .lookup_home_result(&ctx, &request(), 4)
+        .unwrap()
+        .execution
+        .unwrap()
+        .reply
+        .unwrap();
+    assert_eq!(reply.text, "actual reply");
+    db.execute("UPDATE home_device_authorizations SET revoked=1", [])
+        .unwrap();
+    assert!(store.lookup_home_result(&ctx, &request(), 5).is_err());
+}
+
+#[test]
+fn native_delivery_saves_offline_then_reconciles_lost_ack_without_duplicate() {
+    use bob_kernel::{
+        app::LocalApp,
+        dispatch::{DispatchPolicy, JobKind, TransportResult},
+    };
+    use bob_transport::delivery::HomeDelivery;
+    let m = material();
+    let d = tempfile::tempdir().unwrap();
+    let replica_path = d.path().join("replica.sqlite");
+    let home_path = d.path().join("home.sqlite");
+    let mut replica = LocalApp::open(&replica_path).unwrap();
+    let origin = replica.device_id().to_owned();
+    let session = replica.default_session().unwrap();
+    replica
+        .bind_confirmed_home("home", 1, &certificate_fingerprint(&m.home), 1)
+        .unwrap();
+    let mut home = bob_kernel::outbox::Store::open(&home_path, 1).unwrap();
+    home.initialize_local_identity(&origin, "home", 1, 1)
+        .unwrap();
+    rusqlite::Connection::open(&home_path).unwrap().execute("UPDATE devices SET trust_state='paired',public_key_ref='ephemeral-fixture' WHERE id=?1",[&origin]).unwrap();
+    home.grant_home_conversation(
+        "home",
+        1,
+        &origin,
+        &certificate_fingerprint(&m.replica),
+        &session,
+        0,
+        10000,
+        true,
+        1,
+    )
+    .unwrap();
+    replica
+        .accept(
+            "delivery-request",
+            "delivery-message",
+            &session,
+            "saved while offline".into(),
+            2,
+        )
+        .unwrap();
+    let policy = DispatchPolicy {
+        retry_ms: 10,
+        lease_ms: 2000,
+        max_attempts: 5,
+    };
+    let c = client(&m, certificate_fingerprint(&m.home));
+    let closed = listener();
+    let unused = closed.local_addr().unwrap();
+    drop(closed);
+    let first = replica.claim_home_delivery(3, policy).unwrap().unwrap();
+    let driver = HomeDelivery {
+        client: &c,
+        address: unused,
+        server_name: name(),
+        limits: Limits::default(),
+    };
+    let outcome = driver.run_delivery(&first);
+    assert!(matches!(outcome, TransportResult::ConfirmedZero));
+    replica
+        .complete_home_delivery(&first, outcome, 4, policy)
+        .unwrap();
+    assert_eq!(
+        replica.history(&session).unwrap()[0].send_state,
+        "not_dispatched"
+    );
+    let job = replica.claim_home_delivery(20, policy).unwrap().unwrap();
+    assert_eq!(job.kind, JobKind::Send);
+    let s = server(&m, certificate_fingerprint(&m.replica));
+    let l = listener();
+    let address = l.local_addr().unwrap();
+    let worker = std::thread::spawn(move || {
+        // Authentic Home receives and commits after the client's response deadline.
+        // This models a lost ACK, not a failed model execution.
+        let _ = s.serve_control_home_once(
+            l.accept().unwrap().0,
+            Limits::default(),
+            &mut home,
+            "home",
+            1,
+            || {
+                std::thread::sleep(Duration::from_millis(400));
+                30
+            },
+        );
+        home
+    });
+    let driver = HomeDelivery {
+        client: &c,
+        address,
+        server_name: name(),
+        limits: Limits {
+            deadline: Duration::from_millis(200),
+            ..Limits::default()
+        },
+    };
+    let outcome = driver.run_delivery(&job);
+    assert!(matches!(outcome, TransportResult::Uncertain));
+    replica
+        .complete_home_delivery(&job, outcome, 31, policy)
+        .unwrap();
+    let mut home = worker.join().unwrap();
+    drop(replica);
+    let mut replica = LocalApp::open(&replica_path).unwrap();
+    let job = replica
+        .claim_home_delivery(i64::MAX - 10000, policy)
+        .unwrap()
+        .unwrap();
+    assert_eq!(job.kind, JobKind::Lookup);
+    let s = server(&m, certificate_fingerprint(&m.replica));
+    let l = listener();
+    let address = l.local_addr().unwrap();
+    let worker = std::thread::spawn(move || {
+        s.serve_control_home_once(
+            l.accept().unwrap().0,
+            Limits::default(),
+            &mut home,
+            "home",
+            1,
+            || 40,
+        )
+    });
+    let driver = HomeDelivery {
+        client: &c,
+        address,
+        server_name: name(),
+        limits: Limits::default(),
+    };
+    let outcome = driver.run_delivery(&job);
+    assert!(matches!(outcome, TransportResult::Receipt(_)));
+    replica
+        .complete_home_delivery(&job, outcome, i64::MAX - 9999, policy)
+        .unwrap();
+    worker.join().unwrap().unwrap();
+    assert_eq!(
+        replica.history(&session).unwrap()[0].send_state,
+        "peer_accepted"
+    );
+    let db = rusqlite::Connection::open(&home_path).unwrap();
+    assert_eq!(
+        db.query_row("SELECT count(*) FROM messages", [], |r| r.get::<_, i64>(0))
+            .unwrap(),
+        1
+    );
+    assert_eq!(
+        db.query_row("SELECT count(*) FROM inbox_receipts", [], |r| r
+            .get::<_, i64>(0))
+            .unwrap(),
+        1
+    );
+}
+
+fn pairing_scope(m: &Material) -> bob_transport::pairing::PairingScope {
+    bob_transport::pairing::PairingScope {
+        invitation_id: "fixture-invitation".into(),
+        home_id: "home".into(),
+        home_epoch: 1,
+        home_pin: certificate_fingerprint(&m.home),
+        candidate_id: "replica".into(),
+        candidate_pin: certificate_fingerprint(&m.replica),
+        session_id: "conversation".into(),
+    }
+}
+fn pairing_store(
+    path: &std::path::Path,
+    scope: &bob_transport::pairing::PairingScope,
+) -> bob_kernel::outbox::Store {
+    let mut store = bob_kernel::outbox::Store::open(path, 1).unwrap();
+    store
+        .initialize_local_identity("home", "home", 1, 1)
+        .unwrap();
+    store
+        .issue_pairing_invitation(
+            &bob_kernel::pairing::PairingInvitation {
+                id: scope.invitation_id.clone(),
+                home_device_id: scope.home_id.clone(),
+                home_epoch: scope.home_epoch,
+                home_identity_sha256: scope.home_pin.clone(),
+                expires_at: 100,
+            },
+            &[7u8; 32],
+            1,
+        )
+        .unwrap();
+    store
+}
+#[test]
+fn actual_tls_pairing_proves_key_but_requires_local_confirmation_before_grant() {
+    let m = material();
+    let scope = pairing_scope(&m);
+    let d = tempfile::tempdir().unwrap();
+    let path = d.path().join("pairing.sqlite");
+    let mut store = pairing_store(&path, &scope);
+    let s = server(&m, scope.candidate_pin.clone());
+    let c = client(&m, scope.home_pin.clone());
+    let l = listener();
+    let address = l.local_addr().unwrap();
+    let ss = scope.clone();
+    let worker = std::thread::spawn(move || {
+        s.serve_pairing_home_once(
+            l.accept().unwrap().0,
+            Limits::default(),
+            &ss,
+            &mut store,
+            || 2,
+        )
+        .unwrap();
+        store
+    });
+    let pending = c
+        .propose_pairing(address, name(), &scope, [7u8; 32], Limits::default())
+        .unwrap();
+    assert_eq!(pending.candidate_pin, scope.candidate_pin);
+    let mut store = worker.join().unwrap();
+    assert_eq!(
+        store.pairing_status(&scope.invitation_id, 3).unwrap().state,
+        "pending"
+    );
+    assert!(store
+        .authenticate_home_session("home", 1, &scope.candidate_pin, "conversation", 3)
+        .is_err());
+    let s = server(&m, scope.candidate_pin.clone());
+    let l = listener();
+    let address = l.local_addr().unwrap();
+    let ss = scope.clone();
+    let worker = std::thread::spawn(move || {
+        let result = s.serve_pairing_confirmation_home_once(
+            l.accept().unwrap().0,
+            Limits::default(),
+            &ss,
+            &mut store,
+            || 3,
+        );
+        assert!(result.is_err());
+        store
+    });
+    assert!(c
+        .confirm_pairing(address, name(), &scope, Limits::default())
+        .is_err());
+    let mut store = worker.join().unwrap();
+    // This is the trusted local user decision, never a network operation.
+    store
+        .confirm_pairing_peer(
+            &scope.invitation_id,
+            &scope.candidate_id,
+            &scope.candidate_pin,
+            &scope.session_id,
+            1000,
+            true,
+            4,
+        )
+        .unwrap();
+    let s = server(&m, scope.candidate_pin.clone());
+    let l = listener();
+    let address = l.local_addr().unwrap();
+    let ss = scope.clone();
+    let worker = std::thread::spawn(move || {
+        s.serve_pairing_confirmation_home_once(
+            l.accept().unwrap().0,
+            Limits::default(),
+            &ss,
+            &mut store,
+            || 5,
+        )
+    });
+    let proof = c
+        .confirm_pairing(address, name(), &scope, Limits::default())
+        .unwrap();
+    worker.join().unwrap().unwrap();
+    assert_eq!(proof.home_id(), "home");
+    assert_eq!(proof.candidate_pin(), scope.candidate_pin);
+    assert_eq!(proof.session_id(), "conversation");
+    assert_eq!(proof.authorization_revision(), 1);
+}
+#[test]
+fn pairing_wrong_challenge_expiry_and_wrong_candidate_cannot_stage_or_grant() {
+    for mode in ["challenge", "expired", "candidate"] {
+        let m = material();
+        let scope = pairing_scope(&m);
+        let d = tempfile::tempdir().unwrap();
+        let path = d.path().join("pairing.sqlite");
+        let mut store = pairing_store(&path, &scope);
+        let s = server(&m, scope.candidate_pin.clone());
+        let c = client(&m, scope.home_pin.clone());
+        let l = listener();
+        let address = l.local_addr().unwrap();
+        let ss = scope.clone();
+        let worker = std::thread::spawn(move || {
+            assert!(s
+                .serve_pairing_home_once(
+                    l.accept().unwrap().0,
+                    Limits::default(),
+                    &ss,
+                    &mut store,
+                    || if mode == "expired" { 101 } else { 2 }
+                )
+                .is_err());
+            store
+        });
+        let mut client_scope = scope.clone();
+        if mode == "candidate" {
+            client_scope.candidate_id = "impostor".into();
+        }
+        assert!(c
+            .propose_pairing(
+                address,
+                name(),
+                &client_scope,
+                if mode == "challenge" {
+                    [8u8; 32]
+                } else {
+                    [7u8; 32]
+                },
+                Limits::default()
+            )
+            .is_err());
+        let store = worker.join().unwrap();
+        assert_ne!(
+            store.pairing_status(&scope.invitation_id, 2).unwrap().state,
+            "pending"
+        );
+        let db = rusqlite::Connection::open(&path).unwrap();
+        assert_eq!(
+            db.query_row("SELECT count(*) FROM home_device_authorizations", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+    }
+}
+
+#[test]
+fn pairing_callbacks_use_live_localapp_without_reopening_owned_store() {
+ use bob_kernel::{app::LocalApp,outbox::{Store,Error},pairing::{PairingInvitation,ProvenPairingPeer}};
+ use std::sync::Mutex;
+ let m=material();let mut scope=pairing_scope(&m);let d=tempfile::tempdir().unwrap();let path=d.path().join("app.sqlite");
+ let mut app=LocalApp::open(&path).unwrap();scope.home_id=app.device_id().into();
+ app.issue_pairing_invitation(&PairingInvitation{id:scope.invitation_id.clone(),home_device_id:scope.home_id.clone(),home_epoch:1,home_identity_sha256:scope.home_pin.clone(),expires_at:100},&[7u8;32],1).unwrap();
+ // This is the production ownership constraint that a second Store violated.
+ assert!(matches!(Store::open(&path,2),Err(Error::OwnershipUnavailable)));
+ let shared=Arc::new(Mutex::new(app));let s=server(&m,scope.candidate_pin.clone());let c=client(&m,scope.home_pin.clone());
+ let l=listener();let address=l.local_addr().unwrap();let ss=scope.clone();let owner=shared.clone();
+ let worker=std::thread::spawn(move||s.serve_pairing_rpc_once(l.accept().unwrap().0,Limits::default(),&ss,|peer,challenge|{
+  let mut app=owner.lock().unwrap();
+  app.propose_pairing_peer(&ss.invitation_id,&challenge,&ProvenPairingPeer{device_id:ss.candidate_id.clone(),identity_sha256:peer.certificate_sha256().into(),public_key_ref:peer.certificate_sha256().into()},2).map_err(|_|TransportError::Authentication)
+ }));
+ c.propose_pairing(address,name(),&scope,[7u8;32],Limits::default()).unwrap();worker.join().unwrap().unwrap();
+ {
+  let mut app=shared.lock().unwrap();assert_eq!(app.pairing_status(&scope.invitation_id,3).unwrap().state,"pending");
+  assert!(app.authenticate_home_session(&scope.home_id,1,&scope.candidate_pin,&scope.session_id,3).is_err());
+  app.confirm_pairing_peer(&scope.invitation_id,&scope.candidate_id,&scope.candidate_pin,&scope.session_id,1000,true,4).unwrap();
+ }
+ let s=server(&m,scope.candidate_pin.clone());let l=listener();let address=l.local_addr().unwrap();let ss=scope.clone();let owner=shared.clone();
+ let worker=std::thread::spawn(move||s.serve_pairing_confirmation_rpc_once(l.accept().unwrap().0,Limits::default(),&ss,|peer|{
+  let mut app=owner.lock().unwrap();let status=app.pairing_status(&ss.invitation_id,5).map_err(|_|TransportError::Authentication)?;
+  if status.state!="consumed" || status.device_id.as_deref()!=Some(ss.candidate_id.as_str()) || status.identity_sha256.as_deref()!=Some(peer.certificate_sha256()) {return Err(TransportError::Authentication);}
+  app.authenticate_home_session(&ss.home_id,1,peer.certificate_sha256(),&ss.session_id,5).map(|ctx|ctx.authorization_revision()).map_err(|_|TransportError::Authentication)
+ }));
+ let proof=c.confirm_pairing(address,name(),&scope,Limits::default()).unwrap();worker.join().unwrap().unwrap();
+ assert_eq!(proof.home_id(),scope.home_id);assert_eq!(proof.authorization_revision(),1);
+ assert!(matches!(Store::open(&path,6),Err(Error::OwnershipUnavailable)));
+}

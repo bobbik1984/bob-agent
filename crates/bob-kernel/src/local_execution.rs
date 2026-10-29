@@ -10,7 +10,7 @@ use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use serde::Serialize;
 use serde_json::json;
 
-const RUNNER: &str = "local-codex-v1";
+pub(crate) const RUNNER: &str = "local-codex-v1";
 #[derive(Debug, Clone, Serialize)]
 pub struct LocalExecution {
     pub id: String,
@@ -27,8 +27,19 @@ pub struct LocalExecution {
 }
 
 fn executions(db: &Connection, session: &str, origin: &str) -> Result<Vec<LocalExecution>> {
-    let mut q=db.prepare("SELECT e.id,e.request_id,m.id,e.status,m.content_json,e.stop_requested_at IS NOT NULL,d.last_error,e.resolved_json FROM executions e JOIN tasks t ON t.id=e.task_id JOIN messages m ON m.id=t.source_message_id JOIN runner_dispatches d ON d.execution_id=e.id WHERE m.conversation_id=?1 AND m.origin_device_id=?2 AND d.runner_instance_id=?3 ORDER BY e.rowid")?;
-    let rows = q.query_map(params![session, origin, RUNNER], |r| {
+    execution_rows(db, session, origin, false)
+}
+pub(crate) fn owned_executions(db: &Connection, home: &str) -> Result<Vec<LocalExecution>> {
+    execution_rows(db, "", home, true)
+}
+fn execution_rows(
+    db: &Connection,
+    session: &str,
+    origin: &str,
+    managed: bool,
+) -> Result<Vec<LocalExecution>> {
+    let mut q=db.prepare("SELECT e.id,e.request_id,m.id,e.status,m.content_json,e.stop_requested_at IS NOT NULL,d.last_error,e.resolved_json FROM executions e JOIN tasks t ON t.id=e.task_id JOIN messages m ON m.id=t.source_message_id JOIN runner_dispatches d ON d.execution_id=e.id WHERE ((?4=0 AND m.conversation_id=?1 AND m.origin_device_id=?2) OR (?4=1 AND EXISTS(SELECT 1 FROM workspaces w WHERE w.id=e.workspace_id AND w.device_id=?2))) AND d.runner_instance_id=?3 ORDER BY e.rowid")?;
+    let rows = q.query_map(params![session, origin, RUNNER, managed], |r| {
         Ok((
             r.get::<_, String>(0)?,
             r.get::<_, String>(1)?,
@@ -76,6 +87,12 @@ fn executions(db: &Connection, session: &str, origin: &str) -> Result<Vec<LocalE
 }
 
 impl LocalApp {
+    /// Trusted native Home owner view for process recovery and control, not a
+    /// remotely callable cross-conversation read endpoint.
+    pub fn managed_executions(&self) -> Result<Vec<LocalExecution>> {
+        owned_executions(&self.store.db, &self.origin)
+    }
+
     pub fn local_executions(&self, session_id: &str) -> Result<Vec<LocalExecution>> {
         if session_id != self.session {
             return Err(Error::InvalidTransition);
@@ -116,72 +133,23 @@ impl LocalApp {
         }
         let source:Option<(String,String,Option<String>)>=tx.query_row("SELECT m.id,m.content_json,c.project_id FROM messages m JOIN intent_outbox o ON o.request_id=m.request_id JOIN conversations c ON c.id=m.conversation_id WHERE m.request_id=?1 AND m.conversation_id=?2 AND m.origin_device_id=?3 AND m.role='user' AND o.target_device_id=?3 AND o.send_state='local_saved' AND c.archived_at IS NULL",params![request_id,self.session,self.origin],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).optional()?;
         let (message_id, content, existing_project) = source.ok_or(Error::InvalidTransition)?;
-        let content: serde_json::Value = serde_json::from_str(&content)?;
-        let prompt = content["text"]
-            .as_str()
-            .filter(|s| !s.trim().is_empty())
-            .ok_or(Error::InvalidTransition)?
-            .to_owned();
-        let key = digest(request_id.as_bytes());
-        let id = format!("local-execution:{key}");
-        let task = format!("local-task:{key}");
-        let owner_job = format!("Local\\BobReadOnly-{}", id.replace(':', "_"));
-        let owner = json!({"job_name":owner_job,"owner_policy":"windows-job-gated-v1"}).to_string();
-        let project = existing_project.unwrap_or_else(|| format!("local-project:{}", self.session));
-        let workspace = format!(
-            "local-workspace:{}",
-            digest(format!("{}:{workspace_ref}", self.origin).as_bytes())
-        );
-        tx.execute("INSERT OR IGNORE INTO projects VALUES(?1,'local conversation','local','active',1,?2,?2)",params![project,now])?;
-        tx.execute(
-            "INSERT OR IGNORE INTO workspaces VALUES(?1,?2,?3,'codex-read-only-temp-v1',1)",
-            params![workspace, self.origin, workspace_ref],
-        )?;
-        tx.execute(
-            "INSERT OR IGNORE INTO project_workspaces VALUES(?1,?2)",
-            params![project, workspace],
-        )?;
-        // The conversation remains local until a real Home protocol says otherwise.
-        tx.execute(
-            "UPDATE conversations SET project_id=?2 WHERE id=?1 AND project_id IS NULL",
-            params![self.session, project],
-        )?;
-        tx.execute("INSERT INTO tasks(id,project_id,source_message_id,title,status,constraints_json,version,created_at,updated_at) VALUES(?1,?2,?3,'local read-only reply','queued',?4,1,?5,?5)",params![task,project,message_id,json!({"read_only":true,"ephemeral_workspace":true}).to_string(),now])?;
-        let contract=json!({"kind":"local_codex_reply","source_message_id":message_id,"prompt_sha256":digest(prompt.as_bytes()),"workspace_ref":workspace_ref,"read_only":true,"automatic_retry":false}).to_string();
-        tx.execute("INSERT INTO executions(id,project_id,task_id,workspace_id,request_id,status,requested_json,contract_json,contract_sha256,version) VALUES(?1,?2,?3,?4,?5,'dispatching',?6,?7,?8,1)",params![id,project,task,workspace,request_id,json!({"harness":"codex","model":"cli_default","sandbox":"read-only"}).to_string(),contract,digest(contract.as_bytes())])?;
-        tx.execute(
-            "UPDATE executions SET resolved_json=?2 WHERE id=?1",
-            params![id, owner],
-        )?;
-        tx.execute(
-            "INSERT INTO runner_dispatches VALUES(?1,?2,?3,'dispatching',NULL,NULL,?4)",
-            params![id, request_id, RUNNER, now],
+        let result = create_execution(
+            &tx,
+            request_id,
+            workspace_ref,
+            &self.origin,
+            &self.session,
+            message_id,
+            content,
+            existing_project,
+            None,
+            now,
         )?;
         // Reserve the source intent for this local execution. This is not a
         // peer ACK: generic transport must not later submit the same intent.
         tx.execute("UPDATE intent_outbox SET send_state='needs_attention',last_error='LOCAL_EXECUTION_OWNED' WHERE request_id=?1",[request_id])?;
-        let epoch: i64 = tx.query_row(
-            "SELECT epoch FROM home_authority WHERE singleton=1",
-            [],
-            |r| r.get(0),
-        )?;
-        tx.execute("INSERT INTO workspace_leases VALUES(?1,?2,?3,1,'held',?4) ON CONFLICT(workspace_id) DO UPDATE SET execution_id=excluded.execution_id,home_epoch=excluded.home_epoch,fencing_token=workspace_leases.fencing_token+1,state='held',updated_at=excluded.updated_at WHERE workspace_leases.state='released'",params![workspace,id,epoch,now])?;
-        let held:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM workspace_leases WHERE workspace_id=?1 AND execution_id=?2 AND state='held')",params![workspace,id],|r|r.get(0))?;
-        if !held {
-            return Err(Error::InvalidTransition);
-        }
         tx.commit()?;
-        Ok(LocalExecution {
-            id,
-            request_id: request_id.into(),
-            message_id,
-            status: "dispatching".into(),
-            prompt,
-            stop_requested: false,
-            error: None,
-            owner_job: Some(owner_job),
-            can_start: true,
-        })
+        Ok(result)
     }
 
     /// Persist the native ownership identity before releasing the worker gate.
@@ -195,7 +163,7 @@ impl LocalApp {
             .store
             .db
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let local = executions(&tx, &self.session, &self.origin)?
+        let local = owned_executions(&tx, &self.origin)?
             .into_iter()
             .find(|e| e.id == id)
             .ok_or(Error::InvalidTransition)?;
@@ -241,7 +209,7 @@ impl LocalApp {
             .store
             .db
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let local = executions(&tx, &self.session, &self.origin)?
+        let local = owned_executions(&tx, &self.origin)?
             .into_iter()
             .find(|e| e.id == id)
             .ok_or(Error::InvalidTransition)?;
@@ -288,7 +256,7 @@ impl LocalApp {
             .store
             .db
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let local = executions(&tx, &self.session, &self.origin)?
+        let local = owned_executions(&tx, &self.origin)?
             .into_iter()
             .find(|e| e.id == id)
             .ok_or(Error::InvalidTransition)?;
@@ -313,7 +281,7 @@ impl LocalApp {
             .store
             .db
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let local = executions(&tx, &self.session, &self.origin)?
+        let local = owned_executions(&tx, &self.origin)?
             .into_iter()
             .find(|e| e.id == id)
             .ok_or(Error::InvalidTransition)?;
@@ -394,7 +362,7 @@ impl LocalApp {
             .store
             .db
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let local = executions(&tx, &self.session, &self.origin)?
+        let local = owned_executions(&tx, &self.origin)?
             .into_iter()
             .find(|e| e.id == id)
             .ok_or(Error::InvalidTransition)?;
@@ -437,11 +405,21 @@ impl LocalApp {
             params![evidence_id, id],
         )?;
         if status == "completed" {
+            let session: String = tx.query_row(
+                "SELECT conversation_id FROM messages WHERE id=?1",
+                [&local.message_id],
+                |r| r.get(0),
+            )?;
+            let acceptance: String = tx.query_row(
+                "SELECT acceptance FROM messages WHERE id=?1",
+                [&local.message_id],
+                |r| r.get(0),
+            )?;
             let reply = reply.unwrap();
             let binding = format!("native:{id}");
             let message = format!("reply:{id}");
-            tx.execute("INSERT INTO native_sessions(id,conversation_id,device_id,workspace_id,service_instance_id,harness,native_session_id,capability_json) SELECT ?1,?2,?3,workspace_id,?4,'codex',?5,?6 FROM executions WHERE id=?7",params![binding,self.session,self.origin,RUNNER,reply.native_session_id,json!({"ephemeral":true,"read_only":true}).to_string(),id])?;
-            tx.execute("INSERT INTO messages VALUES(?1,?2,?3,NULL,'assistant',?4,'local',?5)",params![message,self.session,self.origin,json!({"text":reply.text,"reply_to":local.message_id,"execution_id":id,"source":"codex_execution","native_session_id":reply.native_session_id,"evidence_id":evidence_id}).to_string(),now])?;
+            tx.execute("INSERT INTO native_sessions(id,conversation_id,device_id,workspace_id,service_instance_id,harness,native_session_id,capability_json) SELECT ?1,?2,?3,workspace_id,?4,'codex',?5,?6 FROM executions WHERE id=?7",params![binding,session,self.origin,RUNNER,reply.native_session_id,json!({"ephemeral":true,"read_only":true}).to_string(),id])?;
+            tx.execute("INSERT INTO messages VALUES(?1,?2,?3,NULL,'assistant',?4,?6,?5)",params![message,session,self.origin,json!({"text":reply.text,"reply_to":local.message_id,"execution_id":id,"source":"codex_execution","native_session_id":reply.native_session_id,"evidence_id":evidence_id}).to_string(),now,acceptance])?;
             tx.execute(
                 "INSERT INTO evidence_links VALUES(?1,'message',?2,'reply_source')",
                 params![evidence_id, message],
@@ -486,4 +464,84 @@ impl LocalApp {
         tx.commit()?;
         Ok(())
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn create_execution(
+    tx: &rusqlite::Transaction<'_>,
+    request_id: &str,
+    workspace_ref: &str,
+    home_id: &str,
+    session: &str,
+    message_id: String,
+    content: String,
+    existing_project: Option<String>,
+    remote_grant: Option<&serde_json::Value>,
+    now: i64,
+) -> Result<LocalExecution> {
+    let content: serde_json::Value = serde_json::from_str(&content)?;
+    let prompt = content["text"]
+        .as_str()
+        .filter(|s| !s.trim().is_empty())
+        .ok_or(Error::InvalidTransition)?
+        .to_owned();
+    let key = digest(request_id.as_bytes());
+    let id = format!("local-execution:{key}");
+    let task = format!("local-task:{key}");
+    let owner_job = format!("Local\\BobReadOnly-{}", id.replace(':', "_"));
+    let owner = json!({"job_name":owner_job,"owner_policy":"windows-job-gated-v1"}).to_string();
+    let project = existing_project.unwrap_or_else(|| format!("local-project:{}", session));
+    let workspace = format!(
+        "local-workspace:{}",
+        digest(format!("{}:{workspace_ref}", home_id).as_bytes())
+    );
+    tx.execute(
+        "INSERT OR IGNORE INTO projects VALUES(?1,'local conversation','local','active',1,?2,?2)",
+        params![project, now],
+    )?;
+    tx.execute(
+        "INSERT OR IGNORE INTO workspaces VALUES(?1,?2,?3,'codex-read-only-temp-v1',1)",
+        params![workspace, home_id, workspace_ref],
+    )?;
+    tx.execute(
+        "INSERT OR IGNORE INTO project_workspaces VALUES(?1,?2)",
+        params![project, workspace],
+    )?;
+    // The conversation remains local until a real Home protocol says otherwise.
+    tx.execute(
+        "UPDATE conversations SET project_id=?2 WHERE id=?1 AND project_id IS NULL",
+        params![session, project],
+    )?;
+    tx.execute("INSERT INTO tasks(id,project_id,source_message_id,title,status,constraints_json,version,created_at,updated_at) VALUES(?1,?2,?3,'local read-only reply','queued',?4,1,?5,?5)",params![task,project,message_id,json!({"read_only":true,"ephemeral_workspace":true}).to_string(),now])?;
+    let contract=json!({"kind":if remote_grant.is_some(){"home_codex_reply"}else{"local_codex_reply"},"home_readonly_authorization":remote_grant,"source_message_id":message_id,"prompt_sha256":digest(prompt.as_bytes()),"workspace_ref":workspace_ref,"read_only":true,"automatic_retry":false}).to_string();
+    tx.execute("INSERT INTO executions(id,project_id,task_id,workspace_id,request_id,status,requested_json,contract_json,contract_sha256,version) VALUES(?1,?2,?3,?4,?5,'dispatching',?6,?7,?8,1)",params![id,project,task,workspace,request_id,json!({"harness":"codex","model":"cli_default","sandbox":"read-only"}).to_string(),contract,digest(contract.as_bytes())])?;
+    tx.execute(
+        "UPDATE executions SET resolved_json=?2 WHERE id=?1",
+        params![id, owner],
+    )?;
+    tx.execute(
+        "INSERT INTO runner_dispatches VALUES(?1,?2,?3,'dispatching',NULL,NULL,?4)",
+        params![id, request_id, RUNNER, now],
+    )?;
+    let epoch: i64 = tx.query_row(
+        "SELECT epoch FROM home_authority WHERE singleton=1",
+        [],
+        |r| r.get(0),
+    )?;
+    tx.execute("INSERT INTO workspace_leases VALUES(?1,?2,?3,1,'held',?4) ON CONFLICT(workspace_id) DO UPDATE SET execution_id=excluded.execution_id,home_epoch=excluded.home_epoch,fencing_token=workspace_leases.fencing_token+1,state='held',updated_at=excluded.updated_at WHERE workspace_leases.state='released'",params![workspace,id,epoch,now])?;
+    let held:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM workspace_leases WHERE workspace_id=?1 AND execution_id=?2 AND state='held')",params![workspace,id],|r|r.get(0))?;
+    if !held {
+        return Err(Error::InvalidTransition);
+    }
+    Ok(LocalExecution {
+        id,
+        request_id: request_id.into(),
+        message_id,
+        status: "dispatching".into(),
+        prompt,
+        stop_requested: false,
+        error: None,
+        owner_job: Some(owner_job),
+        can_start: true,
+    })
 }

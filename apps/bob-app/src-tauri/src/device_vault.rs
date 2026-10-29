@@ -20,6 +20,7 @@ pub(crate) enum VaultError {
     Unavailable,
     ProtectionFailed,
     InvalidProtectedData,
+    NotFound,
 }
 
 /// Creates one protected identity record, never overwriting an existing one.
@@ -224,7 +225,9 @@ mod windows {
             .share_mode(0)
             .custom_flags(OPEN_REPARSE_POINT | BACKUP_SEMANTICS)
             .open(root.join(SLOT))
-            .map_err(|_| VaultError::Unavailable)?;
+            .map_err(|e| if e.kind() == std::io::ErrorKind::NotFound {
+                VaultError::NotFound
+            } else { VaultError::Unavailable })?;
         checked_file(&file)?;
         let mut sealed = Vec::new();
         file.take((SEALED_LIMIT + 1) as u64)

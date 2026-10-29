@@ -15,3 +15,15 @@ pub mod harness_reply;
 pub mod local_execution;
 
 pub mod home_auth;
+
+pub mod pairing;
+
+pub mod home_result;
+
+pub mod replica;
+
+pub mod home_execution;
+
+pub mod home_host;
+
+pub mod home_rejection;

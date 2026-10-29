@@ -28,11 +28,14 @@ export function createExecutionController(bridge) {
 }
 
 export function canCancelExecution(execution) {
-  return !!execution && !execution.stop_requested && ['pending', 'dispatching', 'running'].includes(execution.status);
+  return !!execution && !execution.stop_requested && !execution.stop_pending && ['pending', 'dispatching', 'running'].includes(execution.status);
 }
 
 export function executionStatusKey(execution) {
   if (!execution) return null;
+  const terminal = ['completed', 'failed', 'cancelled'].includes(execution.status);
+  if (!terminal && execution.stop_pending) return 'homeStopPending';
+  if (!terminal && !execution.stop_requested && execution.cancel_rejected) return 'homeStopRejected';
   if (execution.status === 'unknown') return 'executionUnknown';
   if (execution.stop_requested && ['pending', 'dispatching', 'running'].includes(execution.status)) return 'executionStopRequested';
   if (execution.status === 'cancelled') return 'executionCancelled';

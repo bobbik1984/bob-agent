@@ -1,5 +1,6 @@
 <script setup>
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
+import HomeConnection from './HomeConnection.vue';
 import { useI18n } from 'vue-i18n';
 import { kernelBridge } from './native-bridge.mjs';
 import { createSendController } from './send-controller.mjs';
@@ -10,6 +11,7 @@ const messages = ref([]);
 const readiness = ref(null);
 const executions = ref([]);
 const executionFault = ref(null);
+const homeFault = ref(false);
 const cancelPending = ref(new Set());
 const dispatchPending = ref(false);
 let poll = null;
@@ -18,13 +20,15 @@ const locallyAccepted = new Map();
 let unconfirmedRequest = null;
 const executionController = createExecutionController(kernelBridge);
 const executionEnabled = computed(() => readiness.value?.mode === 'codex_readonly' && readiness.value?.execution_available === true);
+const homeConfigured = computed(() => readiness.value?.mode === 'home_configured');
+const sendLabel = computed(() => executionEnabled.value || homeConfigured.value);
 const byMessage = computed(() => new Map(executions.value.map(run => [run.message_id, run])));
 function messageExecution(message) { return byMessage.value.get(message.id) || executions.value.find(run => run.request_id === message.request_id && !!message.request_id); }
 function messageStatus(message) {
-  if (message.role === 'assistant') return message.source === 'codex_execution' ? 'replySaved' : 'probeReplySaved';
+  if (message.role === 'assistant') return ['codex_execution', 'home_codex_execution'].includes(message.source) ? 'replySaved' : 'probeReplySaved';
   return executionStatusKey(messageExecution(message)) || statusKeys[message.send_state] || 'unknown';
 }
-const connectionKey = computed(() => !available ? 'nativeRequired' : executionEnabled.value ? 'codexReadOnlyReady' : readiness.value ? 'providerUnconfigured' : 'loading');
+const connectionKey = computed(() => !available ? 'nativeRequired' : executionEnabled.value ? 'codexReadOnlyReady' : homeConfigured.value ? 'homeConfiguredHint' : readiness.value ? 'providerUnconfigured' : 'loading');
 const draft = ref('');
 const saving = ref(false);
 const loading = ref(true);
@@ -52,6 +56,7 @@ function nearBottom() {
 }
 const reload = singleFlight(async () => {
   if (!sessionId.value || disposed) return;
+  void kernelBridge.syncHome().then(status => { if (status !== 'sync_in_progress') homeFault.value = false; }).catch(() => { homeFault.value = true; });
   const results = await Promise.allSettled([
     kernelBridge.history(sessionId.value), kernelBridge.readiness(), kernelBridge.executions(sessionId.value),
   ]);
@@ -150,13 +155,15 @@ onUnmounted(() => { disposed = true; if (poll) clearInterval(poll); });
         <span>{{ t(connectionKey) }}</span>
         <span v-if="readiness" class="storage-summary">{{ t(executionEnabled ? 'localExecutionStatus' : 'localStatus', { saved: readiness.saved_messages, pending: readiness.pending_messages }) }}</span>
       </div>
+      <HomeConnection v-if="sessionId" @changed="reload" />
       <div v-if="fault" class="notice" role="alert"><span>{{ t(fault) }}</span><button type="button" @click="sessionId ? reload() : startup()">{{ t('reload') }}</button></div>
+      <div v-if="homeFault" class="notice" role="status">{{ t('homeSyncUnconfirmed') }}</div>
       <div v-if="executionFault" class="notice" role="alert"><span>{{ t(executionFault) }}</span><button type="button" @click="reload">{{ t('checkStatus') }}</button></div>
       <section ref="historyRegion" class="history" :aria-label="t('conversation')" aria-live="polite" :aria-busy="loading">
         <p v-if="loading" class="empty">{{ t('loading') }}</p>
-        <div v-else-if="!messages.length" class="empty"><h1>{{ t('startTitle') }}</h1><p>{{ t(executionEnabled ? 'startExecutionHint' : 'startHint') }}</p></div>
+        <div v-else-if="!messages.length" class="empty"><h1>{{ t('startTitle') }}</h1><p>{{ t(homeConfigured ? 'homeStartHint' : executionEnabled ? 'startExecutionHint' : 'startHint') }}</p></div>
         <article v-for="message in messages" :key="message.id" class="message" :class="{ 'assistant-message': message.role === 'assistant' }">
-          <span v-if="message.role === 'assistant'" class="message-state">{{ t(message.source === 'codex_execution' ? 'assistantLiveReply' : 'assistantReply') }}</span>
+          <span v-if="message.role === 'assistant'" class="message-state">{{ t(['codex_execution', 'home_codex_execution'].includes(message.source) ? 'assistantLiveReply' : 'assistantReply') }}</span>
           <p class="message-body">{{ message.content }}</p>
           <span class="message-state">{{ t(messageStatus(message)) }}</span>
           <button v-if="canCancelExecution(messageExecution(message))" type="button" class="cancel-execution" :disabled="cancelPending.has(messageExecution(message).id)" @click="cancel(messageExecution(message))">{{ t(cancelPending.has(messageExecution(message).id) ? 'requestingStop' : 'stopExecution') }}</button>
@@ -166,7 +173,7 @@ onUnmounted(() => { disposed = true; if (poll) clearInterval(poll); });
       <form class="composer" @submit.prevent="send">
         <label class="visually-hidden" for="message-input">{{ t('message') }}</label>
         <textarea id="message-input" ref="input" :value="draft" :disabled="!sessionId" :placeholder="t('placeholder')" rows="2" @input="updateDraft" @focus="focusComposer" @keydown="keydown" />
-        <div class="composer-actions"><span>{{ t(dispatchPending ? 'requestingExecution' : saving ? 'saving' : executionBlocked ? 'executionBusyHint' : executionEnabled ? 'executeHint' : 'localFirstHint') }}</span><button v-if="activeExecution" type="button" :disabled="cancelPending.has(activeExecution.id)" @click="cancel(activeExecution)">{{ t(cancelPending.has(activeExecution.id) ? 'requestingStop' : 'stopExecution') }}</button><button v-else type="submit" :disabled="!canSend">{{ t(executionEnabled ? 'sendAndExecute' : 'send') }}</button></div>
+        <div class="composer-actions"><span>{{ t(dispatchPending ? 'requestingExecution' : saving ? 'saving' : executionBlocked ? 'executionBusyHint' : homeConfigured ? 'homeSendHint' : executionEnabled ? 'executeHint' : 'localFirstHint') }}</span><button v-if="activeExecution" type="button" :disabled="cancelPending.has(activeExecution.id)" @click="cancel(activeExecution)">{{ t(cancelPending.has(activeExecution.id) ? 'requestingStop' : 'stopExecution') }}</button><button v-else type="submit" :disabled="!canSend">{{ t(sendLabel ? 'sendAndExecute' : 'send') }}</button></div>
       </form>
     </main>
   </div>

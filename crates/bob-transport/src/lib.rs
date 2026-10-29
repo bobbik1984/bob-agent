@@ -91,10 +91,12 @@ pub struct TlsIdentity {
 pub struct PinnedClient {
     config: Arc<ClientConfig>,
     peer_pin: String,
+    own_pin: String,
 }
 pub struct PinnedServer {
     config: Arc<ServerConfig>,
     peer_pin: String,
+    own_pin: String,
 }
 pub fn certificate_fingerprint(cert: &CertificateDer<'_>) -> String {
     format!("{:x}", Sha256::digest(cert.as_ref()))
@@ -123,6 +125,12 @@ impl PinnedClient {
         anchors: Vec<CertificateDer<'static>>,
         expected_peer_sha256: String,
     ) -> Result<Self, TransportError> {
+        let own_pin = certificate_fingerprint(
+            identity
+                .certificates
+                .first()
+                .ok_or(TransportError::Configuration)?,
+        );
         if !valid_pin(&expected_peer_sha256) {
             return Err(TransportError::Configuration);
         }
@@ -139,6 +147,7 @@ impl PinnedClient {
         Ok(Self {
             config: Arc::new(config),
             peer_pin: expected_peer_sha256,
+            own_pin,
         })
     }
     pub fn send(
@@ -247,6 +256,12 @@ impl PinnedServer {
         anchors: Vec<CertificateDer<'static>>,
         expected_peer_sha256: String,
     ) -> Result<Self, TransportError> {
+        let own_pin = certificate_fingerprint(
+            identity
+                .certificates
+                .first()
+                .ok_or(TransportError::Configuration)?,
+        );
         if !valid_pin(&expected_peer_sha256) {
             return Err(TransportError::Configuration);
         }
@@ -269,6 +284,7 @@ impl PinnedServer {
         Ok(Self {
             config: Arc::new(config),
             peer_pin: expected_peer_sha256,
+            own_pin,
         })
     }
     /// Trusted Home host adapter. Home identity/epoch and clock are local host
@@ -494,3 +510,9 @@ impl Write for DeadlineSocket {
         self.inner.flush()
     }
 }
+
+pub mod control;
+
+pub mod delivery;
+
+pub mod pairing;

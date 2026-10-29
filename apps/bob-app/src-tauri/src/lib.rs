@@ -1,3 +1,14 @@
+mod home_host;
+mod home_link;
+mod device_identity;
+mod identity_commands;
+mod home_config;
+mod pairing_commands;
+#[cfg(test)]
+mod home_execution_tests;
+use home_link::{HomeLinkState, app_home_sync};
+#[cfg(target_os = "android")]
+mod android_vault;
 mod device_vault;
 mod runner;
 use bob_kernel::app::{AppMessage, AppReadiness, LocalApp};
@@ -75,7 +86,7 @@ async fn app_bootstrap<R: tauri::Runtime>(
             .default_session()
             .map_err(|_| "LOCAL_STORE_UNAVAILABLE")?;
         for execution in local
-            .local_executions(&session)
+            .managed_executions()
             .map_err(|_| "EXECUTION_READ_FAILED")?
         {
             if execution.status == "unknown" {
@@ -163,7 +174,10 @@ async fn app_readiness(
     tauri::async_runtime::spawn_blocking(move || {
         with_app(&state, |app| {
             let mut status = app.readiness().map_err(|_| "LOCAL_STATUS_UNAVAILABLE")?;
-            if enabled {
+            if app.paired_home().map_err(|_| "HOME_STATE_UNAVAILABLE")?.is_some() {
+                status.mode = "home_configured";
+                status.execution_available = false; // Configuration is not remote readiness.
+            } else if enabled {
                 status.mode = "codex_readonly";
                 status.execution_available = true;
             }
@@ -182,12 +196,15 @@ fn app_prewarm() -> &'static str {
 async fn app_executions(
     state: State<'_, AppState>,
     session_id: String,
-) -> Result<Vec<LocalExecution>, &'static str> {
+) -> Result<Vec<serde_json::Value>, &'static str> {
     let state = state.0.clone();
     tauri::async_runtime::spawn_blocking(move || {
         with_app(&state, |app| {
-            app.local_executions(&session_id)
-                .map_err(|_| "EXECUTION_READ_FAILED")
+            let mut result = app.local_executions(&session_id).map_err(|_| "EXECUTION_READ_FAILED")?
+                .into_iter().map(serde_json::to_value).collect::<Result<Vec<_>,_>>().map_err(|_| "EXECUTION_READ_FAILED")?;
+            result.extend(app.remote_executions(&session_id).map_err(|_| "EXECUTION_READ_FAILED")?
+                .into_iter().map(serde_json::to_value).collect::<Result<Vec<_>,_>>().map_err(|_| "EXECUTION_READ_FAILED")?);
+            Ok(result)
         })
     })
     .await
@@ -198,7 +215,17 @@ async fn app_cancel(
     state: State<'_, AppState>,
     runner: State<'_, RunnerState>,
     execution_id: String,
-) -> Result<LocalExecution, &'static str> {
+) -> Result<serde_json::Value, &'static str> {
+    let remote = with_app(&state.0, |app| {
+        let session = app.default_session().map_err(|_| "LOCAL_STORE_UNAVAILABLE")?;
+        Ok(app.remote_executions(&session).map_err(|_| "EXECUTION_READ_FAILED")?.iter().any(|e|e.id==execution_id))
+    })?;
+    if remote {
+        return with_app(&state.0, |app| {
+            serde_json::to_value(app.request_remote_stop(&execution_id,now()?).map_err(|_|"CANCEL_UNCONFIRMED")?)
+                .map_err(|_|"CANCEL_UNCONFIRMED")
+        });
+    }
     // Durable intent first. A signal request is not termination confirmation.
     with_app(&state.0, |app| {
         app.request_local_stop(&execution_id, now()?)
@@ -221,6 +248,7 @@ async fn app_cancel(
             .into_iter()
             .find(|e| e.id == execution_id)
             .ok_or("EXECUTION_NOT_FOUND")
+            .and_then(|e| serde_json::to_value(e).map_err(|_|"EXECUTION_READ_FAILED"))
     })
 }
 #[tauri::command]
@@ -337,10 +365,26 @@ async fn app_execute<R: tauri::Runtime>(
 }
 
 fn configure<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
+    #[cfg(target_os = "android")]
+    let builder = builder.plugin(android_vault::init());
     builder
         .manage(AppState(Arc::new(Mutex::new(None))))
         .manage(RunnerState::default())
+        .manage(HomeLinkState::default())
+        .manage(pairing_commands::PairingState::default())
         .invoke_handler(tauri::generate_handler![
+            pairing_commands::app_pairing_device_code,
+            pairing_commands::app_pairing_home_invite,
+            pairing_commands::app_pairing_status,
+            pairing_commands::app_pairing_propose,
+            pairing_commands::app_pairing_home_confirm,
+            pairing_commands::app_pairing_finish,
+            pairing_commands::app_pairing_enable_home,
+            pairing_commands::app_pairing_reset,
+            pairing_commands::app_pairing_recover,
+            identity_commands::app_identity_create,
+            identity_commands::app_identity_public,
+            app_home_sync,
             app_bootstrap,
             app_accept,
             app_history,

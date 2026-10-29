@@ -39,3 +39,18 @@ test('live or unresolved execution blocks a second send, terminal records do not
  assert.equal(blocksNewExecution([{status:'completed'},{status:'failed'},{status:'cancelled'}]),false);
  assert.equal(blocksNewExecution([]),false);
 });
+
+test('remote cancel intent is distinct from Home confirmation', () => {
+ const pending = {id:'remote',status:'running',stop_requested:false,stop_pending:true};
+ assert.equal(canCancelExecution(pending),false);
+ assert.equal(executionStatusKey(pending),'homeStopPending');
+ assert.equal(executionStatusKey({...pending,stop_pending:false,stop_requested:true}),'executionStopRequested');
+ assert.equal(executionStatusKey({...pending,stop_pending:false,status:'cancelled',stop_confirmed:true}),'executionCancelled');
+});
+
+test('actual terminal or accepted stop outranks an earlier cancel error', () => {
+ for(const [status,key] of [['completed','executionCompleted'],['failed','executionFailed'],['cancelled','executionCancelled']]) {
+  assert.equal(executionStatusKey({status,cancel_rejected:true,stop_pending:true}),key);
+ }
+ assert.equal(executionStatusKey({status:'running',cancel_rejected:true,stop_requested:true}),'executionStopRequested');
+});

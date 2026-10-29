@@ -27,3 +27,9 @@ test('execution commands require the native host too',async()=>{
  const bridge=createKernelBridge(()=>assert.fail('must not invoke'),()=>false);
  for(const action of [()=>bridge.execute('r'),()=>bridge.executions('s'),()=>bridge.cancel('e')])await assert.rejects(action(),/NATIVE_HOST_REQUIRED/);
 });
+
+test('Home sync carries no renderer credential or fabricated result',async()=>{
+ const calls=[];const bridge=createKernelBridge(async(command,args)=>{calls.push({command,args});return 'provider_unconfigured';},()=>true);
+ assert.equal(await bridge.syncHome(),'provider_unconfigured');assert.deepEqual(calls,[{command:'app_home_sync',args:undefined}]);
+ const unavailable=createKernelBridge(()=>assert.fail('no native'),()=>false);await assert.rejects(()=>unavailable.syncHome(),/NATIVE_HOST_REQUIRED/);
+});

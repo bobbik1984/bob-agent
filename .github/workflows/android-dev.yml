@@ -50,7 +50,9 @@ jobs:
       - name: Check controllers
         run: node --test tests/*.test.mjs
       - name: Generate Android shell
-        run: pnpm exec tauri android init --ci --skip-targets-install
+        run: |
+          pnpm exec tauri android init --ci --skip-targets-install
+          python tests/stage-android-vault.py
       - name: Build independent ARM64 development APK
         run: pnpm exec tauri android build --debug --target aarch64 --apk --ci
       - name: Sign APK with persistent certificate

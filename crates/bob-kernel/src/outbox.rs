@@ -189,6 +189,7 @@ impl Store {
                 )?;
             }
         }
+        crate::pairing::migrate(&tx, now)?;
         tx.commit()?;
         let mut store = Self { db, _owner: owner };
         store.recover_interrupted()?;
@@ -285,7 +286,7 @@ impl Store {
         let tx = self
             .db
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let changed = tx.execute("UPDATE intent_outbox SET send_state='dispatching',transport_evidence='started_or_possible',attempts=attempts+1,dispatched_at=?2 WHERE request_id=?1 AND send_state IN ('local_saved','queued_for_wakeup','not_dispatched') AND EXISTS(SELECT 1 FROM home_authority h WHERE h.device_id=intent_outbox.target_device_id AND h.epoch=intent_outbox.home_epoch) AND (lane='control' OR NOT EXISTS(SELECT 1 FROM intent_outbox blocker WHERE blocker.session_id=intent_outbox.session_id AND blocker.request_id!=intent_outbox.request_id AND blocker.lane='normal' AND blocker.send_state IN ('dispatching','dispatched','unknown_send')))", params![id, now])?;
+        let changed = tx.execute("UPDATE intent_outbox SET send_state='dispatching',transport_evidence='started_or_possible',attempts=attempts+1,dispatched_at=?2 WHERE request_id=?1 AND send_state IN ('local_saved','queued_for_wakeup','not_dispatched') AND EXISTS(SELECT 1 FROM home_authority h WHERE h.device_id=intent_outbox.target_device_id AND h.epoch=intent_outbox.home_epoch) AND (lane='control' OR NOT EXISTS(SELECT 1 FROM intent_outbox blocker WHERE blocker.session_id=intent_outbox.session_id AND blocker.target_device_id=intent_outbox.target_device_id AND blocker.home_epoch=intent_outbox.home_epoch AND blocker.request_id!=intent_outbox.request_id AND blocker.lane='normal' AND blocker.send_state IN ('dispatching','dispatched','unknown_send')))", params![id, now])?;
         if changed != 1 {
             return Err(Error::InvalidTransition);
         }
