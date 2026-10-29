@@ -1,5 +1,5 @@
-//! QR bootstrap discovers a signed device identity; local confirmation remains
-//! mandatory before the existing exact-peer mutual TLS path can grant access.
+//! A signed scan of the short-lived QR confirms its exact peer automatically.
+//! Existing certificate checks, durable grants and bounded execution remain.
 use super::*;
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use bob_transport::bootstrap::{
@@ -336,6 +336,11 @@ async fn create_at<R: tauri::Runtime>(
     drop(guard);
     let shared = pairing.0.clone();
     let owner = state.0.clone();
+    let configured_runner = app.state::<RunnerState>();
+    let runner = RunnerState {
+        program: configured_runner.program.clone(),
+        active: configured_runner.active.clone(),
+    };
     let issued = code.clone();
     std::thread::Builder::new().name("bob-pair-bootstrap".into()).spawn(move||{
         let mut confirmation=Some(confirmation);let mut control=Some(control);
@@ -355,9 +360,16 @@ async fn create_at<R: tauri::Runtime>(
                         let listener=confirmation.take().ok_or(TransportError::Protocol)?;
                         listen(listener,pinned,invite.clone(),owner.clone(),stop.clone(),errors.clone(),true).map_err(|_|TransportError::Protocol)?;
                         *state=Some(Ceremony::Home(HomeCeremony{invitation:invite.clone(),bind:SocketAddr::new(bind_ip,w),root:root.clone(),owner:owner.clone(),_listeners:ListenerStop(stop.clone()),error:errors.clone(),grant_expiry:None,host:None,control_reservation:control.take()}));
+                        let Some(Ceremony::Home(home))=state.as_mut() else {return Err(TransportError::Protocol);};
+                        confirm_home(home).map_err(|_|TransportError::Protocol)?;
+                        // A missing/unavailable runner does not undo device pairing or
+                        // pretend replies are enabled. It remains visible as an error.
+                        if let Err(error)=enable_home(home,&identity,&runner){
+                            if let Ok(mut error_state)=errors.lock(){*error_state=Some(error.into());}
+                        }
                         Ok(BootstrapEndpoints{confirmation_address:invite.confirmation_address,control_address:invite.control_address})
                     });
-                    if let Ok(mut error)=errors.lock(){*error=result.err().map(|_|"PAIRING_REQUEST_REJECTED".into());}
+                    if result.is_err(){if let Ok(mut error)=errors.lock(){*error=Some("PAIRING_REQUEST_REJECTED".into());}}
                     if shared.lock().is_ok_and(|s|matches!(s.as_ref(),Some(Ceremony::Home(_)))){break;}
                 }
                 Err(e) if e.kind()==std::io::ErrorKind::WouldBlock=>std::thread::sleep(Duration::from_millis(25)),
@@ -499,6 +511,91 @@ mod tests {
     }
     #[cfg(windows)]
     #[test]
+    fn automatic_confirmation_save_failure_does_not_authorize() {
+        use tauri::test::{mock_builder, mock_context, noop_assets};
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let make = |role: &str| {
+            let mut ctx = mock_context(noop_assets());
+            ctx.config_mut().identifier = format!("org.bobagent.test.autosave.{stamp}.{role}");
+            let app = crate::configure(mock_builder()).build(ctx).unwrap();
+            tauri::async_runtime::block_on(crate::app_bootstrap(app.handle().clone(), app.state()))
+                .unwrap();
+            app
+        };
+        let home = make("home");
+        let phone = make("phone");
+        let roots = [
+            home.path().app_data_dir().unwrap(),
+            phone.path().app_data_dir().unwrap(),
+        ];
+        let device = tauri::async_runtime::block_on(app_pairing_device_code(
+            phone.handle().clone(),
+            phone.state(),
+        ))
+        .unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        drop(listener);
+        let invite = tauri::async_runtime::block_on(app_pairing_home_invite(
+            home.handle().clone(),
+            home.state(),
+            home.state(),
+            device.code,
+            addr.to_string(),
+            addr.ip().to_string(),
+        ))
+        .unwrap();
+        tauri::async_runtime::block_on(app_pairing_propose(
+            phone.handle().clone(),
+            phone.state(),
+            phone.state(),
+            invite.code,
+        ))
+        .unwrap();
+        {
+            let state = home.state::<PairingState>();
+            let mut guard = state.0.lock().unwrap();
+            let Some(Ceremony::Home(h)) = guard.as_mut() else {
+                panic!("home");
+            };
+            h.root = roots[0].join("missing-parent");
+            assert_eq!(confirm_home(h), Err("PAIRING_HOST_SAVE_UNCONFIRMED"));
+            assert_eq!(
+                with_app(&h.owner, |a| Ok(a
+                    .pairing_status(&h.invitation.invitation_id, now()?)
+                    .unwrap()
+                    .state))
+                .unwrap(),
+                "pending"
+            );
+            h.root = roots[0].clone();
+            confirm_home(h).unwrap();
+            let expiry = h.grant_expiry;
+            confirm_home(h).unwrap();
+            assert_eq!(h.grant_expiry, expiry);
+        }
+        *home.state::<PairingState>().0.lock().unwrap() = None;
+        *phone.state::<PairingState>().0.lock().unwrap() = None;
+        *home.state::<AppState>().0.lock().unwrap() = None;
+        *phone.state::<AppState>().0.lock().unwrap() = None;
+        drop(home);
+        drop(phone);
+        std::thread::sleep(Duration::from_millis(150));
+        for root in roots {
+            assert!(root
+                .file_name()
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .starts_with("org.bobagent.test.autosave."));
+            std::fs::remove_dir_all(root).unwrap();
+        }
+    }
+    #[cfg(windows)]
+    #[test]
     fn native_qr_commands_resume_confirmation_after_home_restart() {
         use tauri::test::{mock_builder, mock_context, noop_assets};
         let stamp = std::time::SystemTime::now()
@@ -602,7 +699,7 @@ mod tests {
                 matches!(ambiguous, Some(Ceremony::Replica { state, .. }) if state == "unknown")
             );
         }
-        let pending = status(
+        let confirmed = status(
             home.state::<PairingState>()
                 .0
                 .lock()
@@ -611,77 +708,35 @@ mod tests {
                 .unwrap(),
         )
         .unwrap();
-        assert_eq!(pending.state, "pending");
-        assert_eq!(pending.candidate_pin, proposed.candidate_pin);
-        assert!(tauri::async_runtime::block_on(app_pairing_finish(
-            phone.handle().clone(),
-            phone.state(),
-            phone.state(),
-            phone.state()
-        ))
-        .is_err());
-        // A metadata save failure must leave the exact proposal unconsumed.
-        {
-            let state = home.state::<PairingState>();
-            let mut guard = state.0.lock().unwrap();
-            let Some(Ceremony::Home(h)) = guard.as_mut() else {
-                panic!("home");
-            };
-            h.root = roots[0].join("nonexistent-save-parent");
-        }
+        assert_eq!(confirmed.state, "confirmed"); // no configured runner in this test
+        assert_eq!(confirmed.candidate_pin, proposed.candidate_pin);
+        assert_eq!(confirmed.error.as_deref(), Some("EXECUTION_UNAVAILABLE"));
+        let grant_before = confirmed.grant_expires_at;
         assert_eq!(
-            app_pairing_home_confirm(home.state()).err(),
-            Some("PAIRING_HOST_SAVE_UNCONFIRMED")
-        );
-        {
-            let state = home.state::<PairingState>();
-            let mut guard = state.0.lock().unwrap();
-            let Some(Ceremony::Home(h)) = guard.as_mut() else {
-                panic!("home");
-            };
-            assert_eq!(
-                with_app(&h.owner, |a| Ok(a
-                    .pairing_status(&h.invitation.invitation_id, now().unwrap())
-                    .unwrap()))
+            app_pairing_home_confirm(home.state())
                 .unwrap()
-                .state,
-                "pending"
-            );
-            h.root = roots[0].clone();
-            // Simulate process loss after the durable provisional save, before
-            // database confirmation. Repeating this save must be exact/idempotent.
-            save_host(h).unwrap();
-            save_host(h).unwrap();
+                .grant_expires_at,
+            grant_before
+        );
+        // The automatically selected runner path opens the authenticated host;
+        // opening it itself must never execute the dummy program or a model.
+        {
+            let identity =
+                tauri::async_runtime::block_on(native(home.handle(), &home.state())).unwrap();
+            let state = home.state::<PairingState>();
+            let mut guard = state.0.lock().unwrap();
+            let Some(Ceremony::Home(h)) = guard.as_mut() else {
+                panic!("home");
+            };
+            let runner = RunnerState {
+                program: Some(std::env::current_exe().unwrap()),
+                active: Default::default(),
+            };
+            enable_home(h, &identity, &runner).unwrap();
+            assert!(h.host.as_ref().unwrap().execution_enabled());
+            assert!(runner.active.lock().unwrap().is_empty());
+            assert!(h.error.lock().unwrap().is_none());
         }
-        *home.state::<PairingState>().0.lock().unwrap() = None;
-        *home.state::<AppState>().0.lock().unwrap() = None;
-        std::thread::sleep(Duration::from_millis(150));
-        tauri::async_runtime::block_on(crate::app_bootstrap(home.handle().clone(), home.state()))
-            .unwrap();
-        let resumed = tauri::async_runtime::block_on(app_pairing_status(
-            home.handle().clone(),
-            home.state(),
-            home.state(),
-        ))
-        .unwrap();
-        assert_eq!(resumed.state, "pending");
-        assert_eq!(resumed.candidate_pin, pending.candidate_pin);
-        // Metadata alone never authorizes phone completion or control access.
-        assert!(tauri::async_runtime::block_on(app_pairing_finish(
-            phone.handle().clone(),
-            phone.state(),
-            phone.state(),
-            phone.state()
-        ))
-        .is_err());
-        assert_eq!(
-            app_pairing_home_confirm(home.state()).unwrap().state,
-            "confirmed"
-        );
-        assert_eq!(
-            app_pairing_home_confirm(home.state()).unwrap().state,
-            "confirmed"
-        );
         // Simulate Home process loss after durable local confirmation but before
         // the phone has received proof or committed its connection metadata.
         *home.state::<PairingState>().0.lock().unwrap() = None;
@@ -696,7 +751,7 @@ mod tests {
         ))
         .unwrap();
         assert_eq!(restored.state, "confirmed");
-        assert!(restored.error.is_none());
+        assert!(restored.error.is_none()); // runner error is not a persisted pairing failure
 
         assert_eq!(
             tauri::async_runtime::block_on(app_pairing_finish(

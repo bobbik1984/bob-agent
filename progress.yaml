@@ -10,7 +10,7 @@ project:
   - Vue 3
   - Desktop
   - Android
-  current_task: BP2/BP3 二维码配对候选0e2c869，原生26/bootstrap7/TLS17/Node20通过，Android云端编译中；半配对恢复加固及Pixel扫码/手机闭环待验
+  current_task: BP2/BP3 扫码自动确认27项原生和20项Node通过，新版云端构建/安装及Pixel闭环待做；公网异地连接未实现
   development_plan: docs/CURRENT_STAGE.md
 phases:
 - name: BP0 真相与保护
@@ -43,7 +43,7 @@ phases:
     status: active
 - name: BP3 个人环境 MVP
   tasks:
-  - text: BP3-01 X1C Home ↔ Android Replica 核心同步与远程文件只读浏览
+  - text: BP3-01 X1C Home ↔ Android Replica 核心同步与远程文件只读浏览；公网异地配对与重连待实现/验收
     status: active
   - text: BP3-02 接入 Harness Runner 进程边界并在统一 UI 跑通任务治理闭环
     status: active

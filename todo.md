@@ -17,10 +17,10 @@
 ### BP2 → BP3（1.0.1 骨架与个人工作环境 MVP）
 - [/] **BP2-01**：搭建 `1.0.1` Rust Workspace（`crates/bob-kernel`）+ Tauri v2（Desktop & Android）+ Vue 3 工程骨架
 - [/] **BP2-02**：实现 `BOB-D-008` 懒式休眠、输入框 `@focus`/`@input` 静默预热、单飞 `inFlightWakeupPromise`、本地 `intent_outbox` 先落盘必达与 `not_dispatched` / `unknown_send` 分离对账
-- [ ] **BP3-01**：打通 X1C Home 主库 ↔ 手机 Tauri Android Replica 的会话、捕获、待办与远程文件只读浏览（F4）
+- [ ] **BP3-01**：打通 X1C Home 主库 ↔ 手机 Tauri Android Replica 的会话、捕获、待办与远程文件只读浏览（F4）；异地扫码配对与重连须补齐公网通道，不要求长期同一Wi-Fi（当前未实现）
 - [ ] **BP3-02**：通过进程边界接入 Harness Runner（DSH / AGY / Codex / Generic API），在统一 UI 中跑通 Task → Execution → Artifact 预览与 Review 闭环
 
-当前证据：0e2c869二维码候选已实现Home生成邀请、原生相机入口和签名引导；原生26项、bootstrap7项/既有TLS17项、Node20项及前端构建通过。实际测试邀请在320像素下独立ZXing解码完全一致。用户明确批准365天消息配对，执行许可单独最长1小时。Android云端编译中，半配对恢复仍在加固；Pixel扫码与手机发送/停止闭环未验，BP2/BP3保持进行中。
+当前证据：BOB-D-009扫码即确认简化已实现，原生27项、Node20项和前端构建通过；自动授权、共用只读监听和保存失败不授权覆盖。前版2c42a6d已覆盖安装Pixel，新版待云端构建/安装与相机闭环；公网异地连接仍未实现，不以同Wi-Fi测试代替。
 
 - [/] BP2/BP3：本机只读执行与固定Stop入口；继续完成停止按钮真实操作、窄屏与可用性验收。
 - [/] Home认证基础：持久设备/会话授权、TLS接收及回执查询完成本机验证；继续首次配对、App投递/回复同步和Android Keystore/真机，不以CLI登录或测试证书代替配对。

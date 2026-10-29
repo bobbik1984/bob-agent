@@ -1039,6 +1039,13 @@ pub(crate) fn app_pairing_home_confirm(
     let Some(Ceremony::Home(home)) = guard.as_mut() else {
         return Err("PAIRING_HOME_REQUIRED");
     };
+    confirm_home(home)?;
+    status(guard.as_ref().ok_or("PAIRING_STATE_UNAVAILABLE")?)
+}
+
+// The QR is an explicit, short-lived bearer invitation. A valid signed scan
+// is local consent for this exact peer; manual pairing retains its own button.
+fn confirm_home(home: &mut HomeCeremony) -> Result<(), &'static str> {
     let n = now()?;
     let stored = with_app(&home.owner, |a| {
         a.pairing_status(&home.invitation.invitation_id, n)
@@ -1046,7 +1053,7 @@ pub(crate) fn app_pairing_home_confirm(
     })?;
     if stored.state == "consumed" {
         // Repeated confirmation does not renew or recreate an authorization.
-        return status(guard.as_ref().ok_or("PAIRING_STATE_UNAVAILABLE")?);
+        return Ok(());
     }
     if stored.state != "pending" {
         return Err("PAIRING_CONFIRMATION_REJECTED");
@@ -1065,7 +1072,7 @@ pub(crate) fn app_pairing_home_confirm(
         )
         .map_err(|_| "PAIRING_CONFIRMATION_REJECTED")
     })?;
-    status(guard.as_ref().ok_or("PAIRING_STATE_UNAVAILABLE")?)
+    Ok(())
 }
 
 #[tauri::command]
@@ -1174,14 +1181,23 @@ pub(crate) async fn app_pairing_enable_home<R: tauri::Runtime>(
     let Some(Ceremony::Home(home)) = guard.as_mut() else {
         return Err("PAIRING_HOME_REQUIRED");
     };
+    enable_home(home, &identity, &runner)?;
+    status(guard.as_ref().ok_or("PAIRING_STATE_UNAVAILABLE")?)
+}
+
+fn enable_home(
+    home: &mut HomeCeremony,
+    identity: &NativeIdentity,
+    runner: &RunnerState,
+) -> Result<(), &'static str> {
     if home.host.as_ref().is_some_and(|h| h.execution_enabled()) {
-        return status(guard.as_ref().unwrap());
+        return Ok(());
     }
     let expiry = home.grant_expiry.ok_or("PAIRING_CONFIRMATION_REQUIRED")?;
     if expiry <= now()? {
         return Err("PAIRING_GRANT_EXPIRED");
     }
-    if with_app(&state.0, |a| {
+    if with_app(&home.owner, |a| {
         a.home_pairing_revoked(&home.invitation.invitation_id, now()?)
             .map_err(|_| "PAIRING_STORE_UNAVAILABLE")
     })? {
@@ -1199,18 +1215,13 @@ pub(crate) async fn app_pairing_enable_home<R: tauri::Runtime>(
     if let Some(mut previous) = home.host.take() {
         previous.stop();
     }
-    drop(home.control_reservation.take());
     let config = crate::home_host::HomeHostConfig {
         address: home.bind,
         home_device_id: identity.public.device_id.clone(),
         home_epoch: home.invitation.home_epoch,
         server: server(&identity, &home.invitation.candidate.identity)?,
         program: runner.program.clone().ok_or("EXECUTION_UNAVAILABLE")?,
-        receipts: app
-            .path()
-            .app_data_dir()
-            .map_err(|_| "LOCAL_STORE_UNAVAILABLE")?
-            .join("reply-receipts"),
+        receipts: home.root.join("reply-receipts"),
         policy: crate::home_host::ReadOnlyPolicy {
             device_id: home.invitation.candidate.identity.device_id.clone(),
             session_id: home.invitation.candidate.session_id.clone(),
@@ -1218,12 +1229,16 @@ pub(crate) async fn app_pairing_enable_home<R: tauri::Runtime>(
             execution_timeout: Duration::from_secs(120),
         },
     };
+    drop(home.control_reservation.take());
     home.host = Some(crate::home_host::start(
         config,
-        state.0.clone(),
+        home.owner.clone(),
         runner.active.clone(),
     )?);
-    status(guard.as_ref().ok_or("PAIRING_STATE_UNAVAILABLE")?)
+    if let Ok(mut error) = home.error.lock() {
+        *error = None;
+    }
+    Ok(())
 }
 
 /// Restore only an already committed exact kernel/vault/config combination. No new grant or authority change.
