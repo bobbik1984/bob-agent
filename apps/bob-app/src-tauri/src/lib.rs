@@ -1,3 +1,6 @@
+mod scan_commands;
+#[cfg(target_os = "android")]
+mod android_scanner;
 mod home_host;
 mod home_link;
 mod device_identity;
@@ -366,7 +369,7 @@ async fn app_execute<R: tauri::Runtime>(
 
 fn configure<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
     #[cfg(target_os = "android")]
-    let builder = builder.plugin(android_vault::init());
+    let builder = builder.plugin(android_vault::init()).plugin(android_scanner::init());
     builder
         .manage(AppState(Arc::new(Mutex::new(None))))
         .manage(RunnerState::default())
@@ -378,12 +381,17 @@ fn configure<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R>
             pairing_commands::app_pairing_status,
             pairing_commands::app_pairing_propose,
             pairing_commands::app_pairing_home_confirm,
+            pairing_commands::app_pairing_revoke,
             pairing_commands::app_pairing_finish,
             pairing_commands::app_pairing_enable_home,
             pairing_commands::app_pairing_reset,
             pairing_commands::app_pairing_recover,
             identity_commands::app_identity_create,
             identity_commands::app_identity_public,
+            scan_commands::app_scan_pairing_code,
+            pairing_commands::app_pairing_capabilities,
+            pairing_commands::app_pairing_qr_create,
+            pairing_commands::app_pairing_qr_propose,
             app_home_sync,
             app_bootstrap,
             app_accept,

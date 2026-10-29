@@ -104,3 +104,30 @@ impl LocalApp {
         Ok((receipt, Some(execution)))
     }
 }
+
+impl LocalApp {
+    pub fn home_pairing_revoked(&self, invitation_id: &str, now: i64) -> Result<bool> {
+        let status = self.pairing_status(invitation_id, now)?;
+        let device = status.device_id.ok_or(Error::InvalidTransition)?;
+        self.store.db.query_row("SELECT revoked FROM home_device_authorizations WHERE device_id=?1 AND home_device_id=?2 AND home_epoch=?3 AND identity_sha256=?4",rusqlite::params![device,self.origin,status.invitation.home_epoch,status.identity_sha256],|r|r.get(0)).map_err(Into::into)
+    }
+    /// Local UI action restricted to the candidate captured in this invitation.
+    pub fn revoke_paired_phone(&mut self, invitation_id: &str, now: i64) -> Result<i64> {
+        let status = self.pairing_status(invitation_id, now)?;
+        if status.state != "consumed" {
+            return Err(Error::InvalidTransition);
+        }
+        let device = status.device_id.ok_or(Error::InvalidTransition)?;
+        let (revision,revoked):(i64,bool)=self.store.db.query_row("SELECT revision,revoked FROM home_device_authorizations WHERE device_id=?1 AND home_device_id=?2 AND home_epoch=?3 AND identity_sha256=?4",rusqlite::params![device,self.origin,status.invitation.home_epoch,status.identity_sha256],|r|Ok((r.get(0)?,r.get(1)?)))?;
+        if revoked {
+            return Ok(revision);
+        }
+        self.store.revoke_home_device(
+            &self.origin,
+            status.invitation.home_epoch,
+            &device,
+            revision,
+            now,
+        )
+    }
+}

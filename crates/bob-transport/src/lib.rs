@@ -516,3 +516,5 @@ pub mod control;
 pub mod delivery;
 
 pub mod pairing;
+
+pub mod bootstrap;

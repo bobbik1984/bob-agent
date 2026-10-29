@@ -1,89 +1,40 @@
 <script setup>
-import { ref, onUnmounted } from 'vue';
-import { useI18n } from 'vue-i18n';
-import { kernelBridge } from './native-bridge.mjs';
-const { t } = useI18n();
-const emit = defineEmits(['changed']);
-const open = ref(false), role = ref('replica'), busy = ref(false), error = ref('');
-const deviceCode = ref(''), invitationCode = ref(''), output = ref('');
-const bindAddress = ref(''), advertisedHost = ref(''), status = ref(null);
-let poll = null;
-let disposed = false;
-const stateKeys = {unconfigured:'pairUnconfigured',open:'pairOpen',pending:'pairPending',pending_local_confirmation:'pairPending',proposing:'pairProposing',unknown:'pairUnknown',confirmed:'pairConfirmed',consumed:'pairConfirmed',connected:'pairConnected',enabled:'pairEnabled',expired:'pairExpired',stopped:'pairStopped',error:'pairError'};
-function stateKey() { return stateKeys[status.value?.state] || 'pairUnconfirmed'; }
-async function reset() { await perform(() => kernelBridge.pairingReset()); output.value = ''; invitationCode.value = ''; }
-async function refresh() {
-  if (!open.value || busy.value || disposed) return;
-  try { status.value = await kernelBridge.pairingStatus(); }
-  catch { error.value = 'PAIRING_STATUS_UNAVAILABLE'; }
-}
-async function toggle() {
-  open.value = !open.value;
-  if (poll) { clearInterval(poll); poll = null; }
-  if (open.value) { await refresh(); poll = setInterval(refresh,3000); }
-}
-async function perform(action) {
-  if (busy.value) return;
-  busy.value = true; error.value = '';
-  try {
-    const result = await action();
-    if (result?.code) output.value = result.code;
-    if (result?.state === 'connected') { output.value = ''; invitationCode.value = ''; }
-    status.value = result;
-    emit('changed');
-  } catch (e) {
-    // Native errors are fixed identifiers; never echo pasted pairing material.
-    const code = String(e?.message || e || 'PAIRING_FAILED');
-    error.value = /^[A-Z][A-Z0-9_]{2,90}$/.test(code) ? code : 'PAIRING_FAILED';
-  } finally { busy.value = false; }
-}
-onUnmounted(() => { disposed = true; if (poll) clearInterval(poll); });
+import {ref,onMounted,onUnmounted} from 'vue';
+import {useI18n} from 'vue-i18n';
+import {kernelBridge} from './native-bridge.mjs';
+import PairingQr from './PairingQr.vue';
+import ManualPairing from './ManualPairing.vue';
+const {t}=useI18n();const emit=defineEmits(['changed']);
+const open=ref(false),capabilities=ref(null),status=ref(null),invitation=ref(null),busy=ref(false),error=ref('');
+let poll=null,disposed=false,reading=false;
+const errorKeys={SCAN_PERMISSION_DENIED:'qrCameraDenied',SCAN_UNAVAILABLE:'qrCameraUnavailable',SCAN_UNSUPPORTED:'qrCameraUnsupported',SCAN_INVALID:'qrInvalid',SCAN_BUSY:'qrCameraBusy',PAIRING_QR_RENDER_FAILED:'qrRenderFailed',PAIRING_CODE_INVALID:'qrInvalid',PAIRING_INVITATION_EXPIRED:'pairExpired'};
+const keys={unconfigured:'pairUnconfigured',open:'qrWaiting',pending:'qrConfirmPhone',confirmed:'pairConfirmed',consumed:'pairConfirmed',connected:'pairConnected',enabled:'pairEnabled',expired:'pairExpired',unknown:'pairUnknown',proposing:'pairProposing',stopped:'pairStopped',revoked:'qrRevoked'};
+async function refresh(){if(!open.value||busy.value||reading||disposed)return;reading=true;try{status.value=await kernelBridge.pairingStatus();if(capabilities.value?.can_scan && ['pending','unknown'].includes(status.value?.state)){try{status.value=await kernelBridge.pairingFinish();}catch(e){if(String(e?.message||e)!=='PAIRING_CONFIRMATION_UNAVAILABLE')throw e;}}if(['pending','confirmed','connected','enabled','expired'].includes(status.value?.state))invitation.value=null;emit('changed');}catch{error.value='PAIRING_STATUS_UNAVAILABLE';}finally{reading=false;}}
+async function toggle(){open.value=!open.value;if(poll)clearInterval(poll);poll=null;if(!open.value){invitation.value=null;return;}try{capabilities.value=await kernelBridge.pairingCapabilities();await refresh();poll=setInterval(refresh,2000);}catch{error.value='PAIRING_CAPABILITIES_UNAVAILABLE';}}
+async function act(work){if(busy.value)return;busy.value=true;error.value='';try{const result=await work();status.value=result;if(result?.code)invitation.value=result;emit('changed');}catch(e){const code=String(e?.message||e);if(code!=='SCAN_CANCELLED')error.value=/^[A-Z][A-Z0-9_]{2,90}$/.test(code)?code:'PAIRING_FAILED';}finally{busy.value=false;}}
+async function scan(){await act(async()=>{const result=await kernelBridge.scanPairingCode();if(!result)return status.value;const code=typeof result==='string'?result:result.code;if(!code)return status.value;return kernelBridge.pairingQrPropose(code);});}
+async function confirm(){await act(()=>kernelBridge.pairingHomeConfirm());await refresh();}
+async function reset(){await act(()=>kernelBridge.pairingReset());invitation.value=null;}
+onMounted(async()=>{try{const caps=await kernelBridge.pairingCapabilities();if(caps.start_pairing && caps.can_host){await toggle();if(!status.value || status.value.state==='unconfigured')await act(()=>kernelBridge.pairingQrCreate());}}catch{/* Opening chat remains usable when setup is unavailable. */}});
+onUnmounted(()=>{disposed=true;if(poll)clearInterval(poll);invitation.value=null;});
 </script>
-<template>
-  <div class="home-connection">
-    <button type="button" class="connection-toggle" :aria-expanded="open" @click="toggle">{{ t('homeConnection') }}</button>
-    <section v-if="open" class="pair-panel" :aria-label="t('homeConnection')">
-      <p class="pair-intro">{{ t('pairIntro') }}</p>
-      <label>{{ t('pairRole') }}<select v-model="role" :disabled="busy"><option value="replica">{{ t('pairPhone') }}</option><option value="home">{{ t('pairHome') }}</option></select></label>
-      <template v-if="role === 'replica'">
-        <button type="button" :disabled="busy" @click="perform(() => kernelBridge.pairingDeviceCode())">{{ t('pairExportDevice') }}</button>
-        <label>{{ t('pairPasteInvitation') }}<textarea v-model="invitationCode" rows="2" spellcheck="false" autocomplete="off" :disabled="busy" /></label>
-        <button type="button" :disabled="busy || !invitationCode.trim()" @click="perform(() => kernelBridge.pairingPropose(invitationCode))">{{ t('pairPropose') }}</button>
-        <p>{{ t('pairConfirmHint') }}</p>
-        <button type="button" :disabled="busy" @click="perform(() => kernelBridge.pairingFinish())">{{ t('pairFinish') }}</button>
-      </template>
-      <template v-else>
-        <label>{{ t('pairPasteDevice') }}<textarea v-model="deviceCode" rows="2" spellcheck="false" autocomplete="off" :disabled="busy" /></label>
-        <label>{{ t('pairListenAddress') }}<input v-model="bindAddress" :disabled="busy" autocomplete="off" spellcheck="false" /></label>
-        <label>{{ t('pairReachableHost') }}<input v-model="advertisedHost" :disabled="busy" autocomplete="off" spellcheck="false" /></label>
-        <p>{{ t('pairAddressHint') }}</p>
-        <button type="button" :disabled="busy || !deviceCode.trim() || !bindAddress.trim() || !advertisedHost.trim()" @click="perform(() => kernelBridge.pairingHomeInvite(deviceCode,bindAddress,advertisedHost))">{{ t('pairCreateInvite') }}</button>
-        <button type="button" :disabled="busy || !['pending','pending_local_confirmation'].includes(status?.state)" @click="perform(() => kernelBridge.pairingHomeConfirm())">{{ t('pairConfirmDevice') }}</button>
-        <p>{{ t('pairReadonlyPolicy') }}</p>
-        <button type="button" :disabled="busy || !['confirmed','consumed','connected','enabled'].includes(status?.state)" @click="perform(() => kernelBridge.pairingEnableHome())">{{ t('pairEnableReadonly') }}</button>
-      </template>
-      <label v-if="output">{{ t('pairOutputCode') }}<textarea :value="output" readonly rows="3" spellcheck="false" @focus="$event.target.select()" /></label>
-      <p v-if="output" class="pair-intro">{{ t('pairCodeHint') }}</p>
-      <div v-if="status" class="pair-state" role="status">
-        <strong>{{ t(stateKey()) }}</strong>
-        <span v-if="status.home_pin">{{ t('pairHomeFingerprint') }} <code>{{ status.home_pin }}</code></span>
-        <span v-if="status.candidate_pin">{{ t('pairFingerprint') }} <code>{{ status.candidate_pin }}</code></span>
-      </div>
-      <p v-if="error" role="alert">{{ t('pairFailed') }} <code>{{ error }}</code></p>
-      <p v-if="status?.error" role="alert">{{ t('pairFailed') }} <code>{{ status.error }}</code></p>
-      <button type="button" :disabled="busy" @click="perform(() => kernelBridge.pairingRecover())">{{ t('pairRecover') }}</button>
-      <button type="button" :disabled="busy" @click="reset">{{ t('pairReset') }}</button>
-      <button type="button" :disabled="busy" @click="refresh">{{ t('checkStatus') }}</button>
-    </section>
-  </div>
-</template>
+<template><div class="home-connection">
+ <button type="button" class="connection-toggle" :aria-expanded="open" @click="toggle">{{t('homeConnection')}}</button>
+ <section v-if="open" class="qr-panel" :aria-label="t('homeConnection')">
+  <template v-if="capabilities?.can_host">
+   <h2>{{t('qrConnectPhone')}}</h2><p>{{t('qrHomeHint')}}</p>
+   <button v-if="!invitation && !['pending','confirmed','connected','enabled'].includes(status?.state)" type="button" :disabled="busy" @click="act(()=>kernelBridge.pairingQrCreate())">{{t('qrShow')}}</button>
+   <PairingQr v-if="invitation" :code="invitation.code" :expires-at="invitation.expires_at" @expired="invitation=null" @error="error='PAIRING_QR_RENDER_FAILED'"/>
+   <div v-if="status?.state==='pending'" class="pair-confirm"><p>{{t('qrConfirmHint')}}</p><code>{{status.candidate_pin}}</code><button type="button" :disabled="busy" @click="confirm">{{t('pairConfirmDevice')}}</button></div>
+   <template v-if="['confirmed','consumed','connected'].includes(status?.state)"><p>{{t('pairReadonlyPolicy')}}</p><button type="button" :disabled="busy" @click="act(()=>kernelBridge.pairingEnableHome())">{{t('pairEnableReadonly')}}</button></template>
+  </template>
+  <template v-if="capabilities?.can_scan"><h2>{{t('qrConnectHome')}}</h2><p>{{t('qrPhoneHint')}}</p><button v-if="status?.state!=='connected'" type="button" :disabled="busy" @click="scan">{{t('qrScan')}}</button></template>
+  <p v-if="status" role="status">{{t(keys[status.state]||'pairUnconfirmed')}}</p>
+  <p v-if="error || status?.error" role="alert">{{t(errorKeys[error||status.error]||'pairFailed')}}<code v-if="!errorKeys[error||status.error]"> {{error||status.error}}</code></p>
+  <button v-if="status && !['unconfigured','connected','enabled'].includes(status.state)" type="button" :disabled="busy" @click="reset">{{t('pairReset')}}</button>
+  <template v-if="capabilities?.can_host && ['confirmed','consumed','connected','enabled'].includes(status?.state)"><p>{{t('qrRevokeHint')}}</p><button type="button" :disabled="busy" @click="act(()=>kernelBridge.pairingRevoke())">{{t('qrRevoke')}}</button></template>
+  <details><summary>{{t('qrAdvanced')}}</summary><ManualPairing @changed="emit('changed')"/></details>
+ </section></div></template>
 <style scoped>
-.connection-toggle { padding: .3rem .6rem; font-size: .85rem; }
-.pair-panel { margin-top: .6rem; padding: .8rem; border: 1px solid var(--line); border-radius: .8rem; background: var(--bg-secondary); display: grid; gap: .65rem; max-height: min(65dvh,38rem); overflow-y: auto; scrollbar-gutter: stable; }
-.pair-panel label { display: grid; gap: .3rem; font-size: .85rem; }
-.pair-panel input,.pair-panel select,.pair-panel textarea { min-width: 0; width: 100%; font: inherit; padding: .5rem; border: 1px solid var(--line); border-radius: .5rem; background: var(--bg-primary); color: var(--text-primary); }
-.pair-panel p { margin: 0; font-size: .85rem; line-height: 1.5; }
-.pair-intro { color: var(--text-secondary); }
-.pair-state { display: grid; gap: .4rem; }
-.pair-panel code { overflow-wrap: anywhere; font-size: .75rem; }
+.connection-toggle{padding:.3rem .6rem;font-size:.85rem}.qr-panel{margin-top:.6rem;padding:1rem;border:1px solid var(--line);border-radius:.9rem;background:var(--bg-secondary);display:grid;gap:.8rem;max-height:60dvh;overflow:auto;scrollbar-gutter:stable}.qr-panel h2{font-size:1.1rem;margin:0}.qr-panel p{margin:0;line-height:1.5;font-size:.9rem;color:var(--text-secondary)}.qr-panel code{overflow-wrap:anywhere;font-size:.75rem}.pair-confirm{display:grid;gap:.6rem}.qr-panel details[open]>summary{margin-bottom:.8rem}.qr-panel summary{cursor:pointer;font-size:.85rem;color:var(--text-secondary)}
 </style>

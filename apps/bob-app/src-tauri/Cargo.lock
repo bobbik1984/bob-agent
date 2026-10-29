@@ -152,9 +152,12 @@ dependencies = [
 name = "bob-app"
 version = "1.0.1"
 dependencies = [
+ "base64 0.22.1",
  "bob-kernel",
  "bob-transport",
  "rcgen",
+ "ring",
+ "rusqlite",
  "rustls",
  "serde",
  "serde_json",
@@ -181,6 +184,7 @@ version = "1.0.1"
 dependencies = [
  "bob-kernel",
  "rustls",
+ "rustls-webpki",
  "serde",
  "serde_json",
  "sha2",
