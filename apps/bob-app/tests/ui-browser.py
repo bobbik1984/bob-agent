@@ -22,8 +22,9 @@ results = []
 with sync_playwright() as p:
  browser = p.chromium.launch()
  try:
-  for width,height in [(390,844),(1180,757),(390,420)]:
-   context=browser.new_context(viewport={'width':width,'height':height},permissions=['clipboard-read','clipboard-write'],locale='en-US')
+  for width,height,locale,scheme in [(390,844,'en-US','light'),(1180,757,'en-US','light'),(390,420,'en-US','light'),(390,844,'zh-CN','dark'),(1180,757,'zh-CN','dark')]:
+   labels={'copy':'复制','settings':'设置','close':'关闭设置'} if locale=='zh-CN' else {'copy':'Copy','settings':'Settings','close':'Close settings'}
+   context=browser.new_context(viewport={'width':width,'height':height},permissions=['clipboard-read','clipboard-write'],locale=locale,color_scheme=scheme)
    page=context.new_page()
    page.route('**/src/native-bridge.mjs',lambda route:route.fulfill(content_type='text/javascript',body=fixture))
    page.goto(args.url)
@@ -33,19 +34,19 @@ with sync_playwright() as p:
    assert history['height'] > height*.40, history
    assert page.locator('.brand img').evaluate('(e)=>e.complete && e.naturalWidth>0')
    assert not page.locator('.storage-summary').count()
-   page.get_by_role('button',name='Copy',exact=True).click()
+   page.get_by_role('button',name=labels['copy'],exact=True).click()
    assert page.evaluate('navigator.clipboard.readText()')=='UI fixture reply — copy this exact text.'
-   page.get_by_role('button',name='Settings',exact=True).click()
+   page.get_by_role('button',name=labels['settings'],exact=True).click()
    page.get_by_role('dialog').wait_for(state='visible')
-   assert page.get_by_role('button',name='Close settings').evaluate('(e)=>e===document.activeElement')
+   assert page.get_by_role('button',name=labels['close']).evaluate('(e)=>e===document.activeElement')
    page.keyboard.press('Escape')
-   assert page.get_by_role('button',name='Settings',exact=True).evaluate('(e)=>e===document.activeElement')
-   page.get_by_role('button',name='Settings',exact=True).click()
-   page.get_by_role('button',name='Close settings').click()
+   assert page.get_by_role('button',name=labels['settings'],exact=True).evaluate('(e)=>e===document.activeElement')
+   page.get_by_role('button',name=labels['settings'],exact=True).click()
+   page.get_by_role('button',name=labels['close']).click()
    assert page.locator('textarea').input_value()=='Retain this draft'
    assert page.locator('.history').bounding_box()==history
-   page.screenshot(path=str(args.output/f'ui-{width}-{height}.png'))
-   results.append({'viewport':[width,height],'history_height':history['height'],'copy':True,'settings_return_draft':True,'logo':True,'scope':'UI fixture, not Android keyboard or real Home'})
+   page.screenshot(path=str(args.output/f'ui-{width}-{height}-{locale}-{scheme}.png'))
+   results.append({'viewport':[width,height],'locale':locale,'scheme':scheme,'history_height':history['height'],'copy':True,'settings_return_draft':True,'logo':True,'scope':'UI fixture, not Android keyboard or real Home'})
    context.close()
  finally:
   browser.close()
