@@ -60,7 +60,7 @@
   "homeSyncUnconfirmed": "Home sync is not confirmed. Your saved messages remain on this device; an uncertain send will be checked before any retry.",
   "homeStopPending": "Stop saved on this device; waiting for Home confirmation.",
   "homeStopRejected": "Stop request was not confirmed. Check the latest execution state.",
-  "homeConfiguredHint": "Home paired. Sending and execution states appear with each message.",
+  "homeConfiguredHint": "Home paired. You can send a message; delivery and execution are shown separately.",
   "homeSendHint": "Saved here first; delivery resumes when Home is reachable.",
   "homeStartHint": "Send a message to Home. You will see when it is received, running and answered.",
   "homeConnection": "Connect Home",
@@ -131,5 +131,7 @@
   "qrVerifying": "Home received the request. Saving the connection…",
   "qrScanTimeout": "The camera closed because no code was recognized within two minutes. No connection request was sent. Try the new larger QR code.",
   "qrScanCancelled": "Scanning was cancelled. No connection request was sent.",
-  "qrClose": "Close QR display"
+  "qrClose": "Close QR display",
+  "qrHomePaired": "Home paired",
+  "qrPhonePaired": "Phone paired"
 }

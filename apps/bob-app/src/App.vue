@@ -95,6 +95,7 @@ async function cancel(execution) {
     await reload();
   }
 }
+async function focusPairedComposer(){await reload();await nextTick();input.value?.focus();}
 async function startup() {
   loading.value = true; fault.value = null;
   if (!available) { loading.value = false; return; }
@@ -151,11 +152,11 @@ onUnmounted(() => { disposed = true; if (poll) clearInterval(poll); });
       <label class="language"><span class="visually-hidden">{{ t('language') }}</span><select v-model="locale"><option value="zh-CN">{{ t('chinese') }}</option><option value="en-US">{{ t('english') }}</option></select></label>
     </header>
     <main class="main">
-      <div class="connection-note" role="status">
+      <div class="connection-note" :class="{'home-paired':homeConfigured}" role="status">
         <span>{{ t(connectionKey) }}</span>
         <span v-if="readiness" class="storage-summary">{{ t(executionEnabled ? 'localExecutionStatus' : 'localStatus', { saved: readiness.saved_messages, pending: readiness.pending_messages }) }}</span>
       </div>
-      <HomeConnection v-if="sessionId" @changed="reload" />
+      <HomeConnection v-if="sessionId" :paired="homeConfigured" @changed="reload" @connected="focusPairedComposer" />
       <div v-if="fault" class="notice" role="alert"><span>{{ t(fault) }}</span><button type="button" @click="sessionId ? reload() : startup()">{{ t('reload') }}</button></div>
       <div v-if="homeFault" class="notice" role="status">{{ t('homeSyncUnconfirmed') }}</div>
       <div v-if="executionFault" class="notice" role="alert"><span>{{ t(executionFault) }}</span><button type="button" @click="reload">{{ t('checkStatus') }}</button></div>

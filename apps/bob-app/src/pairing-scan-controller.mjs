@@ -1,5 +1,5 @@
 // UI progress reflects native responses. Reading a QR never means connected.
-export function createPairingScanController({bridge,onPhase,onStatus}) {
+export function createPairingScanController({bridge,onPhase,onStatus,onConnected=()=>{}}) {
  let flight=null;
  return {scan(){
   if(flight)return flight;
@@ -12,7 +12,7 @@ export function createPairingScanController({bridge,onPhase,onStatus}) {
     onPhase('connecting');
     const proposed=await bridge.pairingQrPropose(code);onStatus(proposed);
     onPhase('verifying');
-    try {const saved=await bridge.pairingFinish();onStatus(saved);onPhase(saved.state==='connected'?'connected':'verifying');return saved;}
+    try {const saved=await bridge.pairingFinish();onStatus(saved);onPhase(saved.state==='connected'?'connected':'verifying');if(saved.state==='connected')onConnected(saved);return saved;}
     catch(e){if(String(e?.message||e)==='PAIRING_CONFIRMATION_UNAVAILABLE')return proposed;throw e;}
    } catch(e){onPhase('failed');throw e;}
   })().finally(()=>{flight=null;});
