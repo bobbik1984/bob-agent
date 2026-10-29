@@ -232,3 +232,32 @@ fn pending_candidate_is_readable_after_restart_without_challenge_and_expiry_is_e
         .contains("challenge"));
     assert_eq!(s.pairing_status("invite", 1000).unwrap().state, "expired");
 }
+
+#[test]
+fn fresh_scan_recovers_only_exact_revoked_key_and_advances_revision() {
+    let dir=tempfile::tempdir().unwrap();let p=dir.path().join("db");let mut s=fixture(&p);
+    s.propose_pairing_peer("invite",&[7;32],&peer(),2).unwrap();
+    s.confirm_pairing_peer("invite","phone",PIN,"session",2000,true,3).unwrap();
+    s.revoke_home_device("home",1,"phone",1,4).unwrap();
+    let mut next=invitation();next.id="scan-recovery".into();
+    s.issue_pairing_invitation(&next,&[9;32],5).unwrap();
+    s.propose_pairing_peer(&next.id,&[9;32],&peer(),6).unwrap();
+    assert!(s.confirm_pairing_peer(&next.id,"phone",PIN,"session",2100,true,7).is_err());
+    assert!(s.confirm_scanned_pairing_peer(&next.id,"phone",HOME,"session",2100,true,7).is_err());
+    assert_eq!(s.confirm_scanned_pairing_peer(&next.id,"phone",PIN,"session",2100,true,7).unwrap(),3);
+    assert_eq!(s.authenticate_home_session("home",1,PIN,"session",8).unwrap().authorization_revision(),3);
+    assert!(s.confirm_scanned_pairing_peer(&next.id,"phone",PIN,"session",2200,true,8).is_err());
+}
+#[test]
+fn scan_does_not_replace_a_revoked_devices_key() {
+    let dir=tempfile::tempdir().unwrap();let p=dir.path().join("db");let mut s=fixture(&p);
+    s.propose_pairing_peer("invite",&[7;32],&peer(),2).unwrap();
+    s.confirm_pairing_peer("invite","phone",PIN,"session",2000,true,3).unwrap();
+    s.revoke_home_device("home",1,"phone",1,4).unwrap();
+    let mut next=invitation();next.id="changed-key".into();s.issue_pairing_invitation(&next,&[9;32],5).unwrap();
+    let mut changed=peer();changed.identity_sha256=HOME.into();changed.public_key_ref="different-key".into();
+    s.propose_pairing_peer(&next.id,&[9;32],&changed,6).unwrap();
+    assert!(s.confirm_scanned_pairing_peer(&next.id,"phone",HOME,"session",2100,true,7).is_err());
+    assert_eq!(s.pairing_status(&next.id,8).unwrap().state,"pending");
+    assert!(s.authenticate_home_session("home",1,PIN,"session",8).is_err());
+}

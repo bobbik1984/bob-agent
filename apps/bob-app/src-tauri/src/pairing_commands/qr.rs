@@ -163,8 +163,67 @@ fn existing_open(ceremony: &Option<Ceremony>) -> Result<Option<QrExport>, &'stat
         {
             export(&open.code).map(Some)
         }
+        Some(Ceremony::Home(home)) => {
+            let revoked = with_app(&home.owner, |a| {
+                a.home_pairing_revoked(&home.invitation.invitation_id, now()?)
+                    .map_err(|_| "PAIRING_STORE_UNAVAILABLE")
+            })?;
+            if revoked {
+                Ok(None)
+            } else {
+                Err("PAIRING_ALREADY_ACTIVE")
+            }
+        }
         Some(_) => Err("PAIRING_ALREADY_ACTIVE"),
     }
+}
+// New invitations never undo revocation. Keep the exact old public recovery
+// record under a deterministic archive before freeing its single active slot.
+fn archive_revoked(guard: &mut Option<Ceremony>) -> Result<(), &'static str> {
+    let Some(Ceremony::Home(home)) = guard.as_mut() else {
+        return Ok(());
+    };
+    if !with_app(&home.owner, |a| {
+        a.home_pairing_revoked(&home.invitation.invitation_id, now()?)
+            .map_err(|_| "PAIRING_STORE_UNAVAILABLE")
+    })? {
+        return Err("PAIRING_ALREADY_ACTIVE");
+    }
+    let files = ["home-host.json", "home-host.sha256"];
+    for name in files {
+        let meta = std::fs::symlink_metadata(home.root.join(name))
+            .map_err(|_| "PAIRING_ARCHIVE_FAILED")?;
+        if !meta.is_file() || meta.file_type().is_symlink() {
+            return Err("PAIRING_ARCHIVE_FAILED");
+        }
+    }
+    let body = std::fs::read(home.root.join(files[0])).map_err(|_| "PAIRING_ARCHIVE_FAILED")?;
+    let seal = std::fs::read(home.root.join(files[1])).map_err(|_| "PAIRING_ARCHIVE_FAILED")?;
+    let data: HomeRestore = serde_json::from_slice(&body).map_err(|_| "PAIRING_ARCHIVE_FAILED")?;
+    if data.invitation_id != home.invitation.invitation_id
+        || seal != format!("{:x}", Sha256::digest(&body)).as_bytes()
+    {
+        return Err("PAIRING_ARCHIVE_FAILED");
+    }
+    let archive = home.root.join(format!(
+        "pairing-history-{:x}",
+        Sha256::digest(home.invitation.invitation_id.as_bytes())
+    ));
+    std::fs::create_dir(&archive).map_err(|_| "PAIRING_ARCHIVE_FAILED")?;
+    for (name, expected) in [(files[0], body), (files[1], seal)] {
+        // A partial archive is retained and fails closed for explicit recovery.
+        std::fs::rename(home.root.join(name), archive.join(name))
+            .map_err(|_| "PAIRING_ARCHIVE_FAILED")?;
+        if std::fs::read(archive.join(name)).map_err(|_| "PAIRING_ARCHIVE_FAILED")? != expected {
+            return Err("PAIRING_ARCHIVE_FAILED");
+        }
+    }
+    home._listeners.0.store(true, Ordering::SeqCst);
+    if let Some(mut host) = home.host.take() {
+        host.stop();
+    }
+    *guard = None;
+    Ok(())
 }
 fn allowed_ip(ip: IpAddr) -> bool {
     match ip {
@@ -257,6 +316,18 @@ async fn create_at<R: tauri::Runtime>(
     let mut guard = pairing.0.lock().map_err(|_| "PAIRING_STATE_UNAVAILABLE")?;
     if let Some(code) = existing_open(&guard)? {
         return Ok(code);
+    }
+    if guard.is_some() {
+        if !app
+            .state::<RunnerState>()
+            .active
+            .lock()
+            .map_err(|_| "RUNNER_UNAVAILABLE")?
+            .is_empty()
+        {
+            return Err("HOME_RUNNER_BUSY");
+        }
+        archive_revoked(&mut guard)?;
     }
     let bind_ip = if addresses[0].is_ipv4() {
         IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED)
@@ -389,6 +460,17 @@ pub(crate) async fn app_pairing_qr_propose<R: tauri::Runtime>(
     let identity = native(&app, &state).await?;
     let (_, session) = local_scope(&state)?;
     let home = code.home()?;
+    with_app(&state.0, |a| {
+        if a.paired_home()
+            .map_err(|_| "LOCAL_STORE_UNAVAILABLE")?
+            .is_some_and(|(id, epoch, pin)| {
+                id != home.device_id || epoch != code.e || pin != home.certificate_sha256
+            })
+        {
+            return Err("PAIRING_DIFFERENT_HOME_DENIED");
+        }
+        Ok(())
+    })?;
     if home.device_id == identity.public.device_id {
         return Err("PAIRING_SELF_DENIED");
     }
@@ -424,7 +506,20 @@ pub(crate) async fn app_pairing_qr_propose<R: tauri::Runtime>(
     let invitation_id = invite.invitation_id.clone();
     {
         let mut guard = pairing.0.lock().map_err(|_| "PAIRING_STATE_UNAVAILABLE")?;
-        if guard.is_some() {
+        if let Some(Ceremony::Replica {
+            invitation,
+            state: previous,
+            ..
+        }) = guard.as_ref()
+        {
+            if previous != "connected"
+                || invitation.home.device_id != invite.home.device_id
+                || invitation.home_epoch != code.e
+                || invitation.home.certificate_sha256 != invite.home.certificate_sha256
+            {
+                return Err("PAIRING_ALREADY_ACTIVE");
+            }
+        } else if guard.is_some() {
             return Err("PAIRING_ALREADY_ACTIVE");
         }
         *guard = Some(Ceremony::Replica {
@@ -829,6 +924,50 @@ mod tests {
             .unwrap()
             .state,
             "revoked"
+        );
+        let previous_invitation = {
+            let state = home.state::<PairingState>();
+            let guard = state.0.lock().unwrap();
+            let Some(Ceremony::Home(h)) = guard.as_ref() else {
+                panic!("home");
+            };
+            h.invitation.invitation_id.clone()
+        };
+        let replacement = tauri::async_runtime::block_on(create_at(
+            home.handle(),
+            &home.state(),
+            &home.state(),
+            vec![std::net::Ipv4Addr::LOCALHOST.into()],
+        ))
+        .unwrap();
+        assert!(roots[0]
+            .join(format!(
+                "pairing-history-{:x}",
+                Sha256::digest(previous_invitation.as_bytes())
+            ))
+            .join("home-host.json")
+            .is_file());
+        assert!(with_app(&home.state::<AppState>().0, |a| a
+            .home_pairing_revoked(&previous_invitation, now()?)
+            .map_err(|_| "read"))
+        .unwrap());
+        tauri::async_runtime::block_on(app_pairing_qr_propose(
+            phone.handle().clone(),
+            phone.state(),
+            phone.state(),
+            replacement.code,
+        ))
+        .unwrap();
+        assert_eq!(
+            tauri::async_runtime::block_on(app_pairing_finish(
+                phone.handle().clone(),
+                phone.state(),
+                phone.state(),
+                phone.state()
+            ))
+            .unwrap()
+            .state,
+            "connected"
         );
         *home.state::<PairingState>().0.lock().unwrap() = None;
         *phone.state::<PairingState>().0.lock().unwrap() = None;

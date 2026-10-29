@@ -1099,7 +1099,13 @@ fn confirm_home(home: &mut HomeCeremony) -> Result<(), &'static str> {
     let expires = *home.grant_expiry.get_or_insert(n + GRANT_MS);
     save_host(home)?;
     with_app(&home.owner, |a| {
-        a.confirm_pairing_peer(
+        let confirm = if home.qr_reply_expires_at.is_some() {
+            LocalApp::confirm_scanned_pairing_peer
+        } else {
+            LocalApp::confirm_pairing_peer
+        };
+        confirm(
+            a,
             &home.invitation.invitation_id,
             &home.invitation.candidate.identity.device_id,
             &home.invitation.candidate.identity.certificate_sha256,
