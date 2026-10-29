@@ -130,5 +130,6 @@
   "qrDecodedConnecting": "QR code recognized. Connecting to Home…",
   "qrVerifying": "Home received the request. Saving the connection…",
   "qrScanTimeout": "The camera closed because no code was recognized within two minutes. No connection request was sent. Try the new larger QR code.",
-  "qrScanCancelled": "Scanning was cancelled. No connection request was sent."
+  "qrScanCancelled": "Scanning was cancelled. No connection request was sent.",
+  "qrClose": "Close QR display"
 }

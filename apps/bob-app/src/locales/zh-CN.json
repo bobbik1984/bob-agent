@@ -130,5 +130,6 @@
   "qrDecodedConnecting": "二维码已识别，正在连接电脑…",
   "qrVerifying": "电脑已收到请求，正在保存连接…",
   "qrScanTimeout": "两分钟内没有识别到二维码，相机已自动关闭；尚未发出连接请求。请扫描新的大二维码。",
-  "qrScanCancelled": "已取消扫描，尚未发出连接请求。"
+  "qrScanCancelled": "已取消扫描，尚未发出连接请求。",
+  "qrClose": "关闭二维码展示"
 }

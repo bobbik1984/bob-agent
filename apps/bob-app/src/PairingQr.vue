@@ -19,4 +19,4 @@ watch(()=>[props.code,props.expiresAt],async()=>{
 onUnmounted(()=>{generation++;if(timer)clearInterval(timer);});
 </script>
 <template><figure v-if="code && seconds" class="pair-qr"><canvas ref="canvas" role="img" :aria-label="t('qrScanImage')"/><figcaption>{{t('qrExpires',{seconds})}}</figcaption></figure></template>
-<style scoped>.pair-qr{margin:0;display:grid;justify-items:center;gap:.6rem}.pair-qr canvas{display:block;max-width:100%;height:auto;border-radius:.6rem}.pair-qr figcaption{font-size:.8rem;color:var(--text-secondary)}</style>
+<style scoped>.pair-qr{margin:0;display:grid;justify-items:center;gap:.6rem}.pair-qr canvas{display:block;width:min(420px,calc(100dvh - 240px));max-width:100%;height:auto;border-radius:.6rem}.pair-qr figcaption{font-size:.8rem;color:var(--text-secondary)}</style>
