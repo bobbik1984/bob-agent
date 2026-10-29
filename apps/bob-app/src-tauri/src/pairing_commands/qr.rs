@@ -359,7 +359,7 @@ async fn create_at<R: tauri::Runtime>(
                         with_app(&owner,|a|a.propose_pairing_peer(&issued.i,&provided,&ProvenPairingPeer{device_id:peer.device_id.clone(),identity_sha256:peer.certificate_sha256.clone(),public_key_ref:format!("tls-cert-sha256:{}",peer.certificate_sha256)},now()?).map_err(|_|"PAIRING_PROPOSAL_REJECTED")).map_err(|_|TransportError::Authentication)?;
                         let listener=confirmation.take().ok_or(TransportError::Protocol)?;
                         listen(listener,pinned,invite.clone(),owner.clone(),stop.clone(),errors.clone(),true).map_err(|_|TransportError::Protocol)?;
-                        *state=Some(Ceremony::Home(HomeCeremony{invitation:invite.clone(),bind:SocketAddr::new(bind_ip,w),root:root.clone(),owner:owner.clone(),_listeners:ListenerStop(stop.clone()),error:errors.clone(),grant_expiry:None,host:None,control_reservation:control.take()}));
+                        *state=Some(Ceremony::Home(HomeCeremony{invitation:invite.clone(),bind:SocketAddr::new(bind_ip,w),root:root.clone(),owner:owner.clone(),_listeners:ListenerStop(stop.clone()),error:errors.clone(),grant_expiry:None,qr_reply_expires_at:Some(now().map_err(|_|TransportError::Protocol)?.saturating_add(EXECUTION_PERMISSION_MS)),host:None,control_reservation:control.take()}));
                         let Some(Ceremony::Home(home))=state.as_mut() else {return Err(TransportError::Protocol);};
                         confirm_home(home).map_err(|_|TransportError::Protocol)?;
                         // A missing/unavailable runner does not undo device pairing or
@@ -711,6 +711,14 @@ mod tests {
         assert_eq!(confirmed.state, "confirmed"); // no configured runner in this test
         assert_eq!(confirmed.candidate_pin, proposed.candidate_pin);
         assert_eq!(confirmed.error.as_deref(), Some("EXECUTION_UNAVAILABLE"));
+        let qr_reply_lease = {
+            let state = home.state::<PairingState>();
+            let guard = state.0.lock().unwrap();
+            let Some(Ceremony::Home(h)) = guard.as_ref() else {
+                panic!("home");
+            };
+            h.qr_reply_expires_at.unwrap()
+        };
         let grant_before = confirmed.grant_expires_at;
         assert_eq!(
             app_pairing_home_confirm(home.state())
@@ -751,7 +759,15 @@ mod tests {
         ))
         .unwrap();
         assert_eq!(restored.state, "confirmed");
-        assert!(restored.error.is_none()); // runner error is not a persisted pairing failure
+        {
+            let state = home.state::<PairingState>();
+            let guard = state.0.lock().unwrap();
+            let Some(Ceremony::Home(h)) = guard.as_ref() else {
+                panic!("home");
+            };
+            assert_eq!(h.qr_reply_expires_at, Some(qr_reply_lease));
+        }
+        assert_eq!(restored.error.as_deref(), Some("EXECUTION_UNAVAILABLE"));
 
         assert_eq!(
             tauri::async_runtime::block_on(app_pairing_finish(

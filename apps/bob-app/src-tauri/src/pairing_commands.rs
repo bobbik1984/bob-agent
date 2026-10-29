@@ -132,6 +132,8 @@ struct HomeRestore {
     control_address: SocketAddr,
     grant_expiry: i64,
     #[serde(default)]
+    qr_reply_expires_at: Option<i64>,
+    #[serde(default)]
     confirmation_address: Option<SocketAddr>,
     #[serde(default)]
     invitation_expires_at: Option<i64>,
@@ -150,6 +152,8 @@ struct HomeCeremony {
     _listeners: ListenerStop,
     error: Arc<Mutex<Option<String>>>,
     grant_expiry: Option<i64>,
+    // Some only for a signed QR scan; also freezes its one-hour reply lease.
+    qr_reply_expires_at: Option<i64>,
     host: Option<crate::home_host::HomeHostHandle>,
     control_reservation: Option<TcpListener>,
 }
@@ -339,7 +343,12 @@ fn save_host(home: &HomeCeremony) -> Result<(), &'static str> {
     use std::io::Write;
     let root = &home.root;
     let data = HomeRestore {
-        version: 2,
+        version: if home.qr_reply_expires_at.is_some() {
+            3
+        } else {
+            2
+        },
+        qr_reply_expires_at: home.qr_reply_expires_at,
         invitation_id: home.invitation.invitation_id.clone(),
         home: home.invitation.home.clone(),
         home_epoch: home.invitation.home_epoch,
@@ -428,7 +437,7 @@ fn load_host(
         return Err("PAIRING_HOST_CHANGED");
     }
     let data: HomeRestore = serde_json::from_slice(&body).map_err(|_| "PAIRING_HOST_CHANGED")?;
-    if !matches!(data.version, 1 | 2)
+    if !matches!(data.version, 1 | 2 | 3)
         || data.home.device_id != local.device_id
         || data.home.certificate_sha256 != local.certificate_sha256
         || !valid_identity(&data.home)
@@ -436,6 +445,16 @@ fn load_host(
         || !id(&data.candidate.session_id)
         || !valid_address(data.control_address)
         || data.bind.port() != data.control_address.port()
+        || (data.version < 3 && data.qr_reply_expires_at.is_some())
+        || data.qr_reply_expires_at.is_some_and(|expiry| {
+            expiry <= 0
+                || expiry > data.grant_expiry
+                || expiry
+                    > data
+                        .invitation_expires_at
+                        .unwrap_or(0)
+                        .saturating_add(EXECUTION_PERMISSION_MS)
+        })
     {
         return Err("PAIRING_HOST_CHANGED");
     }
@@ -506,9 +525,15 @@ fn load_host(
         _listeners: ListenerStop(Arc::new(AtomicBool::new(true))),
         error: Arc::new(Mutex::new(None)),
         grant_expiry: Some(data.grant_expiry),
+        qr_reply_expires_at: data.qr_reply_expires_at,
         host: None,
         control_reservation: None,
     };
+    // Resume only consent durably created by the signed QR path. Legacy manual
+    // pending metadata must never silently turn into automatic permission.
+    if !consumed && home.qr_reply_expires_at.is_some() {
+        confirm_home(&mut home)?;
+    }
     if !revoked && now()? < home.invitation.expires_at {
         if recoverable_confirmation.is_some() {
             let bind = SocketAddr::new(home.bind.ip(), home.invitation.confirmation_address.port());
@@ -809,6 +834,7 @@ pub(crate) async fn app_pairing_home_invite<R: tauri::Runtime>(
         _listeners: handle,
         error: errors,
         grant_expiry: None,
+        qr_reply_expires_at: None,
         host: None,
         control_reservation: None,
     }));
@@ -833,7 +859,19 @@ pub(crate) async fn app_pairing_status<R: tauri::Runtime>(
                 .path()
                 .app_data_dir()
                 .map_err(|_| "LOCAL_STORE_UNAVAILABLE")?;
-            if let Some(home) = load_host(&root, &identity, &state.0)? {
+            if let Some(mut home) = load_host(&root, &identity, &state.0)? {
+                if home
+                    .qr_reply_expires_at
+                    .is_some_and(|expiry| expiry > now().unwrap_or(i64::MAX))
+                {
+                    if let Err(error) =
+                        enable_home(&mut home, &identity, &app.state::<RunnerState>())
+                    {
+                        if let Ok(mut stored) = home.error.lock() {
+                            *stored = Some(error.into());
+                        }
+                    }
+                }
                 *guard = Some(Ceremony::Home(home));
             } else if let Some(config) =
                 crate::home_config::load(&root, &identity.public, &session)?
@@ -1215,6 +1253,13 @@ fn enable_home(
     if let Some(mut previous) = home.host.take() {
         previous.stop();
     }
+    let reply_expiry = home
+        .qr_reply_expires_at
+        .unwrap_or(now()?.saturating_add(EXECUTION_PERMISSION_MS))
+        .min(expiry);
+    if reply_expiry <= now()? {
+        return Err("EXECUTION_PERMISSION_EXPIRED");
+    }
     let config = crate::home_host::HomeHostConfig {
         address: home.bind,
         home_device_id: identity.public.device_id.clone(),
@@ -1225,7 +1270,7 @@ fn enable_home(
         policy: crate::home_host::ReadOnlyPolicy {
             device_id: home.invitation.candidate.identity.device_id.clone(),
             session_id: home.invitation.candidate.session_id.clone(),
-            expires_at: expiry.min(now()?.saturating_add(EXECUTION_PERMISSION_MS)),
+            expires_at: reply_expiry,
             execution_timeout: Duration::from_secs(120),
         },
     };
