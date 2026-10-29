@@ -2,7 +2,7 @@
 
 > 施工合同：现在做什么、下一项可派发工作是什么、验收标准是什么。修订：2026-10-29。
 > **当前版本与分支：`1.0.1`**（`main` 与 `1.0.1` 同步演进；旧版 v0.9.30 已归档至 `legacy/v0.9` 分支）。
-> **当前里程碑：16e34c2已在Pixel通过真实扫码→Home授权→手机发送→真实Codex回复→两端落盘闭环（当前可达Wi-Fi/私网）。单次执行completed/exit0/cleanup=true。成功状态不醒目的UI修正已通过Node28项和前端构建，待云端包覆盖更新；异地公网、离线恢复及停止仍未验收。**
+> **当前里程碑：Pixel已在当前可达私网完成真实扫码→手机发送→Home真实Codex回复→双端落盘闭环；同request单执行completed/exit0/cleanup=true。成功状态修正0399df1已云端构建并保留数据覆盖安装，冷启动后配对和原回复仍在，无需重扫。公网异地、运行中异常恢复、停止和F4仍未整体验收。**
 
 ---
 
@@ -31,9 +31,9 @@
 |---|---|---|---|---|
 | **Step 1** | **WP-01** | 前身项目深度只读盘点补全 | **静态盘点完成**（不含旧测试执行/全历史secret扫描） | `docs/evidence/2026-10-28-wp01-deep-inventory.md`、`docs/COMPONENT_MAP.md` |
 | **Step 2** | **WP-02** | `bob-kernel` 单一内核 Schema 与懒式预热 Outbox 状态机定案 | **设计与25项DDL约束通过**；当前内核54项离线回归通过 | `docs/ARCHITECTURE.md`、`docs/wiki/kernel-schema.md` |
-| **Step 3** | **WP-03** | X1C Home ↔ Android 连接配置与安全威胁模型 | 设计已获批；授权/TLS/Windows vault已有实现，首次配对与跨设备验证待做 | `docs/wiki/connectivity.md`、`docs/wiki/threat-model.md`、`DECISIONS.md` |
+| **Step 3** | **WP-03** | X1C Home ↔ Android 连接配置与安全威胁模型 | 设计已获批；私网Pixel配对与真实回复已验，公网/离线/停止待验 | `docs/wiki/connectivity.md`、`docs/wiki/threat-model.md`、`DECISIONS.md` |
 | **Step 4** | **BP2-01** | 建立 `1.0.1` 代码工程骨架（Rust Workspace + Tauri v2 + Vue 3） | 内核已编译；Vue/Tauri壳源码已接，原生构建与启动通过，窗口交互待验 | `Cargo.toml`、`crates/bob-kernel/`、`apps/bob-app/` |
-| **Step 5** | **BP2-02** | 实现 `BOB-D-008` 懒式响应、打字静默预热与本地 Durable Outbox 闭环 | 真实模型IPC及实际Vue提交/回复/重开保留通过；取消按钮具体手势、远端Home与手机未验 | `crates/bob-kernel/src/outbox.rs`、`src/wake.rs`、`src/inbox.rs`、`src/dispatch.rs`（后三项相对crate） |
+| **Step 5** | **BP2-02** | 实现 `BOB-D-008` 懒式响应、打字静默预热与本地 Durable Outbox 闭环 | 本机及Pixel→Home真实只读回复通过；取消手势、公网与异常恢复待验 | `crates/bob-kernel/src/outbox.rs`、`src/wake.rs`、`src/inbox.rs`、`src/dispatch.rs`（后三项相对crate） |
 
 ---
 
@@ -288,3 +288,9 @@
 - 一致性检查过的手机SQLite副本中，恰有同execution回复，source=home_codex_execution，文字与用户报告一致；没有把回放记录当派发。该段为用户在手机实际触发的一次真实模型执行，Agent未自行追加模型测试；提供方实际模型身份未独立核验。
 - 仍有UI缺陷：成功后仍像未连接。已改为认证保存成功后自动返回对话/聚焦输入框，主界面常驻“Home已配对，可以发送消息”，入口同步显示已配对。该标识代表保存的配对，不夸大为持续在线；每条消息的送达/执行仍独立。Node28项与前端93模块通过，新的UI包待构建/安装；现有已连通Home暂不重启。
 - 本次不覆盖异地公网、离线重连、手机重启、停止手势或真实项目修改；不能把BP3/F4或全部个人环境标完成。X1T/B4与生产服务未动。
+
+### 成功状态界面覆盖更新（2026-10-29）
+
+源码0399df17f00766771acaaa0cc619eb705d0137ac，GitHub run40888854563 / artifact12904790666成功；固定签名/16KB门禁通过。APK与设备SHA256同为053df37a3ba8b49d6213b1eb7373183026389b2eeb021cbc9ddf567e2afd707e，install -r保留数据，冷启动926ms。该版只改变成功提示/返回对话交互，未改变16e34c2已真机验证的原生协议，不要求用户再次扫码。
+
+覆盖更新后重新只读核对：Home授权有效、手机内核Home/会话绑定与授权revision一致，配置校验码与更新前相同；手机仍有同一次home_codex_execution回复且正文一致。完成的是App覆盖更新/冷启动后的配对与已终态回复保留，不是手机系统重启、执行中断或公网验收。电脑Home未重启、未自动重跑模型；用户无需再为本次界面修正重复发测试消息。
