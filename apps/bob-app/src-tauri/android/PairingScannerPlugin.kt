@@ -27,6 +27,7 @@ class PairingScannerPlugin(private val host: Activity) : Plugin(host) {
             return
         }
         active = true
+        observe("scanning")
         try {
             val promptId = host.resources.getIdentifier("bob_pairing_scan_prompt", "string", host.packageName)
             if (promptId == 0) throw IllegalStateException()
@@ -55,6 +56,10 @@ class PairingScannerPlugin(private val host: Activity) : Plugin(host) {
                 respond(invoke, "permission_denied")
                 return
             }
+            if (result.data?.getBooleanExtra(Intents.Scan.TIMEOUT, false) == true) {
+                respond(invoke, "timeout")
+                return
+            }
             val contents = ScanContract().parseResult(result.resultCode, result.data).contents
             if (contents == null) {
                 respond(invoke, "cancelled")
@@ -68,7 +73,17 @@ class PairingScannerPlugin(private val host: Activity) : Plugin(host) {
         }
     }
 
+    private fun observe(status: String) {
+        try {
+            host.getSharedPreferences("bob_pairing_scan_observation", 0).edit()
+                .putString("outcome", status).putLong("at_ms", System.currentTimeMillis()).apply()
+        } catch (_: Exception) { /* Diagnostics must not change scan delivery. */ }
+    }
+
     private fun respond(invoke: Invoke, status: String, code: String? = null) {
+        // Outcome only, never scanned contents: diagnosis can distinguish a
+        // decoded QR from timeout even if the WebView lifecycle loses a reply.
+        observe(status)
         val response = JSObject()
         response.put("status", status)
         if (code != null) response.put("code", code)

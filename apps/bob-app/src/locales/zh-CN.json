@@ -125,5 +125,10 @@
   "qrNetworkUnavailable": "未找到手机可访问的本机网络地址。请先连接局域网或已有私有网络。",
   "qrProposalUnknown": "正在核对本次扫码结果，不会重复提交。请保持 Home 可达。",
   "qrAlreadyActive": "已有配对请求，请完成或结束它后再创建新的邀请。",
-  "qrPairedPolicy": "设备配对保留 365 天。只读回复仍限时 1 小时，未开放项目修改。"
+  "qrPairedPolicy": "设备配对保留 365 天。只读回复仍限时 1 小时，未开放项目修改。",
+  "qrScanning": "相机已打开，正在识别二维码…",
+  "qrDecodedConnecting": "二维码已识别，正在连接电脑…",
+  "qrVerifying": "电脑已收到请求，正在保存连接…",
+  "qrScanTimeout": "两分钟内没有识别到二维码，相机已自动关闭；尚未发出连接请求。请扫描新的大二维码。",
+  "qrScanCancelled": "已取消扫描，尚未发出连接请求。"
 }

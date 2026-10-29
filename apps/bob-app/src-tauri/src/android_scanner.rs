@@ -23,6 +23,7 @@ pub(crate) async fn scan<R: Runtime>(app: &AppHandle<R>) -> Result<String, &'sta
     match response.status.as_str() {
         "ok" => crate::scan_commands::validate(response.code.ok_or("SCAN_INVALID")?),
         "cancelled" => Err("SCAN_CANCELLED"),
+        "timeout" => Err("SCAN_TIMEOUT"),
         "permission_denied" => Err("SCAN_PERMISSION_DENIED"),
         "busy" => Err("SCAN_BUSY"),
         "invalid" => Err("SCAN_INVALID"),

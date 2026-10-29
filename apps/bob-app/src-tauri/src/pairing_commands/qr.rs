@@ -1,6 +1,7 @@
 //! A signed scan of the short-lived QR confirms its exact peer automatically.
 //! Existing certificate checks, durable grants and bounded execution remain.
 use super::*;
+mod compact;
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use bob_transport::bootstrap::{
     BootstrapClient, BootstrapEndpoints, BootstrapScope, BootstrapServer,
@@ -58,10 +59,7 @@ impl QrCode {
         })
     }
     fn encode(&self) -> Result<String, &'static str> {
-        let code = format!(
-            "{PREFIX}{}",
-            URL_SAFE_NO_PAD.encode(serde_json::to_vec(self).map_err(|_| "PAIRING_CODE_INVALID")?)
-        );
+        let code = compact::encode(self)?;
         if code.len() > QR_LIMIT {
             return Err("PAIRING_CODE_TOO_LARGE");
         }
@@ -70,6 +68,9 @@ impl QrCode {
     fn decode(code: &str, at: i64) -> Result<Self, &'static str> {
         if code.len() > QR_LIMIT {
             return Err("PAIRING_CODE_INVALID");
+        }
+        if code.starts_with(compact::PREFIX) {
+            return compact::decode(code, at);
         }
         let bytes = URL_SAFE_NO_PAD
             .decode(code.strip_prefix(PREFIX).ok_or("PAIRING_CODE_INVALID")?)
@@ -719,6 +720,18 @@ mod tests {
         ))
         .unwrap();
         assert!(code.code.len() < 2000);
+        let decoded_compact = QrCode::decode(&code.code, now().unwrap()).unwrap();
+        let legacy = format!(
+            "{PREFIX}{}",
+            URL_SAFE_NO_PAD.encode(serde_json::to_vec(&decoded_compact).unwrap())
+        );
+        let decoded_legacy = QrCode::decode(&legacy, now().unwrap()).unwrap();
+        assert!(decoded_compact.scope().unwrap() == decoded_legacy.scope().unwrap());
+        assert_eq!(
+            decoded_compact.challenge().unwrap(),
+            decoded_legacy.challenge().unwrap()
+        );
+        assert!(code.code.len() < legacy.len());
         let again = tauri::async_runtime::block_on(create_at(
             home.handle(),
             &home.state::<AppState>(),

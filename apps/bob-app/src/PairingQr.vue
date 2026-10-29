@@ -12,7 +12,7 @@ watch(()=>[props.code,props.expiresAt],async()=>{
  if(!props.code)return;tick();if(!seconds.value)return;
  await nextTick();if(current!==generation||!canvas.value)return;
  try { // QR's default dark/light pixels are machine-readable encoding, independent of theme.
-  await QRCode.toCanvas(canvas.value,props.code,{width:320,margin:4,errorCorrectionLevel:'M'});
+  await QRCode.toCanvas(canvas.value,props.code,{width:420,margin:4,errorCorrectionLevel:'M'});
  }catch{emit('error');return;}
  timer=setInterval(tick,1000);
 },{immediate:true});

@@ -125,5 +125,10 @@
   "qrNetworkUnavailable": "No reachable local network address was found. Connect to a local or private network first.",
   "qrProposalUnknown": "Checking the existing scan result without resubmitting. Keep Home reachable.",
   "qrAlreadyActive": "A pairing attempt is active. Finish or close it before creating another.",
-  "qrPairedPolicy": "Device access lasts 365 days. Read-only replies remain limited to one hour; project editing is not enabled."
+  "qrPairedPolicy": "Device access lasts 365 days. Read-only replies remain limited to one hour; project editing is not enabled.",
+  "qrScanning": "Camera open — scanning the QR code…",
+  "qrDecodedConnecting": "QR code recognized. Connecting to Home…",
+  "qrVerifying": "Home received the request. Saving the connection…",
+  "qrScanTimeout": "The camera closed because no code was recognized within two minutes. No connection request was sent. Try the new larger QR code.",
+  "qrScanCancelled": "Scanning was cancelled. No connection request was sent."
 }
