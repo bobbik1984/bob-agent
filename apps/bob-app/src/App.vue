@@ -33,6 +33,22 @@ function messageStatus(message) {
 }
 const connectionKey = computed(() => !available ? 'nativeRequired' : executionEnabled.value ? 'codexReadOnlyReady' : homeConfigured.value ? 'homeConfiguredHint' : readiness.value ? 'providerUnconfigured' : 'loading');
 const settingsOpen = ref(false);
+const settingsPanel = ref(null);
+let settingsTrigger = null;
+watch(settingsOpen, async open => {
+  if (open) settingsTrigger = document.activeElement;
+  await nextTick();
+  if (open) settingsPanel.value?.querySelector('button')?.focus();
+  else settingsTrigger?.focus();
+});
+function settingsKeydown(event) {
+  if (event.key === 'Escape') { event.preventDefault(); settingsOpen.value = false; return; }
+  if (event.key !== 'Tab') return;
+  const controls = [...settingsPanel.value.querySelectorAll('button,select,input,textarea,summary,[tabindex="0"]')].filter(el => !el.disabled && el.getClientRects().length);
+  const first = controls[0], last = controls.at(-1);
+  if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+  else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+}
 const copyState = ref({});
 async function copyReply(message) {
   try { await navigator.clipboard.writeText(message.content); copyState.value = {...copyState.value, [message.id]: 'copied'}; }
@@ -161,7 +177,7 @@ onUnmounted(() => { disposed = true; releaseViewport(); if (poll) clearInterval(
       <span class="page-name">{{ t('conversation') }}</span>
       <button type="button" class="settings-toggle" :aria-expanded="settingsOpen" @click="settingsOpen=!settingsOpen">{{ t('settings') }}</button>
     </header>
-    <section v-show="settingsOpen" class="settings-panel" role="dialog" aria-modal="true" :aria-label="t('settings')" @keydown.esc="settingsOpen=false">
+    <section v-show="settingsOpen" ref="settingsPanel" class="settings-panel" role="dialog" aria-modal="true" :aria-label="t('settings')" @keydown="settingsKeydown">
       <div class="settings-heading"><h2>{{ t('settings') }}</h2><button type="button" :aria-label="t('closeSettings')" @click="settingsOpen=false">×</button></div>
       <label class="language"><span class="visually-hidden">{{ t('language') }}</span><select v-model="locale"><option value="zh-CN">{{ t('chinese') }}</option><option value="en-US">{{ t('english') }}</option></select></label>
       <HomeConnection v-if="sessionId" :paired="homeConfigured" @changed="reload" @connected="settingsOpen=false;focusPairedComposer()" />

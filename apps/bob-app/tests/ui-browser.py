@@ -37,6 +37,10 @@ with sync_playwright() as p:
    assert page.evaluate('navigator.clipboard.readText()')=='UI fixture reply — copy this exact text.'
    page.get_by_role('button',name='Settings',exact=True).click()
    page.get_by_role('dialog').wait_for(state='visible')
+   assert page.get_by_role('button',name='Close settings').evaluate('(e)=>e===document.activeElement')
+   page.keyboard.press('Escape')
+   assert page.get_by_role('button',name='Settings',exact=True).evaluate('(e)=>e===document.activeElement')
+   page.get_by_role('button',name='Settings',exact=True).click()
    page.get_by_role('button',name='Close settings').click()
    assert page.locator('textarea').input_value()=='Retain this draft'
    assert page.locator('.history').bounding_box()==history
