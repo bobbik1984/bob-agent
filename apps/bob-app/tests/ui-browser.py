@@ -77,6 +77,12 @@ export const kernelBridge = {
  providerTest:async()=>({id:'default',provider_kind:'openai_compatible',label:'OpenAI',base_url:'https://api.openai.com/v1',model_id:'gpt-4o-mini',api_key_slot:'provider-key-default',api_key_configured:true,enabled:true,last_check_status:'ok',last_check_reason:'gpt-4o-mini',last_checked_at:100,updated_at:100}),
  routeGet:async()=>'auto',
  routeSet:async(_,r)=>r,
+ personalSnapshot:async()=>({schedules:[{id:'s1',title:'Review Architecture',kind:'event',due_at_ms:1761820000000,status:'scheduled',notes:'Check 5 views'}],notes:[{id:'n1',title:'Bob Architecture Note',body:'5 pillars aligned',tags:['arch']}],captures:[],memories:[]}),
+ scheduleCreate:async(p)=>p,
+ scheduleStatus:async(id,st)=>({id,status:st}),
+ noteUpsert:async(p)=>p,
+ captureCreate:async(p)=>p,
+ memoryState:async(id,st)=>({id,state:st}),
  pairingCapabilities:async()=>({can_scan:true,can_host:false}),
  pairingStatus:async()=>({state:'connected'})
 };'''
@@ -85,7 +91,7 @@ with sync_playwright() as p:
  browser = p.chromium.launch()
  try:
   for width,height,locale,scheme in [(390,844,'en-US','light'),(1180,757,'en-US','light'),(390,420,'en-US','light'),(390,844,'zh-CN','dark'),(1180,757,'zh-CN','dark')]:
-   labels={'copy':'复制','settings':'设置','close':'关闭设置','back':'返回设置','by_device':'按执行设备','by_project':'按项目 / 任务','models_badge':'199 个可用模型'} if locale=='zh-CN' else {'copy':'Copy','settings':'Settings','close':'Close settings','back':'Back to Settings','by_device':'By Execution Device','by_project':'By Project / Task','models_badge':'199 available models'}
+   labels={'copy':'复制','settings':'设置','close':'关闭设置','back':'返回设置','by_device':'按执行设备','by_project':'按项目 / 任务','models_badge':'199 个可用模型','nav_schedule':'日程','nav_work':'工作','nav_knowledge':'知识','nav_chat':'对话'} if locale=='zh-CN' else {'copy':'Copy','settings':'Settings','close':'Close settings','back':'Back to Settings','by_device':'By Execution Device','by_project':'By Project / Task','models_badge':'199 available models','nav_schedule':'Schedule','nav_work':'Work','nav_knowledge':'Knowledge','nav_chat':'Chat'}
    context=browser.new_context(viewport={'width':width,'height':height},permissions=['clipboard-read','clipboard-write'],locale=locale,color_scheme=scheme)
    page=context.new_page()
    page.route('**/src/native-bridge.mjs',lambda route:route.fulfill(content_type='text/javascript',body=fixture))
@@ -132,10 +138,22 @@ with sync_playwright() as p:
    page.locator('.device-indicator').click()
    page.locator('.qr-panel').wait_for(state='visible')
    page.get_by_role('button',name=labels['close']).click()
+   if height > 500:
+    page.locator('.bottom-nav').get_by_role('button',name=labels['nav_schedule'],exact=True).click()
+    page.locator('.schedule-view').wait_for(state='visible')
+    assert not page.locator('.navigation-drawer').count()
+    page.locator('.bottom-nav').get_by_role('button',name=labels['nav_work'],exact=True).click()
+    page.locator('.work-view').wait_for(state='visible')
+    assert not page.locator('.navigation-drawer').count()
+    page.locator('.bottom-nav').get_by_role('button',name=labels['nav_knowledge'],exact=True).click()
+    page.locator('.knowledge-view').wait_for(state='visible')
+    assert not page.locator('.navigation-drawer').count()
+    page.locator('.bottom-nav').get_by_role('button',name=labels['nav_chat'],exact=True).click()
+    page.locator('.history').wait_for(state='visible')
    assert page.locator('textarea').input_value()=='Retain this draft'
    assert page.locator('.history').bounding_box()==history
    page.screenshot(path=str(args.output/f'ui-{width}-{height}-{locale}-{scheme}.png'))
-   results.append({'viewport':[width,height],'layout':expected_layout,'locale':locale,'scheme':scheme,'history_height':history['height'],'model_hub_199':True,'copy':True,'multi_session_switch_draft':True,'settings_subpage_and_return_draft':True,'logo':True,'scope':'UI fixture, not Android keyboard or real Home'})
+   results.append({'viewport':[width,height],'layout':expected_layout,'locale':locale,'scheme':scheme,'history_height':history['height'],'model_hub_199':True,'five_views_aligned':True,'copy':True,'multi_session_switch_draft':True,'settings_subpage_and_return_draft':True,'logo':True,'scope':'UI fixture, not Android keyboard or real Home'})
    context.close()
  finally:
   browser.close()

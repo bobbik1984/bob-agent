@@ -90,3 +90,21 @@ test('responsive aspect-ratio layout resolves mobile portrait vs desktop landsca
  assert.equal(getProviderLogo('deepseek'),'/logos/deepseek.png');
  assert.equal(getProviderLogo('gemini'),'/logos/gemini.svg');
 });
+
+test('personal ops IPC maps schedule, note, capture and memory commands cleanly',async()=>{
+ const calls=[];const bridge=createKernelBridge(async(command,args)=>{calls.push({command,args});return {ok:true};},()=>true);
+ await bridge.personalSnapshot();
+ await bridge.scheduleCreate({id:'s1',title:'Review',dueAtMs:1000,notes:'n'});
+ await bridge.scheduleStatus('s1','done');
+ await bridge.noteUpsert({id:'n1',title:'Note',body:'Body',tags:['t1']});
+ await bridge.captureCreate({id:'c1',messageId:'m1',content:'Snippet'});
+ await bridge.memoryState('mem-1','confirmed');
+ assert.deepEqual(calls,[
+  {command:'app_personal_snapshot',args:undefined},
+  {command:'app_schedule_create',args:{id:'s1',projectId:null,taskId:null,title:'Review',startAt:1000,endAt:null,reminderAt:null,notes:'n'}},
+  {command:'app_schedule_status',args:{id:'s1',status:'done'}},
+  {command:'app_note_upsert',args:{id:'n1',projectId:null,conversationId:null,title:'Note',bodyMarkdown:'Body',tags:['t1']}},
+  {command:'app_capture_create',args:{id:'c1',sourceMessageId:'m1',contentRef:'Snippet'}},
+  {command:'app_memory_state',args:{id:'mem-1',newState:'confirmed'}}
+ ]);
+});

@@ -1247,6 +1247,392 @@ textarea {
   color: var(--text-secondary);
 }
 
+/* Primary Views: ScheduleView, WorkView, KnowledgeView */
+.primary-view {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  padding: 1rem max(1rem, calc((100% - 62rem) / 2)) 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+.view-hero {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding-bottom: 0.65rem;
+  border-bottom: 1px solid var(--line);
+}
+.view-hero-titles h2 {
+  margin: 0;
+  font-size: 1.15rem;
+  color: var(--text-primary);
+}
+.view-hero-titles p {
+  margin: 0.2rem 0 0;
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+}
+.view-hero-actions,
+.view-subtabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+.view-subtab-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.4rem 0.75rem;
+  font-size: 0.82rem;
+  border-radius: 0.65rem;
+  border: 1px solid var(--line);
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+}
+.view-subtab-btn.active {
+  background: var(--accent-soft);
+  border-color: var(--accent-primary);
+  color: var(--text-primary);
+  font-weight: 600;
+}
+.subtab-count {
+  font-size: 0.72rem;
+  padding: 0.05rem 0.4rem;
+  border-radius: 999px;
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+}
+.view-content-body {
+  display: grid;
+  gap: 0.85rem;
+}
+.view-card-desc {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+.view-empty-card {
+  text-align: center;
+  padding: 2rem 1rem;
+  color: var(--text-secondary);
+}
+.primary-action-btn {
+  background: var(--accent-primary);
+  color: var(--text-on-accent);
+  border-color: var(--accent-primary);
+  font-weight: 600;
+  padding: 0.48rem 0.9rem;
+  font-size: 0.84rem;
+}
+.mini-ghost-btn {
+  padding: 0.32rem 0.65rem;
+  font-size: 0.78rem;
+  border-radius: 0.55rem;
+  border: 1px solid var(--line);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+/* ScheduleView specifics */
+.quick-schedule-form {
+  display: grid;
+  gap: 0.55rem;
+}
+.quick-schedule-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  gap: 0.5rem;
+  align-items: center;
+}
+.layout-mobile-portrait .quick-schedule-row {
+  grid-template-columns: 1fr;
+}
+.schedule-items-list {
+  display: grid;
+  gap: 0.55rem;
+}
+.schedule-item-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+.schedule-item-card.done {
+  opacity: 0.72;
+}
+.schedule-item-main {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  flex: 1;
+  min-width: 14rem;
+}
+.schedule-check-btn {
+  width: 1.45rem;
+  height: 1.45rem;
+  padding: 0;
+  border-radius: 0.4rem;
+  border: 1.5px solid var(--text-secondary);
+  background: transparent;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.82rem;
+  flex-shrink: 0;
+}
+.schedule-check-btn.checked {
+  background: var(--accent-primary);
+  border-color: var(--accent-primary);
+  color: var(--text-on-accent);
+}
+.schedule-item-text {
+  display: grid;
+  gap: 0.2rem;
+}
+.schedule-item-title-row {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+}
+.schedule-kind-badge,
+.schedule-status-badge {
+  font-size: 0.7rem;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+}
+.schedule-item-notes,
+.schedule-item-due {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+}
+.schedule-item-actions {
+  display: flex;
+  gap: 0.4rem;
+}
+
+/* WorkView specifics */
+.work-nodes-grid,
+.work-projects-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: 0.65rem;
+}
+.work-node-card,
+.work-project-item {
+  padding: 0.8rem 0.9rem;
+  border-radius: 0.75rem;
+  border: 1px solid var(--line);
+  background: var(--bg-primary);
+  display: grid;
+  gap: 0.5rem;
+}
+.work-node-card.online {
+  border-color: var(--accent-primary);
+}
+.work-node-head,
+.work-project-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.work-node-meta {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+.quick-project-form,
+.quick-capture-form {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.quick-project-form input,
+.quick-capture-form input {
+  flex: 1;
+  min-width: 12rem;
+}
+.work-session-list {
+  display: grid;
+  gap: 0.35rem;
+}
+.work-session-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.35rem 0.55rem;
+  border-radius: 0.5rem;
+  background: var(--bg-secondary);
+  font-size: 0.82rem;
+}
+
+/* KnowledgeView specifics */
+.knowledge-toolbar {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.knowledge-search-input {
+  flex: 1;
+  min-width: 12rem;
+}
+.knowledge-split-pane {
+  display: grid;
+  grid-template-columns: 18rem 1fr;
+  gap: 0.75rem;
+  align-items: start;
+}
+.layout-mobile-portrait .knowledge-split-pane {
+  grid-template-columns: 1fr;
+}
+.knowledge-note-list {
+  display: grid;
+  gap: 0.45rem;
+  max-height: 28rem;
+  overflow-y: auto;
+}
+.knowledge-note-item {
+  text-align: start;
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.6rem 0.75rem;
+  border-radius: 0.65rem;
+  border: 1px solid var(--line);
+  background: var(--bg-primary);
+}
+.knowledge-note-item.active {
+  border-color: var(--accent-primary);
+  background: var(--accent-soft);
+}
+.knowledge-tag-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+.knowledge-tag-chip {
+  font-size: 0.68rem;
+  padding: 0.08rem 0.38rem;
+  border-radius: 999px;
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+}
+.knowledge-note-preview {
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+}
+.knowledge-note-editor {
+  display: grid;
+  gap: 0.55rem;
+}
+.note-editor-title {
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+.note-editor-body {
+  font-family: inherit;
+  line-height: 1.55;
+}
+.note-editor-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+.captures-list {
+  display: grid;
+  gap: 0.5rem;
+}
+.capture-item-card p {
+  margin: 0;
+  font-size: 0.88rem;
+}
+.memory-item-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem;
+  padding: 0.55rem 0.75rem;
+  border-radius: 0.65rem;
+  border: 1px solid var(--line);
+  background: var(--bg-primary);
+  flex-wrap: wrap;
+}
+.memory-item-main {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.memory-item-actions {
+  display: flex;
+  gap: 0.4rem;
+}
+
+/* Settings Tab Panels (Workspace, Tasks, Appearance, About) */
+.settings-kv-list {
+  display: grid;
+  gap: 0.45rem;
+}
+.settings-kv-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.45rem 0.65rem;
+  border-radius: 0.55rem;
+  background: var(--bg-primary);
+  border: 1px solid var(--line);
+  font-size: 0.82rem;
+}
+.workspace-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(7rem, 1fr));
+  gap: 0.55rem;
+}
+.workspace-stat-box {
+  padding: 0.65rem;
+  border-radius: 0.65rem;
+  border: 1px solid var(--line);
+  background: var(--bg-primary);
+  display: grid;
+  gap: 0.15rem;
+  text-align: center;
+}
+.workspace-stat-box strong {
+  font-size: 1.15rem;
+  color: var(--accent-primary);
+}
+.workspace-stat-box span {
+  font-size: 0.74rem;
+  color: var(--text-secondary);
+}
+.routine-tag-box {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.55rem 0.75rem;
+  border-radius: 0.6rem;
+  border: 1px solid var(--line);
+  background: var(--bg-primary);
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+.routine-tag-box code {
+  color: var(--accent-primary);
+  font-weight: 600;
+}
+
 @media (max-width: 480px) {
   .topbar {
     padding-inline: 0.65rem;

@@ -19,6 +19,7 @@ use bob_kernel::app::{AppMessage, AppReadiness, LocalApp};
 use bob_kernel::catalog::{CatalogSnapshot, ConversationViewState, DeviceUiPreferences};
 use bob_kernel::local_execution::LocalExecution;
 use bob_kernel::outbox::LocalAccepted;
+use bob_kernel::personal_ops::{CaptureItem, MemoryItem, NoteItem, ScheduleItem};
 pub use runner::worker_entry;
 use serde::{Deserialize, Serialize};
 use std::io::{Read, Write};
@@ -341,6 +342,160 @@ async fn app_preferences_save(
     .map_err(|_| "PREFERENCES_SAVE_FAILED")?
 }
 
+#[derive(Serialize)]
+struct PersonalOpsSnapshot {
+    schedules: Vec<ScheduleItem>,
+    notes: Vec<NoteItem>,
+    captures: Vec<CaptureItem>,
+    memories: Vec<MemoryItem>,
+}
+
+#[tauri::command]
+async fn app_personal_snapshot(
+    state: State<'_, AppState>,
+) -> Result<PersonalOpsSnapshot, &'static str> {
+    let state = state.0.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        with_app(&state, |app| {
+            let schedules = app
+                .list_schedule_items()
+                .map_err(|_| "PERSONAL_OPS_READ_FAILED")?;
+            let notes = app
+                .list_notes(None)
+                .map_err(|_| "PERSONAL_OPS_READ_FAILED")?;
+            let captures = app
+                .list_captures()
+                .map_err(|_| "PERSONAL_OPS_READ_FAILED")?;
+            let memories = app
+                .list_memories(false)
+                .map_err(|_| "PERSONAL_OPS_READ_FAILED")?;
+            Ok(PersonalOpsSnapshot {
+                schedules,
+                notes,
+                captures,
+                memories,
+            })
+        })
+    })
+    .await
+    .map_err(|_| "PERSONAL_OPS_READ_FAILED")?
+}
+
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+async fn app_schedule_create(
+    state: State<'_, AppState>,
+    id: String,
+    project_id: Option<String>,
+    task_id: Option<String>,
+    title: String,
+    start_at: i64,
+    end_at: Option<i64>,
+    reminder_at: Option<i64>,
+    notes: Option<String>,
+) -> Result<ScheduleItem, &'static str> {
+    let state = state.0.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        with_app(&state, |app| {
+            app.create_schedule_item(
+                &id,
+                project_id.as_deref(),
+                task_id.as_deref(),
+                &title,
+                start_at,
+                end_at,
+                reminder_at,
+                notes.as_deref().unwrap_or(""),
+                now()?,
+            )
+            .map_err(|_| "SCHEDULE_CREATE_FAILED")
+        })
+    })
+    .await
+    .map_err(|_| "SCHEDULE_CREATE_FAILED")?
+}
+
+#[tauri::command]
+async fn app_schedule_status(
+    state: State<'_, AppState>,
+    id: String,
+    status: String,
+) -> Result<ScheduleItem, &'static str> {
+    let state = state.0.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        with_app(&state, |app| {
+            app.update_schedule_status(&id, &status, now()?)
+                .map_err(|_| "SCHEDULE_UPDATE_FAILED")
+        })
+    })
+    .await
+    .map_err(|_| "SCHEDULE_UPDATE_FAILED")?
+}
+
+#[tauri::command]
+async fn app_note_upsert(
+    state: State<'_, AppState>,
+    id: String,
+    project_id: Option<String>,
+    conversation_id: Option<String>,
+    title: String,
+    body_markdown: String,
+    tags: Option<Vec<String>>,
+) -> Result<NoteItem, &'static str> {
+    let state = state.0.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        with_app(&state, |app| {
+            app.upsert_note(
+                &id,
+                project_id.as_deref(),
+                conversation_id.as_deref(),
+                &title,
+                &body_markdown,
+                &tags.unwrap_or_default(),
+                now()?,
+            )
+            .map_err(|_| "NOTE_SAVE_FAILED")
+        })
+    })
+    .await
+    .map_err(|_| "NOTE_SAVE_FAILED")?
+}
+
+#[tauri::command]
+async fn app_capture_create(
+    state: State<'_, AppState>,
+    id: String,
+    source_message_id: Option<String>,
+    content_ref: String,
+) -> Result<CaptureItem, &'static str> {
+    let state = state.0.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        with_app(&state, |app| {
+            app.create_capture(&id, source_message_id.as_deref(), &content_ref, now()?)
+                .map_err(|_| "CAPTURE_SAVE_FAILED")
+        })
+    })
+    .await
+    .map_err(|_| "CAPTURE_SAVE_FAILED")?
+}
+
+#[tauri::command]
+async fn app_memory_state(
+    state: State<'_, AppState>,
+    id: String,
+    new_state: String,
+) -> Result<MemoryItem, &'static str> {
+    let state = state.0.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        with_app(&state, |app| {
+            app.update_memory_state(&id, &new_state)
+                .map_err(|_| "MEMORY_UPDATE_FAILED")
+        })
+    })
+    .await
+    .map_err(|_| "MEMORY_UPDATE_FAILED")?
+}
+
 #[tauri::command]
 async fn app_executions(
     state: State<'_, AppState>,
@@ -611,6 +766,12 @@ fn configure<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R>
             app_conversation_select,
             app_view_state_save,
             app_preferences_save,
+            app_personal_snapshot,
+            app_schedule_create,
+            app_schedule_status,
+            app_note_upsert,
+            app_capture_create,
+            app_memory_state,
             direct_llm::app_provider_get,
             direct_llm::app_provider_save,
             direct_llm::app_provider_test,

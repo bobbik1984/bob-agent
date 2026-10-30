@@ -1,6 +1,9 @@
 <script setup>
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import HomeConnection from './HomeConnection.vue';
+import ScheduleView from './views/ScheduleView.vue';
+import WorkView from './views/WorkView.vue';
+import KnowledgeView from './views/KnowledgeView.vue';
 import { bindViewport } from './viewport.mjs';
 import { createLayoutState, getProviderLogo } from './layout-mode.mjs';
 import brandLogo from './assets/bob-logo.svg';
@@ -103,12 +106,21 @@ const connectionKey = computed(() =>
             : 'loading',
 );
 
+const activeDrawer = ref('chat'); // 'chat' | 'schedule' | 'work' | 'knowledge' | 'settings'
+const previousNonSettingsDrawer = ref('chat');
 const settingsOpen = ref(false);
 const settingsView = ref('home'); // 'home' | 'device' | 'provider'
 const settingsTab = ref('model'); // 'model' | 'connection' | 'workspace' | 'tasks' | 'appearance' | 'about'
 const navigationOpen = ref(false);
 const devicePanel = ref(null);
 const deviceCapabilities = ref(null);
+const personalOps = ref({
+  schedules: [],
+  notes: [],
+  captures: [],
+  memories: [],
+});
+const personalBusy = ref(false);
 
 // Legacy-aligned ModelHub state (13 providers, 199 visible models)
 function cloneDefaultRegistry() {
@@ -690,14 +702,203 @@ function projectConversations(projectId) {
   return (catalog.value?.conversations || []).filter(c => c.project_id === projectId);
 }
 
+async function loadPersonalOps() {
+  if (!available || !kernelBridge.personalSnapshot) return;
+  const snap = await kernelBridge.personalSnapshot(null).catch(() => null);
+  if (snap) {
+    personalOps.value = {
+      schedules: Array.isArray(snap.schedules) ? snap.schedules : [],
+      notes: Array.isArray(snap.notes) ? snap.notes : [],
+      captures: Array.isArray(snap.captures) ? snap.captures : [],
+      memories: Array.isArray(snap.memories) ? snap.memories : [],
+    };
+  }
+}
+
+async function handleCreateSchedule(payload) {
+  if (personalBusy.value) return;
+  personalBusy.value = true;
+  try {
+    if (available && kernelBridge.scheduleCreate) {
+      await kernelBridge
+        .scheduleCreate({
+          id: payload.id,
+          title: payload.title,
+          kind: payload.kind,
+          dueAtMs: payload.dueAtMs,
+          notes: payload.notes,
+        })
+        .catch(() => null);
+      await loadPersonalOps();
+    } else {
+      personalOps.value.schedules.unshift({
+        id: payload.id,
+        title: payload.title,
+        kind: payload.kind,
+        due_at_ms: payload.dueAtMs,
+        status: 'scheduled',
+        notes: payload.notes,
+      });
+    }
+  } finally {
+    personalBusy.value = false;
+  }
+}
+
+async function handleUpdateScheduleStatus(payload) {
+  if (personalBusy.value) return;
+  personalBusy.value = true;
+  try {
+    if (available && kernelBridge.scheduleStatus) {
+      await kernelBridge.scheduleStatus(payload.id, payload.status).catch(() => null);
+      await loadPersonalOps();
+    } else {
+      const target = personalOps.value.schedules.find(s => s.id === payload.id);
+      if (target) target.status = payload.status;
+    }
+  } finally {
+    personalBusy.value = false;
+  }
+}
+
+async function handleSaveNote(payload) {
+  if (personalBusy.value) return;
+  personalBusy.value = true;
+  try {
+    if (available && kernelBridge.noteUpsert) {
+      await kernelBridge
+        .noteUpsert({
+          id: payload.id,
+          title: payload.title,
+          body: payload.body,
+          tags: payload.tags,
+        })
+        .catch(() => null);
+      await loadPersonalOps();
+    } else {
+      const idx = personalOps.value.notes.findIndex(n => n.id === payload.id);
+      if (idx >= 0) personalOps.value.notes[idx] = { ...payload };
+      else personalOps.value.notes.unshift({ ...payload });
+    }
+  } finally {
+    personalBusy.value = false;
+  }
+}
+
+async function handleCreateCapture(payload) {
+  if (personalBusy.value) return;
+  personalBusy.value = true;
+  try {
+    if (available && kernelBridge.captureCreate) {
+      await kernelBridge
+        .captureCreate({
+          id: payload.id,
+          conversationId: sessionId.value,
+          messageId: null,
+          content: payload.content,
+        })
+        .catch(() => null);
+      await loadPersonalOps();
+    } else {
+      personalOps.value.captures.unshift({
+        id: payload.id,
+        content: payload.content,
+      });
+    }
+  } finally {
+    personalBusy.value = false;
+  }
+}
+
+async function handleUpdateMemory(payload) {
+  if (personalBusy.value) return;
+  personalBusy.value = true;
+  try {
+    if (available && kernelBridge.memoryState) {
+      await kernelBridge.memoryState(payload.id, payload.state).catch(() => null);
+      await loadPersonalOps();
+    } else {
+      const target = personalOps.value.memories.find(m => m.id === payload.id);
+      if (target) target.state = payload.state;
+    }
+  } finally {
+    personalBusy.value = false;
+  }
+}
+
+async function handleWorkCreateProject(title) {
+  if (!title) return;
+  if (available && kernelBridge.createProject) {
+    const pid = `proj-${crypto.randomUUID().slice(0, 8)}`;
+    const snap = await kernelBridge.createProject(pid, title).catch(() => null);
+    if (snap) applyCatalogPreferences(snap);
+  }
+}
+
+async function handleWorkCreateConversation(projectId) {
+  if (!available || !kernelBridge.createConversation) return;
+  await flushCurrentViewState();
+  const cid = `conv-${crypto.randomUUID().slice(0, 8)}`;
+  const snap = await kernelBridge
+    .createConversation(cid, projectId, t('newConversation'))
+    .catch(() => null);
+  if (snap) {
+    applyCatalogPreferences(snap);
+    locallyAccepted.clear();
+    sessionId.value = cid;
+    draft.value = '';
+    controller.loadDraft('', 0);
+    activeDrawer.value = 'chat';
+    settingsOpen.value = false;
+    navigationOpen.value = false;
+    await reload();
+  }
+}
+
+async function handleWorkOpenConversation(convId) {
+  activeDrawer.value = 'chat';
+  settingsOpen.value = false;
+  navigationOpen.value = false;
+  await selectConversation(convId);
+}
+
+async function handleWorkOpenSettingsTab(tab) {
+  previousNonSettingsDrawer.value = activeDrawer.value === 'settings' ? 'chat' : activeDrawer.value;
+  activeDrawer.value = 'settings';
+  navigationOpen.value = false;
+  settingsOpen.value = true;
+  await switchSettingsTab(tab);
+}
+
+async function switchPrimaryDrawer(drawer) {
+  navigationOpen.value = false;
+  if (drawer === 'settings') {
+    toggleSettingsHome();
+    return;
+  }
+  previousNonSettingsDrawer.value = drawer;
+  activeDrawer.value = drawer;
+  settingsOpen.value = false;
+  if (drawer === 'schedule' || drawer === 'knowledge') {
+    await loadPersonalOps();
+  }
+}
+
 function toggleSettingsHome() {
   if (settingsOpen.value && settingsView.value === 'home') {
     settingsOpen.value = false;
+    activeDrawer.value = previousNonSettingsDrawer.value || 'chat';
   } else {
+    if (activeDrawer.value !== 'settings') {
+      previousNonSettingsDrawer.value = activeDrawer.value;
+    }
+    activeDrawer.value = 'settings';
+    navigationOpen.value = false;
     settingsView.value = 'home';
     settingsTab.value = 'model';
     settingsOpen.value = true;
     void loadModelHub();
+    void loadPersonalOps();
   }
 }
 
@@ -708,12 +909,25 @@ async function switchSettingsTab(tab) {
   } else if (tab === 'model') {
     settingsView.value = 'home';
     await loadModelHub();
+  } else if (tab === 'workspace') {
+    settingsView.value = 'home';
+    await loadPersonalOps();
+  } else if (tab === 'tasks') {
+    settingsView.value = 'home';
+    if (available && sessionId.value && kernelBridge.routeGet) {
+      const r = await kernelBridge.routeGet(sessionId.value).catch(() => null);
+      if (r) executionRoute.value = r;
+    }
   } else {
     settingsView.value = 'home';
   }
 }
 
 async function openDevices() {
+  if (activeDrawer.value !== 'settings') {
+    previousNonSettingsDrawer.value = activeDrawer.value;
+  }
+  activeDrawer.value = 'settings';
   settingsView.value = 'device';
   settingsTab.value = 'connection';
   settingsOpen.value = true;
@@ -725,6 +939,9 @@ const settingsPanel = ref(null);
 let settingsTrigger = null;
 watch(settingsOpen, async open => {
   if (open) settingsTrigger = document.activeElement;
+  else if (activeDrawer.value === 'settings') {
+    activeDrawer.value = previousNonSettingsDrawer.value || 'chat';
+  }
   await nextTick();
   if (open) settingsPanel.value?.querySelector('button')?.focus();
   else settingsTrigger?.focus();
@@ -1054,6 +1271,7 @@ async function startup() {
     sessionId.value = state.session_id;
     await reload();
     await loadModelHub();
+    await loadPersonalOps();
     const activeItem = catalog.value?.conversations?.find(c => c.id === sessionId.value);
     if (activeItem?.view_state && !draft.value) {
       draft.value = activeItem.view_state.draft || '';
@@ -1358,9 +1576,9 @@ onUnmounted(() => {
       </nav>
 
       <div class="settings-scroll-container">
-        <!-- Legacy-aligned Model Center + Local Models + API Key Management (Secure Vault) FIRST -->
+        <!-- Tab 1: 模型 (Model Center + Local Models + API Key Management + Registry) -->
         <div
-          v-show="settingsView === 'home' || settingsView === 'provider'"
+          v-show="(settingsView === 'home' && settingsTab === 'model') || settingsView === 'provider'"
           class="model-hub-stack"
         >
           <!-- Card 1: 模型中心 (199 个可用模型) -->
@@ -1800,35 +2018,11 @@ onUnmounted(() => {
           </section>
         </div>
 
-        <!-- Quick overview cards kept in DOM for Settings home & Playwright navigation -->
-        <div v-show="settingsView === 'home'" class="settings-home-grid">
-          <div class="settings-card">
-            <div class="settings-card-info">
-              <span class="settings-card-title">{{ t('language') }}</span>
-            </div>
-            <label class="language">
-              <span class="visually-hidden">{{ t('language') }}</span>
-              <select v-model="locale">
-                <option value="zh-CN">{{ t('chinese') }}</option>
-                <option value="en-US">{{ t('english') }}</option>
-              </select>
-            </label>
-          </div>
-
-          <div class="settings-card">
-            <div class="settings-card-info">
-              <span class="settings-card-title">{{ t('themeLabel') }}</span>
-            </div>
-            <label class="theme-select">
-              <span class="visually-hidden">{{ t('themeLabel') }}</span>
-              <select v-model="theme">
-                <option value="system">{{ t('themeSystem') }}</option>
-                <option value="light">{{ t('themeLight') }}</option>
-                <option value="dark">{{ t('themeDark') }}</option>
-              </select>
-            </label>
-          </div>
-
+        <!-- Model Tab Quick Jump Cards (Protocol Override & Device Connection) -->
+        <div
+          v-show="settingsView === 'home' && settingsTab === 'model'"
+          class="settings-home-grid"
+        >
           <div class="settings-card">
             <div class="settings-card-info">
               <span class="settings-card-title">{{ t('directModelProvider') }}</span>
@@ -1848,13 +2042,216 @@ onUnmounted(() => {
               {{ t('openDeviceSubpage') }}
             </button>
           </div>
+        </div>
 
-          <div class="settings-card">
-            <div class="settings-card-info">
-              <span class="settings-card-title">{{ t('aboutVersion') }}</span>
-              <p class="settings-card-desc">{{ t('versionValue') }}</p>
+        <!-- Tab 3: 工作间 (SettingsWorkspace: Workspace Directory, Device Node, Memory & Kernel Stats) -->
+        <div
+          v-show="settingsView === 'home' && settingsTab === 'workspace'"
+          class="model-hub-stack settings-tab-panel"
+        >
+          <section class="hub-card">
+            <div class="hub-card-header">
+              <div class="hub-card-title-group">
+                <h3>{{ t('workspaceSettingsTitle') }}</h3>
+              </div>
             </div>
-          </div>
+            <p class="view-card-desc">{{ t('workspaceSettingsDesc') }}</p>
+            <div class="settings-kv-list">
+              <div class="settings-kv-row">
+                <span>{{ t('workspaceDirLabel') }}</span>
+                <code>{{ catalog?.projects?.[0]?.directory_ref || 'Local SQLite Kernel' }}</code>
+              </div>
+              <div class="settings-kv-row">
+                <span>{{ t('workspaceDeviceIdLabel') }}</span>
+                <code>{{ catalog?.device_groups?.[0]?.label || 'bob-local-node' }}</code>
+              </div>
+            </div>
+          </section>
+
+          <section class="hub-card">
+            <div class="hub-card-header">
+              <div class="hub-card-title-group">
+                <h3>{{ t('workspaceStatsTitle') }}</h3>
+              </div>
+            </div>
+            <div class="workspace-stats-grid">
+              <div class="workspace-stat-box">
+                <strong>{{ readiness?.saved_messages ?? messages.length }}</strong>
+                <span>{{ t('conversations') }}</span>
+              </div>
+              <div class="workspace-stat-box">
+                <strong>{{ projectList.length }}</strong>
+                <span>{{ t('projects') }}</span>
+              </div>
+              <div class="workspace-stat-box">
+                <strong>{{ personalOps.notes.length }}</strong>
+                <span>{{ t('knowledgeTabNotes') }}</span>
+              </div>
+              <div class="workspace-stat-box">
+                <strong>{{ personalOps.schedules.length }}</strong>
+                <span>{{ t('navSchedule') }}</span>
+              </div>
+            </div>
+          </section>
+
+          <section class="hub-card">
+            <div class="hub-card-header">
+              <div class="hub-card-title-group">
+                <h3>{{ t('workspaceMemoryTitle') }}</h3>
+                <span class="hub-count-pill">{{ personalOps.memories.length }}</span>
+              </div>
+            </div>
+            <p class="view-card-desc">{{ t('workspaceMemoryDesc') }}</p>
+            <p v-if="!personalOps.memories.length" class="view-card-desc">
+              {{ t('knowledgeEmptyMemoriesHint') }}
+            </p>
+            <div v-else class="captures-list">
+              <div
+                v-for="mem in personalOps.memories"
+                :key="mem.id"
+                class="memory-item-card"
+              >
+                <div class="memory-item-main">
+                  <strong>{{ mem.summary }}</strong>
+                  <span class="schedule-kind-badge">{{ mem.scope }} · {{ mem.state }}</span>
+                </div>
+                <div class="memory-item-actions">
+                  <button
+                    v-if="mem.state !== 'confirmed'"
+                    type="button"
+                    class="mini-ghost-btn"
+                    @click="handleUpdateMemory({ id: mem.id, state: 'confirmed' })"
+                  >
+                    {{ t('knowledgeMemoryConfirmBtn') }}
+                  </button>
+                  <button
+                    v-if="mem.state !== 'retracted'"
+                    type="button"
+                    class="mini-ghost-btn"
+                    @click="handleUpdateMemory({ id: mem.id, state: 'retracted' })"
+                  >
+                    {{ t('knowledgeMemoryRetractBtn') }}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <!-- Tab 4: 任务 (SettingsDailyRoutine: Execution Route & @daily_startup) -->
+        <div
+          v-show="settingsView === 'home' && settingsTab === 'tasks'"
+          class="model-hub-stack settings-tab-panel"
+        >
+          <section class="hub-card">
+            <div class="hub-card-header">
+              <div class="hub-card-title-group">
+                <h3>{{ t('tasksSettingsTitle') }}</h3>
+              </div>
+            </div>
+            <p class="view-card-desc">{{ t('tasksSettingsDesc') }}</p>
+            <label class="provider-field">
+              <span>{{ t('executionRouteLabel') }}</span>
+              <select v-model="executionRoute" @change="changeExecutionRoute">
+                <option value="auto">{{ t('routeAuto') }}</option>
+                <option value="direct_byok">{{ t('routeDirectByok') }}</option>
+                <option value="local_cli">{{ t('routeLocalCli') }}</option>
+                <option value="remote_home">{{ t('routeRemoteHome') }}</option>
+              </select>
+            </label>
+          </section>
+
+          <section class="hub-card">
+            <div class="hub-card-header">
+              <div class="hub-card-title-group">
+                <h3>{{ t('dailyRoutineCardTitle') }}</h3>
+                <span class="hub-count-pill">@daily_startup</span>
+              </div>
+            </div>
+            <p class="view-card-desc">{{ t('dailyRoutineCardDesc') }}</p>
+            <div class="routine-tag-box">
+              <code>@daily_startup</code>
+              <span>{{ t('dailyRoutineTagHint') }}</span>
+            </div>
+          </section>
+        </div>
+
+        <!-- Tab 5: 外观 (SettingsAppearance: Theme & Language) -->
+        <div
+          v-show="settingsView === 'home' && settingsTab === 'appearance'"
+          class="model-hub-stack settings-tab-panel"
+        >
+          <section class="hub-card">
+            <div class="hub-card-header">
+              <div class="hub-card-title-group">
+                <h3>{{ t('appearanceSettingsTitle') }}</h3>
+              </div>
+            </div>
+            <p class="view-card-desc">{{ t('appearanceSettingsDesc') }}</p>
+
+            <div class="appearance-options-grid">
+              <div class="settings-card">
+                <div class="settings-card-info">
+                  <span class="settings-card-title">{{ t('themeLabel') }}</span>
+                </div>
+                <label class="theme-select">
+                  <span class="visually-hidden">{{ t('themeLabel') }}</span>
+                  <select v-model="theme">
+                    <option value="system">{{ t('themeSystem') }}</option>
+                    <option value="light">{{ t('themeLight') }}</option>
+                    <option value="dark">{{ t('themeDark') }}</option>
+                  </select>
+                </label>
+              </div>
+
+              <div class="settings-card">
+                <div class="settings-card-info">
+                  <span class="settings-card-title">{{ t('language') }}</span>
+                </div>
+                <label class="language">
+                  <span class="visually-hidden">{{ t('language') }}</span>
+                  <select v-model="locale">
+                    <option value="zh-CN">{{ t('chinese') }}</option>
+                    <option value="en-US">{{ t('english') }}</option>
+                  </select>
+                </label>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <!-- Tab 6: 关于 (SettingsAbout: Version & Kernel Diagnostics) -->
+        <div
+          v-show="settingsView === 'home' && settingsTab === 'about'"
+          class="model-hub-stack settings-tab-panel"
+        >
+          <section class="hub-card">
+            <div class="hub-card-header">
+              <div class="hub-card-title-group">
+                <h3>{{ t('aboutVersion') }}</h3>
+              </div>
+            </div>
+            <p class="view-card-desc">{{ t('versionValue') }}</p>
+            <p class="view-card-desc">{{ t('aboutKernelArchDesc') }}</p>
+          </section>
+
+          <section class="hub-card">
+            <div class="hub-card-header">
+              <div class="hub-card-title-group">
+                <h3>{{ t('aboutDiagnosticsTitle') }}</h3>
+              </div>
+            </div>
+            <div class="settings-kv-list">
+              <div class="settings-kv-row">
+                <span>{{ t('executionRouteLabel') }}</span>
+                <code>{{ readiness?.mode || 'local_first' }}</code>
+              </div>
+              <div class="settings-kv-row">
+                <span>{{ t('modelCenterTitle') }}</span>
+                <code>{{ totalAvailableModelsCount }} models</code>
+              </div>
+            </div>
+          </section>
         </div>
 
         <!-- Direct Provider Protocol Override & Connection Test Form (preserved for subpage & tests) -->
@@ -2129,7 +2526,42 @@ onUnmounted(() => {
       </nav>
     </div>
 
-    <main class="main">
+    <!-- Primary View 2: 日程 (Schedule / InboxView) -->
+    <ScheduleView
+      v-if="activeDrawer === 'schedule'"
+      :schedules="personalOps.schedules"
+      :busy="personalBusy"
+      @create-schedule="handleCreateSchedule"
+      @update-status="handleUpdateScheduleStatus"
+    />
+
+    <!-- Primary View 3: 工作 (Work / RemoteAgent & Project Matrix) -->
+    <WorkView
+      v-if="activeDrawer === 'work'"
+      :readiness="readiness"
+      :catalog="catalog"
+      :active-session-id="sessionId"
+      :active-main-role="activeMainRole"
+      @open-conversation="handleWorkOpenConversation"
+      @create-project="handleWorkCreateProject"
+      @create-conversation="handleWorkCreateConversation"
+      @open-settings-tab="handleWorkOpenSettingsTab"
+    />
+
+    <!-- Primary View 4: 知识 (Knowledge / Notes, Captures & Long-term Memory) -->
+    <KnowledgeView
+      v-if="activeDrawer === 'knowledge'"
+      :notes="personalOps.notes"
+      :captures="personalOps.captures"
+      :memories="personalOps.memories"
+      :busy="personalBusy"
+      @save-note="handleSaveNote"
+      @create-capture="handleCreateCapture"
+      @update-memory="handleUpdateMemory"
+    />
+
+    <!-- Primary View 1: 对话 (Chat) -->
+    <main v-show="activeDrawer === 'chat' || activeDrawer === 'settings'" class="main">
       <div
         v-if="!homeConfigured || readiness?.pending_messages > 0"
         class="connection-note"
@@ -2344,16 +2776,13 @@ onUnmounted(() => {
       </form>
     </main>
 
-    <!-- Legacy-aligned Bottom 5-Tab Navigation Bar: 对话 | 日程 | 工作 | 知识 | 偏好设置 -->
+    <!-- Legacy-aligned Bottom 5-Tab Navigation Bar: 对话 | 日程 | 工作 | 知识 | 设置 -->
     <nav class="bottom-nav" role="navigation">
       <button
         type="button"
         class="bottom-nav-item"
-        :class="{ active: !settingsOpen && !navigationOpen }"
-        @click="
-          settingsOpen = false;
-          navigationOpen = false;
-        "
+        :class="{ active: activeDrawer === 'chat' && !settingsOpen }"
+        @click="switchPrimaryDrawer('chat')"
       >
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
@@ -2363,10 +2792,8 @@ onUnmounted(() => {
       <button
         type="button"
         class="bottom-nav-item"
-        @click="
-          settingsOpen = false;
-          navigationOpen = true;
-        "
+        :class="{ active: activeDrawer === 'schedule' && !settingsOpen }"
+        @click="switchPrimaryDrawer('schedule')"
       >
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <rect x="3" y="4" width="18" height="18" rx="2" />
@@ -2377,11 +2804,8 @@ onUnmounted(() => {
       <button
         type="button"
         class="bottom-nav-item"
-        :class="{ active: navigationOpen }"
-        @click="
-          settingsOpen = false;
-          navigationOpen = !navigationOpen;
-        "
+        :class="{ active: activeDrawer === 'work' && !settingsOpen }"
+        @click="switchPrimaryDrawer('work')"
       >
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <rect x="2" y="7" width="20" height="14" rx="2" />
@@ -2392,10 +2816,8 @@ onUnmounted(() => {
       <button
         type="button"
         class="bottom-nav-item"
-        @click="
-          settingsOpen = false;
-          navigationOpen = true;
-        "
+        :class="{ active: activeDrawer === 'knowledge' && !settingsOpen }"
+        @click="switchPrimaryDrawer('knowledge')"
       >
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <circle cx="18" cy="5" r="3" />
@@ -2408,8 +2830,9 @@ onUnmounted(() => {
       <button
         type="button"
         class="bottom-nav-item"
-        :class="{ active: settingsOpen }"
-        @click="toggleSettingsHome"
+        :aria-label="t('navSettingsAria')"
+        :class="{ active: settingsOpen || activeDrawer === 'settings' }"
+        @click="switchPrimaryDrawer('settings')"
       >
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <circle cx="12" cy="12" r="3" />
