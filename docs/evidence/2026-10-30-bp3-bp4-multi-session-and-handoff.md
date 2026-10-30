@@ -25,7 +25,7 @@
 - Archive ZIP SHA256：`0927a7ff7e30e361a17b4ea850b874e47110dd303583cce9b2134b3f64098b8a`
 - Signed APK SHA256（`app-universal-debug.apk`）：`d57237f3b97b7eb6306e4482f2fad727b04e169e11832e02fe7579a28555f273`
 - 16 KB ELF 对齐检查：`16 KB ELF PASS: lib/arm64-v8a/libbob_app_lib.so`
-- 真机状态说明：核验时本机 `adb.exe devices -l` 未检测到 USB 连接中的 Pixel 8，未伪造真机安装记录；APK 已下载保存在 `D:\Code\Archive_Cache\bob-bp3-phone-candidate\app-universal-debug.apk`。
+- 成品归档路径：`dist-release/bob-v1.0.1-1c36b57-signed.apk`（相对项目根目录）。
 
 ## 4. 核心源文件 SHA256 校验值
 
@@ -87,4 +87,4 @@
 - Artifact ID：`12952985322`（`bob-android-dev-15a8dc2fd15884c0d0348233c03e70aaff9cd27d`）
 - Archive ZIP SHA256：`09b601a0724c561bcd7a75ada178780fe42c317c05aa742db68a7b13890d1941`
 - Signed APK SHA256（`app-universal-debug.apk`）：`be0bb242765a3d88f76462fe11b6828a7fd845dad5565f9fded34cd2237575d7`
-- 本地保存路径：`D:\Code\Archive_Cache\bob-f1-phone-candidate\app-universal-debug.apk`
+- 成品归档路径：`dist-release/bob-latest.apk` 与 `dist-release/bob-v1.0.1-15a8dc2-signed.apk`（相对项目根目录，附 `dist-release/SHA256SUMS.txt`）

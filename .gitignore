@@ -11,9 +11,10 @@
 *.sqlite
 *.sqlite3
 
-# build outputs & caches (caches should live outside the repo; see AGENTS.md)
+# build outputs & caches (intermediate caches live outside the repo; final installers live in dist-release/; see AGENTS.md)
 target/
 dist/
+dist-release/
 node_modules/
 .pnp.*
 .vite/

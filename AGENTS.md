@@ -42,7 +42,7 @@
 - 文件 I/O 一律 UTF-8；禁止用 PowerShell `Set-Content` / `-replace` 改写含中文的文件，批量改写用 Python（`encoding='utf-8'`）。
 - 文档与脚本中不写主机绝对路径；基础设施地址只引用 cluster-ops 的 `node_inventory.md` / `service_map.md`；模型与 API 只引用 model-registry / api-registry。代码中**禁止硬编码个人域名、IP、节点名**（这是开源前提，见 BOB-D-007 待办）。
 - 前端：i18n 键（`zh-CN` / `en-US` 同步），CSS 变量，不硬编码颜色；遵循工作区前端规范。
-- 缓存隔离：引入 Node/Rust 工具链前，先按 `sync_cache_offloader` 做 dry-run 审计（pnpm 外部 store、Cargo `build.build-dir`），不在仓库内生成大型缓存。
+- 缓存隔离与成品归档：引入 Node/Rust 工具链前，先按 `sync_cache_offloader` 做 dry-run 审计（pnpm 外部 store、Cargo `build.build-dir`），不在仓库内生成 `target/`、`node_modules/` 等大型中间编译缓存；但构建完成的**成品安装包**（如 `.apk`、`.exe`、`.msi` 与 `SHA256SUMS.txt`）统一存放在项目根目录下的 `dist-release/` 中（由 `.gitignore` 忽略，不提交进 Git 历史）。
 - 凭据：用户态 API Key 不进 `.env`、不进日志与 Evidence；数据库、WAL/SHM、`.env` 不进版本控制。
 
 ## 5 验证、Evidence 与 Handoff
