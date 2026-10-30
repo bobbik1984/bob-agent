@@ -29,6 +29,12 @@
 
 ## 4. 核心源文件 SHA256 校验值
 
+### Pixel增量复核（2026-10-30）
+
+本地HEAD为7d2180a，APK实测SHA256与上述d57237f3一致；ADB检测到Pixel，install -r成功，未卸载/清数据；冷启动424ms。真实Android WebView读取仍有原连接测试用户消息及Bob回复。本次经可见界面新建Pixel verification A/B两条独立测试对话，仅输入未发送草稿；A/B切换后各自草稿正确，A经WebView刷新后仍恢复。首轮脚本在异步切换尚未完成时立即断言失败，稍后读回及等待加载完成后的复核均正确；不能据此认定草稿丢失，也尚未证明快速切换竞态均无缺陷。
+
+设备状态图标实际直接进入Device & Connection子页，可见返回Settings入口和原配对保留。本次没有发送模型请求，没有验证新会话Home真实续聊、Online公网接口或跨节点交接；未做完整Android进程重启恢复，不能写作全部真机通过。测试A/B及草稿保留便于复核；一次性USB调试转发已移除。原始结果位于仓库外bob-multi-phone-review，含异步检查失败现场与后续设置页读回。源码hash清单如下。
+
 - `crates/bob-kernel/migrations/0005.sql`: `0512bf02ac92524ccc6be2cf03e579d18f787705d9383f6d70ad54ba101f56ce`
 - `crates/bob-kernel/src/catalog.rs`: `a24ca54d4a4821bbe48024ddc294318079a7fa7b55ed02b1afd2402d02b56893`
 - `crates/bob-kernel/src/online_provider.rs`: `79e4b0fa7866bd44931925c26e2796072433226065c5b8149a0e2267ba482fec`
