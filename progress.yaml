@@ -10,7 +10,7 @@ project:
   - Vue 3
   - Desktop
   - Android
-  current_task: F1 直接模型调用(BYOK)、已配对手机离线直连幂等汇合、F3 个人助理内核(personal_ops)与旧能力逐项对照表已完成代码及全量回归(kernel 81/transport 24/native 31/node 33/browser 5视口)，正执行 GitHub Android 固定签名 APK 构建与校验
+  current_task: F1 直接模型调用(BYOK)、已配对手机离线直连幂等汇合、F3 个人助理内核(personal_ops)与旧能力逐项对照表已完成全量回归与 GitHub Android 固定签名 APK 构建校验(run 40998475431 / APK SHA256 be0bb242...)，待插线安装实测与真实 Online 联调
   development_plan: docs/CURRENT_STAGE.md
 phases:
 - name: BP0 真相与保护

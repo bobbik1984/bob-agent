@@ -80,3 +80,11 @@
 - `apps/bob-app/src-tauri/android/DeviceVaultPlugin.kt`: `3fac521f0c480e251b1b5307f60d36e0f1fd88e7e3b33cd6ce99945e9d09517c`
 - `apps/bob-app/src-tauri/src/lib.rs`: `c57c7f0bb50c816351ab5d769c792f336adb2a072e3fe85c6f3ae6c7b3da8840`
 - `apps/bob-app/src/App.vue`: `2e57b0542ac0414f89ce786e2ff944ea07a43e88e811544ff387f1165e3ccb29`
+
+### 5.4 GitHub Actions Android 固定签名 APK 溯源（F1 + F3 增量候选）
+- Workflow Run：[`40998475431`](https://github.com/bobbik1984/bob-agent/actions/runs/40998475431)（`completed / success`）
+- 源码 Commit：`15a8dc2fd15884c0d0348233c03e70aaff9cd27d`
+- Artifact ID：`12952985322`（`bob-android-dev-15a8dc2fd15884c0d0348233c03e70aaff9cd27d`）
+- Archive ZIP SHA256：`09b601a0724c561bcd7a75ada178780fe42c317c05aa742db68a7b13890d1941`
+- Signed APK SHA256（`app-universal-debug.apk`）：`be0bb242765a3d88f76462fe11b6828a7fd845dad5565f9fded34cd2237575d7`
+- 本地保存路径：`D:\Code\Archive_Cache\bob-f1-phone-candidate\app-universal-debug.apk`
