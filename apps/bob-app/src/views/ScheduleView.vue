@@ -48,16 +48,16 @@ function switchSubtab(tab) {
 function submitNewSchedule() {
   const title = draft.title.trim();
   if (!title) return;
-  let dueAtMs = null;
+  let startAt = Date.now();
   if (draft.dueDate) {
     const parsed = Date.parse(draft.dueDate);
-    if (!Number.isNaN(parsed)) dueAtMs = parsed;
+    if (!Number.isNaN(parsed)) startAt = parsed;
   }
   emit('create-schedule', {
     id: `sched-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
     title,
     kind: draft.kind,
-    dueAtMs,
+    startAt,
     notes: draft.notes.trim(),
   });
   draft.title = '';
@@ -78,8 +78,12 @@ function formatDue(ms) {
   }
 }
 
-function toggleDone(item) {
-  const nextStatus = item.status === 'done' ? 'scheduled' : 'done';
+function isCompleted(item) {
+  return item?.status === 'completed';
+}
+
+function toggleCompleted(item) {
+  const nextStatus = isCompleted(item) ? 'scheduled' : 'completed';
   emit('update-status', { id: item.id, status: nextStatus });
 }
 
@@ -167,17 +171,17 @@ function cancelItem(item) {
             v-for="item in filteredItems"
             :key="item.id"
             class="schedule-item-card hub-card"
-            :class="{ done: item.status === 'done', cancelled: item.status === 'cancelled' }"
+            :class="{ done: isCompleted(item), cancelled: item.status === 'cancelled' }"
           >
             <div class="schedule-item-main">
               <button
                 type="button"
                 class="schedule-check-btn"
-                :class="{ checked: item.status === 'done' }"
-                :aria-label="item.status === 'done' ? t('scheduleReopenBtn') : t('scheduleMarkDoneBtn')"
-                @click="toggleDone(item)"
+                :class="{ checked: isCompleted(item) }"
+                :aria-label="isCompleted(item) ? t('scheduleReopenBtn') : t('scheduleMarkDoneBtn')"
+                @click="toggleCompleted(item)"
               >
-                <span v-if="item.status === 'done'">✓</span>
+                <span v-if="isCompleted(item)">✓</span>
               </button>
               <div class="schedule-item-text">
                 <div class="schedule-item-title-row">
@@ -188,8 +192,8 @@ function cancelItem(item) {
                   <span class="schedule-status-badge" :class="item.status">
                     {{
                       t(
-                        item.status === 'done'
-                          ? 'scheduleStatusDone'
+                        isCompleted(item)
+                          ? 'scheduleStatusCompleted'
                           : item.status === 'cancelled'
                             ? 'scheduleStatusCancelled'
                             : 'scheduleStatusScheduled',
@@ -198,14 +202,14 @@ function cancelItem(item) {
                   </span>
                 </div>
                 <p v-if="item.notes" class="schedule-item-notes">{{ item.notes }}</p>
-                <span v-if="item.due_at_ms" class="schedule-item-due">
-                  🕒 {{ formatDue(item.due_at_ms) }}
+                <span v-if="item.start_at || item.due_at_ms" class="schedule-item-due">
+                  🕒 {{ formatDue(item.start_at || item.due_at_ms) }}
                 </span>
               </div>
             </div>
             <div class="schedule-item-actions">
-              <button type="button" class="mini-ghost-btn" @click="toggleDone(item)">
-                {{ item.status === 'done' ? t('scheduleReopenBtn') : t('scheduleMarkDoneBtn') }}
+              <button type="button" class="mini-ghost-btn" @click="toggleCompleted(item)">
+                {{ isCompleted(item) ? t('scheduleReopenBtn') : t('scheduleMarkDoneBtn') }}
               </button>
               <button
                 v-if="item.status !== 'cancelled'"

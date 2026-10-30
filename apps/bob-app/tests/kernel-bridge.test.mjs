@@ -1,8 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { createKernelBridge } from '../src/kernel-bridge.mjs';
 import { createSendController } from '../src/send-controller.mjs';
 import { createLayoutState, getProviderLogo } from '../src/layout-mode.mjs';
+import { createOnlineWorkClient } from '../src/online-client.mjs';
 
 test('IPC maps stable identities and payload without inventing remote acceptance',async()=>{
  const calls=[];const bridge=createKernelBridge(async(command,args)=>{calls.push({command,args});return {request_id:args?.requestId,message_id:args?.messageId};},()=>true);
@@ -91,20 +95,83 @@ test('responsive aspect-ratio layout resolves mobile portrait vs desktop landsca
  assert.equal(getProviderLogo('gemini'),'/logos/gemini.svg');
 });
 
-test('personal ops IPC maps schedule, note, capture and memory commands cleanly',async()=>{
+test('personal ops IPC maps schedule, note, capture, memory and decision commands cleanly',async()=>{
  const calls=[];const bridge=createKernelBridge(async(command,args)=>{calls.push({command,args});return {ok:true};},()=>true);
  await bridge.personalSnapshot();
- await bridge.scheduleCreate({id:'s1',title:'Review',dueAtMs:1000,notes:'n'});
- await bridge.scheduleStatus('s1','done');
+ await bridge.scheduleCreate({id:'s1',kind:'todo',title:'Review',startAt:1793408400000,notes:'n'});
+ await bridge.scheduleStatus('s1','completed');
  await bridge.noteUpsert({id:'n1',title:'Note',body:'Body',tags:['t1']});
  await bridge.captureCreate({id:'c1',messageId:'m1',content:'Snippet'});
- await bridge.memoryState('mem-1','confirmed');
+ await bridge.memoryState('mem-1','active');
+ await bridge.decisionRecord({id:'d1',body:'Use canonical SQLite snapshot'});
+ await bridge.decisionStatus('d1','accepted');
  assert.deepEqual(calls,[
   {command:'app_personal_snapshot',args:undefined},
-  {command:'app_schedule_create',args:{id:'s1',projectId:null,taskId:null,title:'Review',startAt:1000,endAt:null,reminderAt:null,notes:'n'}},
-  {command:'app_schedule_status',args:{id:'s1',status:'done'}},
+  {command:'app_schedule_create',args:{id:'s1',projectId:null,taskId:null,title:'Review',kind:'todo',startAt:1793408400000,endAt:null,reminderAt:null,notes:'n'}},
+  {command:'app_schedule_status',args:{id:'s1',status:'completed'}},
   {command:'app_note_upsert',args:{id:'n1',projectId:null,conversationId:null,title:'Note',bodyMarkdown:'Body',tags:['t1']}},
   {command:'app_capture_create',args:{id:'c1',sourceMessageId:'m1',contentRef:'Snippet'}},
-  {command:'app_memory_state',args:{id:'mem-1',newState:'confirmed'}}
+  {command:'app_memory_state',args:{id:'mem-1',newState:'active'}},
+  {command:'app_decision_record',args:{id:'d1',projectId:null,taskId:null,sourceMessageId:null,body:'Use canonical SQLite snapshot',rationaleJson:'{}',status:'proposed',supersedesId:null}},
+  {command:'app_decision_status',args:{id:'d1',status:'accepted'}}
  ]);
+});
+
+test('RV-06 canonical Rust-serialized personal_snapshot.json fixture matches kernel schema',()=>{
+ const __dirname=path.dirname(fileURLToPath(import.meta.url));
+ const fixturePath=path.join(__dirname,'fixtures','personal_snapshot.json');
+ const snap=JSON.parse(fs.readFileSync(fixturePath,'utf-8'));
+ assert.ok(Array.isArray(snap.schedules)&&snap.schedules.length>=2);
+ assert.ok(snap.schedules.some(s=>s.kind==='event'&&s.status==='completed'&&s.start_at>=1e12));
+ assert.ok(snap.schedules.some(s=>s.kind==='todo'&&s.status==='scheduled'&&s.start_at>=1e12));
+ assert.ok(Array.isArray(snap.memories)&&snap.memories.length>=1);
+ assert.equal(typeof snap.memories[0].body,'string');
+ assert.ok(['candidate','active','superseded','forgotten'].includes(snap.memories[0].state));
+ assert.ok(Array.isArray(snap.decisions)&&snap.decisions.length>=1);
+ assert.equal(typeof snap.decisions[0].body,'string');
+ assert.ok(['proposed','accepted','superseded','rejected'].includes(snap.decisions[0].status));
+});
+
+test('OL-02..OL-04 Online Work Service client executes PKCE S256 pairing and read-only /api/client/v1 queries',async()=>{
+ const requests=[];
+ const fetchImpl=async(url,opts={})=>{
+  const body=opts.body?JSON.parse(opts.body):null;
+  requests.push({url,method:opts.method||'GET',headers:opts.headers||{},body});
+  if(url.endsWith('/api/client/v1/pairings')){
+   assert.equal(body.challenge_method,'S256');
+   assert.ok(body.challenge.length>=40);
+   return {ok:true,status:200,json:async()=>({pairing_id:'pr-1',user_code:'ABCD-1234',verification_uri:'http://127.0.0.1:8787/pair'})};
+  }
+  if(url.endsWith('/api/client/v1/pairings/pr-1/exchange')){
+   assert.ok(body.verifier.length>=43);
+   return {ok:true,status:200,json:async()=>({access_token:'tok-online-1',device_id:'dev-online-1',scopes:['projects:read','tasks:read']})};
+  }
+  if(url.endsWith('/api/client/v1/projects')){
+   return {ok:true,status:200,json:async()=>({items:[{id:'p-cloud-1',title:'Cloud Agent Deployment'}]})};
+  }
+  if(url.endsWith('/api/client/v1/projects/p-cloud-1/tasks')){
+   return {ok:true,status:200,json:async()=>({items:[{id:'t-cloud-1',title:'Verify /api/client/v1',status:'running'}]})};
+  }
+  if(url.includes('/api/client/v1/projects/p-cloud-1/messages')){
+   return {ok:true,status:200,json:async()=>({items:[{id:'m-cloud-1',role:'assistant',content:'Cloud task running'}]})};
+  }
+  if(url.endsWith('/api/client/v1/credentials/self/revoke')){
+   return {ok:true,status:200,json:async()=>({revoked:true})};
+  }
+  return {ok:false,status:404,json:async()=>({error:'not_found'})};
+ };
+ const origin='http://127.0.0.1:8787';
+ const client=createOnlineWorkClient({fetchImpl});
+ const start=await client.beginPairing({origin,clientInstanceId:'ci-1',clientName:'Pixel 8'});
+ assert.equal(start.user_code,'ABCD-1234');
+ const exchanged=await client.exchangePairing({origin,pairingId:'pr-1',clientInstanceId:'ci-1',verifier:start.verifier});
+ assert.equal(exchanged.access_token,'tok-online-1');
+ const projects=await client.fetchProjects({origin,token:exchanged.access_token});
+ assert.equal(projects.items[0].id,'p-cloud-1');
+ const tasks=await client.fetchProjectTasks({origin,token:exchanged.access_token,projectId:'p-cloud-1'});
+ assert.equal(tasks.items[0].status,'running');
+ const msgs=await client.fetchProjectMessages({origin,token:exchanged.access_token,projectId:'p-cloud-1'});
+ assert.equal(msgs.items[0].content,'Cloud task running');
+ const rev=await client.revokeSelf({origin,token:exchanged.access_token});
+ assert.equal(rev.revoked,true);
 });

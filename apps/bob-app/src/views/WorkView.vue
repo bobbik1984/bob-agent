@@ -19,6 +19,10 @@ const props = defineProps({
     type: Object,
     default: () => ({}),
   },
+  onlineState: {
+    type: Object,
+    default: () => ({}),
+  },
 });
 
 const emit = defineEmits([
@@ -26,6 +30,12 @@ const emit = defineEmits([
   'create-project',
   'create-conversation',
   'open-settings-tab',
+  'online-begin-pairing',
+  'online-exchange-pairing',
+  'online-refresh',
+  'online-revoke',
+  'online-select-project',
+  'online-update-origin',
 ]);
 
 const { t } = useI18n();
@@ -41,6 +51,10 @@ const directProviderReady = computed(
     props.readiness?.execution_available === true,
 );
 const homePaired = computed(() => props.readiness?.mode === 'home_configured');
+const onlineConnected = computed(() => Boolean(props.onlineState?.connected));
+const onlineProjects = computed(() => props.onlineState?.projects || []);
+const onlineTasks = computed(() => props.onlineState?.tasks || []);
+const onlineMessages = computed(() => props.onlineState?.messages || []);
 
 function projectConversations(projectId) {
   return conversations.value.filter(c => c.project_id === projectId);
@@ -127,6 +141,128 @@ function submitProject() {
               {{ t('workPairNodeBtn') }}
             </button>
           </div>
+
+          <div class="work-node-card" :class="{ online: onlineConnected }">
+            <div class="work-node-head">
+              <strong>☁ {{ t('workOnlineNodeTitle') }}</strong>
+              <span class="device-status-pill" :class="{ online: onlineConnected }">
+                {{ onlineConnected ? t('onlineReadOnlyBadge') : t('keyInputUnconfigured') }}
+              </span>
+            </div>
+            <p class="work-node-meta">
+              {{ onlineState?.origin || 'https://agent.bobbik.org' }} · bob-core-client/1.0
+            </p>
+            <div class="work-node-actions">
+              <button
+                v-if="!onlineConnected"
+                type="button"
+                class="mini-ghost-btn"
+                :disabled="onlineState?.busy"
+                @click="emit('online-begin-pairing')"
+              >
+                {{ t('onlineConnectBtn') }}
+              </button>
+              <button
+                v-else
+                type="button"
+                class="mini-ghost-btn"
+                :disabled="onlineState?.busy"
+                @click="emit('online-refresh')"
+              >
+                ↻ {{ t('onlineRefreshBtn') }}
+              </button>
+              <button
+                v-if="onlineConnected"
+                type="button"
+                class="mini-ghost-btn"
+                :disabled="onlineState?.busy"
+                @click="emit('online-revoke')"
+              >
+                {{ t('onlineDisconnectBtn') }}
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Cloud Online Work Service (agent.bobbik.org / bob-core-client/1.0) -->
+      <section class="hub-card">
+        <div class="hub-card-header">
+          <div class="hub-card-title-group">
+            <h3>☁ {{ t('onlineSectionTitle') }}</h3>
+            <span class="hub-count-pill">bob-core-client/1.0</span>
+          </div>
+        </div>
+        <p class="view-card-desc">{{ t('onlineSectionDesc') }}</p>
+
+        <div class="quick-project-form">
+          <input
+            :value="onlineState?.origin || 'https://agent.bobbik.org'"
+            type="url"
+            :placeholder="t('onlineOriginPlaceholder')"
+            @input="emit('online-update-origin', $event.target.value)"
+          />
+          <button
+            v-if="!onlineConnected"
+            type="button"
+            class="primary-action-btn"
+            :disabled="onlineState?.busy"
+            @click="emit('online-begin-pairing')"
+          >
+            {{ t('onlineConnectBtn') }}
+          </button>
+          <button
+            v-else
+            type="button"
+            class="primary-action-btn"
+            :disabled="onlineState?.busy"
+            @click="emit('online-refresh')"
+          >
+            {{ t('onlineRefreshBtn') }}
+          </button>
+        </div>
+
+        <div v-if="onlineState?.pairing && !onlineConnected" class="routine-tag-box">
+          <code>{{ onlineState.pairing.user_code }}</code>
+          <span>{{ onlineState.pairing.verification_uri }}</span>
+          <button
+            type="button"
+            class="mini-ghost-btn"
+            :disabled="onlineState?.busy"
+            @click="emit('online-exchange-pairing')"
+          >
+            {{ t('onlineCompletePairingBtn') }}
+          </button>
+        </div>
+
+        <p v-if="onlineState?.error" class="view-card-desc" role="alert">
+          {{ onlineState.error }}
+        </p>
+
+        <div v-if="onlineConnected" class="work-projects-grid">
+          <article v-for="op in onlineProjects" :key="op.id" class="work-project-item">
+            <div class="work-project-head">
+              <strong>☁ {{ op.title || op.name || op.id }}</strong>
+              <button
+                type="button"
+                class="mini-ghost-btn"
+                @click="emit('online-select-project', op.id)"
+              >
+                {{ t('onlineInspectProjectBtn') }}
+              </button>
+            </div>
+            <div v-if="onlineState?.selectedProjectId === op.id" class="work-session-list">
+              <div v-for="task in onlineTasks" :key="task.id" class="work-session-row">
+                <span class="work-session-title">{{ task.title || task.id }}</span>
+                <span class="schedule-kind-badge">{{ task.status || 'observed' }}</span>
+              </div>
+              <div v-for="msg in onlineMessages" :key="msg.sequence" class="work-session-row">
+                <span class="work-session-title">
+                  #{{ msg.sequence }} · {{ msg.text || msg.content || msg.role }}
+                </span>
+              </div>
+            </div>
+          </article>
         </div>
       </section>
 

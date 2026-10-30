@@ -6,6 +6,7 @@ import WorkView from './views/WorkView.vue';
 import KnowledgeView from './views/KnowledgeView.vue';
 import { bindViewport } from './viewport.mjs';
 import { createLayoutState, getProviderLogo } from './layout-mode.mjs';
+import { createOnlineWorkClient } from './online-client.mjs';
 import brandLogo from './assets/bob-logo.svg';
 import defaultRegistryData from './assets/model_providers.json';
 import mobileModelsData from './assets/mobile_models.json';
@@ -119,8 +120,27 @@ const personalOps = ref({
   notes: [],
   captures: [],
   memories: [],
+  decisions: [],
+  pending_sync_count: 0,
 });
 const personalBusy = ref(false);
+const personalFault = ref(null);
+
+const onlineClient = createOnlineWorkClient();
+const onlineState = reactive({
+  origin: 'https://agent.bobbik.org',
+  clientInstanceId: `bob-client-${Math.random().toString(36).slice(2, 10)}-instance`,
+  pairing: null,
+  token: null,
+  connected: false,
+  capabilities: null,
+  projects: [],
+  selectedProjectId: null,
+  tasks: [],
+  messages: [],
+  busy: false,
+  error: null,
+});
 
 // Legacy-aligned ModelHub state (13 providers, 199 visible models)
 function cloneDefaultRegistry() {
@@ -711,6 +731,8 @@ async function loadPersonalOps() {
       notes: Array.isArray(snap.notes) ? snap.notes : [],
       captures: Array.isArray(snap.captures) ? snap.captures : [],
       memories: Array.isArray(snap.memories) ? snap.memories : [],
+      decisions: Array.isArray(snap.decisions) ? snap.decisions : [],
+      pending_sync_count: Number(snap.pending_sync_count) || 0,
     };
   }
 }
@@ -718,28 +740,29 @@ async function loadPersonalOps() {
 async function handleCreateSchedule(payload) {
   if (personalBusy.value) return;
   personalBusy.value = true;
+  personalFault.value = null;
   try {
     if (available && kernelBridge.scheduleCreate) {
-      await kernelBridge
-        .scheduleCreate({
-          id: payload.id,
-          title: payload.title,
-          kind: payload.kind,
-          dueAtMs: payload.dueAtMs,
-          notes: payload.notes,
-        })
-        .catch(() => null);
+      await kernelBridge.scheduleCreate({
+        id: payload.id,
+        title: payload.title,
+        kind: payload.kind ?? 'event',
+        startAt: payload.startAt ?? payload.dueAtMs ?? Date.now(),
+        notes: payload.notes,
+      });
       await loadPersonalOps();
     } else {
       personalOps.value.schedules.unshift({
         id: payload.id,
         title: payload.title,
-        kind: payload.kind,
-        due_at_ms: payload.dueAtMs,
+        kind: payload.kind ?? 'event',
+        start_at: payload.startAt ?? payload.dueAtMs ?? Date.now(),
         status: 'scheduled',
         notes: payload.notes,
       });
     }
+  } catch (err) {
+    personalFault.value = String(err?.message || err || 'SCHEDULE_CREATE_FAILED');
   } finally {
     personalBusy.value = false;
   }
@@ -748,14 +771,17 @@ async function handleCreateSchedule(payload) {
 async function handleUpdateScheduleStatus(payload) {
   if (personalBusy.value) return;
   personalBusy.value = true;
+  personalFault.value = null;
   try {
     if (available && kernelBridge.scheduleStatus) {
-      await kernelBridge.scheduleStatus(payload.id, payload.status).catch(() => null);
+      await kernelBridge.scheduleStatus(payload.id, payload.status);
       await loadPersonalOps();
     } else {
       const target = personalOps.value.schedules.find(s => s.id === payload.id);
       if (target) target.status = payload.status;
     }
+  } catch (err) {
+    personalFault.value = String(err?.message || err || 'SCHEDULE_UPDATE_FAILED');
   } finally {
     personalBusy.value = false;
   }
@@ -764,22 +790,23 @@ async function handleUpdateScheduleStatus(payload) {
 async function handleSaveNote(payload) {
   if (personalBusy.value) return;
   personalBusy.value = true;
+  personalFault.value = null;
   try {
     if (available && kernelBridge.noteUpsert) {
-      await kernelBridge
-        .noteUpsert({
-          id: payload.id,
-          title: payload.title,
-          body: payload.body,
-          tags: payload.tags,
-        })
-        .catch(() => null);
+      await kernelBridge.noteUpsert({
+        id: payload.id,
+        title: payload.title,
+        body: payload.body,
+        tags: payload.tags,
+      });
       await loadPersonalOps();
     } else {
       const idx = personalOps.value.notes.findIndex(n => n.id === payload.id);
       if (idx >= 0) personalOps.value.notes[idx] = { ...payload };
       else personalOps.value.notes.unshift({ ...payload });
     }
+  } catch (err) {
+    personalFault.value = String(err?.message || err || 'NOTE_SAVE_FAILED');
   } finally {
     personalBusy.value = false;
   }
@@ -788,23 +815,24 @@ async function handleSaveNote(payload) {
 async function handleCreateCapture(payload) {
   if (personalBusy.value) return;
   personalBusy.value = true;
+  personalFault.value = null;
   try {
     if (available && kernelBridge.captureCreate) {
-      await kernelBridge
-        .captureCreate({
-          id: payload.id,
-          conversationId: sessionId.value,
-          messageId: null,
-          content: payload.content,
-        })
-        .catch(() => null);
+      await kernelBridge.captureCreate({
+        id: payload.id,
+        conversationId: sessionId.value,
+        messageId: null,
+        content: payload.content,
+      });
       await loadPersonalOps();
     } else {
       personalOps.value.captures.unshift({
         id: payload.id,
-        content: payload.content,
+        content_ref: payload.content,
       });
     }
+  } catch (err) {
+    personalFault.value = String(err?.message || err || 'CAPTURE_SAVE_FAILED');
   } finally {
     personalBusy.value = false;
   }
@@ -813,18 +841,196 @@ async function handleCreateCapture(payload) {
 async function handleUpdateMemory(payload) {
   if (personalBusy.value) return;
   personalBusy.value = true;
+  personalFault.value = null;
   try {
     if (available && kernelBridge.memoryState) {
-      await kernelBridge.memoryState(payload.id, payload.state).catch(() => null);
+      await kernelBridge.memoryState(payload.id, payload.state);
       await loadPersonalOps();
     } else {
       const target = personalOps.value.memories.find(m => m.id === payload.id);
       if (target) target.state = payload.state;
     }
+  } catch (err) {
+    personalFault.value = String(err?.message || err || 'MEMORY_UPDATE_FAILED');
   } finally {
     personalBusy.value = false;
   }
 }
+
+async function handleCreateDecision(payload) {
+  if (personalBusy.value) return;
+  personalBusy.value = true;
+  personalFault.value = null;
+  try {
+    if (available && kernelBridge.decisionRecord) {
+      await kernelBridge.decisionRecord({
+        id: payload.id,
+        body: payload.body,
+        status: payload.status ?? 'accepted',
+      });
+      await loadPersonalOps();
+    } else {
+      personalOps.value.decisions.unshift({
+        id: payload.id,
+        project_id: 'proj-local',
+        body: payload.body,
+        status: payload.status ?? 'accepted',
+      });
+    }
+  } catch (err) {
+    personalFault.value = String(err?.message || err || 'DECISION_SAVE_FAILED');
+  } finally {
+    personalBusy.value = false;
+  }
+}
+
+async function handleUpdateDecision(payload) {
+  if (personalBusy.value) return;
+  personalBusy.value = true;
+  personalFault.value = null;
+  try {
+    if (available && kernelBridge.decisionStatus) {
+      await kernelBridge.decisionStatus(payload.id, payload.status);
+      await loadPersonalOps();
+    } else {
+      const target = personalOps.value.decisions.find(d => d.id === payload.id);
+      if (target) target.status = payload.status;
+    }
+  } catch (err) {
+    personalFault.value = String(err?.message || err || 'DECISION_UPDATE_FAILED');
+  } finally {
+    personalBusy.value = false;
+  }
+}
+
+async function promoteConversationToWork() {
+  if (!available || !kernelBridge.createProject) {
+    activeDrawer.value = 'work';
+    return;
+  }
+  personalFault.value = null;
+  try {
+    const title = currentConversation.value || t('newProject');
+    const pid = `proj-${crypto.randomUUID().slice(0, 8)}`;
+    const snap = await kernelBridge.createProject(pid, title);
+    if (snap) applyCatalogPreferences(snap);
+    if (kernelBridge.createConversation) {
+      const cid = `conv-${crypto.randomUUID().slice(0, 8)}`;
+      const snap2 = await kernelBridge.createConversation(cid, pid, title);
+      if (snap2) applyCatalogPreferences(snap2);
+    }
+    activeDrawer.value = 'work';
+  } catch (err) {
+    personalFault.value = String(err?.message || err || 'PROJECT_CREATE_FAILED');
+  }
+}
+
+function handleOnlineUpdateOrigin(val) {
+  onlineState.origin = val;
+}
+
+async function handleOnlineBeginPairing() {
+  if (onlineState.busy) return;
+  onlineState.busy = true;
+  onlineState.error = null;
+  try {
+    onlineState.pairing = await onlineClient.beginPairing({
+      origin: onlineState.origin,
+      clientInstanceId: onlineState.clientInstanceId,
+      clientName: 'Bob Cross-Platform Client',
+    });
+  } catch (err) {
+    onlineState.error = String(err?.message || err || 'ONLINE_PAIRING_FAILED');
+  } finally {
+    onlineState.busy = false;
+  }
+}
+
+async function handleOnlineExchangePairing() {
+  if (onlineState.busy || !onlineState.pairing) return;
+  onlineState.busy = true;
+  onlineState.error = null;
+  try {
+    const res = await onlineClient.exchangePairing({
+      origin: onlineState.pairing.origin || onlineState.origin,
+      pairingId: onlineState.pairing.pairing_id,
+      clientInstanceId: onlineState.clientInstanceId,
+      verifier: onlineState.pairing.verifier,
+    });
+    if (!res.pending && res.access_token) {
+      onlineState.token = res.access_token;
+      onlineState.connected = true;
+      await handleOnlineRefresh();
+    }
+  } catch (err) {
+    onlineState.error = String(err?.message || err || 'ONLINE_EXCHANGE_FAILED');
+  } finally {
+    onlineState.busy = false;
+  }
+}
+
+async function handleOnlineRefresh() {
+  if (!onlineState.token) return;
+  onlineState.busy = true;
+  onlineState.error = null;
+  try {
+    const [caps, projs] = await Promise.all([
+      onlineClient.fetchCapabilities({ origin: onlineState.origin, token: onlineState.token }),
+      onlineClient.fetchProjects({ origin: onlineState.origin, token: onlineState.token }),
+    ]);
+    onlineState.capabilities = caps;
+    onlineState.projects = Array.isArray(projs?.items) ? projs.items : [];
+    if (onlineState.projects.length > 0 && !onlineState.selectedProjectId) {
+      await handleOnlineSelectProject(onlineState.projects[0].id);
+    }
+  } catch (err) {
+    onlineState.error = String(err?.message || err || 'ONLINE_REFRESH_FAILED');
+  } finally {
+    onlineState.busy = false;
+  }
+}
+
+async function handleOnlineSelectProject(projectId) {
+  if (!onlineState.token || !projectId) return;
+  onlineState.selectedProjectId = projectId;
+  try {
+    const [tasksRes, msgsRes] = await Promise.all([
+      onlineClient.fetchProjectTasks({
+        origin: onlineState.origin,
+        token: onlineState.token,
+        projectId,
+      }),
+      onlineClient.fetchProjectMessages({
+        origin: onlineState.origin,
+        token: onlineState.token,
+        projectId,
+      }),
+    ]);
+    onlineState.tasks = Array.isArray(tasksRes?.items) ? tasksRes.items : [];
+    onlineState.messages = Array.isArray(msgsRes?.items) ? msgsRes.items : [];
+  } catch (err) {
+    onlineState.error = String(err?.message || err || 'ONLINE_PROJECT_READ_FAILED');
+  }
+}
+
+async function handleOnlineRevoke() {
+  if (!onlineState.token) return;
+  onlineState.busy = true;
+  try {
+    await onlineClient.revokeSelf({ origin: onlineState.origin, token: onlineState.token });
+  } catch {
+    // Clear local session token even if remote already expired/revoked
+  } finally {
+    onlineState.token = null;
+    onlineState.connected = false;
+    onlineState.pairing = null;
+    onlineState.projects = [];
+    onlineState.tasks = [];
+    onlineState.messages = [];
+    onlineState.busy = false;
+  }
+}
+const handleOnlineDisconnect = handleOnlineRevoke;
 
 async function handleWorkCreateProject(title) {
   if (!title) return;
@@ -1361,7 +1567,17 @@ onMounted(async () => {
     deviceCapabilities.value = await kernelBridge.pairingCapabilities().catch(() => null);
   }
   if (!disposed && available) {
+    let idleTick = 0;
     poll = setInterval(() => {
+      if (typeof document !== 'undefined' && document.hidden) return;
+      const isIdleView =
+        activeDrawer.value !== 'chat' && !activeExecution.value && !dispatchPending.value;
+      if (isIdleView) {
+        idleTick = (idleTick + 1) % 4;
+        if (idleTick !== 0) return;
+      } else {
+        idleTick = 0;
+      }
       void reload();
     }, 1500);
   }
@@ -1400,6 +1616,15 @@ onUnmounted(() => {
         <span v-if="totalUnreadCount > 0" class="unread-dot" aria-hidden="true"></span>
       </button>
       <span class="page-name">{{ currentConversation }}</span>
+      <button
+        v-if="activeDrawer === 'chat'"
+        type="button"
+        class="mini-ghost-btn"
+        :title="t('promoteToWorkBtn')"
+        @click="promoteConversationToWork"
+      >
+        💼 {{ t('promoteToWorkBtn') }}
+      </button>
       <span class="layout-mode-badge" aria-hidden="true">
         {{
           t(
@@ -1691,7 +1916,7 @@ onUnmounted(() => {
                   <input
                     v-model="modelSearchQuery"
                     type="search"
-                    placeholder="Filter models (e.g. deepseek, qwen, gemini, gpt, claude)…"
+                    :placeholder="t('modelFilterPlaceholder')"
                   />
                 </label>
               </div>
@@ -1784,16 +2009,18 @@ onUnmounted(() => {
               <button
                 type="button"
                 class="local-action-pill"
-                @click="localRepoExpanded = !localRepoExpanded"
+                disabled
+                :title="t('comingSoonBadge')"
               >
-                {{ t('customDownloadUrl') }}
+                {{ t('customDownloadUrl') }} ({{ t('comingSoonBadge') }})
               </button>
               <button
                 type="button"
                 class="local-action-pill"
-                @click="localRepoExpanded = !localRepoExpanded"
+                disabled
+                :title="t('comingSoonBadge')"
               >
-                📂 {{ t('physicalModelDir') }}
+                📂 {{ t('physicalModelDir') }} ({{ t('comingSoonBadge') }})
               </button>
             </div>
           </section>
@@ -2059,11 +2286,11 @@ onUnmounted(() => {
             <div class="settings-kv-list">
               <div class="settings-kv-row">
                 <span>{{ t('workspaceDirLabel') }}</span>
-                <code>{{ catalog?.projects?.[0]?.directory_ref || 'Local SQLite Kernel' }}</code>
+                <code>{{ catalog?.projects?.[0]?.directory_ref || t('unconfiguredValue') }}</code>
               </div>
               <div class="settings-kv-row">
                 <span>{{ t('workspaceDeviceIdLabel') }}</span>
-                <code>{{ catalog?.device_groups?.[0]?.label || 'bob-local-node' }}</code>
+                <code>{{ catalog?.device_groups?.[0]?.label || t('unconfiguredValue') }}</code>
               </div>
             </div>
           </section>
@@ -2076,8 +2303,12 @@ onUnmounted(() => {
             </div>
             <div class="workspace-stats-grid">
               <div class="workspace-stat-box">
-                <strong>{{ readiness?.saved_messages ?? messages.length }}</strong>
+                <strong>{{ (catalog?.conversations || []).length || 1 }}</strong>
                 <span>{{ t('conversations') }}</span>
+              </div>
+              <div class="workspace-stat-box">
+                <strong>{{ readiness?.saved_messages ?? messages.length }}</strong>
+                <span>{{ t('workspaceStatMessages') }}</span>
               </div>
               <div class="workspace-stat-box">
                 <strong>{{ projectList.length }}</strong>
@@ -2112,25 +2343,25 @@ onUnmounted(() => {
                 class="memory-item-card"
               >
                 <div class="memory-item-main">
-                  <strong>{{ mem.summary }}</strong>
-                  <span class="schedule-kind-badge">{{ mem.scope }} · {{ mem.state }}</span>
+                  <strong>{{ mem.body || mem.summary }}</strong>
+                  <span class="schedule-kind-badge">{{ mem.state }}</span>
                 </div>
                 <div class="memory-item-actions">
                   <button
-                    v-if="mem.state !== 'confirmed'"
+                    v-if="mem.state !== 'active'"
                     type="button"
                     class="mini-ghost-btn"
-                    @click="handleUpdateMemory({ id: mem.id, state: 'confirmed' })"
+                    @click="handleUpdateMemory({ id: mem.id, state: 'active' })"
                   >
-                    {{ t('knowledgeMemoryConfirmBtn') }}
+                    {{ t('knowledgeMemoryActivateBtn') }}
                   </button>
                   <button
-                    v-if="mem.state !== 'retracted'"
+                    v-if="mem.state !== 'forgotten'"
                     type="button"
                     class="mini-ghost-btn"
-                    @click="handleUpdateMemory({ id: mem.id, state: 'retracted' })"
+                    @click="handleUpdateMemory({ id: mem.id, state: 'forgotten' })"
                   >
-                    {{ t('knowledgeMemoryRetractBtn') }}
+                    {{ t('knowledgeMemoryForgetBtn') }}
                   </button>
                 </div>
               </div>
@@ -2526,6 +2757,11 @@ onUnmounted(() => {
       </nav>
     </div>
 
+    <div v-if="personalFault" class="notice" role="alert">
+      <span>{{ personalFault }}</span>
+      <button type="button" @click="personalFault = null">×</button>
+    </div>
+
     <!-- Primary View 2: 日程 (Schedule / InboxView) -->
     <ScheduleView
       v-if="activeDrawer === 'schedule'"
@@ -2542,10 +2778,17 @@ onUnmounted(() => {
       :catalog="catalog"
       :active-session-id="sessionId"
       :active-main-role="activeMainRole"
+      :online-state="onlineState"
       @open-conversation="handleWorkOpenConversation"
       @create-project="handleWorkCreateProject"
       @create-conversation="handleWorkCreateConversation"
       @open-settings-tab="handleWorkOpenSettingsTab"
+      @online-update-origin="handleOnlineUpdateOrigin"
+      @online-begin-pairing="handleOnlineBeginPairing"
+      @online-exchange-pairing="handleOnlineExchangePairing"
+      @online-refresh="handleOnlineRefresh"
+      @online-select-project="handleOnlineSelectProject"
+      @online-disconnect="handleOnlineDisconnect"
     />
 
     <!-- Primary View 4: 知识 (Knowledge / Notes, Captures & Long-term Memory) -->
@@ -2554,10 +2797,13 @@ onUnmounted(() => {
       :notes="personalOps.notes"
       :captures="personalOps.captures"
       :memories="personalOps.memories"
+      :decisions="personalOps.decisions"
       :busy="personalBusy"
       @save-note="handleSaveNote"
       @create-capture="handleCreateCapture"
       @update-memory="handleUpdateMemory"
+      @create-decision="handleCreateDecision"
+      @update-decision="handleUpdateDecision"
     />
 
     <!-- Primary View 1: 对话 (Chat) -->

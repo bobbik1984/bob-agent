@@ -27,36 +27,42 @@ flowchart LR
 | **BP6 开源通用化** | 别人能装、能用、能升级 | LICENSE 与依赖许可证审计；去个人化；默认连接 L1+L2+L4；安装器；升级保留数据；安全报告渠道 | I、J |
 | **BP7 iOS 与扩展** | iOS 评估；第二种实现验证窄 Provider 契约 | 由届时的真实需求决定 | I |
 
-## 依赖说明
+## 依赖说明与 2026-10-30 审查重排计划
 
-### 产品完整性约束
+### 产品完整性约束（2026-10-30 核对更新）
 
-BP3退出门包含F1的独立BYOK助理，配对Home和远端CLI链路通过不能替代它。2026-10-30 已补齐 F1 直接模型调用（系统安全存储凭据、三协议适配、无需配对直接对话）、三轴解耦（模型调用位置 `execution_route` / 工作区位置 `workspace_id` / 记录主权威 `home_authority`）以及已配对 Replica 在 Home 离线时直接调用模型的重连幂等汇合规则（`replica_direct_sync_outbox` + `HomeRequest::ReplicaDirectTurn`），详见 [CURRENT_STAGE](CURRENT_STAGE.md) 与 [kernel-schema](wiki/kernel-schema.md) 第 9 节。
+BP3 退出门包含 F1 的独立 BYOK 助理，配对 Home 和远端 CLI 链路通过不能替代它。
+- **F1 当前真实状态（部分完成）**：已完成 `0006.sql`、`direct_provider.rs`、`direct_llm.rs`、系统安全存储凭据（Windows DPAPI / Android Keystore）、三协议适配与 Loopback HTTP 测试，以及已配对 Replica 在 Home 离线时直接调用模型的重连幂等汇合规则（`replica_direct_sync_outbox` + `HomeRequest::ReplicaDirectTurn`）；**尚未完成**真实外部 Key 的真机问答验收（RV-11）、会话历史检索与多模态附件（RV-21）。
+- **F3 当前真实状态（部分完成）**：已在 `personal_ops.rs` 落地基础表与状态操作（`create_capture`、`propose_memory`/`update_memory_state`、`upsert_note`、`create_schedule_item`/`update_schedule_status`、`record_decision`），前端已拆出日程/工作/知识主视图；但存在**前端↔内核字段与状态值错位**（RV-01~07）、**缺少个人数据 Replica→Home 同步路径**（RV-13）以及**决定记录缺少 IPC/UI**（RV-16），修复并真机验证后才算达成 F3。
+- **三端统一与云端节点（`agent.bobbik.org`）真实状态**：Android 手机与 Windows 电脑已共用同一套 Vue 前端与 Rust 内核（约 80%）；云端 `agent.bobbik.org` 当前运行的是旧 Online（`cloud-agent` Node/TS），已具备 `/api/client/v1` 只读客户端接口（`bob-core-client/1.0`），但新 App 尚未实现 HTTP 客户端接入（近期轨道 OL-01~07）；让云端节点也运行同一 Rust 内核（`bob-node`）并让浏览器复用同一前端属于长期轨道（XP-01~10）。
 
-BP5迁移以 [COMPONENT_MAP](COMPONENT_MAP.md) 第 6 节中的旧能力逐项对照 F1–F7 验收；保留、适配、合并和替换均已明确落点与退出门，F3 个人助理内核能力（收件箱捕获、显式记忆生命周期、笔记、日程、决定）已在 `personal_ops.rs` 落地。过渡 Provider 不改变最终同一内核、多种部署形态的目标。
+### 近期至中期五阶段施工路线（Stage S0 → S4）
 
-### BP3 内部推进顺序（2026-10-30）
+详细任务卡与验收路径见 [CURRENT_STAGE](CURRENT_STAGE.md) 与根目录 `todo.md`：
 
-先完成真实项目/对话目录与逐会话草稿，再补 Home 的新会话接纳、精确授权及上下文续接；随后把侧栏和设置子页接入，云端打包在 Pixel 验证。对应 `BP3-01.a–d`，详细步骤与当前状态只维护于 [CURRENT_STAGE](CURRENT_STAGE.md)。不能用多条气泡展示替代多会话能力，也不能用历史显示替代模型上下文续接。
+```mermaid
+flowchart TD
+    S0["Stage S0：P0 止血与真相对齐<br/>(RV-01 ~ RV-10)"] --> S1["Stage S1：个人助理真机闭环与个人数据同步<br/>(RV-11 ~ RV-13)"]
+    S0 --> S2["Stage S2 (M0)：接入现有云端节点 agent.bobbik.org<br/>(OL-01 ~ OL-07)"]
+    S1 --> S3["Stage S3 (M1)：内核外壳剥离与前端架构解耦<br/>(XP-01~03, XP-05, RV-14~18)"]
+    S2 --> S3
+    S3 --> S4["Stage S4 (M2–M4)：bob-node 云端内核节点与 Web 三端统一<br/>(XP-04, XP-06 ~ XP-10)"]
+```
 
-下一段 `BP3-02.a` 为现有 Online 兼容接入：只读目录/成果先行，精确续聊随后；`BP3-01.e / BP3-02.b` 补公网连接与真实往返。Online 作为过渡期外部工作服务，沿 Provider 边界接入，不建立第二套新内核。云端仅承担中继时不持有 Home 主权威；要在 PC 关闭时继续处理，则另行评估常开 Home 的授权、迁移和恢复，不默认改变 BOB-D-004。公网部署与 BP5 数据迁移分别验收。
-
-- BP3 可以先用作者的自建设施实现连接，但必须走 Connection Provider；BP6 只是增加默认 Provider，不改内核。
-- BP4 期间，旧 Online 继续在生产运行；新内核的能力逐项验收后，才进入 BP5 的数据迁移。
-- 旧项目里进行中的工作（ONL-MWNP-01、ONL-R06-D、APP-RH 系列、ONL-B4 HOLD）仍按旧项目合同推进或暂停，**不计入本项目进度**；需要并入的结论通过本项目的工作包显式引用。
+| 施工阶段 | 核心目标 | 包含任务编号 | 对应大阶段 | 退出门（Exit Gate） |
+|---|---|---|---|---|
+| **Stage S0：P0 止血与真相对齐** | 修复已安装手机版本中日程/记忆/工作间的契约错位与静默吞错；建立 Rust↔UI JSON 快照契约测试；修正文档超范围陈述 | `RV-01` ~ `RV-10` | BP3 修正 | Rust 快照契约测试、Node、Playwright 全绿；Pixel 8 实测新建日程/待办→勾选完成→杀进程重开仍保持；文档无虚假函数名或矛盾状态 |
+| **Stage S1：个人助理真机闭环与数据同步** | 用真实 API Key 完成 Pixel 8 与 Windows 的 F1 真机验收；清理/禁用虚假可点控件；打通笔记/日程/捕获/记忆的 Replica→Home 同步 | `RV-11` ~ `RV-13` | BP3 核心 | 真机 F1 问答与断网保存 Evidence 归档；所有可点控件均有真实效果；手机离线新建笔记/日程在电脑上线后幂等汇入 Home |
+| **Stage S2 (M0)：接入云端节点 `agent.bobbik.org`** | 先复用云端现有 `/api/client/v1`（`bob-core-client/1.0`）完成配对与项目/任务/消息只读接入；随后在 `cloud-agent` 补齐幂等写入并接通 App 受控续聊 | `OL-01` ~ `OL-07` | BP3-02 | App 设置页可配对/吊销云端凭据；侧栏与工作视图可离线查看云端项目缓存；补齐写入后专用测试项目两轮续聊与断网对账通过 |
+| **Stage S3 (M1)：内核外壳剥离与前端解耦** | 抽出平台能力 Trait（`bob-runtime`），把 160KB 业务逻辑从 `src-tauri` 下沉；原生 HTTPS 替换 `curl`；拆分 2842 行 `App.vue`、补桌面左侧栏、决定记录 UI、对话升级 Work 与轮询退避 | `XP-01`~`03`, `XP-05`, `RV-14`~`18` | BP3 → BP4 | `src-tauri` 仅留薄命令壳；`cargo test --workspace` 在 Windows + Linux CI 全绿；`App.vue` < 600 行；桌面横屏左导航与移动底导航自适应 |
+| **Stage S4 (M2–M4)：`bob-node` 云端节点与三端统一** | 补齐 Linux/macOS 密钥与进程沙箱；交付无界面 `bob-node` 服务端程序与 HTTPS/SSE Web 适配层；浏览器直接运行同一套 Vue 前端；逐步收敛旧 Online | `XP-04`, `XP-06` ~ `XP-10` | BP4 → BP5 → BP6 | Linux 容器/VPS 启动 `bob-node`，手机/电脑/浏览器三端共用同一套前后端代码完成对话与任务流转；旧 Online 能力按裁决表逐项迁移或退役 |
 
 ### BP4/F6：跨节点持续开发的渐进门槛
 
-在BP3多会话与来源索引中预留Project→多个Workspace、按设备/任务分组及可用性投影；不把完整跨机交接作为第一版手机侧栏的前置。随后沿BP4/F6依次完成：
-
-1. **BP4-01 副本盘点**：明确同一项目各节点的工作区、源码基线、未同步内容和必要素材，先只读，不自动同步。
-2. **BP4-02 显式交接**：在单一权威下，完成检查点、受控传输、目标校验与写入权交接；同Task新Execution，未知旧执行不重派。先单源→单目标，不扩成广泛自动调度。
-3. **BP4-03 持续性验收**：验证断网/突然关机/未push/素材缺失/节点恢复的完整路径，再评估默认常开工作区和可选常开Home。PC关机仍可工作须同时解决文件位置与控制权可用性。
-
-源码提交、push、敏感素材同步、节点配置和Home迁移均按具体操作授权，计划归并不执行这些动作。详细验收与状态见CURRENT_STAGE；交接规则只在kernel-schema维护。
+在 BP3 多会话与来源索引中已预留 Project→多个 Workspace、按设备/任务分组及可用性投影，并已在 `workspace_handoff.rs` 完成副本只读盘点（BP4-01）、显式交接与 `fencing_token` 原子递增（BP4-02）及 5 大故障场景内核测试（BP4-03）。源码提交、push、敏感素材同步、节点配置和 Home 迁移均按具体操作授权，计划归并不执行这些动作。详细验收与状态见 [CURRENT_STAGE](CURRENT_STAGE.md)；交接规则只在 [kernel-schema](wiki/kernel-schema.md) 维护。
 
 ## 来源
 
 - `references/historical-plans/2026-10-28_BOB_UNIFIED_DEVELOPMENT_PLAN_PROPOSED.md`（用户提出的统一构想，A–J 步骤）
 - `references/historical-plans/2026-10-28_unification_review.md`（遗漏审查与选项）
-- 用户 2026-10-28 的确认：新目录、目标用户、Tauri Android、个人环境优先
+- 2026-10-30 愿景/功能/架构与三端统一审查结论（归档于 `todo.md` `RV-01~21`、`OL-01~07`、`XP-01~10`）

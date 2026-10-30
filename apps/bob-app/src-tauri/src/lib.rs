@@ -19,7 +19,7 @@ use bob_kernel::app::{AppMessage, AppReadiness, LocalApp};
 use bob_kernel::catalog::{CatalogSnapshot, ConversationViewState, DeviceUiPreferences};
 use bob_kernel::local_execution::LocalExecution;
 use bob_kernel::outbox::LocalAccepted;
-use bob_kernel::personal_ops::{CaptureItem, MemoryItem, NoteItem, ScheduleItem};
+use bob_kernel::personal_ops::{CaptureItem, DecisionItem, MemoryItem, NoteItem, ScheduleItem};
 pub use runner::worker_entry;
 use serde::{Deserialize, Serialize};
 use std::io::{Read, Write};
@@ -348,6 +348,8 @@ struct PersonalOpsSnapshot {
     notes: Vec<NoteItem>,
     captures: Vec<CaptureItem>,
     memories: Vec<MemoryItem>,
+    decisions: Vec<DecisionItem>,
+    pending_sync_count: usize,
 }
 
 #[tauri::command]
@@ -369,11 +371,20 @@ async fn app_personal_snapshot(
             let memories = app
                 .list_memories(false)
                 .map_err(|_| "PERSONAL_OPS_READ_FAILED")?;
+            let decisions = app
+                .list_all_decisions()
+                .map_err(|_| "PERSONAL_OPS_READ_FAILED")?;
+            let pending_sync_count = app
+                .pending_personal_op_syncs()
+                .map(|v| v.len())
+                .unwrap_or(0);
             Ok(PersonalOpsSnapshot {
                 schedules,
                 notes,
                 captures,
                 memories,
+                decisions,
+                pending_sync_count,
             })
         })
     })
@@ -389,6 +400,7 @@ async fn app_schedule_create(
     project_id: Option<String>,
     task_id: Option<String>,
     title: String,
+    kind: Option<String>,
     start_at: i64,
     end_at: Option<i64>,
     reminder_at: Option<i64>,
@@ -397,11 +409,12 @@ async fn app_schedule_create(
     let state = state.0.clone();
     tauri::async_runtime::spawn_blocking(move || {
         with_app(&state, |app| {
-            app.create_schedule_item(
+            app.create_schedule_item_with_kind(
                 &id,
                 project_id.as_deref(),
                 task_id.as_deref(),
                 &title,
+                kind.as_deref().unwrap_or("event"),
                 start_at,
                 end_at,
                 reminder_at,
@@ -494,6 +507,91 @@ async fn app_memory_state(
     })
     .await
     .map_err(|_| "MEMORY_UPDATE_FAILED")?
+}
+
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+async fn app_decision_record(
+    state: State<'_, AppState>,
+    id: String,
+    project_id: Option<String>,
+    task_id: Option<String>,
+    source_message_id: Option<String>,
+    body: String,
+    rationale_json: Option<String>,
+    status: Option<String>,
+    supersedes_id: Option<String>,
+) -> Result<DecisionItem, &'static str> {
+    let state = state.0.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        with_app(&state, |app| {
+            let at = now()?;
+            // Ensure a project and source message exist if caller didn't pass one
+            let proj_id = match project_id.as_deref().filter(|s| !s.trim().is_empty()) {
+                Some(pid) => pid.to_owned(),
+                None => {
+                    let snap = app
+                        .catalog_snapshot()
+                        .map_err(|_| "DECISION_SAVE_FAILED")?;
+                    if let Some(first) = snap.projects.first() {
+                        first.id.clone()
+                    } else {
+                        let pid = "proj-default".to_owned();
+                        let _ = app.create_project(&pid, "Default Workspace", at);
+                        pid
+                    }
+                }
+            };
+            let msg_id = match source_message_id.as_deref().filter(|s| !s.trim().is_empty()) {
+                Some(mid) => mid.to_owned(),
+                None => {
+                    let session_id = app
+                        .selected_conversation()
+                        .map_err(|_| "DECISION_SAVE_FAILED")?;
+                    let hist = app.history(&session_id).unwrap_or_default();
+                    if let Some(last) = hist.last() {
+                        last.id.clone()
+                    } else {
+                        let req_id = format!("dec-src-req-{id}");
+                        let mid = format!("dec-src-msg-{id}");
+                        app.accept(&req_id, &mid, &session_id, format!("Decision record: {body}"), at)
+                            .map_err(|_| "DECISION_SAVE_FAILED")?;
+                        mid
+                    }
+                }
+            };
+            app.record_decision(
+                &id,
+                &proj_id,
+                task_id.as_deref(),
+                &msg_id,
+                &body,
+                rationale_json.as_deref().unwrap_or("{}"),
+                status.as_deref().unwrap_or("proposed"),
+                supersedes_id.as_deref(),
+            )
+            .map_err(|_| "DECISION_SAVE_FAILED")
+        })
+    })
+    .await
+    .map_err(|_| "DECISION_SAVE_FAILED")?
+}
+
+#[tauri::command]
+async fn app_decision_status(
+    state: State<'_, AppState>,
+    id: String,
+    status: String,
+) -> Result<DecisionItem, &'static str> {
+    let state = state.0.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        with_app(&state, |app| {
+            app.update_decision_status(&id, &status)
+                .map_err(|_| "DECISION_UPDATE_FAILED")
+        })
+    })
+    .await
+    .map_err(|_| "DECISION_UPDATE_FAILED")?
 }
 
 #[tauri::command]
@@ -772,6 +870,8 @@ fn configure<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R>
             app_note_upsert,
             app_capture_create,
             app_memory_state,
+            app_decision_record,
+            app_decision_status,
             direct_llm::app_provider_get,
             direct_llm::app_provider_save,
             direct_llm::app_provider_test,

@@ -407,3 +407,163 @@ fn catalog_and_multi_session_ipc_commands_persist_and_switch_cleanly() {
     let reopened_boot = invoke(&view, "app_bootstrap", json!({})).unwrap();
     assert_eq!(reopened_boot["session_id"], "conv-2");
 }
+
+#[test]
+fn personal_ops_ipc_contract_aligns_and_exports_canonical_snapshot_fixture() {
+    let f = Fixture::new();
+    let mut local = LocalApp::open(&f.db()).unwrap();
+    let session = local.default_session().unwrap();
+    local
+        .accept(
+            "req-fixture-1",
+            "msg-fixture-1",
+            &session,
+            "下周三下午 3 点进行跨平台契约验收，并整理笔记和记忆。".into(),
+            1_762_000_000_000,
+        )
+        .unwrap();
+    let cap = local
+        .create_capture(
+            "cap-fixture-1",
+            Some("msg-fixture-1"),
+            "速记：优先对齐 Schedule / Memory / Decision 契约与单点快照",
+            1_762_000_010_000,
+        )
+        .unwrap();
+    let mem = local
+        .propose_memory(
+            "mem-fixture-1",
+            Some(&cap.id),
+            Some("msg-fixture-1"),
+            "所有文件读写显式指定 UTF-8 编码，时间戳统一使用 13 位 Unix 毫秒",
+            None,
+        )
+        .unwrap();
+    assert_eq!(mem.state, "proposed");
+
+    let (_host, view) = app(Some(local));
+
+    // RV-01 / RV-02 / RV-03: Create both 'event' and 'todo' schedule items with 13-digit ms startAt
+    let ev = invoke(
+        &view,
+        "app_schedule_create",
+        json!({
+            "id": "sched-event-1",
+            "title": "跨平台架构评审会议",
+            "kind": "event",
+            "startAt": 1_762_010_000_000_i64,
+            "notes": "核对手机端、桌面端与云端 Web 契约"
+        }),
+    )
+    .unwrap();
+    assert_eq!(ev["kind"], "event");
+    assert_eq!(ev["status"], "scheduled");
+    assert_eq!(ev["start_at"], 1_762_010_000_000_i64);
+
+    let td = invoke(
+        &view,
+        "app_schedule_create",
+        json!({
+            "id": "sched-todo-1",
+            "title": "完成 RV-01 至 RV-13 回归验证",
+            "kind": "todo",
+            "startAt": 1_762_020_000_000_i64,
+            "notes": "待办事项回归"
+        }),
+    )
+    .unwrap();
+    assert_eq!(td["kind"], "todo");
+
+    // Negative test: non-canonical 'done' status must be rejected by IPC
+    assert!(invoke(
+        &view,
+        "app_schedule_status",
+        json!({"id": "sched-event-1", "status": "done"})
+    )
+    .is_err());
+
+    // Canonical 'completed' status succeeds
+    let ev_completed = invoke(
+        &view,
+        "app_schedule_status",
+        json!({"id": "sched-event-1", "status": "completed"}),
+    )
+    .unwrap();
+    assert_eq!(ev_completed["status"], "completed");
+
+    // RV-04: Negative test for non-canonical memory state 'confirmed', positive test for 'active'
+    assert!(invoke(
+        &view,
+        "app_memory_state",
+        json!({"id": "mem-fixture-1", "newState": "confirmed"})
+    )
+    .is_err());
+    let mem_active = invoke(
+        &view,
+        "app_memory_state",
+        json!({"id": "mem-fixture-1", "newState": "active"}),
+    )
+    .unwrap();
+    assert_eq!(mem_active["state"], "active");
+    assert_eq!(
+        mem_active["body"],
+        "所有文件读写显式指定 UTF-8 编码，时间戳统一使用 13 位 Unix 毫秒"
+    );
+
+    // Note upsert
+    let note = invoke(
+        &view,
+        "app_note_upsert",
+        json!({
+            "id": "note-fixture-1",
+            "title": "Bob 跨平台统一架构笔记",
+            "bodyMarkdown": "# 核心契约\n- 日程状态：scheduled | completed | cancelled\n- 记忆状态：proposed | active | superseded | forgotten",
+            "tags": ["architecture", "contract"]
+        }),
+    )
+    .unwrap();
+    assert_eq!(note["title"], "Bob 跨平台统一架构笔记");
+
+    // RV-16: Decision record and status transition
+    let dec = invoke(
+        &view,
+        "app_decision_record",
+        json!({
+            "id": "dec-fixture-1",
+            "body": "前后端测试统一消费 Rust 序列化导出的 personal_snapshot.json，禁止手写字典",
+            "rationaleJson": "{\"task\":\"RV-06\"}",
+            "status": "proposed"
+        }),
+    )
+    .unwrap();
+    assert_eq!(dec["status"], "proposed");
+    let dec_acc = invoke(
+        &view,
+        "app_decision_status",
+        json!({"id": "dec-fixture-1", "status": "accepted"}),
+    )
+    .unwrap();
+    assert_eq!(dec_acc["status"], "accepted");
+
+    // RV-06: Export canonical PersonalOpsSnapshot fixture directly from Rust serde_json
+    let snapshot = invoke(&view, "app_personal_snapshot", json!({})).unwrap();
+    assert_eq!(snapshot["schedules"].as_array().unwrap().len(), 2);
+    assert_eq!(snapshot["notes"].as_array().unwrap().len(), 1);
+    assert_eq!(snapshot["captures"].as_array().unwrap().len(), 1);
+    assert_eq!(snapshot["memories"].as_array().unwrap().len(), 1);
+    assert_eq!(snapshot["decisions"].as_array().unwrap().len(), 1);
+
+    let fixture_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .join("tests")
+        .join("fixtures");
+    std::fs::create_dir_all(&fixture_dir).unwrap();
+    let fixture_path = fixture_dir.join("personal_snapshot.json");
+    std::fs::write(
+        &fixture_path,
+        serde_json::to_string_pretty(&snapshot).unwrap(),
+    )
+    .unwrap();
+    assert!(fixture_path.exists());
+}

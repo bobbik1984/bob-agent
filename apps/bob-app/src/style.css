@@ -1633,6 +1633,68 @@ textarea {
   font-weight: 600;
 }
 
+.online-connect-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  align-items: center;
+}
+.online-origin-input {
+  flex: 1 1 14rem;
+  min-width: 12rem;
+  padding: 0.45rem 0.65rem;
+  border-radius: 0.55rem;
+  border: 1px solid var(--line);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 0.82rem;
+}
+.online-pairing-box {
+  margin-top: 0.65rem;
+  padding: 0.7rem;
+  border-radius: 0.65rem;
+  border: 1px solid var(--line);
+  background: var(--bg-primary);
+  display: grid;
+  gap: 0.45rem;
+}
+.online-pairing-code {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  font-size: 0.82rem;
+}
+.online-project-inspector {
+  margin-top: 0.65rem;
+  padding: 0.7rem;
+  border-radius: 0.65rem;
+  border: 1px solid var(--line);
+  background: var(--bg-primary);
+  display: grid;
+  gap: 0.55rem;
+}
+.online-columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: 0.65rem;
+}
+.online-column {
+  display: grid;
+  gap: 0.35rem;
+  align-content: start;
+}
+.online-item-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.5rem;
+  border-radius: 0.45rem;
+  border: 1px solid var(--line);
+  font-size: 0.78rem;
+}
+
 @media (max-width: 480px) {
   .topbar {
     padding-inline: 0.65rem;

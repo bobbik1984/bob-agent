@@ -15,16 +15,26 @@ const props = defineProps({
     type: Array,
     default: () => [],
   },
+  decisions: {
+    type: Array,
+    default: () => [],
+  },
   busy: {
     type: Boolean,
     default: false,
   },
 });
 
-const emit = defineEmits(['save-note', 'create-capture', 'update-memory']);
+const emit = defineEmits([
+  'save-note',
+  'create-capture',
+  'update-memory',
+  'create-decision',
+  'update-decision',
+]);
 
 const { t } = useI18n();
-const activeSubtab = ref('notes'); // 'notes' | 'captures' | 'memories'
+const activeSubtab = ref('notes'); // 'notes' | 'captures' | 'memories' | 'decisions'
 const searchQuery = ref('');
 const selectedNoteId = ref(null);
 
@@ -36,6 +46,7 @@ const noteEditor = reactive({
 });
 
 const captureDraft = ref('');
+const decisionDraft = ref('');
 
 const filteredNotes = computed(() => {
   const q = searchQuery.value.trim().toLowerCase();
@@ -103,6 +114,17 @@ function submitCapture() {
   });
   captureDraft.value = '';
 }
+
+function submitDecision() {
+  const body = decisionDraft.value.trim();
+  if (!body) return;
+  emit('create-decision', {
+    id: `dec-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    body,
+    status: 'accepted',
+  });
+  decisionDraft.value = '';
+}
 </script>
 
 <template>
@@ -139,6 +161,15 @@ function submitCapture() {
         >
           🧠 {{ t('knowledgeTabMemories') }}
           <span class="subtab-count">{{ memories.length }}</span>
+        </button>
+        <button
+          type="button"
+          class="view-subtab-btn"
+          :class="{ active: activeSubtab === 'decisions' }"
+          @click="activeSubtab = 'decisions'"
+        >
+          ⚖ {{ t('knowledgeTabDecisions') }}
+          <span class="subtab-count">{{ decisions.length }}</span>
         </button>
       </div>
     </header>
@@ -242,32 +273,85 @@ function submitCapture() {
         </div>
       </template>
 
-      <template v-else>
+      <template v-else-if="activeSubtab === 'memories'">
         <div v-if="!memories.length" class="view-empty-card hub-card">
           <p>{{ t('knowledgeEmptyMemoriesHint') }}</p>
         </div>
         <div v-else class="captures-list">
           <article v-for="mem in memories" :key="mem.id" class="hub-card memory-item-card">
             <div class="memory-item-main">
-              <strong>{{ mem.summary }}</strong>
-              <span class="schedule-kind-badge">{{ mem.scope }} · {{ mem.state }}</span>
+              <strong>{{ mem.body }}</strong>
+              <span class="schedule-kind-badge">
+                {{ mem.state }}
+                <template v-if="mem.source_capture_id || mem.source_message_id">
+                  · {{ mem.source_capture_id || mem.source_message_id }}
+                </template>
+              </span>
             </div>
             <div class="memory-item-actions">
               <button
-                v-if="mem.state !== 'confirmed'"
+                v-if="mem.state !== 'active'"
                 type="button"
                 class="mini-ghost-btn"
-                @click="emit('update-memory', { id: mem.id, state: 'confirmed' })"
+                @click="emit('update-memory', { id: mem.id, state: 'active' })"
               >
-                {{ t('knowledgeMemoryConfirmBtn') }}
+                {{ t('knowledgeMemoryActivateBtn') }}
               </button>
               <button
-                v-if="mem.state !== 'retracted'"
+                v-if="mem.state !== 'forgotten'"
                 type="button"
                 class="mini-ghost-btn"
-                @click="emit('update-memory', { id: mem.id, state: 'retracted' })"
+                @click="emit('update-memory', { id: mem.id, state: 'forgotten' })"
               >
-                {{ t('knowledgeMemoryRetractBtn') }}
+                {{ t('knowledgeMemoryForgetBtn') }}
+              </button>
+            </div>
+          </article>
+        </div>
+      </template>
+
+      <template v-else>
+        <form class="quick-capture-form hub-card" @submit.prevent="submitDecision">
+          <input
+            v-model="decisionDraft"
+            type="text"
+            :placeholder="t('knowledgeDecisionPlaceholder')"
+            required
+          />
+          <button
+            type="submit"
+            class="primary-action-btn"
+            :disabled="busy || !decisionDraft.trim()"
+          >
+            {{ t('knowledgeAddDecisionBtn') }}
+          </button>
+        </form>
+
+        <div v-if="!decisions.length" class="view-empty-card hub-card">
+          <p>{{ t('knowledgeEmptyDecisionsHint') }}</p>
+        </div>
+        <div v-else class="captures-list">
+          <article v-for="dec in decisions" :key="dec.id" class="hub-card memory-item-card">
+            <div class="memory-item-main">
+              <strong>{{ dec.body }}</strong>
+              <span class="schedule-kind-badge">{{ dec.project_id }} · {{ dec.status }}</span>
+            </div>
+            <div class="memory-item-actions">
+              <button
+                v-if="dec.status !== 'accepted'"
+                type="button"
+                class="mini-ghost-btn"
+                @click="emit('update-decision', { id: dec.id, status: 'accepted' })"
+              >
+                {{ t('decisionAcceptBtn') }}
+              </button>
+              <button
+                v-if="dec.status !== 'rejected'"
+                type="button"
+                class="mini-ghost-btn"
+                @click="emit('update-decision', { id: dec.id, status: 'rejected' })"
+              >
+                {{ t('decisionRejectBtn') }}
               </button>
             </div>
           </article>

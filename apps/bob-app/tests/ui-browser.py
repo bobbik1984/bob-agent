@@ -9,7 +9,9 @@ parser.add_argument('--url', required=True)
 parser.add_argument('--output', type=Path, required=True)
 args = parser.parse_args()
 args.output.mkdir(parents=True, exist_ok=True)
+canonical_personal_json = (Path(__file__).resolve().parent / 'fixtures' / 'personal_snapshot.json').read_text(encoding='utf-8').strip()
 fixture = '''
+const canonicalPersonalSnapshot = ''' + canonical_personal_json + ''';
 let selectedId = 'ui-fixture';
 const drafts = { 'ui-fixture': { draft: '', rev: 0 }, 'ui-second': { draft: 'Second session saved draft', rev: 1 } };
 let groupMode = 'project';
@@ -77,12 +79,18 @@ export const kernelBridge = {
  providerTest:async()=>({id:'default',provider_kind:'openai_compatible',label:'OpenAI',base_url:'https://api.openai.com/v1',model_id:'gpt-4o-mini',api_key_slot:'provider-key-default',api_key_configured:true,enabled:true,last_check_status:'ok',last_check_reason:'gpt-4o-mini',last_checked_at:100,updated_at:100}),
  routeGet:async()=>'auto',
  routeSet:async(_,r)=>r,
- personalSnapshot:async()=>({schedules:[{id:'s1',title:'Review Architecture',kind:'event',due_at_ms:1761820000000,status:'scheduled',notes:'Check 5 views'}],notes:[{id:'n1',title:'Bob Architecture Note',body:'5 pillars aligned',tags:['arch']}],captures:[],memories:[]}),
+ personalSnapshot:async()=>JSON.parse(JSON.stringify(canonicalPersonalSnapshot)),
  scheduleCreate:async(p)=>p,
- scheduleStatus:async(id,st)=>({id,status:st}),
+ scheduleStatus:async(id,st)=>{
+  const item = canonicalPersonalSnapshot.schedules.find(s => s.id === id);
+  if (item) item.status = st;
+  return {id,status:st};
+ },
  noteUpsert:async(p)=>p,
  captureCreate:async(p)=>p,
  memoryState:async(id,st)=>({id,state:st}),
+ decisionRecord:async(p)=>p,
+ decisionStatus:async(id,st)=>({id,status:st}),
  pairingCapabilities:async()=>({can_scan:true,can_host:false}),
  pairingStatus:async()=>({state:'connected'})
 };'''
@@ -94,6 +102,8 @@ with sync_playwright() as p:
    labels={'copy':'复制','settings':'设置','close':'关闭设置','back':'返回设置','by_device':'按执行设备','by_project':'按项目 / 任务','models_badge':'199 个可用模型','nav_schedule':'日程','nav_work':'工作','nav_knowledge':'知识','nav_chat':'对话'} if locale=='zh-CN' else {'copy':'Copy','settings':'Settings','close':'Close settings','back':'Back to Settings','by_device':'By Execution Device','by_project':'By Project / Task','models_badge':'199 available models','nav_schedule':'Schedule','nav_work':'Work','nav_knowledge':'Knowledge','nav_chat':'Chat'}
    context=browser.new_context(viewport={'width':width,'height':height},permissions=['clipboard-read','clipboard-write'],locale=locale,color_scheme=scheme)
    page=context.new_page()
+   page.on('pageerror', lambda err: print('PAGEERROR:', err))
+   page.on('console', lambda msg: print('CONSOLE:', msg.type, msg.text) if msg.type == 'error' else None)
    page.route('**/src/native-bridge.mjs',lambda route:route.fulfill(content_type='text/javascript',body=fixture))
    page.goto(args.url)
    page.get_by_text('UI fixture reply — copy this exact text.',exact=True).wait_for()
@@ -141,12 +151,18 @@ with sync_playwright() as p:
    if height > 500:
     page.locator('.bottom-nav').get_by_role('button',name=labels['nav_schedule'],exact=True).click()
     page.locator('.schedule-view').wait_for(state='visible')
+    page.get_by_text('产品评审会议',exact=True).wait_for(state='visible')
     assert not page.locator('.navigation-drawer').count()
     page.locator('.bottom-nav').get_by_role('button',name=labels['nav_work'],exact=True).click()
     page.locator('.work-view').wait_for(state='visible')
+    page.get_by_text('bob-core-client/1.0',exact=False).first.wait_for(state='visible')
     assert not page.locator('.navigation-drawer').count()
     page.locator('.bottom-nav').get_by_role('button',name=labels['nav_knowledge'],exact=True).click()
     page.locator('.knowledge-view').wait_for(state='visible')
+    page.locator('.knowledge-view .view-subtabs button').nth(2).click()
+    page.locator('.knowledge-view').get_by_text('偏好使用明暗自适应主题与 UTF-8 编码',exact=True).wait_for(state='visible')
+    page.locator('.knowledge-view .view-subtabs button').nth(3).click()
+    page.locator('.knowledge-view').get_by_text('模型调用位置、文件位置与记录权威三轴解耦',exact=True).wait_for(state='visible')
     assert not page.locator('.navigation-drawer').count()
     page.locator('.bottom-nav').get_by_role('button',name=labels['nav_chat'],exact=True).click()
     page.locator('.history').wait_for(state='visible')

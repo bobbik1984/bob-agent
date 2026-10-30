@@ -4,12 +4,12 @@
 
 | ID | 功能 | 阶段 | 状态 |
 |---|---|---|---|
-| F1 | 基础助理（PC 和手机） | BP3 | planned |
-| F2 | 跨设备连续 | BP3 | planned |
-| F3 | 个人事务域（日程、待办、笔记、决定） | BP3–BP4 | planned |
-| F4 | 手机让 PC 处理文件 | BP3 | planned |
-| F5 | Work 与 Harness | BP4 | planned |
-| F6 | 可选常开节点 | BP4 | planned |
+| F1 | 基础助理（PC 和手机：BYOK 13 供应商 199 模型直连、多会话、闪念捕获） | BP3 / S0–S1 | partial (local + Pixel 8 verified; real external key & FTS5 pending) |
+| F2 | 跨设备连续（草稿/阅读位置恢复、直连回合与个人事务 Replica→Home 同步） | BP3 / S1 | partial (kernel + transport verified) |
+| F3 | 个人事务域（日程 `event`/`todo`、Markdown 笔记、长期记忆、决定记录） | BP3–BP4 / S0–S3 | partial (SQLite `0006`+`0007` + 4 views verified) |
+| F4 | 手机让 PC 处理文件 | BP3 | S3 | planned |
+| F5 | Work 与 Harness（对话升级为项目、本机 Codex Runner、Online `bob-core-client/1.0`） | BP4 / S2–S3 | partial (`online-client.mjs` + Codex runner verified) |
+| F6 | 可选常开节点（`agent.bobbik.org` Online Work Service 契约与 `bob-node`） | BP4 / S2–S4 | partial (contract + client adapter ready) |
 | F7 | 开源发行 | BP6 | planned |
 
 ## F1 基础助理

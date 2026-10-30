@@ -494,10 +494,22 @@ HomeMessageContext必须由已认证且有会话访问授权的adapter构造；�
      - 写入 `executions` 终态（`status = 'completed' | 'failed' | 'cancelled'`，记录 `provider_reported` 模型身份与 token 观测证据）；
      - 写入 `messages` 回复行（`role = 'assistant'`，`source = 'replica_direct_provider'`，在 Replica 未与 Home 对账前 `acceptance = 'local'`）；
      - 若当前设备存在已配对的远端 Home（`paired_home.is_some()`），在同一事务写入 `replica_direct_sync_outbox`（含 `sync_request_id`、原用户消息、直连 Execution 摘要、Assistant 回复正文及整体 `payload_sha256`，初始 `sync_state = 'pending'`）。
-3. **重连后向 Home 主库幂等汇入（`receive_replica_direct_turn`）**：
+3. **重连后向 Home 主库幂等汇入（`Store::receive_replica_direct_turn_with_receipt`）**：
    - 当 Home 重新可达时，同步通道将 `replica_direct_sync_outbox` 中 `pending` 的完整回合记录提交给 Home：
      - Home 通过既有 `authorize()` 校验设备证书指纹、`home_epoch` 与会话访问权限；
      - Home 查验 `inbox_receipts(sync_request_id)`：若已存在且 `payload_sha256` 一致，直接返回原 `HomeReceipt { accepted: true }`（幂等无副作用）；若摘要不同则返回 `IdentityConflict`；
      - 若首次接收，Home 在单一事务内将用户消息（保留 `origin_device_id = replica_id`）、已完成 `Task`/`Execution`（`status = 'completed'`）与 Assistant 回复（`source = 'replica_direct_provider'`）全部以 `acceptance = 'home'` 写入 Home 主库，并写入 `domain_events` 与 `inbox_receipts`，**绝不在 Home 上再次调用模型**。
-4. **Replica 收到回执后提升状态**：
-   - Replica 收到经认证的 Home 回执后，调用 `mark_replica_direct_turn_synced`，将本机该回合的用户消息与回复从 `acceptance = 'local'` 提升为 `acceptance = 'home'`，并将 `replica_direct_sync_outbox.sync_state` 置为 `'synced'`。
+4. **Replica 收到回执后提升状态（`LocalApp::ack_replica_direct_turn`）**：
+   - Replica 收到经认证的 Home 回执后，调用 `ack_replica_direct_turn`，将本机该回合的用户消息与回复从 `acceptance = 'local'` 提升为 `acceptance = 'home'`，并将 `replica_direct_sync_outbox.sync_state` 置为 `'synced'`。
+
+### 9.3 个人事务域 schema 扩展与 Replica→Home 同步（迁移 `0006` + `0007`）
+
+- **`schedule_items`（含 `0007.sql` 扩展）**：
+  - 字段：`id`, `project_id`, `task_id`, `kind TEXT NOT NULL DEFAULT 'event' CHECK(kind IN ('event','todo'))`, `title`, `start_at`（13 位 UTC 毫秒）, `end_at`, `reminder_at`, `status CHECK(status IN ('scheduled','completed','cancelled'))`, `notes`, `version`, `created_at`, `updated_at`。
+  - 全部时间字段统一使用 13 位 UTC 毫秒（Unix ms），前端与 IPC 禁止混用秒或 `'done'` 状态名。
+- **`memories` 与 `decisions`**：
+  - `memories.state`：在 `0001.sql` 中定义为 `('proposed','active','superseded','forgotten')`，在 `0006.sql` 重建后支持 `('candidate','active','superseded','forgotten')`；正文列为 `body`。
+  - `decisions.status`：`('proposed','accepted','superseded','rejected')`，正文列为 `body`，通过 `app_decision_record` 与 `app_decision_status` 暴露给前端。
+- **`personal_ops_sync_outbox`（`0007.sql`，RV-13）**：
+  - 当设备已配对远端 Home（`paired_home.is_some()`）时，Replica 上的日程、笔记、捕获、记忆、决定变更在同一 SQLite 事务内写入 `personal_ops_sync_outbox(sync_request_id, object_kind, object_id, expected_version, payload_json, payload_sha256, sync_state)`。
+  - 重连同步时按 `rowid ASC` 顺序经 `HomeRequest::ReplicaPersonalOp` 提交给 Home `Store::receive_replica_personal_op_with_receipt`：Home 核对 `inbox_receipts` 幂等摘要与目标对象 `version`（若 `expected_version > 0` 且版本不匹配则写入 `rejected` 回执并返回 `StaleVersion`），成功后 Replica 调用 `LocalApp::ack_replica_personal_op` 标记 `'synced'`。

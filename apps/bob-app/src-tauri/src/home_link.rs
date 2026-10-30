@@ -104,6 +104,26 @@ pub(crate) async fn app_home_sync<R: tauri::Runtime>(
                 }
             }
         }
+        let personal_op = with_app(&app, |a| {
+            a.pending_personal_op_syncs()
+                .map(|mut v| v.drain(..).next())
+                .map_err(|_| "HOME_PERSONAL_SYNC_READ_FAILED")
+        })?;
+        if let Some(op) = personal_op {
+            if let Ok(ack) = connection.client.control(
+                connection.address,
+                connection.server_name.clone(),
+                &HomeRequest::ReplicaPersonalOp(op.clone()),
+                Limits::default(),
+            ) {
+                if ack.result.receipt.as_ref().is_some_and(|r| r.accepted) {
+                    let _ = with_app(&app, |a| {
+                        a.ack_replica_personal_op(&op.sync_id, now()?)
+                            .map_err(|_| "HOME_PERSONAL_SYNC_MARK_FAILED")
+                    });
+                }
+            }
+        }
         let request = with_app(&app, |a| {
             a.pending_home_result_at(result_index)
                 .map_err(|_| "HOME_RESULT_READ_FAILED")

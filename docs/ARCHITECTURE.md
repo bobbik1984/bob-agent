@@ -1,6 +1,6 @@
 # Bob — Architecture
 
-> 本文记录**已接受的边界与不变量**和**待决的架构候选**，两者分节标明。代码位置见 [COMPONENT_MAP](COMPONENT_MAP.md)，决策理由见 [DECISIONS](DECISIONS.md)。截至 2026-10-28，已开始新写内核与App控制器；完整功能仍未接通。WP-02详细合同见 [wiki/kernel-schema.md](wiki/kernel-schema.md)，当前验证范围以CURRENT_STAGE和Evidence为准。
+> 本文记录**已接受的边界与不变量**和**待决的架构候选**，两者分节标明。代码位置见 [COMPONENT_MAP](COMPONENT_MAP.md)，决策理由见 [DECISIONS](DECISIONS.md)。截至 2026-10-30，单一 Rust 内核（`bob-kernel` 迁移 `0001`–`0007`）、多会话与个人事务域（日程 `event`/`todo`、笔记、捕获、记忆、决定）、BYOK 直连及 Replica→Home 同步（含 `replica_direct_sync_outbox` 与 `personal_ops_sync_outbox`）、以及 `bob-core-client/1.0` Online Work Service 客户端适配器均已接通并通过测试。详细 Schema 见 [wiki/kernel-schema.md](wiki/kernel-schema.md)，当前验证范围以 [CURRENT_STAGE](CURRENT_STAGE.md) 和 Evidence 为准。
 
 ## 1 已接受的不变量
 

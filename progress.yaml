@@ -10,7 +10,7 @@ project:
   - Vue 3
   - Desktop
   - Android
-  current_task: F1 直接模型调用(BYOK)、已配对手机离线直连幂等汇合、F3 个人助理内核(personal_ops)与旧能力逐项对照表已完成全量回归与 GitHub Android 固定签名 APK 构建校验(run 40998475431 / APK SHA256 be0bb242...)，待插线安装实测与真实 Online 联调
+  current_task: 已完成 Stage S0 (RV-01~10)、Stage S1 核心 (RV-12~13 个人数据 Replica→Home 同步)、Stage S2/M0 客户端适配 (OL-02~04 PKCE + /api/client/v1) 及 RV-16~18 (决定记录 UI、对话升级为项目、自适应轮询)，76项 bob-kernel、24项 bob-transport、12项 Node 与 5 视口 Playwright 全绿
   development_plan: docs/CURRENT_STAGE.md
 phases:
 - name: BP0 真相与保护
@@ -38,12 +38,22 @@ phases:
 - name: BP2 骨架与契约
   tasks:
   - text: BP2-01 建立 1.0.1 Rust Workspace (bob-kernel) + Tauri v2 + Vue 3 骨架
-    status: active
+    status: done
   - text: BP2-02 落地 BOB-D-008 懒式响应、输入框打字预热与本地 Durable Outbox 闭环及测试
-    status: active
-- name: BP3 个人环境 MVP
+    status: done
+- name: BP3 个人环境 MVP（按 S0 → S2 推进）
   tasks:
-  - text: BP3-01 X1C Home ↔ Android Replica 核心同步与远程文件只读浏览；公网异地配对与重连待实现/验收
+  - text: Stage S0 (RV-01~10)：修复前端新视图↔内核契约错位、去除静默吞错、建立Rust↔UI JSON快照契约测试并修正文档超范围陈述
+    status: done
+  - text: Stage S1 (RV-11~13)：已完成虚假控件禁用(RV-12)与笔记/日程/记忆/决定 Replica→Home 同步(RV-13)；待填真实外部商业Key完成RV-11真机问答归档
     status: active
-  - text: BP3-02 接入 Harness Runner 进程边界并在统一 UI 跑通任务治理闭环
+  - text: Stage S2 / M0 (OL-01~07)：已完成 bob-core-client/1.0 PKCE 配对与 /api/client/v1 只读客户端及 WorkView 面板(OL-02~04)；待获批探测生产端点(OL-01)与 cloud-agent 写入扩展(OL-05~07)
     status: active
+  - text: BP3-01 X1C Home ↔ Android Replica 私网配对、多会话与个人事务同步已通；远程文件只读浏览(F4)与公网异地重连待验收
+    status: active
+- name: BP4–BP5 Work/Harness 与三端同源（按 S3 → S4 推进）
+  tasks:
+  - text: Stage S3 / M1 (XP-01~03, XP-05, RV-14~18)：已完成决定记录UI(RV-16)、对话升级为项目(RV-17)与轮询退避(RV-18)；待抽离 bob-runtime 与拆分 App.vue
+    status: active
+  - text: Stage S4 / M2–M4 (XP-04, XP-06~10)：交付无界面 bob-node 云端服务端与 Web 适配层，实现手机/电脑/浏览器三端同源并收敛旧 Online
+    status: todo

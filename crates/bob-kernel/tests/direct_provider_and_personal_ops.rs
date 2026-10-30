@@ -392,13 +392,14 @@ fn f3_personal_assistant_domain_lifecycle_works_end_to_end() {
     assert_eq!(note.title, "Bob 1.0.1 架构要点");
     assert_eq!(app.list_notes(None).unwrap().len(), 1);
 
-    // 4. Schedule items
+    // 4. Schedule items (both 'event' and 'todo' kinds, plus negative status validation)
     let sched = app
-        .create_schedule_item(
+        .create_schedule_item_with_kind(
             "sched-1",
             None,
             None,
             "产品评审会议",
+            "event",
             1_762_000_000_000,
             Some(1_762_003_600_000),
             Some(1_761_996_400_000),
@@ -406,12 +407,44 @@ fn f3_personal_assistant_domain_lifecycle_works_end_to_end() {
             150,
         )
         .unwrap();
+    assert_eq!(sched.kind, "event");
     assert_eq!(sched.status, "scheduled");
+    let todo_item = app
+        .create_schedule_item_with_kind(
+            "sched-todo-1",
+            None,
+            None,
+            "补齐契约对齐回归测试",
+            "todo",
+            1_762_005_000_000,
+            None,
+            None,
+            "RV-01 ~ RV-07",
+            155,
+        )
+        .unwrap();
+    assert_eq!(todo_item.kind, "todo");
+    assert!(app
+        .create_schedule_item_with_kind(
+            "sched-bad-kind",
+            None,
+            None,
+            "非法分类",
+            "invalid_kind",
+            1_762_005_000_000,
+            None,
+            None,
+            "",
+            156,
+        )
+        .is_err());
+    // Reject non-canonical 'done' status
+    assert!(app.update_schedule_status("sched-1", "done", 158).is_err());
     let sched_done = app
         .update_schedule_status("sched-1", "completed", 160)
         .unwrap();
     assert_eq!(sched_done.status, "completed");
-    assert_eq!(app.list_schedule_items().unwrap().len(), 1);
+    assert_eq!(app.list_schedule_items().unwrap().len(), 2);
 
     // 5. Decisions
     let proj = app
@@ -425,14 +458,193 @@ fn f3_personal_assistant_domain_lifecycle_works_end_to_end() {
             "msg-cap",
             "模型调用位置、文件位置与记录权威三轴解耦",
             "{\"reason\":\"防止把主库权威误做成所有模型调用必须经由 Home\"}",
-            "accepted",
+            "proposed",
             None,
         )
         .unwrap();
     assert_eq!(dec.project_id, proj.id);
+    assert_eq!(dec.status, "proposed");
+    let dec_accepted = app.update_decision_status("dec-1", "accepted").unwrap();
+    assert_eq!(dec_accepted.status, "accepted");
+    assert_eq!(dec_accepted.version, 2);
     assert_eq!(app.list_decisions(&proj.id).unwrap().len(), 1);
+    assert_eq!(app.list_all_decisions().unwrap().len(), 1);
     assert_eq!(
         json!(dec.body),
         json!("模型调用位置、文件位置与记录权威三轴解耦")
     );
+
+    // RV-06: Export canonical PersonalOpsSnapshot fixture directly from Rust serde_json
+    let canonical_snapshot = json!({
+        "schedules": app.list_schedule_items().unwrap(),
+        "notes": app.list_notes(None).unwrap(),
+        "captures": app.list_captures().unwrap(),
+        "memories": app.list_memories(false).unwrap(),
+        "decisions": app.list_all_decisions().unwrap(),
+        "pending_sync_count": app.pending_personal_op_syncs().unwrap().len(),
+    });
+    let fixture_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .join("apps")
+        .join("bob-app")
+        .join("tests")
+        .join("fixtures");
+    std::fs::create_dir_all(&fixture_dir).unwrap();
+    let fixture_path = fixture_dir.join("personal_snapshot.json");
+    std::fs::write(
+        &fixture_path,
+        serde_json::to_string_pretty(&canonical_snapshot).unwrap(),
+    )
+    .unwrap();
+    assert!(fixture_path.exists());
+}
+
+#[test]
+fn rv13_paired_replica_personal_ops_sync_to_home_idempotently_with_version_checks() {
+    let home_dir = tempfile::tempdir().unwrap();
+    let phone_dir = tempfile::tempdir().unwrap();
+    let mut home = LocalApp::open(&home_dir.path().join("home.db")).unwrap();
+    let mut phone = LocalApp::open(&phone_dir.path().join("phone.db")).unwrap();
+
+    let home_id = home.device_id().to_owned();
+    let phone_id = phone.device_id().to_owned();
+    let phone_session = phone.default_session().unwrap();
+
+    home.issue_pairing_invitation(
+        &PairingInvitation {
+            id: "inv-psync".into(),
+            home_device_id: home_id.clone(),
+            home_epoch: 1,
+            home_identity_sha256: PIN.into(),
+            expires_at: 50_000,
+        },
+        &[9u8; 32],
+        10,
+    )
+    .unwrap();
+    home.propose_pairing_peer(
+        "inv-psync",
+        &[9u8; 32],
+        &ProvenPairingPeer {
+            device_id: phone_id.clone(),
+            identity_sha256: PIN.into(),
+            public_key_ref: "phone-pub".into(),
+        },
+        20,
+    )
+    .unwrap();
+    home.confirm_pairing_peer(
+        "inv-psync",
+        &phone_id,
+        PIN,
+        &phone_session,
+        60_000,
+        true,
+        30,
+    )
+    .unwrap();
+    phone.bind_confirmed_home(&home_id, 1, PIN, 35).unwrap();
+
+    // Phone creates schedule (todo), note, capture, and memory while offline
+    let sched = phone
+        .create_schedule_item_with_kind(
+            "p-sched-1",
+            None,
+            None,
+            "手机端新增待办事项",
+            "todo",
+            1_762_100_000_000,
+            None,
+            None,
+            "离线创建，待同步回 Home",
+            100,
+        )
+        .unwrap();
+    assert_eq!(sched.acceptance, "local");
+    assert_eq!(sched.kind, "todo");
+
+    let note = phone
+        .upsert_note(
+            "p-note-1",
+            None,
+            None,
+            "手机随手记",
+            "# 离线笔记\n等待同步到电脑主库",
+            &["mobile".to_owned()],
+            110,
+        )
+        .unwrap();
+    assert_eq!(note.acceptance, "local");
+
+    let cap = phone
+        .create_capture("p-cap-1", None, "移动端速记：下周五发版", 120)
+        .unwrap();
+    let mem = phone
+        .propose_memory(
+            "p-mem-1",
+            Some(&cap.id),
+            None,
+            "用户习惯在周五下午进行版本发布",
+            None,
+        )
+        .unwrap();
+    assert_eq!(mem.state, "proposed");
+
+    let pending = phone.pending_personal_op_syncs().unwrap();
+    assert_eq!(pending.len(), 4);
+
+    let ctx = home
+        .authenticate_home_session(&home_id, 1, PIN, &phone_session, 130)
+        .unwrap();
+
+    for entry in &pending {
+        let receipt = home
+            .host_receive_replica_personal_op(&ctx, entry, 140)
+            .unwrap();
+        assert!(receipt.accepted);
+        // Idempotent duplicate delivery succeeds
+        let receipt_dup = home
+            .host_receive_replica_personal_op(&ctx, entry, 141)
+            .unwrap();
+        assert!(receipt_dup.accepted);
+        phone.ack_replica_personal_op(&entry.sync_id, 145).unwrap();
+    }
+    assert!(phone.pending_personal_op_syncs().unwrap().is_empty());
+
+    // Verify phone items promoted to 'home' acceptance and Home has all 4 records
+    assert_eq!(phone.list_schedule_items().unwrap()[0].acceptance, "home");
+    assert_eq!(phone.list_notes(None).unwrap()[0].acceptance, "home");
+    assert_eq!(home.list_schedule_items().unwrap().len(), 1);
+    assert_eq!(home.list_schedule_items().unwrap()[0].kind, "todo");
+    assert_eq!(home.list_notes(None).unwrap().len(), 1);
+    assert_eq!(home.list_captures().unwrap().len(), 1);
+    assert_eq!(home.list_memories(false).unwrap().len(), 1);
+
+    // Update schedule status on phone (version 1 -> 2, expected_version = 1)
+    phone
+        .update_schedule_status("p-sched-1", "completed", 200)
+        .unwrap();
+    let update_entries = phone.pending_personal_op_syncs().unwrap();
+    assert_eq!(update_entries.len(), 1);
+    assert_eq!(update_entries[0].expected_version, 1);
+
+    // Apply update on Home
+    home.host_receive_replica_personal_op(&ctx, &update_entries[0], 210)
+        .unwrap();
+    assert_eq!(home.list_schedule_items().unwrap()[0].status, "completed");
+    assert_eq!(home.list_schedule_items().unwrap()[0].version, 2);
+
+    // Stale expected_version conflict: if Home already moved to version 2, an entry claiming expected_version = 1 with different status is rejected
+    phone.ack_replica_personal_op(&update_entries[0].sync_id, 215).unwrap();
+    phone
+        .update_schedule_status("p-sched-1", "cancelled", 220)
+        .unwrap();
+    let mut stale = phone.pending_personal_op_syncs().unwrap()[0].clone();
+    stale.expected_version = 1; // Stale expected version!
+    assert!(home
+        .host_receive_replica_personal_op(&ctx, &stale, 225)
+        .is_err());
 }

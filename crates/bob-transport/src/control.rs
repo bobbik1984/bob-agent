@@ -3,7 +3,7 @@
 use super::*;
 use bob_kernel::{
     direct_provider::ReplicaDirectTurnPayload, dispatch::CancelExecution, home_result::HomeResult,
-    outbox::Store,
+    outbox::Store, personal_ops::PersonalOpSyncEntry,
 };
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -20,6 +20,7 @@ pub enum HomeRequest {
     Cancel(CancelExecution),
     LookupCancel(CancelExecution),
     ReplicaDirectTurn(ReplicaDirectTurnPayload),
+    ReplicaPersonalOp(PersonalOpSyncEntry),
 }
 impl HomeRequest {
     pub fn binding(&self) -> AppendMessage {
@@ -43,16 +44,28 @@ impl HomeRequest {
                 home_epoch: r.home_epoch,
                 content: serde_json::json!({"text": r.user_text}),
             },
+            Self::ReplicaPersonalOp(r) => AppendMessage {
+                request_id: r.sync_id.clone(),
+                session_id: "personal-ops-sync".to_owned(),
+                message_id: r.entity_id.clone(),
+                origin_device_id: r.origin_device_id.clone(),
+                home_device_id: r.home_device_id.clone(),
+                home_epoch: r.home_epoch,
+                content: serde_json::Value::Null,
+            },
         }
     }
     fn payload_hash(&self) -> Result<String, TransportError> {
         if let Self::ReplicaDirectTurn(r) = self {
             return Ok(r.payload_sha256.clone());
         }
+        if let Self::ReplicaPersonalOp(r) = self {
+            return Ok(r.payload_sha256.clone());
+        }
         let bytes = match self {
             Self::Append(r) | Self::Lookup(r) | Self::Result(r) => serde_json::to_vec(r),
             Self::Cancel(r) | Self::LookupCancel(r) => serde_json::to_vec(r),
-            Self::ReplicaDirectTurn(_) => unreachable!(),
+            Self::ReplicaDirectTurn(_) | Self::ReplicaPersonalOp(_) => unreachable!(),
         }
         .map_err(|_| TransportError::Protocol)?;
         Ok(format!("{:x}", Sha256::digest(bytes)))
@@ -204,6 +217,12 @@ impl PinnedServer {
                 }
                 HomeRequest::ReplicaDirectTurn(r) => store
                     .receive_replica_direct_turn(&ctx, r, now)
+                    .map(|r| HomeResult {
+                        receipt: Some(r),
+                        execution: None,
+                    }),
+                HomeRequest::ReplicaPersonalOp(r) => store
+                    .receive_replica_personal_op_with_receipt(&ctx, r, now)
                     .map(|r| HomeResult {
                         receipt: Some(r),
                         execution: None,
