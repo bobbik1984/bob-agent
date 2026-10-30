@@ -85,12 +85,15 @@ with sync_playwright() as p:
  browser = p.chromium.launch()
  try:
   for width,height,locale,scheme in [(390,844,'en-US','light'),(1180,757,'en-US','light'),(390,420,'en-US','light'),(390,844,'zh-CN','dark'),(1180,757,'zh-CN','dark')]:
-   labels={'copy':'复制','settings':'设置','close':'关闭设置','back':'返回设置','by_device':'按执行设备','by_project':'按项目 / 任务'} if locale=='zh-CN' else {'copy':'Copy','settings':'Settings','close':'Close settings','back':'Back to Settings','by_device':'By Execution Device','by_project':'By Project / Task'}
+   labels={'copy':'复制','settings':'设置','close':'关闭设置','back':'返回设置','by_device':'按执行设备','by_project':'按项目 / 任务','models_badge':'199 个可用模型'} if locale=='zh-CN' else {'copy':'Copy','settings':'Settings','close':'Close settings','back':'Back to Settings','by_device':'By Execution Device','by_project':'By Project / Task','models_badge':'199 available models'}
    context=browser.new_context(viewport={'width':width,'height':height},permissions=['clipboard-read','clipboard-write'],locale=locale,color_scheme=scheme)
    page=context.new_page()
    page.route('**/src/native-bridge.mjs',lambda route:route.fulfill(content_type='text/javascript',body=fixture))
    page.goto(args.url)
    page.get_by_text('UI fixture reply — copy this exact text.',exact=True).wait_for()
+   expected_layout = 'layout-desktop-wide' if (width > height and width > 768) else 'layout-mobile-portrait'
+   shell_class = page.locator('.app-shell').get_attribute('class')
+   assert expected_layout in shell_class, shell_class
    page.locator('textarea').fill('Retain this draft')
    history=page.locator('.history').bounding_box()
    assert history['height'] > height*.40, history
@@ -112,7 +115,10 @@ with sync_playwright() as p:
    page.get_by_role('button',name=labels['settings'],exact=True).click()
    page.get_by_role('dialog').wait_for(state='visible')
    page.locator('.settings-home-grid').wait_for(state='visible')
+   page.get_by_text(labels['models_badge'],exact=True).wait_for(state='visible')
+   assert page.locator('.vault-key-row').count() >= 11
    assert page.get_by_role('button',name=labels['close']).evaluate('(e)=>e===document.activeElement')
+   page.screenshot(path=str(args.output/f'ui-modelhub-{width}-{height}-{locale}-{scheme}.png'))
    page.locator('.open-provider-subpage').click()
    page.locator('.provider-form').wait_for(state='visible')
    page.get_by_role('button',name=labels['back'],exact=True).click()
@@ -129,7 +135,7 @@ with sync_playwright() as p:
    assert page.locator('textarea').input_value()=='Retain this draft'
    assert page.locator('.history').bounding_box()==history
    page.screenshot(path=str(args.output/f'ui-{width}-{height}-{locale}-{scheme}.png'))
-   results.append({'viewport':[width,height],'locale':locale,'scheme':scheme,'history_height':history['height'],'copy':True,'multi_session_switch_draft':True,'settings_subpage_and_return_draft':True,'logo':True,'scope':'UI fixture, not Android keyboard or real Home'})
+   results.append({'viewport':[width,height],'layout':expected_layout,'locale':locale,'scheme':scheme,'history_height':history['height'],'model_hub_199':True,'copy':True,'multi_session_switch_draft':True,'settings_subpage_and_return_draft':True,'logo':True,'scope':'UI fixture, not Android keyboard or real Home'})
    context.close()
  finally:
   browser.close()

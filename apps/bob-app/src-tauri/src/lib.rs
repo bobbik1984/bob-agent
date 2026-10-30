@@ -616,6 +616,13 @@ fn configure<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R>
             direct_llm::app_provider_test,
             direct_llm::app_route_get,
             direct_llm::app_route_set,
+            direct_llm::app_model_hub_get,
+            direct_llm::app_provider_key_set,
+            direct_llm::app_model_role_assign,
+            direct_llm::app_provider_variant_set,
+            direct_llm::app_custom_model_save,
+            direct_llm::app_custom_model_delete,
+            direct_llm::app_registry_save,
             app_execute,
             app_executions,
             app_cancel

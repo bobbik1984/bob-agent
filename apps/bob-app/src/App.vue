@@ -1,8 +1,11 @@
 <script setup>
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import HomeConnection from './HomeConnection.vue';
 import { bindViewport } from './viewport.mjs';
+import { createLayoutState, getProviderLogo } from './layout-mode.mjs';
 import brandLogo from './assets/bob-logo.svg';
+import defaultRegistryData from './assets/model_providers.json';
+import mobileModelsData from './assets/mobile_models.json';
 import { useI18n } from 'vue-i18n';
 import { kernelBridge } from './native-bridge.mjs';
 import { createSendController } from './send-controller.mjs';
@@ -29,6 +32,17 @@ const theme = ref('system');
 const creatingKind = ref(null); // 'project' | 'conversation' | null
 const creatingForProjectId = ref(null);
 const newItemTitle = ref('');
+
+const layoutState = ref(
+  createLayoutState(
+    typeof window !== 'undefined' ? window : { innerWidth: 1180, innerHeight: 757 },
+    typeof navigator !== 'undefined' ? navigator : { userAgent: '' },
+  ),
+);
+function updateLayoutState() {
+  if (typeof window === 'undefined') return;
+  layoutState.value = createLayoutState(window, navigator);
+}
 
 let poll = null;
 let disposed = false;
@@ -91,9 +105,239 @@ const connectionKey = computed(() =>
 
 const settingsOpen = ref(false);
 const settingsView = ref('home'); // 'home' | 'device' | 'provider'
+const settingsTab = ref('model'); // 'model' | 'connection' | 'workspace' | 'tasks' | 'appearance' | 'about'
 const navigationOpen = ref(false);
 const devicePanel = ref(null);
 const deviceCapabilities = ref(null);
+
+// Legacy-aligned ModelHub state (13 providers, 199 visible models)
+function cloneDefaultRegistry() {
+  try {
+    return JSON.parse(JSON.stringify(defaultRegistryData));
+  } catch {
+    return { version: '1.1.0', providers: [] };
+  }
+}
+
+const modelHub = ref({
+  registry: cloneDefaultRegistry(),
+  state: {
+    active_roles: {
+      main: {
+        provider_id: 'deepseek',
+        model_id: 'deepseek-chat',
+        model_name: 'DeepSeek V4 Flash',
+        provider_name: 'DeepSeek',
+      },
+      clerk: {
+        provider_id: 'doubao',
+        model_id: 'doubao-seed-1-6-flash-250828',
+        model_name: 'Doubao Seed 1.6 Flash',
+        provider_name: '字节火山',
+      },
+      vision: {
+        provider_id: 'gemini',
+        model_id: 'gemini-2.5-flash',
+        model_name: 'Gemini 2.5 Flash',
+        provider_name: 'Google Gemini',
+      },
+    },
+    provider_variants: {
+      qwen: 'default',
+      minimax: 'default',
+      zhipu: 'default',
+      kimi: 'default',
+    },
+    custom_models: [],
+  },
+  configured_keys: {
+    deepseek: false,
+    minimax: false,
+    qwen: false,
+    zhipu: false,
+    kimi: false,
+    doubao: false,
+    openai: false,
+    gemini: false,
+    anthropic: false,
+    modelscope: false,
+    openrouter: false,
+    tavily: false,
+    tinyfish: false,
+  },
+  available_model_count: 199,
+  active_profile: null,
+});
+
+const mobileModels = ref(Array.isArray(mobileModelsData) ? mobileModelsData : []);
+const localRepoExpanded = ref(false);
+const localMirrorSource = ref('hf'); // 'hf' | 'cn'
+const apiKeysVaultExpanded = ref(true);
+const registryExpanded = ref(false);
+const editingRole = ref(null); // 'main' | 'clerk' | 'vision' | null
+const selectorProviderId = ref('deepseek');
+const modelSearchQuery = ref('');
+const quickSwitcherOpen = ref(false);
+const quickSwitcherProviderId = ref('deepseek');
+const keyInputs = reactive({});
+const customModelDraft = reactive({
+  name: '',
+  model_id: '',
+  base_url: '',
+  api_key: '',
+});
+
+const modelProviderKeyList = [
+  { id: 'deepseek', name: 'DeepSeek' },
+  { id: 'minimax', name: 'MiniMax' },
+  { id: 'qwen', name: '阿里云百炼' },
+  { id: 'zhipu', name: '智谱 AI' },
+  { id: 'kimi', name: '月之暗面' },
+  { id: 'doubao', name: '字节火山' },
+  { id: 'openai', name: 'OpenAI' },
+  { id: 'gemini', name: 'Google Gemini' },
+  { id: 'anthropic', name: 'Anthropic Claude' },
+  { id: 'modelscope', name: 'ModelScope' },
+  { id: 'openrouter', name: 'OpenRouter' },
+];
+
+const toolServiceKeyList = [
+  { id: 'tavily', name: 'Tavily Search' },
+  { id: 'tinyfish', name: 'TinyFish Web Agent' },
+];
+
+const totalAvailableModelsCount = computed(() => {
+  const providers = modelHub.value?.registry?.providers || [];
+  let total = 0;
+  for (const p of providers) {
+    for (const m of p.models || []) {
+      if (m.visible !== false) total += 1;
+    }
+  }
+  total += (modelHub.value?.state?.custom_models || []).length;
+  return total || modelHub.value?.available_model_count || 199;
+});
+
+const roleCards = computed(() => {
+  const roles = modelHub.value?.state?.active_roles || {};
+  return [
+    {
+      key: 'main',
+      title: t('roleMainTitle'),
+      desc: t('roleMainDesc'),
+      icon: 'monitor',
+      assignment: roles.main || {
+        provider_id: 'deepseek',
+        model_id: 'deepseek-chat',
+        model_name: 'DeepSeek V4 Flash',
+        provider_name: 'DeepSeek',
+      },
+    },
+    {
+      key: 'clerk',
+      title: t('roleClerkTitle'),
+      desc: t('roleClerkDesc'),
+      icon: 'clerk',
+      assignment: roles.clerk || {
+        provider_id: 'doubao',
+        model_id: 'doubao-seed-1-6-flash-250828',
+        model_name: 'Doubao Seed 1.6 Flash',
+        provider_name: '字节火山',
+      },
+    },
+    {
+      key: 'vision',
+      title: t('roleVisionTitle'),
+      desc: t('roleVisionDesc'),
+      icon: 'vision',
+      assignment: roles.vision || {
+        provider_id: 'gemini',
+        model_id: 'gemini-2.5-flash',
+        model_name: 'Gemini 2.5 Flash',
+        provider_name: 'Google Gemini',
+      },
+    },
+  ];
+});
+
+const activeMainRole = computed(
+  () =>
+    modelHub.value?.state?.active_roles?.main || {
+      provider_id: 'deepseek',
+      model_id: 'deepseek-chat',
+      model_name: 'DeepSeek V4 Flash',
+      provider_name: 'DeepSeek',
+    },
+);
+
+const selectorProviders = computed(() => {
+  const list = [...(modelHub.value?.registry?.providers || [])];
+  if ((modelHub.value?.state?.custom_models || []).length > 0) {
+    list.push({
+      id: 'custom',
+      name: t('customModelsSectionTitle'),
+      base_url: '',
+      models: modelHub.value.state.custom_models.map(cm => ({
+        id: cm.model_id,
+        name: `${cm.name} (${cm.model_id})`,
+        visible: true,
+        custom_id: cm.id,
+      })),
+    });
+  }
+  return list;
+});
+
+const currentSelectorProvider = computed(
+  () =>
+    selectorProviders.value.find(p => p.id === selectorProviderId.value) ||
+    selectorProviders.value[0] ||
+    null,
+);
+
+const currentSelectorModels = computed(() => {
+  const prov = currentSelectorProvider.value;
+  if (!prov) return [];
+  const q = modelSearchQuery.value.trim().toLowerCase();
+  return (prov.models || []).filter(m => {
+    if (m.visible === false) return false;
+    if (!q) return true;
+    return (
+      (m.name && m.name.toLowerCase().includes(q)) ||
+      (m.id && m.id.toLowerCase().includes(q))
+    );
+  });
+});
+
+const quickSwitcherProvider = computed(
+  () =>
+    selectorProviders.value.find(p => p.id === quickSwitcherProviderId.value) ||
+    selectorProviders.value[0] ||
+    null,
+);
+
+const quickSwitcherModels = computed(() => {
+  const prov = quickSwitcherProvider.value;
+  if (!prov) return [];
+  return (prov.models || []).filter(m => m.visible !== false);
+});
+
+function isKeyConfigured(providerId) {
+  return Boolean(modelHub.value?.configured_keys?.[providerId]);
+}
+
+function toggleRoleEditor(roleKey) {
+  if (editingRole.value === roleKey) {
+    editingRole.value = null;
+    return;
+  }
+  editingRole.value = roleKey;
+  const current = modelHub.value?.state?.active_roles?.[roleKey];
+  if (current?.provider_id) {
+    selectorProviderId.value = current.provider_id;
+  }
+  modelSearchQuery.value = '';
+}
 
 const providerProfile = ref(null);
 const providerForm = ref({
@@ -116,6 +360,215 @@ function syncProviderForm(profile) {
   providerForm.value.modelId = profile.model_id || 'gpt-4o-mini';
   providerForm.value.apiKey = '';
   providerForm.value.enabled = Boolean(profile.enabled);
+}
+
+function resolveEntryToRoleObj(entryOrObj, registryProviders) {
+  if (!entryOrObj) return null;
+  if (typeof entryOrObj === 'object' && entryOrObj.provider_id) {
+    return entryOrObj;
+  }
+  const str = String(entryOrObj);
+  const [provider_id, model_id] = str.includes('::')
+    ? str.split('::', 2)
+    : ['deepseek', str];
+  const prov = (registryProviders || []).find(p => p.id === provider_id);
+  const mdl = (prov?.models || []).find(m => m.id === model_id);
+  return {
+    provider_id,
+    model_id,
+    model_name: mdl?.name || model_id,
+    provider_name: prov?.name || provider_id,
+  };
+}
+
+function applyModelHubSnapshot(snap) {
+  if (!snap) return;
+  if (snap.registry?.providers?.length) {
+    modelHub.value.registry = snap.registry;
+  }
+  const providers = modelHub.value.registry?.providers || [];
+  if (snap.state) {
+    modelHub.value.state = snap.state;
+  }
+  const rawRoles = snap.activeRoles || snap.state?.active_roles;
+  if (rawRoles) {
+    for (const rKey of ['main', 'clerk', 'vision']) {
+      const resolved = resolveEntryToRoleObj(rawRoles[rKey], providers);
+      if (resolved) {
+        modelHub.value.state.active_roles[rKey] = resolved;
+      }
+    }
+  }
+  if (snap.providerVariants) {
+    modelHub.value.state.provider_variants = {
+      ...modelHub.value.state.provider_variants,
+      ...snap.providerVariants,
+    };
+  }
+  if (Array.isArray(snap.customModels)) {
+    modelHub.value.state.custom_models = snap.customModels.map(cm => ({
+      id: cm.id,
+      name: cm.displayName || cm.name || cm.modelId,
+      model_id: cm.modelId || cm.model_id,
+      base_url: cm.baseUrl || cm.base_url,
+    }));
+  }
+  if (snap.configured_keys || snap.providerKeys || snap.toolKeys) {
+    modelHub.value.configured_keys = {
+      ...modelHub.value.configured_keys,
+      ...(snap.configured_keys || {}),
+      ...(snap.providerKeys || {}),
+      ...(snap.toolKeys || {}),
+    };
+  }
+  if (typeof snap.totalAvailableCount === 'number') {
+    modelHub.value.available_model_count = snap.totalAvailableCount;
+  } else if (typeof snap.available_model_count === 'number') {
+    modelHub.value.available_model_count = snap.available_model_count;
+  }
+  if (snap.active_profile) {
+    modelHub.value.active_profile = snap.active_profile;
+    syncProviderForm(snap.active_profile);
+  }
+}
+
+async function loadModelHub() {
+  if (available && kernelBridge.modelHubGet) {
+    const snap = await kernelBridge.modelHubGet().catch(() => null);
+    if (snap) {
+      applyModelHubSnapshot(snap);
+      return;
+    }
+  }
+  if (available && kernelBridge.providerGet) {
+    const p = await kernelBridge.providerGet().catch(() => null);
+    if (p) {
+      syncProviderForm(p);
+      if (p.api_key_configured) {
+        modelHub.value.configured_keys.openai = true;
+      }
+    }
+  }
+}
+
+async function saveProviderKey(providerId) {
+  const rawKey = (keyInputs[providerId] || '').trim();
+  if (!rawKey || providerBusy.value) return;
+  providerBusy.value = true;
+  try {
+    if (available && kernelBridge.providerKeySet) {
+      const snap = await kernelBridge
+        .providerKeySet(providerId, rawKey, false)
+        .catch(() => null);
+      if (snap) {
+        applyModelHubSnapshot(snap);
+      } else {
+        modelHub.value.configured_keys[providerId] = true;
+      }
+    } else {
+      modelHub.value.configured_keys[providerId] = true;
+    }
+    keyInputs[providerId] = '';
+    await reload();
+  } finally {
+    providerBusy.value = false;
+  }
+}
+
+async function clearProviderKey(providerId) {
+  if (providerBusy.value) return;
+  providerBusy.value = true;
+  try {
+    if (available && kernelBridge.providerKeySet) {
+      const snap = await kernelBridge
+        .providerKeySet(providerId, null, true)
+        .catch(() => null);
+      if (snap) {
+        applyModelHubSnapshot(snap);
+      } else {
+        modelHub.value.configured_keys[providerId] = false;
+      }
+    } else {
+      modelHub.value.configured_keys[providerId] = false;
+    }
+    keyInputs[providerId] = '';
+    await reload();
+  } finally {
+    providerBusy.value = false;
+  }
+}
+
+async function selectRoleModel(roleKey, providerObj, modelObj) {
+  if (!providerObj || !modelObj) return;
+  const payload = {
+    role: roleKey,
+    providerId: providerObj.id,
+    modelId: modelObj.id,
+    modelName: modelObj.name || modelObj.id,
+    providerName: providerObj.name || providerObj.id,
+  };
+  modelHub.value.state.active_roles[roleKey] = {
+    provider_id: payload.providerId,
+    model_id: payload.modelId,
+    model_name: payload.modelName,
+    provider_name: payload.providerName,
+  };
+  if (available && kernelBridge.modelRoleAssign) {
+    const snap = await kernelBridge.modelRoleAssign(payload).catch(() => null);
+    if (snap) applyModelHubSnapshot(snap);
+  }
+  editingRole.value = null;
+  quickSwitcherOpen.value = false;
+  await reload();
+}
+
+async function setProviderVariant(providerId, variant) {
+  if (!modelHub.value.state.provider_variants) {
+    modelHub.value.state.provider_variants = {};
+  }
+  modelHub.value.state.provider_variants[providerId] = variant;
+  if (available && kernelBridge.providerVariantSet) {
+    const snap = await kernelBridge.providerVariantSet(providerId, variant).catch(() => null);
+    if (snap) applyModelHubSnapshot(snap);
+  }
+}
+
+async function addCustomModel() {
+  const name = customModelDraft.name.trim();
+  const model_id = customModelDraft.model_id.trim();
+  const base_url = customModelDraft.base_url.trim();
+  const api_key = customModelDraft.api_key.trim();
+  if (!name || !model_id || !base_url) return;
+  const id = `custom-${Date.now()}`;
+  if (available && kernelBridge.customModelSave) {
+    const snap = await kernelBridge
+      .customModelSave({
+        id,
+        name,
+        modelId: model_id,
+        baseUrl: base_url,
+        apiKey: api_key || null,
+      })
+      .catch(() => null);
+    if (snap) applyModelHubSnapshot(snap);
+  } else {
+    modelHub.value.state.custom_models.push({ id, name, model_id, base_url });
+  }
+  customModelDraft.name = '';
+  customModelDraft.model_id = '';
+  customModelDraft.base_url = '';
+  customModelDraft.api_key = '';
+}
+
+async function removeCustomModel(id) {
+  if (available && kernelBridge.customModelDelete) {
+    const snap = await kernelBridge.customModelDelete(id).catch(() => null);
+    if (snap) applyModelHubSnapshot(snap);
+  } else {
+    modelHub.value.state.custom_models = (modelHub.value.state.custom_models || []).filter(
+      m => m.id !== id,
+    );
+  }
 }
 
 function onProviderKindChange() {
@@ -155,11 +608,9 @@ function onProviderKindChange() {
 
 async function openProviderSettings() {
   settingsView.value = 'provider';
+  settingsTab.value = 'model';
   settingsOpen.value = true;
-  if (available && kernelBridge.providerGet) {
-    const p = await kernelBridge.providerGet().catch(() => null);
-    if (p) syncProviderForm(p);
-  }
+  await loadModelHub();
   if (available && sessionId.value && kernelBridge.routeGet) {
     const r = await kernelBridge.routeGet(sessionId.value).catch(() => null);
     if (r) executionRoute.value = r;
@@ -244,12 +695,27 @@ function toggleSettingsHome() {
     settingsOpen.value = false;
   } else {
     settingsView.value = 'home';
+    settingsTab.value = 'model';
     settingsOpen.value = true;
+    void loadModelHub();
+  }
+}
+
+async function switchSettingsTab(tab) {
+  settingsTab.value = tab;
+  if (tab === 'connection') {
+    await openDevices();
+  } else if (tab === 'model') {
+    settingsView.value = 'home';
+    await loadModelHub();
+  } else {
+    settingsView.value = 'home';
   }
 }
 
 async function openDevices() {
   settingsView.value = 'device';
+  settingsTab.value = 'connection';
   settingsOpen.value = true;
   await nextTick();
   await devicePanel.value?.openDetails();
@@ -587,6 +1053,7 @@ async function startup() {
     const state = await kernelBridge.bootstrap();
     sessionId.value = state.session_id;
     await reload();
+    await loadModelHub();
     const activeItem = catalog.value?.conversations?.find(c => c.id === sessionId.value);
     if (activeItem?.view_state && !draft.value) {
       draft.value = activeItem.view_state.draft || '';
@@ -669,6 +1136,8 @@ const statusKeys = {
 
 onMounted(async () => {
   releaseViewport = bindViewport(window, document.documentElement);
+  updateLayoutState();
+  window.addEventListener('resize', updateLayoutState, { passive: true });
   await startup();
   if (available) {
     deviceCapabilities.value = await kernelBridge.pairingCapabilities().catch(() => null);
@@ -684,12 +1153,23 @@ onUnmounted(() => {
   disposed = true;
   if (draftSaveTimer) clearTimeout(draftSaveTimer);
   if (scrollSaveTimer) clearTimeout(scrollSaveTimer);
+  if (typeof window !== 'undefined') {
+    window.removeEventListener('resize', updateLayoutState);
+  }
   releaseViewport();
   if (poll) clearInterval(poll);
 });
 </script>
 <template>
-  <div class="app-shell">
+  <div
+    class="app-shell"
+    :class="[
+      `layout-${layoutState.layoutMode}`,
+      `terminal-${layoutState.terminalKind}`,
+      `aspect-${layoutState.aspect}`,
+      { 'is-mobile': layoutState.isCompact },
+    ]"
+  >
     <header class="topbar">
       <button
         type="button"
@@ -702,6 +1182,15 @@ onUnmounted(() => {
         <span v-if="totalUnreadCount > 0" class="unread-dot" aria-hidden="true"></span>
       </button>
       <span class="page-name">{{ currentConversation }}</span>
+      <span class="layout-mode-badge" aria-hidden="true">
+        {{
+          t(
+            layoutState.layoutMode === 'desktop-wide'
+              ? 'layoutBadgeDesktop'
+              : 'layoutBadgeMobile',
+          )
+        }}
+      </span>
       <button
         type="button"
         class="device-indicator"
@@ -756,20 +1245,23 @@ onUnmounted(() => {
       @keydown="settingsKeydown"
     >
       <div class="settings-heading">
-        <h2>
-          {{
-            t(
-              settingsView === 'device'
-                ? 'deviceAndConnection'
-                : settingsView === 'provider'
-                  ? 'directModelProvider'
-                  : 'settings',
-            )
-          }}
-        </h2>
+        <div class="settings-brand-row">
+          <h2>
+            {{
+              t(
+                settingsView === 'device'
+                  ? 'deviceAndConnection'
+                  : settingsView === 'provider'
+                    ? 'directModelProvider'
+                    : 'settings',
+              )
+            }}
+          </h2>
+        </div>
         <div class="settings-heading-actions">
           <button
             type="button"
+            class="settings-close-btn"
             :aria-label="t('closeSettings')"
             @click="settingsOpen = false"
           >
@@ -780,171 +1272,698 @@ onUnmounted(() => {
             type="button"
             class="back-settings-btn"
             :aria-label="t('backToSettings')"
-            @click="settingsView = 'home'"
+            @click="
+              settingsView = 'home';
+              settingsTab = 'model';
+            "
           >
             ← {{ t('settings') }}
           </button>
         </div>
       </div>
 
-      <div v-show="settingsView === 'home'" class="settings-home-grid">
-        <div class="settings-card">
-          <div class="settings-card-info">
-            <span class="settings-card-title">{{ t('language') }}</span>
-          </div>
-          <label class="language">
-            <span class="visually-hidden">{{ t('language') }}</span>
-            <select v-model="locale">
-              <option value="zh-CN">{{ t('chinese') }}</option>
-              <option value="en-US">{{ t('english') }}</option>
-            </select>
-          </label>
-        </div>
+      <!-- Legacy-aligned Top 6-Tab Bar: 模型 | 连接 | 工作间 | 任务 | 外观 | 关于 -->
+      <nav class="settings-top-tabs" role="tablist">
+        <button
+          type="button"
+          class="settings-top-tab"
+          :class="{ active: settingsTab === 'model' && settingsView !== 'device' }"
+          @click="switchSettingsTab('model')"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <rect x="6" y="6" width="12" height="12" rx="2" />
+            <path d="M9 1v3M15 1v3M9 20v3M15 20v3M20 9h3M20 14h3M1 9h3M1 14h3" />
+          </svg>
+          <span>{{ t('tabModel') }}</span>
+        </button>
+        <button
+          type="button"
+          class="settings-top-tab"
+          :class="{ active: settingsTab === 'connection' || settingsView === 'device' }"
+          @click="switchSettingsTab('connection')"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 22v-5M9 8V2M15 8V2M18 8v5a6 6 0 0 1-12 0V8Z" />
+          </svg>
+          <span>{{ t('tabConnection') }}</span>
+        </button>
+        <button
+          type="button"
+          class="settings-top-tab"
+          :class="{ active: settingsTab === 'workspace' && settingsView === 'home' }"
+          @click="switchSettingsTab('workspace')"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+          </svg>
+          <span>{{ t('tabWorkspace') }}</span>
+        </button>
+        <button
+          type="button"
+          class="settings-top-tab"
+          :class="{ active: settingsTab === 'tasks' && settingsView === 'home' }"
+          @click="switchSettingsTab('tasks')"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 2L15 8l6 1-4.5 4.5L18 20l-6-3-6 3 1.5-6.5L3 9l6-1z" />
+          </svg>
+          <span>{{ t('tabTasks') }}</span>
+        </button>
+        <button
+          type="button"
+          class="settings-top-tab"
+          :class="{ active: settingsTab === 'appearance' && settingsView === 'home' }"
+          @click="switchSettingsTab('appearance')"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="12" cy="12" r="9" />
+            <circle cx="9" cy="10" r="1.2" />
+            <circle cx="15" cy="10" r="1.2" />
+            <circle cx="12" cy="15" r="1.2" />
+          </svg>
+          <span>{{ t('tabAppearance') }}</span>
+        </button>
+        <button
+          type="button"
+          class="settings-top-tab"
+          :class="{ active: settingsTab === 'about' && settingsView === 'home' }"
+          @click="switchSettingsTab('about')"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="12" cy="12" r="10" />
+            <path d="M12 16v-4M12 8h.01" />
+          </svg>
+          <span>{{ t('tabAbout') }}</span>
+        </button>
+      </nav>
 
-        <div class="settings-card">
-          <div class="settings-card-info">
-            <span class="settings-card-title">{{ t('themeLabel') }}</span>
-          </div>
-          <label class="theme-select">
-            <span class="visually-hidden">{{ t('themeLabel') }}</span>
-            <select v-model="theme">
-              <option value="system">{{ t('themeSystem') }}</option>
-              <option value="light">{{ t('themeLight') }}</option>
-              <option value="dark">{{ t('themeDark') }}</option>
-            </select>
-          </label>
-        </div>
+      <div class="settings-scroll-container">
+        <!-- Legacy-aligned Model Center + Local Models + API Key Management (Secure Vault) FIRST -->
+        <div
+          v-show="settingsView === 'home' || settingsView === 'provider'"
+          class="model-hub-stack"
+        >
+          <!-- Card 1: 模型中心 (199 个可用模型) -->
+          <section class="hub-card">
+            <div class="hub-card-header">
+              <div class="hub-card-title-group">
+                <svg class="hub-icon" viewBox="0 0 24 24" aria-hidden="true">
+                  <rect x="5" y="5" width="14" height="14" rx="2" />
+                  <path d="M9 1v4M15 1v4M9 19v4M15 19v4M1 9h4M1 15h4M19 9h4M19 15h4" />
+                </svg>
+                <h3>{{ t('modelCenterTitle') }}</h3>
+                <span class="hub-count-pill">
+                  {{ t('availableModelsBadge', { count: totalAvailableModelsCount }) }}
+                </span>
+              </div>
+              <button
+                type="button"
+                class="hub-icon-btn"
+                :title="t('refreshRegistry')"
+                @click="loadModelHub"
+              >
+                ↻
+              </button>
+            </div>
 
-        <div class="settings-card">
-          <div class="settings-card-info">
-            <span class="settings-card-title">{{ t('directModelProvider') }}</span>
-            <p class="settings-card-desc">{{ t('directModelSubpageDesc') }}</p>
-          </div>
-          <button type="button" class="open-provider-subpage" @click="openProviderSettings">
-            {{ t('openProviderSubpage') }}
-          </button>
-        </div>
+            <div class="role-cards-grid">
+              <button
+                v-for="role in roleCards"
+                :key="role.key"
+                type="button"
+                class="role-card"
+                :class="{ active: editingRole === role.key }"
+                @click="toggleRoleEditor(role.key)"
+              >
+                <div class="role-card-icon">
+                  <svg v-if="role.icon === 'monitor'" viewBox="0 0 24 24" aria-hidden="true">
+                    <rect x="3" y="4" width="18" height="12" rx="2" />
+                    <path d="M8 20h8M12 16v4" />
+                  </svg>
+                  <svg v-else-if="role.icon === 'clerk'" viewBox="0 0 24 24" aria-hidden="true">
+                    <circle cx="8" cy="17" r="3" />
+                    <circle cx="17" cy="17" r="3" />
+                    <path d="M5 17H3V9l5-3h9v11" />
+                  </svg>
+                  <svg v-else viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6Z" />
+                    <circle cx="12" cy="12" r="3" />
+                  </svg>
+                </div>
+                <div class="role-card-body">
+                  <span class="role-card-label">{{ role.title }}</span>
+                  <span class="role-card-provider">
+                    <img
+                      :src="getProviderLogo(role.assignment.provider_id)"
+                      alt=""
+                      class="role-mini-logo"
+                    />
+                    {{ role.assignment.provider_name || role.assignment.provider_id }}
+                  </span>
+                  <strong class="role-card-model">
+                    {{ role.assignment.model_name || role.assignment.model_id }}
+                  </strong>
+                </div>
+              </button>
+            </div>
 
-        <div class="settings-card">
-          <div class="settings-card-info">
-            <span class="settings-card-title">{{ t('deviceAndConnection') }}</span>
-            <p class="settings-card-desc">{{ t('deviceSubpageDesc') }}</p>
-          </div>
-          <button type="button" class="open-device-subpage" @click="openDevices">
-            {{ t('openDeviceSubpage') }}
-          </button>
-        </div>
+            <!-- Interactive Role Model Pool Selector -->
+            <div v-if="editingRole" class="role-selector-drawer">
+              <div class="role-selector-toolbar">
+                <label class="role-selector-field">
+                  <span>{{ t('selectProviderLabel') }}</span>
+                  <select v-model="selectorProviderId">
+                    <option
+                      v-for="prov in selectorProviders"
+                      :key="prov.id"
+                      :value="prov.id"
+                    >
+                      {{ prov.name }}
+                      ({{ (prov.models || []).filter(m => m.visible !== false).length }})
+                      {{ isKeyConfigured(prov.id) ? '●' : '' }}
+                    </option>
+                  </select>
+                </label>
 
-        <div class="settings-card">
-          <div class="settings-card-info">
-            <span class="settings-card-title">{{ t('aboutVersion') }}</span>
-            <p class="settings-card-desc">{{ t('versionValue') }}</p>
-          </div>
-        </div>
-      </div>
+                <label
+                  v-if="['qwen', 'minimax', 'zhipu', 'kimi'].includes(selectorProviderId)"
+                  class="role-selector-field"
+                >
+                  <span>
+                    {{
+                      selectorProviderId === 'qwen'
+                        ? t('variantCodingLabel')
+                        : t('variantRegionLabel')
+                    }}
+                  </span>
+                  <select
+                    :value="modelHub.state.provider_variants?.[selectorProviderId] || 'default'"
+                    @change="setProviderVariant(selectorProviderId, $event.target.value)"
+                  >
+                    <option value="default">{{ t('variantDefault') }}</option>
+                    <option value="international">{{ t('variantInternational') }}</option>
+                    <option value="coding">{{ t('variantCoding') }}</option>
+                  </select>
+                </label>
 
-      <div v-show="settingsView === 'provider'" class="settings-provider-subpage">
-        <form class="provider-form" @submit.prevent="saveProviderSettings(false)">
-          <label class="provider-field">
-            <span>{{ t('executionRouteLabel') }}</span>
-            <select v-model="executionRoute" @change="changeExecutionRoute">
-              <option value="auto">{{ t('routeAuto') }}</option>
-              <option value="direct_byok">{{ t('routeDirectByok') }}</option>
-              <option value="local_cli">{{ t('routeLocalCli') }}</option>
-              <option value="remote_home">{{ t('routeRemoteHome') }}</option>
-            </select>
-          </label>
+                <label class="role-selector-field role-search-field">
+                  <span>{{
+                    t('selectModelFromPool', { count: currentSelectorModels.length })
+                  }}</span>
+                  <input
+                    v-model="modelSearchQuery"
+                    type="search"
+                    placeholder="Filter models (e.g. deepseek, qwen, gemini, gpt, claude)…"
+                  />
+                </label>
+              </div>
 
-          <label class="provider-field">
-            <span>{{ t('providerKindLabel') }}</span>
-            <select v-model="providerForm.providerKind" @change="onProviderKindChange">
-              <option value="openai_compatible">{{ t('providerOpenai') }}</option>
-              <option value="anthropic_messages">{{ t('providerAnthropic') }}</option>
-              <option value="gemini_generate_content">{{ t('providerGemini') }}</option>
-            </select>
-          </label>
+              <div class="model-pool-grid">
+                <button
+                  v-for="mdl in currentSelectorModels"
+                  :key="mdl.id"
+                  type="button"
+                  class="model-pool-chip"
+                  :class="{
+                    selected:
+                      modelHub.state.active_roles?.[editingRole]?.model_id === mdl.id &&
+                      modelHub.state.active_roles?.[editingRole]?.provider_id ===
+                        selectorProviderId,
+                  }"
+                  @click="selectRoleModel(editingRole, currentSelectorProvider, mdl)"
+                >
+                  <img
+                    :src="getProviderLogo(selectorProviderId)"
+                    alt=""
+                    class="chip-logo"
+                  />
+                  <div class="chip-text">
+                    <strong>{{ mdl.name || mdl.id }}</strong>
+                    <small>{{ mdl.id }}</small>
+                  </div>
+                </button>
+              </div>
+            </div>
+          </section>
 
-          <label class="provider-field">
-            <span>{{ t('providerNameLabel') }}</span>
-            <input v-model="providerForm.label" type="text" required />
-          </label>
+          <!-- Card 2: 本地模型 (Local Models) -->
+          <section class="hub-card">
+            <div class="hub-card-header">
+              <div class="hub-card-title-group">
+                <svg class="hub-icon" viewBox="0 0 24 24" aria-hidden="true">
+                  <rect x="3" y="4" width="18" height="6" rx="1.5" />
+                  <rect x="3" y="14" width="18" height="6" rx="1.5" />
+                  <circle cx="7" cy="7" r="1" />
+                  <circle cx="7" cy="17" r="1" />
+                </svg>
+                <h3>{{ t('localModelsTitle') }}</h3>
+              </div>
+              <span class="local-engine-status">
+                {{ t('localEngineSleeping') }} <span class="hollow-dot"></span>
+              </span>
+            </div>
 
-          <label class="provider-field">
-            <span>{{ t('providerBaseUrlLabel') }}</span>
-            <input v-model="providerForm.baseUrl" type="url" required />
-          </label>
-
-          <label class="provider-field">
-            <span>{{ t('providerModelIdLabel') }}</span>
-            <input v-model="providerForm.modelId" type="text" required />
-          </label>
-
-          <label class="provider-field">
-            <span>{{ t('providerApiKeyLabel') }}</span>
-            <input
-              v-model="providerForm.apiKey"
-              type="password"
-              autocomplete="off"
-              :placeholder="
-                t(
-                  providerProfile?.api_key_configured
-                    ? 'providerApiKeyPlaceholderConfigured'
-                    : 'providerApiKeyPlaceholderEmpty',
-                )
-              "
-            />
-          </label>
-
-          <label class="provider-toggle-row">
-            <input v-model="providerForm.enabled" type="checkbox" />
-            <span>{{ t('providerEnabledLabel') }}</span>
-          </label>
-
-          <div class="provider-actions">
-            <button type="submit" :disabled="providerBusy">{{ t('providerSaveBtn') }}</button>
             <button
               type="button"
-              :disabled="providerBusy"
-              @click="testProviderConnection"
+              class="local-repo-bar"
+              @click="localRepoExpanded = !localRepoExpanded"
             >
-              {{ t('providerTestBtn') }}
+              <span class="local-repo-label">
+                <svg class="hub-icon-sm" viewBox="0 0 24 24" aria-hidden="true">
+                  <ellipse cx="12" cy="5" rx="8" ry="3" />
+                  <path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5" />
+                  <path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3" />
+                </svg>
+                {{ t('localModelRepoCount', { count: 0 }) }}
+              </span>
+              <span>{{ localRepoExpanded ? '⌃' : '⌄' }}</span>
             </button>
-            <button
-              v-if="providerProfile?.api_key_configured"
-              type="button"
-              :disabled="providerBusy"
-              @click="saveProviderSettings(true)"
+
+            <div v-if="localRepoExpanded" class="local-models-list">
+              <div v-for="lm in mobileModels" :key="lm.id" class="local-model-item">
+                <div class="local-model-info">
+                  <strong>{{ lm.name }}</strong>
+                  <span class="local-model-meta">{{ lm.size }} · {{ lm.ram }}</span>
+                  <p>{{ lm.desc }}</p>
+                </div>
+                <span class="local-model-filename">{{ lm.filename }}</span>
+              </div>
+            </div>
+
+            <div class="local-actions-row">
+              <div class="local-action-pill">
+                <strong :class="{ active: localMirrorSource === 'hf' }">HF</strong>
+                <button
+                  type="button"
+                  class="mirror-switch"
+                  :class="{ cn: localMirrorSource === 'cn' }"
+                  @click="localMirrorSource = localMirrorSource === 'hf' ? 'cn' : 'hf'"
+                >
+                  <span class="mirror-knob"></span>
+                </button>
+                <strong :class="{ active: localMirrorSource === 'cn' }">CN</strong>
+              </div>
+              <button
+                type="button"
+                class="local-action-pill"
+                @click="localRepoExpanded = !localRepoExpanded"
+              >
+                {{ t('customDownloadUrl') }}
+              </button>
+              <button
+                type="button"
+                class="local-action-pill"
+                @click="localRepoExpanded = !localRepoExpanded"
+              >
+                📂 {{ t('physicalModelDir') }}
+              </button>
+            </div>
+          </section>
+
+          <!-- Card 3: API 密钥管理 (安全存储) -->
+          <section class="hub-card">
+            <div
+              class="hub-card-header clickable"
+              @click="apiKeysVaultExpanded = !apiKeysVaultExpanded"
             >
-              {{ t('providerClearKeyBtn') }}
+              <div class="hub-card-title-group">
+                <svg class="hub-icon" viewBox="0 0 24 24" aria-hidden="true">
+                  <circle cx="8" cy="15" r="4" />
+                  <path d="M10.85 12.15 19 4M18 5l2 2M15 8l2 2" />
+                </svg>
+                <h3>{{ t('apiKeysVaultTitle') }}</h3>
+              </div>
+              <span class="collapse-chevron">{{ apiKeysVaultExpanded ? '⌃' : '⌄' }}</span>
+            </div>
+
+            <div v-show="apiKeysVaultExpanded" class="api-keys-vault-body">
+              <div class="vault-section-subtitle">{{ t('modelProviderKeysSubtitle') }}</div>
+
+              <div class="vault-key-list">
+                <div
+                  v-for="item in modelProviderKeyList"
+                  :key="item.id"
+                  class="vault-key-row"
+                >
+                  <div class="vault-key-brand">
+                    <img
+                      :src="getProviderLogo(item.id)"
+                      alt=""
+                      class="key-provider-logo"
+                    />
+                    <span class="key-provider-name">{{ item.name }}</span>
+                  </div>
+
+                  <span
+                    class="key-status-dot"
+                    :class="{ configured: isKeyConfigured(item.id) }"
+                    :title="
+                      isKeyConfigured(item.id)
+                        ? t('keyInputConfigured')
+                        : t('keyInputUnconfigured')
+                    "
+                  ></span>
+
+                  <input
+                    v-model="keyInputs[item.id]"
+                    type="password"
+                    class="vault-key-input"
+                    autocomplete="off"
+                    :placeholder="
+                      isKeyConfigured(item.id)
+                        ? t('keyInputConfigured')
+                        : t('keyInputUnconfigured')
+                    "
+                    @keydown.enter.prevent="saveProviderKey(item.id)"
+                  />
+
+                  <button
+                    v-if="isKeyConfigured(item.id) && !(keyInputs[item.id] || '').trim()"
+                    type="button"
+                    class="vault-key-action-btn delete"
+                    :aria-label="`${t('deleteKeyAria')} ${item.name}`"
+                    @click="clearProviderKey(item.id)"
+                  >
+                    ✕
+                  </button>
+                  <button
+                    v-else
+                    type="button"
+                    class="vault-key-action-btn save"
+                    :disabled="!(keyInputs[item.id] || '').trim() || providerBusy"
+                    :aria-label="`${t('saveKeyAria')} ${item.name}`"
+                    @click="saveProviderKey(item.id)"
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z" />
+                      <polyline points="17 21 17 13 7 13 7 21" />
+                      <polyline points="7 3 7 8 15 8" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+
+              <div class="vault-section-subtitle">{{ t('toolServiceKeysSubtitle') }}</div>
+              <div class="vault-key-list">
+                <div
+                  v-for="item in toolServiceKeyList"
+                  :key="item.id"
+                  class="vault-key-row"
+                >
+                  <div class="vault-key-brand">
+                    <img
+                      :src="getProviderLogo(item.id)"
+                      alt=""
+                      class="key-provider-logo"
+                    />
+                    <span class="key-provider-name">{{ item.name }}</span>
+                  </div>
+
+                  <span
+                    class="key-status-dot"
+                    :class="{ configured: isKeyConfigured(item.id) }"
+                  ></span>
+
+                  <input
+                    v-model="keyInputs[item.id]"
+                    type="password"
+                    class="vault-key-input"
+                    autocomplete="off"
+                    :placeholder="
+                      isKeyConfigured(item.id)
+                        ? t('keyInputConfigured')
+                        : t('keyInputUnconfigured')
+                    "
+                    @keydown.enter.prevent="saveProviderKey(item.id)"
+                  />
+
+                  <button
+                    v-if="isKeyConfigured(item.id) && !(keyInputs[item.id] || '').trim()"
+                    type="button"
+                    class="vault-key-action-btn delete"
+                    :aria-label="`${t('deleteKeyAria')} ${item.name}`"
+                    @click="clearProviderKey(item.id)"
+                  >
+                    ✕
+                  </button>
+                  <button
+                    v-else
+                    type="button"
+                    class="vault-key-action-btn save"
+                    :disabled="!(keyInputs[item.id] || '').trim() || providerBusy"
+                    :aria-label="`${t('saveKeyAria')} ${item.name}`"
+                    @click="saveProviderKey(item.id)"
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z" />
+                      <polyline points="17 21 17 13 7 13 7 21" />
+                      <polyline points="7 3 7 8 15 8" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+
+              <!-- Custom OpenAI-compatible Model Adder -->
+              <div class="vault-section-subtitle">{{ t('customModelsSectionTitle') }}</div>
+              <div class="custom-model-adder">
+                <input
+                  v-model="customModelDraft.name"
+                  type="text"
+                  :placeholder="t('customModelNamePlaceholder')"
+                />
+                <input
+                  v-model="customModelDraft.model_id"
+                  type="text"
+                  :placeholder="t('customModelIdPlaceholder')"
+                />
+                <input
+                  v-model="customModelDraft.base_url"
+                  type="url"
+                  :placeholder="t('customModelUrlPlaceholder')"
+                />
+                <input
+                  v-model="customModelDraft.api_key"
+                  type="password"
+                  autocomplete="off"
+                  :placeholder="t('customModelKeyPlaceholder')"
+                />
+                <button type="button" @click="addCustomModel">
+                  {{ t('addCustomModelBtn') }}
+                </button>
+              </div>
+              <div
+                v-if="(modelHub.state.custom_models || []).length"
+                class="custom-models-chips"
+              >
+                <span
+                  v-for="cm in modelHub.state.custom_models"
+                  :key="cm.id"
+                  class="custom-model-tag"
+                >
+                  {{ cm.name }} ({{ cm.model_id }})
+                  <button type="button" @click="removeCustomModel(cm.id)">✕</button>
+                </span>
+              </div>
+            </div>
+          </section>
+
+          <!-- Card 4: 模型供应商注册表 (13 Providers & 199 Models) -->
+          <section class="hub-card">
+            <div
+              class="hub-card-header clickable"
+              @click="registryExpanded = !registryExpanded"
+            >
+              <div class="hub-card-title-group">
+                <svg class="hub-icon" viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M4 6h16M4 12h16M4 18h16" />
+                </svg>
+                <h3>{{ t('providerRegistryTitle') }}</h3>
+              </div>
+              <span class="collapse-chevron">{{ registryExpanded ? '⌃' : '⌄' }}</span>
+            </div>
+            <div v-if="registryExpanded" class="registry-providers-list">
+              <div
+                v-for="prov in modelHub.registry.providers"
+                :key="prov.id"
+                class="registry-provider-item"
+              >
+                <div class="registry-provider-head">
+                  <img :src="getProviderLogo(prov.id)" alt="" class="key-provider-logo" />
+                  <strong>{{ prov.name }}</strong>
+                  <span class="registry-url">{{ prov.base_url }}</span>
+                  <span class="hub-count-pill">
+                    {{ (prov.models || []).filter(m => m.visible !== false).length }}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <!-- Quick overview cards kept in DOM for Settings home & Playwright navigation -->
+        <div v-show="settingsView === 'home'" class="settings-home-grid">
+          <div class="settings-card">
+            <div class="settings-card-info">
+              <span class="settings-card-title">{{ t('language') }}</span>
+            </div>
+            <label class="language">
+              <span class="visually-hidden">{{ t('language') }}</span>
+              <select v-model="locale">
+                <option value="zh-CN">{{ t('chinese') }}</option>
+                <option value="en-US">{{ t('english') }}</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="settings-card">
+            <div class="settings-card-info">
+              <span class="settings-card-title">{{ t('themeLabel') }}</span>
+            </div>
+            <label class="theme-select">
+              <span class="visually-hidden">{{ t('themeLabel') }}</span>
+              <select v-model="theme">
+                <option value="system">{{ t('themeSystem') }}</option>
+                <option value="light">{{ t('themeLight') }}</option>
+                <option value="dark">{{ t('themeDark') }}</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="settings-card">
+            <div class="settings-card-info">
+              <span class="settings-card-title">{{ t('directModelProvider') }}</span>
+              <p class="settings-card-desc">{{ t('directModelSubpageDesc') }}</p>
+            </div>
+            <button type="button" class="open-provider-subpage" @click="openProviderSettings">
+              {{ t('openProviderSubpage') }}
             </button>
           </div>
 
-          <p v-if="providerProfile" class="provider-status-line" role="status">
-            <template v-if="providerProfile.last_check_status === 'ok'">
-              {{ t('providerStatusOk') }} ({{ providerProfile.last_check_reason || providerProfile.model_id }})
-            </template>
-            <template v-else-if="providerProfile.last_check_status === 'untested'">
-              {{ t('providerStatusUntested') }}
-            </template>
-            <template v-else>
-              {{ t('providerStatusFailed') }} {{ providerProfile.last_check_status }}
-              {{ providerProfile.last_check_reason }}
-            </template>
-          </p>
-        </form>
-      </div>
+          <div class="settings-card">
+            <div class="settings-card-info">
+              <span class="settings-card-title">{{ t('deviceAndConnection') }}</span>
+              <p class="settings-card-desc">{{ t('deviceSubpageDesc') }}</p>
+            </div>
+            <button type="button" class="open-device-subpage" @click="openDevices">
+              {{ t('openDeviceSubpage') }}
+            </button>
+          </div>
 
-      <div v-show="settingsView === 'device'" class="settings-device-subpage">
-        <HomeConnection
-          ref="devicePanel"
-          v-if="sessionId"
-          :paired="homeConfigured"
-          @changed="reload"
-          @connected="
-            settingsOpen = false;
-            focusPairedComposer();
-          "
-        />
+          <div class="settings-card">
+            <div class="settings-card-info">
+              <span class="settings-card-title">{{ t('aboutVersion') }}</span>
+              <p class="settings-card-desc">{{ t('versionValue') }}</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Direct Provider Protocol Override & Connection Test Form (preserved for subpage & tests) -->
+        <div v-show="settingsView === 'provider'" class="settings-provider-subpage">
+          <form class="provider-form" @submit.prevent="saveProviderSettings(false)">
+            <h3 class="provider-form-heading">{{ t('advancedProtocolOverrideTitle') }}</h3>
+            <label class="provider-field">
+              <span>{{ t('executionRouteLabel') }}</span>
+              <select v-model="executionRoute" @change="changeExecutionRoute">
+                <option value="auto">{{ t('routeAuto') }}</option>
+                <option value="direct_byok">{{ t('routeDirectByok') }}</option>
+                <option value="local_cli">{{ t('routeLocalCli') }}</option>
+                <option value="remote_home">{{ t('routeRemoteHome') }}</option>
+              </select>
+            </label>
+
+            <label class="provider-field">
+              <span>{{ t('providerKindLabel') }}</span>
+              <select v-model="providerForm.providerKind" @change="onProviderKindChange">
+                <option value="openai_compatible">{{ t('providerOpenai') }}</option>
+                <option value="anthropic_messages">{{ t('providerAnthropic') }}</option>
+                <option value="gemini_generate_content">{{ t('providerGemini') }}</option>
+              </select>
+            </label>
+
+            <label class="provider-field">
+              <span>{{ t('providerNameLabel') }}</span>
+              <input v-model="providerForm.label" type="text" required />
+            </label>
+
+            <label class="provider-field">
+              <span>{{ t('providerBaseUrlLabel') }}</span>
+              <input v-model="providerForm.baseUrl" type="url" required />
+            </label>
+
+            <label class="provider-field">
+              <span>{{ t('providerModelIdLabel') }}</span>
+              <input v-model="providerForm.modelId" type="text" required />
+            </label>
+
+            <label class="provider-field">
+              <span>{{ t('providerApiKeyLabel') }}</span>
+              <input
+                v-model="providerForm.apiKey"
+                type="password"
+                autocomplete="off"
+                :placeholder="
+                  t(
+                    providerProfile?.api_key_configured
+                      ? 'providerApiKeyPlaceholderConfigured'
+                      : 'providerApiKeyPlaceholderEmpty',
+                  )
+                "
+              />
+            </label>
+
+            <label class="provider-toggle-row">
+              <input v-model="providerForm.enabled" type="checkbox" />
+              <span>{{ t('providerEnabledLabel') }}</span>
+            </label>
+
+            <div class="provider-actions">
+              <button type="submit" :disabled="providerBusy">{{ t('providerSaveBtn') }}</button>
+              <button
+                type="button"
+                :disabled="providerBusy"
+                @click="testProviderConnection"
+              >
+                {{ t('providerTestBtn') }}
+              </button>
+              <button
+                v-if="providerProfile?.api_key_configured"
+                type="button"
+                :disabled="providerBusy"
+                @click="saveProviderSettings(true)"
+              >
+                {{ t('providerClearKeyBtn') }}
+              </button>
+            </div>
+
+            <p v-if="providerProfile" class="provider-status-line" role="status">
+              <template v-if="providerProfile.last_check_status === 'ok'">
+                {{ t('providerStatusOk') }} ({{
+                  providerProfile.last_check_reason || providerProfile.model_id
+                }})
+              </template>
+              <template v-else-if="providerProfile.last_check_status === 'untested'">
+                {{ t('providerStatusUntested') }}
+              </template>
+              <template v-else>
+                {{ t('providerStatusFailed') }} {{ providerProfile.last_check_status }}
+                {{ providerProfile.last_check_reason }}
+              </template>
+            </p>
+          </form>
+        </div>
+
+        <div v-show="settingsView === 'device'" class="settings-device-subpage">
+          <HomeConnection
+            ref="devicePanel"
+            v-if="sessionId"
+            :paired="homeConfigured"
+            @changed="reload"
+            @connected="
+              settingsOpen = false;
+              focusPairedComposer();
+            "
+          />
+        </div>
       </div>
     </section>
 
@@ -1218,6 +2237,45 @@ onUnmounted(() => {
           </span>
         </article>
       </section>
+
+      <!-- Floating Quick Model Switcher Popover -->
+      <div v-if="quickSwitcherOpen" class="quick-model-popover">
+        <div class="quick-provider-col">
+          <button
+            v-for="prov in selectorProviders"
+            :key="prov.id"
+            type="button"
+            class="quick-provider-item"
+            :class="{ active: quickSwitcherProviderId === prov.id }"
+            @click="quickSwitcherProviderId = prov.id"
+          >
+            <img :src="getProviderLogo(prov.id)" alt="" class="chip-logo" />
+            <span>{{ prov.name }}</span>
+            <span
+              v-if="isKeyConfigured(prov.id)"
+              class="key-status-dot configured"
+            ></span>
+          </button>
+        </div>
+        <div class="quick-model-col">
+          <button
+            v-for="mdl in quickSwitcherModels"
+            :key="mdl.id"
+            type="button"
+            class="quick-model-item"
+            :class="{
+              selected:
+                activeMainRole.model_id === mdl.id &&
+                activeMainRole.provider_id === quickSwitcherProviderId,
+            }"
+            @click="selectRoleModel('main', quickSwitcherProvider, mdl)"
+          >
+            <strong>{{ mdl.name || mdl.id }}</strong>
+            <small>{{ mdl.id }}</small>
+          </button>
+        </div>
+      </div>
+
       <form class="composer" @submit.prevent="send">
         <label class="visually-hidden" for="message-input">{{ t('message') }}</label>
         <textarea
@@ -1232,36 +2290,135 @@ onUnmounted(() => {
           @keydown="keydown"
         />
         <div class="composer-actions">
-          <span>
-            {{
-              t(
-                dispatchPending
-                  ? 'requestingExecution'
-                  : saving
-                    ? 'saving'
-                    : executionBlocked
-                      ? 'executionBusyHint'
-                      : homeConfigured
-                        ? 'homeSendHint'
-                        : executionEnabled
-                          ? 'executeHint'
-                          : 'localFirstHint',
-              )
-            }}
-          </span>
+          <div class="composer-left-tools">
+            <button
+              type="button"
+              class="composer-model-pill"
+              :aria-label="t('quickSwitchModel')"
+              @click="
+                quickSwitcherProviderId = activeMainRole.provider_id || 'deepseek';
+                quickSwitcherOpen = !quickSwitcherOpen;
+              "
+            >
+              <img
+                :src="getProviderLogo(activeMainRole.provider_id)"
+                alt=""
+                class="pill-logo"
+              />
+              <span class="pill-model-name">
+                {{ activeMainRole.model_name || activeMainRole.model_id }}
+              </span>
+              <span aria-hidden="true">▾</span>
+            </button>
+            <span class="composer-hint-text">
+              {{
+                t(
+                  dispatchPending
+                    ? 'requestingExecution'
+                    : saving
+                      ? 'saving'
+                      : executionBlocked
+                        ? 'executionBusyHint'
+                        : homeConfigured
+                          ? 'homeSendHint'
+                          : executionEnabled
+                            ? 'executeHint'
+                            : 'localFirstHint',
+                )
+              }}
+            </span>
+          </div>
           <button
             v-if="activeExecution"
             type="button"
+            class="composer-submit-btn"
             :disabled="cancelPending.has(activeExecution.id)"
             @click="cancel(activeExecution)"
           >
             {{ t(cancelPending.has(activeExecution.id) ? 'requestingStop' : 'stopExecution') }}
           </button>
-          <button v-else type="submit" :disabled="!canSend">
+          <button v-else type="submit" class="composer-submit-btn" :disabled="!canSend">
             {{ t(sendLabel ? 'sendAndExecute' : 'send') }}
           </button>
         </div>
       </form>
     </main>
+
+    <!-- Legacy-aligned Bottom 5-Tab Navigation Bar: 对话 | 日程 | 工作 | 知识 | 偏好设置 -->
+    <nav class="bottom-nav" role="navigation">
+      <button
+        type="button"
+        class="bottom-nav-item"
+        :class="{ active: !settingsOpen && !navigationOpen }"
+        @click="
+          settingsOpen = false;
+          navigationOpen = false;
+        "
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+        </svg>
+        <span>{{ t('navChat') }}</span>
+      </button>
+      <button
+        type="button"
+        class="bottom-nav-item"
+        @click="
+          settingsOpen = false;
+          navigationOpen = true;
+        "
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <rect x="3" y="4" width="18" height="18" rx="2" />
+          <path d="M16 2v4M8 2v4M3 10h18" />
+        </svg>
+        <span>{{ t('navSchedule') }}</span>
+      </button>
+      <button
+        type="button"
+        class="bottom-nav-item"
+        :class="{ active: navigationOpen }"
+        @click="
+          settingsOpen = false;
+          navigationOpen = !navigationOpen;
+        "
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <rect x="2" y="7" width="20" height="14" rx="2" />
+          <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16" />
+        </svg>
+        <span>{{ t('navWork') }}</span>
+      </button>
+      <button
+        type="button"
+        class="bottom-nav-item"
+        @click="
+          settingsOpen = false;
+          navigationOpen = true;
+        "
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="18" cy="5" r="3" />
+          <circle cx="6" cy="12" r="3" />
+          <circle cx="18" cy="19" r="3" />
+          <path d="m8.59 13.51 6.83 3.98M15.41 6.51l-6.82 3.98" />
+        </svg>
+        <span>{{ t('navKnowledge') }}</span>
+      </button>
+      <button
+        type="button"
+        class="bottom-nav-item"
+        :class="{ active: settingsOpen }"
+        @click="toggleSettingsHome"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="12" cy="12" r="3" />
+          <path
+            d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.6.77 1.02 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"
+          />
+        </svg>
+        <span>{{ t('navSettings') }}</span>
+      </button>
+    </nav>
   </div>
 </template>

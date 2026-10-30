@@ -26,6 +26,322 @@ use tauri::{AppHandle, Manager, Runtime, State};
 
 const DEFAULT_SLOT: &str = "provider-key-default";
 const MAX_RESPONSE_BYTES: usize = 512 * 1024;
+const EMBEDDED_MODEL_REGISTRY: &str = include_str!("../resources/model_providers.json");
+const TOOL_KEY_IDS: [&str; 2] = ["TAVILY_API_KEY", "TINYFISH_API_KEY"];
+
+pub(crate) fn provider_slot(provider_id: &str) -> String {
+    format!("provider-key-{}", provider_id.trim())
+}
+
+fn load_or_init_registry(data_dir: &std::path::Path) -> Value {
+    let path = data_dir.join("model_providers.json");
+    if let Ok(raw) = std::fs::read_to_string(&path) {
+        if let Ok(val) = serde_json::from_str::<Value>(&raw) {
+            if val.get("providers").and_then(Value::as_array).is_some() {
+                return val;
+            }
+        }
+    }
+    let default_val: Value = serde_json::from_str(EMBEDDED_MODEL_REGISTRY)
+        .unwrap_or_else(|_| json!({ "$schema_version": 3, "providers": [] }));
+    let _ = std::fs::write(&path, EMBEDDED_MODEL_REGISTRY);
+    default_val
+}
+
+fn save_registry_file(data_dir: &std::path::Path, registry: &Value) -> Result<(), &'static str> {
+    let path = data_dir.join("model_providers.json");
+    let raw = serde_json::to_string_pretty(registry).map_err(|_| "REGISTRY_SAVE_FAILED")?;
+    std::fs::write(path, raw).map_err(|_| "REGISTRY_SAVE_FAILED")
+}
+
+fn default_hub_state() -> Value {
+    json!({
+        "activeRoles": {
+            "main": "deepseek::deepseek-v4-flash",
+            "clerk": "doubao::doubao-seed-1-6-flash-250828",
+            "vision": "gemini::gemini-2.5-flash"
+        },
+        "providerVariants": {},
+        "customModels": []
+    })
+}
+
+fn load_hub_state(data_dir: &std::path::Path) -> Value {
+    let path = data_dir.join("model_hub_state.json");
+    if let Ok(raw) = std::fs::read_to_string(&path) {
+        if let Ok(val) = serde_json::from_str::<Value>(&raw) {
+            if val.is_object() {
+                return val;
+            }
+        }
+    }
+    let def = default_hub_state();
+    let _ = save_hub_state(data_dir, &def);
+    def
+}
+
+fn save_hub_state(data_dir: &std::path::Path, hub: &Value) -> Result<(), &'static str> {
+    let path = data_dir.join("model_hub_state.json");
+    let raw = serde_json::to_string_pretty(hub).map_err(|_| "HUB_STATE_SAVE_FAILED")?;
+    std::fs::write(path, raw).map_err(|_| "HUB_STATE_SAVE_FAILED")
+}
+
+fn infer_provider_protocol(provider_id: &str, base_url: &str) -> &'static str {
+    let pid = provider_id.trim().to_ascii_lowercase();
+    let url = base_url.trim().to_ascii_lowercase();
+    if pid == "anthropic" || url.contains("api.anthropic.com") {
+        "anthropic_messages"
+    } else if (pid == "gemini" || url.contains("generativelanguage.googleapis.com"))
+        && !url.contains("/openai")
+    {
+        "gemini_generate_content"
+    } else {
+        "openai_compatible"
+    }
+}
+
+fn resolve_provider_base_url(provider: &Value, variants: &Value) -> String {
+    let pid = provider.get("id").and_then(Value::as_str).unwrap_or("");
+    let default_url = provider
+        .get("base_url")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_owned();
+    let selected_variant = variants
+        .get(pid)
+        .and_then(Value::as_str)
+        .unwrap_or("default");
+    if selected_variant != "default" {
+        if let Some(variant_url) = provider
+            .get("base_url_variants")
+            .and_then(|v| v.get(selected_variant))
+            .and_then(Value::as_str)
+        {
+            if !variant_url.trim().is_empty() {
+                return variant_url.to_owned();
+            }
+        }
+    }
+    default_url
+}
+
+async fn build_model_hub_snapshot_and_sync<R: Runtime>(
+    host: &AppHandle<R>,
+    state: &State<'_, AppState>,
+) -> Result<Value, &'static str> {
+    let data_dir = host
+        .path()
+        .app_data_dir()
+        .map_err(|_| "LOCAL_STORE_UNAVAILABLE")?;
+    std::fs::create_dir_all(&data_dir).map_err(|_| "LOCAL_STORE_UNAVAILABLE")?;
+
+    let registry = load_or_init_registry(&data_dir);
+    let mut hub_state = load_hub_state(&data_dir);
+    let providers = registry
+        .get("providers")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+
+    let mut provider_keys = serde_json::Map::new();
+    for prov in &providers {
+        let pid = prov.get("id").and_then(Value::as_str).unwrap_or("");
+        if pid.is_empty() || pid == "offline" {
+            continue;
+        }
+        let slot = provider_slot(pid);
+        let configured = read_api_key(host, &slot)
+            .await
+            .is_ok_and(|k| !k.trim().is_empty());
+        provider_keys.insert(pid.to_owned(), json!(configured));
+    }
+
+    let mut tool_keys = serde_json::Map::new();
+    for tid in TOOL_KEY_IDS {
+        let slot = provider_slot(tid);
+        let configured = read_api_key(host, &slot)
+            .await
+            .is_ok_and(|k| !k.trim().is_empty());
+        tool_keys.insert(tid.to_owned(), json!(configured));
+    }
+
+    let mut pool = Vec::new();
+    for prov in &providers {
+        let pid = prov.get("id").and_then(Value::as_str).unwrap_or("");
+        if pid.is_empty() || pid == "offline" {
+            continue;
+        }
+        let pname = prov.get("name").and_then(Value::as_str).unwrap_or(pid);
+        let models = prov
+            .get("models")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        for m in models {
+            if m.get("visible").and_then(Value::as_bool) == Some(false) {
+                continue;
+            }
+            let mid = m.get("id").and_then(Value::as_str).unwrap_or("");
+            if mid.is_empty() {
+                continue;
+            }
+            let mname = m.get("name").and_then(Value::as_str).unwrap_or(mid);
+            let vision = m.get("vision").and_then(Value::as_bool).unwrap_or(false);
+            let discovered = m.get("discovered").and_then(Value::as_bool).unwrap_or(false);
+            let is_default = m.get("default").and_then(Value::as_bool).unwrap_or(false);
+            pool.push(json!({
+                "id": format!("{pid}::{mid}"),
+                "provider": pid,
+                "providerName": pname,
+                "modelId": mid,
+                "displayName": mname,
+                "vision": vision,
+                "discovered": discovered,
+                "default": is_default,
+            }));
+        }
+    }
+
+    let custom_models = hub_state
+        .get("customModels")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    for cm in &custom_models {
+        let cid = cm.get("id").and_then(Value::as_str).unwrap_or("");
+        let mid = cm.get("modelId").and_then(Value::as_str).unwrap_or(cid);
+        let dname = cm.get("displayName").and_then(Value::as_str).unwrap_or(mid);
+        let base_url = cm.get("baseUrl").and_then(Value::as_str).unwrap_or("");
+        if !cid.is_empty() {
+            let slot = provider_slot(&format!("custom-{cid}"));
+            let has_k = read_api_key(host, &slot)
+                .await
+                .is_ok_and(|k| !k.trim().is_empty());
+            provider_keys.insert(format!("custom-{cid}"), json!(has_k));
+            pool.push(json!({
+                "id": format!("custom-{cid}::{mid}"),
+                "provider": format!("custom-{cid}"),
+                "providerName": dname,
+                "modelId": mid,
+                "displayName": dname,
+                "baseUrl": base_url,
+                "vision": false,
+                "discovered": false,
+                "default": true,
+            }));
+        }
+    }
+
+    // If the currently assigned main model's provider has no API key configured,
+    // but another provider DOES have an API key configured, auto-select that provider's default model.
+    let main_entry_id = hub_state["activeRoles"]["main"]
+        .as_str()
+        .unwrap_or("deepseek::deepseek-v4-flash")
+        .to_owned();
+    let main_prov = main_entry_id.split("::").next().unwrap_or("deepseek");
+    let main_has_key = provider_keys
+        .get(main_prov)
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+
+    let effective_main_id = if main_has_key {
+        main_entry_id
+    } else if let Some((configured_pid, _)) = provider_keys
+        .iter()
+        .find(|(_, v)| v.as_bool() == Some(true))
+    {
+        let fallback_entry = pool
+            .iter()
+            .find(|m| {
+                m["provider"].as_str() == Some(configured_pid.as_str())
+                    && m["default"].as_bool() == Some(true)
+            })
+            .or_else(|| {
+                pool.iter()
+                    .find(|m| m["provider"].as_str() == Some(configured_pid.as_str()))
+            })
+            .and_then(|m| m["id"].as_str())
+            .map(str::to_owned);
+        if let Some(ref fb) = fallback_entry {
+            hub_state["activeRoles"]["main"] = json!(fb);
+            let _ = save_hub_state(&data_dir, &hub_state);
+            fb.clone()
+        } else {
+            main_entry_id
+        }
+    } else {
+        main_entry_id
+    };
+
+    // Sync effective main model into bob-kernel's default DirectProviderProfile
+    // ONLY when at least one provider key is configured in ModelHub (so manual test profiles aren't clobbered).
+    let any_hub_key_configured = provider_keys.values().any(|v| v.as_bool() == Some(true));
+    if any_hub_key_configured {
+        let (eff_prov, eff_model) = effective_main_id
+            .split_once("::")
+            .unwrap_or(("deepseek", "deepseek-v4-flash"));
+        let variants = hub_state
+            .get("providerVariants")
+            .cloned()
+            .unwrap_or_else(|| json!({}));
+        let (label, base_url, slot) = if let Some(cid) = eff_prov.strip_prefix("custom-") {
+            let cm = custom_models
+                .iter()
+                .find(|c| c["id"].as_str() == Some(cid));
+            let dname = cm
+                .and_then(|c| c["displayName"].as_str())
+                .unwrap_or("Custom")
+                .to_owned();
+            let burl = cm
+                .and_then(|c| c["baseUrl"].as_str())
+                .unwrap_or("https://api.openai.com/v1")
+                .to_owned();
+            (dname, burl, provider_slot(eff_prov))
+        } else {
+            let prov_val = providers
+                .iter()
+                .find(|p| p["id"].as_str() == Some(eff_prov));
+            let pname = prov_val
+                .and_then(|p| p["name"].as_str())
+                .unwrap_or(eff_prov)
+                .to_owned();
+            let burl = prov_val
+                .map(|p| resolve_provider_base_url(p, &variants))
+                .unwrap_or_else(|| "https://api.deepseek.com".to_owned());
+            (pname, burl, provider_slot(eff_prov))
+        };
+        let protocol = infer_provider_protocol(eff_prov, &base_url).to_owned();
+        let key_configured = provider_keys
+            .get(eff_prov)
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let input = DirectProviderProfileInput {
+            id: "default".to_owned(),
+            provider_kind: protocol,
+            label,
+            base_url,
+            model_id: eff_model.to_owned(),
+            api_key_slot: slot,
+            api_key_configured: key_configured,
+            enabled: true,
+        };
+        let _ = with_app(&state.0, |app| {
+            app.upsert_direct_provider_profile(&input, now()?)
+                .map_err(|_| "PROVIDER_SAVE_FAILED")
+        });
+    }
+
+    Ok(json!({
+        "registry": registry,
+        "pool": pool,
+        "totalAvailableCount": pool.len(),
+        "activeRoles": hub_state["activeRoles"],
+        "providerKeys": provider_keys,
+        "toolKeys": tool_keys,
+        "providerVariants": hub_state["providerVariants"],
+        "customModels": custom_models,
+    }))
+}
 
 pub(crate) async fn store_api_key<R: Runtime>(
     app: &AppHandle<R>,
@@ -717,6 +1033,245 @@ pub(crate) async fn app_route_set(
     })
     .await
     .map_err(|_| "ROUTE_SAVE_FAILED")?
+}
+
+#[tauri::command]
+pub(crate) async fn app_model_hub_get<R: Runtime>(
+    host: AppHandle<R>,
+    state: State<'_, AppState>,
+) -> Result<Value, &'static str> {
+    build_model_hub_snapshot_and_sync(&host, &state).await
+}
+
+#[tauri::command]
+pub(crate) async fn app_provider_key_set<R: Runtime>(
+    host: AppHandle<R>,
+    state: State<'_, AppState>,
+    provider_id: String,
+    api_key: Option<String>,
+    clear_key: Option<bool>,
+) -> Result<Value, &'static str> {
+    let pid = provider_id.trim();
+    if pid.is_empty() {
+        return Err("INVALID_PROVIDER_ID");
+    }
+    let slot = provider_slot(pid);
+    if clear_key.unwrap_or(false) {
+        clear_api_key(&host, &slot).await?;
+    } else if let Some(ref k) = api_key {
+        let trimmed = k.trim();
+        if trimmed.is_empty() {
+            clear_api_key(&host, &slot).await?;
+        } else {
+            store_api_key(&host, &slot, trimmed).await?;
+        }
+    }
+    build_model_hub_snapshot_and_sync(&host, &state).await
+}
+
+#[tauri::command]
+pub(crate) async fn app_model_role_assign<R: Runtime>(
+    host: AppHandle<R>,
+    state: State<'_, AppState>,
+    role: String,
+    model_entry_id: String,
+) -> Result<Value, &'static str> {
+    let r = role.trim();
+    if !matches!(r, "main" | "clerk" | "vision") {
+        return Err("INVALID_MODEL_ROLE");
+    }
+    let mid = model_entry_id.trim();
+    if mid.is_empty() || !mid.contains("::") {
+        return Err("INVALID_MODEL_ID");
+    }
+    let data_dir = host
+        .path()
+        .app_data_dir()
+        .map_err(|_| "LOCAL_STORE_UNAVAILABLE")?;
+    std::fs::create_dir_all(&data_dir).map_err(|_| "LOCAL_STORE_UNAVAILABLE")?;
+    let mut hub = load_hub_state(&data_dir);
+    hub["activeRoles"][r] = json!(mid);
+    save_hub_state(&data_dir, &hub)?;
+
+    if r == "main" {
+        let registry = load_or_init_registry(&data_dir);
+        let providers = registry
+            .get("providers")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        let (eff_prov, eff_model) = mid
+            .split_once("::")
+            .unwrap_or(("deepseek", "deepseek-v4-flash"));
+        let variants = hub
+            .get("providerVariants")
+            .cloned()
+            .unwrap_or_else(|| json!({}));
+        let custom_models = hub
+            .get("customModels")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        let (label, base_url, slot) = if let Some(cid) = eff_prov.strip_prefix("custom-") {
+            let cm = custom_models
+                .iter()
+                .find(|c| c["id"].as_str() == Some(cid));
+            let dname = cm
+                .and_then(|c| c["displayName"].as_str())
+                .unwrap_or("Custom")
+                .to_owned();
+            let burl = cm
+                .and_then(|c| c["baseUrl"].as_str())
+                .unwrap_or("https://api.openai.com/v1")
+                .to_owned();
+            (dname, burl, provider_slot(eff_prov))
+        } else {
+            let prov_val = providers
+                .iter()
+                .find(|p| p["id"].as_str() == Some(eff_prov));
+            let pname = prov_val
+                .and_then(|p| p["name"].as_str())
+                .unwrap_or(eff_prov)
+                .to_owned();
+            let burl = prov_val
+                .map(|p| resolve_provider_base_url(p, &variants))
+                .unwrap_or_else(|| "https://api.deepseek.com".to_owned());
+            (pname, burl, provider_slot(eff_prov))
+        };
+        let protocol = infer_provider_protocol(eff_prov, &base_url).to_owned();
+        let key_configured = read_api_key(&host, &slot)
+            .await
+            .is_ok_and(|k| !k.trim().is_empty());
+        let input = DirectProviderProfileInput {
+            id: "default".to_owned(),
+            provider_kind: protocol,
+            label,
+            base_url,
+            model_id: eff_model.to_owned(),
+            api_key_slot: slot,
+            api_key_configured: key_configured,
+            enabled: true,
+        };
+        let _ = with_app(&state.0, |app| {
+            app.upsert_direct_provider_profile(&input, now()?)
+                .map_err(|_| "PROVIDER_SAVE_FAILED")
+        });
+    }
+
+    build_model_hub_snapshot_and_sync(&host, &state).await
+}
+
+#[tauri::command]
+pub(crate) async fn app_provider_variant_set<R: Runtime>(
+    host: AppHandle<R>,
+    state: State<'_, AppState>,
+    provider_id: String,
+    variant: String,
+) -> Result<Value, &'static str> {
+    let data_dir = host
+        .path()
+        .app_data_dir()
+        .map_err(|_| "LOCAL_STORE_UNAVAILABLE")?;
+    std::fs::create_dir_all(&data_dir).map_err(|_| "LOCAL_STORE_UNAVAILABLE")?;
+    let mut hub = load_hub_state(&data_dir);
+    hub["providerVariants"][provider_id.trim()] = json!(variant.trim());
+    save_hub_state(&data_dir, &hub)?;
+    build_model_hub_snapshot_and_sync(&host, &state).await
+}
+
+#[tauri::command]
+pub(crate) async fn app_custom_model_save<R: Runtime>(
+    host: AppHandle<R>,
+    state: State<'_, AppState>,
+    name: String,
+    model_id: String,
+    base_url: String,
+    api_key: String,
+) -> Result<Value, &'static str> {
+    let dname = name.trim();
+    let mid = if model_id.trim().is_empty() {
+        dname
+    } else {
+        model_id.trim()
+    };
+    let burl = base_url.trim();
+    let key = api_key.trim();
+    if dname.is_empty() || burl.is_empty() || key.is_empty() {
+        return Err("INVALID_CUSTOM_MODEL");
+    }
+    let cid = format!("cm-{}", now()?);
+    let slot = provider_slot(&format!("custom-{cid}"));
+    store_api_key(&host, &slot, key).await?;
+
+    let data_dir = host
+        .path()
+        .app_data_dir()
+        .map_err(|_| "LOCAL_STORE_UNAVAILABLE")?;
+    std::fs::create_dir_all(&data_dir).map_err(|_| "LOCAL_STORE_UNAVAILABLE")?;
+    let mut hub = load_hub_state(&data_dir);
+    let mut list = hub
+        .get("customModels")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    list.push(json!({
+        "id": cid,
+        "displayName": dname,
+        "modelId": mid,
+        "baseUrl": burl,
+    }));
+    hub["customModels"] = json!(list);
+    save_hub_state(&data_dir, &hub)?;
+    build_model_hub_snapshot_and_sync(&host, &state).await
+}
+
+#[tauri::command]
+pub(crate) async fn app_custom_model_delete<R: Runtime>(
+    host: AppHandle<R>,
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<Value, &'static str> {
+    let cid = id.trim();
+    let slot = provider_slot(&format!("custom-{cid}"));
+    let _ = clear_api_key(&host, &slot).await;
+    let data_dir = host
+        .path()
+        .app_data_dir()
+        .map_err(|_| "LOCAL_STORE_UNAVAILABLE")?;
+    let mut hub = load_hub_state(&data_dir);
+    let mut list = hub
+        .get("customModels")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    list.retain(|item| item["id"].as_str() != Some(cid));
+    hub["customModels"] = json!(list);
+    save_hub_state(&data_dir, &hub)?;
+    build_model_hub_snapshot_and_sync(&host, &state).await
+}
+
+#[tauri::command]
+pub(crate) async fn app_registry_save<R: Runtime>(
+    host: AppHandle<R>,
+    state: State<'_, AppState>,
+    registry: Option<Value>,
+) -> Result<Value, &'static str> {
+    let data_dir = host
+        .path()
+        .app_data_dir()
+        .map_err(|_| "LOCAL_STORE_UNAVAILABLE")?;
+    std::fs::create_dir_all(&data_dir).map_err(|_| "LOCAL_STORE_UNAVAILABLE")?;
+    match registry {
+        Some(reg) if reg.get("providers").and_then(Value::as_array).is_some() => {
+            save_registry_file(&data_dir, &reg)?;
+        }
+        _ => {
+            let def: Value = serde_json::from_str(EMBEDDED_MODEL_REGISTRY)
+                .map_err(|_| "REGISTRY_RESET_FAILED")?;
+            save_registry_file(&data_dir, &def)?;
+        }
+    }
+    build_model_hub_snapshot_and_sync(&host, &state).await
 }
 
 pub(crate) async fn execute_direct<R: Runtime>(

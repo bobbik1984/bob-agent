@@ -92,6 +92,44 @@ export function createKernelBridge(invoke, isAvailable) {
     providerTest: () => call('app_provider_test'),
     routeGet: sessionId => call('app_route_get', { sessionId }),
     routeSet: (sessionId, route) => call('app_route_set', { sessionId, route }),
+    modelHubGet: () => call('app_model_hub_get'),
+    providerKeySet: (providerIdOrObj, apiKey, clearKey) => {
+      if (typeof providerIdOrObj === 'object' && providerIdOrObj !== null) {
+        return call('app_provider_key_set', {
+          providerId: providerIdOrObj.providerId,
+          apiKey: providerIdOrObj.apiKey ?? null,
+          clearKey: providerIdOrObj.clearKey ?? false,
+        });
+      }
+      return call('app_provider_key_set', {
+        providerId: providerIdOrObj,
+        apiKey: apiKey ?? null,
+        clearKey: clearKey ?? false,
+      });
+    },
+    modelRoleAssign: (roleOrObj, modelEntryId) => {
+      if (typeof roleOrObj === 'object' && roleOrObj !== null) {
+        const entryId =
+          roleOrObj.modelEntryId ||
+          `${roleOrObj.providerId}::${roleOrObj.modelId}`;
+        return call('app_model_role_assign', {
+          role: roleOrObj.role,
+          modelEntryId: entryId,
+        });
+      }
+      return call('app_model_role_assign', { role: roleOrObj, modelEntryId });
+    },
+    providerVariantSet: (providerId, variant) =>
+      call('app_provider_variant_set', { providerId, variant }),
+    customModelSave: ({ name, modelId, baseUrl, apiKey }) =>
+      call('app_custom_model_save', {
+        name,
+        modelId: modelId ?? '',
+        baseUrl,
+        apiKey: apiKey ?? '',
+      }),
+    customModelDelete: id => call('app_custom_model_delete', { id }),
+    registrySave: registry => call('app_registry_save', { registry: registry ?? null }),
     execute: requestId => call('app_execute', { requestId }),
     executions: sessionId => call('app_executions', { sessionId }),
     cancel: executionId => call('app_cancel', { executionId }),
