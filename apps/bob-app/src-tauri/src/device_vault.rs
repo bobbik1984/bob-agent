@@ -51,6 +51,62 @@ pub(crate) fn read(root: &Path) -> Result<Vec<u8>, VaultError> {
     }
 }
 
+fn valid_secret_slot(slot_name: &str) -> Result<String, VaultError> {
+    let trimmed = slot_name.trim();
+    if trimmed.is_empty()
+        || trimmed.len() > 64
+        || !trimmed
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+    {
+        return Err(VaultError::InvalidInput);
+    }
+    Ok(format!("secret-{trimmed}.dpapi"))
+}
+
+pub(crate) fn store_secret(
+    root: &Path,
+    slot_name: &str,
+    plaintext: &[u8],
+) -> Result<(), VaultError> {
+    let filename = valid_secret_slot(slot_name)?;
+    #[cfg(windows)]
+    {
+        windows::store_secret(root, &filename, plaintext)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (root, filename, plaintext);
+        Err(VaultError::Unsupported)
+    }
+}
+
+pub(crate) fn read_secret(root: &Path, slot_name: &str) -> Result<Vec<u8>, VaultError> {
+    let filename = valid_secret_slot(slot_name)?;
+    #[cfg(windows)]
+    {
+        windows::read_secret(root, &filename)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (root, filename);
+        Err(VaultError::Unsupported)
+    }
+}
+
+pub(crate) fn clear_secret(root: &Path, slot_name: &str) -> Result<(), VaultError> {
+    let filename = valid_secret_slot(slot_name)?;
+    #[cfg(windows)]
+    {
+        windows::clear_secret(root, &filename)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (root, filename);
+        Err(VaultError::Unsupported)
+    }
+}
+
 #[cfg(windows)]
 mod windows {
     use super::*;
@@ -236,6 +292,65 @@ mod windows {
         transform(&sealed, PURPOSE, false)
     }
 
+    const SECRET_PURPOSE: &[u8] = b"bob-provider-secret-v1";
+
+    pub(super) fn store_secret(
+        root: &Path,
+        filename: &str,
+        plaintext: &[u8],
+    ) -> Result<(), VaultError> {
+        let _root_guard = checked_root(root)?;
+        let sealed = transform(plaintext, SECRET_PURPOSE, true)?;
+        let target = root.join(filename);
+        let pending = root.join(format!("{filename}.pending"));
+        let _ = std::fs::remove_file(&pending);
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .share_mode(0)
+            .custom_flags(OPEN_REPARSE_POINT)
+            .open(&pending)
+            .map_err(|_| VaultError::Unavailable)?;
+        checked_file(&file)?;
+        file.write_all(&sealed)
+            .map_err(|_| VaultError::Unavailable)?;
+        file.sync_all().map_err(|_| VaultError::Unavailable)?;
+        drop(file);
+        std::fs::rename(&pending, &target).map_err(|_| VaultError::Unavailable)
+    }
+
+    pub(super) fn read_secret(root: &Path, filename: &str) -> Result<Vec<u8>, VaultError> {
+        let _root_guard = checked_root(root)?;
+        let file = OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .custom_flags(OPEN_REPARSE_POINT | BACKUP_SEMANTICS)
+            .open(root.join(filename))
+            .map_err(|e| {
+                if e.kind() == std::io::ErrorKind::NotFound {
+                    VaultError::NotFound
+                } else {
+                    VaultError::Unavailable
+                }
+            })?;
+        checked_file(&file)?;
+        let mut sealed = Vec::new();
+        file.take((SEALED_LIMIT + 1) as u64)
+            .read_to_end(&mut sealed)
+            .map_err(|_| VaultError::Unavailable)?;
+        transform(&sealed, SECRET_PURPOSE, false)
+    }
+
+    pub(super) fn clear_secret(root: &Path, filename: &str) -> Result<(), VaultError> {
+        let _root_guard = checked_root(root)?;
+        let target = root.join(filename);
+        match std::fs::remove_file(&target) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(_) => Err(VaultError::Unavailable),
+        }
+    }
+
     #[cfg(test)]
     mod tests {
         use super::*;
@@ -342,6 +457,19 @@ mod windows {
             assert_eq!(read_result, Err(VaultError::UnsafePath));
             assert!(store_result.is_err());
             assert!(!target.0.join(SLOT).exists());
+        }
+
+        #[test]
+        fn provider_secret_slot_roundtrip_update_and_clear() {
+            let root = Temp::new();
+            let slot = "provider-key-default";
+            assert_eq!(super::super::read_secret(&root.0, slot), Err(VaultError::NotFound));
+            super::super::store_secret(&root.0, slot, b"sk-test-123456").unwrap();
+            assert_eq!(super::super::read_secret(&root.0, slot).unwrap(), b"sk-test-123456");
+            super::super::store_secret(&root.0, slot, b"sk-test-updated").unwrap();
+            assert_eq!(super::super::read_secret(&root.0, slot).unwrap(), b"sk-test-updated");
+            super::super::clear_secret(&root.0, slot).unwrap();
+            assert_eq!(super::super::read_secret(&root.0, slot), Err(VaultError::NotFound));
         }
     }
 }

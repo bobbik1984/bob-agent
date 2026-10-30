@@ -31,9 +31,9 @@ flowchart LR
 
 ### 产品完整性约束
 
-BP3退出门包含F1的独立BYOK助理，配对Home和远端CLI链路通过不能替代它。当前施工存在F1细化不足，审查与补齐建议见[CURRENT_STAGE](CURRENT_STAGE.md)“产品完整性复核”；下一次排期必须覆盖该缺口，而不是只继续扩展节点连接。模型调用位置与数据主权威分别设计，已配对手机独立执行的同步规则尚需补充，不在此改写BOB-D-004/005。
+BP3退出门包含F1的独立BYOK助理，配对Home和远端CLI链路通过不能替代它。2026-10-30 已补齐 F1 直接模型调用（系统安全存储凭据、三协议适配、无需配对直接对话）、三轴解耦（模型调用位置 `execution_route` / 工作区位置 `workspace_id` / 记录主权威 `home_authority`）以及已配对 Replica 在 Home 离线时直接调用模型的重连幂等汇合规则（`replica_direct_sync_outbox` + `HomeRequest::ReplicaDirectTurn`），详见 [CURRENT_STAGE](CURRENT_STAGE.md) 与 [kernel-schema](wiki/kernel-schema.md) 第 9 节。
 
-BP5迁移以COMPONENT_MAP中的旧能力逐项对照F1–F7验收；保留、适配、替换和退役均须明确落点或裁决。旧App的个人助理能力、旧Online的成果/验证/续改能力不能因新内核骨架完成而视作已经继承。过渡Provider不改变最终同一内核、多种部署形态的目标。
+BP5迁移以 [COMPONENT_MAP](COMPONENT_MAP.md) 第 6 节中的旧能力逐项对照 F1–F7 验收；保留、适配、合并和替换均已明确落点与退出门，F3 个人助理内核能力（收件箱捕获、显式记忆生命周期、笔记、日程、决定）已在 `personal_ops.rs` 落地。过渡 Provider 不改变最终同一内核、多种部署形态的目标。
 
 ### BP3 内部推进顺序（2026-10-30）
 

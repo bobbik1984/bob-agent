@@ -1,6 +1,7 @@
 mod scan_commands;
 #[cfg(target_os = "android")]
 mod android_scanner;
+mod direct_llm;
 mod home_host;
 mod home_link;
 mod device_identity;
@@ -183,11 +184,27 @@ async fn app_readiness(
     tauri::async_runtime::spawn_blocking(move || {
         with_app(&state, |app| {
             let mut status = app.readiness().map_err(|_| "LOCAL_STATUS_UNAVAILABLE")?;
+            let direct_ready = app.direct_provider_ready().unwrap_or(false);
+            let session_id = app.selected_conversation().unwrap_or_default();
+            let route = app
+                .conversation_execution_route(&session_id)
+                .unwrap_or_else(|_| "auto".to_owned());
             if app.paired_home().map_err(|_| "HOME_STATE_UNAVAILABLE")?.is_some() {
-                status.mode = "home_configured";
-                status.execution_available = false; // Configuration is not remote readiness.
+                if route == "direct_byok" && direct_ready {
+                    status.mode = "direct_provider";
+                    status.execution_available = true;
+                } else {
+                    status.mode = "home_configured";
+                    status.execution_available = false; // Configuration is not remote readiness.
+                }
+            } else if route == "direct_byok" && direct_ready {
+                status.mode = "direct_provider";
+                status.execution_available = true;
             } else if enabled {
                 status.mode = "codex_readonly";
+                status.execution_available = true;
+            } else if direct_ready {
+                status.mode = "direct_provider";
                 status.execution_available = true;
             }
             Ok(status)
@@ -359,6 +376,36 @@ async fn app_cancel(
     runner: State<'_, RunnerState>,
     execution_id: String,
 ) -> Result<serde_json::Value, &'static str> {
+    if execution_id.starts_with("direct-execution:") {
+        with_app(&state.0, |app| {
+            let changed = app
+                .request_direct_stop(&execution_id, now()?)
+                .map_err(|_| "CANCEL_UNCONFIRMED")?;
+            if !changed {
+                return Err("CANCEL_UNCONFIRMED");
+            }
+            Ok(())
+        })?;
+        if let Some(flag) = runner
+            .active
+            .lock()
+            .map_err(|_| "RUNNER_UNAVAILABLE")?
+            .get(&execution_id)
+        {
+            flag.store(true, Ordering::SeqCst);
+        }
+        return with_app(&state.0, |app| {
+            let session = app
+                .selected_conversation()
+                .map_err(|_| "EXECUTION_READ_FAILED")?;
+            app.local_executions(&session)
+                .map_err(|_| "EXECUTION_READ_FAILED")?
+                .into_iter()
+                .find(|e| e.id == execution_id)
+                .ok_or("EXECUTION_NOT_FOUND")
+                .and_then(|e| serde_json::to_value(e).map_err(|_| "EXECUTION_READ_FAILED"))
+        });
+    }
     if let Ok(remote_view) = with_app(&state.0, |app| {
         let view = app
             .request_remote_stop(&execution_id, now()?)
@@ -396,6 +443,32 @@ async fn app_execute<R: tauri::Runtime>(
     runner: State<'_, RunnerState>,
     request_id: String,
 ) -> Result<LocalExecution, &'static str> {
+    let use_direct = with_app(&state.0, |app| {
+        let direct_ready = app.direct_provider_ready().unwrap_or(false);
+        if !direct_ready {
+            return Ok(false);
+        }
+        let session = app.selected_conversation().unwrap_or_default();
+        let route = app
+            .conversation_execution_route(&session)
+            .unwrap_or_else(|_| "auto".to_owned());
+        let has_paired_home = app.paired_home().unwrap_or(None).is_some();
+        Ok(route == "direct_byok"
+            || (!has_paired_home && runner.program.is_none() && route != "local_cli"))
+    })?;
+    if use_direct {
+        {
+            let active = runner.active.lock().map_err(|_| "RUNNER_UNAVAILABLE")?;
+            if !active.is_empty() {
+                return Err("RUNNER_BUSY");
+            }
+        }
+        let prepared = with_app(&state.0, |app| {
+            app.prepare_direct_execution(&request_id, now()?)
+                .map_err(|_| "EXECUTION_PREPARE_FAILED")
+        })?;
+        return direct_llm::execute_direct(host, &state, &runner, prepared).await;
+    }
     let program = runner.program.clone().ok_or("PROVIDER_UNCONFIGURED")?;
     let receipts = host
         .path()
@@ -538,6 +611,11 @@ fn configure<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R>
             app_conversation_select,
             app_view_state_save,
             app_preferences_save,
+            direct_llm::app_provider_get,
+            direct_llm::app_provider_save,
+            direct_llm::app_provider_test,
+            direct_llm::app_route_get,
+            direct_llm::app_route_set,
             app_execute,
             app_executions,
             app_cancel

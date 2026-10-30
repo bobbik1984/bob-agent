@@ -51,3 +51,19 @@ test('catalog, view-state and preferences IPC map multi-session arguments cleanl
   {command:'app_preferences_save',args:{sidebarGroupMode:'device',locale:'zh-CN',theme:'dark'}}
  ]);
 });
+
+test('direct provider BYOK and execution route IPC map arguments cleanly',async()=>{
+ const calls=[];const bridge=createKernelBridge(async(command,args)=>{calls.push({command,args});return {ok:true};},()=>true);
+ await bridge.providerGet();
+ await bridge.providerSave({providerKind:'openai_compatible',label:'OpenAI',baseUrl:'https://api.openai.com/v1',modelId:'gpt-4o-mini',apiKey:'sk-test',clearKey:false,enabled:true});
+ await bridge.providerTest();
+ await bridge.routeGet('conv-1');
+ await bridge.routeSet('conv-1','direct_byok');
+ assert.deepEqual(calls,[
+  {command:'app_provider_get',args:undefined},
+  {command:'app_provider_save',args:{providerKind:'openai_compatible',label:'OpenAI',baseUrl:'https://api.openai.com/v1',modelId:'gpt-4o-mini',apiKey:'sk-test',clearKey:false,enabled:true}},
+  {command:'app_provider_test',args:undefined},
+  {command:'app_route_get',args:{sessionId:'conv-1'}},
+  {command:'app_route_set',args:{sessionId:'conv-1',route:'direct_byok'}}
+ ]);
+});

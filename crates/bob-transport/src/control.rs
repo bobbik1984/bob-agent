@@ -1,7 +1,10 @@
 //! Versioned Home control RPC on the same pinned mutual TLS connection.
 //! All operations are bounded; accepting a message never starts a model here.
 use super::*;
-use bob_kernel::{dispatch::CancelExecution, home_result::HomeResult, outbox::Store};
+use bob_kernel::{
+    direct_provider::ReplicaDirectTurnPayload, dispatch::CancelExecution, home_result::HomeResult,
+    outbox::Store,
+};
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(
@@ -16,6 +19,7 @@ pub enum HomeRequest {
     Result(AppendMessage),
     Cancel(CancelExecution),
     LookupCancel(CancelExecution),
+    ReplicaDirectTurn(ReplicaDirectTurnPayload),
 }
 impl HomeRequest {
     pub fn binding(&self) -> AppendMessage {
@@ -30,12 +34,25 @@ impl HomeRequest {
                 home_epoch: r.home_epoch,
                 content: serde_json::Value::Null,
             },
+            Self::ReplicaDirectTurn(r) => AppendMessage {
+                request_id: r.sync_request_id.clone(),
+                session_id: r.conversation_id.clone(),
+                message_id: r.user_message_id.clone(),
+                origin_device_id: r.origin_device_id.clone(),
+                home_device_id: r.home_device_id.clone(),
+                home_epoch: r.home_epoch,
+                content: serde_json::json!({"text": r.user_text}),
+            },
         }
     }
     fn payload_hash(&self) -> Result<String, TransportError> {
+        if let Self::ReplicaDirectTurn(r) = self {
+            return Ok(r.payload_sha256.clone());
+        }
         let bytes = match self {
             Self::Append(r) | Self::Lookup(r) | Self::Result(r) => serde_json::to_vec(r),
             Self::Cancel(r) | Self::LookupCancel(r) => serde_json::to_vec(r),
+            Self::ReplicaDirectTurn(_) => unreachable!(),
         }
         .map_err(|_| TransportError::Protocol)?;
         Ok(format!("{:x}", Sha256::digest(bytes)))
@@ -185,6 +202,12 @@ impl PinnedServer {
                             execution: None,
                         })
                 }
+                HomeRequest::ReplicaDirectTurn(r) => store
+                    .receive_replica_direct_turn(&ctx, r, now)
+                    .map(|r| HomeResult {
+                        receipt: Some(r),
+                        execution: None,
+                    }),
             }
             .map_err(|_| TransportError::Protocol)
         })

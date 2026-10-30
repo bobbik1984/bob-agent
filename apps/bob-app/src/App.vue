@@ -39,8 +39,16 @@ const locallyAccepted = new Map();
 let unconfirmedRequest = null;
 
 const executionController = createExecutionController(kernelBridge);
+const directProviderEnabled = computed(
+  () =>
+    readiness.value?.mode === 'direct_provider' &&
+    readiness.value?.execution_available === true,
+);
 const executionEnabled = computed(
-  () => readiness.value?.mode === 'codex_readonly' && readiness.value?.execution_available === true,
+  () =>
+    (readiness.value?.mode === 'codex_readonly' ||
+      readiness.value?.mode === 'direct_provider') &&
+    readiness.value?.execution_available === true,
 );
 const homeConfigured = computed(() => readiness.value?.mode === 'home_configured');
 const sendLabel = computed(() => executionEnabled.value || homeConfigured.value);
@@ -54,7 +62,12 @@ function messageExecution(message) {
 }
 function messageStatus(message) {
   if (message.role === 'assistant') {
-    return ['codex_execution', 'home_codex_execution'].includes(message.source)
+    return [
+      'codex_execution',
+      'home_codex_execution',
+      'direct_provider',
+      'replica_direct_provider',
+    ].includes(message.source)
       ? 'replySaved'
       : 'probeReplySaved';
   }
@@ -65,20 +78,135 @@ const available = kernelBridge.available();
 const connectionKey = computed(() =>
   !available
     ? 'nativeRequired'
-    : executionEnabled.value
-      ? 'codexReadOnlyReady'
-      : homeConfigured.value
-        ? 'homeConfiguredHint'
-        : readiness.value
-          ? 'providerUnconfigured'
-          : 'loading',
+    : directProviderEnabled.value
+      ? 'directProviderReady'
+      : executionEnabled.value
+        ? 'codexReadOnlyReady'
+        : homeConfigured.value
+          ? 'homeConfiguredHint'
+          : readiness.value
+            ? 'providerUnconfigured'
+            : 'loading',
 );
 
 const settingsOpen = ref(false);
-const settingsView = ref('home'); // 'home' | 'device'
+const settingsView = ref('home'); // 'home' | 'device' | 'provider'
 const navigationOpen = ref(false);
 const devicePanel = ref(null);
 const deviceCapabilities = ref(null);
+
+const providerProfile = ref(null);
+const providerForm = ref({
+  providerKind: 'openai_compatible',
+  label: 'OpenAI',
+  baseUrl: 'https://api.openai.com/v1',
+  modelId: 'gpt-4o-mini',
+  apiKey: '',
+  enabled: true,
+});
+const executionRoute = ref('auto');
+const providerBusy = ref(false);
+
+function syncProviderForm(profile) {
+  providerProfile.value = profile || null;
+  if (!profile) return;
+  providerForm.value.providerKind = profile.provider_kind || 'openai_compatible';
+  providerForm.value.label = profile.label || 'OpenAI';
+  providerForm.value.baseUrl = profile.base_url || 'https://api.openai.com/v1';
+  providerForm.value.modelId = profile.model_id || 'gpt-4o-mini';
+  providerForm.value.apiKey = '';
+  providerForm.value.enabled = Boolean(profile.enabled);
+}
+
+function onProviderKindChange() {
+  const kind = providerForm.value.providerKind;
+  if (kind === 'anthropic_messages') {
+    if (providerForm.value.baseUrl.includes('openai') || providerForm.value.baseUrl.includes('googleapis')) {
+      providerForm.value.baseUrl = 'https://api.anthropic.com/v1';
+    }
+    if (providerForm.value.modelId.startsWith('gpt-') || providerForm.value.modelId.startsWith('gemini-')) {
+      providerForm.value.modelId = 'claude-3-5-sonnet-latest';
+    }
+    if (providerForm.value.label === 'OpenAI' || providerForm.value.label === 'Gemini') {
+      providerForm.value.label = 'Anthropic';
+    }
+  } else if (kind === 'gemini_generate_content') {
+    if (providerForm.value.baseUrl.includes('openai') || providerForm.value.baseUrl.includes('anthropic')) {
+      providerForm.value.baseUrl = 'https://generativelanguage.googleapis.com/v1beta';
+    }
+    if (providerForm.value.modelId.startsWith('gpt-') || providerForm.value.modelId.startsWith('claude-')) {
+      providerForm.value.modelId = 'gemini-2.5-flash';
+    }
+    if (providerForm.value.label === 'OpenAI' || providerForm.value.label === 'Anthropic') {
+      providerForm.value.label = 'Gemini';
+    }
+  } else {
+    if (providerForm.value.baseUrl.includes('anthropic') || providerForm.value.baseUrl.includes('googleapis')) {
+      providerForm.value.baseUrl = 'https://api.openai.com/v1';
+    }
+    if (providerForm.value.modelId.startsWith('claude-') || providerForm.value.modelId.startsWith('gemini-')) {
+      providerForm.value.modelId = 'gpt-4o-mini';
+    }
+    if (providerForm.value.label === 'Anthropic' || providerForm.value.label === 'Gemini') {
+      providerForm.value.label = 'OpenAI';
+    }
+  }
+}
+
+async function openProviderSettings() {
+  settingsView.value = 'provider';
+  settingsOpen.value = true;
+  if (available && kernelBridge.providerGet) {
+    const p = await kernelBridge.providerGet().catch(() => null);
+    if (p) syncProviderForm(p);
+  }
+  if (available && sessionId.value && kernelBridge.routeGet) {
+    const r = await kernelBridge.routeGet(sessionId.value).catch(() => null);
+    if (r) executionRoute.value = r;
+  }
+}
+
+async function saveProviderSettings(clearKey = false) {
+  if (!available || !kernelBridge.providerSave || providerBusy.value) return;
+  providerBusy.value = true;
+  try {
+    const saved = await kernelBridge.providerSave({
+      providerKind: providerForm.value.providerKind,
+      label: providerForm.value.label,
+      baseUrl: providerForm.value.baseUrl,
+      modelId: providerForm.value.modelId,
+      apiKey: clearKey ? null : providerForm.value.apiKey || null,
+      clearKey,
+      enabled: providerForm.value.enabled,
+    });
+    syncProviderForm(saved);
+    if (sessionId.value && kernelBridge.routeSet) {
+      await kernelBridge.routeSet(sessionId.value, executionRoute.value).catch(() => {});
+    }
+    await reload();
+  } finally {
+    providerBusy.value = false;
+  }
+}
+
+async function testProviderConnection() {
+  if (!available || !kernelBridge.providerTest || providerBusy.value) return;
+  await saveProviderSettings(false);
+  providerBusy.value = true;
+  try {
+    const checked = await kernelBridge.providerTest();
+    syncProviderForm(checked);
+    await reload();
+  } finally {
+    providerBusy.value = false;
+  }
+}
+
+async function changeExecutionRoute() {
+  if (!available || !sessionId.value || !kernelBridge.routeSet) return;
+  await kernelBridge.routeSet(sessionId.value, executionRoute.value).catch(() => {});
+  await reload();
+}
 
 const fallbackConversationTitle = computed(
   () => messages.value.find(m => m.role === 'user')?.content?.slice(0, 60) || t('conversation'),
@@ -616,11 +744,29 @@ onUnmounted(() => {
       class="settings-panel"
       role="dialog"
       aria-modal="true"
-      :aria-label="t(settingsView === 'device' ? 'deviceAndConnection' : 'settings')"
+      :aria-label="
+        t(
+          settingsView === 'device'
+            ? 'deviceAndConnection'
+            : settingsView === 'provider'
+              ? 'directModelProvider'
+              : 'settings',
+        )
+      "
       @keydown="settingsKeydown"
     >
       <div class="settings-heading">
-        <h2>{{ t(settingsView === 'device' ? 'deviceAndConnection' : 'settings') }}</h2>
+        <h2>
+          {{
+            t(
+              settingsView === 'device'
+                ? 'deviceAndConnection'
+                : settingsView === 'provider'
+                  ? 'directModelProvider'
+                  : 'settings',
+            )
+          }}
+        </h2>
         <div class="settings-heading-actions">
           <button
             type="button"
@@ -630,7 +776,7 @@ onUnmounted(() => {
             ×
           </button>
           <button
-            v-if="settingsView === 'device'"
+            v-if="settingsView !== 'home'"
             type="button"
             class="back-settings-btn"
             :aria-label="t('backToSettings')"
@@ -671,6 +817,16 @@ onUnmounted(() => {
 
         <div class="settings-card">
           <div class="settings-card-info">
+            <span class="settings-card-title">{{ t('directModelProvider') }}</span>
+            <p class="settings-card-desc">{{ t('directModelSubpageDesc') }}</p>
+          </div>
+          <button type="button" class="open-provider-subpage" @click="openProviderSettings">
+            {{ t('openProviderSubpage') }}
+          </button>
+        </div>
+
+        <div class="settings-card">
+          <div class="settings-card-info">
             <span class="settings-card-title">{{ t('deviceAndConnection') }}</span>
             <p class="settings-card-desc">{{ t('deviceSubpageDesc') }}</p>
           </div>
@@ -685,6 +841,97 @@ onUnmounted(() => {
             <p class="settings-card-desc">{{ t('versionValue') }}</p>
           </div>
         </div>
+      </div>
+
+      <div v-show="settingsView === 'provider'" class="settings-provider-subpage">
+        <form class="provider-form" @submit.prevent="saveProviderSettings(false)">
+          <label class="provider-field">
+            <span>{{ t('executionRouteLabel') }}</span>
+            <select v-model="executionRoute" @change="changeExecutionRoute">
+              <option value="auto">{{ t('routeAuto') }}</option>
+              <option value="direct_byok">{{ t('routeDirectByok') }}</option>
+              <option value="local_cli">{{ t('routeLocalCli') }}</option>
+              <option value="remote_home">{{ t('routeRemoteHome') }}</option>
+            </select>
+          </label>
+
+          <label class="provider-field">
+            <span>{{ t('providerKindLabel') }}</span>
+            <select v-model="providerForm.providerKind" @change="onProviderKindChange">
+              <option value="openai_compatible">{{ t('providerOpenai') }}</option>
+              <option value="anthropic_messages">{{ t('providerAnthropic') }}</option>
+              <option value="gemini_generate_content">{{ t('providerGemini') }}</option>
+            </select>
+          </label>
+
+          <label class="provider-field">
+            <span>{{ t('providerNameLabel') }}</span>
+            <input v-model="providerForm.label" type="text" required />
+          </label>
+
+          <label class="provider-field">
+            <span>{{ t('providerBaseUrlLabel') }}</span>
+            <input v-model="providerForm.baseUrl" type="url" required />
+          </label>
+
+          <label class="provider-field">
+            <span>{{ t('providerModelIdLabel') }}</span>
+            <input v-model="providerForm.modelId" type="text" required />
+          </label>
+
+          <label class="provider-field">
+            <span>{{ t('providerApiKeyLabel') }}</span>
+            <input
+              v-model="providerForm.apiKey"
+              type="password"
+              autocomplete="off"
+              :placeholder="
+                t(
+                  providerProfile?.api_key_configured
+                    ? 'providerApiKeyPlaceholderConfigured'
+                    : 'providerApiKeyPlaceholderEmpty',
+                )
+              "
+            />
+          </label>
+
+          <label class="provider-toggle-row">
+            <input v-model="providerForm.enabled" type="checkbox" />
+            <span>{{ t('providerEnabledLabel') }}</span>
+          </label>
+
+          <div class="provider-actions">
+            <button type="submit" :disabled="providerBusy">{{ t('providerSaveBtn') }}</button>
+            <button
+              type="button"
+              :disabled="providerBusy"
+              @click="testProviderConnection"
+            >
+              {{ t('providerTestBtn') }}
+            </button>
+            <button
+              v-if="providerProfile?.api_key_configured"
+              type="button"
+              :disabled="providerBusy"
+              @click="saveProviderSettings(true)"
+            >
+              {{ t('providerClearKeyBtn') }}
+            </button>
+          </div>
+
+          <p v-if="providerProfile" class="provider-status-line" role="status">
+            <template v-if="providerProfile.last_check_status === 'ok'">
+              {{ t('providerStatusOk') }} ({{ providerProfile.last_check_reason || providerProfile.model_id }})
+            </template>
+            <template v-else-if="providerProfile.last_check_status === 'untested'">
+              {{ t('providerStatusUntested') }}
+            </template>
+            <template v-else>
+              {{ t('providerStatusFailed') }} {{ providerProfile.last_check_status }}
+              {{ providerProfile.last_check_reason }}
+            </template>
+          </p>
+        </form>
       </div>
 
       <div v-show="settingsView === 'device'" class="settings-device-subpage">
@@ -913,11 +1160,13 @@ onUnmounted(() => {
           <p>
             {{
               t(
-                homeConfigured
-                  ? 'homeStartHint'
-                  : executionEnabled
-                    ? 'startExecutionHint'
-                    : 'startHint',
+                directProviderEnabled
+                  ? 'startDirectHint'
+                  : homeConfigured
+                    ? 'homeStartHint'
+                    : executionEnabled
+                      ? 'startExecutionHint'
+                      : 'startHint',
               )
             }}
           </p>
@@ -931,9 +1180,11 @@ onUnmounted(() => {
           <span v-if="message.role === 'assistant'" class="message-state">
             {{
               t(
-                ['codex_execution', 'home_codex_execution'].includes(message.source)
-                  ? 'assistantLiveReply'
-                  : 'assistantReply',
+                ['direct_provider', 'replica_direct_provider'].includes(message.source)
+                  ? 'assistantDirectReply'
+                  : ['codex_execution', 'home_codex_execution'].includes(message.source)
+                    ? 'assistantLiveReply'
+                    : 'assistantReply',
               )
             }}
           </span>

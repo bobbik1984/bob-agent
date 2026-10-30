@@ -10,7 +10,7 @@ project:
   - Vue 3
   - Desktop
   - Android
-  current_task: BP3-01.a/b/c、BP3-02.a 与 BP4-01~03 实现与全量回归通过，GitHub Android 固定签名 APK (run 40937679735) 已构建并下载校验通过，待连接 Pixel 8 执行 adb install -r 真机复核
+  current_task: F1 直接模型调用(BYOK)、已配对手机离线直连幂等汇合、F3 个人助理内核(personal_ops)与旧能力逐项对照表已完成代码及全量回归(kernel 81/transport 24/native 31/node 33/browser 5视口)，正执行 GitHub Android 固定签名 APK 构建与校验
   development_plan: docs/CURRENT_STAGE.md
 phases:
 - name: BP0 真相与保护

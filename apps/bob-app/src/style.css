@@ -100,3 +100,11 @@ html, body, #app { height: 100%; overflow: hidden; }
 .navigation-note { color: var(--text-secondary); font-size: .82rem; line-height: 1.5; margin: 0; }
 .loading-brand { text-align: center; }
 .loading-brand img { width: 4rem; height: 4rem; }
+.settings-provider-subpage { max-width: 36rem; display: grid; gap: .75rem; }
+.provider-form { padding: .85rem 1rem; border: 1px solid var(--line); border-radius: .85rem; background: var(--bg-secondary); display: grid; gap: .65rem; }
+.provider-field { display: grid; gap: .3rem; font-size: .85rem; color: var(--text-secondary); }
+.provider-field input, .provider-field select { width: 100%; }
+.provider-toggle-row { display: flex; align-items: center; gap: .5rem; font-size: .88rem; color: var(--text-primary); }
+.provider-toggle-row input { width: auto; padding: 0; }
+.provider-actions { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; }
+.provider-status-line { margin: 0; font-size: .8rem; color: var(--text-secondary); }

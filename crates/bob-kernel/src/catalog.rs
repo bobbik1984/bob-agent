@@ -111,7 +111,7 @@ pub(crate) fn ensure_bootstrap_catalog_in_tx(
     now: i64,
 ) -> Result<()> {
     tx.execute(
-        "UPDATE conversations SET project_id=NULL WHERE project_id LIKE 'local-project:%'",
+        "UPDATE conversations SET project_id=NULL WHERE project_id LIKE 'local-project:%' OR project_id LIKE 'direct-project:%'",
         [],
     )?;
     tx.execute(
@@ -534,7 +534,7 @@ impl LocalApp {
         let mut conv_stmt = db.prepare(
             "SELECT c.id, c.project_id, p.title, c.title, c.acceptance, c.created_at
              FROM conversations c
-             LEFT JOIN projects p ON p.id = c.project_id AND p.id NOT LIKE 'local-project:%'
+             LEFT JOIN projects p ON p.id = c.project_id AND p.id NOT LIKE 'local-project:%' AND p.id NOT LIKE 'direct-project:%'
              WHERE c.archived_at IS NULL
              ORDER BY c.created_at ASC, c.rowid ASC",
         )?;
@@ -544,7 +544,7 @@ impl LocalApp {
                     Ok((
                         r.get(0)?,
                         r.get::<_, Option<String>>(1)?
-                            .filter(|pid| !pid.starts_with("local-project:")),
+                            .filter(|pid| !pid.starts_with("local-project:") && !pid.starts_with("direct-project:")),
                         r.get(2)?,
                         r.get(3)?,
                         r.get(4)?,
@@ -688,7 +688,7 @@ impl LocalApp {
         let mut proj_stmt = db.prepare(
             "SELECT id, title, status, updated_at
              FROM projects
-             WHERE id NOT LIKE 'local-project:%' AND status != 'archived'
+             WHERE id NOT LIKE 'local-project:%' AND id NOT LIKE 'direct-project:%' AND status != 'archived'
              ORDER BY updated_at DESC, rowid ASC",
         )?;
         let raw_projects: Vec<(String, String, String, i64)> = proj_stmt

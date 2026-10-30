@@ -29,5 +29,7 @@ pub mod home_host;
 pub mod home_rejection;
 
 pub mod catalog;
+pub mod direct_provider;
 pub mod online_provider;
+pub mod personal_ops;
 pub mod workspace_handoff;

@@ -91,3 +91,24 @@
 - `crates/bob-transport/`：标准双向TLS、实际观测身份、有界帧与Home接收适配；测试证书仅位于测试代码。
 - `apps/bob-app/src-tauri/src/device_vault.rs`：Windows DPAPI原生凭据槽，其他平台明确不可用。
 - `apps/bob-app/src/App.vue`：输入框旁固定停止入口，与消息行复用同一取消命令。
+
+
+## 6 旧 App（0.9.30）与旧 Online（cloud-agent）能力逐项继承与验收对照表（2026-10-30）
+
+> 规则：所有旧版能力必须明确对应 `F1`–`F7`、当前 `1.0.1` 真实状态、新源码落点与视作“已完成继承”的退出验收门，严禁以“保留/待评估”静默遗漏，也不得用“内核状态机单测通过”冒充端到端继承完成。
+
+| 旧版能力模块 | 旧版代码来源 | 对应功能树 | 去留裁决 | 当前 `1.0.1` 落点 | 当前真实状态 | 视作“完成继承”的验收门（Exit Gate） |
+|---|---|---|---|---|---|---|
+| **独立 BYOK 直接模型对话（无需配对/服务器）** | 旧 App `src-tauri/src/llm.rs` | **F1 基础助理** | `adapt`（API Key 改存系统安全存储，支持显式模型选择与连通测试） | `crates/bob-kernel/src/direct_provider.rs`、`migrations/0006.sql`、`apps/bob-app/src-tauri/src/direct_llm.rs`、`App.vue` 设置与对话入口 | **本轮落地内核与原生直连链路**（区别于本地 CLI 与本机权重推理） | Windows 与 Android 在未配对 Home、无 VPS 下配置 API Key 完成两轮连续对话、流式/取消/错误可见、重开保留；已配对手机在 Home 离线时直连对话并在重连后幂等汇入 Home |
+| **本机模型权重推理（Llama sidecar）** | 旧 App `src-tauri/src/sidecar.rs` | **F1 扩展 Provider** | `evaluate`（作为独立本地权重 Provider，不与 API 直连混同） | 待独立 Provider 插件评估 | 未迁入（不阻塞 F1 API 直连） | 独立声明本地模型权重文件、硬件内存门槛与进程生命周期，不以 API 直连冒充 |
+| **多项目/多会话目录、草稿 CAS 与双视图分组** | 旧 App `src/views/ChatView.vue` + 旧 Online `projects` | **F1 / F2 连续性** | `merge`（统一 Project / Conversation / ViewState） | `crates/bob-kernel/src/catalog.rs`、`migrations/0005.sql`、`App.vue` | **内核/IPC/浏览器已验，Pixel 已验 A/B 会话草稿切换** | 跨重启保留各会话历史、草稿、阅读锚点与“按项目/按执行设备”分组 |
+| **PC ↔ Android 配对、双向 TLS 与离线发件箱** | 旧 App `sync_engine.rs`、`device_trust.rs`、`outbox.rs` | **F2 跨设备连续** | `replace`（改为 Home 主权威 + 单飞预热 + `intent_outbox`） | `crates/bob-kernel/src/outbox.rs`、`wake.rs`、`inbox.rs`、`replica.rs`、`crates/bob-transport/` | **私网 Pixel 扫码与真实回复已验**；离线直连汇合本轮落地；公网中继待验 | 私网与异地公网断线重连、未知回执先对账不重发、已配对手机离线直连模型后重连无冲突汇入 Home |
+| **闪念捕获（Capture）与捕获路由** | 旧 App `capture.rs`、`capture_router.rs` | **F1 / F3 个人事务域** | `retain & adapt`（统一落盘 `captures` 表，断网先本地保存） | `crates/bob-kernel/migrations/0001.sql` (`captures`)、`src/personal_ops.rs` | **本轮落地内核 CRUD 与归属**；UI 专项视图待接 | 离线/在线快速捕获文本与来源引用，支持转化为待办/笔记/记忆，从旧 `bob.db` 可无损读回 |
+| **日程与待办（Calendar / Todo / Task）** | 旧 App `calendar.rs`、`scheduler.rs`、`work_core/` | **F3 个人事务域** | `retain & merge`（Task 统一权威，日程关联 `schedule_items`） | `crates/bob-kernel/migrations/0001.sql` (`tasks`)、`0006.sql` (`schedule_items`)、`src/personal_ops.rs` | **本轮落地内核日程/待办状态机与回归**；独立日历视图待接 | 待办与日程同一权威存储，支持起止时间、提醒时间与完成状态流转，旧库记录可迁入读回 |
+| **Markdown 笔记与决定记录（Notebook / Decision）** | 旧 App `notebook.rs`、`work_core/decision_change.rs` | **F3 个人事务域** | `retain`（保留理由、备选、证据与重审条件） | `crates/bob-kernel/migrations/0001.sql` (`decisions`)、`0006.sql` (`notes`)、`src/personal_ops.rs` | **本轮落地内核笔记/决定持久化与版本递增**；UI 编辑器待接 | 笔记支持 Markdown 正文与标签检索；决定记录支持 `proposed -> accepted -> superseded` 链式追溯 |
+| **长期记忆与上下文提取（Memory / Dream / Context）** | 旧 App `dream.rs`、`evolution.rs`、`assistant_context.rs` | **F3 个人事务域** | `retain & adapt`（每条记忆必须绑定 `source_capture_id` 或 `source_message_id`） | `crates/bob-kernel/migrations/0001.sql` (`memories`)、`src/personal_ops.rs` | **本轮落地内核记忆提议/激活/更替（supersede）**；自动蒸馏管线待接 | 记忆变更可追溯至源消息/捕获、支持用户显式遗忘（`forgotten`）与版本更替，不静默污染提示词 |
+| **知识库索引与知识图谱（KB / KG）** | 旧 App `kb_indexer.rs`、`kb_extractor.rs`、`kg.rs` | **F1 / F3 检索域** | `evaluate & adapt`（派生索引不进主同步流，源文档归属 Home/Workspace） | 待 BP3/BP4 检索切片接入 | 规划中（未宣称已完成） | 本地 FTS/图谱索引可从权威笔记与归档对话重建，损坏可重算，不阻塞基础聊天 |
+| **附件与图片输入（Attachments / Media）** | 旧 App 对话附件与系统文件选择 | **F1 / F4 文件与多模态** | `retain`（按平台权限附加图片/文件引用与 SHA256） | `captures` / `messages.content_json` 附件引用契约 | 待接平台文件选择器与多模态上传 | 聊天支持附图/文件并校核平台权限与大小限制 |
+| **手机让 PC 处理文件（远程只读浏览与批准导出）** | 旧 App `@pc` 指令 + 新增 F4 沙箱 | **F4 远程文件处理** | `replace`（受控工作区范围 + 明确执行位置） | `crates/bob-kernel/src/local_execution.rs`、`workspace_handoff.rs` | 已验受控临时目录只读 Codex；获准真实工作区浏览/导出待验收 | 手机选择获准工作区→读取指定文档→查看总结→人工批准导出，PC 离线明确显示等待 |
+| **Work 治理闭环（Task / Execution / Artifact / Verification / Review）** | 旧 Online `packages/server/src/db/`、`routes/` | **F5 Work 与 Harness** | `merge`（语义迁入 `bob-kernel`） | `crates/bob-kernel/migrations/0001.sql`、`local_execution.rs`、`online_provider.rs` | 内核 DDL 与执行状态机已就绪；Artifact 版本对比与 Review UI 待接 | V1→V2 成果版本链、自动检查与人工 Review 门禁在统一 UI 跑通 |
+| **多 Harness 进程边界接入（Codex / AGY / DSH / Pi）** | 旧 Online `packages/server/src/runtime/` + 旧 App `remote_agent/` | **F5 / F6 常开节点** | `adapt`（过渡期通过 Online Provider 接入，最终统一 Runner IPC） | `apps/bob-app/src-tauri/src/runner.rs`（Codex）、`crates/bob-kernel/src/online_provider.rs` | 本机与 Home 只读 Codex 已真机验证；Online 兼容契约已单测，真实 Online 端点待联调 | 各 Harness 单独列出 `resume`/`cancel`/`events` 真实证据；过渡期接通生产 Online，BP5 完成数据迁移后旧服务退役 |

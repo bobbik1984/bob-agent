@@ -38,7 +38,7 @@ fn execution_rows(
     origin: &str,
     managed: bool,
 ) -> Result<Vec<LocalExecution>> {
-    let mut q = db.prepare("SELECT e.id,e.request_id,m.id,e.status,m.content_json,e.stop_requested_at IS NOT NULL,d.last_error,e.resolved_json,e.contract_json FROM executions e JOIN tasks t ON t.id=e.task_id JOIN messages m ON m.id=t.source_message_id JOIN runner_dispatches d ON d.execution_id=e.id WHERE ((?4=0 AND m.conversation_id=?1 AND m.origin_device_id=?2) OR (?4=1 AND EXISTS(SELECT 1 FROM workspaces w WHERE w.id=e.workspace_id AND w.device_id=?2))) AND d.runner_instance_id=?3 ORDER BY e.rowid")?;
+    let mut q = db.prepare("SELECT e.id,e.request_id,m.id,e.status,m.content_json,e.stop_requested_at IS NOT NULL,d.last_error,e.resolved_json,e.contract_json FROM executions e JOIN tasks t ON t.id=e.task_id JOIN messages m ON m.id=t.source_message_id JOIN runner_dispatches d ON d.execution_id=e.id WHERE ((?4=0 AND m.conversation_id=?1 AND (m.origin_device_id=?2 OR m.acceptance='home') AND d.runner_instance_id IN (?3, 'direct-provider-v1')) OR (?4=1 AND EXISTS(SELECT 1 FROM workspaces w WHERE w.id=e.workspace_id AND w.device_id=?2) AND d.runner_instance_id=?3)) ORDER BY e.rowid")?;
     let rows = q.query_map(params![session, origin, RUNNER, managed], |r| {
         Ok((
             r.get::<_, String>(0)?,

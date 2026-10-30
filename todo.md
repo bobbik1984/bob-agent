@@ -36,6 +36,8 @@
 - [/] **BP3-02.a**：已完成旧 Online 兼容 Provider 内核状态机与单测（`online_provider.rs`，含只读会话目录缓存、`native_resume_verified` vs `bounded_history_context` 诚实降级、活跃写入禁止并发抢占）；待连接真实 Online 端点验证。
 - [ ] **BP3-01.e / BP3-02.b**：公网传输与 Online 往返、断线对账、授权失效及PC离线行为验证；需要部署时提交具体对象与回退，不能假称当前私网验收已覆盖。
 - [ ] **BP4/F6 决策前置**：若要求PC关机后App仍经云端处理，评估常开Home的主权威迁移/恢复/撤销；保留现有BOB-D-004，不能默认为两主或自动切换。
+- [x] **F1 直接模型调用（BYOK）与已配对手机离线直连幂等汇合**：已完成 `0006.sql`、`direct_provider.rs`、`direct_llm.rs`、系统安全存储凭据槽位（Windows DPAPI / Android Keystore）、OpenAI/Anthropic/Gemini 三协议适配、设置子页「直接模型 API」与执行路径切换器，以及已配对手机离线直连后的 `HomeRequest::ReplicaDirectTurn` 双向 TLS 幂等汇入（81项 `bob-kernel`、24项 `bob-transport`、31项 `bob-app` 原生测试、33项 Node 与 5 视口浏览器测试通过）；真实外部商业大模型计费调用与真机安装待按需核验。
+- [x] **F3 个人助理内核能力与旧能力逐项对照**：已在 `docs/COMPONENT_MAP.md` §6 建立旧 App（0.9.30）与旧 Online（cloud-agent）逐项能力继承与验收表，并在 `crates/bob-kernel/src/personal_ops.rs` 实现捕获（`captures`）、显式记忆生命周期（`memories`）、笔记（`notes`）、日程（`schedule_items`）与决定（`decisions`）状态机及回归测试。
 - [ ] **F1/F2 设置后续**：按真实能力逐项补在线服务认证、执行许可/位置、数据导出与脱敏诊断；余额/订阅选型仍属后续，避免占位按钮。
 
 代码核对基线3103c7a；已安装0f6655f仅覆盖导航壳、设备快捷入口和旧记录保留。上述新增能力未实现、未打包、未真机验收。X1T/B4与生产保持原边界。

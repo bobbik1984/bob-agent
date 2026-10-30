@@ -134,7 +134,7 @@ impl LocalApp {
     }
     pub fn history(&self, session_id: &str) -> Result<Vec<AppMessage>> {
         self.ensure_active_conversation(session_id)?;
-        let mut query=self.store.db.prepare("SELECT m.id,m.content_json,coalesce((SELECT 'execution_' || e.status FROM executions e JOIN runner_dispatches d ON d.execution_id=e.id WHERE e.request_id=m.request_id AND d.runner_instance_id='local-codex-v1'),o.send_state,'reply_saved'),m.role,m.request_id FROM messages m LEFT JOIN intent_outbox o ON o.request_id=m.request_id WHERE m.conversation_id=?1 AND m.origin_device_id=?2 ORDER BY m.created_at,m.rowid")?;
+        let mut query=self.store.db.prepare("SELECT m.id,m.content_json,coalesce((SELECT 'execution_' || e.status FROM executions e JOIN runner_dispatches d ON d.execution_id=e.id WHERE e.request_id=m.request_id AND d.runner_instance_id IN ('local-codex-v1','direct-provider-v1')),o.send_state,CASE WHEN m.acceptance='home' AND m.role='user' THEN 'home_accepted' ELSE 'reply_saved' END),m.role,m.request_id FROM messages m LEFT JOIN intent_outbox o ON o.request_id=m.request_id WHERE m.conversation_id=?1 AND (m.origin_device_id=?2 OR m.acceptance='home') ORDER BY m.created_at,m.rowid")?;
         let rows = query.query_map(params![session_id, self.origin], |r| {
             Ok((
                 r.get::<_, String>(0)?,
@@ -180,13 +180,14 @@ impl LocalApp {
     pub fn readiness_for(&self, session_id: &str) -> Result<AppReadiness> {
         self.ensure_active_conversation(session_id)?;
         let (saved, pending) = self.store.db.query_row(
-            "SELECT count(*),coalesce(sum(CASE WHEN o.send_state IN ('local_saved','queued_for_wakeup','not_dispatched','dispatching','dispatched','unknown_send','needs_attention') AND NOT EXISTS(SELECT 1 FROM executions e JOIN runner_dispatches d ON d.execution_id=e.id WHERE e.request_id=m.request_id AND d.runner_instance_id='local-codex-v1') THEN 1 ELSE 0 END),0) FROM messages m JOIN intent_outbox o ON o.request_id=m.request_id WHERE m.conversation_id=?1 AND m.origin_device_id=?2",
+            "SELECT count(*),coalesce(sum(CASE WHEN o.send_state IN ('local_saved','queued_for_wakeup','not_dispatched','dispatching','dispatched','unknown_send','needs_attention') AND NOT EXISTS(SELECT 1 FROM executions e JOIN runner_dispatches d ON d.execution_id=e.id WHERE e.request_id=m.request_id AND d.runner_instance_id IN ('local-codex-v1','direct-provider-v1')) THEN 1 ELSE 0 END),0) FROM messages m JOIN intent_outbox o ON o.request_id=m.request_id WHERE m.conversation_id=?1 AND m.origin_device_id=?2",
             params![session_id,self.origin], |r| Ok((r.get(0)?,r.get(1)?)))?;
-        // No execution adapter is installed in this facade yet. Persisted messages
-        // must never be presented as scheduled or running just because they exist.
+        let direct_ready = self.direct_provider_ready().unwrap_or(false);
+        // No execution adapter is installed in this facade unless a direct provider
+        // profile is explicitly configured and enabled.
         Ok(AppReadiness {
-            mode: "local_only",
-            execution_available: false,
+            mode: if direct_ready { "direct_provider" } else { "local_only" },
+            execution_available: direct_ready,
             saved_messages: saved,
             pending_messages: pending,
         })

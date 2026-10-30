@@ -72,6 +72,11 @@ export const kernelBridge = {
    : [{id:'user',role:'user',content:'UI-only fixture request',send_state:'peer_accepted'},
       {id:'reply',role:'assistant',source:'home_codex_execution',content:'UI fixture reply — copy this exact text.'}],
  executions:async()=>[], prewarm:async()=>null,
+ providerGet:async()=>({id:'default',provider_kind:'openai_compatible',label:'OpenAI',base_url:'https://api.openai.com/v1',model_id:'gpt-4o-mini',api_key_slot:'provider-key-default',api_key_configured:true,enabled:true,last_check_status:'ok',last_check_reason:'gpt-4o-mini',last_checked_at:100,updated_at:100}),
+ providerSave:async(p)=>({id:'default',provider_kind:p.providerKind,label:p.label,base_url:p.baseUrl,model_id:p.modelId,api_key_slot:'provider-key-default',api_key_configured:true,enabled:p.enabled,last_check_status:'ok',last_check_reason:p.modelId,last_checked_at:100,updated_at:100}),
+ providerTest:async()=>({id:'default',provider_kind:'openai_compatible',label:'OpenAI',base_url:'https://api.openai.com/v1',model_id:'gpt-4o-mini',api_key_slot:'provider-key-default',api_key_configured:true,enabled:true,last_check_status:'ok',last_check_reason:'gpt-4o-mini',last_checked_at:100,updated_at:100}),
+ routeGet:async()=>'auto',
+ routeSet:async(_,r)=>r,
  pairingCapabilities:async()=>({can_scan:true,can_host:false}),
  pairingStatus:async()=>({state:'connected'})
 };'''
@@ -108,6 +113,10 @@ with sync_playwright() as p:
    page.get_by_role('dialog').wait_for(state='visible')
    page.locator('.settings-home-grid').wait_for(state='visible')
    assert page.get_by_role('button',name=labels['close']).evaluate('(e)=>e===document.activeElement')
+   page.locator('.open-provider-subpage').click()
+   page.locator('.provider-form').wait_for(state='visible')
+   page.get_by_role('button',name=labels['back'],exact=True).click()
+   page.locator('.settings-home-grid').wait_for(state='visible')
    page.locator('.open-device-subpage').click()
    page.locator('.qr-panel').wait_for(state='visible')
    page.get_by_role('button',name=labels['back'],exact=True).click()

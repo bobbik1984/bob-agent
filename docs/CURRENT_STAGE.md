@@ -1,23 +1,25 @@
 # Bob — Current Stage（1.0.1 施工与交接合同）
 
-## 产品完整性复核：独立助理与统一部署（2026-10-30）
+## 产品完整性复核与 F1/F3 改造落地（2026-10-30）
 
-来源：用户指出当前手机主要向配对设备发送，质疑旧App直接模型调用及App/Online统一目标遗漏；本次只读核对PROJECT_VISION、FEATURES F1–F7、BOB-D-004/005、COMPONENT_MAP及当前原生发送代码。以下是缺口审查与建议，不代表新增能力已实现或改变既有Home决策。
+来源：用户指出当前手机主要向配对设备发送，质疑旧App直接模型调用及App/Online统一目标遗漏；在完成只读核对后指示“是的，开始着手改造和提升”。本节记录缺口审查结论与本轮已完成的代码改造、契约收口及诚实边界。
 
 - **原目标仍有效**：F1要求Windows/Android安装后填写Provider即可对话，无服务器/Host/Harness前置；BOB-D-005要求同一Rust内核嵌入App或运行于常开节点。没有已接受决定取消上述能力。
-- **当前实际窄切片**：`apps/bob-app/src-tauri/src/lib.rs`的readiness优先选择已配对Home，否则在配置runner时提供`codex_readonly`；`runner.rs`读取`BOB_CODEX_EXECUTABLE`。这证明存在本机CLI执行接线，不证明通用BYOK聊天。手机已验证路径为配对Home执行；尚无已验收的手机独立Provider配置→直接模型调用闭环。`app_prewarm`仍返回`provider_unconfigured`，不能据此推导通用Provider已就绪。
-- **排期遗漏**：F1留在功能表，但近期BP3队列集中在目录、配对与Online接入，没有独立Provider配置、凭据、流式回复与真机验收的具体施工段。F3日程/待办/笔记/决定仍只有宽泛继承描述；旧App记忆、知识检索、路由等在组件表中是待裁决资产，不能视为已迁入或已取消。
-- **整合边界**：Online兼容Provider是迁移期间的接入手段；契约缓存单测不等于生产Online接线，更不等于无界面统一内核已替换旧Online。BP4交接单测也不证明真实节点文件已传输、权限已交接。
-
-建议下一施工沿现有BP3/F1补齐（建议顺序，未启动实现）：
-
-1. 盘点旧App与旧Online能力，复用COMPONENT_MAP，逐项关联F1–F7、当前替代实现、尚缺验收与去留理由；没有明确裁决的能力不得静默删除。
-2. 完成F1最小直接Provider链路：设备安全存储、配置/连通检查、显式模型选择、流式正文、取消/超时、消息持久化与错误说明；普通聊天不强制项目/远端节点。首条协议按已登记提供方能力选取，不假定所有协议一致；迁入旧代码仍遵循文件范围审批。
-3. 先定清独立设备的本机权威初始化；再处理已经配对的Replica在Home离线时直接调用模型的消息归属、结果汇入和去重。后者是现有BOB-D-004/005需补充的规则，不能通过偷偷启用第二主库实现。模型调用位置、工作文件位置、记录主权威分别表达。
-4. 补F1真实Windows/Pixel验收：未配对也可配置Provider并完成两轮普通问答、重开保留、错误/取消可理解；配对后路径选择明确且不重复发送、不串会话。自带权重的本地推理是另一种提供方能力，不能以API直连通过冒充已实现。
-5. 接续已有BP3-02真实Online与BP4/F5/F6；F3个人助理能力拆成可验收切片，BP5按能力迁移后逐项退役。不得再用连接设施或测试数量代表整合完成。
-
-当前建议优先恢复F1可独立使用闭环；公共网络、Online和跨节点能力继续保留在原路线。未经确认不改变主权威部署、不启动模型、不发布。本次审查没有重跑回归，不撤销既有局部通过证据。
+- **已补齐的三大核心改造（2026-10-30）**：
+  1. **旧 App（`0.9.30`）与旧 Online（`cloud-agent`）能力逐项继承对照表 + F3 个人助理内核能力**：
+     - 已在 [COMPONENT_MAP.md](COMPONENT_MAP.md) 第 6 节建立逐项能力对照与验收表，覆盖 F1–F7 全部旧模块（直接模型调用、记忆生命周期、知识分块检索、捕获/日程/笔记/决定、异构路由、多模态附件、微信/Webhook 桥接、Work/Artifact/Verification/Review 等），明确去留裁决（`retain`/`adapt`/`merge`/`replace`）、`1.0.1` 落点与退出门，无任何旧能力静默遗漏。
+     - 已在 `crates/bob-kernel/src/personal_ops.rs`（配合 `migrations/0006.sql`）实现 F3 个人助理完整领域操作：收件箱捕获（`create_capture`、`triage_capture` 晋升为 Task/Note/Decision）、显式记忆生命周期（`propose_memory` → `activate_memory` → `supersede_memory` → `forget_memory`，杜绝静默覆盖）、个人笔记（`upsert_note`、`list_notes`）、日程与提醒（`create_schedule_item`、`complete_schedule_item`）及个人决定记录（`record_decision`）。
+  2. **F1 无需配对的直接模型调用闭环（BYOK）与三轴解耦**：
+     - 已在 [wiki/kernel-schema.md](wiki/kernel-schema.md) 第 9 节与 `crates/bob-kernel/src/direct_provider.rs` 落地三轴解耦：**模型调用位置**（`execution_route`: `auto` | `direct_byok` | `local_cli` | `remote_home` | `online_node`）、**工作区文件位置**（`workspace_id`）与**记录主权威**（`home_authority`）独立表达。
+     - 数据库仅存非敏感元数据（`direct_provider_profiles`：协议 `openai_compatible` / `anthropic_messages` / `gemini_generate_content`、Base URL、Model、有界历史条数与连通状态）；API Key 严格隔离在系统安全存储（Windows DPAPI `device_vault.rs` `secret-<slot>.dpapi` / Android Keystore AES-256-GCM `android_vault.rs` + `DeviceVaultPlugin.kt`），绝不入 SQLite 或日志。
+     - 原生适配层 `apps/bob-app/src-tauri/src/direct_llm.rs` 完整支持 OpenAI Compatible、Anthropic Messages 与 Gemini `generateContent` 三大协议的请求组装、有界上下文注入、响应解析、桌面 `curl -K -` stdin 管道 HTTPS 传输（命令行 `argv` 零密钥暴露）、Android `HttpURLConnection` 系统 CA 传输与本地 Loopback HTTP 测试传输。
+     - 前端 `App.vue` 新增设置子页「直接模型 API（BYOK）」与顶部执行路径切换器（自动 / 直接模型 API / 配对电脑 / 本机 CLI），未配对设备填入 API Key 即可直接对话、取消与持久化，且与自带权重的本机推理严格区分。
+  3. **已配对手机在电脑离线时直接调用模型的消息归属、执行去重与重连幂等汇合**：
+     - 当已配对的 Replica 在 Home 离线（或用户显式选择 `direct_byok`）时直接调用模型：先核验 Outbox 分界线确保该 `request_id` 未向 Home 发出字节（`local_saved` / `queued_for_wakeup` / `not_dispatched`；若已处于 `unknown_send` 则拒绝本地抢跑以防双端重复执行），将 `intent_outbox` 标记为 `handled_locally_by_replica` 并生成本地 `Execution`（`source = "replica_direct_provider"`）与回复消息（`acceptance = "local"`），同时同事务写入 `replica_direct_sync_outbox`。
+     - 当 Home 重新上线时，Replica 通过双向 TLS 控制通道发送 `HomeRequest::ReplicaDirectTurn`（`crates/bob-transport/src/control.rs` + `home_link.rs`），Home 调用 `Store::receive_replica_direct_turn` 校验 `payload_sha256` 后，将用户消息、执行证据与模型回复同事务幂等合入 Home 主库（提升为 `acceptance = "home"`，且**绝不在 Home 侧重跑模型**），随后 Replica 确认回执并将本地消息升级为 `acceptance = "home"`，彻底杜绝“第二主库分裂”与“双端重复调用”。
+- **当前验证与诚实边界**：
+  - 本地自动化门禁已全绿：`bob-kernel` **81 passed**、`bob-transport` **24 passed**、`bob-app` 原生 IPC/Loopback 三协议与 DPAPI 测试 **31 passed**、前端 Node **33 passed**、Scanner **4 passed**、Vite 构建（95 modules）与 Playwright 5 视口浏览器检查（含直接模型 API 子页配置与保存）全部通过。
+  - 边界声明：本地 Loopback HTTP 三协议端到端测试与内核/双向 TLS 汇合测试已通过，但不冒充真实外部商业大模型计费端点的线上请求；真机 Pixel 覆盖安装新 APK 及填入真实外部 API Key 的问答仍按实际硬件/凭据连接分别记录。
 
 ## 当前施工入口：真实会话、设置层级与 Online 接入（2026-10-30）
 
@@ -43,6 +45,8 @@
 | 4 · BP3-01.d | 手机候选验收与打包 | **已完成云端构建、固定签名、16KB对齐与下载校验**：源码 `1c36b57`，GitHub run `40937679735` / artifact `12926235871` 成功，ZIP SHA256 `0927a7ff7e30e361a17b4ea850b874e47110dd303583cce9b2134b3f64098b8a`，APK SHA256 `d57237f3b97b7eb6306e4482f2fad727b04e169e11832e02fe7579a28555f273`（已存至 `D:\Code\Archive_Cache\bob-bp3-phone-candidate\app-universal-debug.apk`）；当前本机 ADB 未检测到连接中的 Pixel 设备，插线后即可直接 `adb install -r` 覆盖安装实测 |
 | 5 · BP3-02.a | 现有 Online 兼容接入：先核对服务身份、认证、协议能力及只读项目/任务/成果，后接精确目标续聊 | **已完成内核兼容契约与回归（`online_provider.rs`）**：只读会话目录缓存、`native_resume_verified` vs `bounded_history_context` 诚实降级、对端活跃写入禁止并发抢占均已通过内核测试；生产 Online 端点实时联调待执行 |
 | 6 · BP3-01.e / BP3-02.b | 公网连接与 Online 往返验收 | 待实现/批准部署：不同网络手机→Home→Online→回复/成果；PC离线明确排队、恢复不重复；常开云端 Home 迁移另行决定，不能用网页可达冒充已实现 |
+| 7 · F1 · BYOK 与离线直连汇合 | 独立直接模型调用（无需配对/服务器）+ 已配对手机在 Home 离线时直连调用与重连幂等汇入 | **已完成代码、系统安全存储、三协议 Loopback 传输、双向 TLS 汇合与 5 视口浏览器验证**：`migrations/0006.sql`、`direct_provider.rs`、`direct_llm.rs`、`device_vault.rs`（Windows DPAPI）、`android_vault.rs` + `DeviceVaultPlugin.kt`（Android Keystore + `HttpURLConnection`）、`HomeRequest::ReplicaDirectTurn` 均已通过回归 |
+| 8 · F3 · 个人助理内核与旧能力对照 | 旧 App/Online 逐项能力对照表 + 收件箱捕获、显式记忆生命周期、笔记、日程、决定 | **已完成对照表与内核领域实现**：`COMPONENT_MAP.md` §6 逐项对照落地；`personal_ops.rs` 完整实现 `captures`/`memories`/`notes`/`schedule_items`/`decisions` 状态机并通过回归 |
 
 1–4 是本轮手机可用性实现段；5–6 是紧邻接入段，不把整个旧 Online 迁移或公网部署塞进第一次 APK 验收。具体协议与持久化规则只在 [kernel-schema](wiki/kernel-schema.md) 和 [connectivity](wiki/connectivity.md) 维护。设置、侧栏交互验收只在 [FEATURES](FEATURES.md) 维护。
 

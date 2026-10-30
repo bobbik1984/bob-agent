@@ -461,3 +461,43 @@ HomeMessageContext必须由已认证且有会话访问授权的adapter构造；�
 ### App本机身份迁移0002
 
 新增app_local_identity(singleton,origin_device_id,default_session_id)。随机标识来自本地SQLite，与私钥/配对凭据无关；打开App时原子生成并保留。新安装本地authority仅供local保存，不表示远端已配置或设备已配对。0001原合同与hash不重写，0002有独立schema_migrations校验。
+
+
+## 9 F1 直接模型调用（BYOK）与已配对 Replica 离线直连汇合合同（2026-10-30）
+
+### 9.1 三轴解耦原则（调用位置 ≠ 工作文件位置 ≠ 记录主权威）
+
+每条对话与每次执行显式区分三个正交维度，禁止将“记录以某个 Home 为主权威”简化为“所有模型请求都必须经过 Home 才能发出”：
+
+1. **模型调用位置（`execution_route`）**：
+   - `direct_byok`：当前设备（Windows 或 Android）使用本机系统安全存储（Windows DPAPI / Android Keystore）中的 Provider API Key 直接调用模型 API，**不要求先配对电脑、不要求配置 VPS 或工作区**。
+   - `local_cli`：当前电脑在本机受控工作区启动本地 CLI Harness（如 Codex）。
+   - `remote_home`：已配对的 Home 电脑接收意图并在 Home 端执行。
+   - `online_node`：由常开节点或兼容 Online 服务承接长期任务。
+   - *注*：自带权重的本机推理（local weights / sidecar）属于另一类独立 Provider 能力，不得用 `direct_byok` API 直连冒充。
+2. **工作文件位置（`workspace_id`）**：
+   - 普通聊天、日常问答、整理、闪念捕获与个人事务（F1/F3）允许 `workspace_id = NULL`（或绑定本机虚拟无文件会话上下文），不强制创建或锁定代码仓库工作区。
+3. **记录主权威（`home_authority`）**：
+   - **未配对独立设备**：`home_authority.device_id == app_local_identity.origin_device_id`，本机即自身记录的唯一主权威，所有消息与直连回复直接以 `acceptance = 'home'` 落盘。
+   - **已配对 Replica 设备（如已配对 X1C 的手机）**：`home_authority.device_id` 仍指向 X1C Home，绝不偷偷分裂出第二个互相覆盖的主库。
+
+### 9.2 已配对手机在 Home 离线（或显式选直连）时的直接模型调用与幂等汇合规则
+
+当已配对手机在 Home 离线时使用本机配置的 BYOK Provider 直接对话，或用户在对话入口显式选择“本机直接调用模型（`direct_byok`）”时，内核按以下四步保证**既能立即对话、又不重跑模型、也不产生双主冲突**：
+
+1. **出网前零字节分界检查（防双发/防重跑）**：
+   - `prepare_direct_execution(request_id)` 必须在同一个 `Immediate` 事务中核对 `intent_outbox`：
+     - 若该 `request_id` 在 `intent_outbox` 中已处于 `dispatched`、`unknown_send` 或 `peer_accepted`（即可能已发往 Home 触发远端执行），**拒绝**在本机重复启动直接模型调用（返回 `Error::InvalidTransition`）。
+     - 若该 `request_id` 处于 `local_saved`、`queued_for_wakeup` 或 `not_dispatched`（已证明对 Home 零字节出网），内核原子将其标记为由本机直连消费（`send_state = 'peer_accepted'`、`transport_evidence = 'peer_receipt'`、`last_error = 'local_direct_provider'`），阻止后台 Home 投递器把该条消息再次当作“待在 Home 执行的请求”发给电脑。
+2. **Replica 本地成对持久化（带明确来源与待汇合标记）**：
+   - 本机直连模型完成后，`finish_direct_execution` 在同一事务内：
+     - 写入 `executions` 终态（`status = 'completed' | 'failed' | 'cancelled'`，记录 `provider_reported` 模型身份与 token 观测证据）；
+     - 写入 `messages` 回复行（`role = 'assistant'`，`source = 'replica_direct_provider'`，在 Replica 未与 Home 对账前 `acceptance = 'local'`）；
+     - 若当前设备存在已配对的远端 Home（`paired_home.is_some()`），在同一事务写入 `replica_direct_sync_outbox`（含 `sync_request_id`、原用户消息、直连 Execution 摘要、Assistant 回复正文及整体 `payload_sha256`，初始 `sync_state = 'pending'`）。
+3. **重连后向 Home 主库幂等汇入（`receive_replica_direct_turn`）**：
+   - 当 Home 重新可达时，同步通道将 `replica_direct_sync_outbox` 中 `pending` 的完整回合记录提交给 Home：
+     - Home 通过既有 `authorize()` 校验设备证书指纹、`home_epoch` 与会话访问权限；
+     - Home 查验 `inbox_receipts(sync_request_id)`：若已存在且 `payload_sha256` 一致，直接返回原 `HomeReceipt { accepted: true }`（幂等无副作用）；若摘要不同则返回 `IdentityConflict`；
+     - 若首次接收，Home 在单一事务内将用户消息（保留 `origin_device_id = replica_id`）、已完成 `Task`/`Execution`（`status = 'completed'`）与 Assistant 回复（`source = 'replica_direct_provider'`）全部以 `acceptance = 'home'` 写入 Home 主库，并写入 `domain_events` 与 `inbox_receipts`，**绝不在 Home 上再次调用模型**。
+4. **Replica 收到回执后提升状态**：
+   - Replica 收到经认证的 Home 回执后，调用 `mark_replica_direct_turn_synced`，将本机该回合的用户消息与回复从 `acceptance = 'local'` 提升为 `acceptance = 'home'`，并将 `replica_direct_sync_outbox.sync_state` 置为 `'synced'`。

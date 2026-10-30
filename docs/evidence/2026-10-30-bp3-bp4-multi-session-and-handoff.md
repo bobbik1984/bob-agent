@@ -45,6 +45,38 @@
 - `apps/bob-app/src-tauri/src/home_host.rs`: `f9dddb30dd00592104a519e72322001089fdec248a705c520506162e7346f99d`
 - `apps/bob-app/src-tauri/src/tests.rs`: `0187d86e3614ef9b104fb68d4e4970144cadafc90002ea5c20649f492ca7d6d9`
 - `apps/bob-app/src/App.vue`: `f3665f5de4f69551a1febf62a990d3735cf213d4158cf95141d80af398aa852c`
-- `apps/bob-app/src/kernel-bridge.mjs`: `d10b3a5dce8eddba8d21217c05865f7967600de106eb49d532be9491f7b3cdd4`
+- `apps/bob-app/src/kernel-bridge.mjs`: `128d9dbf60a42f25aa4a839ae36ae67c523b8cb1f16a5308dca20661c54d3163`
 - `apps/bob-app/src/send-controller.mjs`: `993675e0323dfb12cc45596108a489a61e2eb902e67fecf1b6d347921f1b6194`
-- `apps/bob-app/tests/ui-browser.py`: `30461d98fe9a300cd57803cf05a46b9e5c57844f41f6c7002fb122a594185ccb`
+- `apps/bob-app/tests/ui-browser.py`: `4151b2e310f819330553f76bbd630ffe0529949b32df6c4929d01515e9472db6`
+
+## 5. F1 直接模型调用（BYOK）、已配对手机离线直连汇合与 F3 个人助理内核增量证据（2026-10-30）
+
+### 5.1 交付范围
+- **旧能力逐项对照与 F3 个人助理内核**：`docs/COMPONENT_MAP.md` 第 6 节逐项对照表、`crates/bob-kernel/migrations/0006.sql`、`crates/bob-kernel/src/personal_ops.rs`（`captures`、`memories` 显式生命周期 `proposed -> active -> superseded -> forgotten`、`notes`、`schedule_items`、`decisions`）。
+- **F1 无需配对直接模型调用（BYOK）与三轴解耦**：`docs/wiki/kernel-schema.md` 第 9 节、`crates/bob-kernel/src/direct_provider.rs`、系统安全存储凭据槽位（Windows DPAPI `device_vault.rs` / Android Keystore AES-256-GCM `android_vault.rs` + `DeviceVaultPlugin.kt`）、原生三协议适配器 `apps/bob-app/src-tauri/src/direct_llm.rs`（`openai_compatible`、`anthropic_messages`、`gemini_generate_content`）、前端设置子页「直接模型 API」与执行路径切换器（`App.vue` + `kernel-bridge.mjs`）。
+- **已配对 Replica 在 Home 离线时直连调用与重连幂等汇入**：`replica_direct_sync_outbox`、`Store::complete_replica_direct_execution`、`Store::receive_replica_direct_turn`、双向 TLS 控制消息 `HomeRequest::ReplicaDirectTurn`（`crates/bob-transport/src/control.rs` + `home_host.rs` + `home_link.rs`）。
+
+### 5.2 增量自动化验证结果
+
+| 检查项 | 命令 | 结果 | 说明 |
+|---|---|---|---|
+| `bob-kernel` 全量单测与集成测试 | `cargo test` (`crates/bob-kernel`) | **81 passed, 0 failed** | 新增 `direct_provider_and_personal_ops` 4 大集成测试（含 Replica 离线直连→重连幂等汇入 Home 主库、已出网 `unknown_send` 禁止本地重复执行、F3 全生命周期） |
+| `bob-transport` 双向 TLS 1.3 测试 | `cargo test` (`crates/bob-transport`) | **24 passed, 0 failed** | 含 `HomeRequest::ReplicaDirectTurn` SHA-256 校验与 `Store::receive_replica_direct_turn` 集成 |
+| `bob-app` 原生 IPC / Vault / Loopback 测试 | `cargo test --lib --features native-tests` (`apps/bob-app/src-tauri`) | **31 passed, 0 failed** | 新增 Windows DPAPI 凭据槽位读写清除回环 + 本地 HTTP Loopback OpenAI/Anthropic/Gemini 三协议端到端执行验证 |
+| 前端控制器与 IPC 映射单测 | `node --test tests/*.test.mjs` (`apps/bob-app`) | **33 passed, 0 failed** | 新增 `providerGet`/`providerSave`/`providerTest`/`routeGet`/`routeSet` 桥接验证 |
+| Android 扫码插件暂存检查 | `python -m unittest discover -s tests -p test_android_scanner_stage.py` | **4 passed, 0 failed** | 验证 Android 插件暂存 |
+| 前端生产构建 | `pnpm run build` (`apps/bob-app`) | **95 modules, built in 1.76s** | 零硬编码色彩、中英双语键完整对齐 |
+| Playwright 5 视口浏览器交互 | `python tests/ui-browser.py` (`apps/bob-app`) | **5/5 视口通过** | 覆盖设置首页→「直接模型 API」子页→保存配置→返回设置首页→「设备与连接」子页→多会话切换 |
+
+### 5.3 新增与更新源文件 SHA256 校验值
+- `crates/bob-kernel/migrations/0006.sql`: `caf2369f3f35d5450de0b03f84261177f370b75f02948de970ec32b6d2af9947`
+- `crates/bob-kernel/src/direct_provider.rs`: `f98ac49c425bf8274dccd4acaf3ac6bd84fbca0e12ad2e88d9d32421a8be28e9`
+- `crates/bob-kernel/src/personal_ops.rs`: `a2cda28518c35c3b62048917d9f0d7e4845ca6fa5704366b97dead0a9eb0acc8`
+- `crates/bob-kernel/tests/direct_provider_and_personal_ops.rs`: `7c49cd625494df0c4fd5537dbebcd3c2e102733d3f114db60949eb9f1b447012`
+- `crates/bob-transport/src/control.rs`: `6988bc4fecfdf6ea4415df8cf9528384985284985240c014a6f9b1badfd0c56baca4bb`
+- `apps/bob-app/src-tauri/src/direct_llm.rs`: `6938078e7b55f2b0879099c33f31e53a1287803bf42ef9de7cdf14e8812c13f3`
+- `apps/bob-app/src-tauri/src/device_vault.rs`: `ae0d6e6789d5c11b198bcc20c7c6ed6c846bece036015cc75b2a98a798a20745`
+- `apps/bob-app/src-tauri/src/android_vault.rs`: `36ec39b6c151372bd7e2bf02d441aff76d839d45f25872ecf6bfbda2a206dfd0`
+- `apps/bob-app/src-tauri/android/DeviceVaultPlugin.kt`: `3fac521f0c480e251b1b5307f60d36e0f1fd88e7e3b33cd6ce99945e9d09517c`
+- `apps/bob-app/src-tauri/src/lib.rs`: `c57c7f0bb50c816351ab5d769c792f336adb2a072e3fe85c6f3ae6c7b3da8840`
+- `apps/bob-app/src/App.vue`: `2e57b0542ac0414f89ce786e2ff944ea07a43e88e811544ff387f1165e3ccb29`

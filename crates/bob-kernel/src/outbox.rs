@@ -191,6 +191,7 @@ impl Store {
         }
         crate::pairing::migrate(&tx, now)?;
         crate::catalog::migrate(&tx, now)?;
+        crate::direct_provider::migrate(&tx, now)?;
         tx.commit()?;
         let mut store = Self { db, _owner: owner };
         store.recover_interrupted()?;

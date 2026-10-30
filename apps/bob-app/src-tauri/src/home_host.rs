@@ -255,6 +255,13 @@ fn handle_request(
                     execution: None,
                 })
                 .map_err(|_| "HOME_LOOKUP_FAILED"),
+            HomeRequest::ReplicaDirectTurn(ref r) => app
+                .host_receive_replica_direct_turn(&ctx, r, at)
+                .map(|r| HomeResult {
+                    receipt: Some(r),
+                    execution: None,
+                })
+                .map_err(|_| "HOME_DIRECT_TURN_SYNC_FAILED"),
             HomeRequest::Cancel(ref r) => {
                 let receipt = app
                     .host_receive_cancel(&ctx, r, at)
