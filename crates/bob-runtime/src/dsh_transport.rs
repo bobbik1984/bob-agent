@@ -4,6 +4,16 @@ use std::{io::{Read, Write}, time::{Duration, Instant}, net::{TcpStream, ToSocke
 use tungstenite::{client::IntoClientRequest, Message, stream::MaybeTlsStream};
 use crate::dsh_session::{History, SessionAddress, project_history};
 const LIMIT: u64 = 4 * 1024 * 1024;
+// History snapshots include tool records as well as visible messages. Keep a separate,
+// bounded budget; a size rejection must not masquerade as an offline node.
+const HISTORY_LIMIT: usize = 16 * 1024 * 1024;
+fn history_read_error(error: tungstenite::Error) -> &'static str {
+ match error {
+  tungstenite::Error::Capacity(_) => "DSH_HISTORY_TOO_LARGE",
+  tungstenite::Error::Io(e) if matches!(e.kind(),std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock) => "DSH_HISTORY_TIMEOUT",
+  _ => "DSH_HISTORY_UNAVAILABLE",
+ }
+}
 pub struct DshClient { base: reqwest::Url, cookie: String, http: reqwest::blocking::Client }
 impl DshClient {
  pub fn connect(endpoint: &str, token: &str) -> Result<Self, &'static str> {
@@ -56,17 +66,17 @@ impl DshClient {
   let socket=socket.ok_or("DSH_UNAVAILABLE")?;
   socket.set_read_timeout(Some(Duration::from_secs(10))).map_err(|_|"DSH_UNAVAILABLE")?;
   socket.set_write_timeout(Some(Duration::from_secs(10))).map_err(|_|"DSH_UNAVAILABLE")?;
-  let config=tungstenite::protocol::WebSocketConfig::default().max_message_size(Some(LIMIT as usize)).max_frame_size(Some(LIMIT as usize));
+  let config=tungstenite::protocol::WebSocketConfig::default().max_message_size(Some(HISTORY_LIMIT)).max_frame_size(Some(HISTORY_LIMIT));
   let (mut ws,_)=tungstenite::client_tls_with_config(req,socket,Some(config),None).map_err(|_|"DSH_UNAVAILABLE")?;
   match ws.get_mut(){MaybeTlsStream::Rustls(s)=>{s.sock.set_read_timeout(Some(Duration::from_secs(15))).map_err(|_|"DSH_UNAVAILABLE")?;s.sock.set_write_timeout(Some(Duration::from_secs(15))).map_err(|_|"DSH_UNAVAILABLE")?;},_=>return Err("DSH_TLS_REQUIRED")}
   let stream=format!("bob-{}",crate::now_millis());
   ws.send(Message::Text(json!({"type":"open","streamId":stream,"endpoint":"session/follow","payload":{"args":{"request":{"address":{"kind":"session","sessionId":address.session_id},"maxMessages":200}}}}).to_string().into())).map_err(|_|"DSH_UNAVAILABLE")?;
   let mut size=0; let started=Instant::now();
   for _ in 0..100 {
-   if started.elapsed()>Duration::from_secs(20){return Err("DSH_HISTORY_UNAVAILABLE");}
-   let item=ws.read().map_err(|_|"DSH_HISTORY_UNAVAILABLE")?;
+   if started.elapsed()>Duration::from_secs(20){return Err("DSH_HISTORY_TIMEOUT");}
+   let item=ws.read().map_err(history_read_error)?;
    if let Message::Text(text)=item {
-    size+=text.len();if size as u64>LIMIT{return Err("DSH_PROTOCOL");}
+    size+=text.len();if size>HISTORY_LIMIT{return Err("DSH_HISTORY_TOO_LARGE");}
     let value:Value=serde_json::from_str(&text).map_err(|_|"DSH_PROTOCOL")?;
     if value["streamId"]==stream && value["type"]=="item" && value["value"]["type"]=="snapshot"{
      let result=project_history(address,&value["value"]);
@@ -105,6 +115,21 @@ pub fn dispatch_once(dir:&std::path::Path, connection:&str, session:&str, text:&
 }
 #[cfg(test)] mod tests{
  use super::*;
+ #[test] fn history_capacity_and_timeout_have_distinct_errors(){
+  assert_eq!(history_read_error(tungstenite::Error::Capacity(tungstenite::error::CapacityError::MessageTooLong{size:20*1024*1024,max_size:HISTORY_LIMIT})),"DSH_HISTORY_TOO_LARGE");
+  assert_eq!(history_read_error(tungstenite::Error::Io(std::io::Error::from(std::io::ErrorKind::TimedOut))),"DSH_HISTORY_TIMEOUT");
+  assert_eq!(history_read_error(tungstenite::Error::ConnectionClosed),"DSH_HISTORY_UNAVAILABLE");
+ }
+ #[test] fn real_sized_snapshot_fits_bounded_history_budget(){
+  use tungstenite::{WebSocket,protocol::Role};
+  let payload="x".repeat(4_684_655);
+  let mut sender=WebSocket::from_raw_socket(std::io::Cursor::new(Vec::new()),Role::Server,None);
+  sender.send(Message::Text(payload.clone().into())).unwrap();
+  let bytes=sender.get_ref().get_ref().clone();
+  let config=tungstenite::protocol::WebSocketConfig::default().max_message_size(Some(HISTORY_LIMIT)).max_frame_size(Some(HISTORY_LIMIT));
+  let mut receiver=WebSocket::from_raw_socket(std::io::Cursor::new(bytes),Role::Client,Some(config));
+  assert_eq!(receiver.read().unwrap().into_text().unwrap().len(),payload.len());
+ }
  #[test] fn refuses_replay_after_unknown(){let d=tempfile::tempdir().unwrap();assert!(dispatch_once(d.path(),"c","s","hello","r",||Err("DSH_RECEIPT_UNKNOWN")).is_err());assert!(dispatch_once(d.path(),"c","s","hello","r",||panic!("must not resend")).is_err());}
  #[test] fn dedup_and_bind_payload(){let d=tempfile::tempdir().unwrap();let v=json!({"status":"accepted"});assert_eq!(dispatch_once(d.path(),"c","s","hello","r",||Ok(v.clone())).unwrap(),v);assert_eq!(dispatch_once(d.path(),"c","s","hello","r",||panic!("duplicate")).unwrap(),v);assert_eq!(dispatch_once(d.path(),"c","s","changed","r",||panic!("conflict")).unwrap_err(),"DSH_REQUEST_CONFLICT");}
 }

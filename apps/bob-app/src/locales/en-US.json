@@ -537,5 +537,8 @@
   "dshError": "Cannot read node; check address and connection",
   "dshStorageError": "Local save failed; copy your unsent text first",
   "dshSending": "Sending…",
-  "directoryUnavailable": "Cannot read {name} right now. Check its connection in Settings."
+  "directoryUnavailable": "Cannot read {name} right now. Check its connection in Settings.",
+  "dshHistoryTooLarge": "This session exceeds the history size limit. Your connection address does not need to be reconfigured.",
+  "dshHistoryTimeout": "Reading session history timed out. Please refresh shortly.",
+  "dshHistoryUnavailable": "The session is listed, but its history could not be read. Please refresh to retry."
 }

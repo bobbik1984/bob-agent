@@ -537,5 +537,8 @@
   "dshError": "无法读取节点，请检查地址和连接状态",
   "dshStorageError": "本机保存失败，请先复制未发送内容",
   "dshSending": "正在发送…",
-  "directoryUnavailable": "{name} 暂时无法读取；可在设置中检查连接。"
+  "directoryUnavailable": "{name} 暂时无法读取；可在设置中检查连接。",
+  "dshHistoryTooLarge": "此会话的历史内容超过读取上限，暂时无法加载；连接地址无需重新配置。",
+  "dshHistoryTimeout": "读取会话历史超时，请稍后刷新。",
+  "dshHistoryUnavailable": "会话列表可见，但本次历史读取未完成，请刷新重试。"
 }

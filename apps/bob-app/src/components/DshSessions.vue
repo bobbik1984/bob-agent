@@ -19,7 +19,7 @@ const groups=computed(()=>{
  if(!map.has(k))map.set(k,[]);map.get(k).push(s);}
  return [...map].map(([name,items])=>({name,items}));
 });
-function fault(e){const code=String(e?.message || e);return `${t(code.includes('DSH_RECEIPT_UNKNOWN')?'dshUncertain':'dshError')} · ${code.match(/DSH_[A-Z_]+/)?.[0] || 'DSH_UNAVAILABLE'}`}
+function fault(e){const code=String(e?.message || e);return `${t(code.includes('DSH_RECEIPT_UNKNOWN')?'dshUncertain':code.includes('DSH_HISTORY_TOO_LARGE')?'dshHistoryTooLarge':code.includes('DSH_HISTORY_TIMEOUT')?'dshHistoryTimeout':code.includes('DSH_HISTORY_UNAVAILABLE')?'dshHistoryUnavailable':'dshError')} · ${code.match(/DSH_[A-Z_]+/)?.[0] || 'DSH_UNAVAILABLE'}`}
 async function load(){const g=++generation;clearTimeout(timer);busy.value=true;error.value='';selected.value=null;history.value=null;sessions.value=[];try{const items=await kernelBridge.dshList(connection.value);if(g===generation&&!disposed)sessions.value=items;}catch(e){if(g===generation)error.value=fault(e)}finally{if(g===generation)busy.value=false}}
 watch(connection,()=>{if(connection.value&&!props.target)load()});
 async function refresh(){if(!selected.value||busy.value)return;clearTimeout(timer);const g=generation;const id=selected.value.id;busy.value=true;try{const h=await kernelBridge.dshHistory(connection.value,id);if(g!==generation||disposed)return;if(h.address.session_id!==id||h.address.connection_id!==connection.value)throw Error('DSH_IDENTITY_MISMATCH');history.value=h;error.value='';}catch(e){if(g===generation)error.value=fault(e)}finally{if(g===generation){busy.value=false;timer=setTimeout(refresh,5000)}}}
