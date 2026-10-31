@@ -1,15 +1,22 @@
 <script setup>
 import {computed,ref,watch,onUnmounted} from 'vue';
 import {useI18n} from 'vue-i18n';
+import {readingCache,readingKey,singleFlight} from '../reading-cache.mjs';
 import {kernelBridge} from '../native-bridge.mjs';
 import {nodeLabel as label,directoryGroups} from '../conversation-directory.mjs';
 const props=defineProps({nodes:Array,catalog:Object,search:String,mode:String});
 const emit=defineEmits(['select-local','select-remote']);
 const {t}=useI18n();
 const remote=ref([]), failures=ref([]), loading=ref(false);let generation=0;
+const cachedNodes=new Map();
+const listKey=n=>readingKey(n.id,'directory',n.baseUrl||n.url||'');
+const display=nodes=>{remote.value=nodes.flatMap(n=>(cachedNodes.get(listKey(n))||[]).map(s=>({...s,node:n,remote:true,uid:`${n.id}:${s.id}`})))};
 async function refresh(){const g=++generation;loading.value=true;const nodes=(props.nodes||[]).filter(n=>n.enabled!==false);
- const results=await Promise.allSettled(nodes.map(async n=>(await kernelBridge.dshList(n.id)).map(s=>({...s,node:n,remote:true,uid:`${n.id}:${s.id}`}))));
- if(g!==generation)return;remote.value=results.flatMap(x=>x.status==='fulfilled'?x.value:[]);failures.value=results.flatMap((x,i)=>x.status==='rejected'?[label(nodes[i])]:[]);loading.value=false;}
+ display(nodes);
+ await Promise.all(nodes.map(async n=>{const k=listKey(n);if(!cachedNodes.has(k)){const rows=await readingCache.get(k);if(Array.isArray(rows))cachedNodes.set(k,rows)}}));
+ if(g!==generation)return;display(nodes);
+ const results=await Promise.allSettled(nodes.map(async n=>{const revision=readingCache.revision();const rows=await singleFlight(listKey(n),()=>kernelBridge.dshList(n.id));if(!Array.isArray(rows))throw Error('DSH_INVALID_LIST');cachedNodes.set(listKey(n),rows);await readingCache.put(listKey(n),rows,undefined,revision);return rows}));
+ if(g!==generation)return;display(nodes);failures.value=results.flatMap((x,i)=>x.status==='rejected'?[label(nodes[i])]:[]);loading.value=false;}
 watch(()=>JSON.stringify((props.nodes||[]).map(n=>[n.id,n.enabled,n.baseUrl])),refresh,{immediate:true});
 onUnmounted(()=>{generation++});
 const stamp=s=>{const n=Number(s.updated_at)||0;return n<1e12?n*1000:n};

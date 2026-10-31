@@ -1,4 +1,5 @@
 <script setup>
+import {imageThumbnail} from '../persistent-preview-cache.mjs';
 import {ref,inject,onMounted,onUnmounted,nextTick} from 'vue';
 import {captureReaderAnchor,restoreReaderAnchor} from '../reader-anchor.mjs';
 import {useI18n} from 'vue-i18n';
@@ -10,11 +11,11 @@ async function imageReady(){await nextTick();restoreReaderAnchor(anchor);anchor=
 const image=/\.(png|jpe?g|webp)(?::\d+(?::\d+)?)?$/i.test(props.path);
 const supported=/\.(png|jpe?g|webp|md|txt|json|yaml|yml|csv)(?::\d+(?::\d+)?)?$/i.test(props.path);
 onMounted(()=>{if(!service||!supported)return;observer=new IntersectionObserver(entries=>{visible=entries[0].isIntersecting;if(visible&&state.value==='idle')service.enqueue({element:element.value,visible:()=>alive&&visible,run:async()=>{
- if(!alive||!visible)return;state.value='loading';try{const f=await service.get(props.path);if(!alive)return;
- if(image){anchor=captureReaderAnchor(element.value?.closest('.dsh-reader'));const bytes=Uint8Array.from(atob(f.data),c=>c.charCodeAt(0));url.value=URL.createObjectURL(new Blob([bytes],{type:`image/${f.extension==='jpg'?'jpeg':f.extension}`}));}state.value='ready';
+ if(!alive||!visible)return;state.value='loading';try{if(image&&service.peek){const saved=await service.peek(props.path);if(saved&&alive){anchor=captureReaderAnchor(element.value?.closest('.dsh-reader'));url.value=await imageThumbnail(saved);}}const f=await service.get(props.path);if(!alive)return;
+ if(image){anchor=captureReaderAnchor(element.value?.closest('.dsh-reader'));url.value=await imageThumbnail(f);}state.value='ready';
  }catch{if(alive)state.value='failed';}
  }});},{root:element.value.closest('.dsh-reader'),rootMargin:'120px'});observer.observe(element.value);});
-onUnmounted(()=>{alive=false;observer?.disconnect();if(url.value)URL.revokeObjectURL(url.value)});
+onUnmounted(()=>{alive=false;observer?.disconnect();if(url.value.startsWith('blob:'))URL.revokeObjectURL(url.value)});
 </script>
 <template><button ref="element" type="button" class="artifact-link" :class="{image,loading:state==='loading'}" @click="open(path)"><img v-if="url" :src="url" :alt="label" @load="imageReady"/><span>{{ label }}</span><small v-if="supported">{{ t(state==='loading'?'artifactPreparing':state==='ready'?'artifactReady':state==='failed'?'artifactRetry':'artifactOpen') }}</small></button></template>
 <style scoped>

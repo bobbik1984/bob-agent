@@ -3425,7 +3425,7 @@ async fn native_dsh<R: Runtime>(host: AppHandle<R>, connection_id: String,
         match operation {
             "list" => client.list(),
             "page" => {let v:Value=serde_json::from_str(&text).map_err(|_|"DSH_PROTOCOL")?;client.history_page(bob_runtime::dsh_session::SessionAddress{connection_id,session_id},v["before"].as_i64(),v["through"].as_i64(),v["after"].as_i64())},
-            "preview" => client.preview(bob_runtime::dsh_session::SessionAddress{connection_id,session_id},&text),
+            "preview" => {let known:Option<Value>=serde_json::from_str(&request_id).ok();client.preview_if_changed(bob_runtime::dsh_session::SessionAddress{connection_id,session_id},&text,known.as_ref())},
             "history" => serde_json::to_value(client.history(bob_runtime::dsh_session::SessionAddress {
                 connection_id, session_id,
             })?).map_err(|_| "DSH_PROTOCOL"),
@@ -3459,6 +3459,6 @@ pub(crate) async fn app_dsh_page<R: Runtime>(host: AppHandle<R>, connection_id: 
  native_dsh(host,connection_id,"page",session_id,serde_json::json!({"before":before,"through":through,"after":after}).to_string(),String::new()).await
 }
 #[tauri::command]
-pub(crate) async fn app_dsh_preview<R: Runtime>(host: AppHandle<R>, connection_id: String, session_id: String, path: String) -> Result<Value, &'static str> {
- native_dsh(host,connection_id,"preview",session_id,path,String::new()).await
+pub(crate) async fn app_dsh_preview<R: Runtime>(host: AppHandle<R>, connection_id: String, session_id: String, path: String, known: Option<Value>) -> Result<Value, &'static str> {
+ native_dsh(host,connection_id,"preview",session_id,path,known.map(|v|v.to_string()).unwrap_or_default()).await
 }

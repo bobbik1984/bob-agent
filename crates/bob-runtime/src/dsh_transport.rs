@@ -139,7 +139,7 @@ impl DshClient {
   let started=Instant::now();
   let cursor=through.unwrap_or(current);
   if cursor>current {return Err("DSH_PAGE_CURSOR_INVALID");}
-  let page=self.rpc("session/page",json!({"request":{"address":{"kind":"session","sessionId":address.session_id},"throughSeq":cursor,"beforeSeq":before.unwrap_or(cursor.checked_add(1).ok_or("DSH_PAGE_CURSOR_INVALID")?),"maxMessages":20}}))?;
+  let page=self.rpc("session/page",json!({"request":{"address":{"kind":"session","sessionId":address.session_id},"throughSeq":cursor,"beforeSeq":before.unwrap_or(cursor.checked_add(1).ok_or("DSH_PAGE_CURSOR_INVALID")?),"maxMessages":64}}))?;
   let mut snapshot=json!({"type":"snapshot","header":{"id":address.session_id},"projections":projection,"cursor":cursor,"records":page["records"],"hasMore":page["hasMore"]});
   let mut requests=2;
   let mut bytes=serde_json::to_vec(&snapshot).map_err(|_|"DSH_PROTOCOL")?.len();
@@ -161,7 +161,7 @@ impl DshClient {
     output["replacements"]=json!(records.iter().filter_map(|v|{let op=&v["event"]["surfaceOp"];if op.is_object(){Some(op.clone())}else{None}}).collect::<Vec<_>>());
     return Ok(output);
    }
-   let page=self.rpc("session/page",json!({"request":{"address":{"kind":"session","sessionId":address.session_id},"throughSeq":cursor,"beforeSeq":first,"maxMessages":20}}))?;
+   let page=self.rpc("session/page",json!({"request":{"address":{"kind":"session","sessionId":address.session_id},"throughSeq":cursor,"beforeSeq":first,"maxMessages":64}}))?;
    bytes+=serde_json::to_vec(&page).map_err(|_|"DSH_PROTOCOL")?.len();requests+=1;
    if bytes>HISTORY_LIMIT{return Err("DSH_HISTORY_TOO_LARGE");}
    let mut older=page["records"].as_array().ok_or("DSH_PROTOCOL")?.clone();
@@ -170,7 +170,8 @@ impl DshClient {
    older.extend(records.clone());snapshot["records"]=json!(older);snapshot["hasMore"]=page["hasMore"].clone();
   }
  }
- pub fn preview(&self,address:SessionAddress,path:&str)->Result<Value,&'static str>{
+ pub fn preview(&self,address:SessionAddress,path:&str)->Result<Value,&'static str>{self.preview_if_changed(address,path,None)}
+ pub fn preview_if_changed(&self,address:SessionAddress,path:&str,known:Option<&Value>)->Result<Value,&'static str>{
   let ext=preview_extension(path)?;
   let cached=preview_references().lock().map_err(|_|"DSH_UNAVAILABLE")?.root(&self.scope,&address.session_id,path);
   let root=match cached {
@@ -185,6 +186,9 @@ impl DshClient {
   let stat=self.rpc("workspaceFiles/stat",args.clone())?;
   if stat["absolutePath"]!=expected {return Err("DSH_FILE_OUTSIDE_WORKSPACE");}
   let size=stat["bytes"].as_u64().filter(|n|*n<=2*1024*1024).ok_or("DSH_FILE_TOO_LARGE")?;
+  if known.is_some_and(|k| !stat["version"].is_null() && k["version"]==stat["version"] && k["bytes"]==stat["bytes"]) {
+   return Ok(json!({"not_modified":true,"path":path,"connection_id":address.connection_id,"session_id":address.session_id,"version":stat["version"],"bytes":size}));
+  }
   let mut url=self.base.join("api/file").map_err(|_|"DSH_PROTOCOL")?;
   url.query_pairs_mut().append_pair("path",&expected);
   let response=self.http.get(url).header("Cookie",&self.cookie).timeout(Duration::from_secs(30)).send().map_err(|e|if e.is_timeout(){"DSH_FILE_TIMEOUT"}else{"DSH_FILE_UNAVAILABLE"})?;

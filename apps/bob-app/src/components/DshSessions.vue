@@ -4,22 +4,25 @@ import { useI18n } from 'vue-i18n';
 import { kernelBridge } from '../native-bridge.mjs';
 import MessageContent from './MessageContent.vue';
 import DshFilePreview from './DshFilePreview.vue';
-import {createPreviewCache} from '../dsh-preview-cache.mjs';
+import {readingCache,readingKey} from '../reading-cache.mjs';
+import {createPersistentPreviewCache} from '../persistent-preview-cache.mjs';
 const props=defineProps({nodes:{type:Array,default:()=>[]}, target:{type:Object,default:null}});
 const {t}=useI18n();
 const connection=ref(''), sessions=ref([]), selected=ref(null), history=ref(null), search=ref(''), busy=ref(false), sending=ref(false), error=ref(''), notice=ref(''), draft=ref(''), pending=ref(null);
 const reader=ref(null), loadingOlder=ref(false);let lastTop=0;
 const preview=ref(null);let previewScroll=0;
-const fileCache=createPreviewCache(a=>kernelBridge.dshPreview(a.connectionId,a.sessionId,a.path));
-const fileAddress=path=>({connectionId:connection.value,sessionId:selected.value.id,path:path.replace(/:\d+(?::\d+)?$/,''),cursor:history.value?.cursor});
+const fileCache=createPersistentPreviewCache((a,known)=>kernelBridge.dshPreview(a.connectionId,a.sessionId,a.path,known));
+const fileAddress=path=>({connectionId:connection.value,sessionId:selected.value.id,endpoint:nodes.value.find(n=>n.id===connection.value)?.baseUrl||nodes.value.find(n=>n.id===connection.value)?.url||'',path:path.replace(/:\d+(?::\d+)?$/,''),cursor:history.value?.cursor});
 let artifactQueue=[],artifactTimer,artifactRunning=false,artifactCount=0;
 async function drainArtifacts(){if(artifactRunning||disposed)return;artifactQueue=artifactQueue.filter(x=>x.visible());artifactQueue.sort((a,b)=>b.element.getBoundingClientRect().top-a.element.getBoundingClientRect().top);const item=artifactQueue.shift();if(!item||artifactCount>=6)return;artifactCount++;artifactRunning=true;try{await item.run()}finally{artifactRunning=false;artifactTimer=setTimeout(drainArtifacts,150)}}
-provide('dshArtifacts',{get:path=>fileCache.get(fileAddress(path)),enqueue:item=>{if(!artifactQueue.some(x=>x.element===item.element))artifactQueue.push(item);clearTimeout(artifactTimer);artifactTimer=setTimeout(drainArtifacts,250)}});
+provide('dshArtifacts',{peek:path=>fileCache.peek(fileAddress(path)),get:path=>fileCache.get(fileAddress(path)),enqueue:item=>{if(!artifactQueue.some(x=>x.element===item.element))artifactQueue.push(item);clearTimeout(artifactTimer);artifactTimer=setTimeout(drainArtifacts,250)}});
 provide('dshPreviewGet',a=>fileCache.get(a));
 async function closePreview(){preview.value=null;await nextTick();if(reader.value)reader.value.scrollTop=previewScroll;clearTimeout(timer);timer=setTimeout(refresh,5000)}
 provide('dshOpenFile',path=>{previewScroll=reader.value?.scrollTop||0;clearTimeout(timer);preview.value=fileAddress(path)});
 let generation=0, disposed=false, restoring=false, timer;
 const nodes=computed(()=>props.nodes.filter(n=>n.enabled!==false));
+const historyKey=()=>readingKey(connection.value,'history',nodes.value.find(n=>n.id===connection.value)?.baseUrl||nodes.value.find(n=>n.id===connection.value)?.url||'',selected.value?.id);
+function saveHistory(){if(!history.value)return;const messages=history.value.messages.slice(-10);const h={...history.value,messages,before:messages[0]?.sequence??history.value.before,has_more:history.value.has_more||history.value.messages.length>10};void readingCache.put(historyKey(),h)}
 const key=()=>`bob-dsh:${connection.value}:${selected.value?.id || ''}`;
 function readState(){try{return JSON.parse(localStorage.getItem(key()) || '{}')}catch{return {}}}
 function persist(){if(restoring || !selected.value)return false;try{localStorage.setItem(key(),JSON.stringify({draft:draft.value,pending:pending.value}));return true}catch{error.value=t('dshStorageError');return false}}
@@ -57,23 +60,26 @@ async function refresh(){
   const el=reader.value,follow=first||(el&&el.scrollHeight-el.scrollTop-el.clientHeight<80);
   history.value=first?additions:{...combine(history.value,additions),before:history.value.before,has_more:history.value.has_more};error.value='';
   await nextTick();if(g===generation&&!disposed&&follow&&reader.value)reader.value.scrollTop=reader.value.scrollHeight;
-  lastTop=reader.value?.scrollTop||0;
+  lastTop=reader.value?.scrollTop||0;saveHistory();
  }catch(e){if(g===generation)error.value=fault(e)}finally{if(g===generation){busy.value=false;if(olderRequested&&reader.value?.scrollTop<=24){olderRequested=false;loadOlder()}else{olderRequested=false;timer=setTimeout(refresh,5000)}}}
 }
 async function loadOlder(){
  if(!history.value?.has_more||loadingOlder.value||busy.value||preview.value)return;
  const g=generation,id=selected.value.id,before=history.value.before;loadingOlder.value=true;clearTimeout(timer);
  try{
-  const h=await kernelBridge.dshPage(connection.value,id,before,history.value.cursor);validatePage(h,id);
+  const pageKey=readingKey(connection.value,'page',nodes.value.find(n=>n.id===connection.value)?.baseUrl||nodes.value.find(n=>n.id===connection.value)?.url||'',id,before,history.value.cursor);
+  const cached=await readingCache.get(pageKey);if(g!==generation||disposed)return;
+  const h=cached||await kernelBridge.dshPage(connection.value,id,before,history.value.cursor);validatePage(h,id);
   if(g!==generation||disposed||preview.value)return;
   if(h.has_more&&h.before>=before)throw Error('DSH_PAGE_NO_PROGRESS');
+  void readingCache.put(pageKey,h);
   const el=reader.value, height=el?.scrollHeight||0,top=el?.scrollTop||0;
   history.value={...combine(h,history.value),before:h.before,has_more:h.has_more};error.value='';
   await nextTick();if(g===generation&&reader.value){reader.value.scrollTop=top+reader.value.scrollHeight-height;lastTop=reader.value.scrollTop;}
  }catch(e){if(g===generation)error.value=fault(e)}finally{if(g===generation){loadingOlder.value=false;timer=setTimeout(refresh,5000)}}
 }
 function onScroll(){const top=reader.value?.scrollTop||0;const upwards=top<lastTop;lastTop=top;if(upwards&&top<=24){if(busy.value)olderRequested=true;else loadOlder()}else if(top>24)olderRequested=false}
-async function open(s){olderRequested=false;artifactQueue=[];artifactCount=0;fileCache.clear();persist();++generation;clearTimeout(timer);busy.value=false;loadingOlder.value=false;lastTop=0;selected.value=s;history.value=null;notice.value='';const saved=readState();restoring=true;draft.value=saved.draft||'';pending.value=saved.pending||null;restoring=false;if(pending.value)notice.value=t('dshUncertain');await refresh()}
+async function open(s){olderRequested=false;artifactQueue=[];artifactCount=0;fileCache.clear();persist();++generation;clearTimeout(timer);busy.value=false;loadingOlder.value=false;lastTop=0;selected.value=s;history.value=null;notice.value='';const saved=readState();restoring=true;draft.value=saved.draft||'';pending.value=saved.pending||null;restoring=false;if(pending.value)notice.value=t('dshUncertain');const g=generation;const cached=await readingCache.get(historyKey());if(g!==generation||disposed)return;if(cached){try{validatePage(cached,s.id);history.value=cached;await nextTick();if(reader.value)reader.value.scrollTop=reader.value.scrollHeight;lastTop=reader.value?.scrollTop||0;}catch{}}await refresh()}
 function back(){persist();++generation;clearTimeout(timer);busy.value=false;selected.value=null;history.value=null;notice.value='';load()}
 async function checkReceipt(){
  if(!pending.value || sending.value)return;

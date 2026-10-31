@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { useI18n } from 'vue-i18n';
+import {readingCache,connectionPrefix} from './reading-cache.mjs';
 import { kernelBridge } from './native-bridge.mjs';
 import { isBobNodeRuntime } from './http-bridge.mjs';
 import PairingQr from './PairingQr.vue';
@@ -40,7 +41,7 @@ async function saveConnection() {
   connectionBusy.value=true;connectionError.value='';
   try {
     const snap=await kernelBridge.remoteNodeSave({...connectionDraft.value,token:connectionDraft.value.token||null,enabled:true});
-    if(!snap)throw Error(); connections.value=snap.remoteNodes||[];
+    if(!snap)throw Error(); if(connectionDraft.value.id)await readingCache.removePrefix(connectionPrefix(connectionDraft.value.id)); connections.value=snap.remoteNodes||[];
     connectionDraft.value.token='';connectionForm.value=false;emit('changed');
   } catch {connectionError.value='connectionSaveFailed';}
   finally {connectionBusy.value=false;}
@@ -48,7 +49,7 @@ async function saveConnection() {
 async function deleteConnection() {
   if(!deleting.value||connectionBusy.value)return;
   connectionBusy.value=true;
-  try {const snap=await kernelBridge.remoteNodeDelete(deleting.value.id);if(!snap)throw Error();connections.value=snap.remoteNodes||[];deleting.value=null;emit('changed');}
+  try {const snap=await kernelBridge.remoteNodeDelete(deleting.value.id);if(!snap)throw Error();await readingCache.removePrefix(connectionPrefix(deleting.value.id));connections.value=snap.remoteNodes||[];deleting.value=null;emit('changed');}
   catch {connectionError.value='connectionDeleteFailed';}
   finally {connectionBusy.value=false;}
 }

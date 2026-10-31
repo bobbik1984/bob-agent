@@ -963,7 +963,7 @@ pub fn handle_rpc_command(ctx: &mut NodeContext, command: &str, args: &Value) ->
             match command {
                 "app_dsh_list" => client.list(),
                 "app_dsh_page" => client.history_page(bob_runtime::dsh_session::SessionAddress{connection_id:connection.into(),session_id:args["sessionId"].as_str().ok_or("DSH_SESSION_REQUIRED")?.into()},args.get("before").filter(|v|!v.is_null()).map(|v|v.as_i64().ok_or("DSH_PAGE_CURSOR_INVALID")).transpose()?,args.get("through").filter(|v|!v.is_null()).map(|v|v.as_i64().ok_or("DSH_PAGE_CURSOR_INVALID")).transpose()?,args.get("after").filter(|v|!v.is_null()).map(|v|v.as_i64().ok_or("DSH_PAGE_CURSOR_INVALID")).transpose()?),
-                "app_dsh_preview" => client.preview(bob_runtime::dsh_session::SessionAddress{connection_id:connection.into(),session_id:args.get("sessionId").and_then(Value::as_str).ok_or("DSH_PROTOCOL")?.into()},args.get("path").and_then(Value::as_str).ok_or("DSH_PROTOCOL")?),
+                "app_dsh_preview" => client.preview_if_changed(bob_runtime::dsh_session::SessionAddress{connection_id:connection.into(),session_id:args.get("sessionId").and_then(Value::as_str).ok_or("DSH_PROTOCOL")?.into()},args.get("path").and_then(Value::as_str).ok_or("DSH_PROTOCOL")?,args.get("known").filter(|v|!v.is_null())),
                 "app_dsh_history" => {
                     let session=args["sessionId"].as_str().ok_or("DSH_SESSION_REQUIRED")?;
                     serde_json::to_value(client.history(bob_runtime::dsh_session::SessionAddress{connection_id:connection.into(),session_id:session.into()})?).map_err(|_|"DSH_PROTOCOL")

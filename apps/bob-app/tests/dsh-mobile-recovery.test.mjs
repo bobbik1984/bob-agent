@@ -2,13 +2,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import vm from 'node:vm';
-import {createPreviewCache} from '../src/dsh-preview-cache.mjs';
+import {createPersistentPreviewCache} from '../src/persistent-preview-cache.mjs';
+import {createReadingCache,readingKey} from '../src/reading-cache.mjs';
 // Exercise the shipped component's state/actions; no duplicate send controller.
 const source=readFileSync(new URL('../src/components/DshSessions.vue',import.meta.url),'utf8').split('<script setup>')[1].split('</script>')[0].replace(/^import .*;\r?\n/gm,'');
 function mount(storage=new Map(), overrides={}) {
  const calls=[];
  const bridge={dshPage:async(c,s)=>({address:{connection_id:c,session_id:s},messages:[],cursor:20,before:0,has_more:false}),dshPrompt:async(...a)=>{calls.push(a);throw Error('DSH_RECEIPT_UNKNOWN')},dshReceipt:async()=>({status:'unknown'}),...overrides};
- const context={createPreviewCache,provide:()=>{},nextTick:async()=>{},defineProps:()=>({nodes:[],target:null}),ref:value=>({value}),computed:f=>({get value(){return f()}}),watch:()=>{},onUnmounted:()=>{},useI18n:()=>({t:x=>x}),kernelBridge:bridge,localStorage:{getItem:k=>storage.get(k)||null,setItem:(k,v)=>storage.set(k,v)},crypto:{randomUUID:()=> 'request-1'},setTimeout:()=>0,clearTimeout:()=>{}};
+ const context={createPersistentPreviewCache,readingCache:createReadingCache({storage:null}),readingKey,provide:()=>{},nextTick:async()=>{},defineProps:()=>({nodes:[],target:null}),ref:value=>({value}),computed:f=>({get value(){return f()}}),watch:()=>{},onUnmounted:()=>{},useI18n:()=>({t:x=>x}),kernelBridge:bridge,localStorage:{getItem:k=>storage.get(k)||null,setItem:(k,v)=>storage.set(k,v)},crypto:{randomUUID:()=> 'request-1'},setTimeout:()=>0,clearTimeout:()=>{}};
  vm.createContext(context);vm.runInContext(source+'\nglobalThis.actions={open,send,checkReceipt,connection,draft,pending,notice,error,reader,refresh,loadOlder,history,loadingOlder};',context);
  context.actions.connection.value='device';return {a:context.actions,calls,context,storage};
 }
@@ -48,7 +49,7 @@ test('older page identity failure preserves history and permits explicit retry',
 test('late older page cannot contaminate a switched session',async()=>{
  const m=mount();await m.a.open({id:'original'});m.a.history.value.has_more=true;m.a.history.value.before=10;let release;
  m.context.kernelBridge.dshPage=(c,s,b)=>b?new Promise(resolve=>release=()=>resolve({address:{connection_id:c,session_id:s},messages:[{sequence:1,text:'old'}],cursor:20,before:0,has_more:false})):Promise.resolve({address:{connection_id:c,session_id:s},messages:[],cursor:20,before:0,has_more:false});
- const pending=m.a.loadOlder();await m.a.open({id:'second'});release();await pending;assert.equal(m.a.history.value.address.session_id,'second');assert.equal(m.a.history.value.messages.length,0);
+ const pending=m.a.loadOlder();await new Promise(r=>setImmediate(r));await m.a.open({id:'second'});release();await pending;assert.equal(m.a.history.value.address.session_id,'second');assert.equal(m.a.history.value.messages.length,0);
 });
 
 test('unchanged native cursor keeps loaded history and reader position',async()=>{
