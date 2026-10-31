@@ -36,6 +36,7 @@ async function load(){const g=++generation;clearTimeout(timer);busy.value=true;e
 watch(connection,()=>{if(connection.value&&!props.target)load()});
 function validatePage(h,id){if(h.address.session_id!==id||h.address.connection_id!==connection.value||!Number.isSafeInteger(h.cursor)||!Number.isSafeInteger(h.before)||!Array.isArray(h.messages))throw Error('DSH_IDENTITY_MISMATCH')}
 function combine(old,h){const map=new Map((old?.messages||[]).map(m=>[m.sequence,m]));for(const m of h.messages)map.set(m.sequence,m);const replacements=[...(old?.replacements||[]),...(h.replacements||[])];for(const op of replacements)for(const seq of map.keys())if(seq>=op.startSeq&&seq<=op.endSeq)map.delete(seq);return {...h,messages:[...map.values()].sort((a,b)=>a.sequence-b.sequence),replacements,workspace:h.workspace||old?.workspace}}
+let olderRequested=false;
 async function refresh(){
  if(!selected.value||busy.value||loadingOlder.value||preview.value)return;
  clearTimeout(timer);const g=generation,id=selected.value.id;busy.value=true;
@@ -57,7 +58,7 @@ async function refresh(){
   history.value=first?additions:{...combine(history.value,additions),before:history.value.before,has_more:history.value.has_more};error.value='';
   await nextTick();if(g===generation&&!disposed&&follow&&reader.value)reader.value.scrollTop=reader.value.scrollHeight;
   lastTop=reader.value?.scrollTop||0;
- }catch(e){if(g===generation)error.value=fault(e)}finally{if(g===generation){busy.value=false;timer=setTimeout(refresh,5000)}}
+ }catch(e){if(g===generation)error.value=fault(e)}finally{if(g===generation){busy.value=false;if(olderRequested&&reader.value?.scrollTop<=24){olderRequested=false;loadOlder()}else{olderRequested=false;timer=setTimeout(refresh,5000)}}}
 }
 async function loadOlder(){
  if(!history.value?.has_more||loadingOlder.value||busy.value||preview.value)return;
@@ -71,8 +72,8 @@ async function loadOlder(){
   await nextTick();if(g===generation&&reader.value){reader.value.scrollTop=top+reader.value.scrollHeight-height;lastTop=reader.value.scrollTop;}
  }catch(e){if(g===generation)error.value=fault(e)}finally{if(g===generation){loadingOlder.value=false;timer=setTimeout(refresh,5000)}}
 }
-function onScroll(){const top=reader.value?.scrollTop||0;const upwards=top<lastTop;lastTop=top;if(upwards&&top<=24)loadOlder()}
-async function open(s){artifactQueue=[];artifactCount=0;fileCache.clear();persist();++generation;clearTimeout(timer);busy.value=false;loadingOlder.value=false;lastTop=0;selected.value=s;history.value=null;notice.value='';const saved=readState();restoring=true;draft.value=saved.draft||'';pending.value=saved.pending||null;restoring=false;if(pending.value)notice.value=t('dshUncertain');await refresh()}
+function onScroll(){const top=reader.value?.scrollTop||0;const upwards=top<lastTop;lastTop=top;if(upwards&&top<=24){if(busy.value)olderRequested=true;else loadOlder()}else if(top>24)olderRequested=false}
+async function open(s){olderRequested=false;artifactQueue=[];artifactCount=0;fileCache.clear();persist();++generation;clearTimeout(timer);busy.value=false;loadingOlder.value=false;lastTop=0;selected.value=s;history.value=null;notice.value='';const saved=readState();restoring=true;draft.value=saved.draft||'';pending.value=saved.pending||null;restoring=false;if(pending.value)notice.value=t('dshUncertain');await refresh()}
 function back(){persist();++generation;clearTimeout(timer);busy.value=false;selected.value=null;history.value=null;notice.value='';load()}
 async function checkReceipt(){
  if(!pending.value || sending.value)return;
