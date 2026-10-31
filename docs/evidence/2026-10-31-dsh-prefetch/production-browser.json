@@ -1,0 +1,24 @@
+{
+  "prefetch_calls": [
+    {
+      "connectionId": "node-1793435806962",
+      "sessionId": "session-771043d7-4fae-4d27-b0eb-b6cd714992f9",
+      "path": "snapshots/m2_shelter_cutaway_v2.png"
+    }
+  ],
+  "click_reused_prefetch": true,
+  "indicator": {
+    "x": 281.609375,
+    "y": 5.296875,
+    "width": 44,
+    "height": 44
+  },
+  "status_dot": {
+    "x": 312.609375,
+    "y": 11.296875,
+    "width": 7,
+    "height": 7
+  },
+  "errors": [],
+  "phone_hardware": false
+}

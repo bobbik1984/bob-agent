@@ -1,0 +1,15 @@
+{
+  "release": {
+    "release": "dsh-prefetch-20261031-r1",
+    "baseCommit": "4186208ced91839cefe9f1efecb11d032cfa412b",
+    "sourceSha256": "fbce78b158d93c0d366a3a600fd7d260a80255be0519e686762aaa82786cce38",
+    "apk": false
+  },
+  "binarySha256": "43e6a183f23ed0300f5c92f7f53f04ce6fc8d28a49bd6242a4308b57f27fdc37",
+  "webSha256": "8d179e91ff04df081c4c9523efb2fbc261ae124b659c137fe9c035fbf89112d3",
+  "oldBinaryReadsNewSchema": true,
+  "productionIdle": true,
+  "deployed": true,
+  "backup": "/opt/bob-online/backups/assistant-instance-1793461058",
+  "rollbackUsed": false
+}

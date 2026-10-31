@@ -11,7 +11,7 @@ project:
   - Desktop
   - Android
   - Web (bob-node)
-  current_task: "F2/F5 网页 dsh-paging-20261031-r1 已上线：真实Winter Shelter最近10条/向上分页、固定输入区和紧凑菜单通过390/1180浏览器验证；JS20/20、Linux runtime18/18和node2/2通过。Tauri/手机真机、传输优化、结构化成果仍待完成；无APK，B4暂停。"
+  current_task: "F2/F5 dsh-prefetch-20261031-r1网页已上线，真实图片预取与点击复用、角标、分页和固定输入区验证通过；73项前端检查及Linux定向检查通过。GitHub固定签名APK Run 41215873083成功并下载校验；待手机真机、缩略图和持久缓存治理，B4暂停。"
   development_plan: docs/CURRENT_STAGE.md
 phases:
 - name: BP0 真相与保护
