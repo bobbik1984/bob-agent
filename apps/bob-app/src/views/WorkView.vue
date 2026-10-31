@@ -1,10 +1,11 @@
 <script setup>
 import { computed, reactive, ref } from 'vue';
-import DshSessions from '../components/DshSessions.vue';
+
 import MessageContent from '../components/MessageContent.vue';
 import { useI18n } from 'vue-i18n';
 
 const props = defineProps({
+  settingsOnly: {type:Boolean, default:false},
   readiness: {
     type: Object,
     default: null,
@@ -152,7 +153,7 @@ function submitProject() {
 <template>
   <section class="primary-view work-view" :aria-label="t('workViewTitle')">
     <!-- Compact Single-Line Node Status Strip -->
-    <header class="work-status-strip">
+    <header v-if="!settingsOnly" class="work-status-strip">
       <div class="work-status-pills">
         <button
           type="button"
@@ -196,10 +197,10 @@ function submitProject() {
     </header>
 
     <div class="view-content-body">
-      <DshSessions :nodes="remoteNodes" />
+
       <!-- Collapsible New Project Drawer -->
       <form
-        v-if="showNewProjectForm"
+        v-if="!settingsOnly && showNewProjectForm"
         class="quick-project-form hub-card"
         @submit.prevent="submitProject"
       >
@@ -214,6 +215,7 @@ function submitProject() {
         </button>
       </form>
 
+      <button v-if="settingsOnly" type="button" :aria-expanded="showCloudConfig" @click="showCloudConfig=!showCloudConfig">{{t('onlineSectionTitle')}}</button>
       <!-- Collapsible Cloud Node Pairing Drawer (Opened on demand from status strip) -->
       <section v-if="showCloudConfig || onlineState?.pairing" class="hub-card">
         <div class="hub-card-header">
@@ -316,6 +318,7 @@ function submitProject() {
         </p>
       </section>
 
+      <template v-if="!settingsOnly">
       <!-- First-Screen Priority 1: Active Projects & Task Workspaces -->
       <section class="hub-card">
         <div class="hub-card-header">
@@ -634,6 +637,7 @@ function submitProject() {
           </article>
         </div>
       </section>
+      </template>
     </div>
   </section>
 </template>

@@ -3,7 +3,7 @@
 ## F2/F5 侧栏来源与接续增量
 
 - [x] 侧栏横向溢出、搜索、项目折叠和最近活动排序已发布，真实平台目录核验69个历史导入项目/81条会话；见 docs/evidence/ui-capture-20261031/sidebar-release.json。
-- [x] 网页候选接通X1T DSH真实目录与原DOS会话，只读续聊、同会话身份及刷新记录已验证；上线状态见CURRENT_STAGE。
+- [x] 网页已接通X1T DSH真实目录与原DOS会话；统一对话侧栏、设备标签和原会话草稿/选择恢复已验证，发布状态见CURRENT_STAGE。
 - [ ] 补Tauri原生DSH接线、手机真机、附件与未知回执人工核对解除。
 - [ ] 补充设备视图大量会话收纳与手机真机验收。
 
@@ -297,6 +297,10 @@
 - [/] **BP4-02**：显式交接检查点、受控传输、目标校验与写入权交接；`fencing_token` 原子递增，保留原生会话/上下文与父成果来源；不靠超时抢占unknown执行（`workspace_handoff.rs` 内核回归通过）。
 - [/] **BP4-03**：验证忘记push后关机、同commit但dirty不同、缺LFS/素材/子模块、目标分叉、同步中断、源节点恢复；跨端查看和继续均不丢数据、不重复执行（`multi_session_and_handoff.rs` 5大故障场景通过）。
 - [ ] **BP4/F6 运行策略**：评估常开节点作为默认开发工作区；分别决定Home是否迁移及自动检查点/commit/push范围。明确PC关闭时哪些链路可用，未确认不自动执行。
+- [ ] **BP4-04 项目画像胶囊（`ProjectContextCapsule`，BOB-D-010）**：在 `bob-kernel` / `bob-runtime` 实现按项目提取与组装 3～8 KB 结构化上下文胶囊（`AGENTS.md` 宪章摘要 + 代码目录与符号骨架 + 已生效 `Decisions`/`Memories` + 当前 `todo` 与最新 `Artifact` 结论），在快轨规划《任务卡》时自动注入，防止无源码操作端写任务卡跑偏。
+- [ ] **BP4-05 原生商业 API 子代理池（`NativeSubagentPool`，BOB-D-010）**：在 `bob-runtime` 内生实现 `invoke_subagent` / `define_subagent` 调度器（主控会话调旗舰商业 API，并发子代理调轻量 Flash 商业 API，独立上下文隔离与完成自动唤醒），零外部 CLI 订阅依赖。
+- [ ] **BP4-06 慢轨结构化《任务卡》与持久会话 CLI 调度（BOB-D-010）**：实现两段式任务卡（快轨锚定真实模块路径与 Decision 红线 → 慢轨驻留节点本地 Grounding 执行），通过受控进程边界对接官方 CLI 持久会话（ACP `session/prompt` / `--resume` / 单次完整任务执行），强制执行防高频冷启动与反逆向合规边界。
+- [ ] **BP4-07 跨节点专长能力互借（`overseas_model_egress` + `bobbik-pc` `gpu_display_render`，BOB-D-010）**：扩展 `RuntimeCapabilityManifest`，打通国内节点借用 `VPS2` 海外商业 API 出口，以及无头节点/轻薄本将 Godot/Blender/高分屏 UI 实机渲染验证任务派发给 `bobbik-pc` 渲染节点并自动回传截图 `ArtifactVersion (V1/V2)`。
 
 GitHub中的检出副本通常可关联原项目，但不自动包含未传出的工作或开发环境。版本未知时默认等待核对；用户明确选旧commit时可设计隔离候选路径，不能伪称恢复最新版本。当前不新增节点、不加载策略、不恢复X1T/B4、不部署。
 
@@ -322,4 +326,4 @@ GitHub中的检出副本通常可关联原项目，但不自动包含未传出�
 - [ ] 两套 UI 的 i18n 键对齐（严禁硬编码中文字符串与硬编码颜色）
 - [ ] 旧 App 0.9.x 已安装用户的数据迁移（`bob.db` → `1.0.1` Home 库）
 - [ ] 遥测和崩溃上报的隐私策略
-- [ ] AGY / Codex 订阅在开源场景下的使用许可
+- [x] AGY / Codex 订阅在开源场景下的使用许可边界（已由 BOB-D-010 定案：Bob 内置快轨与原生 Subagent 100% 走正规商业 API Key；官方 CLI 仅通过受控进程边界执行单用户低频完整《任务卡》或持久会话，严禁提取逆向订阅 Token 或包装为高频聊天接口）

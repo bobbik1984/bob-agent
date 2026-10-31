@@ -501,7 +501,7 @@
   "connectionSavedUnverified": "Saved · Connection not verified",
   "connectionDeleteConfirm": "Remove connection settings and token for “{name}”? Remote projects will remain.",
   "connectionPairDevice": "Pair a device by QR code",
-  "connectionProtocolBoundary": "Addresses can be saved and managed. DSH connection checks and existing sessions are still in development; saved does not mean connected.",
+  "connectionProtocolBoundary": "After saving a connection, open its sessions in the conversation sidebar. A saved address does not mean the device is online.",
   "connectionInvalidAddress": "Enter an HTTP or HTTPS service address without credentials, query parameters or fragments.",
   "connectionLoadFailed": "Could not load connections. Please retry.",
   "connectionSaveFailed": "Connection was not saved. Please retry.",
@@ -536,5 +536,6 @@
   "dshUncertain": "Delivery needs checking. Content retained; no automatic resend. Refresh history to check receipt.",
   "dshError": "Cannot read node; check address and connection",
   "dshStorageError": "Local save failed; copy your unsent text first",
-  "dshSending": "Sending…"
+  "dshSending": "Sending…",
+  "directoryUnavailable": "Cannot read {name} right now. Check its connection in Settings."
 }

@@ -501,7 +501,7 @@
   "connectionSavedUnverified": "已保存 · 尚未验证连接",
   "connectionDeleteConfirm": "删除“{name}”的连接配置和令牌？不会删除远端项目。",
   "connectionPairDevice": "通过扫码连接设备",
-  "connectionProtocolBoundary": "当前可保存和管理地址；DSH 的连接检查与原有会话接入仍在开发，保存不代表已连通。",
+  "connectionProtocolBoundary": "连接保存后，可从对话侧栏读取节点会话并继续。保存地址不代表设备当前在线。",
   "connectionInvalidAddress": "请输入 HTTP 或 HTTPS 服务地址，不要在地址中包含令牌、密码或查询参数。",
   "connectionLoadFailed": "连接列表读取失败，请重试。",
   "connectionSaveFailed": "连接未保存，请重试。",
@@ -536,5 +536,6 @@
   "dshUncertain": "发送状态需核对。内容已保留，不会自动重发；请刷新历史确认节点是否收到。",
   "dshError": "无法读取节点，请检查地址和连接状态",
   "dshStorageError": "本机保存失败，请先复制未发送内容",
-  "dshSending": "正在发送…"
+  "dshSending": "正在发送…",
+  "directoryUnavailable": "{name} 暂时无法读取；可在设置中检查连接。"
 }

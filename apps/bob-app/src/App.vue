@@ -5,6 +5,8 @@ import HomeConnection from './HomeConnection.vue';
 import CustomSelect from './components/CustomSelect.vue';
 import ScheduleView from './views/ScheduleView.vue';
 import WorkView from './views/WorkView.vue';
+import DshSessions from './components/DshSessions.vue';
+import ConversationDirectory from './components/ConversationDirectory.vue';
 import KnowledgeView from './views/KnowledgeView.vue';
 import { isBobNodeRuntime } from './http-bridge.mjs';
 import { loadClientState, saveClientState, chooseStartupConversation } from './client-view-state.mjs';
@@ -40,6 +42,10 @@ const dispatchPending = ref(false);
 const catalog = ref(null);
 const sidebarGroupMode = ref('project');
 const sidebarSearch = ref('');
+const remoteConversation = ref(null);
+async function selectRemoteConversation(target){await flushCurrentViewState();restoreRemoteSelection=false;remoteConversation.value=target;try{localStorage.setItem('bob-active-remote',JSON.stringify({nodeId:target.node.id,session:{id:target.session.id,title:target.session.title}}))}catch{};activeDrawer.value='chat';settingsOpen.value=false;navigationOpen.value=false;}
+
+let restoreRemoteSelection=true;
 const expandedProjects = ref({});
 const showLegacy = ref(false);
 const matchesSidebar = item => !sidebarSearch.value.trim() || String(item.title || '').toLocaleLowerCase().includes(sidebarSearch.value.trim().toLocaleLowerCase());
@@ -584,6 +590,7 @@ function applyModelHubSnapshot(snap) {
   }
   if (Array.isArray(snap.remoteNodes)) {
     modelHub.value.state.remote_nodes = snap.remoteNodes;
+    if(restoreRemoteSelection){restoreRemoteSelection=false;try{const saved=JSON.parse(localStorage.getItem('bob-active-remote')||'null');const node=snap.remoteNodes.find(n=>n.id===saved?.nodeId&&n.enabled!==false);if(node&&saved?.session?.id)remoteConversation.value={node,session:saved.session};}catch{}}
     const activeNode =
       snap.remoteNodes.find(n => n.enabled !== false && (n.hasToken || n.token)) ||
       snap.remoteNodes.find(n => n.enabled !== false);
@@ -1867,6 +1874,7 @@ async function flushCurrentViewState() {
 }
 
 async function selectConversation(targetId) {
+  remoteConversation.value=null;try{localStorage.removeItem('bob-active-remote')}catch{};activeDrawer.value='chat';settingsOpen.value=false;
   if (!targetId) return;
   if (targetId === sessionId.value) {
     navigationOpen.value = false;
@@ -1905,6 +1913,7 @@ function startCreateProject() {
 }
 
 function startCreateConversation(projectId = null) {
+  remoteConversation.value=null;try{localStorage.removeItem('bob-active-remote')}catch{};
   creatingKind.value = 'conversation';
   creatingForProjectId.value = projectId;
   newItemTitle.value = '';
@@ -2397,11 +2406,11 @@ onUnmounted(() => {
                 ? t('workViewTitle')
                 : activeDrawer === 'knowledge'
                   ? t('knowledgeViewTitle')
-                  : currentConversation
+                  : (remoteConversation?.session.title || currentConversation)
         }}
       </span>
       <button
-        v-if="activeDrawer === 'chat' && !settingsOpen"
+        v-if="activeDrawer === 'chat' && !settingsOpen && !remoteConversation"
         type="button"
         class="mini-ghost-btn"
         :title="t('promoteToWorkBtn')"
@@ -3304,6 +3313,34 @@ onUnmounted(() => {
           v-show="settingsView === 'home' && settingsTab === 'connection'"
           class="settings-device-subpage"
         >
+    <WorkView
+      :settings-only="true"
+      :readiness="readiness"
+      :catalog="catalog"
+      :schedules="personalOps.schedules"
+      :active-session-id="sessionId"
+      :active-main-role="activeMainRole"
+      :online-state="onlineState"
+      :remote-nodes="modelHub.state.remote_nodes || []"
+      :paired-online="deviceOnline"
+      @open-conversation="handleWorkOpenConversation"
+      @create-project="handleWorkCreateProject"
+      @create-conversation="handleWorkCreateConversation"
+      @open-settings-tab="handleWorkOpenSettingsTab"
+      @create-project-todo="handleCreateProjectTodo"
+      @toggle-todo-status="handleUpdateScheduleStatus"
+      @start-todo-session="handleStartTodoSession"
+      @online-update-origin="handleOnlineUpdateOrigin"
+      @online-save-node="handleOnlineSaveNode"
+      @online-begin-pairing="handleOnlineBeginPairing"
+      @online-exchange-pairing="handleOnlineExchangePairing"
+      @online-refresh="handleOnlineRefresh"
+      @online-select-project="handleOnlineSelectProject"
+      @online-load-more-messages="handleOnlineLoadMoreMessages"
+      @online-submit-operation="handleOnlineSubmitOperation"
+      @online-disconnect="handleOnlineDisconnect"
+      @online-revoke="handleOnlineRevoke"
+    />
           <HomeConnection
             ref="devicePanel"
             v-if="sessionId"
@@ -3389,8 +3426,8 @@ onUnmounted(() => {
         </div>
 
         <input v-model="sidebarSearch" type="search" :placeholder="t('sidebarSearch')" :aria-label="t('sidebarSearch')" />
-        <p class="navigation-note">{{ t('sidebarSourceNote') }}</p>
-        <button v-if="modelHub.state.remote_nodes?.length" type="button" @click="navigationOpen = false; activeDrawer = 'work'">{{ t('dshTitle') }}</button>
+
+
         <div class="sidebar-actions">
           <button type="button" @click="startCreateConversation(null)">
             + {{ t('newConversation') }}
@@ -3418,101 +3455,7 @@ onUnmounted(() => {
           </div>
         </form>
 
-        <template v-if="sidebarGroupMode === 'project'">
-          <section class="sidebar-section">
-            <h2>{{ t('standaloneConversations') }}</h2>
-            <div class="conversation-list">
-              <button
-                v-for="conv in standaloneList"
-                :key="conv.id"
-                type="button"
-                class="conversation-link"
-                :aria-current="conv.id === sessionId ? 'page' : undefined"
-                @click="selectConversation(conv.id)"
-              >
-                <span class="conversation-link-title">{{ conv.title }}</span>
-                <span v-if="conv.unread_count > 0" class="unread-badge">
-                  {{ t('unreadBadge', { count: conv.unread_count }) }}
-                </span>
-              </button>
-            </div>
-          </section>
-
-          <section class="sidebar-section">
-            <h2>{{ t('projects') }}</h2>
-            <button v-if="legacyCount" type="button" :aria-expanded="showLegacy" @click="showLegacy = !showLegacy">{{ t('sidebarLegacy', { count: legacyCount }) }}</button>
-            <p v-if="!projectList.length" class="navigation-note">{{ t('noProjectsHint') }}</p>
-            <div v-for="proj in projectList" :key="proj.id" class="project-card">
-              <div class="project-card-header">
-                <button type="button" class="project-title project-toggle" :title="proj.title" :aria-expanded="projectExpanded(proj.id)" @click="toggleProject(proj.id)"><span>{{ projectExpanded(proj.id) ? '−' : '+' }} {{ proj.title }}</span><small>{{ isLegacyProject(proj) ? t('sidebarImported') : t('sidebarLocal') }} · {{ activityText(proj) }}</small></button>
-                <button
-                  type="button"
-                  class="project-new-conv"
-                  :aria-label="t('newProjectConversation')"
-                  @click="startCreateConversation(proj.id)"
-                >
-                  +
-                </button>
-              </div>
-              <div v-if="projectExpanded(proj.id)" class="conversation-list">
-                <button
-                  v-for="conv in projectConversations(proj.id)"
-                  :key="conv.id"
-                  type="button"
-                  class="conversation-link"
-                  :aria-current="conv.id === sessionId ? 'page' : undefined"
-                  @click="selectConversation(conv.id)"
-                >
-                  <span class="conversation-link-title">{{ conv.title }}</span>
-                  <span v-if="conv.unread_count > 0" class="unread-badge">
-                    {{ t('unreadBadge', { count: conv.unread_count }) }}
-                  </span>
-                </button>
-              </div>
-            </div>
-          </section>
-        </template>
-
-        <template v-else>
-          <section class="sidebar-section">
-            <h2>{{ t('groupByDevice') }}</h2>
-            <div v-for="group in deviceGroupList" :key="group.device_id" class="device-group-card">
-              <div class="device-group-header">
-                <span class="device-group-title">{{ group.label }}</span>
-                <span
-                  class="device-status-pill"
-                  :class="{ online: group.immediate_execution_available }"
-                >
-                  {{
-                    t(
-                      group.availability_state === 'online'
-                        ? 'deviceOnline'
-                        : group.availability_state === 'sleeping'
-                          ? 'deviceSleeping'
-                          : 'deviceOffline',
-                    )
-                  }}
-                </span>
-              </div>
-              <p class="device-status-reason">{{ group.status_reason }}</p>
-              <div class="conversation-list">
-                <button
-                  v-for="conv in group.conversations"
-                  :key="conv.id"
-                  type="button"
-                  class="conversation-link"
-                  :aria-current="conv.id === sessionId ? 'page' : undefined"
-                  @click="selectConversation(conv.id)"
-                >
-                  <span class="conversation-link-title">{{ conv.title }}</span>
-                  <span v-if="conv.unread_count > 0" class="unread-badge">
-                    {{ t('unreadBadge', { count: conv.unread_count }) }}
-                  </span>
-                </button>
-              </div>
-            </div>
-          </section>
-        </template>
+        <ConversationDirectory :nodes="modelHub.state.remote_nodes || []" :catalog="catalog" :search="sidebarSearch" :mode="sidebarGroupMode" @select-local="selectConversation" @select-remote="selectRemoteConversation" />
       </nav>
     </div>
 
@@ -3581,7 +3524,8 @@ onUnmounted(() => {
     />
 
     <!-- Primary View 1: 对话 (Chat) -->
-    <main v-show="activeDrawer === 'chat' && !settingsOpen" class="main">
+    <DshSessions v-if="remoteConversation" v-show="activeDrawer === 'chat' && !settingsOpen" :key="remoteConversation.node.id + remoteConversation.session.id" :target="remoteConversation" :nodes="modelHub.state.remote_nodes || []" />
+    <main v-show="activeDrawer === 'chat' && !settingsOpen && !remoteConversation" class="main">
       <div
         v-if="readiness && readiness.pending_messages > 0"
         class="connection-note"
@@ -3950,18 +3894,6 @@ onUnmounted(() => {
           <path d="M16 2v4M8 2v4M3 10h18" />
         </svg>
         <span>{{ t('navSchedule') }}</span>
-      </button>
-      <button
-        type="button"
-        class="bottom-nav-item"
-        :class="{ active: activeDrawer === 'work' && !settingsOpen }"
-        @click="switchPrimaryDrawer('work')"
-      >
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <rect x="2" y="7" width="20" height="14" rx="2" />
-          <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16" />
-        </svg>
-        <span>{{ t('navWork') }}</span>
       </button>
       <button
         type="button"
