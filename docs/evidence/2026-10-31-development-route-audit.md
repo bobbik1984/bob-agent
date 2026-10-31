@@ -114,3 +114,13 @@
 - `apps/bob-app/src/App.vue`: `748498bd6bc48680536f4c09f9258ddd61dd8fc3e7e133e465030719fb22b9cc`
 - `apps/bob-app/src/components/CaptureImage.vue`: `d1c6cd3284e95105bcc78332d9ca9eeb87c1fb4a5acdb34c4c36d6b550ab6711`
 - `apps/bob-app/tests/photo-capture-browser.py`: `824690f1323789563b8302858882b1f6c1d6fee19b5770638d5f8b19fca7a816`
+
+## 本次发布与安装包（2026-10-31）
+
+用户明确批准上线及上传 GitHub 生成手机包。源码 `be04b7315a97e1b7fb4f51cc5489fe691dac4cbf`；GitHub 两分支均已推送。Linux 完整工作区测试、release 编译、生产数据副本迁移/启动/个人记录读取通过，线上预检无活动执行/占用锁。先备份程序、网页、服务配置及数据，再切换；未触发回退。旧程序/网页与私有数据备份保存在服务目录的 `backups/capture-be04b73-1793425925`；恢复旧程序/网页时保留增量图片表和数据，数据库恢复须先确认没有后续写入。
+
+实际生产程序 SHA-256：`f77aa18d11ff82d1e82c75e6649a9764b1cfef11df3a0c5125d6a267a4ae9557`。网页 `release.json` 指向同一源码。服务 active、NRestarts=0。通过临时私有 SSH 通道浏览实际线上服务，确认无重复 Logo、无嵌套蓝圈、拍照/选图入口及输入后项目选择；清除了验证草稿，没有调用模型。公网入口仍受原认证保护，内置浏览器未获登录态，故不把这次检查描述为公网登录验收。截图：[线上悬浮窗](ui-capture-20261031/deployed-capture.png)。
+
+Android Run `41174093233` / Artifact `13032038892` 成功；固定证书 SHA-256 `dafb9fbdc736f2c70864a7005cb199b70ab5816a6833e8ec3e5ba743fee338f5`；APK SHA-256 `73aa095ae0de65f1b2972f811c7da2f72019b2010c4e19100b6944a781fecf27`。下载后 ZIP 摘要及 APK SHA256SUMS 均匹配，16KB ELF 复核通过。包为 ARM64 development/debug，非应用商店正式发布。安装文件位于被忽略的 `dist-release/capture-be04b73/`。未进行本轮手机安装/相机/图库或外部视觉模型测试。
+
+结构化回执：[release.json](ui-capture-20261031/release.json)。X1T/B4保持暂停。

@@ -1,0 +1,18 @@
+{
+  "candidateStartup": "passed",
+  "productionCopyMigration": "passed",
+  "personalRead": "passed",
+  "binarySha256": "f77aa18d11ff82d1e82c75e6649a9764b1cfef11df3a0c5125d6a267a4ae9557",
+  "commit": "be04b7315a97e1b7fb4f51cc5489fe691dac4cbf",
+  "deployed": true,
+  "backup": "production backups/capture-be04b73-1793425925 (private server directory)",
+  "service": "bob-online.service",
+  "rollbackUsed": false,
+  "android_run": 41174093233,
+  "android_artifact": 13032038892,
+  "apk_sha256": "73aa095ae0de65f1b2972f811c7da2f72019b2010c4e19100b6944a781fecf27",
+  "certificate_sha256": "dafb9fbdc736f2c70864a7005cb199b70ab5816a6833e8ec3e5ba743fee338f5",
+  "phone_test": "not_run",
+  "public_browser_login": "not_available",
+  "browser_scope": "Actual production via temporary authenticated SSH transport; no model call"
+}

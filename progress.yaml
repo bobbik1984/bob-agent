@@ -11,7 +11,7 @@ project:
   - Desktop
   - Android
   - Web (bob-node)
-  current_task: "F1/F3 图片捕获已接通文字、原图、视觉建议校正、项目归属与知识页回看；10项实际浏览器检查通过（识别为本机假服务），JS18、native34通过。未发布；手机相机、外部视觉质量和图片跨Home同步待验，X1T/B4暂停。"
+  current_task: "F1/F3 捕获网页已部署 be04b73，GitHub 固定签名 Android Run 41174093233 成功；Linux 测试、数据迁移、线上启动/页面和16KB检查通过。手机相机、真实视觉质量、图片跨Home同步待验；X1T/B4暂停。"
   development_plan: docs/CURRENT_STAGE.md
 phases:
 - name: BP0 真相与保护
