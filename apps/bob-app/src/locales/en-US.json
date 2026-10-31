@@ -567,5 +567,6 @@
   "artifactPreparing": "Preparing preview",
   "artifactReady": "Preview ready",
   "artifactRetry": "Click to retry",
-  "artifactOpen": "View file"
+  "artifactOpen": "View file",
+  "filePreviewCached": "Showing the downloaded copy. The conversation checks for updates in the background."
 }

@@ -16,7 +16,7 @@ const fileAddress=path=>({connectionId:connection.value,sessionId:selected.value
 let artifactQueue=[],artifactTimer,artifactRunning=false,artifactCount=0;
 async function drainArtifacts(){if(artifactRunning||disposed)return;artifactQueue=artifactQueue.filter(x=>x.visible());artifactQueue.sort((a,b)=>b.element.getBoundingClientRect().top-a.element.getBoundingClientRect().top);const item=artifactQueue.shift();if(!item||artifactCount>=6)return;artifactCount++;artifactRunning=true;try{await item.run()}finally{artifactRunning=false;artifactTimer=setTimeout(drainArtifacts,150)}}
 provide('dshArtifacts',{peek:path=>fileCache.peek(fileAddress(path)),get:path=>fileCache.get(fileAddress(path)),enqueue:item=>{if(!artifactQueue.some(x=>x.element===item.element))artifactQueue.push(item);clearTimeout(artifactTimer);artifactTimer=setTimeout(drainArtifacts,250)}});
-provide('dshPreviewGet',a=>fileCache.get(a));
+provide('dshPreviewGet',async a=>{const cached=await fileCache.peek(a);return cached?{...cached,from_cache:true}:fileCache.get(a)});
 async function closePreview(){preview.value=null;await nextTick();if(reader.value)reader.value.scrollTop=previewScroll;clearTimeout(timer);timer=setTimeout(refresh,5000)}
 provide('dshOpenFile',path=>{previewScroll=reader.value?.scrollTop||0;clearTimeout(timer);preview.value=fileAddress(path)});
 let generation=0, disposed=false, restoring=false, timer;

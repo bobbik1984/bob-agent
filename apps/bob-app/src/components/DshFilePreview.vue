@@ -15,7 +15,7 @@ onUnmounted(()=>{alive=false;if(url.value)URL.revokeObjectURL(url.value);origin?
 <template>
 <dialog ref="dialog" class="dsh-preview" @cancel.prevent="emit('close')">
  <header><strong>{{ address.path }}</strong><button type="button" @click="emit('close')">{{ t('filePreviewClose') }}</button></header>
- <p>{{ t('filePreviewCurrent') }}</p>
+ <p>{{ t(file?.from_cache?'filePreviewCached':'filePreviewCurrent') }}</p>
  <p v-if="busy" role="status">{{ t('filePreviewLoading') }}</p>
  <p v-if="error" role="alert">{{ t('filePreviewFailed') }} · {{ error }}</p>
  <template v-if="file && !error"><button v-if="imageTypes[file.extension]" type="button" @click="zoomed=!zoomed">{{ t(zoomed ? 'filePreviewFit' : 'filePreviewActual') }}</button><div class="dsh-preview-body" :class="{zoomed}"><img v-if="imageTypes[file.extension]" :src="url" :alt="address.path"/><MessageContent v-else-if="file.extension==='md'" :content="text"/><pre v-else>{{ text }}</pre></div><footer><a :href="url" :download="address.path.split('/').pop()">{{ t('filePreviewDownload') }}</a><small :title="file.version">{{ Math.ceil(file.bytes / 1024) }} KB</small></footer></template>

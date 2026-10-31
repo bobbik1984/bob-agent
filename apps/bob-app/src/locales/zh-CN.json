@@ -567,5 +567,6 @@
   "artifactPreparing": "正在准备预览",
   "artifactReady": "预览已准备",
   "artifactRetry": "点击重试",
-  "artifactOpen": "查看文件"
+  "artifactOpen": "查看文件",
+  "filePreviewCached": "显示已读取的文件副本；对话会在后台核对更新。"
 }
