@@ -8,9 +8,11 @@
   --text-primary: CanvasText;
   --text-secondary: GrayText;
   --line: color-mix(in srgb, CanvasText 14%, Canvas);
-  --accent-primary: Highlight;
-  --accent-soft: color-mix(in srgb, Highlight 12%, Canvas);
-  --text-on-accent: HighlightText;
+  --brand-accent-light: oklch(0.48 0.17 250);
+  --brand-accent-dark: oklch(0.76 0.12 250);
+  --accent-primary: light-dark(var(--brand-accent-light), var(--brand-accent-dark));
+  --accent-soft: color-mix(in srgb, var(--accent-primary) 12%, Canvas);
+  --text-on-accent: Canvas;
   --color-success: oklch(0.68 0.17 150);
   --color-warning: oklch(0.75 0.16 75);
   --color-error: oklch(0.63 0.21 25);
@@ -1424,7 +1426,7 @@ textarea {
   text-align: center;
 }
 .loading-brand img {
-  width: 3.2rem;
+  width: 2.4rem;
   height: 3.2rem;
 }
 
@@ -2285,7 +2287,7 @@ textarea {
   flex-shrink: 0;
 }
 .time-col-corner {
-  width: 3.2rem;
+  width: 2.4rem;
   flex-shrink: 0;
   border-right: 1px solid var(--line);
 }
@@ -2335,6 +2337,7 @@ textarea {
 
 .week-grid-body {
   display: flex;
+  align-items: flex-start;
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
@@ -2346,7 +2349,8 @@ textarea {
   display: none;
 }
 .time-axis-col {
-  width: 3.2rem;
+  height: max-content;
+  width: 2.4rem;
   flex-shrink: 0;
   border-right: 1px solid var(--line);
   background: var(--bg-secondary);
@@ -2355,13 +2359,16 @@ textarea {
   height: 3.1rem;
   border-bottom: 1px solid var(--line);
   display: flex;
-  align-items: flex-start;
-  justify-content: flex-end;
-  padding: 0.18rem 0.32rem 0 0;
-  font-size: 0.65rem;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  background: var(--bg-secondary);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-xs);
   color: var(--text-secondary);
 }
 .days-columns-grid {
+  height: max-content;
   flex: 1;
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));
@@ -2412,9 +2419,9 @@ textarea {
 }
 .calendar-event-block {
   background: var(--accent-soft);
-  border-left: 2.5px solid var(--accent-primary);
-  border-radius: 3px;
-  padding: 0.1rem 0.25rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 0.2rem 0.25rem;
   font-size: 0.65rem;
   line-height: 1.2;
   color: var(--text-primary);
@@ -2743,3 +2750,75 @@ textarea {
 .quicknote-card button { min-height: 44px; }
 .quicknote-card .quicknote-action-pill { border-color: transparent; }
 .capture-photo-panel p { font-size: var(--text-sm); }
+
+.device-target-label { max-width: 7rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-xs); }
+.device-indicator { gap: .4rem; }
+@media (forced-colors: active) {
+  :root { --accent-primary: Highlight; --text-on-accent: HighlightText; }
+}
+
+.schedule-editor { width: min(30rem, calc(100vw - 2rem)); max-height: calc(100dvh - 2rem); overflow: auto; border: 1px solid var(--line); border-radius: var(--radius-lg); padding: 1rem; background: var(--bg-primary); color: var(--text-primary); }
+.schedule-editor::backdrop { background: color-mix(in srgb, var(--text-primary) 35%, transparent); }
+.schedule-editor .quick-schedule-row { display: grid; grid-template-columns: 1fr; }
+.schedule-editor .hub-card { padding: 0; border: 0; background: transparent; }
+.schedule-editor-header { display: flex; justify-content: space-between; align-items: center; gap: 1rem; }
+.schedule-detail-link { background: transparent; border: 0; color: var(--text-primary); font-weight: 600; text-align: start; }
+
+.schedule-editor-fields { border: 0; padding: 0; margin: 0; min-width: 0; }
+.schedule-editor { box-sizing: border-box; }
+.schedule-editor input { min-width: 0; width: 100%; box-sizing: border-box; }
+
+.schedule-editor input:focus, .schedule-editor input:focus-visible { outline: 1px solid var(--text-secondary); outline-offset: 1px; box-shadow: none; border-color: var(--text-secondary); }
+.schedule-editor .custom-select-wrapper { width: 100%; }
+
+/* One-row calendar navigation; narrow layouts shorten dates, not touch targets. */
+.week-calendar-toolbar { flex-wrap: nowrap; gap: .25rem; }
+.week-calendar-toolbar .week-range-label { white-space: nowrap; margin-right: auto; }
+.week-calendar-toolbar .week-nav-btns, .week-calendar-toolbar .week-calendar-mode-btns { flex-wrap: nowrap; gap: 0; flex-shrink: 0; }
+.week-calendar-toolbar .week-calendar-mode-btns { border-left: 1px solid var(--line); padding-left: .25rem; }
+.calendar-icon-btn { width: 40px; height: 44px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-secondary); cursor: pointer; }
+.calendar-icon-btn svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.calendar-icon-btn:hover { background: var(--bg-tertiary); color: var(--text-primary); }
+.calendar-icon-btn.active { background: var(--accent-soft); color: var(--accent-primary); }
+.calendar-icon-btn:focus-visible { outline: 1px solid var(--text-secondary); outline-offset: -2px; }
+.week-range-short { display: none; }
+@media (max-width: 520px) { .week-range-full { display: none; } .week-range-short { display: inline; } .calendar-icon-btn { width: 36px; } }
+
+.week-calendar-toolbar { min-height: 32px; }
+.calendar-icon-btn { height: 32px; }
+.calendar-icon-btn svg { width: 16px; height: 16px; }
+
+.connection-list-row { display:flex; flex-wrap:wrap; justify-content:space-between; gap:12px; padding:12px 0; border-bottom:1px solid var(--line); }
+.connection-list-row p { overflow-wrap:anywhere; margin:4px 0; color:var(--text-secondary); }
+.connection-form { display:grid; gap:12px; margin-top:12px; }
+.connection-form label { display:grid; gap:6px; }
+.connection-form input { width:100%; box-sizing:border-box; }
+.connection-delete-confirm { padding:12px; margin-top:12px; background:var(--bg-secondary); border-radius:var(--radius-md); }
+
+/* One vertical reader; wide code/tables own only their horizontal overflow. */
+.main, .primary-view, .history, .message, .work-message-row { min-width: 0; }
+.history { overflow-x: hidden; overscroll-behavior-y: contain; }
+.message { flex-shrink: 0; }
+.work-message-row { display: block; white-space: normal; }
+.message-markdown { white-space: normal; }
+.message-markdown > :first-child { margin-top: 0; }
+.message-markdown > :last-child { margin-bottom: 0; }
+.message-markdown p { white-space: pre-wrap; margin: .55em 0; }
+.message-markdown h1, .message-markdown h2, .message-markdown h3,
+.message-markdown h4, .message-markdown h5, .message-markdown h6 { line-height: 1.4; margin: 1em 0 .4em; font-size: 1.05em; }
+.message-markdown h1 { font-size: 1.3em; }
+.message-markdown h2 { font-size: 1.15em; }
+.message-markdown ul, .message-markdown ol { padding-inline-start: 1.5em; margin: .55em 0; }
+.message-markdown li > p { margin: .2em 0; }
+.message-markdown blockquote { margin: .6em 0; padding: .5em .75em; background: var(--bg-tertiary); border-radius: var(--radius-md); color: var(--text-secondary); }
+.message-markdown code { font-family: ui-monospace, monospace; font-size: .9em; background: var(--bg-tertiary); border-radius: var(--radius-sm); padding: .1em .25em; }
+.message-markdown pre { margin: .65em 0; padding: .75em; background: var(--bg-tertiary); border-radius: var(--radius-md); overflow-x: auto; white-space: pre; max-width: 100%; }
+.message-markdown pre code { padding: 0; white-space: pre; }
+.message-table-scroll { overflow-x: auto; max-width: 100%; margin: .65em 0; }
+.message-markdown table { border-collapse: collapse; width: 100%; }
+.message-markdown th, .message-markdown td { padding: .45em .65em; border: 1px solid var(--line); text-align: start; min-width: 6em; }
+.message-markdown th { background: var(--bg-tertiary); }
+.message-markdown a { color: var(--accent-primary); text-decoration: underline; overflow-wrap: anywhere; }
+.message-markdown hr { border: 0; border-top: 1px solid var(--line); margin: .8em 0; }
+.message-file-reference { overflow-wrap: anywhere; }
+.message-file-reference small { color: var(--text-secondary); }

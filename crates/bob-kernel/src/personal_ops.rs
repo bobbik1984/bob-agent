@@ -716,6 +716,33 @@ impl LocalApp {
         Ok(item)
     }
 
+    /// Compare-and-swap edit; preserve identity, status, duration, reminder and provenance.
+    pub fn edit_schedule_item(&mut self, id: &str, expected_version: i64, title: &str,
+        start_at: i64, notes: &str, now: i64) -> Result<ScheduleItem> {
+        if title.trim().is_empty() || title.len() > 256 { return Err(Error::InvalidTransition); }
+        self.store.db.execute_batch("SAVEPOINT schedule_edit")?;
+        let result = (|| {
+            let old = self.list_schedule_items()?.into_iter().find(|s| s.id == id)
+                .ok_or(Error::InvalidTransition)?;
+            if old.version != expected_version { return Err(Error::InvalidTransition); }
+            let shift = start_at.checked_sub(old.start_at).ok_or(Error::InvalidTransition)?;
+            let end = old.end_at.map(|v| v.checked_add(shift).ok_or(Error::InvalidTransition)).transpose()?;
+            let reminder = old.reminder_at.map(|v| v.checked_add(shift).ok_or(Error::InvalidTransition)).transpose()?;
+            let acceptance = if self.paired_home()?.is_some() { "local" } else { "home" };
+            let changed = self.store.db.execute(
+                "UPDATE schedule_items SET title=?2,start_at=?3,end_at=?4,reminder_at=?5,notes=?6,version=version+1,updated_at=?7,acceptance=?9 WHERE id=?1 AND version=?8",
+                params![id,title.trim(),start_at,end,reminder,notes.trim(),now,expected_version,acceptance])?;
+            if changed != 1 { return Err(Error::InvalidTransition); }
+            let item = self.list_schedule_items()?.into_iter().find(|s| s.id == id).ok_or(Error::InvalidTransition)?;
+            self.enqueue_personal_sync("schedule",id,"upsert",expected_version,&serde_json::to_string(&item)?,now)?;
+            Ok(item)
+        })();
+        match result {
+            Ok(item) => { self.store.db.execute_batch("RELEASE schedule_edit")?; Ok(item) }
+            Err(e) => { self.store.db.execute_batch("ROLLBACK TO schedule_edit; RELEASE schedule_edit")?; Err(e) }
+        }
+    }
+
     pub fn update_schedule_status(
         &mut self,
         id: &str,

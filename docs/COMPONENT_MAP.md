@@ -130,3 +130,9 @@
 | 捕获编辑、项目关联与草稿 | `apps/bob-app/src/App.vue`、`kernel-bridge.mjs` |
 | 已保存原图回看 | `apps/bob-app/src/components/CaptureImage.vue`、`views/KnowledgeView.vue` |
 | 实际浏览器验证 | `apps/bob-app/tests/photo-capture-browser.py`（仅隔离节点，本机模拟视觉服务） |
+
+F2/F5当前新增：`crates/bob-runtime/src/dsh_session.rs`只实现原生身份/历史投影与测试源码；传输、列表与续聊未接通。`bob-node`新增导入项目来源，Work独立折叠历史；不是DSH实时目录。
+
+### 共用消息阅读
+
+`apps/bob-app/src/components/MessageContent.vue` 与 `message-markdown.mjs`：App助手消息和Work Online历史的安全Markdown子集阅读。`tests/message-markdown.test.mjs` 覆盖结构、链接拒绝、代码与长文保留；远端附件传输不由此组件实现。

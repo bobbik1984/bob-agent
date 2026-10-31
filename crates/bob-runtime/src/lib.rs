@@ -10,6 +10,7 @@
 //!   `online_cache.json`, BYOK execution, and Online Client API v1 calls.
 
 pub mod vision;
+pub mod dsh_session;
 use bob_kernel::app::LocalApp;
 use bob_kernel::direct_provider::{
     DirectChatTurn, DirectProviderProfile, DirectProviderProfileInput,

@@ -7,6 +7,7 @@ export function createKernelBridge(invoke, isAvailable) {
   }
   return {
     available: isAvailable,
+    scheduleEdit: payload => call('app_schedule_edit', payload),
     bootstrap: () => call('app_bootstrap'),
     syncHome: () => call('app_home_sync'),
     pairingCapabilities: () => call('app_pairing_capabilities'),

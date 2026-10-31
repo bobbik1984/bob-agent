@@ -2,15 +2,17 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { kernelBridge } from './native-bridge.mjs';
+import { isBobNodeRuntime } from './http-bridge.mjs';
 import PairingQr from './PairingQr.vue';
 import ManualPairing from './ManualPairing.vue';
 import { createPairingScanController } from './pairing-scan-controller.mjs';
 
 const { t } = useI18n();
 const emit = defineEmits(['changed', 'connected']);
+const browserClient = isBobNodeRuntime();
 const props = defineProps({ paired: { type: Boolean, default: false } });
 const paired = computed(
-  () => props.paired || ['connected', 'enabled'].includes(status.value?.state),
+  () => !browserClient && ['connected', 'enabled'].includes(status.value?.state),
 );
 const open = ref(true);
 const capabilities = ref(null);
@@ -19,6 +21,37 @@ const invitation = ref(null);
 const busy = ref(false);
 const error = ref('');
 const syncSuccess = ref(false);
+const connections = ref([]), connectionForm = ref(false), deleting = ref(null);
+const connectionError = ref(''), connectionBusy = ref(false);
+const connectionDraft = ref({id:null,label:'',baseUrl:'',token:''});
+async function loadConnections() {
+  try { const snap=await kernelBridge.modelHubGet(); connections.value=snap?.remoteNodes || []; }
+  catch { connectionError.value='connectionLoadFailed'; }
+}
+function editConnection(node=null) {
+  connectionError.value='';
+  connectionDraft.value={id:node?.id||null,label:node?.name||node?.label||'',baseUrl:node?.url||node?.baseUrl||'',token:''};
+  connectionForm.value=true;
+}
+async function saveConnection() {
+  if(connectionBusy.value)return;
+  try { const url=new URL(connectionDraft.value.baseUrl); if(!['https:','http:'].includes(url.protocol)||url.username||url.password||url.search||url.hash)throw Error(); }
+  catch {connectionError.value='connectionInvalidAddress';return;}
+  connectionBusy.value=true;connectionError.value='';
+  try {
+    const snap=await kernelBridge.remoteNodeSave({...connectionDraft.value,token:connectionDraft.value.token||null,enabled:true});
+    if(!snap)throw Error(); connections.value=snap.remoteNodes||[];
+    connectionDraft.value.token='';connectionForm.value=false;emit('changed');
+  } catch {connectionError.value='connectionSaveFailed';}
+  finally {connectionBusy.value=false;}
+}
+async function deleteConnection() {
+  if(!deleting.value||connectionBusy.value)return;
+  connectionBusy.value=true;
+  try {const snap=await kernelBridge.remoteNodeDelete(deleting.value.id);if(!snap)throw Error();connections.value=snap.remoteNodes||[];deleting.value=null;emit('changed');}
+  catch {connectionError.value='connectionDeleteFailed';}
+  finally {connectionBusy.value=false;}
+}
 let poll = null;
 let disposed = false;
 let reading = false;
@@ -189,9 +222,11 @@ async function syncNow() {
 }
 
 onMounted(async () => {
+  await loadConnections();
   try {
     const caps = await kernelBridge.pairingCapabilities();
     capabilities.value = caps;
+    if (!browserClient) await ensureOpen();
     if (caps.start_pairing && caps.can_host) {
       await ensureOpen();
       if (
@@ -215,6 +250,28 @@ onUnmounted(() => {
 
 <template>
   <div class="home-connection">
+    <section class="hub-card" :aria-label="t('connectionListTitle')">
+      <div class="hub-card-header"><h3>{{ t('connectionListTitle') }}</h3><button type="button" @click="editConnection()">{{ t('connectionAdd') }}</button></div>
+      <p v-if="connectionError" role="alert">{{ t(connectionError) }}</p>
+      <p v-if="!connections.length && !connectionForm" class="view-card-desc">{{ t('connectionEmpty') }}</p>
+      <article v-for="node in connections" :key="node.id" class="connection-list-row">
+        <div><strong>{{ node.name || node.label || node.url || node.baseUrl }}</strong><p>{{ node.url || node.baseUrl }}</p><small>{{ t('connectionSavedUnverified') }}</small></div>
+        <div><button type="button" @click="editConnection(node)">{{ t('connectionEdit') }}</button><button type="button" @click="deleting=node">{{ t('connectionDelete') }}</button></div>
+      </article>
+      <form v-if="connectionForm" class="connection-form" @submit.prevent="saveConnection">
+        <label>{{ t('connectionName') }}<input v-model="connectionDraft.label" :disabled="connectionBusy" /></label>
+        <label>{{ t('connectionAddress') }}<input v-model="connectionDraft.baseUrl" type="url" required :disabled="connectionBusy" /></label>
+        <label>{{ t('connectionToken') }}<input v-model="connectionDraft.token" type="password" autocomplete="off" :disabled="connectionBusy" /></label>
+        <p class="view-card-desc">{{ t('connectionTokenHint') }}</p>
+        <div><button type="submit" :disabled="connectionBusy">{{ t('connectionSave') }}</button><button type="button" :disabled="connectionBusy" @click="connectionForm=false;connectionDraft.token=''">{{ t('scheduleClose') }}</button></div>
+      </form>
+      <div v-if="deleting" role="alertdialog" :aria-label="t('connectionDelete')" class="connection-delete-confirm">
+        <p>{{ t('connectionDeleteConfirm', {name:deleting.name || deleting.label || deleting.url || deleting.baseUrl}) }}</p>
+        <button type="button" :disabled="connectionBusy" @click="deleteConnection">{{ t('connectionDelete') }}</button><button type="button" :disabled="connectionBusy" @click="deleting=null">{{ t('scheduleClose') }}</button>
+      </div>
+      <p class="view-card-desc">{{ t('connectionProtocolBoundary') }}</p>
+    </section>
+    <details v-if="!browserClient && (capabilities?.can_host || capabilities?.can_scan)" class="about-footer-details"><summary>{{ t('connectionPairDevice') }}</summary>
     <section
       v-if="open"
       class="qr-panel hub-card"
@@ -222,37 +279,10 @@ onUnmounted(() => {
       :aria-label="t('homeConnection')"
     >
       <div class="hub-card-header">
-        <div class="hub-card-title-group">
-          <svg class="hub-icon" viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M12 22v-5M9 8V2M15 8V2M18 8v5a6 6 0 0 1-12 0V8Z" />
-          </svg>
-          <h3>
-            {{
-              t(
-                capabilities?.can_host
-                  ? 'qrConnectPhone'
-                  : capabilities?.can_scan
-                    ? 'qrConnectHome'
-                    : 'deviceAndConnection',
-              )
-            }}
-          </h3>
-        </div>
-        <span class="device-status-pill" :class="{ online: paired }">
-          {{
-            t(
-              capabilities?.can_host
-                ? paired
-                  ? 'qrPhonePaired'
-                  : 'pairUnconfigured'
-                : paired
-                  ? 'qrHomePaired'
-                  : 'pairUnconfigured',
-            )
-          }}
-        </span>
+        <h3>{{ t('connectComputerTitle') }}</h3>
+        <span v-if="paired" class="device-status-pill">{{ t('connectionSaved') }}</span>
       </div>
-
+      <p v-if="browserClient" class="view-card-desc">{{ t('connectComputerWebHint') }}</p>
       <button
         v-if="invitation"
         type="button"
@@ -263,7 +293,7 @@ onUnmounted(() => {
         ×
       </button>
 
-      <template v-if="capabilities?.can_host">
+      <template v-if="!browserClient && capabilities?.can_host">
         <p class="view-card-desc">{{ t('qrHomeHint') }}</p>
         <div class="provider-actions">
           <button
@@ -294,7 +324,7 @@ onUnmounted(() => {
         </p>
       </template>
 
-      <template v-else-if="capabilities?.can_scan">
+      <template v-else-if="!browserClient && capabilities?.can_scan">
         <p class="view-card-desc">{{ t('qrPhoneHint') }}</p>
         <div class="provider-actions">
           <button
@@ -320,7 +350,7 @@ onUnmounted(() => {
           )
         }}
       </p>
-      <p v-else-if="status && scanPhase !== 'failed'" role="status" class="view-card-desc">
+      <p v-else-if="!browserClient && status && scanPhase !== 'failed'" role="status" class="view-card-desc">
         {{ t(keys[status.state] || 'pairUnconfirmed') }}
       </p>
       <p v-if="error || status?.error" role="alert" class="view-card-desc">
@@ -335,6 +365,8 @@ onUnmounted(() => {
         {{ t('peerSyncSuccessHint') }}
       </p>
 
+      <details v-if="!browserClient && paired" class="about-footer-details">
+        <summary>{{ t('connectionManage') }}</summary>
       <div class="provider-actions">
         <button
           v-if="paired"
@@ -368,11 +400,14 @@ onUnmounted(() => {
         </button>
       </div>
 
-      <details v-if="!capabilities?.can_scan && !invitation" class="about-footer-details">
+      </details>
+
+      <details v-if="!browserClient && !invitation && (capabilities?.can_host || capabilities?.can_scan)" class="about-footer-details">
         <summary class="about-footer-summary">{{ t('qrAdvanced') }}</summary>
         <ManualPairing @changed="emit('changed')" />
       </details>
     </section>
+    </details>
   </div>
 </template>
 

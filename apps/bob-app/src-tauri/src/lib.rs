@@ -501,6 +501,18 @@ async fn app_schedule_create(
 }
 
 #[tauri::command]
+async fn app_schedule_edit(state: State<'_, AppState>, id: String, expected_version: i64,
+    title: String, start_at: i64, notes: String) -> Result<ScheduleItem, &'static str> {
+    let state = state.0.clone();
+    tauri::async_runtime::spawn_blocking(move || with_app(&state, |app| {
+        let item = app.edit_schedule_item(&id, expected_version, &title, start_at, &notes, now()?)
+            .map_err(|_| "SCHEDULE_UPDATE_FAILED")?;
+        sync_project_todo_markdown(app, &item);
+        Ok(item)
+    })).await.map_err(|_| "SCHEDULE_UPDATE_FAILED")?
+}
+
+#[tauri::command]
 async fn app_schedule_status(
     state: State<'_, AppState>,
     id: String,
@@ -958,6 +970,7 @@ fn configure<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R>
             app_preferences_save,
             app_personal_snapshot,
             app_schedule_create,
+            app_schedule_edit,
             app_schedule_status,
             app_note_upsert,
             app_capture_create,

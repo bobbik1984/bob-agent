@@ -1,6 +1,6 @@
 # Bob — Architecture
 
-> 本文记录已接受的边界与待决方案；目标架构图不代表全部已实现。当前实现是 bob-kernel/bob-transport + Windows/Android Tauri，Online 客户端部分接线；尚无 bob-runtime/bob-node。事实与验证范围见 [CURRENT_STAGE](CURRENT_STAGE.md)，代码位置见 [COMPONENT_MAP](COMPONENT_MAP.md)，决策理由见 [DECISIONS](DECISIONS.md)。
+> 本文记录已接受的边界与待决方案；目标架构图不代表全部已实现。当前实现是 bob-kernel/bob-transport + Windows/Android Tauri，已包含 bob-runtime/bob-node；Online兼容接口与DSH原生会话接入是不同能力，后者当前施工中。事实与验证范围见 [CURRENT_STAGE](CURRENT_STAGE.md)，代码位置见 [COMPONENT_MAP](COMPONENT_MAP.md)，决策理由见 [DECISIONS](DECISIONS.md)。
 
 ## 1 已接受的不变量
 
@@ -114,3 +114,7 @@ Windows原生vault仅接受可信app-data目录，使用当前用户DPAPI固定�
 原件属于内核数据：`capture_media` 保存不可变原始 bytes 与内容哈希，`capture_media_links` 将 capture 关联原件；不复用工程 Artifact/Execution 生命周期。图片上传与最终文字保存分离，最终 capture/可选项目笔记/原图关联为同一事务。草稿媒体引用和未采纳建议为客户端状态。
 
 视觉识别属于 Runtime/宿主能力，使用视觉角色和当前节点凭据存储；内核不持有提供方密钥、不自行调用模型。用户主动识别，后端核对实际配置仍与披露目标一致，不自动改用其他模型。返回文字是建议，提供方模型字段存在时与请求模型分开。Node 请求体通过子进程 stdin 传递，禁止把图像或密钥置于命令行参数；Tauri 复用已有宿主 HTTP 传输。原图目前不进入 personal_ops 同步包，界面不得宣称图片跨端已同步。
+
+### 原生会话来源与历史导入
+
+旧平台导入项目保留来源，不是实时节点目录。DSH的connection_id与session_id共同定位原生会话；目录路径是工作区线索，不能凭同名自动合并项目。DSH仍是原生历史的权威，Bob保存关联与有来源的缓存。目录投影不能生成执行、检查通过或成果证据。认证传输与持久发送接纳尚待接线，不能用只读解析模块宣称已完成续聊。

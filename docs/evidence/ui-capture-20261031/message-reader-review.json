@@ -1,0 +1,58 @@
+{
+  "scope": "new-platform-local-reader-only",
+  "baseline": "74934e253a0a14466ebca289411fe19ed300d763",
+  "sourceSha256": {
+    "apps/bob-app/src/message-markdown.mjs": "3d4fc95d22de707e15cbf55d6feaa2cba394926daeda0c4bb8f67c1ef4134d1a",
+    "apps/bob-app/src/components/MessageContent.vue": "302cf7152bb1732e21036dd59f4b8c4c887b05971ec039aa91ebe2d6f99b134c",
+    "apps/bob-app/src/App.vue": "6a46060ad952cd8a66d9c8ff763181682c3be01b4959896203787b35ac30c3c7",
+    "apps/bob-app/src/views/WorkView.vue": "74bdad2521475169d9c037c833c704744deff3ec020ed08e9b58d8df46c4a9d6",
+    "apps/bob-app/src/style.css": "d64d7b8948aed1035885d7018b8a6754aca3d8bf04ba041c7232762d9024326c",
+    "apps/bob-app/tests/message-markdown.test.mjs": "ad33ae1bcc4d184b0cce273b37b399aacc1826b448e910e27f2b562c12252baf"
+  },
+  "tests": {
+    "frontend": {
+      "passed": 49,
+      "failed": 0
+    },
+    "newParserTests": 6
+  },
+  "browser": {
+    "mobile": {
+      "width": 390,
+      "height": 844,
+      "bodyWidth": 385,
+      "reachedEnd": true,
+      "endBottom": 616.9,
+      "composerTop": 694.3,
+      "returnedToTop": true
+    },
+    "desktop": {
+      "width": 1180,
+      "height": 800,
+      "historyScrollHeight": 2769,
+      "historyClientHeight": 535,
+      "keyboardReachedEnd": true,
+      "endAboveComposer": true,
+      "pageOverflow": false
+    },
+    "navigationRestore": {
+      "before": 882.4000244140625,
+      "after": 882.4000244140625,
+      "draftRetained": true
+    },
+    "copy": {
+      "buttonReportedCopied": true,
+      "clipboardReadback": "not-confirmed"
+    }
+  },
+  "notVerified": [
+    "real DSH transport/history",
+    "remote relative attachments",
+    "native Android",
+    "real SQLite backend this increment"
+  ],
+  "rustCompiled": false,
+  "deployed": false,
+  "apkBuilt": false,
+  "previewData": "isolated local layout fixture rendered by actual App component, not model reply"
+}

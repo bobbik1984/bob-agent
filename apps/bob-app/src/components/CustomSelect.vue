@@ -25,6 +25,7 @@ const emit = defineEmits(['update:modelValue', 'change']);
 const isOpen = ref(false);
 const wrapperRef = ref(null);
 const menuRef = ref(null);
+const insideDialog = ref(false);
 const dropdownStyle = ref({});
 
 const selectedOption = computed(() =>
@@ -69,6 +70,7 @@ function updatePosition() {
 
 function toggle() {
   if (props.disabled) return;
+  insideDialog.value = !!wrapperRef.value?.closest("dialog");
   isOpen.value = !isOpen.value;
   if (isOpen.value) {
     updatePosition();
@@ -158,7 +160,7 @@ onUnmounted(() => {
       </svg>
     </div>
 
-    <Teleport to="body">
+    <Teleport to="body" :disabled="insideDialog">
       <ul
         v-if="isOpen"
         ref="menuRef"

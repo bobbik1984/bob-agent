@@ -1,5 +1,6 @@
 <script setup>
 import { computed, reactive, ref } from 'vue';
+import MessageContent from '../components/MessageContent.vue';
 import { useI18n } from 'vue-i18n';
 
 const props = defineProps({
@@ -94,9 +95,11 @@ function selectSyncedNode(node) {
   });
 }
 
-const projects = computed(() => props.catalog?.projects || []);
+const importedIds = computed(() => new Set(props.catalog?.imported_project_ids || []));
+const projects = computed(() => (props.catalog?.projects || []).filter(p => !importedIds.value.has(p.id)));
+const importedProjects = computed(() => (props.catalog?.projects || []).filter(p => importedIds.value.has(p.id)));
 const conversations = computed(() => props.catalog?.conversations || []);
-const deviceGroups = computed(() => props.catalog?.device_groups || []);
+const deviceGroups = computed(() => (props.catalog?.device_groups || []).map(g => ({ ...g, conversations: g.conversations.filter(c => !importedIds.value.has(c.project_id)) })).filter(g => g.conversations.length));
 
 const directProviderReady = computed(
   () =>
@@ -535,10 +538,9 @@ function submitProject() {
                     </button>
                   </form>
                   <div class="work-session-list">
-                    <div v-for="msg in onlineMessages" :key="msg.sequence" class="work-session-row">
-                      <span class="work-session-title">
-                        #{{ msg.sequence }} · {{ msg.text || msg.content || msg.role }}
-                      </span>
+                    <div v-for="msg in onlineMessages" :key="msg.sequence" class="work-session-row work-message-row">
+                      <small class="message-state">#{{ msg.sequence }} · {{ msg.role }}</small>
+                      <MessageContent :content="msg.text || msg.content || ''" :plain="msg.role === 'user'" />
                     </div>
                   </div>
                   <button
@@ -560,6 +562,18 @@ function submitProject() {
           </article>
         </div>
       </section>
+
+      <details v-if="importedProjects.length" class="hub-card">
+        <summary>{{ t('workImportedProjects') }} · {{ importedProjects.length }}</summary>
+        <p class="view-card-desc">{{ t('workImportedProjectsHint') }}</p>
+        <article v-for="project in importedProjects" :key="project.id" class="work-project-item">
+          <strong>{{ project.title }}</strong>
+          <div v-for="conv in projectConversations(project.id)" :key="conv.id" class="work-session-row">
+            <span>{{ conv.title }}</span>
+            <button class="mini-ghost-btn" @click="emit('open-conversation', conv.id)">{{ t('workOpenSessionBtn') }}</button>
+          </div>
+        </article>
+      </details>
 
       <!-- First-Screen Priority 3: Active Device Task Groups -->
       <section v-if="deviceGroups.length" class="hub-card">

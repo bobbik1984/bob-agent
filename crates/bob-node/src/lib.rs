@@ -55,6 +55,8 @@ pub struct OnlineCredentialRecord {
 
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
 pub struct OnlineWorkState {
+    #[serde(default)]
+    pub imported_project_ids: Vec<String>,
     pub server_instance_id: String,
     pub pairings: HashMap<String, OnlinePairingSession>,
     pub credentials: HashMap<String, OnlineCredentialRecord>,
@@ -85,6 +87,7 @@ fn load_online_state(path: &Path) -> OnlineWorkState {
         }
     }
     OnlineWorkState {
+        imported_project_ids: Vec::new(),
         server_instance_id: format!("bob-node-{}", now_millis()),
         pairings: HashMap::new(),
         credentials: HashMap::new(),
@@ -128,80 +131,11 @@ impl NodeContext {
         save_online_state(&self.online_store_path, &self.online);
     }
 
-    /// Ensures every project/task/conversation in `LocalApp` is also projected in `OnlineWorkState`
-    /// with a default V1 execution, verification summary, and artifact list if not already present.
+    /// Directory refresh does not manufacture execution or verification evidence.
     pub fn sync_catalog_into_online_store(&mut self) {
-        let Ok(catalog) = self.app.catalog_snapshot() else {
-            return;
-        };
-        let stamp = now_millis();
-        for proj in &catalog.projects {
-            self.online
-                .project_messages
-                .entry(proj.id.clone())
-                .or_default();
-        }
-        for conv in &catalog.conversations {
-            let Some(ref proj_id) = conv.project_id else {
-                continue;
-            };
-            let task_id = format!("task-{}", conv.id);
-            self.online
-                .task_snapshots
-                .entry(task_id.clone())
-                .or_insert_with(|| {
-                    json!({
-                        "task": {
-                            "id": task_id,
-                            "project_id": proj_id,
-                            "conversation_id": conv.id,
-                            "title": conv.title,
-                            "instruction": conv.title,
-                            "description": conv.title,
-                            "status": if conv.has_running_execution { "running" } else { "ready" },
-                            "created_at": conv.updated_at,
-                            "updated_at": conv.updated_at,
-                        },
-                        "executions": [
-                            {
-                                "id": format!("exec-{}-v1", task_id),
-                                "task_id": task_id,
-                                "parent_execution_id": Value::Null,
-                                "iteration": 1,
-                                "kind": "work_revision",
-                                "status": if conv.has_running_execution { "running" } else { "ready" },
-                                "started_at": conv.updated_at,
-                                "ended_at": conv.updated_at,
-                                "updated_at": conv.updated_at,
-                            }
-                        ],
-                        "steering": [],
-                        "verifications": [
-                            {
-                                "id": format!("ver-{}-v1", task_id),
-                                "task_id": task_id,
-                                "execution_id": format!("exec-{}-v1", task_id),
-                                "status": "passed",
-                                "summary": "Workspace kernel state verified",
-                                "created_at": stamp,
-                                "completed_at": stamp,
-                            }
-                        ],
-                        "reviews": [],
-                        "artifacts": [
-                            {
-                                "id": format!("art-{}-v1", task_id),
-                                "execution_id": format!("exec-{}-v1", task_id),
-                                "type": "markdown",
-                                "name": "DELIVERABLE_SUMMARY.md",
-                                "summary": format!("Deliverable summary for {}", conv.title),
-                                "content_available": true,
-                                "created_at": stamp,
-                            }
-                        ],
-                        "missing_facts": []
-                    })
-                });
+        let Ok(catalog) = self.app.catalog_snapshot() else { return; };
+        for project in catalog.projects {
+            self.online.project_messages.entry(project.id).or_default();
         }
         self.save_online();
     }
@@ -228,6 +162,9 @@ impl NodeContext {
             if let Some(iter) = rows {
                 for item in iter.flatten() {
                     let (pid, name, updated_at) = item;
+                    if !self.online.imported_project_ids.contains(&pid) {
+                        self.online.imported_project_ids.push(pid.clone());
+                    }
                     let _ = self.app.create_project(&pid, &name, updated_at);
                     imported_count += 1;
                 }
@@ -267,19 +204,8 @@ impl NodeContext {
                                 "created_at": updated_at,
                                 "updated_at": updated_at,
                             },
-                            "executions": [
-                                {
-                                    "id": format!("exec-{tid}-v1"),
-                                    "task_id": tid,
-                                    "parent_execution_id": Value::Null,
-                                    "iteration": 1,
-                                    "kind": "work_revision",
-                                    "status": status,
-                                    "started_at": updated_at,
-                                    "ended_at": updated_at,
-                                    "updated_at": updated_at,
-                                }
-                            ],
+                            "source_kind": "legacy_import",
+                            "executions": [],
                             "steering": [],
                             "verifications": [],
                             "reviews": [],
@@ -326,7 +252,15 @@ pub fn handle_rpc_command(ctx: &mut NodeContext, command: &str, args: &Value) ->
                 .app
                 .catalog_snapshot()
                 .map_err(|_| "CATALOG_READ_FAILED")?;
-            serde_json::to_value(snap).map_err(|_| "CATALOG_READ_FAILED")
+            let mut value = serde_json::to_value(snap).map_err(|_| "CATALOG_READ_FAILED")?;
+            if let Some(projects) = value["projects"].as_array_mut() {
+                for project in projects {
+                    let imported = project["id"].as_str().map(|id| ctx.online.imported_project_ids.iter().any(|p| p == id)).unwrap_or(false);
+                    project["source_kind"] = json!(if imported { "legacy_import" } else { "bob_native" });
+                }
+            }
+            value["imported_project_ids"] = json!(ctx.online.imported_project_ids);
+            Ok(value)
         }
         "app_history" => {
             let session_id = args
@@ -569,6 +503,16 @@ pub fn handle_rpc_command(ctx: &mut NodeContext, command: &str, args: &Value) ->
                 )
                 .map_err(|_| "SCHEDULE_CREATE_FAILED")?;
             serde_json::to_value(created).map_err(|_| "SCHEDULE_CREATE_FAILED")
+        }
+        "app_schedule_edit" => {
+            let item = ctx.app.edit_schedule_item(
+                args["id"].as_str().ok_or("SCHEDULE_UPDATE_FAILED")?,
+                args["expectedVersion"].as_i64().ok_or("SCHEDULE_UPDATE_FAILED")?,
+                args["title"].as_str().ok_or("SCHEDULE_UPDATE_FAILED")?,
+                args["startAt"].as_i64().ok_or("SCHEDULE_UPDATE_FAILED")?,
+                args["notes"].as_str().unwrap_or(""), at
+            ).map_err(|_| "SCHEDULE_UPDATE_FAILED")?;
+            serde_json::to_value(item).map_err(|_| "SCHEDULE_UPDATE_FAILED")
         }
         "app_schedule_status" => {
             let id = args.get("id").and_then(Value::as_str).ok_or("SCHEDULE_UPDATE_FAILED")?;
@@ -827,8 +771,8 @@ pub fn handle_rpc_command(ctx: &mut NodeContext, command: &str, args: &Value) ->
         }
         "app_remote_node_save" => {
             let id = args.get("id").and_then(Value::as_str).map(str::to_owned);
-            let name = args.get("name").and_then(Value::as_str).unwrap_or("");
-            let url = args.get("url").and_then(Value::as_str).unwrap_or("");
+            let name = args.get("name").or_else(|| args.get("label")).and_then(Value::as_str).unwrap_or("");
+            let url = args.get("url").or_else(|| args.get("baseUrl")).and_then(Value::as_str).unwrap_or("");
             let token = args.get("token").and_then(Value::as_str);
             let clear_token = args
                 .get("clearToken")
@@ -2107,6 +2051,16 @@ mod tests {
         assert_eq!(v1_caps["capabilities"]["parent_revision"], json!(true));
         assert_eq!(v1_caps["capabilities"]["review"], json!(true));
 
+        // Explicit first operation: catalog refresh must not invent a V1.
+        let (status, first_op) = http_request(
+            server.local_addr, "POST", "/api/client/v1/operations", Some(&token),
+            Some(&json!({"request_id":"op-first-v1", "type":"create_revision",
+                "task_id":task_id, "payload":{"instruction":"First test operation"}}).to_string()),
+        );
+        assert_eq!(status, 200);
+        assert_eq!(first_op["execution"]["iteration"], json!(1));
+        assert_eq!(first_op["snapshot"]["executions"].as_array().unwrap().len(), 1);
+
         // Create V2 revision
         let (status, rev_op) = http_request(
             server.local_addr,
@@ -2220,5 +2174,13 @@ mod tests {
         let catalog = ctx.app.catalog_snapshot().expect("catalog");
         assert!(catalog.projects.iter().any(|p| p.id == "proj-legacy-1"));
         assert!(ctx.online.task_snapshots.contains_key("task-legacy-1"));
+        let snapshot = &ctx.online.task_snapshots["task-legacy-1"];
+        assert_eq!(snapshot["executions"], json!([]));
+        assert_eq!(snapshot["verifications"], json!([]));
+        assert_eq!(snapshot["artifacts"], json!([]));
+        assert_eq!(ctx.online.imported_project_ids, vec!["proj-legacy-1"]);
+        assert!(!ctx.online.task_snapshots.contains_key("task-conv-task-legacy-1"));
+        let projected = handle_rpc_command(&mut ctx, "app_catalog", &json!({})).unwrap();
+        assert_eq!(projected["projects"][0]["source_kind"], "legacy_import");
     }
 }

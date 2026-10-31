@@ -1,5 +1,6 @@
 <script setup>
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
+import MessageContent from './components/MessageContent.vue';
 import HomeConnection from './HomeConnection.vue';
 import CustomSelect from './components/CustomSelect.vue';
 import ScheduleView from './views/ScheduleView.vue';
@@ -94,6 +95,18 @@ const devicePaired = computed(
 );
 const homeReachable = ref(false);
 const deviceOnline = computed(() => homeReachable.value && !homeFault.value);
+// The badge identifies the connected target, never infers it from this screen's size.
+const pairedHomeIdentity = computed(() => catalog.value?.device_groups?.find(group => group.role === 'paired_home')?.device_id);
+const connectionTarget = computed(() => browserClient
+  ? { kind: 'server', label: t('connectionWebNode') }
+  : homeConfigured.value || pairingStatusState.value?.role === 'replica'
+    ? { kind: 'home', label: pairedHomeIdentity.value ? t('connectionHome') + ' · ' + pairedHomeIdentity.value.slice(0, 6) : t('connectionHome') }
+    : { kind: 'local', label: t('connectionLocal') });
+const connectionLabel = computed(() => t('connectionTargetDetails', {
+  target: connectionTarget.value.label,
+  status: t(deviceOnline.value ? 'connectionStatusOnline' : 'connectionStatusUnknown'),
+}));
+
 const sendLabel = computed(() => executionEnabled.value || homeConfigured.value);
 const byMessage = computed(() => new Map(executions.value.map(run => [run.message_id, run])));
 
@@ -680,15 +693,15 @@ async function selectRoleModel(roleKey, providerObj, modelObj) {
     modelName: modelObj.name || modelObj.id,
     providerName: providerObj.name || providerObj.id,
   };
-  modelHub.value.state.active_roles[roleKey] = {
-    provider_id: payload.providerId,
-    model_id: payload.modelId,
-    model_name: payload.modelName,
-    provider_name: payload.providerName,
-  };
-  if (available && kernelBridge.modelRoleAssign) {
-    const snap = await kernelBridge.modelRoleAssign(payload).catch(() => null);
-    if (snap) applyModelHubSnapshot(snap);
+  try {
+    if (!available || !kernelBridge.modelRoleAssign) throw new Error('UNAVAILABLE');
+    const snap = await kernelBridge.modelRoleAssign(payload);
+    if (!snap) throw new Error('SAVE_UNCONFIRMED');
+    applyModelHubSnapshot(snap);
+    fault.value = null;
+  } catch {
+    fault.value = 'modelSelectionSaveFailed';
+    return;
   }
   editingRole.value = null;
   quickSwitcherOpen.value = false;
@@ -894,6 +907,13 @@ async function loadPersonalOps() {
       pending_sync_count: Number(snap.pending_sync_count) || 0,
     };
   }
+}
+
+async function saveCalendarItem(payload) {
+  if (!available) throw new Error('NATIVE_HOST_REQUIRED');
+  if (payload.expectedVersion != null) await kernelBridge.scheduleEdit(payload);
+  else await kernelBridge.scheduleCreate(payload);
+  await loadPersonalOps();
 }
 
 async function handleCreateSchedule(payload) {
@@ -1969,6 +1989,11 @@ async function startup() {
 
 async function send() {
   if (!canSend.value) return;
+  if (!executionEnabled.value && !homeConfigured.value) {
+    fault.value = 'sendNotConfigured';
+    input.value?.focus();
+    return;
+  }
   saving.value = true;
   fault.value = null;
   const sentText = draft.value;
@@ -2380,17 +2405,20 @@ onUnmounted(() => {
           online: deviceOnline,
           unconfirmed: homeFault || (devicePaired && !deviceOnline),
         }"
-        :aria-label="
-          t(
-            homeFault
-              ? 'deviceStatusUnknown'
-              : devicePaired
-                ? 'devicePairedDetails'
-                : 'connectDeviceDetails',
-          )
-        "
+        :aria-label="connectionLabel"
+        :title="connectionLabel"
         @click="openDevices"
       >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <template v-if="connectionTarget.kind === 'server'">
+            <rect x="3" y="3" width="18" height="7" rx="2" /><rect x="3" y="14" width="18" height="7" rx="2" /><path d="M6 6.5h2M6 17.5h2" />
+          </template>
+          <template v-else-if="connectionTarget.kind === 'home'">
+            <path d="m3 10 9-7 9 7M5 9v12h14V9M9 21v-7h6v7" />
+          </template>
+          <template v-else><circle cx="12" cy="12" r="8" /><path d="M8 12h8M12 8v8" /></template>
+        </svg>
+        <span class="device-target-label">{{ connectionTarget.label }}</span>
         <span class="device-dot" aria-hidden="true"></span>
       </button>
     </header>
@@ -3481,6 +3509,7 @@ onUnmounted(() => {
     <ScheduleView
       v-if="activeDrawer === 'schedule'"
       :schedules="personalOps.schedules"
+      :save-item="saveCalendarItem"
       :projects="projectList"
       :online-projects="onlineState.projects || []"
       :busy="personalBusy"
@@ -3570,6 +3599,7 @@ onUnmounted(() => {
       <section
         ref="historyRegion"
         class="history"
+        tabindex="0"
         :aria-label="t('conversation')"
         aria-live="polite"
         :aria-busy="loading"
@@ -3612,7 +3642,7 @@ onUnmounted(() => {
               )
             }}
           </span>
-          <p class="message-body">{{ message.content }}</p>
+          <MessageContent :content="message.content" :plain="message.role === 'user'" />
           <button
             v-if="message.role === 'assistant'"
             type="button"
@@ -3792,7 +3822,7 @@ onUnmounted(() => {
             {{ t(cancelPending.has(activeExecution.id) ? 'requestingStop' : 'stopExecution') }}
           </button>
           <button v-else type="submit" class="composer-submit-btn" :disabled="!canSend">
-            {{ t(sendLabel ? 'sendAndExecute' : 'send') }}
+            {{ t('send') }}
           </button>
         </div>
       </form>

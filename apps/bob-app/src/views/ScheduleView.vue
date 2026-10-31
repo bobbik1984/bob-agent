@@ -1,9 +1,10 @@
 <script setup>
-import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import CustomSelect from '../components/CustomSelect.vue';
 
 const props = defineProps({
+  saveItem: { type: Function, default: null },
   schedules: {
     type: Array,
     default: () => [],
@@ -32,6 +33,8 @@ const emit = defineEmits([
 const { t } = useI18n();
 const activeSubtab = ref('timeline'); // 'timeline' | 'todo' | 'cron'
 const showCreateForm = ref(false);
+const editor = ref(null), editingItem = ref(null), saving = ref(false), saveError = ref('');
+let returnFocus = null;
 const timelineViewMode = ref('grid'); // 'grid' | 'list'
 const weekOffset = ref(0);
 const selectedProjectFilter = ref('__all__');
@@ -121,20 +124,7 @@ function getMondayOf(dateMs) {
   return mon;
 }
 
-const baseAnchorMonday = computed(() => {
-  const nowMonday = getMondayOf(Date.now());
-  const nowWeekEnd = nowMonday.getTime() + 7 * 86400000;
-  const hasEventsThisWeek = timelineItems.value.some(ev => {
-    const ts = Number(ev.start_at || ev.due_at_ms || 0);
-    return ts >= nowMonday.getTime() && ts < nowWeekEnd;
-  });
-  if (!hasEventsThisWeek && timelineItems.value.length > 0) {
-    const firstEv = timelineItems.value[0];
-    const ts = Number(firstEv.start_at || firstEv.due_at_ms || Date.now());
-    return getMondayOf(ts);
-  }
-  return nowMonday;
-});
+const baseAnchorMonday = computed(() => getMondayOf(Date.now()));
 
 const activeMonday = computed(() => {
   const mon = new Date(baseAnchorMonday.value);
@@ -196,11 +186,21 @@ function getSlotEvents(dayObj, hour) {
   });
 }
 
-function handleSlotClick(dayObj, hour) {
-  const hh = String(hour).padStart(2, '0');
-  draft.kind = 'event';
-  draft.dueDate = `${dayObj.dateStr}T${hh}:00`;
+async function openEditor(item = null, date = '') {
+  editingItem.value = item; saveError.value = '';
+  returnFocus = document.activeElement;
+  const local = item ? new Date(Number(item.start_at || item.due_at_ms)) : null;
+  const localDate = local ? new Date(local.getTime() - local.getTimezoneOffset() * 60000).toISOString().slice(0,16) : date;
+  Object.assign(draft, {title:item?.title || '',kind:item?.kind || (activeSubtab.value === 'todo' ? 'todo':'event'),projectId:item?.project_id || '',dueDate:localDate,notes:item?.notes || ''});
   showCreateForm.value = true;
+  await nextTick(); editor.value?.showModal();
+}
+function closeEditor() {
+  if (saving.value) return;
+  editor.value?.close(); showCreateForm.value = false; returnFocus?.focus?.();
+}
+function handleSlotClick(dayObj, hour) {
+  openEditor(null, `${dayObj.dateStr}T${String(hour).padStart(2,'0')}:00`);
 }
 
 function getProjectName(projectId) {
@@ -215,25 +215,19 @@ function switchSubtab(tab) {
   else if (tab === 'todo') draft.kind = 'todo';
 }
 
-function submitNewSchedule() {
-  const title = draft.title.trim();
-  if (!title) return;
-  let startAt = Date.now();
-  if (draft.dueDate) {
-    const parsed = Date.parse(draft.dueDate);
-    if (!Number.isNaN(parsed)) startAt = parsed;
-  }
-  emit('create-schedule', {
-    id: `sched-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-    title,
-    kind: draft.kind,
-    projectId: draft.projectId || null,
-    startAt,
-    notes: draft.notes.trim(),
-  });
-  draft.title = '';
-  draft.notes = '';
-  showCreateForm.value = false;
+async function submitNewSchedule() {
+  if (saving.value || !draft.title.trim()) return;
+  const startAt = draft.dueDate ? Date.parse(draft.dueDate) : Date.now();
+  if (!Number.isFinite(startAt)) return;
+  saving.value = true; saveError.value = '';
+  try {
+    if (!props.saveItem) throw new Error('UNAVAILABLE');
+    await props.saveItem({id:editingItem.value?.id || `sched-${crypto.randomUUID()}`,
+      expectedVersion:editingItem.value?.version ?? null,title:draft.title.trim(),kind:draft.kind,
+      projectId:draft.projectId || null,startAt,notes:draft.notes.trim()});
+    saving.value = false; closeEditor();
+  } catch { saveError.value = t('scheduleSaveFailed'); }
+  finally { saving.value = false; }
 }
 
 function submitInboxCapture() {
@@ -398,7 +392,7 @@ watch([activeSubtab, timelineViewMode, weekOffset], () => {
         class="compact-add-btn"
         :class="{ active: showCreateForm }"
         :style="{ visibility: activeSubtab === 'cron' ? 'hidden' : 'visible' }"
-        @click="showCreateForm = !showCreateForm"
+        @click="openEditor()"
       >
         + {{ t('scheduleToggleNewBtn') }}
       </button>
@@ -406,14 +400,18 @@ watch([activeSubtab, timelineViewMode, weekOffset], () => {
 
     <div class="view-content-body">
       <!-- Collapsible Quick Schedule / Event Form -->
-      <form
-        v-if="showCreateForm && activeSubtab !== 'cron'"
+      <dialog ref="editor" class="schedule-editor" aria-labelledby="schedule-editor-title" @cancel.prevent="closeEditor" @click="event => { if (event.target === editor) closeEditor(); }">
+      <form v-if="showCreateForm"
         class="quick-schedule-form hub-card"
         @submit.prevent="submitNewSchedule"
       >
+        <header class="schedule-editor-header"><h3 id="schedule-editor-title">{{ t(editingItem ? 'scheduleEditTitle' : 'scheduleToggleNewBtn') }}</h3><button type="button" :disabled="saving" @click="closeEditor">{{ t('scheduleClose') }}</button></header>
+        <p v-if="saveError" role="alert">{{ saveError }}</p>
+        <fieldset :disabled="saving" class="schedule-editor-fields">
         <div class="quick-schedule-row">
           <CustomSelect
             v-model="draft.kind"
+            :disabled="!!editingItem"
             :options="scheduleKindOptions"
             class="schedule-kind-select"
           />
@@ -422,10 +420,13 @@ watch([activeSubtab, timelineViewMode, weekOffset], () => {
             type="text"
             class="schedule-title-input"
             :placeholder="t('scheduleNewTitlePlaceholder')"
+            :aria-label="t('scheduleNewTitlePlaceholder')"
+            autofocus
             required
           />
           <CustomSelect
             v-model="draft.projectId"
+            :disabled="!!editingItem"
             :options="projectSelectOptions"
             class="schedule-project-select"
           />
@@ -438,9 +439,9 @@ watch([activeSubtab, timelineViewMode, weekOffset], () => {
           <button
             type="submit"
             class="primary-action-btn"
-            :disabled="busy || !draft.title.trim()"
+            :disabled="busy || saving || !draft.title.trim()"
           >
-            {{ t('scheduleAddBtn') }}
+            {{ t(editingItem ? 'scheduleSaveChanges' : 'scheduleAddBtn') }}
           </button>
         </div>
         <input
@@ -449,57 +450,23 @@ watch([activeSubtab, timelineViewMode, weekOffset], () => {
           class="schedule-notes-input"
           :placeholder="t('scheduleNotesPlaceholder')"
         />
+        </fieldset>
       </form>
+      </dialog>
 
       <!-- SUBTAB 1: WEEK TIMELINE & CALENDAR GRID VIEW -->
       <template v-if="activeSubtab === 'timeline'">
         <section class="week-calendar-card hub-card">
           <div class="week-calendar-toolbar">
-            <div class="week-calendar-title-group">
-              <strong class="week-range-label">{{ weekRangeLabel }}</strong>
-              <div class="week-nav-btns">
-                <button
-                  type="button"
-                  class="mini-ghost-btn"
-                  @click="weekOffset -= 1"
-                >
-                  &lt; {{ t('calendarPrevWeek') }}
-                </button>
-                <button
-                  type="button"
-                  class="mini-ghost-btn"
-                  :class="{ active: weekOffset === 0 }"
-                  @click="weekOffset = 0"
-                >
-                  {{ t('calendarThisWeek') }}
-                </button>
-                <button
-                  type="button"
-                  class="mini-ghost-btn"
-                  @click="weekOffset += 1"
-                >
-                  {{ t('calendarNextWeek') }} &gt;
-                </button>
-              </div>
+            <strong class="week-range-label" :title="weekRangeLabel"><span class="week-range-full">{{ weekRangeLabel }}</span><span class="week-range-short">{{ weekRangeLabel.slice(5).replaceAll('/', '.') }}</span></strong>
+            <div class="week-nav-btns">
+              <button type="button" class="calendar-icon-btn" :title="t('calendarPrevWeek')" :aria-label="t('calendarPrevWeek')" @click="weekOffset -= 1"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 6-6 6 6 6" /></svg></button>
+              <button type="button" class="calendar-icon-btn" :class="{ active: weekOffset === 0 }" :title="t('calendarThisWeek')" :aria-label="t('calendarThisWeek')" @click="weekOffset = 0"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="7"/></svg></button>
+              <button type="button" class="calendar-icon-btn" :title="t('calendarNextWeek')" :aria-label="t('calendarNextWeek')" @click="weekOffset += 1"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m10 6 6 6-6 6" /></svg></button>
             </div>
-
             <div class="week-calendar-mode-btns">
-              <button
-                type="button"
-                class="mini-ghost-btn"
-                :class="{ active: timelineViewMode === 'grid' }"
-                @click="timelineViewMode = 'grid'"
-              >
-                {{ t('calendarViewGrid') }}
-              </button>
-              <button
-                type="button"
-                class="mini-ghost-btn"
-                :class="{ active: timelineViewMode === 'list' }"
-                @click="timelineViewMode = 'list'"
-              >
-                {{ t('calendarViewList') }}
-              </button>
+              <button type="button" class="calendar-icon-btn" :class="{ active: timelineViewMode === 'grid' }" :aria-pressed="timelineViewMode === 'grid'" :title="t('calendarViewGrid')" :aria-label="t('calendarViewGrid')" @click="timelineViewMode = 'grid'"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M7 3v4m10-4v4M3 11h18m-12 0v10m6-10v10"/></svg></button>
+              <button type="button" class="calendar-icon-btn" :class="{ active: timelineViewMode === 'list' }" :aria-pressed="timelineViewMode === 'list'" :title="t('calendarViewList')" :aria-label="t('calendarViewList')" @click="timelineViewMode = 'list'"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6h12M9 12h12M9 18h12M3 6h1m-1 6h1m-1 6h1"/></svg></button>
             </div>
           </div>
 
@@ -523,7 +490,7 @@ watch([activeSubtab, timelineViewMode, weekOffset], () => {
             <div class="week-grid-body" ref="gridBodyRef">
               <div class="time-axis-col">
                 <div v-for="h in visibleHours" :key="h" class="time-axis-cell">
-                  <span>{{ formatHour(h) }}</span>
+                  <span :aria-label="`${formatHour(h)}–${h === 23 ? '24:00' : formatHour(h + 1)}`">{{ h === 0 ? 24 : h }}</span>
                 </div>
               </div>
 
@@ -553,9 +520,11 @@ watch([activeSubtab, timelineViewMode, weekOffset], () => {
                       :key="ev.id"
                       class="calendar-event-block"
                       :class="{ done: isCompleted(ev), cancelled: ev.status === 'cancelled' }"
-                      @click.stop="toggleCompleted(ev)"
+                      role="button" tabindex="0"
+                      @keydown.enter.stop="openEditor(ev)" @keydown.space.prevent.stop="openEditor(ev)"
+                      @click.stop="openEditor(ev)"
                     >
-                      <span class="calendar-event-time">{{ formatHour(h) }}</span>
+                      <span class="calendar-event-time">{{ new Date(Number(ev.start_at || ev.due_at_ms)).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) }}</span>
                       <strong class="calendar-event-title">{{ ev.title }}</strong>
                       <span v-if="ev.project_id" class="calendar-event-proj">
                         {{ getProjectName(ev.project_id) }}
@@ -593,7 +562,7 @@ watch([activeSubtab, timelineViewMode, weekOffset], () => {
                   </button>
                   <div class="schedule-item-text">
                     <div class="schedule-item-title-row">
-                      <strong>{{ item.title }}</strong>
+                      <button type="button" class="schedule-detail-link" @click="openEditor(item)">{{ item.title }}</button>
                       <span v-if="item.project_id" class="project-bound-badge">
                         {{ getProjectName(item.project_id) }}
                       </span>
@@ -742,7 +711,7 @@ watch([activeSubtab, timelineViewMode, weekOffset], () => {
               </button>
               <div class="schedule-item-text">
                 <div class="schedule-item-title-row">
-                  <strong>{{ item.title }}</strong>
+                  <button type="button" class="schedule-detail-link" @click="openEditor(item)">{{ item.title }}</button>
                   <span v-if="item.project_id" class="project-bound-badge">
                     {{ getProjectName(item.project_id) }}
                   </span>
