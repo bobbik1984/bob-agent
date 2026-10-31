@@ -3401,3 +3401,64 @@ pub(crate) async fn app_capture_recognize<R:Runtime>(host:AppHandle<R>,state:Sta
  let reply=parse_provider_response(&target.protocol,status,&raw).map_err(|_|"VISION_INVALID_RESPONSE")?;
  Ok(json!({"text":reply.text,"requestedModel":target.model_ref,"reportedModel":reply.reported_model}))
 }
+
+// Native hosts share the DSH wire protocol and durable send receipts with bob-node.
+async fn native_dsh<R: Runtime>(host: AppHandle<R>, connection_id: String,
+    operation: &'static str, session_id: String, text: String, request_id: String
+) -> Result<Value, &'static str> {
+    if operation != "list" && session_id.trim().is_empty() { return Err("DSH_SESSION_REQUIRED"); }
+    if operation == "prompt" {
+        if text.trim().is_empty() || text.len() > 32000 { return Err("DSH_TEXT_REQUIRED"); }
+        if request_id.is_empty() || request_id.len() > 200 { return Err("DSH_REQUEST_REQUIRED"); }
+    }
+    let dir = host.path().app_data_dir().map_err(|_| "LOCAL_STORE_UNAVAILABLE")?;
+    let hub = load_hub_state(&dir);
+    let node = hub["remoteNodes"].as_array().and_then(|nodes| nodes.iter()
+        .find(|n| n["id"] == connection_id && n["enabled"] == true))
+        .ok_or("DSH_CONNECTION_NOT_FOUND")?;
+    let endpoint = node["baseUrl"].as_str().or_else(|| node["url"].as_str())
+        .ok_or("DSH_ADDRESS_INVALID")?.to_owned();
+    let token = read_api_key(&host, &remote_node_token_slot(&connection_id)).await?;
+    // Blocking TLS and history reads must not block the mobile UI/event executor.
+    tauri::async_runtime::spawn_blocking(move || {
+        let client = bob_runtime::dsh_transport::DshClient::connect(&endpoint, &token)?;
+        match operation {
+            "list" => client.list(),
+            "page" => {let v:Value=serde_json::from_str(&text).map_err(|_|"DSH_PROTOCOL")?;client.history_page(bob_runtime::dsh_session::SessionAddress{connection_id,session_id},v["before"].as_i64(),v["through"].as_i64(),v["after"].as_i64())},
+            "preview" => client.preview(bob_runtime::dsh_session::SessionAddress{connection_id,session_id},&text),
+            "history" => serde_json::to_value(client.history(bob_runtime::dsh_session::SessionAddress {
+                connection_id, session_id,
+            })?).map_err(|_| "DSH_PROTOCOL"),
+            _ => bob_runtime::dsh_transport::dispatch_once(&dir, &connection_id, &session_id,
+                &text, &request_id, || client.prompt(&session_id, &text, &request_id)),
+        }
+    }).await.map_err(|_| "DSH_UNAVAILABLE")?
+}
+
+#[tauri::command]
+pub(crate) async fn app_dsh_list<R: Runtime>(host: AppHandle<R>, connection_id: String) -> Result<Value, &'static str> {
+    native_dsh(host, connection_id, "list", String::new(), String::new(), String::new()).await
+}
+#[tauri::command]
+pub(crate) async fn app_dsh_history<R: Runtime>(host: AppHandle<R>, connection_id: String, session_id: String) -> Result<Value, &'static str> {
+    native_dsh(host, connection_id, "history", session_id, String::new(), String::new()).await
+}
+#[tauri::command]
+pub(crate) async fn app_dsh_prompt<R: Runtime>(host: AppHandle<R>, connection_id: String, session_id: String, text: String, request_id: String) -> Result<Value, &'static str> {
+    native_dsh(host, connection_id, "prompt", session_id, text, request_id).await
+}
+
+#[tauri::command]
+pub(crate) async fn app_dsh_receipt<R: Runtime>(host: AppHandle<R>, connection_id: String, session_id: String, text: String, request_id: String) -> Result<Value, &'static str> {
+ let dir=host.path().app_data_dir().map_err(|_|"LOCAL_STORE_UNAVAILABLE")?;
+ tauri::async_runtime::spawn_blocking(move || bob_runtime::dsh_transport::inspect_receipt(&dir,&connection_id,&session_id,&text,&request_id)).await.map_err(|_|"DSH_UNAVAILABLE")?
+}
+
+#[tauri::command]
+pub(crate) async fn app_dsh_page<R: Runtime>(host: AppHandle<R>, connection_id: String, session_id: String, before: Option<i64>, through: Option<i64>, after: Option<i64>) -> Result<Value, &'static str> {
+ native_dsh(host,connection_id,"page",session_id,serde_json::json!({"before":before,"through":through,"after":after}).to_string(),String::new()).await
+}
+#[tauri::command]
+pub(crate) async fn app_dsh_preview<R: Runtime>(host: AppHandle<R>, connection_id: String, session_id: String, path: String) -> Result<Value, &'static str> {
+ native_dsh(host,connection_id,"preview",session_id,path,String::new()).await
+}

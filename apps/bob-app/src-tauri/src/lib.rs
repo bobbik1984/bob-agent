@@ -220,6 +220,14 @@ fn app_prewarm() -> &'static str {
 }
 
 #[tauri::command]
+async fn app_assistant_conversation(state: State<'_, AppState>) -> Result<serde_json::Value, &'static str> {
+    with_app(&state.0, |app| {
+        let id = app.assistant_conversation(now()?).map_err(|_| "ASSISTANT_OPEN_FAILED")?;
+        Ok(serde_json::json!({"conversation_id": id}))
+    })
+}
+
+#[tauri::command]
 async fn app_catalog(state: State<'_, AppState>) -> Result<CatalogSnapshot, &'static str> {
     let state = state.0.clone();
     tauri::async_runtime::spawn_blocking(move || {
@@ -962,6 +970,7 @@ fn configure<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R>
             app_prewarm,
             app_readiness,
             app_catalog,
+            app_assistant_conversation,
             app_project_create,
             app_conversation_create,
             app_conversation_promote,
@@ -992,6 +1001,12 @@ fn configure<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R>
             direct_llm::app_provider_variant_set,
             direct_llm::app_custom_model_save,
             direct_llm::app_custom_model_delete,
+            direct_llm::app_dsh_receipt,
+            direct_llm::app_dsh_list,
+            direct_llm::app_dsh_history,
+            direct_llm::app_dsh_page,
+            direct_llm::app_dsh_preview,
+            direct_llm::app_dsh_prompt,
             direct_llm::app_remote_node_save,
             direct_llm::app_remote_node_delete,
             direct_llm::app_registry_save,

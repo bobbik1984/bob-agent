@@ -9,6 +9,7 @@
 //!    continuation, V1->V2 revision creation, cancellation, and review verdicts)
 //! 5. Read-only idempotent migration from legacy `nexus_control_plane.db` (`XP-10`).
 
+mod assistant;
 use bob_kernel::app::LocalApp;
 use bob_runtime::{now_millis, ModelHubRuntime, RuntimeCapabilityManifest};
 use rusqlite::{Connection, OpenFlags};
@@ -246,6 +247,10 @@ pub fn handle_rpc_command(ctx: &mut NodeContext, command: &str, args: &Value) ->
                 status.execution_available = true;
             }
             serde_json::to_value(status).map_err(|_| "LOCAL_STATUS_UNAVAILABLE")
+        }
+        "app_assistant_conversation" => {
+            let id = ctx.app.assistant_conversation(at).map_err(|_| "ASSISTANT_OPEN_FAILED")?;
+            Ok(json!({"conversation_id": id}))
         }
         "app_catalog" => {
             let snap = ctx
@@ -905,6 +910,12 @@ pub fn handle_rpc_command(ctx: &mut NodeContext, command: &str, args: &Value) ->
                 .app
                 .prepare_direct_execution(request_id, at)
                 .map_err(|_| "EXECUTION_PREPARE_FAILED")?;
+            if !prepared.can_start {
+                let existing = ctx.app.local_executions(&prepared.conversation_id)
+                    .map_err(|_| "EXECUTION_READ_FAILED")?.into_iter()
+                    .find(|e| e.id == prepared.execution_id).ok_or("EXECUTION_READ_FAILED")?;
+                return serde_json::to_value(existing).map_err(|_| "EXECUTION_READ_FAILED");
+            }
             let profile = ctx
                 .app
                 .direct_provider_profile()
@@ -922,7 +933,7 @@ pub fn handle_rpc_command(ctx: &mut NodeContext, command: &str, args: &Value) ->
                 {
                     Ok(reply) => bob_kernel::direct_provider::DirectExecutionOutcome::Completed {
                         text: reply,
-                        provider_reported_model: Some(prepared.model_id.clone()),
+                        provider_reported_model: None,
                         input_tokens: None,
                         output_tokens: None,
                     },
@@ -941,11 +952,18 @@ pub fn handle_rpc_command(ctx: &mut NodeContext, command: &str, args: &Value) ->
                 .map_err(|_| "EXECUTION_READ_FAILED")?;
             serde_json::to_value(exec).map_err(|_| "EXECUTION_READ_FAILED")
         }
-        "app_dsh_list" | "app_dsh_history" | "app_dsh_prompt" => {
+        "app_dsh_receipt" => bob_runtime::dsh_transport::inspect_receipt(&ctx.runtime.data_dir,
+            args["connectionId"].as_str().ok_or("DSH_CONNECTION_REQUIRED")?,
+            args["sessionId"].as_str().ok_or("DSH_SESSION_REQUIRED")?,
+            args["text"].as_str().ok_or("DSH_TEXT_REQUIRED")?,
+            args["requestId"].as_str().ok_or("DSH_REQUEST_REQUIRED")?),
+        "app_dsh_page" | "app_dsh_preview" | "app_dsh_list" | "app_dsh_history" | "app_dsh_prompt" => {
             let connection=args["connectionId"].as_str().ok_or("DSH_CONNECTION_REQUIRED")?;
             let client=ctx.runtime.dsh_client(connection)?;
             match command {
                 "app_dsh_list" => client.list(),
+                "app_dsh_page" => client.history_page(bob_runtime::dsh_session::SessionAddress{connection_id:connection.into(),session_id:args["sessionId"].as_str().ok_or("DSH_SESSION_REQUIRED")?.into()},args.get("before").filter(|v|!v.is_null()).map(|v|v.as_i64().ok_or("DSH_PAGE_CURSOR_INVALID")).transpose()?,args.get("through").filter(|v|!v.is_null()).map(|v|v.as_i64().ok_or("DSH_PAGE_CURSOR_INVALID")).transpose()?,args.get("after").filter(|v|!v.is_null()).map(|v|v.as_i64().ok_or("DSH_PAGE_CURSOR_INVALID")).transpose()?),
+                "app_dsh_preview" => client.preview(bob_runtime::dsh_session::SessionAddress{connection_id:connection.into(),session_id:args.get("sessionId").and_then(Value::as_str).ok_or("DSH_PROTOCOL")?.into()},args.get("path").and_then(Value::as_str).ok_or("DSH_PROTOCOL")?),
                 "app_dsh_history" => {
                     let session=args["sessionId"].as_str().ok_or("DSH_SESSION_REQUIRED")?;
                     serde_json::to_value(client.history(bob_runtime::dsh_session::SessionAddress{connection_id:connection.into(),session_id:session.into()})?).map_err(|_|"DSH_PROTOCOL")
@@ -1773,6 +1791,13 @@ fn handle_connection(mut stream: TcpStream, state: Arc<Mutex<NodeContext>>) {
                 return;
             }
         };
+        if matches!(command.trim(), "app_assistant_execute" | "app_assistant_poll") {
+            drop(guard);
+            let result=if command.trim()=="app_assistant_execute" { assistant::execute(&state,&args) } else { assistant::poll(&state,&args) };
+            let (status,value)=match result {Ok(result)=>(200,json!({"ok":true,"result":result})),Err(e)=>(400,json!({"ok":false,"error":e}))};
+            write_json_response(&mut stream,status,&value.to_string());
+            return;
+        }
         if command.trim()=="app_capture_recognize" {
             let prepared=(|| {
                 let image=guard.app.capture_media(args["mediaId"].as_str().unwrap_or("")).map_err(|_|"CAPTURE_IMAGE_MISSING")?;

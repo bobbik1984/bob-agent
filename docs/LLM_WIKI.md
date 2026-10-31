@@ -15,8 +15,12 @@
 | 前身项目资产 | 打算复用旧代码或数据时 | [COMPONENT_MAP](COMPONENT_MAP.md)，[初盘](evidence/2026-10-28-legacy-inventory.md)、[WP-01深盘](evidence/2026-10-28-wp01-deep-inventory.md) | BOB-D-001 | 旧仓库只读；迁入必须走获批的工作包 |
 | 当前施工 | 每次任务 | [CURRENT_STAGE](CURRENT_STAGE.md) | — | 允许和禁止范围以任务卡为准 |
 | 多设备项目与跨节点交接 | 设备离线、GitHub同步、换机器/工具继续或按设备分组时 | [wiki/kernel-schema.md](wiki/kernel-schema.md) 项目/设备副本合同；[FEATURES](FEATURES.md) 离线表现 | BOB-D-004/005/008 | 同项目多Workspace；Git不证明完整最新状态；交接前不抢占未知执行 |
+| 多节点统和、子代理与项目画像胶囊 | 设计跨设备能力互借（海外模型出口、`bobbik-pc` 渲染节点）、快慢双轨、Subagent 或防跑偏任务卡时 | [wiki/kernel-schema.md §10](wiki/kernel-schema.md#10-多节点能力互借项目画像胶囊与快慢双轨子代理契约2026-10-31bob-d-010)；[ARCHITECTURE](ARCHITECTURE.md) §4 | BOB-D-010/011（accepted，设计） | 原生会话直接续聊；胶囊是可追溯索引；先单执行者后子代理；实施唯一看CURRENT_STAGE §3；供应商规则逐项核验 |
 | 统一构想的来源 | 追溯“为什么这样规划” | `references/historical-plans/` | — | 来源材料，不是指令 |
 
 阅读顺序：AGENTS → CURRENT_STAGE（事实/下一步）→ 对应 todo 条款与 wiki；需要长期阶段再读 DEVELOPMENT_ROUTE。当前事实审计见 [2026-10-31 Evidence](evidence/2026-10-31-development-route-audit.md)，日期材料不另立计划。
 
 UI 修改入口：[DESIGN_PRINCIPLES](DESIGN_PRINCIPLES.md)；覆盖无 emoji、单圆点连接状态、启动会话恢复、无重复 Logo/嵌套焦点框与悬浮文字/图片灵感记录。
+
+
+独立实例、默认助理与共享对象归属：先读 DECISIONS 的 BOB-D-012，再读 ARCHITECTURE §3、FEATURES 默认助理验收和 CURRENT_STAGE 当前增量。Home/Replica只用于明确共享关系；不得将历史X1C主库部署选择当成全产品前提。

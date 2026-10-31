@@ -67,6 +67,7 @@ dependencies = [
 name = "bob-runtime"
 version = "1.0.1"
 dependencies = [
+ "base64 0.22.1",
  "bob-kernel",
  "bob-transport",
  "reqwest",

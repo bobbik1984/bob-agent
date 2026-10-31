@@ -1099,3 +1099,5 @@ mod tests {
         assert_eq!(nodes3[0]["hasToken"], json!(false));
     }
 }
+
+pub mod assistant;

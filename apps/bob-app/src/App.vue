@@ -29,6 +29,29 @@ import {
 
 const { t, locale } = useI18n();
 const sessionId = ref(null);
+const assistantConversationId = ref(null);
+const assistantLinks = ref([]);
+const assistantPollFailed = ref(false);
+let assistantPolling = false;
+let assistantNextPoll = 0;
+async function refreshAssistantResults() {
+  if (!browserClient || assistantPolling || sessionId.value !== assistantConversationId.value || Date.now() < assistantNextPoll) return;
+  const current = sessionId.value;
+  assistantPolling = true;
+  try {
+    const result = await kernelBridge.assistantPoll(current);
+    if (current === sessionId.value) {
+      assistantLinks.value = result.links || [];
+      assistantPollFailed.value = Boolean(result.errors?.length);
+    }
+  } catch { if (current === sessionId.value) assistantPollFailed.value = true; }
+  finally { assistantPolling = false; assistantNextPoll = Date.now() + (assistantPollFailed.value ? 30000 : 8000); }
+}
+function assistantLink(message) { return assistantLinks.value.find(link => link.request_id === message.request_id); }
+function openAssistantTarget(link) {
+  const node = (modelHub.value.state.remote_nodes || []).find(n => n.id === link.connection_id);
+  if (node) void selectRemoteConversation({node,session:{id:link.native_session_id,title:link.target_title}});
+}
 const browserClient = isBobNodeRuntime();
 let newConversationPending = false;
 const clientState = loadClientState();
@@ -138,6 +161,7 @@ function messageStatus(message) {
       'home_codex_execution',
       'direct_provider',
       'replica_direct_provider',
+      'native_session_result',
     ].includes(message.source)
       ? 'replySaved'
       : 'probeReplySaved';
@@ -163,6 +187,10 @@ const connectionKey = computed(() =>
 const activeDrawer = ref('chat'); // 'chat' | 'schedule' | 'work' | 'knowledge' | 'settings'
 const previousNonSettingsDrawer = ref('chat');
 const settingsOpen = ref(false);
+const immersive = ref(false);
+try { immersive.value = localStorage.getItem('bob-immersive') === 'true'; } catch {}
+watch(immersive, value => { try { localStorage.setItem('bob-immersive', String(value)); } catch {} });
+const immersiveActive = computed(() => immersive.value && activeDrawer.value === 'chat' && !settingsOpen.value);
 const settingsView = ref('home'); // 'home' | 'device' | 'provider'
 const settingsTab = ref('model'); // 'model' | 'connection' | 'workspace' | 'tasks' | 'appearance' | 'about'
 const navigationOpen = ref(false);
@@ -886,7 +914,7 @@ const activeConversationItem = computed(() =>
   catalog.value?.conversations?.find(c => c.id === sessionId.value) || null,
 );
 const currentConversation = computed(
-  () => messages.value.length ? (activeConversationItem.value?.title || fallbackConversationTitle.value) : t('conversation'),
+  () => sessionId.value === assistantConversationId.value ? t('defaultAssistant') : (messages.value.length ? (activeConversationItem.value?.title || fallbackConversationTitle.value) : t('conversation')),
 );
 const totalUnreadCount = computed(() =>
   (catalog.value?.conversations || []).reduce((sum, c) => sum + (c.unread_count || 0), 0),
@@ -1783,6 +1811,7 @@ let nextAllowedSyncAt = 0;
 const reload = singleFlight(async () => {
   if (!sessionId.value || disposed) return;
   const loadingSession = sessionId.value;
+  void refreshAssistantResults();
   if (Date.now() >= nextAllowedSyncAt) {
     void kernelBridge
       .syncHome()
@@ -1871,6 +1900,14 @@ async function flushCurrentViewState() {
       markRead: true,
     })
     .catch(() => {});
+}
+
+async function openAssistant() {
+  try {
+    const entry = await kernelBridge.assistantConversation();
+    assistantConversationId.value = entry.conversation_id;
+    await selectConversation(entry.conversation_id);
+  } catch { fault.value = 'startupFailed'; }
 }
 
 async function selectConversation(targetId) {
@@ -1986,9 +2023,11 @@ async function startup() {
     const state = await kernelBridge.bootstrap();
     const initialCatalog = await kernelBridge.catalog();
     applyCatalogPreferences(initialCatalog);
-    const selected = browserClient ? chooseStartupConversation(clientState, initialCatalog) : state.session_id;
-    newConversationPending = !selected;
-    sessionId.value = selected || `conv-${crypto.randomUUID()}`;
+    const entry = await kernelBridge.assistantConversation();
+    assistantConversationId.value = entry.conversation_id;
+    const selected = chooseStartupConversation(clientState, initialCatalog);
+    newConversationPending = false;
+    sessionId.value = selected || entry.conversation_id;
     if (newConversationPending) {
       draft.value = clientState.blankDraft || '';
       controller.loadDraft(draft.value, 0);
@@ -2046,7 +2085,11 @@ async function send() {
       dispatchPending.value = true;
       executionFault.value = null;
       try {
-        const execution = await executionController.dispatch(receipt);
+        const execution = browserClient && sessionId.value === assistantConversationId.value && directProviderEnabled.value
+          ? await kernelBridge.assistantExecute(receipt.request_id)
+          : await executionController.dispatch(receipt);
+        assistantNextPoll = 0;
+        void refreshAssistantResults();
         executions.value = [
           ...executions.value.filter(run => run.id !== execution.id),
           execution,
@@ -2366,6 +2409,12 @@ onUnmounted(() => {
   releaseViewport();
   if (poll) clearInterval(poll);
 });
+function dismissConversationMenu(event) {
+ const menu=document.querySelector('.conversation-menu[open]');
+ if(menu && !menu.contains(event.target))menu.open=false;
+}
+onMounted(()=>document.addEventListener('pointerdown',dismissConversationMenu));
+onUnmounted(()=>document.removeEventListener('pointerdown',dismissConversationMenu));
 </script>
 <template>
   <div
@@ -2374,7 +2423,7 @@ onUnmounted(() => {
       `layout-${layoutState.layoutMode}`,
       `terminal-${layoutState.terminalKind}`,
       `aspect-${layoutState.aspect}`,
-      { 'is-mobile': layoutState.isCompact },
+      { 'is-mobile': layoutState.isCompact, 'is-immersive': immersiveActive },
     ]"
   >
     <header class="topbar">
@@ -2439,9 +2488,17 @@ onUnmounted(() => {
           </template>
           <template v-else><circle cx="12" cy="12" r="8" /><path d="M8 12h8M12 8v8" /></template>
         </svg>
-        <span class="device-target-label">{{ connectionTarget.label }}</span>
         <span class="device-dot" aria-hidden="true"></span>
       </button>
+      <details class="conversation-menu" @keydown.esc="$event.currentTarget.open=false; $event.currentTarget.querySelector('summary').focus()" @focusout="!$event.currentTarget.contains($event.relatedTarget) && ($event.currentTarget.open=false)">
+        <summary :aria-label="t('conversationMenu')"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><circle cx="5" cy="12" r="1.5" fill="currentColor"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/><circle cx="19" cy="12" r="1.5" fill="currentColor"/></svg></summary>
+        <div class="conversation-menu-panel" @click="$event.currentTarget.closest('details').open = false">
+          <button @click="immersive = !immersive"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5"/></svg>{{ t(immersive ? 'exitImmersive' : 'enterImmersive') }}</button>
+          <button @click="navigationOpen = true"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>{{ t('openNavigation') }}</button>
+          <button @click="openDevices"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 21h8m-4-5v5"/></svg>{{ t('deviceAndConnection') }}</button>
+          <button @click="settingsOpen = true"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3"/><circle cx="15" cy="17" r="3"/></svg>{{ t('settings') }}</button>
+        </div>
+      </details>
     </header>
 
     <section
@@ -3406,6 +3463,8 @@ onUnmounted(() => {
           </button>
         </div>
 
+        <button type="button" class="sidebar-mode-btn" @click="openAssistant">{{ t('defaultAssistant') }}</button>
+
         <div class="sidebar-mode-switch" role="group">
           <button
             type="button"
@@ -3594,7 +3653,7 @@ onUnmounted(() => {
           <span v-if="message.role === 'assistant'" class="message-state">
             {{
               t(
-                ['direct_provider', 'replica_direct_provider'].includes(message.source)
+                message.source === 'native_session_result' ? 'assistantNativeReply' : ['direct_provider', 'replica_direct_provider'].includes(message.source)
                   ? 'assistantDirectReply'
                   : ['codex_execution', 'home_codex_execution'].includes(message.source)
                     ? 'assistantLiveReply'
@@ -3602,7 +3661,13 @@ onUnmounted(() => {
               )
             }}
           </span>
+          <span v-if="message.source === 'native_session_result'" class="message-state">{{ t('assistantNativeResult') }}</span>
           <MessageContent :content="message.content" :plain="message.role === 'user'" />
+          <div v-if="assistantLink(message)" class="message-state" role="status">
+            <span>{{ t('assistantDispatch_' + assistantLink(message).status) }}</span>
+            <button type="button" @click="openAssistantTarget(assistantLink(message))">{{ assistantLink(message).target_title }} · {{ t('assistantOpenOriginal') }}</button>
+            <span v-if="assistantPollFailed">{{ t('assistantResultReadFailed') }}</span>
+          </div>
           <button
             v-if="message.role === 'assistant'"
             type="button"

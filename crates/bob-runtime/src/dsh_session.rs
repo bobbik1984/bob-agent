@@ -21,6 +21,8 @@ pub struct History {
     pub workspace: Option<String>,
     pub partial: bool,
     pub omitted: usize,
+    #[serde(default)]
+    pub request_results: Vec<NativeRequestResult>,
 }
 pub fn project_history(address: SessionAddress, snapshot: &Value) -> Result<History, &'static str> {
     if address.connection_id.is_empty() || address.session_id.is_empty()
@@ -72,7 +74,8 @@ pub fn project_history(address: SessionAddress, snapshot: &Value) -> Result<Hist
         Some(Value::Bool(b)) => *b,
         _ => return Err("DSH_PROTOCOL"),
     };
-    Ok(History { address, messages, workspace, partial, omitted })
+    let request_results = request_results(records);
+    Ok(History { address, messages, workspace, partial, omitted, request_results })
 }
 
 #[cfg(test)]
@@ -94,5 +97,82 @@ mod tests {
     fn wrong_session_and_unknown_operation_are_rejected() {
         assert!(project_history(address(), &json!({"type":"snapshot","header":{"id":"other"},"records":[]})).is_err());
         assert!(project_history(address(), &json!({"type":"snapshot","header":{"id":"existing"},"records":[{"event":{"surfaceOp":"delete"}}]})).is_err());
+    }
+}
+
+/// Request attribution comes from native source.rpcId and turn boundaries, never
+/// from matching prompt text or choosing the latest assistant message.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct NativeRequestResult {
+    pub request_id: String,
+    pub turn: i64,
+    pub status: String,
+    pub text: String,
+    pub sequences: Vec<i64>,
+}
+
+fn request_results(records: &[Value]) -> Vec<NativeRequestResult> {
+    #[derive(Default)]
+    struct Turn { users: Vec<Option<String>>, replies: Vec<(i64,String)>, end: Option<String>, unsafe_surface: bool }
+    let mut turns = std::collections::BTreeMap::<i64,Turn>::new();
+    let mut current = None;
+    let mut events: Vec<_> = records.iter().filter_map(|r| r.get("event")).collect();
+    // A rewritten surface or conflicting sequence is insufficient attribution
+    // evidence. Do not silently attach an old reply to a new request.
+    if events.iter().any(|e| e["seq"].as_i64().is_none_or(|n|n<0)
+        || (!e["surfaceOp"].is_null() && e["surfaceOp"]!="append")) { return Vec::new(); }
+    events.sort_by_key(|e| e["seq"].as_i64().unwrap_or(-1));
+    if events.windows(2).any(|p|p[0]["seq"]==p[1]["seq"] && p[0]!=p[1]) { return Vec::new(); }
+    events.dedup_by_key(|e| e["seq"].as_i64().unwrap_or(-1));
+    for e in events {
+        match e["type"].as_str().unwrap_or("") {
+            "turn/start" => { current=e["data"]["turn"].as_i64(); if let Some(t)=current { turns.entry(t).or_default(); } }
+            "user/message" if e["data"]["source"]["kind"]=="user" => {
+                if let Some(t)=current { turns.entry(t).or_default().users.push(e["data"]["source"]["rpcId"].as_str().map(str::to_owned)); }
+            }
+            "assistant/message" => {
+                if let Some(t)=e["data"]["turn"].as_i64().filter(|t|Some(*t)==current) {
+                    let turn=turns.entry(t).or_default();
+                    if e["data"]["interrupted"]==true || (!e["surfaceOp"].is_null() && e["surfaceOp"]!="append") { turn.unsafe_surface=true; }
+                    let text=e["data"]["message"]["content"].as_array().map(|parts|parts.iter().filter(|p|p["type"]=="text").filter_map(|p|p["text"].as_str()).collect::<Vec<_>>().join("\n")).unwrap_or_default();
+                    if let Some(seq)=e["seq"].as_i64() { if !text.is_empty() { turn.replies.push((seq,text)); } }
+                }
+            }
+            "turn/end" => {
+                if let Some(t)=e["data"]["turn"].as_i64().filter(|t|Some(*t)==current) {
+                    turns.entry(t).or_default().end=e["data"]["reason"]["kind"].as_str().map(str::to_owned);
+                    current=None;
+                }
+            }
+            _ => {}
+        }
+    }
+    turns.into_iter().flat_map(|(turn,t)| {
+        let unambiguous=t.users.len()==1 && !t.unsafe_surface;
+        t.users.iter().filter_map(|id|id.as_ref()).map(|id| NativeRequestResult {
+            request_id:id.clone(),turn,
+            status:if !unambiguous {"ambiguous".into()} else { t.end.clone().unwrap_or_else(||"running".into()) },
+            text:if unambiguous {t.replies.iter().map(|(_,s)|s.as_str()).collect::<Vec<_>>().join("\n\n")} else {String::new()},
+            sequences:if unambiguous {t.replies.iter().map(|(seq,_)|*seq).collect()} else {Vec::new()},
+        }).collect::<Vec<_>>()
+    }).collect()
+}
+
+#[cfg(test)]
+mod result_tests {
+    use super::*;
+    use serde_json::json;
+    fn e(seq:i64,kind:&str,data:Value)->Value {json!({"event":{"seq":seq,"type":kind,"data":data}})}
+    #[test]
+    fn result_uses_rpc_identity_and_completed_turn_not_latest_text() {
+        let records=vec![e(1,"turn/start",json!({"turn":1})),e(2,"user/message",json!({"source":{"kind":"user","rpcId":"a"}})),e(3,"assistant/message",json!({"turn":1,"message":{"content":[{"type":"text","text":"result a"}]}})),e(4,"turn/end",json!({"turn":1,"reason":{"kind":"completed"}})),e(5,"turn/start",json!({"turn":2})),e(6,"user/message",json!({"source":{"kind":"user","rpcId":"b"}}))];
+        let result=request_results(&records);
+        assert_eq!(result[0].request_id,"a");assert_eq!(result[0].status,"completed");assert_eq!(result[0].text,"result a");assert_eq!(result[1].status,"running");
+    }
+    #[test]
+    fn simultaneous_users_and_missing_start_never_claim_a_result() {
+        let result=request_results(&[e(1,"turn/start",json!({"turn":1})),e(2,"user/message",json!({"source":{"kind":"user","rpcId":"a"}})),e(3,"user/message",json!({"source":{"kind":"user","rpcId":"b"}})),e(4,"turn/end",json!({"turn":1,"reason":{"kind":"completed"}}))]);
+        assert!(result.iter().all(|r|r.status=="ambiguous" && r.text.is_empty()));
+        assert!(request_results(&[e(3,"user/message",json!({"source":{"kind":"user","rpcId":"a"}}))]).is_empty());
     }
 }

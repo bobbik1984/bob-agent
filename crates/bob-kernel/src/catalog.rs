@@ -250,6 +250,14 @@ impl LocalApp {
             .ok_or(Error::InvalidTransition)
     }
 
+    /// One persistent assistant entry per independent instance. It is not a
+    /// replica of a remote Harness conversation and does not change ownership.
+    pub fn assistant_conversation(&mut self, now: i64) -> Result<String> {
+        let id = format!("assistant:{}", self.origin);
+        self.import_conversation(&id, None, "", now)?;
+        Ok(id)
+    }
+
     pub fn create_conversation(
         &mut self,
         conversation_id: &str,

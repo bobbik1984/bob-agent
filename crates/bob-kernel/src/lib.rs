@@ -34,3 +34,5 @@ pub mod online_provider;
 pub mod personal_ops;
 pub mod capture_media;
 pub mod workspace_handoff;
+
+pub mod assistant;

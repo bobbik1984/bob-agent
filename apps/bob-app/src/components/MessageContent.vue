@@ -1,18 +1,21 @@
 <script>
-import { defineComponent, h } from 'vue';
+import { defineComponent, h, inject } from 'vue';
 import { useI18n } from 'vue-i18n';
+import DshArtifactLink from './DshArtifactLink.vue';
 import { parseMessageMarkdown } from '../message-markdown.mjs';
 
 export default defineComponent({
   props: { content: { type: String, default: '' }, plain: Boolean },
   setup(props) {
     const { t } = useI18n();
+    const openFile = inject('dshOpenFile', null);
     function renderNode(node) {
       if (typeof node === 'string') return node;
       if (node.tag === 'reference' || node.tag === 'image-reference') {
         const label = node.label || node.url;
         if (node.href) return h('a', { href:node.href, target:'_blank', rel:'noopener noreferrer', referrerpolicy:'no-referrer' },
           node.tag === 'image-reference' ? t('messageImageLink', { name:label }) : label);
+        if (openFile) return h(DshArtifactLink, {path:node.url,label});
         return h('span', { class:'message-file-reference', title:node.url }, [
           label, ' ', h('small', t('messageFileUnavailable')), ' ', h('code', node.url),
         ]);

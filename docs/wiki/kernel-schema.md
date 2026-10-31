@@ -517,3 +517,38 @@ HomeMessageContext必须由已认证且有会话访问授权的adapter构造；�
 ### 9.4 本地捕获原图（迁移 0008）
 
 `capture_media(id SHA-256, mime, bytes, created_at)` 按内容去重保存原件；`capture_media_links(capture_id PRIMARY KEY, media_id)` 外键关联捕获与原图。原件接受 PNG/JPEG/WebP 格式签名与最多 8 MB 校验。`capture_with_image` 包装原有 `capture_with_project` 保存点；图片不存在、归属错误或相同 capture ID 指向不同图片均回滚。无破坏性迁移，不改变既有 CaptureItem/个人同步快照形状；原图及链接暂不跨 Home 同步。
+
+
+## 10 多节点能力互借、项目画像胶囊与快慢双轨子代理契约（2026-10-31，BOB-D-010）
+
+现行边界由BOB-D-011修订。以下为待实现设计；实现/验收看CURRENT_STAGE §3，不因字段已命名视为可用。
+
+### 10.1 RuntimeCapabilityManifest扩展
+
+能力类型保留overseas_model_egress、gpu_display_render、always_on_harness、native_subagent_pool。每项声明协议/工具版本、支持操作、许可范围、配置状态、观测时间、可达状态、忙碌/容量及实际验证引用；声明与最近实测分开。协议不支持或观测过期显示unknown，不自动降级裸跑。
+
+模型出口仅代发已授权商业API，限定Provider/目标与预算，不做任意URL代理；密钥留在可信运行端，不进入胶囊/日志/IPC。渲染接收输入清单/hash、工作区基线、工具版本与render_profile/command_ref，在已批准范围运行；回传ArtifactVersion与Verification引用。传输重试不能重新启动模型或渲染。
+
+### 10.2 ProjectContextCapsule
+
+载荷至少包含schema_version、capsule_id、project_id、workspace_id、来源host、commit_sha、dirty_fingerprint、generated_at、source_manifest（相对路径/hash/必要位置）、charter_summary、repo_skeleton、active_decisions_and_memories、latest_work_anchor、truncation/staleness标记。3～8KB是首版预算目标，token需按模型实测，不作固定换算。
+
+摘要保留来源与性质（用户确认/建议/推断）；原文与有效授权优先。胶囊作为有来源数据装配，不能把仓库内容提升为系统指令。秘密/无关文件排除；按需渐进读原文。提取失败不得覆盖上一有效索引，旧索引显示过期。刷新基于工作区变化与执行完成，不只依赖commit。
+
+任务卡沿既有Task/Execution契约包含目标/非目标、输入和父成果版本、可写范围、决定引用、验证项、权限、预算与取消边界。现有路径必须有来源；新文件明确为计划创建并现场核验父目录/路径边界。执行端检查commit和dirty，不匹配则重读/重规划，不静默按旧基线修改。
+
+### 10.3 API与Harness路由
+
+普通助理默认API；已绑定原生会话直接续聊，不强制BYOK前置。正式委派按目标Harness实测能力使用原生session/prompt、resume或完整任务进程；不假定所有工具支持同一协议或原生续接。原生DSH记录与Bob治理执行分别标来源，建立映射时保留原ID，不复制成伪历史。
+
+禁止逆向订阅凭据、未授权转售或权限绕过；避免无意义冷启动属于工程策略。供应商认证/许可按官方来源、版本、核查日期分别登记，不能将低频或API Key等同无条件合规。执行权限不因配对/登录自动扩大。
+
+### 10.4 子代理与主权威
+
+kernel保存任务状态、权限和结果引用，runtime承接模型调用与调度。子代理使用父权限交集，限制深度/并发/费用/期限；取消向下传播，未知执行先对账，重复结果幂等；子代理成功声明不等于验证或接受。模型选型来自配置/能力/预算，不固定旗舰与Flash。先单只读子代理，再考虑并发写入隔离。
+
+Home仍按D-004配置，已有授权执行与离线新请求分开。真实主权威切换需epoch/fencing、未决执行核查、备份及恢复证明；不能自动两主或用常开标签绕过Home。人工IDE不受Bob租约控制，写前重新核对工作树。
+
+## 对象归属解释（BOB-D-012）
+
+现有Home/Replica字段为已配置共享关系的实现，不再代表每个用户全部实例的全局依赖。独立实例拥有本地对象；外部会话以来源实例、connection_id/session_id定位。完整跨实例owner/version迁移仍待实现，不修改既有迁移校验码、不自动重写旧对象归属。详见ARCHITECTURE §3与CURRENT_STAGE §3.4。

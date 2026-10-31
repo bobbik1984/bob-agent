@@ -194,6 +194,7 @@ impl Store {
         crate::direct_provider::migrate(&tx, now)?;
         crate::personal_ops::migrate(&tx, now)?;
         crate::capture_media::migrate(&tx, now)?;
+        crate::assistant::migrate(&tx, now)?;
         tx.commit()?;
         let mut store = Self { db, _owner: owner };
         store.recover_interrupted()?;

@@ -7,7 +7,10 @@ export function createKernelBridge(invoke, isAvailable) {
   }
   return {
     available: isAvailable,
+    dshReceipt: (connectionId,sessionId,text,requestId) => call('app_dsh_receipt',{connectionId,sessionId,text,requestId}),
+    dshPreview: (connectionId,sessionId,path) => call('app_dsh_preview',{connectionId,sessionId,path}),
     dshList: connectionId => call('app_dsh_list', {connectionId}),
+    dshPage: (connectionId,sessionId,before=null,through=null,after=null) => call('app_dsh_page',{connectionId,sessionId,before,through,after}),
     dshHistory: (connectionId,sessionId) => call('app_dsh_history',{connectionId,sessionId}),
     dshPrompt: (connectionId,sessionId,text,requestId) => call('app_dsh_prompt',{connectionId,sessionId,text,requestId}),
     scheduleEdit: payload => call('app_schedule_edit', payload),
@@ -43,6 +46,9 @@ export function createKernelBridge(invoke, isAvailable) {
       return call('app_accept', payload);
     },
     prewarm: () => call('app_prewarm'),
+    assistantConversation: () => call('app_assistant_conversation'),
+    assistantExecute: requestId => call('app_assistant_execute', {requestId}),
+    assistantPoll: sessionId => call('app_assistant_poll', {sessionId}),
     catalog: () => call('app_catalog'),
     createProject: (projectId, title) => call('app_project_create', { projectId, title }),
     createConversation: (conversationId, projectId, title) =>

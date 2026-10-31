@@ -1,0 +1,23 @@
+{
+  "assistant": "assistant:73b74c93ab70a1bdd0d42d36a7de0cae",
+  "request_id": "d6cd512c-f1ad-4503-9edb-700b8aece520",
+  "target": "session-dab36d32-af81-4daf-96e1-2e6692cfaaac",
+  "nativeResultSequences": [
+    9478
+  ],
+  "discussionNoDispatch": true,
+  "persistentTwoTurns": true,
+  "oneNativeRequestObserved": true,
+  "sameNativeSessions": "checked before initial browser assertion failure",
+  "idempotentResult": true,
+  "refreshedResult": true,
+  "originalSessionOpened": true,
+  "latestScroll": {
+    "top": 17191,
+    "max": 17191
+  },
+  "width390": true,
+  "pageErrors": [],
+  "nativeReplySha256": "1b6e56f60120402f0dd70ca5e8d8f805ae71439916962e4d5aa108a3ffa7b5bc",
+  "candidateRestartReadback": true
+}

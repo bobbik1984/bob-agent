@@ -1,0 +1,15 @@
+{
+  "release": {
+    "release": "dsh-preview-20261031",
+    "baseCommit": "4186208ced91839cefe9f1efecb11d032cfa412b",
+    "sourceSha256": "94bb6d7ad2d9073f0f7e255e1c32cf526d36d0071c31dfc10aa7403be76c8d1f",
+    "apk": false
+  },
+  "binarySha256": "e376f85eebcd7879e55ac73ada7a9d55f78146e7531bdc360ecced95dd74886d",
+  "webSha256": "1a5281fbd3021cc1ed1a5f52c915f6c77940b2cf73024eabea386e85d1782c5d",
+  "oldBinaryReadsNewSchema": true,
+  "productionIdle": true,
+  "deployed": true,
+  "backup": "/opt/bob-online/backups/assistant-instance-1793457717",
+  "rollbackUsed": false
+}

@@ -15,7 +15,7 @@ onUnmounted(()=>{generation++});
 const stamp=s=>{const n=Number(s.updated_at)||0;return n<1e12?n*1000:n};
 const rows=computed(()=>{
  const projects=props.catalog?.projects||[], imported=new Set(props.catalog?.imported_project_ids||[]);
- const local=(props.catalog?.conversations||[]).map(s=>{const p=projects.find(p=>p.id===s.project_id);return {...s,uid:s.id,project:p?.title,legacy:imported.has(s.project_id)||p?.source_kind==='legacy_import',device:(props.catalog?.device_groups||[]).find(g=>g.conversations?.some(c=>c.id===s.id))?.label||t('sidebarLocal')}});
+ const local=(props.catalog?.conversations||[]).filter(s=>!s.id.startsWith('assistant:')).map(s=>{const p=projects.find(p=>p.id===s.project_id);return {...s,title:s.id.startsWith('assistant:')?t('defaultAssistant'):s.title,uid:s.id,project:p?.title,legacy:imported.has(s.project_id)||p?.source_kind==='legacy_import',device:(props.catalog?.device_groups||[]).find(g=>g.conversations?.some(c=>c.id===s.id))?.label||t('sidebarLocal')}});
  const q=(props.search||'').trim().toLocaleLowerCase();
  return [...local,...remote.value].filter(s=>!q||[s.title,s.project,s.workspace,s.remote?label(s.node):s.device].join(' ').toLocaleLowerCase().includes(q)).sort((a,b)=>stamp(b)-stamp(a)||a.uid.localeCompare(b.uid));});
 const groups=computed(()=>directoryGroups(rows.value,props.mode));

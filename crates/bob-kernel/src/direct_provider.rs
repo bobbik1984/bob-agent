@@ -637,7 +637,8 @@ impl LocalApp {
                     "harness": "direct_api",
                     "provider_id": provider_id,
                     "provider_kind": provider_kind,
-                    "model_id": effective_model,
+                    "model_id": provider_reported_model,
+                    "requested_model_id": configured_model,
                     "input_tokens": input_tokens,
                     "output_tokens": output_tokens
                 });

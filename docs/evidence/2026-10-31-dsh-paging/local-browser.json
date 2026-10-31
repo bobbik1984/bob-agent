@@ -1,0 +1,108 @@
+{
+  "pages": [
+    {
+      "request": {
+        "connectionId": "node-1793435806962",
+        "sessionId": "session-771043d7-4fae-4d27-b0eb-b6cd714992f9",
+        "before": null,
+        "through": null,
+        "after": null
+      },
+      "ok": true,
+      "error": null,
+      "count": 10,
+      "sequences": [
+        706,
+        1284,
+        1292,
+        1548,
+        1556,
+        1885,
+        1893,
+        2278,
+        2286,
+        2420
+      ],
+      "cursor": 2423,
+      "before": 706,
+      "has_more": true,
+      "source_requests": 3,
+      "source_bytes": 7644653
+    },
+    {
+      "request": {
+        "connectionId": "node-1793435806962",
+        "sessionId": "session-771043d7-4fae-4d27-b0eb-b6cd714992f9",
+        "before": 706,
+        "through": 2423,
+        "after": null
+      },
+      "ok": true,
+      "error": null,
+      "count": 10,
+      "sequences": [
+        634,
+        660,
+        667,
+        670,
+        677,
+        680,
+        687,
+        690,
+        697,
+        699
+      ],
+      "cursor": 2423,
+      "before": 634,
+      "has_more": true,
+      "source_requests": 1,
+      "source_bytes": 2853353
+    },
+    {
+      "request": {
+        "connectionId": "node-1793435806962",
+        "sessionId": "session-771043d7-4fae-4d27-b0eb-b6cd714992f9",
+        "before": null,
+        "through": null,
+        "after": 2423
+      },
+      "ok": true,
+      "error": null,
+      "count": 0,
+      "sequences": [],
+      "cursor": 2423,
+      "before": 0,
+      "has_more": null,
+      "source_requests": 1,
+      "source_bytes": 6127
+    }
+  ],
+  "anchor_before": 257.28125,
+  "anchor_after": 257.421875,
+  "composer": {
+    "x": 12,
+    "y": 709.875,
+    "width": 303.21875,
+    "height": 72.53125
+  },
+  "menu_rows": [
+    {
+      "height": 41,
+      "icons": 1
+    },
+    {
+      "height": 41,
+      "icons": 1
+    },
+    {
+      "height": 46,
+      "icons": 1
+    },
+    {
+      "height": 41,
+      "icons": 1
+    }
+  ],
+  "errors": [],
+  "phone_hardware": false
+}

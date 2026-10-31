@@ -11,7 +11,7 @@ project:
   - Desktop
   - Android
   - Web (bob-node)
-  current_task: "F1/F3 捕获网页已部署 be04b73，GitHub 固定签名 Android Run 41174093233 成功；Linux 测试、数据迁移、线上启动/页面和16KB检查通过。手机相机、真实视觉质量、图片跨Home同步待验；X1T/B4暂停。"
+  current_task: "F2/F5 网页 dsh-paging-20261031-r1 已上线：真实Winter Shelter最近10条/向上分页、固定输入区和紧凑菜单通过390/1180浏览器验证；JS20/20、Linux runtime18/18和node2/2通过。Tauri/手机真机、传输优化、结构化成果仍待完成；无APK，B4暂停。"
   development_plan: docs/CURRENT_STAGE.md
 phases:
 - name: BP0 真相与保护
