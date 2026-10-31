@@ -1,0 +1,23 @@
+{
+  "candidateStartup": "passed",
+  "productionCopyMigration": "passed",
+  "personalRead": "passed",
+  "binarySha256": "8484d2b127bb42c18be264a84a14c21a985eecd59d7b4e736f72c07607217d2e",
+  "commit": "148a88d85c5f16d212d545b095d08ed44b8d7389",
+  "deployed": true,
+  "backup": "/opt/bob-online/backups/dsh-native-148a88d-1793438444",
+  "service": "bob-online.service",
+  "rollbackUsed": false,
+  "productionDshList": "passed",
+  "nativeSessions": 16,
+  "productionOriginalHistory": "passed",
+  "modelCallsDuringProductionCheck": 0,
+  "connectionHttps": true,
+  "publicBrowser": {
+    "originalSessionHistory": "passed",
+    "blankConversationTitle": "passed",
+    "viewportWidth": 390,
+    "documentScrollWidth": 385,
+    "additionalPromptSent": false
+  }
+}
