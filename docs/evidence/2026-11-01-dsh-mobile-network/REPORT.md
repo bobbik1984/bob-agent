@@ -17,7 +17,7 @@ User authorized physical-phone read-only verification, one progress inquiry and 
 - Earlier-history button increased7 to11 records, restored scrollTop8799; composer top747.526px unchanged. Auto top-scroll attempt did not load within55s; not accepted as reliable automatic paging.
 - Intermediate and final candidate results below supersede this pending state.
 
-## Remaining limits
+## Earlier baseline limits (superseded where noted below)
 10 records is an upper page target:20s collection budget may return fewer under slow network. Underlying DSH pages include tool payloads, so this does not establish text-only bandwidth efficiency. Initial phone read and automatic older-history trigger still need performance refinement. Preview cache is bounded process memory, not offline permanent storage; server thumbnails and persistent cache governance remain existing todo.
 Phone VPN/Cloudflare tunnel/X1T egress path is not segment-by-segment measured. Do not attribute the entire delay to OpenVPN or v2ray. App-level redundant history and CSP defects are confirmed. No router changes were made.
 
@@ -29,3 +29,18 @@ Run41220334607 / Artifact13049911935 succeeded. Fixed-signature APK hash d34d095
 Actual phone initial9 messages, bottom delta0. Preload14.358s; click238ms, decoded1920x1080. Close restored scroll exactly. Upward scroll automatically loaded9→19, prior message anchor moved0.25px, composer stayed747.526px. One read-only marker and reply remain in original session after multiple APK restarts; no second inquiry or new session. See phone-b79ec6a.json and phone-preview-b79ec6a.png.
 Automatic paging race was corrected by retaining upward request across background polling and dropping it when user leaves top. These are real-phone WebView interactions, not simulated response fixtures. Pinch gestures, long-duration packet loss and filesystem write audit were not performed.
 Core requested operations pass; performance is not fully accepted: first page can contain fewer than10 when bounded collection hits20s, source pages include tools, and cold image preload remains14s on this network. Follow-ups remain on existingF2/F5: text-selective server paging, thumbnails and bounded persistent cache/offline UX. Website production unchanged; B4 paused.
+
+
+## Bounded reading cache:684cbac (current phone result)
+
+Source684cbac15bae16e1faa04bb8b133040947cd0f73; Run41224848706 / Artifact13051242091. APK SHA25649c2f7f1c4399124b3266d7176a6ab18678e314ee2435451f85c5de8c7704c12. Persistent signature pipeline and16KB ELF passed; APK installed over existing app, preserving data and authenticated DSH connection. Website not deployed.
+
+Implementation: immediate cached directory plus background refresh; cached recent10 messages plus cursor refresh; earlier pages cached by snapshot cursor; shared IndexedDB budget64MiB serialized JSON payload/256entries/7day read validity with LRU eviction. Expired data becomes unreadable and is pruned on subsequent writes; this is not a background deletion guarantee nor exact filesystem-size accounting. No credential, send receipt or authoritative message ledger is stored in this disposable cache. Connection update/delete clears its scoped entries. Files use version+size validation and reuse bytes; thumbnails are640px WebP generated locally. First cold image still requires original bytes because the inspected DSH service exposes no verified thumbnail endpoint.
+
+Intermediate94effd6 phone revealed Vue reactive objects could not be written directly to IndexedDB.684cbac serializes a detached JSON snapshot; proxy persistence regression and physical WebView storage tests were added. Frontend83/83 passed; runtime22/22 and node2/2 passed earlier for unchanged Rust scope; frontend and CI build passed. Do not count isolated cache primitive tests as full UI acceptance.
+
+Actual Winter Shelter phone UI results (phone-cache-684cbac.json): latest10messages at bottom (rounding deviation0.33px); cached640×360 thumbnail visible452ms; click380ms opens1920×1080; close scroll delta0; reading cache4entries/1,953,632serialized bytes. Reload shows recent body358ms; sidebar existing Winter row34ms while refresh indicator is active; cached history10messages. Upward scroll10→20; composer delta0px. Prior read-only marker remains exactly1; draft empty. No extra model prompt/new session, file changes, B4 or renderer actions.
+
+Real native version check (phone-cache-version-684cbac.json):6.499s, not_modified=true, no data payload,1,419,665original-byte metadata; session and path match. This proves one unchanged-file transfer was avoided, not zero network traffic. The preview screenshot is the real Winter file, not a fixture. Small-capacity real IndexedDB check validates2-entry eviction;83 tests cover errors, persistence, scoped keys and directory refresh behavior.
+
+Remaining: cold DSH authentication/history still subject to phone/VPN/tunnel network delays. One actual native read timed out at15.037s withDSH_UNAVAILABLE; separate desktop unauthenticated endpoint check returned401 in2.79s. These observations do not isolate a particular router or VPN. Server-side text filtering and thumbnails remain open. Thumbnail452ms and preview380ms are warm-cache observations, not first-download timings. Website deployment, pinch gestures, prolonged network-loss soak and OS-level disk quota audit were not performed.

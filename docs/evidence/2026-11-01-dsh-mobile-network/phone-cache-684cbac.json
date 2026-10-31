@@ -1,0 +1,44 @@
+{
+  "initial": {
+    "messages": 10,
+    "bottom": -0.3330078125,
+    "composer": 747.5260620117188
+  },
+  "session_title": "Winter Shelter (wild) ? M0 Wave 0",
+  "thumbnail": {
+    "ms": 452,
+    "dimensions": [
+      640,
+      360
+    ]
+  },
+  "preview": {
+    "ms": 380,
+    "dimensions": [
+      1920,
+      1080
+    ]
+  },
+  "close_delta": 0.0,
+  "cache": {
+    "entries": 4,
+    "bytes": 1953632,
+    "kinds": [
+      "directory",
+      "file",
+      "history",
+      "thumbnail"
+    ]
+  },
+  "warm_reload_ms": 358,
+  "cached_directory_ms": 34,
+  "directory_refreshing_with_rows": true,
+  "warm_messages": 10,
+  "older": {
+    "before": 10,
+    "after": 20,
+    "composer_delta": 0.0
+  },
+  "marker_count": 1,
+  "draft_empty": true
+}

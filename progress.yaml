@@ -11,7 +11,7 @@ project:
   - Desktop
   - Android
   - Web (bob-node)
-  current_task: "F2/F5 Android真实DSH回复已核对；修复重复历史读取、Blob图片策略和上翻轮询竞争，b79ec6a最终APK图片及自动分页真机通过，冷加载与首批稳定10条待优化。网页本轮未部署，B4暂停。"
+  current_task: "F2/F5 Android684cbac有界缓存与真实Winter阅读通过：正文358ms/侧栏34ms，缩略图原图和10→20条分页通过；冷网与服务端缩略图仍待改善。网页未部署，B4暂停。"
   development_plan: docs/CURRENT_STAGE.md
 phases:
 - name: BP0 真相与保护

@@ -1,0 +1,14 @@
+{
+  "a": null,
+  "b": {
+    "text": "two"
+  },
+  "c": {
+    "text": "three"
+  },
+  "stats": {
+    "entries": 2,
+    "bytes": 30,
+    "limit": 1024
+  }
+}

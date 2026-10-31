@@ -131,7 +131,7 @@
 | 已保存原图回看 | `apps/bob-app/src/components/CaptureImage.vue`、`views/KnowledgeView.vue` |
 | 实际浏览器验证 | `apps/bob-app/tests/photo-capture-browser.py`（仅隔离节点，本机模拟视觉服务） |
 
-F2/F5当前新增：`crates/bob-runtime/src/dsh_session.rs`只实现原生身份/历史投影与测试源码；传输、列表与续聊未接通。`bob-node`新增导入项目来源，Work独立折叠历史；不是DSH实时目录。
+F2/F5：`crates/bob-runtime/src/dsh_session.rs`负责原生身份/历史投影，`dsh_transport.rs`负责认证、目录、分页、文件读取及发送回执；Node/Tauri共用运行时。`ConversationDirectory.vue`与`DshSessions.vue`统一目录和原会话。`reading-cache.mjs`承载可淘汰的IndexedDB阅读缓存，`persistent-preview-cache.mjs`负责版本核对、原文件和缩略图缓存；它们不是任务或发送账本。网页/手机实际验收版本见CURRENT_STAGE，历史导入不冒充原生目录。
 
 ### 共用消息阅读
 
