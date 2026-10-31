@@ -44,6 +44,7 @@ async function refresh(){
   if(g!==generation||disposed||preview.value)return;
   if(h.not_modified){error.value='';return;}
   const first=history.value===null;let additions=h;
+  if(!first&&notice.value===t('dshAccepted')&&h.messages.some(m=>m.role==='assistant'&&m.sequence>history.value.cursor))notice.value='';
   // Catch up a burst without losing messages between the old cursor and latest page.
   for(let n=0;!first&&additions.before>history.value.cursor+1&&additions.has_more;n++){
    if(n>=32)throw Error('DSH_PAGE_CATCHUP_REQUIRED');
