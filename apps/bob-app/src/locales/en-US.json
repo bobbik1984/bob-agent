@@ -510,5 +510,11 @@
   "messageImageLink": "View image: {name}",
   "messageTable": "Table, scroll horizontally",
   "messageCode": "Code, scroll horizontally",
-  "sendNotConfigured": "No assistant is available. Configure a model or connect a device first. Your draft is retained."
+  "sendNotConfigured": "No assistant is available. Configure a model or connect a device first. Your draft is retained.",
+  "sidebarSearch": "Search conversations or projects",
+  "sidebarTimeUnknown": "Time unknown",
+  "sidebarLegacy": "Imported history ({count})",
+  "sidebarImported": "Imported history",
+  "sidebarLocal": "This platform",
+  "sidebarSourceNote": "Records saved on this platform. Imported history is not a live node session list."
 }

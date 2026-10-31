@@ -39,6 +39,15 @@ const cancelPending = ref(new Set());
 const dispatchPending = ref(false);
 const catalog = ref(null);
 const sidebarGroupMode = ref('project');
+const sidebarSearch = ref('');
+const expandedProjects = ref({});
+const showLegacy = ref(false);
+const matchesSidebar = item => !sidebarSearch.value.trim() || String(item.title || '').toLocaleLowerCase().includes(sidebarSearch.value.trim().toLocaleLowerCase());
+const recentFirst = items => [...items].sort((a,b) => (Number(b.updated_at)||0)-(Number(a.updated_at)||0) || String(a.id).localeCompare(String(b.id)));
+const isLegacyProject = item => item.source_kind === 'legacy_import' || (catalog.value?.imported_project_ids || []).includes(item.id);
+const projectExpanded = id => expandedProjects.value[id] ?? (Boolean(sidebarSearch.value.trim()) || activeConversationItem.value?.project_id === id);
+function toggleProject(id) { expandedProjects.value[id] = !projectExpanded(id); }
+function activityText(item) { return Number(item.updated_at) > 0 ? new Date(Number(item.updated_at) * (Number(item.updated_at) < 1e12 ? 1000 : 1)).toLocaleDateString() : t('sidebarTimeUnknown'); }
 const theme = ref('system');
 const creatingKind = ref(null); // 'project' | 'conversation' | null
 const creatingForProjectId = ref(null);
@@ -876,7 +885,7 @@ const totalUnreadCount = computed(() =>
   (catalog.value?.conversations || []).reduce((sum, c) => sum + (c.unread_count || 0), 0),
 );
 const standaloneList = computed(() => {
-  if (catalog.value?.standalone_conversations) return catalog.value.standalone_conversations;
+  if (catalog.value?.standalone_conversations) return recentFirst(catalog.value.standalone_conversations.filter(matchesSidebar));
   if (!sessionId.value) return [];
   return [
     {
@@ -888,10 +897,11 @@ const standaloneList = computed(() => {
     },
   ];
 });
-const projectList = computed(() => catalog.value?.projects || []);
-const deviceGroupList = computed(() => catalog.value?.device_groups || []);
+const projectList = computed(() => recentFirst((catalog.value?.projects || []).map(p => ({...p, updated_at: Math.max(Number(p.updated_at)||0, ...(catalog.value?.conversations || []).filter(c => c.project_id === p.id).map(c => Number(c.updated_at)||0))}))).filter(p => (showLegacy.value || sidebarSearch.value.trim() || !isLegacyProject(p)) && (matchesSidebar(p) || projectConversations(p.id).length)));
+const legacyCount = computed(() => (catalog.value?.projects || []).filter(isLegacyProject).length);
+const deviceGroupList = computed(() => (catalog.value?.device_groups || []).map(g => ({...g, conversations: recentFirst((g.conversations || []).filter(c => !(catalog.value?.imported_project_ids || []).includes(c.project_id) && matchesSidebar(c)))})));
 function projectConversations(projectId) {
-  return (catalog.value?.conversations || []).filter(c => c.project_id === projectId);
+  return (recentFirst(catalog.value?.conversations || [])).filter(c => c.project_id === projectId && (matchesSidebar(c) || matchesSidebar((catalog.value?.projects || []).find(p => p.id === projectId) || {})));
 }
 
 async function loadPersonalOps() {
@@ -3376,6 +3386,8 @@ onUnmounted(() => {
           </button>
         </div>
 
+        <input v-model="sidebarSearch" type="search" :placeholder="t('sidebarSearch')" :aria-label="t('sidebarSearch')" />
+        <p class="navigation-note">{{ t('sidebarSourceNote') }}</p>
         <div class="sidebar-actions">
           <button type="button" @click="startCreateConversation(null)">
             + {{ t('newConversation') }}
@@ -3425,20 +3437,21 @@ onUnmounted(() => {
 
           <section class="sidebar-section">
             <h2>{{ t('projects') }}</h2>
+            <button v-if="legacyCount" type="button" :aria-expanded="showLegacy" @click="showLegacy = !showLegacy">{{ t('sidebarLegacy', { count: legacyCount }) }}</button>
             <p v-if="!projectList.length" class="navigation-note">{{ t('noProjectsHint') }}</p>
             <div v-for="proj in projectList" :key="proj.id" class="project-card">
               <div class="project-card-header">
-                <span class="project-title">{{ proj.title }}</span>
+                <button type="button" class="project-title project-toggle" :title="proj.title" :aria-expanded="projectExpanded(proj.id)" @click="toggleProject(proj.id)"><span>{{ projectExpanded(proj.id) ? '−' : '+' }} {{ proj.title }}</span><small>{{ isLegacyProject(proj) ? t('sidebarImported') : t('sidebarLocal') }} · {{ activityText(proj) }}</small></button>
                 <button
                   type="button"
                   class="project-new-conv"
                   :aria-label="t('newProjectConversation')"
                   @click="startCreateConversation(proj.id)"
                 >
-                  + {{ t('newConversation') }}
+                  +
                 </button>
               </div>
-              <div class="conversation-list">
+              <div v-if="projectExpanded(proj.id)" class="conversation-list">
                 <button
                   v-for="conv in projectConversations(proj.id)"
                   :key="conv.id"

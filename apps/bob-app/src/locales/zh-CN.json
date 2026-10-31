@@ -510,5 +510,11 @@
   "messageImageLink": "查看图片：{name}",
   "messageTable": "表格，可左右滚动",
   "messageCode": "代码，可左右滚动",
-  "sendNotConfigured": "尚未连接可用的助手。请先选择并配置模型，或连接设备；输入内容已保留。"
+  "sendNotConfigured": "尚未连接可用的助手。请先选择并配置模型，或连接设备；输入内容已保留。",
+  "sidebarSearch": "搜索对话或项目",
+  "sidebarTimeUnknown": "时间未知",
+  "sidebarLegacy": "历史导入（{count}）",
+  "sidebarImported": "历史导入",
+  "sidebarLocal": "当前平台",
+  "sidebarSourceNote": "此列表为当前平台保存的记录。历史导入不是节点实时会话。"
 }

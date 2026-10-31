@@ -760,8 +760,7 @@ impl LocalApp {
             let updated_at = last_msg
                 .as_ref()
                 .map(|(_, _, ts, _)| *ts)
-                .unwrap_or(created_at)
-                .max(view_state.updated_at);
+                .unwrap_or(created_at);
 
             let display_title = if !raw_title.trim().is_empty() {
                 raw_title

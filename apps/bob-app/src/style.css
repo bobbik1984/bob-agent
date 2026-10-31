@@ -2822,3 +2822,13 @@ textarea {
 .message-markdown hr { border: 0; border-top: 1px solid var(--line); margin: .8em 0; }
 .message-file-reference { overflow-wrap: anywhere; }
 .message-file-reference small { color: var(--text-secondary); }
+
+/* Navigation must fit its own viewport, including long imported titles. */
+.navigation-drawer { overflow-x: hidden; box-sizing: border-box; }
+.navigation-drawer > *, .navigation-drawer .sidebar-section, .navigation-drawer .project-card, .navigation-drawer .device-group-card, .navigation-drawer .conversation-list { min-width: 0; max-width: 100%; }
+.navigation-drawer .project-card, .navigation-drawer .device-group-card { grid-template-columns: minmax(0, 1fr); }
+.navigation-drawer .project-title, .navigation-drawer .conversation-link-title, .navigation-drawer .device-group-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.navigation-drawer .project-new-conv { flex: 0 0 2rem; }
+.navigation-drawer .project-toggle { flex: 1; text-align: start; background: transparent; border: 0; padding: 0; display: grid; }
+.project-toggle span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-toggle small { color: var(--text-secondary); font-weight: 400; font-size: var(--text-2xs); }
