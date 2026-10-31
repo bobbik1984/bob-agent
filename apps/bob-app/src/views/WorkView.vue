@@ -1,5 +1,6 @@
 <script setup>
 import { computed, reactive, ref } from 'vue';
+import DshSessions from '../components/DshSessions.vue';
 import MessageContent from '../components/MessageContent.vue';
 import { useI18n } from 'vue-i18n';
 
@@ -195,6 +196,7 @@ function submitProject() {
     </header>
 
     <div class="view-content-body">
+      <DshSessions :nodes="remoteNodes" />
       <!-- Collapsible New Project Drawer -->
       <form
         v-if="showNewProjectForm"

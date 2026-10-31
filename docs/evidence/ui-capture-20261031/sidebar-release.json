@@ -1,0 +1,28 @@
+{
+  "candidateStartup": "passed",
+  "productionCopyMigration": "passed",
+  "personalRead": "passed",
+  "binarySha256": "03ec2257488efdef84ac3f1ba4861a547816bfdbbb51f31a37625f2ad6d612a9",
+  "commit": "d8ee00b5d049062a629f7eb1fef4eb9bf6a0dc75",
+  "deployed": true,
+  "backup": "/opt/bob-online/backups/sidebar-d8ee00b-1793436717",
+  "service": "bob-online.service",
+  "rollbackUsed": false,
+  "realCatalog": {
+    "projects": 69,
+    "importedProjects": 69,
+    "conversations": 81
+  },
+  "browser": {
+    "source": "5194 proxy to actual platform",
+    "search": "passed",
+    "collapse": "passed",
+    "drawerClientWidth": 263,
+    "drawerScrollWidth": 263
+  },
+  "dshLiveSessions": "not verified; native transport incomplete",
+  "tests": {
+    "frontend": "49/49",
+    "linuxCatalog": "7/7"
+  }
+}

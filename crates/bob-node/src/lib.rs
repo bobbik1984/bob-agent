@@ -941,6 +941,23 @@ pub fn handle_rpc_command(ctx: &mut NodeContext, command: &str, args: &Value) ->
                 .map_err(|_| "EXECUTION_READ_FAILED")?;
             serde_json::to_value(exec).map_err(|_| "EXECUTION_READ_FAILED")
         }
+        "app_dsh_list" | "app_dsh_history" | "app_dsh_prompt" => {
+            let connection=args["connectionId"].as_str().ok_or("DSH_CONNECTION_REQUIRED")?;
+            let client=ctx.runtime.dsh_client(connection)?;
+            match command {
+                "app_dsh_list" => client.list(),
+                "app_dsh_history" => {
+                    let session=args["sessionId"].as_str().ok_or("DSH_SESSION_REQUIRED")?;
+                    serde_json::to_value(client.history(bob_runtime::dsh_session::SessionAddress{connection_id:connection.into(),session_id:session.into()})?).map_err(|_|"DSH_PROTOCOL")
+                },
+                _ => {
+                    let session=args["sessionId"].as_str().ok_or("DSH_SESSION_REQUIRED")?;
+                    let text=args["text"].as_str().filter(|s|!s.trim().is_empty() && s.len()<=32000).ok_or("DSH_TEXT_REQUIRED")?;
+                    let request=args["requestId"].as_str().filter(|s|s.len()<=200 && !s.is_empty()).ok_or("DSH_REQUEST_REQUIRED")?;
+                    bob_runtime::dsh_transport::dispatch_once(&ctx.runtime.data_dir,connection,session,text,request,||client.prompt(session,text,request))
+                }
+            }
+        }
         "app_online_sync" => {
             ctx.sync_catalog_into_online_store();
             let catalog = ctx

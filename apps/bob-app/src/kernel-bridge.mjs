@@ -7,6 +7,9 @@ export function createKernelBridge(invoke, isAvailable) {
   }
   return {
     available: isAvailable,
+    dshList: connectionId => call('app_dsh_list', {connectionId}),
+    dshHistory: (connectionId,sessionId) => call('app_dsh_history',{connectionId,sessionId}),
+    dshPrompt: (connectionId,sessionId,text,requestId) => call('app_dsh_prompt',{connectionId,sessionId,text,requestId}),
     scheduleEdit: payload => call('app_schedule_edit', payload),
     bootstrap: () => call('app_bootstrap'),
     syncHome: () => call('app_home_sync'),

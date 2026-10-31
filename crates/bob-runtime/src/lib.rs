@@ -11,6 +11,7 @@
 
 pub mod vision;
 pub mod dsh_session;
+pub mod dsh_transport;
 use bob_kernel::app::LocalApp;
 use bob_kernel::direct_provider::{
     DirectChatTurn, DirectProviderProfile, DirectProviderProfileInput,
@@ -582,6 +583,22 @@ impl ModelHubRuntime {
         hub["updatedAt"] = json!(now_millis());
         self.save_hub_state(&hub)?;
         self.build_snapshot_and_sync(app)
+    }
+
+    pub fn dsh_client(&self, id: &str) -> Result<dsh_transport::DshClient, &'static str> {
+        let hub=self.load_hub_state();
+        let node=hub["remoteNodes"].as_array().and_then(|items|items.iter().find(|n|n["id"]==id && n["enabled"]==true)).ok_or("DSH_CONNECTION_NOT_FOUND")?;
+        let url=node["url"].as_str().ok_or("DSH_ADDRESS_INVALID")?;
+        // Optional operator-only candidate reference: one connection, no credential copying.
+        let token=if std::env::var("BOB_DSH_CREDENTIAL_CONNECTION").ok().as_deref()==Some(id){
+            let source=std::env::var_os("BOB_DSH_CREDENTIAL_SOURCE").ok_or("SECRET_STORE_UNAVAILABLE")?;
+            let vault_dir=PathBuf::from(source).join("vault");
+            let seed=std::fs::read(vault_dir.join(".vault_seed")).map_err(|_|"SECRET_STORE_UNAVAILABLE")?;
+            let mut hasher=Sha256::new();hasher.update(seed);hasher.update(b"bob-runtime-file-vault-v1");
+            let master_key:[u8;32]=hasher.finalize().into();
+            FileVaultSecretStore{vault_dir,master_key}.get(&remote_node_token_slot(id))?
+        }else{self.secrets.get(&remote_node_token_slot(id))?};
+        dsh_transport::DshClient::connect(url,&token)
     }
 
     pub fn save_remote_node(

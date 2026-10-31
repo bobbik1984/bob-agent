@@ -879,7 +879,7 @@ const activeConversationItem = computed(() =>
   catalog.value?.conversations?.find(c => c.id === sessionId.value) || null,
 );
 const currentConversation = computed(
-  () => activeConversationItem.value?.title || fallbackConversationTitle.value,
+  () => messages.value.length ? (activeConversationItem.value?.title || fallbackConversationTitle.value) : t('conversation'),
 );
 const totalUnreadCount = computed(() =>
   (catalog.value?.conversations || []).reduce((sum, c) => sum + (c.unread_count || 0), 0),
@@ -1874,6 +1874,8 @@ async function selectConversation(targetId) {
   }
   await flushCurrentViewState();
   locallyAccepted.clear();
+  messages.value = [];
+  executions.value = [];
   sessionId.value = targetId;
   newConversationPending = false;
   clientState.selectedConversation = targetId;
@@ -3388,6 +3390,7 @@ onUnmounted(() => {
 
         <input v-model="sidebarSearch" type="search" :placeholder="t('sidebarSearch')" :aria-label="t('sidebarSearch')" />
         <p class="navigation-note">{{ t('sidebarSourceNote') }}</p>
+        <button v-if="modelHub.state.remote_nodes?.length" type="button" @click="navigationOpen = false; activeDrawer = 'work'">{{ t('dshTitle') }}</button>
         <div class="sidebar-actions">
           <button type="button" @click="startCreateConversation(null)">
             + {{ t('newConversation') }}
