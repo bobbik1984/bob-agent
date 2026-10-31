@@ -1,0 +1,16 @@
+{
+  "marker_count": 1,
+  "reply_visible_in_history": true,
+  "initial": {
+    "count": 7,
+    "remaining": -0.3330078125,
+    "composer": 747.5260620117188
+  },
+  "image_error": "Page.wait_for_function: Timeout 30000ms exceeded.",
+  "older": {
+    "count": 7,
+    "top": 0,
+    "composer": 747.5260620117188,
+    "errors": []
+  }
+}

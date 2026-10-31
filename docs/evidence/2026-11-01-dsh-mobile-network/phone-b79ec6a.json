@@ -1,0 +1,29 @@
+{
+  "marker_count": 1,
+  "reply_visible_in_history": true,
+  "initial": {
+    "count": 9,
+    "remaining": 0,
+    "composer": 747.5260620117188
+  },
+  "preload": {
+    "ok": true,
+    "ms": 14358
+  },
+  "click": {
+    "ok": true,
+    "ms": 238,
+    "dimensions": [
+      1920,
+      1080
+    ]
+  },
+  "close_scroll_delta": 0.0,
+  "older": {
+    "count": 19,
+    "top": 16178,
+    "composer": 747.5260620117188,
+    "errors": []
+  },
+  "older_anchor_delta": 0.25
+}

@@ -11,7 +11,7 @@ project:
   - Desktop
   - Android
   - Web (bob-node)
-  current_task: "F2/F5 dsh-prefetch-20261031-r1网页已上线，真实图片预取与点击复用、角标、分页和固定输入区验证通过；73项前端检查及Linux定向检查通过。GitHub固定签名APK Run 41215873083成功并下载校验；待手机真机、缩略图和持久缓存治理，B4暂停。"
+  current_task: "F2/F5 Android真实DSH回复已核对；修复重复历史读取、Blob图片策略和上翻轮询竞争，b79ec6a最终APK图片及自动分页真机通过，冷加载与首批稳定10条待优化。网页本轮未部署，B4暂停。"
   development_plan: docs/CURRENT_STAGE.md
 phases:
 - name: BP0 真相与保护
