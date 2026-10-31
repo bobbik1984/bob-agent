@@ -1,0 +1,27 @@
+{
+  "candidateStartup": "passed",
+  "productionCopyMigration": "passed",
+  "personalRead": "passed",
+  "binarySha256": "1ceafa7ee1c37b42c39bd7aad9d78464645a3740df4ecb16616d500bbcdf6560",
+  "commit": "fe018b0fcf9eb3eabafa73df35743bb3a1168d22",
+  "deployed": true,
+  "backup": "/opt/bob-online/backups/dsh-history-1793441976",
+  "service": "bob-online.service",
+  "rollbackUsed": false,
+  "verification": {
+    "rustTests": "6/6 passed",
+    "frontendBuild": "passed",
+    "rawHistoryBytes": 4684655,
+    "oldLimitBytes": 4194304,
+    "newHistoryLimitBytes": 16777216,
+    "candidate": "passed on second attempt; first HTTP400 response not captured, cause unconfirmed",
+    "productionRead": "passed, 16 messages in RPC probe; subsequent browser 17 articles, 40 formatted headings",
+    "browserErrorAbsent": true,
+    "scrollContainer": {
+      "clientHeight": 828,
+      "scrollHeight": 18255
+    },
+    "modelRequestsSent": 0,
+    "apk": "not rebuilt"
+  }
+}
