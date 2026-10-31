@@ -66,3 +66,10 @@ test('surface replacement stays applied when older records are prepended',async(
  const m=mount();await m.a.open({id:'original'});m.a.history.value={...m.a.history.value,before:10,has_more:true,replacements:[{op:'replace',startSeq:2,endSeq:4}],messages:[{sequence:12,text:'replacement'}]};
  m.context.kernelBridge.dshPage=async(c,s)=>({address:{connection_id:c,session_id:s},cursor:20,before:0,has_more:false,messages:[{sequence:3,text:'removed'},{sequence:1,text:'retain'}]});await m.a.loadOlder();assert.deepEqual(Array.from(m.a.history.value.messages,m=>m.sequence),[1,12]);
 });
+
+test('cached recent body displays before cursor revalidation resolves',async()=>{
+ const m=mount();const h={address:{connection_id:'device',session_id:'original'},messages:[{sequence:20,role:'assistant',text:'saved body'}],cursor:20,before:20,has_more:true};
+ await m.context.readingCache.put(readingKey('device','history','','original'),h);let resolve;
+ m.context.kernelBridge.dshPage=async(c,s,b,t,after)=>{assert.equal(after,20);return new Promise(r=>{resolve=()=>r({...h,not_modified:true,messages:[]})})};
+ const pending=m.a.open({id:'original'});await new Promise(r=>setImmediate(r));assert.equal(m.a.history.value.messages[0].text,'saved body');resolve();await pending;assert.equal(m.a.history.value.messages[0].text,'saved body');
+});

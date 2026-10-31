@@ -19,3 +19,5 @@ test('persisted files survive view remount, validate versions without another do
  await assert.rejects(createPersistentPreviewCache(async()=>{throw Error('offline')},{store,now:()=>122000}).get(a),/offline/);
 });
 test('changed versions replace bytes; endpoint and session keys do not collide',()=>{assert.notEqual(readingKey('a','file','one','s','x'),readingKey('a','file','two','s','x'));assert.notEqual(readingKey('a','file','one','s','x'),readingKey('b','file','one','s','x'))});
+
+test('reactive proxy values are stored as detached serializable snapshots',async()=>{const c=createReadingCache({storage:null});const data={messages:[{text:'saved'}]};await c.put('reactive',new Proxy(data,{}));data.messages[0].text='changed';assert.equal((await c.get('reactive')).messages[0].text,'saved')});
