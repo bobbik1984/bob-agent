@@ -1,0 +1,13 @@
+{
+  "passed": [
+    "First visit blank; no empty persistent conversation",
+    "First send creates own conversation; refresh restores it",
+    "Independent client remains blank",
+    "Capture text and project selection survive reload",
+    "Failed save retains draft; retry commits one capture and associated project note",
+    "Connection indicator is one dot without halo",
+    "390px capture input/project selector without horizontal overflow",
+    "English/dark capture draft and narrow layout retained"
+  ],
+  "pageErrors": []
+}

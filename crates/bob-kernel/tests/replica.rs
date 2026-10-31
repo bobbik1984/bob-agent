@@ -35,7 +35,7 @@ fn authenticated_reply_is_idempotent_and_cannot_regress_after_restart() {
  app.bind_confirmed_home("home",1,&"a".repeat(64),1).unwrap();let accepted=app.accept("r","m",&s,"hello".into(),2).unwrap();
  let job=app.claim_home_delivery(3,policy()).unwrap().unwrap();let WireIntent::Message(request)=job.intent.clone() else {panic!()};
  let receipt=HomeReceipt{request_id:"r".into(),home_device_id:"home".into(),home_epoch:1,payload_sha256:accepted.payload_sha256,accepted:true};
- let mut result=HomeResult{receipt:Some(receipt.clone()),execution:Some(HomeExecutionResult{execution_id:"e".into(),version:2,status:"completed".into(),stop_requested:false,stop_confirmed:false,reply:Some(HomeReply{message_id:"reply".into(),text:"actual persisted text fixture".into(),created_at:5})})};
+ let mut result=HomeResult{receipt:Some(receipt.clone()),execution:Some(HomeExecutionResult{execution_id:"e".into(),version:2,status:"completed".into(),stop_requested:false,stop_confirmed:false,reply:Some(HomeReply{message_id:"reply".into(),text:"actual persisted text fixture".into(),created_at:5})}),sync_bundle:None};
  assert!(app.apply_authenticated_home_result(&request,&result,5).is_err());
  app.complete_home_delivery(&job,TransportResult::Receipt(receipt),4,policy()).unwrap();
  app.apply_authenticated_home_result(&request,&result,5).unwrap();drop(app);let mut app=LocalApp::open(&p).unwrap();
@@ -53,7 +53,7 @@ fn remote_stop_is_durable_control_intent_not_stop_confirmation() {
  let job=app.claim_home_delivery(3,policy()).unwrap().unwrap();let WireIntent::Message(request)=job.intent.clone() else {panic!()};
  let receipt=HomeReceipt{request_id:"r".into(),home_device_id:"home".into(),home_epoch:1,payload_sha256:accepted.payload_sha256,accepted:true};
  app.complete_home_delivery(&job,TransportResult::Receipt(receipt.clone()),4,policy()).unwrap();
- let mut result=HomeResult{receipt:Some(receipt),execution:Some(HomeExecutionResult{execution_id:"e".into(),version:2,status:"running".into(),stop_requested:false,stop_confirmed:false,reply:None})};
+ let mut result=HomeResult{receipt:Some(receipt),execution:Some(HomeExecutionResult{execution_id:"e".into(),version:2,status:"running".into(),stop_requested:false,stop_confirmed:false,reply:None}),sync_bundle:None};
  app.apply_authenticated_home_result(&request,&result,5).unwrap();
  assert!(app.remote_executions("wrong-session").is_err());
  assert!(app.request_remote_stop("other-execution",6).is_err());
@@ -90,7 +90,7 @@ fn result_polling_reaches_beyond_first_sixteen_and_skips_terminal() {
  for i in 0..20 { assert_eq!(app.pending_home_result_at(i).unwrap().unwrap().request_id,format!("request-{i:02}")); }
  assert_eq!(app.pending_home_result_at(20).unwrap().unwrap().request_id,"request-00");
  let request=app.pending_home_result_at(19).unwrap().unwrap();
- app.apply_authenticated_home_result(&request,&HomeResult{receipt:Some(receipts[19].clone()),execution:Some(HomeExecutionResult{execution_id:"last-execution".into(),version:1,status:"failed".into(),stop_requested:false,stop_confirmed:false,reply:None})},70).unwrap();
+ app.apply_authenticated_home_result(&request,&HomeResult{receipt:Some(receipts[19].clone()),execution:Some(HomeExecutionResult{execution_id:"last-execution".into(),version:1,status:"failed".into(),stop_requested:false,stop_confirmed:false,reply:None}),sync_bundle:None},70).unwrap();
  assert_eq!(app.pending_home_result_at(19).unwrap().unwrap().request_id,"request-00");
  assert_eq!(app.pending_home_result_at(18).unwrap().unwrap().request_id,"request-18");
 }
@@ -103,7 +103,7 @@ fn latest_cancel_and_actual_terminal_replace_old_cancel_rejection() {
  let job=app.claim_home_delivery(3,policy()).unwrap().unwrap();let WireIntent::Message(request)=job.intent.clone() else {panic!()};
  let receipt=HomeReceipt{request_id:"r".into(),home_device_id:"home".into(),home_epoch:1,payload_sha256:saved.payload_sha256,accepted:true};
  app.complete_home_delivery(&job,TransportResult::Receipt(receipt.clone()),4,policy()).unwrap();
- let mut result=HomeResult{receipt:Some(receipt),execution:Some(HomeExecutionResult{execution_id:"e".into(),version:2,status:"running".into(),stop_requested:false,stop_confirmed:false,reply:None})};
+ let mut result=HomeResult{receipt:Some(receipt),execution:Some(HomeExecutionResult{execution_id:"e".into(),version:2,status:"running".into(),stop_requested:false,stop_confirmed:false,reply:None}),sync_bundle:None};
  app.apply_authenticated_home_result(&request,&result,5).unwrap();app.request_remote_stop("e",6).unwrap();
  let job=app.claim_home_delivery(7,policy()).unwrap().unwrap();app.complete_home_delivery(&job,TransportResult::Receipt(HomeReceipt{request_id:job.intent.request_id().into(),home_device_id:"home".into(),home_epoch:1,payload_sha256:job.payload_sha256.clone(),accepted:false}),8,policy()).unwrap();
  assert!(app.remote_executions(&s).unwrap()[0].cancel_rejected);

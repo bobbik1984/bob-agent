@@ -223,6 +223,9 @@ fn archive_revoked(guard: &mut Option<Ceremony>) -> Result<(), &'static str> {
     if let Some(mut host) = home.host.take() {
         host.stop();
     }
+    if let Some(mut sync_host) = home.sync_host.take() {
+        sync_host.stop();
+    }
     *guard = None;
     Ok(())
 }
@@ -431,7 +434,7 @@ async fn create_at<R: tauri::Runtime>(
                         with_app(&owner,|a|a.propose_pairing_peer(&issued.i,&provided,&ProvenPairingPeer{device_id:peer.device_id.clone(),identity_sha256:peer.certificate_sha256.clone(),public_key_ref:format!("tls-cert-sha256:{}",peer.certificate_sha256)},now()?).map_err(|_|"PAIRING_PROPOSAL_REJECTED")).map_err(|_|TransportError::Authentication)?;
                         let listener=confirmation.take().ok_or(TransportError::Protocol)?;
                         listen(listener,pinned,invite.clone(),owner.clone(),stop.clone(),errors.clone(),true).map_err(|_|TransportError::Protocol)?;
-                        *state=Some(Ceremony::Home(HomeCeremony{invitation:invite.clone(),bind:SocketAddr::new(bind_ip,w),root:root.clone(),owner:owner.clone(),_listeners:ListenerStop(stop.clone()),error:errors.clone(),grant_expiry:None,qr_reply_expires_at:Some(now().map_err(|_|TransportError::Protocol)?.saturating_add(EXECUTION_PERMISSION_MS)),host:None,control_reservation:control.take()}));
+                        *state=Some(Ceremony::Home(HomeCeremony{invitation:invite.clone(),bind:SocketAddr::new(bind_ip,w),root:root.clone(),owner:owner.clone(),_listeners:ListenerStop(stop.clone()),error:errors.clone(),grant_expiry:None,qr_reply_expires_at:Some(now().map_err(|_|TransportError::Protocol)?.saturating_add(EXECUTION_PERMISSION_MS)),host:None,sync_host:None,control_reservation:control.take()}));
                         let Some(Ceremony::Home(home))=state.as_mut() else {return Err(TransportError::Protocol);};
                         confirm_home(home).map_err(|_|TransportError::Protocol)?;
                         // A missing/unavailable runner does not undo device pairing or
@@ -982,6 +985,162 @@ mod tests {
             .state,
             "connected"
         );
+
+        // Verify full bidirectional synchronization over the QR-paired mTLS channel
+        // even when no local CLI runner binary is installed on Home:
+        // 1) Home (PC) sets an API key (deepseek), saves a remote node
+        //    (https://agent.bobbik.org), and creates a schedule item + knowledge note.
+        tauri::async_runtime::block_on(crate::direct_llm::app_provider_key_set(
+            home.handle().clone(),
+            home.state(),
+            "deepseek".into(),
+            Some("sk-deepseek-sync-from-pc-123456".into()),
+            Some(false),
+        ))
+        .unwrap();
+        tauri::async_runtime::block_on(crate::direct_llm::app_remote_node_save(
+            home.handle().clone(),
+            home.state(),
+            Some("node-cloud-bobbik".into()),
+            Some("Cloud Bobbik".into()),
+            "https://agent.bobbik.org".into(),
+            Some("bearer-token-from-pc-xyz".into()),
+            None,
+            Some("proj-cloud-1".into()),
+            Some(true),
+        ))
+        .unwrap();
+        tauri::async_runtime::block_on(crate::app_schedule_create(
+            home.state(),
+            "sched-from-pc-1".into(),
+            None,
+            None,
+            "PC Architecture Sync Meeting".into(),
+            Some("event".into()),
+            1_780_000_000_000,
+            None,
+            None,
+            Some("Synced from PC to Phone".into()),
+        ))
+        .unwrap();
+        tauri::async_runtime::block_on(crate::app_note_upsert(
+            home.state(),
+            "note-from-pc-1".into(),
+            None,
+            None,
+            "PC Knowledge Note".into(),
+            "Bidirectional mTLS sync verification note from PC.".into(),
+            Some(vec!["sync".into(), "pc".into()]),
+        ))
+        .unwrap();
+
+        // 2) Phone (Replica) sets a Gemini API key, creates a mobile schedule + decision,
+        //    and triggers app_home_sync().
+        tauri::async_runtime::block_on(crate::direct_llm::app_provider_key_set(
+            phone.handle().clone(),
+            phone.state(),
+            "gemini".into(),
+            Some("AIzaSy-gemini-sync-from-phone-987654".into()),
+            Some(false),
+        ))
+        .unwrap();
+        tauri::async_runtime::block_on(crate::app_schedule_create(
+            phone.state(),
+            "sched-from-phone-1".into(),
+            None,
+            None,
+            "Phone Mobile Todo".into(),
+            Some("todo".into()),
+            1_780_000_100_000,
+            None,
+            None,
+            Some("Created on Phone".into()),
+        ))
+        .unwrap();
+        tauri::async_runtime::block_on(crate::app_decision_record(
+            phone.state(),
+            "dec-from-phone-1".into(),
+            None,
+            None,
+            None,
+            "Use bidirectional PeerSyncBundle over mTLS.".into(),
+            None,
+            Some("accepted".into()),
+            None,
+        ))
+        .unwrap();
+
+        let sync_res = tauri::async_runtime::block_on(crate::home_link::app_home_sync(
+            phone.handle().clone(),
+            phone.state(),
+            phone.state(),
+        ))
+        .unwrap();
+        assert_eq!(sync_res, "sync_checked");
+
+        // Verify Phone received PC's non-secret remote node metadata, schedule, and note,
+        // while device-local secrets (API keys & Online bearer tokens) remain isolated per S0:
+        let phone_hub = tauri::async_runtime::block_on(crate::direct_llm::app_model_hub_get(
+            phone.handle().clone(),
+            phone.state(),
+        ))
+        .unwrap();
+        assert_eq!(
+            phone_hub["providerKeys"]["deepseek"].as_bool(),
+            Some(false),
+            "PC deepseek secret key must not leak to Phone over PeerSync"
+        );
+        assert_eq!(
+            phone_hub["providerKeys"]["gemini"].as_bool(),
+            Some(true),
+            "Phone gemini key must remain on Phone"
+        );
+        let phone_nodes = phone_hub["remoteNodes"].as_array().unwrap();
+        assert!(
+            phone_nodes.iter().any(|n| n["baseUrl"].as_str() == Some("https://agent.bobbik.org")
+                && n.get("token").is_none()
+                && n["hasToken"].as_bool() == Some(false)),
+            "PC remote node metadata must sync to Phone without leaking raw bearer token"
+        );
+        let phone_ops =
+            tauri::async_runtime::block_on(crate::app_personal_snapshot(phone.state())).unwrap();
+        assert!(
+            phone_ops.schedules.iter().any(|s| s.id == "sched-from-pc-1"),
+            "PC schedule must sync to Phone"
+        );
+        assert!(
+            phone_ops.notes.iter().any(|n| n.id == "note-from-pc-1"),
+            "PC knowledge note must sync to Phone"
+        );
+
+        // Verify PC (Home) retained its own DeepSeek key + Online token, did not import Phone's Gemini key,
+        // and received Phone's schedule and decision:
+        let home_hub = tauri::async_runtime::block_on(crate::direct_llm::app_model_hub_get(
+            home.handle().clone(),
+            home.state(),
+        ))
+        .unwrap();
+        assert_eq!(
+            home_hub["providerKeys"]["deepseek"].as_bool(),
+            Some(true),
+            "PC deepseek key must remain on PC"
+        );
+        assert_eq!(
+            home_hub["providerKeys"]["gemini"].as_bool(),
+            Some(false),
+            "Phone gemini secret key must not leak to PC over PeerSync"
+        );
+        let home_ops =
+            tauri::async_runtime::block_on(crate::app_personal_snapshot(home.state())).unwrap();
+        assert!(
+            home_ops.schedules.iter().any(|s| s.id == "sched-from-phone-1"),
+            "Phone schedule must sync to PC"
+        );
+        assert!(
+            home_ops.decisions.iter().any(|d| d.id == "dec-from-phone-1"),
+            "Phone decision must sync to PC"
+        );
+
         *home.state::<PairingState>().0.lock().unwrap() = None;
         *phone.state::<PairingState>().0.lock().unwrap() = None;
         *home.state::<AppState>().0.lock().unwrap() = None;

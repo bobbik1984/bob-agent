@@ -2,6 +2,7 @@
 use crate::{
     home_auth::{authorize, HomeMessageContext},
     outbox::{digest, AppendMessage, Error, HomeReceipt, Result, Store},
+    personal_ops::PeerSyncBundle,
 };
 use rusqlite::{params, OptionalExtension, TransactionBehavior};
 use serde::{Deserialize, Serialize};
@@ -11,6 +12,8 @@ use serde::{Deserialize, Serialize};
 pub struct HomeResult {
     pub receipt: Option<HomeReceipt>,
     pub execution: Option<HomeExecutionResult>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sync_bundle: Option<PeerSyncBundle>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -48,6 +51,7 @@ impl Store {
                 return Ok(HomeResult {
                     receipt: None,
                     execution: None,
+                    sync_bundle: None,
                 });
             }
             Some((origin, epoch, stored, outcome)) => {
@@ -81,6 +85,7 @@ impl Store {
         Ok(HomeResult {
             receipt: Some(receipt),
             execution,
+            sync_bundle: None,
         })
     }
 }

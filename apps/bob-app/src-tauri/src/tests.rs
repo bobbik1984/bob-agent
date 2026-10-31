@@ -545,25 +545,198 @@ fn personal_ops_ipc_contract_aligns_and_exports_canonical_snapshot_fixture() {
     .unwrap();
     assert_eq!(dec_acc["status"], "accepted");
 
-    // RV-06: Export canonical PersonalOpsSnapshot fixture directly from Rust serde_json
-    let snapshot = invoke(&view, "app_personal_snapshot", json!({})).unwrap();
+    // RV-06: Compare canonical PersonalOpsSnapshot against committed fixture (no blind overwrite)
+    let mut snapshot = invoke(&view, "app_personal_snapshot", json!({})).unwrap();
     assert_eq!(snapshot["schedules"].as_array().unwrap().len(), 2);
     assert_eq!(snapshot["notes"].as_array().unwrap().len(), 1);
     assert_eq!(snapshot["captures"].as_array().unwrap().len(), 1);
     assert_eq!(snapshot["memories"].as_array().unwrap().len(), 1);
     assert_eq!(snapshot["decisions"].as_array().unwrap().len(), 1);
 
+    // Normalize runtime-generated device_id and wall-clock timestamps for deterministic comparison
+    for arr_key in ["captures", "notes", "schedules"] {
+        if let Some(arr) = snapshot.get_mut(arr_key).and_then(Value::as_array_mut) {
+            for item in arr {
+                if let Some(obj) = item.as_object_mut() {
+                    if obj.contains_key("origin_device_id") {
+                        obj.insert("origin_device_id".into(), json!("fixture-device-0001"));
+                    }
+                    if obj.contains_key("created_at") {
+                        obj.insert("created_at".into(), json!(1_762_000_010_000_i64));
+                    }
+                    if obj.contains_key("updated_at") {
+                        obj.insert("updated_at".into(), json!(1_762_000_010_000_i64));
+                    }
+                }
+            }
+        }
+    }
+
     let fixture_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .unwrap()
         .join("tests")
         .join("fixtures");
-    std::fs::create_dir_all(&fixture_dir).unwrap();
     let fixture_path = fixture_dir.join("personal_snapshot.json");
-    std::fs::write(
-        &fixture_path,
-        serde_json::to_string_pretty(&snapshot).unwrap(),
+    if std::env::var("BOB_UPDATE_SNAPSHOTS").as_deref() == Ok("1") {
+        std::fs::create_dir_all(&fixture_dir).unwrap();
+        std::fs::write(
+            &fixture_path,
+            format!("{}\n", serde_json::to_string_pretty(&snapshot).unwrap()),
+        )
+        .unwrap();
+    }
+    assert!(fixture_path.exists());
+    let expected: Value =
+        serde_json::from_str(&std::fs::read_to_string(&fixture_path).unwrap()).unwrap();
+    assert_eq!(snapshot, expected);
+}
+
+#[test]
+fn s0_trust_boundaries_redact_secrets_and_reject_unauthenticated_peer_sync_before_side_effects() {
+    let dir = Fixture::new();
+    let data_dir = &dir.0;
+
+    // 1. Store canary API key and Online token in device_vault
+    let canary_api_key = "sk-canary-secret-api-key-9999";
+    let canary_online_token = "bob-online-bearer-secret-8888";
+    crate::device_vault::store_secret(
+        data_dir,
+        &crate::direct_llm::provider_slot("deepseek"),
+        canary_api_key.as_bytes(),
     )
     .unwrap();
-    assert!(fixture_path.exists());
+    crate::device_vault::store_secret(
+        data_dir,
+        &crate::direct_llm::remote_node_token_slot("node-test"),
+        canary_online_token.as_bytes(),
+    )
+    .unwrap();
+
+    // 2. Export shared_config_json and verify zero secret leakage
+    let exported = crate::direct_llm::export_shared_config_from_dir(data_dir);
+    assert!(
+        !exported.contains(canary_api_key),
+        "shared_config_json must never contain raw API keys"
+    );
+    assert!(
+        !exported.contains(canary_online_token),
+        "shared_config_json must never contain Online bearer tokens"
+    );
+    let parsed: Value = serde_json::from_str(&exported).unwrap();
+    assert_eq!(parsed["credentials"], json!({}));
+
+    // 3. Verify merge_shared_config_with_app ignores injected credentials and strips remoteNodes token
+    let mut local_app = LocalApp::open(&data_dir.join("bob.db")).unwrap();
+    let malicious_incoming = json!({
+        "updatedAt": 999_999,
+        "credentials": {
+            "provider-key-openai": {
+                "value": "sk-injected-malicious-key",
+                "updatedAt": 999_999
+            }
+        },
+        "remoteNodes": [
+            {
+                "id": "node-injected",
+                "label": "Node",
+                "baseUrl": "https://agent.bobbik.org",
+                "token": "injected-raw-token",
+                "updatedAt": 999_999
+            }
+        ]
+    })
+    .to_string();
+    crate::direct_llm::merge_shared_config_with_app(data_dir, &mut local_app, &malicious_incoming);
+    assert!(
+        crate::device_vault::read_secret(data_dir, "provider-key-openai").is_err(),
+        "incoming PeerSync must not write secrets into device_vault"
+    );
+    let re_exported = crate::direct_llm::export_shared_config_from_dir(data_dir);
+    assert!(!re_exported.contains("injected-raw-token"));
 }
+
+#[test]
+fn rv17_promote_conversation_in_place_preserves_history_draft_notes_and_decisions() {
+    let dir = Fixture::new();
+    let mut local = LocalApp::open(&dir.db()).unwrap();
+    let session = local.default_session().unwrap();
+    local
+        .accept(
+            "req-rv17-1",
+            "msg-rv17-1",
+            &session,
+            "把这个灵感对话原位升级为正式工程项目，不要丢失上下文。".into(),
+            1_000,
+        )
+        .unwrap();
+    local
+        .save_conversation_view_state(
+            &session,
+            Some("未发送的半截草稿"),
+            Some(Some("msg-rv17-1")),
+            Some(240),
+            true,
+            1_010,
+        )
+        .unwrap();
+    local
+        .upsert_note(
+            "note-rv17-1",
+            None,
+            Some(&session),
+            "会话关联笔记",
+            "原位升级后必须自动继承 project_id",
+            &["rv17".to_owned()],
+            1_020,
+        )
+        .unwrap();
+
+    let (_host, view) = app(Some(local));
+    let promoted = invoke(
+        &view,
+        "app_conversation_promote",
+        json!({
+            "conversationId": session,
+            "projectId": "proj-rv17",
+            "title": "RV-17 原位升级项目"
+        }),
+    )
+    .unwrap();
+
+    // Idempotent repeat call
+    let promoted_again = invoke(
+        &view,
+        "app_conversation_promote",
+        json!({
+            "conversationId": session,
+            "projectId": "proj-rv17",
+            "title": "RV-17 原位升级项目"
+        }),
+    )
+    .unwrap();
+    assert_eq!(promoted["selected_conversation_id"], session);
+    assert_eq!(promoted_again["selected_conversation_id"], session);
+
+    let convs = promoted["conversations"].as_array().unwrap();
+    let target_conv = convs
+        .iter()
+        .find(|c| c["id"].as_str() == Some(&session))
+        .unwrap();
+    assert_eq!(target_conv["project_id"], "proj-rv17");
+    assert_eq!(target_conv["view_state"]["draft"], "未发送的半截草稿");
+    assert_eq!(target_conv["view_state"]["scroll_offset"], 240);
+
+    let history = invoke(&view, "app_history", json!({"sessionId": session})).unwrap();
+    assert_eq!(history.as_array().unwrap().len(), 1);
+    assert_eq!(
+        history[0]["content"],
+        "把这个灵感对话原位升级为正式工程项目，不要丢失上下文。"
+    );
+
+    let snap = invoke(&view, "app_personal_snapshot", json!({})).unwrap();
+    assert_eq!(snap["notes"][0]["project_id"], "proj-rv17");
+    assert_eq!(snap["notes"][0]["conversation_id"], session);
+}
+
+

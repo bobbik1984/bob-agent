@@ -99,7 +99,7 @@ fn reject_link(path: &Path) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn digest(bytes: &[u8]) -> String {
+pub fn digest(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
 
@@ -193,6 +193,7 @@ impl Store {
         crate::catalog::migrate(&tx, now)?;
         crate::direct_provider::migrate(&tx, now)?;
         crate::personal_ops::migrate(&tx, now)?;
+        crate::capture_media::migrate(&tx, now)?;
         tx.commit()?;
         let mut store = Self { db, _owner: owner };
         store.recover_interrupted()?;

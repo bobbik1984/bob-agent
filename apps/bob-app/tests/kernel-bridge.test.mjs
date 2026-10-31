@@ -7,6 +7,7 @@ import { createKernelBridge } from '../src/kernel-bridge.mjs';
 import { createSendController } from '../src/send-controller.mjs';
 import { createLayoutState, getProviderLogo } from '../src/layout-mode.mjs';
 import { createOnlineWorkClient } from '../src/online-client.mjs';
+import { httpInvoke } from '../src/http-bridge.mjs';
 
 test('IPC maps stable identities and payload without inventing remote acceptance',async()=>{
  const calls=[];const bridge=createKernelBridge(async(command,args)=>{calls.push({command,args});return {request_id:args?.requestId,message_id:args?.messageId};},()=>true);
@@ -110,7 +111,7 @@ test('personal ops IPC maps schedule, note, capture, memory and decision command
   {command:'app_schedule_create',args:{id:'s1',projectId:null,taskId:null,title:'Review',kind:'todo',startAt:1793408400000,endAt:null,reminderAt:null,notes:'n'}},
   {command:'app_schedule_status',args:{id:'s1',status:'completed'}},
   {command:'app_note_upsert',args:{id:'n1',projectId:null,conversationId:null,title:'Note',bodyMarkdown:'Body',tags:['t1']}},
-  {command:'app_capture_create',args:{id:'c1',sourceMessageId:'m1',contentRef:'Snippet'}},
+  {command:'app_capture_create',args:{id:'c1',sourceMessageId:'m1',contentRef:'Snippet',projectId:null,newProjectTitle:null,mediaId:null}},
   {command:'app_memory_state',args:{id:'mem-1',newState:'active'}},
   {command:'app_decision_record',args:{id:'d1',projectId:null,taskId:null,sourceMessageId:null,body:'Use canonical SQLite snapshot',rationaleJson:'{}',status:'proposed',supersedesId:null}},
   {command:'app_decision_status',args:{id:'d1',status:'accepted'}}
@@ -174,4 +175,38 @@ test('OL-02..OL-04 Online Work Service client executes PKCE S256 pairing and rea
  assert.equal(msgs.items[0].content,'Cloud task running');
  const rev=await client.revokeSelf({origin,token:exchanged.access_token});
  assert.equal(rev.revoked,true);
+});
+
+test('RV-17 and OL-02..OL-07 native bridge maps promoteConversation and Online commands without exposing raw token',async()=>{
+ const calls=[];
+ const bridge=createKernelBridge(async(command,args)=>{calls.push({command,args});return {ok:true};},()=>true);
+ await bridge.promoteConversation({conversationId:'conv-1',projectId:'proj-1',title:'Promoted Project'});
+ await bridge.onlineBeginPairing({nodeId:'node-1',baseUrl:'https://bob-online.bobbik.org',deviceName:'Pixel 8'});
+ await bridge.onlineExchangePairing({nodeId:'node-1',baseUrl:'https://bob-online.bobbik.org',pairingId:'pr-1',code:'123456',verifier:'v-1'});
+ await bridge.onlineSync({nodeId:'node-1',baseUrl:'https://bob-online.bobbik.org',projectId:'proj-1',taskId:'task-1'});
+ await bridge.onlineSubmitOperation({nodeId:'node-1',baseUrl:'https://bob-online.bobbik.org',operationType:'create_revision',taskId:'task-1',requestId:'req-op-1',payload:{instruction:'V2'}});
+ await bridge.onlineRevoke({nodeId:'node-1',baseUrl:'https://bob-online.bobbik.org'});
+ assert.deepEqual(calls.map(c=>c.command),[
+  'app_conversation_promote',
+  'app_online_begin_pairing',
+  'app_online_exchange_pairing',
+  'app_online_sync',
+  'app_online_submit_operation',
+  'app_online_revoke'
+ ]);
+ assert.deepEqual(calls[0].args,{conversationId:'conv-1',projectId:'proj-1',title:'Promoted Project'});
+ assert.equal(calls[3].args.token,undefined);
+});
+
+test('capture image bridge binds recognition to saved original and disclosed model', async () => {
+ const calls=[];
+ const bridge=createKernelBridge(async (command,args)=>{calls.push({command,args});return {};},()=>true);
+ await bridge.captureMediaPut('image/png','encoded-fixture');
+ await bridge.captureMediaGet(null,'capture-1');
+ await bridge.captureRecognize('image-sha','provider::vision');
+ assert.deepEqual(calls,[
+  {command:'app_capture_media_put',args:{mime:'image/png',base64:'encoded-fixture'}},
+  {command:'app_capture_media_get',args:{mediaId:null,captureId:'capture-1'}},
+  {command:'app_capture_recognize',args:{mediaId:'image-sha',modelRef:'provider::vision'}},
+ ]);
 });

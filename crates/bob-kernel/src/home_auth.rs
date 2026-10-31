@@ -185,6 +185,17 @@ impl Store {
                  WHERE p.device_id=?1 AND a.home_device_id=?2 AND a.home_epoch=?3 AND a.revoked=0 AND p.expires_at>?5",
                 params![device, home_id, epoch, conversation, now],
             )?;
+            if conversation == "personal-ops-sync" {
+                tx.execute(
+                    "INSERT OR IGNORE INTO home_conversation_grants(device_id,conversation_id,expires_at,allow_cancel)
+                     SELECT g.device_id,'personal-ops-sync',MAX(g.expires_at),0
+                     FROM home_conversation_grants g
+                     JOIN home_device_authorizations a ON a.device_id=g.device_id
+                     WHERE g.device_id=?1 AND a.home_device_id=?2 AND a.home_epoch=?3 AND a.revoked=0 AND g.expires_at>?4
+                     GROUP BY g.device_id",
+                    params![device, home_id, epoch, now],
+                )?;
+            }
         }
         let ctx = HomeMessageContext {
             local_home_device_id: home_id.into(),

@@ -260,6 +260,7 @@ fn in_flight_execution_routes_reply_to_originating_conversation_and_tracks_unrea
                     stop_confirmed: false,
                     reply: None,
                 }),
+                sync_bundle: None,
             },
             14,
         )
@@ -285,6 +286,7 @@ fn in_flight_execution_routes_reply_to_originating_conversation_and_tracks_unrea
                         created_at: 15,
                     }),
                 }),
+                sync_bundle: None,
             },
             16,
         )
@@ -656,4 +658,45 @@ fn cross_node_workspace_handoff_verifies_and_blocks_all_five_fault_scenarios() {
     assert_eq!(vok.state, "completed");
     assert!(vok.blocked_reason.is_none());
     assert_eq!(vok.target_fencing_token, Some(1));
+}
+
+#[test]
+fn legacy_import_never_steals_selection_even_after_restart() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("import.sqlite");
+    let mut app = LocalApp::open(&path).unwrap();
+    let initial = app.selected_conversation().unwrap();
+    app.import_conversation("old-snake", None, "Old test", 1).unwrap();
+    assert_eq!(app.selected_conversation().unwrap(), initial);
+    app.create_conversation("my-chat", None, "Today", 2).unwrap();
+    app.import_conversation("old-snake", None, "Old test", 3).unwrap();
+    assert_eq!(app.selected_conversation().unwrap(), "my-chat");
+    drop(app);
+    let mut app = LocalApp::open(&path).unwrap();
+    app.import_conversation("old-snake", None, "Old test", 4).unwrap();
+    assert_eq!(app.selected_conversation().unwrap(), "my-chat");
+}
+
+#[test]
+fn quick_capture_is_atomic_idempotent_and_does_not_select_a_conversation() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("capture.sqlite");
+    let mut app = LocalApp::open(&path).unwrap();
+    let initial = app.selected_conversation().unwrap();
+    let item = app.capture_with_project("cap-one", None, "Idea", Some("proj-one"), Some("Project"), 1).unwrap();
+    assert_eq!(app.capture_with_project("cap-one", None, "Idea", Some("proj-one"), Some("Project"), 2).unwrap(), item);
+    assert_eq!(app.list_captures().unwrap().len(), 1);
+    assert_eq!(app.list_notes(Some("proj-one")).unwrap().len(), 1);
+    assert_eq!(app.selected_conversation().unwrap(), initial);
+    assert!(app.capture_with_project("cap-one", None, "Different", Some("proj-one"), None, 3).is_err());
+    assert!(app.capture_with_project("bad", None, "", Some("proj-bad"), Some("Never created"), 4).is_err());
+    assert!(app.capture_with_project("missing", None, "Idea", Some("absent"), None, 5).is_err());
+    assert_eq!(app.catalog_snapshot().unwrap().projects.len(), 1);
+    assert_eq!(app.list_captures().unwrap().len(), 1);
+    app.capture_with_project("free", None, "Unassigned", None, None, 6).unwrap();
+    app.capture_with_project("free", None, "Unassigned", None, None, 7).unwrap();
+    drop(app);
+    let app = LocalApp::open(&path).unwrap();
+    assert_eq!(app.list_captures().unwrap().len(), 2);
+    assert_eq!(app.list_notes(Some("proj-one")).unwrap()[0].body_markdown, "Idea");
 }

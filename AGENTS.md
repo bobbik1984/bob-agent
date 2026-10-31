@@ -52,3 +52,7 @@
 - Evidence 写入 `docs/evidence/`（仅脱敏内容）；原始敏感证据放在仓库外。
 - Handoff 包含：目标、基线版本、改动清单、通过/失败/未运行的检查、剩余门槛、回退步骤。
 - Commit 信息格式：`[bob] <功能描述>`。
+
+## UI 设计入口
+
+修改导航、输入框、悬浮窗、状态、设置或内置文案前，必须读取 [docs/DESIGN_PRINCIPLES.md](docs/DESIGN_PRINCIPLES.md)。它统一约束 App/网页端的视觉与交互；当前验收仍以 CURRENT_STAGE 为准。

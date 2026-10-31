@@ -10,7 +10,8 @@ project:
   - Vue 3
   - Desktop
   - Android
-  current_task: 已完成 Stage S0 (RV-01~10)、Stage S1 核心 (RV-12~13 个人数据 Replica→Home 同步)、Stage S2/M0 客户端适配 (OL-02~04 PKCE + /api/client/v1) 及 RV-16~18 (决定记录 UI、对话升级为项目、自适应轮询)，76项 bob-kernel、24项 bob-transport、12项 Node 与 5 视口 Playwright 全绿
+  - Web (bob-node)
+  current_task: "F1/F3 图片捕获已接通文字、原图、视觉建议校正、项目归属与知识页回看；10项实际浏览器检查通过（识别为本机假服务），JS18、native34通过。未发布；手机相机、外部视觉质量和图片跨Home同步待验，X1T/B4暂停。"
   development_plan: docs/CURRENT_STAGE.md
 phases:
 - name: BP0 真相与保护
@@ -31,9 +32,9 @@ phases:
     status: done
   - text: BOB-D-008 确认：懒式响应 + 打字静默预热 + 单飞唤醒 + 本地 Outbox 必达契约
     status: done
-  - text: WP-02 设计草案完成（31表、25项内存DDL约束；未实现，BP1待WP-03）
+  - text: WP-02 设计草案完成（31表、25项内存DDL约束）
     status: done
-  - text: WP-03连接与安全设计获批；真实安全验证未运行，D007镜像仍未决
+  - text: WP-03 连接与安全设计获批
     status: done
 - name: BP2 骨架与契约
   tasks:
@@ -41,19 +42,19 @@ phases:
     status: done
   - text: BP2-02 落地 BOB-D-008 懒式响应、输入框打字预热与本地 Durable Outbox 闭环及测试
     status: done
-- name: BP3 个人环境 MVP（按 S0 → S2 推进）
+- name: BP3 个人环境 MVP（S0 → S2）
   tasks:
-  - text: Stage S0 (RV-01~10)：修复前端新视图↔内核契约错位、去除静默吞错、建立Rust↔UI JSON快照契约测试并修正文档超范围陈述
+  - text: Stage S0 凭据同步脱敏、PeerSync 先校验后合并并重算 SHA256、Online 凭据边界与固定快照严格断言
     status: done
-  - text: Stage S1 (RV-11~13)：已完成虚假控件禁用(RV-12)与笔记/日程/记忆/决定 Replica→Home 同步(RV-13)；待填真实外部商业Key完成RV-11真机问答归档
+  - text: Stage S1 原位会话升级 Work (RV-17)、轮询与同步指数退避 (RV-18)、结构化决定表单 (RV-16) 与本地指标 (RV-20)
+    status: done
+  - text: Stage S2 Online 接入闭环 (OL-01~07)：配对、兑换、增量缓存、受控续聊、V1->V2 修订、审阅与凭据吊销
+    status: done
+  - text: RV-11 双端真实商业模型 Key 端到端真机问答与断网恢复记录
     status: active
-  - text: Stage S2 / M0 (OL-01~07)：已完成 bob-core-client/1.0 PKCE 配对与 /api/client/v1 只读客户端及 WorkView 面板(OL-02~04)；待获批探测生产端点(OL-01)与 cloud-agent 写入扩展(OL-05~07)
-    status: active
-  - text: BP3-01 X1C Home ↔ Android Replica 私网配对、多会话与个人事务同步已通；远程文件只读浏览(F4)与公网异地重连待验收
-    status: active
-- name: BP4–BP5 Work/Harness 与三端同源（按 S3 → S4 推进）
+- name: BP4–BP5 Work/Harness 与三端同源（S3 → S4）
   tasks:
-  - text: Stage S3 / M1 (XP-01~03, XP-05, RV-14~18)：已完成决定记录UI(RV-16)、对话升级为项目(RV-17)与轮询退避(RV-18)；待抽离 bob-runtime 与拆分 App.vue
-    status: active
-  - text: Stage S4 / M2–M4 (XP-04, XP-06~10)：交付无界面 bob-node 云端服务端与 Web 适配层，实现手机/电脑/浏览器三端同源并收敛旧 Online
-    status: todo
+  - text: Stage S3 (XP-01~05) 抽离 crates/bob-runtime（SecretStore / CapabilityManifest / ModelHubRuntime）并统一 Workspace 测试
+    status: done
+  - text: Stage S4 (XP-06~10) 交付 crates/bob-node 常开节点与 http-bridge 统一网页端，只读幂等导入旧库 69 个项目并部署上线 https://bob-online.bobbik.org
+    status: done

@@ -47,6 +47,20 @@ export function createKernelBridge(invoke, isAvailable) {
         projectId: projectId ?? null,
         title: title ?? '',
       }),
+    promoteConversation: (conversationIdOrObj, projectId, title) => {
+      if (conversationIdOrObj && typeof conversationIdOrObj === 'object') {
+        return call('app_conversation_promote', {
+          conversationId: conversationIdOrObj.conversationId,
+          projectId: conversationIdOrObj.projectId,
+          title: conversationIdOrObj.title ?? '',
+        });
+      }
+      return call('app_conversation_promote', {
+        conversationId: conversationIdOrObj,
+        projectId,
+        title: title ?? '',
+      });
+    },
     selectConversation: conversationId =>
       call('app_conversation_select', { conversationId }),
     saveViewState: ({
@@ -129,7 +143,64 @@ export function createKernelBridge(invoke, isAvailable) {
         apiKey: apiKey ?? '',
       }),
     customModelDelete: id => call('app_custom_model_delete', { id }),
+    remoteNodeSave: ({ id, label, baseUrl, token, clearToken, selectedProjectId, enabled }) =>
+      call('app_remote_node_save', {
+        id: id ?? null,
+        label: label ?? null,
+        baseUrl,
+        token: token ?? null,
+        clearToken: clearToken ?? false,
+        selectedProjectId: selectedProjectId ?? null,
+        enabled: enabled ?? true,
+      }),
+    remoteNodeDelete: id => call('app_remote_node_delete', { id }),
+    onlineBeginPairing: ({ origin, clientInstanceId, clientName }) =>
+      call('app_online_begin_pairing', {
+        origin,
+        clientInstanceId,
+        clientName: clientName ?? null,
+      }),
+    onlineExchangePairing: ({ origin, pairingId, clientInstanceId, verifier }) =>
+      call('app_online_exchange_pairing', {
+        origin,
+        pairingId,
+        clientInstanceId,
+        verifier: verifier ?? null,
+      }),
+    onlineSync: ({ origin, projectId, after }) =>
+      call('app_online_sync', {
+        origin,
+        projectId: projectId ?? null,
+        after: after ?? null,
+      }),
+    onlineSubmitOperation: ({
+      origin,
+      operationKind,
+      projectId,
+      taskId,
+      prompt,
+      parentVersionId,
+      requestId,
+    }) =>
+      call('app_online_submit_operation', {
+        origin,
+        operationKind,
+        projectId,
+        taskId: taskId ?? null,
+        prompt: prompt ?? null,
+        parentVersionId: parentVersionId ?? null,
+        requestId: requestId ?? null,
+      }),
+    onlineRevoke: ({ origin, localOnly }) =>
+      call('app_online_revoke', {
+        origin,
+        localOnly: localOnly ?? false,
+      }),
     registrySave: registry => call('app_registry_save', { registry: registry ?? null }),
+    modelVisibilitySet: (providerId, modelId, visible) =>
+      call('app_model_visibility_set', { providerId, modelId, visible: Boolean(visible) }),
+    modelsDiscover: providerId =>
+      call('app_models_discover', { providerId: providerId ?? null }),
     personalSnapshot: () => call('app_personal_snapshot'),
     scheduleCreate: ({
       id,
@@ -164,11 +235,18 @@ export function createKernelBridge(invoke, isAvailable) {
         bodyMarkdown: bodyMarkdown ?? body ?? '',
         tags: tags ?? [],
       }),
-    captureCreate: ({ id, sourceMessageId, messageId, contentRef, content }) =>
+    captureMediaPut: (mime, base64) => call('app_capture_media_put', { mime, base64 }),
+    captureMediaGet: (mediaId, captureId) => call('app_capture_media_get', { mediaId: mediaId || null, captureId: captureId || null }),
+    captureVisionTarget: () => call('app_capture_vision_target'),
+    captureRecognize: (mediaId, modelRef) => call('app_capture_recognize', { mediaId, modelRef }),
+    captureCreate: ({ id, sourceMessageId, messageId, contentRef, content, projectId, newProjectTitle, mediaId }) =>
       call('app_capture_create', {
         id,
         sourceMessageId: sourceMessageId ?? messageId ?? null,
         contentRef: contentRef ?? content ?? '',
+        projectId: projectId ?? null,
+        newProjectTitle: newProjectTitle ?? null,
+        mediaId: mediaId ?? null,
       }),
     memoryState: (id, newState) => call('app_memory_state', { id, newState }),
     decisionRecord: ({

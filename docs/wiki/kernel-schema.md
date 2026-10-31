@@ -513,3 +513,7 @@ HomeMessageContext必须由已认证且有会话访问授权的adapter构造；�
 - **`personal_ops_sync_outbox`（`0007.sql`，RV-13）**：
   - 当设备已配对远端 Home（`paired_home.is_some()`）时，Replica 上的日程、笔记、捕获、记忆、决定变更在同一 SQLite 事务内写入 `personal_ops_sync_outbox(sync_request_id, object_kind, object_id, expected_version, payload_json, payload_sha256, sync_state)`。
   - 重连同步时按 `rowid ASC` 顺序经 `HomeRequest::ReplicaPersonalOp` 提交给 Home `Store::receive_replica_personal_op_with_receipt`：Home 核对 `inbox_receipts` 幂等摘要与目标对象 `version`（若 `expected_version > 0` 且版本不匹配则写入 `rejected` 回执并返回 `StaleVersion`），成功后 Replica 调用 `LocalApp::ack_replica_personal_op` 标记 `'synced'`。
+
+### 9.4 本地捕获原图（迁移 0008）
+
+`capture_media(id SHA-256, mime, bytes, created_at)` 按内容去重保存原件；`capture_media_links(capture_id PRIMARY KEY, media_id)` 外键关联捕获与原图。原件接受 PNG/JPEG/WebP 格式签名与最多 8 MB 校验。`capture_with_image` 包装原有 `capture_with_project` 保存点；图片不存在、归属错误或相同 capture ID 指向不同图片均回滚。无破坏性迁移，不改变既有 CaptureItem/个人同步快照形状；原图及链接暂不跨 Home 同步。

@@ -1,9 +1,12 @@
 <script setup>
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import HomeConnection from './HomeConnection.vue';
+import CustomSelect from './components/CustomSelect.vue';
 import ScheduleView from './views/ScheduleView.vue';
 import WorkView from './views/WorkView.vue';
 import KnowledgeView from './views/KnowledgeView.vue';
+import { isBobNodeRuntime } from './http-bridge.mjs';
+import { loadClientState, saveClientState, chooseStartupConversation } from './client-view-state.mjs';
 import { bindViewport } from './viewport.mjs';
 import { createLayoutState, getProviderLogo } from './layout-mode.mjs';
 import { createOnlineWorkClient } from './online-client.mjs';
@@ -23,6 +26,9 @@ import {
 
 const { t, locale } = useI18n();
 const sessionId = ref(null);
+const browserClient = isBobNodeRuntime();
+let newConversationPending = false;
+const clientState = loadClientState();
 const messages = ref([]);
 const readiness = ref(null);
 const executions = ref([]);
@@ -69,6 +75,25 @@ const executionEnabled = computed(
     readiness.value?.execution_available === true,
 );
 const homeConfigured = computed(() => readiness.value?.mode === 'home_configured');
+const pairingStatusState = ref(null);
+const hasOnlineDeviceGroup = computed(() =>
+  (catalog.value?.device_groups || []).some(
+    g => g.availability_state === 'online' || g.immediate_execution_available,
+  ),
+);
+const devicePaired = computed(
+  () =>
+    homeConfigured.value ||
+    Boolean(onlineState.connected) ||
+    ['connected', 'confirmed', 'paired', 'home_ready'].includes(
+      pairingStatusState.value?.state,
+    ) ||
+    Boolean(pairingStatusState.value?.paired_home) ||
+    Boolean(pairingStatusState.value?.online_node) ||
+    hasOnlineDeviceGroup.value,
+);
+const homeReachable = ref(false);
+const deviceOnline = computed(() => homeReachable.value && !homeFault.value);
 const sendLabel = computed(() => executionEnabled.value || homeConfigured.value);
 const byMessage = computed(() => new Map(executions.value.map(run => [run.message_id, run])));
 
@@ -128,18 +153,24 @@ const personalFault = ref(null);
 
 const onlineClient = createOnlineWorkClient();
 const onlineState = reactive({
-  origin: 'https://agent.bobbik.org',
+  origin: 'https://bob-online.bobbik.org',
   clientInstanceId: `bob-client-${Math.random().toString(36).slice(2, 10)}-instance`,
   pairing: null,
   token: null,
+  hasToken: false,
   connected: false,
+  offlineCached: false,
   capabilities: null,
   projects: [],
   selectedProjectId: null,
   tasks: [],
   messages: [],
+  messagesNextAfter: 0,
+  messagesHasMore: false,
+  taskSnapshots: {},
   busy: false,
   error: null,
+  statusNotice: null,
 });
 
 // Legacy-aligned ModelHub state (13 providers, 199 visible models)
@@ -181,6 +212,7 @@ const modelHub = ref({
       kimi: 'default',
     },
     custom_models: [],
+    remote_nodes: [],
   },
   configured_keys: {
     deepseek: false,
@@ -211,6 +243,10 @@ const selectorProviderId = ref('deepseek');
 const modelSearchQuery = ref('');
 const quickSwitcherOpen = ref(false);
 const quickSwitcherProviderId = ref('deepseek');
+const quickSwitcherSearchQuery = ref('');
+const discoveringModels = ref(false);
+const quickPopoverRef = ref(null);
+const quickPillRef = ref(null);
 const keyInputs = reactive({});
 const customModelDraft = reactive({
   name: '',
@@ -303,7 +339,9 @@ const activeMainRole = computed(
 );
 
 const selectorProviders = computed(() => {
-  const list = [...(modelHub.value?.registry?.providers || [])];
+  const list = (modelHub.value?.registry?.providers || []).filter(
+    p => p.id !== 'offline' && p.id !== 'vertex_ai',
+  );
   if ((modelHub.value?.state?.custom_models || []).length > 0) {
     list.push({
       id: 'custom',
@@ -341,6 +379,21 @@ const currentSelectorModels = computed(() => {
   });
 });
 
+const currentSelectorHiddenMatches = computed(() => {
+  const prov = currentSelectorProvider.value;
+  const q = modelSearchQuery.value.trim().toLowerCase();
+  if (!prov || !q) return [];
+  return (prov.models || [])
+    .filter(m => {
+      if (m.visible !== false) return false;
+      return (
+        (m.name && m.name.toLowerCase().includes(q)) ||
+        (m.id && m.id.toLowerCase().includes(q))
+      );
+    })
+    .slice(0, 12);
+});
+
 const quickSwitcherProvider = computed(
   () =>
     selectorProviders.value.find(p => p.id === quickSwitcherProviderId.value) ||
@@ -351,12 +404,74 @@ const quickSwitcherProvider = computed(
 const quickSwitcherModels = computed(() => {
   const prov = quickSwitcherProvider.value;
   if (!prov) return [];
-  return (prov.models || []).filter(m => m.visible !== false);
+  const q = quickSwitcherSearchQuery.value.trim().toLowerCase();
+  return (prov.models || []).filter(m => {
+    if (m.visible === false) return false;
+    if (!q) return true;
+    return (
+      (m.name && m.name.toLowerCase().includes(q)) ||
+      (m.id && m.id.toLowerCase().includes(q))
+    );
+  });
+});
+
+const quickSwitcherHiddenMatches = computed(() => {
+  const prov = quickSwitcherProvider.value;
+  const q = quickSwitcherSearchQuery.value.trim().toLowerCase();
+  if (!prov || !q) return [];
+  return (prov.models || [])
+    .filter(m => {
+      if (m.visible !== false) return false;
+      return (
+        (m.name && m.name.toLowerCase().includes(q)) ||
+        (m.id && m.id.toLowerCase().includes(q))
+      );
+    })
+    .slice(0, 10);
 });
 
 function isKeyConfigured(providerId) {
   return Boolean(modelHub.value?.configured_keys?.[providerId]);
 }
+
+const selectorProviderOptions = computed(() =>
+  selectorProviders.value.map(prov => ({
+    value: prov.id,
+    label: `${prov.name} (${(prov.models || []).filter(m => m.visible !== false).length})${
+      isKeyConfigured(prov.id) ? ` [${t('keyInputConfigured')}]` : ''
+    }`,
+  })),
+);
+
+const variantOptions = computed(() => [
+  { value: 'default', label: t('variantDefault') },
+  { value: 'international', label: t('variantInternational') },
+  { value: 'coding', label: t('variantCoding') },
+]);
+
+const executionRouteOptions = computed(() => [
+  { value: 'auto', label: t('routeAuto') },
+  { value: 'direct_byok', label: t('routeDirectByok') },
+  { value: 'local_cli', label: t('routeLocalCli') },
+  { value: 'remote_home', label: t('routeRemoteHome') },
+]);
+
+const themeOptions = computed(() => [
+  { value: 'system', label: t('themeSystem') },
+  { value: 'light', label: t('themeLight') },
+  { value: 'dark', label: t('themeDark') },
+]);
+
+const languageOptions = computed(() => [
+  { value: 'zh-CN', label: t('chinese') },
+  { value: 'en-US', label: t('english') },
+]);
+
+const providerKindOptions = computed(() => [
+  { value: 'openai_compatible', label: t('providerOpenai') },
+  { value: 'anthropic_messages', label: t('providerAnthropic') },
+  { value: 'gemini_generate_content', label: t('providerGemini') },
+]);
 
 function toggleRoleEditor(roleKey) {
   if (editingRole.value === roleKey) {
@@ -445,6 +560,26 @@ function applyModelHubSnapshot(snap) {
       base_url: cm.baseUrl || cm.base_url,
     }));
   }
+  if (Array.isArray(snap.remoteNodes)) {
+    modelHub.value.state.remote_nodes = snap.remoteNodes;
+    const activeNode =
+      snap.remoteNodes.find(n => n.enabled !== false && (n.hasToken || n.token)) ||
+      snap.remoteNodes.find(n => n.enabled !== false);
+    if (activeNode && activeNode.baseUrl) {
+      if (!onlineState.connected) {
+        onlineState.origin = activeNode.baseUrl;
+        if (activeNode.selectedProjectId) {
+          onlineState.selectedProjectId = activeNode.selectedProjectId;
+        }
+        if (activeNode.hasToken || activeNode.token) {
+          onlineState.hasToken = true;
+          if (activeNode.token) onlineState.token = activeNode.token;
+          onlineState.connected = true;
+          void handleOnlineRefresh();
+        }
+      }
+    }
+  }
   if (snap.configured_keys || snap.providerKeys || snap.toolKeys) {
     modelHub.value.configured_keys = {
       ...modelHub.value.configured_keys,
@@ -532,6 +667,12 @@ async function clearProviderKey(providerId) {
 
 async function selectRoleModel(roleKey, providerObj, modelObj) {
   if (!providerObj || !modelObj) return;
+  if (modelObj.visible === false) {
+    modelObj.visible = true;
+    if (available && kernelBridge.modelVisibilitySet) {
+      await kernelBridge.modelVisibilitySet(providerObj.id, modelObj.id, true).catch(() => null);
+    }
+  }
   const payload = {
     role: roleKey,
     providerId: providerObj.id,
@@ -551,7 +692,25 @@ async function selectRoleModel(roleKey, providerObj, modelObj) {
   }
   editingRole.value = null;
   quickSwitcherOpen.value = false;
+  quickSwitcherSearchQuery.value = '';
   await reload();
+}
+
+async function discoverLatestModels(providerId = null) {
+  if (discoveringModels.value) return;
+  discoveringModels.value = true;
+  try {
+    if (available && kernelBridge.modelsDiscover) {
+      const snap = await kernelBridge.modelsDiscover(providerId).catch(() => null);
+      if (snap) {
+        applyModelHubSnapshot(snap);
+        return;
+      }
+    }
+    await loadModelHub();
+  } finally {
+    discoveringModels.value = false;
+  }
 }
 
 async function setProviderVariant(providerId, variant) {
@@ -745,18 +904,25 @@ async function handleCreateSchedule(payload) {
     if (available && kernelBridge.scheduleCreate) {
       await kernelBridge.scheduleCreate({
         id: payload.id,
+        projectId: payload.projectId ?? null,
+        taskId: payload.taskId ?? null,
         title: payload.title,
         kind: payload.kind ?? 'event',
         startAt: payload.startAt ?? payload.dueAtMs ?? Date.now(),
+        endAt: payload.endAt ?? null,
+        reminderAt: payload.reminderAt ?? null,
         notes: payload.notes,
       });
       await loadPersonalOps();
     } else {
       personalOps.value.schedules.unshift({
         id: payload.id,
+        project_id: payload.projectId ?? null,
+        task_id: payload.taskId ?? null,
         title: payload.title,
         kind: payload.kind ?? 'event',
         start_at: payload.startAt ?? payload.dueAtMs ?? Date.now(),
+        end_at: payload.endAt ?? null,
         status: 'scheduled',
         notes: payload.notes,
       });
@@ -766,6 +932,78 @@ async function handleCreateSchedule(payload) {
   } finally {
     personalBusy.value = false;
   }
+}
+
+async function handleCreateProjectTodo({ projectId, title }) {
+  if (!title) return;
+  await handleCreateSchedule({
+    id: `sched-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    projectId: projectId || null,
+    title,
+    kind: 'todo',
+    startAt: Date.now(),
+    notes: '',
+  });
+}
+
+async function handleStartTodoSession({ projectId, todo }) {
+  if (!todo) return;
+  const targetProjectId = projectId || todo.project_id;
+  if (!targetProjectId) {
+    activeDrawer.value = 'work';
+    return;
+  }
+  const existingConv = (catalog.value?.conversations || []).find(
+    c => c.project_id === targetProjectId,
+  );
+  const promptText = todo.notes ? `${todo.title}\n${todo.notes}` : todo.title;
+  if (existingConv) {
+    await handleWorkOpenConversation(existingConv.id);
+    draft.value = promptText;
+    controller.loadDraft(promptText, 0);
+  } else if (available && kernelBridge.createConversation) {
+    await flushCurrentViewState();
+    const cid = `conv-${crypto.randomUUID().slice(0, 8)}`;
+    const snap = await kernelBridge
+      .createConversation(cid, targetProjectId, todo.title.slice(0, 48))
+      .catch(() => null);
+    if (snap) {
+      applyCatalogPreferences(snap);
+      locallyAccepted.clear();
+      sessionId.value = cid;
+      newConversationPending = false;
+      clientState.selectedConversation = cid;
+      saveClientState(clientState);
+      draft.value = promptText;
+      controller.loadDraft(promptText, 0);
+      activeDrawer.value = 'chat';
+      settingsOpen.value = false;
+      navigationOpen.value = false;
+      await reload();
+    }
+  } else {
+    activeDrawer.value = 'chat';
+    draft.value = promptText;
+    controller.loadDraft(promptText, 0);
+  }
+}
+
+async function handleOpenProjectTodo(todo) {
+  if (!todo) return;
+  await handleStartTodoSession({ projectId: todo.project_id, todo });
+}
+
+async function handlePromoteTodoToProject(todo) {
+  if (!todo || !todo.title) return;
+  const pid = `proj-${crypto.randomUUID().slice(0, 8)}`;
+  if (available && kernelBridge.createProject) {
+    const snap = await kernelBridge.createProject(pid, todo.title).catch(() => null);
+    if (snap) applyCatalogPreferences(snap);
+  } else if (catalog.value?.projects) {
+    catalog.value.projects.push({ id: pid, title: todo.title });
+  }
+  todo.project_id = pid;
+  await handleStartTodoSession({ projectId: pid, todo });
 }
 
 async function handleUpdateScheduleStatus(payload) {
@@ -904,21 +1142,24 @@ async function handleUpdateDecision(payload) {
 }
 
 async function promoteConversationToWork() {
-  if (!available || !kernelBridge.createProject) {
+  if (!available) {
     activeDrawer.value = 'work';
     return;
   }
   personalFault.value = null;
   try {
+    await flushCurrentViewState();
     const title = currentConversation.value || t('newProject');
-    const pid = `proj-${crypto.randomUUID().slice(0, 8)}`;
-    const snap = await kernelBridge.createProject(pid, title);
-    if (snap) applyCatalogPreferences(snap);
-    if (kernelBridge.createConversation) {
-      const cid = `conv-${crypto.randomUUID().slice(0, 8)}`;
-      const snap2 = await kernelBridge.createConversation(cid, pid, title);
-      if (snap2) applyCatalogPreferences(snap2);
+    const existingPid = activeConversationItem.value?.project_id;
+    const pid = existingPid || `proj-${crypto.randomUUID().slice(0, 8)}`;
+    if (kernelBridge.promoteConversation && sessionId.value) {
+      const snap = await kernelBridge.promoteConversation(sessionId.value, pid, title);
+      if (snap) applyCatalogPreferences(snap);
+    } else if (kernelBridge.createProject) {
+      const snap = await kernelBridge.createProject(pid, title);
+      if (snap) applyCatalogPreferences(snap);
     }
+    await reload();
     activeDrawer.value = 'work';
   } catch (err) {
     personalFault.value = String(err?.message || err || 'PROJECT_CREATE_FAILED');
@@ -929,16 +1170,73 @@ function handleOnlineUpdateOrigin(val) {
   onlineState.origin = val;
 }
 
+async function persistOnlineNodeState(overrides = {}) {
+  if (!available || !kernelBridge.remoteNodeSave) return;
+  const baseUrl = (overrides.baseUrl ?? onlineState.origin ?? '').trim();
+  if (!baseUrl) return;
+  const snap = await kernelBridge.remoteNodeSave({
+    id: overrides.id || null,
+    label: overrides.label || baseUrl,
+    baseUrl,
+    token: overrides.token !== undefined ? overrides.token : null,
+    clearToken: Boolean(overrides.clearToken),
+    selectedProjectId:
+      overrides.selectedProjectId !== undefined
+        ? overrides.selectedProjectId
+        : onlineState.selectedProjectId,
+    enabled: overrides.enabled !== undefined ? overrides.enabled : true,
+  });
+  if (snap) {
+    applyModelHubSnapshot(snap);
+  }
+}
+
+async function handleOnlineSaveNode({ origin, token }) {
+  const cleanOrigin = (origin || onlineState.origin || '').trim();
+  if (!cleanOrigin) return;
+  onlineState.origin = cleanOrigin;
+  onlineState.error = null;
+  onlineState.statusNotice = null;
+  const cleanToken = (token || '').trim();
+  try {
+    await persistOnlineNodeState({
+      baseUrl: cleanOrigin,
+      token: cleanToken || null,
+      enabled: true,
+    });
+    if (cleanToken) {
+      onlineState.hasToken = true;
+      onlineState.connected = true;
+    }
+    if (onlineState.hasToken || onlineState.token) {
+      await handleOnlineRefresh();
+    }
+    void reload();
+  } catch (err) {
+    onlineState.error = String(err?.message || err || 'ONLINE_SAVE_FAILED');
+  }
+}
+
 async function handleOnlineBeginPairing() {
   if (onlineState.busy) return;
   onlineState.busy = true;
   onlineState.error = null;
+  onlineState.statusNotice = null;
   try {
-    onlineState.pairing = await onlineClient.beginPairing({
-      origin: onlineState.origin,
-      clientInstanceId: onlineState.clientInstanceId,
-      clientName: 'Bob Cross-Platform Client',
-    });
+    await persistOnlineNodeState({ baseUrl: onlineState.origin, enabled: true });
+    if (available && kernelBridge.onlineBeginPairing) {
+      onlineState.pairing = await kernelBridge.onlineBeginPairing({
+        origin: onlineState.origin,
+        clientInstanceId: onlineState.clientInstanceId,
+        clientName: 'Bob Cross-Platform Client',
+      });
+    } else {
+      onlineState.pairing = await onlineClient.beginPairing({
+        origin: onlineState.origin,
+        clientInstanceId: onlineState.clientInstanceId,
+        clientName: 'Bob Cross-Platform Client',
+      });
+    }
   } catch (err) {
     onlineState.error = String(err?.message || err || 'ONLINE_PAIRING_FAILED');
   } finally {
@@ -951,16 +1249,41 @@ async function handleOnlineExchangePairing() {
   onlineState.busy = true;
   onlineState.error = null;
   try {
-    const res = await onlineClient.exchangePairing({
-      origin: onlineState.pairing.origin || onlineState.origin,
-      pairingId: onlineState.pairing.pairing_id,
-      clientInstanceId: onlineState.clientInstanceId,
-      verifier: onlineState.pairing.verifier,
-    });
-    if (!res.pending && res.access_token) {
-      onlineState.token = res.access_token;
-      onlineState.connected = true;
-      await handleOnlineRefresh();
+    if (available && kernelBridge.onlineExchangePairing) {
+      const res = await kernelBridge.onlineExchangePairing({
+        origin: onlineState.pairing.origin || onlineState.origin,
+        pairingId: onlineState.pairing.pairing_id,
+        clientInstanceId: onlineState.clientInstanceId,
+        verifier: onlineState.pairing.verifier || null,
+      });
+      if (!res.pending && (res.connected || res.hasToken)) {
+        onlineState.hasToken = true;
+        onlineState.connected = true;
+        onlineState.pairing = null;
+        await loadModelHub();
+        await handleOnlineRefresh();
+        void reload();
+      }
+    } else {
+      const res = await onlineClient.exchangePairing({
+        origin: onlineState.pairing.origin || onlineState.origin,
+        pairingId: onlineState.pairing.pairing_id,
+        clientInstanceId: onlineState.clientInstanceId,
+        verifier: onlineState.pairing.verifier,
+      });
+      if (!res.pending && res.access_token) {
+        onlineState.token = res.access_token;
+        onlineState.hasToken = true;
+        onlineState.connected = true;
+        onlineState.pairing = null;
+        await persistOnlineNodeState({
+          baseUrl: onlineState.origin,
+          token: res.access_token,
+          enabled: true,
+        });
+        await handleOnlineRefresh();
+        void reload();
+      }
     }
   } catch (err) {
     onlineState.error = String(err?.message || err || 'ONLINE_EXCHANGE_FAILED');
@@ -969,68 +1292,175 @@ async function handleOnlineExchangePairing() {
   }
 }
 
+function applyOnlineSyncPayload(syncData) {
+  if (!syncData) return;
+  onlineState.connected = Boolean(syncData.connected);
+  onlineState.offlineCached = Boolean(syncData.offlineCached);
+  onlineState.capabilities = syncData.capabilities || null;
+  onlineState.projects = Array.isArray(syncData.projects) ? syncData.projects : [];
+  if (syncData.selectedProjectId) {
+    onlineState.selectedProjectId = syncData.selectedProjectId;
+  }
+  onlineState.tasks = Array.isArray(syncData.tasks) ? syncData.tasks : [];
+  onlineState.messages = Array.isArray(syncData.messages) ? syncData.messages : [];
+  onlineState.messagesNextAfter = Number(syncData.messagesNextAfter) || 0;
+  onlineState.messagesHasMore = Boolean(syncData.messagesHasMore);
+  onlineState.taskSnapshots = syncData.taskSnapshots || {};
+  if (syncData.syncError) {
+    onlineState.error = String(syncData.syncError);
+  }
+}
+
 async function handleOnlineRefresh() {
-  if (!onlineState.token) return;
+  if (!onlineState.hasToken && !onlineState.token) return;
   onlineState.busy = true;
   onlineState.error = null;
   try {
-    const [caps, projs] = await Promise.all([
-      onlineClient.fetchCapabilities({ origin: onlineState.origin, token: onlineState.token }),
-      onlineClient.fetchProjects({ origin: onlineState.origin, token: onlineState.token }),
-    ]);
-    onlineState.capabilities = caps;
-    onlineState.projects = Array.isArray(projs?.items) ? projs.items : [];
-    if (onlineState.projects.length > 0 && !onlineState.selectedProjectId) {
-      await handleOnlineSelectProject(onlineState.projects[0].id);
+    if (available && kernelBridge.onlineSync) {
+      const syncData = await kernelBridge.onlineSync({
+        origin: onlineState.origin,
+        projectId: onlineState.selectedProjectId || null,
+        after: 0,
+      });
+      applyOnlineSyncPayload(syncData);
+    } else if (onlineState.token) {
+      const [caps, projs] = await Promise.all([
+        onlineClient.fetchCapabilities({ origin: onlineState.origin, token: onlineState.token }),
+        onlineClient.fetchProjects({ origin: onlineState.origin, token: onlineState.token }),
+      ]);
+      onlineState.capabilities = caps;
+      onlineState.projects = Array.isArray(projs?.items) ? projs.items : [];
+      if (onlineState.projects.length > 0 && !onlineState.selectedProjectId) {
+        await handleOnlineSelectProject(onlineState.projects[0].id);
+      }
     }
   } catch (err) {
-    onlineState.error = String(err?.message || err || 'ONLINE_REFRESH_FAILED');
+    const msg = String(err?.message || err || 'ONLINE_REFRESH_FAILED');
+    onlineState.error = msg;
+    if (msg.includes('CLIENT_CREDENTIAL_INVALID') || msg.includes('401') || msg.includes('403')) {
+      onlineState.connected = false;
+      onlineState.hasToken = false;
+    }
   } finally {
     onlineState.busy = false;
   }
 }
 
 async function handleOnlineSelectProject(projectId) {
-  if (!onlineState.token || !projectId) return;
+  if ((!onlineState.hasToken && !onlineState.token) || !projectId) return;
   onlineState.selectedProjectId = projectId;
+  void persistOnlineNodeState({ selectedProjectId: projectId }).catch(() => {});
   try {
-    const [tasksRes, msgsRes] = await Promise.all([
-      onlineClient.fetchProjectTasks({
+    if (available && kernelBridge.onlineSync) {
+      const syncData = await kernelBridge.onlineSync({
         origin: onlineState.origin,
-        token: onlineState.token,
         projectId,
-      }),
-      onlineClient.fetchProjectMessages({
-        origin: onlineState.origin,
-        token: onlineState.token,
-        projectId,
-      }),
-    ]);
-    onlineState.tasks = Array.isArray(tasksRes?.items) ? tasksRes.items : [];
-    onlineState.messages = Array.isArray(msgsRes?.items) ? msgsRes.items : [];
+        after: 0,
+      });
+      applyOnlineSyncPayload(syncData);
+    } else if (onlineState.token) {
+      const [tasksRes, msgsRes] = await Promise.all([
+        onlineClient.fetchProjectTasks({
+          origin: onlineState.origin,
+          token: onlineState.token,
+          projectId,
+        }),
+        onlineClient.fetchProjectMessages({
+          origin: onlineState.origin,
+          token: onlineState.token,
+          projectId,
+        }),
+      ]);
+      onlineState.tasks = Array.isArray(tasksRes?.items) ? tasksRes.items : [];
+      onlineState.messages = Array.isArray(msgsRes?.items) ? msgsRes.items : [];
+    }
   } catch (err) {
     onlineState.error = String(err?.message || err || 'ONLINE_PROJECT_READ_FAILED');
   }
 }
 
-async function handleOnlineRevoke() {
-  if (!onlineState.token) return;
-  onlineState.busy = true;
+async function handleOnlineLoadMoreMessages({ projectId, after }) {
+  if ((!onlineState.hasToken && !onlineState.token) || !projectId) return;
   try {
-    await onlineClient.revokeSelf({ origin: onlineState.origin, token: onlineState.token });
-  } catch {
-    // Clear local session token even if remote already expired/revoked
+    if (available && kernelBridge.onlineSync) {
+      const prevMsgs = [...onlineState.messages];
+      const syncData = await kernelBridge.onlineSync({
+        origin: onlineState.origin,
+        projectId,
+        after: Number(after) || onlineState.messagesNextAfter || 0,
+      });
+      const nextBatch = Array.isArray(syncData?.messages) ? syncData.messages : [];
+      const seenSeq = new Set(prevMsgs.map(m => m.sequence));
+      for (const m of nextBatch) {
+        if (!seenSeq.has(m.sequence)) prevMsgs.push(m);
+      }
+      onlineState.messages = prevMsgs;
+      onlineState.messagesNextAfter = Number(syncData?.messagesNextAfter) || onlineState.messagesNextAfter;
+      onlineState.messagesHasMore = Boolean(syncData?.messagesHasMore);
+    }
+  } catch (err) {
+    onlineState.error = String(err?.message || err || 'ONLINE_MESSAGES_PAGE_FAILED');
+  }
+}
+
+async function handleOnlineSubmitOperation(payload) {
+  if (!payload || onlineState.busy) return;
+  onlineState.busy = true;
+  onlineState.error = null;
+  try {
+    if (available && kernelBridge.onlineSubmitOperation) {
+      await kernelBridge.onlineSubmitOperation({
+        origin: onlineState.origin,
+        operationKind: payload.operationKind || 'continue_task',
+        projectId: payload.projectId || onlineState.selectedProjectId,
+        taskId: payload.taskId || null,
+        prompt: payload.prompt || null,
+        parentVersionId: payload.parentVersionId || null,
+      });
+      await handleOnlineRefresh();
+      await reload();
+    }
+  } catch (err) {
+    onlineState.error = String(err?.message || err || 'ONLINE_OPERATION_FAILED');
   } finally {
+    onlineState.busy = false;
+  }
+}
+
+async function handleOnlineRevoke(localOnly = false) {
+  onlineState.busy = true;
+  onlineState.error = null;
+  try {
+    if (available && kernelBridge.onlineRevoke) {
+      const res = await kernelBridge.onlineRevoke({
+        origin: onlineState.origin,
+        localOnly: Boolean(localOnly),
+      });
+      if (!localOnly && res && !res.remoteRevoked && res.revokeError) {
+        onlineState.statusNotice = `Local credential cleared; remote revoke reported: ${res.revokeError}`;
+      } else {
+        onlineState.statusNotice = null;
+      }
+    } else if (!localOnly && onlineState.token) {
+      await onlineClient.revokeSelf({ origin: onlineState.origin, token: onlineState.token });
+    }
+  } catch (err) {
+    onlineState.statusNotice = String(err?.message || err || 'ONLINE_REVOKE_NOTICE');
+  } finally {
+    void persistOnlineNodeState({ clearToken: true, enabled: false }).catch(() => {});
     onlineState.token = null;
+    onlineState.hasToken = false;
     onlineState.connected = false;
+    onlineState.offlineCached = false;
     onlineState.pairing = null;
     onlineState.projects = [];
     onlineState.tasks = [];
     onlineState.messages = [];
+    onlineState.taskSnapshots = {};
     onlineState.busy = false;
   }
 }
-const handleOnlineDisconnect = handleOnlineRevoke;
+const handleOnlineDisconnect = () => handleOnlineRevoke(false);
 
 async function handleWorkCreateProject(title) {
   if (!title) return;
@@ -1085,8 +1515,17 @@ async function switchPrimaryDrawer(drawer) {
   previousNonSettingsDrawer.value = drawer;
   activeDrawer.value = drawer;
   settingsOpen.value = false;
-  if (drawer === 'schedule' || drawer === 'knowledge') {
+  if (drawer === 'schedule' || drawer === 'knowledge' || drawer === 'work') {
+    if (available && kernelBridge.syncHome) {
+      void kernelBridge.syncHome().then(() => {
+        void loadModelHub();
+        void loadPersonalOps();
+      }).catch(() => {});
+    }
     await loadPersonalOps();
+    if (drawer === 'work') {
+      await loadModelHub();
+    }
   }
 }
 
@@ -1110,22 +1549,19 @@ function toggleSettingsHome() {
 
 async function switchSettingsTab(tab) {
   settingsTab.value = tab;
+  settingsView.value = 'home';
   if (tab === 'connection') {
-    await openDevices();
+    await nextTick();
+    await devicePanel.value?.openDetails();
   } else if (tab === 'model') {
-    settingsView.value = 'home';
     await loadModelHub();
   } else if (tab === 'workspace') {
-    settingsView.value = 'home';
     await loadPersonalOps();
   } else if (tab === 'tasks') {
-    settingsView.value = 'home';
     if (available && sessionId.value && kernelBridge.routeGet) {
       const r = await kernelBridge.routeGet(sessionId.value).catch(() => null);
       if (r) executionRoute.value = r;
     }
-  } else {
-    settingsView.value = 'home';
   }
 }
 
@@ -1134,7 +1570,7 @@ async function openDevices() {
     previousNonSettingsDrawer.value = activeDrawer.value;
   }
   activeDrawer.value = 'settings';
-  settingsView.value = 'device';
+  settingsView.value = 'home';
   settingsTab.value = 'connection';
   settingsOpen.value = true;
   await nextTick();
@@ -1249,6 +1685,7 @@ const controller = createSendController({
 });
 
 function scheduleDraftSave(convId, text) {
+  if (newConversationPending) { clientState.blankDraft = text; saveClientState(clientState); return; }
   if (!available || !convId || !kernelBridge.saveViewState) return;
   if (draftSaveTimer) clearTimeout(draftSaveTimer);
   draftSaveTimer = setTimeout(() => {
@@ -1272,7 +1709,7 @@ function focusComposer() {
 }
 
 function onHistoryScroll() {
-  if (!available || !sessionId.value || !historyRegion.value || !kernelBridge.saveViewState) return;
+  if (newConversationPending || !available || !sessionId.value || !historyRegion.value || !kernelBridge.saveViewState) return;
   const offset = Math.max(0, Math.round(historyRegion.value.scrollTop));
   const convId = sessionId.value;
   if (scrollSaveTimer) clearTimeout(scrollSaveTimer);
@@ -1294,30 +1731,52 @@ function applyCatalogPreferences(snap) {
   if (snap.preferences?.sidebar_group_mode) {
     sidebarGroupMode.value = snap.preferences.sidebar_group_mode;
   }
+  if (snap.preferences?.locale === 'zh-CN' || snap.preferences?.locale === 'en-US') {
+    locale.value = snap.preferences.locale;
+  }
   if (snap.preferences?.theme) {
     theme.value = snap.preferences.theme;
     applyTheme(theme.value);
   }
 }
 
+let syncFailureStreak = 0;
+let nextAllowedSyncAt = 0;
+
 const reload = singleFlight(async () => {
   if (!sessionId.value || disposed) return;
-  void kernelBridge
-    .syncHome()
-    .then(status => {
-      if (status !== 'sync_in_progress') homeFault.value = false;
-    })
-    .catch(() => {
-      homeFault.value = true;
-    });
+  const loadingSession = sessionId.value;
+  if (Date.now() >= nextAllowedSyncAt) {
+    void kernelBridge
+      .syncHome()
+      .then(status => {
+        if (status !== 'sync_in_progress') {
+          syncFailureStreak = 0;
+          nextAllowedSyncAt = 0;
+          homeFault.value = false;
+          if (status === 'sync_checked') {
+            homeReachable.value = true;
+            void loadModelHub();
+            void loadPersonalOps();
+          }
+        }
+      })
+      .catch(() => {
+        syncFailureStreak += 1;
+        const backoffMs = Math.min(60000, 3000 * Math.pow(2, syncFailureStreak - 1));
+        nextAllowedSyncAt = Date.now() + backoffMs;
+        homeFault.value = true;
+      });
+  }
   const tasks = [
-    kernelBridge.history(sessionId.value),
+    newConversationPending ? Promise.resolve([]) : kernelBridge.history(loadingSession),
     kernelBridge.readiness(),
-    kernelBridge.executions(sessionId.value),
+    newConversationPending ? Promise.resolve([]) : kernelBridge.executions(loadingSession),
     kernelBridge.catalog ? kernelBridge.catalog() : Promise.resolve(null),
+    kernelBridge.pairingStatus ? kernelBridge.pairingStatus() : Promise.resolve(null),
   ];
   const results = await Promise.allSettled(tasks);
-  if (disposed) return;
+  if (disposed || loadingSession !== sessionId.value) return;
   const follow = nearBottom();
   if (results[0].status === 'fulfilled') {
     const stored = results[0].value;
@@ -1327,9 +1786,13 @@ const reload = singleFlight(async () => {
   } else {
     fault.value = 'historyFailed';
   }
-  if (results[1].status === 'fulfilled') readiness.value = results[1].value;
+  if (results[1].status === 'fulfilled') {
+    readiness.value = results[1].value;
+    if (browserClient) homeReachable.value = true;
+  }
   else {
     readiness.value = null;
+    homeReachable.value = false;
     fault.value ||= 'statusFailed';
   }
   if (results[2].status === 'fulfilled') {
@@ -1347,6 +1810,9 @@ const reload = singleFlight(async () => {
   if (results[3].status === 'fulfilled' && results[3].value) {
     applyCatalogPreferences(results[3].value);
   }
+  if (results[4]?.status === 'fulfilled' && results[4].value) {
+    pairingStatusState.value = results[4].value;
+  }
   await nextTick();
   if (follow && historyRegion.value) {
     historyRegion.value.scrollTop = historyRegion.value.scrollHeight;
@@ -1354,7 +1820,7 @@ const reload = singleFlight(async () => {
 });
 
 async function flushCurrentViewState() {
-  if (!available || !sessionId.value || !kernelBridge.saveViewState) return;
+  if (newConversationPending || !available || !sessionId.value || !kernelBridge.saveViewState) return;
   if (draftSaveTimer) {
     clearTimeout(draftSaveTimer);
     draftSaveTimer = null;
@@ -1379,6 +1845,9 @@ async function selectConversation(targetId) {
   await flushCurrentViewState();
   locallyAccepted.clear();
   sessionId.value = targetId;
+  newConversationPending = false;
+  clientState.selectedConversation = targetId;
+  saveClientState(clientState);
   if (available && kernelBridge.selectConversation) {
     const snap = await kernelBridge.selectConversation(targetId).catch(() => null);
     if (snap) applyCatalogPreferences(snap);
@@ -1474,7 +1943,15 @@ async function startup() {
   }
   try {
     const state = await kernelBridge.bootstrap();
-    sessionId.value = state.session_id;
+    const initialCatalog = await kernelBridge.catalog();
+    applyCatalogPreferences(initialCatalog);
+    const selected = browserClient ? chooseStartupConversation(clientState, initialCatalog) : state.session_id;
+    newConversationPending = !selected;
+    sessionId.value = selected || `conv-${crypto.randomUUID()}`;
+    if (newConversationPending) {
+      draft.value = clientState.blankDraft || '';
+      controller.loadDraft(draft.value, 0);
+    }
     await reload();
     await loadModelHub();
     await loadPersonalOps();
@@ -1497,7 +1974,14 @@ async function send() {
   const sentText = draft.value;
   const shouldExecute = executionEnabled.value;
   try {
+    if (newConversationPending) {
+      await kernelBridge.createConversation(sessionId.value, null, sentText.trim().slice(0, 60));
+      newConversationPending = false;
+      clientState.selectedConversation = sessionId.value;
+      saveClientState(clientState);
+    }
     const receipt = await controller.send();
+    if (receipt) { clientState.blankDraft = ''; saveClientState(clientState); }
     if (receipt && !messages.value.some(message => message.id === receipt.message_id)) {
       const message = {
         id: receipt.message_id,
@@ -1558,10 +2042,246 @@ const statusKeys = {
   needs_attention: 'attention',
 };
 
+// Floating QuickNote Bubble (FAB) & QuickNote Overlay (ported from legacy bob-agent)
+const quickNoteOpen = ref(false);
+const quickNoteText = ref(clientState.quickNote?.text || '');
+const quickNoteProject = ref(clientState.quickNote?.project || '');
+const quickNoteProjectTitle = ref(clientState.quickNote?.title || '');
+const quickNoteBusy = ref(false);
+const quickNoteError = ref(false);
+let quickNotePending = clientState.quickNote?.pending || null;
+
+const quickNoteMediaId = ref(clientState.quickNote?.mediaId || '');
+const quickNoteImage = ref('');
+const quickNoteImageBusy = ref(false);
+const quickNoteImageError = ref('');
+const quickNoteSuggestion = ref(clientState.quickNote?.suggestion || '');
+const quickNoteVisionTarget = ref(null);
+const quickNoteRecognizing = ref(false);
+const quickNoteFileRef = ref(null);
+const quickNoteCameraRef = ref(null);
+let quickNoteImageGeneration = 0;
+const quickNoteSaved = ref(false);
+const quickNoteInputRef = ref(null);
+function persistQuickNote() {
+  clientState.quickNote = { text: quickNoteText.value, project: quickNoteProject.value,
+    title: quickNoteProjectTitle.value, pending: quickNotePending, mediaId: quickNoteMediaId.value, suggestion: quickNoteSuggestion.value };
+  saveClientState(clientState);
+}
+watch([quickNoteText, quickNoteProject, quickNoteProjectTitle, quickNoteMediaId, quickNoteSuggestion], () => {
+  quickNoteSaved.value = false;
+  persistQuickNote();
+}, { flush: 'sync' });
+const fabPos = reactive({
+  x: -1,
+  y: 120,
+  isRight: true,
+});
+const isDraggingFab = ref(false);
+let fabDragMoved = false;
+let fabStartX = 0;
+let fabStartY = 0;
+let fabInitialX = 0;
+let fabInitialY = 0;
+
+function onFabPointerDown(event) {
+  isDraggingFab.value = true;
+  fabDragMoved = false;
+  fabStartX = event.clientX;
+  fabStartY = event.clientY;
+  const rect = event.currentTarget.getBoundingClientRect();
+  fabInitialX = rect.left;
+  fabInitialY = rect.top;
+  try {
+    event.currentTarget.setPointerCapture(event.pointerId);
+  } catch {
+    // ignore in synthetic pointer events
+  }
+}
+
+function onFabPointerMove(event) {
+  if (!isDraggingFab.value) return;
+  const dx = event.clientX - fabStartX;
+  const dy = event.clientY - fabStartY;
+  if (!fabDragMoved && (Math.abs(dx) > 15 || Math.abs(dy) > 15)) {
+    fabDragMoved = true;
+  }
+  if (fabDragMoved) {
+    fabPos.x = fabInitialX + dx;
+    fabPos.y = Math.max(48, Math.min(window.innerHeight - 96, fabInitialY + dy));
+  }
+}
+
+function onFabPointerUp(event) {
+  if (!isDraggingFab.value) return;
+  isDraggingFab.value = false;
+  try {
+    event.currentTarget.releasePointerCapture(event.pointerId);
+  } catch {
+    // ignore
+  }
+  if (fabDragMoved) {
+    const midX = window.innerWidth / 2;
+    fabPos.isRight = fabPos.x + 22 >= midX;
+    fabPos.x = -1;
+  } else {
+    void openQuickNoteOverlay();
+  }
+}
+
+async function openQuickNoteOverlay() {
+  quickNoteOpen.value = true;
+  quickNoteSaved.value = false;
+  await nextTick();
+  quickNoteInputRef.value?.focus();
+  if (quickNoteMediaId.value && !quickNoteImage.value) {
+    try {
+      const image = await kernelBridge.captureMediaGet(quickNoteMediaId.value);
+      quickNoteImage.value = `data:${image.mime};base64,${image.base64}`;
+    } catch { quickNoteImageError.value = 'captureImageMissing'; }
+  }
+  void loadCaptureVisionTarget();
+}
+async function loadCaptureVisionTarget() {
+  try { quickNoteVisionTarget.value = await kernelBridge.captureVisionTarget(); }
+  catch { quickNoteVisionTarget.value = null; }
+}
+async function selectCaptureImage(event) {
+  const file = event.target.files?.[0];
+  event.target.value = '';
+  if (!file || quickNoteBusy.value || quickNoteImageBusy.value || quickNoteRecognizing.value) return;
+  quickNoteImageError.value = '';
+  if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type) || file.size > 8 * 1024 * 1024) {
+    quickNoteImageError.value = 'captureImageInvalid'; return;
+  }
+  const generation = ++quickNoteImageGeneration;
+  quickNoteImageBusy.value = true;
+  try {
+    const data = await new Promise((resolve, reject) => {
+      const reader = new FileReader(); reader.onload = () => resolve(reader.result);
+      reader.onerror = reject; reader.readAsDataURL(file);
+    });
+    await new Promise((resolve, reject) => {
+      const image = new Image(); image.onload = () => image.naturalWidth * image.naturalHeight <= 40000000 ? resolve() : reject();
+      image.onerror = reject; image.src = data;
+    });
+    const stored = await kernelBridge.captureMediaPut(file.type, data.split(',')[1]);
+    if (generation !== quickNoteImageGeneration) return;
+    quickNoteMediaId.value = stored.id;
+    quickNoteImage.value = data;
+    quickNoteSuggestion.value = '';
+    quickNoteSaved.value = false;
+  } catch { quickNoteImageError.value = 'captureImageSaveFailed'; }
+  finally { quickNoteImageBusy.value = false; }
+}
+function removeCaptureImage() {
+  if (quickNoteBusy.value || quickNoteImageBusy.value || quickNoteRecognizing.value) return;
+  ++quickNoteImageGeneration;
+  quickNoteMediaId.value = ''; quickNoteImage.value = ''; quickNoteSuggestion.value = '';
+  quickNoteImageError.value = '';
+}
+async function recognizeCaptureImage() {
+  if (!quickNoteMediaId.value || !quickNoteVisionTarget.value || quickNoteRecognizing.value || quickNoteBusy.value) return;
+  const id = quickNoteMediaId.value;
+  quickNoteRecognizing.value = true; quickNoteImageError.value = '';
+  try {
+    const result = await kernelBridge.captureRecognize(id, quickNoteVisionTarget.value.model_ref);
+    if (id === quickNoteMediaId.value) quickNoteSuggestion.value = result.text;
+  } catch { quickNoteImageError.value = 'captureRecognitionFailed'; }
+  finally { quickNoteRecognizing.value = false; }
+}
+function applyCaptureSuggestion() {
+  quickNoteText.value = [quickNoteText.value.trim(), quickNoteSuggestion.value.trim()].filter(Boolean).join('\n\n');
+  quickNoteSuggestion.value = '';
+}
+
+async function submitQuickNote() {
+  const content = quickNoteText.value.trim() || (quickNoteMediaId.value ? t('capturePhotoOnly') : '');
+  if (!content || quickNoteBusy.value || quickNoteImageBusy.value || quickNoteRecognizing.value) return;
+  quickNoteBusy.value = true;
+  quickNoteError.value = false;
+  const signature = JSON.stringify([content, quickNoteProject.value, quickNoteProjectTitle.value, quickNoteMediaId.value]);
+  if (!quickNotePending || quickNotePending.signature !== signature) {
+    quickNotePending = { signature, id: `cap-${crypto.randomUUID()}`, projectId:
+      quickNoteProject.value === '__new' ? `proj-${crypto.randomUUID()}` : quickNoteProject.value };
+  }
+  try {
+    if (!available) throw new Error('NATIVE_HOST_REQUIRED');
+    if (quickNoteProject.value === '__new' && !quickNoteProjectTitle.value.trim()) {
+      throw new Error('PROJECT_TITLE_REQUIRED');
+    }
+    const pending = quickNotePending;
+    persistQuickNote();
+    await kernelBridge.captureCreate({ id: pending.id, content, mediaId: quickNoteMediaId.value || null,
+      projectId: pending.projectId || null,
+      newProjectTitle: quickNoteProject.value === '__new' ? quickNoteProjectTitle.value.trim() : null });
+    if (signature === JSON.stringify([quickNoteText.value.trim() || (quickNoteMediaId.value ? t('capturePhotoOnly') : ''), quickNoteProject.value, quickNoteProjectTitle.value, quickNoteMediaId.value])) {
+      quickNoteMediaId.value = ''; quickNoteImage.value = ''; quickNoteSuggestion.value = '';
+      quickNoteText.value = '';
+      quickNoteProject.value = '';
+      quickNoteProjectTitle.value = '';
+      quickNotePending = null;
+    }
+    persistQuickNote();
+    quickNoteSaved.value = true;
+    void loadPersonalOps();
+    void reload();
+  } catch {
+    quickNoteError.value = true;
+  } finally {
+    quickNoteBusy.value = false;
+  }
+}
+
+function handleGlobalPointerDown(event) {
+  if (!quickSwitcherOpen.value) return;
+  const target = event.target;
+  if (
+    quickPopoverRef.value?.contains(target) ||
+    quickPillRef.value?.contains(target)
+  ) {
+    return;
+  }
+  quickSwitcherOpen.value = false;
+  quickSwitcherSearchQuery.value = '';
+}
+
+function handleGlobalKeydown(event) {
+  if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === 'n') {
+    event.preventDefault();
+    if (quickNoteOpen.value) {
+      quickNoteOpen.value = false;
+    } else {
+      void openQuickNoteOverlay();
+    }
+    return;
+  }
+  if (event.key === 'Escape' && quickNoteOpen.value) {
+    event.preventDefault();
+    quickNoteOpen.value = false;
+    return;
+  }
+  if (event.key === 'Escape' && quickSwitcherOpen.value) {
+    event.preventDefault();
+    quickSwitcherOpen.value = false;
+    quickSwitcherSearchQuery.value = '';
+  }
+}
+
+function handleVisibilityChange() {
+  if (typeof document !== 'undefined' && !document.hidden && !disposed && available) {
+    nextAllowedSyncAt = 0;
+    void reload();
+  }
+}
+
 onMounted(async () => {
   releaseViewport = bindViewport(window, document.documentElement);
   updateLayoutState();
   window.addEventListener('resize', updateLayoutState, { passive: true });
+  document.addEventListener('pointerdown', handleGlobalPointerDown, true);
+  document.addEventListener('keydown', handleGlobalKeydown);
+  document.addEventListener('visibilitychange', handleVisibilityChange);
   await startup();
   if (available) {
     deviceCapabilities.value = await kernelBridge.pairingCapabilities().catch(() => null);
@@ -1570,10 +2290,12 @@ onMounted(async () => {
     let idleTick = 0;
     poll = setInterval(() => {
       if (typeof document !== 'undefined' && document.hidden) return;
-      const isIdleView =
-        activeDrawer.value !== 'chat' && !activeExecution.value && !dispatchPending.value;
-      if (isIdleView) {
-        idleTick = (idleTick + 1) % 4;
+      const isActiveExecution = Boolean(
+        activeExecution.value || dispatchPending.value || saving.value,
+      );
+      if (!isActiveExecution) {
+        // RV-18: Idle backoff to 15s (10 ticks * 1500ms) across all views when no execution is active
+        idleTick = (idleTick + 1) % 10;
         if (idleTick !== 0) return;
       } else {
         idleTick = 0;
@@ -1589,6 +2311,11 @@ onUnmounted(() => {
   if (scrollSaveTimer) clearTimeout(scrollSaveTimer);
   if (typeof window !== 'undefined') {
     window.removeEventListener('resize', updateLayoutState);
+  }
+  if (typeof document !== 'undefined') {
+    document.removeEventListener('pointerdown', handleGlobalPointerDown, true);
+    document.removeEventListener('keydown', handleGlobalKeydown);
+    document.removeEventListener('visibilitychange', handleVisibilityChange);
   }
   releaseViewport();
   if (poll) clearInterval(poll);
@@ -1612,61 +2339,59 @@ onUnmounted(() => {
         :aria-expanded="navigationOpen"
         @click="navigationOpen = true"
       >
-        ☰
+        <svg class="topbar-svg" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M4 6h16M4 12h16M4 18h16" />
+        </svg>
         <span v-if="totalUnreadCount > 0" class="unread-dot" aria-hidden="true"></span>
       </button>
-      <span class="page-name">{{ currentConversation }}</span>
+      <span class="page-name">
+        {{
+          settingsOpen || activeDrawer === 'settings'
+            ? t(
+                settingsView === 'provider'
+                  ? 'directModelProvider'
+                  : settingsTab === 'connection'
+                    ? 'deviceAndConnection'
+                    : 'settings',
+              )
+            : activeDrawer === 'schedule'
+              ? t('scheduleViewTitle')
+              : activeDrawer === 'work'
+                ? t('workViewTitle')
+                : activeDrawer === 'knowledge'
+                  ? t('knowledgeViewTitle')
+                  : currentConversation
+        }}
+      </span>
       <button
-        v-if="activeDrawer === 'chat'"
+        v-if="activeDrawer === 'chat' && !settingsOpen"
         type="button"
         class="mini-ghost-btn"
         :title="t('promoteToWorkBtn')"
         @click="promoteConversationToWork"
       >
-        💼 {{ t('promoteToWorkBtn') }}
+        {{ t('promoteToWorkBtn') }}
       </button>
-      <span class="layout-mode-badge" aria-hidden="true">
-        {{
-          t(
-            layoutState.layoutMode === 'desktop-wide'
-              ? 'layoutBadgeDesktop'
-              : 'layoutBadgeMobile',
-          )
-        }}
-      </span>
       <button
         type="button"
         class="device-indicator"
-        :class="{ paired: homeConfigured, unconfirmed: homeFault }"
+        :class="{
+          paired: devicePaired,
+          online: deviceOnline,
+          unconfirmed: homeFault || (devicePaired && !deviceOnline),
+        }"
         :aria-label="
           t(
             homeFault
               ? 'deviceStatusUnknown'
-              : homeConfigured
+              : devicePaired
                 ? 'devicePairedDetails'
                 : 'connectDeviceDetails',
           )
         "
         @click="openDevices"
       >
-        <svg v-if="deviceCapabilities?.can_scan" viewBox="0 0 24 24" aria-hidden="true">
-          <rect x="3" y="3" width="18" height="13" rx="2" />
-          <path d="M8 21h8M12 16v5" />
-        </svg>
-        <svg v-else viewBox="0 0 24 24" aria-hidden="true">
-          <rect x="6" y="2" width="12" height="20" rx="2" />
-          <path d="M10 18h4" />
-        </svg>
         <span class="device-dot" aria-hidden="true"></span>
-      </button>
-      <button
-        type="button"
-        class="icon-button settings-toggle"
-        :aria-label="t('settings')"
-        :aria-expanded="settingsOpen"
-        @click="toggleSettingsHome"
-      >
-        ⋯
       </button>
     </header>
 
@@ -1674,63 +2399,23 @@ onUnmounted(() => {
       v-show="settingsOpen"
       ref="settingsPanel"
       class="settings-panel"
-      role="dialog"
-      aria-modal="true"
       :aria-label="
         t(
-          settingsView === 'device'
-            ? 'deviceAndConnection'
-            : settingsView === 'provider'
-              ? 'directModelProvider'
+          settingsView === 'provider'
+            ? 'directModelProvider'
+            : settingsTab === 'connection'
+              ? 'deviceAndConnection'
               : 'settings',
         )
       "
       @keydown="settingsKeydown"
     >
-      <div class="settings-heading">
-        <div class="settings-brand-row">
-          <h2>
-            {{
-              t(
-                settingsView === 'device'
-                  ? 'deviceAndConnection'
-                  : settingsView === 'provider'
-                    ? 'directModelProvider'
-                    : 'settings',
-              )
-            }}
-          </h2>
-        </div>
-        <div class="settings-heading-actions">
-          <button
-            type="button"
-            class="settings-close-btn"
-            :aria-label="t('closeSettings')"
-            @click="settingsOpen = false"
-          >
-            ×
-          </button>
-          <button
-            v-if="settingsView !== 'home'"
-            type="button"
-            class="back-settings-btn"
-            :aria-label="t('backToSettings')"
-            @click="
-              settingsView = 'home';
-              settingsTab = 'model';
-            "
-          >
-            ← {{ t('settings') }}
-          </button>
-        </div>
-      </div>
-
-      <!-- Legacy-aligned Top 6-Tab Bar: 模型 | 连接 | 工作间 | 任务 | 外观 | 关于 -->
+      <!-- Legacy-aligned Flush Top 5-Tab Bar: 模型 | 连接 | 工作间 | 任务 | 外观 -->
       <nav class="settings-top-tabs" role="tablist">
         <button
           type="button"
           class="settings-top-tab"
-          :class="{ active: settingsTab === 'model' && settingsView !== 'device' }"
+          :class="{ active: settingsTab === 'model' }"
           @click="switchSettingsTab('model')"
         >
           <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -1742,7 +2427,7 @@ onUnmounted(() => {
         <button
           type="button"
           class="settings-top-tab"
-          :class="{ active: settingsTab === 'connection' || settingsView === 'device' }"
+          :class="{ active: settingsTab === 'connection' }"
           @click="switchSettingsTab('connection')"
         >
           <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -1786,24 +2471,12 @@ onUnmounted(() => {
           </svg>
           <span>{{ t('tabAppearance') }}</span>
         </button>
-        <button
-          type="button"
-          class="settings-top-tab"
-          :class="{ active: settingsTab === 'about' && settingsView === 'home' }"
-          @click="switchSettingsTab('about')"
-        >
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <circle cx="12" cy="12" r="10" />
-            <path d="M12 16v-4M12 8h.01" />
-          </svg>
-          <span>{{ t('tabAbout') }}</span>
-        </button>
       </nav>
 
       <div class="settings-scroll-container">
         <!-- Tab 1: 模型 (Model Center + Local Models + API Key Management + Registry) -->
         <div
-          v-show="(settingsView === 'home' && settingsTab === 'model') || settingsView === 'provider'"
+          v-show="settingsView === 'home' && settingsTab === 'model'"
           class="model-hub-stack"
         >
           <!-- Card 1: 模型中心 (199 个可用模型) -->
@@ -1821,11 +2494,12 @@ onUnmounted(() => {
               </div>
               <button
                 type="button"
-                class="hub-icon-btn"
+                class="mini-ghost-btn"
+                :disabled="discoveringModels"
                 :title="t('refreshRegistry')"
-                @click="loadModelHub"
+                @click="discoverLatestModels(null)"
               >
-                ↻
+                {{ discoveringModels ? t('discoveringModelsBtn') : t('discoverLatestModelsBtn') }}
               </button>
             </div>
 
@@ -1875,17 +2549,10 @@ onUnmounted(() => {
               <div class="role-selector-toolbar">
                 <label class="role-selector-field">
                   <span>{{ t('selectProviderLabel') }}</span>
-                  <select v-model="selectorProviderId">
-                    <option
-                      v-for="prov in selectorProviders"
-                      :key="prov.id"
-                      :value="prov.id"
-                    >
-                      {{ prov.name }}
-                      ({{ (prov.models || []).filter(m => m.visible !== false).length }})
-                      {{ isKeyConfigured(prov.id) ? '●' : '' }}
-                    </option>
-                  </select>
+                  <CustomSelect
+                    v-model="selectorProviderId"
+                    :options="selectorProviderOptions"
+                  />
                 </label>
 
                 <label
@@ -1899,14 +2566,11 @@ onUnmounted(() => {
                         : t('variantRegionLabel')
                     }}
                   </span>
-                  <select
-                    :value="modelHub.state.provider_variants?.[selectorProviderId] || 'default'"
-                    @change="setProviderVariant(selectorProviderId, $event.target.value)"
-                  >
-                    <option value="default">{{ t('variantDefault') }}</option>
-                    <option value="international">{{ t('variantInternational') }}</option>
-                    <option value="coding">{{ t('variantCoding') }}</option>
-                  </select>
+                  <CustomSelect
+                    :model-value="modelHub.state.provider_variants?.[selectorProviderId] || 'default'"
+                    :options="variantOptions"
+                    @change="setProviderVariant(selectorProviderId, $event)"
+                  />
                 </label>
 
                 <label class="role-selector-field role-search-field">
@@ -1941,10 +2605,40 @@ onUnmounted(() => {
                     class="chip-logo"
                   />
                   <div class="chip-text">
-                    <strong>{{ mdl.name || mdl.id }}</strong>
+                    <strong>
+                      {{ mdl.name || mdl.id }}
+                      <span v-if="mdl.discovered" class="model-tag-pill">{{
+                        t('discoveredModelBadge')
+                      }}</span>
+                    </strong>
                     <small>{{ mdl.id }}</small>
                   </div>
                 </button>
+              </div>
+              <div v-if="currentSelectorHiddenMatches.length" class="catalog-matches-section">
+                <div class="catalog-matches-label">{{ t('catalogHiddenMatchesLabel') }}</div>
+                <div class="model-pool-grid">
+                  <button
+                    v-for="mdl in currentSelectorHiddenMatches"
+                    :key="mdl.id"
+                    type="button"
+                    class="model-pool-chip catalog-hidden-chip"
+                    @click="selectRoleModel(editingRole, currentSelectorProvider, mdl)"
+                  >
+                    <img
+                      :src="getProviderLogo(selectorProviderId)"
+                      alt=""
+                      class="chip-logo"
+                    />
+                    <div class="chip-text">
+                      <strong>
+                        {{ mdl.name || mdl.id }}
+                        <span class="model-tag-pill">{{ t('enableCatalogModelBadge') }}</span>
+                      </strong>
+                      <small>{{ mdl.id }}</small>
+                    </div>
+                  </button>
+                </div>
               </div>
             </div>
           </section>
@@ -1979,7 +2673,9 @@ onUnmounted(() => {
                 </svg>
                 {{ t('localModelRepoCount', { count: 0 }) }}
               </span>
-              <span>{{ localRepoExpanded ? '⌃' : '⌄' }}</span>
+              <svg class="chevron-svg" viewBox="0 0 24 24" aria-hidden="true">
+                <path :d="localRepoExpanded ? 'm18 15-6-6-6 6' : 'm6 9 6 6 6-6'" />
+              </svg>
             </button>
 
             <div v-if="localRepoExpanded" class="local-models-list">
@@ -2020,7 +2716,7 @@ onUnmounted(() => {
                 disabled
                 :title="t('comingSoonBadge')"
               >
-                📂 {{ t('physicalModelDir') }} ({{ t('comingSoonBadge') }})
+                {{ t('physicalModelDir') }} ({{ t('comingSoonBadge') }})
               </button>
             </div>
           </section>
@@ -2038,7 +2734,9 @@ onUnmounted(() => {
                 </svg>
                 <h3>{{ t('apiKeysVaultTitle') }}</h3>
               </div>
-              <span class="collapse-chevron">{{ apiKeysVaultExpanded ? '⌃' : '⌄' }}</span>
+              <svg class="chevron-svg" viewBox="0 0 24 24" aria-hidden="true">
+                <path :d="apiKeysVaultExpanded ? 'm18 15-6-6-6 6' : 'm6 9 6 6 6-6'" />
+              </svg>
             </div>
 
             <div v-show="apiKeysVaultExpanded" class="api-keys-vault-body">
@@ -2089,7 +2787,9 @@ onUnmounted(() => {
                     :aria-label="`${t('deleteKeyAria')} ${item.name}`"
                     @click="clearProviderKey(item.id)"
                   >
-                    ✕
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M18 6 6 18M6 6l12 12" />
+                    </svg>
                   </button>
                   <button
                     v-else
@@ -2149,7 +2849,9 @@ onUnmounted(() => {
                     :aria-label="`${t('deleteKeyAria')} ${item.name}`"
                     @click="clearProviderKey(item.id)"
                   >
-                    ✕
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M18 6 6 18M6 6l12 12" />
+                    </svg>
                   </button>
                   <button
                     v-else
@@ -2206,7 +2908,7 @@ onUnmounted(() => {
                   class="custom-model-tag"
                 >
                   {{ cm.name }} ({{ cm.model_id }})
-                  <button type="button" @click="removeCustomModel(cm.id)">✕</button>
+                  <button type="button" @click="removeCustomModel(cm.id)">×</button>
                 </span>
               </div>
             </div>
@@ -2224,7 +2926,9 @@ onUnmounted(() => {
                 </svg>
                 <h3>{{ t('providerRegistryTitle') }}</h3>
               </div>
-              <span class="collapse-chevron">{{ registryExpanded ? '⌃' : '⌄' }}</span>
+              <svg class="chevron-svg" viewBox="0 0 24 24" aria-hidden="true">
+                <path :d="registryExpanded ? 'm18 15-6-6-6 6' : 'm6 9 6 6 6-6'" />
+              </svg>
             </div>
             <div v-if="registryExpanded" class="registry-providers-list">
               <div
@@ -2383,12 +3087,11 @@ onUnmounted(() => {
             <p class="view-card-desc">{{ t('tasksSettingsDesc') }}</p>
             <label class="provider-field">
               <span>{{ t('executionRouteLabel') }}</span>
-              <select v-model="executionRoute" @change="changeExecutionRoute">
-                <option value="auto">{{ t('routeAuto') }}</option>
-                <option value="direct_byok">{{ t('routeDirectByok') }}</option>
-                <option value="local_cli">{{ t('routeLocalCli') }}</option>
-                <option value="remote_home">{{ t('routeRemoteHome') }}</option>
-              </select>
+              <CustomSelect
+                v-model="executionRoute"
+                :options="executionRouteOptions"
+                @change="changeExecutionRoute"
+              />
             </label>
           </section>
 
@@ -2425,61 +3128,26 @@ onUnmounted(() => {
                 <div class="settings-card-info">
                   <span class="settings-card-title">{{ t('themeLabel') }}</span>
                 </div>
-                <label class="theme-select">
-                  <span class="visually-hidden">{{ t('themeLabel') }}</span>
-                  <select v-model="theme">
-                    <option value="system">{{ t('themeSystem') }}</option>
-                    <option value="light">{{ t('themeLight') }}</option>
-                    <option value="dark">{{ t('themeDark') }}</option>
-                  </select>
-                </label>
+                <div class="theme-select">
+                  <CustomSelect
+                    v-model="theme"
+                    :options="themeOptions"
+                    :aria-label="t('themeLabel')"
+                  />
+                </div>
               </div>
 
               <div class="settings-card">
                 <div class="settings-card-info">
                   <span class="settings-card-title">{{ t('language') }}</span>
                 </div>
-                <label class="language">
-                  <span class="visually-hidden">{{ t('language') }}</span>
-                  <select v-model="locale">
-                    <option value="zh-CN">{{ t('chinese') }}</option>
-                    <option value="en-US">{{ t('english') }}</option>
-                  </select>
-                </label>
-              </div>
-            </div>
-          </section>
-        </div>
-
-        <!-- Tab 6: 关于 (SettingsAbout: Version & Kernel Diagnostics) -->
-        <div
-          v-show="settingsView === 'home' && settingsTab === 'about'"
-          class="model-hub-stack settings-tab-panel"
-        >
-          <section class="hub-card">
-            <div class="hub-card-header">
-              <div class="hub-card-title-group">
-                <h3>{{ t('aboutVersion') }}</h3>
-              </div>
-            </div>
-            <p class="view-card-desc">{{ t('versionValue') }}</p>
-            <p class="view-card-desc">{{ t('aboutKernelArchDesc') }}</p>
-          </section>
-
-          <section class="hub-card">
-            <div class="hub-card-header">
-              <div class="hub-card-title-group">
-                <h3>{{ t('aboutDiagnosticsTitle') }}</h3>
-              </div>
-            </div>
-            <div class="settings-kv-list">
-              <div class="settings-kv-row">
-                <span>{{ t('executionRouteLabel') }}</span>
-                <code>{{ readiness?.mode || 'local_first' }}</code>
-              </div>
-              <div class="settings-kv-row">
-                <span>{{ t('modelCenterTitle') }}</span>
-                <code>{{ totalAvailableModelsCount }} models</code>
+                <div class="language">
+                  <CustomSelect
+                    v-model="locale"
+                    :options="languageOptions"
+                    :aria-label="t('language')"
+                  />
+                </div>
               </div>
             </div>
           </section>
@@ -2487,25 +3155,37 @@ onUnmounted(() => {
 
         <!-- Direct Provider Protocol Override & Connection Test Form (preserved for subpage & tests) -->
         <div v-show="settingsView === 'provider'" class="settings-provider-subpage">
+          <div class="settings-subpage-bar">
+            <button
+              type="button"
+              class="back-settings-btn"
+              :aria-label="t('backToSettings')"
+              @click="
+                settingsView = 'home';
+                settingsTab = 'model';
+              "
+            >
+              ← {{ t('backToSettings') }}
+            </button>
+          </div>
           <form class="provider-form" @submit.prevent="saveProviderSettings(false)">
             <h3 class="provider-form-heading">{{ t('advancedProtocolOverrideTitle') }}</h3>
             <label class="provider-field">
               <span>{{ t('executionRouteLabel') }}</span>
-              <select v-model="executionRoute" @change="changeExecutionRoute">
-                <option value="auto">{{ t('routeAuto') }}</option>
-                <option value="direct_byok">{{ t('routeDirectByok') }}</option>
-                <option value="local_cli">{{ t('routeLocalCli') }}</option>
-                <option value="remote_home">{{ t('routeRemoteHome') }}</option>
-              </select>
+              <CustomSelect
+                v-model="executionRoute"
+                :options="executionRouteOptions"
+                @change="changeExecutionRoute"
+              />
             </label>
 
             <label class="provider-field">
               <span>{{ t('providerKindLabel') }}</span>
-              <select v-model="providerForm.providerKind" @change="onProviderKindChange">
-                <option value="openai_compatible">{{ t('providerOpenai') }}</option>
-                <option value="anthropic_messages">{{ t('providerAnthropic') }}</option>
-                <option value="gemini_generate_content">{{ t('providerGemini') }}</option>
-              </select>
+              <CustomSelect
+                v-model="providerForm.providerKind"
+                :options="providerKindOptions"
+                @change="onProviderKindChange"
+              />
             </label>
 
             <label class="provider-field">
@@ -2580,11 +3260,14 @@ onUnmounted(() => {
           </form>
         </div>
 
-        <div v-show="settingsView === 'device'" class="settings-device-subpage">
+        <div
+          v-show="settingsView === 'home' && settingsTab === 'connection'"
+          class="settings-device-subpage"
+        >
           <HomeConnection
             ref="devicePanel"
             v-if="sessionId"
-            :paired="homeConfigured"
+            :paired="devicePaired"
             @changed="reload"
             @connected="
               settingsOpen = false;
@@ -2592,6 +3275,38 @@ onUnmounted(() => {
             "
           />
         </div>
+
+        <!-- Low-Profile About & System Diagnostics Footer (demoted from primary top tabs, always at bottom) -->
+        <details v-show="settingsView === 'home'" class="about-footer-details">
+          <summary class="about-footer-summary">
+            <span>{{ t('aboutFooterTitle') }} · {{ t('versionValue') }}</span>
+          </summary>
+          <div class="about-footer-body">
+            <p class="view-card-desc">{{ t('aboutKernelArchDesc') }}</p>
+            <div class="settings-kv-list">
+              <div class="settings-kv-row">
+                <span>{{ t('executionRouteLabel') }}</span>
+                <code>{{ readiness?.mode || 'local_first' }}</code>
+              </div>
+              <div class="settings-kv-row">
+                <span>{{ t('modelCenterTitle') }}</span>
+                <code>{{ totalAvailableModelsCount }} models</code>
+              </div>
+              <div class="settings-kv-row">
+                <span>{{ t('northStarTitle') }}</span>
+                <code>
+                  {{
+                    t('northStarStatsText', {
+                      memories: personalOps.memories.filter(m => m.state === 'active').length,
+                      decisions: personalOps.decisions.filter(d => d.status === 'accepted').length,
+                      pendingSync: personalOps.pending_sync_count || 0,
+                    })
+                  }}
+                </code>
+              </div>
+            </div>
+          </div>
+        </details>
       </div>
     </section>
 
@@ -2766,9 +3481,13 @@ onUnmounted(() => {
     <ScheduleView
       v-if="activeDrawer === 'schedule'"
       :schedules="personalOps.schedules"
+      :projects="projectList"
+      :online-projects="onlineState.projects || []"
       :busy="personalBusy"
       @create-schedule="handleCreateSchedule"
       @update-status="handleUpdateScheduleStatus"
+      @open-project-todo="handleOpenProjectTodo"
+      @promote-todo-project="handlePromoteTodoToProject"
     />
 
     <!-- Primary View 3: 工作 (Work / RemoteAgent & Project Matrix) -->
@@ -2776,19 +3495,29 @@ onUnmounted(() => {
       v-if="activeDrawer === 'work'"
       :readiness="readiness"
       :catalog="catalog"
+      :schedules="personalOps.schedules"
       :active-session-id="sessionId"
       :active-main-role="activeMainRole"
       :online-state="onlineState"
+      :remote-nodes="modelHub.state.remote_nodes || []"
+      :paired-online="deviceOnline"
       @open-conversation="handleWorkOpenConversation"
       @create-project="handleWorkCreateProject"
       @create-conversation="handleWorkCreateConversation"
       @open-settings-tab="handleWorkOpenSettingsTab"
+      @create-project-todo="handleCreateProjectTodo"
+      @toggle-todo-status="handleUpdateScheduleStatus"
+      @start-todo-session="handleStartTodoSession"
       @online-update-origin="handleOnlineUpdateOrigin"
+      @online-save-node="handleOnlineSaveNode"
       @online-begin-pairing="handleOnlineBeginPairing"
       @online-exchange-pairing="handleOnlineExchangePairing"
       @online-refresh="handleOnlineRefresh"
       @online-select-project="handleOnlineSelectProject"
+      @online-load-more-messages="handleOnlineLoadMoreMessages"
+      @online-submit-operation="handleOnlineSubmitOperation"
       @online-disconnect="handleOnlineDisconnect"
+      @online-revoke="handleOnlineRevoke"
     />
 
     <!-- Primary View 4: 知识 (Knowledge / Notes, Captures & Long-term Memory) -->
@@ -2807,15 +3536,13 @@ onUnmounted(() => {
     />
 
     <!-- Primary View 1: 对话 (Chat) -->
-    <main v-show="activeDrawer === 'chat' || activeDrawer === 'settings'" class="main">
+    <main v-show="activeDrawer === 'chat' && !settingsOpen" class="main">
       <div
-        v-if="!homeConfigured || readiness?.pending_messages > 0"
+        v-if="readiness && readiness.pending_messages > 0"
         class="connection-note"
-        :class="{ 'home-paired': homeConfigured }"
         role="status"
       >
-        <span>{{ t(connectionKey) }}</span>
-        <span v-if="readiness && readiness.pending_messages > 0" class="storage-summary">
+        <span class="storage-summary">
           {{
             t(executionEnabled ? 'localExecutionStatus' : 'localStatus', {
               saved: readiness.saved_messages,
@@ -2916,45 +3643,89 @@ onUnmounted(() => {
         </article>
       </section>
 
-      <!-- Floating Quick Model Switcher Popover -->
-      <div v-if="quickSwitcherOpen" class="quick-model-popover">
-        <div class="quick-provider-col">
-          <button
-            v-for="prov in selectorProviders"
-            :key="prov.id"
-            type="button"
-            class="quick-provider-item"
-            :class="{ active: quickSwitcherProviderId === prov.id }"
-            @click="quickSwitcherProviderId = prov.id"
-          >
-            <img :src="getProviderLogo(prov.id)" alt="" class="chip-logo" />
-            <span>{{ prov.name }}</span>
-            <span
-              v-if="isKeyConfigured(prov.id)"
-              class="key-status-dot configured"
-            ></span>
-          </button>
-        </div>
-        <div class="quick-model-col">
-          <button
-            v-for="mdl in quickSwitcherModels"
-            :key="mdl.id"
-            type="button"
-            class="quick-model-item"
-            :class="{
-              selected:
-                activeMainRole.model_id === mdl.id &&
-                activeMainRole.provider_id === quickSwitcherProviderId,
-            }"
-            @click="selectRoleModel('main', quickSwitcherProvider, mdl)"
-          >
-            <strong>{{ mdl.name || mdl.id }}</strong>
-            <small>{{ mdl.id }}</small>
-          </button>
-        </div>
-      </div>
-
       <form class="composer" @submit.prevent="send">
+        <!-- Floating Quick Model Switcher Popover (Anchored cleanly above .composer) -->
+        <div
+          v-if="quickSwitcherOpen"
+          ref="quickPopoverRef"
+          class="quick-model-popover"
+          @click.stop
+        >
+          <div class="quick-popover-header">
+            <input
+              v-model="quickSwitcherSearchQuery"
+              type="search"
+              class="quick-model-search"
+              :placeholder="t('quickModelFilterPlaceholder')"
+            />
+            <button
+              type="button"
+              class="mini-ghost-btn"
+              :disabled="discoveringModels"
+              @click="discoverLatestModels(quickSwitcherProviderId)"
+            >
+              {{ discoveringModels ? t('discoveringModelsBtn') : t('discoverLatestModelsBtn') }}
+            </button>
+          </div>
+          <div class="quick-popover-columns">
+            <div class="quick-provider-col">
+              <button
+                v-for="prov in selectorProviders"
+                :key="prov.id"
+                type="button"
+                class="quick-provider-item"
+                :class="{ active: quickSwitcherProviderId === prov.id }"
+                @click="quickSwitcherProviderId = prov.id"
+              >
+                <img :src="getProviderLogo(prov.id)" alt="" class="chip-logo" />
+                <span>{{ prov.name }}</span>
+                <span
+                  v-if="isKeyConfigured(prov.id)"
+                  class="key-status-dot configured"
+                ></span>
+              </button>
+            </div>
+            <div class="quick-model-col">
+              <button
+                v-for="mdl in quickSwitcherModels"
+                :key="mdl.id"
+                type="button"
+                class="quick-model-item"
+                :class="{
+                  selected:
+                    activeMainRole.model_id === mdl.id &&
+                    activeMainRole.provider_id === quickSwitcherProviderId,
+                }"
+                @click="selectRoleModel('main', quickSwitcherProvider, mdl)"
+              >
+                <strong class="quick-model-title-row">
+                  <span>{{ mdl.name || mdl.id }}</span>
+                  <span v-if="mdl.discovered" class="model-tag-pill">{{
+                    t('discoveredModelBadge')
+                  }}</span>
+                </strong>
+                <small>{{ mdl.id }}</small>
+              </button>
+              <template v-if="quickSwitcherHiddenMatches.length">
+                <div class="catalog-matches-label">{{ t('catalogHiddenMatchesLabel') }}</div>
+                <button
+                  v-for="mdl in quickSwitcherHiddenMatches"
+                  :key="`hidden-${mdl.id}`"
+                  type="button"
+                  class="quick-model-item catalog-hidden-chip"
+                  @click="selectRoleModel('main', quickSwitcherProvider, mdl)"
+                >
+                  <strong class="quick-model-title-row">
+                    <span>{{ mdl.name || mdl.id }}</span>
+                    <span class="model-tag-pill">{{ t('enableCatalogModelBadge') }}</span>
+                  </strong>
+                  <small>{{ mdl.id }}</small>
+                </button>
+              </template>
+            </div>
+          </div>
+        </div>
+
         <label class="visually-hidden" for="message-input">{{ t('message') }}</label>
         <textarea
           id="message-input"
@@ -2970,12 +3741,15 @@ onUnmounted(() => {
         <div class="composer-actions">
           <div class="composer-left-tools">
             <button
+              ref="quickPillRef"
               type="button"
               class="composer-model-pill"
               :aria-label="t('quickSwitchModel')"
-              @click="
+              :aria-expanded="quickSwitcherOpen"
+              @click.stop="
                 quickSwitcherProviderId = activeMainRole.provider_id || 'deepseek';
                 quickSwitcherOpen = !quickSwitcherOpen;
+                if (!quickSwitcherOpen) quickSwitcherSearchQuery = '';
               "
             >
               <img
@@ -2986,7 +3760,9 @@ onUnmounted(() => {
               <span class="pill-model-name">
                 {{ activeMainRole.model_name || activeMainRole.model_id }}
               </span>
-              <span aria-hidden="true">▾</span>
+              <svg class="inline-svg-xs" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="m6 9 6 6 6-6" />
+              </svg>
             </button>
             <span class="composer-hint-text">
               {{
@@ -3021,6 +3797,88 @@ onUnmounted(() => {
         </div>
       </form>
     </main>
+
+    <!-- Draggable Edge-Snapping QuickNote Floating Bubble (Restored from legacy bob-agent) -->
+    <button
+      type="button"
+      class="mobile-fab"
+      :class="{
+        dragging: isDraggingFab,
+        'snap-right': fabPos.isRight && fabPos.x === -1,
+        'snap-left': !fabPos.isRight && fabPos.x === -1,
+      }"
+      :style="
+        fabPos.x !== -1
+          ? { left: `${fabPos.x}px`, top: `${fabPos.y}px` }
+          : { top: `${fabPos.y}px` }
+      "
+      :aria-label="t('quickNoteOpenAria')"
+      :title="t('quickNoteOpenAria')"
+      @pointerdown="onFabPointerDown"
+      @pointermove="onFabPointerMove"
+      @pointerup="onFabPointerUp"
+      @pointercancel="onFabPointerUp"
+    >
+      <svg class="fab-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 152.85 99.94" aria-hidden="true">
+        <path fill="currentColor" d="M166.3,82.45a29.91,29.91,0,0,1-52.92,19.11,29.91,29.91,0,0,1-46,0A29.91,29.91,0,0,1,14.45,82.45V15.72a2.3,2.3,0,0,1,2.3-2.3H26a2.3,2.3,0,0,1,2.3,2.3V57.24a29.92,29.92,0,0,1,39.12,6.09,29.91,29.91,0,0,1,39.11-6.09V15.72a2.3,2.3,0,0,1,2.3-2.3H118a2.3,2.3,0,0,1,2.3,2.3V57.24a29.92,29.92,0,0,1,46,25.21Zm-13.8,0a16.11,16.11,0,1,0-16.11,16.1A16.11,16.11,0,0,0,152.5,82.45Zm-46,0a16.11,16.11,0,1,0-16.1,16.1A16.1,16.1,0,0,0,106.48,82.45Zm-46,0a16.11,16.11,0,1,0-16.11,16.1A16.11,16.11,0,0,0,60.47,82.45Z" transform="translate(-13.95 -12.92)" />
+      </svg>
+    </button>
+
+    <!-- QuickNote Glassmorphism Overlay (Restored from legacy QuickNoteOverlay.vue) -->
+    <div
+      v-if="quickNoteOpen"
+      class="quicknote-overlay"
+      @click.self="quickNoteOpen = false"
+    >
+      <div class="quicknote-card">
+        <form class="quicknote-input-row" @submit.prevent="submitQuickNote">
+          <textarea ref="quickNoteInputRef" v-model="quickNoteText" class="quicknote-input" rows="2"
+            :disabled="quickNoteBusy" :aria-label="t('quickNotePlaceholder')" :placeholder="t('quickNotePlaceholder')"
+            @keydown.enter.exact.prevent="!$event.isComposing && submitQuickNote()"></textarea>
+          <span v-if="quickNoteSaved" class="quicknote-saved-badge">
+            {{ t('quickNoteSavedHint') }}
+          </span>
+        </form>
+        <p v-if="quickNoteError" role="alert">{{ t('quickNoteSaveError') }}</p>
+        <div v-if="quickNoteText.trim() || quickNoteMediaId" class="quicknote-project-row">
+          <label for="quicknote-project">{{ t('quickNoteProject') }}</label>
+          <select id="quicknote-project" v-model="quickNoteProject" :disabled="quickNoteBusy">
+            <option value="">{{ t('quickNoteUnassigned') }}</option>
+            <option v-for="project in catalog?.projects || []" :key="project.id" :value="project.id">{{ project.title }}</option>
+            <option value="__new">{{ t('quickNoteNewProject') }}</option>
+          </select>
+          <input v-if="quickNoteProject === '__new'" v-model="quickNoteProjectTitle" :disabled="quickNoteBusy" :aria-label="t('quickNoteProjectTitle')" :placeholder="t('quickNoteProjectTitle')" />
+          <button type="button" :disabled="quickNoteBusy" @click="submitQuickNote">{{ t(quickNoteBusy ? 'saving' : 'quickNoteSave') }}</button>
+        </div>
+        <div class="quicknote-actions-row">
+          <input ref="quickNoteFileRef" class="capture-file-input" type="file" accept="image/png,image/jpeg,image/webp" @change="selectCaptureImage" />
+          <input ref="quickNoteCameraRef" class="capture-file-input" type="file" accept="image/png,image/jpeg,image/webp" capture="environment" @change="selectCaptureImage" />
+          <button class="quicknote-action-pill" type="button" :disabled="quickNoteBusy || quickNoteImageBusy || quickNoteRecognizing" @click="quickNoteCameraRef?.click()">
+            <svg class="inline-svg-xs" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h4l2-3h4l2 3h4v15H4z"/><circle cx="12" cy="13" r="4"/></svg>{{ t('captureCamera') }}
+          </button>
+          <button class="quicknote-action-pill" type="button" :disabled="quickNoteBusy || quickNoteImageBusy || quickNoteRecognizing" @click="quickNoteFileRef?.click()">
+            <svg class="inline-svg-xs" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="m3 17 6-6 4 4 3-3 5 5"/><circle cx="16" cy="7" r="1"/></svg>{{ t('captureChooseImage') }}
+          </button>
+          <span v-if="quickNoteImageBusy" role="status">{{ t('saving') }}</span>
+        </div>
+        <div v-if="quickNoteMediaId" class="capture-photo-panel">
+          <img v-if="quickNoteImage" :src="quickNoteImage" :alt="t('captureOriginal')" />
+          <p>{{ t('captureImageStored') }}</p>
+          <button type="button" :disabled="quickNoteBusy || quickNoteRecognizing" @click="removeCaptureImage">{{ t('captureRemove') }}</button>
+          <template v-if="quickNoteVisionTarget">
+            <p>{{ t('captureRecognitionDestination', { model: quickNoteVisionTarget.model_ref, endpoint: quickNoteVisionTarget.base_url }) }}</p>
+            <button type="button" :disabled="quickNoteBusy || quickNoteRecognizing" @click="recognizeCaptureImage">{{ t(quickNoteRecognizing ? 'captureRecognizing' : 'captureRecognize') }}</button>
+          </template>
+          <p v-else>{{ t('captureVisionUnconfigured') }}</p>
+        </div>
+        <div v-if="quickNoteSuggestion" class="capture-suggestion">
+          <label for="capture-suggestion">{{ t('captureSuggestion') }}</label>
+          <textarea id="capture-suggestion" v-model="quickNoteSuggestion" rows="4" />
+          <button type="button" :disabled="quickNoteBusy" @click="applyCaptureSuggestion">{{ t('captureUseSuggestion') }}</button>
+        </div>
+        <p v-if="quickNoteImageError" role="alert">{{ t(quickNoteImageError) }}</p>
+      </div>
+    </div>
 
     <!-- Legacy-aligned Bottom 5-Tab Navigation Bar: 对话 | 日程 | 工作 | 知识 | 设置 -->
     <nav class="bottom-nav" role="navigation">
@@ -3076,7 +3934,7 @@ onUnmounted(() => {
       <button
         type="button"
         class="bottom-nav-item"
-        :aria-label="t('navSettingsAria')"
+        :aria-label="t('settings')"
         :class="{ active: settingsOpen || activeDrawer === 'settings' }"
         @click="switchPrimaryDrawer('settings')"
       >

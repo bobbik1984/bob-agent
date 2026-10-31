@@ -474,7 +474,7 @@ fn f3_personal_assistant_domain_lifecycle_works_end_to_end() {
         json!("模型调用位置、文件位置与记录权威三轴解耦")
     );
 
-    // RV-06: Export canonical PersonalOpsSnapshot fixture directly from Rust serde_json
+    // RV-06: Verify canonical PersonalOpsSnapshot structure against committed fixture without overwriting it
     let canonical_snapshot = json!({
         "schedules": app.list_schedule_items().unwrap(),
         "notes": app.list_notes(None).unwrap(),
@@ -483,7 +483,7 @@ fn f3_personal_assistant_domain_lifecycle_works_end_to_end() {
         "decisions": app.list_all_decisions().unwrap(),
         "pending_sync_count": app.pending_personal_op_syncs().unwrap().len(),
     });
-    let fixture_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    let fixture_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .unwrap()
         .parent()
@@ -491,15 +491,24 @@ fn f3_personal_assistant_domain_lifecycle_works_end_to_end() {
         .join("apps")
         .join("bob-app")
         .join("tests")
-        .join("fixtures");
-    std::fs::create_dir_all(&fixture_dir).unwrap();
-    let fixture_path = fixture_dir.join("personal_snapshot.json");
-    std::fs::write(
-        &fixture_path,
-        serde_json::to_string_pretty(&canonical_snapshot).unwrap(),
-    )
-    .unwrap();
+        .join("fixtures")
+        .join("personal_snapshot.json");
     assert!(fixture_path.exists());
+    let committed: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&fixture_path).unwrap()).unwrap();
+    for key in [
+        "schedules",
+        "notes",
+        "captures",
+        "memories",
+        "decisions",
+        "pending_sync_count",
+    ] {
+        assert!(
+            committed.get(key).is_some() && canonical_snapshot.get(key).is_some(),
+            "missing top-level key {key}"
+        );
+    }
 }
 
 #[test]

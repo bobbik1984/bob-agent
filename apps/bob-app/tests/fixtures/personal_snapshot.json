@@ -1,21 +1,21 @@
 {
   "captures": [
     {
-      "content_ref": "记住下周三下午三点产品评审",
-      "content_sha256": "3c5adf6ba0b0f8265aef66f9e054d951c927ecee0efe2e1c92684dce29925ccb",
-      "created_at": 110,
-      "id": "cap-1",
-      "origin_device_id": "37fca880b3d456a7a7c39b03a32f4ace",
-      "source_message_id": "msg-cap"
+      "content_ref": "速记：优先对齐 Schedule / Memory / Decision 契约与单点快照",
+      "content_sha256": "2d861ee236bfcfe63adb54061f754546575f2a4b84e419cb8f459a0caf54be3d",
+      "created_at": 1762000010000,
+      "id": "cap-fixture-1",
+      "origin_device_id": "fixture-device-0001",
+      "source_message_id": "msg-fixture-1"
     }
   ],
   "decisions": [
     {
-      "body": "模型调用位置、文件位置与记录权威三轴解耦",
-      "id": "dec-1",
-      "project_id": "proj-unify",
-      "rationale_json": "{\"reason\":\"防止把主库权威误做成所有模型调用必须经由 Home\"}",
-      "source_message_id": "msg-cap",
+      "body": "前后端测试统一消费 Rust 序列化导出的 personal_snapshot.json，禁止手写字典",
+      "id": "dec-fixture-1",
+      "project_id": "proj-default",
+      "rationale_json": "{\"task\":\"RV-06\"}",
+      "source_message_id": "msg-fixture-1",
       "status": "accepted",
       "supersedes_id": null,
       "task_id": null,
@@ -24,39 +24,30 @@
   ],
   "memories": [
     {
-      "body": "偏好使用明暗自适应主题与 UTF-8 编码",
-      "id": "mem-2",
-      "source_capture_id": "cap-1",
-      "source_message_id": "msg-cap",
+      "body": "所有文件读写显式指定 UTF-8 编码，时间戳统一使用 13 位 Unix 毫秒",
+      "id": "mem-fixture-1",
+      "source_capture_id": "cap-fixture-1",
+      "source_message_id": "msg-fixture-1",
       "state": "active",
-      "supersedes_id": "mem-1",
-      "version": 2
-    },
-    {
-      "body": "偏好使用简明明亮主题与 UTF-8 编码",
-      "id": "mem-1",
-      "source_capture_id": "cap-1",
-      "source_message_id": "msg-cap",
-      "state": "superseded",
       "supersedes_id": null,
-      "version": 3
+      "version": 2
     }
   ],
   "notes": [
     {
       "acceptance": "home",
-      "body_markdown": "统一本地内核 + BYOK 直连 + 多端协同",
-      "conversation_id": "60416d4cdd39102ca54d0505097964e6",
-      "created_at": 140,
-      "id": "note-1",
-      "origin_device_id": "37fca880b3d456a7a7c39b03a32f4ace",
+      "body_markdown": "# 核心契约\n- 日程状态：scheduled | completed | cancelled\n- 记忆状态：proposed | active | superseded | forgotten",
+      "conversation_id": null,
+      "created_at": 1762000010000,
+      "id": "note-fixture-1",
+      "origin_device_id": "fixture-device-0001",
       "project_id": null,
       "tags": [
         "architecture",
-        "f1"
+        "contract"
       ],
-      "title": "Bob 1.0.1 架构要点",
-      "updated_at": 140,
+      "title": "Bob 跨平台统一架构笔记",
+      "updated_at": 1762000010000,
       "version": 1
     }
   ],
@@ -64,36 +55,36 @@
   "schedules": [
     {
       "acceptance": "home",
-      "created_at": 150,
-      "end_at": 1762003600000,
-      "id": "sched-1",
+      "created_at": 1762000010000,
+      "end_at": null,
+      "id": "sched-event-1",
       "kind": "event",
-      "notes": "核对旧版 0.9.30 能力继承闭环",
-      "origin_device_id": "37fca880b3d456a7a7c39b03a32f4ace",
+      "notes": "核对手机端、桌面端与云端 Web 契约",
+      "origin_device_id": "fixture-device-0001",
       "project_id": null,
-      "reminder_at": 1761996400000,
-      "start_at": 1762000000000,
+      "reminder_at": null,
+      "start_at": 1762010000000,
       "status": "completed",
       "task_id": null,
-      "title": "产品评审会议",
-      "updated_at": 160,
+      "title": "跨平台架构评审会议",
+      "updated_at": 1762000010000,
       "version": 2
     },
     {
       "acceptance": "home",
-      "created_at": 155,
+      "created_at": 1762000010000,
       "end_at": null,
       "id": "sched-todo-1",
       "kind": "todo",
-      "notes": "RV-01 ~ RV-07",
-      "origin_device_id": "37fca880b3d456a7a7c39b03a32f4ace",
+      "notes": "待办事项回归",
+      "origin_device_id": "fixture-device-0001",
       "project_id": null,
       "reminder_at": null,
-      "start_at": 1762005000000,
+      "start_at": 1762020000000,
       "status": "scheduled",
       "task_id": null,
-      "title": "补齐契约对齐回归测试",
-      "updated_at": 155,
+      "title": "完成 RV-01 至 RV-13 回归验证",
+      "updated_at": 1762000010000,
       "version": 1
     }
   ]

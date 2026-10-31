@@ -1,0 +1,17 @@
+[package]
+name = "bob-runtime"
+version = "1.0.1"
+edition = "2021"
+rust-version = "1.89"
+publish = false
+
+[dependencies]
+bob-kernel = { path = "../bob-kernel" }
+bob-transport = { path = "../bob-transport" }
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.151"
+sha2 = "=0.10.9"
+thiserror = "=2.0.20"
+
+[dev-dependencies]
+tempfile = "=3.27.0"

@@ -60,8 +60,8 @@ pub(crate) async fn app_home_sync<R: tauri::Runtime>(
     };
     let app = state.0.clone();
     let result_index = link.next_result.fetch_add(1, Ordering::Relaxed);
-    tauri::async_runtime::spawn_blocking(move || {
-        let _flight = flight;
+    let replica_shared_cfg = crate::direct_llm::export_shared_config_for_sync(&host).await;
+    let incoming_shared_cfg = tauri::async_runtime::spawn_blocking(move || -> Result<Option<String>, &'static str> {
         let policy = DispatchPolicy {
             retry_ms: 3000,
             lease_ms: 30000,
@@ -145,8 +145,39 @@ pub(crate) async fn app_home_sync<R: tauri::Runtime>(
                     .map_err(|_| "HOME_RESULT_REJECTED")
             })?;
         }
-        Ok("sync_checked")
+        let mut synced_cfg: Option<String> = None;
+        if let Ok(bundle) = with_app(&app, |a| {
+            let sync_req_id = format!("peer-sync:{}:{result_index}", a.device_id());
+            a.export_peer_sync_bundle(&sync_req_id, replica_shared_cfg)
+                .map_err(|_| "HOME_PEER_SYNC_EXPORT_FAILED")
+        }) {
+            if let Ok(ack) = connection.client.control(
+                connection.address,
+                connection.server_name.clone(),
+                &HomeRequest::PeerSync(bundle),
+                Limits::default(),
+            ) {
+                if ack.result.receipt.as_ref().is_some_and(|r| r.accepted) {
+                    if let Some(home_bundle) = ack.result.sync_bundle {
+                        let _ = with_app(&app, |a| {
+                            a.apply_peer_sync_bundle(&home_bundle, now()?)
+                                .map_err(|_| "HOME_PEER_SYNC_APPLY_FAILED")
+                        });
+                        if !home_bundle.shared_config_json.trim().is_empty() {
+                            synced_cfg = Some(home_bundle.shared_config_json);
+                        }
+                    }
+                }
+            }
+        }
+        Ok(synced_cfg)
     })
     .await
-    .map_err(|_| "HOME_SYNC_UNCONFIRMED")?
+    .map_err(|_| "HOME_SYNC_UNCONFIRMED")??;
+
+    if let Some(cfg_json) = incoming_shared_cfg {
+        crate::direct_llm::merge_shared_config_for_host(&host, &state.0, &cfg_json).await;
+    }
+    drop(flight);
+    Ok("sync_checked")
 }

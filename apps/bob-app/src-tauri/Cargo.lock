@@ -154,6 +154,7 @@ version = "1.0.1"
 dependencies = [
  "base64 0.22.1",
  "bob-kernel",
+ "bob-runtime",
  "bob-transport",
  "rcgen",
  "ring",
@@ -171,7 +172,20 @@ dependencies = [
 name = "bob-kernel"
 version = "1.0.1"
 dependencies = [
+ "base64 0.22.1",
  "rusqlite",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror 2.0.20",
+]
+
+[[package]]
+name = "bob-runtime"
+version = "1.0.1"
+dependencies = [
+ "bob-kernel",
+ "bob-transport",
  "serde",
  "serde_json",
  "sha2",

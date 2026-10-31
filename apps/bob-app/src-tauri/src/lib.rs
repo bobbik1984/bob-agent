@@ -272,6 +272,24 @@ async fn app_conversation_create(
 }
 
 #[tauri::command]
+async fn app_conversation_promote(
+    state: State<'_, AppState>,
+    conversation_id: String,
+    project_id: String,
+    title: String,
+) -> Result<CatalogSnapshot, &'static str> {
+    let state = state.0.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        with_app(&state, |app| {
+            app.promote_conversation_to_project(&conversation_id, &project_id, &title, now()?)
+                .map_err(|_| "CONVERSATION_PROMOTE_FAILED")
+        })
+    })
+    .await
+    .map_err(|_| "CONVERSATION_PROMOTE_FAILED")?
+}
+
+#[tauri::command]
 async fn app_conversation_select(
     state: State<'_, AppState>,
     conversation_id: String,
@@ -392,6 +410,57 @@ async fn app_personal_snapshot(
     .map_err(|_| "PERSONAL_OPS_READ_FAILED")?
 }
 
+fn sync_project_todo_markdown(app: &LocalApp, item: &ScheduleItem) {
+    if item.kind == "event" {
+        return;
+    }
+    let Some(proj_id) = item.project_id.as_deref() else {
+        return;
+    };
+    let Ok(catalog) = app.catalog_snapshot() else {
+        return;
+    };
+    let proj_title = catalog
+        .projects
+        .iter()
+        .find(|p| p.id == proj_id)
+        .map(|p| p.title.as_str())
+        .unwrap_or(proj_id);
+    let Ok(workspaces) = app.workspace_inventory(Some(proj_id)) else {
+        return;
+    };
+    let Some(ws) = workspaces
+        .iter()
+        .find(|w| std::path::Path::new(&w.path_ref).is_dir())
+    else {
+        return;
+    };
+    let dir_path = std::path::Path::new(&ws.path_ref);
+    let todo_path = dir_path.join("todo.md");
+    let existing = std::fs::read_to_string(&todo_path).unwrap_or_default();
+    if existing.contains(&item.title) {
+        return;
+    }
+    let checkbox = if item.status == "completed" { "[x]" } else { "[ ]" };
+    let line = if item.notes.trim().is_empty() {
+        format!("- {checkbox} {}\n", item.title.trim())
+    } else {
+        format!(
+            "- {checkbox} {} — {}\n",
+            item.title.trim(),
+            item.notes.trim().replace('\n', " ")
+        )
+    };
+    let updated = if existing.is_empty() {
+        format!("# {proj_title} Todo\n\n{line}")
+    } else if existing.ends_with('\n') {
+        format!("{existing}{line}")
+    } else {
+        format!("{existing}\n{line}")
+    };
+    let _ = std::fs::write(&todo_path, updated.as_bytes());
+}
+
 #[allow(clippy::too_many_arguments)]
 #[tauri::command]
 async fn app_schedule_create(
@@ -409,19 +478,22 @@ async fn app_schedule_create(
     let state = state.0.clone();
     tauri::async_runtime::spawn_blocking(move || {
         with_app(&state, |app| {
-            app.create_schedule_item_with_kind(
-                &id,
-                project_id.as_deref(),
-                task_id.as_deref(),
-                &title,
-                kind.as_deref().unwrap_or("event"),
-                start_at,
-                end_at,
-                reminder_at,
-                notes.as_deref().unwrap_or(""),
-                now()?,
-            )
-            .map_err(|_| "SCHEDULE_CREATE_FAILED")
+            let created = app
+                .create_schedule_item_with_kind(
+                    &id,
+                    project_id.as_deref(),
+                    task_id.as_deref(),
+                    &title,
+                    kind.as_deref().unwrap_or("event"),
+                    start_at,
+                    end_at,
+                    reminder_at,
+                    notes.as_deref().unwrap_or(""),
+                    now()?,
+                )
+                .map_err(|_| "SCHEDULE_CREATE_FAILED")?;
+            sync_project_todo_markdown(app, &created);
+            Ok(created)
         })
     })
     .await
@@ -475,16 +547,35 @@ async fn app_note_upsert(
 }
 
 #[tauri::command]
+async fn app_capture_media_put(state: State<'_, AppState>, mime:String, base64:String)->Result<serde_json::Value,&'static str> {
+ let state=state.0.clone();
+ tauri::async_runtime::spawn_blocking(move||with_app(&state,|app|{
+  let id=app.put_capture_media(&mime,&base64,now()?).map_err(|_|"CAPTURE_IMAGE_INVALID")?;
+  Ok(serde_json::json!({"id":id}))
+ })).await.map_err(|_|"CAPTURE_IMAGE_INVALID")?
+}
+#[tauri::command]
+async fn app_capture_media_get(state: State<'_, AppState>, media_id:Option<String>, capture_id:Option<String>)->Result<serde_json::Value,&'static str> {
+ let state=state.0.clone();
+ tauri::async_runtime::spawn_blocking(move||with_app(&state,|app|{
+  let id=match media_id {Some(id)=>Some(id),None=>app.capture_image_id(capture_id.as_deref().unwrap_or("")).map_err(|_|"CAPTURE_IMAGE_MISSING")?};
+  match id {Some(id)=>serde_json::to_value(app.capture_media(&id).map_err(|_|"CAPTURE_IMAGE_MISSING")?).map_err(|_|"CAPTURE_IMAGE_MISSING"),None=>Ok(serde_json::Value::Null)}
+ })).await.map_err(|_|"CAPTURE_IMAGE_MISSING")?
+}
+#[tauri::command]
 async fn app_capture_create(
     state: State<'_, AppState>,
     id: String,
     source_message_id: Option<String>,
     content_ref: String,
+    project_id: Option<String>,
+    new_project_title: Option<String>,
+    media_id: Option<String>,
 ) -> Result<CaptureItem, &'static str> {
     let state = state.0.clone();
     tauri::async_runtime::spawn_blocking(move || {
         with_app(&state, |app| {
-            app.create_capture(&id, source_message_id.as_deref(), &content_ref, now()?)
+            app.capture_with_image(&id, source_message_id.as_deref(), &content_ref, project_id.as_deref(), new_project_title.as_deref(), media_id.as_deref(), now()?)
                 .map_err(|_| "CAPTURE_SAVE_FAILED")
         })
     })
@@ -861,6 +952,7 @@ fn configure<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R>
             app_catalog,
             app_project_create,
             app_conversation_create,
+            app_conversation_promote,
             app_conversation_select,
             app_view_state_save,
             app_preferences_save,
@@ -869,6 +961,10 @@ fn configure<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R>
             app_schedule_status,
             app_note_upsert,
             app_capture_create,
+            app_capture_media_put,
+            app_capture_media_get,
+            direct_llm::app_capture_vision_target,
+            direct_llm::app_capture_recognize,
             app_memory_state,
             app_decision_record,
             app_decision_status,
@@ -883,7 +979,16 @@ fn configure<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R>
             direct_llm::app_provider_variant_set,
             direct_llm::app_custom_model_save,
             direct_llm::app_custom_model_delete,
+            direct_llm::app_remote_node_save,
+            direct_llm::app_remote_node_delete,
             direct_llm::app_registry_save,
+            direct_llm::app_model_visibility_set,
+            direct_llm::app_models_discover,
+            direct_llm::app_online_begin_pairing,
+            direct_llm::app_online_exchange_pairing,
+            direct_llm::app_online_sync,
+            direct_llm::app_online_submit_operation,
+            direct_llm::app_online_revoke,
             app_execute,
             app_executions,
             app_cancel

@@ -1,0 +1,17 @@
+{
+  "passed": [
+    "No inner logo, model switch, pairing shortcut or nested focus ring",
+    "Real image selection stores identical original before any recognition call",
+    "Refresh restores image, text and project draft",
+    "Simulated recognition failure preserves original and editable text",
+    "Actual node-to-loopback vision request carries image; suggestion requires explicit editable adoption (simulated model)",
+    "Desktop and 390px actual photo layout fit viewport",
+    "Failed save then retry creates one capture, project note and original-image link",
+    "Saved original is visible in Knowledge captures",
+    "Unsupported image rejected without a new saved record",
+    "English/dark controls and original preview; no browser runtime errors"
+  ],
+  "model": "loopback fake service only",
+  "imageSha256": "543e371a051cf0e33eb526031dae3d0362cb58d74ada6c2b324fe8f432fdfe63",
+  "pageErrors": []
+}

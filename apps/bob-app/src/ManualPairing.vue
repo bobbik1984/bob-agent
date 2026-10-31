@@ -1,10 +1,15 @@
 <script setup>
-import { ref, onUnmounted } from 'vue';
+import { computed, ref, onUnmounted } from 'vue';
 import { useI18n } from 'vue-i18n';
+import CustomSelect from './components/CustomSelect.vue';
 import { kernelBridge } from './native-bridge.mjs';
 const { t } = useI18n();
 const emit = defineEmits(['changed']);
 const open = ref(true), role = ref('replica'), busy = ref(false), error = ref('');
+const roleOptions = computed(() => [
+  { value: 'replica', label: t('pairReplica') },
+  { value: 'home', label: t('pairHome') },
+]);
 const deviceCode = ref(''), invitationCode = ref(''), output = ref('');
 const bindAddress = ref(''), advertisedHost = ref(''), status = ref(null);
 let poll = null;
@@ -41,10 +46,9 @@ onUnmounted(() => { disposed = true; if (poll) clearInterval(poll); });
 </script>
 <template>
   <div class="home-connection">
-
     <section v-if="open" class="pair-panel" :aria-label="t('homeConnection')">
       <p class="pair-intro">{{ t('pairIntro') }}</p>
-      <label>{{ t('pairRole') }}<select v-model="role" :disabled="busy"><option value="replica">{{ t('pairPhone') }}</option><option value="home">{{ t('pairHome') }}</option></select></label>
+      <label>{{ t('pairRole') }}<CustomSelect v-model="role" :options="roleOptions" :disabled="busy" /></label>
       <template v-if="role === 'replica'">
         <button type="button" :disabled="busy" @click="perform(() => kernelBridge.pairingDeviceCode())">{{ t('pairExportDevice') }}</button>
         <label>{{ t('pairPasteInvitation') }}<textarea v-model="invitationCode" rows="2" spellcheck="false" autocomplete="off" :disabled="busy" /></label>

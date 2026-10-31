@@ -2,8 +2,11 @@
 //! All operations are bounded; accepting a message never starts a model here.
 use super::*;
 use bob_kernel::{
-    direct_provider::ReplicaDirectTurnPayload, dispatch::CancelExecution, home_result::HomeResult,
-    outbox::Store, personal_ops::PersonalOpSyncEntry,
+    direct_provider::ReplicaDirectTurnPayload,
+    dispatch::CancelExecution,
+    home_result::HomeResult,
+    outbox::Store,
+    personal_ops::{PeerSyncBundle, PersonalOpSyncEntry},
 };
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -21,6 +24,7 @@ pub enum HomeRequest {
     LookupCancel(CancelExecution),
     ReplicaDirectTurn(ReplicaDirectTurnPayload),
     ReplicaPersonalOp(PersonalOpSyncEntry),
+    PeerSync(PeerSyncBundle),
 }
 impl HomeRequest {
     pub fn binding(&self) -> AppendMessage {
@@ -53,6 +57,15 @@ impl HomeRequest {
                 home_epoch: r.home_epoch,
                 content: serde_json::Value::Null,
             },
+            Self::PeerSync(r) => AppendMessage {
+                request_id: r.sync_request_id.clone(),
+                session_id: "personal-ops-sync".to_owned(),
+                message_id: r.sync_request_id.clone(),
+                origin_device_id: r.origin_device_id.clone(),
+                home_device_id: r.home_device_id.clone(),
+                home_epoch: r.home_epoch,
+                content: serde_json::Value::Null,
+            },
         }
     }
     fn payload_hash(&self) -> Result<String, TransportError> {
@@ -62,10 +75,15 @@ impl HomeRequest {
         if let Self::ReplicaPersonalOp(r) = self {
             return Ok(r.payload_sha256.clone());
         }
+        if let Self::PeerSync(r) = self {
+            return Ok(r.payload_sha256.clone());
+        }
         let bytes = match self {
             Self::Append(r) | Self::Lookup(r) | Self::Result(r) => serde_json::to_vec(r),
             Self::Cancel(r) | Self::LookupCancel(r) => serde_json::to_vec(r),
-            Self::ReplicaDirectTurn(_) | Self::ReplicaPersonalOp(_) => unreachable!(),
+            Self::ReplicaDirectTurn(_) | Self::ReplicaPersonalOp(_) | Self::PeerSync(_) => {
+                unreachable!()
+            }
         }
         .map_err(|_| TransportError::Protocol)?;
         Ok(format!("{:x}", Sha256::digest(bytes)))
@@ -194,6 +212,7 @@ impl PinnedServer {
                 HomeRequest::Append(r) => store.receive_message(&ctx, r, now).map(|r| HomeResult {
                     receipt: Some(r),
                     execution: None,
+                    sync_bundle: None,
                 }),
                 HomeRequest::Lookup(r) => {
                     store
@@ -201,11 +220,13 @@ impl PinnedServer {
                         .map(|r| HomeResult {
                             receipt: r,
                             execution: None,
+                            sync_bundle: None,
                         })
                 }
                 HomeRequest::Cancel(r) => store.receive_cancel(&ctx, r, now).map(|r| HomeResult {
                     receipt: Some(r),
                     execution: None,
+                    sync_bundle: None,
                 }),
                 HomeRequest::LookupCancel(r) => {
                     store
@@ -213,6 +234,7 @@ impl PinnedServer {
                         .map(|r| HomeResult {
                             receipt: r,
                             execution: None,
+                            sync_bundle: None,
                         })
                 }
                 HomeRequest::ReplicaDirectTurn(r) => store
@@ -220,13 +242,16 @@ impl PinnedServer {
                     .map(|r| HomeResult {
                         receipt: Some(r),
                         execution: None,
+                        sync_bundle: None,
                     }),
                 HomeRequest::ReplicaPersonalOp(r) => store
                     .receive_replica_personal_op_with_receipt(&ctx, r, now)
                     .map(|r| HomeResult {
                         receipt: Some(r),
                         execution: None,
+                        sync_bundle: None,
                     }),
+                HomeRequest::PeerSync(r) => store.receive_peer_sync(&ctx, r, String::new(), now),
             }
             .map_err(|_| TransportError::Protocol)
         })

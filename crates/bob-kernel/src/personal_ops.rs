@@ -121,6 +121,39 @@ pub struct PersonalOpSyncEntry {
     pub synced_at: Option<i64>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PeerSyncBundle {
+    pub sync_request_id: String,
+    pub origin_device_id: String,
+    pub home_device_id: String,
+    pub home_epoch: i64,
+    pub schedules: Vec<ScheduleItem>,
+    pub notes: Vec<NoteItem>,
+    pub captures: Vec<CaptureItem>,
+    pub memories: Vec<MemoryItem>,
+    pub decisions: Vec<DecisionItem>,
+    pub shared_config_json: String,
+    pub payload_sha256: String,
+}
+
+impl PeerSyncBundle {
+    pub fn compute_sha256(&self) -> Result<String> {
+        let canonical = serde_json::json!({
+            "sync_request_id": self.sync_request_id,
+            "origin_device_id": self.origin_device_id,
+            "home_device_id": self.home_device_id,
+            "home_epoch": self.home_epoch,
+            "schedules": self.schedules,
+            "notes": self.notes,
+            "captures": self.captures,
+            "memories": self.memories,
+            "decisions": self.decisions,
+            "shared_config_json": self.shared_config_json,
+        });
+        Ok(digest(&serde_json::to_vec(&canonical)?))
+    }
+}
+
 impl LocalApp {
     fn enqueue_personal_sync(
         &self,
@@ -266,6 +299,59 @@ impl LocalApp {
         let payload = serde_json::to_string(&item)?;
         self.enqueue_personal_sync("capture", &item.id, "upsert", 0, &payload, now)?;
         Ok(item)
+    }
+
+    /// One durable capture plus its optional project note. Retrying an identical
+    /// request after a lost receipt returns the same capture, not a duplicate.
+    pub fn capture_with_project(
+        &mut self, id: &str, source: Option<&str>, content: &str,
+        project: Option<&str>, new_title: Option<&str>, now: i64,
+    ) -> Result<CaptureItem> {
+        self.store.db.execute_batch("SAVEPOINT quick_capture")?;
+        let result = (|| {
+            let note_id = format!("note-{id}");
+            if let Some(existing) = self.list_captures()?.into_iter().find(|c| c.id == id) {
+                let note = self.list_notes(None)?.into_iter().find(|n| n.id == note_id);
+                if existing.content_ref != content.trim() || existing.source_message_id.as_deref() != source
+                    || note.as_ref().and_then(|n| n.project_id.as_deref()) != project {
+                    return Err(Error::IdentityConflict);
+                }
+                return Ok(existing);
+            }
+            if let Some(pid) = project {
+                if pid.is_empty() || pid.len() > 128 || pid.starts_with("local-project:") || pid.contains('\0') {
+                    return Err(Error::InvalidTransition);
+                }
+                let existing: Option<String> = self.store.db.query_row(
+                    "SELECT title FROM projects WHERE id=?1 AND status='active'", [pid], |r| r.get(0)
+                ).optional()?;
+                if let Some(title) = new_title {
+                    let title = title.trim();
+                    if title.is_empty() || title.len() > 256 { return Err(Error::InvalidTransition); }
+                    if let Some(old) = existing {
+                        if old != title { return Err(Error::IdentityConflict); }
+                    } else {
+                        self.store.db.execute(
+                            "INSERT INTO projects(id,title,acceptance,status,version,created_at,updated_at) VALUES(?1,?2,'local','active',1,?3,?3)",
+                            params![pid,title,now])?;
+                    }
+                } else if existing.is_none() { return Err(Error::InvalidTransition); }
+            } else if new_title.is_some() { return Err(Error::InvalidTransition); }
+            let capture = self.create_capture(id, source, content, now)?;
+            if let Some(pid) = project {
+                let title: String = content.trim().chars().take(60).collect();
+                self.upsert_note(&note_id, Some(pid), None, &title, content.trim(),
+                    &[format!("capture:{id}")], now)?;
+            }
+            Ok(capture)
+        })();
+        match result {
+            Ok(item) => { self.store.db.execute_batch("RELEASE quick_capture")?; Ok(item) }
+            Err(error) => {
+                self.store.db.execute_batch("ROLLBACK TO quick_capture; RELEASE quick_capture")?;
+                Err(error)
+            }
+        }
     }
 
     pub fn list_captures(&self) -> Result<Vec<CaptureItem>> {
@@ -876,6 +962,65 @@ impl LocalApp {
         rows.collect::<std::result::Result<Vec<_>, _>>()
             .map_err(Into::into)
     }
+
+    pub fn export_peer_sync_bundle(
+        &self,
+        sync_request_id: &str,
+        shared_config_json: String,
+    ) -> Result<PeerSyncBundle> {
+        let (home_device_id, home_epoch): (String, i64) = self.store.db.query_row(
+            "SELECT device_id, epoch FROM home_authority WHERE singleton=1",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )?;
+        let mut bundle = PeerSyncBundle {
+            sync_request_id: sync_request_id.to_owned(),
+            origin_device_id: self.origin.clone(),
+            home_device_id,
+            home_epoch,
+            schedules: self.list_schedule_items()?,
+            notes: self.list_notes(None)?,
+            captures: self.list_captures()?,
+            memories: self.list_memories(false)?,
+            decisions: self.list_all_decisions()?,
+            shared_config_json,
+            payload_sha256: String::new(),
+        };
+        bundle.payload_sha256 = bundle.compute_sha256()?;
+        Ok(bundle)
+    }
+
+    pub fn apply_peer_sync_bundle(&mut self, bundle: &PeerSyncBundle, now: i64) -> Result<()> {
+        self.store.merge_peer_sync_bundle(bundle, now)
+    }
+
+    pub fn host_receive_peer_sync(
+        &mut self,
+        ctx: &crate::home_auth::HomeMessageContext,
+        bundle: &PeerSyncBundle,
+        home_shared_config_json: String,
+        now: i64,
+    ) -> Result<crate::home_result::HomeResult> {
+        if ctx.origin_device_id() != bundle.origin_device_id {
+            return Err(Error::InvalidTransition);
+        }
+        self.store.merge_peer_sync_bundle(bundle, now)?;
+        let home_bundle = self.export_peer_sync_bundle(
+            &format!("{}:home-reply", bundle.sync_request_id),
+            home_shared_config_json,
+        )?;
+        Ok(crate::home_result::HomeResult {
+            receipt: Some(crate::outbox::HomeReceipt {
+                request_id: bundle.sync_request_id.clone(),
+                home_device_id: bundle.home_device_id.clone(),
+                home_epoch: bundle.home_epoch,
+                payload_sha256: bundle.payload_sha256.clone(),
+                accepted: true,
+            }),
+            execution: None,
+            sync_bundle: Some(home_bundle),
+        })
+    }
 }
 
 impl Store {
@@ -1074,6 +1219,71 @@ impl Store {
                     }
                 }
             }
+            "decision" => {
+                let dec: DecisionItem = serde_json::from_str(&entry.payload_json)?;
+                tx.execute(
+                    "INSERT OR IGNORE INTO projects(id,title,acceptance,status,version,created_at,updated_at)
+                     VALUES(?1,'Synced Workspace','home','active',1,?2,?2)",
+                    params![dec.project_id, now],
+                )?;
+                let conv_id = format!("sync-conv:{}", dec.project_id);
+                tx.execute(
+                    "INSERT OR IGNORE INTO conversations(id,project_id,title,acceptance,version,created_at)
+                     VALUES(?1,?2,'Synced Conversation','home',1,?3)",
+                    params![conv_id, dec.project_id, now],
+                )?;
+                tx.execute(
+                    "INSERT OR IGNORE INTO messages(id,conversation_id,origin_device_id,role,content_json,acceptance,created_at)
+                     VALUES(?1,?2,?3,'user',?4,'home',?5)",
+                    params![
+                        dec.source_message_id,
+                        conv_id,
+                        entry.origin_device_id,
+                        serde_json::json!({"text": dec.body}).to_string(),
+                        now
+                    ],
+                )?;
+                if let Some(ref tid) = dec.task_id {
+                    tx.execute(
+                        "INSERT OR IGNORE INTO tasks(id,project_id,source_message_id,title,status,constraints_json,version,created_at,updated_at)
+                         VALUES(?1,?2,?3,?4,'completed','{}',1,?5,?5)",
+                        params![tid, dec.project_id, dec.source_message_id, dec.body, now],
+                    )?;
+                }
+                let existing: Option<(i64, String)> = tx
+                    .query_row(
+                        "SELECT version, status FROM decisions WHERE id=?1",
+                        [&dec.id],
+                        |r| Ok((r.get(0)?, r.get(1)?)),
+                    )
+                    .optional()?;
+                match existing {
+                    None => {
+                        tx.execute(
+                            "INSERT INTO decisions(id,project_id,task_id,source_message_id,body,rationale_json,status,supersedes_id,version)
+                             VALUES(?1,?2,?3,?4,?5,?6,?7,NULL,?8)",
+                            params![
+                                dec.id,
+                                dec.project_id,
+                                dec.task_id,
+                                dec.source_message_id,
+                                dec.body,
+                                dec.rationale_json,
+                                dec.status,
+                                dec.version
+                            ],
+                        )?;
+                    }
+                    Some((cur_ver, _)) => {
+                        if dec.version >= cur_ver {
+                            tx.execute(
+                                "UPDATE decisions SET status=?2, version=?3 WHERE id=?1",
+                                params![dec.id, dec.status, dec.version.max(cur_ver + 1)],
+                            )?;
+                        }
+                    }
+                }
+            }
             _ => return Err(Error::InvalidTransition),
         }
         tx.commit()?;
@@ -1096,6 +1306,547 @@ impl Store {
             home_epoch: entry.home_epoch,
             payload_sha256: entry.payload_sha256.clone(),
             accepted: true,
+        })
+    }
+
+    pub fn merge_peer_sync_bundle(&mut self, bundle: &PeerSyncBundle, now: i64) -> Result<()> {
+        let computed = bundle.compute_sha256()?;
+        if computed != bundle.payload_sha256 {
+            return Err(Error::InvalidTransition);
+        }
+        let tx = self
+            .db
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        tx.execute(
+            "INSERT OR IGNORE INTO devices(id,label,trust_state,created_at) VALUES(?1,?1,'paired',?2)",
+            params![bundle.origin_device_id, now],
+        )?;
+        tx.execute(
+            "INSERT OR IGNORE INTO devices(id,label,trust_state,created_at) VALUES(?1,?1,'paired',?2)",
+            params![bundle.home_device_id, now],
+        )?;
+
+        for cap in &bundle.captures {
+            tx.execute(
+                "INSERT OR IGNORE INTO devices(id,label,trust_state,created_at) VALUES(?1,?1,'paired',?2)",
+                params![cap.origin_device_id, now],
+            )?;
+            if let Some(ref mid) = cap.source_message_id {
+                let msg_exists: bool = tx.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM messages WHERE id=?1)",
+                    [mid],
+                    |r| r.get(0),
+                )?;
+                if !msg_exists {
+                    let conv_id = "sync-conv-default";
+                    tx.execute(
+                        "INSERT OR IGNORE INTO conversations(id,project_id,title,acceptance,version,created_at)
+                         VALUES(?1,NULL,'Synced Conversation','home',1,?2)",
+                        params![conv_id, cap.created_at],
+                    )?;
+                    tx.execute(
+                        "INSERT OR IGNORE INTO messages(id,conversation_id,origin_device_id,role,content_json,acceptance,created_at)
+                         VALUES(?1,?2,?3,'user',?4,'home',?5)",
+                        params![
+                            mid,
+                            conv_id,
+                            cap.origin_device_id,
+                            serde_json::json!({"text": cap.content_ref}).to_string(),
+                            cap.created_at
+                        ],
+                    )?;
+                }
+            }
+            tx.execute(
+                "INSERT OR IGNORE INTO captures(id,origin_device_id,source_message_id,content_ref,content_sha256,created_at)
+                 VALUES(?1,?2,?3,?4,?5,?6)",
+                params![
+                    cap.id,
+                    cap.origin_device_id,
+                    cap.source_message_id,
+                    cap.content_ref,
+                    cap.content_sha256,
+                    cap.created_at
+                ],
+            )?;
+        }
+
+        for note in &bundle.notes {
+            tx.execute(
+                "INSERT OR IGNORE INTO devices(id,label,trust_state,created_at) VALUES(?1,?1,'paired',?2)",
+                params![note.origin_device_id, now],
+            )?;
+            if let Some(ref pid) = note.project_id {
+                tx.execute(
+                    "INSERT OR IGNORE INTO projects(id,title,acceptance,status,version,created_at,updated_at)
+                     VALUES(?1,'Synced Project','home','active',1,?2,?2)",
+                    params![pid, note.created_at],
+                )?;
+            }
+            if let Some(ref cid) = note.conversation_id {
+                tx.execute(
+                    "INSERT OR IGNORE INTO conversations(id,project_id,title,acceptance,version,created_at)
+                     VALUES(?1,?2,'Synced Conversation','home',1,?3)",
+                    params![cid, note.project_id, note.created_at],
+                )?;
+            }
+            let tags_json = serde_json::to_string(&note.tags)?;
+            let existing: Option<(i64, i64)> = tx
+                .query_row(
+                    "SELECT version, updated_at FROM notes WHERE id=?1",
+                    [&note.id],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .optional()?;
+            match existing {
+                None => {
+                    tx.execute(
+                        "INSERT INTO notes(id,project_id,conversation_id,origin_device_id,title,body_markdown,tags_json,acceptance,version,created_at,updated_at)
+                         VALUES(?1,?2,?3,?4,?5,?6,?7,'home',?8,?9,?10)",
+                        params![
+                            note.id,
+                            note.project_id,
+                            note.conversation_id,
+                            note.origin_device_id,
+                            note.title,
+                            note.body_markdown,
+                            tags_json,
+                            note.version.max(1),
+                            note.created_at,
+                            note.updated_at
+                        ],
+                    )?;
+                }
+                Some((cur_ver, cur_updated)) => {
+                    if note.version > cur_ver
+                        || (note.version == cur_ver && note.updated_at >= cur_updated)
+                    {
+                        tx.execute(
+                            "UPDATE notes SET title=?2, body_markdown=?3, tags_json=?4, acceptance='home', version=?5, updated_at=?6 WHERE id=?1",
+                            params![
+                                note.id,
+                                note.title,
+                                note.body_markdown,
+                                tags_json,
+                                note.version.max(cur_ver),
+                                note.updated_at.max(cur_updated)
+                            ],
+                        )?;
+                    }
+                }
+            }
+        }
+
+        for sched in &bundle.schedules {
+            tx.execute(
+                "INSERT OR IGNORE INTO devices(id,label,trust_state,created_at) VALUES(?1,?1,'paired',?2)",
+                params![sched.origin_device_id, now],
+            )?;
+            if let Some(ref pid) = sched.project_id {
+                tx.execute(
+                    "INSERT OR IGNORE INTO projects(id,title,acceptance,status,version,created_at,updated_at)
+                     VALUES(?1,'Synced Project','home','active',1,?2,?2)",
+                    params![pid, sched.created_at],
+                )?;
+            }
+            let existing: Option<(i64, i64)> = tx
+                .query_row(
+                    "SELECT version, updated_at FROM schedule_items WHERE id=?1",
+                    [&sched.id],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .optional()?;
+            let kind = if matches!(sched.kind.as_str(), "event" | "todo") {
+                sched.kind.as_str()
+            } else {
+                "event"
+            };
+            match existing {
+                None => {
+                    tx.execute(
+                        "INSERT INTO schedule_items(id,project_id,task_id,origin_device_id,title,kind,start_at,end_at,reminder_at,status,notes,acceptance,version,created_at,updated_at)
+                         VALUES(?1,?2,NULL,?3,?4,?5,?6,?7,?8,?9,?10,'home',?11,?12,?13)",
+                        params![
+                            sched.id,
+                            sched.project_id,
+                            sched.origin_device_id,
+                            sched.title,
+                            kind,
+                            sched.start_at,
+                            sched.end_at,
+                            sched.reminder_at,
+                            sched.status,
+                            sched.notes,
+                            sched.version.max(1),
+                            sched.created_at,
+                            sched.updated_at
+                        ],
+                    )?;
+                }
+                Some((cur_ver, cur_updated)) => {
+                    if sched.version > cur_ver
+                        || (sched.version == cur_ver && sched.updated_at >= cur_updated)
+                    {
+                        tx.execute(
+                            "UPDATE schedule_items SET title=?2, kind=?3, start_at=?4, end_at=?5, reminder_at=?6, status=?7, notes=?8, acceptance='home', version=?9, updated_at=?10 WHERE id=?1",
+                            params![
+                                sched.id,
+                                sched.title,
+                                kind,
+                                sched.start_at,
+                                sched.end_at,
+                                sched.reminder_at,
+                                sched.status,
+                                sched.notes,
+                                sched.version.max(cur_ver),
+                                sched.updated_at.max(cur_updated)
+                            ],
+                        )?;
+                    }
+                }
+            }
+        }
+
+        for mem in &bundle.memories {
+            let mut src_cap = mem.source_capture_id.clone();
+            let src_msg = mem.source_message_id.clone();
+            if let Some(ref cid) = src_cap {
+                let cap_exists: bool = tx.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM captures WHERE id=?1)",
+                    [cid],
+                    |r| r.get(0),
+                )?;
+                if !cap_exists {
+                    tx.execute(
+                        "INSERT OR IGNORE INTO captures(id,origin_device_id,source_message_id,content_ref,content_sha256,created_at)
+                         VALUES(?1,?2,NULL,?3,?4,?5)",
+                        params![
+                            cid,
+                            bundle.origin_device_id,
+                            mem.body,
+                            digest(mem.body.as_bytes()),
+                            now
+                        ],
+                    )?;
+                }
+            }
+            if let Some(ref mid) = src_msg {
+                let msg_exists: bool = tx.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM messages WHERE id=?1)",
+                    [mid],
+                    |r| r.get(0),
+                )?;
+                if !msg_exists {
+                    let conv_id = "sync-conv-default";
+                    tx.execute(
+                        "INSERT OR IGNORE INTO conversations(id,project_id,title,acceptance,version,created_at)
+                         VALUES(?1,NULL,'Synced Conversation','home',1,?2)",
+                        params![conv_id, now],
+                    )?;
+                    tx.execute(
+                        "INSERT OR IGNORE INTO messages(id,conversation_id,origin_device_id,role,content_json,acceptance,created_at)
+                         VALUES(?1,?2,?3,'user',?4,'home',?5)",
+                        params![
+                            mid,
+                            conv_id,
+                            bundle.origin_device_id,
+                            serde_json::json!({"text": mem.body}).to_string(),
+                            now
+                        ],
+                    )?;
+                }
+            }
+            if src_cap.is_none() && src_msg.is_none() {
+                let fallback_cap = format!("sync-cap:{}", mem.id);
+                tx.execute(
+                    "INSERT OR IGNORE INTO captures(id,origin_device_id,source_message_id,content_ref,content_sha256,created_at)
+                     VALUES(?1,?2,NULL,?3,?4,?5)",
+                    params![
+                        fallback_cap,
+                        bundle.origin_device_id,
+                        mem.body,
+                        digest(mem.body.as_bytes()),
+                        now
+                    ],
+                )?;
+                src_cap = Some(fallback_cap);
+            }
+            let existing: Option<i64> = tx
+                .query_row(
+                    "SELECT version FROM memories WHERE id=?1",
+                    [&mem.id],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            match existing {
+                None => {
+                    tx.execute(
+                        "INSERT INTO memories(id,source_capture_id,source_message_id,body,state,supersedes_id,version)
+                         VALUES(?1,?2,?3,?4,?5,NULL,?6)",
+                        params![
+                            mem.id,
+                            src_cap,
+                            src_msg,
+                            mem.body,
+                            mem.state,
+                            mem.version.max(1)
+                        ],
+                    )?;
+                }
+                Some(cur_ver) => {
+                    if mem.version >= cur_ver {
+                        tx.execute(
+                            "UPDATE memories SET body=?2, state=?3, version=?4 WHERE id=?1",
+                            params![mem.id, mem.body, mem.state, mem.version.max(cur_ver)],
+                        )?;
+                    }
+                }
+            }
+        }
+
+        for dec in &bundle.decisions {
+            tx.execute(
+                "INSERT OR IGNORE INTO projects(id,title,acceptance,status,version,created_at,updated_at)
+                 VALUES(?1,'Synced Workspace','home','active',1,?2,?2)",
+                params![dec.project_id, now],
+            )?;
+            let conv_id = format!("sync-conv:{}", dec.project_id);
+            tx.execute(
+                "INSERT OR IGNORE INTO conversations(id,project_id,title,acceptance,version,created_at)
+                 VALUES(?1,?2,'Synced Conversation','home',1,?3)",
+                params![conv_id, dec.project_id, now],
+            )?;
+            tx.execute(
+                "INSERT OR IGNORE INTO messages(id,conversation_id,origin_device_id,role,content_json,acceptance,created_at)
+                 VALUES(?1,?2,?3,'user',?4,'home',?5)",
+                params![
+                    dec.source_message_id,
+                    conv_id,
+                    bundle.origin_device_id,
+                    serde_json::json!({"text": dec.body}).to_string(),
+                    now
+                ],
+            )?;
+            if let Some(ref tid) = dec.task_id {
+                tx.execute(
+                    "INSERT OR IGNORE INTO tasks(id,project_id,source_message_id,title,status,constraints_json,version,created_at,updated_at)
+                     VALUES(?1,?2,?3,?4,'completed','{}',1,?5,?5)",
+                    params![tid, dec.project_id, dec.source_message_id, dec.body, now],
+                )?;
+            }
+            let existing: Option<i64> = tx
+                .query_row(
+                    "SELECT version FROM decisions WHERE id=?1",
+                    [&dec.id],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            let rationale = if serde_json::from_str::<serde_json::Value>(&dec.rationale_json).is_ok() {
+                dec.rationale_json.as_str()
+            } else {
+                "{}"
+            };
+            match existing {
+                None => {
+                    tx.execute(
+                        "INSERT INTO decisions(id,project_id,task_id,source_message_id,body,rationale_json,status,supersedes_id,version)
+                         VALUES(?1,?2,?3,?4,?5,?6,?7,NULL,?8)",
+                        params![
+                            dec.id,
+                            dec.project_id,
+                            dec.task_id,
+                            dec.source_message_id,
+                            dec.body,
+                            rationale,
+                            dec.status,
+                            dec.version.max(1)
+                        ],
+                    )?;
+                }
+                Some(cur_ver) => {
+                    if dec.version >= cur_ver {
+                        tx.execute(
+                            "UPDATE decisions SET body=?2, rationale_json=?3, status=?4, version=?5 WHERE id=?1",
+                            params![
+                                dec.id,
+                                dec.body,
+                                rationale,
+                                dec.status,
+                                dec.version.max(cur_ver)
+                            ],
+                        )?;
+                    }
+                }
+            }
+        }
+
+        tx.execute(
+            "UPDATE personal_ops_sync_outbox SET sync_state='synced', synced_at=?1, last_error=NULL WHERE sync_state='pending'",
+            [now],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn export_peer_sync_bundle(
+        &self,
+        sync_request_id: &str,
+        origin_device_id: &str,
+        shared_config_json: String,
+    ) -> Result<PeerSyncBundle> {
+        let (home_device_id, home_epoch): (String, i64) = self.db.query_row(
+            "SELECT device_id, epoch FROM home_authority WHERE singleton=1",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )?;
+        let mut sched_stmt = self.db.prepare(
+            "SELECT id,project_id,task_id,origin_device_id,title,kind,start_at,end_at,reminder_at,status,notes,acceptance,version,created_at,updated_at
+             FROM schedule_items ORDER BY start_at ASC, rowid ASC",
+        )?;
+        let schedules = sched_stmt
+            .query_map([], |r| {
+                Ok(ScheduleItem {
+                    id: r.get(0)?,
+                    project_id: r.get(1)?,
+                    task_id: r.get(2)?,
+                    origin_device_id: r.get(3)?,
+                    title: r.get(4)?,
+                    kind: r.get(5)?,
+                    start_at: r.get(6)?,
+                    end_at: r.get(7)?,
+                    reminder_at: r.get(8)?,
+                    status: r.get(9)?,
+                    notes: r.get(10)?,
+                    acceptance: r.get(11)?,
+                    version: r.get(12)?,
+                    created_at: r.get(13)?,
+                    updated_at: r.get(14)?,
+                })
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+
+        let mut note_stmt = self.db.prepare(
+            "SELECT id,project_id,conversation_id,origin_device_id,title,body_markdown,tags_json,acceptance,version,created_at,updated_at
+             FROM notes ORDER BY updated_at DESC, rowid DESC",
+        )?;
+        let notes = note_stmt
+            .query_map([], |r| {
+                let raw_tags: String = r.get(6)?;
+                let parsed_tags: Vec<String> = serde_json::from_str(&raw_tags).unwrap_or_default();
+                Ok(NoteItem {
+                    id: r.get(0)?,
+                    project_id: r.get(1)?,
+                    conversation_id: r.get(2)?,
+                    origin_device_id: r.get(3)?,
+                    title: r.get(4)?,
+                    body_markdown: r.get(5)?,
+                    tags: parsed_tags,
+                    acceptance: r.get(7)?,
+                    version: r.get(8)?,
+                    created_at: r.get(9)?,
+                    updated_at: r.get(10)?,
+                })
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+
+        let mut cap_stmt = self.db.prepare(
+            "SELECT id,origin_device_id,source_message_id,content_ref,content_sha256,created_at
+             FROM captures ORDER BY created_at DESC, rowid DESC",
+        )?;
+        let captures = cap_stmt
+            .query_map([], |r| {
+                Ok(CaptureItem {
+                    id: r.get(0)?,
+                    origin_device_id: r.get(1)?,
+                    source_message_id: r.get(2)?,
+                    content_ref: r.get(3)?,
+                    content_sha256: r.get(4)?,
+                    created_at: r.get(5)?,
+                })
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+
+        let mut mem_stmt = self.db.prepare(
+            "SELECT id,source_capture_id,source_message_id,body,state,supersedes_id,version
+             FROM memories ORDER BY rowid DESC",
+        )?;
+        let memories = mem_stmt
+            .query_map([], |r| {
+                Ok(MemoryItem {
+                    id: r.get(0)?,
+                    source_capture_id: r.get(1)?,
+                    source_message_id: r.get(2)?,
+                    body: r.get(3)?,
+                    state: r.get(4)?,
+                    supersedes_id: r.get(5)?,
+                    version: r.get(6)?,
+                })
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+
+        let mut dec_stmt = self.db.prepare(
+            "SELECT id,project_id,task_id,source_message_id,body,rationale_json,status,supersedes_id,version
+             FROM decisions ORDER BY rowid DESC",
+        )?;
+        let decisions = dec_stmt
+            .query_map([], |r| {
+                Ok(DecisionItem {
+                    id: r.get(0)?,
+                    project_id: r.get(1)?,
+                    task_id: r.get(2)?,
+                    source_message_id: r.get(3)?,
+                    body: r.get(4)?,
+                    rationale_json: r.get(5)?,
+                    status: r.get(6)?,
+                    supersedes_id: r.get(7)?,
+                    version: r.get(8)?,
+                })
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+
+        let mut bundle = PeerSyncBundle {
+            sync_request_id: sync_request_id.to_owned(),
+            origin_device_id: origin_device_id.to_owned(),
+            home_device_id,
+            home_epoch,
+            schedules,
+            notes,
+            captures,
+            memories,
+            decisions,
+            shared_config_json,
+            payload_sha256: String::new(),
+        };
+        bundle.payload_sha256 = bundle.compute_sha256()?;
+        Ok(bundle)
+    }
+
+    pub fn receive_peer_sync(
+        &mut self,
+        ctx: &crate::home_auth::HomeMessageContext,
+        bundle: &PeerSyncBundle,
+        home_shared_config_json: String,
+        now: i64,
+    ) -> Result<crate::home_result::HomeResult> {
+        if ctx.origin_device_id() != bundle.origin_device_id {
+            return Err(Error::InvalidTransition);
+        }
+        self.merge_peer_sync_bundle(bundle, now)?;
+        let home_bundle = self.export_peer_sync_bundle(
+            &format!("{}:home-reply", bundle.sync_request_id),
+            &bundle.home_device_id,
+            home_shared_config_json,
+        )?;
+        Ok(crate::home_result::HomeResult {
+            receipt: Some(crate::outbox::HomeReceipt {
+                request_id: bundle.sync_request_id.clone(),
+                home_device_id: bundle.home_device_id.clone(),
+                home_epoch: bundle.home_epoch,
+                payload_sha256: bundle.payload_sha256.clone(),
+                accepted: true,
+            }),
+            execution: None,
+            sync_bundle: Some(home_bundle),
         })
     }
 }

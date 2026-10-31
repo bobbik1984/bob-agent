@@ -7,6 +7,7 @@ use crate::{
 };
 use rusqlite::{params, OptionalExtension, Transaction, TransactionBehavior};
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 
 const MIGRATION_0005: &str = include_str!("../migrations/0005.sql");
 
@@ -256,6 +257,20 @@ impl LocalApp {
         title: &str,
         now: i64,
     ) -> Result<ConversationItem> {
+        self.create_conversation_impl(conversation_id, project_id, title, now, true)
+    }
+
+    /// Background imports must never change the user's active conversation.
+    pub fn import_conversation(
+        &mut self, conversation_id: &str, project_id: Option<&str>, title: &str, now: i64,
+    ) -> Result<ConversationItem> {
+        self.create_conversation_impl(conversation_id, project_id, title, now, false)
+    }
+
+    fn create_conversation_impl(
+        &mut self, conversation_id: &str, project_id: Option<&str>, title: &str, now: i64,
+        select: bool,
+    ) -> Result<ConversationItem> {
         let title = title.trim();
         let project_id = project_id.map(str::trim).filter(|s| !s.is_empty());
         if !valid_id(conversation_id) || title.len() > 256 {
@@ -301,10 +316,12 @@ impl LocalApp {
             "INSERT OR IGNORE INTO conversation_view_states(origin_device_id,conversation_id,draft,draft_revision,scroll_anchor_message_id,scroll_offset,last_read_message_id,updated_at) VALUES(?1,?2,'',0,NULL,0,NULL,?3)",
             params![self.origin, conversation_id, now],
         )?;
+        if select {
         tx.execute(
             "UPDATE device_ui_preferences SET selected_conversation_id=?2,updated_at=?3 WHERE origin_device_id=?1",
             params![self.origin, conversation_id, now],
         )?;
+        }
         if let Some(pid) = project_id {
             tx.execute(
                 "UPDATE projects SET updated_at=?2,version=version+1 WHERE id=?1",
@@ -318,6 +335,96 @@ impl LocalApp {
             .into_iter()
             .find(|c| c.id == conversation_id)
             .ok_or(Error::InvalidTransition)
+    }
+
+    pub fn promote_conversation_to_project(
+        &mut self,
+        conversation_id: &str,
+        project_id: &str,
+        project_title: &str,
+        now: i64,
+    ) -> Result<CatalogSnapshot> {
+        let cid = conversation_id.trim();
+        let pid = project_id.trim();
+        let ptitle = project_title.trim();
+        if !valid_id(cid)
+            || !valid_id(pid)
+            || pid.starts_with("local-project:")
+            || ptitle.is_empty()
+            || ptitle.len() > 256
+        {
+            return Err(Error::InvalidTransition);
+        }
+        let tx = self
+            .store
+            .db
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let existing_conv: Option<(Option<String>, String)> = tx
+            .query_row(
+                "SELECT project_id, title FROM conversations WHERE id=?1 AND archived_at IS NULL",
+                [cid],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?;
+        let Some((current_pid, current_title)) = existing_conv else {
+            return Err(Error::InvalidTransition);
+        };
+        if let Some(ref cur) = current_pid {
+            if cur != pid {
+                return Err(Error::IdentityConflict);
+            }
+        }
+        tx.execute(
+            "INSERT INTO projects(id,title,acceptance,status,version,created_at,updated_at)
+             VALUES(?1,?2,'local','active',1,?3,?3)
+             ON CONFLICT(id) DO UPDATE SET updated_at=?3",
+            params![pid, ptitle, now],
+        )?;
+        let effective_title = if current_title.trim().is_empty() {
+            ptitle.to_owned()
+        } else {
+            current_title
+        };
+        if current_pid.as_deref() != Some(pid) {
+            tx.execute(
+                "UPDATE conversations SET project_id=?2, title=?3, version=version+1 WHERE id=?1",
+                params![cid, pid, effective_title],
+            )?;
+        }
+        tx.execute(
+            "UPDATE notes SET project_id=?2, version=version+1, updated_at=?3 WHERE conversation_id=?1 AND project_id IS NULL",
+            params![cid, pid, now],
+        )?;
+        let source_msg_id: Option<String> = tx
+            .query_row(
+                "SELECT id FROM messages WHERE conversation_id=?1 ORDER BY created_at ASC, rowid ASC LIMIT 1",
+                [cid],
+                |r| r.get(0),
+            )
+            .optional()?;
+        let task_id = format!("task-conv-{}", &digest(cid.as_bytes())[..24]);
+        let constraints = json!({
+            "conversation_id": cid,
+            "promoted_from_standalone": true
+        })
+        .to_string();
+        tx.execute(
+            "INSERT INTO tasks(id,project_id,goal_id,milestone_id,source_message_id,title,status,constraints_json,version,created_at,updated_at)
+             VALUES(?1,?2,NULL,NULL,?3,?4,'running',?5,1,?6,?6)
+             ON CONFLICT(id) DO UPDATE SET project_id=?2, updated_at=?6",
+            params![task_id, pid, source_msg_id, effective_title, constraints, now],
+        )?;
+        tx.execute(
+            "UPDATE decisions SET project_id=?2, task_id=COALESCE(task_id,?3), version=version+1
+             WHERE source_message_id IN (SELECT id FROM messages WHERE conversation_id=?1)",
+            params![cid, pid, task_id],
+        )?;
+        tx.execute(
+            "UPDATE device_ui_preferences SET selected_conversation_id=?2, updated_at=?3 WHERE origin_device_id=?1",
+            params![self.origin, cid, now],
+        )?;
+        tx.commit()?;
+        self.catalog_snapshot()
     }
 
     pub fn select_conversation(

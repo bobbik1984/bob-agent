@@ -155,6 +155,7 @@ struct HomeCeremony {
     // Some only for a signed QR scan; also freezes its one-hour reply lease.
     qr_reply_expires_at: Option<i64>,
     host: Option<crate::home_host::HomeHostHandle>,
+    sync_host: Option<crate::home_host::HomeHostHandle>,
     control_reservation: Option<TcpListener>,
 }
 enum Ceremony {
@@ -527,6 +528,7 @@ fn load_host(
         grant_expiry: Some(data.grant_expiry),
         qr_reply_expires_at: data.qr_reply_expires_at,
         host: None,
+        sync_host: None,
         control_reservation: None,
     };
     // Resume only consent durably created by the signed QR path. Legacy manual
@@ -836,6 +838,7 @@ pub(crate) async fn app_pairing_home_invite<R: tauri::Runtime>(
         grant_expiry: None,
         qr_reply_expires_at: None,
         host: None,
+        sync_host: None,
         control_reservation: None,
     }));
     Ok(export)
@@ -1259,6 +1262,9 @@ fn enable_home(
     if let Some(mut previous) = home.host.take() {
         previous.stop();
     }
+    if let Some(mut previous_sync) = home.sync_host.take() {
+        previous_sync.stop();
+    }
     let reply_expiry = home
         .qr_reply_expires_at
         .unwrap_or(now()?.saturating_add(EXECUTION_PERMISSION_MS))
@@ -1266,12 +1272,30 @@ fn enable_home(
     if reply_expiry <= now()? {
         return Err("EXECUTION_PERMISSION_EXPIRED");
     }
+    let pinned_server = server(&identity, &home.invitation.candidate.identity)?;
+    let Some(program) = runner.program.clone() else {
+        drop(home.control_reservation.take());
+        if let Ok(sync_handle) = crate::home_host::start_sync_only(
+            home.bind,
+            identity.public.device_id.clone(),
+            home.invitation.home_epoch,
+            pinned_server,
+            home.root.join("reply-receipts"),
+            home.invitation.candidate.identity.device_id.clone(),
+            home.invitation.candidate.session_id.clone(),
+            home.owner.clone(),
+            runner.active.clone(),
+        ) {
+            home.sync_host = Some(sync_handle);
+        }
+        return Err("EXECUTION_UNAVAILABLE");
+    };
     let config = crate::home_host::HomeHostConfig {
         address: home.bind,
         home_device_id: identity.public.device_id.clone(),
         home_epoch: home.invitation.home_epoch,
-        server: server(&identity, &home.invitation.candidate.identity)?,
-        program: runner.program.clone().ok_or("EXECUTION_UNAVAILABLE")?,
+        server: pinned_server,
+        program,
         receipts: home.root.join("reply-receipts"),
         policy: crate::home_host::ReadOnlyPolicy {
             device_id: home.invitation.candidate.identity.device_id.clone(),
@@ -1495,6 +1519,9 @@ pub(crate) async fn app_pairing_revoke<R: tauri::Runtime>(
     home._listeners.0.store(true, Ordering::SeqCst);
     if let Some(mut host) = home.host.take() {
         host.stop();
+    }
+    if let Some(mut sync_host) = home.sync_host.take() {
+        sync_host.stop();
     }
     status(guard.as_ref().ok_or("PAIRING_STATE_UNAVAILABLE")?)
 }

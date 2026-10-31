@@ -207,6 +207,129 @@ pub(crate) fn start(
     })
 }
 
+pub(crate) fn start_sync_only(
+    address: SocketAddr,
+    home_device_id: String,
+    home_epoch: i64,
+    server: Arc<PinnedServer>,
+    receipts: PathBuf,
+    device_id: String,
+    session_id: String,
+    owner: App,
+    active: Active,
+) -> Result<HomeHostHandle, &'static str> {
+    if !cfg!(windows) {
+        return Err("HOME_RUNNER_UNSUPPORTED");
+    }
+    if home_device_id.is_empty()
+        || home_epoch <= 0
+        || device_id.is_empty()
+        || session_id.is_empty()
+        || !receipts.is_absolute()
+    {
+        return Err("HOME_HOST_CONFIGURATION_INVALID");
+    }
+    with_app(&owner, |app| {
+        if app.device_id() == home_device_id {
+            Ok(())
+        } else {
+            Err("HOME_IDENTITY_MISMATCH")
+        }
+    })?;
+    std::fs::create_dir_all(&receipts).map_err(|_| "RECEIPT_STORE_UNAVAILABLE")?;
+    let listener = TcpListener::bind(address).map_err(|_| "HOME_BIND_FAILED")?;
+    listener
+        .set_nonblocking(true)
+        .map_err(|_| "HOME_BIND_FAILED")?;
+    let bound_address = listener.local_addr().map_err(|_| "HOME_BIND_FAILED")?;
+    let config = HomeHostConfig {
+        address: bound_address,
+        home_device_id,
+        home_epoch,
+        server,
+        program: PathBuf::new(),
+        receipts,
+        policy: ReadOnlyPolicy {
+            device_id,
+            session_id,
+            expires_at: 0,
+            execution_timeout: Duration::from_secs(120),
+        },
+    };
+    let stop = Arc::new(AtomicBool::new(false));
+    let own = Arc::new(Mutex::new(HashSet::new()));
+    let last_error = Arc::new(Mutex::new(None));
+    let stop_loop = stop.clone();
+    let app = owner.clone();
+    let jobs = active.clone();
+    let owned = own.clone();
+    let error = last_error.clone();
+    let handle = thread::Builder::new()
+        .name("bob-home-sync-listener".into())
+        .spawn(move || {
+            while !stop_loop.load(Ordering::SeqCst) {
+                match listener.accept() {
+                    Ok((socket, _)) => {
+                        if socket.set_nonblocking(false).is_err() {
+                            if let Ok(mut e) = error.lock() {
+                                *e = Some("HOME_SOCKET_CONFIGURATION_FAILED");
+                            }
+                            continue;
+                        }
+                        let result = config.server.serve_control_rpc_once(
+                            socket,
+                            Limits::default(),
+                            |peer, request| {
+                                handle_request(
+                                    &config,
+                                    &app,
+                                    &jobs,
+                                    &owned,
+                                    &stop_loop,
+                                    peer.certificate_sha256(),
+                                    request,
+                                )
+                                .map_err(|code| {
+                                    if let Ok(mut e) = error.lock() {
+                                        *e = Some(code);
+                                    }
+                                    TransportError::Protocol
+                                })
+                            },
+                        );
+                        if result.is_err() {
+                            if let Ok(mut e) = error.lock() {
+                                if e.is_none() {
+                                    *e = Some("HOME_REQUEST_REJECTED");
+                                }
+                            }
+                        }
+                    }
+                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                        thread::sleep(Duration::from_millis(25))
+                    }
+                    Err(_) => {
+                        if let Ok(mut e) = error.lock() {
+                            *e = Some("HOME_LISTENER_FAILED");
+                        }
+                        break;
+                    }
+                }
+            }
+        })
+        .map_err(|_| "HOME_LISTENER_FAILED")?;
+    Ok(HomeHostHandle {
+        address: bound_address,
+        stop,
+        listener: Some(handle),
+        owner,
+        active,
+        own,
+        last_error,
+        policy_expires_at: 0,
+    })
+}
+
 fn handle_request(
     config: &HomeHostConfig,
     owner: &App,
@@ -246,6 +369,7 @@ fn handle_request(
                 .map(|r| HomeResult {
                     receipt: r,
                     execution: None,
+                    sync_bundle: None,
                 })
                 .map_err(|_| "HOME_LOOKUP_FAILED"),
             HomeRequest::LookupCancel(ref r) => app
@@ -253,6 +377,7 @@ fn handle_request(
                 .map(|r| HomeResult {
                     receipt: r,
                     execution: None,
+                    sync_bundle: None,
                 })
                 .map_err(|_| "HOME_LOOKUP_FAILED"),
             HomeRequest::ReplicaDirectTurn(ref r) => app
@@ -260,6 +385,7 @@ fn handle_request(
                 .map(|r| HomeResult {
                     receipt: Some(r),
                     execution: None,
+                    sync_bundle: None,
                 })
                 .map_err(|_| "HOME_DIRECT_TURN_SYNC_FAILED"),
             HomeRequest::ReplicaPersonalOp(ref r) => app
@@ -267,8 +393,34 @@ fn handle_request(
                 .map(|r| HomeResult {
                     receipt: Some(r),
                     execution: None,
+                    sync_bundle: None,
                 })
                 .map_err(|_| "HOME_PERSONAL_OP_SYNC_FAILED"),
+            HomeRequest::PeerSync(ref bundle) => {
+                let data_dir = config
+                    .receipts
+                    .parent()
+                    .unwrap_or(config.receipts.as_path());
+                let home_shared_cfg = crate::direct_llm::export_shared_config_from_dir(data_dir);
+                let mut result = app
+                    .host_receive_peer_sync(&ctx, bundle, home_shared_cfg, at)
+                    .map_err(|_| "HOME_PEER_SYNC_FAILED")?;
+                if result.receipt.as_ref().is_some_and(|r| r.accepted) {
+                    crate::direct_llm::merge_shared_config_with_app(
+                        data_dir,
+                        app,
+                        &bundle.shared_config_json,
+                    );
+                    if let Some(ref mut out_bundle) = result.sync_bundle {
+                        out_bundle.shared_config_json =
+                            crate::direct_llm::export_shared_config_from_dir(data_dir);
+                        if let Ok(recomputed) = out_bundle.compute_sha256() {
+                            out_bundle.payload_sha256 = recomputed;
+                        }
+                    }
+                }
+                Ok(result)
+            }
             HomeRequest::Cancel(ref r) => {
                 let receipt = app
                     .host_receive_cancel(&ctx, r, at)
@@ -281,6 +433,7 @@ fn handle_request(
                 Ok(HomeResult {
                     receipt: Some(receipt),
                     execution: None,
+                    sync_bundle: None,
                 })
             }
             HomeRequest::Append(ref r) => {
@@ -293,6 +446,7 @@ fn handle_request(
                     return Ok(HomeResult {
                         receipt: Some(receipt),
                         execution: None,
+                        sync_bundle: None,
                     });
                 }
                 if stop.load(Ordering::SeqCst) || !jobs.is_empty() {
@@ -301,6 +455,7 @@ fn handle_request(
                         .map(|receipt| HomeResult {
                             receipt: Some(receipt),
                             execution: None,
+                            sync_bundle: None,
                         })
                         .map_err(|_| "HOME_REJECTION_SAVE_FAILED");
                 }
@@ -312,6 +467,7 @@ fn handle_request(
                         .map(|receipt| HomeResult {
                             receipt: Some(receipt),
                             execution: None,
+                            sync_bundle: None,
                         })
                         .map_err(|_| "HOME_REJECTION_SAVE_FAILED");
                 }
@@ -331,6 +487,7 @@ fn handle_request(
                         .map(|receipt| HomeResult {
                             receipt: Some(receipt),
                             execution: None,
+                            sync_bundle: None,
                         })
                         .map_err(|_| "HOME_REJECTION_SAVE_FAILED");
                 }
@@ -368,6 +525,7 @@ fn handle_request(
                 Ok(HomeResult {
                     receipt: Some(receipt),
                     execution: None,
+                    sync_bundle: None,
                 })
             }
         }

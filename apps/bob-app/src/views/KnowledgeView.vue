@@ -1,4 +1,5 @@
 <script setup>
+import CaptureImage from '../components/CaptureImage.vue';
 import { computed, reactive, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 
@@ -37,6 +38,9 @@ const { t } = useI18n();
 const activeSubtab = ref('notes'); // 'notes' | 'captures' | 'memories' | 'decisions'
 const searchQuery = ref('');
 const selectedNoteId = ref(null);
+const mobileEditorOpen = ref(false);
+const showCaptureForm = ref(false);
+const showDecisionForm = ref(false);
 
 const noteEditor = reactive({
   id: '',
@@ -47,6 +51,23 @@ const noteEditor = reactive({
 
 const captureDraft = ref('');
 const decisionDraft = ref('');
+const decisionReason = ref('');
+const decisionAlternatives = ref('');
+const decisionReviewCondition = ref('');
+
+function parseDecisionRationale(dec) {
+  if (!dec?.rationale_json) return null;
+  try {
+    const parsed =
+      typeof dec.rationale_json === 'string'
+        ? JSON.parse(dec.rationale_json)
+        : dec.rationale_json;
+    if (!parsed || typeof parsed !== 'object') return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
 
 const filteredNotes = computed(() => {
   const q = searchQuery.value.trim().toLowerCase();
@@ -64,19 +85,24 @@ watch(
   () => props.notes,
   list => {
     if (!selectedNoteId.value && Array.isArray(list) && list.length > 0) {
-      selectNote(list[0]);
+      loadNoteIntoEditor(list[0]);
     }
   },
   { immediate: true },
 );
 
-function selectNote(note) {
+function loadNoteIntoEditor(note) {
   if (!note) return;
   selectedNoteId.value = note.id;
   noteEditor.id = note.id;
   noteEditor.title = note.title || '';
   noteEditor.tagsText = Array.isArray(note.tags) ? note.tags.join(', ') : '';
   noteEditor.body = note.body_markdown || note.body || '';
+}
+
+function selectNote(note) {
+  loadNoteIntoEditor(note);
+  mobileEditorOpen.value = true;
 }
 
 function startNewNote() {
@@ -86,6 +112,7 @@ function startNewNote() {
   noteEditor.title = '';
   noteEditor.tagsText = '';
   noteEditor.body = '';
+  mobileEditorOpen.value = true;
 }
 
 function submitNote() {
@@ -103,6 +130,7 @@ function submitNote() {
     body: noteEditor.body,
     tags,
   });
+  mobileEditorOpen.value = false;
 }
 
 function submitCapture() {
@@ -113,27 +141,37 @@ function submitCapture() {
     content,
   });
   captureDraft.value = '';
+  showCaptureForm.value = false;
 }
 
 function submitDecision() {
   const body = decisionDraft.value.trim();
   if (!body) return;
+  const rationaleObj = {};
+  if (decisionReason.value.trim()) rationaleObj.reason = decisionReason.value.trim();
+  if (decisionAlternatives.value.trim()) {
+    rationaleObj.alternatives = decisionAlternatives.value.trim();
+  }
+  if (decisionReviewCondition.value.trim()) {
+    rationaleObj.review_condition = decisionReviewCondition.value.trim();
+  }
   emit('create-decision', {
     id: `dec-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
     body,
+    rationaleJson: JSON.stringify(rationaleObj),
     status: 'accepted',
   });
   decisionDraft.value = '';
+  decisionReason.value = '';
+  decisionAlternatives.value = '';
+  decisionReviewCondition.value = '';
+  showDecisionForm.value = false;
 }
 </script>
 
 <template>
   <section class="primary-view knowledge-view" :aria-label="t('knowledgeViewTitle')">
-    <header class="view-hero">
-      <div class="view-hero-titles">
-        <h2>{{ t('knowledgeViewTitle') }}</h2>
-        <p>{{ t('knowledgeViewSubtitle') }}</p>
-      </div>
+    <header class="view-subtab-bar">
       <div class="view-subtabs" role="tablist">
         <button
           type="button"
@@ -141,7 +179,11 @@ function submitDecision() {
           :class="{ active: activeSubtab === 'notes' }"
           @click="activeSubtab = 'notes'"
         >
-          📝 {{ t('knowledgeTabNotes') }}
+          <svg class="inline-svg" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+            <path d="M14 2v6h6M16 13H8M16 17H8M10 9H8" />
+          </svg>
+          <span>{{ t('knowledgeTabNotes') }}</span>
           <span class="subtab-count">{{ notes.length }}</span>
         </button>
         <button
@@ -150,7 +192,10 @@ function submitDecision() {
           :class="{ active: activeSubtab === 'captures' }"
           @click="activeSubtab = 'captures'"
         >
-          ⚡ {{ t('knowledgeTabCaptures') }}
+          <svg class="inline-svg" viewBox="0 0 24 24" aria-hidden="true">
+            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+          </svg>
+          <span>{{ t('knowledgeTabCaptures') }}</span>
           <span class="subtab-count">{{ captures.length }}</span>
         </button>
         <button
@@ -159,7 +204,11 @@ function submitDecision() {
           :class="{ active: activeSubtab === 'memories' }"
           @click="activeSubtab = 'memories'"
         >
-          🧠 {{ t('knowledgeTabMemories') }}
+          <svg class="inline-svg" viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="12" cy="12" r="9" />
+            <path d="M9 12h6M12 9v6" />
+          </svg>
+          <span>{{ t('knowledgeTabMemories') }}</span>
           <span class="subtab-count">{{ memories.length }}</span>
         </button>
         <button
@@ -168,27 +217,64 @@ function submitDecision() {
           :class="{ active: activeSubtab === 'decisions' }"
           @click="activeSubtab = 'decisions'"
         >
-          ⚖ {{ t('knowledgeTabDecisions') }}
+          <svg class="inline-svg" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 3v18M5 8l7-5 7 5M5 16h14" />
+          </svg>
+          <span>{{ t('knowledgeTabDecisions') }}</span>
           <span class="subtab-count">{{ decisions.length }}</span>
         </button>
       </div>
+
+      <button
+        v-if="activeSubtab === 'notes'"
+        type="button"
+        class="compact-add-btn"
+        @click="startNewNote"
+      >
+        {{ t('knowledgeNewNoteBtn') }}
+      </button>
+      <button
+        v-else-if="activeSubtab === 'captures'"
+        type="button"
+        class="compact-add-btn"
+        :class="{ active: showCaptureForm }"
+        @click="showCaptureForm = !showCaptureForm"
+      >
+        + {{ t('knowledgeToggleNewCaptureBtn') }}
+      </button>
+      <button
+        v-else-if="activeSubtab === 'decisions'"
+        type="button"
+        class="compact-add-btn"
+        :class="{ active: showDecisionForm }"
+        @click="showDecisionForm = !showDecisionForm"
+      >
+        + {{ t('knowledgeToggleNewDecisionBtn') }}
+      </button>
+      <button
+        v-else
+        type="button"
+        class="compact-add-btn"
+        style="visibility: hidden"
+        aria-hidden="true"
+        tabindex="-1"
+      >
+        {{ t('knowledgeNewNoteBtn') }}
+      </button>
     </header>
 
     <div class="view-content-body">
       <template v-if="activeSubtab === 'notes'">
-        <div class="knowledge-toolbar">
+        <div class="knowledge-toolbar" :class="{ 'mobile-hidden': mobileEditorOpen }">
           <input
             v-model="searchQuery"
             type="search"
             class="knowledge-search-input"
             :placeholder="t('knowledgeSearchPlaceholder')"
           />
-          <button type="button" class="primary-action-btn" @click="startNewNote">
-            + {{ t('knowledgeNewNoteBtn') }}
-          </button>
         </div>
 
-        <div class="knowledge-split-pane">
+        <div class="knowledge-split-pane" :class="{ 'mobile-editor-active': mobileEditorOpen }">
           <aside class="knowledge-note-list hub-card">
             <p v-if="!filteredNotes.length" class="view-card-desc">
               {{ t('knowledgeEmptyNotesHint') }}
@@ -214,6 +300,15 @@ function submitDecision() {
           </aside>
 
           <form class="knowledge-note-editor hub-card" @submit.prevent="submitNote">
+            <div class="mobile-editor-back-row">
+              <button
+                type="button"
+                class="mini-ghost-btn"
+                @click="mobileEditorOpen = false"
+              >
+                ← {{ t('knowledgeBackToListBtn') }}
+              </button>
+            </div>
             <input
               v-model="noteEditor.title"
               type="text"
@@ -247,7 +342,11 @@ function submitDecision() {
       </template>
 
       <template v-else-if="activeSubtab === 'captures'">
-        <form class="quick-capture-form hub-card" @submit.prevent="submitCapture">
+        <form
+          v-if="showCaptureForm"
+          class="quick-capture-form hub-card"
+          @submit.prevent="submitCapture"
+        >
           <input
             v-model="captureDraft"
             type="text"
@@ -269,6 +368,7 @@ function submitDecision() {
         <div v-else class="captures-list">
           <article v-for="cap in captures" :key="cap.id" class="hub-card capture-item-card">
             <p>{{ cap.content_ref || cap.content }}</p>
+            <CaptureImage :capture-id="cap.id" />
           </article>
         </div>
       </template>
@@ -311,12 +411,31 @@ function submitDecision() {
       </template>
 
       <template v-else>
-        <form class="quick-capture-form hub-card" @submit.prevent="submitDecision">
+        <form
+          v-if="showDecisionForm"
+          class="quick-capture-form decision-structured-form hub-card"
+          @submit.prevent="submitDecision"
+        >
           <input
             v-model="decisionDraft"
             type="text"
             :placeholder="t('knowledgeDecisionPlaceholder')"
             required
+          />
+          <input
+            v-model="decisionReason"
+            type="text"
+            :placeholder="t('knowledgeDecisionReasonPlaceholder')"
+          />
+          <input
+            v-model="decisionAlternatives"
+            type="text"
+            :placeholder="t('knowledgeDecisionAlternativesPlaceholder')"
+          />
+          <input
+            v-model="decisionReviewCondition"
+            type="text"
+            :placeholder="t('knowledgeDecisionReviewConditionPlaceholder')"
           />
           <button
             type="submit"
@@ -334,7 +453,22 @@ function submitDecision() {
           <article v-for="dec in decisions" :key="dec.id" class="hub-card memory-item-card">
             <div class="memory-item-main">
               <strong>{{ dec.body }}</strong>
-              <span class="schedule-kind-badge">{{ dec.project_id }} · {{ dec.status }}</span>
+              <span class="schedule-kind-badge">
+                {{ dec.project_id }}
+                <template v-if="dec.task_id"> · {{ dec.task_id }}</template>
+                · {{ dec.status }}
+              </span>
+              <div v-if="parseDecisionRationale(dec)" class="decision-rationale-meta">
+                <small v-if="parseDecisionRationale(dec).reason">
+                  {{ t('knowledgeDecisionReasonLabel') }}: {{ parseDecisionRationale(dec).reason }}
+                </small>
+                <small v-if="parseDecisionRationale(dec).alternatives">
+                  {{ t('knowledgeDecisionAlternativesLabel') }}: {{ parseDecisionRationale(dec).alternatives }}
+                </small>
+                <small v-if="parseDecisionRationale(dec).review_condition">
+                  {{ t('knowledgeDecisionReviewConditionLabel') }}: {{ parseDecisionRationale(dec).review_condition }}
+                </small>
+              </div>
             </div>
             <div class="memory-item-actions">
               <button
@@ -344,6 +478,14 @@ function submitDecision() {
                 @click="emit('update-decision', { id: dec.id, status: 'accepted' })"
               >
                 {{ t('decisionAcceptBtn') }}
+              </button>
+              <button
+                v-if="dec.status !== 'superseded'"
+                type="button"
+                class="mini-ghost-btn"
+                @click="emit('update-decision', { id: dec.id, status: 'superseded' })"
+              >
+                {{ t('decisionSupersedeBtn') }}
               </button>
               <button
                 v-if="dec.status !== 'rejected'"
