@@ -1,0 +1,9 @@
+{
+  "run": "41266758148",
+  "artifact_id": 13067890750,
+  "commit": "4bdda61e924984e74260849ae2fd76df366c6e59",
+  "apk": "app-universal-debug.apk",
+  "sha256": "b5f055cd759ac783e514c40d93b581c348c88062930945dfbeaf635e5a77e933",
+  "ci_conclusion": "success",
+  "hardware_installed": false
+}

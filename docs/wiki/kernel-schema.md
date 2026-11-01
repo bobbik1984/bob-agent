@@ -570,7 +570,7 @@ JSONL过程事件追加落盘，最终终态回执独立原子写入；tee/管�
 
 workspace_handoff需记录来源/目标实例、精确commit、dirty内容清单与指纹、未决执行及Owner版本/epoch。dirty指纹用于检测差异，不能代替未提交文件传输；未提交内容未交付或旧写入者未释放时，拒绝授予新写入权。command_ref只引用获准命令配置，不接收模型任意shell作为渲染能力参数。
 
-当前BP4-04实现：project_context.rs提供显式源材料的有界构造与失效检查；workspace_context.rs从显式Git工作区/源文件选择提取、复核、版本化保存读回，并提供validate_for_dispatch。dirty指纹范围限定为Git状态及所选文件内容，不能据此交接全工作树写入权。来源片段确定性截取不是模型摘要/符号分析；持久文件不是kernel任务账本。bob-node已接宿主授权配置、网页读回和两条实际发送路径的绑定核对；未绑定原生会话不强制绕行。TaskCard材料装配、跨Host与原生Tauri接线仍未完成；事实和测试见CURRENT_STAGE §3.5。
+当前BP4-04实现：project_context.rs提供显式源材料的有界构造与失效检查；workspace_context.rs从显式Git工作区/源文件选择提取、复核、版本化保存读回，并提供validate_for_dispatch。dirty指纹范围限定为Git状态及所选文件内容，不能据此交接全工作树写入权。来源片段确定性截取不是模型摘要/符号分析；持久文件不是kernel任务账本。bob-node已接宿主授权配置、网页读回和两条实际发送路径的绑定核对；未绑定原生会话不强制绕行。绑定派发的TaskCard材料装配与宿主变化刷新已完成本地接线和验证；远端实际消费、跨Host与原生Tauri接线仍未完成；事实和测试见CURRENT_STAGE §3.5。
 
 
 ### 10.6 本地宿主胶囊授权（BP4-04第一段）

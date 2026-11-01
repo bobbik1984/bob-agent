@@ -136,3 +136,11 @@ F2/F5：`crates/bob-runtime/src/dsh_session.rs`负责原生身份/历史投影�
 ### 共用消息阅读
 
 `apps/bob-app/src/components/MessageContent.vue` 与 `message-markdown.mjs`：App助手消息和Work Online历史的安全Markdown子集阅读。`tests/message-markdown.test.mjs` 覆盖结构、链接拒绝、代码与长文保留；远端附件传输不由此组件实现。
+
+
+## BP4-04 项目上下文与任务卡
+
+- crates/bob-runtime/src/project_context.rs：有界胶囊及来源身份；workspace_context.rs：显式工作区源提取、持久版本及派发前复核。
+- crates/bob-node/src/context_capsule.rs：宿主grant读取、context RPC、固定任务卡装配与5秒变化刷新；lib.rs与ssistant.rs的实际发送入口调用该模块。
+- pps/bob-app/src/components/ProjectContextPane.vue与kernel-bridge.mjs：网页来源和任务卡读回；Android宿主context RPC仍未接通，不等同手机可扫描远端工作区。
+- 同一用户原文沿既有派发回执处理，任务卡引用不是另一套执行状态；验收范围唯一见CURRENT_STAGE §3.5。
