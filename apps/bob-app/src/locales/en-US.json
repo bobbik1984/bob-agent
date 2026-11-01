@@ -568,5 +568,16 @@
   "artifactReady": "Preview ready",
   "artifactRetry": "Click to retry",
   "artifactOpen": "View file",
-  "filePreviewCached": "Showing the downloaded copy. The conversation checks for updates in the background."
+  "filePreviewCached": "Showing the downloaded copy. The conversation checks for updates in the background.",
+  "contextTitle": "Project context",
+  "contextScope": "Uses host-authorized workspaces and files. Sources are checked before dispatch; this does not grant write access.",
+  "contextNoGrants": "No host-authorized workspaces.",
+  "contextChoose": "Choose workspace",
+  "contextRefresh": "Refresh context",
+  "contextLoading": "Checking workspace…",
+  "contextHostOnly": "Context service is not available on this host.",
+  "contextCurrent": "Selected sources are current",
+  "contextStale": "Sources changed; refresh required",
+  "contextReadOnly": "This is a source-backed reading index. Full workspace handoff requires additional checks.",
+  "contextTaskCards": "Pinned task cards"
 }

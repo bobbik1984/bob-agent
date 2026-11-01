@@ -1,0 +1,13 @@
+{
+  "release": "tab-visibility-20261101-r1",
+  "baseCommit": "f6db9d9",
+  "scope": "remote view visibility and file reference style",
+  "apk": false,
+  "deployed": true,
+  "backup": "/opt/bob-online/backups/tab-visibility-1793498148",
+  "frontendOnly": true,
+  "databaseChanged": false,
+  "serviceRestarted": false,
+  "localHttpReadback": "passed",
+  "indexSha256": "b481077e52ff40fe1630ac4e22dedd638e63c2918f507fcb5812692f1357f148"
+}

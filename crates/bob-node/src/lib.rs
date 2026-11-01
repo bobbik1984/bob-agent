@@ -10,6 +10,7 @@
 //! 5. Read-only idempotent migration from legacy `nexus_control_plane.db` (`XP-10`).
 
 mod assistant;
+mod context_capsule;
 use bob_kernel::app::LocalApp;
 use bob_runtime::{now_millis, ModelHubRuntime, RuntimeCapabilityManifest};
 use rusqlite::{Connection, OpenFlags};
@@ -225,6 +226,7 @@ impl NodeContext {
 pub fn handle_rpc_command(ctx: &mut NodeContext, command: &str, args: &Value) -> Result<Value, &'static str> {
     let at = now_millis();
     match command {
+        "app_context_list" | "app_context_read" | "app_context_refresh" | "app_context_tasks" => context_capsule::rpc(&ctx.runtime.data_dir,command,args),
         "app_bootstrap" => {
             let session_id = ctx
                 .app
@@ -959,6 +961,12 @@ pub fn handle_rpc_command(ctx: &mut NodeContext, command: &str, args: &Value) ->
             args["requestId"].as_str().ok_or("DSH_REQUEST_REQUIRED")?),
         "app_dsh_page" | "app_dsh_preview" | "app_dsh_list" | "app_dsh_history" | "app_dsh_prompt" => {
             let connection=args["connectionId"].as_str().ok_or("DSH_CONNECTION_REQUIRED")?;
+            if command=="app_dsh_prompt" {
+                context_capsule::before_dispatch(&ctx.runtime.data_dir,connection,
+                    args["sessionId"].as_str().ok_or("DSH_SESSION_REQUIRED")?,
+                    args["requestId"].as_str().ok_or("DSH_REQUEST_REQUIRED")?,
+                    args["text"].as_str().ok_or("DSH_TEXT_REQUIRED")?)?;
+            }
             let client=ctx.runtime.dsh_client(connection)?;
             match command {
                 "app_dsh_list" => client.list(),
@@ -972,7 +980,8 @@ pub fn handle_rpc_command(ctx: &mut NodeContext, command: &str, args: &Value) ->
                     let session=args["sessionId"].as_str().ok_or("DSH_SESSION_REQUIRED")?;
                     let text=args["text"].as_str().filter(|s|!s.trim().is_empty() && s.len()<=32000).ok_or("DSH_TEXT_REQUIRED")?;
                     let request=args["requestId"].as_str().filter(|s|s.len()<=200 && !s.is_empty()).ok_or("DSH_REQUEST_REQUIRED")?;
-                    bob_runtime::dsh_transport::dispatch_once(&ctx.runtime.data_dir,connection,session,text,request,||client.prompt(session,text,request))
+                    let wire=context_capsule::before_dispatch(&ctx.runtime.data_dir,connection,session,request,text)?;
+                    bob_runtime::dsh_transport::dispatch_once(&ctx.runtime.data_dir,connection,session,text,request,||client.prompt(session,&wire,request))
                 }
             }
         }
@@ -1940,6 +1949,12 @@ pub fn spawn_node_server(config: BobNodeConfig) -> Result<RunningNodeServer, &'s
     let ctx = Arc::new(Mutex::new(NodeContext::open(&config)?));
     let stop = Arc::new(AtomicBool::new(false));
     let stop_flag = stop.clone();
+    let context_dir=config.data_dir.clone();let context_stop=stop.clone();
+    std::thread::spawn(move || {while !context_stop.load(Ordering::SeqCst) {
+        let _=context_capsule::refresh_changed(&context_dir);
+        for _ in 0..10 {if context_stop.load(Ordering::SeqCst){return;}std::thread::sleep(Duration::from_millis(500));}
+    }});
+
 
     std::thread::spawn(move || {
         for incoming in listener.incoming() {

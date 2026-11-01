@@ -1,0 +1,13 @@
+{
+  "release": "model-assets-20261101-r1",
+  "baseCommit": "f6db9d9",
+  "scope": "remote view visibility and file reference style",
+  "apk": false,
+  "deployed": true,
+  "backup": "/opt/bob-online/backups/tab-visibility-1793500506",
+  "frontendOnly": true,
+  "databaseChanged": false,
+  "serviceRestarted": false,
+  "localHttpReadback": "passed",
+  "indexSha256": "405249cb080a215769ea2f615f6dee7c6fb42948bd847ec1d94d0ca8e3c7b3a1"
+}

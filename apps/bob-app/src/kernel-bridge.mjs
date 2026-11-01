@@ -7,6 +7,9 @@ export function createKernelBridge(invoke, isAvailable) {
   }
   return {
     available: isAvailable,
+    contextTasks: grantId => call('app_context_tasks',{grantId}),
+    contextList: () => call('app_context_list',{}),
+    contextRead: (grantId,refresh=false) => call(refresh?'app_context_refresh':'app_context_read',{grantId}),
     dshReceipt: (connectionId,sessionId,text,requestId) => call('app_dsh_receipt',{connectionId,sessionId,text,requestId}),
     dshPreview: (connectionId,sessionId,path,known=null) => call('app_dsh_preview',{connectionId,sessionId,path,known}),
     dshList: connectionId => call('app_dsh_list', {connectionId}),

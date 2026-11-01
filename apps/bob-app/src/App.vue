@@ -6,6 +6,7 @@ import CustomSelect from './components/CustomSelect.vue';
 import ScheduleView from './views/ScheduleView.vue';
 import WorkView from './views/WorkView.vue';
 import DshSessions from './components/DshSessions.vue';
+import ProjectContextPane from './components/ProjectContextPane.vue';
 import ConversationDirectory from './components/ConversationDirectory.vue';
 import KnowledgeView from './views/KnowledgeView.vue';
 import { isBobNodeRuntime } from './http-bridge.mjs';
@@ -2922,11 +2923,7 @@ onUnmounted(()=>document.removeEventListener('pointerdown',dismissConversationMe
                   class="vault-key-row"
                 >
                   <div class="vault-key-brand">
-                    <img
-                      :src="getProviderLogo(item.id)"
-                      alt=""
-                      class="key-provider-logo"
-                    />
+
                     <span class="key-provider-name">{{ item.name }}</span>
                   </div>
 
@@ -3086,6 +3083,7 @@ onUnmounted(()=>document.removeEventListener('pointerdown',dismissConversationMe
           v-show="settingsView === 'home' && settingsTab === 'workspace'"
           class="model-hub-stack settings-tab-panel"
         >
+          <ProjectContextPane :active="settingsOpen && settingsTab === 'workspace'" />
           <section class="hub-card">
             <div class="hub-card-header">
               <div class="hub-card-title-group">
@@ -3583,7 +3581,7 @@ onUnmounted(()=>document.removeEventListener('pointerdown',dismissConversationMe
     />
 
     <!-- Primary View 1: 对话 (Chat) -->
-    <DshSessions v-if="remoteConversation" v-show="activeDrawer === 'chat' && !settingsOpen" :key="remoteConversation.node.id + remoteConversation.session.id" :target="remoteConversation" :nodes="modelHub.state.remote_nodes || []" />
+    <div v-show="remoteConversation && activeDrawer === 'chat' && !settingsOpen" class="remote-session-host"><DshSessions v-if="remoteConversation" :key="remoteConversation.node.id + remoteConversation.session.id" :target="remoteConversation" :nodes="modelHub.state.remote_nodes || []" /></div>
     <main v-show="activeDrawer === 'chat' && !settingsOpen && !remoteConversation" class="main">
       <div
         v-if="readiness && readiness.pending_messages > 0"
@@ -3992,3 +3990,7 @@ onUnmounted(()=>document.removeEventListener('pointerdown',dismissConversationMe
     </nav>
   </div>
 </template>
+
+<style scoped>
+.remote-session-host{display:flex;flex:1;min-height:0;min-width:0;overflow:hidden}
+</style>

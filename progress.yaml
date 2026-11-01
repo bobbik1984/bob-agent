@@ -11,7 +11,7 @@ project:
   - Desktop
   - Android
   - Web (bob-node)
-  current_task: "F2/F5 Android684cbac有界缓存与真实Winter阅读通过：正文358ms/侧栏34ms，缩略图原图和10→20条分页通过；冷网与服务端缩略图仍待改善。网页未部署，B4暂停。"
+  current_task: "BP4-04胶囊材料已入绑定任务卡，5秒变化刷新与固定请求不换版通过真实工作区网页验证；GitHub APK候选生成中，网页不上线，B4暂停。"
   development_plan: docs/CURRENT_STAGE.md
 phases:
 - name: BP0 真相与保护

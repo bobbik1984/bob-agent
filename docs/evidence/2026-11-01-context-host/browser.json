@@ -1,0 +1,21 @@
+{
+  "web_real_workspace_read": true,
+  "source_count": 4,
+  "unauthorized_grant": {
+    "status": 400,
+    "payload": {
+      "error": "CONTEXT_NOT_AUTHORIZED",
+      "ok": false
+    }
+  },
+  "changed_source_detected": true,
+  "actual_dispatch_blocked_before_connection": {
+    "status": 400,
+    "payload": {
+      "error": "CONTEXT_STALE_BASELINE",
+      "ok": false
+    }
+  },
+  "reload_readback": true,
+  "narrow_no_overflow": true
+}

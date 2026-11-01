@@ -568,5 +568,16 @@
   "artifactReady": "预览已准备",
   "artifactRetry": "点击重试",
   "artifactOpen": "查看文件",
-  "filePreviewCached": "显示已读取的文件副本；对话会在后台核对更新。"
+  "filePreviewCached": "显示已读取的文件副本；对话会在后台核对更新。",
+  "contextTitle": "项目上下文",
+  "contextScope": "仅使用宿主已授权的工作区与文件。派发前重新核对来源；不授予写入权。",
+  "contextNoGrants": "尚无宿主授权的工作区。",
+  "contextChoose": "选择工作区",
+  "contextRefresh": "更新上下文",
+  "contextLoading": "正在核对工作区…",
+  "contextHostOnly": "此宿主尚未提供上下文服务。",
+  "contextCurrent": "所选来源已核对",
+  "contextStale": "来源已变化，请更新",
+  "contextReadOnly": "这是有来源的阅读索引；完整工作树交接仍需另行核对。",
+  "contextTaskCards": "已固定的任务卡"
 }

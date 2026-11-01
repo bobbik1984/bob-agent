@@ -78,7 +78,7 @@
 - **项目画像胶囊（Project Context Capsule）防跑偏**：工作区驻留节点提取以 3～8 KB 为预算目标的项目画像胶囊（`AGENTS.md` 规范、代码目录与符号骨架、已生效 `Decisions`/`Memories`、当前待办与上一版成果结论）同步至主账本；在手机/网页等无源码操作端规划《任务卡》时自动注入，提供可追溯的路径和约束依据；执行端仍须核对当前工作树。
 - **快慢双轨与原生子代理（Subagent）**：
   - 快轨：日常对话、任务卡拆解及轻量并发子代理（`invoke_subagent`，模型按配置、能力和预算选择，先单只读子代理后并发）直接由 `bob-runtime` 通过正规商业 API（BYOK）内生执行；
-  - 慢轨：正式工程任务通过低频结构化《任务卡》或持久会话（ACP / `--resume`）经进程边界交由目标工作区节点的官方 CLI（DSH、AGY、Codex）执行，禁止逆向订阅凭据；避免无意义冷启动是工程策略，许可按供应商分别核验。
+  - 慢轨：正式工程任务通过低频结构化《任务卡》或持久会话（外层受控 `tmux` 防断线保活/可旁观容器 + 内层 `native_sessions` 原生 `session_id` 热续接：ACP / `claude --resume` / `codex exec resume` / `agy` + 结构化 JSON 回执落盘，禁止 `send-keys` 刮屏解析）经进程边界交由目标工作区节点的官方 CLI（DSH、Claude Code、Codex、AGY）执行，禁止逆向订阅凭据；避免无意义冷启动是工程策略，许可按供应商分别核验。
 - Task、Execution、成果版本（父版本、hash、来源）、Verification、Review；每个 Harness 的 resume、steer、cancel、attachments、artifacts、events、模型观测能力单独列出证据。
 - **验收**：无本地源码的操作端能基于项目画像胶囊生成引用真实模块路径与 Decision 的任务卡；原生 Subagent 并发子任务可独立收敛并唤醒主会话；同一事项跨 Harness 续接产生新 Execution，旧版本只读，V1→V2 指定父版本修改。
 

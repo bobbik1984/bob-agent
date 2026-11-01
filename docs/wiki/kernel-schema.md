@@ -537,9 +537,17 @@ HomeMessageContext必须由已认证且有会话访问授权的adapter构造；�
 
 任务卡沿既有Task/Execution契约包含目标/非目标、输入和父成果版本、可写范围、决定引用、验证项、权限、预算与取消边界。现有路径必须有来源；新文件明确为计划创建并现场核验父目录/路径边界。执行端检查commit和dirty，不匹配则重读/重规划，不静默按旧基线修改。
 
-### 10.3 API与Harness路由
+### 10.3 API与Harness路由（含 `tmux` 保活容器与原生 `session_id` 同构续接）
 
-普通助理默认API；已绑定原生会话直接续聊，不强制BYOK前置。正式委派按目标Harness实测能力使用原生session/prompt、resume或完整任务进程；不假定所有工具支持同一协议或原生续接。原生DSH记录与Bob治理执行分别标来源，建立映射时保留原ID，不复制成伪历史。
+普通助理默认API；已绑定原生会话直接续聊，不强制BYOK前置。正式委派按目标Harness实测能力使用原生 `session/prompt`、`resume` 或完整任务进程；不假定所有工具支持同一协议或原生续接。原生DSH记录与Bob治理执行分别标来源，建立映射时保留原ID，不复制成伪历史。
+
+- **同构慢轨执行器（`TmuxHarnessRunner`，覆盖 `claude` / `codex` / `agy` / `dsh`）**：
+  1. **外层 `tmux` 防断线保活与 `tee` 双写回执**：在 Linux/macOS 等支持 `tmux` 的远程或本地工作区节点执行长耗时 CLI 任务时，外层可由受控 `tmux` 后台会话承载（仅适用于已验证支持该能力的执行节点；Windows原生端采用宿主进程管理，WSL另作能力登记）（防止 SSH 闪断触发 `SIGHUP` 中途杀灭进程），并通过管道将结构化 JSON/JSONL 输出同时写入终端面板与持久回执文件（`receipt-<execution_id>.json`）。人类开发者可随时 SSH `tmux attach` 实时旁观或手动接管；**严禁**依赖脆弱的 `tmux send-keys` 模拟敲键 + `tmux capture-pane` 刮取含 ANSI 控制符的终端屏幕文本来判断完成态或解析结果。
+  2. **内层 `native_sessions` 原生 `session_id` 恢复绑定**：首次执行《任务卡》后，从结构化回执中提取原生会话 ID 写入 `native_sessions(device_id, workspace_id, harness, native_session_id)`：
+     - `Claude Code`：首轮 `claude -p "<任务卡>" --output-format json` 提取 `session_id`；续聊 `claude -p "<追问>" --resume <session_id> --output-format json`；
+     - `Codex CLI`：首轮 `codex exec --json "<任务卡>"` 提取 `thread_id`/`session_id`；续聊 `codex exec resume <session_id> "<追问>" --json`；
+     - `AGY / DSH`：按实测能力使用 ACP `session/prompt`（携带 `sessionId`）或 CLI 会话恢复参数。
+  3. **诚实降级（Honest Fallback）**：若目标 CLI 版本不支持原生 `resume` 或本地会话文件已失效，Runner 拒绝伪装原生续接，先核对原执行是否终止；只有原执行已明确结束、既有授权及预算覆盖新执行时，才可装配最新 `ProjectContextCapsule` + 有界历史摘要创建新 Execution，否则等待决定，并在 UI 与回执中明确标注 `bounded_context_fallback`。
 
 禁止逆向订阅凭据、未授权转售或权限绕过；避免无意义冷启动属于工程策略。供应商认证/许可按官方来源、版本、核查日期分别登记，不能将低频或API Key等同无条件合规。执行权限不因配对/登录自动扩大。
 
@@ -547,8 +555,31 @@ HomeMessageContext必须由已认证且有会话访问授权的adapter构造；�
 
 kernel保存任务状态、权限和结果引用，runtime承接模型调用与调度。子代理使用父权限交集，限制深度/并发/费用/期限；取消向下传播，未知执行先对账，重复结果幂等；子代理成功声明不等于验证或接受。模型选型来自配置/能力/预算，不固定旗舰与Flash。先单只读子代理，再考虑并发写入隔离。
 
-Home仍按D-004配置，已有授权执行与离线新请求分开。真实主权威切换需epoch/fencing、未决执行核查、备份及恢复证明；不能自动两主或用常开标签绕过Home。人工IDE不受Bob租约控制，写前重新核对工作树。
+共享关系按D-012的对象Owner解释，已有授权执行与离线新请求分开。真实主权威切换需epoch/fencing、未决执行核查、备份及恢复证明；不能自动两主或用常开标签绕过Home。人工IDE不受Bob租约控制，写前重新核对工作树。
 
 ## 对象归属解释（BOB-D-012）
 
 现有Home/Replica字段为已配置共享关系的实现，不再代表每个用户全部实例的全局依赖。独立实例拥有本地对象；外部会话以来源实例、connection_id/session_id定位。完整跨实例owner/version迁移仍待实现，不修改既有迁移校验码、不自动重写旧对象归属。详见ARCHITECTURE §3与CURRENT_STAGE §3.4。
+
+
+### 10.5 保活、恢复与交接的实施约束
+
+tmux只提供终端会话保活，不提供权限隔离、节点重启恢复、执行去重或进程树清理证明。原生resume恢复已保存会话，不承诺常驻进程、完整上下文或100% Prompt Cache命中；缓存收益由Provider实际观测记录。既有DSH服务优先使用其原生会话接口，不额外套tmux重启服务。
+
+JSONL过程事件追加落盘，最终终态回执独立原子写入；tee/管道必须保留实际工具退出码、处理磁盘满与输出上限，不能以tee成功替代工具成功。人工attach默认仅旁观；接管必须暂停自动写入并记录所有权，不能让人工和自动执行同时写。中断后先核对原执行身份、回执和工作树，再决定恢复，禁止盲目重派。
+
+workspace_handoff需记录来源/目标实例、精确commit、dirty内容清单与指纹、未决执行及Owner版本/epoch。dirty指纹用于检测差异，不能代替未提交文件传输；未提交内容未交付或旧写入者未释放时，拒绝授予新写入权。command_ref只引用获准命令配置，不接收模型任意shell作为渲染能力参数。
+
+当前BP4-04实现：project_context.rs提供显式源材料的有界构造与失效检查；workspace_context.rs从显式Git工作区/源文件选择提取、复核、版本化保存读回，并提供validate_for_dispatch。dirty指纹范围限定为Git状态及所选文件内容，不能据此交接全工作树写入权。来源片段确定性截取不是模型摘要/符号分析；持久文件不是kernel任务账本。bob-node已接宿主授权配置、网页读回和两条实际发送路径的绑定核对；未绑定原生会话不强制绕行。TaskCard材料装配、跨Host与原生Tauri接线仍未完成；事实和测试见CURRENT_STAGE §3.5。
+
+
+### 10.6 本地宿主胶囊授权（BP4-04第一段）
+
+宿主管理员在节点数据目录配置workspace-context-grants.json（JSON数组）：id、project_id、workspace_id、owner_instance、root（宿主路径配置）、sources（相对文件清单），可选connection_id和session_id必须成对。配置不含密钥；网页仅按grantId执行list/read/refresh，不提供注册或修改授权RPC。root只是此宿主的读取授权，不能自动代表远端设备的同名目录。缺少对应胶囊或源已变时，绑定目标的派发被拒绝；不自动更新旧任务卡继续发送。实际发送前记录请求/目标/胶囊/基线/载荷hash引用，仍由原有回执和Task/Execution处理结果。未配置绑定的原会话保持直接续聊语义，不虚称完整治理。
+
+
+### 10.7 胶囊任务卡与自动刷新（本地实现）
+
+宿主每5秒核对显式授权文件及Git状态，提取失败保留旧版并在读回核对时标明不可用。active胶囊是可更新索引；dispatch请求固定的胶囊/任务卡是只读引用，后台更新不替换它。重试按原请求/目标/原文hash/固定版本核对，旧基线变化拒绝继续；需要新请求才能绑定新材料。未绑定原会话仍直接续聊，不强制包装。
+
+绑定目标的任务卡包含原始goal、capsule_id、baseline、source_manifest、excerpts/truncated及数据性质和执行前核对约束。实际传输发送装配后的wire，既有回执继续绑定原用户文本，固定记录同时保存原文和wire的hash。字段不能冒充已有Task/Execution、权限、预算或人工接受；当前远端真实执行/成果治理尚未验收。自动刷新不发任务、不调用模型、不扩展源清单。

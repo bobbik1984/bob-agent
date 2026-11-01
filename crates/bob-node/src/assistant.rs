@@ -47,7 +47,8 @@ pub fn execute(state:&Arc<Mutex<NodeContext>>,args:&Value)->Result<Value,&'stati
    let client=runtime.dsh_client(connection)?;
    if !client.list()?.as_array().is_some_and(|items|items.iter().any(|s|s["id"]==session)){return Err("ASSISTANT_TARGET_UNVERIFIED")}
    state.lock().map_err(|_|"NODE_LOCK_POISONED")?.app.assistant_bind_dispatch(request,connection,session,candidate["title"].as_str().unwrap_or(""),now_millis()).map_err(|_|"ASSISTANT_LINK_SAVE_FAILED")?;
-   let sent=bob_runtime::dsh_transport::dispatch_once(&runtime.data_dir,connection,session,user,request,||client.prompt(session,user,request));
+   let wire=context_capsule::before_dispatch(&runtime.data_dir,connection,session,request,user)?;
+   let sent=bob_runtime::dsh_transport::dispatch_once(&runtime.data_dir,connection,session,user,request,||client.prompt(session,&wire,request));
    if let Ok(receipt)=sent {
     if receipt["status"]=="accepted"&&receipt["request_id"]==request&&receipt["session_id"]==session {
      state.lock().map_err(|_|"NODE_LOCK_POISONED")?.app.assistant_record_status(request,"accepted",now_millis()).map_err(|_|"ASSISTANT_LINK_SAVE_FAILED")?;
