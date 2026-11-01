@@ -118,6 +118,20 @@ test('personal ops IPC maps schedule, note, capture, memory and decision command
  ]);
 });
 
+test('personal ops IPC maps scheduleDelete, noteDelete, ticketUpsert and ticketRecognize cleanly',async()=>{
+ const calls=[];const bridge=createKernelBridge(async(command,args)=>{calls.push({command,args});return {ok:true};},()=>true);
+ await bridge.scheduleDelete('s1');
+ await bridge.noteDelete('n1');
+ await bridge.ticketUpsert({id:'t1',title:'G101 北京南 - 上海虹桥',category:'train',ticketMeta:{seat:'06F'},startAt:1793408400000});
+ await bridge.ticketRecognize('media-1','gemini::gemini-2.5-flash','t1');
+ assert.deepEqual(calls,[
+  {command:'app_schedule_delete',args:{id:'s1'}},
+  {command:'app_note_delete',args:{id:'n1'}},
+  {command:'app_ticket_upsert',args:{id:'t1',title:'G101 北京南 - 上海虹桥',category:'train',ticketMeta:{seat:'06F'},startAt:1793408400000,endAt:null,notesSummary:''}},
+  {command:'app_ticket_recognize',args:{mediaId:'media-1',modelRef:'gemini::gemini-2.5-flash',id:'t1'}}
+ ]);
+});
+
 test('RV-06 canonical Rust-serialized personal_snapshot.json fixture matches kernel schema',()=>{
  const __dirname=path.dirname(fileURLToPath(import.meta.url));
  const fixturePath=path.join(__dirname,'fixtures','personal_snapshot.json');
@@ -209,4 +223,54 @@ test('capture image bridge binds recognition to saved original and disclosed mod
   {command:'app_capture_media_get',args:{mediaId:null,captureId:'capture-1'}},
   {command:'app_capture_recognize',args:{mediaId:'image-sha',modelRef:'provider::vision'}},
  ]);
+});
+
+test('BP4-06 Claude harness bridge maps capability, session, prompt, cancel, reconcile and review commands cleanly', async () => {
+ const calls=[];
+ const bridge=createKernelBridge(async (command,args)=>{calls.push({command,args});return {ok:true};},()=>true);
+ await bridge.claudeCapabilities('node-x1t');
+ await bridge.claudeSessions('node-x1t');
+ await bridge.claudeHistory('node-x1t','claude:winter-shelter');
+ await bridge.claudePrompt({connectionId:'node-x1t',sessionId:'claude:winter-shelter',text:'Build V2',requestId:'req-c-2',parentVersionId:'v1'});
+ await bridge.claudeCancel('node-x1t','claude:winter-shelter','req-c-2');
+ await bridge.claudeReconcile('node-x1t','claude:winter-shelter');
+ await bridge.claudeReview({connectionId:'node-x1t',sessionId:'claude:winter-shelter',versionId:'v2',verdict:'accepted',note:'Verified'});
+ await bridge.claudeArtifacts('node-x1t','claude:winter-shelter');
+ await bridge.claudePreview('node-x1t','claude:winter-shelter','index.html','v1');
+ assert.deepEqual(calls,[
+  {command:'app_claude_capabilities',args:{connectionId:'node-x1t'}},
+  {command:'app_claude_sessions',args:{connectionId:'node-x1t'}},
+  {command:'app_claude_history',args:{connectionId:'node-x1t',sessionId:'claude:winter-shelter'}},
+  {command:'app_claude_prompt',args:{connectionId:'node-x1t',sessionId:'claude:winter-shelter',text:'Build V2',requestId:'req-c-2',parentVersionId:'v1',detachedHoldMs:null}},
+  {command:'app_claude_cancel',args:{connectionId:'node-x1t',sessionId:'claude:winter-shelter',requestId:'req-c-2'}},
+  {command:'app_claude_reconcile',args:{connectionId:'node-x1t',sessionId:'claude:winter-shelter'}},
+  {command:'app_claude_review',args:{connectionId:'node-x1t',sessionId:'claude:winter-shelter',versionId:'v2',verdict:'accepted',note:'Verified'}},
+  {command:'app_claude_artifacts',args:{connectionId:'node-x1t',sessionId:'claude:winter-shelter'}},
+  {command:'app_claude_preview',args:{connectionId:'node-x1t',sessionId:'claude:winter-shelter',path:'index.html',versionId:'v1'}},
+ ]);
+});
+
+
+test('BP4-05 bounded subagent bridge maps dispatch, execute, cancel, reconcile, status and list commands cleanly', async () => {
+  const calls = [];
+  const bridge = createKernelBridge(async (command, args) => { calls.push({ command, args }); return { ok: true }; }, () => true);
+  const sampleGrant = { parent_task_id: 'task-1', depth: 1, max_budget_usd: 0.05 };
+  const sampleReq = { request_id: 'sub-1', role: 'read_only_researcher', prompt: 'Audit codebase' };
+  const sampleActions = [{ tool: 'read_file', relative_path: 'lib.rs' }];
+
+  await bridge.subagentDispatch(sampleGrant, sampleReq);
+  await bridge.subagentExecute(sampleGrant, 'subagent-sub-1', sampleActions);
+  await bridge.subagentCancel('task-1', 'subagent-sub-1', 'PARENT_CANCELLED');
+  await bridge.subagentReconcile();
+  await bridge.subagentStatus('subagent-sub-1');
+  await bridge.subagentList('task-1');
+
+  assert.deepEqual(calls, [
+    { command: 'app_subagent_dispatch', args: { grant: sampleGrant, request: sampleReq } },
+    { command: 'app_subagent_execute', args: { grant: sampleGrant, runId: 'subagent-sub-1', actions: sampleActions } },
+    { command: 'app_subagent_cancel', args: { parentTaskId: 'task-1', runId: 'subagent-sub-1', reason: 'PARENT_CANCELLED' } },
+    { command: 'app_subagent_reconcile', args: {} },
+    { command: 'app_subagent_status', args: { runId: 'subagent-sub-1' } },
+    { command: 'app_subagent_list', args: { parentTaskId: 'task-1' } },
+  ]);
 });

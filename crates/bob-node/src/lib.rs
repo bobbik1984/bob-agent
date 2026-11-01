@@ -11,6 +11,7 @@
 
 mod assistant;
 mod context_capsule;
+mod claude_rpc;
 use bob_kernel::app::LocalApp;
 use bob_runtime::{now_millis, ModelHubRuntime, RuntimeCapabilityManifest};
 use rusqlite::{Connection, OpenFlags};
@@ -227,6 +228,53 @@ pub fn handle_rpc_command(ctx: &mut NodeContext, command: &str, args: &Value) ->
     let at = now_millis();
     match command {
         "app_context_list" | "app_context_read" | "app_context_refresh" | "app_context_tasks" => context_capsule::rpc(&ctx.runtime.data_dir,command,args),
+        "app_claude_capabilities" | "app_claude_sessions" | "app_claude_history" | "app_claude_prompt" | "app_claude_cancel" | "app_claude_reconcile" | "app_claude_review" | "app_claude_artifacts" | "app_claude_preview" => claude_rpc::rpc(&ctx.runtime.data_dir, command, args),
+        "app_capability_registry_get" => serde_json::to_value(bob_runtime::capability_borrowing::load_capabilities(&ctx.runtime.data_dir)?).map_err(|_| "CAPABILITY_READ_FAILED"),
+        "app_vault_rotate_seed" => {
+            let mut store = bob_runtime::FileVaultSecretStore::open(&ctx.runtime.data_dir)?; 
+            let rotated = store.rotate_master_seed()?;
+            Ok(json!({ "rotated_slots": rotated }))
+        }
+        "app_egress_audit_list" => serde_json::to_value(bob_runtime::capability_borrowing::list_egress_audit_records(&ctx.runtime.data_dir)?).map_err(|_| "EGRESS_AUDIT_READ_FAILED"),
+        "app_render_grants_list" => serde_json::to_value(bob_runtime::capability_borrowing::load_render_grants(&ctx.runtime.data_dir)?).map_err(|_| "RENDER_GRANTS_READ_FAILED"),
+        "app_subagent_dispatch" => {
+            let grant: bob_runtime::subagent_pool::SubagentGrant = serde_json::from_value(args.get("grant").cloned().unwrap_or(Value::Null))
+                .map_err(|_| "SUBAGENT_GRANT_INVALID")?;
+            let request: bob_runtime::subagent_pool::SubagentInvocationRequest = serde_json::from_value(args.get("request").cloned().unwrap_or(Value::Null))
+                .map_err(|_| "SUBAGENT_REQUEST_INVALID")?;
+            let record = bob_runtime::subagent_pool::SubagentPoolCoordinator::dispatch(&ctx.runtime.data_dir, &grant, &request)?;
+            serde_json::to_value(record).map_err(|_| "SUBAGENT_SERIALIZE_FAILED")
+        }
+        "app_subagent_execute" => {
+            let grant: bob_runtime::subagent_pool::SubagentGrant = serde_json::from_value(args.get("grant").cloned().unwrap_or(Value::Null))
+                .map_err(|_| "SUBAGENT_GRANT_INVALID")?;
+            let run_id = args.get("runId").or_else(|| args.get("run_id")).and_then(Value::as_str).ok_or("SUBAGENT_RUN_ID_REQUIRED")?;
+            let actions: Vec<bob_runtime::subagent_pool::SubagentStepAction> = serde_json::from_value(args.get("actions").cloned().unwrap_or(Value::Null))
+                .map_err(|_| "SUBAGENT_ACTIONS_INVALID")?;
+            let record = bob_runtime::subagent_pool::SubagentPoolCoordinator::execute_bounded_turn(&ctx.runtime.data_dir, &grant, run_id, &actions)?;
+            serde_json::to_value(record).map_err(|_| "SUBAGENT_SERIALIZE_FAILED")
+        }
+        "app_subagent_cancel" => {
+            let parent_task_id = args.get("parentTaskId").or_else(|| args.get("parent_task_id")).and_then(Value::as_str).ok_or("SUBAGENT_PARENT_TASK_REQUIRED")?;
+            let run_id = args.get("runId").or_else(|| args.get("run_id")).and_then(Value::as_str);
+            let reason = args.get("reason").and_then(Value::as_str).unwrap_or("EXPLICIT_CANCEL");
+            let record = bob_runtime::subagent_pool::SubagentPoolCoordinator::cancel(&ctx.runtime.data_dir, parent_task_id, run_id, reason)?;
+            serde_json::to_value(record).map_err(|_| "SUBAGENT_SERIALIZE_FAILED")
+        }
+        "app_subagent_reconcile" => {
+            let reconciled = bob_runtime::subagent_pool::SubagentPoolCoordinator::reconcile_on_restart(&ctx.runtime.data_dir)?;
+            serde_json::to_value(reconciled).map_err(|_| "SUBAGENT_SERIALIZE_FAILED")
+        }
+        "app_subagent_status" => {
+            let run_id = args.get("runId").or_else(|| args.get("run_id")).and_then(Value::as_str).ok_or("SUBAGENT_RUN_ID_REQUIRED")?;
+            let record = bob_runtime::subagent_pool::SubagentPoolCoordinator::get_run(&ctx.runtime.data_dir, run_id)?;
+            serde_json::to_value(record).map_err(|_| "SUBAGENT_SERIALIZE_FAILED")
+        }
+        "app_subagent_list" => {
+            let parent_task_id = args.get("parentTaskId").or_else(|| args.get("parent_task_id")).and_then(Value::as_str).ok_or("SUBAGENT_PARENT_TASK_REQUIRED")?;
+            let list = bob_runtime::subagent_pool::SubagentPoolCoordinator::list_runs_for_task(&ctx.runtime.data_dir, parent_task_id)?;
+            serde_json::to_value(list).map_err(|_| "SUBAGENT_SERIALIZE_FAILED")
+        }
         "app_bootstrap" => {
             let session_id = ctx
                 .app
@@ -533,6 +581,14 @@ pub fn handle_rpc_command(ctx: &mut NodeContext, command: &str, args: &Value) ->
                 .map_err(|_| "SCHEDULE_UPDATE_FAILED")?;
             serde_json::to_value(updated).map_err(|_| "SCHEDULE_UPDATE_FAILED")
         }
+        "app_schedule_delete" => {
+            let id = args.get("id").and_then(Value::as_str).ok_or("SCHEDULE_DELETE_FAILED")?;
+            let deleted = ctx
+                .app
+                .delete_schedule_item(id, at)
+                .map_err(|_| "SCHEDULE_DELETE_FAILED")?;
+            serde_json::to_value(deleted).map_err(|_| "SCHEDULE_DELETE_FAILED")
+        }
         "app_note_upsert" => {
             let id = args.get("id").and_then(Value::as_str).ok_or("NOTE_SAVE_FAILED")?;
             let project_id = args
@@ -564,6 +620,54 @@ pub fn handle_rpc_command(ctx: &mut NodeContext, command: &str, args: &Value) ->
                 .upsert_note(id, project_id, conversation_id, title, body_markdown, &tags, at)
                 .map_err(|_| "NOTE_SAVE_FAILED")?;
             serde_json::to_value(note).map_err(|_| "NOTE_SAVE_FAILED")
+        }
+        "app_note_delete" => {
+            let id = args.get("id").and_then(Value::as_str).ok_or("NOTE_DELETE_FAILED")?;
+            let deleted = ctx
+                .app
+                .delete_note(id, at)
+                .map_err(|_| "NOTE_DELETE_FAILED")?;
+            serde_json::to_value(deleted).map_err(|_| "NOTE_DELETE_FAILED")
+        }
+        "app_ticket_upsert" => {
+            let id = args.get("id").and_then(Value::as_str).ok_or("TICKET_SAVE_FAILED")?;
+            let title = args.get("title").and_then(Value::as_str).ok_or("TICKET_SAVE_FAILED")?;
+            let category = args.get("category").and_then(Value::as_str).unwrap_or("general");
+            let ticket_meta = args
+                .get("ticketMeta")
+                .or_else(|| args.get("ticket_meta"))
+                .cloned()
+                .unwrap_or_else(|| json!({}));
+            let start_at = args
+                .get("startAt")
+                .or_else(|| args.get("start_at"))
+                .and_then(Value::as_i64);
+            let end_at = args
+                .get("endAt")
+                .or_else(|| args.get("end_at"))
+                .and_then(Value::as_i64);
+            let notes_summary = args
+                .get("notesSummary")
+                .or_else(|| args.get("notes_summary"))
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let (note, schedule) = ctx
+                .app
+                .upsert_ticket(
+                    id,
+                    title,
+                    category,
+                    &ticket_meta,
+                    start_at,
+                    end_at,
+                    notes_summary,
+                    at,
+                )
+                .map_err(|_| "TICKET_SAVE_FAILED")?;
+            Ok(json!({
+                "ticket": note,
+                "schedule": schedule,
+            }))
         }
         "app_capture_vision_target" => serde_json::to_value(ctx.runtime.vision_target()?).map_err(|_|"VISION_NOT_CONFIGURED"),
         "app_capture_media_put" => {
@@ -719,13 +823,25 @@ pub fn handle_rpc_command(ctx: &mut NodeContext, command: &str, args: &Value) ->
         }
         "app_model_role_assign" => {
             let role = args.get("role").and_then(Value::as_str).unwrap_or("main");
-            let model_ref = args
+            let model_ref_val = args
                 .get("modelRef")
                 .or_else(|| args.get("modelEntryId"))
                 .or_else(|| args.get("model_ref"))
                 .and_then(Value::as_str)
-                .unwrap_or("");
-            ctx.runtime.assign_role(&mut ctx.app, role, model_ref)
+                .unwrap_or("")
+                .trim();
+            let model_ref = if !model_ref_val.is_empty() {
+                model_ref_val.to_string()
+            } else {
+                let pid = args.get("providerId").or_else(|| args.get("provider_id")).and_then(Value::as_str).unwrap_or("");
+                let mid = args.get("modelId").or_else(|| args.get("model_id")).and_then(Value::as_str).unwrap_or("");
+                if !pid.is_empty() && !mid.is_empty() {
+                    format!("{pid}::{mid}")
+                } else {
+                    model_ref_val.to_string()
+                }
+            };
+            ctx.runtime.assign_role(&mut ctx.app, role, &model_ref)
         }
         "app_provider_variant_set" => {
             let pid = args
@@ -831,6 +947,13 @@ pub fn handle_rpc_command(ctx: &mut NodeContext, command: &str, args: &Value) ->
                 .unwrap_or(true);
             ctx.runtime
                 .set_model_visibility(&mut ctx.app, pid, mid, visible)
+        }
+        "app_models_discover" => {
+            let pid = args
+                .get("providerId")
+                .or_else(|| args.get("provider_id"))
+                .and_then(Value::as_str);
+            ctx.runtime.discover_and_curate_models(&mut ctx.app, pid)
         }
         "app_provider_get" => {
             let prof = ctx
@@ -954,22 +1077,38 @@ pub fn handle_rpc_command(ctx: &mut NodeContext, command: &str, args: &Value) ->
                 .map_err(|_| "EXECUTION_READ_FAILED")?;
             serde_json::to_value(exec).map_err(|_| "EXECUTION_READ_FAILED")
         }
-        "app_dsh_receipt" => bob_runtime::dsh_transport::inspect_receipt(&ctx.runtime.data_dir,
-            args["connectionId"].as_str().ok_or("DSH_CONNECTION_REQUIRED")?,
-            args["sessionId"].as_str().ok_or("DSH_SESSION_REQUIRED")?,
-            args["text"].as_str().ok_or("DSH_TEXT_REQUIRED")?,
-            args["requestId"].as_str().ok_or("DSH_REQUEST_REQUIRED")?),
+        "app_dsh_receipt" => {
+            if let Some(v) = claude_rpc::try_handle_dsh_command(&ctx.runtime.data_dir, command, args)? {
+                return Ok(v);
+            }
+            bob_runtime::dsh_transport::inspect_receipt(&ctx.runtime.data_dir,
+                args["connectionId"].as_str().ok_or("DSH_CONNECTION_REQUIRED")?,
+                args["sessionId"].as_str().ok_or("DSH_SESSION_REQUIRED")?,
+                args["text"].as_str().ok_or("DSH_TEXT_REQUIRED")?,
+                args["requestId"].as_str().ok_or("DSH_REQUEST_REQUIRED")?)
+        }
         "app_dsh_page" | "app_dsh_preview" | "app_dsh_list" | "app_dsh_history" | "app_dsh_prompt" => {
             let connection=args["connectionId"].as_str().ok_or("DSH_CONNECTION_REQUIRED")?;
+            if command=="app_dsh_list" {
+                return claude_rpc::merge_claude_into_dsh_list(
+                    &ctx.runtime.data_dir,
+                    connection,
+                    ctx.runtime.dsh_client(connection).and_then(|c| c.list()),
+                );
+            }
+            if let Some(v) = claude_rpc::try_handle_dsh_command(&ctx.runtime.data_dir, command, args)? {
+                return Ok(v);
+            }
             if command=="app_dsh_prompt" {
+                let s = args["sessionId"].as_str().ok_or("DSH_SESSION_REQUIRED")?;
+                bob_runtime::claude_harness::check_workspace_not_locked_by_other(&ctx.runtime.data_dir, connection, s)?;
                 context_capsule::before_dispatch(&ctx.runtime.data_dir,connection,
-                    args["sessionId"].as_str().ok_or("DSH_SESSION_REQUIRED")?,
+                    s,
                     args["requestId"].as_str().ok_or("DSH_REQUEST_REQUIRED")?,
                     args["text"].as_str().ok_or("DSH_TEXT_REQUIRED")?)?;
             }
             let client=ctx.runtime.dsh_client(connection)?;
             match command {
-                "app_dsh_list" => client.list(),
                 "app_dsh_page" => client.history_page(bob_runtime::dsh_session::SessionAddress{connection_id:connection.into(),session_id:args["sessionId"].as_str().ok_or("DSH_SESSION_REQUIRED")?.into()},args.get("before").filter(|v|!v.is_null()).map(|v|v.as_i64().ok_or("DSH_PAGE_CURSOR_INVALID")).transpose()?,args.get("through").filter(|v|!v.is_null()).map(|v|v.as_i64().ok_or("DSH_PAGE_CURSOR_INVALID")).transpose()?,args.get("after").filter(|v|!v.is_null()).map(|v|v.as_i64().ok_or("DSH_PAGE_CURSOR_INVALID")).transpose()?),
                 "app_dsh_preview" => client.preview_if_changed(bob_runtime::dsh_session::SessionAddress{connection_id:connection.into(),session_id:args.get("sessionId").and_then(Value::as_str).ok_or("DSH_PROTOCOL")?.into()},args.get("path").and_then(Value::as_str).ok_or("DSH_PROTOCOL")?,args.get("known").filter(|v|!v.is_null())),
                 "app_dsh_history" => {
@@ -981,7 +1120,9 @@ pub fn handle_rpc_command(ctx: &mut NodeContext, command: &str, args: &Value) ->
                     let text=args["text"].as_str().filter(|s|!s.trim().is_empty() && s.len()<=32000).ok_or("DSH_TEXT_REQUIRED")?;
                     let request=args["requestId"].as_str().filter(|s|s.len()<=200 && !s.is_empty()).ok_or("DSH_REQUEST_REQUIRED")?;
                     let wire=context_capsule::before_dispatch(&ctx.runtime.data_dir,connection,session,request,text)?;
-                    bob_runtime::dsh_transport::dispatch_once(&ctx.runtime.data_dir,connection,session,text,request,||client.prompt(session,&wire,request))
+                    let res = bob_runtime::dsh_transport::dispatch_once(&ctx.runtime.data_dir,connection,session,text,request,||client.prompt(session,&wire,request))?;
+                    let _ = bob_runtime::claude_harness::record_external_harness_turn_for_session(&ctx.runtime.data_dir, connection, session, "dsh");
+                    Ok(res)
                 }
             }
         }
@@ -1818,6 +1959,105 @@ fn handle_connection(mut stream: TcpStream, state: Arc<Mutex<NodeContext>>) {
             write_json_response(&mut stream,status,&value.to_string());
             return;
         }
+        if command.trim() == "app_ticket_recognize" {
+            let now = now_millis();
+            let media_id = args["mediaId"].as_str().unwrap_or("").to_owned();
+            let model_ref = args["modelRef"].as_str().unwrap_or("");
+            let prepared = (|| {
+                let image = guard
+                    .app
+                    .capture_media(&media_id)
+                    .map_err(|_| "CAPTURE_IMAGE_MISSING")?;
+                guard.runtime.prepare_ticket_vision(&image, model_ref, now)
+            })();
+            drop(guard);
+            let result = prepared.and_then(|(target, spec)| {
+                let vision_res = bob_runtime::vision::execute(target, spec)?;
+                let raw_text = vision_res["text"].as_str().unwrap_or("");
+                let mut guard = state.lock().map_err(|_| "NODE_LOCK_POISONED")?;
+                let proposal = bob_runtime::assistant::parse_proposal(raw_text, &[], false).unwrap_or_else(|_| bob_runtime::assistant::Proposal {
+                    kind: "create_ticket".into(),
+                    text: raw_text.trim().to_owned(),
+                    connection_id: None,
+                    session_id: None,
+                    title: Some("票据记录".into()),
+                    start_time: None,
+                    end_time: None,
+                    notes: None,
+                    schedule_id: None,
+                    ticket: None,
+                });
+                let title = proposal
+                    .title
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or("票据记录")
+                    .to_owned();
+                let ticket_prop = proposal.ticket.clone().unwrap_or_else(|| {
+                    bob_runtime::assistant::TicketProposal {
+                        category: "general".into(),
+                        origin: None,
+                        destination: None,
+                        venue: None,
+                        number: None,
+                        start_time: proposal.start_time.clone(),
+                        end_time: proposal.end_time.clone(),
+                        seat: None,
+                        coach: None,
+                        gate: None,
+                        passenger: None,
+                        pickup_code: None,
+                        booking_id: None,
+                    }
+                });
+                let ticket_id = args
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .filter(|s| !s.trim().is_empty())
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| {
+                        format!(
+                            "ticket-{}",
+                            &bob_kernel::outbox::digest(format!("{media_id}:{now}").as_bytes())[..12]
+                        )
+                    });
+                let (note, schedule) = bob_runtime::assistant::save_ticket_proposal(
+                    &mut guard.app,
+                    &ticket_id,
+                    &title,
+                    &ticket_prop,
+                    proposal.start_time.as_deref(),
+                    proposal.end_time.as_deref(),
+                    Some(&media_id),
+                    now,
+                )?;
+                let receipt = if schedule.is_some() {
+                    format!("[已存入票夹并同步至日历：{title}]")
+                } else {
+                    format!("[已存入票夹：{title}]")
+                };
+                let reply_text = if proposal.text.trim().is_empty() {
+                    receipt.clone()
+                } else {
+                    format!("{}\n\n{receipt}", proposal.text.trim())
+                };
+                Ok(json!({
+                    "ticket": note,
+                    "schedule": schedule,
+                    "receipt": receipt,
+                    "text": reply_text,
+                    "requestedModel": vision_res["requestedModel"],
+                    "reportedModel": vision_res["reportedModel"],
+                }))
+            });
+            let (status, value) = match result {
+                Ok(result) => (200, json!({"ok": true, "result": result})),
+                Err(e) => (400, json!({"ok": false, "error": e})),
+            };
+            write_json_response(&mut stream, status, &value.to_string());
+            return;
+        }
         match handle_rpc_command(&mut guard, command.trim(), &args) {
             Ok(result) => {
                 let payload = serde_json::to_string(&json!({ "ok": true, "result": result }))
@@ -2240,4 +2480,168 @@ mod tests {
         let projected = handle_rpc_command(&mut ctx, "app_catalog", &json!({})).unwrap();
         assert_eq!(projected["projects"][0]["source_kind"], "legacy_import");
     }
+
+    #[test]
+    fn xp11_bounded_subagent_rpc_lifecycle_and_constraints() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let ws = dir.path().join("workspace");
+        std::fs::create_dir_all(&ws).unwrap();
+        std::fs::write(ws.join("engine.rs"), b"pub fn version() -> &'static str { \"2.0.0\" }").unwrap();
+
+        let mut ctx = NodeContext::open(&BobNodeConfig {
+            bind_addr: "127.0.0.1:0".to_owned(),
+            data_dir: dir.path().to_path_buf(),
+            static_dir: None,
+            legacy_db_path: None,
+        })
+        .expect("open node context");
+
+        let grant = json!({
+            "parent_task_id": "task-architect-10",
+            "parent_session_id": "session-arch-10",
+            "parent_grant_id": "grant-10",
+            "project_id": "proj-core",
+            "workspace_root": ws.to_string_lossy(),
+            "allowed_subpaths": ["engine.rs"],
+            "depth": 1,
+            "max_tokens": 8192,
+            "max_budget_usd": 0.05,
+            "max_timeout_ms": 15000,
+            "parent_cancelled": false
+        });
+
+        let req = json!({
+            "request_id": "sub-101",
+            "parent_task_id": "task-architect-10",
+            "parent_session_id": "session-arch-10",
+            "role": "code_auditor",
+            "goal": "Verify engine version signature",
+            "prompt": "Inspect engine.rs and confirm version",
+            "estimated_cost_usd": 0.005,
+            "model_id": "gemini-flash"
+        });
+
+        // 1. Dispatch valid subagent
+        let dispatched = handle_rpc_command(
+            &mut ctx,
+            "app_subagent_dispatch",
+            &json!({ "grant": grant, "request": req }),
+        )
+        .expect("dispatch subagent");
+        assert_eq!(dispatched["status"], "dispatched");
+        assert_eq!(dispatched["run_id"], "subagent-sub-101");
+
+        // 2. Concurrency limit = 1: second dispatch for same parent fails
+        let mut req2 = req.clone();
+        req2["request_id"] = json!("sub-102");
+        req2["prompt"] = json!("Concurrent subtask");
+        let conc_err = handle_rpc_command(
+            &mut ctx,
+            "app_subagent_dispatch",
+            &json!({ "grant": grant, "request": req2 }),
+        )
+        .unwrap_err();
+        assert_eq!(conc_err, "SUBAGENT_CONCURRENCY_LIMIT_EXCEEDED");
+
+        // 3. Execution turn: write forbidden check
+        let write_action = json!([{
+            "tool": "write_file",
+            "relative_path": "engine.rs",
+            "search_query": null,
+            "claim_check": null,
+            "write_attempt_content": "corrupt()",
+            "spawn_subagent_attempt": false,
+            "prompt_tokens": 10,
+            "completion_tokens": 5,
+            "reported_cost_usd": 0.0001,
+            "reported_identity": "test",
+            "delay_ms": 1
+        }]);
+        let write_err = handle_rpc_command(
+            &mut ctx,
+            "app_subagent_execute",
+            &json!({ "grant": grant, "run_id": "subagent-sub-101", "actions": write_action }),
+        )
+        .unwrap_err();
+        assert_eq!(write_err, "SUBAGENT_WRITE_FORBIDDEN");
+
+        // 4. Execution turn: read & verify fact
+        let read_action = json!([{
+            "tool": "read_file",
+            "relative_path": "engine.rs",
+            "search_query": null,
+            "claim_check": "2.0.0",
+            "write_attempt_content": null,
+            "spawn_subagent_attempt": false,
+            "prompt_tokens": 50,
+            "completion_tokens": 20,
+            "reported_cost_usd": 0.001,
+            "reported_identity": "gemini-flash",
+            "delay_ms": 5
+        }]);
+        let completed = handle_rpc_command(
+            &mut ctx,
+            "app_subagent_execute",
+            &json!({ "grant": grant, "run_id": "subagent-sub-101", "actions": read_action }),
+        )
+        .expect("execute turn");
+        assert_eq!(completed["status"], "completed");
+        assert_eq!(completed["conclusion"]["citations"][0]["relative_path"], "engine.rs");
+        assert_eq!(completed["conclusion"]["model_claims"][0]["verification_status"], "verified");
+
+        // 5. Query status & list
+        let status = handle_rpc_command(
+            &mut ctx,
+            "app_subagent_status",
+            &json!({ "run_id": "subagent-sub-101" }),
+        )
+        .expect("subagent status");
+        assert_eq!(status["status"], "completed");
+
+        let list = handle_rpc_command(
+            &mut ctx,
+            "app_subagent_list",
+            &json!({ "parent_task_id": "task-architect-10" }),
+        )
+        .expect("subagent list");
+        assert_eq!(list.as_array().unwrap().len(), 1);
+
+        // 6. Cascade cancellation
+        let mut req_cancel = req.clone();
+        req_cancel["request_id"] = json!("sub-103");
+        let dispatched_for_cancel = handle_rpc_command(
+            &mut ctx,
+            "app_subagent_dispatch",
+            &json!({ "grant": grant, "request": req_cancel }),
+        )
+        .expect("dispatch for cancel");
+        assert_eq!(dispatched_for_cancel["status"], "dispatched");
+
+        let cancelled = handle_rpc_command(
+            &mut ctx,
+            "app_subagent_cancel",
+            &json!({ "parent_task_id": "task-architect-10", "reason": "PARENT_CANCELLED" }),
+        )
+        .expect("cancel subagent");
+        assert_eq!(cancelled["status"], "cancelled");
+        assert_eq!(cancelled["cancellation_evidence"]["reason"], "PARENT_CANCELLED");
+
+        // 7. Restart reconciliation
+        let mut req_restart = req.clone();
+        req_restart["request_id"] = json!("sub-104");
+        handle_rpc_command(
+            &mut ctx,
+            "app_subagent_dispatch",
+            &json!({ "grant": grant, "request": req_restart }),
+        )
+        .expect("dispatch for restart");
+
+        let reconciled = handle_rpc_command(&mut ctx, "app_subagent_reconcile", &json!({}))
+            .expect("reconcile on restart");
+        let rec_arr = reconciled.as_array().unwrap();
+        assert_eq!(rec_arr.len(), 1);
+        assert_eq!(rec_arr[0]["status"], "interrupted");
+        assert_eq!(rec_arr[0]["error_code"], "RECONCILED_AFTER_RESTART");
+    }
 }
+

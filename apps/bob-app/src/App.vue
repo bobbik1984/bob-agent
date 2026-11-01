@@ -245,21 +245,15 @@ const modelHub = ref({
     active_roles: {
       main: {
         provider_id: 'deepseek',
-        model_id: 'deepseek-chat',
-        model_name: 'DeepSeek V4 Flash',
+        model_id: 'deepseek-v4.1-flash-1017',
+        model_name: 'DeepSeek V4.1 Flash 1017',
         provider_name: 'DeepSeek',
       },
-      clerk: {
-        provider_id: 'doubao',
-        model_id: 'doubao-seed-1-6-flash-250828',
-        model_name: 'Doubao Seed 1.6 Flash',
-        provider_name: '字节火山',
-      },
-      vision: {
-        provider_id: 'gemini',
-        model_id: 'gemini-2.5-flash',
-        model_name: 'Gemini 2.5 Flash',
-        provider_name: 'Google Gemini',
+      flash: {
+        provider_id: 'deepseek',
+        model_id: 'deepseek-v4.1-flash-1017',
+        model_name: 'DeepSeek V4.1 Flash',
+        provider_name: 'DeepSeek',
       },
     },
     provider_variants: {
@@ -343,6 +337,12 @@ const totalAvailableModelsCount = computed(() => {
   return total || modelHub.value?.available_model_count || 199;
 });
 
+const assistantAutoRouting = ref(localStorage.getItem('bob-assistant-auto-routing') !== 'false');
+function toggleAutoRouting() {
+  assistantAutoRouting.value = !assistantAutoRouting.value;
+  try { localStorage.setItem('bob-assistant-auto-routing', String(assistantAutoRouting.value)); } catch {}
+}
+
 const roleCards = computed(() => {
   const roles = modelHub.value?.state?.active_roles || {};
   return [
@@ -353,33 +353,21 @@ const roleCards = computed(() => {
       icon: 'monitor',
       assignment: roles.main || {
         provider_id: 'deepseek',
-        model_id: 'deepseek-chat',
-        model_name: 'DeepSeek V4 Flash',
+        model_id: 'deepseek-v4.1-flash-1017',
+        model_name: 'DeepSeek V4.1 Flash 1017',
         provider_name: 'DeepSeek',
       },
     },
     {
-      key: 'clerk',
-      title: t('roleClerkTitle'),
-      desc: t('roleClerkDesc'),
-      icon: 'clerk',
-      assignment: roles.clerk || {
-        provider_id: 'doubao',
-        model_id: 'doubao-seed-1-6-flash-250828',
-        model_name: 'Doubao Seed 1.6 Flash',
-        provider_name: '字节火山',
-      },
-    },
-    {
-      key: 'vision',
-      title: t('roleVisionTitle'),
-      desc: t('roleVisionDesc'),
-      icon: 'vision',
-      assignment: roles.vision || {
-        provider_id: 'gemini',
-        model_id: 'gemini-2.5-flash',
-        model_name: 'Gemini 2.5 Flash',
-        provider_name: 'Google Gemini',
+      key: 'flash',
+      title: t('roleFlashTitle'),
+      desc: t('roleFlashDesc'),
+      icon: 'flash',
+      assignment: roles.flash || roles.clerk || {
+        provider_id: 'deepseek',
+        model_id: 'deepseek-v4.1-flash-1017',
+        model_name: 'DeepSeek V4.1 Flash',
+        provider_name: 'DeepSeek',
       },
     },
   ];
@@ -596,8 +584,9 @@ function applyModelHubSnapshot(snap) {
   }
   const rawRoles = snap.activeRoles || snap.state?.active_roles;
   if (rawRoles) {
-    for (const rKey of ['main', 'clerk', 'vision']) {
-      const resolved = resolveEntryToRoleObj(rawRoles[rKey], providers);
+    for (const rKey of ['main', 'flash']) {
+      const sourceKey = (rKey === 'flash' && !rawRoles.flash && rawRoles.clerk) ? 'clerk' : rKey;
+      const resolved = resolveEntryToRoleObj(rawRoles[sourceKey], providers);
       if (resolved) {
         modelHub.value.state.active_roles[rKey] = resolved;
       }
@@ -747,6 +736,10 @@ async function selectRoleModel(roleKey, providerObj, modelObj) {
   } catch {
     fault.value = 'modelSelectionSaveFailed';
     return;
+  }
+  if (roleKey === 'main') {
+    assistantAutoRouting.value = false;
+    try { localStorage.setItem('bob-assistant-auto-routing', 'false'); } catch {}
   }
   editingRole.value = null;
   quickSwitcherOpen.value = false;
@@ -1114,6 +1107,152 @@ async function handleSaveNote(payload) {
   } finally {
     personalBusy.value = false;
   }
+}
+
+const recognizingTicket = ref(false);
+const composerTicketFileRef = ref(null);
+
+async function handleDeleteSchedule(id) {
+  if (!id || personalBusy.value) return;
+  personalBusy.value = true;
+  personalFault.value = null;
+  try {
+    if (available && kernelBridge.scheduleDelete) {
+      await kernelBridge.scheduleDelete(id);
+      await loadPersonalOps();
+    } else {
+      personalOps.value.schedules = personalOps.value.schedules.filter(s => s.id !== id);
+    }
+  } catch (err) {
+    personalFault.value = String(err?.message || err || 'SCHEDULE_DELETE_FAILED');
+  } finally {
+    personalBusy.value = false;
+  }
+}
+
+async function handleDeleteNote(id) {
+  if (!id || personalBusy.value) return;
+  personalBusy.value = true;
+  personalFault.value = null;
+  try {
+    if (available && kernelBridge.noteDelete) {
+      await kernelBridge.noteDelete(id);
+      await loadPersonalOps();
+    } else {
+      personalOps.value.notes = personalOps.value.notes.filter(n => n.id !== id);
+    }
+  } catch (err) {
+    personalFault.value = String(err?.message || err || 'NOTE_DELETE_FAILED');
+  } finally {
+    personalBusy.value = false;
+  }
+}
+
+async function handleSaveTicket(payload) {
+  if (!payload?.title || personalBusy.value) return;
+  personalBusy.value = true;
+  personalFault.value = null;
+  try {
+    if (available && kernelBridge.ticketUpsert) {
+      await kernelBridge.ticketUpsert(payload);
+      await loadPersonalOps();
+    } else {
+      const cat = payload.category || 'general';
+      const note = {
+        id: payload.id || `ticket-${Date.now()}`,
+        title: payload.title,
+        tags: ['ticket', `ticket:${cat}`],
+        body_markdown: JSON.stringify({
+          kind: 'ticket',
+          category: cat,
+          title: payload.title,
+          start_at_ms: payload.startAt || null,
+          end_at_ms: payload.endAt || null,
+          ticket: payload.ticketMeta || {},
+        }),
+        updated_at: Date.now(),
+      };
+      const idx = personalOps.value.notes.findIndex(n => n.id === note.id);
+      if (idx >= 0) personalOps.value.notes[idx] = note;
+      else personalOps.value.notes.unshift(note);
+    }
+  } catch (err) {
+    personalFault.value = String(err?.message || err || 'TICKET_SAVE_FAILED');
+  } finally {
+    personalBusy.value = false;
+  }
+}
+
+async function handleDeleteTicket(ticketItem) {
+  if (!ticketItem?.id || personalBusy.value) return;
+  personalBusy.value = true;
+  personalFault.value = null;
+  try {
+    if (available && kernelBridge.noteDelete) {
+      await kernelBridge.noteDelete(ticketItem.id);
+      if (kernelBridge.scheduleDelete) {
+        await kernelBridge.scheduleDelete(`sched-${ticketItem.id}`).catch(() => {});
+      }
+      await loadPersonalOps();
+    } else {
+      personalOps.value.notes = personalOps.value.notes.filter(n => n.id !== ticketItem.id);
+      personalOps.value.schedules = personalOps.value.schedules.filter(
+        s => s.id !== `sched-${ticketItem.id}`,
+      );
+    }
+  } catch (err) {
+    personalFault.value = String(err?.message || err || 'TICKET_DELETE_FAILED');
+  } finally {
+    personalBusy.value = false;
+  }
+}
+
+async function handleRecognizeTicketFile(file) {
+  if (!file || recognizingTicket.value) return;
+  if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type) || file.size > 8 * 1024 * 1024) {
+    personalFault.value = t('captureImageInvalid');
+    return;
+  }
+  recognizingTicket.value = true;
+  personalFault.value = null;
+  try {
+    const data = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+    const stored = await kernelBridge.captureMediaPut(file.type, data.split(',')[1]);
+    let modelRef = null;
+    try {
+      const target = await kernelBridge.captureVisionTarget();
+      modelRef = target?.model_ref || null;
+    } catch {
+      modelRef = null;
+    }
+    const result = await kernelBridge.ticketRecognize(stored.id, modelRef);
+    await loadPersonalOps();
+    if (activeDrawer.value === 'chat' && result?.text) {
+      messages.value.push({
+        id: `msg-ticket-${Date.now()}`,
+        role: 'assistant',
+        source: 'direct_provider',
+        content: result.text,
+        send_state: 'reply_saved',
+      });
+    }
+  } catch {
+    personalFault.value = t('captureRecognitionFailed');
+  } finally {
+    recognizingTicket.value = false;
+  }
+}
+
+function handleComposerTicketFileChange(event) {
+  const file = event.target?.files?.[0];
+  if (event.target) event.target.value = '';
+  if (!file) return;
+  void handleRecognizeTicketFile(file);
 }
 
 async function handleCreateCapture(payload) {
@@ -2103,6 +2242,7 @@ async function send() {
       }
     }
     await reload();
+    void loadPersonalOps();
   } catch {
     draft.value = controller.snapshot().draft;
     fault.value = 'saveFailed';
@@ -2277,6 +2417,20 @@ async function recognizeCaptureImage() {
   try {
     const result = await kernelBridge.captureRecognize(id, quickNoteVisionTarget.value.model_ref);
     if (id === quickNoteMediaId.value) quickNoteSuggestion.value = result.text;
+  } catch { quickNoteImageError.value = 'captureRecognitionFailed'; }
+  finally { quickNoteRecognizing.value = false; }
+}
+async function recognizeCaptureAsTicket() {
+  if (!quickNoteMediaId.value || !quickNoteVisionTarget.value || quickNoteRecognizing.value || quickNoteBusy.value) return;
+  const id = quickNoteMediaId.value;
+  quickNoteRecognizing.value = true; quickNoteImageError.value = '';
+  try {
+    const result = await kernelBridge.ticketRecognize(id, quickNoteVisionTarget.value.model_ref);
+    if (id === quickNoteMediaId.value) {
+      quickNoteSuggestion.value = result?.text || t('ticketRecognizedSuccess');
+      quickNoteSaved.value = true;
+    }
+    await loadPersonalOps();
   } catch { quickNoteImageError.value = 'captureRecognitionFailed'; }
   finally { quickNoteRecognizing.value = false; }
 }
@@ -2495,8 +2649,6 @@ onUnmounted(()=>document.removeEventListener('pointerdown',dismissConversationMe
         <summary :aria-label="t('conversationMenu')"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><circle cx="5" cy="12" r="1.5" fill="currentColor"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/><circle cx="19" cy="12" r="1.5" fill="currentColor"/></svg></summary>
         <div class="conversation-menu-panel" @click="$event.currentTarget.closest('details').open = false">
           <button @click="immersive = !immersive"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5"/></svg>{{ t(immersive ? 'exitImmersive' : 'enterImmersive') }}</button>
-          <button @click="navigationOpen = true"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>{{ t('openNavigation') }}</button>
-          <button @click="openDevices"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 21h8m-4-5v5"/></svg>{{ t('deviceAndConnection') }}</button>
           <button @click="settingsOpen = true"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3"/><circle cx="15" cy="17" r="3"/></svg>{{ t('settings') }}</button>
         </div>
       </details>
@@ -2624,14 +2776,8 @@ onUnmounted(()=>document.removeEventListener('pointerdown',dismissConversationMe
                     <rect x="3" y="4" width="18" height="12" rx="2" />
                     <path d="M8 20h8M12 16v4" />
                   </svg>
-                  <svg v-else-if="role.icon === 'clerk'" viewBox="0 0 24 24" aria-hidden="true">
-                    <circle cx="8" cy="17" r="3" />
-                    <circle cx="17" cy="17" r="3" />
-                    <path d="M5 17H3V9l5-3h9v11" />
-                  </svg>
                   <svg v-else viewBox="0 0 24 24" aria-hidden="true">
-                    <path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6Z" />
-                    <circle cx="12" cy="12" r="3" />
+                    <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" fill="currentColor" />
                   </svg>
                 </div>
                 <div class="role-card-body">
@@ -3461,7 +3607,22 @@ onUnmounted(()=>document.removeEventListener('pointerdown',dismissConversationMe
           </button>
         </div>
 
-        <button type="button" class="sidebar-mode-btn" @click="openAssistant">{{ t('defaultAssistant') }}</button>
+        <button
+          type="button"
+          class="sidebar-primary-agent-row"
+          :class="{ active: !remoteConversation && sessionId === assistantConversationId }"
+          @click="openAssistant"
+        >
+          <span class="agent-row-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+              <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+            </svg>
+          </span>
+          <span class="agent-row-text">
+            <strong>{{ t('defaultAssistant') }}</strong>
+            <small>{{ t('defaultAssistantDesc') }}</small>
+          </span>
+        </button>
 
         <div class="sidebar-mode-switch" role="group">
           <button
@@ -3525,14 +3686,20 @@ onUnmounted(()=>document.removeEventListener('pointerdown',dismissConversationMe
     <ScheduleView
       v-if="activeDrawer === 'schedule'"
       :schedules="personalOps.schedules"
+      :notes="personalOps.notes"
+      :recognizing-ticket="recognizingTicket"
       :save-item="saveCalendarItem"
       :projects="projectList"
       :online-projects="onlineState.projects || []"
       :busy="personalBusy"
       @create-schedule="handleCreateSchedule"
       @update-status="handleUpdateScheduleStatus"
+      @delete-schedule="handleDeleteSchedule"
       @open-project-todo="handleOpenProjectTodo"
       @promote-todo-project="handlePromoteTodoToProject"
+      @save-ticket="handleSaveTicket"
+      @delete-ticket="handleDeleteTicket"
+      @recognize-ticket-file="handleRecognizeTicketFile"
     />
 
     <!-- Primary View 3: 工作 (Work / RemoteAgent & Project Matrix) -->
@@ -3573,7 +3740,12 @@ onUnmounted(()=>document.removeEventListener('pointerdown',dismissConversationMe
       :memories="personalOps.memories"
       :decisions="personalOps.decisions"
       :busy="personalBusy"
+      :recognizing-ticket="recognizingTicket"
       @save-note="handleSaveNote"
+      @delete-note="handleDeleteNote"
+      @save-ticket="handleSaveTicket"
+      @delete-ticket="handleDeleteTicket"
+      @recognize-ticket-file="handleRecognizeTicketFile"
       @create-capture="handleCreateCapture"
       @update-memory="handleUpdateMemory"
       @create-decision="handleCreateDecision"
@@ -3704,6 +3876,25 @@ onUnmounted(()=>document.removeEventListener('pointerdown',dismissConversationMe
           class="quick-model-popover"
           @click.stop
         >
+          <div class="quick-auto-routing-bar">
+            <button
+              type="button"
+              class="quick-auto-btn"
+              :class="{ active: assistantAutoRouting }"
+              @click="toggleAutoRouting(); if (assistantAutoRouting) quickSwitcherOpen = false;"
+            >
+              <div class="auto-btn-content">
+                <span class="auto-btn-title">
+                  <svg class="inline-svg-xs" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+                  </svg>
+                  {{ t('modelAutoRoute') }}
+                </span>
+                <span class="auto-btn-desc">{{ t('modelAutoRouteDesc') }}</span>
+              </div>
+              <span v-if="assistantAutoRouting" class="auto-active-badge">{{ t('enabled') }}</span>
+            </button>
+          </div>
           <div class="quick-popover-header">
             <input
               v-model="quickSwitcherSearchQuery"
@@ -3805,14 +3996,23 @@ onUnmounted(()=>document.removeEventListener('pointerdown',dismissConversationMe
                 if (!quickSwitcherOpen) quickSwitcherSearchQuery = '';
               "
             >
-              <img
-                :src="getProviderLogo(activeMainRole.provider_id)"
-                alt=""
-                class="pill-logo"
-              />
-              <span class="pill-model-name">
-                {{ activeMainRole.model_name || activeMainRole.model_id }}
-              </span>
+              <template v-if="assistantAutoRouting">
+                <svg class="inline-svg-xs" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+                </svg>
+                <span class="pill-model-name">{{ t('modelModePillAuto') }}</span>
+                <span class="pill-auto-tag">{{ activeMainRole.model_name || activeMainRole.model_id }}</span>
+              </template>
+              <template v-else>
+                <img
+                  :src="getProviderLogo(activeMainRole.provider_id)"
+                  alt=""
+                  class="pill-logo"
+                />
+                <span class="pill-model-name">
+                  {{ activeMainRole.model_name || activeMainRole.model_id }}
+                </span>
+              </template>
               <svg class="inline-svg-xs" viewBox="0 0 24 24" aria-hidden="true">
                 <path d="m6 9 6 6 6-6" />
               </svg>
@@ -3920,7 +4120,10 @@ onUnmounted(()=>document.removeEventListener('pointerdown',dismissConversationMe
           <button type="button" :disabled="quickNoteBusy || quickNoteRecognizing" @click="removeCaptureImage">{{ t('captureRemove') }}</button>
           <template v-if="quickNoteVisionTarget">
             <p>{{ t('captureRecognitionDestination', { model: quickNoteVisionTarget.model_ref, endpoint: quickNoteVisionTarget.base_url }) }}</p>
-            <button type="button" :disabled="quickNoteBusy || quickNoteRecognizing" @click="recognizeCaptureImage">{{ t(quickNoteRecognizing ? 'captureRecognizing' : 'captureRecognize') }}</button>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+              <button type="button" :disabled="quickNoteBusy || quickNoteRecognizing" @click="recognizeCaptureImage">{{ t(quickNoteRecognizing ? 'captureRecognizing' : 'captureRecognize') }}</button>
+              <button type="button" :disabled="quickNoteBusy || quickNoteRecognizing" @click="recognizeCaptureAsTicket">{{ t(quickNoteRecognizing ? 'ticketRecognizingBtn' : 'ticketRecognizeBtn') }}</button>
+            </div>
           </template>
           <p v-else>{{ t('captureVisionUnconfigured') }}</p>
         </div>

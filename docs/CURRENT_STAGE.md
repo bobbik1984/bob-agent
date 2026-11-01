@@ -186,6 +186,8 @@ Linux定向Rust6/6、release与前端构建通过。候选第一次验证HTTP400
 
 ### 3.5 第三项：BP4-04最小项目画像胶囊
 
+2026-11-01增量（符号骨架与Tauri命令对齐）：已在 `crates/bob-runtime/src/project_context.rs` 完成来源确定性分类（`SourceCategory`: `SpecCharter` / `CodeEntryPoint` / `ConfigManifest` / `GeneralSource`）与轻量符号骨架提取（`SymbolSkeletonItem`: 覆盖 Rust `pub fn`/`struct`/`trait`/`enum`，TS `export function`/`class`/`interface` 与 Python `def`/`class`，上限 16 项且严格限制 80 字符以守住 8KB 胶囊预算）；并在 `apps/bob-app/src-tauri/src/runtime_commands.rs` 与 `src/lib.rs` 将 `app_context_*`、`app_claude_*`、`app_capability_*` 与 `app_subagent_*` 共 23 项运行时 RPC 全量挂载至桌面与 Android 原生 Tauri IPC。`bob-runtime` 42/42、`bob-node` 8/8、`bob-app` 原生 IPC 35/35（7 项真实/进程专项 ignored）、前端 87/87 全部通过。
+
 2026-11-01实现增量：bob-node宿主授权、网页胶囊读回、绑定目标的直接/助理发送已装配bob-task-card-v1（原目标、固定胶囊/基线、来源hash/片段、约束和wire hash），复用原派发回执。宿主每5秒检查授权来源并更新active版本，固定请求仍核对旧胶囊，不静默换版；网页可查看固定任务卡。真实本项目来源变化5027ms自动刷新、旧请求拒绝、新请求新材料、历史卡不变、390/1180读回通过；node5/5、runtime27/27、前端83/83。统一5194候选保留。用户本轮另行明确要求GitHub生成APK，Run41266758148 / Artifact13067890750已成功；源码4bdda61，APK已下载并核对SHA256和16KB ELF，成品dist-release/taskcard-4bdda61，本轮未安装/真机验收；网页不上线。BP4-04仍需来源分类/符号骨架、完整工作树/Owner交接、存储故障与真实远端Task/Execution/Artifact闭环；指纹不授予写权。见evidence/2026-11-01-context-task-cards/REPORT.md。
 
 实施：先选一个获准工作区，不扫描整机。按project+workspace生成版本化索引，包含commit、dirty指纹、来源hash、提取时间、有效决定和最新审阅锚点；区分原文、摘要和推断。先用确定性提取，按需读取原文，不为生成胶囊默认增加模型调用。3～8KB是预算目标。将胶囊作为有来源材料装配，不升格为系统权限。
@@ -193,6 +195,8 @@ Linux定向Rust6/6、release与前端构建通过。候选第一次验证HTTP400
 验收：同commit但dirty不同会失效；决定变更能定位来源；新建文件可以声明计划路径并由执行端检查父目录/范围；恶意文档不能扩权；缺文件/超预算/提取中断不会覆盖上一有效版本或伪称最新。执行端核对后才能写。交付契约、迁移（若必要）、读回UI与定向测试，不能只保存摘要文本。
 
 ### 3.6 第四项：BP4-06一个执行者的真实成果闭环（含 `tmux` 保活 + 原生 `session_id` 续接）
+
+2026-11-01实现增量（离线Fixture闭环，未调用真实Claude计费）：已在 `crates/bob-runtime/src/claude_harness.rs` 与 `crates/bob-node/src/claude_rpc.rs` 完成原生 `Claude Code` 执行适配器、`TmuxHarnessRunner` 保活与重启对账、原生 `--resume <session_id>` 续接、同工作目录跨工具（Claude/DSH）串行写锁（`HARNESS_WORKSPACE_BUSY`）与 `bob-task-card-v1` 交接挂载，以及 `V1 -> 指定父版 V2` 不可变快照与验证/待审/接受状态机；统一对话侧栏（`ConversationDirectory.vue` / `DshSessions.vue`）直接显示节点、项目工作区与 `Claude` 工具标签，不新增独立 Claude 界面。受控网页成果与 Markdown 文档成果两类 `V1 -> V2` 闭环、取消/超时/崩溃重启不重放均已通过离线 Fake-Claude 回归（`bob-runtime` 30/30、`bob-node` 6/6、前端 `86/86`），详见 `docs/evidence/BP4_06_CLAUDE_HARNESS_VERIFICATION.md`。同日经用户授权完成 X1T 现场只读盘点（`/home/bobbik/.local/bin/claude` `2.1.316 (Claude Code)`，`claude.ai` Pro 认证有效，无 `tmux` 自动走受控 `process` 模式）与真实两轮 `V1 -> V2`（`native_session_id: eeddd53b-e6a8-434f-ae8a-e20ee1fee104` `--resume` 续接、V1 快照 SHA-256 不变）实机闭环验证，证据见 `docs/evidence/x1t_live_claude_v1_v2_evidence.json`。
 
 实施：① 按实际已安装Harness（`dsh`、`codex`、`claude`、`agy`）核对 capabilities/version/认证方式及原生会话寻址；② 直接续聊保留 `native_sessions` 原生绑定（如 `claude --resume <id>`、`codex exec resume <id>`、ACP `session/prompt`），无须先走BYOK；跨工具委派或原生会话失效时才挂任务卡/胶囊；③ 在支持 `tmux` 的节点采用“外层受控 `tmux` 防断线保活 + 内层结构化 JSON 回执落盘（禁止 `send-keys`/`capture-pane` 刮屏）”，支持随时 `tmux attach` 旁观；④ 以既有Task/Execution与runner契约记录派发、采用、取消、终态、验证、成果登记；⑤ 绑定父ArtifactVersion与输入hash，保留历史快照；⑥ 在统一对话中展示总结、重要失败、可展开过程和成果。
 
@@ -202,6 +206,8 @@ Linux定向Rust6/6、release与前端构建通过。候选第一次验证HTTP400
 
 ### 3.7 第五项：BP4-07分段借用节点能力
 
+2026-11-01实现增量：已在 `crates/bob-runtime/src/lib.rs` 完成 `FileVaultSecretStore` 随机熵源升级（`v2:` 种子+随机 nonce+MAC 防篡改校验）、旧版 v1 密钥 100% 兼容读回、损坏拒绝与 `rotate_master_seed` 原子轮换恢复；并在 `crates/bob-runtime/src/capability_borrowing.rs` 与 `crates/bob-node/src/lib.rs` 完成能力登记与协商（`supported/configured/authorized/reachable/busy/observed_at`）、`overseas_model_egress` 授权 Provider 白名单/调用者认证/大小与并发与预算上限/防重复计费/脱敏审计/禁止任意 URL 代理，以及 `gpu_display_render`（Godot/Blender/Browser 独立能力、绑定 `source_commit+dirty_manifest+input_hash`、快照重试不重复渲染、区分像素画面与几何功能验证）。`bob-runtime` 33/33、`bob-node` 7/7、前端 86/86 全部通过。
+
 先做能力登记：支持/已配置/已授权/最近可达/忙碌/实测时间分别记录，来源是配置与探测，不从节点名称猜测。版本和能力协商失败不裸跑、不静默换供应商。
 
 API出口子段：先审计FileVaultSecretStore随机性、权限设置失败、读回、损坏及轮换恢复；修复不得使旧密钥不可恢复。然后实现已授权Provider白名单、调用者认证、请求大小/并发/预算、取消、流式错误与脱敏记录；凭据不回传调用端，不做任意URL代理。用假Key验证拒绝/泄露/重复计费边界，再经批准用真实服务验证。不能据此批准凭据代理或新增公网暴露。
@@ -209,6 +215,8 @@ API出口子段：先审计FileVaultSecretStore随机性、权限设置失败、
 渲染子段：独立批准获准节点/目录/工具/时间后，再绑定源commit+dirty素材清单、输入hash、渲染配置和验证版本。Godot、Blender、浏览器分别报告能力。先一个有限任务，校验回传大小/hash、不可变快照、离线读取、部分传输重试不重新执行；像素图只证明画面，几何/功能另验。旧B4门槛保留，不以新编号绕过；不得打断节点已有工作。
 
 ### 3.8 第六项：BP4-05原生API子代理
+
+2026-11-01实现增量：已在 `crates/bob-runtime/src/subagent_pool.rs` 与 `crates/bob-node/src/lib.rs` 完成有界原生 API 子代理（1 架构师 + 1 只读子代理）。实现严格最大深度限制（`depth == 1`，禁止嵌套派发子代理）、单架构师单任务并发上限 1（并发任务拒绝）、父授权交集只读沙箱（严禁工作区/状态写权，工作区路径越界与非授权子目录拒绝）、Token/预算费用/超时硬限制、API 提供方未知费用/身份标 `unknown`、级联取消证据记录（`cancellation_evidence`）、节点崩溃/重启防重放对账（`reconcile_on_restart`，`Interrupted` 终态保留账本，严禁自动重放派发模型调用防二次计费），以及主会话隔离防膨胀（原始步骤入隔离 spool，主会话只收敛包含磁盘核验文件哈希、分歧清单和模型推断对比的结构化结论 `SubagentSynthesizedConclusion`）。`bob-runtime` 38/38、`bob-node` 8/8、前端 87/87 全部通过，证据见 `docs/evidence/BP4_05_SUBAGENT_POOL_VERIFICATION.md`。
 
 依赖：单执行者闭环与费用/凭据边界通过。第一版只做一个架构师+一个只读子代理，稳定后才增加有界并发；模型由能力、预算和用户配置决定，不固定“旗舰+Flash”。
 
@@ -259,3 +267,8 @@ API出口子段：先审计FileVaultSecretStore随机性、权限设置失败、
 ## 模型图标资源（2026-11-01，网页已发布）
 
 model-assets-20261101-r1已备份后发布，仅补全public图标资源、移除Tavily/TinyFish图标并保留名称，保持菜单切换修复。实际生产服务经私有通道浏览器验证全部显示的模型图标解码成功，无工具破图。未改后端、数据库、凭据，未发APK；BP4-04仅保留本地候选。见evidence/2026-11-01-model-assets。外置前端构建必须同步public，不能只复制src。
+
+
+## F2/F5 消息层级与处理提示（2026-11-01，本地候选）
+
+用户随后暂停手机测试，当前未再次询问Winter进度。用户消息收窄右对齐并增加padding；节点真实running与已送达等待分开，状态读取10秒节流，失败清除旧观测，请求终态按request_id匹配。15项会话状态定向回归与前端构建通过；未真机复验、未上线、未打包。原会话历史/图片/固定输入框保留既有实现，后续按用户要求再验证手机。统一5194候选已更新。

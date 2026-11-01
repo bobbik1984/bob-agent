@@ -812,6 +812,99 @@ impl LocalApp {
         Ok(item)
     }
 
+    pub fn delete_schedule_item(&mut self, id: &str, now: i64) -> Result<ScheduleItem> {
+        let id = id.trim();
+        if id.is_empty() {
+            return Err(Error::InvalidTransition);
+        }
+        let item = self
+            .list_schedule_items()?
+            .into_iter()
+            .find(|s| s.id == id)
+            .ok_or(Error::InvalidTransition)?;
+        let expected_version = item.version;
+        let changed = self
+            .store
+            .db
+            .execute("DELETE FROM schedule_items WHERE id=?1", [id])?;
+        if changed != 1 {
+            return Err(Error::InvalidTransition);
+        }
+        let payload = serde_json::to_string(&item)?;
+        self.enqueue_personal_sync("schedule", id, "delete", expected_version, &payload, now)?;
+        Ok(item)
+    }
+
+    pub fn delete_note(&mut self, id: &str, now: i64) -> Result<NoteItem> {
+        let id = id.trim();
+        if id.is_empty() {
+            return Err(Error::InvalidTransition);
+        }
+        let item = self
+            .list_notes(None)?
+            .into_iter()
+            .find(|n| n.id == id)
+            .ok_or(Error::InvalidTransition)?;
+        let expected_version = item.version;
+        let changed = self
+            .store
+            .db
+            .execute("DELETE FROM notes WHERE id=?1", [id])?;
+        if changed != 1 {
+            return Err(Error::InvalidTransition);
+        }
+        let payload = serde_json::to_string(&item)?;
+        self.enqueue_personal_sync("note", id, "delete", expected_version, &payload, now)?;
+        Ok(item)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn upsert_ticket(
+        &mut self,
+        id: &str,
+        title: &str,
+        category: &str,
+        ticket_meta: &serde_json::Value,
+        start_at_ms: Option<i64>,
+        end_at_ms: Option<i64>,
+        notes_summary: &str,
+        now: i64,
+    ) -> Result<(NoteItem, Option<ScheduleItem>)> {
+        let id = id.trim();
+        let title = title.trim();
+        let cat = if category.trim().is_empty() { "general" } else { category.trim() };
+        if id.is_empty() || title.is_empty() {
+            return Err(Error::InvalidTransition);
+        }
+        let body = serde_json::to_string_pretty(ticket_meta)?;
+        let tags = vec!["ticket".to_owned(), format!("ticket:{cat}")];
+        let note = self.upsert_note(id, None, None, title, &body, &tags, now)?;
+        let mut sched_out = None;
+        if let Some(start_at) = start_at_ms {
+            let sched_id = format!("sched-{id}");
+            let end_at = end_at_ms.filter(|&e| e >= start_at);
+            if let Some(existing) = self.list_schedule_items()?.into_iter().find(|s| s.id == sched_id) {
+                let updated = self.edit_schedule_item(&sched_id, existing.version, title, start_at, notes_summary, now)?;
+                sched_out = Some(updated);
+            } else {
+                let created = self.create_schedule_item_with_kind(
+                    &sched_id,
+                    None,
+                    None,
+                    title,
+                    "event",
+                    start_at,
+                    end_at,
+                    None,
+                    notes_summary,
+                    now,
+                )?;
+                sched_out = Some(created);
+            }
+        }
+        Ok((note, sched_out))
+    }
+
     pub fn list_schedule_items(&self) -> Result<Vec<ScheduleItem>> {
         let mut stmt = self.store.db.prepare(
             "SELECT id,project_id,task_id,origin_device_id,title,kind,start_at,end_at,reminder_at,status,notes,acceptance,version,created_at,updated_at
@@ -1103,6 +1196,11 @@ impl Store {
             }
             "note" => {
                 let note: NoteItem = serde_json::from_str(&entry.payload_json)?;
+                if entry.op_kind == "delete" {
+                    tx.execute("DELETE FROM notes WHERE id=?1", [&note.id])?;
+                    tx.commit()?;
+                    return Ok(());
+                }
                 let existing: Option<(i64, String, String)> = tx
                     .query_row(
                         "SELECT version, title, body_markdown FROM notes WHERE id=?1",
@@ -1153,6 +1251,11 @@ impl Store {
             }
             "schedule" => {
                 let sched: ScheduleItem = serde_json::from_str(&entry.payload_json)?;
+                if entry.op_kind == "delete" {
+                    tx.execute("DELETE FROM schedule_items WHERE id=?1", [&sched.id])?;
+                    tx.commit()?;
+                    return Ok(());
+                }
                 let existing: Option<(i64, String, String)> = tx
                     .query_row(
                         "SELECT version, title, status FROM schedule_items WHERE id=?1",

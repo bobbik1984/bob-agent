@@ -27,7 +27,7 @@ use tauri::{AppHandle, Manager, Runtime, State};
 const DEFAULT_SLOT: &str = "provider-key-default";
 const MAX_RESPONSE_BYTES: usize = 512 * 1024;
 const EMBEDDED_MODEL_REGISTRY: &str = include_str!("../resources/model_providers.json");
-const TOOL_KEY_IDS: [&str; 2] = ["TAVILY_API_KEY", "TINYFISH_API_KEY"];
+const TOOL_KEY_IDS: [&str; 4] = ["tavily", "tinyfish", "TAVILY_API_KEY", "TINYFISH_API_KEY"];
 
 pub(crate) fn provider_slot(provider_id: &str) -> String {
     format!("provider-key-{}", provider_id.trim())
@@ -150,9 +150,8 @@ fn save_registry_file(data_dir: &std::path::Path, registry: &Value) -> Result<()
 fn default_hub_state() -> Value {
     json!({
         "activeRoles": {
-            "main": "deepseek::deepseek-v4-flash",
-            "clerk": "doubao::doubao-seed-1-6-flash-250828",
-            "vision": "gemini::gemini-2.5-flash"
+            "main": "deepseek::deepseek-v4.1-flash-1017",
+            "flash": "deepseek::deepseek-v4.1-flash-1017"
         },
         "providerVariants": {},
         "customModels": [],
@@ -253,12 +252,16 @@ async fn build_model_hub_snapshot_and_sync<R: Runtime>(
     }
 
     let mut tool_keys = serde_json::Map::new();
-    for tid in TOOL_KEY_IDS {
-        let slot = provider_slot(tid);
-        let configured = read_api_key(host, &slot)
+    for (short_id, env_id) in [("tavily", "TAVILY_API_KEY"), ("tinyfish", "TINYFISH_API_KEY")] {
+        let has_short = read_api_key(host, &provider_slot(short_id))
             .await
             .is_ok_and(|k| !k.trim().is_empty());
-        tool_keys.insert(tid.to_owned(), json!(configured));
+        let has_env = read_api_key(host, &provider_slot(env_id))
+            .await
+            .is_ok_and(|k| !k.trim().is_empty());
+        let configured = has_short || has_env;
+        tool_keys.insert(short_id.to_owned(), json!(configured));
+        tool_keys.insert(env_id.to_owned(), json!(configured));
     }
 
     let mut pool = Vec::new();
@@ -1473,8 +1476,11 @@ pub(crate) async fn app_model_role_assign<R: Runtime>(
     role: String,
     model_entry_id: String,
 ) -> Result<Value, &'static str> {
-    let r = role.trim();
-    if !matches!(r, "main" | "clerk" | "vision") {
+    let r = match role.trim() {
+        "clerk" => "flash",
+        other => other,
+    };
+    if !matches!(r, "main" | "flash" | "vision") {
         return Err("INVALID_MODEL_ROLE");
     }
     let mid = model_entry_id.trim();
@@ -2448,12 +2454,33 @@ pub(crate) async fn execute_direct<R: Runtime>(
         }
     };
 
+    let is_assistant_conv = prepared.conversation_id.starts_with("assistant:");
+    let effective_messages = if is_assistant_conv {
+        with_app(&state.0, |app| {
+            let mut msgs = prepared.messages.clone();
+            if let Some(last_user) = msgs.iter_mut().rev().find(|m| m.role == "user") {
+                let sched_catalog = bob_runtime::assistant::schedule_catalog_for_prompt(app);
+                last_user.content = bob_runtime::assistant::routing_prompt_with_context(
+                    &last_user.content,
+                    &[],
+                    false,
+                    &sched_catalog,
+                    now().unwrap_or(1),
+                );
+            }
+            Ok(msgs)
+        })
+        .unwrap_or_else(|_| prepared.messages.clone())
+    } else {
+        prepared.messages.clone()
+    };
+
     let spec = match build_provider_request(
         &prepared.provider_kind,
         &prepared.base_url,
         &prepared.model_id,
         &api_key,
-        &prepared.messages,
+        &effective_messages,
         4096,
     ) {
         Ok(s) => s,
@@ -2502,12 +2529,40 @@ pub(crate) async fn execute_direct<R: Runtime>(
         } else {
             match http_res {
                 Ok((status, body)) => match parse_provider_response(&provider_kind, status, &body) {
-                    Ok(parsed) => DirectExecutionOutcome::Completed {
-                        text: parsed.text,
-                        provider_reported_model: parsed.reported_model,
-                        input_tokens: parsed.input_tokens,
-                        output_tokens: parsed.output_tokens,
-                    },
+                    Ok(parsed) => {
+                        let final_text = if is_assistant_conv {
+                            if let Ok(proposal) = bob_runtime::assistant::parse_proposal(&parsed.text, &[], false) {
+                                let receipt_opt = with_app(&owner, |app| {
+                                    bob_runtime::assistant::apply_personal_proposal(
+                                        app,
+                                        &exec_id,
+                                        &proposal,
+                                        now()?,
+                                    )
+                                })
+                                .ok()
+                                .flatten();
+                                match receipt_opt {
+                                    Some(receipt) if !proposal.text.trim().is_empty() => {
+                                        format!("{}\n\n{receipt}", proposal.text.trim())
+                                    }
+                                    Some(receipt) => receipt,
+                                    None if !proposal.text.trim().is_empty() => proposal.text,
+                                    None => parsed.text,
+                                }
+                            } else {
+                                parsed.text
+                            }
+                        } else {
+                            parsed.text
+                        };
+                        DirectExecutionOutcome::Completed {
+                            text: final_text,
+                            provider_reported_model: parsed.reported_model,
+                            input_tokens: parsed.input_tokens,
+                            output_tokens: parsed.output_tokens,
+                        }
+                    }
                     Err(reason) => DirectExecutionOutcome::Failed { reason },
                 },
                 Err(reason) => {
@@ -3400,6 +3455,126 @@ pub(crate) async fn app_capture_recognize<R:Runtime>(host:AppHandle<R>,state:Sta
  if !(200..300).contains(&status){return Err("VISION_REQUEST_FAILED");}
  let reply=parse_provider_response(&target.protocol,status,&raw).map_err(|_|"VISION_INVALID_RESPONSE")?;
  Ok(json!({"text":reply.text,"requestedModel":target.model_ref,"reportedModel":reply.reported_model}))
+}
+
+#[tauri::command]
+pub(crate) async fn app_ticket_recognize<R: Runtime>(
+    host: AppHandle<R>,
+    state: State<'_, AppState>,
+    media_id: String,
+    model_ref: Option<String>,
+    id: Option<String>,
+) -> Result<Value, &'static str> {
+    let dir = host.path().app_data_dir().map_err(|_| "VISION_NOT_CONFIGURED")?;
+    let target = bob_runtime::vision::resolve(&load_or_init_registry(&dir), &load_hub_state(&dir))?;
+    if let Some(ref mref) = model_ref {
+        if !mref.trim().is_empty() && target.model_ref != mref.trim() {
+            return Err("VISION_TARGET_CHANGED");
+        }
+    }
+    let ts = now()?;
+    let image = with_app(&state.0, |app| {
+        app.capture_media(&media_id).map_err(|_| "CAPTURE_IMAGE_MISSING")
+    })?;
+    let key = read_api_key(&host, &provider_slot(&target.provider)).await?;
+    let request = bob_runtime::vision::ticket_request(&target, &key, &image, ts)?;
+    let mut headers = request.headers;
+    headers.push(("Content-Type".into(), "application/json".into()));
+    let spec = ProviderRequestSpec {
+        url: request.url,
+        headers,
+        body: request.body,
+    };
+    let (status, raw) = execute_http_spec(
+        Some(&host),
+        spec,
+        Arc::new(AtomicBool::new(false)),
+        Duration::from_secs(60),
+    )
+    .await
+    .map_err(|_| "VISION_REQUEST_FAILED")?;
+    if !(200..300).contains(&status) {
+        return Err("VISION_REQUEST_FAILED");
+    }
+    let reply =
+        parse_provider_response(&target.protocol, status, &raw).map_err(|_| "VISION_INVALID_RESPONSE")?;
+    let proposal = bob_runtime::assistant::parse_proposal(&reply.text, &[], false).unwrap_or_else(|_| bob_runtime::assistant::Proposal {
+        kind: "create_ticket".into(),
+        text: reply.text.trim().to_owned(),
+        connection_id: None,
+        session_id: None,
+        title: Some("票据记录".into()),
+        start_time: None,
+        end_time: None,
+        notes: None,
+        schedule_id: None,
+        ticket: None,
+    });
+    let title = proposal
+        .title
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("票据记录")
+        .to_owned();
+    let ticket_prop = proposal.ticket.clone().unwrap_or_else(|| {
+        bob_runtime::assistant::TicketProposal {
+            category: "general".into(),
+            origin: None,
+            destination: None,
+            venue: None,
+            number: None,
+            start_time: proposal.start_time.clone(),
+            end_time: proposal.end_time.clone(),
+            seat: None,
+            coach: None,
+            gate: None,
+            passenger: None,
+            pickup_code: None,
+            booking_id: None,
+        }
+    });
+    let ticket_id = id
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned)
+        .unwrap_or_else(|| {
+            format!(
+                "ticket-{}",
+                &bob_kernel::outbox::digest(format!("{media_id}:{ts}").as_bytes())[..12]
+            )
+        });
+    let (note, schedule) = with_app(&state.0, |app| {
+        bob_runtime::assistant::save_ticket_proposal(
+            app,
+            &ticket_id,
+            &title,
+            &ticket_prop,
+            proposal.start_time.as_deref(),
+            proposal.end_time.as_deref(),
+            Some(&media_id),
+            ts,
+        )
+    })?;
+    let receipt = if schedule.is_some() {
+        format!("[已存入票夹并同步至日历：{title}]")
+    } else {
+        format!("[已存入票夹：{title}]")
+    };
+    let reply_text = if proposal.text.trim().is_empty() {
+        receipt.clone()
+    } else {
+        format!("{}\n\n{receipt}", proposal.text.trim())
+    };
+    Ok(json!({
+        "ticket": note,
+        "schedule": schedule,
+        "receipt": receipt,
+        "text": reply_text,
+        "requestedModel": target.model_ref,
+        "reportedModel": reply.reported_model,
+    }))
 }
 
 // Native hosts share the DSH wire protocol and durable send receipts with bob-node.

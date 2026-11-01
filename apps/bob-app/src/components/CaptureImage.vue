@@ -2,14 +2,19 @@
 import { ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { kernelBridge } from '../native-bridge.mjs';
-const props = defineProps({ captureId: String });
+const props = defineProps({ captureId: String, mediaId: String });
 const { t } = useI18n();
 const image = ref(null);
 const error = ref(false);
-watch(() => props.captureId, async id => {
+watch(() => [props.mediaId, props.captureId], async ([mId, cId]) => {
   image.value = null; error.value = false;
-  try { const found = await kernelBridge.captureMediaGet(null, id); if (id === props.captureId) image.value = found; }
-  catch { error.value = true; }
+  if (!mId && !cId) return;
+  try {
+    const found = await kernelBridge.captureMediaGet(mId || null, cId || null);
+    if (mId === props.mediaId && cId === props.captureId) image.value = found;
+  } catch {
+    error.value = true;
+  }
 }, { immediate: true });
 </script>
 <template>

@@ -16,6 +16,22 @@ export function createKernelBridge(invoke, isAvailable) {
     dshPage: (connectionId,sessionId,before=null,through=null,after=null) => call('app_dsh_page',{connectionId,sessionId,before,through,after}),
     dshHistory: (connectionId,sessionId) => call('app_dsh_history',{connectionId,sessionId}),
     dshPrompt: (connectionId,sessionId,text,requestId) => call('app_dsh_prompt',{connectionId,sessionId,text,requestId}),
+    claudeCapabilities: (connectionId=null) => call('app_claude_capabilities',{connectionId}),
+    claudeSessions: (connectionId=null) => call('app_claude_sessions',{connectionId}),
+    claudeHistory: (connectionId,sessionId) => call('app_claude_history',{connectionId,sessionId}),
+    claudePrompt: ({connectionId,sessionId,text,requestId,parentVersionId=null,detachedHoldMs=null}) => call('app_claude_prompt',{connectionId,sessionId,text,requestId,parentVersionId,detachedHoldMs}),
+    claudeCancel: (connectionId,sessionId,requestId) => call('app_claude_cancel',{connectionId,sessionId,requestId}),
+    claudeReconcile: (connectionId,sessionId) => call('app_claude_reconcile',{connectionId,sessionId}),
+    claudeReview: ({connectionId,sessionId,versionId,verdict,note=null}) => call('app_claude_review',{connectionId,sessionId,versionId,verdict,note}),
+    claudeArtifacts: (connectionId,sessionId) => call('app_claude_artifacts',{connectionId,sessionId}),
+    claudePreview: (connectionId,sessionId,path,versionId=null) => call('app_claude_preview',{connectionId,sessionId,path,versionId}),
+    subagentDispatch: (grant, request) => call('app_subagent_dispatch', { grant, request }),
+    subagentExecute: (grant, runId, actions) => call('app_subagent_execute', { grant, runId, actions }),
+    subagentCancel: (parentTaskId, runId = null, reason = 'EXPLICIT_CANCEL') =>
+      call('app_subagent_cancel', { parentTaskId, runId, reason }),
+    subagentReconcile: () => call('app_subagent_reconcile', {}),
+    subagentStatus: runId => call('app_subagent_status', { runId }),
+    subagentList: parentTaskId => call('app_subagent_list', { parentTaskId }),
     scheduleEdit: payload => call('app_schedule_edit', payload),
     bootstrap: () => call('app_bootstrap'),
     syncHome: () => call('app_home_sync'),
@@ -239,6 +255,7 @@ export function createKernelBridge(invoke, isAvailable) {
         notes: notes ?? '',
       }),
     scheduleStatus: (id, status) => call('app_schedule_status', { id, status }),
+    scheduleDelete: id => call('app_schedule_delete', { id }),
     noteUpsert: ({ id, projectId, conversationId, title, bodyMarkdown, body, tags }) =>
       call('app_note_upsert', {
         id,
@@ -248,10 +265,23 @@ export function createKernelBridge(invoke, isAvailable) {
         bodyMarkdown: bodyMarkdown ?? body ?? '',
         tags: tags ?? [],
       }),
+    noteDelete: id => call('app_note_delete', { id }),
+    ticketUpsert: ({ id, title, category, ticketMeta, startAt, endAt, notesSummary }) =>
+      call('app_ticket_upsert', {
+        id,
+        title,
+        category: category ?? 'general',
+        ticketMeta: ticketMeta ?? {},
+        startAt: startAt ?? null,
+        endAt: endAt ?? null,
+        notesSummary: notesSummary ?? '',
+      }),
     captureMediaPut: (mime, base64) => call('app_capture_media_put', { mime, base64 }),
     captureMediaGet: (mediaId, captureId) => call('app_capture_media_get', { mediaId: mediaId || null, captureId: captureId || null }),
     captureVisionTarget: () => call('app_capture_vision_target'),
     captureRecognize: (mediaId, modelRef) => call('app_capture_recognize', { mediaId, modelRef }),
+    ticketRecognize: (mediaId, modelRef = null, id = null) =>
+      call('app_ticket_recognize', { mediaId, modelRef: modelRef ?? null, id: id ?? null }),
     captureCreate: ({ id, sourceMessageId, messageId, contentRef, content, projectId, newProjectTitle, mediaId }) =>
       call('app_capture_create', {
         id,

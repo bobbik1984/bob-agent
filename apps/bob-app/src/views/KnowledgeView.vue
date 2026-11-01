@@ -1,5 +1,6 @@
 <script setup>
 import CaptureImage from '../components/CaptureImage.vue';
+import TicketWalletPanel from '../components/TicketWalletPanel.vue';
 import { computed, reactive, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 
@@ -24,10 +25,18 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  recognizingTicket: {
+    type: Boolean,
+    default: false,
+  },
 });
 
 const emit = defineEmits([
   'save-note',
+  'delete-note',
+  'save-ticket',
+  'delete-ticket',
+  'recognize-ticket-file',
   'create-capture',
   'update-memory',
   'create-decision',
@@ -69,9 +78,21 @@ function parseDecisionRationale(dec) {
   }
 }
 
+const regularNotes = computed(() =>
+  (props.notes || []).filter(
+    n => !(n.tags || []).some(tag => tag === 'ticket' || String(tag).startsWith('ticket:')),
+  ),
+);
+
+const ticketNotesCount = computed(() =>
+  (props.notes || []).filter(n =>
+    (n.tags || []).some(tag => tag === 'ticket' || String(tag).startsWith('ticket:')),
+  ).length,
+);
+
 const filteredNotes = computed(() => {
   const q = searchQuery.value.trim().toLowerCase();
-  const list = props.notes || [];
+  const list = regularNotes.value;
   if (!q) return list;
   return list.filter(n => {
     const inTitle = (n.title || '').toLowerCase().includes(q);
@@ -222,6 +243,19 @@ function submitDecision() {
           </svg>
           <span>{{ t('knowledgeTabDecisions') }}</span>
           <span class="subtab-count">{{ decisions.length }}</span>
+        </button>
+        <button
+          type="button"
+          class="view-subtab-btn"
+          :class="{ active: activeSubtab === 'tickets' }"
+          @click="activeSubtab = 'tickets'"
+        >
+          <svg class="inline-svg" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M2 9a3 3 0 0 1 0 6v2a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-2a3 3 0 0 1 0-6V7a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2Z" />
+            <path d="M13 5v2M13 17v2M13 11v2" />
+          </svg>
+          <span>{{ t('knowledgeTabTickets') }}</span>
+          <span class="subtab-count">{{ ticketNotesCount }}</span>
         </button>
       </div>
 
@@ -408,6 +442,17 @@ function submitDecision() {
             </div>
           </article>
         </div>
+      </template>
+
+      <template v-else-if="activeSubtab === 'tickets'">
+        <TicketWalletPanel
+          :notes="notes"
+          :busy="busy"
+          :recognizing="recognizingTicket"
+          @save-ticket="emit('save-ticket', $event)"
+          @delete-ticket="emit('delete-ticket', $event)"
+          @recognize-ticket-file="emit('recognize-ticket-file', $event)"
+        />
       </template>
 
       <template v-else>

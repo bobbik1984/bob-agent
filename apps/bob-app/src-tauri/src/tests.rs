@@ -740,3 +740,90 @@ fn rv17_promote_conversation_in_place_preserves_history_draft_notes_and_decision
 }
 
 
+
+#[test]
+fn test_bp4_runtime_ipc_commands_end_to_end() {
+    let fix = Fixture::new();
+    let local = LocalApp::open(&fix.db()).unwrap();
+    let (_app, view) = app(Some(local));
+
+    // 1. Context Capsule IPC
+    let context_list = invoke(&view, "app_context_list", json!({})).unwrap();
+    assert!(context_list.is_array());
+
+    // 2. Capability Registry IPC
+    let capabilities = invoke(&view, "app_capability_registry_get", json!({})).unwrap();
+    assert!(capabilities.is_array());
+
+    // 3. Claude Capabilities IPC
+    let claude_caps = invoke(&view, "app_claude_capabilities", json!({})).unwrap();
+    assert!(claude_caps.is_array());
+
+    // 4. Bounded Subagent Dispatch IPC
+    let ws = fix.0.join("workspace");
+    std::fs::create_dir_all(&ws).unwrap();
+    std::fs::write(ws.join("main.rs"), b"fn main() {}").unwrap();
+
+    let valid_grant = json!({
+        "parent_task_id": "task-ipc-1",
+        "parent_session_id": "session-ipc-1",
+        "parent_grant_id": "grant-ipc-1",
+        "project_id": "proj-ipc",
+        "workspace_root": ws.to_string_lossy(),
+        "allowed_subpaths": ["main.rs"],
+        "depth": 1,
+        "max_tokens": 4096,
+        "max_budget_usd": 0.05,
+        "max_timeout_ms": 10000,
+        "parent_cancelled": false
+    });
+
+    let req = json!({
+        "request_id": "sub-ipc-1",
+        "parent_task_id": "task-ipc-1",
+        "parent_session_id": "session-ipc-1",
+        "role": "read_only_researcher",
+        "goal": "Audit main.rs",
+        "prompt": "Inspect main.rs",
+        "estimated_cost_usd": 0.001,
+        "model_id": "flash"
+    });
+
+    let dispatched = invoke(
+        &view,
+        "app_subagent_dispatch",
+        json!({ "grant": valid_grant, "request": req }),
+    )
+    .unwrap();
+    assert_eq!(dispatched["status"], "dispatched");
+    assert_eq!(dispatched["run_id"], "subagent-sub-ipc-1");
+
+    // Depth limit IPC check
+    let mut invalid_grant = valid_grant.clone();
+    invalid_grant["depth"] = json!(2);
+    let depth_err = invoke(
+        &view,
+        "app_subagent_dispatch",
+        json!({ "grant": invalid_grant, "request": req }),
+    )
+    .unwrap_err();
+    assert_eq!(depth_err, json!("SUBAGENT_DEPTH_LIMIT_EXCEEDED"));
+
+    // Query status IPC
+    let status = invoke(
+        &view,
+        "app_subagent_status",
+        json!({ "runId": "subagent-sub-ipc-1" }),
+    )
+    .unwrap();
+    assert_eq!(status["status"], "dispatched");
+
+    // Cancel IPC
+    let cancelled = invoke(
+        &view,
+        "app_subagent_cancel",
+        json!({ "parentTaskId": "task-ipc-1", "runId": "subagent-sub-ipc-1" }),
+    )
+    .unwrap();
+    assert_eq!(cancelled["status"], "cancelled");
+}

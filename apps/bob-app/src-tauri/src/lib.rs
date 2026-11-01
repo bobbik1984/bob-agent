@@ -15,6 +15,7 @@ use home_link::{app_home_sync, HomeLinkState};
 mod android_vault;
 mod device_vault;
 mod runner;
+mod runtime_commands;
 use bob_kernel::app::{AppMessage, AppReadiness, LocalApp};
 use bob_kernel::catalog::{CatalogSnapshot, ConversationViewState, DeviceUiPreferences};
 use bob_kernel::local_execution::LocalExecution;
@@ -538,6 +539,22 @@ async fn app_schedule_status(
 }
 
 #[tauri::command]
+async fn app_schedule_delete(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<ScheduleItem, &'static str> {
+    let state = state.0.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        with_app(&state, |app| {
+            app.delete_schedule_item(&id, now()?)
+                .map_err(|_| "SCHEDULE_DELETE_FAILED")
+        })
+    })
+    .await
+    .map_err(|_| "SCHEDULE_DELETE_FAILED")?
+}
+
+#[tauri::command]
 async fn app_note_upsert(
     state: State<'_, AppState>,
     id: String,
@@ -564,6 +581,60 @@ async fn app_note_upsert(
     })
     .await
     .map_err(|_| "NOTE_SAVE_FAILED")?
+}
+
+#[tauri::command]
+async fn app_note_delete(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<NoteItem, &'static str> {
+    let state = state.0.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        with_app(&state, |app| {
+            app.delete_note(&id, now()?)
+                .map_err(|_| "NOTE_DELETE_FAILED")
+        })
+    })
+    .await
+    .map_err(|_| "NOTE_DELETE_FAILED")?
+}
+
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+async fn app_ticket_upsert(
+    state: State<'_, AppState>,
+    id: String,
+    title: String,
+    category: Option<String>,
+    ticket_meta: Option<serde_json::Value>,
+    start_at: Option<i64>,
+    end_at: Option<i64>,
+    notes_summary: Option<String>,
+) -> Result<serde_json::Value, &'static str> {
+    let state = state.0.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        with_app(&state, |app| {
+            let meta = ticket_meta.unwrap_or_else(|| serde_json::json!({}));
+            let (note, schedule) = app
+                .upsert_ticket(
+                    &id,
+                    &title,
+                    category.as_deref().unwrap_or("general"),
+                    &meta,
+                    start_at,
+                    end_at,
+                    notes_summary.as_deref().unwrap_or(""),
+                    now()?,
+                )
+                .map_err(|_| "TICKET_SAVE_FAILED")?;
+            Ok(serde_json::json!({
+                "ticket": note,
+                "schedule": schedule,
+            }))
+        })
+    })
+    .await
+    .map_err(|_| "TICKET_SAVE_FAILED")?
 }
 
 #[tauri::command]
@@ -981,12 +1052,16 @@ fn configure<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R>
             app_schedule_create,
             app_schedule_edit,
             app_schedule_status,
+            app_schedule_delete,
             app_note_upsert,
+            app_note_delete,
+            app_ticket_upsert,
             app_capture_create,
             app_capture_media_put,
             app_capture_media_get,
             direct_llm::app_capture_vision_target,
             direct_llm::app_capture_recognize,
+            direct_llm::app_ticket_recognize,
             app_memory_state,
             app_decision_record,
             app_decision_status,
@@ -1019,7 +1094,30 @@ fn configure<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R>
             direct_llm::app_online_revoke,
             app_execute,
             app_executions,
-            app_cancel
+            app_cancel,
+            runtime_commands::app_context_list,
+            runtime_commands::app_context_read,
+            runtime_commands::app_context_refresh,
+            runtime_commands::app_context_tasks,
+            runtime_commands::app_claude_capabilities,
+            runtime_commands::app_claude_sessions,
+            runtime_commands::app_claude_history,
+            runtime_commands::app_claude_prompt,
+            runtime_commands::app_claude_cancel,
+            runtime_commands::app_claude_reconcile,
+            runtime_commands::app_claude_review,
+            runtime_commands::app_claude_artifacts,
+            runtime_commands::app_claude_preview,
+            runtime_commands::app_capability_registry_get,
+            runtime_commands::app_vault_rotate_seed,
+            runtime_commands::app_egress_audit_list,
+            runtime_commands::app_render_grants_list,
+            runtime_commands::app_subagent_dispatch,
+            runtime_commands::app_subagent_execute,
+            runtime_commands::app_subagent_cancel,
+            runtime_commands::app_subagent_reconcile,
+            runtime_commands::app_subagent_status,
+            runtime_commands::app_subagent_list
         ])
 }
 

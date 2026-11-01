@@ -24,11 +24,12 @@ const rows=computed(()=>{
  const projects=props.catalog?.projects||[], imported=new Set(props.catalog?.imported_project_ids||[]);
  const local=(props.catalog?.conversations||[]).filter(s=>!s.id.startsWith('assistant:')).map(s=>{const p=projects.find(p=>p.id===s.project_id);return {...s,title:s.id.startsWith('assistant:')?t('defaultAssistant'):s.title,uid:s.id,project:p?.title,legacy:imported.has(s.project_id)||p?.source_kind==='legacy_import',device:(props.catalog?.device_groups||[]).find(g=>g.conversations?.some(c=>c.id===s.id))?.label||t('sidebarLocal')}});
  const q=(props.search||'').trim().toLocaleLowerCase();
- return [...local,...remote.value].filter(s=>!q||[s.title,s.project,s.workspace,s.remote?label(s.node):s.device].join(' ').toLocaleLowerCase().includes(q)).sort((a,b)=>stamp(b)-stamp(a)||a.uid.localeCompare(b.uid));});
+ return [...local,...remote.value].filter(s=>!q||[s.title,s.project,s.workspace,s.toolLabel,s.harness,s.remote?label(s.node):s.device].join(' ').toLocaleLowerCase().includes(q)).sort((a,b)=>stamp(b)-stamp(a)||a.uid.localeCompare(b.uid));});
 const groups=computed(()=>directoryGroups(rows.value,props.mode));
 const legacy=computed(()=>rows.value.filter(s=>s.legacy));
 function select(s){emit(s.remote?'select-remote':'select-local',s.remote?{node:s.node,session:s}:s.id)}
 const date=s=>stamp(s)?new Date(stamp(s)).toLocaleDateString():t('sidebarTimeUnknown');
+const toolLabel=s=>s.remote?(s.toolLabel||s.tool_label||(s.harness==='claude'||s.source_kind==='claude_native'?t('claudeAgent'):'')):'';
 </script>
 <template>
  <section class="directory" :aria-label="t('conversations')">
@@ -37,10 +38,10 @@ const date=s=>stamp(s)?new Date(stamp(s)).toLocaleDateString():t('sidebarTimeUnk
   <template v-for="group in groups" :key="group.key">
    <details v-if="group.name" :open="!!search || mode==='device'"><summary :title="group.fullName"><span class="directory-heading"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></svg><span>{{group.name}}</span><small>{{group.items.length}}</small></span></summary>
     <div class="directory-children">
-    <button v-for="s in group.items" :key="s.uid" class="directory-row" @click="select(s)"><span>{{s.title}}</span><small>{{s.remote?label(s.node):s.device}} · {{date(s)}}</small></button>
+    <button v-for="s in group.items" :key="s.uid" class="directory-row" @click="select(s)"><span>{{s.title}}</span><small>{{s.remote?label(s.node):s.device}}<template v-if="toolLabel(s)"> · {{toolLabel(s)}}</template> · {{date(s)}}</small></button>
     </div>
    </details>
-   <template v-else><button v-for="s in group.items" :key="s.uid" class="directory-row" @click="select(s)"><span>{{s.title}}</span><small>{{s.remote?label(s.node):s.device}} · {{date(s)}}</small></button></template>
+   <template v-else><button v-for="s in group.items" :key="s.uid" class="directory-row" @click="select(s)"><span>{{s.title}}</span><small>{{s.remote?label(s.node):s.device}}<template v-if="toolLabel(s)"> · {{toolLabel(s)}}</template> · {{date(s)}}</small></button></template>
   </template>
   <details v-if="legacy.length" :open="!!search"><summary>{{t('sidebarLegacy',{count:legacy.length})}}</summary><button v-for="s in legacy" :key="s.uid" class="directory-row" @click="select(s)"><span>{{s.title}}</span><small>{{t('sidebarImported')}} · {{date(s)}}</small></button></details>
  </section>

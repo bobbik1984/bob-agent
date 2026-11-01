@@ -18,7 +18,10 @@ dist-release/
 node_modules/
 .pnp.*
 .vite/
-src-tauri/gen/**/build/
+**/src-tauri/gen/
+
+**/src-tauri/gen/
+**/build/
 
 # OS / editor
 .DS_Store

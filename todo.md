@@ -297,10 +297,10 @@
 - [/] **BP4-02**：显式交接检查点、受控传输、目标校验与写入权交接；`fencing_token` 原子递增，保留原生会话/上下文与父成果来源；不靠超时抢占unknown执行（`workspace_handoff.rs` 内核回归通过）。
 - [/] **BP4-03**：验证忘记push后关机、同commit但dirty不同、缺LFS/素材/子模块、目标分叉、同步中断、源节点恢复；跨端查看和继续均不丢数据、不重复执行（`multi_session_and_handoff.rs` 5大故障场景通过）。
 - [/] **BP4/F6 运行策略**：BOB-D-012已确认每个实例独立运行，共享对象有owner/source/version；Home迁移不是单实例或默认助理前置。继续补对象级共享/交接、owner离线边界和旧owner恢复防双写；不自动迁移数据或commit/push。
-- [ ] **BP4-04**：本地宿主授权/胶囊任务卡/5秒来源变化刷新及固定请求不换版已验证；真实工作区和390/1180读回通过，node5/5、runtime27/27、前端83/83。GitHub APK Run41266758148成功，已下载校验，未安装；网页不上线。远端真实成果治理、来源分类/符号骨架、完整Owner交接及存储异常门禁待做，见CURRENT_STAGE §3.5。
-- [ ] **BP4-05**：有界API子代理：排在单执行者成果闭环之后；见CURRENT_STAGE §3.8。
-- [/] **BP4-06**：网页默认助理持久入口、真实目录关联、原文派发与request/turn绑定回流已真实验证并发布（assistant-instance-20261031）；重复检查、刷新和候选重启不重派。继续补原生App接线、任务卡去除路由元语句并保留原文、标题与实际工作锚点核对、超窗/未知回执、远端取消、单执行者V1/V2及对象级共享。公网独立登录与手机真机未验收；见CURRENT_STAGE及evidence/2026-10-31-assistant-instance.md。
-- [ ] **BP4-07**：能力登记、凭据保护审计、API出口与受控渲染分段验收；见CURRENT_STAGE §3.7。
+- [/] **BP4-04**：本地宿主授权/胶囊任务卡/5秒来源变化刷新、来源分类（`SourceCategory`）、符号骨架（`SymbolSkeletonItem`）及原生 Tauri IPC 对齐已验证；真实工作区和390/1180读回通过，node5/5、runtime27/27、前端83/83。GitHub APK Run41266758148成功，已下载校验，未安装；网页不上线。远端真实成果治理、来源分类/符号骨架、完整Owner交接及存储异常门禁待做，见CURRENT_STAGE §3.5。
+- [/] **BP4-05**：有界API子代理：已完成 1 架构师 + 1 只读子代理协调池（`subagent_pool.rs`），深度限制=1、单任务并发上限=1、只读权限交集沙箱、预算与超时硬限制、级联取消证据记录、重启防重放对账（`Interrupted` 状态保留账本，不自动重放调用）及主会话防膨胀结构化结论收敛；内核 38/38、Node 8/8、前端 87/87 通过，证据见 `BP4_05_SUBAGENT_POOL_VERIFICATION.md`。
+- [/] **BP4-06**：网页默认助理持久入口、真实目录关联、原文派发与request/turn绑定回流已验证（assistant-instance-20261031）；2026-11-01 已完成原生 `Claude Code` 执行适配器、`TmuxHarnessRunner` 进程保活与重启对账、`--resume <session_id>` 原生续接、同目录 Claude/DSH 串行写锁与任务卡交接、统一侧栏 `Claude` 标签接入及网页/文档两类成果 `V1->V2` 离线 Fixture 闭环验证（`bob-runtime` 30/30、`bob-node` 6/6、前端 86/86，见 `docs/evidence/BP4_06_CLAUDE_HARNESS_VERIFICATION.md`）。同日已完成 X1T 现场只读盘点（`2.1.316 (Claude Code)`）与真实两轮 `V1->V2`（`--resume` 续接+V1 快照不变）实机验证，见 `docs/evidence/x1t_live_claude_v1_v2_evidence.json`。
+- [/] **BP4-07**：已完成 `FileVaultSecretStore` 随机源/MAC防篡改/v1兼容读回/原子轮换恢复审计加固，以及 `capability_borrowing.rs` 节点能力登记协商、`overseas_model_egress`（白名单/认证/预算/防重计费/脱敏/禁任意URL代理）与 `gpu_display_render`（绑定commit+dirty清单/快照重试不重跑/像素与几何验证分离）内核闭环验证（`bob-runtime` 33/33）；见CURRENT_STAGE §3.7。
 
 GitHub中的检出副本通常可关联原项目，但不自动包含未传出的工作或开发环境。版本未知时默认等待核对；用户明确选旧commit时可设计隔离候选路径，不能伪称恢复最新版本。当前不新增节点、不加载策略、不恢复X1T/B4、不部署。
 

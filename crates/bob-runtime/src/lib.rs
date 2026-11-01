@@ -14,6 +14,12 @@ pub mod workspace_context;
 pub mod vision;
 pub mod dsh_session;
 pub mod dsh_transport;
+pub mod claude_harness;
+pub mod capability_borrowing;
+pub mod subagent_pool;
+pub mod context_capsule;
+pub mod claude_rpc;
+pub mod runtime_rpc;
 use bob_kernel::app::LocalApp;
 use bob_kernel::direct_provider::{
     DirectChatTurn, DirectProviderProfile, DirectProviderProfileInput,
@@ -28,7 +34,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 const DEFAULT_SLOT: &str = "provider-key-default";
 const MAX_RESPONSE_BYTES: usize = 512 * 1024;
-const TOOL_KEY_IDS: [&str; 2] = ["TAVILY_API_KEY", "TINYFISH_API_KEY"];
+const TOOL_KEY_IDS: [&str; 4] = ["tavily", "tinyfish", "TAVILY_API_KEY", "TINYFISH_API_KEY"];
 const EMBEDDED_MODEL_REGISTRY: &str =
     include_str!("../../../apps/bob-app/src-tauri/resources/model_providers.json");
 
@@ -69,6 +75,70 @@ pub trait SecretStore: Send + Sync {
     }
 }
 
+fn generate_entropy_seed(label: &str) -> Vec<u8> {
+    static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    let seq = COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    let mut hasher = Sha256::new();
+    hasher.update(b"bob-vault-csprng-v2:");
+    hasher.update(label.as_bytes());
+    hasher.update(now_millis().to_le_bytes());
+    hasher.update(std::process::id().to_le_bytes());
+    hasher.update(seq.to_le_bytes());
+    let stack_addr = (&seq as *const u64) as usize;
+    hasher.update(stack_addr.to_le_bytes());
+    if let Ok(nanos) = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos()) {
+        hasher.update(nanos.to_le_bytes());
+    }
+    #[cfg(unix)]
+    {
+        if let Ok(mut urandom) = std::fs::File::open("/dev/urandom") {
+            let mut os_bytes = [0u8; 32];
+            if urandom.read_exact(&mut os_bytes).is_ok() {
+                hasher.update(os_bytes);
+            }
+        }
+    }
+    #[cfg(windows)]
+    {
+        use std::collections::hash_map::RandomState;
+        use std::hash::{BuildHasher, Hasher};
+        for round in 0..4u64 {
+            let s = RandomState::new();
+            let mut h = s.build_hasher();
+            h.write_u64(round ^ seq);
+            hasher.update(h.finish().to_le_bytes());
+        }
+    }
+    let digest = hasher.finalize();
+    let hex: String = digest.iter().map(|b| format!("{b:02x}")).collect();
+    format!("v2:{hex}").into_bytes()
+}
+
+fn derive_master_key(seed: &[u8]) -> [u8; 32] {
+    let mut hasher = Sha256::new();
+    hasher.update(seed);
+    hasher.update(b"bob-runtime-file-vault-v1");
+    let digest = hasher.finalize();
+    let mut master_key = [0u8; 32];
+    master_key.copy_from_slice(&digest[..32]);
+    master_key
+}
+
+fn set_secure_file_permissions(path: &Path, is_dir: bool) -> Result<(), &'static str> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = if is_dir { 0o700 } else { 0o600 };
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))
+            .map_err(|_| "SECRET_PERMISSION_SET_FAILED")?;
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (path, is_dir);
+    }
+    Ok(())
+}
+
 pub struct FileVaultSecretStore {
     vault_dir: PathBuf,
     master_key: [u8; 32],
@@ -78,32 +148,26 @@ impl FileVaultSecretStore {
     pub fn open(data_dir: &Path) -> Result<Self, &'static str> {
         let vault_dir = data_dir.join("vault");
         std::fs::create_dir_all(&vault_dir).map_err(|_| "SECRET_STORE_UNAVAILABLE")?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(&vault_dir, std::fs::Permissions::from_mode(0o700));
-        }
+        set_secure_file_permissions(&vault_dir, true)?;
         let seed_path = vault_dir.join(".vault_seed");
+        let bak_seed_path = vault_dir.join(".vault_seed.bak");
+        if !seed_path.is_file() && bak_seed_path.is_file() {
+            std::fs::rename(&bak_seed_path, &seed_path).map_err(|_| "SECRET_STORE_UNAVAILABLE")?;
+        }
         let seed = if let Ok(bytes) = std::fs::read(&seed_path) {
+            if bytes.is_empty() {
+                return Err("SECRET_SEED_CORRUPT");
+            }
             bytes
         } else {
-            let generated = format!("bob-vault-seed-{}-{}", now_millis(), std::process::id())
-                .into_bytes();
-            let _ = std::fs::write(&seed_path, &generated);
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                let _ =
-                    std::fs::set_permissions(&seed_path, std::fs::Permissions::from_mode(0o600));
-            }
+            let generated = generate_entropy_seed("master-seed");
+            let tmp_seed = vault_dir.join(".vault_seed.tmp");
+            std::fs::write(&tmp_seed, &generated).map_err(|_| "SECRET_STORE_UNAVAILABLE")?;
+            set_secure_file_permissions(&tmp_seed, false)?;
+            std::fs::rename(&tmp_seed, &seed_path).map_err(|_| "SECRET_STORE_UNAVAILABLE")?;
             generated
         };
-        let mut hasher = Sha256::new();
-        hasher.update(&seed);
-        hasher.update(b"bob-runtime-file-vault-v1");
-        let digest = hasher.finalize();
-        let mut master_key = [0u8; 32];
-        master_key.copy_from_slice(&digest[..32]);
+        let master_key = derive_master_key(&seed);
         Ok(Self {
             vault_dir,
             master_key,
@@ -124,9 +188,9 @@ impl FileVaultSecretStore {
         self.vault_dir.join(format!("{safe}.bin"))
     }
 
-    fn xor_transform(&self, input: &[u8], slot: &str) -> Vec<u8> {
+    fn legacy_xor_transform(master_key: &[u8; 32], input: &[u8], slot: &str) -> Vec<u8> {
         let mut stream_hasher = Sha256::new();
-        stream_hasher.update(self.master_key);
+        stream_hasher.update(master_key);
         stream_hasher.update(slot.as_bytes());
         let stream_key = stream_hasher.finalize();
         input
@@ -135,18 +199,156 @@ impl FileVaultSecretStore {
             .map(|(idx, b)| b ^ stream_key[idx % stream_key.len()])
             .collect()
     }
+
+    fn v2_stream_transform(
+        master_key: &[u8; 32],
+        slot: &str,
+        nonce: &str,
+        input: &[u8],
+    ) -> Vec<u8> {
+        let mut out = Vec::with_capacity(input.len());
+        for (block_idx, chunk) in input.chunks(32).enumerate() {
+            let mut h = Sha256::new();
+            h.update(master_key);
+            h.update(b":v2-stream:");
+            h.update(slot.as_bytes());
+            h.update(b":");
+            h.update(nonce.as_bytes());
+            h.update((block_idx as u64).to_le_bytes());
+            let block_key = h.finalize();
+            for (i, &b) in chunk.iter().enumerate() {
+                out.push(b ^ block_key[i]);
+            }
+        }
+        out
+    }
+
+    fn v2_mac_hex(master_key: &[u8; 32], slot: &str, nonce: &str, cipher_hex: &str) -> String {
+        let mut h = Sha256::new();
+        h.update(master_key);
+        h.update(b":v2-mac:");
+        h.update(slot.as_bytes());
+        h.update(b":");
+        h.update(nonce.as_bytes());
+        h.update(b":");
+        h.update(cipher_hex.as_bytes());
+        h.finalize().iter().map(|b| format!("{b:02x}")).collect()
+    }
+
+    fn encode_v2_slot(master_key: &[u8; 32], slot: &str, plaintext: &[u8]) -> Vec<u8> {
+        let nonce_seed = generate_entropy_seed(slot);
+        let nonce_hex = String::from_utf8_lossy(&nonce_seed)
+            .trim_start_matches("v2:")
+            .chars()
+            .take(32)
+            .collect::<String>();
+        let cipher = Self::v2_stream_transform(master_key, slot, &nonce_hex, plaintext);
+        let cipher_hex: String = cipher.iter().map(|b| format!("{b:02x}")).collect();
+        let mac_hex = Self::v2_mac_hex(master_key, slot, &nonce_hex, &cipher_hex);
+        format!("v2:{nonce_hex}:{mac_hex}:{cipher_hex}").into_bytes()
+    }
+
+    fn decode_slot_bytes(
+        master_key: &[u8; 32],
+        slot: &str,
+        encrypted: &[u8],
+    ) -> Result<String, &'static str> {
+        if encrypted.starts_with(b"v2:") {
+            let text = std::str::from_utf8(encrypted).map_err(|_| "PROVIDER_KEY_CORRUPT")?;
+            let parts: Vec<&str> = text.split(':').collect();
+            if parts.len() != 4 || parts[0] != "v2" || parts[1].is_empty() || parts[3].is_empty() {
+                return Err("PROVIDER_KEY_CORRUPT");
+            }
+            let nonce_hex = parts[1];
+            let mac_hex = parts[2];
+            let cipher_hex = parts[3];
+            let expected_mac = Self::v2_mac_hex(master_key, slot, nonce_hex, cipher_hex);
+            if mac_hex != expected_mac || cipher_hex.len() % 2 != 0 {
+                return Err("PROVIDER_KEY_CORRUPT");
+            }
+            let mut cipher_bytes = Vec::with_capacity(cipher_hex.len() / 2);
+            for idx in (0..cipher_hex.len()).step_by(2) {
+                let b = u8::from_str_radix(&cipher_hex[idx..idx + 2], 16)
+                    .map_err(|_| "PROVIDER_KEY_CORRUPT")?;
+                cipher_bytes.push(b);
+            }
+            let plain = Self::v2_stream_transform(master_key, slot, nonce_hex, &cipher_bytes);
+            let val = String::from_utf8(plain).map_err(|_| "PROVIDER_KEY_CORRUPT")?;
+            if val.trim().is_empty() {
+                return Err("PROVIDER_KEY_MISSING");
+            }
+            return Ok(val);
+        }
+        // Legacy v1 compatibility path: existing slots remain 100% readable
+        let plain = Self::legacy_xor_transform(master_key, encrypted, slot);
+        let value = String::from_utf8(plain).map_err(|_| "PROVIDER_KEY_CORRUPT")?;
+        if value.trim().is_empty() || value.chars().any(|c| c == '\0') {
+            return Err("PROVIDER_KEY_CORRUPT");
+        }
+        Ok(value)
+    }
+
+    /// Atomically rotate `.vault_seed` and re-encrypt all existing slots without losing any key.
+    /// If any slot is corrupt before rotation, aborts cleanly without modifying the vault.
+    pub fn rotate_master_seed(&mut self) -> Result<usize, &'static str> {
+        let mut decrypted_slots: Vec<(String, PathBuf, String)> = Vec::new();
+        for entry in std::fs::read_dir(&self.vault_dir).map_err(|_| "SECRET_STORE_UNAVAILABLE")? {
+            let entry = entry.map_err(|_| "SECRET_STORE_UNAVAILABLE")?;
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("bin") {
+                continue;
+            }
+            let stem = path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .ok_or("VAULT_ROTATION_ABORTED_CORRUPT_SLOT")?
+                .to_owned();
+            let raw = std::fs::read(&path).map_err(|_| "VAULT_ROTATION_ABORTED_CORRUPT_SLOT")?;
+            let plain = Self::decode_slot_bytes(&self.master_key, &stem, &raw)
+                .map_err(|_| "VAULT_ROTATION_ABORTED_CORRUPT_SLOT")?;
+            decrypted_slots.push((stem, path, plain));
+        }
+
+        let seed_path = self.vault_dir.join(".vault_seed");
+        let bak_seed_path = self.vault_dir.join(".vault_seed.bak");
+        std::fs::copy(&seed_path, &bak_seed_path).map_err(|_| "VAULT_ROTATION_BACKUP_FAILED")?;
+
+        let new_seed = generate_entropy_seed("rotated-master-seed");
+        let new_master_key = derive_master_key(&new_seed);
+
+        for (slot, path, plain) in &decrypted_slots {
+            let bak_slot = path.with_extension("bin.bak");
+            let _ = std::fs::copy(path, &bak_slot);
+            let encoded = Self::encode_v2_slot(&new_master_key, slot, plain.as_bytes());
+            let tmp_slot = path.with_extension("bin.tmp");
+            if std::fs::write(&tmp_slot, &encoded).is_err()
+                || set_secure_file_permissions(&tmp_slot, false).is_err()
+                || std::fs::rename(&tmp_slot, path).is_err()
+            {
+                let _ = std::fs::copy(&bak_seed_path, &seed_path);
+                return Err("VAULT_ROTATION_WRITE_FAILED");
+            }
+        }
+
+        let tmp_seed = self.vault_dir.join(".vault_seed.tmp");
+        std::fs::write(&tmp_seed, &new_seed).map_err(|_| "VAULT_ROTATION_WRITE_FAILED")?;
+        set_secure_file_permissions(&tmp_seed, false)?;
+        std::fs::rename(&tmp_seed, &seed_path).map_err(|_| "VAULT_ROTATION_WRITE_FAILED")?;
+        self.master_key = new_master_key;
+
+        for (_, path, _) in &decrypted_slots {
+            let _ = std::fs::remove_file(path.with_extension("bin.bak"));
+        }
+        let _ = std::fs::remove_file(&bak_seed_path);
+        Ok(decrypted_slots.len())
+    }
 }
 
 impl SecretStore for FileVaultSecretStore {
     fn get(&self, slot: &str) -> Result<String, &'static str> {
         let path = self.slot_path(slot);
         let encrypted = std::fs::read(path).map_err(|_| "PROVIDER_KEY_MISSING")?;
-        let plain = self.xor_transform(&encrypted, slot);
-        let value = String::from_utf8(plain).map_err(|_| "PROVIDER_KEY_CORRUPT")?;
-        if value.trim().is_empty() {
-            return Err("PROVIDER_KEY_MISSING");
-        }
-        Ok(value)
+        Self::decode_slot_bytes(&self.master_key, slot, &encrypted)
     }
 
     fn set(&self, slot: &str, secret: &str) -> Result<(), &'static str> {
@@ -155,13 +357,15 @@ impl SecretStore for FileVaultSecretStore {
             return self.clear(slot);
         }
         let path = self.slot_path(slot);
-        let encrypted = self.xor_transform(trimmed.as_bytes(), slot);
-        std::fs::write(&path, encrypted).map_err(|_| "SECRET_SAVE_FAILED")?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
-        }
+        let safe_slot = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or(slot);
+        let encoded = Self::encode_v2_slot(&self.master_key, safe_slot, trimmed.as_bytes());
+        let tmp_path = path.with_extension("bin.tmp");
+        std::fs::write(&tmp_path, encoded).map_err(|_| "SECRET_SAVE_FAILED")?;
+        set_secure_file_permissions(&tmp_path, false)?;
+        std::fs::rename(&tmp_path, &path).map_err(|_| "SECRET_SAVE_FAILED")?;
         Ok(())
     }
 
@@ -231,9 +435,8 @@ impl ModelHubRuntime {
         }
         let def = json!({
             "activeRoles": {
-                "main": "deepseek::deepseek-v4-flash",
-                "clerk": "doubao::doubao-seed-1-6-flash-250828",
-                "vision": "gemini::gemini-2.5-flash"
+                "main": "deepseek::deepseek-v4.1-flash-1017",
+                "flash": "deepseek::deepseek-v4.1-flash-1017"
             },
             "providerVariants": {},
             "customModels": [],
@@ -272,10 +475,11 @@ impl ModelHubRuntime {
         }
 
         let mut tool_keys = serde_json::Map::new();
-        for tid in TOOL_KEY_IDS {
-            let slot = provider_slot(tid);
-            let configured = self.secrets.has(&slot);
-            tool_keys.insert(tid.to_owned(), json!(configured));
+        for (short_id, env_id) in [("tavily", "TAVILY_API_KEY"), ("tinyfish", "TINYFISH_API_KEY")] {
+            let configured = self.secrets.has(&provider_slot(short_id))
+                || self.secrets.has(&provider_slot(env_id));
+            tool_keys.insert(short_id.to_owned(), json!(configured));
+            tool_keys.insert(env_id.to_owned(), json!(configured));
         }
 
         let mut pool = Vec::new();
@@ -365,11 +569,43 @@ impl ModelHubRuntime {
         }
         hub_state["remoteNodes"] = json!(remote_nodes);
 
+        if !hub_state["activeRoles"].is_object() {
+            hub_state["activeRoles"] = json!({});
+        }
+        let main_empty = hub_state
+            .get("activeRoles")
+            .and_then(|r| r.get("main"))
+            .and_then(Value::as_str)
+            .map(|s| s.trim().is_empty())
+            .unwrap_or(true);
+        if main_empty {
+            hub_state["activeRoles"]["main"] = json!("deepseek::deepseek-v4.1-flash-1017");
+        }
+
+        let flash_empty = hub_state
+            .get("activeRoles")
+            .and_then(|r| r.get("flash"))
+            .and_then(Value::as_str)
+            .map(|s| s.trim().is_empty())
+            .unwrap_or(true);
+        if flash_empty {
+            let clerk_val = hub_state["activeRoles"]
+                .get("clerk")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .trim();
+            if !clerk_val.is_empty() {
+                hub_state["activeRoles"]["flash"] = json!(clerk_val);
+            } else {
+                hub_state["activeRoles"]["flash"] = json!("deepseek::deepseek-v4.1-flash-1017");
+            }
+        }
+
         let main_role = hub_state
             .get("activeRoles")
             .and_then(|r| r.get("main"))
             .and_then(Value::as_str)
-            .unwrap_or("deepseek::deepseek-v4-flash")
+            .unwrap_or("deepseek::deepseek-v4.1-flash-1017")
             .to_owned();
         let (active_pid, active_mid) = main_role
             .split_once("::")
@@ -471,13 +707,29 @@ impl ModelHubRuntime {
             return Err("PROVIDER_ID_REQUIRED");
         }
         let slot = provider_slot(pid);
+        let alias_slot = match pid {
+            "tavily" => Some(provider_slot("TAVILY_API_KEY")),
+            "TAVILY_API_KEY" => Some(provider_slot("tavily")),
+            "tinyfish" => Some(provider_slot("TINYFISH_API_KEY")),
+            "TINYFISH_API_KEY" => Some(provider_slot("tinyfish")),
+            _ => None,
+        };
         if clear_key {
             self.secrets.clear(&slot)?;
+            if let Some(ref a) = alias_slot {
+                let _ = self.secrets.clear(a);
+            }
         } else if let Some(raw) = api_key {
             if raw.trim().is_empty() {
                 self.secrets.clear(&slot)?;
+                if let Some(ref a) = alias_slot {
+                    let _ = self.secrets.clear(a);
+                }
             } else {
                 self.secrets.set(&slot, raw.trim())?;
+                if let Some(ref a) = alias_slot {
+                    let _ = self.secrets.set(a, raw.trim());
+                }
             }
         }
         let mut hub = self.load_hub_state();
@@ -501,7 +753,11 @@ impl ModelHubRuntime {
         if !hub["activeRoles"].is_object() {
             hub["activeRoles"] = json!({});
         }
-        hub["activeRoles"][role.trim()] = json!(model_ref.trim());
+        let r = match role.trim() {
+            "clerk" => "flash",
+            other => other,
+        };
+        hub["activeRoles"][r] = json!(model_ref.trim());
         hub["updatedAt"] = json!(now_millis());
         self.save_hub_state(&hub)?;
         self.build_snapshot_and_sync(app)
@@ -710,6 +966,550 @@ impl ModelHubRuntime {
         let api_key = self.secrets.get(&profile.api_key_slot)?;
         invoke_provider_http(profile, &api_key, history, prompt)
     }
+
+    pub fn resolve_profile_for_model_ref(
+        &self,
+        model_ref: &str,
+    ) -> Result<DirectProviderProfile, &'static str> {
+        let (pid, mid) = model_ref.split_once("::").ok_or("INVALID_MODEL_REF")?;
+        let registry = self.load_or_init_registry();
+        let hub_state = self.load_hub_state();
+        let providers = registry
+            .get("providers")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        let custom_models = hub_state
+            .get("customModels")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        let variants = hub_state
+            .get("providerVariants")
+            .cloned()
+            .unwrap_or_else(|| json!({}));
+
+        let mut resolved_base_url = "https://api.deepseek.com/v1".to_owned();
+        let mut resolved_protocol = "openai_compatible".to_owned();
+        let mut resolved_label = pid.to_owned();
+        let mut resolved_slot = provider_slot(pid);
+        let mut key_present = false;
+
+        if let Some(cm) = custom_models
+            .iter()
+            .find(|c| c.get("id").and_then(Value::as_str) == Some(pid))
+        {
+            resolved_base_url = cm
+                .get("baseUrl")
+                .and_then(Value::as_str)
+                .unwrap_or("https://api.openai.com/v1")
+                .to_owned();
+            resolved_label = cm
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or(pid)
+                .to_owned();
+            resolved_protocol =
+                infer_provider_protocol(pid, &resolved_base_url).to_owned();
+            resolved_slot = provider_slot(pid);
+            key_present = self.secrets.has(&resolved_slot);
+        } else if let Some(prov) = providers
+            .iter()
+            .find(|p| p.get("id").and_then(Value::as_str) == Some(pid))
+        {
+            resolved_base_url = resolve_provider_base_url(prov, &variants);
+            resolved_label = prov
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or(pid)
+                .to_owned();
+            resolved_protocol =
+                infer_provider_protocol(pid, &resolved_base_url).to_owned();
+            resolved_slot = provider_slot(pid);
+            key_present = self.secrets.has(&resolved_slot);
+        }
+
+        if !key_present && self.secrets.has(DEFAULT_SLOT) {
+            resolved_slot = DEFAULT_SLOT.to_owned();
+            key_present = true;
+        }
+
+        if !key_present {
+            return Err("PROVIDER_KEY_NOT_CONFIGURED");
+        }
+
+        Ok(DirectProviderProfile {
+            id: format!("role-{pid}-{mid}"),
+            provider_kind: resolved_protocol,
+            label: resolved_label,
+            base_url: resolved_base_url,
+            model_id: mid.to_owned(),
+            api_key_slot: resolved_slot,
+            api_key_configured: true,
+            enabled: true,
+            last_check_status: "ok".to_owned(),
+            last_check_reason: String::new(),
+            last_checked_at: Some(now_millis()),
+            updated_at: now_millis(),
+        })
+    }
+
+    pub fn resolve_role_profile(&self, role: &str) -> Result<DirectProviderProfile, &'static str> {
+        let hub = self.load_hub_state();
+        let target_role = if role == "clerk" { "flash" } else { role };
+        let mut model_ref = hub["activeRoles"]
+            .get(target_role)
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim();
+        if model_ref.is_empty() && target_role == "flash" {
+            model_ref = hub["activeRoles"]
+                .get("clerk")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .trim();
+        }
+        if model_ref.is_empty() {
+            model_ref = hub["activeRoles"]
+                .get("main")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .trim();
+        }
+        if model_ref.is_empty() {
+            model_ref = if target_role == "flash" {
+                "deepseek::deepseek-v4.1-flash-1017"
+            } else {
+                "deepseek::deepseek-v4.1-flash-1017"
+            };
+        }
+        self.resolve_profile_for_model_ref(model_ref)
+    }
+
+    pub fn try_load_knowledge_feed() -> Option<Value> {
+        let mut candidates = Vec::new();
+        if let Ok(dir) = std::env::var("BOB_CLOUD_SYNC_DIR") {
+            candidates.push(PathBuf::from(&dir).join("registry").join("models.json"));
+            candidates.push(PathBuf::from(&dir).join("models.json"));
+            candidates.push(PathBuf::from(&dir).join("registry").join("unified_model_registry.json"));
+        }
+        if let Ok(ws) = std::env::var("GEMINI_WORKSPACE") {
+            candidates.push(PathBuf::from(&ws).join("cloud_sync").join("registry").join("models.json"));
+            candidates.push(PathBuf::from(&ws).join("cloud_sync").join("registry").join("unified_model_registry.json"));
+        }
+        if let Ok(home) = std::env::var("HOME") {
+            let ref_dir = PathBuf::from(&home)
+                .join("common")
+                .join("knowledge")
+                .join("skills")
+                .join("model-registry")
+                .join("references");
+            candidates.push(ref_dir.join("models.json"));
+            candidates.push(ref_dir.join("unified_model_registry.json"));
+        }
+        candidates.push(PathBuf::from("cloud_sync/registry/models.json"));
+        candidates.push(PathBuf::from("../cloud_sync/registry/models.json"));
+        candidates.push(PathBuf::from("../../cloud_sync/registry/models.json"));
+        candidates.push(PathBuf::from("cloud_sync/registry/unified_model_registry.json"));
+
+        for p in candidates {
+            if p.is_file() {
+                if let Ok(content) = std::fs::read_to_string(&p) {
+                    if let Ok(val) = serde_json::from_str::<Value>(&content) {
+                        return Some(val);
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    pub fn get_tool_secret(&self, short_id: &str, env_id: &str) -> Option<String> {
+        self.secrets
+            .get(&provider_slot(short_id))
+            .or_else(|_| self.secrets.get(&provider_slot(env_id)))
+            .ok()
+            .map(|s| s.trim().to_owned())
+            .filter(|s| !s.is_empty())
+    }
+
+    pub fn discover_and_curate_models(
+        &self,
+        app: &mut LocalApp,
+        target_provider_id: Option<&str>,
+    ) -> Result<Value, &'static str> {
+        let mut registry = self.load_or_init_registry();
+        let mut hub = self.load_hub_state();
+        let variants = hub
+            .get("providerVariants")
+            .cloned()
+            .unwrap_or_else(|| json!({}));
+
+        let feed_opt = Self::try_load_knowledge_feed();
+        let tavily_key_opt = self.get_tool_secret("tavily", "TAVILY_API_KEY");
+        let judge_profile_opt = self
+            .resolve_role_profile("main")
+            .or_else(|_| self.resolve_role_profile("flash"))
+            .ok();
+
+        let mut any_updated = false;
+        let mut hub_updated = false;
+        let mut targets = Vec::new();
+        if let Some(providers) = registry.get("providers").and_then(Value::as_array) {
+            for p in providers {
+                let pid = p.get("id").and_then(Value::as_str).unwrap_or("");
+                if pid.is_empty() || pid == "offline" || pid == "vertex_ai" {
+                    continue;
+                }
+                if let Some(target) = target_provider_id {
+                    if pid != target {
+                        continue;
+                    }
+                }
+                let pname = p.get("name").and_then(Value::as_str).unwrap_or(pid).to_owned();
+                let slot = provider_slot(pid);
+                let api_key = self.secrets.get(&slot).unwrap_or_default().trim().to_owned();
+                let base_url = resolve_provider_base_url(p, &variants);
+                let existing_ids: Vec<String> = p
+                    .get("models")
+                    .and_then(Value::as_array)
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|m| m.get("id").and_then(Value::as_str).map(str::to_owned))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                targets.push((pid.to_owned(), pname, base_url, api_key, existing_ids));
+            }
+        }
+
+        for (pid, pname, base_url, api_key, existing_ids) in targets {
+            let mut candidate_ids: Vec<String> = Vec::new();
+
+            // 1. Live /models probe if provider API key is configured
+            if !api_key.is_empty() && !base_url.is_empty() {
+                let base_trimmed = base_url.trim_end_matches('/');
+                let auth_header = format!("Bearer {api_key}");
+                let (models_url, headers) = if pid == "gemini"
+                    || (base_trimmed.contains("generativelanguage.googleapis.com")
+                        && !base_trimmed.contains("/openai"))
+                {
+                    (
+                        format!("{base_trimmed}/models?key={api_key}"),
+                        vec![("Accept", "application/json")],
+                    )
+                } else if pid == "anthropic" || base_trimmed.contains("api.anthropic.com") {
+                    let url = if base_trimmed.ends_with("/v1") {
+                        format!("{base_trimmed}/models")
+                    } else {
+                        format!("{base_trimmed}/v1/models")
+                    };
+                    (
+                        url,
+                        vec![
+                            ("x-api-key", api_key.as_str()),
+                            ("anthropic-version", "2023-06-01"),
+                            ("Accept", "application/json"),
+                        ],
+                    )
+                } else {
+                    let url = if base_trimmed.ends_with("/v1")
+                        || base_trimmed.contains("/compatible-mode/")
+                        || base_trimmed.contains("/api/v3")
+                    {
+                        format!("{base_trimmed}/models")
+                    } else {
+                        format!("{base_trimmed}/v1/models")
+                    };
+                    (
+                        url,
+                        vec![
+                            ("Authorization", auth_header.as_str()),
+                            ("Accept", "application/json"),
+                        ],
+                    )
+                };
+
+                if let Ok(body) = get_https_curl(&models_url, &headers) {
+                    if let Ok(parsed) = serde_json::from_str::<Value>(&body) {
+                        let items = parsed
+                            .get("data")
+                            .and_then(Value::as_array)
+                            .or_else(|| parsed.get("models").and_then(Value::as_array));
+                        if let Some(remote_list) = items {
+                            for rm in remote_list {
+                                let raw_id = rm
+                                    .get("id")
+                                    .or_else(|| rm.get("name"))
+                                    .and_then(Value::as_str)
+                                    .unwrap_or("")
+                                    .trim();
+                                if raw_id.is_empty() || !is_chat_model_id(raw_id) {
+                                    continue;
+                                }
+                                let clean = if pid == "gemini" {
+                                    raw_id.strip_prefix("models/").unwrap_or(raw_id)
+                                } else {
+                                    raw_id
+                                };
+                                if !candidate_ids.iter().any(|x| x == clean) {
+                                    candidate_ids.push(clean.to_owned());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 2. Merge with existing catalog models & optional knowledge feed so dated snapshots (like -1017) are preserved
+            for eid in &existing_ids {
+                if is_chat_model_id(eid) && !candidate_ids.iter().any(|x| x == eid) {
+                    candidate_ids.push(eid.clone());
+                }
+            }
+            if let Some(ref feed) = feed_opt {
+                let feed_key = if pid == "gemini" { "google" } else { pid.as_str() };
+                if let Some(feed_models) = feed.get(feed_key).and_then(|fp| fp.get("models")).and_then(Value::as_object) {
+                    for mid in feed_models.keys() {
+                        if !candidate_ids.iter().any(|x| x == mid) {
+                            candidate_ids.push(mid.clone());
+                        }
+                    }
+                }
+            }
+
+            if candidate_ids.is_empty() {
+                continue;
+            }
+
+            // Only run live LLM + Tavily Scout Skill for providers the user has configured (or explicitly targeted)
+            let should_scout = !api_key.is_empty() || target_provider_id == Some(pid.as_str());
+            if !should_scout {
+                continue;
+            }
+
+            let mut chosen_main: Option<String> = None;
+            let mut chosen_flash: Option<String> = None;
+
+            // For DeepSeek: Official benchmark certification proves v4.1 flash 1017 outperforms v4 pro, so only 1 model is needed
+            if pid == "deepseek" {
+                let best = candidate_ids
+                    .iter()
+                    .find(|id| id.contains("4.1") && id.contains("1017"))
+                    .cloned()
+                    .or_else(|| candidate_ids.iter().find(|id| id.contains("4.1")).cloned())
+                    .unwrap_or_else(|| "deepseek-v4.1-flash-1017".to_string());
+                chosen_main = Some(best.clone());
+                chosen_flash = Some(best);
+            }
+
+            // 3. Built-in Model Scout Skill: Query Tavily Web Search if key is available
+            let search_context = if pid != "deepseek" && tavily_key_opt.is_some() {
+                query_tavily_search(
+                    tavily_key_opt.as_ref().unwrap(),
+                    &format!("{pname} ({pid}) latest LLM API model release benchmark ranking 2026"),
+                )
+                .unwrap_or_default()
+            } else {
+                String::new()
+            };
+
+            if pid != "deepseek" && judge_profile_opt.is_some() {
+                let prof = judge_profile_opt.as_ref().unwrap();
+                let prompt = format!(
+                    "You are the built-in `model-scout` skill for an AI Agent workbench.\nProvider: {pname} ({pid})\nCandidate Model IDs: {:?}\nLatest Web Search Intelligence:\n{}\n\nSelection Rules:\n1. Pick 'main': The single newest, highest-capability flagship/pro/reasoning model for complex coding and architecture.\n2. Pick 'flash': The single newest, fastest high-efficiency flash/mini/haiku model for daily tasks and routing.\n3. CRITICAL VERSION & SNAPSHOT RULE: Higher version numbers (e.g. v4.1 > v4.0, 3.8 > 3.5, 2.5 > 2.0) and newer date-suffixed snapshots (e.g. `deepseek-v4.1-flash-1017` > `deepseek-v4.1-flash` > `deepseek-flash`; `260215` > `250828`) ALWAYS win over older or generic undated aliases.\n4. Both selected IDs MUST come from the Candidate Model IDs list above and MUST be distinct if at least 2 models exist.\nReturn ONLY raw JSON (no markdown fences):\n{{\"main\": {{\"id\": \"...\", \"vision\": true}}, \"flash\": {{\"id\": \"...\", \"vision\": true}}}}",
+                    &candidate_ids[..candidate_ids.len().min(80)],
+                    if search_context.is_empty() { "(No external search configured; apply strict version & date-suffix rules)" } else { &search_context }
+                );
+                if let Ok(reply) = self.invoke_direct_model(prof, &[], &prompt) {
+                    let trimmed = reply.trim();
+                    let clean_json = if let Some(s) = trimmed.strip_prefix("```json") {
+                        s.strip_suffix("```").unwrap_or(s).trim()
+                    } else if let Some(s) = trimmed.strip_prefix("```") {
+                        s.strip_suffix("```").unwrap_or(s).trim()
+                    } else {
+                        trimmed
+                    };
+                    if let Ok(v) = serde_json::from_str::<Value>(clean_json) {
+                        chosen_main = v["main"]["id"]
+                            .as_str()
+                            .map(str::to_owned)
+                            .filter(|id| candidate_ids.iter().any(|c| c == id));
+                        chosen_flash = v["flash"]["id"]
+                            .as_str()
+                            .map(str::to_owned)
+                            .filter(|id| candidate_ids.iter().any(|c| c == id));
+                    }
+                }
+            }
+
+            // Deterministic version-aware fallback heuristic
+            if chosen_flash.is_none() {
+                chosen_flash = pick_best_tier_model(&candidate_ids, true, None);
+            }
+            if chosen_main.is_none() {
+                chosen_main = pick_best_tier_model(&candidate_ids, false, chosen_flash.as_deref());
+            }
+
+            if chosen_main.is_none() && chosen_flash.is_none() {
+                continue;
+            }
+
+            if let Some(providers) = registry.get_mut("providers").and_then(Value::as_array_mut) {
+                if let Some(prov) = providers.iter_mut().find(|p| p.get("id").and_then(Value::as_str) == Some(&pid)) {
+                    if let Some(models) = prov.get_mut("models").and_then(Value::as_array_mut) {
+                        // Ensure chosen_main and chosen_flash exist in `models`
+                        for (role_id_opt, is_default) in [(&chosen_main, true), (&chosen_flash, false)] {
+                            if let Some(sel_id) = role_id_opt {
+                                if !models.iter().any(|m| m.get("id").and_then(Value::as_str) == Some(sel_id.as_str())) {
+                                    models.insert(0, json!({
+                                        "id": sel_id,
+                                        "name": sel_id,
+                                        "visible": true,
+                                        "vision": true,
+                                        "discovered": true,
+                                        "default": is_default,
+                                        "pricing": { "input": 0.0, "output": 0.0 }
+                                    }));
+                                }
+                            }
+                        }
+
+                        for m in models.iter_mut() {
+                            let mid = m.get("id").and_then(Value::as_str).unwrap_or("");
+                            let is_curated = chosen_main.as_deref() == Some(mid)
+                                || chosen_flash.as_deref() == Some(mid);
+                            m["visible"] = json!(is_curated);
+                            if is_curated {
+                                m["vision"] = json!(true);
+                            }
+                        }
+                        any_updated = true;
+                    }
+                }
+            }
+
+            // If activeRoles currently uses this provider, upgrade to the newly scouted main/flash
+            if hub["activeRoles"].is_object() {
+                let current_main = hub["activeRoles"].get("main").and_then(Value::as_str).unwrap_or("");
+                if current_main.starts_with(&format!("{pid}::")) {
+                    if let Some(ref cm) = chosen_main {
+                        hub["activeRoles"]["main"] = json!(format!("{pid}::{cm}"));
+                        hub_updated = true;
+                    }
+                }
+                let current_flash = hub["activeRoles"].get("flash").and_then(Value::as_str).unwrap_or("");
+                if current_flash.starts_with(&format!("{pid}::")) {
+                    if let Some(ref cf) = chosen_flash {
+                        hub["activeRoles"]["flash"] = json!(format!("{pid}::{cf}"));
+                        hub_updated = true;
+                    }
+                }
+            }
+        }
+
+        if any_updated {
+            let _ = self.save_registry(&registry);
+        }
+        if hub_updated {
+            let _ = self.save_hub_state(&hub);
+        }
+        self.build_snapshot_and_sync(app)
+    }
+}
+
+fn pick_best_tier_model(candidates: &[String], want_flash: bool, exclude: Option<&str>) -> Option<String> {
+    let mut best: Option<(i64, String)> = None;
+    for id in candidates {
+        if Some(id.as_str()) == exclude {
+            continue;
+        }
+        let l = id.to_ascii_lowercase();
+        let is_flash_like = l.contains("flash") || l.contains("mini") || l.contains("haiku") || l.contains("lite");
+        let is_main_like = l.contains("pro") || l.contains("max") || l.contains("sonnet") || l.contains("opus") || l.contains("plus") || l == "gpt-4o";
+        let mut score: i64 = 0;
+        if want_flash {
+            if is_flash_like { score += 1000; }
+        } else if is_main_like && !is_flash_like {
+            score += 1000;
+        }
+        // Prefer higher version numbers & date snapshots (e.g. v4.1, -1017, -260215)
+        if l.contains("4.1") || l.contains("4-5") || l.contains("3.8") || l.contains("5.3") || l.contains("2.5") || l.contains("2-0") {
+            score += 300;
+        }
+        if l.contains("1017") || l.contains("2602") || l.contains("2508") || l.contains("2025") || l.contains("2026") {
+            score += 200;
+        }
+        if l.contains("lite") && want_flash {
+            score -= 50; // Prefer standard flash over flash-lite
+        }
+        if best.as_ref().map_or(true, |(b_score, _)| score > *b_score) {
+            best = Some((score, id.clone()));
+        }
+    }
+    best.map(|(_, id)| id)
+}
+
+fn query_tavily_search(api_key: &str, query: &str) -> Option<String> {
+    let body = json!({
+        "api_key": api_key,
+        "query": query,
+        "search_depth": "basic",
+        "include_answer": true,
+        "max_results": 4
+    })
+    .to_string();
+    let raw = post_https_curl("https://api.tavily.com/search", "openai_compatible", api_key, &body).ok()?;
+    let val: Value = serde_json::from_str(&raw).ok()?;
+    let mut summary = String::new();
+    if let Some(ans) = val.get("answer").and_then(Value::as_str) {
+        if !ans.trim().is_empty() {
+            summary.push_str(ans.trim());
+            summary.push('\n');
+        }
+    }
+    if let Some(results) = val.get("results").and_then(Value::as_array) {
+        for r in results.iter().take(4) {
+            let title = r.get("title").and_then(Value::as_str).unwrap_or("");
+            let content = r.get("content").and_then(Value::as_str).unwrap_or("");
+            if !title.is_empty() || !content.is_empty() {
+                summary.push_str(&format!("- {title}: {content}\n"));
+            }
+        }
+    }
+    if summary.trim().is_empty() {
+        None
+    } else {
+        Some(summary)
+    }
+}
+
+pub fn is_chat_model_id(raw_id: &str) -> bool {
+    let lower = raw_id.to_ascii_lowercase();
+    !lower.contains("embedding")
+        && !lower.contains("tts")
+        && !lower.contains("whisper")
+        && !lower.contains("audio")
+        && !lower.contains("dall-e")
+        && !lower.contains("realtime")
+        && !lower.contains("moderation")
+}
+
+fn get_https_curl(
+    url: &str,
+    headers: &[(&str, &str)],
+) -> Result<String, &'static str> {
+    let curl_bin = if cfg!(windows) { "curl.exe" } else { "curl" };
+    let mut cmd = std::process::Command::new(curl_bin);
+    cmd.args(["-sS", "--max-time", "15", "-X", "GET", url]);
+    for (k, v) in headers {
+        cmd.args(["-H", &format!("{k}: {v}")]);
+    }
+    let output = cmd.output().map_err(|_| "PROVIDER_UNREACHABLE")?;
+    if !output.status.success() {
+        return Err("PROVIDER_UNREACHABLE");
+    }
+    String::from_utf8(output.stdout).map_err(|_| "PROVIDER_INVALID_RESPONSE")
 }
 
 pub fn infer_provider_protocol(provider_id: &str, base_url: &str) -> &'static str {

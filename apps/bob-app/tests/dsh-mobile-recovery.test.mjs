@@ -10,7 +10,7 @@ function mount(storage=new Map(), overrides={}) {
  const calls=[];
  const bridge={dshPage:async(c,s)=>({address:{connection_id:c,session_id:s},messages:[],cursor:20,before:0,has_more:false}),dshPrompt:async(...a)=>{calls.push(a);throw Error('DSH_RECEIPT_UNKNOWN')},dshReceipt:async()=>({status:'unknown'}),...overrides};
  const context={createPersistentPreviewCache,readingCache:createReadingCache({storage:null}),readingKey,provide:()=>{},nextTick:async()=>{},defineProps:()=>({nodes:[],target:null}),ref:value=>({value}),computed:f=>({get value(){return f()}}),watch:()=>{},onUnmounted:()=>{},useI18n:()=>({t:x=>x}),kernelBridge:bridge,localStorage:{getItem:k=>storage.get(k)||null,setItem:(k,v)=>storage.set(k,v)},crypto:{randomUUID:()=> 'request-1'},setTimeout:()=>0,clearTimeout:()=>{}};
- vm.createContext(context);vm.runInContext(source+'\nglobalThis.actions={open,send,checkReceipt,connection,draft,pending,notice,error,reader,refresh,loadOlder,history,loadingOlder};',context);
+ vm.createContext(context);vm.runInContext(source+'\nglobalThis.actions={open,send,checkReceipt,connection,draft,pending,notice,error,reader,refresh,loadOlder,history,loadingOlder,nodeActivity,awaitingReply,activityLabel};',context);
  context.actions.connection.value='device';return {a:context.actions,calls,context,storage};
 }
 test('mobile session: lost reply survives reopening, cannot resend, exact accepted receipt recovers',async()=>{
@@ -72,4 +72,16 @@ test('cached recent body displays before cursor revalidation resolves',async()=>
  await m.context.readingCache.put(readingKey('device','history','','original'),h);let resolve;
  m.context.kernelBridge.dshPage=async(c,s,b,t,after)=>{assert.equal(after,20);return new Promise(r=>{resolve=()=>r({...h,not_modified:true,messages:[]})})};
  const pending=m.a.open({id:'original'});await new Promise(r=>setImmediate(r));assert.equal(m.a.history.value.messages[0].text,'saved body');resolve();await pending;assert.equal(m.a.history.value.messages[0].text,'saved body');
+});
+
+test('processing label needs node observation; accepted send alone only waits',async()=>{
+ const m=mount(new Map(),{dshList:async()=>[{id:'original',running:false}],dshPrompt:async()=>({status:'accepted',session_id:'original',request_id:'request-1'})});
+ await m.a.open({id:'original'});assert.equal(m.a.activityLabel.value,'');m.a.draft.value='progress only';await m.a.send();assert.equal(m.a.awaitingReply.value,'request-1');assert.equal(m.a.activityLabel.value,'dshAwaitingReply');
+ await new Promise(r=>setImmediate(r));m.a.nodeActivity.value={running:true,at:Date.now()};assert.equal(m.a.activityLabel.value,'dshNodeProcessing');
+ m.context.kernelBridge.dshPage=async()=>{throw Error('DSH_HISTORY_TIMEOUT')};await m.a.refresh();assert.equal(m.a.nodeActivity.value,null);assert.equal(m.a.activityLabel.value,'dshAwaitingReply');
+});
+test('matching completion clears waiting; another request cannot do so',async()=>{
+ const m=mount();await m.a.open({id:'original'});m.a.awaitingReply.value='mine';
+ m.context.kernelBridge.dshPage=async(c,s)=>({address:{connection_id:c,session_id:s},cursor:21,before:0,messages:[],request_results:[{request_id:'other',status:'completed'}]});await m.a.refresh();assert.equal(m.a.awaitingReply.value,'mine');
+ m.context.kernelBridge.dshPage=async(c,s)=>({address:{connection_id:c,session_id:s},cursor:22,before:0,messages:[],request_results:[{request_id:'mine',status:'completed'}]});await m.a.refresh();assert.equal(m.a.awaitingReply.value,null);
 });

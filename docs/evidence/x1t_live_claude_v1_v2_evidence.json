@@ -1,0 +1,146 @@
+{
+  "capabilities": {
+    "auth_status": "authenticated",
+    "available": true,
+    "binary_path": "/home/bobbik/.local/bin/claude",
+    "connection_id": "node-x1t",
+    "cwd_available": true,
+    "execution_mode": "process",
+    "grant_id": "grant-x1t-live",
+    "harness": "claude",
+    "observed_at": 1793516217004,
+    "session_id": "claude:x1t-live-verify",
+    "supports_output_format_json": true,
+    "supports_output_format_stream_json": true,
+    "supports_resume": true,
+    "tmux_available": false,
+    "tmux_version": null,
+    "tool_label": "Claude",
+    "version": "2.1.316 (Claude Code)"
+  },
+  "round1_receipt": {
+    "artifact_version": {
+      "bundle_sha256": "3cd98d06dd6b9e36cb18b3a29808cf8ccdd549809943e4dfe87daf3daadbbf84",
+      "created_at": 1793516252695,
+      "deliverable_kind": "markdown",
+      "files": [
+        {
+          "path": "LIVE_NOTE.md",
+          "sha256": "32e1b284cb963eb3135b11b2f6bce2da19d03950295bb625891d69757f9d4a91",
+          "size_bytes": 51
+        }
+      ],
+      "grant_id": "grant-x1t-live",
+      "instruction": "Create a file named LIVE_NOTE.md in the current directory with the exact heading '# X1T Live V1' and one short sentence confirming V1 baseline. Then reply briefly.",
+      "lifecycle_state": "awaiting_review",
+      "parent_version_id": null,
+      "request_id": "req-x1t-live-v1",
+      "review_note": null,
+      "review_status": "pending_review",
+      "session_id": "claude:x1t-live-verify",
+      "snapshot_dir": "C:\\Users\\xm_bo\\AppData\\Local\\Temp\\.tmpKqCmg9\\node-data\\claude-harness\\artifacts\\grant-x1t-live\\v1\\files",
+      "updated_at": 1793516252695,
+      "verification": {
+        "checks": [
+          {
+            "detail": "1 markdown/document file(s) non-empty",
+            "id": "utf8_non_empty",
+            "passed": true
+          },
+          {
+            "detail": "document contains top-level Markdown heading",
+            "id": "heading_structure",
+            "passed": true
+          }
+        ],
+        "deliverable_kind": "markdown",
+        "id": "ver-v1-1793516252695",
+        "status": "passed",
+        "summary": "markdown deliverable v1 passed all 2 checks",
+        "verified_at": 1793516252695,
+        "version_id": "v1"
+      },
+      "version_id": "v1",
+      "version_number": 1
+    },
+    "completed_at": 1793516252698,
+    "connection_id": "node-x1t",
+    "error_code": null,
+    "execution_mode": "process",
+    "grant_id": "grant-x1t-live",
+    "native_session_id": "eeddd53b-e6a8-434f-ae8a-e20ee1fee104",
+    "recovered": false,
+    "reply_text": "I created `LIVE_NOTE.md` in `/tmp/bob-bp406-x1t-live` with the heading `# X1T Live V1` and one sentence confirming the V1 baseline.",
+    "request_hash": "50c26c5de9b9b0de2b55efaecb9f9b2e63bc5633b73ae40c8eec8c48bcd54d3f",
+    "request_id": "req-x1t-live-v1",
+    "route_kind": "initial_prompt",
+    "session_id": "claude:x1t-live-verify",
+    "started_at": 1793516224324,
+    "status": "completed",
+    "text_hash": "85c0ba2d7b4dfc2e69e7f6abdc440dfb51f045dfcba56de3b92d205464cc7f8f",
+    "tmux_session_name": null
+  },
+  "round2_receipt": {
+    "artifact_version": {
+      "bundle_sha256": "03bd295c71be5ecb70ffad977f984b317a6ea42f9b426a25d107c108a548a42a",
+      "created_at": 1793516285936,
+      "deliverable_kind": "markdown",
+      "files": [
+        {
+          "path": "LIVE_NOTE.md",
+          "sha256": "e998c3d462a48e95cd71a2c1671dae331ac5411cac8d185c33756fd1ea539e81",
+          "size_bytes": 82
+        }
+      ],
+      "grant_id": "grant-x1t-live",
+      "instruction": "Update LIVE_NOTE.md so the top heading is '# X1T Live V2' and add a second line 'Resumed native session for V2.' Then reply briefly.",
+      "lifecycle_state": "awaiting_review",
+      "parent_version_id": "v1",
+      "request_id": "req-x1t-live-v2",
+      "review_note": null,
+      "review_status": "pending_review",
+      "session_id": "claude:x1t-live-verify",
+      "snapshot_dir": "C:\\Users\\xm_bo\\AppData\\Local\\Temp\\.tmpKqCmg9\\node-data\\claude-harness\\artifacts\\grant-x1t-live\\v2\\files",
+      "updated_at": 1793516285936,
+      "verification": {
+        "checks": [
+          {
+            "detail": "1 markdown/document file(s) non-empty",
+            "id": "utf8_non_empty",
+            "passed": true
+          },
+          {
+            "detail": "document contains top-level Markdown heading",
+            "id": "heading_structure",
+            "passed": true
+          }
+        ],
+        "deliverable_kind": "markdown",
+        "id": "ver-v2-1793516285936",
+        "status": "passed",
+        "summary": "markdown deliverable v2 passed all 2 checks",
+        "verified_at": 1793516285936,
+        "version_id": "v2"
+      },
+      "version_id": "v2",
+      "version_number": 2
+    },
+    "completed_at": 1793516285941,
+    "connection_id": "node-x1t",
+    "error_code": null,
+    "execution_mode": "process",
+    "grant_id": "grant-x1t-live",
+    "native_session_id": "eeddd53b-e6a8-434f-ae8a-e20ee1fee104",
+    "recovered": false,
+    "reply_text": "I changed the heading in `LIVE_NOTE.md` to `# X1T Live V2` and added \"Resumed native session for V2.\" on a new line. I kept the V1 sentence and put the new line after it, so it's the second sentence rather than literally line 2 of the file.",
+    "request_hash": "5eeb36191f12f4a0eb39c9ef024b3e082925e80ba0a7d11f9f5112feae68ab5b",
+    "request_id": "req-x1t-live-v2",
+    "route_kind": "native_resume",
+    "session_id": "claude:x1t-live-verify",
+    "started_at": 1793516260461,
+    "status": "completed",
+    "text_hash": "b8c68826ea79db64e7bd6b531275a4d880de985608db392648d182a383ed9960",
+    "tmux_session_name": null
+  },
+  "v1_preview_sha256": "32e1b284cb963eb3135b11b2f6bce2da19d03950295bb625891d69757f9d4a91"
+}

@@ -2,12 +2,21 @@
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import CustomSelect from '../components/CustomSelect.vue';
+import TicketWalletPanel from '../components/TicketWalletPanel.vue';
 
 const props = defineProps({
   saveItem: { type: Function, default: null },
   schedules: {
     type: Array,
     default: () => [],
+  },
+  notes: {
+    type: Array,
+    default: () => [],
+  },
+  recognizingTicket: {
+    type: Boolean,
+    default: false,
   },
   projects: {
     type: Array,
@@ -26,8 +35,12 @@ const props = defineProps({
 const emit = defineEmits([
   'create-schedule',
   'update-status',
+  'delete-schedule',
   'open-project-todo',
   'promote-todo-project',
+  'save-ticket',
+  'delete-ticket',
+  'recognize-ticket-file',
 ]);
 
 const { t } = useI18n();
@@ -285,6 +298,20 @@ function cancelItem(item) {
   emit('update-status', { id: item.id, status: 'cancelled' });
 }
 
+function deleteItem(item) {
+  if (!item?.id) return;
+  emit('delete-schedule', item.id);
+  if (editingItem.value?.id === item.id) {
+    closeEditor();
+  }
+}
+
+const ticketCount = computed(() =>
+  (props.notes || []).filter(n =>
+    (n.tags || []).some(tag => tag === 'ticket' || String(tag).startsWith('ticket:'))
+  ).length,
+);
+
 const gridBodyRef = ref(null);
 
 function scrollToCurrentTime(smooth = false) {
@@ -385,6 +412,19 @@ watch([activeSubtab, timelineViewMode, weekOffset], () => {
           </svg>
           <span>{{ t('scheduleTabCron') }}</span>
         </button>
+        <button
+          type="button"
+          class="view-subtab-btn"
+          :class="{ active: activeSubtab === 'tickets' }"
+          @click="switchSubtab('tickets')"
+        >
+          <svg class="inline-svg" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M2 9a3 3 0 0 1 0 6v2a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-2a3 3 0 0 1 0-6V7a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2Z" />
+            <path d="M13 5v2M13 17v2M13 11v2" />
+          </svg>
+          <span>{{ t('scheduleTabTickets') }}</span>
+          <span class="subtab-count">{{ ticketCount }}</span>
+        </button>
       </div>
 
       <button
@@ -405,7 +445,7 @@ watch([activeSubtab, timelineViewMode, weekOffset], () => {
         class="quick-schedule-form hub-card"
         @submit.prevent="submitNewSchedule"
       >
-        <header class="schedule-editor-header"><h3 id="schedule-editor-title">{{ t(editingItem ? 'scheduleEditTitle' : 'scheduleToggleNewBtn') }}</h3><button type="button" :disabled="saving" @click="closeEditor">{{ t('scheduleClose') }}</button></header>
+        <header class="schedule-editor-header"><h3 id="schedule-editor-title">{{ t(editingItem ? 'scheduleEditTitle' : 'scheduleToggleNewBtn') }}</h3><div style="display:flex;gap:8px;"><button v-if="editingItem" type="button" class="mini-ghost-btn" :disabled="saving" @click="deleteItem(editingItem)">{{ t('scheduleDeleteBtn') }}</button><button type="button" :disabled="saving" @click="closeEditor">{{ t('scheduleClose') }}</button></div></header>
         <p v-if="saveError" role="alert">{{ saveError }}</p>
         <fieldset :disabled="saving" class="schedule-editor-fields">
         <div class="quick-schedule-row">
@@ -768,9 +808,28 @@ watch([activeSubtab, timelineViewMode, weekOffset], () => {
               >
                 {{ t('scheduleCancelBtn') }}
               </button>
+              <button
+                type="button"
+                class="mini-ghost-btn"
+                @click="deleteItem(item)"
+              >
+                {{ t('scheduleDeleteBtn') }}
+              </button>
             </div>
           </article>
         </div>
+      </template>
+
+      <!-- SUBTAB 4: TICKET WALLET -->
+      <template v-else-if="activeSubtab === 'tickets'">
+        <TicketWalletPanel
+          :notes="notes"
+          :busy="busy"
+          :recognizing="recognizingTicket"
+          @save-ticket="emit('save-ticket', $event)"
+          @delete-ticket="emit('delete-ticket', $event)"
+          @recognize-ticket-file="emit('recognize-ticket-file', $event)"
+        />
       </template>
 
       <!-- SUBTAB 3: CRON & DAILY ROUTINES -->

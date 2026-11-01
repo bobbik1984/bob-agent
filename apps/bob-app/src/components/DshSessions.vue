@@ -10,6 +10,10 @@ const props=defineProps({nodes:{type:Array,default:()=>[]}, target:{type:Object,
 const {t}=useI18n();
 const connection=ref(''), sessions=ref([]), selected=ref(null), history=ref(null), search=ref(''), busy=ref(false), sending=ref(false), error=ref(''), notice=ref(''), draft=ref(''), pending=ref(null);
 const reader=ref(null), loadingOlder=ref(false);let lastTop=0;
+const nodeActivity=ref(null),awaitingReply=ref(null);let activityChecked=0;
+async function refreshActivity(g,id){if(Date.now()-activityChecked<10000)return;activityChecked=Date.now();try{const list=await kernelBridge.dshList(connection.value);if(g!==generation||disposed)return;const row=list.find(s=>s.id===id);nodeActivity.value=typeof row?.running==='boolean'?{running:row.running,at:Date.now()}:null}catch{if(g===generation)nodeActivity.value=null}}
+const activityLabel=computed(()=>nodeActivity.value?.running===true?t('dshNodeProcessing'):awaitingReply.value?t('dshAwaitingReply'):'');
+const agentLabel=computed(()=>(selected.value?.harness==='claude'||history.value?.harness==='claude'||selected.value?.toolLabel==='Claude')?t('claudeAgent'):t('dshAgent'));
 const preview=ref(null);let previewScroll=0;
 const fileCache=createPersistentPreviewCache((a,known)=>kernelBridge.dshPreview(a.connectionId,a.sessionId,a.path,known));
 const fileAddress=path=>({connectionId:connection.value,sessionId:selected.value.id,endpoint:nodes.value.find(n=>n.id===connection.value)?.baseUrl||nodes.value.find(n=>n.id===connection.value)?.url||'',path:path.replace(/:\d+(?::\d+)?$/,''),cursor:history.value?.cursor});
@@ -46,6 +50,8 @@ async function refresh(){
  try{
   const h=await kernelBridge.dshPage(connection.value,id,null,null,history.value?.cursor ?? null);validatePage(h,id);
   if(g!==generation||disposed||preview.value)return;
+  await refreshActivity(g,id);if(g!==generation||disposed)return;
+  if(h.request_results?.some(r=>r.request_id===awaitingReply.value&&['completed','error','blocked','cancelled'].includes(r.status)))awaitingReply.value=null;
   if(h.not_modified){error.value='';return;}
   const first=history.value===null;let additions=h;
   if(!first&&notice.value===t('dshAccepted')&&h.messages.some(m=>m.role==='assistant'&&m.sequence>history.value.cursor))notice.value='';
@@ -61,7 +67,7 @@ async function refresh(){
   history.value=first?additions:{...combine(history.value,additions),before:history.value.before,has_more:history.value.has_more};error.value='';
   await nextTick();if(g===generation&&!disposed&&follow&&reader.value)reader.value.scrollTop=reader.value.scrollHeight;
   lastTop=reader.value?.scrollTop||0;saveHistory();
- }catch(e){if(g===generation)error.value=fault(e)}finally{if(g===generation){busy.value=false;if(olderRequested&&reader.value?.scrollTop<=24){olderRequested=false;loadOlder()}else{olderRequested=false;timer=setTimeout(refresh,5000)}}}
+ }catch(e){if(g===generation){error.value=fault(e);nodeActivity.value=null}}finally{if(g===generation){busy.value=false;if(olderRequested&&reader.value?.scrollTop<=24){olderRequested=false;loadOlder()}else{olderRequested=false;timer=setTimeout(refresh,5000)}}}
 }
 async function loadOlder(){
  if(!history.value?.has_more||loadingOlder.value||busy.value||preview.value)return;
@@ -79,7 +85,7 @@ async function loadOlder(){
  }catch(e){if(g===generation)error.value=fault(e)}finally{if(g===generation){loadingOlder.value=false;timer=setTimeout(refresh,5000)}}
 }
 function onScroll(){const top=reader.value?.scrollTop||0;const upwards=top<lastTop;lastTop=top;if(upwards&&top<=24){if(busy.value)olderRequested=true;else loadOlder()}else if(top>24)olderRequested=false}
-async function open(s){olderRequested=false;artifactQueue=[];artifactCount=0;fileCache.clear();persist();++generation;clearTimeout(timer);busy.value=false;loadingOlder.value=false;lastTop=0;selected.value=s;history.value=null;notice.value='';const saved=readState();restoring=true;draft.value=saved.draft||'';pending.value=saved.pending||null;restoring=false;if(pending.value)notice.value=t('dshUncertain');const g=generation;const cached=await readingCache.get(historyKey());if(g!==generation||disposed)return;if(cached){try{validatePage(cached,s.id);history.value=cached;await nextTick();if(reader.value)reader.value.scrollTop=reader.value.scrollHeight;lastTop=reader.value?.scrollTop||0;}catch{}}await refresh()}
+async function open(s){nodeActivity.value=null;awaitingReply.value=null;activityChecked=0;olderRequested=false;artifactQueue=[];artifactCount=0;fileCache.clear();persist();++generation;clearTimeout(timer);busy.value=false;loadingOlder.value=false;lastTop=0;selected.value=s;history.value=null;notice.value='';const saved=readState();restoring=true;draft.value=saved.draft||'';pending.value=saved.pending||null;restoring=false;if(pending.value)notice.value=t('dshUncertain');const g=generation;const cached=await readingCache.get(historyKey());if(g!==generation||disposed)return;if(cached){try{validatePage(cached,s.id);history.value=cached;await nextTick();if(reader.value)reader.value.scrollTop=reader.value.scrollHeight;lastTop=reader.value?.scrollTop||0;}catch{}}await refresh()}
 function back(){persist();++generation;clearTimeout(timer);busy.value=false;selected.value=null;history.value=null;notice.value='';load()}
 async function checkReceipt(){
  if(!pending.value || sending.value)return;
@@ -91,7 +97,7 @@ async function checkReceipt(){
  }else{notice.value=t('dshReceiptStillUnknown');}
  }catch(e){if(g===generation)error.value=fault(e)}finally{sending.value=false;if(g===generation&&!busy.value)refresh()}
 }
-async function send(){if(sending.value||pending.value||!draft.value.trim())return;const text=draft.value.trim(), g=generation, address={connection:connection.value,session:selected.value.id};pending.value={id:crypto.randomUUID(),text};if(!persist()){pending.value=null;return;}sending.value=true;error.value='';try{const requestId=pending.value.id;const receipt=await kernelBridge.dshPrompt(address.connection,address.session,text,requestId);if(receipt?.status!=='accepted'||receipt.session_id!==address.session||receipt.request_id!==requestId)throw Error('DSH_RECEIPT_UNKNOWN');if(g===generation){pending.value=null;if(draft.value.trim()===text)draft.value='';persist();notice.value=t('dshAccepted');}}catch(e){if(g===generation){error.value=fault(e);notice.value=t('dshUncertain')}}finally{sending.value=false;if(g===generation&&!busy.value)refresh()}}
+async function send(){if(sending.value||pending.value||!draft.value.trim())return;const text=draft.value.trim(), g=generation, address={connection:connection.value,session:selected.value.id};pending.value={id:crypto.randomUUID(),text};if(!persist()){pending.value=null;return;}sending.value=true;error.value='';try{const requestId=pending.value.id;const receipt=await kernelBridge.dshPrompt(address.connection,address.session,text,requestId);if(receipt?.status!=='accepted'||receipt.session_id!==address.session||receipt.request_id!==requestId)throw Error('DSH_RECEIPT_UNKNOWN');if(g===generation){awaitingReply.value=requestId;activityChecked=0;pending.value=null;if(draft.value.trim()===text)draft.value='';persist();notice.value=t('dshAccepted');}}catch(e){if(g===generation){error.value=fault(e);notice.value=t('dshUncertain')}}finally{sending.value=false;if(g===generation&&!busy.value)refresh()}}
 watch(()=>props.target, async target=>{if(!target)return;connection.value=target.node.id;await open(target.session)},{immediate:true});
 onUnmounted(()=>{clearTimeout(artifactTimer);artifactQueue=[];fileCache.clear();persist();disposed=true;++generation;clearTimeout(timer)});
 </script>
@@ -109,18 +115,18 @@ onUnmounted(()=>{clearTimeout(artifactTimer);artifactQueue=[];fileCache.clear();
    <p v-if="!busy && !groups.length">{{ t('dshEmpty') }}</p>
   </template>
   <template v-if="selected">
-   <div class="dsh-tools"><button v-if="!target" :disabled="sending" @click="back">{{ t('dshBack') }}</button><h4 v-if="!target">{{ selected.title }}</h4><small v-else>{{ target.node.label || target.node.name }} · {{ t('dshAgent') }}</small><button :disabled="busy" @click="refresh">{{ t('dshRefresh') }}</button></div>
+   <div class="dsh-tools"><button v-if="!target" :disabled="sending" @click="back">{{ t('dshBack') }}</button><h4 v-if="!target">{{ selected.title }}</h4><small v-else>{{ target.node.label || target.node.name }} · {{ agentLabel }}</small><button :disabled="busy" @click="refresh">{{ t('dshRefresh') }}</button></div>
    <p class="dsh-note">{{ history?.workspace || t('dshNoWorkspace') }}</p>
    <p v-if="history?.partial || history?.omitted" class="dsh-note">{{ t('dshPartial') }}</p>
    <p v-if="busy && !history" role="status">{{ t('dshLoading') }}</p>
    <button v-if="history?.has_more" class="dsh-older" :disabled="loadingOlder || busy" @click="loadOlder">{{ t(loadingOlder ? 'dshLoading' : 'dshLoadOlder') }}</button>
-   <article v-for="m in history?.messages || []" :key="m.sequence" :data-sequence="m.sequence" class="dsh-message" :class="{user:m.role==='user'}"><small>{{ t(m.role==='user'?'dshYou':'dshAgent') }}</small><MessageContent :content="m.text" :plain="m.role==='user'" /></article>
+   <article v-for="m in history?.messages || []" :key="m.sequence" :data-sequence="m.sequence" class="dsh-message" :class="{user:m.role==='user'}"><small>{{ m.role==='user'?t('dshYou'):agentLabel }}</small><MessageContent :content="m.text" :plain="m.role==='user'" /></article>
   </template>
   </div>
-   <form v-if="selected" class="dsh-compose" @submit.prevent="send"><textarea v-model="draft" :disabled="sending" :placeholder="t('dshPrompt')" :aria-label="t('dshPrompt')" rows="3"></textarea><button :disabled="sending || !!pending || !draft.trim() || !history">{{ t(sending?'dshSending':'send') }}</button><p v-if="pending && !sending" role="status">{{ t('dshUncertain') }} <button type="button" @click="checkReceipt">{{ t('dshCheckReceipt') }}</button></p></form>
+   <form v-if="selected" class="dsh-compose" @submit.prevent="send"><p v-if="activityLabel" class="dsh-activity" role="status" aria-live="polite">{{activityLabel}}</p><textarea v-model="draft" :disabled="sending" :placeholder="t('dshPrompt')" :aria-label="t('dshPrompt')" rows="3"></textarea><button :disabled="sending || !!pending || !draft.trim() || !history">{{ t(sending?'dshSending':'send') }}</button><p v-if="pending && !sending" role="status">{{ t('dshUncertain') }} <button type="button" @click="checkReceipt">{{ t('dshCheckReceipt') }}</button></p></form>
  </section>
 </template>
 <style scoped>
 .dsh-sessions{min-width:0;max-width:100%;padding:16px;border:1px solid var(--border-color);border-radius:12px;background:var(--bg-primary)}
-.dsh-sessions.embedded{border:0;border-radius:0;padding:0;flex:1;min-height:0;overflow:hidden;display:flex;flex-direction:column}.dsh-reader{min-height:0;flex:1;overflow-y:auto;overflow-x:hidden;scrollbar-gutter:stable;overflow-anchor:none;padding:12px;overscroll-behavior:contain}.dsh-compose{flex-shrink:0;padding:12px;background:var(--bg-primary);border-top:1px solid var(--border-color)}.dsh-older{display:block;margin:8px auto;background:transparent;border:0;color:var(--text-secondary)}header,.dsh-tools{display:flex;align-items:center;gap:8px;flex-wrap:wrap}h3,h4{margin:0;overflow-wrap:anywhere}select,input,textarea{min-width:0;max-width:100%;color:var(--text-primary);background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:8px;padding:8px}select,input{flex:1}button{max-width:100%;white-space:normal}details{margin-top:10px}summary{overflow-wrap:anywhere;cursor:pointer;padding:8px 0}.dsh-note,small{color:var(--text-secondary);overflow-wrap:anywhere}.dsh-session{display:flex;flex-direction:column;text-align:left;width:100%;gap:5px;margin-top:5px;padding:10px}.dsh-session strong{overflow-wrap:anywhere}.dsh-message{min-width:0;margin-top:20px;overflow-wrap:anywhere}.dsh-message.user{background:var(--bg-secondary);border-radius:10px;padding:12px}.dsh-compose{margin-top:0;display:flex;flex-wrap:wrap;gap:8px}.dsh-compose textarea{flex:1;min-width:65%}.dsh-compose p{width:100%}
+.dsh-sessions.embedded{border:0;border-radius:0;padding:0;flex:1;min-height:0;overflow:hidden;display:flex;flex-direction:column}.dsh-reader{min-height:0;flex:1;overflow-y:auto;overflow-x:hidden;scrollbar-gutter:stable;overflow-anchor:none;padding:12px;overscroll-behavior:contain}.dsh-compose{flex-shrink:0;padding:12px;background:var(--bg-primary);border-top:1px solid var(--border-color)}.dsh-older{display:block;margin:8px auto;background:transparent;border:0;color:var(--text-secondary)}header,.dsh-tools{display:flex;align-items:center;gap:8px;flex-wrap:wrap}h3,h4{margin:0;overflow-wrap:anywhere}select,input,textarea{min-width:0;max-width:100%;color:var(--text-primary);background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:8px;padding:8px}select,input{flex:1}button{max-width:100%;white-space:normal}details{margin-top:10px}summary{overflow-wrap:anywhere;cursor:pointer;padding:8px 0}.dsh-note,small{color:var(--text-secondary);overflow-wrap:anywhere}.dsh-session{display:flex;flex-direction:column;text-align:left;width:100%;gap:5px;margin-top:5px;padding:10px}.dsh-session strong{overflow-wrap:anywhere}.dsh-message{min-width:0;margin-top:20px;overflow-wrap:anywhere}.dsh-message.user{background:var(--bg-secondary);border-radius:12px;padding:14px 16px;width:fit-content;max-width:88%;margin-left:auto}.dsh-message.user>small{display:block;text-align:right;margin-bottom:6px}.dsh-message:not(.user){padding:4px 2px}.dsh-activity{margin:0;color:var(--text-secondary);font-size:.85rem}.dsh-compose{margin-top:0;display:flex;flex-wrap:wrap;gap:8px}.dsh-compose textarea{flex:1;min-width:65%}.dsh-compose p{width:100%}
 </style>
