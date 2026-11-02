@@ -652,5 +652,20 @@
   "smartGroupActionBtn": "AI Auto-Group",
   "smartGroupAgentPrompt": "Please group related conversations in my directory into platform projects by topic.",
   "pinSessionLabel": "Pin conversation",
-  "unpinSessionLabel": "Unpin conversation"
+  "unpinSessionLabel": "Unpin conversation",
+  "filterToggleBtn": "Filter",
+  "filterResetBtn": "Reset",
+  "filterNodesLabel": "Nodes",
+  "filterHarnessesLabel": "Tools",
+  "filterAllOption": "All",
+  "filterTopicLabel": "Topic / Project",
+  "filterTopicAll": "All topics & projects",
+  "filterTopicPinned": "★ Pinned only",
+  "filterTopicUnlinked": "Unlinked sessions",
+  "filterSortLabel": "Sort by",
+  "filterSortTimeDesc": "Newest activity first",
+  "filterSortTimeAsc": "Oldest activity first",
+  "filterSortTitleAsc": "Title (A→Z)",
+  "filterSortNodeAsc": "By node & tool",
+  "filterSortTopicAsc": "By topic & project"
 }

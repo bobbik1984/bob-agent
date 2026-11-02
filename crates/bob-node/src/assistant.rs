@@ -134,9 +134,10 @@ pub fn execute(state: &Arc<Mutex<NodeContext>>, args: &Value) -> Result<Value, &
                             if candidates.len() >= 100 {
                                 break;
                             }
+                            let harness = item["harness"].as_str().unwrap_or("agy");
                             candidates.push(json!({
                                 "connection_id": id,
-                                "harness": "agy",
+                                "harness": harness,
                                 "session_id": item["id"],
                                 "title": item["title"].as_str().unwrap_or("").chars().take(120).collect::<String>(),
                                 "device": node["name"],

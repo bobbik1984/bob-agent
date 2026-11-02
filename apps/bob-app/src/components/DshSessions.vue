@@ -15,7 +15,7 @@ const syncStatus=ref(''),hasNewMessages=ref(false),copiedSeq=ref(null);let syncT
 const syncStatusLabel=computed(()=>syncStatus.value==='checking'?t('dshSyncChecking'):syncStatus.value==='syncing'?t('dshSyncUpdating'):syncStatus.value==='synced'?t('dshSyncCompleted'):syncStatus.value==='offline_cached'?t('dshSyncOfflineCached'):'');
 async function refreshActivity(g,id){if(Date.now()-activityChecked<10000)return;activityChecked=Date.now();try{const list=await kernelBridge.dshList(connection.value);if(g!==generation||disposed)return;const row=list.find(s=>s.id===id);nodeActivity.value=typeof row?.running==='boolean'?{running:row.running,at:Date.now()}:null}catch{if(g===generation)nodeActivity.value=null}}
 const activityLabel=computed(()=>sending.value?t('dshSendingWaitReceipt'):replying.value?t('dshReplying'):nodeActivity.value?.running===true?t('dshNodeProcessing'):awaitingReply.value?t('dshAwaitingReply'):'');
-const agentLabel=computed(()=>selected.value?.harness==='agy'||selected.value?.id?.startsWith('agy:')?t('agyAgent'):(selected.value?.harness==='claude'||history.value?.harness==='claude'||selected.value?.toolLabel==='Claude')?t('claudeAgent'):t('dshAgent'));
+const agentLabel=computed(()=>{const h=selected.value?.harness||history.value?.harness||'';if(h==='agy'||selected.value?.id?.startsWith('agy:'))return t('agyAgent');if(h==='claude'||selected.value?.toolLabel==='Claude')return t('claudeAgent');if(h==='pi'||selected.value?.toolLabel==='Pi')return 'Pi';if(h==='codex'||selected.value?.toolLabel==='Codex')return 'Codex';return t('dshAgent');});
 function formatMessageTime(ts){
  if(ts===null||ts===undefined||ts===''||typeof ts==='boolean')return '';
  const raw=typeof ts==='number'?ts:Number(ts);

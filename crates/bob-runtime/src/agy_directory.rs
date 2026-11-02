@@ -1,13 +1,37 @@
-//! Read-only AGY directory attached to an existing device connection.
-//! No model execution or private history decoding is performed here.
-use std::{fs, io::{Read, Write}, path::Path, process::{Command, Stdio}, thread, time::{Duration, Instant}};
+//! Read-only multi-harness remote directory & session history reader (AGY, Claude, Pi, Codex, DSH/Control-Plane).
+//! No model execution or private credential decoding is performed here.
+use std::{fs, io::Read, path::Path, process::{Command, Stdio}, thread, time::{Duration, Instant}};
 use base64::{Engine, engine::general_purpose::STANDARD};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-#[derive(Deserialize)]
-#[serde(rename_all="camelCase", deny_unknown_fields)]
-struct HostGrant { connection_id: String, ssh_target: String, agy_data_dir: String }
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(rename_all="camelCase")]
+struct HostGrant {
+    connection_id: String,
+    ssh_target: String,
+    #[serde(default)]
+    agy_data_dir: String,
+    #[serde(default)]
+    claude_data_dir: Option<String>,
+    #[serde(default)]
+    pi_data_dir: Option<String>,
+    #[serde(default)]
+    codex_data_dir: Option<String>,
+    #[serde(default)]
+    control_plane_dbs: Vec<String>,
+    #[serde(default)]
+    harnesses: Vec<String>,
+}
+
+impl HostGrant {
+    fn has_multi(&self) -> bool {
+        self.claude_data_dir.is_some()
+            || self.pi_data_dir.is_some()
+            || self.codex_data_dir.is_some()
+            || !self.control_plane_dbs.is_empty()
+    }
+}
 
 fn grants(data: &Path) -> Result<Vec<HostGrant>, &'static str> {
     let p=data.join("device_harnesses.json");
@@ -17,6 +41,13 @@ fn grants(data: &Path) -> Result<Vec<HostGrant>, &'static str> {
 }
 
 pub fn owns_session(id: &str) -> bool { id.starts_with("agy:") }
+
+pub fn owns_readable_session(id: &str) -> bool {
+    id.starts_with("claude-jsonl:")
+        || id.starts_with("pi:")
+        || id.starts_with("codex:")
+        || id.starts_with("cp:")
+}
 
 pub fn list(data: &Path, connection: &str) -> Result<Vec<Value>, &'static str> {
     use sha2::{Sha256,Digest};
@@ -55,38 +86,159 @@ pub fn list(data: &Path, connection: &str) -> Result<Vec<Value>, &'static str> {
     }
 }
 
-fn fetch_list(data: &Path, connection: &str) -> Result<Vec<Value>, &'static str> {
-    let all=grants(data)?;
-    let Some(g)=all.iter().find(|g|g.connection_id==connection) else { return Ok(vec![]) };
-    if g.ssh_target.is_empty() || g.ssh_target.starts_with('-') || !g.ssh_target.bytes().all(|c|c.is_ascii_alphanumeric()||b"-_.@".contains(&c)) || !g.agy_data_dir.starts_with('/') { return Err("AGY_CONFIG_INVALID") }
-    let root=STANDARD.encode(g.agy_data_dir.as_bytes());
-    let code=format!("import sys,base64\nsys.argv=['probe',base64.b64decode('{root}').decode('utf-8')]\n{}",include_str!("agy_index_probe.py"));
+fn compact_python(src: &str) -> String {
+    let mut out = String::with_capacity(src.len());
+    for line in src.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        let spaces = line.len() - line.trim_start_matches(' ').len();
+        for _ in 0..(spaces / 4) {
+            out.push(' ');
+        }
+        out.push_str(line.trim_start_matches(' '));
+        out.push('\n');
+    }
+    out
+}
+
+fn run_ssh_python(ssh_target: &str, arg_str: &str, timeout_secs: u64) -> Result<Vec<u8>, &'static str> {
+    if ssh_target.is_empty() || ssh_target.starts_with('-') || !ssh_target.bytes().all(|c|c.is_ascii_alphanumeric()||b"-_.@".contains(&c)) {
+        return Err("AGY_CONFIG_INVALID");
+    }
+    let encoded=STANDARD.encode(arg_str.as_bytes());
+    let code=format!("import sys,base64\nsys.argv=['probe',base64.b64decode('{encoded}').decode('utf-8')]\n{}",compact_python(include_str!("agy_index_probe.py")));
+    let script_b64=STANDARD.encode(code.as_bytes());
+    let remote_cmd=format!("python3 -c \"import base64;exec(base64.b64decode('{script_b64}').decode('utf-8'))\"");
     let mut command=Command::new("ssh");
-    command.args(["-o","BatchMode=yes","-o","ConnectTimeout=3","-o","ServerAliveInterval=5","-o","ServerAliveCountMax=2","--",&g.ssh_target,"python3 -"])
-        .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null());
+    command.args(["-n","-o","BatchMode=yes","-o","ConnectTimeout=6","-o","ServerAliveInterval=5","-o","ServerAliveCountMax=2","--",ssh_target,&remote_cmd])
+        .stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
     #[cfg(windows)] { use std::os::windows::process::CommandExt; command.creation_flags(0x08000000); }
     let mut child=command.spawn().map_err(|_|"AGY_HOST_UNAVAILABLE")?;
-    let mut stdin=child.stdin.take().ok_or("AGY_HOST_UNAVAILABLE")?;
-    let writer=thread::spawn(move || stdin.write_all(code.as_bytes()));
     let stdout=child.stdout.take().ok_or("AGY_HOST_UNAVAILABLE")?;
     let reader=thread::spawn(move || { let mut b=Vec::new();stdout.take(2*1024*1024+1).read_to_end(&mut b).map(|_|b) });
     let started=Instant::now();
     let success=loop {
         match child.try_wait() {
             Ok(Some(s))=>break s.success(),
-            Ok(None) if started.elapsed()<Duration::from_secs(6)=>thread::sleep(Duration::from_millis(40)),
+            Ok(None) if started.elapsed()<Duration::from_secs(timeout_secs)=>thread::sleep(Duration::from_millis(40)),
             _=>{let _=child.kill();let _=child.wait();return Err("AGY_HOST_TIMEOUT")}
         }
     };
-    writer.join().map_err(|_|"AGY_HOST_UNAVAILABLE")?.map_err(|_|"AGY_HOST_UNAVAILABLE")?;
     let b=reader.join().map_err(|_|"AGY_INDEX_UNAVAILABLE")?.map_err(|_|"AGY_INDEX_UNAVAILABLE")?;
     if !success || b.len()>2*1024*1024 { return Err("AGY_INDEX_UNAVAILABLE") }
+    Ok(b)
+}
+
+fn fetch_list(data: &Path, connection: &str) -> Result<Vec<Value>, &'static str> {
+    let all=grants(data)?;
+    let Some(g)=all.iter().find(|g|g.connection_id==connection) else { return Ok(vec![]) };
+    if !g.agy_data_dir.is_empty() && !g.agy_data_dir.starts_with('/') { return Err("AGY_CONFIG_INVALID") }
+    let arg_str = if g.has_multi() {
+        serde_json::to_string(&json!({
+            "mode": "list",
+            "agyDataDir": g.agy_data_dir,
+            "claudeDataDir": g.claude_data_dir,
+            "piDataDir": g.pi_data_dir,
+            "codexDataDir": g.codex_data_dir,
+            "controlPlaneDbs": g.control_plane_dbs,
+            "harnesses": g.harnesses,
+        })).map_err(|_|"AGY_CONFIG_INVALID")?
+    } else {
+        if g.agy_data_dir.is_empty() { return Ok(vec![]) }
+        g.agy_data_dir.clone()
+    };
+    let b = run_ssh_python(&g.ssh_target, &arg_str, 20)?;
     let v:Value=serde_json::from_slice(&b).map_err(|_|"AGY_INDEX_INVALID")?;
     let rows=v["sessions"].as_array().ok_or("AGY_INDEX_INVALID")?;
     rows.iter().map(|s|normalize(connection,s)).collect()
 }
 
+pub fn read_page(data: &Path, connection: &str, session_id: &str, after: Option<i64>) -> Result<Value, &'static str> {
+    use sha2::{Sha256,Digest};
+    if !owns_readable_session(session_id) {
+        return Err("DSH_SESSION_NOT_FOUND");
+    }
+    let all=grants(data)?;
+    let Some(g)=all.iter().find(|g|g.connection_id==connection) else { return Err("DSH_CONNECTION_REQUIRED") };
+    let mut hash=Sha256::new();
+    hash.update(connection.as_bytes());
+    hash.update(b":");
+    hash.update(session_id.as_bytes());
+    let cache_path=data.join(format!("remote-page-{:x}.json",hash.finalize()));
+    let now=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs();
+    if let Some(cached)=fs::read(&cache_path).ok().and_then(|b|serde_json::from_slice::<Value>(&b).ok()) {
+        let age=cached["at"].as_u64().map(|t|now.saturating_sub(t)).unwrap_or(9999);
+        if age<30 {
+            if let Some(mut page)=cached.get("page").cloned() {
+                let cursor=page["cursor"].as_i64().unwrap_or(0);
+                if after.is_some_and(|a|a>=cursor) {
+                    page["not_modified"]=json!(true);
+                    page["messages"]=json!([]);
+                }
+                return Ok(page);
+            }
+        }
+    }
+    let arg_str=serde_json::to_string(&json!({
+        "mode": "page",
+        "sessionId": session_id,
+        "agyDataDir": g.agy_data_dir,
+        "claudeDataDir": g.claude_data_dir,
+        "piDataDir": g.pi_data_dir,
+        "codexDataDir": g.codex_data_dir,
+        "controlPlaneDbs": g.control_plane_dbs,
+    })).map_err(|_|"AGY_CONFIG_INVALID")?;
+    let b=run_ssh_python(&g.ssh_target, &arg_str, 20)?;
+    let raw:Value=serde_json::from_slice(&b).map_err(|_|"DSH_HISTORY_UNAVAILABLE")?;
+    let msgs=raw["messages"].as_array().cloned().unwrap_or_default();
+    let cursor=msgs.len() as i64;
+    let harness=raw["harness"].as_str().unwrap_or("dsh");
+    let workspace=raw["workspace"].as_str().unwrap_or("");
+    let mut page=json!({
+        "address": { "connection_id": connection, "session_id": session_id },
+        "harness": harness,
+        "workspace": workspace,
+        "cursor": cursor,
+        "before": if msgs.is_empty() { 0 } else { 1 },
+        "has_more": false,
+        "not_modified": false,
+        "replacements": [],
+        "messages": msgs,
+    });
+    let _=fs::write(&cache_path, serde_json::to_vec(&json!({"at":now,"page":page})).unwrap_or_default());
+    if after.is_some_and(|a|a>=cursor) {
+        page["not_modified"]=json!(true);
+        page["messages"]=json!([]);
+    }
+    Ok(page)
+}
+
 fn normalize(connection: &str, s: &Value)->Result<Value,&'static str>{
+    if let Some(explicit_id)=s.get("id").and_then(Value::as_str) {
+        if explicit_id.is_empty() || explicit_id.contains("..") { return Err("AGY_INDEX_INVALID") }
+        let native_id=s["nativeSessionId"].as_str().unwrap_or(explicit_id);
+        let harness=s["harness"].as_str().unwrap_or("dsh");
+        let tool_label=s["toolLabel"].as_str().unwrap_or("DSH");
+        let source_kind=s["sourceKind"].as_str().unwrap_or("remote_native");
+        let uri=s["workspaceUris"].as_array().and_then(|x|x.first()).and_then(Value::as_str).unwrap_or("");
+        let readable=s["historyReadable"].as_bool().unwrap_or(true);
+        return Ok(json!({
+            "id":explicit_id,
+            "nativeSessionId":native_id,
+            "connectionId":connection,
+            "harness":harness,
+            "toolLabel":tool_label,
+            "source_kind":source_kind,
+            "title":s["title"].as_str().filter(|x|!x.is_empty()).unwrap_or(native_id),
+            "workspace":uri.strip_prefix("file://").unwrap_or(uri),
+            "updated_at":s["updatedAt"],
+            "historyReadable":readable,
+            "historyReason":s["historyReason"],
+            "readOnlyDirectory":!readable
+        }));
+    }
     let id=s["nativeSessionId"].as_str().ok_or("AGY_INDEX_INVALID")?;
     if id.len()!=36 || !id.bytes().all(|b|b.is_ascii_hexdigit()||b==b'-') { return Err("AGY_INDEX_INVALID") }
     let uri=s["workspaceUris"].as_array().and_then(|x|x.first()).and_then(Value::as_str).unwrap_or("");
@@ -103,6 +255,14 @@ fn normalize(connection: &str, s: &Value)->Result<Value,&'static str>{
   let s=json!({"nativeSessionId":"00000000-0000-0000-0000-000000000001","title":"Project","workspaceUris":["file:///work/project"],"updatedAt":"2026-11-02","historyReason":"AGY_HISTORY_CODEC_UNSUPPORTED"});
   let v=normalize("device",&s).unwrap();assert!(owns_session(v["id"].as_str().unwrap()));assert_eq!(v["workspace"],"/work/project");assert_eq!(v["historyReadable"],false);
   assert!(normalize("device",&json!({"nativeSessionId":"../unsafe"})).is_err());
+ }
+ #[test] fn multi_harness_normalization_preserves_tool_badges(){
+  let s=json!({"id":"pi:01a099bb","nativeSessionId":"01a099bb","harness":"pi","toolLabel":"Pi","sourceKind":"pi_native","title":"Snake D-pad","workspaceUris":["/home/ubuntu/snake"],"updatedAt":1790000000000i64,"historyReadable":true});
+  let v=normalize("node-vps3",&s).unwrap();
+  assert!(owns_readable_session(v["id"].as_str().unwrap()));
+  assert_eq!(v["harness"],"pi");
+  assert_eq!(v["toolLabel"],"Pi");
+  assert_eq!(v["historyReadable"],true);
  }
  #[test] fn unconfigured_device_is_empty(){let d=tempfile::tempdir().unwrap();assert!(list(d.path(),"none").unwrap().is_empty())}
 }

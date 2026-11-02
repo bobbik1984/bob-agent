@@ -652,5 +652,20 @@
   "smartGroupActionBtn": "AI 归集到项目",
   "smartGroupAgentPrompt": "请帮我把当前对话列表里看起来相关的对话都按主题归集到平台项目里。",
   "pinSessionLabel": "置顶对话",
-  "unpinSessionLabel": "取消置顶"
+  "unpinSessionLabel": "取消置顶",
+  "filterToggleBtn": "筛选",
+  "filterResetBtn": "重置",
+  "filterNodesLabel": "节点",
+  "filterHarnessesLabel": "工具",
+  "filterAllOption": "全部",
+  "filterTopicLabel": "主题 / 项目",
+  "filterTopicAll": "全部主题与项目",
+  "filterTopicPinned": "★ 仅置顶会话",
+  "filterTopicUnlinked": "未关联项目会话",
+  "filterSortLabel": "排序方式",
+  "filterSortTimeDesc": "按最新活跃排序",
+  "filterSortTimeAsc": "按最早时间排序",
+  "filterSortTitleAsc": "按标题名称 (A→Z)",
+  "filterSortNodeAsc": "按节点与工具排序",
+  "filterSortTopicAsc": "按主题与项目排序"
 }

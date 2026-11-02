@@ -1109,15 +1109,24 @@ pub fn handle_rpc_command(ctx: &mut NodeContext, command: &str, args: &Value) ->
                     ctx.runtime.dsh_client(connection).and_then(|c| c.list()),
                 );
                 let agy = bob_runtime::agy_directory::list(&ctx.runtime.data_dir,connection);
-                let mut base = base?;
-                // Preserve DSH availability if this optional harness cannot be reached.
-                if let Ok(extra) = agy {
-                    if let Some(rows)=base.as_array_mut() { rows.extend(extra); }
+                match (base, agy) {
+                    (Ok(mut b), Ok(extra)) => {
+                        if let Some(rows)=b.as_array_mut() { rows.extend(extra); }
+                        return Ok(b);
+                    }
+                    (Ok(b), Err(_)) => return Ok(b),
+                    (Err(_), Ok(extra)) if !extra.is_empty() => return Ok(json!(extra)),
+                    (Err(e), _) => return Err(e),
                 }
-                return Ok(base);
             }
             if args.get("sessionId").and_then(Value::as_str).is_some_and(bob_runtime::agy_directory::owns_session) {
                 return Err("AGY_HISTORY_NOT_CONNECTED");
+            }
+            if command=="app_dsh_page" {
+                if let Some(sid)=args.get("sessionId").and_then(Value::as_str).filter(|s|bob_runtime::agy_directory::owns_readable_session(s)) {
+                    let after=args.get("after").filter(|v|!v.is_null()).map(|v|v.as_i64().ok_or("DSH_PAGE_CURSOR_INVALID")).transpose()?;
+                    return bob_runtime::agy_directory::read_page(&ctx.runtime.data_dir, connection, sid, after);
+                }
             }
             if let Some(v) = claude_rpc::try_handle_dsh_command(&ctx.runtime.data_dir, command, args)? {
                 return Ok(v);
@@ -1887,13 +1896,17 @@ fn execute_unlocked_harness_rpc(
                     runtime.dsh_client(connection).and_then(|c| c.list()),
                 );
                 let agy = bob_runtime::agy_directory::list(data_dir, connection);
-                let mut base = base?;
-                if let Ok(extra) = agy {
-                    if let Some(rows) = base.as_array_mut() {
-                        rows.extend(extra);
+                match (base, agy) {
+                    (Ok(mut b), Ok(extra)) => {
+                        if let Some(rows) = b.as_array_mut() {
+                            rows.extend(extra);
+                        }
+                        return Ok(b);
                     }
+                    (Ok(b), Err(_)) => return Ok(b),
+                    (Err(_), Ok(extra)) if !extra.is_empty() => return Ok(json!(extra)),
+                    (Err(e), _) => return Err(e),
                 }
-                return Ok(base);
             }
             if args
                 .get("sessionId")
@@ -1901,6 +1914,20 @@ fn execute_unlocked_harness_rpc(
                 .is_some_and(bob_runtime::agy_directory::owns_session)
             {
                 return Err("AGY_HISTORY_NOT_CONNECTED");
+            }
+            if command == "app_dsh_page" {
+                if let Some(sid) = args
+                    .get("sessionId")
+                    .and_then(Value::as_str)
+                    .filter(|s| bob_runtime::agy_directory::owns_readable_session(s))
+                {
+                    let after = args
+                        .get("after")
+                        .filter(|v| !v.is_null())
+                        .map(|v| v.as_i64().ok_or("DSH_PAGE_CURSOR_INVALID"))
+                        .transpose()?;
+                    return bob_runtime::agy_directory::read_page(data_dir, connection, sid, after);
+                }
             }
             if let Some(v) = claude_rpc::try_handle_dsh_command(data_dir, command, args)? {
                 return Ok(v);

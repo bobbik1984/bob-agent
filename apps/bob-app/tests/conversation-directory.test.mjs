@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {workspaceName,directoryGroups} from '../src/conversation-directory.mjs';
+import {workspaceName,directoryGroups,extractFilterOptions,filterAndSortRows} from '../src/conversation-directory.mjs';
 test('short path labels support POSIX, Windows and trailing separators',()=>{
  assert.equal(workspaceName('/home/user/projects/winter-shelter/'),'winter-shelter');
  assert.equal(workspaceName('C:\\projects\\winter-shelter'),'winter-shelter');
@@ -49,4 +49,28 @@ test('smart mode clusters related topics across generic workspaces and separates
  const uuidGroup=smart.find(g=>g.key==='smart:unnamed-uuid');
  assert.ok(uuidGroup);
  assert.equal(uuidGroup.items.length,1);
+});
+
+test('extractFilterOptions and filterAndSortRows support multi-node, multi-harness, topic, and sort modes',()=>{
+ const rows=[
+  {uid:'x1t:1',remote:true,node:{id:'x1t',label:'X1T'},harness:'claude',workspace:'/home/bobbik/winter-shelter',title:'Beta Session',updated_at:'2026-10-30T10:00:00Z'},
+  {uid:'vps3:1',remote:true,node:{id:'vps3',label:'VPS3'},harness:'pi',workspace:'/home/ubuntu/.bob',title:'Alpha Session',updated_at:'2026-11-02T10:00:00Z'},
+  {uid:'vps3:2',remote:true,node:{id:'vps3',label:'VPS3'},harness:'codex',workspace:'/home/ubuntu/.bob',title:'Gamma Session',updated_at:'2026-11-01T10:00:00Z',project:'Bob Next',project_id:'proj-bob',project_owner:'owner'}
+ ];
+ const opts=extractFilterOptions(rows);
+ assert.deepEqual(opts.nodes.map(n=>n.key),['remote:x1t','remote:vps3']);
+ assert.deepEqual(opts.harnesses.map(h=>h.key),['claude','pi','codex']);
+ assert.ok(opts.topics.some(t=>t.key==='project:proj-bob'));
+ assert.ok(opts.topics.some(t=>t.key==='smart:topic:winter-shelter'));
+
+ const onlyVps3=filterAndSortRows(rows,{selectedNodes:['remote:vps3'],sortBy:'title_asc'});
+ assert.deepEqual(onlyVps3.map(r=>r.uid),['vps3:1','vps3:2']);
+
+ const multiHarness=filterAndSortRows(rows,{selectedHarnesses:['claude','codex'],sortBy:'time_desc'});
+ assert.deepEqual(multiHarness.map(r=>r.uid),['vps3:2','x1t:1']);
+
+ const topicFiltered=directoryGroups(rows,'smart',[],{selectedTopic:'project:proj-bob'});
+ assert.equal(topicFiltered.length,1);
+ assert.equal(topicFiltered[0].items.length,1);
+ assert.equal(topicFiltered[0].items[0].uid,'vps3:2');
 });
