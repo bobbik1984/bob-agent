@@ -9,6 +9,7 @@
 //! - `ModelHubRuntime` managing `model_providers.json`, `model_hub_state.json`,
 //!   `online_cache.json`, BYOK execution, and Online Client API v1 calls.
 
+pub mod agy_directory;
 pub mod project_context;
 pub mod workspace_context;
 pub mod vision;
@@ -19,6 +20,7 @@ pub mod capability_borrowing;
 pub mod subagent_pool;
 pub mod context_capsule;
 pub mod claude_rpc;
+pub mod harness_auth;
 pub mod runtime_rpc;
 use bob_kernel::app::LocalApp;
 use bob_kernel::direct_provider::{
@@ -854,9 +856,13 @@ impl ModelHubRuntime {
             let seed=std::fs::read(vault_dir.join(".vault_seed")).map_err(|_|"SECRET_STORE_UNAVAILABLE")?;
             let mut hasher=Sha256::new();hasher.update(seed);hasher.update(b"bob-runtime-file-vault-v1");
             let master_key:[u8;32]=hasher.finalize().into();
-            FileVaultSecretStore{vault_dir,master_key}.get(&remote_node_token_slot(id))?
-        }else{self.secrets.get(&remote_node_token_slot(id))?};
-        dsh_transport::DshClient::connect(url,&token)
+            FileVaultSecretStore{vault_dir,master_key}.get(&remote_node_token_slot(id)).ok()
+        }else{self.secrets.get(&remote_node_token_slot(id)).ok()};
+        let log_source=node["logPath"].as_str().map(PathBuf::from).or_else(||std::env::var_os("BOB_DSH_LOG_PATH").map(PathBuf::from));
+        if token.is_none() && log_source.is_none() && dsh_transport::load_cached_cookie(&self.data_dir, url).is_none() {
+            return Err("SECRET_NOT_CONFIGURED");
+        }
+        dsh_transport::DshClient::connect_or_recover(url, token.as_deref(), &self.data_dir, log_source.as_deref())
     }
 
     pub fn save_remote_node(

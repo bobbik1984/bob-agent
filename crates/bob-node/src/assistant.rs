@@ -8,7 +8,7 @@ pub fn execute(state: &Arc<Mutex<NodeContext>>, args: &Value) -> Result<Value, &
         .as_str()
         .filter(|s| !s.is_empty() && s.len() <= 200)
         .ok_or("REQUEST_ID_REQUIRED")?;
-    let (prepared, profile, dir, schedules) = {
+    let (prepared, profile, dir, schedules, local_candidates) = {
         let mut ctx = state.lock().map_err(|_| "NODE_LOCK_POISONED")?;
         let assistant = ctx
             .app
@@ -44,7 +44,34 @@ pub fn execute(state: &Arc<Mutex<NodeContext>>, args: &Value) -> Result<Value, &
             .map_err(|_| "PROVIDER_READ_FAILED")?
             .ok_or("PROVIDER_UNCONFIGURED")?;
         let sched_catalog = bob_runtime::assistant::schedule_catalog_for_prompt(&ctx.app);
-        (prep, profile, ctx.runtime.data_dir.clone(), sched_catalog)
+        let local_convs: Vec<Value> = ctx
+            .app
+            .catalog_snapshot()
+            .map(|snap| {
+                snap.conversations
+                    .into_iter()
+                    .filter(|c| !c.id.starts_with("assistant:"))
+                    .take(30)
+                    .map(|c| {
+                        json!({
+                            "connection_id": "local",
+                            "harness": "local",
+                            "session_id": c.id,
+                            "title": c.title.chars().take(120).collect::<String>(),
+                            "device": "local",
+                            "workspace": c.project_title,
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        (
+            prep,
+            profile,
+            ctx.runtime.data_dir.clone(),
+            sched_catalog,
+            local_convs,
+        )
     };
     let work = (|| -> Result<String, &'static str> {
         let runtime = ModelHubRuntime::with_file_vault(dir)?;
@@ -54,22 +81,43 @@ pub fn execute(state: &Arc<Mutex<NodeContext>>, args: &Value) -> Result<Value, &
             .map(|n| n.iter().filter(|n| n["enabled"] == true).collect())
             .unwrap_or_default();
         let mut complete = nodes.len() <= 4;
-        let mut candidates = Vec::new();
+        let mut candidates = local_candidates;
         for node in nodes.iter().take(4) {
             let Some(id) = node["id"].as_str() else {
                 complete = false;
                 continue;
             };
-            match runtime.dsh_client(id).and_then(|c| c.list()) {
-                Ok(list) => {
+            let merged = claude_rpc::merge_claude_into_dsh_list(
+                &runtime.data_dir,
+                id,
+                runtime.dsh_client(id).and_then(|c| c.list()),
+            );
+            match merged {
+                Ok(mut list) => {
+                    if let Ok(extra) = bob_runtime::agy_directory::list(&runtime.data_dir, id) {
+                        if let Some(rows) = list.as_array_mut() {
+                            rows.extend(extra);
+                        }
+                    }
                     if let Some(items) = list.as_array() {
                         for item in items {
                             if candidates.len() >= 100 {
                                 complete = false;
                                 break;
                             }
+                            let harness = item["harness"].as_str().unwrap_or_else(|| {
+                                if item["source_kind"].as_str() == Some("claude_native") {
+                                    "claude"
+                                } else if item["id"].as_str().is_some_and(|s| s.starts_with("agy:"))
+                                {
+                                    "agy"
+                                } else {
+                                    "dsh"
+                                }
+                            });
                             candidates.push(json!({
                                 "connection_id": id,
+                                "harness": harness,
                                 "session_id": item["id"],
                                 "title": item["title"].as_str().unwrap_or("").chars().take(120).collect::<String>(),
                                 "device": node["name"],
@@ -80,7 +128,24 @@ pub fn execute(state: &Arc<Mutex<NodeContext>>, args: &Value) -> Result<Value, &
                         complete = false;
                     }
                 }
-                Err(_) => complete = false,
+                Err(_) => {
+                    if let Ok(extra) = bob_runtime::agy_directory::list(&runtime.data_dir, id) {
+                        for item in extra {
+                            if candidates.len() >= 100 {
+                                break;
+                            }
+                            candidates.push(json!({
+                                "connection_id": id,
+                                "harness": "agy",
+                                "session_id": item["id"],
+                                "title": item["title"].as_str().unwrap_or("").chars().take(120).collect::<String>(),
+                                "device": node["name"],
+                                "workspace": item["workspace"]
+                            }));
+                        }
+                    }
+                    complete = false;
+                }
             }
         }
         let user = prepared
@@ -96,8 +161,12 @@ pub fn execute(state: &Arc<Mutex<NodeContext>>, args: &Value) -> Result<Value, &
             &schedules,
             now_millis(),
         );
-        let flash_profile = runtime.resolve_role_profile("flash").unwrap_or_else(|_| profile.clone());
-        let main_profile = runtime.resolve_role_profile("main").unwrap_or_else(|_| profile.clone());
+        let flash_profile = runtime
+            .resolve_role_profile("flash")
+            .unwrap_or_else(|_| profile.clone());
+        let main_profile = runtime
+            .resolve_role_profile("main")
+            .unwrap_or_else(|_| profile.clone());
         let chosen_profile = if user.contains("[image:") || user.contains("<image>") {
             &main_profile
         } else {

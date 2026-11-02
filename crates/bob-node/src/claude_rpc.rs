@@ -316,6 +316,12 @@ mod tests {
 from pathlib import Path
 
 args = sys.argv[1:]
+if "--help" in args:
+    print("--output-format json stream-json --resume")
+    sys.exit(0)
+if args[:2] == ["auth", "status"]:
+    print(json.dumps({"loggedIn": True}))
+    sys.exit(0)
 if "--version" in args:
     print("2.1.0 (Claude Code fake fixture)")
     sys.exit(0)

@@ -723,90 +723,73 @@ pub fn parse_claude_output(
     })
 }
 
-/// Probe host capabilities for a configured Claude harness grant without invoking model turns.
-pub fn probe_capabilities(
-    data_dir: &Path,
-    grant: &ClaudeHarnessGrant,
-) -> ClaudeCapabilityReport {
-    let mut cmd = if let Some(ref ssh_host) = grant.remote_ssh_target {
-        let mut c = Command::new("ssh");
-        c.args(["-o", "BatchMode=yes", "-o", "ConnectTimeout=8", ssh_host]);
-        c.arg(format!("{} --version < /dev/null", shell_quote(&grant.claude_bin)));
-        c
+// Commands are built against the execution host, never a mixture of local and remote probes.
+fn host_command(grant: &ClaudeHarnessGrant, executable: &str, args: &[&str]) -> Command {
+    if let Some(target) = &grant.remote_ssh_target {
+        let mut command = Command::new("ssh");
+        let line = std::iter::once(executable).chain(args.iter().copied())
+            .map(shell_quote).collect::<Vec<_>>().join(" ");
+        command.args(["-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "--", target]);
+        command.arg(format!("{line} < /dev/null"));
+        command
     } else {
-        let mut c = Command::new(&grant.claude_bin);
-        for arg in &grant.claude_args_prefix {
-            c.arg(arg);
+        let mut command = Command::new(executable);
+        if executable == grant.claude_bin {
+            command.args(&grant.claude_args_prefix);
         }
-        c.arg("--version");
-        c
-    };
-    let version_out = cmd
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .output()
-        .ok();
-    let (available, version) = match version_out {
-        Some(out) if out.status.success() => {
-            let text = String::from_utf8_lossy(&out.stdout).trim().to_owned();
-            (true, Some(if text.is_empty() { "claude-cli".to_owned() } else { text }))
-        }
-        _ => (false, None),
-    };
+        command.args(args);
+        command
+    }
+}
 
-    let tmux_bin = grant.tmux_bin.as_deref().unwrap_or("tmux");
-    let tmux_out = Command::new(tmux_bin)
-        .arg("-V")
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .output()
-        .ok();
-    let (tmux_available, tmux_version) = match tmux_out {
-        Some(out) if out.status.success() => {
-            let text = String::from_utf8_lossy(&out.stdout).trim().to_owned();
-            (true, Some(text))
-        }
-        _ => (false, None),
-    };
+fn observed_auth(raw: Option<&[u8]>) -> &'static str {
+    match raw.and_then(|b| serde_json::from_slice::<Value>(b).ok())
+        .and_then(|v| v.get("loggedIn").and_then(Value::as_bool)) {
+        Some(true) => "authenticated",
+        Some(false) => "missing",
+        None => "unverified",
+    }
+}
 
-    let cwd_available = Path::new(&grant.cwd).is_dir();
-    let auth_status = match grant.auth_configured {
-        Some(true) => "authenticated".to_owned(),
-        Some(false) => "missing".to_owned(),
-        None => {
-            if available {
-                "authenticated".to_owned()
-            } else {
-                "unverified".to_owned()
-            }
-        }
+/// Read-only observations on the execution host. Configuration is not login evidence.
+pub fn probe_capabilities(_data_dir: &Path, grant: &ClaudeHarnessGrant) -> ClaudeCapabilityReport {
+    let probe = |bin: &str, args: &[&str]| {
+        host_command(grant, bin, args).stdin(Stdio::null())
+            .stdout(Stdio::piped()).stderr(Stdio::null()).output().ok()
     };
-    let execution_mode = if grant.prefer_tmux && tmux_available {
-        "tmux".to_owned()
-    } else {
-        "process".to_owned()
-    };
-    let _ = data_dir;
-
+    let version_out = probe(&grant.claude_bin, &["--version"]);
+    let available = version_out.as_ref().is_some_and(|o| o.status.success());
+    let version = version_out.filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned());
+    let tmux = probe(grant.tmux_bin.as_deref().unwrap_or("tmux"), &["-V"]);
+    let tmux_available = tmux.as_ref().is_some_and(|o| o.status.success());
+    let tmux_version = tmux.filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned());
+    let cwd_available = if grant.remote_ssh_target.is_some() {
+        grant.remote_cwd.as_deref().is_some_and(|cwd|
+            probe("test", &["-d", cwd]).is_some_and(|o| o.status.success()))
+    } else { Path::new(&grant.cwd).is_dir() };
+    let auth = probe(&grant.claude_bin, &["auth", "status", "--json"]);
+    let auth_status = observed_auth(auth.as_ref().filter(|o| o.status.success())
+        .map(|o| o.stdout.as_slice())).to_owned();
+    let help = probe(&grant.claude_bin, &["--help"]);
+    let help_text = help.filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).into_owned()).unwrap_or_default();
+    // Remote SSH execution needs a resident receipt/process supervisor. The old
+    // branch would start local tmux and could report remote cancellation falsely.
+    let execution_mode = if grant.remote_ssh_target.is_some() {
+        "remote_supervisor_required"
+    } else if grant.prefer_tmux && tmux_available { "tmux" } else { "process" };
     ClaudeCapabilityReport {
-        grant_id: grant.id.clone(),
-        connection_id: grant.connection_id.clone(),
-        session_id: grant.session_id.clone(),
-        harness: "claude".to_owned(),
-        tool_label: "Claude".to_owned(),
-        binary_path: grant.claude_bin.clone(),
-        available,
-        version,
-        auth_status,
-        supports_output_format_json: true,
-        supports_output_format_stream_json: true,
-        supports_resume: true,
-        tmux_available,
-        tmux_version,
-        execution_mode,
-        cwd_available,
-        observed_at: now_millis(),
+        grant_id: grant.id.clone(), connection_id: grant.connection_id.clone(),
+        session_id: grant.session_id.clone(), harness: "claude".to_owned(),
+        tool_label: "Claude".to_owned(), binary_path: grant.claude_bin.clone(),
+        available, version, auth_status,
+        supports_output_format_json: help_text.contains("--output-format") && help_text.contains("json"),
+        supports_output_format_stream_json: help_text.contains("--output-format") && help_text.contains("stream-json"),
+        supports_resume: help_text.contains("--resume"),
+        tmux_available, tmux_version, execution_mode: execution_mode.to_owned(),
+        cwd_available, observed_at: now_millis(),
     }
 }
 
@@ -1300,6 +1283,9 @@ pub fn dispatch_prompt(
         return inspect_or_finalize_execution(data_dir, grant, &req_hash);
     }
 
+    if grant.remote_ssh_target.is_some() {
+        return Err("CLAUDE_REMOTE_SUPERVISOR_REQUIRED");
+    }
     let mut session_state = load_session_state(data_dir, grant)?;
     if let Some(max_rev) = grant.max_revisions {
         let existing_versions = load_artifact_versions(data_dir, &grant.id)?;
@@ -1704,6 +1690,9 @@ pub fn inspect_or_finalize_execution(
     let exit_code_path = dir.join("exit_code.txt");
     let stdout_path = dir.join("stdout.json");
 
+    if grant.remote_ssh_target.is_some() && !receipt_path.is_file() {
+        return Err("CLAUDE_REMOTE_RECONCILIATION_REQUIRED");
+    }
     if !exit_code_path.is_file() {
         let now = now_millis();
         if now.saturating_sub(started.started_at) as u64 > started.timeout_ms {
@@ -1874,6 +1863,10 @@ pub fn cancel_execution(
         return Err("CLAUDE_EXECUTION_NOT_FOUND");
     }
     let started: StartedExecutionRecord = read_json_file(&started_path)?;
+    if grant.remote_ssh_target.is_some() {
+        // Retain receipt and lease: killing a local SSH client is not remote cleanup.
+        return Err("CLAUDE_CANCEL_CLEANUP_UNCONFIRMED");
+    }
     let tmux_bin = grant.tmux_bin.as_deref().unwrap_or("tmux");
     let cleaned = kill_execution_process(
         tmux_bin,
@@ -1921,6 +1914,10 @@ pub fn reconcile_grant(
             continue;
         }
         let started: StartedExecutionRecord = read_json_file(&started_path)?;
+        if grant.remote_ssh_target.is_some() {
+            return Err("CLAUDE_REMOTE_RECONCILIATION_REQUIRED");
+        }
+
         let exit_code_path = path.join("exit_code.txt");
         if exit_code_path.is_file() {
             if let Ok(mut finalized) =
@@ -2143,6 +2140,12 @@ if hold_ms > 0:
     time.sleep(hold_ms / 1000.0)
 
 args = sys.argv[1:]
+if "--help" in args:
+    print("--output-format json stream-json --resume")
+    sys.exit(0)
+if args[:2] == ["auth", "status"]:
+    print(json.dumps({"loggedIn": True}))
+    sys.exit(0)
 if "--version" in args:
     print("2.1.0 (Claude Code fake fixture)")
     sys.exit(0)
@@ -2476,5 +2479,35 @@ else:
             Some("CLAUDE_RESTART_INTERRUPTED")
         );
         assert!(crash_rec.recovered);
+    }
+}
+
+#[cfg(test)]
+mod host_probe_regressions {
+    use super::*;
+    #[test]
+    fn remote_host_commands_and_dispatch_never_use_local_tmux() {
+        let dir = tempfile::tempdir().unwrap();
+        let grant: ClaudeHarnessGrant = serde_json::from_value(json!({
+            "id":"probe","connection_id":"node","session_id":"session","title":"Probe",
+            "cwd":dir.path().to_string_lossy(),"remote_ssh_target":"configured-node",
+            "remote_cwd":"/workspace/with space","claude_bin":"/bin/claude"
+        })).unwrap();
+        let command=host_command(&grant,"test", &["-d","/workspace/with space"]);
+        assert_eq!(command.get_program(), "ssh");
+        let args=command.get_args().map(|s|s.to_string_lossy().into_owned()).collect::<Vec<_>>();
+        assert!(args.last().unwrap().contains("'/workspace/with space'"));
+        assert_eq!(dispatch_prompt(dir.path(),&grant,"r","hello",ClaudeDispatchOptions {
+            parent_version_id:None,detached_hold_ms:None,capsule_wire_override:None
+        }).unwrap_err(), "CLAUDE_REMOTE_SUPERVISOR_REQUIRED");
+        assert!(!dir.path().join(HARNESS_DIR).exists());
+    }
+    #[test]
+    fn authentication_requires_observed_boolean_not_cli_presence() {
+        assert_eq!(observed_auth(None), "unverified");
+        assert_eq!(observed_auth(Some(b"Claude 2.1")), "unverified");
+        assert_eq!(observed_auth(Some(br#"{"loggedIn":"true"}"#)), "unverified");
+        assert_eq!(observed_auth(Some(br#"{"loggedIn":false}"#)), "missing");
+        assert_eq!(observed_auth(Some(br#"{"loggedIn":true}"#)), "authenticated");
     }
 }

@@ -13,6 +13,26 @@ pub struct Message {
     pub sequence: i64,
     pub role: String,
     pub text: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<i64>,
+}
+fn extract_timestamp_ms(record: &Value, event: &Value) -> Option<i64> {
+    for candidate in [
+        &event["timestamp"],
+        &event["createdAt"],
+        &event["created_at"],
+        &event["ts"],
+        &record["timestamp"],
+        &record["createdAt"],
+        &record["created_at"],
+        &event["data"]["timestamp"],
+        &event["data"]["createdAt"],
+    ] {
+        if let Some(n) = candidate.as_i64().filter(|&n| n > 0) {
+            return Some(if n < 1_000_000_000_000 && n > 1_000_000_000 { n * 1000 } else { n });
+        }
+    }
+    None
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct History {
@@ -57,8 +77,9 @@ pub fn project_history(address: SessionAddress, snapshot: &Value) -> Result<Hist
         }
         let text = text.join("\n");
         if !text.is_empty() {
+            let created_at = extract_timestamp_ms(record, event);
             messages.retain(|m| m.sequence != sequence);
-            messages.push(Message { sequence, role: role.into(), text });
+            messages.push(Message { sequence, role: role.into(), text, created_at });
         }
     }
     messages.sort_by_key(|m| m.sequence);

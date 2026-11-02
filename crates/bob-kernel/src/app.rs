@@ -22,6 +22,8 @@ pub struct AppMessage {
     pub reply_to: Option<String>,
     pub request_id: Option<String>,
     pub source: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<i64>,
 }
 #[derive(Debug, Serialize)]
 pub struct AppReadiness {
@@ -134,7 +136,7 @@ impl LocalApp {
     }
     pub fn history(&self, session_id: &str) -> Result<Vec<AppMessage>> {
         self.ensure_active_conversation(session_id)?;
-        let mut query=self.store.db.prepare("SELECT m.id,m.content_json,coalesce((SELECT 'execution_' || e.status FROM executions e JOIN runner_dispatches d ON d.execution_id=e.id WHERE e.request_id=m.request_id AND d.runner_instance_id IN ('local-codex-v1','direct-provider-v1')),o.send_state,CASE WHEN m.acceptance='home' AND m.role='user' THEN 'home_accepted' ELSE 'reply_saved' END),m.role,m.request_id FROM messages m LEFT JOIN intent_outbox o ON o.request_id=m.request_id WHERE m.conversation_id=?1 AND (m.origin_device_id=?2 OR m.acceptance='home') ORDER BY m.created_at,m.rowid")?;
+        let mut query=self.store.db.prepare("SELECT m.id,m.content_json,coalesce((SELECT 'execution_' || e.status FROM executions e JOIN runner_dispatches d ON d.execution_id=e.id WHERE e.request_id=m.request_id AND d.runner_instance_id IN ('local-codex-v1','direct-provider-v1')),o.send_state,CASE WHEN m.acceptance='home' AND m.role='user' THEN 'home_accepted' ELSE 'reply_saved' END),m.role,m.request_id,m.created_at FROM messages m LEFT JOIN intent_outbox o ON o.request_id=m.request_id WHERE m.conversation_id=?1 AND (m.origin_device_id=?2 OR m.acceptance='home') ORDER BY m.created_at,m.rowid")?;
         let rows = query.query_map(params![session_id, self.origin], |r| {
             Ok((
                 r.get::<_, String>(0)?,
@@ -142,11 +144,12 @@ impl LocalApp {
                 r.get::<_, String>(2)?,
                 r.get::<_, String>(3)?,
                 r.get::<_, Option<String>>(4)?,
+                r.get::<_, Option<i64>>(5)?,
             ))
         })?;
         let mut result = Vec::new();
         for row in rows {
-            let (id, json, send_state, role, request_id) = row?;
+            let (id, json, send_state, role, request_id, created_at) = row?;
             let parsed: serde_json::Value = serde_json::from_str(&json)?;
             let content = parsed
                 .get("text")
@@ -168,6 +171,7 @@ impl LocalApp {
                     .get("reply_to")
                     .and_then(|v| v.as_str())
                     .map(str::to_owned),
+                created_at: created_at.filter(|&ts| ts > 0),
             });
         }
         Ok(result)

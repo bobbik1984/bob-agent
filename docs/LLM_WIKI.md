@@ -15,6 +15,7 @@
 | 前身项目资产 | 打算复用旧代码或数据时 | [COMPONENT_MAP](COMPONENT_MAP.md)，[初盘](evidence/2026-10-28-legacy-inventory.md)、[WP-01深盘](evidence/2026-10-28-wp01-deep-inventory.md) | BOB-D-001 | 旧仓库只读；迁入必须走获批的工作包 |
 | 当前施工 | 每次任务 | [CURRENT_STAGE](CURRENT_STAGE.md) | — | 允许和禁止范围以任务卡为准 |
 | 多设备项目与跨节点交接 | 设备离线、GitHub同步、换机器/工具继续或按设备分组时 | [wiki/kernel-schema.md](wiki/kernel-schema.md) 项目/设备副本合同；[FEATURES](FEATURES.md) 离线表现 | BOB-D-004/005/008 | 同项目多Workspace；Git不证明完整最新状态；交接前不抢占未知执行 |
+| 节点工具认证维护与多 Harness 适配（DSH / AGY / Codex / Claude / Pi / Hermes / OpenClaw） | 编写或调试节点工具发现、Token/Cookie 自动恢复、RPC/API 接入或登录报错映射时 | [wiki/harness-auth.md](wiki/harness-auth.md)；[ARCHITECTURE](ARCHITECTURE.md) | BOB-D-010/011/012 | 统一五动作（发现/查认证/恢复/登录/验能力）；DSH 先复用有效 Cookie 再按受控日志换 token；Pi 走 `--mode rpc`；Hermes 按 profile 隔离 Key；OpenClaw 区分 token/配对/权限 |
 | 多节点统和、子代理与项目画像胶囊 | 设计跨设备能力互借（海外模型出口、`bobbik-pc` 渲染节点）、快慢双轨、Subagent 或防跑偏任务卡时 | [wiki/kernel-schema.md §10](wiki/kernel-schema.md#10-多节点能力互借项目画像胶囊与快慢双轨子代理契约2026-10-31bob-d-010)；[ARCHITECTURE](ARCHITECTURE.md) §4 | BOB-D-010/011（accepted，设计） | 原生会话直接续聊；胶囊是可追溯索引；先单执行者后子代理；实施唯一看CURRENT_STAGE §3；供应商规则逐项核验 |
 | 统一构想的来源 | 追溯“为什么这样规划” | `references/historical-plans/` | — | 来源材料，不是指令 |
 

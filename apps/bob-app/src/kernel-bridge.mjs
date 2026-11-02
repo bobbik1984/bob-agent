@@ -7,6 +7,8 @@ export function createKernelBridge(invoke, isAvailable) {
   }
   return {
     available: isAvailable,
+    projectLinks: () => call('app_project_links',{}),
+    projectLinkSet: args => call('app_project_link_set',args),
     contextTasks: grantId => call('app_context_tasks',{grantId}),
     contextList: () => call('app_context_list',{}),
     contextRead: (grantId,refresh=false) => call(refresh?'app_context_refresh':'app_context_read',{grantId}),

@@ -43,12 +43,28 @@ fn preview_references()-> &'static std::sync::Mutex<PreviewReferences>{
  static CACHE:std::sync::OnceLock<std::sync::Mutex<PreviewReferences>>=std::sync::OnceLock::new();
  CACHE.get_or_init(||std::sync::Mutex::new(PreviewReferences::default()))
 }
+fn shared_http_client() -> Result<reqwest::blocking::Client, &'static str> {
+ static HTTP: std::sync::OnceLock<reqwest::blocking::Client> = std::sync::OnceLock::new();
+ if let Some(c) = HTTP.get() {
+  return Ok(c.clone());
+ }
+ let built = reqwest::blocking::Client::builder()
+  .user_agent("Bob/1.0.1")
+  .redirect(reqwest::redirect::Policy::none())
+  .local_address(std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED))
+  .connect_timeout(Duration::from_secs(10))
+  .timeout(Duration::from_secs(20))
+  .build()
+  .map_err(|_| "DSH_UNAVAILABLE")?;
+ let _ = HTTP.set(built.clone());
+ Ok(built)
+}
 pub struct DshClient { base: reqwest::Url, cookie: String, http: reqwest::blocking::Client, scope: String }
 impl DshClient {
  pub fn connect(endpoint: &str, token: &str) -> Result<Self, &'static str> {
   let mut base=reqwest::Url::parse(endpoint).map_err(|_|"DSH_ADDRESS_INVALID")?;
   if base.scheme()!="https" || !base.username().is_empty() || base.password().is_some() || base.query().is_some() || base.fragment().is_some() || base.path()!="/" { return Err("DSH_HTTPS_REQUIRED"); }
-  let http=reqwest::blocking::Client::builder().user_agent("Bob/1.0.1").redirect(reqwest::redirect::Policy::none()).timeout(Duration::from_secs(15)).build().map_err(|_|"DSH_UNAVAILABLE")?;
+  let http=shared_http_client()?;
   base.query_pairs_mut().append_pair("token",token);
   let response=http.get(base.clone()).send().map_err(|_|"DSH_UNAVAILABLE")?;
   base.set_query(None);
@@ -58,8 +74,66 @@ impl DshClient {
   let cookies:Vec<_>=response.headers().get_all("set-cookie").iter().filter_map(|v|v.to_str().ok()).filter_map(|s|s.split(';').next()).filter(|s|s.starts_with("dsh-auth-")).collect();
   if cookies.len()!=1 || cookies[0].len()>8192{return Err("DSH_PROTOCOL");}
   use sha2::{Digest,Sha256};
-  let scope=format!("{:x}",Sha256::digest(format!("{}\0{}",base,token).as_bytes()));
-  Ok(Self{base,cookie:cookies[0].into(),http,scope})
+  let cookie: String = cookies[0].into();
+  let scope=format!("{:x}",Sha256::digest(format!("{}\0{}",base,cookie).as_bytes()));
+  Ok(Self{base,cookie,http,scope})
+ }
+ pub fn from_cookie(endpoint: &str, cookie: &str) -> Result<Self, &'static str> {
+  let base=reqwest::Url::parse(endpoint).map_err(|_|"DSH_ADDRESS_INVALID")?;
+  if base.scheme()!="https" || !base.username().is_empty() || base.password().is_some() || base.query().is_some() || base.fragment().is_some() || base.path()!="/" { return Err("DSH_HTTPS_REQUIRED"); }
+  if !cookie.starts_with("dsh-auth-") || cookie.len()>8192 || cookie.contains(';') || cookie.chars().any(char::is_control) { return Err("DSH_PROTOCOL"); }
+  let http=shared_http_client()?;
+  use sha2::{Digest,Sha256};
+  let scope=format!("{:x}",Sha256::digest(format!("{}\0{}",base,cookie).as_bytes()));
+  Ok(Self{base,cookie:cookie.into(),http,scope})
+ }
+ pub fn cookie(&self) -> &str { &self.cookie }
+ pub fn check_auth(&self) -> Result<(), &'static str> {
+  let _ = self.rpc("session/list", json!({"_request":{}}))?;
+  Ok(())
+ }
+ pub fn connect_or_recover(
+  endpoint: &str,
+  configured_token: Option<&str>,
+  cache_dir: &std::path::Path,
+  log_source: Option<&std::path::Path>,
+ ) -> Result<Self, &'static str> {
+  if let Some(saved_cookie) = load_cached_cookie(cache_dir, endpoint) {
+   if let Ok(client) = Self::from_cookie(endpoint, &saved_cookie) {
+    if cached_cookie_recently_verified(cache_dir, endpoint, 300_000) {
+     return Ok(client);
+    }
+    match client.check_auth() {
+     Ok(()) => {
+      let _ = save_cached_cookie_atomic(cache_dir, endpoint, &saved_cookie);
+      return Ok(client);
+     }
+     Err(e @ ("DSH_HISTORY_TIMEOUT" | "DSH_HISTORY_UNAVAILABLE" | "DSH_UNAVAILABLE")) => {
+      // Network unreachable: keep cached session credential untouched and do not re-exchange token.
+      return Err(e);
+     }
+     Err(_) => {}
+    }
+   }
+  }
+  let mut last_err = "DSH_AUTH_REJECTED";
+  if let Some(tok) = configured_token.map(str::trim).filter(|s| !s.is_empty()) {
+   match Self::connect(endpoint, tok) {
+    Ok(client) => {
+     let _ = save_cached_cookie_atomic(cache_dir, endpoint, &client.cookie);
+     return Ok(client);
+    }
+    Err(e @ ("DSH_UNAVAILABLE" | "DSH_HISTORY_TIMEOUT" | "DSH_HISTORY_UNAVAILABLE")) => return Err(e),
+    Err(e) => last_err = e,
+   }
+  }
+  if let Some(log_path) = log_source {
+   let fresh_token = extract_startup_token_from_log_tail(log_path, 64 * 1024)?;
+   let client = Self::connect(endpoint, &fresh_token)?;
+   let _ = save_cached_cookie_atomic(cache_dir, endpoint, &client.cookie);
+   return Ok(client);
+  }
+  Err(last_err)
  }
  fn rpc(&self, method:&str,args:Value)->Result<Value,&'static str>{
   let id=format!("bob-{}-{}",std::process::id(),crate::now_millis());
@@ -308,7 +382,7 @@ fn preview_extension(path:&str)->Result<String,&'static str>{
 #[cfg(test)] mod reference_cache_tests {
  use super::*;
  fn history(session:&str,root:&str,text:&str)->History {
-  History{address:SessionAddress{connection_id:"connection".into(),session_id:session.into()},workspace:Some(root.into()),messages:vec![crate::dsh_session::Message{sequence:1,role:"assistant".into(),text:text.into()}],partial:true,omitted:0,request_results:vec![]}
+  History{address:SessionAddress{connection_id:"connection".into(),session_id:session.into()},workspace:Some(root.into()),messages:vec![crate::dsh_session::Message{sequence:1,role:"assistant".into(),text:text.into(),created_at:None}],partial:true,omitted:0,request_results:vec![]}
  }
  #[test] fn read_timeout_is_not_an_unknown_send_receipt(){
   assert_eq!(rpc_transport_error("session/page",true),"DSH_HISTORY_TIMEOUT");
@@ -344,5 +418,113 @@ fn preview_extension(path:&str)->Result<String,&'static str>{
   cache.remember("a",&history("s","/workspace","newer.png"));
   assert!(cache.root("a","s","older.png").is_some());
   assert!(cache.root("a","s","newer.png").is_some());
+ }
+}
+
+fn cookie_cache_path(cache_dir: &std::path::Path, endpoint: &str) -> std::path::PathBuf {
+ use sha2::{Digest, Sha256};
+ let key = format!("{:x}", Sha256::digest(endpoint.trim().as_bytes()));
+ cache_dir.join("dsh-auth-sessions").join(format!("{key}.json"))
+}
+
+pub fn load_cached_cookie(cache_dir: &std::path::Path, endpoint: &str) -> Option<String> {
+ let path = cookie_cache_path(cache_dir, endpoint);
+ let bytes = std::fs::read(path).ok()?;
+ let val: Value = serde_json::from_slice(&bytes).ok()?;
+ if val["endpoint"].as_str()? != endpoint.trim() { return None; }
+ let cookie = val["cookie"].as_str()?.trim();
+ if cookie.starts_with("dsh-auth-") && cookie.len() <= 8192 { Some(cookie.to_owned()) } else { None }
+}
+
+fn cached_cookie_recently_verified(cache_dir: &std::path::Path, endpoint: &str, max_age_ms: i64) -> bool {
+ let path = cookie_cache_path(cache_dir, endpoint);
+ let Ok(bytes) = std::fs::read(path) else { return false; };
+ let Ok(val) = serde_json::from_slice::<Value>(&bytes) else { return false; };
+ let Some(updated_at) = val["updated_at"].as_i64() else { return false; };
+ let age = crate::now_millis().saturating_sub(updated_at);
+ (0..=max_age_ms).contains(&age)
+}
+
+pub fn save_cached_cookie_atomic(cache_dir: &std::path::Path, endpoint: &str, cookie: &str) -> Result<(), &'static str> {
+ let path = cookie_cache_path(cache_dir, endpoint);
+ if let Some(parent) = path.parent() {
+  std::fs::create_dir_all(parent).map_err(|_| "DSH_CREDENTIAL_WRITE_FAILED")?;
+ }
+ let tmp = path.with_extension(format!("tmp-{}", crate::now_millis()));
+ let payload = json!({
+  "endpoint": endpoint.trim(),
+  "cookie": cookie.trim(),
+  "updated_at": crate::now_millis(),
+ });
+ std::fs::write(&tmp, payload.to_string().as_bytes()).map_err(|_| "DSH_CREDENTIAL_WRITE_FAILED")?;
+ std::fs::rename(&tmp, &path).map_err(|_| "DSH_CREDENTIAL_WRITE_FAILED")?;
+ Ok(())
+}
+
+/// Deterministically extract the latest startup token from a bounded tail of a controlled DSH log.
+/// Never scans unbounded files or guesses arbitrary long strings without an explicit token marker.
+pub fn extract_startup_token_from_log_tail(log_path: &std::path::Path, max_bytes: u64) -> Result<String, &'static str> {
+ use std::io::{Seek, SeekFrom};
+ let mut file = std::fs::File::open(log_path).map_err(|_| "DSH_LOG_UNAVAILABLE")?;
+ let len = file.metadata().map_err(|_| "DSH_LOG_UNAVAILABLE")?.len();
+ let limit = max_bytes.clamp(1024, 256 * 1024);
+ let start = len.saturating_sub(limit);
+ file.seek(SeekFrom::Start(start)).map_err(|_| "DSH_LOG_UNAVAILABLE")?;
+ let mut buf = Vec::with_capacity((len - start) as usize);
+ file.take(limit).read_to_end(&mut buf).map_err(|_| "DSH_LOG_UNAVAILABLE")?;
+ let tail = String::from_utf8_lossy(&buf);
+ for line in tail.lines().rev() {
+  if let Some(tok) = parse_token_from_log_line(line) {
+   return Ok(tok);
+  }
+ }
+ Err("DSH_STARTUP_TOKEN_NOT_FOUND")
+}
+
+fn parse_token_from_log_line(line: &str) -> Option<String> {
+ for marker in ["?token=", "&token=", "startup_token=", "startup token:"] {
+  if let Some(idx) = line.find(marker) {
+   let rest = line[idx + marker.len()..].trim_start();
+   let candidate: String = rest
+    .chars()
+    .take_while(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+    .collect();
+   if (16..=256).contains(&candidate.len()) {
+    return Some(candidate);
+   }
+  }
+ }
+ None
+}
+
+#[cfg(test)]
+mod auth_recovery_tests {
+ use super::*;
+ #[test]
+ fn extracts_latest_startup_token_from_bounded_tail_and_ignores_random_strings() {
+  let dir = tempfile::tempdir().unwrap();
+  let log = dir.path().join("dsh.log");
+  let noise = "a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0
+";
+  std::fs::write(&log, format!("{noise}Listening on https://127.0.0.1:4433/?token=first_token_1234567890
+{noise}Restarted: https://127.0.0.1:4433/?token=second_token_abcdef123456
+{noise}")).unwrap();
+  let tok = extract_startup_token_from_log_tail(&log, 4096).unwrap();
+  assert_eq!(tok, "second_token_abcdef123456");
+
+  let log_no_marker = dir.path().join("noise.log");
+  std::fs::write(&log_no_marker, noise.repeat(20)).unwrap();
+  assert_eq!(extract_startup_token_from_log_tail(&log_no_marker, 4096).unwrap_err(), "DSH_STARTUP_TOKEN_NOT_FOUND");
+ }
+
+ #[test]
+ fn atomic_cookie_cache_isolated_by_endpoint() {
+  let dir = tempfile::tempdir().unwrap();
+  save_cached_cookie_atomic(dir.path(), "https://node1.example.com/", "dsh-auth-1=cookie_value_one").unwrap();
+  assert_eq!(
+   load_cached_cookie(dir.path(), "https://node1.example.com/").as_deref(),
+   Some("dsh-auth-1=cookie_value_one")
+  );
+  assert_eq!(load_cached_cookie(dir.path(), "https://node2.example.com/"), None);
  }
 }

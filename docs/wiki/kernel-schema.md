@@ -583,3 +583,7 @@ workspace_handoff需记录来源/目标实例、精确commit、dirty内容清单
 宿主每5秒核对显式授权文件及Git状态，提取失败保留旧版并在读回核对时标明不可用。active胶囊是可更新索引；dispatch请求固定的胶囊/任务卡是只读引用，后台更新不替换它。重试按原请求/目标/原文hash/固定版本核对，旧基线变化拒绝继续；需要新请求才能绑定新材料。未绑定原会话仍直接续聊，不强制包装。
 
 绑定目标的任务卡包含原始goal、capsule_id、baseline、source_manifest、excerpts/truncated及数据性质和执行前核对约束。实际传输发送装配后的wire，既有回执继续绑定原用户文本，固定记录同时保存原文和wire的hash。字段不能冒充已有Task/Execution、权限、预算或人工接受；当前远端真实执行/成果治理尚未验收。自动刷新不发任务、不调用模型、不扩展源清单。
+
+### 本实例项目会话关联（迁移0010，网页接线中）
+
+project_session_links以(connection_id,harness,native_session_id)为主键，引用本地Project并持有owner_instance/version/updated_at。接口不接收调用方自称owner；版本CAS避免覆盖，解除关联写空project_id并递增版本，保留墓碑。关联仅为目录组织，不修改源消息、不创建执行、不转移工作区写权。项目视图按(owner_instance,project_id)聚合，未关联项仍按原连接/目录隔离；设备视图保留来源。跨实例关联同步与设备稳定身份迁移尚未实现。

@@ -892,6 +892,17 @@ pub fn handle_rpc_command(ctx: &mut NodeContext, command: &str, args: &Value) ->
             let id = args.get("id").and_then(Value::as_str).unwrap_or("");
             ctx.runtime.delete_custom_model(&mut ctx.app, id)
         }
+        "app_project_links" => ctx.app.project_session_links().map_err(|_| "PROJECT_LINK_READ_FAILED"),
+        "app_project_link_set" => {
+            ctx.app.set_project_session_link(
+                args["connectionId"].as_str().ok_or("PROJECT_LINK_TARGET_REQUIRED")?,
+                args["harness"].as_str().ok_or("PROJECT_LINK_TARGET_REQUIRED")?,
+                args["sessionId"].as_str().ok_or("PROJECT_LINK_TARGET_REQUIRED")?,
+                args["projectId"].as_str(),
+                args["expectedVersion"].as_i64().ok_or("PROJECT_LINK_VERSION_REQUIRED")?,
+                now_millis(),
+            ).map_err(|_| "PROJECT_LINK_CONFLICT")
+        }
         "app_remote_node_save" => {
             let id = args.get("id").and_then(Value::as_str).map(str::to_owned);
             let name = args.get("name").or_else(|| args.get("label")).and_then(Value::as_str).unwrap_or("");
@@ -1078,6 +1089,9 @@ pub fn handle_rpc_command(ctx: &mut NodeContext, command: &str, args: &Value) ->
             serde_json::to_value(exec).map_err(|_| "EXECUTION_READ_FAILED")
         }
         "app_dsh_receipt" => {
+            if args.get("sessionId").and_then(Value::as_str).is_some_and(bob_runtime::agy_directory::owns_session) {
+                return Err("AGY_HISTORY_NOT_CONNECTED");
+            }
             if let Some(v) = claude_rpc::try_handle_dsh_command(&ctx.runtime.data_dir, command, args)? {
                 return Ok(v);
             }
@@ -1090,11 +1104,20 @@ pub fn handle_rpc_command(ctx: &mut NodeContext, command: &str, args: &Value) ->
         "app_dsh_page" | "app_dsh_preview" | "app_dsh_list" | "app_dsh_history" | "app_dsh_prompt" => {
             let connection=args["connectionId"].as_str().ok_or("DSH_CONNECTION_REQUIRED")?;
             if command=="app_dsh_list" {
-                return claude_rpc::merge_claude_into_dsh_list(
-                    &ctx.runtime.data_dir,
-                    connection,
+                let base = claude_rpc::merge_claude_into_dsh_list(
+                    &ctx.runtime.data_dir, connection,
                     ctx.runtime.dsh_client(connection).and_then(|c| c.list()),
                 );
+                let agy = bob_runtime::agy_directory::list(&ctx.runtime.data_dir,connection);
+                let mut base = base?;
+                // Preserve DSH availability if this optional harness cannot be reached.
+                if let Ok(extra) = agy {
+                    if let Some(rows)=base.as_array_mut() { rows.extend(extra); }
+                }
+                return Ok(base);
+            }
+            if args.get("sessionId").and_then(Value::as_str).is_some_and(bob_runtime::agy_directory::owns_session) {
+                return Err("AGY_HISTORY_NOT_CONNECTED");
             }
             if let Some(v) = claude_rpc::try_handle_dsh_command(&ctx.runtime.data_dir, command, args)? {
                 return Ok(v);
@@ -1817,6 +1840,126 @@ pub fn handle_client_v1_http(
     (404, json!({ "code": "CLIENT_ROUTE_NOT_FOUND" }))
 }
 
+fn execute_unlocked_harness_rpc(
+    data_dir: &Path,
+    command: &str,
+    args: &Value,
+) -> Result<Value, &'static str> {
+    match command {
+        "app_context_list" | "app_context_read" | "app_context_refresh" | "app_context_tasks" => {
+            context_capsule::rpc(data_dir, command, args)
+        }
+        "app_claude_capabilities"
+        | "app_claude_sessions"
+        | "app_claude_history"
+        | "app_claude_prompt"
+        | "app_claude_cancel"
+        | "app_claude_reconcile"
+        | "app_claude_review"
+        | "app_claude_artifacts"
+        | "app_claude_preview" => claude_rpc::rpc(data_dir, command, args),
+        "app_dsh_receipt" => {
+            if args
+                .get("sessionId")
+                .and_then(Value::as_str)
+                .is_some_and(bob_runtime::agy_directory::owns_session)
+            {
+                return Err("AGY_HISTORY_NOT_CONNECTED");
+            }
+            if let Some(v) = claude_rpc::try_handle_dsh_command(data_dir, command, args)? {
+                return Ok(v);
+            }
+            bob_runtime::dsh_transport::inspect_receipt(
+                data_dir,
+                args["connectionId"].as_str().ok_or("DSH_CONNECTION_REQUIRED")?,
+                args["sessionId"].as_str().ok_or("DSH_SESSION_REQUIRED")?,
+                args["text"].as_str().ok_or("DSH_TEXT_REQUIRED")?,
+                args["requestId"].as_str().ok_or("DSH_REQUEST_REQUIRED")?,
+            )
+        }
+        "app_dsh_page" | "app_dsh_preview" | "app_dsh_list" | "app_dsh_history" | "app_dsh_prompt" => {
+            let connection = args["connectionId"].as_str().ok_or("DSH_CONNECTION_REQUIRED")?;
+            let runtime = ModelHubRuntime::with_file_vault(data_dir.to_path_buf())?;
+            if command == "app_dsh_list" {
+                let base = claude_rpc::merge_claude_into_dsh_list(
+                    data_dir,
+                    connection,
+                    runtime.dsh_client(connection).and_then(|c| c.list()),
+                );
+                let agy = bob_runtime::agy_directory::list(data_dir, connection);
+                let mut base = base?;
+                if let Ok(extra) = agy {
+                    if let Some(rows) = base.as_array_mut() {
+                        rows.extend(extra);
+                    }
+                }
+                return Ok(base);
+            }
+            if args
+                .get("sessionId")
+                .and_then(Value::as_str)
+                .is_some_and(bob_runtime::agy_directory::owns_session)
+            {
+                return Err("AGY_HISTORY_NOT_CONNECTED");
+            }
+            if let Some(v) = claude_rpc::try_handle_dsh_command(data_dir, command, args)? {
+                return Ok(v);
+            }
+            if command == "app_dsh_prompt" {
+                let s = args["sessionId"].as_str().ok_or("DSH_SESSION_REQUIRED")?;
+                bob_runtime::claude_harness::check_workspace_not_locked_by_other(data_dir, connection, s)?;
+                context_capsule::before_dispatch(
+                    data_dir,
+                    connection,
+                    s,
+                    args["requestId"].as_str().ok_or("DSH_REQUEST_REQUIRED")?,
+                    args["text"].as_str().ok_or("DSH_TEXT_REQUIRED")?,
+                )?;
+            }
+            let client = runtime.dsh_client(connection)?;
+            match command {
+                "app_dsh_page" => client.history_page(
+                    bob_runtime::dsh_session::SessionAddress {
+                        connection_id: connection.into(),
+                        session_id: args["sessionId"].as_str().ok_or("DSH_SESSION_REQUIRED")?.into(),
+                    },
+                    args.get("before").filter(|v| !v.is_null()).map(|v| v.as_i64().ok_or("DSH_PAGE_CURSOR_INVALID")).transpose()?,
+                    args.get("through").filter(|v| !v.is_null()).map(|v| v.as_i64().ok_or("DSH_PAGE_CURSOR_INVALID")).transpose()?,
+                    args.get("after").filter(|v| !v.is_null()).map(|v| v.as_i64().ok_or("DSH_PAGE_CURSOR_INVALID")).transpose()?,
+                ),
+                "app_dsh_preview" => client.preview_if_changed(
+                    bob_runtime::dsh_session::SessionAddress {
+                        connection_id: connection.into(),
+                        session_id: args.get("sessionId").and_then(Value::as_str).ok_or("DSH_PROTOCOL")?.into(),
+                    },
+                    args.get("path").and_then(Value::as_str).ok_or("DSH_PROTOCOL")?,
+                    args.get("known").filter(|v| !v.is_null()),
+                ),
+                "app_dsh_history" => {
+                    let session = args["sessionId"].as_str().ok_or("DSH_SESSION_REQUIRED")?;
+                    serde_json::to_value(client.history(bob_runtime::dsh_session::SessionAddress {
+                        connection_id: connection.into(),
+                        session_id: session.into(),
+                    })?)
+                    .map_err(|_| "DSH_PROTOCOL")
+                }
+                _ => {
+                    let session = args["sessionId"].as_str().ok_or("DSH_SESSION_REQUIRED")?;
+                    let text = args["text"].as_str().filter(|s| !s.trim().is_empty() && s.len() <= 32000).ok_or("DSH_TEXT_REQUIRED")?;
+                    let request = args["requestId"].as_str().filter(|s| s.len() <= 200 && !s.is_empty()).ok_or("DSH_REQUEST_REQUIRED")?;
+                    let wire = context_capsule::before_dispatch(data_dir, connection, session, request, text)?;
+                    let res = bob_runtime::dsh_transport::dispatch_once(data_dir, connection, session, text, request, || {
+                        client.prompt(session, &wire, request)
+                    })?;
+                    let _ = bob_runtime::claude_harness::record_external_harness_turn_for_session(data_dir, connection, session, "dsh");
+                    Ok(res)
+                }
+            }
+        }
+        _ => Err("UNSUPPORTED_COMMAND"),
+    }
+}
+
 fn guess_content_type(path: &Path) -> &'static str {
     match path.extension().and_then(|e| e.to_str()).unwrap_or("") {
         "html" => "text/html; charset=utf-8",
@@ -1948,6 +2091,39 @@ fn handle_connection(mut stream: TcpStream, state: Arc<Mutex<NodeContext>>) {
             write_json_response(&mut stream,status,&value.to_string());
             return;
         }
+        if matches!(
+            command.trim(),
+            "app_dsh_receipt"
+                | "app_dsh_page"
+                | "app_dsh_preview"
+                | "app_dsh_list"
+                | "app_dsh_history"
+                | "app_dsh_prompt"
+                | "app_context_list"
+                | "app_context_read"
+                | "app_context_refresh"
+                | "app_context_tasks"
+                | "app_claude_capabilities"
+                | "app_claude_sessions"
+                | "app_claude_history"
+                | "app_claude_prompt"
+                | "app_claude_cancel"
+                | "app_claude_reconcile"
+                | "app_claude_review"
+                | "app_claude_artifacts"
+                | "app_claude_preview"
+        ) {
+            let cmd = command.trim();
+            let data_dir = guard.runtime.data_dir.clone();
+            drop(guard);
+            let result = execute_unlocked_harness_rpc(&data_dir, cmd, &args);
+            let (status, value) = match result {
+                Ok(result) => (200, json!({"ok": true, "result": result})),
+                Err(e) => (400, json!({"ok": false, "error": e})),
+            };
+            write_json_response(&mut stream, status, &value.to_string());
+            return;
+        }
         if command.trim()=="app_capture_recognize" {
             let prepared=(|| {
                 let image=guard.app.capture_media(args["mediaId"].as_str().unwrap_or("")).map_err(|_|"CAPTURE_IMAGE_MISSING")?;
@@ -1986,6 +2162,7 @@ fn handle_connection(mut stream: TcpStream, state: Arc<Mutex<NodeContext>>) {
                     notes: None,
                     schedule_id: None,
                     ticket: None,
+                    project_groups: None,
                 });
                 let title = proposal
                     .title

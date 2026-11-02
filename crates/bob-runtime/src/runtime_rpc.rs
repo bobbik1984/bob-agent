@@ -4,6 +4,7 @@
 use crate::capability_borrowing;
 use crate::claude_rpc;
 use crate::context_capsule;
+use crate::harness_auth;
 use crate::subagent_pool::{self, SubagentPoolCoordinator};
 use crate::FileVaultSecretStore;
 use serde_json::{json, Value};
@@ -17,6 +18,11 @@ pub fn is_runtime_rpc_command(command: &str) -> bool {
             | "app_context_read"
             | "app_context_refresh"
             | "app_context_tasks"
+            | "app_harness_discover"
+            | "app_harness_check_auth"
+            | "app_harness_recover_auth"
+            | "app_harness_begin_login"
+            | "app_harness_verify_capabilities"
             | "app_claude_capabilities"
             | "app_claude_sessions"
             | "app_claude_history"
@@ -50,6 +56,30 @@ pub fn dispatch_runtime_rpc(
         | "app_context_read"
         | "app_context_refresh"
         | "app_context_tasks" => context_capsule::rpc(data_dir, command, args),
+
+        "app_harness_discover"
+        | "app_harness_check_auth"
+        | "app_harness_recover_auth"
+        | "app_harness_begin_login"
+        | "app_harness_verify_capabilities" => {
+            let connection_id = args
+                .get("connectionId")
+                .or_else(|| args.get("connection_id"))
+                .and_then(Value::as_str)
+                .ok_or("HARNESS_CONNECTION_REQUIRED")?;
+            let tool = args
+                .get("tool")
+                .and_then(Value::as_str)
+                .ok_or("HARNESS_TOOL_REQUIRED")?;
+            let report = match command {
+                "app_harness_discover" => harness_auth::discover_tool(data_dir, connection_id, tool)?,
+                "app_harness_check_auth" => harness_auth::check_auth(data_dir, connection_id, tool)?,
+                "app_harness_recover_auth" => harness_auth::recover_auth(data_dir, connection_id, tool)?,
+                "app_harness_begin_login" => harness_auth::begin_login(data_dir, connection_id, tool)?,
+                _ => harness_auth::verify_capabilities(data_dir, connection_id, tool)?,
+            };
+            serde_json::to_value(report).map_err(|_| "HARNESS_SERIALIZE_FAILED")
+        }
 
         "app_claude_capabilities"
         | "app_claude_sessions"

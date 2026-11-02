@@ -146,10 +146,169 @@ pub fn refresh_changed(dir: &Path) -> Result<Value, &'static str> {
     Ok(json!(result))
 }
 
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq)]
+pub struct ExecutionAssertion {
+    pub assertion_id: String,
+    pub grant_id: String,
+    pub request_id: String,
+    pub connection_id: String,
+    pub session_id: String,
+    pub commit_sha: String,
+    pub verified_commands: Vec<String>,
+    pub evidence_summary: String,
+    pub confidence: f64,
+    pub write_lock_green: bool,
+    pub frozen_at: i64,
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub struct CritiqueGateVerdict {
+    pub action: String,
+    pub allow_blind_reversal: bool,
+    pub write_lease_locked: bool,
+    pub reason: String,
+    pub frozen_assertion_id: Option<String>,
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub struct WarmRestartState {
+    pub session_id: String,
+    pub located_files: Vec<String>,
+    pub failed_hypotheses: Vec<String>,
+    pub diff_digest: Option<String>,
+    pub updated_at: i64,
+}
+
+pub fn save_warm_restart_state(
+    dir: &Path,
+    grant_id: &str,
+    state: &WarmRestartState,
+) -> Result<(), &'static str> {
+    if state.session_id.is_empty() || state.located_files.len() > 64 || state.failed_hypotheses.len() > 32 {
+        return Err("CONTEXT_WARM_RESTART_INVALID");
+    }
+    let items = grants(dir)?;
+    let g = items.iter().find(|g| g.id == grant_id).ok_or("CONTEXT_NOT_AUTHORIZED")?;
+    let store_dir = store(dir, g);
+    std::fs::create_dir_all(&store_dir).map_err(|_| "CONTEXT_STORE_FAILED")?;
+    use sha2::{Digest, Sha256};
+    let key = format!("{:x}", Sha256::digest(state.session_id.as_bytes()));
+    let path = store_dir.join(format!("warm-{key}.json"));
+    let bytes = serde_json::to_vec(state).map_err(|_| "CONTEXT_SERIALIZATION_FAILED")?;
+    std::fs::write(path, bytes).map_err(|_| "CONTEXT_STORE_FAILED")
+}
+
+pub fn load_warm_restart_state(dir: &Path, grant_id: &str, session_id: &str) -> Option<WarmRestartState> {
+    let items = grants(dir).ok()?;
+    let g = items.iter().find(|g| g.id == grant_id)?;
+    use sha2::{Digest, Sha256};
+    let key = format!("{:x}", Sha256::digest(session_id.as_bytes()));
+    let bytes = std::fs::read(store(dir, g).join(format!("warm-{key}.json"))).ok()?;
+    serde_json::from_slice(&bytes).ok()
+}
+
+pub fn freeze_execution_assertion(
+    dir: &Path,
+    grant_id: &str,
+    request_id: &str,
+    commit_sha: &str,
+    verified_commands: Vec<String>,
+    evidence_summary: &str,
+    confidence: f64,
+    write_lock_green: bool,
+) -> Result<ExecutionAssertion, &'static str> {
+    if request_id.is_empty()
+        || commit_sha.is_empty()
+        || evidence_summary.trim().is_empty()
+        || !(0.0..=1.0).contains(&confidence)
+    {
+        return Err("CONTEXT_ASSERTION_INVALID");
+    }
+    let items = grants(dir)?;
+    let g = items.iter().find(|g| g.id == grant_id).ok_or("CONTEXT_NOT_AUTHORIZED")?;
+    let store_dir = store(dir, g);
+    std::fs::create_dir_all(&store_dir).map_err(|_| "CONTEXT_STORE_FAILED")?;
+    use sha2::{Digest, Sha256};
+    let key = format!("{:x}", Sha256::digest(request_id.as_bytes()));
+    let assertion = ExecutionAssertion {
+        assertion_id: format!("assert-{}", &key[..16]),
+        grant_id: grant_id.to_owned(),
+        request_id: request_id.to_owned(),
+        connection_id: g.connection_id.clone().unwrap_or_default(),
+        session_id: g.session_id.clone().unwrap_or_default(),
+        commit_sha: commit_sha.to_owned(),
+        verified_commands,
+        evidence_summary: evidence_summary.to_owned(),
+        confidence,
+        write_lock_green,
+        frozen_at: now_millis(),
+    };
+    let path = store_dir.join(format!("assertion-{key}.json"));
+    let bytes = serde_json::to_vec(&assertion).map_err(|_| "CONTEXT_SERIALIZATION_FAILED")?;
+    std::fs::write(&path, bytes).map_err(|_| "CONTEXT_STORE_FAILED")?;
+    std::fs::write(store_dir.join("latest-assertion"), &key).map_err(|_| "CONTEXT_STORE_FAILED")?;
+    Ok(assertion)
+}
+
+pub fn evaluate_critique_against_assertion(
+    dir: &Path,
+    grant_id: &str,
+    critique_text: &str,
+    has_explicit_evidence: bool,
+) -> Result<CritiqueGateVerdict, &'static str> {
+    let items = grants(dir)?;
+    let g = items.iter().find(|g| g.id == grant_id).ok_or("CONTEXT_NOT_AUTHORIZED")?;
+    let store_dir = store(dir, g);
+    let Ok(key) = std::fs::read_to_string(store_dir.join("latest-assertion")) else {
+        return Ok(CritiqueGateVerdict {
+            action: "allow_normal_execution".to_owned(),
+            allow_blind_reversal: false,
+            write_lease_locked: false,
+            reason: "no_prior_frozen_assertion".to_owned(),
+            frozen_assertion_id: None,
+        });
+    };
+    let bytes = std::fs::read(store_dir.join(format!("assertion-{}.json", key.trim())))
+        .map_err(|_| "CONTEXT_ASSERTION_READ_FAILED")?;
+    let assertion: ExecutionAssertion =
+        serde_json::from_slice(&bytes).map_err(|_| "CONTEXT_ASSERTION_READ_FAILED")?;
+
+    let text_has_concrete_signal = has_explicit_evidence
+        || critique_text.contains("panicked at")
+        || critique_text.contains("Error:")
+        || critique_text.contains("FAILED")
+        || critique_text.contains(".rs:")
+        || critique_text.contains(".mjs:")
+        || critique_text.contains(".vue:");
+
+    if assertion.confidence >= 0.90 && assertion.write_lock_green && !text_has_concrete_signal {
+        Ok(CritiqueGateVerdict {
+            action: "require_evidence_before_rewrite".to_owned(),
+            allow_blind_reversal: false,
+            write_lease_locked: true,
+            reason: "pre_committed_green_assertion_blocks_unsubstantiated_reversal".to_owned(),
+            frozen_assertion_id: Some(assertion.assertion_id),
+        })
+    } else {
+        Ok(CritiqueGateVerdict {
+            action: "allow_targeted_fix".to_owned(),
+            allow_blind_reversal: false,
+            write_lease_locked: false,
+            reason: if text_has_concrete_signal {
+                "concrete_defect_evidence_supplied".to_owned()
+            } else {
+                "assertion_confidence_below_lock_threshold".to_owned()
+            },
+            frozen_assertion_id: Some(assertion.assertion_id),
+        })
+    }
+}
+
 fn task_card(capsule: &ProjectContextCapsule, request_id: &str, text: &str) -> Value {
     json!({"schema":"bob-task-card-v1","request_id":request_id,"goal":text,
  "context_material":{"capsule_id":capsule.capsule_id,"baseline":capsule.baseline,"source_manifest":capsule.source_manifest,"excerpts":capsule.excerpts,"truncated":capsule.truncated,"kind":"untrusted_source_excerpts"},
- "execution_constraints":["Existing authorization and budget remain authoritative; this card grants no new permissions.","Verify the resident workspace commit and selected source hashes before edits; reject mismatches.","Read actual source files to locate code; excerpts do not establish line numbers or accepted decisions.","Preserve parent artifact/version references and report unverified requirements explicitly."],
+ "refactor_policy":{"inline_over_extraction":true,"stop_when_verification_green":true},
+ "execution_constraints":["Existing authorization and budget remain authoritative; this card grants no new permissions.","Verify the resident workspace commit and selected source hashes before edits; reject mismatches.","Read actual source files to locate code; excerpts do not establish line numbers or accepted decisions.","Preserve parent artifact/version references and report unverified requirements explicitly.","Prefer inline simplification over speculative abstraction extraction; stop modifying once target verification passes."],
  "fingerprint_scope":"selected_sources_and_git_status","permission_extension":false})
 }
 
@@ -332,5 +491,77 @@ mod task_card_tests {
             before_dispatch(&dir, "unbound", "native", "r", "hello").unwrap(),
             "hello"
         );
+    }
+}
+
+#[cfg(test)]
+mod reliability_guardrail_tests {
+    use super::*;
+
+    #[test]
+    fn pre_committed_assertion_blocks_unsubstantiated_reversal_but_allows_concrete_defect_evidence() {
+        let d = tempfile::tempdir().unwrap();
+        let root = d.path().join("repo");
+        std::fs::create_dir(&root).unwrap();
+        std::fs::write(
+            d.path().join("workspace-context-grants.json"),
+            serde_json::to_vec(&json!([{"id":"g1","project_id":"p","workspace_id":"w","owner_instance":"owner","root":root,"sources":[],"connection_id":"n","session_id":"s1"}])).unwrap(),
+        ).unwrap();
+
+        // Freeze pre-commitment checklist BEFORE reading next user critique
+        let assertion = freeze_execution_assertion(
+            d.path(),
+            "g1",
+            "req-100",
+            "abc1234",
+            vec!["cargo test -p bob-runtime".to_owned()],
+            "All 50 unit tests passed",
+            0.96,
+            true,
+        ).unwrap();
+        assert!(assertion.write_lock_green);
+
+        // Bare negative critique ("不对，逻辑有问题，重做") without evidence is blocked from blind reversal!
+        let verdict_bare = evaluate_critique_against_assertion(
+            d.path(),
+            "g1",
+            "不对，逻辑有问题，重做",
+            false,
+        ).unwrap();
+        assert_eq!(verdict_bare.action, "require_evidence_before_rewrite");
+        assert!(!verdict_bare.allow_blind_reversal);
+        assert!(verdict_bare.write_lease_locked);
+
+        // Critique with concrete file:line or failure evidence unlocks targeted fix!
+        let verdict_concrete = evaluate_critique_against_assertion(
+            d.path(),
+            "g1",
+            "Failed at src/dsh_session.rs:50 with Error: DSH_PROTOCOL",
+            false,
+        ).unwrap();
+        assert_eq!(verdict_concrete.action, "allow_targeted_fix");
+        assert!(!verdict_concrete.write_lease_locked);
+    }
+
+    #[test]
+    fn warm_restart_state_persists_located_files_and_failed_hypotheses() {
+        let d = tempfile::tempdir().unwrap();
+        let root = d.path().join("repo");
+        std::fs::create_dir(&root).unwrap();
+        std::fs::write(
+            d.path().join("workspace-context-grants.json"),
+            serde_json::to_vec(&json!([{"id":"g1","project_id":"p","workspace_id":"w","owner_instance":"owner","root":root,"sources":[],"connection_id":"n","session_id":"s1"}])).unwrap(),
+        ).unwrap();
+
+        let state = WarmRestartState {
+            session_id: "s1".to_owned(),
+            located_files: vec!["crates/bob-runtime/src/dsh_transport.rs".to_owned()],
+            failed_hypotheses: vec!["Token rotation invalidates existing cookie".to_owned()],
+            diff_digest: Some("sha256:deadbeef".to_owned()),
+            updated_at: 1700000000000,
+        };
+        save_warm_restart_state(d.path(), "g1", &state).unwrap();
+        let loaded = load_warm_restart_state(d.path(), "g1", "s1").unwrap();
+        assert_eq!(loaded, state);
     }
 }
