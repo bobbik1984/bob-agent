@@ -343,9 +343,12 @@ def read_session_page(cfg, sid):
                 if o.get('cwd') and (not ws or ws in ('/home/bobbik', '/home/ubuntu')):
                     ws = o['cwd']
                 ts, t = _ts(o.get('timestamp'), fb), o.get('type')
-                c = (o.get('message') or {}).get('content') if isinstance(o.get('message'), dict) else None
-                if t == 'user' and not o.get('isMeta') and isinstance(c, str) and not any(x in c for x in ('<command-name>', '<local-command', '<task-notification>')):
-                    push('user', c, ts)
+                msg = o.get('message') if isinstance(o.get('message'), dict) else {}
+                c = msg.get('content')
+                if (t == 'user' or (t == 'api-request-blob' and msg.get('role') == 'user')) and not o.get('isMeta'):
+                    utxt = c if isinstance(c, str) else '\n'.join(b.get('text', '') for b in c if isinstance(b, dict) and b.get('type') == 'text') if isinstance(c, list) else ''
+                    if utxt and not any(x in utxt for x in ('<command-name>', '<local-command', '<task-notification>')):
+                        push('user', utxt, ts)
                 elif t == 'assistant':
                     if isinstance(c, list):
                         for b in c:
@@ -458,10 +461,9 @@ def inspect_receipt(cfg):
 
 def _run_worker(cfg):
     sid, rid, text = cfg['session_id'], cfg['request_id'], cfg['text']
-    pcwd, wcwd, jpath = cfg.get('project_cwd') or str(Path.home()), cfg.get('work_cwd') or str(Path.home()), cfg.get('jsonl_path') or ''
+    pcwd, wcwd = cfg.get('project_cwd') or str(Path.home()), cfg.get('work_cwd') or str(Path.home())
     env = os.environ.copy()
     env['PATH'] = f"{Path.home() / '.local/bin'}:{Path.home() / '.npm-global/bin'}:/usr/local/bin:" + env.get('PATH', '')
-    bsize = Path(jpath).stat().st_size if jpath and Path(jpath).is_file() else 0
     reply = ''
     try:
         if sid.startswith('claude-jsonl:'):
@@ -469,14 +471,12 @@ def _run_worker(cfg):
             cbin = shutil.which('claude', path=env['PATH']) or '/home/bobbik/.local/bin/claude'
             pr = subprocess.run([cbin, '--resume', raw, '-p', text, '--dangerously-skip-permissions'],
                                 cwd=pcwd if Path(pcwd).is_dir() else str(Path.home()), env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=540)
-            asize = Path(jpath).stat().st_size if jpath and Path(jpath).is_file() else 0
-            if asize <= bsize:
-                if (pr.stdout or '').strip() and pr.returncode == 0:
-                    reply = pr.stdout.strip()
-                else:
-                    pr2 = subprocess.run([cbin, '-p', text, '--dangerously-skip-permissions'],
-                                         cwd=wcwd if Path(wcwd).is_dir() else str(Path.home()), env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=540)
-                    reply = (pr2.stdout or pr2.stderr or pr.stderr or 'Completed.').strip()
+            if (pr.stdout or '').strip() and pr.returncode == 0:
+                reply = pr.stdout.strip()
+            elif pr.returncode != 0:
+                pr2 = subprocess.run([cbin, '-p', text, '--dangerously-skip-permissions'],
+                                     cwd=wcwd if Path(wcwd).is_dir() else str(Path.home()), env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=540)
+                reply = (pr2.stdout or pr2.stderr or pr.stderr or 'Completed.').strip()
         elif sid.startswith('codex:'):
             cbin = shutil.which('codex', path=env['PATH']) or 'codex'
             pr = subprocess.run([cbin, 'exec', text], cwd=wcwd if Path(wcwd).is_dir() else str(Path.home()), env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=540)
@@ -500,7 +500,7 @@ def prompt_session(cfg):
     if not sid or not text or not rid:
         raise ValueError('DSH_REQUEST_REQUIRED')
     d = _load_r()
-    if rid in d and d[rid].get('session_id') == sid:
+    if rid in d and d[rid].get('session_id') == sid and (d[rid].get('execution_status') == 'running' or d[rid].get('reply_text')):
         return {'status': 'accepted', 'session_id': sid, 'request_id': rid}
     pcwd = wcwd = str(Path.home())
     jpath = ''
@@ -508,11 +508,13 @@ def prompt_session(cfg):
         raw, cdir = sid.split(':', 1)[1], cfg.get('claudeDataDir') or ''
         m = list((Path(cdir) / 'projects').glob(f'*/{raw}.jsonl')) if cdir else []
         if m:
-            jpath = str(m[0])
+            jpath, slug = str(m[0]), m[0].parent.name
             for _, o in _iter_jsonl(m[0], 60):
-                if o.get('cwd'):
-                    pcwd = wcwd = o['cwd']
-                    break
+                cw = o.get('cwd')
+                if cw:
+                    wcwd = cw
+                    if cw.replace('/', '-') == slug:
+                        pcwd = cw
     wcfg = json.dumps({'mode': 'worker', 'session_id': sid, 'request_id': rid, 'text': text, 'project_cwd': pcwd, 'work_cwd': wcwd, 'jsonl_path': jpath}, ensure_ascii=False)
     sf = Path.home() / '.bob_remote_probe.py'
     try:
