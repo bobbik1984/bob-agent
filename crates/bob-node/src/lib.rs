@@ -1089,9 +1089,6 @@ pub fn handle_rpc_command(ctx: &mut NodeContext, command: &str, args: &Value) ->
             serde_json::to_value(exec).map_err(|_| "EXECUTION_READ_FAILED")
         }
         "app_dsh_receipt" => {
-            if args.get("sessionId").and_then(Value::as_str).is_some_and(bob_runtime::agy_directory::owns_session) {
-                return Err("AGY_HISTORY_NOT_CONNECTED");
-            }
             if let Some(sid)=args.get("sessionId").and_then(Value::as_str).filter(|s|bob_runtime::agy_directory::owns_readable_session(s)) {
                 return bob_runtime::agy_directory::inspect_receipt(
                     &ctx.runtime.data_dir,
@@ -1127,9 +1124,6 @@ pub fn handle_rpc_command(ctx: &mut NodeContext, command: &str, args: &Value) ->
                     (Err(_), Ok(extra)) if !extra.is_empty() => return Ok(json!(extra)),
                     (Err(e), _) => return Err(e),
                 }
-            }
-            if args.get("sessionId").and_then(Value::as_str).is_some_and(bob_runtime::agy_directory::owns_session) {
-                return Err("AGY_HISTORY_NOT_CONNECTED");
             }
             if command=="app_dsh_page" {
                 if let Some(sid)=args.get("sessionId").and_then(Value::as_str).filter(|s|bob_runtime::agy_directory::owns_readable_session(s)) {
@@ -1884,13 +1878,6 @@ fn execute_unlocked_harness_rpc(
         | "app_claude_artifacts"
         | "app_claude_preview" => claude_rpc::rpc(data_dir, command, args),
         "app_dsh_receipt" => {
-            if args
-                .get("sessionId")
-                .and_then(Value::as_str)
-                .is_some_and(bob_runtime::agy_directory::owns_session)
-            {
-                return Err("AGY_HISTORY_NOT_CONNECTED");
-            }
             if let Some(sid) = args
                 .get("sessionId")
                 .and_then(Value::as_str)
@@ -1936,13 +1923,6 @@ fn execute_unlocked_harness_rpc(
                     (Err(_), Ok(extra)) if !extra.is_empty() => return Ok(json!(extra)),
                     (Err(e), _) => return Err(e),
                 }
-            }
-            if args
-                .get("sessionId")
-                .and_then(Value::as_str)
-                .is_some_and(bob_runtime::agy_directory::owns_session)
-            {
-                return Err("AGY_HISTORY_NOT_CONNECTED");
             }
             if command == "app_dsh_page" {
                 if let Some(sid) = args

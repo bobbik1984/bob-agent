@@ -44,5 +44,37 @@ class IndexTests(unittest.TestCase):
                 probe.discover(tmp)
             self.assertEqual(list(Path(tmp).iterdir()), [])
 
+    def test_agy_transcript_jsonl_makes_session_readable_and_parses_page(self):
+        import json
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            sid = str(__import__('uuid').UUID(int=7))
+            with closing(sqlite3.connect(root / 'conversation_summaries.db')) as db:
+                db.execute('CREATE TABLE conversation_summaries(conversation_id,title,workspace_uris,last_modified_time,step_count,status,parent_conversation_id)')
+                db.execute('INSERT INTO conversation_summaries VALUES(?,?,?,?,?,?,?)',
+                           (sid, 'Camera Tilt Lens Shift Analysis', '["file:///home/bobbik/dsh_projects/winter-shelter"]', '2026-11-03T13:17:47Z', 4, 'IDLE', ''))
+                db.commit()
+            log_dir = root / 'brain' / sid / '.system_generated' / 'logs'
+            log_dir.mkdir(parents=True)
+            (log_dir / 'transcript_full.jsonl').write_text(
+                '\n'.join([
+                    json.dumps({'step_index': 0, 'type': 'USER_INPUT', 'created_at': '2026-11-03T13:14:17Z', 'content': '<USER_REQUEST>\n/plan Read-only research\n</USER_REQUEST>'}),
+                    json.dumps({'step_index': 1, 'type': 'PLANNER_RESPONSE', 'created_at': '2026-11-03T13:14:22Z', 'thinking': 'Checking tilt_lens_shift', 'tool_calls': [{'name': 'run_command', 'args': {'CommandLine': 'grep -rn tilt_lens_shift scripts/'}}]}),
+                    json.dumps({'step_index': 2, 'type': 'PLANNER_RESPONSE', 'created_at': '2026-11-03T13:17:34Z', 'content': 'tests/test_build_session.gd:49 [BREAKS] Hardcodes base := deg_to_rad(13.5).'}),
+                ]),
+                encoding='utf-8',
+            )
+            out = probe.discover(root, 10)
+            self.assertTrue(out['sessions'][0]['historyReadable'])
+            self.assertIsNone(out['sessions'][0]['historyReason'])
+            page = probe.read_session_page({'agyDataDir': str(root)}, f'agy:{sid}')
+            self.assertEqual(page['harness'], 'agy')
+            self.assertEqual(page['workspace'], '/home/bobbik/dsh_projects/winter-shelter')
+            self.assertEqual(len(page['messages']), 2)
+            self.assertEqual(page['messages'][0]['role'], 'user')
+            self.assertEqual(page['messages'][0]['text'], '/plan Read-only research')
+            self.assertIn('```thinking', page['messages'][1]['text'])
+            self.assertIn('tests/test_build_session.gd:49', page['messages'][1]['text'])
+
 if __name__ == '__main__':
     unittest.main()

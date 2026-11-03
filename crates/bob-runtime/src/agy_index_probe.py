@@ -58,13 +58,17 @@ def discover(data_dir, limit=100):
         except (ValueError, TypeError, AttributeError):
             raise ValueError('AGY_INDEX_ROW_INVALID') from None
         h = root / 'conversations' / (sid + '.db')
-        loc = h.is_file() and not h.is_symlink() and h.resolve().is_relative_to(root)
+        tr_full = root / 'brain' / sid / '.system_generated' / 'logs' / 'transcript_full.jsonl'
+        tr_comp = root / 'brain' / sid / '.system_generated' / 'logs' / 'transcript.jsonl'
+        has_tr = (tr_full.is_file() and not tr_full.is_symlink()) or (tr_comp.is_file() and not tr_comp.is_symlink())
+        loc = has_tr or (h.is_file() and not h.is_symlink() and h.resolve().is_relative_to(root))
         out.append({
-            'nativeSessionId': sid, 'harness': 'agy', 'title': title, 'workspaceUris': uris,
+            'id': f'agy:{sid}', 'nativeSessionId': sid, 'harness': 'agy', 'toolLabel': 'AGY',
+            'title': title, 'workspaceUris': uris,
             'updatedAt': mod, 'stepCount': cnt, 'nativeStatus': st, 'sourceKind': 'agy_index',
-            'localHistoryPresent': loc, 'historyReadable': False,
-            'historyReason': 'AGY_HISTORY_CODEC_UNSUPPORTED' if loc else 'AGY_HISTORY_NOT_LOCAL',
-            'resumeVerified': False,
+            'localHistoryPresent': loc, 'historyReadable': has_tr,
+            'historyReason': None if has_tr else ('AGY_HISTORY_CODEC_UNSUPPORTED' if loc else 'AGY_HISTORY_NOT_LOCAL'),
+            'resumeVerified': has_tr,
         })
     return {'schemaVersion': 1, 'sessions': out, 'hasMore': len(rows) > limit,
             'authentication': 'unverified', 'source': 'local_readonly_index'}
@@ -326,7 +330,47 @@ def _reconcile(sid):
 def read_session_page(cfg, sid):
     ev, ws, h = [], '', 'dsh'
     push = lambda r, t, ts=0: ev.append((r, t.strip(), ts)) if (t or '').strip() else None
-    if sid.startswith('claude-jsonl:'):
+    if sid.startswith('agy:'):
+        h, raw, adir = 'agy', sid.split(':', 1)[1], cfg.get('agyDataDir') or ''
+        root = Path(adir) if adir else None
+        if root and root.is_dir():
+            idx = root / 'conversation_summaries.db'
+            if idx.is_file():
+                try:
+                    with closing(sqlite3.connect(idx.as_uri() + '?mode=ro', uri=True, timeout=2)) as db:
+                        row = db.execute('SELECT workspace_uris FROM conversation_summaries WHERE conversation_id=?', (raw,)).fetchone()
+                        if row and row[0]:
+                            uris = _j(row[0])
+                            if isinstance(uris, list) and uris and isinstance(uris[0], str):
+                                ws = uris[0].removeprefix('file://')
+                except Exception:
+                    pass
+            tf = root / 'brain' / raw / '.system_generated' / 'logs' / 'transcript_full.jsonl'
+            if not tf.is_file():
+                tf = root / 'brain' / raw / '.system_generated' / 'logs' / 'transcript.jsonl'
+            if tf.is_file():
+                fb = int(tf.stat().st_mtime * 1000)
+                for _, o in _iter_jsonl(tf):
+                    ts, tp = _ts(o.get('created_at'), fb), o.get('type')
+                    if tp == 'USER_INPUT':
+                        c = str(o.get('content') or '')
+                        m = re.search(r'<USER_REQUEST>\s*([\s\S]*?)\s*</USER_REQUEST>', c)
+                        utxt = (m.group(1) if m else re.sub(r'<ADDITIONAL_METADATA>[\s\S]*?</ADDITIONAL_METADATA>', '', c)).strip()
+                        if utxt:
+                            push('user', utxt, ts)
+                    elif tp == 'PLANNER_RESPONSE':
+                        th = str(o.get('thinking') or '').strip()
+                        if th:
+                            push('step', _thk(th), ts)
+                        for tc in o.get('tool_calls') or []:
+                            if isinstance(tc, dict) and tc.get('name'):
+                                a = tc.get('args') if isinstance(tc.get('args'), dict) else tc.get('arguments') if isinstance(tc.get('arguments'), dict) else {}
+                                d = a.get('CommandLine') or a.get('Path') or a.get('query') or a.get('Prompt') or tc.get('args') or ''
+                                push('step', _tstep(tc['name'], d), ts)
+                        ct = str(o.get('content') or '').strip()
+                        if ct:
+                            push('assistant', ct, ts)
+    elif sid.startswith('claude-jsonl:'):
         h, raw, cdir = 'claude', sid.split(':', 1)[1], cfg.get('claudeDataDir') or ''
         m = list((Path(cdir) / 'projects').glob(f'*/{raw}.jsonl')) if cdir else []
         if m:
@@ -515,6 +559,12 @@ def _run_worker(cfg):
             cbin = shutil.which('codex', path=env['PATH']) or 'codex'
             pr = subprocess.run([cbin, 'exec', text], cwd=wcwd if Path(wcwd).is_dir() else str(Path.home()), env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=3600)
             reply = (pr.stdout or pr.stderr or 'Completed.').strip()
+        elif sid.startswith('agy:'):
+            raw = sid.split(':', 1)[1]
+            cbin = shutil.which('agy', path=env['PATH']) or '/home/bobbik/.local/bin/agy'
+            pr = subprocess.run([cbin, '--conversation', raw, '-p', text, '--dangerously-skip-permissions'],
+                                cwd=wcwd if Path(wcwd).is_dir() else str(Path.home()), env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=3600)
+            reply = (pr.stdout or pr.stderr or 'Completed.').strip()
         elif sid.startswith('pi:'):
             cbin = shutil.which('pi', path=env['PATH']) or 'pi'
             pr = subprocess.run([cbin, '-p', text], cwd=wcwd if Path(wcwd).is_dir() else str(Path.home()), env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=3600)
@@ -539,7 +589,20 @@ def prompt_session(cfg):
         return {'status': 'accepted', 'session_id': sid, 'request_id': rid}
     pcwd = wcwd = str(Path.home())
     jpath = ''
-    if sid.startswith('claude-jsonl:'):
+    if sid.startswith('agy:'):
+        raw, adir = sid.split(':', 1)[1], cfg.get('agyDataDir') or ''
+        idx = (Path(adir) / 'conversation_summaries.db') if adir else None
+        if idx and idx.is_file():
+            try:
+                with closing(sqlite3.connect(idx.as_uri() + '?mode=ro', uri=True, timeout=2)) as db:
+                    row = db.execute('SELECT workspace_uris FROM conversation_summaries WHERE conversation_id=?', (raw,)).fetchone()
+                    if row and row[0]:
+                        uris = _j(row[0])
+                        if isinstance(uris, list) and uris and isinstance(uris[0], str):
+                            wcwd = pcwd = uris[0].removeprefix('file://')
+            except Exception:
+                pass
+    elif sid.startswith('claude-jsonl:'):
         raw, cdir = sid.split(':', 1)[1], cfg.get('claudeDataDir') or ''
         m = list((Path(cdir) / 'projects').glob(f'*/{raw}.jsonl')) if cdir else []
         if m:
