@@ -22,6 +22,17 @@ function updateRodTicker(){
  else if(!isSpinning.value&&rodTimer){if(typeof clearInterval==='function')clearInterval(rodTimer);rodTimer=null;}
 }
 watch(isSpinning,updateRodTicker);
+let syncPulseTimer;
+function emitTopbarPhase(overridePhase){
+ const fn=globalThis.__bobSetRemoteSyncPhase;if(typeof fn!=='function')return;
+ if(overridePhase){fn(overridePhase);return;}
+ if(!selected.value){fn('');return;}
+ if(syncStatus.value==='offline_cached'){fn('offline');return;}
+ if(syncStatus.value==='syncing'||sending.value||replying.value||nodeActivity.value?.running){fn('syncing');return;}
+ if(syncStatus.value==='checking'||(busy.value&&!history.value)){fn('checking');return;}
+ fn('synced');
+}
+watch([syncStatus,sending,replying,()=>nodeActivity.value?.running,busy],()=>emitTopbarPhase());
 const displayMessages=computed(()=>{
  const raw=history.value?.messages||[];
  if(!raw.length)return [];
@@ -82,7 +93,7 @@ let artifactQueue=[],artifactTimer,artifactRunning=false,artifactCount=0;
 async function drainArtifacts(){if(artifactRunning||disposed)return;artifactQueue=artifactQueue.filter(x=>x.visible());artifactQueue.sort((a,b)=>b.element.getBoundingClientRect().top-a.element.getBoundingClientRect().top);const item=artifactQueue.shift();if(!item||artifactCount>=6)return;artifactCount++;artifactRunning=true;try{await item.run()}finally{artifactRunning=false;artifactTimer=setTimeout(drainArtifacts,150)}}
 provide('dshArtifacts',{peek:path=>fileCache.peek(fileAddress(path)),get:path=>fileCache.get(fileAddress(path)),enqueue:item=>{if(!artifactQueue.some(x=>x.element===item.element))artifactQueue.push(item);clearTimeout(artifactTimer);artifactTimer=setTimeout(drainArtifacts,250)}});
 provide('dshPreviewGet',async a=>{const cached=await fileCache.peek(a);return cached?{...cached,from_cache:true}:fileCache.get(a)});
-async function closePreview(){preview.value=null;await nextTick();if(reader.value){reader.value.scrollTop=previewScroll;lastTop=previewScroll;}clearTimeout(timer);timer=setTimeout(refresh,5000)}
+async function closePreview(){preview.value=null;await nextTick();if(reader.value){reader.value.scrollTop=previewScroll;lastTop=previewScroll;}clearTimeout(timer);timer=setTimeout(refresh,60000)}
 provide('dshOpenFile',path=>{previewScroll=reader.value?.scrollTop||0;clearTimeout(timer);preview.value=fileAddress(path)});
 let generation=0, disposed=false, restoring=false, timer;
 const nodes=computed(()=>props.nodes.filter(n=>n.enabled!==false));
@@ -108,7 +119,7 @@ let olderRequested=false;
 async function refresh(){if(selected.value?.historyReadable===false){error.value=t(selected.value?.historyReason==='AGY_HISTORY_NOT_LOCAL'?'agyHistoryNotLocal':'agyHistoryPending');return;}
  if(!selected.value||busy.value||loadingOlder.value||preview.value)return;
  clearTimeout(timer);const g=generation,id=selected.value.id;busy.value=true;
- if(history.value!==null){clearTimeout(syncTimer);syncStatus.value='checking';}
+ clearTimeout(syncTimer);syncStatus.value='checking';emitTopbarPhase('checking');
  try{
   const h=await kernelBridge.dshPage(connection.value,id,null,null,history.value?.cursor ?? null);validatePage(h,id);
   if(g!==generation||disposed||preview.value)return;
@@ -143,9 +154,10 @@ async function refresh(){if(selected.value?.historyReadable===false){error.value
    else if(follow)hasNewMessages.value=false;
    syncStatus.value='synced';clearTimeout(syncTimer);syncTimer=setTimeout(()=>{if(syncStatus.value==='synced')syncStatus.value='';},1800);
   }
+  if(first||deltaAdded){emitTopbarPhase('syncing');clearTimeout(syncPulseTimer);syncPulseTimer=setTimeout(()=>emitTopbarPhase(),700);}else{emitTopbarPhase();}
   await nextTick();if(g===generation&&!disposed&&follow&&reader.value)reader.value.scrollTop=reader.value.scrollHeight;
   lastTop=reader.value?.scrollTop||0;saveHistory();
- }catch(e){if(g===generation){error.value=fault(e);nodeActivity.value=null;if(history.value!==null){clearTimeout(syncTimer);syncStatus.value='offline_cached';}}}finally{if(g===generation){busy.value=false;const pollMs=(awaitingReply.value||replying.value||nodeActivity.value?.running)?1800:5000;if(olderRequested&&reader.value?.scrollTop<=24){olderRequested=false;loadOlder()}else{olderRequested=false;timer=setTimeout(refresh,pollMs)}}}
+ }catch(e){if(g===generation){error.value=fault(e);nodeActivity.value=null;if(history.value!==null){clearTimeout(syncTimer);syncStatus.value='offline_cached';}}}finally{if(g===generation){busy.value=false;const pollMs=(awaitingReply.value||replying.value||nodeActivity.value?.running)?1800:60000;if(olderRequested&&reader.value?.scrollTop<=24){olderRequested=false;loadOlder()}else{olderRequested=false;timer=setTimeout(refresh,pollMs)}}}
 }
 async function loadOlder(){
  if(!history.value?.has_more||loadingOlder.value||busy.value||preview.value)return;
@@ -160,7 +172,7 @@ async function loadOlder(){
   const el=reader.value, height=el?.scrollHeight||0,top=el?.scrollTop||0;
   history.value={...combine(h,history.value),before:h.before,has_more:h.has_more};error.value='';
   await nextTick();if(g===generation&&reader.value){reader.value.scrollTop=top+reader.value.scrollHeight-height;lastTop=reader.value.scrollTop;}
- }catch(e){if(g===generation)error.value=fault(e)}finally{if(g===generation){loadingOlder.value=false;timer=setTimeout(refresh,5000)}}
+ }catch(e){if(g===generation)error.value=fault(e)}finally{if(g===generation){loadingOlder.value=false;timer=setTimeout(refresh,60000)}}
 }
 function onScroll(){const el=reader.value,top=el?.scrollTop||0;const upwards=top<lastTop;lastTop=top;if(el&&el.scrollHeight-top-el.clientHeight<80)hasNewMessages.value=false;if(upwards&&top<=24){if(busy.value)olderRequested=true;else loadOlder()}else if(top>24)olderRequested=false}
 async function forceRefresh(){if(!selected.value){if(connection.value)return load();return;}clearTimeout(timer);activityChecked=0;error.value='';if(pending.value&&!sending.value)return checkReceipt();await refresh();}
@@ -189,7 +201,7 @@ async function checkReceipt(){
 function dismissPending(){if(!pending.value||sending.value)return;if(!draft.value.trim()&&pending.value.text)draft.value=pending.value.text;pending.value=null;notice.value='';error.value='';persist();}
 async function send(){if(selected.value?.historyReadable===false){error.value=t('agyHistoryPending');return;}const attBlock=formatAttachmentBlock(attachments.value);const text=[draft.value.trim(),attBlock].filter(Boolean).join('\n\n');if(sending.value||pending.value||!text)return;const g=generation, address={connection:connection.value,session:selected.value.id};pending.value={id:crypto.randomUUID(),text};if(!persist()){pending.value=null;return;}sending.value=true;error.value='';try{const requestId=pending.value.id;const receipt=await kernelBridge.dshPrompt(address.connection,address.session,text,requestId);if(receipt?.status!=='accepted'||receipt.session_id!==address.session||receipt.request_id!==requestId)throw Error('DSH_RECEIPT_UNKNOWN');if(g===generation){awaitingReply.value=requestId;replying.value=false;activityChecked=0;pending.value=null;attachments.value=[];if(draft.value.trim()===text||attBlock)draft.value='';persist();notice.value=t('dshAccepted');}}catch(e){if(g===generation){error.value=fault(e);notice.value=t('dshUncertain')}}finally{sending.value=false;if(g===generation&&!busy.value)refresh()}}
 watch(()=>props.target, async target=>{if(!target)return;connection.value=target.node.id;await open(target.session)},{immediate:true});
-onUnmounted(()=>{if(globalThis.__bobForceRefreshDsh===forceRefresh)globalThis.__bobForceRefreshDsh=null;if(rodTimer&&typeof clearInterval==='function')clearInterval(rodTimer);clearTimeout(wheelResetTimer);clearTimeout(artifactTimer);clearTimeout(syncTimer);clearTimeout(copyTimer);artifactQueue=[];fileCache.clear();persist();disposed=true;++generation;clearTimeout(timer)});
+onUnmounted(()=>{if(globalThis.__bobForceRefreshDsh===forceRefresh)globalThis.__bobForceRefreshDsh=null;clearTimeout(syncPulseTimer);if(typeof globalThis.__bobSetRemoteSyncPhase==='function')globalThis.__bobSetRemoteSyncPhase('');if(rodTimer&&typeof clearInterval==='function')clearInterval(rodTimer);clearTimeout(wheelResetTimer);clearTimeout(artifactTimer);clearTimeout(syncTimer);clearTimeout(copyTimer);artifactQueue=[];fileCache.clear();persist();disposed=true;++generation;clearTimeout(timer)});
 </script>
 <template>
  <DshFilePreview v-if="preview" :address="preview" @close="closePreview" />
@@ -205,7 +217,7 @@ onUnmounted(()=>{if(globalThis.__bobForceRefreshDsh===forceRefresh)globalThis.__
    <p v-if="!busy && !groups.length">{{ t('dshEmpty') }}</p>
   </template>
   <template v-if="selected">
-   <div class="dsh-tools"><button v-if="!target" :disabled="sending" @click="back">{{ t('dshBack') }}</button><h4 v-if="!target">{{ selected.title }}</h4><small v-else>{{ target.node.label || target.node.name }} · {{ agentLabel }}</small><span v-if="syncStatusLabel" class="dsh-sync-pill" :class="{active:syncStatus==='checking'||syncStatus==='syncing'}" role="status" aria-live="polite"><span v-if="syncStatus==='checking'||syncStatus==='syncing'" class="terminal-rod" aria-hidden="true">[{{ rodFrame }}]</span><span>{{ syncStatusLabel }}</span><span v-if="syncStatus==='checking'||syncStatus==='syncing'" class="terminal-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span></span></div>
+   <div class="dsh-tools"><button v-if="!target" :disabled="sending" @click="back">{{ t('dshBack') }}</button><h4 v-if="!target">{{ selected.title }}</h4><small v-else>{{ target.node.label || target.node.name }} · {{ agentLabel }}</small><span v-if="syncStatus==='offline_cached' && syncStatusLabel" class="dsh-sync-pill" :class="{active:syncStatus==='checking'||syncStatus==='syncing'}" role="status" aria-live="polite"><span v-if="syncStatus==='checking'||syncStatus==='syncing'" class="terminal-rod" aria-hidden="true">[{{ rodFrame }}]</span><span>{{ syncStatusLabel }}</span><span v-if="syncStatus==='checking'||syncStatus==='syncing'" class="terminal-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span></span></div>
    <p class="dsh-note">{{ history?.workspace || t('dshNoWorkspace') }}</p>
    <p v-if="history?.partial || history?.omitted" class="dsh-note">{{ t('dshPartial') }}</p>
    <p v-if="busy && !history" class="terminal-status-line" role="status"><span class="terminal-rod" aria-hidden="true">[{{ rodFrame }}]</span><span>{{ stripDots(t('dshLoading')) }}</span><span class="terminal-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span></p>
@@ -224,7 +236,7 @@ onUnmounted(()=>{if(globalThis.__bobForceRefreshDsh===forceRefresh)globalThis.__
      <div class="dsh-compose-left-tools">
       <input ref="fileInput" type="file" multiple class="visually-hidden" @change="onFilesSelected" />
       <button type="button" class="composer-tool-btn" :disabled="sending" :title="t('attachFileBtn')" :aria-label="t('attachFileBtn')" @click="openFilePicker"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></button>
-      <span v-if="syncStatusLabel" class="dsh-sync-pill" :class="{active:syncStatus==='checking'||syncStatus==='syncing'}"><span v-if="syncStatus==='checking'||syncStatus==='syncing'" class="terminal-rod" aria-hidden="true">[{{ rodFrame }}]</span><span>{{ syncStatusLabel }}</span><span v-if="syncStatus==='checking'||syncStatus==='syncing'" class="terminal-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span></span>
+      <span v-if="syncStatus==='offline_cached' && syncStatusLabel" class="dsh-sync-pill" :class="{active:syncStatus==='checking'||syncStatus==='syncing'}"><span v-if="syncStatus==='checking'||syncStatus==='syncing'" class="terminal-rod" aria-hidden="true">[{{ rodFrame }}]</span><span>{{ syncStatusLabel }}</span><span v-if="syncStatus==='checking'||syncStatus==='syncing'" class="terminal-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span></span>
      </div>
      <button type="submit" class="composer-submit-btn" :disabled="sending || !!pending || (!draft.trim() && !attachments.length) || !history">{{ t(sending?'dshSending':'send') }}</button>
     </div>

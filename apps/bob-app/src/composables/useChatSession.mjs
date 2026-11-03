@@ -471,11 +471,35 @@ function onHistoryWheel(event) {
   }
 }
 
+const remoteSyncPhase = ref('');
+const mainSyncPhase = ref('synced');
+let mainSyncPulseTimer = null;
+globalThis.__bobSetRemoteSyncPhase = phase => {
+  remoteSyncPhase.value = phase || '';
+};
+
+const deviceSyncPhase = computed(() => {
+  if (remoteConversation.value) {
+    return remoteSyncPhase.value || (deviceOnline.value ? 'synced' : 'offline');
+  }
+  if (saving.value || dispatchPending.value || activeExecution.value || mainSyncPhase.value === 'syncing') {
+    return 'syncing';
+  }
+  if (loading.value || mainSyncPhase.value === 'checking') {
+    return 'checking';
+  }
+  if (homeFault.value || (devicePaired.value && !deviceOnline.value)) {
+    return 'offline';
+  }
+  return 'synced';
+});
+
 async function forceRefreshActiveConversation() {
   if (remoteConversation.value && typeof globalThis.__bobForceRefreshDsh === 'function') {
     await globalThis.__bobForceRefreshDsh();
     return;
   }
+  mainSyncPhase.value = 'checking';
   resetSyncBackoffAndReload();
   void ctx.loadModelHub?.();
 }
@@ -607,6 +631,8 @@ let nextAllowedSyncAt = 0;
 const reload = singleFlight(async () => {
   if (!sessionId.value || disposed) return;
   const loadingSession = sessionId.value;
+  const prevMsgCount = messages.value.length;
+  mainSyncPhase.value = 'checking';
   void refreshAssistantResults();
   if (Date.now() >= nextAllowedSyncAt) {
     void kernelBridge
@@ -674,6 +700,17 @@ const reload = singleFlight(async () => {
   }
   if (results[4]?.status === 'fulfilled' && results[4].value) {
     pairingStatusState.value = results[4].value;
+  }
+  if (fault.value || homeFault.value) {
+    mainSyncPhase.value = 'offline';
+  } else if (messages.value.length > prevMsgCount && prevMsgCount > 0) {
+    mainSyncPhase.value = 'syncing';
+    if (mainSyncPulseTimer) clearTimeout(mainSyncPulseTimer);
+    mainSyncPulseTimer = setTimeout(() => {
+      mainSyncPhase.value = 'synced';
+    }, 700);
+  } else {
+    mainSyncPhase.value = 'synced';
   }
   await nextTick();
   if (follow && historyRegion.value) {
@@ -965,7 +1002,7 @@ const statusKeys = {
           activeExecution.value || dispatchPending.value || saving.value,
         );
         if (!isActiveExecution) {
-          idleTick = (idleTick + 1) % 10;
+          idleTick = (idleTick + 1) % 40;
           if (idleTick !== 0) return;
         } else {
           idleTick = 0;
@@ -980,6 +1017,7 @@ const statusKeys = {
     if (draftSaveTimer) clearTimeout(draftSaveTimer);
     if (scrollSaveTimer) clearTimeout(scrollSaveTimer);
     if (historyWheelResetTimer) clearTimeout(historyWheelResetTimer);
+    if (mainSyncPulseTimer) clearTimeout(mainSyncPulseTimer);
     if (poll) clearInterval(poll);
   }
 
@@ -1078,6 +1116,7 @@ const statusKeys = {
     onHistoryTouchMove,
     onHistoryTouchEnd,
     onHistoryWheel,
+    deviceSyncPhase,
     forceRefreshActiveConversation,
     executionBlocked,
     activeExecution,

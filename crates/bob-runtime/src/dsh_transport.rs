@@ -158,7 +158,8 @@ impl DshClient {
   for s in items.iter().filter(|s|s["origin"]!="subagent") {
    let id=s["sessionId"].as_str().ok_or("DSH_PROTOCOL")?;
    let running=s["running"].as_bool().ok_or("DSH_PROTOCOL")?;
-   output.push(json!({"id":id,"title":s["projections"]["values"]["title"].as_str().unwrap_or(id),"updated_at":s["updatedAt"],"running":running,"workspace":s["projections"]["values"]["workingDirectory"],"source_kind":"dsh_native"}));
+   let workspace=s["projections"]["values"].get("workingDirectory").filter(|v|!v.is_null()).or_else(||s.get("cwd").filter(|v|!v.is_null())).cloned().unwrap_or(Value::Null);
+   output.push(json!({"id":id,"title":s["projections"]["values"]["title"].as_str().unwrap_or(id),"updated_at":s["updatedAt"],"running":running,"workspace":workspace,"source_kind":"dsh_native"}));
   }
   output.sort_by_key(|s|std::cmp::Reverse(s["updated_at"].as_i64().unwrap_or(0)));
   Ok(json!(output))
@@ -206,15 +207,25 @@ impl DshClient {
   if before.is_some_and(|n|n<0) || through.is_some_and(|n|n< -1) || before.is_some()!=through.is_some(){return Err("DSH_PAGE_CURSOR_INVALID");}
   if after.is_some_and(|n|n< -1) || after.is_some() && before.is_some(){return Err("DSH_PAGE_CURSOR_INVALID");}
   // Obtain the log cut without subscribing to a multi-megabyte follow snapshot.
-  let projection=self.rpc("session/projections",json!({"request":{"sessionId":address.session_id}}))?;
-  if projection["kind"]!="sequenced" {return Err("DSH_PROTOCOL");}
+  // For older v3 sessions where `session/projections` returns `kind == "migration-required"`,
+  // fall back to the cached projection cut (`asOfSeq` + `cwd`) from `session/list`.
+  let raw_projection=self.rpc("session/projections",json!({"request":{"sessionId":address.session_id}}))?;
+  let (projection,header_cwd)=if raw_projection["kind"]=="sequenced" {
+   (raw_projection,Value::Null)
+  } else {
+   let list_val=self.rpc("session/list",json!({"_request":{}}))?;
+   let item=list_val["items"].as_array().and_then(|arr|arr.iter().find(|s|s["sessionId"].as_str()==Some(address.session_id.as_str()))).ok_or("DSH_PROTOCOL")?;
+   let item_proj=&item["projections"];
+   if item_proj["kind"]!="sequenced" && item_proj["kind"]!="cached" {return Err("DSH_PROTOCOL");}
+   (item_proj.clone(),item.get("cwd").cloned().unwrap_or(Value::Null))
+  };
   let current=projection["asOfSeq"].as_i64().filter(|n|*n>= -1).ok_or("DSH_PROTOCOL")?;
   if after==Some(current){return Ok(json!({"address":address,"cursor":current,"not_modified":true,"messages":[],"before":0,"source_requests":1,"source_bytes":serde_json::to_vec(&projection).map_err(|_|"DSH_PROTOCOL")?.len()}));}
   let started=Instant::now();
   let cursor=through.unwrap_or(current);
   if cursor>current {return Err("DSH_PAGE_CURSOR_INVALID");}
   let page=self.rpc("session/page",json!({"request":{"address":{"kind":"session","sessionId":address.session_id},"throughSeq":cursor,"beforeSeq":before.unwrap_or(cursor.checked_add(1).ok_or("DSH_PAGE_CURSOR_INVALID")?),"maxMessages":64}}))?;
-  let mut snapshot=json!({"type":"snapshot","header":{"id":address.session_id},"projections":projection,"cursor":cursor,"records":page["records"],"hasMore":page["hasMore"]});
+  let mut snapshot=json!({"type":"snapshot","header":{"id":address.session_id,"cwd":header_cwd},"projections":projection,"cursor":cursor,"records":page["records"],"hasMore":page["hasMore"]});
   let mut requests=2;
   let mut bytes=serde_json::to_vec(&snapshot).map_err(|_|"DSH_PROTOCOL")?.len();
   loop {

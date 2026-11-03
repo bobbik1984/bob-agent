@@ -18,10 +18,12 @@ pub struct Message {
 }
 fn extract_timestamp_ms(record: &Value, event: &Value) -> Option<i64> {
     for candidate in [
+        &event["time"],
         &event["timestamp"],
         &event["createdAt"],
         &event["created_at"],
         &event["ts"],
+        &record["time"],
         &record["timestamp"],
         &record["createdAt"],
         &record["created_at"],
@@ -83,8 +85,10 @@ pub fn project_history(address: SessionAddress, snapshot: &Value) -> Result<Hist
         }
     }
     messages.sort_by_key(|m| m.sequence);
-    let directory = snapshot["projections"]["values"].get("workingDirectory")
-        .or_else(|| snapshot["header"].get("cwd"));
+    let directory = snapshot["projections"]["values"]
+        .get("workingDirectory")
+        .filter(|v| !v.is_null())
+        .or_else(|| snapshot["header"].get("cwd").filter(|v| !v.is_null()));
     let workspace = match directory {
         None | Some(Value::Null) => None,
         Some(Value::String(s)) if s.len() <= 4096 && !s.chars().any(char::is_control) => Some(s.clone()),

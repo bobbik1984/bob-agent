@@ -54,6 +54,7 @@ const {
   totalUnreadCount,
   projectList,
   switchPrimaryDrawer,
+  deviceSyncPhase,
   forceRefreshActiveConversation,
   startup,
   resetSyncBackoffAndReload,
@@ -253,9 +254,12 @@ onUnmounted(() => {
         type="button"
         class="device-indicator"
         :class="{
-          paired: devicePaired,
-          online: deviceOnline,
-          unconfirmed: homeFault || (devicePaired && !deviceOnline),
+          paired: devicePaired || !!remoteConversation,
+          online: (deviceOnline || !!remoteConversation) && deviceSyncPhase !== 'offline',
+          checking: deviceSyncPhase === 'checking',
+          syncing: deviceSyncPhase === 'syncing',
+          synced: deviceSyncPhase === 'synced',
+          unconfirmed: deviceSyncPhase === 'offline' || homeFault || (devicePaired && !deviceOnline),
         }"
         :aria-label="`${connectionLabel} · ${t('forceRefreshBtn')}`"
         :title="`${connectionLabel} · ${t('forceRefreshBtn')}`"
