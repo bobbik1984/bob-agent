@@ -346,9 +346,14 @@ def read_session_page(cfg, sid):
                 msg = o.get('message') if isinstance(o.get('message'), dict) else {}
                 c = msg.get('content')
                 if (t == 'user' or (t == 'api-request-blob' and msg.get('role') == 'user')) and not o.get('isMeta'):
-                    utxt = c if isinstance(c, str) else '\n'.join(b.get('text', '') for b in c if isinstance(b, dict) and b.get('type') == 'text') if isinstance(c, list) else ''
+                    utxt = c if isinstance(c, str) else '\n'.join(b.get('text', '') for b in c if isinstance(b, dict) and b.get('type') == 'text' and not str(b.get('text', '')).lstrip().startswith('<system-reminder>')) if isinstance(c, list) else ''
+                    utxt = re.sub(r'<system-reminder>[\s\S]*?</system-reminder>', '', utxt).strip()
                     if utxt and not any(x in utxt for x in ('<command-name>', '<local-command', '<task-notification>')):
                         push('user', utxt, ts)
+                elif t == 'last-prompt' and o.get('lastPrompt'):
+                    lp = str(o['lastPrompt']).strip()
+                    if lp and lp != 'ping' and not any(u == lp for r, u, _ in ev[-6:] if r == 'user'):
+                        push('user', lp, ts)
                 elif t == 'assistant':
                     if isinstance(c, list):
                         for b in c:
@@ -441,12 +446,13 @@ def read_session_page(cfg, sid):
     ru = {t for r, t, _ in ev[-12:] if r == 'user'}
     ra = {t for r, t, _ in ev[-12:] if r == 'assistant'}
     for r in recs:
-        ut, at = (r.get('text') or '').strip(), (r.get('reply_text') or '').strip()
+        ut, at, sat = (r.get('text') or '').strip(), (r.get('reply_text') or '').strip(), int(r.get('started_at') or 0)
         if ut and ut not in ru:
-            push('user', ut, r.get('started_at') or 0)
+            idx = next((i for i, (_, _, ets) in enumerate(ev) if sat and ets and ets >= sat - 1000), len(ev))
+            ev.insert(idx, ('user', ut, sat))
             ru.add(ut)
         if at and at not in ra:
-            push('assistant', at, r.get('ended_at') or r.get('started_at') or 0)
+            push('assistant', at, int(r.get('ended_at') or sat))
             ra.add(at)
     msgs = _consolidate(ev, 60) or [{'sequence': 1, 'role': 'assistant', 'text': f'Session `{sid}` loaded (`{ws or "default"}`).', 'timestamp': _now()}]
     return {'harness': h, 'workspace': ws, 'messages': msgs,
