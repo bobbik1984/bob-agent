@@ -376,13 +376,116 @@ const loading = ref(true);
 const fault = ref(null);
 const input = ref(null);
 const historyRegion = ref(null);
+const composerAttachments = ref([]);
+const composerFileInput = ref(null);
+const historyPullUpDistance = ref(0);
+let historyTouchStartY = null;
+let historyWheelOverscroll = 0;
+let historyWheelResetTimer = null;
+
+function openComposerFilePicker() {
+  composerFileInput.value?.click?.();
+}
+
+async function handleComposerFiles(event) {
+  const files = Array.from(event?.target?.files || []);
+  for (const f of files) {
+    let content = '';
+    try {
+      if (typeof f.text === 'function' && (f.size || 0) <= 256 * 1024) {
+        content = await f.text();
+      }
+    } catch {}
+    composerAttachments.value.push({
+      id: crypto.randomUUID(),
+      name: f.name || 'file',
+      size: f.size || 0,
+      type: f.type || '',
+      content,
+    });
+  }
+  if (event?.target) event.target.value = '';
+}
+
+function removeComposerAttachment(id) {
+  composerAttachments.value = composerAttachments.value.filter(a => a.id !== id);
+}
+
+function formatComposerAttachments(list) {
+  if (!list?.length) return '';
+  return list
+    .map(a =>
+      a.content
+        ? `[Attachment: ${a.name}]\n\`\`\`\n${String(a.content).slice(0, 16384)}\n\`\`\``
+        : `[Attachment: ${a.name} (${a.size || 0} bytes)]`,
+    )
+    .join('\n\n');
+}
+
+function onHistoryTouchStart(event) {
+  const el = historyRegion.value;
+  const atBottom = !el || el.scrollHeight - el.scrollTop - el.clientHeight <= 16;
+  historyTouchStartY = atBottom ? (event?.touches?.[0]?.clientY ?? null) : null;
+  historyPullUpDistance.value = 0;
+}
+
+function onHistoryTouchMove(event) {
+  if (historyTouchStartY === null) return;
+  const y = event?.touches?.[0]?.clientY;
+  if (typeof y !== 'number') return;
+  const delta = historyTouchStartY - y;
+  const el = historyRegion.value;
+  const atBottom = !el || el.scrollHeight - el.scrollTop - el.clientHeight <= 20;
+  if (delta > 8 && atBottom) {
+    historyPullUpDistance.value = Math.min(72, Math.round((delta - 8) * 0.75));
+  } else if (delta <= 0) {
+    historyPullUpDistance.value = 0;
+  }
+}
+
+function onHistoryTouchEnd() {
+  const dist = historyPullUpDistance.value;
+  historyTouchStartY = null;
+  historyPullUpDistance.value = 0;
+  if (dist >= 36) {
+    void forceRefreshActiveConversation();
+  }
+}
+
+function onHistoryWheel(event) {
+  if (!(event?.deltaY > 24)) return;
+  const el = historyRegion.value;
+  const atBottom = !el || el.scrollHeight - el.scrollTop - el.clientHeight <= 8;
+  if (!atBottom) {
+    historyWheelOverscroll = 0;
+    return;
+  }
+  historyWheelOverscroll += event.deltaY;
+  if (historyWheelResetTimer) clearTimeout(historyWheelResetTimer);
+  historyWheelResetTimer = setTimeout(() => {
+    historyWheelOverscroll = 0;
+  }, 450);
+  if (historyWheelOverscroll >= 140) {
+    historyWheelOverscroll = 0;
+    void forceRefreshActiveConversation();
+  }
+}
+
+async function forceRefreshActiveConversation() {
+  if (remoteConversation.value && typeof globalThis.__bobForceRefreshDsh === 'function') {
+    await globalThis.__bobForceRefreshDsh();
+    return;
+  }
+  resetSyncBackoffAndReload();
+  void ctx.loadModelHub?.();
+}
 
 const executionBlocked = computed(() => blocksNewExecution(executions.value));
 const activeExecution = computed(() => executions.value.find(run => canCancelExecution(run)));
 const canSend = computed(
   () =>
     !!sessionId.value &&
-    !!draft.value.trim() &&
+    (!!draft.value.trim() || composerAttachments.value.length > 0) &&
     !loading.value &&
     !saving.value &&
     !executionBlocked.value,
@@ -761,7 +864,11 @@ async function send() {
   }
   saving.value = true;
   fault.value = null;
-  const sentText = draft.value;
+  const attBlock = formatComposerAttachments(composerAttachments.value);
+  const sentText = [draft.value.trim(), attBlock].filter(Boolean).join('\n\n') || draft.value;
+  if (attBlock) {
+    controller.setDraft(sentText);
+  }
   const shouldExecute = executionEnabled.value;
   try {
     if (newConversationPending.value) {
@@ -771,7 +878,11 @@ async function send() {
       saveClientState(clientState);
     }
     const receipt = await controller.send();
-    if (receipt) { clientState.blankDraft = ''; saveClientState(clientState); }
+    if (receipt) {
+      composerAttachments.value = [];
+      clientState.blankDraft = '';
+      saveClientState(clientState);
+    }
     if (receipt && !messages.value.some(message => message.id === receipt.message_id)) {
       const message = {
         id: receipt.message_id,
@@ -868,6 +979,7 @@ const statusKeys = {
     disposed = true;
     if (draftSaveTimer) clearTimeout(draftSaveTimer);
     if (scrollSaveTimer) clearTimeout(scrollSaveTimer);
+    if (historyWheelResetTimer) clearTimeout(historyWheelResetTimer);
     if (poll) clearInterval(poll);
   }
 
@@ -956,6 +1068,17 @@ const statusKeys = {
     fault,
     input,
     historyRegion,
+    composerAttachments,
+    composerFileInput,
+    openComposerFilePicker,
+    handleComposerFiles,
+    removeComposerAttachment,
+    historyPullUpDistance,
+    onHistoryTouchStart,
+    onHistoryTouchMove,
+    onHistoryTouchEnd,
+    onHistoryWheel,
+    forceRefreshActiveConversation,
     executionBlocked,
     activeExecution,
     canSend,

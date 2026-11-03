@@ -65,6 +65,16 @@ const {
   executionBlocked,
   activeExecution,
   canSend,
+  composerAttachments,
+  composerFileInput,
+  openComposerFilePicker,
+  handleComposerFiles,
+  removeComposerAttachment,
+  historyPullUpDistance,
+  onHistoryTouchStart,
+  onHistoryTouchMove,
+  onHistoryTouchEnd,
+  onHistoryWheel,
 } = inject('bobAppShell');
 
 const rodIdx = ref(0);
@@ -140,6 +150,11 @@ onUnmounted(() => { if (rodTimer) clearInterval(rodTimer); });
         aria-live="polite"
         :aria-busy="loading"
         @scroll.passive="onHistoryScroll"
+        @touchstart.passive="onHistoryTouchStart"
+        @touchmove.passive="onHistoryTouchMove"
+        @touchend.passive="onHistoryTouchEnd"
+        @touchcancel.passive="onHistoryTouchEnd"
+        @wheel.passive="onHistoryWheel"
       >
         <div v-if="loading" class="empty loading-brand">
           <img :src="brandLogo" :alt="t('brand')" />
@@ -224,6 +239,10 @@ onUnmounted(() => { if (rodTimer) clearInterval(rodTimer); });
           <span class="terminal-rod" aria-hidden="true">[{{ rodFrame }}]</span>
           <span>{{ stripDots(t(dispatchPending ? 'requestingExecution' : saving ? 'saving' : 'agentLiveThinking')) }}</span>
           <span class="terminal-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span>
+        </div>
+        <div v-if="historyPullUpDistance > 10" class="pull-up-refresh-hint" :class="{ ready: historyPullUpDistance >= 36 }" role="status" aria-live="polite">
+          <span class="terminal-rod" aria-hidden="true">[{{ rodFrame }}]</span>
+          <span>{{ t(historyPullUpDistance >= 36 ? 'releaseToRefresh' : 'pullUpToRefresh') }}</span>
         </div>
       </section>
 
@@ -341,8 +360,27 @@ onUnmounted(() => { if (rodTimer) clearInterval(rodTimer); });
           @focus="focusComposer"
           @keydown="keydown"
         />
+        <div v-if="composerAttachments.length" class="composer-attachments">
+          <span v-for="att in composerAttachments" :key="att.id" class="composer-attachment-chip">
+            <span class="chip-file-name">{{ att.name }}</span>
+            <button type="button" class="chip-remove-btn" :aria-label="t('removeAttachment')" @click="removeComposerAttachment(att.id)">×</button>
+          </span>
+        </div>
         <div class="composer-actions">
           <div class="composer-left-tools">
+            <input ref="composerFileInput" type="file" multiple class="visually-hidden" @change="handleComposerFiles" />
+            <button
+              type="button"
+              class="composer-tool-btn"
+              :disabled="!sessionId || saving"
+              :title="t('attachFileBtn')"
+              :aria-label="t('attachFileBtn')"
+              @click="openComposerFilePicker"
+            >
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+              </svg>
+            </button>
             <button
               ref="quickPillRef"
               type="button"

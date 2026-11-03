@@ -77,7 +77,7 @@ function mountDsh(storage = new Map(), overrides = {}) {
   vm.createContext(context);
   vm.runInContext(
     dshSource +
-      '\nglobalThis.actions={open,send,refresh,closePreview,preview,reader,history,draft,syncStatus,syncStatusLabel,hasNewMessages,scrollToBottom,formatMessageTime,copyMessage,copiedSeq,sending,awaitingReply,nodeActivity,replying,activityLabel,fileCache,connection};',
+      '\nglobalThis.actions={open,send,refresh,forceRefresh,onReaderTouchStart,onReaderTouchMove,onReaderTouchEnd,pullUpDistance,attachments,onFilesSelected,removeAttachment,closePreview,preview,reader,history,draft,syncStatus,syncStatusLabel,hasNewMessages,scrollToBottom,formatMessageTime,copyMessage,copiedSeq,sending,awaitingReply,nodeActivity,replying,activityLabel,fileCache,connection};',
     context,
   );
   context.actions.connection.value = 'device';
@@ -423,4 +423,72 @@ test('Collapsible thinking & process section consolidates tool calls and preserv
   assert.match(dshVue, /\\u2060\$\{rodFrames/);
   const styleCss = readFileSync(new URL('../src/style.css', import.meta.url), 'utf8');
   assert.match(styleCss, /\.terminal-rod\s*\{[^}]*width:\s*3\.4ch;[^}]*white-space:\s*nowrap;[^}]*word-break:\s*keep-all;/s);
+});
+
+test('Bottom pull-up refresh, top-right force refresh icon, and unified composer box with attachments and model switcher', async () => {
+  let pageCalls = 0;
+  const sentPrompts = [];
+  const m = mountDsh(new Map(), {
+    dshPage: async (c, s) => {
+      pageCalls += 1;
+      return {
+        address: { connection_id: c, session_id: s },
+        messages: [{ sequence: pageCalls, role: 'assistant', text: 'msg ' + pageCalls }],
+        cursor: pageCalls,
+        before: 0,
+        has_more: false,
+      };
+    },
+    dshPrompt: async (c, s, text, reqId) => {
+      sentPrompts.push(text);
+      return { status: 'accepted', session_id: s, request_id: reqId };
+    },
+  });
+  const el = { scrollHeight: 2000, scrollTop: 1400, clientHeight: 600 };
+  m.a.reader.value = el;
+  await m.a.open({ id: 'original' });
+  assert.equal(pageCalls, 1);
+
+  // 1. Pull up at bottom of history triggers forceRefresh
+  m.a.onReaderTouchStart({ touches: [{ clientY: 500 }] });
+  m.a.onReaderTouchMove({ touches: [{ clientY: 420 }] });
+  assert.ok(m.a.pullUpDistance.value >= 36);
+  m.a.onReaderTouchEnd();
+  await new Promise(r => setImmediate(r));
+  assert.equal(pageCalls, 2);
+
+  // 2. Attachment selection & removal in composer
+  await m.a.onFilesSelected({
+    target: {
+      files: [{ name: 'patch.diff', size: 18, type: 'text/plain', text: async () => '+fixed' }],
+      value: 'C:\\fakepath\\patch.diff',
+    },
+  });
+  assert.equal(m.a.attachments.value.length, 1);
+  assert.equal(m.a.attachments.value[0].name, 'patch.diff');
+  m.a.draft.value = 'Please review';
+  await m.a.send();
+  assert.equal(sentPrompts.length, 1);
+  assert.match(sentPrompts[0], /Please review/);
+  assert.match(sentPrompts[0], /\[Attachment: patch\.diff\]/);
+  assert.equal(m.a.attachments.value.length, 0);
+
+  // 3. Structural checks across DshSessions.vue, PrimaryChatPane.vue, App.vue, and style.css
+  const dshVue = readFileSync(new URL('../src/components/DshSessions.vue', import.meta.url), 'utf8');
+  const selectedTemplate = dshVue.split('<template v-if="selected">')[1];
+  assert.ok(!selectedTemplate.includes('@click="refresh"'), 'Top refresh button removed from selected conversation header');
+  assert.ok(selectedTemplate.includes('class="dsh-compose-box"'), 'Unified composer box in DshSessions');
+  assert.ok(selectedTemplate.includes('class="composer-tool-btn"'), 'Attachment button in DshSessions composer');
+  assert.ok(selectedTemplate.includes('class="composer-submit-btn"'), 'Fixed bottom-right send button in DshSessions composer');
+
+  const primaryVue = readFileSync(new URL('../src/components/PrimaryChatPane.vue', import.meta.url), 'utf8');
+  assert.ok(primaryVue.includes('openComposerFilePicker'), 'Attachment button in PrimaryChatPane composer');
+  assert.ok(primaryVue.includes('class="composer-model-pill"'), 'Model switcher button in PrimaryChatPane composer');
+
+  const appVue = readFileSync(new URL('../src/App.vue', import.meta.url), 'utf8');
+  assert.match(appVue, /class="device-indicator"[\s\S]*?@click="forceRefreshActiveConversation"/);
+
+  const styleCss = readFileSync(new URL('../src/style.css', import.meta.url), 'utf8');
+  assert.match(styleCss, /\.device-indicator svg\{width:17px;height:17px;/);
+  assert.match(styleCss, /\.composer-submit-btn\{margin-left:auto;flex-shrink:0;height:1\.85rem;/);
 });

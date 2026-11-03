@@ -673,5 +673,10 @@
   "thinkingProcessRunning": "Running thinking & tool steps",
   "streamingOutputStatus": "Streaming output",
   "streamingSkipBtn": "Show full reply",
-  "agentLiveThinking": "Thinking & dispatching"
+  "agentLiveThinking": "Thinking & dispatching",
+  "pullUpToRefresh": "Pull up to refresh",
+  "releaseToRefresh": "Release to refresh",
+  "forceRefreshBtn": "Force refresh conversation",
+  "attachFileBtn": "Add attachment",
+  "removeAttachment": "Remove attachment"
 }

@@ -54,7 +54,7 @@ const {
   totalUnreadCount,
   projectList,
   switchPrimaryDrawer,
-  openDevices,
+  forceRefreshActiveConversation,
   startup,
   resetSyncBackoffAndReload,
   startPolling,
@@ -257,9 +257,9 @@ onUnmounted(() => {
           online: deviceOnline,
           unconfirmed: homeFault || (devicePaired && !deviceOnline),
         }"
-        :aria-label="connectionLabel"
-        :title="connectionLabel"
-        @click="openDevices"
+        :aria-label="`${connectionLabel} · ${t('forceRefreshBtn')}`"
+        :title="`${connectionLabel} · ${t('forceRefreshBtn')}`"
+        @click="forceRefreshActiveConversation"
       >
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <template v-if="connectionTarget.kind === 'server'">

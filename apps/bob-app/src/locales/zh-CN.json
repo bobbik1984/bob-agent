@@ -673,5 +673,10 @@
   "thinkingProcessRunning": "正在执行思考与工具调用",
   "streamingOutputStatus": "正在流式输出",
   "streamingSkipBtn": "直接显示全文",
-  "agentLiveThinking": "正在思考与调度节点"
+  "agentLiveThinking": "正在思考与调度节点",
+  "pullUpToRefresh": "上拉强制刷新",
+  "releaseToRefresh": "松开立即刷新",
+  "forceRefreshBtn": "强制刷新当前对话",
+  "attachFileBtn": "添加附件",
+  "removeAttachment": "移除附件"
 }
