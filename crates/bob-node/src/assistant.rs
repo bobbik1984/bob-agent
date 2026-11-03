@@ -101,7 +101,7 @@ pub fn execute(state: &Arc<Mutex<NodeContext>>, args: &Value) -> Result<Value, &
                     }
                     if let Some(items) = list.as_array() {
                         for item in items {
-                            if candidates.len() >= 100 {
+                            if candidates.len() >= 200 {
                                 complete = false;
                                 break;
                             }
@@ -131,7 +131,8 @@ pub fn execute(state: &Arc<Mutex<NodeContext>>, args: &Value) -> Result<Value, &
                 Err(_) => {
                     if let Ok(extra) = bob_runtime::agy_directory::list(&runtime.data_dir, id) {
                         for item in extra {
-                            if candidates.len() >= 100 {
+                            if candidates.len() >= 200 {
+                                complete = false;
                                 break;
                             }
                             let harness = item["harness"].as_str().unwrap_or("agy");
@@ -144,8 +145,9 @@ pub fn execute(state: &Arc<Mutex<NodeContext>>, args: &Value) -> Result<Value, &
                                 "workspace": item["workspace"]
                             }));
                         }
+                    } else {
+                        complete = false;
                     }
-                    complete = false;
                 }
             }
         }
@@ -168,12 +170,42 @@ pub fn execute(state: &Arc<Mutex<NodeContext>>, args: &Value) -> Result<Value, &
         let main_profile = runtime
             .resolve_role_profile("main")
             .unwrap_or_else(|_| profile.clone());
+        let vision_profile = runtime
+            .resolve_role_profile("vision")
+            .unwrap_or_else(|_| profile.clone());
         let chosen_profile = if user.contains("[image:") || user.contains("<image>") {
             &main_profile
         } else {
             &flash_profile
         };
-        let raw = runtime.invoke_direct_model(chosen_profile, &prepared.messages, &prompt)?;
+        let prior_len = prepared.messages.len().saturating_sub(1);
+        let context_turns: Vec<_> = prepared.messages[..prior_len]
+            .iter()
+            .filter(|m| {
+                !m.content.contains("上线连通检查：仅在当前助理对话回答")
+                    && m.content.trim() != "助理已就绪。"
+            })
+            .cloned()
+            .collect();
+        let mut raw_res: Result<String, &'static str> = Err("PROVIDER_UNCONFIGURED");
+        let mut tried = Vec::new();
+        for prof in [chosen_profile, &main_profile, &vision_profile, &profile] {
+            let key = (prof.base_url.clone(), prof.model_id.clone());
+            if tried.contains(&key) {
+                continue;
+            }
+            tried.push(key);
+            match runtime.invoke_direct_model(prof, &context_turns, &prompt) {
+                Ok(out) => {
+                    raw_res = Ok(out);
+                    break;
+                }
+                Err(e) => {
+                    raw_res = Err(e);
+                }
+            }
+        }
+        let raw = raw_res?;
         let proposal = bob_runtime::assistant::parse_proposal(&raw, &candidates, complete)?;
         let mut reply_text = proposal.text.clone();
         if proposal.kind == "dispatch" {

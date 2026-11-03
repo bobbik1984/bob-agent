@@ -1575,12 +1575,13 @@ pub fn invoke_provider_http(
             }
         }
         "gemini_generate_content" => {
+            let clean_mid = profile.model_id.strip_prefix("models/").unwrap_or(&profile.model_id);
             if base.contains(":generateContent") {
                 base.to_owned()
             } else if base.ends_with("/v1beta") || base.ends_with("/v1") {
-                format!("{base}/models/{}:generateContent", profile.model_id)
+                format!("{base}/models/{clean_mid}:generateContent")
             } else {
-                format!("{base}/v1beta/models/{}:generateContent", profile.model_id)
+                format!("{base}/v1beta/models/{clean_mid}:generateContent")
             }
         }
         _ => {
@@ -1672,8 +1673,25 @@ fn build_request_body(
                 .into_iter()
                 .map(|t| json!({ "role": t.role, "content": t.content }))
                 .collect();
+            let wire_model = if profile.base_url.contains("api.deepseek.com") {
+                if profile.model_id.contains("reasoner") || profile.model_id.contains("-r1") || profile.model_id.contains("-r2") {
+                    "deepseek-reasoner"
+                } else if profile.model_id.starts_with("deepseek-") {
+                    "deepseek-chat"
+                } else {
+                    profile.model_id.as_str()
+                }
+            } else if profile.base_url.contains("dashscope.aliyuncs.com") && profile.model_id.starts_with("qwen3.") {
+                if profile.model_id.contains("flash") {
+                    "qwen-plus"
+                } else {
+                    "qwen-max"
+                }
+            } else {
+                profile.model_id.as_str()
+            };
             json!({
-                "model": profile.model_id,
+                "model": wire_model,
                 "messages": messages,
                 "temperature": 0.3,
                 "max_tokens": 4096,
@@ -1783,8 +1801,15 @@ fn post_https_curl(
             cmd.args(["-H", &format!("Authorization: Bearer {api_key}")]);
         }
     }
-    cmd.args(["--data-raw", body]);
-    let output = cmd.output().map_err(|_| "PROVIDER_UNREACHABLE")?;
+    cmd.args(["--data-binary", "@-"]);
+    cmd.stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null());
+    let mut child = cmd.spawn().map_err(|_| "PROVIDER_UNREACHABLE")?;
+    if let Some(mut stdin) = child.stdin.take() {
+        let _ = stdin.write_all(body.as_bytes());
+    }
+    let output = child.wait_with_output().map_err(|_| "PROVIDER_UNREACHABLE")?;
     if !output.status.success() {
         return Err("PROVIDER_UNREACHABLE");
     }

@@ -376,24 +376,102 @@ def discover_multi(cfg):
             'authentication': 'unverified', 'source': 'local_readonly_index'}
 
 
-def read_session_page(cfg, session_id):
-    messages = []
-    workspace = ''
-    harness = 'dsh'
-    seq = 0
+def _fmt_tool_step(name, detail):
+    clean = ' '.join(str(detail or '').split())
+    if len(clean) > 180:
+        clean = clean[:177] + '...'
+    return f'`[Tool: {name}]` {clean}' if clean else f'`[Tool: {name}]`'
 
-    def push(role, text, ts=0):
-        nonlocal seq
+
+def _consolidate_raw_events(raw_events, limit=60):
+    consolidated = []
+    cur_steps = []
+    cur_texts = []
+    cur_ts = 0
+
+    def flush_assistant():
+        nonlocal cur_steps, cur_texts, cur_ts
+        if not cur_steps and not cur_texts:
+            return
+        steps = []
+        formal_parts = []
+        text_only = [val for kind, val in cur_texts if kind == 'text']
+        has_tools = any(kind == 'step' for kind, _ in cur_texts)
+        if not text_only:
+            steps = [val for _, val in cur_texts]
+        elif not has_tools or len(text_only) == 1:
+            steps = [val for kind, val in cur_texts if kind == 'step']
+            formal_parts = text_only
+        else:
+            keep_count = 2 if (len(text_only) >= 2 and text_only[-1].rstrip().endswith(':') and len(text_only[-1]) < 240) else 1
+            cutoff_idx = len(text_only) - keep_count
+            seen_text = 0
+            for kind, val in cur_texts:
+                if kind == 'step':
+                    steps.append(val)
+                else:
+                    if seen_text < cutoff_idx:
+                        first_line = ' '.join(val.split())
+                        if len(first_line) > 220:
+                            first_line = first_line[:217] + '...'
+                        steps.append(f'`[Thinking]` {first_line}')
+                    else:
+                        formal_parts.append(val)
+                    seen_text += 1
+        body = '\n\n'.join(formal_parts).strip()
+        if steps:
+            step_lines = '\n'.join(f'- {s}' for s in steps[:40])
+            if len(steps) > 40:
+                step_lines += f'\n- ... (+{len(steps) - 40} steps)'
+            full_text = f'```thinking\n{step_lines}\n```\n\n{body}'.strip()
+        else:
+            full_text = body
+        if full_text:
+            consolidated.append(('assistant', full_text, cur_ts))
+        cur_steps = []
+        cur_texts = []
+        cur_ts = 0
+
+    for role, text, ts in raw_events:
         txt = (text or '').strip()
         if not txt:
-            return
-        seq += 1
-        messages.append({
-            'sequence': seq,
+            continue
+        if role == 'user':
+            flush_assistant()
+            consolidated.append(('user', txt, ts))
+        elif role == 'step':
+            cur_steps.append(txt)
+            cur_texts.append(('step', txt))
+            if ts:
+                cur_ts = ts
+        else:
+            cur_texts.append(('text', txt))
+            if ts:
+                cur_ts = ts
+    flush_assistant()
+
+    tail = consolidated[-limit:] if len(consolidated) > limit else consolidated
+    out = []
+    now_ms = int(datetime.now().timestamp() * 1000)
+    for idx, (role, txt, ts) in enumerate(tail, 1):
+        out.append({
+            'sequence': idx,
             'role': role,
             'text': txt[:16000],
-            'timestamp': ts or int(datetime.now().timestamp() * 1000),
+            'timestamp': ts or now_ms,
         })
+    return out
+
+
+def read_session_page(cfg, session_id):
+    raw_events = []
+    workspace = ''
+    harness = 'dsh'
+
+    def push(role, text, ts=0):
+        txt = (text or '').strip()
+        if txt:
+            raw_events.append((role, txt, ts))
 
     if session_id.startswith('claude-jsonl:'):
         harness = 'claude'
@@ -422,22 +500,23 @@ def read_session_page(cfg, session_id):
                         msg = obj.get('message', {})
                         c = msg.get('content') if isinstance(msg, dict) else None
                         if isinstance(c, list):
-                            parts = []
                             for blk in c:
                                 if not isinstance(blk, dict):
                                     continue
-                                if blk.get('type') == 'text' and blk.get('text'):
-                                    parts.append(blk['text'])
-                                elif blk.get('type') == 'tool_use' and blk.get('name'):
-                                    inp = blk.get('input', {})
-                                    cmd_str = inp.get('command') or inp.get('file_path') or inp.get('pattern') or ''
-                                    parts.append(f"`[Tool: {blk['name']}]` {str(cmd_str)[:120]}")
-                            if parts:
-                                push('assistant', '\n\n'.join(parts), ts)
+                                btype = blk.get('type')
+                                if btype == 'thinking' and blk.get('thinking'):
+                                    t_clean = ' '.join(str(blk['thinking']).split())
+                                    if len(t_clean) > 200:
+                                        t_clean = t_clean[:197] + '...'
+                                    push('step', f'`[Thinking]` {t_clean}', ts)
+                                elif btype == 'tool_use' and blk.get('name'):
+                                    inp = blk.get('input', {}) if isinstance(blk.get('input'), dict) else {}
+                                    cmd_str = inp.get('command') or inp.get('file_path') or inp.get('pattern') or inp.get('description') or ''
+                                    push('step', _fmt_tool_step(blk['name'], cmd_str), ts)
+                                elif btype == 'text' and blk.get('text'):
+                                    push('assistant', blk['text'], ts)
                         elif isinstance(c, str):
                             push('assistant', c, ts)
-                    if len(messages) >= 80:
-                        break
 
     elif session_id.startswith('pi:'):
         harness = 'pi'
@@ -460,19 +539,20 @@ def read_session_page(cfg, session_id):
                         role = msg.get('role')
                         ts = _parse_ts(msg.get('timestamp') or obj.get('timestamp'), fallback_ms)
                         if role in ('user', 'assistant'):
-                            parts = []
                             for blk in msg.get('content', []):
                                 if not isinstance(blk, dict):
                                     continue
-                                if blk.get('type') == 'text' and blk.get('text'):
-                                    parts.append(blk['text'])
-                                elif blk.get('type') == 'toolCall' and blk.get('name'):
-                                    args = blk.get('arguments', {})
-                                    parts.append(f"`[Tool: {blk['name']}]` {str(args.get('command') or args.get('path') or '')[:120]}")
-                            if parts:
-                                push(role, '\n\n'.join(parts), ts)
-                    if len(messages) >= 80:
-                        break
+                                btype = blk.get('type')
+                                if btype == 'thinking' and blk.get('thinking'):
+                                    t_clean = ' '.join(str(blk['thinking']).split())
+                                    if len(t_clean) > 200:
+                                        t_clean = t_clean[:197] + '...'
+                                    push('step', f'`[Thinking]` {t_clean}', ts)
+                                elif btype == 'toolCall' and blk.get('name'):
+                                    args = blk.get('arguments', {}) if isinstance(blk.get('arguments'), dict) else {}
+                                    push('step', _fmt_tool_step(blk['name'], args.get('command') or args.get('path') or ''), ts)
+                                elif btype == 'text' and blk.get('text'):
+                                    push(role, blk['text'], ts)
 
     elif session_id.startswith('codex:'):
         harness = 'codex'
@@ -493,15 +573,16 @@ def read_session_page(cfg, session_id):
                         workspace = obj.get('payload', {}).get('cwd') or workspace
                     elif obj.get('type') == 'response_item':
                         p = obj.get('payload', {})
+                        ptype = p.get('type')
                         role = p.get('role')
-                        if role in ('user', 'assistant'):
+                        if ptype in ('function_call', 'custom_tool_call') and p.get('name'):
+                            push('step', _fmt_tool_step(p['name'], p.get('arguments') or p.get('input') or ''), ts)
+                        elif role in ('user', 'assistant'):
                             content = p.get('content')
                             txt = '\n'.join(c.get('text', '') for c in content if isinstance(c, dict)) if isinstance(content, list) else str(content or '')
                             if '<environment_context>' in txt or '<skills_instructions>' in txt or '<plugins_instructions>' in txt:
                                 continue
                             push(role, txt, ts)
-                    if len(messages) >= 80:
-                        break
 
     elif session_id.startswith('cp:'):
         parts = session_id.split(':', 2)
@@ -530,22 +611,29 @@ def read_session_page(cfg, session_id):
                                     push('user' if r_role == 'user' else 'assistant', r_content, r_ts)
                         execs = conn.execute('SELECT id, agent_type, status, model_id, runtime_session_ref, started_at, ended_at FROM executions WHERE task_id=? ORDER BY started_at ASC', (tid,)).fetchall()
                         for eid, atype, estatus, mid, sref, sat, eat in execs:
-                            summary = f"**Execution `{eid}`** · Harness: `{atype.upper()}` · Model: `{mid or 'default'}` · Status: `{estatus}`"
-                            if sref:
-                                summary += f"\nSession Ref: `{sref}`"
+                            push('step', f"Execution `{eid}` · Harness: `{atype.upper()}` · Model: `{mid or 'default'}` · Status: `{estatus}`", sat or updated_at)
+                            summary_parts = []
                             revs = conn.execute('SELECT status, note, created_at FROM reviews WHERE execution_id=? ORDER BY created_at ASC', (eid,)).fetchall()
                             for rstat, rnote, rts in revs:
-                                summary += f"\n\n- **Review ({rstat})**: {rnote or ''}"
+                                if rnote:
+                                    summary_parts.append(f"**Review ({rstat})**: {rnote}")
                             arts = conn.execute('SELECT type, name, substr(uri_or_content, 1, 1200) FROM artifacts WHERE execution_id=? LIMIT 5', (eid,)).fetchall()
                             for atype_name, aname, acontent in arts:
-                                summary += f"\n\n- **Artifact `{aname}` ({atype_name})**:\n```\n{acontent}\n```"
-                            push('assistant', summary, eat or sat or updated_at)
+                                summary_parts.append(f"**Artifact `{aname}` ({atype_name})**:\n```\n{acontent}\n```")
+                            if summary_parts:
+                                push('assistant', '\n\n'.join(summary_parts), eat or sat or updated_at)
                         break
                 except Exception:
                     continue
 
+    messages = _consolidate_raw_events(raw_events, limit=60)
     if not messages:
-        push('assistant', f'Session `{session_id}` metadata loaded (workspace: `{workspace or "default"}`).')
+        messages = [{
+            'sequence': 1,
+            'role': 'assistant',
+            'text': f'Session `{session_id}` metadata loaded (workspace: `{workspace or "default"}`).',
+            'timestamp': int(datetime.now().timestamp() * 1000),
+        }]
     return {
         'harness': harness,
         'workspace': workspace,

@@ -3013,3 +3013,139 @@ textarea {
 
 /* A fixed icon target, with status attached to the same device. */
 .device-indicator{position:relative;flex:0 0 44px;width:44px;padding:10px;min-width:44px;overflow:visible}.device-indicator svg{width:22px;height:22px;flex-shrink:0}.device-indicator .device-dot{position:absolute;top:6px;right:6px;width:7px;height:7px}
+
+
+/* Collapsible "思考与过程" (Thinking & Process) section + Terminal Micro-Animations & Streaming */
+.thinking-process-box {
+  margin-bottom: 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-secondary);
+  overflow: hidden;
+}
+.thinking-process-summary {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 11px;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+}
+.thinking-process-summary::-webkit-details-marker {
+  display: none;
+}
+.thinking-process-summary::after {
+  content: '▸';
+  margin-left: auto;
+  font-size: 0.75rem;
+  color: var(--text-tertiary);
+  transition: transform 0.16s ease;
+}
+.thinking-process-box[open] .thinking-process-summary {
+  border-bottom: 1px solid var(--border-color);
+  color: var(--text-primary);
+}
+.thinking-process-box[open] .thinking-process-summary::after {
+  transform: rotate(90deg);
+}
+.thinking-process-icon {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: var(--accent-primary);
+  font-size: 0.82rem;
+}
+.thinking-process-list {
+  margin: 0;
+  padding: 8px 12px 8px 26px;
+  max-height: 240px;
+  overflow-y: auto;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+.thinking-process-item {
+  margin-bottom: 4px;
+  overflow-wrap: anywhere;
+}
+.thinking-process-item:last-child {
+  margin-bottom: 0;
+}
+.thinking-process-item code {
+  font-size: 0.74rem;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--bg-tertiary);
+  color: var(--accent-primary);
+}
+
+.terminal-status-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+.terminal-rod {
+  display: inline-block;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-weight: 600;
+  color: var(--accent-primary);
+  letter-spacing: -0.02em;
+}
+.terminal-dots {
+  display: inline-flex;
+  align-items: center;
+}
+.terminal-dots span {
+  animation: bobTerminalDotPulse 1.2s infinite ease-in-out;
+}
+.terminal-dots span:nth-child(2) {
+  animation-delay: 0.2s;
+}
+.terminal-dots span:nth-child(3) {
+  animation-delay: 0.4s;
+}
+@keyframes bobTerminalDotPulse {
+  0%, 20% { opacity: 0.2; }
+  50% { opacity: 1; }
+  100% { opacity: 0.2; }
+}
+
+.streaming-output-bar {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+.streaming-skip-btn {
+  margin-left: 4px;
+  padding: 1px 6px;
+  font-size: 0.72rem;
+  border-radius: 4px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.streaming-skip-btn:hover {
+  color: var(--text-primary);
+  border-color: var(--accent-primary);
+}
+.streaming-cursor {
+  display: inline-block;
+  margin-left: 3px;
+  color: var(--accent-primary);
+  font-weight: 700;
+  animation: bobCursorBlink 0.85s steps(2, start) infinite;
+}
+@keyframes bobCursorBlink {
+  to { visibility: hidden; }
+}

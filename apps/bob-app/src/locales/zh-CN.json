@@ -667,5 +667,11 @@
   "filterSortTimeAsc": "按最早时间排序",
   "filterSortTitleAsc": "按标题名称 (A→Z)",
   "filterSortNodeAsc": "按节点与工具排序",
-  "filterSortTopicAsc": "按主题与项目排序"
+  "filterSortTopicAsc": "按主题与项目排序",
+  "thinkingProcessTitle": "思考与过程",
+  "thinkingProcessCount": "思考与过程 · {count} 步",
+  "thinkingProcessRunning": "正在执行思考与工具调用",
+  "streamingOutputStatus": "正在流式输出",
+  "streamingSkipBtn": "直接显示全文",
+  "agentLiveThinking": "正在思考与调度节点"
 }

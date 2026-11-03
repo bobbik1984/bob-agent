@@ -1,7 +1,8 @@
 <script setup>
-import { inject } from 'vue';
+import { computed, inject, onUnmounted, ref, watch } from 'vue';
 import DshSessions from './DshSessions.vue';
 import MessageContent from './MessageContent.vue';
+import { TERMINAL_ROD_FRAMES } from '../thinking-process.mjs';
 
 const {
   t,
@@ -65,6 +66,21 @@ const {
   activeExecution,
   canSend,
 } = inject('bobAppShell');
+
+const rodIdx = ref(0);
+let rodTimer = null;
+const isBusy = computed(() => Boolean(loading.value || dispatchPending.value || saving.value || activeExecution.value));
+const rodFrame = computed(() => TERMINAL_ROD_FRAMES[rodIdx.value % TERMINAL_ROD_FRAMES.length]);
+watch(isBusy, val => {
+  if (typeof setInterval !== 'function') return;
+  if (val && !rodTimer) {
+    rodTimer = setInterval(() => { rodIdx.value = (rodIdx.value + 1) % TERMINAL_ROD_FRAMES.length; }, 120);
+  } else if (!val && rodTimer) {
+    clearInterval(rodTimer);
+    rodTimer = null;
+  }
+}, { immediate: true });
+onUnmounted(() => { if (rodTimer) clearInterval(rodTimer); });
 </script>
 
 <template>
@@ -131,7 +147,7 @@ const {
           </p>
         </div>
         <article
-          v-for="message in messages"
+          v-for="(message, msgIdx) in messages"
           :key="message.id"
           class="message"
           :class="{ 'assistant-message': message.role === 'assistant' }"
@@ -148,7 +164,7 @@ const {
             }}
           </span>
           <span v-if="message.source === 'native_session_result'" class="message-state">{{ t('assistantNativeResult') }}</span>
-          <MessageContent :content="message.content" :plain="message.role === 'user'" />
+          <MessageContent :content="message.content" :plain="message.role === 'user'" :stream="message.role === 'assistant' && msgIdx === messages.length - 1" />
           <div v-if="assistantLink(message)" class="message-state" role="status">
             <span>{{ t('assistantDispatch_' + assistantLink(message).status) }}</span>
             <button type="button" @click="openAssistantTarget(assistantLink(message))">{{ assistantLink(message).target_title }} · {{ t('assistantOpenOriginal') }}</button>
@@ -189,6 +205,11 @@ const {
             {{ t('noAutomaticReplay') }}
           </span>
         </article>
+        <div v-if="dispatchPending || saving || activeExecution" class="dsh-live-terminal-card" role="status" aria-live="polite">
+          <span class="terminal-rod" aria-hidden="true">[{{ rodFrame }}]</span>
+          <span>{{ t(dispatchPending ? 'requestingExecution' : saving ? 'saving' : 'agentLiveThinking') }}</span>
+          <span class="terminal-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span>
+        </div>
       </section>
 
       <form class="composer" @submit.prevent="send">

@@ -360,3 +360,34 @@ test('App.vue lossless modular split and sidebar Agent logo anti-overflow CSS', 
   assert.match(styleCss, /\.sidebar-primary-agent-row\s*\{[^}]*min-height:\s*3\.35rem;/s);
   assert.match(styleCss, /\.sidebar-primary-agent-row\s*\{[^}]*flex-shrink:\s*0;/s);
 });
+
+test('Collapsible thinking & process section consolidates tool calls and intermediate narration into thinkingSteps', async () => {
+  const { extractThinkingAndBody, consolidateSessionMessages, TERMINAL_ROD_FRAMES } = await import('../src/thinking-process.mjs');
+  assert.deepEqual(TERMINAL_ROD_FRAMES, ['|', '/', '─', '\\']);
+
+  // 1. Fenced thinking block + <think> tag + standalone [Tool:] paragraphs
+  const parsed = extractThinkingAndBody(
+    '```thinking\n- `[Tool: Bash]` cd /home/bobbik/winter-shelter\n- `[Tool: Read]` snapshots/heatmap.png\n```\n\n<think>Checking snow depth values</think>\n\n`[Tool: Grep]` KEY_F3\n\nAll 591 checks pass and CI is green.',
+  );
+  assert.equal(parsed.steps.length, 4);
+  assert.equal(parsed.body, 'All 591 checks pass and CI is green.');
+
+  // 2. Multi-step Claude turn consolidation (like winter-shelter session)
+  const rawTurn = [
+    { sequence: 1, role: 'user', text: 'carry on with the winter shelter game' },
+    { sequence: 2, role: 'assistant', text: '`[Tool: Bash]` cd /home/bobbik/dsh_projects/winter-shelter; python3 test.py' },
+    { sequence: 3, role: 'assistant', text: 'All 591 checks pass. Now I will run the actual game in each level.' },
+    { sequence: 4, role: 'assistant', text: '`[Tool: Bash]` grep -rn "KEY_F3" scripts' },
+    { sequence: 5, role: 'assistant', text: '`[Tool: Read]` snapshots/l2_level_snow_heatmaps.png' },
+    { sequence: 6, role: 'assistant', text: 'Quick CI passes and the final heatmap adjustments are committed.' },
+  ];
+  const consolidated = consolidateSessionMessages(rawTurn);
+  assert.equal(consolidated.length, 2);
+  assert.equal(consolidated[0].role, 'user');
+  assert.equal(consolidated[1].role, 'assistant');
+  assert.equal(consolidated[1].sequence, 6);
+  assert.equal(consolidated[1].displayText, 'Quick CI passes and the final heatmap adjustments are committed.');
+  assert.equal(consolidated[1].thinkingSteps.length, 4);
+  assert.match(consolidated[1].thinkingSteps[0], /\[Tool: Bash\]/);
+  assert.match(consolidated[1].thinkingSteps[1], /\[Thinking\]`\s*All 591 checks pass/);
+});

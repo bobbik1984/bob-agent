@@ -7,7 +7,10 @@ import {nodeLabel as label,directoryGroups,extractFilterOptions} from '../conver
 const props=defineProps({nodes:Array,catalog:Object,search:String,mode:String});
 const emit=defineEmits(['select-local','select-remote']);
 const {t}=useI18n();
-const remote=ref([]), failures=ref([]), loading=ref(false);let generation=0;
+const remote=ref([]), failures=ref([]), loading=ref(false), rodIndex=ref(0);let generation=0, rodTimer=null;
+const rodFrames=['|','/','─','\\'];
+const rodFrame=computed(()=>rodFrames[rodIndex.value%rodFrames.length]);
+watch(loading,val=>{if(typeof setInterval!=='function')return;if(val&&!rodTimer){rodTimer=setInterval(()=>{rodIndex.value=(rodIndex.value+1)%rodFrames.length;},120);}else if(!val&&rodTimer){clearInterval(rodTimer);rodTimer=null;}},{immediate:true});
 const associations=ref({links:[]}), associationError=ref(''), linking=ref(false), linksAvailable=ref(false);
 const pinnedUids=ref((()=>{try{return typeof localStorage!=='undefined'?JSON.parse(localStorage.getItem('bob-pinned-sessions')||'[]'):[]}catch{return []}})());
 function isPinned(uid){return pinnedUids.value.includes(uid);}
@@ -43,7 +46,7 @@ async function refresh(){const g=++generation;loading.value=true;const nodes=(pr
  const results=await Promise.allSettled(nodes.map(async n=>{const revision=readingCache.revision();const rows=await singleFlight(listKey(n),()=>kernelBridge.dshList(n.id));if(!Array.isArray(rows))throw Error('DSH_INVALID_LIST');cachedNodes.set(listKey(n),rows);await readingCache.put(listKey(n),rows,undefined,revision);return rows}));
  if(g!==generation)return;display(nodes);failures.value=results.flatMap((x,i)=>x.status==='rejected'?[label(nodes[i])]:[]);loading.value=false;}
 watch(()=>JSON.stringify((props.nodes||[]).map(n=>[n.id,n.enabled,n.baseUrl])),refresh,{immediate:true});
-onUnmounted(()=>{generation++});
+onUnmounted(()=>{if(rodTimer&&typeof clearInterval==='function')clearInterval(rodTimer);generation++});
 const stamp=s=>{const raw=s.updated_at;const n=Number(raw);return Number.isFinite(n)?(n<1e12?n*1000:n):(Date.parse(raw)||0)};
 const rows=computed(()=>{
  const projects=props.catalog?.projects||[], imported=new Set(props.catalog?.imported_project_ids||[]);
@@ -70,7 +73,7 @@ const toolLabel=s=>s.remote?(s.toolLabel||s.tool_label||(s.harness==='claude'||s
     <button v-if="activeFilterCount>0" type="button" class="directory-filter-reset" @click="resetFilters">{{t('filterResetBtn')}}</button>
    </div>
    <div class="directory-refresh-bar">
-    <span v-if="loading" role="status">{{t('dshLoading')}}</span>
+    <span v-if="loading" class="terminal-status-line" role="status"><span class="terminal-rod" aria-hidden="true">[{{rodFrame}}]</span><span>{{t('dshLoading')}}</span><span class="terminal-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span></span>
     <button type="button" :disabled="loading" @click="refresh">{{t('dshRefresh')}}</button>
    </div>
   </div>

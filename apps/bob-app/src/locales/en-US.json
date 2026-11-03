@@ -667,5 +667,11 @@
   "filterSortTimeAsc": "Oldest activity first",
   "filterSortTitleAsc": "Title (A→Z)",
   "filterSortNodeAsc": "By node & tool",
-  "filterSortTopicAsc": "By topic & project"
+  "filterSortTopicAsc": "By topic & project",
+  "thinkingProcessTitle": "Thinking & Process",
+  "thinkingProcessCount": "Thinking & Process · {count} steps",
+  "thinkingProcessRunning": "Running thinking & tool steps",
+  "streamingOutputStatus": "Streaming output",
+  "streamingSkipBtn": "Show full reply",
+  "agentLiveThinking": "Thinking & dispatching"
 }
