@@ -361,14 +361,9 @@ def read_session_page(cfg, sid):
                         x in utxt for x in ('<command-name>', '<local-command', '<task-notification>', '<bash-input>', '<bash-stdout>')
                     ):
                         continue
-                    if not any(u2 == utxt for r2, u2, _ in ev[-4:] if r2 == 'user'):
+                    prev_users = [u2 for r2, u2, _ in ev if r2 == 'user']
+                    if not prev_users or prev_users[-1] != utxt:
                         push('user', utxt, ts)
-                elif t == 'last-prompt' and o.get('lastPrompt'):
-                    lp = str(o['lastPrompt']).strip()
-                    if lp and lp != 'ping' and not lp.startswith('This session is being continued') and not any(
-                        u2 == lp for r2, u2, _ in ev[-6:] if r2 == 'user'
-                    ):
-                        push('user', lp, ts)
                 elif t == 'assistant':
                     if isinstance(c, list):
                         has_text = any(isinstance(b, dict) and b.get('type') == 'text' and (b.get('text') or '').strip() for b in c)
@@ -476,8 +471,8 @@ def read_session_page(cfg, sid):
                 except Exception:
                     continue
     recs = _reconcile(sid)
-    ru = {t for r, t, _ in ev[-20:] if r == 'user'}
-    ra = {t for r, t, _ in ev[-20:] if r == 'assistant'}
+    ru = {t for r, t, _ in ev if r == 'user'}
+    ra = {t for r, t, _ in ev if r == 'assistant'}
     for r in recs:
         ut, at, sat = (r.get('text') or '').strip(), (r.get('reply_text') or '').strip(), int(r.get('started_at') or 0)
         if ut and ut not in ru:
