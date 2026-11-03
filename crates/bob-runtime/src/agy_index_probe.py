@@ -556,9 +556,15 @@ def _run_worker(cfg):
                                      cwd=wcwd if Path(wcwd).is_dir() else str(Path.home()), env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=3600)
                 reply = (pr2.stdout or pr2.stderr or pr.stderr or 'Completed.').strip()
         elif sid.startswith('codex:'):
+            raw = sid.split(':', 1)[1]
             cbin = shutil.which('codex', path=env['PATH']) or 'codex'
-            pr = subprocess.run([cbin, 'exec', text], cwd=wcwd if Path(wcwd).is_dir() else str(Path.home()), env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=3600)
-            reply = (pr.stdout or pr.stderr or 'Completed.').strip()
+            cwd = wcwd if Path(wcwd).is_dir() else str(Path.home())
+            pr = subprocess.run([cbin, 'exec', 'resume', raw, text, '--dangerously-bypass-approvals-and-sandbox', '--skip-git-repo-check'], cwd=cwd, env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=3600)
+            if (pr.stdout or '').strip() and pr.returncode == 0:
+                reply = pr.stdout.strip()
+            else:
+                pr2 = subprocess.run([cbin, 'exec', text, '--dangerously-bypass-approvals-and-sandbox', '--skip-git-repo-check'], cwd=cwd, env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=3600)
+                reply = (pr2.stdout or pr2.stderr or pr.stderr or 'Completed.').strip()
         elif sid.startswith('agy:'):
             raw = sid.split(':', 1)[1]
             cbin = shutil.which('agy', path=env['PATH']) or '/home/bobbik/.local/bin/agy'
@@ -566,8 +572,33 @@ def _run_worker(cfg):
                                 cwd=wcwd if Path(wcwd).is_dir() else str(Path.home()), env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=3600)
             reply = (pr.stdout or pr.stderr or 'Completed.').strip()
         elif sid.startswith('pi:'):
+            raw = sid.split(':', 1)[1]
             cbin = shutil.which('pi', path=env['PATH']) or 'pi'
-            pr = subprocess.run([cbin, '-p', text], cwd=wcwd if Path(wcwd).is_dir() else str(Path.home()), env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=3600)
+            cwd = wcwd if Path(wcwd).is_dir() else str(Path.home())
+            sarg = cfg.get('jsonl_path') or raw
+            pr = subprocess.run([cbin, '--session', sarg, '-p', text], cwd=cwd, env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=3600)
+            if (pr.stdout or '').strip() and pr.returncode == 0:
+                reply = pr.stdout.strip()
+            else:
+                pr2 = subprocess.run([cbin, '-p', text], cwd=cwd, env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=3600)
+                reply = (pr2.stdout or pr2.stderr or pr.stderr or 'Completed.').strip()
+        elif sid.startswith('cp:'):
+            pts = sid.split(':', 2)
+            at = pts[1] if len(pts) == 3 else 'dsh'
+            cwd = wcwd if Path(wcwd).is_dir() else str(Path.home())
+            if at == 'pi':
+                cbin = shutil.which('pi', path=env['PATH']) or 'pi'
+                pr = subprocess.run([cbin, '-p', text], cwd=cwd, env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=3600)
+            elif at == 'codex':
+                cbin = shutil.which('codex', path=env['PATH']) or 'codex'
+                pr = subprocess.run([cbin, 'exec', text, '--dangerously-bypass-approvals-and-sandbox', '--skip-git-repo-check'], cwd=cwd, env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=3600)
+            elif at == 'agy':
+                cbin = shutil.which('agy', path=env['PATH']) or 'agy'
+                pr = subprocess.run([cbin, '-p', text, '--dangerously-skip-permissions'], cwd=cwd, env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=3600)
+            else:
+                cbin = shutil.which('claude', path=env['PATH']) or shutil.which('pi', path=env['PATH']) or 'pi'
+                args = [cbin, '-p', text, '--dangerously-skip-permissions'] if 'claude' in str(cbin) else [cbin, '-p', text]
+                pr = subprocess.run(args, cwd=cwd, env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=3600)
             reply = (pr.stdout or pr.stderr or 'Completed.').strip()
     except Exception as exc:
         if not sid.startswith('claude-jsonl:'):
@@ -613,6 +644,39 @@ def prompt_session(cfg):
                     wcwd = cw
                     if cw.replace('/', '-') == slug:
                         pcwd = cw
+    elif sid.startswith('pi:'):
+        raw, pdir = sid.split(':', 1)[1], cfg.get('piDataDir') or ''
+        m = [p for p in Path(pdir).glob('**/*.jsonl') if raw in p.name] if pdir else []
+        if m:
+            jpath = str(m[0])
+            for _, o in _iter_jsonl(m[0], 30):
+                if o.get('type') == 'session' and o.get('cwd'):
+                    wcwd = pcwd = o['cwd']
+                    break
+    elif sid.startswith('codex:'):
+        raw, xdir = sid.split(':', 1)[1], cfg.get('codexDataDir') or ''
+        m = [p for p in (Path(xdir) / 'sessions').glob('**/*.jsonl') if raw in p.name] if xdir else []
+        if m:
+            jpath = str(m[0])
+            for _, o in _iter_jsonl(m[0], 30):
+                if o.get('type') == 'session_meta' and (o.get('payload') or {}).get('cwd'):
+                    wcwd = pcwd = o['payload']['cwd']
+                    break
+    elif sid.startswith('cp:'):
+        pts = sid.split(':', 2)
+        if len(pts) == 3:
+            _, _, tid = pts
+            for dbp in cfg.get('controlPlaneDbs') or []:
+                p = Path(dbp)
+                if p.is_file():
+                    try:
+                        with closing(sqlite3.connect(p.as_uri() + '?mode=ro', uri=True, timeout=2)) as conn:
+                            wr = conn.execute('SELECT w.path FROM executions e JOIN workspaces w ON w.id=e.workspace_id WHERE e.task_id=? LIMIT 1', (tid,)).fetchone()
+                            if wr and wr[0]:
+                                wcwd = pcwd = wr[0]
+                                break
+                    except Exception:
+                        pass
     wcfg = json.dumps({'mode': 'worker', 'session_id': sid, 'request_id': rid, 'text': text, 'project_cwd': pcwd, 'work_cwd': wcwd, 'jsonl_path': jpath}, ensure_ascii=False)
     sf = Path.home() / '.bob_remote_probe.py'
     try:
