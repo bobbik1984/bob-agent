@@ -1,10 +1,11 @@
 // Utilities for collapsing intermediate agent thinking / tool-use steps
-// into a foldable "思考与过程" (Thinking & Process) section and driving
-// terminal micro-animations + progressive streaming output.
+// into foldable process sections (including interleaved Claude Code style
+// tool summaries between progress paragraphs) and driving terminal
+// micro-animations + progressive streaming output.
 
-export const TERMINAL_ROD_FRAMES = ['|', '/', '─', '\\'];
+export const TERMINAL_ROD_FRAMES = ['|', '/', '-', '\\'];
 
-const TOOL_LINE_RE = /^(?:`?\[(?:Tool|Thinking):\s*[^\]]*\]`?)/i;
+const TOOL_LINE_RE = /^(?:[-*]\s+)?(?:`?\[(?:Tool|Thinking)(?::\s*[^\]]*)?\]`?)/i;
 
 export function cleanStepLine(line) {
   const s = String(line ?? '')
@@ -14,47 +15,142 @@ export function cleanStepLine(line) {
   return s.length > 220 ? `${s.slice(0, 217)}...` : s;
 }
 
-export function extractThinkingAndBody(rawContent, extraSteps = []) {
-  const steps = Array.isArray(extraSteps)
-    ? extraSteps.map(cleanStepLine).filter(Boolean)
-    : [];
-  let text = String(rawContent ?? '').replace(/\r\n?/g, '\n');
+export function summarizeProcessSteps(steps, locale = 'zh-CN') {
+  if (!Array.isArray(steps) || steps.length === 0) return '';
+  let cmd = 0;
+  let read = 0;
+  let edit = 0;
+  let search = 0;
+  let otherTool = 0;
 
-  // 1. Extract fenced ```thinking ... ``` blocks
-  text = text.replace(/```thinking\s*\n([\s\S]*?)(?:```|$)/gi, (_, inner) => {
-    for (const rawLine of String(inner).split('\n')) {
-      const cleaned = cleanStepLine(rawLine);
-      if (cleaned) steps.push(cleaned);
-    }
-    return '\n';
-  });
-
-  // 2. Extract <think>...</think> blocks (including unclosed <think> during streaming)
-  text = text.replace(/<think>([\s\S]*?)(?:<\/think>|$)/gi, (_, inner) => {
-    for (const para of String(inner).split(/\n{2,}/)) {
-      const cleaned = cleanStepLine(para);
-      if (cleaned) steps.push(cleaned.startsWith('`[Thinking]`') ? cleaned : `\`[Thinking]\` ${cleaned}`);
-    }
-    return '\n';
-  });
-
-  // 3. Separate standalone [Tool: ...] paragraphs from formal reply paragraphs
-  const paragraphs = text.split(/\n{2,}/);
-  const bodyParts = [];
-  for (const para of paragraphs) {
-    const trimmed = para.trim();
-    if (!trimmed) continue;
-    if (TOOL_LINE_RE.test(trimmed)) {
-      steps.push(cleanStepLine(trimmed));
-    } else {
-      bodyParts.push(trimmed);
+  for (const raw of steps) {
+    const s = String(raw ?? '');
+    if (/\[Tool:\s*(?:Bash|sh|zsh|cmd|powershell|exec|shell|command|terminal)\b/i.test(s) || /^Execution\s+`/i.test(s)) {
+      cmd += 1;
+    } else if (/\[Tool:\s*(?:Read|read_file|view_file|cat)\b/i.test(s)) {
+      read += 1;
+    } else if (/\[Tool:\s*(?:Edit|Write|MultiEdit|edit_file|write_file|patch)\b/i.test(s)) {
+      edit += 1;
+    } else if (/\[Tool:\s*(?:Grep|Glob|ToolSearch|Search|WebSearch|grep|find)\b/i.test(s)) {
+      search += 1;
+    } else if (/\[Tool:/i.test(s)) {
+      otherTool += 1;
     }
   }
 
+  const totalTools = cmd + read + edit + search + otherTool;
+  if (totalTools === 0) return '';
+
+  const isZh = String(locale ?? 'zh-CN').toLowerCase().startsWith('zh');
+  if (isZh) {
+    const parts = [];
+    if (cmd > 0) parts.push(`执行了 ${cmd} 条命令`);
+    if (read > 0) parts.push(`读取了 ${read} 个文件`);
+    if (edit > 0) parts.push(`修改了 ${edit} 个文件`);
+    if (search > 0) parts.push(`搜索了 ${search} 次`);
+    if (otherTool > 0) parts.push(`调用了 ${otherTool} 个工具`);
+    return parts.join('，');
+  }
+
+  const parts = [];
+  if (cmd > 0) parts.push(cmd === 1 ? 'ran a command' : `ran ${cmd} commands`);
+  if (read > 0) parts.push(read === 1 ? 'read a file' : `read ${read} files`);
+  if (edit > 0) parts.push(edit === 1 ? 'edited a file' : `edited ${edit} files`);
+  if (search > 0) parts.push(search === 1 ? 'searched once' : `searched ${search} times`);
+  if (otherTool > 0) parts.push(otherTool === 1 ? 'used a tool' : `used ${otherTool} tools`);
+  const joined = parts.join(', ');
+  return joined ? joined.charAt(0).toUpperCase() + joined.slice(1) : '';
+}
+
+export function parseMessageSegments(rawContent, extraSteps = []) {
+  const segments = [];
+  let pendingSteps = Array.isArray(extraSteps)
+    ? extraSteps.map(cleanStepLine).filter(Boolean)
+    : [];
+  let pendingText = [];
+
+  const flushSteps = () => {
+    if (pendingSteps.length > 0) {
+      segments.push({ kind: 'steps', steps: pendingSteps });
+      pendingSteps = [];
+    }
+  };
+
+  const flushText = () => {
+    if (pendingText.length > 0) {
+      const joined = pendingText.join('\n\n').trim();
+      if (joined) segments.push({ kind: 'text', text: joined });
+      pendingText = [];
+    }
+  };
+
+  const processPlainChunk = chunk => {
+    const paragraphs = String(chunk ?? '').split(/\n{2,}/);
+    for (const para of paragraphs) {
+      const trimmed = para.trim();
+      if (!trimmed) continue;
+      if (TOOL_LINE_RE.test(trimmed)) {
+        flushText();
+        const cleaned = cleanStepLine(trimmed);
+        if (cleaned) pendingSteps.push(cleaned);
+      } else {
+        flushSteps();
+        pendingText.push(trimmed);
+      }
+    }
+  };
+
+  const text = String(rawContent ?? '').replace(/\r\n?/g, '\n');
+  const blockRe = /```thinking\s*\n([\s\S]*?)(?:```|$)|<think>([\s\S]*?)(?:<\/think>|$)/gi;
+  let lastIndex = 0;
+  let match;
+
+  while ((match = blockRe.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      processPlainChunk(text.slice(lastIndex, match.index));
+    }
+    flushText();
+    if (match[1] !== undefined) {
+      for (const rawLine of String(match[1]).split('\n')) {
+        const cleaned = cleanStepLine(rawLine);
+        if (cleaned) pendingSteps.push(cleaned);
+      }
+    } else if (match[2] !== undefined) {
+      for (const para of String(match[2]).split(/\n{2,}/)) {
+        const cleaned = cleanStepLine(para);
+        if (cleaned) {
+          pendingSteps.push(cleaned.startsWith('`[Thinking]`') ? cleaned : `\`[Thinking]\` ${cleaned}`);
+        }
+      }
+    }
+    lastIndex = blockRe.lastIndex;
+  }
+
+  if (lastIndex < text.length) {
+    processPlainChunk(text.slice(lastIndex));
+  }
+
+  flushSteps();
+  flushText();
+  return segments;
+}
+
+export function extractThinkingAndBody(rawContent, extraSteps = []) {
+  const segments = parseMessageSegments(rawContent, extraSteps);
+  const steps = [];
+  const bodyParts = [];
+  for (const seg of segments) {
+    if (seg.kind === 'steps') {
+      steps.push(...seg.steps);
+    } else if (seg.kind === 'text' && seg.text) {
+      bodyParts.push(seg.text);
+    }
+  }
   const body = bodyParts.join('\n\n').trim();
   return {
     steps,
     body,
+    segments,
     isThinkingOnly: steps.length > 0 && !body,
   };
 }
@@ -73,61 +169,51 @@ export function consolidateSessionMessages(messages) {
         ...msg,
         thinkingSteps: parsed.steps,
         displayText: parsed.body,
+        interleavedText: String(msg.text ?? ''),
       });
       assistantRun = [];
       return;
     }
 
-    const items = [];
-    let hasTools = false;
+    const allSegments = [];
     for (const msg of assistantRun) {
-      const parsed = extractThinkingAndBody(msg.text, msg.thinkingSteps);
-      for (const st of parsed.steps) {
-        items.push({ kind: 'step', value: st, msg });
-        if (TOOL_LINE_RE.test(st) || st.includes('[Tool:')) hasTools = true;
-      }
-      if (parsed.body) {
-        items.push({ kind: 'text', value: parsed.body, msg });
+      const segs = parseMessageSegments(msg.text, msg.thinkingSteps);
+      for (const seg of segs) {
+        if (seg.kind === 'steps') {
+          if (allSegments.length > 0 && allSegments[allSegments.length - 1].kind === 'steps') {
+            allSegments[allSegments.length - 1].steps.push(...seg.steps);
+          } else {
+            allSegments.push({ kind: 'steps', steps: [...seg.steps] });
+          }
+        } else if (seg.kind === 'text' && seg.text) {
+          allSegments.push({ kind: 'text', text: seg.text });
+        }
       }
     }
 
-    const textOnly = items.filter(x => x.kind === 'text').map(x => x.value);
     const steps = [];
     const formalParts = [];
+    const interleavedChunks = [];
 
-    if (textOnly.length === 0) {
-      for (const it of items) steps.push(it.value);
-    } else if (!hasTools && items.every(x => x.kind === 'text')) {
-      for (const t of textOnly) formalParts.push(t);
-    } else {
-      const lastText = textOnly[textOnly.length - 1] || '';
-      const keepCount =
-        textOnly.length >= 2 && lastText.trimEnd().endsWith(':') && lastText.length < 240
-          ? 2
-          : 1;
-      const cutoff = textOnly.length - keepCount;
-      let seenText = 0;
-      for (const it of items) {
-        if (it.kind === 'step') {
-          steps.push(it.value);
-        } else {
-          if (seenText < cutoff) {
-            const cleaned = cleanStepLine(it.value);
-            if (cleaned) steps.push(cleaned.startsWith('`[Thinking]`') ? cleaned : `\`[Thinking]\` ${cleaned}`);
-          } else {
-            formalParts.push(it.value);
-          }
-          seenText += 1;
-        }
+    for (const seg of allSegments) {
+      if (seg.kind === 'steps') {
+        steps.push(...seg.steps);
+        const lines = seg.steps.map(s => `- ${s}`).join('\n');
+        interleavedChunks.push(`\`\`\`thinking\n${lines}\n\`\`\``);
+      } else if (seg.kind === 'text') {
+        formalParts.push(seg.text);
+        interleavedChunks.push(seg.text);
       }
     }
 
     const anchor = assistantRun[assistantRun.length - 1];
     const body = formalParts.join('\n\n').trim();
+    const interleavedText = interleavedChunks.join('\n\n').trim();
     out.push({
       ...anchor,
       thinkingSteps: steps,
       displayText: body,
+      interleavedText: interleavedText || String(anchor.text ?? ''),
       text: body || anchor.text,
     });
     assistantRun = [];
@@ -141,6 +227,7 @@ export function consolidateSessionMessages(messages) {
         ...m,
         thinkingSteps: [],
         displayText: String(m.text ?? ''),
+        interleavedText: String(m.text ?? ''),
       });
     } else {
       assistantRun.push(m);

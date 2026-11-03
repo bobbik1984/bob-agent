@@ -5,6 +5,11 @@ from pathlib import Path
 
 MAX_ROWS = 200
 REQUIRED = {'conversation_id', 'title', 'workspace_uris', 'last_modified_time', 'step_count', 'status'}
+SKIP_TYPES = (
+    '"file-history-snapshot"', '"api-request"', '"cost-state"', '"system"',
+    '"attachment"', '"bridge-session"', '"permission-mode"', '"atis-latch"',
+    '"session-owner"', '"tools-used"', '"mode"'
+)
 _now = lambda: int(time.time() * 1000)
 
 def _j(s):
@@ -87,26 +92,17 @@ def _clean(text, fb=''):
 
 def _iter_jsonl(f, max_lines=0):
     try:
-        sz = f.stat().st_size
         with open(f, 'r', encoding='utf-8', errors='replace') as fp:
-            if not max_lines and sz > 6000000:
-                for i in range(25):
-                    ln = fp.readline()
-                    if not ln:
-                        break
-                    if len(ln) <= 65536:
-                        o = _j(ln)
-                        if o:
-                            yield i, o
-                fp.seek(max(0, sz - 6000000))
-                fp.readline()
             for i, ln in enumerate(fp):
                 if max_lines and i > max_lines:
                     break
-                if len(ln) > 100000 and ('"tool_result"' in ln or '"base64"' in ln or '"image"' in ln):
+                h = ln[:160]
+                if any(k in h for k in SKIP_TYPES):
+                    continue
+                if len(ln) > 65536 and ('"tool_result"' in ln[:600] or '"base64"' in ln[:1200] or '"type":"user"' in h):
                     continue
                 o = _j(ln)
-                if o:
+                if isinstance(o, dict) and o:
                     yield i, o
     except OSError:
         return
@@ -126,7 +122,9 @@ def discover_claude(d, limit=30):
             if o.get('cwd') and (not cwd or cwd in ('/home/bobbik', '/home/ubuntu')):
                 cwd = o['cwd']
             t = o.get('type')
-            if t == 'queue-operation' and o.get('operation') == 'enqueue' and o.get('content') and not title:
+            if t == 'ai-title' and o.get('aiTitle'):
+                title = _clean(o['aiTitle']) or title
+            elif t == 'queue-operation' and o.get('operation') == 'enqueue' and o.get('content') and not title:
                 title = _clean(o['content'])
             elif t == 'user' and not o.get('isMeta'):
                 c = (o.get('message') or {}).get('content') if isinstance(o.get('message'), dict) else None
@@ -147,7 +145,7 @@ def discover_pi(d, limit=30):
     out = []
     for f in sorted(r.glob('**/*.jsonl'), key=lambda p: p.stat().st_mtime, reverse=True)[:limit]:
         ms, sid, cwd, title, cnt = int(f.stat().st_mtime * 1000), f.stem.split('_')[-1], '', None, 0
-        for i, o in _iter_jsonl(f):
+        for i, o in _iter_jsonl(f, 250):
             if i > 200 and title and cwd:
                 break
             if o.get('type') == 'session':
@@ -254,28 +252,22 @@ def _consolidate(events, limit=60):
         nonlocal cur, cts
         if not cur:
             return
-        steps, body_parts = [], []
-        txts = [v for k, v in cur if k == 'text']
-        if not txts:
-            steps = [v for _, v in cur]
-        elif not any(k == 'step' for k, _ in cur) or len(txts) == 1:
-            steps = [v for k, v in cur if k == 'step']
-            body_parts = txts
-        else:
-            keep = 2 if (len(txts) >= 2 and txts[-1].rstrip().endswith(':') and len(txts[-1]) < 240) else 1
-            cut, seen = len(txts) - keep, 0
-            for k, v in cur:
-                if k == 'step':
-                    steps.append(v)
-                else:
-                    (steps.append(_thk(v, 220)) if seen < cut else body_parts.append(v))
-                    seen += 1
-        body = '\n\n'.join(body_parts).strip()
-        if steps:
-            sl = '\n'.join(f'- {s}' for s in steps[:40]) + (f'\n- ... (+{len(steps) - 40} steps)' if len(steps) > 40 else '')
-            full = f'```thinking\n{sl}\n```\n\n{body}'.strip()
-        else:
-            full = body
+        chunks, sbuf = [], []
+        def flush_steps():
+            nonlocal sbuf
+            if not sbuf:
+                return
+            sl = '\n'.join(f'- {s}' for s in sbuf[:40]) + (f'\n- ... (+{len(sbuf) - 40} steps)' if len(sbuf) > 40 else '')
+            chunks.append(f'```thinking\n{sl}\n```')
+            sbuf = []
+        for k, v in cur:
+            if k == 'step':
+                sbuf.append(v)
+            else:
+                flush_steps()
+                chunks.append(v)
+        flush_steps()
+        full = '\n\n'.join(chunks).strip()
         if full:
             out.append(('assistant', full, cts))
         cur, cts = [], 0
@@ -291,7 +283,7 @@ def _consolidate(events, limit=60):
             cts = ts or cts
     flush()
     now_ms = _now()
-    return [{'sequence': i, 'role': r, 'text': t[:16000], 'timestamp': ts or now_ms} for i, (r, t, ts) in enumerate(out[-limit:], 1)]
+    return [{'sequence': i, 'role': r, 'text': t[:32000], 'timestamp': ts or now_ms} for i, (r, t, ts) in enumerate(out[-limit:], 1)]
 
 def _rpath():
     return Path.home() / '.bob_remote_receipts.json'
@@ -339,36 +331,77 @@ def read_session_page(cfg, sid):
         m = list((Path(cdir) / 'projects').glob(f'*/{raw}.jsonl')) if cdir else []
         if m:
             fb = int(m[0].stat().st_mtime * 1000)
+            seen_uuids = set()
+            skip_ping = False
             for _, o in _iter_jsonl(m[0]):
                 if o.get('cwd') and (not ws or ws in ('/home/bobbik', '/home/ubuntu')):
                     ws = o['cwd']
+                u = o.get('uuid')
+                if u:
+                    if u in seen_uuids:
+                        continue
+                    seen_uuids.add(u)
+                if o.get('isMeta') or o.get('isSidechain'):
+                    continue
                 ts, t = _ts(o.get('timestamp'), fb), o.get('type')
                 msg = o.get('message') if isinstance(o.get('message'), dict) else {}
                 c = msg.get('content')
-                if (t == 'user' or (t == 'api-request-blob' and msg.get('role') == 'user')) and not o.get('isMeta'):
-                    utxt = c if isinstance(c, str) else '\n'.join(b.get('text', '') for b in c if isinstance(b, dict) and b.get('type') == 'text' and not str(b.get('text', '')).lstrip().startswith('<system-reminder>')) if isinstance(c, list) else ''
+                if t == 'user':
+                    utxt = c if isinstance(c, str) else '\n'.join(
+                        b.get('text', '') for b in c
+                        if isinstance(b, dict) and b.get('type') == 'text' and not str(b.get('text', '')).lstrip().startswith('<system-reminder>')
+                    ) if isinstance(c, list) else ''
                     utxt = re.sub(r'<system-reminder>[\s\S]*?</system-reminder>', '', utxt).strip()
-                    if utxt and not any(x in utxt for x in ('<command-name>', '<local-command', '<task-notification>')):
+                    if not utxt:
+                        continue
+                    if utxt == 'ping':
+                        skip_ping = True
+                        continue
+                    if utxt.startswith('This session is being continued from a previous conversation') or any(
+                        x in utxt for x in ('<command-name>', '<local-command', '<task-notification>', '<bash-input>', '<bash-stdout>')
+                    ):
+                        continue
+                    if not any(u2 == utxt for r2, u2, _ in ev[-4:] if r2 == 'user'):
                         push('user', utxt, ts)
                 elif t == 'last-prompt' and o.get('lastPrompt'):
                     lp = str(o['lastPrompt']).strip()
-                    if lp and lp != 'ping' and not any(u == lp for r, u, _ in ev[-6:] if r == 'user'):
+                    if lp and lp != 'ping' and not lp.startswith('This session is being continued') and not any(
+                        u2 == lp for r2, u2, _ in ev[-6:] if r2 == 'user'
+                    ):
                         push('user', lp, ts)
                 elif t == 'assistant':
                     if isinstance(c, list):
+                        has_text = any(isinstance(b, dict) and b.get('type') == 'text' and (b.get('text') or '').strip() for b in c)
                         for b in c:
                             if not isinstance(b, dict):
                                 continue
                             bt = b.get('type')
-                            if bt == 'thinking' and b.get('thinking'):
-                                push('step', _thk(b['thinking']), ts)
+                            if bt == 'thinking':
+                                th = (b.get('thinking') or '').strip()
+                                if not th:
+                                    continue
+                                if not has_text and len(th) <= 600 and '\n\n' not in th:
+                                    push('assistant', th, ts)
+                                else:
+                                    push('step', _thk(th), ts)
                             elif bt == 'tool_use' and b.get('name'):
                                 inp = b.get('input') if isinstance(b.get('input'), dict) else {}
                                 push('step', _tstep(b['name'], inp.get('command') or inp.get('file_path') or inp.get('pattern') or inp.get('description') or ''), ts)
                             elif bt == 'text' and b.get('text'):
-                                push('assistant', b['text'], ts)
+                                tx = b['text'].strip()
+                                if not tx or tx == 'No response requested.':
+                                    continue
+                                if skip_ping:
+                                    skip_ping = False
+                                    continue
+                                push('assistant', tx, ts)
                     elif isinstance(c, str):
-                        push('assistant', c, ts)
+                        tx = c.strip()
+                        if tx and tx != 'No response requested.':
+                            if skip_ping:
+                                skip_ping = False
+                            else:
+                                push('assistant', tx, ts)
     elif sid.startswith('pi:'):
         h, raw, pdir = 'pi', sid.split(':', 1)[1], cfg.get('piDataDir') or ''
         m = [p for p in Path(pdir).glob('**/*.jsonl') if raw in p.name] if pdir else []
@@ -443,15 +476,15 @@ def read_session_page(cfg, sid):
                 except Exception:
                     continue
     recs = _reconcile(sid)
-    ru = {t for r, t, _ in ev[-12:] if r == 'user'}
-    ra = {t for r, t, _ in ev[-12:] if r == 'assistant'}
+    ru = {t for r, t, _ in ev[-20:] if r == 'user'}
+    ra = {t for r, t, _ in ev[-20:] if r == 'assistant'}
     for r in recs:
         ut, at, sat = (r.get('text') or '').strip(), (r.get('reply_text') or '').strip(), int(r.get('started_at') or 0)
         if ut and ut not in ru:
             idx = next((i for i, (_, _, ets) in enumerate(ev) if sat and ets and ets >= sat - 1000), len(ev))
             ev.insert(idx, ('user', ut, sat))
             ru.add(ut)
-        if at and at not in ra:
+        if at and at not in ra and not (sid.startswith('claude-jsonl:') and ev and at.startswith('Execution error:')):
             push('assistant', at, int(r.get('ended_at') or sat))
             ra.add(at)
     msgs = _consolidate(ev, 60) or [{'sequence': 1, 'role': 'assistant', 'text': f'Session `{sid}` loaded (`{ws or "default"}`).', 'timestamp': _now()}]
@@ -476,23 +509,24 @@ def _run_worker(cfg):
             raw = sid.split(':', 1)[1]
             cbin = shutil.which('claude', path=env['PATH']) or '/home/bobbik/.local/bin/claude'
             pr = subprocess.run([cbin, '--resume', raw, '-p', text, '--dangerously-skip-permissions'],
-                                cwd=pcwd if Path(pcwd).is_dir() else str(Path.home()), env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=540)
+                                cwd=pcwd if Path(pcwd).is_dir() else str(Path.home()), env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=3600)
             if (pr.stdout or '').strip() and pr.returncode == 0:
                 reply = pr.stdout.strip()
             elif pr.returncode != 0:
                 pr2 = subprocess.run([cbin, '-p', text, '--dangerously-skip-permissions'],
-                                     cwd=wcwd if Path(wcwd).is_dir() else str(Path.home()), env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=540)
+                                     cwd=wcwd if Path(wcwd).is_dir() else str(Path.home()), env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=3600)
                 reply = (pr2.stdout or pr2.stderr or pr.stderr or 'Completed.').strip()
         elif sid.startswith('codex:'):
             cbin = shutil.which('codex', path=env['PATH']) or 'codex'
-            pr = subprocess.run([cbin, 'exec', text], cwd=wcwd if Path(wcwd).is_dir() else str(Path.home()), env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=540)
+            pr = subprocess.run([cbin, 'exec', text], cwd=wcwd if Path(wcwd).is_dir() else str(Path.home()), env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=3600)
             reply = (pr.stdout or pr.stderr or 'Completed.').strip()
         elif sid.startswith('pi:'):
             cbin = shutil.which('pi', path=env['PATH']) or 'pi'
-            pr = subprocess.run([cbin, '-p', text], cwd=wcwd if Path(wcwd).is_dir() else str(Path.home()), env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=540)
+            pr = subprocess.run([cbin, '-p', text], cwd=wcwd if Path(wcwd).is_dir() else str(Path.home()), env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=3600)
             reply = (pr.stdout or pr.stderr or 'Completed.').strip()
     except Exception as exc:
-        reply = f'Execution error: {exc}'
+        if not sid.startswith('claude-jsonl:'):
+            reply = f'Execution error: {exc}'
     d = _load_r()
     rec = d.get(rid) or {'request_id': rid, 'session_id': sid, 'status': 'accepted', 'text': text}
     rec['execution_status'], rec['ended_at'] = 'completed', _now()
@@ -549,7 +583,7 @@ if __name__ == '__main__':
             else:
                 print(json.dumps(discover_multi(cfg), ensure_ascii=False))
         else:
-            print(json.dumps(discover(a1, int(sys.argv[2]) if len(sys.argv) > 2 else 100), ensure_ascii=False))
+            print(json.dumps(discover(a1, int(sys.argv[2]) if len(sys.argv[2:]) else 100), ensure_ascii=False))
     except (ValueError, OSError, sqlite3.Error, IndexError):
         print(json.dumps({'error': 'AGY_INDEX_READ_FAILED'}))
         sys.exit(1)

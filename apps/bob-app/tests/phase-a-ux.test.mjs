@@ -361,33 +361,59 @@ test('App.vue lossless modular split and sidebar Agent logo anti-overflow CSS', 
   assert.match(styleCss, /\.sidebar-primary-agent-row\s*\{[^}]*flex-shrink:\s*0;/s);
 });
 
-test('Collapsible thinking & process section consolidates tool calls and intermediate narration into thinkingSteps', async () => {
-  const { extractThinkingAndBody, consolidateSessionMessages, TERMINAL_ROD_FRAMES } = await import('../src/thinking-process.mjs');
-  assert.deepEqual(TERMINAL_ROD_FRAMES, ['|', '/', '─', '\\']);
+test('Collapsible thinking & process section consolidates tool calls and preserves interleaved progress paragraphs', async () => {
+  const {
+    extractThinkingAndBody,
+    parseMessageSegments,
+    summarizeProcessSteps,
+    consolidateSessionMessages,
+    TERMINAL_ROD_FRAMES,
+  } = await import('../src/thinking-process.mjs');
+  assert.deepEqual(TERMINAL_ROD_FRAMES, ['|', '/', '-', '\\']);
 
-  // 1. Fenced thinking block + <think> tag + standalone [Tool:] paragraphs
+  // 1. Natural tool step summaries (Claude mobile parity)
+  assert.equal(
+    summarizeProcessSteps(['`[Tool: Bash]` ls', '`[Tool: Read]` a.gd'], 'en-US'),
+    'Ran a command, read a file',
+  );
+  assert.equal(
+    summarizeProcessSteps(['`[Tool: Bash]` ls', '`[Tool: Read]` a.gd'], 'zh-CN'),
+    '执行了 1 条命令，读取了 1 个文件',
+  );
+  assert.equal(
+    summarizeProcessSteps(['`[Tool: Bash]` a', '`[Tool: Bash]` b', '`[Tool: Bash]` c'], 'en-US'),
+    'Ran 3 commands',
+  );
+
+  // 2. Fenced thinking block + <think> tag + standalone [Tool:] paragraphs
   const parsed = extractThinkingAndBody(
     '```thinking\n- `[Tool: Bash]` cd /home/bobbik/winter-shelter\n- `[Tool: Read]` snapshots/heatmap.png\n```\n\n<think>Checking snow depth values</think>\n\n`[Tool: Grep]` KEY_F3\n\nAll 591 checks pass and CI is green.',
   );
   assert.equal(parsed.steps.length, 4);
   assert.equal(parsed.body, 'All 591 checks pass and CI is green.');
 
-  // 2. Multi-step Claude turn consolidation (like winter-shelter session)
+  // 3. Multi-step Claude turn consolidation preserves all visible text paragraphs and interleaves tool steps
   const rawTurn = [
-    { sequence: 1, role: 'user', text: 'carry on with the winter shelter game' },
-    { sequence: 2, role: 'assistant', text: '`[Tool: Bash]` cd /home/bobbik/dsh_projects/winter-shelter; python3 test.py' },
-    { sequence: 3, role: 'assistant', text: 'All 591 checks pass. Now I will run the actual game in each level.' },
-    { sequence: 4, role: 'assistant', text: '`[Tool: Bash]` grep -rn "KEY_F3" scripts' },
-    { sequence: 5, role: 'assistant', text: '`[Tool: Read]` snapshots/l2_level_snow_heatmaps.png' },
-    { sequence: 6, role: 'assistant', text: 'Quick CI passes and the final heatmap adjustments are committed.' },
+    { sequence: 1, role: 'user', text: 'Agree with all 4' },
+    { sequence: 2, role: 'assistant', text: 'Starting with the four setup steps, then reading the input and UI code.' },
+    { sequence: 3, role: 'assistant', text: '`[Tool: Bash]` cd /home/bobbik/dsh_projects/winter-shelter' },
+    { sequence: 4, role: 'assistant', text: '`[Tool: Read]` scripts/ui/game_ui.gd' },
+    { sequence: 5, role: 'assistant', text: 'Setup is finished and the fixes are committed as 7586aa6.' },
+    { sequence: 6, role: 'assistant', text: '`[Tool: Bash]` grep -rn "KEY_F3" scripts' },
+    { sequence: 7, role: 'assistant', text: 'All 36 checks on the full touch-only loop pass.' },
   ];
   const consolidated = consolidateSessionMessages(rawTurn);
   assert.equal(consolidated.length, 2);
   assert.equal(consolidated[0].role, 'user');
   assert.equal(consolidated[1].role, 'assistant');
-  assert.equal(consolidated[1].sequence, 6);
-  assert.equal(consolidated[1].displayText, 'Quick CI passes and the final heatmap adjustments are committed.');
-  assert.equal(consolidated[1].thinkingSteps.length, 4);
-  assert.match(consolidated[1].thinkingSteps[0], /\[Tool: Bash\]/);
-  assert.match(consolidated[1].thinkingSteps[1], /\[Thinking\]`\s*All 591 checks pass/);
+  assert.equal(consolidated[1].sequence, 7);
+  assert.equal(consolidated[1].thinkingSteps.length, 3);
+  const segs = parseMessageSegments(consolidated[1].interleavedText);
+  assert.equal(segs.length, 5);
+  assert.equal(segs[0].kind, 'text');
+  assert.equal(segs[1].kind, 'steps');
+  assert.equal(segs[1].steps.length, 2);
+  assert.equal(segs[2].kind, 'text');
+  assert.equal(segs[3].kind, 'steps');
+  assert.equal(segs[4].kind, 'text');
 });

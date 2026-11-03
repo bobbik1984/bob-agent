@@ -3,7 +3,12 @@ import { defineComponent, h, inject, ref, watch, onUnmounted } from 'vue';
 import { useI18n } from 'vue-i18n';
 import DshArtifactLink from './DshArtifactLink.vue';
 import { parseMessageMarkdown, inlineMarkdown } from '../message-markdown.mjs';
-import { extractThinkingAndBody, TERMINAL_ROD_FRAMES } from '../thinking-process.mjs';
+import {
+  extractThinkingAndBody,
+  parseMessageSegments,
+  summarizeProcessSteps,
+  TERMINAL_ROD_FRAMES,
+} from '../thinking-process.mjs';
 
 export default defineComponent({
   props: {
@@ -13,7 +18,7 @@ export default defineComponent({
     stream: { type: Boolean, default: false },
   },
   setup(props) {
-    const { t } = useI18n();
+    const { t, locale } = useI18n();
     const openFile = inject('dshOpenFile', null);
     const isBrowser = typeof window !== 'undefined';
 
@@ -81,7 +86,8 @@ export default defineComponent({
           return;
         }
         const parsed = extractThinkingAndBody(newContent, props.thinkingSteps);
-        const prevParsed = oldContent !== undefined ? extractThinkingAndBody(oldContent, props.thinkingSteps) : { body: '' };
+        const prevParsed =
+          oldContent !== undefined ? extractThinkingAndBody(oldContent, props.thinkingSteps) : { body: '' };
         const reset = !oldStream || !prevParsed.body || !parsed.body.startsWith(prevParsed.body.slice(0, 16));
         if (reset) {
           startStream(parsed.body.length, true);
@@ -131,35 +137,40 @@ export default defineComponent({
       );
     }
 
+    function renderStepsBox(steps, openByDefault, keyIdx) {
+      const naturalSummary = summarizeProcessSteps(steps, locale?.value || 'zh-CN');
+      const label = naturalSummary || t('thinkingProcessCount', { count: steps.length });
+      return h('details', { key: `steps-${keyIdx}`, class: 'thinking-process-box', open: openByDefault }, [
+        h('summary', { class: 'thinking-process-summary' }, [
+          h('span', { class: 'thinking-process-icon', 'aria-hidden': 'true' }, '⚙'),
+          h('span', { class: 'thinking-process-title' }, label),
+        ]),
+        h(
+          'ul',
+          { class: 'thinking-process-list' },
+          steps.map((st, idx) =>
+            h('li', { key: idx, class: 'thinking-process-item' }, inlineMarkdown(st).map(renderNode)),
+          ),
+        ),
+      ]);
+    }
+
     return () => {
       if (props.plain) {
         return h('div', { class: 'message-body' }, props.content);
       }
 
-      const { steps, body } = extractThinkingAndBody(props.content, props.thinkingSteps);
-      const children = [];
-
-      if (steps.length > 0) {
-        children.push(
-          h('details', { class: 'thinking-process-box', open: !body }, [
-            h('summary', { class: 'thinking-process-summary' }, [
-              h('span', { class: 'thinking-process-icon', 'aria-hidden': 'true' }, '⚙'),
-              h('span', { class: 'thinking-process-title' }, t('thinkingProcessCount', { count: steps.length })),
-            ]),
-            h(
-              'ul',
-              { class: 'thinking-process-list' },
-              steps.map((st, idx) =>
-                h('li', { key: idx, class: 'thinking-process-item' }, inlineMarkdown(st).map(renderNode)),
-              ),
-            ),
-          ]),
-        );
-      }
-
+      const segments = parseMessageSegments(props.content, props.thinkingSteps);
+      const textSegments = segments.filter(s => s.kind === 'text');
+      const totalBodyLen = textSegments.reduce(
+        (acc, seg, idx) => acc + seg.text.length + (idx > 0 ? 2 : 0),
+        0,
+      );
+      const hasAnyText = textSegments.length > 0;
       const activelyStreaming =
-        isBrowser && props.stream && Number.isFinite(visibleLen.value) && visibleLen.value < body.length;
-      const shownBody = activelyStreaming ? body.slice(0, visibleLen.value) : body;
+        isBrowser && props.stream && Number.isFinite(visibleLen.value) && visibleLen.value < totalBodyLen;
+
+      const children = [];
 
       if (activelyStreaming) {
         const rod = TERMINAL_ROD_FRAMES[rodIdx.value % TERMINAL_ROD_FRAMES.length];
@@ -181,12 +192,26 @@ export default defineComponent({
         );
       }
 
-      if (shownBody) {
-        const mdNodes = parseMessageMarkdown(shownBody).map(renderNode);
-        if (activelyStreaming) {
-          mdNodes.push(h('span', { class: 'streaming-cursor', 'aria-hidden': 'true' }, '▋'));
+      let rem = activelyStreaming ? visibleLen.value : Infinity;
+      let cursorPlaced = false;
+
+      for (let i = 0; i < segments.length; i += 1) {
+        const seg = segments[i];
+        if (seg.kind === 'steps') {
+          if (activelyStreaming && rem <= 0 && cursorPlaced) break;
+          children.push(renderStepsBox(seg.steps, !hasAnyText && i === segments.length - 1, i));
+        } else if (seg.kind === 'text' && seg.text) {
+          if (activelyStreaming && rem <= 0) break;
+          const shown =
+            activelyStreaming && rem < seg.text.length ? seg.text.slice(0, Math.max(1, rem)) : seg.text;
+          rem -= seg.text.length + 2;
+          const mdNodes = parseMessageMarkdown(shown).map(renderNode);
+          if (activelyStreaming && !cursorPlaced && rem <= 0) {
+            mdNodes.push(h('span', { class: 'streaming-cursor', 'aria-hidden': 'true' }, '▋'));
+            cursorPlaced = true;
+          }
+          children.push(h('div', { key: `text-${i}`, class: 'message-markdown-content' }, mdNodes));
         }
-        children.push(h('div', { class: 'message-markdown-content' }, mdNodes));
       }
 
       return h('div', { class: 'message-body message-markdown' }, children);

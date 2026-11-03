@@ -184,6 +184,7 @@ pub fn execute(state: &Arc<Mutex<NodeContext>>, args: &Value) -> Result<Value, &
             .filter(|m| {
                 !m.content.contains("上线连通检查：仅在当前助理对话回答")
                     && m.content.trim() != "助理已就绪。"
+                    && !m.content.contains("当前对话被限定为")
             })
             .cloned()
             .collect();

@@ -12,7 +12,7 @@ const connection=ref(''), sessions=ref([]), selected=ref(null), history=ref(null
 const reader=ref(null), loadingOlder=ref(false);let lastTop=0;
 const nodeActivity=ref(null),awaitingReply=ref(null),replying=ref(false);let activityChecked=0;
 const syncStatus=ref(''),hasNewMessages=ref(false),copiedSeq=ref(null),streamSeq=ref(null),rodIndex=ref(0);let syncTimer,copyTimer,rodTimer;
-const rodFrames=['|','/','─','\\'];
+const rodFrames=['|','/','-','\\'];
 const rodFrame=computed(()=>rodFrames[rodIndex.value%rodFrames.length]);
 const isSpinning=computed(()=>Boolean(busy.value||sending.value||replying.value||awaitingReply.value||nodeActivity.value?.running||syncStatus.value==='checking'||syncStatus.value==='syncing'));
 function updateRodTicker(){
@@ -21,39 +21,25 @@ function updateRodTicker(){
  else if(!isSpinning.value&&rodTimer){if(typeof clearInterval==='function')clearInterval(rodTimer);rodTimer=null;}
 }
 watch(isSpinning,updateRodTicker);
-function parseMsgThinking(rawText,extraSteps){
- const steps=Array.isArray(extraSteps)?[...extraSteps]:[];
- let text=String(rawText??'').replace(/\r\n?/g,'\n');
- text=text.replace(/```thinking\s*\n([\s\S]*?)(?:```|$)/gi,(_,inner)=>{for(const ln of String(inner).split('\n')){const s=ln.replace(/^\s*[-*]\s+/,'').replace(/\s+/g,' ').trim();if(s)steps.push(s.length>220?s.slice(0,217)+'...':s);}return '\n';});
- text=text.replace(/<think>([\s\S]*?)(?:<\/think>|$)/gi,(_,inner)=>{for(const p of String(inner).split(/\n{2,}/)){const s=p.replace(/\s+/g,' ').trim();if(s)steps.push(s.startsWith('[Thinking]')?s:'`[Thinking]` '+(s.length>220?s.slice(0,217)+'...':s));}return '\n';});
- const bodyParts=[];
- for(const para of text.split(/\n{2,}/)){
-  const tr=para.trim();if(!tr)continue;
-  if(/^(?:`?\[(?:Tool|Thinking):\s*[^\]]*\]`?)/i.test(tr)){const s=tr.replace(/\s+/g,' ').trim();steps.push(s.length>220?s.slice(0,217)+'...':s);}
-  else bodyParts.push(tr);
- }
- return {steps,body:bodyParts.join('\n\n').trim()};
-}
 const displayMessages=computed(()=>{
  const raw=history.value?.messages||[];
  if(!raw.length)return [];
  const out=[];let run=[];
  const flush=()=>{
   if(!run.length)return;
-  if(run.length===1){const m=run[0],p=parseMsgThinking(m.text,m.thinkingSteps);out.push({...m,thinkingSteps:p.steps,displayText:p.body});run=[];return;}
-  const items=[];let hasTools=false;
-  for(const m of run){const p=parseMsgThinking(m.text,m.thinkingSteps);for(const st of p.steps){items.push({kind:'step',val:st});if(st.includes('[Tool:'))hasTools=true;}if(p.body)items.push({kind:'text',val:p.body});}
-  const texts=items.filter(x=>x.kind==='text').map(x=>x.val),steps=[],formal=[];
-  if(!texts.length){for(const it of items)steps.push(it.val);}
-  else if(!hasTools&&items.every(x=>x.kind==='text')){for(const tx of texts)formal.push(tx);}
-  else{
-   const lastTx=texts[texts.length-1]||'',keep=(texts.length>=2&&lastTx.trimEnd().endsWith(':')&&lastTx.length<240)?2:1,cut=texts.length-keep;let seen=0;
-   for(const it of items){if(it.kind==='step')steps.push(it.val);else{if(seen<cut){const s=it.val.replace(/\s+/g,' ').trim();if(s)steps.push(s.startsWith('`[Thinking]`')?s:'`[Thinking]` '+(s.length>220?s.slice(0,217)+'...':s));}else formal.push(it.val);seen++;}}
+  if(run.length===1){out.push(run[0]);run=[];return;}
+  const chunks=[];let sbuf=[];
+  const flushSteps=()=>{if(sbuf.length){chunks.push('```thinking\n'+sbuf.map(s=>`- ${s}`).join('\n')+'\n```');sbuf=[];}};
+  for(const m of run){
+   const tx=String(m.text??'').trim();if(!tx)continue;
+   if(/^(?:[-*]\s+)?(?:`?\[(?:Tool|Thinking)(?::\s*[^\]]*)?\]`?)/i.test(tx)&&!tx.includes('\n\n'))sbuf.push(tx.replace(/^\s*[-*]\s+/,'').trim());
+   else{flushSteps();chunks.push(tx);}
   }
-  const anchor=run[run.length-1],body=formal.join('\n\n').trim();
-  out.push({...anchor,thinkingSteps:steps,displayText:body,text:body||anchor.text});run=[];
+  flushSteps();
+  const anchor=run[run.length-1];
+  out.push({...anchor,text:chunks.join('\n\n')||anchor.text});run=[];
  };
- for(const m of raw){if(m.role==='user'){flush();out.push({...m,thinkingSteps:[],displayText:String(m.text??'')});}else run.push(m);}
+ for(const m of raw){if(m.role==='user'){flush();out.push(m);}else run.push(m);}
  flush();
  return out;
 });
@@ -212,7 +198,7 @@ onUnmounted(()=>{if(rodTimer&&typeof clearInterval==='function')clearInterval(ro
    <p v-if="history?.partial || history?.omitted" class="dsh-note">{{ t('dshPartial') }}</p>
    <p v-if="busy && !history" class="terminal-status-line" role="status"><span class="terminal-rod" aria-hidden="true">[{{ rodFrame }}]</span><span>{{ t('dshLoading') }}</span><span class="terminal-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span></p>
    <button v-if="history?.has_more" class="dsh-older" :disabled="loadingOlder || busy" @click="loadOlder"><span v-if="loadingOlder" class="terminal-rod" aria-hidden="true">[{{ rodFrame }}] </span>{{ t(loadingOlder ? 'dshLoading' : 'dshLoadOlder') }}</button>
-   <article v-for="(m, idx) in displayMessages" :key="m.sequence" :data-sequence="m.sequence" class="dsh-message" :class="{user:m.role==='user'}"><div class="dsh-message-meta"><small class="dsh-role">{{ m.role==='user'?t('dshYou'):agentLabel }}</small><time v-if="formatMessageTime(m.created_at || m.createdAt || m.timestamp)" class="dsh-time">{{ formatMessageTime(m.created_at || m.createdAt || m.timestamp) }}</time><button type="button" class="dsh-copy-btn" @click="copyMessage(m)">{{ t(copiedSeq===m.sequence?'copied':'copyMessage') }}</button></div><MessageContent :content="m.displayText ?? m.text" :thinking-steps="m.thinkingSteps || []" :plain="m.role==='user'" :stream="m.role!=='user' && (m.sequence===streamSeq || idx===displayMessages.length-1)" /></article>
+   <article v-for="(m, idx) in displayMessages" :key="m.sequence" :data-sequence="m.sequence" class="dsh-message" :class="{user:m.role==='user'}"><div class="dsh-message-meta"><small class="dsh-role">{{ m.role==='user'?t('dshYou'):agentLabel }}</small><time v-if="formatMessageTime(m.created_at || m.createdAt || m.timestamp)" class="dsh-time">{{ formatMessageTime(m.created_at || m.createdAt || m.timestamp) }}</time><button type="button" class="dsh-copy-btn" @click="copyMessage(m)">{{ t(copiedSeq===m.sequence?'copied':'copyMessage') }}</button></div><MessageContent :content="m.text" :thinking-steps="m.thinkingSteps || []" :plain="m.role==='user'" :stream="m.role!=='user' && (m.sequence===streamSeq || idx===displayMessages.length-1)" /></article>
    <div v-if="activityLabel" class="dsh-live-terminal-card" role="status" aria-live="polite">
     <span class="terminal-rod" aria-hidden="true">[{{ rodFrame }}]</span>
     <span>{{ activityLabel }}</span>

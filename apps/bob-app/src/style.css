@@ -3017,17 +3017,20 @@ textarea {
 
 /* Collapsible "思考与过程" (Thinking & Process) section + Terminal Micro-Animations & Streaming */
 .thinking-process-box {
-  margin-bottom: 10px;
+  margin: 8px 0 10px;
   border: 1px solid var(--border-color);
   border-radius: 8px;
   background: var(--bg-secondary);
   overflow: hidden;
 }
+.thinking-process-box:first-child {
+  margin-top: 0;
+}
 .thinking-process-summary {
   display: flex;
   align-items: center;
   gap: 7px;
-  padding: 6px 11px;
+  padding: 5px 11px;
   font-size: 0.78rem;
   color: var(--text-secondary);
   cursor: pointer;
@@ -3052,6 +3055,11 @@ textarea {
   transform: rotate(90deg);
 }
 .thinking-process-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.2em;
+  flex-shrink: 0;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   color: var(--accent-primary);
   font-size: 0.82rem;
@@ -3088,15 +3096,26 @@ textarea {
   color: var(--text-secondary);
 }
 .terminal-rod {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.7ch;
+  min-width: 2.7ch;
+  flex-shrink: 0;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-variant-numeric: tabular-nums;
   font-weight: 600;
   color: var(--accent-primary);
-  letter-spacing: -0.02em;
+  letter-spacing: 0;
+  text-align: center;
 }
 .terminal-dots {
   display: inline-flex;
   align-items: center;
+  width: 1.8ch;
+  min-width: 1.8ch;
+  flex-shrink: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 .terminal-dots span {
   animation: bobTerminalDotPulse 1.2s infinite ease-in-out;
