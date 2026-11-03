@@ -1891,6 +1891,19 @@ fn execute_unlocked_harness_rpc(
             {
                 return Err("AGY_HISTORY_NOT_CONNECTED");
             }
+            if let Some(sid) = args
+                .get("sessionId")
+                .and_then(Value::as_str)
+                .filter(|s| bob_runtime::agy_directory::owns_readable_session(s))
+            {
+                return bob_runtime::agy_directory::inspect_receipt(
+                    data_dir,
+                    args["connectionId"].as_str().ok_or("DSH_CONNECTION_REQUIRED")?,
+                    sid,
+                    args["text"].as_str().ok_or("DSH_TEXT_REQUIRED")?,
+                    args["requestId"].as_str().ok_or("DSH_REQUEST_REQUIRED")?,
+                );
+            }
             if let Some(v) = claude_rpc::try_handle_dsh_command(data_dir, command, args)? {
                 return Ok(v);
             }
@@ -1943,6 +1956,23 @@ fn execute_unlocked_harness_rpc(
                         .map(|v| v.as_i64().ok_or("DSH_PAGE_CURSOR_INVALID"))
                         .transpose()?;
                     return bob_runtime::agy_directory::read_page(data_dir, connection, sid, after);
+                }
+            }
+            if command == "app_dsh_prompt" {
+                if let Some(sid) = args
+                    .get("sessionId")
+                    .and_then(Value::as_str)
+                    .filter(|s| bob_runtime::agy_directory::owns_readable_session(s))
+                {
+                    let text = args["text"]
+                        .as_str()
+                        .filter(|s| !s.trim().is_empty() && s.len() <= 32000)
+                        .ok_or("DSH_TEXT_REQUIRED")?;
+                    let request = args["requestId"]
+                        .as_str()
+                        .filter(|s| s.len() <= 200 && !s.is_empty())
+                        .ok_or("DSH_REQUEST_REQUIRED")?;
+                    return bob_runtime::agy_directory::prompt_session(data_dir, connection, sid, text, request);
                 }
             }
             if let Some(v) = claude_rpc::try_handle_dsh_command(data_dir, command, args)? {
