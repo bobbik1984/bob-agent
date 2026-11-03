@@ -70,7 +70,22 @@ const {
 const rodIdx = ref(0);
 let rodTimer = null;
 const isBusy = computed(() => Boolean(loading.value || dispatchPending.value || saving.value || activeExecution.value));
-const rodFrame = computed(() => TERMINAL_ROD_FRAMES[rodIdx.value % TERMINAL_ROD_FRAMES.length]);
+const rodFrame = computed(() => `\u2060${TERMINAL_ROD_FRAMES[rodIdx.value % TERMINAL_ROD_FRAMES.length]}\u2060`);
+const stripDots = s => String(s ?? '').replace(/\s*(?:…|\.{2,})\s*$/, '');
+const streamingMsgId = ref(null);
+let initializedSessionId = null;
+watch(() => [sessionId.value, (messages.value || []).length], ([sid]) => {
+  const list = messages.value || [];
+  const last = list[list.length - 1];
+  if (sid !== initializedSessionId) {
+    initializedSessionId = sid;
+    streamingMsgId.value = null;
+    return;
+  }
+  if (last && last.role === 'assistant') {
+    streamingMsgId.value = last.id;
+  }
+}, { immediate: true });
 watch(isBusy, val => {
   if (typeof setInterval !== 'function') return;
   if (val && !rodTimer) {
@@ -164,7 +179,7 @@ onUnmounted(() => { if (rodTimer) clearInterval(rodTimer); });
             }}
           </span>
           <span v-if="message.source === 'native_session_result'" class="message-state">{{ t('assistantNativeResult') }}</span>
-          <MessageContent :content="message.content" :plain="message.role === 'user'" :stream="message.role === 'assistant' && msgIdx === messages.length - 1" />
+          <MessageContent :content="message.content" :plain="message.role === 'user'" :stream="message.role === 'assistant' && msgIdx === messages.length - 1 && message.id === streamingMsgId" />
           <div v-if="assistantLink(message)" class="message-state" role="status">
             <span>{{ t('assistantDispatch_' + assistantLink(message).status) }}</span>
             <button type="button" @click="openAssistantTarget(assistantLink(message))">{{ assistantLink(message).target_title }} · {{ t('assistantOpenOriginal') }}</button>
@@ -207,7 +222,7 @@ onUnmounted(() => { if (rodTimer) clearInterval(rodTimer); });
         </article>
         <div v-if="dispatchPending || saving || activeExecution" class="dsh-live-terminal-card" role="status" aria-live="polite">
           <span class="terminal-rod" aria-hidden="true">[{{ rodFrame }}]</span>
-          <span>{{ t(dispatchPending ? 'requestingExecution' : saving ? 'saving' : 'agentLiveThinking') }}</span>
+          <span>{{ stripDots(t(dispatchPending ? 'requestingExecution' : saving ? 'saving' : 'agentLiveThinking')) }}</span>
           <span class="terminal-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span>
         </div>
       </section>

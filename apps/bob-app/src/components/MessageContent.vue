@@ -176,8 +176,8 @@ export default defineComponent({
         const rod = TERMINAL_ROD_FRAMES[rodIdx.value % TERMINAL_ROD_FRAMES.length];
         children.push(
           h('div', { class: 'streaming-output-bar', role: 'status', 'aria-live': 'polite' }, [
-            h('span', { class: 'terminal-rod', 'aria-hidden': 'true' }, `[${rod}]`),
-            h('span', { class: 'streaming-output-label' }, t('streamingOutputStatus')),
+            h('span', { class: 'terminal-rod', 'aria-hidden': 'true' }, `[\u2060${rod}\u2060]`),
+            h('span', { class: 'streaming-output-label' }, String(t('streamingOutputStatus')).replace(/\s*(?:…|\.{2,})\s*$/, '')),
             h('span', { class: 'terminal-dots', 'aria-hidden': 'true' }, [
               h('span', '.'),
               h('span', '.'),

@@ -12,8 +12,8 @@ const connection=ref(''), sessions=ref([]), selected=ref(null), history=ref(null
 const reader=ref(null), loadingOlder=ref(false);let lastTop=0;
 const nodeActivity=ref(null),awaitingReply=ref(null),replying=ref(false);let activityChecked=0;
 const syncStatus=ref(''),hasNewMessages=ref(false),copiedSeq=ref(null),streamSeq=ref(null),rodIndex=ref(0);let syncTimer,copyTimer,rodTimer;
-const rodFrames=['|','/','-','\\'];
-const rodFrame=computed(()=>rodFrames[rodIndex.value%rodFrames.length]);
+const rodFrames=['|','/','-','\\'],stripDots=s=>String(s??'').replace(/\s*(?:…|\.{2,})\s*$/,'');
+const rodFrame=computed(()=>`\u2060${rodFrames[rodIndex.value%rodFrames.length]}\u2060`);
 const isSpinning=computed(()=>Boolean(busy.value||sending.value||replying.value||awaitingReply.value||nodeActivity.value?.running||syncStatus.value==='checking'||syncStatus.value==='syncing'));
 function updateRodTicker(){
  if(typeof setInterval!=='function')return;
@@ -43,9 +43,9 @@ const displayMessages=computed(()=>{
  flush();
  return out;
 });
-const syncStatusLabel=computed(()=>syncStatus.value==='checking'?t('dshSyncChecking'):syncStatus.value==='syncing'?t('dshSyncUpdating'):syncStatus.value==='synced'?t('dshSyncCompleted'):syncStatus.value==='offline_cached'?t('dshSyncOfflineCached'):'');
+const syncStatusLabel=computed(()=>stripDots(syncStatus.value==='checking'?t('dshSyncChecking'):syncStatus.value==='syncing'?t('dshSyncUpdating'):syncStatus.value==='synced'?t('dshSyncCompleted'):syncStatus.value==='offline_cached'?t('dshSyncOfflineCached'):''));
 async function refreshActivity(g,id){if(Date.now()-activityChecked<10000)return;activityChecked=Date.now();try{const list=await kernelBridge.dshList(connection.value);if(g!==generation||disposed)return;const row=list.find(s=>s.id===id);nodeActivity.value=typeof row?.running==='boolean'?{running:row.running,at:Date.now()}:null}catch{if(g===generation)nodeActivity.value=null}}
-const activityLabel=computed(()=>sending.value?t('dshSendingWaitReceipt'):replying.value?t('dshReplying'):nodeActivity.value?.running===true?t('dshNodeProcessing'):awaitingReply.value?t('dshAwaitingReply'):'');
+const activityLabel=computed(()=>stripDots(sending.value?t('dshSendingWaitReceipt'):replying.value?t('dshReplying'):nodeActivity.value?.running===true?t('dshNodeProcessing'):awaitingReply.value?t('dshAwaitingReply'):''));
 const agentLabel=computed(()=>{const h=selected.value?.harness||history.value?.harness||'';if(h==='agy'||selected.value?.id?.startsWith('agy:'))return t('agyAgent');if(h==='claude'||selected.value?.toolLabel==='Claude')return t('claudeAgent');if(h==='pi'||selected.value?.toolLabel==='Pi')return 'Pi';if(h==='codex'||selected.value?.toolLabel==='Codex')return 'Codex';return t('dshAgent');});
 function formatMessageTime(ts){
  if(ts===null||ts===undefined||ts===''||typeof ts==='boolean')return '';
@@ -133,8 +133,8 @@ async function refresh(){if(selected.value?.id?.startsWith('agy:')){error.value=
   const el=reader.value,follow=first||(el&&el.scrollHeight-el.scrollTop-el.clientHeight<80);
   const deltaAdded=!first&&additions.messages.some(m=>m.sequence>prevCursor);
   history.value=first?additions:{...combine(history.value,additions),before:history.value.before,has_more:history.value.has_more};error.value='';
-  if(first||deltaAdded){
-   const lastAsst=[...(history.value?.messages||[])].reverse().find(m=>m.role!=='user');
+  if(!first&&deltaAdded&&(replying.value||awaitingReply.value||nodeActivity.value?.running)){
+   const lastAsst=[...(history.value?.messages||[])].reverse().find(m=>m.role!=='user'&&m.sequence>prevCursor);
    if(lastAsst)streamSeq.value=lastAsst.sequence;
   }
   if(!first){
@@ -188,7 +188,7 @@ onUnmounted(()=>{if(rodTimer&&typeof clearInterval==='function')clearInterval(ro
   <p v-if="error && syncStatus!=='offline_cached'" role="alert">{{ error }}</p><p v-if="notice" role="status">{{ notice }}</p>
   <template v-if="connection && !selected">
    <div class="dsh-tools"><input v-model="search" type="search" :placeholder="t('dshSearch')" :aria-label="t('dshSearch')"><button :disabled="busy" @click="load">{{ t('dshRefresh') }}</button></div>
-   <p v-if="busy" class="terminal-status-line" role="status"><span class="terminal-rod" aria-hidden="true">[{{ rodFrame }}]</span><span>{{ t('dshLoading') }}</span><span class="terminal-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span></p>
+   <p v-if="busy" class="terminal-status-line" role="status"><span class="terminal-rod" aria-hidden="true">[{{ rodFrame }}]</span><span>{{ stripDots(t('dshLoading')) }}</span><span class="terminal-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span></p>
    <details v-for="group in groups" :key="group.name" :open="!!search"><summary>{{ group.name }} · {{ group.items.length }}</summary><button v-for="s in group.items" :key="s.id" class="dsh-session" @click="open(s)"><strong>{{ s.title }}</strong><small>{{ s.updated_at ? new Date(s.updated_at).toLocaleString() : t('sidebarTimeUnknown') }} · {{ t(s.running?'dshRunning':'dshIdle') }}</small></button></details>
    <p v-if="!busy && !groups.length">{{ t('dshEmpty') }}</p>
   </template>
@@ -196,18 +196,13 @@ onUnmounted(()=>{if(rodTimer&&typeof clearInterval==='function')clearInterval(ro
    <div class="dsh-tools"><button v-if="!target" :disabled="sending" @click="back">{{ t('dshBack') }}</button><h4 v-if="!target">{{ selected.title }}</h4><small v-else>{{ target.node.label || target.node.name }} · {{ agentLabel }}</small><span v-if="syncStatusLabel" class="dsh-sync-pill" :class="{active:syncStatus==='checking'||syncStatus==='syncing'}" role="status" aria-live="polite"><span v-if="syncStatus==='checking'||syncStatus==='syncing'" class="terminal-rod" aria-hidden="true">[{{ rodFrame }}]</span><span>{{ syncStatusLabel }}</span><span v-if="syncStatus==='checking'||syncStatus==='syncing'" class="terminal-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span></span><button :disabled="busy" @click="refresh">{{ t('dshRefresh') }}</button></div>
    <p class="dsh-note">{{ history?.workspace || t('dshNoWorkspace') }}</p>
    <p v-if="history?.partial || history?.omitted" class="dsh-note">{{ t('dshPartial') }}</p>
-   <p v-if="busy && !history" class="terminal-status-line" role="status"><span class="terminal-rod" aria-hidden="true">[{{ rodFrame }}]</span><span>{{ t('dshLoading') }}</span><span class="terminal-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span></p>
-   <button v-if="history?.has_more" class="dsh-older" :disabled="loadingOlder || busy" @click="loadOlder"><span v-if="loadingOlder" class="terminal-rod" aria-hidden="true">[{{ rodFrame }}] </span>{{ t(loadingOlder ? 'dshLoading' : 'dshLoadOlder') }}</button>
-   <article v-for="(m, idx) in displayMessages" :key="m.sequence" :data-sequence="m.sequence" class="dsh-message" :class="{user:m.role==='user'}"><div class="dsh-message-meta"><small class="dsh-role">{{ m.role==='user'?t('dshYou'):agentLabel }}</small><time v-if="formatMessageTime(m.created_at || m.createdAt || m.timestamp)" class="dsh-time">{{ formatMessageTime(m.created_at || m.createdAt || m.timestamp) }}</time><button type="button" class="dsh-copy-btn" @click="copyMessage(m)">{{ t(copiedSeq===m.sequence?'copied':'copyMessage') }}</button></div><MessageContent :content="m.text" :thinking-steps="m.thinkingSteps || []" :plain="m.role==='user'" :stream="m.role!=='user' && (m.sequence===streamSeq || idx===displayMessages.length-1)" /></article>
-   <div v-if="activityLabel" class="dsh-live-terminal-card" role="status" aria-live="polite">
-    <span class="terminal-rod" aria-hidden="true">[{{ rodFrame }}]</span>
-    <span>{{ activityLabel }}</span>
-    <span class="terminal-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span>
-   </div>
+   <p v-if="busy && !history" class="terminal-status-line" role="status"><span class="terminal-rod" aria-hidden="true">[{{ rodFrame }}]</span><span>{{ stripDots(t('dshLoading')) }}</span><span class="terminal-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span></p>
+   <button v-if="history?.has_more" class="dsh-older" :disabled="loadingOlder || busy" @click="loadOlder"><span v-if="loadingOlder" class="terminal-rod" aria-hidden="true">[{{ rodFrame }}]</span> {{ t(loadingOlder ? 'dshLoading' : 'dshLoadOlder') }}</button>
+   <article v-for="(m, idx) in displayMessages" :key="m.sequence" :data-sequence="m.sequence" class="dsh-message" :class="{user:m.role==='user'}"><div class="dsh-message-meta"><small class="dsh-role">{{ m.role==='user'?t('dshYou'):agentLabel }}</small><time v-if="formatMessageTime(m.created_at || m.createdAt || m.timestamp)" class="dsh-time">{{ formatMessageTime(m.created_at || m.createdAt || m.timestamp) }}</time><button type="button" class="dsh-copy-btn" @click="copyMessage(m)">{{ t(copiedSeq===m.sequence?'copied':'copyMessage') }}</button></div><MessageContent :content="m.text" :thinking-steps="m.thinkingSteps || []" :plain="m.role==='user'" :stream="m.role!=='user' && idx===displayMessages.length-1 && m.sequence===streamSeq" /></article>
   </template>
   </div>
   <div v-if="selected && hasNewMessages" class="dsh-new-msg-bar"><button type="button" class="dsh-new-msg-btn" @click="scrollToBottom">{{ t('dshNewMessagesBtn') }}</button></div>
-  <form v-if="selected" class="dsh-compose" @submit.prevent="send"><p v-if="activityLabel" class="dsh-activity" role="status" aria-live="polite"><span class="terminal-rod" aria-hidden="true">[{{ rodFrame }}]</span> <span>{{activityLabel}}</span><span class="terminal-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span></p><textarea v-model="draft" :disabled="sending" :placeholder="t('dshPrompt')" :aria-label="t('dshPrompt')" rows="3"></textarea><button :disabled="sending || !!pending || !draft.trim() || !history"><span v-if="sending" class="terminal-rod" aria-hidden="true">[{{ rodFrame }}] </span>{{ t(sending?'dshSending':'send') }}</button><p v-if="pending && !sending" role="status">{{ t('dshUncertain') }} <button type="button" @click="checkReceipt">{{ t('dshCheckReceipt') }}</button> <button type="button" @click="dismissPending">{{ t('dshUnlockEdit') }}</button></p></form>
+  <form v-if="selected" class="dsh-compose" @submit.prevent="send"><p v-if="activityLabel" class="dsh-activity" role="status" aria-live="polite"><span class="terminal-rod" aria-hidden="true">[{{ rodFrame }}]</span> <span>{{activityLabel}}</span><span class="terminal-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span></p><textarea v-model="draft" :disabled="sending" :placeholder="t('dshPrompt')" :aria-label="t('dshPrompt')" rows="3"></textarea><button :disabled="sending || !!pending || !draft.trim() || !history">{{ t(sending?'dshSending':'send') }}</button><p v-if="pending && !sending" role="status">{{ t('dshUncertain') }} <button type="button" @click="checkReceipt">{{ t('dshCheckReceipt') }}</button> <button type="button" @click="dismissPending">{{ t('dshUnlockEdit') }}</button></p></form>
  </section>
 </template>
 <style scoped>

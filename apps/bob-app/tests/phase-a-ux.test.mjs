@@ -416,4 +416,11 @@ test('Collapsible thinking & process section consolidates tool calls and preserv
   assert.equal(segs[2].kind, 'text');
   assert.equal(segs[3].kind, 'steps');
   assert.equal(segs[4].kind, 'text');
+
+  // 4. Terminal rod never wraps across lines and activity status never duplicates
+  const dshVue = readFileSync(new URL('../src/components/DshSessions.vue', import.meta.url), 'utf8');
+  assert.ok(!dshVue.includes('class="dsh-live-terminal-card"'), 'DshSessions should not duplicate activityLabel in both reader and composer');
+  assert.match(dshVue, /\\u2060\$\{rodFrames/);
+  const styleCss = readFileSync(new URL('../src/style.css', import.meta.url), 'utf8');
+  assert.match(styleCss, /\.terminal-rod\s*\{[^}]*width:\s*3\.4ch;[^}]*white-space:\s*nowrap;[^}]*word-break:\s*keep-all;/s);
 });
