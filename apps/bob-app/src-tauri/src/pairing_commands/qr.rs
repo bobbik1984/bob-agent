@@ -460,6 +460,25 @@ pub(crate) async fn app_pairing_qr_propose<R: tauri::Runtime>(
     pairing: State<'_, PairingState>,
     invitation_code: String,
 ) -> Result<CeremonyStatus, &'static str> {
+    if bob_runtime::node_pairing::is_node_pairing_code(&invitation_code) {
+        let inv = crate::direct_llm::pair_and_sync_node_qr(&app, &state, &invitation_code).await?;
+        let mut guard = pairing.0.lock().map_err(|_| "PAIRING_STATE_UNAVAILABLE")?;
+        *guard = Some(Ceremony::NodeBroker {
+            node_id: inv.node_id.clone(),
+            expires_at: inv.expires_at,
+        });
+        return Ok(CeremonyStatus {
+            role: "replica",
+            state: "pending".into(),
+            candidate_id: Some(inv.node_id),
+            candidate_pin: None,
+            session_id: None,
+            expires_at: Some(inv.expires_at),
+            error: None,
+            home_pin: None,
+            grant_expires_at: None,
+        });
+    }
     let code = QrCode::decode(&invitation_code, now()?)?;
     let identity = native(&app, &state).await?;
     let (_, session) = local_scope(&state)?;

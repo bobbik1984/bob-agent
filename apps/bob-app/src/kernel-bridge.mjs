@@ -37,8 +37,10 @@ export function createKernelBridge(invoke, isAvailable) {
     scheduleEdit: payload => call('app_schedule_edit', payload),
     bootstrap: () => call('app_bootstrap'),
     syncHome: () => call('app_home_sync'),
+    topologySync: payload => call('app_topology_sync', payload),
     pairingCapabilities: () => call('app_pairing_capabilities'),
-    pairingQrCreate: () => call('app_pairing_qr_create'),
+    pairingQrCreate: args =>
+      args !== undefined ? call('app_pairing_qr_create', args) : call('app_pairing_qr_create'),
     pairingQrPropose: invitationCode => call('app_pairing_qr_propose', { invitationCode }),
     scanPairingCode: () => call('app_scan_pairing_code'),
     pairingDeviceCode: () => call('app_pairing_device_code'),

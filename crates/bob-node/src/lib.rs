@@ -999,16 +999,197 @@ pub fn handle_rpc_command(ctx: &mut NodeContext, command: &str, args: &Value) ->
             Ok(json!(saved))
         }
         "app_pairing_capabilities" => {
-            serde_json::to_value(RuntimeCapabilityManifest::headless_node())
-                .map_err(|_| "CAPABILITIES_UNAVAILABLE")
+            let mut val = serde_json::to_value(RuntimeCapabilityManifest::headless_node())
+                .map_err(|_| "CAPABILITIES_UNAVAILABLE")?;
+            if let Some(obj) = val.as_object_mut() {
+                obj.insert("can_host".to_owned(), json!(true));
+                obj.insert("can_scan".to_owned(), json!(false));
+                obj.insert("start_pairing".to_owned(), json!(false));
+            }
+            Ok(val)
         }
-        "app_pairing_status" => Ok(json!({
-            "role": "home",
-            "state": "home_ready",
-            "paired_home": Value::Null,
-            "home_enabled": true,
-            "online_node": true,
+        "app_pairing_status" => {
+            let latest_qr = ctx
+                .online
+                .pairings
+                .values()
+                .filter(|p| p.pairing_id.starts_with("qr_"))
+                .max_by_key(|p| p.created_at);
+            let (state_str, exp_opt) = match latest_qr {
+                Some(p) if p.exchanged_token.is_some() => ("connected", Some(p.expires_at)),
+                Some(p) if p.expires_at > at => ("open", Some(p.expires_at)),
+                _ => ("home_ready", None),
+            };
+            Ok(json!({
+                "role": "home",
+                "state": state_str,
+                "expires_at": exp_opt,
+                "paired_home": Value::Null,
+                "home_enabled": true,
+                "online_node": true,
+            }))
+        }
+        "app_pairing_qr_create" => {
+            let _ = bob_runtime::agy_directory::ensure_local_grant_registered(
+                &ctx.runtime.data_dir,
+                "local",
+            );
+            let origin = args
+                .get("origin")
+                .or_else(|| args.get("baseUrl"))
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_owned)
+                .or_else(|| std::env::var("BOB_NODE_PUBLIC_URL").ok().filter(|s| !s.trim().is_empty()))
+                .unwrap_or_else(|| {
+                    format!(
+                        "http://{}:53020",
+                        bob_runtime::node_pairing::detect_lan_or_tailscale_ip()
+                    )
+                });
+            let clean_url = origin.trim_end_matches('/').to_owned();
+            let default_host = std::env::var("BOB_NODE_LABEL")
+                .or_else(|_| std::env::var("HOSTNAME"))
+                .or_else(|_| std::env::var("COMPUTERNAME"))
+                .unwrap_or_else(|_| "Bob Host".to_owned());
+            let label = args
+                .get("label")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .unwrap_or(&default_host)
+                .to_owned();
+            let role = args
+                .get("role")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .unwrap_or(if ctx.static_dir.is_some() {
+                    "web_host"
+                } else {
+                    "node"
+                })
+                .to_owned();
+            let pairing_id = format!("qr_{at}_{}", ctx.online.pairings.len() + 1);
+            let code_num = ((at as u64) % 900_000) + 100_000;
+            let user_code = format!("{code_num}");
+            let expires_at = at + 600_000;
+            ctx.online.pairings.insert(
+                pairing_id.clone(),
+                OnlinePairingSession {
+                    pairing_id: pairing_id.clone(),
+                    user_code: user_code.clone(),
+                    device_name: label.clone(),
+                    created_at: at,
+                    expires_at,
+                    exchanged_token: None,
+                },
+            );
+            ctx.save_online();
+            let node_id = bob_runtime::node_pairing::compute_node_id(&clean_url);
+            let inv = bob_runtime::node_pairing::NodePairingInvitation {
+                v: 1,
+                role: role.clone(),
+                node_id: node_id.clone(),
+                label: label.clone(),
+                base_url: clean_url.clone(),
+                pairing_id: pairing_id.clone(),
+                user_code: user_code.clone(),
+                expires_at,
+                harnesses: Vec::new(),
+            };
+            let qr_code = inv.encode_qr_code();
+            Ok(json!({
+                "code": qr_code,
+                "expires_at": expires_at,
+                "state": "open",
+                "role": role,
+                "node_id": node_id,
+                "home_name": label,
+                "base_url": clean_url,
+                "pairing_id": pairing_id,
+                "user_code": user_code,
+                "addresses": [clean_url],
+            }))
+        }
+        "app_pairing_qr_propose" => {
+            let raw_code = args
+                .get("invitationCode")
+                .or_else(|| args.get("invitation_code"))
+                .or_else(|| args.get("code"))
+                .and_then(Value::as_str)
+                .ok_or("PAIRING_CODE_INVALID")?;
+            let inv = bob_runtime::node_pairing::NodePairingInvitation::decode_qr_code(raw_code, at)?;
+            let local_topo = bob_runtime::node_pairing::export_local_topology(
+                &ctx.runtime.data_dir,
+                &ctx.runtime,
+                true,
+            );
+            let exchanged = bob_runtime::node_pairing::exchange_and_sync_with_peer(
+                &inv,
+                "Bob Mobile Broker",
+                &local_topo,
+            )?;
+            let token = exchanged
+                .get("accessToken")
+                .and_then(Value::as_str)
+                .ok_or("PAIRING_CODE_INVALID")?;
+            let _ = ctx.runtime.save_remote_node(
+                &mut ctx.app,
+                Some(inv.node_id.clone()),
+                &inv.label,
+                &inv.base_url,
+                Some(token),
+                false,
+                Some(&inv.role),
+                true,
+            )?;
+            if let Some(synced) = exchanged.get("syncedTopology") {
+                let _ = bob_runtime::node_pairing::merge_topology(
+                    &ctx.runtime.data_dir,
+                    &mut ctx.app,
+                    &ctx.runtime,
+                    synced,
+                );
+            }
+            Ok(json!({
+                "role": "replica",
+                "state": "connected",
+                "node_id": inv.node_id,
+                "label": inv.label,
+                "base_url": inv.base_url,
+                "expires_at": inv.expires_at,
+            }))
+        }
+        "app_pairing_finish" => Ok(json!({
+            "role": "replica",
+            "state": "connected",
         })),
+        "app_pairing_reset" => {
+            for p in ctx.online.pairings.values_mut() {
+                if p.exchanged_token.is_none() {
+                    p.expires_at = 0;
+                }
+            }
+            ctx.save_online();
+            Ok(json!({
+                "role": "home",
+                "state": "unconfigured",
+            }))
+        }
+        "app_topology_sync" => {
+            let _ = bob_runtime::agy_directory::ensure_local_grant_registered(
+                &ctx.runtime.data_dir,
+                "local",
+            );
+            bob_runtime::node_pairing::merge_topology(
+                &ctx.runtime.data_dir,
+                &mut ctx.app,
+                &ctx.runtime,
+                args,
+            )
+        }
         "app_home_sync" => Ok(json!({
             "status": "online_node_local",
             "reachable": true,
@@ -1089,26 +1270,44 @@ pub fn handle_rpc_command(ctx: &mut NodeContext, command: &str, args: &Value) ->
             serde_json::to_value(exec).map_err(|_| "EXECUTION_READ_FAILED")
         }
         "app_dsh_receipt" => {
+            let connection = args["connectionId"].as_str().ok_or("DSH_CONNECTION_REQUIRED")?;
+            if connection == "local" {
+                let _ = bob_runtime::agy_directory::ensure_local_grant_registered(&ctx.runtime.data_dir, "local");
+            }
             if let Some(sid)=args.get("sessionId").and_then(Value::as_str).filter(|s|bob_runtime::agy_directory::owns_readable_session(s)) {
-                return bob_runtime::agy_directory::inspect_receipt(
+                match bob_runtime::agy_directory::inspect_receipt(
                     &ctx.runtime.data_dir,
-                    args["connectionId"].as_str().ok_or("DSH_CONNECTION_REQUIRED")?,
+                    connection,
                     sid,
                     args["text"].as_str().ok_or("DSH_TEXT_REQUIRED")?,
                     args["requestId"].as_str().ok_or("DSH_REQUEST_REQUIRED")?,
-                );
+                ) {
+                    Ok(v) => return Ok(v),
+                    Err("DSH_CONNECTION_REQUIRED") if connection != "local" => {
+                        return bob_runtime::node_pairing::forward_dsh_rpc_to_remote_node(
+                            &ctx.runtime,
+                            connection,
+                            command,
+                            args,
+                        );
+                    }
+                    Err(e) => return Err(e),
+                }
             }
             if let Some(v) = claude_rpc::try_handle_dsh_command(&ctx.runtime.data_dir, command, args)? {
                 return Ok(v);
             }
             bob_runtime::dsh_transport::inspect_receipt(&ctx.runtime.data_dir,
-                args["connectionId"].as_str().ok_or("DSH_CONNECTION_REQUIRED")?,
+                connection,
                 args["sessionId"].as_str().ok_or("DSH_SESSION_REQUIRED")?,
                 args["text"].as_str().ok_or("DSH_TEXT_REQUIRED")?,
                 args["requestId"].as_str().ok_or("DSH_REQUEST_REQUIRED")?)
         }
         "app_dsh_page" | "app_dsh_preview" | "app_dsh_list" | "app_dsh_history" | "app_dsh_prompt" => {
             let connection=args["connectionId"].as_str().ok_or("DSH_CONNECTION_REQUIRED")?;
+            if connection == "local" {
+                let _ = bob_runtime::agy_directory::ensure_local_grant_registered(&ctx.runtime.data_dir, "local");
+            }
             if command=="app_dsh_list" {
                 let base = claude_rpc::merge_claude_into_dsh_list(
                     &ctx.runtime.data_dir, connection,
@@ -1120,22 +1319,71 @@ pub fn handle_rpc_command(ctx: &mut NodeContext, command: &str, args: &Value) ->
                         if let Some(rows)=b.as_array_mut() { rows.extend(extra); }
                         return Ok(b);
                     }
-                    (Ok(b), Err(_)) => return Ok(b),
+                    (Ok(b), Err(_)) => {
+                        if b.as_array().is_some_and(|rows| !rows.is_empty()) {
+                            return Ok(b);
+                        }
+                        if connection != "local" {
+                            if let Ok(remote_rows) = bob_runtime::node_pairing::forward_dsh_rpc_to_remote_node(
+                                &ctx.runtime,
+                                connection,
+                                command,
+                                args,
+                            ) {
+                                return Ok(remote_rows);
+                            }
+                        }
+                        return Ok(b);
+                    }
                     (Err(_), Ok(extra)) if !extra.is_empty() => return Ok(json!(extra)),
-                    (Err(e), _) => return Err(e),
+                    (Err(e), _) => {
+                        if connection != "local" {
+                            if let Ok(remote_rows) = bob_runtime::node_pairing::forward_dsh_rpc_to_remote_node(
+                                &ctx.runtime,
+                                connection,
+                                command,
+                                args,
+                            ) {
+                                return Ok(remote_rows);
+                            }
+                        }
+                        return Err(e);
+                    }
                 }
             }
             if command=="app_dsh_page" {
                 if let Some(sid)=args.get("sessionId").and_then(Value::as_str).filter(|s|bob_runtime::agy_directory::owns_readable_session(s)) {
                     let after=args.get("after").filter(|v|!v.is_null()).map(|v|v.as_i64().ok_or("DSH_PAGE_CURSOR_INVALID")).transpose()?;
-                    return bob_runtime::agy_directory::read_page(&ctx.runtime.data_dir, connection, sid, after);
+                    match bob_runtime::agy_directory::read_page(&ctx.runtime.data_dir, connection, sid, after) {
+                        Ok(v) => return Ok(v),
+                        Err("DSH_CONNECTION_REQUIRED") if connection != "local" => {
+                            return bob_runtime::node_pairing::forward_dsh_rpc_to_remote_node(
+                                &ctx.runtime,
+                                connection,
+                                command,
+                                args,
+                            );
+                        }
+                        Err(e) => return Err(e),
+                    }
                 }
             }
             if command=="app_dsh_prompt" {
                 if let Some(sid)=args.get("sessionId").and_then(Value::as_str).filter(|s|bob_runtime::agy_directory::owns_readable_session(s)) {
                     let text=args["text"].as_str().filter(|s|!s.trim().is_empty() && s.len()<=32000).ok_or("DSH_TEXT_REQUIRED")?;
                     let request=args["requestId"].as_str().filter(|s|s.len()<=200 && !s.is_empty()).ok_or("DSH_REQUEST_REQUIRED")?;
-                    return bob_runtime::agy_directory::prompt_session(&ctx.runtime.data_dir, connection, sid, text, request);
+                    match bob_runtime::agy_directory::prompt_session(&ctx.runtime.data_dir, connection, sid, text, request) {
+                        Ok(v) => return Ok(v),
+                        Err("DSH_CONNECTION_REQUIRED") if connection != "local" => {
+                            return bob_runtime::node_pairing::forward_dsh_rpc_to_remote_node(
+                                &ctx.runtime,
+                                connection,
+                                command,
+                                args,
+                            );
+                        }
+                        Err(e) => return Err(e),
+                    }
                 }
             }
             if let Some(v) = claude_rpc::try_handle_dsh_command(&ctx.runtime.data_dir, command, args)? {
@@ -1848,6 +2096,36 @@ pub fn handle_client_v1_http(
         }
     }
 
+    if path == "/api/client/v1/topology" && method == "GET" {
+        let _ = bob_runtime::agy_directory::ensure_local_grant_registered(
+            &ctx.runtime.data_dir,
+            "local",
+        );
+        let topo = bob_runtime::node_pairing::export_local_topology(
+            &ctx.runtime.data_dir,
+            &ctx.runtime,
+            false,
+        );
+        return (200, topo);
+    }
+
+    if path == "/api/client/v1/topology/sync" && method == "POST" {
+        let parsed: Value = serde_json::from_str(body_str).unwrap_or_else(|_| json!({}));
+        let _ = bob_runtime::agy_directory::ensure_local_grant_registered(
+            &ctx.runtime.data_dir,
+            "local",
+        );
+        return match bob_runtime::node_pairing::merge_topology(
+            &ctx.runtime.data_dir,
+            &mut ctx.app,
+            &ctx.runtime,
+            &parsed,
+        ) {
+            Ok(merged) => (200, merged),
+            Err(code) => (400, json!({ "code": code })),
+        };
+    }
+
     if path == "/api/client/v1/operations" && method == "POST" {
         let parsed: Value = serde_json::from_str(body_str).unwrap_or_else(|_| json!({}));
         return match execute_online_operation(ctx, &parsed) {
@@ -1878,25 +2156,41 @@ fn execute_unlocked_harness_rpc(
         | "app_claude_artifacts"
         | "app_claude_preview" => claude_rpc::rpc(data_dir, command, args),
         "app_dsh_receipt" => {
+            let connection = args["connectionId"].as_str().ok_or("DSH_CONNECTION_REQUIRED")?;
+            if connection == "local" {
+                let _ = bob_runtime::agy_directory::ensure_local_grant_registered(data_dir, "local");
+            }
             if let Some(sid) = args
                 .get("sessionId")
                 .and_then(Value::as_str)
                 .filter(|s| bob_runtime::agy_directory::owns_readable_session(s))
             {
-                return bob_runtime::agy_directory::inspect_receipt(
+                match bob_runtime::agy_directory::inspect_receipt(
                     data_dir,
-                    args["connectionId"].as_str().ok_or("DSH_CONNECTION_REQUIRED")?,
+                    connection,
                     sid,
                     args["text"].as_str().ok_or("DSH_TEXT_REQUIRED")?,
                     args["requestId"].as_str().ok_or("DSH_REQUEST_REQUIRED")?,
-                );
+                ) {
+                    Ok(v) => return Ok(v),
+                    Err("DSH_CONNECTION_REQUIRED") if connection != "local" => {
+                        let runtime = ModelHubRuntime::with_file_vault(data_dir.to_path_buf())?;
+                        return bob_runtime::node_pairing::forward_dsh_rpc_to_remote_node(
+                            &runtime,
+                            connection,
+                            command,
+                            args,
+                        );
+                    }
+                    Err(e) => return Err(e),
+                }
             }
             if let Some(v) = claude_rpc::try_handle_dsh_command(data_dir, command, args)? {
                 return Ok(v);
             }
             bob_runtime::dsh_transport::inspect_receipt(
                 data_dir,
-                args["connectionId"].as_str().ok_or("DSH_CONNECTION_REQUIRED")?,
+                connection,
                 args["sessionId"].as_str().ok_or("DSH_SESSION_REQUIRED")?,
                 args["text"].as_str().ok_or("DSH_TEXT_REQUIRED")?,
                 args["requestId"].as_str().ok_or("DSH_REQUEST_REQUIRED")?,
@@ -1904,6 +2198,9 @@ fn execute_unlocked_harness_rpc(
         }
         "app_dsh_page" | "app_dsh_preview" | "app_dsh_list" | "app_dsh_history" | "app_dsh_prompt" => {
             let connection = args["connectionId"].as_str().ok_or("DSH_CONNECTION_REQUIRED")?;
+            if connection == "local" {
+                let _ = bob_runtime::agy_directory::ensure_local_grant_registered(data_dir, "local");
+            }
             let runtime = ModelHubRuntime::with_file_vault(data_dir.to_path_buf())?;
             if command == "app_dsh_list" {
                 let base = claude_rpc::merge_claude_into_dsh_list(
@@ -1919,9 +2216,36 @@ fn execute_unlocked_harness_rpc(
                         }
                         return Ok(b);
                     }
-                    (Ok(b), Err(_)) => return Ok(b),
+                    (Ok(b), Err(_)) => {
+                        if b.as_array().is_some_and(|rows| !rows.is_empty()) {
+                            return Ok(b);
+                        }
+                        if connection != "local" {
+                            if let Ok(remote_rows) = bob_runtime::node_pairing::forward_dsh_rpc_to_remote_node(
+                                &runtime,
+                                connection,
+                                command,
+                                args,
+                            ) {
+                                return Ok(remote_rows);
+                            }
+                        }
+                        return Ok(b);
+                    }
                     (Err(_), Ok(extra)) if !extra.is_empty() => return Ok(json!(extra)),
-                    (Err(e), _) => return Err(e),
+                    (Err(e), _) => {
+                        if connection != "local" {
+                            if let Ok(remote_rows) = bob_runtime::node_pairing::forward_dsh_rpc_to_remote_node(
+                                &runtime,
+                                connection,
+                                command,
+                                args,
+                            ) {
+                                return Ok(remote_rows);
+                            }
+                        }
+                        return Err(e);
+                    }
                 }
             }
             if command == "app_dsh_page" {
@@ -1935,7 +2259,18 @@ fn execute_unlocked_harness_rpc(
                         .filter(|v| !v.is_null())
                         .map(|v| v.as_i64().ok_or("DSH_PAGE_CURSOR_INVALID"))
                         .transpose()?;
-                    return bob_runtime::agy_directory::read_page(data_dir, connection, sid, after);
+                    match bob_runtime::agy_directory::read_page(data_dir, connection, sid, after) {
+                        Ok(v) => return Ok(v),
+                        Err("DSH_CONNECTION_REQUIRED") if connection != "local" => {
+                            return bob_runtime::node_pairing::forward_dsh_rpc_to_remote_node(
+                                &runtime,
+                                connection,
+                                command,
+                                args,
+                            );
+                        }
+                        Err(e) => return Err(e),
+                    }
                 }
             }
             if command == "app_dsh_prompt" {
@@ -1952,7 +2287,18 @@ fn execute_unlocked_harness_rpc(
                         .as_str()
                         .filter(|s| s.len() <= 200 && !s.is_empty())
                         .ok_or("DSH_REQUEST_REQUIRED")?;
-                    return bob_runtime::agy_directory::prompt_session(data_dir, connection, sid, text, request);
+                    match bob_runtime::agy_directory::prompt_session(data_dir, connection, sid, text, request) {
+                        Ok(v) => return Ok(v),
+                        Err("DSH_CONNECTION_REQUIRED") if connection != "local" => {
+                            return bob_runtime::node_pairing::forward_dsh_rpc_to_remote_node(
+                                &runtime,
+                                connection,
+                                command,
+                                args,
+                            );
+                        }
+                        Err(e) => return Err(e),
+                    }
                 }
             }
             if let Some(v) = claude_rpc::try_handle_dsh_command(data_dir, command, args)? {
@@ -2288,6 +2634,69 @@ fn handle_connection(mut stream: TcpStream, state: Arc<Mutex<NodeContext>>) {
             write_json_response(&mut stream, status, &value.to_string());
             return;
         }
+        if command.trim() == "app_pairing_qr_propose" {
+            let at = now_millis();
+            let raw_code = args
+                .get("invitationCode")
+                .or_else(|| args.get("invitation_code"))
+                .or_else(|| args.get("code"))
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_owned();
+            let local_topo = bob_runtime::node_pairing::export_local_topology(
+                &guard.runtime.data_dir,
+                &guard.runtime,
+                true,
+            );
+            drop(guard);
+            let result: Result<Value, &'static str> = (|| {
+                let inv = bob_runtime::node_pairing::NodePairingInvitation::decode_qr_code(&raw_code, at)?;
+                let exchanged = bob_runtime::node_pairing::exchange_and_sync_with_peer(
+                    &inv,
+                    "Bob Mobile Broker",
+                    &local_topo,
+                )?;
+                let token = exchanged
+                    .get("accessToken")
+                    .and_then(Value::as_str)
+                    .ok_or("PAIRING_CODE_INVALID")?;
+                let mut guard = state.lock().map_err(|_| "NODE_LOCK_POISONED")?;
+                let ctx: &mut NodeContext = &mut *guard;
+                let data_dir = ctx.runtime.data_dir.clone();
+                let _ = ctx.runtime.save_remote_node(
+                    &mut ctx.app,
+                    Some(inv.node_id.clone()),
+                    &inv.label,
+                    &inv.base_url,
+                    Some(token),
+                    false,
+                    Some(&inv.role),
+                    true,
+                )?;
+                if let Some(synced) = exchanged.get("syncedTopology") {
+                    let _ = bob_runtime::node_pairing::merge_topology(
+                        &data_dir,
+                        &mut ctx.app,
+                        &ctx.runtime,
+                        synced,
+                    );
+                }
+                Ok(json!({
+                    "role": "replica",
+                    "state": "pending",
+                    "node_id": inv.node_id,
+                    "label": inv.label,
+                    "base_url": inv.base_url,
+                    "expires_at": inv.expires_at,
+                }))
+            })();
+            let (status, value) = match result {
+                Ok(result) => (200, json!({ "ok": true, "result": result })),
+                Err(e) => (400, json!({ "ok": false, "error": e })),
+            };
+            write_json_response(&mut stream, status, &value.to_string());
+            return;
+        }
         match handle_rpc_command(&mut guard, command.trim(), &args) {
             Ok(result) => {
                 let payload = serde_json::to_string(&json!({ "ok": true, "result": result }))
@@ -2404,6 +2813,7 @@ fn write_bytes_response(stream: &mut TcpStream, status: u16, content_type: &str,
 pub struct RunningNodeServer {
     pub local_addr: SocketAddr,
     stop: Arc<AtomicBool>,
+    state: Arc<Mutex<NodeContext>>,
 }
 
 impl RunningNodeServer {
@@ -2411,12 +2821,94 @@ impl RunningNodeServer {
         self.stop.store(true, Ordering::SeqCst);
         let _ = TcpStream::connect_timeout(&self.local_addr, Duration::from_millis(100));
     }
+
+    pub fn issue_startup_pairing(
+        &self,
+        public_url: Option<&str>,
+        label: Option<&str>,
+    ) -> Result<bob_runtime::node_pairing::NodePairingInvitation, &'static str> {
+        let mut ctx = self.state.lock().map_err(|_| "NODE_LOCK_POISONED")?;
+        let local_grant = bob_runtime::agy_directory::ensure_local_grant_registered(
+            &ctx.runtime.data_dir,
+            "local",
+        );
+        let harnesses: Vec<String> = local_grant
+            .as_ref()
+            .and_then(|g| g.get("harnesses"))
+            .and_then(Value::as_array)
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_owned)
+                    .collect()
+            })
+            .unwrap_or_default();
+        let resolved_url = public_url
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned)
+            .or_else(|| std::env::var("BOB_NODE_PUBLIC_URL").ok().filter(|s| !s.trim().is_empty()))
+            .unwrap_or_else(|| {
+                let ip = if self.local_addr.ip().is_loopback()
+                    || self.local_addr.ip().is_unspecified()
+                {
+                    bob_runtime::node_pairing::detect_lan_or_tailscale_ip()
+                } else {
+                    self.local_addr.ip().to_string()
+                };
+                format!("http://{ip}:{}", self.local_addr.port())
+            });
+        let clean_url = resolved_url.trim_end_matches('/').to_owned();
+        let default_host = std::env::var("BOB_NODE_LABEL")
+            .or_else(|_| std::env::var("HOSTNAME"))
+            .or_else(|_| std::env::var("COMPUTERNAME"))
+            .unwrap_or_else(|_| "Bob Node".to_owned());
+        let resolved_label = label
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .unwrap_or(&default_host)
+            .to_owned();
+        let role = if ctx.static_dir.is_some() {
+            "web_host"
+        } else {
+            "node"
+        };
+        let at = now_millis();
+        let pairing_id = format!("qr_boot_{at}");
+        let code_num = ((at as u64) % 900_000) + 100_000;
+        let user_code = format!("{code_num}");
+        let expires_at = at + 86_400_000; // 24h startup invitation window
+        ctx.online.pairings.insert(
+            pairing_id.clone(),
+            OnlinePairingSession {
+                pairing_id: pairing_id.clone(),
+                user_code: user_code.clone(),
+                device_name: resolved_label.clone(),
+                created_at: at,
+                expires_at,
+                exchanged_token: None,
+            },
+        );
+        ctx.save_online();
+        Ok(bob_runtime::node_pairing::NodePairingInvitation {
+            v: 1,
+            role: role.to_owned(),
+            node_id: bob_runtime::node_pairing::compute_node_id(&clean_url),
+            label: resolved_label,
+            base_url: clean_url,
+            pairing_id,
+            user_code,
+            expires_at,
+            harnesses,
+        })
+    }
 }
 
 pub fn spawn_node_server(config: BobNodeConfig) -> Result<RunningNodeServer, &'static str> {
     let listener = TcpListener::bind(&config.bind_addr).map_err(|_| "BIND_FAILED")?;
     let local_addr = listener.local_addr().map_err(|_| "LOCAL_ADDR_FAILED")?;
     let ctx = Arc::new(Mutex::new(NodeContext::open(&config)?));
+    let ctx_handle = ctx.clone();
     let stop = Arc::new(AtomicBool::new(false));
     let stop_flag = stop.clone();
     let context_dir=config.data_dir.clone();let context_stop=stop.clone();
@@ -2438,7 +2930,11 @@ pub fn spawn_node_server(config: BobNodeConfig) -> Result<RunningNodeServer, &'s
         }
     });
 
-    Ok(RunningNodeServer { local_addr, stop })
+    Ok(RunningNodeServer {
+        local_addr,
+        stop,
+        state: ctx_handle,
+    })
 }
 
 #[cfg(test)]
@@ -2872,6 +3368,159 @@ mod tests {
         assert_eq!(rec_arr.len(), 1);
         assert_eq!(rec_arr[0]["status"], "interrupted");
         assert_eq!(rec_arr[0]["error_code"], "RECONCILED_AFTER_RESTART");
+    }
+
+    #[test]
+    fn two_step_mobile_broker_qr_pairing_and_topology_sync_connects_work_node_and_web_host() {
+        let work_dir = tempfile::tempdir().unwrap();
+        let phone_dir = tempfile::tempdir().unwrap();
+        let web_dir = tempfile::tempdir().unwrap();
+
+        let work_srv = spawn_node_server(BobNodeConfig {
+            bind_addr: "127.0.0.1:0".parse().unwrap(),
+            data_dir: work_dir.path().to_path_buf(),
+            static_dir: None,
+            legacy_db_path: None,
+        })
+        .expect("start work node");
+        let phone_srv = spawn_node_server(BobNodeConfig {
+            bind_addr: "127.0.0.1:0".parse().unwrap(),
+            data_dir: phone_dir.path().to_path_buf(),
+            static_dir: None,
+            legacy_db_path: None,
+        })
+        .expect("start phone broker");
+        let web_srv = spawn_node_server(BobNodeConfig {
+            bind_addr: "127.0.0.1:0".parse().unwrap(),
+            data_dir: web_dir.path().to_path_buf(),
+            static_dir: None,
+            legacy_db_path: None,
+        })
+        .expect("start web host");
+
+        // Step 1: Work Node prints terminal QR on startup
+        let work_url = format!("http://{}", work_srv.local_addr);
+        let work_inv = work_srv
+            .issue_startup_pairing(Some(&work_url), Some("VPS3 Work Node"))
+            .expect("work node startup pairing");
+        let work_qr_uri = work_inv.encode_qr_code();
+        assert!(work_qr_uri.starts_with("bob://pair?"));
+        let ansi = bob_runtime::node_pairing::render_terminal_qr(&work_qr_uri)
+            .expect("render terminal qr");
+        assert!(ansi.contains('█'));
+
+        // Phone scans Work Node terminal QR
+        let (st, prop1) = http_request(
+            phone_srv.local_addr,
+            "POST",
+            "/api/rpc/app_pairing_qr_propose",
+            None,
+            Some(&json!({ "invitationCode": work_qr_uri }).to_string()),
+        );
+        assert_eq!(st, 200);
+        assert_eq!(prop1["ok"], true);
+        assert_eq!(prop1["result"]["state"], "pending");
+
+        let (st, fin1) = http_request(
+            phone_srv.local_addr,
+            "POST",
+            "/api/rpc/app_pairing_finish",
+            None,
+            Some("{}"),
+        );
+        assert_eq!(st, 200);
+        assert_eq!(fin1["ok"], true);
+        assert_eq!(fin1["result"]["state"], "connected");
+
+        // Verify Phone now has Work Node in its remoteNodes
+        let (st, phone_hub1) = http_request(
+            phone_srv.local_addr,
+            "POST",
+            "/api/rpc/app_model_hub_get",
+            None,
+            Some("{}"),
+        );
+        assert_eq!(st, 200);
+        let phone_nodes1 = phone_hub1["result"]["remoteNodes"].as_array().unwrap();
+        assert_eq!(phone_nodes1.len(), 1);
+        assert_eq!(phone_nodes1[0]["baseUrl"], work_url);
+        assert_eq!(phone_nodes1[0]["label"], "VPS3 Work Node");
+
+        // Step 2: Web Host user clicks "Show QR Code" in Settings -> Connection
+        let web_url = format!("http://{}", web_srv.local_addr);
+        let (st, web_qr_res) = http_request(
+            web_srv.local_addr,
+            "POST",
+            "/api/rpc/app_pairing_qr_create",
+            None,
+            Some(&json!({ "origin": web_url, "label": "Bob Online Web Host" }).to_string()),
+        );
+        assert_eq!(st, 200);
+        assert_eq!(web_qr_res["ok"], true);
+        let web_qr_code = web_qr_res["result"]["code"].as_str().unwrap().to_owned();
+
+        // Web Host pairing status is initially "open"
+        let (_, web_status_before) = http_request(
+            web_srv.local_addr,
+            "POST",
+            "/api/rpc/app_pairing_status",
+            None,
+            Some("{}"),
+        );
+        assert_eq!(web_status_before["result"]["state"], "open");
+
+        // Phone scans Web Host Settings QR -> pairs with Web Host AND pushes Work Node topology to Web Host!
+        let (st, prop2) = http_request(
+            phone_srv.local_addr,
+            "POST",
+            "/api/rpc/app_pairing_qr_propose",
+            None,
+            Some(&json!({ "invitationCode": web_qr_code }).to_string()),
+        );
+        assert_eq!(st, 200);
+        assert_eq!(prop2["ok"], true);
+        assert_eq!(prop2["result"]["state"], "pending");
+
+        // Web Host status automatically transitions to "connected"!
+        let (_, web_status_after) = http_request(
+            web_srv.local_addr,
+            "POST",
+            "/api/rpc/app_pairing_status",
+            None,
+            Some("{}"),
+        );
+        assert_eq!(web_status_after["result"]["state"], "connected");
+
+        // Web Host now has the Work Node in its remoteNodes (synced via the Phone Broker!)
+        let (_, web_hub) = http_request(
+            web_srv.local_addr,
+            "POST",
+            "/api/rpc/app_model_hub_get",
+            None,
+            Some("{}"),
+        );
+        let web_nodes = web_hub["result"]["remoteNodes"].as_array().unwrap();
+        assert!(
+            web_nodes
+                .iter()
+                .any(|n| n["baseUrl"] == work_url && n["hasToken"] == true),
+            "Web Host should receive Work Node and its token from the Phone Broker: {web_nodes:?}"
+        );
+
+        // And Phone now has BOTH Work Node and Web Host in its remoteNodes!
+        let (_, phone_hub2) = http_request(
+            phone_srv.local_addr,
+            "POST",
+            "/api/rpc/app_model_hub_get",
+            None,
+            Some("{}"),
+        );
+        let phone_nodes2 = phone_hub2["result"]["remoteNodes"].as_array().unwrap();
+        assert_eq!(phone_nodes2.len(), 2);
+
+        work_srv.shutdown();
+        phone_srv.shutdown();
+        web_srv.shutdown();
     }
 }
 

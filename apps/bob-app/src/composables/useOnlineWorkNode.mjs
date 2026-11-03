@@ -23,9 +23,16 @@ export function useOnlineWorkNode(ctx) {
   const applyModelHubSnapshot = (...args) => ctx.applyModelHubSnapshot(...args);
   const loadModelHub = (...args) => ctx.loadModelHub(...args);
 
+const defaultOnlineOrigin =
+  typeof window !== 'undefined' &&
+  window.__BOB_NODE_RUNTIME__ === true &&
+  typeof window.location?.origin === 'string' &&
+  window.location.origin.startsWith('http')
+    ? window.location.origin
+    : 'https://bob-online.bobbik.org';
 const onlineClient = createOnlineWorkClient();
 const onlineState = reactive({
-  origin: 'https://bob-online.bobbik.org',
+  origin: defaultOnlineOrigin,
   clientInstanceId: `bob-client-${Math.random().toString(36).slice(2, 10)}-instance`,
   pairing: null,
   token: null,

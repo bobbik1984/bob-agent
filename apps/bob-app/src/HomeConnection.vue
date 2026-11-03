@@ -12,8 +12,8 @@ const { t } = useI18n();
 const emit = defineEmits(['changed', 'connected']);
 const browserClient = isBobNodeRuntime();
 const props = defineProps({ paired: { type: Boolean, default: false } });
-const paired = computed(
-  () => !browserClient && ['connected', 'enabled'].includes(status.value?.state),
+const paired = computed(() =>
+  ['connected', 'enabled'].includes(status.value?.state),
 );
 const open = ref(true);
 const capabilities = ref(null);
@@ -107,6 +107,8 @@ function completePairing() {
   if (!capabilities.value?.can_scan) return;
   if (poll) clearInterval(poll);
   poll = null;
+  void loadConnections();
+  emit('changed');
   emit('connected');
 }
 
@@ -114,6 +116,7 @@ async function refresh() {
   if (!open.value || busy.value || reading || disposed) return;
   reading = true;
   try {
+    const hadInvitation = Boolean(invitation.value);
     status.value = await kernelBridge.pairingStatus();
     if (error.value === lastStatusError) error.value = '';
     lastStatusError = '';
@@ -138,6 +141,9 @@ async function refresh() {
       )
     ) {
       invitation.value = null;
+      if (hadInvitation && status.value?.state === 'connected') {
+        await loadConnections();
+      }
     }
     emit('changed');
   } catch (e) {
@@ -159,6 +165,7 @@ async function ensureOpen() {
     capabilities.value = await kernelBridge.pairingCapabilities();
     await refresh();
     if (
+      !browserClient &&
       capabilities.value?.can_host &&
       ['confirmed', 'consumed', 'connected'].includes(status.value?.state)
     ) {
@@ -192,6 +199,14 @@ defineExpose({ openDetails: ensureOpen });
 async function createQr() {
   await act(async () => {
     if (status.value?.state === 'expired') await kernelBridge.pairingReset();
+    if (
+      browserClient &&
+      typeof window !== 'undefined' &&
+      typeof window.location?.origin === 'string' &&
+      window.location.origin.startsWith('http')
+    ) {
+      return kernelBridge.pairingQrCreate({ origin: window.location.origin });
+    }
     return kernelBridge.pairingQrCreate();
   });
 }
@@ -227,14 +242,13 @@ onMounted(async () => {
   try {
     const caps = await kernelBridge.pairingCapabilities();
     capabilities.value = caps;
-    if (!browserClient) await ensureOpen();
+    await ensureOpen();
     if (caps.start_pairing && caps.can_host) {
-      await ensureOpen();
       if (
         !status.value ||
         ['unconfigured', 'revoked', 'stopped'].includes(status.value.state)
       ) {
-        await act(() => kernelBridge.pairingQrCreate());
+        await createQr();
       }
     }
   } catch {
@@ -272,7 +286,7 @@ onUnmounted(() => {
       </div>
       <p class="view-card-desc">{{ t('connectionProtocolBoundary') }}</p>
     </section>
-    <details v-if="!browserClient && (capabilities?.can_host || capabilities?.can_scan)" class="about-footer-details"><summary>{{ t('connectionPairDevice') }}</summary>
+    <details v-if="capabilities?.can_host || capabilities?.can_scan" :open="browserClient" class="about-footer-details"><summary>{{ t('connectionPairDevice') }}</summary>
     <section
       v-if="open"
       class="qr-panel hub-card"
@@ -294,13 +308,13 @@ onUnmounted(() => {
         ×
       </button>
 
-      <template v-if="!browserClient && capabilities?.can_host">
+      <template v-if="capabilities?.can_host">
         <p class="view-card-desc">{{ t('qrHomeHint') }}</p>
         <div class="provider-actions">
           <button
             v-if="
               !invitation &&
-              !['pending', 'confirmed', 'connected', 'enabled'].includes(status?.state)
+              (browserClient || !['pending', 'confirmed', 'connected', 'enabled'].includes(status?.state))
             "
             type="button"
             class="primary-action-btn"
@@ -325,7 +339,7 @@ onUnmounted(() => {
         </p>
       </template>
 
-      <template v-else-if="!browserClient && capabilities?.can_scan">
+      <template v-else-if="capabilities?.can_scan">
         <p class="view-card-desc">{{ t('qrPhoneHint') }}</p>
         <div class="provider-actions">
           <button
@@ -351,7 +365,7 @@ onUnmounted(() => {
           )
         }}
       </p>
-      <p v-else-if="!browserClient && status && scanPhase !== 'failed'" role="status" class="view-card-desc">
+      <p v-else-if="status && scanPhase !== 'failed'" role="status" class="view-card-desc">
         {{ t(keys[status.state] || 'pairUnconfirmed') }}
       </p>
       <p v-if="error || status?.error" role="alert" class="view-card-desc">

@@ -31,6 +31,113 @@ impl HostGrant {
             || self.codex_data_dir.is_some()
             || !self.control_plane_dbs.is_empty()
     }
+    fn is_local(&self) -> bool {
+        matches!(
+            self.ssh_target.as_str(),
+            "local" | "self" | "localhost" | "127.0.0.1"
+        )
+    }
+}
+
+pub fn discover_local_grant(connection_id: &str) -> Option<Value> {
+    let home = std::env::var_os("BOB_LOCAL_HOME")
+        .or_else(|| std::env::var_os("HOME"))
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(std::path::PathBuf::from)?;
+    if !home.is_dir() {
+        return None;
+    }
+    let agy_cli = home.join(".gemini").join("antigravity-cli");
+    let agy_gui = home.join(".gemini").join("antigravity");
+    let agy_dir = if agy_cli.is_dir() {
+        agy_cli.to_string_lossy().replace('\\', "/")
+    } else if agy_gui.is_dir() {
+        agy_gui.to_string_lossy().replace('\\', "/")
+    } else {
+        String::new()
+    };
+    let claude_dir = home.join(".claude");
+    let claude_opt = claude_dir
+        .is_dir()
+        .then(|| claude_dir.to_string_lossy().replace('\\', "/"));
+    let pi_dir = home.join(".pi").join("agent").join("sessions");
+    let pi_opt = pi_dir
+        .is_dir()
+        .then(|| pi_dir.to_string_lossy().replace('\\', "/"));
+    let codex_dir = home.join(".codex");
+    let codex_opt = codex_dir
+        .is_dir()
+        .then(|| codex_dir.to_string_lossy().replace('\\', "/"));
+
+    let mut cp_dbs = Vec::new();
+    let bob_state = home.join(".bob").join("state");
+    if let Ok(entries) = fs::read_dir(&bob_state) {
+        for e in entries.flatten() {
+            let db = e.path().join("nexus_control_plane.sqlite");
+            if db.is_file() {
+                cp_dbs.push(db.to_string_lossy().replace('\\', "/"));
+            }
+        }
+    }
+    let opt_db = std::path::Path::new("/opt/bob-online/data/nexus_control_plane.sqlite");
+    if opt_db.is_file() {
+        cp_dbs.push(opt_db.to_string_lossy().into_owned());
+    }
+
+    let mut harnesses = Vec::new();
+    if !cp_dbs.is_empty() {
+        harnesses.push("dsh".to_owned());
+    }
+    if claude_opt.is_some() {
+        harnesses.push("claude".to_owned());
+    }
+    if pi_opt.is_some() {
+        harnesses.push("pi".to_owned());
+    }
+    if codex_opt.is_some() {
+        harnesses.push("codex".to_owned());
+    }
+    if !agy_dir.is_empty() {
+        harnesses.push("agy".to_owned());
+    }
+    if harnesses.is_empty() {
+        return None;
+    }
+    Some(json!({
+        "connectionId": connection_id,
+        "sshTarget": "local",
+        "agyDataDir": agy_dir,
+        "claudeDataDir": claude_opt,
+        "piDataDir": pi_opt,
+        "codexDataDir": codex_opt,
+        "controlPlaneDbs": cp_dbs,
+        "harnesses": harnesses,
+    }))
+}
+
+pub fn ensure_local_grant_registered(data: &Path, connection_id: &str) -> Option<Value> {
+    if std::env::var("BOB_AUTO_DISCOVER_LOCAL").ok().as_deref() == Some("0") {
+        return None;
+    }
+    let grant = discover_local_grant(connection_id)?;
+    let p = data.join("device_harnesses.json");
+    let mut list: Vec<Value> = fs::read(&p)
+        .ok()
+        .and_then(|b| serde_json::from_slice(&b).ok())
+        .unwrap_or_default();
+    if let Some(idx) = list
+        .iter()
+        .position(|x| x.get("connectionId").and_then(Value::as_str) == Some(connection_id))
+    {
+        if list[idx].get("sshTarget").and_then(Value::as_str) == Some("local") {
+            list[idx] = grant.clone();
+            let _ = fs::write(&p, serde_json::to_vec_pretty(&list).unwrap_or_default());
+        }
+        return Some(list[idx].clone());
+    }
+    list.push(grant.clone());
+    let _ = fs::write(&p, serde_json::to_vec_pretty(&list).unwrap_or_default());
+    Some(grant)
 }
 
 fn grants(data: &Path) -> Result<Vec<HostGrant>, &'static str> {
@@ -104,7 +211,63 @@ fn compact_python(src: &str) -> String {
     out
 }
 
+pub fn run_local_probe(arg_str: &str, timeout_secs: u64) -> Result<Vec<u8>, &'static str> {
+    let encoded = STANDARD.encode(arg_str.as_bytes());
+    let compacted = compact_python(include_str!("agy_index_probe.py"));
+    let py_code = format!(
+        "import sys,base64;s=sys.stdin.read();sys.argv=['probe',base64.b64decode('{encoded}').decode('utf-8')];exec(s,{{'__name__':'__main__','__BOB_PROBE_SRC__':s}})"
+    );
+    let mut child = Command::new("python3")
+        .args(["-c", &py_code])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .or_else(|_| {
+            Command::new("python")
+                .args(["-c", &py_code])
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null())
+                .spawn()
+        })
+        .map_err(|_| "AGY_HOST_UNAVAILABLE")?;
+    if let Some(mut stdin) = child.stdin.take() {
+        let _ = stdin.write_all(compacted.as_bytes());
+    }
+    let stdout = child.stdout.take().ok_or("AGY_HOST_UNAVAILABLE")?;
+    let reader = thread::spawn(move || {
+        let mut b = Vec::new();
+        stdout.take(2 * 1024 * 1024 + 1).read_to_end(&mut b).map(|_| b)
+    });
+    let started = Instant::now();
+    let success = loop {
+        match child.try_wait() {
+            Ok(Some(s)) => break s.success(),
+            Ok(None) if started.elapsed() < Duration::from_secs(timeout_secs) => {
+                thread::sleep(Duration::from_millis(40))
+            }
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err("AGY_HOST_TIMEOUT");
+            }
+        }
+    };
+    let b = reader
+        .join()
+        .map_err(|_| "AGY_INDEX_UNAVAILABLE")?
+        .map_err(|_| "AGY_INDEX_UNAVAILABLE")?;
+    if !success || b.len() > 2 * 1024 * 1024 {
+        return Err("AGY_INDEX_UNAVAILABLE");
+    }
+    Ok(b)
+}
+
 fn run_ssh_python(ssh_target: &str, arg_str: &str, timeout_secs: u64) -> Result<Vec<u8>, &'static str> {
+    if matches!(ssh_target, "local" | "self" | "localhost" | "127.0.0.1") {
+        return run_local_probe(arg_str, timeout_secs);
+    }
     if ssh_target.is_empty() || ssh_target.starts_with('-') || !ssh_target.bytes().all(|c|c.is_ascii_alphanumeric()||b"-_.@".contains(&c)) {
         return Err("AGY_CONFIG_INVALID");
     }
@@ -136,7 +299,7 @@ fn run_ssh_python(ssh_target: &str, arg_str: &str, timeout_secs: u64) -> Result<
 fn fetch_list(data: &Path, connection: &str) -> Result<Vec<Value>, &'static str> {
     let all=grants(data)?;
     let Some(g)=all.iter().find(|g|g.connection_id==connection) else { return Ok(vec![]) };
-    if !g.agy_data_dir.is_empty() && !g.agy_data_dir.starts_with('/') { return Err("AGY_CONFIG_INVALID") }
+    if !g.is_local() && !g.agy_data_dir.is_empty() && !g.agy_data_dir.starts_with('/') { return Err("AGY_CONFIG_INVALID") }
     let arg_str = if g.has_multi() {
         serde_json::to_string(&json!({
             "mode": "list",

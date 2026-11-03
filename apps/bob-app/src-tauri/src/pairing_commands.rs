@@ -166,6 +166,10 @@ enum Ceremony {
         invitation: InvitationCode,
         state: String,
     },
+    NodeBroker {
+        node_id: String,
+        expires_at: i64,
+    },
 }
 #[derive(Default)]
 pub(crate) struct PairingState(Arc<Mutex<Option<Ceremony>>>);
@@ -277,8 +281,21 @@ fn status(ceremony: &Ceremony) -> Result<CeremonyStatus, &'static str> {
     if let Ceremony::OpenHome(open) = ceremony {
         return qr::open_status(open);
     }
+    if let Ceremony::NodeBroker { node_id, expires_at } = ceremony {
+        return Ok(CeremonyStatus {
+            role: "replica",
+            state: "connected".into(),
+            candidate_id: Some(node_id.clone()),
+            candidate_pin: None,
+            session_id: None,
+            expires_at: Some(*expires_at),
+            error: None,
+            home_pin: None,
+            grant_expires_at: None,
+        });
+    }
     let (invite, role, state, error, grant_expiry) = match ceremony {
-        Ceremony::OpenHome(_) => unreachable!(),
+        Ceremony::OpenHome(_) | Ceremony::NodeBroker { .. } => unreachable!(),
         Ceremony::Replica {
             invitation, state, ..
         } => (invitation, "replica", state.clone(), None, None),
@@ -1132,6 +1149,9 @@ pub(crate) async fn app_pairing_finish<R: tauri::Runtime>(
     let (invite, attempt) = {
         let guard = pairing.0.lock().map_err(|_| "PAIRING_STATE_UNAVAILABLE")?;
         match guard.as_ref() {
+            Some(c @ Ceremony::NodeBroker { .. }) => {
+                return status(c);
+            }
             Some(Ceremony::Replica {
                 invitation,
                 state,

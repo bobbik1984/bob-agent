@@ -10,6 +10,7 @@
 //!   `online_cache.json`, BYOK execution, and Online Client API v1 calls.
 
 pub mod agy_directory;
+pub mod node_pairing;
 pub mod project_context;
 pub mod workspace_context;
 pub mod vision;
@@ -898,7 +899,9 @@ impl ModelHubRuntime {
         let entry = json!({
             "id": nid,
             "name": name.trim(),
+            "label": name.trim(),
             "url": url.trim(),
+            "baseUrl": url.trim(),
             "remark": remark.unwrap_or("").trim(),
             "enabled": enabled,
             "updatedAt": now_millis()
