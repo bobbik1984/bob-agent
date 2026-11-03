@@ -1,6 +1,6 @@
 //! Read-only multi-harness remote directory & session history reader (AGY, Claude, Pi, Codex, DSH/Control-Plane).
 //! No model execution or private credential decoding is performed here.
-use std::{fs, io::Read, path::Path, process::{Command, Stdio}, thread, time::{Duration, Instant}};
+use std::{fs, io::{Read, Write}, path::Path, process::{Command, Stdio}, thread, time::{Duration, Instant}};
 use base64::{Engine, engine::general_purpose::STANDARD};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -108,14 +108,15 @@ fn run_ssh_python(ssh_target: &str, arg_str: &str, timeout_secs: u64) -> Result<
         return Err("AGY_CONFIG_INVALID");
     }
     let encoded=STANDARD.encode(arg_str.as_bytes());
-    let code=format!("import sys,base64\nsys.argv=['probe',base64.b64decode('{encoded}').decode('utf-8')]\n{}",compact_python(include_str!("agy_index_probe.py")));
-    let script_b64=STANDARD.encode(code.as_bytes());
-    let remote_cmd=format!("python3 -c \"import base64;exec(base64.b64decode('{script_b64}').decode('utf-8'))\"");
+    let compacted=compact_python(include_str!("agy_index_probe.py"));
+    let remote_cmd=format!("python3 -c \"import sys,base64;s=sys.stdin.read();sys.argv=['probe',base64.b64decode('{encoded}').decode('utf-8')];exec(s,{{'__name__':'__main__','__BOB_PROBE_SRC__':s}})\"");
     let mut command=Command::new("ssh");
-    command.args(["-n","-o","BatchMode=yes","-o","ConnectTimeout=6","-o","ServerAliveInterval=5","-o","ServerAliveCountMax=2","--",ssh_target,&remote_cmd])
-        .stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
-    #[cfg(windows)] { use std::os::windows::process::CommandExt; command.creation_flags(0x08000000); }
+    command.args(["-o","BatchMode=yes","-o","ConnectTimeout=15","-o","ServerAliveInterval=5","-o","ServerAliveCountMax=2","--",ssh_target,&remote_cmd])
+        .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null());
     let mut child=command.spawn().map_err(|_|"AGY_HOST_UNAVAILABLE")?;
+    if let Some(mut stdin)=child.stdin.take() {
+        let _=stdin.write_all(compacted.as_bytes());
+    }
     let stdout=child.stdout.take().ok_or("AGY_HOST_UNAVAILABLE")?;
     let reader=thread::spawn(move || { let mut b=Vec::new();stdout.take(2*1024*1024+1).read_to_end(&mut b).map(|_|b) });
     let started=Instant::now();
@@ -149,7 +150,7 @@ fn fetch_list(data: &Path, connection: &str) -> Result<Vec<Value>, &'static str>
         if g.agy_data_dir.is_empty() { return Ok(vec![]) }
         g.agy_data_dir.clone()
     };
-    let b = run_ssh_python(&g.ssh_target, &arg_str, 20)?;
+    let b = run_ssh_python(&g.ssh_target, &arg_str, 35)?;
     let v:Value=serde_json::from_slice(&b).map_err(|_|"AGY_INDEX_INVALID")?;
     let rows=v["sessions"].as_array().ok_or("AGY_INDEX_INVALID")?;
     rows.iter().map(|s|normalize(connection,s)).collect()
@@ -170,10 +171,12 @@ pub fn read_page(data: &Path, connection: &str, session_id: &str, after: Option<
     let now=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs();
     if let Some(cached)=fs::read(&cache_path).ok().and_then(|b|serde_json::from_slice::<Value>(&b).ok()) {
         let age=cached["at"].as_u64().map(|t|now.saturating_sub(t)).unwrap_or(9999);
-        if age<30 {
+        let has_running=cached["page"]["request_results"].as_array().is_some_and(|arr|arr.iter().any(|r|r["status"].as_str()==Some("running")));
+        let ttl=if has_running || after.is_some() { 2 } else { 15 };
+        if age<ttl {
             if let Some(mut page)=cached.get("page").cloned() {
                 let cursor=page["cursor"].as_i64().unwrap_or(0);
-                if after.is_some_and(|a|a>=cursor) {
+                if after.is_some_and(|a|a>=cursor) && !has_running {
                     page["not_modified"]=json!(true);
                     page["messages"]=json!([]);
                 }
@@ -190,9 +193,10 @@ pub fn read_page(data: &Path, connection: &str, session_id: &str, after: Option<
         "codexDataDir": g.codex_data_dir,
         "controlPlaneDbs": g.control_plane_dbs,
     })).map_err(|_|"AGY_CONFIG_INVALID")?;
-    let b=run_ssh_python(&g.ssh_target, &arg_str, 20)?;
+    let b=run_ssh_python(&g.ssh_target, &arg_str, 35)?;
     let raw:Value=serde_json::from_slice(&b).map_err(|_|"DSH_HISTORY_UNAVAILABLE")?;
     let msgs=raw["messages"].as_array().cloned().unwrap_or_default();
+    let req_results=raw["request_results"].as_array().cloned().unwrap_or_default();
     let cursor=msgs.len() as i64;
     let harness=raw["harness"].as_str().unwrap_or("dsh");
     let workspace=raw["workspace"].as_str().unwrap_or("");
@@ -206,13 +210,68 @@ pub fn read_page(data: &Path, connection: &str, session_id: &str, after: Option<
         "not_modified": false,
         "replacements": [],
         "messages": msgs,
+        "request_results": req_results,
     });
     let _=fs::write(&cache_path, serde_json::to_vec(&json!({"at":now,"page":page})).unwrap_or_default());
-    if after.is_some_and(|a|a>=cursor) {
+    let has_running=req_results.iter().any(|r|r["status"].as_str()==Some("running"));
+    if after.is_some_and(|a|a>=cursor) && !has_running {
         page["not_modified"]=json!(true);
         page["messages"]=json!([]);
     }
     Ok(page)
+}
+
+pub fn prompt_session(data: &Path, connection: &str, session_id: &str, text: &str, request_id: &str) -> Result<Value, &'static str> {
+    use sha2::{Sha256,Digest};
+    if !owns_readable_session(session_id) {
+        return Err("DSH_SESSION_NOT_FOUND");
+    }
+    let all=grants(data)?;
+    let Some(g)=all.iter().find(|g|g.connection_id==connection) else { return Err("DSH_CONNECTION_REQUIRED") };
+    let arg_str=serde_json::to_string(&json!({
+        "mode": "prompt",
+        "sessionId": session_id,
+        "text": text,
+        "requestId": request_id,
+        "agyDataDir": g.agy_data_dir,
+        "claudeDataDir": g.claude_data_dir,
+        "piDataDir": g.pi_data_dir,
+        "codexDataDir": g.codex_data_dir,
+        "controlPlaneDbs": g.control_plane_dbs,
+    })).map_err(|_|"AGY_CONFIG_INVALID")?;
+    let b=run_ssh_python(&g.ssh_target, &arg_str, 35)?;
+    let res:Value=serde_json::from_slice(&b).map_err(|_|"DSH_RECEIPT_UNKNOWN")?;
+    if res.get("error").is_some() {
+        return Err("DSH_RECEIPT_UNKNOWN");
+    }
+    let mut hash=Sha256::new();
+    hash.update(connection.as_bytes());
+    hash.update(b":");
+    hash.update(session_id.as_bytes());
+    let cache_path=data.join(format!("remote-page-{:x}.json",hash.finalize()));
+    let _=fs::remove_file(cache_path);
+    Ok(res)
+}
+
+pub fn inspect_receipt(data: &Path, connection: &str, session_id: &str, text: &str, request_id: &str) -> Result<Value, &'static str> {
+    if !owns_readable_session(session_id) {
+        return Err("DSH_SESSION_NOT_FOUND");
+    }
+    let all=grants(data)?;
+    let Some(g)=all.iter().find(|g|g.connection_id==connection) else { return Err("DSH_CONNECTION_REQUIRED") };
+    let arg_str=serde_json::to_string(&json!({
+        "mode": "receipt",
+        "sessionId": session_id,
+        "text": text,
+        "requestId": request_id,
+        "claudeDataDir": g.claude_data_dir,
+        "piDataDir": g.pi_data_dir,
+        "codexDataDir": g.codex_data_dir,
+        "controlPlaneDbs": g.control_plane_dbs,
+    })).map_err(|_|"AGY_CONFIG_INVALID")?;
+    let b=run_ssh_python(&g.ssh_target, &arg_str, 35)?;
+    let res:Value=serde_json::from_slice(&b).map_err(|_|"DSH_RECEIPT_UNKNOWN")?;
+    Ok(res)
 }
 
 fn normalize(connection: &str, s: &Value)->Result<Value,&'static str>{
