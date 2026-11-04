@@ -4268,8 +4268,16 @@ pub(crate) async fn app_dsh_receipt<R: Runtime>(
         .path()
         .app_data_dir()
         .map_err(|_| "LOCAL_STORE_UNAVAILABLE")?;
-    if bob_runtime::agy_directory::owns_readable_session(&session_id) {
-        let hub = load_hub_state(&dir);
+    let receipt_hub = load_hub_state(&dir);
+    let receipt_endpoint = receipt_hub["remoteNodes"].as_array()
+        .and_then(|nodes| nodes.iter().find(|n| n["id"] == connection_id && n["enabled"].as_bool().unwrap_or(true)))
+        .and_then(|n| n["baseUrl"].as_str().or_else(|| n["url"].as_str())).map(str::to_owned);
+    let receipt_is_node = if let Some(endpoint) = receipt_endpoint {
+        tauri::async_runtime::spawn_blocking(move || bob_runtime::node_pairing::is_bob_node_endpoint(&endpoint))
+            .await.map_err(|_| "DSH_UNAVAILABLE")??
+    } else { false };
+    if bob_runtime::agy_directory::owns_readable_session(&session_id) || receipt_is_node {
+        let hub = receipt_hub;
         if let Some(nodes) = hub["remoteNodes"].as_array() {
             if let Some(node) = nodes.iter().find(|n| {
                 n["id"] == connection_id
@@ -4349,7 +4357,7 @@ pub(crate) async fn app_dsh_receipt<R: Runtime>(
                         {
                             return Ok(res);
                         }
-                        if !is_web_host {
+                        if !is_web_host && !receipt_is_node {
                             for (peer_url, peer_tok, _) in &relay_peers {
                                 if let Ok(res) =
                                     bob_runtime::node_pairing::forward_dsh_rpc_to_endpoint_with_target(
