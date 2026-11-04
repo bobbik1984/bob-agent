@@ -824,9 +824,13 @@ pub fn forward_dsh_rpc_to_endpoint_with_target(
                 }
             }
         }
-    } else if command == "app_dsh_page" {
+    } else if matches!(command, "app_dsh_page" | "app_dsh_history") {
         if let Some(addr) = result.get_mut("address").and_then(Value::as_object_mut) {
             addr.insert("connection_id".to_owned(), json!(connection_id));
+        }
+    } else if command == "app_dsh_preview" {
+        if let Some(obj) = result.as_object_mut() {
+            obj.insert("connection_id".to_owned(), json!(connection_id));
         }
     }
     Ok(result)
