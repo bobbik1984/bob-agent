@@ -1088,11 +1088,16 @@ impl LocalApp {
         sync_request_id: &str,
         shared_config_json: String,
     ) -> Result<PeerSyncBundle> {
-        let (home_device_id, home_epoch): (String, i64) = self.store.db.query_row(
-            "SELECT device_id, epoch FROM home_authority WHERE singleton=1",
-            [],
-            |r| Ok((r.get(0)?, r.get(1)?)),
-        )?;
+        let (home_device_id, home_epoch): (String, i64) = self
+            .store
+            .db
+            .query_row(
+                "SELECT device_id, epoch FROM home_authority WHERE singleton=1",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?
+            .unwrap_or_else(|| (self.origin.clone(), 1));
         let mut bundle = PeerSyncBundle {
             sync_request_id: sync_request_id.to_owned(),
             origin_device_id: self.origin.clone(),
@@ -1824,11 +1829,15 @@ impl Store {
         origin_device_id: &str,
         shared_config_json: String,
     ) -> Result<PeerSyncBundle> {
-        let (home_device_id, home_epoch): (String, i64) = self.db.query_row(
-            "SELECT device_id, epoch FROM home_authority WHERE singleton=1",
-            [],
-            |r| Ok((r.get(0)?, r.get(1)?)),
-        )?;
+        let (home_device_id, home_epoch): (String, i64) = self
+            .db
+            .query_row(
+                "SELECT device_id, epoch FROM home_authority WHERE singleton=1",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?
+            .unwrap_or_else(|| (origin_device_id.to_owned(), 1));
         let mut sched_stmt = self.db.prepare(
             "SELECT id,project_id,task_id,origin_device_id,title,kind,start_at,end_at,reminder_at,status,notes,acceptance,version,created_at,updated_at
              FROM schedule_items ORDER BY start_at ASC, rowid ASC",

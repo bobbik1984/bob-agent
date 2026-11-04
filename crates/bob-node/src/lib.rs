@@ -1121,8 +1121,9 @@ pub fn handle_rpc_command(ctx: &mut NodeContext, command: &str, args: &Value) ->
                 .and_then(Value::as_str)
                 .ok_or("PAIRING_CODE_INVALID")?;
             let inv = bob_runtime::node_pairing::NodePairingInvitation::decode_qr_code(raw_code, at)?;
-            let local_topo = bob_runtime::node_pairing::export_local_topology(
+            let local_topo = bob_runtime::node_pairing::export_local_topology_with_app(
                 &ctx.runtime.data_dir,
+                Some(&ctx.app),
                 &ctx.runtime,
                 true,
             );
@@ -2101,8 +2102,9 @@ pub fn handle_client_v1_http(
             &ctx.runtime.data_dir,
             "local",
         );
-        let topo = bob_runtime::node_pairing::export_local_topology(
+        let topo = bob_runtime::node_pairing::export_local_topology_with_app(
             &ctx.runtime.data_dir,
+            Some(&ctx.app),
             &ctx.runtime,
             false,
         );
@@ -2643,8 +2645,9 @@ fn handle_connection(mut stream: TcpStream, state: Arc<Mutex<NodeContext>>) {
                 .and_then(Value::as_str)
                 .unwrap_or("")
                 .to_owned();
-            let local_topo = bob_runtime::node_pairing::export_local_topology(
+            let local_topo = bob_runtime::node_pairing::export_local_topology_with_app(
                 &guard.runtime.data_dir,
+                Some(&guard.app),
                 &guard.runtime,
                 true,
             );

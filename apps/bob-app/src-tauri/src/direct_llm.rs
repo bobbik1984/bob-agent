@@ -1753,18 +1753,46 @@ pub(crate) async fn app_remote_node_save<R: Runtime>(
         .filter(|s| !s.is_empty())
         .unwrap_or(burl)
         .to_owned();
+    let existing_remark = nodes
+        .iter()
+        .find(|n| {
+            n["id"].as_str() == Some(&resolved_id)
+                || n.get("baseUrl")
+                    .or_else(|| n.get("url"))
+                    .and_then(Value::as_str)
+                    == Some(burl)
+        })
+        .and_then(|n| n.get("remark"))
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    let sel_proj = selected_project_id.unwrap_or_default();
+    let remark_val = if sel_proj == "web_host" || sel_proj == "node" {
+        sel_proj.clone()
+    } else if let Some(r) = existing_remark.filter(|s| !s.trim().is_empty()) {
+        r
+    } else if burl.contains("bob-online") {
+        "web_host".to_owned()
+    } else {
+        String::new()
+    };
     let entry = json!({
         "id": resolved_id,
         "label": node_label,
+        "name": node_label,
         "baseUrl": burl,
-        "selectedProjectId": selected_project_id.unwrap_or_default(),
+        "url": burl,
+        "remark": remark_val,
+        "selectedProjectId": sel_proj,
         "enabled": enabled.unwrap_or(true),
         "updatedAt": ts,
     });
-    if let Some(existing) = nodes
-        .iter_mut()
-        .find(|n| n["id"].as_str() == Some(&resolved_id) || n["baseUrl"].as_str() == Some(burl))
-    {
+    if let Some(existing) = nodes.iter_mut().find(|n| {
+        n["id"].as_str() == Some(&resolved_id)
+            || n.get("baseUrl")
+                .or_else(|| n.get("url"))
+                .and_then(Value::as_str)
+                == Some(burl)
+    }) {
         *existing = entry;
     } else {
         nodes.push(entry);
@@ -3578,6 +3606,314 @@ pub(crate) async fn app_ticket_recognize<R: Runtime>(
     }))
 }
 
+async fn build_local_topology_payload<R: Runtime>(
+    host: &AppHandle<R>,
+    state: &State<'_, AppState>,
+) -> Result<Value, &'static str> {
+    let at_ms = now()?;
+    let dir = host
+        .path()
+        .app_data_dir()
+        .map_err(|_| "LOCAL_STORE_UNAVAILABLE")?;
+    let hub = load_hub_state(&dir);
+
+    let mut nodes_with_tokens = Vec::new();
+    if let Some(arr) = hub["remoteNodes"].as_array() {
+        for n in arr {
+            let mut item = n.clone();
+            if let Some(obj) = item.as_object_mut() {
+                let id = obj
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_owned();
+                let url_val = obj
+                    .get("baseUrl")
+                    .or_else(|| obj.get("url"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_owned();
+                let label_val = obj
+                    .get("label")
+                    .or_else(|| obj.get("name"))
+                    .and_then(Value::as_str)
+                    .unwrap_or(&url_val)
+                    .to_owned();
+                obj.insert("baseUrl".to_owned(), json!(url_val));
+                obj.insert("url".to_owned(), json!(url_val));
+                obj.insert("label".to_owned(), json!(label_val));
+                obj.insert("name".to_owned(), json!(label_val));
+                if !id.is_empty() {
+                    if let Ok(tok) = read_api_key(host, &remote_node_token_slot(&id)).await {
+                        if !tok.trim().is_empty() {
+                            obj.insert("token".to_owned(), json!(tok.trim()));
+                        }
+                    }
+                }
+            }
+            nodes_with_tokens.push(item);
+        }
+    }
+
+    let harnesses: Vec<Value> = bob_runtime::node_pairing::load_device_harnesses_raw(&dir)
+        .into_iter()
+        .filter_map(|item| bob_runtime::node_pairing::normalize_harness_item(&item))
+        .collect();
+
+    let mut provider_keys = serde_json::Map::new();
+    let registry = load_or_init_registry(&dir);
+    if let Some(providers) = registry.get("providers").and_then(Value::as_array) {
+        for p in providers {
+            if let Some(pid) = p.get("id").and_then(Value::as_str) {
+                if let Ok(k) = read_api_key(host, &provider_slot(pid)).await {
+                    if !k.trim().is_empty() {
+                        provider_keys.insert(pid.to_owned(), json!(k.trim()));
+                    }
+                }
+            }
+        }
+    }
+    for tool_id in ["tavily", "tinyfish", "TAVILY_API_KEY", "TINYFISH_API_KEY"] {
+        if let Ok(k) = read_api_key(host, &provider_slot(tool_id)).await {
+            if !k.trim().is_empty() {
+                provider_keys.insert(tool_id.to_owned(), json!(k.trim()));
+            }
+        }
+    }
+    if let Ok(k) = read_api_key(host, DEFAULT_SLOT).await {
+        if !k.trim().is_empty() {
+            provider_keys.insert("__default__".to_owned(), json!(k.trim()));
+        }
+    }
+
+    let model_hub = json!({
+        "activeRoles": hub.get("activeRoles").cloned().unwrap_or_else(|| json!({})),
+        "providerVariants": hub.get("providerVariants").cloned().unwrap_or_else(|| json!({})),
+        "customModels": hub.get("customModels").cloned().unwrap_or_else(|| json!([])),
+        "providerKeys": Value::Object(provider_keys),
+    });
+
+    let (projects_and_links, peer_bundle) = with_app(&state.0, |app| {
+        let pl = app.export_projects_and_links().unwrap_or_else(|_| json!({}));
+        let pb = app
+            .export_peer_sync_bundle(&format!("topo-sync:{at_ms}"), String::new())
+            .ok()
+            .and_then(|b| serde_json::to_value(b).ok())
+            .unwrap_or(Value::Null);
+        Ok((pl, pb))
+    })?;
+
+    Ok(json!({
+        "schemaVersion": 2,
+        "remoteNodes": nodes_with_tokens,
+        "deviceHarnesses": harnesses,
+        "modelHub": model_hub,
+        "projects": projects_and_links.get("projects").cloned().unwrap_or_else(|| json!([])),
+        "projectSessionLinks": projects_and_links.get("projectSessionLinks").cloned().unwrap_or_else(|| json!([])),
+        "peerSyncBundle": peer_bundle,
+        "exportedAt": at_ms,
+    }))
+}
+
+async fn apply_synced_topology_payload<R: Runtime>(
+    host: &AppHandle<R>,
+    state: &State<'_, AppState>,
+    synced: &Value,
+    skip_node_id: Option<&str>,
+) -> Result<(), &'static str> {
+    let at_ms = now()?;
+    let dir = host
+        .path()
+        .app_data_dir()
+        .map_err(|_| "LOCAL_STORE_UNAVAILABLE")?;
+
+    if let Some(remote_nodes) = synced.get("remoteNodes").and_then(Value::as_array) {
+        for rn in remote_nodes {
+            let Some(rid) = rn.get("id").and_then(Value::as_str) else {
+                continue;
+            };
+            if skip_node_id == Some(rid) {
+                continue;
+            }
+            let rlabel = rn
+                .get("label")
+                .or_else(|| rn.get("name"))
+                .and_then(Value::as_str)
+                .unwrap_or(rid);
+            let rurl = rn
+                .get("baseUrl")
+                .or_else(|| rn.get("url"))
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            if !rurl.starts_with("http://") && !rurl.starts_with("https://") {
+                continue;
+            }
+            let rtok = rn
+                .get("token")
+                .or_else(|| rn.get("accessToken"))
+                .and_then(Value::as_str)
+                .filter(|s| !s.trim().is_empty())
+                .map(str::to_owned);
+            let remark = rn
+                .get("remark")
+                .and_then(Value::as_str)
+                .filter(|s| !s.trim().is_empty())
+                .map(str::to_owned);
+            let renabled = rn.get("enabled").and_then(Value::as_bool).unwrap_or(true);
+            let _ = app_remote_node_save(
+                host.clone(),
+                state.clone(),
+                Some(rid.to_owned()),
+                Some(rlabel.to_owned()),
+                rurl.to_owned(),
+                rtok,
+                Some(false),
+                remark,
+                Some(renabled),
+            )
+            .await;
+        }
+    }
+
+    if let Some(inc_harnesses) = synced.get("deviceHarnesses").and_then(Value::as_array) {
+        if !inc_harnesses.is_empty() {
+            let mut merged: Vec<Value> = bob_runtime::node_pairing::load_device_harnesses_raw(&dir)
+                .into_iter()
+                .filter_map(|item| bob_runtime::node_pairing::normalize_harness_item(&item))
+                .collect();
+            for raw_inc in inc_harnesses {
+                let Some(inc) = bob_runtime::node_pairing::normalize_harness_item(raw_inc) else {
+                    continue;
+                };
+                let cid = inc["connectionId"].as_str().unwrap_or("");
+                let target = inc["sshTarget"].as_str().unwrap_or("");
+                if cid == "local" || target.eq_ignore_ascii_case("local") {
+                    continue;
+                }
+                if let Some(existing) = merged.iter_mut().find(|g| {
+                    g.get("connectionId")
+                        .or_else(|| g.get("connection_id"))
+                        .and_then(Value::as_str)
+                        == Some(cid)
+                }) {
+                    *existing = inc;
+                } else {
+                    merged.push(inc);
+                }
+            }
+            let _ = bob_runtime::node_pairing::save_device_harnesses_raw(&dir, &merged);
+        }
+    }
+
+    if let Some(mh) = synced.get("modelHub").and_then(Value::as_object) {
+        if let Some(pkeys) = mh.get("providerKeys").and_then(Value::as_object) {
+            for (pid, kval) in pkeys {
+                if let Some(secret) = kval.as_str().map(str::trim).filter(|s| !s.is_empty()) {
+                    let slot = if pid == "__default__" {
+                        DEFAULT_SLOT.to_owned()
+                    } else {
+                        provider_slot(pid)
+                    };
+                    let has_local = read_api_key(host, &slot)
+                        .await
+                        .is_ok_and(|s| !s.trim().is_empty());
+                    if !has_local {
+                        let _ = store_api_key(host, &slot, secret).await;
+                    }
+                }
+            }
+        }
+        if let Ok(mh_str) = serde_json::to_string(&Value::Object(mh.clone())) {
+            merge_shared_config_for_host(host, &state.0, &mh_str).await;
+        }
+    }
+
+    let synced_clone = synced.clone();
+    let _ = with_app(&state.0, |app| {
+        if synced_clone.get("projects").is_some()
+            || synced_clone.get("projectSessionLinks").is_some()
+        {
+            let _ = app.merge_projects_and_links(&synced_clone, at_ms);
+        }
+        if let Some(bundle_val) = synced_clone.get("peerSyncBundle") {
+            if let Ok(bundle) =
+                serde_json::from_value::<bob_kernel::personal_ops::PeerSyncBundle>(bundle_val.clone())
+            {
+                let _ = app.apply_peer_sync_bundle(&bundle, at_ms);
+            }
+        }
+        Ok(())
+    });
+
+    let _ = build_model_hub_snapshot_and_sync(host, state).await;
+    Ok(())
+}
+
+pub(crate) async fn sync_with_paired_remote_nodes<R: Runtime>(
+    host: &AppHandle<R>,
+    state: &State<'_, AppState>,
+) -> Result<bool, &'static str> {
+    let dir = host
+        .path()
+        .app_data_dir()
+        .map_err(|_| "LOCAL_STORE_UNAVAILABLE")?;
+    let hub = load_hub_state(&dir);
+    let Some(nodes) = hub["remoteNodes"].as_array() else {
+        return Ok(false);
+    };
+
+    let mut peers: Vec<(String, String, Option<String>, bool)> = Vec::new();
+    for n in nodes {
+        if !n.get("enabled").and_then(Value::as_bool).unwrap_or(true) {
+            continue;
+        }
+        let Some(id) = n.get("id").and_then(Value::as_str).map(str::to_owned) else {
+            continue;
+        };
+        let Some(url) = n
+            .get("baseUrl")
+            .or_else(|| n.get("url"))
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+        else {
+            continue;
+        };
+        let is_web_host = n.get("remark").and_then(Value::as_str) == Some("web_host")
+            || n.get("selectedProjectId").and_then(Value::as_str) == Some("web_host")
+            || url.contains("bob-online");
+        let tok = read_api_key(host, &remote_node_token_slot(&id))
+            .await
+            .ok()
+            .filter(|s| !s.trim().is_empty());
+        peers.push((id, url, tok, is_web_host));
+    }
+    peers.sort_by_key(|(_, _, _, is_web_host)| if *is_web_host { 0 } else { 1 });
+
+    let mut any_synced = false;
+    for (_peer_id, peer_url, peer_tok, _is_web_host) in peers {
+        let local_topo = build_local_topology_payload(host, state).await?;
+        let url_clone = peer_url.clone();
+        let tok_clone = peer_tok.clone();
+        let sync_res = tauri::async_runtime::spawn_blocking(move || {
+            bob_runtime::node_pairing::sync_topology_with_peer_url(
+                &url_clone,
+                tok_clone.as_deref(),
+                &local_topo,
+            )
+        })
+        .await
+        .ok()
+        .and_then(Result::ok);
+
+        if let Some(synced) = sync_res {
+            let _ = apply_synced_topology_payload(host, state, &synced, None).await;
+            any_synced = true;
+        }
+    }
+
+    Ok(any_synced)
+}
+
 pub(crate) async fn pair_and_sync_node_qr<R: Runtime>(
     host: &AppHandle<R>,
     state: &State<'_, AppState>,
@@ -3585,30 +3921,7 @@ pub(crate) async fn pair_and_sync_node_qr<R: Runtime>(
 ) -> Result<bob_runtime::node_pairing::NodePairingInvitation, &'static str> {
     let at_ms = now()?;
     let inv = bob_runtime::node_pairing::NodePairingInvitation::decode_qr_code(invitation_code, at_ms)?;
-    let dir = host.path().app_data_dir().map_err(|_| "LOCAL_STORE_UNAVAILABLE")?;
-    let hub = load_hub_state(&dir);
-
-    let mut nodes_with_tokens = Vec::new();
-    if let Some(arr) = hub["remoteNodes"].as_array() {
-        for n in arr {
-            let mut item = n.clone();
-            if let Some(id) = item["id"].as_str().map(str::to_owned) {
-                if let Ok(tok) = read_api_key(host, &remote_node_token_slot(&id)).await {
-                    if !tok.trim().is_empty() {
-                        item["token"] = json!(tok);
-                    }
-                }
-            }
-            nodes_with_tokens.push(item);
-        }
-    }
-    let harnesses = bob_runtime::node_pairing::load_device_harnesses_raw(&dir);
-    let local_topo = json!({
-        "schemaVersion": 1,
-        "remoteNodes": nodes_with_tokens,
-        "deviceHarnesses": harnesses,
-        "exportedAt": at_ms,
-    });
+    let local_topo = build_local_topology_payload(host, state).await?;
 
     let inv_clone = inv.clone();
     let ex_out = tauri::async_runtime::spawn_blocking(move || {
@@ -3634,114 +3947,161 @@ pub(crate) async fn pair_and_sync_node_qr<R: Runtime>(
         inv.base_url.clone(),
         Some(token),
         Some(false),
-        None,
+        Some(inv.role.clone()),
         Some(true),
     )
     .await;
 
     if let Some(synced) = ex_out.get("syncedTopology") {
-        if let Some(remote_nodes) = synced.get("remoteNodes").and_then(Value::as_array) {
-            for rn in remote_nodes {
-                let Some(rid) = rn.get("id").and_then(Value::as_str) else {
-                    continue;
-                };
-                if rid == inv.node_id {
-                    continue;
-                }
-                let rlabel = rn.get("label").and_then(Value::as_str).unwrap_or(rid);
-                let rurl = rn
-                    .get("baseUrl")
-                    .or_else(|| rn.get("url"))
-                    .and_then(Value::as_str)
-                    .unwrap_or("");
-                if !rurl.starts_with("http://") && !rurl.starts_with("https://") {
-                    continue;
-                }
-                let rtok = rn
-                    .get("token")
-                    .or_else(|| rn.get("accessToken"))
-                    .and_then(Value::as_str)
-                    .filter(|s| !s.trim().is_empty())
-                    .map(str::to_owned);
-                let renabled = rn.get("enabled").and_then(Value::as_bool).unwrap_or(true);
-                let _ = app_remote_node_save(
-                    host.clone(),
-                    state.clone(),
-                    Some(rid.to_owned()),
-                    Some(rlabel.to_owned()),
-                    rurl.to_owned(),
-                    rtok,
-                    Some(false),
-                    None,
-                    Some(renabled),
-                )
-                .await;
-            }
-        }
-        if let Some(inc_harnesses) = synced.get("deviceHarnesses").and_then(Value::as_array) {
-            if !inc_harnesses.is_empty() {
-                let mut merged = bob_runtime::node_pairing::load_device_harnesses_raw(&dir);
-                for inc in inc_harnesses {
-                    let Some(cid) = inc.get("connection_id").and_then(Value::as_str) else {
-                        continue;
-                    };
-                    let target = inc.get("ssh_target").and_then(Value::as_str).unwrap_or("");
-                    if cid == "local" || target.eq_ignore_ascii_case("local") {
-                        continue;
-                    }
-                    if let Some(existing) = merged
-                        .iter_mut()
-                        .find(|g| g.get("connection_id").and_then(Value::as_str) == Some(cid))
-                    {
-                        *existing = inc.clone();
-                    } else {
-                        merged.push(inc.clone());
-                    }
-                }
-                let _ = bob_runtime::node_pairing::save_device_harnesses_raw(&dir, &merged);
-            }
-        }
+        let _ = apply_synced_topology_payload(host, state, synced, Some(&inv.node_id)).await;
     }
 
     Ok(inv)
 }
 
 // Native hosts share the DSH wire protocol and durable send receipts with bob-node.
-async fn native_dsh<R: Runtime>(host: AppHandle<R>, connection_id: String,
-    operation: &'static str, session_id: String, text: String, request_id: String
+async fn native_dsh<R: Runtime>(
+    host: AppHandle<R>,
+    connection_id: String,
+    operation: &'static str,
+    session_id: String,
+    text: String,
+    request_id: String,
 ) -> Result<Value, &'static str> {
-    if operation != "list" && session_id.trim().is_empty() { return Err("DSH_SESSION_REQUIRED"); }
-    if operation == "prompt" {
-        if text.trim().is_empty() || text.len() > 32000 { return Err("DSH_TEXT_REQUIRED"); }
-        if request_id.is_empty() || request_id.len() > 200 { return Err("DSH_REQUEST_REQUIRED"); }
+    if operation != "list" && session_id.trim().is_empty() {
+        return Err("DSH_SESSION_REQUIRED");
     }
-    let dir = host.path().app_data_dir().map_err(|_| "LOCAL_STORE_UNAVAILABLE")?;
+    if operation == "prompt" {
+        if text.trim().is_empty() || text.len() > 32000 {
+            return Err("DSH_TEXT_REQUIRED");
+        }
+        if request_id.is_empty() || request_id.len() > 200 {
+            return Err("DSH_REQUEST_REQUIRED");
+        }
+    }
+    let dir = host
+        .path()
+        .app_data_dir()
+        .map_err(|_| "LOCAL_STORE_UNAVAILABLE")?;
     let hub = load_hub_state(&dir);
-    let node = hub["remoteNodes"].as_array().and_then(|nodes| nodes.iter()
-        .find(|n| n["id"] == connection_id && n["enabled"] == true))
+    let nodes = hub["remoteNodes"]
+        .as_array()
         .ok_or("DSH_CONNECTION_NOT_FOUND")?;
-    let endpoint = node["baseUrl"].as_str().or_else(|| node["url"].as_str())
-        .ok_or("DSH_ADDRESS_INVALID")?.to_owned();
-    let token = read_api_key(&host, &remote_node_token_slot(&connection_id)).await.unwrap_or_default();
+    let node = nodes
+        .iter()
+        .find(|n| {
+            n["id"] == connection_id
+                && n.get("enabled").and_then(Value::as_bool).unwrap_or(true)
+        })
+        .ok_or("DSH_CONNECTION_NOT_FOUND")?;
+    let endpoint = node["baseUrl"]
+        .as_str()
+        .or_else(|| node["url"].as_str())
+        .ok_or("DSH_ADDRESS_INVALID")?
+        .to_owned();
+    let is_web_host = node.get("remark").and_then(Value::as_str) == Some("web_host")
+        || node.get("selectedProjectId").and_then(Value::as_str) == Some("web_host")
+        || endpoint.contains("bob-online");
+    let token = read_api_key(&host, &remote_node_token_slot(&connection_id))
+        .await
+        .unwrap_or_default();
+
+    // Collect paired bob-node / web_host peers as fallback relays for SSH-probed harnesses
+    // when this device (e.g. Android) has no local SSH tunnel to the work node.
+    let mut relay_peers: Vec<(String, Option<String>, bool)> = Vec::new();
+    for peer in nodes {
+        if !peer.get("enabled").and_then(Value::as_bool).unwrap_or(true) {
+            continue;
+        }
+        let Some(pid) = peer.get("id").and_then(Value::as_str) else {
+            continue;
+        };
+        if pid == connection_id {
+            continue;
+        }
+        let Some(purl) = peer
+            .get("baseUrl")
+            .or_else(|| peer.get("url"))
+            .and_then(Value::as_str)
+            .filter(|u| !u.trim().is_empty())
+            .map(str::to_owned)
+        else {
+            continue;
+        };
+        let peer_is_web_host = peer.get("remark").and_then(Value::as_str) == Some("web_host")
+            || peer.get("selectedProjectId").and_then(Value::as_str) == Some("web_host")
+            || purl.contains("bob-online");
+        let ptok = read_api_key(&host, &remote_node_token_slot(pid))
+            .await
+            .ok()
+            .filter(|s| !s.trim().is_empty());
+        relay_peers.push((purl, ptok, peer_is_web_host));
+    }
+    relay_peers.sort_by_key(|(_, _, peer_is_web_host)| if *peer_is_web_host { 0 } else { 1 });
+
     // Blocking TLS and history reads must not block the mobile UI/event executor.
     tauri::async_runtime::spawn_blocking(move || {
-        let tok_opt = if token.trim().is_empty() { None } else { Some(token.as_str()) };
-        if operation == "list" {
-            let dsh_res = bob_runtime::dsh_transport::DshClient::connect(&endpoint, &token)
-                .and_then(|c| c.list());
-            let node_res = bob_runtime::node_pairing::forward_dsh_rpc_to_endpoint(
+        let tok_opt = if token.trim().is_empty() {
+            None
+        } else {
+            Some(token.as_str())
+        };
+        let forward_with_relay_fallback = |cmd: &str, args: &Value| -> Result<Value, &'static str> {
+            if let Ok(res) = bob_runtime::node_pairing::forward_dsh_rpc_to_endpoint_with_target(
                 &endpoint,
                 tok_opt,
                 &connection_id,
-                "app_dsh_list",
-                &json!({"connectionId": "local"}),
-            );
+                "local",
+                cmd,
+                args,
+            ) {
+                return Ok(res);
+            }
+            if !is_web_host {
+                for (peer_url, peer_tok, _) in &relay_peers {
+                    if let Ok(res) =
+                        bob_runtime::node_pairing::forward_dsh_rpc_to_endpoint_with_target(
+                            peer_url,
+                            peer_tok.as_deref(),
+                            &connection_id,
+                            &connection_id,
+                            cmd,
+                            args,
+                        )
+                    {
+                        return Ok(res);
+                    }
+                }
+            }
+            Err("DSH_UNAVAILABLE")
+        };
+
+        if operation == "list" {
+            if is_web_host {
+                return forward_with_relay_fallback(
+                    "app_dsh_list",
+                    &json!({"connectionId": "local"}),
+                );
+            }
+            // Work node (e.g. X1T, VPS3):
+            // 1. Connect directly to the node's DSH server using the phone's own HTTPS path.
+            let dsh_res = bob_runtime::dsh_transport::DshClient::connect_or_recover(
+                &endpoint, tok_opt, &dir, None,
+            )
+            .and_then(|c| c.list());
+            // 2. Query multi-harness sessions (agy, claude, codex, pi) either directly from the node's
+            //    bob-node or via a paired web_host relay (since mobile has no local SSH tunnel).
+            let node_res =
+                forward_with_relay_fallback("app_dsh_list", &json!({"connectionId": "local"}));
             return match (dsh_res, node_res) {
                 (Ok(mut a), Ok(b)) => {
                     if let (Some(rows_a), Some(rows_b)) = (a.as_array_mut(), b.as_array()) {
                         for item in rows_b {
                             let sid = item.get("id").and_then(Value::as_str);
-                            if !rows_a.iter().any(|existing| existing.get("id").and_then(Value::as_str) == sid) {
+                            if !rows_a
+                                .iter()
+                                .any(|existing| existing.get("id").and_then(Value::as_str) == sid)
+                            {
                                 rows_a.push(item.clone());
                             }
                         }
@@ -3753,58 +4113,118 @@ async fn native_dsh<R: Runtime>(host: AppHandle<R>, connection_id: String,
                 (Err(e), Err(_)) => Err(e),
             };
         }
-        if bob_runtime::agy_directory::owns_readable_session(&session_id) {
-            let (cmd, args) = match operation {
+
+        let build_rpc_call = || -> (&'static str, Value) {
+            match operation {
                 "page" => {
                     let v: Value = serde_json::from_str(&text).unwrap_or_else(|_| json!({}));
-                    ("app_dsh_page", json!({
-                        "connectionId": "local",
-                        "sessionId": session_id,
-                        "before": v.get("before").cloned().unwrap_or(Value::Null),
-                        "through": v.get("through").cloned().unwrap_or(Value::Null),
-                        "after": v.get("after").cloned().unwrap_or(Value::Null),
-                    }))
+                    (
+                        "app_dsh_page",
+                        json!({
+                            "connectionId": "local",
+                            "sessionId": session_id,
+                            "before": v.get("before").cloned().unwrap_or(Value::Null),
+                            "through": v.get("through").cloned().unwrap_or(Value::Null),
+                            "after": v.get("after").cloned().unwrap_or(Value::Null),
+                        }),
+                    )
                 }
                 "preview" => {
                     let known: Option<Value> = serde_json::from_str(&request_id).ok();
-                    ("app_dsh_preview", json!({
+                    (
+                        "app_dsh_preview",
+                        json!({
+                            "connectionId": "local",
+                            "sessionId": session_id,
+                            "path": text,
+                            "known": known,
+                        }),
+                    )
+                }
+                "history" => (
+                    "app_dsh_history",
+                    json!({
                         "connectionId": "local",
                         "sessionId": session_id,
-                        "path": text,
-                        "known": known,
-                    }))
+                    }),
+                ),
+                _ => (
+                    "app_dsh_prompt",
+                    json!({
+                        "connectionId": "local",
+                        "sessionId": session_id,
+                        "text": text,
+                        "requestId": request_id,
+                    }),
+                ),
+            }
+        };
+
+        if bob_runtime::agy_directory::owns_readable_session(&session_id) || is_web_host {
+            let (cmd, args) = build_rpc_call();
+            return forward_with_relay_fallback(cmd, &args);
+        }
+
+        // Native DSH session on a work node: connect directly first, falling back to relay only on failure.
+        let direct_dsh = (|| -> Result<Value, &'static str> {
+            let client = bob_runtime::dsh_transport::DshClient::connect_or_recover(
+                &endpoint, tok_opt, &dir, None,
+            )?;
+            let cid = connection_id.clone();
+            let sid = session_id.clone();
+            match operation {
+                "list" => client.list(),
+                "page" => {
+                    let v: Value = serde_json::from_str(&text).map_err(|_| "DSH_PROTOCOL")?;
+                    client.history_page(
+                        bob_runtime::dsh_session::SessionAddress {
+                            connection_id: cid,
+                            session_id: sid,
+                        },
+                        v["before"].as_i64(),
+                        v["through"].as_i64(),
+                        v["after"].as_i64(),
+                    )
                 }
-                "history" => ("app_dsh_history", json!({
-                    "connectionId": "local",
-                    "sessionId": session_id,
-                })),
-                _ => ("app_dsh_prompt", json!({
-                    "connectionId": "local",
-                    "sessionId": session_id,
-                    "text": text,
-                    "requestId": request_id,
-                })),
-            };
-            return bob_runtime::node_pairing::forward_dsh_rpc_to_endpoint(
-                &endpoint,
-                tok_opt,
-                &connection_id,
-                cmd,
-                &args,
-            );
+                "preview" => {
+                    let known: Option<Value> = serde_json::from_str(&request_id).ok();
+                    client.preview_if_changed(
+                        bob_runtime::dsh_session::SessionAddress {
+                            connection_id: cid,
+                            session_id: sid,
+                        },
+                        &text,
+                        known.as_ref(),
+                    )
+                }
+                "history" => serde_json::to_value(client.history(
+                    bob_runtime::dsh_session::SessionAddress {
+                        connection_id: cid,
+                        session_id: sid,
+                    },
+                )?)
+                .map_err(|_| "DSH_PROTOCOL"),
+                _ => bob_runtime::dsh_transport::dispatch_once(
+                    &dir,
+                    &cid,
+                    &sid,
+                    &text,
+                    &request_id,
+                    || client.prompt(&sid, &text, &request_id),
+                ),
+            }
+        })();
+
+        match direct_dsh {
+            Ok(val) => Ok(val),
+            Err(err) => {
+                let (cmd, args) = build_rpc_call();
+                forward_with_relay_fallback(cmd, &args).or(Err(err))
+            }
         }
-        let client = bob_runtime::dsh_transport::DshClient::connect(&endpoint, &token)?;
-        match operation {
-            "list" => client.list(),
-            "page" => {let v:Value=serde_json::from_str(&text).map_err(|_|"DSH_PROTOCOL")?;client.history_page(bob_runtime::dsh_session::SessionAddress{connection_id,session_id},v["before"].as_i64(),v["through"].as_i64(),v["after"].as_i64())},
-            "preview" => {let known:Option<Value>=serde_json::from_str(&request_id).ok();client.preview_if_changed(bob_runtime::dsh_session::SessionAddress{connection_id,session_id},&text,known.as_ref())},
-            "history" => serde_json::to_value(client.history(bob_runtime::dsh_session::SessionAddress {
-                connection_id, session_id,
-            })?).map_err(|_| "DSH_PROTOCOL"),
-            _ => bob_runtime::dsh_transport::dispatch_once(&dir, &connection_id, &session_id,
-                &text, &request_id, || client.prompt(&session_id, &text, &request_id)),
-        }
-    }).await.map_err(|_| "DSH_UNAVAILABLE")?
+    })
+    .await
+    .map_err(|_| "DSH_UNAVAILABLE")?
 }
 
 #[tauri::command]
@@ -3821,40 +4241,127 @@ pub(crate) async fn app_dsh_prompt<R: Runtime>(host: AppHandle<R>, connection_id
 }
 
 #[tauri::command]
-pub(crate) async fn app_dsh_receipt<R: Runtime>(host: AppHandle<R>, connection_id: String, session_id: String, text: String, request_id: String) -> Result<Value, &'static str> {
-    let dir = host.path().app_data_dir().map_err(|_| "LOCAL_STORE_UNAVAILABLE")?;
+pub(crate) async fn app_dsh_receipt<R: Runtime>(
+    host: AppHandle<R>,
+    connection_id: String,
+    session_id: String,
+    text: String,
+    request_id: String,
+) -> Result<Value, &'static str> {
+    let dir = host
+        .path()
+        .app_data_dir()
+        .map_err(|_| "LOCAL_STORE_UNAVAILABLE")?;
     if bob_runtime::agy_directory::owns_readable_session(&session_id) {
         let hub = load_hub_state(&dir);
-        if let Some(node) = hub["remoteNodes"].as_array().and_then(|nodes| {
-            nodes.iter().find(|n| n["id"] == connection_id && n["enabled"] == true)
-        }) {
-            if let Some(endpoint) = node["baseUrl"].as_str().or_else(|| node["url"].as_str()).map(str::to_owned) {
-                let token = read_api_key(&host, &remote_node_token_slot(&connection_id)).await.unwrap_or_default();
-                let cid = connection_id.clone();
-                let sid = session_id.clone();
-                let txt = text.clone();
-                let req_id = request_id.clone();
-                return tauri::async_runtime::spawn_blocking(move || {
-                    let tok_opt = if token.trim().is_empty() { None } else { Some(token.as_str()) };
-                    bob_runtime::node_pairing::forward_dsh_rpc_to_endpoint(
-                        &endpoint,
-                        tok_opt,
-                        &cid,
-                        "app_dsh_receipt",
-                        &json!({
+        if let Some(nodes) = hub["remoteNodes"].as_array() {
+            if let Some(node) = nodes.iter().find(|n| {
+                n["id"] == connection_id
+                    && n.get("enabled").and_then(Value::as_bool).unwrap_or(true)
+            }) {
+                if let Some(endpoint) = node["baseUrl"]
+                    .as_str()
+                    .or_else(|| node["url"].as_str())
+                    .map(str::to_owned)
+                {
+                    let is_web_host = node.get("remark").and_then(Value::as_str) == Some("web_host")
+                        || node.get("selectedProjectId").and_then(Value::as_str)
+                            == Some("web_host")
+                        || endpoint.contains("bob-online");
+                    let token = read_api_key(&host, &remote_node_token_slot(&connection_id))
+                        .await
+                        .unwrap_or_default();
+                    let mut relay_peers: Vec<(String, Option<String>, bool)> = Vec::new();
+                    for peer in nodes {
+                        if !peer.get("enabled").and_then(Value::as_bool).unwrap_or(true) {
+                            continue;
+                        }
+                        let Some(pid) = peer.get("id").and_then(Value::as_str) else {
+                            continue;
+                        };
+                        if pid == connection_id {
+                            continue;
+                        }
+                        let Some(purl) = peer
+                            .get("baseUrl")
+                            .or_else(|| peer.get("url"))
+                            .and_then(Value::as_str)
+                            .filter(|u| !u.trim().is_empty())
+                            .map(str::to_owned)
+                        else {
+                            continue;
+                        };
+                        let peer_is_web_host =
+                            peer.get("remark").and_then(Value::as_str) == Some("web_host")
+                                || peer.get("selectedProjectId").and_then(Value::as_str)
+                                    == Some("web_host")
+                                || purl.contains("bob-online");
+                        let ptok = read_api_key(&host, &remote_node_token_slot(pid))
+                            .await
+                            .ok()
+                            .filter(|s| !s.trim().is_empty());
+                        relay_peers.push((purl, ptok, peer_is_web_host));
+                    }
+                    relay_peers
+                        .sort_by_key(|(_, _, peer_is_web_host)| if *peer_is_web_host { 0 } else { 1 });
+
+                    let cid = connection_id.clone();
+                    let sid = session_id.clone();
+                    let txt = text.clone();
+                    let req_id = request_id.clone();
+                    return tauri::async_runtime::spawn_blocking(move || {
+                        let tok_opt = if token.trim().is_empty() {
+                            None
+                        } else {
+                            Some(token.as_str())
+                        };
+                        let args = json!({
                             "connectionId": "local",
                             "sessionId": sid,
                             "text": txt,
                             "requestId": req_id,
-                        }),
-                    )
-                })
-                .await
-                .map_err(|_| "DSH_UNAVAILABLE")?;
+                        });
+                        if let Ok(res) =
+                            bob_runtime::node_pairing::forward_dsh_rpc_to_endpoint_with_target(
+                                &endpoint,
+                                tok_opt,
+                                &cid,
+                                "local",
+                                "app_dsh_receipt",
+                                &args,
+                            )
+                        {
+                            return Ok(res);
+                        }
+                        if !is_web_host {
+                            for (peer_url, peer_tok, _) in &relay_peers {
+                                if let Ok(res) =
+                                    bob_runtime::node_pairing::forward_dsh_rpc_to_endpoint_with_target(
+                                        peer_url,
+                                        peer_tok.as_deref(),
+                                        &cid,
+                                        &cid,
+                                        "app_dsh_receipt",
+                                        &args,
+                                    )
+                                {
+                                    return Ok(res);
+                                }
+                            }
+                        }
+                        Err("DSH_UNAVAILABLE")
+                    })
+                    .await
+                    .map_err(|_| "DSH_UNAVAILABLE")?;
+                }
             }
         }
     }
-    tauri::async_runtime::spawn_blocking(move || bob_runtime::dsh_transport::inspect_receipt(&dir,&connection_id,&session_id,&text,&request_id)).await.map_err(|_|"DSH_UNAVAILABLE")?
+    tauri::async_runtime::spawn_blocking(move || {
+        bob_runtime::dsh_transport::inspect_receipt(&dir, &connection_id, &session_id, &text, &request_id)
+    })
+    .await
+    .map_err(|_| "DSH_UNAVAILABLE")?
 }
 
 #[tauri::command]

@@ -2,9 +2,10 @@
 //! terminal ANSI QR code rendering, and bidirectional topology synchronization
 //! (Mobile Broker <-> Work Nodes <-> Web Hosts).
 
-use crate::{now_millis, remote_node_token_slot, ModelHubRuntime};
+use crate::{now_millis, provider_slot, remote_node_token_slot, ModelHubRuntime, DEFAULT_SLOT, TOOL_KEY_IDS};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use bob_kernel::app::LocalApp;
+use bob_kernel::personal_ops::PeerSyncBundle;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::fs;
@@ -232,9 +233,92 @@ pub fn save_device_harnesses_raw(data_dir: &Path, items: &[Value]) -> Result<(),
     Ok(())
 }
 
+/// Normalize a `deviceHarnesses` item so both camelCase (`connectionId`, `sshTarget`, `enabledHarnesses`)
+/// and snake_case (`connection_id`, `ssh_target`, `enabled_harnesses`) keys are present for cross-runtime compatibility.
+pub fn normalize_harness_item(item: &Value) -> Option<Value> {
+    let cid = item
+        .get("connectionId")
+        .or_else(|| item.get("connection_id"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())?
+        .to_owned();
+    let label = item
+        .get("label")
+        .or_else(|| item.get("name"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or(&cid)
+        .to_owned();
+    let ssh_target = item
+        .get("sshTarget")
+        .or_else(|| item.get("ssh_target"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or("")
+        .to_owned();
+    let mut enabled_harnesses: Vec<String> = item
+        .get("enabledHarnesses")
+        .or_else(|| item.get("enabled_harnesses"))
+        .and_then(Value::as_array)
+        .map(|arr| {
+            arr.iter()
+                .filter_map(Value::as_str)
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_owned)
+                .collect()
+        })
+        .unwrap_or_default();
+    if enabled_harnesses.is_empty() {
+        enabled_harnesses = vec![
+            "dsh".to_owned(),
+            "agy".to_owned(),
+            "claude".to_owned(),
+            "codex".to_owned(),
+            "pi".to_owned(),
+            "cp".to_owned(),
+        ];
+    }
+    let notes = item
+        .get("notes")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_owned();
+    let updated_at = item
+        .get("updatedAt")
+        .or_else(|| item.get("updated_at"))
+        .and_then(Value::as_i64)
+        .unwrap_or_else(now_millis);
+    Some(json!({
+        "connectionId": cid,
+        "connection_id": cid,
+        "label": label,
+        "sshTarget": ssh_target,
+        "ssh_target": ssh_target,
+        "enabledHarnesses": enabled_harnesses,
+        "enabled_harnesses": enabled_harnesses,
+        "notes": notes,
+        "updatedAt": updated_at,
+        "updated_at": updated_at,
+    }))
+}
+
 /// Export local topology (`remoteNodes` with tokens optional for broker push + `deviceHarnesses`).
 pub fn export_local_topology(
     data_dir: &Path,
+    runtime: &ModelHubRuntime,
+    include_tokens: bool,
+) -> Value {
+    export_local_topology_with_app(data_dir, None, runtime, include_tokens)
+}
+
+/// Export full local topology + knowledge bundle (`remoteNodes`, `deviceHarnesses`, `modelHub`,
+/// `projects`, `projectSessionLinks`, and `peerSyncBundle`).
+pub fn export_local_topology_with_app(
+    data_dir: &Path,
+    app: Option<&LocalApp>,
     runtime: &ModelHubRuntime,
     include_tokens: bool,
 ) -> Value {
@@ -277,21 +361,92 @@ pub fn export_local_topology(
             obj.insert("hasToken".to_owned(), json!(!tok.trim().is_empty()));
         }
     }
-    let harnesses = load_device_harnesses_raw(data_dir);
-    json!({
+    let harnesses: Vec<Value> = load_device_harnesses_raw(data_dir)
+        .into_iter()
+        .filter_map(|item| normalize_harness_item(&item))
+        .collect();
+
+    let mut provider_keys = serde_json::Map::new();
+    if include_tokens {
+        let registry = runtime.load_or_init_registry();
+        if let Some(providers) = registry.get("providers").and_then(Value::as_array) {
+            for p in providers {
+                if let Some(pid) = p.get("id").and_then(Value::as_str) {
+                    if let Ok(k) = runtime.secrets.get(&provider_slot(pid)) {
+                        if !k.trim().is_empty() {
+                            provider_keys.insert(pid.to_owned(), json!(k.trim()));
+                        }
+                    }
+                }
+            }
+        }
+        for tool_id in TOOL_KEY_IDS {
+            if let Ok(k) = runtime.secrets.get(&provider_slot(tool_id)) {
+                if !k.trim().is_empty() {
+                    provider_keys.insert(tool_id.to_owned(), json!(k.trim()));
+                }
+            }
+        }
+        if let Ok(k) = runtime.secrets.get(DEFAULT_SLOT) {
+            if !k.trim().is_empty() {
+                provider_keys.insert("__default__".to_owned(), json!(k.trim()));
+            }
+        }
+    }
+
+    let model_hub = json!({
+        "activeRoles": hub.get("activeRoles").cloned().unwrap_or_else(|| json!({})),
+        "providerVariants": hub.get("providerVariants").cloned().unwrap_or_else(|| json!({})),
+        "customModels": hub.get("customModels").cloned().unwrap_or_else(|| json!([])),
+        "providerKeys": Value::Object(provider_keys),
+    });
+
+    let mut out = json!({
         "remoteNodes": nodes,
         "deviceHarnesses": harnesses,
+        "modelHub": model_hub,
         "updatedAt": now_millis(),
-    })
+    });
+
+    if let Some(app_ref) = app {
+        if let Ok(pl) = app_ref.export_projects_and_links() {
+            if let Some(obj) = out.as_object_mut() {
+                obj.insert(
+                    "projects".to_owned(),
+                    pl.get("projects").cloned().unwrap_or_else(|| json!([])),
+                );
+                obj.insert(
+                    "projectSessionLinks".to_owned(),
+                    pl.get("projectSessionLinks")
+                        .cloned()
+                        .unwrap_or_else(|| json!([])),
+                );
+            }
+        }
+        if let Ok(bundle) = app_ref.export_peer_sync_bundle(
+            &format!("topo-sync:{}", now_millis()),
+            String::new(),
+        ) {
+            if let Ok(bundle_val) = serde_json::to_value(bundle) {
+                if let Some(obj) = out.as_object_mut() {
+                    obj.insert("peerSyncBundle".to_owned(), bundle_val);
+                }
+            }
+        }
+    }
+
+    out
 }
 
-/// Merge incoming topology (`remoteNodes` and `deviceHarnesses`) into `data_dir` and `ModelHubRuntime`.
+/// Merge incoming topology + knowledge (`remoteNodes`, `deviceHarnesses`, `modelHub`, `projects`,
+/// `projectSessionLinks`, and `peerSyncBundle`) into `data_dir`, `LocalApp`, and `ModelHubRuntime`.
 pub fn merge_topology(
     data_dir: &Path,
     app: &mut LocalApp,
     runtime: &ModelHubRuntime,
     incoming: &Value,
 ) -> Result<Value, &'static str> {
+    let now = now_millis();
     if let Some(inc_nodes) = incoming.get("remoteNodes").and_then(Value::as_array) {
         for node in inc_nodes {
             let url = node
@@ -340,35 +495,38 @@ pub fn merge_topology(
 
     if let Some(inc_harnesses) = incoming.get("deviceHarnesses").and_then(Value::as_array) {
         if !inc_harnesses.is_empty() {
-            let mut local_harnesses = load_device_harnesses_raw(data_dir);
+            let mut local_harnesses: Vec<Value> = load_device_harnesses_raw(data_dir)
+                .into_iter()
+                .filter_map(|item| normalize_harness_item(&item))
+                .collect();
             let mut changed = false;
-            for item in inc_harnesses {
-                let Some(cid) = item.get("connectionId").and_then(Value::as_str) else {
+            for raw_item in inc_harnesses {
+                let Some(item) = normalize_harness_item(raw_item) else {
                     continue;
                 };
-                if cid.trim().is_empty() {
-                    continue;
-                }
+                let cid = item["connectionId"].as_str().unwrap_or("");
+                let ssh_target = item["sshTarget"].as_str().unwrap_or("");
                 // Never overwrite a local self-grant with a remote "local" grant
-                let ssh_target = item
-                    .get("sshTarget")
-                    .and_then(Value::as_str)
-                    .unwrap_or("");
                 if (cid == "local" || ssh_target == "local")
-                    && local_harnesses
-                        .iter()
-                        .any(|x| x.get("connectionId").and_then(Value::as_str) == Some(cid))
+                    && local_harnesses.iter().any(|x| {
+                        x.get("connectionId")
+                            .or_else(|| x.get("connection_id"))
+                            .and_then(Value::as_str)
+                            == Some(cid)
+                    })
                 {
                     continue;
                 }
-                if let Some(existing) = local_harnesses
-                    .iter_mut()
-                    .find(|x| x.get("connectionId").and_then(Value::as_str) == Some(cid))
-                {
-                    *existing = item.clone();
+                if let Some(existing) = local_harnesses.iter_mut().find(|x| {
+                    x.get("connectionId")
+                        .or_else(|| x.get("connection_id"))
+                        .and_then(Value::as_str)
+                        == Some(cid)
+                }) {
+                    *existing = item;
                     changed = true;
                 } else {
-                    local_harnesses.push(item.clone());
+                    local_harnesses.push(item);
                     changed = true;
                 }
             }
@@ -378,14 +536,123 @@ pub fn merge_topology(
         }
     }
 
-    let snap = runtime.build_snapshot_and_sync(app)?;
-    let harnesses = load_device_harnesses_raw(data_dir);
-    Ok(json!({
-        "status": "synced",
-        "remoteNodes": snap.get("remoteNodes").cloned().unwrap_or_else(|| json!([])),
-        "deviceHarnesses": harnesses,
-        "syncedAt": now_millis(),
-    }))
+    if let Some(mh) = incoming.get("modelHub").and_then(Value::as_object) {
+        let mut hub = runtime.load_hub_state();
+        let mut hub_changed = false;
+        if let Some(roles) = mh.get("activeRoles").and_then(Value::as_object) {
+            if !hub["activeRoles"].is_object() {
+                hub["activeRoles"] = json!({});
+            }
+            if let Some(local_roles) = hub["activeRoles"].as_object_mut() {
+                for (k, v) in roles {
+                    if let Some(s) = v.as_str().map(str::trim).filter(|s| !s.is_empty()) {
+                        let cur_empty = local_roles
+                            .get(k)
+                            .and_then(Value::as_str)
+                            .map(|c| c.trim().is_empty())
+                            .unwrap_or(true);
+                        if cur_empty {
+                            local_roles.insert(k.clone(), json!(s));
+                            hub_changed = true;
+                        }
+                    }
+                }
+            }
+        }
+        if let Some(variants) = mh.get("providerVariants").and_then(Value::as_object) {
+            if !hub["providerVariants"].is_object() {
+                hub["providerVariants"] = json!({});
+            }
+            if let Some(local_vars) = hub["providerVariants"].as_object_mut() {
+                for (k, v) in variants {
+                    if !local_vars.contains_key(k) {
+                        local_vars.insert(k.clone(), v.clone());
+                        hub_changed = true;
+                    }
+                }
+            }
+        }
+        if let Some(custom_models) = mh.get("customModels").and_then(Value::as_array) {
+            if !hub["customModels"].is_array() {
+                hub["customModels"] = json!([]);
+            }
+            if let Some(local_custom) = hub["customModels"].as_array_mut() {
+                for cm in custom_models {
+                    let cid = cm.get("id").and_then(Value::as_str).unwrap_or("");
+                    if !cid.is_empty()
+                        && !local_custom
+                            .iter()
+                            .any(|x| x.get("id").and_then(Value::as_str) == Some(cid))
+                    {
+                        local_custom.push(cm.clone());
+                        hub_changed = true;
+                    }
+                }
+            }
+        }
+        if hub_changed {
+            let _ = runtime.save_hub_state(&hub);
+        }
+        if let Some(pkeys) = mh.get("providerKeys").and_then(Value::as_object) {
+            for (pid, kval) in pkeys {
+                if let Some(secret) = kval.as_str().map(str::trim).filter(|s| !s.is_empty()) {
+                    let slot = if pid == "__default__" {
+                        DEFAULT_SLOT.to_owned()
+                    } else {
+                        provider_slot(pid)
+                    };
+                    let existing = runtime.secrets.get(&slot).unwrap_or_default();
+                    if existing.trim().is_empty() {
+                        let _ = runtime.secrets.set(&slot, secret);
+                    }
+                }
+            }
+        }
+    }
+
+    if incoming.get("projects").is_some() || incoming.get("projectSessionLinks").is_some() {
+        let _ = app.merge_projects_and_links(incoming, now);
+    }
+
+    if let Some(bundle_val) = incoming.get("peerSyncBundle") {
+        if let Ok(bundle) = serde_json::from_value::<PeerSyncBundle>(bundle_val.clone()) {
+            let _ = app.apply_peer_sync_bundle(&bundle, now);
+        }
+    }
+
+    let _ = runtime.build_snapshot_and_sync(app)?;
+    let mut full = export_local_topology_with_app(data_dir, Some(app), runtime, true);
+    if let Some(obj) = full.as_object_mut() {
+        obj.insert("status".to_owned(), json!("synced"));
+        obj.insert("syncedAt".to_owned(), json!(now));
+    }
+    Ok(full)
+}
+
+/// Push local topology + knowledge to an already-paired `bob-node` / Web Host and return its merged payload.
+pub fn sync_topology_with_peer_url(
+    base_url: &str,
+    token: Option<&str>,
+    local_topology: &Value,
+) -> Result<Value, &'static str> {
+    let base = base_url.trim().trim_end_matches('/');
+    if !base.starts_with("http://") && !base.starts_with("https://") {
+        return Err("PAIRING_HOME_UNREACHABLE");
+    }
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(15))
+        .build()
+        .map_err(|_| "PAIRING_NETWORK_UNAVAILABLE")?;
+    let sync_url = format!("{base}/api/client/v1/topology/sync");
+    let mut req = client.post(&sync_url).json(local_topology);
+    if let Some(tok) = token.map(str::trim).filter(|s| !s.is_empty()) {
+        req = req.header("Authorization", format!("Bearer {tok}"));
+    }
+    let resp = req.send().map_err(|_| "PAIRING_HOME_UNREACHABLE")?;
+    if !resp.status().is_success() {
+        return Err("PAIRING_HOME_UNREACHABLE");
+    }
+    resp.json::<Value>().map_err(|_| "PAIRING_CODE_INVALID")
 }
 
 /// Execute HTTP pairing code exchange + bidirectional topology sync with a target `bob-node` / Web Host.
@@ -464,13 +731,34 @@ pub fn forward_dsh_rpc_to_endpoint(
     command: &str,
     args: &Value,
 ) -> Result<Value, &'static str> {
+    forward_dsh_rpc_to_endpoint_with_target(
+        raw_url,
+        token,
+        connection_id,
+        "local",
+        command,
+        args,
+    )
+}
+
+/// Forward a DSH/Multi-Harness RPC over HTTP to a remote `bob-node` / Web Host endpoint,
+/// requesting `target_connection_id` on that peer and stamping returned records with `connection_id`.
+pub fn forward_dsh_rpc_to_endpoint_with_target(
+    raw_url: &str,
+    token: Option<&str>,
+    connection_id: &str,
+    target_connection_id: &str,
+    command: &str,
+    args: &Value,
+) -> Result<Value, &'static str> {
     let raw_url = raw_url.trim().trim_end_matches('/');
     if !raw_url.starts_with("http://") && !raw_url.starts_with("https://") {
         return Err("DSH_ADDRESS_INVALID");
     }
     let mut forwarded_args = args.clone();
     if let Some(obj) = forwarded_args.as_object_mut() {
-        obj.insert("connectionId".to_owned(), json!("local"));
+        obj.insert("connectionId".to_owned(), json!(target_connection_id));
+        obj.insert("_relayed".to_owned(), json!(true));
     }
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(35))
@@ -512,33 +800,104 @@ pub fn forward_dsh_rpc_to_endpoint(
 }
 
 /// Forward a DSH/Multi-Harness RPC (`app_dsh_list`, `app_dsh_page`, `app_dsh_prompt`, `app_dsh_receipt`, `app_dsh_preview`)
-/// over HTTP to a remote `bob-node` instance registered in `remoteNodes`, querying its `"local"` harnesses.
+/// over HTTP to a remote `bob-node` instance registered in `remoteNodes`.
+/// First tries the target node's own URL (`target_connection_id = "local"` unless the target itself is a `web_host`).
+/// If the target node URL only hosts a raw DSH server (not `bob-node`) and this request wasn't already relayed,
+/// falls back to any paired `web_host` / `bob-node` peer in `remoteNodes` with `target_connection_id = connection_id`.
 pub fn forward_dsh_rpc_to_remote_node(
     runtime: &ModelHubRuntime,
     connection_id: &str,
     command: &str,
     args: &Value,
 ) -> Result<Value, &'static str> {
+    let already_relayed = args
+        .get("_relayed")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
     let hub = runtime.load_hub_state();
-    let node = hub["remoteNodes"]
+    let nodes = hub["remoteNodes"]
         .as_array()
-        .and_then(|arr| {
-            arr.iter().find(|n| {
-                n["id"].as_str() == Some(connection_id)
-                    && n.get("enabled").and_then(Value::as_bool).unwrap_or(true)
-            })
-        })
         .ok_or("DSH_CONNECTION_NOT_FOUND")?;
-    let raw_url = node
-        .get("url")
-        .or_else(|| node.get("baseUrl"))
-        .and_then(Value::as_str)
-        .unwrap_or("");
-    let token = runtime
-        .secrets
-        .get(&remote_node_token_slot(connection_id))
-        .ok();
-    forward_dsh_rpc_to_endpoint(raw_url, token.as_deref(), connection_id, command, args)
+
+    if let Some(node) = nodes.iter().find(|n| {
+        n["id"].as_str() == Some(connection_id)
+            && n.get("enabled").and_then(Value::as_bool).unwrap_or(true)
+    }) {
+        let raw_url = node
+            .get("url")
+            .or_else(|| node.get("baseUrl"))
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        let remark = node.get("remark").and_then(Value::as_str).unwrap_or("");
+        let token = runtime
+            .secrets
+            .get(&remote_node_token_slot(connection_id))
+            .ok();
+        let target_cid = if remark == "web_host" {
+            "local"
+        } else {
+            "local"
+        };
+        if let Ok(res) = forward_dsh_rpc_to_endpoint_with_target(
+            raw_url,
+            token.as_deref(),
+            connection_id,
+            target_cid,
+            command,
+            args,
+        ) {
+            return Ok(res);
+        }
+    }
+
+    if already_relayed {
+        return Err("DSH_UNAVAILABLE");
+    }
+
+    // Fallback: relay through any paired `web_host` (or other `bob-node`) peer in `remoteNodes`
+    let mut candidates: Vec<&Value> = nodes
+        .iter()
+        .filter(|n| {
+            n["id"].as_str() != Some(connection_id)
+                && n.get("enabled").and_then(Value::as_bool).unwrap_or(true)
+        })
+        .collect();
+    candidates.sort_by_key(|n| {
+        let is_web_host = n.get("remark").and_then(Value::as_str) == Some("web_host")
+            || n.get("url")
+                .or_else(|| n.get("baseUrl"))
+                .and_then(Value::as_str)
+                .map(|u| u.contains("bob-online"))
+                .unwrap_or(false);
+        if is_web_host { 0 } else { 1 }
+    });
+
+    for peer in candidates {
+        let Some(peer_id) = peer.get("id").and_then(Value::as_str) else {
+            continue;
+        };
+        let peer_url = peer
+            .get("url")
+            .or_else(|| peer.get("baseUrl"))
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        let peer_tok = runtime
+            .secrets
+            .get(&remote_node_token_slot(peer_id))
+            .ok();
+        if let Ok(res) = forward_dsh_rpc_to_endpoint_with_target(
+            peer_url,
+            peer_tok.as_deref(),
+            connection_id,
+            connection_id,
+            command,
+            args,
+        ) {
+            return Ok(res);
+        }
+    }
+
+    Err("DSH_UNAVAILABLE")
 }
 
 // ============================================================================
@@ -931,5 +1290,120 @@ mod tests {
         let lines: Vec<&str> = rendered.lines().collect();
         assert!(lines.len() >= 15 && lines.len() <= 35);
         assert!(rendered.contains('█') && rendered.contains('▀'));
+    }
+
+    #[test]
+    fn bidirectional_merge_topology_syncs_tokens_harnesses_projects_and_knowledge() {
+        let base_tmp = std::env::temp_dir().join(format!("bob-topo-sync-{}", now_millis()));
+        let host_dir = base_tmp.join("host");
+        let phone_dir = base_tmp.join("phone");
+        let _ = fs::create_dir_all(&host_dir);
+        let _ = fs::create_dir_all(&phone_dir);
+
+        let mut host_app = LocalApp::open(&host_dir.join("bob.db")).unwrap();
+        let host_rt = ModelHubRuntime::with_file_vault(host_dir.clone()).unwrap();
+        host_rt
+            .save_remote_node(
+                &mut host_app,
+                Some("node-x1t".to_owned()),
+                "X1T",
+                "https://x1t-dsh.bobbik.org",
+                Some("x1t-secret-token"),
+                false,
+                Some("node"),
+                true,
+            )
+            .unwrap();
+        save_device_harnesses_raw(
+            &host_dir,
+            &[json!({
+                "connectionId": "node-x1t",
+                "label": "X1T",
+                "sshTarget": "x1t",
+                "enabledHarnesses": ["dsh", "agy", "claude"],
+            })],
+        )
+        .unwrap();
+        host_app
+            .create_project("proj-winter", "Winter Shelter", 1000)
+            .unwrap();
+        host_app
+            .set_project_session_link(
+                "node-x1t",
+                "claude",
+                "claude-jsonl:7863969d",
+                Some("proj-winter"),
+                0,
+                1000,
+            )
+            .unwrap();
+        host_app
+            .upsert_note(
+                "note-1",
+                Some("proj-winter"),
+                None,
+                "Architecture Wiki",
+                "# Shared Knowledge",
+                &["wiki".to_owned()],
+                1000,
+            )
+            .unwrap();
+
+        let mut phone_app = LocalApp::open(&phone_dir.join("bob.db")).unwrap();
+        let phone_rt = ModelHubRuntime::with_file_vault(phone_dir.clone()).unwrap();
+        phone_app
+            .upsert_note(
+                "note-phone",
+                None,
+                None,
+                "Phone Memo",
+                "Captured on mobile",
+                &["memo".to_owned()],
+                1100,
+            )
+            .unwrap();
+
+        // Phone exports its local topology + knowledge and sends to Host
+        let phone_payload =
+            export_local_topology_with_app(&phone_dir, Some(&phone_app), &phone_rt, true);
+        let host_merged_reply =
+            merge_topology(&host_dir, &mut host_app, &host_rt, &phone_payload).unwrap();
+
+        // Host now has Phone's note
+        let host_notes = host_app.list_notes(None).unwrap();
+        assert!(host_notes.iter().any(|n| n.id == "note-phone"));
+
+        // Phone merges Host's reply
+        let _ = merge_topology(&phone_dir, &mut phone_app, &phone_rt, &host_merged_reply).unwrap();
+
+        // Phone now has X1T's secret token, harness grant (both camelCase and snake_case), project, session link, and wiki note!
+        let phone_x1t_tok = phone_rt
+            .secrets
+            .get(&remote_node_token_slot("node-x1t"))
+            .unwrap();
+        assert_eq!(phone_x1t_tok, "x1t-secret-token");
+
+        let phone_harnesses = load_device_harnesses_raw(&phone_dir);
+        assert!(phone_harnesses.iter().any(|h| {
+            h.get("connectionId").and_then(Value::as_str) == Some("node-x1t")
+                && h.get("connection_id").and_then(Value::as_str) == Some("node-x1t")
+        }));
+
+        let phone_links_val = phone_app.project_session_links().unwrap();
+        let phone_links = phone_links_val["links"].as_array().unwrap();
+        assert_eq!(phone_links.len(), 1);
+        assert_eq!(
+            phone_links[0].get("project_id").and_then(Value::as_str),
+            Some("proj-winter")
+        );
+        assert_eq!(
+            phone_links[0].get("session_id").and_then(Value::as_str),
+            Some("claude-jsonl:7863969d")
+        );
+
+        let phone_notes = phone_app.list_notes(None).unwrap();
+        assert!(phone_notes.iter().any(|n| n.id == "note-1"));
+
+        let _ = fs::remove_dir_all(&base_tmp);
     }
 }

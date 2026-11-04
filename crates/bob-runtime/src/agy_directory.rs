@@ -151,6 +151,7 @@ pub fn owns_session(id: &str) -> bool { id.starts_with("agy:") }
 
 pub fn owns_readable_session(id: &str) -> bool {
     id.starts_with("agy:")
+        || id.starts_with("claude:")
         || id.starts_with("claude-jsonl:")
         || id.starts_with("pi:")
         || id.starts_with("codex:")

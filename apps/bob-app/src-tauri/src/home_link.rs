@@ -56,6 +56,12 @@ pub(crate) async fn app_home_sync<R: tauri::Runtime>(
         .map_err(|_| "HOME_STATE_UNAVAILABLE")?
         .clone();
     let Some(connection) = connection else {
+        if crate::direct_llm::sync_with_paired_remote_nodes(&host, &state)
+            .await
+            .unwrap_or(false)
+        {
+            return Ok("sync_checked");
+        }
         return Ok("provider_unconfigured");
     };
     let app = state.0.clone();
@@ -178,6 +184,7 @@ pub(crate) async fn app_home_sync<R: tauri::Runtime>(
     if let Some(cfg_json) = incoming_shared_cfg {
         crate::direct_llm::merge_shared_config_for_host(&host, &state.0, &cfg_json).await;
     }
+    let _ = crate::direct_llm::sync_with_paired_remote_nodes(&host, &state).await;
     drop(flight);
     Ok("sync_checked")
 }

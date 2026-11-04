@@ -853,6 +853,8 @@ async function cancel(execution) {
 
 async function focusPairedComposer() {
   await reload();
+  await ctx.loadModelHub?.();
+  await ctx.loadPersonalOps?.();
   await nextTick();
   input.value?.focus();
 }

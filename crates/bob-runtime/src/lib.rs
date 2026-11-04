@@ -35,9 +35,9 @@ use std::net::{SocketAddr, TcpStream};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-const DEFAULT_SLOT: &str = "provider-key-default";
+pub(crate) const DEFAULT_SLOT: &str = "provider-key-default";
 const MAX_RESPONSE_BYTES: usize = 512 * 1024;
-const TOOL_KEY_IDS: [&str; 4] = ["tavily", "tinyfish", "TAVILY_API_KEY", "TINYFISH_API_KEY"];
+pub(crate) const TOOL_KEY_IDS: [&str; 4] = ["tavily", "tinyfish", "TAVILY_API_KEY", "TINYFISH_API_KEY"];
 const EMBEDDED_MODEL_REGISTRY: &str =
     include_str!("../../../apps/bob-app/src-tauri/resources/model_providers.json");
 
