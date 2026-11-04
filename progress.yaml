@@ -11,7 +11,7 @@ project:
   - Desktop
   - Android
   - Web (bob-node)
-  current_task: "BP4-04任务卡材料和变化刷新通过真实工作区网页验证；APK Run41266758148已构建/下载校验，未安装，网页未部署，B4暂停。"
+  current_task: "统一节点 DSH 认证分流已上线，X1T 列表/原会话读取实测通过；GitHub APK 构建中。原生流式与跨轮常驻/取消/恢复仍待完整验收，手机暂停。"
   development_plan: docs/CURRENT_STAGE.md
 phases:
 - name: BP0 真相与保护

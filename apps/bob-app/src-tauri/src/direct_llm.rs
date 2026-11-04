@@ -461,6 +461,7 @@ async fn build_model_hub_snapshot_and_sync<R: Runtime>(
         "providerVariants": hub_state["providerVariants"],
         "customModels": custom_models,
         "remoteNodes": remote_nodes,
+        "subscriptionQuotas": bob_runtime::probe_subscription_quotas_cached(),
     }))
 }
 
@@ -2175,6 +2176,7 @@ pub(crate) fn export_shared_config_from_dir(data_dir: &std::path::Path) -> Strin
         "providerVariants": hub.get("providerVariants").cloned().unwrap_or_else(|| json!({})),
         "customModels": hub.get("customModels").cloned().unwrap_or_else(|| json!([])),
         "remoteNodes": remote_nodes,
+        "subscriptionQuotas": bob_runtime::probe_subscription_quotas_cached(),
         "credentials": {},
     }))
     .unwrap_or_default()
@@ -3967,6 +3969,7 @@ async fn native_dsh<R: Runtime>(
     session_id: String,
     text: String,
     request_id: String,
+    attachments: Option<Value>,
 ) -> Result<Value, &'static str> {
     if operation != "list" && session_id.trim().is_empty() {
         return Err("DSH_SESSION_REQUIRED");
@@ -4046,6 +4049,7 @@ async fn native_dsh<R: Runtime>(
         } else {
             Some(token.as_str())
         };
+        let is_node = bob_runtime::node_pairing::is_bob_node_endpoint(&endpoint)?;
         let forward_with_relay_fallback = |cmd: &str, args: &Value| -> Result<Value, &'static str> {
             if let Ok(res) = bob_runtime::node_pairing::forward_dsh_rpc_to_endpoint_with_target(
                 &endpoint,
@@ -4057,7 +4061,7 @@ async fn native_dsh<R: Runtime>(
             ) {
                 return Ok(res);
             }
-            if !is_web_host {
+            if !is_web_host && !is_node && cmd != "app_dsh_prompt" {
                 for (peer_url, peer_tok, _) in &relay_peers {
                     if let Ok(res) =
                         bob_runtime::node_pairing::forward_dsh_rpc_to_endpoint_with_target(
@@ -4077,7 +4081,7 @@ async fn native_dsh<R: Runtime>(
         };
 
         if operation == "list" {
-            if is_web_host {
+            if is_web_host || is_node {
                 return forward_with_relay_fallback(
                     "app_dsh_list",
                     &json!({"connectionId": "local"}),
@@ -4155,12 +4159,13 @@ async fn native_dsh<R: Runtime>(
                         "sessionId": session_id,
                         "text": text,
                         "requestId": request_id,
+                        "attachments": attachments,
                     }),
                 ),
             }
         };
 
-        if bob_runtime::agy_directory::owns_readable_session(&session_id) || is_web_host {
+        if bob_runtime::agy_directory::owns_readable_session(&session_id) || is_web_host || is_node {
             let (cmd, args) = build_rpc_call();
             return forward_with_relay_fallback(cmd, &args);
         }
@@ -4204,14 +4209,25 @@ async fn native_dsh<R: Runtime>(
                     },
                 )?)
                 .map_err(|_| "DSH_PROTOCOL"),
-                _ => bob_runtime::dsh_transport::dispatch_once(
-                    &dir,
-                    &cid,
-                    &sid,
-                    &text,
-                    &request_id,
-                    || client.prompt(&sid, &text, &request_id),
-                ),
+                _ => {
+                    let ws_hint = client.resolve_session_workspace(&sid);
+                    let staged = bob_runtime::dsh_transport::stage_attachments_for_prompt(
+                        &dir,
+                        &cid,
+                        &sid,
+                        ws_hint.as_deref(),
+                        &text,
+                        attachments.as_ref(),
+                    );
+                    bob_runtime::dsh_transport::dispatch_once(
+                        &dir,
+                        &cid,
+                        &sid,
+                        &text,
+                        &request_id,
+                        || client.prompt(&sid, &staged, &request_id),
+                    )
+                }
             }
         })();
 
@@ -4229,15 +4245,15 @@ async fn native_dsh<R: Runtime>(
 
 #[tauri::command]
 pub(crate) async fn app_dsh_list<R: Runtime>(host: AppHandle<R>, connection_id: String) -> Result<Value, &'static str> {
-    native_dsh(host, connection_id, "list", String::new(), String::new(), String::new()).await
+    native_dsh(host, connection_id, "list", String::new(), String::new(), String::new(), None).await
 }
 #[tauri::command]
 pub(crate) async fn app_dsh_history<R: Runtime>(host: AppHandle<R>, connection_id: String, session_id: String) -> Result<Value, &'static str> {
-    native_dsh(host, connection_id, "history", session_id, String::new(), String::new()).await
+    native_dsh(host, connection_id, "history", session_id, String::new(), String::new(), None).await
 }
 #[tauri::command]
-pub(crate) async fn app_dsh_prompt<R: Runtime>(host: AppHandle<R>, connection_id: String, session_id: String, text: String, request_id: String) -> Result<Value, &'static str> {
-    native_dsh(host, connection_id, "prompt", session_id, text, request_id).await
+pub(crate) async fn app_dsh_prompt<R: Runtime>(host: AppHandle<R>, connection_id: String, session_id: String, text: String, request_id: String, attachments: Option<Value>) -> Result<Value, &'static str> {
+    native_dsh(host, connection_id, "prompt", session_id, text, request_id, attachments).await
 }
 
 #[tauri::command]
@@ -4366,9 +4382,9 @@ pub(crate) async fn app_dsh_receipt<R: Runtime>(
 
 #[tauri::command]
 pub(crate) async fn app_dsh_page<R: Runtime>(host: AppHandle<R>, connection_id: String, session_id: String, before: Option<i64>, through: Option<i64>, after: Option<i64>) -> Result<Value, &'static str> {
- native_dsh(host,connection_id,"page",session_id,serde_json::json!({"before":before,"through":through,"after":after}).to_string(),String::new()).await
+ native_dsh(host,connection_id,"page",session_id,serde_json::json!({"before":before,"through":through,"after":after}).to_string(),String::new(),None).await
 }
 #[tauri::command]
 pub(crate) async fn app_dsh_preview<R: Runtime>(host: AppHandle<R>, connection_id: String, session_id: String, path: String, known: Option<Value>) -> Result<Value, &'static str> {
- native_dsh(host,connection_id,"preview",session_id,path,known.map(|v|v.to_string()).unwrap_or_default()).await
+ native_dsh(host,connection_id,"preview",session_id,path,known.map(|v|v.to_string()).unwrap_or_default(),None).await
 }

@@ -38,6 +38,9 @@ export function createLayoutState(winOrOpts = {}, nav = {}) {
 
 export function getProviderLogo(idOrModel = "") {
   const name = String(idOrModel || "").toLowerCase();
+  if (name.includes("antigravity") || name === "agy" || name.includes("agy-"))
+    return "/logos/antigravity.png";
+  if (name.includes("codex")) return "/logos/codex.png";
   if (name.includes("deepseek")) return "/logos/deepseek.png";
   if (name.includes("minimax")) return "/logos/minimax.png";
   if (name.includes("qwen") || name.includes("dashscope") || name.includes("aliyun"))

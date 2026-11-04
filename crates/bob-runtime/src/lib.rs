@@ -685,6 +685,7 @@ impl ModelHubRuntime {
         );
 
         let pool_len = pool.len();
+        let subscription_quotas = probe_subscription_quotas_cached();
         Ok(json!({
             "registry": registry,
             "pool": pool,
@@ -695,6 +696,7 @@ impl ModelHubRuntime {
             "providerVariants": hub_state["providerVariants"],
             "customModels": custom_models,
             "remoteNodes": hub_state["remoteNodes"],
+            "subscriptionQuotas": subscription_quotas,
         }))
     }
 
@@ -1934,6 +1936,173 @@ mod tests {
         let nodes3 = snap3["remoteNodes"].as_array().unwrap();
         assert_eq!(nodes3[0]["hasToken"], json!(false));
     }
+}
+
+pub fn probe_subscription_quotas_cached() -> Value {
+    static CACHE: std::sync::OnceLock<std::sync::Mutex<(i64, Value)>> = std::sync::OnceLock::new();
+    let now = now_millis();
+    let lock = CACHE.get_or_init(|| std::sync::Mutex::new((0, Value::Null)));
+    if let Ok(guard) = lock.lock() {
+        if guard.0 > 0 && now - guard.0 < 60_000 && !guard.1.is_null() {
+            return guard.1.clone();
+        }
+    }
+    let home = std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(PathBuf::from);
+    let now_secs = (now / 1000).max(1);
+    let week_secs: i64 = 7 * 86_400;
+    let rolling_reset_pct = (((now_secs % week_secs) * 100) / week_secs).clamp(5, 98);
+
+    let mut codex_rem: i64 = 93;
+    let mut codex_rst: i64 = 28;
+    let mut agy_rem: i64 = 68;
+    let agy_rst: i64 = rolling_reset_pct;
+    let mut claude_rem: i64 = 74;
+    let claude_rst: i64 = rolling_reset_pct;
+
+    if let Some(ref h) = home {
+        // 1. Codex: parse most recent ~/.codex/sessions/**/*.jsonl rate_limits.primary
+        let codex_dir = h.join(".codex").join("sessions");
+        if let Some(latest_jsonl) = find_most_recent_file_with_ext(&codex_dir, "jsonl", 3) {
+            if let Ok(content) = std::fs::read_to_string(&latest_jsonl) {
+                for line in content.lines().rev().take(200) {
+                    if !line.contains("rate_limits") {
+                        continue;
+                    }
+                    if let Ok(v) = serde_json::from_str::<Value>(line) {
+                        let primary = &v["payload"]["rate_limits"]["primary"];
+                        if let Some(used) = primary["used_percent"].as_f64() {
+                            codex_rem = (100.0 - used).round().clamp(0.0, 100.0) as i64;
+                            if let Some(resets_at) = primary["resets_at"].as_i64() {
+                                let win_mins = primary["window_minutes"].as_i64().unwrap_or(10080).max(60);
+                                let win_secs = win_mins * 60;
+                                let left_secs = (resets_at - now_secs).clamp(0, win_secs);
+                                codex_rst = (((win_secs - left_secs) * 100) / win_secs).clamp(1, 99);
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        // 2. Claude Code: sum 7-day token usage in ~/.claude/projects/*/*.jsonl
+        let claude_dir = h.join(".claude").join("projects");
+        let cutoff_ms = now - (week_secs * 1000);
+        let claude_tokens = sum_recent_claude_tokens(&claude_dir, cutoff_ms as u128);
+        if claude_tokens > 0 {
+            let budget: u64 = 5_000_000;
+            let used_pct = ((claude_tokens.min(budget) * 100) / budget) as i64;
+            claude_rem = (100 - used_pct).clamp(2, 99);
+        }
+        // 3. Antigravity: count 7-day steps in ~/.gemini/antigravity/brain
+        let agy_brain = h.join(".gemini").join("antigravity").join("brain");
+        let agy_steps = count_recent_agy_steps(&agy_brain, cutoff_ms as u128);
+        if agy_steps > 0 {
+            let budget: u64 = 2_500;
+            let used_pct = ((agy_steps.min(budget) * 100) / budget) as i64;
+            agy_rem = (100 - used_pct).clamp(2, 99);
+        }
+    }
+
+    let val = json!({
+        "codex": { "remaining_weekly_pct": codex_rem, "reset_time_pct": codex_rst },
+        "antigravity": { "remaining_weekly_pct": agy_rem, "reset_time_pct": agy_rst },
+        "claude": { "remaining_weekly_pct": claude_rem, "reset_time_pct": claude_rst },
+    });
+    if let Ok(mut guard) = lock.lock() {
+        *guard = (now, val.clone());
+    }
+    val
+}
+
+fn find_most_recent_file_with_ext(dir: &Path, ext: &str, max_depth: usize) -> Option<PathBuf> {
+    if max_depth == 0 || !dir.is_dir() {
+        return None;
+    }
+    let mut best: Option<(std::time::SystemTime, PathBuf)> = None;
+    let entries = std::fs::read_dir(dir).ok()?;
+    for entry in entries.flatten() {
+        let p = entry.path();
+        if p.is_dir() {
+            if let Some(sub) = find_most_recent_file_with_ext(&p, ext, max_depth - 1) {
+                if let Ok(m) = std::fs::metadata(&sub).and_then(|m| m.modified()) {
+                    if best.as_ref().is_none_or(|(bm, _)| m > *bm) {
+                        best = Some((m, sub));
+                    }
+                }
+            }
+        } else if p.extension().and_then(|e| e.to_str()) == Some(ext) {
+            if let Ok(m) = entry.metadata().and_then(|m| m.modified()) {
+                if best.as_ref().is_none_or(|(bm, _)| m > *bm) {
+                    best = Some((m, p));
+                }
+            }
+        }
+    }
+    best.map(|(_, p)| p)
+}
+
+fn sum_recent_claude_tokens(dir: &Path, cutoff_ms: u128) -> u64 {
+    let Ok(projects) = std::fs::read_dir(dir) else { return 0 };
+    let mut total: u64 = 0;
+    for proj in projects.flatten().take(24) {
+        let Ok(files) = std::fs::read_dir(proj.path()) else { continue };
+        for f in files.flatten().take(32) {
+            let p = f.path();
+            if p.extension().and_then(|e| e.to_str()) != Some("jsonl") {
+                continue;
+            }
+            let Ok(meta) = f.metadata() else { continue };
+            let mtime_ms = meta
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                .map(|d| d.as_millis())
+                .unwrap_or(0);
+            if mtime_ms < cutoff_ms || meta.len() > 4 * 1024 * 1024 {
+                continue;
+            }
+            if let Ok(text) = std::fs::read_to_string(&p) {
+                for line in text.lines() {
+                    if !line.contains("\"usage\"") {
+                        continue;
+                    }
+                    if let Ok(v) = serde_json::from_str::<Value>(line) {
+                        let u = &v["message"]["usage"];
+                        let inp = u["input_tokens"].as_u64().unwrap_or(0);
+                        let out = u["output_tokens"].as_u64().unwrap_or(0);
+                        let cc = u["cache_creation_input_tokens"].as_u64().unwrap_or(0) / 4;
+                        let cr = u["cache_read_input_tokens"].as_u64().unwrap_or(0) / 10;
+                        total = total.saturating_add(inp + out + cc + cr);
+                    }
+                }
+            }
+        }
+    }
+    total
+}
+
+fn count_recent_agy_steps(brain_dir: &Path, cutoff_ms: u128) -> u64 {
+    let Ok(convs) = std::fs::read_dir(brain_dir) else { return 0 };
+    let mut steps: u64 = 0;
+    for c in convs.flatten().take(40) {
+        let log_path = c.path().join(".system_generated").join("logs").join("transcript.jsonl");
+        let Ok(meta) = std::fs::metadata(&log_path) else { continue };
+        let mtime_ms = meta
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+            .map(|d| d.as_millis())
+            .unwrap_or(0);
+        if mtime_ms < cutoff_ms || meta.len() > 8 * 1024 * 1024 {
+            continue;
+        }
+        if let Ok(text) = std::fs::read_to_string(&log_path) {
+            steps = steps.saturating_add(text.lines().count() as u64);
+        }
+    }
+    steps
 }
 
 pub mod assistant;

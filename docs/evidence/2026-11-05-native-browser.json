@@ -1,0 +1,112 @@
+{
+  "stream": {
+    "marker": "bob-browser-stream-1793811613392419500",
+    "request_id": "8e8b7606-63cf-4ba4-9eac-2c565d8a5eb2",
+    "samples": [
+      {
+        "seconds": 2.1,
+        "chars": 5921,
+        "marker_count": 0
+      },
+      {
+        "seconds": 4.1,
+        "chars": 6160,
+        "marker_count": 0
+      },
+      {
+        "seconds": 6.1,
+        "chars": 6273,
+        "marker_count": 0
+      },
+      {
+        "seconds": 8.1,
+        "chars": 6355,
+        "marker_count": 0
+      },
+      {
+        "seconds": 10.1,
+        "chars": 6863,
+        "marker_count": 0
+      },
+      {
+        "seconds": 12.1,
+        "chars": 7034,
+        "marker_count": 2
+      },
+      {
+        "seconds": 14.2,
+        "chars": 7408,
+        "marker_count": 2
+      },
+      {
+        "seconds": 16.2,
+        "chars": 7533,
+        "marker_count": 2
+      },
+      {
+        "seconds": 18.2,
+        "chars": 7533,
+        "marker_count": 2
+      },
+      {
+        "seconds": 20.2,
+        "chars": 6118,
+        "marker_count": 2
+      }
+    ],
+    "event_kinds": [
+      "accepted",
+      "running",
+      "text_delta",
+      "text_delta",
+      "text_delta",
+      "text_delta",
+      "text_delta",
+      "text_delta",
+      "text_delta",
+      "text_delta",
+      "text_delta",
+      "text_delta",
+      "text_delta",
+      "text_delta",
+      "text_delta",
+      "text_delta",
+      "text_delta",
+      "text_delta",
+      "text_delta",
+      "text_delta",
+      "text_delta",
+      "text_delta",
+      "text_delta",
+      "text_delta",
+      "text_delta",
+      "text_delta",
+      "text_delta",
+      "text_delta",
+      "completed"
+    ],
+    "errors": [],
+    "input_visible": true
+  },
+  "reopen": {
+    "reopen_marker_counts": [
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2
+    ],
+    "errors": [],
+    "input_visible": true
+  },
+  "candidate_only": true,
+  "phone_tested": false,
+  "production_deployed": false
+}

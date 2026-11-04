@@ -55,6 +55,7 @@ dependencies = [
  "bob-kernel",
  "bob-runtime",
  "bob-transport",
+ "ring",
  "rusqlite",
  "serde",
  "serde_json",

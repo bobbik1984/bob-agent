@@ -12,6 +12,8 @@
 mod assistant;
 mod context_capsule;
 mod claude_rpc;
+pub mod node_access;
+
 use bob_kernel::app::LocalApp;
 use bob_runtime::{now_millis, ModelHubRuntime, RuntimeCapabilityManifest};
 use rusqlite::{Connection, OpenFlags};
@@ -1410,8 +1412,10 @@ pub fn handle_rpc_command(ctx: &mut NodeContext, command: &str, args: &Value) ->
                     let session=args["sessionId"].as_str().ok_or("DSH_SESSION_REQUIRED")?;
                     let text=args["text"].as_str().filter(|s|!s.trim().is_empty() && s.len()<=32000).ok_or("DSH_TEXT_REQUIRED")?;
                     let request=args["requestId"].as_str().filter(|s|s.len()<=200 && !s.is_empty()).ok_or("DSH_REQUEST_REQUIRED")?;
-                    let wire=context_capsule::before_dispatch(&ctx.runtime.data_dir,connection,session,request,text)?;
-                    let res = bob_runtime::dsh_transport::dispatch_once(&ctx.runtime.data_dir,connection,session,text,request,||client.prompt(session,&wire,request))?;
+                    let wire = context_capsule::before_dispatch(&ctx.runtime.data_dir,connection,session,request,text)?;
+                    let ws_hint = client.resolve_session_workspace(session);
+                    let staged_wire = bob_runtime::dsh_transport::stage_attachments_for_prompt(&ctx.runtime.data_dir, connection, session, ws_hint.as_deref(), &wire, args.get("attachments"));
+                    let res = bob_runtime::dsh_transport::dispatch_once(&ctx.runtime.data_dir,connection,session,text,request,||client.prompt(session,&staged_wire,request))?;
                     let _ = bob_runtime::claude_harness::record_external_harness_turn_for_session(&ctx.runtime.data_dir, connection, session, "dsh");
                     Ok(res)
                 }
@@ -2144,6 +2148,13 @@ fn execute_unlocked_harness_rpc(
     command: &str,
     args: &Value,
 ) -> Result<Value, &'static str> {
+    if command.starts_with("app_dsh_") || command == "app_native_events" {
+        let connection = args["connectionId"].as_str().ok_or("DSH_CONNECTION_REQUIRED")?;
+        let runtime = ModelHubRuntime::with_file_vault(data_dir.to_path_buf())?;
+        if let Some(result) = bob_runtime::node_pairing::route_paired_node_rpc(&runtime, connection, command, args)? {
+            return Ok(result);
+        }
+    }
     match command {
         "app_context_list" | "app_context_read" | "app_context_refresh" | "app_context_tasks" => {
             context_capsule::rpc(data_dir, command, args)
@@ -2157,6 +2168,18 @@ fn execute_unlocked_harness_rpc(
         | "app_claude_review"
         | "app_claude_artifacts"
         | "app_claude_preview" => claude_rpc::rpc(data_dir, command, args),
+        "app_native_events" => {
+            let connection=args["connectionId"].as_str().ok_or("DSH_CONNECTION_REQUIRED")?;
+            let session=args["sessionId"].as_str().ok_or("DSH_SESSION_REQUIRED")?;
+            if connection=="local" { let _=bob_runtime::agy_directory::ensure_local_grant_registered(data_dir,"local"); }
+            match bob_runtime::agy_directory::native_events(data_dir,connection,session,args["after"].as_i64().unwrap_or(0)) {
+                Err("DSH_CONNECTION_REQUIRED") if connection!="local" => {
+                    let runtime=ModelHubRuntime::with_file_vault(data_dir.to_path_buf())?;
+                    bob_runtime::node_pairing::forward_dsh_rpc_to_remote_node(&runtime,connection,command,args)
+                },
+                value=>value
+            }
+        }
         "app_dsh_receipt" => {
             let connection = args["connectionId"].as_str().ok_or("DSH_CONNECTION_REQUIRED")?;
             if connection == "local" {
@@ -2446,6 +2469,39 @@ fn handle_connection(mut stream: TcpStream, state: Arc<Mutex<NodeContext>>) {
         }
     }
 
+    // A configured standalone node owns its authentication boundary, including RPC.
+    let access_dir = match state.lock() { Ok(g) => g.runtime.data_dir.clone(), Err(_) => return };
+    if node_access::enabled(&access_dir) {
+        let mut node_path = path.strip_prefix("/api/node/v1/").map(str::to_owned);
+        let mut parsed: Value = serde_json::from_str(&body_str).unwrap_or_else(|_|json!({}));
+        if !parsed.is_object() {write_json_response(&mut stream,400,r#"{"error":"NODE_BODY_INVALID"}"#);return;}
+        // Existing phone QR exchange protocol remains usable, but never syncs secrets.
+        if method == "POST" && path.starts_with("/api/client/v1/pairings/") && path.ends_with("/exchange") {
+            if let Some(id) = path.strip_prefix("/api/client/v1/pairings/").and_then(|s|s.strip_suffix("/exchange")) {
+                parsed["pairing_id"]=json!(id);node_path=Some("exchange".into());
+            }
+        }
+        if let Some(p) = node_path.filter(|_| method != "OPTIONS") {
+            let result=node_access::route(&access_dir,method,&p,auth_header.as_deref(),&parsed,now_millis());
+            let (status,value)=match result {Ok(v)=>(200,v),Err(e)=>(if e=="NODE_RATE_LIMITED"{429}else{401},json!({"error":e}))};
+            write_json_response(&mut stream,status,&value.to_string());return;
+        }
+        if method != "OPTIONS" && path.starts_with("/api/") {
+            let scope=node_access::authorize(&access_dir,auth_header.as_deref(),now_millis());
+            let allowed=match scope {
+                Ok(ref role) if role=="owner" => !path.starts_with("/api/client/v1/"),
+                Ok(_) => path.strip_prefix("/api/rpc/").is_some_and(|cmd|matches!(cmd,
+                    "app_native_events"|"app_dsh_list"|"app_dsh_page"|"app_dsh_history"|"app_dsh_preview"|"app_dsh_prompt"|"app_dsh_receipt"|
+                    "app_harness_discover"|"app_harness_check_auth"|"app_harness_verify_capabilities")),
+                Err(_) => false,
+            };
+            if !allowed {write_json_response(&mut stream,401,r#"{"error":"NODE_AUTH_REQUIRED"}"#);return;}
+            if scope.as_deref()==Ok("device") && parsed.get("connectionId").and_then(Value::as_str)!=Some("local") {
+                write_json_response(&mut stream,403,r#"{"error":"NODE_SCOPE_DENIED"}"#);return;
+            }
+        }
+    }
+
     if method == "OPTIONS" {
         let resp = "HTTP/1.1 204 No Content\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type, Authorization\r\nConnection: close\r\n\r\n";
         let _ = stream.write_all(resp.as_bytes());
@@ -2494,7 +2550,7 @@ fn handle_connection(mut stream: TcpStream, state: Arc<Mutex<NodeContext>>) {
         }
         if matches!(
             command.trim(),
-            "app_dsh_receipt"
+            "app_native_events" | "app_dsh_receipt"
                 | "app_dsh_page"
                 | "app_dsh_preview"
                 | "app_dsh_list"

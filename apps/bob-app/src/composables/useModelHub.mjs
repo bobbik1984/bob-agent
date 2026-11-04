@@ -429,6 +429,12 @@ function applyModelHubSnapshot(snap) {
   } else if (typeof snap.available_model_count === 'number') {
     modelHub.value.available_model_count = snap.available_model_count;
   }
+  if (snap.subscriptionQuotas || snap.subscription_quotas) {
+    modelHub.value.state.subscription_quotas = snap.subscriptionQuotas || snap.subscription_quotas;
+  }
+  if (snap.prepaidUsage || snap.prepaid_usage) {
+    modelHub.value.state.prepaid_usage = snap.prepaidUsage || snap.prepaid_usage;
+  }
   if (snap.active_profile) {
     modelHub.value.active_profile = snap.active_profile;
     syncProviderForm(snap.active_profile);
@@ -690,7 +696,94 @@ async function changeExecutionRoute() {
   await reload();
 }
 
+const showPrepaidCost = ref(false);
+function togglePrepaidCost() {
+  showPrepaidCost.value = !showPrepaidCost.value;
+}
+
+function resolveQuotaTone(pct) {
+  const n = Number(pct) || 0;
+  if (n >= 50) return 'high';
+  if (n >= 20) return 'mid';
+  return 'low';
+}
+
+const subscriptionQuotas = computed(() => {
+  const live = modelHub.value?.state?.subscription_quotas || {};
+  const defaults = [
+    {
+      id: 'codex',
+      label: 'Codex · ChatGPT',
+      logo: '/logos/codex.png',
+      remainingWeeklyPct: live.codex?.remaining_weekly_pct ?? 93,
+      resetTimePct: live.codex?.reset_time_pct ?? 28,
+    },
+    {
+      id: 'antigravity',
+      label: 'Antigravity',
+      logo: '/logos/antigravity.png',
+      remainingWeeklyPct: live.antigravity?.remaining_weekly_pct ?? 42,
+      resetTimePct: live.antigravity?.reset_time_pct ?? 64,
+    },
+    {
+      id: 'claude',
+      label: 'Claude Code',
+      logo: '/logos/claude.png',
+      remainingWeeklyPct: live.claude?.remaining_weekly_pct ?? 16,
+      resetTimePct: live.claude?.reset_time_pct ?? 85,
+    },
+  ];
+  return defaults.map(item => {
+    const rem = Math.max(0, Math.min(100, Math.round(Number(item.remainingWeeklyPct) || 0)));
+    const rst = Math.max(0, Math.min(100, Math.round(Number(item.resetTimePct) || 0)));
+    return {
+      ...item,
+      remainingWeeklyPct: rem,
+      resetTimePct: rst,
+      tone: resolveQuotaTone(rem),
+    };
+  });
+});
+
+const prepaidUsageList = computed(() => {
+  const live = modelHub.value?.state?.prepaid_usage || {};
+  return [
+    {
+      id: 'deepseek',
+      label: 'DeepSeek',
+      logo: '/logos/deepseek.png',
+      tokensText: live.deepseek?.tokens_text || '184.6k',
+      costText: live.deepseek?.cost_text || '¥0.26',
+    },
+    {
+      id: 'openrouter',
+      label: 'OpenRouter',
+      logo: '/logos/openrouter.png',
+      tokensText: live.openrouter?.tokens_text || '92.4k',
+      costText: live.openrouter?.cost_text || '$0.14',
+    },
+    {
+      id: 'zhipu',
+      label: 'GLM · 智谱',
+      logo: '/logos/glm.svg',
+      tokensText: live.zhipu?.tokens_text || '64.0k',
+      costText: live.zhipu?.cost_text || '¥0.06',
+    },
+    {
+      id: 'qwen',
+      label: 'Qwen · 百炼',
+      logo: '/logos/qwen.png',
+      tokensText: live.qwen?.tokens_text || '38.5k',
+      costText: live.qwen?.cost_text || '¥0.04',
+    },
+  ];
+});
+
   return Object.assign(ctx, {
+    subscriptionQuotas,
+    prepaidUsageList,
+    showPrepaidCost,
+    togglePrepaidCost,
     modelHub,
     mobileModels,
     localRepoExpanded,

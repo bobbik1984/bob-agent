@@ -9,7 +9,7 @@
 
 ## 一、 近期优先队列：F2/F5 会话阅读与流式交互四项优化（2026-11-02 确认）
 
-施工顺序与细则见 [`docs/CURRENT_STAGE.md §3.3`](docs/CURRENT_STAGE.md)，验收标准见 [`docs/FEATURES.md`](docs/FEATURES.md)。手机实测等待用户通知。
+施工顺序与细则见 [`docs/CURRENT_STAGE.md §3.3`](docs/CURRENT_STAGE.md)，验收标准见 [`docs/FEATURES.md`](docs/FEATURES.md)。手机实测等待用户通知。 统一节点 DSH 认证分流已在网页发布并实测，APK 及其真机验收以本轮 evidence 为准；保留重启自动恢复与各工具流式终验缺口。
 
 - [/] **Phase A 四项体验优化真机终验**（本地代码与 `tests/phase-a-ux.test.mjs` 93 项前端单测、55 项 `bob-runtime` 单测已全绿归档至 `docs/archive_done.md`；**剩余缺口**：待用户通知连接手机后执行 Android 真机状态栏安全区、手势返回与真实多节点流式联调终验）。
 
@@ -19,9 +19,9 @@
 
 详细施工步序见 [`docs/CURRENT_STAGE.md §3.6`](docs/CURRENT_STAGE.md)，架构与合规护栏见 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)。
 
-- [/] **BP4-06 宿主边界与目标端 `tmux` 常驻监管**：目标探测与认证核验已统一，未受监管的 SSH 新派发已封堵；**剩余缺口**：在获准节点配置目标端受控 `tmux` / `bob-node` 本地监管、进程取消确认与断线恢复（解决 SSH/PuTTY 关窗口 `SIGHUP` 断连）。
+- [/] **BP4-06 宿主边界与原生常驻监管**：按 BOB-D-013 优先官方服务/持久程序接口，tmux 仅作兼容保活；VPS3 原生协议只读探测已验证，**剩余缺口**：新节点配对与两域名入口已部署并实测；X1T Claude/AGY 与 VPS3 Pi 原会话只读增量已实测并接入本地网页；仍需 DSH 实时订阅、Codex/Claude 未知请求对账、跨轮持久监管、取消确认、全局事件容量/过期游标及断线恢复。见 docs/evidence/2026-11-05-native-session-stream.md。施工见 CURRENT_STAGE §3.6。
 - [/] **BP4-06/07 单设备多 Harness 入口与会话发现/新建**：X1T 连接已合流 DSH/AGY 目录；**剩余缺口**：自动发现已授权工作区的 Claude（`~/.claude/projects`）/ Codex 历史会话并合流至 Tauri `app_dsh_list`，在侧边栏提供“新建 CLI 会话”入口，完善设备能力配置 UI。
-- [/] **BP4-06 节点统一认证维护与多工具递进接线**（规范见 [`docs/wiki/harness-auth.md`](docs/wiki/harness-auth.md)）：`harness_auth.rs` 五项内部动作（`discover_tool / check_auth / recover_auth / begin_login / verify_capabilities`）与 DSH Cookie 优先复用 + 受控日志尾部 token 恢复（`dsh_transport.rs`）已落盘通过单测；**剩余缺口**：核查 X1T 独立程序握手协议，完成 AGY 旧历史解码闭环，以及各远程节点上 Codex / Claude Code / Pi / Hermes / OpenClaw 实机探测接线。
+- [/] **BP4-06 节点统一认证维护与多工具递进接线**（规范见 [`docs/wiki/harness-auth.md`](docs/wiki/harness-auth.md)）：已将原生宿主授权/版本/认证探测接入共用 RPC，移除静态能力成功推断；VPS3 Codex 协议/目录、Pi RPC 与 Claude 登录状态已验。**剩余缺口**：Pi 已配置指定 DS for Remote 私有 profile 并验证原会话，AGY 已用 stream-json 接续；剩余 Codex 原会话实际回复、VPS3 Claude 无回复定位、VPS3 缺失工作区、DSH 实时订阅与独立程序握手、完整持久事件/恢复/取消、Hermes/OpenClaw 实测。见 [`VPS3 evidence`](docs/evidence/2026-11-04-vps3-native-adapters.md)，整体保持进行中。
 - [/] **BP4-01/02/03 跨设备项目关联与工作区交接终验**：本实例 SQLite `project_session_links` 与内核交接状态机已通过；**剩余缺口**：真实跨节点文件/dirty 素材传输验证、跨实例关联同步与 Android 原生命令接线。
 - [/] **BP4-04/05/06 受控自治护栏接线**：胶囊符号骨架、只读子代理池、`ExecutionAssertion`（事前锦囊防盲目质疑反转 + 全绿锁写）、任务卡减法约束与 `WarmRestartState` 热重启状态已在 `context_capsule.rs` 落盘通过单测；**剩余缺口**：在前端主对话 UI 挂载 Observe/Ticket 草案确认卡与低置信度复核提示面板。
 

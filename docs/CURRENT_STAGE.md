@@ -159,8 +159,8 @@ ightarrow$<br>**A2** 旧会话瞬时缓存+角落“检查更新/正在同步/�
 ightarrow$<br>**A3** 消息真实时间（跨天带日期）+ 保留 Markdown 复制栏 $
 ightarrow$<br>**A4** “发送中→已接收→处理中→回复中→完成”五阶段状态与真实流式/整包诚实区分底座 | 390px/1180px 浏览器与单测全绿；预览返回不退应用、不重载会话；翻看旧消息不强滚到底；无假打字动画 |
 | **Phase B**<br>多节点 CLI 有序合流与常驻触达<br>*(见 §3.6 第 1–4 步)* | 侧边栏有序聚合各节点 DSH/Claude/Codex/AGY，解决关 SSH 窗口即断连问题 | **B1** 抽屉置顶「Agent」，下方按项目/按设备有序分组（Web + Tauri `app_dsh_list` 合流）+ 新建 CLI 会话入口 $
-ightarrow$<br>**B2** 目标节点 `bob-node` + 受控 `tmux` 保活 + 原生 `--resume` / `exec resume` 续接（防 SSH `SIGHUP`） $
-ightarrow$<br>**B3** 节点统一认证维护（发现/查认证/确定性恢复/登录/验能力，见 `wiki/harness-auth.md`）与工具递进接入：**先补 DSH 自动恢复**（先复用有效 Cookie，确认失效再从受控启动输出/限定日志换 token，核查独立程序握手协议） $\rightarrow$ **再完成 AGY**（同用户 Headless 缓存认证检测+历史读取） $\rightarrow$ **接通 Codex / Claude Code**（原版工具托管认证+受控 `tmux` 保活） $\rightarrow$ **最后扩展 Pi（`--mode rpc` 管道）、Hermes（按 profile 隔离 `API_SERVER_KEY` + SSE）、OpenClaw（设备身份+配对+权限范围）** | 一次配设备可见已授权工具与历史；关终端窗口任务不中断；取消证实目标进程终止；AGY/DSH/Claude 互不串写 |
+ightarrow$<br>**B2** 目标节点 `bob-node` + 官方服务/持久子进程优先 + 原生会话恢复（BOB-D-013；tmux 仅作兼容保活） $
+ightarrow$<br>**B3** 节点统一认证维护（发现/查认证/确定性恢复/登录/验能力，见 `wiki/harness-auth.md`）与工具递进接入：**先补 DSH 自动恢复**（先复用有效 Cookie，确认失效再从受控启动输出/限定日志换 token，核查独立程序握手协议） $\rightarrow$ **再完成 AGY**（同用户 Headless 缓存认证检测+历史读取） $\rightarrow$ **接通 Codex / Claude Code**（原版工具托管认证+原生持久接口优先） $\rightarrow$ **最后扩展 Pi（`--mode rpc` 管道）、Hermes（按 profile 隔离 `API_SERVER_KEY` + SSE）、OpenClaw（设备身份+配对+权限范围）** | 一次配设备可见已授权工具与历史；关终端窗口任务不中断；取消证实目标进程终止；AGY/DSH/Claude 互不串写 |
 | **Phase C**<br>主 Agent 受控自治与三道防退化护栏<br>*(见 §3.5 & §3.6 第 5 步)* | 吸收 Super-Agent 与三篇论文结论，让主 Agent 省注意力且不盲目改坏代码 | **C1** Resident Router（快慢两级过滤）+ 非白名单任务 Observe/Ticket 草案确认卡（过程静默、终态回流） $
 ightarrow$<br>**C2** 回执前置冻结 `ExecutionAssertion`（事前锦囊，`<0.90` 展开），对无证据“不对/重做”先展示锚点并澄清症状 $
 ightarrow$<br>**C3** `TaskCard` 内联减法约束 + 必选检查全绿且进程终止后收回工作区写锁 $
@@ -238,6 +238,13 @@ ightarrow$ 手机审阅接受”闭环 | 真机冷启动、数据库完整性与
 
 ### 3.6 第四项：BP4-06一个执行者的真实成果闭环（含 `tmux` 保活 + 原生 `session_id` 续接）
 
+2026-11-05 DSH 认证分流修复：统一节点的列表/正文/预览/发送改走节点认证，DSH 凭据仅由宿主管理。X1T 真读 41 会话、Winter Shelter 最近 10 条与身份保持通过，网页已发布；APK 构建待补结果，手机未测。证据见 [2026-11-05-dsh-node-routing.md](evidence/2026-11-05-dsh-node-routing.md)。
+
+现行监管选择按 BOB-D-013：优先官方服务/持久程序接口，tmux 为兼容路径；下文早期实现记录不代表全部工具必须套 tmux。
+
+2026-11-04真实配对审查：设备地址挑战认证流程未验收。生产回环API实测未认证可创建邀请、错误code可凭邀请路径兑换；测试凭据已撤销。优先修复机主授权、严格一次性兑换、随机凭据与节点身份，再推进统一设备入口。生产前端经SSH转发检查，不等于公网登录或手机验收。详见[evidence/2026-11-04-node-pairing-audit.md](evidence/2026-11-04-node-pairing-audit.md)。
+
+
 2026-11-01实现增量（离线Fixture闭环，未调用真实Claude计费）：已在 `crates/bob-runtime/src/claude_harness.rs` 与 `crates/bob-node/src/claude_rpc.rs` 完成原生 `Claude Code` 执行适配器、`TmuxHarnessRunner` 保活与重启对账、原生 `--resume <session_id>` 续接、同工作目录跨工具（Claude/DSH）串行写锁（`HARNESS_WORKSPACE_BUSY`）与 `bob-task-card-v1` 交接挂载，以及 `V1 -> 指定父版 V2` 不可变快照与验证/待审/接受状态机；统一对话侧栏（`ConversationDirectory.vue` / `DshSessions.vue`）直接显示节点、项目工作区与 `Claude` 工具标签，不新增独立 Claude 界面。受控网页成果与 Markdown 文档成果两类 `V1 -> V2` 闭环、取消/超时/崩溃重启不重放均已通过离线 Fake-Claude 回归（`bob-runtime` 30/30、`bob-node` 6/6、前端 `86/86`），详见 `docs/evidence/BP4_06_CLAUDE_HARNESS_VERIFICATION.md`。同日经用户授权完成 X1T 现场只读盘点（`/home/bobbik/.local/bin/claude` `2.1.316 (Claude Code)`，`claude.ai` Pro 认证有效，无 `tmux` 自动走受控 `process` 模式）与真实两轮 `V1 -> V2`（`native_session_id: eeddd53b-e6a8-434f-ae8a-e20ee1fee104` `--resume` 续接、V1 快照 SHA-256 不变）实机闭环验证，证据见 `docs/evidence/x1t_live_claude_v1_v2_evidence.json`。
 
 实施：① 按实际已安装Harness（`dsh`、`codex`、`claude`、`agy`）核对 capabilities/version/认证方式及原生会话寻址；② 直接续聊保留 `native_sessions` 原生绑定（如 `claude --resume <id>`、`codex exec resume <id>`、ACP `session/prompt`），无须先走BYOK；跨工具委派或原生会话失效时才挂任务卡/胶囊；③ 在支持 `tmux` 的节点采用“外层受控 `tmux` 防断线保活 + 内层结构化 JSON 回执落盘（禁止 `send-keys`/`capture-pane` 刮屏）”，支持随时 `tmux attach` 旁观；④ 以既有Task/Execution与runner契约记录派发、采用、取消、终态、验证、成果登记；⑤ 绑定父ArtifactVersion与输入hash，保留历史快照；⑥ 在统一对话中展示总结、重要失败、可展开过程和成果。
@@ -247,6 +254,37 @@ ightarrow$ 手机审阅接受”闭环 | 真机冷启动、数据库完整性与
 边界：优先已有DSH或Codex一条有证据路径，其余按能力诚实降级；不要求同时接齐全部Harness。不恢复X1T/B4建模，不修改真实项目，不擅自发布测试成果。跨工具并发写同目录禁止；人工IDE修改需重新核对工作树。
 
 #### BP4-06 当前接续施工：单设备入口、多Harness与项目归组
+
+2026-11-04 后续获批实施：两个指定域名的独立节点认证入口已部署，稳定身份、机主密码、一次性5分钟邀请、独立365天凭证、撤销及匿名/越权拒绝均经公网实测。线上连接界面已发布并保存两台新连接；节点重启后新凭证可读取VPS3 35条、X1T 40条真实目录，X1T DSH/AGY/Claude/Codex历史各一条已读回（DSH Winter Shelter最近10条）。本机DSH回环HTTP/WS及受控日志认证已接通，旧远端TLS约束保留。手机暂停、无APK、未发真实项目消息；不是所有工具续聊/流式已完成。VPS3独立DSH未发现（3080是旧Dashboard），Pi默认长期配置和AGY兼容仍待接。旧入口身份迁移、旧Online配对协议加固和客户端发布单独验收。详见 [统一节点入口证据](evidence/2026-11-04-unified-node-entry.md)。
+
+
+#### BP4-06 原会话续聊与增量当前事实（2026-11-05，本地候选）
+
+本轮已实际发送只读消息：X1T Claude、AGY（Winter Shelter）与 VPS3 Pi 原生 ID 不变，分别捕获 6/7/38 段文本增量，三处工作区 Git status+diff 指纹前后不变。Pi 使用此前已授权的 DS for Remote 私有 profile。统一5194候选可读两节点真实目录及 Pi 原会话；页面实际发送接收到持久增量事件。已修复静默新建会话 fallback、绕权限默认参数、死进程假完成、Pi 截断假成功与用户快照串为助手消息。
+
+此增量替代下方早期“仅探测/无实际发送”边界，但 BP4-06 仍在施工：X1T Codex 超时且官方原会话末 turn interrupted/无文本，保持 unknown 不重发；VPS3 Claude 未获回复；VPS3 Codex 原工作目录已不存在；DSH 实时订阅未接通。前端目前按游标轮询事件，跨轮持久进程、取消确认、全局事件容量及过期游标恢复尚未完成。手机仍暂停、未上线、未打包。代码与实测见 [本轮证据](evidence/2026-11-05-native-session-stream.md)。
+
+连续施工顺序：① 完成 Pi/AGY/Claude 共用事件的 UI 身份/去重回归；② DSH 采用已核实 session/follow assistantStream 协议，不再 snapshot 后立即关流；③ Codex/Claude 未知请求按原生回执对账，修复确切失败点，不重配令牌或偷换会话；④ 目标端长驻监管、取消/重连、容量/过期游标与 Tauri 接线；⑤ 用户通知后再做手机验收。以上沿 BP4-06.b/c/d，不新增平行计划。
+
+#### BP4-06 / F2/F5 标准适配器与流式当前任务（设计与首轮实现）
+
+状态：用户随后授权必要修改并指定 VPS3 验证。已将 `harness_auth.rs` 原有静态能力与登录推断替换为宿主授权下的版本/原生协议探测；共用 `app_harness_*` RPC 沿 `agy_directory.rs` 执行 `harness_probe.py`，仅允许连接授权清单中的工具，非默认 profile 未支持时拒绝冒用默认身份。配置、官方支持、现场观测与 Bob 接通状态分开。JSONL 组件保留接受回执之前到达的通知，有帧/队列/总量/时间上限并回收自有子进程。
+
+VPS3 实测：Codex 0.156.1 原生 app-server 握手、账户状态和目录请求通过（返回 0 条，不证明既有历史续聊）；Pi 0.85.1 同进程状态/隔离空历史/模型列表读取通过，但可用模型 0，短文本测试在接受前被拒绝，流式未通过；AGY 1.2.16 ACP 初始化进程退出，保持未知；Claude 2.1.74 本机登录状态通过。DSH 有既存端口观察，但本轮未完成服务身份/认证验证。详情及源码哈希见 [VPS3 验证证据](evidence/2026-11-04-vps3-native-adapters.md)。
+
+后续指定凭据复验：用户授权 `DS for Remote`，VPS3 Pi + 注册表 `deepseek-flash` 实际收到 23 次文本增量，首段 972 ms、1063 ms 完成，`agent_settled` 与 idle 核对通过。凭据只临时注入，默认配置仍未改；网页流式/原会话续聊未验。
+
+本地 runtime 62/62、最终认证定向 6/6、协议组件 11/11 通过；本轮只是原生探测接线与 VPS3 协议验证，不是新工具网页收发闭环。下一步先解决节点配对审查阻断项，再落节点持久事件/游标和一种可用工具的真实发送链路；Pi 模型认证及 AGY 版本兼容单独处理，不自动升级、提取其他工具凭据或重发拒绝/未知请求。以上为该轮探测时的历史边界；随后节点部署与配对结果见本节前述统一入口增量。未打包、未测手机。
+
+1. **BP4-06.a 统一入口与能力真实性**：先完成已记录的节点认证/配对阻断项；再以 §6 契约拆分官方支持、现场探测、Bob 接通状态。探测限获准宿主/用户/profile；命令存在不等于登录或能续聊。源码落点先沿 `harness_auth.rs` / `agy_directory.rs` 与既有 node RPC，不新增平行任务账本。
+2. **BP4-06.b 持久适配器**：保留 DSH 现有服务与原 session，接通 AGY 原会话路径，再接 Codex/Claude，随后 Pi；复用 registry/supervisor/session contract。启动及空闲回收有明确所有权，外部服务不自动重启；每种工具单独记录支持的版本范围。
+3. **F2/F5 + BP4-06.c 真实事件链路**：从上游文本增量到节点持久事件再到网页渲染全链路接线，覆盖审批、取消、成果和终态。不能以“工具支持流式”或历史轮询证明 Bob 已流式；不只实现校验函数。
+4. **BP4-06.d 兼容测试与产品闭环**：公共一致性测试套件覆盖至少 DSH 服务与一种 stdio 驱动；真实节点原会话测试另行记录版本、首段时间/终态时间、request/session ID 和断线重连结果。仅在模型请求授权明确时做有副作用的测试。
+
+验收：未安装/未登录/未知版本、已接受但未完成、重复/乱序事件、UTF-8 分帧、增量后快照不重复、断流补齐、未知发送不重发、取消待确认、节点重启、慢客户端背压及同会话多入口竞争；既有 DSH 历史/凭据/草稿无损。统一本地页面显示缓存→核对→实际回复状态；新适配器无需另一套聊天 UI。手机仍等用户通知；本次无上线/打包授权，不改变既有运行事实和完成度。
+
+回退：保持现有 DSH 兼容路径；新驱动可按配置停用，保留原会话、回执及未决执行，不能通过回退重发。组件规范见 wiki/harness-auth §6，原生监管选择替代旧的统一 tmux 假设。
+
 
 本轮补充：AGY目录已提供短时复用与失败缓存回退；Winter冷读取曾超过60秒，放宽等待后的浏览器复验通过，性能问题仍待优化。
 
@@ -266,7 +304,7 @@ ightarrow$ 手机审阅接受”闭环 | 真机冷启动、数据库完整性与
 1. **BP4-06 宿主正确性优先**：修复remote_ssh_target下Claude远端探测而tmux/cwd本地探测及启动的错位；认证未知保持unknown，不从命令存在推断已登录。明确目标端进程、回执、取消、超时和重启核对；无可靠远端监管不得宣称保活成功。
 2. **BP4-06/07 设备能力入口**：稳定设备身份与地址分离；节点提供版本化工具清单和独立授权状态。设置中添加设备后选择可用Harness；保留DSH兼容适配和原有凭据/原session。工具端口为宿主内部配置。先探测后选择，不自动安装工具或新增公网端口。
 3. **BP4-01/02 项目关联与双视图**：将Project身份与设备目录分开，持久保存会话/工作区关联和owner版本。实现推荐后确认、纠正及解除关联；按项目跨设备聚合，按设备展示同一记录。禁止按同名合并，禁止用关联操作隐式转移写权。
-4. **BP4-06 Claude/Codex实际入口与AGY合规边界**：在统一界面与Tauri原生桥接（`app_dsh_list`合流）自动发现目标设备已授权工作区的原生会话（如 `~/.claude/projects` 等）并提供新建会话入口，由目标端 `bob-node` + 受控 `tmux` 保活并通过 `--resume` 续接（解决SSH/PuTTY关闭触发 `SIGHUP` 断连）；`Codex` 沿 `codex exec resume` 核验接入；`AGY` 严守反套壳红线（不以 `tmux` 刮屏或抠取凭据充当后台API，仅通过共享工作区文档与 `ProjectContextCapsule` 做只读状态观测与显式交接，除非使用官方获准的外部协议）。
+4. **BP4-06 原生接口组件化接线**：沿用统一目录与 Tauri 桥接，按 BOB-D-013 / wiki/harness-auth §6 接官方持久服务/程序接口；AGY ACP 或持续 JSON 流、Codex app-server、Claude 官方程序接口、Pi RPC 分别探测版本与认证。tmux 仅作兼容保活，禁止凭据提取或刮屏；原生历史读取与新建/恢复能力分别验收。
 5. **BP4-04/06 自治护栏与接续验证**：在主路由与 `TaskCard` / 回执链路落实：① Observe/Ticket草案模式（非白名单任务先出草案卡确认）；② 回执同事务冻结 `ExecutionAssertion`（事前锦囊，置信度 < 0.90 展开，拦截无证据盲目质疑引发的错误反转）；③ 任务卡内联减法约束与必选检查全绿后收回写锁；④ 跨执行/跨工具换手注入 `WarmRestartState`（已定位文件+失败诊断+增量diff，替代冷重启）。以同项目讨论、DSH开发、Claude续改及另一节点研究为验收场景。
 
 验收门：正常连接、认证未知/失效、工具缺失、节点离线、重复派发、取消/迟到回执、宿主重启和同名不同项目均有证据；项目关联跨刷新保留，原session与消息不复制，已有DSH连接无损。分开记录代码/本地/远端/浏览器/真机结果。手机验证待用户恢复要求；本次仅更新文档，不授权部署、打包、安装tmux或模型调用。

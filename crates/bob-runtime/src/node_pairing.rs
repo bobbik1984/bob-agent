@@ -640,6 +640,7 @@ pub fn sync_topology_with_peer_url(
         return Err("PAIRING_HOME_UNREACHABLE");
     }
     let client = reqwest::blocking::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
         .timeout(Duration::from_secs(15))
         .build()
         .map_err(|_| "PAIRING_NETWORK_UNAVAILABLE")?;
@@ -662,6 +663,7 @@ pub fn exchange_and_sync_with_peer(
     local_topology: &Value,
 ) -> Result<Value, &'static str> {
     let client = reqwest::blocking::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
         .timeout(Duration::from_secs(12))
         .build()
         .map_err(|_| "PAIRING_NETWORK_UNAVAILABLE")?;
@@ -700,7 +702,9 @@ pub fn exchange_and_sync_with_peer(
 
     // Push local topology (including remoteNodes + deviceHarnesses) to peer and receive peer's merged topology
     let sync_url = format!("{base}/api/client/v1/topology/sync");
-    let synced_topology = client
+    let synced_topology = if ex_json.get("topology_sync").and_then(Value::as_bool) == Some(false) {
+        json!({})
+    } else { client
         .post(&sync_url)
         .header("Authorization", format!("Bearer {token}"))
         .json(local_topology)
@@ -708,10 +712,10 @@ pub fn exchange_and_sync_with_peer(
         .ok()
         .filter(|r| r.status().is_success())
         .and_then(|r| r.json::<Value>().ok())
-        .unwrap_or_else(|| json!({}));
+        .unwrap_or_else(|| json!({})) };
 
     Ok(json!({
-        "nodeId": inv.node_id,
+        "nodeId": ex_json.get("node_id").and_then(Value::as_str).unwrap_or(&inv.node_id),
         "label": inv.label,
         "baseUrl": base,
         "role": inv.role,
@@ -724,6 +728,34 @@ pub fn exchange_and_sync_with_peer(
 
 /// Forward a DSH/Multi-Harness RPC (`app_dsh_list`, `app_dsh_page`, `app_dsh_prompt`, `app_dsh_receipt`, `app_dsh_preview`)
 /// over HTTP to a remote `bob-node` endpoint, querying its `"local"` harnesses.
+/// Discover protocol without sending either kind of credential. Never guess from a hostname.
+pub fn is_bob_node_endpoint(endpoint: &str) -> Result<bool, &'static str> {
+    let url = reqwest::Url::parse(endpoint).map_err(|_| "DSH_ADDRESS_INVALID")?;
+    if !matches!(url.scheme(), "http" | "https") || !url.username().is_empty() || url.password().is_some() || url.query().is_some() {
+        return Err("DSH_ADDRESS_INVALID");
+    }
+    let response = reqwest::blocking::Client::builder()
+        .redirect(reqwest::redirect::Policy::none()).timeout(Duration::from_secs(10))
+        .build().map_err(|_| "DSH_UNAVAILABLE")?
+        .get(format!("{}/api/node/v1/info", endpoint.trim_end_matches('/')))
+        .send().map_err(|_| "DSH_UNAVAILABLE")?;
+    if matches!(response.status().as_u16(), 401 | 404) { return Ok(false); }
+    if !response.status().is_success() { return Err("DSH_UNAVAILABLE"); }
+    let body: Value = response.json().map_err(|_| "DSH_PROTOCOL")?;
+    Ok(body["protocol"] == "bob-node-v1")
+}
+
+/// A paired node owns its local tool authentication. Do not retry another peer.
+pub fn route_paired_node_rpc(runtime: &ModelHubRuntime, connection: &str, command: &str, args: &Value) -> Result<Option<Value>, &'static str> {
+    if connection == "local" { return Ok(None); }
+    let hub = runtime.load_hub_state();
+    let node = hub["remoteNodes"].as_array().and_then(|nodes| nodes.iter().find(|n| n["id"] == connection && n["enabled"].as_bool().unwrap_or(true))).ok_or("DSH_CONNECTION_NOT_FOUND")?;
+    let endpoint = node["url"].as_str().or_else(|| node["baseUrl"].as_str()).ok_or("DSH_ADDRESS_INVALID")?;
+    if !is_bob_node_endpoint(endpoint)? { return Ok(None); }
+    let token = runtime.secrets.get(&remote_node_token_slot(connection)).ok();
+    forward_dsh_rpc_to_endpoint(endpoint, token.as_deref(), connection, command, args).map(Some)
+}
+
 pub fn forward_dsh_rpc_to_endpoint(
     raw_url: &str,
     token: Option<&str>,
@@ -761,6 +793,7 @@ pub fn forward_dsh_rpc_to_endpoint_with_target(
         obj.insert("_relayed".to_owned(), json!(true));
     }
     let client = reqwest::blocking::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
         .timeout(Duration::from_secs(35))
         .build()
         .map_err(|_| "DSH_UNAVAILABLE")?;
@@ -850,7 +883,8 @@ pub fn forward_dsh_rpc_to_remote_node(
         }
     }
 
-    if already_relayed {
+    // A send with an unknown receipt must never be replayed through another peer.
+    if already_relayed || command == "app_dsh_prompt" {
         return Err("DSH_UNAVAILABLE");
     }
 
@@ -1251,6 +1285,32 @@ pub fn render_terminal_qr(payload: &str) -> Result<String, &'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn node_protocol_discovery_is_credential_free_and_fail_closed() {
+        use std::io::{Read, Write};
+        for (status, body, expected) in [
+            ("200 OK", r#"{"protocol":"bob-node-v1"}"#, Ok(true)),
+            ("401 Unauthorized", "{}", Ok(false)),
+            ("404 Not Found", "{}", Ok(false)),
+            ("503 Unavailable", "{}", Err("DSH_UNAVAILABLE")),
+        ] {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let endpoint = format!("http://{}", listener.local_addr().unwrap());
+            let worker = std::thread::spawn(move || {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut buf = [0u8; 4096];
+                let count = stream.read(&mut buf).unwrap();
+                let request = String::from_utf8_lossy(&buf[..count]).to_lowercase();
+                assert!(request.starts_with("get /api/node/v1/info "));
+                assert!(!request.contains("authorization:") && !request.contains("token="));
+                write!(stream, "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+            });
+            assert_eq!(is_bob_node_endpoint(&endpoint), expected);
+            worker.join().unwrap();
+        }
+        assert_eq!(is_bob_node_endpoint("https://user:secret@example.invalid"), Err("DSH_ADDRESS_INVALID"));
+    }
 
     #[test]
     fn node_pairing_invitation_roundtrips_compact_uri_and_base64() {

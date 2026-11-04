@@ -213,8 +213,13 @@ fn compact_python(src: &str) -> String {
 }
 
 pub fn run_local_probe(arg_str: &str, timeout_secs: u64) -> Result<Vec<u8>, &'static str> {
+    let source = compact_python(include_str!("agy_index_probe.py"));
+    run_local_python(arg_str, timeout_secs, &source)
+}
+
+fn run_local_python(arg_str: &str, timeout_secs: u64, source: &str) -> Result<Vec<u8>, &'static str> {
     let encoded = STANDARD.encode(arg_str.as_bytes());
-    let compacted = compact_python(include_str!("agy_index_probe.py"));
+    let compacted = source.to_owned();
     let py_code = format!(
         "import sys,base64;s=sys.stdin.read();sys.argv=['probe',base64.b64decode('{encoded}').decode('utf-8')];exec(s,{{'__name__':'__main__','__BOB_PROBE_SRC__':s}})"
     );
@@ -266,14 +271,19 @@ pub fn run_local_probe(arg_str: &str, timeout_secs: u64) -> Result<Vec<u8>, &'st
 }
 
 fn run_ssh_python(ssh_target: &str, arg_str: &str, timeout_secs: u64) -> Result<Vec<u8>, &'static str> {
+    let source = compact_python(include_str!("agy_index_probe.py"));
+    run_host_python(ssh_target, arg_str, timeout_secs, &source)
+}
+
+fn run_host_python(ssh_target: &str, arg_str: &str, timeout_secs: u64, source: &str) -> Result<Vec<u8>, &'static str> {
     if matches!(ssh_target, "local" | "self" | "localhost" | "127.0.0.1") {
-        return run_local_probe(arg_str, timeout_secs);
+        return run_local_python(arg_str, timeout_secs, source);
     }
     if ssh_target.is_empty() || ssh_target.starts_with('-') || !ssh_target.bytes().all(|c|c.is_ascii_alphanumeric()||b"-_.@".contains(&c)) {
         return Err("AGY_CONFIG_INVALID");
     }
     let encoded=STANDARD.encode(arg_str.as_bytes());
-    let compacted=compact_python(include_str!("agy_index_probe.py"));
+    let compacted=source.to_owned();
     let remote_cmd=format!("python3 -c \"import sys,base64;s=sys.stdin.read();sys.argv=['probe',base64.b64decode('{encoded}').decode('utf-8')];exec(s,{{'__name__':'__main__','__BOB_PROBE_SRC__':s}})\"");
     let mut command=Command::new("ssh");
     command.args(["-o","BatchMode=yes","-o","ConnectTimeout=15","-o","ServerAliveInterval=5","-o","ServerAliveCountMax=2","--",ssh_target,&remote_cmd])
@@ -295,6 +305,27 @@ fn run_ssh_python(ssh_target: &str, arg_str: &str, timeout_secs: u64) -> Result<
     let b=reader.join().map_err(|_|"AGY_INDEX_UNAVAILABLE")?.map_err(|_|"AGY_INDEX_UNAVAILABLE")?;
     if !success || b.len()>2*1024*1024 { return Err("AGY_INDEX_UNAVAILABLE") }
     Ok(b)
+}
+
+/// Probe only tools explicitly granted to this connection, on that host.
+/// Inputs never supply executable paths, shell text, credentials, or a new host.
+pub fn probe_native_harness(data: &Path, connection: &str, tool: &str, discovery_only: bool) -> Result<Value, &'static str> {
+    if !["codex", "pi", "agy", "claude"].contains(&tool) {
+        return Err("HARNESS_TOOL_UNSUPPORTED");
+    }
+    let all = grants(data)?;
+    let g = all.iter().find(|g| g.connection_id == connection).ok_or("HARNESS_HOST_GRANT_REQUIRED")?;
+    if !g.harnesses.iter().any(|t| t == tool) {
+        return Err("HARNESS_TOOL_NOT_GRANTED");
+    }
+    let args = serde_json::to_string(&json!({"tool": tool, "discovery_only": discovery_only}))
+        .map_err(|_| "HARNESS_PROBE_INVALID")?;
+    let bytes = run_host_python(&g.ssh_target, &args, 55, include_str!("harness_probe.py"))?;
+    let value: Value = serde_json::from_slice(&bytes).map_err(|_| "HARNESS_PROBE_INVALID")?;
+    if value["schema_version"] != 1 || value["tool"] != tool || !value["installed"].is_boolean() {
+        return Err("HARNESS_PROBE_INVALID");
+    }
+    Ok(value)
 }
 
 fn fetch_list(data: &Path, connection: &str) -> Result<Vec<Value>, &'static str> {
@@ -416,6 +447,15 @@ pub fn prompt_session(data: &Path, connection: &str, session_id: &str, text: &st
     let cache_path=data.join(format!("remote-page-{:x}.json",hash.finalize()));
     let _=fs::remove_file(cache_path);
     Ok(res)
+}
+
+pub fn native_events(data: &Path, connection: &str, session: &str, after: i64) -> Result<Value, &'static str> {
+    if !owns_readable_session(session) { return Err("HARNESS_EVENTS_UNSUPPORTED") }
+    let all=grants(data)?;
+    let grant=all.iter().find(|g|g.connection_id==connection).ok_or("DSH_CONNECTION_REQUIRED")?;
+    let args=json!({"mode":"events","sessionId":session,"after":after});
+    let bytes=run_ssh_python(&grant.ssh_target,&args.to_string(),15)?;
+    serde_json::from_slice(&bytes).map_err(|_|"HARNESS_EVENTS_INVALID")
 }
 
 pub fn inspect_receipt(data: &Path, connection: &str, session_id: &str, text: &str, request_id: &str) -> Result<Value, &'static str> {

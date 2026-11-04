@@ -31,7 +31,8 @@
 
 | 工具 | 官方认证机制 | Bob 节点推荐接法 | 失效后如何确定性处理 | 官方参考来源 |
 | :--- | :--- | :--- | :--- | :--- |
-| **DSH**<br>*(DeepSeek Harness)* | 启动 `token` 换取浏览器会话 `Cookie`（签名密钥持久保存）；另有独立程序接入握手协议 | 优先评估独立程序接入握手协议；兼容现有 `token` $ightarrow$ `Cookie` 交换通道 | **先检查现有 Cookie 会话是否仍有效**；确认认证失效（401/403）后，才从受控启动输出或指定日志范围获取当前启动 `token` 交换新 `Cookie` | [DSH 浏览器 Token 认证架构](https://github.com/deepseek-ai/deepseek-harness/blob/master/.agents/notes/implemented/architecture/2026-08-24-browser-token-authentication.md) |
+| **DSH**<br>*(DeepSeek Harness)* | 启动 `token` 换取浏览器会话 `Cookie`（签名密钥持久保存）；另有独立程序接入握手协议 | 优先评估独立程序接入握手协议；兼容现有 `token` $
+ightarrow$ `Cookie` 交换通道 | **先检查现有 Cookie 会话是否仍有效**；确认认证失效（401/403）后，才从受控启动输出或指定日志范围获取当前启动 `token` 交换新 `Cookie` | [DSH 浏览器 Token 认证架构](https://github.com/deepseek-ai/deepseek-harness/blob/master/.agents/notes/implemented/architecture/2026-08-24-browser-token-authentication.md) |
 | **AGY**<br>*(Antigravity)* | Headless 模式直接复用本机已缓存的官方登录凭据 | 在同一系统用户（User）下运行官方 `agy` CLI（或核验官方协议） | 未登录时 CLI 会明确退出报错；节点捕获后报告 `login_required`，交回官方交互登录流程，**严禁抠取凭据或刮屏套壳** | [AGY 官方 Headless 文档](https://antigravity.google/docs/cli/headless/) |
 | **Codex**<br>*(OpenAI Codex)* | 官方 CLI / `app-server` 托管账户登录状态、完成通知与 Token 自动刷新 | 由本机原版工具管理认证（调用官方 CLI 或 `app-server`） | 使用官方账户状态检查与托管刷新机制；需要重新认证时触发官方登录流程，**避免 Bob 自行搬运其内部凭据** | [Codex 官方 app-server 文档](https://developers.openai.com/codex/app-server) |
 | **Claude Code**<br>*(`claude`)* | 官方账号 OAuth 登录、`ANTHROPIC_API_KEY` 或云厂商凭据 | 调用本机原版 `claude` CLI，沿用该系统用户的认证环境 | 通过结构化 `loggedIn` 状态核验；失效时报告 `login_required` 交回官方 `claude` 登录流程处理 | [Claude Code 官方认证文档](https://code.claude.com/docs/en/authentication) |
@@ -74,9 +75,12 @@
 ### 4.3 OpenClaw 的三类拒绝状态机
 
 接入 OpenClaw 网关时，适配器状态机必须解析握手与响应中的具体拒绝错误码：
-- `TokenInvalid / Expired` $ightarrow$ 尝试使用已配对身份刷新或读取更新后的网关 Token；
-- `PairingRevoked / Unpaired` $ightarrow$ 标记 `pairing_required`，停止后台自动重试，向前端展示重新配对流程；
-- `InsufficientScope / Forbidden` $ightarrow$ 标记 `insufficient_scope`，明确告知用户当前设备角色缺少哪项网关权限（如只读设备尝试发起执行），不诱导用户反复无效重填 Token。
+- `TokenInvalid / Expired` $
+ightarrow$ 尝试使用已配对身份刷新或读取更新后的网关 Token；
+- `PairingRevoked / Unpaired` $
+ightarrow$ 标记 `pairing_required`，停止后台自动重试，向前端展示重新配对流程；
+- `InsufficientScope / Forbidden` $
+ightarrow$ 标记 `insufficient_scope`，明确告知用户当前设备角色缺少哪项网关权限（如只读设备尝试发起执行），不诱导用户反复无效重填 Token。
 
 ---
 
@@ -86,5 +90,64 @@
 
 1. **第一棒：补齐 `DSH` 自动认证恢复闭环**（落实上述 6 步算法 + 核查 X1T 实际版本是否支持独立程序握手协议）；
 2. **第二棒：完成 `AGY` 认证状态核验与历史接入**（同用户 Headless 缓存认证检测、未登录诚实报告 `login_required`、完成历史读取）；
-3. **第三棒：接通 `Codex` 与 `Claude Code` 统一设备入口**（复用本机原版 CLI / `app-server` 官方认证状态与受控 `tmux` 保活续接）；
+3. **第三棒：接通 `Codex` 与 `Claude Code` 统一设备入口**（复用本机原版工具认证与持久程序接口；`tmux` 仅作必要的兼容保活）；
 4. **第四棒：扩展独立适配器 `Pi`（`--mode rpc` JSONL 管道）、`Hermes`（按 profile 隔离的 `API_SERVER_KEY` + SSE 流式）、`OpenClaw`（设备身份 + 配对 + Scope 状态机）**。
+
+## 6. 标准适配组件：原生常驻优先与真实流式
+
+2026-11-04 用户确认的设计，按 BOB-D-013 生效；本节是组件协议的唯一正文，不表示所有适配器已实现或部署。
+
+### 6.1 接入选择与官方能力依据
+
+顺序：复用已运行、支持机器调用的官方服务 → 官方持久子进程协议 → 受监管的原生命令/续接 → 必要时使用 tmux 兼容保活。官方 Remote Control 仅供厂商客户端使用时，保留为“在官方界面打开”；它不是 Bob 自动可用的程序接口。服务常驻、会话持久化和机器不休眠是三个不同条件。
+
+| 工具 | 首选接入 | 流式依据与待核对边界 |
+|---|---|---|
+| DSH | 复用现有 Host 的认证会话接口；SDK/ACP 作为按版本探测的候选，不为接入另启争用同一会话的服务 | 官方架构定义实时 assistant-stream 与 Web Session-follow；临时文本增量和持久 SessionEvent 分开，断流须用已提交历史补齐。当前节点协议与 Bob 到 UI 链路仍须实测 |
+| AGY | `agy acp` 或同一进程的双向 stream-json；原生远控 daemon 用于官方远控入口 | ACP/stream-json 为公开程序接口；正文 text_delta、回合 result 可标准化。历史枚举、旧会话恢复、审批与取消逐项探测，不能由 ACP 名称推断全部支持 |
+| Codex | `codex app-server`，优先本机 stdio；Bob 提供设备网络边界 | 原生会话、审批及增量事件；WebSocket 为实验性，不能直接当公网服务。具体 schema 以安装版本生成/核对，认证适用范围单独检查 |
+| Claude Code | 官方程序接口/Agent SDK 或受监管结构化 CLI 续接；Remote Control 为官方备用入口 | 核验文本增量、审批和原 ID 恢复；官方远控在线不等于 Bob 已控制该进程，不同时恢复同一活动会话 |
+| Pi | `pi --mode rpc` 持久子进程、JSONL stdin/stdout | 官方 RPC 有 message_update/text_delta。prompt 接受回执不是完成；按该版本终态协议判定，当前文档以 agent_settled 区别低层 agent_end。正常业务启用持久 session，不照抄示例的 --no-session |
+| Hermes / OpenClaw | 沿 §3 的本机 HTTP/SSE 或网关适配 | 后续逐版本核验；不能沿用静态 supports_stream=true 宣称已接通 |
+
+官方来源（核查日期 2026-11-04；上游主分支不等于节点安装版本）：[DSH 架构](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/architecture.md)、[AGY ACP](https://antigravity.google/docs/cli/acp/)、[AGY 持续流](https://antigravity.google/docs/cli/headless/)、[AGY 远控](https://antigravity.google/docs/remote-control/)、[Codex app-server](https://developers.openai.com/codex/app-server)、[Claude 程序接口](https://code.claude.com/docs/en/headless)、[Pi RPC](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/rpc.md)。
+
+### 6.2 组件职责与契约
+
+这些是待接入现有 runtime/node 的逻辑组件，不是新增服务或另一套任务账本：
+
+| 组件 | 标准职责 |
+|---|---|
+| AdapterRegistry | 根据工具、版本、OS 用户/profile 选择兼容驱动；配置命令/端点，不硬编码用户设备、域名或目录；未知版本先探测 |
+| HarnessAdapter | 保留 §2 五项认证动作；提供 list_sessions、read_history(cursor, limit)、open/resume_session、send(request_id)、subscribe(cursor)、approve、cancel、read_artifact；不支持的动作显式返回 unsupported |
+| ProcessSupervisor | 管理节点自己启动的进程、并发/空闲回收、退出和重启对账；外部服务仅连接，不擅自重启；有在途/待审批/未知回执时不得按空闲释放 |
+| EventNormalizer | 将原协议映射为统一事件及错误，同时保留原生身份/序号；stdout 只作协议，stderr 有界脱敏；不解析终端画面 |
+| SessionDirectory / ReadCache | 沿用已有目录、分页和有界缓存；先读缓存后核对；保留 project/device/workspace/harness/profile/native_session_id，不复制权威历史 |
+
+能力报告必须分三层：`documented_support`（来源/日期/兼容版本）、`observed_support`（supported/unsupported/unknown、探针/时间/失败原因）、`bob_integration`（unwired/candidate/verified）。认证、可达性、授权范围独立报告；有配置、存在二进制、官方宣称支持都不能直接变成当前可用。当前实现兼容值 `probe_only` 表示只完成上游探测，`unverified` 表示未验，均不等于 `verified`；旧布尔 `supports_*` 未验时为 null。只读状态检查不调用模型；有副作用的能力验证须在既有明确授权内执行。
+
+### 6.3 统一流式事件与恢复
+
+- 事件信封包含 schema_version、device_id、adapter/profile、native_session_id、Bob request_id/执行引用（可空）、原生 turn/message/item ID（不可得时可空）、Bob 持久 event_id/sequence、原生 cursor（如支持）、observed_at、kind 与有界 payload。关联不明时保持未知，不把“最新回复”直接归到本次请求。
+- 统一 kind：accepted、running、text_delta、message_snapshot、tool_status、approval_required、artifact_available、completed、failed、cancelled。完成、取消确认和消息快照不同；停止请求不等于目标已停止。
+- UI 以真实事件呈现发送中、已接收、处理中、回复中、完成；审批独立可操作。只有上游正在输出可展示文本才追加 text_delta；整包接口显示处理中后一次呈现，不伪造打字动画，不索取内部思维链。
+- 先订阅再发送，先落持久回执再向用户确认；事件重复去重、迟到隔离；snapshot 替换同一消息已显示增量，不能追加一份完整回复。SDK/管道分帧处理 UTF-8 跨块、JSONL 长帧和背压。
+- 浏览器掉线不停止节点任务。客户端用 Bob 游标补事件；上游不可重放时，用原生 ID 的有界持久历史核对并标记增量缺口。不能将暂存片段冒充源已提交历史，不能因重连重发 prompt。
+- 沿用阅读缓存容量/条数/TTL 上限；事件日志另设有界保留窗口，过期游标返回 resync_required；未决回执、审批及成果身份不得随阅读缓存淘汰。凭据不进事件或缓存。
+- 同会话发送串行，同工作区写权沿用既有租约；厂商原生窗口不受 Bob 租约控制时，能力报告标明接管限制并核对活动状态，不宣称全局互斥。
+
+### 6.4 面向用户的统一方式
+
+设置只暴露添加设备（地址/扫码）、节点认证、工具列表及明确的“可使用/需要登录/未安装/暂不可达/功能未接通”状态；内部端口、RPC、tmux 和流协议置于诊断。已授权工具可自动发现，登录/安装仅按需引导，不自动授予新工具执行权。新工具只增加适配器和兼容测试，不新增一套聊天页面。
+
+### 6.5 当前候选实现及未完成边界
+
+`agy_index_probe.py` 的原生执行分支保留固定 session ID：Claude `--resume` + stream-json，AGY `--conversation` + stream-json，Codex app-server thread/resume/turn/start，Pi RPC 指定原会话文件并 get_state 校验身份。恢复失败禁止偷偷新建会话。节点私有 SQLite 存请求幂等和增量事件，网页 app_native_events 按游标补读；这是传输回执，不冒充内核 Task/Execution。
+
+终态必须结合原生结束原因：Pi agent_settled 不能覆盖此前 length/error/aborted，message_end 仅处理 assistant，空回复不能报告完成；上游中断、超时或进程消失保持 unknown，阻止自动重发。现有候选限制为只读验证，不代表任意工具修改文件获得授权。
+
+当前有帧/队列/正文/单请求事件限制，但全局事件保留、过期游标、完整 turn/item 身份、取消、跨轮常驻进程仍待接。DSH 现场协议需要 assistantStream=true 才推 assistant-stream(start/chunk/end)，text-delta.text 为正文；旧 snapshot reader 不等于流式订阅。实际通过与失败分工具见 CURRENT_STAGE §3.6 和 2026-11-05 evidence，不把官方支持写成产品已接通。
+
+### 统一设备入口与 DSH 直连分流
+
+连接类型由无凭据的节点协议发现确认，不根据主机名称推断。Bob 节点请求使用设备 Bearer，不能作为 DSH 启动令牌放入 URL；原生 DSH 直连继续使用 Cookie 与受控日志恢复。已确认节点发生请求错误时不得改投其他 peer，未知发送不自动重发。网页与 Tauri 必须保持一致。

@@ -537,11 +537,11 @@ HomeMessageContext必须由已认证且有会话访问授权的adapter构造；�
 
 任务卡沿既有Task/Execution契约包含目标/非目标、输入和父成果版本、可写范围、决定引用、验证项、权限、预算与取消边界。现有路径必须有来源；新文件明确为计划创建并现场核验父目录/路径边界。执行端检查commit和dirty，不匹配则重读/重规划，不静默按旧基线修改。
 
-### 10.3 API与Harness路由（含 `tmux` 保活容器与原生 `session_id` 同构续接）
+### 10.3 API与Harness路由（原生持久接口优先与原生会话续接）
 
 普通助理默认API；已绑定原生会话直接续聊，不强制BYOK前置。正式委派按目标Harness实测能力使用原生 `session/prompt`、`resume` 或完整任务进程；不假定所有工具支持同一协议或原生续接。原生DSH记录与Bob治理执行分别标来源，建立映射时保留原ID，不复制成伪历史。
 
-- **同构慢轨执行器（`TmuxHarnessRunner`，覆盖 `claude` / `codex` / `agy` / `dsh`）**：
+- **同构慢轨执行器（按 BOB-D-013 修订）**：优先复用官方服务/持久子进程接口；`TmuxHarnessRunner` 只承接必要的兼容进程，不强制覆盖所有工具。组件及事件契约唯一见 [harness-auth §6](harness-auth.md#6-标准适配组件原生常驻优先与真实流式)。以下命令是原生 CLI 恢复的兼容路径，不替代优先接口：
   1. **外层 `tmux` 防断线保活与 `tee` 双写回执**：在 Linux/macOS 等支持 `tmux` 的远程或本地工作区节点执行长耗时 CLI 任务时，外层可由受控 `tmux` 后台会话承载（仅适用于已验证支持该能力的执行节点；Windows原生端采用宿主进程管理，WSL另作能力登记）（防止 SSH 闪断触发 `SIGHUP` 中途杀灭进程），并通过管道将结构化 JSON/JSONL 输出同时写入终端面板与持久回执文件（`receipt-<execution_id>.json`）。人类开发者可随时 SSH `tmux attach` 实时旁观或手动接管；**严禁**依赖脆弱的 `tmux send-keys` 模拟敲键 + `tmux capture-pane` 刮取含 ANSI 控制符的终端屏幕文本来判断完成态或解析结果。
   2. **内层 `native_sessions` 原生 `session_id` 恢复绑定**：首次执行《任务卡》后，从结构化回执中提取原生会话 ID 写入 `native_sessions(device_id, workspace_id, harness, native_session_id)`：
      - `Claude Code`：首轮 `claude -p "<任务卡>" --output-format json` 提取 `session_id`；续聊 `claude -p "<追问>" --resume <session_id> --output-format json`；

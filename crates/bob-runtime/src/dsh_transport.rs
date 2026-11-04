@@ -35,6 +35,7 @@ impl PreviewReferences {
   self.bytes+=text.len();
   self.entries.push_back(PreviewReference{scope:scope.into(),session:h.address.session_id.clone(),root:root.clone(),text,at:Instant::now()});
  }
+ fn session_root(&self,scope:&str,session:&str)->Option<String>{self.entries.iter().rev().find(|e|e.scope==scope && e.session==session).map(|e|e.root.clone())}
  fn root(&self,scope:&str,session:&str,path:&str)->Option<String>{
   self.entries.iter().rev().find(|e|e.scope==scope && e.session==session && e.at.elapsed()<Duration::from_secs(600) && e.text.contains(path)).map(|e|e.root.clone())
  }
@@ -59,11 +60,17 @@ fn shared_http_client() -> Result<reqwest::blocking::Client, &'static str> {
  let _ = HTTP.set(built.clone());
  Ok(built)
 }
+// Plain HTTP is permitted only for a literal loopback service on this host.
+// Remote devices must use TLS; DNS names cannot opt into this exception.
+fn trusted_endpoint(base: &reqwest::Url) -> bool {
+ let loopback = base.host_str().and_then(|h|h.trim_matches(['[',']']).parse::<std::net::IpAddr>().ok()).is_some_and(|ip|ip.is_loopback());
+ (base.scheme()=="https" || (base.scheme()=="http" && loopback)) && base.username().is_empty() && base.password().is_none() && base.query().is_none() && base.fragment().is_none() && base.path()=="/"
+}
 pub struct DshClient { base: reqwest::Url, cookie: String, http: reqwest::blocking::Client, scope: String }
 impl DshClient {
  pub fn connect(endpoint: &str, token: &str) -> Result<Self, &'static str> {
   let mut base=reqwest::Url::parse(endpoint).map_err(|_|"DSH_ADDRESS_INVALID")?;
-  if base.scheme()!="https" || !base.username().is_empty() || base.password().is_some() || base.query().is_some() || base.fragment().is_some() || base.path()!="/" { return Err("DSH_HTTPS_REQUIRED"); }
+  if !trusted_endpoint(&base) { return Err("DSH_HTTPS_REQUIRED"); }
   let http=shared_http_client()?;
   base.query_pairs_mut().append_pair("token",token);
   let response=http.get(base.clone()).send().map_err(|_|"DSH_UNAVAILABLE")?;
@@ -80,7 +87,7 @@ impl DshClient {
  }
  pub fn from_cookie(endpoint: &str, cookie: &str) -> Result<Self, &'static str> {
   let base=reqwest::Url::parse(endpoint).map_err(|_|"DSH_ADDRESS_INVALID")?;
-  if base.scheme()!="https" || !base.username().is_empty() || base.password().is_some() || base.query().is_some() || base.fragment().is_some() || base.path()!="/" { return Err("DSH_HTTPS_REQUIRED"); }
+  if !trusted_endpoint(&base) { return Err("DSH_HTTPS_REQUIRED"); }
   if !cookie.starts_with("dsh-auth-") || cookie.len()>8192 || cookie.contains(';') || cookie.chars().any(char::is_control) { return Err("DSH_PROTOCOL"); }
   let http=shared_http_client()?;
   use sha2::{Digest,Sha256};
@@ -170,7 +177,7 @@ impl DshClient {
   Ok(h)
  }
  fn snapshot(&self,address:&SessionAddress,max_messages:usize)->Result<Value,&'static str>{
-  let mut url=self.base.join("api/remote.mux").map_err(|_|"DSH_PROTOCOL")?;url.set_scheme("wss").map_err(|_|"DSH_PROTOCOL")?;
+  let mut url=self.base.join("api/remote.mux").map_err(|_|"DSH_PROTOCOL")?;url.set_scheme(if self.base.scheme()=="http" {"ws"} else {"wss"}).map_err(|_|"DSH_PROTOCOL")?;
   let mut req=url.as_str().into_client_request().map_err(|_|"DSH_PROTOCOL")?;
   req.headers_mut().insert("Cookie",self.cookie.parse().map_err(|_|"DSH_PROTOCOL")?);
   req.headers_mut().insert("Origin",self.base.origin().ascii_serialization().parse().map_err(|_|"DSH_PROTOCOL")?);
@@ -184,7 +191,7 @@ impl DshClient {
   socket.set_write_timeout(Some(Duration::from_secs(10))).map_err(|_|"DSH_UNAVAILABLE")?;
   let config=tungstenite::protocol::WebSocketConfig::default().max_message_size(Some(HISTORY_LIMIT)).max_frame_size(Some(HISTORY_LIMIT));
   let (mut ws,_)=tungstenite::client_tls_with_config(req,socket,Some(config),None).map_err(|_|"DSH_UNAVAILABLE")?;
-  match ws.get_mut(){MaybeTlsStream::Rustls(s)=>{s.sock.set_read_timeout(Some(Duration::from_secs(15))).map_err(|_|"DSH_UNAVAILABLE")?;s.sock.set_write_timeout(Some(Duration::from_secs(15))).map_err(|_|"DSH_UNAVAILABLE")?;},_=>return Err("DSH_TLS_REQUIRED")}
+  match ws.get_mut(){MaybeTlsStream::Rustls(s)=>{s.sock.set_read_timeout(Some(Duration::from_secs(15))).map_err(|_|"DSH_UNAVAILABLE")?;s.sock.set_write_timeout(Some(Duration::from_secs(15))).map_err(|_|"DSH_UNAVAILABLE")?;},MaybeTlsStream::Plain(s) if self.base.scheme()=="http" && trusted_endpoint(&self.base)=>{s.set_read_timeout(Some(Duration::from_secs(15))).map_err(|_|"DSH_UNAVAILABLE")?;s.set_write_timeout(Some(Duration::from_secs(15))).map_err(|_|"DSH_UNAVAILABLE")?;},_=>return Err("DSH_TLS_REQUIRED")}
   let stream=format!("bob-{}",crate::now_millis());
   ws.send(Message::Text(json!({"type":"open","streamId":stream,"endpoint":"session/follow","payload":{"args":{"request":{"address":{"kind":"session","sessionId":address.session_id},"maxMessages":max_messages}}}}).to_string().into())).map_err(|_|"DSH_UNAVAILABLE")?;
   let mut size=0; let started=Instant::now();
@@ -286,6 +293,23 @@ impl DshClient {
   use base64::Engine;
   use sha2::{Digest,Sha256};
   Ok(json!({"path":path,"extension":ext,"data":base64::engine::general_purpose::STANDARD.encode(&bytes),"bytes":size,"version":stat["version"],"sha256":format!("{:x}",Sha256::digest(&bytes)),"source":"current_workspace","connection_id":address.connection_id,"session_id":address.session_id}))
+ }
+ pub fn resolve_session_workspace(&self,session:&str)->Option<String>{
+  if let Ok(guard)=preview_references().lock() {
+   if let Some(root)=guard.session_root(&self.scope,session) { return Some(root); }
+  }
+  if let Ok(list)=self.list() {
+   if let Some(arr)=list.as_array() {
+    for item in arr {
+     if item["id"].as_str()==Some(session) {
+      if let Some(w)=item["workspace"].as_str().filter(|s|!s.trim().is_empty()) {
+       return Some(w.to_owned());
+      }
+     }
+    }
+   }
+  }
+  None
  }
  pub fn prompt(&self,session:&str,text:&str,id:&str)->Result<Value,&'static str>{
   let result=self.rpc("session/prompt",json!({"request":{"requestId":id,"sessionId":session,"mode":"queue","content":[{"type":"text","text":text}]}}))?;
@@ -537,5 +561,180 @@ mod auth_recovery_tests {
    Some("dsh-auth-1=cookie_value_one")
   );
   assert_eq!(load_cached_cookie(dir.path(), "https://node2.example.com/"), None);
+ }
+}
+
+#[cfg(test)] mod node_endpoint_policy_tests {
+ use super::*;
+ #[test] fn loopback_http_only_remote_tls_and_no_embedded_secrets() {
+  for raw in ["http://127.0.0.1:3080", "http://[::1]:3080", "https://node.example"] {assert!(trusted_endpoint(&reqwest::Url::parse(raw).unwrap()));}
+  for raw in ["http://localhost:3080", "http://node.example", "http://192.168.1.2", "https://u:p@node.example", "https://node.example/?token=a", "https://node.example/path"] {assert!(!trusted_endpoint(&reqwest::Url::parse(raw).unwrap()));}
+ }
+}
+
+fn sanitize_attachment_name(raw: &str) -> String {
+ let base = raw.rsplit(['/', '\\']).next().unwrap_or("attachment.bin");
+ let cleaned: String = base
+  .chars()
+  .map(|c| if c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_') { c } else { '_' })
+  .collect();
+ let trimmed = cleaned.trim_matches('.');
+ if trimmed.is_empty() { "attachment.bin".to_owned() } else { trimmed.to_owned() }
+}
+
+fn find_remote_ssh_target_for_connection(data_dir: &std::path::Path, connection: &str) -> Option<(String, Option<String>, Option<String>)> {
+ let grants = crate::claude_harness::load_grants(data_dir).ok()?;
+ let mut ssh_for_conn = None;
+ for g in grants {
+  if g.connection_id == connection {
+   if let Some(ref ssh) = g.remote_ssh_target {
+    if !ssh.trim().is_empty() {
+     ssh_for_conn = Some((ssh.clone(), g.remote_cwd.clone(), Some(g.cwd.clone())));
+     break;
+    }
+   }
+  }
+ }
+ ssh_for_conn
+}
+
+pub fn stage_attachments_for_prompt(
+ data_dir: &std::path::Path,
+ connection: &str,
+ session: &str,
+ workspace_hint: Option<&str>,
+ text: &str,
+ attachments: Option<&Value>,
+) -> String {
+ let Some(arr) = attachments.and_then(Value::as_array).filter(|a| !a.is_empty()) else {
+  return text.to_owned();
+ };
+ use base64::Engine;
+ let grant_opt = crate::claude_harness::find_grant(data_dir, connection, session).ok().flatten();
+ let conn_ssh = find_remote_ssh_target_for_connection(data_dir, connection);
+ let ssh_target = grant_opt
+  .as_ref()
+  .and_then(|g| g.remote_ssh_target.clone())
+  .or_else(|| conn_ssh.as_ref().map(|(s, _, _)| s.clone()));
+ let workspace = workspace_hint
+  .filter(|s| !s.trim().is_empty())
+  .map(str::to_owned)
+  .or_else(|| grant_opt.as_ref().and_then(|g| g.remote_cwd.clone().or_else(|| Some(g.cwd.clone()))))
+  .unwrap_or_else(|| "/tmp/bob_attachments".to_owned());
+
+ let mut updated = text.to_owned();
+ for item in arr.iter().take(8) {
+  let Some(raw_name) = item.get("name").and_then(Value::as_str) else { continue };
+  let Some(b64) = item.get("base64").and_then(Value::as_str).filter(|s| !s.is_empty()) else { continue };
+  let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(b64.trim()) else { continue };
+  if bytes.is_empty() || bytes.len() > 10 * 1024 * 1024 { continue; }
+  let safe_name = sanitize_attachment_name(raw_name);
+  let target_dir = format!("{}/.bob_attachments", workspace.trim_end_matches(['/', '\\']));
+  let target_file = format!("{target_dir}/{safe_name}");
+  let mut staged_ok = false;
+
+  let local_ws_path = std::path::Path::new(&workspace);
+  if ssh_target.is_none() || local_ws_path.exists() {
+   let dir_path = local_ws_path.join(".bob_attachments");
+   if std::fs::create_dir_all(&dir_path).is_ok() {
+    let file_path = dir_path.join(&safe_name);
+    if std::fs::write(&file_path, &bytes).is_ok() {
+     #[cfg(unix)]
+     {
+      use std::os::unix::fs::PermissionsExt;
+      let _ = std::fs::set_permissions(&file_path, std::fs::Permissions::from_mode(0o644));
+     }
+     staged_ok = true;
+    }
+   }
+  }
+  if !staged_ok {
+   if let Some(ref ssh) = ssh_target {
+    let quoted_dir = target_dir.replace('\'', "'\\''");
+    let quoted_file = target_file.replace('\'', "'\\''");
+    let remote_cmd = format!("mkdir -p '{quoted_dir}' && cat > '{quoted_file}' && chmod 644 '{quoted_file}'");
+    if let Ok(mut child) = std::process::Command::new("ssh")
+     .args(["-o", "BatchMode=yes", "-o", "ConnectTimeout=6", ssh, &remote_cmd])
+     .stdin(std::process::Stdio::piped())
+     .stdout(std::process::Stdio::null())
+     .stderr(std::process::Stdio::null())
+     .spawn()
+    {
+     if let Some(mut stdin) = child.stdin.take() {
+      let _ = stdin.write_all(&bytes);
+     }
+     if let Ok(status) = child.wait() {
+      staged_ok = status.success();
+     }
+    }
+   }
+  }
+  if !staged_ok {
+   let fallback_dir = data_dir.join("bob_attachments");
+   if std::fs::create_dir_all(&fallback_dir).is_ok() {
+    let fallback_file = fallback_dir.join(&safe_name);
+    if std::fs::write(&fallback_file, &bytes).is_ok() {
+     #[cfg(unix)]
+     {
+      use std::os::unix::fs::PermissionsExt;
+      let _ = std::fs::set_permissions(&fallback_file, std::fs::Permissions::from_mode(0o644));
+     }
+    }
+   }
+  }
+
+  let size = item.get("size").and_then(Value::as_u64).unwrap_or(bytes.len() as u64);
+  let old_marker_sized = format!("[Attachment: {raw_name} ({size} bytes)]");
+  let old_marker_plain = format!("[Attachment: {raw_name}]");
+  let new_marker = format!("[Attachment: {raw_name} -> {target_file}]");
+  if updated.contains(&old_marker_sized) {
+   updated = updated.replace(&old_marker_sized, &new_marker);
+  } else if updated.contains(&old_marker_plain) {
+   updated = updated.replace(&old_marker_plain, &new_marker);
+  } else {
+   updated = format!("{updated}\n\n{new_marker}");
+  }
+ }
+ updated
+}
+
+#[cfg(test)]
+mod attachment_stage_tests {
+ use super::*;
+ use base64::Engine;
+ use serde_json::json;
+
+ #[test]
+ fn stages_attachment_bytes_into_session_workspace_and_rewrites_marker() {
+  let tmp = std::env::temp_dir().join(format!("bob_att_test_{}", std::process::id()));
+  let _ = std::fs::remove_dir_all(&tmp);
+  let ws_dir = tmp.join("ws");
+  std::fs::create_dir_all(&ws_dir).unwrap();
+  let ws_str = ws_dir.to_string_lossy().to_string();
+  let png_b64 = base64::engine::general_purpose::STANDARD.encode(b"\x89PNG");
+  let attachments = json!([
+   {
+    "name": "1.png",
+    "size": 4,
+    "mime": "image/png",
+    "base64": png_b64
+   }
+  ]);
+  let raw_prompt = "请参考这张图\n\n[Attachment: 1.png (4 bytes)]";
+  let staged = stage_attachments_for_prompt(
+   &tmp,
+   "local",
+   "sess-1",
+   Some(&ws_str),
+   raw_prompt,
+   Some(&attachments),
+  );
+  let expected_path = format!("{}/.bob_attachments/1.png", ws_str.trim_end_matches('/'));
+  assert!(staged.contains(&format!("[Attachment: 1.png -> {expected_path}]")));
+  let written = std::fs::read(ws_dir.join(".bob_attachments").join("1.png")).unwrap();
+  assert_eq!(written, b"\x89PNG");
+  let _ = std::fs::remove_dir_all(&tmp);
+ }
+ fn _noop() {
  }
 }

@@ -6,6 +6,8 @@ import { kernelBridge } from './native-bridge.mjs';
 import { isBobNodeRuntime } from './http-bridge.mjs';
 import PairingQr from './PairingQr.vue';
 import ManualPairing from './ManualPairing.vue';
+import NodeConnect from './NodeConnect.vue';
+const addNode = ref(false);
 import { createPairingScanController } from './pairing-scan-controller.mjs';
 
 const { t } = useI18n();
@@ -266,7 +268,8 @@ onUnmounted(() => {
 <template>
   <div class="home-connection">
     <section class="hub-card" :aria-label="t('connectionListTitle')">
-      <div class="hub-card-header"><h3>{{ t('connectionListTitle') }}</h3><button type="button" @click="editConnection()">{{ t('connectionAdd') }}</button></div>
+      <div class="hub-card-header"><h3>{{ t('connectionListTitle') }}</h3><button type="button" @click="addNode=true">{{ t('connectionAdd') }}</button></div>
+      <NodeConnect v-if="addNode" @close="addNode=false" @connected="loadConnections();emit('changed')" />
       <p v-if="connectionError" role="alert">{{ t(connectionError) }}</p>
       <p v-if="!connections.length && !connectionForm" class="view-card-desc">{{ t('connectionEmpty') }}</p>
       <article v-for="node in connections" :key="node.id" class="connection-list-row">

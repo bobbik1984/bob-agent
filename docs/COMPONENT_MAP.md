@@ -11,7 +11,9 @@
 | bob-kernel / bob-transport | `crates/bob-kernel`、`crates/bob-transport` | 已有领域状态机与传输；完整验收见 CURRENT_STAGE |
 | Tauri / Vue / 直连 | `apps/bob-app/src-tauri`、`apps/bob-app/src` | Windows/Android 已有实现；工作区增量另验 |
 | Online 过渡客户端 | `src/online-client.mjs`、`src/views/WorkView.vue`（均在 apps/bob-app 下） | JS 配对/读取适配；原生认证、缓存与真实服务待闭环 |
-| bob-runtime / bob-node / Web bridge | XP-01–10 | 尚未建立 |
+| bob-runtime / bob-node / Web bridge | `crates/bob-runtime`、`crates/bob-node`、App bridge | 已建立；各能力及验证边界见 CURRENT_STAGE |
+| 原生 Harness 能力探测 | `crates/bob-runtime/src/harness_auth.rs`、`harness_probe.py`、`agy_directory.rs`、`runtime_rpc.rs` | 授权宿主内只读探测已接共用 RPC；VPS3 协议实测，新增工具 UI 流式待接 |
+| JSONL 协议回归 | `crates/bob-runtime/tests/test_harness_probe.py` | 请求关联、通知保留、UTF-8、背压、超时、脱敏和空模型检查 |
 
 ## 2 旧 App（`bob-agent/`，Tauri v2 + Vue 3，0.9.30）
 
@@ -144,3 +146,16 @@ F2/F5：`crates/bob-runtime/src/dsh_session.rs`负责原生身份/历史投影�
 - crates/bob-node/src/context_capsule.rs：宿主grant读取、context RPC、固定任务卡装配与5秒变化刷新；lib.rs与ssistant.rs的实际发送入口调用该模块。
 - pps/bob-app/src/components/ProjectContextPane.vue与kernel-bridge.mjs：网页来源和任务卡读回；Android宿主context RPC仍未接通，不等同手机可扫描远端工作区。
 - 同一用户原文沿既有派发回执处理，任务卡引用不是另一套执行状态；验收范围唯一见CURRENT_STAGE §3.5。
+
+### 节点统一认证与连接入口
+
+- `crates/bob-node/src/node_access.rs`：节点身份、机主验证、一次性邀请、持久设备凭证及撤销。
+- `apps/bob-app/src/NodeConnect.vue` / `node-connection.mjs`：地址探测、密码验证、Vault 保存与手机邀请；由 HomeConnection 接入。
+- `crates/bob-runtime/src/node_pairing.rs`：兼容扫码兑换、禁止新节点隐式密钥同步与不确定发送重放。
+- `crates/bob-runtime/src/dsh_transport.rs`：仅字面回环地址允许本机 HTTP/WS；远端保持 TLS。
+
+### BP4-06 原会话增量候选
+
+- `crates/bob-runtime/src/agy_index_probe.py`：原 ID 续聊驱动、目标端 JSONL 管道、私有 SQLite 请求/事件与未知执行核对；`agy_directory.rs` 依据宿主授权路由。
+- `crates/bob-node/src/lib.rs` / `apps/bob-app/src/kernel-bridge.mjs`：共用 app_native_events 游标读取；`components/DshSessions.vue` 展示原会话正文、处理中及真实增量。不是 SSE 或已完成的 Tauri 手机接线。
+- `crates/bob-runtime/tests/test_native_stream.py`：幂等、同会话竞争、恢复失败拒绝新建、死进程未知、AGY 格式、Pi 截断及角色隔离。实际节点/浏览器范围见 CURRENT_STAGE §3.6。

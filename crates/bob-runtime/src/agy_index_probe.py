@@ -320,11 +320,12 @@ def _reconcile(sid):
                 except OSError:
                     pass
             if not alive and now_ms - int(r.get('started_at') or 0) > 2500:
-                r['execution_status'], r['ended_at'], chg = 'completed', now_ms, True
+                r['execution_status'], r['ended_at'], chg = 'unknown', now_ms, True
         out.append(r)
     if chg:
         _save_r(d)
     out.sort(key=lambda x: int(x.get('started_at') or 0))
+    out.extend(_stream_records(sid))
     return out
 
 def read_session_page(cfg, sid):
@@ -523,7 +524,7 @@ def read_session_page(cfg, sid):
             idx = next((i for i, (_, _, ets) in enumerate(ev) if sat and ets and ets >= sat - 1000), len(ev))
             ev.insert(idx, ('user', ut, sat))
             ru.add(ut)
-        if at and at not in ra and not (sid.startswith('claude-jsonl:') and ev and at.startswith('Execution error:')):
+        if at and r.get('execution_status')=='completed' and at not in ra and not (sid.startswith('claude-jsonl:') and ev and at.startswith('Execution error:')):
             push('assistant', at, int(r.get('ended_at') or sat))
             ra.add(at)
     msgs = _consolidate(ev, 60) or [{'sequence': 1, 'role': 'assistant', 'text': f'Session `{sid}` loaded (`{ws or "default"}`).', 'timestamp': _now()}]
@@ -537,89 +538,280 @@ def inspect_receipt(cfg):
             return {'status': 'accepted', 'execution_status': r.get('execution_status', 'completed'), 'session_id': sid, 'request_id': rid}
     return {'status': 'unknown', 'session_id': sid, 'request_id': rid}
 
-def _run_worker(cfg):
+"""Native session driver, durable incremental receipts and conservative permissions."""
+import hashlib
+import queue
+import signal
+import threading
+
+
+def _stream_db():
+    root = Path.home() / '.local/share/bob-native'
+    root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    db = sqlite3.connect(root / 'receipts.sqlite', timeout=10)
+    db.execute('PRAGMA journal_mode=WAL')
+    db.execute('CREATE TABLE IF NOT EXISTS requests (id TEXT PRIMARY KEY, session TEXT NOT NULL, input_hash TEXT NOT NULL, body TEXT NOT NULL)')
+    db.execute('CREATE TABLE IF NOT EXISTS events (sequence INTEGER PRIMARY KEY AUTOINCREMENT, request TEXT NOT NULL, session TEXT NOT NULL, kind TEXT NOT NULL, payload TEXT NOT NULL, at INTEGER NOT NULL)')
+    db.execute('CREATE INDEX IF NOT EXISTS events_session ON events(session,sequence)')
+    return db
+
+
+def _stream_records(sid):
+    with closing(_stream_db()) as db, db:
+        db.execute('BEGIN IMMEDIATE')
+        records=[json.loads(r[0]) for r in db.execute('SELECT body FROM requests WHERE session=?', (sid,))]
+        for r in records:
+            if r.get('execution_status') not in ('accepted','running') or _now()-r.get('started_at',0)<30000:continue
+            alive=False
+            try:
+                pid=int(r.get('pid') or 0)
+                if pid>0:
+                    os.kill(pid,0);alive=True
+                    proc=Path('/proc')/str(pid)/'cmdline'
+                    if proc.exists():alive=r['request_id'].encode() in proc.read_bytes()
+            except (OSError,ValueError):pass
+            if not alive:
+                r.update(execution_status='unknown',error_code='HARNESS_PROCESS_LOST')
+                db.execute('UPDATE requests SET body=? WHERE id=?',(json.dumps(r,ensure_ascii=False),r['request_id']))
+                db.execute('INSERT INTO events(request,session,kind,payload,at) VALUES(?,?,?,?,?)',(r['request_id'],sid,'unknown',json.dumps({'code':'HARNESS_PROCESS_LOST'}),_now()))
+        return records
+
+
+def _stream_update(rid, **fields):
+    with closing(_stream_db()) as db, db:
+        db.execute('BEGIN IMMEDIATE')
+        row = db.execute('SELECT body FROM requests WHERE id=?', (rid,)).fetchone()
+        if not row:
+            raise ValueError('HARNESS_RECEIPT_MISSING')
+        body = json.loads(row[0]); body.update(fields)
+        db.execute('UPDATE requests SET body=? WHERE id=?', (json.dumps(body, ensure_ascii=False), rid))
+        return body
+
+
+def _stream_event(cfg, kind, payload=None):
+    payload = payload or {}
+    with closing(_stream_db()) as db, db:
+        count = db.execute('SELECT COUNT(*) FROM events WHERE request=?', (cfg['request_id'],)).fetchone()[0]
+        if count >= 20000:
+            raise ValueError('HARNESS_EVENT_LIMIT')
+        db.execute('INSERT INTO events(request,session,kind,payload,at) VALUES(?,?,?,?,?)',
+                   (cfg['request_id'], cfg['session_id'], kind, json.dumps(payload, ensure_ascii=False), _now()))
+
+
+def read_native_events(cfg):
+    sid = cfg['sessionId']; after = max(0, int(cfg.get('after') or 0))
+    _stream_records(sid)
+    with closing(_stream_db()) as db:
+        rows = db.execute('SELECT sequence,request,kind,payload,at FROM events WHERE session=? AND sequence>? ORDER BY sequence LIMIT 100', (sid, after)).fetchall()
+    return {'session_id': sid, 'cursor': rows[-1][0] if rows else after,
+            'events': [{'sequence': n, 'request_id': r, 'session_id': sid, 'kind': k, 'payload': json.loads(p), 'observed_at': at} for n,r,k,p,at in rows]}
+
+
+class NativePipe:
+    def __init__(self, command, cwd, env):
+        self.p = subprocess.Popen(command, cwd=cwd, env=env, stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, start_new_session=True)
+        self.q = queue.Queue(maxsize=256)
+        def reader():
+            try:
+                while True:
+                    line = self.p.stdout.readline(8*1024*1024+1)
+                    if not line: break
+                    if len(line)>8*1024*1024: raise ValueError()
+                    self.q.put(json.loads(line), timeout=10)
+            except Exception:
+                pass
+            finally:
+                try: self.q.put(None, timeout=1)
+                except queue.Full: pass
+        threading.Thread(target=reader, daemon=True).start()
+
+    def send(self, frame):
+        self.p.stdin.write((json.dumps(frame, ensure_ascii=False)+'\n').encode('utf-8'))
+        self.p.stdin.flush()
+
+    def receive(self, timeout=120):
+        try: frame = self.q.get(timeout=timeout)
+        except queue.Empty: raise ValueError('HARNESS_TIMEOUT') from None
+        if frame is None: raise ValueError('HARNESS_PROCESS_EXITED')
+        return frame
+
+    def close(self):
+        try: self.p.stdin.close()
+        except (OSError, ValueError): pass
+        try: self.p.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            os.killpg(self.p.pid, signal.SIGTERM)
+            try: self.p.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                os.killpg(self.p.pid, signal.SIGKILL); self.p.wait(timeout=3)
+
+
+def _native_worker(cfg):
     sid, rid, text = cfg['session_id'], cfg['request_id'], cfg['text']
-    pcwd, wcwd = cfg.get('project_cwd') or str(Path.home()), cfg.get('work_cwd') or str(Path.home())
+    tool, raw = sid.split(':', 1)
+    tool = 'claude' if tool == 'claude-jsonl' else tool
     env = os.environ.copy()
-    env['PATH'] = f"{Path.home() / '.local/bin'}:{Path.home() / '.npm-global/bin'}:/usr/local/bin:" + env.get('PATH', '')
-    reply = ''
+    env['PATH'] = os.pathsep.join(str(Path.home()/p) for p in ['.local/bin','.npm-global/bin','.cargo/bin'])+os.pathsep+env.get('PATH','')
+    exe = shutil.which(tool, path=env['PATH']); pipe = None
+    reply = ''; terminal = False; identity = False
     try:
-        if sid.startswith('claude-jsonl:'):
-            raw = sid.split(':', 1)[1]
-            cbin = shutil.which('claude', path=env['PATH']) or '/home/bobbik/.local/bin/claude'
-            pr = subprocess.run([cbin, '--resume', raw, '-p', text, '--dangerously-skip-permissions'],
-                                cwd=pcwd if Path(pcwd).is_dir() else str(Path.home()), env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=3600)
-            if (pr.stdout or '').strip() and pr.returncode == 0:
-                reply = pr.stdout.strip()
-            elif pr.returncode != 0:
-                pr2 = subprocess.run([cbin, '-p', text, '--dangerously-skip-permissions'],
-                                     cwd=wcwd if Path(wcwd).is_dir() else str(Path.home()), env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=3600)
-                reply = (pr2.stdout or pr2.stderr or pr.stderr or 'Completed.').strip()
-        elif sid.startswith('codex:'):
-            raw = sid.split(':', 1)[1]
-            cbin = shutil.which('codex', path=env['PATH']) or 'codex'
-            cwd = wcwd if Path(wcwd).is_dir() else str(Path.home())
-            pr = subprocess.run([cbin, 'exec', 'resume', raw, text, '--dangerously-bypass-approvals-and-sandbox', '--skip-git-repo-check'], cwd=cwd, env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=3600)
-            if (pr.stdout or '').strip() and pr.returncode == 0:
-                reply = pr.stdout.strip()
+        if not exe: raise ValueError('HARNESS_EXECUTABLE_MISSING')
+        cwd = cfg['work_cwd']
+        if not Path(cwd).is_dir(): raise ValueError('HARNESS_WORKSPACE_MISSING')
+        if tool == 'codex':
+            pipe = NativePipe([exe,'app-server'],cwd,env)
+            pipe.send({'id':1,'method':'initialize','params':{'clientInfo':{'name':'bob-native','version':'1.0.1'}}})
+            init_deadline=time.monotonic()+30
+            while True:
+                frame=pipe.receive(timeout=max(1,init_deadline-time.monotonic()))
+                if frame.get('id')==1:
+                    if 'error' in frame:raise ValueError('HARNESS_INITIALIZE_REJECTED')
+                    break
+                if time.monotonic()>=init_deadline:raise ValueError('HARNESS_TIMEOUT')
+            pipe.send({'method':'initialized','params':{}})
+            pipe.send({'id':2,'method':'thread/resume','params':{'threadId':raw,'cwd':cwd,'approvalPolicy':'never','sandbox':'read-only'}})
+        elif tool == 'claude':
+            pipe = NativePipe([exe,'--resume',raw,'-p',text,'--output-format','stream-json','--verbose',
+                '--include-partial-messages','--tools','','--permission-mode','plan'],cwd,env)
+        elif tool == 'pi':
+            model_args=[]
+            profile=Path.home()/'.local/share/bob-native/pi-profile.json'
+            if profile.is_file():
+                settings=json.loads(profile.read_text(encoding='utf-8'))
+                env['PI_CODING_AGENT_DIR']=str(profile.parent/'pi')
+                env['BOB_PI_API_KEY']=settings['api_key']
+                model_args=['--provider',settings['provider'],'--model',settings['model'],'--thinking','off']
+            pipe = NativePipe([exe,*model_args,'--mode','rpc','--session',cfg['jsonl_path'],'--no-tools',
+                '--no-extensions','--no-skills','--no-prompt-templates','--no-themes'],cwd,env)
+            pipe.send({'id':'identity','type':'get_state'})
+        elif tool == 'agy':
+            pipe = NativePipe([exe,'--conversation',raw,'-p',text,'--output-format','stream-json'],cwd,env)
+        else: raise ValueError('HARNESS_NATIVE_RESUME_UNSUPPORTED')
+        _stream_update(rid, execution_status='running', pid=os.getpid())
+        _stream_event(cfg,'running')
+        deadline = time.monotonic()+180
+        while time.monotonic()<deadline:
+            frame = pipe.receive(timeout=min(120,max(1,deadline-time.monotonic())))
+            _stream_update(rid,last_protocol_frame=str(frame.get('method') or frame.get('event') or frame.get('type') or frame.get('id'))[:100])
+            delta = ''; snapshot = None
+            if tool == 'codex':
+                if frame.get('id')==2:
+                    _stream_update(rid,resume_response_received=True)
+                    if 'error' in frame: raise ValueError('HARNESS_RESUME_REJECTED')
+                    if frame.get('result',{}).get('thread',{}).get('id')!=raw: raise ValueError('HARNESS_SESSION_MISMATCH')
+                    identity=True
+                    _stream_update(rid,native_session_id=raw,turn_start_requested=True)
+                    pipe.send({'id':3,'method':'turn/start','params':{'threadId':raw,'input':[{'type':'text','text':text}],
+                        'approvalPolicy':'never','sandboxPolicy':{'type':'readOnly'}}})
+                if frame.get('id')==3: _stream_update(rid,turn_start_response_received=True)
+                if frame.get('id')==3 and 'error' in frame: raise ValueError('HARNESS_SEND_REJECTED')
+                method=frame.get('method',''); p=frame.get('params') or {}
+                if 'id' in frame and method:
+                    pipe.send({'id':frame['id'],'error':{'code':-32000,'message':'Bob read-only verification denies tool approval'}})
+                if p.get('threadId') not in (None,raw): continue
+                if method=='item/agentMessage/delta': delta=p.get('delta','')
+                if method=='turn/completed':
+                    if p.get('turn',{}).get('status')!='completed': raise ValueError('HARNESS_TURN_FAILED')
+                    terminal=True
+            elif tool == 'agy':
+                event=frame.get('event');payload=frame.get('step_update') or frame.get('result') or frame
+                returned=payload.get('conversation_id') or frame.get('conversation_id')
+                if returned:
+                    if returned!=raw: raise ValueError('HARNESS_SESSION_MISMATCH')
+                    identity=True
+                if event=='step_update' and payload.get('step_type')=='agent_response':delta=payload.get('text_delta','')
+                if event=='result':
+                    if payload.get('status')!='SUCCESS':raise ValueError('HARNESS_TURN_FAILED')
+                    snapshot=payload.get('response');terminal=True
+            elif tool == 'claude':
+                returned=frame.get('session_id') or frame.get('conversation_id')
+                if returned:
+                    if returned!=raw: raise ValueError('HARNESS_SESSION_MISMATCH')
+                    identity=True
+                event=frame.get('event') or {}
+                if event.get('type')=='content_block_delta' and event.get('delta',{}).get('type')=='text_delta': delta=event['delta'].get('text','')
+                if frame.get('type')=='assistant':
+                    content=frame.get('message',{}).get('content',[])
+                    snapshot=''.join(b.get('text','') for b in content if b.get('type')=='text')
+                if frame.get('type')=='result':
+                    if frame.get('is_error') or frame.get('subtype') not in (None,'success'): raise ValueError('HARNESS_TURN_FAILED')
+                    snapshot=frame.get('result') or snapshot;terminal=True
             else:
-                pr2 = subprocess.run([cbin, 'exec', text, '--dangerously-bypass-approvals-and-sandbox', '--skip-git-repo-check'], cwd=cwd, env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=3600)
-                reply = (pr2.stdout or pr2.stderr or pr.stderr or 'Completed.').strip()
-        elif sid.startswith('agy:'):
-            raw = sid.split(':', 1)[1]
-            cbin = shutil.which('agy', path=env['PATH']) or '/home/bobbik/.local/bin/agy'
-            pr = subprocess.run([cbin, '--conversation', raw, '-p', text, '--dangerously-skip-permissions'],
-                                cwd=wcwd if Path(wcwd).is_dir() else str(Path.home()), env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=3600)
-            reply = (pr.stdout or pr.stderr or 'Completed.').strip()
-        elif sid.startswith('pi:'):
-            raw = sid.split(':', 1)[1]
-            cbin = shutil.which('pi', path=env['PATH']) or 'pi'
-            cwd = wcwd if Path(wcwd).is_dir() else str(Path.home())
-            sarg = cfg.get('jsonl_path') or raw
-            pr = subprocess.run([cbin, '--session', sarg, '-p', text], cwd=cwd, env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=3600)
-            if (pr.stdout or '').strip() and pr.returncode == 0:
-                reply = pr.stdout.strip()
-            else:
-                pr2 = subprocess.run([cbin, '-p', text], cwd=cwd, env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=3600)
-                reply = (pr2.stdout or pr2.stderr or pr.stderr or 'Completed.').strip()
-        elif sid.startswith('cp:'):
-            pts = sid.split(':', 2)
-            at = pts[1] if len(pts) == 3 else 'dsh'
-            cwd = wcwd if Path(wcwd).is_dir() else str(Path.home())
-            if at == 'pi':
-                cbin = shutil.which('pi', path=env['PATH']) or 'pi'
-                pr = subprocess.run([cbin, '-p', text], cwd=cwd, env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=3600)
-            elif at == 'codex':
-                cbin = shutil.which('codex', path=env['PATH']) or 'codex'
-                pr = subprocess.run([cbin, 'exec', text, '--dangerously-bypass-approvals-and-sandbox', '--skip-git-repo-check'], cwd=cwd, env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=3600)
-            elif at == 'agy':
-                cbin = shutil.which('agy', path=env['PATH']) or 'agy'
-                pr = subprocess.run([cbin, '-p', text, '--dangerously-skip-permissions'], cwd=cwd, env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=3600)
-            else:
-                cbin = shutil.which('claude', path=env['PATH']) or shutil.which('pi', path=env['PATH']) or 'pi'
-                args = [cbin, '-p', text, '--dangerously-skip-permissions'] if 'claude' in str(cbin) else [cbin, '-p', text]
-                pr = subprocess.run(args, cwd=cwd, env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=3600)
-            reply = (pr.stdout or pr.stderr or 'Completed.').strip()
+                if frame.get('id')=='identity':
+                    state=frame.get('data') or {}
+                    if frame.get('success') is False or state.get('sessionId')!=raw: raise ValueError('HARNESS_SESSION_MISMATCH')
+                    identity=True
+                    pipe.send({'id':'prompt','type':'prompt','message':text})
+                if frame.get('id')=='prompt' and frame.get('success') is False: raise ValueError('HARNESS_SEND_REJECTED')
+                event=frame.get('assistantMessageEvent') or {}
+                if frame.get('type')=='message_update' and event.get('type')=='text_delta': delta=event.get('delta','')
+                if frame.get('type')=='agent_settled': terminal=True
+                if frame.get('type')=='message_end' and (frame.get('message') or {}).get('role')=='assistant':
+                    msg=frame.get('message') or {}
+                    if msg.get('stopReason') in ('error','aborted'): raise ValueError('HARNESS_TURN_FAILED')
+                    if msg.get('stopReason')=='length': raise ValueError('HARNESS_OUTPUT_TRUNCATED')
+                    snapshot=''.join(part.get('text','') for part in msg.get('content',[]) if part.get('type')=='text') or None
+            if delta:
+                reply+=delta
+                if len(reply)>262144: raise ValueError('HARNESS_OUTPUT_LIMIT')
+                _stream_event(cfg,'text_delta',{'text':delta})
+                _stream_update(rid,reply_text=reply)
+            elif snapshot and snapshot!=reply:
+                reply=snapshot[:262144]
+                _stream_event(cfg,'message_snapshot',{'text':reply})
+                _stream_update(rid,reply_text=reply)
+            if terminal: break
+        if not terminal: raise ValueError('HARNESS_TIMEOUT')
+        if not identity: raise ValueError('HARNESS_IDENTITY_UNCONFIRMED')
+        if not reply.strip(): raise ValueError('HARNESS_EMPTY_REPLY')
+        _stream_event(cfg,'completed')
+        _stream_update(rid,execution_status='completed',ended_at=_now(),native_session_id=raw)
     except Exception as exc:
-        if not sid.startswith('claude-jsonl:'):
-            reply = f'Execution error: {exc}'
-    d = _load_r()
-    rec = d.get(rid) or {'request_id': rid, 'session_id': sid, 'status': 'accepted', 'text': text}
-    rec['execution_status'], rec['ended_at'] = 'completed', _now()
-    if reply:
-        rec['reply_text'] = reply[:15000]
-    d[rid] = rec
-    _save_r(d)
+        code=str(exc) if isinstance(exc,ValueError) and str(exc).startswith('HARNESS_') else 'HARNESS_TRANSPORT_FAILED'
+        state='unknown' if code in ('HARNESS_TIMEOUT','HARNESS_PROCESS_EXITED','HARNESS_TRANSPORT_FAILED','HARNESS_IDENTITY_UNCONFIRMED') else 'error'
+        _stream_event(cfg,state,{'code':code})
+        _stream_update(rid,execution_status=state,error_code=code,ended_at=_now())
+    finally:
+        if pipe: pipe.close()
+
+
+def _native_start(cfg, source):
+    sid,rid,text=cfg['session_id'],cfg['request_id'],cfg['text']
+    digest=hashlib.sha256(text.encode('utf-8')).hexdigest()
+    with closing(_stream_db()) as db, db:
+        db.execute('BEGIN IMMEDIATE')
+        old=db.execute('SELECT session,input_hash FROM requests WHERE id=?',(rid,)).fetchone()
+        if old:
+            if old!=(sid,digest): raise ValueError('HARNESS_REQUEST_CONFLICT')
+            return {'status':'accepted','session_id':sid,'request_id':rid}
+        for row in db.execute('SELECT body FROM requests WHERE session=?',(sid,)):
+            if json.loads(row[0]).get('execution_status') in ('accepted','running','unknown'):
+                raise ValueError('HARNESS_SESSION_BUSY')
+        record={'request_id':rid,'session_id':sid,'text':text,'execution_status':'accepted','started_at':_now()}
+        db.execute('INSERT INTO requests VALUES(?,?,?,?)',(rid,sid,digest,json.dumps(record,ensure_ascii=False)))
+    root=Path.home()/'.local/share/bob-native'
+    sf=root/(hashlib.sha256(source.encode()).hexdigest()+'.py')
+    if not sf.exists(): sf.write_text(source,encoding='utf-8');sf.chmod(0o600)
+    _stream_event(cfg,'accepted')
+    proc=subprocess.Popen([sys.executable,str(sf),json.dumps(dict(cfg,mode='native_worker'),ensure_ascii=False)],
+        start_new_session=True,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+    _stream_update(rid,pid=proc.pid)
+    return {'status':'accepted','session_id':sid,'request_id':rid}
+
+
 
 def prompt_session(cfg):
     sid, text, rid = (cfg.get('sessionId') or '').strip(), (cfg.get('text') or '').strip(), (cfg.get('requestId') or '').strip()
     if not sid or not text or not rid:
         raise ValueError('DSH_REQUEST_REQUIRED')
+    if not re.fullmatch(r'[a-z-]+:[a-zA-Z0-9-]{8,80}', sid):
+        raise ValueError('HARNESS_SESSION_INVALID')
     d = _load_r()
     if rid in d and d[rid].get('session_id') == sid and (d[rid].get('execution_status') == 'running' or d[rid].get('reply_text')):
         return {'status': 'accepted', 'session_id': sid, 'request_id': rid}
     pcwd = wcwd = str(Path.home())
-    jpath = ''
+    jpath = ''; row = None; idx = None
     if sid.startswith('agy:'):
         raw, adir = sid.split(':', 1)[1], cfg.get('agyDataDir') or ''
         idx = (Path(adir) / 'conversation_summaries.db') if adir else None
@@ -677,16 +869,18 @@ def prompt_session(cfg):
                                 break
                     except Exception:
                         pass
-    wcfg = json.dumps({'mode': 'worker', 'session_id': sid, 'request_id': rid, 'text': text, 'project_cwd': pcwd, 'work_cwd': wcwd, 'jsonl_path': jpath}, ensure_ascii=False)
-    sf = Path.home() / '.bob_remote_probe.py'
-    try:
-        sf.write_text(globals().get('__BOB_PROBE_SRC__', ''), encoding='utf-8')
-    except Exception:
-        pass
-    proc = subprocess.Popen([sys.executable, str(sf), wcfg], start_new_session=True, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    d[rid] = {'request_id': rid, 'session_id': sid, 'status': 'accepted', 'execution_status': 'running', 'text': text, 'pid': proc.pid, 'started_at': _now()}
-    _save_r(d)
-    return {'status': 'accepted', 'session_id': sid, 'request_id': rid}
+    if sid.startswith('cp:'):
+        raise ValueError('HARNESS_NATIVE_BINDING_REQUIRED')
+    if not re.fullmatch(r'[a-z-]+:[a-zA-Z0-9-]{8,80}', sid):
+        raise ValueError('HARNESS_SESSION_INVALID')
+    if not jpath and not sid.startswith('agy:'):
+        raise ValueError('HARNESS_SESSION_NOT_FOUND')
+    if sid.startswith('agy:') and not (idx and idx.is_file() and row):
+        raise ValueError('HARNESS_SESSION_NOT_FOUND')
+    if not Path(wcwd).is_dir():raise ValueError('HARNESS_WORKSPACE_MISSING')
+    cfg = {'session_id':sid,'request_id':rid,'text':text,'project_cwd':pcwd,'work_cwd':wcwd,'jsonl_path':jpath}
+    source = globals().get('__BOB_PROBE_SRC__') or Path(__file__).read_text(encoding='utf-8')
+    return _native_start(cfg, source)
 
 if __name__ == '__main__':
     try:
@@ -700,8 +894,10 @@ if __name__ == '__main__':
                 print(json.dumps(prompt_session(cfg), ensure_ascii=False))
             elif m == 'receipt':
                 print(json.dumps(inspect_receipt(cfg), ensure_ascii=False))
-            elif m == 'worker':
-                _run_worker(cfg)
+            elif m == 'native_worker':
+                _native_worker(cfg)
+            elif m == 'events':
+                print(json.dumps(read_native_events(cfg), ensure_ascii=False))
             else:
                 print(json.dumps(discover_multi(cfg), ensure_ascii=False))
         else:

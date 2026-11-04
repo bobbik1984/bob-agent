@@ -387,12 +387,20 @@ function openComposerFilePicker() {
   composerFileInput.value?.click?.();
 }
 
+function isTextComposerFile(f) {
+  const m = String(f?.type || '').toLowerCase();
+  const n = String(f?.name || '').toLowerCase();
+  if (m.startsWith('image/') || m.startsWith('audio/') || m.startsWith('video/') || m === 'application/pdf') return false;
+  if (m.startsWith('text/') || m.includes('json') || m.includes('yaml') || m.includes('xml') || m.includes('javascript')) return true;
+  return /\.(txt|md|json|ya?ml|csv|tsv|py|rs|js|mjs|cjs|ts|tsx|jsx|vue|html|css|scss|sh|bat|ps1|toml|ini|cfg|log|sql|gd|tscn)$/i.test(n);
+}
+
 async function handleComposerFiles(event) {
   const files = Array.from(event?.target?.files || []);
   for (const f of files) {
     let content = '';
     try {
-      if (typeof f.text === 'function' && (f.size || 0) <= 256 * 1024) {
+      if (isTextComposerFile(f) && typeof f.text === 'function' && (f.size || 0) <= 256 * 1024) {
         content = await f.text();
       }
     } catch {}

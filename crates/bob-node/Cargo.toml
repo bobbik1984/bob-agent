@@ -6,6 +6,7 @@ rust-version = "1.89"
 publish = false
 
 [dependencies]
+ring = "=0.17.14"
 bob-kernel = { path = "../bob-kernel" }
 bob-transport = { path = "../bob-transport" }
 bob-runtime = { path = "../bob-runtime" }

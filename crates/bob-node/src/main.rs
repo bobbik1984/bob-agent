@@ -68,6 +68,17 @@ fn main() {
         }
     }
 
+    if args.iter().any(|a| a == "--set-pairing-password") {
+        use std::io::Read;
+        let mut password=String::new();
+        std::io::stdin().take(1025).read_to_string(&mut password).expect("password input unavailable");
+        match bob_node::node_access::initialize(&data_dir,password.trim_end_matches(['\r','\n'])) {
+            Ok(())=>println!("Node owner password configured"),
+            Err(e)=>{eprintln!("{e}");std::process::exit(1);}
+        }
+        return;
+    }
+
     let config = BobNodeConfig {
         bind_addr: bind_addr.clone(),
         data_dir: data_dir.clone(),
@@ -81,6 +92,7 @@ fn main() {
         server.local_addr, data_dir, static_dir, legacy_db_path
     );
 
+    if !bob_node::node_access::enabled(&data_dir) {
     if let Ok(inv) = server.issue_startup_pairing(public_url.as_deref(), node_label.as_deref()) {
         let qr_uri = inv.encode_qr_code();
         println!("----------------------------------------------------------------");
@@ -103,6 +115,7 @@ fn main() {
         }
     }
 
+    }
     loop {
         std::thread::sleep(Duration::from_secs(3600));
     }

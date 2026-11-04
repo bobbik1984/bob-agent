@@ -96,6 +96,16 @@ pub fn rpc(data_dir: &Path, command: &str, args: &Value) -> Result<Value, &'stat
                 None
             };
 
+            let base_wire = capsule_wire_override.as_deref().unwrap_or(text);
+            let staged_wire = crate::dsh_transport::stage_attachments_for_prompt(
+                data_dir,
+                &grant.connection_id,
+                &grant.session_id,
+                grant.remote_cwd.as_deref().or(Some(grant.cwd.as_str())),
+                base_wire,
+                args.get("attachments"),
+            );
+            let final_override = if staged_wire != text { Some(staged_wire) } else { capsule_wire_override };
             let receipt = claude_harness::dispatch_prompt(
                 data_dir,
                 &grant,
@@ -104,7 +114,7 @@ pub fn rpc(data_dir: &Path, command: &str, args: &Value) -> Result<Value, &'stat
                 ClaudeDispatchOptions {
                     parent_version_id,
                     detached_hold_ms,
-                    capsule_wire_override,
+                    capsule_wire_override: final_override,
                 },
             )?;
             let page = claude_harness::history_page_for_ui(data_dir, &grant)?;

@@ -10,8 +10,8 @@
 //!    (DSH Cookie reuse -> bounded log startup token exchange; Hermes profile key reload; OpenClaw device token).
 //! 4. `begin_login`: Return official login/pairing flow instructions when interactive auth is required,
 //!    never copying or smuggling raw user credentials across machines.
-//! 5. `verify_capabilities`: Report real observed capabilities (`supports_stream`, `supports_resume`,
-//!    `supports_directory`, `daemon_mode`, `anti_wrapping_compliant`).
+//! 5. `verify_capabilities`: Separate documented support, host observations, and Bob
+//!    integration evidence. Legacy support booleans remain unknown until verified.
 
 use crate::{dsh_transport, now_millis};
 use serde::{Deserialize, Serialize};
@@ -91,69 +91,63 @@ fn find_config(data_dir: &Path, connection_id: &str, tool: &str) -> ToolAuthConf
         })
 }
 
-fn daemon_mode_for(tool: &str) -> &'static str {
-    match tool {
-        "dsh" => "native_daemon",
-        "openclaw" => "http_gateway",
-        "hermes" => "http_gateway",
+fn capabilities_for(tool: &str) -> Value {
+    let preferred = match tool {
+        "dsh" => "native_service",
+        "agy" => "acp_or_stream_json",
+        "codex" => "app_server_stdio",
+        "claude" => "structured_cli",
         "pi" => "stdio_rpc",
-        "claude" | "codex" | "agy" => "tmux_keepalive",
+        "hermes" => "http_sse",
+        "openclaw" => "native_gateway",
         _ => "unknown",
-    }
+    };
+    json!({
+        "schema_version": 1,
+        "preferred_transport": preferred,
+        "documented_support": {"stream_events": true, "basis": "harness-auth/6", "checked_on": "2026-11-04"},
+        "observed_support": {
+            "list_sessions": "unknown", "read_history": "unknown", "resume_chat": "unknown",
+            "stream_events": "unknown", "cancel_execution": "unknown", "read_artifacts": "unknown", "approvals": "unknown"
+        },
+        "bob_integration": "unverified",
+        "supports_stream": null, "supports_resume": null, "supports_directory": null,
+        "compliance_status": "not_assessed"
+    })
 }
 
-fn capabilities_for(tool: &str) -> Value {
-    match tool {
-        "dsh" => json!({
-            "supports_stream": true,
-            "supports_resume": true,
-            "supports_directory": true,
-            "auth_mechanism": "startup_token_to_cookie",
-            "cookie_reusable_across_restarts": true
-        }),
-        "claude" => json!({
-            "supports_stream": true,
-            "supports_resume": true,
-            "supports_directory": true,
-            "auth_mechanism": "native_cli_account_or_api_key",
-            "keepalive": "tmux_detached"
-        }),
-        "codex" => json!({
-            "supports_stream": true,
-            "supports_resume": true,
-            "supports_directory": true,
-            "auth_mechanism": "official_cli_app_server_auth",
-            "keepalive": "tmux_detached"
-        }),
-        "agy" => json!({
-            "supports_stream": false,
-            "supports_resume": false,
-            "supports_directory": true,
-            "auth_mechanism": "same_user_cached_official_login",
-            "keepalive": "tmux_detached",
-            "read_only_directory_until_public_api": true
-        }),
-        "pi" => json!({
-            "supports_stream": true,
-            "supports_resume": true,
-            "supports_directory": true,
-            "auth_mechanism": "stdio_rpc_provider_managed",
-            "rpc_command": "pi --mode rpc"
-        }),
-        "hermes" => json!({
-            "supports_stream": true,
-            "supports_resume": true,
-            "supports_directory": true,
-            "auth_mechanism": "profile_isolated_bearer_key"
-        }),
-        "openclaw" => json!({
-            "supports_stream": true,
-            "supports_resume": true,
-            "supports_directory": true,
-            "auth_mechanism": "gateway_token_plus_device_identity_and_scopes"
-        }),
-        _ => json!({}),
+fn native_report(data: &Path, connection: &str, tool: &str, discovery_only: bool) -> HarnessAuthReport {
+    let mut report = HarnessAuthReport {
+        connection_id: connection.to_owned(), tool: tool.to_owned(),
+        action: if discovery_only { "discover_tool" } else { "check_auth" }.to_owned(),
+        installed: false, auth_state: "unknown".to_owned(), daemon_mode: "unknown".to_owned(),
+        anti_wrapping_compliant: false, login_hint: None,
+        capabilities: capabilities_for(tool), observed_at: now_millis(),
+    };
+    let config = find_config(data, connection, tool);
+    if config.profile.as_deref().is_some_and(|p| !p.is_empty() && p != "default") {
+        // Never probe another profile while presenting it as the requested identity.
+        report.capabilities["probe"] = json!({"reason": "HARNESS_PROFILE_NOT_SUPPORTED", "installed_state": "unknown"});
+        return report;
     }
+    match crate::agy_directory::probe_native_harness(data, connection, tool, discovery_only) {
+        Ok(observed) => {
+            report.installed = observed["installed"].as_bool().unwrap_or(false);
+            report.auth_state = observed["auth_state"].as_str().unwrap_or("unknown").to_owned();
+            report.daemon_mode = observed["observed_transport"].as_str().unwrap_or("unknown").to_owned();
+            if report.auth_state == "login_required" {
+                report.login_hint = Some(official_login_hint(tool, None));
+            }
+            report.capabilities["observed_support"] = observed["capabilities"].clone();
+            report.capabilities["probe"] = observed;
+            // A probe verifies the upstream endpoint, not the chat UI/send path.
+            report.capabilities["bob_integration"] = json!("probe_only");
+        }
+        Err(reason) => {
+            report.capabilities["probe"] = json!({"reason": reason, "installed_state": "unknown"});
+        }
+    }
+    report
 }
 
 fn official_login_hint(tool: &str, profile: Option<&str>) -> String {
@@ -180,6 +174,9 @@ pub fn discover_tool(
     if !SUPPORTED_TOOLS.contains(&tool) {
         return Err("HARNESS_TOOL_UNSUPPORTED");
     }
+    if ["pi", "codex", "claude", "agy"].contains(&tool) {
+        return Ok(native_report(data_dir, connection_id, tool, true));
+    }
     let cfg = find_config(data_dir, connection_id, tool);
     let installed = cfg.installed.unwrap_or_else(|| match tool {
         "dsh" => cfg.endpoint.is_some(),
@@ -193,8 +190,8 @@ pub fn discover_tool(
         action: "discover_tool".to_owned(),
         installed,
         auth_state: if installed { "discovered" } else { "unconfigured" }.to_owned(),
-        daemon_mode: daemon_mode_for(tool).to_owned(),
-        anti_wrapping_compliant: true,
+        daemon_mode: "unknown".to_owned(),
+        anti_wrapping_compliant: false,
         login_hint: if installed {
             None
         } else {
@@ -212,6 +209,9 @@ pub fn check_auth(
 ) -> Result<HarnessAuthReport, &'static str> {
     if !SUPPORTED_TOOLS.contains(&tool) {
         return Err("HARNESS_TOOL_UNSUPPORTED");
+    }
+    if ["pi", "codex", "claude", "agy"].contains(&tool) {
+        return Ok(native_report(data_dir, connection_id, tool, false));
     }
     let cfg = find_config(data_dir, connection_id, tool);
     let (installed, auth_state, hint) = match tool {
@@ -266,7 +266,7 @@ pub fn check_auth(
                     Some("OpenClaw device token lacks required operator scopes.".to_owned()),
                 )
             } else if cfg.auth_cached == Some(true) {
-                (true, "authenticated", None)
+                (true, "unknown", None)
             } else {
                 (true, "auth_required", Some(official_login_hint("openclaw", None)))
             }
@@ -291,23 +291,13 @@ pub fn check_auth(
                     Some(official_login_hint("hermes", cfg.profile.as_deref())),
                 )
             } else if has_key {
-                (true, "authenticated", None)
+                (true, "unknown", None)
             } else {
                 (
                     true,
                     "auth_required",
                     Some(official_login_hint("hermes", cfg.profile.as_deref())),
                 )
-            }
-        }
-        "pi" | "codex" | "claude" | "agy" => {
-            let installed = cfg.installed.unwrap_or(false);
-            if !installed {
-                (false, "unconfigured", Some(official_login_hint(tool, None)))
-            } else if cfg.auth_cached == Some(true) {
-                (true, "authenticated", None)
-            } else {
-                (true, "auth_required", Some(official_login_hint(tool, None)))
             }
         }
         _ => return Err("HARNESS_TOOL_UNSUPPORTED"),
@@ -319,8 +309,8 @@ pub fn check_auth(
         action: "check_auth".to_owned(),
         installed,
         auth_state: auth_state.to_owned(),
-        daemon_mode: daemon_mode_for(tool).to_owned(),
-        anti_wrapping_compliant: true,
+        daemon_mode: "unknown".to_owned(),
+        anti_wrapping_compliant: false,
         login_hint: hint,
         capabilities: capabilities_for(tool),
         observed_at: now_millis(),
@@ -441,12 +431,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn supports_all_seven_tools_and_enforces_anti_wrapping_compliance() {
+    fn supports_seven_tool_identifiers_without_claiming_verification() {
         let dir = tempfile::tempdir().unwrap();
         for tool in SUPPORTED_TOOLS {
             let disc = discover_tool(dir.path(), "node-1", tool).unwrap();
             assert_eq!(disc.tool, tool);
-            assert!(disc.anti_wrapping_compliant);
+            assert!(!disc.anti_wrapping_compliant);
             let login = begin_login(dir.path(), "node-1", tool).unwrap();
             assert!(login.login_hint.is_some());
         }
@@ -454,6 +444,39 @@ mod tests {
             discover_tool(dir.path(), "node-1", "unknown_cli").unwrap_err(),
             "HARNESS_TOOL_UNSUPPORTED"
         );
+    }
+
+    #[test]
+    fn configuration_cannot_claim_live_native_auth_or_streaming() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("harness-auth-configs.json"),
+            br#"[{"connectionId":"c1","tool":"codex","installed":true,"authCached":true}]"#).unwrap();
+        let report = verify_capabilities(dir.path(), "c1", "codex").unwrap();
+        assert_eq!(report.auth_state, "unknown");
+        assert_eq!(report.daemon_mode, "unknown");
+        assert_eq!(report.capabilities["probe"]["reason"], "HARNESS_HOST_GRANT_REQUIRED");
+        assert!(report.capabilities["supports_stream"].is_null());
+        assert_eq!(report.capabilities["preferred_transport"], "app_server_stdio");
+        assert!(!report.anti_wrapping_compliant);
+    }
+
+    #[test]
+    fn non_default_profile_cannot_silently_probe_the_default_identity() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("harness-auth-configs.json"),
+            br#"[{"connectionId":"c1","tool":"pi","profile":"other"}]"#).unwrap();
+        let report = check_auth(dir.path(), "c1", "pi").unwrap();
+        assert_eq!(report.auth_state, "unknown");
+        assert_eq!(report.capabilities["probe"]["reason"], "HARNESS_PROFILE_NOT_SUPPORTED");
+    }
+
+    #[test]
+    fn a_connection_cannot_probe_an_ungranted_tool() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("device_harnesses.json"),
+            br#"[{"connectionId":"c1","sshTarget":"local","harnesses":["agy"]}]"#).unwrap();
+        let report = verify_capabilities(dir.path(), "c1", "codex").unwrap();
+        assert_eq!(report.capabilities["probe"]["reason"], "HARNESS_TOOL_NOT_GRANTED");
     }
 
     #[test]
@@ -499,7 +522,7 @@ mod tests {
         assert_eq!(r2.auth_state, "scope_insufficient");
 
         let r3 = check_auth(dir.path(), "c3", "openclaw").unwrap();
-        assert_eq!(r3.auth_state, "authenticated");
+        assert_eq!(r3.auth_state, "unknown");
     }
 
     #[test]

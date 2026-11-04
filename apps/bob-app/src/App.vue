@@ -87,6 +87,10 @@ const {
   quickSwitcherSearchQuery,
   quickPopoverRef,
   quickPillRef,
+  subscriptionQuotas,
+  prepaidUsageList,
+  showPrepaidCost,
+  togglePrepaidCost,
 } = useModelHub(shell);
 
 const {
@@ -278,9 +282,72 @@ onUnmounted(() => {
       </button>
       <details class="conversation-menu" @keydown.esc="$event.currentTarget.open=false; $event.currentTarget.querySelector('summary').focus()" @focusout="!$event.currentTarget.contains($event.relatedTarget) && ($event.currentTarget.open=false)">
         <summary :aria-label="t('conversationMenu')"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><circle cx="5" cy="12" r="1.5" fill="currentColor"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/><circle cx="19" cy="12" r="1.5" fill="currentColor"/></svg></summary>
-        <div class="conversation-menu-panel" @click="$event.currentTarget.closest('details').open = false">
-          <button @click="immersive = !immersive"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5"/></svg>{{ t(immersive ? 'exitImmersive' : 'enterImmersive') }}</button>
-          <button @click="settingsOpen = true"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3"/><circle cx="15" cy="17" r="3"/></svg>{{ t('settings') }}</button>
+        <div class="conversation-menu-panel">
+          <button type="button" class="conversation-menu-action" @click="immersive = !immersive; $event.currentTarget.closest('details.conversation-menu').open = false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5"/></svg>{{ t(immersive ? 'exitImmersive' : 'enterImmersive') }}</button>
+          <button type="button" class="conversation-menu-action" @click="settingsOpen = true; $event.currentTarget.closest('details.conversation-menu').open = false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3"/><circle cx="15" cy="17" r="3"/></svg>{{ t('settings') }}</button>
+          <div class="conversation-menu-divider" role="separator"></div>
+
+          <div class="quota-sub-section" :aria-label="t('quotaWeeklyRemaining')">
+            <div
+              v-for="item in subscriptionQuotas"
+              :key="item.id"
+              class="quota-sub-row"
+              :title="`${item.label} · ${t('quotaWeeklyRemaining')} ${item.remainingWeeklyPct}% · ${t('quotaResetProgress')} ${item.resetTimePct}%`"
+            >
+              <span class="quota-brand-badge">
+                <img :src="item.logo" :alt="item.label" class="quota-brand-logo" />
+              </span>
+              <div class="quota-dual-bars">
+                <div class="quota-bar-line">
+                  <div class="quota-bar-track">
+                    <div
+                      class="quota-bar-fill"
+                      :class="`tone-${item.tone}`"
+                      :style="{ width: `${item.remainingWeeklyPct}%` }"
+                    ></div>
+                  </div>
+                  <span class="quota-bar-pct" :class="`tone-${item.tone}`">{{ item.remainingWeeklyPct }}%</span>
+                </div>
+                <div class="quota-bar-line">
+                  <div class="quota-bar-track">
+                    <div
+                      class="quota-bar-fill tone-reset"
+                      :style="{ width: `${item.resetTimePct}%` }"
+                    ></div>
+                  </div>
+                  <span class="quota-bar-pct tone-reset">{{ item.resetTimePct }}%</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <details class="quota-other-details">
+            <summary class="quota-other-summary">
+              <span>{{ t('otherUsageMenu') }}</span>
+              <svg class="quota-other-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg>
+            </summary>
+            <div class="quota-other-body">
+              <div class="quota-other-header">
+                <button type="button" class="quota-cost-toggle" @click.stop="togglePrepaidCost">
+                  {{ t(showPrepaidCost ? 'hideCostBtn' : 'calcCostBtn') }}
+                </button>
+              </div>
+              <div
+                v-for="p in prepaidUsageList"
+                :key="p.id"
+                class="quota-prepaid-row"
+              >
+                <img :src="p.logo" :alt="p.label" class="quota-prepaid-logo" />
+                <span class="quota-prepaid-name">{{ p.label }}</span>
+                <span class="quota-prepaid-val">
+                  {{ p.tokensText }} {{ t('prepaidTokenUnit') }}
+                  <em v-if="showPrepaidCost" class="quota-prepaid-cost">· {{ p.costText }}</em>
+                </span>
+              </div>
+            </div>
+          </details>
+
+
         </div>
       </details>
     </header>
