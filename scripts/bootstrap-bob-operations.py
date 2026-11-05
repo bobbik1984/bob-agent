@@ -120,6 +120,12 @@ def main():
         parser.error('Run as the existing Bob service account, not root')
     account = pwd.getpwuid(os.getuid()).pw_name
     root = arguments.root.resolve(strict=True)
+    if root == Path('/'):
+        raise SetupError('The installation root must not be the filesystem root')
+    for relative in ('target/release', 'data', 'web_dist'):
+        directory = root / relative
+        if not directory.is_dir() or not directory.resolve().is_relative_to(root):
+            raise SetupError('Deployment directories must remain inside the installation root')
     if unit_value('bob-online.service', 'User') != account:
         raise SetupError('Current login is not the Bob service account')
     if Path(unit_value('bob-online.service', 'WorkingDirectory')).resolve() != root:
