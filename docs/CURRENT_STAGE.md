@@ -11,7 +11,7 @@
 
 准备入口：.github/workflows/bob-operations.yml（手动inspect/deploy）、scripts/run-remote-bob-operation.py（指纹校验/SSH/脱敏结果）、scripts/inspect-bob-online.py、scripts/deploy-bob-online.py（增加非交互模式）、scripts/bootstrap-bob-operations.py（一次性所有者授权）。首次bootstrap必须由所有者完成GitHub设备登录与限定服务控制授权；之后Agent可经已连接GitHub调度任务，不要求用户逐次复制运维命令。Secret仅包含运行连接配置，不可粘贴到聊天。
 
-应用修复已在1.0.1的d7a7818076da3c0a0873788080541999871aa3e6构建并签名验证，Android Run 41956502630；本main工作树仅更新运维入口，不代表其较早应用代码就是应部署版本。部署输入应使用经过验证的应用完整SHA。当前仅完成12项本地运维测试、Python语法与工作流配置检查，尚无成功SSH、部署、生产节点归并或官方额度接入证据。下一步是合入运维入口、确认缺失配置的真实错误，再由所有者一次性bootstrap，随后Agent发起inspect实连验证。
+应用修复已在1.0.1的d7a7818076da3c0a0873788080541999871aa3e6构建并签名验证，Android Run 41956502630；本main工作树仅更新运维入口，不代表其较早应用代码就是应部署版本。部署输入应使用经过验证的应用完整SHA。当前仅完成12项本地运维测试、Python语法与工作流配置检查，尚无成功SSH、部署、生产节点归并或官方额度接入证据。运维入口已通过PR #3合入main（835af33）。Agent已独立触发inspect Run 41967908780并读取日志，真实结果为BOB_DEPLOY_SSH_CONFIG尚未绑定，未开始SSH认证。下一步仅需所有者一次性bootstrap，随后Agent重新发起inspect验证网络、主机指纹、密钥与服务控制权限；验证通过后再执行已授权部署。
 
 ## BP4-06/07 设备多路径归并（2026-11-05，待实施）
 
