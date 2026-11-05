@@ -15,6 +15,7 @@ import platform
 import pwd
 import re
 import shutil
+import signal
 import socket
 import sqlite3
 import stat
@@ -29,7 +30,28 @@ def run(args, **kwargs):
     return subprocess.run([str(a) for a in args], check=True, **kwargs)
 
 
+NON_INTERACTIVE = False
+
+
 def privileged(*args):
+    if NON_INTERACTIVE and args[0] != 'systemctl':
+        command = list(args)
+        if command[0] == 'chown':
+            # Copies made in this mode belong to the service account already.
+            target = Path(command[-1])
+            if any(p.stat().st_uid != os.getuid() for p in [target, *target.rglob('*')]):
+                raise RuntimeError('Probe copy ownership is not the service account')
+            return
+        if command[0] == 'cp':
+            command.insert(2, '--no-preserve=ownership')
+        if command[0] == 'install':
+            for option in ('-o', '-g'):
+                if option in command:
+                    index = command.index(option)
+                    del command[index:index + 2]
+        if command[0] not in ('cp', 'mv', 'install'):
+            raise RuntimeError('Unsupported unprivileged file operation')
+        return run(command, stdout=subprocess.DEVNULL)
     return run(['sudo', '-n', *args], stdout=subprocess.DEVNULL)
 
 
@@ -140,8 +162,11 @@ def build(work, cache, repository, commit):
         env['CARGO_TARGET_DIR'] = str(cache / 'cargo-target')
         env['BOB_FRONTEND_DIST'] = str(work / 'web_dist')
         # All dependency/build caches are outside the authoritative source tree.
+        print('Preparing locked frontend dependencies.', flush=True)
         run(['pnpm', '--dir', frontend, 'install', '--frozen-lockfile', '--store-dir', cache / 'pnpm-store'], env=env, stdout=output, stderr=output)
+        print('Building the web application.', flush=True)
         run(['pnpm', '--dir', frontend, 'run', 'build'], env=env, stdout=output, stderr=output)
+        print('Building the production Bob service.', flush=True)
         run(['cargo', 'build', '--locked', '--release', '-p', 'bob-node'], cwd=source, env=env, stdout=output, stderr=output)
     candidate = work / 'bob-node'
     shutil.copy2(cache / 'cargo-target/release/bob-node', candidate)
@@ -238,9 +263,10 @@ def verify_live(root, service, expected_binary, expected_web):
 def deploy(root, service, work, candidate, web, initial, commit):
     binary, data = Path(initial['binary']), Path(initial['data'])
     tag = time.strftime('%Y%m%d-%H%M%S') + '-' + uuid.uuid4().hex[:8]
-    backup = root / 'backups' / ('quota-device-' + tag)
+    backup = root / ('operator-backups' if NON_INTERACTIVE else 'backups') / ('quota-device-' + tag)
     # Renew the operator's sudo timestamp in their own terminal, without recording it.
-    run(['sudo', '-v'])
+    if not NON_INTERACTIVE:
+        run(['sudo', '-v'])
     current = inspect_service(root, service)
     if current != initial:
         raise RuntimeError('The running deployment changed while building; nothing replaced')
@@ -289,12 +315,19 @@ def deploy(root, service, work, candidate, web, initial, commit):
 
 
 def main():
+    def interrupted(signum, frame):
+        raise KeyboardInterrupt()
+    signal.signal(signal.SIGHUP, interrupted)
+    signal.signal(signal.SIGTERM, interrupted)
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--root', required=True, type=Path)
     parser.add_argument('--service', default='bob-online.service')
     parser.add_argument('--repository', required=True)
     parser.add_argument('--commit', required=True)
+    parser.add_argument('--non-interactive', action='store_true', help='Use service-account file access and narrowly delegated service controls')
     options = parser.parse_args()
+    global NON_INTERACTIVE
+    NON_INTERACTIVE = options.non_interactive
     if not re.fullmatch(r'[0-9a-f]{40}', options.commit):
         parser.error('commit must be a full lowercase Git SHA')
     if not options.repository.startswith('https://github.com/'):
@@ -311,11 +344,19 @@ def main():
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         initial = inspect_service(root, options.service)
         check_data(Path(initial['data']))
+        if NON_INTERACTIVE:
+            for path in (root, root / 'target/release'):
+                if not os.access(path, os.W_OK | os.X_OK):
+                    raise RuntimeError('Service-account write permission is missing: ' + str(path))
+            for action in ('start', 'stop', 'reset-failed'):
+                run(['sudo', '-n', '-l', shutil.which('systemctl'), action, options.service], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         work = cache / ('release-' + options.commit[:12] + '-' + uuid.uuid4().hex[:8])
         work.mkdir(mode=0o700)
         # Require space for two private data copies plus the isolated build.
         size = sum(p.stat().st_size for p in Path(initial['data']).rglob('*') if p.is_file())
-        if shutil.disk_usage(cache).free < 2 * size + 4 * 1024**3:
+        shared_disk = cache.stat().st_dev == root.stat().st_dev
+        needed = (3 if shared_disk else 2) * size + 4 * 1024**3
+        if shutil.disk_usage(cache).free < needed:
             raise RuntimeError('Insufficient free build/compatibility space')
         if shutil.disk_usage(root).free < size + 512 * 1024**2:
             raise RuntimeError('Insufficient free backup space')

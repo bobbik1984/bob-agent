@@ -4,6 +4,14 @@
 
 > 当前事实与详细执行顺序的唯一入口；长期阶段见 [DEVELOPMENT_ROUTE](DEVELOPMENT_ROUTE.md)，需求与原始验收条款见 [todo](../todo.md)。沿用 BP、S、M、RV、OL、XP 编号，不另起路线。
 
+## 独立运维通道（2026-11-05，等待一次性开通）
+
+用户使用ChatGPT Android内的Codex云端项目，要求一次配置后Agent独立操作，不接受逐次在PuTTY代执行部署脚本。控制面工作流bob-operations.yml已通过PR #3合入main，PR #4补充bootstrap路径检查。Agent已成功触发inspect Run 41967908780并读取结果：BOB_DEPLOY_SSH_CONFIG尚未绑定，未开始SSH认证。
+
+下一步由所有者一次性执行scripts/bootstrap-bob-operations.py并完成GitHub官方设备登录，把新专用SSH密钥直接加密存入仓库Secret；限定委托Bob服务的start/stop/reset-failed，不授予全局免密sudo。随后Agent自行触发inspect校验网络、主机指纹、身份、目录写权限和服务控制权限；通过后执行已授权的生产部署，不再把逐次操作交给用户。当前云端仍没有直接SSH通道，不等于GitHub runner已经连通，任何接入成功须有真实任务回执。
+
+应用修复源为d7a7818076da3c0a0873788080541999871aa3e6，Android Run 41956502630已构建校验；生产尚未部署，真实官方额度仍未接通。控制脚本支持非交互文件操作/限定sudo，12项本地运维测试及语法检查通过，不能替代生产实连验证。
+
 ## BP4-06/07 设备多路径归并（2026-11-05，待实施）
 
 用户确认：设备是唯一记录，公网统一入口和Tailscale内网地址是该设备的不同路径；此前工具专用通道不再单独代表设备。规则已归入ARCHITECTURE“设备统一入口与跨设备项目组织”。实际运行地址应归入运维inventory/service_map，不在产品源码硬编码。用户本次确认的目标映射如下（是目标配置，不代表已验证或已迁移）：

@@ -81,6 +81,17 @@ class DeploymentTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, 'links or special'):
                 deploy.check_data(data)
 
+    def test_noninteractive_file_operations_need_no_root_and_preserve_data(self):
+        with tempfile.TemporaryDirectory() as folder, patch.object(deploy, 'NON_INTERACTIVE', True):
+            root, binary, data, candidate, web = self.layout(Path(folder))
+            backup = root / 'operator-backups/test'
+            deploy.backup_files(root, binary, data, backup)
+            deploy.replace_files(root, binary, candidate, web, 'fixture')
+            self.assertEqual(binary.read_text(), 'new program')
+            deploy.restore_files(root, binary, backup, 'fixture')
+            self.assertEqual(binary.read_text(), 'old program')
+            self.assertEqual((data / 'private-state').read_text(), 'keep private data')
+
     def test_http_hash_includes_bob_runtime_marker(self):
         with tempfile.TemporaryDirectory() as folder:
             web = Path(folder)
