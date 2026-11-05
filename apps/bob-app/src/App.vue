@@ -280,7 +280,7 @@ onUnmounted(() => {
         </svg>
         <span class="device-dot" aria-hidden="true"></span>
       </button>
-      <details class="conversation-menu" @keydown.esc="$event.currentTarget.open=false; $event.currentTarget.querySelector('summary').focus()" @focusout="!$event.currentTarget.contains($event.relatedTarget) && ($event.currentTarget.open=false)">
+      <details class="conversation-menu" @keydown.esc="$event.currentTarget.open=false; $event.currentTarget.querySelector('summary').focus()" @focusout="$event.relatedTarget && !$event.currentTarget.contains($event.relatedTarget) && ($event.currentTarget.open=false)">
         <summary :aria-label="t('conversationMenu')"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><circle cx="5" cy="12" r="1.5" fill="currentColor"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/><circle cx="19" cy="12" r="1.5" fill="currentColor"/></svg></summary>
         <div class="conversation-menu-panel">
           <button type="button" class="conversation-menu-action" @click="immersive = !immersive; $event.currentTarget.closest('details.conversation-menu').open = false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5"/></svg>{{ t(immersive ? 'exitImmersive' : 'enterImmersive') }}</button>

@@ -75,3 +75,16 @@
 - 浏览器通过 SSH 私有通道访问同一生产进程；公网匿名资源检查返回 HTTP 403，未获得本轮独立公网登录验收。未更改公网认证，不把 403 解释成节点离线。未发送新模型消息，未迁移/删除设备路径，未打包或安装 APK，手机真机继续暂停。
 
 后续：官方真实额度数据源、设备路径身份核对及关联迁移、GitHub 运维 Secret 接通仍保留原待办；本次完成的是最新开发版网页发布，不代表这些能力全部完成。
+
+
+## 额度菜单选字崩溃修复（2026-11-05）
+
+用户报告在电脑右上角三点菜单选择“暂不可获取”准备复制时浏览器显示 this page is having a problem。原因已通过对照定位：App.vue 的 details focusout 处理把 relatedTarget=null 当成移出菜单，文字选取期间同步关闭 details，实际触发 Chromium renderer crash。相同已发布前端成品的无补丁测试出现 Playwright crash 事件；仅忽略空 relatedTarget 的对照测试正常。不能把此故障解释为账户认证失败或额度查询失败。
+
+最小修复：仅在 relatedTarget 确实位于菜单之外时失焦关闭；外部 pointerdown、Esc 和内部焦点交互保持。新增 scripts/test-menu-selection.py，以指定外置 dist 运行本机浏览器回归，不安装依赖、不使用模拟额度。Chromium/Edge ×390/1180px 共4组：三行文字双击/拖选/复制、其他用量展开、Esc/外部点击/外部焦点关闭均通过，无脚本错误或崩溃。Vite 构建通过，体积警告保留。
+
+仅发布网页静态资源，后端进程 PID 957756、数据库与凭据保持。index SHA256 `2621bbb51d5235a1ad7debed8833451dfcb2851b70b3b57a4b7f3bd5f8d1bc96`；注入后 HTTP SHA256 `f22bf4e54764a539a661b93181ad64ca0514f0f73921d6b01a4bf4bce1ac6666`。备份 `/opt/bob-online/operator-backups/menu-selection-1793876341/web_dist`，回退仅恢复该网页目录。未打包APK或手机测试。
+
+额度显示边界：后端 probe_subscription_quotas_cached 和前端菜单仍未接入持续采集，三个“暂不可获取”是未接线状态，不表示订阅不可用。此前用户授权的一次性官方查询已取得 Codex app-server 额度、AGY 状态栏 quota JSON 和 X1T Claude /usage 面板；不把一次性快照硬编码到线上。正式采集、缓存时间/来源展示及 Claude rate_limits 结构化验证仍待实施。
+
+发布后复验：实际生产服务经私有通道，在 Edge 390/1180px 各重复20轮双击/拖选/复制及其他用量展开，均无 JS 错误和 crash 事件；移除全部临时浏览器拦截后验证。首轮截图等待字体超时，交互本身通过，后续不依赖截图完成复验；未声称独立公网登录验收。

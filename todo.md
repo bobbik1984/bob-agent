@@ -1,5 +1,8 @@
 # todo — 需求池（仅保留未完成与待补尾缺口）
 
+- [x] 修复额度菜单选字触发浏览器崩溃：忽略空目标失焦，完成双浏览器四组验证并发布前端。
+- [ ] 接入官方订阅额度持续采集：Codex app-server、AGY quota JSON、X1T Claude 官方结构化额度；显示来源/更新时间，失效保留缓存，不使用一次性快照冒充实时数据。
+
 - [x] 2026-11-05 最新开发版 0888876 网页发布及真实 X1T 阅读/图片、390/1180px 菜单隔离验证；见 docs/evidence/2026-11-05-quota-device-paths.md。设备关联迁移、官方额度、Actions SSH 和手机验收仍按原队列保留。
 
 > **记录准则**（遵循 [项目开发与文档统一标准](../docs/standards/project_documentation_standard.md) §3.7）：
