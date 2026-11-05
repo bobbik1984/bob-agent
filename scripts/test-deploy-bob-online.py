@@ -1,3 +1,4 @@
+import hashlib
 import importlib.util
 from pathlib import Path
 import sqlite3
@@ -91,6 +92,14 @@ class DeploymentTests(unittest.TestCase):
             deploy.restore_files(root, binary, backup, 'fixture')
             self.assertEqual(binary.read_text(), 'old program')
             self.assertEqual((data / 'private-state').read_text(), 'keep private data')
+
+    def test_http_hash_preserves_crlf_and_utf8(self):
+        with tempfile.TemporaryDirectory() as folder:
+            web = Path(folder)
+            html = '<html>\r\n<head></head><body>测试</body>\r\n</html>'
+            (web / 'index.html').write_bytes(html.encode('utf-8'))
+            expected = html.replace('<head>', '<head><script>window.__BOB_NODE_RUNTIME__=true;</script>', 1)
+            self.assertEqual(deploy.http_index_sha(web), hashlib.sha256(expected.encode('utf-8')).hexdigest())
 
     def test_http_hash_includes_bob_runtime_marker(self):
         with tempfile.TemporaryDirectory() as folder:

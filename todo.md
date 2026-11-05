@@ -1,5 +1,7 @@
 # todo — 需求池（仅保留未完成与待补尾缺口）
 
+- [x] 2026-11-05 最新开发版 0888876 网页发布及真实 X1T 阅读/图片、390/1180px 菜单隔离验证；见 docs/evidence/2026-11-05-quota-device-paths.md。设备关联迁移、官方额度、Actions SSH 和手机验收仍按原队列保留。
+
 > **记录准则**（遵循 [项目开发与文档统一标准](../docs/standards/project_documentation_standard.md) §3.7）：
 > 1. **已完成项 (`[x]`)** 一律归档至 [`docs/archive_done.md`](docs/archive_done.md)，不在本文件堆积战报；
 > 2. **已获得的能力与验收标准** 统一登记于 [`docs/FEATURES.md`](docs/FEATURES.md)；

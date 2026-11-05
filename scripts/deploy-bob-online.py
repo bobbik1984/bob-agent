@@ -64,7 +64,8 @@ def sha(path):
 
 
 def http_index_sha(web):
-    html = (web / 'index.html').read_text()
+    # Match the actual served bytes; universal newline conversion changes Windows builds.
+    html = (web / 'index.html').read_bytes().decode('utf-8')
     marker = '<script>window.__BOB_NODE_RUNTIME__=true;</script>'
     injected = html.replace('<head>', '<head>' + marker, 1) if '<head>' in html else marker + html
     return hashlib.sha256(injected.encode()).hexdigest()

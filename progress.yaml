@@ -11,7 +11,7 @@ project:
   - Desktop
   - Android
   - Web (bob-node)
-  current_task: "统一节点 DSH 认证分流已上线；X1T 真实历史分页、图片点击预览与返回通过；固定签名 APK Run 41884589345 已生成并校验。原生流式与跨轮常驻/取消/恢复待完整验收，手机暂停。"
+  current_task: "GitHub 1.0.1 源码 0888876 已发布网页；112 项前端检查及真实 X1T 历史/图片、390/1180px 菜单隔离通过。设备路径未迁移，官方额度与 Actions 运维通道仍待验证；本轮无 APK，手机暂停。"
   development_plan: docs/CURRENT_STAGE.md
 phases:
 - name: BP0 真相与保护
