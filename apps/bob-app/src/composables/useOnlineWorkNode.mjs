@@ -92,7 +92,6 @@ async function handleOnlineSaveNode({ origin, token }) {
     });
     if (cleanToken) {
       onlineState.hasToken = true;
-      onlineState.connected = true;
     }
     if (onlineState.hasToken || onlineState.token) {
       await handleOnlineRefresh();
@@ -216,6 +215,7 @@ async function handleOnlineRefresh() {
       ]);
       onlineState.capabilities = caps;
       onlineState.projects = Array.isArray(projs?.items) ? projs.items : [];
+      onlineState.connected = true;
       if (onlineState.projects.length > 0 && !onlineState.selectedProjectId) {
         await handleOnlineSelectProject(onlineState.projects[0].id);
       }
@@ -223,6 +223,7 @@ async function handleOnlineRefresh() {
   } catch (err) {
     const msg = String(err?.message || err || 'ONLINE_REFRESH_FAILED');
     onlineState.error = msg;
+    onlineState.connected = false;
     if (msg.includes('CLIENT_CREDENTIAL_INVALID') || msg.includes('401') || msg.includes('403')) {
       onlineState.connected = false;
       onlineState.hasToken = false;

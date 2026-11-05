@@ -1,3 +1,4 @@
+import { deviceKey } from './device-paths.mjs';
 export const nodeLabel = node => node.label || node.name || node.baseUrl || node.id;
 export function workspaceName(path) {
   const parts = String(path || '').split(/[\\/]+/).filter(Boolean);
@@ -86,7 +87,7 @@ export function inferSmartTopic(row) {
 }
 
 export function rowNodeKey(row) {
-  return row.remote ? `remote:${row.node?.id || ''}` : `local:${row.device || 'local'}`;
+  return row.remote ? `remote:${deviceKey(row.node || {}) || ''}` : `local:${row.device || 'local'}`;
 }
 
 export function rowNodeLabel(row) {
@@ -290,7 +291,7 @@ export function directoryGroups(rows, mode, pinnedSet = null, options = null) {
   const groups = new Map();
   for (const row of ordered) {
     const device = row.remote ? nodeLabel(row.node) : row.device;
-    const owner = row.remote ? ['remote', row.node.id] : ['local', row.device];
+    const owner = row.remote ? ['remote', deviceKey(row.node)] : ['local', row.device];
     const project = row.project || row.workspace || '';
     const linked = row.project_owner && row.project_id;
     const key = JSON.stringify(

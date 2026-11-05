@@ -287,38 +287,12 @@ onUnmounted(() => {
           <button type="button" class="conversation-menu-action" @click="settingsOpen = true; $event.currentTarget.closest('details.conversation-menu').open = false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3"/><circle cx="15" cy="17" r="3"/></svg>{{ t('settings') }}</button>
           <div class="conversation-menu-divider" role="separator"></div>
 
-          <div class="quota-sub-section" :aria-label="t('quotaWeeklyRemaining')">
-            <div
-              v-for="item in subscriptionQuotas"
-              :key="item.id"
-              class="quota-sub-row"
-              :title="`${item.label} · ${t('quotaWeeklyRemaining')} ${item.remainingWeeklyPct}% · ${t('quotaResetProgress')} ${item.resetTimePct}%`"
-            >
-              <span class="quota-brand-badge">
-                <img :src="item.logo" :alt="item.label" class="quota-brand-logo" />
-              </span>
-              <div class="quota-dual-bars">
-                <div class="quota-bar-line">
-                  <div class="quota-bar-track">
-                    <div
-                      class="quota-bar-fill"
-                      :class="`tone-${item.tone}`"
-                      :style="{ width: `${item.remainingWeeklyPct}%` }"
-                    ></div>
-                  </div>
-                  <span class="quota-bar-pct" :class="`tone-${item.tone}`">{{ item.remainingWeeklyPct }}%</span>
-                </div>
-                <div class="quota-bar-line">
-                  <div class="quota-bar-track">
-                    <div
-                      class="quota-bar-fill tone-reset"
-                      :style="{ width: `${item.resetTimePct}%` }"
-                    ></div>
-                  </div>
-                  <span class="quota-bar-pct tone-reset">{{ item.resetTimePct }}%</span>
-                </div>
-              </div>
+          <div class="quota-sub-section" :aria-label="t('quotaSubscription')">
+            <div v-for="item in subscriptionQuotas" :key="item.id" class="quota-sub-row">
+              <span class="quota-brand-badge"><img :src="item.logo" :alt="item.label" class="quota-brand-logo" /></span>
+              <div><strong>{{ item.label }}</strong><p>{{ t('quotaUnavailable') }}</p></div>
             </div>
+            <p>{{ t('quotaNotConnected') }}</p>
           </div>
 
           <details class="quota-other-details">

@@ -177,7 +177,7 @@ export function createKernelBridge(invoke, isAvailable) {
         apiKey: apiKey ?? '',
       }),
     customModelDelete: id => call('app_custom_model_delete', { id }),
-    remoteNodeSave: ({ id, label, baseUrl, token, clearToken, selectedProjectId, enabled }) =>
+    remoteNodeSave: ({ id, label, baseUrl, token, clearToken, selectedProjectId, enabled, deviceId }) =>
       call('app_remote_node_save', {
         id: id ?? null,
         label: label ?? null,
@@ -185,6 +185,7 @@ export function createKernelBridge(invoke, isAvailable) {
         token: token ?? null,
         clearToken: clearToken ?? false,
         selectedProjectId: selectedProjectId ?? null,
+        ...(deviceId ? { deviceId } : {}),
         enabled: enabled ?? true,
       }),
     remoteNodeDelete: id => call('app_remote_node_delete', { id }),

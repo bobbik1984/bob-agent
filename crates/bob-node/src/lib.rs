@@ -920,7 +920,7 @@ pub fn handle_rpc_command(ctx: &mut NodeContext, command: &str, args: &Value) ->
                 .get("enabled")
                 .and_then(Value::as_bool)
                 .unwrap_or(true);
-            ctx.runtime.save_remote_node(
+            ctx.runtime.save_remote_node_for_device(
                 &mut ctx.app,
                 id,
                 name,
@@ -929,6 +929,7 @@ pub fn handle_rpc_command(ctx: &mut NodeContext, command: &str, args: &Value) ->
                 clear_token,
                 remark,
                 enabled,
+                args.get("deviceId").and_then(Value::as_str),
             )
         }
         "app_remote_node_delete" => {

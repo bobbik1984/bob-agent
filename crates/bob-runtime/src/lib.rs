@@ -879,10 +879,33 @@ impl ModelHubRuntime {
         remark: Option<&str>,
         enabled: bool,
     ) -> Result<Value, &'static str> {
+        self.save_remote_node_for_device(app, id, name, url, token, clear_token, remark, enabled, None)
+    }
+
+    pub fn save_remote_node_for_device(
+        &self,
+        app: &mut LocalApp,
+        id: Option<String>,
+        name: &str,
+        url: &str,
+        token: Option<&str>,
+        clear_token: bool,
+        remark: Option<&str>,
+        enabled: bool,
+        device_id: Option<&str>,
+    ) -> Result<Value, &'static str> {
         let mut hub = self.load_hub_state();
-        let nid = id
-            .filter(|s| !s.trim().is_empty())
+        let old_nodes = hub.get("remoteNodes").and_then(Value::as_array);
+        let same_address = old_nodes.and_then(|nodes| nodes.iter().find(|n| {
+            n.get("baseUrl").or_else(|| n.get("url")).and_then(Value::as_str)
+                .is_some_and(|u| u.trim().trim_end_matches('/') == url.trim().trim_end_matches('/'))
+        })).and_then(|n| n["id"].as_str()).map(str::to_owned);
+        let nid = id.filter(|s| !s.trim().is_empty()).or(same_address)
             .unwrap_or_else(|| format!("node-{}", now_millis()));
+        let existing_device = old_nodes.and_then(|nodes| nodes.iter().find(|n| n["id"].as_str() == Some(&nid)))
+            .and_then(|n| n["deviceId"].as_str());
+        let resolved_device = device_id.filter(|s| !s.trim().is_empty())
+            .or(existing_device).unwrap_or(&nid).trim().to_owned();
         let slot = remote_node_token_slot(&nid);
         if clear_token {
             let _ = self.secrets.clear(&slot);
@@ -898,16 +921,25 @@ impl ModelHubRuntime {
             .and_then(Value::as_array)
             .cloned()
             .unwrap_or_default();
-        let entry = json!({
+        let mut entry = list.iter().find(|n| n["id"].as_str() == Some(&nid))
+            .cloned().unwrap_or_else(|| json!({}));
+        let saved_remark = remark.map(str::to_owned)
+            .or_else(|| entry["remark"].as_str().map(str::to_owned)).unwrap_or_default();
+        let update = json!({
             "id": nid,
+            "deviceId": resolved_device,
             "name": name.trim(),
             "label": name.trim(),
             "url": url.trim(),
             "baseUrl": url.trim(),
-            "remark": remark.unwrap_or("").trim(),
+            "remark": saved_remark.trim(),
             "enabled": enabled,
             "updatedAt": now_millis()
         });
+        let fields = entry.as_object_mut().ok_or("INVALID_REMOTE_NODE")?;
+        fields.remove("token");
+        fields.remove("accessToken");
+        fields.extend(update.as_object().unwrap().clone());
         if let Some(existing) = list
             .iter_mut()
             .find(|item| item.get("id").and_then(Value::as_str) == Some(&nid))
@@ -1885,6 +1917,52 @@ mod tests {
     use super::*;
 
     #[test]
+    fn subscription_quotas_do_not_fabricate_data() {
+        let quotas = probe_subscription_quotas_cached();
+        for provider in ["codex", "antigravity", "claude"] {
+            assert_eq!(quotas[provider]["status"], "unavailable");
+            assert!(quotas[provider].get("remaining_weekly_pct").is_none());
+            assert!(quotas[provider].get("reset_time_pct").is_none());
+        }
+    }
+
+    #[test]
+    fn device_paths_preserve_tokens_ids_and_membership() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = LocalApp::open(&dir.path().join("kernel.sqlite")).unwrap();
+        let runtime = ModelHubRuntime::with_file_vault(dir.path().to_path_buf()).unwrap();
+        runtime.save_remote_node_for_device(&mut app, Some("public".into()), "Desktop",
+            "https://node.example", Some("public-token"), false, None, true, Some("machine")).unwrap();
+        runtime.save_remote_node_for_device(&mut app, Some("vpn".into()), "Desktop VPN",
+            "http://node.internal", Some("vpn-token"), false, None, true, Some("machine")).unwrap();
+        let mut saved = runtime.load_hub_state();
+        saved["remoteNodes"][1]["transportHint"] = json!("keep");
+        saved["remoteNodes"][1]["token"] = json!("legacy-plaintext");
+        runtime.save_hub_state(&saved).unwrap();
+        // Legacy callers must retain explicit membership and keep credential slots separate.
+        let snap = runtime.save_remote_node(&mut app, Some("vpn".into()), "Renamed",
+            "http://node.internal", None, false, None, true).unwrap();
+        let nodes = snap["remoteNodes"].as_array().unwrap();
+        assert_eq!(nodes.len(), 2);
+        assert!(nodes.iter().all(|n| n["deviceId"] == "machine"));
+        assert_eq!(nodes[1]["transportHint"], "keep");
+        assert!(nodes[1].get("token").is_none());
+        assert_eq!(runtime.secrets.get(&remote_node_token_slot("public")).unwrap(), "public-token");
+        assert_eq!(runtime.secrets.get(&remote_node_token_slot("vpn")).unwrap(), "vpn-token");
+        let snap = runtime.save_remote_node(&mut app, None, "Updated",
+            "https://node.example/", None, false, None, true).unwrap();
+        assert_eq!(snap["remoteNodes"].as_array().unwrap().len(), 2);
+        node_pairing::merge_topology(dir.path(), &mut app, &runtime, &json!({
+            "remoteNodes": [{"id":"imported", "deviceId":"machine", "label":"Alias",
+                "url":"http://alias.internal", "enabled":true}]
+        })).unwrap();
+        let hub = runtime.load_hub_state();
+        let imported = hub["remoteNodes"].as_array().unwrap().iter()
+            .find(|n| n["id"] == "imported").unwrap();
+        assert_eq!(imported["deviceId"], "machine");
+    }
+
+    #[test]
     fn file_vault_secret_store_roundtrip_and_redaction() {
         let dir = tempfile::tempdir().expect("tempdir");
         let mut app = LocalApp::open(&dir.path().join("kernel.sqlite")).expect("open kernel");
@@ -1938,171 +2016,14 @@ mod tests {
     }
 }
 
+/// No authenticated provider quota feed is configured yet. Local token/step counts
+/// and another process's session logs cannot establish the user's subscription quota.
 pub fn probe_subscription_quotas_cached() -> Value {
-    static CACHE: std::sync::OnceLock<std::sync::Mutex<(i64, Value)>> = std::sync::OnceLock::new();
-    let now = now_millis();
-    let lock = CACHE.get_or_init(|| std::sync::Mutex::new((0, Value::Null)));
-    if let Ok(guard) = lock.lock() {
-        if guard.0 > 0 && now - guard.0 < 60_000 && !guard.1.is_null() {
-            return guard.1.clone();
-        }
-    }
-    let home = std::env::var_os("HOME")
-        .or_else(|| std::env::var_os("USERPROFILE"))
-        .map(PathBuf::from);
-    let now_secs = (now / 1000).max(1);
-    let week_secs: i64 = 7 * 86_400;
-    let rolling_reset_pct = (((now_secs % week_secs) * 100) / week_secs).clamp(5, 98);
-
-    let mut codex_rem: i64 = 93;
-    let mut codex_rst: i64 = 28;
-    let mut agy_rem: i64 = 68;
-    let agy_rst: i64 = rolling_reset_pct;
-    let mut claude_rem: i64 = 74;
-    let claude_rst: i64 = rolling_reset_pct;
-
-    if let Some(ref h) = home {
-        // 1. Codex: parse most recent ~/.codex/sessions/**/*.jsonl rate_limits.primary
-        let codex_dir = h.join(".codex").join("sessions");
-        if let Some(latest_jsonl) = find_most_recent_file_with_ext(&codex_dir, "jsonl", 3) {
-            if let Ok(content) = std::fs::read_to_string(&latest_jsonl) {
-                for line in content.lines().rev().take(200) {
-                    if !line.contains("rate_limits") {
-                        continue;
-                    }
-                    if let Ok(v) = serde_json::from_str::<Value>(line) {
-                        let primary = &v["payload"]["rate_limits"]["primary"];
-                        if let Some(used) = primary["used_percent"].as_f64() {
-                            codex_rem = (100.0 - used).round().clamp(0.0, 100.0) as i64;
-                            if let Some(resets_at) = primary["resets_at"].as_i64() {
-                                let win_mins = primary["window_minutes"].as_i64().unwrap_or(10080).max(60);
-                                let win_secs = win_mins * 60;
-                                let left_secs = (resets_at - now_secs).clamp(0, win_secs);
-                                codex_rst = (((win_secs - left_secs) * 100) / win_secs).clamp(1, 99);
-                            }
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-        // 2. Claude Code: sum 7-day token usage in ~/.claude/projects/*/*.jsonl
-        let claude_dir = h.join(".claude").join("projects");
-        let cutoff_ms = now - (week_secs * 1000);
-        let claude_tokens = sum_recent_claude_tokens(&claude_dir, cutoff_ms as u128);
-        if claude_tokens > 0 {
-            let budget: u64 = 5_000_000;
-            let used_pct = ((claude_tokens.min(budget) * 100) / budget) as i64;
-            claude_rem = (100 - used_pct).clamp(2, 99);
-        }
-        // 3. Antigravity: count 7-day steps in ~/.gemini/antigravity/brain
-        let agy_brain = h.join(".gemini").join("antigravity").join("brain");
-        let agy_steps = count_recent_agy_steps(&agy_brain, cutoff_ms as u128);
-        if agy_steps > 0 {
-            let budget: u64 = 2_500;
-            let used_pct = ((agy_steps.min(budget) * 100) / budget) as i64;
-            agy_rem = (100 - used_pct).clamp(2, 99);
-        }
-    }
-
-    let val = json!({
-        "codex": { "remaining_weekly_pct": codex_rem, "reset_time_pct": codex_rst },
-        "antigravity": { "remaining_weekly_pct": agy_rem, "reset_time_pct": agy_rst },
-        "claude": { "remaining_weekly_pct": claude_rem, "reset_time_pct": claude_rst },
-    });
-    if let Ok(mut guard) = lock.lock() {
-        *guard = (now, val.clone());
-    }
-    val
-}
-
-fn find_most_recent_file_with_ext(dir: &Path, ext: &str, max_depth: usize) -> Option<PathBuf> {
-    if max_depth == 0 || !dir.is_dir() {
-        return None;
-    }
-    let mut best: Option<(std::time::SystemTime, PathBuf)> = None;
-    let entries = std::fs::read_dir(dir).ok()?;
-    for entry in entries.flatten() {
-        let p = entry.path();
-        if p.is_dir() {
-            if let Some(sub) = find_most_recent_file_with_ext(&p, ext, max_depth - 1) {
-                if let Ok(m) = std::fs::metadata(&sub).and_then(|m| m.modified()) {
-                    if best.as_ref().is_none_or(|(bm, _)| m > *bm) {
-                        best = Some((m, sub));
-                    }
-                }
-            }
-        } else if p.extension().and_then(|e| e.to_str()) == Some(ext) {
-            if let Ok(m) = entry.metadata().and_then(|m| m.modified()) {
-                if best.as_ref().is_none_or(|(bm, _)| m > *bm) {
-                    best = Some((m, p));
-                }
-            }
-        }
-    }
-    best.map(|(_, p)| p)
-}
-
-fn sum_recent_claude_tokens(dir: &Path, cutoff_ms: u128) -> u64 {
-    let Ok(projects) = std::fs::read_dir(dir) else { return 0 };
-    let mut total: u64 = 0;
-    for proj in projects.flatten().take(24) {
-        let Ok(files) = std::fs::read_dir(proj.path()) else { continue };
-        for f in files.flatten().take(32) {
-            let p = f.path();
-            if p.extension().and_then(|e| e.to_str()) != Some("jsonl") {
-                continue;
-            }
-            let Ok(meta) = f.metadata() else { continue };
-            let mtime_ms = meta
-                .modified()
-                .ok()
-                .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-                .map(|d| d.as_millis())
-                .unwrap_or(0);
-            if mtime_ms < cutoff_ms || meta.len() > 4 * 1024 * 1024 {
-                continue;
-            }
-            if let Ok(text) = std::fs::read_to_string(&p) {
-                for line in text.lines() {
-                    if !line.contains("\"usage\"") {
-                        continue;
-                    }
-                    if let Ok(v) = serde_json::from_str::<Value>(line) {
-                        let u = &v["message"]["usage"];
-                        let inp = u["input_tokens"].as_u64().unwrap_or(0);
-                        let out = u["output_tokens"].as_u64().unwrap_or(0);
-                        let cc = u["cache_creation_input_tokens"].as_u64().unwrap_or(0) / 4;
-                        let cr = u["cache_read_input_tokens"].as_u64().unwrap_or(0) / 10;
-                        total = total.saturating_add(inp + out + cc + cr);
-                    }
-                }
-            }
-        }
-    }
-    total
-}
-
-fn count_recent_agy_steps(brain_dir: &Path, cutoff_ms: u128) -> u64 {
-    let Ok(convs) = std::fs::read_dir(brain_dir) else { return 0 };
-    let mut steps: u64 = 0;
-    for c in convs.flatten().take(40) {
-        let log_path = c.path().join(".system_generated").join("logs").join("transcript.jsonl");
-        let Ok(meta) = std::fs::metadata(&log_path) else { continue };
-        let mtime_ms = meta
-            .modified()
-            .ok()
-            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-            .map(|d| d.as_millis())
-            .unwrap_or(0);
-        if mtime_ms < cutoff_ms || meta.len() > 8 * 1024 * 1024 {
-            continue;
-        }
-        if let Ok(text) = std::fs::read_to_string(&log_path) {
-            steps = steps.saturating_add(text.lines().count() as u64);
-        }
-    }
-    steps
+    json!({
+        "codex": { "status": "unavailable", "reason": "PROVIDER_QUOTA_NOT_CONNECTED" },
+        "antigravity": { "status": "unavailable", "reason": "PROVIDER_QUOTA_NOT_CONNECTED" },
+        "claude": { "status": "unavailable", "reason": "PROVIDER_QUOTA_NOT_CONNECTED" }
+    })
 }
 
 pub mod assistant;

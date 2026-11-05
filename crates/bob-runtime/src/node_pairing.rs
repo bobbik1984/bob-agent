@@ -480,7 +480,7 @@ pub fn merge_topology(
                 .filter(|s| !s.is_empty());
             let remark = node.get("remark").and_then(Value::as_str);
             let enabled = node.get("enabled").and_then(Value::as_bool).unwrap_or(true);
-            let _ = runtime.save_remote_node(
+            let _ = runtime.save_remote_node_for_device(
                 app,
                 Some(id),
                 name,
@@ -489,6 +489,7 @@ pub fn merge_topology(
                 false,
                 remark,
                 enabled,
+                node.get("deviceId").and_then(Value::as_str),
             )?;
         }
     }

@@ -698,5 +698,19 @@
   "calcCostBtn": "算费用",
   "hideCostBtn": "收起费用",
   "prepaidTokenUnit": "tok",
-  "nativeExecutionFailed": "节点未能完成本次回复"
+  "nativeExecutionFailed": "节点未能完成本次回复",
+  "quotaSubscription": "订阅额度",
+  "quotaUnavailable": "暂不可获取",
+  "quotaNotConnected": "尚未接入已认证账户的官方额度数据；不显示估算余额或重置倒计时。",
+  "connectionAddPath": "添加访问路径",
+  "connectionDeletePath": "删除此路径",
+  "connectionDevice": "所属设备",
+  "connectionSeparateDevice": "独立设备",
+  "connectionDeviceHint": "仅在确认属于同一台设备后归并。保留各路径的凭据与会话关联；不会复制或重发消息。",
+  "connectionTest": "测试读取",
+  "connectionChecking": "正在验证会话读取",
+  "connectionReadable": "最近一次会话读取成功，不代表全部工具可执行",
+  "connectionReadFailed": "会话读取失败；不代表整台设备离线",
+  "directoryPathFailed": "{name} 的路径 {url} 暂时无法读取。",
+  "directoryCacheRetained": "下方保留上次读取的缓存目录，不代表当前在线。"
 }
