@@ -2,6 +2,7 @@
 
 - [x] 修复额度菜单选字触发浏览器崩溃：忽略空目标失焦，完成双浏览器四组验证并发布前端。
 - [x] Codex app-server、AGY quota JSON 持续采集及来源/更新时间/过期缓存展示已上线，实际生产 Edge/Chromium ×390/1180px 验证通过（7e24e2a）；见现有额度 Evidence。
+- [x] 按用户确认样式上线紧凑额度菜单：Logo、双线、百分比/剩余时长、#333333底线；源数据和未知/过期边界保持。
 - [ ] X1T Claude 官方 statusLine 接收器已安装；仍需真实 rate_limits 回调并验证持续显示，禁止将此前 /usage 一次性快照当作实时数据。
 
 - [x] 2026-11-05 最新开发版 0888876 网页发布及真实 X1T 阅读/图片、390/1180px 菜单隔离验证；见 docs/evidence/2026-11-05-quota-device-paths.md。设备关联迁移、官方额度、Actions SSH 和手机验收仍按原队列保留。

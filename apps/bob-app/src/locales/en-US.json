@@ -728,5 +728,6 @@
   "quotaGeminiFiveHour": "Gemini · Five hours",
   "quotaGeminiWeekly": "Gemini · Weekly",
   "quotaThirdPartyFiveHour": "Third-party · Five hours",
-  "quotaThirdPartyWeekly": "Third-party · Weekly"
+  "quotaThirdPartyWeekly": "Third-party · Weekly",
+  "quotaResetTime": "Time until reset"
 }

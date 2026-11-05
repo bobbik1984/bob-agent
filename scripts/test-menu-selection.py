@@ -18,7 +18,7 @@ try:
     page.on('pageerror',lambda e:errors.append(str(e)));page.on('crash',lambda _:crashes.append(True))
     page.goto('http://127.0.0.1:'+str(server.server_port),wait_until='domcontentloaded')
     menu=page.locator('.conversation-menu');summary=page.locator('.conversation-menu > summary');summary.click()
-    for row in page.locator('.quota-sub-row p').all():
+    for row in page.locator('.quota-sub-row .quota-bar-pct').all():
      row.dblclick(timeout=5000);assert page.evaluate('window.getSelection().toString().length')>0
      rect=row.bounding_box();page.mouse.move(rect['x']+1,rect['y']+rect['height']/2);page.mouse.down();page.mouse.move(rect['x']+rect['width']-1,rect['y']+rect['height']/2,steps=12);page.mouse.up();page.keyboard.press('Control+c')
      assert menu.get_attribute('open') is not None

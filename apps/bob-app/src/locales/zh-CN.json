@@ -728,5 +728,6 @@
   "quotaGeminiFiveHour": "Gemini · 五小时",
   "quotaGeminiWeekly": "Gemini · 本周",
   "quotaThirdPartyFiveHour": "第三方模型 · 五小时",
-  "quotaThirdPartyWeekly": "第三方模型 · 本周"
+  "quotaThirdPartyWeekly": "第三方模型 · 本周",
+  "quotaResetTime": "剩余重置时间"
 }

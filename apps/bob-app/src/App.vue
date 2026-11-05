@@ -289,20 +289,24 @@ onUnmounted(() => {
           <div class="conversation-menu-divider" role="separator"></div>
 
           <div class="quota-sub-section" :aria-label="t('quotaSubscription')">
-            <div v-for="item in subscriptionQuotas" :key="item.id" class="quota-sub-row">
+            <div v-for="item in subscriptionQuotas" :key="item.id" class="quota-sub-row"
+              :title="[item.label, item.compact?.id, item.source && t('quotaSource', {node:item.source}), item.updated && t('quotaUpdatedAt', {time:item.updated}), item.status === 'stale' && t('quotaStale'), !item.compact && t('quotaAwaitingSource')].filter(Boolean).join(' · ')">
               <span class="quota-brand-badge"><img :src="item.logo" :alt="item.label" class="quota-brand-logo" /></span>
-              <div class="quota-sub-content"><strong>{{ item.label }}</strong>
-                <p v-if="!item.windows.length">{{ t('quotaAwaitingSource') }}</p>
-                <p v-if="item.source" class="quota-source">{{ t('quotaSource', { node: item.source }) }}</p>
-                <div v-for="window in item.windows" :key="window.id" class="quota-window">
-                  <div class="quota-window-value"><span>{{ window.label }}</span><strong>{{ window.expired ? t('quotaWindowExpired') : t('quotaRemaining', { value: window.remaining }) }}</strong></div>
-                  <progress v-if="!window.expired" :value="window.remaining_percent" max="100" :aria-label="window.label"></progress>
-                  <small v-if="window.reset">{{ t('quotaResetsAt', { time: window.reset }) }}</small>
+              <div class="quota-dual-bars">
+                <div class="quota-bar-line">
+                  <div class="quota-bar-track" role="meter" :aria-label="item.label + ' ' + t('quotaSubscription')" :aria-valuenow="item.compact && !item.compact.expired ? item.compact.remaining_percent : undefined" :aria-valuetext="!item.compact ? t('quotaAwaitingSource') : item.compact.expired ? t('quotaWindowExpired') : item.status === 'stale' ? t('quotaStale') : undefined" aria-valuemin="0" aria-valuemax="100">
+                    <div class="quota-bar-fill quota-remaining-fill" :style="{'--remaining': item.compact && !item.compact.expired ? item.compact.remaining_percent + '%' : '0%'}"></div>
+                  </div>
+                  <span class="quota-bar-pct">{{ item.compact && !item.compact.expired ? Math.round(item.compact.remaining_percent) + '%' : '—' }}<span v-if="item.status === 'stale'" :aria-label="t('quotaStale')">*</span></span>
                 </div>
-                <small v-if="item.updated" class="quota-updated">{{ t('quotaUpdatedAt', { time: item.updated }) }}<span v-if="item.status === 'stale'"> · {{ t('quotaStale') }}</span></small>
+                <div class="quota-bar-line">
+                  <div class="quota-bar-track" role="meter" :aria-label="item.label + ' ' + t('quotaResetTime')" :aria-valuenow="item.compact?.timePercent ?? undefined" :aria-valuetext="item.compact?.timeText || t('quotaAwaitingSource')" aria-valuemin="0" aria-valuemax="100">
+                    <div class="quota-bar-fill quota-time-fill" :style="{width: (item.compact?.timePercent ?? 0) + '%'}"></div>
+                  </div>
+                  <span class="quota-bar-pct quota-time-text">{{ item.compact?.timeText || '—' }}</span>
+                </div>
               </div>
             </div>
-            <p class="quota-source-note">{{ t('quotaSourceNote') }}</p>
           </div>
 
           <details class="quota-other-details">

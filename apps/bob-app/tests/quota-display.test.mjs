@@ -1,10 +1,11 @@
+import {compactQuota} from '../src/composables/quota-display.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import {readFileSync} from 'node:fs';
 const source=readFileSync(new URL('../src/composables/useModelHub.mjs',import.meta.url),'utf8').replace(/^import .*;\r?\n/gm,'').replace('export function useModelHub','function useModelHub');
 test('missing and legacy quota snapshots cannot display example subscription balances',()=>{
- const ctx={localStorage:{getItem:()=>null},ref:value=>({value}),reactive:x=>x,computed:fn=>({get value(){return fn()}}),defaultRegistryData:{providers:[]},mobileModelsData:[]};
+ const ctx={compactQuota,onMounted:()=>{},onUnmounted:()=>{},localStorage:{getItem:()=>null},ref:value=>({value}),reactive:x=>x,computed:fn=>({get value(){return fn()}}),defaultRegistryData:{providers:[]},mobileModelsData:[]};
  vm.createContext(ctx);vm.runInContext(source+';globalThis.create=useModelHub;',ctx);
  const hub=ctx.create({t:key=>key});
  assert.equal(hub.subscriptionQuotas.value.length,3);
@@ -14,7 +15,7 @@ test('missing and legacy quota snapshots cannot display example subscription bal
 });
 
 test('saving a token does not establish a verified online connection',()=>{
- const ctx={localStorage:{getItem:()=>null},ref:value=>({value}),reactive:x=>x,computed:fn=>({get value(){return fn()}}),defaultRegistryData:{providers:[]},mobileModelsData:[]};
+ const ctx={compactQuota,onMounted:()=>{},onUnmounted:()=>{},localStorage:{getItem:()=>null},ref:value=>({value}),reactive:x=>x,computed:fn=>({get value(){return fn()}}),defaultRegistryData:{providers:[]},mobileModelsData:[]};
  vm.createContext(ctx);vm.runInContext(source+';globalThis.create=useModelHub;',ctx);
  const onlineState={connected:false};let refreshes=0;
  const hub=ctx.create({t:key=>key,onlineState,restoreRemoteSelection:{value:false},handleOnlineRefresh:()=>{assert.equal(onlineState.connected,false);refreshes++;}});

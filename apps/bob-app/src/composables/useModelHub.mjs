@@ -1,4 +1,5 @@
-import { computed, reactive, ref } from 'vue';
+import { compactQuota } from './quota-display.mjs';
+import { computed, reactive, ref, onMounted, onUnmounted } from 'vue';
 import defaultRegistryData from '../assets/model_providers.json';
 import mobileModelsData from '../assets/mobile_models.json';
 
@@ -707,6 +708,10 @@ function resolveQuotaTone(pct) {
   return 'low';
 }
 
+const quotaNow = ref(Date.now() / 1000);
+let quotaClock;
+onMounted(() => { quotaClock = setInterval(() => { quotaNow.value = Date.now() / 1000; }, 1000); });
+onUnmounted(() => clearInterval(quotaClock));
 const subscriptionQuotas = computed(() => [
   { id: 'codex', label: 'Codex · ChatGPT', logo: '/logos/codex.png' },
   { id: 'antigravity', label: 'Antigravity', logo: '/logos/antigravity.png' },
@@ -716,7 +721,8 @@ const subscriptionQuotas = computed(() => [
   const known = ['available', 'stale'].includes(data?.status);
   const windowLabels = {weekly:'quotaWeekly', five_hour:'quotaFiveHour', primary:'quotaPrimary', secondary:'quotaSecondary',
     'gemini-5h':'quotaGeminiFiveHour', 'gemini-weekly':'quotaGeminiWeekly', '3p-5h':'quotaThirdPartyFiveHour', '3p-weekly':'quotaThirdPartyWeekly'};
-  return {...item, status: known ? data.status : 'unavailable', source: data?.source_node || '',
+  const compact = compactQuota(data, quotaNow.value);
+  return {...item, compact, status: known ? data.status : 'unavailable', source: data?.source_node || '',
     updated: known && data.observed_at ? new Date(data.observed_at * 1000).toLocaleString() : '',
     windows: known ? (data.windows || []).map(w => ({...w, label: windowLabels[w.id] ? t(windowLabels[w.id]) : w.id,
       remaining: Number(w.remaining_percent).toLocaleString(undefined, {maximumFractionDigits:1}),

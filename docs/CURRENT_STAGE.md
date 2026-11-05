@@ -1,6 +1,6 @@
 # Bob — Current Stage（1.0.1 施工与交接合同）
 
-> 最新额度功能（2026-11-05）：7e24e2a 已发布网页与后端。Codex app-server、Antigravity 官方 quota JSON 持续采集已接通；菜单展示剩余、重置、来源及更新时间，读取失败保留过期缓存。X1T Claude 官方 statusLine 接收已安装，但尚无 rate_limits 观测，仍待验收。实际生产 Edge/Chromium ×390/1180px 显示、选字及菜单交互通过；浏览器经私有通道访问同一服务，未独立验证公网登录。无 APK/手机测试。详见现有额度 Evidence 最新节。
+> 最新额度功能（2026-11-05）：7e24e2a 已发布网页与后端。Codex app-server、Antigravity 官方 quota JSON 持续采集已接通；菜单已改为Logo、双线、剩余百分比与时长；来源和更新时间收至悬停详情，底线#333333，读取失败保留过期标记。X1T Claude 官方 statusLine 接收已安装，但尚无 rate_limits 观测，仍待验收。实际生产 Edge/Chromium ×390/1180px 显示、选字及菜单交互通过；浏览器经私有通道访问同一服务，未独立验证公网登录。无 APK/手机测试。详见现有额度 Evidence 最新节。
 
 > 前次发布基线与设备路径验收见现有额度 Evidence；本轮未迁移或删除设备路径，Actions SSH 通道与手机验收边界不变。
 
