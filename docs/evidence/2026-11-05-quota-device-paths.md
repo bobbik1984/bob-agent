@@ -88,3 +88,13 @@
 额度显示边界：后端 probe_subscription_quotas_cached 和前端菜单仍未接入持续采集，三个“暂不可获取”是未接线状态，不表示订阅不可用。此前用户授权的一次性官方查询已取得 Codex app-server 额度、AGY 状态栏 quota JSON 和 X1T Claude /usage 面板；不把一次性快照硬编码到线上。正式采集、缓存时间/来源展示及 Claude rate_limits 结构化验证仍待实施。
 
 发布后复验：实际生产服务经私有通道，在 Edge 390/1180px 各重复20轮双击/拖选/复制及其他用量展开，均无 JS 错误和 crash 事件；移除全部临时浏览器拦截后验证。首轮截图等待字体超时，交互本身通过，后续不依赖截图完成复验；未声称独立公网登录验收。
+
+## 官方额度持续采集发布（2026-11-05）
+
+源码7e24e2a已发布。Codex官方app-server与AGY官方statusLine实际返回数据；采集器不发送模型提示、不读取OAuth、不解析终端画面。VPS2用户级bob-quota-collector.timer已启用，约5分钟采集；浏览器打开菜单读取缓存。X1T Claude settings的原文件已在节点本机备份，安装官方statusLine接收器；尚未收到rate_limits，页面诚实显示等待官方回报，不能标记三家全部验收。
+
+- 前端112项通过；Rust额度定向4项通过；采集器正常/缺失/非法数值/字段隔离4项通过；Vue及Linux release构建通过（已有chunk体积警告保留）。未重跑全套Rust既有失败用例。
+- 发布前在服务器本机一致性备份，候选仅复制kernel.sqlite、不复制Vault；候选启动/旧程序读回、正式HTTP哈希检查通过。备份operator-backups/quota-device-20261105-142357-13a3395d（相对服务根）。回退恢复其程序及网页，保持当前data；可停用用户级额度timer，不得覆盖新用户数据。
+- 程序SHA256 dd7eb06ef42f678cd96349ae73024ca19712f8f966b32f7208c0116a1b387cab；网页index SHA256 6d05592d983fdb7cf11859ef4f58fb59027583361996eae4348be12401593b15；HTTP SHA256 dad86c2173910ff8acc4e62602d34f645719c72ea323f41706608d30194c92ad。
+- 实际生产经SSH私有通道，Edge/Chromium各390/1180px：两家真实额度共5窗口显示、来源/更新时间、选字复制、展开其他用量、Esc关闭、无横向溢出均通过，无JS错误/crash。观测Codex周剩余96%、AGY Gemini周剩余约35.8%，只是验收时快照，不写死产品。两次浏览器检查观测时间推进，证实后台刷新在运行。
+- 未验证独立公网登录、未打包APK、未测手机。Claude正式数据仍待验证；没有使用旧/usage的52%数字冒充新数据。

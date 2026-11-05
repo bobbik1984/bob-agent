@@ -11,7 +11,7 @@ project:
   - Desktop
   - Android
   - Web (bob-node)
-  current_task: "GitHub 1.0.1 源码 0888876 已发布网页；112 项前端检查及真实 X1T 历史/图片、390/1180px 菜单隔离通过。设备路径未迁移，官方额度与 Actions 运维通道仍待验证；本轮无 APK，手机暂停。"
+  current_task: "额度源码7e24e2a已发布网页与后端：Codex/AGY真实持续采集和生产Edge/Chromium菜单验证通过；Claude官方回调已安装但无rate_limits观测，继续待验收。设备路径未迁移，Actions通道待验证；本轮无APK，手机暂停。"
   development_plan: docs/CURRENT_STAGE.md
 phases:
 - name: BP0 真相与保护
