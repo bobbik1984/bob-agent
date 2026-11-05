@@ -712,5 +712,21 @@
   "connectionReadable": "最近一次会话读取成功，不代表全部工具可执行",
   "connectionReadFailed": "会话读取失败；不代表整台设备离线",
   "directoryPathFailed": "{name} 的路径 {url} 暂时无法读取。",
-  "directoryCacheRetained": "下方保留上次读取的缓存目录，不代表当前在线。"
+  "directoryCacheRetained": "下方保留上次读取的缓存目录，不代表当前在线。",
+  "quotaAwaitingSource": "等待官方额度回报",
+  "quotaSource": "来源：{node}",
+  "quotaRemaining": "剩余 {value}%",
+  "quotaResetsAt": "重置：{time}",
+  "quotaUpdatedAt": "更新：{time}",
+  "quotaStale": "上次记录，待更新",
+  "quotaWindowExpired": "窗口已到期",
+  "quotaSourceNote": "来自已登录工具的官方额度。后台定期更新；过期记录保留标记，不推算新额度。",
+  "quotaWeekly": "本周",
+  "quotaFiveHour": "五小时",
+  "quotaPrimary": "主窗口",
+  "quotaSecondary": "次窗口",
+  "quotaGeminiFiveHour": "Gemini · 五小时",
+  "quotaGeminiWeekly": "Gemini · 本周",
+  "quotaThirdPartyFiveHour": "第三方模型 · 五小时",
+  "quotaThirdPartyWeekly": "第三方模型 · 本周"
 }

@@ -88,6 +88,7 @@ const {
   quickPopoverRef,
   quickPillRef,
   subscriptionQuotas,
+  loadModelHub,
   prepaidUsageList,
   showPrepaidCost,
   togglePrepaidCost,
@@ -280,7 +281,7 @@ onUnmounted(() => {
         </svg>
         <span class="device-dot" aria-hidden="true"></span>
       </button>
-      <details class="conversation-menu" @keydown.esc="$event.currentTarget.open=false; $event.currentTarget.querySelector('summary').focus()" @focusout="$event.relatedTarget && !$event.currentTarget.contains($event.relatedTarget) && ($event.currentTarget.open=false)">
+      <details class="conversation-menu" @toggle="$event.currentTarget.open && loadModelHub()" @keydown.esc="$event.currentTarget.open=false; $event.currentTarget.querySelector('summary').focus()" @focusout="$event.relatedTarget && !$event.currentTarget.contains($event.relatedTarget) && ($event.currentTarget.open=false)">
         <summary :aria-label="t('conversationMenu')"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><circle cx="5" cy="12" r="1.5" fill="currentColor"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/><circle cx="19" cy="12" r="1.5" fill="currentColor"/></svg></summary>
         <div class="conversation-menu-panel">
           <button type="button" class="conversation-menu-action" @click="immersive = !immersive; $event.currentTarget.closest('details.conversation-menu').open = false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5"/></svg>{{ t(immersive ? 'exitImmersive' : 'enterImmersive') }}</button>
@@ -290,9 +291,18 @@ onUnmounted(() => {
           <div class="quota-sub-section" :aria-label="t('quotaSubscription')">
             <div v-for="item in subscriptionQuotas" :key="item.id" class="quota-sub-row">
               <span class="quota-brand-badge"><img :src="item.logo" :alt="item.label" class="quota-brand-logo" /></span>
-              <div><strong>{{ item.label }}</strong><p>{{ t('quotaUnavailable') }}</p></div>
+              <div class="quota-sub-content"><strong>{{ item.label }}</strong>
+                <p v-if="!item.windows.length">{{ t('quotaAwaitingSource') }}</p>
+                <p v-if="item.source" class="quota-source">{{ t('quotaSource', { node: item.source }) }}</p>
+                <div v-for="window in item.windows" :key="window.id" class="quota-window">
+                  <div class="quota-window-value"><span>{{ window.label }}</span><strong>{{ window.expired ? t('quotaWindowExpired') : t('quotaRemaining', { value: window.remaining }) }}</strong></div>
+                  <progress v-if="!window.expired" :value="window.remaining_percent" max="100" :aria-label="window.label"></progress>
+                  <small v-if="window.reset">{{ t('quotaResetsAt', { time: window.reset }) }}</small>
+                </div>
+                <small v-if="item.updated" class="quota-updated">{{ t('quotaUpdatedAt', { time: item.updated }) }}<span v-if="item.status === 'stale'"> · {{ t('quotaStale') }}</span></small>
+              </div>
             </div>
-            <p>{{ t('quotaNotConnected') }}</p>
+            <p class="quota-source-note">{{ t('quotaSourceNote') }}</p>
           </div>
 
           <details class="quota-other-details">

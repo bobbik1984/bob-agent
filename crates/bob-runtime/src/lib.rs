@@ -685,7 +685,7 @@ impl ModelHubRuntime {
         );
 
         let pool_len = pool.len();
-        let subscription_quotas = probe_subscription_quotas_cached();
+        let subscription_quotas = subscription_quota::read(&self.data_dir);
         Ok(json!({
             "registry": registry,
             "pool": pool,
@@ -2027,3 +2027,5 @@ pub fn probe_subscription_quotas_cached() -> Value {
 }
 
 pub mod assistant;
+
+pub mod subscription_quota;

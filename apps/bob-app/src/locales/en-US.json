@@ -712,5 +712,21 @@
   "connectionReadable": "Recent session reading succeeded; other tool capabilities are not verified",
   "connectionReadFailed": "Session reading failed; the device may still be reachable",
   "directoryPathFailed": "Cannot currently read {name} through {url}.",
-  "directoryCacheRetained": "The cached directory remains visible below; it does not establish current connectivity."
+  "directoryCacheRetained": "The cached directory remains visible below; it does not establish current connectivity.",
+  "quotaAwaitingSource": "Awaiting official quota data",
+  "quotaSource": "Source: {node}",
+  "quotaRemaining": "{value}% left",
+  "quotaResetsAt": "Resets: {time}",
+  "quotaUpdatedAt": "Updated: {time}",
+  "quotaStale": "Previous reading; awaiting update",
+  "quotaWindowExpired": "Window expired",
+  "quotaSourceNote": "Official quotas from signed-in tools. Refreshed in the background; expired readings remain marked, never estimated.",
+  "quotaWeekly": "Weekly",
+  "quotaFiveHour": "Five hours",
+  "quotaPrimary": "Primary window",
+  "quotaSecondary": "Secondary window",
+  "quotaGeminiFiveHour": "Gemini · Five hours",
+  "quotaGeminiWeekly": "Gemini · Weekly",
+  "quotaThirdPartyFiveHour": "Third-party · Five hours",
+  "quotaThirdPartyWeekly": "Third-party · Weekly"
 }
