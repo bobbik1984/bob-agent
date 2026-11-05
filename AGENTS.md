@@ -20,6 +20,7 @@
 |---|---|
 | 每次任务（L0） | 本文件 → `docs/CURRENT_STAGE.md` |
 | 修改设备、连接、路径选择或会话目录 | `docs/ARCHITECTURE.md` → “设备统一入口与跨设备项目组织”；具体迁移状态见 `docs/CURRENT_STAGE.md` → “BP4-06/07 设备多路径归并” |
+| 生产检查、部署与长期运维接入 | `docs/ARCHITECTURE.md` → “独立运维执行通道”；状态与一次性设置见 `docs/CURRENT_STAGE.md` → “独立运维通道” |
 | 为什么做、为谁做 | `docs/PROJECT_VISION.md` |
 | 边界、不变量、待决架构 | `docs/ARCHITECTURE.md` |
 | 长期阶段与 Exit Gate | `docs/DEVELOPMENT_ROUTE.md` |
