@@ -20,7 +20,7 @@ async function connect(){
   const auth=await api('login',{password:password.value});password.value='';owner=auth.access_token;
   const invite=await api('invitations',{},owner);
   const credential=await api('exchange',{pairing_id:invite.pairing_id,code:invite.user_code,device_name:'Bob operator'});
-  try {await kernelBridge.remoteNodeSave({id:info.value.node_id,label:name.value.trim()||new URL(base).hostname,baseUrl:base,token:credential.access_token,enabled:true});}
+  try {await kernelBridge.remoteNodeSave({deviceId:info.value.node_id,label:name.value.trim()||new URL(base).hostname,baseUrl:base,token:credential.access_token,enabled:true});}
   catch(e){await api('revoke',{},credential.access_token).catch(()=>{});throw e;}
   connected.value=true;emit('connected');
   const mobile=await api('invitations',{},owner);qr.value={code:invitationUri(base,mobile),expires_at:mobile.expires_at};

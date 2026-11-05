@@ -698,5 +698,19 @@
   "calcCostBtn": "Calc Cost",
   "hideCostBtn": "Hide Cost",
   "prepaidTokenUnit": "tok",
-  "nativeExecutionFailed": "The node could not complete this reply"
+  "nativeExecutionFailed": "The node could not complete this reply",
+  "quotaSubscription": "Subscription quota",
+  "quotaUnavailable": "Unavailable",
+  "quotaNotConnected": "Authenticated provider quota data is not connected. Estimated balances and reset countdowns are not shown.",
+  "connectionAddPath": "Add access path",
+  "connectionDeletePath": "Delete this path",
+  "connectionDevice": "Device",
+  "connectionSeparateDevice": "Separate device",
+  "connectionDeviceHint": "Group paths only after confirming they belong to the same device. Path credentials and session links are preserved; messages are never copied or resent.",
+  "connectionTest": "Test reading",
+  "connectionChecking": "Checking session reading",
+  "connectionReadable": "Recent session reading succeeded; other tool capabilities are not verified",
+  "connectionReadFailed": "Session reading failed; the device may still be reachable",
+  "directoryPathFailed": "Cannot currently read {name} through {url}.",
+  "directoryCacheRetained": "The cached directory remains visible below; it does not establish current connectivity."
 }

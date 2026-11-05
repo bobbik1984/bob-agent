@@ -6,6 +6,8 @@ import { kernelBridge } from './native-bridge.mjs';
 import { isBobNodeRuntime } from './http-bridge.mjs';
 import PairingQr from './PairingQr.vue';
 import ManualPairing from './ManualPairing.vue';
+import {deviceGroups} from './device-paths.mjs';
+import {checkPath,pathState,pathHealth} from './path-health.mjs';
 import NodeConnect from './NodeConnect.vue';
 const addNode = ref(false);
 import { createPairingScanController } from './pairing-scan-controller.mjs';
@@ -26,14 +28,18 @@ const error = ref('');
 const syncSuccess = ref(false);
 const connections = ref([]), connectionForm = ref(false), deleting = ref(null);
 const connectionError = ref(''), connectionBusy = ref(false);
+const devices = computed(()=>deviceGroups(connections.value));
+const testing=ref({});
+async function testConnection(node){testing.value={...testing.value,[node.id]:true};try{await checkPath(node,kernelBridge);}catch{}finally{testing.value={...testing.value,[node.id]:false};}}
+function healthKey(node){return {readable:'connectionReadable',failed:'connectionReadFailed',checking:'connectionChecking',unverified:'connectionSavedUnverified'}[pathState(node)];}
 const connectionDraft = ref({id:null,label:'',baseUrl:'',token:''});
 async function loadConnections() {
   try { const snap=await kernelBridge.modelHubGet(); connections.value=snap?.remoteNodes || []; }
   catch { connectionError.value='connectionLoadFailed'; }
 }
-function editConnection(node=null) {
+function editConnection(node=null,deviceId=null) {
   connectionError.value='';
-  connectionDraft.value={id:node?.id||null,label:node?.name||node?.label||'',baseUrl:node?.url||node?.baseUrl||'',token:''};
+  connectionDraft.value={id:node?.id||null,label:node?.name||node?.label||'',baseUrl:node?.url||node?.baseUrl||'',token:'',deviceId:deviceId||node?.deviceId||node?.id||''};
   connectionForm.value=true;
 }
 async function saveConnection() {
@@ -43,7 +49,7 @@ async function saveConnection() {
   connectionBusy.value=true;connectionError.value='';
   try {
     const snap=await kernelBridge.remoteNodeSave({...connectionDraft.value,token:connectionDraft.value.token||null,enabled:true});
-    if(!snap)throw Error(); if(connectionDraft.value.id)await readingCache.removePrefix(connectionPrefix(connectionDraft.value.id)); connections.value=snap.remoteNodes||[];
+    if(!snap)throw Error(); if(connectionDraft.value.id)await readingCache.removePrefix(connectionPrefix(connectionDraft.value.id)); connections.value=snap.remoteNodes||[];if(connectionDraft.value.id)delete pathHealth[connectionDraft.value.id];
     connectionDraft.value.token='';connectionForm.value=false;emit('changed');
   } catch {connectionError.value='connectionSaveFailed';}
   finally {connectionBusy.value=false;}
@@ -51,7 +57,7 @@ async function saveConnection() {
 async function deleteConnection() {
   if(!deleting.value||connectionBusy.value)return;
   connectionBusy.value=true;
-  try {const snap=await kernelBridge.remoteNodeDelete(deleting.value.id);if(!snap)throw Error();await readingCache.removePrefix(connectionPrefix(deleting.value.id));connections.value=snap.remoteNodes||[];deleting.value=null;emit('changed');}
+  try {const snap=await kernelBridge.remoteNodeDelete(deleting.value.id);if(!snap)throw Error();await readingCache.removePrefix(connectionPrefix(deleting.value.id));connections.value=snap.remoteNodes||[];delete pathHealth[deleting.value.id];deleting.value=null;emit('changed');}
   catch {connectionError.value='connectionDeleteFailed';}
   finally {connectionBusy.value=false;}
 }
@@ -272,12 +278,18 @@ onUnmounted(() => {
       <NodeConnect v-if="addNode" @close="addNode=false" @connected="loadConnections();emit('changed')" />
       <p v-if="connectionError" role="alert">{{ t(connectionError) }}</p>
       <p v-if="!connections.length && !connectionForm" class="view-card-desc">{{ t('connectionEmpty') }}</p>
-      <article v-for="node in connections" :key="node.id" class="connection-list-row">
-        <div><strong>{{ node.name || node.label || node.url || node.baseUrl }}</strong><p>{{ node.url || node.baseUrl }}</p><small>{{ t('connectionSavedUnverified') }}</small></div>
-        <div><button type="button" @click="editConnection(node)">{{ t('connectionEdit') }}</button><button type="button" @click="deleting=node">{{ t('connectionDelete') }}</button></div>
+      <article v-for="device in devices" :key="device.id" class="connection-device">
+        <h4>{{ device.label }}</h4>
+        <button type="button" @click="editConnection(null,device.id)">{{ t('connectionAddPath') }}</button>
+        <div v-for="node in device.paths" :key="node.id" class="connection-list-row">
+          <div><p>{{ node.url || node.baseUrl }}</p><small>{{ t(healthKey(node)) }}</small></div>
+          <div><button type="button" :disabled="testing[node.id]" @click="testConnection(node)">{{t('connectionTest')}}</button><button type="button" @click="editConnection(node)">{{ t('connectionEdit') }}</button><button type="button" @click="deleting=node">{{ t('connectionDeletePath') }}</button></div>
+        </div>
       </article>
       <form v-if="connectionForm" class="connection-form" @submit.prevent="saveConnection">
         <label>{{ t('connectionName') }}<input v-model="connectionDraft.label" :disabled="connectionBusy" /></label>
+        <label>{{ t('connectionDevice') }}<select v-model="connectionDraft.deviceId" :disabled="connectionBusy"><option :value="connectionDraft.id || ''">{{t('connectionSeparateDevice')}}</option><option v-for="device in devices" :key="device.id" :value="device.id">{{device.label}} · {{device.paths[0].baseUrl || device.paths[0].url}}</option></select></label>
+        <p>{{t('connectionDeviceHint')}}</p>
         <label>{{ t('connectionAddress') }}<input v-model="connectionDraft.baseUrl" type="url" required :disabled="connectionBusy" /></label>
         <label>{{ t('connectionToken') }}<input v-model="connectionDraft.token" type="password" autocomplete="off" :disabled="connectionBusy" /></label>
         <p class="view-card-desc">{{ t('connectionTokenHint') }}</p>

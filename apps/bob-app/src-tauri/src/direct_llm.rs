@@ -1682,6 +1682,7 @@ pub(crate) async fn app_remote_node_save<R: Runtime>(
     clear_token: Option<bool>,
     selected_project_id: Option<String>,
     enabled: Option<bool>,
+    device_id: Option<String>,
 ) -> Result<Value, &'static str> {
     let burl = base_url.trim().trim_end_matches('/');
     if burl.is_empty() {
@@ -1776,8 +1777,15 @@ pub(crate) async fn app_remote_node_save<R: Runtime>(
     } else {
         String::new()
     };
-    let entry = json!({
+    let existing_device = nodes.iter().find(|n| n["id"].as_str() == Some(&resolved_id))
+        .and_then(|n| n["deviceId"].as_str());
+    let resolved_device = device_id.as_deref().filter(|s| !s.trim().is_empty())
+        .or(existing_device).unwrap_or(&resolved_id).trim().to_owned();
+    let mut entry = nodes.iter().find(|n| n["id"].as_str() == Some(&resolved_id))
+        .cloned().unwrap_or_else(|| json!({}));
+    let update = json!({
         "id": resolved_id,
+        "deviceId": resolved_device,
         "label": node_label,
         "name": node_label,
         "baseUrl": burl,
@@ -1787,12 +1795,12 @@ pub(crate) async fn app_remote_node_save<R: Runtime>(
         "enabled": enabled.unwrap_or(true),
         "updatedAt": ts,
     });
+    let fields = entry.as_object_mut().ok_or("INVALID_REMOTE_NODE")?;
+    fields.remove("token");
+    fields.remove("accessToken");
+    fields.extend(update.as_object().unwrap().clone());
     if let Some(existing) = nodes.iter_mut().find(|n| {
         n["id"].as_str() == Some(&resolved_id)
-            || n.get("baseUrl")
-                .or_else(|| n.get("url"))
-                .and_then(Value::as_str)
-                == Some(burl)
     }) {
         *existing = entry;
     } else {
@@ -3772,6 +3780,7 @@ async fn apply_synced_topology_payload<R: Runtime>(
                 Some(false),
                 remark,
                 Some(renabled),
+                rn.get("deviceId").and_then(Value::as_str).map(str::to_owned),
             )
             .await;
         }
@@ -3951,6 +3960,7 @@ pub(crate) async fn pair_and_sync_node_qr<R: Runtime>(
         Some(false),
         Some(inv.role.clone()),
         Some(true),
+        None,
     )
     .await;
 

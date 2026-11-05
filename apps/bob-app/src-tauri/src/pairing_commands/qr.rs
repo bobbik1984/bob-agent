@@ -1027,6 +1027,7 @@ mod tests {
             None,
             Some("proj-cloud-1".into()),
             Some(true),
+            None,
         ))
         .unwrap();
         tauri::async_runtime::block_on(crate::app_schedule_create(

@@ -402,7 +402,7 @@ function applyModelHubSnapshot(snap) {
       snap.remoteNodes.find(n => n.enabled !== false && (n.hasToken || n.token)) ||
       snap.remoteNodes.find(n => n.enabled !== false);
     if (activeNode && activeNode.baseUrl) {
-      if (!onlineState.connected) {
+      if (!onlineState.connected && !onlineState.busy) {
         onlineState.origin = activeNode.baseUrl;
         if (activeNode.selectedProjectId) {
           onlineState.selectedProjectId = activeNode.selectedProjectId;
@@ -410,7 +410,6 @@ function applyModelHubSnapshot(snap) {
         if (activeNode.hasToken || activeNode.token) {
           onlineState.hasToken = true;
           if (activeNode.token) onlineState.token = activeNode.token;
-          onlineState.connected = true;
           void handleOnlineRefresh();
         }
       }
@@ -708,42 +707,13 @@ function resolveQuotaTone(pct) {
   return 'low';
 }
 
-const subscriptionQuotas = computed(() => {
-  const live = modelHub.value?.state?.subscription_quotas || {};
-  const defaults = [
-    {
-      id: 'codex',
-      label: 'Codex · ChatGPT',
-      logo: '/logos/codex.png',
-      remainingWeeklyPct: live.codex?.remaining_weekly_pct ?? 93,
-      resetTimePct: live.codex?.reset_time_pct ?? 28,
-    },
-    {
-      id: 'antigravity',
-      label: 'Antigravity',
-      logo: '/logos/antigravity.png',
-      remainingWeeklyPct: live.antigravity?.remaining_weekly_pct ?? 42,
-      resetTimePct: live.antigravity?.reset_time_pct ?? 64,
-    },
-    {
-      id: 'claude',
-      label: 'Claude Code',
-      logo: '/logos/claude.png',
-      remainingWeeklyPct: live.claude?.remaining_weekly_pct ?? 16,
-      resetTimePct: live.claude?.reset_time_pct ?? 85,
-    },
-  ];
-  return defaults.map(item => {
-    const rem = Math.max(0, Math.min(100, Math.round(Number(item.remainingWeeklyPct) || 0)));
-    const rst = Math.max(0, Math.min(100, Math.round(Number(item.resetTimePct) || 0)));
-    return {
-      ...item,
-      remainingWeeklyPct: rem,
-      resetTimePct: rst,
-      tone: resolveQuotaTone(rem),
-    };
-  });
-});
+// No authenticated subscription quota integration is connected. Never reuse
+// legacy percentages: they included example values and local token estimates.
+const subscriptionQuotas = computed(() => [
+  { id: 'codex', label: 'Codex · ChatGPT', logo: '/logos/codex.png' },
+  { id: 'antigravity', label: 'Antigravity', logo: '/logos/antigravity.png' },
+  { id: 'claude', label: 'Claude Code', logo: '/logos/claude.png' },
+]);
 
 const prepaidUsageList = computed(() => {
   const live = modelHub.value?.state?.prepaid_usage || {};
@@ -752,29 +722,29 @@ const prepaidUsageList = computed(() => {
       id: 'deepseek',
       label: 'DeepSeek',
       logo: '/logos/deepseek.png',
-      tokensText: live.deepseek?.tokens_text || '184.6k',
-      costText: live.deepseek?.cost_text || '¥0.26',
+      tokensText: live.deepseek?.tokens_text || t('quotaUnavailable'),
+      costText: live.deepseek?.cost_text || t('quotaUnavailable'),
     },
     {
       id: 'openrouter',
       label: 'OpenRouter',
       logo: '/logos/openrouter.png',
-      tokensText: live.openrouter?.tokens_text || '92.4k',
-      costText: live.openrouter?.cost_text || '$0.14',
+      tokensText: live.openrouter?.tokens_text || t('quotaUnavailable'),
+      costText: live.openrouter?.cost_text || t('quotaUnavailable'),
     },
     {
       id: 'zhipu',
       label: 'GLM · 智谱',
       logo: '/logos/glm.svg',
-      tokensText: live.zhipu?.tokens_text || '64.0k',
-      costText: live.zhipu?.cost_text || '¥0.06',
+      tokensText: live.zhipu?.tokens_text || t('quotaUnavailable'),
+      costText: live.zhipu?.cost_text || t('quotaUnavailable'),
     },
     {
       id: 'qwen',
       label: 'Qwen · 百炼',
       logo: '/logos/qwen.png',
-      tokensText: live.qwen?.tokens_text || '38.5k',
-      costText: live.qwen?.cost_text || '¥0.04',
+      tokensText: live.qwen?.tokens_text || t('quotaUnavailable'),
+      costText: live.qwen?.cost_text || t('quotaUnavailable'),
     },
   ];
 });

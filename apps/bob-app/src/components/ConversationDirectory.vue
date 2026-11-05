@@ -4,6 +4,8 @@ import {useI18n} from 'vue-i18n';
 import {readingCache,readingKey,singleFlight} from '../reading-cache.mjs';
 import {kernelBridge} from '../native-bridge.mjs';
 import {nodeLabel as label,directoryGroups,extractFilterOptions} from '../conversation-directory.mjs';
+import {checkPath,pathState} from '../path-health.mjs';
+import {deviceGroups,deviceFilterKeys} from '../device-paths.mjs';
 const props=defineProps({nodes:Array,catalog:Object,search:String,mode:String});
 const emit=defineEmits(['select-local','select-remote']);
 const {t}=useI18n();
@@ -37,15 +39,16 @@ async function setProject(s,event){linking.value=true;associationError.value='';
 loadLinks();
 watch(()=>props.catalog?.projects?.length,()=>loadLinks());
 const listKey=n=>readingKey(n.id,'directory',n.baseUrl||n.url||'');
-const display=nodes=>{remote.value=nodes.flatMap(n=>(cachedNodes.get(listKey(n))||[]).map(s=>({...s,node:n,remote:true,uid:`${n.id}:${s.id}`})))};
+const display=nodes=>{const labels=new Map(deviceGroups(nodes).map(g=>[g.id,g.label]));remote.value=nodes.flatMap(n=>(cachedNodes.get(listKey(n))||[]).map(s=>({...s,node:{...n,label:labels.get(n.deviceId||n.id)},remote:true,directoryStale:s.directoryStale||pathState(n)!=='readable',uid:`${n.id}:${s.id}`})))};
 async function refresh(){const g=++generation;loading.value=true;const nodes=(props.nodes||[]).filter(n=>n.enabled!==false);
+ failures.value=failures.value.filter(f=>nodes.some(n=>n.id===f.id&&(n.baseUrl||n.url)===f.url));
  void loadLinks();
  display(nodes);
  await Promise.all(nodes.map(async n=>{const k=listKey(n);if(!cachedNodes.has(k)){const rows=await readingCache.get(k);if(Array.isArray(rows))cachedNodes.set(k,rows)}}));
  if(g!==generation)return;display(nodes);
- const results=await Promise.allSettled(nodes.map(async n=>{const revision=readingCache.revision();const rows=await singleFlight(listKey(n),()=>kernelBridge.dshList(n.id));if(!Array.isArray(rows))throw Error('DSH_INVALID_LIST');cachedNodes.set(listKey(n),rows);await readingCache.put(listKey(n),rows,undefined,revision);return rows}));
- if(g!==generation)return;display(nodes);failures.value=results.flatMap((x,i)=>x.status==='rejected'?[label(nodes[i])]:[]);loading.value=false;}
-watch(()=>JSON.stringify((props.nodes||[]).map(n=>[n.id,n.enabled,n.baseUrl])),refresh,{immediate:true});
+ const results=await Promise.allSettled(nodes.map(async n=>{const revision=readingCache.revision();const rows=await singleFlight(listKey(n),()=>checkPath(n,kernelBridge));if(!Array.isArray(rows))throw Error('DSH_INVALID_LIST');cachedNodes.set(listKey(n),rows);await readingCache.put(listKey(n),rows,undefined,revision);return rows}));
+ if(g!==generation)return;display(nodes);failures.value=results.flatMap((x,i)=>x.status==='rejected'?[{id:nodes[i].id,name:label(nodes[i]),url:nodes[i].baseUrl||nodes[i].url,cached:Boolean(cachedNodes.get(listKey(nodes[i]))?.length)}]:[]);loading.value=false;}
+watch(()=>JSON.stringify((props.nodes||[]).map(n=>[n.id,n.deviceId,n.enabled,n.baseUrl])),()=>{selectedNodes.value=deviceFilterKeys(selectedNodes.value,props.nodes||[]);return refresh()},{immediate:true});
 onUnmounted(()=>{if(rodTimer&&typeof clearInterval==='function')clearInterval(rodTimer);generation++});
 const stamp=s=>{const raw=s.updated_at;const n=Number(raw);return Number.isFinite(n)?(n<1e12?n*1000:n):(Date.parse(raw)||0)};
 const rows=computed(()=>{
@@ -114,16 +117,16 @@ const toolLabel=s=>s.remote?(s.toolLabel||s.tool_label||(s.harness==='claude'||s
     </label>
    </div>
   </div>
-  <p v-for="name in failures" :key="name" role="status">{{t('directoryUnavailable',{name})}}</p>
+  <p v-for="failure in failures" :key="failure.id" role="status">{{t('directoryPathFailed',{name:failure.name,url:failure.url})}} <span v-if="failure.cached">{{t('directoryCacheRetained')}}</span></p>
   <p v-if="associationError" role="alert">{{associationError}}</p>
   <template v-for="group in groups" :key="group.key">
    <details v-if="group.name" :open="!!search || mode==='device' || mode==='smart' || activeFilterCount>0"><summary :title="group.fullName"><span class="directory-heading"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></svg><span>{{group.name}}</span><small>{{group.items.length}}</small></span></summary>
     <div class="directory-children">
-    <div v-for="s in group.items" :key="s.uid" class="directory-item-wrap"><div class="directory-row-bar"><button class="directory-row" @click="select(s)"><span>{{s.title}}</span><small>{{s.remote?label(s.node):s.device}}<template v-if="toolLabel(s)"> · {{toolLabel(s)}}</template> · {{date(s)}}<template v-if="s.directoryStale"> · {{t('directoryCached')}}</template></small></button><button type="button" class="directory-pin-btn" :class="{pinned:isPinned(s.uid)}" :aria-label="t(isPinned(s.uid)?'unpinSessionLabel':'pinSessionLabel')" :title="t(isPinned(s.uid)?'unpinSessionLabel':'pinSessionLabel')" @click.stop="togglePin(s.uid)"><svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" :fill="isPinned(s.uid)?'currentColor':'none'" stroke="currentColor" stroke-width="1.8"/></svg></button></div>
+    <div v-for="s in group.items" :key="s.uid" class="directory-item-wrap"><div class="directory-row-bar"><button class="directory-row" @click="select(s)"><span>{{s.title}}</span><small>{{s.remote?label(s.node):s.device}}<span v-if="s.remote && (props.nodes||[]).filter(n=>(n.deviceId||n.id)===(s.node.deviceId||s.node.id)).length>1"> · {{s.node.baseUrl||s.node.url}}</span><template v-if="toolLabel(s)"> · {{toolLabel(s)}}</template> · {{date(s)}}<template v-if="s.directoryStale"> · {{t('directoryCached')}}</template></small></button><button type="button" class="directory-pin-btn" :class="{pinned:isPinned(s.uid)}" :aria-label="t(isPinned(s.uid)?'unpinSessionLabel':'pinSessionLabel')" :title="t(isPinned(s.uid)?'unpinSessionLabel':'pinSessionLabel')" @click.stop="togglePin(s.uid)"><svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" :fill="isPinned(s.uid)?'currentColor':'none'" stroke="currentColor" stroke-width="1.8"/></svg></button></div>
     <select v-if="s.remote && linksAvailable" class="project-link-select" :aria-label="t('projectLinkLabel')" :disabled="linking" :value="association(s)?.project_id||''" @change="setProject(s,$event)"><option value="">{{t('projectLinkNone')}}</option><option v-for="p in catalog?.projects||[]" :key="p.id" :value="p.id">{{p.title}}</option></select></div>
     </div>
    </details>
-   <template v-else><div v-for="s in group.items" :key="s.uid" class="directory-item-wrap"><div class="directory-row-bar"><button class="directory-row" @click="select(s)"><span>{{s.title}}</span><small>{{s.remote?label(s.node):s.device}}<template v-if="toolLabel(s)"> · {{toolLabel(s)}}</template> · {{date(s)}}<template v-if="s.directoryStale"> · {{t('directoryCached')}}</template></small></button><button type="button" class="directory-pin-btn" :class="{pinned:isPinned(s.uid)}" :aria-label="t(isPinned(s.uid)?'unpinSessionLabel':'pinSessionLabel')" :title="t(isPinned(s.uid)?'unpinSessionLabel':'pinSessionLabel')" @click.stop="togglePin(s.uid)"><svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" :fill="isPinned(s.uid)?'currentColor':'none'" stroke="currentColor" stroke-width="1.8"/></svg></button></div>
+   <template v-else><div v-for="s in group.items" :key="s.uid" class="directory-item-wrap"><div class="directory-row-bar"><button class="directory-row" @click="select(s)"><span>{{s.title}}</span><small>{{s.remote?label(s.node):s.device}}<span v-if="s.remote && (props.nodes||[]).filter(n=>(n.deviceId||n.id)===(s.node.deviceId||s.node.id)).length>1"> · {{s.node.baseUrl||s.node.url}}</span><template v-if="toolLabel(s)"> · {{toolLabel(s)}}</template> · {{date(s)}}<template v-if="s.directoryStale"> · {{t('directoryCached')}}</template></small></button><button type="button" class="directory-pin-btn" :class="{pinned:isPinned(s.uid)}" :aria-label="t(isPinned(s.uid)?'unpinSessionLabel':'pinSessionLabel')" :title="t(isPinned(s.uid)?'unpinSessionLabel':'pinSessionLabel')" @click.stop="togglePin(s.uid)"><svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" :fill="isPinned(s.uid)?'currentColor':'none'" stroke="currentColor" stroke-width="1.8"/></svg></button></div>
     <select v-if="s.remote && linksAvailable" class="project-link-select" :aria-label="t('projectLinkLabel')" :disabled="linking" :value="association(s)?.project_id||''" @change="setProject(s,$event)"><option value="">{{t('projectLinkNone')}}</option><option v-for="p in catalog?.projects||[]" :key="p.id" :value="p.id">{{p.title}}</option></select></div></template>
   </template>
   <details v-if="legacy.length" :open="!!search"><summary>{{t('sidebarLegacy',{count:legacy.length})}}</summary><button v-for="s in legacy" :key="s.uid" class="directory-row" @click="select(s)"><span>{{s.title}}</span><small>{{t('sidebarImported')}} · {{date(s)}}<template v-if="s.directoryStale"> · {{t('directoryCached')}}</template></small></button></details>
