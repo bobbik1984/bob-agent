@@ -11,50 +11,48 @@ project:
   - Desktop
   - Android
   - Web (bob-node)
-  current_task: "优先事件恢复：epoch/失效游标替换快照、有界日志、回执终态双向修复与旧外部轮次核对已实现。Python48/前端24/Rust27及两节点真实记录副本通过；网页及三节点已发布，生产认证恢复读回通过，见现有Evidence。完整外部订阅/所有事件类型、Codex真实取消、跨Harness成果及HTML渲染仍待；Claude额度后置，无APK，手机暂停。"
+  current_task: Stage 2 核心成果全链路与体验优化已交付上线（图片/文件预览全屏磨砂高斯模糊遮罩与外部点击返回、语音转文字麦克风录入、会话列表一键归档降噪、.bob_attachments 安全预览映射）。
   development_plan: docs/CURRENT_STAGE.md
 phases:
-- name: BP0 真相与保护
+- name: ✅ 已交付基座：单一 Rust 内核、三端同源与跨节点扫码配对 (BP0–BP5)
   tasks:
-  - text: 统一项目目录与 Production 文档骨架
+  - text: BP0–BP2 单一 Rust 内核 (bob-kernel + bob-runtime) 与 Tauri v2 + Vue 3 + bob-node 骨架
     status: done
-  - text: 前身项目只读盘点（2026-10-28 快照）
+  - text: BP3 个人环境 MVP：凭据脱敏、PeerSync 同步、原位会话升级 Work 与 Outbox 必达
     status: done
-  - text: WP-00 前身项目保护基线（bundle + diff + untracked，已验证）
+  - text: BP4–BP5 常开节点 (bob-online.bobbik.org) 上线、扫码配对下发关联节点 (VPS3 / X1T) 与 Bearer RPC 鉴权
     status: done
-  - text: WP-04 仓库初始化、legacy/v0.9 归档与 1.0.1 分支推送 GitHub
+  - text: 紧凑额度监控菜单上线（Codex / AGY / Claude 多源采集与周额度窗口校准）
     status: done
-  - text: WP-01 静态深盘完成（同步/Outbox/凭据实现/表与API/测试CI统计；未跑旧测试或全历史secret扫描）
+  - text: Android 签名安装包 (Bob-1.0.1-cd88177.apk) 云端构建与校验就绪
     status: done
-- name: BP1 架构定案
+  - text: Stage 0 看板净室：清理 X1T 拦截回执、归档旧版重复卡片与已完成收件箱待办
+    status: done
+- name: 🏗️ 第一大项：基础架构与多节点接管 (Stage 1 / Stage 2 / Stage 4)
   tasks:
-  - text: BOB-D-004/005 确认：单一 Rust 内核，个人环境以 X1C 为 Home 主库
+  - text: '[Stage 1] Claude 终端会话「双模分流」：识别 --remote-control 只读看板模式；普通终端占用时同步拦截并支持一键切换 Bob 接管'
     status: done
-  - text: BOB-D-008 确认：懒式响应 + 打字静默预热 + 单飞唤醒 + 本地 Outbox 必达契约
+  - text: '[Stage 2] 跨设备工作区与成果全链路：打通 Codex/Claude 绝对路径图片安全映射、X1T Blender 渲染成果回传预览、磨砂高斯模糊背景与 PDF/网页包渲染'
     status: done
-  - text: WP-02 设计草案完成（31表、25项内存DDL约束）
+  - text: '[Stage 2] 跨节点项目交接与素材同步：会话附带图片/参考文件发往远端执行工作区 (.bob_attachments)'
     status: done
-  - text: WP-03 连接与安全设计获批
-    status: done
-- name: BP2 骨架与契约
+  - text: '[Stage 4] 额度回调与去个人化收尾：X1T Claude 真实 rate_limits 回调落盘；抽离固定域名/节点配置支持第三方部署'
+    status: todo
+- name: 🎨 第二大项：UI 与多端交互体验 (Stage 1 / Stage 2 / Stage 4)
   tasks:
-  - text: BP2-01 建立 1.0.1 Rust Workspace (bob-kernel) + Tauri v2 + Vue 3 骨架
+  - text: '[Stage 1] 远端 Agent 阻塞提问与权限「气泡内直接点选」：在聊天流内直接点击回答选择题或批准工具，顶栏提供权限档位开关（只读 / 自动读写）'
     status: done
-  - text: BP2-02 落地 BOB-D-008 懒式响应、输入框打字预热与本地 Durable Outbox 闭环及测试
+  - text: '[Stage 2] 多模态输入入口：输入框工具栏增加麦克风语音转文字录入，支持选图/传附件'
     status: done
-- name: BP3 个人环境 MVP（S0 → S2）
-  tasks:
-  - text: Stage S0 凭据同步脱敏、PeerSync 先校验后合并并重算 SHA256、Online 凭据边界与固定快照严格断言
-    status: done
-  - text: Stage S1 原位会话升级 Work (RV-17)、轮询与同步指数退避 (RV-18)、结构化决定表单 (RV-16) 与本地指标 (RV-20)
-    status: done
-  - text: Stage S2 Online 接入闭环 (OL-01~07)：配对、兑换、增量缓存、受控续聊、V1->V2 修订、审阅与凭据吊销
-    status: done
-  - text: RV-11 双端真实商业模型 Key 端到端真机问答与断网恢复记录
+  - text: '[Stage 2] 会话列表降噪与全文搜索：支持本地一键隐藏/归档测试或完结会话（不删远端文件，随时找回）及 SQLite FTS5 全局历史检索'
     status: active
-- name: BP4–BP5 Work/Harness 与三端同源（S3 → S4）
+  - text: '[Stage 4] 主动提醒通知与多端精修：长任务完成/异常或日程到期通知（Toast / 手机通知）、桌面宽屏分栏布局优化与 Android 真机终验'
+    status: todo
+- name: 🧠 第三大项：置顶「主 Agent 小助理」大脑升维 (Stage 3)
   tasks:
-  - text: Stage S3 (XP-01~05) 抽离 crates/bob-runtime（SecretStore / CapabilityManifest / ModelHubRuntime）并统一 Workspace 测试
-    status: done
-  - text: Stage S4 (XP-06~10) 交付 crates/bob-node 常开节点与 http-bridge 统一网页端，只读幂等导入旧库 69 个项目并部署上线 https://bob-online.bobbik.org
-    status: done
+  - text: '[Stage 3] 跨设备主动巡检与早晚报 (Daily Briefing)：打开主 Agent 自动汇总各节点 (X1T / VPS3) 已完成、待拍板与异常任务'
+    status: todo
+  - text: '[Stage 3] 自然语言跨节点派单 (Chat-to-Dispatch)：对主 Agent 说一句话即可自动路由并下发指令至目标设备与会话'
+    status: todo
+  - text: '[Stage 3] 注意力分层与灵感结晶 (Topic HOT/WARM & Bob Notebook)：日常闪念与长笔记自动关联活跃话题，成熟后一键转化为远端开发项目'
+    status: todo

@@ -19,6 +19,11 @@ const awayFromLatest=ref(false),chatContent=ref(null);
 const chatScroll=createChatScroll(value=>{awayFromLatest.value=value;});
 watch([reader,chatContent],()=>chatScroll.bind(reader.value),{flush:'post'});
 const pullUpDistance=ref(0),attachments=ref([]),fileInput=ref(null);let touchStartY=null,wheelOverscroll=0,wheelResetTimer;
+const approvalMode=ref('interactive'),takeoverPrompt=ref(null),terminalHolderOverride=ref(null);
+const activeTerminalHolder=computed(()=>terminalHolderOverride.value||history.value?.terminal_holder||null);
+const isClaudeRemoteControl=computed(()=>Boolean(activeTerminalHolder.value?.busy&&activeTerminalHolder.value?.remote_control));
+const isClaudeTerminalBusy=computed(()=>Boolean(activeTerminalHolder.value?.busy&&!activeTerminalHolder.value?.remote_control));
+const supportsApprovalMode=computed(()=>/^(claude-jsonl|agy):/.test(selected.value?.id||''));
 const nodeActivity=ref(null),awaitingReply=ref(null),replying=ref(false);let activityChecked=0;
 const syncStatus=ref(''),hasNewMessages=ref(false),copiedSeq=ref(null),streamSeq=ref(null),rodIndex=ref(0);let syncTimer,copyTimer,rodTimer;
 const rodFrames=['|','/','-','\\'],stripDots=s=>String(s??'').replace(/\s*(?:…|\.{2,})\s*$/,'');
@@ -78,7 +83,7 @@ async function cancelNative(){
  finally{cancelBusy.value=false;}
 }
 const nativeDrafts=ref({});
-const nativeUnresolved=computed(()=>Object.values(nativeDrafts.value).some(v=>v.status==='unknown')||(history.value?.request_results||[]).some(v=>v.status==='unknown'));let nativeCursor=0,nativeEpoch='',nativeTimer,nativeMore=false;
+const nativeUnresolved=computed(()=>Object.entries(nativeDrafts.value).some(([k,v])=>!k.startsWith('external-codex-')&&v.status==='unknown')||(history.value?.request_results||[]).some(v=>v.status==='unknown'));const isExternalCodexWaitingApproval=computed(()=>Object.entries(nativeDrafts.value).some(([k,v])=>k.startsWith('external-codex-')&&(v.activity?.approvals||[]).some(a=>a.status==='pending')));const isExternalCodexRunning=computed(()=>Object.entries(nativeDrafts.value).some(([k,v])=>k.startsWith('external-codex-')&&v.active));let nativeCursor=0,nativeEpoch='',nativeTimer,nativeMore=false;
 async function refreshNativeEvents(){
  const g=generation,id=selected.value?.id;
  nativeMore=false;
@@ -131,7 +136,7 @@ async function refreshNativeEvents(){
     current.activity=unconfirmActivity(current.activity);
      if(cancelRequest.value===rid){cancelRequest.value=null;notice.value=t(event.kind==='cancelled'?'nativeCancelled':event.kind==='completed'?'dshSyncCompleted':'nativeCancelUnconfirmed');}
     if(awaitingReply.value===rid)awaitingReply.value=null;
-    if(event.kind==='error'||event.kind==='unknown')error.value=t('nativeExecutionFailed')+' · '+String(event.payload.code||'HARNESS_FAILED');
+    if((event.kind==='error'||event.kind==='unknown')&&!rid.startsWith('external-codex-'))error.value=t('nativeExecutionFailed')+' · '+String(event.payload.code||'HARNESS_FAILED');
     if(event.kind==='completed'){current.completed=true;error.value='';}
    }
    nativeDrafts.value={...nativeDrafts.value,[rid]:current};
@@ -213,7 +218,7 @@ const displayMessages=computed(()=>{
 });
 const syncStatusLabel=computed(()=>stripDots(syncStatus.value==='checking'?t('dshSyncChecking'):syncStatus.value==='syncing'?t('dshSyncUpdating'):syncStatus.value==='synced'?t('dshSyncCompleted'):syncStatus.value==='offline_cached'?t('dshSyncOfflineCached'):''));
 async function refreshActivity(g,id){if(Date.now()-activityChecked<10000)return;activityChecked=Date.now();try{const list=await kernelBridge.dshList(connection.value);if(g!==generation||disposed)return;const row=list.find(s=>s.id===id);nodeActivity.value=typeof row?.running==='boolean'?{running:row.running,at:Date.now()}:null}catch{if(g===generation)nodeActivity.value=null}}
-const activityLabel=computed(()=>stripDots(sending.value?t('dshSendingWaitReceipt'):waitingNativeApproval(nativeDrafts.value)?t('nativeApprovalPending'):replying.value?t('dshReplying'):nodeActivity.value?.running===true?t('dshNodeProcessing'):awaitingReply.value?t('dshAwaitingReply'):''));
+const activityLabel=computed(()=>stripDots(sending.value?t('dshSendingWaitReceipt'):waitingNativeApproval(nativeDrafts.value)?t('nativeApprovalPending'):isExternalCodexWaitingApproval.value?t('codexExternalWaitingApproval'):isExternalCodexRunning.value&&!awaitingReply.value?t('codexExternalActiveBadge'):replying.value?t('dshReplying'):nodeActivity.value?.running===true?t('dshNodeProcessing'):awaitingReply.value?t('dshAwaitingReply'):''));
 const agentLabel=computed(()=>{const h=selected.value?.harness||history.value?.harness||'';if(h==='agy'||selected.value?.id?.startsWith('agy:'))return t('agyAgent');if(h==='claude'||selected.value?.toolLabel==='Claude')return t('claudeAgent');if(h==='pi'||selected.value?.toolLabel==='Pi')return 'Pi';if(h==='codex'||selected.value?.toolLabel==='Codex')return 'Codex';return t('dshAgent');});
 function formatMessageTime(ts){
  if(ts===null||ts===undefined||ts===''||typeof ts==='boolean')return '';
@@ -266,18 +271,66 @@ const key=()=>`bob-dsh:${connection.value}:${selected.value?.id || ''}`;
 function readState(){try{return JSON.parse(localStorage.getItem(key()) || '{}')}catch{return {}}}
 function persist(){if(restoring || !selected.value)return false;try{localStorage.setItem(key(),JSON.stringify({draft:draft.value,pending:pending.value}));return true}catch{error.value=t('dshStorageError');return false}}
 watch(draft,persist,{flush:'sync'});
+const isListening=ref(false);
+let speechRec=null;
+function toggleVoiceInput(){
+ if(isListening.value){stopVoiceInput();return;}
+ const SR=globalThis.SpeechRecognition||globalThis.webkitSpeechRecognition;
+ if(!SR){notice.value=t('voiceInputUnsupported');return;}
+ try{
+  const rec=new SR();
+  rec.continuous=false;
+  rec.interimResults=false;
+  rec.lang=globalThis.navigator?.language||'zh-CN';
+  rec.onstart=()=>{isListening.value=true;};
+  rec.onresult=e=>{
+   const text=Array.from(e.results).map(r=>r[0]?.transcript||'').join('');
+   if(text){draft.value=draft.value?`${draft.value} ${text}`:text;persist();}
+  };
+  rec.onerror=e=>{isListening.value=false;if(e.error!=='no-speech')notice.value=t('voiceInputError');};
+  rec.onend=()=>{isListening.value=false;speechRec=null;};
+  speechRec=rec;
+  rec.start();
+ }catch{isListening.value=false;notice.value=t('voiceInputUnsupported');}
+}
+function stopVoiceInput(){if(speechRec){try{speechRec.stop();}catch{}speechRec=null;}isListening.value=false;}
+
+const archivedSessionIds=ref(new Set());
+try{
+ const raw=localStorage?.getItem?.('bob-dsh-archived-sessions');
+ if(raw){const arr=JSON.parse(raw);if(Array.isArray(arr))archivedSessionIds.value=new Set(arr);}
+}catch{}
+function toggleArchiveSession(id,e){
+ e?.stopPropagation?.();
+ const next=new Set(archivedSessionIds.value);
+ if(next.has(id))next.delete(id);else next.add(id);
+ archivedSessionIds.value=next;
+ try{localStorage?.setItem?.('bob-dsh-archived-sessions',JSON.stringify([...next]));}catch{}
+}
 const groups=computed(()=>{
  const map=new Map();
- for(const s of sessions.value){if(search.value.trim() && !`${s.title} ${s.workspace || ''}`.toLocaleLowerCase().includes(search.value.trim().toLocaleLowerCase()))continue;
- const k=typeof s.workspace==='string' && s.workspace ? s.workspace : t('dshNoWorkspace');
- if(!map.has(k))map.set(k,[]);map.get(k).push(s);}
+ for(const s of sessions.value){
+  if(archivedSessionIds.value.has(s.id))continue;
+  if(search.value.trim() && !`${s.title} ${s.workspace || ''}`.toLocaleLowerCase().includes(search.value.trim().toLocaleLowerCase()))continue;
+  const k=typeof s.workspace==='string' && s.workspace ? s.workspace : t('dshNoWorkspace');
+  if(!map.has(k))map.set(k,[]);map.get(k).push(s);
+ }
  return [...map].map(([name,items])=>({name,items}));
+});
+const archivedList=computed(()=>{
+ const list=[];
+ for(const s of sessions.value){
+  if(!archivedSessionIds.value.has(s.id))continue;
+  if(search.value.trim() && !`${s.title} ${s.workspace || ''}`.toLocaleLowerCase().includes(search.value.trim().toLocaleLowerCase()))continue;
+  list.push(s);
+ }
+ return list;
 });
 function fault(e){const code=String(e?.message || e);if(code.includes('AGY_'))return t('agyHistoryPending');return `${t(code.includes('DSH_RECEIPT_UNKNOWN')?'dshUncertain':code.includes('DSH_HISTORY_TOO_LARGE')?'dshHistoryTooLarge':code.includes('DSH_HISTORY_TIMEOUT')?'dshHistoryTimeout':code.includes('DSH_HISTORY_UNAVAILABLE')?'dshHistoryUnavailable':'dshError')} · ${code.match(/DSH_[A-Z_]+/)?.[0] || 'DSH_UNAVAILABLE'}`}
 async function load(){const g=++generation;clearTimeout(timer);busy.value=true;error.value='';selected.value=null;history.value=null;sessions.value=[];try{const items=await kernelBridge.dshList(connection.value);if(g===generation&&!disposed)sessions.value=items;}catch(e){if(g===generation)error.value=fault(e)}finally{if(g===generation)busy.value=false}}
 watch(connection,()=>{if(connection.value&&!props.target)load()});
 function validatePage(h,id){if(h.address.session_id!==id||h.address.connection_id!==connection.value||!Number.isSafeInteger(h.cursor)||!Number.isSafeInteger(h.before)||!Array.isArray(h.messages))throw Error('DSH_IDENTITY_MISMATCH')}
-function combine(old,h){if(h.history_snapshot)return h;const map=new Map((old?.messages||[]).map(m=>[m.sequence,m]));for(const m of h.messages)map.set(m.sequence,m);const replacements=[...(old?.replacements||[]),...(h.replacements||[])];for(const op of replacements)for(const seq of map.keys())if(seq>=op.startSeq&&seq<=op.endSeq)map.delete(seq);return {...h,messages:[...map.values()].sort((a,b)=>a.sequence-b.sequence),replacements,workspace:h.workspace||old?.workspace}}
+function combine(old,h){if(h.history_snapshot)return h;const map=new Map((old?.messages||[]).map(m=>[m.sequence,m]));for(const m of h.messages)map.set(m.sequence,m);const replacements=[...(old?.replacements||[]),...(h.replacements||[])];for(const op of replacements)for(const seq of map.keys())if(seq>=op.startSeq&&seq<=op.endSeq)map.delete(seq);return {...h,messages:[...map.values()].sort((a,b)=>a.sequence-b.sequence),replacements,workspace:h.workspace||old?.workspace,terminal_holder:h.terminal_holder!==undefined?h.terminal_holder:old?.terminal_holder}}
 let olderRequested=false;
 async function refresh(){if(selected.value?.historyReadable===false){error.value=t(selected.value?.historyReason==='AGY_HISTORY_NOT_LOCAL'?'agyHistoryNotLocal':'agyHistoryPending');return;}
  if(!selected.value||busy.value||loadingOlder.value||preview.value)return;
@@ -288,6 +341,7 @@ async function refresh(){if(selected.value?.historyReadable===false){error.value
   if(g!==generation||disposed||preview.value)return;
   await refreshActivity(g,id);if(g!==generation||disposed)return;
   if(h.request_results?.some(r=>r.request_id===awaitingReply.value&&['completed','error','blocked','cancelled'].includes(r.status))){awaitingReply.value=null;replying.value=false;}
+  if(h.terminal_holder!==undefined){terminalHolderOverride.value=null;if(history.value)history.value={...history.value,terminal_holder:h.terminal_holder};}
   if(h.not_modified){
    error.value='';
    if(syncStatus.value==='checking'){syncStatus.value='synced';clearTimeout(syncTimer);syncTimer=setTimeout(()=>{if(syncStatus.value==='synced')syncStatus.value='';},1800);}
@@ -352,7 +406,7 @@ function removeAttachment(id){attachments.value=attachments.value.filter(a=>a.id
 function formatAttachmentBlock(list){if(!list?.length)return '';return list.map(a=>a.content?`[Attachment: ${a.name}]\n\`\`\`\n${String(a.content).slice(0,16384)}\n\`\`\``:`[Attachment: ${a.name} (${a.size||0} bytes)]`).join('\n\n');}
 function onComposeKeydown(e){if(e?.key==='Enter'&&!e.shiftKey&&!e.isComposing){e.preventDefault();void send();}}
 globalThis.__bobForceRefreshDsh=forceRefresh;
-async function open(s){approvalErrors.value={};pendingDecision.value=null;cancelRequest.value=null;cancelBusy.value=false;chatScroll.reset();clearTimeout(dshLiveTimer);dshLiveState.value=null;dshReadCursor=-1;clearTimeout(nativeTimer);nativeCursor=0;nativeEpoch='';nativeDrafts.value={};nodeActivity.value=null;awaitingReply.value=null;replying.value=false;hasNewMessages.value=false;streamSeq.value=null;syncStatus.value='';pullUpDistance.value=0;attachments.value=[];clearTimeout(syncTimer);activityChecked=0;olderRequested=false;artifactQueue=[];artifactCount=0;persist();++generation;clearTimeout(timer);busy.value=false;loadingOlder.value=false;lastTop=0;selected.value=s;history.value=null;notice.value='';const saved=readState();restoring=true;draft.value=saved.draft||'';pending.value=saved.pending||null;restoring=false;if(pending.value)notice.value=t('dshUncertain');const g=generation;const cached=await readingCache.get(historyKey());if(g!==generation||disposed)return;if(cached){try{validatePage(cached,s.id);history.value=cached;syncStatus.value='checking';await nextTick();if(reader.value)reader.value.scrollTop=reader.value.scrollHeight;lastTop=reader.value?.scrollTop||0;}catch{}}if(s.historyReadable===false){error.value=t(s.historyReason==='AGY_HISTORY_NOT_LOCAL'?'agyHistoryNotLocal':'agyHistoryPending');return;}await refresh();void refreshNativeEvents();void refreshDshLive()}
+async function open(s){approvalErrors.value={};pendingDecision.value=null;cancelRequest.value=null;cancelBusy.value=false;takeoverPrompt.value=null;terminalHolderOverride.value=null;chatScroll.reset();clearTimeout(dshLiveTimer);dshLiveState.value=null;dshReadCursor=-1;clearTimeout(nativeTimer);nativeCursor=0;nativeEpoch='';nativeDrafts.value={};nodeActivity.value=null;awaitingReply.value=null;replying.value=false;hasNewMessages.value=false;streamSeq.value=null;syncStatus.value='';pullUpDistance.value=0;attachments.value=[];clearTimeout(syncTimer);activityChecked=0;olderRequested=false;artifactQueue=[];artifactCount=0;persist();++generation;clearTimeout(timer);busy.value=false;loadingOlder.value=false;lastTop=0;selected.value=s;history.value=null;notice.value='';const saved=readState();restoring=true;draft.value=saved.draft||'';pending.value=saved.pending||null;restoring=false;if(pending.value)notice.value=t('dshUncertain');const g=generation;const cached=await readingCache.get(historyKey());if(g!==generation||disposed)return;if(cached){try{validatePage(cached,s.id);history.value=cached;syncStatus.value='checking';await nextTick();if(reader.value)reader.value.scrollTop=reader.value.scrollHeight;lastTop=reader.value?.scrollTop||0;}catch{}}if(s.historyReadable===false){error.value=t(s.historyReason==='AGY_HISTORY_NOT_LOCAL'?'agyHistoryNotLocal':'agyHistoryPending');return;}await refresh();void refreshNativeEvents();void refreshDshLive()}
 function back(){clearTimeout(dshLiveTimer);dshLiveState.value=null;clearTimeout(nativeTimer);persist();++generation;clearTimeout(timer);clearTimeout(syncTimer);busy.value=false;selected.value=null;history.value=null;syncStatus.value='';hasNewMessages.value=false;notice.value='';load()}
 async function checkReceipt(){
  if(!pending.value || sending.value)return;
@@ -366,9 +420,9 @@ async function checkReceipt(){
  }catch(e){if(g===generation)error.value=fault(e)}finally{sending.value=false;if(g===generation&&!busy.value)refresh()}
 }
 function dismissPending(){if(!pending.value||sending.value)return;if(!draft.value.trim()&&pending.value.text)draft.value=pending.value.text;pending.value=null;notice.value='';error.value='';persist();}
-async function send(){if(selected.value?.historyReadable===false){error.value=t('agyHistoryPending');return;}const attBlock=formatAttachmentBlock(attachments.value);const text=[draft.value.trim(),attBlock].filter(Boolean).join('\n\n');if(sending.value||pending.value||nativeUnresolved.value||!text)return;const g=generation, address={connection:connection.value,session:selected.value.id};const attPayload=attachments.value.filter(a=>a.base64).map(a=>({name:a.name,type:a.type,size:a.size,base64:a.base64}));pending.value={id:crypto.randomUUID(),text};if(!persist()){pending.value=null;return;}sending.value=true;error.value='';try{const requestId=pending.value.id;const receipt=await kernelBridge.dshPrompt(address.connection,address.session,text,requestId,attPayload);if(isNotAcceptedReceipt(receipt,address.session,requestId)){if(g===generation){pending.value=null;persist();notice.value=t('dshNotDispatched');}return;}if(receipt?.status!=='accepted'||receipt.session_id!==address.session||receipt.request_id!==requestId)throw Error('DSH_RECEIPT_UNKNOWN');if(g===generation){awaitingReply.value=requestId;replying.value=false;activityChecked=0;pending.value=null;attachments.value=[];if(draft.value.trim()===text||attBlock)draft.value='';persist();notice.value=t('dshAccepted');}}catch(e){if(g===generation){error.value=fault(e);notice.value=t('dshUncertain')}}finally{sending.value=false;if(g===generation&&!busy.value)refresh()}}
+async function send(opts={}){const takeover=opts?.takeover===true;if(selected.value?.historyReadable===false){error.value=t('agyHistoryPending');return;}if(isClaudeRemoteControl.value){notice.value=t('claudeRemoteControlTitle');return;}const attBlock=formatAttachmentBlock(attachments.value);const text=[draft.value.trim(),attBlock].filter(Boolean).join('\n\n');if(sending.value||pending.value||nativeUnresolved.value||!text)return;if(!takeover&&isClaudeTerminalBusy.value){takeoverPrompt.value=activeTerminalHolder.value||{busy:true,remote_control:false};return;}const g=generation, address={connection:connection.value,session:selected.value.id};const attPayload=attachments.value.filter(a=>a.base64).map(a=>({name:a.name,type:a.type,size:a.size,base64:a.base64}));pending.value={id:crypto.randomUUID(),text};if(!persist()){pending.value=null;return;}sending.value=true;error.value='';try{const requestId=pending.value.id;const receipt=await kernelBridge.dshPrompt(address.connection,address.session,text,requestId,attPayload,{takeover,approvalMode:supportsApprovalMode.value?approvalMode.value:null});if(isNotAcceptedReceipt(receipt,address.session,requestId)){if(g===generation){pending.value=null;persist();if(receipt?.reason==='HARNESS_CLAUDE_REMOTE_CONTROL'){terminalHolderOverride.value=receipt.terminal_holder||{busy:true,remote_control:true};takeoverPrompt.value=null;notice.value=t('claudeRemoteControlTitle');}else if(receipt?.reason==='HARNESS_SESSION_BUSY'&&String(address.session||'').startsWith('claude-jsonl:')){const holder=receipt.terminal_holder||{busy:true,remote_control:false};terminalHolderOverride.value=holder;takeoverPrompt.value=holder;notice.value='';}else{notice.value=t('dshNotDispatched');}}return;}if(receipt?.status!=='accepted'||receipt.session_id!==address.session||receipt.request_id!==requestId)throw Error('DSH_RECEIPT_UNKNOWN');if(g===generation){takeoverPrompt.value=null;terminalHolderOverride.value={busy:false,remote_control:false};awaitingReply.value=requestId;replying.value=false;activityChecked=0;pending.value=null;attachments.value=[];if(draft.value.trim()===text||attBlock)draft.value='';persist();notice.value=t('dshAccepted');}}catch(e){if(g===generation){error.value=fault(e);notice.value=t('dshUncertain')}}finally{sending.value=false;if(g===generation&&!busy.value)refresh()}}
 watch(()=>props.target, async target=>{if(!target)return;connection.value=target.node.id;await open(target.session)},{immediate:true});
-onUnmounted(()=>{chatScroll.dispose();clearTimeout(dshLiveTimer);clearTimeout(nativeTimer);if(globalThis.__bobForceRefreshDsh===forceRefresh)globalThis.__bobForceRefreshDsh=null;clearTimeout(syncPulseTimer);if(typeof globalThis.__bobSetRemoteSyncPhase==='function')globalThis.__bobSetRemoteSyncPhase('');if(rodTimer&&typeof clearInterval==='function')clearInterval(rodTimer);clearTimeout(wheelResetTimer);clearTimeout(artifactTimer);clearTimeout(syncTimer);clearTimeout(copyTimer);artifactQueue=[];fileCache.clear();persist();disposed=true;++generation;clearTimeout(timer)});
+onUnmounted(()=>{stopVoiceInput();chatScroll.dispose();clearTimeout(dshLiveTimer);clearTimeout(nativeTimer);if(globalThis.__bobForceRefreshDsh===forceRefresh)globalThis.__bobForceRefreshDsh=null;clearTimeout(syncPulseTimer);if(typeof globalThis.__bobSetRemoteSyncPhase==='function')globalThis.__bobSetRemoteSyncPhase('');if(rodTimer&&typeof clearInterval==='function')clearInterval(rodTimer);clearTimeout(wheelResetTimer);clearTimeout(artifactTimer);clearTimeout(syncTimer);clearTimeout(copyTimer);artifactQueue=[];fileCache.clear();persist();disposed=true;++generation;clearTimeout(timer)});
 </script>
 <template>
  <DshFilePreview v-if="preview" :address="preview" @close="closePreview" />
@@ -381,11 +435,13 @@ onUnmounted(()=>{chatScroll.dispose();clearTimeout(dshLiveTimer);clearTimeout(na
   <template v-if="connection && !selected">
    <div class="dsh-tools"><input v-model="search" type="search" :placeholder="t('dshSearch')" :aria-label="t('dshSearch')"><button :disabled="busy" @click="load">{{ t('dshRefresh') }}</button></div>
    <p v-if="busy" class="terminal-status-line" role="status"><span class="terminal-rod" aria-hidden="true">[{{ rodFrame }}]</span><span>{{ stripDots(t('dshLoading')) }}</span><span class="terminal-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span></p>
-   <details v-for="group in groups" :key="group.name" :open="!!search"><summary>{{ group.name }} · {{ group.items.length }}</summary><button v-for="s in group.items" :key="s.id" class="dsh-session" @click="open(s)"><strong>{{ s.title }}</strong><small>{{ s.updated_at ? new Date(s.updated_at).toLocaleString() : t('sidebarTimeUnknown') }} · {{ t(s.running?'dshRunning':'dshIdle') }}</small></button></details>
-   <p v-if="!busy && !groups.length">{{ t('dshEmpty') }}</p>
+   <details v-for="group in groups" :key="group.name" :open="!!search"><summary>{{ group.name }} · {{ group.items.length }}</summary><div v-for="s in group.items" :key="s.id" class="dsh-session-item"><button class="dsh-session" @click="open(s)"><strong>{{ s.title }}</strong><small>{{ s.updated_at ? new Date(s.updated_at).toLocaleString() : t('sidebarTimeUnknown') }} · {{ t(s.running?'dshRunning':'dshIdle') }}</small></button><button type="button" class="dsh-session-archive-btn" :title="t('dshArchiveSession')" :aria-label="t('dshArchiveSession')" @click.stop="toggleArchiveSession(s.id, $event)"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/></svg></button></div></details>
+   <p v-if="!busy && !groups.length && !archivedList.length">{{ t('dshEmpty') }}</p>
+   <details v-if="archivedList.length" class="dsh-archived-group" :open="!!search"><summary>{{ t('dshArchivedSessions') }} · {{ archivedList.length }}</summary><div v-for="s in archivedList" :key="s.id" class="dsh-session-item archived"><button class="dsh-session" @click="open(s)"><strong>{{ s.title }}</strong><small>{{ s.updated_at ? new Date(s.updated_at).toLocaleString() : t('sidebarTimeUnknown') }} · {{ t(s.running?'dshRunning':'dshIdle') }}</small></button><button type="button" class="dsh-session-unarchive-btn" :title="t('dshUnarchiveSession')" :aria-label="t('dshUnarchiveSession')" @click.stop="toggleArchiveSession(s.id, $event)">{{ t('dshUnarchiveSession') }}</button></div></details>
   </template>
   <template v-if="selected">
-   <div class="dsh-tools"><button v-if="!target" :disabled="sending" @click="back">{{ t('dshBack') }}</button><h4 v-if="!target">{{ selected.title }}</h4><small v-else>{{ target.node.label || target.node.name }} · {{ agentLabel }}</small><span v-if="syncStatus==='offline_cached' && syncStatusLabel" class="dsh-sync-pill" :class="{active:syncStatus==='checking'||syncStatus==='syncing'}" role="status" aria-live="polite"><span v-if="syncStatus==='checking'||syncStatus==='syncing'" class="terminal-rod" aria-hidden="true">[{{ rodFrame }}]</span><span>{{ syncStatusLabel }}</span><span v-if="syncStatus==='checking'||syncStatus==='syncing'" class="terminal-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span></span></div>
+   <div class="dsh-tools"><button v-if="!target" :disabled="sending" @click="back">{{ t('dshBack') }}</button><h4 v-if="!target">{{ selected.title }}</h4><small v-else>{{ target.node.label || target.node.name }} · {{ agentLabel }}</small><span v-if="isClaudeTerminalBusy" class="dsh-holder-pill" role="status"><span>{{ t('claudeTerminalBusyBadge', {pid: activeTerminalHolder?.pid || '?'}) }}</span><button type="button" class="dsh-holder-takeover-btn" @click="takeoverPrompt = activeTerminalHolder">{{ t('claudeTakeoverBtn') }}</button></span><span v-if="syncStatus==='offline_cached' && syncStatusLabel" class="dsh-sync-pill" :class="{active:syncStatus==='checking'||syncStatus==='syncing'}" role="status" aria-live="polite"><span v-if="syncStatus==='checking'||syncStatus==='syncing'" class="terminal-rod" aria-hidden="true">[{{ rodFrame }}]</span><span>{{ syncStatusLabel }}</span><span v-if="syncStatus==='checking'||syncStatus==='syncing'" class="terminal-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span></span></div>
+   <div v-if="isClaudeRemoteControl" class="dsh-remote-control-banner" role="status"><strong>{{ t('claudeRemoteControlTitle') }}</strong><p>{{ t('claudeRemoteControlDesc', {pid: activeTerminalHolder?.pid || '?'}) }}</p></div>
    <p class="dsh-note">{{ history?.workspace || t('dshNoWorkspace') }}</p>
    <p v-if="history?.partial || history?.omitted" class="dsh-note">{{ t('dshPartial') }}</p>
    <p v-if="busy && !history" class="terminal-status-line" role="status"><span class="terminal-rod" aria-hidden="true">[{{ rodFrame }}]</span><span>{{ stripDots(t('dshLoading')) }}</span><span class="terminal-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span></p>
@@ -400,19 +456,35 @@ onUnmounted(()=>{chatScroll.dispose();clearTimeout(dshLiveTimer);clearTimeout(na
   </div>
   </div>
   <div v-if="selected && (awayFromLatest || hasNewMessages)" class="dsh-new-msg-bar"><button type="button" class="dsh-new-msg-btn" @click="scrollToBottom" :aria-label="t('chatJumpLatest')" :title="t('chatJumpLatest')"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M12 4v16m-6-6 6 6 6-6"/></svg></button></div>
-  <form v-if="selected" class="dsh-compose" @submit.prevent="send">
+  <form v-if="selected" class="dsh-compose" @submit.prevent="send()">
+   <div v-if="takeoverPrompt && !isClaudeRemoteControl" class="dsh-takeover-card" role="alertdialog" :aria-label="t('claudeTakeoverConfirmTitle')">
+    <div class="dsh-takeover-body">
+     <strong>{{ t('claudeTakeoverConfirmTitle') }}</strong>
+     <p>{{ t('claudeTakeoverConfirmDesc', {pid: takeoverPrompt?.pid || '?'}) }}</p>
+    </div>
+    <div class="dsh-takeover-actions">
+     <button type="button" class="dsh-takeover-primary" :disabled="sending" @click="send({takeover: true})">{{ t('claudeTakeoverSendBtn') }}</button>
+     <button type="button" class="dsh-takeover-secondary" :disabled="sending" @click="takeoverPrompt = null">{{ t('claudeKeepBoardBtn') }}</button>
+    </div>
+   </div>
    <p v-if="activityLabel" class="dsh-activity" role="status" aria-live="polite"><span class="terminal-rod" aria-hidden="true">[{{ rodFrame }}]</span> <span>{{activityLabel}}</span><span class="terminal-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span></p>
    <div class="dsh-compose-box">
-    <textarea v-model="draft" :disabled="sending" :placeholder="t('dshPrompt')" :aria-label="t('dshPrompt')" rows="2" @keydown="onComposeKeydown"></textarea>
+    <textarea v-model="draft" :disabled="sending || isClaudeRemoteControl" :placeholder="t(isClaudeRemoteControl ? 'claudeRemoteControlTitle' : 'dshPrompt')" :aria-label="t('dshPrompt')" rows="2" @keydown="onComposeKeydown"></textarea>
     <div v-if="attachments.length" class="composer-attachments"><span v-for="att in attachments" :key="att.id" class="composer-attachment-chip"><span class="chip-file-name">{{ att.name }}</span><button type="button" class="chip-remove-btn" :aria-label="t('removeAttachment')" @click="removeAttachment(att.id)">×</button></span></div>
     <div class="dsh-compose-toolbar">
      <div class="dsh-compose-left-tools">
       <input ref="fileInput" type="file" multiple class="visually-hidden" @change="onFilesSelected" />
-      <button type="button" class="composer-tool-btn" :disabled="sending" :title="t('attachFileBtn')" :aria-label="t('attachFileBtn')" @click="openFilePicker"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></button>
+      <button type="button" class="composer-tool-btn" :disabled="sending || isClaudeRemoteControl" :title="t('attachFileBtn')" :aria-label="t('attachFileBtn')" @click="openFilePicker"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></button>
+      <button type="button" class="composer-tool-btn voice-btn" :class="{recording:isListening}" :disabled="sending || isClaudeRemoteControl" :title="t(isListening ? 'voiceInputListening' : 'voiceInputBtn')" :aria-label="t(isListening ? 'voiceInputListening' : 'voiceInputBtn')" @click="toggleVoiceInput"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/></svg></button>
+      <select v-if="supportsApprovalMode" v-model="approvalMode" class="dsh-permission-mode-select" :disabled="sending || isClaudeRemoteControl" :aria-label="t('permissionModeLabel')" :title="t('permissionModeLabel')">
+       <option value="interactive">{{ t('permissionModeInteractive') }}</option>
+       <option value="read_only">{{ t('permissionModeReadOnly') }}</option>
+       <option value="deny">{{ t('permissionModePlan') }}</option>
+      </select>
       <span v-if="syncStatus==='offline_cached' && syncStatusLabel" class="dsh-sync-pill" :class="{active:syncStatus==='checking'||syncStatus==='syncing'}"><span v-if="syncStatus==='checking'||syncStatus==='syncing'" class="terminal-rod" aria-hidden="true">[{{ rodFrame }}]</span><span>{{ syncStatusLabel }}</span><span v-if="syncStatus==='checking'||syncStatus==='syncing'" class="terminal-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span></span>
      </div>
      <button v-if="cancellableRequest" type="button" class="composer-submit-btn" :disabled="cancelBusy || cancelRequest===cancellableRequest" @click="cancelNative">{{ t(cancelRequest===cancellableRequest?'nativeCancelPending':'nativeCancel') }}</button>
-      <button v-else type="submit" class="composer-submit-btn" :disabled="sending || !!pending || nativeUnresolved || (!draft.trim() && !attachments.length) || !history">{{ t(sending?'dshSending':'send') }}</button>
+      <button v-else type="submit" class="composer-submit-btn" :disabled="sending || isClaudeRemoteControl || !!pending || nativeUnresolved || (!draft.trim() && !attachments.length) || !history">{{ t(sending?'dshSending':'send') }}</button>
     </div>
    </div>
    <p v-if="pending && !sending" role="status">{{ t('dshUncertain') }} <button type="button" @click="checkReceipt">{{ t('dshCheckReceipt') }}</button> <button type="button" @click="dismissPending">{{ t('dshUnlockEdit') }}</button></p>
@@ -422,4 +494,15 @@ onUnmounted(()=>{chatScroll.dispose();clearTimeout(dshLiveTimer);clearTimeout(na
 <style scoped>
 .dsh-sessions{min-width:0;max-width:100%;padding:16px;border:1px solid var(--border-color);border-radius:12px;background:var(--bg-primary)}
 .dsh-sessions.embedded{border:0;border-radius:0;padding:0;flex:1;min-height:0;overflow:hidden;display:flex;flex-direction:column}.dsh-reader{min-height:0;flex:1;overflow-y:auto;overflow-x:hidden;scrollbar-gutter:stable;overflow-anchor:none;padding:12px;overscroll-behavior:contain}.dsh-compose{flex-shrink:0;padding:8px 12px 10px;background:var(--bg-primary);border-top:1px solid var(--border-color);display:flex;flex-direction:column;gap:6px}.dsh-compose-box{border:1px solid var(--border-color);border-radius:12px;padding:7px 10px;background:var(--bg-secondary);display:flex;flex-direction:column;gap:6px;transition:border-color .15s ease}.dsh-compose-box:focus-within{border-color:var(--accent-primary)}.dsh-compose-box textarea{width:100%;border:0;outline:none;background:transparent;padding:2px;resize:vertical;min-height:2.6rem;max-height:7.5rem}.dsh-compose-toolbar{display:flex;align-items:center;justify-content:space-between;gap:8px}.dsh-compose-left-tools{display:flex;align-items:center;gap:6px;min-width:0;flex:1;flex-wrap:wrap}.dsh-older{display:block;margin:8px auto;background:transparent;border:0;color:var(--text-secondary)}header,.dsh-tools{display:flex;align-items:center;gap:8px;flex-wrap:wrap}h3,h4{margin:0;overflow-wrap:anywhere}select,input,textarea{min-width:0;max-width:100%;color:var(--text-primary);background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:8px;padding:8px}select,input{flex:1}button{max-width:100%;white-space:normal}details{margin-top:10px}summary{overflow-wrap:anywhere;cursor:pointer;padding:8px 0}.dsh-note,small{color:var(--text-secondary);overflow-wrap:anywhere}.dsh-sync-pill{display:inline-flex;align-items:center;gap:5px;font-size:.75rem;padding:2px 8px;border-radius:999px;background:var(--bg-primary);color:var(--text-secondary);border:1px solid var(--border-color)}.dsh-tools .dsh-sync-pill{margin-left:auto}.dsh-sync-pill.active{color:var(--accent-primary);border-color:var(--accent-primary)}.dsh-session{display:flex;flex-direction:column;text-align:left;width:100%;gap:5px;margin-top:5px;padding:10px}.dsh-session strong{overflow-wrap:anywhere}.dsh-message{min-width:0;margin-top:20px;overflow-wrap:anywhere}.dsh-message-meta{display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap}.dsh-message.user{background:var(--bg-secondary);border-radius:12px;padding:14px 16px;width:fit-content;max-width:88%;margin-left:auto}.dsh-message.user .dsh-message-meta{justify-content:flex-end}.dsh-message:not(.user){padding:4px 2px}.dsh-time{font-size:.75rem;color:var(--text-secondary)}.dsh-copy-btn{padding:2px 8px;font-size:.75rem;border-radius:6px;border:1px solid var(--border-color);background:var(--bg-secondary);color:var(--text-secondary);cursor:pointer}@media(hover:hover) and (pointer:fine){.dsh-copy-btn{opacity:0;transition:opacity .15s ease}.dsh-message:hover .dsh-copy-btn,.dsh-copy-btn:focus-visible{opacity:1}}.dsh-new-msg-bar{height:0;position:relative;z-index:2;display:flex;justify-content:flex-end;padding:0 20px;background:transparent;transform:translateY(-46px)}.dsh-new-msg-btn{display:grid;place-items:center;width:36px;height:36px;padding:6px;border-radius:999px;border:1px solid var(--border-color);background:var(--bg-secondary);color:var(--accent-primary);font-size:.82rem;cursor:pointer}.dsh-activity{margin:0;display:flex;align-items:center;gap:6px;color:var(--text-secondary);font-size:.82rem}.dsh-compose p{width:100%;margin:0}
-</style>
+.dsh-holder-pill{display:inline-flex;align-items:center;gap:6px;font-size:.75rem;padding:2px 8px;border-radius:999px;background:var(--bg-secondary);color:var(--text-primary);border:1px solid var(--accent-primary)}
+.dsh-holder-takeover-btn{padding:1px 7px;border-radius:999px;border:0;background:var(--accent-primary);color:var(--bg-primary);font-size:.72rem;font-weight:600;cursor:pointer}
+.dsh-remote-control-banner{margin:8px 0;padding:10px 12px;border-radius:10px;border:1px solid var(--accent-primary);background:var(--bg-secondary);display:flex;flex-direction:column;gap:4px}
+.dsh-remote-control-banner strong{font-size:.84rem;color:var(--accent-primary)}.dsh-remote-control-banner p{margin:0;font-size:.8rem;color:var(--text-secondary)}
+.dsh-takeover-card{padding:10px 12px;border-radius:10px;border:1px solid var(--accent-primary);background:var(--bg-secondary);display:flex;flex-direction:column;gap:8px}
+.dsh-takeover-body strong{display:block;font-size:.85rem;color:var(--text-primary);margin-bottom:2px}.dsh-takeover-body p{margin:0;font-size:.8rem;color:var(--text-secondary)}
+.dsh-takeover-actions{display:flex;gap:8px;flex-wrap:wrap}
+.dsh-takeover-primary,.dsh-takeover-secondary{padding:5px 12px;border-radius:999px;font-size:.78rem;font-weight:600;cursor:pointer;border:1px solid var(--border-color)}
+.dsh-takeover-primary{background:var(--accent-primary);color:var(--bg-primary);border-color:var(--accent-primary)}
+.dsh-takeover-secondary{background:var(--bg-primary);color:var(--text-secondary)}
+.dsh-permission-mode-select{flex:0 0 auto;width:auto;padding:3px 8px;font-size:.76rem;border-radius:999px;background:var(--bg-primary);color:var(--text-secondary);border:1px solid var(--border-color);cursor:pointer}
+.dsh-session-item{display:flex;align-items:center;gap:6px;width:100%;margin-top:5px;position:relative}.dsh-session-item .dsh-session{flex:1;min-width:0;margin-top:0}.dsh-session-archive-btn{flex-shrink:0;padding:6px;border-radius:6px;border:1px solid var(--border-color);background:var(--bg-secondary);color:var(--text-secondary);cursor:pointer;opacity:0.6;transition:opacity .15s ease}.dsh-session-item:hover .dsh-session-archive-btn,.dsh-session-archive-btn:focus-visible{opacity:1}.dsh-session-unarchive-btn{flex-shrink:0;padding:4px 8px;font-size:.75rem;border-radius:6px;border:1px solid var(--border-color);background:var(--bg-secondary);color:var(--text-secondary);cursor:pointer}.dsh-archived-group{margin-top:16px;border-top:1px dashed var(--border-color);padding-top:8px}.dsh-archived-group summary{color:var(--text-secondary)}.composer-tool-btn.voice-btn.recording{color:var(--color-error);animation:pulse-mic 1.2s infinite ease-in-out}@keyframes pulse-mic{0%,100%{opacity:1;transform:scale(1)}50%{opacity:0.5;transform:scale(1.15)}}</style>

@@ -10,3 +10,8 @@ test('receipt check cannot silently use a browser substitute', async()=>{
  const bridge=createKernelBridge(()=>{throw Error('must not call')},()=>false);
  await assert.rejects(bridge.dshReceipt('c','s','t','r'),/NATIVE_HOST_REQUIRED/);
 });
+test('dshPrompt forwards takeover and approvalMode options cleanly', async()=>{
+ const calls=[];const bridge=createKernelBridge(async(c,a)=>{calls.push({c,a});return {status:'accepted'}},()=>true);
+ await bridge.dshPrompt('conn-1','claude-jsonl:s1','hello','req-1',null,{takeover:true,approvalMode:'interactive'});
+ assert.deepEqual(calls,[{c:'app_dsh_prompt',a:{connectionId:'conn-1',sessionId:'claude-jsonl:s1',text:'hello',requestId:'req-1',takeover:true,approvalMode:'interactive'}}]);
+});

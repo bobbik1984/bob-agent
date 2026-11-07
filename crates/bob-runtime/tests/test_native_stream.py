@@ -1349,4 +1349,41 @@ class NativeTests(unittest.TestCase):
    with self.assertRaisesRegex(ValueError,'CONFLICT'):p.inspect_receipt({'sessionId':cfg['session_id'],'requestId':cfg['request_id'],'text':'different'})
    pipe.assert_not_called()
 
+ def test_claude_remote_control_vs_terminal_takeover_and_no_fake_bubble(self):
+  root=Path(self.tmp.name)/'claude';folder=root/'projects'/'workspace';folder.mkdir(parents=True)
+  raw='12345678-1234-1234-1234-123456789abc';sid='claude-jsonl:'+raw
+  (folder/(raw+'.jsonl')).write_text(json.dumps({'type':'user','uuid':'u1','timestamp':1000,'cwd':str(folder),'message':{'content':'First'}})+'\n',encoding='utf-8')
+  with patch.object(p.shutil,'which',return_value='claude'),patch.object(p,'_inspect_claude_session_holder',return_value={'busy':True,'pid':4242,'name':'Winter shelter','kind':'interactive','status':'idle','remote_control':True}):
+   res_rc=p.prompt_session({'sessionId':sid,'requestId':'req-rc','text':'Follow up','claudeDataDir':str(root)})
+  self.assertEqual(res_rc['status'],'not_accepted')
+  self.assertEqual(res_rc['reason'],'HARNESS_CLAUDE_REMOTE_CONTROL')
+  self.assertTrue(res_rc['terminal_holder']['remote_control'])
+  with patch.object(p.shutil,'which',return_value='claude'),patch.object(p,'_inspect_claude_session_holder',return_value={'busy':True,'pid':4242,'name':'Winter shelter','kind':'interactive','status':'idle','remote_control':False}):
+   res_busy=p.prompt_session({'sessionId':sid,'requestId':'req-busy','text':'Follow up','claudeDataDir':str(root)})
+  self.assertEqual(res_busy['status'],'not_accepted')
+  self.assertEqual(res_busy['reason'],'HARNESS_SESSION_BUSY')
+  self.assertFalse(res_busy['terminal_holder']['remote_control'])
+  failed_rec={'request_id':'req-busy','text':'Fake bubble text','reply_text':'','started_at':5000,'execution_status':'error','error_code':'HARNESS_SESSION_BUSY'}
+  with patch.object(p,'_reconcile',return_value=[failed_rec]):
+   page=p.read_session_page({'claudeDataDir':str(root)},sid)
+  self.assertEqual([m['text'] for m in page['messages']],['First'])
+
+ def test_claude_ask_user_question_in_bubble_options(self):
+  from unittest.mock import Mock
+  rid='ask-1';sid='claude-jsonl:original';cfg={'session_id':sid,'request_id':rid,'approval_mode':'interactive','claude_tools':['AskUserQuestion']}
+  rec=dict(cfg,execution_status='running',pid=123,started_at=p._now(),tool_authorization={'version':1,'approval_mode':'interactive','tools':['AskUserQuestion']})
+  with p.closing(p._stream_db()) as db,db:db.execute('INSERT INTO requests VALUES(?,?,?,?)',(rid,sid,'hash',json.dumps(rec)))
+  pipe=Mock()
+  q_input={'questions':[{'question':'Which mode?','options':[{'label':'Fast','description':'Quick'},{'label':'Safe','description':'Careful'}]}]}
+  frame={'type':'control_request','request_id':'perm-ask','request':{'subtype':'can_use_tool','tool_name':'AskUserQuestion','input':q_input}}
+  p._handle_claude_permission(cfg,pipe,frame);pipe.send.assert_not_called()
+  with p.closing(p._stream_db()) as db:entry=json.loads(db.execute('SELECT body FROM native_permissions WHERE request=?',(rid,)).fetchone()[0])
+  self.assertEqual([o['id'] for o in entry['options']],['answer_0','answer_1','reject_once'])
+  with patch.object(p,'_permission_owner_alive',return_value=True):
+   p.submit_native_permission({'sessionId':sid,'requestId':rid,'permissionId':entry['id'],'optionId':'answer_0','claudeTools':['AskUserQuestion']})
+  p._flush_native_permissions(cfg,pipe)
+  resp=pipe.send.call_args.args[0]['response']['response']
+  self.assertEqual(resp['behavior'],'allow')
+  self.assertEqual(resp['updatedInput']['answers'],{'Which mode?':'Fast'})
+
 if __name__=='__main__':unittest.main()

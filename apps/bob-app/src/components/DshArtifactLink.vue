@@ -9,7 +9,7 @@ const element=ref(null),state=ref('idle'),url=ref('');let observer,alive=true,vi
 let anchor=null;
 async function imageReady(){await nextTick();restoreReaderAnchor(anchor);anchor=null}
 const image=/\.(png|jpe?g|webp)(?::\d+(?::\d+)?)?$/i.test(props.path);
-const supported=/\.(png|jpe?g|webp|md|txt|json|yaml|yml|csv)(?::\d+(?::\d+)?)?$/i.test(props.path);
+const supported=/\.(png|jpe?g|webp|svg|pdf|docx?|xlsx?|pptx?|html?|md|txt|json|ya?ml|csv|log|py|js|ts|rs|c|cpp|h|sh)(?::\d+(?::\d+)?)?$/i.test(props.path);
 onMounted(()=>{if(!service||!supported)return;observer=new IntersectionObserver(entries=>{visible=entries[0].isIntersecting;if(visible&&state.value==='idle')service.enqueue({element:element.value,visible:()=>alive&&visible,run:async()=>{
  if(!alive||!visible)return;state.value='loading';try{if(image&&service.peek){const saved=await service.peek(props.path);if(saved&&alive){anchor=captureReaderAnchor(element.value?.closest('.dsh-reader'));url.value=await imageThumbnail(saved);}}const f=await service.get(props.path);if(!alive)return;
  if(image){anchor=captureReaderAnchor(element.value?.closest('.dsh-reader'));url.value=await imageThumbnail(f);}state.value='ready';

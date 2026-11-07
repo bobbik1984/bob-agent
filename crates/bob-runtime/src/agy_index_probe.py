@@ -557,6 +557,8 @@ def read_session_page(cfg, sid):
     ra = {t for r, t, _ in ev if r == 'assistant'}
     for r in recs:
         ut, at, sat = (r.get('text') or '').strip(), (r.get('reply_text') or '').strip(), int(r.get('started_at') or 0)
+        if r.get('execution_status') in ('error', 'not_accepted') and not r.get('native_user_message_id') and not at:
+            continue
         anchor=r.get('native_user_message_id') if sid.startswith('claude-jsonl:') else None
         input_present=anchor in native_user_ids if anchor else ut in ru
         if ut and not input_present:
@@ -572,8 +574,13 @@ def read_session_page(cfg, sid):
             ev.insert(idx,('assistant',at,ended))
             ra.add(at)
     msgs = _consolidate(ev, 60) or [{'sequence': 1, 'role': 'assistant', 'text': f'Session `{sid}` loaded (`{ws or "default"}`).', 'timestamp': _now()}]
-    return {'harness': h, 'workspace': ws, 'messages': msgs,
-            'request_results': [{'request_id': r['request_id'], 'status': r.get('execution_status', 'completed')} for r in recs if r.get('request_id')]}
+    out = {'harness': h, 'workspace': ws, 'messages': msgs,
+           'request_results': [{'request_id': r['request_id'], 'status': r.get('execution_status', 'completed')} for r in recs if r.get('request_id')]}
+    if cfg.get('mode') == 'page' and sid.startswith('claude-jsonl:'):
+        holder = _safe_claude_holder(sid)
+        if holder is not None:
+            out['terminal_holder'] = holder
+    return out
 
 
 def _read_artifact_bytes(root,relative,limit=2*1024*1024):
@@ -704,16 +711,18 @@ def preview_native_file(cfg):
     candidate=Path(requested)
     try:relative=candidate.relative_to(root) if candidate.is_absolute() else candidate
     except ValueError:raise ValueError('DSH_FILE_OUTSIDE_WORKSPACE')
-    if not relative.parts or any(p in ('.','..') or p.startswith('.') for p in relative.parts):
+    if not relative.parts or any(p in ('.','..') or (p.startswith('.') and p != '.bob_attachments') for p in relative.parts):
         raise ValueError('DSH_FILE_PATH_REJECTED')
     ext=relative.suffix.lower().lstrip('.')
     if ext not in ('png','jpg','jpeg','webp','md','txt','json','yaml','yml','gd','tscn','js','css','html','pdf','docx','xlsx','pptx','doc','xls','ppt','odt','ods','odp'):
         raise ValueError('DSH_FILE_TYPE_UNSUPPORTED')
     refs=set()
     for message in page.get('messages',[]):
-        if message.get('role')!='assistant':continue
-        body=re.sub(r'```[\s\S]*?```','',message.get('text',''))
-        refs.update(re.findall(r'!?\[[^\]]*\]\(<?([^\s)>]+)>?(?:\s+[^)]*)?\)',body))
+        body=re.sub(r'`[\s\S]*?`','',message.get('text',''))
+        if message.get('role')=='assistant':
+            refs.update(re.findall(r'!?\[[^\]]*\]\(<?([^\s)>]+)>?(?:\s+[^)]*)?\)',body))
+            refs.update(re.findall(r'([^\n]+)',body))
+        refs.update(re.findall(r'\[Attachment:\s*[^->\]]+->\s*([^\]]+)\]',body))
         refs.update(re.findall(r'`([^`\n]+)`',body))
     # Native assistants may emit local file URIs; normalize only their
     # explicit references, never the requested path or workspace boundary.
@@ -816,6 +825,11 @@ def _stream_records(sid):
                         recovered_activity['approvals']=checkpoint.get('activity',{}).get('approvals',[])
                         _append_event(db,{'session_id':sid,'request_id':r['request_id']},'activity_snapshot',{'activity':recovered_activity})
             proven=checkpoint.get('native_terminal')
+            if sid.startswith('codex:') and r.get('execution_status')=='unknown' and r.get('error_code')=='HARNESS_TIMEOUT' and not r.get('turn_start_requested') and not r.get('native_turn_id'):
+                r.update(execution_status='not_accepted',reconciliation='timeout_before_turn_start')
+                db.execute('UPDATE requests SET body=? WHERE id=?',(json.dumps(r,ensure_ascii=False),r['request_id']))
+                _append_event(db,{'session_id':sid,'request_id':r['request_id']},'error',{'code':'HARNESS_NOT_ACCEPTED'})
+                continue
             if r.get('execution_status') == 'unknown' and proven in ('completed','cancelled'):
                 text=checkpoint.get('native_terminal_text',checkpoint.get('text',r.get('reply_text','')))
                 r.update(execution_status=proven,reply_text=text,ended_at=checkpoint.get('observed_at',_now()),error_code=None)
@@ -1442,6 +1456,78 @@ def _claude_initialize(pipe, raw, text):
     raise ValueError('HARNESS_TIMEOUT')
 
 
+def _claude_pid_has_remote_control(pid):
+    try:
+        p=int(pid or 0)
+        if p<=0:return False
+        raw_cmd=(Path('/proc')/str(p)/'cmdline').read_bytes()
+        parts=[seg.decode('utf-8','ignore') for seg in raw_cmd.split(b'\x00') if seg]
+        return any(arg in ('--remote-control','--rc','remote-control') or arg.startswith('--remote-control=') for arg in parts)
+    except Exception:
+        return False
+
+
+def _inspect_claude_session_holder(exe, raw, env):
+    result=subprocess.run([exe,'agents','--json'],cwd=str(Path.home()),env=env,
+        stdin=subprocess.DEVNULL,capture_output=True,timeout=8)
+    if result.returncode or len(result.stdout)>1048576:raise ValueError()
+    rows=json.loads(result.stdout)
+    if not isinstance(rows,list) or len(rows)>1024:raise ValueError()
+    for row in rows:
+        if not isinstance(row,dict) or not isinstance(row.get('sessionId'),str) or not row['sessionId']:
+            raise ValueError()
+        if row['sessionId']==raw:
+            pid=int(row.get('pid') or 0)
+            return {
+                'busy':True,
+                'pid':pid,
+                'name':str(row.get('name') or '')[:200],
+                'kind':str(row.get('kind') or 'interactive')[:64],
+                'status':str(row.get('status') or 'idle')[:64],
+                'remote_control':_claude_pid_has_remote_control(pid),
+            }
+    return {'busy':False,'remote_control':False}
+
+
+def _release_claude_terminal_holder(exe, raw, env):
+    holder=_inspect_claude_session_holder(exe,raw,env)
+    if not holder.get('busy'):return holder
+    if holder.get('remote_control'):raise ValueError('HARNESS_CLAUDE_REMOTE_CONTROL')
+    pid=int(holder.get('pid') or 0)
+    if pid<=0 or pid==os.getpid():raise ValueError('HARNESS_SESSION_BUSY')
+    try:
+        proc_dir=Path('/proc')/str(pid)
+        if hasattr(os,'getuid') and proc_dir.exists() and proc_dir.stat().st_uid!=os.getuid():
+            raise ValueError('HARNESS_SESSION_BUSY')
+        cmdline=(proc_dir/'cmdline').read_bytes().decode('utf-8','ignore').lower() if (proc_dir/'cmdline').exists() else 'claude'
+        if 'claude' not in cmdline or 'native_worker' in cmdline:
+            raise ValueError('HARNESS_SESSION_BUSY')
+        os.kill(pid,signal.SIGTERM)
+    except ValueError:
+        raise
+    except OSError:
+        pass
+    deadline=time.monotonic()+3.5
+    while time.monotonic()<deadline:
+        time.sleep(0.25)
+        holder=_inspect_claude_session_holder(exe,raw,env)
+        if not holder.get('busy'):return holder
+    return holder
+
+
+def _safe_claude_holder(sid):
+    if not isinstance(sid,str) or not sid.startswith('claude-jsonl:'):return None
+    raw=sid.split(':',1)[1]
+    env=os.environ.copy()
+    env['PATH']=os.pathsep.join(str(Path.home()/p) for p in ['.local/bin','.npm-global/bin','.cargo/bin'])+os.pathsep+env.get('PATH','')
+    exe=shutil.which('claude',path=env['PATH'])
+    if not exe:return None
+    try:
+        return _inspect_claude_session_holder(exe,raw,env)
+    except Exception:
+        return None
+
+
 def _ensure_claude_session_available(exe, raw, env):
     """Official active-session inventory, never terminal-log scraping.
 
@@ -1449,15 +1535,8 @@ def _ensure_claude_session_available(exe, raw, env):
     starting another resume process; missing/invalid inventory is not absence.
     """
     try:
-        result=subprocess.run([exe,'agents','--json'],cwd=str(Path.home()),env=env,
-            stdin=subprocess.DEVNULL,capture_output=True,timeout=8)
-        if result.returncode or len(result.stdout)>1048576:raise ValueError()
-        rows=json.loads(result.stdout)
-        if not isinstance(rows,list) or len(rows)>1024:raise ValueError()
-        for row in rows:
-            if not isinstance(row,dict) or not isinstance(row.get('sessionId'),str) or not row['sessionId']:
-                raise ValueError()
-            if row['sessionId']==raw:raise ValueError('HARNESS_SESSION_BUSY')
+        holder=_inspect_claude_session_holder(exe,raw,env)
+        if holder.get('busy'):raise ValueError('HARNESS_SESSION_BUSY')
     except Exception as exc:
         if isinstance(exc,ValueError) and str(exc)=='HARNESS_SESSION_BUSY':raise
         raise ValueError('HARNESS_ACTIVITY_UNCONFIRMED') from None
@@ -1519,11 +1598,25 @@ def _handle_claude_permission(cfg, pipe, frame):
         return
     tool_input=request.get('input')
     if not isinstance(tool_input,dict):raise ValueError('HARNESS_PROTOCOL_INVALID')
+    tool_name=request.get('tool_name') or 'tool'
+    options=[{'optionId':'allow_once','kind':'allow_once'},{'optionId':'reject_once','kind':'reject_once'}]
+    if tool_name=='AskUserQuestion' and isinstance(tool_input.get('questions'),list) and tool_input['questions']:
+        q0=tool_input['questions'][0] if isinstance(tool_input['questions'][0],dict) else {}
+        q_opts=[]
+        for idx,opt in enumerate((q0.get('options') or [])[:8]):
+            if not isinstance(opt,dict):continue
+            lbl=str(opt.get('label') or opt.get('value') or f'Option {idx+1}').strip()[:120]
+            desc=str(opt.get('description') or '').strip()[:120]
+            if lbl:
+                q_opts.append({'optionId':f'answer_{idx}','kind':'allow_once','name':f'{lbl} — {desc}' if desc else lbl,'answerValue':lbl})
+        if q_opts:
+            q_opts.append({'optionId':'reject_once','kind':'reject_once','name':'跳过 / 暂不回答'})
+            options=q_opts
     normalized={'id':identity,'protocol':'claude','original_input':tool_input,'params':{
         'sessionId':cfg['session_id'].split(':',1)[1],
-        'toolCall':{'title':request.get('tool_name') or 'tool','input':tool_input,'tool_use_id':request.get('tool_use_id')},
-        'options':[{'optionId':'allow_once','kind':'allow_once'},{'optionId':'reject_once','kind':'reject_once'}]}}
-    if request.get('tool_name') in cfg.get('claude_tools',[]) and len(json.dumps(tool_input,ensure_ascii=False))<=8192 and cfg.get('approval_mode')=='interactive' and _open_native_permission(cfg,normalized,1):return
+        'toolCall':{'title':tool_name,'input':tool_input,'tool_use_id':request.get('tool_use_id')},
+        'options':options}}
+    if tool_name in cfg.get('claude_tools',[]) and len(json.dumps(tool_input,ensure_ascii=False))<=8192 and cfg.get('approval_mode')=='interactive' and _open_native_permission(cfg,normalized,1):return
     pipe.send({'type':'control_response','response':{'subtype':'success','request_id':identity,'response':{'behavior':'deny','message':'Tool execution has not been approved'}}})
 
 def _open_native_permission(cfg, frame, serial):
@@ -1536,7 +1629,10 @@ def _open_native_permission(cfg, frame, serial):
         if option.get('kind') not in ('allow_once','reject_once'):continue
         oid=option.get('optionId')
         if isinstance(oid,str) and oid and len(oid)<=128 and not any(x['id']==oid for x in options):
-            options.append({'id':oid,'kind':option['kind'],'label':str(option.get('name') or option['kind'])[:256]})
+            item={'id':oid,'kind':option['kind'],'label':str(option.get('name') or option['kind'])[:256]}
+            if isinstance(option.get('answerValue'),str) and option['answerValue']:
+                item['answer_value']=option['answerValue'][:128]
+            options.append(item)
     with closing(_stream_db()) as db,db:
         db.execute('BEGIN IMMEDIATE');_permission_schema(db)
         row=db.execute('SELECT body FROM requests WHERE id=? AND session=?',(cfg['request_id'],cfg['session_id'])).fetchone()
@@ -1610,9 +1706,19 @@ def _flush_native_permissions(cfg, pipe):
     for entry in ready:
         choice=entry.get('choice')
         outcome={'outcome':'cancelled'} if choice is None else {'outcome':'selected','optionId':choice}
-        allowed=any(x['id']==choice and x['kind']=='allow_once' for x in entry['options'])
+        selected_opt=next((x for x in entry['options'] if x['id']==choice),None)
+        allowed=bool(selected_opt and selected_opt.get('kind')=='allow_once')
         if entry.get('protocol')=='claude':
-            answer={'behavior':'allow','updatedInput':entry['original_input']} if allowed else {'behavior':'deny','message':'Tool execution was not approved'}
+            if allowed:
+                updated_input=entry['original_input']
+                if entry.get('title')=='AskUserQuestion' and selected_opt and selected_opt.get('answer_value') and isinstance(updated_input,dict):
+                    updated_input=dict(updated_input)
+                    qs=updated_input.get('questions')
+                    q_key=(qs[0].get('question') if isinstance(qs,list) and qs and isinstance(qs[0],dict) else None) or 'question'
+                    updated_input['answers']={str(q_key):selected_opt['answer_value']}
+                answer={'behavior':'allow','updatedInput':updated_input}
+            else:
+                answer={'behavior':'deny','message':'Tool execution was not approved'}
             pipe.send({'type':'control_response','response':{'subtype':'success','request_id':entry['frame']['id'],'response':answer}})
         else:pipe.send({'jsonrpc':'2.0','id':entry['frame']['id'],'result':{'outcome':outcome}})
         with closing(_stream_db()) as db,db:
@@ -1785,6 +1891,8 @@ def _native_worker(cfg):
             pipe.send({'method':'initialized','params':{}})
             pipe.send({'id':2,'method':'thread/resume','params':{'threadId':raw,'cwd':cwd,'approvalPolicy':'never','sandbox':'read-only'}})
         elif tool == 'claude':
+            if cfg.get('takeover') is True:
+                _release_claude_terminal_holder(exe,raw,env)
             _ensure_claude_session_available(exe,raw,env)
             pipe = _claude_durable_pipe([exe,'--resume',raw,'-p','--input-format','stream-json','--output-format','stream-json','--verbose',
                 '--include-partial-messages']+_claude_tool_arguments(cfg),cwd,env,sid,rid)
@@ -1959,9 +2067,13 @@ def _native_worker(cfg):
         _stream_update(rid,execution_status=state,ended_at=_now(),native_session_id=raw)
     except Exception as exc:
         code=str(exc) if isinstance(exc,ValueError) and str(exc).startswith('HARNESS_') else 'HARNESS_TRANSPORT_FAILED'
-        state='unknown' if code in ('HARNESS_TIMEOUT','HARNESS_PROCESS_EXITED','HARNESS_TRANSPORT_FAILED','HARNESS_IDENTITY_UNCONFIRMED','HARNESS_CANCEL_UNCONFIRMED') else 'error'
-        _stream_event(cfg,state,{'code':code})
-        _stream_update(rid,execution_status=state,error_code=code,ended_at=_now())
+        if tool=='codex' and not identity and code=='HARNESS_TIMEOUT':
+            _stream_event(cfg,'error',{'code':'HARNESS_NOT_ACCEPTED'})
+            _stream_update(rid,execution_status='not_accepted',error_code=code,ended_at=_now())
+        else:
+            state='unknown' if code in ('HARNESS_TIMEOUT','HARNESS_PROCESS_EXITED','HARNESS_TRANSPORT_FAILED','HARNESS_IDENTITY_UNCONFIRMED','HARNESS_CANCEL_UNCONFIRMED') else 'error'
+            _stream_event(cfg,state,{'code':code})
+            _stream_update(rid,execution_status=state,error_code=code,ended_at=_now())
     finally:
         if pipe: pipe.close()
 
@@ -2205,10 +2317,28 @@ def prompt_session(cfg):
     if not Path(wcwd).is_dir():raise ValueError('HARNESS_WORKSPACE_MISSING')
     approval_mode = 'interactive' if cfg.get('approvalMode') == 'interactive' else 'deny'
     claude_tools=cfg.get('claudeTools',[]) if sid.startswith('claude-jsonl:') else []
+    takeover=bool(cfg.get('takeover'))
     _claude_tool_arguments({'approval_mode':approval_mode,'claude_tools':claude_tools})
+    if sid.startswith('claude-jsonl:'):
+        raw=sid.split(':',1)[1]
+        env=os.environ.copy()
+        env['PATH']=os.pathsep.join(str(Path.home()/p) for p in ['.local/bin','.npm-global/bin','.cargo/bin'])+os.pathsep+env.get('PATH','')
+        exe=shutil.which('claude',path=env['PATH'])
+        if exe:
+            try:
+                holder=_release_claude_terminal_holder(exe,raw,env) if takeover else _inspect_claude_session_holder(exe,raw,env)
+                if holder.get('busy'):
+                    reason='HARNESS_CLAUDE_REMOTE_CONTROL' if holder.get('remote_control') else 'HARNESS_SESSION_BUSY'
+                    return {'status':'not_accepted','execution_status':'not_accepted','session_id':sid,'request_id':rid,'reason':reason,'terminal_holder':holder}
+            except ValueError as exc:
+                if str(exc)=='HARNESS_CLAUDE_REMOTE_CONTROL':
+                    holder=_safe_claude_holder(sid) or {'busy':True,'remote_control':True}
+                    return {'status':'not_accepted','execution_status':'not_accepted','session_id':sid,'request_id':rid,'reason':'HARNESS_CLAUDE_REMOTE_CONTROL','terminal_holder':holder}
     cfg = {'session_id':sid,'request_id':rid,'text':text,'project_cwd':pcwd,'work_cwd':wcwd,'jsonl_path':jpath}
     cfg['approval_mode'] = approval_mode
     cfg['claude_tools'] = claude_tools
+    if takeover:
+        cfg['takeover'] = True
     source = globals().get('__BOB_PROBE_SRC__') or Path(__file__).read_text(encoding='utf-8')
     return _native_start(cfg, source)
 
@@ -2607,12 +2737,23 @@ def observe_external_codex(cfg):
             _observer_table(db);db.execute('UPDATE observers SET status=? WHERE session=? AND pid=?',(value,sid,os.getpid()))
     def emit(kind,payload=None):
         if turn_id:_stream_event({'session_id':sid,'request_id':'external-codex-'+raw+'-'+turn_id},kind,payload)
+    def safe_capture(frame):
+        try:_capture_external_codex_event(sid,raw,frame,observer_id)
+        except ValueError as exc:
+            if str(exc)!='HARNESS_OUTPUT_LIMIT':raise
+            fp=frame.get('params') if isinstance(frame.get('params'),dict) else {}
+            it=fp.get('item') if isinstance(fp.get('item'),dict) else None
+            if it is not None:
+                slim={'method':frame.get('method'),'params':{'threadId':fp.get('threadId'),'turnId':fp.get('turnId') or (fp.get('turn') or {}).get('id'),'item':{'id':it.get('id'),'type':it.get('type'),'status':it.get('status'),'exitCode':it.get('exitCode'),'command':str(it.get('command') or '')[:512],'name':str(it.get('name') or '')[:512]}}}
+                if 'id' in frame:slim['id']=frame['id']
+                try:_capture_external_codex_event(sid,raw,slim,observer_id)
+                except ValueError:pass
     try:
-        pipe,thread=_open_loaded_codex(raw,lambda frame:_capture_external_codex_event(sid,raw,frame,observer_id))
+        pipe,thread=_open_loaded_codex(raw,safe_capture)
         if not pipe:
             _restore_external_checkpoints(sid,raw,[])
             status('unavailable');return
-        recovery_turns=_older_external_turn_statuses(pipe,sid,raw,thread.get('turns') or [],lambda frame:_capture_external_codex_event(sid,raw,frame,observer_id))
+        recovery_turns=_older_external_turn_statuses(pipe,sid,raw,thread.get('turns') or [],safe_capture)
         _restore_external_checkpoints(sid,raw,recovery_turns)
         status('live')
         for turn in (thread.get('turns') or [])[-1:]:
@@ -2635,7 +2776,7 @@ def observe_external_codex(cfg):
             f=pipe.receive(.5)
             if not f:continue
             method=f.get('method');p=f.get('params') or {}
-            _capture_external_codex_event(sid,raw,f,observer_id)
+            safe_capture(f)
             if 'id' in f and method:
                 # An observer has no authority to decide approvals or tool calls.
                 continue

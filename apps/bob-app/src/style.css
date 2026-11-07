@@ -8,6 +8,7 @@
   --text-primary: CanvasText;
   --text-secondary: GrayText;
   --line: color-mix(in srgb, CanvasText 14%, Canvas);
+  --border-color: var(--line);
   --brand-accent-light: oklch(0.48 0.17 250);
   --brand-accent-dark: oklch(0.76 0.12 250);
   --accent-primary: light-dark(var(--brand-accent-light), var(--brand-accent-dark));
@@ -2850,7 +2851,13 @@ textarea {
 }
 
 .schedule-editor { width: min(30rem, calc(100vw - 2rem)); max-height: calc(100dvh - 2rem); overflow: auto; border: 1px solid var(--line); border-radius: var(--radius-lg); padding: 1rem; background: var(--bg-primary); color: var(--text-primary); }
-.schedule-editor::backdrop { background: color-mix(in srgb, var(--text-primary) 35%, transparent); }
+.dsh-preview::backdrop,
+.schedule-editor::backdrop,
+dialog::backdrop {
+  background: color-mix(in srgb, var(--bg-root, #0b0f17) 78%, transparent);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
 .schedule-editor .quick-schedule-row { display: grid; grid-template-columns: 1fr; }
 .schedule-editor .hub-card { padding: 0; border: 0; background: transparent; }
 .schedule-editor-header { display: flex; justify-content: space-between; align-items: center; gap: 1rem; }

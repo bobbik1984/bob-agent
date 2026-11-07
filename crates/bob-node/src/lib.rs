@@ -1406,7 +1406,9 @@ pub fn handle_rpc_command(ctx: &mut NodeContext, command: &str, args: &Value) ->
                 if let Some(sid)=args.get("sessionId").and_then(Value::as_str).filter(|s|bob_runtime::agy_directory::owns_readable_session(s)) {
                     let text=args["text"].as_str().filter(|s|!s.trim().is_empty() && s.len()<=32000).ok_or("DSH_TEXT_REQUIRED")?;
                     let request=args["requestId"].as_str().filter(|s|s.len()<=200 && !s.is_empty()).ok_or("DSH_REQUEST_REQUIRED")?;
-                    match bob_runtime::agy_directory::prompt_session(&ctx.runtime.data_dir, connection, sid, text, request) {
+                    let takeover=args.get("takeover").and_then(Value::as_bool).unwrap_or(false);
+                    let approval_mode=args.get("approvalMode").or_else(||args.get("approval_mode")).and_then(Value::as_str);
+                    match bob_runtime::agy_directory::prompt_session_with_options(&ctx.runtime.data_dir, connection, sid, text, request, takeover, approval_mode) {
                         Ok(v) => return Ok(v),
                         Err("DSH_CONNECTION_REQUIRED") if connection != "local" => {
                             return bob_runtime::node_pairing::forward_dsh_rpc_to_remote_node(
@@ -2413,7 +2415,20 @@ fn execute_unlocked_harness_rpc(
                         .as_str()
                         .filter(|s| s.len() <= 200 && !s.is_empty())
                         .ok_or("DSH_REQUEST_REQUIRED")?;
-                    match bob_runtime::agy_directory::prompt_session(data_dir, connection, sid, text, request) {
+                    let takeover = args.get("takeover").and_then(Value::as_bool).unwrap_or(false);
+                    let approval_mode = args
+                        .get("approvalMode")
+                        .or_else(|| args.get("approval_mode"))
+                        .and_then(Value::as_str);
+                    match bob_runtime::agy_directory::prompt_session_with_options(
+                        data_dir,
+                        connection,
+                        sid,
+                        text,
+                        request,
+                        takeover,
+                        approval_mode,
+                    ) {
                         Ok(v) => return Ok(v),
                         Err("DSH_CONNECTION_REQUIRED") if connection != "local" => {
                             return bob_runtime::node_pairing::forward_dsh_rpc_to_remote_node(

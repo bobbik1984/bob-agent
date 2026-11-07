@@ -4170,16 +4170,35 @@ async fn native_dsh<R: Runtime>(
                         "sessionId": session_id,
                     }),
                 ),
-                _ => (
-                    "app_dsh_prompt",
-                    json!({
-                        "connectionId": "local",
-                        "sessionId": session_id,
-                        "text": text,
-                        "requestId": request_id,
-                        "attachments": attachments,
-                    }),
-                ),
+                _ => {
+                    let takeover = attachments
+                        .as_ref()
+                        .and_then(|v| v.get("__bob_takeover"))
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false);
+                    let approval_mode = attachments
+                        .as_ref()
+                        .and_then(|v| v.get("__bob_approval_mode"))
+                        .and_then(Value::as_str)
+                        .map(str::to_owned);
+                    let clean_attachments = match attachments.as_ref() {
+                        Some(v) if v.is_array() => Some(v.clone()),
+                        Some(v) => v.get("items").cloned(),
+                        None => None,
+                    };
+                    (
+                        "app_dsh_prompt",
+                        json!({
+                            "connectionId": "local",
+                            "sessionId": session_id,
+                            "text": text,
+                            "requestId": request_id,
+                            "attachments": clean_attachments,
+                            "takeover": takeover,
+                            "approvalMode": approval_mode,
+                        }),
+                    )
+                }
             }
         };
 
@@ -4271,8 +4290,27 @@ pub(crate) async fn app_dsh_history<R: Runtime>(host: AppHandle<R>, connection_i
     native_dsh(host, connection_id, "history", session_id, String::new(), String::new(), None).await
 }
 #[tauri::command]
-pub(crate) async fn app_dsh_prompt<R: Runtime>(host: AppHandle<R>, connection_id: String, session_id: String, text: String, request_id: String, attachments: Option<Value>) -> Result<Value, &'static str> {
-    native_dsh(host, connection_id, "prompt", session_id, text, request_id, attachments).await
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn app_dsh_prompt<R: Runtime>(
+    host: AppHandle<R>,
+    connection_id: String,
+    session_id: String,
+    text: String,
+    request_id: String,
+    attachments: Option<Value>,
+    takeover: Option<bool>,
+    approval_mode: Option<String>,
+) -> Result<Value, &'static str> {
+    let wrapped = if takeover.is_some() || approval_mode.is_some() {
+        Some(json!({
+            "items": attachments,
+            "__bob_takeover": takeover.unwrap_or(false),
+            "__bob_approval_mode": approval_mode,
+        }))
+    } else {
+        attachments
+    };
+    native_dsh(host, connection_id, "prompt", session_id, text, request_id, wrapped).await
 }
 
 #[tauri::command]
@@ -4433,6 +4471,6 @@ pub(crate) async fn app_native_cancel<R: Runtime>(host: AppHandle<R>, connection
 
 #[tauri::command]
 pub(crate) async fn app_native_permission<R: Runtime>(host: AppHandle<R>, connection_id: String, session_id: String, request_id: String, permission_id: String, option_id: Option<String>) -> Result<Value, &'static str> {
- if !session_id.starts_with("agy:") || request_id.is_empty() || request_id.len()>200 || permission_id.is_empty() || permission_id.len()>128 || option_id.as_ref().is_some_and(|x|x.len()>128) {return Err("HARNESS_APPROVAL_INVALID")}
+ if (!session_id.starts_with("agy:") && !session_id.starts_with("claude-jsonl:")) || request_id.is_empty() || request_id.len()>200 || permission_id.is_empty() || permission_id.len()>128 || option_id.as_ref().is_some_and(|x|x.len()>128) {return Err("HARNESS_APPROVAL_INVALID")}
  native_dsh(host,connection_id,"permission",session_id,json!({"permissionId":permission_id,"optionId":option_id}).to_string(),request_id,None).await
 }

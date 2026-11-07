@@ -42,6 +42,13 @@ function onPopState(){
  if(zoomed.value){zoomed.value=false;return;}
  closingFromPop=true;emit('close');
 }
+function onBackdropClick(e){
+ if(e.target===dialog.value){
+  const rect=dialog.value.getBoundingClientRect();
+  const inside=rect.top<=e.clientY&&e.clientY<=rect.top+rect.height&&rect.left<=e.clientX&&e.clientX<=rect.left+rect.width;
+  if(!inside)closeAll();
+ }
+}
 onMounted(async()=>{
  pushPreviewState('file');
  globalThis.window?.addEventListener?.('popstate',onPopState);
@@ -74,7 +81,7 @@ onUnmounted(()=>{
 });
 </script>
 <template>
-<dialog ref="dialog" class="dsh-preview" @cancel.prevent="handleBack">
+<dialog ref="dialog" class="dsh-preview" @cancel.prevent="handleBack" @click="onBackdropClick">
  <header class="dsh-preview-header">
   <button type="button" class="dsh-preview-back" @click="handleBack">← {{ t(zoomed ? 'filePreviewExitZoom' : 'filePreviewBack') }}</button>
   <strong class="dsh-preview-title">{{ address.path }}</strong>
@@ -90,7 +97,8 @@ onUnmounted(()=>{
 <style scoped>
 .document-pages figure{margin:0 0 16px}.document-pages figcaption{color:var(--text-secondary);padding:8px 0}.document-pages img{display:block;width:100%;height:auto}
 .dsh-html-preview{display:block;width:100%;height:65dvh;border:1px solid var(--border-color);background:var(--bg-primary)}
-.dsh-preview{width:min(1100px,94vw);height:90dvh;max-height:94dvh;box-sizing:border-box;padding:max(16px,calc(env(safe-area-inset-top,0px) + 12px)) 16px max(16px,calc(env(safe-area-inset-bottom,0px) + 12px));border:1px solid var(--border-color);border-radius:12px;background:var(--bg-primary);color:var(--text-primary);overflow:auto;scrollbar-gutter:stable}
+.dsh-preview::backdrop{background:color-mix(in srgb,var(--bg-root,#0b0f17) 78%,transparent);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px)}
+.dsh-preview{width:min(1100px,94vw);height:90dvh;max-height:94dvh;box-sizing:border-box;padding:max(16px,calc(env(safe-area-inset-top,0px) + 12px)) 16px max(16px,calc(env(safe-area-inset-bottom,0px) + 12px));border:1px solid var(--border-color);border-radius:12px;background:var(--bg-primary);color:var(--text-primary);box-shadow:0 24px 64px rgba(0,0,0,0.65), 0 0 0 1px var(--border-color);overflow:auto;scrollbar-gutter:stable}
 footer a{color:var(--accent-primary);white-space:nowrap}.dsh-preview-body{overflow:auto;margin-top:12px}.dsh-preview-body.zoomed{max-height:70dvh}.dsh-preview-body.zoomed img{max-width:none}header,footer{display:flex;align-items:center;justify-content:space-between;gap:12px}header{position:sticky;top:0;z-index:1;background:var(--bg-primary);padding-block:8px}header strong{min-width:0;flex:1;text-align:center;overflow-wrap:anywhere}header button{flex-shrink:0;padding:6px 12px;border-radius:8px;border:1px solid var(--border-color);background:var(--bg-secondary);color:var(--text-primary);cursor:pointer}p,small{color:var(--text-secondary)}small{overflow-wrap:anywhere}img{max-width:100%;height:auto}pre{white-space:pre-wrap;overflow-wrap:anywhere}footer{margin-top:16px}
 @media(max-width:600px){.dsh-preview{width:100%;height:100dvh;max-width:100%;max-height:100dvh;margin:0;border-radius:0}}
 </style>

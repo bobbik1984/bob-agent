@@ -21,7 +21,7 @@ export function createKernelBridge(invoke, isAvailable) {
     dshLive: (connectionId,sessionId) => call('app_dsh_live',{connectionId,sessionId}),
     dshPage: (connectionId,sessionId,before=null,through=null,after=null) => call('app_dsh_page',{connectionId,sessionId,before,through,after}),
     dshHistory: (connectionId,sessionId) => call('app_dsh_history',{connectionId,sessionId}),
-    dshPrompt: (connectionId,sessionId,text,requestId,attachments=null) => call('app_dsh_prompt',{connectionId,sessionId,text,requestId,...(attachments?.length?{attachments}:{})}),
+    dshPrompt: (connectionId,sessionId,text,requestId,attachments=null,options=null) => call('app_dsh_prompt',{connectionId,sessionId,text,requestId,...(attachments?.length?{attachments}:{}),...(options?.takeover?{takeover:true}:{}),...(options?.approvalMode?{approvalMode:options.approvalMode}:{})}),
     claudeCapabilities: (connectionId=null) => call('app_claude_capabilities',{connectionId}),
     claudeSessions: (connectionId=null) => call('app_claude_sessions',{connectionId}),
     claudeHistory: (connectionId,sessionId) => call('app_claude_history',{connectionId,sessionId}),

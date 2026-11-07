@@ -39,6 +39,25 @@ impl HostGrant {
             "local" | "self" | "localhost" | "127.0.0.1"
         )
     }
+    fn effective_claude_tools(&self) -> Vec<String> {
+        if !self.claude_tools.is_empty() {
+            return self.claude_tools.clone();
+        }
+        if self.harnesses.iter().any(|h| h == "claude") {
+            return vec![
+                "Read".to_owned(),
+                "Grep".to_owned(),
+                "Glob".to_owned(),
+                "Bash".to_owned(),
+                "Edit".to_owned(),
+                "Write".to_owned(),
+                "AskUserQuestion".to_owned(),
+                "WebFetch".to_owned(),
+                "WebSearch".to_owned(),
+            ];
+        }
+        Vec::new()
+    }
 }
 
 pub fn discover_local_grant(connection_id: &str) -> Option<Value> {
@@ -105,6 +124,21 @@ pub fn discover_local_grant(connection_id: &str) -> Option<Value> {
     if harnesses.is_empty() {
         return None;
     }
+    let claude_tools: Vec<String> = if claude_opt.is_some() {
+        vec![
+            "Read".to_owned(),
+            "Grep".to_owned(),
+            "Glob".to_owned(),
+            "Bash".to_owned(),
+            "Edit".to_owned(),
+            "Write".to_owned(),
+            "AskUserQuestion".to_owned(),
+            "WebFetch".to_owned(),
+            "WebSearch".to_owned(),
+        ]
+    } else {
+        Vec::new()
+    };
     Some(json!({
         "connectionId": connection_id,
         "sshTarget": "local",
@@ -114,6 +148,7 @@ pub fn discover_local_grant(connection_id: &str) -> Option<Value> {
         "codexDataDir": codex_opt,
         "controlPlaneDbs": cp_dbs,
         "harnesses": harnesses,
+        "claudeTools": claude_tools,
     }))
 }
 
@@ -403,7 +438,8 @@ pub fn read_page(data: &Path, connection: &str, session_id: &str, after: Option<
     let now=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs();
     if let Some(cached)=fs::read(&cache_path).ok().and_then(|b|serde_json::from_slice::<Value>(&b).ok()) {
         let age=cached["at"].as_u64().map(|t|now.saturating_sub(t)).unwrap_or(9999);
-        let has_running=cached["page"]["request_results"].as_array().is_some_and(|arr|arr.iter().any(|r|r["status"].as_str()==Some("running")));
+        let has_running=cached["page"]["request_results"].as_array().is_some_and(|arr|arr.iter().any(|r|r["status"].as_str()==Some("running")))
+            || cached["page"]["terminal_holder"]["busy"].as_bool() == Some(true);
         let ttl=if has_running || after.is_some() { 2 } else { 15 };
         if age<ttl {
             if let Some(mut page)=cached.get("page").cloned() {
@@ -428,6 +464,7 @@ pub fn read_page(data: &Path, connection: &str, session_id: &str, after: Option<
     let raw:Value=serde_json::from_slice(&b).map_err(|_|"DSH_HISTORY_UNAVAILABLE")?;
     let msgs=raw["messages"].as_array().cloned().unwrap_or_default();
     let req_results=raw["request_results"].as_array().cloned().unwrap_or_default();
+    let terminal_holder=raw.get("terminal_holder").cloned().unwrap_or(Value::Null);
     let cursor=msgs.len() as i64;
     let harness=raw["harness"].as_str().unwrap_or("dsh");
     let workspace=raw["workspace"].as_str().unwrap_or("");
@@ -443,12 +480,25 @@ pub fn read_page(data: &Path, connection: &str, session_id: &str, after: Option<
         "replacements": [],
         "messages": msgs,
         "request_results": req_results,
+        "terminal_holder": terminal_holder,
     });
     let _=fs::write(&cache_path, serde_json::to_vec(&json!({"at":now,"page":page})).unwrap_or_default());
     Ok(page)
 }
 
 pub fn prompt_session(data: &Path, connection: &str, session_id: &str, text: &str, request_id: &str) -> Result<Value, &'static str> {
+    prompt_session_with_options(data, connection, session_id, text, request_id, false, None)
+}
+
+pub fn prompt_session_with_options(
+    data: &Path,
+    connection: &str,
+    session_id: &str,
+    text: &str,
+    request_id: &str,
+    takeover: bool,
+    approval_mode_override: Option<&str>,
+) -> Result<Value, &'static str> {
     use sha2::{Sha256,Digest};
     if !owns_readable_session(session_id) {
         return Err("DSH_SESSION_NOT_FOUND");
@@ -456,10 +506,28 @@ pub fn prompt_session(data: &Path, connection: &str, session_id: &str, text: &st
     let all=grants(data)?;
     let Some(g)=all.iter().find(|g|g.connection_id==connection) else { return Err("DSH_CONNECTION_REQUIRED") };
     require_native_harness_grant(g, session_id)?;
+    let claude_tools = if !session_id.starts_with("claude-jsonl:") || approval_mode_override == Some("deny") {
+        Vec::new()
+    } else if approval_mode_override == Some("read_only") {
+        g.effective_claude_tools()
+            .into_iter()
+            .filter(|t| matches!(t.as_str(), "Read" | "Grep" | "Glob" | "AskUserQuestion" | "WebFetch" | "WebSearch"))
+            .collect()
+    } else {
+        g.effective_claude_tools()
+    };
+    let approval_mode = if approval_mode_override == Some("deny") {
+        "deny"
+    } else if session_id.starts_with("agy:") || (session_id.starts_with("claude-jsonl:") && !claude_tools.is_empty()) {
+        "interactive"
+    } else {
+        "deny"
+    };
     let arg_str=serde_json::to_string(&json!({
         "mode": "prompt",
-        "approvalMode": if session_id.starts_with("agy:") || (session_id.starts_with("claude-jsonl:") && !g.claude_tools.is_empty()) { "interactive" } else { "deny" },
-        "claudeTools": if session_id.starts_with("claude-jsonl:") { g.claude_tools.clone() } else { vec![] },
+        "approvalMode": approval_mode,
+        "claudeTools": claude_tools,
+        "takeover": takeover,
         "sessionId": session_id,
         "text": text,
         "requestId": request_id,
@@ -496,13 +564,21 @@ fn require_native_harness_grant(grant: &HostGrant, session: &str) -> Result<(), 
 }
 
 pub fn native_permission(data: &Path, connection: &str, session: &str, request: &str, permission: &str, option: Option<&str>) -> Result<Value, &'static str> {
+    use sha2::{Sha256,Digest};
     if !session.starts_with("agy:") && !session.starts_with("claude-jsonl:") { return Err("HARNESS_APPROVAL_UNSUPPORTED") }
     if permission.is_empty() || permission.len()>128 || option.is_some_and(|x|x.len()>128) { return Err("HARNESS_APPROVAL_INVALID") }
     let all=grants(data)?;
     let grant=all.iter().find(|g|g.connection_id==connection).ok_or("DSH_CONNECTION_REQUIRED")?;
     require_native_harness_grant(grant, session)?;
-    let bytes=run_ssh_python(&grant.ssh_target,&json!({"mode":"permission","sessionId":session,"requestId":request,"permissionId":permission,"optionId":option,"claudeTools":grant.claude_tools}).to_string(),15)?;
-    serde_json::from_slice(&bytes).map_err(|_|"HARNESS_APPROVAL_UNCONFIRMED")
+    let bytes=run_ssh_python(&grant.ssh_target,&json!({"mode":"permission","sessionId":session,"requestId":request,"permissionId":permission,"optionId":option,"claudeTools":grant.effective_claude_tools()}).to_string(),15)?;
+    let res: Value = serde_json::from_slice(&bytes).map_err(|_|"HARNESS_APPROVAL_UNCONFIRMED")?;
+    let mut hash=Sha256::new();
+    hash.update(connection.as_bytes());
+    hash.update(b":");
+    hash.update(session.as_bytes());
+    let cache_path=data.join(format!("remote-page-{:x}.json",hash.finalize()));
+    let _=fs::remove_file(cache_path);
+    Ok(res)
 }
 
 pub fn native_cancel(data: &Path, connection: &str, session: &str, request: &str) -> Result<Value, &'static str> {
