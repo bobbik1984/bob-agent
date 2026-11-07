@@ -812,5 +812,7 @@
   "visualAssetsCount": "视觉资产 · {count} 项",
   "visualAssetsEmpty": "当前会话暂无生成的视觉资产",
   "quoteFeedbackBtn": "引用此图反馈",
-  "quoteFeedbackSuccess": "已引用至对话输入框"
+  "quoteFeedbackSuccess": "已引用至对话输入框",
+  "testAndScratchSessions": "实验与临时测试",
+  "testAndScratchHint": "已收纳探针与临时测试"
 }

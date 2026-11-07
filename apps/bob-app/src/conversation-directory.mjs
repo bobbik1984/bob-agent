@@ -253,13 +253,91 @@ export function filterAndSortRows(rows, pinnedSet = null, options = null) {
   });
 }
 
+
+export const CANONICAL_PROJECTS = [
+  { id: 'sea2', name: '海路纪元 · Sea2', pattern: /(sea2|海路纪元|海路|地球渲染|航海)/i },
+  { id: 'quant_lab', name: 'Quant Lab 量化实验室', pattern: /(quant_lab|quant|量化)/i },
+  { id: 'winter-shelter', name: 'Winter Shelter 避难所', pattern: /(winter[\s_-]*shelter|winter|雪洞)/i },
+  { id: 'history_map', name: '4D 历史地图', pattern: /(history_map|history-map|历史地图)/i },
+  { id: 'courtyard-garden', name: '庭院布局与塔防', pattern: /(庭院|花园守线|garden)/i },
+  { id: 'village', name: 'Village 集群系统', pattern: /(village|cluster-os|集控|运维控制台)/i },
+  { id: 'bedtime_story', name: 'AI 睡前故事', pattern: /(bedtime_story|睡前故事|绘本)/i },
+  { id: 'code_runner', name: 'CodeRunner 并发引擎', pattern: /(code_runner|coderunner)/i },
+  { id: 'iknow', name: 'iKnow 知识图谱', pattern: /(iknow|生态图谱|知识图谱)/i },
+  { id: '3d-render', name: '3D 渲染与美术管线', pattern: /(空间站|月表|molence|gpcr|blender|render|渲染|建模|3d)/i },
+  { id: 'reverse-eng', name: '逆向工程与源码还原', pattern: /(dos|exe|逆向|还原源代码|反编译)/i },
+  { id: 'four-harness', name: '多工具联合验收', pattern: /(four[\s_-]*harness)/i },
+];
+
+export function resolveCanonicalProject(row) {
+  if (!row) return null;
+  if (row.project_owner && row.project_id) {
+    return {
+      id: row.project_id,
+      name: row.project || row.project_id,
+      isExplicit: true,
+    };
+  }
+  const title = String(row.title || '').trim();
+  const ws = workspaceName(row.workspace || '');
+  const wsLower = String(ws || '').toLocaleLowerCase();
+
+  for (const def of CANONICAL_PROJECTS) {
+    if (def.pattern.test(title) || def.pattern.test(wsLower)) {
+      return { id: def.id, name: def.name, isCanonical: true };
+    }
+  }
+  return null;
+}
+
+export function isTestOrScratchSession(row) {
+  if (!row) return false;
+  if (row.pinned) return false;
+  if (row.project_owner && row.project_id && !/(test|tmp|scratch|probe)/i.test(row.project_id)) {
+    return false;
+  }
+  const title = String(row.title || '').trim().toLocaleLowerCase();
+  const ws = workspaceName(row.workspace || '').toLocaleLowerCase();
+
+  if (/(^|[\s_/-])(test|eval|probe|tmp|temp|scratch|benchmark|fixture|mock|smoke|check)([\s_/-]|$)/i.test(title)) {
+    return true;
+  }
+  if (/(测试|探针|临时|冒烟|评测|验证)/.test(title)) {
+    return true;
+  }
+
+  if (/(^|[\s_/-])(test|tmp|temp|scratch)([\s_/-]|$)/i.test(ws)) {
+    return true;
+  }
+  return false;
+}
+
 // Display names never become identity keys: equal basenames can belong to different nodes/paths.
 export function directoryGroups(rows, mode, pinnedSet = null, options = null) {
   const ordered = filterAndSortRows(rows, pinnedSet, options);
 
+  const pins =
+    pinnedSet instanceof Set
+      ? pinnedSet
+      : Array.isArray(pinnedSet)
+        ? new Set(pinnedSet)
+        : new Set();
+
+  const activeRows = [];
+  const testRows = [];
+
+  for (const row of ordered) {
+    const isPin = pins.has(row.uid || row.id);
+    if (!isPin && isTestOrScratchSession(row)) {
+      testRows.push(row);
+    } else {
+      activeRows.push(row);
+    }
+  }
+
   if (mode === 'smart') {
     const groups = new Map();
-    for (const row of ordered) {
+    for (const row of activeRows) {
       const linked = row.project_owner && row.project_id;
       if (linked) {
         const key = JSON.stringify(['project', row.project_owner, row.project_id]);
@@ -285,37 +363,95 @@ export function directoryGroups(rows, mode, pinnedSet = null, options = null) {
       }
       groups.get(topic.key).items.push(row);
     }
-    return [...groups.values()];
+    const res = [...groups.values()];
+    if (testRows.length > 0) {
+      res.push({
+        key: 'group:test-scratch',
+        name: '实验与临时测试',
+        fullName: '实验与临时测试',
+        isTestGroup: true,
+        items: testRows,
+      });
+    }
+    return res;
   }
 
+  if (mode === 'device') {
+    const groups = new Map();
+    for (const row of activeRows) {
+      const device = row.remote ? nodeLabel(row.node) : row.device;
+      const owner = row.remote ? ['remote', deviceKey(row.node)] : ['local', row.device];
+      const key = JSON.stringify(owner);
+      if (!groups.has(key)) {
+        groups.set(key, {
+          key,
+          name: device,
+          fullName: device,
+          items: [],
+        });
+      }
+      groups.get(key).items.push(row);
+    }
+    const res = [...groups.values()];
+    if (testRows.length > 0) {
+      res.push({
+        key: 'group:test-scratch',
+        name: '实验与临时测试',
+        fullName: '实验与临时测试',
+        isTestGroup: true,
+        items: testRows,
+      });
+    }
+    return res;
+  }
+
+  // mode === 'project' (default)
   const groups = new Map();
-  for (const row of ordered) {
+  for (const row of activeRows) {
     const device = row.remote ? nodeLabel(row.node) : row.device;
     const owner = row.remote ? ['remote', deviceKey(row.node)] : ['local', row.device];
-    const project = row.project || row.workspace || '';
+    const canonical = resolveCanonicalProject(row);
     const linked = row.project_owner && row.project_id;
-    const key = JSON.stringify(
-      mode === 'device'
-        ? owner
-        : linked
-          ? ['project', row.project_owner, row.project_id]
-          : [...owner, row.project_id || row.workspace || ''],
-    );
-    if (!groups.has(key))
+
+    let key;
+    let name;
+    let fullName;
+
+    if (linked) {
+      key = JSON.stringify(['project', row.project_owner, row.project_id]);
+      name = row.project;
+      fullName = row.project;
+    } else if (canonical) {
+      key = JSON.stringify(['canonical_project', canonical.id]);
+      name = canonical.name;
+      fullName = canonical.name;
+    } else {
+      const project = row.project || row.workspace || '';
+      key = JSON.stringify([...owner, row.project_id || row.workspace || '']);
+      name = project ? `${device} / ${row.project || workspaceName(row.workspace)}` : '';
+      fullName = project ? `${device} / ${project}` : '';
+    }
+
+    if (!groups.has(key)) {
       groups.set(key, {
         key,
-        name:
-          mode === 'device'
-            ? device
-            : linked
-              ? row.project
-              : project
-                ? `${device} / ${row.project || workspaceName(row.workspace)}`
-                : '',
-        fullName: mode === 'device' ? device : project ? `${device} / ${project}` : '',
+        name,
+        fullName,
         items: [],
       });
+    }
     groups.get(key).items.push(row);
   }
-  return [...groups.values()];
+
+  const res = [...groups.values()];
+  if (testRows.length > 0) {
+    res.push({
+      key: 'group:test-scratch',
+      name: '实验与临时测试',
+      fullName: '实验与临时测试',
+      isTestGroup: true,
+      items: testRows,
+    });
+  }
+  return res;
 }

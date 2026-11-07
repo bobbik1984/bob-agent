@@ -8,21 +8,23 @@ use serde_json::{json, Value};
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all="camelCase")]
 struct HostGrant {
+    #[serde(alias = "connection_id")]
     connection_id: String,
+    #[serde(alias = "ssh_target")]
     ssh_target: String,
-    #[serde(default)]
+    #[serde(default, alias = "agy_data_dir")]
     agy_data_dir: String,
-    #[serde(default)]
+    #[serde(default, alias = "claude_data_dir")]
     claude_data_dir: Option<String>,
-    #[serde(default)]
+    #[serde(default, alias = "pi_data_dir")]
     pi_data_dir: Option<String>,
-    #[serde(default)]
+    #[serde(default, alias = "codex_data_dir")]
     codex_data_dir: Option<String>,
-    #[serde(default)]
+    #[serde(default, alias = "control_plane_dbs")]
     control_plane_dbs: Vec<String>,
     #[serde(default)]
     harnesses: Vec<String>,
-    #[serde(default)]
+    #[serde(default, alias = "claude_tools")]
     claude_tools: Vec<String>,
 }
 

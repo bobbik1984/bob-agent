@@ -74,3 +74,44 @@ test('extractFilterOptions and filterAndSortRows support multi-node, multi-harne
  assert.equal(topicFiltered[0].items.length,1);
  assert.equal(topicFiltered[0].items[0].uid,'vps3:2');
 });
+
+
+test('canonical task keyword and project tag grouping clusters sessions across VPS2, VPS3, and X1T', () => {
+  const rows = [
+    { uid: 'vps2:1', remote: true, node: { id: 'local', label: 'VPS2' }, workspace: '/opt/quant_lab', title: '量化交易回测管线' },
+    { uid: 'vps3:1', remote: true, node: { id: 'vps3', label: 'VPS3' }, workspace: '/home/ubuntu/quant_lab', title: 'quant_lab data loader' },
+    { uid: 'x1t:1', remote: true, node: { id: 'x1t', label: 'X1T' }, workspace: '/home/bobbik/dsh_projects/games/sea2', title: 'Sea2 海图渲染管线' },
+    { uid: 'vps2:2', remote: true, node: { id: 'local', label: 'VPS2' }, workspace: '/home/ubuntu/sea2-server', title: '海路纪元后端同步' },
+  ];
+  const groups = directoryGroups(rows, 'project');
+  assert.equal(groups.length, 2);
+  const quant = groups.find(g => g.name.includes('Quant Lab'));
+  assert.ok(quant);
+  assert.equal(quant.items.length, 2);
+  assert.deepEqual(quant.items.map(i => i.uid), ['vps2:1', 'vps3:1']);
+
+  const sea = groups.find(g => g.name.includes('Sea2'));
+  assert.ok(sea);
+  assert.equal(sea.items.length, 2);
+  assert.deepEqual(sea.items.map(i => i.uid).sort(), ['vps2:2', 'x1t:1']);
+});
+
+test('test, probe, and scratch sessions are automatically shielded into testAndScratchGroup at bottom', () => {
+  const rows = [
+    { uid: 'vps2:core', remote: true, node: { id: 'local', label: 'VPS2' }, workspace: '/opt/quant_lab', title: 'Quant Lab 核心算法' },
+    { uid: 'vps2:test1', remote: true, node: { id: 'local', label: 'VPS2' }, workspace: '/opt/quant_lab/tests', title: 'test_order_matcher' },
+    { uid: 'x1t:probe', remote: true, node: { id: 'x1t', label: 'X1T' }, workspace: '/tmp/probe', title: 'probe_network_vps3' },
+    { uid: 'vps3:eval', remote: true, node: { id: 'vps3', label: 'VPS3' }, workspace: '/home/ubuntu/eval', title: '临时冒烟验证' },
+  ];
+  const groups = directoryGroups(rows, 'project');
+  // Normal projects + 1 test group
+  assert.equal(groups.length, 2);
+  const coreGroup = groups[0];
+  assert.equal(coreGroup.items.length, 1);
+  assert.equal(coreGroup.items[0].uid, 'vps2:core');
+
+  const testGroup = groups[1];
+  assert.equal(testGroup.isTestGroup, true);
+  assert.equal(testGroup.items.length, 3);
+  assert.deepEqual(testGroup.items.map(i => i.uid).sort(), ['vps2:test1', 'vps3:eval', 'x1t:probe']);
+});

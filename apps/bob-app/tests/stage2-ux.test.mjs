@@ -132,3 +132,26 @@ test('Stage 2 Design Studio: Visual feedback loop quotes images to prompt compos
   assert.match(dshSource, /reel-card-quote-btn/);
   assert.match(dshSource, /workspace:\s*selected\.value\?\.workspace/);
 });
+
+
+test('Stage 3 Chief of Staff: cross-node task normalization and test session shielding', () => {
+  const cdSource = readFileSync(new URL('../src/conversation-directory.mjs', import.meta.url), 'utf8');
+  assert.match(cdSource, /resolveCanonicalProject/);
+  assert.match(cdSource, /isTestOrScratchSession/);
+  assert.match(cdSource, /CANONICAL_PROJECTS/);
+  assert.match(cdSource, /isTestGroup/);
+
+  const dshSource = readFileSync(new URL('../src/components/DshSessions.vue', import.meta.url), 'utf8');
+  assert.match(dshSource, /isTestOrScratchSession/);
+  assert.match(dshSource, /testList/);
+  assert.match(dshSource, /dsh-test-group/);
+
+  const dirSource = readFileSync(new URL('../src/components/ConversationDirectory.vue', import.meta.url), 'utf8');
+  assert.match(dirSource, /directory-test-group/);
+  assert.match(dirSource, /node-tag-pill/);
+
+  const zhLocale = JSON.parse(readFileSync(new URL('../src/locales/zh-CN.json', import.meta.url), 'utf8'));
+  assert.ok(zhLocale.testAndScratchSessions);
+  const enLocale = JSON.parse(readFileSync(new URL('../src/locales/en-US.json', import.meta.url), 'utf8'));
+  assert.ok(enLocale.testAndScratchSessions);
+});

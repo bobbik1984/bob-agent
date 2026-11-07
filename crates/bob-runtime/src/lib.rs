@@ -567,7 +567,8 @@ impl ModelHubRuntime {
                 let slot = remote_node_token_slot(&nid);
                 let token_val = self.secrets.get(&slot).unwrap_or_default();
                 obj.remove("token");
-                obj.insert("hasToken".to_owned(), json!(!token_val.trim().is_empty()));
+                let is_local = nid == "local";
+                obj.insert("hasToken".to_owned(), json!(is_local || !token_val.trim().is_empty()));
             }
         }
         hub_state["remoteNodes"] = json!(remote_nodes);

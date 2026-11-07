@@ -812,5 +812,7 @@
   "visualAssetsCount": "Visual assets · {count}",
   "visualAssetsEmpty": "No visual assets in current session",
   "quoteFeedbackBtn": "Quote to prompt",
-  "quoteFeedbackSuccess": "Quoted to prompt composer"
+  "quoteFeedbackSuccess": "Quoted to prompt composer",
+  "testAndScratchSessions": "Experiments & Scratch Tests",
+  "testAndScratchHint": "Probes and scratch tests collapsed"
 }
