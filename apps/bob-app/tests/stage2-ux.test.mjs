@@ -45,7 +45,13 @@ test('Stage 2: Locale coverage for voice input and session archive', () => {
     'dshSearchMatchCount',
     'dshSearchClear',
     'dshSearchNoMatches',
+    'processExecution',
+    'processExecutionSteps',
+    'auditLogSummary',
   ];
+
+  assert.equal(zh.dshAgent, 'DSH');
+  assert.equal(en.dshAgent, 'DSH');
 
   for (const k of requiredKeys) {
     assert.ok(zh[k], `Missing zh-CN key: ${k}`);
@@ -60,4 +66,25 @@ test('Stage 2: DshSessions in-conversation search, snippet match, and composer t
   assert.match(dshSource, /filteredDisplayMessages/);
   assert.match(dshSource, /dsh-search-snippet/);
   assert.match(dshSource, /chip-thumb/);
+});
+
+test('Stage 2.5: DshSessions renders HarnessIcon across session cards, topbar, and message headers', () => {
+  const dshSource = readFileSync(new URL('../src/components/DshSessions.vue', import.meta.url), 'utf8');
+  assert.match(dshSource, /import HarnessIcon from '\.\/HarnessIcon\.vue';/);
+  assert.match(dshSource, /class="session-card-icon"/);
+  assert.match(dshSource, /class="topbar-harness-icon"/);
+  assert.match(dshSource, /class="role-harness-icon"/);
+});
+
+test('Stage 2.5: AUDIT_LINE_RE correctly detects code checklist lines and MessageContent supports audit & execution folding', async () => {
+  const { AUDIT_LINE_RE, parseMessageSegments } = await import('../src/thinking-process.mjs');
+  const sampleAudit = 'tests/build.gd:49 [BREAKS] hardcoded\nscripts/tune.gd:205 [CHECK] tilt_shift\nres.tres:1 [CHECK] omits\nvis.md:15 [DOC] specs';
+  const segs = parseMessageSegments(sampleAudit);
+  assert.equal(segs.length, 1);
+  assert.equal(segs[0].kind, 'audit');
+  assert.equal(segs[0].lines.length, 4);
+
+  const mcSource = readFileSync(new URL('../src/components/MessageContent.vue', import.meta.url), 'utf8');
+  assert.match(mcSource, /audit-checklist-box/);
+  assert.match(mcSource, /execution-process-box/);
 });

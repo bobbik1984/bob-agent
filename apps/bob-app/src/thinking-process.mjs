@@ -7,6 +7,8 @@ export const TERMINAL_ROD_FRAMES = ['|', '/', '-', '\\'];
 
 const TOOL_LINE_RE = /^(?:[-*]\s+)?(?:`?\[(?:Tool|ToolResult|Thinking)(?::\s*[^\]]*)?\]`?)/i;
 
+export const AUDIT_LINE_RE = /^(?:[-*]\s+)?(?:[\w./\\-]+(?::\d+)?)?\s*\[(?:CHECK|DOC|BREAKS|PASS|FAIL|WARN|ERROR|INFO|FIX|TODO|VERIFY|TEST|MUTATION)\]/i;
+
 export function cleanStepLine(line) {
   const s = String(line ?? '')
     .replace(/^\s*[-*]\s+/, '')
@@ -80,8 +82,16 @@ export function parseMessageSegments(rawContent, extraSteps = []) {
         const cleaned = cleanStepLine(trimmed);
         if (cleaned) pendingSteps.push(cleaned);
       } else {
-        flushSteps();
-        pendingText.push(trimmed);
+        const lines = trimmed.split('\n').map(l => l.trim()).filter(Boolean);
+        const auditMatches = lines.filter(l => AUDIT_LINE_RE.test(l));
+        if (lines.length >= 4 && auditMatches.length >= Math.ceil(lines.length * 0.8)) {
+          flushSteps();
+          flushText();
+          segments.push({ kind: 'audit', lines });
+        } else {
+          flushSteps();
+          pendingText.push(trimmed);
+        }
       }
     }
   };
@@ -130,6 +140,8 @@ export function extractThinkingAndBody(rawContent, extraSteps = []) {
       steps.push(...seg.steps);
     } else if (seg.kind === 'text' && seg.text) {
       bodyParts.push(seg.text);
+    } else if (seg.kind === 'audit' && seg.lines) {
+      bodyParts.push(seg.lines.join('\n'));
     }
   }
   const body = bodyParts.join('\n\n').trim();

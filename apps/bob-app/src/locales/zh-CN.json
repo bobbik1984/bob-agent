@@ -537,7 +537,7 @@
   "dshBack": "会话列表",
   "dshPartial": "显示对话正文；向上滚动可读取更早记录。工具详情与附件不一定包含在正文中。",
   "dshYou": "你",
-  "dshAgent": "节点助手",
+  "dshAgent": "DSH",
   "dshPrompt": "继续这个原有会话…",
   "dshAccepted": "节点已接收，正在等待回复。",
   "dshUncertain": "发送状态需核对。内容已保留，不会自动重发；请刷新历史确认节点是否收到。",
@@ -792,5 +792,8 @@
   "dshSearchMessagesPlaceholder": "在当前会话记录中检索...",
   "dshSearchMatchCount": "匹配 {count} 条",
   "dshSearchClear": "清空搜索",
-  "dshSearchNoMatches": "未找到相关消息记录"
+  "dshSearchNoMatches": "未找到相关消息记录",
+  "processExecution": "执行过程",
+  "processExecutionSteps": "执行过程 · {count} 步",
+  "auditLogSummary": "检查与审计清单 · {count} 项"
 }

@@ -137,6 +137,59 @@ export default defineComponent({
       );
     }
 
+    function renderAuditBox(lines, keyIdx) {
+      return h('details', { key: `audit-${keyIdx}`, class: 'thinking-process-box audit-checklist-box' }, [
+        h('summary', { class: 'thinking-process-summary' }, [
+          h('svg', { class: 'thinking-process-icon audit-icon', viewBox: '0 0 24 24', width: '13', height: '13', fill: 'none', stroke: 'currentColor', 'stroke-width': '2', 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true' }, [
+          h('path', { d: 'M9 11l3 3L22 4' }),
+          h('path', { d: 'M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11' }),
+        ]),
+          h('span', { class: 'thinking-process-title' }, t('auditLogSummary', { count: lines.length })),
+        ]),
+        h(
+          'pre',
+          { class: 'audit-checklist-pre', tabindex: 0, 'aria-label': t('auditLogSummary', { count: lines.length }) },
+          [h('code', lines.join('\n'))],
+        ),
+      ]);
+    }
+
+    function renderExecutionProcess(processSegments, keyIdx, openByDefault) {
+      const allSteps = processSegments.filter(s => s.kind === 'steps').flatMap(s => s.steps);
+      const naturalSummary = summarizeProcessSteps(allSteps, locale?.value || 'zh-CN', t);
+      const label = naturalSummary || t('processExecutionSteps', { count: allSteps.length || processSegments.length });
+
+      const items = [];
+      for (let j = 0; j < processSegments.length; j += 1) {
+        const p = processSegments[j];
+        if (p.kind === 'steps') {
+          items.push(
+            h(
+              'ul',
+              { key: `p-steps-${j}`, class: 'thinking-process-list' },
+              p.steps.map((st, sIdx) =>
+                h('li', { key: sIdx, class: 'thinking-process-item' }, inlineMarkdown(st).map(renderNode)),
+              ),
+            ),
+          );
+        } else if (p.kind === 'text' && p.text) {
+          items.push(
+            h('p', { key: `p-text-${j}`, class: 'execution-scratchpad-text' }, p.text),
+          );
+        } else if (p.kind === 'audit' && p.lines) {
+          items.push(renderAuditBox(p.lines, `p-${j}`));
+        }
+      }
+
+      return h('details', { key: `proc-${keyIdx}`, class: 'thinking-process-box execution-process-box', open: openByDefault }, [
+        h('summary', { class: 'thinking-process-summary' }, [
+          h('span', { class: 'thinking-process-icon', 'aria-hidden': 'true' }, '⚙'),
+          h('span', { class: 'thinking-process-title' }, label),
+        ]),
+        h('div', { class: 'thinking-process-timeline' }, items),
+      ]);
+    }
+
     function renderStepsBox(steps, openByDefault, keyIdx) {
       const naturalSummary = summarizeProcessSteps(steps, locale?.value || 'zh-CN', t);
       const label = naturalSummary || t('thinkingProcessCount', { count: steps.length });
@@ -195,22 +248,59 @@ export default defineComponent({
       let rem = activelyStreaming ? visibleLen.value : Infinity;
       let cursorPlaced = false;
 
+      const textIndices = [];
+      const stepsIndices = [];
       for (let i = 0; i < segments.length; i += 1) {
-        const seg = segments[i];
-        if (seg.kind === 'steps') {
-          if (activelyStreaming && rem <= 0 && cursorPlaced) break;
-          children.push(renderStepsBox(seg.steps, !hasAnyText && i === segments.length - 1, i));
-        } else if (seg.kind === 'text' && seg.text) {
-          if (activelyStreaming && rem <= 0) break;
-          const shown =
-            activelyStreaming && rem < seg.text.length ? seg.text.slice(0, Math.max(1, rem)) : seg.text;
-          rem -= seg.text.length + 2;
-          const mdNodes = parseMessageMarkdown(shown).map(renderNode);
-          if (activelyStreaming && !cursorPlaced && rem <= 0) {
-            mdNodes.push(h('span', { class: 'streaming-cursor', 'aria-hidden': 'true' }, '▋'));
-            cursorPlaced = true;
+        if (segments[i].kind === 'text') textIndices.push(i);
+        else if (segments[i].kind === 'steps') stepsIndices.push(i);
+      }
+      const lastTextIdx = textIndices.length > 0 ? textIndices[textIndices.length - 1] : -1;
+      const isMultiStepRun =
+        stepsIndices.length > 1 || (stepsIndices.length === 1 && textIndices.length > 1 && stepsIndices[0] < lastTextIdx);
+
+      if (isMultiStepRun && lastTextIdx > 0) {
+        const processSegments = segments.slice(0, lastTextIdx);
+        children.push(renderExecutionProcess(processSegments, 'main', false));
+        for (let i = lastTextIdx; i < segments.length; i += 1) {
+          const seg = segments[i];
+          if (seg.kind === 'steps') {
+            if (activelyStreaming && rem <= 0 && cursorPlaced) break;
+            children.push(renderStepsBox(seg.steps, false, i));
+          } else if (seg.kind === 'audit') {
+            children.push(renderAuditBox(seg.lines, i));
+          } else if (seg.kind === 'text' && seg.text) {
+            if (activelyStreaming && rem <= 0) break;
+            const shown =
+              activelyStreaming && rem < seg.text.length ? seg.text.slice(0, Math.max(1, rem)) : seg.text;
+            rem -= seg.text.length + 2;
+            const mdNodes = parseMessageMarkdown(shown).map(renderNode);
+            if (activelyStreaming && !cursorPlaced && rem <= 0) {
+              mdNodes.push(h('span', { class: 'streaming-cursor', 'aria-hidden': 'true' }, '▋'));
+              cursorPlaced = true;
+            }
+            children.push(h('div', { key: `text-${i}`, class: 'message-markdown-content' }, mdNodes));
           }
-          children.push(h('div', { key: `text-${i}`, class: 'message-markdown-content' }, mdNodes));
+        }
+      } else {
+        for (let i = 0; i < segments.length; i += 1) {
+          const seg = segments[i];
+          if (seg.kind === 'steps') {
+            if (activelyStreaming && rem <= 0 && cursorPlaced) break;
+            children.push(renderStepsBox(seg.steps, !hasAnyText && i === segments.length - 1, i));
+          } else if (seg.kind === 'audit') {
+            children.push(renderAuditBox(seg.lines, i));
+          } else if (seg.kind === 'text' && seg.text) {
+            if (activelyStreaming && rem <= 0) break;
+            const shown =
+              activelyStreaming && rem < seg.text.length ? seg.text.slice(0, Math.max(1, rem)) : seg.text;
+            rem -= seg.text.length + 2;
+            const mdNodes = parseMessageMarkdown(shown).map(renderNode);
+            if (activelyStreaming && !cursorPlaced && rem <= 0) {
+              mdNodes.push(h('span', { class: 'streaming-cursor', 'aria-hidden': 'true' }, '▋'));
+              cursorPlaced = true;
+            }
+            children.push(h('div', { key: `text-${i}`, class: 'message-markdown-content' }, mdNodes));
+          }
         }
       }
 

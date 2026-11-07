@@ -3462,3 +3462,55 @@ dialog::backdrop {
 .quota-time-fill { background:var(--quota-time); }
 .quota-bar-pct { width:6ch; white-space:nowrap; font-size:10px; font-weight:400; color:var(--text-primary); }
 .quota-time-text { color:var(--text-secondary); }
+
+/* Stage 2.5: Foldable Agent Execution Timeline, Audit Checklist Box, and Session Logos */
+.thinking-process-box.execution-process-box {
+  margin-bottom: 8px;
+}
+.execution-scratchpad-text {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  margin: 6px 0;
+  padding: 4px 8px;
+  background: color-mix(in srgb, var(--bg-secondary) 60%, transparent);
+  border-left: 2px solid var(--border-color);
+  border-radius: 0 4px 4px 0;
+}
+.audit-checklist-box {
+  margin: 8px 0;
+}
+.audit-checklist-pre {
+  margin: 0;
+  padding: 8px 12px;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  font-family: var(--font-mono, monospace);
+  color: var(--text-secondary);
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: color-mix(in srgb, var(--bg-secondary) 80%, black 20%);
+  border-radius: 0 0 6px 6px;
+  max-height: 40vh;
+  scrollbar-gutter: stable;
+}
+.dsh-role .harness-icon {
+  width: 14px;
+  height: 14px;
+  margin-inline: 0 4px;
+  vertical-align: -2px;
+}
+.dsh-tools h4 .harness-icon,
+.dsh-tools small .harness-icon {
+  width: 16px;
+  height: 16px;
+  margin-inline: 0 6px;
+  vertical-align: -2px;
+}
+.dsh-session strong .harness-icon {
+  width: 15px;
+  height: 15px;
+  margin-inline: 0 6px;
+  vertical-align: -2px;
+}

@@ -537,7 +537,7 @@
   "dshBack": "Session list",
   "dshPartial": "Showing conversation text. Scroll up for earlier messages. Tool details and attachments may not be included.",
   "dshYou": "You",
-  "dshAgent": "Node assistant",
+  "dshAgent": "DSH",
   "dshPrompt": "Continue this original session…",
   "dshAccepted": "Accepted by node; waiting for reply.",
   "dshUncertain": "Delivery needs checking. Content retained; no automatic resend. Refresh history to check receipt.",
@@ -792,5 +792,8 @@
   "dshSearchMessagesPlaceholder": "Search in current messages...",
   "dshSearchMatchCount": "{count} matches",
   "dshSearchClear": "Clear search",
-  "dshSearchNoMatches": "No matching messages found"
+  "dshSearchNoMatches": "No matching messages found",
+  "processExecution": "Execution process",
+  "processExecutionSteps": "Execution process · {count} steps",
+  "auditLogSummary": "Inspection & audit checklist · {count} items"
 }
