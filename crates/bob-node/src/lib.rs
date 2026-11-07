@@ -1376,6 +1376,9 @@ pub fn handle_rpc_command(ctx: &mut NodeContext, command: &str, args: &Value) ->
                     }
                 }
             }
+            if let Some(v) = claude_rpc::try_handle_dsh_command(&ctx.runtime.data_dir, command, args)? {
+                return Ok(v);
+            }
             if command == "app_dsh_preview" {
                 if let Some(sid)=args["sessionId"].as_str().filter(|s|bob_runtime::agy_directory::owns_readable_session(s)) {
                     match bob_runtime::agy_directory::preview_native_file(&ctx.runtime.data_dir, connection, sid, args["path"].as_str().ok_or("DSH_PROTOCOL")?, args.get("known")) {
@@ -1408,7 +1411,19 @@ pub fn handle_rpc_command(ctx: &mut NodeContext, command: &str, args: &Value) ->
                     let request=args["requestId"].as_str().filter(|s|s.len()<=200 && !s.is_empty()).ok_or("DSH_REQUEST_REQUIRED")?;
                     let takeover=args.get("takeover").and_then(Value::as_bool).unwrap_or(false);
                     let approval_mode=args.get("approvalMode").or_else(||args.get("approval_mode")).and_then(Value::as_str);
-                    match bob_runtime::agy_directory::prompt_session_with_options(&ctx.runtime.data_dir, connection, sid, text, request, takeover, approval_mode) {
+                    let ws_hint = args.get("workspace")
+                        .and_then(Value::as_str)
+                        .map(str::to_owned)
+                        .or_else(|| bob_runtime::agy_directory::find_cached_workspace(&ctx.runtime.data_dir, connection, sid));
+                    let staged_text = bob_runtime::dsh_transport::stage_attachments_for_prompt(
+                        &ctx.runtime.data_dir,
+                        connection,
+                        sid,
+                        ws_hint.as_deref(),
+                        text,
+                        args.get("attachments"),
+                    );
+                    match bob_runtime::agy_directory::prompt_session_with_details(&ctx.runtime.data_dir, connection, sid, &staged_text, request, takeover, approval_mode, args.get("attachments")) {
                         Ok(v) => return Ok(v),
                         Err("DSH_CONNECTION_REQUIRED") if connection != "local" => {
                             return bob_runtime::node_pairing::forward_dsh_rpc_to_remote_node(
@@ -1421,9 +1436,6 @@ pub fn handle_rpc_command(ctx: &mut NodeContext, command: &str, args: &Value) ->
                         Err(e) => return Err(e),
                     }
                 }
-            }
-            if let Some(v) = claude_rpc::try_handle_dsh_command(&ctx.runtime.data_dir, command, args)? {
-                return Ok(v);
             }
             if command=="app_dsh_prompt" {
                 let s = args["sessionId"].as_str().ok_or("DSH_SESSION_REQUIRED")?;
@@ -2367,6 +2379,9 @@ fn execute_unlocked_harness_rpc(
                     }
                 }
             }
+            if let Some(v) = claude_rpc::try_handle_dsh_command(data_dir, command, args)? {
+                return Ok(v);
+            }
             if command == "app_dsh_preview" {
                 if let Some(sid)=args["sessionId"].as_str().filter(|s|bob_runtime::agy_directory::owns_readable_session(s)) {
                     match bob_runtime::agy_directory::preview_native_file(data_dir, connection, sid, args["path"].as_str().ok_or("DSH_PROTOCOL")?, args.get("known")) {
@@ -2420,14 +2435,27 @@ fn execute_unlocked_harness_rpc(
                         .get("approvalMode")
                         .or_else(|| args.get("approval_mode"))
                         .and_then(Value::as_str);
-                    match bob_runtime::agy_directory::prompt_session_with_options(
+                    let ws_hint = args.get("workspace")
+                        .and_then(Value::as_str)
+                        .map(str::to_owned)
+                        .or_else(|| bob_runtime::agy_directory::find_cached_workspace(data_dir, connection, sid));
+                    let staged_text = bob_runtime::dsh_transport::stage_attachments_for_prompt(
                         data_dir,
                         connection,
                         sid,
+                        ws_hint.as_deref(),
                         text,
+                        args.get("attachments"),
+                    );
+                    match bob_runtime::agy_directory::prompt_session_with_details(
+                        data_dir,
+                        connection,
+                        sid,
+                        &staged_text,
                         request,
                         takeover,
                         approval_mode,
+                        args.get("attachments"),
                     ) {
                         Ok(v) => return Ok(v),
                         Err("DSH_CONNECTION_REQUIRED") if connection != "local" => {
@@ -2441,9 +2469,6 @@ fn execute_unlocked_harness_rpc(
                         Err(e) => return Err(e),
                     }
                 }
-            }
-            if let Some(v) = claude_rpc::try_handle_dsh_command(data_dir, command, args)? {
-                return Ok(v);
             }
             if command == "app_dsh_prompt" {
                 let s = args["sessionId"].as_str().ok_or("DSH_SESSION_REQUIRED")?;

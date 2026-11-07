@@ -810,5 +810,7 @@
   "zoom200": "200% Zoom",
   "visualAssets": "Visual assets",
   "visualAssetsCount": "Visual assets · {count}",
-  "visualAssetsEmpty": "No visual assets in current session"
+  "visualAssetsEmpty": "No visual assets in current session",
+  "quoteFeedbackBtn": "Quote to prompt",
+  "quoteFeedbackSuccess": "Quoted to prompt composer"
 }

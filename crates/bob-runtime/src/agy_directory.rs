@@ -490,6 +490,43 @@ pub fn prompt_session(data: &Path, connection: &str, session_id: &str, text: &st
     prompt_session_with_options(data, connection, session_id, text, request_id, false, None)
 }
 
+pub fn find_cached_workspace(data: &Path, connection: &str, session_id: &str) -> Option<String> {
+    use sha2::{Sha256, Digest};
+    let mut hash = Sha256::new();
+    hash.update(connection.as_bytes());
+    hash.update(b":");
+    hash.update(session_id.as_bytes());
+    let page_cache = data.join(format!("remote-page-{:x}.json", hash.finalize()));
+    if let Ok(b) = fs::read(&page_cache) {
+        if let Ok(v) = serde_json::from_slice::<Value>(&b) {
+            if let Some(ws) = v.pointer("/page/workspace").and_then(Value::as_str).filter(|s| !s.trim().is_empty()) {
+                return Some(ws.to_owned());
+            }
+        }
+    }
+    let p = data.join("device_harnesses.json");
+    if let Ok(raw) = fs::read(&p) {
+        let mut d_hash = Sha256::new();
+        d_hash.update(connection.as_bytes());
+        d_hash.update(&raw);
+        let dir_cache = data.join(format!("agy-directory-{:x}.json", d_hash.finalize()));
+        if let Ok(b) = fs::read(&dir_cache) {
+            if let Ok(v) = serde_json::from_slice::<Value>(&b) {
+                if let Some(rows) = v.get("rows").and_then(Value::as_array) {
+                    for r in rows {
+                        if r.get("id").and_then(Value::as_str) == Some(session_id) {
+                            if let Some(ws) = r.get("workspace").and_then(Value::as_str).filter(|s| !s.trim().is_empty()) {
+                                return Some(ws.to_owned());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
 pub fn prompt_session_with_options(
     data: &Path,
     connection: &str,
@@ -498,6 +535,19 @@ pub fn prompt_session_with_options(
     request_id: &str,
     takeover: bool,
     approval_mode_override: Option<&str>,
+) -> Result<Value, &'static str> {
+    prompt_session_with_details(data, connection, session_id, text, request_id, takeover, approval_mode_override, None)
+}
+
+pub fn prompt_session_with_details(
+    data: &Path,
+    connection: &str,
+    session_id: &str,
+    text: &str,
+    request_id: &str,
+    takeover: bool,
+    approval_mode_override: Option<&str>,
+    attachments: Option<&Value>,
 ) -> Result<Value, &'static str> {
     use sha2::{Sha256,Digest};
     if !owns_readable_session(session_id) {
@@ -531,6 +581,7 @@ pub fn prompt_session_with_options(
         "sessionId": session_id,
         "text": text,
         "requestId": request_id,
+        "attachments": attachments,
         "agyDataDir": g.agy_data_dir,
         "claudeDataDir": g.claude_data_dir,
         "piDataDir": g.pi_data_dir,

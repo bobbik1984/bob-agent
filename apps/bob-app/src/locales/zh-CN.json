@@ -810,5 +810,7 @@
   "zoom200": "200% 细节",
   "visualAssets": "视觉资产",
   "visualAssetsCount": "视觉资产 · {count} 项",
-  "visualAssetsEmpty": "当前会话暂无生成的视觉资产"
+  "visualAssetsEmpty": "当前会话暂无生成的视觉资产",
+  "quoteFeedbackBtn": "引用此图反馈",
+  "quoteFeedbackSuccess": "已引用至对话输入框"
 }

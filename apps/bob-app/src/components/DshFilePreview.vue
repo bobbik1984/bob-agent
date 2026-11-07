@@ -6,7 +6,13 @@ import MessageContent from './MessageContent.vue';
 import {artifactHtmlDocument, artifactHtmlSandbox} from '../artifact-html.mjs';
 
 const props = defineProps({address: Object});
-const emit = defineEmits(['close']);
+const emit = defineEmits(['close', 'quote']);
+
+function quoteForFeedback() {
+  const path = props.address?.path || '';
+  const name = path.split('/').pop() || 'image';
+  emit('quote', { path, name });
+}
 const {t} = useI18n();
 
 provide('dshOpenFile', null);
@@ -240,6 +246,12 @@ onUnmounted(() => {
     <div v-if="imgNatural.width > 0" class="toolbar-group">
       <span class="toolbar-spec-pill">{{ imgNatural.width }} × {{ imgNatural.height }} px</span>
     </div>
+    <div class="toolbar-group">
+      <button type="button" class="toolbar-btn quote-feedback-btn" :title="t('quoteFeedbackBtn')" @click="quoteForFeedback">
+        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        <span>{{ t('quoteFeedbackBtn') }}</span>
+      </button>
+    </div>
   </div>
 
   <p class="preview-status-line">{{ t(file?.from_cache ? 'filePreviewCached' : 'filePreviewCurrent') }}</p>
@@ -287,6 +299,7 @@ onUnmounted(() => {
     </div>
 
     <footer class="dsh-preview-footer">
+      <button type="button" class="footer-quote-btn" @click="quoteForFeedback">{{ t('quoteFeedbackBtn') }}</button>
       <a :href="url" :download="address.path.split('/').pop()">{{ t('filePreviewDownload') }}</a>
       <span v-if="imgNatural.width > 0 && imageTypes[file.extension]" class="footer-spec">{{ imgNatural.width }} × {{ imgNatural.height }} px · </span>
       <small :title="file.version">{{ Math.ceil(file.bytes / 1024) }} KB</small>
@@ -301,6 +314,30 @@ onUnmounted(() => {
 .document-pages img{display:block;width:100%;height:auto}
 
 /* Toolbar */
+.quote-feedback-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: var(--accent-primary);
+  color: var(--bg-primary);
+  border-color: var(--accent-primary);
+  font-weight: 600;
+}
+.quote-feedback-btn:hover {
+  filter: brightness(1.1);
+}
+.footer-quote-btn {
+  background: transparent;
+  border: 0;
+  color: var(--accent-primary);
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+  font-size: var(--text-xs);
+}
+.footer-quote-btn:hover {
+  filter: brightness(1.15);
+}
 .dsh-inspector-toolbar {
   display: flex;
   align-items: center;

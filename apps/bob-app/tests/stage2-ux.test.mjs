@@ -53,6 +53,7 @@ test('Stage 2: Locale coverage for voice input and session archive', () => {
     'viewportTablet',
     'bgCheckerboard',
     'visualAssetsCount',
+    'quoteFeedbackBtn',
   ];
 
   assert.equal(zh.dshAgent, 'DSH');
@@ -116,4 +117,18 @@ test('Stage 2 Design Studio: DshSessions scans visual assets and renders visual 
   assert.match(dshSource, /dsh-visual-reel-strip/);
   assert.match(dshSource, /visual-reel-card/);
   assert.match(dshSource, /openAssetPreview/);
+});
+
+test('Stage 2 Design Studio: Visual feedback loop quotes images to prompt composer, and supports paste / drag-drop attachments with workspace', () => {
+  const previewSource = readFileSync(new URL('../src/components/DshFilePreview.vue', import.meta.url), 'utf8');
+  assert.match(previewSource, /quoteForFeedback/);
+  assert.match(previewSource, /quote-feedback-btn/);
+  assert.match(previewSource, /defineEmits\(\['close',\s*'quote'\]\)/);
+
+  const dshSource = readFileSync(new URL('../src/components/DshSessions.vue', import.meta.url), 'utf8');
+  assert.match(dshSource, /onQuoteToPrompt/);
+  assert.match(dshSource, /onComposerPaste/);
+  assert.match(dshSource, /onComposerDrop/);
+  assert.match(dshSource, /reel-card-quote-btn/);
+  assert.match(dshSource, /workspace:\s*selected\.value\?\.workspace/);
 });

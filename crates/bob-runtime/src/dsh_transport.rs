@@ -612,19 +612,32 @@ fn sanitize_attachment_name(raw: &str) -> String {
 }
 
 fn find_remote_ssh_target_for_connection(data_dir: &std::path::Path, connection: &str) -> Option<(String, Option<String>, Option<String>)> {
- let grants = crate::claude_harness::load_grants(data_dir).ok()?;
- let mut ssh_for_conn = None;
- for g in grants {
-  if g.connection_id == connection {
-   if let Some(ref ssh) = g.remote_ssh_target {
-    if !ssh.trim().is_empty() {
-     ssh_for_conn = Some((ssh.clone(), g.remote_cwd.clone(), Some(g.cwd.clone())));
-     break;
+ if let Ok(grants) = crate::claude_harness::load_grants(data_dir) {
+  for g in grants {
+   if g.connection_id == connection {
+    if let Some(ref ssh) = g.remote_ssh_target {
+     if !ssh.trim().is_empty() {
+      return Some((ssh.clone(), g.remote_cwd.clone(), Some(g.cwd.clone())));
+     }
     }
    }
   }
  }
- ssh_for_conn
+ let p = data_dir.join("device_harnesses.json");
+ if let Ok(raw) = std::fs::read(&p) {
+  if let Ok(list) = serde_json::from_slice::<Vec<Value>>(&raw) {
+   for item in list {
+    let cid = item.get("connectionId").or_else(|| item.get("connection_id")).and_then(Value::as_str);
+    if cid == Some(connection) {
+     let ssh = item.get("sshTarget").or_else(|| item.get("ssh_target")).and_then(Value::as_str).unwrap_or("");
+     if !matches!(ssh, "" | "local" | "self" | "localhost" | "127.0.0.1") {
+      return Some((ssh.to_owned(), None, None));
+     }
+    }
+   }
+  }
+ }
+ None
 }
 
 pub fn stage_attachments_for_prompt(
@@ -721,7 +734,17 @@ pub fn stage_attachments_for_prompt(
   } else if updated.contains(&old_marker_plain) {
    updated = updated.replace(&old_marker_plain, &new_marker);
   } else {
-   updated = format!("{updated}\n\n{new_marker}");
+   let prefix = format!("[Attachment: {raw_name}");
+   if let Some(start_idx) = updated.find(&prefix) {
+    if let Some(end_offset) = updated[start_idx..].find(']') {
+     let full_marker = updated[start_idx..start_idx + end_offset + 1].to_owned();
+     updated = updated.replace(&full_marker, &new_marker);
+    } else {
+     updated = format!("{updated}\n\n{new_marker}");
+    }
+   } else {
+    updated = format!("{updated}\n\n{new_marker}");
+   }
   }
  }
  updated
@@ -764,6 +787,40 @@ mod attachment_stage_tests {
   assert_eq!(written, b"\x89PNG");
   let _ = std::fs::remove_dir_all(&tmp);
  }
+
+ #[test]
+ fn stages_attachment_rewrites_prefix_even_if_size_differs() {
+  let tmp = std::env::temp_dir().join(format!("bob_att_test_prefix_{}", std::process::id()));
+  let _ = std::fs::remove_dir_all(&tmp);
+  let ws_dir = tmp.join("ws");
+  std::fs::create_dir_all(&ws_dir).unwrap();
+  let ws_str = ws_dir.to_string_lossy().to_string();
+  let png_b64 = base64::engine::general_purpose::STANDARD.encode(b"DESIGN_MOCKUP_BYTES");
+  let attachments = json!([
+   {
+    "name": "design.png",
+    "size": 99999,
+    "mime": "image/png",
+    "base64": png_b64
+   }
+  ]);
+  let raw_prompt = "请参考设计图：[Attachment: design.png (12345 bytes)] 然后修改。";
+  let staged = stage_attachments_for_prompt(
+   &tmp,
+   "local",
+   "sess-2",
+   Some(&ws_str),
+   raw_prompt,
+   Some(&attachments),
+  );
+  let expected_path = format!("{}/.bob_attachments/design.png", ws_str.trim_end_matches('/'));
+  assert!(staged.contains(&format!("[Attachment: design.png -> {expected_path}]")));
+  assert!(!staged.contains("12345 bytes"));
+  let written = std::fs::read(ws_dir.join(".bob_attachments").join("design.png")).unwrap();
+  assert_eq!(written, b"DESIGN_MOCKUP_BYTES");
+  let _ = std::fs::remove_dir_all(&tmp);
+ }
+
  fn _noop() {
  }
 }

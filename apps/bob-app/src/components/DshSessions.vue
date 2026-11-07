@@ -469,7 +469,33 @@ function openFilePicker(){fileInput.value?.click?.();}
 function isTextAttachment(f){const m=String(f?.type||'').toLowerCase(),n=String(f?.name||'').toLowerCase();if(m.startsWith('image/')||m.startsWith('audio/')||m.startsWith('video/')||m==='application/pdf'||m==='application/zip')return false;if(m.startsWith('text/')||m.includes('json')||m.includes('yaml')||m.includes('xml')||m.includes('javascript'))return true;return /\.(txt|md|json|ya?ml|csv|tsv|py|rs|js|mjs|cjs|ts|tsx|jsx|vue|html|css|scss|sh|bat|ps1|toml|ini|cfg|log|sql|gd|tscn)$/i.test(n);}
 function bytesToBase64(bytes){let bin='';const chunk=0x8000;for(let i=0;i<bytes.length;i+=chunk){bin+=String.fromCharCode.apply(null,bytes.subarray(i,i+chunk));}return btoa(bin);}
 async function readAttachmentBase64(f){if(!f||(f.size||0)>8*1024*1024)return '';try{if(String(f.type||'').startsWith('image/')&&(f.size||0)>1024*1024&&typeof createImageBitmap==='function'&&typeof document!=='undefined'){const bmp=await createImageBitmap(f);const maxSide=Math.max(bmp.width||1,bmp.height||1);const scale=maxSide>1920?1920/maxSide:1;const w=Math.max(1,Math.round(bmp.width*scale)),h=Math.max(1,Math.round(bmp.height*scale));const c=document.createElement('canvas');c.width=w;c.height=h;const ctx2d=c.getContext('2d');if(ctx2d){ctx2d.drawImage(bmp,0,0,w,h);const outMime=f.type==='image/png'?'image/png':'image/jpeg';const dataUrl=c.toDataURL(outMime,0.86);const idx=dataUrl.indexOf(',');if(idx>0)return dataUrl.slice(idx+1);}}if(typeof f.arrayBuffer==='function'){const ab=await f.arrayBuffer();return bytesToBase64(new Uint8Array(ab));}}catch{}return '';}
-async function onFilesSelected(e){const files=Array.from(e?.target?.files||[]);for(const f of files){let content='',base64='';try{if(isTextAttachment(f)&&typeof f.text==='function'&&(f.size||0)<=256*1024)content=await f.text();base64=await readAttachmentBase64(f);}catch{}attachments.value.push({id:crypto.randomUUID(),name:f.name||'file',size:f.size||0,type:f.type||'',content,base64});}if(e?.target)e.target.value='';}
+async function appendFilesToAttachments(fileList){
+  const files=Array.from(fileList||[]);
+  for(const f of files){
+    let content='',base64='';
+    try{
+      if(isTextAttachment(f)&&typeof f.text==='function'&&(f.size||0)<=256*1024)content=await f.text();
+      base64=await readAttachmentBase64(f);
+    }catch{}
+    const name=f.name||`attachment_${Date.now()}`;
+    attachments.value.push({id:crypto.randomUUID(),name,size:f.size||0,type:f.type||'',content,base64});
+  }
+}
+async function onFilesSelected(e){await appendFilesToAttachments(e?.target?.files);if(e?.target)e.target.value='';}
+async function onComposerPaste(e){const items=Array.from(e?.clipboardData?.items||[]);const fileItems=items.filter(it=>it.kind==='file').map(it=>it.getAsFile()).filter(Boolean);if(fileItems.length>0){e.preventDefault();await appendFilesToAttachments(fileItems);}}
+async function onComposerDrop(e){const files=Array.from(e?.dataTransfer?.files||[]);if(files.length>0){e.preventDefault();await appendFilesToAttachments(files);}}
+function onQuoteToPrompt({path, name}){
+  preview.value=null;
+  const cleanName=name||path?.split('/')?.pop()||'image';
+  const quoteText=`请基于此图 [Attachment: ${cleanName} -> ${path}] 调整：`;
+  draft.value=draft.value?`${draft.value}\n\n${quoteText}`:quoteText;
+  nextTick(()=>{
+    if(typeof document!=='undefined'){
+      const el=document.querySelector('.dsh-compose-box textarea');
+      if(el){el.focus();el.setSelectionRange(el.value.length,el.value.length);}
+    }
+  });
+}
 function removeAttachment(id){attachments.value=attachments.value.filter(a=>a.id!==id);}
 function formatAttachmentBlock(list){if(!list?.length)return '';return list.map(a=>a.content?`[Attachment: ${a.name}]\n\`\`\`\n${String(a.content).slice(0,16384)}\n\`\`\``:`[Attachment: ${a.name} (${a.size||0} bytes)]`).join('\n\n');}
 function onComposeKeydown(e){if(e?.key==='Enter'&&!e.shiftKey&&!e.isComposing){e.preventDefault();void send();}}
@@ -488,12 +514,12 @@ async function checkReceipt(){
  }catch(e){if(g===generation)error.value=fault(e)}finally{sending.value=false;if(g===generation&&!busy.value)refresh()}
 }
 function dismissPending(){if(!pending.value||sending.value)return;if(!draft.value.trim()&&pending.value.text)draft.value=pending.value.text;pending.value=null;notice.value='';error.value='';persist();}
-async function send(opts={}){const takeover=opts?.takeover===true;if(selected.value?.historyReadable===false){error.value=t('agyHistoryPending');return;}if(isClaudeRemoteControl.value){notice.value=t('claudeRemoteControlTitle');return;}const attBlock=formatAttachmentBlock(attachments.value);const text=[draft.value.trim(),attBlock].filter(Boolean).join('\n\n');if(sending.value||pending.value||nativeUnresolved.value||!text)return;if(!takeover&&isClaudeTerminalBusy.value){takeoverPrompt.value=activeTerminalHolder.value||{busy:true,remote_control:false};return;}const g=generation, address={connection:connection.value,session:selected.value.id};const attPayload=attachments.value.filter(a=>a.base64).map(a=>({name:a.name,type:a.type,size:a.size,base64:a.base64}));pending.value={id:crypto.randomUUID(),text};if(!persist()){pending.value=null;return;}sending.value=true;error.value='';try{const requestId=pending.value.id;const receipt=await kernelBridge.dshPrompt(address.connection,address.session,text,requestId,attPayload,{takeover,approvalMode:supportsApprovalMode.value?approvalMode.value:null});if(isNotAcceptedReceipt(receipt,address.session,requestId)){if(g===generation){pending.value=null;persist();if(receipt?.reason==='HARNESS_CLAUDE_REMOTE_CONTROL'){terminalHolderOverride.value=receipt.terminal_holder||{busy:true,remote_control:true};takeoverPrompt.value=null;notice.value=t('claudeRemoteControlTitle');}else if(receipt?.reason==='HARNESS_SESSION_BUSY'&&String(address.session||'').startsWith('claude-jsonl:')){const holder=receipt.terminal_holder||{busy:true,remote_control:false};terminalHolderOverride.value=holder;takeoverPrompt.value=holder;notice.value='';}else{notice.value=t('dshNotDispatched');}}return;}if(receipt?.status!=='accepted'||receipt.session_id!==address.session||receipt.request_id!==requestId)throw Error('DSH_RECEIPT_UNKNOWN');if(g===generation){takeoverPrompt.value=null;terminalHolderOverride.value={busy:false,remote_control:false};awaitingReply.value=requestId;replying.value=false;activityChecked=0;pending.value=null;attachments.value=[];if(draft.value.trim()===text||attBlock)draft.value='';persist();notice.value=t('dshAccepted');}}catch(e){if(g===generation){error.value=fault(e);notice.value=t('dshUncertain')}}finally{sending.value=false;if(g===generation&&!busy.value)refresh()}}
+async function send(opts={}){const takeover=opts?.takeover===true;if(selected.value?.historyReadable===false){error.value=t('agyHistoryPending');return;}if(isClaudeRemoteControl.value){notice.value=t('claudeRemoteControlTitle');return;}const attBlock=formatAttachmentBlock(attachments.value);const text=[draft.value.trim(),attBlock].filter(Boolean).join('\n\n');if(sending.value||pending.value||nativeUnresolved.value||!text)return;if(!takeover&&isClaudeTerminalBusy.value){takeoverPrompt.value=activeTerminalHolder.value||{busy:true,remote_control:false};return;}const g=generation, address={connection:connection.value,session:selected.value.id};const attPayload=attachments.value.filter(a=>a.base64).map(a=>({name:a.name,type:a.type,size:a.size,base64:a.base64}));pending.value={id:crypto.randomUUID(),text};if(!persist()){pending.value=null;return;}sending.value=true;error.value='';try{const requestId=pending.value.id;const receipt=await kernelBridge.dshPrompt(address.connection,address.session,text,requestId,attPayload,{takeover,approvalMode:supportsApprovalMode.value?approvalMode.value:null,workspace:selected.value?.workspace||history.value?.workspace||null});if(isNotAcceptedReceipt(receipt,address.session,requestId)){if(g===generation){pending.value=null;persist();if(receipt?.reason==='HARNESS_CLAUDE_REMOTE_CONTROL'){terminalHolderOverride.value=receipt.terminal_holder||{busy:true,remote_control:true};takeoverPrompt.value=null;notice.value=t('claudeRemoteControlTitle');}else if(receipt?.reason==='HARNESS_SESSION_BUSY'&&String(address.session||'').startsWith('claude-jsonl:')){const holder=receipt.terminal_holder||{busy:true,remote_control:false};terminalHolderOverride.value=holder;takeoverPrompt.value=holder;notice.value='';}else{notice.value=t('dshNotDispatched');}}return;}if(receipt?.status!=='accepted'||receipt.session_id!==address.session||receipt.request_id!==requestId)throw Error('DSH_RECEIPT_UNKNOWN');if(g===generation){takeoverPrompt.value=null;terminalHolderOverride.value={busy:false,remote_control:false};awaitingReply.value=requestId;replying.value=false;activityChecked=0;pending.value=null;attachments.value=[];if(draft.value.trim()===text||attBlock)draft.value='';persist();notice.value=t('dshAccepted');}}catch(e){if(g===generation){error.value=fault(e);notice.value=t('dshUncertain')}}finally{sending.value=false;if(g===generation&&!busy.value)refresh()}}
 watch(()=>props.target, async target=>{if(!target)return;connection.value=target.node.id;await open(target.session)},{immediate:true});
 onUnmounted(()=>{stopVoiceInput();chatScroll.dispose();clearTimeout(dshLiveTimer);clearTimeout(nativeTimer);if(globalThis.__bobForceRefreshDsh===forceRefresh)globalThis.__bobForceRefreshDsh=null;clearTimeout(syncPulseTimer);if(typeof globalThis.__bobSetRemoteSyncPhase==='function')globalThis.__bobSetRemoteSyncPhase('');if(rodTimer&&typeof clearInterval==='function')clearInterval(rodTimer);clearTimeout(wheelResetTimer);clearTimeout(artifactTimer);clearTimeout(syncTimer);clearTimeout(copyTimer);artifactQueue=[];fileCache.clear();persist();disposed=true;++generation;clearTimeout(timer)});
 </script>
 <template>
- <DshFilePreview v-if="preview" :address="preview" @close="closePreview" />
+ <DshFilePreview v-if="preview" :address="preview" @close="closePreview" @quote="onQuoteToPrompt" />
  <section class="dsh-sessions" :class="{embedded:!!target}" :aria-label="t('dshTitle')">
   <div ref="reader" class="dsh-reader" tabindex="0" @scroll.passive="onScroll" @touchstart.passive="onReaderTouchStart" @touchmove.passive="onReaderTouchMove" @touchend.passive="onReaderTouchEnd" @touchcancel.passive="onReaderTouchEnd" @wheel.passive="onReaderWheel">
   <div ref="chatContent" data-chat-content>
@@ -516,22 +542,35 @@ onUnmounted(()=>{stopVoiceInput();chatScroll.dispose();clearTimeout(dshLiveTimer
        <button type="button" class="visual-reel-close" :aria-label="t('filePreviewClose')" @click="visualReelOpen = false">✕</button>
      </div>
      <div class="visual-reel-scroll">
-       <button
+       <div
          v-for="asset in sessionVisualAssets"
          :key="asset.path"
-         type="button"
-         class="visual-reel-card"
-         :title="asset.path"
-         @click="openAssetPreview(asset.path)"
+         class="visual-reel-card-wrap"
        >
-         <div class="visual-reel-thumb-box">
-           <span v-if="asset.isHtml" class="reel-type-badge html-badge">HTML</span>
-           <span v-else class="reel-type-badge img-badge">{{ asset.ext.toUpperCase() }}</span>
-           <svg v-if="asset.isHtml" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" class="reel-icon" aria-hidden="true"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
-           <svg v-else viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" class="reel-icon" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
-         </div>
-         <span class="visual-reel-name">{{ asset.name }}</span>
-       </button>
+         <button
+           type="button"
+           class="visual-reel-card"
+           :title="asset.path"
+           @click="openAssetPreview(asset.path)"
+         >
+           <div class="visual-reel-thumb-box">
+             <span v-if="asset.isHtml" class="reel-type-badge html-badge">HTML</span>
+             <span v-else class="reel-type-badge img-badge">{{ asset.ext.toUpperCase() }}</span>
+             <svg v-if="asset.isHtml" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" class="reel-icon" aria-hidden="true"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+             <svg v-else viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" class="reel-icon" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
+           </div>
+           <span class="visual-reel-name">{{ asset.name }}</span>
+         </button>
+         <button
+           type="button"
+           class="reel-card-quote-btn"
+           :title="t('quoteFeedbackBtn')"
+           :aria-label="t('quoteFeedbackBtn')"
+           @click.stop="onQuoteToPrompt({path: asset.path, name: asset.name})"
+         >
+           <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+         </button>
+       </div>
      </div>
    </div>
    <div v-if="inSessionSearchOpen" class="dsh-session-search-bar"><input v-model="inSessionSearchQuery" type="search" :placeholder="t('dshSearchMessagesPlaceholder')" :aria-label="t('dshSearchMessagesPlaceholder')"><span v-if="inSessionSearchQuery.trim()" class="dsh-search-count">{{ t('dshSearchMatchCount', {count: filteredDisplayMessages.length}) }}</span><button v-if="inSessionSearchQuery" type="button" class="dsh-search-clear" :aria-label="t('dshSearchClear')" @click="inSessionSearchQuery=''">✕</button></div>
@@ -564,7 +603,7 @@ onUnmounted(()=>{stopVoiceInput();chatScroll.dispose();clearTimeout(dshLiveTimer
    </div>
    <p v-if="activityLabel" class="dsh-activity" role="status" aria-live="polite"><span class="terminal-rod" aria-hidden="true">[{{ rodFrame }}]</span> <span>{{activityLabel}}</span><span class="terminal-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span></p>
    <div class="dsh-compose-box">
-    <textarea v-model="draft" :disabled="sending || isClaudeRemoteControl" :placeholder="t(isClaudeRemoteControl ? 'claudeRemoteControlTitle' : 'dshPrompt')" :aria-label="t('dshPrompt')" rows="2" @keydown="onComposeKeydown"></textarea>
+    <textarea v-model="draft" :disabled="sending || isClaudeRemoteControl" :placeholder="t(isClaudeRemoteControl ? 'claudeRemoteControlTitle' : 'dshPrompt')" :aria-label="t('dshPrompt')" rows="2" @keydown="onComposeKeydown" @paste="onComposerPaste" @dragover.prevent @drop.prevent="onComposerDrop"></textarea>
     <div v-if="attachments.length" class="composer-attachments"><span v-for="att in attachments" :key="att.id" class="composer-attachment-chip"><img v-if="att.base64 && att.type?.startsWith('image/')" :src="'data:' + att.type + ';base64,' + att.base64" alt="" class="chip-thumb" /><span class="chip-file-name">{{ att.name }}</span><button type="button" class="chip-remove-btn" :aria-label="t('removeAttachment')" @click="removeAttachment(att.id)">×</button></span></div>
     <div class="dsh-compose-toolbar">
      <div class="dsh-compose-left-tools">

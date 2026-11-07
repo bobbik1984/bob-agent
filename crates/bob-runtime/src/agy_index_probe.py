@@ -2334,6 +2334,44 @@ def prompt_session(cfg):
                 if str(exc)=='HARNESS_CLAUDE_REMOTE_CONTROL':
                     holder=_safe_claude_holder(sid) or {'busy':True,'remote_control':True}
                     return {'status':'not_accepted','execution_status':'not_accepted','session_id':sid,'request_id':rid,'reason':'HARNESS_CLAUDE_REMOTE_CONTROL','terminal_holder':holder}
+    attachments = cfg.get('attachments') or []
+    if isinstance(attachments, list) and attachments:
+        att_dir = Path(wcwd) / '.bob_attachments'
+        try:
+            att_dir.mkdir(parents=True, exist_ok=True)
+            for item in attachments[:8]:
+                raw_name = (item.get('name') or '').strip()
+                b64 = (item.get('base64') or '').strip()
+                if not raw_name or not b64:
+                    continue
+                try:
+                    raw_bytes = base64.b64decode(b64)
+                except Exception:
+                    continue
+                if not raw_bytes or len(raw_bytes) > 10 * 1024 * 1024:
+                    continue
+                base_name = os.path.basename(raw_name.replace('\\', '/'))
+                safe_name = ''.join(c if (c.isalnum() or c in '.-_') else '_' for c in base_name).strip('.') or 'attachment.bin'
+                target_path = att_dir / safe_name
+                try:
+                    target_path.write_bytes(raw_bytes)
+                    target_path.chmod(0o644)
+                except Exception:
+                    pass
+                target_str = str(target_path).replace('\\', '/')
+                prefix = f"[Attachment: {raw_name}"
+                new_marker = f"[Attachment: {raw_name} -> {target_str}]"
+                if prefix in text:
+                    s_idx = text.find(prefix)
+                    e_idx = text.find(']', s_idx)
+                    if e_idx != -1:
+                        text = text[:s_idx] + new_marker + text[e_idx + 1:]
+                    else:
+                        text = f"{text}\n\n{new_marker}"
+                else:
+                    text = f"{text}\n\n{new_marker}"
+        except Exception:
+            pass
     cfg = {'session_id':sid,'request_id':rid,'text':text,'project_cwd':pcwd,'work_cwd':wcwd,'jsonl_path':jpath}
     cfg['approval_mode'] = approval_mode
     cfg['claude_tools'] = claude_tools
