@@ -61,7 +61,7 @@ jobs:
         run: pnpm exec tauri android build --debug --target aarch64 --apk --ci
       - name: Verify packaged Bob branding
         run: |
-          for apk in src-tauri/gen/android/app/build/outputs/apk/*/*.apk; do
+          for apk in src-tauri/gen/android/app/build/outputs/apk/*/*/*.apk; do
             "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$apk" > "$RUNNER_TEMP/bob-badging.txt"
             grep -q "application-label:'Bob'" "$RUNNER_TEMP/bob-badging.txt"
             ! grep -q "Bob Dev" "$RUNNER_TEMP/bob-badging.txt"
