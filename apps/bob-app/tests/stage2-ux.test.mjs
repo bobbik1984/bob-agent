@@ -48,6 +48,11 @@ test('Stage 2: Locale coverage for voice input and session archive', () => {
     'processExecution',
     'processExecutionSteps',
     'auditLogSummary',
+    'viewport720p',
+    'viewport1080p',
+    'viewportTablet',
+    'bgCheckerboard',
+    'visualAssetsCount',
   ];
 
   assert.equal(zh.dshAgent, 'DSH');
@@ -87,4 +92,28 @@ test('Stage 2.5: AUDIT_LINE_RE correctly detects code checklist lines and Messag
   const mcSource = readFileSync(new URL('../src/components/MessageContent.vue', import.meta.url), 'utf8');
   assert.match(mcSource, /audit-checklist-box/);
   assert.match(mcSource, /execution-process-box/);
+});
+
+test('Stage 2 Design Studio: DshFilePreview supports interactive HTML viewports (720p/1080p/tablet), orientation, reload, and image checkerboard inspector', () => {
+  const previewSource = readFileSync(new URL('../src/components/DshFilePreview.vue', import.meta.url), 'utf8');
+  assert.match(previewSource, /mobile_720/);
+  assert.match(previewSource, /mobile_1080/);
+  assert.match(previewSource, /getViewportDimensions/);
+  assert.match(previewSource, /toggleOrientation/);
+  assert.match(previewSource, /reloadHtml/);
+  assert.match(previewSource, /canvas-checkerboard/);
+  assert.match(previewSource, /canvas-dark/);
+  assert.match(previewSource, /canvas-light/);
+  assert.match(previewSource, /html-device-frame/);
+  assert.match(previewSource, /dsh-inspector-toolbar/);
+});
+
+test('Stage 2 Design Studio: DshSessions scans visual assets and renders visual asset reel strip', () => {
+  const dshSource = readFileSync(new URL('../src/components/DshSessions.vue', import.meta.url), 'utf8');
+  assert.match(dshSource, /sessionVisualAssets/);
+  assert.match(dshSource, /visualReelOpen/);
+  assert.match(dshSource, /dsh-visual-reel-toggle-btn/);
+  assert.match(dshSource, /dsh-visual-reel-strip/);
+  assert.match(dshSource, /visual-reel-card/);
+  assert.match(dshSource, /openAssetPreview/);
 });

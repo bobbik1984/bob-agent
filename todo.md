@@ -64,3 +64,42 @@
 - [ ] 旧 Online 统一提案 §2 中“worktree 注册项可 prune”改为“禁止 prune（含 2707 项已备份未提交改动）”。
 - [ ] 旧 Online `ONL-D-005` 仍写 VPS3 为 Core（实际生产在 Hostinger），需标过期。
 - [ ] 旧 App `docs/contracts/bob_cloud_agent_interchange.yaml` 标为 `superseded`。
+
+---
+
+## 五、 统一待办、灵感中枢与跨 Agent 日程生态 (Bob × Dashboard × GCal MCP)
+
+基于 `bob-kernel` 中的 `NoteItem`、`ScheduleItem`（`kind: 'event' | 'todo'`）与 `Replica → Home` 跨端同步机制，构建统一的个人状态中枢：
+
+- [ ] **Bob 智能笔记/Memo 模块 (Bob Notebook)**：
+  - **核心痛点**：当前 TodoList 过于零碎，缺乏长文本思考的承载空间。
+  - **功能设想**：类似 OneNote/Evernote 的本地化 Markdown 笔记本，底层对接 `NoteItem`。
+  - **生态融合联动**：
+    - **知识库 (KB)**：长笔记后台自动进行语义向量化（Embedding），自动提取实体融合进 `iknow` 知识图谱。
+    - **日程与待办 (Todo/Calendar)**：利用 LLM 自动扫描笔记中的待办事项和时间点，提取出 Action Items 并挂载到日程看板上。
+    - **交互入口**：在界面提供快捷键触发的 `Quick Note` 抽屉，并在聊天侧边栏可以直接引用历史笔记作为 Context。
+
+- [ ] **Bob-Mobile 手机端移动入口 (Digital Inbox)**：
+  - **定位**：独立前哨站——能独立调用云端 API 产出知识点和管理日程，但不跑图谱编织和重计算。
+  - **核心场景**：
+    1. **稍后阅读/文章抓取**：Share Extension 一键收集，手机调 API 直接生成结构化知识点存本地。
+    2. **闪念胶囊**：Voice-first 设计，一键录音转文字并自动排版入库。
+    3. **意图待办**：自然语言解析日程任务，手机可独立管理日程。
+  - **跨端同步架构 (复用 T-1800 Web Drop 基建)**：
+    - **扫码结拜**：Ed25519 密钥交换 + X25519-AES-GCM 加密传输 API Key / System Prompt。
+    - **四级渐进式连接**：局域网直连 → WebRTC P2P 打洞 (复用 bob-relay + coturn) → TURN 中继 → 微信 Bot 推送唤醒。
+    - **PC 主导唤醒**：PC 启动时主动探测手机，手机不主动扫描（绕开 iOS 权限限制）。
+  - **详细蓝图**: `docs/MOBILE_BLUEPRINT.md`
+
+- [ ] **Dashboard 灵感框直接汇入 Bob Online Core (API 收敛)**：
+  - **当前现状**：`dashboard.bobbik.org` 的 `/api/inbox` 仍独立写在 `cloud_sync/inbox/*.md`，与 Bob 数据隔离。
+  - **打通目标**：将 Dashboard 的 Inbox API 改为直接对接 `bob-online` (`Hostinger:53020`) 的 Capture/Note 接口，实现“Portal 随手记、Bob 桌面/网页/手机端实时同流”。
+
+- [ ] **Google Calendar MCP 跨 Agent 待办/日程双向总线**：
+  - **核心价值**：以 Google Calendar 为跨生态公用总线，解决外部 Agent（Grok Bot、Muse Spark 等）无法直连本地 SQLite 的问题。
+  - **双向联动**：
+    1. **Bob ➔ Google Calendar**：`ScheduleItem`（事件及带截止时间的任务）通过 Google Calendar MCP 双向同步到 Google Calendar。
+    2. **外部 Agent ➔ Bob**：外部 Agent（Grok Bot、Muse Spark）在手机或云端创建的 `[Bob Inbox]` 事件，通过 MCP 轮询/Webhook 自动拉入 Bob，生成 `ScheduleItem` 或触发项目分拣。
+
+- [ ] **研发需求下沉与代码仓库分拣通道 (Task Promotion)**：
+  - 在 Bob 界面中支持将灵感/Note/待办一键提升（Promote）为研发任务，通过 `todo-sorter` 机制按 `project_registry.yaml` 自动写入目标代码仓库的 `todo.md`（原生兼容 `Gemini` 相对路径与 `D:\Code` 绝对路径），并回填 `ScheduleItem.project_id`。

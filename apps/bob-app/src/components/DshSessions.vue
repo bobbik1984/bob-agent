@@ -250,6 +250,42 @@ function scrollToBottom(){
  if(reader.value){reader.value.scrollTop=reader.value.scrollHeight;lastTop=reader.value.scrollTop;}
 }
 const preview=ref(null);let previewScroll=0;
+const visualReelOpen = ref(false);
+function openAssetPreview(path) {
+  previewScroll = reader.value?.scrollTop || 0;
+  clearTimeout(timer);
+  preview.value = fileAddress(path);
+}
+const sessionVisualAssets = computed(() => {
+  if (!selected.value || !displayMessages.value?.length) return [];
+  const assetsMap = new Map();
+  const fileRegex = /(?:!?\[([^\]]*)\]\(([^)]+)\)|`([^`]+)`|([a-zA-Z0-9_\-./\\]+\.(?:png|jpe?g|webp|svg|html?))|(\/[^\s`"'<>]+\.(?:png|jpe?g|webp|svg|html?)))/gi;
+  for (const m of displayMessages.value) {
+    const text = m.text || '';
+    let match;
+    while ((match = fileRegex.exec(text)) !== null) {
+      const candidate = match[2] || match[3] || match[4] || match[5];
+      if (!candidate) continue;
+      const clean = candidate.trim().split('#')[0].split('?')[0];
+      const extMatch = clean.match(/\.(png|jpe?g|webp|svg|html?)$/i);
+      if (extMatch) {
+        const ext = extMatch[1].toLowerCase();
+        const isHtml = ext === 'html' || ext === 'htm';
+        const name = clean.split('/').pop().split('\\').pop();
+        if (!assetsMap.has(clean)) {
+          assetsMap.set(clean, {
+            path: clean,
+            name: (match[1] && !match[1].startsWith('http')) ? match[1] : name,
+            ext,
+            isHtml,
+            role: m.role
+          });
+        }
+      }
+    }
+  }
+  return Array.from(assetsMap.values());
+});
 const fileCache=createPersistentPreviewCache((a,known)=>kernelBridge.dshPreview(a.connectionId,a.sessionId,a.path,known));
 const fileAddress=path=>({connectionId:connection.value,sessionId:selected.value.id,endpoint:nodes.value.find(n=>n.id===connection.value)?.baseUrl||nodes.value.find(n=>n.id===connection.value)?.url||'',path:artifactPath(path),cursor:history.value?.cursor});
 let artifactQueue=[],artifactTimer,artifactRunning=false,artifactCount=0;
@@ -472,8 +508,32 @@ onUnmounted(()=>{stopVoiceInput();chatScroll.dispose();clearTimeout(dshLiveTimer
    <details v-if="archivedList.length" class="dsh-archived-group" :open="!!search"><summary>{{ t('dshArchivedSessions') }} · {{ archivedList.length }}</summary><div v-for="s in archivedList" :key="s.id" class="dsh-session-item archived"><button class="dsh-session" @click="open(s)"><strong><HarnessIcon :session="s" class="session-card-icon" />{{ s.title }}</strong><small>{{ s.updated_at ? new Date(s.updated_at).toLocaleString() : t('sidebarTimeUnknown') }} · {{ t(s.running?'dshRunning':'dshIdle') }}</small><small v-if="searchMatches.has(s.id)" class="dsh-search-snippet">“{{ searchMatches.get(s.id) }}”</small></button><button type="button" class="dsh-session-unarchive-btn" :title="t('dshUnarchiveSession')" :aria-label="t('dshUnarchiveSession')" @click.stop="toggleArchiveSession(s.id, $event)">{{ t('dshUnarchiveSession') }}</button></div></details>
   </template>
   <template v-if="selected">
-   <div class="dsh-tools"><button v-if="!target" :disabled="sending" @click="back">{{ t('dshBack') }}</button><h4 v-if="!target"><HarnessIcon :session="selected" class="topbar-harness-icon" />{{ selected.title }}</h4><small v-else><HarnessIcon :session="selected" class="topbar-harness-icon" />{{ target.node.label || target.node.name }} · {{ agentLabel }}</small><span v-if="isClaudeTerminalBusy" class="dsh-holder-pill" role="status"><span>{{ t('claudeTerminalBusyBadge', {pid: activeTerminalHolder?.pid || '?'}) }}</span><button type="button" class="dsh-holder-takeover-btn" @click="takeoverPrompt = activeTerminalHolder">{{ t('claudeTakeoverBtn') }}</button></span><button type="button" class="dsh-search-toggle-btn" :class="{active:inSessionSearchOpen}" :title="t('dshSearchInSession')" :aria-label="t('dshSearchInSession')" @click="toggleInSessionSearch"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg></button>
+   <div class="dsh-tools"><button v-if="!target" :disabled="sending" @click="back">{{ t('dshBack') }}</button><h4 v-if="!target"><HarnessIcon :session="selected" class="topbar-harness-icon" />{{ selected.title }}</h4><small v-else><HarnessIcon :session="selected" class="topbar-harness-icon" />{{ target.node.label || target.node.name }} · {{ agentLabel }}</small><span v-if="isClaudeTerminalBusy" class="dsh-holder-pill" role="status"><span>{{ t('claudeTerminalBusyBadge', {pid: activeTerminalHolder?.pid || '?'}) }}</span><button type="button" class="dsh-holder-takeover-btn" @click="takeoverPrompt = activeTerminalHolder">{{ t('claudeTakeoverBtn') }}</button></span><button type="button" class="dsh-search-toggle-btn" :class="{active:inSessionSearchOpen}" :title="t('dshSearchInSession')" :aria-label="t('dshSearchInSession')" @click="toggleInSessionSearch"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg></button><button v-if="sessionVisualAssets.length" type="button" class="dsh-visual-reel-toggle-btn" :class="{active: visualReelOpen}" :title="t('visualAssetsCount', {count: sessionVisualAssets.length})" :aria-label="t('visualAssets')" @click="visualReelOpen = !visualReelOpen"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg><span>{{ sessionVisualAssets.length }}</span></button>
     <span v-if="syncStatus==='offline_cached' && syncStatusLabel" class="dsh-sync-pill" :class="{active:syncStatus==='checking'||syncStatus==='syncing'}" role="status" aria-live="polite"><span v-if="syncStatus==='checking'||syncStatus==='syncing'" class="terminal-rod" aria-hidden="true">[{{ rodFrame }}]</span><span>{{ syncStatusLabel }}</span><span v-if="syncStatus==='checking'||syncStatus==='syncing'" class="terminal-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span></span></div>
+   <div v-if="visualReelOpen && sessionVisualAssets.length" class="dsh-visual-reel-strip" role="region" :aria-label="t('visualAssets')">
+     <div class="visual-reel-header">
+       <span class="visual-reel-title"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>{{ t('visualAssetsCount', {count: sessionVisualAssets.length}) }}</span>
+       <button type="button" class="visual-reel-close" :aria-label="t('filePreviewClose')" @click="visualReelOpen = false">✕</button>
+     </div>
+     <div class="visual-reel-scroll">
+       <button
+         v-for="asset in sessionVisualAssets"
+         :key="asset.path"
+         type="button"
+         class="visual-reel-card"
+         :title="asset.path"
+         @click="openAssetPreview(asset.path)"
+       >
+         <div class="visual-reel-thumb-box">
+           <span v-if="asset.isHtml" class="reel-type-badge html-badge">HTML</span>
+           <span v-else class="reel-type-badge img-badge">{{ asset.ext.toUpperCase() }}</span>
+           <svg v-if="asset.isHtml" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" class="reel-icon" aria-hidden="true"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+           <svg v-else viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" class="reel-icon" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
+         </div>
+         <span class="visual-reel-name">{{ asset.name }}</span>
+       </button>
+     </div>
+   </div>
    <div v-if="inSessionSearchOpen" class="dsh-session-search-bar"><input v-model="inSessionSearchQuery" type="search" :placeholder="t('dshSearchMessagesPlaceholder')" :aria-label="t('dshSearchMessagesPlaceholder')"><span v-if="inSessionSearchQuery.trim()" class="dsh-search-count">{{ t('dshSearchMatchCount', {count: filteredDisplayMessages.length}) }}</span><button v-if="inSessionSearchQuery" type="button" class="dsh-search-clear" :aria-label="t('dshSearchClear')" @click="inSessionSearchQuery=''">✕</button></div>
     <div v-if="isClaudeRemoteControl" class="dsh-remote-control-banner" role="status"><strong>{{ t('claudeRemoteControlTitle') }}</strong><p>{{ t('claudeRemoteControlDesc', {pid: activeTerminalHolder?.pid || '?'}) }}</p></div>
    <p class="dsh-note">{{ history?.workspace || t('dshNoWorkspace') }}</p>

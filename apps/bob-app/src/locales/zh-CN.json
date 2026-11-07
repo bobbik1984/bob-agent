@@ -795,5 +795,20 @@
   "dshSearchNoMatches": "未找到相关消息记录",
   "processExecution": "执行过程",
   "processExecutionSteps": "执行过程 · {count} 步",
-  "auditLogSummary": "检查与审计清单 · {count} 项"
+  "auditLogSummary": "检查与审计清单 · {count} 项",
+  "viewportResponsive": "自适应",
+  "viewport720p": "720p 手机 (720×1280)",
+  "viewport1080p": "1080p 手机 (1080×1920)",
+  "viewportTablet": "平板 (1280×800)",
+  "viewportRotate": "横/竖屏",
+  "viewportReload": "重载原型",
+  "bgCheckerboard": "棋盘格",
+  "bgDark": "暗黑",
+  "bgLight": "高亮",
+  "zoomFit": "适应屏幕",
+  "zoom100": "100% 原画",
+  "zoom200": "200% 细节",
+  "visualAssets": "视觉资产",
+  "visualAssetsCount": "视觉资产 · {count} 项",
+  "visualAssetsEmpty": "当前会话暂无生成的视觉资产"
 }

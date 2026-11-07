@@ -795,5 +795,20 @@
   "dshSearchNoMatches": "No matching messages found",
   "processExecution": "Execution process",
   "processExecutionSteps": "Execution process · {count} steps",
-  "auditLogSummary": "Inspection & audit checklist · {count} items"
+  "auditLogSummary": "Inspection & audit checklist · {count} items",
+  "viewportResponsive": "Responsive",
+  "viewport720p": "720p Mobile (720×1280)",
+  "viewport1080p": "1080p Mobile (1080×1920)",
+  "viewportTablet": "Tablet (1280×800)",
+  "viewportRotate": "Rotate",
+  "viewportReload": "Reload prototype",
+  "bgCheckerboard": "Checkerboard",
+  "bgDark": "Dark",
+  "bgLight": "Light",
+  "zoomFit": "Fit",
+  "zoom100": "100% 1:1",
+  "zoom200": "200% Zoom",
+  "visualAssets": "Visual assets",
+  "visualAssetsCount": "Visual assets · {count}",
+  "visualAssetsEmpty": "No visual assets in current session"
 }
