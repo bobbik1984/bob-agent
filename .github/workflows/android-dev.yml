@@ -56,8 +56,16 @@ jobs:
           pnpm exec tauri android init --ci --skip-targets-install
           python tests/stage-android-vault.py
           python tests/stage-android-scanner.py
+          python tests/stage-android-branding.py
       - name: Build independent ARM64 development APK
         run: pnpm exec tauri android build --debug --target aarch64 --apk --ci
+      - name: Verify packaged Bob branding
+        run: |
+          for apk in src-tauri/gen/android/app/build/outputs/apk/*/*.apk; do
+            "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$apk" > "$RUNNER_TEMP/bob-badging.txt"
+            grep -q "application-label:'Bob'" "$RUNNER_TEMP/bob-badging.txt"
+            ! grep -q "Bob Dev" "$RUNNER_TEMP/bob-badging.txt"
+          done
       - name: Sign APK with persistent certificate
         env:
           SIGNING_KEY: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}

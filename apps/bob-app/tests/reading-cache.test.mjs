@@ -21,3 +21,14 @@ test('persisted files survive view remount, validate versions without another do
 test('changed versions replace bytes; endpoint and session keys do not collide',()=>{assert.notEqual(readingKey('a','file','one','s','x'),readingKey('a','file','two','s','x'));assert.notEqual(readingKey('a','file','one','s','x'),readingKey('b','file','one','s','x'))});
 
 test('reactive proxy values are stored as detached serializable snapshots',async()=>{const c=createReadingCache({storage:null});const data={messages:[{text:'saved'}]};await c.put('reactive',new Proxy(data,{}));data.messages[0].text='changed';assert.equal((await c.get('reactive')).messages[0].text,'saved')});
+
+test('opening a cached preview can revalidate its resource bundle without losing offline copy',async()=>{
+ const store=createReadingCache({storage:null});let version='old',calls=0;
+ const a={connectionId:'bundle',sessionId:'s',path:'index.html',cursor:1};
+ const cache=createPersistentPreviewCache(async(a,known)=>{calls++;if(version==='offline')throw Error('offline');return {connection_id:a.connectionId,session_id:a.sessionId,path:a.path,bytes:3,data:'YWJj',version,resources:version==='new'?[{url:'image.png'}]:[]}}, {store,now:()=>1});
+ await cache.get(a);version='new';assert.equal((await cache.peek(a)).version,'old');
+ assert.equal((await cache.get(a)).version,'old');assert.equal(calls,1);
+ assert.equal((await cache.get(a,{force:true})).resources.length,1);assert.equal(calls,2);
+ version='offline';await assert.rejects(cache.get(a,{force:true}),/offline/);
+ assert.equal((await cache.peek(a)).version,'new');
+});

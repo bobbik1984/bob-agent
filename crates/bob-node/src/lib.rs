@@ -1307,7 +1307,7 @@ pub fn handle_rpc_command(ctx: &mut NodeContext, command: &str, args: &Value) ->
                 args["text"].as_str().ok_or("DSH_TEXT_REQUIRED")?,
                 args["requestId"].as_str().ok_or("DSH_REQUEST_REQUIRED")?)
         }
-        "app_dsh_page" | "app_dsh_preview" | "app_dsh_list" | "app_dsh_history" | "app_dsh_prompt" => {
+        "app_dsh_live" | "app_dsh_page" | "app_dsh_preview" | "app_dsh_list" | "app_dsh_history" | "app_dsh_prompt" => {
             let connection=args["connectionId"].as_str().ok_or("DSH_CONNECTION_REQUIRED")?;
             if connection == "local" {
                 let _ = bob_runtime::agy_directory::ensure_local_grant_registered(&ctx.runtime.data_dir, "local");
@@ -1352,6 +1352,15 @@ pub fn handle_rpc_command(ctx: &mut NodeContext, command: &str, args: &Value) ->
                             }
                         }
                         return Err(e);
+                    }
+                }
+            }
+            if command == "app_dsh_preview" {
+                if let Some(sid)=args["sessionId"].as_str().filter(|s|bob_runtime::agy_directory::owns_readable_session(s)) {
+                    match bob_runtime::agy_directory::preview_native_file(&ctx.runtime.data_dir, connection, sid, args["path"].as_str().ok_or("DSH_PROTOCOL")?, args.get("known")) {
+                        Ok(v)=>return Ok(v),
+                        Err("DSH_CONNECTION_REQUIRED") if connection != "local" => return bob_runtime::node_pairing::forward_dsh_rpc_to_remote_node(&ctx.runtime,connection,command,args),
+                        Err(e)=>return Err(e),
                     }
                 }
             }
@@ -1403,6 +1412,7 @@ pub fn handle_rpc_command(ctx: &mut NodeContext, command: &str, args: &Value) ->
             }
             let client=ctx.runtime.dsh_client(connection)?;
             match command {
+                "app_dsh_live" => client.live(bob_runtime::dsh_session::SessionAddress{connection_id:connection.into(),session_id:args["sessionId"].as_str().ok_or("DSH_SESSION_REQUIRED")?.into()}),
                 "app_dsh_page" => client.history_page(bob_runtime::dsh_session::SessionAddress{connection_id:connection.into(),session_id:args["sessionId"].as_str().ok_or("DSH_SESSION_REQUIRED")?.into()},args.get("before").filter(|v|!v.is_null()).map(|v|v.as_i64().ok_or("DSH_PAGE_CURSOR_INVALID")).transpose()?,args.get("through").filter(|v|!v.is_null()).map(|v|v.as_i64().ok_or("DSH_PAGE_CURSOR_INVALID")).transpose()?,args.get("after").filter(|v|!v.is_null()).map(|v|v.as_i64().ok_or("DSH_PAGE_CURSOR_INVALID")).transpose()?),
                 "app_dsh_preview" => client.preview_if_changed(bob_runtime::dsh_session::SessionAddress{connection_id:connection.into(),session_id:args.get("sessionId").and_then(Value::as_str).ok_or("DSH_PROTOCOL")?.into()},args.get("path").and_then(Value::as_str).ok_or("DSH_PROTOCOL")?,args.get("known").filter(|v|!v.is_null())),
                 "app_dsh_history" => {
@@ -2149,7 +2159,7 @@ fn execute_unlocked_harness_rpc(
     command: &str,
     args: &Value,
 ) -> Result<Value, &'static str> {
-    if command.starts_with("app_dsh_") || command == "app_native_events" {
+    if command.starts_with("app_dsh_") || matches!(command, "app_native_events" | "app_native_cancel" | "app_native_permission") {
         let connection = args["connectionId"].as_str().ok_or("DSH_CONNECTION_REQUIRED")?;
         let runtime = ModelHubRuntime::with_file_vault(data_dir.to_path_buf())?;
         if let Some(result) = bob_runtime::node_pairing::route_paired_node_rpc(&runtime, connection, command, args)? {
@@ -2169,11 +2179,37 @@ fn execute_unlocked_harness_rpc(
         | "app_claude_review"
         | "app_claude_artifacts"
         | "app_claude_preview" => claude_rpc::rpc(data_dir, command, args),
+        "app_native_permission" => {
+            let connection=args["connectionId"].as_str().ok_or("DSH_CONNECTION_REQUIRED")?;
+            let session=args["sessionId"].as_str().ok_or("DSH_SESSION_REQUIRED")?;
+            let request=args["requestId"].as_str().ok_or("DSH_REQUEST_REQUIRED")?;
+            let permission=args["permissionId"].as_str().ok_or("HARNESS_APPROVAL_INVALID")?;
+            if !args["optionId"].is_null() && !args["optionId"].is_string() {return Err("HARNESS_APPROVAL_INVALID")}
+            if connection=="local" {let _=bob_runtime::agy_directory::ensure_local_grant_registered(data_dir,"local");}
+            match bob_runtime::agy_directory::native_permission(data_dir,connection,session,request,permission,args["optionId"].as_str()) {
+                Err("DSH_CONNECTION_REQUIRED") if connection!="local" => {
+                    let runtime=ModelHubRuntime::with_file_vault(data_dir.to_path_buf())?;
+                    bob_runtime::node_pairing::forward_dsh_rpc_to_remote_node(&runtime,connection,command,args)
+                },value=>value
+            }
+        }
+        "app_native_cancel" => {
+            let connection=args["connectionId"].as_str().ok_or("DSH_CONNECTION_REQUIRED")?;
+            let session=args["sessionId"].as_str().ok_or("DSH_SESSION_REQUIRED")?;
+            let request=args["requestId"].as_str().ok_or("DSH_REQUEST_REQUIRED")?;
+            if connection=="local" { let _=bob_runtime::agy_directory::ensure_local_grant_registered(data_dir,"local"); }
+            match bob_runtime::agy_directory::native_cancel(data_dir,connection,session,request) {
+                Err("DSH_CONNECTION_REQUIRED") if connection!="local" => {
+                    let runtime=ModelHubRuntime::with_file_vault(data_dir.to_path_buf())?;
+                    bob_runtime::node_pairing::forward_dsh_rpc_to_remote_node(&runtime,connection,command,args)
+                }, value=>value
+            }
+        }
         "app_native_events" => {
             let connection=args["connectionId"].as_str().ok_or("DSH_CONNECTION_REQUIRED")?;
             let session=args["sessionId"].as_str().ok_or("DSH_SESSION_REQUIRED")?;
             if connection=="local" { let _=bob_runtime::agy_directory::ensure_local_grant_registered(data_dir,"local"); }
-            match bob_runtime::agy_directory::native_events(data_dir,connection,session,args["after"].as_i64().unwrap_or(0)) {
+            match bob_runtime::agy_directory::native_events(data_dir,connection,session,args["after"].as_i64().unwrap_or(0),args["epoch"].as_str()) {
                 Err("DSH_CONNECTION_REQUIRED") if connection!="local" => {
                     let runtime=ModelHubRuntime::with_file_vault(data_dir.to_path_buf())?;
                     bob_runtime::node_pairing::forward_dsh_rpc_to_remote_node(&runtime,connection,command,args)
@@ -2222,7 +2258,7 @@ fn execute_unlocked_harness_rpc(
                 args["requestId"].as_str().ok_or("DSH_REQUEST_REQUIRED")?,
             )
         }
-        "app_dsh_page" | "app_dsh_preview" | "app_dsh_list" | "app_dsh_history" | "app_dsh_prompt" => {
+        "app_dsh_live" | "app_dsh_page" | "app_dsh_preview" | "app_dsh_list" | "app_dsh_history" | "app_dsh_prompt" => {
             let connection = args["connectionId"].as_str().ok_or("DSH_CONNECTION_REQUIRED")?;
             if connection == "local" {
                 let _ = bob_runtime::agy_directory::ensure_local_grant_registered(data_dir, "local");
@@ -2271,6 +2307,15 @@ fn execute_unlocked_harness_rpc(
                             }
                         }
                         return Err(e);
+                    }
+                }
+            }
+            if command == "app_dsh_preview" {
+                if let Some(sid)=args["sessionId"].as_str().filter(|s|bob_runtime::agy_directory::owns_readable_session(s)) {
+                    match bob_runtime::agy_directory::preview_native_file(data_dir, connection, sid, args["path"].as_str().ok_or("DSH_PROTOCOL")?, args.get("known")) {
+                        Ok(v)=>return Ok(v),
+                        Err("DSH_CONNECTION_REQUIRED") if connection != "local" => return bob_runtime::node_pairing::forward_dsh_rpc_to_remote_node(&runtime,connection,command,args),
+                        Err(e)=>return Err(e),
                     }
                 }
             }
@@ -2343,6 +2388,7 @@ fn execute_unlocked_harness_rpc(
             }
             let client = runtime.dsh_client(connection)?;
             match command {
+                "app_dsh_live" => client.live(bob_runtime::dsh_session::SessionAddress{connection_id:connection.into(),session_id:args["sessionId"].as_str().ok_or("DSH_SESSION_REQUIRED")?.into()}),
                 "app_dsh_page" => client.history_page(
                     bob_runtime::dsh_session::SessionAddress {
                         connection_id: connection.into(),
@@ -2492,7 +2538,7 @@ fn handle_connection(mut stream: TcpStream, state: Arc<Mutex<NodeContext>>) {
             let allowed=match scope {
                 Ok(ref role) if role=="owner" => !path.starts_with("/api/client/v1/"),
                 Ok(_) => path.strip_prefix("/api/rpc/").is_some_and(|cmd|matches!(cmd,
-                    "app_native_events"|"app_dsh_list"|"app_dsh_page"|"app_dsh_history"|"app_dsh_preview"|"app_dsh_prompt"|"app_dsh_receipt"|
+                    "app_dsh_live"|"app_native_events"|"app_native_cancel"|"app_native_permission"|"app_dsh_list"|"app_dsh_page"|"app_dsh_history"|"app_dsh_preview"|"app_dsh_prompt"|"app_dsh_receipt"|
                     "app_harness_discover"|"app_harness_check_auth"|"app_harness_verify_capabilities")),
                 Err(_) => false,
             };
@@ -2551,7 +2597,7 @@ fn handle_connection(mut stream: TcpStream, state: Arc<Mutex<NodeContext>>) {
         }
         if matches!(
             command.trim(),
-            "app_native_events" | "app_dsh_receipt"
+            "app_dsh_live" | "app_native_events" | "app_native_cancel" | "app_native_permission" | "app_dsh_receipt"
                 | "app_dsh_page"
                 | "app_dsh_preview"
                 | "app_dsh_list"

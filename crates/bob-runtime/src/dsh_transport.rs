@@ -66,6 +66,7 @@ fn trusted_endpoint(base: &reqwest::Url) -> bool {
  let loopback = base.host_str().and_then(|h|h.trim_matches(['[',']']).parse::<std::net::IpAddr>().ok()).is_some_and(|ip|ip.is_loopback());
  (base.scheme()=="https" || (base.scheme()=="http" && loopback)) && base.username().is_empty() && base.password().is_none() && base.query().is_none() && base.fragment().is_none() && base.path()=="/"
 }
+#[derive(Clone)]
 pub struct DshClient { base: reqwest::Url, cookie: String, http: reqwest::blocking::Client, scope: String }
 impl DshClient {
  pub fn connect(endpoint: &str, token: &str) -> Result<Self, &'static str> {
@@ -176,6 +177,29 @@ impl DshClient {
   preview_references().lock().map_err(|_|"DSH_UNAVAILABLE")?.remember(&self.scope,&h);
   Ok(h)
  }
+ pub fn live(&self,address:SessionAddress)->Result<Value,&'static str>{
+  crate::dsh_live::view(self.clone(),self.scope.clone(),address)
+ }
+ pub(crate) fn follow_socket(&self,session:&str)->Result<(tungstenite::WebSocket<MaybeTlsStream<TcpStream>>,String),&'static str>{
+  let mut url=self.base.join("api/remote.mux").map_err(|_|"DSH_PROTOCOL")?;url.set_scheme(if self.base.scheme()=="http" {"ws"} else {"wss"}).map_err(|_|"DSH_PROTOCOL")?;
+  let mut req=url.as_str().into_client_request().map_err(|_|"DSH_PROTOCOL")?;
+  req.headers_mut().insert("Cookie",self.cookie.parse().map_err(|_|"DSH_PROTOCOL")?);
+  req.headers_mut().insert("Origin",self.base.origin().ascii_serialization().parse().map_err(|_|"DSH_PROTOCOL")?);
+  req.headers_mut().insert("User-Agent","Bob/1.0.1".parse().unwrap());
+  let host=self.base.host_str().ok_or("DSH_ADDRESS_INVALID")?;
+  let addresses=(host,self.base.port_or_known_default().ok_or("DSH_ADDRESS_INVALID")?).to_socket_addrs().map_err(|_|"DSH_UNAVAILABLE")?;
+  let mut socket=None;
+  for address in addresses.take(4) { if let Ok(s)=TcpStream::connect_timeout(&address,Duration::from_secs(3)){socket=Some(s);break;} }
+  let socket=socket.ok_or("DSH_UNAVAILABLE")?;
+  socket.set_read_timeout(Some(Duration::from_secs(10))).map_err(|_|"DSH_UNAVAILABLE")?;
+  socket.set_write_timeout(Some(Duration::from_secs(10))).map_err(|_|"DSH_UNAVAILABLE")?;
+  let config=tungstenite::protocol::WebSocketConfig::default().max_message_size(Some(HISTORY_LIMIT)).max_frame_size(Some(HISTORY_LIMIT));
+  let (mut ws,_)=tungstenite::client_tls_with_config(req,socket,Some(config),None).map_err(|_|"DSH_UNAVAILABLE")?;
+  match ws.get_mut(){MaybeTlsStream::Rustls(s)=>{s.sock.set_read_timeout(Some(Duration::from_secs(1))).map_err(|_|"DSH_UNAVAILABLE")?;s.sock.set_write_timeout(Some(Duration::from_secs(1))).map_err(|_|"DSH_UNAVAILABLE")?;},MaybeTlsStream::Plain(s) if self.base.scheme()=="http" && trusted_endpoint(&self.base)=>{s.set_read_timeout(Some(Duration::from_secs(1))).map_err(|_|"DSH_UNAVAILABLE")?;s.set_write_timeout(Some(Duration::from_secs(1))).map_err(|_|"DSH_UNAVAILABLE")?;},_=>return Err("DSH_TLS_REQUIRED")}
+  let stream=format!("bob-live-{}",crate::now_millis());
+  ws.send(Message::Text(json!({"type":"open","streamId":stream,"endpoint":"session/follow","payload":{"args":{"request":{"address":{"kind":"session","sessionId":session},"maxMessages":1,"assistantStream":true}}}}).to_string().into())).map_err(|_|"DSH_UNAVAILABLE")?;
+  Ok((ws,stream))
+ }
  fn snapshot(&self,address:&SessionAddress,max_messages:usize)->Result<Value,&'static str>{
   let mut url=self.base.join("api/remote.mux").map_err(|_|"DSH_PROTOCOL")?;url.set_scheme(if self.base.scheme()=="http" {"ws"} else {"wss"}).map_err(|_|"DSH_PROTOCOL")?;
   let mut req=url.as_str().into_client_request().map_err(|_|"DSH_PROTOCOL")?;
@@ -278,8 +302,10 @@ impl DshClient {
   let stat=self.rpc("workspaceFiles/stat",args.clone())?;
   if stat["absolutePath"]!=expected {return Err("DSH_FILE_OUTSIDE_WORKSPACE");}
   let size=stat["bytes"].as_u64().filter(|n|*n<=2*1024*1024).ok_or("DSH_FILE_TOO_LARGE")?;
-  if known.is_some_and(|k| !stat["version"].is_null() && k["version"]==stat["version"] && k["bytes"]==stat["bytes"]) {
-   return Ok(json!({"not_modified":true,"path":path,"connection_id":address.connection_id,"session_id":address.session_id,"version":stat["version"],"bytes":size}));
+  let document=["pdf","docx","xlsx","pptx","doc","xls","ppt","odt","ods","odp"].contains(&ext.as_str());
+  let version=if document {json!(format!("document-v1:{}",stat["version"]))} else {stat["version"].clone()};
+  if known.is_some_and(|k| !stat["version"].is_null() && k["version"]==version && k["bytes"]==stat["bytes"]) {
+   return Ok(json!({"not_modified":true,"path":path,"connection_id":address.connection_id,"session_id":address.session_id,"version":version,"bytes":size}));
   }
   let mut url=self.base.join("api/file").map_err(|_|"DSH_PROTOCOL")?;
   url.query_pairs_mut().append_pair("path",&expected);
@@ -292,7 +318,9 @@ impl DshClient {
   if after["absolutePath"]!=stat["absolutePath"] || after["version"]!=stat["version"] || after["bytes"]!=stat["bytes"] {return Err("DSH_FILE_CHANGED");}
   use base64::Engine;
   use sha2::{Digest,Sha256};
-  Ok(json!({"path":path,"extension":ext,"data":base64::engine::general_purpose::STANDARD.encode(&bytes),"bytes":size,"version":stat["version"],"sha256":format!("{:x}",Sha256::digest(&bytes)),"source":"current_workspace","connection_id":address.connection_id,"session_id":address.session_id}))
+  let mut result=json!({"path":path,"extension":ext,"data":base64::engine::general_purpose::STANDARD.encode(&bytes),"bytes":size,"version":version,"sha256":format!("{:x}",Sha256::digest(&bytes)),"source":"current_workspace","connection_id":address.connection_id,"session_id":address.session_id});
+  if document {result["document"]=crate::agy_directory::render_document_bytes(&bytes,&ext)?;}
+  Ok(result)
  }
  pub fn resolve_session_workspace(&self,session:&str)->Option<String>{
   if let Ok(guard)=preview_references().lock() {
@@ -393,13 +421,14 @@ pub fn inspect_receipt(dir:&std::path::Path, connection:&str, session:&str, text
 fn preview_extension(path:&str)->Result<String,&'static str>{
   if path.is_empty() || path.len()>512 || path.contains(['\\',':','%','?','#']) || path.starts_with('/') || path.split('/').any(|p|p.is_empty()||p=="."||p==".."||p.starts_with('.')) {return Err("DSH_FILE_PATH_REJECTED");}
   let ext=path.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
-  if !["png","jpg","jpeg","webp","md","txt","json","yaml","yml","gd","tscn","js","css","html"].contains(&ext.as_str()){return Err("DSH_FILE_TYPE_UNSUPPORTED");}
+  if !["png","jpg","jpeg","webp","md","txt","json","yaml","yml","gd","tscn","js","css","html","pdf","docx","xlsx","pptx","doc","xls","ppt","odt","ods","odp"].contains(&ext.as_str()){return Err("DSH_FILE_TYPE_UNSUPPORTED");}
   Ok(ext)
 }
 
 #[cfg(test)] mod preview_tests {
  use super::*;
  #[test] fn allowed_preview_paths(){assert_eq!(preview_extension("snapshots/view.png").unwrap(),"png");assert_eq!(preview_extension("docs/progress.md").unwrap(),"md");}
+ #[test] fn document_preview_paths(){for ext in ["pdf","docx","xlsx","pptx","doc","xls","ppt","odt","ods","odp"] {assert_eq!(preview_extension(&format!("docs/report.{ext}")).unwrap(),ext);}}
  #[test] fn reject_unsafe_preview_paths(){for p in ["../secret.md","/etc/config.txt","a/../../b.md",".env","a/.secret.txt","C:/secret.txt","a%2fb.md","https://host/a.png","private.key", "a//b.md"] {assert!(preview_extension(p).is_err(),"{p}");}}
 }
 

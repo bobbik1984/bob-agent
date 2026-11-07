@@ -776,6 +776,33 @@ pub fn forward_dsh_rpc_to_endpoint(
 
 /// Forward a DSH/Multi-Harness RPC over HTTP to a remote `bob-node` / Web Host endpoint,
 /// requesting `target_connection_id` on that peer and stamping returned records with `connection_id`.
+fn forwarded_rpc_timeout_secs(command: &str, args: &Value) -> u64 {
+    if command=="app_dsh_preview" && crate::agy_directory::preview_host_timeout_secs(args["path"].as_str().unwrap_or(""))>35 {
+        // Native conversion <=110s; DSH can additionally read history, stat,
+        // download and re-stat before rendering. Keep the outer budget larger.
+        240
+    } else {35}
+}
+
+fn forwarded_preview_error(body: &Value) -> &'static str {
+    match body["error"].as_str().unwrap_or("") {
+        "DSH_DOCUMENT_RENDERER_UNAVAILABLE"=>"DSH_DOCUMENT_RENDERER_UNAVAILABLE",
+        "DSH_DOCUMENT_SANDBOX_UNAVAILABLE"=>"DSH_DOCUMENT_SANDBOX_UNAVAILABLE",
+        "DSH_DOCUMENT_RENDER_TIMEOUT"=>"DSH_DOCUMENT_RENDER_TIMEOUT",
+        "DSH_DOCUMENT_RENDER_FAILED"=>"DSH_DOCUMENT_RENDER_FAILED",
+        "DSH_DOCUMENT_PAGE_LIMIT"=>"DSH_DOCUMENT_PAGE_LIMIT",
+        "DSH_FILE_TOO_LARGE"=>"DSH_FILE_TOO_LARGE",
+        "DSH_FILE_TIMEOUT"=>"DSH_FILE_TIMEOUT",
+        "DSH_FILE_CHANGED"=>"DSH_FILE_CHANGED",
+        "DSH_FILE_NOT_REFERENCED"=>"DSH_FILE_NOT_REFERENCED",
+        "DSH_FILE_OUTSIDE_WORKSPACE"=>"DSH_FILE_OUTSIDE_WORKSPACE",
+        "DSH_FILE_PATH_REJECTED"=>"DSH_FILE_PATH_REJECTED",
+        "DSH_FILE_NOT_FOUND"=>"DSH_FILE_NOT_FOUND",
+        "DSH_FILE_TYPE_UNSUPPORTED"=>"DSH_FILE_TYPE_UNSUPPORTED",
+        _=>"DSH_UNAVAILABLE",
+    }
+}
+
 pub fn forward_dsh_rpc_to_endpoint_with_target(
     raw_url: &str,
     token: Option<&str>,
@@ -795,7 +822,8 @@ pub fn forward_dsh_rpc_to_endpoint_with_target(
     }
     let client = reqwest::blocking::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
-        .timeout(Duration::from_secs(35))
+        .connect_timeout(Duration::from_secs(10))
+        .timeout(Duration::from_secs(forwarded_rpc_timeout_secs(command,args)))
         .build()
         .map_err(|_| "DSH_UNAVAILABLE")?;
     let mut req = client
@@ -804,14 +832,14 @@ pub fn forward_dsh_rpc_to_endpoint_with_target(
     if let Some(tok) = token.map(str::trim).filter(|s| !s.is_empty()) {
         req = req.header("Authorization", format!("Bearer {tok}"));
     }
-    let resp = req.send().map_err(|_| "DSH_UNAVAILABLE")?;
-    if !resp.status().is_success() {
-        return Err("DSH_UNAVAILABLE");
-    }
-    let body: Value = resp.json().map_err(|_| "DSH_PROTOCOL")?;
+    let resp = req.send().map_err(|e|if command=="app_dsh_preview" && e.is_timeout() {"DSH_FILE_TIMEOUT"} else {"DSH_UNAVAILABLE"})?;
+    let success=resp.status().is_success();
+    if !success && command!="app_dsh_preview" {return Err("DSH_UNAVAILABLE");}
+    let body: Value = resp.json().map_err(|_| if success {"DSH_PROTOCOL"} else {"DSH_UNAVAILABLE"})?;
+    if !success {return Err(forwarded_preview_error(&body));}
     let mut result = if let Some(ok) = body.get("ok").and_then(Value::as_bool) {
         if !ok {
-            return Err("DSH_UNAVAILABLE");
+            return Err(if command=="app_dsh_preview" {forwarded_preview_error(&body)} else {"DSH_UNAVAILABLE"});
         }
         body.get("result").cloned().unwrap_or(Value::Null)
     } else {
@@ -825,7 +853,7 @@ pub fn forward_dsh_rpc_to_endpoint_with_target(
                 }
             }
         }
-    } else if matches!(command, "app_dsh_page" | "app_dsh_history") {
+    } else if matches!(command, "app_dsh_live" | "app_dsh_page" | "app_dsh_history") {
         if let Some(addr) = result.get_mut("address").and_then(Value::as_object_mut) {
             addr.insert("connection_id".to_owned(), json!(connection_id));
         }
@@ -1290,6 +1318,26 @@ pub fn render_terminal_qr(payload: &str) -> Result<String, &'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dsh_preview_forwarding_preserves_document_errors_without_echoing_details() {
+        use std::io::{Read,Write};
+        for (code,expected) in [("DSH_DOCUMENT_RENDERER_UNAVAILABLE","DSH_DOCUMENT_RENDERER_UNAVAILABLE"),("DSH_DOCUMENT_RENDER_TIMEOUT","DSH_DOCUMENT_RENDER_TIMEOUT"),("private upstream details","DSH_UNAVAILABLE")] {
+            let listener=std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let endpoint=format!("http://{}",listener.local_addr().unwrap());
+            let worker=std::thread::spawn(move || {
+                let (mut stream,_)=listener.accept().unwrap();let mut buf=[0u8;4096];let _=stream.read(&mut buf).unwrap();
+                let body=json!({"ok":false,"error":code}).to_string();
+                write!(stream,"HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",body.len(),body).unwrap();
+            });
+            let got=forward_dsh_rpc_to_endpoint_with_target(&endpoint,None,"visible","local","app_dsh_preview",&json!({"path":"report.pdf"}));
+            assert_eq!(got,Err(expected));worker.join().unwrap();
+        }
+        assert!(crate::agy_directory::preview_host_timeout_secs("report.PDF")>45+10+40);
+        assert!(forwarded_rpc_timeout_secs("app_dsh_preview",&json!({"path":"slides.pptx"}))>110+20+20+30+20);
+        assert_eq!(forwarded_rpc_timeout_secs("app_dsh_preview",&json!({"path":"photo.png"})),35);
+        assert_eq!(forwarded_rpc_timeout_secs("app_dsh_history",&json!({"path":"report.pdf"})),35);
+    }
 
     #[test]
     fn node_protocol_discovery_is_credential_free_and_fail_closed() {

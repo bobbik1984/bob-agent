@@ -4,8 +4,8 @@ export function createPersistentPreviewCache(fetchFile,{store=readingCache,now=(
  function validate(f,a){if(f.connection_id!==a.connectionId||f.session_id!==a.sessionId||f.path!==a.path)throw Error('DSH_IDENTITY_MISMATCH');if(!Number.isSafeInteger(f.bytes)||f.bytes<0||f.bytes>2*1024*1024)throw Error('DSH_FILE_TOO_LARGE')}
  return {
   async peek(a){return (await store.get(key(a)))?.file||null},
-  async get(a){return singleFlight(key(a),async()=>{const revision=store.revision();const saved=await store.get(key(a));
-   if(saved&&saved.cursor===a.cursor&&now()-saved.checked<60000)return saved.file;
+  async get(a,{force=false}={}){return singleFlight(key(a),async()=>{const revision=store.revision();const saved=await store.get(key(a));
+   if(!force&&saved&&saved.cursor===a.cursor&&now()-saved.checked<60000)return saved.file;
    const reply=await fetchFile(a,saved?{version:saved.file.version,bytes:saved.file.bytes}:null);validate(reply,a);
    if(reply.not_modified&&!saved)throw Error('DSH_CACHE_MISSING');
    const file=reply.not_modified?saved.file:reply;

@@ -138,7 +138,7 @@ export default defineComponent({
     }
 
     function renderStepsBox(steps, openByDefault, keyIdx) {
-      const naturalSummary = summarizeProcessSteps(steps, locale?.value || 'zh-CN');
+      const naturalSummary = summarizeProcessSteps(steps, locale?.value || 'zh-CN', t);
       const label = naturalSummary || t('thinkingProcessCount', { count: steps.length });
       return h('details', { key: `steps-${keyIdx}`, class: 'thinking-process-box', open: openByDefault }, [
         h('summary', { class: 'thinking-process-summary' }, [

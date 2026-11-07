@@ -1,8 +1,13 @@
 <script setup>
+import {artifactPath} from '../artifact-path.mjs';
+import {isNotAcceptedReceipt} from '../native-receipt.mjs';
+import NativeActivity from './NativeActivity.vue';
+import {unconfirmActivity,settleNativeActivity,orderedNativeActivities,waitingNativeApproval} from '../native-activity.mjs';
 import { computed, ref, watch, onUnmounted, nextTick, provide } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { kernelBridge } from '../native-bridge.mjs';
 import MessageContent from './MessageContent.vue';
+import {createChatScroll} from '../chat-scroll.mjs';
 import DshFilePreview from './DshFilePreview.vue';
 import {readingCache,readingKey} from '../reading-cache.mjs';
 import {createPersistentPreviewCache} from '../persistent-preview-cache.mjs';
@@ -10,6 +15,9 @@ const props=defineProps({nodes:{type:Array,default:()=>[]}, target:{type:Object,
 const {t}=useI18n();
 const connection=ref(''), sessions=ref([]), selected=ref(null), history=ref(null), search=ref(''), busy=ref(false), sending=ref(false), error=ref(''), notice=ref(''), draft=ref(''), pending=ref(null);
 const reader=ref(null), loadingOlder=ref(false);let lastTop=0;
+const awayFromLatest=ref(false),chatContent=ref(null);
+const chatScroll=createChatScroll(value=>{awayFromLatest.value=value;});
+watch([reader,chatContent],()=>chatScroll.bind(reader.value),{flush:'post'});
 const pullUpDistance=ref(0),attachments=ref([]),fileInput=ref(null);let touchStartY=null,wheelOverscroll=0,wheelResetTimer;
 const nodeActivity=ref(null),awaitingReply=ref(null),replying=ref(false);let activityChecked=0;
 const syncStatus=ref(''),hasNewMessages=ref(false),copiedSeq=ref(null),streamSeq=ref(null),rodIndex=ref(0);let syncTimer,copyTimer,rodTimer;
@@ -33,41 +41,154 @@ function emitTopbarPhase(overridePhase){
  fn('synced');
 }
 watch([syncStatus,sending,replying,()=>nodeActivity.value?.running,busy],()=>emitTopbarPhase());
-const nativeDrafts=ref({});let nativeCursor=0,nativeTimer;
+const dshLiveState=ref(null);let dshLiveTimer,dshReadCursor=-1;
+const isNativeId=id=>/^(agy|claude-jsonl|codex|pi):/.test(id||'');
+const dshLiveMessages=computed(()=> (dshLiveState.value?.messages||[]).filter(m=>m.text&&(m.active||!Number.isSafeInteger(m.sequence)||m.sequence>(history.value?.cursor??-1))));
+async function refreshDshLive(){
+ const g=generation,id=selected.value?.id,cid=connection.value;
+ if(!id||isNativeId(id)||disposed||!kernelBridge.dshLive)return;
+ try{
+  const page=await kernelBridge.dshLive(cid,id);
+  if(g!==generation||disposed)return;
+  if(page.address?.session_id!==id||page.address?.connection_id!==cid||!Array.isArray(page.messages)||!Number.isSafeInteger(page.cursor))throw Error('DSH_IDENTITY_MISMATCH');
+  const el=reader.value,follow=el&&el.scrollHeight-el.scrollTop-el.clientHeight<80;
+  const changed=JSON.stringify(page.messages)!==JSON.stringify(dshLiveState.value?.messages||[]);
+  if(page.status==='live')dshLiveState.value=page;
+  else dshLiveState.value={...page,messages:(dshLiveState.value?.messages||[]).map(m=>({...m,active:false}))};
+  replying.value=page.status==='live'&&page.active===true;
+  const latest=Math.max(page.cursor,...page.messages.map(m=>Number.isSafeInteger(m.sequence)?m.sequence:-1));
+  if(history.value&&latest>history.value.cursor&&latest>dshReadCursor&&!busy.value&&!loadingOlder.value&&!preview.value){dshReadCursor=latest;void refresh();}
+  await nextTick();
+  if(g!==generation||disposed)return;
+  if(changed&&!preview.value){if(follow&&chatScroll.following)scrollToBottom();else hasNewMessages.value=true;}
+ }catch(e){if(g===generation&&!disposed){dshLiveState.value={...(dshLiveState.value||{}),status:'reconnecting',messages:(dshLiveState.value?.messages||[]).map(m=>({...m,active:false}))};replying.value=false;}}
+ finally{if(g===generation&&!disposed)dshLiveTimer=setTimeout(refreshDshLive,dshLiveState.value?.status==='live'?1000:3000);}
+}
+const cancelRequest=ref(null),cancelBusy=ref(false);
+const cancellableRequest=computed(()=>/^(codex|pi|agy|claude-jsonl):/.test(selected.value?.id||'')?Object.entries(nativeDrafts.value).find(([,v])=>v.active&&v.cancelSupported)?.[0]:null);
+async function cancelNative(){
+ const rid=cancellableRequest.value,g=generation;if(!rid||cancelBusy.value||cancelRequest.value===rid)return;
+ cancelBusy.value=true;
+ try{const result=await kernelBridge.nativeCancel(connection.value,selected.value.id,rid);
+  if(g!==generation)return;
+  if(result.request_id!==rid||result.session_id!==selected.value.id)throw Error('HARNESS_IDENTITY_UNCONFIRMED');
+  cancelRequest.value=result.status==='cancel_requested'?rid:null;
+  notice.value=t(result.status==='cancelled'?'nativeCancelled':result.status==='completed'?'dshSyncCompleted':'nativeCancelPending');
+ }catch{if(g===generation)notice.value=t('nativeCancelUnconfirmed');}
+ finally{cancelBusy.value=false;}
+}
+const nativeDrafts=ref({});
+const nativeUnresolved=computed(()=>Object.values(nativeDrafts.value).some(v=>v.status==='unknown')||(history.value?.request_results||[]).some(v=>v.status==='unknown'));let nativeCursor=0,nativeEpoch='',nativeTimer,nativeMore=false;
 async function refreshNativeEvents(){
  const g=generation,id=selected.value?.id;
+ nativeMore=false;
  if(!id||! /^(agy|claude-jsonl|codex|pi):/.test(id)||disposed)return;
  try{
-  const page=await kernelBridge.nativeEvents(connection.value,id,nativeCursor);
+  const page=await kernelBridge.nativeEvents(connection.value,id,nativeCursor,nativeEpoch);
   if(g!==generation||disposed||page.session_id!==id)return;
   const el=reader.value,follow=el&&el.scrollHeight-el.scrollTop-el.clientHeight<80;
+  if(page.reset){
+   if(!Number.isSafeInteger(page.cursor)||typeof page.epoch!=='string'||!Array.isArray(page.snapshots)||page.snapshots.some(v=>v.session_id!==id))throw Error('HARNESS_EVENTS_INVALID');
+   const restored={};cancelRequest.value=null;
+   for(const v of page.snapshots){
+    restored[v.request_id]={status:v.status,activity:v.activity||null,text:v.text||'',unconfirmed:v.status==='unknown'&&v.code==='HARNESS_EXTERNAL_TURN_UNCONFIRMED',timestamp:v.observed_at,active:['accepted','running'].includes(v.status),completed:v.status==='completed',terminal:['completed','cancelled','error'].includes(v.status),cancelSupported:v.cancel_supported===true};
+    if(v.cancel_pending)cancelRequest.value=v.request_id;
+    if(v.request_id===awaitingReply.value&&['completed','cancelled','error'].includes(v.status))awaitingReply.value=null;
+   }
+   nativeDrafts.value=restored;nativeCursor=page.cursor;nativeEpoch=page.epoch;
+   replying.value=Object.values(restored).some(v=>v.active);
+   notice.value=t(page.snapshot_incomplete?'nativeRecoveryPartial':'nativeRecoveryRestored');
+   if(page.history_required&&!busy.value&&!loadingOlder.value&&!preview.value)void refresh();
+  }else if(page.epoch){
+   if(nativeEpoch&&page.epoch!==nativeEpoch)throw Error('HARNESS_EVENTS_EPOCH_CHANGED');
+   nativeEpoch=page.epoch;
+  }
   for(const event of page.events||[]){
    if(event.sequence<=nativeCursor||event.session_id!==id)continue;
    nativeCursor=event.sequence;
    const rid=event.request_id;
    const settled=(history.value?.request_results||[]).find(r=>r.request_id===rid)?.status;
    if(settled==='completed'||(['error','not_accepted','cancelled'].includes(settled)&&rid!==awaitingReply.value)){
-    if(nativeDrafts.value[rid]){const next={...nativeDrafts.value};delete next[rid];nativeDrafts.value=next;}
+    const retained=settleNativeActivity(nativeDrafts.value[rid]||{timestamp:event.observed_at},settled,event.kind==='activity_snapshot'?event.payload.activity:undefined);
+    if(retained)retained.status=settled;
+    const next={...nativeDrafts.value};if(retained)next[rid]=retained;else delete next[rid];nativeDrafts.value=next;
     if(rid===awaitingReply.value){awaitingReply.value=null;replying.value=false;}
     continue;
    }
    const current=nativeDrafts.value[rid]||{text:'',timestamp:event.observed_at};
-   if(event.kind==='text_delta')current.text+=event.payload.text||'';
+   if(['accepted','running','completed','cancelled','error','unknown'].includes(event.kind))current.status=event.kind;
+   if(current.terminal&&!['message_snapshot','activity_snapshot'].includes(event.kind))continue;
+   if(['accepted','running','completed'].includes(event.kind))current.unconfirmed=false;
+   if(event.kind==='unknown'&&event.payload?.code==='HARNESS_EXTERNAL_TURN_UNCONFIRMED')current.unconfirmed=true;
+   if(event.kind==='activity_snapshot')current.activity=current.terminal?unconfirmActivity(event.payload.activity):event.payload.activity||null;
+   if(event.kind==='accepted')current.cancelSupported=event.payload.cancel_supported===true;
+    if(event.kind==='text_delta')current.text+=event.payload.text||'';
    if(event.kind==='message_snapshot')current.text=event.payload.text||'';
+    if(event.kind==='cancel_requested'){cancelRequest.value=rid;notice.value=t('nativeCancelPending');}
    if(['accepted','running','text_delta'].includes(event.kind)){current.active=true;replying.value=true;}
    if(['completed','error','cancelled','unknown'].includes(event.kind)){
-    current.active=false;replying.value=false;
+    current.active=false;current.terminal=['completed','cancelled','error'].includes(event.kind);replying.value=false;
+    current.activity=unconfirmActivity(current.activity);
+     if(cancelRequest.value===rid){cancelRequest.value=null;notice.value=t(event.kind==='cancelled'?'nativeCancelled':event.kind==='completed'?'dshSyncCompleted':'nativeCancelUnconfirmed');}
     if(awaitingReply.value===rid)awaitingReply.value=null;
     if(event.kind==='error'||event.kind==='unknown')error.value=t('nativeExecutionFailed')+' · '+String(event.payload.code||'HARNESS_FAILED');
     if(event.kind==='completed'){current.completed=true;error.value='';}
    }
    nativeDrafts.value={...nativeDrafts.value,[rid]:current};
   }
-  await nextTick();if(follow&&g===generation)scrollToBottom();
- }catch(e){if(g===generation&&awaitingReply.value)syncStatus.value='offline_cached';}
- finally{if(g===generation&&!disposed)nativeTimer=setTimeout(refreshNativeEvents,replying.value||awaitingReply.value?400:5000);}
+   if(Number.isSafeInteger(page.cursor))nativeCursor=Math.max(nativeCursor,page.cursor);
+   nativeMore=page.has_more===true;
+   if(page.external_live && page.external_live!=='live'){
+    let touched=false;const next={...nativeDrafts.value};
+    for(const [key,value] of Object.entries(next))if(key.startsWith('external-codex-')&&value.active){next[key]={...value,active:false,activity:unconfirmActivity(value.activity)};touched=true;}
+    if(touched){nativeDrafts.value=next;replying.value=Object.values(next).some(v=>v.active);}
+   }
+   // History can settle a request before its terminal event reaches this poll.
+   // Derive the indicator from all retained executions, including empty replies.
+   replying.value=Object.values(nativeDrafts.value).some(v=>v.active===true);
+   if(pendingDecision.value){
+    const record=nativeDrafts.value[pendingDecision.value.request];
+    const approval=record?.activity?.approvals?.find(v=>v.permission_id===pendingDecision.value.permission);
+    if(approval&& !['pending','queued'].includes(approval.status)){
+     notice.value=t(approval.status==='denied'?'nativeApprovalDenied':approval.status==='approved'?'nativeApprovalApproved':'nativeApprovalUnconfirmed');
+     pendingDecision.value=null;
+    }
+   }
+   await nextTick();if(follow&&chatScroll.following&&g===generation)scrollToBottom();
+ }catch(e){if(g===generation){syncStatus.value='offline_cached';nativeEpoch='';replying.value=false;nativeDrafts.value=Object.fromEntries(Object.entries(nativeDrafts.value).map(([k,v])=>[k,{...v,active:false,activity:unconfirmActivity(v.activity)}]));}}
+ finally{if(g===generation&&!disposed)nativeTimer=setTimeout(refreshNativeEvents,nativeMore?0:replying.value||awaitingReply.value?400:5000);}
 }
-const nativeMessages=computed(()=>Object.entries(nativeDrafts.value).filter(([,v])=>v.text&&!((history.value?.messages||[]).some(m=>m.role==='assistant'&&(m.text===v.text||(v.completed&&m.text.includes(v.text)))))).map(([id,v])=>({...v,id})));
+// A live turn can contain several assistant records separated by tool output.
+// Compare ordered paragraphs within one user-bounded run, never across turns.
+function nativeTextInHistory(text){
+ const normalize=value=>String(value??'').replace(/\s+/g,' ').trim();
+ const chunks=String(text??'').split(/\n\s*\n/).map(normalize).filter(Boolean);
+ if(!chunks.length)return false;
+ const runs=[];let run=[];
+ for(const m of history.value?.messages||[]){if(m.role==='user'){if(run.length)runs.push(run.join(' '));run=[];}else if(m.role==='assistant')run.push(normalize(m.text));}
+ if(run.length)runs.push(run.join(' '));
+ return runs.some(body=>{let offset=0;for(const chunk of chunks){const at=body.indexOf(chunk,offset);if(at<0)return false;offset=at+chunk.length;}return true;});
+}
+const nativeActivities=computed(()=>orderedNativeActivities(nativeDrafts.value));
+const busyPermission=ref(''),pendingDecision=ref(null),approvalErrors=ref({});
+async function decidePermission(requestId,permissionId,optionId){
+ if(busyPermission.value||!selected.value)return;
+ const g=generation,address={connection:connection.value,session:selected.value.id};busyPermission.value=permissionId;
+ try{
+  const result=await kernelBridge.nativePermission(address.connection,address.session,requestId,permissionId,optionId);
+  if(result?.error)throw Error(String(result.error?.code||result.error));
+  if(result?.permission_id!==permissionId)throw Error('HARNESS_APPROVAL_UNCONFIRMED');
+  if(g===generation){delete approvalErrors.value[permissionId];pendingDecision.value={request:requestId,permission:permissionId};notice.value=t('nativeApprovalQueued');await refreshNativeEvents();}
+ }catch(e){if(g===generation)approvalErrors.value[permissionId]=String(e?.message||e).includes('HARNESS_TOOL_NOT_GRANTED')?'nativeApprovalRevoked':'nativeApprovalUnconfirmed';}
+ finally{busyPermission.value='';}
+}
+
+const nativeMessages=computed(()=>{
+ const time=value=>typeof value==='number'?value:Date.parse(value)||0;
+ const latestUser=Math.max(0,...(history.value?.messages||[]).filter(m=>m.role==='user').map(m=>time(m.created_at||m.createdAt||m.timestamp)));
+ // Historical checkpoints restore receipt state; they are not new replies to a later user turn.
+ return Object.entries(nativeDrafts.value).filter(([id,v])=>v.text&&!v.unconfirmed&&!(v.terminal&&id!==awaitingReply.value&&time(v.timestamp)>0&&time(v.timestamp)<latestUser)&&!nativeTextInHistory(v.text)).map(([id,v])=>({...v,id})).sort((a,b)=>time(a.timestamp)-time(b.timestamp));
+});
 const displayMessages=computed(()=>{
  const raw=history.value?.messages||[];
  if(!raw.length)return [];
@@ -92,7 +213,7 @@ const displayMessages=computed(()=>{
 });
 const syncStatusLabel=computed(()=>stripDots(syncStatus.value==='checking'?t('dshSyncChecking'):syncStatus.value==='syncing'?t('dshSyncUpdating'):syncStatus.value==='synced'?t('dshSyncCompleted'):syncStatus.value==='offline_cached'?t('dshSyncOfflineCached'):''));
 async function refreshActivity(g,id){if(Date.now()-activityChecked<10000)return;activityChecked=Date.now();try{const list=await kernelBridge.dshList(connection.value);if(g!==generation||disposed)return;const row=list.find(s=>s.id===id);nodeActivity.value=typeof row?.running==='boolean'?{running:row.running,at:Date.now()}:null}catch{if(g===generation)nodeActivity.value=null}}
-const activityLabel=computed(()=>stripDots(sending.value?t('dshSendingWaitReceipt'):replying.value?t('dshReplying'):nodeActivity.value?.running===true?t('dshNodeProcessing'):awaitingReply.value?t('dshAwaitingReply'):''));
+const activityLabel=computed(()=>stripDots(sending.value?t('dshSendingWaitReceipt'):waitingNativeApproval(nativeDrafts.value)?t('nativeApprovalPending'):replying.value?t('dshReplying'):nodeActivity.value?.running===true?t('dshNodeProcessing'):awaitingReply.value?t('dshAwaitingReply'):''));
 const agentLabel=computed(()=>{const h=selected.value?.harness||history.value?.harness||'';if(h==='agy'||selected.value?.id?.startsWith('agy:'))return t('agyAgent');if(h==='claude'||selected.value?.toolLabel==='Claude')return t('claudeAgent');if(h==='pi'||selected.value?.toolLabel==='Pi')return 'Pi';if(h==='codex'||selected.value?.toolLabel==='Codex')return 'Codex';return t('dshAgent');});
 function formatMessageTime(ts){
  if(ts===null||ts===undefined||ts===''||typeof ts==='boolean')return '';
@@ -118,16 +239,23 @@ async function copyMessage(m){
  }catch{return false;}
 }
 function scrollToBottom(){
+ chatScroll.bind(reader.value);chatScroll.bottom();
  hasNewMessages.value=false;
  if(reader.value){reader.value.scrollTop=reader.value.scrollHeight;lastTop=reader.value.scrollTop;}
 }
 const preview=ref(null);let previewScroll=0;
 const fileCache=createPersistentPreviewCache((a,known)=>kernelBridge.dshPreview(a.connectionId,a.sessionId,a.path,known));
-const fileAddress=path=>({connectionId:connection.value,sessionId:selected.value.id,endpoint:nodes.value.find(n=>n.id===connection.value)?.baseUrl||nodes.value.find(n=>n.id===connection.value)?.url||'',path:path.replace(/:\d+(?::\d+)?$/,''),cursor:history.value?.cursor});
+const fileAddress=path=>({connectionId:connection.value,sessionId:selected.value.id,endpoint:nodes.value.find(n=>n.id===connection.value)?.baseUrl||nodes.value.find(n=>n.id===connection.value)?.url||'',path:artifactPath(path),cursor:history.value?.cursor});
 let artifactQueue=[],artifactTimer,artifactRunning=false,artifactCount=0;
 async function drainArtifacts(){if(artifactRunning||disposed)return;artifactQueue=artifactQueue.filter(x=>x.visible());artifactQueue.sort((a,b)=>b.element.getBoundingClientRect().top-a.element.getBoundingClientRect().top);const item=artifactQueue.shift();if(!item||artifactCount>=6)return;artifactCount++;artifactRunning=true;try{await item.run()}finally{artifactRunning=false;artifactTimer=setTimeout(drainArtifacts,150)}}
 provide('dshArtifacts',{peek:path=>fileCache.peek(fileAddress(path)),get:path=>fileCache.get(fileAddress(path)),enqueue:item=>{if(!artifactQueue.some(x=>x.element===item.element))artifactQueue.push(item);clearTimeout(artifactTimer);artifactTimer=setTimeout(drainArtifacts,250)}});
-provide('dshPreviewGet',async a=>{const cached=await fileCache.peek(a);return cached?{...cached,from_cache:true}:fileCache.get(a)});
+provide('dshPreviewGet',async(a,onUpdate)=>{
+ const cached=await fileCache.peek(a);
+ if(!cached)return fileCache.get(a);
+ // Return the saved view immediately, then verify its complete resource version.
+ setTimeout(()=>fileCache.get(a,{force:true}).then(f=>onUpdate?.(f)).catch(()=>{}),0);
+ return {...cached,from_cache:true};
+});
 async function closePreview(){preview.value=null;await nextTick();if(reader.value){reader.value.scrollTop=previewScroll;lastTop=previewScroll;}clearTimeout(timer);timer=setTimeout(refresh,60000)}
 provide('dshOpenFile',path=>{previewScroll=reader.value?.scrollTop||0;clearTimeout(timer);preview.value=fileAddress(path)});
 let generation=0, disposed=false, restoring=false, timer;
@@ -149,7 +277,7 @@ function fault(e){const code=String(e?.message || e);if(code.includes('AGY_'))re
 async function load(){const g=++generation;clearTimeout(timer);busy.value=true;error.value='';selected.value=null;history.value=null;sessions.value=[];try{const items=await kernelBridge.dshList(connection.value);if(g===generation&&!disposed)sessions.value=items;}catch(e){if(g===generation)error.value=fault(e)}finally{if(g===generation)busy.value=false}}
 watch(connection,()=>{if(connection.value&&!props.target)load()});
 function validatePage(h,id){if(h.address.session_id!==id||h.address.connection_id!==connection.value||!Number.isSafeInteger(h.cursor)||!Number.isSafeInteger(h.before)||!Array.isArray(h.messages))throw Error('DSH_IDENTITY_MISMATCH')}
-function combine(old,h){const map=new Map((old?.messages||[]).map(m=>[m.sequence,m]));for(const m of h.messages)map.set(m.sequence,m);const replacements=[...(old?.replacements||[]),...(h.replacements||[])];for(const op of replacements)for(const seq of map.keys())if(seq>=op.startSeq&&seq<=op.endSeq)map.delete(seq);return {...h,messages:[...map.values()].sort((a,b)=>a.sequence-b.sequence),replacements,workspace:h.workspace||old?.workspace}}
+function combine(old,h){if(h.history_snapshot)return h;const map=new Map((old?.messages||[]).map(m=>[m.sequence,m]));for(const m of h.messages)map.set(m.sequence,m);const replacements=[...(old?.replacements||[]),...(h.replacements||[])];for(const op of replacements)for(const seq of map.keys())if(seq>=op.startSeq&&seq<=op.endSeq)map.delete(seq);return {...h,messages:[...map.values()].sort((a,b)=>a.sequence-b.sequence),replacements,workspace:h.workspace||old?.workspace}}
 let olderRequested=false;
 async function refresh(){if(selected.value?.historyReadable===false){error.value=t(selected.value?.historyReason==='AGY_HISTORY_NOT_LOCAL'?'agyHistoryNotLocal':'agyHistoryPending');return;}
  if(!selected.value||busy.value||loadingOlder.value||preview.value)return;
@@ -178,8 +306,8 @@ async function refresh(){if(selected.value?.historyReadable===false){error.value
    additions={...combine(older,additions),before:older.before,has_more:older.has_more};
   }
   const el=reader.value,follow=first||(el&&el.scrollHeight-el.scrollTop-el.clientHeight<80);
-  const deltaAdded=!first&&additions.messages.some(m=>m.sequence>prevCursor);
-  history.value=first?additions:{...combine(history.value,additions),before:history.value.before,has_more:history.value.has_more};error.value='';
+  const deltaAdded=!first&&(additions.history_snapshot?JSON.stringify(additions.messages)!==JSON.stringify(history.value.messages):additions.messages.some(m=>m.sequence>prevCursor));
+  history.value=first||additions.history_snapshot?additions:{...combine(history.value,additions),before:history.value.before,has_more:history.value.has_more};error.value='';
   if(!first&&deltaAdded&&(replying.value||awaitingReply.value||nodeActivity.value?.running)){
    const lastAsst=[...(history.value?.messages||[])].reverse().find(m=>m.role!=='user'&&m.sequence>prevCursor);
    if(lastAsst)streamSeq.value=lastAsst.sequence;
@@ -190,13 +318,13 @@ async function refresh(){if(selected.value?.historyReadable===false){error.value
    syncStatus.value='synced';clearTimeout(syncTimer);syncTimer=setTimeout(()=>{if(syncStatus.value==='synced')syncStatus.value='';},1800);
   }
   if(first||deltaAdded){emitTopbarPhase('syncing');clearTimeout(syncPulseTimer);syncPulseTimer=setTimeout(()=>emitTopbarPhase(),700);}else{emitTopbarPhase();}
-  await nextTick();if(g===generation&&!disposed&&follow&&reader.value)reader.value.scrollTop=reader.value.scrollHeight;
+  await nextTick();if(g===generation&&!disposed&&follow&&chatScroll.following&&reader.value)scrollToBottom();
   lastTop=reader.value?.scrollTop||0;saveHistory();
- }catch(e){if(g===generation){error.value=fault(e);nodeActivity.value=null;if(history.value!==null){clearTimeout(syncTimer);syncStatus.value='offline_cached';}}}finally{if(g===generation){busy.value=false;const pollMs=(awaitingReply.value||replying.value||nodeActivity.value?.running)?1800:60000;if(olderRequested&&reader.value?.scrollTop<=24){olderRequested=false;loadOlder()}else{olderRequested=false;timer=setTimeout(refresh,pollMs)}}}
+ }catch(e){if(g===generation){error.value=fault(e);nodeActivity.value=null;if(history.value!==null){clearTimeout(syncTimer);syncStatus.value='offline_cached';}}}finally{if(g===generation){busy.value=false;const pollMs=(awaitingReply.value||replying.value||nodeActivity.value?.running)?1800:/^(agy|claude-jsonl|codex|pi):/.test(id)?5000:60000;if(olderRequested&&reader.value?.scrollTop<=24){olderRequested=false;loadOlder()}else{olderRequested=false;timer=setTimeout(refresh,pollMs)}}}
 }
 async function loadOlder(){
  if(!history.value?.has_more||loadingOlder.value||busy.value||preview.value)return;
- const g=generation,id=selected.value.id,before=history.value.before;loadingOlder.value=true;clearTimeout(timer);
+ chatScroll.hold();const g=generation,id=selected.value.id,before=history.value.before;loadingOlder.value=true;clearTimeout(timer);
  try{
   const pageKey=readingKey(connection.value,'page',nodes.value.find(n=>n.id===connection.value)?.baseUrl||nodes.value.find(n=>n.id===connection.value)?.url||'',id,before,history.value.cursor);
   const cached=await readingCache.get(pageKey);if(g!==generation||disposed)return;
@@ -206,10 +334,10 @@ async function loadOlder(){
   void readingCache.put(pageKey,h);
   const el=reader.value, height=el?.scrollHeight||0,top=el?.scrollTop||0;
   history.value={...combine(h,history.value),before:h.before,has_more:h.has_more};error.value='';
-  await nextTick();if(g===generation&&reader.value){reader.value.scrollTop=top+reader.value.scrollHeight-height;lastTop=reader.value.scrollTop;}
+  await nextTick();if(g===generation&&reader.value){reader.value.scrollTop=top+reader.value.scrollHeight-height;lastTop=reader.value.scrollTop;chatScroll.measure();}
  }catch(e){if(g===generation)error.value=fault(e)}finally{if(g===generation){loadingOlder.value=false;timer=setTimeout(refresh,60000)}}
 }
-function onScroll(){const el=reader.value,top=el?.scrollTop||0;const upwards=top<lastTop;lastTop=top;if(el&&el.scrollHeight-top-el.clientHeight<80)hasNewMessages.value=false;if(upwards&&top<=24){if(busy.value)olderRequested=true;else loadOlder()}else if(top>24)olderRequested=false}
+function onScroll(){chatScroll.bind(reader.value);chatScroll.scroll();const el=reader.value,top=el?.scrollTop||0;const upwards=top<lastTop;lastTop=top;if(el&&el.scrollHeight-top-el.clientHeight<80)hasNewMessages.value=false;if(upwards&&top<=24){if(busy.value)olderRequested=true;else loadOlder()}else if(top>24)olderRequested=false}
 async function forceRefresh(){if(!selected.value){if(connection.value)return load();return;}clearTimeout(timer);activityChecked=0;error.value='';if(pending.value&&!sending.value)return checkReceipt();await refresh();}
 function onReaderTouchStart(e){if(!selected.value)return;const el=reader.value,atBottom=!el||(el.scrollHeight-el.scrollTop-el.clientHeight<=16);touchStartY=atBottom?(e?.touches?.[0]?.clientY??null):null;pullUpDistance.value=0;}
 function onReaderTouchMove(e){if(touchStartY===null||!selected.value)return;const y=e?.touches?.[0]?.clientY;if(typeof y!=='number')return;const delta=touchStartY-y,el=reader.value,atBottom=!el||(el.scrollHeight-el.scrollTop-el.clientHeight<=20);if(delta>8&&atBottom)pullUpDistance.value=Math.min(72,Math.round((delta-8)*0.75));else if(delta<=0)pullUpDistance.value=0;}
@@ -224,30 +352,32 @@ function removeAttachment(id){attachments.value=attachments.value.filter(a=>a.id
 function formatAttachmentBlock(list){if(!list?.length)return '';return list.map(a=>a.content?`[Attachment: ${a.name}]\n\`\`\`\n${String(a.content).slice(0,16384)}\n\`\`\``:`[Attachment: ${a.name} (${a.size||0} bytes)]`).join('\n\n');}
 function onComposeKeydown(e){if(e?.key==='Enter'&&!e.shiftKey&&!e.isComposing){e.preventDefault();void send();}}
 globalThis.__bobForceRefreshDsh=forceRefresh;
-async function open(s){clearTimeout(nativeTimer);nativeCursor=0;nativeDrafts.value={};nodeActivity.value=null;awaitingReply.value=null;replying.value=false;hasNewMessages.value=false;streamSeq.value=null;syncStatus.value='';pullUpDistance.value=0;attachments.value=[];clearTimeout(syncTimer);activityChecked=0;olderRequested=false;artifactQueue=[];artifactCount=0;persist();++generation;clearTimeout(timer);busy.value=false;loadingOlder.value=false;lastTop=0;selected.value=s;history.value=null;notice.value='';const saved=readState();restoring=true;draft.value=saved.draft||'';pending.value=saved.pending||null;restoring=false;if(pending.value)notice.value=t('dshUncertain');const g=generation;const cached=await readingCache.get(historyKey());if(g!==generation||disposed)return;if(cached){try{validatePage(cached,s.id);history.value=cached;syncStatus.value='checking';await nextTick();if(reader.value)reader.value.scrollTop=reader.value.scrollHeight;lastTop=reader.value?.scrollTop||0;}catch{}}if(s.historyReadable===false){error.value=t(s.historyReason==='AGY_HISTORY_NOT_LOCAL'?'agyHistoryNotLocal':'agyHistoryPending');return;}await refresh();void refreshNativeEvents()}
-function back(){clearTimeout(nativeTimer);persist();++generation;clearTimeout(timer);clearTimeout(syncTimer);busy.value=false;selected.value=null;history.value=null;syncStatus.value='';hasNewMessages.value=false;notice.value='';load()}
+async function open(s){approvalErrors.value={};pendingDecision.value=null;cancelRequest.value=null;cancelBusy.value=false;chatScroll.reset();clearTimeout(dshLiveTimer);dshLiveState.value=null;dshReadCursor=-1;clearTimeout(nativeTimer);nativeCursor=0;nativeEpoch='';nativeDrafts.value={};nodeActivity.value=null;awaitingReply.value=null;replying.value=false;hasNewMessages.value=false;streamSeq.value=null;syncStatus.value='';pullUpDistance.value=0;attachments.value=[];clearTimeout(syncTimer);activityChecked=0;olderRequested=false;artifactQueue=[];artifactCount=0;persist();++generation;clearTimeout(timer);busy.value=false;loadingOlder.value=false;lastTop=0;selected.value=s;history.value=null;notice.value='';const saved=readState();restoring=true;draft.value=saved.draft||'';pending.value=saved.pending||null;restoring=false;if(pending.value)notice.value=t('dshUncertain');const g=generation;const cached=await readingCache.get(historyKey());if(g!==generation||disposed)return;if(cached){try{validatePage(cached,s.id);history.value=cached;syncStatus.value='checking';await nextTick();if(reader.value)reader.value.scrollTop=reader.value.scrollHeight;lastTop=reader.value?.scrollTop||0;}catch{}}if(s.historyReadable===false){error.value=t(s.historyReason==='AGY_HISTORY_NOT_LOCAL'?'agyHistoryNotLocal':'agyHistoryPending');return;}await refresh();void refreshNativeEvents();void refreshDshLive()}
+function back(){clearTimeout(dshLiveTimer);dshLiveState.value=null;clearTimeout(nativeTimer);persist();++generation;clearTimeout(timer);clearTimeout(syncTimer);busy.value=false;selected.value=null;history.value=null;syncStatus.value='';hasNewMessages.value=false;notice.value='';load()}
 async function checkReceipt(){
  if(!pending.value || sending.value)return;
  const g=generation,p= pending.value; sending.value=true;
  try{const receipt=await kernelBridge.dshReceipt(connection.value,selected.value.id,p.text,p.id);
  if(g!==generation||disposed)return;
- if(receipt.status==='accepted' && receipt.session_id===selected.value.id && receipt.request_id===p.id){
+ if(isNotAcceptedReceipt(receipt,selected.value.id,p.id)){pending.value=null;persist();error.value='';notice.value=t('dshNotDispatched');}
+ else if(receipt.status==='accepted' && receipt.session_id===selected.value.id && receipt.request_id===p.id){
  pending.value=null;if(draft.value.trim()===p.text)draft.value='';persist();error.value='';notice.value=t('dshAccepted');
  }else{notice.value=t('dshReceiptStillUnknown');}
  }catch(e){if(g===generation)error.value=fault(e)}finally{sending.value=false;if(g===generation&&!busy.value)refresh()}
 }
 function dismissPending(){if(!pending.value||sending.value)return;if(!draft.value.trim()&&pending.value.text)draft.value=pending.value.text;pending.value=null;notice.value='';error.value='';persist();}
-async function send(){if(selected.value?.historyReadable===false){error.value=t('agyHistoryPending');return;}const attBlock=formatAttachmentBlock(attachments.value);const text=[draft.value.trim(),attBlock].filter(Boolean).join('\n\n');if(sending.value||pending.value||!text)return;const g=generation, address={connection:connection.value,session:selected.value.id};const attPayload=attachments.value.filter(a=>a.base64).map(a=>({name:a.name,type:a.type,size:a.size,base64:a.base64}));pending.value={id:crypto.randomUUID(),text};if(!persist()){pending.value=null;return;}sending.value=true;error.value='';try{const requestId=pending.value.id;const receipt=await kernelBridge.dshPrompt(address.connection,address.session,text,requestId,attPayload);if(receipt?.status!=='accepted'||receipt.session_id!==address.session||receipt.request_id!==requestId)throw Error('DSH_RECEIPT_UNKNOWN');if(g===generation){awaitingReply.value=requestId;replying.value=false;activityChecked=0;pending.value=null;attachments.value=[];if(draft.value.trim()===text||attBlock)draft.value='';persist();notice.value=t('dshAccepted');}}catch(e){if(g===generation){error.value=fault(e);notice.value=t('dshUncertain')}}finally{sending.value=false;if(g===generation&&!busy.value)refresh()}}
+async function send(){if(selected.value?.historyReadable===false){error.value=t('agyHistoryPending');return;}const attBlock=formatAttachmentBlock(attachments.value);const text=[draft.value.trim(),attBlock].filter(Boolean).join('\n\n');if(sending.value||pending.value||nativeUnresolved.value||!text)return;const g=generation, address={connection:connection.value,session:selected.value.id};const attPayload=attachments.value.filter(a=>a.base64).map(a=>({name:a.name,type:a.type,size:a.size,base64:a.base64}));pending.value={id:crypto.randomUUID(),text};if(!persist()){pending.value=null;return;}sending.value=true;error.value='';try{const requestId=pending.value.id;const receipt=await kernelBridge.dshPrompt(address.connection,address.session,text,requestId,attPayload);if(isNotAcceptedReceipt(receipt,address.session,requestId)){if(g===generation){pending.value=null;persist();notice.value=t('dshNotDispatched');}return;}if(receipt?.status!=='accepted'||receipt.session_id!==address.session||receipt.request_id!==requestId)throw Error('DSH_RECEIPT_UNKNOWN');if(g===generation){awaitingReply.value=requestId;replying.value=false;activityChecked=0;pending.value=null;attachments.value=[];if(draft.value.trim()===text||attBlock)draft.value='';persist();notice.value=t('dshAccepted');}}catch(e){if(g===generation){error.value=fault(e);notice.value=t('dshUncertain')}}finally{sending.value=false;if(g===generation&&!busy.value)refresh()}}
 watch(()=>props.target, async target=>{if(!target)return;connection.value=target.node.id;await open(target.session)},{immediate:true});
-onUnmounted(()=>{clearTimeout(nativeTimer);if(globalThis.__bobForceRefreshDsh===forceRefresh)globalThis.__bobForceRefreshDsh=null;clearTimeout(syncPulseTimer);if(typeof globalThis.__bobSetRemoteSyncPhase==='function')globalThis.__bobSetRemoteSyncPhase('');if(rodTimer&&typeof clearInterval==='function')clearInterval(rodTimer);clearTimeout(wheelResetTimer);clearTimeout(artifactTimer);clearTimeout(syncTimer);clearTimeout(copyTimer);artifactQueue=[];fileCache.clear();persist();disposed=true;++generation;clearTimeout(timer)});
+onUnmounted(()=>{chatScroll.dispose();clearTimeout(dshLiveTimer);clearTimeout(nativeTimer);if(globalThis.__bobForceRefreshDsh===forceRefresh)globalThis.__bobForceRefreshDsh=null;clearTimeout(syncPulseTimer);if(typeof globalThis.__bobSetRemoteSyncPhase==='function')globalThis.__bobSetRemoteSyncPhase('');if(rodTimer&&typeof clearInterval==='function')clearInterval(rodTimer);clearTimeout(wheelResetTimer);clearTimeout(artifactTimer);clearTimeout(syncTimer);clearTimeout(copyTimer);artifactQueue=[];fileCache.clear();persist();disposed=true;++generation;clearTimeout(timer)});
 </script>
 <template>
  <DshFilePreview v-if="preview" :address="preview" @close="closePreview" />
  <section class="dsh-sessions" :class="{embedded:!!target}" :aria-label="t('dshTitle')">
   <div ref="reader" class="dsh-reader" tabindex="0" @scroll.passive="onScroll" @touchstart.passive="onReaderTouchStart" @touchmove.passive="onReaderTouchMove" @touchend.passive="onReaderTouchEnd" @touchcancel.passive="onReaderTouchEnd" @wheel.passive="onReaderWheel">
+  <div ref="chatContent" data-chat-content>
   <header v-if="!target"><h3>{{ t('dshTitle') }}</h3><select v-model="connection" :disabled="sending" :aria-label="t('dshChooseNode')"><option value="">{{ t('dshChooseNode') }}</option><option v-for="n in nodes" :key="n.id" :value="n.id">{{ n.label || n.name || n.baseUrl || n.url }}</option></select></header>
   <p v-if="!target" class="dsh-note">{{ t('dshSource') }}</p>
-  <p v-if="error && syncStatus!=='offline_cached'" role="alert">{{ error }}</p><p v-if="notice" role="status">{{ notice }}</p>
+  <p v-if="error && syncStatus!=='offline_cached'" role="alert">{{ error }}</p><p v-if="nativeUnresolved" role="status">{{ t('nativeExecutionUnconfirmed') }}</p><p v-else-if="notice" role="status">{{ notice }}</p>
   <template v-if="connection && !selected">
    <div class="dsh-tools"><input v-model="search" type="search" :placeholder="t('dshSearch')" :aria-label="t('dshSearch')"><button :disabled="busy" @click="load">{{ t('dshRefresh') }}</button></div>
    <p v-if="busy" class="terminal-status-line" role="status"><span class="terminal-rod" aria-hidden="true">[{{ rodFrame }}]</span><span>{{ stripDots(t('dshLoading')) }}</span><span class="terminal-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span></p>
@@ -260,12 +390,16 @@ onUnmounted(()=>{clearTimeout(nativeTimer);if(globalThis.__bobForceRefreshDsh===
    <p v-if="history?.partial || history?.omitted" class="dsh-note">{{ t('dshPartial') }}</p>
    <p v-if="busy && !history" class="terminal-status-line" role="status"><span class="terminal-rod" aria-hidden="true">[{{ rodFrame }}]</span><span>{{ stripDots(t('dshLoading')) }}</span><span class="terminal-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span></p>
    <button v-if="history?.has_more" class="dsh-older" :disabled="loadingOlder || busy" @click="loadOlder"><span v-if="loadingOlder" class="terminal-rod" aria-hidden="true">[{{ rodFrame }}]</span> {{ t(loadingOlder ? 'dshLoading' : 'dshLoadOlder') }}</button>
-   <article v-for="(m, idx) in displayMessages" :key="m.sequence" :data-sequence="m.sequence" class="dsh-message" :class="{user:m.role==='user'}"><div class="dsh-message-meta"><small class="dsh-role">{{ m.role==='user'?t('dshYou'):agentLabel }}</small><time v-if="formatMessageTime(m.created_at || m.createdAt || m.timestamp)" class="dsh-time">{{ formatMessageTime(m.created_at || m.createdAt || m.timestamp) }}</time><button type="button" class="dsh-copy-btn" @click="copyMessage(m)">{{ t(copiedSeq===m.sequence?'copied':'copyMessage') }}</button></div><MessageContent :content="m.text" :thinking-steps="m.thinkingSteps || []" :plain="m.role==='user'" :stream="m.role!=='user' && idx===displayMessages.length-1 && m.sequence===streamSeq" /></article>
-   <article v-for="m in nativeMessages" :key="m.id" class="dsh-message"><small>{{ agentLabel }}</small><MessageContent :content="m.text" :stream="m.active" /></article>
+   <article v-for="(m, idx) in displayMessages" :key="m.sequence" :data-sequence="m.sequence" :data-chat-anchor="String(m.sequence)" class="dsh-message" :class="{user:m.role==='user'}"><div class="dsh-message-meta"><small class="dsh-role">{{ m.role==='user'?t('dshYou'):agentLabel }}</small><time v-if="formatMessageTime(m.created_at || m.createdAt || m.timestamp)" class="dsh-time">{{ formatMessageTime(m.created_at || m.createdAt || m.timestamp) }}</time><button type="button" class="dsh-copy-btn" @click="copyMessage(m)">{{ t(copiedSeq===m.sequence?'copied':'copyMessage') }}</button></div><MessageContent :content="m.text" :thinking-steps="m.thinkingSteps || []" :plain="m.role==='user'" :stream="m.role!=='user' && idx===displayMessages.length-1 && m.sequence===streamSeq" /></article>
+   <p v-if="dshLiveState && dshLiveState.status!=='live'" class="dsh-notice" role="status">{{ t(dshLiveState.status==='connecting'?'dshLiveConnecting':'dshLiveReconnecting') }}</p>
+   <article v-for="m in dshLiveMessages" :key="'dsh-live-'+m.id" :data-chat-anchor="'live-'+m.id" class="dsh-message"><small>{{ agentLabel }}</small><MessageContent :content="m.text" :stream="m.active" /></article>
+   <article v-for="m in nativeMessages" :key="m.id" :data-chat-anchor="m.id" class="dsh-message"><small>{{ agentLabel }}</small><MessageContent :content="m.text" :stream="m.active" /></article>
+   <NativeActivity v-for="record in nativeActivities" :key="'activity-'+record.id" :activity="record.activity" :busy-permission="busyPermission" :approval-errors="approvalErrors" @decide="(permission,option)=>decidePermission(record.id,permission,option)"/>
    <div v-if="pullUpDistance > 10" class="pull-up-refresh-hint" :class="{ready: pullUpDistance >= 36}" role="status" aria-live="polite"><span class="terminal-rod" aria-hidden="true">[{{ rodFrame }}]</span><span>{{ t(pullUpDistance >= 36 ? 'releaseToRefresh' : 'pullUpToRefresh') }}</span></div>
   </template>
   </div>
-  <div v-if="selected && hasNewMessages" class="dsh-new-msg-bar"><button type="button" class="dsh-new-msg-btn" @click="scrollToBottom">{{ t('dshNewMessagesBtn') }}</button></div>
+  </div>
+  <div v-if="selected && (awayFromLatest || hasNewMessages)" class="dsh-new-msg-bar"><button type="button" class="dsh-new-msg-btn" @click="scrollToBottom" :aria-label="t('chatJumpLatest')" :title="t('chatJumpLatest')"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M12 4v16m-6-6 6 6 6-6"/></svg></button></div>
   <form v-if="selected" class="dsh-compose" @submit.prevent="send">
    <p v-if="activityLabel" class="dsh-activity" role="status" aria-live="polite"><span class="terminal-rod" aria-hidden="true">[{{ rodFrame }}]</span> <span>{{activityLabel}}</span><span class="terminal-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span></p>
    <div class="dsh-compose-box">
@@ -277,7 +411,8 @@ onUnmounted(()=>{clearTimeout(nativeTimer);if(globalThis.__bobForceRefreshDsh===
       <button type="button" class="composer-tool-btn" :disabled="sending" :title="t('attachFileBtn')" :aria-label="t('attachFileBtn')" @click="openFilePicker"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></button>
       <span v-if="syncStatus==='offline_cached' && syncStatusLabel" class="dsh-sync-pill" :class="{active:syncStatus==='checking'||syncStatus==='syncing'}"><span v-if="syncStatus==='checking'||syncStatus==='syncing'" class="terminal-rod" aria-hidden="true">[{{ rodFrame }}]</span><span>{{ syncStatusLabel }}</span><span v-if="syncStatus==='checking'||syncStatus==='syncing'" class="terminal-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span></span>
      </div>
-     <button type="submit" class="composer-submit-btn" :disabled="sending || !!pending || (!draft.trim() && !attachments.length) || !history">{{ t(sending?'dshSending':'send') }}</button>
+     <button v-if="cancellableRequest" type="button" class="composer-submit-btn" :disabled="cancelBusy || cancelRequest===cancellableRequest" @click="cancelNative">{{ t(cancelRequest===cancellableRequest?'nativeCancelPending':'nativeCancel') }}</button>
+      <button v-else type="submit" class="composer-submit-btn" :disabled="sending || !!pending || nativeUnresolved || (!draft.trim() && !attachments.length) || !history">{{ t(sending?'dshSending':'send') }}</button>
     </div>
    </div>
    <p v-if="pending && !sending" role="status">{{ t('dshUncertain') }} <button type="button" @click="checkReceipt">{{ t('dshCheckReceipt') }}</button> <button type="button" @click="dismissPending">{{ t('dshUnlockEdit') }}</button></p>
@@ -286,5 +421,5 @@ onUnmounted(()=>{clearTimeout(nativeTimer);if(globalThis.__bobForceRefreshDsh===
 </template>
 <style scoped>
 .dsh-sessions{min-width:0;max-width:100%;padding:16px;border:1px solid var(--border-color);border-radius:12px;background:var(--bg-primary)}
-.dsh-sessions.embedded{border:0;border-radius:0;padding:0;flex:1;min-height:0;overflow:hidden;display:flex;flex-direction:column}.dsh-reader{min-height:0;flex:1;overflow-y:auto;overflow-x:hidden;scrollbar-gutter:stable;overflow-anchor:none;padding:12px;overscroll-behavior:contain}.dsh-compose{flex-shrink:0;padding:8px 12px 10px;background:var(--bg-primary);border-top:1px solid var(--border-color);display:flex;flex-direction:column;gap:6px}.dsh-compose-box{border:1px solid var(--border-color);border-radius:12px;padding:7px 10px;background:var(--bg-secondary);display:flex;flex-direction:column;gap:6px;transition:border-color .15s ease}.dsh-compose-box:focus-within{border-color:var(--accent-primary)}.dsh-compose-box textarea{width:100%;border:0;outline:none;background:transparent;padding:2px;resize:vertical;min-height:2.6rem;max-height:7.5rem}.dsh-compose-toolbar{display:flex;align-items:center;justify-content:space-between;gap:8px}.dsh-compose-left-tools{display:flex;align-items:center;gap:6px;min-width:0;flex:1;flex-wrap:wrap}.dsh-older{display:block;margin:8px auto;background:transparent;border:0;color:var(--text-secondary)}header,.dsh-tools{display:flex;align-items:center;gap:8px;flex-wrap:wrap}h3,h4{margin:0;overflow-wrap:anywhere}select,input,textarea{min-width:0;max-width:100%;color:var(--text-primary);background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:8px;padding:8px}select,input{flex:1}button{max-width:100%;white-space:normal}details{margin-top:10px}summary{overflow-wrap:anywhere;cursor:pointer;padding:8px 0}.dsh-note,small{color:var(--text-secondary);overflow-wrap:anywhere}.dsh-sync-pill{display:inline-flex;align-items:center;gap:5px;font-size:.75rem;padding:2px 8px;border-radius:999px;background:var(--bg-primary);color:var(--text-secondary);border:1px solid var(--border-color)}.dsh-tools .dsh-sync-pill{margin-left:auto}.dsh-sync-pill.active{color:var(--accent-primary);border-color:var(--accent-primary)}.dsh-session{display:flex;flex-direction:column;text-align:left;width:100%;gap:5px;margin-top:5px;padding:10px}.dsh-session strong{overflow-wrap:anywhere}.dsh-message{min-width:0;margin-top:20px;overflow-wrap:anywhere}.dsh-message-meta{display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap}.dsh-message.user{background:var(--bg-secondary);border-radius:12px;padding:14px 16px;width:fit-content;max-width:88%;margin-left:auto}.dsh-message.user .dsh-message-meta{justify-content:flex-end}.dsh-message:not(.user){padding:4px 2px}.dsh-time{font-size:.75rem;color:var(--text-secondary)}.dsh-copy-btn{padding:2px 8px;font-size:.75rem;border-radius:6px;border:1px solid var(--border-color);background:var(--bg-secondary);color:var(--text-secondary);cursor:pointer}@media(hover:hover) and (pointer:fine){.dsh-copy-btn{opacity:0;transition:opacity .15s ease}.dsh-message:hover .dsh-copy-btn,.dsh-copy-btn:focus-visible{opacity:1}}.dsh-new-msg-bar{display:flex;justify-content:center;padding:4px 12px;background:transparent}.dsh-new-msg-btn{padding:4px 14px;border-radius:999px;border:1px solid var(--border-color);background:var(--bg-secondary);color:var(--accent-primary);font-size:.82rem;cursor:pointer}.dsh-activity{margin:0;display:flex;align-items:center;gap:6px;color:var(--text-secondary);font-size:.82rem}.dsh-compose p{width:100%;margin:0}
+.dsh-sessions.embedded{border:0;border-radius:0;padding:0;flex:1;min-height:0;overflow:hidden;display:flex;flex-direction:column}.dsh-reader{min-height:0;flex:1;overflow-y:auto;overflow-x:hidden;scrollbar-gutter:stable;overflow-anchor:none;padding:12px;overscroll-behavior:contain}.dsh-compose{flex-shrink:0;padding:8px 12px 10px;background:var(--bg-primary);border-top:1px solid var(--border-color);display:flex;flex-direction:column;gap:6px}.dsh-compose-box{border:1px solid var(--border-color);border-radius:12px;padding:7px 10px;background:var(--bg-secondary);display:flex;flex-direction:column;gap:6px;transition:border-color .15s ease}.dsh-compose-box:focus-within{border-color:var(--accent-primary)}.dsh-compose-box textarea{width:100%;border:0;outline:none;background:transparent;padding:2px;resize:vertical;min-height:2.6rem;max-height:7.5rem}.dsh-compose-toolbar{display:flex;align-items:center;justify-content:space-between;gap:8px}.dsh-compose-left-tools{display:flex;align-items:center;gap:6px;min-width:0;flex:1;flex-wrap:wrap}.dsh-older{display:block;margin:8px auto;background:transparent;border:0;color:var(--text-secondary)}header,.dsh-tools{display:flex;align-items:center;gap:8px;flex-wrap:wrap}h3,h4{margin:0;overflow-wrap:anywhere}select,input,textarea{min-width:0;max-width:100%;color:var(--text-primary);background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:8px;padding:8px}select,input{flex:1}button{max-width:100%;white-space:normal}details{margin-top:10px}summary{overflow-wrap:anywhere;cursor:pointer;padding:8px 0}.dsh-note,small{color:var(--text-secondary);overflow-wrap:anywhere}.dsh-sync-pill{display:inline-flex;align-items:center;gap:5px;font-size:.75rem;padding:2px 8px;border-radius:999px;background:var(--bg-primary);color:var(--text-secondary);border:1px solid var(--border-color)}.dsh-tools .dsh-sync-pill{margin-left:auto}.dsh-sync-pill.active{color:var(--accent-primary);border-color:var(--accent-primary)}.dsh-session{display:flex;flex-direction:column;text-align:left;width:100%;gap:5px;margin-top:5px;padding:10px}.dsh-session strong{overflow-wrap:anywhere}.dsh-message{min-width:0;margin-top:20px;overflow-wrap:anywhere}.dsh-message-meta{display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap}.dsh-message.user{background:var(--bg-secondary);border-radius:12px;padding:14px 16px;width:fit-content;max-width:88%;margin-left:auto}.dsh-message.user .dsh-message-meta{justify-content:flex-end}.dsh-message:not(.user){padding:4px 2px}.dsh-time{font-size:.75rem;color:var(--text-secondary)}.dsh-copy-btn{padding:2px 8px;font-size:.75rem;border-radius:6px;border:1px solid var(--border-color);background:var(--bg-secondary);color:var(--text-secondary);cursor:pointer}@media(hover:hover) and (pointer:fine){.dsh-copy-btn{opacity:0;transition:opacity .15s ease}.dsh-message:hover .dsh-copy-btn,.dsh-copy-btn:focus-visible{opacity:1}}.dsh-new-msg-bar{height:0;position:relative;z-index:2;display:flex;justify-content:flex-end;padding:0 20px;background:transparent;transform:translateY(-46px)}.dsh-new-msg-btn{display:grid;place-items:center;width:36px;height:36px;padding:6px;border-radius:999px;border:1px solid var(--border-color);background:var(--bg-secondary);color:var(--accent-primary);font-size:.82rem;cursor:pointer}.dsh-activity{margin:0;display:flex;align-items:center;gap:6px;color:var(--text-secondary);font-size:.82rem}.dsh-compose p{width:100%;margin:0}
 </style>

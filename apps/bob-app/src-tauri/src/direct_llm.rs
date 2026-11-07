@@ -3984,6 +3984,7 @@ async fn native_dsh<R: Runtime>(
     if operation != "list" && session_id.trim().is_empty() {
         return Err("DSH_SESSION_REQUIRED");
     }
+    if matches!(operation, "events" | "cancel" | "permission") && !bob_runtime::agy_directory::owns_readable_session(&session_id) { return Err("HARNESS_EVENTS_UNSUPPORTED"); }
     if operation == "prompt" {
         if text.trim().is_empty() || text.len() > 32000 {
             return Err("DSH_TEXT_REQUIRED");
@@ -4130,6 +4131,13 @@ async fn native_dsh<R: Runtime>(
 
         let build_rpc_call = || -> (&'static str, Value) {
             match operation {
+                "events" => ("app_native_events",json!({"connectionId":"local","sessionId":session_id,"after":text.parse::<i64>().unwrap_or(0),"epoch":request_id})),
+                "permission" => {
+                    let v:Value=serde_json::from_str(&text).unwrap_or_else(|_|json!({}));
+                    ("app_native_permission",json!({"connectionId":"local","sessionId":session_id,"requestId":request_id,"permissionId":v["permissionId"],"optionId":v["optionId"]}))
+                }
+                "cancel" => ("app_native_cancel",json!({"connectionId":"local","sessionId":session_id,"requestId":request_id})),
+                "live" => ("app_dsh_live",json!({"connectionId":"local","sessionId":session_id})),
                 "page" => {
                     let v: Value = serde_json::from_str(&text).unwrap_or_else(|_| json!({}));
                     (
@@ -4189,6 +4197,7 @@ async fn native_dsh<R: Runtime>(
             let sid = session_id.clone();
             match operation {
                 "list" => client.list(),
+                "live" => client.live(bob_runtime::dsh_session::SessionAddress{connection_id:cid,session_id:sid}),
                 "page" => {
                     let v: Value = serde_json::from_str(&text).map_err(|_| "DSH_PROTOCOL")?;
                     client.history_page(
@@ -4405,4 +4414,25 @@ pub(crate) async fn app_dsh_page<R: Runtime>(host: AppHandle<R>, connection_id: 
 #[tauri::command]
 pub(crate) async fn app_dsh_preview<R: Runtime>(host: AppHandle<R>, connection_id: String, session_id: String, path: String, known: Option<Value>) -> Result<Value, &'static str> {
  native_dsh(host,connection_id,"preview",session_id,path,known.map(|v|v.to_string()).unwrap_or_default(),None).await
+}
+
+#[tauri::command]
+pub(crate) async fn app_dsh_live<R: Runtime>(host: AppHandle<R>, connection_id: String, session_id: String) -> Result<Value, &'static str> {
+ native_dsh(host,connection_id,"live",session_id,String::new(),String::new(),None).await
+}
+
+#[tauri::command]
+pub(crate) async fn app_native_events<R: Runtime>(host: AppHandle<R>, connection_id: String, session_id: String, after: Option<i64>, epoch: Option<String>) -> Result<Value, &'static str> {
+ native_dsh(host,connection_id,"events",session_id,after.unwrap_or(0).to_string(),epoch.unwrap_or_default(),None).await
+}
+#[tauri::command]
+pub(crate) async fn app_native_cancel<R: Runtime>(host: AppHandle<R>, connection_id: String, session_id: String, request_id: String) -> Result<Value, &'static str> {
+ if request_id.is_empty() || request_id.len()>200 { return Err("DSH_REQUEST_REQUIRED"); }
+ native_dsh(host,connection_id,"cancel",session_id,String::new(),request_id,None).await
+}
+
+#[tauri::command]
+pub(crate) async fn app_native_permission<R: Runtime>(host: AppHandle<R>, connection_id: String, session_id: String, request_id: String, permission_id: String, option_id: Option<String>) -> Result<Value, &'static str> {
+ if !session_id.starts_with("agy:") || request_id.is_empty() || request_id.len()>200 || permission_id.is_empty() || permission_id.len()>128 || option_id.as_ref().is_some_and(|x|x.len()>128) {return Err("HARNESS_APPROVAL_INVALID")}
+ native_dsh(host,connection_id,"permission",session_id,json!({"permissionId":permission_id,"optionId":option_id}).to_string(),request_id,None).await
 }

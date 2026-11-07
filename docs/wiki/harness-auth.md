@@ -128,6 +128,10 @@ ightarrow$ 标记 `insufficient_scope`，明确告知用户当前设备角色缺
 
 ### 6.3 统一流式事件与恢复
 
+AGY ACP源事件恢复必须匹配持久请求的原生session与严格整数acp_request_id；session/prompt_result额外持久化规范session_id，不信任缺身份的旧结果或其他请求结果。正文源片段独立累积，覆盖源事件已落盘而展示投影未落盘的崩溃窗口。只有官方end_turn/cancelled可补终态；没有官方结果仍unknown，不重发。
+
+旧轮次仅找到结束摘要而完整条目读取失败时，保持已确认终态并持久化recovery_pending；后续有界补读成功才清除，不再生成第二次终态事件。该状态属于恢复检查点，不允许迟到普通事件重开结束的请求。
+
 - 事件信封包含 schema_version、device_id、adapter/profile、native_session_id、Bob request_id/执行引用（可空）、原生 turn/message/item ID（不可得时可空）、Bob 持久 event_id/sequence、原生 cursor（如支持）、observed_at、kind 与有界 payload。关联不明时保持未知，不把“最新回复”直接归到本次请求。
 - 统一 kind：accepted、running、text_delta、message_snapshot、tool_status、approval_required、artifact_available、completed、failed、cancelled。完成、取消确认和消息快照不同；停止请求不等于目标已停止。
 - UI 以真实事件呈现发送中、已接收、处理中、回复中、完成；审批独立可操作。只有上游正在输出可展示文本才追加 text_delta；整包接口显示处理中后一次呈现，不伪造打字动画，不索取内部思维链。
@@ -146,8 +150,33 @@ ightarrow$ 标记 `insufficient_scope`，明确告知用户当前设备角色缺
 
 终态必须结合原生结束原因：Pi agent_settled 不能覆盖此前 length/error/aborted，message_end 仅处理 assistant，空回复不能报告完成；上游中断、超时或进程消失保持 unknown，阻止自动重发。现有候选限制为只读验证，不代表任意工具修改文件获得授权。
 
-当前有帧/队列/正文/单请求事件限制，但全局事件保留、过期游标、完整 turn/item 身份、取消、跨轮常驻进程仍待接。DSH 现场协议需要 assistantStream=true 才推 assistant-stream(start/chunk/end)，text-delta.text 为正文；旧 snapshot reader 不等于流式订阅。实际通过与失败分工具见 CURRENT_STAGE §3.6 和 2026-11-05 evidence，不把官方支持写成产品已接通。
+当前正文/终态事件已增加全局有界日志及恢复投影：最多20,000条/16MiB载荷/7天，快照最多256个/64MiB/7天；这是逻辑保留上限，SQLite物理文件与WAL不承诺立即缩小。每页100事件/1.5MiB，epoch变化、游标落后保留窗口或领先服务器时返回reset+替换快照+history_required；一次快照最多32项/1.5MiB，超出明确snapshot_incomplete，不冒称完整。未决/unknown发送回执不随阅读缓存删除，过期快照仍可由请求回执与原生历史核对。终态事件与最终回执互相修复崩溃窗口；迟到事件不能重开已确认终态。外部Codex重连只按官方原轮次确认状态，无法确认时标unknown，不能当新回复追加或继续转圈。此机制尚不等于审批、工具过程、成果身份等所有事件类型的恢复；跨轮常驻监管和各工具外部订阅仍待接。DSH 现场协议需要 assistantStream=true 才推 assistant-stream(start/chunk/end)，text-delta.text 为正文；旧 snapshot reader 不等于流式订阅。实际通过与失败分工具见 CURRENT_STAGE §3.6 和 2026-11-05 evidence，不把官方支持写成产品已接通。
 
 ### 统一设备入口与 DSH 直连分流
 
 连接类型由无凭据的节点协议发现确认，不根据主机名称推断。Bob 节点请求使用设备 Bearer，不能作为 DSH 启动令牌放入 URL；原生 DSH 直连继续使用 Cookie 与受控日志恢复。已确认节点发生请求错误时不得改投其他 peer，未知发送不自动重发。网页与 Tauri 必须保持一致。
+
+### 活动原会话与新续聊进程的边界
+
+Claude适配器在启动结构化resume前调用同用户官方`claude agents --json`核对活动会话（已核验安装版本2.1.319）。清单包含交互式及后台会话；`idle`仍表示会话被进程持有，不能据此从另一个进程resume。相同`sessionId`返回`HARNESS_SESSION_BUSY`；清单失败或结构无法核实返回`HARNESS_ACTIVITY_UNCONFIRMED`，不会启动续聊进程。旧版本未提供此接口时亦不能宣称已经证明无活动持有者。
+
+该探测并非跨进程原子锁，也不解决探测后另一个外部进程启动的竞争；官方原进程附着/事件接入仍需实现。`claude logs`帮助定义为终端输出，不用它解析状态或充当结构化实时事件源。AGY官方remote-control daemon存在也不自动意味着第三方可消费其网页远控通道；继续使用已核实的官方程序接口，不逆向凭据或刮屏。
+
+### AGY ACP 的能力协商与历史重放边界
+
+官方接入说明：https://antigravity.google/docs/ide/extensions/acp 。AGY 根帮助未列出某子命令不能作为“不支持”的证据；以该子命令帮助及实际初始化能力为准。X1T安装版本1.4.12实测支持`agy acp --stdio`，协议1，复用同用户缓存认证，不从Bob复制OAuth凭据。已验证list/load/resume；不将这些只读能力推导为取消、审批或外部活跃进程订阅已可用。
+
+官方协议`session/load`会重放历史（https://agentclientprotocol.com/protocol/v1/session-setup）。Google文档称resume不重放，但本次同版本实测resume仍产生148条初始化更新。适配器必须显式区分加载阶段与prompt阶段，不能把历史片段算作新回复或把其终态匹配到新请求；常驻连接优先，不能每次网页轮询重新启动ACP及拉全历史。断连后未知prompt不能自动重发。权限请求不能由历史回放自动批准，客户端请求与响应ID分开识别。
+
+外部CLI独立进程的实时订阅还需单独证明；官方Remote Control网页可用不等于提供第三方订阅接口。ACP会话成功加载也不自动证明共享执行者或避免双写。先在私有专用会话确认所有权、精确身份、实际流和取消，再替换既有发送路径。
+
+### Claude 宿主工具清单与逐次审批
+
+节点device_harnesses配置中的claudeTools为显式工具名数组，默认空；仅在claude-jsonl原会话且已通过精确Harness授权时传给执行端。操作端请求和模型提示不能自行扩大清单。最多32项，仅接受规范工具名，不接受通配符、默认整包或命令行参数；空配置保留无工具模式。非空配置经官方stdio审批通道逐次确认，ask规则覆盖已有allow；收到请求时再次核对工具名。取消、过期、无法确认执行者身份和未知结果不得自动批准。
+
+本轮仅验证Read；工具名清单不是文件目录沙箱，仍须核对每次调用的具体参数，不能据此宣称路径隔离或任意写入已验收。执行接纳前持久保存tool_authorization；批准时取原始清单与当前宿主清单交集，缺失旧快照只允许拒绝。此检查针对批准提交前撤销，不撤回已批准或已执行动作；批准后到工具执行间的原子撤销仍未实现。实际证据见CURRENT_STAGE §3.6。官方规则优先级依据：https://code.claude.com/docs/en/permissions 。
+
+
+### 外部运行中会话的接口边界（实测补充）
+
+历史、执行状态、正文增量、审批决策、成果引用分别验收，不以状态可读推断全文可订阅。Claude 官方 `agents --json --all` 可核对 busy/waiting/idle；终端 attach/logs 不作为结构化事件接口。AGY ACP 已有会话续接与外部进程热附着是不同能力；不得二次启动已有执行中的会话。官方 Hooks 适合作为生命周期观测候选，需核对当前版本载入方式、会话标识与去重后再启用，不能当作 token 流或授权代理。参见 [Claude 官方会话管理](https://code.claude.com/docs/en/agent-view)、[AGY ACP](https://antigravity.google/docs/cli/acp/)、[AGY Hooks](https://antigravity.google/docs/hooks/)、[AGY Sidecars](https://antigravity.google/docs/sidecars/)。

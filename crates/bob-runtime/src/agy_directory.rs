@@ -1,5 +1,5 @@
-//! Read-only multi-harness remote directory & session history reader (AGY, Claude, Pi, Codex, DSH/Control-Plane).
-//! No model execution or private credential decoding is performed here.
+//! Multi-harness directory, history and authorized native-session transport.
+//! Execution and approval remain bound to the host grant and original session.
 use std::{fs, io::{Read, Write}, path::Path, process::{Command, Stdio}, thread, time::{Duration, Instant}};
 use base64::{Engine, engine::general_purpose::STANDARD};
 use serde::{Deserialize, Serialize};
@@ -22,6 +22,8 @@ struct HostGrant {
     control_plane_dbs: Vec<String>,
     #[serde(default)]
     harnesses: Vec<String>,
+    #[serde(default)]
+    claude_tools: Vec<String>,
 }
 
 impl HostGrant {
@@ -244,7 +246,7 @@ fn run_local_python(arg_str: &str, timeout_secs: u64, source: &str) -> Result<Ve
     let stdout = child.stdout.take().ok_or("AGY_HOST_UNAVAILABLE")?;
     let reader = thread::spawn(move || {
         let mut b = Vec::new();
-        stdout.take(2 * 1024 * 1024 + 1).read_to_end(&mut b).map(|_| b)
+        stdout.take(4 * 1024 * 1024 + 1).read_to_end(&mut b).map(|_| b)
     });
     let started = Instant::now();
     let success = loop {
@@ -264,10 +266,44 @@ fn run_local_python(arg_str: &str, timeout_secs: u64, source: &str) -> Result<Ve
         .join()
         .map_err(|_| "AGY_INDEX_UNAVAILABLE")?
         .map_err(|_| "AGY_INDEX_UNAVAILABLE")?;
-    if !success || b.len() > 2 * 1024 * 1024 {
+    if !success || b.len() > 4 * 1024 * 1024 {
         return Err("AGY_INDEX_UNAVAILABLE");
     }
     Ok(b)
+}
+
+
+/// Render bytes already authorized and read by a transport. No path or host comes
+/// from the request; the same bounded renderer is used for native and DSH files.
+pub(crate) fn render_document_bytes(bytes: &[u8], extension: &str) -> Result<Value, &'static str> {
+    if !["pdf","docx","xlsx","pptx","doc","xls","ppt","odt","ods","odp"].contains(&extension) {
+        return Err("DSH_FILE_TYPE_UNSUPPORTED");
+    }
+    if bytes.len() >= 2*1024*1024 { return Err("DSH_FILE_TOO_LARGE"); }
+    // Carry document bytes over stdin, never in argv (size limit and visibility).
+    let source = format!("{}\ntry:\n print(json.dumps(_document_preview(base64.b64decode('{}'), '{}', {})))\nexcept (ValueError,OSError) as exc:\n print(json.dumps({{'error':str(exc) if isinstance(exc,ValueError) else 'DSH_DOCUMENT_RENDER_FAILED'}}))\n",
+        include_str!("agy_index_probe.py").replace("if __name__ == '__main__':", "if False:"),
+        STANDARD.encode(bytes), extension, 2*1024*1024-bytes.len());
+    let raw=run_local_python("{}",100,&source).map_err(|e|match e {
+        "AGY_HOST_UNAVAILABLE"=>"DSH_DOCUMENT_RENDERER_UNAVAILABLE",
+        "AGY_HOST_TIMEOUT"=>"DSH_DOCUMENT_RENDER_TIMEOUT",
+        _=>"DSH_DOCUMENT_RENDER_FAILED",
+    })?;
+    let result:Value=serde_json::from_slice(&raw).map_err(|_|"DSH_DOCUMENT_RENDER_FAILED")?;
+    if let Some(code)=result["error"].as_str() {
+        return Err(match code {
+            "DSH_DOCUMENT_RENDERER_UNAVAILABLE"=>"DSH_DOCUMENT_RENDERER_UNAVAILABLE",
+            "DSH_DOCUMENT_SANDBOX_UNAVAILABLE"=>"DSH_DOCUMENT_SANDBOX_UNAVAILABLE",
+            "DSH_DOCUMENT_RENDER_TIMEOUT"=>"DSH_DOCUMENT_RENDER_TIMEOUT",
+            "DSH_DOCUMENT_PAGE_LIMIT"=>"DSH_DOCUMENT_PAGE_LIMIT",
+            "DSH_FILE_TOO_LARGE"=>"DSH_FILE_TOO_LARGE",
+            _=>"DSH_DOCUMENT_RENDER_FAILED",
+        });
+    }
+    if !result["pages"].is_array() || result["page_count"].as_u64().is_none() {
+        return Err("DSH_DOCUMENT_RENDER_FAILED");
+    }
+    Ok(result)
 }
 
 fn run_ssh_python(ssh_target: &str, arg_str: &str, timeout_secs: u64) -> Result<Vec<u8>, &'static str> {
@@ -293,7 +329,7 @@ fn run_host_python(ssh_target: &str, arg_str: &str, timeout_secs: u64, source: &
         let _=stdin.write_all(compacted.as_bytes());
     }
     let stdout=child.stdout.take().ok_or("AGY_HOST_UNAVAILABLE")?;
-    let reader=thread::spawn(move || { let mut b=Vec::new();stdout.take(2*1024*1024+1).read_to_end(&mut b).map(|_|b) });
+    let reader=thread::spawn(move || { let mut b=Vec::new();stdout.take(4*1024*1024+1).read_to_end(&mut b).map(|_|b) });
     let started=Instant::now();
     let success=loop {
         match child.try_wait() {
@@ -303,7 +339,7 @@ fn run_host_python(ssh_target: &str, arg_str: &str, timeout_secs: u64, source: &
         }
     };
     let b=reader.join().map_err(|_|"AGY_INDEX_UNAVAILABLE")?.map_err(|_|"AGY_INDEX_UNAVAILABLE")?;
-    if !success || b.len()>2*1024*1024 { return Err("AGY_INDEX_UNAVAILABLE") }
+    if !success || b.len()>4*1024*1024 { return Err("AGY_INDEX_UNAVAILABLE") }
     Ok(b)
 }
 
@@ -371,11 +407,10 @@ pub fn read_page(data: &Path, connection: &str, session_id: &str, after: Option<
         let ttl=if has_running || after.is_some() { 2 } else { 15 };
         if age<ttl {
             if let Some(mut page)=cached.get("page").cloned() {
-                let cursor=page["cursor"].as_i64().unwrap_or(0);
-                if after.is_some_and(|a|a>=cursor) && !has_running {
-                    page["not_modified"]=json!(true);
-                    page["messages"]=json!([]);
-                }
+                // Native history is a mutable bounded snapshot, not an append-only log.
+                // A stable message count does not prove unchanged text (or window contents).
+                page["not_modified"]=json!(false);
+                page["history_snapshot"]=json!(true);
                 return Ok(page);
             }
         }
@@ -396,7 +431,7 @@ pub fn read_page(data: &Path, connection: &str, session_id: &str, after: Option<
     let cursor=msgs.len() as i64;
     let harness=raw["harness"].as_str().unwrap_or("dsh");
     let workspace=raw["workspace"].as_str().unwrap_or("");
-    let mut page=json!({
+    let page=json!({
         "address": { "connection_id": connection, "session_id": session_id },
         "harness": harness,
         "workspace": workspace,
@@ -404,16 +439,12 @@ pub fn read_page(data: &Path, connection: &str, session_id: &str, after: Option<
         "before": if msgs.is_empty() { 0 } else { 1 },
         "has_more": false,
         "not_modified": false,
+        "history_snapshot": true,
         "replacements": [],
         "messages": msgs,
         "request_results": req_results,
     });
     let _=fs::write(&cache_path, serde_json::to_vec(&json!({"at":now,"page":page})).unwrap_or_default());
-    let has_running=req_results.iter().any(|r|r["status"].as_str()==Some("running"));
-    if after.is_some_and(|a|a>=cursor) && !has_running {
-        page["not_modified"]=json!(true);
-        page["messages"]=json!([]);
-    }
     Ok(page)
 }
 
@@ -424,8 +455,11 @@ pub fn prompt_session(data: &Path, connection: &str, session_id: &str, text: &st
     }
     let all=grants(data)?;
     let Some(g)=all.iter().find(|g|g.connection_id==connection) else { return Err("DSH_CONNECTION_REQUIRED") };
+    require_native_harness_grant(g, session_id)?;
     let arg_str=serde_json::to_string(&json!({
         "mode": "prompt",
+        "approvalMode": if session_id.starts_with("agy:") || (session_id.starts_with("claude-jsonl:") && !g.claude_tools.is_empty()) { "interactive" } else { "deny" },
+        "claudeTools": if session_id.starts_with("claude-jsonl:") { g.claude_tools.clone() } else { vec![] },
         "sessionId": session_id,
         "text": text,
         "requestId": request_id,
@@ -449,11 +483,83 @@ pub fn prompt_session(data: &Path, connection: &str, session_id: &str, text: &st
     Ok(res)
 }
 
-pub fn native_events(data: &Path, connection: &str, session: &str, after: i64) -> Result<Value, &'static str> {
+fn require_native_harness_grant(grant: &HostGrant, session: &str) -> Result<(), &'static str> {
+    let tool = match session.split_once(':').map(|(tool, _)| tool) {
+        Some("claude-jsonl") => "claude",
+        Some(tool @ ("codex" | "agy" | "pi" | "claude")) => tool,
+        _ => return Err("HARNESS_EVENTS_UNSUPPORTED"),
+    };
+    if !grant.harnesses.iter().any(|allowed| allowed == tool) {
+        return Err("HARNESS_TOOL_NOT_GRANTED");
+    }
+    Ok(())
+}
+
+pub fn native_permission(data: &Path, connection: &str, session: &str, request: &str, permission: &str, option: Option<&str>) -> Result<Value, &'static str> {
+    if !session.starts_with("agy:") && !session.starts_with("claude-jsonl:") { return Err("HARNESS_APPROVAL_UNSUPPORTED") }
+    if permission.is_empty() || permission.len()>128 || option.is_some_and(|x|x.len()>128) { return Err("HARNESS_APPROVAL_INVALID") }
+    let all=grants(data)?;
+    let grant=all.iter().find(|g|g.connection_id==connection).ok_or("DSH_CONNECTION_REQUIRED")?;
+    require_native_harness_grant(grant, session)?;
+    let bytes=run_ssh_python(&grant.ssh_target,&json!({"mode":"permission","sessionId":session,"requestId":request,"permissionId":permission,"optionId":option,"claudeTools":grant.claude_tools}).to_string(),15)?;
+    serde_json::from_slice(&bytes).map_err(|_|"HARNESS_APPROVAL_UNCONFIRMED")
+}
+
+pub fn native_cancel(data: &Path, connection: &str, session: &str, request: &str) -> Result<Value, &'static str> {
+    if !session.starts_with("codex:") && !session.starts_with("pi:") && !session.starts_with("agy:") && !session.starts_with("claude-jsonl:") { return Err("HARNESS_CANCEL_UNSUPPORTED") }
+    let all=grants(data)?;
+    let grant=all.iter().find(|g|g.connection_id==connection).ok_or("DSH_CONNECTION_REQUIRED")?;
+    require_native_harness_grant(grant, session)?;
+    let bytes=run_ssh_python(&grant.ssh_target,&json!({"mode":"cancel","sessionId":session,"requestId":request}).to_string(),15)?;
+    serde_json::from_slice(&bytes).map_err(|_|"HARNESS_CANCEL_UNCONFIRMED")
+}
+
+pub(crate) fn preview_host_timeout_secs(path: &str) -> u64 {
+    let ext=Path::new(path).extension().and_then(|s|s.to_str()).unwrap_or("").to_ascii_lowercase();
+    // Office 45s + pdfinfo 10s + page rasterization 40s + process overhead.
+    if ["pdf","docx","xlsx","pptx","doc","xls","ppt","odt","ods","odp"].contains(&ext.as_str()) {110} else {35}
+}
+
+pub fn preview_native_file(data: &Path, connection: &str, session: &str, path: &str, known: Option<&Value>) -> Result<Value, &'static str> {
+    if !owns_readable_session(session) { return Err("DSH_SESSION_NOT_FOUND") }
+    let all=grants(data)?;
+    let g=all.iter().find(|g|g.connection_id==connection).ok_or("DSH_CONNECTION_REQUIRED")?;
+    let tool=if session.starts_with("claude-jsonl:") {"claude"} else {session.split(':').next().unwrap_or("")};
+    if !g.harnesses.iter().any(|h|h==tool) { return Err("HARNESS_TOOL_NOT_GRANTED") }
+    let args=json!({"mode":"preview","sessionId":session,"path":path,"known":known,
+        "agyDataDir":g.agy_data_dir,"claudeDataDir":g.claude_data_dir,"piDataDir":g.pi_data_dir,"codexDataDir":g.codex_data_dir});
+    let bytes=run_ssh_python(&g.ssh_target,&args.to_string(),preview_host_timeout_secs(path))
+        .map_err(|e|if e=="AGY_HOST_TIMEOUT" {"DSH_FILE_TIMEOUT"} else {e})?;
+    let mut value:Value=serde_json::from_slice(&bytes).map_err(|_|"DSH_PREVIEW_UNAVAILABLE")?;
+    if let Some(error)=value["error"].as_str() {
+        return Err(match error {
+            "DSH_FILE_TOO_LARGE"=>"DSH_FILE_TOO_LARGE",
+            "DSH_DOCUMENT_RENDERER_UNAVAILABLE"=>"DSH_DOCUMENT_RENDERER_UNAVAILABLE",
+            "DSH_DOCUMENT_SANDBOX_UNAVAILABLE"=>"DSH_DOCUMENT_SANDBOX_UNAVAILABLE",
+            "DSH_DOCUMENT_RENDER_TIMEOUT"=>"DSH_DOCUMENT_RENDER_TIMEOUT",
+            "DSH_DOCUMENT_RENDER_FAILED"=>"DSH_DOCUMENT_RENDER_FAILED",
+            "DSH_DOCUMENT_PAGE_LIMIT"=>"DSH_DOCUMENT_PAGE_LIMIT",
+
+            "DSH_FILE_CHANGED"=>"DSH_FILE_CHANGED",
+            "DSH_FILE_NOT_REFERENCED"=>"DSH_FILE_NOT_REFERENCED",
+            "DSH_FILE_OUTSIDE_WORKSPACE"=>"DSH_FILE_OUTSIDE_WORKSPACE",
+            "DSH_FILE_PATH_REJECTED"=>"DSH_FILE_PATH_REJECTED",
+            "DSH_FILE_TYPE_UNSUPPORTED"=>"DSH_FILE_TYPE_UNSUPPORTED",
+            "DSH_SESSION_NOT_FOUND"=>"DSH_SESSION_NOT_FOUND",
+            _=>"DSH_PREVIEW_UNAVAILABLE",
+        });
+    }
+    if value["path"]!=path || value["session_id"]!=session {return Err("DSH_IDENTITY_MISMATCH")}
+    value["connection_id"]=json!(connection);
+    Ok(value)
+}
+
+pub fn native_events(data: &Path, connection: &str, session: &str, after: i64, epoch: Option<&str>) -> Result<Value, &'static str> {
     if !owns_readable_session(session) { return Err("HARNESS_EVENTS_UNSUPPORTED") }
     let all=grants(data)?;
     let grant=all.iter().find(|g|g.connection_id==connection).ok_or("DSH_CONNECTION_REQUIRED")?;
-    let args=json!({"mode":"events","sessionId":session,"after":after});
+    require_native_harness_grant(grant, session)?;
+    let args=json!({"mode":"events","sessionId":session,"after":after,"epoch":epoch,"observeExternal":session.starts_with("codex:") && grant.harnesses.iter().any(|h|h=="codex")});
     let bytes=run_ssh_python(&grant.ssh_target,&args.to_string(),15)?;
     serde_json::from_slice(&bytes).map_err(|_|"HARNESS_EVENTS_INVALID")
 }
@@ -528,5 +634,42 @@ fn normalize(connection: &str, s: &Value)->Result<Value,&'static str>{
   assert_eq!(v["toolLabel"],"Pi");
   assert_eq!(v["historyReadable"],true);
  }
+ #[test] fn dsh_document_bridge_bounds_before_process() {
+  assert_eq!(render_document_bytes(b"", "exe").unwrap_err(),"DSH_FILE_TYPE_UNSUPPORTED");
+  assert_eq!(render_document_bytes(&vec![0;2*1024*1024], "pdf").unwrap_err(),"DSH_FILE_TOO_LARGE");
+ }
+ #[test] fn dsh_document_bridge_real_pdf_when_renderer_installed() {
+  if !Command::new("pdfinfo").arg("-v").output().is_ok_and(|v|v.status.success()) { return; }
+  let bytes=STANDARD.decode("JVBERi0xLjQKMSAwIG9iago8PCAvVHlwZSAvQ2F0YWxvZyAvUGFnZXMgMiAwIFIgPj4KZW5kb2JqCjIgMCBvYmoKPDwgL1R5cGUgL1BhZ2VzIC9LaWRzIFszIDAgUl0gL0NvdW50IDEgPj4KZW5kb2JqCjMgMCBvYmoKPDwgL1R5cGUgL1BhZ2UgL1BhcmVudCAyIDAgUiAvTWVkaWFCb3ggWzAgMCAyMDAgMjAwXSAvUmVzb3VyY2VzIDw8ID4+IC9Db250ZW50cyA0IDAgUiA+PgplbmRvYmoKNCAwIG9iago8PCAvTGVuZ3RoIDI3ID4+CnN0cmVhbQowIDAgMSByZyAxMCAxMCAxMDAgMTAwIHJlIGYKZW5kc3RyZWFtCmVuZG9iagp4cmVmCjAgNQowMDAwMDAwMDAwIDY1NTM1IGYgCjAwMDAwMDAwMDkgMDAwMDAgbiAKMDAwMDAwMDA1OCAwMDAwMCBuIAowMDAwMDAwMTE1IDAwMDAwIG4gCjAwMDAwMDAyMTkgMDAwMDAgbiAKdHJhaWxlcgo8PCAvU2l6ZSA1IC9Sb290IDEgMCBSID4+CnN0YXJ0eHJlZgoyOTYKJSVFT0YK").unwrap();
+  let result=render_document_bytes(&bytes,"pdf").unwrap();
+  assert_eq!(result["page_count"],1);
+  assert_eq!(result["pages"][0]["number"],1);
+  let image=STANDARD.decode(result["pages"][0]["data"].as_str().unwrap()).unwrap();
+  assert!(image.starts_with(&[0xff,0xd8]));
+  assert_eq!(render_document_bytes(b"malformed", "pdf").unwrap_err(),"DSH_DOCUMENT_RENDER_FAILED");
+ }
  #[test] fn unconfigured_device_is_empty(){let d=tempfile::tempdir().unwrap();assert!(list(d.path(),"none").unwrap().is_empty())}
+}
+
+#[cfg(test)]
+mod native_grant_tests {
+    use super::*;
+    #[test]
+    fn dsh_native_control_rejects_ungranted_tool_before_host_contact() {
+        let data = tempfile::tempdir().unwrap();
+        fs::write(data.path().join("device_harnesses.json"), serde_json::to_vec(&json!([
+            {"connectionId":"test-node","sshTarget":"must-not-be-contacted.invalid","harnesses":["agy"]}
+        ])).unwrap()).unwrap();
+        assert_eq!(native_cancel(data.path(),"test-node","codex:12345678","request").unwrap_err(),"HARNESS_TOOL_NOT_GRANTED");
+        assert_eq!(native_events(data.path(),"test-node","codex:12345678",0,None).unwrap_err(),"HARNESS_TOOL_NOT_GRANTED");
+        assert_eq!(prompt_session(data.path(),"test-node","codex:12345678","read only","request").unwrap_err(),"HARNESS_TOOL_NOT_GRANTED");
+    }
+    #[test]
+    fn dsh_native_grant_uses_exact_tool_and_claude_alias() {
+        let grant: HostGrant = serde_json::from_value(json!({"connectionId":"test","sshTarget":"local","harnesses":["claude","agy"]})).unwrap();
+        assert!(require_native_harness_grant(&grant,"claude-jsonl:12345678").is_ok());
+        assert!(require_native_harness_grant(&grant,"agy:12345678").is_ok());
+        assert_eq!(require_native_harness_grant(&grant,"pi:12345678"),Err("HARNESS_TOOL_NOT_GRANTED"));
+        assert_eq!(require_native_harness_grant(&grant,"unknown:12345678"),Err("HARNESS_EVENTS_UNSUPPORTED"));
+    }
 }

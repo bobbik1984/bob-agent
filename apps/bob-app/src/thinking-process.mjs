@@ -5,7 +5,7 @@
 
 export const TERMINAL_ROD_FRAMES = ['|', '/', '-', '\\'];
 
-const TOOL_LINE_RE = /^(?:[-*]\s+)?(?:`?\[(?:Tool|Thinking)(?::\s*[^\]]*)?\]`?)/i;
+const TOOL_LINE_RE = /^(?:[-*]\s+)?(?:`?\[(?:Tool|ToolResult|Thinking)(?::\s*[^\]]*)?\]`?)/i;
 
 export function cleanStepLine(line) {
   const s = String(line ?? '')
@@ -15,7 +15,7 @@ export function cleanStepLine(line) {
   return s.length > 220 ? `${s.slice(0, 217)}...` : s;
 }
 
-export function summarizeProcessSteps(steps, locale = 'zh-CN') {
+export function summarizeProcessSteps(steps, locale = 'zh-CN', translate) {
   if (!Array.isArray(steps) || steps.length === 0) return '';
   let cmd = 0;
   let read = 0;
@@ -41,25 +41,11 @@ export function summarizeProcessSteps(steps, locale = 'zh-CN') {
   const totalTools = cmd + read + edit + search + otherTool;
   if (totalTools === 0) return '';
 
-  const isZh = String(locale ?? 'zh-CN').toLowerCase().startsWith('zh');
-  if (isZh) {
-    const parts = [];
-    if (cmd > 0) parts.push(`执行了 ${cmd} 条命令`);
-    if (read > 0) parts.push(`读取了 ${read} 个文件`);
-    if (edit > 0) parts.push(`修改了 ${edit} 个文件`);
-    if (search > 0) parts.push(`搜索了 ${search} 次`);
-    if (otherTool > 0) parts.push(`调用了 ${otherTool} 个工具`);
-    return parts.join('，');
-  }
-
-  const parts = [];
-  if (cmd > 0) parts.push(cmd === 1 ? 'ran a command' : `ran ${cmd} commands`);
-  if (read > 0) parts.push(read === 1 ? 'read a file' : `read ${read} files`);
-  if (edit > 0) parts.push(edit === 1 ? 'edited a file' : `edited ${edit} files`);
-  if (search > 0) parts.push(search === 1 ? 'searched once' : `searched ${search} times`);
-  if (otherTool > 0) parts.push(otherTool === 1 ? 'used a tool' : `used ${otherTool} tools`);
-  const joined = parts.join(', ');
-  return joined ? joined.charAt(0).toUpperCase() + joined.slice(1) : '';
+  if (typeof translate !== 'function') return '';
+  const counts = { command: cmd, read, edit, search, other: otherTool };
+  return Object.entries(counts).filter(([, count]) => count > 0)
+    .map(([kind, count]) => translate(`processCall_${kind}`, { count }))
+    .join(translate('processCall_separator'));
 }
 
 export function parseMessageSegments(rawContent, extraSteps = []) {

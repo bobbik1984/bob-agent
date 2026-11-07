@@ -11,7 +11,7 @@ project:
   - Desktop
   - Android
   - Web (bob-node)
-  current_task: "额度源码7e24e2a已发布网页与后端：Codex/AGY真实持续采集和生产Edge/Chromium菜单验证通过；Claude官方回调已安装但无rate_limits观测，继续待验收。设备路径未迁移，Actions通道待验证；本轮无APK，手机暂停。"
+  current_task: "优先事件恢复：epoch/失效游标替换快照、有界日志、回执终态双向修复与旧外部轮次核对已实现。Python48/前端24/Rust27及两节点真实记录副本通过；网页及三节点已发布，生产认证恢复读回通过，见现有Evidence。完整外部订阅/所有事件类型、Codex真实取消、跨Harness成果及HTML渲染仍待；Claude额度后置，无APK，手机暂停。"
   development_plan: docs/CURRENT_STAGE.md
 phases:
 - name: BP0 真相与保护

@@ -1,3 +1,7 @@
+import {artifactPath} from '../src/artifact-path.mjs';
+import {isNotAcceptedReceipt} from '../src/native-receipt.mjs';
+import {unconfirmActivity,settleNativeActivity,orderedNativeActivities,waitingNativeApproval} from '../src/native-activity.mjs';
+import {createChatScroll} from '../src/chat-scroll.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -40,7 +44,8 @@ function mountDsh(storage = new Map(), overrides = {}) {
     }),
     ...overrides,
   };
-  const context = {
+  const context = {artifactPath,isNotAcceptedReceipt,unconfirmActivity,settleNativeActivity,orderedNativeActivities,waitingNativeApproval,
+    createChatScroll,
     createPersistentPreviewCache,
     readingCache: createReadingCache({ storage: null }),
     readingKey,
@@ -77,7 +82,7 @@ function mountDsh(storage = new Map(), overrides = {}) {
   vm.createContext(context);
   vm.runInContext(
     dshSource +
-      '\nglobalThis.actions={open,send,refresh,forceRefresh,onReaderTouchStart,onReaderTouchMove,onReaderTouchEnd,pullUpDistance,attachments,onFilesSelected,removeAttachment,closePreview,preview,reader,history,draft,syncStatus,syncStatusLabel,hasNewMessages,scrollToBottom,formatMessageTime,copyMessage,copiedSeq,sending,awaitingReply,nodeActivity,replying,activityLabel,fileCache,connection};',
+      '\nglobalThis.actions={open,send,refresh,forceRefresh,onReaderTouchStart,onReaderTouchMove,onReaderTouchEnd,pullUpDistance,attachments,onFilesSelected,removeAttachment,closePreview,preview,reader,history,draft,syncStatus,syncStatusLabel,hasNewMessages,scrollToBottom,formatMessageTime,copyMessage,copiedSeq,sending,awaitingReply,nodeActivity,replying,activityLabel,fileCache,connection,refreshDshLive,dshLiveState,dshLiveMessages,refreshNativeEvents,nativeDrafts,nativeMessages,cancellableRequest,cancelNative,cancelRequest,notice};',
     context,
   );
   context.actions.connection.value = 'device';
@@ -371,19 +376,24 @@ test('Collapsible thinking & process section consolidates tool calls and preserv
   } = await import('../src/thinking-process.mjs');
   assert.deepEqual(TERMINAL_ROD_FRAMES, ['|', '/', '-', '\\']);
 
+  const translated = lang => (key, args = {}) => JSON.parse(readFileSync(new URL(`../src/locales/${lang}.json`, import.meta.url), 'utf8'))[key].replace('{count}', String(args.count));
   // 1. Natural tool step summaries (Claude mobile parity)
   assert.equal(
-    summarizeProcessSteps(['`[Tool: Bash]` ls', '`[Tool: Read]` a.gd'], 'en-US'),
-    'Ran a command, read a file',
+    summarizeProcessSteps(['`[Tool: Bash]` ls', '`[Tool: Read]` a.gd'], 'en-US', translated('en-US')),
+    'Command calls: 1, Read calls: 1',
   );
   assert.equal(
-    summarizeProcessSteps(['`[Tool: Bash]` ls', '`[Tool: Read]` a.gd'], 'zh-CN'),
-    '执行了 1 条命令，读取了 1 个文件',
+    summarizeProcessSteps(['`[Tool: Bash]` ls', '`[Tool: Read]` a.gd'], 'zh-CN', translated('zh-CN')),
+    '命令调用 1 次，读取调用 1 次',
   );
   assert.equal(
-    summarizeProcessSteps(['`[Tool: Bash]` a', '`[Tool: Bash]` b', '`[Tool: Bash]` c'], 'en-US'),
-    'Ran 3 commands',
+    summarizeProcessSteps(['`[Tool: Bash]` a', '`[Tool: Bash]` b', '`[Tool: Bash]` c'], 'en-US', translated('en-US')),
+    'Command calls: 3',
   );
+
+  const returned = parseMessageSegments('```thinking\n- `[Tool: exec]` check\n- `[ToolResult: exec]` permission failed\n```');
+  assert.equal(returned[0].steps.length, 2);
+  assert.equal(summarizeProcessSteps(returned[0].steps, 'en-US', translated('en-US')), 'Command calls: 1');
 
   // 2. Fenced thinking block + <think> tag + standalone [Tool:] paragraphs
   const parsed = extractThinkingAndBody(
@@ -491,4 +501,106 @@ test('Bottom pull-up refresh, top-right force refresh icon, and unified composer
   const styleCss = readFileSync(new URL('../src/style.css', import.meta.url), 'utf8');
   assert.match(styleCss, /\.device-indicator svg\{width:17px;height:17px;/);
   assert.match(styleCss, /\.composer-submit-btn\{margin-left:auto;flex-shrink:0;height:1\.85rem;/);
+});
+
+test('native snapshot refresh replaces growing text even when cursor is unchanged', async () => {
+  let text='partial';
+  const {a}=mountDsh(new Map(), {dshPage:async(c,s)=>({address:{connection_id:c,session_id:s},cursor:1,before:1,has_more:false,history_snapshot:true,messages:[{sequence:1,role:'assistant',text}]})});
+  await a.open({id:'codex:original'});
+  text='partial and final reply';await a.refresh();
+  assert.equal(a.history.value.messages[0].text,text);
+  assert.equal(a.hasNewMessages.value,true);
+});
+test('native rolling snapshot removes messages that left the window without retaining stale tail', async () => {
+  let rows=[{sequence:1,role:'user',text:'old'},{sequence:2,role:'assistant',text:'old answer'}];
+  const {a}=mountDsh(new Map(), {dshPage:async(c,s)=>({address:{connection_id:c,session_id:s},cursor:rows.length,before:1,has_more:false,history_snapshot:true,messages:rows})});
+  await a.open({id:'codex:original'});
+  rows=[{sequence:1,role:'assistant',text:'new answer'}];await a.refresh();
+  assert.equal(a.history.value.messages.length,1);
+  assert.equal(a.history.value.messages[0].text,'new answer');
+});
+
+
+test('DSH live state preserves reading position and replaces reconnect baseline without duplication', async()=>{
+ let frame={address:{connection_id:'device',session_id:'original'},status:'live',cursor:20,active:true,messages:[{id:'attempt',text:'partial',active:true,sequence:null}]};
+ const {a}=mountDsh(new Map(),{dshLive:async()=>frame});
+ await a.open({id:'original'});await a.refreshDshLive();
+ assert.equal(a.dshLiveMessages.value[0].text,'partial');
+ a.reader.value={scrollHeight:1000,clientHeight:200,scrollTop:100};
+ frame={...frame,messages:[{id:'attempt',text:'partial plus',active:true,sequence:null}]};
+ await a.refreshDshLive();assert.equal(a.reader.value.scrollTop,100);assert.equal(a.hasNewMessages.value,true);
+ frame={...frame,status:'reconnecting',active:false,messages:[]};
+ await a.refreshDshLive();assert.equal(a.dshLiveMessages.value[0].text,'partial plus');assert.equal(a.replying.value,false);
+ frame={...frame,status:'live',active:true,messages:[{id:'attempt',text:'partial plus restored',active:true,sequence:null}]};
+ await a.refreshDshLive();await a.refreshDshLive();assert.equal(a.dshLiveMessages.value[0].text,'partial plus restored');
+ a.history.value.cursor=21;frame={...frame,active:false,messages:[{id:'attempt',text:'final',active:false,sequence:21}]};
+ await a.refreshDshLive();assert.equal(a.dshLiveMessages.value.length,0);
+});
+
+test('DSH live response cannot cross the selected session identity', async()=>{
+ let frame={address:{connection_id:'device',session_id:'other'},status:'live',cursor:20,active:true,messages:[{id:'a',text:'wrong session',active:true}]};
+ const {a}=mountDsh(new Map(),{dshLive:async()=>frame});await a.open({id:'original'});await a.refreshDshLive();
+ assert.equal(a.dshLiveMessages.value.length,0);assert.equal(a.dshLiveState.value.status,'reconnecting');
+});
+
+test('DSH projection lag triggers one refresh per live cursor instead of repeated history downloads', async()=>{
+ let calls=0,cursor=21;
+ const {a}=mountDsh(new Map(),{
+  dshPage:async(c,s)=>{calls++;return {address:{connection_id:c,session_id:s},cursor:20,before:0,has_more:false,messages:[{sequence:20,role:'assistant',text:'saved'}]};},
+  dshLive:async(c,s)=>({address:{connection_id:c,session_id:s},status:'live',cursor,active:false,messages:[]})
+ });
+ await a.open({id:'original'});await new Promise(r=>setImmediate(r));
+ const baseline=calls;
+ await a.refreshDshLive();await a.refreshDshLive();await new Promise(r=>setImmediate(r));
+ assert.equal(calls,baseline);
+ cursor=22;await a.refreshDshLive();await new Promise(r=>setImmediate(r));
+ assert.equal(calls,baseline+1);
+});
+
+test('native stop remains pending until an exact terminal event',async()=>{
+ let events=[{sequence:1,request_id:'r',session_id:'pi:original',kind:'accepted',payload:{cancel_supported:true}}];
+ const {a}=mountDsh(new Map(),{nativeEvents:async()=>({session_id:'pi:original',events}),nativeCancel:async()=>({session_id:'pi:original',request_id:'r',status:'cancel_requested'})});
+ await a.open({id:'pi:original'});await a.refreshNativeEvents();assert.equal(a.cancellableRequest.value,'r');
+ await a.cancelNative();assert.equal(a.cancelRequest.value,'r');assert.equal(a.notice.value,'nativeCancelPending');
+ events=[{sequence:2,request_id:'r',session_id:'pi:original',kind:'cancelled',payload:{}}];await a.refreshNativeEvents();
+ assert.ok(!a.cancellableRequest.value);assert.equal(a.notice.value,'nativeCancelled');
+});
+test('external disconnect retains text but cannot claim it is still generating',async()=>{
+ let source='live',events=[{sequence:1,request_id:'external-codex-thread-turn',session_id:'codex:original',kind:'message_snapshot',payload:{text:'partial'}},{sequence:2,request_id:'external-codex-thread-turn',session_id:'codex:original',kind:'running',payload:{}}];
+ const {a}=mountDsh(new Map(),{nativeEvents:async()=>({session_id:'codex:original',external_live:source,events})});
+ await a.open({id:'codex:original'});await a.refreshNativeEvents();assert.equal(a.replying.value,true);assert.ok(!a.cancellableRequest.value);
+ source='unavailable';events=[];await a.refreshNativeEvents();assert.equal(a.replying.value,false);assert.equal(a.nativeDrafts.value['external-codex-thread-turn'].text,'partial');
+});
+
+test('native live turn merges against multiple saved assistant records without hiding new text or crossing user turns',async()=>{
+ const {a}=mountDsh(new Map());
+ a.history.value={messages:[{role:'user',text:'request'},{role:'assistant',text:'First paragraph.'},{role:'assistant',text:'[Tool: check]'},{role:'assistant',text:'Second paragraph.'}]};
+ a.nativeDrafts.value={r:{text:'First paragraph.\n\nSecond paragraph.',active:true}};
+ assert.equal(a.nativeMessages.value.length,0);
+ a.nativeDrafts.value={r:{text:'First paragraph.\n\nSecond paragraph.\n\nNew output.',active:true}};
+ assert.equal(a.nativeMessages.value.length,1);
+ a.history.value.messages.splice(2,0,{role:'user',text:'different request'});
+ a.nativeDrafts.value={r:{text:'First paragraph.\n\nSecond paragraph.',completed:true}};
+ assert.equal(a.nativeMessages.value.length,1);
+});
+
+test('expired event cursor replaces drafts from checkpoint then accepts only newer deltas',async()=>{
+ let page={session_id:'pi:original',epoch:'store-a',cursor:100,reset:true,history_required:true,snapshots:[{request_id:'r',session_id:'pi:original',text:'restored',status:'running',cancel_supported:true}],events:[]};
+ const calls=[];const {a}=mountDsh(new Map(),{nativeEvents:async(...args)=>{calls.push(args);return page;}});
+ await a.open({id:'pi:original'});await a.refreshNativeEvents();assert.equal(a.nativeDrafts.value.r.text,'restored');assert.equal(a.cancellableRequest.value,'r');
+ page={session_id:'pi:original',epoch:'store-a',cursor:101,events:[{sequence:101,request_id:'r',session_id:'pi:original',kind:'text_delta',payload:{text:' new'}}]};
+ await a.refreshNativeEvents();await a.refreshNativeEvents();assert.equal(a.nativeDrafts.value.r.text,'restored new');assert.equal(calls.at(-1)[3],'store-a');
+});
+test('failed event read retains partial text and asks for a fresh baseline on reconnect',async()=>{
+ let fail=false;const calls=[];const {a}=mountDsh(new Map(),{nativeEvents:async(...args)=>{calls.push(args);if(fail)throw Error('offline');return {session_id:'pi:original',epoch:'store-a',cursor:10,reset:true,snapshots:[{request_id:'r',session_id:'pi:original',text:'partial',status:'running'}],events:[]};}});
+ await a.open({id:'pi:original'});await a.refreshNativeEvents();fail=true;await a.refreshNativeEvents();assert.equal(a.nativeDrafts.value.r.text,'partial');assert.equal(a.replying.value,false);
+ fail=false;await a.refreshNativeEvents();assert.equal(calls.at(-1)[3],'');assert.equal(a.replying.value,true);assert.equal(a.nativeDrafts.value.r.text,'partial');
+});
+
+test('recovered old terminal checkpoints are not appended as replies to a newer user turn',()=>{
+ const {a}=mountDsh(new Map());
+ a.history.value={messages:[{role:'user',text:'new request',timestamp:2000}]};
+ a.nativeDrafts.value={old:{text:'old result',timestamp:1000,terminal:true},newer:{text:'new result',timestamp:3000,terminal:true},pending:{text:'still running',timestamp:1500,active:true}};
+ assert.deepEqual(Array.from(a.nativeMessages.value,m=>m.id),['pending','newer']);
+ a.awaitingReply.value='old';assert.equal(a.nativeMessages.value.length,3);
 });

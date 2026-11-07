@@ -1,6 +1,7 @@
 <script setup>
 import { computed, inject, onUnmounted, ref, watch } from 'vue';
 import DshSessions from './DshSessions.vue';
+import {createChatScroll} from '../chat-scroll.mjs';
 import MessageContent from './MessageContent.vue';
 import { TERMINAL_ROD_FRAMES } from '../thinking-process.mjs';
 
@@ -77,6 +78,13 @@ const {
   onHistoryWheel,
 } = inject('bobAppShell');
 
+const awayFromLatest=ref(false),chatContent=ref(null);
+const chatScroll=createChatScroll(value=>{awayFromLatest.value=value;});
+watch([historyRegion,chatContent],()=>chatScroll.bind(historyRegion.value),{flush:'post'});
+watch(sessionId,()=>chatScroll.reset());
+function onChatScroll(){chatScroll.scroll();onHistoryScroll();}
+function jumpLatest(){chatScroll.bottom();}
+onUnmounted(()=>chatScroll.dispose());
 const rodIdx = ref(0);
 let rodTimer = null;
 const isBusy = computed(() => Boolean(loading.value || dispatchPending.value || saving.value || activeExecution.value));
@@ -149,14 +157,15 @@ onUnmounted(() => { if (rodTimer) clearInterval(rodTimer); });
         :aria-label="t('conversation')"
         aria-live="polite"
         :aria-busy="loading"
-        @scroll.passive="onHistoryScroll"
+        @scroll.passive="onChatScroll"
         @touchstart.passive="onHistoryTouchStart"
         @touchmove.passive="onHistoryTouchMove"
         @touchend.passive="onHistoryTouchEnd"
         @touchcancel.passive="onHistoryTouchEnd"
         @wheel.passive="onHistoryWheel"
       >
-        <div v-if="loading" class="empty loading-brand">
+        <div ref="chatContent" data-chat-content>
+        <div v-if="loading && !messages.length" class="empty loading-brand">
           <img :src="brandLogo" :alt="t('brand')" />
           <p>{{ t('loading') }}</p>
         </div>
@@ -178,7 +187,7 @@ onUnmounted(() => { if (rodTimer) clearInterval(rodTimer); });
         </div>
         <article
           v-for="(message, msgIdx) in messages"
-          :key="message.id"
+          :key="message.id" :data-chat-anchor="message.id"
           class="message"
           :class="{ 'assistant-message': message.role === 'assistant' }"
         >
@@ -244,7 +253,9 @@ onUnmounted(() => { if (rodTimer) clearInterval(rodTimer); });
           <span class="terminal-rod" aria-hidden="true">[{{ rodFrame }}]</span>
           <span>{{ t(historyPullUpDistance >= 36 ? 'releaseToRefresh' : 'pullUpToRefresh') }}</span>
         </div>
+        </div>
       </section>
+      <div v-if="awayFromLatest" class="chat-jump-row"><button type="button" class="chat-jump-latest" @click="jumpLatest" :aria-label="t('chatJumpLatest')" :title="t('chatJumpLatest')"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M12 4v16m-6-6 6 6 6-6"/></svg></button></div>
 
       <form class="composer" @submit.prevent="send">
         <!-- Floating Quick Model Switcher Popover (Anchored cleanly above .composer) -->
@@ -457,4 +468,9 @@ onUnmounted(() => { if (rodTimer) clearInterval(rodTimer); });
   min-width: 0;
   overflow: hidden;
 }
+</style>
+
+<style scoped>
+.chat-jump-row{height:0;position:relative;z-index:2;display:flex;justify-content:flex-end;padding:0 20px;transform:translateY(-46px)}
+.chat-jump-latest{display:grid;place-items:center;width:36px;height:36px;border-radius:50%;border:1px solid var(--border-color);background:var(--bg-secondary);color:var(--accent-primary);cursor:pointer}
 </style>

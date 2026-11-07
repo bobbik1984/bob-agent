@@ -1,3 +1,7 @@
+import {createChatScroll} from '../src/chat-scroll.mjs';
+import {artifactPath} from '../src/artifact-path.mjs';
+import {isNotAcceptedReceipt} from '../src/native-receipt.mjs';
+import {unconfirmActivity,settleNativeActivity,orderedNativeActivities,waitingNativeApproval} from '../src/native-activity.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
@@ -9,7 +13,7 @@ const source=readFileSync(new URL('../src/components/DshSessions.vue',import.met
 function mount(storage=new Map(), overrides={}) {
  const calls=[];
  const bridge={dshPage:async(c,s)=>({address:{connection_id:c,session_id:s},messages:[],cursor:20,before:0,has_more:false}),dshPrompt:async(...a)=>{calls.push(a);throw Error('DSH_RECEIPT_UNKNOWN')},dshReceipt:async()=>({status:'unknown'}),...overrides};
- const context={createPersistentPreviewCache,readingCache:createReadingCache({storage:null}),readingKey,provide:()=>{},nextTick:async()=>{},defineProps:()=>({nodes:[],target:null}),ref:value=>({value}),computed:f=>({get value(){return f()}}),watch:()=>{},onUnmounted:()=>{},useI18n:()=>({t:x=>x}),kernelBridge:bridge,localStorage:{getItem:k=>storage.get(k)||null,setItem:(k,v)=>storage.set(k,v)},crypto:{randomUUID:()=> 'request-1'},setTimeout:()=>0,clearTimeout:()=>{}};
+ const context={createChatScroll,artifactPath,isNotAcceptedReceipt,unconfirmActivity,settleNativeActivity,orderedNativeActivities,waitingNativeApproval,createPersistentPreviewCache,readingCache:createReadingCache({storage:null}),readingKey,provide:()=>{},nextTick:async()=>{},defineProps:()=>({nodes:[],target:null}),ref:value=>({value}),computed:f=>({get value(){return f()}}),watch:()=>{},onUnmounted:()=>{},useI18n:()=>({t:x=>x}),kernelBridge:bridge,localStorage:{getItem:k=>storage.get(k)||null,setItem:(k,v)=>storage.set(k,v)},crypto:{randomUUID:()=> 'request-1'},setTimeout:()=>0,clearTimeout:()=>{}};
  vm.createContext(context);vm.runInContext(source+'\nglobalThis.actions={open,send,checkReceipt,connection,draft,pending,notice,error,reader,refresh,loadOlder,history,loadingOlder,nodeActivity,awaitingReply,activityLabel};',context);
  context.actions.connection.value='device';return {a:context.actions,calls,context,storage};
 }

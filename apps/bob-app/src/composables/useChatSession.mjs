@@ -785,15 +785,13 @@ async function selectConversation(targetId) {
   const targetItem = catalog.value?.conversations?.find(c => c.id === targetId);
   const restoredDraft = targetItem?.view_state?.draft ?? '';
   const restoredRev = targetItem?.view_state?.draft_revision ?? 0;
-  const restoredScroll = targetItem?.view_state?.scroll_offset ?? 0;
+
   draft.value = restoredDraft;
   controller.loadDraft(restoredDraft, restoredRev);
   navigationOpen.value = false;
   await reload();
   await nextTick();
-  if (historyRegion.value && restoredScroll > 0) {
-    historyRegion.value.scrollTop = restoredScroll;
-  }
+  if (historyRegion.value) historyRegion.value.scrollTop = historyRegion.value.scrollHeight;
 }
 
 function startCreateProject() {

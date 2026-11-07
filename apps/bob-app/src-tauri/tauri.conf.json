@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Bob Dev",
+  "productName": "Bob",
   "version": "1.0.1",
   "identifier": "org.bobagent.nextdev",
   "build": {

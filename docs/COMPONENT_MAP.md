@@ -1,5 +1,7 @@
 # Bob — Component Map
 
+会话目录工具标识：`apps/bob-app/src/components/HarnessIcon.vue`统一映射本地`public/logos/`资源，由ConversationDirectory分组/未分组行共用；Pi原始SVG来自官方https://pi.dev/logo.svg，DSH复用deepseek.png。
+
 > 把逻辑组件映射到真实代码。统一项目新源码见本页末段；前身落点仅供只读参考，去留判断（retain、adapt、replace、merge、retire，均为 proposed，在 BP1 去留表获批后才生效）。
 > §2–5 的旧项目路径相对于 `<workspace_root>`；本仓库代码路径相对于仓库根。历史观察时间：2026-10-28，旧 App HEAD `a4ff5fd`，旧 Online HEAD `d14a527`，13个tracked修改、111个untracked项（只读采样）。详细表、状态、凭据及测试清单见[WP-01](evidence/2026-10-28-wp01-deep-inventory.md)。
 
@@ -133,7 +135,7 @@
 | 已保存原图回看 | `apps/bob-app/src/components/CaptureImage.vue`、`views/KnowledgeView.vue` |
 | 实际浏览器验证 | `apps/bob-app/tests/photo-capture-browser.py`（仅隔离节点，本机模拟视觉服务） |
 
-F2/F5：`crates/bob-runtime/src/dsh_session.rs`负责原生身份/历史投影，`dsh_transport.rs`负责认证、目录、分页、文件读取及发送回执；Node/Tauri共用运行时。`ConversationDirectory.vue`与`DshSessions.vue`统一目录和原会话。`reading-cache.mjs`承载可淘汰的IndexedDB阅读缓存，`persistent-preview-cache.mjs`负责版本核对、原文件和缩略图缓存；它们不是任务或发送账本。网页/手机实际验收版本见CURRENT_STAGE，历史导入不冒充原生目录。
+F2/F5：`crates/bob-runtime/src/dsh_session.rs`负责原生身份/历史投影，`dsh_transport.rs`负责认证、目录、分页、文件读取及发送回执；`dsh_live.rs`负责官方 assistantStream 持续订阅、有界临时正文与重连基线替换，经 `app_dsh_live` 接入共用聊天视图（非完整持久事件账本）；Node/Tauri共用运行时。`ConversationDirectory.vue`与`DshSessions.vue`统一目录和原会话。`reading-cache.mjs`承载可淘汰的IndexedDB阅读缓存，`persistent-preview-cache.mjs`负责版本核对、原文件和缩略图缓存；它们不是任务或发送账本。网页/手机实际验收版本见CURRENT_STAGE，历史导入不冒充原生目录。
 
 ### 共用消息阅读
 

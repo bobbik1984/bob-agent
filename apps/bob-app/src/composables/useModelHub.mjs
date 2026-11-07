@@ -721,7 +721,7 @@ const subscriptionQuotas = computed(() => [
   const known = ['available', 'stale'].includes(data?.status);
   const windowLabels = {weekly:'quotaWeekly', five_hour:'quotaFiveHour', primary:'quotaPrimary', secondary:'quotaSecondary',
     'gemini-5h':'quotaGeminiFiveHour', 'gemini-weekly':'quotaGeminiWeekly', '3p-5h':'quotaThirdPartyFiveHour', '3p-weekly':'quotaThirdPartyWeekly'};
-  const compact = compactQuota(data, quotaNow.value);
+  const compact = compactQuota(data, quotaNow.value, item.id === 'antigravity' ? 'gemini-weekly' : 'weekly');
   return {...item, compact, status: known ? data.status : 'unavailable', source: data?.source_node || '',
     updated: known && data.observed_at ? new Date(data.observed_at * 1000).toLocaleString() : '',
     windows: known ? (data.windows || []).map(w => ({...w, label: windowLabels[w.id] ? t(windowLabels[w.id]) : w.id,
