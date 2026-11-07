@@ -11,7 +11,7 @@ project:
   - Desktop
   - Android
   - Web (bob-node)
-  current_task: Stage 2 核心成果全链路与体验优化已交付上线（图片/文件预览全屏磨砂高斯模糊遮罩与外部点击返回、语音转文字麦克风录入、会话列表一键归档降噪、.bob_attachments 安全预览映射）。
+  current_task: Stage 2 成果全链路与多模态交互全量交付上线（全屏磨砂高斯模糊背景与外部点击退出、会话内与全局全文检索、输入框发图缩略图预览、麦克风语音转文字录入、会话归档降噪）。准备推进 Stage 3 主 Agent 巡检与派单。
   development_plan: docs/CURRENT_STAGE.md
 phases:
 - name: ✅ 已交付基座：单一 Rust 内核、三端同源与跨节点扫码配对 (BP0–BP5)
@@ -45,7 +45,7 @@ phases:
   - text: '[Stage 2] 多模态输入入口：输入框工具栏增加麦克风语音转文字录入，支持选图/传附件'
     status: done
   - text: '[Stage 2] 会话列表降噪与全文搜索：支持本地一键隐藏/归档测试或完结会话（不删远端文件，随时找回）及 SQLite FTS5 全局历史检索'
-    status: active
+    status: done
   - text: '[Stage 4] 主动提醒通知与多端精修：长任务完成/异常或日程到期通知（Toast / 手机通知）、桌面宽屏分栏布局优化与 Android 真机终验'
     status: todo
 - name: 🧠 第三大项：置顶「主 Agent 小助理」大脑升维 (Stage 3)
