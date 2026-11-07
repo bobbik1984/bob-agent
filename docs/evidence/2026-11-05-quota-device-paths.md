@@ -127,3 +127,11 @@
 - Android原包标识org.bobagent.nextdev与固定签名保留，显示名Bob；正式品牌SVG生成launcher资源，CI初始化后明确覆盖常规/圆形/自适应图标。包构建及成品回执随后记录，未手机安装。
 
 首轮APK Run42326875533编译通过，新增品牌检查因产物目录glob少一层而失败，未进入签名上传；已修复为实际universal/debug目录层级，重新触发，不把该次视为可交付安装包。
+
+
+### 最终Android成品与GitHub归并
+
+- Run42327592100 / Artifact13555627834成功，源edda3c746363ec3a6accea7d57ba2c572ad34192；main与1.0.1归并至05aa86e，应用树不变，保留独立运维历史。中间Run42327449221因图标安全留白修正主动取消。
+- 名称Bob检查通过，固定证书SHA256 dafb9fbdc736f2c70864a7005cb199b70ab5816a6833e8ec3e5ba743fee338f5；v2/v3签名有效，16KB ELF/zipalign通过。
+- 下载ZIP SHA256 0aec5b134873bbe25f7de58799fc35422a3e184918135885afd989229846c365；APK SHA256 550bb7b045aaf4e3f87546a8983343d8e021f662a12b279babe5d953fe62901d，字节数241313140。从APK解码PNG与源资源逐像素核对15项一致，自适应前景alpha边界[100, 140, 332, 292]，安全留白通过。
+- 成品dist-release/Bob-1.0.1-edda3c7.apk；仍是既有固定签名开发构建，不冒称商店release或手机安装验收。没有安装Office、没有更改手机。

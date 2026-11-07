@@ -1,6 +1,6 @@
 # Bob — Current Stage（1.0.1 施工与交接合同）
 
-> 2026-11-07 发布准备：用户批准上线及GitHub APK。线上官方缓存确认Gemini五小时约96%、周约99%，旧界面选最低余额误显示短窗口；本次固定antigravity为gemini-weekly、其他两家为weekly，缺周数据不回退。144项前端检查通过。Android显示名改Bob，使用既有正式SVG生成资源并在CI初始化后覆盖启动图标；保留包名和固定签名兼容升级。发布提交f75f521已上线Hostinger网页/后端及X1T/VPS3节点；公网浏览器确认gemini-weekly 99%、6d22h，Claude仍无官方额度。APK Run 42326875533构建中，成品验收待追加。
+> 2026-11-07 发布准备：用户批准上线及GitHub APK。线上官方缓存确认Gemini五小时约96%、周约99%，旧界面选最低余额误显示短窗口；本次固定antigravity为gemini-weekly、其他两家为weekly，缺周数据不回退。144项前端检查通过。Android显示名改Bob，使用既有正式SVG生成资源并在CI初始化后覆盖启动图标；保留包名和固定签名兼容升级。发布提交f75f521已上线Hostinger网页/后端及X1T/VPS3节点；公网浏览器确认gemini-weekly 99%、6d22h，Claude仍无官方额度。APK Run 42327592100成功，基于edda3c7（05aa86e仅归并历史、树相同）；名称Bob、15项启动图标像素、固定签名及16KB对齐均通过。成品dist-release/Bob-1.0.1-edda3c7.apk，未安装手机。
 
 > 原生历史刷新（2026-11-06）：同消息数不再作为未变化依据，前端替换有界快照。定向测试与真实候选读回通过；Hostinger网页/后端及X1T/VPS3节点已发布并通过本机读回，生产浏览器经私有通道读取原会话新正文、定位底部及翻阅时输入框固定均通过。公网独立登录与手机未验，不能宣称外部CLI全实时流式已完成。见 [原生会话Evidence](evidence/2026-11-05-native-session-stream.md) 最新节。
 
