@@ -7,6 +7,7 @@ use tauri::{
 };
 
 const LIMIT: usize = 64 * 1024;
+const MAX_SLOT_LEN: usize = 128;
 pub(crate) struct AndroidVault<R: Runtime>(PluginHandle<R>);
 #[derive(Serialize)]
 struct WriteRequest {
@@ -90,7 +91,7 @@ pub(crate) async fn store_secret<R: Runtime>(
     slot: &str,
     bytes: Vec<u8>,
 ) -> Result<(), &'static str> {
-    if slot.trim().is_empty() || slot.len() > 64 || bytes.is_empty() || bytes.len() > LIMIT {
+    if slot.trim().is_empty() || slot.len() > MAX_SLOT_LEN || bytes.is_empty() || bytes.len() > LIMIT {
         return Err("VAULT_INVALID_INPUT");
     }
     let handle = app.state::<AndroidVault<R>>().0.clone();
@@ -111,7 +112,7 @@ pub(crate) async fn read_secret<R: Runtime>(
     app: &AppHandle<R>,
     slot: &str,
 ) -> Result<Option<Vec<u8>>, &'static str> {
-    if slot.trim().is_empty() || slot.len() > 64 {
+    if slot.trim().is_empty() || slot.len() > MAX_SLOT_LEN {
         return Err("VAULT_INVALID_INPUT");
     }
     let handle = app.state::<AndroidVault<R>>().0.clone();
@@ -138,7 +139,7 @@ pub(crate) async fn clear_secret<R: Runtime>(
     app: &AppHandle<R>,
     slot: &str,
 ) -> Result<(), &'static str> {
-    if slot.trim().is_empty() || slot.len() > 64 {
+    if slot.trim().is_empty() || slot.len() > MAX_SLOT_LEN {
         return Err("VAULT_INVALID_INPUT");
     }
     let handle = app.state::<AndroidVault<R>>().0.clone();

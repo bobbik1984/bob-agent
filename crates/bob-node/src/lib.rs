@@ -1052,10 +1052,27 @@ pub fn handle_rpc_command(ctx: &mut NodeContext, command: &str, args: &Value) ->
                     )
                 });
             let clean_url = origin.trim_end_matches('/').to_owned();
+            let url_host_label = clean_url
+                .split("://")
+                .nth(1)
+                .unwrap_or(&clean_url)
+                .split('/')
+                .next()
+                .unwrap_or("")
+                .split(':')
+                .next()
+                .unwrap_or("")
+                .split('.')
+                .next()
+                .filter(|s| !s.is_empty() && *s != "localhost" && *s != "127")
+                .map(str::to_owned);
             let default_host = std::env::var("BOB_NODE_LABEL")
-                .or_else(|_| std::env::var("HOSTNAME"))
-                .or_else(|_| std::env::var("COMPUTERNAME"))
-                .unwrap_or_else(|_| "Bob Host".to_owned());
+                .ok()
+                .filter(|s| !s.trim().is_empty())
+                .or(url_host_label)
+                .or_else(|| std::env::var("HOSTNAME").ok().filter(|s| !s.trim().is_empty()))
+                .or_else(|| std::env::var("COMPUTERNAME").ok().filter(|s| !s.trim().is_empty()))
+                .unwrap_or_else(|| "Bob Host".to_owned());
             let label = args
                 .get("label")
                 .and_then(Value::as_str)
@@ -1187,11 +1204,15 @@ pub fn handle_rpc_command(ctx: &mut NodeContext, command: &str, args: &Value) ->
                 &ctx.runtime.data_dir,
                 "local",
             );
+            let mut cleaned = args.clone();
+            if ctx.static_dir.is_some() {
+                filter_self_web_host_nodes(&mut cleaned);
+            }
             bob_runtime::node_pairing::merge_topology(
                 &ctx.runtime.data_dir,
                 &mut ctx.app,
                 &ctx.runtime,
-                args,
+                &cleaned,
             )
         }
         "app_home_sync" => Ok(json!({
@@ -1339,7 +1360,7 @@ pub fn handle_rpc_command(ctx: &mut NodeContext, command: &str, args: &Value) ->
                         }
                         return Ok(b);
                     }
-                    (Err(_), Ok(extra)) if !extra.is_empty() => return Ok(json!(extra)),
+                    (Err(_), Ok(extra)) if !extra.is_empty() || connection == "local" => return Ok(json!(extra)),
                     (Err(e), _) => {
                         if connection != "local" {
                             if let Ok(remote_rows) = bob_runtime::node_pairing::forward_dsh_rpc_to_remote_node(
@@ -1791,6 +1812,37 @@ pub fn execute_online_operation(ctx: &mut NodeContext, body: &Value) -> Result<V
     Ok(result)
 }
 
+fn filter_self_web_host_nodes(incoming: &mut Value) {
+    let self_public = std::env::var("BOB_NODE_PUBLIC_URL")
+        .ok()
+        .map(|s| s.trim().trim_end_matches('/').to_owned())
+        .filter(|s| !s.is_empty());
+    if let Some(arr) = incoming.get_mut("remoteNodes").and_then(Value::as_array_mut) {
+        arr.retain(|n| {
+            let remark = n.get("remark").and_then(Value::as_str).unwrap_or("");
+            if remark == "web_host" {
+                return false;
+            }
+            let url = n
+                .get("url")
+                .or_else(|| n.get("baseUrl"))
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .trim()
+                .trim_end_matches('/');
+            if url.contains("bob-online.bobbik.org") {
+                return false;
+            }
+            if let Some(ref pub_url) = self_public {
+                if url.eq_ignore_ascii_case(pub_url) {
+                    return false;
+                }
+            }
+            true
+        });
+    }
+}
+
 fn verify_bearer_token(ctx: &NodeContext, auth_header: Option<&str>) -> Result<String, (u16, &'static str)> {
     let raw = auth_header.ok_or((401, "CLIENT_CREDENTIAL_INVALID"))?;
     let token = raw
@@ -2127,7 +2179,10 @@ pub fn handle_client_v1_http(
     }
 
     if path == "/api/client/v1/topology/sync" && method == "POST" {
-        let parsed: Value = serde_json::from_str(body_str).unwrap_or_else(|_| json!({}));
+        let mut parsed: Value = serde_json::from_str(body_str).unwrap_or_else(|_| json!({}));
+        if ctx.static_dir.is_some() {
+            filter_self_web_host_nodes(&mut parsed);
+        }
         let _ = bob_runtime::agy_directory::ensure_local_grant_registered(
             &ctx.runtime.data_dir,
             "local",
@@ -2294,7 +2349,7 @@ fn execute_unlocked_harness_rpc(
                         }
                         return Ok(b);
                     }
-                    (Err(_), Ok(extra)) if !extra.is_empty() => return Ok(json!(extra)),
+                    (Err(_), Ok(extra)) if !extra.is_empty() || connection == "local" => return Ok(json!(extra)),
                     (Err(e), _) => {
                         if connection != "local" {
                             if let Ok(remote_rows) = bob_runtime::node_pairing::forward_dsh_rpc_to_remote_node(
@@ -2588,6 +2643,17 @@ fn handle_connection(mut stream: TcpStream, state: Arc<Mutex<NodeContext>>) {
                 return;
             }
         };
+        if !node_access::enabled(&access_dir)
+            && auth_header
+                .as_deref()
+                .is_some_and(|h| h.trim_start().to_ascii_lowercase().starts_with("bearer "))
+        {
+            if let Err((status, code)) = verify_bearer_token(&guard, auth_header.as_deref()) {
+                let body = json!({ "ok": false, "error": code }).to_string();
+                write_json_response(&mut stream, status, &body);
+                return;
+            }
+        }
         if matches!(command.trim(), "app_assistant_execute" | "app_assistant_poll") {
             drop(guard);
             let result=if command.trim()=="app_assistant_execute" { assistant::execute(&state,&args) } else { assistant::poll(&state,&args) };

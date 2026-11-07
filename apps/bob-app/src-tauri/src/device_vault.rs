@@ -54,7 +54,7 @@ pub(crate) fn read(root: &Path) -> Result<Vec<u8>, VaultError> {
 fn valid_secret_slot(slot_name: &str) -> Result<String, VaultError> {
     let trimmed = slot_name.trim();
     if trimmed.is_empty()
-        || trimmed.len() > 64
+        || trimmed.len() > 128
         || !trimmed
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
@@ -470,6 +470,12 @@ mod windows {
             assert_eq!(super::super::read_secret(&root.0, slot).unwrap(), b"sk-test-updated");
             super::super::clear_secret(&root.0, slot).unwrap();
             assert_eq!(super::super::read_secret(&root.0, slot), Err(VaultError::NotFound));
+
+            let sha_node_slot = "remote-node-token-ac70f3bc37f7c559614a29d91579bd354f693165f44a6fb4909fc5ef35cb40d6";
+            assert_eq!(sha_node_slot.len(), 82);
+            super::super::store_secret(&root.0, sha_node_slot, b"node-tok-82").unwrap();
+            assert_eq!(super::super::read_secret(&root.0, sha_node_slot).unwrap(), b"node-tok-82");
+            super::super::clear_secret(&root.0, sha_node_slot).unwrap();
         }
     }
 }

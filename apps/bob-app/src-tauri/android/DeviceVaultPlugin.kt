@@ -58,7 +58,7 @@ class DeviceVaultPlugin(private val host: Activity) : Plugin(host) {
         private const val OVERHEAD = 4 + 12 + 16
         private val MAGIC = byteArrayOf(66, 79, 66, 1)
         private val LOCK = Any()
-        private val SLOT_REGEX = Regex("^[A-Za-z0-9_-]{1,64}$")
+        private val SLOT_REGEX = Regex("^[A-Za-z0-9_-]{1,128}$")
     }
     private val alias get() = host.packageName + ".home-identity-v1"
     private val secretAlias get() = host.packageName + ".provider-secret-v1"

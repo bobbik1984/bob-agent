@@ -111,11 +111,16 @@ const keys = {
   revoked: 'qrRevoked',
 };
 
-function completePairing() {
+async function completePairing() {
   if (!capabilities.value?.can_scan) return;
   if (poll) clearInterval(poll);
   poll = null;
-  void loadConnections();
+  await loadConnections();
+  for (const node of connections.value) {
+    if (node?.enabled !== false && node?.id) {
+      void testConnection(node);
+    }
+  }
   emit('changed');
   emit('connected');
 }
