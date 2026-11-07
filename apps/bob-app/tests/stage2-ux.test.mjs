@@ -7,6 +7,10 @@ test('Stage 2: DshFilePreview backdrop blur and frosted overlay', () => {
   assert.match(previewSource, /\.dsh-preview::backdrop\s*\{[^}]*backdrop-filter:\s*blur/);
   assert.match(previewSource, /onBackdropClick/);
   assert.match(previewSource, /@click="onBackdropClick"/);
+  assert.match(previewSource, /dsh-modal-blur-active/);
+  const styleSource = readFileSync(new URL('../src/style.css', import.meta.url), 'utf8');
+  assert.match(styleSource, /body\.dsh-modal-blur-active/);
+  assert.match(styleSource, /filter:\s*blur/);
 });
 
 test('Stage 2: DshSessions voice dictation and session archive noise reduction', () => {
@@ -36,10 +40,24 @@ test('Stage 2: Locale coverage for voice input and session archive', () => {
     'dshArchiveSession',
     'dshUnarchiveSession',
     'dshArchivedSessions',
+    'dshSearchInSession',
+    'dshSearchMessagesPlaceholder',
+    'dshSearchMatchCount',
+    'dshSearchClear',
+    'dshSearchNoMatches',
   ];
 
   for (const k of requiredKeys) {
     assert.ok(zh[k], `Missing zh-CN key: ${k}`);
     assert.ok(en[k], `Missing en-US key: ${k}`);
   }
+});
+
+test('Stage 2: DshSessions in-conversation search, snippet match, and composer thumbnail preview', () => {
+  const dshSource = readFileSync(new URL('../src/components/DshSessions.vue', import.meta.url), 'utf8');
+  assert.match(dshSource, /dsh-search-toggle-btn/);
+  assert.match(dshSource, /inSessionSearchOpen/);
+  assert.match(dshSource, /filteredDisplayMessages/);
+  assert.match(dshSource, /dsh-search-snippet/);
+  assert.match(dshSource, /chip-thumb/);
 });

@@ -2851,6 +2851,21 @@ textarea {
 }
 
 .schedule-editor { width: min(30rem, calc(100vw - 2rem)); max-height: calc(100dvh - 2rem); overflow: auto; border: 1px solid var(--line); border-radius: var(--radius-lg); padding: 1rem; background: var(--bg-primary); color: var(--text-primary); }
+body.dsh-modal-blur-active .app-shell > header.topbar,
+body.dsh-modal-blur-active .app-shell > nav.bottom-nav,
+body.dsh-modal-blur-active .app-shell > .navigation-drawer,
+body.dsh-modal-blur-active .app-shell > .settings-view,
+body.dsh-modal-blur-active .app-shell > main,
+body.dsh-modal-blur-active .app-shell > section,
+body.dsh-modal-blur-active .app-shell > article,
+body.dsh-modal-blur-active .primary-chat-pane,
+body.dsh-modal-blur-active .dsh-sessions {
+  filter: blur(12px) brightness(0.65);
+  pointer-events: none;
+  user-select: none;
+  transition: filter 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
 .dsh-preview::backdrop,
 .schedule-editor::backdrop,
 dialog::backdrop {

@@ -52,6 +52,7 @@ function onBackdropClick(e){
 onMounted(async()=>{
  pushPreviewState('file');
  globalThis.window?.addEventListener?.('popstate',onPopState);
+ globalThis.document?.body?.classList?.add?.('dsh-modal-blur-active');
  dialog.value?.showModal?.();
  try{
   const a=props.address;
@@ -60,7 +61,7 @@ onMounted(async()=>{
   if(f.path!==a.path||f.session_id!==a.sessionId||f.connection_id!==a.connectionId)throw Error('DSH_IDENTITY_MISMATCH');
   const bytes=Uint8Array.from(atob(f.data),c=>c.charCodeAt(0));
   if(bytes.length!==f.bytes)throw Error('DSH_FILE_CHANGED');
-  if(url.value)URL.revokeObjectURL(url.value);
+   if(url.value)URL.revokeObjectURL(url.value);
   file.value=f;
   url.value=URL.createObjectURL(new Blob([bytes],{type:imageTypes[f.extension]||documentTypes[f.extension]||'text/plain;charset=utf-8'}));
   if(!imageTypes[f.extension]&&!documentTypes[f.extension])text.value=new TextDecoder('utf-8',{fatal:true}).decode(bytes);
@@ -76,6 +77,7 @@ onMounted(async()=>{
 onUnmounted(()=>{
  alive=false;
  globalThis.window?.removeEventListener?.('popstate',onPopState);
+ globalThis.document?.body?.classList?.remove?.('dsh-modal-blur-active');
  if(url.value)URL.revokeObjectURL(url.value);
  origin?.focus?.({preventScroll:true});
 });

@@ -787,5 +787,10 @@
   "voiceInputError": "Speech recognition error, please try again",
   "dshArchiveSession": "Archive session",
   "dshUnarchiveSession": "Unarchive session",
-  "dshArchivedSessions": "Archived sessions"
+  "dshArchivedSessions": "Archived sessions",
+  "dshSearchInSession": "Search in session",
+  "dshSearchMessagesPlaceholder": "Search in current messages...",
+  "dshSearchMatchCount": "{count} matches",
+  "dshSearchClear": "Clear search",
+  "dshSearchNoMatches": "No matching messages found"
 }

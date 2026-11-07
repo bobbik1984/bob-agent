@@ -32,3 +32,19 @@ test('opening a cached preview can revalidate its resource bundle without losing
  version='offline';await assert.rejects(cache.get(a,{force:true}),/offline/);
  assert.equal((await cache.peek(a)).version,'new');
 });
+
+test('findMatches finds query in cached session messages and extracts snippet', async () => {
+ const c = createReadingCache({ storage: null });
+ const key = readingKey('node-1', 'history', 'http://127.0.0.1', 'session-123');
+ await c.put(key, {
+  address: { connection_id: 'node-1', session_id: 'session-123' },
+  messages: [
+   { sequence: 1, role: 'user', text: 'Please build london port model in blender' },
+   { sequence: 2, role: 'assistant', text: 'Exported london_port_model.png to docs' },
+  ],
+ });
+ const matches = await c.findMatches('dsh:node-1:', 'blender');
+ assert.equal(matches.length, 1);
+ assert.equal(matches[0].sessionId, 'session-123');
+ assert.match(matches[0].snippet, /blender/);
+});

@@ -787,5 +787,10 @@
   "voiceInputError": "语音识别异常，请重试",
   "dshArchiveSession": "归档此会话",
   "dshUnarchiveSession": "取消归档",
-  "dshArchivedSessions": "已归档会话"
+  "dshArchivedSessions": "已归档会话",
+  "dshSearchInSession": "在会话内搜索",
+  "dshSearchMessagesPlaceholder": "在当前会话记录中检索...",
+  "dshSearchMatchCount": "匹配 {count} 条",
+  "dshSearchClear": "清空搜索",
+  "dshSearchNoMatches": "未找到相关消息记录"
 }
