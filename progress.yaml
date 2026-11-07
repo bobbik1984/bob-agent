@@ -11,7 +11,7 @@ project:
   - Desktop
   - Android
   - Web (bob-node)
-  current_task: Stage 2 成果全链路与多模态交互全量交付上线（全屏磨砂高斯模糊背景与外部点击退出、会话内与全局全文检索、输入框发图缩略图预览、麦克风语音转文字录入、会话归档降噪）。准备推进 Stage 3 主 Agent 巡检与派单。
+  current_task: Chief of Staff 幕僚长三大核心（VPS2 本机节点接入、跨节点同类任务归一与测试项目智能屏蔽）全量交付上线。已验证 Hostinger VPS2 与 X1T 生产端。
   development_plan: docs/CURRENT_STAGE.md
 phases:
 - name: ✅ 已交付基座：单一 Rust 内核、三端同源与跨节点扫码配对 (BP0–BP5)
@@ -50,6 +50,12 @@ phases:
     status: todo
 - name: 🧠 第三大项：置顶「主 Agent 小助理」大脑升维 (Stage 3)
   tasks:
+  - text: '[Stage 3] Chief of Staff 接入 VPS2 本机节点：挂载 local 节点并支持无缝侧栏目录与多轮会话浏览'
+    status: done
+  - text: '[Stage 3] Chief of Staff 跨节点同类任务归一：resolveCanonicalProject 跨设备聚合同名工程并标注主机徽章'
+    status: done
+  - text: '[Stage 3] Chief of Staff 实验与临时测试智能屏蔽：识别 test/probe/eval 会话并折叠收纳入底部临时测试组'
+    status: done
   - text: '[Stage 3] 跨设备主动巡检与早晚报 (Daily Briefing)：打开主 Agent 自动汇总各节点 (X1T / VPS3) 已完成、待拍板与异常任务'
     status: todo
   - text: '[Stage 3] 自然语言跨节点派单 (Chat-to-Dispatch)：对主 Agent 说一句话即可自动路由并下发指令至目标设备与会话'

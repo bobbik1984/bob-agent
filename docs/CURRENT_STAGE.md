@@ -1,5 +1,11 @@
 # Bob — Current Stage（1.0.1 施工与交接合同）
 
+> Chief of Staff 幕僚长核心三项落地（2026-11-08）：
+> 1. 本机节点接入：Hostinger VPS2 自动挂载 `local` 节点，Rust 端重构 `device_harnesses.json` 解析逻辑，彻底支持驼峰与蛇形混合字段及重复键（camelCase/snake_case 并存）反序列化韧性，本地免 Token 凭证通道就绪，本地 Claude (`/home/ubuntu/.claude`) 与 Codex (`/home/ubuntu/.codex`) 会话无缝进入侧栏目录并支持多轮对话翻阅。
+> 2. 跨节点同类任务归一：实现 `resolveCanonicalProject` 规范项目识别引擎，覆盖 sea2, quant_lab, winter-shelter, history_map 等主流项目，打破物理节点隔阂，在项目分组下统一归纳多节点同名任务，会话行清晰展示各自主机节点徽章（`node-tag-pill`），维持本地独立上下文避免不必要 Token 膨胀。
+> 3. 实验与临时测试智能屏蔽：基于 `isTestOrScratchSession` 启发式规则智能识别包含 test, probe, eval, tmp, scratch 等标记的无状态/测试会话，统一收纳于侧栏底部的折叠区域（`实验与临时测试 · N 项`），常态下保持项目视图极致干净，在用户搜索时通过 `:open="!!search"` 自动穿透检索。
+> 验证与发布：全工作区 159 项前端测试、82 项 bob-runtime 测试及全量 Cargo 单元测试全绿；前端构建在 2.45s 内完成；生产端已发布至 Hostinger VPS2（`bob-online.bobbik.org`，服务重启并经本地与内网 RPC 验证 200 及正文加载成功），并同步剥离后的 release 二进制至 X1T 节点（`bob-node-access.service` 重启成功）。
+
 > 2026-11-07 发布准备：用户批准上线及GitHub APK。线上官方缓存确认Gemini五小时约96%、周约99%，旧界面选最低余额误显示短窗口；本次固定antigravity为gemini-weekly、其他两家为weekly，缺周数据不回退。144项前端检查通过。Android显示名改Bob，使用既有正式SVG生成资源并在CI初始化后覆盖启动图标；保留包名和固定签名兼容升级。发布提交f75f521已上线Hostinger网页/后端及X1T/VPS3节点；公网浏览器确认gemini-weekly 99%、6d22h，Claude仍无官方额度。APK Run 42327592100成功，基于edda3c7（05aa86e仅归并历史、树相同）；名称Bob、15项启动图标像素、固定签名及16KB对齐均通过。成品dist-release/Bob-1.0.1-edda3c7.apk，未安装手机。
 
 > 原生历史刷新（2026-11-06）：同消息数不再作为未变化依据，前端替换有界快照。定向测试与真实候选读回通过；Hostinger网页/后端及X1T/VPS3节点已发布并通过本机读回，生产浏览器经私有通道读取原会话新正文、定位底部及翻阅时输入框固定均通过。公网独立登录与手机未验，不能宣称外部CLI全实时流式已完成。见 [原生会话Evidence](evidence/2026-11-05-native-session-stream.md) 最新节。
