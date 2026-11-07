@@ -183,7 +183,32 @@ fn grants(data: &Path) -> Result<Vec<HostGrant>, &'static str> {
     let p=data.join("device_harnesses.json");
     if !p.exists() { return Ok(vec![]) }
     if fs::metadata(&p).map_err(|_|"AGY_CONFIG_UNAVAILABLE")?.len()>65536 { return Err("AGY_CONFIG_INVALID") }
-    serde_json::from_slice(&fs::read(p).map_err(|_|"AGY_CONFIG_UNAVAILABLE")?).map_err(|_|"AGY_CONFIG_INVALID")
+    let raw = fs::read(&p).map_err(|_|"AGY_CONFIG_UNAVAILABLE")?;
+    let raw_list: Vec<Value> = serde_json::from_slice(&raw).map_err(|_| "AGY_CONFIG_INVALID")?;
+    let mut list = Vec::with_capacity(raw_list.len());
+    for item in raw_list {
+        let connection_id = item.get("connectionId").or_else(|| item.get("connection_id")).and_then(Value::as_str).unwrap_or_default().to_owned();
+        let ssh_target = item.get("sshTarget").or_else(|| item.get("ssh_target")).and_then(Value::as_str).unwrap_or_default().to_owned();
+        let agy_data_dir = item.get("agyDataDir").or_else(|| item.get("agy_data_dir")).and_then(Value::as_str).unwrap_or_default().to_owned();
+        let claude_data_dir = item.get("claudeDataDir").or_else(|| item.get("claude_data_dir")).and_then(Value::as_str).map(str::to_owned);
+        let pi_data_dir = item.get("piDataDir").or_else(|| item.get("pi_data_dir")).and_then(Value::as_str).map(str::to_owned);
+        let codex_data_dir = item.get("codexDataDir").or_else(|| item.get("codex_data_dir")).and_then(Value::as_str).map(str::to_owned);
+        let control_plane_dbs = item.get("controlPlaneDbs").or_else(|| item.get("control_plane_dbs")).and_then(Value::as_array).map(|arr| arr.iter().filter_map(Value::as_str).map(str::to_owned).collect()).unwrap_or_default();
+        let harnesses = item.get("harnesses").or_else(|| item.get("enabledHarnesses")).or_else(|| item.get("enabled_harnesses")).and_then(Value::as_array).map(|arr| arr.iter().filter_map(Value::as_str).map(str::to_owned).collect()).unwrap_or_default();
+        let claude_tools = item.get("claudeTools").or_else(|| item.get("claude_tools")).and_then(Value::as_array).map(|arr| arr.iter().filter_map(Value::as_str).map(str::to_owned).collect()).unwrap_or_default();
+        list.push(HostGrant {
+            connection_id,
+            ssh_target,
+            agy_data_dir,
+            claude_data_dir,
+            pi_data_dir,
+            codex_data_dir,
+            control_plane_dbs,
+            harnesses,
+            claude_tools,
+        });
+    }
+    Ok(list)
 }
 
 pub fn owns_session(id: &str) -> bool { id.starts_with("agy:") }
