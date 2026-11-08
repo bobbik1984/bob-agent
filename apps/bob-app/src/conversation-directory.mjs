@@ -293,8 +293,9 @@ export function resolveCanonicalProject(row) {
 export function isTestOrScratchSession(row) {
   if (!row) return false;
   if (row.pinned) return false;
-  if (row.project_owner && row.project_id && !/(test|tmp|scratch|probe)/i.test(row.project_id)) {
-    return false;
+  if (row.project_owner && row.project_id) {
+    const pName = String(row.project || row.project_id || '');
+    return /(test|tmp|scratch|probe|测试|探针|临时|实验|冒烟)/i.test(pName);
   }
   const title = String(row.title || '').trim().toLocaleLowerCase();
   const ws = workspaceName(row.workspace || '').toLocaleLowerCase();

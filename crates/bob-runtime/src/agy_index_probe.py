@@ -19,11 +19,12 @@ def _j(s):
     except Exception:
         return {}
 
-def _mk_row(rid, sid, h, lbl, kind, title, ws, ts, steps=1, st='completed', res=False):
+def _mk_row(rid, sid, h, lbl, kind, title, ws, ts, steps=1, st='completed', res=False, fp='', ls=''):
     return {
         'id': rid, 'nativeSessionId': sid, 'harness': h, 'toolLabel': lbl,
         'sourceKind': kind, 'title': title, 'workspaceUris': [ws], 'updatedAt': ts,
         'stepCount': max(steps, 1), 'nativeStatus': st or 'completed',
+        'firstPrompt': (fp or '')[:120], 'lastSnippet': (ls or '')[:120],
         'localHistoryPresent': True, 'historyReadable': True, 'historyReason': None,
         'resumeVerified': res,
     }
@@ -43,17 +44,18 @@ def discover(data_dir, limit=100):
         if not REQUIRED <= cols:
             raise ValueError('AGY_INDEX_SCHEMA_UNSUPPORTED')
         pred = "WHERE COALESCE(parent_conversation_id,'')=''" if 'parent_conversation_id' in cols else ''
+        prev_col = "substr(preview,1,240)" if 'preview' in cols else "''"
         rows = db.execute(
             'SELECT conversation_id,substr(title,1,512),substr(workspace_uris,1,16385),'
-            'last_modified_time,step_count,status FROM conversation_summaries ' + pred +
+            'last_modified_time,step_count,status,' + prev_col + ' FROM conversation_summaries ' + pred +
             ' ORDER BY last_modified_time DESC,conversation_id LIMIT ?', (limit + 1,)
         ).fetchall()
     out = []
-    for sid, title, enc, mod, cnt, st in rows[:limit]:
+    for sid, title, enc, mod, cnt, st, prev in rows[:limit]:
         try:
             if str(uuid.UUID(sid)) != sid:
                 raise ValueError()
-            uris = json.loads(enc)
+            uris = json.loads(enc) if enc and str(enc).strip() else []
             if not isinstance(uris, list) or len(uris) > 32 or any(not isinstance(u, str) for u in uris):
                 raise ValueError()
         except (ValueError, TypeError, AttributeError):
@@ -63,10 +65,19 @@ def discover(data_dir, limit=100):
         tr_comp = root / 'brain' / sid / '.system_generated' / 'logs' / 'transcript.jsonl'
         has_tr = (tr_full.is_file() and not tr_full.is_symlink()) or (tr_comp.is_file() and not tr_comp.is_symlink())
         loc = has_tr or (h.is_file() and not h.is_symlink() and h.resolve().is_relative_to(root))
+        prev_clean = _clean(prev) if prev else ''
+        eff_title = title if (title and str(title).strip()) else (prev_clean or title)
+        fp, ls = prev_clean, ''
+        if has_tr:
+            tf = tr_full if (tr_full.is_file() and not tr_full.is_symlink()) else tr_comp
+            fp_tr, ls_tr = _seek_digest(tf, 'agy')
+            fp = fp_tr or fp
+            ls = ls_tr or ls
         out.append({
             'id': f'agy:{sid}', 'nativeSessionId': sid, 'harness': 'agy', 'toolLabel': 'AGY',
-            'title': title, 'workspaceUris': uris,
+            'title': eff_title, 'workspaceUris': uris,
             'updatedAt': mod, 'stepCount': cnt, 'nativeStatus': st, 'sourceKind': 'agy_index',
+            'firstPrompt': (fp or '')[:120], 'lastSnippet': (ls or '')[:120],
             'localHistoryPresent': loc, 'historyReadable': has_tr,
             'historyReason': None if has_tr else ('AGY_HISTORY_CODEC_UNSUPPORTED' if loc else 'AGY_HISTORY_NOT_LOCAL'),
             'resumeVerified': has_tr,
@@ -112,6 +123,79 @@ def _iter_jsonl(f, max_lines=0):
     except OSError:
         return
 
+def _seek_digest(f, harness):
+    fp, ls = '', ''
+    try:
+        sz = f.stat().st_size
+        with open(f, 'rb') as fh:
+            head_b = fh.read(24576)
+            tail_b = b''
+            if sz > 24576:
+                fh.seek(max(24576, sz - 32768))
+                tail_b = fh.read(32768)
+        lines = head_b.decode('utf-8', errors='replace').splitlines()
+        if tail_b:
+            t_lines = tail_b.decode('utf-8', errors='replace').splitlines()
+            lines.extend(t_lines[1:] if len(t_lines) > 1 else t_lines)
+        for ln in lines:
+            if not ln or len(ln) > 65536 or any(k in ln[:160] for k in SKIP_TYPES):
+                continue
+            o = _j(ln)
+            if not isinstance(o, dict) or not o:
+                continue
+            if harness == 'agy':
+                tp = o.get('type')
+                if tp == 'USER_INPUT':
+                    c = str(o.get('content') or '')
+                    m = re.search(r'<USER_REQUEST>\s*([\s\S]*?)\s*</USER_REQUEST>', c)
+                    u = _clean(m.group(1) if m else c)
+                    if u:
+                        fp = fp or u
+                        ls = u
+                elif tp == 'PLANNER_RESPONSE':
+                    a = _clean(o.get('content') or o.get('thinking') or '')
+                    if a:
+                        ls = a
+            elif harness == 'claude':
+                if o.get('isMeta') or o.get('isSidechain'):
+                    continue
+                t = o.get('type')
+                msg = o.get('message') if isinstance(o.get('message'), dict) else {}
+                c = msg.get('content')
+                if t == 'user':
+                    u = c if isinstance(c, str) else '\n'.join(b.get('text', '') for b in c if isinstance(b, dict) and b.get('type') == 'text') if isinstance(c, list) else ''
+                    if '<command-name>' not in u and '<local-command' not in u:
+                        cl = _clean(u)
+                        if cl and cl != 'ping':
+                            fp = fp or cl
+                            ls = cl
+                elif t == 'assistant' and isinstance(c, list):
+                    a = _clean('\n'.join(b.get('text', '') for b in c if isinstance(b, dict) and b.get('type') == 'text'))
+                    if a:
+                        ls = a
+            elif harness == 'pi':
+                if o.get('type') == 'message':
+                    m = o.get('message') if isinstance(o.get('message'), dict) else {}
+                    txt = _clean('\n'.join(p.get('text', '') for p in (m.get('content') or []) if isinstance(p, dict) and p.get('type') == 'text'))
+                    if txt:
+                        if m.get('role') == 'user':
+                            fp = fp or txt
+                        ls = txt
+            elif harness == 'codex':
+                if o.get('type') == 'response_item':
+                    p = o.get('payload') if isinstance(o.get('payload'), dict) else {}
+                    c = p.get('content')
+                    raw_t = '\n'.join(x.get('text', '') for x in c if isinstance(x, dict)) if isinstance(c, list) else str(c or '')
+                    if '<environment_context>' not in raw_t:
+                        txt = _clean(raw_t)
+                        if txt:
+                            if p.get('role') == 'user':
+                                fp = fp or txt
+                            ls = txt
+    except OSError:
+        pass
+    return fp[:110], ls[:110]
+
 def discover_claude(d, limit=30):
     pr = Path(d) / 'projects' if d else None
     if not pr or not pr.is_dir():
@@ -139,8 +223,9 @@ def discover_claude(d, limit=30):
             elif t == 'assistant':
                 cnt += 1
         ws = cwd or str(f.parent.name)
+        fp, ls = _seek_digest(f, 'claude')
         out.append(_mk_row(f'claude-jsonl:{sid}', sid, 'claude', 'Claude', 'claude_native',
-                           title or f'Claude · {Path(ws).name} ({sid[:8]})', ws, ms, cnt, 'completed', True))
+                           title or fp or f'Claude · {Path(ws).name} ({sid[:8]})', ws, ms, cnt, 'completed', True, fp, ls))
     return out
 
 def discover_pi(d, limit=30):
@@ -162,8 +247,9 @@ def discover_pi(d, limit=30):
                     txt = '\n'.join(p.get('text', '') for p in m.get('content', []) if isinstance(p, dict) and p.get('type') == 'text')
                     title = _clean(txt) or title
         wn = Path(cwd).name if cwd else f.parent.name.strip('-')
+        fp, ls = _seek_digest(f, 'pi')
         out.append(_mk_row(f'pi:{sid}', sid, 'pi', 'Pi', 'pi_native',
-                           title or f'Pi · {wn} ({sid[:8]})', cwd or wn, ms, cnt))
+                           title or fp or f'Pi · {wn} ({sid[:8]})', cwd or wn, ms, cnt, 'completed', False, fp, ls))
     return out
 
 def discover_codex(d, limit=20):
@@ -174,12 +260,13 @@ def discover_codex(d, limit=20):
     for f in sorted(sr.glob('**/*.jsonl'), key=lambda p: p.stat().st_mtime, reverse=True):
         if len(out) >= limit:
             break
-        ms, sid, cwd, guard, ut, at = int(f.stat().st_mtime * 1000), None, '', False, None, None
+        ms, sid, cwd, guard, ut, at, cnt = int(f.stat().st_mtime * 1000), None, '', False, None, None, 0
         for _, o in _iter_jsonl(f, 120):
             if o.get('type') == 'session_meta':
                 p = o.get('payload', {})
                 sid, cwd, guard = p.get('id') or p.get('session_id'), p.get('cwd') or '', p.get('thread_source') == 'guardian_review'
             elif o.get('type') == 'response_item':
+                cnt += 1
                 p = o.get('payload', {})
                 c = p.get('content')
                 txt = '\n'.join(x.get('text', '') for x in c if isinstance(x, dict)) if isinstance(c, list) else str(c or '')
@@ -195,8 +282,9 @@ def discover_codex(d, limit=20):
         if cwd:
             seen.add(cwd)
         wn = Path(cwd).name if cwd else 'codex'
+        fp, ls = _seek_digest(f, 'codex')
         out.append(_mk_row(f'codex:{sid}', sid, 'codex', 'Codex', 'codex_native',
-                           at or ut or f'Codex · {wn}', cwd or str(f.parent), ms))
+                           at or ut or fp or f'Codex · {wn}', cwd or str(f.parent), ms, max(cnt, 1), 'completed', False, fp or ut, ls or at))
     return out
 
 def discover_control_plane(dbs, harnesses=None, limit=40):
@@ -224,8 +312,9 @@ def discover_control_plane(dbs, harnesses=None, limit=40):
             if at not in allow or (at, tid) in seen or (title and '自动测试，非人工验收' in title):
                 continue
             seen.add((at, tid))
+            t_clean = (title or pn or tid).strip()
             out.append(_mk_row(f'cp:{at}:{tid}', tid, at, lmap.get(at, at.upper()),
-                               f'{at}_control_plane', (title or pn or tid).strip(), wp or pn or 'vps3', uat, 1, st))
+                               f'{at}_control_plane', t_clean, wp or pn or 'vps3', uat, 1, st, False, t_clean, ''))
             if len(out) >= limit:
                 break
     return out
@@ -234,7 +323,19 @@ def discover_multi(cfg):
     s = []
     if cfg.get('agyDataDir'):
         try:
-            s.extend(discover(cfg['agyDataDir'], int(cfg.get('limit', 60))).get('sessions', []))
+            raw_agy = discover(cfg['agyDataDir'], min(MAX_ROWS, int(cfg.get('limit', 120)))).get('sessions', [])
+            ql_cron = 0
+            for item in raw_agy:
+                if item.get('stepCount', 0) == 0 and not (item.get('title') or '').strip():
+                    continue
+                uris = item.get('workspaceUris') or []
+                if any('quant_lab' in u for u in uris) and item.get('stepCount', 0) <= 3:
+                    ql_cron += 1
+                    if ql_cron > 5:
+                        continue
+                s.append(item)
+                if len(s) >= 45:
+                    break
         except Exception:
             pass
     s.extend(discover_claude(cfg.get('claudeDataDir')))

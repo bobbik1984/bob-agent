@@ -38,7 +38,7 @@ async function setProject(s,event){linking.value=true;associationError.value='';
  associations.value=await kernelBridge.projectLinkSet({connectionId:s.node.id,harness:harness(s),sessionId:s.id,projectId:event.target.value||null,expectedVersion:association(s)?.version||0});
  }catch{associationError.value=t('projectLinkConflict');await loadLinks();}finally{linking.value=false;}}
 loadLinks();
-watch(()=>props.catalog?.projects?.length,()=>loadLinks());
+watch(()=>[props.catalog?.projects?.length,props.catalog?.conversations?.[0]?.updated_at],()=>loadLinks());
 const listKey=n=>readingKey(n.id,'directory',n.baseUrl||n.url||'');
 const display=nodes=>{const labels=new Map(deviceGroups(nodes).map(g=>[g.id,g.label]));remote.value=nodes.flatMap(n=>(cachedNodes.get(listKey(n))||[]).map(s=>({...s,node:{...n,label:labels.get(n.deviceId||n.id)},remote:true,directoryStale:s.directoryStale||pathState(n)!=='readable',uid:`${n.id}:${s.id}`})))};
 async function refresh(){const g=++generation;loading.value=true;const nodes=(props.nodes||[]).filter(n=>n.enabled!==false);

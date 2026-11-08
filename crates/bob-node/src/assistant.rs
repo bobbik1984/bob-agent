@@ -87,68 +87,69 @@ pub fn execute(state: &Arc<Mutex<NodeContext>>, args: &Value) -> Result<Value, &
                 complete = false;
                 continue;
             };
+            if id == "local" {
+                let _ = bob_runtime::agy_directory::ensure_local_grant_registered(&runtime.data_dir, "local");
+            }
             let merged = claude_rpc::merge_claude_into_dsh_list(
                 &runtime.data_dir,
                 id,
                 runtime.dsh_client(id).and_then(|c| c.list()),
             );
-            match merged {
+            let mut node_items: Vec<Value> = match merged {
                 Ok(mut list) => {
                     if let Ok(extra) = bob_runtime::agy_directory::list(&runtime.data_dir, id) {
                         if let Some(rows) = list.as_array_mut() {
                             rows.extend(extra);
                         }
                     }
-                    if let Some(items) = list.as_array() {
-                        for item in items {
-                            if candidates.len() >= 200 {
-                                complete = false;
-                                break;
-                            }
-                            let harness = item["harness"].as_str().unwrap_or_else(|| {
-                                if item["source_kind"].as_str() == Some("claude_native") {
-                                    "claude"
-                                } else if item["id"].as_str().is_some_and(|s| s.starts_with("agy:"))
-                                {
-                                    "agy"
-                                } else {
-                                    "dsh"
-                                }
-                            });
-                            candidates.push(json!({
-                                "connection_id": id,
-                                "harness": harness,
-                                "session_id": item["id"],
-                                "title": item["title"].as_str().unwrap_or("").chars().take(120).collect::<String>(),
-                                "device": node["name"],
-                                "workspace": item["workspace"]
-                            }));
-                        }
-                    } else {
-                        complete = false;
+                    list.as_array().cloned().unwrap_or_default()
+                }
+                Err(_) => bob_runtime::agy_directory::list(&runtime.data_dir, id).unwrap_or_default(),
+            };
+            if node_items.is_empty() && id != "local" {
+                if let Ok(remote_rows) = bob_runtime::node_pairing::forward_dsh_rpc_to_remote_node(
+                    &runtime,
+                    id,
+                    "app_dsh_list",
+                    &json!({"connectionId": id}),
+                ) {
+                    if let Some(arr) = remote_rows.as_array() {
+                        node_items = arr.clone();
                     }
                 }
-                Err(_) => {
-                    if let Ok(extra) = bob_runtime::agy_directory::list(&runtime.data_dir, id) {
-                        for item in extra {
-                            if candidates.len() >= 200 {
-                                complete = false;
-                                break;
-                            }
-                            let harness = item["harness"].as_str().unwrap_or("agy");
-                            candidates.push(json!({
-                                "connection_id": id,
-                                "harness": harness,
-                                "session_id": item["id"],
-                                "title": item["title"].as_str().unwrap_or("").chars().take(120).collect::<String>(),
-                                "device": node["name"],
-                                "workspace": item["workspace"]
-                            }));
-                        }
-                    } else {
-                        complete = false;
-                    }
+            }
+            for item in node_items {
+                if candidates.len() >= 200 {
+                    complete = false;
+                    break;
                 }
+                let harness = item["harness"].as_str().unwrap_or_else(|| {
+                    if item["source_kind"].as_str() == Some("claude_native") {
+                        "claude"
+                    } else if item["id"].as_str().is_some_and(|s| s.starts_with("agy:")) {
+                        "agy"
+                    } else {
+                        "dsh"
+                    }
+                });
+                let mut cand = json!({
+                    "connection_id": id,
+                    "harness": harness,
+                    "session_id": item["id"],
+                    "title": item["title"].as_str().unwrap_or("").chars().take(120).collect::<String>(),
+                    "device": node["name"],
+                    "workspace": item["workspace"]
+                });
+                if let Some(sc) = item.get("stepCount").and_then(Value::as_i64) {
+                    cand["turns"] = json!(sc);
+                }
+                if let Some(fp) = item.get("firstPrompt").and_then(Value::as_str).filter(|s| !s.is_empty()) {
+                    cand["first_prompt"] = json!(fp.chars().take(100).collect::<String>());
+                }
+                if let Some(ls) = item.get("lastSnippet").and_then(Value::as_str).filter(|s| !s.is_empty()) {
+                    cand["last_snippet"] = json!(ls.chars().take(100).collect::<String>());
+                }
+                candidates.push(cand);
             }
         }
         let user = prepared

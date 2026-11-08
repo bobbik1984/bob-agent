@@ -758,6 +758,9 @@ fn normalize(connection: &str, s: &Value)->Result<Value,&'static str>{
             "title":s["title"].as_str().filter(|x|!x.is_empty()).unwrap_or(native_id),
             "workspace":uri.strip_prefix("file://").unwrap_or(uri),
             "updated_at":s["updatedAt"],
+            "stepCount":s["stepCount"],
+            "firstPrompt":s["firstPrompt"],
+            "lastSnippet":s["lastSnippet"],
             "historyReadable":readable,
             "historyReason":s["historyReason"],
             "readOnlyDirectory":!readable

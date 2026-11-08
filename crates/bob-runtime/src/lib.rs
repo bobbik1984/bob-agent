@@ -1697,12 +1697,16 @@ fn build_request_body(
                     json!({ "role": role, "parts": [{ "text": t.content }] })
                 })
                 .collect();
+            let mut gen_cfg = json!({
+                "temperature": 0.3,
+                "maxOutputTokens": 8192,
+            });
+            if profile.model_id.contains("2.5-flash") {
+                gen_cfg["thinkingConfig"] = json!({ "thinkingBudget": 0 });
+            }
             json!({
                 "contents": contents,
-                "generationConfig": {
-                    "temperature": 0.3,
-                    "maxOutputTokens": 4096,
-                }
+                "generationConfig": gen_cfg,
             })
             .to_string()
         }
@@ -1887,6 +1891,9 @@ fn extract_reply_text(protocol: &str, raw_json: &str) -> Result<String, &'static
             .and_then(|parts| {
                 let mut joined = String::new();
                 for p in parts {
+                    if p.get("thought").and_then(Value::as_bool) == Some(true) {
+                        continue;
+                    }
                     if let Some(t) = p.get("text").and_then(Value::as_str) {
                         joined.push_str(t);
                     }
