@@ -204,3 +204,31 @@
 - 理由：官方程序接口保留流式事件、审批与会话身份，减少终端包装脆弱性；官方远控 UI 不自动等于第三方控制 API。仅提供官方远控的工具可保留外部打开入口。
 - 能力以官方文档、节点版本实测、Bob 链路验收三层区分；配置表不能替代探测。供应商认证用途须另核查，特别不将 app-server 本地认证直接用于商业/托管服务。
 - 当前架构见 ARCHITECTURE；适配器及流式契约唯一见 wiki/harness-auth §6；施工沿 BP4-06 / F2/F5，无新增总计划。
+
+
+## BOB-D-014 — 单一收集箱与每日幕僚长分拣（One Inbox, Sorted Once a Day）及五栏导航职责收敛
+
+- 日期：2026-11-08；状态：**accepted（设计立项，尚未施工）**。来源：用户引入并确认“One inbox, sorted once a day”概念设计，要求写入项目开发文档作为后续推进指南。
+- **背景**：
+  1. 原有灵感入口分散在三处（Dashboard `#inbox`、Bob「闪念摘录」、以及「日程 → 待办事项」下的收件箱），且写入时需选择项目或类型，违背“2 秒随手记”的认知规律。
+  2. 「日程」、「收集箱」与「知识」边界模糊，未整理的碎片与已沉淀的笔记/决定混杂。
+- **决定**：
+  1. **捕获与分拣彻底解耦（Capture Now, Sort Once a Day）**：
+     - **捕获层（Zero-Decision Capture）**：全平台（手机、Web、桌面悬浮按钮及外部 Share/API）统一写入唯一的云端同步 **收集箱（Inbox）**。支持纯文本、照片、语音；写入时**不强制**要求项目、标签或日期，支持离线先存本地、联网自动同步。
+     - **状态与溯源（Never Deleted, Linked to Destination）**：每条 Spark 仅有两个核心状态：`unsorted`（未分拣）与 `sorted`（已分拣）。已分拣的 Spark 永不静默删除，而是持久保留指向其最终去向（目标项目 `todo.md`、日程事件或知识笔记）的可点击溯源链接（Destination Chip）。
+  2. **Bob Core 幕僚长每日批处理分拣（Daily Sort & Review Card）**：
+     - 每天固定时间（可配置，如 21:00）或用户手动触发时，由自包含的 `Bob Core`（复用当前选定的主对话模型，不依赖宿主预装外部 CLI）批量读取 `unsorted` Sparks 并结合 `project_registry.yaml` 生成一张聚合的 **每日分拣确认卡（Daily Review Card）**，提供五类去向建议：
+       - `→ Project todo`：匹配项目并准备写入对应项目的 `todo.md`；
+       - `→ Calendar`：含时间语义的事项转为日程/提醒；
+       - `→ Note / Knowledge`：沉淀为结构化笔记，后续支持一键在对话中“展开这个想法（Develop this idea）”；
+       - `→ Merge`：将多条同主题碎片合并为一项；
+       - `→ Keep for later`：暂不处理，继续留在收集箱。
+     - **人类确认门禁（Human Confirmation Gate）**：未经用户在 Review Card 上点击「确认 / 全部确认」，不产生任何跨模块写入副作用。
+     - **跨端 `todo.md` 写入策略**：对已通过 Syncthing 同步至常驻节点的工作区或全局 `todo.md` 直接落盘；仅存在于离线 PC 本地独有路径的项目 `todo.md` 诚实标记为 `Waiting for PC`（进入持久化 Outbox 队列），待 PC 节点重连后由 PC 端完成写入并回填状态。
+  3. **五栏导航职责重划（Time vs. Spark vs. Knowledge）**：
+     - **对话（Chat）**：与 Bob 主助理对话及各项目工程会话；
+     - **今天（Today，原“日程”）**：只关注时间与当下行动（今日议程、待办事项、定时任务）；
+     - **收集箱（Inbox）**：未分拣的原始火花（带轻量角标计数）+ 每日分拣确认卡；统一替代旧 Dashboard `#inbox`、闪念摘录与日程收件箱；
+     - **知识（Knowledge）**：仅存放**已分拣沉淀**的材料（笔记、决定记录、长期记忆）；
+     - **我的（Avatar / Profile）**：设置、设备连接、模型配置与**票夹**（收拢至单一入口，不再多处重复）。
+- **实施路由**：视觉与交互约束归并入 `docs/DESIGN_PRINCIPLES.md`，能力验收归并入 `docs/FEATURES.md §F3`，分阶段施工步骤维护于 `docs/CURRENT_STAGE.md §3.10`。

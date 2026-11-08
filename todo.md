@@ -104,3 +104,13 @@
 
 - [ ] **研发需求下沉与代码仓库分拣通道 (Task Promotion)**：
   - 在 Bob 界面中支持将灵感/Note/待办一键提升（Promote）为研发任务，通过 `todo-sorter` 机制按 `project_registry.yaml` 自动写入目标代码仓库的 `todo.md`（原生兼容 `Gemini` 相对路径与 `D:\Code` 绝对路径），并回填 `ScheduleItem.project_id`。
+
+
+- [ ] **单一收集箱与每日幕僚长分拣（One Inbox, Sorted Once a Day，见 `BOB-D-014` 与 `docs/CURRENT_STAGE.md §3.10`）**：
+  - **核心闭环**：`Capture（全端悬浮按钮/API 零决策 2 秒写入，离线先存本地） → Inbox（unsorted/sorted 双态 + 去向溯源胶囊） → Daily Sort（Bob Core 每日生成 Daily Review Card，确认后落盘至项目 todo.md / 今天日程 / 知识笔记） → Develop（从笔记一键展开对话 + 每周回顾）`。
+  - **导航对齐**：`对话 | 今天（原日程） | 收集箱 | 知识 | 我的（合并票夹）`。
+  - **施工前待裁决的 4 个开放问题（Open Questions）**：
+    1. 每日分拣（Daily Sort）默认触发时间（如 `21:00`），以及连续数日未处理时是否支持跳过或延期汇总？
+    2. 对于置信度极高的明确项目待办，是否允许配置“免确认直写”，还是严格保持 100% 人工点击确认？
+    3. 首版（V1）是否同步纳入语音捕获（Voice Capture），还是先完成文字 + 图片闭环？
+    4. 旧 Dashboard `#inbox` 地址重定向至 `bob-online` 收集箱的过渡保留期多久？

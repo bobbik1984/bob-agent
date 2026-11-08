@@ -567,3 +567,22 @@ model-assets-20261101-r1已备份后发布，仅补全public图标资源、移�
 首个验证节点沿用X1T，无需重新选节点。用户补充的主路由、ExecutionAssertion与WarmRestartState归入现有第5步，不能抢占前四步设备入口/原生会话的施工优先级。研究中的54.7%、226:1和20k尚未附可核查论文/实验条件，不纳入验收承诺；先补来源再判断适用性。界面不固定某个路由模型，模型由已有配置驱动。
 
 先完成受限目录原生会话发现与原ID直达，再完成新建与持久监管；目录扫描只读取显式授权范围的元数据并有数量/字节上限，不读取全机任意用户历史。X1T环境安装/部署仍需明确答复；此前“请继续”不解释为对尚未解释清楚的安装请求的确认。所有后续实现遵循ARCHITECTURE“自治护栏的证据与反馈边界”。
+
+
+### 3.10 第七项：F3 / BOB-D-014 单一收集箱与每日幕僚长分拣（One Inbox, Sorted Once a Day）推进路线（2026-11-08 立项，待施工）
+
+依据 `BOB-D-014`、`DESIGN_PRINCIPLES` 与 `FEATURES §F3`，将原本分散的三处收件入口（Dashboard `#inbox`、闪念摘录、日程下待办收件箱）收敛为唯一的 **「收集箱（Inbox）」**，并复用已打通的自包含 `Bob Core` 幕僚长执行通道实现每日一次的批处理分拣。按以下四步递进施工，不抢占当前已排期的稳定性门禁：
+
+1. **Step 1 — 内核数据契约与单一收集箱底座（`bob-kernel` + `bob-node`）**：
+   - 演进现有 `captures` 表（增量迁移，不破坏历史记录），补齐 `triage_status`（`unsorted` | `sorted`）、`destination_kind`（`project_todo` | `calendar` | `note` | `merged`）、`destination_ref_id`、`destination_label` 与 `triage_batch_id` 字段。
+   - 暴露统一 RPC / HTTP 端点（兼容外部 Share 与旧 Dashboard `#inbox` 转发写入），确保离线 Outbox 幂等提交与全端实时同流。
+2. **Step 2 — Bob Core 幕僚长每日分拣引擎（`bob-runtime` + `assistant.rs`）**：
+   - 新增 `triage_sparks` 动作提案协议：读取全部 `unsorted` Sparks、当前项目清单（对齐 `project_registry.yaml` 与平台 `projects`）及近期日程摘要，调用当前选定的 `main` 模型产出结构化分拣草案 `DailyReviewBatch`。
+   - 支持定时预处理（每日用户指定时刻后台生成草稿卡）与手动一键触发（「立即整理」），打开收集箱即可直接审阅，无需现场等待模型推理。
+3. **Step 3 — 五栏导航重划与「收集箱 / 每日分拣确认卡」UI（`bob-app`）**：
+   - 主导航调整为 **`对话 | 今天 | 收集箱 | 知识 | 我的`**（将「日程」升级为聚焦今日行动的「今天」，将「票夹」收拢至「我的」单点入口）。
+   - 在「收集箱」顶部实现卡片堆叠式 **Daily Review Card**（展示去向彩色胶囊与 `确认 / 改一下 / 全部确认` 按钮），全部视觉样式通过明暗双模 CSS 变量注入（遵循 `AGENTS.md` 严禁硬编码色彩与 i18n 双语同步铁律）。
+4. **Step 4 — 确认落盘、PC 节点 `todo.md` 同步与「展开想法」闭环**：
+   - 用户点击确认后，在同一事务内将 Spark 标为 `sorted` 并写入目标模块（日程 `ScheduleItem`、知识 `NoteItem` 或项目 `todo.md`）。
+   - 项目 `todo.md` 写入：常驻节点已同步目录直接落盘；仅驻留于离线 PC 的仓库写入 `pending_todo_writes` 队列并在卡片上诚实展示 `Waiting for PC`，待 PC 节点上线后自动执行字段级追加并回填完成状态。
+   - 在「知识」笔记详情页提供「展开这个想法（Develop this idea）」按钮，点击即携带原 Spark 与笔记上下文开启 Bob 对话，并可选支持每周回顾摘要（Weekly Look-back）。
