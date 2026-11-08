@@ -612,13 +612,13 @@ pub fn merge_topology(
     }
 
     if incoming.get("projects").is_some() || incoming.get("projectSessionLinks").is_some() {
-        let _ = app.merge_projects_and_links(incoming, now);
+        app.merge_projects_and_links(incoming, now).map_err(|_| "PROJECT_LINK_SYNC_FAILED")?;
     }
 
-    if let Some(bundle_val) = incoming.get("peerSyncBundle") {
-        if let Ok(bundle) = serde_json::from_value::<PeerSyncBundle>(bundle_val.clone()) {
-            let _ = app.apply_peer_sync_bundle(&bundle, now);
-        }
+    if let Some(bundle_val) = incoming.get("peerSyncBundle").filter(|value| !value.is_null()) {
+        let bundle = serde_json::from_value::<PeerSyncBundle>(bundle_val.clone())
+            .map_err(|_| "HOME_PEER_SYNC_APPLY_FAILED")?;
+        app.apply_peer_sync_bundle(&bundle, now).map_err(|_| "HOME_PEER_SYNC_APPLY_FAILED")?;
     }
 
     let _ = runtime.build_snapshot_and_sync(app)?;

@@ -59,11 +59,14 @@ export function useInbox(ctx = {}) {
     return list;
   });
 
+  let inboxRead = 0;
   async function loadInbox() {
     if (!available || !kernelBridge.inboxList) return;
+    const read = ++inboxRead;
     inboxBusy.value = true;
     try {
       const list = await kernelBridge.inboxList(null);
+      if (read !== inboxRead) return;
       inboxItems.value = (Array.isArray(list) ? list : []).map(item => ({
         ...item,
         content: item.content || item.content_ref || item.contentRef || '',
@@ -71,7 +74,7 @@ export function useInbox(ctx = {}) {
     } catch (err) {
       console.error('Failed to load inbox:', err);
     } finally {
-      inboxBusy.value = false;
+      if (read === inboxRead) inboxBusy.value = false;
     }
   }
 

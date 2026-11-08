@@ -7,7 +7,7 @@ import {kernelBridge} from '../native-bridge.mjs';
 import {nodeLabel as label,directoryGroups,extractFilterOptions,groupIconKind} from '../conversation-directory.mjs';
 import {checkPath,pathState} from '../path-health.mjs';
 import {deviceGroups,deviceFilterKeys} from '../device-paths.mjs';
-const props=defineProps({nodes:Array,catalog:Object,search:String,mode:String});
+const props=defineProps({nodes:Array,catalog:Object,search:String,mode:String,syncRevision:Number});
 const emit=defineEmits(['select-local','select-remote']);
 const {t}=useI18n();
 const remote=ref([]), failures=ref([]), loading=ref(false), rodIndex=ref(0);let generation=0, rodTimer=null;
@@ -33,19 +33,31 @@ const activeFilterCount=computed(()=>(selectedNodes.value.length>0?1:0)+(selecte
 const cachedNodes=new Map();
 const harness=s=>s.harness||(s.source_kind==='claude_native'?'claude':'dsh');
 const association=s=>associations.value.links.find(l=>l.connection_id===s.node?.id&&l.harness===harness(s)&&l.session_id===s.id);
-async function loadLinks(){try{associations.value=await kernelBridge.projectLinks();linksAvailable.value=true;}catch{linksAvailable.value=false;}}
-async function setProject(s,event){linking.value=true;associationError.value='';try{
+let linkRead = 0;
+let linksFlight;
+function loadLinks() {
+ if (linksFlight) return linksFlight;
+ const read = ++linkRead;
+ linksFlight = Promise.resolve().then(() => kernelBridge.projectLinks()).then(next => {
+  if (read !== linkRead || linking.value) return;
+  if (JSON.stringify(next) !== JSON.stringify(associations.value)) associations.value = next;
+  linksAvailable.value = next.writable !== false;
+ }).catch(() => { /* Keep the last good view when the refresh fails. */ }).finally(() => {
+  if (read === linkRead) linksFlight = undefined;
+ });
+ return linksFlight;
+}
+async function setProject(s,event){linkRead++;linksFlight=undefined;linking.value=true;associationError.value='';try{
  associations.value=await kernelBridge.projectLinkSet({connectionId:s.node.id,harness:harness(s),sessionId:s.id,projectId:event.target.value||null,expectedVersion:association(s)?.version||0});
- }catch{associationError.value=t('projectLinkConflict');await loadLinks();}finally{linking.value=false;}}
-loadLinks();
-watch(()=>[props.catalog?.projects?.length,props.catalog?.conversations?.[0]?.updated_at],()=>loadLinks());
+ }catch{associationError.value=t('projectLinkConflict');linking.value=false;await loadLinks();}finally{linking.value=false;}}
+watch([()=>props.catalog,()=>props.syncRevision],()=>loadLinks());
 const listKey=n=>readingKey(n.id,'directory',n.baseUrl||n.url||'');
-const display=nodes=>{const labels=new Map(deviceGroups(nodes).map(g=>[g.id,g.label]));remote.value=nodes.flatMap(n=>(cachedNodes.get(listKey(n))||[]).map(s=>({...s,node:{...n,label:labels.get(n.deviceId||n.id)},remote:true,directoryStale:s.directoryStale||pathState(n)!=='readable',uid:`${n.id}:${s.id}`})))};
+const display=nodes=>{const labels=new Map(deviceGroups(nodes).map(g=>[g.id,g.label]));const next=nodes.flatMap(n=>(cachedNodes.get(listKey(n))||[]).map(s=>({...s,node:{...n,label:labels.get(n.deviceId||n.id)},remote:true,directoryStale:s.directoryStale||pathState(n)!=='readable',uid:`${n.id}:${s.id}`})));if(JSON.stringify(next)!==JSON.stringify(remote.value))remote.value=next;};
 async function refresh(){const g=++generation;loading.value=true;const nodes=(props.nodes||[]).filter(n=>n.enabled!==false);
  failures.value=failures.value.filter(f=>nodes.some(n=>n.id===f.id&&(n.baseUrl||n.url)===f.url));
- void loadLinks();
- display(nodes);
+ const linksReady = loadLinks();
  await Promise.all(nodes.map(async n=>{const k=listKey(n);if(!cachedNodes.has(k)){const rows=await readingCache.get(k);if(Array.isArray(rows))cachedNodes.set(k,rows)}}));
+ await linksReady;
  if(g!==generation)return;display(nodes);
  const results=await Promise.allSettled(nodes.map(async n=>{const revision=readingCache.revision();const rows=await singleFlight(listKey(n),()=>checkPath(n,kernelBridge));if(!Array.isArray(rows))throw Error('DSH_INVALID_LIST');cachedNodes.set(listKey(n),rows);await readingCache.put(listKey(n),rows,undefined,revision);return rows}));
  if(g!==generation)return;display(nodes);failures.value=results.flatMap((x,i)=>x.status==='rejected'?[{id:nodes[i].id,name:label(nodes[i]),url:nodes[i].baseUrl||nodes[i].url,cached:Boolean(cachedNodes.get(listKey(nodes[i]))?.length)}]:[]);loading.value=false;}

@@ -22,6 +22,7 @@ pub(crate) struct PairedHome {
 #[derive(Default)]
 pub(crate) struct HomeLinkState {
     pub connection: Mutex<Option<Arc<PairedHome>>>,
+    pub(crate) subscription_quotas: Mutex<Option<(String, serde_json::Value)>>,
     busy: Arc<AtomicBool>,
     next_result: AtomicUsize,
 }
@@ -57,8 +58,7 @@ pub(crate) async fn app_home_sync<R: tauri::Runtime>(
         .clone();
     let Some(connection) = connection else {
         if crate::direct_llm::sync_with_paired_remote_nodes(&host, &state)
-            .await
-            .unwrap_or(false)
+            .await?
         {
             return Ok("sync_checked");
         }
@@ -184,7 +184,7 @@ pub(crate) async fn app_home_sync<R: tauri::Runtime>(
     if let Some(cfg_json) = incoming_shared_cfg {
         crate::direct_llm::merge_shared_config_for_host(&host, &state.0, &cfg_json).await;
     }
-    let _ = crate::direct_llm::sync_with_paired_remote_nodes(&host, &state).await;
+    crate::direct_llm::sync_with_paired_remote_nodes(&host, &state).await?;
     drop(flight);
     Ok("sync_checked")
 }

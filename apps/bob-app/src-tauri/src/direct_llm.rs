@@ -232,6 +232,13 @@ async fn build_model_hub_snapshot_and_sync<R: Runtime>(
 
     let registry = load_or_init_registry(&data_dir);
     let mut hub_state = load_hub_state(&data_dir);
+    let subscription_quotas = host.try_state::<crate::home_link::HomeLinkState>()
+        .and_then(|link| link.subscription_quotas.lock().ok()?.clone())
+        .filter(|(id, _)| hub_state["remoteNodes"].as_array().is_some_and(|nodes| nodes.iter().any(|n|
+            n["id"].as_str() == Some(id.as_str()) && n["enabled"] != false
+        )))
+        .map(|(_, value)| bob_runtime::subscription_quota::from_paired_view(&value))
+        .unwrap_or_else(bob_runtime::probe_subscription_quotas_cached);
     let providers = registry
         .get("providers")
         .and_then(Value::as_array)
@@ -461,7 +468,7 @@ async fn build_model_hub_snapshot_and_sync<R: Runtime>(
         "providerVariants": hub_state["providerVariants"],
         "customModels": custom_models,
         "remoteNodes": remote_nodes,
-        "subscriptionQuotas": bob_runtime::probe_subscription_quotas_cached(),
+        "subscriptionQuotas": subscription_quotas,
     }))
 }
 
@@ -3840,21 +3847,19 @@ async fn apply_synced_topology_payload<R: Runtime>(
     }
 
     let synced_clone = synced.clone();
-    let _ = with_app(&state.0, |app| {
+    with_app(&state.0, |app| {
         if synced_clone.get("projects").is_some()
             || synced_clone.get("projectSessionLinks").is_some()
         {
-            let _ = app.merge_projects_and_links(&synced_clone, at_ms);
+            app.merge_projects_and_links(&synced_clone, at_ms).map_err(|_| "PROJECT_LINK_SYNC_FAILED")?;
         }
-        if let Some(bundle_val) = synced_clone.get("peerSyncBundle") {
-            if let Ok(bundle) =
-                serde_json::from_value::<bob_kernel::personal_ops::PeerSyncBundle>(bundle_val.clone())
-            {
-                let _ = app.apply_peer_sync_bundle(&bundle, at_ms);
-            }
+        if let Some(bundle_val) = synced_clone.get("peerSyncBundle").filter(|v| !v.is_null()) {
+            let bundle = serde_json::from_value::<bob_kernel::personal_ops::PeerSyncBundle>(bundle_val.clone())
+                .map_err(|_| "HOME_PEER_SYNC_APPLY_FAILED")?;
+            app.apply_peer_sync_bundle(&bundle, at_ms).map_err(|_| "HOME_PEER_SYNC_APPLY_FAILED")?;
         }
         Ok(())
-    });
+    })?;
 
     let _ = build_model_hub_snapshot_and_sync(host, state).await;
     Ok(())
@@ -3901,8 +3906,13 @@ pub(crate) async fn sync_with_paired_remote_nodes<R: Runtime>(
     peers.sort_by_key(|(_, _, _, is_web_host)| if *is_web_host { 0 } else { 1 });
 
     let mut any_synced = false;
-    for (_peer_id, peer_url, peer_tok, _is_web_host) in peers {
-        let local_topo = build_local_topology_payload(host, state).await?;
+    let mut web_sync_failed = false;
+    for (peer_id, peer_url, peer_tok, is_web_host) in peers {
+        let mut local_topo = build_local_topology_payload(host, state).await?;
+        let read_quotas = is_web_host && peer_tok.is_some() && peer_url.starts_with("https://");
+        if read_quotas {
+            local_topo["includeSubscriptionQuotas"] = json!(true);
+        }
         let url_clone = peer_url.clone();
         let tok_clone = peer_tok.clone();
         let sync_res = tauri::async_runtime::spawn_blocking(move || {
@@ -3917,11 +3927,21 @@ pub(crate) async fn sync_with_paired_remote_nodes<R: Runtime>(
         .and_then(Result::ok);
 
         if let Some(synced) = sync_res {
-            let _ = apply_synced_topology_payload(host, state, &synced, None).await;
+            apply_synced_topology_payload(host, state, &synced, None).await?;
+            if read_quotas && synced["subscriptionQuotas"].is_object() {
+                if let Some(link) = host.try_state::<crate::home_link::HomeLinkState>() {
+                    if let Ok(mut cached) = link.subscription_quotas.lock() {
+                        *cached = Some((peer_id, synced["subscriptionQuotas"].clone()));
+                    }
+                }
+            }
             any_synced = true;
+        } else if is_web_host {
+            web_sync_failed = true;
         }
     }
 
+    if web_sync_failed { return Err("HOME_WEB_SYNC_UNAVAILABLE"); }
     Ok(any_synced)
 }
 

@@ -50,6 +50,7 @@ const homeFault = ref(false);
 const cancelPending = ref(new Set());
 const dispatchPending = ref(false);
 const catalog = ref(null);
+const directorySyncRevision = ref(0);
 const sidebarGroupMode = ref('project');
 const sidebarSearch = ref('');
 const remoteConversation = ref(null);
@@ -240,7 +241,11 @@ async function switchPrimaryDrawer(drawer) {
   settingsOpen.value = false;
   if (drawer === 'schedule' || drawer === 'knowledge' || drawer === 'work' || drawer === 'inbox') {
     if (available && kernelBridge.syncHome) {
-      void kernelBridge.syncHome().then(() => {
+      void kernelBridge.syncHome().then(async status => {
+        if (status !== 'sync_checked' || disposed) return;
+        directorySyncRevision.value += 1;
+        const snap = await kernelBridge.catalog().catch(() => null);
+        if (snap && !disposed) applyCatalogPreferences(snap);
         void ctx.loadModelHub();
         void ctx.loadPersonalOps();
         if (ctx.inbox?.loadInbox) void ctx.inbox.loadInbox();
@@ -621,7 +626,7 @@ function nearBottom() {
 
 function applyCatalogPreferences(snap) {
   if (!snap) return;
-  catalog.value = snap;
+  if (JSON.stringify(catalog.value) !== JSON.stringify(snap)) catalog.value = snap;
   let localMode = null;
   try { localMode = localStorage.getItem('bob-sidebar-mode'); } catch {}
   if (localMode === 'smart') {
@@ -650,15 +655,20 @@ const reload = singleFlight(async () => {
   if (Date.now() >= nextAllowedSyncAt) {
     void kernelBridge
       .syncHome()
-      .then(status => {
+      .then(async status => {
+        if (disposed) return;
         if (status !== 'sync_in_progress') {
           syncFailureStreak = 0;
           nextAllowedSyncAt = 0;
           homeFault.value = false;
           if (status === 'sync_checked') {
             homeReachable.value = true;
+            directorySyncRevision.value += 1;
             void ctx.loadModelHub();
             void ctx.loadPersonalOps();
+            if (activeDrawer.value === 'inbox') void ctx.inbox?.loadInbox();
+            const snap = await kernelBridge.catalog().catch(() => null);
+            if (snap && !disposed) applyCatalogPreferences(snap);
           }
         }
       })
@@ -1056,6 +1066,7 @@ const statusKeys = {
     cancelPending,
     dispatchPending,
     catalog,
+    directorySyncRevision,
     sidebarGroupMode,
     sidebarSearch,
     remoteConversation,

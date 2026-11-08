@@ -685,6 +685,20 @@ async fn app_inbox_capture(
 }
 
 #[tauri::command]
+async fn app_project_links(state: State<'_, AppState>) -> Result<serde_json::Value, &'static str> {
+    let state = state.0.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        with_app(&state, |app| {
+            let mut snapshot = app.project_session_links().map_err(|_| "PROJECT_LINK_READ_FAILED")?;
+            snapshot["writable"] = serde_json::json!(false);
+            Ok(snapshot)
+        })
+    })
+    .await
+    .map_err(|_| "PROJECT_LINK_READ_FAILED")?
+}
+
+#[tauri::command]
 async fn app_inbox_list(
     state: State<'_, AppState>,
     status: Option<String>,
@@ -1085,6 +1099,7 @@ fn configure<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R>
             app_capture_create,
             app_inbox_capture,
             app_inbox_list,
+            app_project_links,
             app_capture_media_put,
             app_capture_media_get,
             direct_llm::app_capture_vision_target,

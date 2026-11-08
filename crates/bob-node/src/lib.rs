@@ -2251,7 +2251,12 @@ pub fn handle_client_v1_http(
             &ctx.runtime,
             &parsed,
         ) {
-            Ok(merged) => (200, merged),
+            Ok(mut merged) => {
+                if parsed["includeSubscriptionQuotas"] == true {
+                    merged["subscriptionQuotas"] = bob_runtime::subscription_quota::read(&ctx.runtime.data_dir);
+                }
+                (200, merged)
+            }
             Err(code) => (400, json!({ "code": code })),
         };
     }

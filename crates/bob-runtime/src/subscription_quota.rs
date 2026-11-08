@@ -11,6 +11,19 @@ pub fn read(data_dir: &Path) -> Value {
     sanitize(&snapshot, now)
 }
 
+/// A paired Web host returns the public quota projection, not its provider cache.
+/// Revalidate it on each read so an offline phone never treats old data as fresh.
+pub fn from_paired_view(view: &Value) -> Value {
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+    let mut providers = view.clone();
+    for provider in ["codex", "antigravity", "claude"] {
+        if providers[provider]["status"] == "stale" {
+            providers[provider]["last_error"] = json!("source_stale");
+        }
+    }
+    sanitize(&json!({"version":1,"providers":providers}), now)
+}
+
 fn sanitize(snapshot: &Value, now: u64) -> Value {
     let mut result = json!({});
     for provider in ["codex", "antigravity", "claude"] {

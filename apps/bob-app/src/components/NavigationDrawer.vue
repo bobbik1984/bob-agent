@@ -28,6 +28,7 @@ const {
   submitCreateItem,
   modelHub,
   catalog,
+  directorySyncRevision,
   selectConversation,
   selectRemoteConversation,
 } = inject('bobAppShell');
@@ -156,10 +157,10 @@ const {
       </div>
     </form>
 
-    <ConversationDirectory :nodes="modelHub.state.remote_nodes || []" :catalog="catalog" :search="sidebarSearch" :mode="sidebarGroupMode" @select-local="selectConversation" @select-remote="selectRemoteConversation" />
+    <ConversationDirectory :nodes="modelHub.state.remote_nodes || []" :catalog="catalog" :sync-revision="directorySyncRevision" :search="sidebarSearch" :mode="sidebarGroupMode" @select-local="selectConversation" @select-remote="selectRemoteConversation" />
   </nav>
 
-  <div v-else-if="navigationOpen" class="navigation-overlay" @keydown.esc="navigationOpen = false">
+  <div v-else v-show="navigationOpen" class="navigation-overlay" @keydown.esc="navigationOpen = false">
     <button
       type="button"
       class="navigation-backdrop"
@@ -291,7 +292,7 @@ const {
         </div>
       </form>
 
-      <ConversationDirectory :nodes="modelHub.state.remote_nodes || []" :catalog="catalog" :search="sidebarSearch" :mode="sidebarGroupMode" @select-local="selectConversation" @select-remote="selectRemoteConversation" />
+      <ConversationDirectory :nodes="modelHub.state.remote_nodes || []" :catalog="catalog" :sync-revision="directorySyncRevision" :search="sidebarSearch" :mode="sidebarGroupMode" @select-local="selectConversation" @select-remote="selectRemoteConversation" />
     </nav>
   </div>
 </template>
