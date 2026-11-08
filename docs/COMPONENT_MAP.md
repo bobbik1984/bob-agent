@@ -161,3 +161,10 @@ F2/F5：`crates/bob-runtime/src/dsh_session.rs`负责原生身份/历史投影�
 - `crates/bob-runtime/src/agy_index_probe.py`：原 ID 续聊驱动、目标端 JSONL 管道、私有 SQLite 请求/事件与未知执行核对；`agy_directory.rs` 依据宿主授权路由。
 - `crates/bob-node/src/lib.rs` / `apps/bob-app/src/kernel-bridge.mjs`：共用 app_native_events 游标读取；`components/DshSessions.vue` 展示原会话正文、处理中及真实增量。不是 SSE 或已完成的 Tauri 手机接线。
 - `crates/bob-runtime/tests/test_native_stream.py`：幂等、同会话竞争、恢复失败拒绝新建、死进程未知、AGY 格式、Pi 截断及角色隔离。实际节点/浏览器范围见 CURRENT_STAGE §3.6。
+
+### 外部 Bot 受限入口
+
+- `crates/bob-node/src/bot_access.rs`：MCP认证接入、工具声明、结果封装及审计；不再承载关联业务规则。
+- `crates/bob-node/src/project_service.rs`：传输无关的受限项目操作与字段白名单；调用既有内核查询及授权写入。
+- `crates/bob-kernel/src/project_links.rs`：机主与Scoped调用共用关联保存事务，统一Owner/版本CAS及原项目范围检查。当前源码候选，未编译验收。
+- `scripts/provision-bot-account.py`：本机机主初始化受限账号，专用凭证写私密文件，只保存摘要；不访问网络、不覆写已有账号。

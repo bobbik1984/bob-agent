@@ -183,31 +183,28 @@ async function submitQuickNote() {
   if (!content || quickNoteBusy.value || quickNoteImageBusy.value || quickNoteRecognizing.value) return;
   quickNoteBusy.value = true;
   quickNoteError.value = false;
-  const signature = JSON.stringify([content, quickNoteProject.value, quickNoteProjectTitle.value, quickNoteMediaId.value]);
+  const signature = JSON.stringify([content, quickNoteMediaId.value]);
   if (!quickNotePending || quickNotePending.signature !== signature) {
-    quickNotePending = { signature, id: `cap-${crypto.randomUUID()}`, projectId:
-      quickNoteProject.value === '__new' ? `proj-${crypto.randomUUID()}` : quickNoteProject.value };
+    quickNotePending = { signature, id: `cap-${crypto.randomUUID()}` };
   }
   try {
     if (!available) throw new Error('NATIVE_HOST_REQUIRED');
-    if (quickNoteProject.value === '__new' && !quickNoteProjectTitle.value.trim()) {
-      throw new Error('PROJECT_TITLE_REQUIRED');
-    }
     const pending = quickNotePending;
     persistQuickNote();
-    await kernelBridge.captureCreate({ id: pending.id, content, mediaId: quickNoteMediaId.value || null,
-      projectId: pending.projectId || null,
-      newProjectTitle: quickNoteProject.value === '__new' ? quickNoteProjectTitle.value.trim() : null });
-    if (signature === JSON.stringify([quickNoteText.value.trim() || (quickNoteMediaId.value ? t('capturePhotoOnly') : ''), quickNoteProject.value, quickNoteProjectTitle.value, quickNoteMediaId.value])) {
-      quickNoteMediaId.value = ''; quickNoteImage.value = ''; quickNoteSuggestion.value = '';
-      quickNoteText.value = '';
-      quickNoteProject.value = '';
-      quickNoteProjectTitle.value = '';
-      quickNotePending = null;
+    if (kernelBridge.inboxCapture) {
+      await kernelBridge.inboxCapture({ id: pending.id, content, mediaId: quickNoteMediaId.value || null });
+    } else {
+      await kernelBridge.captureCreate({ id: pending.id, content, mediaId: quickNoteMediaId.value || null });
     }
+    quickNoteMediaId.value = ''; quickNoteImage.value = ''; quickNoteSuggestion.value = '';
+    quickNoteText.value = '';
+    quickNoteProject.value = '';
+    quickNoteProjectTitle.value = '';
+    quickNotePending = null;
     persistQuickNote();
     quickNoteSaved.value = true;
     void loadPersonalOps();
+    if (ctx.inbox?.loadInbox) void ctx.inbox.loadInbox();
     void reload();
   } catch {
     quickNoteError.value = true;

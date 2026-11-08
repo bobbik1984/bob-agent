@@ -238,14 +238,19 @@ async function switchPrimaryDrawer(drawer) {
   previousNonSettingsDrawer.value = drawer;
   activeDrawer.value = drawer;
   settingsOpen.value = false;
-  if (drawer === 'schedule' || drawer === 'knowledge' || drawer === 'work') {
+  if (drawer === 'schedule' || drawer === 'knowledge' || drawer === 'work' || drawer === 'inbox') {
     if (available && kernelBridge.syncHome) {
       void kernelBridge.syncHome().then(() => {
         void ctx.loadModelHub();
         void ctx.loadPersonalOps();
+        if (ctx.inbox?.loadInbox) void ctx.inbox.loadInbox();
       }).catch(() => {});
     }
     await ctx.loadPersonalOps();
+    if (drawer === 'inbox' && ctx.inbox?.loadInbox) {
+      await ctx.inbox.loadInbox();
+      void ctx.inbox.loadTriageDraft?.(false);
+    }
     if (drawer === 'work') {
       await ctx.loadModelHub();
     }

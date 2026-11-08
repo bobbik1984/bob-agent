@@ -463,9 +463,13 @@ onUnmounted(() => { if (rodTimer) clearInterval(rodTimer); });
 <style scoped>
 .remote-session-host {
   display: flex;
+  flex-direction: column;
   flex: 1;
   min-height: 0;
   min-width: 0;
+  width: 100%;
+  margin: 0 auto;
+  position: relative;
   overflow: hidden;
 }
 </style>

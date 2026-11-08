@@ -7,6 +7,18 @@ use serde_json::{json, Value};
 
 const SCHEMA: &str = include_str!("../migrations/0010.sql");
 
+/// Authorization context supplied by a trusted entry point, never deserialized
+/// from an external request. All writers use the same transaction below.
+pub enum ProjectLinkAuthority<'a> {
+    Owner,
+    Scoped {
+        organize: bool,
+        projects: &'a [String],
+        sessions: &'a [(String, String, String)],
+    },
+}
+
+
 pub(crate) fn migrate(tx: &Transaction<'_>, now: i64) -> Result<()> {
     let hash = digest(SCHEMA.replace("\r\n", "\n").as_bytes());
     let old: Option<String> = tx
@@ -63,10 +75,31 @@ impl LocalApp {
         expected: i64,
         now: i64,
     ) -> Result<Value> {
+        self.set_project_session_link_authorized(
+            ProjectLinkAuthority::Owner, connection, harness, session, project, expected, now,
+        )
+    }
+
+    pub fn set_project_session_link_authorized(
+        &mut self,
+        authority: ProjectLinkAuthority<'_>,
+        connection: &str,
+        harness: &str,
+        session: &str,
+        project: Option<&str>,
+        expected: i64,
+        now: i64,
+    ) -> Result<Value> {
+        if let ProjectLinkAuthority::Scoped { organize, projects, sessions } = &authority {
+            if !*organize
+                || !project.is_some_and(|p| projects.iter().any(|id| id == p))
+                || !sessions.iter().any(|(c,h,s)| c == connection && h == harness && s == session)
+            { return Err(Error::InvalidTransition); }
+        }
         if [connection, harness, session]
             .iter()
             .any(|s| s.is_empty() || s.len() > 512 || s.contains('\0'))
-            || expected < 0
+            || expected < 0 || expected == i64::MAX
         {
             return Err(Error::InvalidTransition);
         }
@@ -84,13 +117,19 @@ impl LocalApp {
                 return Err(Error::InvalidTransition);
             }
         }
-        let old: Option<(String, i64)> = tx
+        let old: Option<(String, i64, Option<String>)> = tx
             .query_row(
-                "SELECT owner_instance,version FROM project_session_links WHERE connection_id=?1 AND harness=?2 AND native_session_id=?3",
+                "SELECT owner_instance,version,project_id FROM project_session_links WHERE connection_id=?1 AND harness=?2 AND native_session_id=?3",
                 params![connection, harness, session],
-                |r| Ok((r.get(0)?, r.get(1)?)),
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
             )
             .optional()?;
+        // Check the source project under the same SQLite write lock as the CAS.
+        if let ProjectLinkAuthority::Scoped { projects, .. } = &authority {
+            if old.as_ref().and_then(|o| o.2.as_ref()).is_some_and(|p| !projects.contains(p)) {
+                return Err(Error::InvalidTransition);
+            }
+        }
         if old.as_ref().map(|o| o.1).unwrap_or(0) != expected
             || old.as_ref().is_some_and(|o| o.0 != self.origin)
         {

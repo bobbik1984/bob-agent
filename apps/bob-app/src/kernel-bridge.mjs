@@ -300,6 +300,20 @@ export function createKernelBridge(invoke, isAvailable) {
         newProjectTitle: newProjectTitle ?? null,
         mediaId: mediaId ?? null,
       }),
+    inboxList: (status = null) => call('app_inbox_list', { status: status || null }),
+    inboxCapture: ({ id, content, mediaId = null }) =>
+      call('app_inbox_capture', { id, content: content ?? '', mediaId: mediaId || null }),
+    inboxTriageSet: ({ captureId, destination = null, batchId = null, expectedVersion }) =>
+      call('app_inbox_triage_set', {
+        captureId,
+        destination: destination || null,
+        batchId: batchId || null,
+        expectedVersion,
+      }),
+    inboxTriageDraft: ({ regenerate = false } = {}) =>
+      call('app_inbox_triage_draft', { regenerate: Boolean(regenerate) }),
+    inboxTriageClose: ({ batchId, status }) =>
+      call('app_inbox_triage_close', { batchId, status }),
     memoryState: (id, newState) => call('app_memory_state', { id, newState }),
     decisionRecord: ({
       id,

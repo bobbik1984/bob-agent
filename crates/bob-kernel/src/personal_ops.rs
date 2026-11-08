@@ -134,11 +134,15 @@ pub struct PeerSyncBundle {
     pub decisions: Vec<DecisionItem>,
     pub shared_config_json: String,
     pub payload_sha256: String,
+    /// BOB-D-014 spark triage state. Omitted when empty so bundles without triage keep
+    /// the exact pre-0011 shape and digest for older peers.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub capture_triage: Vec<crate::spark_inbox::CaptureTriage>,
 }
 
 impl PeerSyncBundle {
     pub fn compute_sha256(&self) -> Result<String> {
-        let canonical = serde_json::json!({
+        let mut canonical = serde_json::json!({
             "sync_request_id": self.sync_request_id,
             "origin_device_id": self.origin_device_id,
             "home_device_id": self.home_device_id,
@@ -150,6 +154,9 @@ impl PeerSyncBundle {
             "decisions": self.decisions,
             "shared_config_json": self.shared_config_json,
         });
+        if !self.capture_triage.is_empty() {
+            canonical["capture_triage"] = serde_json::to_value(&self.capture_triage)?;
+        }
         Ok(digest(&serde_json::to_vec(&canonical)?))
     }
 }
@@ -167,30 +174,54 @@ impl LocalApp {
         let Some((home_id, home_epoch, _)) = self.paired_home()? else {
             return Ok(());
         };
-        let sha = digest(payload_json.as_bytes());
-        let sync_id = format!("psync-{entity_kind}-{entity_id}-{expected_version}-{}", &sha[..8]);
-        self.store.db.execute(
-            "INSERT OR REPLACE INTO personal_ops_sync_outbox(
-               sync_id,entity_kind,entity_id,op_kind,origin_device_id,home_device_id,home_epoch,
-               expected_version,payload_json,payload_sha256,sync_state,last_error,created_at,synced_at
-             ) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,'pending',NULL,?11,NULL)",
-            params![
-                sync_id,
-                entity_kind,
-                entity_id,
-                op_kind,
-                self.origin,
-                home_id,
-                home_epoch,
-                expected_version,
-                payload_json,
-                sha,
-                now
-            ],
-        )?;
-        Ok(())
+        insert_personal_sync(
+            &self.store.db,
+            &self.origin,
+            (&home_id, home_epoch),
+            (entity_kind, entity_id, op_kind),
+            expected_version,
+            payload_json,
+            now,
+        )
     }
+}
 
+/// Append one Replica → Home personal op. Takes a plain connection so callers can run it
+/// inside the same transaction as the state change it replicates.
+pub(crate) fn insert_personal_sync(
+    db: &rusqlite::Connection,
+    origin: &str,
+    (home_id, home_epoch): (&str, i64),
+    (entity_kind, entity_id, op_kind): (&str, &str, &str),
+    expected_version: i64,
+    payload_json: &str,
+    now: i64,
+) -> Result<()> {
+    let sha = digest(payload_json.as_bytes());
+    let sync_id = format!("psync-{entity_kind}-{entity_id}-{expected_version}-{}", &sha[..8]);
+    db.execute(
+        "INSERT OR REPLACE INTO personal_ops_sync_outbox(
+           sync_id,entity_kind,entity_id,op_kind,origin_device_id,home_device_id,home_epoch,
+           expected_version,payload_json,payload_sha256,sync_state,last_error,created_at,synced_at
+         ) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,'pending',NULL,?11,NULL)",
+        params![
+            sync_id,
+            entity_kind,
+            entity_id,
+            op_kind,
+            origin,
+            home_id,
+            home_epoch,
+            expected_version,
+            payload_json,
+            sha,
+            now
+        ],
+    )?;
+    Ok(())
+}
+
+impl LocalApp {
     pub fn pending_personal_op_syncs(&self) -> Result<Vec<PersonalOpSyncEntry>> {
         let mut stmt = self.store.db.prepare(
             "SELECT sync_id,entity_kind,entity_id,op_kind,origin_device_id,home_device_id,home_epoch,
@@ -1110,6 +1141,7 @@ impl LocalApp {
             decisions: self.list_all_decisions()?,
             shared_config_json,
             payload_sha256: String::new(),
+            capture_triage: crate::spark_inbox::list_all_triage(&self.store.db)?,
         };
         bundle.payload_sha256 = bundle.compute_sha256()?;
         Ok(bundle)
@@ -1419,6 +1451,14 @@ impl Store {
                     }
                 }
             }
+            "capture_triage" => {
+                let triage: crate::spark_inbox::CaptureTriage =
+                    serde_json::from_str(&entry.payload_json)?;
+                if triage.capture_id != entry.entity_id {
+                    return Err(Error::InvalidTransition);
+                }
+                crate::spark_inbox::receive_replica_triage(&tx, &triage, entry.expected_version, now)?;
+            }
             _ => return Err(Error::InvalidTransition),
         }
         tx.commit()?;
@@ -1505,6 +1545,8 @@ impl Store {
                 ],
             )?;
         }
+
+        crate::spark_inbox::merge_triage(&tx, &bundle.capture_triage)?;
 
         for note in &bundle.notes {
             tx.execute(
@@ -1955,6 +1997,7 @@ impl Store {
             decisions,
             shared_config_json,
             payload_sha256: String::new(),
+            capture_triage: crate::spark_inbox::list_all_triage(&self.db)?,
         };
         bundle.payload_sha256 = bundle.compute_sha256()?;
         Ok(bundle)

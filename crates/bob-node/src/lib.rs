@@ -10,6 +10,9 @@
 //! 5. Read-only idempotent migration from legacy `nexus_control_plane.db` (`XP-10`).
 
 mod assistant;
+mod bot_access;
+mod project_service;
+mod inbox_triage;
 mod context_capsule;
 mod claude_rpc;
 pub mod node_access;
@@ -700,6 +703,47 @@ pub fn handle_rpc_command(ctx: &mut NodeContext, command: &str, args: &Value) ->
                     args.get("newProjectTitle").and_then(Value::as_str), args.get("mediaId").and_then(Value::as_str), at)
                 .map_err(|_| "CAPTURE_SAVE_FAILED")?;
             serde_json::to_value(cap).map_err(|_| "CAPTURE_SAVE_FAILED")
+        }
+        // BOB-D-014 unified inbox. Zero-decision capture: no project, tag or date at write time.
+        // Also the ingestion target for external clients (owner token via /api/rpc/).
+        "app_inbox_capture" => {
+            let id = args.get("id").and_then(Value::as_str).ok_or("INBOX_CAPTURE_FAILED")?;
+            let content = args.get("content").and_then(Value::as_str).unwrap_or("");
+            let cap = ctx
+                .app
+                .capture_with_image(id, None, content, None, None, args.get("mediaId").and_then(Value::as_str), at)
+                .map_err(|_| "INBOX_CAPTURE_FAILED")?;
+            serde_json::to_value(cap).map_err(|_| "INBOX_CAPTURE_FAILED")
+        }
+        "app_inbox_list" => {
+            let items = ctx
+                .app
+                .list_inbox(args.get("status").and_then(Value::as_str))
+                .map_err(|_| "INBOX_LIST_FAILED")?;
+            serde_json::to_value(items).map_err(|_| "INBOX_LIST_FAILED")
+        }
+        "app_inbox_triage_set" => {
+            let capture_id = args.get("captureId").and_then(Value::as_str).ok_or("INBOX_TRIAGE_REJECTED")?;
+            let expected = args.get("expectedVersion").and_then(Value::as_i64).ok_or("INBOX_TRIAGE_REJECTED")?;
+            let destination = match args.get("destination").filter(|d| !d.is_null()) {
+                Some(d) => Some(bob_kernel::spark_inbox::TriageDestination {
+                    kind: d.get("kind").and_then(Value::as_str).ok_or("INBOX_TRIAGE_REJECTED")?.to_owned(),
+                    ref_id: d.get("refId").and_then(Value::as_str).map(str::to_owned),
+                    label: d.get("label").and_then(Value::as_str).map(str::to_owned),
+                }),
+                None => None,
+            };
+            let triage = ctx
+                .app
+                .set_capture_triage(capture_id, destination.as_ref(), args.get("batchId").and_then(Value::as_str), expected, at)
+                .map_err(|_| "INBOX_TRIAGE_REJECTED")?;
+            serde_json::to_value(triage).map_err(|_| "INBOX_TRIAGE_REJECTED")
+        }
+        "app_inbox_triage_close" => {
+            let id = args.get("batchId").and_then(Value::as_str).ok_or("TRIAGE_CLOSE_REJECTED")?;
+            let status = args.get("status").and_then(Value::as_str).ok_or("TRIAGE_CLOSE_REJECTED")?;
+            let batch = ctx.app.close_triage_batch(id, status, at).map_err(|_| "TRIAGE_CLOSE_REJECTED")?;
+            serde_json::to_value(batch).map_err(|_| "TRIAGE_CLOSE_REJECTED")
         }
         "app_memory_state" => {
             let id = args.get("id").and_then(Value::as_str).ok_or("MEMORY_UPDATE_FAILED")?;
@@ -2611,6 +2655,19 @@ fn handle_connection(mut stream: TcpStream, state: Arc<Mutex<NodeContext>>) {
         }
     }
 
+    // Bot credentials are a separate principal class; they never reach owner/device RPC.
+    if path == "/api/bot/v1/mcp" {
+        if method != "POST" { write_json_response(&mut stream,405,r#"{"error":"METHOD_NOT_ALLOWED"}"#);return; }
+        if body_bytes.len() > 16384 { write_json_response(&mut stream,413,r#"{"error":"REQUEST_TOO_LARGE"}"#);return; }
+        let body: Value=match serde_json::from_str(&body_str) {Ok(v)=>v,Err(_)=>{write_json_response(&mut stream,400,r#"{"error":"BOT_BODY_INVALID"}"#);return;}};
+        let mut guard=match state.lock(){Ok(g)=>g,Err(_)=>return};
+        let (status,value)=bot_access::handle(&mut guard,auth_header.as_deref(),&body,now_millis());
+        write_json_response(&mut stream,status,&value.to_string());return;
+    }
+    if auth_header.as_deref().is_some_and(|h|h.to_ascii_lowercase().contains("bob_bot_")) {
+        write_json_response(&mut stream,403,r#"{"error":"BOT_SCOPE_DENIED"}"#);return;
+    }
+
     // A configured standalone node owns its authentication boundary, including RPC.
     let access_dir = match state.lock() { Ok(g) => g.runtime.data_dir.clone(), Err(_) => return };
     if node_access::enabled(&access_dir) {
@@ -2693,6 +2750,13 @@ fn handle_connection(mut stream: TcpStream, state: Arc<Mutex<NodeContext>>) {
                 write_json_response(&mut stream, status, &body);
                 return;
             }
+        }
+        if command.trim() == "app_inbox_triage_draft" {
+            drop(guard);
+            let result = inbox_triage::draft(&state, &args);
+            let (status,value)=match result {Ok(result)=>(200,json!({"ok":true,"result":result})),Err(e)=>(400,json!({"ok":false,"error":e}))};
+            write_json_response(&mut stream,status,&value.to_string());
+            return;
         }
         if matches!(command.trim(), "app_assistant_execute" | "app_assistant_poll") {
             drop(guard);

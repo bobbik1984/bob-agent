@@ -32,7 +32,16 @@ const {
   quickNoteSuggestion,
   applyCaptureSuggestion,
   quickNoteImageError,
+  brandLogo,
+  organizeSessionsViaAgent,
 } = inject('bobAppShell');
+
+async function handleOrganizeCurrentInfo() {
+  quickNoteOpen.value = false;
+  if (organizeSessionsViaAgent) {
+    await organizeSessionsViaAgent();
+  }
+}
 </script>
 
 <template>
@@ -69,6 +78,23 @@ const {
       @click.self="quickNoteOpen = false"
     >
       <div class="quicknote-card">
+        <div class="inbox-title-group" style="justify-content: space-between; padding-bottom: 6px; border-bottom: 1px solid var(--line);">
+          <div style="display: flex; align-items: center; gap: 6px;">
+            <img :src="brandLogo" alt="" style="width: 24px; height: 16px; object-fit: contain;" />
+          </div>
+          <div style="display: flex; align-items: center; gap: 6px;">
+            <button
+              type="button"
+              class="btn tonal tiny bob-organize-header-btn"
+              :title="t('organizeCurrentInfoTooltip')"
+              @click="handleOrganizeCurrentInfo"
+            >
+              <svg class="inline-svg-xs" viewBox="0 0 24 24"><path d="m12 3 1.912 5.886a2 2 0 0 0 1.272 1.272L21 12l-5.886 1.912a2 2 0 0 0-1.272 1.272L12 21l-1.912-5.886a2 2 0 0 0-1.272-1.272L3 12l5.886-1.912a2 2 0 0 0 1.272-1.272L12 3z"/></svg>
+              <span>{{ t('organizeCurrentInfoBtn') }}</span>
+            </button>
+            <button type="button" style="border:0;background:none;cursor:pointer;font-size:16px;padding:0 4px;color:var(--text-secondary);" @click="quickNoteOpen = false">×</button>
+          </div>
+        </div>
         <form class="quicknote-input-row" @submit.prevent="submitQuickNote">
           <textarea ref="quickNoteInputRef" v-model="quickNoteText" class="quicknote-input" rows="2"
             :disabled="quickNoteBusy" :aria-label="t('quickNotePlaceholder')" :placeholder="t('quickNotePlaceholder')"
@@ -78,16 +104,7 @@ const {
           </span>
         </form>
         <p v-if="quickNoteError" role="alert">{{ t('quickNoteSaveError') }}</p>
-        <div v-if="quickNoteText.trim() || quickNoteMediaId" class="quicknote-project-row">
-          <label for="quicknote-project">{{ t('quickNoteProject') }}</label>
-          <select id="quicknote-project" v-model="quickNoteProject" :disabled="quickNoteBusy">
-            <option value="">{{ t('quickNoteUnassigned') }}</option>
-            <option v-for="project in catalog?.projects || []" :key="project.id" :value="project.id">{{ project.title }}</option>
-            <option value="__new">{{ t('quickNoteNewProject') }}</option>
-          </select>
-          <input v-if="quickNoteProject === '__new'" v-model="quickNoteProjectTitle" :disabled="quickNoteBusy" :aria-label="t('quickNoteProjectTitle')" :placeholder="t('quickNoteProjectTitle')" />
-          <button type="button" :disabled="quickNoteBusy" @click="submitQuickNote">{{ t(quickNoteBusy ? 'saving' : 'quickNoteSave') }}</button>
-        </div>
+
         <div class="quicknote-actions-row">
           <input ref="quickNoteFileRef" class="capture-file-input" type="file" accept="image/png,image/jpeg,image/webp" @change="selectCaptureImage" />
           <input ref="quickNoteCameraRef" class="capture-file-input" type="file" accept="image/png,image/jpeg,image/webp" capture="environment" @change="selectCaptureImage" />
@@ -98,6 +115,10 @@ const {
             <svg class="inline-svg-xs" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="m3 17 6-6 4 4 3-3 5 5"/><circle cx="16" cy="7" r="1"/></svg>{{ t('captureChooseImage') }}
           </button>
           <span v-if="quickNoteImageBusy" role="status">{{ t('saving') }}</span>
+          <span style="flex: 1;"></span>
+          <button class="btn primary tiny" type="button" :disabled="quickNoteBusy || (!quickNoteText.trim() && !quickNoteMediaId)" @click="submitQuickNote">
+            {{ t(quickNoteBusy ? 'saving' : 'quickNoteSave') }}
+          </button>
         </div>
         <div v-if="quickNoteMediaId" class="capture-photo-panel">
           <img v-if="quickNoteImage" :src="quickNoteImage" :alt="t('captureOriginal')" />

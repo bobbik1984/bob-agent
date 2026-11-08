@@ -2035,6 +2035,7 @@ pub fn probe_subscription_quotas_cached() -> Value {
 }
 
 pub mod assistant;
+pub mod inbox_triage;
 
 pub mod subscription_quota;
 

@@ -80,6 +80,29 @@ const allAvailableProjects = computed(() => {
   return Array.from(map.values());
 });
 
+const unassignedTodoCount = computed(() =>
+  todoItems.value.filter(i => !i.project_id).length
+);
+
+const activeProjectsWithTodos = computed(() => {
+  const counts = new Map();
+  for (const item of todoItems.value) {
+    if (item.project_id) {
+      counts.set(item.project_id, (counts.get(item.project_id) || 0) + 1);
+    }
+  }
+  const result = [];
+  for (const [id, count] of counts.entries()) {
+    const p = allAvailableProjects.value.find(proj => proj.id === id);
+    result.push({
+      id,
+      title: p ? p.title : id,
+      count,
+    });
+  }
+  return result;
+});
+
 const projectSelectOptions = computed(() => [
   { value: '', label: t('inboxProjectUnassigned') },
   ...allAvailableProjects.value.map(p => ({
@@ -412,20 +435,7 @@ watch([activeSubtab, timelineViewMode, weekOffset], () => {
           </svg>
           <span>{{ t('scheduleTabCron') }}</span>
         </button>
-        <button
-          type="button"
-          class="view-subtab-btn"
-          :class="{ active: activeSubtab === 'tickets' }"
-          @click="switchSubtab('tickets')"
-        >
-          <svg class="inline-svg" viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M2 9a3 3 0 0 1 0 6v2a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-2a3 3 0 0 1 0-6V7a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2Z" />
-            <path d="M13 5v2M13 17v2M13 11v2" />
-          </svg>
-          <span>{{ t('scheduleTabTickets') }}</span>
-          <span class="subtab-count">{{ ticketCount }}</span>
-        </button>
-      </div>
+        </div>
 
       <button
         type="button"
@@ -660,44 +670,8 @@ watch([activeSubtab, timelineViewMode, weekOffset], () => {
 
       <!-- SUBTAB 2: INSPIRATION & PROJECT TODO INBOX (dashboard.bobbik.org/#inbox Closed Loop) -->
       <template v-else-if="activeSubtab === 'todo'">
-        <form class="inbox-capture-card hub-card" @submit.prevent="submitInboxCapture">
-          <div class="inbox-capture-header">
-            <svg class="inline-svg" viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4" />
-            </svg>
-            <strong>{{ t('inboxCaptureTitle') }}</strong>
-          </div>
-          <textarea
-            v-model="inboxDraft.content"
-            class="inbox-capture-textarea"
-            rows="2"
-            :placeholder="t('inboxCapturePlaceholder')"
-            @keydown="handleInboxKeydown"
-          ></textarea>
-          <div class="inbox-capture-toolbar">
-            <div class="inbox-project-picker">
-              <span class="inbox-picker-label">{{ t('inboxProjectSelectLabel') }}</span>
-              <CustomSelect
-                v-model="inboxDraft.projectId"
-                :options="projectSelectOptions"
-                class="inbox-project-select"
-              />
-            </div>
-            <div class="inbox-submit-group">
-              <span class="inbox-shortcut-hint">{{ t('inboxShortcutHint') }}</span>
-              <button
-                type="submit"
-                class="primary-action-btn"
-                :disabled="busy || !inboxDraft.content.trim()"
-              >
-                {{ t('inboxSubmitTodoBtn') }}
-              </button>
-            </div>
-          </div>
-        </form>
-
-        <!-- Project Filter Strip -->
-        <div v-if="allAvailableProjects.length > 0" class="todo-project-filter-bar">
+        <!-- Project Filter Strip (Only show when multiple project categories exist, and only for projects with todos) -->
+        <div v-if="(activeProjectsWithTodos.length + (unassignedTodoCount > 0 ? 1 : 0)) > 1" class="todo-project-filter-bar">
           <button
             type="button"
             class="node-status-chip"
@@ -707,22 +681,23 @@ watch([activeSubtab, timelineViewMode, weekOffset], () => {
             {{ t('todoFilterAll') }} ({{ todoItems.length }})
           </button>
           <button
+            v-if="unassignedTodoCount > 0"
             type="button"
             class="node-status-chip"
             :class="{ active: selectedProjectFilter === '__unassigned__' }"
             @click="selectedProjectFilter = '__unassigned__'"
           >
-            {{ t('todoFilterUnassigned') }} ({{ todoItems.filter(i => !i.project_id).length }})
+            {{ t('todoFilterUnassigned') }} ({{ unassignedTodoCount }})
           </button>
           <button
-            v-for="proj in allAvailableProjects"
+            v-for="proj in activeProjectsWithTodos"
             :key="proj.id"
             type="button"
             class="node-status-chip"
             :class="{ active: selectedProjectFilter === proj.id }"
             @click="selectedProjectFilter = proj.id"
           >
-            {{ proj.title }} ({{ todoItems.filter(i => i.project_id === proj.id).length }})
+            {{ proj.title }} ({{ proj.count }})
           </button>
         </div>
 
@@ -818,18 +793,6 @@ watch([activeSubtab, timelineViewMode, weekOffset], () => {
             </div>
           </article>
         </div>
-      </template>
-
-      <!-- SUBTAB 4: TICKET WALLET -->
-      <template v-else-if="activeSubtab === 'tickets'">
-        <TicketWalletPanel
-          :notes="notes"
-          :busy="busy"
-          :recognizing="recognizingTicket"
-          @save-ticket="emit('save-ticket', $event)"
-          @delete-ticket="emit('delete-ticket', $event)"
-          @recognize-ticket-file="emit('recognize-ticket-file', $event)"
-        />
       </template>
 
       <!-- SUBTAB 3: CRON & DAILY ROUTINES -->

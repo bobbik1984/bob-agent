@@ -17,6 +17,9 @@ import { useOnlineWorkNode } from './composables/useOnlineWorkNode.mjs';
 import { useModelHub } from './composables/useModelHub.mjs';
 import { usePersonalOps } from './composables/usePersonalOps.mjs';
 import { useQuickNote } from './composables/useQuickNote.mjs';
+import InboxView from './views/InboxView.vue';
+import DesktopRightSidebar from './components/DesktopRightSidebar.vue';
+import { useInbox } from './composables/useInbox.mjs';
 
 const { t, locale } = useI18n();
 
@@ -60,7 +63,11 @@ const {
   resetSyncBackoffAndReload,
   startPolling,
   disposeChatSession,
+  organizeSessionsViaAgent,
 } = useChatSession(shell);
+shell.organizeSessionsViaAgent = organizeSessionsViaAgent;
+shell.catalog = catalog;
+shell.projectList = projectList;
 
 const {
   onlineState,
@@ -124,6 +131,9 @@ const {
   openQuickNoteOverlay,
 } = useQuickNote(shell);
 
+const inbox = useInbox(shell);
+shell.inbox = inbox;
+
 provide('bobAppShell', shell);
 
 let releaseViewport = () => {};
@@ -131,12 +141,7 @@ let releaseViewport = () => {};
 function handleGlobalPointerDown(event) {
   if (!quickSwitcherOpen.value) return;
   const target = event.target;
-  if (
-    quickPopoverRef.value?.contains(target) ||
-    quickPillRef.value?.contains(target)
-  ) {
-    return;
-  }
+  if (quickPopoverRef.value?.contains(target) || quickPillRef.value?.contains(target)) return;
   quickSwitcherOpen.value = false;
   quickSwitcherSearchQuery.value = '';
 }
@@ -144,11 +149,8 @@ function handleGlobalPointerDown(event) {
 function handleGlobalKeydown(event) {
   if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === 'n') {
     event.preventDefault();
-    if (quickNoteOpen.value) {
-      quickNoteOpen.value = false;
-    } else {
-      void openQuickNoteOverlay();
-    }
+    if (quickNoteOpen.value) quickNoteOpen.value = false;
+    else void openQuickNoteOverlay();
     return;
   }
   if (event.key === 'Escape' && quickNoteOpen.value) {
@@ -164,9 +166,7 @@ function handleGlobalKeydown(event) {
 }
 
 function handleVisibilityChange() {
-  if (typeof document !== 'undefined' && !document.hidden) {
-    resetSyncBackoffAndReload();
-  }
+  if (typeof document !== 'undefined' && !document.hidden) resetSyncBackoffAndReload();
 }
 
 function dismissConversationMenu(event) {
@@ -191,9 +191,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   disposeChatSession();
-  if (typeof window !== 'undefined') {
-    window.removeEventListener('resize', updateLayoutState);
-  }
+  if (typeof window !== 'undefined') window.removeEventListener('resize', updateLayoutState);
   if (typeof document !== 'undefined') {
     document.removeEventListener('pointerdown', handleGlobalPointerDown, true);
     document.removeEventListener('pointerdown', dismissConversationMenu);
@@ -215,30 +213,18 @@ onUnmounted(() => {
     ]"
   >
     <header class="topbar">
-      <button
-        type="button"
-        class="icon-button"
-        :aria-label="t('openNavigation')"
-        :aria-expanded="navigationOpen"
-        @click="navigationOpen = true"
-      >
-        <svg class="topbar-svg" viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M4 6h16M4 12h16M4 18h16" />
-        </svg>
+      <button type="button" class="icon-button topbar-nav-toggle" :aria-label="t('openNavigation')" :aria-expanded="navigationOpen" @click="navigationOpen = true">
+        <svg class="topbar-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" /></svg>
         <span v-if="totalUnreadCount > 0" class="unread-dot" aria-hidden="true"></span>
       </button>
       <span class="page-name">
         {{
           settingsOpen || activeDrawer === 'settings'
-            ? t(
-                settingsView === 'provider'
-                  ? 'directModelProvider'
-                  : settingsTab === 'connection'
-                    ? 'deviceAndConnection'
-                    : 'settings',
-              )
+            ? t(settingsView === 'provider' ? 'directModelProvider' : settingsTab === 'connection' ? 'deviceAndConnection' : 'settings')
             : activeDrawer === 'schedule'
               ? t('scheduleViewTitle')
+              : activeDrawer === 'inbox'
+                ? t('inboxTitle')
               : activeDrawer === 'work'
                 ? t('workViewTitle')
                 : activeDrawer === 'knowledge'
@@ -246,13 +232,7 @@ onUnmounted(() => {
                   : (remoteConversation?.session.title || currentConversation)
         }}
       </span>
-      <button
-        v-if="activeDrawer === 'chat' && !settingsOpen && !remoteConversation"
-        type="button"
-        class="mini-ghost-btn"
-        :title="t('promoteToWorkBtn')"
-        @click="promoteConversationToWork"
-      >
+      <button v-if="activeDrawer === 'chat' && !settingsOpen && !remoteConversation" type="button" class="mini-ghost-btn" :title="t('promoteToWorkBtn')" @click="promoteConversationToWork">
         {{ t('promoteToWorkBtn') }}
       </button>
       <button
@@ -320,11 +300,7 @@ onUnmounted(() => {
                   {{ t(showPrepaidCost ? 'hideCostBtn' : 'calcCostBtn') }}
                 </button>
               </div>
-              <div
-                v-for="p in prepaidUsageList"
-                :key="p.id"
-                class="quota-prepaid-row"
-              >
+              <div v-for="p in prepaidUsageList" :key="p.id" class="quota-prepaid-row">
                 <img :src="p.logo" :alt="p.label" class="quota-prepaid-logo" />
                 <span class="quota-prepaid-name">{{ p.label }}</span>
                 <span class="quota-prepaid-val">
@@ -334,148 +310,158 @@ onUnmounted(() => {
               </div>
             </div>
           </details>
-
-
         </div>
       </details>
     </header>
 
-    <SettingsView />
+    <div class="app-body-container">
+      <!-- Desktop Left Rail (Screen Desktop A/B) -->
+      <nav v-if="!layoutState.isCompact" class="desktop-rail" role="navigation" aria-label="Desktop Rail">
+        <button type="button" class="rail-item" :class="{ on: activeDrawer === 'chat' && !settingsOpen }" :title="t('navChat')" @click="switchPrimaryDrawer('chat')">
+          <svg class="rail-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>
+          <span>{{ t('navChat') }}</span>
+        </button>
+        <button type="button" class="rail-item" :class="{ on: activeDrawer === 'schedule' && !settingsOpen }" :title="t('navSchedule')" @click="switchPrimaryDrawer('schedule')">
+          <svg class="rail-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2" /><path d="M16 2v4M8 2v4M3 10h18" /></svg>
+          <span>{{ t('navSchedule') }}</span>
+        </button>
+        <button type="button" class="rail-item" :class="{ on: activeDrawer === 'inbox' && !settingsOpen }" :title="t('inboxTitle')" @click="switchPrimaryDrawer('inbox')">
+          <svg class="rail-icon" viewBox="0 0 24 24" aria-hidden="true"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12" /><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" /></svg>
+          <span v-if="(inbox?.unsortedCount?.value || inbox?.unsortedCount || 0) > 0" class="dot-badge">{{ inbox?.unsortedCount?.value ?? inbox?.unsortedCount ?? 0 }}</span>
+          <span>{{ t('inboxTitle') }}</span>
+        </button>
+        <button type="button" class="rail-item" :class="{ on: activeDrawer === 'knowledge' && !settingsOpen }" :title="t('navKnowledge')" @click="switchPrimaryDrawer('knowledge')">
+          <svg class="rail-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="18" cy="5" r="3" /><circle cx="6" cy="12" r="3" /><circle cx="18" cy="19" r="3" /><path d="m8.59 13.51 6.83 3.98M15.41 6.51l-6.82 3.98" /></svg>
+          <span>{{ t('navKnowledge') }}</span>
+        </button>
+        <span class="rail-spacer"></span>
+        <button type="button" class="rail-item" :class="{ on: settingsOpen || activeDrawer === 'settings' }" :title="t('navSettings')" @click="switchPrimaryDrawer('settings')">
+          <svg class="rail-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.6.77 1.02 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" /></svg>
+          <span>{{ t('navSettings') }}</span>
+        </button>
+      </nav>
 
-    <NavigationDrawer />
+      <!-- Desktop Docked Conversation Sidebar in Chat Tab -->
+      <aside v-if="!layoutState.isCompact && activeDrawer === 'chat' && !settingsOpen" class="desktop-docked-sidebar" :aria-label="t('conversations')">
+        <NavigationDrawer :docked="true" />
+      </aside>
 
-    <div v-if="personalFault" class="notice" role="alert">
-      <span>{{ personalFault }}</span>
-      <button type="button" @click="personalFault = null">×</button>
+      <!-- Main Content Views -->
+      <div class="app-content-area">
+        <div v-if="personalFault" class="notice" role="alert">
+          <span>{{ personalFault }}</span>
+          <button type="button" @click="personalFault = null">×</button>
+        </div>
+
+        <SettingsView />
+
+        <ScheduleView
+          v-if="activeDrawer === 'schedule'"
+          :schedules="personalOps.schedules"
+          :notes="personalOps.notes"
+          :recognizing-ticket="recognizingTicket"
+          :save-item="saveCalendarItem"
+          :projects="projectList"
+          :online-projects="onlineState.projects || []"
+          :busy="personalBusy"
+          @create-schedule="handleCreateSchedule"
+          @update-status="handleUpdateScheduleStatus"
+          @delete-schedule="handleDeleteSchedule"
+          @open-project-todo="handleOpenProjectTodo"
+          @promote-todo-project="handlePromoteTodoToProject"
+          @save-ticket="handleSaveTicket"
+          @delete-ticket="handleDeleteTicket"
+          @recognize-ticket-file="handleRecognizeTicketFile"
+        />
+
+        <WorkView
+          v-if="activeDrawer === 'work'"
+          :readiness="readiness"
+          :catalog="catalog"
+          :schedules="personalOps.schedules"
+          :active-session-id="sessionId"
+          :active-main-role="activeMainRole"
+          :online-state="onlineState"
+          :remote-nodes="modelHub.state.remote_nodes || []"
+          :paired-online="deviceOnline"
+          @open-conversation="handleWorkOpenConversation"
+          @create-project="handleWorkCreateProject"
+          @create-conversation="handleWorkCreateConversation"
+          @open-settings-tab="handleWorkOpenSettingsTab"
+          @create-project-todo="handleCreateProjectTodo"
+          @toggle-todo-status="handleUpdateScheduleStatus"
+          @start-todo-session="handleStartTodoSession"
+          @online-update-origin="handleOnlineUpdateOrigin"
+          @online-save-node="handleOnlineSaveNode"
+          @online-begin-pairing="handleOnlineBeginPairing"
+          @online-exchange-pairing="handleOnlineExchangePairing"
+          @online-refresh="handleOnlineRefresh"
+          @online-select-project="handleOnlineSelectProject"
+          @online-load-more-messages="handleOnlineLoadMoreMessages"
+          @online-submit-operation="handleOnlineSubmitOperation"
+          @online-disconnect="handleOnlineDisconnect"
+          @online-revoke="handleOnlineRevoke"
+        />
+
+        <InboxView v-if="activeDrawer === 'inbox'" />
+
+        <KnowledgeView
+          v-if="activeDrawer === 'knowledge'"
+          :notes="personalOps.notes"
+          :captures="personalOps.captures"
+          :memories="personalOps.memories"
+          :decisions="personalOps.decisions"
+          :busy="personalBusy"
+          :recognizing-ticket="recognizingTicket"
+          @save-note="handleSaveNote"
+          @delete-note="handleDeleteNote"
+          @save-ticket="handleSaveTicket"
+          @delete-ticket="handleDeleteTicket"
+          @recognize-ticket-file="handleRecognizeTicketFile"
+          @create-capture="handleCreateCapture"
+          @update-memory="handleUpdateMemory"
+          @create-decision="handleCreateDecision"
+          @update-decision="handleUpdateDecision"
+        />
+
+        <PrimaryChatPane />
+      </div>
+
+      <DesktopRightSidebar
+        v-if="!layoutState.isCompact && activeDrawer === 'chat' && !settingsOpen"
+        :schedules="personalOps.schedules"
+        :inbox="inbox"
+        @navigate="switchPrimaryDrawer"
+        @open-quick-note="openQuickNoteOverlay"
+      />
     </div>
 
-    <!-- Primary View 2: 日程 (Schedule / InboxView) -->
-    <ScheduleView
-      v-if="activeDrawer === 'schedule'"
-      :schedules="personalOps.schedules"
-      :notes="personalOps.notes"
-      :recognizing-ticket="recognizingTicket"
-      :save-item="saveCalendarItem"
-      :projects="projectList"
-      :online-projects="onlineState.projects || []"
-      :busy="personalBusy"
-      @create-schedule="handleCreateSchedule"
-      @update-status="handleUpdateScheduleStatus"
-      @delete-schedule="handleDeleteSchedule"
-      @open-project-todo="handleOpenProjectTodo"
-      @promote-todo-project="handlePromoteTodoToProject"
-      @save-ticket="handleSaveTicket"
-      @delete-ticket="handleDeleteTicket"
-      @recognize-ticket-file="handleRecognizeTicketFile"
-    />
-
-    <!-- Primary View 3: 工作 (Work / RemoteAgent & Project Matrix) -->
-    <WorkView
-      v-if="activeDrawer === 'work'"
-      :readiness="readiness"
-      :catalog="catalog"
-      :schedules="personalOps.schedules"
-      :active-session-id="sessionId"
-      :active-main-role="activeMainRole"
-      :online-state="onlineState"
-      :remote-nodes="modelHub.state.remote_nodes || []"
-      :paired-online="deviceOnline"
-      @open-conversation="handleWorkOpenConversation"
-      @create-project="handleWorkCreateProject"
-      @create-conversation="handleWorkCreateConversation"
-      @open-settings-tab="handleWorkOpenSettingsTab"
-      @create-project-todo="handleCreateProjectTodo"
-      @toggle-todo-status="handleUpdateScheduleStatus"
-      @start-todo-session="handleStartTodoSession"
-      @online-update-origin="handleOnlineUpdateOrigin"
-      @online-save-node="handleOnlineSaveNode"
-      @online-begin-pairing="handleOnlineBeginPairing"
-      @online-exchange-pairing="handleOnlineExchangePairing"
-      @online-refresh="handleOnlineRefresh"
-      @online-select-project="handleOnlineSelectProject"
-      @online-load-more-messages="handleOnlineLoadMoreMessages"
-      @online-submit-operation="handleOnlineSubmitOperation"
-      @online-disconnect="handleOnlineDisconnect"
-      @online-revoke="handleOnlineRevoke"
-    />
-
-    <!-- Primary View 4: 知识 (Knowledge / Notes, Captures & Long-term Memory) -->
-    <KnowledgeView
-      v-if="activeDrawer === 'knowledge'"
-      :notes="personalOps.notes"
-      :captures="personalOps.captures"
-      :memories="personalOps.memories"
-      :decisions="personalOps.decisions"
-      :busy="personalBusy"
-      :recognizing-ticket="recognizingTicket"
-      @save-note="handleSaveNote"
-      @delete-note="handleDeleteNote"
-      @save-ticket="handleSaveTicket"
-      @delete-ticket="handleDeleteTicket"
-      @recognize-ticket-file="handleRecognizeTicketFile"
-      @create-capture="handleCreateCapture"
-      @update-memory="handleUpdateMemory"
-      @create-decision="handleCreateDecision"
-      @update-decision="handleUpdateDecision"
-    />
-
-
-    <PrimaryChatPane />
+    <!-- Mobile Sliding Modal Drawer -->
+    <NavigationDrawer v-if="layoutState.isCompact" :docked="false" />
 
     <QuickNoteOverlay />
 
-    <!-- Legacy-aligned Bottom 5-Tab Navigation Bar: 对话 | 日程 | 工作 | 知识 | 设置 -->
+    <!-- Mobile Bottom 5-Tab Navigation Bar: 对话 | 今天 | 收集箱 | 知识 | 设置 -->
     <nav class="bottom-nav" role="navigation">
-      <button
-        type="button"
-        class="bottom-nav-item"
-        :class="{ active: activeDrawer === 'chat' && !settingsOpen }"
-        @click="switchPrimaryDrawer('chat')"
-      >
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-        </svg>
+      <button type="button" class="bottom-nav-item" :class="{ active: activeDrawer === 'chat' && !settingsOpen }" @click="switchPrimaryDrawer('chat')">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>
         <span>{{ t('navChat') }}</span>
       </button>
-      <button
-        type="button"
-        class="bottom-nav-item"
-        :class="{ active: activeDrawer === 'schedule' && !settingsOpen }"
-        @click="switchPrimaryDrawer('schedule')"
-      >
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <rect x="3" y="4" width="18" height="18" rx="2" />
-          <path d="M16 2v4M8 2v4M3 10h18" />
-        </svg>
+      <button type="button" class="bottom-nav-item" :class="{ active: activeDrawer === 'schedule' && !settingsOpen }" @click="switchPrimaryDrawer('schedule')">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2" /><path d="M16 2v4M8 2v4M3 10h18" /></svg>
         <span>{{ t('navSchedule') }}</span>
       </button>
-      <button
-        type="button"
-        class="bottom-nav-item"
-        :class="{ active: activeDrawer === 'knowledge' && !settingsOpen }"
-        @click="switchPrimaryDrawer('knowledge')"
-      >
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <circle cx="18" cy="5" r="3" />
-          <circle cx="6" cy="12" r="3" />
-          <circle cx="18" cy="19" r="3" />
-          <path d="m8.59 13.51 6.83 3.98M15.41 6.51l-6.82 3.98" />
-        </svg>
+      <button type="button" class="bottom-nav-item" :class="{ active: activeDrawer === 'inbox' && !settingsOpen }" @click="switchPrimaryDrawer('inbox')">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12" /><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" /></svg>
+        <span v-if="(inbox?.unsortedCount?.value || inbox?.unsortedCount || 0) > 0" class="nav-badge" :aria-label="t('inboxUnsortedBadge', {count: (inbox?.unsortedCount?.value ?? inbox?.unsortedCount ?? 0)})">{{ inbox?.unsortedCount?.value ?? inbox?.unsortedCount ?? 0 }}</span>
+        <span>{{ t('inboxTitle') }}</span>
+      </button>
+      <button type="button" class="bottom-nav-item" :class="{ active: activeDrawer === 'knowledge' && !settingsOpen }" @click="switchPrimaryDrawer('knowledge')">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="18" cy="5" r="3" /><circle cx="6" cy="12" r="3" /><circle cx="18" cy="19" r="3" /><path d="m8.59 13.51 6.83 3.98M15.41 6.51l-6.82 3.98" /></svg>
         <span>{{ t('navKnowledge') }}</span>
       </button>
-      <button
-        type="button"
-        class="bottom-nav-item"
-        :aria-label="t('settings')"
-        :class="{ active: settingsOpen || activeDrawer === 'settings' }"
-        @click="switchPrimaryDrawer('settings')"
-      >
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <circle cx="12" cy="12" r="3" />
-          <path
-            d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.6.77 1.02 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"
-          />
-        </svg>
+      <button type="button" class="bottom-nav-item" :aria-label="t('settings')" :class="{ active: settingsOpen || activeDrawer === 'settings' }" @click="switchPrimaryDrawer('settings')">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.6.77 1.02 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" /></svg>
         <span>{{ t('navSettings') }}</span>
       </button>
     </nav>

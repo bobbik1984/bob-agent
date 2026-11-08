@@ -675,6 +675,32 @@ async fn app_capture_create(
 }
 
 #[tauri::command]
+async fn app_inbox_capture(
+    state: State<'_, AppState>,
+    id: String,
+    content: String,
+    media_id: Option<String>,
+) -> Result<CaptureItem, &'static str> {
+    app_capture_create(state, id, None, content, None, None, media_id).await
+}
+
+#[tauri::command]
+async fn app_inbox_list(
+    state: State<'_, AppState>,
+    status: Option<String>,
+) -> Result<serde_json::Value, &'static str> {
+    let state = state.0.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        with_app(&state, |app| {
+            let items = app.list_inbox(status.as_deref()).map_err(|_| "INBOX_LIST_FAILED")?;
+            serde_json::to_value(items).map_err(|_| "INBOX_LIST_FAILED")
+        })
+    })
+    .await
+    .map_err(|_| "INBOX_LIST_FAILED")?
+}
+
+#[tauri::command]
 async fn app_memory_state(
     state: State<'_, AppState>,
     id: String,
@@ -1057,6 +1083,8 @@ fn configure<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R>
             app_note_delete,
             app_ticket_upsert,
             app_capture_create,
+            app_inbox_capture,
+            app_inbox_list,
             app_capture_media_put,
             app_capture_media_get,
             direct_llm::app_capture_vision_target,

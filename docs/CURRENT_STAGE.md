@@ -576,13 +576,34 @@ model-assets-20261101-r1已备份后发布，仅补全public图标资源、移�
 1. **Step 1 — 内核数据契约与单一收集箱底座（`bob-kernel` + `bob-node`）**：
    - 演进现有 `captures` 表（增量迁移，不破坏历史记录），补齐 `triage_status`（`unsorted` | `sorted`）、`destination_kind`（`project_todo` | `calendar` | `note` | `merged`）、`destination_ref_id`、`destination_label` 与 `triage_batch_id` 字段。
    - 暴露统一 RPC / HTTP 端点（兼容外部 Share 与旧 Dashboard `#inbox` 转发写入），确保离线 Outbox 幂等提交与全端实时同流。
+   - **进展（2026-11-08，源码+单测，未发布）**：migration 0011 新增独立 `capture_triage` 表（`captures` 原文与摘要不变，无行即 unsorted），并重建 `personal_ops_sync_outbox` 以接受 `capture_triage` 及既有 `delete` 操作（0007 约束遗漏，配对副本删除笔记/日程曾失败）；`LocalApp::list_inbox` / `set_capture_triage`（版本校验、相同请求幂等、状态与同步 outbox 同事务）、Replica→Home 接收与快照合并（无分拣时快照摘要与旧版一致）；bob-node RPC `app_inbox_capture` / `app_inbox_list` / `app_inbox_triage_set`（外部客户端经 owner 令牌 `/api/rpc/` 写入）。`cargo test --offline -p bob-kernel` 全绿（`tests/spark_inbox.rs` 新增 7 项），`cargo check --offline -p bob-node` 通过。未做：Tauri 端同名命令、外部采集专用窄权限令牌、真实旧库升级与公网验证。
 2. **Step 2 — Bob Core 幕僚长每日分拣引擎（`bob-runtime` + `assistant.rs`）**：
    - 新增 `triage_sparks` 动作提案协议：读取全部 `unsorted` Sparks、当前项目清单（对齐 `project_registry.yaml` 与平台 `projects`）及近期日程摘要，调用当前选定的 `main` 模型产出结构化分拣草案 `DailyReviewBatch`。
    - 支持定时预处理（每日用户指定时刻后台生成草稿卡）与手动一键触发（「立即整理」），打开收集箱即可直接审阅，无需现场等待模型推理。
+   - **进展（2026-11-08，源码+单测，未发布）**：`bob-runtime::inbox_triage` 提供分拣提示词与校验解析（编造/重复 Spark ID、未知项目、无时间日程、无标题、未知去向一律丢弃并计数；未覆盖 Spark 自动补 `keep`；多 ID 即合并，`merge` 视为笔记；`keep` 合并自动拆开；裸数组/围栏/夹杂说明文字均可解析），`planned_triage` 为 Step 4 生成主 Spark 去向与被合并 Spark 的 `merged` 链接。migration 0012 `triage_batches` 持久化草稿（新草稿取代旧草稿，`applied`/`dismissed` 关闭，同 ID 幂等）。bob-node `app_inbox_triage_draft`（有草稿直接返回不调用模型；`regenerate` 时锁外调用 main→flash→默认模型）与 `app_inbox_triage_close`。`cargo test -p bob-kernel` 109 项全绿、`bob-runtime --lib inbox_triage` 7 项与 `assistant` 4 项通过、`cargo check -p bob-node` 通过。未做：每日定时触发、真实模型实测、`project_registry.yaml` 路径接入（Step 4 写 todo.md 时需要）、Tauri 端命令。
 3. **Step 3 — 五栏导航重划与「收集箱 / 每日分拣确认卡」UI（`bob-app`）**：
    - 主导航调整为 **`对话 | 今天 | 收集箱 | 知识 | 我的`**（将「日程」升级为聚焦今日行动的「今天」，将「票夹」收拢至「我的」单点入口）。
    - 在「收集箱」顶部实现卡片堆叠式 **Daily Review Card**（展示去向彩色胶囊与 `确认 / 改一下 / 全部确认` 按钮），全部视觉样式通过明暗双模 CSS 变量注入（遵循 `AGENTS.md` 严禁硬编码色彩与 i18n 双语同步铁律）。
+   - **进展（2026-11-08，前端源码+单测，未发布）**：
+     - **UI令牌与圆角收敛**：全局倒角半径减半（卡片/外框降至7-8px，按钮/输入框6px，微标签4px，模态弹窗12px），消除卡片和按键内的过度药丸圆角；
+     - **输入框与下拉菜单令牌统一**：修复 `DshSessions.vue` 底部模式切换按钮（`Ask to approve ∨`）使用原生 `<select>` 导致的外框过度胶囊（999px）与展开弹窗纯方直角的割裂问题，替换为 `CustomSelect.vue`，触发器与相邻工具按键统一度量为 `--radius-btn: 6px; height: 1.8rem;`，弹出浮层统一为 `--radius-card: 8px` 并注入系统明暗变量；
+     - **远程会话阅读宽度收束**：修复 `PrimaryChatPane.vue` 中远端节点会话宿主容器 `.remote-session-host` 撑满整个屏幕宽度（1920px）难于阅读的问题，对齐主 Agent 会话几何结构，统一定义为 `width: min(100%, 62rem); margin: 0 auto;` 舒适居中；
+     - **宽屏响应式桌面布局（Screen Desktop A/B）**：依据 `bob-ui-concept.html` 宽屏规格，在 `layout-desktop-wide`（!isCompact）模式下自动隐藏底部导航栏，左侧激活 72px 宽度五栏垂直轨条（`.desktop-rail`），当处于“对话”标签时会话目录自动常驻泊靠于轨条右侧（`.desktop-docked-sidebar`，280px），中间区域展示舒适宽度对话；而在移动窄屏（isCompact）模式下无缝回退至底栏加抽屉模态浮层；
+     - **单一收集箱与分拣卡落地**：新建 `InboxView.vue` 与 `useInbox.mjs`，顶部集成零决策速记输入框与每日分拣确认卡片堆叠（彩色去向胶囊、理由、快速换去向、改一下与确认/全部确认）；票夹单点收拢至“我的”（SettingsView.vue），清理日程与知识页冗余入口；QuickNoteOverlay 升级为零决策直写 `inboxCapture`；i18n 中英双语对齐；
+     - **自动化验证**：164项前端单测全绿（含 `phase-a-ux.test.mjs` 模板与变量静态编译检查），`bob-kernel` 全部 Rust 单测通过。未做：生产环境打包发布（遵循重型操作防火墙，等待用户明确授权）。
 4. **Step 4 — 确认落盘、PC 节点 `todo.md` 同步与「展开想法」闭环**：
    - 用户点击确认后，在同一事务内将 Spark 标为 `sorted` 并写入目标模块（日程 `ScheduleItem`、知识 `NoteItem` 或项目 `todo.md`）。
    - 项目 `todo.md` 写入：常驻节点已同步目录直接落盘；仅驻留于离线 PC 的仓库写入 `pending_todo_writes` 队列并在卡片上诚实展示 `Waiting for PC`，待 PC 节点上线后自动执行字段级追加并回填完成状态。
    - 在「知识」笔记详情页提供「展开这个想法（Develop this idea）」按钮，点击即携带原 Spark 与笔记上下文开启 Bob 对话，并可选支持每周回顾摘要（Weekly Look-back）。
+
+## BP4 外部 Bot 只读/项目整理（2026-11-08，源码候选）
+
+用户认可 `grok_bot` 专用账号，不开放节点执行；后续明确“暂不编译，先完成源码与轻量验证”，故本轮不编译、不启动新后端、不上线、不打包。
+
+本轮边界复核（2026-11-08）：原实现已复用内核保存，但范围检查和业务操作混在MCP中；已提取project_service受限应用层，关联权限下沉为内核ProjectLinkAuthority，机主旧入口委托同一保存事务。原项目范围与版本同事务核对，外部关联字段显式投影，拒绝最大整数版本溢出。补2项内核回归（未运行）；原9项Bot用例保留。未宣称所有现存RPC已改造为统一身份系统。
+
+已写入 bob-node 的受限 MCP 路由、逐请求授权、项目字段投影、授权会话关联 CAS 和脱敏审计；提供本机机主配置脚本，默认只读、24小时有效，无 HTTP 管理或权限提升接口。九项 Rust 权限/持久化/HTTP绕过用例已编写，尚未运行。未创建或交付真实 grok_bot 凭证，避免把源码准备当已可登录账号。
+
+下一步获准编译后：定向测试 → 隔离本地 SQLite 候选 → 创建仅测试项目范围的 grok_bot → HTTP initialize/list/read → 整理保存/重启读回 → 只读拒写、越权/执行拒绝、版本冲突、撤销/过期 → 再开放用户选择的真实项目。暂不连接外部服务或发送私人项目内容。本轮不改现有收件箱/UI其他进行中修改。
+
+Grok Bot 官方文档支持自定义 MCP；Grok 消费端连接器需要服务可达，localhost 无法直接供云端访问。Muse Model API 支持工具调用，尚未确认 Muse 消费端自定义 Bob 连接器及本账号可用性。来源及验证记录见 `evidence/2026-11-08-external-bot-access.md`。完整 MCP 兼容、管理UI、OAuth/远程TLS入口、分页正文和附件权限仍待后续，不标记已接通。

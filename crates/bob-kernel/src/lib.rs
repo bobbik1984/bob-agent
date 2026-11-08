@@ -38,3 +38,5 @@ pub mod workspace_handoff;
 pub mod assistant;
 
 pub mod project_links;
+
+pub mod spark_inbox;

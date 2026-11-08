@@ -274,3 +274,35 @@ test('BP4-05 bounded subagent bridge maps dispatch, execute, cancel, reconcile, 
     { command: 'app_subagent_list', args: { parentTaskId: 'task-1' } },
   ]);
 });
+
+test('BOB-D-014 unified inbox commands map list, capture, triage set, draft, and close', async () => {
+  const calls = [];
+  const bridge = createKernelBridge(async (command, args) => { calls.push({ command, args }); return { ok: true }; }, () => true);
+
+  await bridge.inboxList('unsorted');
+  await bridge.inboxCapture({ id: 'cap-1', content: 'Spark idea', mediaId: 'img-1' });
+  await bridge.inboxTriageSet({
+    captureId: 'cap-1',
+    destination: { kind: 'calendar', refId: 'sched-1', label: 'Tomorrow' },
+    batchId: 'batch-1',
+    expectedVersion: 0,
+  });
+  await bridge.inboxTriageDraft({ regenerate: true });
+  await bridge.inboxTriageClose({ batchId: 'batch-1', status: 'applied' });
+
+  assert.deepEqual(calls, [
+    { command: 'app_inbox_list', args: { status: 'unsorted' } },
+    { command: 'app_inbox_capture', args: { id: 'cap-1', content: 'Spark idea', mediaId: 'img-1' } },
+    {
+      command: 'app_inbox_triage_set',
+      args: {
+        captureId: 'cap-1',
+        destination: { kind: 'calendar', refId: 'sched-1', label: 'Tomorrow' },
+        batchId: 'batch-1',
+        expectedVersion: 0,
+      },
+    },
+    { command: 'app_inbox_triage_draft', args: { regenerate: true } },
+    { command: 'app_inbox_triage_close', args: { batchId: 'batch-1', status: 'applied' } },
+  ]);
+});

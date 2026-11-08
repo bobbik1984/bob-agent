@@ -1,6 +1,8 @@
 <script setup>
 import CaptureImage from '../components/CaptureImage.vue';
 import TicketWalletPanel from '../components/TicketWalletPanel.vue';
+import KnowledgeGraphView from '../components/KnowledgeGraphView.vue';
+import { inject } from 'vue';
 import { computed, reactive, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 
@@ -44,7 +46,9 @@ const emit = defineEmits([
 ]);
 
 const { t } = useI18n();
-const activeSubtab = ref('notes'); // 'notes' | 'captures' | 'memories' | 'decisions'
+const shell = inject('bobAppShell', {});
+const projects = computed(() => shell.catalog?.value?.projects || shell.projectList?.value || []);
+const activeSubtab = ref('notes'); // 'notes' | 'tickets' | 'memories' | 'decisions' | 'graph'
 const searchQuery = ref('');
 const selectedNoteId = ref(null);
 const mobileEditorOpen = ref(false);
@@ -106,7 +110,10 @@ watch(
   () => props.notes,
   list => {
     if (!selectedNoteId.value && Array.isArray(list) && list.length > 0) {
-      loadNoteIntoEditor(list[0]);
+      const reg = regularNotes.value;
+      if (reg.length > 0) {
+        loadNoteIntoEditor(reg[0]);
+      }
     }
   },
   { immediate: true },
@@ -205,19 +212,20 @@ function submitDecision() {
             <path d="M14 2v6h6M16 13H8M16 17H8M10 9H8" />
           </svg>
           <span>{{ t('knowledgeTabNotes') }}</span>
-          <span class="subtab-count">{{ notes.length }}</span>
+          <span class="subtab-count">{{ regularNotes.length }}</span>
         </button>
         <button
           type="button"
           class="view-subtab-btn"
-          :class="{ active: activeSubtab === 'captures' }"
-          @click="activeSubtab = 'captures'"
+          :class="{ active: activeSubtab === 'tickets' }"
+          @click="activeSubtab = 'tickets'"
         >
           <svg class="inline-svg" viewBox="0 0 24 24" aria-hidden="true">
-            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+            <path d="M2 9a3 3 0 0 1 0 6v2a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-2a3 3 0 0 1 0-6V7a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2Z" />
+            <path d="M13 5v2M13 17v2M13 11v2" />
           </svg>
-          <span>{{ t('knowledgeTabCaptures') }}</span>
-          <span class="subtab-count">{{ captures.length }}</span>
+          <span>{{ t('knowledgeTabTickets') }}</span>
+          <span class="subtab-count">{{ ticketNotesCount }}</span>
         </button>
         <button
           type="button"
@@ -247,15 +255,18 @@ function submitDecision() {
         <button
           type="button"
           class="view-subtab-btn"
-          :class="{ active: activeSubtab === 'tickets' }"
-          @click="activeSubtab = 'tickets'"
+          :class="{ active: activeSubtab === 'graph' }"
+          @click="activeSubtab = 'graph'"
         >
           <svg class="inline-svg" viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M2 9a3 3 0 0 1 0 6v2a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-2a3 3 0 0 1 0-6V7a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2Z" />
-            <path d="M13 5v2M13 17v2M13 11v2" />
+            <circle cx="6" cy="6" r="3"/>
+            <circle cx="18" cy="6" r="3"/>
+            <circle cx="6" cy="18" r="3"/>
+            <circle cx="18" cy="18" r="3"/>
+            <line x1="8.5" y1="7.5" x2="15.5" y2="16.5"/>
+            <line x1="8.5" y1="16.5" x2="15.5" y2="7.5"/>
           </svg>
-          <span>{{ t('knowledgeTabTickets') }}</span>
-          <span class="subtab-count">{{ ticketNotesCount }}</span>
+          <span>{{ t('knowledgeTabGraph') }}</span>
         </button>
       </div>
 
@@ -266,15 +277,6 @@ function submitDecision() {
         @click="startNewNote"
       >
         {{ t('knowledgeNewNoteBtn') }}
-      </button>
-      <button
-        v-else-if="activeSubtab === 'captures'"
-        type="button"
-        class="compact-add-btn"
-        :class="{ active: showCaptureForm }"
-        @click="showCaptureForm = !showCaptureForm"
-      >
-        + {{ t('knowledgeToggleNewCaptureBtn') }}
       </button>
       <button
         v-else-if="activeSubtab === 'decisions'"
@@ -298,6 +300,7 @@ function submitDecision() {
     </header>
 
     <div class="view-content-body">
+      <!-- SUBTAB 1: NOTES & SAVED ARTICLES -->
       <template v-if="activeSubtab === 'notes'">
         <div class="knowledge-toolbar" :class="{ 'mobile-hidden': mobileEditorOpen }">
           <input
@@ -310,9 +313,9 @@ function submitDecision() {
 
         <div class="knowledge-split-pane" :class="{ 'mobile-editor-active': mobileEditorOpen }">
           <aside class="knowledge-note-list hub-card">
-            <p v-if="!filteredNotes.length" class="view-card-desc">
-              {{ t('knowledgeEmptyNotesHint') }}
-            </p>
+            <div v-if="!filteredNotes.length" class="view-empty-card" style="padding: 1.5rem 1rem; text-align: center;">
+              <p class="view-card-desc">{{ t('knowledgeEmptyNotesHint') }}</p>
+            </div>
             <button
               v-for="note in filteredNotes"
               :key="note.id"
@@ -375,41 +378,25 @@ function submitDecision() {
         </div>
       </template>
 
-      <template v-else-if="activeSubtab === 'captures'">
-        <form
-          v-if="showCaptureForm"
-          class="quick-capture-form hub-card"
-          @submit.prevent="submitCapture"
-        >
-          <input
-            v-model="captureDraft"
-            type="text"
-            :placeholder="t('knowledgeCapturePlaceholder')"
-            required
-          />
-          <button
-            type="submit"
-            class="primary-action-btn"
-            :disabled="busy || !captureDraft.trim()"
-          >
-            {{ t('knowledgeAddCaptureBtn') }}
-          </button>
-        </form>
-
-        <div v-if="!captures.length" class="view-empty-card hub-card">
-          <p>{{ t('knowledgeEmptyNotesHint') }}</p>
-        </div>
-        <div v-else class="captures-list">
-          <article v-for="cap in captures" :key="cap.id" class="hub-card capture-item-card">
-            <p>{{ cap.content_ref || cap.content }}</p>
-            <CaptureImage :capture-id="cap.id" />
-          </article>
-        </div>
+      <!-- SUBTAB 2: TICKET WALLET -->
+      <template v-else-if="activeSubtab === 'tickets'">
+        <TicketWalletPanel
+          :notes="notes"
+          :busy="busy"
+          :recognizing="recognizingTicket"
+          @save-ticket="emit('save-ticket', $event)"
+          @delete-ticket="emit('delete-ticket', $event)"
+          @recognize-ticket-file="emit('recognize-ticket-file', $event)"
+        />
       </template>
 
+      <!-- SUBTAB 3: LONG-TERM MEMORIES -->
       <template v-else-if="activeSubtab === 'memories'">
-        <div v-if="!memories.length" class="view-empty-card hub-card">
-          <p>{{ t('knowledgeEmptyMemoriesHint') }}</p>
+        <div v-if="!memories.length" class="view-empty-card hub-card" style="padding: 2.5rem 1.5rem; text-align: center;">
+          <h4 style="margin: 0 0 0.5rem; color: var(--text-primary);">{{ t('knowledgeTabMemories') }}</h4>
+          <p style="color: var(--text-secondary); max-width: 460px; margin: 0 auto 1rem; line-height: 1.5;">
+            {{ t('knowledgeEmptyMemoriesHint') }}
+          </p>
         </div>
         <div v-else class="captures-list">
           <article v-for="mem in memories" :key="mem.id" class="hub-card memory-item-card">
@@ -444,18 +431,8 @@ function submitDecision() {
         </div>
       </template>
 
-      <template v-else-if="activeSubtab === 'tickets'">
-        <TicketWalletPanel
-          :notes="notes"
-          :busy="busy"
-          :recognizing="recognizingTicket"
-          @save-ticket="emit('save-ticket', $event)"
-          @delete-ticket="emit('delete-ticket', $event)"
-          @recognize-ticket-file="emit('recognize-ticket-file', $event)"
-        />
-      </template>
-
-      <template v-else>
+      <!-- SUBTAB 4: ARCHITECTURE DECISIONS (ADR) -->
+      <template v-else-if="activeSubtab === 'decisions'">
         <form
           v-if="showDecisionForm"
           class="quick-capture-form decision-structured-form hub-card"
@@ -491,8 +468,19 @@ function submitDecision() {
           </button>
         </form>
 
-        <div v-if="!decisions.length" class="view-empty-card hub-card">
-          <p>{{ t('knowledgeEmptyDecisionsHint') }}</p>
+        <div v-if="!decisions.length" class="view-empty-card hub-card" style="padding: 2.5rem 1.5rem; text-align: center;">
+          <h4 style="margin: 0 0 0.5rem; color: var(--text-primary);">{{ t('knowledgeTabDecisions') }}</h4>
+          <p style="color: var(--text-secondary); max-width: 460px; margin: 0 auto 1rem; line-height: 1.5;">
+            {{ t('knowledgeEmptyDecisionsHint') }}
+          </p>
+          <button
+            v-if="!showDecisionForm"
+            type="button"
+            class="btn primary small"
+            @click="showDecisionForm = true"
+          >
+            + {{ t('knowledgeToggleNewDecisionBtn') }}
+          </button>
         </div>
         <div v-else class="captures-list">
           <article v-for="dec in decisions" :key="dec.id" class="hub-card memory-item-card">
@@ -543,6 +531,16 @@ function submitDecision() {
             </div>
           </article>
         </div>
+      </template>
+
+      <!-- SUBTAB 5: KNOWLEDGE GRAPH (Built-in Dynamic Graph) -->
+      <template v-else-if="activeSubtab === 'graph'">
+        <KnowledgeGraphView
+          :projects="projects"
+          :notes="props.notes"
+          :decisions="props.decisions"
+          :memories="props.memories"
+        />
       </template>
     </div>
   </section>
