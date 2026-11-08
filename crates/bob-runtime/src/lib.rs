@@ -1679,7 +1679,7 @@ fn build_request_body(
                 .collect();
             json!({
                 "model": profile.model_id,
-                "max_tokens": 4096,
+                "max_tokens": 8192,
                 "temperature": 0.3,
                 "messages": messages,
             })
@@ -1736,7 +1736,7 @@ fn build_request_body(
                 "model": wire_model,
                 "messages": messages,
                 "temperature": 0.3,
-                "max_tokens": 4096,
+                "max_tokens": 8192,
                 "stream": false,
             })
             .to_string()
@@ -1820,7 +1820,7 @@ fn post_https_curl(
     cmd.args([
         "-sS",
         "--max-time",
-        "60",
+        "120",
         "-X",
         "POST",
         endpoint,

@@ -320,20 +320,44 @@ impl LocalApp {
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
 
         // Check if a direct execution for this request_id already exists.
-        let existing: Option<(String, String, String)> = tx
+        let existing: Option<(String, String, String, String)> = tx
             .query_row(
-                "SELECT e.id, m.conversation_id, m.id
+                "SELECT e.id, m.conversation_id, m.id, e.status
                  FROM executions e
                  JOIN tasks t ON t.id = e.task_id
                  JOIN messages m ON m.id = t.source_message_id
                  JOIN runner_dispatches d ON d.execution_id = e.id
                  WHERE e.request_id = ?1 AND d.runner_instance_id = ?2",
                 params![request_id, DIRECT_RUNNER],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
             )
             .optional()?;
-        if let Some((exec_id, conv_id, msg_id)) = existing {
+        if let Some((exec_id, conv_id, msg_id, status)) = existing {
             let turns = load_conversation_turns(&tx, &conv_id, &msg_id)?;
+            if status == "failed" {
+                tx.execute(
+                    "UPDATE executions SET status='running', ended_at=NULL, started_at=?2, version=version+1 WHERE id=?1",
+                    params![exec_id, now],
+                )?;
+                tx.execute(
+                    "UPDATE runner_dispatches SET state='dispatching', last_error=NULL, updated_at=?2 WHERE execution_id=?1",
+                    params![exec_id, now],
+                )?;
+                tx.commit()?;
+                return Ok(DirectExecutionPrepared {
+                    execution_id: exec_id,
+                    request_id: request_id.to_owned(),
+                    conversation_id: conv_id,
+                    message_id: msg_id,
+                    provider_id: profile.id,
+                    provider_kind: profile.provider_kind,
+                    base_url: profile.base_url,
+                    model_id: profile.model_id,
+                    api_key_slot: profile.api_key_slot,
+                    messages: turns,
+                    can_start: true,
+                });
+            }
             tx.commit()?;
             return Ok(DirectExecutionPrepared {
                 execution_id: exec_id,

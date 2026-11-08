@@ -50,7 +50,11 @@ pub fn execute(state: &Arc<Mutex<NodeContext>>, args: &Value) -> Result<Value, &
             .map(|snap| {
                 snap.conversations
                     .into_iter()
-                    .filter(|c| !c.id.starts_with("assistant:"))
+                    .filter(|c| {
+                        !c.id.starts_with("assistant:")
+                            && !c.id.starts_with("conv-task-")
+                            && !c.id.starts_with("conv-direct-task:")
+                    })
                     .take(30)
                     .map(|c| {
                         json!({
@@ -119,7 +123,7 @@ pub fn execute(state: &Arc<Mutex<NodeContext>>, args: &Value) -> Result<Value, &
                 }
             }
             for item in node_items {
-                if candidates.len() >= 200 {
+                if candidates.len() >= 300 {
                     complete = false;
                     break;
                 }
@@ -175,9 +179,9 @@ pub fn execute(state: &Arc<Mutex<NodeContext>>, args: &Value) -> Result<Value, &
             .resolve_role_profile("vision")
             .unwrap_or_else(|_| profile.clone());
         let chosen_profile = if user.contains("[image:") || user.contains("<image>") {
-            &main_profile
+            &vision_profile
         } else {
-            &flash_profile
+            &main_profile
         };
         let prior_len = prepared.messages.len().saturating_sub(1);
         let context_turns: Vec<_> = prepared.messages[..prior_len]
@@ -187,11 +191,21 @@ pub fn execute(state: &Arc<Mutex<NodeContext>>, args: &Value) -> Result<Value, &
                     && m.content.trim() != "助理已就绪。"
                     && !m.content.contains("当前对话被限定为")
             })
-            .cloned()
+            .map(|m| {
+                let mut turn = m.clone();
+                if turn.role == "assistant" && !turn.content.trim_start().starts_with('{') {
+                    turn.content = json!({
+                        "kind": "reply",
+                        "text": turn.content,
+                    })
+                    .to_string();
+                }
+                turn
+            })
             .collect();
         let mut raw_res: Result<String, &'static str> = Err("PROVIDER_UNCONFIGURED");
         let mut tried = Vec::new();
-        for prof in [chosen_profile, &main_profile, &vision_profile, &profile] {
+        for prof in [chosen_profile, &main_profile, &flash_profile, &vision_profile, &profile] {
             let key = (prof.base_url.clone(), prof.model_id.clone());
             if tried.contains(&key) {
                 continue;
