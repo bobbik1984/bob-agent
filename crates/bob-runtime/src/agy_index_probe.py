@@ -186,7 +186,7 @@ def _seek_digest(f, harness):
                     p = o.get('payload') if isinstance(o.get('payload'), dict) else {}
                     c = p.get('content')
                     raw_t = '\n'.join(x.get('text', '') for x in c if isinstance(x, dict)) if isinstance(c, list) else str(c or '')
-                    if '<environment_context>' not in raw_t:
+                    if '<environment_context>' not in raw_t and 'The following is the Codex agent history added since your last approval assessment' not in raw_t:
                         txt = _clean(raw_t)
                         if txt:
                             if p.get('role') == 'user':
@@ -270,21 +270,28 @@ def discover_codex(d, limit=20):
                 p = o.get('payload', {})
                 c = p.get('content')
                 txt = '\n'.join(x.get('text', '') for x in c if isinstance(x, dict)) if isinstance(c, list) else str(c or '')
-                if p.get('role') == 'user' and '<environment_context>' not in txt and not ut:
+                if p.get('role') == 'user' and '<environment_context>' not in txt and 'The following is the Codex agent history added since your last approval assessment' not in txt and not ut:
                     ut = _clean(txt)
                 elif p.get('role') == 'assistant' and not at:
                     at = _clean(txt)
-        if guard or (cwd and cwd in seen):
+        if guard:
+            continue
+        fp, ls = _seek_digest(f, 'codex')
+        u_prompt = ut or fp or ''
+        if cwd in ('/home/bobbik', '/home/ubuntu', '') and u_prompt:
+            pm = re.search(r'(/home/(?:bobbik|ubuntu)/[A-Za-z0-9_./-]+)', u_prompt)
+            if pm:
+                cwd = pm.group(1).rstrip('.,;:)')
+        if cwd and cwd not in ('/home/bobbik', '/home/ubuntu') and cwd in seen:
             continue
         if not sid:
             m = re.search(r'([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})', f.name)
             sid = m.group(1) if m else f.stem
-        if cwd:
+        if cwd and cwd not in ('/home/bobbik', '/home/ubuntu'):
             seen.add(cwd)
         wn = Path(cwd).name if cwd else 'codex'
-        fp, ls = _seek_digest(f, 'codex')
         out.append(_mk_row(f'codex:{sid}', sid, 'codex', 'Codex', 'codex_native',
-                           at or ut or fp or f'Codex · {wn}', cwd or str(f.parent), ms, max(cnt, 1), 'completed', False, fp or ut, ls or at))
+                           ut or fp or at or f'Codex · {wn}', cwd or str(f.parent), ms, max(cnt, 1), 'completed', False, fp or ut, ls or at))
     return out
 
 def discover_control_plane(dbs, harnesses=None, limit=40):
