@@ -459,3 +459,30 @@ export function directoryGroups(rows, mode, pinnedSet = null, options = null) {
   }
   return res;
 }
+
+export function groupIconKind(group, mode = 'project') {
+  if (group?.isTestGroup) return 'archive';
+  if (mode !== 'device') return 'project';
+  const sample = group?.items?.[0];
+  const node = sample?.node || {};
+  const text = [
+    group?.name,
+    group?.fullName,
+    group?.key,
+    node.label,
+    node.name,
+    node.remark,
+    node.baseUrl,
+    node.url,
+    sample?.device,
+  ]
+    .filter(Boolean)
+    .join(' ');
+  if (/(phone|mobile|pixel|android|iphone|ios|ipad|手机|移动|平板)/i.test(text)) {
+    return 'phone';
+  }
+  if (/(vps|cloud|server|hostinger|racknerd|volc|aliyun|aws|gcp|azure|云|服务器)/i.test(text)) {
+    return 'cloud';
+  }
+  return 'computer';
+}

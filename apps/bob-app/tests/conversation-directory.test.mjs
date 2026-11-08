@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {workspaceName,directoryGroups,extractFilterOptions,filterAndSortRows} from '../src/conversation-directory.mjs';
+import {workspaceName,directoryGroups,extractFilterOptions,filterAndSortRows,groupIconKind} from '../src/conversation-directory.mjs';
 test('short path labels support POSIX, Windows and trailing separators',()=>{
  assert.equal(workspaceName('/home/user/projects/winter-shelter/'),'winter-shelter');
  assert.equal(workspaceName('C:\\projects\\winter-shelter'),'winter-shelter');
@@ -114,4 +114,15 @@ test('test, probe, and scratch sessions are automatically shielded into testAndS
   assert.equal(testGroup.isTestGroup, true);
   assert.equal(testGroup.items.length, 3);
   assert.deepEqual(testGroup.items.map(i => i.uid).sort(), ['vps2:test1', 'vps3:eval', 'x1t:probe']);
+});
+
+test('groupIconKind selects project, archive, computer, phone, and cloud icons by mode and device', () => {
+  assert.equal(groupIconKind({ name: 'Quant Lab 量化交易', items: [] }, 'project'), 'project');
+  assert.equal(groupIconKind({ name: 'Sea2 航海纪元', items: [] }, 'smart'), 'project');
+  assert.equal(groupIconKind({ name: '实验与临时测试', isTestGroup: true, items: [] }, 'project'), 'archive');
+  assert.equal(groupIconKind({ name: '实验与临时测试', isTestGroup: true, items: [] }, 'device'), 'archive');
+  assert.equal(groupIconKind({ name: 'X1T', items: [{ node: { label: 'X1T' } }] }, 'device'), 'computer');
+  assert.equal(groupIconKind({ name: 'Pixel 8 手机', items: [{ device: 'Pixel 8 手机' }] }, 'device'), 'phone');
+  assert.equal(groupIconKind({ name: 'VPS2', items: [{ node: { label: 'VPS2', remark: 'Hostinger VPS2' } }] }, 'device'), 'cloud');
+  assert.equal(groupIconKind({ name: 'VPS3', items: [{ node: { label: 'VPS3', baseUrl: 'https://vps3.bobbik.org' } }] }, 'device'), 'cloud');
 });
