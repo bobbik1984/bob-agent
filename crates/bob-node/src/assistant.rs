@@ -53,6 +53,7 @@ pub fn execute(state: &Arc<Mutex<NodeContext>>, args: &Value) -> Result<Value, &
                     .filter(|c| {
                         !c.id.starts_with("assistant:")
                             && !c.id.starts_with("conv-task-")
+                            && !c.id.starts_with("conv-task_")
                             && !c.id.starts_with("conv-direct-task:")
                     })
                     .take(30)

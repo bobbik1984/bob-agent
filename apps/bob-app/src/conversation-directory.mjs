@@ -303,7 +303,10 @@ export function isTestOrScratchSession(row) {
   if (/(^|[\s_/-])(test|eval|probe|tmp|temp|scratch|benchmark|fixture|mock|smoke|check)([\s_/-]|$)/i.test(title)) {
     return true;
   }
-  if (/(测试|探针|临时|冒烟|评测|验证)/.test(title)) {
+  if (/^(are you online\??|r u online\??|hello\??|hi\??|ping\??|blank message|synced conversation)$/i.test(title)) {
+    return true;
+  }
+  if (/(测试|探针|临时|冒烟|评测|验证|连通检查)/.test(title)) {
     return true;
   }
 

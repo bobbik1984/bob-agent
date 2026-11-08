@@ -642,7 +642,7 @@ pub fn apply_personal_proposal(
                     if s.connection_id == "local"
                         && !crate::agy_directory::owns_readable_session(&s.session_id)
                     {
-                        let _ = app.promote_conversation_to_project(
+                        let _ = app.assign_conversation_to_project(
                             &s.session_id,
                             &proj_id,
                             g_title,

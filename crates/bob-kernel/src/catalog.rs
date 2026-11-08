@@ -435,6 +435,45 @@ impl LocalApp {
         self.catalog_snapshot()
     }
 
+    /// Used by Chief of Staff `organize_projects` to assign or re-assign a local
+    /// conversation to a platform project without overwriting its conversation
+    /// title or stealing UI focus from the active assistant conversation.
+    pub fn assign_conversation_to_project(
+        &mut self,
+        conversation_id: &str,
+        project_id: &str,
+        project_title: &str,
+        now: i64,
+    ) -> Result<()> {
+        let cid = conversation_id.trim();
+        let pid = project_id.trim();
+        let ptitle = project_title.trim();
+        if !valid_id(cid)
+            || !valid_id(pid)
+            || pid.starts_with("local-project:")
+            || ptitle.is_empty()
+            || ptitle.len() > 256
+        {
+            return Err(Error::InvalidTransition);
+        }
+        let tx = self
+            .store
+            .db
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        tx.execute(
+            "INSERT INTO projects(id,title,acceptance,status,version,created_at,updated_at)
+             VALUES(?1,?2,'local','active',1,?3,?3)
+             ON CONFLICT(id) DO UPDATE SET updated_at=?3",
+            params![pid, ptitle, now],
+        )?;
+        tx.execute(
+            "UPDATE conversations SET project_id=?2, version=version+1 WHERE id=?1 AND archived_at IS NULL",
+            params![cid, pid],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
     pub fn select_conversation(
         &mut self,
         conversation_id: &str,
