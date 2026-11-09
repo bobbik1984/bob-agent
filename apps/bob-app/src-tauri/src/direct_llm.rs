@@ -440,6 +440,9 @@ async fn build_model_hub_snapshot_and_sync<R: Runtime>(
     let mut remote_nodes = Vec::new();
     if let Some(raw_nodes) = hub_state.get("remoteNodes").and_then(Value::as_array) {
         for node in raw_nodes {
+            if cfg!(target_os = "android") && bob_runtime::node_pairing::is_host_loopback_alias(node) {
+                continue;
+            }
             let nid = node.get("id").and_then(Value::as_str).unwrap_or("");
             if nid.is_empty() {
                 continue;
@@ -3637,6 +3640,9 @@ async fn build_local_topology_payload<R: Runtime>(
     let mut nodes_with_tokens = Vec::new();
     if let Some(arr) = hub["remoteNodes"].as_array() {
         for n in arr {
+            if bob_runtime::node_pairing::is_host_loopback_alias(n) {
+                continue;
+            }
             let mut item = n.clone();
             if let Some(obj) = item.as_object_mut() {
                 let id = obj
@@ -3746,6 +3752,9 @@ async fn apply_synced_topology_payload<R: Runtime>(
 
     if let Some(remote_nodes) = synced.get("remoteNodes").and_then(Value::as_array) {
         for rn in remote_nodes {
+            if bob_runtime::node_pairing::is_host_loopback_alias(rn) {
+                continue;
+            }
             let Some(rid) = rn.get("id").and_then(Value::as_str) else {
                 continue;
             };
@@ -3880,7 +3889,9 @@ pub(crate) async fn sync_with_paired_remote_nodes<R: Runtime>(
 
     let mut peers: Vec<(String, String, Option<String>, bool)> = Vec::new();
     for n in nodes {
-        if !n.get("enabled").and_then(Value::as_bool).unwrap_or(true) {
+        if bob_runtime::node_pairing::is_host_loopback_alias(n)
+            || !n.get("enabled").and_then(Value::as_bool).unwrap_or(true)
+        {
             continue;
         }
         let Some(id) = n.get("id").and_then(Value::as_str).map(str::to_owned) else {
@@ -4040,9 +4051,9 @@ async fn native_dsh<R: Runtime>(
         .await
         .unwrap_or_default();
 
-    // Collect paired bob-node / web_host peers as fallback relays for SSH-probed harnesses
-    // when this device (e.g. Android) has no local SSH tunnel to the work node.
-    let mut relay_peers: Vec<(String, Option<String>, bool)> = Vec::new();
+    // Only an authenticated Web host is a cross-node relay. Standalone nodes
+    // keep the existing device grant for their own sessions.
+    let mut relay_peers = Vec::new();
     for peer in nodes {
         if !peer.get("enabled").and_then(Value::as_bool).unwrap_or(true) {
             continue;
@@ -4065,13 +4076,14 @@ async fn native_dsh<R: Runtime>(
         let peer_is_web_host = peer.get("remark").and_then(Value::as_str) == Some("web_host")
             || peer.get("selectedProjectId").and_then(Value::as_str) == Some("web_host")
             || purl.contains("bob-online");
-        let ptok = read_api_key(&host, &remote_node_token_slot(pid))
-            .await
-            .ok()
-            .filter(|s| !s.trim().is_empty());
-        relay_peers.push((purl, ptok, peer_is_web_host));
+        if peer_is_web_host && purl.starts_with("https://") {
+            if let Ok(token) = read_api_key(&host, &remote_node_token_slot(pid)).await {
+                if !token.trim().is_empty() {
+                    relay_peers.push((purl, token));
+                }
+            }
+        }
     }
-    relay_peers.sort_by_key(|(_, _, peer_is_web_host)| if *peer_is_web_host { 0 } else { 1 });
 
     // Blocking TLS and history reads must not block the mobile UI/event executor.
     tauri::async_runtime::spawn_blocking(move || {
@@ -4080,24 +4092,31 @@ async fn native_dsh<R: Runtime>(
         } else {
             Some(token.as_str())
         };
-        let is_node = bob_runtime::node_pairing::is_bob_node_endpoint(&endpoint)?;
+        let can_relay = matches!(operation, "list" | "history" | "page" | "preview" | "live" | "events");
+        // A Web host is already identified by pairing. Direct discovery failures
+        // on other nodes must not abort an eligible read through the Web host.
+        let discovery = if is_web_host { Ok(false) } else {
+            bob_runtime::node_pairing::is_bob_node_endpoint(&endpoint)
+        };
+        let is_node = match discovery {
+            Ok(value) => value,
+            Err(_) if can_relay && !relay_peers.is_empty() => false,
+            Err(error) => return Err(error),
+        };
         let forward_with_relay_fallback = |cmd: &str, args: &Value| -> Result<Value, &'static str> {
-            if let Ok(res) = bob_runtime::node_pairing::forward_dsh_rpc_to_endpoint_with_target(
-                &endpoint,
-                tok_opt,
-                &connection_id,
-                "local",
-                cmd,
-                args,
-            ) {
-                return Ok(res);
+            if discovery.is_ok() {
+                if let Ok(res) = bob_runtime::node_pairing::forward_dsh_rpc_to_endpoint_with_target(
+                    &endpoint, tok_opt, &connection_id, "local", cmd, args,
+                ) {
+                    return Ok(res);
+                }
             }
-            if !is_web_host && !is_node && cmd != "app_dsh_prompt" {
-                for (peer_url, peer_tok, _) in &relay_peers {
+            if !is_web_host && can_relay {
+                for (peer_url, peer_tok) in &relay_peers {
                     if let Ok(res) =
                         bob_runtime::node_pairing::forward_dsh_rpc_to_endpoint_with_target(
                             peer_url,
-                            peer_tok.as_deref(),
+                            Some(peer_tok.as_str()),
                             &connection_id,
                             &connection_id,
                             cmd,
@@ -4112,7 +4131,7 @@ async fn native_dsh<R: Runtime>(
         };
 
         if operation == "list" {
-            if is_web_host || is_node {
+            if is_web_host || is_node || discovery.is_err() {
                 return forward_with_relay_fallback(
                     "app_dsh_list",
                     &json!({"connectionId": "local"}),
@@ -4222,7 +4241,7 @@ async fn native_dsh<R: Runtime>(
             }
         };
 
-        if bob_runtime::agy_directory::owns_readable_session(&session_id) || is_web_host || is_node {
+        if bob_runtime::agy_directory::owns_readable_session(&session_id) || is_web_host || is_node || discovery.is_err() {
             let (cmd, args) = build_rpc_call();
             return forward_with_relay_fallback(cmd, &args);
         }

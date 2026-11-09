@@ -314,6 +314,20 @@ pub fn export_local_topology(
     export_local_topology_with_app(data_dir, None, runtime, include_tokens)
 }
 
+/// The host's synthetic `local` connection is usable only on that host.
+pub fn is_host_loopback_alias(node: &Value) -> bool {
+    if node["id"] != "local" {
+        return false;
+    }
+    let url = node["baseUrl"].as_str().or_else(|| node["url"].as_str());
+    url.and_then(|value| reqwest::Url::parse(value).ok()).is_some_and(|url| {
+        url.host_str().is_some_and(|host| {
+            host.trim_end_matches('.').eq_ignore_ascii_case("localhost")
+                || host.trim_matches(['[', ']']).parse::<std::net::IpAddr>().is_ok_and(|ip| ip.is_loopback())
+        })
+    })
+}
+
 /// Export full local topology + knowledge bundle (`remoteNodes`, `deviceHarnesses`, `modelHub`,
 /// `projects`, `projectSessionLinks`, and `peerSyncBundle`).
 pub fn export_local_topology_with_app(
@@ -328,6 +342,7 @@ pub fn export_local_topology_with_app(
         .and_then(Value::as_array)
         .cloned()
         .unwrap_or_default();
+    nodes.retain(|node| !is_host_loopback_alias(node));
     for node in &mut nodes {
         if let Some(obj) = node.as_object_mut() {
             let nid = obj
@@ -449,6 +464,9 @@ pub fn merge_topology(
     let now = now_millis();
     if let Some(inc_nodes) = incoming.get("remoteNodes").and_then(Value::as_array) {
         for node in inc_nodes {
+            if is_host_loopback_alias(node) {
+                continue;
+            }
             let url = node
                 .get("url")
                 .or_else(|| node.get("baseUrl"))
@@ -1403,6 +1421,28 @@ mod tests {
         let lines: Vec<&str> = rendered.lines().collect();
         assert!(lines.len() >= 15 && lines.len() <= 35);
         assert!(rendered.contains('█') && rendered.contains('▀'));
+    }
+
+    #[test]
+    fn topology_does_not_share_the_hosts_loopback_alias() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = LocalApp::open(&dir.path().join("kernel.sqlite")).unwrap();
+        let runtime = ModelHubRuntime::with_file_vault(dir.path().to_path_buf()).unwrap();
+        let alias = json!({"id":"local","url":"http://[::1]:53020","name":"Host only"});
+        let remote = json!({"id":"remote","url":"https://example.invalid","name":"Remote"});
+        let mut hub = runtime.load_hub_state();
+        hub["remoteNodes"] = json!([alias.clone(), remote.clone()]);
+        runtime.save_hub_state(&hub).unwrap();
+        let exported = export_local_topology_with_app(dir.path(), Some(&app), &runtime, true);
+        assert_eq!(exported["remoteNodes"].as_array().unwrap().len(), 1);
+        assert_eq!(exported["remoteNodes"][0]["id"], "remote");
+        assert_eq!(runtime.load_hub_state()["remoteNodes"].as_array().unwrap().len(), 2);
+
+        hub["remoteNodes"] = json!([]);
+        runtime.save_hub_state(&hub).unwrap();
+        merge_topology(dir.path(), &mut app, &runtime, &json!({"remoteNodes":[alias,remote]})).unwrap();
+        assert_eq!(runtime.load_hub_state()["remoteNodes"][0]["id"], "remote");
+        assert_eq!(runtime.load_hub_state()["remoteNodes"].as_array().unwrap().len(), 1);
     }
 
     #[test]
