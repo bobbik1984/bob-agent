@@ -4517,7 +4517,7 @@ pub(crate) async fn app_paired_session_setup<R: Runtime>(
     let endpoint = owner["url"].as_str().or_else(|| owner["baseUrl"].as_str())
         .filter(|url| url.starts_with("https://"))
         .ok_or("SESSION_SETUP_OWNER_REQUIRED")?.to_owned();
-    let parsed = reqwest::Url::parse(&endpoint).map_err(|_| "SESSION_SETUP_OWNER_REQUIRED")?;
+    let parsed = tauri::Url::parse(&endpoint).map_err(|_| "SESSION_SETUP_OWNER_REQUIRED")?;
     if !parsed.username().is_empty() || parsed.password().is_some()
         || parsed.query().is_some() || parsed.fragment().is_some() || parsed.path() != "/" {
         return Err("SESSION_SETUP_OWNER_REQUIRED");
