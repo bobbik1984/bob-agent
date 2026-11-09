@@ -46,6 +46,83 @@ pub struct History {
     #[serde(default)]
     pub request_results: Vec<NativeRequestResult>,
 }
+/// A read-only projection of DSH's native questions. It never claims the
+/// foreground answerer or submits a reply to the harness.
+pub(crate) fn pending_questions(snapshot: &Value) -> Vec<Value> {
+    let projected = &snapshot["projections"]["values"]["userQuestions"];
+    let mut pending = std::collections::BTreeMap::<String, Value>::new();
+    for row in projected["active"].as_array().into_iter().flatten().take(16) {
+        let Some(id) = row["callId"].as_str().filter(|id| !id.is_empty() && id.len() <= 256) else { continue; };
+        let Some(state @ ("open" | "continued")) = row["state"].as_str() else { continue; };
+        if let Some(row) = question_row(id, state, &row["questions"]) {
+            pending.insert(id.to_owned(), row);
+        }
+    }
+
+    // Legacy blocking calls are absent from userQuestions. Reconstruct only
+    // the open calls visible at this history cut, using their exact call IDs.
+    let mut legacy = std::collections::BTreeMap::new();
+    let mut records: Vec<_> = snapshot["records"].as_array().into_iter().flatten()
+        .filter_map(|record| record.get("event")).collect();
+    records.sort_by_key(|event| event["seq"].as_i64().unwrap_or(-1));
+    for event in records {
+        apply_question_event(&mut legacy, event);
+    }
+    for (id, row) in legacy {
+        if !projected["settled"].as_array().is_some_and(|rows| rows.iter().any(|row| row["callId"].as_str() == Some(id.as_str()))) {
+            pending.entry(id).or_insert(row);
+        }
+    }
+    let mut budget = 64_usize * 1024;
+    pending.into_values().filter(|row| {
+        let Ok(bytes) = serde_json::to_vec(row) else { return false; };
+        let Some(remaining) = budget.checked_sub(bytes.len()) else { return false; };
+        budget = remaining;
+        true
+    }).take(8).collect()
+}
+
+fn question_row(id: &str, state: &str, input: &Value) -> Option<Value> {
+    let items: Vec<_> = input.as_array()?.iter().take(8).filter_map(|item| {
+        let question = item["question"].as_str()?.trim();
+        if question.is_empty() { return None; }
+        let options: Vec<_> = item["options"].as_array().into_iter().flatten().take(12)
+            .filter_map(|option| {
+                let label = option["label"].as_str()?.trim();
+                if label.is_empty() { return None; }
+                Some(serde_json::json!({"label":label.chars().take(256).collect::<String>(),
+                    "description":option["description"].as_str().map(|s|s.chars().take(512).collect::<String>())}))
+            }).collect();
+        Some(serde_json::json!({"question":question.chars().take(2048).collect::<String>(),"options":options}))
+    }).collect();
+    (!items.is_empty()).then(||serde_json::json!({"call_id":id,"state":state,"questions":items}))
+}
+
+fn apply_question_event(pending: &mut std::collections::BTreeMap<String, Value>, event: &Value) {
+    let data = &event["data"];
+    if event["surfaceOp"].is_object() {
+        // A rewrite can invalidate the causal context of a reconstructed call.
+        // The host's authoritative timed projection is kept separately.
+        pending.clear();
+    }
+    match event["type"].as_str() {
+        Some("tool/call") if data["name"] == "ask_user_question" && pending.len() < 16 => {
+            let Some(id) = data["callId"].as_str().filter(|id| !id.is_empty() && id.len() <= 256) else { return; };
+            let Some(raw) = data["arguments"].as_str().filter(|raw| raw.len() <= 64 * 1024) else { return; };
+            let Ok(args) = serde_json::from_str::<Value>(raw) else { return; };
+            if let Some(row) = question_row(id, "open", &args["questions"]) { pending.insert(id.to_owned(), row); }
+        }
+        Some("tool/result") => {
+            if let Some(id) = data["message"]["toolCallId"].as_str() { pending.remove(id); }
+        }
+        Some("user/message") if data["source"]["kind"] == "user-question-reply" => {
+            if let Some(id) = data["source"]["callId"].as_str() { pending.remove(id); }
+        }
+        Some("turn/start" | "turn/end") => pending.retain(|_, row| row["state"] == "continued"),
+        _ => {}
+    }
+}
+
 pub fn project_history(address: SessionAddress, snapshot: &Value) -> Result<History, &'static str> {
     if address.connection_id.is_empty() || address.session_id.is_empty()
         || snapshot["type"] != "snapshot"
@@ -108,6 +185,26 @@ mod tests {
     use super::*;
     use serde_json::json;
     fn address() -> SessionAddress { SessionAddress { connection_id: "node-a".into(), session_id: "existing".into() } }
+    #[test]
+    fn legacy_question_stays_visible_until_its_own_result_or_turn_end() {
+        let args = json!({"questions":[{"id":"q","question":"Choose a target","options":[{"label":"A"}]}]});
+        let call = json!({"event":{"type":"tool/call","seq":4,"surfaceOp":"append","data":{"callId":"q1","name":"ask_user_question","arguments":args.to_string()}}});
+        let other = json!({"event":{"type":"tool/result","seq":5,"data":{"message":{"toolCallId":"q2"}}}});
+        let own = json!({"event":{"type":"tool/result","seq":6,"data":{"message":{"toolCallId":"q1"}}}});
+        let mut snapshot = json!({"records":[other,call]});
+        assert_eq!(pending_questions(&snapshot)[0]["questions"][0]["options"][0]["label"],"A");
+        snapshot["records"].as_array_mut().unwrap().push(own);
+        assert!(pending_questions(&snapshot).is_empty());
+        snapshot["records"].as_array_mut().unwrap().pop();
+        snapshot["records"].as_array_mut().unwrap().push(json!({"event":{"type":"turn/end","seq":7}}));
+        assert!(pending_questions(&snapshot).is_empty());
+    }
+    #[test]
+    fn authoritative_continued_question_survives_timeout_and_does_not_block() {
+        let snapshot = json!({"records":[{"event":{"type":"tool/result","seq":8,"data":{"message":{"toolCallId":"q1"}}}}],
+            "projections":{"values":{"userQuestions":{"active":[{"callId":"q1","state":"continued","questions":[{"id":"q","question":"Still answerable"}]}]}}}});
+        assert_eq!(pending_questions(&snapshot)[0]["state"],"continued");
+    }
     #[test]
     fn preserves_identity_and_append_deduplicates_sequence() {
         let event = json!({"event":{"type":"assistant/message","seq":2,"surfaceOp":"append","data":{"message":{"content":[{"type":"text","text":"reply"}]}}}});

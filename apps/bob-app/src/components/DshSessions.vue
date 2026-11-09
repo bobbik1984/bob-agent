@@ -56,6 +56,18 @@ function emitTopbarPhase(overridePhase){
 watch([syncStatus,sending,replying,()=>nodeActivity.value?.running,busy],()=>emitTopbarPhase());
 const dshLiveState=ref(null);let dshLiveTimer,dshReadCursor=-1;
 const isNativeId=id=>/^(agy|claude-jsonl|codex|pi):/.test(id||'');
+const dshQuestionView=ref(null);
+let checkedDshQuestions=false;
+const dshQuestions=computed(()=>dshQuestionView.value?.pending_questions||[]);
+const dshQuestionBlocking=computed(()=>dshQuestions.value.some(q=>q.state==='open'));
+const dshQuestionSource=computed(()=>{
+ try{const url=new URL(dshQuestionView.value?.question_source);return url.protocol==='https:'&&!url.username&&!url.password&&!url.search&&!url.hash&&url.pathname==='/'?url.href:null;}
+ catch{return null;}
+});
+function observeDshQuestions(page){
+ if(!Array.isArray(page.pending_questions)||page.cursor<(dshQuestionView.value?.cursor??-1))return;
+ dshQuestionView.value={cursor:page.cursor,pending_questions:page.pending_questions,question_source:page.question_source};
+}
 const dshLiveMessages=computed(()=> (dshLiveState.value?.messages||[]).filter(m=>m.text&&(m.active||!Number.isSafeInteger(m.sequence)||m.sequence>(history.value?.cursor??-1))));
 async function refreshDshLive(){
  const g=generation,id=selected.value?.id,cid=connection.value;
@@ -78,6 +90,31 @@ async function refreshDshLive(){
  finally{if(g===generation&&!disposed)dshLiveTimer=setTimeout(refreshDshLive,dshLiveState.value?.status==='live'?1000:3000);}
 }
 const cancelRequest=ref(null),cancelBusy=ref(false);
+const dshStop=ref(null);
+let dshStopTimer;
+const canStopDsh=computed(()=>!!selected.value&&!isNativeId(selected.value.id)&&
+ (dshStop.value!==null||(syncStatus.value!=='offline_cached'&&
+ (dshQuestionBlocking.value||nodeActivity.value?.running===true||replying.value))));
+function resetDshStop(){clearTimeout(dshStopTimer);dshStop.value=null;}
+function settleDshIdle(){
+ resetDshStop();replying.value=false;nodeActivity.value={running:false,at:Date.now()};
+ notice.value=t('dshStopIdle');
+}
+async function stopDsh(){
+ const id=selected.value?.id,cid=connection.value,g=generation;
+ if(!id||!canStopDsh.value||dshStop.value||sending.value)return;
+ dshStop.value={checking:false};notice.value='';
+ try{
+  const result=await kernelBridge.dshCancel(cid,id);
+  if(g!==generation||disposed)return;
+  if(result.address?.session_id!==id||result.address?.connection_id!==cid)throw Error('DSH_IDENTITY_MISMATCH');
+  if(result.status==='idle'){settleDshIdle();return;}
+  if(result.status!=='cancel_requested')throw Error('DSH_CANCEL_UNCONFIRMED');
+  dshStop.value={checking:true};activityChecked=0;notice.value=t('dshStopChecking');
+  dshStopTimer=setTimeout(()=>{if(g===generation&&dshStop.value){resetDshStop();notice.value=t('dshStopUnconfirmed');}},30000);
+ }catch{if(g===generation&&!disposed){resetDshStop();notice.value=t('dshStopUnconfirmed');}}
+ finally{if(g===generation&&!disposed)void refresh();}
+}
 const cancellableRequest=computed(()=>/^(codex|pi|agy|claude-jsonl):/.test(selected.value?.id||'')?Object.entries(nativeDrafts.value).find(([,v])=>v.active&&v.cancelSupported)?.[0]:null);
 async function cancelNative(){
  const rid=cancellableRequest.value,g=generation;if(!rid||cancelBusy.value||cancelRequest.value===rid)return;
@@ -225,8 +262,17 @@ const displayMessages=computed(()=>{
  return out;
 });
 const syncStatusLabel=computed(()=>stripDots(syncStatus.value==='checking'?t('dshSyncChecking'):syncStatus.value==='syncing'?t('dshSyncUpdating'):syncStatus.value==='synced'?t('dshSyncCompleted'):syncStatus.value==='offline_cached'?t('dshSyncOfflineCached'):''));
-async function refreshActivity(g,id){if(Date.now()-activityChecked<10000)return;activityChecked=Date.now();try{const list=await kernelBridge.dshList(connection.value);if(g!==generation||disposed)return;const row=list.find(s=>s.id===id);nodeActivity.value=typeof row?.running==='boolean'?{running:row.running,at:Date.now()}:null}catch{if(g===generation)nodeActivity.value=null}}
-const activityLabel=computed(()=>stripDots(sending.value?t('dshSendingWaitReceipt'):waitingNativeApproval(nativeDrafts.value)?t('nativeApprovalPending'):isExternalCodexWaitingApproval.value?t('codexExternalWaitingApproval'):isExternalCodexRunning.value&&!awaitingReply.value?t('codexExternalActiveBadge'):replying.value?t('dshReplying'):nodeActivity.value?.running===true?t('dshNodeProcessing'):awaitingReply.value?t('dshAwaitingReply'):''));
+async function refreshActivity(g,id){
+ const stop=dshStop.value;
+ if(Date.now()-activityChecked<(stop?.checking?1800:10000))return;
+ activityChecked=Date.now();
+ try{
+  const list=await kernelBridge.dshList(connection.value);if(g!==generation||disposed)return;
+  const row=list.find(s=>s.id===id);nodeActivity.value=typeof row?.running==='boolean'?{running:row.running,at:Date.now()}:null;
+  if(stop?.checking&&dshStop.value===stop&&row?.running===false)settleDshIdle();
+ }catch{if(g===generation)nodeActivity.value=null}
+}
+const activityLabel=computed(()=>stripDots(dshQuestionBlocking.value?t('dshQuestionWaiting'):sending.value?t('dshSendingWaitReceipt'):waitingNativeApproval(nativeDrafts.value)?t('nativeApprovalPending'):isExternalCodexWaitingApproval.value?t('codexExternalWaitingApproval'):isExternalCodexRunning.value&&!awaitingReply.value?t('codexExternalActiveBadge'):replying.value?t('dshReplying'):nodeActivity.value?.running===true?t('dshNodeProcessing'):awaitingReply.value?t('dshAwaitingReply'):''));
 const agentLabel=computed(()=>{const h=selected.value?.harness||history.value?.harness||'';if(h==='agy'||selected.value?.id?.startsWith('agy:'))return t('agyAgent');if(h==='claude'||selected.value?.toolLabel==='Claude')return t('claudeAgent');if(h==='pi'||selected.value?.toolLabel==='Pi')return 'Pi';if(h==='codex'||selected.value?.toolLabel==='Codex')return 'Codex';return t('dshAgent');});
 function formatMessageTime(ts){
  if(ts===null||ts===undefined||ts===''||typeof ts==='boolean')return '';
@@ -310,7 +356,7 @@ provide('dshOpenFile',path=>{previewScroll=reader.value?.scrollTop||0;clearTimeo
 let generation=0, disposed=false, restoring=false, timer;
 const nodes=computed(()=>props.nodes.filter(n=>n.enabled!==false));
 const historyKey=()=>readingKey(connection.value,'history',nodes.value.find(n=>n.id===connection.value)?.baseUrl||nodes.value.find(n=>n.id===connection.value)?.url||'',selected.value?.id);
-function saveHistory(){if(!history.value)return;const messages=history.value.messages.slice(-10);const h={...history.value,messages,before:messages[0]?.sequence??history.value.before,has_more:history.value.has_more||history.value.messages.length>10};void readingCache.put(historyKey(),h)}
+function saveHistory(){if(!history.value)return;const {pending_questions,question_source,...cacheable}=history.value;const messages=history.value.messages.slice(-10);const h={...cacheable,messages,before:messages[0]?.sequence??history.value.before,has_more:history.value.has_more||history.value.messages.length>10};void readingCache.put(historyKey(),h)}
 const key=()=>`bob-dsh:${connection.value}:${selected.value?.id || ''}`;
 function readState(){try{return JSON.parse(localStorage.getItem(key()) || '{}')}catch{return {}}}
 function persist(){if(restoring || !selected.value)return false;try{localStorage.setItem(key(),JSON.stringify({draft:draft.value,pending:pending.value}));return true}catch{error.value=t('dshStorageError');return false}}
@@ -415,7 +461,7 @@ const filteredDisplayMessages=computed(()=>{
  return displayMessages.value.filter(m=>String(m.text||'').toLocaleLowerCase().includes(q));
 });
 function fault(e){const code=String(e?.message || e);if(code.includes('AGY_'))return t('agyHistoryPending');return `${t(code.includes('DSH_RECEIPT_UNKNOWN')?'dshUncertain':code.includes('DSH_HISTORY_TOO_LARGE')?'dshHistoryTooLarge':code.includes('DSH_HISTORY_TIMEOUT')?'dshHistoryTimeout':code.includes('DSH_HISTORY_UNAVAILABLE')?'dshHistoryUnavailable':'dshError')} · ${code.match(/DSH_[A-Z_]+/)?.[0] || 'DSH_UNAVAILABLE'}`}
-async function load(){const g=++generation;clearTimeout(timer);busy.value=true;error.value='';selected.value=null;history.value=null;sessions.value=[];try{const items=await kernelBridge.dshList(connection.value);if(g===generation&&!disposed)sessions.value=items;}catch(e){if(g===generation)error.value=fault(e)}finally{if(g===generation)busy.value=false}}
+async function load(){resetDshStop();dshQuestionView.value=null;const g=++generation;clearTimeout(timer);busy.value=true;error.value='';selected.value=null;history.value=null;sessions.value=[];try{const items=await kernelBridge.dshList(connection.value);if(g===generation&&!disposed)sessions.value=items;}catch(e){if(g===generation)error.value=fault(e)}finally{if(g===generation)busy.value=false}}
 watch(connection,()=>{if(connection.value&&!props.target)load()});
 function validatePage(h,id){if(h.address.session_id!==id||h.address.connection_id!==connection.value||!Number.isSafeInteger(h.cursor)||!Number.isSafeInteger(h.before)||!Array.isArray(h.messages))throw Error('DSH_IDENTITY_MISMATCH')}
 function combine(old,h){if(h.history_snapshot)return h;const map=new Map((old?.messages||[]).map(m=>[m.sequence,m]));for(const m of h.messages)map.set(m.sequence,m);const replacements=[...(old?.replacements||[]),...(h.replacements||[])];for(const op of replacements)for(const seq of map.keys())if(seq>=op.startSeq&&seq<=op.endSeq)map.delete(seq);return {...h,messages:[...map.values()].sort((a,b)=>a.sequence-b.sequence),replacements,workspace:h.workspace||old?.workspace,terminal_holder:h.terminal_holder!==undefined?h.terminal_holder:old?.terminal_holder}}
@@ -425,8 +471,10 @@ async function refresh(){if(selected.value?.historyReadable===false){error.value
  clearTimeout(timer);const g=generation,id=selected.value.id;busy.value=true;
  clearTimeout(syncTimer);syncStatus.value='checking';emitTopbarPhase('checking');
  try{
-  const h=await kernelBridge.dshPage(connection.value,id,null,null,history.value?.cursor ?? null);validatePage(h,id);
+  const native=isNativeId(id);
+  const h=await kernelBridge.dshPage(connection.value,id,null,null,(native||checkedDshQuestions)?history.value?.cursor??null:null);validatePage(h,id);
   if(g!==generation||disposed||preview.value)return;
+  if(!native){observeDshQuestions(h);checkedDshQuestions=true;}
   await refreshActivity(g,id);if(g!==generation||disposed)return;
   if(h.request_results?.some(r=>r.request_id===awaitingReply.value&&['completed','error','blocked','cancelled'].includes(r.status))){awaitingReply.value=null;replying.value=false;}
   if(h.terminal_holder!==undefined){terminalHolderOverride.value=null;if(history.value)history.value={...history.value,terminal_holder:h.terminal_holder};}
@@ -462,7 +510,7 @@ async function refresh(){if(selected.value?.historyReadable===false){error.value
   if(first||deltaAdded){emitTopbarPhase('syncing');clearTimeout(syncPulseTimer);syncPulseTimer=setTimeout(()=>emitTopbarPhase(),700);}else{emitTopbarPhase();}
   await nextTick();if(g===generation&&!disposed&&follow&&chatScroll.following&&reader.value)scrollToBottom();
   lastTop=reader.value?.scrollTop||0;saveHistory();
- }catch(e){if(g===generation){error.value=fault(e);nodeActivity.value=null;if(history.value!==null){clearTimeout(syncTimer);syncStatus.value='offline_cached';}}}finally{if(g===generation){busy.value=false;const pollMs=(awaitingReply.value||replying.value||nodeActivity.value?.running)?1800:/^(agy|claude-jsonl|codex|pi):/.test(id)?5000:60000;if(olderRequested&&reader.value?.scrollTop<=24){olderRequested=false;loadOlder()}else{olderRequested=false;timer=setTimeout(refresh,pollMs)}}}
+ }catch(e){if(g===generation){error.value=fault(e);nodeActivity.value=null;if(history.value!==null){clearTimeout(syncTimer);syncStatus.value='offline_cached';}}}finally{if(g===generation){busy.value=false;const pollMs=(dshStop.value||dshQuestionBlocking.value||awaitingReply.value||replying.value||nodeActivity.value?.running)?1800:/^(agy|claude-jsonl|codex|pi):/.test(id)?5000:60000;if(olderRequested&&reader.value?.scrollTop<=24){olderRequested=false;loadOlder()}else{olderRequested=false;timer=setTimeout(refresh,pollMs)}}}
 }
 async function loadOlder(){
  if(!history.value?.has_more||loadingOlder.value||busy.value||preview.value)return;
@@ -520,8 +568,8 @@ function removeAttachment(id){attachments.value=attachments.value.filter(a=>a.id
 function formatAttachmentBlock(list){if(!list?.length)return '';return list.map(a=>a.content?`[Attachment: ${a.name}]\n\`\`\`\n${String(a.content).slice(0,16384)}\n\`\`\``:`[Attachment: ${a.name} (${a.size||0} bytes)]`).join('\n\n');}
 function onComposeKeydown(e){if(e?.key==='Enter'&&!e.shiftKey&&!e.isComposing){e.preventDefault();void send();}}
 globalThis.__bobForceRefreshDsh=forceRefresh;
-async function open(s){inSessionSearchOpen.value=false;inSessionSearchQuery.value='';approvalErrors.value={};pendingDecision.value=null;cancelRequest.value=null;cancelBusy.value=false;takeoverPrompt.value=null;terminalHolderOverride.value=null;chatScroll.reset();clearTimeout(dshLiveTimer);dshLiveState.value=null;dshReadCursor=-1;clearTimeout(nativeTimer);nativeCursor=0;nativeEpoch='';nativeDrafts.value={};nodeActivity.value=null;awaitingReply.value=null;replying.value=false;hasNewMessages.value=false;streamSeq.value=null;syncStatus.value='';pullUpDistance.value=0;attachments.value=[];clearTimeout(syncTimer);activityChecked=0;olderRequested=false;artifactQueue=[];artifactCount=0;persist();++generation;clearTimeout(timer);busy.value=false;loadingOlder.value=false;lastTop=0;selected.value=s;history.value=null;notice.value='';const saved=readState();restoring=true;draft.value=saved.draft||'';pending.value=saved.pending||null;restoring=false;if(pending.value)notice.value=t('dshUncertain');const g=generation;const cached=await readingCache.get(historyKey());if(g!==generation||disposed)return;if(cached){try{validatePage(cached,s.id);history.value=cached;syncStatus.value='checking';await nextTick();if(reader.value)reader.value.scrollTop=reader.value.scrollHeight;lastTop=reader.value?.scrollTop||0;}catch{}}if(s.historyReadable===false){error.value=t(s.historyReason==='AGY_HISTORY_NOT_LOCAL'?'agyHistoryNotLocal':'agyHistoryPending');return;}await refresh();void refreshNativeEvents();void refreshDshLive()}
-function back(){inSessionSearchOpen.value=false;inSessionSearchQuery.value='';clearTimeout(dshLiveTimer);dshLiveState.value=null;clearTimeout(nativeTimer);persist();++generation;clearTimeout(timer);clearTimeout(syncTimer);busy.value=false;selected.value=null;history.value=null;syncStatus.value='';hasNewMessages.value=false;notice.value='';load()}
+async function open(s){resetDshStop();checkedDshQuestions=false;dshQuestionView.value=null;inSessionSearchOpen.value=false;inSessionSearchQuery.value='';approvalErrors.value={};pendingDecision.value=null;cancelRequest.value=null;cancelBusy.value=false;takeoverPrompt.value=null;terminalHolderOverride.value=null;chatScroll.reset();clearTimeout(dshLiveTimer);dshLiveState.value=null;dshReadCursor=-1;clearTimeout(nativeTimer);nativeCursor=0;nativeEpoch='';nativeDrafts.value={};nodeActivity.value=null;awaitingReply.value=null;replying.value=false;hasNewMessages.value=false;streamSeq.value=null;syncStatus.value='';pullUpDistance.value=0;attachments.value=[];clearTimeout(syncTimer);activityChecked=0;olderRequested=false;artifactQueue=[];artifactCount=0;persist();++generation;clearTimeout(timer);busy.value=false;loadingOlder.value=false;lastTop=0;selected.value=s;history.value=null;notice.value='';const saved=readState();restoring=true;draft.value=saved.draft||'';pending.value=saved.pending||null;restoring=false;if(pending.value)notice.value=t('dshUncertain');const g=generation;const cached=await readingCache.get(historyKey());if(g!==generation||disposed)return;if(cached){try{validatePage(cached,s.id);history.value=cached;syncStatus.value='checking';await nextTick();if(reader.value)reader.value.scrollTop=reader.value.scrollHeight;lastTop=reader.value?.scrollTop||0;}catch{}}if(s.historyReadable===false){error.value=t(s.historyReason==='AGY_HISTORY_NOT_LOCAL'?'agyHistoryNotLocal':'agyHistoryPending');return;}await refresh();void refreshNativeEvents();void refreshDshLive()}
+function back(){resetDshStop();dshQuestionView.value=null;inSessionSearchOpen.value=false;inSessionSearchQuery.value='';clearTimeout(dshLiveTimer);dshLiveState.value=null;clearTimeout(nativeTimer);persist();++generation;clearTimeout(timer);clearTimeout(syncTimer);busy.value=false;selected.value=null;history.value=null;syncStatus.value='';hasNewMessages.value=false;notice.value='';load()}
 async function checkReceipt(){
  if(!pending.value || sending.value)return;
  const g=generation,p= pending.value; sending.value=true;
@@ -534,9 +582,9 @@ async function checkReceipt(){
  }catch(e){if(g===generation)error.value=fault(e)}finally{sending.value=false;if(g===generation&&!busy.value)refresh()}
 }
 function dismissPending(){if(!pending.value||sending.value)return;if(!draft.value.trim()&&pending.value.text)draft.value=pending.value.text;pending.value=null;notice.value='';error.value='';persist();}
-async function send(opts={}){const takeover=opts?.takeover===true;if(selected.value?.historyReadable===false){error.value=t('agyHistoryPending');return;}if(isClaudeRemoteControl.value){notice.value=t('claudeRemoteControlTitle');return;}const attBlock=formatAttachmentBlock(attachments.value);const text=[draft.value.trim(),attBlock].filter(Boolean).join('\n\n');if(sending.value||pending.value||nativeUnresolved.value||!text)return;if(!takeover&&isClaudeTerminalBusy.value){takeoverPrompt.value=activeTerminalHolder.value||{busy:true,remote_control:false};return;}const g=generation, address={connection:connection.value,session:selected.value.id};const attPayload=attachments.value.filter(a=>a.base64).map(a=>({name:a.name,type:a.type,size:a.size,base64:a.base64}));pending.value={id:crypto.randomUUID(),text};if(!persist()){pending.value=null;return;}sending.value=true;error.value='';try{const requestId=pending.value.id;const receipt=await kernelBridge.dshPrompt(address.connection,address.session,text,requestId,attPayload,{takeover,approvalMode:supportsApprovalMode.value?approvalMode.value:null,workspace:selected.value?.workspace||history.value?.workspace||null});if(isNotAcceptedReceipt(receipt,address.session,requestId)){if(g===generation){pending.value=null;persist();if(receipt?.reason==='HARNESS_CLAUDE_REMOTE_CONTROL'){terminalHolderOverride.value=receipt.terminal_holder||{busy:true,remote_control:true};takeoverPrompt.value=null;notice.value=t('claudeRemoteControlTitle');}else if(receipt?.reason==='HARNESS_SESSION_BUSY'&&String(address.session||'').startsWith('claude-jsonl:')){const holder=receipt.terminal_holder||{busy:true,remote_control:false};terminalHolderOverride.value=holder;takeoverPrompt.value=holder;notice.value='';}else{notice.value=t('dshNotDispatched');}}return;}if(receipt?.status!=='accepted'||receipt.session_id!==address.session||receipt.request_id!==requestId)throw Error('DSH_RECEIPT_UNKNOWN');if(g===generation){takeoverPrompt.value=null;terminalHolderOverride.value={busy:false,remote_control:false};awaitingReply.value=requestId;replying.value=false;activityChecked=0;pending.value=null;attachments.value=[];if(draft.value.trim()===text||attBlock)draft.value='';persist();notice.value=t('dshAccepted');}}catch(e){if(g===generation){error.value=fault(e);notice.value=t('dshUncertain')}}finally{sending.value=false;if(g===generation&&!busy.value)refresh()}}
+async function send(opts={}){const takeover=opts?.takeover===true;if(selected.value?.historyReadable===false){error.value=t('agyHistoryPending');return;}if(isClaudeRemoteControl.value){notice.value=t('claudeRemoteControlTitle');return;}const attBlock=formatAttachmentBlock(attachments.value);const text=[draft.value.trim(),attBlock].filter(Boolean).join('\n\n');if(sending.value||pending.value||nativeUnresolved.value||dshQuestionBlocking.value||dshStop.value||!text)return;if(!takeover&&isClaudeTerminalBusy.value){takeoverPrompt.value=activeTerminalHolder.value||{busy:true,remote_control:false};return;}const g=generation, address={connection:connection.value,session:selected.value.id};const attPayload=attachments.value.filter(a=>a.base64).map(a=>({name:a.name,type:a.type,size:a.size,base64:a.base64}));pending.value={id:crypto.randomUUID(),text};if(!persist()){pending.value=null;return;}sending.value=true;error.value='';try{const requestId=pending.value.id;const receipt=await kernelBridge.dshPrompt(address.connection,address.session,text,requestId,attPayload,{takeover,approvalMode:supportsApprovalMode.value?approvalMode.value:null,workspace:selected.value?.workspace||history.value?.workspace||null});if(isNotAcceptedReceipt(receipt,address.session,requestId)){if(g===generation){pending.value=null;persist();if(receipt?.reason==='HARNESS_CLAUDE_REMOTE_CONTROL'){terminalHolderOverride.value=receipt.terminal_holder||{busy:true,remote_control:true};takeoverPrompt.value=null;notice.value=t('claudeRemoteControlTitle');}else if(receipt?.reason==='HARNESS_SESSION_BUSY'&&String(address.session||'').startsWith('claude-jsonl:')){const holder=receipt.terminal_holder||{busy:true,remote_control:false};terminalHolderOverride.value=holder;takeoverPrompt.value=holder;notice.value='';}else{notice.value=t('dshNotDispatched');}}return;}if(receipt?.status!=='accepted'||receipt.session_id!==address.session||receipt.request_id!==requestId)throw Error('DSH_RECEIPT_UNKNOWN');if(g===generation){takeoverPrompt.value=null;terminalHolderOverride.value={busy:false,remote_control:false};awaitingReply.value=requestId;replying.value=false;activityChecked=0;pending.value=null;attachments.value=[];if(draft.value.trim()===text||attBlock)draft.value='';persist();notice.value=t('dshAccepted');}}catch(e){if(g===generation){error.value=fault(e);notice.value=t('dshUncertain')}}finally{sending.value=false;if(g===generation&&!busy.value)refresh()}}
 watch(()=>props.target, async target=>{if(!target)return;connection.value=target.node.id;await open(target.session)},{immediate:true});
-onUnmounted(()=>{stopVoiceInput();chatScroll.dispose();clearTimeout(dshLiveTimer);clearTimeout(nativeTimer);if(globalThis.__bobForceRefreshDsh===forceRefresh)globalThis.__bobForceRefreshDsh=null;clearTimeout(syncPulseTimer);if(typeof globalThis.__bobSetRemoteSyncPhase==='function')globalThis.__bobSetRemoteSyncPhase('');if(rodTimer&&typeof clearInterval==='function')clearInterval(rodTimer);clearTimeout(wheelResetTimer);clearTimeout(artifactTimer);clearTimeout(syncTimer);clearTimeout(copyTimer);artifactQueue=[];fileCache.clear();persist();disposed=true;++generation;clearTimeout(timer)});
+onUnmounted(()=>{resetDshStop();stopVoiceInput();chatScroll.dispose();clearTimeout(dshLiveTimer);clearTimeout(nativeTimer);if(globalThis.__bobForceRefreshDsh===forceRefresh)globalThis.__bobForceRefreshDsh=null;clearTimeout(syncPulseTimer);if(typeof globalThis.__bobSetRemoteSyncPhase==='function')globalThis.__bobSetRemoteSyncPhase('');if(rodTimer&&typeof clearInterval==='function')clearInterval(rodTimer);clearTimeout(wheelResetTimer);clearTimeout(artifactTimer);clearTimeout(syncTimer);clearTimeout(copyTimer);artifactQueue=[];fileCache.clear();persist();disposed=true;++generation;clearTimeout(timer)});
 </script>
 <template>
  <DshFilePreview v-if="preview" :address="preview" @close="closePreview" @quote="onQuoteToPrompt" />
@@ -622,7 +670,21 @@ onUnmounted(()=>{stopVoiceInput();chatScroll.dispose();clearTimeout(dshLiveTimer
      <button type="button" class="dsh-takeover-secondary" :disabled="sending" @click="takeoverPrompt = null">{{ t('claudeKeepBoardBtn') }}</button>
     </div>
    </div>
-   <p v-if="activityLabel" class="dsh-activity" role="status" aria-live="polite"><span class="terminal-rod" aria-hidden="true">[{{ rodFrame }}]</span> <span>{{activityLabel}}</span><span class="terminal-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span></p>
+   <section v-if="dshQuestions.length" class="dsh-question-notice" aria-live="polite">
+    <strong>{{ t(dshQuestionBlocking ? 'dshQuestionWaiting' : 'dshQuestionOpen') }}</strong>
+    <p>{{ t('dshQuestionReplyInSource') }}</p>
+    <a v-if="dshQuestionSource" :href="dshQuestionSource" target="_blank" rel="noopener noreferrer">{{ t('dshQuestionOpenSource') }}</a>
+    <details open>
+     <summary>{{ t('dshQuestionDetails') }}</summary>
+     <div v-for="request in dshQuestions" :key="request.call_id">
+      <div v-for="(item,index) in request.questions" :key="index">
+       <p>{{ item.question }}</p>
+       <ul v-if="item.options.length"><li v-for="(option,index) in item.options" :key="index">{{ option.label }} <small v-if="option.description">{{ option.description }}</small></li></ul>
+      </div>
+     </div>
+    </details>
+   </section>
+   <p v-if="activityLabel && !dshQuestionBlocking && !dshStop" class="dsh-activity" role="status" aria-live="polite"><span class="terminal-rod" aria-hidden="true">[{{ rodFrame }}]</span> <span>{{activityLabel}}</span><span class="terminal-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span></p>
    <div class="dsh-compose-box">
     <textarea v-model="draft" :disabled="sending || isClaudeRemoteControl" :placeholder="t(isClaudeRemoteControl ? 'claudeRemoteControlTitle' : 'dshPrompt')" :aria-label="t('dshPrompt')" rows="2" @keydown="onComposeKeydown" @paste="onComposerPaste" @dragover.prevent @drop.prevent="onComposerDrop"></textarea>
     <div v-if="attachments.length" class="composer-attachments"><span v-for="att in attachments" :key="att.id" class="composer-attachment-chip"><img v-if="att.base64 && att.type?.startsWith('image/')" :src="'data:' + att.type + ';base64,' + att.base64" alt="" class="chip-thumb" /><span class="chip-file-name">{{ att.name }}</span><button type="button" class="chip-remove-btn" :aria-label="t('removeAttachment')" @click="removeAttachment(att.id)">×</button></span></div>
@@ -642,8 +704,9 @@ onUnmounted(()=>{stopVoiceInput();chatScroll.dispose();clearTimeout(dshLiveTimer
       />
       <span v-if="syncStatus==='offline_cached' && syncStatusLabel" class="dsh-sync-pill" :class="{active:syncStatus==='checking'||syncStatus==='syncing'}"><span v-if="syncStatus==='checking'||syncStatus==='syncing'" class="terminal-rod" aria-hidden="true">[{{ rodFrame }}]</span><span>{{ syncStatusLabel }}</span><span v-if="syncStatus==='checking'||syncStatus==='syncing'" class="terminal-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span></span>
      </div>
-     <button v-if="cancellableRequest" type="button" class="composer-submit-btn" :disabled="cancelBusy || cancelRequest===cancellableRequest" @click="cancelNative">{{ t(cancelRequest===cancellableRequest?'nativeCancelPending':'nativeCancel') }}</button>
-      <button v-else type="submit" class="composer-submit-btn" :disabled="sending || isClaudeRemoteControl || !!pending || nativeUnresolved || (!draft.trim() && !attachments.length) || !history">{{ t(sending?'dshSending':'send') }}</button>
+     <button v-if="canStopDsh" type="button" class="composer-submit-btn" :disabled="!!dshStop || sending" @click="stopDsh">{{ t(dshStop ? 'dshStopChecking' : 'dshStop') }}</button>
+     <button v-else-if="cancellableRequest" type="button" class="composer-submit-btn" :disabled="cancelBusy || cancelRequest===cancellableRequest" @click="cancelNative">{{ t(cancelRequest===cancellableRequest?'nativeCancelPending':'nativeCancel') }}</button>
+      <button v-else type="submit" class="composer-submit-btn" :disabled="sending || isClaudeRemoteControl || !!pending || nativeUnresolved || dshQuestionBlocking || (!draft.trim() && !attachments.length) || !history">{{ t(sending?'dshSending':'send') }}</button>
     </div>
    </div>
    <p v-if="pending && !sending" role="status">{{ t('dshUncertain') }} <button type="button" @click="checkReceipt">{{ t('dshCheckReceipt') }}</button> <button type="button" @click="dismissPending">{{ t('dshUnlockEdit') }}</button></p>
@@ -651,6 +714,9 @@ onUnmounted(()=>{stopVoiceInput();chatScroll.dispose();clearTimeout(dshLiveTimer
  </section>
 </template>
 <style scoped>
+.dsh-question-notice{max-height:34vh;overflow:auto;padding:10px 12px;border:1px solid var(--accent-primary);border-radius:var(--radius-card);background:var(--bg-secondary);overflow-wrap:anywhere}
+.dsh-question-notice p{margin:4px 0}.dsh-question-notice details{margin-top:0}.dsh-question-notice ul{margin:4px 0;padding-inline-start:1.5rem}
+
 .dsh-sessions{min-width:0;max-width:100%;padding:16px;border:1px solid var(--border-color);border-radius:var(--radius-modal);background:var(--bg-primary)}
 .dsh-sessions.embedded{border:0;border-radius:0;padding:0;flex:1;min-height:0;overflow:hidden;display:flex;flex-direction:column;width:100%}
 .dsh-sessions.embedded .dsh-reader{min-height:0;flex:1;overflow-y:auto;overflow-x:hidden;scrollbar-gutter:stable;overflow-anchor:none;padding:12px 8px;overscroll-behavior:contain}

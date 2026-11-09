@@ -14,7 +14,7 @@ function mount(storage=new Map(), overrides={}) {
  const calls=[];
  const bridge={dshPage:async(c,s)=>({address:{connection_id:c,session_id:s},messages:[],cursor:20,before:0,has_more:false}),dshPrompt:async(...a)=>{calls.push(a);throw Error('DSH_RECEIPT_UNKNOWN')},dshReceipt:async()=>({status:'unknown'}),...overrides};
  const context={createChatScroll,artifactPath,isNotAcceptedReceipt,unconfirmActivity,settleNativeActivity,orderedNativeActivities,waitingNativeApproval,createPersistentPreviewCache,readingCache:createReadingCache({storage:null}),readingKey,provide:()=>{},nextTick:async()=>{},defineProps:()=>({nodes:[],target:null}),ref:value=>({value}),computed:f=>({get value(){return f()}}),watch:()=>{},onUnmounted:()=>{},useI18n:()=>({t:x=>x}),kernelBridge:bridge,localStorage:{getItem:k=>storage.get(k)||null,setItem:(k,v)=>storage.set(k,v)},crypto:{randomUUID:()=> 'request-1'},setTimeout:()=>0,clearTimeout:()=>{}};
- vm.createContext(context);vm.runInContext(source+'\nglobalThis.actions={open,send,checkReceipt,connection,draft,pending,notice,error,reader,refresh,loadOlder,history,loadingOlder,nodeActivity,awaitingReply,activityLabel};',context);
+ vm.createContext(context);vm.runInContext(source+'\nglobalThis.actions={open,send,checkReceipt,connection,draft,pending,notice,error,reader,refresh,loadOlder,history,loadingOlder,nodeActivity,awaitingReply,activityLabel,dshQuestions,dshQuestionBlocking,canStopDsh,dshStop,stopDsh};',context);
  context.actions.connection.value='device';return {a:context.actions,calls,context,storage};
 }
 test('mobile session: lost reply survives reopening, cannot resend, exact accepted receipt recovers',async()=>{
@@ -74,8 +74,39 @@ test('surface replacement stays applied when older records are prepended',async(
 test('cached recent body displays before cursor revalidation resolves',async()=>{
  const m=mount();const h={address:{connection_id:'device',session_id:'original'},messages:[{sequence:20,role:'assistant',text:'saved body'}],cursor:20,before:20,has_more:true};
  await m.context.readingCache.put(readingKey('device','history','','original'),h);let resolve;
- m.context.kernelBridge.dshPage=async(c,s,b,t,after)=>{assert.equal(after,20);return new Promise(r=>{resolve=()=>r({...h,not_modified:true,messages:[]})})};
+ m.context.kernelBridge.dshPage=async(c,s,b,t,after)=>{assert.equal(after,null);return new Promise(r=>{resolve=()=>r({...h,not_modified:true,messages:[]})})};
  const pending=m.a.open({id:'original'});await new Promise(r=>setImmediate(r));assert.equal(m.a.history.value.messages[0].text,'saved body');resolve();await pending;assert.equal(m.a.history.value.messages[0].text,'saved body');
+});
+
+const dshPageResult=(c,s,cursor,questions)=>({address:{connection_id:c,session_id:s},messages:[],cursor,before:0,has_more:false,pending_questions:questions});
+const openQuestion={call_id:'q1',state:'open',questions:[{question:'Choose a target',options:[{label:'A'}]}]};
+test('question is surfaced on an existing DSH session and does not become a chat send or a cached prompt',async()=>{
+ const m=mount(new Map(),{dshPage:async(c,s)=>dshPageResult(c,s,20,[openQuestion]),dshList:async()=>[{id:'original',running:true}]});
+ await m.a.open({id:'original'});assert.equal(m.a.activityLabel.value,'dshQuestionWaiting');assert.equal(m.a.canStopDsh.value,true);
+ m.a.draft.value='keep draft';await m.a.send();assert.equal(m.calls.length,0);
+ const cached=await m.context.readingCache.get(readingKey('device','history','','original'));assert.ok(cached);assert.equal(cached.pending_questions,undefined);
+ m.context.kernelBridge.dshPage=async(c,s)=>dshPageResult(c,s,21,[]);await m.a.refresh();
+ assert.equal(m.a.dshQuestions.value.length,0);assert.equal(m.a.draft.value,'keep draft');
+});
+test('stop waits for a fresh idle observation from the selected session and does not replay',async()=>{
+ let count=0,running=true;
+ const m=mount(new Map(),{dshList:async()=>[{id:'other',running:false},{id:'original',running}],dshCancel:async(c,s)=>{
+  count++;assert.equal(c,'device');assert.equal(s,'original');return {address:{connection_id:c,session_id:s},status:'cancel_requested'};
+ }});
+ await m.a.open({id:'original'});m.a.draft.value='keep draft';
+ await m.a.stopDsh();await new Promise(r=>setImmediate(r));
+ assert.equal(m.a.notice.value,'dshStopChecking');assert.ok(m.a.dshStop.value);
+ await m.a.stopDsh();assert.equal(count,1);
+ m.a.awaitingReply.value='queued-request';running=false;vm.runInContext('activityChecked=0',m.context);
+ await m.a.refresh();assert.equal(m.a.notice.value,'dshStopIdle');assert.equal(m.a.dshStop.value,null);
+ assert.equal(m.a.awaitingReply.value,'queued-request');assert.equal(m.a.draft.value,'keep draft');
+});
+test('mismatched or lost stop acknowledgement is shown as unconfirmed without retry',async()=>{
+ for(const cancel of [async()=>({address:{connection_id:'device',session_id:'other'},status:'idle'}),async()=>{throw Error('offline')}]){
+  let count=0;const m=mount(new Map(),{dshList:async()=>[{id:'original',running:true}],dshCancel:async()=>{count++;return cancel();}});
+  await m.a.open({id:'original'});await m.a.stopDsh();await new Promise(r=>setImmediate(r));
+  assert.equal(m.a.notice.value,'dshStopUnconfirmed');assert.equal(m.a.dshStop.value,null);assert.equal(count,1);
+ }
 });
 
 test('processing label needs node observation; accepted send alone only waits',async()=>{

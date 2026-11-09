@@ -4176,6 +4176,7 @@ async fn native_dsh<R: Runtime>(
                     ("app_native_permission",json!({"connectionId":"local","sessionId":session_id,"requestId":request_id,"permissionId":v["permissionId"],"optionId":v["optionId"]}))
                 }
                 "cancel" => ("app_native_cancel",json!({"connectionId":"local","sessionId":session_id,"requestId":request_id})),
+                "dsh_cancel" => ("app_dsh_cancel",json!({"connectionId":"local","sessionId":session_id})),
                 "live" => ("app_dsh_live",json!({"connectionId":"local","sessionId":session_id})),
                 "page" => {
                     let v: Value = serde_json::from_str(&text).unwrap_or_else(|_| json!({}));
@@ -4255,6 +4256,7 @@ async fn native_dsh<R: Runtime>(
             let sid = session_id.clone();
             match operation {
                 "list" => client.list(),
+                "dsh_cancel" => client.cancel_session(bob_runtime::dsh_session::SessionAddress{connection_id:cid,session_id:sid}),
                 "live" => client.live(bob_runtime::dsh_session::SessionAddress{connection_id:cid,session_id:sid}),
                 "page" => {
                     let v: Value = serde_json::from_str(&text).map_err(|_| "DSH_PROTOCOL")?;
@@ -4310,6 +4312,7 @@ async fn native_dsh<R: Runtime>(
 
         match direct_dsh {
             Ok(val) => Ok(val),
+            Err(err) if operation=="dsh_cancel" => Err(err),
             Err(err) => {
                 let (cmd, args) = build_rpc_call();
                 forward_with_relay_fallback(cmd, &args).or(Err(err))
@@ -4491,6 +4494,49 @@ pub(crate) async fn app_dsh_page<R: Runtime>(host: AppHandle<R>, connection_id: 
 #[tauri::command]
 pub(crate) async fn app_dsh_preview<R: Runtime>(host: AppHandle<R>, connection_id: String, session_id: String, path: String, known: Option<Value>) -> Result<Value, &'static str> {
  native_dsh(host,connection_id,"preview",session_id,path,known.map(|v|v.to_string()).unwrap_or_default(),None).await
+}
+
+/// The paired Web owner creates and associates sessions for a replica.
+#[tauri::command]
+pub(crate) async fn app_paired_session_setup<R: Runtime>(
+    host: AppHandle<R>,
+    owner_id: String,
+    command: String,
+    args: Value,
+) -> Result<Value, &'static str> {
+    if !matches!(command.as_str(), "app_catalog" | "app_project_create" | "app_project_links" | "app_project_link_set" | "app_dsh_create" | "app_dsh_list") {
+        return Err("SESSION_SETUP_COMMAND_DENIED");
+    }
+    let dir = host.path().app_data_dir().map_err(|_| "LOCAL_STORE_UNAVAILABLE")?;
+    let hub = load_hub_state(&dir);
+    let owner = hub["remoteNodes"].as_array()
+        .and_then(|nodes| nodes.iter().find(|node| node["id"] == owner_id
+            && node["enabled"] != false
+            && (node["remark"] == "web_host" || node["selectedProjectId"] == "web_host")))
+        .ok_or("SESSION_SETUP_OWNER_REQUIRED")?;
+    let endpoint = owner["url"].as_str().or_else(|| owner["baseUrl"].as_str())
+        .filter(|url| url.starts_with("https://"))
+        .ok_or("SESSION_SETUP_OWNER_REQUIRED")?.to_owned();
+    let parsed = reqwest::Url::parse(&endpoint).map_err(|_| "SESSION_SETUP_OWNER_REQUIRED")?;
+    if !parsed.username().is_empty() || parsed.password().is_some()
+        || parsed.query().is_some() || parsed.fragment().is_some() || parsed.path() != "/" {
+        return Err("SESSION_SETUP_OWNER_REQUIRED");
+    }
+    let token = read_api_key(&host, &remote_node_token_slot(&owner_id)).await?;
+    if token.trim().is_empty() {
+        return Err("SESSION_SETUP_OWNER_REQUIRED");
+    }
+    let connection = args["connectionId"].as_str().unwrap_or("local").to_owned();
+    tauri::async_runtime::spawn_blocking(move || {
+        bob_runtime::node_pairing::forward_dsh_rpc_to_endpoint_with_target(
+            &endpoint, Some(token.as_str()), &connection, &connection, &command, &args,
+        )
+    }).await.map_err(|_| "DSH_UNAVAILABLE")?
+}
+
+#[tauri::command]
+pub(crate) async fn app_dsh_cancel<R: Runtime>(host: AppHandle<R>, connection_id: String, session_id: String) -> Result<Value, &'static str> {
+ native_dsh(host,connection_id,"dsh_cancel",session_id,String::new(),String::new(),None).await
 }
 
 #[tauri::command]

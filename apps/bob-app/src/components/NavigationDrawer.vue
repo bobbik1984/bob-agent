@@ -1,6 +1,7 @@
 <script setup>
 import { inject } from 'vue';
 import ConversationDirectory from './ConversationDirectory.vue';
+import SidebarCreateForm from './SidebarCreateForm.vue';
 
 const props = defineProps({
   docked: {
@@ -23,9 +24,7 @@ const {
   sidebarSearch,
   startCreateConversation,
   startCreateProject,
-  creatingKind,
-  newItemTitle,
-  submitCreateItem,
+  directoryCreationRevision,
   modelHub,
   catalog,
   directorySyncRevision,
@@ -139,25 +138,9 @@ const {
       </button>
     </div>
 
-    <form v-if="creatingKind" class="sidebar-create-form" @submit.prevent="submitCreateItem">
-      <input
-        v-model="newItemTitle"
-        type="text"
-        :placeholder="
-          t(
-            creatingKind === 'project'
-              ? 'projectTitlePlaceholder'
-              : 'conversationTitlePlaceholder',
-          )
-        "
-      />
-      <div class="sidebar-create-buttons">
-        <button type="button" @click="creatingKind = null">{{ t('cancelAction') }}</button>
-        <button type="submit">{{ t('create') }}</button>
-      </div>
-    </form>
+    <SidebarCreateForm />
 
-    <ConversationDirectory :nodes="modelHub.state.remote_nodes || []" :catalog="catalog" :sync-revision="directorySyncRevision" :search="sidebarSearch" :mode="sidebarGroupMode" @select-local="selectConversation" @select-remote="selectRemoteConversation" />
+    <ConversationDirectory :nodes="modelHub.state.remote_nodes || []" :catalog="catalog" :sync-revision="directorySyncRevision" :creation-revision="directoryCreationRevision" @create-in-project="startCreateConversation" :search="sidebarSearch" :mode="sidebarGroupMode" @select-local="selectConversation" @select-remote="selectRemoteConversation" />
   </nav>
 
   <div v-else v-show="navigationOpen" class="navigation-overlay" @keydown.esc="navigationOpen = false">
@@ -274,25 +257,9 @@ const {
       </button>
     </div>
 
-      <form v-if="creatingKind" class="sidebar-create-form" @submit.prevent="submitCreateItem">
-        <input
-          v-model="newItemTitle"
-          type="text"
-          :placeholder="
-            t(
-              creatingKind === 'project'
-                ? 'projectTitlePlaceholder'
-                : 'conversationTitlePlaceholder',
-            )
-          "
-        />
-        <div class="sidebar-create-buttons">
-          <button type="button" @click="creatingKind = null">{{ t('cancelAction') }}</button>
-          <button type="submit">{{ t('create') }}</button>
-        </div>
-      </form>
+      <SidebarCreateForm />
 
-      <ConversationDirectory :nodes="modelHub.state.remote_nodes || []" :catalog="catalog" :sync-revision="directorySyncRevision" :search="sidebarSearch" :mode="sidebarGroupMode" @select-local="selectConversation" @select-remote="selectRemoteConversation" />
+      <ConversationDirectory :nodes="modelHub.state.remote_nodes || []" :catalog="catalog" :sync-revision="directorySyncRevision" :creation-revision="directoryCreationRevision" @create-in-project="startCreateConversation" :search="sidebarSearch" :mode="sidebarGroupMode" @select-local="selectConversation" @select-remote="selectRemoteConversation" />
     </nav>
   </div>
 </template>

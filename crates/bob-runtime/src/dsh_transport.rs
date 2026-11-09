@@ -9,6 +9,8 @@ const LIMIT: u64 = 4 * 1024 * 1024;
 const HISTORY_LIMIT: usize = 16 * 1024 * 1024;
 fn rpc_transport_error(method:&str, timeout:bool)-> &'static str {
  if method=="session/prompt" {"DSH_RECEIPT_UNKNOWN"}
+ else if method=="session/cancel" {"DSH_CANCEL_UNCONFIRMED"}
+ else if matches!(method,"session/create" | "session/rename") {"DSH_CREATE_UNCONFIRMED"}
  else if method.starts_with("workspaceFiles/") {if timeout {"DSH_FILE_TIMEOUT"}else{"DSH_FILE_UNAVAILABLE"}}
  else {if timeout {"DSH_HISTORY_TIMEOUT"}else{"DSH_HISTORY_UNAVAILABLE"}}
 }
@@ -180,6 +182,12 @@ impl DshClient {
  pub fn live(&self,address:SessionAddress)->Result<Value,&'static str>{
   crate::dsh_live::view(self.clone(),self.scope.clone(),address)
  }
+ pub(crate) fn question_source(&self) -> Option<&str> {
+  // Only browser-reachable, credential-free HTTPS origins are linkable.
+  (self.base.scheme() == "https" && !self.base.host_str().is_some_and(|host|
+   host.eq_ignore_ascii_case("localhost") || host.trim_matches(['[', ']']).parse::<std::net::IpAddr>().is_ok_and(|ip| ip.is_loopback())
+  )).then_some(self.base.as_str())
+ }
  pub(crate) fn follow_socket(&self,session:&str)->Result<(tungstenite::WebSocket<MaybeTlsStream<TcpStream>>,String),&'static str>{
   let mut url=self.base.join("api/remote.mux").map_err(|_|"DSH_PROTOCOL")?;url.set_scheme(if self.base.scheme()=="http" {"ws"} else {"wss"}).map_err(|_|"DSH_PROTOCOL")?;
   let mut req=url.as_str().into_client_request().map_err(|_|"DSH_PROTOCOL")?;
@@ -269,6 +277,10 @@ impl DshClient {
     let mut output=serde_json::to_value(&h).map_err(|_|"DSH_PROTOCOL")?;
     let skip=h.messages.len().saturating_sub(10);
     output["messages"]=json!(&h.messages[skip..]);
+    if before.is_none() {
+     output["pending_questions"]=json!(crate::dsh_session::pending_questions(&snapshot));
+     output["question_source"]=json!(self.question_source());
+    }
     output["cursor"]=json!(cursor);
     output["before"]=json!(if skip>0 {h.messages[skip].sequence} else {first});
     output["has_more"]=json!(h.partial || skip>0);
@@ -339,6 +351,56 @@ impl DshClient {
   }
   None
  }
+ /// Reuse a native identity after an ambiguous response. DSH checks the
+ /// identity's cwd when adopting an existing session.
+ pub fn create_session(&self, address: SessionAddress, workspace: &str, title: &str) -> Result<Value, &'static str> {
+  let id = &address.session_id;
+  let uuid = id.strip_prefix("session-").ok_or("DSH_SESSION_REQUIRED")?;
+  if uuid.len() != 36 || !uuid.bytes().enumerate().all(|(i, b)|
+   if matches!(i, 8 | 13 | 18 | 23) { b == b'-' } else { b.is_ascii_hexdigit() })
+   || workspace.is_empty() || workspace.len() > 4096 || workspace.chars().any(char::is_control)
+   || title.trim().is_empty() || title.len() > 256 || title.chars().any(char::is_control) {
+   return Err("DSH_CREATE_INVALID");
+  }
+  let list = self.list()?;
+  let rows = list.as_array().ok_or("DSH_PROTOCOL")?;
+  if !rows.iter().any(|row| row["workspace"].as_str() == Some(workspace)) {
+   return Err("DSH_WORKSPACE_NOT_AVAILABLE");
+  }
+  if let Some(row) = rows.iter().find(|row| row["id"].as_str() == Some(id.as_str())) {
+   if row["workspace"].as_str() != Some(workspace) {
+    return Err("DSH_IDENTITY_MISMATCH");
+   }
+   // A named session is already usable. Do not overwrite a later user rename.
+   if let Some(saved_title) = row["title"].as_str().filter(|s| !s.is_empty() && *s != id.as_str()) {
+    return Ok(json!({"address":address,"title":saved_title,"workspace":workspace,"source_kind":"dsh_native"}));
+   }
+  }
+  let created = self.rpc("session/create", json!({"request":{"sessionId":id,"cwd":workspace}}))?;
+  if created["sessionId"].as_str() != Some(id.as_str()) {
+   return Err("DSH_IDENTITY_MISMATCH");
+  }
+  // A title event materializes the otherwise lazy blank session. No prompt is sent.
+  let renamed = self.rpc("session/rename", json!({"request":{"sessionId":id,"title":title}}))?;
+  let title = renamed["title"].as_str().filter(|s| !s.is_empty()).ok_or("DSH_CREATE_UNCONFIRMED")?;
+  if renamed["seq"].as_i64().is_none_or(|seq| seq < 0) {
+   return Err("DSH_CREATE_UNCONFIRMED");
+  }
+  Ok(json!({"address":address,"title":title,"workspace":workspace,"source_kind":"dsh_native"}))
+ }
+
+ pub fn cancel_session(&self,address:SessionAddress)->Result<Value,&'static str>{
+  let session=address.session_id.as_str();
+  if session.trim().is_empty() || session.len()>256 || session.chars().any(char::is_control)
+     || crate::agy_directory::owns_readable_session(session) {return Err("DSH_SESSION_REQUIRED");}
+  let list=self.list()?;
+  let running=list.as_array().and_then(|rows|rows.iter().find(|row|row["id"].as_str()==Some(session)))
+   .and_then(|row|row["running"].as_bool()).ok_or("DSH_SESSION_REQUIRED")?;
+  if !running {return Ok(json!({"address":address,"status":"idle"}));}
+  let result=self.rpc("session/cancel",json!({"request":{"sessionId":session}}))?;
+  if result["accepted"]!=true {return Err("DSH_CANCEL_UNCONFIRMED");}
+  Ok(json!({"address":address,"status":"cancel_requested"}))
+ }
  pub fn prompt(&self,session:&str,text:&str,id:&str)->Result<Value,&'static str>{
   let result=self.rpc("session/prompt",json!({"request":{"requestId":id,"sessionId":session,"mode":"queue","content":[{"type":"text","text":text}]}}))?;
   if result["accepted"]!=true{return Err("DSH_RECEIPT_UNKNOWN");} Ok(json!({"status":"accepted","session_id":session,"request_id":id}))
@@ -368,6 +430,23 @@ pub fn dispatch_once(dir:&std::path::Path, connection:&str, session:&str, text:&
 }
 #[cfg(test)] mod tests{
  use super::*;
+ #[test]
+ fn creation_refuses_invalid_identity_and_request_before_network() {
+  let client = DshClient {
+   base: reqwest::Url::parse("https://example.invalid/").unwrap(),
+   cookie: String::new(),
+   http: reqwest::blocking::Client::new(),
+   scope: String::new(),
+  };
+  let address = SessionAddress {
+   connection_id: "node".into(),
+   session_id: "session-00000000-0000-4000-8000-000000000000".into(),
+  };
+  assert_eq!(client.create_session(address.clone(), "", "Demo"), Err("DSH_CREATE_INVALID"));
+  assert_eq!(client.create_session(address, "/projects/demo", ""), Err("DSH_CREATE_INVALID"));
+  assert_eq!(client.create_session(SessionAddress {connection_id:"node".into(), session_id:"codex:existing".into()}, "/projects/demo", "Demo"), Err("DSH_SESSION_REQUIRED"));
+ }
+
  #[test] fn history_capacity_and_timeout_have_distinct_errors(){
   assert_eq!(history_read_error(tungstenite::Error::Capacity(tungstenite::error::CapacityError::MessageTooLong{size:20*1024*1024,max_size:HISTORY_LIMIT})),"DSH_HISTORY_TOO_LARGE");
   assert_eq!(history_read_error(tungstenite::Error::Io(std::io::Error::from(std::io::ErrorKind::TimedOut))),"DSH_HISTORY_TIMEOUT");

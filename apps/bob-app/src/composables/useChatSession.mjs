@@ -82,6 +82,57 @@ const theme = ref('system');
 const creatingKind = ref(null); // 'project' | 'conversation' | null
 const creatingForProjectId = ref(null);
 const newItemTitle = ref('');
+const creationMode = ref('local');
+const creationConnectionId = ref('');
+const creationWorkspace = ref('');
+const creationWorkspaces = ref([]);
+const creationLoading = ref(false);
+const creationBusy = ref(false);
+const creationError = ref('');
+const remoteCreation = ref(null);
+const directoryCreationRevision = ref(0);
+const creationJournalKey = 'bob-dsh-create-v1';
+const creationNodes = computed(() => (ctx.modelHub.value?.state?.remote_nodes || []).filter(node => node.enabled !== false));
+const pairedCreationOwners = computed(() => browserClient ? [] : creationNodes.value.filter(node =>
+  node.remark === 'web_host' || node.selectedProjectId === 'web_host'));
+const pairedCreationOwner = computed(() => pairedCreationOwners.value.length === 1 ? pairedCreationOwners.value[0] : null);
+const remoteCreationEnabled = computed(() => browserClient || Boolean(pairedCreationOwner.value));
+function dshSetupBridge(owner) {
+  if (!owner) return kernelBridge;
+  const call = (command,args) => kernelBridge.pairedSessionSetup(owner.id,command,args);
+  return {
+    catalog: () => call('app_catalog'),
+    projectLinks: () => call('app_project_links'),
+    createProject: (projectId,title) => call('app_project_create',{projectId,title}),
+    dshList: connectionId => call('app_dsh_list',{connectionId}),
+    dshCreate: (connectionId,sessionId,workspace,title) => call('app_dsh_create',{connectionId,sessionId,workspace,title}),
+    projectLinkSet: args => call('app_project_link_set',args),
+  };
+}
+const creationNode = computed(() => creationNodes.value.find(node => node.id === creationConnectionId.value));
+let workspaceRead = 0;
+
+async function loadCreationWorkspaces() {
+  const read = ++workspaceRead;
+  creationWorkspace.value = '';
+  creationWorkspaces.value = [];
+  creationError.value = '';
+  const node = creationNode.value;
+  creationLoading.value = Boolean(node && creationMode.value === 'dsh');
+  if (!creationLoading.value) return;
+  try {
+    const rows = await dshSetupBridge(pairedCreationOwner.value).dshList(node.id);
+    if (read !== workspaceRead) return;
+    creationWorkspaces.value = [...new Set(rows
+      .filter(row => row.source_kind === 'dsh_native' && typeof row.workspace === 'string' && row.workspace)
+      .map(row => row.workspace))].sort();
+    if (!creationWorkspaces.value.length) creationError.value = 'createNoDshWorkspaces';
+  } catch {
+    if (read === workspaceRead) creationError.value = 'createNodeUnavailable';
+  } finally {
+    if (read === workspaceRead) creationLoading.value = false;
+  }
+}
 
 const layoutState = ref(
   createLayoutState(
@@ -809,27 +860,157 @@ async function selectConversation(targetId) {
   if (historyRegion.value) historyRegion.value.scrollTop = historyRegion.value.scrollHeight;
 }
 
+function beginCreateItem(kind, projectId) {
+  if (creationBusy.value) return;
+  let saved;
+  try {
+    saved = JSON.parse(localStorage.getItem(creationJournalKey) || 'null');
+  } catch {}
+  remoteCreation.value = saved || null;
+  creatingKind.value = saved?.kind || kind;
+  creatingForProjectId.value = saved?.projectId || projectId;
+  newItemTitle.value = saved?.title || '';
+  creationMode.value = saved ? 'dsh' : kind === 'project' ? 'none' : 'local';
+  creationConnectionId.value = saved?.connectionId || '';
+  creationWorkspace.value = saved?.workspace || '';
+  creationWorkspaces.value = saved ? [saved.workspace] : [];
+  creationLoading.value = false;
+  creationError.value = saved ? 'createRemoteRetry' : '';
+  workspaceRead++;
+  navigationOpen.value = true;
+}
+
 function startCreateProject() {
-  creatingKind.value = 'project';
-  creatingForProjectId.value = null;
-  newItemTitle.value = '';
+  beginCreateItem('project', null);
 }
 
 function startCreateConversation(projectId = null) {
-  remoteConversation.value=null;try{localStorage.removeItem('bob-active-remote')}catch{};
-  creatingKind.value = 'conversation';
-  creatingForProjectId.value = projectId;
-  newItemTitle.value = '';
+  beginCreateItem('conversation', projectId);
+}
+
+function cancelCreateItem() {
+  if (creationBusy.value) return;
+  workspaceRead++;
+  creatingKind.value = null;
+}
+
+async function submitDshCreation(title) {
+  const node = creationNode.value;
+  if (!node || !creationWorkspace.value || (!remoteCreation.value && !creationWorkspaces.value.includes(creationWorkspace.value))) {
+    creationError.value = 'createNodeUnavailable';
+    return;
+  }
+  const owner = pairedCreationOwner.value;
+  if (!remoteCreationEnabled.value) {
+    creationError.value = 'createProjectLinkUnavailable';
+    return;
+  }
+  const bridge = dshSetupBridge(owner);
+  const attempt = remoteCreation.value || {
+    ownerId: owner?.id || null,
+    ownerEndpoint: owner?.url || owner?.baseUrl || null,
+    kind: creatingKind.value,
+    title,
+    projectId: creatingKind.value === 'project'
+      ? 'proj-' + crypto.randomUUID()
+      : creatingForProjectId.value,
+    connectionId: node.id,
+    endpoint: node.url || node.baseUrl || '',
+    workspace: creationWorkspace.value,
+    sessionId: 'session-' + crypto.randomUUID(),
+  };
+  if (attempt.endpoint !== (node.url || node.baseUrl || '') || (attempt.ownerId || null) !== (owner?.id || null)
+      || (attempt.ownerEndpoint || null) !== (owner?.url || owner?.baseUrl || null)) {
+    creationError.value = 'createTargetChanged';
+    return;
+  }
+  if (attempt.projectId) {
+    const links = await bridge.projectLinks();
+    if (links?.writable === false || !Array.isArray(links?.links)) {
+      creationError.value = 'createProjectLinkUnavailable';
+      return;
+    }
+    if (attempt.kind !== 'project') {
+      const snap = await bridge.catalog();
+      if (!snap?.projects?.some(project => project.id === attempt.projectId)) {
+        creationError.value = 'createProjectMissing';
+        return;
+      }
+    }
+  }
+  try {
+    localStorage.setItem(creationJournalKey, JSON.stringify(attempt));
+  } catch {
+    creationError.value = 'createRetryStorageError';
+    return;
+  }
+  remoteCreation.value = attempt;
+  if (attempt.kind === 'project') {
+    const snap = await bridge.createProject(attempt.projectId, attempt.title);
+    if (!snap?.projects?.some(project => project.id === attempt.projectId)) throw Error('PROJECT_CREATE_FAILED');
+    if (!owner) applyCatalogPreferences(snap);
+  }
+  const result = await bridge.dshCreate(node.id, attempt.sessionId, attempt.workspace, attempt.title || t('newConversation'));
+  if (result?.address?.connection_id !== node.id || result.address.session_id !== attempt.sessionId
+      || result.workspace !== attempt.workspace || result.source_kind !== 'dsh_native' || !result.title) {
+    throw Error('DSH_IDENTITY_MISMATCH');
+  }
+  if (attempt.projectId) {
+    creationError.value = 'createLinkUnconfirmed';
+    const links = await bridge.projectLinks();
+    const findLink = link => link.connection_id === node.id && link.harness === 'dsh' && link.session_id === attempt.sessionId;
+    const existing = links.links.find(findLink);
+    if (!existing) {
+      const saved = await bridge.projectLinkSet({connectionId: node.id, harness: 'dsh', sessionId: attempt.sessionId,
+        projectId: attempt.projectId, expectedVersion: 0});
+      if (saved?.links?.find(findLink)?.project_id !== attempt.projectId) throw Error('PROJECT_LINK_UNCONFIRMED');
+    } else if (existing.project_id !== attempt.projectId) {
+      throw Error('PROJECT_LINK_CONFLICT');
+    }
+  }
+  localStorage.removeItem(creationJournalKey);
+  remoteCreation.value = null;
+  creationError.value = '';
+  creatingKind.value = null;
+  directoryCreationRevision.value++;
+  if (owner) void reload();
+  await selectRemoteConversation({node, session: {id: attempt.sessionId, title: result.title,
+    workspace: result.workspace, source_kind: result.source_kind}});
 }
 
 async function submitCreateItem() {
-  if (!available) return;
+  if (!available || !creatingKind.value || creationBusy.value) return;
   const title = newItemTitle.value.trim();
+  if (creatingKind.value === 'project' && !title) return;
+  if (new TextEncoder().encode(title).length > 256) {
+    creationError.value = 'createTitleTooLong';
+    return;
+  }
+  creationBusy.value = true;
+  creationError.value = '';
+  try {
+    if (creationMode.value === 'dsh') await submitDshCreation(title);
+    else await submitLocalCreation(title);
+  } catch {
+    if (!creationError.value) creationError.value = remoteCreation.value ? 'createRemoteRetry' : 'createItemFailed';
+  } finally {
+    creationBusy.value = false;
+  }
+}
+
+async function submitLocalCreation(title) {
   if (creatingKind.value === 'project') {
     if (!title || !kernelBridge.createProject) return;
     const pid = `proj-${crypto.randomUUID().slice(0, 8)}`;
     const snap = await kernelBridge.createProject(pid, title).catch(() => null);
-    if (snap) applyCatalogPreferences(snap);
+    if (!snap) throw Error('PROJECT_CREATE_FAILED');
+    applyCatalogPreferences(snap);
+    if (creationMode.value === 'local') {
+      creatingKind.value = 'conversation';
+      creatingForProjectId.value = pid;
+      await submitLocalCreation(title);
+      return;
+    }
     creatingKind.value = null;
     newItemTitle.value = '';
   } else if (creatingKind.value === 'conversation') {
@@ -840,18 +1021,19 @@ async function submitCreateItem() {
     const snap = await kernelBridge
       .createConversation(cid, pid, title || t('newConversation'))
       .catch(() => null);
+    if (!snap) throw Error('CONVERSATION_CREATE_FAILED');
     creatingKind.value = null;
     creatingForProjectId.value = null;
     newItemTitle.value = '';
-    if (snap) {
-      applyCatalogPreferences(snap);
-      locallyAccepted.clear();
-      sessionId.value = cid;
-      draft.value = '';
-      controller.loadDraft('', 0);
-      navigationOpen.value = false;
-      await reload();
-    }
+    remoteConversation.value = null;
+    try { localStorage.removeItem('bob-active-remote'); } catch {}
+    applyCatalogPreferences(snap);
+    locallyAccepted.clear();
+    sessionId.value = cid;
+    draft.value = '';
+    controller.loadDraft('', 0);
+    navigationOpen.value = false;
+    await reload();
   }
 }
 
@@ -915,7 +1097,44 @@ async function startup() {
   }
 }
 
+async function openAssistantSessionDraft(text) {
+  const [command, ...fields] = text.split('|').map(part => part.trim());
+  if (!['/new-dsh', '新建 DSH 会话', '新建DSH会话'].includes(command)) return false;
+  startCreateConversation();
+  if (remoteCreation.value) return true;
+  if (!remoteCreationEnabled.value || fields.length > 4) {
+    creationError.value = 'createAssistantCommandHelp';
+    return true;
+  }
+  creationMode.value = 'dsh';
+  const [device, workspace, project, title] = fields;
+  newItemTitle.value = title || '';
+  if (project) {
+    const matches = (catalog.value?.projects || []).filter(p => p.id === project || p.title === project);
+    if (matches.length === 1) creatingForProjectId.value = matches[0].id;
+    else {
+      creationError.value = 'createProjectMissing';
+      return true;
+    }
+  }
+  if (device) {
+    const matches = creationNodes.value.filter(node => [node.id,node.name,node.label].includes(device));
+    if (matches.length !== 1) {
+      creationError.value = 'createAssistantDeviceMissing';
+      return true;
+    }
+    creationConnectionId.value = matches[0].id;
+    await loadCreationWorkspaces();
+    if (workspace && creationWorkspaces.value.includes(workspace)) creationWorkspace.value = workspace;
+    else if (workspace && !creationError.value) creationError.value = 'createNoDshWorkspaces';
+  }
+  return true;
+}
+
 async function send() {
+  if (sessionId.value && sessionId.value === assistantConversationId.value && !composerAttachments.value.length
+      && /^(?:\/new-dsh|新建 ?DSH 会话|新建DSH会话)(?:\s*\||$)/.test(draft.value.trim())
+      && await openAssistantSessionDraft(draft.value.trim())) return;
   if (!canSend.value) return;
   if (!executionEnabled.value && !homeConfigured.value) {
     fault.value = 'sendNotConfigured';
@@ -1080,6 +1299,19 @@ const statusKeys = {
     creatingKind,
     creatingForProjectId,
     newItemTitle,
+    creationMode,
+    creationConnectionId,
+    creationWorkspace,
+    creationWorkspaces,
+    creationLoading,
+    creationBusy,
+    creationError,
+    remoteCreation,
+    remoteCreationEnabled,
+    creationNodes,
+    loadCreationWorkspaces,
+    cancelCreateItem,
+    directoryCreationRevision,
     layoutState,
     updateLayoutState,
     locallyAccepted,
