@@ -57,6 +57,25 @@ jobs:
           python tests/stage-android-vault.py
           python tests/stage-android-scanner.py
           python tests/stage-android-branding.py
+      - name: Prepare verified Gradle distribution
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          wrapper=src-tauri/gen/android/gradle/wrapper/gradle-wrapper.properties
+          grep -Eq '^distributionUrl=.*gradle-8\.14\.3-bin\.zip$' "$wrapper"
+          archive="$RUNNER_TEMP/gradle-8.14.3-bin.zip"
+          checksum=bd71102213493060956ec229d946beee57158dbd89d0e62b91bca0fa2c5f3531
+          api="https://api.github.com/repos/gradle/gradle-distributions/releases/assets/269969095?run=$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          if ! curl --fail --silent --show-error --location --retry 2 --max-time 200 \
+              -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/octet-stream' "$api" -o "$archive" \
+              || ! printf '%s  %s\n' "$checksum" "$archive" | sha256sum -c --status; then
+            curl --fail --silent --show-error --location --retry 2 --max-time 200 \
+              https://services.gradle.org/distributions/gradle-8.14.3-bin.zip -o "$archive"
+          fi
+          printf '%s  %s\n' "$checksum" "$archive" | sha256sum -c
+          sed -i '/^distributionUrl=/d; /^distributionSha256Sum=/d' "$wrapper"
+          printf '\ndistributionUrl=file://%s\ndistributionSha256Sum=%s\n' "$archive" "$checksum" >> "$wrapper"
       - name: Build independent ARM64 development APK
         run: pnpm exec tauri android build --debug --target aarch64 --apk --ci
       - name: Verify packaged Bob branding
