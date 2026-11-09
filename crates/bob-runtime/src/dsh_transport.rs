@@ -164,9 +164,11 @@ impl DshClient {
   let value=self.rpc("session/list",json!({"_request":{}}))?;
   let items=value["items"].as_array().ok_or("DSH_PROTOCOL")?;
   if items.len()>5000{return Err("DSH_PROTOCOL");}
+  let archived = if items.is_empty() { None } else { self.archived_session_ids() };
   let mut output=Vec::new();
   for s in items.iter().filter(|s|s["origin"]!="subagent") {
    let id=s["sessionId"].as_str().ok_or("DSH_PROTOCOL")?;
+   if archived.as_ref().is_some_and(|ids| ids.contains(id)) { continue; }
    let running=s["running"].as_bool().ok_or("DSH_PROTOCOL")?;
    let workspace=s["projections"]["values"].get("workingDirectory").filter(|v|!v.is_null()).or_else(||s.get("cwd").filter(|v|!v.is_null())).cloned().unwrap_or(Value::Null);
    output.push(json!({"id":id,"title":s["projections"]["values"]["title"].as_str().unwrap_or(id),"updated_at":s["updatedAt"],"running":running,"workspace":workspace,"source_kind":"dsh_native"}));
@@ -189,6 +191,10 @@ impl DshClient {
   )).then_some(self.base.as_str())
  }
  pub(crate) fn follow_socket(&self,session:&str)->Result<(tungstenite::WebSocket<MaybeTlsStream<TcpStream>>,String),&'static str>{
+  let args=json!({"request":{"address":{"kind":"session","sessionId":session},"maxMessages":1,"assistantStream":true}});
+  self.open_stream("session/follow", args, Duration::from_secs(10))
+ }
+ fn open_stream(&self,endpoint:&str,args:Value,timeout:Duration)->Result<(tungstenite::WebSocket<MaybeTlsStream<TcpStream>>,String),&'static str>{
   let mut url=self.base.join("api/remote.mux").map_err(|_|"DSH_PROTOCOL")?;url.set_scheme(if self.base.scheme()=="http" {"ws"} else {"wss"}).map_err(|_|"DSH_PROTOCOL")?;
   let mut req=url.as_str().into_client_request().map_err(|_|"DSH_PROTOCOL")?;
   req.headers_mut().insert("Cookie",self.cookie.parse().map_err(|_|"DSH_PROTOCOL")?);
@@ -197,16 +203,34 @@ impl DshClient {
   let host=self.base.host_str().ok_or("DSH_ADDRESS_INVALID")?;
   let addresses=(host,self.base.port_or_known_default().ok_or("DSH_ADDRESS_INVALID")?).to_socket_addrs().map_err(|_|"DSH_UNAVAILABLE")?;
   let mut socket=None;
-  for address in addresses.take(4) { if let Ok(s)=TcpStream::connect_timeout(&address,Duration::from_secs(3)){socket=Some(s);break;} }
+  for address in addresses.take(4) { if let Ok(s)=TcpStream::connect_timeout(&address,timeout.min(Duration::from_secs(3))){socket=Some(s);break;} }
   let socket=socket.ok_or("DSH_UNAVAILABLE")?;
-  socket.set_read_timeout(Some(Duration::from_secs(10))).map_err(|_|"DSH_UNAVAILABLE")?;
-  socket.set_write_timeout(Some(Duration::from_secs(10))).map_err(|_|"DSH_UNAVAILABLE")?;
+  socket.set_read_timeout(Some(timeout)).map_err(|_|"DSH_UNAVAILABLE")?;
+  socket.set_write_timeout(Some(timeout)).map_err(|_|"DSH_UNAVAILABLE")?;
   let config=tungstenite::protocol::WebSocketConfig::default().max_message_size(Some(HISTORY_LIMIT)).max_frame_size(Some(HISTORY_LIMIT));
   let (mut ws,_)=tungstenite::client_tls_with_config(req,socket,Some(config),None).map_err(|_|"DSH_UNAVAILABLE")?;
   match ws.get_mut(){MaybeTlsStream::Rustls(s)=>{s.sock.set_read_timeout(Some(Duration::from_secs(1))).map_err(|_|"DSH_UNAVAILABLE")?;s.sock.set_write_timeout(Some(Duration::from_secs(1))).map_err(|_|"DSH_UNAVAILABLE")?;},MaybeTlsStream::Plain(s) if self.base.scheme()=="http" && trusted_endpoint(&self.base)=>{s.set_read_timeout(Some(Duration::from_secs(1))).map_err(|_|"DSH_UNAVAILABLE")?;s.set_write_timeout(Some(Duration::from_secs(1))).map_err(|_|"DSH_UNAVAILABLE")?;},_=>return Err("DSH_TLS_REQUIRED")}
-  let stream=format!("bob-live-{}",crate::now_millis());
-  ws.send(Message::Text(json!({"type":"open","streamId":stream,"endpoint":"session/follow","payload":{"args":{"request":{"address":{"kind":"session","sessionId":session},"maxMessages":1,"assistantStream":true}}}}).to_string().into())).map_err(|_|"DSH_UNAVAILABLE")?;
+  let stream=format!("bob-stream-{}",crate::now_millis());
+  ws.send(Message::Text(json!({"type":"open","streamId":stream,"endpoint":endpoint,"payload":{"args":args}}).to_string().into())).map_err(|_|"DSH_UNAVAILABLE")?;
   Ok((ws,stream))
+ }
+ // Older DSH versions can lack the workspace feed. Keep their native catalog readable.
+ fn archived_session_ids(&self) -> Option<std::collections::HashSet<String>> {
+  let (mut ws, stream) = self.open_stream("workspace/follow", json!({}), Duration::from_secs(2)).ok()?;
+  let deadline = Instant::now() + Duration::from_secs(2);
+  while Instant::now() < deadline {
+   let Message::Text(text) = ws.read().ok()? else { continue };
+   let frame: Value = serde_json::from_str(&text).ok()?;
+   if frame["streamId"] != stream { continue; }
+   if matches!(frame["type"].as_str(), Some("error" | "end" | "close")) { return None; }
+   if frame["type"] == "item" && frame["value"]["type"] == "baseline" {
+    let ids = frame["value"]["value"]["archivedSessionIds"].as_array()?.iter()
+     .map(|id| id.as_str().map(str::to_owned)).collect();
+    let _ = ws.close(None);
+    return ids;
+   }
+  }
+  None
  }
  fn snapshot(&self,address:&SessionAddress,max_messages:usize)->Result<Value,&'static str>{
   let mut url=self.base.join("api/remote.mux").map_err(|_|"DSH_PROTOCOL")?;url.set_scheme(if self.base.scheme()=="http" {"ws"} else {"wss"}).map_err(|_|"DSH_PROTOCOL")?;
