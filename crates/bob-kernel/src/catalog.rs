@@ -48,6 +48,7 @@ pub struct ConversationItem {
     pub project_title: Option<String>,
     pub title: String,
     pub acceptance: String,
+    pub can_delete: bool,
     pub target_device_id: String,
     pub target_device_label: String,
     pub target_device_online: bool,
@@ -137,6 +138,20 @@ pub(crate) fn ensure_bootstrap_catalog_in_tx(
 fn valid_id(id: &str) -> bool {
     let trimmed = id.trim();
     !trimmed.is_empty() && trimmed.len() <= 128 && !trimmed.contains('\0')
+}
+
+fn has_running_execution(db: &rusqlite::Connection, cid: &str) -> Result<bool> {
+    let local_running: bool = db.query_row(
+        "SELECT EXISTS(SELECT 1 FROM executions e JOIN tasks t ON t.id=e.task_id JOIN messages m ON m.id=t.source_message_id WHERE m.conversation_id=?1 AND e.status IN ('pending','dispatching','running','paused','unknown'))",
+        [&cid],
+        |r| r.get(0),
+    )?;
+    let remote_running: bool = db.query_row(
+        "SELECT EXISTS(SELECT 1 FROM domain_events e JOIN intent_outbox o ON o.request_id=e.request_id WHERE e.object_kind='remote_execution' AND o.session_id=?1 AND NOT EXISTS(SELECT 1 FROM domain_events newer WHERE newer.object_kind='remote_execution' AND newer.request_id=e.request_id AND newer.object_version>e.object_version) AND json_extract(e.payload_json,'$.status') IN ('pending','dispatching','running','paused','unknown'))",
+        [&cid],
+        |r| r.get(0),
+    )?;
+    Ok(local_running || remote_running)
 }
 
 impl LocalApp {
@@ -303,14 +318,17 @@ impl LocalApp {
                 return Err(Error::InvalidTransition);
             }
         }
-        let existing: Option<(Option<String>, String)> = tx
+        let existing: Option<(Option<String>, String, Option<i64>)> = tx
             .query_row(
-                "SELECT project_id, title FROM conversations WHERE id=?1",
+                "SELECT project_id, title, archived_at FROM conversations WHERE id=?1",
                 [conversation_id],
-                |r| Ok((r.get(0)?, r.get(1)?)),
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
             )
             .optional()?;
-        if let Some((old_pid, old_title)) = existing {
+        if let Some((old_pid, old_title, archived_at)) = existing {
+            if archived_at.is_some() {
+                return Err(Error::InvalidTransition);
+            }
             if old_pid.as_deref() != project_id || (!title.is_empty() && old_title != title) {
                 return Err(Error::IdentityConflict);
             }
@@ -469,6 +487,46 @@ impl LocalApp {
         tx.execute(
             "UPDATE conversations SET project_id=?2, version=version+1 WHERE id=?1 AND archived_at IS NULL",
             params![cid, pid],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Remove an ordinary local conversation from active views while preserving its history.
+    pub fn delete_local_conversation(&mut self, id: &str, now: i64) -> Result<()> {
+        if !valid_id(id) || id == self.session || id.starts_with("assistant:") {
+            return Err(Error::InvalidTransition);
+        }
+        let default_target = self.paired_home()?.map(|(home, _, _)| home)
+            .unwrap_or_else(|| self.origin.clone());
+        let tx = self.store.db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let (acceptance, archived_at, target): (String, Option<i64>, String) = tx.query_row(
+            "SELECT acceptance, archived_at, COALESCE(
+                (SELECT target_device_id FROM intent_outbox WHERE session_id=?1 ORDER BY created_at DESC, rowid DESC LIMIT 1), ?2)
+             FROM conversations WHERE id=?1",
+            params![id, default_target],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        ).optional()?.ok_or(Error::InvalidTransition)?;
+        if acceptance != "local" || target != self.origin {
+            return Err(Error::InvalidTransition);
+        }
+        if archived_at.is_some() {
+            return Ok(());
+        }
+        if has_running_execution(&tx, id)? {
+            return Err(Error::InvalidTransition);
+        }
+        let assistant = format!("assistant:{}", self.origin);
+        tx.execute(
+            "UPDATE conversations SET archived_at=?2, version=version+1 WHERE id=?1",
+            params![id, now],
+        )?;
+        tx.execute(
+            "UPDATE device_ui_preferences
+             SET selected_conversation_id=COALESCE(
+                 (SELECT id FROM conversations WHERE id=?2 AND archived_at IS NULL), ?3), updated_at=?4
+             WHERE origin_device_id=?5 AND selected_conversation_id=?1",
+            params![id, assistant, self.session, now, self.origin],
         )?;
         tx.commit()?;
         Ok(())
@@ -762,17 +820,7 @@ impl LocalApp {
                 )?
             };
 
-            let local_running: bool = db.query_row(
-                "SELECT EXISTS(SELECT 1 FROM executions e JOIN tasks t ON t.id=e.task_id JOIN messages m ON m.id=t.source_message_id WHERE m.conversation_id=?1 AND e.status IN ('pending','dispatching','running','paused','unknown'))",
-                [&cid],
-                |r| r.get(0),
-            )?;
-            let remote_running: bool = db.query_row(
-                "SELECT EXISTS(SELECT 1 FROM domain_events e JOIN intent_outbox o ON o.request_id=e.request_id WHERE e.object_kind='remote_execution' AND o.session_id=?1 AND NOT EXISTS(SELECT 1 FROM domain_events newer WHERE newer.object_kind='remote_execution' AND newer.request_id=e.request_id AND newer.object_version>e.object_version) AND json_extract(e.payload_json,'$.status') IN ('pending','dispatching','running','paused','unknown'))",
-                [&cid],
-                |r| r.get(0),
-            )?;
-            let has_running_execution = local_running || remote_running;
+            let has_running_execution = has_running_execution(db, &cid)?;
 
             let target_device_id: String = db
                 .query_row(
@@ -819,12 +867,15 @@ impl LocalApp {
                 "新会话".to_owned()
             };
 
+            let can_delete = acceptance == "local" && target_device_id == self.origin
+                && cid != self.session && !cid.starts_with("assistant:");
             conversations.push(ConversationItem {
                 id: cid,
                 project_id,
                 project_title,
                 title: display_title,
                 acceptance,
+                can_delete,
                 target_device_id,
                 target_device_label,
                 target_device_online,

@@ -438,6 +438,16 @@ pub fn handle_rpc_command(ctx: &mut NodeContext, command: &str, args: &Value) ->
             ctx.sync_catalog_into_online_store();
             serde_json::to_value(snap).map_err(|_| "CONVERSATION_PROMOTE_FAILED")
         }
+        "app_conversation_delete" => {
+            let conversation_id = args
+                .get("conversationId")
+                .and_then(Value::as_str)
+                .ok_or("CONVERSATION_DELETE_FAILED")?;
+            ctx.app
+                .delete_local_conversation(conversation_id, at)
+                .map_err(|_| "CONVERSATION_DELETE_FAILED")?;
+            handle_rpc_command(ctx, "app_catalog", &json!({}))
+        }
         "app_conversation_select" => {
             let conversation_id = args
                 .get("conversationId")

@@ -21,6 +21,43 @@ fn policy() -> DispatchPolicy {
 }
 
 #[test]
+fn local_conversation_delete_is_persistent_and_preserves_other_sessions() {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("app.sqlite");
+    let mut app = LocalApp::open(&db_path).unwrap();
+    let default = app.default_session().unwrap();
+    let assistant = app.assistant_conversation(10).unwrap();
+    assert!(app.delete_local_conversation(&default, 11).is_err());
+    assert!(app.delete_local_conversation(&assistant, 11).is_err());
+
+    app.create_project("project", "Project", 12).unwrap();
+    app.create_conversation("keep", Some("project"), "Keep", 13).unwrap();
+    app.save_conversation_view_state("keep", Some("other draft"), None, None, false, 14).unwrap();
+    let item = app.create_conversation("discard", Some("project"), "Discard", 15).unwrap();
+    assert!(item.can_delete);
+    app.accept("discard-request", "discard-message", "discard", "old message".into(), 16).unwrap();
+
+    app.delete_local_conversation("discard", 17).unwrap();
+    app.delete_local_conversation("discard", 18).unwrap();
+    assert!(app.history("discard").is_err());
+    assert!(app.create_conversation("discard", Some("project"), "Discard", 19).is_err());
+    assert_eq!(app.selected_conversation().unwrap(), assistant);
+    drop(app);
+
+    let mut app = LocalApp::open(&db_path).unwrap();
+    let snapshot = app.catalog_snapshot().unwrap();
+    assert_eq!(snapshot.selected_conversation_id, assistant);
+    assert!(!snapshot.conversations.iter().any(|item| item.id == "discard"));
+    assert_eq!(snapshot.projects[0].conversation_count, 1);
+    let kept = snapshot.conversations.iter().find(|item| item.id == "keep").unwrap();
+    assert_eq!(kept.view_state.draft, "other draft");
+
+    app.accept("busy-request", "busy-message", "keep", "work".into(), 20).unwrap();
+    app.prepare_local_execution("busy-request", "ephemeral/keep", 21).unwrap();
+    assert!(app.delete_local_conversation("keep", 22).is_err());
+}
+
+#[test]
 fn multi_project_and_conversation_catalog_preserves_default_session_and_draft_cas() {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("app.sqlite");

@@ -833,17 +833,25 @@ async function openAssistant() {
   } catch { fault.value = 'startupFailed'; }
 }
 
-async function selectConversation(targetId) {
-  remoteConversation.value = null;
-  try { localStorage.removeItem('bob-active-remote'); } catch {}
-  activeDrawer.value = 'chat';
-  settingsOpen.value = false;
-  navigationOpen.value = false;
+async function selectConversation(targetId, { replacingDeleted = false } = {}) {
+  const keepRemote = replacingDeleted && remoteConversation.value;
+  if (!keepRemote) {
+    remoteConversation.value = null;
+    try { localStorage.removeItem('bob-active-remote'); } catch {}
+    activeDrawer.value = 'chat';
+    settingsOpen.value = false;
+    navigationOpen.value = false;
+  }
   if (!targetId) return;
   if (targetId === sessionId.value) {
     return;
   }
-  void flushCurrentViewState();
+  if (replacingDeleted) {
+    clearTimeout(draftSaveTimer);
+    clearTimeout(scrollSaveTimer);
+  } else {
+    void flushCurrentViewState();
+  }
   locallyAccepted.clear();
   messages.value = [];
   executions.value = [];
@@ -861,10 +869,18 @@ async function selectConversation(targetId) {
 
   draft.value = restoredDraft;
   controller.loadDraft(restoredDraft, restoredRev);
-  navigationOpen.value = false;
+  if (!keepRemote) navigationOpen.value = false;
   await reload();
   await nextTick();
   if (historyRegion.value) historyRegion.value.scrollTop = historyRegion.value.scrollHeight;
+}
+
+async function deleteLocalConversation(id) {
+  const snapshot = await kernelBridge.deleteConversation(id);
+  applyCatalogPreferences(snapshot);
+  if (sessionId.value === id) {
+    await selectConversation(assistantConversationId.value || snapshot.selected_conversation_id, { replacingDeleted: true });
+  }
 }
 
 function beginCreateItem(kind, projectId) {
@@ -1445,6 +1461,7 @@ const statusKeys = {
     flushCurrentViewState,
     openAssistant,
     selectConversation,
+    deleteLocalConversation,
     startCreateProject,
     startCreateConversation,
     submitCreateItem,

@@ -7,7 +7,7 @@ import {kernelBridge} from '../native-bridge.mjs';
 import {nodeLabel as label,directoryGroups,extractFilterOptions,groupIconKind} from '../conversation-directory.mjs';
 import {checkPath,pathState} from '../path-health.mjs';
 import {deviceGroups,deviceFilterKeys} from '../device-paths.mjs';
-const props=defineProps({nodes:Array,catalog:Object,search:String,mode:String,syncRevision:Number,creationRevision:Number});
+const props=defineProps({nodes:Array,catalog:Object,search:String,mode:String,syncRevision:Number,creationRevision:Number,deleteLocal:Function});
 const emit=defineEmits(['select-local','select-remote','create-in-project']);
 const {t}=useI18n();
 const remote=ref([]), failures=ref([]), loading=ref(false), rodIndex=ref(0);let generation=0, rodTimer=null;
@@ -96,6 +96,32 @@ const groups=computed(()=>{
  return groups;
 });
 const legacy=computed(()=>rows.value.filter(s=>s.legacy));
+const deleteDialog = ref(null);
+const deleting = ref(null);
+const deleteBusy = ref(false);
+const deleteError = ref(false);
+
+function confirmDelete(session) {
+  deleting.value = session;
+  deleteError.value = false;
+  deleteDialog.value.showModal();
+}
+
+async function deleteConversation() {
+  if (!deleting.value || deleteBusy.value) return;
+  const { id, uid } = deleting.value;
+  deleteBusy.value = true;
+  deleteError.value = false;
+  try {
+    await props.deleteLocal(id);
+    if (isPinned(uid)) togglePin(uid);
+    deleteDialog.value?.close();
+  } catch {
+    deleteError.value = true;
+  } finally {
+    deleteBusy.value = false;
+  }
+}
 function select(s){emit(s.remote?'select-remote':'select-local',s.remote?{node:s.node,session:s}:s.id)}
 const date=s=>stamp(s)?new Date(stamp(s)).toLocaleDateString():t('sidebarTimeUnknown');
 const toolLabel=s=>s.remote?(s.toolLabel||s.tool_label||(s.harness==='claude'||s.source_kind==='claude_native'?t('claudeAgent'):'')):'';
@@ -159,23 +185,76 @@ const toolLabel=s=>s.remote?(s.toolLabel||s.tool_label||(s.harness==='claude'||s
    <details v-if="group.isTestGroup" class="directory-test-group" :open="!!search"><summary :title="group.fullName"><span class="directory-heading test-heading"><svg aria-hidden="true" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/></svg><span>{{t('testAndScratchSessions')}}</span><small>{{group.items.length}}</small></span></summary>
     <div class="directory-children">
     <button v-if="group.projectId" type="button" class="project-create-session" @click="emit('create-in-project',group.projectId)">+ {{t('newConversation')}}</button>
-    <div v-for="s in group.items" :key="s.uid" class="directory-item-wrap"><div class="directory-row-bar"><button class="directory-row" @click="select(s)"><span>{{s.title}}</span><small><span class="node-tag-pill">{{s.remote?label(s.node):s.device}}</span><span v-if="s.remote && (props.nodes||[]).filter(n=>(n.deviceId||n.id)===(s.node.deviceId||s.node.id)).length>1"> · {{s.node.baseUrl||s.node.url}}</span><template v-if="toolLabel(s)"> · <HarnessIcon :session="s" :label="toolLabel(s)" /></template> · {{date(s)}}<template v-if="s.directoryStale"> · {{t('directoryCached')}}</template></small></button><button type="button" class="directory-pin-btn" :class="{pinned:isPinned(s.uid)}" :aria-label="t(isPinned(s.uid)?'unpinSessionLabel':'pinSessionLabel')" :title="t(isPinned(s.uid)?'unpinSessionLabel':'pinSessionLabel')" @click.stop="togglePin(s.uid)"><svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" :fill="isPinned(s.uid)?'currentColor':'none'" stroke="currentColor" stroke-width="1.8"/></svg></button></div>
+    <div v-for="s in group.items" :key="s.uid" class="directory-item-wrap"><div class="directory-row-bar"><button class="directory-row" @click="select(s)"><span>{{s.title}}</span><small><span class="node-tag-pill">{{s.remote?label(s.node):s.device}}</span><span v-if="s.remote && (props.nodes||[]).filter(n=>(n.deviceId||n.id)===(s.node.deviceId||s.node.id)).length>1"> · {{s.node.baseUrl||s.node.url}}</span><template v-if="toolLabel(s)"> · <HarnessIcon :session="s" :label="toolLabel(s)" /></template> · {{date(s)}}<template v-if="s.directoryStale"> · {{t('directoryCached')}}</template></small></button><button type="button" class="directory-pin-btn" :class="{pinned:isPinned(s.uid)}" :aria-label="t(isPinned(s.uid)?'unpinSessionLabel':'pinSessionLabel')" :title="t(isPinned(s.uid)?'unpinSessionLabel':'pinSessionLabel')" @click.stop="togglePin(s.uid)"><svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" :fill="isPinned(s.uid)?'currentColor':'none'" stroke="currentColor" stroke-width="1.8"/></svg></button>
+    <button v-if="!s.remote && s.can_delete" type="button" class="directory-delete-btn"
+      :disabled="s.has_running_execution"
+      :title="t(s.has_running_execution ? 'localConversationDeleteBusy' : 'localConversationDelete')"
+      :aria-label="t('localConversationDeleteLabel', { title: s.title })" @click="confirmDelete(s)">
+     <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 10v6m4-6v6"/></svg>
+    </button></div>
     <select v-if="s.remote && linksAvailable" class="project-link-select" :aria-label="t('projectLinkLabel')" :disabled="linking" :value="association(s)?.project_id||''" @change="setProject(s,$event)"><option value="">{{t('projectLinkNone')}}</option><option v-for="p in catalog?.projects||[]" :key="p.id" :value="p.id">{{p.title}}</option></select></div>
     </div>
    </details>
    <details v-else-if="group.name" :open="!!search || mode==='device' || mode==='smart' || activeFilterCount>0"><summary :title="group.fullName"><span class="directory-heading"><svg v-if="groupIconKind(group, mode)==='project'" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg><svg v-else-if="groupIconKind(group, mode)==='phone'" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="2" width="12" height="20" rx="2.5"/><path d="M10 18h4"/></svg><svg v-else-if="groupIconKind(group, mode)==='cloud'" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 19h11a4.5 4.5 0 0 0 .7-8.95A5.5 5.5 0 0 0 7.4 8.5 4 4 0 0 0 6.5 19Z"/></svg><svg v-else aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></svg><span>{{group.name}}</span><small>{{group.items.length}}</small></span></summary>
     <div class="directory-children">
     <button v-if="group.projectId" type="button" class="project-create-session" @click="emit('create-in-project',group.projectId)">+ {{t('newConversation')}}</button>
-    <div v-for="s in group.items" :key="s.uid" class="directory-item-wrap"><div class="directory-row-bar"><button class="directory-row" @click="select(s)"><span>{{s.title}}</span><small><span class="node-tag-pill">{{s.remote?label(s.node):s.device}}</span><span v-if="s.remote && (props.nodes||[]).filter(n=>(n.deviceId||n.id)===(s.node.deviceId||s.node.id)).length>1"> · {{s.node.baseUrl||s.node.url}}</span><template v-if="toolLabel(s)"> · <HarnessIcon :session="s" :label="toolLabel(s)" /></template> · {{date(s)}}<template v-if="s.directoryStale"> · {{t('directoryCached')}}</template></small></button><button type="button" class="directory-pin-btn" :class="{pinned:isPinned(s.uid)}" :aria-label="t(isPinned(s.uid)?'unpinSessionLabel':'pinSessionLabel')" :title="t(isPinned(s.uid)?'unpinSessionLabel':'pinSessionLabel')" @click.stop="togglePin(s.uid)"><svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" :fill="isPinned(s.uid)?'currentColor':'none'" stroke="currentColor" stroke-width="1.8"/></svg></button></div>
+    <div v-for="s in group.items" :key="s.uid" class="directory-item-wrap"><div class="directory-row-bar"><button class="directory-row" @click="select(s)"><span>{{s.title}}</span><small><span class="node-tag-pill">{{s.remote?label(s.node):s.device}}</span><span v-if="s.remote && (props.nodes||[]).filter(n=>(n.deviceId||n.id)===(s.node.deviceId||s.node.id)).length>1"> · {{s.node.baseUrl||s.node.url}}</span><template v-if="toolLabel(s)"> · <HarnessIcon :session="s" :label="toolLabel(s)" /></template> · {{date(s)}}<template v-if="s.directoryStale"> · {{t('directoryCached')}}</template></small></button><button type="button" class="directory-pin-btn" :class="{pinned:isPinned(s.uid)}" :aria-label="t(isPinned(s.uid)?'unpinSessionLabel':'pinSessionLabel')" :title="t(isPinned(s.uid)?'unpinSessionLabel':'pinSessionLabel')" @click.stop="togglePin(s.uid)"><svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" :fill="isPinned(s.uid)?'currentColor':'none'" stroke="currentColor" stroke-width="1.8"/></svg></button>
+    <button v-if="!s.remote && s.can_delete" type="button" class="directory-delete-btn"
+      :disabled="s.has_running_execution"
+      :title="t(s.has_running_execution ? 'localConversationDeleteBusy' : 'localConversationDelete')"
+      :aria-label="t('localConversationDeleteLabel', { title: s.title })" @click="confirmDelete(s)">
+     <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 10v6m4-6v6"/></svg>
+    </button></div>
     <select v-if="s.remote && linksAvailable" class="project-link-select" :aria-label="t('projectLinkLabel')" :disabled="linking" :value="association(s)?.project_id||''" @change="setProject(s,$event)"><option value="">{{t('projectLinkNone')}}</option><option v-for="p in catalog?.projects||[]" :key="p.id" :value="p.id">{{p.title}}</option></select></div>
     </div>
    </details>
-   <template v-else><div v-for="s in group.items" :key="s.uid" class="directory-item-wrap"><div class="directory-row-bar"><button class="directory-row" @click="select(s)"><span>{{s.title}}</span><small>{{s.remote?label(s.node):s.device}}<span v-if="s.remote && (props.nodes||[]).filter(n=>(n.deviceId||n.id)===(s.node.deviceId||s.node.id)).length>1"> · {{s.node.baseUrl||s.node.url}}</span><template v-if="toolLabel(s)"> · <HarnessIcon :session="s" :label="toolLabel(s)" /></template> · {{date(s)}}<template v-if="s.directoryStale"> · {{t('directoryCached')}}</template></small></button><button type="button" class="directory-pin-btn" :class="{pinned:isPinned(s.uid)}" :aria-label="t(isPinned(s.uid)?'unpinSessionLabel':'pinSessionLabel')" :title="t(isPinned(s.uid)?'unpinSessionLabel':'pinSessionLabel')" @click.stop="togglePin(s.uid)"><svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" :fill="isPinned(s.uid)?'currentColor':'none'" stroke="currentColor" stroke-width="1.8"/></svg></button></div>
+   <template v-else><div v-for="s in group.items" :key="s.uid" class="directory-item-wrap"><div class="directory-row-bar"><button class="directory-row" @click="select(s)"><span>{{s.title}}</span><small>{{s.remote?label(s.node):s.device}}<span v-if="s.remote && (props.nodes||[]).filter(n=>(n.deviceId||n.id)===(s.node.deviceId||s.node.id)).length>1"> · {{s.node.baseUrl||s.node.url}}</span><template v-if="toolLabel(s)"> · <HarnessIcon :session="s" :label="toolLabel(s)" /></template> · {{date(s)}}<template v-if="s.directoryStale"> · {{t('directoryCached')}}</template></small></button><button type="button" class="directory-pin-btn" :class="{pinned:isPinned(s.uid)}" :aria-label="t(isPinned(s.uid)?'unpinSessionLabel':'pinSessionLabel')" :title="t(isPinned(s.uid)?'unpinSessionLabel':'pinSessionLabel')" @click.stop="togglePin(s.uid)"><svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" :fill="isPinned(s.uid)?'currentColor':'none'" stroke="currentColor" stroke-width="1.8"/></svg></button>
+    <button v-if="!s.remote && s.can_delete" type="button" class="directory-delete-btn"
+      :disabled="s.has_running_execution"
+      :title="t(s.has_running_execution ? 'localConversationDeleteBusy' : 'localConversationDelete')"
+      :aria-label="t('localConversationDeleteLabel', { title: s.title })" @click="confirmDelete(s)">
+     <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 10v6m4-6v6"/></svg>
+    </button></div>
     <select v-if="s.remote && linksAvailable" class="project-link-select" :aria-label="t('projectLinkLabel')" :disabled="linking" :value="association(s)?.project_id||''" @change="setProject(s,$event)"><option value="">{{t('projectLinkNone')}}</option><option v-for="p in catalog?.projects||[]" :key="p.id" :value="p.id">{{p.title}}</option></select></div></template>
   </template>
   <details v-if="legacy.length" :open="!!search"><summary>{{t('sidebarLegacy',{count:legacy.length})}}</summary><button v-for="s in legacy" :key="s.uid" class="directory-row" @click="select(s)"><span>{{s.title}}</span><small>{{t('sidebarImported')}} · {{date(s)}}<template v-if="s.directoryStale"> · {{t('directoryCached')}}</template></small></button></details>
+  <dialog ref="deleteDialog" class="directory-delete-dialog" :aria-label="t('localConversationDelete')"
+    @cancel="deleteBusy && $event.preventDefault()" @close="deleting = null">
+   <form @submit.prevent="deleteConversation">
+    <h3>{{ t('localConversationDelete') }}</h3>
+    <p>{{ t('localConversationDeleteConfirm', { title: deleting?.title || '' }) }}</p>
+    <p v-if="deleteError" role="alert">{{ t('localConversationDeleteFailed') }}</p>
+    <div class="directory-delete-actions">
+     <button type="button" autofocus :disabled="deleteBusy" @click="deleteDialog.close()">{{ t('cancelAction') }}</button>
+     <button type="submit" class="directory-delete-confirm" :disabled="deleteBusy">{{ t('localConversationDeleteAction') }}</button>
+    </div>
+   </form>
+  </dialog>
  </section>
 </template>
 <style scoped>
 .project-create-session{margin-block:4px;padding:4px 8px;font-size:12px}.project-link-select{max-width:100%;width:100%;margin-top:2px;min-height:24px;padding:2px 6px;font-size:11px;color:var(--text-secondary);background:var(--bg-primary)}.directory{min-width:0;max-width:100%}.directory-status{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}.directory-filter-bar,.directory-refresh-bar{display:inline-flex;align-items:center;gap:6px}.directory-filter-toggle{display:inline-flex;align-items:center;gap:5px;padding:4px 9px;font-size:12px;color:var(--text-secondary);background:var(--bg-primary)}.directory-filter-toggle.active{color:var(--text-primary);border-color:var(--accent-primary)}.filter-count-badge{display:inline-flex;align-items:center;justify-content:center;min-width:16px;height:16px;padding:0 4px;border-radius:999px;font-size:10px;font-weight:600;color:var(--bg-primary);background:var(--accent-primary)}.directory-filter-reset{padding:4px 8px;font-size:11px;color:var(--text-secondary);background:transparent}.directory-filter-panel{margin-top:8px;padding:10px;border-radius:10px;background:var(--bg-secondary);display:flex;flex-direction:column;gap:8px}.filter-group{display:flex;flex-direction:column;gap:4px}.filter-label{font-size:11px;font-weight:600;color:var(--text-secondary)}.filter-chips{display:flex;flex-wrap:wrap;gap:5px}.filter-chip{padding:3px 8px;min-height:24px;border-radius:999px;font-size:11px;color:var(--text-secondary);background:var(--bg-primary)}.filter-chip.active{color:var(--text-primary);border-color:var(--accent-primary);font-weight:600}.filter-select-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px}.filter-select-field{display:flex;flex-direction:column;gap:3px;min-width:0}.filter-select-field span{font-size:11px;font-weight:600;color:var(--text-secondary)}.filter-select-field select{width:100%;min-height:28px;padding:3px 6px;font-size:11px;color:var(--text-primary);background:var(--bg-primary)}.directory details{margin-top:10px}.directory summary{cursor:pointer;padding:8px 0;color:var(--text-secondary)}.directory-heading{display:inline-flex;align-items:center;gap:6px;max-width:calc(100% - 20px);vertical-align:middle;min-width:0;font-weight:600;color:var(--text-primary)}.directory-heading>span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.directory-heading svg{width:16px;height:16px;flex-shrink:0;color:var(--text-secondary)}.directory-heading small{flex-shrink:0;font-weight:400}.directory-children{padding-inline-start:14px;padding-bottom:8px;min-width:0}.directory details+ .directory-row{margin-top:10px}.directory-item-wrap{margin-top:4px}.directory-row-bar{display:flex;align-items:stretch;gap:4px;min-width:0}.directory-row{display:flex;flex:1;flex-direction:column;align-items:flex-start;min-width:0;gap:3px;padding:8px 10px;text-align:left;background:var(--bg-primary);color:var(--text-primary)}.directory-row span{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.node-tag-pill{display:inline-block;padding:1px 5px;border-radius:4px;font-size:10px;font-weight:600;background:var(--bg-secondary);color:var(--text-secondary);margin-right:2px}.directory-test-group summary{opacity:0.8}.directory-test-group summary:hover{opacity:1}.directory-pin-btn{flex:0 0 28px;width:28px;min-height:28px;padding:0;display:inline-flex;align-items:center;justify-content:center;color:var(--text-secondary);background:var(--bg-primary)}.directory-pin-btn.pinned{color:var(--accent-primary);border-color:var(--accent-primary)}.directory small{font-size:11px;color:var(--text-secondary);overflow-wrap:anywhere}.directory p{overflow-wrap:anywhere}
+.directory-delete-btn {
+  flex: 0 0 32px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+  background: var(--bg-primary);
+}
+.directory-delete-btn:hover:not(:disabled), .directory-delete-confirm {
+  color: var(--color-error);
+}
+.directory-delete-dialog {
+  width: min(24rem, calc(100vw - 2rem));
+  box-sizing: border-box;
+  padding: 1rem;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+.directory-delete-dialog h3 { margin: 0; }
+.directory-delete-actions { display: flex; justify-content: flex-end; gap: 8px; }
 </style>

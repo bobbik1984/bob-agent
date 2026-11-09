@@ -102,6 +102,8 @@ export function createKernelBridge(invoke, isAvailable) {
         title: title ?? '',
       });
     },
+    deleteConversation: conversationId =>
+      call('app_conversation_delete', { conversationId }),
     selectConversation: conversationId =>
       call('app_conversation_select', { conversationId }),
     saveViewState: ({

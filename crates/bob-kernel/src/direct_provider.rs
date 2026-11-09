@@ -326,8 +326,9 @@ impl LocalApp {
                  FROM executions e
                  JOIN tasks t ON t.id = e.task_id
                  JOIN messages m ON m.id = t.source_message_id
+                 JOIN conversations c ON c.id = m.conversation_id
                  JOIN runner_dispatches d ON d.execution_id = e.id
-                 WHERE e.request_id = ?1 AND d.runner_instance_id = ?2",
+                 WHERE e.request_id = ?1 AND d.runner_instance_id = ?2 AND c.archived_at IS NULL",
                 params![request_id, DIRECT_RUNNER],
                 |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
             )
@@ -395,7 +396,8 @@ impl LocalApp {
                 "SELECT m.id, m.conversation_id, o.send_state
                  FROM messages m
                  JOIN intent_outbox o ON o.request_id = m.request_id AND o.message_id = m.id
-                 WHERE m.request_id = ?1 AND m.origin_device_id = ?2 AND m.role = 'user'",
+                 JOIN conversations c ON c.id = m.conversation_id
+                 WHERE m.request_id = ?1 AND m.origin_device_id = ?2 AND m.role = 'user' AND c.archived_at IS NULL",
                 params![request_id, self.origin],
                 |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
             )

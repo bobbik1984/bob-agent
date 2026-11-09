@@ -29,6 +29,7 @@ const {
   catalog,
   directorySyncRevision,
   selectConversation,
+  deleteLocalConversation,
   selectRemoteConversation,
 } = inject('bobAppShell');
 </script>
@@ -140,7 +141,7 @@ const {
 
     <SidebarCreateForm />
 
-    <ConversationDirectory :nodes="modelHub.state.remote_nodes || []" :catalog="catalog" :sync-revision="directorySyncRevision" :creation-revision="directoryCreationRevision" @create-in-project="startCreateConversation" :search="sidebarSearch" :mode="sidebarGroupMode" @select-local="selectConversation" @select-remote="selectRemoteConversation" />
+    <ConversationDirectory :nodes="modelHub.state.remote_nodes || []" :catalog="catalog" :sync-revision="directorySyncRevision" :creation-revision="directoryCreationRevision" @create-in-project="startCreateConversation" :search="sidebarSearch" :mode="sidebarGroupMode" @select-local="selectConversation" :delete-local="deleteLocalConversation" @select-remote="selectRemoteConversation" />
   </nav>
 
   <div v-else v-show="navigationOpen" class="navigation-overlay" @keydown.esc="navigationOpen = false">
@@ -259,7 +260,7 @@ const {
 
       <SidebarCreateForm />
 
-      <ConversationDirectory :nodes="modelHub.state.remote_nodes || []" :catalog="catalog" :sync-revision="directorySyncRevision" :creation-revision="directoryCreationRevision" @create-in-project="startCreateConversation" :search="sidebarSearch" :mode="sidebarGroupMode" @select-local="selectConversation" @select-remote="selectRemoteConversation" />
+      <ConversationDirectory :nodes="modelHub.state.remote_nodes || []" :catalog="catalog" :sync-revision="directorySyncRevision" :creation-revision="directoryCreationRevision" @create-in-project="startCreateConversation" :search="sidebarSearch" :mode="sidebarGroupMode" @select-local="selectConversation" :delete-local="deleteLocalConversation" @select-remote="selectRemoteConversation" />
     </nav>
   </div>
 </template>

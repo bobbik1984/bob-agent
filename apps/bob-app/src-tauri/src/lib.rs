@@ -299,6 +299,23 @@ async fn app_conversation_promote(
 }
 
 #[tauri::command]
+async fn app_conversation_delete(
+    state: State<'_, AppState>,
+    conversation_id: String,
+) -> Result<CatalogSnapshot, &'static str> {
+    let state = state.0.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        with_app(&state, |app| {
+            app.delete_local_conversation(&conversation_id, now()?)
+                .map_err(|_| "CONVERSATION_DELETE_FAILED")?;
+            app.catalog_snapshot().map_err(|_| "CATALOG_READ_FAILED")
+        })
+    })
+    .await
+    .map_err(|_| "CONVERSATION_DELETE_FAILED")?
+}
+
+#[tauri::command]
 async fn app_conversation_select(
     state: State<'_, AppState>,
     conversation_id: String,
@@ -1085,6 +1102,7 @@ fn configure<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R>
             app_project_create,
             app_conversation_create,
             app_conversation_promote,
+            app_conversation_delete,
             app_conversation_select,
             app_view_state_save,
             app_preferences_save,
