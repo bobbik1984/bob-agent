@@ -32,7 +32,7 @@ function mount(bridge, storage = new Map()) {
   const script = [
     readSection('const creatingKind =', 'const layoutState ='),
     readSection('function beginCreateItem(', 'async function cancel(execution)'),
-    'globalThis.actions = {startCreateProject, startCreateConversation, newItemTitle, creationMode, creationConnectionId, creationWorkspace, creationWorkspaces, loadCreationWorkspaces, submitCreateItem, creationError}',
+    'globalThis.actions = {startCreateProject, startCreateConversation, newItemTitle, firstSessionMessage, creationMode, creationConnectionId, creationWorkspace, creationWorkspaces, loadCreationWorkspaces, submitCreateItem, creationError}',
   ].join('\n');
   vm.runInContext(script, ctx);
   return {a:ctx.actions, opened, storage};
@@ -101,4 +101,45 @@ test('read-only project associations cannot launch a remote session', async () =
   assert.equal(m.opened.length, 0);
   assert.equal(m.storage.size, 0);
   assert.equal(m.a.creationError.value, 'createProjectLinkUnavailable');
+});
+
+test('native creation dispatches the first message once and attaches the returned ID after reload', async () => {
+  const requests = [];
+  let launched = false;
+  const session = 'codex:22222222-2222-4222-8222-222222222222';
+  const bridge = {
+    dshList: async () => [{harness:'codex', workspace}, {harness:'pi', workspace:'/other'}],
+    createProject: async id => ({projects:[{id}]}),
+    projectLinks: async () => ({links:[]}),
+    nativeSetup: async arg => {
+      requests.push(arg);
+      if (arg.action === 'start') {
+        launched = true;
+        throw Error('lost start reply');
+      }
+      return launched ? {request_id:arg.requestId,status:'ready',session_id:session,address:{connection_id:identity.id,session_id:session}}
+        : {request_id:arg.requestId,status:'missing'};
+    },
+    projectLinkSet: async arg => ({links:[{connection_id:arg.connectionId,harness:arg.harness,session_id:arg.sessionId,project_id:arg.projectId}]}),
+  };
+  const initial = mount(bridge);
+  const a = initial.a;
+  a.startCreateProject();
+  a.newItemTitle.value = 'Demo';
+  a.creationMode.value = 'codex';
+  a.creationConnectionId.value = identity.id;
+  await a.loadCreationWorkspaces();
+  assert.deepEqual(Array.from(a.creationWorkspaces.value), [workspace]);
+  a.creationWorkspace.value = workspace;
+  a.firstSessionMessage.value = 'First message';
+  await a.submitCreateItem();
+  assert.equal(initial.opened.length, 0);
+  const restored = mount(bridge, initial.storage);
+  restored.a.startCreateProject();
+  await restored.a.submitCreateItem();
+  assert.deepEqual(requests.map(r=>r.action), ['check','start','check']);
+  assert.equal(requests[1].text, 'First message');
+  assert.equal(requests[1].requestId, requests[2].requestId);
+  assert.equal(restored.opened[0].session.id, session);
+  assert.equal(restored.storage.size, 0);
 });

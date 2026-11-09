@@ -152,6 +152,19 @@ AGY ACP源事件恢复必须匹配持久请求的原生session与严格整数acp
 
 当前正文/终态事件已增加全局有界日志及恢复投影：最多20,000条/16MiB载荷/7天，快照最多256个/64MiB/7天；这是逻辑保留上限，SQLite物理文件与WAL不承诺立即缩小。每页100事件/1.5MiB，epoch变化、游标落后保留窗口或领先服务器时返回reset+替换快照+history_required；一次快照最多32项/1.5MiB，超出明确snapshot_incomplete，不冒称完整。未决/unknown发送回执不随阅读缓存删除，过期快照仍可由请求回执与原生历史核对。终态事件与最终回执互相修复崩溃窗口；迟到事件不能重开已确认终态。外部Codex重连只按官方原轮次确认状态，无法确认时标unknown，不能当新回复追加或继续转圈。此机制尚不等于审批、工具过程、成果身份等所有事件类型的恢复；跨轮常驻监管和各工具外部订阅仍待接。DSH 现场协议需要 assistantStream=true 才推 assistant-stream(start/chunk/end)，text-delta.text 为正文；旧 snapshot reader 不等于流式订阅。实际通过与失败分工具见 CURRENT_STAGE §3.6 和 2026-11-05 evidence，不把官方支持写成产品已接通。
 
+### 6.6 原生会话新建与首次落盘
+
+2026-11-09 核对官方文档及本地参考源码。侧栏和主助理可复用同一个创建请求，适配器分别核对工作区、原生会话身份和持久状态。下表是接口研究，目标节点的实际版本和重启恢复仍需逐项验收。
+
+| 工具 | 创建与续接 | 持久化验收 |
+| --- | --- | --- |
+| Claude Code | 以目标工作区启动 `claude --session-id <UUID>`；非交互首轮用 `-p` 和既有 stream-json 流，后续用 `--resume <UUID>`。 | UUID 可在启动前记入请求。空白启动是否写入可重启恢复的原生记录，须在已安装版本核对。首次发送仍使用用户原文。[官方 CLI](https://code.claude.com/docs/en/cli-reference) |
+| Codex | 复用 app-server，先 `thread/start`，再用返回的 `thread.id` 发 `turn/start` 或重连 `thread/resume`。 | 本地参考版本的测试显示空白线程未落盘，当前上游测试则覆盖归档空白线程时落盘。两者都不能替代目标安装版本对空白会话可发现性和重启恢复的验证。[官方 app-server](https://developers.openai.com/codex/app-server/)、[上游空白线程测试](https://github.com/openai/codex/blob/main/codex-rs/app-server/tests/suite/v2/thread_archive.rs) |
+| AGY | 复用 `agy acp`，协商完成后通过 `session/new` 提交 `cwd` 和 `mcpServers: []`，记录返回的 `sessionId`；发送走 `session/prompt`，恢复按协商结果走 `session/load` 或 `session/resume`。 | ACP 创建回执证明本进程拥有会话。需验证目标版本在未发送首条消息时能否重新列出并加载同一个 ID。[Google ACP](https://antigravity.google/docs/cli/acp)、[ACP v1 会话规范](https://agentclientprotocol.com/protocol/v1/session-setup) |
+| Pi | 在目标工作区以可持久模式启动 `pi --mode rpc`，使用 `new_session` 后查 `get_state`，验证 `cancelled`、`sessionId` 和 `sessionFile`。续接走现有 `--session <原文件>`。 | 本地参考的普通新会话到首条助手消息才写入 JSONL。路径已返回仍须验证文件存在、身份匹配和重启可打开。[Pi RPC](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/rpc-commands.md#new_session) |
+
+统一界面可保留已确认目标的空白草稿，随后用用户的第一条消息启动原生会话或使其持久化。Bob 仅在原生身份和实际持久性核对后记录为可重启续接。固定请求 ID 绑定设备、工具、工作区与首条消息。工具分配 ID 的创建若丢失回执，只按权威来源核对，无法确定时保留未知状态并避免自动重发。首轮沿用适配器既有权限边界。
+
 ### 统一设备入口与 DSH 直连分流
 
 连接类型由无凭据的节点协议发现确认，不根据主机名称推断。Bob 节点请求使用设备 Bearer，不能作为 DSH 启动令牌放入 URL；原生 DSH 直连继续使用 Cookie 与受控日志恢复。已确认节点发生请求错误时不得改投其他 peer，未知发送不自动重发。网页与 Tauri 必须保持一致。

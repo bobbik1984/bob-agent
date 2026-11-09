@@ -871,7 +871,7 @@ pub fn forward_dsh_rpc_to_endpoint_with_target(
                 }
             }
         }
-    } else if matches!(command, "app_dsh_create" | "app_dsh_cancel" | "app_dsh_live" | "app_dsh_page" | "app_dsh_history") {
+    } else if matches!(command, "app_native_setup" | "app_dsh_create" | "app_dsh_cancel" | "app_dsh_live" | "app_dsh_page" | "app_dsh_history") {
         if let Some(addr) = result.get_mut("address").and_then(Value::as_object_mut) {
             addr.insert("connection_id".to_owned(), json!(connection_id));
         }
@@ -894,7 +894,7 @@ pub fn forward_dsh_rpc_to_remote_node(
     command: &str,
     args: &Value,
 ) -> Result<Value, &'static str> {
-    if command == "app_dsh_create" {return Err("DSH_CREATE_UNCONFIRMED");}
+    if matches!(command,"app_native_setup" | "app_dsh_create") {return Err("DSH_CREATE_UNCONFIRMED");}
     if command == "app_dsh_cancel" {return Err("DSH_CANCEL_UNCONFIRMED");}
     let already_relayed = args
         .get("_relayed")

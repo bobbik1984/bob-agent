@@ -513,6 +513,53 @@ pub fn read_page(data: &Path, connection: &str, session_id: &str, after: Option<
     Ok(page)
 }
 
+pub fn setup_native_session(data: &Path, connection: &str, args: &Value) -> Result<Value, &'static str> {
+    let tool = args["harness"].as_str()
+        .filter(|h| matches!(*h,"claude" | "codex" | "agy" | "pi"))
+        .ok_or("HARNESS_SETUP_UNSUPPORTED")?;
+    let workspace = args["workspace"].as_str()
+        .filter(|s| !s.is_empty() && s.len() <= 4096 && !s.chars().any(char::is_control))
+        .ok_or("HARNESS_WORKSPACE_MISSING")?;
+    let request = args["requestId"].as_str()
+        .filter(|s| s.strip_prefix("setup-").is_some_and(|id| id.len() == 36
+            && id.bytes().enumerate().all(|(i,b)| if matches!(i,8|13|18|23) { b==b'-' } else { b.is_ascii_hexdigit() && !b.is_ascii_uppercase() })))
+        .ok_or("HARNESS_REQUEST_CONFLICT")?;
+    let action = args["action"].as_str().filter(|a| matches!(*a,"start" | "check"))
+        .ok_or("HARNESS_SETUP_INVALID")?;
+    let all = grants(data)?;
+    let grant = all.iter().find(|g| g.connection_id == connection).ok_or("DSH_CONNECTION_REQUIRED")?;
+    require_native_harness_grant(grant, &format!("{tool}:setup"))?;
+    let text = if action == "start" {
+        let text = args["text"].as_str().filter(|s| !s.trim().is_empty() && s.len() <= 32000)
+            .ok_or("HARNESS_SETUP_INVALID")?;
+        // Cached client-supplied paths never grant authority to start a tool.
+        let rows = fetch_list(data, connection)?;
+        if !rows.iter().any(|row| row["workspace"] == workspace && row["harness"] == tool) {
+            return Err("HARNESS_WORKSPACE_MISSING");
+        }
+        Some(text)
+    } else { None };
+    let payload = json!({"mode":"setup","action":action,"harness":tool,"workspace":workspace,
+        "requestId":request,"text":text,"agyDataDir":grant.agy_data_dir,"claudeDataDir":grant.claude_data_dir,
+        "piDataDir":grant.pi_data_dir,"codexDataDir":grant.codex_data_dir});
+    let bytes = run_ssh_python(&grant.ssh_target, &payload.to_string(), 25)?;
+    let mut result: Value = serde_json::from_slice(&bytes).map_err(|_| "HARNESS_SETUP_UNCONFIRMED")?;
+    if result["request_id"] != request && result.get("error").is_none() {
+        return Err("HARNESS_SETUP_UNCONFIRMED");
+    }
+    if let Some(id) = result.get("session_id").and_then(Value::as_str).filter(|_| result["status"] == "ready") {
+        result["address"] = json!({"connection_id":connection,"session_id":id});
+        use sha2::{Digest, Sha256};
+        if let Ok(config) = fs::read(data.join("device_harnesses.json")) {
+            let mut key = Sha256::new();
+            key.update(connection.as_bytes());
+            key.update(config);
+            let _ = fs::remove_file(data.join(format!("agy-directory-{:x}.json",key.finalize())));
+        }
+    }
+    Ok(result)
+}
+
 pub fn prompt_session(data: &Path, connection: &str, session_id: &str, text: &str, request_id: &str) -> Result<Value, &'static str> {
     prompt_session_with_options(data, connection, session_id, text, request_id, false, None)
 }

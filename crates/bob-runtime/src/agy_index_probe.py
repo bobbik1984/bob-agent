@@ -660,7 +660,7 @@ def read_session_page(cfg, sid):
                         break
                 except Exception:
                     continue
-    recs = _reconcile(sid)
+    recs = [] if cfg.get("mode") == "setup" else _reconcile(sid)
     ru = {t for r, t, _ in ev if r == 'user'}
     ra = {t for r, t, _ in ev if r == 'assistant'}
     for r in recs:
@@ -681,7 +681,9 @@ def read_session_page(cfg, sid):
             idx=next((i for i,(_,_,ets) in enumerate(ev) if ended and ets and ets>ended),len(ev))
             ev.insert(idx,('assistant',at,ended))
             ra.add(at)
-    msgs = _consolidate(ev, 60) or [{'sequence': 1, 'role': 'assistant', 'text': f'Session `{sid}` loaded (`{ws or "default"}`).', 'timestamp': _now()}]
+    msgs = _consolidate(ev, 60)
+    if not msgs and cfg.get('mode') != 'setup':
+        msgs = [{'sequence': 1, 'role': 'assistant', 'text': f'Session `{sid}` loaded (`{ws or "default"}`).', 'timestamp': _now()}]
     out = {'harness': h, 'workspace': ws, 'messages': msgs,
            'request_results': [{'request_id': r['request_id'], 'status': r.get('execution_status', 'completed')} for r in recs if r.get('request_id')]}
     if cfg.get('mode') == 'page' and sid.startswith('claude-jsonl:'):
@@ -1844,11 +1846,15 @@ class AgyAcpSession:
         try:
             result = self.control('initialize', {'protocolVersion': 1,
                 'clientCapabilities': {}, 'clientInfo': {'name': 'bob-native', 'version': '1.0.1'}})
-            if not result.get('agentCapabilities', {}).get('loadSession'):
-                raise ValueError('HARNESS_NATIVE_RESUME_UNSUPPORTED')
-            result = self.control('session/load', {'sessionId': raw, 'cwd': cwd, 'mcpServers': []})
-            if result.get('sessionId', raw) != raw:
-                raise ValueError('HARNESS_SESSION_MISMATCH')
+            if raw is None:
+                result = self.control('session/new', {'cwd': cwd, 'mcpServers': []})
+                self.raw = validate_new_native_id(result.get('sessionId'))
+            else:
+                if not result.get('agentCapabilities', {}).get('loadSession'):
+                    raise ValueError('HARNESS_NATIVE_RESUME_UNSUPPORTED')
+                result = self.control('session/load', {'sessionId': raw, 'cwd': cwd, 'mcpServers': []})
+                if result.get('sessionId', raw) != raw:
+                    raise ValueError('HARNESS_SESSION_MISMATCH')
         except Exception:
             self.close()
             raise
@@ -1964,10 +1970,17 @@ def _claude_tool_arguments(cfg):
         '--permission-prompt-tool','stdio','--settings',
         json.dumps({'permissions':{'ask':tools}},ensure_ascii=False)]
 
+def validate_new_native_id(raw):
+    if not isinstance(raw, str) or not re.fullmatch(r'[a-zA-Z0-9-]{8,80}', raw):
+        raise ValueError('HARNESS_IDENTITY_UNCONFIRMED')
+    return raw
+
+
 def _native_worker(cfg):
     sid, rid, text = cfg['session_id'], cfg['request_id'], cfg['text']
     tool, raw = sid.split(':', 1)
-    tool = 'claude' if tool == 'claude-jsonl' else tool
+    creating = cfg.get('new_harness')
+    tool = creating or ('claude' if tool == 'claude-jsonl' else tool)
     env = os.environ.copy()
     env['PATH'] = os.pathsep.join(str(Path.home()/p) for p in ['.local/bin','.npm-global/bin','.cargo/bin'])+os.pathsep+env.get('PATH','')
     exe = shutil.which(tool, path=env['PATH']); pipe = None
@@ -1997,12 +2010,17 @@ def _native_worker(cfg):
                     break
                 if time.monotonic()>=init_deadline:raise ValueError('HARNESS_TIMEOUT')
             pipe.send({'method':'initialized','params':{}})
-            pipe.send({'id':2,'method':'thread/resume','params':{'threadId':raw,'cwd':cwd,'approvalPolicy':'never','sandbox':'read-only'}})
+            params = {'cwd':cwd, 'approvalPolicy':'never', 'sandbox':'read-only'}
+            if not creating:
+                params['threadId'] = raw
+            pipe.send({'id':2, 'method':'thread/start' if creating else 'thread/resume', 'params':params})
         elif tool == 'claude':
-            if cfg.get('takeover') is True:
-                _release_claude_terminal_holder(exe,raw,env)
-            _ensure_claude_session_available(exe,raw,env)
-            pipe = _claude_durable_pipe([exe,'--resume',raw,'-p','--input-format','stream-json','--output-format','stream-json','--verbose',
+            if not creating:
+                if cfg.get('takeover') is True:
+                    _release_claude_terminal_holder(exe,raw,env)
+                _ensure_claude_session_available(exe,raw,env)
+            session_flag = '--session-id' if creating else '--resume'
+            pipe = _claude_durable_pipe([exe,session_flag,raw,'-p','--input-format','stream-json','--output-format','stream-json','--verbose',
                 '--include-partial-messages']+_claude_tool_arguments(cfg),cwd,env,sid,rid)
             _claude_initialize(pipe,raw,text)
             if _cancel_requested(rid):
@@ -2011,7 +2029,7 @@ def _native_worker(cfg):
             user_uuid=str(uuid.uuid5(uuid.NAMESPACE_URL,'bob-native:'+sid+':'+rid))
             # Persist the exact input anchor before dispatch; text matching is
             # insufficient when identical prompts occur in the same session.
-            _stream_update(rid,native_user_message_id=user_uuid)
+            _stream_update(rid,native_user_message_id=user_uuid,native_session_id=raw)
             pipe.send({'type':'user','uuid':user_uuid,'session_id':raw,'parent_tool_use_id':None,'message':{'role':'user','content':text}})
         elif tool == 'pi':
             model_args=[]
@@ -2021,11 +2039,14 @@ def _native_worker(cfg):
                 env['PI_CODING_AGENT_DIR']=str(profile.parent/'pi')
                 env['BOB_PI_API_KEY']=settings['api_key']
                 model_args=['--provider',settings['provider'],'--model',settings['model'],'--thinking','off']
-            pipe = NativePipe([exe,*model_args,'--mode','rpc','--session',cfg['jsonl_path'],'--no-tools',
+            session_args = ['--session-dir',cfg['pi_session_dir']] if creating else ['--session',cfg['jsonl_path']]
+            pipe = NativePipe([exe,*model_args,'--mode','rpc',*session_args,'--no-tools',
                 '--no-extensions','--no-skills','--no-prompt-templates','--no-themes'],cwd,env)
             pipe.send({'id':'identity','type':'get_state'})
         elif tool == 'agy':
-            pipe = AgyAcpSession(exe, raw, cwd, env)
+            pipe = AgyAcpSession(exe, None if creating else raw, cwd, env)
+            if creating:
+                _stream_update(rid,native_session_id=pipe.raw)
             pipe.prompt(cfg)
             return
         else: raise ValueError('HARNESS_NATIVE_RESUME_UNSUPPORTED')
@@ -2072,7 +2093,13 @@ def _native_worker(cfg):
                 if frame.get('id')==2:
                     _stream_update(rid,resume_response_received=True)
                     if 'error' in frame: raise ValueError('HARNESS_RESUME_REJECTED')
-                    if frame.get('result',{}).get('thread',{}).get('id')!=raw: raise ValueError('HARNESS_SESSION_MISMATCH')
+                    thread = frame.get('result',{}).get('thread',{})
+                    if creating:
+                        raw = validate_new_native_id(thread.get('id'))
+                        codex_stream = CodexTurnStream(raw)
+                        _stream_update(rid,native_session_id=raw)
+                    elif thread.get('id') != raw:
+                        raise ValueError('HARNESS_SESSION_MISMATCH')
                     identity=True
                     if _cancel_requested(rid):
                         _stream_update(rid,execution_status='cancelled',ended_at=_now(),cancel_confirmed_by='not_dispatched')
@@ -2141,7 +2168,15 @@ def _native_worker(cfg):
             else:
                 if frame.get('id')=='identity':
                     state=frame.get('data') or {}
-                    if frame.get('success') is False or state.get('sessionId')!=raw: raise ValueError('HARNESS_SESSION_MISMATCH')
+                    if frame.get('success') is False: raise ValueError('HARNESS_SESSION_MISMATCH')
+                    if creating:
+                        raw = validate_new_native_id(state.get('sessionId'))
+                        session_file = state.get('sessionFile')
+                        if not isinstance(session_file,str) or not Path(session_file).resolve().is_relative_to(Path(cfg['pi_session_dir']).resolve()):
+                            raise ValueError('HARNESS_WORKSPACE_MISMATCH')
+                        _stream_update(rid,native_session_id=raw)
+                    elif state.get('sessionId') != raw:
+                        raise ValueError('HARNESS_SESSION_MISMATCH')
                     identity=True
                     if _cancel_requested(rid):
                         _stream_update(rid,execution_status='cancelled',ended_at=_now(),cancel_confirmed_by='not_dispatched')
@@ -2323,13 +2358,19 @@ def _native_start(cfg, source):
         old=db.execute('SELECT session,input_hash,body FROM requests WHERE id=?',(rid,)).fetchone()
         if old:
             if old[:2]!=(sid,digest): raise ValueError('HARNESS_REQUEST_CONFLICT')
-            state=json.loads(old[2]).get('execution_status','unknown')
+            existing=json.loads(old[2])
+            if cfg.get('new_harness') and (existing.get('setup_harness') != cfg['new_harness']
+                    or existing.get('setup_workspace') != cfg['work_cwd']):
+                raise ValueError('HARNESS_REQUEST_CONFLICT')
+            state=existing.get('execution_status','unknown')
             return {'status':state if state in ('unknown','not_accepted') else 'accepted',
                     'execution_status':state,'session_id':sid,'request_id':rid}
         for row in db.execute('SELECT body FROM requests WHERE session=?',(sid,)):
             if json.loads(row[0]).get('execution_status') in ('accepted','running','unknown'):
                 raise ValueError('HARNESS_SESSION_BUSY')
         record={'request_id':rid,'session_id':sid,'text':text,'execution_status':'accepted','started_at':_now(),'cancel_supported':sid.startswith(('codex:','pi:','agy:','claude-jsonl:'))}
+        if cfg.get('new_harness'):
+            record.update(setup_harness=cfg['new_harness'],setup_workspace=cfg['work_cwd'])
         if sid.startswith('claude-jsonl:'):
             args=_claude_tool_arguments(cfg)
             record['tool_authorization']={'version':1,'approval_mode':cfg.get('approval_mode','deny'),
@@ -2344,6 +2385,56 @@ def _native_start(cfg, source):
     _stream_update(rid,pid=proc.pid)
     return {'status':'accepted','session_id':sid,'request_id':rid}
 
+
+
+def setup_native_session(cfg):
+    rid, tool, cwd = (cfg.get(key) for key in ('requestId','harness','workspace'))
+    if not isinstance(rid, str) or not re.fullmatch(r'setup-[0-9a-f-]{36}', rid):
+        raise ValueError('HARNESS_REQUEST_CONFLICT')
+    prefixes = {'claude':'claude-jsonl', 'codex':'codex', 'agy':'agy', 'pi':'pi'}
+    if tool not in prefixes or not isinstance(cwd,str) or not Path(cwd).is_absolute():
+        raise ValueError('HARNESS_WORKSPACE_MISSING')
+    sid = 'setup:' + rid.removeprefix('setup-')
+    text = cfg.get('text')
+    start = cfg.get('action') == 'start'
+    with closing(_stream_db()) as db:
+        row = db.execute('SELECT session,input_hash,body FROM requests WHERE id=?',(rid,)).fetchone()
+    if row is None:
+        if not start:
+            return {'request_id':rid,'status':'missing'}
+        if not isinstance(text,str) or not text.strip() or len(text.encode('utf-8')) > 32000 or not Path(cwd).is_dir():
+            raise ValueError('HARNESS_SETUP_INVALID')
+        source = globals().get('__BOB_PROBE_SRC__') or Path(__file__).read_text(encoding='utf-8')
+        worker = {'session_id':sid,'request_id':rid,'text':text,'work_cwd':cwd,'project_cwd':cwd,
+                  'new_harness':tool,'approval_mode':'deny','claude_tools':[],
+                  'pi_session_dir':cfg.get('piDataDir') or ''}
+        if tool == 'pi' and not worker['pi_session_dir']:
+            raise ValueError('HARNESS_WORKSPACE_MISSING')
+        # Scope is included in the persisted fingerprint before spawning.
+        return _native_start(worker, source)
+    if row[0] != sid:
+        raise ValueError('HARNESS_REQUEST_CONFLICT')
+    record = json.loads(row[2])
+    if record.get('setup_harness') != tool or record.get('setup_workspace') != cwd:
+        raise ValueError('HARNESS_REQUEST_CONFLICT')
+    if start and (not isinstance(text,str) or row[1] != hashlib.sha256(text.encode('utf-8')).hexdigest()):
+        raise ValueError('HARNESS_REQUEST_CONFLICT')
+    records = _stream_records(sid)
+    record = next((r for r in records if r.get('request_id') == rid), record)
+    status = record.get('execution_status','unknown')
+    response = {'request_id':rid,'status':status,'error':record.get('error_code'),
+                'reply':str(record.get('reply_text') or '')[:16000]}
+    if status != 'completed':
+        return response
+    raw = validate_new_native_id(record.get('native_session_id'))
+    native = prefixes[tool] + ':' + raw
+    page = read_session_page(cfg,native)
+    messages = page.get('messages') or []
+    if not any(m.get('role') == 'assistant' and m.get('text') for m in messages):
+        return dict(response,status='persisting')
+    if not page.get('workspace') or Path(page['workspace']).resolve() != Path(cwd).resolve():
+        return dict(response,status='unknown',error='HARNESS_WORKSPACE_MISMATCH')
+    return dict(response,status='ready',session_id=native)
 
 
 def prompt_session(cfg):
@@ -2952,6 +3043,11 @@ if __name__ == '__main__':
             m = cfg.get('mode', 'list')
             if m == 'page':
                 print(json.dumps(read_session_page(cfg, cfg.get('sessionId', '')), ensure_ascii=False))
+            elif m == 'setup':
+                try: print(json.dumps(setup_native_session(cfg),ensure_ascii=False))
+                except ValueError as exc:
+                    code=str(exc)
+                    print(json.dumps({'error':code if re.fullmatch(r'HARNESS_[A-Z_]+',code) else 'HARNESS_SETUP_UNCONFIRMED'}))
             elif m == 'prompt':
                 print(json.dumps(prompt_session(cfg), ensure_ascii=False))
             elif m == 'preview':

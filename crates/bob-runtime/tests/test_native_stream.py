@@ -5,6 +5,22 @@ spec=importlib.util.spec_from_file_location('probe',Path(__file__).parents[1]/'s
 p=importlib.util.module_from_spec(spec);spec.loader.exec_module(p)
 
 class NativeTests(unittest.TestCase):
+ def test_setup_only_reports_ready_when_exact_native_history_is_readable(self):
+  rid='setup-00000000-0000-4000-8000-000000000001'
+  native='22222222-2222-4222-8222-222222222222'
+  cfg={'mode':'setup','action':'check','requestId':rid,'harness':'codex','workspace':self.tmp.name}
+  sid=rid.replace('setup-','setup:',1)
+  record={'request_id':rid,'session_id':sid,'execution_status':'completed','native_session_id':native,
+   'setup_harness':'codex','setup_workspace':self.tmp.name,'reply_text':'saved'}
+  with p.closing(p._stream_db()) as db,db:
+   db.execute('INSERT INTO requests VALUES(?,?,?,?)',(rid,sid,'hash',json.dumps(record)))
+  with patch.object(p.subprocess,'Popen',side_effect=AssertionError('must never replay')):
+   self.assertEqual(p.setup_native_session(cfg)['status'],'persisting')
+   with patch.object(p,'read_session_page',return_value={'workspace':self.tmp.name,'messages':[{'role':'assistant','text':'saved'}]}):
+    self.assertEqual(p.setup_native_session(cfg)['session_id'],'codex:'+native)
+   with self.assertRaisesRegex(ValueError,'HARNESS_REQUEST_CONFLICT'):
+    p.setup_native_session(dict(cfg,harness='pi'))
+
  def test_claude_tool_projection_preserves_outcome_and_bounds(self):
   use={'type':'assistant','message':{'content':[{'type':'tool_use','id':'u','name':'Read'}]}}
   result={'type':'user','message':{'content':[{'type':'tool_result','tool_use_id':'u','is_error':True}]}}

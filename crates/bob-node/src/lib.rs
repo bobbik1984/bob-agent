@@ -2286,7 +2286,7 @@ fn execute_unlocked_harness_rpc(
     command: &str,
     args: &Value,
 ) -> Result<Value, &'static str> {
-    if command.starts_with("app_dsh_") || matches!(command, "app_native_events" | "app_native_cancel" | "app_native_permission") {
+    if command.starts_with("app_dsh_") || matches!(command, "app_native_setup" | "app_native_events" | "app_native_cancel" | "app_native_permission") {
         let connection = args["connectionId"].as_str().ok_or("DSH_CONNECTION_REQUIRED")?;
         let runtime = ModelHubRuntime::with_file_vault(data_dir.to_path_buf())?;
         if let Some(result) = bob_runtime::node_pairing::route_paired_node_rpc(&runtime, connection, command, args)? {
@@ -2306,6 +2306,13 @@ fn execute_unlocked_harness_rpc(
         | "app_claude_review"
         | "app_claude_artifacts"
         | "app_claude_preview" => claude_rpc::rpc(data_dir, command, args),
+        "app_native_setup" => {
+            let connection = args["connectionId"].as_str().ok_or("DSH_CONNECTION_REQUIRED")?;
+            if connection == "local" {
+                let _ = bob_runtime::agy_directory::ensure_local_grant_registered(data_dir, "local");
+            }
+            bob_runtime::agy_directory::setup_native_session(data_dir, connection, args)
+        }
         "app_native_permission" => {
             let connection=args["connectionId"].as_str().ok_or("DSH_CONNECTION_REQUIRED")?;
             let session=args["sessionId"].as_str().ok_or("DSH_SESSION_REQUIRED")?;
@@ -2713,7 +2720,7 @@ fn handle_connection(mut stream: TcpStream, state: Arc<Mutex<NodeContext>>) {
             let allowed=match scope {
                 Ok(ref role) if role=="owner" => !path.starts_with("/api/client/v1/"),
                 Ok(_) => path.strip_prefix("/api/rpc/").is_some_and(|cmd|matches!(cmd,
-                    "app_dsh_live"|"app_dsh_create"|"app_dsh_cancel"|"app_native_events"|"app_native_cancel"|"app_native_permission"|"app_dsh_list"|"app_dsh_page"|"app_dsh_history"|"app_dsh_preview"|"app_dsh_prompt"|"app_dsh_receipt"|
+                    "app_dsh_live"|"app_dsh_create"|"app_dsh_cancel"|"app_native_setup"|"app_native_events"|"app_native_cancel"|"app_native_permission"|"app_dsh_list"|"app_dsh_page"|"app_dsh_history"|"app_dsh_preview"|"app_dsh_prompt"|"app_dsh_receipt"|
                     "app_harness_discover"|"app_harness_check_auth"|"app_harness_verify_capabilities")),
                 Err(_) => false,
             };
@@ -2790,7 +2797,7 @@ fn handle_connection(mut stream: TcpStream, state: Arc<Mutex<NodeContext>>) {
         }
         if matches!(
             command.trim(),
-            "app_dsh_live" | "app_dsh_create" | "app_dsh_cancel" | "app_native_events" | "app_native_cancel" | "app_native_permission" | "app_dsh_receipt"
+            "app_dsh_live" | "app_dsh_create" | "app_dsh_cancel" | "app_native_setup" | "app_native_events" | "app_native_cancel" | "app_native_permission" | "app_dsh_receipt"
                 | "app_dsh_page"
                 | "app_dsh_preview"
                 | "app_dsh_list"

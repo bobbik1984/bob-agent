@@ -4504,7 +4504,7 @@ pub(crate) async fn app_paired_session_setup<R: Runtime>(
     command: String,
     args: Value,
 ) -> Result<Value, &'static str> {
-    if !matches!(command.as_str(), "app_catalog" | "app_project_create" | "app_project_links" | "app_project_link_set" | "app_dsh_create" | "app_dsh_list") {
+    if !matches!(command.as_str(), "app_catalog" | "app_project_create" | "app_project_links" | "app_project_link_set" | "app_dsh_create" | "app_dsh_list" | "app_native_setup") {
         return Err("SESSION_SETUP_COMMAND_DENIED");
     }
     let dir = host.path().app_data_dir().map_err(|_| "LOCAL_STORE_UNAVAILABLE")?;

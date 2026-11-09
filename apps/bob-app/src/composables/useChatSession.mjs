@@ -83,6 +83,10 @@ const creatingKind = ref(null); // 'project' | 'conversation' | null
 const creatingForProjectId = ref(null);
 const newItemTitle = ref('');
 const creationMode = ref('local');
+const firstSessionMessage = ref('');
+const nativeSetupReply = ref('');
+const remoteHarnesses = {dsh:'DSH',claude:'Claude Code',codex:'Codex',agy:'AGY',pi:'Pi'};
+let nativeSetupTimer;
 const creationConnectionId = ref('');
 const creationWorkspace = ref('');
 const creationWorkspaces = ref([]);
@@ -106,6 +110,7 @@ function dshSetupBridge(owner) {
     createProject: (projectId,title) => call('app_project_create',{projectId,title}),
     dshList: connectionId => call('app_dsh_list',{connectionId}),
     dshCreate: (connectionId,sessionId,workspace,title) => call('app_dsh_create',{connectionId,sessionId,workspace,title}),
+    nativeSetup: args => call('app_native_setup',args),
     projectLinkSet: args => call('app_project_link_set',args),
   };
 }
@@ -118,15 +123,17 @@ async function loadCreationWorkspaces() {
   creationWorkspaces.value = [];
   creationError.value = '';
   const node = creationNode.value;
-  creationLoading.value = Boolean(node && creationMode.value === 'dsh');
+  const tool = creationMode.value;
+  creationLoading.value = Boolean(node && Object.hasOwn(remoteHarnesses,tool));
   if (!creationLoading.value) return;
   try {
     const rows = await dshSetupBridge(pairedCreationOwner.value).dshList(node.id);
     if (read !== workspaceRead) return;
     creationWorkspaces.value = [...new Set(rows
-      .filter(row => row.source_kind === 'dsh_native' && typeof row.workspace === 'string' && row.workspace)
+      .filter(row => (tool === 'dsh' ? row.source_kind === 'dsh_native' : row.harness === tool)
+        && row.directoryStale !== true && typeof row.workspace === 'string' && row.workspace)
       .map(row => row.workspace))].sort();
-    if (!creationWorkspaces.value.length) creationError.value = 'createNoDshWorkspaces';
+    if (!creationWorkspaces.value.length) creationError.value = 'createNoToolWorkspaces';
   } catch {
     if (read === workspaceRead) creationError.value = 'createNodeUnavailable';
   } finally {
@@ -870,7 +877,9 @@ function beginCreateItem(kind, projectId) {
   creatingKind.value = saved?.kind || kind;
   creatingForProjectId.value = saved?.projectId || projectId;
   newItemTitle.value = saved?.title || '';
-  creationMode.value = saved ? 'dsh' : kind === 'project' ? 'none' : 'local';
+  creationMode.value = saved ? saved.harness || 'dsh' : kind === 'project' ? 'none' : 'local';
+  firstSessionMessage.value = saved?.text || '';
+  nativeSetupReply.value = '';
   creationConnectionId.value = saved?.connectionId || '';
   creationWorkspace.value = saved?.workspace || '';
   creationWorkspaces.value = saved ? [saved.workspace] : [];
@@ -890,11 +899,19 @@ function startCreateConversation(projectId = null) {
 
 function cancelCreateItem() {
   if (creationBusy.value) return;
+  clearTimeout(nativeSetupTimer);
   workspaceRead++;
   creatingKind.value = null;
 }
 
-async function submitDshCreation(title) {
+async function submitRemoteCreation(title, checking) {
+  const harness = creationMode.value;
+  const isDsh = harness === 'dsh';
+  const text = firstSessionMessage.value;
+  if (!isDsh && (!text.trim() || new TextEncoder().encode(text).length > 32000)) {
+    creationError.value = 'createFirstMessageRequired';
+    return;
+  }
   const node = creationNode.value;
   if (!node || !creationWorkspace.value || (!remoteCreation.value && !creationWorkspaces.value.includes(creationWorkspace.value))) {
     creationError.value = 'createNodeUnavailable';
@@ -918,13 +935,14 @@ async function submitDshCreation(title) {
     endpoint: node.url || node.baseUrl || '',
     workspace: creationWorkspace.value,
     sessionId: 'session-' + crypto.randomUUID(),
+    ...(isDsh ? {} : {harness,text,requestId:'setup-' + crypto.randomUUID()}),
   };
   if (attempt.endpoint !== (node.url || node.baseUrl || '') || (attempt.ownerId || null) !== (owner?.id || null)
       || (attempt.ownerEndpoint || null) !== (owner?.url || owner?.baseUrl || null)) {
     creationError.value = 'createTargetChanged';
     return;
   }
-  if (attempt.projectId) {
+  if (!checking && attempt.projectId) {
     const links = await bridge.projectLinks();
     if (links?.writable === false || !Array.isArray(links?.links)) {
       creationError.value = 'createProjectLinkUnavailable';
@@ -945,23 +963,56 @@ async function submitDshCreation(title) {
     return;
   }
   remoteCreation.value = attempt;
-  if (attempt.kind === 'project') {
+  if (!checking && attempt.kind === 'project') {
     const snap = await bridge.createProject(attempt.projectId, attempt.title);
     if (!snap?.projects?.some(project => project.id === attempt.projectId)) throw Error('PROJECT_CREATE_FAILED');
     if (!owner) applyCatalogPreferences(snap);
   }
-  const result = await bridge.dshCreate(node.id, attempt.sessionId, attempt.workspace, attempt.title || t('newConversation'));
-  if (result?.address?.connection_id !== node.id || result.address.session_id !== attempt.sessionId
-      || result.workspace !== attempt.workspace || result.source_kind !== 'dsh_native' || !result.title) {
-    throw Error('DSH_IDENTITY_MISMATCH');
+  let result;
+  let sessionId = attempt.sessionId;
+  if (isDsh) {
+    result = await bridge.dshCreate(node.id, sessionId, attempt.workspace, attempt.title || t('newConversation'));
+    if (result?.address?.connection_id !== node.id || result.address.session_id !== sessionId
+        || result.workspace !== attempt.workspace || result.source_kind !== 'dsh_native' || !result.title) {
+      throw Error('DSH_IDENTITY_MISMATCH');
+    }
+  } else {
+    const request = {connectionId:node.id, harness, workspace:attempt.workspace, requestId:attempt.requestId};
+    result = await bridge.nativeSetup({...request,action:'check'});
+    if (!checking && !attempt.sent && result?.request_id === attempt.requestId && result.status === 'missing') {
+      const dispatched = {...attempt,sent:true};
+      localStorage.setItem(creationJournalKey, JSON.stringify(dispatched));
+      remoteCreation.value = dispatched;
+      result = await bridge.nativeSetup({...request,action:'start',text:attempt.text});
+    }
+    if (result?.request_id !== attempt.requestId) throw Error(result?.error || 'HARNESS_IDENTITY_UNCONFIRMED');
+    nativeSetupReply.value = result.reply || '';
+    if (['accepted','running','persisting'].includes(result.status)) {
+      creationError.value = result.status === 'persisting' ? 'createNativePersisting' : 'createNativeRunning';
+      clearTimeout(nativeSetupTimer);
+      nativeSetupTimer = setTimeout(() => {
+        if (creatingKind.value && remoteCreation.value?.requestId === attempt.requestId) void submitCreateItem(true);
+      },result.status === 'persisting' ? 5000 : 2200);
+      return;
+    }
+    if (result.status !== 'ready') {
+      creationError.value = result.status === 'missing' && !remoteCreation.value?.sent ? 'createRemoteRetry' : 'createNativeUnconfirmed';
+      return;
+    }
+    sessionId = result.address?.session_id;
+    const prefix = harness === 'claude' ? 'claude-jsonl:' : harness+':';
+    if (result.address?.connection_id !== node.id || !sessionId?.startsWith(prefix) || sessionId !== result.session_id) {
+      throw Error('HARNESS_IDENTITY_UNCONFIRMED');
+    }
+    result = {title:attempt.title || t('newConversation'),workspace:attempt.workspace,source_kind:harness+'_native'};
   }
   if (attempt.projectId) {
     creationError.value = 'createLinkUnconfirmed';
     const links = await bridge.projectLinks();
-    const findLink = link => link.connection_id === node.id && link.harness === 'dsh' && link.session_id === attempt.sessionId;
+    const findLink = link => link.connection_id === node.id && link.harness === harness && link.session_id === sessionId;
     const existing = links.links.find(findLink);
     if (!existing) {
-      const saved = await bridge.projectLinkSet({connectionId: node.id, harness: 'dsh', sessionId: attempt.sessionId,
+      const saved = await bridge.projectLinkSet({connectionId: node.id, harness, sessionId,
         projectId: attempt.projectId, expectedVersion: 0});
       if (saved?.links?.find(findLink)?.project_id !== attempt.projectId) throw Error('PROJECT_LINK_UNCONFIRMED');
     } else if (existing.project_id !== attempt.projectId) {
@@ -974,11 +1025,11 @@ async function submitDshCreation(title) {
   creatingKind.value = null;
   directoryCreationRevision.value++;
   if (owner) void reload();
-  await selectRemoteConversation({node, session: {id: attempt.sessionId, title: result.title,
+  await selectRemoteConversation({node, session: {id: sessionId, harness, title: result.title,
     workspace: result.workspace, source_kind: result.source_kind}});
 }
 
-async function submitCreateItem() {
+async function submitCreateItem(checking = false) {
   if (!available || !creatingKind.value || creationBusy.value) return;
   const title = newItemTitle.value.trim();
   if (creatingKind.value === 'project' && !title) return;
@@ -989,7 +1040,7 @@ async function submitCreateItem() {
   creationBusy.value = true;
   creationError.value = '';
   try {
-    if (creationMode.value === 'dsh') await submitDshCreation(title);
+    if (Object.hasOwn(remoteHarnesses,creationMode.value)) await submitRemoteCreation(title, checking === true);
     else await submitLocalCreation(title);
   } catch {
     if (!creationError.value) creationError.value = remoteCreation.value ? 'createRemoteRetry' : 'createItemFailed';
@@ -1099,14 +1150,16 @@ async function startup() {
 
 async function openAssistantSessionDraft(text) {
   const [command, ...fields] = text.split('|').map(part => part.trim());
-  if (!['/new-dsh', '新建 DSH 会话', '新建DSH会话'].includes(command)) return false;
+  const natural = /^新建\s*(DSH|Claude(?: Code)?|Codex|AGY|Pi)\s*(?:会话|对话)$/i.exec(command);
+  const tool = natural ? natural[1].split(' ')[0].toLowerCase() : command.startsWith('/new-') ? command.slice(5) : '';
+  if (!Object.hasOwn(remoteHarnesses,tool)) return false;
   startCreateConversation();
   if (remoteCreation.value) return true;
   if (!remoteCreationEnabled.value || fields.length > 4) {
     creationError.value = 'createAssistantCommandHelp';
     return true;
   }
-  creationMode.value = 'dsh';
+  creationMode.value = tool;
   const [device, workspace, project, title] = fields;
   newItemTitle.value = title || '';
   if (project) {
@@ -1126,14 +1179,14 @@ async function openAssistantSessionDraft(text) {
     creationConnectionId.value = matches[0].id;
     await loadCreationWorkspaces();
     if (workspace && creationWorkspaces.value.includes(workspace)) creationWorkspace.value = workspace;
-    else if (workspace && !creationError.value) creationError.value = 'createNoDshWorkspaces';
+    else if (workspace && !creationError.value) creationError.value = 'createNoToolWorkspaces';
   }
   return true;
 }
 
 async function send() {
   if (sessionId.value && sessionId.value === assistantConversationId.value && !composerAttachments.value.length
-      && /^(?:\/new-dsh|新建 ?DSH 会话|新建DSH会话)(?:\s*\||$)/.test(draft.value.trim())
+      && /^(?:\/new-(?:dsh|claude|codex|agy|pi)|新建\s*(?:DSH|Claude(?: Code)?|Codex|AGY|Pi)\s*(?:会话|对话))(?:\s*\||$)/i.test(draft.value.trim())
       && await openAssistantSessionDraft(draft.value.trim())) return;
   if (!canSend.value) return;
   if (!executionEnabled.value && !homeConfigured.value) {
@@ -1256,6 +1309,7 @@ const statusKeys = {
 
   function disposeChatSession() {
     disposed = true;
+    clearTimeout(nativeSetupTimer);
     if (draftSaveTimer) clearTimeout(draftSaveTimer);
     if (scrollSaveTimer) clearTimeout(scrollSaveTimer);
     if (historyWheelResetTimer) clearTimeout(historyWheelResetTimer);
@@ -1299,6 +1353,9 @@ const statusKeys = {
     creatingKind,
     creatingForProjectId,
     newItemTitle,
+    firstSessionMessage,
+    nativeSetupReply,
+    remoteHarnesses,
     creationMode,
     creationConnectionId,
     creationWorkspace,
