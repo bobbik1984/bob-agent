@@ -1512,7 +1512,7 @@ pub fn handle_rpc_command(ctx: &mut NodeContext, command: &str, args: &Value) ->
                 "app_dsh_cancel" => client.cancel_session(bob_runtime::dsh_session::SessionAddress{connection_id:connection.into(),session_id:args["sessionId"].as_str().ok_or("DSH_SESSION_REQUIRED")?.into()}),
                 "app_dsh_live" => client.live(bob_runtime::dsh_session::SessionAddress{connection_id:connection.into(),session_id:args["sessionId"].as_str().ok_or("DSH_SESSION_REQUIRED")?.into()}),
                 "app_dsh_page" => client.history_page(bob_runtime::dsh_session::SessionAddress{connection_id:connection.into(),session_id:args["sessionId"].as_str().ok_or("DSH_SESSION_REQUIRED")?.into()},args.get("before").filter(|v|!v.is_null()).map(|v|v.as_i64().ok_or("DSH_PAGE_CURSOR_INVALID")).transpose()?,args.get("through").filter(|v|!v.is_null()).map(|v|v.as_i64().ok_or("DSH_PAGE_CURSOR_INVALID")).transpose()?,args.get("after").filter(|v|!v.is_null()).map(|v|v.as_i64().ok_or("DSH_PAGE_CURSOR_INVALID")).transpose()?),
-                "app_dsh_preview" => client.preview_if_changed(bob_runtime::dsh_session::SessionAddress{connection_id:connection.into(),session_id:args.get("sessionId").and_then(Value::as_str).ok_or("DSH_PROTOCOL")?.into()},args.get("path").and_then(Value::as_str).ok_or("DSH_PROTOCOL")?,args.get("known").filter(|v|!v.is_null())),
+                "app_dsh_preview" => client.preview_message(bob_runtime::dsh_session::SessionAddress{connection_id:connection.into(),session_id:args.get("sessionId").and_then(Value::as_str).ok_or("DSH_PROTOCOL")?.into()},args.get("path").and_then(Value::as_str).ok_or("DSH_PROTOCOL")?,args.get("known").filter(|v|!v.is_null()), args.get("messageSequence").filter(|v|!v.is_null()).map(|v|v.as_i64().ok_or("DSH_PROTOCOL")).transpose()?),
                 "app_dsh_history" => {
                     let session=args["sessionId"].as_str().ok_or("DSH_SESSION_REQUIRED")?;
                     serde_json::to_value(client.history(bob_runtime::dsh_session::SessionAddress{connection_id:connection.into(),session_id:session.into()})?).map_err(|_|"DSH_PROTOCOL")
@@ -2577,13 +2577,14 @@ fn execute_unlocked_harness_rpc(
                     args.get("through").filter(|v| !v.is_null()).map(|v| v.as_i64().ok_or("DSH_PAGE_CURSOR_INVALID")).transpose()?,
                     args.get("after").filter(|v| !v.is_null()).map(|v| v.as_i64().ok_or("DSH_PAGE_CURSOR_INVALID")).transpose()?,
                 ),
-                "app_dsh_preview" => client.preview_if_changed(
+                "app_dsh_preview" => client.preview_message(
                     bob_runtime::dsh_session::SessionAddress {
                         connection_id: connection.into(),
                         session_id: args.get("sessionId").and_then(Value::as_str).ok_or("DSH_PROTOCOL")?.into(),
                     },
                     args.get("path").and_then(Value::as_str).ok_or("DSH_PROTOCOL")?,
                     args.get("known").filter(|v| !v.is_null()),
+                    args.get("messageSequence").filter(|v|!v.is_null()).map(|v|v.as_i64().ok_or("DSH_PROTOCOL")).transpose()?,
                 ),
                 "app_dsh_history" => {
                     let session = args["sessionId"].as_str().ok_or("DSH_SESSION_REQUIRED")?;

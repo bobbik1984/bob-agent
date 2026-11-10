@@ -23,7 +23,7 @@ fn history_read_error(error: tungstenite::Error) -> &'static str {
 }
 // Only server-read history can authorize a preview. Scope includes credential identity;
 // pages are bounded and volatile, never client-supplied grants or persistent history copies.
-struct PreviewReference { scope: String, session: String, root: String, text: String, at: Instant }
+struct PreviewReference { scope: String, session: String, root: String, text: String, contexts: Vec<(String, String, i64)>, at: Instant }
 #[derive(Default)]
 struct PreviewReferences { entries: std::collections::VecDeque<PreviewReference>, bytes: usize }
 impl PreviewReferences {
@@ -35,7 +35,39 @@ impl PreviewReferences {
   self.bytes=self.entries.iter().map(|e|e.text.len()).sum();
   while self.entries.len()>=64 || self.bytes+text.len()>8*1024*1024 {if let Some(e)=self.entries.pop_front(){self.bytes-=e.text.len()}else{break}}
   self.bytes+=text.len();
-  self.entries.push_back(PreviewReference{scope:scope.into(),session:h.address.session_id.clone(),root:root.clone(),text,at:Instant::now()});
+  self.entries.push_back(PreviewReference{scope:scope.into(),session:h.address.session_id.clone(),root:root.clone(),text,contexts:Vec::new(),at:Instant::now()});
+ }
+ fn remember_snapshot(&mut self, scope:&str, h:&History, snapshot:&Value) {
+  self.remember(scope,h);
+  let Some(entry)=self.entries.back_mut().filter(|e|e.scope==scope && e.session==h.address.session_id) else{return};
+  entry.contexts=crate::dsh_file_context::message_contexts(h,snapshot);
+ }
+ #[cfg(test)]
+ fn resolved_path(&self,scope:&str,session:&str,path:&str)->Result<String,&'static str>{self.resolved_message_path(scope,session,path,None)}
+ #[cfg(test)]
+ fn resolved_message_path(&self,scope:&str,session:&str,path:&str,sequence:Option<i64>)->Result<String,&'static str>{
+  let paths=self.message_paths(scope,session,path,sequence)?;
+  if paths.len()!=1{return Err("DSH_FILE_CONTEXT_AMBIGUOUS");} Ok(paths[0].clone())
+ }
+ fn message_paths(&self,scope:&str,session:&str,path:&str,sequence:Option<i64>)->Result<Vec<String>,&'static str>{
+  let entries:Vec<_>=self.entries.iter().filter(|e|e.scope==scope && e.session==session && e.at.elapsed()<Duration::from_secs(600) && e.text.contains(path)).collect();
+  // An actual Markdown target is stronger evidence than a later prose mention
+  // of the same filename. Multiple real targets still fail closed.
+  let target=format!("]({path})");
+  let has_link=entries.iter().any(|e|e.contexts.iter().any(|(text,_,seq)|sequence.is_none_or(|s|s==*seq) && text.contains(&target)));
+  let mut candidates=std::collections::BTreeSet::new();
+  for e in entries {
+   for (text,base,seq) in &e.contexts {
+    if sequence.is_some_and(|s|s!=*seq){continue;}
+    if !text.contains(path) || (has_link && !text.contains(&target)){continue;}
+    if base=="!ambiguous" {return Err("DSH_FILE_CONTEXT_AMBIGUOUS");}
+    candidates.insert(if base.is_empty() || path.starts_with(&format!("{base}/")) {path.to_owned()} else {format!("{base}/{path}")});
+   }
+  }
+  if sequence.is_some() && candidates.is_empty(){return Err("DSH_FILE_NOT_REFERENCED");}
+  if candidates.len()>8 {return Err("DSH_FILE_CONTEXT_AMBIGUOUS");}
+  if candidates.is_empty(){candidates.insert(path.to_owned());}
+  Ok(candidates.into_iter().collect())
  }
  fn session_root(&self,scope:&str,session:&str)->Option<String>{self.entries.iter().rev().find(|e|e.scope==scope && e.session==session).map(|e|e.root.clone())}
  fn root(&self,scope:&str,session:&str,path:&str)->Option<String>{
@@ -155,7 +187,12 @@ impl DshClient {
   let value:Value=serde_json::from_slice(&bytes).map_err(|_|"DSH_PROTOCOL")?;
   if value["type"]!="server-response" || value["rpcId"]!=id {return Err("DSH_PROTOCOL");}
   if value["result"]["ok"]!=true {
-   if method.starts_with("workspaceFiles/") { eprintln!("DSH preview rejected: {}", value["result"]["error"]["code"].as_str().unwrap_or("unknown")); }
+   if method.starts_with("workspaceFiles/") {
+    return Err(match value["result"]["error"]["code"].as_str().unwrap_or("") {
+     "workspace-file/not-found"=>"DSH_FILE_NOT_FOUND",
+     _=>"DSH_FILE_UNAVAILABLE",
+    });
+   }
    return Err("DSH_REJECTED");
   }
   Ok(value["result"]["value"].clone())
@@ -177,8 +214,9 @@ impl DshClient {
   Ok(json!(output))
  }
  pub fn history(&self,address:SessionAddress)->Result<History,&'static str>{
-  let h=project_history(address.clone(),&self.snapshot(&address,200)?)?;
-  preview_references().lock().map_err(|_|"DSH_UNAVAILABLE")?.remember(&self.scope,&h);
+  let snapshot=self.snapshot(&address,200)?;
+  let h=project_history(address.clone(),&snapshot)?;
+  preview_references().lock().map_err(|_|"DSH_UNAVAILABLE")?.remember_snapshot(&self.scope,&h,&snapshot);
   Ok(h)
  }
  pub fn live(&self,address:SessionAddress)->Result<Value,&'static str>{
@@ -297,7 +335,7 @@ impl DshClient {
    let first=records.first().map(|v|v["event"]["seq"].as_i64().ok_or("DSH_PROTOCOL")).transpose()?.unwrap_or(0);
    if records.iter().any(|v|v["event"]["seq"].as_i64().is_none_or(|n|n<0||n>cursor||before.is_some_and(|b|n>=b))) {return Err("DSH_PAGE_CURSOR_INVALID");}
    if h.messages.len()>=10 || !h.partial || first==0 || requests>=32 || started.elapsed()>Duration::from_secs(20) {
-    preview_references().lock().map_err(|_|"DSH_UNAVAILABLE")?.remember(&self.scope,&h);
+    preview_references().lock().map_err(|_|"DSH_UNAVAILABLE")?.remember_snapshot(&self.scope,&h,&snapshot);
     let mut output=serde_json::to_value(&h).map_err(|_|"DSH_PROTOCOL")?;
     let skip=h.messages.len().saturating_sub(10);
     output["messages"]=json!(&h.messages[skip..]);
@@ -323,7 +361,15 @@ impl DshClient {
   }
  }
  pub fn preview(&self,address:SessionAddress,path:&str)->Result<Value,&'static str>{self.preview_if_changed(address,path,None)}
- pub fn preview_if_changed(&self,address:SessionAddress,path:&str,known:Option<&Value>)->Result<Value,&'static str>{
+ pub fn preview_if_changed(&self,address:SessionAddress,path:&str,known:Option<&Value>)->Result<Value,&'static str>{self.preview_message(address,path,known,None)}
+ pub fn preview_message(&self,address:SessionAddress,path:&str,known:Option<&Value>,sequence:Option<i64>)->Result<Value,&'static str>{
+  if sequence.is_some_and(|s|s<0 || s==i64::MAX){return Err("DSH_PAGE_CURSOR_INVALID");}
+  // Rehydrate a bounded page around the selected reply, including its tool context.
+  // A sequence is only a selector: history read with this credential authorizes it.
+  if let Some(seq)=sequence {
+   let present=preview_references().lock().map_err(|_|"DSH_UNAVAILABLE")?.entries.iter().any(|e|e.scope==self.scope && e.session==address.session_id && e.at.elapsed()<Duration::from_secs(600) && e.contexts.iter().any(|(text,_,s)|*s==seq && text.contains(path)));
+   if !present {self.history_page(address.clone(),Some(seq+1),Some(seq),None)?;}
+  }
   let ext=preview_extension(path)?;
   let cached=preview_references().lock().map_err(|_|"DSH_UNAVAILABLE")?.root(&self.scope,&address.session_id,path);
   let root=match cached {
@@ -333,15 +379,32 @@ impl DshClient {
     preview_references().lock().map_err(|_|"DSH_UNAVAILABLE")?.root(&self.scope,&address.session_id,path).ok_or("DSH_FILE_NOT_REFERENCED")?
    }
   };
-  let expected=format!("{}/{}",root.trim_end_matches('/'),path);
-  let args=json!({"workspaceFileScopeId":address.session_id,"path":path});
-  let stat=self.rpc("workspaceFiles/stat",args.clone())?;
-  if stat["absolutePath"]!=expected {return Err("DSH_FILE_OUTSIDE_WORKSPACE");}
+  let paths=preview_references().lock().map_err(|_|"DSH_UNAVAILABLE")?.message_paths(&self.scope,&address.session_id,path,sequence)?;
+  // Only exact paths in this reply's observed directories. No filesystem search,
+  // no guessed parent traversal, and never choose the first of two real files.
+  let mut found=None;
+  for candidate in paths {
+   preview_extension(&candidate)?;
+   let expected=format!("{}/{}",root.trim_end_matches('/'),candidate);
+   let args=json!({"workspaceFileScopeId":address.session_id,"path":candidate});
+   match self.rpc("workspaceFiles/stat",args) {
+    Ok(stat)=>{
+     if stat["absolutePath"]!=expected{return Err("DSH_FILE_OUTSIDE_WORKSPACE");}
+     if found.is_some(){return Err("DSH_FILE_CONTEXT_AMBIGUOUS");}
+     found=Some((candidate,stat));
+    },
+    Err("DSH_FILE_NOT_FOUND")=>{},
+    Err(error)=>return Err(error),
+   }
+  }
+  let (resolved,stat)=found.ok_or("DSH_FILE_NOT_FOUND")?;
+  let expected=format!("{}/{}",root.trim_end_matches('/'),resolved);
+  let args=json!({"workspaceFileScopeId":address.session_id,"path":resolved});
   let size=stat["bytes"].as_u64().filter(|n|*n<=2*1024*1024).ok_or("DSH_FILE_TOO_LARGE")?;
   let document=["pdf","docx","xlsx","pptx","doc","xls","ppt","odt","ods","odp"].contains(&ext.as_str());
   let version=if document {json!(format!("document-v1:{}",stat["version"]))} else {stat["version"].clone()};
-  if known.is_some_and(|k| !stat["version"].is_null() && k["version"]==version && k["bytes"]==stat["bytes"]) {
-   return Ok(json!({"not_modified":true,"path":path,"connection_id":address.connection_id,"session_id":address.session_id,"version":version,"bytes":size}));
+  if known.is_some_and(|k| !stat["version"].is_null() && k["resolved_path"]==resolved && k["version"]==version && k["bytes"]==stat["bytes"]) {
+   return Ok(json!({"not_modified":true,"path":path,"resolved_path":resolved,"connection_id":address.connection_id,"session_id":address.session_id,"version":version,"bytes":size}));
   }
   let mut url=self.base.join("api/file").map_err(|_|"DSH_PROTOCOL")?;
   url.query_pairs_mut().append_pair("path",&expected);
@@ -354,7 +417,7 @@ impl DshClient {
   if after["absolutePath"]!=stat["absolutePath"] || after["version"]!=stat["version"] || after["bytes"]!=stat["bytes"] {return Err("DSH_FILE_CHANGED");}
   use base64::Engine;
   use sha2::{Digest,Sha256};
-  let mut result=json!({"path":path,"extension":ext,"data":base64::engine::general_purpose::STANDARD.encode(&bytes),"bytes":size,"version":version,"sha256":format!("{:x}",Sha256::digest(&bytes)),"source":"current_workspace","connection_id":address.connection_id,"session_id":address.session_id});
+  let mut result=json!({"path":path,"resolved_path":resolved,"extension":ext,"data":base64::engine::general_purpose::STANDARD.encode(&bytes),"bytes":size,"version":version,"sha256":format!("{:x}",Sha256::digest(&bytes)),"source":"current_workspace","connection_id":address.connection_id,"session_id":address.session_id});
   if document {result["document"]=crate::agy_directory::render_document_bytes(&bytes,&ext)?;}
   Ok(result)
  }
@@ -925,5 +988,34 @@ mod attachment_stage_tests {
  }
 
  fn _noop() {
+ }
+}
+
+#[cfg(test)] mod preview_context_resolution_tests {
+ use super::*;
+ fn entry(text:&str,base:&str)->PreviewReference {PreviewReference{scope:"scope".into(),session:"session".into(),root:"/work".into(),text:text.into(),contexts:vec![(text.into(),base.into(),1)],at:Instant::now()}}
+ #[test] fn real_link_is_not_rebound_by_later_prose() {
+  let mut cache=PreviewReferences::default();cache.entries.push_back(entry("[Doc](docs/A.md)","project"));cache.entries.push_back(entry("Updated `docs/A.md`","!ambiguous"));
+  assert_eq!(cache.resolved_path("scope","session","docs/A.md").unwrap(),"project/docs/A.md");
+ }
+ #[test] fn conflicting_actual_links_and_scopes_are_not_guessed() {
+  let mut cache=PreviewReferences::default();cache.entries.push_back(entry("[Doc](README.md)","a"));cache.entries.push_back(entry("[Doc](README.md)","b"));
+  assert_eq!(cache.resolved_path("scope","session","README.md"),Err("DSH_FILE_CONTEXT_AMBIGUOUS"));
+  assert_eq!(cache.root("other","session","README.md"),None);
+ }
+}
+
+#[cfg(test)] mod message_preview_tests {
+ use super::*;
+ #[test] fn identical_names_in_different_replies_are_isolated() {
+  let mut cache=PreviewReferences::default();
+  for (seq,base) in [(10,"a"),(20,"b")] {
+   cache.entries.push_back(PreviewReference{scope:"s".into(),session:"session".into(),root:"/work".into(),text:"[Read](README.md)".into(),contexts:vec![("[Read](README.md)".into(),base.into(),seq)],at:Instant::now()});
+  }
+  assert_eq!(cache.resolved_message_path("s","session","README.md",Some(10)),Ok("a/README.md".into()));
+  assert_eq!(cache.resolved_message_path("s","session","README.md",Some(20)),Ok("b/README.md".into()));
+  assert_eq!(cache.resolved_message_path("s","session","README.md",Some(30)),Err("DSH_FILE_NOT_REFERENCED"));
+  assert_eq!(cache.resolved_message_path("other","session","README.md",Some(10)),Err("DSH_FILE_NOT_REFERENCED"));
+  assert_eq!(cache.resolved_message_path("s","other","README.md",Some(10)),Err("DSH_FILE_NOT_REFERENCED"));
  }
 }

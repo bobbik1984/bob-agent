@@ -14,6 +14,7 @@ export default defineComponent({
   props: {
     content: { type: String, default: '' },
     plain: Boolean,
+    messageSequence: { type: Number, default: null },
     thinkingSteps: { type: Array, default: () => [] },
     stream: { type: Boolean, default: false },
   },
@@ -113,7 +114,7 @@ export default defineComponent({
             { href: node.href, target: '_blank', rel: 'noopener noreferrer', referrerpolicy: 'no-referrer' },
             node.tag === 'image-reference' ? t('messageImageLink', { name: label }) : label,
           );
-        if (openFile) return h(DshArtifactLink, { path: node.url, label });
+        if (openFile) return h(DshArtifactLink, { path: node.url, label, messageSequence: props.messageSequence });
         return h('span', { class: 'message-file-reference', title: node.url }, [
           label,
           ' ',

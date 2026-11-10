@@ -23,6 +23,7 @@ pub mod context_capsule;
 pub mod claude_rpc;
 pub mod harness_auth;
 pub mod runtime_rpc;
+mod dsh_file_context;
 use bob_kernel::app::LocalApp;
 use bob_kernel::direct_provider::{
     DirectChatTurn, DirectProviderProfile, DirectProviderProfileInput,

@@ -1,12 +1,12 @@
 import {readingCache,readingKey,singleFlight} from './reading-cache.mjs';
 export function createPersistentPreviewCache(fetchFile,{store=readingCache,now=()=>Date.now()}={}){
- const key=a=>readingKey(a.connectionId,'file',a.endpoint||'',a.sessionId,a.path);
+ const key=a=>readingKey(a.connectionId,'file',a.endpoint||'',a.sessionId,JSON.stringify([a.path,a.messageSequence??null]));
  function validate(f,a){if(f.connection_id!==a.connectionId||f.session_id!==a.sessionId||f.path!==a.path)throw Error('DSH_IDENTITY_MISMATCH');if(!Number.isSafeInteger(f.bytes)||f.bytes<0||f.bytes>2*1024*1024)throw Error('DSH_FILE_TOO_LARGE')}
  return {
   async peek(a){return (await store.get(key(a)))?.file||null},
   async get(a,{force=false}={}){return singleFlight(key(a),async()=>{const revision=store.revision();const saved=await store.get(key(a));
    if(!force&&saved&&saved.cursor===a.cursor&&now()-saved.checked<60000)return saved.file;
-   const reply=await fetchFile(a,saved?{version:saved.file.version,bytes:saved.file.bytes}:null);validate(reply,a);
+   const reply=await fetchFile(a,saved?{version:saved.file.version,bytes:saved.file.bytes,resolved_path:saved.file.resolved_path}:null);validate(reply,a);
    if(reply.not_modified&&!saved)throw Error('DSH_CACHE_MISSING');
    const file=reply.not_modified?saved.file:reply;
    if(typeof file.data!=='string'||atob(file.data).length!==file.bytes)throw Error('DSH_FILE_CHANGED');

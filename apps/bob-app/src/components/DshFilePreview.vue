@@ -3,6 +3,7 @@ import {ref, onMounted, onUnmounted, provide, inject} from 'vue';
 import {useI18n} from 'vue-i18n';
 import {kernelBridge} from '../native-bridge.mjs';
 import MessageContent from './MessageContent.vue';
+import {previewErrorKey} from '../preview-error.mjs';
 import {artifactHtmlDocument, artifactHtmlSandbox} from '../artifact-html.mjs';
 
 const props = defineProps({address: Object});
@@ -16,7 +17,7 @@ function quoteForFeedback() {
 const {t} = useI18n();
 
 provide('dshOpenFile', null);
-const getFile = inject('dshPreviewGet', a => kernelBridge.dshPreview(a.connectionId, a.sessionId, a.path));
+const getFile = inject('dshPreviewGet', a => kernelBridge.dshPreview(a.connectionId, a.sessionId, a.path, null, a.messageSequence));
 
 // State
 const dialog = ref(null), busy = ref(true), error = ref(''), file = ref(null), url = ref(''), text = ref('');
@@ -202,7 +203,7 @@ onUnmounted(() => {
 <dialog ref="dialog" class="dsh-preview" @cancel.prevent="handleBack" @click="onBackdropClick">
   <header class="dsh-preview-header">
     <button type="button" class="dsh-preview-back" @click="handleBack">← {{ t(zoomed ? 'filePreviewExitZoom' : 'filePreviewBack') }}</button>
-    <strong class="dsh-preview-title">{{ address.path }}</strong>
+    <strong class="dsh-preview-title">{{ file?.resolved_path || address.path }}</strong>
     <button type="button" class="dsh-preview-close" @click="closeAll">{{ t('filePreviewClose') }}</button>
   </header>
 
@@ -257,7 +258,7 @@ onUnmounted(() => {
   <p class="preview-status-line">{{ t(file?.from_cache ? 'filePreviewCached' : 'filePreviewCurrent') }}</p>
   <p v-if="file?.resources_unavailable?.length" role="status" class="preview-warning">{{ t('filePreviewResourcesPartial', {count: file.resources_unavailable.length}) }}</p>
   <p v-if="busy" role="status">{{ t('filePreviewLoading') }}</p>
-  <p v-if="error" role="alert" class="preview-error">{{ t('filePreviewFailed') }} · {{ error }}</p>
+  <p v-if="error" role="alert" class="preview-error">{{ t(previewErrorKey(error)) }} · {{ error }}</p>
 
   <template v-if="file && !error">
     <!-- Legacy compatibility button (hidden if inspector is active, but present for backward-compatibility) -->

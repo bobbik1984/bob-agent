@@ -16,7 +16,7 @@ export function createKernelBridge(invoke, isAvailable) {
     nativeCancel: (connectionId,sessionId,requestId) => call('app_native_cancel',{connectionId,sessionId,requestId}),
     nativeEvents: (connectionId,sessionId,after=0,epoch='') => call('app_native_events',{connectionId,sessionId,after,epoch}),
     dshReceipt: (connectionId,sessionId,text,requestId) => call('app_dsh_receipt',{connectionId,sessionId,text,requestId}),
-    dshPreview: (connectionId,sessionId,path,known=null) => call('app_dsh_preview',{connectionId,sessionId,path,known}),
+    dshPreview: (connectionId,sessionId,path,known=null,messageSequence=null) => call('app_dsh_preview',{connectionId,sessionId,path,known,messageSequence}),
     dshList: connectionId => call('app_dsh_list', {connectionId}),
     dshLive: (connectionId,sessionId) => call('app_dsh_live',{connectionId,sessionId}),
     dshCancel: (connectionId,sessionId) => call('app_dsh_cancel',{connectionId,sessionId}),

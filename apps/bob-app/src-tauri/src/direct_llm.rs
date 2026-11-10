@@ -4192,7 +4192,8 @@ async fn native_dsh<R: Runtime>(
                     )
                 }
                 "preview" => {
-                    let known: Option<Value> = serde_json::from_str(&request_id).ok();
+                    let options: Value = serde_json::from_str(&request_id).unwrap_or(Value::Null);
+                    let known = options.get("known");
                     (
                         "app_dsh_preview",
                         json!({
@@ -4200,6 +4201,7 @@ async fn native_dsh<R: Runtime>(
                             "sessionId": session_id,
                             "path": text,
                             "known": known,
+                            "messageSequence": options.get("messageSequence"),
                         }),
                     )
                 }
@@ -4271,14 +4273,16 @@ async fn native_dsh<R: Runtime>(
                     )
                 }
                 "preview" => {
-                    let known: Option<Value> = serde_json::from_str(&request_id).ok();
-                    client.preview_if_changed(
+                    let options: Value = serde_json::from_str(&request_id).unwrap_or(Value::Null);
+                    let known = options.get("known");
+                    client.preview_message(
                         bob_runtime::dsh_session::SessionAddress {
                             connection_id: cid,
                             session_id: sid,
                         },
                         &text,
-                        known.as_ref(),
+                        known,
+                        options.get("messageSequence").and_then(Value::as_i64),
                     )
                 }
                 "history" => serde_json::to_value(client.history(
@@ -4492,8 +4496,8 @@ pub(crate) async fn app_dsh_page<R: Runtime>(host: AppHandle<R>, connection_id: 
  native_dsh(host,connection_id,"page",session_id,serde_json::json!({"before":before,"through":through,"after":after}).to_string(),String::new(),None).await
 }
 #[tauri::command]
-pub(crate) async fn app_dsh_preview<R: Runtime>(host: AppHandle<R>, connection_id: String, session_id: String, path: String, known: Option<Value>) -> Result<Value, &'static str> {
- native_dsh(host,connection_id,"preview",session_id,path,known.map(|v|v.to_string()).unwrap_or_default(),None).await
+pub(crate) async fn app_dsh_preview<R: Runtime>(host: AppHandle<R>, connection_id: String, session_id: String, path: String, known: Option<Value>, message_sequence: Option<i64>) -> Result<Value, &'static str> {
+ native_dsh(host,connection_id,"preview",session_id,path,json!({"known":known,"messageSequence":message_sequence}).to_string(),None).await
 }
 
 /// The paired Web owner creates and associates sessions for a replica.

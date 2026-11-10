@@ -304,10 +304,10 @@ function scrollToBottom(){
 }
 const preview=ref(null);let previewScroll=0;
 const visualReelOpen = ref(false);
-function openAssetPreview(path) {
+function openAssetPreview(path,sequence) {
   previewScroll = reader.value?.scrollTop || 0;
   clearTimeout(timer);
-  preview.value = fileAddress(path);
+  preview.value = fileAddress(path,sequence);
 }
 const sessionVisualAssets = computed(() => {
   if (!selected.value || !displayMessages.value?.length) return [];
@@ -328,6 +328,7 @@ const sessionVisualAssets = computed(() => {
         if (!assetsMap.has(clean)) {
           assetsMap.set(clean, {
             path: clean,
+            messageSequence: m.sequence,
             name: (match[1] && !match[1].startsWith('http')) ? match[1] : name,
             ext,
             isHtml,
@@ -339,11 +340,11 @@ const sessionVisualAssets = computed(() => {
   }
   return Array.from(assetsMap.values());
 });
-const fileCache=createPersistentPreviewCache((a,known)=>kernelBridge.dshPreview(a.connectionId,a.sessionId,a.path,known));
-const fileAddress=path=>({connectionId:connection.value,sessionId:selected.value.id,endpoint:nodes.value.find(n=>n.id===connection.value)?.baseUrl||nodes.value.find(n=>n.id===connection.value)?.url||'',path:artifactPath(path),cursor:history.value?.cursor});
+const fileCache=createPersistentPreviewCache((a,known)=>kernelBridge.dshPreview(a.connectionId,a.sessionId,a.path,known,a.messageSequence));
+const fileAddress=(path,messageSequence=null)=>({messageSequence,connectionId:connection.value,sessionId:selected.value.id,endpoint:nodes.value.find(n=>n.id===connection.value)?.baseUrl||nodes.value.find(n=>n.id===connection.value)?.url||'',path:artifactPath(path),cursor:history.value?.cursor});
 let artifactQueue=[],artifactTimer,artifactRunning=false,artifactCount=0;
 async function drainArtifacts(){if(artifactRunning||disposed)return;artifactQueue=artifactQueue.filter(x=>x.visible());artifactQueue.sort((a,b)=>b.element.getBoundingClientRect().top-a.element.getBoundingClientRect().top);const item=artifactQueue.shift();if(!item||artifactCount>=6)return;artifactCount++;artifactRunning=true;try{await item.run()}finally{artifactRunning=false;artifactTimer=setTimeout(drainArtifacts,150)}}
-provide('dshArtifacts',{peek:path=>fileCache.peek(fileAddress(path)),get:path=>fileCache.get(fileAddress(path)),enqueue:item=>{if(!artifactQueue.some(x=>x.element===item.element))artifactQueue.push(item);clearTimeout(artifactTimer);artifactTimer=setTimeout(drainArtifacts,250)}});
+provide('dshArtifacts',{peek:(path,seq)=>fileCache.peek(fileAddress(path,seq)),get:(path,seq)=>fileCache.get(fileAddress(path,seq)),enqueue:item=>{if(!artifactQueue.some(x=>x.element===item.element))artifactQueue.push(item);clearTimeout(artifactTimer);artifactTimer=setTimeout(drainArtifacts,250)}});
 provide('dshPreviewGet',async(a,onUpdate)=>{
  const cached=await fileCache.peek(a);
  if(!cached)return fileCache.get(a);
@@ -352,7 +353,7 @@ provide('dshPreviewGet',async(a,onUpdate)=>{
  return {...cached,from_cache:true};
 });
 async function closePreview(){preview.value=null;await nextTick();if(reader.value){reader.value.scrollTop=previewScroll;lastTop=previewScroll;}clearTimeout(timer);timer=setTimeout(refresh,60000)}
-provide('dshOpenFile',path=>{previewScroll=reader.value?.scrollTop||0;clearTimeout(timer);preview.value=fileAddress(path)});
+provide('dshOpenFile',(path,seq)=>{previewScroll=reader.value?.scrollTop||0;clearTimeout(timer);preview.value=fileAddress(path,seq)});
 let generation=0, disposed=false, restoring=false, timer;
 const nodes=computed(()=>props.nodes.filter(n=>n.enabled!==false));
 const historyKey=()=>readingKey(connection.value,'history',nodes.value.find(n=>n.id===connection.value)?.baseUrl||nodes.value.find(n=>n.id===connection.value)?.url||'',selected.value?.id);
@@ -620,7 +621,7 @@ onUnmounted(()=>{resetDshStop();stopVoiceInput();chatScroll.dispose();clearTimeo
            type="button"
            class="visual-reel-card"
            :title="asset.path"
-           @click="openAssetPreview(asset.path)"
+           @click="openAssetPreview(asset.path,asset.messageSequence)"
          >
            <div class="visual-reel-thumb-box">
              <span v-if="asset.isHtml" class="reel-type-badge html-badge">HTML</span>
@@ -648,10 +649,10 @@ onUnmounted(()=>{resetDshStop();stopVoiceInput();chatScroll.dispose();clearTimeo
    <p v-if="history?.partial || history?.omitted" class="dsh-note">{{ t('dshPartial') }}</p>
    <p v-if="busy && !history" class="terminal-status-line" role="status"><span class="terminal-rod" aria-hidden="true">[{{ rodFrame }}]</span><span>{{ stripDots(t('dshLoading')) }}</span><span class="terminal-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span></p>
    <button v-if="history?.has_more" class="dsh-older" :disabled="loadingOlder || busy" @click="loadOlder"><span v-if="loadingOlder" class="terminal-rod" aria-hidden="true">[{{ rodFrame }}]</span> {{ t(loadingOlder ? 'dshLoading' : 'dshLoadOlder') }}</button>
-   <article v-for="(m, idx) in filteredDisplayMessages" :key="m.sequence" :data-sequence="m.sequence" :data-chat-anchor="String(m.sequence)" class="dsh-message" :class="{user:m.role==='user'}"><div class="dsh-message-meta"><small class="dsh-role"><HarnessIcon v-if="m.role!=='user'" :session="selected" class="role-harness-icon" />{{ m.role==='user'?t('dshYou'):agentLabel }}</small><time v-if="formatMessageTime(m.created_at || m.createdAt || m.timestamp)" class="dsh-time">{{ formatMessageTime(m.created_at || m.createdAt || m.timestamp) }}</time><button type="button" class="dsh-copy-btn" @click="copyMessage(m)">{{ t(copiedSeq===m.sequence?'copied':'copyMessage') }}</button></div><MessageContent :content="m.text" :thinking-steps="m.thinkingSteps || []" :plain="m.role==='user'" :stream="m.role!=='user' && idx===displayMessages.length-1 && m.sequence===streamSeq" /></article>
+   <article v-for="(m, idx) in filteredDisplayMessages" :key="m.sequence" :data-sequence="m.sequence" :data-chat-anchor="String(m.sequence)" class="dsh-message" :class="{user:m.role==='user'}"><div class="dsh-message-meta"><small class="dsh-role"><HarnessIcon v-if="m.role!=='user'" :session="selected" class="role-harness-icon" />{{ m.role==='user'?t('dshYou'):agentLabel }}</small><time v-if="formatMessageTime(m.created_at || m.createdAt || m.timestamp)" class="dsh-time">{{ formatMessageTime(m.created_at || m.createdAt || m.timestamp) }}</time><button type="button" class="dsh-copy-btn" @click="copyMessage(m)">{{ t(copiedSeq===m.sequence?'copied':'copyMessage') }}</button></div><MessageContent :message-sequence="m.sequence" :content="m.text" :thinking-steps="m.thinkingSteps || []" :plain="m.role==='user'" :stream="m.role!=='user' && idx===displayMessages.length-1 && m.sequence===streamSeq" /></article>
    <p v-if="dshLiveState && dshLiveState.status!=='live'" class="dsh-notice" role="status">{{ t(dshLiveState.status==='connecting'?'dshLiveConnecting':'dshLiveReconnecting') }}</p>
-   <article v-for="m in dshLiveMessages" :key="'dsh-live-'+m.id" :data-chat-anchor="'live-'+m.id" class="dsh-message"><small><HarnessIcon :session="selected" class="role-harness-icon" />{{ agentLabel }}</small><MessageContent :content="m.text" :stream="m.active" /></article>
-   <article v-for="m in nativeMessages" :key="m.id" :data-chat-anchor="m.id" class="dsh-message"><small><HarnessIcon :session="selected" class="role-harness-icon" />{{ agentLabel }}</small><MessageContent :content="m.text" :stream="m.active" /></article>
+   <article v-for="m in dshLiveMessages" :key="'dsh-live-'+m.id" :data-chat-anchor="'live-'+m.id" class="dsh-message"><small><HarnessIcon :session="selected" class="role-harness-icon" />{{ agentLabel }}</small><MessageContent :message-sequence="m.sequence" :content="m.text" :stream="m.active" /></article>
+   <article v-for="m in nativeMessages" :key="m.id" :data-chat-anchor="m.id" class="dsh-message"><small><HarnessIcon :session="selected" class="role-harness-icon" />{{ agentLabel }}</small><MessageContent :message-sequence="m.sequence" :content="m.text" :stream="m.active" /></article>
    <p v-if="inSessionSearchQuery.trim() && !filteredDisplayMessages.length" class="dsh-empty-search" role="status">{{ t('dshSearchNoMatches') }}</p>
     <NativeActivity v-for="record in nativeActivities" :key="'activity-'+record.id" :activity="record.activity" :busy-permission="busyPermission" :approval-errors="approvalErrors" @decide="(permission,option)=>decidePermission(record.id,permission,option)"/>
    <div v-if="pullUpDistance > 10" class="pull-up-refresh-hint" :class="{ready: pullUpDistance >= 36}" role="status" aria-live="polite"><span class="terminal-rod" aria-hidden="true">[{{ rodFrame }}]</span><span>{{ t(pullUpDistance >= 36 ? 'releaseToRefresh' : 'pullUpToRefresh') }}</span></div>

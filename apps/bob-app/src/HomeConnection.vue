@@ -306,7 +306,7 @@ onUnmounted(() => {
       </div>
       <p class="view-card-desc">{{ t('connectionProtocolBoundary') }}</p>
     </section>
-    <details v-if="capabilities?.can_host || capabilities?.can_scan" :open="browserClient" class="about-footer-details"><summary>{{ t('connectionPairDevice') }}</summary>
+    <details v-if="capabilities?.can_host || capabilities?.can_scan" :open="browserClient" class="connection-pairing-details"><summary>{{ t('connectionPairDevice') }}</summary>
     <section
       v-if="open"
       class="qr-panel hub-card"
@@ -447,6 +447,23 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+.home-connection {
+  display: grid;
+  gap: 0.75rem;
+  min-width: 0;
+}
+.connection-pairing-details {
+  min-width: 0;
+}
+.connection-pairing-details > summary {
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+}
+.connection-pairing-details > .qr-panel:not(.qr-display) {
+  margin-top: 0.55rem;
+}
+
 .qr-display {
   position: fixed;
   inset: max(0.75rem, env(safe-area-inset-top)) max(0.75rem, env(safe-area-inset-right))

@@ -48,3 +48,13 @@ test('findMatches finds query in cached session messages and extracts snippet', 
  assert.equal(matches[0].sessionId, 'session-123');
  assert.match(matches[0].snippet, /blender/);
 });
+
+test('same session filename in different replies has separate persisted preview identity',async()=>{
+ const store=createReadingCache({storage:null});let calls=0;
+ const cache=createPersistentPreviewCache(async a=>{calls++;return {connection_id:a.connectionId,session_id:a.sessionId,path:a.path,bytes:3,data:'YWJj',resolved_path:`project-${a.messageSequence}/README.md`}}, {store});
+ const a={connectionId:'c',sessionId:'s',path:'README.md',cursor:1,messageSequence:10};
+ await cache.get(a);await cache.get({...a,messageSequence:20});
+ assert.equal(calls,2);assert.equal((await cache.peek(a)).resolved_path,'project-10/README.md');
+ assert.equal((await cache.peek({...a,messageSequence:20})).resolved_path,'project-20/README.md');
+ await cache.get(a);assert.equal(calls,2);
+});
