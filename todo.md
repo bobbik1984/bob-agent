@@ -20,7 +20,7 @@
 
 施工顺序与细则见 [`docs/CURRENT_STAGE.md §3.3`](docs/CURRENT_STAGE.md)，验收标准见 [`docs/FEATURES.md`](docs/FEATURES.md)。手机实测等待用户通知。 统一节点 DSH 认证分流已在网页发布并实测，APK 及其真机验收以本轮 evidence 为准；保留重启自动恢复与各工具流式终验缺口。
 
-- [/] **Phase A 四项体验优化真机终验**（本地代码与 `tests/phase-a-ux.test.mjs` 93 项前端单测、55 项 `bob-runtime` 单测已全绿归档至 `docs/archive_done.md`；**剩余缺口**：待用户通知连接手机后执行 Android 真机状态栏安全区、手势返回与真实多节点流式联调终验）。
+- [/] **Phase A 四项体验优化真机终验**（本地代码与 `tests/phase-a-ux.test.mjs` 93 项前端单测、55 项 `bob-runtime` 单测已全绿归档至 `docs/archive_done.md`；**剩余缺口**：待用户通知连接手机后执行 Android 真机状态栏安全区、手势返回与真实多节点流式联调终验）。 本轮网页连接卡片对齐已发布并通过1458/390px生产资源浏览器核验；新版APK `07a7ce9` 已生成，仍待真机核对配对页及按消息定位的文件预览。
 
 ---
 
