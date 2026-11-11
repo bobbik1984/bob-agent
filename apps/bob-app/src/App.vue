@@ -274,63 +274,6 @@ onUnmounted(() => {
         <div class="conversation-menu-panel">
           <button type="button" class="conversation-menu-action" @click="immersive = !immersive; $event.currentTarget.closest('details.conversation-menu').open = false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5"/></svg>{{ t(immersive ? 'exitImmersive' : 'enterImmersive') }}</button>
           <button type="button" class="conversation-menu-action" @click="settingsOpen = true; $event.currentTarget.closest('details.conversation-menu').open = false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3"/><circle cx="15" cy="17" r="3"/></svg>{{ t('settings') }}</button>
-          <div class="conversation-menu-divider" role="separator"></div>
-
-          <!-- Monthly Budget Row -->
-          <div v-if="jarvisHome?.budgetState?.value" class="quota-sub-row" :title="t('jarvisMonthlyBudget')">
-            <span class="quota-brand-badge">{{ t('jarvisMonthlyBudget') }}</span>
-            <div class="quota-dual-bars">
-              <div class="quota-bar-line">
-                <div class="quota-bar-track" role="meter" :aria-label="t('jarvisMonthlyBudget')">
-                  <div class="quota-bar-fill quota-remaining-fill" :style="{'--remaining': Math.min(100, Math.round(((jarvisHome.budgetState.value.spent_usd || 0) / (jarvisHome.budgetState.value.monthly_cap_usd || 10)) * 100)) + '%'}"></div>
-                </div>
-                <span class="quota-bar-pct">${{ Number(jarvisHome.budgetState.value.spent_usd || 0).toFixed(2) }} / ${{ Number(jarvisHome.budgetState.value.monthly_cap_usd || 10).toFixed(2) }}</span>
-              </div>
-            </div>
-          </div>
-
-          <div v-if="jarvisHome?.hasProCluster?.value" class="quota-sub-section" :aria-label="t('quotaSubscription')">
-            <div v-for="item in subscriptionQuotas" :key="item.id" class="quota-sub-row"
-              :title="[item.label, item.compact?.id, item.source && t('quotaSource', {node:item.source}), item.updated && t('quotaUpdatedAt', {time:item.updated}), item.status === 'stale' && t('quotaStale'), !item.compact && t('quotaAwaitingSource')].filter(Boolean).join(' · ')">
-              <span class="quota-brand-badge"><img :src="item.logo" :alt="item.label" class="quota-brand-logo" /></span>
-              <div class="quota-dual-bars">
-                <div class="quota-bar-line">
-                  <div class="quota-bar-track" role="meter" :aria-label="item.label + ' ' + t('quotaSubscription')" :aria-valuenow="item.compact && !item.compact.expired ? item.compact.remaining_percent : undefined" :aria-valuetext="!item.compact ? t('quotaAwaitingSource') : item.compact.expired ? t('quotaWindowExpired') : item.status === 'stale' ? t('quotaStale') : undefined" aria-valuemin="0" aria-valuemax="100">
-                    <div class="quota-bar-fill quota-remaining-fill" :style="{'--remaining': item.compact && !item.compact.expired ? item.compact.remaining_percent + '%' : '0%'}"></div>
-                  </div>
-                  <span class="quota-bar-pct">{{ item.compact && !item.compact.expired ? Math.round(item.compact.remaining_percent) + '%' : '—' }}<span v-if="item.status === 'stale'" :aria-label="t('quotaStale')">*</span></span>
-                </div>
-                <div class="quota-bar-line">
-                  <div class="quota-bar-track" role="meter" :aria-label="item.label + ' ' + t('quotaResetTime')" :aria-valuenow="item.compact?.timePercent ?? undefined" :aria-valuetext="item.compact?.timeText || t('quotaAwaitingSource')" aria-valuemin="0" aria-valuemax="100">
-                    <div class="quota-bar-fill quota-time-fill" :style="{width: (item.compact?.timePercent ?? 0) + '%'}"></div>
-                  </div>
-                  <span class="quota-bar-pct quota-time-text">{{ item.compact?.timeText || '—' }}</span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <details class="quota-other-details">
-            <summary class="quota-other-summary">
-              <span>{{ t('otherUsageMenu') }}</span>
-              <svg class="quota-other-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg>
-            </summary>
-            <div class="quota-other-body">
-              <div class="quota-other-header">
-                <button type="button" class="quota-cost-toggle" @click.stop="togglePrepaidCost">
-                  {{ t(showPrepaidCost ? 'hideCostBtn' : 'calcCostBtn') }}
-                </button>
-              </div>
-              <div v-for="p in prepaidUsageList" :key="p.id" class="quota-prepaid-row">
-                <img :src="p.logo" :alt="p.label" class="quota-prepaid-logo" />
-                <span class="quota-prepaid-name">{{ p.label }}</span>
-                <span class="quota-prepaid-val">
-                  {{ p.tokensText }} {{ t('prepaidTokenUnit') }}
-                  <em v-if="showPrepaidCost" class="quota-prepaid-cost">· {{ p.costText }}</em>
-                </span>
-              </div>
-            </div>
-          </details>
         </div>
       </details>
     </header>
