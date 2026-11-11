@@ -702,3 +702,46 @@ Dashboard 生产本机 `/api/inbox` 实测200，19条，字段 content/created_a
   - 成果审阅组件：在文稿、网页、图片与报告预览上实现**局部批注/修改指派 → 自动携带父版本（`ArtifactVersion` V1）回传原执行者（主助理、PC 节点或 L3 外部 Harness）→ V1/V2 并排或切换对照审阅**。
   - 部署交付：提供集成 `bob-node` + Headless Chromium + 中文字体 + Caddy 自动 HTTPS 的单 VPS 一键部署方案（目标 2C/4G 24 小时连续稳定运行）。
 - **退出门（Exit Gate）**：完成 `FEATURES.md` 定义的 **L2 与 L3 端到端闭环验收**。
+
+---
+
+## 4. 2026-11-12 生产上线与全量验证记录（Live Deployment Evidence）
+
+### 4.1 生产上线环境（Production Target）
+- **目标服务器**：Hostinger VPS2 (`srv1471410`, `187.124.144.87`)
+- **服务单元**：`systemd` `bob-online.service`（绑定 `127.0.0.1:53020`，反向代理网关 `https://bob-online.bobbik.org`）
+- **发布 Commit**：`c18a4287dfa51d866d7434fa6fefc768c1975e5b`（分支 `1.0.1`）
+- **上线时间**：2026-11-11 17:20:15 UTC (北京时间 2026-11-12 01:20:15)
+
+### 4.2 部署安全收口与一致性回执（Deployment Receipt）
+```json
+{
+  "deployed": true,
+  "codeCommit": "c18a4287dfa51d866d7434fa6fefc768c1975e5b",
+  "pid": "2112030",
+  "binarySha256": "58e26d7cc1932e0168ed5adfef350d0eed933f9caf32e233f9aadb4ba7034f56",
+  "webSha256": "4796309c0aba39c36ec01806b136f09e37d0ba13b272da06a3ef4a8c432b24ee",
+  "httpSha256": "250ef35cca0321d1d547c0ebeb5fb6723eb6ea1884f2f4cf2fe27d35eb14eeb0",
+  "backup": "/opt/bob-online/operator-backups/quota-device-20261111-172011-6296d96b",
+  "localHttpReadback": "passed",
+  "connectionsMigrated": false,
+  "publicBrowserVerified": false
+}
+```
+
+### 4.3 现役服务运行与健康校验（Live Health Check）
+- **数据库无损与完整性**：`PRAGMA quick_check` 返回 `ok`，现役 executions 全部归档状态无悬挂，现役 leases 释放状态。
+- **服务状态**：`systemctl status bob-online.service` 状态为 `active (running)`，Main PID `2112030`，内存开销轻量（~3.1MB）。
+- **RPC 就绪度**：
+  - `app_bootstrap`：`ok: true`，会话初始化正常。
+  - `app_personal_snapshot`：`ok: true`，现存捕获、记忆与个人数据 100% 完整保留。
+  - `app_jarvis_approvals_list`：`ok: true, result: []`，WP-J1/WP-J2 审批流正常就绪。
+  - `app_feature_sandbox_list`：`ok: true, status: ok`，WP-J3 QuickJS 沙箱插件引擎运行正常。
+  - `app_budget_status`：`ok: true, status: ok`，WP-J1 预算控制与安全网关正常。
+  - `app_growth_stats`：`ok: true, status: ok`，WP-J4 成长闭环与做梦系统正常。
+- **Web 前端与 PWA 资产**：
+  - `/manifest.webmanifest`：返回完整 Web App Manifest（直通 iOS Safari APNs 与桌面 PWA 安装）。
+  - `/sw.js`：正常注册并接管 Service Worker 生命周期。
+  - 核心单交流窗口、Jarvis 彩色球、组件网格与虚拟浏览器前端打包产物（`index-CGB6kmuM.js`, `index-CewEGIV9.css`）热更新完成，HTTP 200 正常响应。
+- **公网网关**：`https://bob-online.bobbik.org/api/capabilities` 经 Cloudflare + Caddy 代理返回 HTTP 200，能力探针 `browser_mode: true` 正常点亮。
+
