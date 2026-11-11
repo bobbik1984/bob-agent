@@ -76,3 +76,27 @@ BP4 / F2/F5阅读增量：四项底栏、可持久化沉浸和DSH当前文件只
 沿 Chief of Staff 与对象级权限路线：受限 Bot 主体与授权项目读取 → 显式整理权限及版本冲突/审计 → 本地真实内核闭环 → 对接官方外部工具入口。执行委派不在本轮范围，未来需独立授权合同，不自动继承设备能力。
 
 Exit Gate：只读不能写；跨项目/跨会话越权被拒；撤销与过期立即生效；关联保存重启后可读且重复版本拒绝；Bot 凭据不能调用任何执行 RPC；真实外部客户端握手单独验收。本地通过不等于 Grok/Muse 已接通。消费端连接器和模型 API 是两条不同接入路径。
+
+## BOB-D-015 统一收敛路线：吸收 `bob-bot` 打造分层完整的 Jarvis 主助理（2026-11-11）
+
+依据 [DECISIONS](DECISIONS.md) `BOB-D-015`，评价优先级调整为**“先让每一层用户得到完整、顺手的闭环，再按需展开专业控制”**。`bob-bot`（`prototype/`）长期保留为快速实验场，所有正式能力统一在 `bob-agent-next` 单一纯 Rust 主干（无 Node.js 依赖）按以下 6 个垂直可发布工作包递进交付；已有 L3 生产会话链路全程保持零退化兼容：
+
+```mermaid
+flowchart LR
+    WPJ1["WP-J1 异步底座与<br/>BobNativeHarness 流式主脑"] --> WPJ2["WP-J2 Siri 彩色球 +<br/>手机桌面小组件主界面"]
+    WPJ2 --> WPJ3["WP-J3 QuickJS + 沙箱 iframe<br/>无 Node 3 分钟试用自改造"]
+    WPJ3 --> WPJ4["WP-J4 时间调度 / Routine /<br/>做梦晨报与多端推送（L1 闭环）"]
+    WPJ4 --> WPJ5["WP-J5 bob-browser CDP 与<br/>手机虚拟窗口接力"]
+    WPJ5 --> WPJ6["WP-J6 我的电脑工作台与<br/>V1→V2 批注对照（L2/L3 贯通）"]
+```
+
+| 工作包 | 层级目标 | 退出门（Exit Gate） |
+|---|---|---|
+| **WP-J1** | `bob-node` 零破坏升级 `tokio + axum`；纯 Rust `BobNativeHarness` + `Bob Tool Bus` + `$10` 花费上限替换 `assistant.rs` 单轮 JSON 分类器 | 既有全部节点/L3 RPC 回归全绿；置顶主助理支持逐字 SSE 流式、多步调用既有个人事务/记忆/`web_fetch`/`show_card`/会话派发工具，循环熔断与花费上限硬拦截通过 |
+| **WP-J2** | Jarvis 单一交流窗口：`<JarvisOrb />` Siri 流体彩色球 + `<JarvisWidgetGrid />` 内建桌面小组件 + L1/L2/L3 渐进降噪 | L1 态首屏零节点/Harness/额度噪音；彩色球四态过渡、对话收拢左上角、内建小组件增删排序与明暗双模/无障碍验收通过；专业额度/节点移入可选小组件与抽屉 |
+| **WP-J3** | 无 Node.js 自我改造：内嵌 `rquickjs` 能力沙箱 + 无凭据 `<iframe sandbox>` 小组件 + 持久化 3 分钟试用（保留/撤销） | 对话创建自定义小组件与微型工具即刻生效、首帧 `bob.state` 无闪烁；拒绝访问本机回环/内网地址；超时、报错、手动撤销或重启均可靠回滚至前版 |
+| **WP-J4** | 常驻生活节律：统一时间对象、Routine 试运行与待批草稿、五阶段做梦 + 每日晨报 + 四档主动关心、iOS Safari Web Push / Android / 微信桥送达 | iOS 主屏幕 PWA 与 Android 连续准点接收晨报与提醒；无人值守高危动作转为待批草稿；夜间做梦单次删减 ≤3 条且可恢复；知识库 FTS5+实体检索带来源 |
+| **WP-J5** | `bob-browser` crate（CDP 无障碍树 + iframe/Shadow DOM）+ `<VirtualBrowserModal />` 手机/桌面虚拟窗口接管 | 通过 `bob-bot` 18 项本地浏览器测试及所在地区 VPS 上 3～5 个真实办公站点手机 390px 接管登录与重启保活验收；密码零进模型 |
+| **WP-J6** | PC 桌面端挂载 `BobNativeHarness` 与授权目录/本机浏览器工具；贯通 **V1→V2 成果批注对照修改**与 L3 幕僚长派单 | 手机指派电脑整理目录 → 圈选批注产出 V2 对照 → 批准导出；电脑离线诚实等待且恢复不重发；常驻 VPS 一键部署脚本（含 HTTPS）2C/4G 24h 稳定运行 |
+
+施工细则、文件落点与当前优先派发项唯一维护于 [CURRENT_STAGE](CURRENT_STAGE.md)。

@@ -1251,13 +1251,15 @@ async function send() {
       executionFault.value = null;
       try {
         const execution = browserClient && sessionId.value === assistantConversationId.value && directProviderEnabled.value
-          ? await kernelBridge.assistantExecute(receipt.request_id)
+          ? (typeof ctx.jarvisHome?.runJarvisTurn === 'function'
+              ? await ctx.jarvisHome.runJarvisTurn({ sessionId: sessionId.value, requestId: receipt.request_id, messageId: receipt.message_id, content: sentText })
+              : await kernelBridge.assistantExecute(receipt.request_id))
           : await executionController.dispatch(receipt);
         assistantNextPoll = 0;
         void refreshAssistantResults();
         executions.value = [
-          ...executions.value.filter(run => run.id !== execution.id),
-          execution,
+          ...executions.value.filter(run => run && (!execution || run.id !== execution.id)),
+          ...(execution ? [execution] : []),
         ];
       } catch {
         unconfirmedRequest = receipt.request_id;
@@ -1341,6 +1343,7 @@ const statusKeys = {
     saveClientState,
     sessionId,
     assistantConversationId,
+    jarvisHome: ctx.jarvisHome,
     assistantLinks,
     assistantPollFailed,
     assistantLink,

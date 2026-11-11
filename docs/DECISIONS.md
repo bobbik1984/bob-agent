@@ -232,3 +232,27 @@
      - **知识（Knowledge）**：仅存放**已分拣沉淀**的材料（笔记、决定记录、长期记忆）；
      - **我的（Avatar / Profile）**：设置、设备连接、模型配置与**票夹**（收拢至单一入口，不再多处重复）。
 - **实施路由**：视觉与交互约束归并入 `docs/DESIGN_PRINCIPLES.md`，能力验收归并入 `docs/FEATURES.md §F3`，分阶段施工步骤维护于 `docs/CURRENT_STAGE.md §3.10`。
+
+
+## BOB-D-015 — 单一主干吸收 `bob-bot`、Jarvis 彩色球与桌面小组件主界面、无 Node 纯 Rust 自扩展及渐进式三层产品结构
+
+- 日期：2026-11-11；状态：**accepted（架构与路线定案，代码待按 `WP-J1`～`WP-J6` 施工）**。来源：用户对历代 Bob 项目（旧版 `bob-agent`、`bob-bot`、`code_runner`、`cloud-agent`、当前 `bob-agent-next`）产品层级、主界面形态与统一开发路线的最终裁决。
+- **背景**：
+  1. 评价标准从“新版是否逐项覆盖旧版全部功能”转向“每一层用户能否用适合自己的复杂度把事情顺畅做完”。
+  2. `bob-bot` 原型已验证了极简单一对话入口、彩色球（Orb）状态表达、云浏览器手机虚拟窗口接管、Routine 示教与待批草稿、四档主动关心及 3 分钟试用沙箱功能包的体验优势；其 `Node.js + DSH` 只是临时推理脚手架，并非核心。
+  3. 当前 `bob-agent-next` 已具备跨平台 Rust 内核与多节点底座，但置顶主助理（`crates/bob-runtime/src/assistant.rs`）仍是单轮 JSON 意图分类器，缺乏多步自主执行与自扩展能力，且首屏默认暴露了面向专业集群（L3）的节点、Harness 与额度概念。
+- **决定**：
+  1. **单一生产主干与原型实验室分工**：
+     - **`bob-agent-next` 为唯一正式开发主干**（Rust 单一内核 + Linux `bob-node` 常驻网页/PWA + Tauri 桌面端 + Tauri Android 客户端），取消在 `bob-bot` 仓库另建独立 `bobbot-server` Rust 分叉的计划。
+     - **`bob-bot`（`prototype/`）长期保留为轻量交互与能力研究原型实验室**，其已跑通的能力与 61+ 项端到端/浏览器/UI 验收用例逐包迁入 `bob-agent-next`。
+  2. **Jarvis 主助理合一（彩色球 + 桌面小组件 + 单一交流主窗口）**：
+     - `bob-bot` 的单一交流主界面与 `bob-agent-next` 置顶的主 Agent 合一为同一个角色：**直白、自主的 Jarvis 个人助理**，直接面对用户完成回复、多步执行或跨设备任务派发。
+     - 默认主界面始终保持克制：以类似 Siri 唤醒态的**流体彩色能量球（Jarvis Orb）**表达空闲、思考、工具执行、播报与等待人工确认/接管状态，并在主屏承载**类似手机桌面的可按需增删小组件网格（Widget Grid）**（含系统内建组件与用户通过对话让 Bob 现场生成的自定义小组件）。`今天 / 收集箱 / 知识 / 我的` 与会话目录作为次级视图或抽屉保留，不把重型运维面板强加于首屏。
+  3. **纯 Rust 自主主脑与零 Node 依赖自扩展**：
+     - 以纯 Rust 内置 **`BobNativeHarness`**（多服务商逐字流式 ReAct 循环 + 工具调用循环熔断器 + 默认 `$10` 月度花费上限）配合统一**工具与门禁总线（Bob Tool Bus + Action Gates）**替换 `assistant.rs` 单轮 JSON 分类器；同时保留标准 `AgentHarness` / 本地 MCP 窄接口，允许按需由外部 Harness（DSH、Claude Code、Codex、AGY）支撑任务执行。
+     - **严禁在正式版引入 Node.js 运行时依赖**：功能包（Feature Packages）前端小组件与设置面板运行于无凭据沙箱 `<iframe sandbox>` + `@scope` CSS；功能包服务端微型工具与路由运行于 `bob-runtime` 内嵌的轻量 **`QuickJS`（`rquickjs`）能力沙箱**（仅暴露经公网地址守卫过滤的网络请求、限额键值存储与工具/路由注册），完整保留 **3 分钟试用（保留 / 撤销 + 5 版本自动回退）** 治理机制。
+  4. **产品能力分三层，与设备数量和部署形态解耦**：
+     - **L1 个人助理**：随手捕获、待办日程提醒、Routine、云浏览器手机接管、成长回路（遥测→夜间做梦→每日晨报/四档主动关心→知识检索）与小组件自改造；默认隐藏节点、端口、Harness 与订阅额度名词。
+     - **L2 工作助理**：连接“我的电脑”（运行同一 Rust 内核与 `BobNativeHarness`），支持授权目录文件处理、本机浏览器/脚本审批，以及跨文稿/设计图/网页的 **V1→V2 成果批注与对照续改**。
+     - **L3 专业工作台**：按需展开多节点目录、多外部 Harness 原生会话续聊、项目画像胶囊、GPU/海外出口借用与订阅额度小组件；置顶 Jarvis 兼任跨节点幕僚长。
+- **实施路由**：愿景分层归并入 `docs/PROJECT_VISION.md`，系统结构归并入 `docs/ARCHITECTURE.md`，视觉与小组件交互归并入 `docs/DESIGN_PRINCIPLES.md`，分层能力验收归并入 `docs/FEATURES.md`，里程碑与 6 个可独立交付工作包（`WP-J1`～`WP-J6`）归并入 `docs/DEVELOPMENT_ROUTE.md` 与 `docs/CURRENT_STAGE.md`。

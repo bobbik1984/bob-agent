@@ -647,3 +647,58 @@ Dashboard 生产本机 `/api/inbox` 实测200，19条，字段 content/created_a
 连接页扫码区域不再复用带左右 padding 的诊断容器；列表与配对卡片使用相同边界，展开间距仅属于展开内容。候选真实后端浏览器验证：1458px 两卡 x=117.390625、宽1283.21875；390px 两卡 x=0、宽378，无横向溢出。172项前端检查和Vite构建通过。此次发布同时收录此前已验证的按消息序号定位真实工作目录的文件预览修复；APK使用既有固定签名流水线，手机安装与实机验收未执行。部署与构建回执见本节后续结果。
 
 发布回执：源码 `07a7ce9` 已推送 `main` / `1.0.1`；网页生产服务发布成功，保留一致性备份 `quota-device-20261110-120524-88a16ff3`，发布后直接读取生产资源的 Chromium 1458/390px 两组卡片对齐通过。复用已验证的节点二进制，未重复重启 X1T。Android Actions [Run 42812623855](https://github.com/bobbik1984/bob-agent/actions/runs/42812623855) 成功，Bob品牌、固定证书签名及16KB对齐检查通过；成品 `dist-release/Bob-1.0.1-07a7ce9.apk`，下载与CI SHA256一致：`de6f34946b89ab43ba860dbf5c407943b693a3f0be0b010c0783fa2a8e5f4f50`。未安装手机，未独立进行公网登录浏览器验收。
+
+
+## Jarvis 统一主助理与桌面小组件收敛施工合同（BOB-D-015，2026-11-11 源码与本地四重门禁验证完成，待授权上线与真机终验）
+
+> **战略与范围**：依据 `BOB-D-015`，`bob-bot`（线上研究原型）长期作为轻量交互与新能力实验场，不再另起独立 Rust 服务端；全部经验证优势统一迁入本仓库主干（纯 Rust 内核 + Vue 3 前端，**零 Node.js 生产依赖**）。
+> **绞杀者渐进原则（严禁大爆炸重写）**：以下 `WP-J1`～`WP-J6` 每一个工作包都必须**独立可编译、独立通过自动化回归、独立可上线**，且严禁破坏现有线上已运行的 L3 原生会话与设备连接链路。任何引入新依赖、编译构建或生产部署动作，仍须遵守 `AGENTS.md §3` 重型操作防火墙逐包获取执行授权。
+> **最新源码与本地验证进展（2026-11-11）**：`WP-J1`～`WP-J6`（`T01`～`T12` 共 12 步）已完成全栈源码落地并通过本地离线四重门禁：**Cargo 全工作区 32 个套件共 359 项测试全绿（0 失败）**、`apps/bob-app/src-tauri` 离线 `cargo check` 0 错误、**前端 203/203 项单测与规范扫描全绿**（`zh-CN.json`/`en-US.json` 1,060 键对称、0 硬编码颜色、0 装饰 emoji）、`vite build` 生产构建通过；详见 [WP-J1～WP-J6 本地验证回执](evidence/2026-11-11-wp-j1-j6-jarvis-convergence-verification.md)。**诚实边界**：尚未向线上生产节点推送或重启服务，真实宿主 Chromium 公网办公站点接管、iOS Safari 真机 APNs 锁屏推送及 Android 真机安装验收待用户授权后执行。
+
+### WP-J1（当前优先可派发包）：`bob-node` 异步双轨网关 + 纯 Rust `BobNativeHarness` 流式主脑
+
+- **解决的核心卡点**：打通 `bob-node` 缺失的持续 SSE / WebSocket 异步通道，并将置顶主助理从单轮 JSON 意图分类器升级为真正自主的多步流式智能体。
+- **涉及模块与文件**：
+  - `crates/bob-node/`：入口由手写同步 `std::net` 升级为 `tokio + axum`；新增 `/api/jarvis/v1/stream`（逐字 SSE 事件流：`token`、`thinking`、`tool_start`、`tool_end`、`card`、`approval_required`、`done`），既有全部同步 `/api/*` 路由通过 `spawn_blocking` 原样桥接，确保 100% 向后兼容。
+  - `crates/bob-runtime/`：新增 `native_harness.rs`、`tool_bus.rs`、`budget.rs`（参考旧版 `llm.rs` 多服务商流式解析、`tools.rs` 的 `ToolCallTracker` 重复调用熔断器与 `bob-bot` 月度花费上限账本，对接现有 `ModelHubRuntime` 与 `SecretStore`），替换 `assistant.rs` 单轮分类主路径。
+  - 首批接入 `Bob Tool Bus` 的内生工具：既有 `personal_ops`（待办/日程/笔记/记忆/票夹）、`spark_inbox`（收集箱读写）、受公网地址守卫保护的只读 `web_fetch`、`show_card` 结构化卡片，以及带审批门禁的 `dispatch_to_session` / `organize_projects`。
+- **退出门（Exit Gate）**：
+  1. 既有 `bob-kernel`、`bob-runtime`、`bob-node` 测试全绿，现有 L3 远端会话读写零退化；
+  2. 主助理跑通逐字流式回复与 ≥3 步连续工具调用闭环；故意构造死循环工具调用可被 `ToolCallTracker` 熔断；花费达 80% 告警、100% 硬拦截新模型调用。
+
+### WP-J2：Jarvis 单一交流主界面 — Siri 流体彩色球 + 手机桌面式小组件网格
+
+- **涉及模块与文件**：
+  - `apps/bob-app/src/components/`：新建 `<JarvisOrb />`（纯 CSS 变量/Canvas 流体彩色球：空闲呼吸、思考涟漪、回复律动、待确认暖琥珀四态；对话展开后平滑收拢至左上角；支持 `prefers-reduced-motion` 与完整 `aria-label`）与 `<JarvisWidgetGrid />`（手机桌面式可增删、拖拽/排序小组件网格）、`<ActionCard />`（对应 `show_card` 与审批卡）。
+  - `apps/bob-app/src/components/PrimaryChatPane.vue`、`App.vue`：移除主助理对话中的终端字符旋转棒（`TERMINAL_ROD_FRAMES`）；提供首批内建系统小组件（待确认与接管、今日日程待办、收集箱速记、日常任务；将「订阅额度双线」与「节点/活跃工程会话」收束为 L3 可选小组件）；未连接外部工作电脑与外部 CLI 时自动处于零噪音 L1 视图，次级抽屉（`今天 / 收集箱 / 知识 / 我的`）可从小组件或导航一键直达。
+- **退出门（Exit Gate）**：390px 手机视口与 1440px 宽屏下明暗双模、中英双语、键盘/屏幕阅读器无障碍检查全绿；L1 空库状态下首屏无任何节点、端口、Harness 或额度术语。
+
+### WP-J3：无 Node 依赖的小组件与工具自我改造（`QuickJS` 沙箱 + 3 分钟试用回退）
+
+- **涉及模块与文件**：
+  - `crates/bob-runtime/src/features.rs`：内嵌轻量 `rquickjs`（配置内存上限与指令中断计数，无子进程与原始 Socket 权限），仅注入受公网守卫保护的 `ctx.fetch`、限额键值存储 `ctx.storage`（≤8KB）、`ctx.registerTool`（`f_<pkg>_*`）与 `ctx.registerRoute`（`/api/f/<pkg>/*`）；对话新增 `feature_create`、`skill_create` 与远程 HTTP `mcp_add`（写入类工具默认需审批）。
+  - `apps/bob-app/src/components/`：新建 `<FeatureWidgetFrame />`（无凭据独立源 `<iframe sandbox>` + `@scope` CSS + `postMessage` 桥接 `bob.call` / `bob.state` / `bob.save` / 主题变量，首帧缓存零闪烁绘制）与页头 `<FeatureTrialBanner />`（持久化 **3 分钟倒计时：保留 / 撤销**，超时、崩溃或服务重启自动回滚，保留最近 5 个历史版本）。
+- **退出门（Exit Gate）**：在无 Node.js 的干净环境下，通过对话让 Jarvis 生成一个带后台拉取与前端视图的桌面小组件并挂载至 `<JarvisWidgetGrid />`；验证访问 `127.0.0.1` / 内网地址被硬拦截，且撤销、报错与试用期重启均 100% 回滚。
+
+### WP-J4：常驻生活节律 — 时间对象合一、Routine、做梦晨报与多端推送（完成 L1 闭环）
+
+- **涉及模块与文件**：
+  - `crates/bob-kernel/` & `crates/bob-runtime/`：将 `ScheduleItem` 扩展为统一时间对象（日程/待办/提醒/定时任务/`RoutinePlaybook`），新增 `tokio` 定时调度器、对话轨迹提炼 `routine_save`（启用前强制 1 次应用内试运行）、无人值守高危动作转存待批草稿（`Draft`，7 天过期，批准后不经模型精确重放）。
+  - 成长回路模块（参考归档旧版 `evolution.rs`、`dream.rs`、`daily_brief/`、`kb_indexer.rs` 与 `bob-bot` 护栏）：零成本遥测 → 夜间五阶段做梦（单次自动删减 ≤3 条并记可恢复日志）→ 每日结构化晨报小组件与推送 → 0～1 四档主动性滑块（`22:00–08:00` 安静时段硬规则）→ SQLite FTS5 与实体关系带来源检索。
+  - `crates/bob-node/` 推送与渠道：接入 Web Push（`manifest.webmanifest` + `sw.js` + VAPID，直通 iOS 16.4+ Safari 主屏幕 APNs）、Android 推送接收、以及 `/v1/chat` 官方微信 iLink 桥兼容接口与企微/飞书 Webhook。
+- **退出门（Exit Gate）**：完成 `FEATURES.md` 定义的 **L1 完整闭环验收**（含 iOS Safari 主屏幕 PWA 锁屏接收晨报与提醒推送）。
+
+### WP-J5：`bob-browser` CDP 持久化浏览器与手机虚拟窗口人机接力
+
+- **涉及模块与文件**：
+  - 新建 `crates/bob-browser/`：纯 Rust 实现 Chromium/Chrome CDP 守护（持久化 `--user-data-dir`、空闲休眠回收、崩溃自愈）、带编号无障碍树快照提取（穿透跨站 iframe、开放 Shadow DOM 与自定义可点击元素、遮挡检测）、公网地址重定向守卫、密码/验证码框零入模硬拦截，以及按需 `Page.startScreencast` 帧推流与触控/输入映射（退出窗口立即 `stopScreencast` 归零 CPU）。
+  - `crates/bob-node/` & `apps/bob-app/`：挂载 `/api/ws/browser-takeover` WebSocket 路由，实现 `<VirtualBrowserModal />`（手机/桌面视口与 UA 自适应、双指缩放、滑块拖动、底部原生中文输入法/短信验证码穿透输入栏、二维码存相册）与「网站授权中心」面板。
+- **退出门（Exit Gate）**：通过 `bob-bot` 18 项本地浏览器测试集的全部等价用例，并在所在地区 VPS 上用 390px 手机浏览器完成 3～5 个真实办公站点（至少 1 个含验证码或 2FA）的接管登录与重启保活验收。
+
+### WP-J6：我的电脑工作台（L2）、V1→V2 成果批注对照修改与一键部署收口
+
+- **涉及模块与文件**：
+  - `apps/bob-app/src-tauri/` & `crates/bob-runtime/`：桌面端启用同一 `BobNativeHarness`、获准目录文件/命令分级审批工具与本机 `bob-browser`（复用个人电脑浏览器环境规避机房 IP 风控）；完善离线 `Waiting for PC` 与恢复对账不重发。
+  - 成果审阅组件：在文稿、网页、图片与报告预览上实现**局部批注/修改指派 → 自动携带父版本（`ArtifactVersion` V1）回传原执行者（主助理、PC 节点或 L3 外部 Harness）→ V1/V2 并排或切换对照审阅**。
+  - 部署交付：提供集成 `bob-node` + Headless Chromium + 中文字体 + Caddy 自动 HTTPS 的单 VPS 一键部署方案（目标 2C/4G 24 小时连续稳定运行）。
+- **退出门（Exit Gate）**：完成 `FEATURES.md` 定义的 **L2 与 L3 端到端闭环验收**。

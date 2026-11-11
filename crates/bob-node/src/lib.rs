@@ -16,6 +16,9 @@ mod inbox_triage;
 mod context_capsule;
 mod claude_rpc;
 pub mod node_access;
+pub mod jarvis;
+pub mod push_channels;
+pub mod browser_ws;
 
 use bob_kernel::app::LocalApp;
 use bob_runtime::{now_millis, ModelHubRuntime, RuntimeCapabilityManifest};
@@ -231,7 +234,156 @@ impl NodeContext {
 
 pub fn handle_rpc_command(ctx: &mut NodeContext, command: &str, args: &Value) -> Result<Value, &'static str> {
     let at = now_millis();
+    let data_dir = &ctx.runtime.data_dir;
     match command {
+        "app_features_list" => {
+            let mut store = bob_runtime::features::FeatureStore::open(&ctx.runtime.data_dir)?;
+            let list = store.list(at);
+            serde_json::to_value(list).map_err(|_| "FEATURES_LIST_FAILED")
+        }
+        "app_feature_keep" => {
+            let name = args.get("name").and_then(Value::as_str).ok_or("FEATURE_NAME_REQUIRED")?;
+            let mut store = bob_runtime::features::FeatureStore::open(&ctx.runtime.data_dir)?;
+            let feat = store.keep_feature(name, at)?;
+            serde_json::to_value(feat).map_err(|_| "FEATURE_KEEP_FAILED")
+        }
+        "app_feature_rollback" => {
+            let name = args.get("name").and_then(Value::as_str).ok_or("FEATURE_NAME_REQUIRED")?;
+            let target_version = args
+                .get("targetVersion")
+                .or_else(|| args.get("target_version"))
+                .and_then(Value::as_u64)
+                .map(|v| v as u32);
+            let mut store = bob_runtime::features::FeatureStore::open(&ctx.runtime.data_dir)?;
+            let feat = store.rollback_feature(name, target_version, at)?;
+            Ok(json!({
+                "rolled_back": true,
+                "feature": feat,
+            }))
+        }
+        "app_feature_toggle" => {
+            let name = args.get("name").and_then(Value::as_str).ok_or("FEATURE_NAME_REQUIRED")?;
+            let enabled = args.get("enabled").and_then(Value::as_bool).unwrap_or(true);
+            let mut store = bob_runtime::features::FeatureStore::open(&ctx.runtime.data_dir)?;
+            let feat = store.toggle_feature(name, enabled, at)?;
+            serde_json::to_value(feat).map_err(|_| "FEATURE_TOGGLE_FAILED")
+        }
+        "app_feature_call" => {
+            bob_runtime::features::execute_feature_call(&ctx.runtime.data_dir, args)
+        }
+        "app_feature_storage_save" => {
+            let name = args.get("name").and_then(Value::as_str).ok_or("FEATURE_NAME_REQUIRED")?;
+            let storage = args.get("storage").cloned().unwrap_or(json!({}));
+            let mut store = bob_runtime::features::FeatureStore::open(&ctx.runtime.data_dir)?;
+            let saved = store.save_storage(name, storage, at)?;
+            Ok(json!({
+                "ok": true,
+                "storage": saved,
+            }))
+        }
+        "app_jarvis_chat" => jarvis::chat_with_ctx(ctx, args),
+        "app_jarvis_approve" => jarvis::approve_with_ctx(ctx, args),
+        "app_jarvis_reject" => jarvis::reject_with_ctx(ctx, args),
+        "app_jarvis_approvals_list" => jarvis::approvals_list(&ctx.runtime.data_dir, args),
+        "app_jarvis_budget_get" => jarvis::budget_get(&ctx.runtime.data_dir, args),
+        "app_jarvis_budget_set" => jarvis::budget_set(&ctx.runtime.data_dir, args),
+        "app_push_vapid_public_key" => {
+            let store = push_channels::PushStore::open(&ctx.runtime.data_dir)?;
+            Ok(json!({
+                "publicKey": store.public_key(),
+                "public_key": store.public_key(),
+            }))
+        }
+        "app_push_subscribe" => {
+            let sub_val = args.get("subscription").unwrap_or(args);
+            let sub: push_channels::WebPushSubscription = serde_json::from_value(sub_val.clone())
+                .map_err(|_| "SUBSCRIPTION_PARSE_FAILED")?;
+            let mut store = push_channels::PushStore::open(&ctx.runtime.data_dir)?;
+            store.add_subscription(sub)?;
+            Ok(json!({ "ok": true }))
+        }
+        "app_proactivity_get" => {
+            let store = bob_runtime::growth::ProactivityStore::open(&ctx.runtime.data_dir)?;
+            Ok(store.config.to_json_value())
+        }
+        "app_proactivity_set" => {
+            let level = args.get("level").and_then(Value::as_f64);
+            let start = args.get("quietHoursStart").or_else(|| args.get("quiet_hours_start")).and_then(Value::as_str).map(str::to_owned);
+            let end = args.get("quietHoursEnd").or_else(|| args.get("quiet_hours_end")).and_then(Value::as_str).map(str::to_owned);
+            let offset = args.get("utcOffsetMinutes").or_else(|| args.get("utc_offset_minutes")).and_then(Value::as_i64).map(|v| v as i32);
+            let mut store = bob_runtime::growth::ProactivityStore::open(&ctx.runtime.data_dir)?;
+            let cfg = store.set_config(level, start, end, offset)?;
+            Ok(cfg.to_json_value())
+        }
+        "app_morning_brief" => {
+            let brief = bob_runtime::growth::generate_morning_brief(&ctx.runtime.data_dir, &ctx.app, at)?;
+            serde_json::to_value(brief).map_err(|_| "MORNING_BRIEF_SERIALIZE_FAILED")
+        }
+        "app_dream_run" => {
+            let mut bus = bob_runtime::tool_bus::BobToolBus::with_approval_store(&ctx.runtime.data_dir)
+                .map_err(|_| "BUS_INIT_FAILED")?;
+            crate::browser_ws::register_browser_tools(&mut bus, &ctx.runtime.data_dir);
+            let report = bob_runtime::growth::run_nightly_dream(&ctx.runtime.data_dir, &mut ctx.app, &mut bus, at)?;
+            serde_json::to_value(report).map_err(|_| "DREAM_REPORT_SERIALIZE_FAILED")
+        }
+        "app_kb_search" => {
+            let query = args.get("query").and_then(Value::as_str).unwrap_or("");
+            let limit = args.get("limit").and_then(Value::as_u64).unwrap_or(10) as usize;
+            let hits = ctx.app.kb_search(query, limit).map_err(|_| "KB_SEARCH_FAILED")?;
+            Ok(json!({
+                "hits": hits,
+                "count": hits.len(),
+            }))
+        }
+        "app_routines_list" => {
+            let store = bob_runtime::routines::RoutineStore::open(&ctx.runtime.data_dir)?;
+            let list = store.list();
+            serde_json::to_value(list).map_err(|_| "ROUTINES_LIST_FAILED")
+        }
+        "app_routine_save" => {
+            let routine_val = args.get("routine").unwrap_or(args);
+            let routine: bob_runtime::routines::RoutineRecord = serde_json::from_value(routine_val.clone())
+                .map_err(|_| "ROUTINE_PARSE_FAILED")?;
+            let mut store = bob_runtime::routines::RoutineStore::open(&ctx.runtime.data_dir)?;
+            let saved = store.save_routine(routine)?;
+            let _ = bob_runtime::routines::mirror_routine_to_schedule(&mut ctx.app, &saved, at);
+            serde_json::to_value(saved).map_err(|_| "ROUTINE_SAVE_FAILED")
+        }
+        "app_routine_trial" => {
+            let id = args.get("id").or_else(|| args.get("routine_id")).or_else(|| args.get("routineId")).and_then(Value::as_str).ok_or("ROUTINE_ID_REQUIRED")?;
+            let mut store = bob_runtime::routines::RoutineStore::open(&ctx.runtime.data_dir)?;
+            let mut draft_store = bob_runtime::routines::UnattendedDraftStore::open(&ctx.runtime.data_dir)?;
+            let mut bus = bob_runtime::tool_bus::BobToolBus::with_approval_store(&ctx.runtime.data_dir)
+                .map_err(|_| "BUS_INIT_FAILED")?;
+            crate::browser_ws::register_browser_tools(&mut bus, &ctx.runtime.data_dir);
+            let (routine, report, drafts) = store.run_trial(id, &mut bus, &mut draft_store, &mut ctx.app, at)?;
+            let _ = bob_runtime::routines::mirror_routine_to_schedule(&mut ctx.app, &routine, at);
+            Ok(json!({
+                "routine": routine,
+                "report": report,
+                "drafts": drafts,
+            }))
+        }
+        "app_routine_toggle" => {
+            let id = args.get("id").or_else(|| args.get("routine_id")).or_else(|| args.get("routineId")).and_then(Value::as_str).ok_or("ROUTINE_ID_REQUIRED")?;
+            let enabled = args.get("enabled").and_then(Value::as_bool).ok_or("ROUTINE_ENABLED_REQUIRED")?;
+            let mut store = bob_runtime::routines::RoutineStore::open(&ctx.runtime.data_dir)?;
+            let updated = store.enable_routine(id, enabled, at)?;
+            let _ = bob_runtime::routines::mirror_routine_to_schedule(&mut ctx.app, &updated, at);
+            serde_json::to_value(updated).map_err(|_| "ROUTINE_TOGGLE_FAILED")
+        }
+        "app_routine_delete" => {
+            let id = args.get("id").or_else(|| args.get("routine_id")).or_else(|| args.get("routineId")).and_then(Value::as_str).ok_or("ROUTINE_ID_REQUIRED")?;
+            let mut store = bob_runtime::routines::RoutineStore::open(&ctx.runtime.data_dir)?;
+            let deleted = store.delete_routine(id)?;
+            let _ = bob_runtime::routines::unmirror_routine_from_schedule(&mut ctx.app, &deleted, at);
+            serde_json::to_value(deleted).map_err(|_| "ROUTINE_DELETE_FAILED")
+        }
+        "app_routine_drafts_list" => {
+            let mut store = bob_runtime::routines::UnattendedDraftStore::open(&ctx.runtime.data_dir)?;
+            let list = store.list_pending(at);
+            serde_json::to_value(list).map_err(|_| "ROUTINE_DRAFTS_LIST_FAILED")
+        }
         "app_context_list" | "app_context_read" | "app_context_refresh" | "app_context_tasks" => context_capsule::rpc(&ctx.runtime.data_dir,command,args),
         "app_claude_capabilities" | "app_claude_sessions" | "app_claude_history" | "app_claude_prompt" | "app_claude_cancel" | "app_claude_reconcile" | "app_claude_review" | "app_claude_artifacts" | "app_claude_preview" => claude_rpc::rpc(&ctx.runtime.data_dir, command, args),
         "app_capability_registry_get" => serde_json::to_value(bob_runtime::capability_borrowing::load_capabilities(&ctx.runtime.data_dir)?).map_err(|_| "CAPABILITY_READ_FAILED"),
@@ -1434,6 +1586,11 @@ pub fn handle_rpc_command(ctx: &mut NodeContext, command: &str, args: &Value) ->
                 return Ok(v);
             }
             if command == "app_dsh_preview" {
+                if let Some(p) = args.get("path").and_then(Value::as_str) {
+                    if bob_browser::assert_profile_download_forbidden(std::path::Path::new(p)).is_err() {
+                        return Err("BROWSER_PROFILE_FORBIDDEN");
+                    }
+                }
                 if let Some(sid)=args["sessionId"].as_str().filter(|s|bob_runtime::agy_directory::owns_readable_session(s)) {
                     match bob_runtime::agy_directory::preview_native_file(&ctx.runtime.data_dir, connection, sid, args["path"].as_str().ok_or("DSH_PROTOCOL")?, args.get("known")) {
                         Ok(v)=>return Ok(v),
@@ -1614,6 +1771,31 @@ pub fn handle_rpc_command(ctx: &mut NodeContext, command: &str, args: &Value) ->
                 "payload": payload,
             });
             execute_online_operation(ctx, &op_body)
+        }
+        "app_host_queue_reconcile" => {
+            let node_id = args
+                .get("nodeId")
+                .or_else(|| args.get("node_id"))
+                .and_then(Value::as_str)
+                .ok_or("NODE_ID_REQUIRED")?;
+            let mut bus = bob_runtime::tool_bus::BobToolBus::with_approval_store(&ctx.runtime.data_dir)
+                .map_err(|_| "BUS_INIT_FAILED")?;
+            crate::browser_ws::register_browser_tools(&mut bus, &ctx.runtime.data_dir);
+            let list = bob_runtime::host_tools::HostOfflineQueueStore::reconcile_when_pc_online(
+                &ctx.runtime.data_dir,
+                node_id,
+                &mut bus,
+                &mut ctx.app,
+                at,
+            )
+            .map_err(|_| "RECONCILE_FAILED")?;
+            serde_json::to_value(list).map_err(|_| "QUEUE_SERIALIZE_FAILED")
+        }
+        cmd if cmd.starts_with("app_browser_") => {
+            crate::browser_ws::handle_browser_rpc(data_dir, cmd, args)
+        }
+        cmd if bob_runtime::runtime_rpc::is_runtime_rpc_command(cmd) => {
+            bob_runtime::runtime_rpc::dispatch_runtime_rpc(data_dir, cmd, args)
         }
         _ => Ok(json!({ "status": "ok" })),
     }
@@ -2296,6 +2478,13 @@ fn execute_unlocked_harness_rpc(
     command: &str,
     args: &Value,
 ) -> Result<Value, &'static str> {
+    if command == "app_claude_preview" || command == "app_dsh_preview" {
+        if let Some(path) = args.get("path").and_then(Value::as_str) {
+            if bob_browser::assert_profile_download_forbidden(std::path::Path::new(path)).is_err() {
+                return Err("BROWSER_PROFILE_FORBIDDEN");
+            }
+        }
+    }
     if command.starts_with("app_dsh_") || matches!(command, "app_native_setup" | "app_native_events" | "app_native_cancel" | "app_native_permission") {
         let connection = args["connectionId"].as_str().ok_or("DSH_CONNECTION_REQUIRED")?;
         let runtime = ModelHubRuntime::with_file_vault(data_dir.to_path_buf())?;
@@ -2458,6 +2647,11 @@ fn execute_unlocked_harness_rpc(
                 return Ok(v);
             }
             if command == "app_dsh_preview" {
+                if let Some(p) = args.get("path").and_then(Value::as_str) {
+                    if bob_browser::assert_profile_download_forbidden(std::path::Path::new(p)).is_err() {
+                        return Err("BROWSER_PROFILE_FORBIDDEN");
+                    }
+                }
                 if let Some(sid)=args["sessionId"].as_str().filter(|s|bob_runtime::agy_directory::owns_readable_session(s)) {
                     match bob_runtime::agy_directory::preview_native_file(data_dir, connection, sid, args["path"].as_str().ok_or("DSH_PROTOCOL")?, args.get("known")) {
                         Ok(v)=>return Ok(v),
@@ -2607,6 +2801,12 @@ fn execute_unlocked_harness_rpc(
                 }
             }
         }
+        cmd if cmd.starts_with("app_browser_") => {
+            crate::browser_ws::handle_browser_rpc(data_dir, cmd, args)
+        }
+        cmd if bob_runtime::runtime_rpc::is_runtime_rpc_command(cmd) => {
+            bob_runtime::runtime_rpc::dispatch_runtime_rpc(data_dir, cmd, args)
+        }
         _ => Err("UNSUPPORTED_COMMAND"),
     }
 }
@@ -2695,6 +2895,11 @@ fn handle_connection(mut stream: TcpStream, state: Arc<Mutex<NodeContext>>) {
             }
         }
     }
+    if auth_header.is_none() && path == "/api/ws/browser-takeover" {
+        if let Some(token) = crate::browser_ws::extract_query_param(query, "token") {
+            auth_header = Some(format!("Bearer {token}"));
+        }
+    }
 
     // Bot credentials are a separate principal class; they never reach owner/device RPC.
     if path == "/api/bot/v1/mcp" {
@@ -2730,21 +2935,281 @@ fn handle_connection(mut stream: TcpStream, state: Arc<Mutex<NodeContext>>) {
             let scope=node_access::authorize(&access_dir,auth_header.as_deref(),now_millis());
             let allowed=match scope {
                 Ok(ref role) if role=="owner" => !path.starts_with("/api/client/v1/"),
-                Ok(_) => path.strip_prefix("/api/rpc/").is_some_and(|cmd|matches!(cmd,
+                Ok(_) => path == "/api/ws/browser-takeover" || path.starts_with("/api/f/") || path.strip_prefix("/api/rpc/").is_some_and(|cmd|matches!(cmd,
                     "app_dsh_live"|"app_dsh_create"|"app_dsh_cancel"|"app_native_setup"|"app_native_events"|"app_native_cancel"|"app_native_permission"|"app_dsh_list"|"app_dsh_page"|"app_dsh_history"|"app_dsh_preview"|"app_dsh_prompt"|"app_dsh_receipt"|
-                    "app_harness_discover"|"app_harness_check_auth"|"app_harness_verify_capabilities")),
+                    "app_harness_discover"|"app_harness_check_auth"|"app_harness_verify_capabilities"|
+                    "app_jarvis_chat"|"app_jarvis_approve"|"app_jarvis_reject"|"app_jarvis_approvals_list"|"app_jarvis_budget_get"|"app_jarvis_budget_set"|
+                    "app_features_list"|"app_feature_keep"|"app_feature_rollback"|"app_feature_toggle"|"app_feature_call"|"app_feature_storage_save"|
+                    "app_routines_list"|"app_routine_save"|"app_routine_trial"|"app_routine_toggle"|"app_routine_delete"|"app_routine_drafts_list"|
+                    "app_push_vapid_public_key"|"app_push_subscribe"|"app_proactivity_get"|"app_proactivity_set"|"app_morning_brief"|"app_dream_run"|"app_kb_search"|
+                    "app_browser_sessions_list"|"app_browser_session_open"|"app_browser_session_clear"|"app_browser_takeover_complete"|
+                    "app_host_workspaces_list"|"app_host_workspace_grant"|"app_host_workspace_revoke"|"app_host_queue_list"|"app_host_queue_enqueue"|"app_host_queue_reconcile")),
                 Err(_) => false,
             };
             if !allowed {write_json_response(&mut stream,401,r#"{"error":"NODE_AUTH_REQUIRED"}"#);return;}
-            if scope.as_deref()==Ok("device") && parsed.get("connectionId").and_then(Value::as_str)!=Some("local") {
+            if scope.as_deref()==Ok("device") && path != "/api/ws/browser-takeover" && parsed.get("connectionId").and_then(Value::as_str)!=Some("local") {
                 write_json_response(&mut stream,403,r#"{"error":"NODE_SCOPE_DENIED"}"#);return;
             }
         }
     }
 
     if method == "OPTIONS" {
-        let resp = "HTTP/1.1 204 No Content\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type, Authorization\r\nConnection: close\r\n\r\n";
+        let resp = "HTTP/1.1 204 No Content\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type, Authorization, X-Bob-Rpc\r\nConnection: close\r\n\r\n";
         let _ = stream.write_all(resp.as_bytes());
+        return;
+    }
+
+    if path == "/api/ws/browser-takeover" {
+        if method != "GET" {
+            write_json_response(&mut stream, 405, r#"{"error":"METHOD_NOT_ALLOWED"}"#);
+            return;
+        }
+        if !node_access::enabled(&access_dir)
+            && auth_header
+                .as_deref()
+                .is_some_and(|h| h.trim_start().to_ascii_lowercase().starts_with("bearer "))
+        {
+            let guard = match state.lock() {
+                Ok(g) => g,
+                Err(_) => {
+                    write_json_response(&mut stream, 500, r#"{"error":"NODE_LOCK_POISONED"}"#);
+                    return;
+                }
+            };
+            if let Err((status, code)) = verify_bearer_token(&guard, auth_header.as_deref()) {
+                let body = json!({ "ok": false, "error": code }).to_string();
+                write_json_response(&mut stream, status, &body);
+                return;
+            }
+        }
+        crate::browser_ws::handle_ws_upgrade(stream, &access_dir, &header_text, query);
+        return;
+    }
+
+    if path == "/api/jarvis/v1/stream" {
+        if method != "POST" {
+            write_json_response(&mut stream, 405, r#"{"error":"METHOD_NOT_ALLOWED"}"#);
+            return;
+        }
+        if !node_access::enabled(&access_dir)
+            && auth_header
+                .as_deref()
+                .is_some_and(|h| h.trim_start().to_ascii_lowercase().starts_with("bearer "))
+        {
+            let guard = match state.lock() {
+                Ok(g) => g,
+                Err(_) => {
+                    write_json_response(&mut stream, 500, r#"{"error":"NODE_LOCK_POISONED"}"#);
+                    return;
+                }
+            };
+            if let Err((status, code)) = verify_bearer_token(&guard, auth_header.as_deref()) {
+                let body = json!({ "ok": false, "error": code }).to_string();
+                write_json_response(&mut stream, status, &body);
+                return;
+            }
+        }
+        let parsed_body: Value = serde_json::from_str(&body_str).unwrap_or_else(|_| json!({}));
+        jarvis::handle_http_stream(stream, &state, &parsed_body);
+        return;
+    }
+
+    if let Some(rest) = path.strip_prefix("/api/f/") {
+        if method != "POST" && method != "GET" {
+            write_json_response(&mut stream, 405, r#"{"error":"METHOD_NOT_ALLOWED"}"#);
+            return;
+        }
+        let parts: Vec<&str> = rest.splitn(2, '/').collect();
+        if parts.len() != 2 || parts[0].is_empty() || parts[1].is_empty() {
+            write_json_response(&mut stream, 400, r#"{"error":"INVALID_FEATURE_ROUTE_PATH"}"#);
+            return;
+        }
+        let pkg = parts[0];
+        let route = parts[1];
+
+        if !node_access::enabled(&access_dir)
+            && auth_header
+                .as_deref()
+                .is_some_and(|h| h.trim_start().to_ascii_lowercase().starts_with("bearer "))
+        {
+            let guard = match state.lock() {
+                Ok(g) => g,
+                Err(_) => {
+                    write_json_response(&mut stream, 500, r#"{"error":"NODE_LOCK_POISONED"}"#);
+                    return;
+                }
+            };
+            if let Err((status, code)) = verify_bearer_token(&guard, auth_header.as_deref()) {
+                let body = json!({ "ok": false, "error": code }).to_string();
+                write_json_response(&mut stream, status, &body);
+                return;
+            }
+        }
+
+        let payload: Value = if method == "POST" {
+            serde_json::from_str(&body_str).unwrap_or_else(|_| json!({}))
+        } else {
+            let mut map = serde_json::Map::new();
+            if !query.is_empty() {
+                for pair in query.split('&') {
+                    if let Some((k, v)) = pair.split_once('=') {
+                        map.insert(k.to_string(), json!(v));
+                    }
+                }
+            }
+            Value::Object(map)
+        };
+
+        let data_dir = access_dir.clone();
+        let call_args = json!({
+            "name": pkg,
+            "route": route,
+            "payload": payload,
+        });
+
+        match bob_runtime::features::execute_feature_call(&data_dir, &call_args) {
+            Ok(result) => {
+                let payload = serde_json::to_string(&result).unwrap_or_else(|_| "{}".to_owned());
+                write_json_response(&mut stream, 200, &payload);
+            }
+            Err(err) => {
+                let status = if err == "FEATURE_NOT_FOUND" || err == "FEATURE_ROUTE_NOT_FOUND" {
+                    404
+                } else if err == "FEATURE_DISABLED" {
+                    403
+                } else {
+                    400
+                };
+                let payload = json!({ "ok": false, "error": err }).to_string();
+                write_json_response(&mut stream, status, &payload);
+            }
+        }
+        return;
+    }
+
+    if path == "/api/push/vapid-public-key" && method == "GET" {
+        let store = match push_channels::PushStore::open(&access_dir) {
+            Ok(s) => s,
+            Err(e) => {
+                write_json_response(&mut stream, 500, &json!({ "ok": false, "error": e }).to_string());
+                return;
+            }
+        };
+        write_json_response(&mut stream, 200, &json!({ "ok": true, "publicKey": store.public_key(), "public_key": store.public_key() }).to_string());
+        return;
+    }
+
+    if path == "/api/push/subscribe" && method == "POST" {
+        let parsed_body: Value = serde_json::from_str(&body_str).unwrap_or_else(|_| json!({}));
+        let sub_val = parsed_body.get("subscription").unwrap_or(&parsed_body);
+        let sub: Result<push_channels::WebPushSubscription, _> = serde_json::from_value(sub_val.clone());
+        match sub {
+            Ok(subscription) => {
+                let mut store = match push_channels::PushStore::open(&access_dir) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        write_json_response(&mut stream, 500, &json!({ "ok": false, "error": e }).to_string());
+                        return;
+                    }
+                };
+                match store.add_subscription(subscription) {
+                    Ok(()) => write_json_response(&mut stream, 200, r#"{"ok":true,"status":"subscribed"}"#),
+                    Err(e) => write_json_response(&mut stream, 400, &json!({ "ok": false, "error": e }).to_string()),
+                }
+            }
+            Err(_) => {
+                write_json_response(&mut stream, 400, r#"{"ok":false,"error":"SUBSCRIPTION_INVALID"}"#);
+            }
+        }
+        return;
+    }
+
+    if path == "/api/push/unsubscribe" && method == "POST" {
+        let parsed_body: Value = serde_json::from_str(&body_str).unwrap_or_else(|_| json!({}));
+        let endpoint = parsed_body.get("endpoint").and_then(Value::as_str).unwrap_or("");
+        let mut store = match push_channels::PushStore::open(&access_dir) {
+            Ok(s) => s,
+            Err(e) => {
+                write_json_response(&mut stream, 500, &json!({ "ok": false, "error": e }).to_string());
+                return;
+            }
+        };
+        let _ = store.remove_subscription(endpoint);
+        write_json_response(&mut stream, 200, r#"{"ok":true,"status":"unsubscribed"}"#);
+        return;
+    }
+
+    if path == "/v1/health" && method == "GET" {
+        let (status, val) = push_channels::handle_wechat_health();
+        write_json_response(&mut stream, status, &val.to_string());
+        return;
+    }
+
+    if path == "/v1/conversations" {
+        if node_access::enabled(&access_dir) {
+            if let Err(e) = node_access::authorize(&access_dir, auth_header.as_deref(), now_millis()) {
+                write_json_response(&mut stream, 401, &json!({ "error": e }).to_string());
+                return;
+            }
+        } else if auth_header.as_deref().is_some_and(|h| h.trim_start().to_ascii_lowercase().starts_with("bearer ")) {
+            let guard = match state.lock() {
+                Ok(g) => g,
+                Err(_) => {
+                    write_json_response(&mut stream, 500, r#"{"error":"NODE_LOCK_POISONED"}"#);
+                    return;
+                }
+            };
+            if let Err((status, code)) = verify_bearer_token(&guard, auth_header.as_deref()) {
+                write_json_response(&mut stream, status, &json!({ "error": code }).to_string());
+                return;
+            }
+        }
+        let parsed_body: Value = serde_json::from_str(&body_str).unwrap_or_else(|_| json!({}));
+        let mut guard = match state.lock() {
+            Ok(g) => g,
+            Err(_) => {
+                write_json_response(&mut stream, 500, r#"{"error":"NODE_LOCK_POISONED"}"#);
+                return;
+            }
+        };
+        let res = push_channels::handle_wechat_conversations(&mut *guard, method, &parsed_body);
+        drop(guard);
+        match res {
+            Ok((status, val)) => write_json_response(&mut stream, status, &val.to_string()),
+            Err(e) => write_json_response(&mut stream, 400, &json!({ "error": e }).to_string()),
+        }
+        return;
+    }
+
+    if path == "/v1/chat" && method == "POST" {
+        if node_access::enabled(&access_dir) {
+            if let Err(e) = node_access::authorize(&access_dir, auth_header.as_deref(), now_millis()) {
+                write_json_response(&mut stream, 401, &json!({ "error": e }).to_string());
+                return;
+            }
+        } else if auth_header.as_deref().is_some_and(|h| h.trim_start().to_ascii_lowercase().starts_with("bearer ")) {
+            let guard = match state.lock() {
+                Ok(g) => g,
+                Err(_) => {
+                    write_json_response(&mut stream, 500, r#"{"error":"NODE_LOCK_POISONED"}"#);
+                    return;
+                }
+            };
+            if let Err((status, code)) = verify_bearer_token(&guard, auth_header.as_deref()) {
+                write_json_response(&mut stream, status, &json!({ "error": code }).to_string());
+                return;
+            }
+        }
+        let parsed_body: Value = serde_json::from_str(&body_str).unwrap_or_else(|_| json!({}));
+        let mut accept_header: Option<String> = None;
+        for line in header_text.lines() {
+            if let Some((k, v)) = line.split_once(':') {
+                if k.trim().eq_ignore_ascii_case("accept") {
+                    accept_header = Some(v.trim().to_owned());
+                }
+            }
+        }
+        push_channels::handle_wechat_chat(stream, &state, &parsed_body, accept_header.as_deref());
         return;
     }
 
@@ -2770,10 +3235,11 @@ fn handle_connection(mut stream: TcpStream, state: Arc<Mutex<NodeContext>>) {
             return;
         }
         let parsed_body: Value = serde_json::from_str(&body_str).unwrap_or_else(|_| json!({}));
-        let args = parsed_body
-            .get("args")
-            .cloned()
-            .unwrap_or(parsed_body);
+        let args = if parsed_body.as_object().is_some_and(|m| m.len() == 1 && m.contains_key("args")) {
+            parsed_body.get("args").cloned().unwrap()
+        } else {
+            parsed_body
+        };
         let mut guard = match state.lock() {
             Ok(g) => g,
             Err(_) => {
@@ -2804,6 +3270,41 @@ fn handle_connection(mut stream: TcpStream, state: Arc<Mutex<NodeContext>>) {
             let result=if command.trim()=="app_assistant_execute" { assistant::execute(&state,&args) } else { assistant::poll(&state,&args) };
             let (status,value)=match result {Ok(result)=>(200,json!({"ok":true,"result":result})),Err(e)=>(400,json!({"ok":false,"error":e}))};
             write_json_response(&mut stream,status,&value.to_string());
+            return;
+        }
+        if command.trim() == "app_jarvis_chat" {
+            drop(guard);
+            let result = jarvis::chat(&state, &args);
+            let (status, value) = match result {
+                Ok(result) => (200, json!({ "ok": true, "result": result })),
+                Err(e) => (400, json!({ "ok": false, "error": e })),
+            };
+            write_json_response(&mut stream, status, &value.to_string());
+            return;
+        }
+        if matches!(command.trim(), "app_jarvis_approve" | "app_jarvis_reject") {
+            drop(guard);
+            let result = match command.trim() {
+                "app_jarvis_approve" => jarvis::approve(&state, &args),
+                "app_jarvis_reject" => jarvis::reject(&state, &args),
+                _ => unreachable!(),
+            };
+            let (status, value) = match result {
+                Ok(result) => (200, json!({ "ok": true, "result": result })),
+                Err(e) => (400, json!({ "ok": false, "error": e })),
+            };
+            write_json_response(&mut stream, status, &value.to_string());
+            return;
+        }
+        if command.trim() == "app_feature_call" {
+            let data_dir = guard.runtime.data_dir.clone();
+            drop(guard);
+            let result = bob_runtime::features::execute_feature_call(&data_dir, &args);
+            let (status, value) = match result {
+                Ok(result) => (200, json!({ "ok": true, "result": result })),
+                Err(e) => (400, json!({ "ok": false, "error": e })),
+            };
+            write_json_response(&mut stream, status, &value.to_string());
             return;
         }
         if matches!(
@@ -3233,6 +3734,24 @@ pub fn spawn_node_server(config: BobNodeConfig) -> Result<RunningNodeServer, &'s
         let _=context_capsule::refresh_changed(&context_dir);
         for _ in 0..10 {if context_stop.load(Ordering::SeqCst){return;}std::thread::sleep(Duration::from_millis(500));}
     }});
+
+    let sched_stop = stop.clone();
+    let sched_ctx = ctx.clone();
+    std::thread::spawn(move || {
+        while !sched_stop.load(Ordering::SeqCst) {
+            if let Ok(mut guard) = sched_ctx.try_lock() {
+                let now = now_millis();
+                let data_dir = guard.runtime.data_dir.clone();
+                let _ = bob_runtime::routines::tick_due_server(&data_dir, &mut guard.app, now);
+            }
+            for _ in 0..5 {
+                if sched_stop.load(Ordering::SeqCst) {
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(200));
+            }
+        }
+    });
 
 
     std::thread::spawn(move || {
@@ -3838,6 +4357,359 @@ mod tests {
         work_srv.shutdown();
         phone_srv.shutdown();
         web_srv.shutdown();
+    }
+
+    #[test]
+    fn wp_j4a_routines_rpc_and_unattended_draft_lifecycle() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("kernel.sqlite");
+        let _ = LocalApp::open(&db_path).unwrap();
+
+        let cfg = BobNodeConfig {
+            bind_addr: "127.0.0.1:0".to_string(),
+            data_dir: dir.path().to_path_buf(),
+            static_dir: None,
+            legacy_db_path: None,
+        };
+        let srv = spawn_node_server(cfg).expect("spawn node server");
+
+        // 1. Create a schedule item to be deleted by routine later
+        let (st, add_res) = http_request(
+            srv.local_addr,
+            "POST",
+            "/api/rpc/app_schedule_create",
+            None,
+            Some(&json!({
+                "id": "sched-stale-1",
+                "title": "Stale Item For Routine",
+                "notes": "Temporary todo",
+                "start_at": now_millis()
+            }).to_string()),
+        );
+        assert_eq!(st, 200);
+        let item_id = add_res["result"]["id"].as_str().unwrap().to_owned();
+
+        // 2. Author/Save a routine via app_routine_save
+        let (st, save_res) = http_request(
+            srv.local_addr,
+            "POST",
+            "/api/rpc/app_routine_save",
+            None,
+            Some(&json!({
+                "id": "rtn-node-test",
+                "title": "Clean Stale Todos",
+                "prompt_instruction": "Clean up stale todos nightly",
+                "recurrence": { "type": "daily", "hour": 23, "minute": 0 },
+                "routine_steps": [
+                    { "step_index": 0, "tool_name": "schedule_delete", "description": "Delete todo", "args_template": { "id": item_id } }
+                ],
+                "utc_offset_minutes": 480
+            }).to_string()),
+        );
+        assert_eq!(st, 200);
+        assert_eq!(save_res["ok"], true);
+        assert_eq!(save_res["result"]["trial_passed"], false);
+        assert_eq!(save_res["result"]["enabled"], false);
+
+        // 3. List routines via app_routines_list
+        let (st, list_res) = http_request(
+            srv.local_addr,
+            "POST",
+            "/api/rpc/app_routines_list",
+            None,
+            Some("{}"),
+        );
+        assert_eq!(st, 200);
+        let routines = list_res["result"].as_array().unwrap();
+        assert_eq!(routines.len(), 1);
+        assert_eq!(routines[0]["id"], "rtn-node-test");
+
+        // 4. Try enabling before trial -> must fail with ROUTINE_TRIAL_REQUIRED
+        let (st, tog_err) = http_request(
+            srv.local_addr,
+            "POST",
+            "/api/rpc/app_routine_toggle",
+            None,
+            Some(&json!({ "id": "rtn-node-test", "enabled": true }).to_string()),
+        );
+        assert_eq!(st, 400);
+        assert_eq!(tog_err["error"], "ROUTINE_TRIAL_REQUIRED");
+
+        // 5. Run mandatory trial via app_routine_trial
+        let (st, trial_res) = http_request(
+            srv.local_addr,
+            "POST",
+            "/api/rpc/app_routine_trial",
+            None,
+            Some(&json!({ "id": "rtn-node-test" }).to_string()),
+        );
+        assert_eq!(st, 200);
+        assert_eq!(trial_res["result"]["routine"]["trial_passed"], true);
+        assert_eq!(trial_res["result"]["report"]["goal_achieved"], true);
+        let drafts = trial_res["result"]["drafts"].as_array().unwrap();
+        assert_eq!(drafts.len(), 1);
+        let draft_id = drafts[0]["id"].as_str().unwrap().to_owned();
+
+        // 6. Now enabling succeeds!
+        let (st, tog_ok) = http_request(
+            srv.local_addr,
+            "POST",
+            "/api/rpc/app_routine_toggle",
+            None,
+            Some(&json!({ "id": "rtn-node-test", "enabled": true }).to_string()),
+        );
+        assert_eq!(st, 200);
+        assert_eq!(tog_ok["result"]["enabled"], true);
+
+        // 7. Check drafts in app_routine_drafts_list
+        let (st, drafts_res) = http_request(
+            srv.local_addr,
+            "POST",
+            "/api/rpc/app_routine_drafts_list",
+            None,
+            Some("{}"),
+        );
+        assert_eq!(st, 200);
+        let draft_items = drafts_res["result"].as_array().unwrap();
+        assert_eq!(draft_items.len(), 1);
+        assert_eq!(draft_items[0]["id"], draft_id);
+
+        // 8. Check that draft is also presented in jarvis::approvals_list with kind: "routine_draft"
+        let (st, apprv_res) = http_request(
+            srv.local_addr,
+            "POST",
+            "/api/rpc/app_jarvis_approvals_list",
+            None,
+            Some("{}"),
+        );
+        assert_eq!(st, 200);
+        let apprvs = apprv_res["result"].as_array().unwrap();
+        assert!(
+            apprvs.iter().any(|a| a["id"] == draft_id && a["kind"] == "routine_draft"),
+            "Draft should appear in jarvis approvals stream: {apprvs:?}"
+        );
+
+        // 9. Approve draft via app_jarvis_approve seamlessly!
+        let (st, appr_out) = http_request(
+            srv.local_addr,
+            "POST",
+            "/api/rpc/app_jarvis_approve",
+            None,
+            Some(&json!({ "approvalId": draft_id }).to_string()),
+        );
+        assert_eq!(st, 200);
+        assert_eq!(appr_out["result"]["ok"], true);
+
+        // Verify the schedule item was really deleted!
+        let (st, sched_snap) = http_request(
+            srv.local_addr,
+            "POST",
+            "/api/rpc/app_personal_snapshot",
+            None,
+            Some("{}"),
+        );
+        assert_eq!(st, 200);
+        let sched_items = sched_snap["result"]["schedules"].as_array().unwrap();
+        assert!(!sched_items.iter().any(|s| s["id"] == item_id));
+
+        // 10. Delete routine via app_routine_delete
+        let (st, del_res) = http_request(
+            srv.local_addr,
+            "POST",
+            "/api/rpc/app_routine_delete",
+            None,
+            Some(&json!({ "id": "rtn-node-test" }).to_string()),
+        );
+        assert_eq!(st, 200);
+        assert_eq!(del_res["result"]["id"], "rtn-node-test");
+
+        // Verify shutdown
+        srv.shutdown();
+    }
+
+    #[test]
+    fn test_wp_j4b_growth_proactivity_and_push_channels_e2e() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let server = spawn_node_server(BobNodeConfig {
+            bind_addr: "127.0.0.1:0".to_owned(),
+            data_dir: dir.path().to_path_buf(),
+            static_dir: None,
+            legacy_db_path: None,
+        })
+        .expect("spawn server");
+
+        // 1. Proactivity RPCs: initial get -> default level 0.35, tier morning_brief
+        let (status, get_res) = http_request(
+            server.local_addr,
+            "POST",
+            "/api/rpc/app_proactivity_get",
+            None,
+            Some("{}"),
+        );
+        assert_eq!(status, 200);
+        assert_eq!(get_res["result"]["level"], json!(0.35));
+        assert_eq!(get_res["result"]["tier"], json!("morning_brief"));
+        assert_eq!(get_res["result"]["quietHoursStart"], json!("22:00"));
+        assert_eq!(get_res["result"]["quietHoursEnd"], json!("08:00"));
+
+        // 2. Proactivity set -> update level to 0.9 (proactive_care) and custom quiet hours
+        let (status, set_res) = http_request(
+            server.local_addr,
+            "POST",
+            "/api/rpc/app_proactivity_set",
+            None,
+            Some(&json!({
+                "level": 0.9,
+                "quietHoursStart": "23:00",
+                "quietHoursEnd": "07:00",
+                "utcOffsetMinutes": 480
+            }).to_string()),
+        );
+        assert_eq!(status, 200);
+        assert_eq!(set_res["result"]["level"], json!(0.9));
+        assert_eq!(set_res["result"]["tier"], json!("proactive_care"));
+        assert_eq!(set_res["result"]["quietHoursStart"], json!("23:00"));
+        assert_eq!(set_res["result"]["quietHoursEnd"], json!("07:00"));
+
+        // 3. VAPID Web Push RPC & HTTP endpoints
+        let (status, key_rpc) = http_request(
+            server.local_addr,
+            "POST",
+            "/api/rpc/app_push_vapid_public_key",
+            None,
+            Some("{}"),
+        );
+        assert_eq!(status, 200);
+        let pubkey = key_rpc["result"]["publicKey"].as_str().expect("pubkey string");
+        assert!(!pubkey.is_empty());
+
+        let (status, key_http) = http_request(
+            server.local_addr,
+            "GET",
+            "/api/push/vapid-public-key",
+            None,
+            None,
+        );
+        assert_eq!(status, 200);
+        assert_eq!(key_http["publicKey"], json!(pubkey));
+
+        // 4. Push Subscribe / Unsubscribe via HTTP
+        let (status, sub_http) = http_request(
+            server.local_addr,
+            "POST",
+            "/api/push/subscribe",
+            None,
+            Some(&json!({
+                "endpoint": "https://fcm.googleapis.com/fcm/send/test-sub-123",
+                "keys": {
+                    "p256dh": "dummy-p256",
+                    "auth": "dummy-auth"
+                }
+            }).to_string()),
+        );
+        assert_eq!(status, 200);
+        assert_eq!(sub_http["ok"], json!(true));
+
+        let (status, unsub_http) = http_request(
+            server.local_addr,
+            "POST",
+            "/api/push/unsubscribe",
+            None,
+            Some(&json!({
+                "endpoint": "https://fcm.googleapis.com/fcm/send/test-sub-123"
+            }).to_string()),
+        );
+        assert_eq!(status, 200);
+        assert_eq!(unsub_http["ok"], json!(true));
+
+        // 5. Seed note & memory, then test app_kb_search
+        let (status, _note_res) = http_request(
+            server.local_addr,
+            "POST",
+            "/api/rpc/app_note_upsert",
+            None,
+            Some(&json!({
+                "id": "note-fts-1",
+                "title": "Quantum Algorithm",
+                "bodyMarkdown": "Fast Fourier transform on qubits #quantum @Alice",
+                "tags": ["quantum"]
+            }).to_string()),
+        );
+        assert_eq!(status, 200);
+
+        let (status, search_res) = http_request(
+            server.local_addr,
+            "POST",
+            "/api/rpc/app_kb_search",
+            None,
+            Some(&json!({
+                "query": "Quantum",
+                "limit": 5
+            }).to_string()),
+        );
+        assert_eq!(status, 200);
+        let hits = search_res["result"]["hits"].as_array().expect("hits array");
+        assert!(!hits.is_empty(), "Should find indexed note");
+        assert_eq!(hits[0]["doc_id"], "note-fts-1");
+
+        // 6. Morning brief and Nightly Dream run
+        let (status, brief_res) = http_request(
+            server.local_addr,
+            "POST",
+            "/api/rpc/app_morning_brief",
+            None,
+            Some("{}"),
+        );
+        assert_eq!(status, 200);
+        assert!(brief_res["result"]["date_key"].is_string());
+        assert!(brief_res["result"]["card"].is_object());
+
+        let (status, dream_res) = http_request(
+            server.local_addr,
+            "POST",
+            "/api/rpc/app_dream_run",
+            None,
+            Some("{}"),
+        );
+        assert_eq!(status, 200);
+        assert_eq!(dream_res["result"]["memories_pruned"], json!(0));
+
+        // 7. Official WeChat compat endpoints
+        let (status, health_res) = http_request(
+            server.local_addr,
+            "GET",
+            "/v1/health",
+            None,
+            None,
+        );
+        assert_eq!(status, 200);
+        assert_eq!(health_res["ok"], json!(true));
+        assert_eq!(health_res["service"], json!("bob-jarvis"));
+        assert_eq!(health_res["version"], json!("1.0.1"));
+
+        let (status, convs_res) = http_request(
+            server.local_addr,
+            "GET",
+            "/v1/conversations",
+            None,
+            None,
+        );
+        assert_eq!(status, 200);
+        assert!(convs_res["conversations"].is_array());
+
+        let (status, conv_create) = http_request(
+            server.local_addr,
+            "POST",
+            "/v1/conversations",
+            None,
+            Some(&json!({
+                "title": "WeChat Mobile Chat"
+            }).to_string()),
+        );
+        assert_eq!(status, 200);
+        assert!(conv_create["conversation_id"].is_string());
+
+        server.shutdown();
     }
 }
 

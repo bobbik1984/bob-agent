@@ -98,6 +98,7 @@ impl LocalApp {
             origin,
             session,
         };
+        app.ensure_kb_search_schema()?;
         app.recover_local_executions(now)?;
         Ok(app)
     }

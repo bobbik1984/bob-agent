@@ -165,6 +165,9 @@ pub fn rpc(data_dir: &Path, command: &str, args: &Value) -> Result<Value, &'stat
                 .get("path")
                 .and_then(Value::as_str)
                 .ok_or("CLAUDE_PATH_INVALID")?;
+            if bob_browser::assert_profile_download_forbidden(std::path::Path::new(path)).is_err() {
+                return Err("BROWSER_PROFILE_FORBIDDEN");
+            }
             let version_id = args
                 .get("versionId")
                 .or_else(|| args.get("version_id"))
@@ -200,6 +203,9 @@ pub fn try_handle_dsh_command(
                 .get("path")
                 .and_then(Value::as_str)
                 .ok_or("CLAUDE_PATH_INVALID")?;
+            if bob_browser::assert_profile_download_forbidden(std::path::Path::new(path)).is_err() {
+                return Err("BROWSER_PROFILE_FORBIDDEN");
+            }
             let version_id = args
                 .get("versionId")
                 .or_else(|| args.get("version_id"))

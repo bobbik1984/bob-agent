@@ -4,6 +4,11 @@ import DshSessions from './DshSessions.vue';
 import {createChatScroll} from '../chat-scroll.mjs';
 import MessageContent from './MessageContent.vue';
 import { TERMINAL_ROD_FRAMES } from '../thinking-process.mjs';
+import JarvisOrb from './JarvisOrb.vue';
+import ActionCard from './ActionCard.vue';
+import JarvisWidgetGrid from './JarvisWidgetGrid.vue';
+import FeatureTrialBanner from './FeatureTrialBanner.vue';
+import VirtualBrowserModal from './VirtualBrowserModal.vue';
 
 const {
   t,
@@ -19,6 +24,8 @@ const {
   activeConversationItem,
   fault,
   sessionId,
+  assistantConversationId,
+  jarvisHome,
   reload,
   startup,
   homeFault,
@@ -114,12 +121,40 @@ watch(isBusy, val => {
   }
 }, { immediate: true });
 onUnmounted(() => { if (rodTimer) clearInterval(rodTimer); });
+
+const jarvisOrbMood = computed(() => jarvisHome?.orbMood?.value || 'idle');
+const pendingApprovalCount = computed(() => jarvisHome?.pendingApprovalCount?.value || 0);
+const isMainJarvisSession = computed(() => !sessionId.value || sessionId.value === assistantConversationId?.value);
 </script>
 
 <template>
     <!-- Primary View 1: 对话 (Chat) -->
     <div v-show="remoteConversation && activeDrawer === 'chat' && !settingsOpen" class="remote-session-host"><DshSessions v-if="remoteConversation" :key="remoteConversation.node.id + remoteConversation.session.id" :target="remoteConversation" :nodes="modelHub.state.remote_nodes || []" /></div>
     <main v-show="activeDrawer === 'chat' && !settingsOpen && !remoteConversation" class="main">
+      <!-- Jarvis Sticky Bar & Widget Sheet when conversation has messages -->
+      <div v-if="messages?.length && isMainJarvisSession" class="jarvis-sticky-bar">
+        <JarvisOrb
+          size="compact"
+          :mood="jarvisOrbMood"
+          :badge-count="pendingApprovalCount"
+          :interactive="true"
+          @activate="jarvisHome && (jarvisHome.widgetSheetOpen.value = !jarvisHome.widgetSheetOpen.value)"
+        />
+        <button
+          type="button"
+          class="jarvis-sheet-toggle-btn"
+          :aria-expanded="jarvisHome?.widgetSheetOpen?.value"
+          @click="jarvisHome && (jarvisHome.widgetSheetOpen.value = !jarvisHome.widgetSheetOpen.value)"
+        >
+          <span>{{ t(jarvisHome?.widgetSheetOpen?.value ? 'jarvisCloseWidgetsSheet' : 'jarvisOpenWidgetsSheet') }}</span>
+          <svg class="chevron-svg" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+            <path :d="jarvisHome?.widgetSheetOpen?.value ? 'm18 15-6-6-6 6' : 'm6 9 6 6 6-6'" />
+          </svg>
+        </button>
+      </div>
+      <div v-if="messages?.length && isMainJarvisSession && jarvisHome?.widgetSheetOpen?.value" class="jarvis-widget-sheet">
+        <JarvisWidgetGrid />
+      </div>
       <div
         v-if="readiness && readiness.pending_messages > 0"
         class="connection-note"
@@ -169,7 +204,13 @@ onUnmounted(() => { if (rodTimer) clearInterval(rodTimer); });
           <img :src="brandLogo" :alt="t('brand')" />
           <p>{{ t('loading') }}</p>
         </div>
-        <div v-else-if="!messages.length" class="empty">
+        <div v-else-if="!messages.length" class="empty jarvis-home-stage">
+          <JarvisOrb
+            size="hero"
+            :mood="jarvisOrbMood"
+            :badge-count="pendingApprovalCount"
+            @activate="focusComposer"
+          />
           <h1>{{ t('startTitle') }}</h1>
           <p>
             {{
@@ -184,6 +225,7 @@ onUnmounted(() => { if (rodTimer) clearInterval(rodTimer); });
               )
             }}
           </p>
+          <JarvisWidgetGrid />
         </div>
         <article
           v-for="(message, msgIdx) in messages"
@@ -204,6 +246,17 @@ onUnmounted(() => { if (rodTimer) clearInterval(rodTimer); });
           </span>
           <span v-if="message.source === 'native_session_result'" class="message-state">{{ t('assistantNativeResult') }}</span>
           <MessageContent :content="message.content" :plain="message.role === 'user'" :stream="message.role === 'assistant' && msgIdx === messages.length - 1 && message.id === streamingMsgId" />
+          <div v-if="jarvisHome?.cardsForMessage(message)?.length" class="message-action-cards">
+            <ActionCard
+              v-for="c in jarvisHome.cardsForMessage(message)"
+              :key="c.id"
+              :card="c"
+              @approve="jarvisHome.approveAction"
+              @reject="jarvisHome.rejectAction"
+              @open-takeover="jarvisHome.openTakeover"
+              @save-routine="jarvisHome.saveRoutine"
+            />
+          </div>
           <div v-if="assistantLink(message)" class="message-state" role="status">
             <span>{{ t('assistantDispatch_' + assistantLink(message).status) }}</span>
             <button type="button" @click="openAssistantTarget(assistantLink(message))">{{ assistantLink(message).target_title }} · {{ t('assistantOpenOriginal') }}</button>
@@ -244,10 +297,34 @@ onUnmounted(() => { if (rodTimer) clearInterval(rodTimer); });
             {{ t('noAutomaticReplay') }}
           </span>
         </article>
-        <div v-if="dispatchPending || saving || activeExecution" class="dsh-live-terminal-card" role="status" aria-live="polite">
-          <span class="terminal-rod" aria-hidden="true">[{{ rodFrame }}]</span>
-          <span>{{ stripDots(t(dispatchPending ? 'requestingExecution' : saving ? 'saving' : 'agentLiveThinking')) }}</span>
-          <span class="terminal-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span>
+        <article
+          v-if="jarvisHome?.jarvisStreaming?.value && jarvisHome?.streamingSessionId?.value === sessionId && jarvisHome?.streamingReplyText?.value"
+          class="message assistant-message streaming-live-bubble"
+        >
+          <span class="message-state">{{ t('assistantReply') }}</span>
+          <MessageContent :content="jarvisHome.streamingReplyText.value" :stream="true" />
+        </article>
+        <div v-if="jarvisHome?.pendingApprovals?.value?.length" class="pending-approvals-stream">
+          <ActionCard
+            v-for="card in jarvisHome.pendingApprovals.value"
+            :key="card.id"
+            :card="card"
+            @approve="jarvisHome.approveAction"
+            @reject="jarvisHome.rejectAction"
+            @open-takeover="jarvisHome.openTakeover"
+            @save-routine="jarvisHome.saveRoutine"
+          />
+        </div>
+        <div v-if="dispatchPending || saving || activeExecution" class="live-status-container" role="status" aria-live="polite">
+          <div v-if="isMainJarvisSession" class="jarvis-live-status-card">
+            <JarvisOrb size="compact" :mood="jarvisOrbMood" :interactive="false" />
+            <span class="jarvis-live-label">{{ stripDots(t(dispatchPending ? 'requestingExecution' : saving ? 'saving' : 'agentLiveThinking')) }}</span>
+          </div>
+          <div v-else class="dsh-live-terminal-card">
+            <span class="terminal-rod" aria-hidden="true">[{{ rodFrame }}]</span>
+            <span>{{ stripDots(t(dispatchPending ? 'requestingExecution' : saving ? 'saving' : 'agentLiveThinking')) }}</span>
+            <span class="terminal-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span>
+          </div>
         </div>
         <div v-if="historyPullUpDistance > 10" class="pull-up-refresh-hint" :class="{ ready: historyPullUpDistance >= 36 }" role="status" aria-live="polite">
           <span class="terminal-rod" aria-hidden="true">[{{ rodFrame }}]</span>
@@ -256,6 +333,9 @@ onUnmounted(() => { if (rodTimer) clearInterval(rodTimer); });
         </div>
       </section>
       <div v-if="awayFromLatest" class="chat-jump-row"><button type="button" class="chat-jump-latest" @click="jumpLatest" :aria-label="t('chatJumpLatest')" :title="t('chatJumpLatest')"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M12 4v16m-6-6 6 6 6-6"/></svg></button></div>
+
+      <!-- Persistent 3-Minute Trial Bar above composer during active chat -->
+      <FeatureTrialBanner v-if="messages?.length" />
 
       <form class="composer" @submit.prevent="send">
         <!-- Floating Quick Model Switcher Popover (Anchored cleanly above .composer) -->
@@ -458,6 +538,7 @@ onUnmounted(() => { if (rodTimer) clearInterval(rodTimer); });
         </div>
       </form>
     </main>
+    <VirtualBrowserModal />
 </template>
 
 <style scoped>
@@ -477,4 +558,91 @@ onUnmounted(() => { if (rodTimer) clearInterval(rodTimer); });
 <style scoped>
 .chat-jump-row{height:0;position:relative;z-index:2;display:flex;justify-content:flex-end;padding:0 20px;transform:translateY(-46px)}
 .chat-jump-latest{display:grid;place-items:center;width:36px;height:36px;border-radius:50%;border:1px solid var(--border-color);background:var(--bg-secondary);color:var(--accent-primary);cursor:pointer}
+
+.jarvis-home-stage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: var(--gap-lg) var(--gap-md);
+  gap: var(--gap-sm);
+  width: 100%;
+  max-width: 900px;
+  margin: 0 auto;
+}
+
+.jarvis-sticky-bar {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  padding: var(--gap-2xs) var(--gap-md);
+  background: var(--bg-primary);
+  border-bottom: 1px solid var(--line);
+  backdrop-filter: blur(8px);
+}
+
+.jarvis-sheet-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--gap-3xs);
+  background: var(--bg-secondary);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  padding: 0.2rem 0.6rem;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+
+.jarvis-sheet-toggle-btn:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.jarvis-widget-sheet {
+  padding: var(--gap-sm) var(--gap-md);
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--line);
+  max-height: 50vh;
+  overflow-y: auto;
+}
+
+.message-action-cards,
+.pending-approvals-stream {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-sm);
+  margin-top: var(--gap-xs);
+  width: 100%;
+}
+
+.streaming-live-bubble {
+  border-left: 3px solid var(--accent-primary);
+  background: var(--bg-secondary);
+}
+
+.live-status-container {
+  display: flex;
+  align-items: center;
+  margin: var(--gap-xs) 0;
+}
+
+.jarvis-live-status-card {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  padding: 0.35rem 0.75rem;
+  background: var(--bg-secondary);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+}
+
+.jarvis-live-label {
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
 </style>

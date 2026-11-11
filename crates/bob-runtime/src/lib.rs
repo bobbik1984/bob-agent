@@ -10,20 +10,31 @@
 //!   `online_cache.json`, BYOK execution, and Online Client API v1 calls.
 
 pub mod agy_directory;
-pub mod node_pairing;
-pub mod project_context;
-pub mod workspace_context;
-pub mod vision;
+pub mod budget;
+pub mod capability_borrowing;
+pub mod claude_harness;
+pub mod claude_rpc;
+pub mod context_capsule;
+mod dsh_file_context;
 pub mod dsh_session;
 pub mod dsh_transport;
-pub mod claude_harness;
-pub mod capability_borrowing;
-pub mod subagent_pool;
-pub mod context_capsule;
-pub mod claude_rpc;
+pub mod features;
+pub mod growth;
 pub mod harness_auth;
+pub mod host_tools;
+pub mod native_harness;
+pub mod net_guard;
+pub mod node_pairing;
+pub mod project_context;
+pub mod routines;
 pub mod runtime_rpc;
-mod dsh_file_context;
+pub mod subagent_pool;
+pub mod tool_bus;
+pub mod tool_tracker;
+pub mod vision;
+pub mod workspace_context;
+pub use base64;
+pub use reqwest;
 use bob_kernel::app::LocalApp;
 use bob_kernel::direct_provider::{
     DirectChatTurn, DirectProviderProfile, DirectProviderProfileInput,
@@ -39,7 +50,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 pub(crate) const DEFAULT_SLOT: &str = "provider-key-default";
 const MAX_RESPONSE_BYTES: usize = 512 * 1024;
 pub(crate) const TOOL_KEY_IDS: [&str; 4] = ["tavily", "tinyfish", "TAVILY_API_KEY", "TINYFISH_API_KEY"];
-const EMBEDDED_MODEL_REGISTRY: &str =
+pub(crate) const EMBEDDED_MODEL_REGISTRY: &str =
     include_str!("../../../apps/bob-app/src-tauri/resources/model_providers.json");
 
 pub fn now_millis() -> i64 {

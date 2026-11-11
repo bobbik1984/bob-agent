@@ -1,4 +1,4 @@
 [workspace]
-members = ["crates/bob-kernel", "crates/bob-transport", "crates/bob-runtime", "crates/bob-node"]
+members = ["crates/bob-kernel", "crates/bob-transport", "crates/bob-runtime", "crates/bob-node", "crates/bob-browser"]
 resolver = "2"
 exclude = ["apps/bob-app/src-tauri"]

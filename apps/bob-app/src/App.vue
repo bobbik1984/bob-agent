@@ -20,6 +20,7 @@ import { useQuickNote } from './composables/useQuickNote.mjs';
 import InboxView from './views/InboxView.vue';
 import DesktopRightSidebar from './components/DesktopRightSidebar.vue';
 import { useInbox } from './composables/useInbox.mjs';
+import { useJarvisHome } from './composables/useJarvisHome.mjs';
 
 const { t, locale } = useI18n();
 
@@ -35,6 +36,8 @@ const {
   available,
   kernelBridge,
   sessionId,
+  assistantConversationId,
+  messages,
   catalog,
   remoteConversation,
   layoutState,
@@ -68,6 +71,8 @@ const {
 shell.organizeSessionsViaAgent = organizeSessionsViaAgent;
 shell.catalog = catalog;
 shell.projectList = projectList;
+shell.assistantConversationId = assistantConversationId;
+shell.messages = messages;
 
 const {
   onlineState,
@@ -133,6 +138,9 @@ const {
 
 const inbox = useInbox(shell);
 shell.inbox = inbox;
+
+const jarvisHome = useJarvisHome(shell);
+shell.jarvisHome = jarvisHome;
 
 provide('bobAppShell', shell);
 
@@ -232,7 +240,7 @@ onUnmounted(() => {
                   : (remoteConversation?.session.title || currentConversation)
         }}
       </span>
-      <button v-if="activeDrawer === 'chat' && !settingsOpen && !remoteConversation" type="button" class="mini-ghost-btn" :title="t('promoteToWorkBtn')" @click="promoteConversationToWork">
+      <button v-if="activeDrawer === 'chat' && !settingsOpen && !remoteConversation && (messages?.length > 0)" type="button" class="mini-ghost-btn" :title="t('promoteToWorkBtn')" @click="promoteConversationToWork">
         {{ t('promoteToWorkBtn') }}
       </button>
       <button
@@ -261,14 +269,27 @@ onUnmounted(() => {
         </svg>
         <span class="device-dot" aria-hidden="true"></span>
       </button>
-      <details class="conversation-menu" @toggle="$event.currentTarget.open && loadModelHub()" @keydown.esc="$event.currentTarget.open=false; $event.currentTarget.querySelector('summary').focus()" @focusout="$event.relatedTarget && !$event.currentTarget.contains($event.relatedTarget) && ($event.currentTarget.open=false)">
+      <details class="conversation-menu" @toggle="$event.currentTarget.open && (loadModelHub(), jarvisHome?.refreshJarvisState(sessionId))" @keydown.esc="$event.currentTarget.open=false; $event.currentTarget.querySelector('summary').focus()" @focusout="$event.relatedTarget && !$event.currentTarget.contains($event.relatedTarget) && ($event.currentTarget.open=false)">
         <summary :aria-label="t('conversationMenu')"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><circle cx="5" cy="12" r="1.5" fill="currentColor"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/><circle cx="19" cy="12" r="1.5" fill="currentColor"/></svg></summary>
         <div class="conversation-menu-panel">
           <button type="button" class="conversation-menu-action" @click="immersive = !immersive; $event.currentTarget.closest('details.conversation-menu').open = false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5"/></svg>{{ t(immersive ? 'exitImmersive' : 'enterImmersive') }}</button>
           <button type="button" class="conversation-menu-action" @click="settingsOpen = true; $event.currentTarget.closest('details.conversation-menu').open = false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3"/><circle cx="15" cy="17" r="3"/></svg>{{ t('settings') }}</button>
           <div class="conversation-menu-divider" role="separator"></div>
 
-          <div class="quota-sub-section" :aria-label="t('quotaSubscription')">
+          <!-- Monthly Budget Row -->
+          <div v-if="jarvisHome?.budgetState?.value" class="quota-sub-row" :title="t('jarvisMonthlyBudget')">
+            <span class="quota-brand-badge">{{ t('jarvisMonthlyBudget') }}</span>
+            <div class="quota-dual-bars">
+              <div class="quota-bar-line">
+                <div class="quota-bar-track" role="meter" :aria-label="t('jarvisMonthlyBudget')">
+                  <div class="quota-bar-fill quota-remaining-fill" :style="{'--remaining': Math.min(100, Math.round(((jarvisHome.budgetState.value.spent_usd || 0) / (jarvisHome.budgetState.value.monthly_cap_usd || 10)) * 100)) + '%'}"></div>
+                </div>
+                <span class="quota-bar-pct">${{ Number(jarvisHome.budgetState.value.spent_usd || 0).toFixed(2) }} / ${{ Number(jarvisHome.budgetState.value.monthly_cap_usd || 10).toFixed(2) }}</span>
+              </div>
+            </div>
+          </div>
+
+          <div v-if="jarvisHome?.hasProCluster?.value" class="quota-sub-section" :aria-label="t('quotaSubscription')">
             <div v-for="item in subscriptionQuotas" :key="item.id" class="quota-sub-row"
               :title="[item.label, item.compact?.id, item.source && t('quotaSource', {node:item.source}), item.updated && t('quotaUpdatedAt', {time:item.updated}), item.status === 'stale' && t('quotaStale'), !item.compact && t('quotaAwaitingSource')].filter(Boolean).join(' · ')">
               <span class="quota-brand-badge"><img :src="item.logo" :alt="item.label" class="quota-brand-logo" /></span>

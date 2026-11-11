@@ -36,6 +36,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "bob-browser"
+version = "1.0.1"
+dependencies = [
+ "base64 0.22.1",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "thiserror",
+ "tungstenite",
+]
+
+[[package]]
 name = "bob-kernel"
 version = "1.0.1"
 dependencies = [
@@ -52,6 +66,7 @@ dependencies = [
 name = "bob-node"
 version = "1.0.1"
 dependencies = [
+ "bob-browser",
  "bob-kernel",
  "bob-runtime",
  "bob-transport",
@@ -62,6 +77,7 @@ dependencies = [
  "sha2",
  "tempfile",
  "thiserror",
+ "tungstenite",
 ]
 
 [[package]]

@@ -1,0 +1,22 @@
+{$BOB_PUBLIC_DOMAIN:bob.example.com} {
+    encode zstd gzip
+
+    # Streaming endpoints: flush immediately without proxy buffering for SSE / LLM tokens
+    @streaming path /api/jarvis/v1/stream* /v1/chat* /api/events*
+    handle @streaming {
+        reverse_proxy bob-node:8787 {
+            flush_interval -1
+        }
+    }
+
+    # WebSocket endpoints: virtual browser takeover & interactive tunnel
+    @websockets path /api/ws/browser-takeover* /api/ws/*
+    handle @websockets {
+        reverse_proxy bob-node:8787
+    }
+
+    # Default reverse proxy for bob-node server and embedded frontend SPA
+    handle {
+        reverse_proxy bob-node:8787
+    }
+}

@@ -345,5 +345,33 @@ export function createKernelBridge(invoke, isAvailable) {
     execute: requestId => call('app_execute', { requestId }),
     executions: sessionId => call('app_executions', { sessionId }),
     cancel: executionId => call('app_cancel', { executionId }),
+    jarvisChat: ({ sessionId, requestId, messageId = null, content = null }) =>
+      call('app_jarvis_chat', { sessionId, requestId, messageId, content }),
+    jarvisApprovalsList: (sessionId = null) => call('app_jarvis_approvals_list', { sessionId }),
+    jarvisApprove: approvalId => call('app_jarvis_approve', { approvalId }),
+    jarvisReject: approvalId => call('app_jarvis_reject', { approvalId }),
+    jarvisBudgetGet: () => call('app_jarvis_budget_get', {}),
+    jarvisBudgetSet: monthlyCapUsd => call('app_jarvis_budget_set', { monthlyCapUsd }),
+    featuresList: () => call('app_features_list', {}),
+    featureKeep: name => call('app_feature_keep', { name }),
+    featureRollback: (name, targetVersion = null) =>
+      call('app_feature_rollback', { name, targetVersion }),
+    featureToggle: (name, enabled) => call('app_feature_toggle', { name, enabled }),
+    featureCall: (name, route, payload = {}) =>
+      call('app_feature_call', { name, route, payload }),
+    featureSaveStorage: (name, storage) =>
+      call('app_feature_storage_save', { name, storage }),
+    browserSessionsList: () => call('app_browser_sessions_list', {}),
+    browserSessionOpen: target => call('app_browser_session_open', { target }),
+    browserSessionClear: domain => call('app_browser_session_clear', { domain }),
+    browserTakeoverComplete: takeoverId => call('app_browser_takeover_complete', { takeoverId }),
+    proactivityGet: () => call('app_proactivity_get', {}),
+    proactivitySet: (args = {}) => {
+      const { level, quietHoursStart = '22:00', quietHoursEnd = '08:00' } =
+        typeof args === 'number' ? { level: args } : args;
+      return call('app_proactivity_set', { level, quietHoursStart, quietHoursEnd });
+    },
+    pushVapidPublicKey: () => call('app_push_vapid_public_key', {}),
+    pushSubscribe: subscription => call('app_push_subscribe', { subscription }),
   };
 }

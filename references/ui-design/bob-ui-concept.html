@@ -1,0 +1,1292 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Bob UI Concept</title>
+<style>
+/* ============ Design tokens ============
+   Mirrors apps/bob-app/src/style.css and docs/DESIGN_PRINCIPLES.md:
+   system Canvas neutrals, one brand accent (oklch hue 250), semantic status colours only.
+   No purple, no decorative gradients. */
+:root {
+  color-scheme: light dark;
+  --brand-accent-light: oklch(0.48 0.17 250);
+  --brand-accent-dark: oklch(0.76 0.12 250);
+  --accent-primary: light-dark(var(--brand-accent-light), var(--brand-accent-dark));
+  --accent-soft: color-mix(in srgb, var(--accent-primary) 12%, Canvas);
+  --text-on-accent: Canvas;
+  --bg-root: color-mix(in srgb, CanvasText 7%, Canvas);
+  --bg-primary: Canvas;
+  --bg-secondary: color-mix(in srgb, CanvasText 4.5%, Canvas);
+  --bg-tertiary: color-mix(in srgb, CanvasText 8.5%, Canvas);
+  --text-primary: CanvasText;
+  --text-secondary: GrayText;
+  --text-tertiary: color-mix(in srgb, CanvasText 42%, Canvas);
+  --line: color-mix(in srgb, CanvasText 12%, Canvas);
+  --color-success: oklch(0.68 0.17 150);
+  --color-warning: oklch(0.75 0.16 75);
+  --color-error: oklch(0.63 0.21 25);
+  --success-text: light-dark(oklch(0.50 0.14 150), var(--color-success));
+  --warning-text: light-dark(oklch(0.53 0.13 65), var(--color-warning));
+  --error-text: light-dark(oklch(0.52 0.20 25), var(--color-error));
+  --success-soft: color-mix(in srgb, var(--color-success) 14%, Canvas);
+  --warning-soft: color-mix(in srgb, var(--color-warning) 18%, Canvas);
+  --error-soft: color-mix(in srgb, var(--color-error) 13%, Canvas);
+  --brand-logo: #2776BB;
+  --frame: light-dark(#1A1A1A, #3A3A3A);
+  --shadow: 0 0 0 1px var(--line), 0 1px 3px rgb(0 0 0 / .04);
+  --shadow-lg: 0 24px 48px rgb(0 0 0 / .14);
+  --r-card: 14px;
+  --r-btn: 999px;
+  --font: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }
+
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--bg-root);
+  color: var(--text-primary);
+  font-family: var(--font);
+  font-size: 15px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+button { font: inherit; color: inherit; cursor: pointer; border: 0; background: none; }
+svg.ic { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+svg.ic.sm { width: 16px; height: 16px; }
+svg.ic.xs { width: 14px; height: 14px; }
+
+/* ============ Page shell ============ */
+.wrap { max-width: 1104px; margin: 0 auto; padding: 28px 16px 48px; }
+.hero { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 24px; margin-bottom: 24px; }
+.brand { display: flex; align-items: baseline; gap: 18px; flex-wrap: wrap; }
+.brand h1 { margin: 0; font-size: clamp(36px, 6vw, 56px); letter-spacing: -0.03em; line-height: 1; }
+.brand h1 b { font-weight: 800; }
+.brand h1 span { font-weight: 400; }
+.brand .tag { border-left: 1px solid var(--line); padding-left: 18px; }
+.brand .tag strong { display: block; font-size: 22px; font-weight: 600; }
+.brand .tag small { color: var(--text-secondary); font-size: 15px; letter-spacing: .2em; }
+.hero-right { display: flex; align-items: center; gap: 12px; }
+.theme-btn { background: var(--bg-primary); box-shadow: var(--shadow); border-radius: var(--r-btn); padding: 8px 16px; font-size: 14px; color: var(--text-secondary); }
+.theme-btn b { color: var(--text-primary); font-weight: 600; }
+
+section.block { margin-top: 40px; }
+.sec-head { display: flex; align-items: baseline; gap: 14px; margin-bottom: 14px; flex-wrap: wrap; }
+.sec-head .num { font-size: 15px; font-weight: 700; color: var(--accent-primary); }
+.sec-head h2 { margin: 0; font-size: 24px; letter-spacing: -0.01em; }
+.sec-head p { margin: 0; color: var(--text-secondary); font-size: 15px; }
+
+/* reference image */
+.ref-card { background: var(--bg-primary); border-radius: 24px; box-shadow: var(--shadow); padding: 12px; }
+.ref-card img { display: block; width: 100%; height: auto; border-radius: 14px; }
+.ref-notes { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-top: 16px; }
+.ref-note { background: var(--bg-tertiary); border-radius: 14px; padding: 12px 14px; font-size: 14px; color: var(--text-secondary); }
+.ref-note b { color: var(--text-primary); display: block; font-size: 15px; margin-bottom: 2px; }
+
+/* before / after */
+.compare { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
+.cmp { border-radius: 24px; padding: 20px; }
+.cmp h3 { margin: 0 0 4px; font-size: 16px; }
+.cmp > p { margin: 0 0 16px; font-size: 14px; color: var(--text-secondary); }
+.cmp.old { background: var(--bg-tertiary); border: 1px dashed var(--line); }
+.cmp.new { background: var(--bg-primary); box-shadow: var(--shadow); }
+.old-ui { font-family: "Segoe UI", system-ui, sans-serif; font-size: 13px; background: Canvas; color: CanvasText; border: 1px solid color-mix(in srgb, CanvasText 14%, Canvas); border-radius: 6px; padding: 10px; }
+.old-ui .row { display: flex; gap: 8px; align-items: center; padding: 8px; border: 1px solid color-mix(in srgb, CanvasText 14%, Canvas); border-radius: 6px; margin-top: 6px; }
+.old-ui .row small { color: GrayText; }
+.old-ui .tabs { display: flex; gap: 4px; flex-wrap: wrap; }
+.old-ui .tabs span { border: 1px solid color-mix(in srgb, CanvasText 14%, Canvas); border-radius: 4px; padding: 2px 6px; font-size: 12px; }
+.old-ui .ghost { border: 1px solid color-mix(in srgb, CanvasText 14%, Canvas); border-radius: 4px; padding: 2px 8px; font-size: 12px; margin-left: auto; }
+
+.token-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-top: 14px; }
+.token { background: var(--bg-primary); border-radius: 16px; box-shadow: var(--shadow); padding: 12px; font-size: 13px; color: var(--text-secondary); }
+.token .sw { height: 44px; border-radius: 12px; margin-bottom: 8px; display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 13px; }
+.token b { color: var(--text-primary); display: block; font-size: 14px; }
+
+/* ============ Phone gallery ============ */
+.gallery { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 336px), 336px)); gap: 28px 24px; justify-content: center; }
+.shot { display: flex; flex-direction: column; align-items: center; width: 100%; max-width: 336px; }
+.caption { text-align: center; margin-top: 10px; }
+.caption strong { font-size: 18px; display: block; }
+.caption strong i { font-style: normal; color: var(--accent-primary); margin-right: 8px; }
+.caption span { font-size: 14px; color: var(--text-secondary); }
+
+.phone {
+  width: 100%; max-width: 336px; height: 690px;
+  border: 8px solid var(--frame); border-radius: 46px;
+  background: var(--bg-secondary); box-shadow: var(--shadow-lg);
+  position: relative; overflow: hidden; display: flex; flex-direction: column;
+}
+.statusbar { display: flex; justify-content: space-between; align-items: center; padding: 12px 24px 4px; font-size: 13px; font-weight: 600; flex: none; }
+.statusbar .sig { display: flex; gap: 4px; align-items: center; }
+.statusbar .sig i { display: block; width: 3px; background: var(--text-primary); border-radius: 1px; }
+.statusbar .batt { width: 22px; height: 11px; border: 1.5px solid var(--text-primary); border-radius: 3px; padding: 1px; margin-left: 4px; }
+.statusbar .batt::after { content: ""; display: block; width: 70%; height: 100%; background: var(--text-primary); border-radius: 1px; }
+
+.appbar { display: flex; align-items: center; gap: 10px; padding: 8px 16px 10px; flex: none; }
+.appbar .title { flex: 1; min-width: 0; }
+.appbar .title b { display: block; font-size: 19px; letter-spacing: -0.01em; line-height: 1.25; }
+.appbar .title small { color: var(--text-secondary); font-size: 12px; }
+.icon-btn { width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; color: var(--text-primary); position: relative; flex: none; }
+.icon-btn.soft { background: var(--bg-primary); box-shadow: var(--shadow); }
+.dot-badge { position: absolute; top: 3px; right: 3px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; background: var(--accent-primary); color: var(--text-on-accent); font-size: 10px; font-weight: 700; display: grid; place-items: center; line-height: 1; border: 2px solid var(--bg-secondary); }
+
+.screen { flex: 1; overflow-y: auto; padding: 4px 14px 16px; scrollbar-width: none; }
+.screen::-webkit-scrollbar { display: none; }
+
+.avatar { width: 38px; height: 38px; flex: none; border-radius: 50%; }
+.avatar.sm { width: 30px; height: 30px; }
+.avatar.lg { width: 56px; height: 56px; }
+
+/* cards & primitives */
+.card { background: var(--bg-primary); border-radius: var(--r-card); box-shadow: var(--shadow); padding: 14px; margin-bottom: 12px; }
+.chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 9px; border-radius: 999px; font-size: 11.5px; font-weight: 600; line-height: 1.6; white-space: nowrap; }
+.chip.blue { background: var(--accent-soft); color: var(--accent-primary); }
+.chip.orange { background: var(--warning-soft); color: var(--warning-text); }
+.chip.green { background: var(--success-soft); color: var(--success-text); }
+.chip.red { background: var(--error-soft); color: var(--error-text); }
+.chip.violet { background: var(--bg-tertiary); color: var(--text-secondary); }
+.chip.gray { background: var(--bg-tertiary); color: var(--text-secondary); }
+.btn-row { display: flex; gap: 8px; margin-top: 12px; }
+.btn { flex: 1; height: 38px; border-radius: var(--r-btn); font-size: 14px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; gap: 6px; transition: transform .1s, opacity .2s; }
+.btn:active { transform: scale(.97); }
+.btn.primary { background: var(--accent-primary); color: var(--text-on-accent); }
+.btn.ghost { background: var(--bg-tertiary); color: var(--text-primary); }
+/* One solid action per screen: buttons repeated on every card/row are tonal. */
+.btn.tonal,
+.card .btn.primary,
+.rv-row .btn.primary { background: var(--accent-soft); color: var(--accent-primary); }
+.card .btn.primary:hover, .rv-row .btn.primary:hover { background: color-mix(in srgb, var(--accent-primary) 20%, Canvas); }
+.btn.tiny { height: 30px; font-size: 12.5px; flex: none; padding: 0 14px; }
+.muted { color: var(--text-secondary); }
+.small { font-size: 12.5px; }
+.pills { display: flex; gap: 6px; overflow-x: auto; padding: 2px 0 12px; scrollbar-width: none; }
+.pills::-webkit-scrollbar { display: none; }
+.pill { flex: none; padding: 5px 12px; border-radius: 999px; background: var(--bg-primary); font-size: 12.5px; color: var(--text-secondary); box-shadow: var(--shadow); }
+.pill.on { background: var(--accent-primary); color: var(--text-on-accent); }
+
+/* chat */
+.greet { text-align: center; padding: 8px 0 14px; }
+.greet b { display: block; font-size: 17px; margin-top: 6px; }
+.greet small { color: var(--text-secondary); font-size: 12.5px; }
+.msg { display: flex; gap: 8px; margin-bottom: 12px; align-items: flex-end; }
+.msg.me { justify-content: flex-end; }
+.bubble { max-width: 82%; padding: 10px 13px; border-radius: 18px; font-size: 14px; line-height: 1.55; }
+.msg.bob .bubble { background: none; box-shadow: none; padding: 0 2px; max-width: 100%; }
+.msg.bob { display: block; }
+.msg.me .bubble { background: var(--bg-tertiary); border-radius: 14px; max-width: 80%; }
+.brief { background: var(--bg-primary); box-shadow: var(--shadow); border-radius: var(--r-card); padding: 14px; margin-bottom: 14px; }
+.brief p { margin: 2px 0 10px; font-size: 14px; }
+.brief .btn-row { margin-top: 0; }
+.brief .btn.ghost { background: var(--bg-tertiary); }
+.rich { margin: -2px 0 12px 38px; }
+.stat-head { display: flex; justify-content: space-between; align-items: center; font-size: 13px; font-weight: 600; }
+.big { font-size: 30px; font-weight: 750; letter-spacing: -0.02em; line-height: 1.2; margin: 6px 0 2px; }
+.big small { font-size: 13px; color: var(--text-secondary); font-weight: 500; margin-left: 4px; }
+.bar { height: 6px; background: var(--bg-tertiary); border-radius: 3px; overflow: hidden; margin: 8px 0 10px; }
+.bar i { display: block; height: 100%; background: var(--accent-primary); border-radius: 3px; }
+.kv { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; font-size: 13px; border-top: 1px solid var(--line); }
+.kv:first-of-type { border-top: 0; }
+.approval-top { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.approval-top .tool { width: 30px; height: 30px; border-radius: 10px; background: var(--bg-tertiary); display: grid; place-items: center; }
+.approval-top .tool img { width: 18px; height: 18px; }
+.code { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: 12.5px; background: var(--bg-tertiary); border-radius: 10px; padding: 8px 10px; margin: 10px 0 6px; }
+.result-chip { margin-top: 12px; text-align: center; font-size: 13px; font-weight: 600; padding: 8px; border-radius: 999px; }
+.steps { display: flex; align-items: center; gap: 4px; margin-top: 10px; }
+.steps .st { flex: 1; text-align: center; font-size: 11px; color: var(--text-tertiary); }
+.steps .st i { display: block; height: 4px; border-radius: 2px; background: var(--line); margin-bottom: 5px; }
+.steps .st.done { color: var(--success-text); }
+.steps .st.done i { background: var(--success-text); }
+.steps .st.now { color: var(--accent-primary); font-weight: 700; }
+.steps .st.now i { background: var(--accent-primary); animation: pulse 1.4s infinite; }
+@keyframes pulse { 50% { opacity: .35; } }
+/* images in conversation */
+.msg-photo { display: block; width: 68%; margin: 0 0 4px auto; border-radius: 14px; overflow: hidden; background: var(--bg-tertiary); }
+.msg-photo img, .media-card img { display: block; width: 100%; height: auto; }
+.media-card { background: var(--bg-primary); border-radius: var(--r-card); box-shadow: var(--shadow); overflow: hidden; margin: 6px 0 10px; }
+.media-card .media-img { position: relative; }
+.media-card .media-badge { position: absolute; top: 8px; right: 8px; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px; background: color-mix(in srgb, Canvas 82%, transparent); color: var(--text-primary); }
+.media-meta { display: flex; align-items: center; gap: 10px; padding: 9px 12px; }
+.media-meta .file-ic { width: 30px; height: 30px; border-radius: 9px; background: var(--accent-soft); color: var(--accent-primary); display: grid; place-items: center; flex: none; }
+.media-meta div { flex: 1; min-width: 0; }
+.media-meta b { display: block; font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.media-meta small { color: var(--text-secondary); font-size: 11.5px; }
+.typing { display: inline-flex; gap: 4px; padding: 8px 2px; }
+.typing i { width: 6px; height: 6px; background: var(--text-tertiary); border-radius: 50%; animation: bounce 1.2s infinite; }
+.typing i:nth-child(2) { animation-delay: .15s; } .typing i:nth-child(3) { animation-delay: .3s; }
+@keyframes bounce { 30% { transform: translateY(-4px); opacity: .6; } }
+.composer { flex: none; margin: 0 12px 10px; background: var(--bg-primary); border-radius: 999px; box-shadow: var(--shadow); display: flex; align-items: center; gap: 8px; padding: 6px 6px 6px 14px; color: var(--text-secondary); font-size: 14px; }
+.composer > span:not(.mic) { flex: 1; }
+.composer .mic { width: 34px; height: 34px; border-radius: 50%; background: var(--accent-primary); color: var(--text-on-accent); display: grid; place-items: center; }
+
+/* bottom nav */
+.nav { flex: none; display: flex; justify-content: space-around; padding: 8px 6px 14px; background: var(--bg-primary); border-top: 1px solid var(--line); }
+.nav a { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px; font-size: 11px; color: var(--text-tertiary); text-decoration: none; position: relative; }
+.nav a.on { color: var(--accent-primary); font-weight: 600; }
+.nav .dot-badge { top: -4px; right: calc(50% - 24px); background: var(--accent-soft); color: var(--accent-primary); border-color: var(--bg-primary); }
+
+/* today */
+.week { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; background: var(--bg-primary); border-radius: var(--r-card); box-shadow: var(--shadow); padding: 10px 6px; margin-bottom: 16px; }
+.day { text-align: center; font-size: 11px; color: var(--text-secondary); padding: 4px 0; border-radius: 12px; }
+.day b { display: block; font-size: 15px; color: var(--text-primary); margin-top: 2px; }
+.day i { display: block; width: 4px; height: 4px; border-radius: 50%; background: var(--accent-primary); margin: 3px auto 0; opacity: 0; }
+.day.has i { opacity: 1; }
+.day.today { background: var(--accent-primary); color: var(--text-on-accent); }
+.day.today b { color: var(--text-on-accent); }
+.day.today i { background: var(--text-on-accent); }
+.label { font-size: 12.5px; font-weight: 700; color: var(--text-secondary); margin: 4px 4px 8px; display: flex; justify-content: space-between; align-items: center; }
+.event { display: flex; gap: 12px; align-items: stretch; }
+.event .time { font-size: 12.5px; color: var(--text-secondary); width: 40px; flex: none; padding-top: 7px; text-align: right; font-variant-numeric: tabular-nums; }
+.event .body { flex: 1; background: var(--bg-secondary); border: 1px solid var(--line); border-radius: 10px; padding: 6px 10px; }
+.event .body b { font-size: 14px; display: block; }
+.event .body small { color: var(--text-secondary); font-size: 12px; }
+.event + .event { margin-top: 12px; }
+.proj { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 700; margin-bottom: 4px; }
+.proj i { width: 8px; height: 8px; border-radius: 50%; }
+.todo { display: flex; gap: 10px; align-items: flex-start; padding: 8px 0; border-top: 1px solid var(--line); cursor: pointer; }
+.proj + .todo { border-top: 0; }
+.todo .box { width: 20px; height: 20px; border-radius: 7px; border: 2px solid var(--text-tertiary); flex: none; display: grid; place-items: center; margin-top: 1px; transition: .15s; }
+.todo .box svg { opacity: 0; color: var(--text-on-accent); }
+.todo.done .box { background: var(--success-text); border-color: var(--success-text); }
+.todo.done .box svg { opacity: 1; }
+.todo.done .t { text-decoration: line-through; color: var(--text-tertiary); }
+.todo .t { font-size: 14px; }
+.todo small { display: block; color: var(--text-secondary); font-size: 11.5px; }
+
+/* inbox */
+.review-banner { background: var(--bg-primary); color: var(--text-primary); border-radius: var(--r-card); padding: 14px; margin-bottom: 14px; box-shadow: var(--shadow); }
+.review-banner .top { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--accent-primary); font-weight: 600; }
+.review-banner b { display: block; font-size: 16px; margin: 4px 0 10px; }
+.review-banner .btn { background: var(--accent-primary); color: var(--text-on-accent); height: 34px; font-size: 13px; }
+.review-banner .btn.ghost { background: var(--bg-tertiary); color: var(--text-primary); }
+.spark { padding: 12px 14px; }
+.spark p { margin: 0; font-size: 14px; }
+.spark .meta { display: flex; gap: 6px; align-items: center; margin-top: 8px; font-size: 11.5px; color: var(--text-tertiary); flex-wrap: wrap; }
+.spark.with-img { display: flex; gap: 12px; }
+.spark .thumb { width: 64px; height: 64px; border-radius: 12px; flex: none; background: linear-gradient(170deg, #8A97A6, #C4CCD5 55%, #E3E7EB); position: relative; overflow: hidden; }
+.spark .thumb::after { content: "P2 \2192"; position: absolute; inset: auto 6px 8px 6px; background: #2776BB; color: #fff; font-size: 10px; font-weight: 800; text-align: center; border-radius: 4px; padding: 2px 0; }
+.spark.new { animation: pop .35s ease; }
+@keyframes pop { from { transform: translateY(-8px) scale(.97); opacity: 0; } }
+.fab { position: absolute; right: 16px; bottom: 82px; width: 58px; height: 58px; border-radius: 50%; background: var(--accent-primary); color: var(--text-on-accent); display: grid; place-items: center; box-shadow: 0 6px 16px rgb(0 0 0 / .2); z-index: 3; }
+.fab svg { width: 34px; height: 22px; fill: currentColor; }
+.fab .plus { position: absolute; right: -2px; top: -2px; width: 20px; height: 20px; border-radius: 50%; background: var(--bg-primary); color: var(--accent-primary); display: grid; place-items: center; font-size: 15px; font-weight: 800; line-height: 1; box-shadow: var(--shadow); }
+.sheet-veil { position: absolute; inset: 0; background: rgba(10, 16, 30, .38); opacity: 0; pointer-events: none; transition: opacity .2s; z-index: 4; }
+.sheet { position: absolute; left: 0; right: 0; bottom: 0; background: var(--bg-primary); border-radius: 26px 26px 0 0; padding: 10px 16px 18px; transform: translateY(105%); transition: transform .28s cubic-bezier(.2,.8,.2,1); z-index: 5; }
+.phone.sheet-open .sheet-veil { opacity: 1; pointer-events: auto; }
+.phone.sheet-open .sheet { transform: none; }
+.sheet .grab { width: 40px; height: 5px; border-radius: 3px; background: var(--line); margin: 0 auto 12px; }
+.sheet textarea { width: 100%; border: 0; outline: 0; resize: none; background: var(--bg-tertiary); color: var(--text-primary); border-radius: 14px; padding: 12px; font: inherit; font-size: 15px; height: 84px; }
+.sheet .tools { display: flex; align-items: center; gap: 6px; margin-top: 10px; }
+.sheet .tools .icon-btn { background: var(--bg-tertiary); width: 38px; height: 38px; }
+.sheet .tools .btn { flex: none; margin-left: auto; padding: 0 22px; }
+.sheet .hint { font-size: 12px; color: var(--text-secondary); margin-top: 10px; display: flex; gap: 6px; align-items: center; }
+.toast { position: absolute; left: 50%; top: 60px; transform: translate(-50%, -20px); background: var(--text-primary); color: var(--bg-secondary); font-size: 13px; padding: 8px 14px; border-radius: 999px; opacity: 0; transition: .25s; z-index: 6; white-space: nowrap; display: flex; gap: 6px; align-items: center; }
+.toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+/* review */
+.progress-line { display: flex; justify-content: space-between; align-items: center; font-size: 12.5px; color: var(--text-secondary); margin: 0 4px 6px; }
+.sugg { transition: opacity .25s, transform .25s; }
+.sugg .orig { font-size: 13.5px; padding: 8px 10px; background: var(--bg-tertiary); border-radius: 12px; position: relative; }
+.sugg .orig + .orig { margin-top: 6px; }
+.sugg .to { display: flex; align-items: center; gap: 8px; margin-top: 10px; font-size: 13px; flex-wrap: wrap; }
+.sugg .to .arrow { color: var(--text-tertiary); }
+.sugg .dest { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; padding: 5px 10px; border-radius: 10px; font-size: 13px; }
+.sugg .why { font-size: 11.5px; color: var(--text-secondary); margin-top: 6px; }
+.sugg .alts { display: none; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+.sugg.editing .alts { display: flex; }
+.sugg .alts button { padding: 4px 10px; border-radius: 999px; background: var(--bg-tertiary); font-size: 12px; }
+.sugg.ok { opacity: .55; }
+.sugg.ok .btn-row { display: none; }
+.sugg .done-tag { display: none; margin-top: 10px; font-size: 12.5px; font-weight: 600; color: var(--success-text); align-items: center; gap: 6px; }
+.sugg.ok .done-tag { display: flex; }
+.dock { flex: none; padding: 10px 14px 16px; background: var(--bg-primary); border-top: 1px solid var(--line); }
+.dock .node { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--text-secondary); margin-bottom: 8px; }
+.dock .node i { width: 7px; height: 7px; border-radius: 50%; background: var(--success-text); box-shadow: 0 0 0 3px var(--success-soft); }
+.dock .btn-row { margin-top: 0; }
+
+/* pending */
+.pend-head { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.pend-head .when { margin-left: auto; color: var(--text-tertiary); font-size: 11.5px; }
+.pend-body { display: flex; gap: 12px; margin-top: 10px; align-items: center; }
+.pend-body .art { width: 56px; height: 56px; border-radius: 12px; flex: none; display: grid; place-items: center; background: var(--bg-tertiary); color: var(--text-secondary); }
+.pend-body .art.pdf { background: var(--error-soft); color: var(--error-text); font-weight: 800; font-size: 13px; }
+.pend-body b { display: block; font-size: 14px; }
+.pend-body small { color: var(--text-secondary); font-size: 12px; display: block; }
+[data-kind].hide { display: none; }
+
+/* knowledge */
+.search { display: flex; align-items: center; gap: 8px; background: var(--bg-primary); border-radius: 999px; box-shadow: var(--shadow); padding: 9px 14px; color: var(--text-tertiary); font-size: 14px; margin-bottom: 12px; }
+.note-card b { font-size: 15px; display: block; }
+.note-card p { margin: 4px 0 8px; font-size: 13px; color: var(--text-secondary); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.note-card .meta { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; font-size: 11.5px; color: var(--text-tertiary); }
+.tl { position: relative; padding-left: 18px; }
+.tl::before { content: ""; position: absolute; left: 4px; top: 6px; bottom: 6px; width: 2px; background: var(--line); }
+.tl-item { position: relative; padding-bottom: 12px; }
+.tl-item::before { content: ""; position: absolute; left: -18px; top: 5px; width: 10px; height: 10px; border-radius: 50%; background: var(--bg-primary); border: 2px solid var(--text-tertiary); }
+.tl-item b { font-size: 13.5px; display: block; }
+.tl-item small { font-size: 11.5px; color: var(--text-secondary); }
+.mem { display: flex; gap: 10px; align-items: flex-start; }
+.mem .q { width: 28px; height: 28px; border-radius: 9px; background: var(--accent-soft); color: var(--accent-primary); display: grid; place-items: center; flex: none; }
+.mem p { margin: 0; font-size: 13.5px; }
+.mem small { color: var(--text-secondary); font-size: 11.5px; }
+
+/* principles / rollout */
+.princ { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
+.princ .card { padding: 18px; margin: 0; }
+.princ .card b { display: flex; align-items: center; gap: 8px; font-size: 16px; margin-bottom: 6px; }
+.princ .card p { margin: 0; font-size: 14px; color: var(--text-secondary); }
+.princ .card .n { width: 26px; height: 26px; border-radius: 9px; background: var(--accent-soft); color: var(--accent-primary); display: grid; place-items: center; font-size: 13px; font-weight: 800; }
+.flow { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 4px; }
+.flow .stage { background: var(--bg-primary); box-shadow: var(--shadow); border-radius: 16px; padding: 12px 16px; flex: 1 1 170px; }
+.flow .stage b { display: block; font-size: 15px; }
+.flow .stage small { color: var(--text-secondary); font-size: 13px; }
+.flow .arr { color: var(--text-tertiary); flex: none; }
+footer { margin-top: 40px; text-align: center; color: var(--text-tertiary); font-size: 13px; }
+
+/* ============ Real-device density ============
+   Phones are laid out at a true 390×844 viewport, then zoomed to fit the page,
+   so text/padding proportions match a real handset. */
+.gallery { grid-template-columns: repeat(auto-fit, minmax(min(100%, 334px), 334px)); gap: 24px 20px; }
+.shot { max-width: 334px; }
+.phone { width: 406px; max-width: none; height: 860px; border-radius: 54px; zoom: .82; line-height: 1.45; }
+.statusbar { padding: 10px 26px 2px; }
+.appbar { padding: 2px 10px 4px; gap: 8px; }
+.appbar .title b { font-size: 18px; }
+.screen { padding: 2px 10px 10px; }
+.card { padding: 11px 12px; margin-bottom: 8px; border-radius: 16px; }
+.msg { margin-bottom: 8px; }
+.msg.bob .avatar { display: none; }
+.bubble { padding: 9px 12px; font-size: 15px; line-height: 1.55; }
+.msg.bob .bubble { padding: 0 2px; }
+.rich { margin: 0 0 8px; }
+.brief { padding: 11px 12px; margin-bottom: 10px; }
+.brief p { margin: 2px 0 8px; }
+.btn-row { margin-top: 10px; }
+.btn { height: 36px; }
+.big { font-size: 28px; margin: 4px 0 0; }
+.bar { margin: 6px 0 6px; }
+.kv { padding: 5px 0; }
+.code { margin: 8px 0 4px; }
+.week { padding: 8px 4px; margin-bottom: 10px; }
+.label { margin: 2px 4px 6px; }
+.event + .event { margin-top: 8px; }
+.todo { padding: 7px 0; }
+.review-banner { padding: 12px; margin-bottom: 10px; }
+.spark { padding: 10px 12px; }
+.spark .meta { margin-top: 6px; }
+.sugg .to { margin-top: 8px; }
+.sugg .why { margin-top: 4px; }
+.pills { padding: 0 0 8px; }
+.search { padding: 8px 14px; margin-bottom: 8px; }
+.pend-body { margin-top: 8px; }
+.tl-item { padding-bottom: 8px; }
+.composer { margin: 0 10px 6px; padding: 5px 5px 5px 14px; }
+.nav { padding: 6px 4px 10px; }
+.dock { padding: 8px 12px 12px; }
+.fab { bottom: 76px; }
+.caption { margin-top: 8px; }
+@media (max-width: 380px) { .phone { zoom: .76; } }
+
+/* ============ Desktop (PC) ============
+   Laid out at a real 1280×800 window, zoomed by JS to the available width. */
+.desk-wrap { width: 100%; overflow: hidden; }
+.desk-shot + .desk-shot { margin-top: 28px; }
+.desk { width: 1280px; height: 800px; border-radius: 12px; overflow: hidden; background: var(--bg-secondary); box-shadow: var(--shadow-lg), 0 0 0 1px var(--line); display: flex; flex-direction: column; transform-origin: 0 0; line-height: 1.45; }
+.desk-title { height: 36px; flex: none; display: flex; align-items: center; gap: 10px; padding: 0 0 0 14px; background: var(--bg-primary); border-bottom: 1px solid var(--line); font-size: 12.5px; color: var(--text-secondary); }
+.desk-title svg.logo { width: 26px; height: 17px; fill: var(--brand-logo); }
+.desk-title .grow { flex: 1; }
+.desk-title .win { width: 46px; height: 36px; display: grid; place-items: center; color: var(--text-secondary); }
+.desk-title .win svg { width: 12px; height: 12px; stroke: currentColor; stroke-width: 1.4; fill: none; }
+.desk-body { flex: 1; display: flex; min-height: 0; }
+
+.rail { width: 72px; flex: none; background: var(--bg-primary); border-right: 1px solid var(--line); display: flex; flex-direction: column; align-items: center; padding: 10px 0; gap: 4px; }
+.rail a { width: 60px; padding: 8px 0 6px; border-radius: 12px; display: flex; flex-direction: column; align-items: center; gap: 3px; font-size: 11px; color: var(--text-secondary); position: relative; text-decoration: none; }
+.rail a.on { background: var(--accent-soft); color: var(--accent-primary); font-weight: 600; }
+.rail a .dot-badge { top: 2px; right: 10px; background: var(--accent-soft); color: var(--accent-primary); border-color: var(--bg-primary); }
+.rail a.on .dot-badge { background: var(--accent-primary); color: var(--text-on-accent); }
+.rail .spacer { flex: 1; }
+
+.col { min-width: 0; display: flex; flex-direction: column; }
+.col-side { width: 280px; flex: none; background: var(--bg-primary); border-right: 1px solid var(--line); padding: 12px 10px; overflow: hidden; }
+.col-main { flex: 1; }
+.col-right { width: 312px; flex: none; border-left: 1px solid var(--line); background: var(--bg-secondary); padding: 14px 12px; overflow: hidden; gap: 10px; }
+.col-right .card { margin: 0; }
+
+.side-search { display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 12px; border-radius: 10px; background: var(--bg-secondary); color: var(--text-tertiary); font-size: 13px; margin-bottom: 10px; }
+.side-row { display: flex; align-items: center; gap: 9px; padding: 7px 8px; border-radius: 10px; font-size: 13.5px; }
+.side-row.on { background: var(--accent-soft); }
+.side-row .ttl { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.side-row small { color: var(--text-tertiary); font-size: 11.5px; flex: none; }
+.side-row img, .side-row .hx { width: 16px; height: 16px; flex: none; border-radius: 4px; }
+.side-row .avatar { width: 26px; height: 26px; }
+.side-group { font-size: 11.5px; font-weight: 700; color: var(--text-secondary); padding: 12px 8px 4px; display: flex; align-items: center; gap: 6px; }
+.side-group .dev { font-weight: 500; color: var(--text-tertiary); }
+.side-row.sub { padding-left: 22px; }
+
+.main-head { height: 56px; flex: none; display: flex; align-items: center; gap: 12px; padding: 0 20px; border-bottom: 1px solid var(--line); background: var(--bg-primary); }
+.main-head b { font-size: 16px; }
+.main-head .meta { display: flex; gap: 6px; align-items: center; }
+.main-head .grow { flex: 1; }
+.dev-chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; background: var(--bg-secondary); font-size: 12px; color: var(--text-secondary); }
+.dev-chip i { width: 7px; height: 7px; border-radius: 50%; background: var(--color-success); }
+.dev-chip img { width: 14px; height: 14px; }
+.thread { flex: 1; min-height: 0; overflow: hidden; padding: 18px 0 0; display: flex; flex-direction: column; justify-content: flex-end; }
+.thread-inner { width: 100%; }
+.thread-inner { max-width: 720px; margin: 0 auto; padding: 0 24px; }
+.thread .msg.me .bubble { max-width: 70%; }
+.thread .bubble { font-size: 15px; }
+.thread .media-card { max-width: 520px; }
+.thread .msg-photo { width: 260px; }
+.desk-composer { flex: none; max-width: 720px; width: calc(100% - 48px); margin: 8px auto 16px; background: var(--bg-primary); border-radius: 16px; box-shadow: var(--shadow); padding: 10px 12px 8px; }
+.desk-composer .ph { color: var(--text-tertiary); font-size: 14.5px; padding: 2px 4px 10px; }
+.desk-composer .tools { display: flex; align-items: center; gap: 4px; color: var(--text-secondary); }
+.desk-composer .tools .icon-btn { width: 32px; height: 32px; }
+.desk-composer .tools .grow { flex: 1; }
+.desk-composer .model { font-size: 12px; padding: 4px 10px; border-radius: 999px; background: var(--bg-secondary); display: inline-flex; gap: 6px; align-items: center; }
+.desk-composer .model img { width: 14px; height: 14px; }
+.desk-composer .send { width: 32px; height: 32px; border-radius: 50%; background: var(--accent-primary); color: var(--text-on-accent); display: grid; place-items: center; }
+
+.panel-title { display: flex; align-items: center; justify-content: space-between; font-size: 13px; font-weight: 700; margin-bottom: 8px; }
+.panel-title small { font-weight: 500; color: var(--text-secondary); font-size: 12px; }
+.mini-row { display: flex; gap: 8px; align-items: center; font-size: 13px; padding: 5px 0; border-top: 1px solid var(--line); }
+.mini-row:first-of-type { border-top: 0; }
+.mini-row .t { color: var(--text-secondary); width: 40px; flex: none; font-variant-numeric: tabular-nums; font-size: 12px; }
+.mini-row .x { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.kbd { display: inline-block; font-family: ui-monospace, Consolas, monospace; font-size: 11px; padding: 1px 6px; border-radius: 5px; background: var(--bg-tertiary); color: var(--text-secondary); border: 1px solid var(--line); }
+
+/* inbox desktop */
+.ib-head { height: 60px; flex: none; display: flex; align-items: center; gap: 14px; padding: 0 24px; border-bottom: 1px solid var(--line); background: var(--bg-primary); }
+.ib-head b { font-size: 18px; }
+.ib-head .pills { padding: 0; }
+.ib-head .grow { flex: 1; }
+.ib-cols { flex: 1; display: flex; min-height: 0; }
+.ib-list { width: 440px; flex: none; border-right: 1px solid var(--line); padding: 16px; overflow: hidden; }
+.ib-capture { background: var(--bg-primary); border-radius: 14px; box-shadow: var(--shadow); padding: 10px 12px; margin-bottom: 14px; }
+.ib-capture .ph { font-size: 14px; color: var(--text-tertiary); padding: 2px 2px 10px; }
+.ib-capture .row { display: flex; align-items: center; gap: 4px; color: var(--text-secondary); font-size: 12px; }
+.ib-capture .row .grow { flex: 1; }
+.ib-capture .icon-btn { width: 30px; height: 30px; }
+.dest-chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 8px; font-size: 11.5px; font-weight: 600; background: var(--bg-tertiary); color: var(--text-secondary); }
+.dest-chip.cal { background: var(--accent-soft); color: var(--accent-primary); }
+.dest-chip.todo { background: var(--success-soft); color: var(--success-text); }
+.spark.sorted p { color: var(--text-secondary); }
+.ib-review { flex: 1; padding: 16px 24px; overflow: hidden; display: flex; flex-direction: column; }
+.rv-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 12px; }
+.rv-head b { font-size: 16px; }
+.rv-head small { color: var(--text-secondary); font-size: 12.5px; }
+.rv-head .grow { flex: 1; }
+.rv-table { background: var(--bg-primary); border-radius: 14px; box-shadow: var(--shadow); overflow: hidden; }
+.rv-row { display: grid; grid-template-columns: 1.3fr 22px 1.25fr 1fr auto; gap: 12px; align-items: center; padding: 12px 16px; border-top: 1px solid var(--line); font-size: 13.5px; }
+.rv-row:first-child { border-top: 0; }
+.rv-row.hd { font-size: 11.5px; font-weight: 700; color: var(--text-tertiary); padding: 8px 16px; background: var(--bg-secondary); }
+.rv-row .orig { color: var(--text-primary); }
+.rv-row .orig small { display: block; color: var(--text-tertiary); font-size: 11.5px; }
+.rv-row .why { color: var(--text-secondary); font-size: 12px; }
+.rv-row .acts { display: flex; gap: 6px; }
+.rv-row .acts .btn { height: 30px; font-size: 12.5px; padding: 0 12px; flex: none; }
+.rv-row.ok { opacity: .55; }
+.rv-row.ok .acts { display: none; }
+.rv-row .okmark { display: none; color: var(--success-text); font-size: 12.5px; font-weight: 600; align-items: center; gap: 4px; }
+.rv-row.ok .okmark { display: inline-flex; }
+.rv-foot { display: flex; align-items: center; gap: 10px; margin-top: 14px; }
+.rv-foot .node { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary); }
+.rv-foot .node i { width: 7px; height: 7px; border-radius: 50%; background: var(--color-success); }
+.rv-foot .grow { flex: 1; }
+.rv-foot .btn { flex: none; padding: 0 20px; }
+.desk-note { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-top: 14px; }
+.desk-note .ref-note { background: var(--bg-primary); box-shadow: var(--shadow); }
+
+@media (max-width: 560px) {
+  .wrap { padding-top: 24px; }
+  .brand .tag { border-left: 0; padding-left: 0; }
+  .flow .arr { display: none; }
+}
+</style>
+</head>
+<body>
+
+<!-- ============ SVG sprite ============ -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="bob" viewBox="0 0 40 40"><circle cx="20" cy="20" r="20" style="fill:var(--accent-soft)" /><use href="#logo" x="8" y="12.2" width="24" height="15.7" style="fill:var(--brand-logo)" /></symbol>
+    <symbol id="logo" viewBox="0 0 152.85 99.94"><path d="M166.3,82.45a29.91,29.91,0,0,1-52.92,19.11,29.91,29.91,0,0,1-46,0A29.91,29.91,0,0,1,14.45,82.45V15.72a2.3,2.3,0,0,1,2.3-2.3H26a2.3,2.3,0,0,1,2.3,2.3V57.24a29.92,29.92,0,0,1,39.120,6.090,29.910,29.910,0,0,1,39.110-6.090V15.72a2.300,2.300,0,0,1,2.300-2.300H118a2.300,2.300,0,0,1,2.300,2.300V57.24a29.920,29.920,0,0,1,46,25.210Zm-13.8,0a16.11,16.11,0,1,0-16.11,16.1A16.11,16.11,0,0,0,152.5,82.45Zm-46,0a16.11,16.11,0,1,0-16.1,16.1A16.1,16.1,0,0,0,106.48,82.45Zm-46,0a16.11,16.11,0,1,0-16.11,16.1A16.11,16.11,0,0,0,60.47,82.45Z" transform="translate(-13.95 -12.92)"/></symbol>
+    <symbol id="i-chat" viewBox="0 0 24 24"><path d="M20.5 12a8.5 8.5 0 0 1-12.3 7.6L3.5 20.5l1-4.4A8.5 8.5 0 1 1 20.5 12z"/></symbol>
+    <symbol id="i-today" viewBox="0 0 24 24"><rect x="3" y="4.5" width="18" height="16.5" rx="3.5"/><path d="M8 2.5v4M16 2.5v4M3 10h18"/><circle cx="12" cy="15" r="1.6"/></symbol>
+    <symbol id="i-inbox" viewBox="0 0 24 24"><path d="M3 13.5 6 5h12l3 8.5V18a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3z"/><path d="M3 13.5h5l1.2 2.5h5.6l1.2-2.5h5"/></symbol>
+    <symbol id="i-book" viewBox="0 0 24 24"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15H6.5A2.5 2.5 0 0 0 4 20.5z"/><path d="M4 20.5V5.5M20 18v3H6.5M8.5 7.5h7"/></symbol>
+    <symbol id="i-bell" viewBox="0 0 24 24"><path d="M6 9a6 6 0 1 1 12 0c0 6 2.5 8 2.5 8h-17S6 15 6 9z"/><path d="M10 20.5a2.2 2.2 0 0 0 4 0"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/></symbol>
+    <symbol id="i-camera" viewBox="0 0 24 24"><path d="M3.5 8h3.5l2-3h6l2 3h3.5v12h-17z"/><circle cx="12" cy="13.5" r="3.7"/></symbol>
+    <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="4"/><path d="m3.5 17 5-5 4 4 3-3 5 5"/><circle cx="16" cy="8" r="1.5"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5 10 17.5 19 7"/></symbol>
+    <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></symbol>
+    <symbol id="i-back" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></symbol>
+    <symbol id="i-note" viewBox="0 0 24 24"><path d="M6 3h9l4 4v14H6z"/><path d="M14.5 3v4.5H19M9 12.5h7M9 16.5h5"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.2 2"/></symbol>
+    <symbol id="i-merge" viewBox="0 0 24 24"><path d="M7 4v4a5 5 0 0 0 5 5 5 5 0 0 0 5-5V4M12 13v7"/></symbol>
+    <symbol id="i-term" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="m7.5 9.5 3 2.5-3 2.5M13 15h4"/></symbol>
+    <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h10"/></symbol>
+    <symbol id="i-spark" viewBox="0 0 24 24"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M19 16v4M17 18h4"/></symbol>
+    <symbol id="i-check-sq" viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="17" height="17" rx="4.5"/><path d="m8 12 3 3 5-6"/></symbol>
+    <symbol id="i-later" viewBox="0 0 24 24"><path d="M6 3h12M6 21h12M7 3c0 5 10 5 10 9s-10 4-10 9M17 3c0 5-10 5-10 9"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3 4.5 6v6c0 4.5 3.2 7.8 7.5 9 4.3-1.2 7.5-4.5 7.5-9V6z"/><path d="m9 12 2 2 4-4"/></symbol>
+    <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8.5" r="4"/><path d="M4.5 20.5a7.5 7.5 0 0 1 15 0"/></symbol>
+    <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/></symbol>
+  </defs>
+</svg>
+
+<div class="wrap">
+
+  <!-- ============ Hero ============ -->
+  <header class="hero">
+    <div class="brand">
+      <h1><b>Bob</b> <span>Online</span></h1>
+      <div class="tag">
+        <strong>你的 AI 助理 · 随手记下，Bob 帮你整理</strong>
+        <small>对话 · 收集 · 确认 · 搞定</small>
+      </div>
+    </div>
+    <div class="hero-right">
+      <button class="theme-btn" id="themeBtn" type="button">主题：<b id="themeLabel">跟随系统</b></button>
+    </div>
+  </header>
+
+  <!-- ============ 00 Reference ============ -->
+  <section class="block" style="margin-top:0">
+    <div class="sec-head"><span class="num">00</span><h2>参考图</h2><p>20261001_UI_ref.png：沿用它的视觉语言，并按 Bob 的实际功能重排</p></div>
+    <div class="ref-card">
+      <img src="20261001_UI_ref.png" alt="Bob Online UI 参考图：助理对话、项目对话、成果检视、待确认四个手机界面" />
+      <div class="ref-notes">
+        <div class="ref-note"><b>借鉴：面层与卡片</b>中性浅灰底 + 白卡片 + 细边框；配色改用 Bob 自有令牌</div>
+        <div class="ref-note"><b>借鉴：一个主按钮</b>每张卡只有一个实心蓝按钮，其余是浅灰药丸</div>
+        <div class="ref-note"><b>借鉴：富卡片回复</b>支出概览这类结构化答案用卡片呈现，而不是文字墙</div>
+        <div class="ref-note"><b>借鉴：待确认队列</b>所有“等我拍板”的事集中一处，带分类与计数</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 01 Before / After ============ -->
+  <section class="block">
+    <div class="sec-head"><span class="num">01</span><h2>现在 vs 建议</h2><p>配色只取 DESIGN_PRINCIPLES / style.css 令牌：一个品牌蓝 + 中性灰 + 语义状态色，不用紫色和渐变</p></div>
+    <div class="compare">
+      <div class="cmp old">
+        <h3>现在</h3>
+        <p>系统色 Canvas / GrayText、4–8px 圆角、无阴影、14px 字号、工程术语</p>
+        <div class="old-ui">
+          <div class="tabs"><span>本周日程 3</span><span>待办事项 12</span><span>自动任务</span><span>票夹 2</span></div>
+          <div class="row"><strong>Agent</strong><small>主对话 · 智能分流与个人事务</small></div>
+          <div class="row"><span>手机真机验收 APK d740979</span><span class="ghost">未分配</span></div>
+          <div class="row"><small>持续工作与多端协同台 · 统一调度本机直连、Home 电脑节点与云端 Online Work 服务</small></div>
+        </div>
+      </div>
+      <div class="cmp new">
+        <h3>建议</h3>
+        <p>沿用 style.css 语义令牌、单一品牌蓝、14px 卡片、细边框、15px 正文、一句人话</p>
+        <div class="card" style="display:flex;gap:12px;align-items:center;margin-bottom:10px">
+          <svg class="avatar"><use href="#bob"/></svg>
+          <div style="flex:1"><b style="font-size:15px">Bob</b><div class="muted small">随时为你效劳 · DeepSeek</div></div>
+          <span class="chip green">在线</span>
+        </div>
+        <div class="card" style="margin-bottom:0">
+          <div style="display:flex;align-items:center;gap:8px"><span class="chip blue">bob-agent</span><span class="chip orange">今天</span></div>
+          <div style="margin-top:8px;font-size:14px;font-weight:600">在手机上安装新版 APK 并验收</div>
+          <div class="btn-row"><button class="btn ghost" type="button">推迟</button><button class="btn primary" type="button">完成</button></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="token-grid">
+      <div class="token"><div class="sw" style="background:var(--bg-root);box-shadow:var(--shadow)"></div><b>--bg-root / --bg-secondary</b>Canvas 混合中性灰</div>
+      <div class="token"><div class="sw" style="background:var(--accent-primary);color:var(--text-on-accent)">确认</div><b>--accent-primary</b>oklch(0.48 0.17 250) · 暗色 0.76 0.12</div>
+      <div class="token"><div class="sw" style="background:var(--bg-primary);box-shadow:var(--shadow)"><svg style="width:46px;height:30px;fill:var(--brand-logo)"><use href="#logo"/></svg></div><b>品牌 Logo</b>#2776BB · 正式 Bob 资产</div>
+      <div class="token"><div class="sw" style="background:var(--bg-tertiary)">稍后</div><b>--bg-tertiary</b>次按钮 / 用户消息面层</div>
+      <div class="token"><div class="sw" style="gap:4px;flex-wrap:wrap"><span class="chip green">完成</span><span class="chip orange">待处理</span><span class="chip red">到期</span></div><b>success / warning / error</b>只用于状态</div>
+      <div class="token"><div class="sw" style="font-size:20px;font-weight:750">Aa 15</div><b>字号</b>正文 15 · 标题 18–24</div>
+    </div>
+  </section>
+
+  <!-- ============ 02 Screens ============ -->
+  <section class="block">
+    <div class="sec-head"><span class="num">02</span><h2>关键界面</h2><p>底栏五项（BOB-D-014）：对话 · 今天 · 收集箱 · 知识 · 我的；右上角铃铛进入“待确认”。可点击试用。</p></div>
+
+    <div class="gallery">
+
+      <!-- ===== 01 对话 ===== -->
+      <div class="shot">
+        <div class="phone">
+          <div class="statusbar"><span>9:41</span><span class="sig"><i style="height:4px"></i><i style="height:6px"></i><i style="height:8px"></i><i style="height:10px"></i><span class="batt"></span></span></div>
+          <div class="appbar">
+            <button class="icon-btn" type="button" aria-label="我的"><svg class="ic"><use href="#i-menu"/></svg></button>
+            <svg class="avatar sm"><use href="#bob"/></svg>
+            <div class="title"><b>Bob</b><small>DeepSeek v4.1 · 在线</small></div>
+            <button class="icon-btn" type="button" aria-label="待确认"><svg class="ic"><use href="#i-bell"/></svg><span class="dot-badge">4</span></button>
+          </div>
+          <div class="screen">
+            <div class="brief">
+              <div style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600"><svg class="ic sm"><use href="#i-spark"/></svg>早上好</div>
+              <p>今天有 <b>3 个待办</b>，昨晚帮你整理了 <b>5 条灵感</b>，还有 1 个审批在等你。</p>
+              <div class="btn-row"><button class="btn ghost tiny" type="button">看今天</button><button class="btn ghost tiny" type="button">看整理</button></div>
+            </div>
+
+            <figure class="msg-photo" style="margin-top:0;margin-right:0"><img src="assets/chat-photo-atrium.jpg" alt="用户发送的中庭现场照片" /></figure>
+            <div class="msg me"><div class="bubble">这张中庭现场照片存进 Winter Shelter 项目素材</div></div>
+            <div class="msg bob"><div class="bubble">已存好。另外 Ocean Game 的场景第 8 版也渲染完了，水体更清透，加了鱼群：</div></div>
+            <div class="media-card">
+              <div class="media-img"><img src="assets/chat-result-ocean.jpg" alt="Bob 返回的渲染结果图" /><span class="media-badge">v8</span></div>
+              <div class="media-meta">
+                <span class="file-ic"><svg class="ic sm"><use href="#i-image"/></svg></span>
+                <div><b>ocean_scene_v8.png</b><small>2400 × 1500 · 1.8 MB · X1T</small></div>
+                <button class="btn ghost tiny" type="button">打开</button>
+              </div>
+            </div>
+
+            <div class="msg me"><div class="bubble">bob-agent 这周的成果预览做到哪了？</div></div>
+            <div class="msg bob"><svg class="avatar sm"><use href="#bob"/></svg><div class="bubble">这周进展不错，大部分格式已经能直接预览：</div></div>
+            <div class="rich card">
+              <div class="stat-head"><span>成果预览 · 本周</span><span class="chip blue">+3 项</span></div>
+              <div class="big">8 / 12<small>项已验收</small></div>
+              <div class="bar"><i style="width:67%"></i></div>
+              <div class="kv"><span>PDF 双页预览</span><span class="chip green">已验收</span></div>
+              <div class="kv"><span>HTML 隔离渲染</span><span class="chip green">已验收</span></div>
+              <div class="kv"><span>外部 CLI 旁观</span><span class="chip blue">进行中</span></div>
+              <div class="kv"><span>Office 渲染</span><span class="chip orange">暂缓</span></div>
+            </div>
+
+            <div class="rich card approval" id="approvalCard">
+              <div class="approval-top">
+                <span class="tool"><img src="../../apps/bob-app/public/logos/codex.png" alt="" onerror="this.replaceWith(document.createTextNode('C'))" /></span>
+                <div style="flex:1"><b style="font-size:13.5px">Codex 想运行命令</b><div class="muted" style="font-size:11.5px">X1T · bob-agent-next</div></div>
+                <span class="chip orange">待确认</span>
+              </div>
+              <div class="code">pnpm test -- phase-a-ux</div>
+              <div class="muted small">只读运行测试，不修改文件</div>
+              <div class="btn-row" data-approval>
+                <button class="btn ghost" type="button" data-act="deny">拒绝</button>
+                <button class="btn primary" type="button" data-act="allow">允许本次</button>
+              </div>
+            </div>
+
+            <div class="rich card">
+              <div style="display:flex;justify-content:space-between;align-items:center;font-size:13.5px"><b>打包 Android APK</b><span class="muted" style="font-size:11.5px">约 6 分钟</span></div>
+              <div class="steps">
+                <div class="st done"><i></i>已发送</div>
+                <div class="st now"><i></i>执行中</div>
+                <div class="st"><i></i>待确认</div>
+                <div class="st"><i></i>完成</div>
+              </div>
+            </div>
+            <div class="msg bob"><svg class="avatar sm"><use href="#bob"/></svg><div class="typing"><i></i><i></i><i></i></div></div>
+          </div>
+          <div class="composer"><svg class="ic"><use href="#i-plus"/></svg><span>发消息给 Bob…</span><span class="mic"><svg class="ic sm"><use href="#i-mic"/></svg></span></div>
+          <nav class="nav">
+            <a class="on"><svg class="ic"><use href="#i-chat"/></svg>对话</a>
+            <a><svg class="ic"><use href="#i-today"/></svg>今天</a>
+            <a><svg class="ic"><use href="#i-inbox"/></svg>收集箱<span class="dot-badge">6</span></a>
+            <a><svg class="ic"><use href="#i-book"/></svg>知识</a>
+            <a><svg class="ic"><use href="#i-user"/></svg>我的</a>
+          </nav>
+        </div>
+        <div class="caption"><strong><i>01</i>对话</strong><span>问候卡 · 富卡片回复 · 审批卡 · 任务进度条</span></div>
+      </div>
+
+      <!-- ===== 02 今天 ===== -->
+      <div class="shot">
+        <div class="phone">
+          <div class="statusbar"><span>9:41</span><span class="sig"><i style="height:4px"></i><i style="height:6px"></i><i style="height:8px"></i><i style="height:10px"></i><span class="batt"></span></span></div>
+          <div class="appbar">
+            <div class="title"><b>今天</b><small>11月8日 · 周日</small></div>
+            <button class="icon-btn soft" type="button" aria-label="新建"><svg class="ic"><use href="#i-plus"/></svg></button>
+            <button class="icon-btn" type="button" aria-label="待确认"><svg class="ic"><use href="#i-bell"/></svg><span class="dot-badge">4</span></button>
+          </div>
+          <div class="screen">
+            <div class="week">
+              <div class="day has">一<b>2</b><i></i></div>
+              <div class="day">二<b>3</b><i></i></div>
+              <div class="day has">三<b>4</b><i></i></div>
+              <div class="day has">四<b>5</b><i></i></div>
+              <div class="day">五<b>6</b><i></i></div>
+              <div class="day has">六<b>7</b><i></i></div>
+              <div class="day today has">日<b>8</b><i></i></div>
+            </div>
+
+            <div class="label"><span>日程</span><span class="muted" style="font-weight:500">周视图 ›</span></div>
+            <div class="card">
+              <div class="event"><span class="time">10:00</span><div class="body green"><b>牙科复诊</b><small>30 分钟 · 提前 1 小时提醒</small></div></div>
+              <div class="event"><span class="time">15:00</span><div class="body"><b>和设计师过 UI 方案</b><small>bob-agent · 带上参考图</small></div></div>
+              <div class="event"><span class="time">21:00</span><div class="body violet"><b>Bob 每日整理</b><small>自动 · 整理今天的灵感</small></div></div>
+            </div>
+
+            <div class="label"><span>待办</span><span class="muted" style="font-weight:500" id="todoCount">2 / 6</span></div>
+            <div class="card">
+              <div class="proj"><i style="background:var(--accent-primary)"></i>bob-agent</div>
+              <div class="todo" data-todo><span class="box"><svg class="ic xs"><use href="#i-check"/></svg></span><div><span class="t">手机安装新版 APK 并验收</span><small>来自 11月5日 灵感</small></div></div>
+              <div class="todo done" data-todo><span class="box"><svg class="ic xs"><use href="#i-check"/></svg></span><div><span class="t">确认 Claude 额度实时显示</span><small>已完成 · 08:40</small></div></div>
+            </div>
+            <div class="card">
+              <div class="proj"><i style="background:var(--success-text)"></i>生活</div>
+              <div class="todo" data-todo><span class="box"><svg class="ic xs"><use href="#i-check"/></svg></span><div><span class="t">续订停车月卡</span><small><span class="chip red" style="padding:0 6px">今天到期</span></small></div></div>
+              <div class="todo done" data-todo><span class="box"><svg class="ic xs"><use href="#i-check"/></svg></span><div><span class="t">给车加玻璃水</span><small>已完成 · 昨天</small></div></div>
+            </div>
+            <div class="card">
+              <div class="proj"><i style="background:var(--warning-text)"></i>Winter Shelter Project</div>
+              <div class="todo" data-todo><span class="box"><svg class="ic xs"><use href="#i-check"/></svg></span><div><span class="t">比较气凝胶毡与岩棉的保温报价</span><small>来自 11月7日 灵感</small></div></div>
+              <div class="todo" data-todo><span class="box"><svg class="ic xs"><use href="#i-check"/></svg></span><div><span class="t">整理现场照片发给结构顾问</span><small>周二截止</small></div></div>
+            </div>
+          </div>
+          <nav class="nav">
+            <a><svg class="ic"><use href="#i-chat"/></svg>对话</a>
+            <a class="on"><svg class="ic"><use href="#i-today"/></svg>今天</a>
+            <a><svg class="ic"><use href="#i-inbox"/></svg>收集箱<span class="dot-badge">6</span></a>
+            <a><svg class="ic"><use href="#i-book"/></svg>知识</a>
+            <a><svg class="ic"><use href="#i-user"/></svg>我的</a>
+          </nav>
+        </div>
+        <div class="caption"><strong><i>02</i>今天</strong><span>手机默认看今天；周视图一键切换；待办按项目分组</span></div>
+      </div>
+
+      <!-- ===== 03 收集箱 ===== -->
+      <div class="shot">
+        <div class="phone" id="inboxPhone">
+          <div class="statusbar"><span>9:41</span><span class="sig"><i style="height:4px"></i><i style="height:6px"></i><i style="height:8px"></i><i style="height:10px"></i><span class="batt"></span></span></div>
+          <div class="appbar">
+            <div class="title"><b>收集箱</b><small><span id="unsortedCount">6</span> 条待整理 · 已同步</small></div>
+            <button class="icon-btn" type="button" aria-label="待确认"><svg class="ic"><use href="#i-bell"/></svg><span class="dot-badge">4</span></button>
+          </div>
+          <div class="screen">
+            <div class="pills">
+              <span class="pill on">全部</span><span class="pill">待整理</span><span class="pill">稍后</span><span class="pill">已归档</span>
+            </div>
+            <div class="review-banner">
+              <div class="top"><svg class="ic sm"><use href="#i-spark"/></svg>Bob 每日整理 · 昨晚 21:00</div>
+              <b>5 条灵感已有整理建议</b>
+              <div class="btn-row" style="margin-top:0"><button class="btn ghost" type="button">明天再说</button><button class="btn" type="button">去确认</button></div>
+            </div>
+            <div id="sparkList">
+              <div class="card spark"><p>参考图里的圆角和留白很舒服，Bob 也可以这样</p><div class="meta"><span>2 分钟前</span>·<span>手机</span></div></div>
+              <div class="card spark with-img"><span class="thumb" aria-hidden="true"></span><div><p>停车场出口的指示牌拍下来了，回头和标识打样对一下</p><div class="meta"><span>1 小时前</span>·<span>手机</span><span class="chip gray">照片</span></div></div></div>
+              <div class="card spark"><p>周四下午问一下供应商报价</p><div class="meta"><span>今天 08:12</span>·<span class="chip violet"><svg class="ic xs"><use href="#i-mic"/></svg>语音 0:06</span></div></div>
+              <div class="card spark"><p>Bob 每周回顾：看看最近反复在想的主题</p><div class="meta"><span>昨天 22:14</span>·<span>网页</span></div></div>
+              <div class="card spark"><p>冬季庇护所那个项目，保温材料可以查一下气凝胶毡的价格</p><div class="meta"><span>昨天 18:40</span>·<span>手机</span></div></div>
+              <div class="card spark"><p>APK 装好后检查手势返回和状态栏</p><div class="meta"><span>昨天 11:05</span>·<span>电脑</span></div></div>
+              <div class="card spark"><p>以后也许可以做个家庭账本</p><div class="meta"><span>11月6日</span>·<span>手机</span><span class="chip gray">稍后</span></div></div>
+            </div>
+          </div>
+          <button class="fab" type="button" id="fab" aria-label="灵感速记"><svg><use href="#logo"/></svg><span class="plus">+</span></button>
+          <nav class="nav">
+            <a><svg class="ic"><use href="#i-chat"/></svg>对话</a>
+            <a><svg class="ic"><use href="#i-today"/></svg>今天</a>
+            <a class="on"><svg class="ic"><use href="#i-inbox"/></svg>收集箱<span class="dot-badge" id="navBadge">6</span></a>
+            <a><svg class="ic"><use href="#i-book"/></svg>知识</a>
+            <a><svg class="ic"><use href="#i-user"/></svg>我的</a>
+          </nav>
+          <div class="sheet-veil" id="veil"></div>
+          <div class="sheet" role="dialog" aria-label="灵感速记">
+            <div class="grab"></div>
+            <div style="font-weight:700;font-size:15px;margin:0 2px 8px">灵感速记</div>
+            <textarea id="sparkInput" placeholder="记下此刻的灵感…（Enter 保存）"></textarea>
+            <div class="tools">
+              <button class="icon-btn" type="button" aria-label="拍照"><svg class="ic"><use href="#i-camera"/></svg></button>
+              <button class="icon-btn" type="button" aria-label="图片"><svg class="ic"><use href="#i-image"/></svg></button>
+              <button class="icon-btn" type="button" aria-label="语音"><svg class="ic"><use href="#i-mic"/></svg></button>
+              <button class="btn primary" type="button" id="saveSpark">保存</button>
+            </div>
+            <div class="hint"><svg class="ic xs"><use href="#i-clock"/></svg>不用选项目或日期，今晚 21:00 Bob 统一整理</div>
+          </div>
+          <div class="toast" id="toast"><svg class="ic xs"><use href="#i-check"/></svg>已收进收集箱 · 已同步</div>
+        </div>
+        <div class="caption"><strong><i>03</i>收集箱</strong><span>灵感速记：点右下角 Bob，几秒钟记下；只收集，不分类</span></div>
+      </div>
+
+      <!-- ===== 04 每日整理 ===== -->
+      <div class="shot">
+        <div class="phone">
+          <div class="statusbar"><span>9:41</span><span class="sig"><i style="height:4px"></i><i style="height:6px"></i><i style="height:8px"></i><i style="height:10px"></i><span class="batt"></span></span></div>
+          <div class="appbar">
+            <button class="icon-btn" type="button" aria-label="返回"><svg class="ic"><use href="#i-back"/></svg></button>
+            <div class="title"><b>每日整理</b><small>11月7日 · 5 条灵感 → 4 项去向</small></div>
+          </div>
+          <div class="screen" id="reviewList">
+            <div class="progress-line"><span>Bob 的建议，确认后才会写入</span><span id="reviewProgress">已确认 0 / 4</span></div>
+
+            <div class="card sugg">
+              <div class="orig">周四下午问一下供应商报价</div>
+              <div class="to"><span class="arrow"><svg class="ic sm"><use href="#i-arrow"/></svg></span><span class="dest chip blue" data-dest><svg class="ic xs"><use href="#i-today"/></svg>日程 · 11月12日 周四 15:00</span></div>
+              <div class="why">有明确时间，所以放进日程</div>
+              <div class="alts"><button type="button" data-alt="待办 · 未分配">待办</button><button type="button" data-alt="笔记">笔记</button><button type="button" data-alt="稍后再看">稍后</button></div>
+              <div class="btn-row"><button class="btn ghost tiny" type="button" data-edit>改一下</button><button class="btn primary tiny" type="button" data-ok style="flex:1">确认</button></div>
+              <div class="done-tag"><svg class="ic xs"><use href="#i-check"/></svg>已加入日程</div>
+            </div>
+
+            <div class="card sugg">
+              <div class="orig">APK 装好后检查手势返回和状态栏</div>
+              <div class="to"><span class="arrow"><svg class="ic sm"><use href="#i-arrow"/></svg></span><span class="dest chip green" data-dest><svg class="ic xs"><use href="#i-check-sq"/></svg>待办 · bob-agent / todo.md</span></div>
+              <div class="why">和“真机验收”是同一件事，写入项目待办</div>
+              <div class="alts"><button type="button" data-alt="日程">日程</button><button type="button" data-alt="笔记">笔记</button><button type="button" data-alt="稍后再看">稍后</button></div>
+              <div class="btn-row"><button class="btn ghost tiny" type="button" data-edit>改一下</button><button class="btn primary tiny" type="button" data-ok style="flex:1">确认</button></div>
+              <div class="done-tag"><svg class="ic xs"><use href="#i-check"/></svg>已写入 bob-agent/todo.md</div>
+            </div>
+
+            <div class="card sugg">
+              <div class="orig">参考图里的圆角和留白很舒服</div>
+              <div class="orig">首页可以有个 Bob 小头像打招呼</div>
+              <div class="to"><span class="arrow"><svg class="ic sm"><use href="#i-merge"/></svg></span><span class="chip gray">合并 2 条</span><span class="dest chip violet" data-dest><svg class="ic xs"><use href="#i-note"/></svg>笔记 · UI 改版想法</span></div>
+              <div class="why">两条都在说界面风格，合并成一篇笔记以后展开</div>
+              <div class="alts"><button type="button" data-alt="待办 · bob-agent">待办</button><button type="button" data-alt="稍后再看">稍后</button></div>
+              <div class="btn-row"><button class="btn ghost tiny" type="button" data-edit>改一下</button><button class="btn primary tiny" type="button" data-ok style="flex:1">确认</button></div>
+              <div class="done-tag"><svg class="ic xs"><use href="#i-check"/></svg>已存为笔记</div>
+            </div>
+
+            <div class="card sugg">
+              <div class="orig">以后也许可以做个家庭账本</div>
+              <div class="to"><span class="arrow"><svg class="ic sm"><use href="#i-arrow"/></svg></span><span class="dest chip gray" data-dest><svg class="ic xs"><use href="#i-later"/></svg>稍后再看 · 留在收集箱</span></div>
+              <div class="why">还只是个念头，7 天后再提醒你</div>
+              <div class="alts"><button type="button" data-alt="新项目 · 家庭账本">新项目</button><button type="button" data-alt="笔记">笔记</button></div>
+              <div class="btn-row"><button class="btn ghost tiny" type="button" data-edit>改一下</button><button class="btn primary tiny" type="button" data-ok style="flex:1">确认</button></div>
+              <div class="done-tag"><svg class="ic xs"><use href="#i-check"/></svg>留在收集箱 · 11月14日再提醒</div>
+            </div>
+          </div>
+          <div class="dock">
+            <div class="node"><i></i>写入项目 todo.md 由 X1T 执行 · 在线</div>
+            <div class="btn-row"><button class="btn ghost" type="button">明天再说</button><button class="btn primary" type="button" id="okAll">全部确认 (4)</button></div>
+          </div>
+        </div>
+        <div class="caption"><strong><i>04</i>每日整理</strong><span>Bob 一天整理一次，你一次确认；可逐条修改</span></div>
+      </div>
+
+      <!-- ===== 05 待确认 ===== -->
+      <div class="shot">
+        <div class="phone">
+          <div class="statusbar"><span>9:41</span><span class="sig"><i style="height:4px"></i><i style="height:6px"></i><i style="height:8px"></i><i style="height:10px"></i><span class="batt"></span></span></div>
+          <div class="appbar">
+            <button class="icon-btn" type="button" aria-label="返回"><svg class="ic"><use href="#i-back"/></svg></button>
+            <div class="title"><b>待确认</b><small>需要你拍板的事</small></div>
+          </div>
+          <div class="screen">
+            <div class="pills" id="pendPills">
+              <button class="pill on" type="button" data-f="all">全部 4</button>
+              <button class="pill" type="button" data-f="approve">审批 1</button>
+              <button class="pill" type="button" data-f="result">成果 1</button>
+              <button class="pill" type="button" data-f="review">整理 1</button>
+              <button class="pill" type="button" data-f="due">到期 1</button>
+            </div>
+            <div class="card" data-kind="approve">
+              <div class="pend-head"><svg class="ic sm" style="color:var(--warning-text)"><use href="#i-shield"/></svg><span class="chip orange">待审批</span><span class="when">2 分钟前</span></div>
+              <div class="pend-body"><span class="art"><svg class="ic"><use href="#i-term"/></svg></span><div><b>Claude 想修改 1 个文件</b><small>docs/USER_GUIDE.md · X1T</small></div></div>
+              <div class="btn-row"><button class="btn ghost" type="button">拒绝</button><button class="btn primary" type="button">查看并允许</button></div>
+            </div>
+            <div class="card" data-kind="result">
+              <div class="pend-head"><svg class="ic sm" style="color:var(--accent-primary)"><use href="#i-note"/></svg><span class="chip blue">成果待检视</span><span class="when">1 小时前</span></div>
+              <div class="pend-body"><span class="art pdf">PDF</span><div><b>Office 预览样例 v2</b><small>2 页 · 28 KB · 改了页眉与表格</small></div></div>
+              <div class="btn-row"><button class="btn ghost" type="button">提出修改</button><button class="btn primary" type="button">确认完成</button></div>
+            </div>
+            <div class="card" data-kind="review">
+              <div class="pend-head"><svg class="ic sm" style="color:var(--text-secondary)"><use href="#i-spark"/></svg><span class="chip violet">每日整理</span><span class="when">昨晚</span></div>
+              <div class="pend-body"><span class="art"><svg class="ic"><use href="#i-inbox"/></svg></span><div><b>5 条灵感 → 4 项去向</b><small>1 日程 · 1 待办 · 1 笔记 · 1 稍后</small></div></div>
+              <div class="btn-row"><button class="btn ghost" type="button">稍后</button><button class="btn primary" type="button">去确认</button></div>
+            </div>
+            <div class="card" data-kind="due">
+              <div class="pend-head"><svg class="ic sm" style="color:var(--error-text)"><use href="#i-clock"/></svg><span class="chip red">今天到期</span><span class="when">生活</span></div>
+              <div class="pend-body"><span class="art"><svg class="ic"><use href="#i-check-sq"/></svg></span><div><b>续订停车月卡</b><small>来自 11月1日 灵感</small></div></div>
+              <div class="btn-row"><button class="btn ghost" type="button">推迟一天</button><button class="btn primary" type="button">完成</button></div>
+            </div>
+          </div>
+        </div>
+        <div class="caption"><strong><i>05</i>待确认</strong><span>审批、成果、整理、到期集中在一个队列里</span></div>
+      </div>
+
+      <!-- ===== 06 知识 ===== -->
+      <div class="shot">
+        <div class="phone">
+          <div class="statusbar"><span>9:41</span><span class="sig"><i style="height:4px"></i><i style="height:6px"></i><i style="height:8px"></i><i style="height:10px"></i><span class="batt"></span></span></div>
+          <div class="appbar">
+            <div class="title"><b>知识</b><small>整理过的东西都在这里</small></div>
+            <button class="icon-btn" type="button" aria-label="待确认"><svg class="ic"><use href="#i-bell"/></svg><span class="dot-badge">4</span></button>
+          </div>
+          <div class="screen">
+            <div class="search"><svg class="ic sm"><use href="#i-search"/></svg>搜索笔记、决定、记忆</div>
+            <div class="pills"><span class="pill on">全部</span><span class="pill">笔记</span><span class="pill">决定</span><span class="pill">记忆</span></div>
+
+            <div class="label"><span>笔记</span></div>
+            <div class="card note-card">
+              <b>UI 改版想法</b>
+              <p>大圆角卡片、柔和阴影、一个主按钮；首页加 Bob 头像问候；结构化回复用卡片……</p>
+              <div class="meta"><span class="chip violet">#设计</span><span>来自 2 条灵感 · 11月7日</span></div>
+            </div>
+            <div class="card note-card">
+              <b>标识打样意见</b>
+              <p>停车场出口指示牌：字号偏小，箭头和文字间距不统一，夜间反光需要再测。</p>
+              <div class="meta"><span class="chip green">#龙华停车</span><span>含 3 张照片</span></div>
+            </div>
+
+            <div class="label"><span>决定</span></div>
+            <div class="card">
+              <div class="tl">
+                <div class="tl-item"><b>灵感每天统一整理一次，不即时分类</b><small>11月8日 · bob-agent</small></div>
+                <div class="tl-item"><b>先保证单机独立可用，再扩展多设备</b><small>10月31日 · BOB-D-012</small></div>
+                <div class="tl-item" style="padding-bottom:0"><b>手机端采用 Tauri Android</b><small>10月28日 · BOB-D-003</small></div>
+              </div>
+            </div>
+
+            <div class="label"><span>Bob 记住的</span></div>
+            <div class="card">
+              <div class="mem"><span class="q"><svg class="ic sm"><use href="#i-spark"/></svg></span><div><p>你喜欢简洁、留白多的界面</p><small>来自 11月7日 的灵感 · <a style="color:var(--accent-primary)">忘掉这条</a></small></div></div>
+            </div>
+          </div>
+          <nav class="nav">
+            <a><svg class="ic"><use href="#i-chat"/></svg>对话</a>
+            <a><svg class="ic"><use href="#i-today"/></svg>今天</a>
+            <a><svg class="ic"><use href="#i-inbox"/></svg>收集箱<span class="dot-badge">6</span></a>
+            <a class="on"><svg class="ic"><use href="#i-book"/></svg>知识</a>
+            <a><svg class="ic"><use href="#i-user"/></svg>我的</a>
+          </nav>
+        </div>
+        <div class="caption"><strong><i>06</i>知识</strong><span>只放整理过的；来源用人话写，不显示 ID</span></div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ============ 03 Desktop ============ -->
+  <section class="block">
+    <div class="sec-head"><span class="num">03</span><h2>电脑版</h2><p>同一套令牌与组件；手机底栏变为左侧导航栏，宽屏用多栏同时呈现列表、内容与上下文</p></div>
+
+    <!-- ===== Desktop A: 对话 ===== -->
+    <div class="desk-shot">
+      <div class="desk-wrap"><div class="desk" data-desk>
+        <div class="desk-title">
+          <svg class="logo"><use href="#logo"/></svg><span>Bob</span><span class="grow"></span>
+          <span class="win"><svg viewBox="0 0 12 12"><path d="M1 6h10"/></svg></span>
+          <span class="win"><svg viewBox="0 0 12 12"><rect x="1.5" y="1.5" width="9" height="9"/></svg></span>
+          <span class="win"><svg viewBox="0 0 12 12"><path d="M1.5 1.5l9 9M10.5 1.5l-9 9"/></svg></span>
+        </div>
+        <div class="desk-body">
+          <nav class="rail">
+            <a class="on"><svg class="ic"><use href="#i-chat"/></svg>对话</a>
+            <a><svg class="ic"><use href="#i-today"/></svg>今天</a>
+            <a><svg class="ic"><use href="#i-inbox"/></svg>收集箱<span class="dot-badge">6</span></a>
+            <a><svg class="ic"><use href="#i-book"/></svg>知识</a>
+            <span class="spacer"></span>
+            <a><svg class="ic"><use href="#i-bell"/></svg>待确认<span class="dot-badge">4</span></a>
+            <a><svg class="ic"><use href="#i-user"/></svg>我的</a>
+          </nav>
+
+          <aside class="col col-side">
+            <div class="side-search"><svg class="ic sm"><use href="#i-search"/></svg>搜索会话与项目<span style="flex:1"></span><span class="kbd">Ctrl K</span></div>
+            <div class="side-row"><svg class="avatar"><use href="#bob"/></svg><span class="ttl"><b>Bob 助理</b></span><small>刚刚</small></div>
+            <div class="side-group">bob-agent <span class="dev">· X1T</span></div>
+            <div class="side-row sub on"><img src="../../apps/bob-app/public/logos/codex.png" alt="Codex" /><span class="ttl">成果预览进度与 Office 渲染</span><small>2 分钟</small></div>
+            <div class="side-row sub"><img src="../../apps/bob-app/public/logos/claude.png" alt="Claude" /><span class="ttl">审批队列与断线恢复</span><small>1 小时</small></div>
+            <div class="side-row sub"><img src="../../apps/bob-app/public/logos/antigravity.png" alt="AGY" /><span class="ttl">ACP 驻留队列实测</span><small>昨天</small></div>
+            <div class="side-group">Ocean Game <span class="dev">· X1T</span></div>
+            <div class="side-row sub"><img src="../../apps/bob-app/public/logos/codex.png" alt="Codex" /><span class="ttl">海底场景第 8 版材质</span><small>3 小时</small></div>
+            <div class="side-group">Winter Shelter Project <span class="dev">· VPS2</span></div>
+            <div class="side-row sub"><img src="../../apps/bob-app/public/logos/deepseek.png" alt="DeepSeek" /><span class="ttl">保温材料比价</span><small>周五</small></div>
+            <div class="side-row sub"><img src="../../apps/bob-app/public/logos/deepseek.png" alt="DeepSeek" /><span class="ttl">现场照片整理</span><small>周四</small></div>
+            <div class="side-group">龙华停车 <span class="dev">· 手机</span></div>
+            <div class="side-row sub"><img src="../../apps/bob-app/public/logos/deepseek.png" alt="DeepSeek" /><span class="ttl">标识打样意见汇总</span><small>11月3日</small></div>
+          </aside>
+
+          <main class="col col-main">
+            <div class="main-head">
+              <b>成果预览进度与 Office 渲染</b>
+              <span class="meta"><span class="dev-chip"><i></i>X1T</span><span class="dev-chip"><img src="../../apps/bob-app/public/logos/codex.png" alt="" />Codex</span><span class="chip gray">bob-agent</span></span>
+              <span class="grow"></span>
+              <button class="icon-btn" type="button" aria-label="更多"><svg class="ic"><use href="#i-more"/></svg></button>
+            </div>
+            <div class="thread"><div class="thread-inner">
+              <div class="msg me"><div class="bubble">bob-agent 这周的成果预览做到哪了？</div></div>
+              <div class="msg bob"><div class="bubble">这周进展不错，大部分格式已经能直接预览：</div></div>
+              <div class="card" style="max-width:520px">
+                <div class="stat-head"><span>成果预览 · 本周</span><span class="chip blue">+3 项</span></div>
+                <div class="big">8 / 12<small>项已验收</small></div>
+                <div class="bar"><i style="width:67%"></i></div>
+                <div class="kv"><span>PDF 双页预览 · HTML 隔离渲染</span><span class="chip green">已验收</span></div>
+                <div class="kv"><span>外部 CLI 旁观</span><span class="chip blue">进行中</span></div>
+                <div class="kv"><span>Office 渲染</span><span class="chip orange">暂缓</span></div>
+              </div>
+              <figure class="msg-photo" style="margin:0 0 4px auto"><img src="assets/chat-photo-atrium.jpg" alt="用户发送的中庭现场照片" /></figure>
+              <div class="msg me"><div class="bubble">这张中庭现场照片存进 Winter Shelter 项目素材</div></div>
+              <div class="msg bob"><div class="bubble">已存好。另外 Ocean Game 的场景第 8 版也渲染完了：</div></div>
+              <div class="media-card">
+                <div class="media-img"><img src="assets/chat-result-ocean.jpg" alt="Bob 返回的渲染结果图" /><span class="media-badge">v8</span></div>
+                <div class="media-meta"><span class="file-ic"><svg class="ic sm"><use href="#i-image"/></svg></span><div><b>ocean_scene_v8.png</b><small>2400 × 1500 · 1.8 MB · X1T</small></div><button class="btn ghost tiny" type="button">打开</button></div>
+              </div>
+            </div></div>
+            <div class="desk-composer">
+              <div class="ph">发消息给 Bob…　Enter 发送，Shift+Enter 换行</div>
+              <div class="tools">
+                <button class="icon-btn" type="button" aria-label="附件"><svg class="ic sm"><use href="#i-plus"/></svg></button>
+                <button class="icon-btn" type="button" aria-label="图片"><svg class="ic sm"><use href="#i-image"/></svg></button>
+                <span class="model"><img src="../../apps/bob-app/public/logos/codex.png" alt="" />Codex · X1T</span>
+                <span class="grow"></span>
+                <button class="icon-btn" type="button" aria-label="语音"><svg class="ic sm"><use href="#i-mic"/></svg></button>
+                <span class="send"><svg class="ic sm"><use href="#i-arrow"/></svg></span>
+              </div>
+            </div>
+          </main>
+
+          <aside class="col col-right">
+            <div class="card">
+              <div class="panel-title"><span>今天 · 11月8日</span><small>2 / 6 待办</small></div>
+              <div class="mini-row"><span class="t">10:00</span><span class="x">牙科复诊</span></div>
+              <div class="mini-row"><span class="t">15:00</span><span class="x">和设计师过 UI 方案</span></div>
+              <div class="mini-row"><span class="t">21:00</span><span class="x">Bob 每日整理</span><span class="chip gray">自动</span></div>
+            </div>
+            <div class="card">
+              <div class="panel-title"><span>待确认</span><small>4 项</small></div>
+              <div class="mini-row"><svg class="ic xs" style="color:var(--warning-text)"><use href="#i-shield"/></svg><span class="x">Codex 想运行 pnpm test</span><span class="chip orange">审批</span></div>
+              <div class="mini-row"><svg class="ic xs" style="color:var(--accent-primary)"><use href="#i-note"/></svg><span class="x">Office 预览样例 v2</span><span class="chip blue">成果</span></div>
+              <div class="mini-row"><svg class="ic xs" style="color:var(--text-secondary)"><use href="#i-inbox"/></svg><span class="x">每日整理 5 条</span><span class="chip gray">整理</span></div>
+              <div class="mini-row"><svg class="ic xs" style="color:var(--error-text)"><use href="#i-clock"/></svg><span class="x">续订停车月卡</span><span class="chip red">到期</span></div>
+            </div>
+            <div class="card">
+              <div class="panel-title"><span>收集箱</span><small>6 条待整理</small></div>
+              <div class="mini-row"><span class="x">参考图里的圆角和留白很舒服</span></div>
+              <div class="mini-row"><span class="x">周四下午问一下供应商报价</span></div>
+              <div class="mini-row"><span class="x">冬季庇护所：查气凝胶毡价格</span></div>
+              <div class="muted small" style="margin-top:6px">任意界面按 <span class="kbd">Ctrl Shift Space</span> 灵感速记</div>
+            </div>
+          </aside>
+        </div>
+      </div></div>
+      <div class="caption"><strong><i>A</i>对话</strong><span>左侧导航 · 会话按“项目 · 设备”分组 · 中间对话 · 右侧今天 / 待确认 / 收集箱随时可见</span></div>
+    </div>
+
+    <!-- ===== Desktop B: 收集箱 ===== -->
+    <div class="desk-shot">
+      <div class="desk-wrap"><div class="desk" data-desk>
+        <div class="desk-title">
+          <svg class="logo"><use href="#logo"/></svg><span>Bob</span><span class="grow"></span>
+          <span class="win"><svg viewBox="0 0 12 12"><path d="M1 6h10"/></svg></span>
+          <span class="win"><svg viewBox="0 0 12 12"><rect x="1.5" y="1.5" width="9" height="9"/></svg></span>
+          <span class="win"><svg viewBox="0 0 12 12"><path d="M1.5 1.5l9 9M10.5 1.5l-9 9"/></svg></span>
+        </div>
+        <div class="desk-body">
+          <nav class="rail">
+            <a><svg class="ic"><use href="#i-chat"/></svg>对话</a>
+            <a><svg class="ic"><use href="#i-today"/></svg>今天</a>
+            <a class="on"><svg class="ic"><use href="#i-inbox"/></svg>收集箱<span class="dot-badge">6</span></a>
+            <a><svg class="ic"><use href="#i-book"/></svg>知识</a>
+            <span class="spacer"></span>
+            <a><svg class="ic"><use href="#i-bell"/></svg>待确认<span class="dot-badge">4</span></a>
+            <a><svg class="ic"><use href="#i-user"/></svg>我的</a>
+          </nav>
+          <div class="col col-main">
+            <div class="ib-head">
+              <b>收集箱</b>
+              <div class="pills"><span class="pill on">全部 9</span><span class="pill">待整理 6</span><span class="pill">稍后 1</span><span class="pill">已整理 2</span></div>
+              <span class="grow"></span>
+              <span class="muted small">已同步 · 手机 / 网页 / X1T</span>
+              <button class="btn ghost tiny" type="button"><svg class="ic xs"><use href="#i-spark"/></svg>立即整理</button>
+            </div>
+            <div class="ib-cols">
+              <div class="ib-list">
+                <div class="ib-capture">
+                  <div class="ph">灵感速记…　不用选项目，Enter 保存</div>
+                  <div class="row">
+                    <button class="icon-btn" type="button" aria-label="截图"><svg class="ic sm"><use href="#i-camera"/></svg></button>
+                    <button class="icon-btn" type="button" aria-label="图片"><svg class="ic sm"><use href="#i-image"/></svg></button>
+                    <button class="icon-btn" type="button" aria-label="语音"><svg class="ic sm"><use href="#i-mic"/></svg></button>
+                    <span class="grow"></span><span>任意界面 <span class="kbd">Ctrl Shift Space</span></span>
+                  </div>
+                </div>
+                <div class="label"><span>待整理</span><span class="muted" style="font-weight:500">今晚 21:00 自动整理</span></div>
+                <div class="card spark"><p>参考图里的圆角和留白很舒服，Bob 也可以这样</p><div class="meta"><span>2 分钟前</span>·<span>手机</span></div></div>
+                <div class="card spark with-img"><span class="thumb" aria-hidden="true"></span><div><p>停车场出口的指示牌拍下来了，回头和标识打样对一下</p><div class="meta"><span>1 小时前</span>·<span>手机</span><span class="chip gray">照片</span></div></div></div>
+                <div class="card spark"><p>冬季庇护所那个项目，保温材料可以查一下气凝胶毡的价格</p><div class="meta"><span>昨天 18:40</span>·<span>网页</span></div></div>
+                <div class="label" style="margin-top:12px"><span>已整理</span><span class="muted" style="font-weight:500">保留原文与去向</span></div>
+                <div class="card spark sorted"><p>周二前把现场照片发给结构顾问</p><div class="meta"><span>11月6日</span><span class="dest-chip todo"><svg class="ic xs"><use href="#i-check-sq"/></svg>Winter Shelter / todo.md</span></div></div>
+                <div class="card spark sorted"><p>周四下午问一下供应商报价</p><div class="meta"><span>11月5日</span><span class="dest-chip cal"><svg class="ic xs"><use href="#i-today"/></svg>日程 · 11月12日 15:00</span></div></div>
+              </div>
+
+              <div class="ib-review">
+                <div class="rv-head"><b>每日整理</b><small>11月7日 · 5 条灵感 → 4 项去向 · Bob 的建议，确认后才写入</small><span class="grow"></span><small id="dkProgress">已确认 0 / 4</small></div>
+                <div class="rv-table" id="dkReview">
+                  <div class="rv-row hd"><span>灵感</span><span></span><span>去向</span><span>理由</span><span>操作</span></div>
+                  <div class="rv-row"><span class="orig">周四下午问一下供应商报价<small>语音 · 今天 08:12</small></span><svg class="ic sm muted"><use href="#i-arrow"/></svg><span><span class="dest-chip cal"><svg class="ic xs"><use href="#i-today"/></svg>日程 · 11月12日 周四 15:00</span></span><span class="why">有明确时间</span><span class="acts"><button class="btn ghost" type="button">改一下</button><button class="btn primary" type="button" data-dk-ok>确认</button></span><span class="okmark"><svg class="ic xs"><use href="#i-check"/></svg>已加入日程</span></div>
+                  <div class="rv-row"><span class="orig">APK 装好后检查手势返回和状态栏<small>电脑 · 昨天 11:05</small></span><svg class="ic sm muted"><use href="#i-arrow"/></svg><span><span class="dest-chip todo"><svg class="ic xs"><use href="#i-check-sq"/></svg>待办 · bob-agent / todo.md</span></span><span class="why">与“真机验收”同一件事</span><span class="acts"><button class="btn ghost" type="button">改一下</button><button class="btn primary" type="button" data-dk-ok>确认</button></span><span class="okmark"><svg class="ic xs"><use href="#i-check"/></svg>已写入 todo.md</span></div>
+                  <div class="rv-row"><span class="orig">参考图里的圆角和留白很舒服<small>+ 首页可以有个 Bob 头像打招呼</small></span><svg class="ic sm muted"><use href="#i-merge"/></svg><span><span class="dest-chip"><svg class="ic xs"><use href="#i-note"/></svg>合并为笔记 · UI 改版想法</span></span><span class="why">都在说界面风格</span><span class="acts"><button class="btn ghost" type="button">改一下</button><button class="btn primary" type="button" data-dk-ok>确认</button></span><span class="okmark"><svg class="ic xs"><use href="#i-check"/></svg>已存为笔记</span></div>
+                  <div class="rv-row"><span class="orig">以后也许可以做个家庭账本<small>手机 · 11月6日</small></span><svg class="ic sm muted"><use href="#i-arrow"/></svg><span><span class="dest-chip"><svg class="ic xs"><use href="#i-later"/></svg>稍后再看 · 留在收集箱</span></span><span class="why">还只是念头，7 天后再提醒</span><span class="acts"><button class="btn ghost" type="button">改一下</button><button class="btn primary" type="button" data-dk-ok>确认</button></span><span class="okmark"><svg class="ic xs"><use href="#i-check"/></svg>11月14日再提醒</span></div>
+                </div>
+                <div class="rv-foot">
+                  <span class="node"><i></i>写入项目 todo.md 由 X1T 执行 · 在线</span>
+                  <span class="grow"></span>
+                  <button class="btn ghost" type="button">明天再说</button>
+                  <button class="btn primary" type="button" id="dkOkAll">全部确认 (4)</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div></div>
+      <div class="caption"><strong><i>B</i>收集箱</strong><span>左侧随手记 + 待整理 / 已整理（保留去向标签）· 右侧每日整理表格一次确认 · 全局快捷键唤起灵感速记</span></div>
+    </div>
+
+    <div class="desk-note">
+      <div class="ref-note"><b>导航</b>手机底栏五项 → 左侧导航栏同样五项；“待确认”在电脑上有足够空间，直接放进导航栏</div>
+      <div class="ref-note"><b>多栏</b>≥1100px 三栏（列表 · 内容 · 上下文）；800–1100px 收起右栏；更窄回到手机布局</div>
+      <div class="ref-note"><b>灵感速记</b>手机用悬浮 Bob 按钮；电脑用全局快捷键弹出小窗，同一个收集箱</div>
+      <div class="ref-note"><b>同一套组件</b>卡片、胶囊、按钮、去向标签与手机共用 CSS 变量，换皮肤只改令牌</div>
+    </div>
+  </section>
+
+  <!-- ============ 04 Flow ============ -->
+  <section class="block">
+    <div class="sec-head"><span class="num">04</span><h2>灵感的一生</h2><p>替代 dashboard.bobbik.org/#inbox，统一在 bob-online，手机 / 网页 / 电脑同步</p></div>
+    <div class="flow">
+      <div class="stage"><b>① 随手记</b><small>点 Bob · 文字 / 照片 / 语音 · 离线可存</small></div>
+      <svg class="ic arr"><use href="#i-arrow"/></svg>
+      <div class="stage"><b>② 收集箱</b><small>云端一份，所有设备一致</small></div>
+      <svg class="ic arr"><use href="#i-arrow"/></svg>
+      <div class="stage"><b>③ 每日整理</b><small>Bob 出建议，你一次确认</small></div>
+      <svg class="ic arr"><use href="#i-arrow"/></svg>
+      <div class="stage"><b>④ 去向</b><small>项目 todo.md · 日程 · 笔记 · 稍后</small></div>
+    </div>
+  </section>
+
+  <!-- ============ 04 Principles ============ -->
+  <section class="block">
+    <div class="sec-head"><span class="num">05</span><h2>设计原则与落地顺序</h2></div>
+    <div class="princ">
+      <div class="card"><b><span class="n">1</span>先换基础样式</b><p>改 style.css 的颜色、圆角、阴影、字号，不动结构，就能拿到大部分观感提升。</p></div>
+      <div class="card"><b><span class="n">2</span>导航与用词</b><p>底栏为对话 · 今天 · 收集箱 · 知识 · 我的；设置、设备、票夹统一收进“我的”；“Agent”统一改为“Bob”。</p></div>
+      <div class="card"><b><span class="n">3</span>Bob 的形象</b><p>头像、早安卡、空状态插画与一句引导，让它像个助理而不是控制台。</p></div>
+      <div class="card"><b><span class="n">4</span>富卡片</b><p>汇总、新建项、成果、审批、任务进度都用卡片；每张卡只有一个实心主按钮。</p></div>
+      <div class="card"><b><span class="n">5</span>收集箱与每日整理</b><p>三个入口合一；每天一次批量建议，确认后由电脑节点写入项目 todo.md。</p></div>
+      <div class="card"><b><span class="n">6</span>待确认队列</b><p>所有需要你拍板的事集中一处，铃铛角标计数，真实状态不美化。</p></div>
+    </div>
+  </section>
+
+  <footer>Bob Online · UI 概念测试页 · 2026-11-08 · 数据均为示例</footer>
+</div>
+
+<script>
+(() => {
+  /* theme toggle: auto → light → dark */
+  const root = document.documentElement;
+  const label = document.getElementById('themeLabel');
+  const names = { auto: '跟随系统', light: '浅色', dark: '深色' };
+  let mode = 'auto';
+  try { mode = localStorage.getItem('bob-ui-theme') || 'auto'; } catch (e) {}
+  const apply = () => {
+    if (mode === 'auto') root.removeAttribute('data-theme'); else root.setAttribute('data-theme', mode);
+    label.textContent = names[mode];
+  };
+  apply();
+  document.getElementById('themeBtn').addEventListener('click', () => {
+    mode = mode === 'auto' ? 'light' : mode === 'light' ? 'dark' : 'auto';
+    try { localStorage.setItem('bob-ui-theme', mode); } catch (e) {}
+    apply();
+  });
+
+  /* todos */
+  const todoCount = document.getElementById('todoCount');
+  const todos = [...document.querySelectorAll('[data-todo]')];
+  const updTodo = () => { todoCount.textContent = `${todos.filter(t => t.classList.contains('done')).length} / ${todos.length}`; };
+  todos.forEach(t => t.addEventListener('click', () => { t.classList.toggle('done'); updTodo(); }));
+
+  /* approval */
+  document.querySelectorAll('[data-approval]').forEach(row => {
+    row.addEventListener('click', e => {
+      const b = e.target.closest('button'); if (!b) return;
+      const allow = b.dataset.act === 'allow';
+      const card = row.closest('.card');
+      card.querySelector('.chip').className = 'chip ' + (allow ? 'green' : 'gray');
+      card.querySelector('.chip').textContent = allow ? '已允许' : '已拒绝';
+      const res = document.createElement('div');
+      res.className = 'result-chip ' + (allow ? 'chip green' : 'chip gray');
+      res.style.display = 'block';
+      res.textContent = allow ? '已允许本次 · 正在运行…' : '已拒绝 · Codex 不会执行';
+      row.replaceWith(res);
+    });
+  });
+
+  /* capture sheet */
+  const phone = document.getElementById('inboxPhone');
+  const input = document.getElementById('sparkInput');
+  const list = document.getElementById('sparkList');
+  const toast = document.getElementById('toast');
+  const counts = [document.getElementById('unsortedCount'), document.getElementById('navBadge')];
+  let unsorted = 6;
+  const open = () => { phone.classList.add('sheet-open'); setTimeout(() => input.focus(), 250); };
+  const close = () => phone.classList.remove('sheet-open');
+  const save = () => {
+    const text = input.value.trim();
+    if (!text) { input.focus(); return; }
+    const card = document.createElement('div');
+    card.className = 'card spark new';
+    const p = document.createElement('p'); p.textContent = text;
+    const meta = document.createElement('div'); meta.className = 'meta'; meta.textContent = '刚刚 · 网页';
+    card.append(p, meta);
+    list.prepend(card);
+    input.value = '';
+    unsorted += 1; counts.forEach(c => c.textContent = unsorted);
+    close();
+    toast.classList.add('show'); setTimeout(() => toast.classList.remove('show'), 1600);
+  };
+  document.getElementById('fab').addEventListener('click', open);
+  document.getElementById('veil').addEventListener('click', close);
+  document.getElementById('saveSpark').addEventListener('click', save);
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); save(); }
+    if (e.key === 'Escape') close();
+  });
+
+  /* daily review */
+  const suggs = [...document.querySelectorAll('.sugg')];
+  const prog = document.getElementById('reviewProgress');
+  const okAll = document.getElementById('okAll');
+  const upd = () => {
+    const n = suggs.filter(s => s.classList.contains('ok')).length;
+    prog.textContent = `已确认 ${n} / ${suggs.length}`;
+    const left = suggs.length - n;
+    okAll.textContent = left ? `全部确认 (${left})` : '已全部确认';
+    okAll.disabled = !left; okAll.style.opacity = left ? 1 : .5;
+  };
+  suggs.forEach(s => {
+    s.querySelector('[data-ok]').addEventListener('click', () => { s.classList.add('ok'); s.classList.remove('editing'); upd(); });
+    s.querySelector('[data-edit]').addEventListener('click', () => s.classList.toggle('editing'));
+    s.querySelectorAll('[data-alt]').forEach(a => a.addEventListener('click', () => {
+      const dest = s.querySelector('[data-dest]');
+      const icon = dest.querySelector('svg').outerHTML;
+      dest.innerHTML = icon + a.dataset.alt;
+      s.querySelector('.why').textContent = '已按你的选择修改';
+      s.querySelector('.done-tag').lastChild.textContent = '已按修改执行：' + a.dataset.alt;
+      s.classList.remove('editing');
+    }));
+  });
+  okAll.addEventListener('click', () => { suggs.forEach(s => s.classList.add('ok')); upd(); });
+
+  /* pending filter */
+  const pills = document.querySelectorAll('#pendPills .pill');
+  pills.forEach(p => p.addEventListener('click', () => {
+    pills.forEach(x => x.classList.toggle('on', x === p));
+    document.querySelectorAll('[data-kind]').forEach(c => c.classList.toggle('hide', p.dataset.f !== 'all' && c.dataset.kind !== p.dataset.f));
+  }));
+  /* desktop mockups: real 1280px layout, scaled to the available width */
+  const fitDesks = () => document.querySelectorAll('[data-desk]').forEach(d => {
+    const w = d.parentElement.clientWidth;
+    d.style.zoom = Math.min(1, w / 1280);
+  });
+  fitDesks();
+  addEventListener('resize', fitDesks);
+  const dkRows = [...document.querySelectorAll('#dkReview .rv-row:not(.hd)')];
+  const dkProg = document.getElementById('dkProgress');
+  const dkAll = document.getElementById('dkOkAll');
+  const dkUpd = () => {
+    const n = dkRows.filter(r => r.classList.contains('ok')).length;
+    dkProg.textContent = `已确认 ${n} / ${dkRows.length}`;
+    const left = dkRows.length - n;
+    dkAll.textContent = left ? `全部确认 (${left})` : '已全部确认';
+    dkAll.disabled = !left; dkAll.style.opacity = left ? 1 : .5;
+  };
+  dkRows.forEach(r => r.querySelector('[data-dk-ok]').addEventListener('click', () => { r.classList.add('ok'); dkUpd(); }));
+  dkAll.addEventListener('click', () => { dkRows.forEach(r => r.classList.add('ok')); dkUpd(); });
+})();
+</script>
+</body>
+</html>

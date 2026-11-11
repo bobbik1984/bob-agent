@@ -2,6 +2,7 @@
 import { computed, reactive, ref } from 'vue';
 
 import MessageContent from '../components/MessageContent.vue';
+import ArtifactRevisionReview from '../components/ArtifactRevisionReview.vue';
 import { useI18n } from 'vue-i18n';
 
 const props = defineProps({
@@ -79,6 +80,93 @@ function submitOnlineOperation(projectId, task, operationKind = 'continue_task')
     parentVersionId: task?.latest_artifact_version_id || null,
   });
   onlineTaskPrompts[key] = '';
+}
+
+const showRevisionReview = ref(false);
+const activeReviewProjectId = ref(null);
+const revisionReviewTask = ref(null);
+const revisionReviewVersions = ref([]);
+
+function openTaskRevisionReview(projectId, task) {
+  const snapshot = props.onlineState?.taskSnapshots?.[task?.id] || {};
+  let vers = task?.versions || snapshot?.versions || [];
+  if (!Array.isArray(vers) || vers.length === 0) {
+    const parentId = task?.parent_version_id || snapshot?.parent_version_id || 'V1';
+    const currentId = task?.latest_artifact_version_id || snapshot?.latest_artifact_version_id || 'V2';
+    const v1Content =
+      snapshot?.parent_content ||
+      snapshot?.v1_content ||
+      task?.initial_output ||
+      snapshot?.summary ||
+      '';
+    const v2Content =
+      snapshot?.current_content ||
+      snapshot?.v2_content ||
+      task?.latest_output ||
+      snapshot?.verification_output ||
+      v1Content;
+    const artPath =
+      task?.artifact_path ||
+      snapshot?.artifact_path ||
+      task?.title ||
+      'deliverable.md';
+
+    vers = [
+      {
+        id: parentId,
+        versionLabel: 'V1',
+        path: artPath,
+        mimeType: task?.mime_type || 'text/markdown',
+        textContent: v1Content,
+        imageUrl: task?.imageUrl || null,
+        createdAt: task?.created_at || new Date().toISOString(),
+        parentVersionId: null,
+      },
+      {
+        id: currentId,
+        versionLabel: 'V2',
+        path: artPath,
+        mimeType: task?.mime_type || 'text/markdown',
+        textContent: v2Content,
+        imageUrl: task?.latestImageUrl || null,
+        createdAt: new Date().toISOString(),
+        parentVersionId: parentId,
+      },
+    ];
+  }
+  activeReviewProjectId.value = projectId;
+  revisionReviewTask.value = task;
+  revisionReviewVersions.value = vers;
+  showRevisionReview.value = true;
+}
+
+function handleDispatchRevision(payload) {
+  emit('online-submit-operation', {
+    kind: 'revise',
+    operationKind: 'revise',
+    projectId: activeReviewProjectId.value,
+    taskId: revisionReviewTask.value?.id || null,
+    artifactPath: payload.artifactPath,
+    parentVersionId:
+      payload.parentVersionId || revisionReviewTask.value?.latest_artifact_version_id || null,
+    prompt: payload.instruction,
+    claudePrompt: payload.instruction,
+    annotations: payload.annotations,
+  });
+  showRevisionReview.value = false;
+}
+
+function handleApproveVersion(payload) {
+  emit('online-submit-operation', {
+    kind: 'review',
+    operationKind: 'review',
+    verdict: 'approved',
+    projectId: activeReviewProjectId.value,
+    taskId: revisionReviewTask.value?.id || null,
+    versionId: payload.versionId,
+    note: payload.note || null,
+  });
+  showRevisionReview.value = false;
 }
 
 function submitSaveNode() {
@@ -515,6 +603,13 @@ function submitProject() {
                       </div>
                       <span class="schedule-kind-badge">{{ task.status || 'observed' }}</span>
                       <button
+                        type="button"
+                        class="mini-ghost-btn"
+                        @click="openTaskRevisionReview(op.id, task)"
+                      >
+                        {{ t('artifactOpenRevisionReview') }}
+                      </button>
+                      <button
                         v-if="onlineState?.capabilities?.capabilities?.submit"
                         type="button"
                         class="mini-ghost-btn"
@@ -639,5 +734,14 @@ function submitProject() {
       </section>
       </template>
     </div>
+
+    <ArtifactRevisionReview
+      v-if="showRevisionReview"
+      :versions="revisionReviewVersions"
+      :busy="onlineState?.busy"
+      @dispatch-revision="handleDispatchRevision"
+      @approve-version="handleApproveVersion"
+      @close="showRevisionReview = false"
+    />
   </section>
 </template>

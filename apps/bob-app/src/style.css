@@ -19,6 +19,16 @@
   --color-error: oklch(0.63 0.21 25);
   --content-max-width: 68rem;
 
+  /* Siri-like fluid colorful orb tokens (BOB-D-015) */
+  --orb-core-cyan: light-dark(oklch(0.68 0.16 215), oklch(0.78 0.15 215));
+  --orb-core-violet: light-dark(oklch(0.60 0.22 295), oklch(0.72 0.20 295));
+  --orb-core-magenta: light-dark(oklch(0.65 0.24 340), oklch(0.74 0.22 340));
+  --orb-core-blue: light-dark(oklch(0.55 0.20 260), oklch(0.70 0.18 260));
+  --orb-amber-core: light-dark(oklch(0.72 0.18 75), oklch(0.80 0.17 75));
+  --orb-amber-glow: light-dark(oklch(0.78 0.16 75 / 0.45), oklch(0.82 0.16 75 / 0.40));
+  --orb-glow-soft: light-dark(oklch(0.92 0.04 250 / 0.5), oklch(0.25 0.05 250 / 0.6));
+  --orb-surface-ring: light-dark(oklch(1 0 0 / 0.35), oklch(1 0 0 / 0.15));
+
   /* Legacy bob-agent 14px base typography scale */
   --text-2xs: 0.6875rem; /* 11px */
   --text-xs: 0.75rem;    /* 12px */
@@ -4546,5 +4556,16 @@ dialog::backdrop {
 @media (max-width: 1080px) {
   .desktop-right-sidebar {
     display: none !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .jarvis-orb,
+  .jarvis-orb *,
+  .action-card,
+  .action-card * {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
   }
 }

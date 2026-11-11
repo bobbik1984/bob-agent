@@ -417,3 +417,528 @@ pub async fn app_subagent_list<R: Runtime>(
     .await
     .map_err(|_| "RUNTIME_RPC_FAILED")?
 }
+
+// ---------------------------------------------------------------------------
+// 5. Feature Packages & Sandbox RPCs
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub async fn app_features_list<R: Runtime>(host: AppHandle<R>) -> Result<Value, &'static str> {
+    tauri::async_runtime::spawn_blocking(move || execute_rpc(&host, "app_features_list", json!({})))
+        .await
+        .map_err(|_| "RUNTIME_RPC_FAILED")?
+}
+
+#[tauri::command]
+pub async fn app_feature_keep<R: Runtime>(host: AppHandle<R>, name: String) -> Result<Value, &'static str> {
+    tauri::async_runtime::spawn_blocking(move || {
+        execute_rpc(&host, "app_feature_keep", json!({ "name": name }))
+    })
+    .await
+    .map_err(|_| "RUNTIME_RPC_FAILED")?
+}
+
+#[tauri::command]
+pub async fn app_feature_rollback<R: Runtime>(
+    host: AppHandle<R>,
+    name: String,
+    target_version: Option<u32>,
+) -> Result<Value, &'static str> {
+    tauri::async_runtime::spawn_blocking(move || {
+        execute_rpc(
+            &host,
+            "app_feature_rollback",
+            json!({ "name": name, "targetVersion": target_version }),
+        )
+    })
+    .await
+    .map_err(|_| "RUNTIME_RPC_FAILED")?
+}
+
+#[tauri::command]
+pub async fn app_feature_toggle<R: Runtime>(
+    host: AppHandle<R>,
+    name: String,
+    enabled: bool,
+) -> Result<Value, &'static str> {
+    tauri::async_runtime::spawn_blocking(move || {
+        execute_rpc(
+            &host,
+            "app_feature_toggle",
+            json!({ "name": name, "enabled": enabled }),
+        )
+    })
+    .await
+    .map_err(|_| "RUNTIME_RPC_FAILED")?
+}
+
+#[tauri::command]
+pub async fn app_feature_call<R: Runtime>(
+    host: AppHandle<R>,
+    name: Option<String>,
+    route: Option<String>,
+    payload: Option<Value>,
+) -> Result<Value, &'static str> {
+    tauri::async_runtime::spawn_blocking(move || {
+        execute_rpc(
+            &host,
+            "app_feature_call",
+            json!({
+                "name": name,
+                "route": route,
+                "payload": payload.unwrap_or(Value::Null)
+            }),
+        )
+    })
+    .await
+    .map_err(|_| "RUNTIME_RPC_FAILED")?
+}
+
+#[tauri::command]
+pub async fn app_feature_storage_save<R: Runtime>(
+    host: AppHandle<R>,
+    name: String,
+    storage: Option<Value>,
+    patch: Option<Value>,
+) -> Result<Value, &'static str> {
+    tauri::async_runtime::spawn_blocking(move || {
+        execute_rpc(
+            &host,
+            "app_feature_storage_save",
+            json!({
+                "name": name,
+                "storage": storage.or(patch).unwrap_or(Value::Null)
+            }),
+        )
+    })
+    .await
+    .map_err(|_| "RUNTIME_RPC_FAILED")?
+}
+
+// ---------------------------------------------------------------------------
+// 6. Routine & Draft RPCs
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub async fn app_routines_list<R: Runtime>(host: AppHandle<R>) -> Result<Value, &'static str> {
+    tauri::async_runtime::spawn_blocking(move || execute_rpc(&host, "app_routines_list", json!({})))
+        .await
+        .map_err(|_| "RUNTIME_RPC_FAILED")?
+}
+
+#[tauri::command]
+pub async fn app_routine_save<R: Runtime>(
+    host: AppHandle<R>,
+    id: Option<String>,
+    title: String,
+    prompt_instruction: Option<String>,
+    recurrence: Option<Value>,
+    routine_steps: Option<Value>,
+    utc_offset_minutes: Option<i32>,
+) -> Result<Value, &'static str> {
+    tauri::async_runtime::spawn_blocking(move || {
+        execute_rpc(
+            &host,
+            "app_routine_save",
+            json!({
+                "id": id,
+                "title": title,
+                "promptInstruction": prompt_instruction,
+                "recurrence": recurrence,
+                "routineSteps": routine_steps,
+                "utcOffsetMinutes": utc_offset_minutes
+            }),
+        )
+    })
+    .await
+    .map_err(|_| "RUNTIME_RPC_FAILED")?
+}
+
+#[tauri::command]
+pub async fn app_routine_trial<R: Runtime>(
+    host: AppHandle<R>,
+    id: Option<String>,
+    routine_id: Option<String>,
+) -> Result<Value, &'static str> {
+    tauri::async_runtime::spawn_blocking(move || {
+        execute_rpc(
+            &host,
+            "app_routine_trial",
+            json!({ "id": id.or(routine_id) }),
+        )
+    })
+    .await
+    .map_err(|_| "RUNTIME_RPC_FAILED")?
+}
+
+#[tauri::command]
+pub async fn app_routine_toggle<R: Runtime>(
+    host: AppHandle<R>,
+    id: Option<String>,
+    routine_id: Option<String>,
+    enabled: bool,
+) -> Result<Value, &'static str> {
+    tauri::async_runtime::spawn_blocking(move || {
+        execute_rpc(
+            &host,
+            "app_routine_toggle",
+            json!({ "id": id.or(routine_id), "enabled": enabled }),
+        )
+    })
+    .await
+    .map_err(|_| "RUNTIME_RPC_FAILED")?
+}
+
+#[tauri::command]
+pub async fn app_routine_delete<R: Runtime>(
+    host: AppHandle<R>,
+    id: Option<String>,
+    routine_id: Option<String>,
+) -> Result<Value, &'static str> {
+    tauri::async_runtime::spawn_blocking(move || {
+        execute_rpc(
+            &host,
+            "app_routine_delete",
+            json!({ "id": id.or(routine_id) }),
+        )
+    })
+    .await
+    .map_err(|_| "RUNTIME_RPC_FAILED")?
+}
+
+#[tauri::command]
+pub async fn app_routine_drafts_list<R: Runtime>(host: AppHandle<R>) -> Result<Value, &'static str> {
+    tauri::async_runtime::spawn_blocking(move || {
+        execute_rpc(&host, "app_routine_drafts_list", json!({}))
+    })
+    .await
+    .map_err(|_| "RUNTIME_RPC_FAILED")?
+}
+
+// ---------------------------------------------------------------------------
+// 7. Growth & Budget & Approvals RPCs
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub async fn app_jarvis_chat<R: Runtime>(
+    _host: AppHandle<R>,
+    _text: Option<String>,
+    _conversation_id: Option<String>,
+    _streaming: Option<bool>,
+) -> Result<Value, &'static str> {
+    Ok(json!({ "status": "direct_mode", "text": "Direct mode response" }))
+}
+
+#[tauri::command]
+pub async fn app_jarvis_approvals_list<R: Runtime>(host: AppHandle<R>) -> Result<Value, &'static str> {
+    tauri::async_runtime::spawn_blocking(move || {
+        execute_rpc(&host, "app_jarvis_approvals_list", json!({}))
+    })
+    .await
+    .map_err(|_| "RUNTIME_RPC_FAILED")?
+}
+
+#[tauri::command]
+pub async fn app_jarvis_approve<R: Runtime>(
+    host: AppHandle<R>,
+    approval_id: Option<String>,
+    id: Option<String>,
+) -> Result<Value, &'static str> {
+    tauri::async_runtime::spawn_blocking(move || {
+        execute_rpc(
+            &host,
+            "app_jarvis_approve",
+            json!({ "approvalId": approval_id.or(id) }),
+        )
+    })
+    .await
+    .map_err(|_| "RUNTIME_RPC_FAILED")?
+}
+
+#[tauri::command]
+pub async fn app_jarvis_reject<R: Runtime>(
+    host: AppHandle<R>,
+    approval_id: Option<String>,
+    id: Option<String>,
+) -> Result<Value, &'static str> {
+    tauri::async_runtime::spawn_blocking(move || {
+        execute_rpc(
+            &host,
+            "app_jarvis_reject",
+            json!({ "approvalId": approval_id.or(id) }),
+        )
+    })
+    .await
+    .map_err(|_| "RUNTIME_RPC_FAILED")?
+}
+
+#[tauri::command]
+pub async fn app_jarvis_budget_get<R: Runtime>(host: AppHandle<R>) -> Result<Value, &'static str> {
+    tauri::async_runtime::spawn_blocking(move || {
+        execute_rpc(&host, "app_jarvis_budget_get", json!({}))
+    })
+    .await
+    .map_err(|_| "RUNTIME_RPC_FAILED")?
+}
+
+#[tauri::command]
+pub async fn app_jarvis_budget_set<R: Runtime>(
+    host: AppHandle<R>,
+    monthly_cap_usd: Option<f64>,
+    cap: Option<f64>,
+) -> Result<Value, &'static str> {
+    tauri::async_runtime::spawn_blocking(move || {
+        execute_rpc(
+            &host,
+            "app_jarvis_budget_set",
+            json!({ "monthlyCapUsd": monthly_cap_usd.or(cap) }),
+        )
+    })
+    .await
+    .map_err(|_| "RUNTIME_RPC_FAILED")?
+}
+
+#[tauri::command]
+pub async fn app_proactivity_get<R: Runtime>(host: AppHandle<R>) -> Result<Value, &'static str> {
+    tauri::async_runtime::spawn_blocking(move || {
+        execute_rpc(&host, "app_proactivity_get", json!({}))
+    })
+    .await
+    .map_err(|_| "RUNTIME_RPC_FAILED")?
+}
+
+#[tauri::command]
+pub async fn app_proactivity_set<R: Runtime>(
+    host: AppHandle<R>,
+    level: Option<Value>,
+    quiet_hours_start: Option<String>,
+    quiet_hours_end: Option<String>,
+) -> Result<Value, &'static str> {
+    tauri::async_runtime::spawn_blocking(move || {
+        execute_rpc(
+            &host,
+            "app_proactivity_set",
+            json!({
+                "level": level,
+                "quietHoursStart": quiet_hours_start,
+                "quietHoursEnd": quiet_hours_end
+            }),
+        )
+    })
+    .await
+    .map_err(|_| "RUNTIME_RPC_FAILED")?
+}
+
+#[tauri::command]
+pub async fn app_morning_brief<R: Runtime>(host: AppHandle<R>) -> Result<Value, &'static str> {
+    tauri::async_runtime::spawn_blocking(move || {
+        execute_rpc(&host, "app_morning_brief", json!({}))
+    })
+    .await
+    .map_err(|_| "RUNTIME_RPC_FAILED")?
+}
+
+#[tauri::command]
+pub async fn app_dream_run<R: Runtime>(host: AppHandle<R>) -> Result<Value, &'static str> {
+    tauri::async_runtime::spawn_blocking(move || execute_rpc(&host, "app_dream_run", json!({})))
+        .await
+        .map_err(|_| "RUNTIME_RPC_FAILED")?
+}
+
+#[tauri::command]
+pub async fn app_kb_search<R: Runtime>(
+    host: AppHandle<R>,
+    query: String,
+    limit: Option<usize>,
+) -> Result<Value, &'static str> {
+    tauri::async_runtime::spawn_blocking(move || {
+        execute_rpc(&host, "app_kb_search", json!({ "query": query, "limit": limit }))
+    })
+    .await
+    .map_err(|_| "RUNTIME_RPC_FAILED")?
+}
+
+// ---------------------------------------------------------------------------
+// 8. Browser Session Fallback RPCs & Push RPCs
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub async fn app_browser_sessions_list<R: Runtime>(host: AppHandle<R>) -> Result<Value, &'static str> {
+    tauri::async_runtime::spawn_blocking(move || {
+        execute_rpc(&host, "app_browser_sessions_list", json!({}))
+    })
+    .await
+    .map_err(|_| "RUNTIME_RPC_FAILED")?
+}
+
+#[tauri::command]
+pub async fn app_browser_session_open<R: Runtime>(
+    host: AppHandle<R>,
+    target: Option<String>,
+    url: Option<String>,
+) -> Result<Value, &'static str> {
+    tauri::async_runtime::spawn_blocking(move || {
+        execute_rpc(
+            &host,
+            "app_browser_session_open",
+            json!({ "target": target.or(url) }),
+        )
+    })
+    .await
+    .map_err(|_| "RUNTIME_RPC_FAILED")?
+}
+
+#[tauri::command]
+pub async fn app_browser_session_clear<R: Runtime>(
+    host: AppHandle<R>,
+    domain: Option<String>,
+) -> Result<Value, &'static str> {
+    tauri::async_runtime::spawn_blocking(move || {
+        execute_rpc(
+            &host,
+            "app_browser_session_clear",
+            json!({ "domain": domain.unwrap_or_else(|| "*".to_string()) }),
+        )
+    })
+    .await
+    .map_err(|_| "RUNTIME_RPC_FAILED")?
+}
+
+#[tauri::command]
+pub async fn app_browser_takeover_complete<R: Runtime>(
+    host: AppHandle<R>,
+    takeover_id: Option<String>,
+    id: Option<String>,
+) -> Result<Value, &'static str> {
+    tauri::async_runtime::spawn_blocking(move || {
+        execute_rpc(
+            &host,
+            "app_browser_takeover_complete",
+            json!({ "takeoverId": takeover_id.or(id) }),
+        )
+    })
+    .await
+    .map_err(|_| "RUNTIME_RPC_FAILED")?
+}
+
+#[tauri::command]
+pub async fn app_push_vapid_public_key<R: Runtime>(host: AppHandle<R>) -> Result<Value, &'static str> {
+    tauri::async_runtime::spawn_blocking(move || {
+        execute_rpc(&host, "app_push_vapid_public_key", json!({}))
+    })
+    .await
+    .map_err(|_| "RUNTIME_RPC_FAILED")?
+}
+
+#[tauri::command]
+pub async fn app_push_subscribe<R: Runtime>(
+    host: AppHandle<R>,
+    subscription: Option<Value>,
+) -> Result<Value, &'static str> {
+    tauri::async_runtime::spawn_blocking(move || {
+        execute_rpc(
+            &host,
+            "app_push_subscribe",
+            json!({ "subscription": subscription }),
+        )
+    })
+    .await
+    .map_err(|_| "RUNTIME_RPC_FAILED")?
+}
+
+// ---------------------------------------------------------------------------
+// 9. Host Workspaces & Offline Queue RPCs
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub async fn app_host_workspaces_list<R: Runtime>(host: AppHandle<R>) -> Result<Value, &'static str> {
+    tauri::async_runtime::spawn_blocking(move || {
+        execute_rpc(&host, "app_host_workspaces_list", json!({}))
+    })
+    .await
+    .map_err(|_| "RUNTIME_RPC_FAILED")?
+}
+
+#[tauri::command]
+pub async fn app_host_workspace_grant<R: Runtime>(
+    host: AppHandle<R>,
+    path: String,
+    label: Option<String>,
+    read_only: Option<bool>,
+) -> Result<Value, &'static str> {
+    tauri::async_runtime::spawn_blocking(move || {
+        execute_rpc(
+            &host,
+            "app_host_workspace_grant",
+            json!({
+                "path": path,
+                "label": label,
+                "readOnly": read_only
+            }),
+        )
+    })
+    .await
+    .map_err(|_| "RUNTIME_RPC_FAILED")?
+}
+
+#[tauri::command]
+pub async fn app_host_workspace_revoke<R: Runtime>(
+    host: AppHandle<R>,
+    id: String,
+) -> Result<Value, &'static str> {
+    tauri::async_runtime::spawn_blocking(move || {
+        execute_rpc(&host, "app_host_workspace_revoke", json!({ "id": id }))
+    })
+    .await
+    .map_err(|_| "RUNTIME_RPC_FAILED")?
+}
+
+#[tauri::command]
+pub async fn app_host_queue_list<R: Runtime>(
+    host: AppHandle<R>,
+    node_id: Option<String>,
+) -> Result<Value, &'static str> {
+    tauri::async_runtime::spawn_blocking(move || {
+        execute_rpc(&host, "app_host_queue_list", json!({ "nodeId": node_id }))
+    })
+    .await
+    .map_err(|_| "RUNTIME_RPC_FAILED")?
+}
+
+#[tauri::command]
+pub async fn app_host_queue_enqueue<R: Runtime>(
+    host: AppHandle<R>,
+    node_id: String,
+    tool_name: String,
+    args: Option<Value>,
+) -> Result<Value, &'static str> {
+    tauri::async_runtime::spawn_blocking(move || {
+        execute_rpc(
+            &host,
+            "app_host_queue_enqueue",
+            json!({
+                "nodeId": node_id,
+                "toolName": tool_name,
+                "args": args.unwrap_or(json!({}))
+            }),
+        )
+    })
+    .await
+    .map_err(|_| "RUNTIME_RPC_FAILED")?
+}
+
+#[tauri::command]
+pub async fn app_host_queue_reconcile<R: Runtime>(
+    host: AppHandle<R>,
+    node_id: String,
+) -> Result<Value, &'static str> {
+    tauri::async_runtime::spawn_blocking(move || {
+        execute_rpc(
+            &host,
+            "app_host_queue_reconcile",
+            json!({ "nodeId": node_id }),
+        )
+    })
+    .await
+    .map_err(|_| "RUNTIME_RPC_FAILED")?
+}

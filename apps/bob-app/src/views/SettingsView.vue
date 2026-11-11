@@ -1,10 +1,12 @@
 <script setup>
-import { inject } from 'vue';
+import { computed, inject, ref, watch } from 'vue';
 import CustomSelect from '../components/CustomSelect.vue';
 import ProjectContextPane from '../components/ProjectContextPane.vue';
 import HomeConnection from '../HomeConnection.vue';
 import WorkView from './WorkView.vue';
+import SiteSessionVault from '../components/SiteSessionVault.vue';
 
+const shell = inject('bobAppShell');
 const {
   t,
   locale,
@@ -95,7 +97,65 @@ const {
   changeExecutionRoute,
   getProviderLogo,
   personalOps,
-} = inject('bobAppShell');
+  jarvisHome,
+  kernelBridge,
+} = shell;
+
+const proactivityLevels = [
+  { value: 0.0, labelKey: 'proactivitySilent', descKey: 'proactivitySilentDesc' },
+  { value: 0.35, labelKey: 'proactivityMorningBrief', descKey: 'proactivityMorningBriefDesc' },
+  { value: 0.7, labelKey: 'proactivityTimely', descKey: 'proactivityTimelyDesc' },
+  { value: 1.0, labelKey: 'proactivityCare', descKey: 'proactivityCareDesc' },
+];
+
+const currentProactivityLevel = computed(() => {
+  return jarvisHome?.proactivityState?.value?.level ?? 0.35;
+});
+
+function setProactivity(level) {
+  if (typeof jarvisHome?.saveProactivity === 'function') {
+    jarvisHome.saveProactivity(level);
+  }
+}
+
+function onProactivitySliderInput(e) {
+  const raw = Number(e.target.value);
+  let snapped = 0.35;
+  if (raw <= 0.17) snapped = 0.0;
+  else if (raw <= 0.52) snapped = 0.35;
+  else if (raw <= 0.85) snapped = 0.7;
+  else snapped = 1.0;
+  setProactivity(snapped);
+}
+
+const monthlyCapInput = ref(10);
+const capSavedNotice = ref(false);
+
+watch(
+  () => jarvisHome?.budgetState?.value?.monthly_cap_usd,
+  val => {
+    if (val !== undefined && val !== null) {
+      monthlyCapInput.value = Number(val);
+    }
+  },
+  { immediate: true },
+);
+
+async function saveMonthlySpendCap(val) {
+  const cap = Number(val ?? monthlyCapInput.value);
+  if (Number.isNaN(cap) || cap < 0) return;
+  monthlyCapInput.value = cap;
+  if (typeof kernelBridge?.jarvisBudgetSet === 'function') {
+    await kernelBridge.jarvisBudgetSet(cap).catch(() => null);
+  }
+  if (jarvisHome?.budgetState?.value) {
+    jarvisHome.budgetState.value.monthly_cap_usd = cap;
+  }
+  capSavedNotice.value = true;
+  setTimeout(() => {
+    capSavedNotice.value = false;
+  }, 2000);
+}
 </script>
 
 <template>
@@ -773,6 +833,122 @@ const {
           v-show="settingsView === 'home' && settingsTab === 'tasks'"
           class="model-hub-stack settings-tab-panel"
         >
+          <!-- 4-Level Proactivity Slider Card -->
+          <section class="hub-card proactivity-card">
+            <div class="hub-card-header">
+              <div class="hub-card-title-group">
+                <svg class="hub-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+                  <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+                </svg>
+                <h3>{{ t('proactivitySettingsTitle') }}</h3>
+                <span class="hub-count-pill">
+                  {{
+                    currentProactivityLevel <= 0.17
+                      ? t('proactivitySilent')
+                      : currentProactivityLevel <= 0.52
+                        ? t('proactivityMorningBrief')
+                        : currentProactivityLevel <= 0.85
+                          ? t('proactivityTimely')
+                          : t('proactivityCare')
+                  }}
+                </span>
+              </div>
+            </div>
+            <p class="view-card-desc">{{ t('proactivitySettingsDesc') }}</p>
+
+            <div class="proactivity-slider-box">
+              <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.01"
+                :value="currentProactivityLevel"
+                class="proactivity-range-slider"
+                :aria-label="t('proactivitySettingsTitle')"
+                @input="onProactivitySliderInput"
+              />
+              <div class="proactivity-tiers-grid">
+                <button
+                  v-for="tier in proactivityLevels"
+                  :key="tier.value"
+                  type="button"
+                  class="proactivity-tier-btn"
+                  :class="{ active: Math.abs(currentProactivityLevel - tier.value) < 0.18 }"
+                  @click="setProactivity(tier.value)"
+                >
+                  <span class="tier-label">{{ t(tier.labelKey) }}</span>
+                  <span class="tier-desc">{{ t(tier.descKey) }}</span>
+                </button>
+              </div>
+            </div>
+
+            <div class="quiet-hours-badge">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+              </svg>
+              <span>{{ t('proactivityQuietHoursNote') }}</span>
+            </div>
+          </section>
+
+          <!-- Monthly Spend Cap Card -->
+          <section class="hub-card spend-cap-card">
+            <div class="hub-card-header">
+              <div class="hub-card-title-group">
+                <svg class="hub-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                  <line x1="12" y1="1" x2="12" y2="23" />
+                  <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
+                </svg>
+                <h3>{{ t('spendCapTitle') }}</h3>
+                <span class="hub-count-pill">${{ monthlyCapInput }}</span>
+              </div>
+              <span v-if="capSavedNotice" class="save-feedback-pill">{{ t('spendCapSaved') }}</span>
+            </div>
+            <p class="view-card-desc">{{ t('spendCapDesc') }}</p>
+
+            <div class="spend-cap-controls">
+              <div class="spend-cap-presets-row">
+                <button
+                  v-for="preset in [5, 10, 20, 50]"
+                  :key="preset"
+                  type="button"
+                  class="spend-preset-btn"
+                  :class="{ active: monthlyCapInput === preset }"
+                  @click="saveMonthlySpendCap(preset)"
+                >
+                  ${{ preset }}
+                </button>
+              </div>
+
+              <div class="spend-cap-input-row">
+                <span class="currency-prefix">$</span>
+                <input
+                  v-model.number="monthlyCapInput"
+                  type="number"
+                  min="0"
+                  step="1"
+                  class="spend-cap-number-input"
+                  :placeholder="t('spendCapMonthly')"
+                  @keydown.enter.prevent="saveMonthlySpendCap(monthlyCapInput)"
+                />
+                <button
+                  type="button"
+                  class="mini-ghost-btn spend-save-btn"
+                  @click="saveMonthlySpendCap(monthlyCapInput)"
+                >
+                  {{ t('spendCapSaveBtn') }}
+                </button>
+              </div>
+
+              <div class="current-spend-bar">
+                <span>{{ t('spendCapCurrentSpend', { spend: (jarvisHome?.budgetState?.value?.current_spend_usd ?? 0).toFixed(2) }) }}</span>
+              </div>
+            </div>
+          </section>
+
+          <!-- Site Session Center -->
+          <SiteSessionVault />
+
           <section class="hub-card">
             <div class="hub-card-header">
               <div class="hub-card-title-group">
@@ -1033,3 +1209,162 @@ const {
       </div>
     </section>
 </template>
+
+<style scoped>
+.proactivity-card,
+.spend-cap-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-sm);
+}
+
+.proactivity-slider-box {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-sm);
+  margin-top: var(--gap-3xs);
+}
+
+.proactivity-range-slider {
+  width: 100%;
+  accent-color: var(--accent-primary);
+  cursor: pointer;
+}
+
+.proactivity-tiers-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: var(--gap-xs);
+}
+
+.proactivity-tier-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  text-align: left;
+  gap: 0.2rem;
+  padding: 0.5rem 0.65rem;
+  background: var(--bg-secondary);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.proactivity-tier-btn:hover {
+  background: var(--bg-tertiary);
+}
+
+.proactivity-tier-btn.active {
+  background: var(--accent-soft);
+  border-color: var(--accent-primary);
+}
+
+.tier-label {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.proactivity-tier-btn.active .tier-label {
+  color: var(--accent-primary);
+}
+
+.tier-desc {
+  font-size: var(--text-2xs);
+  color: var(--text-secondary);
+  line-height: 1.3;
+}
+
+.quiet-hours-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  background: var(--bg-secondary);
+  padding: 0.25rem 0.6rem;
+  border-radius: var(--radius-pill);
+  width: fit-content;
+  border: 1px solid var(--line);
+}
+
+.spend-cap-controls {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-sm);
+  margin-top: var(--gap-3xs);
+}
+
+.spend-cap-presets-row {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-xs);
+  flex-wrap: wrap;
+}
+
+.spend-preset-btn {
+  padding: 0.3rem 0.75rem;
+  background: var(--bg-secondary);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  color: var(--text-primary);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.spend-preset-btn:hover {
+  background: var(--bg-tertiary);
+}
+
+.spend-preset-btn.active {
+  background: var(--accent-primary);
+  border-color: var(--accent-primary);
+  color: var(--text-on-accent);
+}
+
+.spend-cap-input-row {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-xs);
+}
+
+.currency-prefix {
+  font-size: var(--text-md);
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.spend-cap-number-input {
+  width: 120px;
+  padding: 0.4rem 0.6rem;
+  background: var(--bg-secondary);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+
+.spend-cap-number-input:focus {
+  border-color: var(--accent-primary);
+}
+
+.spend-save-btn {
+  padding: 0.4rem 0.8rem;
+}
+
+.save-feedback-pill {
+  font-size: var(--text-2xs);
+  color: var(--color-success);
+  font-weight: 600;
+}
+
+.current-spend-bar {
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+</style>
