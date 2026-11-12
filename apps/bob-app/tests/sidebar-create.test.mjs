@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
+import {markRecentProject} from '../src/recent-projects.mjs';
 
 const source = readFileSync(new URL('../src/composables/useChatSession.mjs', import.meta.url), 'utf8');
 const readSection = (from, through) => source.slice(source.indexOf(from), source.indexOf(through));
@@ -11,6 +12,7 @@ const workspace = '/projects/demo';
 function mount(bridge, storage = new Map()) {
   const opened = [];
   const ctx = vm.createContext({
+    markRecentProject,
     ref: value => ({value}),
     computed: get => ({get value() { return get(); }}),
     ctx: {modelHub: {value: {state: {remote_nodes: [identity]}}}},

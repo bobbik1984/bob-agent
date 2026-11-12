@@ -1,3 +1,4 @@
+import {markRecentProject} from '../recent-projects.mjs';
 import { computed, nextTick, ref, watch } from 'vue';
 import { isBobNodeRuntime } from '../http-bridge.mjs';
 import { loadClientState, saveClientState, chooseStartupConversation } from '../client-view-state.mjs';
@@ -982,6 +983,7 @@ async function submitRemoteCreation(title, checking) {
   if (!checking && attempt.kind === 'project') {
     const snap = await bridge.createProject(attempt.projectId, attempt.title);
     if (!snap?.projects?.some(project => project.id === attempt.projectId)) throw Error('PROJECT_CREATE_FAILED');
+    markRecentProject(attempt.projectId);
     if (!owner) applyCatalogPreferences(snap);
   }
   let result;
@@ -1071,6 +1073,7 @@ async function submitLocalCreation(title) {
     const pid = `proj-${crypto.randomUUID().slice(0, 8)}`;
     const snap = await kernelBridge.createProject(pid, title).catch(() => null);
     if (!snap) throw Error('PROJECT_CREATE_FAILED');
+    markRecentProject(pid);
     applyCatalogPreferences(snap);
     if (creationMode.value === 'local') {
       creatingKind.value = 'conversation';
