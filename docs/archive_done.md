@@ -69,3 +69,9 @@
 - [x] **Phase A Step A4 — 五阶段发送与流式状态区分 (`DshSessions.vue`, `App.vue`)**：严格区分 `正在发送／等待接收…` $\rightarrow$ `已送达，等待回复…` $\rightarrow$ `节点正在处理…` $\rightarrow$ `正在回复…` $\rightarrow$ `完成`，无虚假打字机模拟，`unknown_send` 与断线缓存独立展示。
 - [x] **Phase B Step 1 — DSH 会话 Cookie 优先复用与受控日志尾部确定性恢复 (`dsh_transport.rs`, `harness_auth.rs`, `runtime_rpc.rs`)**：实现 `DshClient::connect_or_recover`（先复用本地原子持久化的 `dsh-auth-*` Cookie 做零模型消耗 `check_auth`，网络不可达保留凭据不误判失效，仅认证拒绝时交换 token 或从受控日志尾部 64KB 确定性提取最新启动 token）；新增 `harness_auth.rs` 覆盖 7 类工具（`dsh / agy / codex / claude / pi / hermes / openclaw`）的五项统一内部动作与 `runtime_rpc` 接线。
 - [x] **Phase C — 事前锦囊 (`ExecutionAssertion`)、全绿写锁与热重启状态 (`context_capsule.rs`)**：落盘 `freeze_execution_assertion` 与 `evaluate_critique_against_assertion`（当置信度 $\ge 0.90$ 且验证全绿锁写时，拦截无证据空投质疑的盲目推翻重写；提供具体报错/行号证据时放行定点修复）；在 `bob-task-card-v1` 注入内联精简防膨胀约束，并实现 `WarmRestartState`（持久化已定位文件、失败假设与 diff 摘要）。
+
+- [x] 2026-11-12 零对话项目默认隐藏，本次新建临时保留；206 项测试及生产真实目录验证后发布网页。两项待清理对象有引用，保留资料。细节见 CURRENT_STAGE「零对话项目侧栏收敛」。
+
+- [x] 2026-11-12 已实核并解除 VPS3 旧连接 68 条过期关联，27 条现役归属完整保留，41 条旧任务仅解除关系；无引用测试项目归档。日历 0–23 已发布并浏览器验证，详见 CURRENT_STAGE 后续核查节。
+
+- [x] 2026-11-12 外部Bot待办读/新增：独立权限、共用账本、原子幂等回执；12项Bot、5项个人事务测试及11组独立进程HTTP检查通过。仅本地候选验收，生产/真实消费端仍待办；见 evidence/2026-11-12-bot-todos.md。

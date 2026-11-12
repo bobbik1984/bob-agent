@@ -70,8 +70,8 @@ async function handleCreateSchedule(payload) {
         taskId: payload.taskId ?? null,
         title: payload.title,
         kind: payload.kind ?? 'event',
-        startAt: payload.startAt ?? payload.dueAtMs ?? Date.now(),
-        endAt: payload.endAt ?? null,
+        startAt: payload.startAt ?? null,
+        endAt: payload.endAt ?? payload.dueAtMs ?? null,
         reminderAt: payload.reminderAt ?? null,
         notes: payload.notes,
       });
@@ -83,8 +83,8 @@ async function handleCreateSchedule(payload) {
         task_id: payload.taskId ?? null,
         title: payload.title,
         kind: payload.kind ?? 'event',
-        start_at: payload.startAt ?? payload.dueAtMs ?? Date.now(),
-        end_at: payload.endAt ?? null,
+        start_at: payload.startAt ?? null,
+        end_at: payload.endAt ?? payload.dueAtMs ?? null,
         status: 'scheduled',
         notes: payload.notes,
       });
@@ -103,7 +103,7 @@ async function handleCreateProjectTodo({ projectId, title }) {
     projectId: projectId || null,
     title,
     kind: 'todo',
-    startAt: Date.now(),
+    startAt: null,
     notes: '',
   });
 }

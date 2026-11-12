@@ -11,6 +11,7 @@
 
 mod assistant;
 mod bot_access;
+mod todo_service;
 mod project_service;
 mod inbox_triage;
 mod context_capsule;
@@ -708,7 +709,7 @@ pub fn handle_rpc_command(ctx: &mut NodeContext, command: &str, args: &Value) ->
                 .get("startAt")
                 .or_else(|| args.get("start_at"))
                 .and_then(Value::as_i64)
-                .unwrap_or(at);
+                .unwrap_or(0);
             let end_at = args
                 .get("endAt")
                 .or_else(|| args.get("end_at"))
@@ -720,20 +721,29 @@ pub fn handle_rpc_command(ctx: &mut NodeContext, command: &str, args: &Value) ->
             let notes = args.get("notes").and_then(Value::as_str).unwrap_or("");
             let created = ctx
                 .app
-                .create_schedule_item_with_kind(
-                    id, project_id, task_id, title, kind, start_at, end_at, reminder_at, notes, at,
+                .create_schedule_item_with_timing(
+                    id, project_id, task_id, title, kind, start_at, end_at, reminder_at, notes, serde_json::from_value(args.get("timing").cloned().unwrap_or(serde_json::json!({}))).map_err(|_|"SCHEDULE_CREATE_FAILED")?, at,
                 )
                 .map_err(|_| "SCHEDULE_CREATE_FAILED")?;
             serde_json::to_value(created).map_err(|_| "SCHEDULE_CREATE_FAILED")
         }
         "app_schedule_edit" => {
-            let item = ctx.app.edit_schedule_item(
+            let old=ctx.app.list_schedule_items().map_err(|_|"SCHEDULE_UPDATE_FAILED")?.into_iter()
+                .find(|s|Some(s.id.as_str())==args["id"].as_str()).ok_or("SCHEDULE_UPDATE_FAILED")?;
+            let item = if old.kind=="todo" {
+                ctx.app.edit_todo_item_with_timing(&old.id,args["expectedVersion"].as_i64().ok_or("SCHEDULE_UPDATE_FAILED")?,
+                    args["title"].as_str().ok_or("SCHEDULE_UPDATE_FAILED")?,
+                    if args.get("projectId").is_some(){args["projectId"].as_str()}else{old.project_id.as_deref()},
+                    args["startAt"].as_i64(),args.get("endAt").map_or(old.end_at,Value::as_i64),
+                    args["notes"].as_str().unwrap_or(""),args.get("timing").map(|v|serde_json::from_value(v.clone())).transpose().map_err(|_|"SCHEDULE_UPDATE_FAILED")?,at)
+            } else {ctx.app.edit_schedule_interval(
                 args["id"].as_str().ok_or("SCHEDULE_UPDATE_FAILED")?,
                 args["expectedVersion"].as_i64().ok_or("SCHEDULE_UPDATE_FAILED")?,
                 args["title"].as_str().ok_or("SCHEDULE_UPDATE_FAILED")?,
                 args["startAt"].as_i64().ok_or("SCHEDULE_UPDATE_FAILED")?,
+                args.get("endAt").map(Value::as_i64),
                 args["notes"].as_str().unwrap_or(""), at
-            ).map_err(|_| "SCHEDULE_UPDATE_FAILED")?;
+            )}.map_err(|_| "SCHEDULE_UPDATE_FAILED")?;
             serde_json::to_value(item).map_err(|_| "SCHEDULE_UPDATE_FAILED")
         }
         "app_schedule_status" => {

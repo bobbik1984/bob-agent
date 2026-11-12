@@ -1037,10 +1037,11 @@ mod tests {
             None,
             "PC Architecture Sync Meeting".into(),
             Some("event".into()),
-            1_780_000_000_000,
+            Some(1_780_000_000_000),
             None,
             None,
             Some("Synced from PC to Phone".into()),
+            None,
         ))
         .unwrap();
         tauri::async_runtime::block_on(crate::app_note_upsert(
@@ -1071,10 +1072,11 @@ mod tests {
             None,
             "Phone Mobile Todo".into(),
             Some("todo".into()),
-            1_780_000_100_000,
+            Some(1_780_000_100_000),
             None,
             None,
             Some("Created on Phone".into()),
+            None,
         ))
         .unwrap();
         tauri::async_runtime::block_on(crate::app_decision_record(

@@ -657,3 +657,106 @@ fn rv13_paired_replica_personal_ops_sync_to_home_idempotently_with_version_check
         .host_receive_replica_personal_op(&ctx, &stale, 225)
         .is_err());
 }
+
+#[test]
+fn todo_date_precision_survives_snapshot_and_restart() {
+    use bob_kernel::personal_ops::ScheduleTiming;
+    let a=tempfile::tempdir().unwrap();let b=tempfile::tempdir().unwrap();
+    let mut home=LocalApp::open(&a.path().join("home.db")).unwrap();
+    let timing=ScheduleTiming{due_date:Some("2026-11-15".into()),time_zone:Some("Asia/Shanghai".into()),..Default::default()};
+    home.create_schedule_item_with_timing("date-only",None,None,"Pay","todo",0,None,None,"original",timing.clone(),100).unwrap();
+    let snapshot=home.export_peer_sync_bundle("dates","{}".into()).unwrap();assert_eq!(snapshot.schedules[0].timing,timing);
+    drop(home);let home=LocalApp::open(&a.path().join("home.db")).unwrap();
+    assert_eq!(home.list_schedule_items().unwrap()[0].timing,timing);
+    let mut peer=LocalApp::open(&b.path().join("peer.db")).unwrap();
+    peer.apply_peer_sync_bundle(&snapshot,200).unwrap();
+    assert_eq!(peer.list_schedule_items().unwrap()[0].timing,timing);
+}
+
+#[test]
+fn event_resize_preserves_identity_and_persists_end_with_cas() {
+ let dir=tempfile::tempdir().unwrap();let db=dir.path().join("event.db");
+ let mut app=LocalApp::open(&db).unwrap();let start=1_762_000_000_000;
+ let a=app.create_schedule_item_with_kind("resize",None,None,"Review","event",start,Some(start+3600000),Some(start-60000),"notes",1).unwrap();
+ let b=app.edit_schedule_interval(&a.id,a.version,"Review",start,Some(Some(start+7200000)),"notes",2).unwrap();
+ assert_eq!(b.start_at,start);assert_eq!(b.end_at,Some(start+7200000));assert_eq!(b.reminder_at,Some(start-60000));
+ assert!(app.edit_schedule_interval(&a.id,a.version,"Review",start,Some(Some(start+3600000)),"notes",3).is_err());
+ assert!(app.edit_schedule_interval(&b.id,b.version,"Review",start,Some(Some(start-1)),"notes",3).is_err());
+ let c=app.edit_schedule_interval(&b.id,b.version,"Review",start-900000,Some(b.end_at),"notes",4).unwrap();
+ assert_eq!(c.end_at,b.end_at);assert_eq!(c.reminder_at,Some(start-960000));
+ drop(app);let app=LocalApp::open(&db).unwrap();let saved=app.list_schedule_items().unwrap();assert_eq!(saved.len(),1);assert_eq!(saved[0].end_at,c.end_at);assert_eq!(saved[0].version,c.version);
+}
+
+#[test]
+fn paired_calendar_date_and_resize_roundtrip_rejects_concurrent_time_edit() {
+    let home_dir = tempfile::tempdir().unwrap();
+    let phone_dir = tempfile::tempdir().unwrap();
+    let mut home = LocalApp::open(&home_dir.path().join("home.db")).unwrap();
+    let mut phone = LocalApp::open(&phone_dir.path().join("phone.db")).unwrap();
+
+    let home_id = home.device_id().to_owned();
+    let phone_id = phone.device_id().to_owned();
+    let phone_session = phone.default_session().unwrap();
+
+    home.issue_pairing_invitation(
+        &PairingInvitation {
+            id: "inv-psync".into(),
+            home_device_id: home_id.clone(),
+            home_epoch: 1,
+            home_identity_sha256: PIN.into(),
+            expires_at: 50_000,
+        },
+        &[9u8; 32],
+        10,
+    )
+    .unwrap();
+    home.propose_pairing_peer(
+        "inv-psync",
+        &[9u8; 32],
+        &ProvenPairingPeer {
+            device_id: phone_id.clone(),
+            identity_sha256: PIN.into(),
+            public_key_ref: "phone-pub".into(),
+        },
+        20,
+    )
+    .unwrap();
+    home.confirm_pairing_peer(
+        "inv-psync",
+        &phone_id,
+        PIN,
+        &phone_session,
+        60_000,
+        true,
+        30,
+    )
+    .unwrap();
+    phone.bind_confirmed_home(&home_id, 1, PIN, 35).unwrap();
+
+
+    use bob_kernel::personal_ops::ScheduleTiming;
+    let start=1_762_000_000_000;
+    let timing=ScheduleTiming{due_date:Some("2026-11-15".into()),time_zone:Some("Asia/Shanghai".into()),..Default::default()};
+    home.create_schedule_item_with_timing("day",None,None,"Pay","todo",0,None,None,"notes",timing,100).unwrap();
+    home.create_schedule_item_with_kind("meeting",None,None,"Meet","event",start,Some(start+3600000),Some(start-60000),"notes",101).unwrap();
+    phone.apply_peer_sync_bundle(&home.export_peer_sync_bundle("initial","{}".into()).unwrap(),110).unwrap();
+    let timing=ScheduleTiming{due_date:Some("2026-11-16".into()),time_zone:Some("Asia/Shanghai".into()),..Default::default()};
+    phone.edit_todo_item_with_timing("day",1,"Pay",None,None,None,"notes",Some(timing.clone()),120).unwrap();
+    phone.edit_schedule_interval("meeting",1,"Meet",start+900000,Some(Some(start+7200000)),"notes",121).unwrap();
+    let ctx=home.authenticate_home_session(&home_id,1,PIN,&phone_session,130).unwrap();
+    for op in phone.pending_personal_op_syncs().unwrap() {
+        assert!(home.host_receive_replica_personal_op(&ctx,&op,140).unwrap().accepted);
+        assert!(home.host_receive_replica_personal_op(&ctx,&op,141).unwrap().accepted);
+        phone.ack_replica_personal_op(&op.sync_id,142).unwrap();
+    }
+    phone.apply_peer_sync_bundle(&home.export_peer_sync_bundle("return","{}".into()).unwrap(),150).unwrap();
+    let rows=phone.list_schedule_items().unwrap();
+    assert_eq!(rows.len(),2);assert_eq!(rows.iter().find(|x|x.id=="day").unwrap().timing,timing);
+    let item=rows.iter().find(|x|x.id=="meeting").unwrap();
+    assert_eq!(item.start_at,start+900000);assert_eq!(item.end_at,Some(start+7200000));assert_eq!(item.reminder_at,Some(start+840000));
+    home.edit_schedule_interval("meeting",2,"Meet",start+1800000,Some(item.end_at),"notes",160).unwrap();
+    phone.edit_schedule_interval("meeting",2,"Meet",start+2700000,Some(item.end_at),"notes",161).unwrap();
+    let pending=phone.pending_personal_op_syncs().unwrap();
+    assert!(home.host_receive_replica_personal_op(&ctx,&pending[0],170).is_err());
+    assert_eq!(home.list_schedule_items().unwrap().iter().find(|x|x.id=="meeting").unwrap().start_at,start+1800000);
+}

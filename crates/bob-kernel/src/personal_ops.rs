@@ -71,8 +71,47 @@ pub struct NoteItem {
     pub updated_at: i64,
 }
 
+/// Date-only values stay civil dates, never fabricated midnight timestamps.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ScheduleTiming {
+    #[serde(default, skip_serializing_if="Option::is_none")]
+    pub start_date: Option<String>,
+    #[serde(default, skip_serializing_if="Option::is_none")]
+    pub due_date: Option<String>,
+    #[serde(default, skip_serializing_if="Option::is_none")]
+    pub time_zone: Option<String>,
+    #[serde(default, skip_serializing_if="Option::is_none")]
+    pub source_text: Option<String>,
+    #[serde(default, skip_serializing_if="Option::is_none")]
+    pub reference_at: Option<i64>,
+    #[serde(default, skip_serializing_if="Option::is_none")]
+    pub inference_note: Option<String>,
+}
+impl ScheduleTiming {
+    pub fn is_empty(&self)->bool { self==&Self::default() }
+    pub fn validate(&self,start:Option<i64>,due:Option<i64>)->Result<()> {
+        fn date(v:&str)->bool {
+            if v.len()!=10 || !v.is_ascii() || &v[4..5]!="-" || &v[7..8]!="-" {return false;}
+            let (Ok(y),Ok(m),Ok(d))=(v[..4].parse::<u32>(),v[5..7].parse::<u32>(),v[8..].parse::<u32>()) else{return false;};
+            let days=match m {1|3|5|7|8|10|12=>31,4|6|9|11=>30,2=>if y%4==0 && (y%100!=0 || y%400==0){29}else{28},_=>0};
+            y>=1 && d>=1 && d<=days
+        }
+        if self.start_date.as_ref().is_some_and(|v|!date(v) || start.is_some())
+            || self.due_date.as_ref().is_some_and(|v|!date(v) || due.is_some())
+            || self.start_date.as_ref().zip(self.due_date.as_ref()).is_some_and(|(s,d)|d<s)
+            || self.time_zone.as_ref().is_some_and(|v|v.is_empty() || v.len()>64)
+            || self.source_text.as_ref().is_some_and(|v|v.len()>4096)
+            || self.inference_note.as_ref().is_some_and(|v|v.len()>4096)
+            || self.reference_at.is_some_and(|v|v<=0) {return Err(Error::InvalidTransition);}
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ScheduleItem {
+    #[serde(default, skip_serializing_if="ScheduleTiming::is_empty")]
+    pub timing: ScheduleTiming,
     pub id: String,
     pub project_id: Option<String>,
     pub task_id: Option<String>,
@@ -690,6 +729,13 @@ impl LocalApp {
         notes: &str,
         now: i64,
     ) -> Result<ScheduleItem> {
+        self.create_schedule_item_with_timing(id,project_id,task_id,title,kind,start_at,end_at,reminder_at,notes,ScheduleTiming::default(),now)
+    }
+
+    pub fn create_schedule_item_with_timing(&mut self,id:&str,project_id:Option<&str>,task_id:Option<&str>,title:&str,kind:&str,
+        start_at:i64,end_at:Option<i64>,reminder_at:Option<i64>,notes:&str,timing:ScheduleTiming,now:i64)->Result<ScheduleItem> {
+        timing.validate(if start_at==0{None}else{Some(start_at)},end_at)?;
+        if kind!="todo" && !timing.is_empty(){return Err(Error::InvalidTransition);}
         let id = id.trim();
         let title = title.trim();
         let kind = kind.trim();
@@ -698,7 +744,9 @@ impl LocalApp {
             || title.is_empty()
             || title.len() > 256
             || !matches!(kind, "event" | "todo")
-            || end_at.is_some_and(|e| e < start_at)
+            || start_at < 0
+            || (kind == "event" && start_at == 0)
+            || end_at.is_some_and(|e| e < 0 || (start_at != 0 && e < start_at))
         {
             return Err(Error::InvalidTransition);
         }
@@ -708,8 +756,8 @@ impl LocalApp {
             "home"
         };
         self.store.db.execute(
-            "INSERT INTO schedule_items(id,project_id,task_id,origin_device_id,title,kind,start_at,end_at,reminder_at,status,notes,acceptance,version,created_at,updated_at)
-             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,'scheduled',?10,?11,1,?12,?12)",
+            "INSERT INTO schedule_items(id,project_id,task_id,origin_device_id,title,kind,start_at,end_at,reminder_at,status,notes,acceptance,version,created_at,updated_at,timing_json)
+             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,'scheduled',?10,?11,1,?12,?12,?13)",
             params![
                 id,
                 project_id,
@@ -722,10 +770,12 @@ impl LocalApp {
                 reminder_at,
                 notes.trim(),
                 acceptance,
-                now
+                now,
+                serde_json::to_string(&timing)?
             ],
         )?;
         let item = ScheduleItem {
+            timing,
             id: id.to_owned(),
             project_id: project_id.map(str::to_owned),
             task_id: task_id.map(str::to_owned),
@@ -750,14 +800,21 @@ impl LocalApp {
     /// Compare-and-swap edit; preserve identity, status, duration, reminder and provenance.
     pub fn edit_schedule_item(&mut self, id: &str, expected_version: i64, title: &str,
         start_at: i64, notes: &str, now: i64) -> Result<ScheduleItem> {
-        if title.trim().is_empty() || title.len() > 256 { return Err(Error::InvalidTransition); }
+        self.edit_schedule_interval(id,expected_version,title,start_at,None,notes,now)
+    }
+
+    /// Explicit end override permits resizing; omitted override retains legacy move duration.
+    pub fn edit_schedule_interval(&mut self,id:&str,expected_version:i64,title:&str,
+        start_at:i64,end_override:Option<Option<i64>>,notes:&str,now:i64)->Result<ScheduleItem> {
+        if title.trim().is_empty() || title.len() > 256 || start_at<=0 { return Err(Error::InvalidTransition); }
         self.store.db.execute_batch("SAVEPOINT schedule_edit")?;
         let result = (|| {
             let old = self.list_schedule_items()?.into_iter().find(|s| s.id == id)
                 .ok_or(Error::InvalidTransition)?;
             if old.version != expected_version { return Err(Error::InvalidTransition); }
             let shift = start_at.checked_sub(old.start_at).ok_or(Error::InvalidTransition)?;
-            let end = old.end_at.map(|v| v.checked_add(shift).ok_or(Error::InvalidTransition)).transpose()?;
+            let end = match end_override {Some(value)=>value,None=>old.end_at.map(|v| v.checked_add(shift).ok_or(Error::InvalidTransition)).transpose()?};
+            if end.is_some_and(|v|v<start_at) {return Err(Error::InvalidTransition);}
             let reminder = old.reminder_at.map(|v| v.checked_add(shift).ok_or(Error::InvalidTransition)).transpose()?;
             let acceptance = if self.paired_home()?.is_some() { "local" } else { "home" };
             let changed = self.store.db.execute(
@@ -771,6 +828,42 @@ impl LocalApp {
         match result {
             Ok(item) => { self.store.db.execute_batch("RELEASE schedule_edit")?; Ok(item) }
             Err(e) => { self.store.db.execute_batch("ROLLBACK TO schedule_edit; RELEASE schedule_edit")?; Err(e) }
+        }
+    }
+
+    /// Todo dates are independent; 0 is the legacy storage sentinel for no start.
+    /// Unlike calendar moves, editing a todo start must never shift its deadline.
+    pub fn edit_todo_item(&mut self,id:&str,expected_version:i64,title:&str,
+        project:Option<&str>,start:Option<i64>,due:Option<i64>,notes:&str,now:i64)->Result<ScheduleItem> {
+        self.edit_todo_item_with_timing(id,expected_version,title,project,start,due,notes,None,now)
+    }
+    pub fn edit_todo_item_with_timing(&mut self,id:&str,expected_version:i64,title:&str,
+        project:Option<&str>,start:Option<i64>,due:Option<i64>,notes:&str,timing:Option<ScheduleTiming>,now:i64)->Result<ScheduleItem> {
+        if title.trim().is_empty() || title.len()>256 || start.is_some_and(|v|v<=0)
+            || due.is_some_and(|v|v<=0) || start.zip(due).is_some_and(|(s,d)|d<s) {
+            return Err(Error::InvalidTransition);
+        }
+        self.store.db.execute_batch("SAVEPOINT todo_edit")?;
+        let result=(|| {
+            let old=self.list_schedule_items()?.into_iter().find(|s|s.id==id && s.kind=="todo")
+                .ok_or(Error::InvalidTransition)?;
+            if old.version!=expected_version || expected_version==i64::MAX {return Err(Error::InvalidTransition);}
+            let explicit=timing.is_some();
+            let mut timing=timing.unwrap_or_else(||old.timing.clone());
+            if !explicit {if start.is_some(){timing.start_date=None;} if due.is_some(){timing.due_date=None;}}
+            timing.validate(start,due)?;
+            let acceptance=if self.paired_home()?.is_some(){"local"}else{"home"};
+            let changed=self.store.db.execute(
+                "UPDATE schedule_items SET title=?2,project_id=?3,start_at=?4,end_at=?5,notes=?6,timing_json=?10,version=version+1,updated_at=?7,acceptance=?8 WHERE id=?1 AND version=?9",
+                params![id,title.trim(),project,start.unwrap_or(0),due,notes.trim(),now,acceptance,expected_version,serde_json::to_string(&timing)?])?;
+            if changed!=1{return Err(Error::InvalidTransition);}
+            let item=self.list_schedule_items()?.into_iter().find(|s|s.id==id).ok_or(Error::InvalidTransition)?;
+            self.enqueue_personal_sync("schedule",id,"upsert",expected_version,&serde_json::to_string(&item)?,now)?;
+            Ok(item)
+        })();
+        match result {
+            Ok(item)=>{self.store.db.execute_batch("RELEASE todo_edit")?;Ok(item)}
+            Err(e)=>{self.store.db.execute_batch("ROLLBACK TO todo_edit; RELEASE todo_edit")?;Err(e)}
         }
     }
 
@@ -808,11 +901,12 @@ impl LocalApp {
             return Err(Error::InvalidTransition);
         }
         let item = self.store.db.query_row(
-            "SELECT id,project_id,task_id,origin_device_id,title,kind,start_at,end_at,reminder_at,status,notes,acceptance,version,created_at,updated_at
+            "SELECT id,project_id,task_id,origin_device_id,title,kind,start_at,end_at,reminder_at,status,notes,acceptance,version,created_at,updated_at,timing_json
              FROM schedule_items WHERE id=?1",
             [id],
             |r| {
                 Ok(ScheduleItem {
+                timing: serde_json::from_str(&r.get::<_,String>(15)?).unwrap_or_default(),
                     id: r.get(0)?,
                     project_id: r.get(1)?,
                     task_id: r.get(2)?,
@@ -938,11 +1032,12 @@ impl LocalApp {
 
     pub fn list_schedule_items(&self) -> Result<Vec<ScheduleItem>> {
         let mut stmt = self.store.db.prepare(
-            "SELECT id,project_id,task_id,origin_device_id,title,kind,start_at,end_at,reminder_at,status,notes,acceptance,version,created_at,updated_at
+            "SELECT id,project_id,task_id,origin_device_id,title,kind,start_at,end_at,reminder_at,status,notes,acceptance,version,created_at,updated_at,timing_json
              FROM schedule_items ORDER BY start_at ASC, rowid ASC",
         )?;
         let rows = stmt.query_map([], |r| {
             Ok(ScheduleItem {
+                timing: serde_json::from_str(&r.get::<_,String>(15)?).unwrap_or_default(),
                 id: r.get(0)?,
                 project_id: r.get(1)?,
                 task_id: r.get(2)?,
@@ -1306,8 +1401,8 @@ impl Store {
                             return Err(Error::InvalidTransition);
                         }
                         tx.execute(
-                            "INSERT INTO schedule_items(id,project_id,task_id,origin_device_id,title,kind,start_at,end_at,reminder_at,status,notes,acceptance,version,created_at,updated_at)
-                             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,'home',?12,?13,?14)",
+                            "INSERT INTO schedule_items(id,project_id,task_id,origin_device_id,title,kind,start_at,end_at,reminder_at,status,notes,acceptance,version,created_at,updated_at,timing_json)
+                             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,'home',?12,?13,?14,?15)",
                             params![
                                 sched.id,
                                 sched.project_id,
@@ -1322,7 +1417,7 @@ impl Store {
                                 sched.notes,
                                 sched.version,
                                 sched.created_at,
-                                sched.updated_at
+                                sched.updated_at,serde_json::to_string(&sched.timing)?
                             ],
                         )?;
                     }
@@ -1330,14 +1425,19 @@ impl Store {
                         if cur_ver == sched.version
                             && cur_title == sched.title
                             && cur_status == sched.status
+                            && tx.query_row(
+                                "SELECT COUNT(*) FROM schedule_items WHERE id=?1 AND project_id IS ?2 AND task_id IS ?3 AND kind=?4 AND start_at=?5 AND end_at IS ?6 AND reminder_at IS ?7 AND notes=?8 AND timing_json=?9",
+                                params![sched.id,sched.project_id,sched.task_id,sched.kind,sched.start_at,sched.end_at,sched.reminder_at,sched.notes,serde_json::to_string(&sched.timing)?],
+                                |row| row.get::<_, i64>(0),
+                            )? == 1
                         {
                             // Idempotent retry
                         } else if cur_ver != entry.expected_version {
                             return Err(Error::InvalidTransition);
                         } else {
                             tx.execute(
-                                "UPDATE schedule_items SET status=?2, notes=?3, acceptance='home', version=version+1, updated_at=?4 WHERE id=?1",
-                                params![sched.id, sched.status, sched.notes, now],
+                                "UPDATE schedule_items SET status=?2, notes=?3, acceptance='home', version=version+1, updated_at=?4,title=?5,project_id=?6,start_at=?7,end_at=?8,timing_json=?9,reminder_at=?10 WHERE id=?1",
+                                params![sched.id, sched.status, sched.notes, now,sched.title,sched.project_id,sched.start_at,sched.end_at,serde_json::to_string(&sched.timing)?,sched.reminder_at],
                             )?;
                         }
                     }
@@ -1641,8 +1741,8 @@ impl Store {
             match existing {
                 None => {
                     tx.execute(
-                        "INSERT INTO schedule_items(id,project_id,task_id,origin_device_id,title,kind,start_at,end_at,reminder_at,status,notes,acceptance,version,created_at,updated_at)
-                         VALUES(?1,?2,NULL,?3,?4,?5,?6,?7,?8,?9,?10,'home',?11,?12,?13)",
+                        "INSERT INTO schedule_items(id,project_id,task_id,origin_device_id,title,kind,start_at,end_at,reminder_at,status,notes,acceptance,version,created_at,updated_at,timing_json)
+                         VALUES(?1,?2,NULL,?3,?4,?5,?6,?7,?8,?9,?10,'home',?11,?12,?13,?14)",
                         params![
                             sched.id,
                             sched.project_id,
@@ -1656,7 +1756,7 @@ impl Store {
                             sched.notes,
                             sched.version.max(1),
                             sched.created_at,
-                            sched.updated_at
+                            sched.updated_at,serde_json::to_string(&sched.timing)?
                         ],
                     )?;
                 }
@@ -1665,7 +1765,7 @@ impl Store {
                         || (sched.version == cur_ver && sched.updated_at >= cur_updated)
                     {
                         tx.execute(
-                            "UPDATE schedule_items SET title=?2, kind=?3, start_at=?4, end_at=?5, reminder_at=?6, status=?7, notes=?8, acceptance='home', version=?9, updated_at=?10 WHERE id=?1",
+                            "UPDATE schedule_items SET title=?2, kind=?3, start_at=?4, end_at=?5, reminder_at=?6, status=?7, notes=?8, acceptance='home', version=?9, updated_at=?10,timing_json=?11,project_id=?12 WHERE id=?1",
                             params![
                                 sched.id,
                                 sched.title,
@@ -1676,7 +1776,7 @@ impl Store {
                                 sched.status,
                                 sched.notes,
                                 sched.version.max(cur_ver),
-                                sched.updated_at.max(cur_updated)
+                                sched.updated_at.max(cur_updated),serde_json::to_string(&sched.timing)?,sched.project_id
                             ],
                         )?;
                     }
@@ -1881,12 +1981,13 @@ impl Store {
             .optional()?
             .unwrap_or_else(|| (origin_device_id.to_owned(), 1));
         let mut sched_stmt = self.db.prepare(
-            "SELECT id,project_id,task_id,origin_device_id,title,kind,start_at,end_at,reminder_at,status,notes,acceptance,version,created_at,updated_at
+            "SELECT id,project_id,task_id,origin_device_id,title,kind,start_at,end_at,reminder_at,status,notes,acceptance,version,created_at,updated_at,timing_json
              FROM schedule_items ORDER BY start_at ASC, rowid ASC",
         )?;
         let schedules = sched_stmt
             .query_map([], |r| {
                 Ok(ScheduleItem {
+                timing: serde_json::from_str(&r.get::<_,String>(15)?).unwrap_or_default(),
                     id: r.get(0)?,
                     project_id: r.get(1)?,
                     task_id: r.get(2)?,

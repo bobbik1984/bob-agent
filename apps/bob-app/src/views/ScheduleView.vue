@@ -2,6 +2,8 @@
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import CustomSelect from '../components/CustomSelect.vue';
+import { calendarEntries, entryDay } from '../todo-calendar.mjs';
+import { calendarPatch, timedDayLayout } from '../calendar-gesture.mjs';
 import TicketWalletPanel from '../components/TicketWalletPanel.vue';
 
 const props = defineProps({
@@ -104,7 +106,7 @@ const activeProjectsWithTodos = computed(() => {
 });
 
 const projectSelectOptions = computed(() => [
-  { value: '', label: t('inboxProjectUnassigned') },
+  { value: '', label: t('todoNoProject') },
   ...allAvailableProjects.value.map(p => ({
     value: p.id,
     label: p.title,
@@ -116,6 +118,8 @@ const draft = reactive({
   kind: 'event', // 'event' | 'todo'
   projectId: '',
   dueDate: '',
+  deadline: '',
+  startDateOnly: false, dueDateOnly: false,
   notes: '',
 });
 
@@ -125,7 +129,7 @@ const inboxDraft = reactive({
 });
 
 const timelineItems = computed(() =>
-  (props.schedules || []).filter(item => item.kind === 'event'),
+  (props.schedules || []).filter(item => calendarEntries(item).length),
 );
 
 const todoItems = computed(() =>
@@ -188,7 +192,7 @@ const weekDays = computed(() => {
       dateStr: `${yyyy}-${mm}-${dd}`,
       isToday: d.toDateString() === todayStr,
       startMs: d.getTime(),
-      endMs: d.getTime() + 86400000,
+      endMs: new Date(d.getFullYear(), d.getMonth(), d.getDate()+1).getTime(),
     });
   }
   return days;
@@ -214,20 +218,68 @@ const nowMinutes = ref(new Date().getHours() * 60 + new Date().getMinutes());
 let nowTimer = null;
 const currentTimeTopPercent = computed(() => (nowMinutes.value / (24 * 60)) * 100);
 
-function getSlotEvents(dayObj, hour) {
-  return timelineItems.value.filter(ev => {
-    const ts = Number(ev.start_at || ev.due_at_ms || 0);
-    if (!ts || ts < dayObj.startMs || ts >= dayObj.endMs) return false;
-    return new Date(ts).getHours() === hour;
-  });
+const gesture = ref(null), calendarSaving=ref(false), calendarError=ref('');
+let pointerDrag=null, suppressClickUntil=0;
+const entries = computed(() => timelineItems.value.flatMap(item=>{
+  const patch=gesture.value?.patch;
+  if(patch?.id===item.id)item={...item,start_at:patch.startAt,end_at:patch.endAt,timing:patch.timing};
+  if(item.start_at && item.end_at && !item.timing?.start_date && !item.timing?.due_date)
+    return [{...item,key:item.id,at:Number(item.start_at),until:Number(item.end_at),boundary:item.kind==='event'?'event':'range',original:item}];
+  return calendarEntries(item);
+}));
+function timedItems(day){return timedDayLayout(entries.value,day.startMs,day.endMs);}
+function blockStyle(ev){return {top:`${ev.top}%`,height:`${ev.height}%`,left:`calc(${ev.lane/ev.lanes*100}% + 2px)`,width:`calc(${100/ev.lanes}% - 4px)`};}
+function eventDescription(ev){return `${ev.title} · ${boundaryLabel(ev)} · ${ev.date || formatDue(ev.at)}${ev.until?' – '+formatDue(ev.until):''}`;}
+function eventClick(ev){if(Date.now()>suppressClickUntil && !calendarSaving.value)openEditor(ev);}
+function startGesture(e,ev,mode='move'){
+  if(e.button!==0 || calendarSaving.value || props.busy)return;
+  calendarError.value='';
+  const columns=[...gridBodyRef.value.querySelectorAll('.day-column')];
+  const column=columns.find(c=>c.dataset.date===entryDay(ev)) || e.currentTarget.closest('.day-column');
+  const originIndex=columns.indexOf(column);
+  pointerDrag={ev,mode,x:e.clientX,y:e.clientY,originIndex,columns,scroll:gridBodyRef.value.scrollTop,moved:false,pointer:e.pointerId};
+  e.currentTarget.setPointerCapture(e.pointerId);
+}
+function moveGesture(e){
+  const d=pointerDrag;if(!d || e.pointerId!==d.pointer)return;
+  if(!d.moved && Math.hypot(e.clientX-d.x,e.clientY-d.y)<6)return;
+  d.moved=true;e.preventDefault();
+  const grid=gridBodyRef.value,rect=grid.getBoundingClientRect();
+  if(!d.ev.date){if(e.clientY<rect.top+28)grid.scrollTop-=14;else if(e.clientY>rect.bottom-28)grid.scrollTop+=14;}
+  const index=d.columns.findIndex(c=>{const b=c.getBoundingClientRect();return e.clientX>=b.left && e.clientX<=b.right;});
+  if(index<0)return;
+  const minutes=d.ev.date?0:Math.round(((e.clientY-d.y+grid.scrollTop-d.scroll)/d.columns[0].offsetHeight*1440)/15)*15;
+  try{gesture.value={patch:calendarPatch(d.ev,d.mode,index-d.originIndex,minutes),valid:true};}
+  catch{gesture.value={valid:false};}
+}
+function cancelGesture(){pointerDrag=null;gesture.value=null;suppressClickUntil=Date.now()+300;}
+async function finishGesture(e){
+  const d=pointerDrag;if(!d || e.pointerId!==d.pointer)return;
+  pointerDrag=null;if(!d.moved)return;
+  suppressClickUntil=Date.now()+400;
+  if(!gesture.value?.valid){calendarError.value=t('scheduleInvalidDates');gesture.value=null;return;}
+  const patch=gesture.value.patch;calendarSaving.value=true;
+  try{if(!props.saveItem)throw new Error('UNAVAILABLE');await props.saveItem(patch);}
+  catch{calendarError.value=t('scheduleSaveFailed');}
+  finally{calendarSaving.value=false;gesture.value=null;}
+}
+function gestureKey(e){if(e.key==='Escape' && pointerDrag)cancelGesture();}
+function allDayItems(day) {return entries.value.filter(ev=>ev.date===day.dateStr);}
+function boundaryLabel(ev) {return t(ev.boundary==='due'?'todoDueLabel':ev.boundary==='start'?'todoStartLabel':'scheduleKindEvent');}
+function dateValue(item,boundary) {return item.timing?.[`${boundary}_date`] || formatDue(boundary==='start'?item.start_at:item.end_at);}
+function changePrecision(boundary) {
+  const field=boundary==='start'?'dueDate':'deadline';
+  const dateOnly=boundary==='start'?draft.startDateOnly:draft.dueDateOnly;
+  if(dateOnly) draft[field]=draft[field].slice(0,10);
+  else if(draft[field] && draft[field].length===10) draft[field]='';
 }
 
 async function openEditor(item = null, date = '') {
+  item = item?.original || item;
   editingItem.value = item; saveError.value = '';
   returnFocus = document.activeElement;
-  const local = item ? new Date(Number(item.start_at || item.due_at_ms)) : null;
-  const localDate = local ? new Date(local.getTime() - local.getTimezoneOffset() * 60000).toISOString().slice(0,16) : date;
-  Object.assign(draft, {title:item?.title || '',kind:item?.kind || (activeSubtab.value === 'todo' ? 'todo':'event'),projectId:item?.project_id || '',dueDate:localDate,notes:item?.notes || ''});
+  const asLocal = ms => ms ? new Date(Number(ms) - new Date(Number(ms)).getTimezoneOffset()*60000).toISOString().slice(0,16) : '';
+  Object.assign(draft, {title:item?.title || '',kind:item?.kind || (activeSubtab.value === 'todo' ? 'todo':'event'),projectId:item?.project_id || '',dueDate:item ? (item.timing?.start_date || asLocal(item.start_at)) : date,deadline:item?.timing?.due_date || asLocal(item?.end_at),startDateOnly:!!item?.timing?.start_date,dueDateOnly:!!item?.timing?.due_date,notes:item?.notes || ''});
   showCreateForm.value = true;
   await nextTick(); editor.value?.showModal();
 }
@@ -253,14 +305,21 @@ function switchSubtab(tab) {
 
 async function submitNewSchedule() {
   if (saving.value || !draft.title.trim()) return;
-  const startAt = draft.dueDate ? Date.parse(draft.dueDate) : Date.now();
-  if (!Number.isFinite(startAt)) return;
+  const startAt = draft.dueDate && !(draft.kind==='todo' && draft.startDateOnly) ? Date.parse(draft.dueDate) : null;
+  const endAt = draft.deadline && !draft.dueDateOnly ? Date.parse(draft.deadline) : null;
+  if ((startAt !== null && !Number.isFinite(startAt)) || (endAt !== null && !Number.isFinite(endAt))
+      || (draft.kind === 'event' && startAt === null) || (startAt !== null && endAt !== null && endAt < startAt)) {
+    saveError.value = t('scheduleInvalidDates'); return;
+  }
   saving.value = true; saveError.value = '';
   try {
     if (!props.saveItem) throw new Error('UNAVAILABLE');
     await props.saveItem({id:editingItem.value?.id || `sched-${crypto.randomUUID()}`,
       expectedVersion:editingItem.value?.version ?? null,title:draft.title.trim(),kind:draft.kind,
-      projectId:draft.projectId || null,startAt,notes:draft.notes.trim()});
+      projectId:draft.projectId || null,startAt,endAt,notes:draft.notes.trim(),
+      timing:draft.kind==='todo' ? {...(editingItem.value?.timing || {}),
+        start_date:draft.startDateOnly && draft.dueDate ? draft.dueDate : null,
+        due_date:draft.dueDateOnly && draft.deadline ? draft.deadline : null} : {}});
     saving.value = false; closeEditor();
   } catch { saveError.value = t('scheduleSaveFailed'); }
   finally { saving.value = false; }
@@ -277,7 +336,7 @@ function submitInboxCapture() {
     title,
     kind: 'todo',
     projectId: inboxDraft.projectId || null,
-    startAt: Date.now(),
+    startAt: null,
     notes,
   });
   inboxDraft.content = '';
@@ -371,6 +430,10 @@ function scrollToCurrentTime(smooth = false) {
 }
 
 onMounted(() => {
+  window.addEventListener('pointermove',moveGesture,{passive:false});
+  window.addEventListener('pointerup',finishGesture);
+  window.addEventListener('pointercancel',cancelGesture);
+  window.addEventListener('keydown',gestureKey);
   nowTimer = setInterval(() => {
     const d = new Date();
     nowMinutes.value = d.getHours() * 60 + d.getMinutes();
@@ -380,6 +443,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   if (nowTimer) clearInterval(nowTimer);
+  window.removeEventListener('pointermove',moveGesture);window.removeEventListener('pointerup',finishGesture);window.removeEventListener('pointercancel',cancelGesture);window.removeEventListener('keydown',gestureKey);
 });
 
 watch([activeSubtab, timelineViewMode, weekOffset], () => {
@@ -457,6 +521,7 @@ watch([activeSubtab, timelineViewMode, weekOffset], () => {
       >
         <header class="schedule-editor-header"><h3 id="schedule-editor-title">{{ t(editingItem ? 'scheduleEditTitle' : 'scheduleToggleNewBtn') }}</h3><div style="display:flex;gap:8px;"><button v-if="editingItem" type="button" class="mini-ghost-btn" :disabled="saving" @click="deleteItem(editingItem)">{{ t('scheduleDeleteBtn') }}</button><button type="button" :disabled="saving" @click="closeEditor">{{ t('scheduleClose') }}</button></div></header>
         <p v-if="saveError" role="alert">{{ saveError }}</p>
+        <p v-if="editingItem?.timing?.inference_note" class="schedule-time-context">{{ editingItem.timing.inference_note }}</p>
         <fieldset :disabled="saving" class="schedule-editor-fields">
         <div class="quick-schedule-row">
           <CustomSelect
@@ -476,16 +541,20 @@ watch([activeSubtab, timelineViewMode, weekOffset], () => {
           />
           <CustomSelect
             v-model="draft.projectId"
-            :disabled="!!editingItem"
+            :disabled="!!editingItem && draft.kind !== 'todo'"
             :options="projectSelectOptions"
             class="schedule-project-select"
           />
-          <input
-            v-model="draft.dueDate"
-            type="datetime-local"
-            class="schedule-date-input"
-            :aria-label="t('scheduleDueLabel')"
-          />
+          <label v-if="draft.kind === 'todo'"><input type="checkbox" v-model="draft.startDateOnly" @change="changePrecision('start')" />{{ t('todoStartDateOnly') }}</label>
+          <label class="schedule-time-field">
+            <span>{{ t(draft.kind === 'todo' ? 'todoStartOptional' : 'scheduleDueLabel') }}</span>
+            <input v-model="draft.dueDate" :type="draft.kind === 'todo' && draft.startDateOnly ? 'date' : 'datetime-local'" class="schedule-date-input" :required="draft.kind === 'event'" :aria-label="t(draft.kind === 'todo' ? 'todoStartOptional' : 'scheduleDueLabel')" />
+          </label>
+          <label v-if="draft.kind === 'todo'"><input type="checkbox" v-model="draft.dueDateOnly" @change="changePrecision('due')" />{{ t('todoDueDateOnly') }}</label>
+          <label class="schedule-time-field">
+            <span>{{ t(draft.kind==='todo'?'todoDueOptional':'calendarEndOptional') }}</span>
+            <input v-model="draft.deadline" :type="draft.dueDateOnly ? 'date' : 'datetime-local'" class="schedule-date-input" :aria-label="t(draft.kind==='todo'?'todoDueOptional':'calendarEndOptional')" />
+          </label>
           <button
             type="submit"
             class="primary-action-btn"
@@ -520,6 +589,8 @@ watch([activeSubtab, timelineViewMode, weekOffset], () => {
             </div>
           </div>
 
+          <p v-if="calendarError" role="alert">{{ calendarError }}</p>
+          <p v-if="calendarSaving" class="calendar-saving-status" role="status">{{ t('calendarSaving') }}</p>
           <!-- 7-Day 24-Hour Week Calendar Grid (Inherited from legacy WeekTimeline.vue) -->
           <div v-if="timelineViewMode === 'grid'" class="week-calendar-grid-wrapper">
             <div class="week-grid-header">
@@ -537,10 +608,18 @@ watch([activeSubtab, timelineViewMode, weekOffset], () => {
               </div>
             </div>
 
+            <div class="todo-all-day-row">
+              <span>{{ t('todoAllDay') }}</span>
+              <div v-for="day in weekDays" :key="day.dateStr" class="todo-all-day-cell">
+                <button v-for="ev in allDayItems(day)" :key="ev.key" type="button" class="todo-calendar-marker" :class="{ done:isCompleted(ev) }" @pointerdown.stop="startGesture($event,ev)" @click="eventClick(ev)" :title="eventDescription(ev)" :aria-label="eventDescription(ev)">
+                  <strong>{{ ev.title }}</strong>
+                </button>
+              </div>
+            </div>
             <div class="week-grid-body" ref="gridBodyRef">
               <div class="time-axis-col">
                 <div v-for="h in visibleHours" :key="h" class="time-axis-cell">
-                  <span :aria-label="`${formatHour(h)}–${h === 23 ? '24:00' : formatHour(h + 1)}`">{{ h === 0 ? 24 : h }}</span>
+                  <span :aria-label="`${formatHour(h)}–${h === 23 ? '24:00' : formatHour(h + 1)}`">{{ h }}</span>
                 </div>
               </div>
 
@@ -548,7 +627,7 @@ watch([activeSubtab, timelineViewMode, weekOffset], () => {
                 <div
                   v-for="day in weekDays"
                   :key="day.dateStr"
-                  class="day-column"
+                  class="day-column" :data-date="day.dateStr"
                   :class="{ today: day.isToday }"
                 >
                   <div
@@ -565,21 +644,19 @@ watch([activeSubtab, timelineViewMode, weekOffset], () => {
                     :title="t('calendarSlotAddTitle')"
                     @click="handleSlotClick(day, h)"
                   >
-                    <div
-                      v-for="ev in getSlotEvents(day, h)"
-                      :key="ev.id"
-                      class="calendar-event-block"
-                      :class="{ done: isCompleted(ev), cancelled: ev.status === 'cancelled' }"
-                      role="button" tabindex="0"
-                      @keydown.enter.stop="openEditor(ev)" @keydown.space.prevent.stop="openEditor(ev)"
-                      @click.stop="openEditor(ev)"
-                    >
-                      <span class="calendar-event-time">{{ new Date(Number(ev.start_at || ev.due_at_ms)).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) }}</span>
-                      <strong class="calendar-event-title">{{ ev.title }}</strong>
-                      <span v-if="ev.project_id" class="calendar-event-proj">
-                        {{ getProjectName(ev.project_id) }}
-                      </span>
-                    </div>
+                  </div>
+                  <div v-for="ev in timedItems(day)" :key="ev.key" class="calendar-event-block timed-event"
+                    :class="{done:isCompleted(ev),cancelled:ev.status==='cancelled',dragging:gesture?.patch?.id===ev.id}"
+                    :style="blockStyle(ev)" role="button" tabindex="0" :title="eventDescription(ev)" :aria-label="eventDescription(ev)"
+                    @pointerdown.stop="startGesture($event,ev)" @click.stop="eventClick(ev)"
+                    @keydown.enter.stop="eventClick(ev)" @keydown.space.prevent.stop="eventClick(ev)">
+                    <strong class="calendar-event-title">{{ ev.title }}</strong>
+                    <span v-if="(ev.boundary==='event'||ev.boundary==='range') && !ev.clipStart" class="calendar-resize-handle resize-start"
+                      role="button" tabindex="0" :aria-label="t('calendarResizeStart')" :title="t('calendarResizeStart')"
+                      @pointerdown.stop="startGesture($event,ev,'start')" @click.stop @keydown.enter.stop="openEditor(ev)"></span>
+                    <span v-if="(ev.boundary==='event'||ev.boundary==='range') && !ev.clipEnd" class="calendar-resize-handle resize-end"
+                      role="button" tabindex="0" :aria-label="t('calendarResizeEnd')" :title="t('calendarResizeEnd')"
+                      @pointerdown.stop="startGesture($event,ev,'end')" @click.stop @keydown.enter.stop="openEditor(ev)"></span>
                   </div>
                 </div>
               </div>
@@ -617,7 +694,7 @@ watch([activeSubtab, timelineViewMode, weekOffset], () => {
                         {{ getProjectName(item.project_id) }}
                       </span>
                       <span class="schedule-kind-badge">
-                        {{ t('scheduleKindEvent') }}
+                        {{ t(item.kind === 'todo' ? 'scheduleKindTodo' : 'scheduleKindEvent') }}
                       </span>
                       <span class="schedule-status-badge" :class="item.status">
                         {{
@@ -632,12 +709,12 @@ watch([activeSubtab, timelineViewMode, weekOffset], () => {
                       </span>
                     </div>
                     <p v-if="item.notes" class="schedule-item-notes">{{ item.notes }}</p>
-                    <span v-if="item.start_at || item.due_at_ms" class="schedule-item-due">
+                    <span v-if="dateValue(item, 'start') || dateValue(item, 'due')" class="schedule-item-due">
                       <svg class="inline-svg-xs" viewBox="0 0 24 24" aria-hidden="true">
                         <circle cx="12" cy="12" r="9" />
                         <path d="M12 7v5l3 2" />
                       </svg>
-                      {{ formatDue(item.start_at || item.due_at_ms) }}
+                      {{ dateValue(item, 'start') }} {{ dateValue(item, 'due') ? t('todoDueLabel') + ': ' + dateValue(item, 'due') : '' }}
                     </span>
                   </div>
                 </div>
@@ -746,13 +823,9 @@ watch([activeSubtab, timelineViewMode, weekOffset], () => {
                   </span>
                 </div>
                 <p v-if="item.notes" class="schedule-item-notes">{{ item.notes }}</p>
-                <span v-if="item.start_at || item.due_at_ms" class="schedule-item-due">
-                  <svg class="inline-svg-xs" viewBox="0 0 24 24" aria-hidden="true">
-                    <circle cx="12" cy="12" r="9" />
-                    <path d="M12 7v5l3 2" />
-                  </svg>
-                  {{ formatDue(item.start_at || item.due_at_ms) }}
-                </span>
+                <span v-if="dateValue(item, 'start')" class="schedule-item-due">{{ t('todoStartOptional') }}: {{ dateValue(item, 'start') }}</span>
+                <span v-if="dateValue(item, 'due')" class="schedule-item-due">{{ t('todoDueOptional') }}: {{ dateValue(item, 'due') }}</span>
+
               </div>
             </div>
             <div class="schedule-item-actions">
@@ -814,3 +887,23 @@ watch([activeSubtab, timelineViewMode, weekOffset], () => {
     </div>
   </section>
 </template>
+
+<style scoped>
+.todo-all-day-row {display:grid;grid-template-columns:2.4rem repeat(7,minmax(0,1fr));border-bottom:1px solid var(--line);flex-shrink:0;max-height:12rem;overflow-y:auto;scrollbar-gutter:stable;}
+.todo-all-day-row > span {font-size:.7rem;color:var(--text-secondary);padding:4px;}
+.todo-all-day-cell {min-width:0;padding:3px;border-left:1px solid var(--line);}
+.todo-calendar-marker {display:block;width:100%;text-align:left;overflow-wrap:anywhere;font-size:.75rem;padding:4px;margin-bottom:3px;background:var(--bg-secondary);color:var(--text-primary);border:1px solid var(--accent-primary);border-radius:var(--radius-btn);}
+.todo-calendar-marker small,.schedule-time-context {color:var(--text-secondary);}
+.todo-calendar-marker.done {opacity:.6;}
+.week-calendar-card {position:relative;}
+.calendar-saving-status {position:absolute;top:0;left:50%;transform:translateX(-50%);z-index:10;background:var(--bg-primary);color:var(--text-secondary);padding:3px 8px;border-radius:var(--radius-sm);font-size:.75rem;}
+/* Time is encoded by position; titles are always the primary content. */
+.timed-event {position:absolute;z-index:6;min-height:2rem;padding:7px 5px;cursor:grab;touch-action:none;user-select:none;box-sizing:border-box;background:var(--bg-secondary);border-color:var(--accent-primary);border-radius:4px;}
+.timed-event .calendar-event-title {white-space:normal;overflow-wrap:anywhere;font-size:.8rem;line-height:1.25;font-weight:600;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;}
+.timed-event.dragging {z-index:8;opacity:.8;cursor:grabbing;}
+.calendar-resize-handle {position:absolute;left:0;right:0;height:8px;cursor:ns-resize;touch-action:none;}
+.resize-start {top:0;}.resize-end {bottom:0;}
+.calendar-resize-handle:hover,.calendar-resize-handle:focus-visible {background:var(--accent-soft);outline:1px solid var(--accent-primary);}
+.todo-calendar-marker {touch-action:none;cursor:grab;border-radius:4px;}
+.todo-calendar-marker strong {font-weight:600;}
+</style>

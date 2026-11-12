@@ -244,3 +244,21 @@ Dashboard 的 `#inbox` 是前端路由，其数据来自独立 `/api/inbox`；Bo
    - `bob-browser` crate 通过 CDP 管理持久化浏览器实例（Linux 常驻节点使用 Headless Chromium，PC 桌面端可驱动受管本机浏览器配置以降低机房 IP 风控），优先提取带编号精简无障碍树（含 iframe 与开放 Shadow DOM），遇到密码框、一次性验证码、二维码或风控时立即挂起并向前端推送 `<VirtualBrowserModal />` 人工接管，密码与验证码字符绝不进入模型上下文或日志。
 5. **成长回路护栏**：
    - 执行遥测（零模型成本）→ 夜间五阶段做梦（过时淘汰、相似合并、SOUL 提案、失败模式、笔记消化；单次自动删除上限 3 条并留存可恢复日志）→ 每日结构化晨报与四档主动关心（受 `22:00–08:00` 安静时段与日配额硬约束）。
+
+### 外部 Bot 待办接入边界
+
+外部 Bot 的 todos_read / todos_create / todos_update 是独立、默认关闭的授权，不随 organize 或项目读取权限自动开启。项目关联可选，按项目范围及独立 todos_unassigned 授权过滤；不提供节点执行、账号管理或任意 RPC 转发。MCP/HTTP 仅作为传输，todo_service 复用内核 personal_ops 的 schedule_items(kind=todo) 与同步队列，禁止另建业务待办 JSON 副本。
+
+0013 bot_todo_receipts 保存 actor/request_id/请求摘要/原始结果；新增待办、同步队列和回执在同一 SQLite savepoint 内提交。同请求同内容重试返回原始结果（replayed=true），不同内容拒绝；后续用户改动不被旧请求覆盖。说明书版本更新不授予额外权限；凭据与共享说明书分离，按 Bot 独立颁发与撤销。读取和写入前均重新验证 Token 有效期、撤销与项目范围。
+
+### 外部Bot全项目待办授权边界
+
+机主明确同意后，Bot可使用独立长期可撤销Token读取/新增当前和未来项目待办。全项目范围每次从可信平台目录解析，不能通过请求参数扩大权限；会话正文、收件箱、知识、成果及节点执行需独立能力授权，本次不开放。公网接口已完成认证读回与越权拒绝；后续验收为消费端真实接入、用户新增待办及配对端读回。详见 connectivity 与外部Bot待办Evidence。
+
+### 独立待办与可选时间（2026-11-12）
+
+待办是独立个人对象，项目只是可选关联；不强制创建或选择 Default Workspace。开始与截止时间独立可选，允许两者为空、只填一个或都填写；都填写时截止不得早于开始。用户未给时间不补当前时刻或09:00。网页编辑可清空项目与日期，修改开始时间不移动截止时间。
+
+Bot `project_id` 省略或 null 可创建独立待办；`start_at`、`due_at` 为可选 Unix 毫秒，省略/null表示未设置，明确提供时必须为正数。`bob_todos` 不传 project_id 返回所有获准待办，null 仅返回独立待办，字符串仅返回对应获准项目。新增仅 request_id/title 必填。无项目访问由默认关闭的 `todos_unassigned` 独立控制，不自动随 all_projects 开启；grok_bot 经机主本轮授权开启该范围，节点执行仍关闭。
+
+业务仍使用同一 schedule_items 和同步队列；兼容既有非空 start_at 列时，内部0代表待办未设开始，Bot API投影null，不展示1970年；end_at对应待办截止。日程仍须开始时间。重复请求保留原幂等语义，旧版无截止请求摘要兼容。日期只有天时使用 timing.start_date / timing.due_date（YYYY-MM-DD），不虚构午夜或09:00；明确时刻才使用 start_at / due_at。0014迁移保存 timing_json；日期精度、原话、参考时间与推定说明随同一待办同步。日历将日期投影到全天栏，将时刻投影到小时格；不会额外创建日程副本。

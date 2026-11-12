@@ -110,3 +110,35 @@ L1的mDNS只是发现，不能以“同一局域网”免除认证；L2与L3同�
 `POST credentials` 仅机主返回未撤销的设备凭证元数据；`POST revoke` 默认撤销自己，机主可指定 credential_id。设备凭证仅可访问本机已适配的会话接口，不可更改模型/认证配置或转发其他节点。节点拒绝匿名 RPC。新交换响应 `topology_sync:false`，客户端不再自动上传或下载其他服务的密钥。旧手机的真实扫码验收和发布版本仍单独记录，不能由协议检查代替。
 
 新连接不跟随 HTTP 重定向；对结果未知的发送不改走其他节点重放。本机 DSH 可以使用字面 loopback HTTP/WS，远程 DSH 仍要求 HTTPS/WSS，拒绝嵌入用户名、密码、查询参数和路径的服务地址。受控启动日志仅在本机用于恢复 DSH Cookie，不给手机暴露专用 Token。
+
+### 外部 Bot 待办协议（v0.3，接口已上线，消费端待验收）
+
+沿用 `POST /api/bot/v1/mcp`：HTTPS、Authorization: Bearer（Bot 独立凭据）、Content-Type: application/json。普通 HTTP 客户端也能发送 JSON-RPC，无需调用任何节点命令；MCP 客户端使用 tools/list 与 tools/call。需先验证消费端确有自定义 HTTP/MCP 能力，读云盘不等于有该能力。
+
+机主配置 scope 增加 `todos_read`、`todos_create` 布尔值；缺省 false。例：`{"projects":["approved-project-id"],"sessions":[],"organize":false,"todos_read":true,"todos_create":true}`。通过既有 `scripts/provision-bot-account.py` 在候选数据目录配置测试账号；脚本不会覆盖已有账号文件，Token 仅写入指定私密文件，不打印或提交。不要向生产目录运行测试配置。
+
+读取：`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"bob_todos","arguments":{"project_id":"approved-project-id","offset":0}}}`。
+
+新增：`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"bob_todo_create","arguments":{"project_id":"approved-project-id","request_id":"unique-client-request-id","title":"检查渲染结果","start_at":1794470400000,"notes":"仅记录待办，不启动开发任务"}}}`。
+
+start_at/due_at 可省略或为null；提供时为明确时区转换后的 Unix 毫秒；客户端需确认用户日期，不把示例时间当默认。结果位于 MCP content[0].text（JSON），检查 isError；HTTP 200 不代表业务成功。新增返回 todo、created_by、request_id、replayed；重复回执是原始创建快照，获取当前状态需重新读取。读取每页最多100条，next_offset=null结束；不返回未授权项目或无项目资料。首次提交必须保存请求编号，断网重试使用同编号同内容；冲突不能换编号盲目重发。
+
+共享云盘只放版本化指南、接口说明、变更摘要；不放长期 Token。指南版本不变可跳过重读，但权限仍以服务端为准，消费 Agent 是否定时更新需由其自身配置。初版仅读取和新增；修改、完成、删除、正式账号管理 UI、Grok/Muse 消费端实连尚未验收。
+
+机主可显式设置 `all_projects:true`（projects可为空），每次认证请求从当前平台目录装配项目ID，涵盖以后新增的项目；不扩大sessions/organize或执行权限。`--no-expiry` 显式生成 `no_expiry:true`，默认仍是有限时授权；revoked始终优先。grok_bot正式配置为全项目、todos_read/todos_create/todos_update=true、organize=false、sessions=[]。服务器仅存Token哈希；撤销通过机主安全运维入口原子修改该账号revoked=true，下一请求即拒绝，禁止公开授权管理接口。公网仅精确 `/api/bot/v1/mcp` 走Bot认证，其他网页维持原登录。自定义HTTP客户端应发送明确User-Agent（如Bob-Assistant-Connector/1.0），默认Python标识目前被网关1010拒绝。
+
+### 独立待办与可选时间（2026-11-12）
+
+待办是独立个人对象，项目只是可选关联；不强制创建或选择 Default Workspace。开始与截止时间独立可选，允许两者为空、只填一个或都填写；都填写时截止不得早于开始。用户未给时间不补当前时刻或09:00。网页编辑可清空项目与日期，修改开始时间不移动截止时间。
+
+Bot `project_id` 省略或 null 可创建独立待办；`start_at`、`due_at` 为可选 Unix 毫秒，省略/null表示未设置，明确提供时必须为正数。`bob_todos` 不传 project_id 返回所有获准待办，null 仅返回独立待办，字符串仅返回对应获准项目。新增仅 request_id/title 必填。无项目访问由默认关闭的 `todos_unassigned` 独立控制，不自动随 all_projects 开启；grok_bot 经机主本轮授权开启该范围，节点执行仍关闭。
+
+业务仍使用同一 schedule_items 和同步队列；兼容既有非空 start_at 列时，内部0代表待办未设开始，Bot API投影null，不展示1970年；end_at对应待办截止。日程仍须开始时间。重复请求保留原幂等语义，旧版无截止请求摘要兼容。日期只有天时使用 timing.start_date / timing.due_date（YYYY-MM-DD），不虚构午夜或09:00；明确时刻才使用 start_at / due_at。0014迁移保存 timing_json；日期精度、原话、参考时间与推定说明随同一待办同步。日历将日期投影到全天栏，将时刻投影到小时格；不会额外创建日程副本。
+
+### 语义日期与修改待办契约
+
+- 消费端按用户语义填写时间：日期可单独保存；相对日期锚定原消息时间与用户时区。“中午”可解释为12:00；“下班前”优先用户偏好，缺省采用合理、显式可纠正的推定并留痕。只有真正影响含义的歧义才询问，不因缺钟点拒绝记录日期。
+- `timing`：可选 `start_date` / `due_date`、`time_zone`、`source_text`、`reference_at`（Unix毫秒）、`inference_note`。同一开始/截止边界不得同时填日期与时间戳；省略代表未指定。只表示开始或截止，不自动开启提醒或周期重复。
+- `bob_todo_update` 必填 `id`、`request_id`、`expected_version`，可改 title/notes/project_id/start_at/due_at/timing。字段省略保留原值，时间或项目null可清除；提供timing时替换整个timing对象，先读回合并保留所需字段。先读版本再写；冲突重新核对，不盲目覆盖。
+- 独立、默认false的 `todos_update` 权限同时核对旧归属和新归属。当前grok_bot已获读取/新增/修改及独立待办权限；不含完成、删除、节点执行或权限管理。原Token保持不变。
+- 写入原子持久化并保存actor/request_id回执；重试用相同编号和相同内容，更新不会新增待办。更新之后读回核对；日历只是同一账本的显示投影。

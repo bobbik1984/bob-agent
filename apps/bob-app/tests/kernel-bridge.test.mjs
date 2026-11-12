@@ -110,7 +110,7 @@ test('personal ops IPC maps schedule, note, capture, memory and decision command
  await bridge.decisionStatus('d1','accepted');
  assert.deepEqual(calls,[
   {command:'app_personal_snapshot',args:undefined},
-  {command:'app_schedule_create',args:{id:'s1',projectId:null,taskId:null,title:'Review',kind:'todo',startAt:1793408400000,endAt:null,reminderAt:null,notes:'n'}},
+  {command:'app_schedule_create',args:{id:'s1',projectId:null,taskId:null,title:'Review',kind:'todo',startAt:1793408400000,endAt:null,reminderAt:null,notes:'n',timing:{}}},
   {command:'app_schedule_status',args:{id:'s1',status:'completed'}},
   {command:'app_note_upsert',args:{id:'n1',projectId:null,conversationId:null,title:'Note',bodyMarkdown:'Body',tags:['t1']}},
   {command:'app_capture_create',args:{id:'c1',sourceMessageId:'m1',contentRef:'Snippet',projectId:null,newProjectTitle:null,mediaId:null}},
@@ -307,4 +307,23 @@ test('BOB-D-014 unified inbox commands map list, capture, triage set, draft, and
     { command: 'app_inbox_triage_draft', args: { regenerate: true } },
     { command: 'app_inbox_triage_close', args: { batchId: 'batch-1', status: 'applied' } },
   ]);
+});
+
+test('todo dates and project stay optional and legacy deadline never becomes a start',async()=>{
+ const calls=[];const bridge=createKernelBridge(async(command,args)=>{calls.push(args);return args;},()=>true);
+ await bridge.scheduleCreate({id:'plain',title:'Plain',kind:'todo'});
+ assert.equal(calls[0].projectId,null);assert.equal(calls[0].startAt,null);assert.equal(calls[0].endAt,null);
+ await bridge.scheduleCreate({id:'due',title:'Deadline',kind:'todo',dueAtMs:2000});
+ assert.equal(calls[1].startAt,null);assert.equal(calls[1].endAt,2000);
+ await bridge.scheduleEdit({id:'due',expectedVersion:1,title:'Clear',projectId:null,startAt:null,endAt:null});
+ assert.equal(calls[2].startAt,null);assert.equal(calls[2].endAt,null);
+});
+
+test('date-only precision and provenance pass unchanged through create and edit',async()=>{
+ const calls=[];const bridge=createKernelBridge(async(command,args)=>{calls.push(args);return args;},()=>true);
+ const timing={due_date:'2026-11-15',time_zone:'Asia/Shanghai',source_text:'11/15前'};
+ await bridge.scheduleCreate({id:'civil',title:'Pay',kind:'todo',timing});
+ assert.deepEqual(calls[0].timing,timing);assert.equal(calls[0].endAt,null);
+ await bridge.scheduleEdit({id:'civil',expectedVersion:1,timing:{due_date:null}});
+ assert.equal(calls[1].timing.due_date,null);
 });

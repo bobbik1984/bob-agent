@@ -46,3 +46,5 @@ __pycache__/
 
 scratch/
 
+# Local credentials; never commit or share
+/.private/

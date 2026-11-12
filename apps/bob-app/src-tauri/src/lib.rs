@@ -496,25 +496,27 @@ async fn app_schedule_create(
     task_id: Option<String>,
     title: String,
     kind: Option<String>,
-    start_at: i64,
+    start_at: Option<i64>,
     end_at: Option<i64>,
     reminder_at: Option<i64>,
     notes: Option<String>,
+    timing: Option<bob_kernel::personal_ops::ScheduleTiming>,
 ) -> Result<ScheduleItem, &'static str> {
     let state = state.0.clone();
     tauri::async_runtime::spawn_blocking(move || {
         with_app(&state, |app| {
             let created = app
-                .create_schedule_item_with_kind(
+                .create_schedule_item_with_timing(
                     &id,
                     project_id.as_deref(),
                     task_id.as_deref(),
                     &title,
                     kind.as_deref().unwrap_or("event"),
-                    start_at,
+                    start_at.unwrap_or(0),
                     end_at,
                     reminder_at,
                     notes.as_deref().unwrap_or(""),
+                    timing.unwrap_or_default(),
                     now()?,
                 )
                 .map_err(|_| "SCHEDULE_CREATE_FAILED")?;
@@ -528,10 +530,13 @@ async fn app_schedule_create(
 
 #[tauri::command]
 async fn app_schedule_edit(state: State<'_, AppState>, id: String, expected_version: i64,
-    title: String, start_at: i64, notes: String) -> Result<ScheduleItem, &'static str> {
+    title: String, start_at: Option<i64>, end_at: Option<i64>, project_id: Option<String>, notes: String, timing: Option<bob_kernel::personal_ops::ScheduleTiming>) -> Result<ScheduleItem, &'static str> {
     let state = state.0.clone();
     tauri::async_runtime::spawn_blocking(move || with_app(&state, |app| {
-        let item = app.edit_schedule_item(&id, expected_version, &title, start_at, &notes, now()?)
+        let old=app.list_schedule_items().map_err(|_|"SCHEDULE_UPDATE_FAILED")?.into_iter().find(|s|s.id==id).ok_or("SCHEDULE_UPDATE_FAILED")?;
+        let item = if old.kind=="todo" {
+            app.edit_todo_item_with_timing(&id,expected_version,&title,project_id.as_deref(),start_at,end_at,&notes,timing,now()?)
+        } else {app.edit_schedule_interval(&id, expected_version, &title, start_at.ok_or("SCHEDULE_UPDATE_FAILED")?, Some(end_at), &notes, now()?)}
             .map_err(|_| "SCHEDULE_UPDATE_FAILED")?;
         sync_project_todo_markdown(app, &item);
         Ok(item)

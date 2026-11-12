@@ -197,6 +197,7 @@ impl Store {
         crate::assistant::migrate(&tx, now)?;
         crate::project_links::migrate(&tx, now)?;
         crate::spark_inbox::migrate(&tx, now)?;
+        crate::bot_todos::migrate(&tx, now)?;
         tx.commit()?;
         let mut store = Self { db, _owner: owner };
         store.recover_interrupted()?;

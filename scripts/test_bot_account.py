@@ -17,6 +17,16 @@ class ProvisionTests(unittest.TestCase):
         self.assertEqual(result['username'],'grok_bot');self.assertFalse(result['organize']);self.assertFalse(result['execution'])
         self.assertTrue(token.startswith('bob_bot_'));self.assertNotIn(token,raw)
         self.assertEqual(grant['token_hash'],hashlib.sha256(token.encode()).hexdigest())
+    def test_todo_permissions_default_denied(self):
+        self.create();grant=json.loads((self.root/'data/bot-grants.json').read_text(encoding='utf-8'))[0]
+        self.assertFalse(grant['todos_read']);self.assertFalse(grant['todos_create'])
+    def test_todo_permissions_explicit(self):
+        self.scope.update(todos_read=True,todos_create=True);self.create()
+        grant=json.loads((self.root/'data/bot-grants.json').read_text(encoding='utf-8'))[0]
+        self.assertTrue(grant['todos_read']);self.assertTrue(grant['todos_create'])
+    def test_todo_permission_string_rejected(self):
+        self.scope['todos_create']='true'
+        with self.assertRaises(ValueError): self.create()
     def test_existing_account_not_overwritten(self):
         self.create();old=(self.root/'data/bot-grants.json').read_bytes()
         with self.assertRaises(FileExistsError): self.create()
@@ -35,6 +45,10 @@ class ProvisionTests(unittest.TestCase):
         with self.assertRaises(ValueError): self.create()
     def test_bounded_lifetime(self):
         with self.assertRaises(ValueError): mod.provision(self.root/'data',self.scope,self.root/'token',hours=99999)
+    def test_explicit_no_expiry(self):
+        mod.provision(self.root/'data',self.scope,self.root/'private-token',hours=None)
+        grant=json.loads((self.root/'data/bot-grants.json').read_text(encoding='utf-8'))[0]
+        self.assertTrue(grant['no_expiry']);self.assertEqual(grant['expires_at'],0)
     def test_explicit_organize(self):
         self.scope['organize']=True
         self.assertTrue(self.create()['organize'])

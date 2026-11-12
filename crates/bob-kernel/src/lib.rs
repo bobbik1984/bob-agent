@@ -42,3 +42,4 @@ pub mod project_links;
 pub mod spark_inbox;
 
 pub mod kb_search;
+pub mod bot_todos;
