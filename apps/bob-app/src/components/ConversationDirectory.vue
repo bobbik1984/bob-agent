@@ -1,5 +1,6 @@
 <script setup>
 import {computed,ref,watch,onUnmounted} from 'vue';
+import {isRecentProject} from '../recent-projects.mjs';
 import HarnessIcon from './HarnessIcon.vue';
 import {useI18n} from 'vue-i18n';
 import {readingCache,readingKey,singleFlight} from '../reading-cache.mjs';
@@ -7,6 +8,9 @@ import {kernelBridge} from '../native-bridge.mjs';
 import {nodeLabel as label,directoryGroups,extractFilterOptions,groupIconKind} from '../conversation-directory.mjs';
 import {checkPath,pathState} from '../path-health.mjs';
 import {deviceGroups,deviceFilterKeys} from '../device-paths.mjs';
+const recentClock=ref(Date.now());
+const recentTimer=setInterval(()=>{recentClock.value=Date.now()},10000);
+onUnmounted(()=>clearInterval(recentTimer));
 const props=defineProps({nodes:Array,catalog:Object,search:String,mode:String,syncRevision:Number,creationRevision:Number,deleteLocal:Function});
 const emit=defineEmits(['select-local','select-remote','create-in-project']);
 const {t}=useI18n();
@@ -29,7 +33,9 @@ watch([filterOpen,selectedNodes,selectedHarnesses,selectedTopic,sortBy],saveFilt
 function toggleNodeFilter(key){selectedNodes.value=selectedNodes.value.includes(key)?selectedNodes.value.filter(x=>x!==key):[...selectedNodes.value,key];}
 function toggleHarnessFilter(key){selectedHarnesses.value=selectedHarnesses.value.includes(key)?selectedHarnesses.value.filter(x=>x!==key):[...selectedHarnesses.value,key];}
 function resetFilters(){selectedNodes.value=[];selectedHarnesses.value=[];selectedTopic.value='all';sortBy.value='time_desc';}
-const activeFilterCount=computed(()=>(selectedNodes.value.length>0?1:0)+(selectedHarnesses.value.length>0?1:0)+(selectedTopic.value&&selectedTopic.value!=='all'?1:0)+(sortBy.value&&sortBy.value!=='time_desc'?1:0));
+const hasConnectedNodes=computed(()=>Array.isArray(props.nodes)&&props.nodes.some(n=>n&&n.enabled!==false));
+const effectiveSortBy=computed(()=>!hasConnectedNodes.value&&sortBy.value==='node_asc'?'time_desc':sortBy.value);
+const activeFilterCount=computed(()=>((hasConnectedNodes.value&&selectedNodes.value.length>0)?1:0)+(selectedHarnesses.value.length>0?1:0)+(selectedTopic.value&&selectedTopic.value!=='all'?1:0)+(effectiveSortBy.value&&effectiveSortBy.value!=='time_desc'?1:0));
 const cachedNodes=new Map();
 const harness=s=>s.harness||(s.source_kind==='claude_native'?'claude':'dsh');
 const association=s=>associations.value.links.find(l=>l.connection_id===s.node?.id&&l.harness===harness(s)&&l.session_id===s.id);
@@ -73,7 +79,7 @@ const rows=computed(()=>{
  return [...local,...linkedRemote].filter(s=>!q||[s.title,s.project,s.workspace,s.toolLabel,s.harness,s.remote?label(s.node):s.device].join(' ').toLocaleLowerCase().includes(q)).sort((a,b)=>stamp(b)-stamp(a)||a.uid.localeCompare(b.uid));});
 const filterOptions=computed(()=>extractFilterOptions(rows.value));
 const groups=computed(()=>{
- const groups=directoryGroups(rows.value,props.mode,pinnedUids.value,{selectedNodes:selectedNodes.value,selectedHarnesses:selectedHarnesses.value,selectedTopic:selectedTopic.value,sortBy:sortBy.value});
+ const groups=directoryGroups(rows.value,props.mode,pinnedUids.value,{selectedNodes:hasConnectedNodes.value?selectedNodes.value:[],selectedHarnesses:selectedHarnesses.value,selectedTopic:selectedTopic.value,sortBy:effectiveSortBy.value});
  if(props.mode!=='project')return groups;
  const projectIds=new Set();
  for(const group of groups){
@@ -87,7 +93,7 @@ const groups=computed(()=>{
  const imported=new Set(props.catalog?.imported_project_ids||[]);
  if(!activeFilterCount.value){
   for(const project of props.catalog?.projects||[]){
-   if(!projectIds.has(project.id)&&!rows.value.some(row=>row.project_id===project.id)&&!imported.has(project.id)
+   if(isRecentProject(project.id,Math.max(recentClock.value,Date.now()))&&!projectIds.has(project.id)&&!rows.value.some(row=>row.project_id===project.id)&&!imported.has(project.id)
        && project.source_kind!=='legacy_import'&&project.title.toLocaleLowerCase().includes(query)){
     groups.push({key:'empty-project:'+project.id,name:project.title,fullName:project.title,items:[],projectId:project.id});
    }
@@ -137,13 +143,13 @@ const toolLabel=s=>s.remote?(s.toolLabel||s.tool_label||(s.harness==='claude'||s
     </button>
     <button v-if="activeFilterCount>0" type="button" class="directory-filter-reset" @click="resetFilters">{{t('filterResetBtn')}}</button>
    </div>
-   <div class="directory-refresh-bar">
+   <div v-if="hasConnectedNodes" class="directory-refresh-bar">
     <span v-if="loading" class="terminal-status-line" role="status"><span class="terminal-rod" aria-hidden="true">[{{rodFrame}}]</span><span>{{t('dshLoading')}}</span><span class="terminal-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span></span>
     <button type="button" :disabled="loading" @click="refresh">{{t('dshRefresh')}}</button>
    </div>
   </div>
   <div v-if="filterOpen" class="directory-filter-panel">
-   <div v-if="filterOptions.nodes.length>0" class="filter-group">
+   <div v-if="hasConnectedNodes && filterOptions.nodes.length>1" class="filter-group">
     <span class="filter-label">{{t('filterNodesLabel')}}</span>
     <div class="filter-chips">
      <button type="button" class="filter-chip" :class="{active:selectedNodes.length===0}" @click="selectedNodes=[]">{{t('filterAllOption')}}</button>
@@ -173,7 +179,7 @@ const toolLabel=s=>s.remote?(s.toolLabel||s.tool_label||(s.harness==='claude'||s
       <option value="time_desc">{{t('filterSortTimeDesc')}}</option>
       <option value="time_asc">{{t('filterSortTimeAsc')}}</option>
       <option value="title_asc">{{t('filterSortTitleAsc')}}</option>
-      <option value="node_asc">{{t('filterSortNodeAsc')}}</option>
+      <option v-if="hasConnectedNodes" value="node_asc">{{t('filterSortNodeAsc')}}</option>
       <option value="topic_asc">{{t('filterSortTopicAsc')}}</option>
      </select>
     </label>
@@ -185,7 +191,7 @@ const toolLabel=s=>s.remote?(s.toolLabel||s.tool_label||(s.harness==='claude'||s
    <details v-if="group.isTestGroup" class="directory-test-group" :open="!!search"><summary :title="group.fullName"><span class="directory-heading test-heading"><svg aria-hidden="true" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/></svg><span>{{t('testAndScratchSessions')}}</span><small>{{group.items.length}}</small></span></summary>
     <div class="directory-children">
     <button v-if="group.projectId" type="button" class="project-create-session" @click="emit('create-in-project',group.projectId)">+ {{t('newConversation')}}</button>
-    <div v-for="s in group.items" :key="s.uid" class="directory-item-wrap"><div class="directory-row-bar"><button class="directory-row" @click="select(s)"><span>{{s.title}}</span><small><span class="node-tag-pill">{{s.remote?label(s.node):s.device}}</span><span v-if="s.remote && (props.nodes||[]).filter(n=>(n.deviceId||n.id)===(s.node.deviceId||s.node.id)).length>1"> · {{s.node.baseUrl||s.node.url}}</span><template v-if="toolLabel(s)"> · <HarnessIcon :session="s" :label="toolLabel(s)" /></template> · {{date(s)}}<template v-if="s.directoryStale"> · {{t('directoryCached')}}</template></small></button><button type="button" class="directory-pin-btn" :class="{pinned:isPinned(s.uid)}" :aria-label="t(isPinned(s.uid)?'unpinSessionLabel':'pinSessionLabel')" :title="t(isPinned(s.uid)?'unpinSessionLabel':'pinSessionLabel')" @click.stop="togglePin(s.uid)"><svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" :fill="isPinned(s.uid)?'currentColor':'none'" stroke="currentColor" stroke-width="1.8"/></svg></button>
+    <div v-for="s in group.items" :key="s.uid" class="directory-item-wrap"><div class="directory-row-bar"><button class="directory-row" @click="select(s)"><span>{{s.title}}</span><small><template v-if="s.remote || hasConnectedNodes"><span class="node-tag-pill">{{s.remote?label(s.node):s.device}}</span><span v-if="s.remote && (props.nodes||[]).filter(n=>(n.deviceId||n.id)===(s.node.deviceId||s.node.id)).length>1"> · {{s.node.baseUrl||s.node.url}}</span><template v-if="toolLabel(s)"> · <HarnessIcon :session="s" :label="toolLabel(s)" /></template> · </template>{{date(s)}}<template v-if="s.directoryStale"> · {{t('directoryCached')}}</template></small></button><button type="button" class="directory-pin-btn" :class="{pinned:isPinned(s.uid)}" :aria-label="t(isPinned(s.uid)?'unpinSessionLabel':'pinSessionLabel')" :title="t(isPinned(s.uid)?'unpinSessionLabel':'pinSessionLabel')" @click.stop="togglePin(s.uid)"><svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" :fill="isPinned(s.uid)?'currentColor':'none'" stroke="currentColor" stroke-width="1.8"/></svg></button>
     <button v-if="!s.remote && s.can_delete" type="button" class="directory-delete-btn"
       :disabled="s.has_running_execution"
       :title="t(s.has_running_execution ? 'localConversationDeleteBusy' : 'localConversationDelete')"
@@ -198,7 +204,7 @@ const toolLabel=s=>s.remote?(s.toolLabel||s.tool_label||(s.harness==='claude'||s
    <details v-else-if="group.name" :open="!!search || mode==='device' || mode==='smart' || activeFilterCount>0"><summary :title="group.fullName"><span class="directory-heading"><svg v-if="groupIconKind(group, mode)==='project'" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg><svg v-else-if="groupIconKind(group, mode)==='phone'" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="2" width="12" height="20" rx="2.5"/><path d="M10 18h4"/></svg><svg v-else-if="groupIconKind(group, mode)==='cloud'" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 19h11a4.5 4.5 0 0 0 .7-8.95A5.5 5.5 0 0 0 7.4 8.5 4 4 0 0 0 6.5 19Z"/></svg><svg v-else aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></svg><span>{{group.name}}</span><small>{{group.items.length}}</small></span></summary>
     <div class="directory-children">
     <button v-if="group.projectId" type="button" class="project-create-session" @click="emit('create-in-project',group.projectId)">+ {{t('newConversation')}}</button>
-    <div v-for="s in group.items" :key="s.uid" class="directory-item-wrap"><div class="directory-row-bar"><button class="directory-row" @click="select(s)"><span>{{s.title}}</span><small><span class="node-tag-pill">{{s.remote?label(s.node):s.device}}</span><span v-if="s.remote && (props.nodes||[]).filter(n=>(n.deviceId||n.id)===(s.node.deviceId||s.node.id)).length>1"> · {{s.node.baseUrl||s.node.url}}</span><template v-if="toolLabel(s)"> · <HarnessIcon :session="s" :label="toolLabel(s)" /></template> · {{date(s)}}<template v-if="s.directoryStale"> · {{t('directoryCached')}}</template></small></button><button type="button" class="directory-pin-btn" :class="{pinned:isPinned(s.uid)}" :aria-label="t(isPinned(s.uid)?'unpinSessionLabel':'pinSessionLabel')" :title="t(isPinned(s.uid)?'unpinSessionLabel':'pinSessionLabel')" @click.stop="togglePin(s.uid)"><svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" :fill="isPinned(s.uid)?'currentColor':'none'" stroke="currentColor" stroke-width="1.8"/></svg></button>
+    <div v-for="s in group.items" :key="s.uid" class="directory-item-wrap"><div class="directory-row-bar"><button class="directory-row" @click="select(s)"><span>{{s.title}}</span><small><template v-if="s.remote || hasConnectedNodes"><span class="node-tag-pill">{{s.remote?label(s.node):s.device}}</span><span v-if="s.remote && (props.nodes||[]).filter(n=>(n.deviceId||n.id)===(s.node.deviceId||s.node.id)).length>1"> · {{s.node.baseUrl||s.node.url}}</span><template v-if="toolLabel(s)"> · <HarnessIcon :session="s" :label="toolLabel(s)" /></template> · </template>{{date(s)}}<template v-if="s.directoryStale"> · {{t('directoryCached')}}</template></small></button><button type="button" class="directory-pin-btn" :class="{pinned:isPinned(s.uid)}" :aria-label="t(isPinned(s.uid)?'unpinSessionLabel':'pinSessionLabel')" :title="t(isPinned(s.uid)?'unpinSessionLabel':'pinSessionLabel')" @click.stop="togglePin(s.uid)"><svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" :fill="isPinned(s.uid)?'currentColor':'none'" stroke="currentColor" stroke-width="1.8"/></svg></button>
     <button v-if="!s.remote && s.can_delete" type="button" class="directory-delete-btn"
       :disabled="s.has_running_execution"
       :title="t(s.has_running_execution ? 'localConversationDeleteBusy' : 'localConversationDelete')"
@@ -208,7 +214,7 @@ const toolLabel=s=>s.remote?(s.toolLabel||s.tool_label||(s.harness==='claude'||s
     <select v-if="s.remote && linksAvailable" class="project-link-select" :aria-label="t('projectLinkLabel')" :disabled="linking" :value="association(s)?.project_id||''" @change="setProject(s,$event)"><option value="">{{t('projectLinkNone')}}</option><option v-for="p in catalog?.projects||[]" :key="p.id" :value="p.id">{{p.title}}</option></select></div>
     </div>
    </details>
-   <template v-else><div v-for="s in group.items" :key="s.uid" class="directory-item-wrap"><div class="directory-row-bar"><button class="directory-row" @click="select(s)"><span>{{s.title}}</span><small>{{s.remote?label(s.node):s.device}}<span v-if="s.remote && (props.nodes||[]).filter(n=>(n.deviceId||n.id)===(s.node.deviceId||s.node.id)).length>1"> · {{s.node.baseUrl||s.node.url}}</span><template v-if="toolLabel(s)"> · <HarnessIcon :session="s" :label="toolLabel(s)" /></template> · {{date(s)}}<template v-if="s.directoryStale"> · {{t('directoryCached')}}</template></small></button><button type="button" class="directory-pin-btn" :class="{pinned:isPinned(s.uid)}" :aria-label="t(isPinned(s.uid)?'unpinSessionLabel':'pinSessionLabel')" :title="t(isPinned(s.uid)?'unpinSessionLabel':'pinSessionLabel')" @click.stop="togglePin(s.uid)"><svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" :fill="isPinned(s.uid)?'currentColor':'none'" stroke="currentColor" stroke-width="1.8"/></svg></button>
+   <template v-else><div v-for="s in group.items" :key="s.uid" class="directory-item-wrap"><div class="directory-row-bar"><button class="directory-row" @click="select(s)"><span>{{s.title}}</span><small><template v-if="s.remote || hasConnectedNodes">{{s.remote?label(s.node):s.device}}<span v-if="s.remote && (props.nodes||[]).filter(n=>(n.deviceId||n.id)===(s.node.deviceId||s.node.id)).length>1"> · {{s.node.baseUrl||s.node.url}}</span><template v-if="toolLabel(s)"> · <HarnessIcon :session="s" :label="toolLabel(s)" /></template> · </template>{{date(s)}}<template v-if="s.directoryStale"> · {{t('directoryCached')}}</template></small></button><button type="button" class="directory-pin-btn" :class="{pinned:isPinned(s.uid)}" :aria-label="t(isPinned(s.uid)?'unpinSessionLabel':'pinSessionLabel')" :title="t(isPinned(s.uid)?'unpinSessionLabel':'pinSessionLabel')" @click.stop="togglePin(s.uid)"><svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" :fill="isPinned(s.uid)?'currentColor':'none'" stroke="currentColor" stroke-width="1.8"/></svg></button>
     <button v-if="!s.remote && s.can_delete" type="button" class="directory-delete-btn"
       :disabled="s.has_running_execution"
       :title="t(s.has_running_execution ? 'localConversationDeleteBusy' : 'localConversationDelete')"

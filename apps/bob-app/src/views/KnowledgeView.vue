@@ -1,8 +1,6 @@
 <script setup>
 import CaptureImage from '../components/CaptureImage.vue';
 import TicketWalletPanel from '../components/TicketWalletPanel.vue';
-import KnowledgeGraphView from '../components/KnowledgeGraphView.vue';
-import { inject } from 'vue';
 import { computed, reactive, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 
@@ -46,9 +44,7 @@ const emit = defineEmits([
 ]);
 
 const { t } = useI18n();
-const shell = inject('bobAppShell', {});
-const projects = computed(() => shell.catalog?.value?.projects || shell.projectList?.value || []);
-const activeSubtab = ref('notes'); // 'notes' | 'tickets' | 'memories' | 'decisions' | 'graph'
+const activeSubtab = ref('notes'); // 'notes' | 'tickets' | 'memories' | 'decisions'
 const searchQuery = ref('');
 const selectedNoteId = ref(null);
 const mobileEditorOpen = ref(false);
@@ -251,22 +247,6 @@ function submitDecision() {
           </svg>
           <span>{{ t('knowledgeTabDecisions') }}</span>
           <span class="subtab-count">{{ decisions.length }}</span>
-        </button>
-        <button
-          type="button"
-          class="view-subtab-btn"
-          :class="{ active: activeSubtab === 'graph' }"
-          @click="activeSubtab = 'graph'"
-        >
-          <svg class="inline-svg" viewBox="0 0 24 24" aria-hidden="true">
-            <circle cx="6" cy="6" r="3"/>
-            <circle cx="18" cy="6" r="3"/>
-            <circle cx="6" cy="18" r="3"/>
-            <circle cx="18" cy="18" r="3"/>
-            <line x1="8.5" y1="7.5" x2="15.5" y2="16.5"/>
-            <line x1="8.5" y1="16.5" x2="15.5" y2="7.5"/>
-          </svg>
-          <span>{{ t('knowledgeTabGraph') }}</span>
         </button>
       </div>
 
@@ -531,16 +511,6 @@ function submitDecision() {
             </div>
           </article>
         </div>
-      </template>
-
-      <!-- SUBTAB 5: KNOWLEDGE GRAPH (Built-in Dynamic Graph) -->
-      <template v-else-if="activeSubtab === 'graph'">
-        <KnowledgeGraphView
-          :projects="projects"
-          :notes="props.notes"
-          :decisions="props.decisions"
-          :memories="props.memories"
-        />
       </template>
     </div>
   </section>

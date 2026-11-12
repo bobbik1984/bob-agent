@@ -1,5 +1,5 @@
 <script setup>
-import { inject } from 'vue';
+import { computed, inject } from 'vue';
 import ConversationDirectory from './ConversationDirectory.vue';
 import SidebarCreateForm from './SidebarCreateForm.vue';
 
@@ -32,6 +32,16 @@ const {
   deleteLocalConversation,
   selectRemoteConversation,
 } = inject('bobAppShell');
+
+const hasConnectedNodes = computed(() => {
+  const nodes = modelHub?.value?.state?.remote_nodes || modelHub?.state?.remote_nodes || [];
+  return Array.isArray(nodes) && nodes.some(n => n && n.enabled !== false);
+});
+
+const effectiveSidebarMode = computed(() => {
+  const current = sidebarGroupMode?.value ?? sidebarGroupMode ?? 'project';
+  return !hasConnectedNodes.value && current === 'device' ? 'project' : current;
+});
 </script>
 
 <template>
@@ -63,7 +73,7 @@ const {
       <button
         type="button"
         class="sidebar-mode-btn"
-        :class="{ active: sidebarGroupMode === 'project' }"
+        :class="{ active: effectiveSidebarMode === 'project' }"
         :title="t('groupByProject')"
         :aria-label="t('groupByProject')"
         @click="switchSidebarMode('project')"
@@ -76,7 +86,7 @@ const {
       <button
         type="button"
         class="sidebar-mode-btn"
-        :class="{ active: sidebarGroupMode === 'smart' }"
+        :class="{ active: effectiveSidebarMode === 'smart' }"
         :title="t('groupBySmart')"
         :aria-label="t('groupBySmart')"
         @click="switchSidebarMode('smart')"
@@ -87,9 +97,10 @@ const {
         <span>{{ t('modeSmartShort') }}</span>
       </button>
       <button
+        v-if="hasConnectedNodes"
         type="button"
         class="sidebar-mode-btn"
-        :class="{ active: sidebarGroupMode === 'device' }"
+        :class="{ active: effectiveSidebarMode === 'device' }"
         :title="t('groupByDevice')"
         :aria-label="t('groupByDevice')"
         @click="switchSidebarMode('device')"
@@ -141,7 +152,7 @@ const {
 
     <SidebarCreateForm />
 
-    <ConversationDirectory :nodes="modelHub.state.remote_nodes || []" :catalog="catalog" :sync-revision="directorySyncRevision" :creation-revision="directoryCreationRevision" @create-in-project="startCreateConversation" :search="sidebarSearch" :mode="sidebarGroupMode" @select-local="selectConversation" :delete-local="deleteLocalConversation" @select-remote="selectRemoteConversation" />
+    <ConversationDirectory :nodes="modelHub.state.remote_nodes || []" :catalog="catalog" :sync-revision="directorySyncRevision" :creation-revision="directoryCreationRevision" @create-in-project="startCreateConversation" :search="sidebarSearch" :mode="effectiveSidebarMode" @select-local="selectConversation" :delete-local="deleteLocalConversation" @select-remote="selectRemoteConversation" />
   </nav>
 
   <div v-else v-show="navigationOpen" class="navigation-overlay" @keydown.esc="navigationOpen = false">
@@ -182,7 +193,7 @@ const {
       <button
         type="button"
         class="sidebar-mode-btn"
-        :class="{ active: sidebarGroupMode === 'project' }"
+        :class="{ active: effectiveSidebarMode === 'project' }"
         :title="t('groupByProject')"
         :aria-label="t('groupByProject')"
         @click="switchSidebarMode('project')"
@@ -195,7 +206,7 @@ const {
       <button
         type="button"
         class="sidebar-mode-btn"
-        :class="{ active: sidebarGroupMode === 'smart' }"
+        :class="{ active: effectiveSidebarMode === 'smart' }"
         :title="t('groupBySmart')"
         :aria-label="t('groupBySmart')"
         @click="switchSidebarMode('smart')"
@@ -206,9 +217,10 @@ const {
         <span>{{ t('modeSmartShort') }}</span>
       </button>
       <button
+        v-if="hasConnectedNodes"
         type="button"
         class="sidebar-mode-btn"
-        :class="{ active: sidebarGroupMode === 'device' }"
+        :class="{ active: effectiveSidebarMode === 'device' }"
         :title="t('groupByDevice')"
         :aria-label="t('groupByDevice')"
         @click="switchSidebarMode('device')"
@@ -260,7 +272,7 @@ const {
 
       <SidebarCreateForm />
 
-      <ConversationDirectory :nodes="modelHub.state.remote_nodes || []" :catalog="catalog" :sync-revision="directorySyncRevision" :creation-revision="directoryCreationRevision" @create-in-project="startCreateConversation" :search="sidebarSearch" :mode="sidebarGroupMode" @select-local="selectConversation" :delete-local="deleteLocalConversation" @select-remote="selectRemoteConversation" />
+      <ConversationDirectory :nodes="modelHub.state.remote_nodes || []" :catalog="catalog" :sync-revision="directorySyncRevision" :creation-revision="directoryCreationRevision" @create-in-project="startCreateConversation" :search="sidebarSearch" :mode="effectiveSidebarMode" @select-local="selectConversation" :delete-local="deleteLocalConversation" @select-remote="selectRemoteConversation" />
     </nav>
   </div>
 </template>

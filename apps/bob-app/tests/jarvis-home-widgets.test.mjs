@@ -364,3 +364,37 @@ test('All Jarvis home widget i18n keys exist symmetrically in zh-CN.json and en-
     );
   }
 });
+
+test('L1 local-only progressive disclosure hides multi-node sidebar chrome and empty knowledge graph tab', () => {
+  const navDrawerSource = readFileSync(
+    new URL('../src/components/NavigationDrawer.vue', import.meta.url),
+    'utf8',
+  );
+  const convDirSource = readFileSync(
+    new URL('../src/components/ConversationDirectory.vue', import.meta.url),
+    'utf8',
+  );
+  const knowledgeViewSource = readFileSync(
+    new URL('../src/views/KnowledgeView.vue', import.meta.url),
+    'utf8',
+  );
+
+  for (const [name, source] of [
+    ['NavigationDrawer.vue', navDrawerSource],
+    ['ConversationDirectory.vue', convDirSource],
+    ['KnowledgeView.vue', knowledgeViewSource],
+  ]) {
+    const { descriptor } = parse(source, { filename: name });
+    const compiled = compileScript(descriptor, { id: name, inlineTemplate: true });
+    assert.ok(compiled.content, `${name} compiles cleanly`);
+  }
+
+  assert.match(navDrawerSource, /v-if="hasConnectedNodes"[\s\S]*?modeDeviceShort/);
+  assert.match(navDrawerSource, /:mode="effectiveSidebarMode"/);
+  assert.match(convDirSource, /v-if="hasConnectedNodes"\s+class="directory-refresh-bar"/);
+  assert.match(convDirSource, /v-if="hasConnectedNodes\s*&&\s*filterOptions\.nodes\.length>1"/);
+  assert.match(convDirSource, /v-if="s\.remote\s*\|\|\s*hasConnectedNodes"/);
+
+  assert.equal(knowledgeViewSource.includes('KnowledgeGraphView'), false);
+  assert.equal(knowledgeViewSource.includes("activeSubtab === 'graph'"), false);
+});
