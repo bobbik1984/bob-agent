@@ -52,6 +52,10 @@ const editor = ref(null), editingItem = ref(null), saving = ref(false), saveErro
 let returnFocus = null;
 const timelineViewMode = ref('grid'); // 'grid' | 'list'
 const weekOffset = ref(0);
+const compactCalendar = ref(globalThis.matchMedia?.('(max-width: 640px)').matches ?? false);
+const dayCount = computed(() => compactCalendar.value ? 3 : 7);
+let calendarMedia;
+function calendarViewportChanged(e) { cancelGesture(); compactCalendar.value=e.matches; weekOffset.value=0; }
 const selectedProjectFilter = ref('__all__');
 
 const scheduleKindOptions = computed(() => [
@@ -167,8 +171,9 @@ function getMondayOf(dateMs) {
 const baseAnchorMonday = computed(() => getMondayOf(Date.now()));
 
 const activeMonday = computed(() => {
-  const mon = new Date(baseAnchorMonday.value);
-  mon.setDate(mon.getDate() + weekOffset.value * 7);
+  const mon = compactCalendar.value ? new Date() : new Date(baseAnchorMonday.value);
+  mon.setHours(0,0,0,0);
+  mon.setDate(mon.getDate() + weekOffset.value * dayCount.value);
   return mon;
 });
 
@@ -178,7 +183,7 @@ const weekDays = computed(() => {
   const mon = activeMonday.value;
   const todayStr = new Date().toDateString();
   const days = [];
-  for (let i = 0; i < 7; i += 1) {
+  for (let i = 0; i < dayCount.value; i += 1) {
     const d = new Date(mon);
     d.setDate(mon.getDate() + i);
     const yyyy = d.getFullYear();
@@ -186,7 +191,7 @@ const weekDays = computed(() => {
     const dd = String(d.getDate()).padStart(2, '0');
     days.push({
       index: i,
-      labelKey: dayLabelKeys[i],
+      labelKey: dayLabelKeys[(d.getDay()+6)%7],
       dateNum: d.getDate(),
       monthNum: d.getMonth() + 1,
       dateStr: `${yyyy}-${mm}-${dd}`,
@@ -202,7 +207,7 @@ const weekRangeLabel = computed(() => {
   const days = weekDays.value;
   if (!days.length) return '';
   const first = new Date(days[0].startMs);
-  const last = new Date(days[6].startMs);
+  const last = new Date(days[days.length-1].startMs);
   const y1 = first.getFullYear();
   const m1 = first.getMonth() + 1;
   const d1 = first.getDate();
@@ -403,9 +408,9 @@ function scrollToCurrentTime(smooth = false) {
   const hasToday = days.some(d => d.isToday);
   let targetHour = Math.max(0, new Date().getHours() - 2);
 
-  if (!hasToday && days.length === 7) {
+  if (!hasToday && days.length) {
     const weekStart = days[0].startMs;
-    const weekEnd = days[6].endMs;
+    const weekEnd = days[days.length-1].endMs;
     const weekEvents = timelineItems.value
       .map(ev => Number(ev.start_at || ev.due_at_ms || 0))
       .filter(ts => ts >= weekStart && ts < weekEnd)
@@ -430,6 +435,8 @@ function scrollToCurrentTime(smooth = false) {
 }
 
 onMounted(() => {
+  calendarMedia=window.matchMedia('(max-width: 640px)');
+  calendarMedia.addEventListener('change',calendarViewportChanged);
   window.addEventListener('pointermove',moveGesture,{passive:false});
   window.addEventListener('pointerup',finishGesture);
   window.addEventListener('pointercancel',cancelGesture);
@@ -442,11 +449,12 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
+  calendarMedia?.removeEventListener('change',calendarViewportChanged);
   if (nowTimer) clearInterval(nowTimer);
   window.removeEventListener('pointermove',moveGesture);window.removeEventListener('pointerup',finishGesture);window.removeEventListener('pointercancel',cancelGesture);window.removeEventListener('keydown',gestureKey);
 });
 
-watch([activeSubtab, timelineViewMode, weekOffset], () => {
+watch([activeSubtab, timelineViewMode, weekOffset, compactCalendar], () => {
   if (activeSubtab.value === 'timeline' && timelineViewMode.value === 'grid') {
     setTimeout(() => scrollToCurrentTime(false), 60);
   }
@@ -471,7 +479,7 @@ watch([activeSubtab, timelineViewMode, weekOffset], () => {
             <rect x="3" y="4" width="18" height="18" rx="2" />
             <path d="M16 2v4M8 2v4M3 10h18" />
           </svg>
-          <span>{{ t('scheduleTabTimeline') }}</span>
+          <span>{{ t(compactCalendar ? 'scheduleTabThreeDays' : 'scheduleTabTimeline') }}</span>
           <span class="subtab-count">{{ timelineItems.length }}</span>
         </button>
         <button
@@ -579,12 +587,12 @@ watch([activeSubtab, timelineViewMode, weekOffset], () => {
           <div class="week-calendar-toolbar">
             <strong class="week-range-label" :title="weekRangeLabel"><span class="week-range-full">{{ weekRangeLabel }}</span><span class="week-range-short">{{ weekRangeLabel.slice(5).replaceAll('/', '.') }}</span></strong>
             <div class="week-nav-btns">
-              <button type="button" class="calendar-icon-btn" :title="t('calendarPrevWeek')" :aria-label="t('calendarPrevWeek')" @click="weekOffset -= 1"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 6-6 6 6 6" /></svg></button>
-              <button type="button" class="calendar-icon-btn" :class="{ active: weekOffset === 0 }" :title="t('calendarThisWeek')" :aria-label="t('calendarThisWeek')" @click="weekOffset = 0"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="7"/></svg></button>
-              <button type="button" class="calendar-icon-btn" :title="t('calendarNextWeek')" :aria-label="t('calendarNextWeek')" @click="weekOffset += 1"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m10 6 6 6-6 6" /></svg></button>
+              <button type="button" class="calendar-icon-btn" :title="t(compactCalendar ? 'calendarPrevThreeDays' : 'calendarPrevWeek')" :aria-label="t(compactCalendar ? 'calendarPrevThreeDays' : 'calendarPrevWeek')" @click="weekOffset -= 1"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 6-6 6 6 6" /></svg></button>
+              <button type="button" class="calendar-icon-btn" :class="{ active: weekOffset === 0 }" :title="t(compactCalendar ? 'calendarToday' : 'calendarThisWeek')" :aria-label="t(compactCalendar ? 'calendarToday' : 'calendarThisWeek')" @click="weekOffset = 0"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="7"/></svg></button>
+              <button type="button" class="calendar-icon-btn" :title="t(compactCalendar ? 'calendarNextThreeDays' : 'calendarNextWeek')" :aria-label="t(compactCalendar ? 'calendarNextThreeDays' : 'calendarNextWeek')" @click="weekOffset += 1"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m10 6 6 6-6 6" /></svg></button>
             </div>
             <div class="week-calendar-mode-btns">
-              <button type="button" class="calendar-icon-btn" :class="{ active: timelineViewMode === 'grid' }" :aria-pressed="timelineViewMode === 'grid'" :title="t('calendarViewGrid')" :aria-label="t('calendarViewGrid')" @click="timelineViewMode = 'grid'"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M7 3v4m10-4v4M3 11h18m-12 0v10m6-10v10"/></svg></button>
+              <button type="button" class="calendar-icon-btn" :class="{ active: timelineViewMode === 'grid' }" :aria-pressed="timelineViewMode === 'grid'" :title="t(compactCalendar ? 'calendarThreeDayGrid' : 'calendarViewGrid')" :aria-label="t(compactCalendar ? 'calendarThreeDayGrid' : 'calendarViewGrid')" @click="timelineViewMode = 'grid'"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M7 3v4m10-4v4M3 11h18m-12 0v10m6-10v10"/></svg></button>
               <button type="button" class="calendar-icon-btn" :class="{ active: timelineViewMode === 'list' }" :aria-pressed="timelineViewMode === 'list'" :title="t('calendarViewList')" :aria-label="t('calendarViewList')" @click="timelineViewMode = 'list'"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6h12M9 12h12M9 18h12M3 6h1m-1 6h1m-1 6h1"/></svg></button>
             </div>
           </div>
@@ -592,7 +600,7 @@ watch([activeSubtab, timelineViewMode, weekOffset], () => {
           <p v-if="calendarError" role="alert">{{ calendarError }}</p>
           <p v-if="calendarSaving" class="calendar-saving-status" role="status">{{ t('calendarSaving') }}</p>
           <!-- 7-Day 24-Hour Week Calendar Grid (Inherited from legacy WeekTimeline.vue) -->
-          <div v-if="timelineViewMode === 'grid'" class="week-calendar-grid-wrapper">
+          <div v-if="timelineViewMode === 'grid'" class="week-calendar-grid-wrapper" :style="{ '--calendar-days': dayCount }">
             <div class="week-grid-header">
               <div class="time-col-corner"></div>
               <div class="week-grid-header-days">
@@ -889,9 +897,9 @@ watch([activeSubtab, timelineViewMode, weekOffset], () => {
 </template>
 
 <style scoped>
-.todo-all-day-row {display:grid;grid-template-columns:2.4rem repeat(7,minmax(0,1fr));border-bottom:1px solid var(--line);flex-shrink:0;max-height:12rem;overflow-y:auto;scrollbar-gutter:stable;}
+.todo-all-day-row {display:grid;grid-template-columns:2.4rem repeat(var(--calendar-days),minmax(0,1fr));border-bottom:1px solid var(--line);flex-shrink:0;max-height:min(10rem,28dvh);overflow-y:auto;scrollbar-gutter:stable;}
 .todo-all-day-row > span {font-size:.7rem;color:var(--text-secondary);padding:4px;}
-.todo-all-day-cell {min-width:0;padding:3px;border-left:1px solid var(--line);}
+.todo-all-day-cell {min-width:0;padding:3px;border-right:1px solid var(--line);}
 .todo-calendar-marker {display:block;width:100%;text-align:left;overflow-wrap:anywhere;font-size:.75rem;padding:4px;margin-bottom:3px;background:var(--bg-secondary);color:var(--text-primary);border:1px solid var(--accent-primary);border-radius:var(--radius-btn);}
 .todo-calendar-marker small,.schedule-time-context {color:var(--text-secondary);}
 .todo-calendar-marker.done {opacity:.6;}
@@ -905,5 +913,13 @@ watch([activeSubtab, timelineViewMode, weekOffset], () => {
 .resize-start {top:0;}.resize-end {bottom:0;}
 .calendar-resize-handle:hover,.calendar-resize-handle:focus-visible {background:var(--accent-soft);outline:1px solid var(--accent-primary);}
 .todo-calendar-marker {touch-action:none;cursor:grab;border-radius:4px;}
-.todo-calendar-marker strong {font-weight:600;}
+.todo-calendar-marker strong {font-weight:600;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;}
+/* Identical axes, track sizing and scrollbar reservations across all three bands. */
+.week-grid-header,.week-grid-body,.todo-all-day-row {overflow-y:auto;overflow-x:hidden;scrollbar-gutter:stable;scrollbar-width:thin;box-sizing:border-box;}
+.week-grid-header::-webkit-scrollbar,.week-grid-body::-webkit-scrollbar,.todo-all-day-row::-webkit-scrollbar {display:block;width:6px;}
+.week-grid-header::-webkit-scrollbar-thumb,.week-grid-body::-webkit-scrollbar-thumb,.todo-all-day-row::-webkit-scrollbar-thumb {background:var(--text-tertiary);border-radius:3px;}
+.week-grid-header-days,.days-columns-grid {grid-template-columns:repeat(var(--calendar-days),minmax(0,1fr));}
+.time-col-corner,.time-axis-col {width:2.4rem;box-sizing:border-box;}
+.todo-all-day-row > span {border-right:1px solid var(--line);box-sizing:border-box;}
+.todo-all-day-cell:last-child {border-right:0;}
 </style>

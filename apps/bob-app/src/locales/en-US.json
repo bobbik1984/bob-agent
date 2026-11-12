@@ -1071,5 +1071,10 @@
   "calendarSaving": "Saving time…",
   "calendarResizeStart": "Drag to adjust start time",
   "calendarResizeEnd": "Drag to adjust end time",
-  "calendarEndOptional": "End time (optional)"
+  "calendarEndOptional": "End time (optional)",
+  "calendarPrevThreeDays": "Previous three days",
+  "calendarNextThreeDays": "Next three days",
+  "calendarToday": "Today",
+  "scheduleTabThreeDays": "Three days",
+  "calendarThreeDayGrid": "Three-day calendar"
 }

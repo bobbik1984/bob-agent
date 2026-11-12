@@ -1071,5 +1071,10 @@
   "calendarSaving": "正在保存时间…",
   "calendarResizeStart": "拖动调整开始时间",
   "calendarResizeEnd": "拖动调整结束时间",
-  "calendarEndOptional": "结束时间（可选）"
+  "calendarEndOptional": "结束时间（可选）",
+  "calendarPrevThreeDays": "前三天",
+  "calendarNextThreeDays": "后三天",
+  "calendarToday": "今天",
+  "scheduleTabThreeDays": "三天日程",
+  "calendarThreeDayGrid": "三天日历视图"
 }
