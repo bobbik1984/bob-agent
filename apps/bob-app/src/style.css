@@ -4569,3 +4569,10 @@ dialog::backdrop {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* The app shell never scrolls: do not reserve a viewport-side scrollbar lane.
+   Chat scrolling stays native, without a track consuming horizontal space. */
+html { scrollbar-width: none; }
+html::-webkit-scrollbar { width: 0; height: 0; }
+.main > .history { scrollbar-gutter: auto; scrollbar-width: none; }
+.main > .history::-webkit-scrollbar { width: 0; height: 0; }

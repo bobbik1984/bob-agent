@@ -217,19 +217,17 @@ button.jarvis-orb:focus-visible {
   background: var(--bg-primary);
 }
 
-/* Layer 1: Core Mesh Gradient */
+/* Broad overlapping colours avoid hard wedges and dark seams. */
 .orb-mesh {
   position: absolute;
-  inset: -5%;
+  inset: -12%;
   border-radius: var(--radius-pill);
   background:
-    radial-gradient(circle at 30% 25%, var(--orb-core-cyan) 0%, transparent 55%),
-    radial-gradient(circle at 75% 30%, var(--orb-core-violet) 0%, transparent 50%),
-    radial-gradient(circle at 70% 75%, var(--orb-core-magenta) 0%, transparent 55%),
-    radial-gradient(circle at 25% 70%, var(--orb-core-blue) 0%, transparent 50%),
-    radial-gradient(circle at 50% 50%, var(--bg-primary) 0%, transparent 100%);
-  filter: blur(4px);
-  transition: background 0.4s ease;
+    radial-gradient(ellipse at 24% 22%, var(--orb-core-cyan), transparent 72%),
+    radial-gradient(ellipse at 78% 80%, var(--orb-core-magenta), transparent 75%),
+    linear-gradient(140deg in oklab, var(--orb-core-cyan), var(--orb-core-blue) 38%, var(--orb-core-violet) 68%, var(--orb-core-magenta));
+  filter: blur(8px);
+  transition: background 0.6s ease;
 }
 
 .jarvis-orb.mood-needs_human .orb-mesh,
@@ -254,9 +252,9 @@ button.jarvis-orb:focus-visible {
     var(--orb-core-blue),
     var(--orb-core-cyan)
   );
-  opacity: 0.45;
-  mix-blend-mode: overlay;
-  filter: blur(8px);
+  opacity: 0.18;
+  mix-blend-mode: normal;
+  filter: blur(16px);
 }
 
 .jarvis-orb.mood-needs_human .orb-swirl,
@@ -278,7 +276,7 @@ button.jarvis-orb:focus-visible {
   border-radius: var(--radius-pill);
   box-shadow:
     inset 0 0 0 1px var(--orb-surface-ring),
-    inset 0 2px 4px var(--orb-surface-ring),
+    inset 0 3px 12px color-mix(in srgb, var(--orb-surface-ring) 50%, transparent),
     inset 0 -2px 6px color-mix(in srgb, CanvasText 10%, transparent);
   pointer-events: none;
 }
@@ -305,7 +303,7 @@ button.jarvis-orb:focus-visible {
 }
 
 .jarvis-orb.mood-idle .orb-swirl {
-  animation: orb-spin 12s linear infinite;
+  animation: orb-spin 24s linear infinite;
 }
 
 /* Mood 2: Thinking Fluid Swirl & Ripple */

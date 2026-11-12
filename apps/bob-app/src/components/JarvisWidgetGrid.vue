@@ -1,6 +1,7 @@
 <script setup>
-import { computed, inject, ref } from 'vue';
+import { computed, inject, ref, unref, onMounted } from 'vue';
 import { useI18n } from 'vue-i18n';
+import { todayItems } from '../today-items.mjs';
 import FeatureWidgetFrame from './FeatureWidgetFrame.vue';
 import FeatureTrialBanner from './FeatureTrialBanner.vue';
 
@@ -17,14 +18,15 @@ const focusComposer = shell.focusComposer;
 const updateDraft = shell.updateDraft;
 
 const sparkInput = ref('');
+onMounted(() => shell.loadPersonalOps?.());
 
 const pendingApprovalCount = computed(
   () => jarvisHome.value?.pendingApprovalCount?.value ?? 0,
 );
 
 const todaySchedules = computed(() => {
-  const list = personalOps.value?.schedules || [];
-  return list.filter(item => item.status !== 'completed').slice(0, 3);
+  const list = unref(personalOps.value)?.schedules || [];
+  return todayItems(list).slice(0, 3);
 });
 
 const unsortedInboxCount = computed(() => {

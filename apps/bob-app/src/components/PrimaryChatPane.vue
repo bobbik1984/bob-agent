@@ -132,7 +132,7 @@ const isMainJarvisSession = computed(() => !sessionId.value || sessionId.value =
     <div v-show="remoteConversation && activeDrawer === 'chat' && !settingsOpen" class="remote-session-host"><DshSessions v-if="remoteConversation" :key="remoteConversation.node.id + remoteConversation.session.id" :target="remoteConversation" :nodes="modelHub.state.remote_nodes || []" /></div>
     <main v-show="activeDrawer === 'chat' && !settingsOpen && !remoteConversation" class="main">
       <!-- Jarvis Sticky Bar & Widget Sheet when conversation has messages -->
-      <div v-if="messages?.length && isMainJarvisSession" class="jarvis-sticky-bar">
+      <div v-if="messages?.length && isMainJarvisSession && (pendingApprovalCount || jarvisHome?.widgetSheetOpen?.value)" class="jarvis-sticky-bar">
         <JarvisOrb
           size="compact"
           :mood="jarvisOrbMood"
@@ -154,20 +154,6 @@ const isMainJarvisSession = computed(() => !sessionId.value || sessionId.value =
       </div>
       <div v-if="messages?.length && isMainJarvisSession && jarvisHome?.widgetSheetOpen?.value" class="jarvis-widget-sheet">
         <JarvisWidgetGrid />
-      </div>
-      <div
-        v-if="readiness && readiness.pending_messages > 0"
-        class="connection-note"
-        role="status"
-      >
-        <span class="storage-summary">
-          {{
-            t(executionEnabled ? 'localExecutionStatus' : 'localStatus', {
-              saved: readiness.saved_messages,
-              pending: readiness.pending_messages,
-            })
-          }}
-        </span>
       </div>
       <div
         v-if="activeConversationItem && !activeConversationItem.target_device_online"
@@ -199,7 +185,7 @@ const isMainJarvisSession = computed(() => !sessionId.value || sessionId.value =
         @touchcancel.passive="onHistoryTouchEnd"
         @wheel.passive="onHistoryWheel"
       >
-        <div ref="chatContent" data-chat-content>
+        <div ref="chatContent" data-chat-content :class="{ 'empty-conversation-stage': !loading && !messages.length && !jarvisHome?.widgetSheetOpen?.value }">
         <div v-if="loading && !messages.length" class="empty loading-brand">
           <img :src="brandLogo" :alt="t('brand')" />
           <p>{{ t('loading') }}</p>
@@ -212,20 +198,8 @@ const isMainJarvisSession = computed(() => !sessionId.value || sessionId.value =
             @activate="focusComposer"
           />
           <h1>{{ t('startTitle') }}</h1>
-          <p>
-            {{
-              t(
-                directProviderEnabled
-                  ? 'startDirectHint'
-                  : homeConfigured
-                    ? 'homeStartHint'
-                    : executionEnabled
-                      ? 'startExecutionHint'
-                      : 'startHint',
-              )
-            }}
-          </p>
-          <JarvisWidgetGrid />
+          <p>{{ t('assistantStartHint') }}</p>
+          <JarvisWidgetGrid v-if="jarvisHome?.widgetSheetOpen?.value" />
         </div>
         <article
           v-for="(message, msgIdx) in messages"
@@ -559,6 +533,16 @@ const isMainJarvisSession = computed(() => !sessionId.value || sessionId.value =
 .chat-jump-row{height:0;position:relative;z-index:2;display:flex;justify-content:flex-end;padding:0 20px;transform:translateY(-46px)}
 .chat-jump-latest{display:grid;place-items:center;width:36px;height:36px;border-radius:50%;border:1px solid var(--border-color);background:var(--bg-secondary);color:var(--accent-primary);cursor:pointer}
 
+/* Centre the empty assistant in the available area above the composer.
+   The supporting copy places the sphere slightly above the optical midpoint. */
+.empty-conversation-stage { min-height: 100%; display: flex; }
+.empty-conversation-stage .jarvis-home-stage { justify-content: center; }
+.empty-conversation-stage :deep(.orb-hero) {
+  width: clamp(7rem, 19vmin, 9rem);
+  height: clamp(7rem, 19vmin, 9rem);
+  flex-shrink: 0;
+  margin-bottom: var(--gap-lg);
+}
 .jarvis-home-stage {
   display: flex;
   flex-direction: column;
