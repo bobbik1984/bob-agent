@@ -176,227 +176,69 @@ button.jarvis-orb:focus-visible {
   height: 2.125rem;
 }
 
-/* Outer Ambient Glow / Halo */
+/* Water surface: restrained refraction and a moving specular reflection. */
 .orb-halo {
-  position: absolute;
-  inset: -15%;
-  border-radius: var(--radius-pill);
-  background: radial-gradient(
-    circle,
-    var(--orb-glow-soft) 0%,
-    color-mix(in srgb, var(--orb-core-violet) 25%, transparent) 40%,
-    color-mix(in srgb, var(--orb-core-cyan) 15%, transparent) 70%,
-    transparent 100%
-  );
-  filter: blur(12px);
-  pointer-events: none;
-  opacity: 0.75;
-  transition: opacity 0.4s ease, filter 0.4s ease;
+  position: absolute; inset: 6%; border-radius: 50%;
+  background: var(--water-shadow); filter: blur(18px); opacity: .25;
+  transform: translateY(12%); pointer-events: none;
 }
-
-.jarvis-orb.mood-needs_human .orb-halo,
-.jarvis-orb.mood-needs-human .orb-halo {
-  background: radial-gradient(
-    circle,
-    var(--orb-amber-glow) 0%,
-    color-mix(in srgb, var(--orb-amber-core) 30%, transparent) 50%,
-    transparent 100%
-  );
-  opacity: 0.95;
-  filter: blur(14px);
-}
-
-/* Spherical Core Container */
 .orb-sphere {
-  position: relative;
-  width: 100%;
-  height: 100%;
-  border-radius: var(--radius-pill);
-  overflow: hidden;
-  box-shadow: 0 4px 16px color-mix(in srgb, var(--line) 40%, transparent);
-  background: var(--bg-primary);
+  position: relative; width: 100%; height: 100%; overflow: hidden;
+  border-radius: 50%;
+  background: var(--water-body);
+  box-shadow: inset 1px 2px 3px var(--water-highlight), inset -4px -6px 10px var(--water-edge), 0 8px 22px var(--water-shadow);
+  transform: scaleX(var(--water-strain)) scaleY(calc(1 / var(--water-strain)));
+  animation: water-tension 9s ease-in-out infinite;
 }
-
-/* Broad overlapping colours avoid hard wedges and dark seams. */
 .orb-mesh {
-  position: absolute;
-  inset: -12%;
-  border-radius: var(--radius-pill);
+  position: absolute; inset: 0; border-radius: inherit;
   background:
-    radial-gradient(ellipse at 24% 22%, var(--orb-core-cyan), transparent 72%),
-    radial-gradient(ellipse at 78% 80%, var(--orb-core-magenta), transparent 75%),
-    linear-gradient(140deg in oklab, var(--orb-core-cyan), var(--orb-core-blue) 38%, var(--orb-core-violet) 68%, var(--orb-core-magenta));
-  filter: blur(8px);
-  transition: background 0.6s ease;
+    radial-gradient(ellipse at 28% 20%, var(--water-highlight), transparent 34%),
+    radial-gradient(ellipse at 72% 78%, var(--water-highlight), transparent 38%),
+    radial-gradient(ellipse at 54% 52%, transparent 38%, var(--water-edge) 76%, var(--water-highlight) 99%);
 }
-
-.jarvis-orb.mood-needs_human .orb-mesh,
-.jarvis-orb.mood-needs-human .orb-mesh {
-  background:
-    radial-gradient(circle at 50% 40%, var(--orb-amber-core) 0%, transparent 70%),
-    radial-gradient(circle at 40% 70%, var(--orb-amber-glow) 0%, transparent 60%),
-    var(--bg-primary);
-  filter: blur(3px);
-}
-
-/* Layer 2: Conic Fluid Swirl */
 .orb-swirl {
-  position: absolute;
-  inset: -20%;
-  border-radius: var(--radius-pill);
-  background: conic-gradient(
-    from 0deg,
-    var(--orb-core-cyan),
-    var(--orb-core-violet),
-    var(--orb-core-magenta),
-    var(--orb-core-blue),
-    var(--orb-core-cyan)
-  );
-  opacity: 0.18;
-  mix-blend-mode: normal;
-  filter: blur(16px);
+  position: absolute; inset: 10%; border-radius: 50%; opacity: .3;
+  background: radial-gradient(ellipse at 70% 75%, var(--water-caustic), transparent 55%);
+  filter: blur(5px);
 }
-
-.jarvis-orb.mood-needs_human .orb-swirl,
-.jarvis-orb.mood-needs-human .orb-swirl {
-  background: conic-gradient(
-    from 0deg,
-    var(--orb-amber-core),
-    var(--orb-amber-glow),
-    var(--color-warning),
-    var(--orb-amber-core)
-  );
-  opacity: 0.35;
-}
-
-/* Layer 3: Glass Sheen & Surface Ring */
 .orb-sheen {
-  position: absolute;
-  inset: 0;
-  border-radius: var(--radius-pill);
-  box-shadow:
-    inset 0 0 0 1px var(--orb-surface-ring),
-    inset 0 3px 12px color-mix(in srgb, var(--orb-surface-ring) 50%, transparent),
-    inset 0 -2px 6px color-mix(in srgb, CanvasText 10%, transparent);
-  pointer-events: none;
+  position: absolute; inset: 5%; border-radius: inherit; pointer-events: none;
+  border-top: 2px solid var(--water-highlight);
+  border-left: 1px solid var(--water-highlight);
+  transform: rotate(-28deg);
+}
+.orb-sheen::after {
+  content: ''; position: absolute; width: 22%; height: 9%; top: 12%; left: 26%;
+  border-radius: 50%; background: var(--water-highlight); filter: blur(2px);
+}
+/* One interpolated strain with its reciprocal keeps projected area constant
+   throughout the animation, not just at keyframes. This is a surface-tension
+   visual approximation, not a fluid simulation. */
+@property --water-strain {
+  syntax: '<number>';
+  inherits: false;
+  initial-value: 1;
+}
+@keyframes water-tension {
+  0%, 18%, 100% { --water-strain: 1; }
+  32% { --water-strain: .975; }
+  46% { --water-strain: 1.018; }
+  60% { --water-strain: .992; }
+  74% { --water-strain: 1.004; }
+  88% { --water-strain: 1; }
+}
+.mood-thinking .orb-sphere { animation-duration: 4s; }
+.mood-needs_human .orb-mesh, .mood-needs-human .orb-mesh {
+  background: radial-gradient(ellipse at 70% 78%, var(--orb-amber-glow), transparent 65%);
 }
 
-/* Mood 1: Idle Breathing */
-@keyframes orb-breathe {
-  0%, 100% {
-    transform: scale(0.98);
-    opacity: 0.92;
-  }
-  50% {
-    transform: scale(1.02);
-    opacity: 1;
-  }
-}
-
-@keyframes orb-spin {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
-}
-
-.jarvis-orb.mood-idle .orb-visual {
-  animation: orb-breathe 4s ease-in-out infinite;
-}
-
-.jarvis-orb.mood-idle .orb-swirl {
-  animation: orb-spin 24s linear infinite;
-}
-
-/* Mood 2: Thinking Fluid Swirl & Ripple */
-@keyframes orb-think-pulse {
-  0%, 100% {
-    transform: scale(0.97);
-    filter: brightness(1);
-  }
-  50% {
-    transform: scale(1.03);
-    filter: brightness(1.15);
-  }
-}
-
-@keyframes orb-mesh-ripple {
-  0% { transform: scale(0.95) rotate(-5deg); }
-  100% { transform: scale(1.05) rotate(5deg); }
-}
-
-.jarvis-orb.mood-thinking .orb-visual {
-  animation: orb-think-pulse 2s ease-in-out infinite;
-}
-
-.jarvis-orb.mood-thinking .orb-swirl {
-  animation: orb-spin 3s linear infinite;
-  opacity: 0.7;
-}
-
-.jarvis-orb.mood-thinking .orb-mesh {
-  animation: orb-mesh-ripple 2.5s ease-in-out infinite alternate;
-}
-
-/* Mood 3: Speaking Voice Wave Rings */
-@keyframes orb-speak-pulse {
-  0%, 100% { transform: scale(0.97); }
-  35% { transform: scale(1.04); }
-  70% { transform: scale(0.99); }
-}
-
-.jarvis-orb.mood-speaking .orb-visual {
-  animation: orb-speak-pulse 1.1s ease-in-out infinite;
-}
-
-.orb-waves {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.orb-wave-ring {
-  position: absolute;
-  inset: -5%;
-  border-radius: var(--radius-pill);
-  border: 1.5px solid var(--orb-core-cyan);
-  opacity: 0;
-  animation: orb-wave-expand 1.8s cubic-bezier(0.2, 0.6, 0.35, 1) infinite;
-}
-
-.orb-wave-ring.wave-2 {
-  animation-delay: 0.9s;
-  border-color: var(--orb-core-violet);
-}
-
-@keyframes orb-wave-expand {
-  0% {
-    transform: scale(0.95);
-    opacity: 0.65;
-  }
-  100% {
-    transform: scale(1.45);
-    opacity: 0;
-  }
-}
-
-/* Mood 4: Needs Human Amber Beacon */
-@keyframes orb-amber-beacon {
-  0%, 100% {
-    transform: scale(0.97);
-    filter: drop-shadow(0 0 6px var(--orb-amber-glow));
-  }
-  50% {
-    transform: scale(1.04);
-    filter: drop-shadow(0 0 14px var(--orb-amber-core));
-  }
-}
-
-.jarvis-orb.mood-needs_human .orb-visual,
-.jarvis-orb.mood-needs-human .orb-visual {
-  animation: orb-amber-beacon 1.6s ease-in-out infinite;
-}
+/* State changes alter tension cadence, never inflate the whole drop. */
+.jarvis-orb.mood-speaking .orb-sphere { animation-duration: 5s; }
+.jarvis-orb.mood-thinking .orb-swirl { opacity: .45; }
+.orb-waves { display: none; }
+.jarvis-orb.mood-needs_human .orb-halo,
+.jarvis-orb.mood-needs-human .orb-halo { background: var(--orb-amber-glow); }
 
 /* Semantic Attention Badge */
 .orb-badge {

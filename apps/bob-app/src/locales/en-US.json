@@ -1,4 +1,7 @@
 {
+  "claudeCancelTakeoverBtn": "Cancel interruption",
+  "todoCompletedArchive": "Completed",
+  "todoUnknownYear": "Unknown year",
   "assistantStartHint": "Tell me what you would like to do.",
   "dshNotDispatched": "The node is switching session connections. This message was not sent. Your draft is preserved; please retry shortly.",
   "processCall_command": "Command calls: {count}",

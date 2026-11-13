@@ -1,4 +1,7 @@
 {
+  "claudeCancelTakeoverBtn": "取消打断",
+  "todoCompletedArchive": "已完成",
+  "todoUnknownYear": "年份未知",
   "assistantStartHint": "直接告诉我你想做什么。",
   "dshNotDispatched": "节点正在切换会话连接，此消息尚未发送。内容已保留，请稍后重试。",
   "processCall_command": "命令调用 {count} 次",

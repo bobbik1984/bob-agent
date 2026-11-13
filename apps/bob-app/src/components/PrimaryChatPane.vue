@@ -85,6 +85,16 @@ const {
   onHistoryWheel,
 } = inject('bobAppShell');
 
+const emptyHome = computed(() => !loading.value && !messages.value.length && !jarvisHome?.widgetSheetOpen?.value);
+const emptyHeight = ref(400);
+let emptyObserver;
+watch(historyRegion, region => {
+  emptyObserver?.disconnect();
+  if (!region || typeof ResizeObserver === 'undefined') return;
+  emptyObserver = new ResizeObserver(() => { emptyHeight.value = region.clientHeight; });
+  emptyObserver.observe(region);
+}, { flush: 'post' });
+onUnmounted(() => emptyObserver?.disconnect());
 const awayFromLatest=ref(false),chatContent=ref(null);
 const chatScroll=createChatScroll(value=>{awayFromLatest.value=value;});
 watch([historyRegion,chatContent],()=>chatScroll.bind(historyRegion.value),{flush:'post'});
@@ -174,6 +184,8 @@ const isMainJarvisSession = computed(() => !sessionId.value || sessionId.value =
       <section
         ref="historyRegion"
         class="history"
+        :class="{ 'history-empty-home': emptyHome, 'history-empty-tight': emptyHome && emptyHeight < 240 }"
+        :style="emptyHome ? { '--empty-orb-size': Math.max(28, Math.min(144, emptyHeight * 0.38)) + 'px' } : undefined"
         tabindex="0"
         :aria-label="t('conversation')"
         aria-live="polite"
@@ -535,11 +547,18 @@ const isMainJarvisSession = computed(() => !sessionId.value || sessionId.value =
 
 /* Centre the empty assistant in the available area above the composer.
    The supporting copy places the sphere slightly above the optical midpoint. */
-.empty-conversation-stage { min-height: 100%; display: flex; }
+.history-empty-home { overflow: hidden; display: flex; min-height: 0; }
+.empty-conversation-stage { flex: 1; height: 100%; min-height: 0; display: flex; }
+.empty-conversation-stage .jarvis-home-stage { min-height: 0; padding-block: 8px; gap: 8px; }
+.empty-conversation-stage .jarvis-home-stage p { margin: 0; }
+.history-empty-tight .jarvis-home-stage > p { display: none; }
+.history-empty-tight .jarvis-home-stage > h1 { font-size: var(--text-sm); margin: 0; }
+.history-empty-tight .empty-conversation-stage :deep(.orb-hero) { margin-bottom: 0; }
+
 .empty-conversation-stage .jarvis-home-stage { justify-content: center; }
 .empty-conversation-stage :deep(.orb-hero) {
-  width: clamp(7rem, 19vmin, 9rem);
-  height: clamp(7rem, 19vmin, 9rem);
+  width: var(--empty-orb-size, 7rem);
+  height: var(--empty-orb-size, 7rem);
   flex-shrink: 0;
   margin-bottom: var(--gap-lg);
 }

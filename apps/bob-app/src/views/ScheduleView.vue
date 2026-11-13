@@ -2,6 +2,7 @@
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import CustomSelect from '../components/CustomSelect.vue';
+import { todoSections } from '../todo-archive.mjs';
 import { calendarEntries, entryDay } from '../todo-calendar.mjs';
 import { calendarPatch, timedDayLayout } from '../calendar-gesture.mjs';
 import TicketWalletPanel from '../components/TicketWalletPanel.vue';
@@ -148,6 +149,8 @@ const filteredTodoItems = computed(() => {
   }
   return list.filter(item => item.project_id === selectedProjectFilter.value);
 });
+
+const todoDisplaySections = computed(() => todoSections(filteredTodoItems.value));
 
 const filteredItems = computed(() => {
   if (activeSubtab.value === 'timeline') return timelineItems.value;
@@ -790,9 +793,14 @@ watch([activeSubtab, timelineViewMode, weekOffset, compactCalendar], () => {
           <p>{{ t('scheduleEmptyTodo') }}</p>
         </div>
 
-        <div v-else class="schedule-items-list">
+        <template v-for="section in todoDisplaySections" :key="section.key">
+          <component :is="section.archived ? 'details' : 'div'" v-if="section.count" class="todo-section" :class="{ 'todo-completed-archive': section.archived }">
+            <summary v-if="section.archived">{{ t('todoCompletedArchive') }} <span class="subtab-count">{{ section.count }}</span></summary>
+            <component :is="section.archived ? 'details' : 'div'" v-for="group in section.groups" :key="group.key" class="todo-year-group">
+              <summary v-if="section.archived">{{ group.key === 'unknown' ? t('todoUnknownYear') : group.key }} <span class="subtab-count">{{ group.items.length }}</span></summary>
+              <div class="schedule-items-list">
           <article
-            v-for="item in filteredTodoItems"
+            v-for="item in group.items"
             :key="item.id"
             class="schedule-item-card hub-card"
             :class="{ done: isCompleted(item), cancelled: item.status === 'cancelled' }"
@@ -874,6 +882,9 @@ watch([activeSubtab, timelineViewMode, weekOffset, compactCalendar], () => {
             </div>
           </article>
         </div>
+            </component>
+          </component>
+        </template>
       </template>
 
       <!-- SUBTAB 3: CRON & DAILY ROUTINES -->
@@ -897,6 +908,11 @@ watch([activeSubtab, timelineViewMode, weekOffset, compactCalendar], () => {
 </template>
 
 <style scoped>
+.todo-completed-archive { margin-top: var(--space-4, 16px); }
+.todo-completed-archive summary { cursor: pointer; padding: 12px 0; color: var(--text-secondary); font-weight: 600; }
+.todo-completed-archive > .todo-year-group { margin-inline-start: 16px; }
+.todo-completed-archive summary:focus-visible { outline: 2px solid var(--accent-primary); outline-offset: 2px; }
+
 .todo-all-day-row {display:grid;grid-template-columns:2.4rem repeat(var(--calendar-days),minmax(0,1fr));border-bottom:1px solid var(--line);flex-shrink:0;max-height:min(10rem,28dvh);overflow-y:auto;scrollbar-gutter:stable;}
 .todo-all-day-row > span {font-size:.7rem;color:var(--text-secondary);padding:4px;}
 .todo-all-day-cell {min-width:0;padding:3px;border-right:1px solid var(--line);}

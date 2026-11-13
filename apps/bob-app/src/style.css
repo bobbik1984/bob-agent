@@ -19,7 +19,14 @@
   --color-error: oklch(0.63 0.21 25);
   --content-max-width: 68rem;
 
-  /* Siri-like fluid colorful orb tokens (BOB-D-015) */
+  /* Neutral water material, shared by light and dark themes. */
+  --water-body: light-dark(oklch(0.91 0.045 235 / .48), oklch(0.65 0.045 235 / .24));
+  --water-highlight: light-dark(oklch(1 0 0 / .95), oklch(0.97 0.005 210 / .8));
+  --water-edge: light-dark(oklch(0.57 0.045 235 / .4), oklch(0.77 0.035 235 / .38));
+  --water-shadow: light-dark(oklch(0.3 0.005 210 / .12), oklch(0.1 0 0 / .35));
+  --water-caustic: light-dark(oklch(0.82 0.05 230 / .45), oklch(0.85 0.045 230 / .5));
+
+  /* Semantic attention colours retained for approval states. */
   --orb-core-cyan: light-dark(oklch(0.68 0.16 215), oklch(0.78 0.15 215));
   --orb-core-violet: light-dark(oklch(0.60 0.22 295), oklch(0.72 0.20 295));
   --orb-core-magenta: light-dark(oklch(0.65 0.24 340), oklch(0.74 0.22 340));
@@ -4576,3 +4583,8 @@ html { scrollbar-width: none; }
 html::-webkit-scrollbar { width: 0; height: 0; }
 .main > .history { scrollbar-gutter: auto; scrollbar-width: none; }
 .main > .history::-webkit-scrollbar { width: 0; height: 0; }
+
+/* Avoid mobile browser focus zoom shifting the empty assistant out of view. */
+@media (max-width: 640px) {
+  .main:has(.history-empty-home) .composer textarea { font-size: max(16px, var(--text-base)); }
+}

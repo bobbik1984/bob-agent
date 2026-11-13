@@ -23,6 +23,16 @@ const chatScroll=createChatScroll(value=>{awayFromLatest.value=value;});
 watch([reader,chatContent],()=>chatScroll.bind(reader.value),{flush:'post'});
 const pullUpDistance=ref(0),attachments=ref([]),fileInput=ref(null);let touchStartY=null,wheelOverscroll=0,wheelResetTimer;
 const approvalMode=ref('interactive'),takeoverPrompt=ref(null),terminalHolderOverride=ref(null);
+const composerInput = ref(null);
+async function cancelTakeover() {
+  if (sending.value) return;
+  const session = selected.value;
+  takeoverPrompt.value = null;
+  // Dismiss only: preserve draft/attachments and never send or cancel a remote task.
+  await nextTick();
+  if (selected.value === session) composerInput.value?.focus({ preventScroll: true });
+}
+
 const activeTerminalHolder=computed(()=>terminalHolderOverride.value||history.value?.terminal_holder||null);
 const isClaudeRemoteControl=computed(()=>Boolean(activeTerminalHolder.value?.busy&&activeTerminalHolder.value?.remote_control));
 const isClaudeTerminalBusy=computed(()=>Boolean(activeTerminalHolder.value?.busy&&!activeTerminalHolder.value?.remote_control));
@@ -661,7 +671,7 @@ onUnmounted(()=>{resetDshStop();stopVoiceInput();chatScroll.dispose();clearTimeo
   </div>
   <div v-if="selected && (awayFromLatest || hasNewMessages)" class="dsh-new-msg-bar"><button type="button" class="dsh-new-msg-btn" @click="scrollToBottom" :aria-label="t('chatJumpLatest')" :title="t('chatJumpLatest')"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M12 4v16m-6-6 6 6 6-6"/></svg></button></div>
   <form v-if="selected" class="dsh-compose" @submit.prevent="send()">
-   <div v-if="takeoverPrompt && !isClaudeRemoteControl" class="dsh-takeover-card" role="alertdialog" :aria-label="t('claudeTakeoverConfirmTitle')">
+   <div v-if="takeoverPrompt && !isClaudeRemoteControl" class="dsh-takeover-card" @keydown.esc.stop.prevent="cancelTakeover" role="alertdialog" :aria-label="t('claudeTakeoverConfirmTitle')">
     <div class="dsh-takeover-body">
      <strong>{{ t('claudeTakeoverConfirmTitle') }}</strong>
      <p>{{ t('claudeTakeoverConfirmDesc', {pid: takeoverPrompt?.pid || '?'}) }}</p>
@@ -669,6 +679,7 @@ onUnmounted(()=>{resetDshStop();stopVoiceInput();chatScroll.dispose();clearTimeo
     <div class="dsh-takeover-actions">
      <button type="button" class="dsh-takeover-primary" :disabled="sending" @click="send({takeover: true})">{{ t('claudeTakeoverSendBtn') }}</button>
      <button type="button" class="dsh-takeover-secondary" :disabled="sending" @click="takeoverPrompt = null">{{ t('claudeKeepBoardBtn') }}</button>
+     <button type="button" class="dsh-takeover-secondary" :disabled="sending" @click="cancelTakeover">{{ t('claudeCancelTakeoverBtn') }}</button>
     </div>
    </div>
    <section v-if="dshQuestions.length" class="dsh-question-notice" aria-live="polite">
@@ -687,7 +698,7 @@ onUnmounted(()=>{resetDshStop();stopVoiceInput();chatScroll.dispose();clearTimeo
    </section>
    <p v-if="activityLabel && !dshQuestionBlocking && !dshStop" class="dsh-activity" role="status" aria-live="polite"><span class="terminal-rod" aria-hidden="true">[{{ rodFrame }}]</span> <span>{{activityLabel}}</span><span class="terminal-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span></p>
    <div class="dsh-compose-box">
-    <textarea v-model="draft" :disabled="sending || isClaudeRemoteControl" :placeholder="t(isClaudeRemoteControl ? 'claudeRemoteControlTitle' : 'dshPrompt')" :aria-label="t('dshPrompt')" rows="2" @keydown="onComposeKeydown" @paste="onComposerPaste" @dragover.prevent @drop.prevent="onComposerDrop"></textarea>
+    <textarea ref="composerInput" v-model="draft" :disabled="sending || isClaudeRemoteControl" :placeholder="t(isClaudeRemoteControl ? 'claudeRemoteControlTitle' : 'dshPrompt')" :aria-label="t('dshPrompt')" rows="2" @keydown="onComposeKeydown" @paste="onComposerPaste" @dragover.prevent @drop.prevent="onComposerDrop"></textarea>
     <div v-if="attachments.length" class="composer-attachments"><span v-for="att in attachments" :key="att.id" class="composer-attachment-chip"><img v-if="att.base64 && att.type?.startsWith('image/')" :src="'data:' + att.type + ';base64,' + att.base64" alt="" class="chip-thumb" /><span class="chip-file-name">{{ att.name }}</span><button type="button" class="chip-remove-btn" :aria-label="t('removeAttachment')" @click="removeAttachment(att.id)">×</button></span></div>
     <div class="dsh-compose-toolbar">
      <div class="dsh-compose-left-tools">
