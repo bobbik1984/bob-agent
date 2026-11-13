@@ -229,7 +229,7 @@ Dashboard 的 `#inbox` 是前端路由，其数据来自独立 `/api/inbox`；Bo
 
 文件预览补充：链接、预加载、成果面板和缓存携带消息序号；后端只接受该凭据下读取的原生消息证据。缓存失效时围绕目标消息有界恢复，不扫描全部历史。同轮多个已观测目录至多核对八个精确文件路径；唯一存在者可读，多份实际文件仍拒绝猜选。仅识别字面起始目录，不执行或解释 shell 后续内容。读取后继续校验路径、版本和字节数；这是当前工作区文件，不构成历史验收成果。
 
-### Jarvis 自主主助理、工具门禁总线与无 Node 自扩展架构（BOB-D-015，目标契约，待按 `WP-J1`～`WP-J6` 实施）
+### Jarvis 自主主助理、工具门禁总线与无 Node 自扩展架构（BOB-D-015，核心底座已落地，见 COMPONENT_MAP §1.1）
 
 1. **统一 `AgentHarness` 与 `BobNativeHarness`（替换单轮 JSON 分类器）**：
    - 置顶 Jarvis 主助理及已配对 PC 节点的默认日常执行均由纯 Rust **`BobNativeHarness`** 驱动（多服务商逐字 SSE 流式 ReAct 循环 + `ToolCallTracker` 重复调用熔断器 + 默认 `$10`/月花费上限）。
@@ -238,7 +238,7 @@ Dashboard 的 `#inbox` 是前端路由，其数据来自独立 `/api/inbox`；Bo
 2. **`bob-node` 异步双轨网关（零破坏升级）**：
    - `bob-node` 入口升级为 `tokio + axum`，原生承载逐字 SSE 流式通道、CDP 虚拟浏览器双向 WebSocket（`/api/ws/browser-takeover`）及 Web Push（VAPID → iOS Safari APNs）；既有同步 RPC 路由在迁移期经 `spawn_blocking` 兼容保留，禁止因引入流式网关破坏已上线 L3 会话链路。
 3. **无 Node.js 运行时的功能包与小组件自扩展沙箱**：
-   - 正式版二进制严禁依赖外部 Node.js。功能包服务端代码（微型工具与 `/api/f/<name>/*` 路由）运行于 `bob-runtime` 内嵌的 **`QuickJS`（`rquickjs`）隔离沙箱**（设置内存与执行步数上限，无原始套接字或子进程能力，仅开放经公网地址守卫过滤的 `ctx.fetch`、限额键值存储 `ctx.storage` 及受前缀隔离的工具/路由注册，彻底阻断本机回环端口 SSRF）。
+   - 正式版二进制严禁依赖外部 Node.js。当前 `crates/bob-runtime/src/features.rs` 已落地声明式安全路由（`static` / `http_json` / `http_text` / `storage_patch`，限额 8KB 存储并强制经 `net_guard` 过滤，彻底阻断本机回环/内网 SSRF）；`WP-E4` 阶段将在此基础上内嵌纯 Rust **`QuickJS`（`rquickjs`）隔离沙箱**（内存 16MB、单次执行 500ms 硬限制，无文件系统/子进程/内网套接字权限），支持更复杂的纯客户端服务端微逻辑。
    - 功能包前端小组件与设置面板运行于独立无凭据 `<iframe sandbox>` + `@scope` CSS，经 `postMessage`（`bob.call`、`bob.state`、`bob.save`、主题语义变量）通信。任何新建或修改的功能包进入持久化 **3 分钟试用（保留 / 撤销）**，超时、报错或服务重启一律自动回滚至上一稳定版本（保留最近 5 版）。
 4. **`bob-browser` 跨宿主复用与密码零进模型铁律**：
    - `bob-browser` crate 通过 CDP 管理持久化浏览器实例（Linux 常驻节点使用 Headless Chromium，PC 桌面端可驱动受管本机浏览器配置以降低机房 IP 风控），优先提取带编号精简无障碍树（含 iframe 与开放 Shadow DOM），遇到密码框、一次性验证码、二维码或风控时立即挂起并向前端推送 `<VirtualBrowserModal />` 人工接管，密码与验证码字符绝不进入模型上下文或日志。
@@ -262,3 +262,16 @@ Dashboard 的 `#inbox` 是前端路由，其数据来自独立 `/api/inbox`；Bo
 Bot `project_id` 省略或 null 可创建独立待办；`start_at`、`due_at` 为可选 Unix 毫秒，省略/null表示未设置，明确提供时必须为正数。`bob_todos` 不传 project_id 返回所有获准待办，null 仅返回独立待办，字符串仅返回对应获准项目。新增仅 request_id/title 必填。无项目访问由默认关闭的 `todos_unassigned` 独立控制，不自动随 all_projects 开启；grok_bot 经机主本轮授权开启该范围，节点执行仍关闭。
 
 业务仍使用同一 schedule_items 和同步队列；兼容既有非空 start_at 列时，内部0代表待办未设开始，Bot API投影null，不展示1970年；end_at对应待办截止。日程仍须开始时间。重复请求保留原幂等语义，旧版无截止请求摘要兼容。日期只有天时使用 timing.start_date / timing.due_date（YYYY-MM-DD），不虚构午夜或09:00；明确时刻才使用 start_at / due_at。0014迁移保存 timing_json；日期精度、原话、参考时间与推定说明随同一待办同步。日历将日期投影到全天栏，将时刻投影到小时格；不会额外创建日程副本。
+
+### 三路径安装交付与三层扩展安全边界（BOB-D-016，目标契约）
+
+1. **开箱配对与预编译容器安全边界**：
+   - 官方发布的预编译镜像、桌面/Android 安装包与静态二进制严禁内置任何默认凭据或静态密钥。
+   - 未初始化的云端常驻实例首次访问仅开放引导接口，必须校验服务端命令行启动日志生成的**短期一次性 6 位配对码**后方可执行 3 步 Web 开箱向导（API Key 与 OAuth 令牌全部通过 AEAD `SecretStore` 以 `0600` 权限持久化，前端仅返回 `hasKey` 与掩码前缀）。
+   - 常驻容器镜像默认集成 `fonts-noto-cjk` 等中文字体与独立 `0700` Chromium Profile 卷，消除中文网页截屏方框乱码并确保登录态严格隔离。
+2. **外部 MCP 客户端与办公文档解析不可信输入边界**：
+   - 从外部 SaaS MCP 服务器拉取的邮件/文档/日历字段，以及 `BobNativeHarness` 解析的 PDF/Office/网页正文，一律视为**不可信输入数据（Data, not Instructions）**；外部输入中的任何命令词不得提升会话或 Tool Bus 权限。
+   - 外部 MCP 工具注册进 `BobToolBus` 时，除非经过显式可信只读声明与域名白名单复核，否则统一强制归入 `ActionRiskLevel::SideEffect`：交互对话必须弹出审批卡，无人值守 Routine 执行一律拦截转为 `SavedActionDraft` 待人工批准后免模型重放；模型输出不得自行降级工具风险等级。
+3. **Feature Plugin (`rquickjs`) 与消息渠道 (`ChannelAdapter`) 隔离边界**：
+   - 内嵌 `rquickjs` 沙箱执行微应用脚本时，物理不挂载主机文件系统、环境变量、子进程与原始网络套接字；仅提供限额键值存储与经过 `net_guard` 校验（严格拦截回环、内网与云元数据地址）的公网抓取函数，单次执行受内存（16MB）与超时（500ms）硬熔断，且新装/修改强制走持久化 3 分钟试用及 5 版本自动回退。
+   - `ChannelAdapter`（飞书 / Telegram / 微信桥等）坚持 **Source / Trigger / Outbox** 幂等模型，仅响应已绑定管理员身份的外部账号；聊天频道内严禁收发网站密码或验证码，遇登录墙一律推送一次性受鉴权链接引导用户在端内 `<VirtualBrowserModal />` 完成接力。

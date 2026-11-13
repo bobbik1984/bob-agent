@@ -18,6 +18,8 @@
 | 节点工具认证维护与多 Harness 适配（DSH / AGY / Codex / Claude / Pi / Hermes / OpenClaw） | 编写或调试节点工具发现、Token/Cookie 自动恢复、RPC/API 接入或登录报错映射时 | [wiki/harness-auth.md](wiki/harness-auth.md)；[ARCHITECTURE](ARCHITECTURE.md) | BOB-D-010/011/012 | 统一五动作（发现/查认证/恢复/登录/验能力）；§6 原生持久接口优先、适配组件及真实流式契约（BOB-D-013）；DSH 先复用有效 Cookie 再按受控日志换 token；Pi 走 `--mode rpc`；Hermes 按 profile 隔离 Key；OpenClaw 区分 token/配对/权限 |
 | 多节点统和、子代理与项目画像胶囊 | 设计跨设备能力互借（海外模型出口、`bobbik-pc` 渲染节点）、快慢双轨、Subagent 或防跑偏任务卡时 | [wiki/kernel-schema.md §10](wiki/kernel-schema.md#10-多节点能力互借项目画像胶囊与快慢双轨子代理契约2026-10-31bob-d-010)；[ARCHITECTURE](ARCHITECTURE.md) §4 | BOB-D-010/011（accepted，设计） | 原生会话直接续聊；胶囊是可追溯索引；先单执行者后子代理；实施唯一看CURRENT_STAGE §3；供应商规则逐项核验 |
 | 统一构想的来源 | 追溯“为什么这样规划” | `references/historical-plans/` | — | 来源材料，不是指令 |
+| Jarvis 主助理、小组件沙箱与云浏览器接管 | 修改水滴球/小组件主屏、Tool Bus、功能包试用、Routine 或虚拟浏览器窗口时 | [ARCHITECTURE](ARCHITECTURE.md)、[COMPONENT_MAP](COMPONENT_MAP.md) §1.1 | BOB-D-015 | 零 Node 依赖；无硬编码颜色与装饰 emoji；密码/验证码零入模；`WP-J1`～`WP-J6` 源码已落盘 |
+| 白领生产力、三路径安装向导与 MCP/Plugin 扩展 | 承接后续 `WP-E1`～`WP-E4` 进化任务、快慢双模、办公文档/IM 渠道、一键安装或 MCP/QuickJS 扩展时 | [DEVELOPMENT_ROUTE](DEVELOPMENT_ROUTE.md)、[CURRENT_STAGE](CURRENT_STAGE.md) §5、[ARCHITECTURE](ARCHITECTURE.md) | BOB-D-016 | 保持单用户极简 L1 体验；不破坏 L2/L3 兼容性；外部 MCP 写操作默认 `SideEffect`；按任务卡粒度逐波交付 |
 
 阅读顺序：AGENTS → CURRENT_STAGE（事实/下一步）→ 对应 todo 条款与 wiki；需要长期阶段再读 DEVELOPMENT_ROUTE。当前事实审计见 [2026-10-31 Evidence](evidence/2026-10-31-development-route-audit.md)，日期材料不另立计划。
 

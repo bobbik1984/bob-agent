@@ -236,7 +236,7 @@
 
 ## BOB-D-015 — 单一主干吸收 `bob-bot`、Jarvis 彩色球与桌面小组件主界面、无 Node 纯 Rust 自扩展及渐进式三层产品结构
 
-- 日期：2026-11-11；状态：**accepted（架构与路线定案，代码待按 `WP-J1`～`WP-J6` 施工）**。来源：用户对历代 Bob 项目（旧版 `bob-agent`、`bob-bot`、`code_runner`、`cloud-agent`、当前 `bob-agent-next`）产品层级、主界面形态与统一开发路线的最终裁决。
+- 日期：2026-11-11；状态：**accepted（2026-11-12 状态更新：`WP-J1`～`WP-J6` 全栈源码、359 项 Rust 单测、207 项前端单测及常驻节点部署已完成，见 [WP-J1～WP-J6 验证回执](evidence/2026-11-11-wp-j1-j6-jarvis-convergence-verification.md) 与 `CURRENT_STAGE.md`；剩余宿主机真实浏览器实连、真机终端验收及后续系统性进化转入 `BOB-D-016`）**。来源：用户对历代 Bob 项目（旧版 `bob-agent`、`bob-bot`、`code_runner`、`cloud-agent`、当前 `bob-agent-next`）产品层级、主界面形态与统一开发路线的最终裁决。
 - **背景**：
   1. 评价标准从“新版是否逐项覆盖旧版全部功能”转向“每一层用户能否用适合自己的复杂度把事情顺畅做完”。
   2. `bob-bot` 原型已验证了极简单一对话入口、彩色球（Orb）状态表达、云浏览器手机虚拟窗口接管、Routine 示教与待批草稿、四档主动关心及 3 分钟试用沙箱功能包的体验优势；其 `Node.js + DSH` 只是临时推理脚手架，并非核心。
@@ -256,3 +256,25 @@
      - **L2 工作助理**：连接“我的电脑”（运行同一 Rust 内核与 `BobNativeHarness`），支持授权目录文件处理、本机浏览器/脚本审批，以及跨文稿/设计图/网页的 **V1→V2 成果批注与对照续改**。
      - **L3 专业工作台**：按需展开多节点目录、多外部 Harness 原生会话续聊、项目画像胶囊、GPU/海外出口借用与订阅额度小组件；置顶 Jarvis 兼任跨节点幕僚长。
 - **实施路由**：愿景分层归并入 `docs/PROJECT_VISION.md`，系统结构归并入 `docs/ARCHITECTURE.md`，视觉与小组件交互归并入 `docs/DESIGN_PRINCIPLES.md`，分层能力验收归并入 `docs/FEATURES.md`，里程碑与 6 个可独立交付工作包（`WP-J1`～`WP-J6`）归并入 `docs/DEVELOPMENT_ROUTE.md` 与 `docs/CURRENT_STAGE.md`。
+
+
+## BOB-D-016 — 后 `WP-J6` 系统性进化：白领生产力对齐、三路径零门槛安装与 MCP/Plugin/Skill 三层扩展边界
+
+- 日期：2026-11-14；状态：**accepted（架构与长期路线立项，待按 `WP-E1`～`WP-E4` 递进施工）**。来源：基于已落地的 `WP-J1`～`WP-J6` 底座，对标全托管云端竞品（如 Grok Bot 等）的白领办公体验差距，并系统确立多平台傻瓜安装体系与后期扩展架构。
+- **背景**：
+  1. `WP-J1`～`WP-J6` 已打通纯 Rust `BobNativeHarness`、Jarvis 水滴主屏、手机桌面小组件、无凭据沙箱 3 分钟试用、`bob-browser` CDP 手机虚拟接管、`V1→V2` 批注审阅与单 VPS 模板；
+  2. 但面向非技术白领日常办公时，对比全托管云端竞品仍存在 4 项短板：**办公 SaaS OAuth/MCP 一键直连缺失**（`McpStore` 尚未实现真实远程握手）、**PDF/Excel/Word 原生读写生成工具缺失**、**常用 IM 随手交代与推送门槛较高**、**首次自托管部署仍需手工运维**；
+  3. 同时 Bob 拥有 4 项明确反超竞品的差异化护城河：**本机住宅 IP 浏览器与授权文件夹协同（L1→L2 无缝接力）**、**`V1→V2` 成果圈选批注对照定稿**、**一句话自生长且 3 分钟试用自动回退的小组件机制**、**BYOK 可预期低花费（默认 `$10`/月硬上限）+ 密码零入模 + 无人值守强制转待批草稿**。
+- **决定**：
+  1. **快慢双模分流与白领生产力补齐**：
+     - 置顶 Jarvis 主脑明确拆分为 **`Resident Clerk`（快模型秒回与记忆检索）+ `Async ReAct Worker`（后台多步工具执行与进度推送）**，消除复杂任务阻塞对话输入手感；
+     - 在 `BobNativeHarness` 内置纯 Rust 办公文档读写原语（解析 PDF / `.xlsx` / `.docx` / CSV 并产出可下载报告，直连 `ArtifactRevisionReview` 完成 `V1→V2` 批注定稿）及统一 `ChannelAdapter`（飞书 / Telegram / 官方微信桥）。
+  2. **三路径零门槛安装体系（与 L1/L2/L3 产品界面解耦）**：
+     - **路径 A（零服务器·电脑直装版，推荐 80% 新用户首日使用）**：Windows/macOS 桌面安装包托盘常驻 + 首次启动 **3 步图形向导**（选预设服务商贴 1 个 Key 自动绑定快慢双模 → 勾选 1 个授权工作文件夹 → 弹出配对二维码供手机扫码双向 TLS/通道直连），零 VPS/域名/配置文件门槛；
+     - **路径 B（7×24 云端常驻·90 秒预编译引导安装）**：通过 CI 发布内置 `bob-node` + Headless Chromium + `fonts-noto-cjk` 中文字体的多架构预编译镜像与静态二进制，彻底避免 2C/4G 机器现场编译 Rust OOM；配合单行交互式引导器（仅询问域名或隧道，输出 6 位首次配对码），浏览器直接进入同一 3 步图形开箱向导，并同步提供 1Panel / CasaOS / NAS 标准应用模板；
+     - **路径 C（云 + PC + 手机混合完全体）**：云端用户随时扫码将办公室/家用电脑挂载为受控执行节点，保持 L1/L2 简洁体验不退化为运维台。
+  3. **零 Node.js 必经依赖的三层正交扩展架构**：
+     - **MCP 连接层（双向）**：`bob-runtime` 实现纯 Rust **MCP Streamable HTTP 客户端 + OAuth 2.1 令牌保险箱**（桌面端按需支持本地 `stdio` MCP）；外部工具注入 `BobToolBus` 时，除显式验证只读外默认标为 `SideEffect`（交互弹审批卡，无人值守 Routine 强制存为 `SavedActionDraft` 防提示词注入）；`bob-node` 继续作为受控 MCP Server 对外提供细粒度授权接口；
+     - **Feature Plugin 层（`.bobpkg` 可视化小组件与微应用）**：前端无凭据 `<FeatureWidgetFrame />` + 后端将声明式路由升级为内嵌纯 Rust **`rquickjs`（`QuickJS`）隔离沙箱**（16MB 内存上限、500ms 单次执行超时、无文件系统/子进程/内网套接字权限，仅开放经 `net_guard` 过滤的 HTTP 请求与 8KB 键值存储），严格继承 **3 分钟试用 + 5 版本自动回退**；
+     - **Skill / Routine 模板与渠道适配层**：声明式 Markdown/YAML 技能库（受 `SYSTEM_PROMPT_SKILLS_BUDGET_CHARS` 预算约束）与标准化 `RoutinePlaybook` / `ChannelAdapter`。
+- **实施路由**：安全与隔离边界入 `docs/ARCHITECTURE.md`，长期阶段与 Exit Gate 入 `docs/DEVELOPMENT_ROUTE.md`，模块落点索引入 `docs/COMPONENT_MAP.md` 与 `docs/LLM_WIKI.md`，具体施工任务卡唯一维护于 `docs/CURRENT_STAGE.md §5`。

@@ -128,3 +128,14 @@
     3. 首版（V1）是否同步纳入语音捕获（Voice Capture），还是先完成文字 + 图片闭环？
     4. 旧 Dashboard `#inbox` 地址重定向至 `bob-online` 收集箱的过渡保留期多久？
     - 建议默认（待用户确认，不阻塞 Step 1）：① 21:00，连续未处理时合并为一张卡不逐日堆叠；② V1 严格 100% 人工确认；③ V1 先文字+照片，语音后置；④ 旧地址保留 30 天转发。
+
+---
+
+## 六、 后 `WP-J6` 系统性进化需求池（`BOB-D-016`：`WP-E1` → `WP-E4`）
+
+> 详细分包任务卡、前置依赖与退出门唯一维护于 [`docs/CURRENT_STAGE.md §5`](docs/CURRENT_STAGE.md)，本节仅保留未完成的用户需求缺口：
+
+- [ ] **[WP-E1] 线上实景闭环、快慢双模与 3 步开箱向导**：确认常驻节点 Headless Chromium + CJK 中文字体挂载并通过真实办公站点手机 390px 接管保活；将置顶 Jarvis 拆分为 `Resident Clerk + Async Worker` 快慢双模不阻塞聊天；上线首次 3 步图形开箱向导；调优对话现场生成小组件 3 分钟试用体验。
+- [ ] **[WP-E2] 白领办公文档深度处理与高频 IM 触达**：在纯 Rust `BobNativeHarness` 内新增 PDF / `.xlsx` / `.docx` / CSV 解析与格式化报告生成工具并直连 `V1→V2` 批注审阅；落地标准化 `ChannelAdapter`（打通飞书、Telegram 与增强官方微信桥）。
+- [ ] **[WP-E3] 三路径零门槛安装体系与桌面扫码直连**：CI 发布多架构预编译镜像与静态二进制；升级 90 秒单行交互引导脚本与 1Panel / CasaOS / NAS 应用模板；完善桌面端首次启动 3 步向导与手机扫码直连。
+- [ ] **[WP-E4] MCP 客户端连接器与 QuickJS 插件扩展体系**：`bob-runtime` 实现纯 Rust MCP Streamable HTTP 客户端 + OAuth 2.1 令牌托管（受控默认 `SideEffect` 审批）；将 `FeatureStore` 沙箱升级至内嵌 `rquickjs`（16MB/500ms 限制）并在界面以「能力目录」统一呈现，保持零 Node.js 必经依赖。

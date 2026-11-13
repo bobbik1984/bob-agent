@@ -11,7 +11,7 @@ project:
   - Desktop
   - Android
   - Web (bob-node)
-  current_task: Chief of Staff 幕僚长三大核心（VPS2 本机节点接入、跨节点同类任务归一与测试项目智能屏蔽）全量交付上线。已验证 Hostinger VPS2 与 X1T 生产端。
+  current_task: 完成 BOB-D-015（WP-J1–WP-J6）Jarvis 统一主助理底座上线与三日历/水滴首页/L1渐进降噪部署（基线 6b93e62）；当前进入 BOB-D-016（WP-E1–WP-E4）系统性进化：实景浏览器/快慢双模/3步开箱 → 白领办公文档与IM触达 → 三路径傻瓜安装 → MCP客户端与QuickJS插件生态。
   development_plan: docs/CURRENT_STAGE.md
 phases:
 - name: ✅ 已交付基座：单一 Rust 内核、三端同源与跨节点扫码配对 (BP0–BP5)
@@ -20,13 +20,15 @@ phases:
     status: done
   - text: BP3 个人环境 MVP：凭据脱敏、PeerSync 同步、原位会话升级 Work 与 Outbox 必达
     status: done
-  - text: BP4–BP5 常开节点 (bob-online.bobbik.org) 上线、扫码配对下发关联节点 (VPS3 / X1T) 与 Bearer RPC 鉴权
+  - text: BP4–BP5 常开节点 (bob-online) 上线、扫码配对下发关联节点与 Bearer RPC 鉴权
     status: done
   - text: 紧凑额度监控菜单上线（Codex / AGY / Claude 多源采集与周额度窗口校准）
     status: done
-  - text: Android 签名安装包 (Bob-1.0.1-cd88177.apk) 云端构建与校验就绪
+  - text: Android 签名安装包 (Bob-1.0.1) 云端构建与校验就绪（三日历与水滴首页已出包待真机核验）
     status: done
-  - text: Stage 0 看板净室：清理 X1T 拦截回执、归档旧版重复卡片与已完成收件箱待办
+  - text: Stage 0 看板净室：清理过期拦截回执、归档旧版重复卡片与过期项目关联
+    status: done
+  - text: 'BOB-D-015 (WP-J1–WP-J6) 全栈落地：BobNativeHarness流式主脑、Jarvis水滴与小组件桌面、无Node 3分钟试用沙箱、Routine/做梦晨报/推送、bob-browser CDP手机接管、PC受控工具与V1→V2批注对照'
     status: done
 - name: 🏗️ 第一大项：基础架构与多节点接管 (Stage 1 / Stage 2 / Stage 4)
   tasks:
@@ -61,4 +63,14 @@ phases:
   - text: '[Stage 3] 自然语言跨节点派单 (Chat-to-Dispatch)：对主 Agent 说一句话即可自动路由并下发指令至目标设备与会话'
     status: todo
   - text: '[Stage 3] 注意力分层与灵感结晶 (Topic HOT/WARM & Bob Notebook)：日常闪念与长笔记自动关联活跃话题，成熟后一键转化为远端开发项目'
+    status: todo
+- name: 🚀 第四大项：系统性进化——白领生产力、三路径傻瓜安装与 MCP/Plugin 生态 (BOB-D-016 / WP-E1–WP-E4)
+  tasks:
+  - text: '[WP-E1] 线上实景闭环、快慢双模与 3 步开箱向导：常驻节点 Headless Chromium + CJK 字体真实接管、Resident Clerk + Async Worker 分流、首次访问图形向导与现场小组件试用调优'
+    status: todo
+  - text: '[WP-E2] 白领办公文档深度处理与高频 IM 触达：BobNativeHarness 纯 Rust PDF/Excel/Word/CSV 读写生成并联动 V1→V2 批注审阅；标准化 ChannelAdapter（飞书 / Telegram / 微信桥增强）'
+    status: todo
+  - text: '[WP-E3] 三路径零门槛安装体系与桌面扫码直连：CI 多架构预编译镜像 + 90 秒单行交互安装脚本 + 1Panel/NAS 模板；桌面端首次启动 3 步向导与手机扫码直连'
+    status: todo
+  - text: '[WP-E4] 三层可扩展生态（零 Node 依赖）：纯 Rust MCP Streamable HTTP + OAuth 2.1 客户端（默认 SideEffect 门禁）与内嵌 rquickjs .bobpkg 插件沙箱及统一能力目录'
     status: todo

@@ -17,6 +17,19 @@
 | 原生 Harness 能力探测 | `crates/bob-runtime/src/harness_auth.rs`、`harness_probe.py`、`agy_directory.rs`、`runtime_rpc.rs` | 授权宿主内只读探测已接共用 RPC；VPS3 协议实测，新增工具 UI 流式待接 |
 | JSONL 协议回归 | `crates/bob-runtime/tests/test_harness_probe.py` | 请求关联、通知保留、UTF-8、背压、超时、脱敏和空模型检查 |
 
+### 1.1 Jarvis 主助理、云浏览器与自扩展模块落点（WP-J1～WP-J6 已落地源码）
+
+| 逻辑组件 | 落点 | 关键职责与状态 |
+|---|---|---|
+| 运行时安全护栏 | `crates/bob-runtime/src/{budget.rs, net_guard.rs, tool_tracker.rs}` | 月度花费上限（默认 `$10`、80% 预警/100% 拦截）、SSRF 公网守卫、死循环工具调用熔断器 |
+| Tool Bus 与流式主脑 | `crates/bob-runtime/src/{tool_bus.rs, native_harness.rs, runtime_rpc.rs}` | 分级 `Action Gates`、OpenAI/Anthropic/Gemini 多服务商流式 ReAct 循环、跨平台 RPC 分发 |
+| 自扩展、Routine、成长与本机工具 | `crates/bob-runtime/src/{features.rs, routines.rs, growth.rs, host_tools.rs}` | 零 Node 功能包/3 分钟试用 5 版回退/Skill/MCP 注册表、Routine 试运行与 `Draft`、五阶段做梦/晨报/四档主动关心、PC 获准目录受控工具 |
+| 全文知识检索 | `crates/bob-kernel/src/kb_search.rs` | SQLite FTS5 全文检索（笔记/记忆/决定/归档会话）与来源链接返回 |
+| 纯 Rust CDP 浏览器引擎 | `crates/bob-browser/src/*`、`crates/bob-node/src/browser_ws.rs` | 精简 AXTree 穿透 iframe/Shadow DOM、密码/验证码零入模拦截、`/api/ws/browser-takeover` 双向 WebSocket 与 CSWSH `Origin` 防护 |
+| SSE 网关与推送通道 | `crates/bob-node/src/{jarvis.rs, push_channels.rs}` | `/api/jarvis/v1/stream` 逐字 SSE 流、VAPID Web Push 与 `/v1/chat` 微信桥兼容入口 |
+| Jarvis 主屏与交付 UI | `apps/bob-app/src/components/{JarvisOrb.vue, ActionCard.vue, JarvisWidgetGrid.vue, FeatureWidgetFrame.vue, FeatureTrialBanner.vue, VirtualBrowserModal.vue, SiteSessionVault.vue, ArtifactRevisionReview.vue}`、`src/composables/useJarvisHome.mjs`、`public/{manifest.webmanifest, sw.js}` | 流体水滴球、结构化审批卡、手机桌面小组件网格、无凭据沙箱小组件、3 分钟试用条、虚拟浏览器接管窗、网站授权中心、`V1→V2` 行/框选批注对照与 Web Push PWA |
+| 单 VPS 部署模板 | `deploy/{Dockerfile, docker-compose.yml, Caddyfile.example}`、`scripts/deploy-vps-oneclick.sh` | 容器构建模板（`WP-E3` 将升级为预编译镜像分发、中文字体补齐与交互式向导） |
+
 ## 2 旧 App（`bob-agent/`，Tauri v2 + Vue 3，0.9.30）
 
 | 能力 | 主要落点 | 初判 |

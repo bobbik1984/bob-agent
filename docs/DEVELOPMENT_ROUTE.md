@@ -99,6 +99,8 @@ flowchart LR
 | **WP-J5** | `bob-browser` crate（CDP 无障碍树 + iframe/Shadow DOM）+ `<VirtualBrowserModal />` 手机/桌面虚拟窗口接管 | 通过 `bob-bot` 18 项本地浏览器测试及所在地区 VPS 上 3～5 个真实办公站点手机 390px 接管登录与重启保活验收；密码零进模型 |
 | **WP-J6** | PC 桌面端挂载 `BobNativeHarness` 与授权目录/本机浏览器工具；贯通 **V1→V2 成果批注对照修改**与 L3 幕僚长派单 | 手机指派电脑整理目录 → 圈选批注产出 V2 对照 → 批准导出；电脑离线诚实等待且恢复不重发；常驻 VPS 一键部署脚本（含 HTTPS）2C/4G 24h 稳定运行 |
 
+> **状态更新（2026-11-12）**：`WP-J1`～`WP-J6` 全栈代码、离线四重门禁验证（359 项 Rust 测试 + `src-tauri` 校验 + 203 项前端单测 + `vite build`）及常驻节点部署已完成，详见 [2026-11-11 WP-J1～WP-J6 验证回执](evidence/2026-11-11-wp-j1-j6-jarvis-convergence-verification.md) 与 [CURRENT_STAGE](CURRENT_STAGE.md)；剩余宿主机浏览器/真机实连与后续系统性进化已并入下方 `BOB-D-016`（`WP-E1`～`WP-E4`）。
+
 施工细则、文件落点与当前优先派发项唯一维护于 [CURRENT_STAGE](CURRENT_STAGE.md)。
 
 #### 外部 Bot 待办最小闭环
@@ -112,3 +114,23 @@ flowchart LR
 独立待办支持语义日期、可选开始/截止及全天日期显示；外部Bot可按单独授权修改原记录，具备版本冲突与持久幂等保护。日期/时刻与来源推定保存在同一账本，日历不新增副本。生产8条原记录已补日期并读回，未重复新增，节点执行关闭；配对手机与Grok新版本消费端仍需单独验收。契约见 wiki/connectivity.md。
 
 个人事务日历交互已补直接拖动改期与边界调整；沿同一schedule_items和版本校验保存，日期精度不变。下一步设备验收沿原跨端验证门禁推进，不另起计划。
+
+## BOB-D-016 系统性进化路线：白领生产力、零门槛安装与三层扩展生态（WP-E1 → WP-E4，2026-11-14）
+
+依据 [DECISIONS](DECISIONS.md) `BOB-D-016`，在已交付 `WP-J1`～`WP-J6` 底座之上，按以下 4 个阶段系统推进产品级进化（从“功能已编译上线”走向“白领日常丝滑可用、三路径 90 秒开箱、开放可扩展生态”），全程守住零 Node.js 必经依赖与不破坏 L1/L2/L3 分层边界：
+
+```mermaid
+flowchart LR
+    WPE1["WP-E1 实景闭环与<br/>快慢双模 + 3步开箱"] --> WPE2["WP-E2 白领办公文档与<br/>高频 IM 触达"]
+    WPE2 --> WPE3["WP-E3 预编译镜像与<br/>三路径傻瓜安装"]
+    WPE3 --> WPE4["WP-E4 MCP 客户端与<br/>QuickJS 插件生态"]
+```
+
+| 阶段工作包 | 核心目标 | 退出门（Exit Gate） |
+|---|---|---|
+| **WP-E1 实景闭环、快慢双模与开箱引导** | 跑通宿主真实无头浏览器（含 CJK 字体）手机 390px 接管与重启保活；将 Jarvis 拆为 `Resident Clerk + Async Worker` 快慢双模分流；上线首次 3 步图形化开箱向导；调优对话现场生成小组件 3 分钟试用体验 | 常驻节点真刀真枪完成至少 3 个真实办公站点接管、登录态重启保留与 Routine 复跑；普通对话响应不被工具链阻塞；首次空白实例仅用 1 个 Key + 配对码 3 分钟内完成开箱 |
+| **WP-E2 白领办公文档深度处理与 IM 触达** | 为 `BobNativeHarness` 增加纯 Rust 办公文档读写与生成工具（PDF / `.xlsx` / `.docx` / CSV），并直通 `ArtifactRevisionReview` 的 `V1→V2` 框选批注；落地标准化 `ChannelAdapter`（打通飞书/Telegram 与增强官方微信桥） | 发送任意 Excel/PDF/Word 资料能准确提取内容并生成可下载的格式化报告或表格，且支持在批注窗修订出 V2；绑定后在外部 IM 发送任务与接收 `Draft`/接管跳转链接闭环通过 |
+| **WP-E3 零门槛三路径部署与桌面扫码直连** | CI 发布含 Chromium 与中文字体的多架构预编译镜像及静态二进制；升级 90 秒单行交互安装脚本与 NAS/1Panel 应用模板；完善桌面端首次启动 3 步向导及对手机二维码直连 | 空白 Linux 轻量服务器 90 秒内无编译启动 HTTPS 常驻节点并扫码/配对码激活；Windows 桌面端安装后不写任何配置文件即可完成 Key 填入、工作区授权与手机扫码执行 |
+| **WP-E4 MCP 连接器客户端与 QuickJS 插件体系** | `bob-runtime` 实现纯 Rust MCP Streamable HTTP 客户端 + OAuth 2.1 令牌库（接入 Gmail/日历/Notion/GitHub 等 SaaS）；`FeatureStore` 内嵌 `rquickjs` 沙箱执行 `.bobpkg` 微应用，界面以「能力目录」统一呈现 | 成功连接至少 2 个外部 OAuth/HTTPS MCP 服务，写入类动作在交互时弹审批卡、Routine 时落为 `Draft`；安装带 `rquickjs` 脚本的小组件运行正常且故障时 3 分钟自动回退；整包仍保持零外部 Node.js 依赖 |
+
+具体任务卡拆解、文件范围与当前接手入口统一维护于 [CURRENT_STAGE](CURRENT_STAGE.md) §5。

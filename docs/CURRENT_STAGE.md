@@ -1,5 +1,7 @@
 # Bob — Current Stage（1.0.1 施工与交接合同）
 
+> **最新交接入口（2026-11-14）**：`WP-J1`～`WP-J6` 核心底座与生产端升级已合入主干（当前代码基线 `6b93e62`）；后续任何 Agent 接手系统性进化任务，请直接跳转本文件末尾 **「5. 后 WP-J6 系统性进化施工合同（BOB-D-016：WP-E1 → WP-E4）」** 按序领取工作包。
+
 > 当前外部Bot待办验收以本文件末尾“语义日期与原待办修改”及对应Evidence为准；早期阶段记录不是当前限制。
 
 > Chief of Staff 幕僚长核心三项落地（2026-11-08）：
@@ -843,3 +845,82 @@ PrimaryChatPane 按历史区 ResizeObserver 实测高度缩放水滴，空态容
 
 ### Claude 接管询问取消入口（2026-11-13，本地源码）
 新增“取消打断”及提示内 Escape：只关闭确认并恢复输入焦点，保留草稿/附件和远端进程；sending 时禁用。原看板关闭行为保留，不引入新的远端调用。待发布及浏览器验收，本次未打断真实 Claude 进程。
+
+---
+
+## 5. 后 `WP-J6` 系统性进化施工合同（`BOB-D-016`：`WP-E1` → `WP-E4`，2026-11-14 交接基线）
+
+> **致后续接手 Agent（必读接手说明）**：
+> - **当前代码基线**：分支 `1.0.1`（及对齐同步的 `main`），基线提交 `6b93e62` 之后；`WP-J1`～`WP-J6` 全栈源码及离线四重门禁验证已完备（见 [2026-11-11 验证回执](evidence/2026-11-11-wp-j1-j6-jarvis-convergence-verification.md) 与 [COMPONENT_MAP](COMPONENT_MAP.md) §1.1）。
+> - **核心目标**：依据 [DECISIONS](DECISIONS.md) `BOB-D-016` 与 [DEVELOPMENT_ROUTE](DEVELOPMENT_ROUTE.md)，在不破坏已有 L1/L2/L3 兼容性与“零 Node.js 必经依赖”铁律的前提下，按 `WP-E1 → WP-E2 → WP-E3 → WP-E4` 分波补齐白领场景与竞品（如 Grok Bot）的差距，并放大 Bob 在本机协同、`V1→V2` 批注审阅、自生长小组件与低成本安全门禁上的差异化优势。
+> - **强制护栏**：
+>   1. 禁止硬编码任何个人域名、IP 或私密节点名（示例域名用 `bob.example.com`）；
+>   2. Rust 离线测试需使用外置缓存且保持 `cargo test --offline --workspace` 通过；前端严禁硬编码颜色（仅用 CSS Variables）与装饰性 emoji，可见文案必须同步更新 `zh-CN.json` 与 `en-US.json`；
+>   3. 对线上常驻节点执行重启、构建或 APK 打包前，须确认已获得用户明确授权；
+>   4. 每完成一张子任务卡，须同步在本节或 `docs/evidence/` 登记可验证回执。
+
+---
+
+### 5.1 第一波次：`WP-E1` 实景闭环、快慢双模分流与 3 步开箱向导（当前最高优先级，待领取）
+
+#### 任务卡 `WP-E1.1`：常驻节点无头浏览器实装（CJK 字体 + 隔离卷）与真实办公站点接管验收
+- **背景与缺口**：当前 `crates/bob-browser` 仅在本地模拟 CDP 测试通过；生产侧 `deploy/Dockerfile` 缺少中文字体，线上宿主机尚未验证 Chromium + 独立 `--user-data-dir` 的重启保活与 390px 手机接管实操。
+- **允许改动范围**：
+  - `deploy/Dockerfile`、`scripts/deploy-vps-oneclick.sh`、`crates/bob-browser/src/*`、`crates/bob-node/src/browser_ws.rs`
+- **关键动作**：
+  1. 在 `deploy/Dockerfile` 运行时镜像与宿主机装机检查中补充 `fonts-noto-cjk`（及基本表情/无衬线字体回退），确保中文网页无方框乱码；强化 `--user-data-dir` `0700` 目录权属检查与 Chromium 崩溃自动重启恢复。
+  2. 核对 `browser_ws.rs` 在反代（HTTPS/WSS）下的 `Origin` 校验逻辑（兼容自定义公网域名与本地直连），完善中文输入法（IME composition）与滑块拖拽在 390px 移动端视口的手势流畅度。
+  3. 选取 3～5 个真实办公/内容站点（用测试账号），在常驻节点跑通“自动浏览 → 撞登录/滑块弹窗 → 手机 390px `<VirtualBrowserModal />` 完成接管 → 服务重启后验证持久化 Cookie 仍有效 → 一键存为 Routine 复跑”。
+- **验收门禁**：`cargo test --offline -p bob-browser -p bob-node` 全绿 + 写入脱敏真实验收记录至 `docs/evidence/`。
+
+#### 任务卡 `WP-E1.2`：置顶 Jarvis `Resident Clerk + Async Worker` 快慢双模分流
+- **背景与缺口**：目前 `crates/bob-runtime/src/native_harness.rs` 与 `crates/bob-node/src/jarvis.rs` 采用单条 SSE 执行流响应请求，复杂网页抓取或多步工具调用期间用户体验存在等待阻塞感；配置层面也缺少对“同一 API Key 自动绑定快模型（Clerk）+ 慢模型（Maker）”的一键默认配对逻辑。
+- **允许改动范围**：
+  - `crates/bob-runtime/src/{native_harness.rs, model_presets.rs (新增), tool_bus.rs}`
+  - `crates/bob-node/src/jarvis.rs`
+  - `apps/bob-app/src/composables/useJarvisHome.mjs`、`apps/bob-app/src/components/PrimaryChatPane.vue`
+- **关键动作**：
+  1. 抽离并建立服务商预设映射表（DeepSeek / Gemini / OpenAI / Anthropic / OpenRouter 的推荐 `clerk_model` 与 `maker_model`，严格遵循不硬编码外部注册表之外猜测值的原则，允许用户高级微调）。
+  2. 将 `/api/jarvis/v1/stream` 交互拆分为双层：用户输入先经过极轻量的 `Resident Clerk`（仅携带记忆摘要 + `dispatch_background_task` / 轻量读取权限，秒级首字响应或直接回答）；涉及浏览器/多步工具的任务立刻返回一个后台任务 ID，由 `tokio::spawn` 异步 Worker 独立运行并把结构化步骤卡与审批卡实时推回主对话流与状态机，聊天输入框保持随时可用、断线重连可从持久化 Step Ledger 恢复进度。
+  3. 对齐原型实验室文档（`bob-bot/docs/SUPER_AGENT_NOTES.md`）中的 `Thread 订阅直通` 与 `事件批处理`，同一任务后续追问优先直通当前活跃 Worker 上下文，避免 Clerk 重复路由浪费预算。
+- **验收门禁**：`cargo test --offline -p bob-runtime -p bob-node` 新增快慢分流与后台任务断线恢复单测全绿 + 前端 `node --test tests/*.test.mjs` 全绿。
+
+#### 任务卡 `WP-E1.3`：首次访问 3 步图形化开箱向导与一次性配对码鉴权
+- **背景与缺口**：当前首次开箱缺少全屏三步引导 UI，非技术用户面对多 Tab 设置页与模型/URL/Model ID 表单仍有认知障碍；同时未初始化实例缺少面向容器部署的安全首次接管机制。
+- **允许改动范围**：
+  - `crates/bob-node/src/{lib.rs, node_access.rs, jarvis.rs}`
+  - `apps/bob-app/src/components/OnboardingWizard.vue`（新增）、`apps/bob-app/src/App.vue`、`apps/bob-app/src/locales/{zh-CN.json, en-US.json}`
+- **关键动作**：
+  1. 后端在首次检测到未配置管理员口令及模型 Key 时，启动日志生成并打印**一次性 6 位初始配对码**（内存中加有效期与错误退避，防止抢先注册），提供只读状态字段 `needsOnboarding`（仅返回布尔状态与预设服务商列表，绝不回传凭据或泄露系统信息）。
+  2. 前端实现简洁响应式 `<OnboardingWizard />` 三步流程：**Step 1 验证配对码与设定访问口令 → Step 2 选择服务商卡片并粘贴 1 个 API Key（一键实测连通性并自动配对 Clerk/Maker 双模）→ Step 3（可选）为助理命名 / 跳过直接进入 Jarvis 水滴主屏**。
+- **验收门禁**：支持 390px 手机端与 1280px 桌面端、明暗双模与双语 i18n 全键对称，附带向导流程与抢注拒绝单测；完成并验证零硬编码颜色/emoji。
+
+#### 任务卡 `WP-E1.4`：对话现场生成与迭代桌面小组件真实模型闭环调优
+- **背景与缺口**：`WP-J3` 已建立 `/api/f/:pkg/*` 安全路由、`FeatureWidgetFrame` 与 3 分钟试用 5 版回退机制，但仍需使用真实商业大模型对生成提示词、主题 CSS 变量注入与错误自动恢复提示做实测打磨。
+- **允许改动范围**：
+  - `crates/bob-runtime/src/{features.rs, native_harness.rs}`（提示词规范段）
+  - `apps/bob-app/src/components/{FeatureWidgetFrame.vue, FeatureTrialBanner.vue, JarvisWidgetGrid.vue}`
+- **关键动作**：
+  1. 优化内置提示词对沙箱约束的说明（禁用外链 CDN 与硬编码色值，指导模型使用宿主透传的 `--bg-*`、`--text-*`、`--accent-primary` 与 `bob.call`/`bob.save` 通信规范）。
+  2. 验证“一句话新建小组件 → 主屏展示无白屏闪烁 → 试用 3 分钟内二次微调 → 点击保留或到期自动回退”全流程实测录屏/日志。
+- **验收门禁**：在真实模型调用下跑通 ≥2 个实用白领小组件（如每日待办焦点卡、汇率/报价换算卡），确认重启服务与超时场景均可干净回退。
+
+---
+
+### 5.2 后续波次路线图预览（`WP-E2` → `WP-E4`，前置依赖完成后按序启动）
+
+#### 波次二：`WP-E2` 白领办公文档深度处理与高频 IM 触达（依赖 `WP-E1.2`）
+- **核心交付**：
+  1. **纯 Rust 办公文档读写与生成工具集**（`crates/bob-runtime/src/doc_tools.rs`）：基于轻量纯 Rust crate（零外部 Office/Python/Node 依赖）支持读取解析 **`.pdf` / `.xlsx` / `.docx` / `.csv`**，并支持生成结构化 **`.xlsx` / `.md` / 交互式 HTML 报告**，产出自动登记为 `ArtifactVersion`，在聊天/工作台中点击即可直接进入 `<ArtifactRevisionReview />` 做 `V1→V2` 圈选批注续改。
+  2. **标准化 `ChannelAdapter` 双向通道**（`crates/bob-node/src/channels/`）：基于 `Source / Trigger / Thread / Outbox` 幂等架构，完善与扩展 **飞书（Lark）、Telegram Bot** 与现有 **微信官方桥（`/v1/*`）**：支持仅响应已绑定用户、IM 群聊/私聊触发日常任务、返回简洁行动卡 + 审批/虚拟窗口一次性跳转链接，严格执行“严禁经 IM 明文传递网站密码”红线。
+
+#### 波次三：`WP-E3` 三路径傻瓜安装向导与桌面扫码直连（依赖 `WP-E1.3`）
+- **核心交付**：
+  1. **路径 A（桌面零服务器直装端）**：在 `apps/bob-app/src-tauri` 完善系统托盘常驻模式与首次启动 3 步向导（选 Key → 勾选 1 个授权工作目录 → 屏幕直接显示手机扫码配对二维码，复用 `bob-transport` 双向 TLS 完成移动端绑定）。
+  2. **路径 B（90 秒预编译云端向导与一键模板）**：新增 `.github/workflows/release-bob-node.yml` 发布 `linux/amd64` & `linux/arm64` 多架构预编译镜像（GHCR）与静态二进制；升级 `scripts/deploy-vps-oneclick.sh` 实现交互式零编译拉取（自动查内存/Swap → 仅问是否拥有域名并配置 Caddy 或隧道 → 打印一次性 6 位首次配对码）；补充 **1Panel / CasaOS / NAS** 标准 Compose 安装模板与独立 `docs/USER_GUIDE.md` 图文傻瓜安装教程。
+
+#### 波次四：`WP-E4` MCP 连接器客户端与 `QuickJS` 插件沙箱体系（依赖 `WP-E1` + `WP-E3`）
+- **核心交付**：
+  1. **纯 Rust 远程 MCP 客户端与 OAuth 2.1 令牌保险箱**（`crates/bob-runtime/src/mcp_client.rs`）：激活并落地此前保留在 `features.rs` 中的 `McpStore`，支持连接标准 MCP Streamable HTTP（及桌面端可选本地 `stdio`）外部服务（Google Workspace、Notion、GitHub、飞书等），动态将远端工具接入 `BobToolBus`；除经过审核标为只读的工具外，写操作统一强制标为 `ActionRiskLevel::SideEffect` 走审批卡与无人值守 `Draft` 门禁。
+  2. **内嵌 `rquickjs` (`QuickJS`) `.bobpkg` 微应用引擎**（`crates/bob-runtime/src/features.rs` 沙箱升级）：以纯 Rust `rquickjs` 替代当前仅有的静态路由声明，强制 `16MB` 内存与 `500ms` CPU 硬上限、零文件系统/环境变量/子进程权限、公网 HTTP 请求唯一穿透 `net_guard`，依然受 3 分钟试用 + 5 版本自动回退守护。
+  3. **统一消费者级「能力目录」**：在设置与主屏新增入口，统一收纳 MCP 连接器、`QuickJS` 小组件与 Skill/Routine 模板，对外隐藏技术名词，实现小白点选即装、极客可查来源与源码审阅的渐进体验。
