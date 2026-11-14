@@ -466,7 +466,8 @@ pub fn read_page(data: &Path, connection: &str, session_id: &str, after: Option<
     if let Some(cached)=fs::read(&cache_path).ok().and_then(|b|serde_json::from_slice::<Value>(&b).ok()) {
         let age=cached["at"].as_u64().map(|t|now.saturating_sub(t)).unwrap_or(9999);
         let has_running=cached["page"]["request_results"].as_array().is_some_and(|arr|arr.iter().any(|r|r["status"].as_str()==Some("running")))
-            || cached["page"]["terminal_holder"]["busy"].as_bool() == Some(true);
+            || cached["page"]["terminal_holder"]["busy"].as_bool() == Some(true)
+            || cached["page"]["bob_holder"]["held"].as_bool() == Some(true);
         let ttl=if has_running || after.is_some() { 2 } else { 15 };
         if age<ttl {
             if let Some(mut page)=cached.get("page").cloned() {
@@ -492,6 +493,7 @@ pub fn read_page(data: &Path, connection: &str, session_id: &str, after: Option<
     let msgs=raw["messages"].as_array().cloned().unwrap_or_default();
     let req_results=raw["request_results"].as_array().cloned().unwrap_or_default();
     let terminal_holder=raw.get("terminal_holder").cloned().unwrap_or(Value::Null);
+    let bob_holder=raw.get("bob_holder").cloned().unwrap_or(Value::Null);
     let cursor=msgs.len() as i64;
     let harness=raw["harness"].as_str().unwrap_or("dsh");
     let workspace=raw["workspace"].as_str().unwrap_or("");
@@ -508,6 +510,7 @@ pub fn read_page(data: &Path, connection: &str, session_id: &str, after: Option<
         "messages": msgs,
         "request_results": req_results,
         "terminal_holder": terminal_holder,
+        "bob_holder": bob_holder,
         "cli_interrupted": raw["cli_interrupted"].as_bool().unwrap_or(false),
     });
     let _=fs::write(&cache_path, serde_json::to_vec(&json!({"at":now,"page":page})).unwrap_or_default());
@@ -641,13 +644,7 @@ pub fn prompt_session_with_details(
     } else {
         g.effective_claude_tools()
     };
-    let approval_mode = if approval_mode_override == Some("deny") {
-        "deny"
-    } else if session_id.starts_with("agy:") || (session_id.starts_with("claude-jsonl:") && !claude_tools.is_empty()) {
-        "interactive"
-    } else {
-        "deny"
-    };
+    let approval_mode = resolve_approval_mode(session_id, approval_mode_override, &claude_tools);
     let arg_str=serde_json::to_string(&json!({
         "mode": "prompt",
         "approvalMode": approval_mode,
@@ -677,6 +674,22 @@ pub fn prompt_session_with_details(
     Ok(res)
 }
 
+fn resolve_approval_mode(session_id: &str, approval_mode_override: Option<&str>, claude_tools: &[String]) -> &'static str {
+    if approval_mode_override == Some("deny") {
+        "deny"
+    } else if session_id.starts_with("codex:") {
+        if approval_mode_override == Some("interactive") {
+            "interactive"
+        } else {
+            "deny"
+        }
+    } else if session_id.starts_with("agy:") || (session_id.starts_with("claude-jsonl:") && !claude_tools.is_empty()) {
+        "interactive"
+    } else {
+        "deny"
+    }
+}
+
 fn require_native_harness_grant(grant: &HostGrant, session: &str) -> Result<(), &'static str> {
     let tool = match session.split_once(':').map(|(tool, _)| tool) {
         Some("claude-jsonl") => "claude",
@@ -691,7 +704,7 @@ fn require_native_harness_grant(grant: &HostGrant, session: &str) -> Result<(), 
 
 pub fn native_permission(data: &Path, connection: &str, session: &str, request: &str, permission: &str, option: Option<&str>) -> Result<Value, &'static str> {
     use sha2::{Sha256,Digest};
-    if !session.starts_with("agy:") && !session.starts_with("claude-jsonl:") { return Err("HARNESS_APPROVAL_UNSUPPORTED") }
+    if !session.starts_with("agy:") && !session.starts_with("claude-jsonl:") && !session.starts_with("codex:") { return Err("HARNESS_APPROVAL_UNSUPPORTED") }
     if permission.is_empty() || permission.len()>128 || option.is_some_and(|x|x.len()>128) { return Err("HARNESS_APPROVAL_INVALID") }
     let all=grants(data)?;
     let grant=all.iter().find(|g|g.connection_id==connection).ok_or("DSH_CONNECTION_REQUIRED")?;
@@ -708,12 +721,22 @@ pub fn native_permission(data: &Path, connection: &str, session: &str, request: 
 }
 
 pub fn native_cancel(data: &Path, connection: &str, session: &str, request: &str) -> Result<Value, &'static str> {
+    use sha2::{Sha256,Digest};
     if !session.starts_with("codex:") && !session.starts_with("pi:") && !session.starts_with("agy:") && !session.starts_with("claude-jsonl:") { return Err("HARNESS_CANCEL_UNSUPPORTED") }
     let all=grants(data)?;
     let grant=all.iter().find(|g|g.connection_id==connection).ok_or("DSH_CONNECTION_REQUIRED")?;
     require_native_harness_grant(grant, session)?;
     let bytes=run_ssh_python(&grant.ssh_target,&json!({"mode":"cancel","sessionId":session,"requestId":request}).to_string(),15)?;
-    serde_json::from_slice(&bytes).map_err(|_|"HARNESS_CANCEL_UNCONFIRMED")
+    let res: Value = serde_json::from_slice(&bytes).map_err(|_|"HARNESS_CANCEL_UNCONFIRMED")?;
+    if request == "__bob_release_holder__" {
+        let mut hash=Sha256::new();
+        hash.update(connection.as_bytes());
+        hash.update(b":");
+        hash.update(session.as_bytes());
+        let cache_path=data.join(format!("remote-page-{:x}.json",hash.finalize()));
+        let _=fs::remove_file(cache_path);
+    }
+    Ok(res)
 }
 
 pub(crate) fn preview_host_timeout_secs(path: &str) -> u64 {
@@ -916,5 +939,28 @@ mod native_grant_tests {
         assert!(require_native_harness_grant(&grant,"agy:12345678").is_ok());
         assert_eq!(require_native_harness_grant(&grant,"pi:12345678"),Err("HARNESS_TOOL_NOT_GRANTED"));
         assert_eq!(require_native_harness_grant(&grant,"unknown:12345678"),Err("HARNESS_EVENTS_UNSUPPORTED"));
+    }
+
+    #[test]
+    fn resolve_approval_mode_codex_requires_explicit_interactive_override() {
+        let tools = vec!["Bash".to_string()];
+        assert_eq!(resolve_approval_mode("codex:12345678", None, &[]), "deny");
+        assert_eq!(resolve_approval_mode("codex:12345678", Some("read_only"), &[]), "deny");
+        assert_eq!(resolve_approval_mode("codex:12345678", Some("deny"), &[]), "deny");
+        assert_eq!(resolve_approval_mode("codex:12345678", Some("interactive"), &[]), "interactive");
+        assert_eq!(resolve_approval_mode("agy:12345678", Some("interactive"), &[]), "interactive");
+        assert_eq!(resolve_approval_mode("agy:12345678", Some("deny"), &[]), "deny");
+        assert_eq!(resolve_approval_mode("claude-jsonl:12345678", None, &[]), "deny");
+        assert_eq!(resolve_approval_mode("claude-jsonl:12345678", None, &tools), "interactive");
+        assert_eq!(resolve_approval_mode("claude-jsonl:12345678", Some("deny"), &tools), "deny");
+    }
+
+    #[test]
+    fn native_permission_accepts_codex_prefix_past_harness_check() {
+        let dir = std::env::temp_dir().join(format!("bob_codex_perm_test_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let err = native_permission(&dir, "local", "codex:12345678", "req-1", "perm-1", Some("accept")).unwrap_err();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_ne!(err, "HARNESS_APPROVAL_UNSUPPORTED");
     }
 }

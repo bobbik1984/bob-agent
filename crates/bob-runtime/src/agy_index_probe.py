@@ -2,7 +2,7 @@ from collections import deque
 from contextlib import closing
 from datetime import datetime
 from urllib.parse import unquote
-import json, os, re, shutil, sqlite3, subprocess, sys, time, uuid
+import hashlib, json, os, re, shutil, signal, sqlite3, subprocess, sys, time, uuid
 from pathlib import Path
 
 def _uri_to_path(uri):
@@ -503,7 +503,7 @@ def _reconcile(sid):
     return out
 
 def read_session_page(cfg, sid):
-    ev, ws, h = [], '', 'dsh'
+    ev, ws, h, jpath = [], '', 'dsh', ''
     codex_turn_texts = {}
     native_user_ids = set()
     agy_meta = {}
@@ -657,6 +657,7 @@ def read_session_page(cfg, sid):
         h, raw, xdir = 'codex', sid.split(':', 1)[1], cfg.get('codexDataDir') or ''
         m = [p for p in (Path(xdir) / 'sessions').glob('**/*.jsonl') if raw in p.name] if xdir else []
         if m:
+            jpath = str(m[0])
             fb = int(m[0].stat().st_mtime * 1000)
             current_turn = None
             tool_calls = {}
@@ -762,10 +763,18 @@ def read_session_page(cfg, sid):
             msgs = [{'sequence': 1, 'role': 'assistant', 'text': f'Session `{sid}` loaded (`{ws or "default"}`).', 'timestamp': _now()}]
     out = {'harness': h, 'workspace': ws, 'messages': msgs, 'cli_interrupted': cli_interrupted,
            'request_results': [{'request_id': r['request_id'], 'status': r.get('execution_status', 'completed')} for r in recs if r.get('request_id')]}
-    if cfg.get('mode') == 'page' and sid.startswith('claude-jsonl:'):
-        holder = _safe_claude_holder(sid)
+    if cfg.get('mode') == 'page':
+        holder = None
+        if sid.startswith('claude-jsonl:'):
+            holder = _safe_claude_holder(sid)
+        elif sid.startswith('codex:'):
+            holder = _safe_codex_holder(sid, jpath if sid.startswith('codex:') else '')
+        elif sid.startswith('agy:'):
+            holder = _safe_agy_holder(sid, cfg.get('agyDataDir') or '')
         if holder is not None:
             out['terminal_holder'] = holder
+        if sid.startswith(('claude-jsonl:', 'codex:', 'agy:')):
+            out['bob_holder'] = _inspect_bob_holder(sid)
     return out
 
 
@@ -1247,6 +1256,43 @@ def request_native_cancel(cfg):
     """Only cancel a Bob-owned request, never a process discovered by name."""
     sid, rid = cfg.get('sessionId'), cfg.get('requestId')
     if not sid or not rid: raise ValueError('HARNESS_REQUEST_REQUIRED')
+    if rid == '__bob_release_holder__':
+        if not sid.startswith(('codex:', 'pi:', 'agy:', 'claude-jsonl:')):
+            raise ValueError('HARNESS_CANCEL_UNSUPPORTED')
+        _stream_records(sid)
+        sup_to_kill = None
+        obs_to_kill = None
+        with closing(_stream_db()) as db, db:
+            db.execute('BEGIN IMMEDIATE')
+            _agy_tables(db)
+            _observer_table(db)
+            for (raw_body,) in db.execute('SELECT body FROM requests WHERE session=?', (sid,)).fetchall():
+                if json.loads(raw_body).get('execution_status') in ('accepted', 'running'):
+                    return {'session_id': sid, 'request_id': rid, 'status': 'busy', 'released': False, 'reason': 'HARNESS_SESSION_BUSY'}
+            if sid.startswith('agy:'):
+                sup = db.execute('SELECT token, pid FROM agy_supervisors WHERE session=?', (sid,)).fetchone()
+                db.execute('DELETE FROM agy_supervisors WHERE session=?', (sid,))
+                if sup and _agy_process_owned(sup[1], sup[0], sid):
+                    sup_to_kill = int(sup[1])
+            elif sid.startswith('codex:'):
+                obs = db.execute('SELECT pid FROM observers WHERE session=?', (sid,)).fetchone()
+                db.execute('DELETE FROM observers WHERE session=?', (sid,))
+                if obs and obs[0] and _observer_process_owned(obs[0], sid):
+                    obs_to_kill = int(obs[0])
+        if sup_to_kill:
+            try:
+                if hasattr(os, 'killpg') and hasattr(os, 'getpgid') and os.getpgid(sup_to_kill) == sup_to_kill:
+                    os.killpg(sup_to_kill, signal.SIGTERM)
+                else:
+                    os.kill(sup_to_kill, signal.SIGTERM)
+            except OSError:
+                pass
+        if obs_to_kill:
+            try:
+                os.kill(obs_to_kill, signal.SIGTERM)
+            except OSError:
+                pass
+        return {'session_id': sid, 'request_id': rid, 'status': 'released', 'released': True}
     with closing(_stream_db()) as db, db:
         db.execute('BEGIN IMMEDIATE')
         row=db.execute('SELECT body FROM requests WHERE id=? AND session=?',(rid,sid)).fetchone()
@@ -1664,15 +1710,18 @@ def _inspect_claude_session_holder(exe, raw, env):
             raise ValueError()
         if row['sessionId']==raw:
             pid=int(row.get('pid') or 0)
+            remote=_claude_pid_has_remote_control(pid)
             return {
                 'busy':True,
                 'pid':pid,
                 'name':str(row.get('name') or '')[:200],
                 'kind':str(row.get('kind') or 'interactive')[:64],
                 'status':str(row.get('status') or 'idle')[:64],
-                'remote_control':_claude_pid_has_remote_control(pid),
+                'remote_control':remote,
+                'harness':'claude',
+                'mode':'claude_remote_control' if remote else 'claude_terminal',
             }
-    return {'busy':False,'remote_control':False}
+    return {'busy':False,'remote_control':False,'harness':'claude'}
 
 
 def _release_claude_terminal_holder(exe, raw, env):
@@ -1714,6 +1763,390 @@ def _safe_claude_holder(sid):
         return None
 
 
+def _proc_ppid(pid):
+    try:
+        for line in (Path('/proc') / str(int(pid)) / 'status').read_text(encoding='utf-8', errors='replace').splitlines():
+            if line.startswith('PPid:'):
+                return int(line.split(':', 1)[1].strip() or 0)
+    except Exception:
+        pass
+    return 0
+
+
+def _proc_cmdline_parts(pid):
+    try:
+        raw_cmd = (Path('/proc') / str(int(pid)) / 'cmdline').read_bytes()
+        return [seg.decode('utf-8', 'ignore') for seg in raw_cmd.split(b'\x00') if seg]
+    except Exception:
+        return []
+
+
+def _proc_fd_targets(pid, limit=256):
+    targets = []
+    try:
+        fd_dir = Path('/proc') / str(int(pid)) / 'fd'
+        for idx, fd in enumerate(fd_dir.iterdir()):
+            if idx >= limit:
+                break
+            try:
+                targets.append(os.readlink(fd))
+            except OSError:
+                pass
+    except OSError:
+        pass
+    return targets
+
+
+def _is_bob_owned_proc(pid):
+    try:
+        p = int(pid or 0)
+        if p <= 0 or p == os.getpid():
+            return True
+        joined = '\0'.join(_proc_cmdline_parts(p)).lower()
+        if any(tag in joined for tag in ('agy_supervisor', 'native_worker', 'external_observer', 'bob-receipt-reader')):
+            return True
+        ppid = _proc_ppid(p)
+        if ppid > 1:
+            pjoined = '\0'.join(_proc_cmdline_parts(ppid)).lower()
+            if any(tag in pjoined for tag in ('agy_supervisor', 'native_worker', 'external_observer')):
+                return True
+    except Exception:
+        pass
+    return False
+
+
+def _iter_same_uid_procs():
+    proc_root = Path('/proc')
+    if not proc_root.is_dir():
+        return []
+    uid = os.getuid() if hasattr(os, 'getuid') else None
+    rows = []
+    for entry in proc_root.iterdir():
+        if not entry.name.isdigit():
+            continue
+        try:
+            if uid is not None and entry.stat().st_uid != uid:
+                continue
+            pid = int(entry.name)
+            if pid == os.getpid():
+                continue
+            argv = _proc_cmdline_parts(pid)
+            if argv:
+                rows.append((pid, argv))
+        except (OSError, ValueError):
+            continue
+    return rows
+
+
+def _observer_process_owned(pid, sid):
+    try:
+        p = int(pid or 0)
+        if p <= 0:
+            return False
+        os.kill(p, 0)
+        argv = (Path('/proc') / str(p) / 'cmdline').read_bytes()
+        return b'external_observer' in argv and sid.encode('utf-8') in argv
+    except (OSError, ValueError):
+        return False
+
+
+def _codex_socket_pid_map():
+    if not Path('/proc/net/unix').is_file():
+        return {}
+    inode_to_pid = {}
+    for pid, argv in _iter_same_uid_procs():
+        if Path(argv[0]).name != 'codex' or 'app-server' not in argv:
+            continue
+        for target in _proc_fd_targets(pid):
+            if target.startswith('socket:[') and target.endswith(']'):
+                inode_to_pid[target[8:-1]] = pid
+    out = {}
+    if not inode_to_pid:
+        return out
+    try:
+        for line in Path('/proc/net/unix').read_text(encoding='utf-8', errors='replace').splitlines()[1:]:
+            parts = line.split()
+            if len(parts) > 7 and parts[6] in inode_to_pid and parts[7].startswith('/'):
+                out.setdefault(parts[7], inode_to_pid[parts[6]])
+    except OSError:
+        pass
+    return out
+
+
+def _inspect_codex_session_holder(raw, jpath=''):
+    if not isinstance(raw, str) or not raw:
+        return {'busy': False, 'remote_control': False, 'harness': 'codex'}
+    pipe = None
+    try:
+        pipe, thread = _open_loaded_codex(raw)
+        if isinstance(thread, dict):
+            turns = thread.get('turns') or []
+            latest = turns[-1] if turns and isinstance(turns[-1], dict) else {}
+            if latest.get('status') == 'inProgress':
+                sock_path = getattr(pipe, 'path', None)
+                sock_pid = _codex_socket_pid_map().get(sock_path, 0) if isinstance(sock_path, str) and sock_path else 0
+                return {
+                    'busy': True,
+                    'pid': int(sock_pid or 0),
+                    'name': 'Codex App Server',
+                    'kind': 'app_server',
+                    'status': 'inProgress',
+                    'remote_control': False,
+                    'harness': 'codex',
+                    'mode': 'codex_app_server',
+                    'active_turn_id': str(latest.get('id') or '')[:128],
+                    'can_hot_interrupt': True,
+                }
+    except Exception:
+        pass
+    finally:
+        if pipe:
+            try:
+                pipe.close()
+            except Exception:
+                pass
+    for pid, argv in _iter_same_uid_procs():
+        joined = '\0'.join(argv).lower()
+        if any(tag in joined for tag in ('native_worker', 'external_observer', 'agy_supervisor', 'bob-receipt-reader', 'app-server')):
+            continue
+        b0 = Path(argv[0]).name.lower()
+        b1 = Path(argv[1]).name.lower() if len(argv) > 1 else ''
+        if b0 not in ('codex', 'codex.exe') and not (b0 in ('node', 'node.exe', 'nodejs') and b1 in ('codex', 'codex.exe')):
+            continue
+        matched = any(raw in a for a in argv)
+        if not matched and jpath:
+            targets = _proc_fd_targets(pid)
+            matched = any(t == jpath or raw in t for t in targets)
+        if matched:
+            return {
+                'busy': True,
+                'pid': pid,
+                'name': 'Codex CLI',
+                'kind': 'interactive',
+                'status': 'running',
+                'remote_control': False,
+                'harness': 'codex',
+                'mode': 'codex_terminal',
+                'can_hot_interrupt': False,
+            }
+    return {'busy': False, 'remote_control': False, 'harness': 'codex'}
+
+
+def _release_codex_terminal_holder(raw, jpath=''):
+    holder = _inspect_codex_session_holder(raw, jpath)
+    if not holder.get('busy'):
+        return holder
+    if holder.get('remote_control'):
+        raise ValueError('HARNESS_REMOTE_CONTROL')
+    mode = holder.get('mode')
+    if mode == 'codex_app_server':
+        pipe = None
+        try:
+            pipe, thread = _open_loaded_codex(raw)
+            if pipe and isinstance(thread, dict):
+                turns = thread.get('turns') or []
+                latest = turns[-1] if turns and isinstance(turns[-1], dict) else {}
+                turn_id = latest.get('id')
+                if latest.get('status') == 'inProgress' and isinstance(turn_id, str) and turn_id:
+                    pipe.send({'id': 5, 'method': 'turn/interrupt', 'params': {'threadId': raw, 'turnId': turn_id}})
+                    try:
+                        _control_result(pipe, 5)
+                    except (ValueError, OSError):
+                        pass
+        except (ValueError, OSError):
+            pass
+        finally:
+            if pipe:
+                try:
+                    pipe.close()
+                except Exception:
+                    pass
+    else:
+        pid = int(holder.get('pid') or 0)
+        if pid <= 0 or pid == os.getpid():
+            raise ValueError('HARNESS_SESSION_BUSY')
+        try:
+            proc_dir = Path('/proc') / str(pid)
+            if hasattr(os, 'getuid') and proc_dir.exists() and proc_dir.stat().st_uid != os.getuid():
+                raise ValueError('HARNESS_SESSION_BUSY')
+            cmdline = (proc_dir / 'cmdline').read_bytes().decode('utf-8', 'ignore').lower() if (proc_dir / 'cmdline').exists() else 'codex'
+            if 'codex' not in cmdline or 'native_worker' in cmdline or 'app-server' in cmdline:
+                raise ValueError('HARNESS_SESSION_BUSY')
+            os.kill(pid, signal.SIGTERM)
+        except ValueError:
+            raise
+        except OSError:
+            pass
+    deadline = time.monotonic() + 3.5
+    while time.monotonic() < deadline:
+        time.sleep(0.25)
+        holder = _inspect_codex_session_holder(raw, jpath)
+        if not holder.get('busy'):
+            return holder
+    return holder
+
+
+def _safe_codex_holder(sid, jpath=''):
+    if not isinstance(sid, str) or not sid.startswith('codex:'):
+        return None
+    raw = sid.split(':', 1)[1]
+    try:
+        return _inspect_codex_session_holder(raw, jpath)
+    except Exception:
+        return None
+
+
+def _classify_agy_process(pid, argv, fd_targets, raw, adir=''):
+    if not argv or not raw:
+        return None
+    joined = '\0'.join(argv).lower()
+    if any(tag in joined for tag in ('agy_supervisor', 'native_worker', 'external_observer', 'bob-receipt-reader')):
+        return None
+    head_match = any(
+        Path(a).name.lower() in ('agy', 'agy.exe', 'antigravity', 'antigravity.exe')
+        or ('antigravity' in a.lower() and not a.startswith('-'))
+        for a in argv[:4] if a
+    )
+    if not head_match:
+        return None
+    ref_match = any(raw in a for a in argv) or any(
+        raw in t and (not adir or adir in t or 'conversations' in t or 'brain' in t)
+        for t in (fd_targets or ())
+    )
+    if not ref_match:
+        return None
+    head0 = Path(argv[0]).name.lower()
+    is_ide = any(
+        a.startswith('--type=')
+        or 'electron' in a.lower()
+        or 'extensionhost' in a.lower()
+        or 'reh-' in a.lower()
+        or 'antigravity-server' in a.lower()
+        or a in ('--remote', '--ms-enable-electron-run-as-node')
+        for a in argv
+    ) or (
+        head0 in ('antigravity', 'antigravity.exe')
+        and not any(x in argv[1:] for x in ('chat', 'run', 'resume', 'acp', '-p', '--prompt'))
+    )
+    if is_ide:
+        return {
+            'busy': True,
+            'pid': int(pid),
+            'name': 'Antigravity IDE',
+            'kind': 'ide',
+            'status': 'running',
+            'remote_control': True,
+            'harness': 'agy',
+            'mode': 'agy_ide',
+        }
+    return {
+        'busy': True,
+        'pid': int(pid),
+        'name': 'AGY CLI',
+        'kind': 'interactive',
+        'status': 'running',
+        'remote_control': False,
+        'harness': 'agy',
+        'mode': 'agy_terminal',
+        'can_hot_interrupt': False,
+    }
+
+
+def _inspect_agy_session_holder(raw, adir=''):
+    if not isinstance(raw, str) or not raw:
+        return {'busy': False, 'remote_control': False, 'harness': 'agy'}
+    cli_holder = None
+    for pid, argv in _iter_same_uid_procs():
+        if _is_bob_owned_proc(pid):
+            continue
+        head_match = any(
+            Path(a).name.lower() in ('agy', 'agy.exe', 'antigravity', 'antigravity.exe')
+            or ('antigravity' in a.lower() and not a.startswith('-'))
+            for a in argv[:4] if a
+        )
+        if not head_match:
+            continue
+        fd_targets = _proc_fd_targets(pid) if not any(raw in a for a in argv) else ()
+        hit = _classify_agy_process(pid, argv, fd_targets, raw, adir)
+        if not hit:
+            continue
+        if hit.get('remote_control'):
+            return hit
+        if cli_holder is None:
+            cli_holder = hit
+    return cli_holder or {'busy': False, 'remote_control': False, 'harness': 'agy'}
+
+
+def _release_agy_terminal_holder(raw, adir=''):
+    holder = _inspect_agy_session_holder(raw, adir)
+    if not holder.get('busy'):
+        return holder
+    if holder.get('remote_control'):
+        raise ValueError('HARNESS_REMOTE_CONTROL')
+    pid = int(holder.get('pid') or 0)
+    if pid <= 0 or pid == os.getpid() or _is_bob_owned_proc(pid):
+        raise ValueError('HARNESS_SESSION_BUSY')
+    try:
+        proc_dir = Path('/proc') / str(pid)
+        if hasattr(os, 'getuid') and proc_dir.exists() and proc_dir.stat().st_uid != os.getuid():
+            raise ValueError('HARNESS_SESSION_BUSY')
+        cmdline = (proc_dir / 'cmdline').read_bytes().decode('utf-8', 'ignore').lower() if (proc_dir / 'cmdline').exists() else 'agy'
+        if not any(tok in cmdline for tok in ('agy', 'antigravity')) or 'agy_supervisor' in cmdline or 'native_worker' in cmdline:
+            raise ValueError('HARNESS_SESSION_BUSY')
+        os.kill(pid, signal.SIGTERM)
+    except ValueError:
+        raise
+    except OSError:
+        pass
+    deadline = time.monotonic() + 3.5
+    while time.monotonic() < deadline:
+        time.sleep(0.25)
+        holder = _inspect_agy_session_holder(raw, adir)
+        if not holder.get('busy'):
+            return holder
+    return holder
+
+
+def _safe_agy_holder(sid, adir=''):
+    if not isinstance(sid, str) or not sid.startswith('agy:'):
+        return None
+    raw = sid.split(':', 1)[1]
+    try:
+        return _inspect_agy_session_holder(raw, adir)
+    except Exception:
+        return None
+
+
+def _inspect_bob_holder(sid):
+    conn = _readonly_receipts_conn()
+    if conn is None:
+        return {'held': False, 'running': False, 'kind': None, 'pid': None}
+    try:
+        with closing(conn) as db:
+            tbls = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+            running = False
+            active_pid = None
+            if 'requests' in tbls:
+                for (raw_body,) in db.execute('SELECT body FROM requests WHERE session=?', (sid,)).fetchall():
+                    rec = _j(raw_body)
+                    if rec.get('execution_status') in ('accepted', 'running'):
+                        running = True
+                        active_pid = rec.get('pid') or active_pid
+            if sid.startswith('agy:') and 'agy_supervisors' in tbls:
+                row = db.execute('SELECT token, pid FROM agy_supervisors WHERE session=?', (sid,)).fetchone()
+                if row and _agy_process_owned(row[1], row[0], sid):
+                    return {'held': True, 'running': running, 'kind': 'agy_supervisor', 'pid': int(row[1])}
+            if sid.startswith('codex:') and 'observers' in tbls:
+                row = db.execute('SELECT pid, status FROM observers WHERE session=?', (sid,)).fetchone()
+                if row and row[0] and _observer_process_owned(row[0], sid):
+                    return {'held': True, 'running': running, 'kind': 'codex_observer', 'pid': int(row[0])}
+            if running:
+                return {'held': True, 'running': True, 'kind': 'native_worker', 'pid': int(active_pid) if active_pid else None}
+    except Exception:
+        pass
+    return {'held': False, 'running': False, 'kind': None, 'pid': None}
+
+
 def _ensure_claude_session_available(exe, raw, env):
     """Official active-session inventory, never terminal-log scraping.
 
@@ -1748,10 +2181,12 @@ def _permission_activity(db, cfg, entry, status):
     state = json.loads(row[0]) if row else {}
     activity = state.get('activity') or {'items': [], 'approvals': [], 'partial': False}
     key = json.dumps(entry['frame']['id'])
+    raw_key = str(entry['frame']['id'])
     items = activity.setdefault('approvals', [])
-    old = next((x for x in items if x['id'] == key), None)
+    old = next((x for x in items if x['id'] == key or x.get('request_key') == key or x.get('id') == raw_key), None)
     if old is None:
-        old = {'id': key, 'method': 'can_use_tool' if entry.get('protocol')=='claude' else 'session/request_permission'}
+        method = entry.get('codex_method') if entry.get('protocol')=='codex' else ('can_use_tool' if entry.get('protocol')=='claude' else 'session/request_permission')
+        old = {'id': key, 'method': method}
         items.append(old)
     old.update(status=status, permission_id=entry['id'], options=entry['options'],
         title=entry['title'], detail=entry.get('detail',''), actionable=status == 'pending', expires_at=entry['expires_at'])
@@ -1763,12 +2198,12 @@ def _permission_activity(db, cfg, entry, status):
 
 def _permission_owner(rec, sid):
     if sid.startswith('agy:'):return rec.get('supervisor_token')
-    if sid.startswith('claude-jsonl:'):return 'worker:'+str(rec.get('request_id') or '')
+    if sid.startswith(('claude-jsonl:', 'codex:')):return 'worker:'+str(rec.get('request_id') or '')
     return None
 
 def _permission_owner_alive(rec, sid):
     if sid.startswith('agy:'):return _agy_process_owned(rec.get('pid'),rec.get('supervisor_token'),sid)
-    if not sid.startswith('claude-jsonl:'):return False
+    if not sid.startswith(('claude-jsonl:', 'codex:')):return False
     try:
         pid=int(rec.get('pid') or 0)
         if pid<=0:return False
@@ -1838,6 +2273,8 @@ def _open_native_permission(cfg, frame, serial):
             'owner':_permission_owner(rec,cfg['session_id']),'pid':rec['pid'],'expires_at':_now()+300000,'status':'pending'}
         if frame.get('protocol')=='claude':
             entry.update(protocol='claude',original_input=frame['original_input'])
+        elif frame.get('protocol')=='codex':
+            entry.update(protocol='codex',codex_method=str(frame.get('codex_method') or 'item/requestApproval')[:256])
         db.execute('INSERT INTO native_permissions VALUES(?,?,?,?)',(entry['id'],cfg['request_id'],cfg['session_id'],json.dumps(entry)))
         _permission_activity(db,cfg,entry,'pending')
     return True
@@ -1845,7 +2282,7 @@ def _open_native_permission(cfg, frame, serial):
 
 def submit_native_permission(cfg):
     sid,rid=cfg.get('sessionId'),cfg.get('requestId');pid=cfg.get('permissionId');choice=cfg.get('optionId')
-    if not isinstance(sid,str) or not sid.startswith(('agy:','claude-jsonl:')):raise ValueError('HARNESS_APPROVAL_UNSUPPORTED')
+    if not isinstance(sid,str) or not sid.startswith(('agy:','claude-jsonl:','codex:')):raise ValueError('HARNESS_APPROVAL_UNSUPPORTED')
     _stream_records(sid)
     with closing(_stream_db()) as db,db:
         db.execute('BEGIN IMMEDIATE');_permission_schema(db)
@@ -1906,6 +2343,9 @@ def _flush_native_permissions(cfg, pipe):
             else:
                 answer={'behavior':'deny','message':'Tool execution was not approved'}
             pipe.send({'type':'control_response','response':{'subtype':'success','request_id':entry['frame']['id'],'response':answer}})
+        elif entry.get('protocol')=='codex':
+            decision='accept' if allowed else ('cancel' if cancelled else 'decline')
+            pipe.send({'id':entry['frame']['id'],'result':{'decision':decision}})
         else:pipe.send({'jsonrpc':'2.0','id':entry['frame']['id'],'result':{'outcome':outcome}})
         with closing(_stream_db()) as db,db:
             entry['status']='sent'
@@ -2072,6 +2512,8 @@ def _native_worker(cfg):
         cwd = cfg['work_cwd']
         if not Path(cwd).is_dir(): raise ValueError('HARNESS_WORKSPACE_MISSING')
         if tool == 'codex':
+            if not creating and cfg.get('takeover') is True:
+                _release_codex_terminal_holder(raw, cfg.get('jsonl_path') or '')
             pipe = NativePipe([exe,'app-server'],cwd,env)
             pipe.send({'id':1,'method':'initialize','params':{'clientInfo':{'name':'bob-native','version':'1.0.1'}}})
             init_deadline=time.monotonic()+30
@@ -2086,7 +2528,8 @@ def _native_worker(cfg):
                     break
                 if time.monotonic()>=init_deadline:raise ValueError('HARNESS_TIMEOUT')
             pipe.send({'method':'initialized','params':{}})
-            params = {'cwd':cwd, 'approvalPolicy':'never', 'sandbox':'read-only'}
+            codex_interactive = (not creating and cfg.get('approval_mode') == 'interactive')
+            params = {'cwd':cwd, 'approvalPolicy':'on-request' if codex_interactive else 'never', 'sandbox':'workspace-write' if codex_interactive else 'read-only'}
             if not creating:
                 params['threadId'] = raw
             pipe.send({'id':2, 'method':'thread/start' if creating else 'thread/resume', 'params':params})
@@ -2144,7 +2587,7 @@ def _native_worker(cfg):
                 elif codex_stream.turn_id:
                     pipe.send({'id':4,'method':'turn/interrupt','params':{'threadId':raw,'turnId':codex_stream.turn_id}});cancel_sent=True
                 if cancel_sent: _stream_update(rid,cancel_dispatched_at=_now())
-            if tool=='claude' and cfg.get('approval_mode')=='interactive':_flush_native_permissions(cfg,pipe)
+            if tool in ('claude','codex') and cfg.get('approval_mode')=='interactive':_flush_native_permissions(cfg,pipe)
             frame, already_answered = ready_frames.popleft() if ready_frames else (pipe.receive(timeout=0.5), False)
             if frame is None: continue
             _stream_update(rid,last_protocol_frame=str(frame.get('method') or frame.get('event') or frame.get('type') or frame.get('id'))[:100])
@@ -2156,6 +2599,21 @@ def _native_worker(cfg):
                     if codex_stream.turn_id:
                         _capture_codex_event(sid,raw,frame,'worker:'+rid,rid,codex_stream.turn_id)
                     if not already_answered:
+                        codex_interactive = (not creating and cfg.get('approval_mode') == 'interactive')
+                        if codex_interactive and identity and codex_stream.turn_id and str(frame.get('method')).endswith('/requestApproval'):
+                            fp = frame.get('params') if isinstance(frame.get('params'), dict) else {}
+                            cmd = fp.get('command')
+                            fpath = fp.get('filePath') or fp.get('path') or fp.get('reason')
+                            title = str(cmd or fpath or frame.get('method') or 'Codex approval')[:512]
+                            tool_call = {'title': title, 'method': frame.get('method'), 'params': fp}
+                            if cmd: tool_call['command'] = str(cmd)[:1024]
+                            if fpath: tool_call['file_path'] = str(fpath)[:1024]
+                            normalized = {'id': frame['id'], 'protocol': 'codex', 'codex_method': frame.get('method'),
+                                'params': {'sessionId': raw, 'toolCall': tool_call,
+                                    'options': [{'optionId': 'allow_once', 'kind': 'allow_once', 'name': 'Allow once'},
+                                                {'optionId': 'reject_once', 'kind': 'reject_once', 'name': 'Decline'}]}}
+                            if _open_native_permission(cfg, normalized, 1):
+                                continue
                         pipe.send({'id':frame['id'],'error':{'code':-32000,'message':'Bob read-only verification denies tool approval'}})
                     params=frame.get('params') or {}
                     if identity and codex_stream.turn_id is None and isinstance(params,dict) and params.get('threadId')==raw:
@@ -2181,8 +2639,10 @@ def _native_worker(cfg):
                         _stream_update(rid,execution_status='cancelled',ended_at=_now(),cancel_confirmed_by='not_dispatched')
                         _stream_event(cfg,'cancelled');return
                     _stream_update(rid,native_session_id=raw,turn_start_requested=True)
+                    codex_interactive = (not creating and cfg.get('approval_mode') == 'interactive')
                     pipe.send({'id':3,'method':'turn/start','params':{'threadId':raw,'input':[{'type':'text','text':text}],
-                        'approvalPolicy':'never','sandboxPolicy':{'type':'readOnly'}}})
+                        'approvalPolicy':'on-request' if codex_interactive else 'never',
+                        'sandboxPolicy':{'type':'workspaceWrite'} if codex_interactive else {'type':'readOnly'}}})
                 if frame.get('id')==3:
                     _stream_update(rid,turn_start_response_received=True)
                     if 'error' in frame: raise ValueError('HARNESS_SEND_REJECTED')
@@ -2614,6 +3074,34 @@ def prompt_session(cfg):
                 if str(exc)=='HARNESS_CLAUDE_REMOTE_CONTROL':
                     holder=_safe_claude_holder(sid) or {'busy':True,'remote_control':True}
                     return {'status':'not_accepted','execution_status':'not_accepted','session_id':sid,'request_id':rid,'reason':'HARNESS_CLAUDE_REMOTE_CONTROL','terminal_holder':holder}
+    elif sid.startswith('codex:'):
+        raw=sid.split(':',1)[1]
+        try:
+            holder=_release_codex_terminal_holder(raw,jpath) if takeover else _inspect_codex_session_holder(raw,jpath)
+            if holder.get('busy'):
+                reason='HARNESS_REMOTE_CONTROL' if holder.get('remote_control') else 'HARNESS_SESSION_BUSY'
+                return {'status':'not_accepted','execution_status':'not_accepted','session_id':sid,'request_id':rid,'reason':reason,'terminal_holder':holder}
+        except ValueError as exc:
+            if str(exc)=='HARNESS_REMOTE_CONTROL':
+                holder=_safe_codex_holder(sid,jpath) or {'busy':True,'remote_control':True,'harness':'codex'}
+                return {'status':'not_accepted','execution_status':'not_accepted','session_id':sid,'request_id':rid,'reason':'HARNESS_REMOTE_CONTROL','terminal_holder':holder}
+            if str(exc)=='HARNESS_SESSION_BUSY':
+                holder=_safe_codex_holder(sid,jpath) or {'busy':True,'remote_control':False,'harness':'codex'}
+                return {'status':'not_accepted','execution_status':'not_accepted','session_id':sid,'request_id':rid,'reason':'HARNESS_SESSION_BUSY','terminal_holder':holder}
+    elif sid.startswith('agy:'):
+        raw=sid.split(':',1)[1];adir=cfg.get('agyDataDir') or ''
+        try:
+            holder=_release_agy_terminal_holder(raw,adir) if takeover else _inspect_agy_session_holder(raw,adir)
+            if holder.get('busy'):
+                reason='HARNESS_REMOTE_CONTROL' if holder.get('remote_control') else 'HARNESS_SESSION_BUSY'
+                return {'status':'not_accepted','execution_status':'not_accepted','session_id':sid,'request_id':rid,'reason':reason,'terminal_holder':holder}
+        except ValueError as exc:
+            if str(exc)=='HARNESS_REMOTE_CONTROL':
+                holder=_safe_agy_holder(sid,adir) or {'busy':True,'remote_control':True,'harness':'agy','mode':'agy_ide'}
+                return {'status':'not_accepted','execution_status':'not_accepted','session_id':sid,'request_id':rid,'reason':'HARNESS_REMOTE_CONTROL','terminal_holder':holder}
+            if str(exc)=='HARNESS_SESSION_BUSY':
+                holder=_safe_agy_holder(sid,adir) or {'busy':True,'remote_control':False,'harness':'agy','mode':'agy_terminal'}
+                return {'status':'not_accepted','execution_status':'not_accepted','session_id':sid,'request_id':rid,'reason':'HARNESS_SESSION_BUSY','terminal_holder':holder}
     attachments = cfg.get('attachments') or []
     if isinstance(attachments, list) and attachments:
         att_dir = Path(wcwd) / '.bob_attachments'
@@ -2671,6 +3159,7 @@ class CodexControlSocket:
     def __init__(self, path):
         st=os.stat(path)
         if st.st_uid!=os.getuid() or not stat.S_ISSOCK(st.st_mode): raise ValueError('HARNESS_CONTROL_NOT_OWNED')
+        self.path=path
         self.s=socket.socket(socket.AF_UNIX);self.s.settimeout(5);self.s.connect(path)
         self.buf=b'';self.fragment=b''
         key=base64.b64encode(os.urandom(16)).decode()

@@ -1397,9 +1397,81 @@ class NativeTests(unittest.TestCase):
   self.assertEqual([o['id'] for o in entry['options']],['answer_0','answer_1','reject_once'])
   with patch.object(p,'_permission_owner_alive',return_value=True):
    p.submit_native_permission({'sessionId':sid,'requestId':rid,'permissionId':entry['id'],'optionId':'answer_0','claudeTools':['AskUserQuestion']})
-  p._flush_native_permissions(cfg,pipe)
+   p._flush_native_permissions(cfg,pipe)
   resp=pipe.send.call_args.args[0]['response']['response']
   self.assertEqual(resp['behavior'],'allow')
   self.assertEqual(resp['updatedInput']['answers'],{'Which mode?':'Fast'})
+
+ def test_codex_app_server_holder_and_hot_interrupt_takeover(self):
+  from unittest.mock import Mock
+  raw='12345678-1234-4234-8234-123456789abc'
+  pipe=Mock();pipe.path='/tmp/codex-app.sock'
+  thread={'id':raw,'turns':[{'id':'turn-live','status':'inProgress'}]}
+  with patch.object(p,'_open_loaded_codex',return_value=(pipe,thread)),patch.object(p,'_codex_socket_pid_map',return_value={'/tmp/codex-app.sock':4321}),patch.object(p,'_observer_process_owned',return_value=False):
+   holder=p._inspect_codex_session_holder(raw)
+  self.assertTrue(holder['busy']);self.assertEqual(holder['pid'],4321)
+  self.assertEqual(holder['harness'],'codex');self.assertEqual(holder['mode'],'codex_app_server')
+  self.assertTrue(holder['can_hot_interrupt']);self.assertFalse(holder['remote_control'])
+  with patch.object(p,'_open_loaded_codex',return_value=(pipe,thread)),patch.object(p,'_codex_socket_pid_map',return_value={'/tmp/codex-app.sock':4321}),patch.object(p,'_observer_process_owned',return_value=False),patch.object(p,'_control_result',return_value={}),patch.object(p.os,'kill',side_effect=AssertionError('hot interrupt must not SIGTERM')):
+   p._release_codex_terminal_holder(raw)
+  sent=[c.args[0] for c in pipe.send.call_args_list]
+  self.assertTrue(any(f.get('method')=='turn/interrupt' for f in sent))
+
+ def test_codex_interactive_permission_accept_and_decline_flush(self):
+  from unittest.mock import Mock
+  sid='codex:12345678-1234-4234-8234-123456789abc';raw=sid.split(':',1)[1];rid='req-codex-perm'
+  cfg={'session_id':sid,'request_id':rid}
+  with p.closing(p._stream_db()) as db,db:
+   db.execute('INSERT INTO requests VALUES(?,?,?,?)',(rid,sid,'h',json.dumps({'request_id':rid,'session_id':sid,'execution_status':'running','pid':4444,'started_at':p._now()})))
+  normalized={'id':77,'protocol':'codex','codex_method':'item/commandExecution/requestApproval',
+   'params':{'sessionId':raw,'toolCall':{'title':'echo ok','command':'echo ok'},
+    'options':[{'optionId':'allow_once','kind':'allow_once','name':'Allow once'},
+               {'optionId':'reject_once','kind':'reject_once','name':'Decline'}]}}
+  self.assertTrue(p._open_native_permission(cfg,normalized,1))
+  with p.closing(p._stream_db()) as db:
+   entry=json.loads(db.execute('SELECT body FROM native_permissions WHERE request=?',(rid,)).fetchone()[0])
+  opt_ids=[o['id'] for o in entry['options']]
+  self.assertEqual(opt_ids,['allow_once','reject_once'])
+  with patch.object(p,'_permission_owner_alive',return_value=True):
+   p.submit_native_permission({'sessionId':sid,'requestId':rid,'permissionId':entry['id'],'optionId':'allow_once'})
+  pipe=Mock()
+  p._flush_native_permissions(cfg,pipe)
+  pipe.send.assert_called_once()
+  sent=pipe.send.call_args.args[0]
+  self.assertEqual(sent['id'],77);self.assertEqual(sent['result']['decision'],'accept')
+
+ def test_agy_holder_distinguishes_ide_protected_and_cli_takeover(self):
+  raw='agy-sess-1234'
+  ide_procs=[(7001,['/opt/Antigravity/antigravity','--type=renderer',raw])]
+  cli_procs=[(7002,['agy','--session',raw])]
+  with patch.object(p,'_iter_same_uid_procs',return_value=ide_procs),patch.object(p,'_is_bob_owned_proc',return_value=False),patch.object(p,'_proc_fd_targets',return_value=()):
+   ide_h=p._inspect_agy_session_holder(raw)
+  self.assertTrue(ide_h['busy']);self.assertTrue(ide_h['remote_control']);self.assertEqual(ide_h['mode'],'agy_ide')
+  with patch.object(p,'_iter_same_uid_procs',return_value=ide_procs),patch.object(p,'_is_bob_owned_proc',return_value=False),patch.object(p,'_proc_fd_targets',return_value=()),patch.object(p.os,'kill',side_effect=AssertionError('IDE must never be killed')):
+   with self.assertRaisesRegex(ValueError,'HARNESS_REMOTE_CONTROL'):
+    p._release_agy_terminal_holder(raw)
+  with patch.object(p,'_iter_same_uid_procs',return_value=cli_procs),patch.object(p,'_is_bob_owned_proc',return_value=False),patch.object(p,'_proc_fd_targets',return_value=()):
+   cli_h=p._inspect_agy_session_holder(raw)
+  self.assertTrue(cli_h['busy']);self.assertFalse(cli_h['remote_control']);self.assertEqual(cli_h['mode'],'agy_terminal')
+  with patch.object(p,'_iter_same_uid_procs',side_effect=[cli_procs,[]]),patch.object(p,'_is_bob_owned_proc',return_value=False),patch.object(p,'_proc_fd_targets',return_value=()),patch.object(p.os,'kill') as kill_mock:
+   p._release_agy_terminal_holder(raw)
+  kill_mock.assert_called_with(7002,p.signal.SIGTERM)
+
+ def test_bob_holder_reverse_release_stops_idle_and_guards_running(self):
+  sid='agy:release-test-1';rid='req-release-1'
+  with p.closing(p._stream_db()) as db,db:
+   p._agy_tables(db)
+   db.execute('INSERT INTO requests VALUES(?,?,?,?)',(rid,sid,'h',json.dumps({'request_id':rid,'session_id':sid,'execution_status':'running','started_at':p._now()})))
+   db.execute('INSERT INTO agy_supervisors VALUES(?,?,?,?)',(sid,'tok-1',8801,'cli'))
+  with patch.object(p,'_agy_process_owned',return_value=True),patch.object(p.os,'kill') as kill_mock:
+   busy_res=p.request_native_cancel({'sessionId':sid,'requestId':'__bob_release_holder__'})
+  self.assertEqual(busy_res['status'],'busy');self.assertFalse(busy_res['released']);kill_mock.assert_not_called()
+  with p.closing(p._stream_db()) as db,db:
+   db.execute('UPDATE requests SET body=? WHERE id=?',(json.dumps({'request_id':rid,'session_id':sid,'execution_status':'completed','started_at':p._now()}),rid))
+   db.execute('INSERT OR REPLACE INTO agy_supervisors VALUES(?,?,?,?)',(sid,'tok-2',8802,'cli'))
+  with patch.object(p,'_agy_process_owned',return_value=True),patch.object(p.os,'kill') as kill_mock:
+   rel_res=p.request_native_cancel({'sessionId':sid,'requestId':'__bob_release_holder__'})
+  self.assertEqual(rel_res['status'],'released');self.assertTrue(rel_res['released'])
+  kill_mock.assert_called_with(8802,p.signal.SIGTERM)
 
 if __name__=='__main__':unittest.main()

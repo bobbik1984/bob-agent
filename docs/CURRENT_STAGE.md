@@ -4,6 +4,7 @@
 > - 新建项目/新对话毛玻璃居中弹窗（`<Teleport to="body">` + `backdrop-filter: blur(14px)`），级联顺序改为「① 关联项目与名称 → ② 选择运行设备 → ③ 选择该设备实际可用工具 → ④ 工作目录与首条指令」。
 > - 右上角额度追踪自动增量打点（`crates/bob-node/src/quota_sync.rs` 配合环境变量 `BOB_QUOTA_CHECKPOINT_URL` / `BOB_QUOTA_CHECKPOINT_TOKEN`，在 `app_model_hub_get` 与拓扑同步时自动去重推送周额度快照并支持周周期重置轮转）。
 > - 终端断线 `agy` 会话识别与一键后台接续（`agy_index_probe.py` 只读比对 `receipts.sqlite` `agy_supervisors` 识别 `cliInterrupted` / `resumable`，解除 `DshSessions.vue` 对 `historyReadable === false` 的打开与发送封锁，支持通过独立守护进程 `agy acp --stdio` `session/load` 无缝恢复）。
+> - 多工具双向平滑交接与打断确认统一收口（`Claude` / `Codex` / `AGY` / `Remote-IDE`）：`agy_index_probe.py` 与 `agy_directory.rs` 统一输出 `terminal_holder` 与 `bob_holder`，支持 `Codex` `app-server` 热中断（`turn/interrupt`）与终端 `SIGTERM` 接管及交互式审批（`approval_mode='interactive'`）、`AGY` 桌面 IDE / Remote 只读保护（`agy_ide` / `HARNESS_REMOTE_CONTROL`）与独立 CLI 接管（`agy_terminal`），以及 `__bob_release_holder__` 释放空闲后台托管守护进程；前端 `DshSessions.vue` 统一展示忙态徽章、只读保护横幅、接管打断确认卡片、「交回终端」与可一键复制的「终端续接」CLI 命令卡片。
 
 > 当前外部Bot待办验收以本文件末尾“语义日期与原待办修改”及对应Evidence为准；早期阶段记录不是当前限制。
 

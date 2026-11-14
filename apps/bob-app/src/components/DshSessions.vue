@@ -22,7 +22,7 @@ const awayFromLatest=ref(false),chatContent=ref(null);
 const chatScroll=createChatScroll(value=>{awayFromLatest.value=value;});
 watch([reader,chatContent],()=>chatScroll.bind(reader.value),{flush:'post'});
 const pullUpDistance=ref(0),attachments=ref([]),fileInput=ref(null);let touchStartY=null,wheelOverscroll=0,wheelResetTimer;
-const approvalMode=ref('interactive'),takeoverPrompt=ref(null),terminalHolderOverride=ref(null);
+const approvalMode=ref('interactive'),takeoverPrompt=ref(null),terminalHolderOverride=ref(null),bobHolderOverride=ref(null),handoffCardOpen=ref(false),releasingHolder=ref(false),copiedCliCmd=ref(false);
 const composerInput = ref(null);
 async function cancelTakeover() {
   if (sending.value) return;
@@ -34,11 +34,103 @@ async function cancelTakeover() {
 }
 
 const activeTerminalHolder=computed(()=>terminalHolderOverride.value||history.value?.terminal_holder||null);
-const isClaudeRemoteControl=computed(()=>Boolean(activeTerminalHolder.value?.busy&&activeTerminalHolder.value?.remote_control));
-const isClaudeTerminalBusy=computed(()=>Boolean(activeTerminalHolder.value?.busy&&!activeTerminalHolder.value?.remote_control));
+const holderHarness=computed(()=>{
+  const h=activeTerminalHolder.value?.harness;
+  if(h)return h;
+  const sid=String(selected.value?.id||'');
+  if(sid.startsWith('claude-jsonl:'))return 'claude';
+  if(sid.startsWith('codex:'))return 'codex';
+  if(sid.startsWith('agy:'))return 'agy';
+  return '';
+});
+const holderMode=computed(()=>activeTerminalHolder.value?.mode||'');
+const isRemoteProtected=computed(()=>Boolean(activeTerminalHolder.value?.busy&&activeTerminalHolder.value?.remote_control));
+const isClaudeRemoteControl=isRemoteProtected;
+const isExternalHolderBusy=computed(()=>Boolean(activeTerminalHolder.value?.busy&&!activeTerminalHolder.value?.remote_control));
+const isClaudeTerminalBusy=isExternalHolderBusy;
+const activeBobHolder=computed(()=>bobHolderOverride.value!==null?bobHolderOverride.value:(history.value?.bob_holder||null));
+const isBobBackgroundIdleHeld=computed(()=>Boolean(activeBobHolder.value?.held&&!activeBobHolder.value?.running));
+const holderBusyBadgeKey=computed(()=>{
+  if(holderMode.value==='codex_app_server')return 'codexAppServerBusyBadge';
+  if(holderMode.value==='codex_terminal'||holderHarness.value==='codex')return 'codexTerminalBusyBadge';
+  if(holderHarness.value==='agy')return 'agyTerminalBusyBadge';
+  return 'claudeTerminalBusyBadge';
+});
+const remoteProtectedTitleKey=computed(()=>(holderHarness.value==='agy'||holderMode.value==='agy_ide')?'agyIdeProtectedTitle':'claudeRemoteControlTitle');
+const remoteProtectedDescKey=computed(()=>(holderHarness.value==='agy'||holderMode.value==='agy_ide')?'agyIdeProtectedDesc':'claudeRemoteControlDesc');
+const TAKEOVER_KEY_MAP={
+  codex_app_server:{title:'codexHotTakeoverConfirmTitle',desc:'codexHotTakeoverConfirmDesc'},
+  codex_terminal:{title:'codexTakeoverConfirmTitle',desc:'codexTakeoverConfirmDesc'},
+  codex:{title:'codexTakeoverConfirmTitle',desc:'codexTakeoverConfirmDesc'},
+  agy_terminal:{title:'agyTakeoverConfirmTitle',desc:'agyTakeoverConfirmDesc'},
+  agy:{title:'agyTakeoverConfirmTitle',desc:'agyTakeoverConfirmDesc'},
+  claude:{title:'claudeTakeoverConfirmTitle',desc:'claudeTakeoverConfirmDesc'},
+};
+const activeTakeoverKeys=computed(()=>{
+  const p=takeoverPrompt.value;
+  const h=p?.harness||holderHarness.value;
+  const m=p?.mode||(p?.can_hot_interrupt&&h==='codex'?'codex_app_server':'')||holderMode.value;
+  return TAKEOVER_KEY_MAP[m]||TAKEOVER_KEY_MAP[h]||TAKEOVER_KEY_MAP.claude;
+});
 function canReadOrResume(s){return Boolean(s&&(s.historyReadable!==false||s.resumable===true));}
 const isInterruptedCliSession=computed(()=>Boolean(selected.value?.harness==='agy'&&(selected.value?.cliInterrupted===true||history.value?.cli_interrupted===true||(selected.value?.historyReadable===false&&selected.value?.resumable===true))));
-const supportsApprovalMode=computed(()=>/^(claude-jsonl|agy):/.test(selected.value?.id||''));
+const supportsApprovalMode=computed(()=>/^(claude-jsonl|agy|codex):/.test(selected.value?.id||''));
+const supportsTerminalHandoff=computed(()=>/^(claude-jsonl|codex|agy):/.test(selected.value?.id||''));
+function shellQuoteArg(v){
+  const s=String(v||'').trim();
+  if(!s)return '';
+  return /^[A-Za-z0-9_./:~-]+$/.test(s)?s:`'${s.replace(/'/g,"'\\''")}'`;
+}
+function buildCliResumeCommand(s,h){
+  const sid=String(s?.id||'');
+  const ws=String(s?.workspace||h?.workspace||'').trim();
+  const prefix=ws?`cd ${shellQuoteArg(ws)} && `:'';
+  if(sid.startsWith('claude-jsonl:'))return `${prefix}claude --resume ${shellQuoteArg(sid.slice('claude-jsonl:'.length))}`;
+  if(sid.startsWith('codex:'))return `${prefix}codex resume ${shellQuoteArg(sid.slice('codex:'.length))}`;
+  if(sid.startsWith('agy:'))return `${prefix}agy`;
+  return '';
+}
+const cliResumeCommand=computed(()=>buildCliResumeCommand(selected.value,history.value));
+async function copyCliResumeCommand(){
+  const cmd=cliResumeCommand.value;
+  if(!cmd)return;
+  try{
+    await globalThis.navigator?.clipboard?.writeText?.(cmd);
+    copiedCliCmd.value=true;
+    setTimeout(()=>{copiedCliCmd.value=false;},1800);
+  }catch{}
+}
+async function handoffToTerminal(){
+  if(!selected.value||releasingHolder.value)return;
+  if(activeBobHolder.value?.held){
+    if(activeBobHolder.value?.running){notice.value=t('bobHolderBusyNotice');return;}
+    releasingHolder.value=true;
+    const conn=connection.value,sid=selected.value.id;
+    try{
+      const res=kernelBridge.nativeRelease
+        ?await kernelBridge.nativeRelease(conn,sid)
+        :await kernelBridge.nativeCancel(conn,sid,'__bob_release_holder__');
+      if(res?.status==='busy'||res?.released===false){
+        notice.value=t('bobHolderBusyNotice');
+        return;
+      }
+      bobHolderOverride.value={held:false,running:false,kind:null,pid:null};
+      if(history.value)history.value={...history.value,bob_holder:bobHolderOverride.value};
+      notice.value=t('bobHolderReleasedNotice');
+      handoffCardOpen.value=true;
+    }catch(e){
+      error.value=fault(e);
+    }finally{
+      releasingHolder.value=false;
+    }
+    return;
+  }
+  handoffCardOpen.value=!handoffCardOpen.value;
+}
+function confirmTakeoverSend(){
+  if(!draft.value.trim()&&!attachments.value.length)draft.value=t('agyResumeDefaultPrompt');
+  void send({takeover:true});
+}
 const permissionModeOptions=computed(()=>[
   { value: 'interactive', label: t('permissionModeInteractive') },
   { value: 'read_only', label: t('permissionModeReadOnly') },
@@ -477,7 +569,7 @@ function fault(e){const code=String(e?.message || e);if(code.includes('AGY_'))re
 async function load(){resetDshStop();dshQuestionView.value=null;const g=++generation;clearTimeout(timer);busy.value=true;error.value='';selected.value=null;history.value=null;sessions.value=[];try{const items=await kernelBridge.dshList(connection.value);if(g===generation&&!disposed)sessions.value=items;}catch(e){if(g===generation)error.value=fault(e)}finally{if(g===generation)busy.value=false}}
 watch(connection,()=>{if(connection.value&&!props.target)load()});
 function validatePage(h,id){if(h.address.session_id!==id||h.address.connection_id!==connection.value||!Number.isSafeInteger(h.cursor)||!Number.isSafeInteger(h.before)||!Array.isArray(h.messages))throw Error('DSH_IDENTITY_MISMATCH')}
-function combine(old,h){if(h.history_snapshot)return h;const map=new Map((old?.messages||[]).map(m=>[m.sequence,m]));for(const m of h.messages)map.set(m.sequence,m);const replacements=[...(old?.replacements||[]),...(h.replacements||[])];for(const op of replacements)for(const seq of map.keys())if(seq>=op.startSeq&&seq<=op.endSeq)map.delete(seq);return {...h,messages:[...map.values()].sort((a,b)=>a.sequence-b.sequence),replacements,workspace:h.workspace||old?.workspace,terminal_holder:h.terminal_holder!==undefined?h.terminal_holder:old?.terminal_holder}}
+function combine(old,h){if(h.history_snapshot)return h;const map=new Map((old?.messages||[]).map(m=>[m.sequence,m]));for(const m of h.messages)map.set(m.sequence,m);const replacements=[...(old?.replacements||[]),...(h.replacements||[])];for(const op of replacements)for(const seq of map.keys())if(seq>=op.startSeq&&seq<=op.endSeq)map.delete(seq);return {...h,messages:[...map.values()].sort((a,b)=>a.sequence-b.sequence),replacements,workspace:h.workspace||old?.workspace,terminal_holder:h.terminal_holder!==undefined?h.terminal_holder:old?.terminal_holder,bob_holder:h.bob_holder!==undefined?h.bob_holder:old?.bob_holder}}
 let olderRequested=false;
 async function refresh(){if(!canReadOrResume(selected.value)){error.value=t(selected.value?.historyReason==='AGY_HISTORY_NOT_LOCAL'?'agyHistoryNotLocal':'agyHistoryPending');return;}
  if(!selected.value||busy.value||loadingOlder.value||preview.value)return;
@@ -491,6 +583,7 @@ async function refresh(){if(!canReadOrResume(selected.value)){error.value=t(sele
   await refreshActivity(g,id);if(g!==generation||disposed)return;
   if(h.request_results?.some(r=>r.request_id===awaitingReply.value&&['completed','error','blocked','cancelled'].includes(r.status))){awaitingReply.value=null;replying.value=false;}
   if(h.terminal_holder!==undefined){terminalHolderOverride.value=null;if(history.value)history.value={...history.value,terminal_holder:h.terminal_holder};}
+  if(h.bob_holder!==undefined){bobHolderOverride.value=null;if(history.value)history.value={...history.value,bob_holder:h.bob_holder};}
   if(h.not_modified){
    error.value='';
    if(syncStatus.value==='checking'){syncStatus.value='synced';clearTimeout(syncTimer);syncTimer=setTimeout(()=>{if(syncStatus.value==='synced')syncStatus.value='';},1800);}
@@ -581,8 +674,8 @@ function removeAttachment(id){attachments.value=attachments.value.filter(a=>a.id
 function formatAttachmentBlock(list){if(!list?.length)return '';return list.map(a=>a.content?`[Attachment: ${a.name}]\n\`\`\`\n${String(a.content).slice(0,16384)}\n\`\`\``:`[Attachment: ${a.name} (${a.size||0} bytes)]`).join('\n\n');}
 function onComposeKeydown(e){if(e?.key==='Enter'&&!e.shiftKey&&!e.isComposing){e.preventDefault();void send();}}
 globalThis.__bobForceRefreshDsh=forceRefresh;
-async function open(s){resetDshStop();checkedDshQuestions=false;dshQuestionView.value=null;inSessionSearchOpen.value=false;inSessionSearchQuery.value='';approvalErrors.value={};pendingDecision.value=null;cancelRequest.value=null;cancelBusy.value=false;takeoverPrompt.value=null;terminalHolderOverride.value=null;chatScroll.reset();clearTimeout(dshLiveTimer);dshLiveState.value=null;dshReadCursor=-1;clearTimeout(nativeTimer);nativeCursor=0;nativeEpoch='';nativeDrafts.value={};nodeActivity.value=null;awaitingReply.value=null;replying.value=false;hasNewMessages.value=false;streamSeq.value=null;syncStatus.value='';pullUpDistance.value=0;attachments.value=[];clearTimeout(syncTimer);activityChecked=0;olderRequested=false;artifactQueue=[];artifactCount=0;persist();++generation;clearTimeout(timer);busy.value=false;loadingOlder.value=false;lastTop=0;selected.value=s;history.value=null;notice.value='';const saved=readState();restoring=true;draft.value=saved.draft||'';pending.value=saved.pending||null;restoring=false;if(pending.value)notice.value=t('dshUncertain');const g=generation;const cached=await readingCache.get(historyKey());if(g!==generation||disposed)return;if(cached){try{validatePage(cached,s.id);history.value=cached;syncStatus.value='checking';await nextTick();if(reader.value)reader.value.scrollTop=reader.value.scrollHeight;lastTop=reader.value?.scrollTop||0;}catch{}}if(!canReadOrResume(s)){error.value=t(s.historyReason==='AGY_HISTORY_NOT_LOCAL'?'agyHistoryNotLocal':'agyHistoryPending');return;}await refresh();void refreshNativeEvents();void refreshDshLive()}
-function back(){resetDshStop();dshQuestionView.value=null;inSessionSearchOpen.value=false;inSessionSearchQuery.value='';clearTimeout(dshLiveTimer);dshLiveState.value=null;clearTimeout(nativeTimer);persist();++generation;clearTimeout(timer);clearTimeout(syncTimer);busy.value=false;selected.value=null;history.value=null;syncStatus.value='';hasNewMessages.value=false;notice.value='';load()}
+async function open(s){resetDshStop();checkedDshQuestions=false;dshQuestionView.value=null;inSessionSearchOpen.value=false;inSessionSearchQuery.value='';approvalErrors.value={};pendingDecision.value=null;cancelRequest.value=null;cancelBusy.value=false;takeoverPrompt.value=null;terminalHolderOverride.value=null;bobHolderOverride.value=null;handoffCardOpen.value=false;releasingHolder.value=false;copiedCliCmd.value=false;chatScroll.reset();clearTimeout(dshLiveTimer);dshLiveState.value=null;dshReadCursor=-1;clearTimeout(nativeTimer);nativeCursor=0;nativeEpoch='';nativeDrafts.value={};nodeActivity.value=null;awaitingReply.value=null;replying.value=false;hasNewMessages.value=false;streamSeq.value=null;syncStatus.value='';pullUpDistance.value=0;attachments.value=[];clearTimeout(syncTimer);activityChecked=0;olderRequested=false;artifactQueue=[];artifactCount=0;persist();++generation;clearTimeout(timer);busy.value=false;loadingOlder.value=false;lastTop=0;selected.value=s;history.value=null;notice.value='';const saved=readState();restoring=true;draft.value=saved.draft||'';pending.value=saved.pending||null;restoring=false;if(pending.value)notice.value=t('dshUncertain');const g=generation;const cached=await readingCache.get(historyKey());if(g!==generation||disposed)return;if(cached){try{validatePage(cached,s.id);history.value=cached;syncStatus.value='checking';await nextTick();if(reader.value)reader.value.scrollTop=reader.value.scrollHeight;lastTop=reader.value?.scrollTop||0;}catch{}}if(!canReadOrResume(s)){error.value=t(s.historyReason==='AGY_HISTORY_NOT_LOCAL'?'agyHistoryNotLocal':'agyHistoryPending');return;}await refresh();void refreshNativeEvents();void refreshDshLive()}
+function back(){resetDshStop();dshQuestionView.value=null;inSessionSearchOpen.value=false;inSessionSearchQuery.value='';takeoverPrompt.value=null;terminalHolderOverride.value=null;bobHolderOverride.value=null;handoffCardOpen.value=false;releasingHolder.value=false;copiedCliCmd.value=false;clearTimeout(dshLiveTimer);dshLiveState.value=null;clearTimeout(nativeTimer);persist();++generation;clearTimeout(timer);clearTimeout(syncTimer);busy.value=false;selected.value=null;history.value=null;syncStatus.value='';hasNewMessages.value=false;notice.value='';load()}
 async function checkReceipt(){
  if(!pending.value || sending.value)return;
  const g=generation,p= pending.value; sending.value=true;
@@ -597,7 +690,53 @@ async function checkReceipt(){
 function dismissPending(){if(!pending.value||sending.value)return;if(!draft.value.trim()&&pending.value.text)draft.value=pending.value.text;pending.value=null;notice.value='';error.value='';persist();}
 function sendResumePrompt(){if(!draft.value.trim())draft.value=t('agyResumeDefaultPrompt');void send();}
 async function fillResumePrompt(){if(!draft.value.trim())draft.value=t('agyResumeDefaultPrompt');await nextTick();composerInput.value?.focus?.();}
-async function send(opts={}){const takeover=opts?.takeover===true;if(!canReadOrResume(selected.value)){error.value=t('agyHistoryPending');return;}if(isClaudeRemoteControl.value){notice.value=t('claudeRemoteControlTitle');return;}const attBlock=formatAttachmentBlock(attachments.value);const text=[draft.value.trim(),attBlock].filter(Boolean).join('\n\n');if(sending.value||pending.value||nativeUnresolved.value||dshQuestionBlocking.value||dshStop.value||!text)return;if(!takeover&&isClaudeTerminalBusy.value){takeoverPrompt.value=activeTerminalHolder.value||{busy:true,remote_control:false};return;}const g=generation, address={connection:connection.value,session:selected.value.id};const attPayload=attachments.value.filter(a=>a.base64).map(a=>({name:a.name,type:a.type,size:a.size,base64:a.base64}));pending.value={id:crypto.randomUUID(),text};if(!persist()){pending.value=null;return;}sending.value=true;error.value='';try{const requestId=pending.value.id;const receipt=await kernelBridge.dshPrompt(address.connection,address.session,text,requestId,attPayload,{takeover,approvalMode:supportsApprovalMode.value?approvalMode.value:null,workspace:selected.value?.workspace||history.value?.workspace||null});if(isNotAcceptedReceipt(receipt,address.session,requestId)){if(g===generation){pending.value=null;persist();if(receipt?.reason==='HARNESS_CLAUDE_REMOTE_CONTROL'){terminalHolderOverride.value=receipt.terminal_holder||{busy:true,remote_control:true};takeoverPrompt.value=null;notice.value=t('claudeRemoteControlTitle');}else if(receipt?.reason==='HARNESS_SESSION_BUSY'&&String(address.session||'').startsWith('claude-jsonl:')){const holder=receipt.terminal_holder||{busy:true,remote_control:false};terminalHolderOverride.value=holder;takeoverPrompt.value=holder;notice.value='';}else{notice.value=t('dshNotDispatched');}}return;}if(receipt?.status!=='accepted'||receipt.session_id!==address.session||receipt.request_id!==requestId)throw Error('DSH_RECEIPT_UNKNOWN');if(g===generation){takeoverPrompt.value=null;terminalHolderOverride.value={busy:false,remote_control:false};awaitingReply.value=requestId;replying.value=false;activityChecked=0;pending.value=null;attachments.value=[];if(draft.value.trim()===text||attBlock)draft.value='';persist();notice.value=t('dshAccepted');}}catch(e){if(g===generation){error.value=fault(e);notice.value=t('dshUncertain')}}finally{sending.value=false;if(g===generation&&!busy.value)refresh()}}
+async function send(opts={}){
+  const takeover=opts?.takeover===true;
+  if(!canReadOrResume(selected.value)){error.value=t('agyHistoryPending');return;}
+  if(isRemoteProtected.value){notice.value=t(remoteProtectedTitleKey.value);return;}
+  const attBlock=formatAttachmentBlock(attachments.value);
+  const text=[draft.value.trim(),attBlock].filter(Boolean).join('\n\n');
+  if(sending.value||pending.value||nativeUnresolved.value||dshQuestionBlocking.value||dshStop.value||!text)return;
+  if(!takeover&&isExternalHolderBusy.value){
+    takeoverPrompt.value=activeTerminalHolder.value||{busy:true,remote_control:false,harness:holderHarness.value,mode:holderMode.value};
+    return;
+  }
+  const g=generation, address={connection:connection.value,session:selected.value.id};
+  const attPayload=attachments.value.filter(a=>a.base64).map(a=>({name:a.name,type:a.type,size:a.size,base64:a.base64}));
+  pending.value={id:crypto.randomUUID(),text};
+  if(!persist()){pending.value=null;return;}
+  sending.value=true;error.value='';
+  try{
+    const requestId=pending.value.id;
+    const receipt=await kernelBridge.dshPrompt(address.connection,address.session,text,requestId,attPayload,{takeover,approvalMode:supportsApprovalMode.value?approvalMode.value:null,workspace:selected.value?.workspace||history.value?.workspace||null});
+    if(isNotAcceptedReceipt(receipt,address.session,requestId)){
+      if(g===generation){
+        pending.value=null;persist();
+        if(receipt?.reason==='HARNESS_CLAUDE_REMOTE_CONTROL'||receipt?.reason==='HARNESS_REMOTE_CONTROL'){
+          const holder=receipt.terminal_holder||{busy:true,remote_control:true,harness:holderHarness.value,mode:holderHarness.value==='agy'?'agy_ide':''};
+          terminalHolderOverride.value=holder;takeoverPrompt.value=null;
+          notice.value=t((holder.harness||holderHarness.value)==='agy'?'agyIdeProtectedTitle':'claudeRemoteControlTitle');
+        }else if(receipt?.reason==='HARNESS_SESSION_BUSY'&&/^(claude-jsonl|codex|agy):/.test(String(address.session||''))){
+          const holder=receipt.terminal_holder||{busy:true,remote_control:false,harness:holderHarness.value,mode:holderMode.value};
+          terminalHolderOverride.value=holder;takeoverPrompt.value=holder;notice.value='';
+        }else{
+          notice.value=t('dshNotDispatched');
+        }
+      }
+      return;
+    }
+    if(receipt?.status!=='accepted'||receipt.session_id!==address.session||receipt.request_id!==requestId)throw Error('DSH_RECEIPT_UNKNOWN');
+    if(g===generation){
+      takeoverPrompt.value=null;terminalHolderOverride.value={busy:false,remote_control:false,harness:holderHarness.value,mode:''};
+      bobHolderOverride.value=null;awaitingReply.value=requestId;replying.value=false;activityChecked=0;pending.value=null;attachments.value=[];
+      if(draft.value.trim()===text||attBlock)draft.value='';persist();notice.value=t('dshAccepted');
+    }
+  }catch(e){
+    if(g===generation){error.value=fault(e);notice.value=t('dshUncertain');}
+  }finally{
+    sending.value=false;if(g===generation&&!busy.value)refresh();
+  }
+}
 watch(()=>props.target, async target=>{if(!target)return;connection.value=target.node.id;await open(target.session)},{immediate:true});
 onUnmounted(()=>{resetDshStop();stopVoiceInput();chatScroll.dispose();clearTimeout(dshLiveTimer);clearTimeout(nativeTimer);if(globalThis.__bobForceRefreshDsh===forceRefresh)globalThis.__bobForceRefreshDsh=null;clearTimeout(syncPulseTimer);if(typeof globalThis.__bobSetRemoteSyncPhase==='function')globalThis.__bobSetRemoteSyncPhase('');if(rodTimer&&typeof clearInterval==='function')clearInterval(rodTimer);clearTimeout(wheelResetTimer);clearTimeout(artifactTimer);clearTimeout(syncTimer);clearTimeout(copyTimer);artifactQueue=[];fileCache.clear();persist();disposed=true;++generation;clearTimeout(timer)});
 </script>
@@ -618,7 +757,7 @@ onUnmounted(()=>{resetDshStop();stopVoiceInput();chatScroll.dispose();clearTimeo
    <details v-if="archivedList.length" class="dsh-archived-group" :open="!!search"><summary>{{ t('dshArchivedSessions') }} · {{ archivedList.length }}</summary><div v-for="s in archivedList" :key="s.id" class="dsh-session-item archived"><button class="dsh-session" @click="open(s)"><strong><HarnessIcon :session="s" class="session-card-icon" />{{ s.title }}</strong><small>{{ s.updated_at ? new Date(s.updated_at).toLocaleString() : t('sidebarTimeUnknown') }} · {{ t(s.running?'dshRunning':'dshIdle') }}</small><small v-if="searchMatches.has(s.id)" class="dsh-search-snippet">“{{ searchMatches.get(s.id) }}”</small></button><button type="button" class="dsh-session-unarchive-btn" :title="t('dshUnarchiveSession')" :aria-label="t('dshUnarchiveSession')" @click.stop="toggleArchiveSession(s.id, $event)">{{ t('dshUnarchiveSession') }}</button></div></details>
   </template>
   <template v-if="selected">
-   <div class="dsh-tools"><button v-if="!target" :disabled="sending" @click="back">{{ t('dshBack') }}</button><h4 v-if="!target"><HarnessIcon :session="selected" class="topbar-harness-icon" />{{ selected.title }}</h4><small v-else><HarnessIcon :session="selected" class="topbar-harness-icon" />{{ target.node.label || target.node.name }} · {{ agentLabel }}</small><span v-if="isClaudeTerminalBusy" class="dsh-holder-pill" role="status"><span>{{ t('claudeTerminalBusyBadge', {pid: activeTerminalHolder?.pid || '?'}) }}</span><button type="button" class="dsh-holder-takeover-btn" @click="takeoverPrompt = activeTerminalHolder">{{ t('claudeTakeoverBtn') }}</button></span><button type="button" class="dsh-search-toggle-btn" :class="{active:inSessionSearchOpen}" :title="t('dshSearchInSession')" :aria-label="t('dshSearchInSession')" @click="toggleInSessionSearch"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg></button><button v-if="sessionVisualAssets.length" type="button" class="dsh-visual-reel-toggle-btn" :class="{active: visualReelOpen}" :title="t('visualAssetsCount', {count: sessionVisualAssets.length})" :aria-label="t('visualAssets')" @click="visualReelOpen = !visualReelOpen"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg><span>{{ sessionVisualAssets.length }}</span></button>
+   <div class="dsh-tools"><button v-if="!target" :disabled="sending" @click="back">{{ t('dshBack') }}</button><h4 v-if="!target"><HarnessIcon :session="selected" class="topbar-harness-icon" />{{ selected.title }}</h4><small v-else><HarnessIcon :session="selected" class="topbar-harness-icon" />{{ target.node.label || target.node.name }} · {{ agentLabel }}</small><span v-if="isExternalHolderBusy" class="dsh-holder-pill" role="status"><span>{{ t(holderBusyBadgeKey, {pid: activeTerminalHolder?.pid || '?'}) }}</span><button type="button" class="dsh-holder-takeover-btn" @click="takeoverPrompt = activeTerminalHolder">{{ t('claudeTakeoverBtn') }}</button></span><span v-if="isBobBackgroundIdleHeld" class="dsh-bob-holder-pill" role="status"><span>{{ t('bobHolderActiveBadge') }}</span><button type="button" class="dsh-bob-release-btn" :disabled="releasingHolder" @click="handoffToTerminal">{{ t('bobHolderReleaseBtn') }}</button></span><button v-if="supportsTerminalHandoff" type="button" class="dsh-terminal-cmd-btn" :class="{active: handoffCardOpen}" @click="handoffCardOpen = !handoffCardOpen">{{ t('terminalHandoffBtn') }}</button><button type="button" class="dsh-search-toggle-btn" :class="{active:inSessionSearchOpen}" :title="t('dshSearchInSession')" :aria-label="t('dshSearchInSession')" @click="toggleInSessionSearch"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg></button><button v-if="sessionVisualAssets.length" type="button" class="dsh-visual-reel-toggle-btn" :class="{active: visualReelOpen}" :title="t('visualAssetsCount', {count: sessionVisualAssets.length})" :aria-label="t('visualAssets')" @click="visualReelOpen = !visualReelOpen"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg><span>{{ sessionVisualAssets.length }}</span></button>
     <span v-if="syncStatus==='offline_cached' && syncStatusLabel" class="dsh-sync-pill" :class="{active:syncStatus==='checking'||syncStatus==='syncing'}" role="status" aria-live="polite"><span v-if="syncStatus==='checking'||syncStatus==='syncing'" class="terminal-rod" aria-hidden="true">[{{ rodFrame }}]</span><span>{{ syncStatusLabel }}</span><span v-if="syncStatus==='checking'||syncStatus==='syncing'" class="terminal-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span></span></div>
    <div v-if="visualReelOpen && sessionVisualAssets.length" class="dsh-visual-reel-strip" role="region" :aria-label="t('visualAssets')">
      <div class="visual-reel-header">
@@ -658,7 +797,12 @@ onUnmounted(()=>{resetDshStop();stopVoiceInput();chatScroll.dispose();clearTimeo
      </div>
    </div>
    <div v-if="inSessionSearchOpen" class="dsh-session-search-bar"><input v-model="inSessionSearchQuery" type="search" :placeholder="t('dshSearchMessagesPlaceholder')" :aria-label="t('dshSearchMessagesPlaceholder')"><span v-if="inSessionSearchQuery.trim()" class="dsh-search-count">{{ t('dshSearchMatchCount', {count: filteredDisplayMessages.length}) }}</span><button v-if="inSessionSearchQuery" type="button" class="dsh-search-clear" :aria-label="t('dshSearchClear')" @click="inSessionSearchQuery=''">✕</button></div>
-    <div v-if="isClaudeRemoteControl" class="dsh-remote-control-banner" role="status"><strong>{{ t('claudeRemoteControlTitle') }}</strong><p>{{ t('claudeRemoteControlDesc', {pid: activeTerminalHolder?.pid || '?'}) }}</p></div>
+    <div v-if="isRemoteProtected" class="dsh-remote-control-banner" role="status"><strong>{{ t(remoteProtectedTitleKey) }}</strong><p>{{ t(remoteProtectedDescKey, {pid: activeTerminalHolder?.pid || '?'}) }}</p></div>
+    <div v-if="handoffCardOpen && cliResumeCommand" class="dsh-handoff-card" role="region" :aria-label="t('terminalHandoffCardTitle')">
+     <div class="dsh-handoff-head"><strong>{{ t('terminalHandoffCardTitle') }}</strong><button type="button" class="dsh-handoff-close" :aria-label="t('dshSearchClear')" @click="handoffCardOpen = false"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button></div>
+     <p>{{ t('terminalHandoffCardDesc') }}</p>
+     <div class="dsh-handoff-cmd-row"><code>{{ cliResumeCommand }}</code><button type="button" class="dsh-takeover-primary" @click="copyCliResumeCommand"><svg v-if="copiedCliCmd" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg><span>{{ t('copyTerminalCmdBtn') }}</span></button></div>
+    </div>
     <div v-if="isInterruptedCliSession" class="dsh-interrupted-banner" role="status">
       <div class="dsh-interrupted-text">
         <strong>{{ t(selected?.cliInterrupted || history?.cli_interrupted ? 'agyCliInterruptedTitle' : 'agyCliCodecResumeTitle') }}</strong>
@@ -685,13 +829,13 @@ onUnmounted(()=>{resetDshStop();stopVoiceInput();chatScroll.dispose();clearTimeo
   </div>
   <div v-if="selected && (awayFromLatest || hasNewMessages)" class="dsh-new-msg-bar"><button type="button" class="dsh-new-msg-btn" @click="scrollToBottom" :aria-label="t('chatJumpLatest')" :title="t('chatJumpLatest')"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M12 4v16m-6-6 6 6 6-6"/></svg></button></div>
   <form v-if="selected" class="dsh-compose" @submit.prevent="send()">
-   <div v-if="takeoverPrompt && !isClaudeRemoteControl" class="dsh-takeover-card" @keydown.esc.stop.prevent="cancelTakeover" role="alertdialog" :aria-label="t('claudeTakeoverConfirmTitle')">
+   <div v-if="takeoverPrompt && !isRemoteProtected" class="dsh-takeover-card" @keydown.esc.stop.prevent="cancelTakeover" role="alertdialog" :aria-label="t(activeTakeoverKeys.title)">
     <div class="dsh-takeover-body">
-     <strong>{{ t('claudeTakeoverConfirmTitle') }}</strong>
-     <p>{{ t('claudeTakeoverConfirmDesc', {pid: takeoverPrompt?.pid || '?'}) }}</p>
+     <strong>{{ t(activeTakeoverKeys.title) }}</strong>
+     <p>{{ t(activeTakeoverKeys.desc, {pid: takeoverPrompt?.pid || '?'}) }}</p>
     </div>
     <div class="dsh-takeover-actions">
-     <button type="button" class="dsh-takeover-primary" :disabled="sending" @click="send({takeover: true})">{{ t('claudeTakeoverSendBtn') }}</button>
+     <button type="button" class="dsh-takeover-primary" :disabled="sending" @click="confirmTakeoverSend">{{ t('claudeTakeoverSendBtn') }}</button>
      <button type="button" class="dsh-takeover-secondary" :disabled="sending" @click="takeoverPrompt = null">{{ t('claudeKeepBoardBtn') }}</button>
      <button type="button" class="dsh-takeover-secondary" :disabled="sending" @click="cancelTakeover">{{ t('claudeCancelTakeoverBtn') }}</button>
     </div>
@@ -754,6 +898,17 @@ onUnmounted(()=>{resetDshStop();stopVoiceInput();chatScroll.dispose();clearTimeo
 .dsh-holder-takeover-btn{padding:1px 7px;border-radius:999px;border:0;background:var(--accent-primary);color:var(--bg-primary);font-size:.72rem;font-weight:600;cursor:pointer}
 .dsh-remote-control-banner{margin:8px 0;padding:10px 12px;border-radius:var(--radius-card);border:1px solid var(--accent-primary);background:var(--bg-secondary);display:flex;flex-direction:column;gap:4px}
 .dsh-remote-control-banner strong{font-size:.84rem;color:var(--accent-primary)}.dsh-remote-control-banner p{margin:0;font-size:.8rem;color:var(--text-secondary)}
+.dsh-bob-holder-pill{display:inline-flex;align-items:center;gap:6px;font-size:.75rem;padding:2px 8px;border-radius:999px;background:var(--bg-secondary);color:var(--text-primary);border:1px solid var(--border-color)}
+.dsh-bob-release-btn,.dsh-terminal-cmd-btn{padding:1px 7px;border-radius:999px;border:1px solid var(--border-color);background:var(--bg-primary);color:var(--text-primary);font-size:.72rem;font-weight:600;cursor:pointer}
+.dsh-terminal-cmd-btn.active{border-color:var(--accent-primary);color:var(--accent-primary)}
+.dsh-handoff-card{margin:8px 0;padding:10px 12px;border-radius:var(--radius-card);border:1px solid var(--border-color);background:var(--bg-secondary);display:flex;flex-direction:column;gap:6px}
+.dsh-handoff-head{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.dsh-handoff-head strong{font-size:.84rem;color:var(--text-primary)}
+.dsh-handoff-card p{margin:0;font-size:.78rem;color:var(--text-secondary)}
+.dsh-handoff-close{border:0;background:transparent;color:var(--text-secondary);cursor:pointer;display:inline-flex;align-items:center;padding:2px}
+.dsh-handoff-cmd-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.dsh-handoff-cmd-row code{flex:1;min-width:180px;padding:6px 8px;border-radius:var(--radius-btn);background:var(--bg-primary);color:var(--text-primary);border:1px solid var(--border-color);font-size:.76rem;overflow-x:auto;white-space:nowrap}
+.dsh-handoff-cmd-row button{display:inline-flex;align-items:center;gap:4px}
 .dsh-interrupted-banner{margin:8px 0;padding:10px 12px;border-radius:var(--radius-card);border:1px solid var(--color-warning);background:color-mix(in srgb, var(--color-warning) 10%, var(--bg-secondary));display:flex;flex-direction:column;gap:8px}
 .dsh-interrupted-text strong{display:block;font-size:.84rem;color:var(--text-primary);margin-bottom:2px}
 .dsh-interrupted-text p{margin:0;font-size:.8rem;color:var(--text-secondary);line-height:1.4}
