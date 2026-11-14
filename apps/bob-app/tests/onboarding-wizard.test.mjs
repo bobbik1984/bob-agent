@@ -396,3 +396,18 @@ test('Static audit on OnboardingWizard.vue, App.vue, http-bridge.mjs, and 100% s
     );
   }
 });
+
+test('App.vue enters workspace directly after gateway password auth without mounting 6-digit OnboardingWizard', () => {
+  assert.equal(
+    appVueSource.includes('OnboardingWizard'),
+    false,
+    'App.vue must not mount 6-digit OnboardingWizard over the main workspace',
+  );
+  assert.equal(
+    appVueSource.includes('fetchOnboardingStatus'),
+    false,
+    'App.vue must not block startup() behind fetchOnboardingStatus()',
+  );
+  assert.ok(appVueSource.includes('SidebarCreateForm'));
+  assert.ok(appVueSource.includes('PrimaryChatPane'));
+});

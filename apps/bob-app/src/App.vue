@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, onUnmounted, provide, ref } from 'vue';
+import { onMounted, onUnmounted, provide } from 'vue';
 import { useI18n } from 'vue-i18n';
 import ScheduleView from './views/ScheduleView.vue';
 import WorkView from './views/WorkView.vue';
@@ -8,11 +8,9 @@ import SettingsView from './views/SettingsView.vue';
 import NavigationDrawer from './components/NavigationDrawer.vue';
 import PrimaryChatPane from './components/PrimaryChatPane.vue';
 import QuickNoteOverlay from './components/QuickNoteOverlay.vue';
-import OnboardingWizard from './components/OnboardingWizard.vue';
 import SidebarCreateForm from './components/SidebarCreateForm.vue';
 import { bindViewport } from './viewport.mjs';
 import { getProviderLogo } from './layout-mode.mjs';
-import { isBobNodeRuntime, fetchOnboardingStatus } from './http-bridge.mjs';
 import brandLogo from './assets/bob-logo.svg';
 import { canCancelExecution } from './execution-controller.mjs';
 import { useChatSession } from './composables/useChatSession.mjs';
@@ -62,7 +60,6 @@ const {
   currentConversation,
   totalUnreadCount,
   projectList,
-  theme,
   switchPrimaryDrawer,
   deviceSyncPhase,
   forceRefreshActiveConversation,
@@ -168,25 +165,7 @@ function handleGlobalKeydown(event) {
   }
 }
 
-const onboardingStatus = ref({ needsOnboarding: false, presets: [] });
-const onboardingWizardOpen = ref(false);
-
-async function handleOnboardingCompleted() {
-  onboardingWizardOpen.value = false;
-  onboardingStatus.value = { ...onboardingStatus.value, needsOnboarding: false };
-  activeDrawer.value = 'chat';
-  settingsOpen.value = false;
-  await startup();
-  await loadModelHub();
-  await jarvisHome.refreshJarvisState(sessionId.value);
-  if (available) {
-    deviceCapabilities.value = await kernelBridge.pairingCapabilities().catch(() => null);
-  }
-  startPolling();
-}
-
 function handleVisibilityChange() {
-  if (onboardingWizardOpen.value) return;
   if (typeof document !== 'undefined' && !document.hidden) resetSyncBackoffAndReload();
 }
 
@@ -203,14 +182,6 @@ onMounted(async () => {
   document.addEventListener('pointerdown', dismissConversationMenu);
   document.addEventListener('keydown', handleGlobalKeydown);
   document.addEventListener('visibilitychange', handleVisibilityChange);
-  if (isBobNodeRuntime()) {
-    const ob = await fetchOnboardingStatus();
-    onboardingStatus.value = ob;
-    if (ob.needsOnboarding) {
-      onboardingWizardOpen.value = true;
-      return;
-    }
-  }
   await startup();
   await jarvisHome.refreshJarvisState(sessionId.value);
   if (available) {
@@ -242,14 +213,6 @@ onUnmounted(() => {
       { 'is-mobile': layoutState.isCompact, 'is-immersive': immersiveActive },
     ]"
   >
-    <OnboardingWizard
-      v-if="onboardingWizardOpen"
-      :initial-status="onboardingStatus"
-      :theme="theme"
-      @update-theme="theme = $event"
-      @completed="handleOnboardingCompleted"
-    />
-    <template v-else>
     <header class="topbar">
       <button type="button" class="icon-button topbar-nav-toggle" :aria-label="t('openNavigation')" :aria-expanded="navigationOpen" @click="navigationOpen = true">
         <svg class="topbar-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" /></svg>
@@ -487,6 +450,5 @@ onUnmounted(() => {
         <span>{{ t('navSettings') }}</span>
       </button>
     </nav>
-    </template>
   </div>
 </template>

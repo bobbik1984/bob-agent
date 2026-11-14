@@ -74,9 +74,42 @@ fn normalize_code(raw: &str) -> String {
         .collect()
 }
 
+pub fn onboarding_disabled_by_env() -> bool {
+    std::env::var("BOB_DISABLE_ONBOARDING")
+        .ok()
+        .map(|v| {
+            matches!(
+                v.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
+        .unwrap_or(false)
+}
+
+/// Returns true when a node is already established behind an external reverse-proxy auth gate
+/// (e.g., Caddy `common_auth` on `bob-online.bobbik.org`) where `node_access.sqlite` is unused
+/// and onboarding was not started via `ONBOARDING_IN_PROGRESS_FILE`.
+/// NOTE: Do NOT check `model_hub_state.json` or `online_work_store.json` here because
+/// `NodeContext::open` / `load_hub_state` can create default copies in a brand-new tempdir.
+pub fn is_established_external_auth_node(
+    data_dir: &Path,
+    runtime: Option<&ModelHubRuntime>,
+) -> bool {
+    if node_access::enabled(data_dir) || data_dir.join(ONBOARDING_IN_PROGRESS_FILE).is_file() {
+        return false;
+    }
+    has_provider_configured(data_dir, runtime)
+        || data_dir.join("device_harnesses.json").is_file()
+        || data_dir.join("bot-grants.json").is_file()
+}
+
 /// Ensures an uninitialized node has an active in-memory 6-digit single-use pairing code.
 pub fn ensure_bootstrap_code(data_dir: &Path, now: i64) -> Option<String> {
-    if node_access::enabled(data_dir) || data_dir.join(ONBOARDING_COMPLETED_FILE).is_file() {
+    if onboarding_disabled_by_env()
+        || node_access::enabled(data_dir)
+        || data_dir.join(ONBOARDING_COMPLETED_FILE).is_file()
+        || is_established_external_auth_node(data_dir, None)
+    {
         return None;
     }
     let _ = std::fs::create_dir_all(data_dir);
@@ -113,7 +146,11 @@ pub fn force_expire_bootstrap_code_for_test(data_dir: &Path, expired_at: i64) {
 }
 
 pub fn peek_bootstrap_code(data_dir: &Path, now: i64) -> Option<String> {
-    if node_access::enabled(data_dir) || data_dir.join(ONBOARDING_COMPLETED_FILE).is_file() {
+    if onboarding_disabled_by_env()
+        || node_access::enabled(data_dir)
+        || data_dir.join(ONBOARDING_COMPLETED_FILE).is_file()
+        || is_established_external_auth_node(data_dir, None)
+    {
         return None;
     }
     let key = canonical_key(data_dir);
@@ -133,7 +170,10 @@ pub fn has_provider_configured(data_dir: &Path, runtime: Option<&ModelHubRuntime
 }
 
 pub fn needs_onboarding(data_dir: &Path, runtime: Option<&ModelHubRuntime>) -> bool {
-    if data_dir.join(ONBOARDING_COMPLETED_FILE).is_file() {
+    if onboarding_disabled_by_env()
+        || data_dir.join(ONBOARDING_COMPLETED_FILE).is_file()
+        || is_established_external_auth_node(data_dir, runtime)
+    {
         return false;
     }
     let password_configured = node_access::enabled(data_dir);
@@ -152,9 +192,12 @@ pub fn needs_onboarding(data_dir: &Path, runtime: Option<&ModelHubRuntime>) -> b
 pub fn status_json(data_dir: &Path, runtime: Option<&ModelHubRuntime>, now: i64) -> Value {
     let password_configured = node_access::enabled(data_dir);
     let provider_configured = has_provider_configured(data_dir, runtime);
+    let external_auth_established =
+        is_established_external_auth_node(data_dir, runtime) || onboarding_disabled_by_env();
     let needs = needs_onboarding(data_dir, runtime);
+    let pairing_code_required = !password_configured && !external_auth_established && needs;
 
-    if !password_configured && needs {
+    if pairing_code_required {
         let _ = ensure_bootstrap_code(data_dir, now);
     }
 
@@ -186,8 +229,8 @@ pub fn status_json(data_dir: &Path, runtime: Option<&ModelHubRuntime>, now: i64)
         "password_configured": password_configured,
         "providerConfigured": provider_configured,
         "provider_configured": provider_configured,
-        "pairingCodeRequired": !password_configured,
-        "pairing_code_required": !password_configured,
+        "pairingCodeRequired": pairing_code_required,
+        "pairing_code_required": pairing_code_required,
         "pairingExpiresAt": expires_at,
         "pairing_expires_at": expires_at,
         "lockedRetryAfterSec": retry_after_sec,
@@ -198,7 +241,11 @@ pub fn status_json(data_dir: &Path, runtime: Option<&ModelHubRuntime>, now: i64)
 
 /// Step 1: Claim uninitialized node using single-use 6-digit pairing code and set owner password.
 pub fn claim_node(data_dir: &Path, body: &Value, now: i64) -> (u16, Value) {
-    if node_access::enabled(data_dir) || data_dir.join(ONBOARDING_COMPLETED_FILE).is_file() {
+    if onboarding_disabled_by_env()
+        || node_access::enabled(data_dir)
+        || data_dir.join(ONBOARDING_COMPLETED_FILE).is_file()
+        || is_established_external_auth_node(data_dir, None)
+    {
         return (
             403,
             json!({
@@ -963,5 +1010,82 @@ mod tests {
         assert!(!raw_status_dump.contains("sk-valid-onboarding-key"));
 
         server.shutdown();
+    }
+
+    #[test]
+    fn test_established_external_auth_node_skips_onboarding_and_blocks_claim() {
+        let dir_provider = tempfile::tempdir().unwrap();
+        let mut app = bob_kernel::app::LocalApp::open(&dir_provider.path().join("kernel.sqlite")).unwrap();
+        let rt = ModelHubRuntime::with_file_vault(dir_provider.path().to_path_buf()).unwrap();
+        rt.apply_provider_dual_preset_with_base_url(
+            &mut app,
+            "deepseek",
+            Some("sk-existing-provider-key"),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        drop(rt);
+        drop(app);
+
+        let srv_provider = spawn_node_server(BobNodeConfig {
+            bind_addr: "127.0.0.1:0".to_owned(),
+            data_dir: dir_provider.path().to_path_buf(),
+            static_dir: None,
+            legacy_db_path: None,
+        })
+        .unwrap();
+        assert!(
+            srv_provider.bootstrap_pairing_code().is_none(),
+            "established external-auth node must never emit a 6-digit pairing code"
+        );
+        let (st, status) = http_json(
+            srv_provider.local_addr,
+            "GET",
+            "/api/node/v1/onboarding/status",
+            None,
+            None,
+        );
+        assert_eq!(st, 200);
+        assert_eq!(status["needsOnboarding"], false);
+        assert_eq!(status["pairingCodeRequired"], false);
+
+        let (claim_st, claim_res) = http_json(
+            srv_provider.local_addr,
+            "POST",
+            "/api/node/v1/onboarding/claim",
+            None,
+            Some(&json!({ "pairingCode": "123456", "password": "AttemptOverride123!" })),
+        );
+        assert_eq!(claim_st, 403);
+        assert_eq!(claim_res["error"], "ONBOARDING_ALREADY_CLAIMED");
+        assert!(
+            !dir_provider.path().join("node_access.sqlite").exists(),
+            "claim must not create node_access.sqlite on an established external-auth node"
+        );
+        srv_provider.shutdown();
+
+        let dir_harnesses = tempfile::tempdir().unwrap();
+        std::fs::write(dir_harnesses.path().join("device_harnesses.json"), "{}").unwrap();
+        let srv_harnesses = spawn_node_server(BobNodeConfig {
+            bind_addr: "127.0.0.1:0".to_owned(),
+            data_dir: dir_harnesses.path().to_path_buf(),
+            static_dir: None,
+            legacy_db_path: None,
+        })
+        .unwrap();
+        assert!(srv_harnesses.bootstrap_pairing_code().is_none());
+        let (hst, hstatus) = http_json(
+            srv_harnesses.local_addr,
+            "GET",
+            "/api/node/v1/onboarding/status",
+            None,
+            None,
+        );
+        assert_eq!(hst, 200);
+        assert_eq!(hstatus["needsOnboarding"], false);
+        assert_eq!(hstatus["pairingCodeRequired"], false);
+        srv_harnesses.shutdown();
     }
 }

@@ -835,7 +835,14 @@ impl ModelHubRuntime {
         if self.secrets.has(DEFAULT_SLOT) {
             return true;
         }
-        let registry = self.load_or_init_registry();
+        let registry = std::fs::read_to_string(self.data_dir.join("model_providers.json"))
+            .ok()
+            .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
+            .filter(|val| val.get("providers").and_then(Value::as_array).is_some())
+            .unwrap_or_else(|| {
+                serde_json::from_str::<Value>(EMBEDDED_MODEL_REGISTRY)
+                    .unwrap_or_else(|_| json!({ "$schema_version": 4, "providers": [] }))
+            });
         if let Some(providers) = registry.get("providers").and_then(Value::as_array) {
             for prov in providers {
                 let pid = prov.get("id").and_then(Value::as_str).unwrap_or("").trim();
@@ -852,12 +859,18 @@ impl ModelHubRuntime {
                 }
             }
         }
-        let hub = self.load_hub_state();
-        if let Some(custom_models) = hub.get("customModels").and_then(Value::as_array) {
-            for cm in custom_models {
-                let cid = cm.get("id").and_then(Value::as_str).unwrap_or("").trim();
-                if !cid.is_empty() && self.secrets.has(&provider_slot(cid)) {
-                    return true;
+        let hub_path = self.data_dir.join("model_hub_state.json");
+        if hub_path.is_file() {
+            if let Ok(raw) = std::fs::read_to_string(&hub_path) {
+                if let Ok(hub) = serde_json::from_str::<Value>(&raw) {
+                    if let Some(custom_models) = hub.get("customModels").and_then(Value::as_array) {
+                        for cm in custom_models {
+                            let cid = cm.get("id").and_then(Value::as_str).unwrap_or("").trim();
+                            if !cid.is_empty() && self.secrets.has(&provider_slot(cid)) {
+                                return true;
+                            }
+                        }
+                    }
                 }
             }
         }
