@@ -178,22 +178,34 @@ impl DshClient {
   Err(last_err)
  }
  fn rpc(&self, method:&str,args:Value)->Result<Value,&'static str>{
+  self.rpc_with_code(method, args).map_err(|(err, _)| err)
+ }
+ fn rpc_with_code(&self, method:&str,args:Value)->Result<Value,(&'static str, Option<String>)>{
   let id=format!("bob-{}-{}",std::process::id(),crate::now_millis());
-  let response=self.http.post(self.base.join(&format!("api/{method}")).map_err(|_|"DSH_PROTOCOL")?).header("Cookie",&self.cookie).header("Origin",self.base.origin().ascii_serialization()).json(&json!({"type":"client-request","rpcId":id,"method":method,"payload":{"args":args}})).send().map_err(|e|rpc_transport_error(method,e.is_timeout()))?;
-  if !response.status().is_success(){return Err("DSH_REJECTED");}
+  let url=self.base.join(&format!("api/{method}")).map_err(|_|("DSH_PROTOCOL",None))?;
+  let response=self.http.post(url).header("Cookie",&self.cookie).header("Origin",self.base.origin().ascii_serialization()).json(&json!({"type":"client-request","rpcId":id,"method":method,"payload":{"args":args}})).send().map_err(|e|(rpc_transport_error(method,e.is_timeout()),None))?;
+  if !response.status().is_success(){return Err(("DSH_REJECTED",None));}
   let limit=if method=="session/page" {HISTORY_LIMIT as u64}else{LIMIT};
-  let mut bytes=Vec::new();response.take(limit+1).read_to_end(&mut bytes).map_err(|e|rpc_transport_error(method,matches!(e.kind(),std::io::ErrorKind::TimedOut|std::io::ErrorKind::WouldBlock)))?;
-  if bytes.len() as u64>limit{return Err("DSH_PROTOCOL");}
-  let value:Value=serde_json::from_slice(&bytes).map_err(|_|"DSH_PROTOCOL")?;
-  if value["type"]!="server-response" || value["rpcId"]!=id {return Err("DSH_PROTOCOL");}
+  let mut bytes=Vec::new();response.take(limit+1).read_to_end(&mut bytes).map_err(|e|(rpc_transport_error(method,matches!(e.kind(),std::io::ErrorKind::TimedOut|std::io::ErrorKind::WouldBlock)),None))?;
+  if bytes.len() as u64>limit{return Err(("DSH_PROTOCOL",None));}
+  let value:Value=serde_json::from_slice(&bytes).map_err(|_|("DSH_PROTOCOL",None))?;
+  if value["type"]!="server-response" || value["rpcId"]!=id {return Err(("DSH_PROTOCOL",None));}
   if value["result"]["ok"]!=true {
+   let raw_code=value["result"]["error"]["code"].as_str().map(str::to_owned);
+   let err_msg=value["result"]["error"]["message"].as_str().unwrap_or("");
+   let norm_code=match raw_code.as_deref() {
+    Some("gateway/internal") if err_msg.contains("already queued for this question") => Some("REPLY_QUEUED".to_owned()),
+    Some("gateway/internal") if err_msg.contains("must name each of its") => Some("BAD_ANSWER".to_owned()),
+    Some("gateway/input-invalid" | "gateway/arguments-invalid") => Some("BAD_ANSWER".to_owned()),
+    _ => raw_code,
+   };
    if method.starts_with("workspaceFiles/") {
-    return Err(match value["result"]["error"]["code"].as_str().unwrap_or("") {
+    return Err((match norm_code.as_deref().unwrap_or("") {
      "workspace-file/not-found"=>"DSH_FILE_NOT_FOUND",
      _=>"DSH_FILE_UNAVAILABLE",
-    });
+    }, norm_code));
    }
-   return Err("DSH_REJECTED");
+   return Err(("DSH_REJECTED", norm_code));
   }
   Ok(value["result"]["value"].clone())
  }
@@ -491,6 +503,176 @@ impl DshClient {
  pub fn prompt(&self,session:&str,text:&str,id:&str)->Result<Value,&'static str>{
   let result=self.rpc("session/prompt",json!({"request":{"requestId":id,"sessionId":session,"mode":"queue","content":[{"type":"text","text":text}]}}))?;
   if result["accepted"]!=true{return Err("DSH_RECEIPT_UNKNOWN");} Ok(json!({"status":"accepted","session_id":session,"request_id":id}))
+ }
+
+ /// Submit structured answers for a pending DSH `ask_user_question` call.
+ /// Tries `userQuestions/answer` for `continued` (and hibernated) questions first,
+ /// falls back to settling a live `open` waterfall via `/api/remote.mux` `$events` + `/api/$events/result`,
+ /// and retries `userQuestions/answer` once to absorb `open -> continued` transitions.
+ pub fn answer_question(&self, address: SessionAddress, call_id: &str, answers: &Value) -> Result<Value, &'static str> {
+  let session = address.session_id.as_str();
+  if session.trim().is_empty()
+   || session.len() > 256
+   || session.chars().any(char::is_control)
+   || crate::agy_directory::owns_readable_session(session)
+  {
+   return Err("DSH_SESSION_REQUIRED");
+  }
+  let call_id = call_id.trim();
+  if call_id.is_empty() || call_id.len() > 256 || call_id.chars().any(char::is_control) {
+   return Err("DSH_QUESTION_INVALID");
+  }
+  let items = answers.as_array().filter(|a| (1..=8).contains(&a.len())).ok_or("DSH_QUESTION_INVALID")?;
+  let mut expected_qids = std::collections::BTreeSet::<String>::new();
+  let mut normalized = Vec::with_capacity(items.len());
+  for item in items {
+   let obj = item.as_object().ok_or("DSH_QUESTION_INVALID")?;
+   let qid = obj
+    .get("id")
+    .and_then(Value::as_str)
+    .map(str::trim)
+    .filter(|s| !s.is_empty() && s.chars().count() <= 128 && !s.chars().any(char::is_control))
+    .ok_or("DSH_QUESTION_INVALID")?;
+   if !expected_qids.insert(qid.to_owned()) {
+    return Err("DSH_QUESTION_INVALID");
+   }
+   let selected = match obj.get("selected") {
+    None | Some(Value::Null) => Vec::new(),
+    Some(Value::Array(arr)) if arr.len() <= 12 => {
+     let mut labels = Vec::with_capacity(arr.len());
+     for label_val in arr {
+      let label = label_val
+       .as_str()
+       .map(str::trim)
+       .filter(|s| !s.is_empty() && s.chars().count() <= 256 && !s.chars().any(char::is_control))
+       .ok_or("DSH_QUESTION_INVALID")?;
+      labels.push(Value::String(label.to_owned()));
+     }
+     labels
+    }
+    _ => return Err("DSH_QUESTION_INVALID"),
+   };
+   let custom = match obj.get("custom") {
+    None | Some(Value::Null) => None,
+    Some(Value::String(s)) => {
+     let trimmed = s.trim();
+     if trimmed.is_empty() {
+      None
+     } else if trimmed.chars().count() > 4096 || trimmed.chars().any(|c| c.is_control() && !matches!(c, '\n' | '\r' | '\t')) {
+      return Err("DSH_QUESTION_INVALID");
+     } else {
+      Some(trimmed.to_owned())
+     }
+    }
+    _ => return Err("DSH_QUESTION_INVALID"),
+   };
+   if selected.is_empty() && custom.is_none() {
+    return Err("DSH_QUESTION_INVALID");
+   }
+   let mut norm_item = serde_json::Map::new();
+   norm_item.insert("id".into(), Value::String(qid.to_owned()));
+   norm_item.insert("selected".into(), Value::Array(selected));
+   if let Some(custom_text) = custom {
+    norm_item.insert("custom".into(), Value::String(custom_text));
+   }
+   normalized.push(Value::Object(norm_item));
+  }
+  let answer_payload = json!({ "answers": normalized });
+
+  // Attempt 1: continued / cold-resumable RPC
+  match self.rpc_with_code("userQuestions/answer", json!({ "agentId": session, "callId": call_id, "answer": answer_payload })) {
+   Ok(Value::Bool(true)) => {
+    return Ok(json!({ "address": address, "call_id": call_id, "status": "answered", "delivery": "continued" }));
+   }
+   Err((_, Some(ref code))) if code == "REPLY_QUEUED" => {
+    return Ok(json!({ "address": address, "call_id": call_id, "status": "already_queued", "delivery": "continued" }));
+   }
+   Err((_, Some(ref code))) if code == "BAD_ANSWER" => return Err("DSH_QUESTION_INVALID"),
+   Err((e @ ("DSH_UNAVAILABLE" | "DSH_HISTORY_TIMEOUT" | "DSH_AUTH_REJECTED" | "DSH_TLS_REQUIRED"), _)) => return Err(e),
+   Ok(Value::Bool(false)) | Ok(_) | Err(_) => {}
+  }
+
+  // Attempt 2: live open waterfall via `$events` WebSocket + `$events/result` POST
+  let (mut ws, stream) = self.open_stream("$events", json!({}), Duration::from_secs(3))?;
+  match ws.get_mut() {
+   MaybeTlsStream::Rustls(s) => {
+    s.sock.set_read_timeout(Some(Duration::from_millis(400))).map_err(|_| "DSH_UNAVAILABLE")?;
+   }
+   MaybeTlsStream::Plain(s) if self.base.scheme() == "http" && trusted_endpoint(&self.base) => {
+    s.set_read_timeout(Some(Duration::from_millis(400))).map_err(|_| "DSH_UNAVAILABLE")?;
+   }
+   _ => return Err("DSH_TLS_REQUIRED"),
+  }
+  let mut client_id: Option<String> = None;
+  let deadline = Instant::now() + Duration::from_millis(1500);
+  while Instant::now() < deadline {
+   match ws.read() {
+    Ok(Message::Text(text)) => {
+     let Ok(frame) = serde_json::from_str::<Value>(&text) else { continue };
+     if frame["streamId"] != stream {
+      continue;
+     }
+     if matches!(frame["type"].as_str(), Some("error" | "end" | "close")) {
+      break;
+     }
+     if frame["type"] != "item" {
+      continue;
+     }
+     let item = &frame["value"];
+     if item["type"] == "ready" {
+      client_id = item["clientId"].as_str().map(str::to_owned);
+      continue;
+     }
+     if item["type"] == "waterfall"
+      && item["event"] == "user-questions/request"
+      && item["agentId"].as_str() == Some(session)
+     {
+      let wait_call_id = item["request"]["wait"]["callId"].as_str();
+      let matches_call = wait_call_id == Some(call_id)
+       || (wait_call_id.is_none()
+        && item["request"]["questions"].as_array().is_some_and(|qs| {
+         let wf_ids: std::collections::BTreeSet<String> = qs
+          .iter()
+          .filter_map(|q| q["id"].as_str().map(str::trim).filter(|s| !s.is_empty()).map(str::to_owned))
+          .collect();
+         !wf_ids.is_empty() && wf_ids == expected_qids
+        }));
+      if matches_call {
+       if let (Some(cid), Some(eid)) = (client_id.as_deref(), item["eventId"].as_str()) {
+        let res = self.rpc(
+         "$events/result",
+         json!({ "clientId": cid, "eventId": eid, "outcome": { "kind": "result", "value": answer_payload } }),
+        );
+        let _ = ws.send(Message::Text(json!({ "type": "cancel", "streamId": stream }).to_string().into()));
+        let _ = ws.close(None);
+        res?;
+        return Ok(json!({ "address": address, "call_id": call_id, "status": "answered", "delivery": "open_waterfall" }));
+       }
+      }
+     }
+    }
+    Ok(Message::Ping(_) | Message::Pong(_) | Message::Binary(_) | Message::Frame(_)) => {}
+    Ok(Message::Close(_)) => break,
+    Err(tungstenite::Error::Io(ref e)) if matches!(e.kind(), std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock) => {
+     if client_id.is_some() {
+      break;
+     }
+    }
+    Err(_) => break,
+   }
+  }
+  let _ = ws.send(Message::Text(json!({ "type": "cancel", "streamId": stream }).to_string().into()));
+  let _ = ws.close(None);
+
+  // Attempt 3: recover from mid-flight `open -> continued` timeout transition
+  match self.rpc_with_code("userQuestions/answer", json!({ "agentId": session, "callId": call_id, "answer": answer_payload })) {
+   Ok(Value::Bool(true)) => Ok(json!({ "address": address, "call_id": call_id, "status": "answered", "delivery": "continued" })),
+   Err((_, Some(ref code))) if code == "REPLY_QUEUED" => Ok(json!({ "address": address, "call_id": call_id, "status": "already_queued", "delivery": "continued" })),
+   Ok(Value::Bool(false)) => Err("DSH_QUESTION_EXPIRED"),
+   Err((_, Some(ref code))) if code == "BAD_ANSWER" => Err("DSH_QUESTION_INVALID"),
+   Ok(_) => Err("DSH_QUESTION_EXPIRED"),
+   Err((e, _)) => Err(e),
+  }
  }
 }
 
@@ -1017,5 +1199,157 @@ mod attachment_stage_tests {
   assert_eq!(cache.resolved_message_path("s","session","README.md",Some(30)),Err("DSH_FILE_NOT_REFERENCED"));
   assert_eq!(cache.resolved_message_path("other","session","README.md",Some(10)),Err("DSH_FILE_NOT_REFERENCED"));
   assert_eq!(cache.resolved_message_path("s","other","README.md",Some(10)),Err("DSH_FILE_NOT_REFERENCED"));
+ }
+}
+
+#[cfg(test)]
+mod question_answer_tests {
+ use super::*;
+
+ #[test]
+ fn answer_question_rejects_invalid_inputs_before_network() {
+  let client = DshClient::from_cookie("https://example.invalid/", "dsh-auth-1=ok").unwrap();
+  assert_eq!(
+   client.answer_question(SessionAddress { connection_id: "c".into(), session_id: "codex:123".into() }, "call-1", &json!([{"id":"q1","selected":["A"]}])),
+   Err("DSH_SESSION_REQUIRED")
+  );
+  let addr = SessionAddress { connection_id: "c".into(), session_id: "session-1".into() };
+  assert_eq!(client.answer_question(addr.clone(), "", &json!([{"id":"q1","selected":["A"]}])), Err("DSH_QUESTION_INVALID"));
+  assert_eq!(client.answer_question(addr.clone(), "call-1", &json!([])), Err("DSH_QUESTION_INVALID"));
+  assert_eq!(
+   client.answer_question(addr.clone(), "call-1", &json!([{"id":"q1","selected":["A"]},{"id":"q1","selected":["B"]}])),
+   Err("DSH_QUESTION_INVALID")
+  );
+  assert_eq!(
+   client.answer_question(addr, "call-1", &json!([{"id":"q1","selected":[],"custom":"   "}])),
+   Err("DSH_QUESTION_INVALID")
+  );
+ }
+
+ fn read_http_post(mut stream: TcpStream) -> (String, Value, TcpStream) {
+  use std::io::BufRead;
+  let cloned = stream.try_clone().unwrap();
+  let mut reader = std::io::BufReader::new(cloned);
+  let mut req_line = String::new();
+  reader.read_line(&mut req_line).unwrap();
+  let path = req_line.split_whitespace().nth(1).unwrap_or("").to_owned();
+  let mut content_length = 0usize;
+  loop {
+   let mut line = String::new();
+   reader.read_line(&mut line).unwrap();
+   if line == "\r\n" || line == "\n" || line.is_empty() {
+    break;
+   }
+   if let Some((k, v)) = line.split_once(':') {
+    if k.trim().eq_ignore_ascii_case("content-length") {
+     content_length = v.trim().parse().unwrap_or(0);
+    }
+   }
+  }
+  let mut body = vec![0u8; content_length];
+  reader.read_exact(&mut body).unwrap();
+  let parsed: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
+  let _ = &mut stream;
+  (path, parsed, reader.into_inner())
+ }
+
+ fn write_http_json(stream: &mut TcpStream, body: &Value) {
+  let bytes = body.to_string();
+  let resp = format!(
+   "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+   bytes.len(),
+   bytes
+  );
+  stream.write_all(resp.as_bytes()).unwrap();
+  let _ = stream.flush();
+ }
+
+ #[test]
+ fn answer_question_handles_continued_and_open_waterfall_over_loopback() {
+  let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+  let addr = listener.local_addr().unwrap();
+  let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::<(String, Value)>::new()));
+  let seen_srv = seen.clone();
+
+  let handle = std::thread::spawn(move || {
+   let (done_tx, done_rx) = std::sync::mpsc::channel::<()>();
+   let mut ws_holder = None;
+   for stream in listener.incoming().flatten() {
+    let mut head = [0u8; 24];
+    let n = stream.peek(&mut head).unwrap_or(0);
+    let prefix = std::str::from_utf8(&head[..n]).unwrap_or("");
+    if prefix.starts_with("GET /api/remote.mux") {
+     let mut ws = tungstenite::accept(stream).unwrap();
+     let open_msg = match ws.read().unwrap() {
+      Message::Text(t) => serde_json::from_str::<Value>(&t).unwrap(),
+      other => panic!("unexpected ws frame: {other:?}"),
+     };
+     let stream_id = open_msg["streamId"].as_str().unwrap().to_owned();
+     ws.send(Message::Text(json!({"type":"item","streamId":stream_id,"value":{"type":"ready","clientId":"cli-1","host":{"home":"/tmp"}}}).to_string().into())).unwrap();
+     ws.send(Message::Text(json!({
+      "type":"item",
+      "streamId":stream_id,
+      "value":{
+       "type":"waterfall",
+       "event":"user-questions/request",
+       "eventId":"evt-1",
+       "agentId":"session-1",
+       "request":{
+        "questions":[{"id":"q1","question":"Pick?"}],
+        "wait":{"callId":"call-open","timed":true}
+       }
+      }
+     }).to_string().into())).unwrap();
+     ws_holder = Some(ws);
+     continue;
+    }
+    let (path, body, mut s) = read_http_post(stream);
+    seen_srv.lock().unwrap().push((path.clone(), body.clone()));
+    let rpc_id = body["rpcId"].as_str().unwrap_or("");
+    let args = &body["payload"]["args"];
+    if path == "/api/userQuestions/answer" {
+     assert_eq!(args["agentId"], "session-1");
+     if args["callId"] == "call-continued" {
+      assert!(args["answer"]["answers"][0].as_object().unwrap().get("custom").is_none());
+      write_http_json(&mut s, &json!({"type":"server-response","rpcId":rpc_id,"result":{"ok":true,"value":true}}));
+     } else {
+      write_http_json(&mut s, &json!({"type":"server-response","rpcId":rpc_id,"result":{"ok":true,"value":false}}));
+     }
+    } else if path == "/api/$events/result" {
+     assert_eq!(args["clientId"], "cli-1");
+     assert_eq!(args["eventId"], "evt-1");
+     assert_eq!(args["outcome"]["kind"], "result");
+     assert_eq!(args["outcome"]["value"]["answers"][0]["custom"], "Do it cleanly");
+     write_http_json(&mut s, &json!({"type":"server-response","rpcId":rpc_id,"result":{"ok":true}}));
+     let _ = done_tx.send(());
+     break;
+    }
+   }
+   let _ = done_rx.try_recv();
+   drop(ws_holder);
+  });
+
+  let client = DshClient::from_cookie(&format!("http://127.0.0.1:{}/", addr.port()), "dsh-auth-1=test").unwrap();
+  let session_addr = SessionAddress { connection_id: "c1".into(), session_id: "session-1".into() };
+
+  let res1 = client.answer_question(
+   session_addr.clone(),
+   "call-continued",
+   &json!([{"id":"q1","selected":["Option A"],"custom":"   "}]),
+  ).unwrap();
+  assert_eq!(res1["status"], "answered");
+  assert_eq!(res1["delivery"], "continued");
+
+  let res2 = client.answer_question(
+   session_addr,
+   "call-open",
+   &json!([{"id":"q1","selected":[],"custom":"Do it cleanly"}]),
+  ).unwrap();
+  assert_eq!(res2["status"], "answered");
+  assert_eq!(res2["delivery"], "open_waterfall");
+
+  handle.join().unwrap();
+  let recorded = seen.lock().unwrap();
+  assert_eq!(recorded.len(), 3);
  }
 }

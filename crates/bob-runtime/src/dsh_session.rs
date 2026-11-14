@@ -46,14 +46,28 @@ pub struct History {
     #[serde(default)]
     pub request_results: Vec<NativeRequestResult>,
 }
-/// A read-only projection of DSH's native questions. It never claims the
-/// foreground answerer or submits a reply to the harness.
+/// Project pending DSH questions (`open` and `continued`) from projections and legacy records,
+/// suppressing `continued` items whose reply is already queued in the agent inbox.
 pub(crate) fn pending_questions(snapshot: &Value) -> Vec<Value> {
     let projected = &snapshot["projections"]["values"]["userQuestions"];
+    let inbox = &snapshot["projections"]["values"]["inbox"];
+    let mut queued_call_ids = std::collections::BTreeSet::<&str>::new();
+    for key in ["next-step", "next-turn"] {
+        for msg in inbox[key].as_array().into_iter().flatten() {
+            if msg["source"]["kind"].as_str() == Some("user-question-reply") {
+                if let Some(cid) = msg["source"]["callId"].as_str().filter(|s| !s.is_empty()) {
+                    queued_call_ids.insert(cid);
+                }
+            }
+        }
+    }
     let mut pending = std::collections::BTreeMap::<String, Value>::new();
     for row in projected["active"].as_array().into_iter().flatten().take(16) {
         let Some(id) = row["callId"].as_str().filter(|id| !id.is_empty() && id.len() <= 256) else { continue; };
         let Some(state @ ("open" | "continued")) = row["state"].as_str() else { continue; };
+        if state == "continued" && queued_call_ids.contains(id) {
+            continue;
+        }
         if let Some(row) = question_row(id, state, &row["questions"]) {
             pending.insert(id.to_owned(), row);
         }
@@ -90,12 +104,31 @@ fn question_row(id: &str, state: &str, input: &Value) -> Option<Value> {
             .filter_map(|option| {
                 let label = option["label"].as_str()?.trim();
                 if label.is_empty() { return None; }
-                Some(serde_json::json!({"label":label.chars().take(256).collect::<String>(),
-                    "description":option["description"].as_str().map(|s|s.chars().take(512).collect::<String>())}))
+                Some(serde_json::json!({
+                    "label": label.chars().take(256).collect::<String>(),
+                    "description": option["description"].as_str().map(|s| s.chars().take(512).collect::<String>())
+                }))
             }).collect();
-        Some(serde_json::json!({"question":question.chars().take(2048).collect::<String>(),"options":options}))
+        let multi_select = item["multiSelect"]
+            .as_bool()
+            .or_else(|| item["multi_select"].as_bool())
+            .unwrap_or(false);
+        let mut obj = serde_json::Map::new();
+        if let Some(qid) = item["id"].as_str().map(str::trim).filter(|s| !s.is_empty() && !s.chars().any(char::is_control)) {
+            obj.insert("id".into(), Value::String(qid.chars().take(128).collect()));
+        }
+        obj.insert("question".into(), Value::String(question.chars().take(2048).collect()));
+        if let Some(header) = item["header"].as_str().map(str::trim).filter(|s| !s.is_empty()) {
+            obj.insert("header".into(), Value::String(header.chars().take(128).collect()));
+        }
+        if let Some(detail) = item["detail"].as_str().map(str::trim).filter(|s| !s.is_empty()) {
+            obj.insert("detail".into(), Value::String(detail.chars().take(16384).collect()));
+        }
+        obj.insert("multi_select".into(), Value::Bool(multi_select));
+        obj.insert("options".into(), Value::Array(options));
+        Some(Value::Object(obj))
     }).collect();
-    (!items.is_empty()).then(||serde_json::json!({"call_id":id,"state":state,"questions":items}))
+    (!items.is_empty()).then(|| serde_json::json!({"call_id": id, "state": state, "questions": items}))
 }
 
 fn apply_question_event(pending: &mut std::collections::BTreeMap<String, Value>, event: &Value) {
@@ -219,6 +252,73 @@ mod tests {
     fn wrong_session_and_unknown_operation_are_rejected() {
         assert!(project_history(address(), &json!({"type":"snapshot","header":{"id":"other"},"records":[]})).is_err());
         assert!(project_history(address(), &json!({"type":"snapshot","header":{"id":"existing"},"records":[{"event":{"surfaceOp":"delete"}}]})).is_err());
+    }
+    #[test]
+    fn question_row_preserves_metadata_and_multi_select_variants() {
+        let snapshot = json!({
+            "projections": {
+                "values": {
+                    "userQuestions": {
+                        "active": [{
+                            "callId": "call-meta-1",
+                            "state": "continued",
+                            "questions": [
+                                {
+                                    "id": "q-camel",
+                                    "header": "Deployment",
+                                    "detail": "Detailed plan notes",
+                                    "question": "Which targets?",
+                                    "multiSelect": true,
+                                    "options": [{"label": "Staging", "description": "Safe test"}]
+                                },
+                                {
+                                    "id": "q-snake",
+                                    "question": "Pick modes?",
+                                    "multi_select": true,
+                                    "options": [{"label": "Fast"}]
+                                }
+                            ]
+                        }]
+                    }
+                }
+            }
+        });
+        let rows = pending_questions(&snapshot);
+        assert_eq!(rows.len(), 1);
+        let q0 = &rows[0]["questions"][0];
+        assert_eq!(q0["id"], "q-camel");
+        assert_eq!(q0["header"], "Deployment");
+        assert_eq!(q0["detail"], "Detailed plan notes");
+        assert_eq!(q0["multi_select"], true);
+        assert_eq!(q0["options"][0]["label"], "Staging");
+        let q1 = &rows[0]["questions"][1];
+        assert_eq!(q1["id"], "q-snake");
+        assert_eq!(q1["multi_select"], true);
+        assert!(q1.get("header").is_none());
+        assert!(q1.get("detail").is_none());
+    }
+    #[test]
+    fn continued_question_is_suppressed_while_reply_queued_in_inbox() {
+        let snapshot = json!({
+            "projections": {
+                "values": {
+                    "userQuestions": {
+                        "active": [
+                            {"callId": "call-queued", "state": "continued", "questions": [{"id": "q1", "question": "First?"}]},
+                            {"callId": "call-other", "state": "continued", "questions": [{"id": "q2", "question": "Second?"}]},
+                            {"callId": "call-open", "state": "open", "questions": [{"id": "q3", "question": "Open?"}]}
+                        ]
+                    },
+                    "inbox": {
+                        "next-step": [{"source": {"kind": "user-question-reply", "callId": "call-queued"}}],
+                        "next-turn": [{"source": {"kind": "user-question-reply", "callId": "call-open"}}]
+                    }
+                }
+            }
+        });
+        let rows = pending_questions(&snapshot);
+        let ids: Vec<_> = rows.iter().filter_map(|r| r["call_id"].as_str()).collect();
+        assert_eq!(ids, vec!["call-open", "call-other"]);
     }
 }
 

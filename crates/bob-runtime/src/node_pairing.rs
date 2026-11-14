@@ -873,7 +873,7 @@ pub fn forward_dsh_rpc_to_endpoint_with_target(
                 }
             }
         }
-    } else if matches!(command, "app_native_setup" | "app_dsh_create" | "app_dsh_cancel" | "app_dsh_live" | "app_dsh_page" | "app_dsh_history") {
+    } else if matches!(command, "app_native_setup" | "app_dsh_create" | "app_dsh_cancel" | "app_dsh_answer" | "app_dsh_live" | "app_dsh_page" | "app_dsh_history") {
         if let Some(addr) = result.get_mut("address").and_then(Value::as_object_mut) {
             addr.insert("connection_id".to_owned(), json!(connection_id));
         }
@@ -938,8 +938,8 @@ pub fn forward_dsh_rpc_to_remote_node(
         }
     }
 
-    // A send with an unknown receipt must never be replayed through another peer.
-    if already_relayed || command == "app_dsh_prompt" {
+    // A send or question answer with an unknown state must never be replayed through another peer.
+    if already_relayed || matches!(command, "app_dsh_prompt" | "app_dsh_answer") {
         return Err("DSH_UNAVAILABLE");
     }
 

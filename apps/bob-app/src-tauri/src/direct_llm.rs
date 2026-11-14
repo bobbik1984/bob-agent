@@ -4177,6 +4177,15 @@ async fn native_dsh<R: Runtime>(
                 }
                 "cancel" => ("app_native_cancel",json!({"connectionId":"local","sessionId":session_id,"requestId":request_id})),
                 "dsh_cancel" => ("app_dsh_cancel",json!({"connectionId":"local","sessionId":session_id})),
+                "dsh_answer" => (
+                    "app_dsh_answer",
+                    json!({
+                        "connectionId": "local",
+                        "sessionId": session_id,
+                        "callId": request_id,
+                        "answers": attachments.clone().unwrap_or(Value::Null),
+                    }),
+                ),
                 "live" => ("app_dsh_live",json!({"connectionId":"local","sessionId":session_id})),
                 "page" => {
                     let v: Value = serde_json::from_str(&text).unwrap_or_else(|_| json!({}));
@@ -4259,6 +4268,17 @@ async fn native_dsh<R: Runtime>(
             match operation {
                 "list" => client.list(),
                 "dsh_cancel" => client.cancel_session(bob_runtime::dsh_session::SessionAddress{connection_id:cid,session_id:sid}),
+                "dsh_answer" => {
+                    let ans = attachments.as_ref().ok_or("BAD_ANSWER")?;
+                    client.answer_question(
+                        bob_runtime::dsh_session::SessionAddress {
+                            connection_id: cid,
+                            session_id: sid,
+                        },
+                        &request_id,
+                        ans,
+                    )
+                }
                 "live" => client.live(bob_runtime::dsh_session::SessionAddress{connection_id:cid,session_id:sid}),
                 "page" => {
                     let v: Value = serde_json::from_str(&text).map_err(|_| "DSH_PROTOCOL")?;
@@ -4316,7 +4336,7 @@ async fn native_dsh<R: Runtime>(
 
         match direct_dsh {
             Ok(val) => Ok(val),
-            Err(err) if operation=="dsh_cancel" => Err(err),
+            Err(err) if matches!(operation, "dsh_cancel" | "dsh_answer") => Err(err),
             Err(err) => {
                 let (cmd, args) = build_rpc_call();
                 forward_with_relay_fallback(cmd, &args).or(Err(err))
@@ -4542,6 +4562,11 @@ pub(crate) async fn app_paired_session_setup<R: Runtime>(
 pub(crate) async fn app_dsh_cancel<R: Runtime>(host: AppHandle<R>, connection_id: String, session_id: String) -> Result<Value, &'static str> {
  native_dsh(host,connection_id,"dsh_cancel",session_id,String::new(),String::new(),None).await
 }
+#[tauri::command]
+pub(crate) async fn app_dsh_answer<R: Runtime>(host: AppHandle<R>, connection_id: String, session_id: String, call_id: String, answers: Value) -> Result<Value, &'static str> {
+ if call_id.is_empty() || call_id.len() > 256 { return Err("BAD_ANSWER"); }
+ native_dsh(host,connection_id,"dsh_answer",session_id,String::new(),call_id,Some(answers)).await
+}
 
 #[tauri::command]
 pub(crate) async fn app_dsh_live<R: Runtime>(host: AppHandle<R>, connection_id: String, session_id: String) -> Result<Value, &'static str> {
@@ -4560,6 +4585,6 @@ pub(crate) async fn app_native_cancel<R: Runtime>(host: AppHandle<R>, connection
 
 #[tauri::command]
 pub(crate) async fn app_native_permission<R: Runtime>(host: AppHandle<R>, connection_id: String, session_id: String, request_id: String, permission_id: String, option_id: Option<String>) -> Result<Value, &'static str> {
- if (!session_id.starts_with("agy:") && !session_id.starts_with("claude-jsonl:")) || request_id.is_empty() || request_id.len()>200 || permission_id.is_empty() || permission_id.len()>128 || option_id.as_ref().is_some_and(|x|x.len()>128) {return Err("HARNESS_APPROVAL_INVALID")}
+ if (!session_id.starts_with("agy:") && !session_id.starts_with("claude-jsonl:") && !session_id.starts_with("codex:")) || request_id.is_empty() || request_id.len()>200 || permission_id.is_empty() || permission_id.len()>128 || option_id.as_ref().is_some_and(|x|x.len()>128) {return Err("HARNESS_APPROVAL_INVALID")}
  native_dsh(host,connection_id,"permission",session_id,json!({"permissionId":permission_id,"optionId":option_id}).to_string(),request_id,None).await
 }

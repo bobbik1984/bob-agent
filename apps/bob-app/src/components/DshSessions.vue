@@ -161,8 +161,12 @@ watch([syncStatus,sending,replying,()=>nodeActivity.value?.running,busy],()=>emi
 const dshLiveState=ref(null);let dshLiveTimer,dshReadCursor=-1;
 const isNativeId=id=>/^(agy|claude-jsonl|codex|pi):/.test(id||'');
 const dshQuestionView=ref(null);
+const answeredDshCallIds=ref({});
+const dshQuestionDrafts=ref({});
+const dshQuestionBusy=ref({});
+const dshQuestionErrors=ref({});
 let checkedDshQuestions=false;
-const dshQuestions=computed(()=>dshQuestionView.value?.pending_questions||[]);
+const dshQuestions=computed(()=> (dshQuestionView.value?.pending_questions||[]).filter(q=>q&&!answeredDshCallIds.value[q.call_id]));
 const dshQuestionBlocking=computed(()=>dshQuestions.value.some(q=>q.state==='open'));
 const dshQuestionSource=computed(()=>{
  try{const url=new URL(dshQuestionView.value?.question_source);return url.protocol==='https:'&&!url.username&&!url.password&&!url.search&&!url.hash&&url.pathname==='/'?url.href:null;}
@@ -170,7 +174,97 @@ const dshQuestionSource=computed(()=>{
 });
 function observeDshQuestions(page){
  if(!Array.isArray(page.pending_questions)||page.cursor<(dshQuestionView.value?.cursor??-1))return;
+ const present=new Set(page.pending_questions.map(q=>q?.call_id).filter(Boolean));
+ const nextAnswered={};
+ for(const key of Object.keys(answeredDshCallIds.value)){if(present.has(key))nextAnswered[key]=true;}
+ answeredDshCallIds.value=nextAnswered;
  dshQuestionView.value={cursor:page.cursor,pending_questions:page.pending_questions,question_source:page.question_source};
+}
+function dshAnswerKey(callId,questionId){return `${callId}\u0000${questionId}`;}
+function canAnswerDshRequest(request){
+ return Boolean(request&&typeof request.call_id==='string'&&request.call_id&&Array.isArray(request.questions)&&request.questions.length>0&&request.questions.every(q=>q&&typeof q.id==='string'&&q.id.trim().length>0)&&typeof kernelBridge.dshAnswer==='function');
+}
+function getDshAnswerDraft(callId,questionId){
+ const entry=dshQuestionDrafts.value[dshAnswerKey(callId,questionId)];
+ return {selected:Array.isArray(entry?.selected)?entry.selected:[],custom:typeof entry?.custom==='string'?entry.custom:''};
+}
+function isDshOptionSelected(callId,questionId,label){
+ return getDshAnswerDraft(callId,questionId).selected.includes(label);
+}
+function toggleDshOption(request,item,label){
+ if(!request?.call_id||!item?.id||dshQuestionBusy.value[request.call_id])return;
+ const key=dshAnswerKey(request.call_id,item.id);
+ const cur=getDshAnswerDraft(request.call_id,item.id);
+ const exists=cur.selected.includes(label);
+ const nextSelected=item.multi_select
+  ?(exists?cur.selected.filter(v=>v!==label):[...cur.selected,label])
+  :(exists?[]:[label]);
+ dshQuestionDrafts.value={...dshQuestionDrafts.value,[key]:{...cur,selected:nextSelected}};
+ if(dshQuestionErrors.value[request.call_id]){const nextErr={...dshQuestionErrors.value};delete nextErr[request.call_id];dshQuestionErrors.value=nextErr;}
+}
+function setDshCustomAnswer(request,item,value){
+ if(!request?.call_id||!item?.id||dshQuestionBusy.value[request.call_id])return;
+ const key=dshAnswerKey(request.call_id,item.id);
+ const cur=getDshAnswerDraft(request.call_id,item.id);
+ dshQuestionDrafts.value={...dshQuestionDrafts.value,[key]:{...cur,custom:String(value??'')}};
+ if(dshQuestionErrors.value[request.call_id]){const nextErr={...dshQuestionErrors.value};delete nextErr[request.call_id];dshQuestionErrors.value=nextErr;}
+}
+function canSubmitDshQuestion(request){
+ if(!canAnswerDshRequest(request)||dshQuestionBusy.value[request.call_id])return false;
+ return request.questions.every(item=>{
+  const entry=getDshAnswerDraft(request.call_id,item.id);
+  return entry.selected.length>0||entry.custom.trim().length>0;
+ });
+}
+function buildDshAnswersPayload(request){
+ return request.questions.map(item=>{
+  const entry=getDshAnswerDraft(request.call_id,item.id);
+  const out={id:item.id,selected:[...entry.selected]};
+  const custom=entry.custom.trim();
+  if(custom)out.custom=custom;
+  return out;
+ });
+}
+async function submitDshQuestion(request){
+ const id=selected.value?.id,cid=connection.value,g=generation;
+ if(!id||!request?.call_id||dshQuestionBusy.value[request.call_id]||!canSubmitDshQuestion(request))return;
+ const callId=request.call_id;
+ const answers=buildDshAnswersPayload(request);
+ let shouldRefresh=false;
+ dshQuestionBusy.value={...dshQuestionBusy.value,[callId]:true};
+ if(dshQuestionErrors.value[callId]){const nextErr={...dshQuestionErrors.value};delete nextErr[callId];dshQuestionErrors.value=nextErr;}
+ try{
+  await kernelBridge.dshAnswer(cid,id,callId,answers);
+  if(g!==generation||disposed)return;
+  answeredDshCallIds.value={...answeredDshCallIds.value,[callId]:true};
+  const nextDrafts={...dshQuestionDrafts.value};
+  const prefix=`${callId}\u0000`;
+  for(const key of Object.keys(nextDrafts)){if(key.startsWith(prefix))delete nextDrafts[key];}
+  dshQuestionDrafts.value=nextDrafts;
+  notice.value=t('dshQuestionSubmitted');
+  checkedDshQuestions=false;
+  shouldRefresh=true;
+ }catch(e){
+  if(g!==generation||disposed)return;
+  const raw=String(e?.message||e||'');
+  if(raw.includes('REPLY_QUEUED')){
+   answeredDshCallIds.value={...answeredDshCallIds.value,[callId]:true};
+   notice.value=t('dshQuestionSubmitted');
+   checkedDshQuestions=false;
+   shouldRefresh=true;
+  }else if(raw.includes('DSH_QUESTION_EXPIRED')){
+   dshQuestionErrors.value={...dshQuestionErrors.value,[callId]:t('dshQuestionExpired')};
+   checkedDshQuestions=false;
+   shouldRefresh=true;
+  }else{
+   dshQuestionErrors.value={...dshQuestionErrors.value,[callId]:typeof fault==='function'?fault(e):raw};
+  }
+ }finally{
+  if(!disposed){
+   const nextBusy={...dshQuestionBusy.value};delete nextBusy[callId];dshQuestionBusy.value=nextBusy;
+  }
+ }
+ if(shouldRefresh&&g===generation&&!disposed)await refresh();
 }
 const dshLiveMessages=computed(()=> (dshLiveState.value?.messages||[]).filter(m=>m.text&&(m.active||!Number.isSafeInteger(m.sequence)||m.sequence>(history.value?.cursor??-1))));
 async function refreshDshLive(){
@@ -674,8 +768,8 @@ function removeAttachment(id){attachments.value=attachments.value.filter(a=>a.id
 function formatAttachmentBlock(list){if(!list?.length)return '';return list.map(a=>a.content?`[Attachment: ${a.name}]\n\`\`\`\n${String(a.content).slice(0,16384)}\n\`\`\``:`[Attachment: ${a.name} (${a.size||0} bytes)]`).join('\n\n');}
 function onComposeKeydown(e){if(e?.key==='Enter'&&!e.shiftKey&&!e.isComposing){e.preventDefault();void send();}}
 globalThis.__bobForceRefreshDsh=forceRefresh;
-async function open(s){resetDshStop();checkedDshQuestions=false;dshQuestionView.value=null;inSessionSearchOpen.value=false;inSessionSearchQuery.value='';approvalErrors.value={};pendingDecision.value=null;cancelRequest.value=null;cancelBusy.value=false;takeoverPrompt.value=null;terminalHolderOverride.value=null;bobHolderOverride.value=null;handoffCardOpen.value=false;releasingHolder.value=false;copiedCliCmd.value=false;chatScroll.reset();clearTimeout(dshLiveTimer);dshLiveState.value=null;dshReadCursor=-1;clearTimeout(nativeTimer);nativeCursor=0;nativeEpoch='';nativeDrafts.value={};nodeActivity.value=null;awaitingReply.value=null;replying.value=false;hasNewMessages.value=false;streamSeq.value=null;syncStatus.value='';pullUpDistance.value=0;attachments.value=[];clearTimeout(syncTimer);activityChecked=0;olderRequested=false;artifactQueue=[];artifactCount=0;persist();++generation;clearTimeout(timer);busy.value=false;loadingOlder.value=false;lastTop=0;selected.value=s;history.value=null;notice.value='';const saved=readState();restoring=true;draft.value=saved.draft||'';pending.value=saved.pending||null;restoring=false;if(pending.value)notice.value=t('dshUncertain');const g=generation;const cached=await readingCache.get(historyKey());if(g!==generation||disposed)return;if(cached){try{validatePage(cached,s.id);history.value=cached;syncStatus.value='checking';await nextTick();if(reader.value)reader.value.scrollTop=reader.value.scrollHeight;lastTop=reader.value?.scrollTop||0;}catch{}}if(!canReadOrResume(s)){error.value=t(s.historyReason==='AGY_HISTORY_NOT_LOCAL'?'agyHistoryNotLocal':'agyHistoryPending');return;}await refresh();void refreshNativeEvents();void refreshDshLive()}
-function back(){resetDshStop();dshQuestionView.value=null;inSessionSearchOpen.value=false;inSessionSearchQuery.value='';takeoverPrompt.value=null;terminalHolderOverride.value=null;bobHolderOverride.value=null;handoffCardOpen.value=false;releasingHolder.value=false;copiedCliCmd.value=false;clearTimeout(dshLiveTimer);dshLiveState.value=null;clearTimeout(nativeTimer);persist();++generation;clearTimeout(timer);clearTimeout(syncTimer);busy.value=false;selected.value=null;history.value=null;syncStatus.value='';hasNewMessages.value=false;notice.value='';load()}
+async function open(s){resetDshStop();checkedDshQuestions=false;dshQuestionView.value=null;answeredDshCallIds.value={};dshQuestionDrafts.value={};dshQuestionBusy.value={};dshQuestionErrors.value={};inSessionSearchOpen.value=false;inSessionSearchQuery.value='';approvalErrors.value={};pendingDecision.value=null;cancelRequest.value=null;cancelBusy.value=false;takeoverPrompt.value=null;terminalHolderOverride.value=null;bobHolderOverride.value=null;handoffCardOpen.value=false;releasingHolder.value=false;copiedCliCmd.value=false;chatScroll.reset();clearTimeout(dshLiveTimer);dshLiveState.value=null;dshReadCursor=-1;clearTimeout(nativeTimer);nativeCursor=0;nativeEpoch='';nativeDrafts.value={};nodeActivity.value=null;awaitingReply.value=null;replying.value=false;hasNewMessages.value=false;streamSeq.value=null;syncStatus.value='';pullUpDistance.value=0;attachments.value=[];clearTimeout(syncTimer);activityChecked=0;olderRequested=false;artifactQueue=[];artifactCount=0;persist();++generation;clearTimeout(timer);busy.value=false;loadingOlder.value=false;lastTop=0;selected.value=s;history.value=null;notice.value='';const saved=readState();restoring=true;draft.value=saved.draft||'';pending.value=saved.pending||null;restoring=false;if(pending.value)notice.value=t('dshUncertain');const g=generation;const cached=await readingCache.get(historyKey());if(g!==generation||disposed)return;if(cached){try{validatePage(cached,s.id);history.value=cached;syncStatus.value='checking';await nextTick();if(reader.value)reader.value.scrollTop=reader.value.scrollHeight;lastTop=reader.value?.scrollTop||0;}catch{}}if(!canReadOrResume(s)){error.value=t(s.historyReason==='AGY_HISTORY_NOT_LOCAL'?'agyHistoryNotLocal':'agyHistoryPending');return;}await refresh();void refreshNativeEvents();void refreshDshLive()}
+function back(){resetDshStop();dshQuestionView.value=null;answeredDshCallIds.value={};dshQuestionDrafts.value={};dshQuestionBusy.value={};dshQuestionErrors.value={};inSessionSearchOpen.value=false;inSessionSearchQuery.value='';takeoverPrompt.value=null;terminalHolderOverride.value=null;bobHolderOverride.value=null;handoffCardOpen.value=false;releasingHolder.value=false;copiedCliCmd.value=false;clearTimeout(dshLiveTimer);dshLiveState.value=null;clearTimeout(nativeTimer);persist();++generation;clearTimeout(timer);clearTimeout(syncTimer);busy.value=false;selected.value=null;history.value=null;syncStatus.value='';hasNewMessages.value=false;notice.value='';load()}
 async function checkReceipt(){
  if(!pending.value || sending.value)return;
  const g=generation,p= pending.value; sending.value=true;
@@ -841,18 +935,44 @@ onUnmounted(()=>{resetDshStop();stopVoiceInput();chatScroll.dispose();clearTimeo
     </div>
    </div>
    <section v-if="dshQuestions.length" class="dsh-question-notice" aria-live="polite">
-    <strong>{{ t(dshQuestionBlocking ? 'dshQuestionWaiting' : 'dshQuestionOpen') }}</strong>
-    <p>{{ t('dshQuestionReplyInSource') }}</p>
-    <a v-if="dshQuestionSource" :href="dshQuestionSource" target="_blank" rel="noopener noreferrer">{{ t('dshQuestionOpenSource') }}</a>
-    <details open>
-     <summary>{{ t('dshQuestionDetails') }}</summary>
-     <div v-for="request in dshQuestions" :key="request.call_id">
+    <div class="dsh-question-top">
+     <strong>{{ t(dshQuestionBlocking ? 'dshQuestionWaiting' : 'dshQuestionOpen') }}</strong>
+     <a v-if="dshQuestionSource" :href="dshQuestionSource" target="_blank" rel="noopener noreferrer">{{ t('dshQuestionOpenSource') }}</a>
+    </div>
+    <p>{{ dshQuestions.every(canAnswerDshRequest) ? t('dshQuestionReplyInlineHint') : t('dshQuestionReplyInSource') }}</p>
+    <div v-for="request in dshQuestions" :key="request.call_id" class="dsh-question-card">
+     <template v-if="canAnswerDshRequest(request)">
+      <div v-for="(item,qIdx) in request.questions" :key="item.id || qIdx" class="dsh-question-item">
+       <div class="dsh-question-item-head">
+        <span v-if="item.header" class="dsh-question-header">{{ item.header }}</span>
+        <span v-if="item.multi_select" class="dsh-question-badge">{{ t('dshQuestionMultiSelect') }}</span>
+       </div>
+       <p class="dsh-question-prompt">{{ item.question }}</p>
+       <details v-if="item.detail" class="dsh-question-detail">
+        <summary>{{ t('dshQuestionDetailToggle') }}</summary>
+        <pre class="dsh-question-detail-body">{{ item.detail }}</pre>
+       </details>
+       <div v-if="item.options?.length" class="dsh-question-options">
+        <button v-for="(option,optIdx) in item.options" :key="optIdx" type="button" class="dsh-question-option" :class="{ selected: isDshOptionSelected(request.call_id, item.id, option.label) }" :aria-pressed="isDshOptionSelected(request.call_id, item.id, option.label)" :disabled="!!dshQuestionBusy[request.call_id]" @click="toggleDshOption(request, item, option.label)">
+         <span class="dsh-question-option-label">{{ option.label }}</span>
+         <small v-if="option.description" class="dsh-question-option-desc">{{ option.description }}</small>
+        </button>
+       </div>
+       <textarea rows="2" class="dsh-question-custom" :value="getDshAnswerDraft(request.call_id, item.id).custom" :placeholder="item.options?.length ? t('dshQuestionCustomOptional') : t('dshQuestionCustomRequired')" :disabled="!!dshQuestionBusy[request.call_id]" @input="setDshCustomAnswer(request, item, $event.target.value)" @keydown.ctrl.enter.prevent="submitDshQuestion(request)" @keydown.meta.enter.prevent="submitDshQuestion(request)" />
+      </div>
+      <p v-if="dshQuestionErrors[request.call_id]" class="dsh-question-error" role="alert">{{ dshQuestionErrors[request.call_id] }}</p>
+      <div class="dsh-question-actions">
+       <button type="button" class="dsh-question-submit" :disabled="!canSubmitDshQuestion(request)" @click="submitDshQuestion(request)">{{ t(dshQuestionBusy[request.call_id] ? 'dshQuestionSubmitting' : 'dshQuestionSubmit') }}</button>
+      </div>
+     </template>
+     <details v-else open>
+      <summary>{{ t('dshQuestionDetails') }}</summary>
       <div v-for="(item,index) in request.questions" :key="index">
        <p>{{ item.question }}</p>
-       <ul v-if="item.options.length"><li v-for="(option,index) in item.options" :key="index">{{ option.label }} <small v-if="option.description">{{ option.description }}</small></li></ul>
+       <ul v-if="item.options?.length"><li v-for="(option,optIndex) in item.options" :key="optIndex">{{ option.label }} <small v-if="option.description">{{ option.description }}</small></li></ul>
       </div>
-     </div>
-    </details>
+     </details>
+    </div>
    </section>
    <p v-if="activityLabel && !dshQuestionBlocking && !dshStop" class="dsh-activity" role="status" aria-live="polite"><span class="terminal-rod" aria-hidden="true">[{{ rodFrame }}]</span> <span>{{activityLabel}}</span><span class="terminal-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span></p>
    <div class="dsh-compose-box">
@@ -884,8 +1004,32 @@ onUnmounted(()=>{resetDshStop();stopVoiceInput();chatScroll.dispose();clearTimeo
  </section>
 </template>
 <style scoped>
-.dsh-question-notice{max-height:34vh;overflow:auto;padding:10px 12px;border:1px solid var(--accent-primary);border-radius:var(--radius-card);background:var(--bg-secondary);overflow-wrap:anywhere}
-.dsh-question-notice p{margin:4px 0}.dsh-question-notice details{margin-top:0}.dsh-question-notice ul{margin:4px 0;padding-inline-start:1.5rem}
+.dsh-question-notice{max-height:46vh;overflow:auto;padding:12px 14px;border:1px solid var(--accent-primary);border-radius:var(--radius-card);background:var(--bg-secondary);overflow-wrap:anywhere;display:flex;flex-direction:column;gap:8px}
+.dsh-sessions.embedded .dsh-question-notice{width:min(100%, 46rem);margin:0 auto;box-sizing:border-box}
+.dsh-question-notice p{margin:0;color:var(--text-secondary);font-size:.82rem}.dsh-question-notice details{margin-top:0}.dsh-question-notice ul{margin:4px 0;padding-inline-start:1.5rem}
+.dsh-question-top{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
+.dsh-question-top strong{font-size:.9rem;color:var(--text-primary)}
+.dsh-question-card{padding-top:8px;border-top:1px solid var(--border-color);display:flex;flex-direction:column;gap:8px}
+.dsh-question-item{display:flex;flex-direction:column;gap:6px}
+.dsh-question-item-head{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.dsh-question-header,.dsh-question-badge{font-size:.72rem;padding:1px 7px;border-radius:999px;border:1px solid var(--border-color);background:var(--bg-primary);color:var(--text-secondary)}
+.dsh-question-badge{border-color:var(--accent-primary);color:var(--accent-primary)}
+.dsh-question-notice .dsh-question-prompt{color:var(--text-primary);font-size:.88rem;font-weight:500;line-height:1.45}
+.dsh-question-detail{margin-top:2px;font-size:.8rem}
+.dsh-question-detail summary{padding:2px 0;color:var(--text-secondary)}
+.dsh-question-detail-body{margin:4px 0 0;padding:8px 10px;border-radius:var(--radius-btn);border:1px solid var(--border-color);background:var(--bg-primary);color:var(--text-primary);white-space:pre-wrap;font-size:.78rem}
+.dsh-question-options{display:flex;flex-direction:column;gap:6px}
+.dsh-question-option{display:flex;flex-direction:column;align-items:flex-start;text-align:left;gap:2px;width:100%;padding:8px 10px;border-radius:var(--radius-btn);border:1px solid var(--border-color);background:var(--bg-primary);color:var(--text-primary);cursor:pointer;transition:border-color .15s ease,background-color .15s ease}
+.dsh-question-option:hover:not(:disabled){border-color:var(--accent-primary)}
+.dsh-question-option.selected{border-color:var(--accent-primary);background:color-mix(in srgb, var(--accent-primary) 12%, var(--bg-primary))}
+.dsh-question-option-label{font-size:.85rem;font-weight:600;color:var(--text-primary)}
+.dsh-question-option-desc{font-size:.76rem;color:var(--text-secondary)}
+.dsh-question-custom{width:100%;box-sizing:border-box;min-height:2.4rem;resize:vertical;padding:6px 10px;font-size:.84rem;border:1px solid var(--border-color);border-radius:var(--radius-btn);background:var(--bg-primary);color:var(--text-primary)}
+.dsh-question-custom:focus{outline:none;border-color:var(--accent-primary)}
+.dsh-question-notice .dsh-question-error{color:var(--color-error);font-size:.8rem}
+.dsh-question-actions{display:flex;justify-content:flex-end;gap:8px}
+.dsh-question-submit{padding:6px 14px;border-radius:var(--radius-btn);border:1px solid var(--accent-primary);background:var(--accent-primary);color:var(--bg-primary);font-size:.82rem;font-weight:600;cursor:pointer}
+.dsh-question-submit:disabled{opacity:.45;cursor:not-allowed}
 
 .dsh-sessions{min-width:0;max-width:100%;padding:16px;border:1px solid var(--border-color);border-radius:var(--radius-modal);background:var(--bg-primary)}
 .dsh-sessions.embedded{border:0;border-radius:0;padding:0;flex:1;min-height:0;overflow:hidden;display:flex;flex-direction:column;width:100%}

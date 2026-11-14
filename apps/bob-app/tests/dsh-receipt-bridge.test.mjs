@@ -15,3 +15,9 @@ test('dshPrompt forwards takeover and approvalMode options cleanly', async()=>{
  await bridge.dshPrompt('conn-1','claude-jsonl:s1','hello','req-1',null,{takeover:true,approvalMode:'interactive'});
  assert.deepEqual(calls,[{c:'app_dsh_prompt',a:{connectionId:'conn-1',sessionId:'claude-jsonl:s1',text:'hello',requestId:'req-1',takeover:true,approvalMode:'interactive'}}]);
 });
+test('dshAnswer forwards callId and answers cleanly', async()=>{
+ const calls=[];const bridge=createKernelBridge(async(c,a)=>{calls.push({c,a});return {ok:true}},()=>true);
+ const answers=[{id:'q1',selected:['opt-a']}];
+ await bridge.dshAnswer('conn-1','dsh-s1','call-1',answers);
+ assert.deepEqual(calls,[{c:'app_dsh_answer',a:{connectionId:'conn-1',sessionId:'dsh-s1',callId:'call-1',answers}}]);
+});

@@ -1557,7 +1557,7 @@ pub fn handle_rpc_command(ctx: &mut NodeContext, command: &str, args: &Value) ->
                 args["text"].as_str().ok_or("DSH_TEXT_REQUIRED")?,
                 args["requestId"].as_str().ok_or("DSH_REQUEST_REQUIRED")?)
         }
-        "app_dsh_create" | "app_dsh_cancel" | "app_dsh_live" | "app_dsh_page" | "app_dsh_preview" | "app_dsh_list" | "app_dsh_history" | "app_dsh_prompt" => {
+        "app_dsh_create" | "app_dsh_cancel" | "app_dsh_answer" | "app_dsh_live" | "app_dsh_page" | "app_dsh_preview" | "app_dsh_list" | "app_dsh_history" | "app_dsh_prompt" => {
             let connection=args["connectionId"].as_str().ok_or("DSH_CONNECTION_REQUIRED")?;
             if connection == "local" {
                 let _ = bob_runtime::agy_directory::ensure_local_grant_registered(&ctx.runtime.data_dir, "local");
@@ -1679,7 +1679,20 @@ pub fn handle_rpc_command(ctx: &mut NodeContext, command: &str, args: &Value) ->
                     args["requestId"].as_str().ok_or("DSH_REQUEST_REQUIRED")?,
                     args["text"].as_str().ok_or("DSH_TEXT_REQUIRED")?)?;
             }
-            let client=ctx.runtime.dsh_client(connection)?;
+            let client = match ctx.runtime.dsh_client(connection) {
+                Ok(c) => c,
+                Err("DSH_CONNECTION_NOT_FOUND" | "DSH_CONNECTION_REQUIRED" | "SECRET_NOT_CONFIGURED")
+                    if connection != "local" && command == "app_dsh_answer" =>
+                {
+                    return bob_runtime::node_pairing::forward_dsh_rpc_to_remote_node(
+                        &ctx.runtime,
+                        connection,
+                        command,
+                        args,
+                    );
+                }
+                Err(e) => return Err(e),
+            };
             match command {
                 "app_dsh_create" => client.create_session(
                     bob_runtime::dsh_session::SessionAddress {
@@ -1690,6 +1703,26 @@ pub fn handle_rpc_command(ctx: &mut NodeContext, command: &str, args: &Value) ->
                     args["title"].as_str().ok_or("DSH_CREATE_INVALID")?,
                 ),
                 "app_dsh_cancel" => client.cancel_session(bob_runtime::dsh_session::SessionAddress{connection_id:connection.into(),session_id:args["sessionId"].as_str().ok_or("DSH_SESSION_REQUIRED")?.into()}),
+                "app_dsh_answer" => {
+                    let session = args["sessionId"].as_str().ok_or("DSH_SESSION_REQUIRED")?;
+                    let call_id = args["callId"].as_str().ok_or("DSH_PROTOCOL")?;
+                    let answers = args.get("answers").ok_or("BAD_ANSWER")?;
+                    let res = client.answer_question(
+                        bob_runtime::dsh_session::SessionAddress {
+                            connection_id: connection.into(),
+                            session_id: session.into(),
+                        },
+                        call_id,
+                        answers,
+                    )?;
+                    let _ = bob_runtime::claude_harness::record_external_harness_turn_for_session(
+                        &ctx.runtime.data_dir,
+                        connection,
+                        session,
+                        "dsh",
+                    );
+                    Ok(res)
+                }
                 "app_dsh_live" => client.live(bob_runtime::dsh_session::SessionAddress{connection_id:connection.into(),session_id:args["sessionId"].as_str().ok_or("DSH_SESSION_REQUIRED")?.into()}),
                 "app_dsh_page" => client.history_page(bob_runtime::dsh_session::SessionAddress{connection_id:connection.into(),session_id:args["sessionId"].as_str().ok_or("DSH_SESSION_REQUIRED")?.into()},args.get("before").filter(|v|!v.is_null()).map(|v|v.as_i64().ok_or("DSH_PAGE_CURSOR_INVALID")).transpose()?,args.get("through").filter(|v|!v.is_null()).map(|v|v.as_i64().ok_or("DSH_PAGE_CURSOR_INVALID")).transpose()?,args.get("after").filter(|v|!v.is_null()).map(|v|v.as_i64().ok_or("DSH_PAGE_CURSOR_INVALID")).transpose()?),
                 "app_dsh_preview" => client.preview_message(bob_runtime::dsh_session::SessionAddress{connection_id:connection.into(),session_id:args.get("sessionId").and_then(Value::as_str).ok_or("DSH_PROTOCOL")?.into()},args.get("path").and_then(Value::as_str).ok_or("DSH_PROTOCOL")?,args.get("known").filter(|v|!v.is_null()), args.get("messageSequence").filter(|v|!v.is_null()).map(|v|v.as_i64().ok_or("DSH_PROTOCOL")).transpose()?),
@@ -2617,7 +2650,7 @@ fn execute_unlocked_harness_rpc(
                 args["requestId"].as_str().ok_or("DSH_REQUEST_REQUIRED")?,
             )
         }
-        "app_dsh_create" | "app_dsh_cancel" | "app_dsh_live" | "app_dsh_page" | "app_dsh_preview" | "app_dsh_list" | "app_dsh_history" | "app_dsh_prompt" => {
+        "app_dsh_create" | "app_dsh_cancel" | "app_dsh_answer" | "app_dsh_live" | "app_dsh_page" | "app_dsh_preview" | "app_dsh_list" | "app_dsh_history" | "app_dsh_prompt" => {
             let connection = args["connectionId"].as_str().ok_or("DSH_CONNECTION_REQUIRED")?;
             if connection == "local" {
                 let _ = bob_runtime::agy_directory::ensure_local_grant_registered(data_dir, "local");
@@ -2776,7 +2809,20 @@ fn execute_unlocked_harness_rpc(
                     args["text"].as_str().ok_or("DSH_TEXT_REQUIRED")?,
                 )?;
             }
-            let client = runtime.dsh_client(connection)?;
+            let client = match runtime.dsh_client(connection) {
+                Ok(c) => c,
+                Err("DSH_CONNECTION_NOT_FOUND" | "DSH_CONNECTION_REQUIRED" | "SECRET_NOT_CONFIGURED")
+                    if connection != "local" && command == "app_dsh_answer" =>
+                {
+                    return bob_runtime::node_pairing::forward_dsh_rpc_to_remote_node(
+                        &runtime,
+                        connection,
+                        command,
+                        args,
+                    );
+                }
+                Err(e) => return Err(e),
+            };
             match command {
                 "app_dsh_create" => client.create_session(
                     bob_runtime::dsh_session::SessionAddress {
@@ -2787,6 +2833,26 @@ fn execute_unlocked_harness_rpc(
                     args["title"].as_str().ok_or("DSH_CREATE_INVALID")?,
                 ),
                 "app_dsh_cancel" => client.cancel_session(bob_runtime::dsh_session::SessionAddress{connection_id:connection.into(),session_id:args["sessionId"].as_str().ok_or("DSH_SESSION_REQUIRED")?.into()}),
+                "app_dsh_answer" => {
+                    let session = args["sessionId"].as_str().ok_or("DSH_SESSION_REQUIRED")?;
+                    let call_id = args["callId"].as_str().ok_or("DSH_PROTOCOL")?;
+                    let answers = args.get("answers").ok_or("BAD_ANSWER")?;
+                    let res = client.answer_question(
+                        bob_runtime::dsh_session::SessionAddress {
+                            connection_id: connection.into(),
+                            session_id: session.into(),
+                        },
+                        call_id,
+                        answers,
+                    )?;
+                    let _ = bob_runtime::claude_harness::record_external_harness_turn_for_session(
+                        data_dir,
+                        connection,
+                        session,
+                        "dsh",
+                    );
+                    Ok(res)
+                }
                 "app_dsh_live" => client.live(bob_runtime::dsh_session::SessionAddress{connection_id:connection.into(),session_id:args["sessionId"].as_str().ok_or("DSH_SESSION_REQUIRED")?.into()}),
                 "app_dsh_page" => client.history_page(
                     bob_runtime::dsh_session::SessionAddress {
@@ -3057,7 +3123,7 @@ fn handle_connection(mut stream: TcpStream, state: Arc<Mutex<NodeContext>>) {
             let allowed=match scope {
                 Ok(ref role) if role=="owner" => !path.starts_with("/api/client/v1/"),
                 Ok(_) => path == "/api/ws/browser-takeover" || path.starts_with("/api/f/") || path.strip_prefix("/api/rpc/").is_some_and(|cmd|matches!(cmd,
-                    "app_dsh_live"|"app_dsh_create"|"app_dsh_cancel"|"app_native_setup"|"app_native_events"|"app_native_cancel"|"app_native_permission"|"app_dsh_list"|"app_dsh_page"|"app_dsh_history"|"app_dsh_preview"|"app_dsh_prompt"|"app_dsh_receipt"|
+                    "app_dsh_live"|"app_dsh_create"|"app_dsh_cancel"|"app_dsh_answer"|"app_native_setup"|"app_native_events"|"app_native_cancel"|"app_native_permission"|"app_dsh_list"|"app_dsh_page"|"app_dsh_history"|"app_dsh_preview"|"app_dsh_prompt"|"app_dsh_receipt"|
                     "app_harness_discover"|"app_harness_check_auth"|"app_harness_verify_capabilities"|
                     "app_jarvis_chat"|"app_jarvis_approve"|"app_jarvis_reject"|"app_jarvis_approvals_list"|"app_jarvis_budget_get"|"app_jarvis_budget_set"|"app_jarvis_worker_tasks"|"app_jarvis_worker_cancel"|"app_model_presets_list"|
                     "app_features_list"|"app_feature_keep"|"app_feature_rollback"|"app_feature_toggle"|"app_feature_call"|"app_feature_storage_save"|"app_feature_report_error"|
@@ -3430,7 +3496,7 @@ fn handle_connection(mut stream: TcpStream, state: Arc<Mutex<NodeContext>>) {
         }
         if matches!(
             command.trim(),
-            "app_dsh_live" | "app_dsh_create" | "app_dsh_cancel" | "app_native_setup" | "app_native_events" | "app_native_cancel" | "app_native_permission" | "app_dsh_receipt"
+            "app_dsh_live" | "app_dsh_create" | "app_dsh_cancel" | "app_dsh_answer" | "app_native_setup" | "app_native_events" | "app_native_cancel" | "app_native_permission" | "app_dsh_receipt"
                 | "app_dsh_page"
                 | "app_dsh_preview"
                 | "app_dsh_list"

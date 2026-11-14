@@ -21,6 +21,7 @@ export function createKernelBridge(invoke, isAvailable) {
     dshList: connectionId => call('app_dsh_list', {connectionId}),
     dshLive: (connectionId,sessionId) => call('app_dsh_live',{connectionId,sessionId}),
     dshCancel: (connectionId,sessionId) => call('app_dsh_cancel',{connectionId,sessionId}),
+    dshAnswer: (connectionId,sessionId,callId,answers) => call('app_dsh_answer',{connectionId,sessionId,callId,answers}),
     dshCreate: (connectionId,sessionId,workspace,title) => call('app_dsh_create',{connectionId,sessionId,workspace,title}),
     nativeSetup: args => call('app_native_setup',args),
     pairedSessionSetup: (ownerId,command,args={}) => call('app_paired_session_setup',{ownerId,command,args}),
