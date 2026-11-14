@@ -1,8 +1,31 @@
 use crate::cdp::{CdpClient, CdpEvent};
 use crate::error::BrowserResult;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{json, Value};
 use std::time::Duration;
+
+pub const REDACTED_TAKEOVER_TEXT: &str = "[REDACTED]";
+
+fn deserialize_pointer_button<'de, D>(deserializer: D) -> Result<u32, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let val = Option::<Value>::deserialize(deserializer)?;
+    match val {
+        None | Some(Value::Null) => Ok(0),
+        Some(Value::Number(n)) => Ok(n.as_u64().unwrap_or(0) as u32),
+        Some(Value::String(s)) => match s.trim().to_ascii_lowercase().as_str() {
+            "middle" | "1" => Ok(1),
+            "right" | "2" => Ok(2),
+            _ => Ok(0),
+        },
+        _ => Ok(0),
+    }
+}
+
+fn is_false(b: &bool) -> bool {
+    !*b
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ViewportMeta {
@@ -45,7 +68,7 @@ fn default_frame_type() -> String {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
-pub enum ClientTakeoverCommand {
+enum WireTakeoverCommand {
     #[serde(rename = "viewport_meta")]
     ViewportMetaReq,
 
@@ -53,30 +76,27 @@ pub enum ClientTakeoverCommand {
     PointerDown {
         x: f64,
         y: f64,
-        #[serde(default)]
+        #[serde(default, deserialize_with = "deserialize_pointer_button")]
         button: u32,
     },
 
     #[serde(rename = "pointer_move")]
-    PointerMove {
-        x: f64,
-        y: f64,
-    },
+    PointerMove { x: f64, y: f64 },
 
     #[serde(rename = "pointer_up")]
     PointerUp {
         x: f64,
         y: f64,
-        #[serde(default)]
+        #[serde(default, deserialize_with = "deserialize_pointer_button")]
         button: u32,
     },
 
     #[serde(rename = "pointer")]
     PointerAction {
-        action: String, // "down" | "move" | "up" | "tap"
+        action: String,
         x: f64,
         y: f64,
-        #[serde(default)]
+        #[serde(default, deserialize_with = "deserialize_pointer_button")]
         button: u32,
     },
 
@@ -95,12 +115,30 @@ pub enum ClientTakeoverCommand {
     #[serde(rename = "insert_text")]
     InsertText {
         text: String,
+        #[serde(default, skip_serializing_if = "is_false")]
+        masked: bool,
+    },
+
+    #[serde(rename = "ime_set_composition", alias = "imeSetComposition")]
+    ImeSetComposition {
+        text: String,
+        #[serde(default, alias = "selectionStart", skip_serializing_if = "Option::is_none")]
+        selection_start: Option<i32>,
+        #[serde(default, alias = "selectionEnd", skip_serializing_if = "Option::is_none")]
+        selection_end: Option<i32>,
+        #[serde(default, skip_serializing_if = "is_false")]
+        masked: bool,
+    },
+
+    #[serde(rename = "ime_commit", alias = "imeCommit")]
+    ImeCommit {
+        text: String,
+        #[serde(default, skip_serializing_if = "is_false")]
+        masked: bool,
     },
 
     #[serde(rename = "key_press", alias = "key")]
-    KeyPress {
-        key: String,
-    },
+    KeyPress { key: String },
 
     #[serde(rename = "toggle_desktop")]
     ToggleDesktop {
@@ -109,9 +147,7 @@ pub enum ClientTakeoverCommand {
     },
 
     #[serde(rename = "navigate")]
-    Navigate {
-        action: String, // "back" | "reload"
-    },
+    Navigate { action: String },
 
     #[serde(rename = "complete")]
     Complete,
@@ -120,13 +156,211 @@ pub enum ClientTakeoverCommand {
     Cancel,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(from = "WireTakeoverCommand", into = "WireTakeoverCommand")]
+pub enum ClientTakeoverCommand {
+    ViewportMetaReq,
+
+    PointerDown {
+        x: f64,
+        y: f64,
+        button: u32,
+    },
+
+    PointerMove {
+        x: f64,
+        y: f64,
+    },
+
+    PointerUp {
+        x: f64,
+        y: f64,
+        button: u32,
+    },
+
+    PointerAction {
+        action: String, // "down" | "move" | "up" | "tap"
+        x: f64,
+        y: f64,
+        button: u32,
+    },
+
+    Scroll {
+        x: f64,
+        y: f64,
+        delta_x: f64,
+        delta_y: f64,
+    },
+
+    InsertText {
+        text: String,
+    },
+
+    InsertMaskedText {
+        text: String,
+    },
+
+    ImeSetComposition {
+        text: String,
+        selection_start: Option<i32>,
+        selection_end: Option<i32>,
+        masked: bool,
+    },
+
+    ImeCommit {
+        text: String,
+        masked: bool,
+    },
+
+    KeyPress {
+        key: String,
+    },
+
+    ToggleDesktop {
+        desktop: bool,
+    },
+
+    Navigate {
+        action: String, // "back" | "reload" | URL
+    },
+
+    Complete,
+
+    Cancel,
+}
+
+impl From<WireTakeoverCommand> for ClientTakeoverCommand {
+    fn from(wire: WireTakeoverCommand) -> Self {
+        match wire {
+            WireTakeoverCommand::ViewportMetaReq => Self::ViewportMetaReq,
+            WireTakeoverCommand::PointerDown { x, y, button } => {
+                Self::PointerDown { x, y, button }
+            }
+            WireTakeoverCommand::PointerMove { x, y } => Self::PointerMove { x, y },
+            WireTakeoverCommand::PointerUp { x, y, button } => Self::PointerUp { x, y, button },
+            WireTakeoverCommand::PointerAction {
+                action,
+                x,
+                y,
+                button,
+            } => Self::PointerAction {
+                action,
+                x,
+                y,
+                button,
+            },
+            WireTakeoverCommand::Scroll {
+                x,
+                y,
+                delta_x,
+                delta_y,
+            } => Self::Scroll {
+                x,
+                y,
+                delta_x,
+                delta_y,
+            },
+            WireTakeoverCommand::InsertText { text, masked } => {
+                if masked {
+                    Self::InsertMaskedText { text }
+                } else {
+                    Self::InsertText { text }
+                }
+            }
+            WireTakeoverCommand::ImeSetComposition {
+                text,
+                selection_start,
+                selection_end,
+                masked,
+            } => Self::ImeSetComposition {
+                text,
+                selection_start,
+                selection_end,
+                masked,
+            },
+            WireTakeoverCommand::ImeCommit { text, masked } => Self::ImeCommit { text, masked },
+            WireTakeoverCommand::KeyPress { key } => Self::KeyPress { key },
+            WireTakeoverCommand::ToggleDesktop { desktop } => Self::ToggleDesktop { desktop },
+            WireTakeoverCommand::Navigate { action } => Self::Navigate { action },
+            WireTakeoverCommand::Complete => Self::Complete,
+            WireTakeoverCommand::Cancel => Self::Cancel,
+        }
+    }
+}
+
+impl From<ClientTakeoverCommand> for WireTakeoverCommand {
+    fn from(cmd: ClientTakeoverCommand) -> Self {
+        match cmd {
+            ClientTakeoverCommand::ViewportMetaReq => Self::ViewportMetaReq,
+            ClientTakeoverCommand::PointerDown { x, y, button } => {
+                Self::PointerDown { x, y, button }
+            }
+            ClientTakeoverCommand::PointerMove { x, y } => Self::PointerMove { x, y },
+            ClientTakeoverCommand::PointerUp { x, y, button } => Self::PointerUp { x, y, button },
+            ClientTakeoverCommand::PointerAction {
+                action,
+                x,
+                y,
+                button,
+            } => Self::PointerAction {
+                action,
+                x,
+                y,
+                button,
+            },
+            ClientTakeoverCommand::Scroll {
+                x,
+                y,
+                delta_x,
+                delta_y,
+            } => Self::Scroll {
+                x,
+                y,
+                delta_x,
+                delta_y,
+            },
+            ClientTakeoverCommand::InsertText { text } => Self::InsertText {
+                text,
+                masked: false,
+            },
+            ClientTakeoverCommand::InsertMaskedText { text } => Self::InsertText {
+                text,
+                masked: true,
+            },
+            ClientTakeoverCommand::ImeSetComposition {
+                text,
+                selection_start,
+                selection_end,
+                masked,
+            } => Self::ImeSetComposition {
+                text,
+                selection_start,
+                selection_end,
+                masked,
+            },
+            ClientTakeoverCommand::ImeCommit { text, masked } => Self::ImeCommit { text, masked },
+            ClientTakeoverCommand::KeyPress { key } => Self::KeyPress { key },
+            ClientTakeoverCommand::ToggleDesktop { desktop } => Self::ToggleDesktop { desktop },
+            ClientTakeoverCommand::Navigate { action } => Self::Navigate { action },
+            ClientTakeoverCommand::Complete => Self::Complete,
+            ClientTakeoverCommand::Cancel => Self::Cancel,
+        }
+    }
+}
+
+pub type TakeoverCommand = ClientTakeoverCommand;
+
 pub struct ScreencastBridge {
     pub remote_width: u32,
     pub remote_height: u32,
     pub desktop_mode: bool,
     pub sensitive_input_focused: bool,
     pub is_active: bool,
+    pub is_pointer_down: bool,
+    pub recorded_commands: Vec<ClientTakeoverCommand>,
 }
+
+pub type ScreencastSession = ScreencastBridge;
 
 impl Default for ScreencastBridge {
     fn default() -> Self {
@@ -136,6 +370,8 @@ impl Default for ScreencastBridge {
             desktop_mode: false,
             sensitive_input_focused: false,
             is_active: false,
+            is_pointer_down: false,
+            recorded_commands: Vec::new(),
         }
     }
 }
@@ -163,12 +399,235 @@ pub fn get_virtual_key_code(key: &str) -> i64 {
     }
 }
 
+/// Converts a slice of recorded takeover commands into structured replayable routine steps
+/// (`open`, `click_xy`, `drag_xy`, `type_text`, `scroll`, `key`), skipping any masked/redacted inputs.
+pub fn export_commands_to_routine_steps(
+    commands: &[ClientTakeoverCommand],
+    initial_url: Option<&str>,
+) -> Vec<Value> {
+    let mut steps = Vec::new();
+
+    if let Some(url) = initial_url {
+        let trimmed = url.trim();
+        if !trimmed.is_empty() {
+            steps.push(json!({
+                "action": "open",
+                "url": trimmed,
+            }));
+        }
+    }
+
+    let mut active_drag: Option<(f64, f64, f64, f64, bool)> = None;
+
+    let flush_drag = |drag: &mut Option<(f64, f64, f64, f64, bool)>,
+                      end_x: f64,
+                      end_y: f64,
+                      out: &mut Vec<Value>| {
+        if let Some((sx, sy, _, _, moved)) = drag.take() {
+            let dist = ((end_x - sx).powi(2) + (end_y - sy).powi(2)).sqrt();
+            if moved && dist >= 4.0 {
+                out.push(json!({
+                    "action": "drag_xy",
+                    "from_x": sx,
+                    "from_y": sy,
+                    "to_x": end_x,
+                    "to_y": end_y,
+                }));
+            } else {
+                out.push(json!({
+                    "action": "click_xy",
+                    "x": sx,
+                    "y": sy,
+                }));
+            }
+        }
+    };
+
+    for cmd in commands {
+        match cmd {
+            ClientTakeoverCommand::PointerDown { x, y, .. } => {
+                active_drag = Some((*x, *y, *x, *y, false));
+            }
+            ClientTakeoverCommand::PointerMove { x, y } => {
+                if let Some((sx, sy, _, _, _)) = active_drag {
+                    active_drag = Some((sx, sy, *x, *y, true));
+                }
+            }
+            ClientTakeoverCommand::PointerUp { x, y, .. } => {
+                flush_drag(&mut active_drag, *x, *y, &mut steps);
+            }
+            ClientTakeoverCommand::PointerAction { action, x, y, .. } => match action.as_str() {
+                "down" => {
+                    active_drag = Some((*x, *y, *x, *y, false));
+                }
+                "move" => {
+                    if let Some((sx, sy, _, _, _)) = active_drag {
+                        active_drag = Some((sx, sy, *x, *y, true));
+                    }
+                }
+                "up" => {
+                    flush_drag(&mut active_drag, *x, *y, &mut steps);
+                }
+                "tap" => {
+                    active_drag = None;
+                    steps.push(json!({
+                        "action": "click_xy",
+                        "x": x,
+                        "y": y,
+                    }));
+                }
+                _ => {}
+            },
+            ClientTakeoverCommand::InsertText { text } => {
+                if text != REDACTED_TAKEOVER_TEXT && !text.is_empty() {
+                    steps.push(json!({
+                        "action": "type_text",
+                        "text": text,
+                    }));
+                }
+            }
+            ClientTakeoverCommand::InsertMaskedText { .. } => {
+                // Masked inputs (passwords/OTPs) never persist into replayable routines.
+            }
+            ClientTakeoverCommand::ImeCommit { text, masked } => {
+                if !*masked && text != REDACTED_TAKEOVER_TEXT && !text.is_empty() {
+                    steps.push(json!({
+                        "action": "type_text",
+                        "text": text,
+                    }));
+                }
+            }
+            ClientTakeoverCommand::ImeSetComposition { .. } => {
+                // Pre-commit composition states are transient; final text is captured on ImeCommit.
+            }
+            ClientTakeoverCommand::Scroll {
+                x,
+                y,
+                delta_x,
+                delta_y,
+            } => {
+                steps.push(json!({
+                    "action": "scroll",
+                    "x": x,
+                    "y": y,
+                    "delta_x": delta_x,
+                    "delta_y": delta_y,
+                }));
+            }
+            ClientTakeoverCommand::KeyPress { key } => {
+                steps.push(json!({
+                    "action": "key",
+                    "key": key,
+                }));
+            }
+            ClientTakeoverCommand::Navigate { action } => {
+                if action.starts_with("http://") || action.starts_with("https://") {
+                    steps.push(json!({
+                        "action": "open",
+                        "url": action,
+                    }));
+                } else {
+                    steps.push(json!({
+                        "action": "open",
+                        "navigation": action,
+                    }));
+                }
+            }
+            ClientTakeoverCommand::ViewportMetaReq
+            | ClientTakeoverCommand::ToggleDesktop { .. }
+            | ClientTakeoverCommand::Complete
+            | ClientTakeoverCommand::Cancel => {}
+        }
+    }
+
+    steps
+}
+
 impl ScreencastBridge {
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Applies privacy redaction for sensitive or masked inputs before persisting into `recorded_commands`.
+    pub fn sanitize_for_recording(&self, cmd: &ClientTakeoverCommand) -> ClientTakeoverCommand {
+        let force_redact = self.sensitive_input_focused;
+        match cmd {
+            ClientTakeoverCommand::InsertText { text } => {
+                if force_redact {
+                    ClientTakeoverCommand::InsertMaskedText {
+                        text: REDACTED_TAKEOVER_TEXT.to_string(),
+                    }
+                } else {
+                    ClientTakeoverCommand::InsertText { text: text.clone() }
+                }
+            }
+            ClientTakeoverCommand::InsertMaskedText { .. } => {
+                ClientTakeoverCommand::InsertMaskedText {
+                    text: REDACTED_TAKEOVER_TEXT.to_string(),
+                }
+            }
+            ClientTakeoverCommand::ImeSetComposition {
+                text,
+                selection_start,
+                selection_end,
+                masked,
+            } => {
+                if *masked || force_redact {
+                    ClientTakeoverCommand::ImeSetComposition {
+                        text: REDACTED_TAKEOVER_TEXT.to_string(),
+                        selection_start: *selection_start,
+                        selection_end: *selection_end,
+                        masked: true,
+                    }
+                } else {
+                    ClientTakeoverCommand::ImeSetComposition {
+                        text: text.clone(),
+                        selection_start: *selection_start,
+                        selection_end: *selection_end,
+                        masked: false,
+                    }
+                }
+            }
+            ClientTakeoverCommand::ImeCommit { text, masked } => {
+                if *masked || force_redact {
+                    ClientTakeoverCommand::ImeCommit {
+                        text: REDACTED_TAKEOVER_TEXT.to_string(),
+                        masked: true,
+                    }
+                } else {
+                    ClientTakeoverCommand::ImeCommit {
+                        text: text.clone(),
+                        masked: false,
+                    }
+                }
+            }
+            other => other.clone(),
+        }
+    }
+
+    pub fn record_command(&mut self, cmd: &ClientTakeoverCommand) -> ClientTakeoverCommand {
+        let sanitized = self.sanitize_for_recording(cmd);
+        self.recorded_commands.push(sanitized.clone());
+        sanitized
+    }
+
+    pub fn export_routine_steps(&self, initial_url: Option<&str>) -> Vec<Value> {
+        export_commands_to_routine_steps(&self.recorded_commands, initial_url)
+    }
+
     pub fn start(&mut self, cdp: &CdpClient, max_width: u32, max_height: u32) -> BrowserResult<()> {
+        if !self.desktop_mode {
+            let _ = cdp.send_command(
+                "Emulation.setDeviceMetricsOverride",
+                Some(json!({
+                    "width": max_width,
+                    "height": max_height,
+                    "deviceScaleFactor": 2,
+                    "mobile": true
+                })),
+                Duration::from_secs(3),
+            );
+        }
         let params = json!({
             "format": "jpeg",
             "quality": 68,
@@ -186,6 +645,7 @@ impl ScreencastBridge {
     pub fn stop(&mut self, cdp: &CdpClient) -> BrowserResult<()> {
         let _ = cdp.send_command("Page.stopScreencast", None, Duration::from_secs(3));
         self.is_active = false;
+        self.is_pointer_down = false;
         Ok(())
     }
 
@@ -243,17 +703,19 @@ impl ScreencastBridge {
         ("Page.screencastFrameAck", json!({ "sessionId": session_id }))
     }
 
-    /// Translates client takeover commands into low-level CDP commands.
+    /// Translates client takeover commands into low-level CDP commands while recording privacy-sanitized steps.
     pub fn translate_command(
         &mut self,
         cmd: &ClientTakeoverCommand,
     ) -> Vec<(&'static str, Value)> {
+        self.record_command(cmd);
         let mut ops = Vec::new();
 
         match cmd {
             ClientTakeoverCommand::ViewportMetaReq => {}
 
             ClientTakeoverCommand::PointerDown { x, y, button } => {
+                self.is_pointer_down = true;
                 let btn_str = match button {
                     1 => "middle",
                     2 => "right",
@@ -278,19 +740,22 @@ impl ScreencastBridge {
             }
 
             ClientTakeoverCommand::PointerMove { x, y } => {
-                // Continuous drag (e.g. slider-CAPTCHA) uses buttons: 1
+                let button = if self.is_pointer_down { "left" } else { "none" };
+                let buttons = if self.is_pointer_down { 1 } else { 0 };
                 ops.push((
                     "Input.dispatchMouseEvent",
                     json!({
                         "type": "mouseMoved",
                         "x": x,
                         "y": y,
-                        "buttons": 1
+                        "button": button,
+                        "buttons": buttons
                     }),
                 ));
             }
 
             ClientTakeoverCommand::PointerUp { x, y, button } => {
+                self.is_pointer_down = false;
                 let btn_str = match button {
                     1 => "middle",
                     2 => "right",
@@ -303,7 +768,8 @@ impl ScreencastBridge {
                         "x": x,
                         "y": y,
                         "button": btn_str,
-                        "buttons": 0
+                        "buttons": 0,
+                        "clickCount": 1
                     }),
                 ));
             }
@@ -315,6 +781,7 @@ impl ScreencastBridge {
                 button,
             } => match action.as_str() {
                 "down" => {
+                    self.is_pointer_down = true;
                     let btn_str = if *button == 2 { "right" } else { "left" };
                     let btn_mask = if *button == 2 { 2 } else { 1 };
                     ops.push((
@@ -330,17 +797,21 @@ impl ScreencastBridge {
                     ));
                 }
                 "move" => {
+                    let btn_str = if self.is_pointer_down { "left" } else { "none" };
+                    let btn_mask = if self.is_pointer_down { 1 } else { 0 };
                     ops.push((
                         "Input.dispatchMouseEvent",
                         json!({
                             "type": "mouseMoved",
                             "x": x,
                             "y": y,
-                            "buttons": 1
+                            "button": btn_str,
+                            "buttons": btn_mask
                         }),
                     ));
                 }
                 "up" => {
+                    self.is_pointer_down = false;
                     let btn_str = if *button == 2 { "right" } else { "left" };
                     ops.push((
                         "Input.dispatchMouseEvent",
@@ -349,11 +820,13 @@ impl ScreencastBridge {
                             "x": x,
                             "y": y,
                             "button": btn_str,
-                            "buttons": 0
+                            "buttons": 0,
+                            "clickCount": 1
                         }),
                     ));
                 }
                 "tap" => {
+                    self.is_pointer_down = false;
                     ops.push((
                         "Input.dispatchMouseEvent",
                         json!({
@@ -372,7 +845,8 @@ impl ScreencastBridge {
                             "x": x,
                             "y": y,
                             "button": "left",
-                            "buttons": 0
+                            "buttons": 0,
+                            "clickCount": 1
                         }),
                     ));
                 }
@@ -397,7 +871,31 @@ impl ScreencastBridge {
                 ));
             }
 
-            ClientTakeoverCommand::InsertText { text } => {
+            ClientTakeoverCommand::InsertText { text }
+            | ClientTakeoverCommand::InsertMaskedText { text } => {
+                ops.push(("Input.insertText", json!({ "text": text })));
+            }
+
+            ClientTakeoverCommand::ImeSetComposition {
+                text,
+                selection_start,
+                selection_end,
+                ..
+            } => {
+                let default_pos = text.encode_utf16().count() as i32;
+                let start = selection_start.unwrap_or(default_pos);
+                let end = selection_end.unwrap_or(default_pos);
+                ops.push((
+                    "Input.imeSetComposition",
+                    json!({
+                        "text": text,
+                        "selectionStart": start,
+                        "selectionEnd": end
+                    }),
+                ));
+            }
+
+            ClientTakeoverCommand::ImeCommit { text, .. } => {
                 ops.push(("Input.insertText", json!({ "text": text })));
             }
 
@@ -470,16 +968,36 @@ impl ScreencastBridge {
                     ));
                 } else if action == "reload" {
                     ops.push(("Page.reload", json!({ "ignoreCache": false })));
+                } else if action.starts_with("http://") || action.starts_with("https://") {
+                    ops.push(("Page.navigate", json!({ "url": action })));
                 }
             }
 
             ClientTakeoverCommand::Complete | ClientTakeoverCommand::Cancel => {
                 self.is_active = false;
+                self.is_pointer_down = false;
                 ops.push(("Page.stopScreencast", json!({})));
             }
         }
 
         ops
+    }
+
+    /// Forces Chromium's SQLitePersistentCookieStore to flush buffered HTTP cookies to disk
+    /// so session cookies survive an unexpected container restart or browser crash.
+    pub fn flush_cookies_to_disk(&self, cdp: &CdpClient) {
+        let flush_js = r#"(() => {
+            try {
+                if (location.protocol === 'http:' || location.protocol === 'https:') {
+                    for (let i = 0; i < 520; i++) {
+                        document.cookie = '__bob_cflush=' + i + '; max-age=1; path=/__bob_cflush';
+                    }
+                    document.cookie = '__bob_cflush=; max-age=0; path=/__bob_cflush';
+                }
+            } catch (_) {}
+            return true;
+        })()"#;
+        let _ = cdp.evaluate(flush_js);
     }
 
     /// Dispatches a client takeover command over a CDP client.
@@ -488,10 +1006,163 @@ impl ScreencastBridge {
         cdp: &CdpClient,
         cmd: &ClientTakeoverCommand,
     ) -> BrowserResult<()> {
+        if matches!(cmd, ClientTakeoverCommand::Complete) {
+            self.flush_cookies_to_disk(cdp);
+        }
         let ops = self.translate_command(cmd);
         for (method, params) in ops {
             cdp.send_command(method, Some(params), Duration::from_secs(5))?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod screencast_unit_tests {
+    use super::*;
+
+    #[test]
+    fn test_pointer_down_move_up_tracks_drag_buttons_state() {
+        let mut session = ScreencastSession::new();
+        assert!(!session.is_pointer_down);
+
+        // Hover move before pointer down -> button: "none", buttons: 0
+        let hover_ops = session.translate_command(&TakeoverCommand::PointerMove { x: 10.0, y: 20.0 });
+        assert_eq!(hover_ops.len(), 1);
+        assert_eq!(hover_ops[0].1["button"], "none");
+        assert_eq!(hover_ops[0].1["buttons"], 0);
+
+        // Pointer down -> button: "left", buttons: 1
+        let down_ops = session.translate_command(&TakeoverCommand::PointerDown {
+            x: 30.0,
+            y: 120.0,
+            button: 0,
+        });
+        assert!(session.is_pointer_down);
+        assert_eq!(down_ops[0].1["type"], "mousePressed");
+        assert_eq!(down_ops[0].1["button"], "left");
+        assert_eq!(down_ops[0].1["buttons"], 1);
+        assert_eq!(down_ops[0].1["clickCount"], 1);
+
+        // Drag move while pointer down -> button: "left", buttons: 1
+        let move_ops = session.translate_command(&TakeoverCommand::PointerMove {
+            x: 240.0,
+            y: 120.0,
+        });
+        assert_eq!(move_ops[0].1["type"], "mouseMoved");
+        assert_eq!(move_ops[0].1["button"], "left");
+        assert_eq!(move_ops[0].1["buttons"], 1);
+
+        // Pointer up -> button: "left", buttons: 0, clickCount: 1
+        let up_ops = session.translate_command(&TakeoverCommand::PointerUp {
+            x: 240.0,
+            y: 120.0,
+            button: 0,
+        });
+        assert!(!session.is_pointer_down);
+        assert_eq!(up_ops[0].1["type"], "mouseReleased");
+        assert_eq!(up_ops[0].1["button"], "left");
+        assert_eq!(up_ops[0].1["buttons"], 0);
+        assert_eq!(up_ops[0].1["clickCount"], 1);
+    }
+
+    #[test]
+    fn test_ime_composition_privacy_redaction_and_routine_export() {
+        let mut session = ScreencastSession::new();
+
+        // Non-masked IME composition + commit
+        let comp_ops = session.translate_command(&TakeoverCommand::ImeSetComposition {
+            text: "nihao".to_string(),
+            selection_start: Some(0),
+            selection_end: Some(5),
+            masked: false,
+        });
+        assert_eq!(comp_ops[0].0, "Input.imeSetComposition");
+        assert_eq!(comp_ops[0].1["text"], "nihao");
+        assert_eq!(comp_ops[0].1["selectionStart"], 0);
+        assert_eq!(comp_ops[0].1["selectionEnd"], 5);
+
+        let commit_ops = session.translate_command(&TakeoverCommand::ImeCommit {
+            text: "你好世界".to_string(),
+            masked: false,
+        });
+        assert_eq!(commit_ops[0].0, "Input.insertText");
+        assert_eq!(commit_ops[0].1["text"], "你好世界");
+
+        // Masked insert_text via JSON wire format
+        let masked_insert: TakeoverCommand = serde_json::from_value(json!({
+            "type": "insert_text",
+            "text": "OtpCode889900",
+            "masked": true
+        }))
+        .expect("deserialize masked insert_text");
+        let masked_ops = session.translate_command(&masked_insert);
+        assert_eq!(masked_ops[0].1["text"], "OtpCode889900");
+
+        // Masked IME commit
+        let _ = session.translate_command(&TakeoverCommand::ImeCommit {
+            text: "MySecretPassword!".to_string(),
+            masked: true,
+        });
+
+        // Click and drag
+        let _ = session.translate_command(&TakeoverCommand::PointerDown {
+            x: 20.0,
+            y: 40.0,
+            button: 0,
+        });
+        let _ = session.translate_command(&TakeoverCommand::PointerUp {
+            x: 20.0,
+            y: 40.0,
+            button: 0,
+        });
+
+        let _ = session.translate_command(&TakeoverCommand::PointerDown {
+            x: 30.0,
+            y: 200.0,
+            button: 0,
+        });
+        let _ = session.translate_command(&TakeoverCommand::PointerMove {
+            x: 280.0,
+            y: 200.0,
+        });
+        let _ = session.translate_command(&TakeoverCommand::PointerUp {
+            x: 280.0,
+            y: 200.0,
+            button: 0,
+        });
+
+        let _ = session.translate_command(&TakeoverCommand::Scroll {
+            x: 0.0,
+            y: 0.0,
+            delta_x: 0.0,
+            delta_y: 320.0,
+        });
+        let _ = session.translate_command(&TakeoverCommand::KeyPress {
+            key: "Enter".to_string(),
+        });
+
+        // Verify recorded_commands never store plaintext secrets
+        let recorded_json = serde_json::to_string(&session.recorded_commands).unwrap();
+        assert!(!recorded_json.contains("OtpCode889900"));
+        assert!(!recorded_json.contains("MySecretPassword!"));
+        assert!(recorded_json.contains(REDACTED_TAKEOVER_TEXT));
+
+        // Verify exported routine steps
+        let steps = session.export_routine_steps(Some("https://bob.example.com/portal"));
+        let steps_json = serde_json::to_string(&steps).unwrap();
+        assert!(!steps_json.contains("OtpCode889900"));
+        assert!(!steps_json.contains("MySecretPassword!"));
+        assert!(!steps_json.contains(REDACTED_TAKEOVER_TEXT));
+
+        assert_eq!(steps[0]["action"], "open");
+        assert_eq!(steps[0]["url"], "https://bob.example.com/portal");
+        assert_eq!(steps[1]["action"], "type_text");
+        assert_eq!(steps[1]["text"], "你好世界");
+        assert_eq!(steps[2]["action"], "click_xy");
+        assert_eq!(steps[3]["action"], "drag_xy");
+        assert_eq!(steps[4]["action"], "scroll");
+        assert_eq!(steps[5]["action"], "key");
+        assert_eq!(steps[5]["key"], "Enter");
     }
 }

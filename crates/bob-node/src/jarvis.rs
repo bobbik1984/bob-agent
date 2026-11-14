@@ -8,14 +8,16 @@
 
 use crate::{now_millis, NodeContext};
 use bob_kernel::app::LocalApp;
-use bob_kernel::direct_provider::DirectExecutionOutcome;
+use bob_kernel::direct_provider::{DirectExecutionOutcome, DirectProviderProfile};
 use bob_runtime::budget::{BudgetStatus, MonthlyBudgetStore};
 use bob_runtime::native_harness::{
-    BobNativeHarness, JarvisStreamEvent, SuspendedTurn, TurnUsageSummary,
+    BobNativeHarness, HarnessRole, JarvisStreamEvent, SharedAppAccessor, SuspendedTurn,
+    TurnUsageSummary,
 };
 use bob_runtime::tool_bus::{
     ActionRiskLevel, BobToolBus, PendingApprovalCard, PendingApprovalStore, StructuredCard,
 };
+use bob_runtime::worker_ledger::{WorkerTaskStatus, WorkerTaskStore};
 use bob_runtime::ModelHubRuntime;
 use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
@@ -149,6 +151,31 @@ pub fn event_to_wire_json(evt: &JarvisStreamEvent, reply_message_id: Option<&str
             "type": "card",
             "card": card_to_wire(card),
         }),
+        JarvisStreamEvent::TaskDispatched {
+            task_id,
+            title,
+            objective,
+            maker_model,
+        } => json!({
+            "type": "task_dispatched",
+            "taskId": task_id,
+            "task_id": task_id,
+            "title": title,
+            "objective": objective,
+            "makerModel": maker_model,
+            "maker_model": maker_model,
+            "status": "running",
+        }),
+        JarvisStreamEvent::FollowupBatched {
+            task_id,
+            queued_count,
+        } => json!({
+            "type": "followup_batched",
+            "taskId": task_id,
+            "task_id": task_id,
+            "queuedCount": queued_count,
+            "queued_count": queued_count,
+        }),
         JarvisStreamEvent::ApprovalRequired { approval } => json!({
             "type": "approval_required",
             "approval": approval_card_to_wire(approval),
@@ -222,19 +249,33 @@ pub fn save_suspended_turns(
 // Provider & Harness Builder (Single-Owner SQLite App Transfer)
 // ---------------------------------------------------------------------------
 
-pub fn take_app_from_ctx(ctx: &mut NodeContext) -> Result<(LocalApp, PathBuf), &'static str> {
+static PLACEHOLDER_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+pub fn open_placeholder_app() -> Result<(LocalApp, PathBuf), &'static str> {
+    let seq = PLACEHOLDER_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let dummy_dir = std::env::temp_dir().join(format!(
         "bob_placeholder_{}_{}_{}",
         std::process::id(),
         crate::now_millis(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0)
+        seq
     ));
     std::fs::create_dir_all(&dummy_dir).map_err(|_| "TEMP_DIR_FAILED")?;
     let dummy_db = dummy_dir.join("placeholder.sqlite");
     let dummy_app = LocalApp::open(&dummy_db).map_err(|_| "DUMMY_APP_OPEN_FAILED")?;
+    Ok((dummy_app, dummy_dir))
+}
+
+pub fn make_shared_app_accessor(state: &Arc<Mutex<NodeContext>>) -> SharedAppAccessor {
+    let state_clone = state.clone();
+    Arc::new(move |cb: &mut dyn FnMut(&mut LocalApp)| {
+        if let Ok(mut guard) = state_clone.lock() {
+            cb(&mut guard.app);
+        }
+    })
+}
+
+pub fn take_app_from_ctx(ctx: &mut NodeContext) -> Result<(LocalApp, PathBuf), &'static str> {
+    let (dummy_app, dummy_dir) = open_placeholder_app()?;
     let real_app = std::mem::replace(&mut ctx.app, dummy_app);
     Ok((real_app, dummy_dir))
 }
@@ -307,6 +348,267 @@ pub fn build_harness_outside_lock(data_dir: &Path) -> Result<BobNativeHarness, S
     build_harness(data_dir, app).map_err(|(e, _)| e)
 }
 
+#[derive(Debug, Clone)]
+struct DispatchedWorkerSpec {
+    task_id: String,
+    title: String,
+    objective: String,
+}
+
+/// Resolves `(clerk_profile_with_key, maker_profile_with_key)` when dual-model routing (`WP-E1.2`)
+/// is configured via `model_hub_state.json` (or explicitly requested via `args.dualMode == true`).
+pub fn resolve_dual_mode_profiles(
+    data_dir: &Path,
+    args: &Value,
+) -> Option<((DirectProviderProfile, String), (DirectProviderProfile, String))> {
+    if args.get("dualMode").and_then(Value::as_bool) == Some(false) {
+        return None;
+    }
+    let forced = args.get("dualMode").and_then(Value::as_bool) == Some(true);
+    if !forced && !data_dir.join("model_hub_state.json").is_file() {
+        return None;
+    }
+    let runtime = ModelHubRuntime::with_file_vault(data_dir.to_path_buf()).ok()?;
+    let (clerk_prof, clerk_key) = runtime.resolve_role_profile_with_key("clerk").ok()?;
+    let (maker_prof, maker_key) = runtime.resolve_role_profile_with_key("maker").ok()?;
+    if !forced && clerk_prof.model_id == maker_prof.model_id {
+        return None;
+    }
+    Some(((clerk_prof, clerk_key), (maker_prof, maker_key)))
+}
+
+pub fn build_clerk_harness(
+    data_dir: &Path,
+    app: LocalApp,
+    clerk_profile: DirectProviderProfile,
+    clerk_key: String,
+    maker_model: String,
+) -> Result<BobNativeHarness, (String, LocalApp)> {
+    let budget_store = match MonthlyBudgetStore::open(data_dir) {
+        Ok(bs) => bs,
+        Err(e) => return Err((format!("BUDGET_STORE_FAILED: {e}"), app)),
+    };
+    let mut tool_bus = match BobToolBus::with_approval_store(data_dir) {
+        Ok(tb) => tb,
+        Err(e) => return Err((format!("TOOL_BUS_FAILED: {e}"), app)),
+    };
+    crate::browser_ws::register_browser_tools(&mut tool_bus, data_dir);
+    Ok(BobNativeHarness::new_clerk(
+        clerk_profile,
+        clerk_key,
+        budget_store,
+        tool_bus,
+        app,
+        data_dir.to_path_buf(),
+        maker_model,
+    ))
+}
+
+pub fn build_worker_harness(
+    data_dir: &Path,
+    app: LocalApp,
+    maker_profile: DirectProviderProfile,
+    maker_key: String,
+    task_id: String,
+) -> Result<BobNativeHarness, (String, LocalApp)> {
+    let budget_store = match MonthlyBudgetStore::open(data_dir) {
+        Ok(bs) => bs,
+        Err(e) => return Err((format!("BUDGET_STORE_FAILED: {e}"), app)),
+    };
+    let mut tool_bus = match BobToolBus::with_approval_store(data_dir) {
+        Ok(tb) => tb,
+        Err(e) => return Err((format!("TOOL_BUS_FAILED: {e}"), app)),
+    };
+    crate::browser_ws::register_browser_tools(&mut tool_bus, data_dir);
+    Ok(BobNativeHarness::new_worker(
+        maker_profile,
+        maker_key,
+        budget_store,
+        tool_bus,
+        app,
+        data_dir.to_path_buf(),
+        task_id,
+    ))
+}
+
+fn save_worker_assistant_reply(data_dir: &Path, conv_id: &str, task_id: &str, reply_text: &str) {
+    let trimmed = reply_text.trim();
+    if trimmed.is_empty() {
+        return;
+    }
+    let db_path = data_dir.join("kernel.sqlite");
+    let Ok(conn) = rusqlite::Connection::open(&db_path) else {
+        return;
+    };
+    let _ = conn.busy_timeout(std::time::Duration::from_secs(5));
+    let now = now_millis();
+    let origin: String = conn
+        .query_row(
+            "SELECT origin_device_id FROM app_local_identity WHERE singleton=1",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or_else(|_| "local".to_owned());
+    let reply_id = format!("worker-reply:{task_id}");
+    let payload = json!({
+        "text": trimmed,
+        "source": "jarvis_worker",
+        "worker_task_id": task_id,
+    });
+    let _ = conn.execute(
+        "INSERT OR REPLACE INTO messages(id, conversation_id, origin_device_id, role, content_json, acceptance, created_at)
+         VALUES(?1, ?2, ?3, 'assistant', ?4, 'local', ?5)",
+        params![
+            reply_id,
+            conv_id,
+            origin,
+            serde_json::to_string(&payload).unwrap_or_default(),
+            now
+        ],
+    );
+}
+
+pub fn build_shared_standard_harness(
+    state: &Arc<Mutex<NodeContext>>,
+    data_dir: &Path,
+) -> Result<(BobNativeHarness, PathBuf), String> {
+    let runtime = ModelHubRuntime::with_file_vault(data_dir.to_path_buf())
+        .map_err(|e| format!("VAULT_OPEN_FAILED: {e}"))?;
+
+    let profile = {
+        let mut guard = state
+            .lock()
+            .map_err(|_| "NODE_LOCK_POISONED".to_string())?;
+        if data_dir.join("model_hub_state.json").is_file() {
+            let _ = runtime.build_snapshot_and_sync(&mut guard.app);
+        }
+        match guard.app.direct_provider_profile() {
+            Ok(Some(p)) if p.enabled && p.api_key_configured => p,
+            _ => {
+                let _ = runtime.build_snapshot_and_sync(&mut guard.app);
+                match guard.app.direct_provider_profile() {
+                    Ok(Some(p)) if p.enabled && p.api_key_configured => p,
+                    Ok(_) => return Err("PROVIDER_UNCONFIGURED".to_string()),
+                    Err(e) => return Err(format!("PROVIDER_READ_FAILED: {e}")),
+                }
+            }
+        }
+    };
+
+    let api_key = runtime
+        .secrets
+        .get(&profile.api_key_slot)
+        .unwrap_or_default();
+
+    let budget_store =
+        MonthlyBudgetStore::open(data_dir).map_err(|e| format!("BUDGET_STORE_FAILED: {e}"))?;
+    let mut tool_bus =
+        BobToolBus::with_approval_store(data_dir).map_err(|e| format!("TOOL_BUS_FAILED: {e}"))?;
+    crate::browser_ws::register_browser_tools(&mut tool_bus, data_dir);
+
+    let (placeholder_app, dummy_dir) = open_placeholder_app().map_err(str::to_owned)?;
+    let harness = BobNativeHarness::new(profile, api_key, budget_store, tool_bus, placeholder_app)
+        .with_app_accessor(make_shared_app_accessor(state));
+    Ok((harness, dummy_dir))
+}
+
+fn spawn_background_worker_task(
+    state: Arc<Mutex<NodeContext>>,
+    data_dir: PathBuf,
+    conv_id: String,
+    user_text: String,
+    spec: DispatchedWorkerSpec,
+    maker_profile: DirectProviderProfile,
+    maker_key: String,
+) {
+    let _ = WorkerTaskStore::mark_status(&data_dir, &spec.task_id, WorkerTaskStatus::Running);
+    std::thread::spawn(move || {
+        let task_id = spec.task_id.clone();
+        let (placeholder_app, dummy_dir) = match open_placeholder_app() {
+            Ok(pair) => pair,
+            Err(e) => {
+                let _ = WorkerTaskStore::fail_task(&data_dir, &task_id, e, None);
+                return;
+            }
+        };
+
+        let mut worker_harness = match build_worker_harness(
+            &data_dir,
+            placeholder_app,
+            maker_profile,
+            maker_key,
+            task_id.clone(),
+        ) {
+            Ok(h) => h.with_app_accessor(make_shared_app_accessor(&state)),
+            Err((err_msg, _)) => {
+                let _ = std::fs::remove_dir_all(&dummy_dir);
+                let _ = WorkerTaskStore::fail_task(&data_dir, &task_id, &err_msg, None);
+                return;
+            }
+        };
+
+        let context_summary = WorkerTaskStore::get_task(&data_dir, &task_id)
+            .map(|t| t.context_summary)
+            .unwrap_or_default();
+
+        let mut worker_prompt = format!(
+            "[Background Worker Task: {}]\nObjective: {}\nOriginal User Request: {}",
+            spec.title, spec.objective, user_text
+        );
+        if !context_summary.trim().is_empty() {
+            worker_prompt.push_str(&format!("\nContext Summary: {}", context_summary.trim()));
+        }
+
+        let mut captured_done_text = String::new();
+        let mut saved_in_done = false;
+        let res = worker_harness.run_turn(&conv_id, &worker_prompt, &mut |evt| {
+            if let JarvisStreamEvent::Done { ref full_text, .. } = evt {
+                captured_done_text = full_text.clone();
+                save_worker_assistant_reply(&data_dir, &conv_id, &task_id, full_text);
+                saved_in_done = true;
+            }
+        });
+
+        let suspended = worker_harness.suspended_turn.take();
+        drop(worker_harness);
+        let _ = std::fs::remove_dir_all(&dummy_dir);
+
+        if let Some(suspended) = suspended {
+            let mut st = load_suspended_turns(&data_dir);
+            st.turns.insert(
+                suspended.approval_id.clone(),
+                PersistedSuspendedTurn {
+                    suspended,
+                    execution_id: None,
+                    request_id: Some(format!("worker-task:{task_id}")),
+                },
+            );
+            let _ = save_suspended_turns(&data_dir, &st);
+            return;
+        }
+
+        match res {
+            Ok(final_text) => {
+                if !saved_in_done {
+                    let text_to_save = if !final_text.trim().is_empty() {
+                        final_text
+                    } else {
+                        captured_done_text
+                    };
+                    save_worker_assistant_reply(&data_dir, &conv_id, &task_id, &text_to_save);
+                }
+            }
+            Err(err_code) => {
+                if let Some(cur) = WorkerTaskStore::get_task(&data_dir, &task_id) {
+                    if !cur.status.is_terminal() {
+                        let _ = WorkerTaskStore::fail_task(&data_dir, &task_id, &err_code, None);
+                    }
+                }
+            }
+        }
+    });
+}
+
 // ---------------------------------------------------------------------------
 // Turn Preparation Helper
 // ---------------------------------------------------------------------------
@@ -363,14 +665,16 @@ fn prepare_turn(
             return Err("REQUEST_ID_NOT_FOUND");
         }
     } else if let Some(content) = content_arg.filter(|c| !c.trim().is_empty()) {
+        static TURN_REQ_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        let seq = TURN_REQ_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let gen_req = format!(
             "req-{}",
-            &bob_kernel::outbox::digest(format!("{conv_id}:{at}").as_bytes())[..12]
+            &bob_kernel::outbox::digest(format!("{conv_id}:{at}:{seq}:{content}").as_bytes())[..12]
         );
         let gen_msg = message_id_arg.map(str::to_owned).unwrap_or_else(|| {
             format!(
                 "msg-{}",
-                &bob_kernel::outbox::digest(format!("{gen_req}:{at}").as_bytes())[..12]
+                &bob_kernel::outbox::digest(format!("{gen_req}:{at}:{seq}").as_bytes())[..12]
             )
         });
         ctx.app
@@ -507,7 +811,7 @@ pub fn handle_http_stream(
         }
     }
 
-    let (conv_id, req_id, execution_id, user_text, data_dir, real_app, dummy_dir) = {
+    let (conv_id, req_id, execution_id, user_text, data_dir, active_worker) = {
         let mut guard = match state.lock() {
             Ok(g) => g,
             Err(_) => {
@@ -536,7 +840,105 @@ pub fn handle_http_stream(
                 return;
             }
         };
-        let (real_app, dummy_dir) = match take_app_from_ctx(&mut *guard) {
+
+        // WP-E1.2 Thread Direct Subscription: route mid-flight follow-ups directly to active Worker
+        if let Some(active_task) = WorkerTaskStore::active_task_for_conversation(&data_dir, &conv_id) {
+            if let Ok((_, queued_count)) = WorkerTaskStore::enqueue_followup(
+                &data_dir,
+                &active_task.task_id,
+                &req_id,
+                &user_text,
+            ) {
+                let ack = format!(
+                    "Queued for active task ({}) — will incorporate at next step.",
+                    active_task.title
+                );
+                let _ = guard.app.finish_direct_execution(
+                    &execution_id,
+                    DirectExecutionOutcome::Completed {
+                        text: ack.clone(),
+                        provider_reported_model: Some(active_task.maker_model.clone()),
+                        input_tokens: Some(0),
+                        output_tokens: Some(0),
+                    },
+                    now_millis(),
+                );
+                (
+                    conv_id,
+                    req_id,
+                    execution_id,
+                    user_text,
+                    data_dir,
+                    Some((active_task.task_id, queued_count, ack)),
+                )
+            } else {
+                (conv_id, req_id, execution_id, user_text, data_dir, None)
+            }
+        } else {
+            (conv_id, req_id, execution_id, user_text, data_dir, None)
+        }
+    };
+
+    if let Some((task_id, queued_count, ack_text)) = active_worker {
+        let reply_message_id = format!("direct-reply:{execution_id}");
+        let _ = write_event(
+            &mut stream,
+            &event_to_wire_json(
+                &JarvisStreamEvent::Mood {
+                    mood: "speaking".to_string(),
+                },
+                Some(&reply_message_id),
+            ),
+        );
+        let _ = write_event(
+            &mut stream,
+            &event_to_wire_json(
+                &JarvisStreamEvent::TextDelta {
+                    delta: ack_text.clone(),
+                },
+                Some(&reply_message_id),
+            ),
+        );
+        let _ = write_event(
+            &mut stream,
+            &event_to_wire_json(
+                &JarvisStreamEvent::FollowupBatched {
+                    task_id,
+                    queued_count,
+                },
+                Some(&reply_message_id),
+            ),
+        );
+        let _ = write_event(
+            &mut stream,
+            &event_to_wire_json(
+                &JarvisStreamEvent::Mood {
+                    mood: "idle".to_string(),
+                },
+                Some(&reply_message_id),
+            ),
+        );
+        let _ = write_event(
+            &mut stream,
+            &event_to_wire_json(
+                &JarvisStreamEvent::Done {
+                    conversation_id: conv_id,
+                    full_text: ack_text,
+                    usage: TurnUsageSummary::default(),
+                },
+                Some(&reply_message_id),
+            ),
+        );
+        return;
+    }
+
+    let dual_profiles = resolve_dual_mode_profiles(&data_dir, args);
+    let mut pending_maker: Option<(DirectProviderProfile, String)> = None;
+
+    let (mut harness, dummy_dir) = if let Some(((clerk_prof, clerk_key), (maker_prof, maker_key))) = dual_profiles {
+        let maker_model = maker_prof.model_id.clone();
+        pending_maker = Some((maker_prof, maker_key));
+        let (placeholder_app, dummy_dir) = match open_placeholder_app() {
             Ok(pair) => pair,
             Err(err) => {
                 let err_wire = event_to_wire_json(
@@ -550,31 +952,53 @@ pub fn handle_http_stream(
                 return;
             }
         };
-        (conv_id, req_id, execution_id, user_text, data_dir, real_app, dummy_dir)
-    };
-
-    let mut harness = match build_harness(&data_dir, real_app) {
-        Ok(h) => h,
-        Err((e, returned_app)) => {
-            restore_app(state, returned_app, &dummy_dir);
-            let err_wire = event_to_wire_json(
-                &JarvisStreamEvent::Error {
-                    code: "HARNESS_BUILD_FAILED".to_string(),
-                    message: e.clone(),
-                },
-                None,
-            );
-            let _ = write_event(&mut stream, &err_wire);
-            if let Ok(mut guard) = state.lock() {
-                let _ = guard.app.finish_direct_execution(
-                    &execution_id,
-                    DirectExecutionOutcome::Failed {
-                        reason: "HARNESS_BUILD_FAILED".to_string(),
+        match build_clerk_harness(&data_dir, placeholder_app, clerk_prof, clerk_key, maker_model) {
+            Ok(h) => (h.with_app_accessor(make_shared_app_accessor(state)), dummy_dir),
+            Err((e, _)) => {
+                let _ = std::fs::remove_dir_all(&dummy_dir);
+                let err_wire = event_to_wire_json(
+                    &JarvisStreamEvent::Error {
+                        code: "HARNESS_BUILD_FAILED".to_string(),
+                        message: e,
                     },
-                    now_millis(),
+                    None,
                 );
+                let _ = write_event(&mut stream, &err_wire);
+                if let Ok(mut guard) = state.lock() {
+                    let _ = guard.app.finish_direct_execution(
+                        &execution_id,
+                        DirectExecutionOutcome::Failed {
+                            reason: "HARNESS_BUILD_FAILED".to_string(),
+                        },
+                        now_millis(),
+                    );
+                }
+                return;
             }
-            return;
+        }
+    } else {
+        match build_shared_standard_harness(state, &data_dir) {
+            Ok(pair) => pair,
+            Err(e) => {
+                let err_wire = event_to_wire_json(
+                    &JarvisStreamEvent::Error {
+                        code: "HARNESS_BUILD_FAILED".to_string(),
+                        message: e,
+                    },
+                    None,
+                );
+                let _ = write_event(&mut stream, &err_wire);
+                if let Ok(mut guard) = state.lock() {
+                    let _ = guard.app.finish_direct_execution(
+                        &execution_id,
+                        DirectExecutionOutcome::Failed {
+                            reason: "HARNESS_BUILD_FAILED".to_string(),
+                        },
+                        now_millis(),
+                    );
+                }
+                return;
+            }
         }
     };
 
@@ -582,8 +1006,23 @@ pub fn handle_http_stream(
     let reply_msg_clone = reply_message_id.clone();
     let mut captured_full_text = String::new();
     let mut captured_usage = TurnUsageSummary::default();
+    let mut dispatched_workers: Vec<DispatchedWorkerSpec> = Vec::new();
+    let mut deferred_done_wire: Option<Value> = None;
 
     let run_res = harness.run_turn(&conv_id, &user_text, &mut |evt| {
+        if let JarvisStreamEvent::TaskDispatched {
+            ref task_id,
+            ref title,
+            ref objective,
+            ..
+        } = evt
+        {
+            dispatched_workers.push(DispatchedWorkerSpec {
+                task_id: task_id.clone(),
+                title: title.clone(),
+                objective: objective.clone(),
+            });
+        }
         if let JarvisStreamEvent::Done {
             ref full_text,
             ref usage,
@@ -592,6 +1031,8 @@ pub fn handle_http_stream(
         {
             captured_full_text = full_text.clone();
             captured_usage = usage.clone();
+            deferred_done_wire = Some(event_to_wire_json(&evt, Some(&reply_msg_clone)));
+            return;
         }
         let wire = event_to_wire_json(&evt, Some(&reply_msg_clone));
         let _ = write_event(&mut stream, &wire);
@@ -599,9 +1040,8 @@ pub fn handle_http_stream(
 
     let model_id = harness.profile.model_id.clone();
     let suspended = harness.suspended_turn.take();
-
-    let real_app = harness.app.into_inner().unwrap();
-    restore_app(state, real_app, &dummy_dir);
+    drop(harness);
+    let _ = std::fs::remove_dir_all(&dummy_dir);
 
     if let Some(suspended) = suspended {
         let mut st = load_suspended_turns(&data_dir);
@@ -655,6 +1095,22 @@ pub fn handle_http_stream(
                     now_millis(),
                 );
             }
+            if let Some((maker_prof, maker_key)) = pending_maker {
+                for spec in dispatched_workers {
+                    spawn_background_worker_task(
+                        state.clone(),
+                        data_dir.clone(),
+                        conv_id.clone(),
+                        user_text.clone(),
+                        spec,
+                        maker_prof.clone(),
+                        maker_key.clone(),
+                    );
+                }
+            }
+            if let Some(done_wire) = deferred_done_wire {
+                let _ = write_event(&mut stream, &done_wire);
+            }
         }
         Err(e) => {
             if let Ok(mut guard) = state.lock() {
@@ -674,36 +1130,124 @@ pub fn handle_http_stream(
 
 pub fn chat(state: &Arc<Mutex<NodeContext>>, args: &Value) -> Result<Value, &'static str> {
     let at = now_millis();
-    let (conv_id, req_id, exec_id, user_text, data_dir, real_app, dummy_dir) = {
+    let (conv_id, req_id, exec_id, user_text, data_dir, active_worker) = {
         let mut guard = state.lock().map_err(|_| "NODE_LOCK_POISONED")?;
         let (conv_id, req_id, exec_id, user_text, data_dir) = prepare_turn(&mut *guard, args, at)?;
-        let (real_app, dummy_dir) = take_app_from_ctx(&mut *guard)?;
-        (conv_id, req_id, exec_id, user_text, data_dir, real_app, dummy_dir)
-    };
-
-    let mut harness = match build_harness(&data_dir, real_app) {
-        Ok(h) => h,
-        Err((e, returned_app)) => {
-            restore_app(state, returned_app, &dummy_dir);
-            if let Ok(mut guard) = state.lock() {
+        if let Some(active_task) = WorkerTaskStore::active_task_for_conversation(&data_dir, &conv_id) {
+            if let Ok((_, queued_count)) = WorkerTaskStore::enqueue_followup(
+                &data_dir,
+                &active_task.task_id,
+                &req_id,
+                &user_text,
+            ) {
+                let ack = format!(
+                    "Queued for active task ({}) — will incorporate at next step.",
+                    active_task.title
+                );
                 let _ = guard.app.finish_direct_execution(
                     &exec_id,
-                    DirectExecutionOutcome::Failed { reason: e },
+                    DirectExecutionOutcome::Completed {
+                        text: ack.clone(),
+                        provider_reported_model: Some(active_task.maker_model.clone()),
+                        input_tokens: Some(0),
+                        output_tokens: Some(0),
+                    },
                     now_millis(),
                 );
+                (
+                    conv_id,
+                    req_id,
+                    exec_id,
+                    user_text,
+                    data_dir,
+                    Some((active_task.task_id, queued_count, ack)),
+                )
+            } else {
+                (conv_id, req_id, exec_id, user_text, data_dir, None)
             }
-            return Err("HARNESS_BUILD_FAILED");
+        } else {
+            (conv_id, req_id, exec_id, user_text, data_dir, None)
+        }
+    };
+
+    if let Some((task_id, queued_count, ack_text)) = active_worker {
+        return Ok(json!({
+            "id": exec_id,
+            "message_id": format!("direct-reply:{exec_id}"),
+            "reply": ack_text,
+            "followupBatched": {
+                "taskId": task_id,
+                "queuedCount": queued_count,
+            },
+            "cards": [],
+            "approvals": [],
+            "usage": {
+                "prompt_tokens": 0,
+                "completion_tokens": 0,
+                "total_tokens": 0,
+                "cost_usd": 0.0,
+            }
+        }));
+    }
+
+    let dual_profiles = resolve_dual_mode_profiles(&data_dir, args);
+    let mut pending_maker: Option<(DirectProviderProfile, String)> = None;
+
+    let (mut harness, dummy_dir) = if let Some(((clerk_prof, clerk_key), (maker_prof, maker_key))) = dual_profiles {
+        let maker_model = maker_prof.model_id.clone();
+        pending_maker = Some((maker_prof, maker_key));
+        let (placeholder_app, dummy_dir) = open_placeholder_app()?;
+        match build_clerk_harness(&data_dir, placeholder_app, clerk_prof, clerk_key, maker_model) {
+            Ok(h) => (h.with_app_accessor(make_shared_app_accessor(state)), dummy_dir),
+            Err((e, _)) => {
+                let _ = std::fs::remove_dir_all(&dummy_dir);
+                if let Ok(mut guard) = state.lock() {
+                    let _ = guard.app.finish_direct_execution(
+                        &exec_id,
+                        DirectExecutionOutcome::Failed { reason: e },
+                        now_millis(),
+                    );
+                }
+                return Err("HARNESS_BUILD_FAILED");
+            }
+        }
+    } else {
+        match build_shared_standard_harness(state, &data_dir) {
+            Ok(pair) => pair,
+            Err(e) => {
+                if let Ok(mut guard) = state.lock() {
+                    let _ = guard.app.finish_direct_execution(
+                        &exec_id,
+                        DirectExecutionOutcome::Failed { reason: e },
+                        now_millis(),
+                    );
+                }
+                return Err("HARNESS_BUILD_FAILED");
+            }
         }
     };
 
     let model_id = harness.profile.model_id.clone();
     let mut cards = Vec::new();
     let mut approvals = Vec::new();
+    let mut dispatched_workers: Vec<DispatchedWorkerSpec> = Vec::new();
     let mut usage = TurnUsageSummary::default();
     let mut captured_full_text = String::new();
 
     let run_res = harness.run_turn(&conv_id, &user_text, &mut |evt| {
         match evt {
+            JarvisStreamEvent::TaskDispatched {
+                task_id,
+                title,
+                objective,
+                ..
+            } => {
+                dispatched_workers.push(DispatchedWorkerSpec {
+                    task_id,
+                    title,
+                    objective,
+                });
+            }
             JarvisStreamEvent::Card { card } => cards.push(card_to_wire(&card)),
             JarvisStreamEvent::ApprovalRequired { approval } => {
                 approvals.push(approval_card_to_wire(&approval));
@@ -721,8 +1265,8 @@ pub fn chat(state: &Arc<Mutex<NodeContext>>, args: &Value) -> Result<Value, &'st
     });
 
     let suspended = harness.suspended_turn.take();
-    let real_app = harness.app.into_inner().unwrap();
-    restore_app(state, real_app, &dummy_dir);
+    drop(harness);
+    let _ = std::fs::remove_dir_all(&dummy_dir);
 
     if let Some(suspended) = suspended {
         let mut st = load_suspended_turns(&data_dir);
@@ -787,10 +1331,26 @@ pub fn chat(state: &Arc<Mutex<NodeContext>>, args: &Value) -> Result<Value, &'st
                 },
                 now_millis(),
             );
+            drop(guard);
+            let first_task_id = dispatched_workers.first().map(|d| d.task_id.clone());
+            if let Some((maker_prof, maker_key)) = pending_maker {
+                for spec in dispatched_workers {
+                    spawn_background_worker_task(
+                        state.clone(),
+                        data_dir.clone(),
+                        conv_id.clone(),
+                        user_text.clone(),
+                        spec,
+                        maker_prof.clone(),
+                        maker_key.clone(),
+                    );
+                }
+            }
             Ok(json!({
                 "id": exec_id,
                 "message_id": format!("direct-reply:{exec_id}"),
                 "reply": text_to_save,
+                "taskDispatched": first_task_id,
                 "cards": cards,
                 "approvals": approvals,
                 "usage": {
@@ -961,17 +1521,37 @@ pub fn approve(state: &Arc<Mutex<NodeContext>>, args: &Value) -> Result<Value, &
     if let Some(persisted) = st.turns.remove(approval_id) {
         let _ = save_suspended_turns(&data_dir, &st);
 
-        let (real_app, dummy_dir) = {
-            let mut guard = state.lock().map_err(|_| "NODE_LOCK_POISONED")?;
-            take_app_from_ctx(&mut *guard)?
-        };
+        let worker_task_id = persisted
+            .request_id
+            .as_deref()
+            .and_then(|r| r.strip_prefix("worker-task:"))
+            .map(str::to_owned);
 
-        let mut harness = match build_harness(&data_dir, real_app) {
-            Ok(h) => h,
-            Err((_, returned_app)) => {
-                restore_app(state, returned_app, &dummy_dir);
-                return Err("HARNESS_BUILD_FAILED");
+        let (mut harness, dummy_dir) = if let Some(ref tid) = worker_task_id {
+            let _ = WorkerTaskStore::mark_status(&data_dir, tid, WorkerTaskStatus::Running);
+            if let Some((_, (maker_prof, maker_key))) = resolve_dual_mode_profiles(&data_dir, &json!({ "dualMode": true })) {
+                let (placeholder_app, dummy_dir) = open_placeholder_app()?;
+                match build_worker_harness(&data_dir, placeholder_app, maker_prof, maker_key, tid.clone()) {
+                    Ok(h) => (h.with_app_accessor(make_shared_app_accessor(state)), dummy_dir),
+                    Err((_, _)) => {
+                        let _ = std::fs::remove_dir_all(&dummy_dir);
+                        return Err("HARNESS_BUILD_FAILED");
+                    }
+                }
+            } else {
+                match build_shared_standard_harness(state, &data_dir) {
+                    Ok((h, dummy_dir)) => (
+                        h.with_role(HarnessRole::Worker {
+                            data_dir: data_dir.clone(),
+                            task_id: tid.clone(),
+                        }),
+                        dummy_dir,
+                    ),
+                    Err(_) => return Err("HARNESS_BUILD_FAILED"),
+                }
             }
+        } else {
+            build_shared_standard_harness(state, &data_dir).map_err(|_| "HARNESS_BUILD_FAILED")?
         };
         harness.suspended_turn = Some(persisted.suspended.clone());
 
@@ -988,8 +1568,8 @@ pub fn approve(state: &Arc<Mutex<NodeContext>>, args: &Value) -> Result<Value, &
         });
 
         let new_suspended = harness.suspended_turn.take();
-        let real_app = harness.app.into_inner().unwrap();
-        restore_app(state, real_app, &dummy_dir);
+        drop(harness);
+        let _ = std::fs::remove_dir_all(&dummy_dir);
 
         match res {
             Ok(final_text) => {
@@ -1328,11 +1908,41 @@ pub fn reject(state: &Arc<Mutex<NodeContext>>, args: &Value) -> Result<Value, &'
             take_app_from_ctx(&mut *guard)?
         };
 
-        let mut harness = match build_harness(&data_dir, real_app) {
-            Ok(h) => h,
-            Err((_, returned_app)) => {
-                restore_app(state, returned_app, &dummy_dir);
-                return Err("HARNESS_BUILD_FAILED");
+        let worker_task_id = persisted
+            .request_id
+            .as_deref()
+            .and_then(|r| r.strip_prefix("worker-task:"))
+            .map(str::to_owned);
+
+        let mut harness = if let Some(ref tid) = worker_task_id {
+            let _ = WorkerTaskStore::mark_status(&data_dir, tid, WorkerTaskStatus::Running);
+            if let Some((_, (maker_prof, maker_key))) = resolve_dual_mode_profiles(&data_dir, &json!({ "dualMode": true })) {
+                match build_worker_harness(&data_dir, real_app, maker_prof, maker_key, tid.clone()) {
+                    Ok(h) => h,
+                    Err((_, returned_app)) => {
+                        restore_app(state, returned_app, &dummy_dir);
+                        return Err("HARNESS_BUILD_FAILED");
+                    }
+                }
+            } else {
+                match build_harness(&data_dir, real_app) {
+                    Ok(h) => h.with_role(HarnessRole::Worker {
+                        data_dir: data_dir.clone(),
+                        task_id: tid.clone(),
+                    }),
+                    Err((_, returned_app)) => {
+                        restore_app(state, returned_app, &dummy_dir);
+                        return Err("HARNESS_BUILD_FAILED");
+                    }
+                }
+            }
+        } else {
+            match build_harness(&data_dir, real_app) {
+                Ok(h) => h,
+                Err((_, returned_app)) => {
+                    restore_app(state, returned_app, &dummy_dir);
+                    return Err("HARNESS_BUILD_FAILED");
+                }
             }
         };
         harness.suspended_turn = Some(persisted.suspended.clone());
@@ -2321,5 +2931,261 @@ mod tests {
         let (_, final_list) = http_rpc(server.local_addr, "app_features_list", &json!({}));
         let list_arr = final_list["result"].as_array().unwrap();
         assert_eq!(list_arr.len(), 0);
+    }
+
+    #[test]
+    fn test_wp_e1_2_dual_mode_clerk_worker_thread_subscription_batching_and_ledger_recovery() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::time::{Duration, Instant};
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let llm_addr = listener.local_addr().unwrap();
+        let clerk_calls = Arc::new(AtomicUsize::new(0));
+        let worker_calls = Arc::new(AtomicUsize::new(0));
+        let captured_worker_bodies: Arc<Mutex<Vec<Value>>> = Arc::new(Mutex::new(Vec::new()));
+
+        let clerk_calls_srv = clerk_calls.clone();
+        let worker_calls_srv = worker_calls.clone();
+        let worker_bodies_srv = captured_worker_bodies.clone();
+
+        std::thread::spawn(move || {
+            for _ in 0..4 {
+                let Ok((mut sock, _)) = listener.accept() else {
+                    break;
+                };
+                let mut reader = BufReader::new(sock.try_clone().unwrap());
+                let mut content_length = 0usize;
+                loop {
+                    let mut line = String::new();
+                    if reader.read_line(&mut line).unwrap_or(0) == 0 {
+                        break;
+                    }
+                    let trimmed = line.trim();
+                    if trimmed.is_empty() {
+                        break;
+                    }
+                    if let Some((k, v)) = trimmed.split_once(':') {
+                        if k.trim().eq_ignore_ascii_case("content-length") {
+                            content_length = v.trim().parse().unwrap_or(0);
+                        }
+                    }
+                }
+                let mut body_bytes = vec![0u8; content_length];
+                if content_length > 0 {
+                    let _ = reader.read_exact(&mut body_bytes);
+                }
+                let req_json: Value = serde_json::from_slice(&body_bytes).unwrap_or_else(|_| json!({}));
+                let model = req_json["model"].as_str().unwrap_or("").to_owned();
+
+                let sse_headers = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nConnection: close\r\n\r\n";
+                let _ = sock.write_all(sse_headers.as_bytes());
+
+                if model == "deepseek-v4.1-flash-1017" {
+                    let idx = clerk_calls_srv.fetch_add(1, Ordering::SeqCst);
+                    if idx == 0 {
+                        let chunk1 = json!({
+                            "choices": [{
+                                "delta": {
+                                    "tool_calls": [{
+                                        "index": 0,
+                                        "id": "call_dispatch_1",
+                                        "type": "function",
+                                        "function": {
+                                            "name": "dispatch_background_task",
+                                            "arguments": "{\"title\":\"Weekly Ops Digest\",\"objective\":\"Compile notes and build weekly digest\",\"context_summary\":\"User requested deep weekly ops review\"}"
+                                        }
+                                    }]
+                                },
+                                "finish_reason": "tool_calls"
+                            }],
+                            "usage": { "prompt_tokens": 30, "completion_tokens": 20, "total_tokens": 50 }
+                        });
+                        let _ = sock.write_all(format!("data: {chunk1}\n\ndata: [DONE]\n\n").as_bytes());
+                    } else {
+                        let chunk2 = json!({
+                            "choices": [{
+                                "delta": { "content": "Got it — started the weekly ops digest in the background. Feel free to keep chatting." },
+                                "finish_reason": "stop"
+                            }],
+                            "usage": { "prompt_tokens": 45, "completion_tokens": 18, "total_tokens": 63 }
+                        });
+                        let _ = sock.write_all(format!("data: {chunk2}\n\ndata: [DONE]\n\n").as_bytes());
+                    }
+                } else if model == "deepseek-v4-pro" {
+                    let idx = worker_calls_srv.fetch_add(1, Ordering::SeqCst);
+                    worker_bodies_srv.lock().unwrap().push(req_json);
+                    if idx == 0 {
+                        // Hold step 1 briefly so mid-flight follow-up messages arrive while Worker is active
+                        std::thread::sleep(Duration::from_millis(350));
+                        let wchunk1 = json!({
+                            "choices": [{
+                                "delta": {
+                                    "reasoning_content": "Inspecting schedules and notes first.",
+                                    "tool_calls": [{
+                                        "index": 0,
+                                        "id": "call_worker_note_1",
+                                        "type": "function",
+                                        "function": {
+                                            "name": "note_save",
+                                            "arguments": "{\"title\":\"Weekly Ops Draft\",\"body\":\"Initial structured ops summary\"}"
+                                        }
+                                    }]
+                                },
+                                "finish_reason": "tool_calls"
+                            }],
+                            "usage": { "prompt_tokens": 80, "completion_tokens": 35, "total_tokens": 115 }
+                        });
+                        let _ = sock.write_all(format!("data: {wchunk1}\n\ndata: [DONE]\n\n").as_bytes());
+                    } else {
+                        let wchunk2 = json!({
+                            "choices": [{
+                                "delta": {
+                                    "content": "Weekly Ops Digest completed with urgent deadlines highlighted and compact mobile layout."
+                                },
+                                "finish_reason": "stop"
+                            }],
+                            "usage": { "prompt_tokens": 120, "completion_tokens": 28, "total_tokens": 148 }
+                        });
+                        let _ = sock.write_all(format!("data: {wchunk2}\n\ndata: [DONE]\n\n").as_bytes());
+                    }
+                }
+                let _ = sock.flush();
+            }
+        });
+
+        let dir = tempfile::tempdir().unwrap();
+        {
+            let mut app = LocalApp::open(&dir.path().join("kernel.sqlite")).unwrap();
+            let runtime = ModelHubRuntime::with_file_vault(dir.path().to_path_buf()).unwrap();
+            runtime
+                .apply_provider_dual_preset_with_base_url(
+                    &mut app,
+                    "deepseek",
+                    Some("sk-dual-test-key"),
+                    Some(&format!("http://{llm_addr}/v1")),
+                    None,
+                    None,
+                )
+                .unwrap();
+        }
+
+        let server = spawn_node_server(BobNodeConfig {
+            bind_addr: "127.0.0.1:0".to_owned(),
+            data_dir: dir.path().to_path_buf(),
+            static_dir: None,
+            legacy_db_path: None,
+        })
+        .unwrap();
+
+        // 1. Send complex request -> Clerk responds in <1s and dispatches background Worker
+        let t0 = Instant::now();
+        let (status, sse_events) = http_stream_post(
+            server.local_addr,
+            &json!({
+                "sessionId": "conv-dual-e2e",
+                "content": "Please compile all my notes into a deep weekly ops digest."
+            }),
+        );
+        let clerk_elapsed = t0.elapsed();
+        assert_eq!(status, 200);
+        assert!(
+            clerk_elapsed < Duration::from_millis(1000),
+            "Clerk fast path must complete under 1s, took {clerk_elapsed:?}"
+        );
+
+        let dispatched_evt = sse_events
+            .iter()
+            .find(|e| e["type"] == "task_dispatched")
+            .expect("Clerk SSE stream must emit task_dispatched");
+        let task_id = dispatched_evt["taskId"].as_str().unwrap().to_owned();
+        assert_eq!(dispatched_evt["makerModel"], "deepseek-v4-pro");
+        assert!(sse_events.iter().any(|e| e["type"] == "done"));
+        assert_eq!(clerk_calls.load(Ordering::SeqCst), 2);
+
+        // 2. While Worker is running (350ms window), send TWO follow-up messages in the same session.
+        // Verify Thread direct subscription: instant acknowledgement + followup_batched, ZERO new Clerk LLM calls!
+        let (f1_status, f1_events) = http_stream_post(
+            server.local_addr,
+            &json!({
+                "sessionId": "conv-dual-e2e",
+                "content": "Also highlight urgent Friday deadlines."
+            }),
+        );
+        assert_eq!(f1_status, 200);
+        assert!(f1_events.iter().any(|e| e["type"] == "followup_batched" && e["taskId"] == task_id));
+
+        let (f2_status, f2_events) = http_stream_post(
+            server.local_addr,
+            &json!({
+                "sessionId": "conv-dual-e2e",
+                "content": "Keep the summary compact for mobile screens."
+            }),
+        );
+        assert_eq!(f2_status, 200);
+        let f2_batch = f2_events
+            .iter()
+            .find(|e| e["type"] == "followup_batched")
+            .expect("second follow-up must also batch onto active worker");
+        assert_eq!(f2_batch["queuedCount"], 2);
+        assert_eq!(
+            clerk_calls.load(Ordering::SeqCst),
+            2,
+            "Thread direct subscription must bypass Clerk LLM for active conversation worker"
+        );
+
+        // 3. Disconnect recovery: poll app_jarvis_worker_tasks until Worker completes
+        let wait_start = Instant::now();
+        let mut completed_task: Option<Value> = None;
+        while wait_start.elapsed() < Duration::from_secs(5) {
+            let (st_code, tasks_res) = http_rpc(
+                server.local_addr,
+                "app_jarvis_worker_tasks",
+                &json!({ "sessionId": "conv-dual-e2e", "afterSeq": 0 }),
+            );
+            assert_eq!(st_code, 200);
+            if let Some(arr) = tasks_res["result"].as_array() {
+                if let Some(t) = arr.iter().find(|t| t["task_id"] == task_id) {
+                    if t["status"] == "completed" {
+                        completed_task = Some(t.clone());
+                        break;
+                    }
+                }
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+
+        let task_val = completed_task.expect("Background Worker must reach completed status");
+        assert_eq!(task_val["clerk_model"], "deepseek-v4.1-flash-1017");
+        assert_eq!(task_val["maker_model"], "deepseek-v4-pro");
+        let step_kinds: Vec<&str> = task_val["steps"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|s| s["kind"].as_str())
+            .collect();
+        assert!(step_kinds.contains(&"dispatched"));
+        assert!(step_kinds.contains(&"tool_start"));
+        assert!(step_kinds.contains(&"tool_end"));
+        assert!(step_kinds.contains(&"followup_batched"));
+        assert!(step_kinds.contains(&"completed"));
+
+        // Verify both follow-up messages were coalesced into Worker's second LLM call
+        let bodies = captured_worker_bodies.lock().unwrap();
+        assert_eq!(bodies.len(), 2);
+        let second_req_str = serde_json::to_string(&bodies[1]).unwrap();
+        assert!(second_req_str.contains("Also highlight urgent Friday deadlines."));
+        assert!(second_req_str.contains("Keep the summary compact for mobile screens."));
+
+        // Verify final Worker assistant deliverable was persisted to LocalApp conversation history
+        let (hist_code, hist_res) = http_rpc(
+            server.local_addr,
+            "app_history",
+            &json!({ "sessionId": "conv-dual-e2e" }),
+        );
+        assert_eq!(hist_code, 200);
+        let hist_str = serde_json::to_string(&hist_res["result"]).unwrap();
+        assert!(hist_str.contains("Weekly Ops Digest completed with urgent deadlines highlighted"));
+
+        server.shutdown();
     }
 }

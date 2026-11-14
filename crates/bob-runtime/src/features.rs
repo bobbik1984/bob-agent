@@ -24,6 +24,139 @@ pub const MAX_ACTIVE_SKILLS: usize = 20;
 pub const MAX_SKILL_INSTRUCTION_CHARS: usize = 4000;
 pub const SYSTEM_PROMPT_SKILLS_BUDGET_CHARS: usize = 1500;
 
+pub const WIDGET_SANDBOX_PROMPT_SPEC: &str = "\
+[Widget Sandbox Specification (feature_create)]\n\
+1. Sandbox Isolation: Widgets run inside `<iframe sandbox=\"allow-scripts\" referrerpolicy=\"no-referrer\">`. NEVER reference external CDNs (`<script src=\"http...\">`, `<link href=\"http...\">`, or `@import url(\"http...\")`). All HTML, CSS, inline SVG icons, and vanilla JS MUST be 100% self-contained inline.\n\
+2. Theme Adaptation & Visual Discipline: NEVER use hardcoded `#hex`, `rgb()`, or `hsl()` colors, and NEVER use decorative emoji. Exclusively style with host-injected CSS semantic variables: `var(--bg-primary)`, `var(--bg-secondary)`, `var(--surface)`, `var(--line)`, `var(--text-primary)`, `var(--text-secondary)`, `var(--accent-primary)`, `var(--color-success)`, `var(--color-warning)`, `var(--color-error)`.\n\
+3. Zero-Flicker Host Bridge (`window.bob`): Render frame 0 synchronously from `window.bob.state` and `window.bob.storage`. Subscribe to live updates via `window.bob.onState(state => ...)` and `window.bob.onTheme(vars => ...)`. Persist widget state (`<= 8192` UTF-8 bytes) via `await window.bob.save(nextObj)` and invoke declarative backend routes via `await window.bob.call(routeName, payload)`.";
+
+fn extract_html_attr_value<'a>(tag_body: &'a str, attr_name: &str) -> Option<&'a str> {
+    let lower = tag_body.to_ascii_lowercase();
+    let bytes = lower.as_bytes();
+    let target = attr_name.as_bytes();
+    let mut i = 0;
+    while i + target.len() <= bytes.len() {
+        let prev_ok = i == 0 || bytes[i - 1].is_ascii_whitespace() || bytes[i - 1] == b'/' || bytes[i - 1] == b'"' || bytes[i - 1] == b'\'';
+        if prev_ok && &bytes[i..i + target.len()] == target {
+            let mut j = i + target.len();
+            while j < bytes.len() && bytes[j].is_ascii_whitespace() {
+                j += 1;
+            }
+            if j < bytes.len() && bytes[j] == b'=' {
+                j += 1;
+                while j < bytes.len() && bytes[j].is_ascii_whitespace() {
+                    j += 1;
+                }
+                if j >= bytes.len() {
+                    return None;
+                }
+                let quote = bytes[j];
+                if quote == b'"' || quote == b'\'' {
+                    let start = j + 1;
+                    let mut end = start;
+                    while end < bytes.len() && bytes[end] != quote {
+                        end += 1;
+                    }
+                    return tag_body.get(start..end);
+                } else {
+                    let start = j;
+                    let mut end = start;
+                    while end < bytes.len() && !bytes[end].is_ascii_whitespace() && bytes[end] != b'>' {
+                        end += 1;
+                    }
+                    return tag_body.get(start..end);
+                }
+            }
+        }
+        i += 1;
+    }
+    None
+}
+
+fn is_external_http_ref(raw: &str) -> bool {
+    let trimmed = raw.trim().to_ascii_lowercase();
+    trimmed.starts_with("http://") || trimmed.starts_with("https://") || trimmed.starts_with("//")
+}
+
+/// Deterministically validates sandboxed widget HTML before installation/upgrade.
+/// Rejects external HTTP/HTTPS/protocol-relative `<script src=...>` and `<link href=...>`
+/// as well as CSS `@import` external URLs.
+pub fn validate_widget_sandbox_html(html: &str) -> Result<(), &'static str> {
+    let bytes = html.as_bytes();
+    let mut idx = 0;
+    while idx < bytes.len() {
+        if bytes[idx] == b'<' {
+            if html[idx..].starts_with("<!--") {
+                if let Some(end_comment) = html[idx + 4..].find("-->") {
+                    idx += 4 + end_comment + 3;
+                    continue;
+                } else {
+                    break;
+                }
+            }
+            let mut close = idx + 1;
+            let mut in_quote: Option<u8> = None;
+            while close < bytes.len() {
+                let c = bytes[close];
+                if let Some(q) = in_quote {
+                    if c == q {
+                        in_quote = None;
+                    }
+                } else if c == b'"' || c == b'\'' {
+                    in_quote = Some(c);
+                } else if c == b'>' {
+                    break;
+                }
+                close += 1;
+            }
+            if let Some(tag_inner) = html.get(idx + 1..close) {
+                let trimmed = tag_inner.trim_start();
+                if !trimmed.starts_with('/') && !trimmed.starts_with('!') {
+                    let tag_name_end = trimmed
+                        .find(|c: char| c.is_ascii_whitespace() || c == '/')
+                        .unwrap_or(trimmed.len());
+                    let tag_name = trimmed[..tag_name_end].to_ascii_lowercase();
+                    let attrs = &trimmed[tag_name_end..];
+                    if tag_name == "script" {
+                        if let Some(src) = extract_html_attr_value(attrs, "src") {
+                            if is_external_http_ref(src) {
+                                return Err("FEATURE_WIDGET_EXTERNAL_CDN_FORBIDDEN");
+                            }
+                        }
+                    } else if tag_name == "link" {
+                        if let Some(href) = extract_html_attr_value(attrs, "href") {
+                            if is_external_http_ref(href) {
+                                return Err("FEATURE_WIDGET_EXTERNAL_CDN_FORBIDDEN");
+                            }
+                        }
+                    }
+                }
+            }
+            idx = close.saturating_add(1);
+        } else {
+            idx += 1;
+        }
+    }
+
+    let lower = html.to_ascii_lowercase();
+    let mut search_pos = 0;
+    while let Some(rel) = lower[search_pos..].find("@import") {
+        let after = lower[search_pos + rel + 7..].trim_start();
+        let target = if let Some(rest) = after.strip_prefix("url(") {
+            rest.trim_start()
+        } else {
+            after
+        };
+        let unquoted = target.trim_start_matches(['"', '\'']);
+        if is_external_http_ref(unquoted) {
+            return Err("FEATURE_WIDGET_EXTERNAL_CDN_FORBIDDEN");
+        }
+        search_pos += rel + 7;
+    }
+
+    Ok(())
+}
+
 pub fn is_valid_feature_name(name: &str) -> bool {
     let trimmed = name.trim();
     if trimmed.is_empty() || trimmed.len() > 48 {
@@ -126,6 +259,8 @@ pub struct FeaturePackage {
     pub tools: Vec<FeatureToolSpec>,
     #[serde(default)]
     pub consecutive_errors: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_error: Option<String>,
     pub updated_at: i64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rollback_reason: Option<String>,
@@ -165,9 +300,12 @@ impl FeaturePackage {
         self.routes = snap.routes;
         self.tools = snap.tools;
         self.consecutive_errors = 0;
+        self.last_error = None;
         self.updated_at = now_ms;
     }
 }
+
+pub type FeaturePackageManager = FeatureStore;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct FeatureStoreData {
@@ -182,6 +320,10 @@ pub struct FeatureStore {
 
 impl FeatureStore {
     pub fn open(data_dir: &Path) -> Result<Self, &'static str> {
+        Self::open_at(data_dir, crate::now_millis())
+    }
+
+    pub fn open_at(data_dir: &Path, now: i64) -> Result<Self, &'static str> {
         let _ = std::fs::create_dir_all(data_dir);
         let file_path = data_dir.join("features_store.json");
 
@@ -192,7 +334,6 @@ impl FeatureStore {
             FeatureStoreData::default()
         };
 
-        let now = crate::now_millis();
         let mut store = Self { file_path, data };
         if store.reconcile_trials(now) {
             let _ = store.save_atomic();
@@ -273,6 +414,12 @@ impl FeatureStore {
             return Err("INVALID_FEATURE_NAME");
         }
 
+        if let Some(ref html) = widget_html {
+            if !html.trim().is_empty() {
+                validate_widget_sandbox_html(html)?;
+            }
+        }
+
         let storage_val = initial_storage.unwrap_or_else(|| json!({}));
         let storage_str =
             serde_json::to_string(&storage_val).map_err(|_| "STORAGE_SERIALIZATION_FAILED")?;
@@ -304,6 +451,7 @@ impl FeatureStore {
             existing.routes = routes;
             existing.tools = tools;
             existing.consecutive_errors = 0;
+            existing.last_error = None;
             existing.updated_at = now_ms;
             existing.rollback_reason = None;
             if !storage_val.is_null() && storage_val != json!({}) {
@@ -328,6 +476,7 @@ impl FeatureStore {
                 routes,
                 tools,
                 consecutive_errors: 0,
+                last_error: None,
                 updated_at: now_ms,
                 rollback_reason: None,
                 versions: Vec::new(),
@@ -338,12 +487,37 @@ impl FeatureStore {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
+    pub fn install_or_upgrade(
+        &mut self,
+        name: &str,
+        title: &str,
+        description: &str,
+        widget_html: Option<String>,
+        routes: HashMap<String, FeatureRouteSpec>,
+        tools: Vec<FeatureToolSpec>,
+        initial_storage: Option<Value>,
+        now_ms: i64,
+    ) -> Result<FeaturePackage, &'static str> {
+        self.create_or_update(
+            name,
+            title,
+            description,
+            widget_html,
+            routes,
+            tools,
+            initial_storage,
+            now_ms,
+        )
+    }
+
     pub fn keep_feature(&mut self, name: &str, now_ms: i64) -> Result<FeaturePackage, &'static str> {
         let pkg = self.data.packages.get_mut(name).ok_or("FEATURE_NOT_FOUND")?;
         pkg.status = "active".to_string();
         pkg.enabled = true;
         pkg.trial_expires_at = None;
         pkg.consecutive_errors = 0;
+        pkg.last_error = None;
         pkg.updated_at = now_ms;
         let res = pkg.clone();
         self.save_atomic()?;
@@ -434,6 +608,84 @@ impl FeatureStore {
             }
         }
         false
+    }
+
+    pub fn rollback(
+        &mut self,
+        name: &str,
+        target_version: Option<u32>,
+    ) -> Result<Option<FeaturePackage>, &'static str> {
+        self.rollback_feature(name, target_version, crate::now_millis())
+    }
+
+    /// Records a frontend/sandbox widget runtime error (`last_error`) on `name`.
+    /// If `name` is currently in `"trial"` status, automatically rolls back to the immediately
+    /// preceding working version (or disables cleanly if v1) and returns recovery telemetry.
+    pub fn report_runtime_error(
+        &mut self,
+        name: &str,
+        error: &str,
+        now_ms: i64,
+    ) -> Result<Value, &'static str> {
+        let pkg = self.data.packages.get_mut(name).ok_or("FEATURE_NOT_FOUND")?;
+        let err_msg = error.trim();
+        let clean_err = if err_msg.is_empty() {
+            "WIDGET_RUNTIME_ERROR"
+        } else {
+            err_msg
+        };
+
+        if pkg.status == "trial" {
+            if let Some(snap) = pkg.versions.pop() {
+                pkg.restore_from_snapshot(snap, now_ms);
+                pkg.last_error = Some(clean_err.to_string());
+                pkg.rollback_reason = Some("TRIAL_RUNTIME_ERROR_AUTO_ROLLBACK".to_string());
+                let restored_version = pkg.version;
+                let restored_status = pkg.status.clone();
+                self.save_atomic()?;
+                Ok(json!({
+                    "name": name,
+                    "recovered": true,
+                    "action": "rolled_back",
+                    "version": restored_version,
+                    "status": restored_status,
+                    "error": clean_err,
+                }))
+            } else {
+                pkg.status = "disabled".to_string();
+                pkg.enabled = false;
+                pkg.trial_expires_at = None;
+                pkg.consecutive_errors += 1;
+                pkg.last_error = Some(clean_err.to_string());
+                pkg.rollback_reason = Some("TRIAL_RUNTIME_ERROR_AUTO_DISABLED".to_string());
+                pkg.updated_at = now_ms;
+                let disabled_version = pkg.version;
+                self.save_atomic()?;
+                Ok(json!({
+                    "name": name,
+                    "recovered": true,
+                    "action": "rolled_back",
+                    "version": disabled_version,
+                    "status": "disabled",
+                    "error": clean_err,
+                }))
+            }
+        } else {
+            pkg.consecutive_errors += 1;
+            pkg.last_error = Some(clean_err.to_string());
+            pkg.updated_at = now_ms;
+            let ver = pkg.version;
+            let st = pkg.status.clone();
+            self.save_atomic()?;
+            Ok(json!({
+                "name": name,
+                "recovered": true,
+                "action": "recorded",
+                "version": ver,
+                "status": st,
+                "error": clean_err,
+            }))
+        }
     }
 }
 
@@ -1244,6 +1496,199 @@ mod tests {
 
         let skill_create_spec = bus.get_spec("skill_create").unwrap();
         assert_eq!(skill_create_spec.risk_level, ActionRiskLevel::ReadOnly);
+    }
+
+    #[test]
+    fn test_wp_e1_4_office_widgets_trial_refinement_runtime_error_rollback_5v_cap_and_cdn_guard() {
+        let dir = tempdir().unwrap();
+        let mut now = 2_000_000i64;
+        let mut mgr = FeaturePackageManager::open(dir.path()).unwrap();
+
+        // 1. Realistic office widget #1: daily_focus_matrix (CSS variables + window.bob.save/call)
+        let focus_v1_html = r#"<!DOCTYPE html>
+<html>
+<head>
+<style>
+  body { background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--line); }
+  .quadrant { background: var(--surface); color: var(--text-secondary); }
+  button.primary { background: var(--accent-primary); color: var(--bg-primary); }
+</style>
+</head>
+<body>
+  <div id="matrix" class="quadrant"></div>
+  <script>
+    const initial = window.bob.storage || { urgent_important: [] };
+    window.bob.onTheme(vars => { document.body.dataset.themeReady = "1"; });
+    window.bob.onState(st => { document.getElementById("matrix").textContent = JSON.stringify(st); });
+    async function addItem(text) {
+      const next = { urgent_important: [...(initial.urgent_important || []), text] };
+      await window.bob.save(next);
+      await window.bob.call("sync_focus", next);
+    }
+  </script>
+</body>
+</html>"#;
+
+        let mut focus_routes = HashMap::new();
+        focus_routes.insert(
+            "sync_focus".to_string(),
+            FeatureRouteSpec::StoragePatch { patch: None },
+        );
+
+        let v1 = mgr
+            .install_or_upgrade(
+                "daily_focus_matrix",
+                "Daily Focus Matrix",
+                "Eisenhower quadrant planner v1",
+                Some(focus_v1_html.to_string()),
+                focus_routes.clone(),
+                Vec::new(),
+                Some(json!({ "urgent_important": ["Prepare board deck"] })),
+                now,
+            )
+            .unwrap();
+        assert_eq!(v1.version, 1);
+        assert_eq!(v1.status, "trial");
+
+        // v2 refinement within 3-minute trial window
+        now += 30_000;
+        let focus_v2_html = focus_v1_html.replace("quadrant", "quadrant-v2");
+        let v2 = mgr
+            .install_or_upgrade(
+                "daily_focus_matrix",
+                "Daily Focus Matrix v2",
+                "Added keyboard shortcut support",
+                Some(focus_v2_html.clone()),
+                focus_routes.clone(),
+                Vec::new(),
+                None,
+                now,
+            )
+            .unwrap();
+        assert_eq!(v2.version, 2);
+        assert_eq!(v2.status, "trial");
+
+        // Confirm Keep on v2
+        now += 15_000;
+        let kept_v2 = mgr.keep_feature("daily_focus_matrix", now).unwrap();
+        assert_eq!(kept_v2.version, 2);
+        assert_eq!(kept_v2.status, "active");
+
+        // v3 buggy update enters trial, then frontend reports runtime error -> auto-rollback to v2!
+        now += 20_000;
+        let focus_v3_buggy = focus_v2_html.replace("addItem", "brokenReference()");
+        let v3 = mgr
+            .install_or_upgrade(
+                "daily_focus_matrix",
+                "Daily Focus Matrix v3",
+                "Experimental drag handler",
+                Some(focus_v3_buggy),
+                focus_routes.clone(),
+                Vec::new(),
+                None,
+                now,
+            )
+            .unwrap();
+        assert_eq!(v3.version, 3);
+        assert_eq!(v3.status, "trial");
+
+        let recovery = crate::runtime_rpc::dispatch_runtime_rpc(
+            dir.path(),
+            "app_feature_report_error",
+            &json!({
+                "name": "daily_focus_matrix",
+                "error": "ReferenceError: brokenReference is not defined",
+                "now": now + 1_000
+            }),
+        )
+        .unwrap();
+        assert_eq!(recovery["recovered"], true);
+        assert_eq!(recovery["action"], "rolled_back");
+        assert_eq!(recovery["version"], 2);
+
+        let mut reloaded = FeaturePackageManager::open_at(dir.path(), now + 2_000).unwrap();
+        let restored = reloaded.get("daily_focus_matrix", now + 2_000).unwrap();
+        assert_eq!(restored.version, 2);
+        assert_eq!(restored.status, "active");
+        assert_eq!(
+            restored.last_error.as_deref(),
+            Some("ReferenceError: brokenReference is not defined")
+        );
+        assert!(restored
+            .widget_html
+            .as_deref()
+            .unwrap()
+            .contains("quadrant-v2"));
+
+        // 2. Realistic office widget #2: quote_margin_calc + 5-version cap + CDN rejection
+        let calc_html = r#"<div style="background:var(--surface);color:var(--text-primary);border-color:var(--line)">
+  <span id="margin" style="color:var(--color-success)">32%</span>
+  <script>
+    const s = window.bob.state || {};
+    async function saveQuote(cost, price) {
+      const margin = price > 0 ? ((price - cost) / price) : 0;
+      await window.bob.save({ cost, price, margin });
+      return await window.bob.call("compute_quote", { cost, price });
+    }
+  </script>
+</div>"#;
+
+        let mut calc_routes = HashMap::new();
+        calc_routes.insert(
+            "compute_quote".to_string(),
+            FeatureRouteSpec::Static {
+                template: json!({ "currency": "USD", "approved_tier": "standard" }),
+                cache_result: Some(true),
+            },
+        );
+
+        for step in 1..=7 {
+            now += 5_000;
+            let pkg = reloaded
+                .install_or_upgrade(
+                    "quote_margin_calc",
+                    &format!("Quote Margin Calculator v{step}"),
+                    "Instant B2B gross margin calculator",
+                    Some(format!("{calc_html}<!-- rev {step} -->")),
+                    calc_routes.clone(),
+                    Vec::new(),
+                    Some(json!({ "cost": 68, "price": 100 })),
+                    now,
+                )
+                .unwrap();
+            assert_eq!(pkg.version, step);
+            reloaded.keep_feature("quote_margin_calc", now).unwrap();
+        }
+        let calc_pkg = reloaded.get("quote_margin_calc", now).unwrap();
+        assert_eq!(calc_pkg.version, 7);
+        assert_eq!(calc_pkg.versions.len(), MAX_FEATURE_VERSIONS); // Strictly capped at 5!
+
+        // External CDN <script src="https://cdn.example.com/..."> MUST be deterministically rejected
+        let cdn_script_err = reloaded
+            .install_or_upgrade(
+                "quote_margin_calc",
+                "CDN Script Attempt",
+                "Should fail validation",
+                Some(r#"<script src="https://cdn.example.com/chart.min.js"></script>"#.to_string()),
+                HashMap::new(),
+                Vec::new(),
+                None,
+                now + 1_000,
+            )
+            .unwrap_err();
+        assert_eq!(cdn_script_err, "FEATURE_WIDGET_EXTERNAL_CDN_FORBIDDEN");
+
+        let cdn_link_err = validate_widget_sandbox_html(
+            r#"<link rel="stylesheet" href="https://cdn.example.com/reset.css"><div>Hi</div>"#,
+        )
+        .unwrap_err();
+        assert_eq!(cdn_link_err, "FEATURE_WIDGET_EXTERNAL_CDN_FORBIDDEN");
+
+        let cdn_import_err = validate_widget_sandbox_html(
+            r#"<style>@import url("https://cdn.example.com/inter.css");</style>"#,
+        )
+        .unwrap_err();
+        assert_eq!(cdn_import_err, "FEATURE_WIDGET_EXTERNAL_CDN_FORBIDDEN");
     }
 }
 

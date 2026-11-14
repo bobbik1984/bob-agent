@@ -22,6 +22,7 @@ pub mod features;
 pub mod growth;
 pub mod harness_auth;
 pub mod host_tools;
+pub mod model_presets;
 pub mod native_harness;
 pub mod net_guard;
 pub mod node_pairing;
@@ -32,6 +33,7 @@ pub mod subagent_pool;
 pub mod tool_bus;
 pub mod tool_tracker;
 pub mod vision;
+pub mod worker_ledger;
 pub mod workspace_context;
 pub use base64;
 pub use reqwest;
@@ -595,7 +597,31 @@ impl ModelHubRuntime {
             .map(|s| s.trim().is_empty())
             .unwrap_or(true);
         if main_empty {
-            hub_state["activeRoles"]["main"] = json!("deepseek::deepseek-v4.1-flash-1017");
+            let maker_val = hub_state["activeRoles"]
+                .get("maker")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .trim()
+                .to_owned();
+            if !maker_val.is_empty() {
+                hub_state["activeRoles"]["main"] = json!(maker_val);
+            } else {
+                hub_state["activeRoles"]["main"] = json!("deepseek::deepseek-v4.1-flash-1017");
+            }
+        }
+        let maker_empty = hub_state
+            .get("activeRoles")
+            .and_then(|r| r.get("maker"))
+            .and_then(Value::as_str)
+            .map(|s| s.trim().is_empty())
+            .unwrap_or(true);
+        if maker_empty {
+            let main_val = hub_state["activeRoles"]
+                .get("main")
+                .and_then(Value::as_str)
+                .unwrap_or("deepseek::deepseek-v4.1-flash-1017")
+                .to_owned();
+            hub_state["activeRoles"]["maker"] = json!(main_val);
         }
 
         let flash_empty = hub_state
@@ -609,12 +635,27 @@ impl ModelHubRuntime {
                 .get("clerk")
                 .and_then(Value::as_str)
                 .unwrap_or("")
-                .trim();
+                .trim()
+                .to_owned();
             if !clerk_val.is_empty() {
                 hub_state["activeRoles"]["flash"] = json!(clerk_val);
             } else {
                 hub_state["activeRoles"]["flash"] = json!("deepseek::deepseek-v4.1-flash-1017");
             }
+        }
+        let clerk_empty = hub_state
+            .get("activeRoles")
+            .and_then(|r| r.get("clerk"))
+            .and_then(Value::as_str)
+            .map(|s| s.trim().is_empty())
+            .unwrap_or(true);
+        if clerk_empty {
+            let flash_val = hub_state["activeRoles"]
+                .get("flash")
+                .and_then(Value::as_str)
+                .unwrap_or("deepseek::deepseek-v4.1-flash-1017")
+                .to_owned();
+            hub_state["activeRoles"]["clerk"] = json!(flash_val);
         }
 
         let main_role = hub_state
@@ -771,13 +812,214 @@ impl ModelHubRuntime {
         if !hub["activeRoles"].is_object() {
             hub["activeRoles"] = json!({});
         }
-        let r = match role.trim() {
-            "clerk" => "flash",
-            other => other,
-        };
-        hub["activeRoles"][r] = json!(model_ref.trim());
+        let mref = model_ref.trim();
+        match role.trim() {
+            "clerk" | "flash" => {
+                hub["activeRoles"]["flash"] = json!(mref);
+                hub["activeRoles"]["clerk"] = json!(mref);
+            }
+            "maker" | "main" => {
+                hub["activeRoles"]["main"] = json!(mref);
+                hub["activeRoles"]["maker"] = json!(mref);
+            }
+            other => {
+                hub["activeRoles"][other] = json!(mref);
+            }
+        }
         hub["updatedAt"] = json!(now_millis());
         self.save_hub_state(&hub)?;
+        self.build_snapshot_and_sync(app)
+    }
+
+    pub fn has_any_provider_key(&self) -> bool {
+        if self.secrets.has(DEFAULT_SLOT) {
+            return true;
+        }
+        let registry = self.load_or_init_registry();
+        if let Some(providers) = registry.get("providers").and_then(Value::as_array) {
+            for prov in providers {
+                let pid = prov.get("id").and_then(Value::as_str).unwrap_or("").trim();
+                if pid.is_empty()
+                    || pid == "offline"
+                    || pid == "tavily"
+                    || pid == "tinyfish"
+                    || TOOL_KEY_IDS.contains(&pid)
+                {
+                    continue;
+                }
+                if self.secrets.has(&provider_slot(pid)) {
+                    return true;
+                }
+            }
+        }
+        let hub = self.load_hub_state();
+        if let Some(custom_models) = hub.get("customModels").and_then(Value::as_array) {
+            for cm in custom_models {
+                let cid = cm.get("id").and_then(Value::as_str).unwrap_or("").trim();
+                if !cid.is_empty() && self.secrets.has(&provider_slot(cid)) {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    pub fn apply_provider_dual_preset(
+        &self,
+        app: &mut LocalApp,
+        provider_id: &str,
+        api_key: Option<&str>,
+        clerk_override: Option<&str>,
+        maker_override: Option<&str>,
+    ) -> Result<Value, &'static str> {
+        self.apply_provider_dual_preset_with_base_url(
+            app,
+            provider_id,
+            api_key,
+            None,
+            clerk_override,
+            maker_override,
+        )
+    }
+
+    pub fn apply_provider_dual_preset_with_base_url(
+        &self,
+        app: &mut LocalApp,
+        provider_id: &str,
+        api_key: Option<&str>,
+        base_url_override: Option<&str>,
+        clerk_override: Option<&str>,
+        maker_override: Option<&str>,
+    ) -> Result<Value, &'static str> {
+        let pid = provider_id.trim();
+        if pid.is_empty() || pid == "offline" {
+            return Err("PROVIDER_ID_REQUIRED");
+        }
+
+        let mut registry = self.load_or_init_registry();
+        let mut hub = self.load_hub_state();
+
+        let preset_opt = model_presets::find_dual_preset(pid);
+        let custom_opt = hub
+            .get("customModels")
+            .and_then(Value::as_array)
+            .and_then(|arr| {
+                arr.iter()
+                    .find(|c| c.get("id").and_then(Value::as_str) == Some(pid))
+                    .cloned()
+            });
+        let reg_prov_opt = registry
+            .get("providers")
+            .and_then(Value::as_array)
+            .and_then(|arr| {
+                arr.iter()
+                    .find(|p| p.get("id").and_then(Value::as_str) == Some(pid))
+                    .cloned()
+            });
+
+        if preset_opt.is_none() && custom_opt.is_none() && reg_prov_opt.is_none() {
+            return Err("UNKNOWN_PROVIDER");
+        }
+
+        let (default_clerk, default_maker) = if let Some(ref preset) = preset_opt {
+            (preset.clerk_model.clone(), preset.maker_model.clone())
+        } else if let Some(ref cm) = custom_opt {
+            let m = cm
+                .get("modelName")
+                .and_then(Value::as_str)
+                .unwrap_or("custom-model")
+                .to_owned();
+            (m.clone(), m)
+        } else if let Some(ref prov) = reg_prov_opt {
+            let models = prov
+                .get("models")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+            let first = models
+                .iter()
+                .find(|m| m.get("default").and_then(Value::as_bool) == Some(true))
+                .or_else(|| models.first())
+                .and_then(|m| m.get("id").and_then(Value::as_str))
+                .unwrap_or("")
+                .to_owned();
+            (first.clone(), first)
+        } else {
+            return Err("UNKNOWN_PROVIDER");
+        };
+
+        let clerk_model = clerk_override
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned)
+            .unwrap_or(default_clerk);
+        let maker_model = maker_override
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned)
+            .unwrap_or(default_maker);
+
+        if clerk_model.is_empty() || maker_model.is_empty() {
+            return Err("MODEL_ID_REQUIRED");
+        }
+
+        let stamp = now_millis();
+        if let Some(raw) = api_key {
+            let trimmed = raw.trim();
+            if !trimmed.is_empty() {
+                self.secrets.set(&provider_slot(pid), trimmed)?;
+                if !hub["credentialTimestamps"].is_object() {
+                    hub["credentialTimestamps"] = json!({});
+                }
+                hub["credentialTimestamps"][pid] = json!(stamp);
+            }
+        }
+
+        // Ensure both clerk and maker models are marked visible in model_providers.json if present
+        let mut registry_changed = false;
+        let clean_base_override = base_url_override.map(str::trim).filter(|s| !s.is_empty());
+        if let Some(providers) = registry.get_mut("providers").and_then(Value::as_array_mut) {
+            if let Some(prov) = providers
+                .iter_mut()
+                .find(|p| p.get("id").and_then(Value::as_str) == Some(pid))
+            {
+                if let Some(override_url) = clean_base_override {
+                    if prov.get("base_url").and_then(Value::as_str) != Some(override_url) {
+                        prov["base_url"] = json!(override_url);
+                        registry_changed = true;
+                    }
+                }
+                if let Some(models) = prov.get_mut("models").and_then(Value::as_array_mut) {
+                    for target_mid in [&clerk_model, &maker_model] {
+                        if let Some(m) = models
+                            .iter_mut()
+                            .find(|m| m.get("id").and_then(Value::as_str) == Some(target_mid.as_str()))
+                        {
+                            if m.get("visible").and_then(Value::as_bool) != Some(true) {
+                                m["visible"] = json!(true);
+                                registry_changed = true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if registry_changed {
+            self.save_registry(&registry)?;
+        }
+
+        if !hub["activeRoles"].is_object() {
+            hub["activeRoles"] = json!({});
+        }
+        let clerk_ref = format!("{pid}::{clerk_model}");
+        let maker_ref = format!("{pid}::{maker_model}");
+        hub["activeRoles"]["flash"] = json!(clerk_ref);
+        hub["activeRoles"]["clerk"] = json!(clerk_ref);
+        hub["activeRoles"]["main"] = json!(maker_ref);
+        hub["activeRoles"]["maker"] = json!(maker_ref);
+        hub["updatedAt"] = json!(stamp);
+        self.save_hub_state(&hub)?;
+
         self.build_snapshot_and_sync(app)
     }
 
@@ -1112,34 +1354,38 @@ impl ModelHubRuntime {
 
     pub fn resolve_role_profile(&self, role: &str) -> Result<DirectProviderProfile, &'static str> {
         let hub = self.load_hub_state();
-        let target_role = if role == "clerk" { "flash" } else { role };
-        let mut model_ref = hub["activeRoles"]
-            .get(target_role)
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .trim();
-        if model_ref.is_empty() && target_role == "flash" {
-            model_ref = hub["activeRoles"]
-                .get("clerk")
-                .and_then(Value::as_str)
-                .unwrap_or("")
-                .trim();
+        let active_roles = &hub["activeRoles"];
+        let pick_non_empty = |keys: &[&str]| -> Option<String> {
+            for k in keys {
+                if let Some(s) = active_roles.get(*k).and_then(Value::as_str) {
+                    let t = s.trim();
+                    if !t.is_empty() {
+                        return Some(t.to_owned());
+                    }
+                }
+            }
+            None
+        };
+
+        let model_ref = match role.trim() {
+            "clerk" => pick_non_empty(&["clerk", "flash", "main", "maker"]),
+            "flash" => pick_non_empty(&["flash", "clerk", "main", "maker"]),
+            "maker" => pick_non_empty(&["maker", "main"]),
+            "main" => pick_non_empty(&["main", "maker"]),
+            other => pick_non_empty(&[other, "main", "maker"]),
         }
-        if model_ref.is_empty() {
-            model_ref = hub["activeRoles"]
-                .get("main")
-                .and_then(Value::as_str)
-                .unwrap_or("")
-                .trim();
-        }
-        if model_ref.is_empty() {
-            model_ref = if target_role == "flash" {
-                "deepseek::deepseek-v4.1-flash-1017"
-            } else {
-                "deepseek::deepseek-v4.1-flash-1017"
-            };
-        }
-        self.resolve_profile_for_model_ref(model_ref)
+        .unwrap_or_else(|| "deepseek::deepseek-v4.1-flash-1017".to_owned());
+
+        self.resolve_profile_for_model_ref(&model_ref)
+    }
+
+    pub fn resolve_role_profile_with_key(
+        &self,
+        role: &str,
+    ) -> Result<(DirectProviderProfile, String), &'static str> {
+        let profile = self.resolve_role_profile(role)?;
+        let api_key = self.secrets.get(&profile.api_key_slot)?;
+        Ok((profile, api_key))
     }
 
     pub fn try_load_knowledge_feed() -> Option<Value> {

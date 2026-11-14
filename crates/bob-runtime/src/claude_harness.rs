@@ -544,13 +544,27 @@ fn is_pid_alive(pid: u32) -> bool {
     }
     #[cfg(not(windows))]
     {
-        Command::new("kill")
+        let alive = Command::new("kill")
             .args(["-0", &pid.to_string()])
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .status()
             .map(|s| s.success())
-            .unwrap_or(false)
+            .unwrap_or(false);
+        if !alive {
+            return false;
+        }
+        if let Ok(status_text) = fs::read_to_string(format!("/proc/{pid}/status")) {
+            for line in status_text.lines() {
+                if let Some(rest) = line.strip_prefix("State:") {
+                    if rest.contains('Z') {
+                        return false;
+                    }
+                    break;
+                }
+            }
+        }
+        true
     }
 }
 

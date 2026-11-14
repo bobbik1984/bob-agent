@@ -17,9 +17,12 @@ pub use ax_snapshot::{
 };
 pub use cdp::{CdpClient, CdpCommandRequest, CdpErrorObject, CdpEvent, CdpRawMessage};
 pub use error::{BrowserError, BrowserResult};
-pub use launcher::{find_chromium_binary, BrowserConfig, ChromiumManager, TabState};
+pub use launcher::{
+    find_chromium_binary, secure_and_prepare_profile_dir, BrowserConfig, ChromiumManager, TabState,
+};
 pub use screencast::{
-    ClientTakeoverCommand, ScreencastBridge, ScreencastFrameMsg, ViewportMeta,
+    export_commands_to_routine_steps, ClientTakeoverCommand, ScreencastBridge, ScreencastFrameMsg,
+    ScreencastSession, TakeoverCommand, ViewportMeta, REDACTED_TAKEOVER_TEXT,
 };
 pub use sessions::{
     assert_profile_download_forbidden, clear_domain_cookies, clear_site_session, load_sessions,

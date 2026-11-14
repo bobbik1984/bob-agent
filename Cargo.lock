@@ -43,7 +43,6 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
- "sha2",
  "tempfile",
  "thiserror",
  "tungstenite",
@@ -69,7 +68,6 @@ dependencies = [
  "bob-browser",
  "bob-kernel",
  "bob-runtime",
- "bob-transport",
  "ring",
  "rusqlite",
  "serde",
@@ -86,7 +84,6 @@ version = "1.0.1"
 dependencies = [
  "base64 0.22.1",
  "bob-kernel",
- "bob-transport",
  "reqwest",
  "serde",
  "serde_json",

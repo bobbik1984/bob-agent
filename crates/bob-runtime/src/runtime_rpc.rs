@@ -49,6 +49,8 @@ pub fn is_runtime_rpc_command(command: &str) -> bool {
             | "app_feature_toggle"
             | "app_feature_call"
             | "app_feature_storage_save"
+            | "app_feature_report_error"
+            | "app_model_presets_list"
             | "app_routines_list"
             | "app_routine_save"
             | "app_routine_trial"
@@ -60,6 +62,8 @@ pub fn is_runtime_rpc_command(command: &str) -> bool {
             | "app_jarvis_reject"
             | "app_jarvis_budget_get"
             | "app_jarvis_budget_set"
+            | "app_jarvis_worker_tasks"
+            | "app_jarvis_worker_cancel"
             | "app_proactivity_get"
             | "app_proactivity_set"
             | "app_morning_brief"
@@ -277,6 +281,24 @@ pub fn dispatch_runtime_rpc(
                 .map_err(|_| "FEATURE_STORAGE_FAILED")?;
             Ok(storage)
         }
+        "app_feature_report_error" => {
+            let name = args
+                .get("name")
+                .and_then(Value::as_str)
+                .ok_or("FEATURE_NAME_REQUIRED")?;
+            let error = args
+                .get("error")
+                .or_else(|| args.get("message"))
+                .and_then(Value::as_str)
+                .unwrap_or("WIDGET_RUNTIME_ERROR");
+            let now_ms = args
+                .get("now")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(crate::now_millis);
+            crate::features::FeaturePackageManager::open_at(data_dir, now_ms)?
+                .report_runtime_error(name, error, now_ms)
+        }
+        "app_model_presets_list" => Ok(Value::Array(crate::model_presets::list_dual_presets_json())),
 
         // -------------------------------------------------------------------
         // Routine & Draft RPCs
@@ -520,6 +542,32 @@ pub fn dispatch_runtime_rpc(
                 "capReached": status.exceeded,
             }))
         }
+        "app_jarvis_worker_tasks" => {
+            let session_id = args
+                .get("conversationId")
+                .or_else(|| args.get("conversation_id"))
+                .or_else(|| args.get("sessionId"))
+                .or_else(|| args.get("session_id"))
+                .and_then(Value::as_str);
+            let after_seq = args
+                .get("afterSeq")
+                .or_else(|| args.get("after_seq"))
+                .and_then(Value::as_u64)
+                .unwrap_or(0);
+            let tasks =
+                crate::worker_ledger::WorkerTaskStore::list_tasks(data_dir, session_id, after_seq);
+            Ok(Value::Array(tasks))
+        }
+        "app_jarvis_worker_cancel" => {
+            let task_id = args
+                .get("taskId")
+                .or_else(|| args.get("task_id"))
+                .or_else(|| args.get("id"))
+                .and_then(Value::as_str)
+                .ok_or("WORKER_TASK_ID_REQUIRED")?;
+            let cancelled = crate::worker_ledger::WorkerTaskStore::request_cancel(data_dir, task_id)?;
+            serde_json::to_value(cancelled).map_err(|_| "WORKER_TASK_SERIALIZE_FAILED")
+        }
         "app_proactivity_get" => {
             let store = crate::growth::ProactivityStore::open(data_dir)?;
             Ok(store.config.to_json_value())
@@ -725,5 +773,61 @@ pub fn dispatch_runtime_rpc(
         }
 
         _ => Err("COMMAND_UNKNOWN"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::worker_ledger::WorkerTaskStore;
+
+    #[test]
+    fn test_wp_e1_2_and_e1_4_runtime_rpc_commands_roundtrip() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+
+        for cmd in [
+            "app_model_presets_list",
+            "app_jarvis_worker_tasks",
+            "app_jarvis_worker_cancel",
+            "app_feature_report_error",
+        ] {
+            assert!(is_runtime_rpc_command(cmd), "{cmd} must be registered");
+        }
+
+        // 1. app_model_presets_list
+        let presets = dispatch_runtime_rpc(dir, "app_model_presets_list", &json!({})).unwrap();
+        let arr = presets.as_array().unwrap();
+        assert_eq!(arr.len(), 10);
+        assert!(arr.iter().any(|p| p["provider_id"] == "deepseek" && p["providerId"] == "deepseek"));
+
+        // 2. app_jarvis_worker_tasks + app_jarvis_worker_cancel
+        let created = WorkerTaskStore::create_task(
+            dir,
+            "conv-rpc-1",
+            "req-rpc-1",
+            "Analyze report",
+            "Summarize Q4 numbers",
+            "",
+            "deepseek-v4.1-flash-1017",
+            "deepseek-v4-pro",
+        );
+
+        let listed = dispatch_runtime_rpc(
+            dir,
+            "app_jarvis_worker_tasks",
+            &json!({ "conversationId": "conv-rpc-1", "afterSeq": 0 }),
+        )
+        .unwrap();
+        assert_eq!(listed.as_array().unwrap().len(), 1);
+
+        let cancelled = dispatch_runtime_rpc(
+            dir,
+            "app_jarvis_worker_cancel",
+            &json!({ "taskId": created.task_id }),
+        )
+        .unwrap();
+        assert_eq!(cancelled["status"], "cancelled");
+        assert_eq!(cancelled["cancel_requested"], true);
     }
 }

@@ -1,8 +1,9 @@
-import { computed, ref, watch } from 'vue';
+import { computed, ref } from 'vue';
 import { isBobNodeRuntime, streamJarvisTurn } from '../http-bridge.mjs';
 
 const STORAGE_KEY = 'bob-jarvis-widgets-v1';
 export const MAX_FEATURE_STORAGE_BYTES = 8192;
+const ACTIVE_WORKER_STATUSES = new Set(['queued', 'running', 'waiting_approval']);
 
 function utf8ByteLength(str) {
   if (typeof TextEncoder !== 'undefined') {
@@ -43,6 +44,42 @@ function loadPersistedWidgets() {
   return DEFAULT_WIDGETS.map(w => ({ ...w }));
 }
 
+function normalizeWorkerStep(step, idx) {
+  if (!step || typeof step !== 'object') {
+    return {
+      seq: idx + 1,
+      summary: String(step ?? ''),
+    };
+  }
+  return {
+    ...step,
+    seq: step.seq ?? step.step_index ?? step.index ?? idx + 1,
+    summary: String(
+      step.summary ?? step.title ?? step.detail ?? step.tool_name ?? step.kind ?? '',
+    ),
+  };
+}
+
+function mergeWorkerSteps(existingSteps = [], incomingSteps = []) {
+  if (!Array.isArray(incomingSteps) || incomingSteps.length === 0) {
+    return Array.isArray(existingSteps) ? existingSteps : [];
+  }
+  const normalizedIncoming = incomingSteps.map((s, idx) => normalizeWorkerStep(s, idx));
+  if (!Array.isArray(existingSteps) || existingSteps.length === 0) {
+    return normalizedIncoming;
+  }
+  const bySeq = new Map();
+  for (let i = 0; i < existingSteps.length; i += 1) {
+    const s = normalizeWorkerStep(existingSteps[i], i);
+    bySeq.set(s.seq, s);
+  }
+  for (let i = 0; i < normalizedIncoming.length; i += 1) {
+    const s = normalizedIncoming[i];
+    bySeq.set(s.seq, { ...(bySeq.get(s.seq) || {}), ...s });
+  }
+  return Array.from(bySeq.values()).sort((a, b) => Number(a.seq || 0) - Number(b.seq || 0));
+}
+
 export function useJarvisHome(ctx = {}) {
   // 1. Progressive Tier Detection (hasProCluster)
   const hasProCluster = computed(() => {
@@ -63,6 +100,7 @@ export function useJarvisHome(ctx = {}) {
   const widgets = ref(loadPersistedWidgets());
   const installedFeatures = ref([]);
   const customFeatureWidgets = ref([]);
+  const featureErrors = ref({});
   const trialFeatures = computed(() =>
     installedFeatures.value.filter(
       f => f.status === 'trial' && (!f.trial_expires_at || f.trial_expires_at > 0),
@@ -114,7 +152,7 @@ export function useJarvisHome(ctx = {}) {
     } catch {}
   }
 
-  // 3. Jarvis Streaming, Cards & Approvals
+  // 3. Jarvis Streaming, Clerk/Worker Dual-Mode StepLedger, Cards & Approvals
   const jarvisStreaming = ref(false);
   const jarvisSpeaking = ref(false);
   const streamingReplyText = ref('');
@@ -130,6 +168,150 @@ export function useJarvisHome(ctx = {}) {
     quietHoursEnd: '08:00',
   });
 
+  const workerTasks = ref([]);
+  const activeWorkerTasks = computed(() =>
+    workerTasks.value.filter(t => ACTIVE_WORKER_STATUSES.has(t.status)),
+  );
+
+  let workerPollTimer = null;
+  let workerPollingSessionId = null;
+
+  function upsertWorkerTask(raw, fallbackSessionId = null) {
+    if (!raw || typeof raw !== 'object') return null;
+    const taskId = raw.task_id || raw.taskId || raw.id;
+    if (!taskId) return null;
+
+    const list = [...workerTasks.value];
+    const idx = list.findIndex(item => item.task_id === taskId);
+    const existing = idx !== -1 ? list[idx] : null;
+
+    const merged = {
+      ...(existing || {}),
+      task_id: taskId,
+      conversation_id:
+        raw.conversation_id ??
+        raw.conversationId ??
+        raw.session_id ??
+        raw.sessionId ??
+        existing?.conversation_id ??
+        fallbackSessionId ??
+        null,
+      title: raw.title ?? existing?.title ?? raw.objective ?? '',
+      objective: raw.objective ?? existing?.objective ?? raw.title ?? '',
+      maker_model:
+        raw.maker_model ?? raw.makerModel ?? raw.model ?? existing?.maker_model ?? '',
+      status: raw.status ?? existing?.status ?? 'running',
+      steps: mergeWorkerSteps(existing?.steps || [], raw.steps),
+      followupBatched: Boolean(
+        raw.followupBatched ?? raw.followup_batched ?? existing?.followupBatched ?? false,
+      ),
+      followupCount: Number(
+        raw.followupCount ?? raw.followup_count ?? existing?.followupCount ?? 0,
+      ),
+      followupSummary:
+        raw.followupSummary ?? raw.followup_summary ?? existing?.followupSummary ?? '',
+    };
+
+    if (idx !== -1) {
+      list[idx] = merged;
+    } else {
+      list.push(merged);
+    }
+    workerTasks.value = list;
+    return merged;
+  }
+
+  function stopWorkerPolling() {
+    if (workerPollTimer) {
+      clearInterval(workerPollTimer);
+      workerPollTimer = null;
+    }
+  }
+
+  function ensureWorkerPolling(sessionId = null) {
+    if (sessionId) {
+      workerPollingSessionId = sessionId;
+    }
+    if (workerPollTimer || typeof setInterval !== 'function') return;
+    workerPollTimer = setInterval(() => {
+      if (activeWorkerTasks.value.length === 0) {
+        stopWorkerPolling();
+        return;
+      }
+      void refreshWorkerTasks(workerPollingSessionId);
+    }, 1500);
+    if (workerPollTimer && typeof workerPollTimer.unref === 'function') {
+      workerPollTimer.unref();
+    }
+  }
+
+  async function refreshWorkerTasks(sessionId = null) {
+    if (typeof ctx.kernelBridge?.jarvisWorkerTasks !== 'function') {
+      return workerTasks.value;
+    }
+    const prevActiveStatuses = new Map(
+      activeWorkerTasks.value.map(t => [t.task_id, t.status]),
+    );
+
+    try {
+      const res = await ctx.kernelBridge.jarvisWorkerTasks(sessionId, 0).catch(() => null);
+      const list = Array.isArray(res)
+        ? res
+        : Array.isArray(res?.tasks)
+          ? res.tasks
+          : null;
+      if (!list) return workerTasks.value;
+
+      let shouldSyncOutcome = false;
+      for (const item of list) {
+        const updated = upsertWorkerTask(item, sessionId);
+        if (!updated) continue;
+        const prevStatus = prevActiveStatuses.get(updated.task_id);
+        if (prevStatus) {
+          const enteredTerminal = ['completed', 'failed', 'cancelled'].includes(
+            updated.status,
+          );
+          const enteredWaitingApproval =
+            prevStatus !== 'waiting_approval' && updated.status === 'waiting_approval';
+          if (enteredTerminal || enteredWaitingApproval) {
+            shouldSyncOutcome = true;
+          }
+        }
+      }
+
+      if (activeWorkerTasks.value.length > 0) {
+        ensureWorkerPolling(sessionId);
+      } else {
+        stopWorkerPolling();
+      }
+
+      if (shouldSyncOutcome) {
+        if (typeof ctx.reload === 'function') {
+          await ctx.reload().catch(() => null);
+        }
+        await refreshJarvisState(sessionId, { skipWorkerTasks: true });
+      }
+    } catch {}
+
+    return workerTasks.value;
+  }
+
+  async function cancelWorkerTask(taskId) {
+    if (!taskId) return null;
+    let res = null;
+    if (typeof ctx.kernelBridge?.jarvisWorkerCancel === 'function') {
+      res = await ctx.kernelBridge.jarvisWorkerCancel(taskId).catch(() => null);
+    }
+    upsertWorkerTask({ task_id: taskId, status: 'cancelled' });
+    if (activeWorkerTasks.value.length === 0) {
+      stopWorkerPolling();
+    }
+    if (typeof ctx.reload === 'function') {
+      await ctx.reload().catch(() => null);
+    }
+    return res;
+  }
+
   const pendingApprovalCount = computed(
     () => pendingApprovals.value.filter(a => !a.status || a.status === 'pending').length,
   );
@@ -141,7 +323,7 @@ export function useJarvisHome(ctx = {}) {
     if (jarvisSpeaking.value) {
       return 'speaking';
     }
-    if (jarvisStreaming.value) {
+    if (jarvisStreaming.value || activeWorkerTasks.value.length > 0) {
       return 'thinking';
     }
     return 'idle';
@@ -235,9 +417,29 @@ export function useJarvisHome(ctx = {}) {
     if (typeof ctx.kernelBridge?.featureRollback === 'function') {
       await ctx.kernelBridge.featureRollback(name, targetVersion).catch(() => null);
     }
+    const nextErrors = { ...featureErrors.value };
+    delete nextErrors[name];
+    featureErrors.value = nextErrors;
     installedFeatures.value = installedFeatures.value.filter(f => f.name !== name);
     customFeatureWidgets.value = customFeatureWidgets.value.filter(f => f.name !== name);
     await refreshFeatures();
+  }
+
+  async function reportFeatureError(name, error) {
+    if (!name) return null;
+    const message = String(error?.message ?? error ?? 'Widget runtime error');
+    featureErrors.value = {
+      ...featureErrors.value,
+      [name]: message,
+    };
+    let res = null;
+    if (typeof ctx.kernelBridge?.featureReportError === 'function') {
+      res = await ctx.kernelBridge.featureReportError(name, message).catch(() => null);
+    }
+    if (res) {
+      await refreshFeatures();
+    }
+    return res;
   }
 
   async function toggleFeature(name, enabled) {
@@ -291,8 +493,13 @@ export function useJarvisHome(ctx = {}) {
     return res;
   }
 
-  async function refreshJarvisState(sessionId = null) {
+  async function refreshJarvisState(sessionId = null, options = {}) {
     if (!ctx.kernelBridge) return;
+    if (!options?.skipWorkerTasks) {
+      try {
+        await refreshWorkerTasks(sessionId);
+      } catch {}
+    }
     try {
       if (typeof ctx.kernelBridge.jarvisApprovalsList === 'function') {
         const list = await ctx.kernelBridge.jarvisApprovalsList(sessionId).catch(() => null);
@@ -486,6 +693,103 @@ export function useJarvisHome(ctx = {}) {
     }
   }
 
+  function handleStreamEvent(evt, { sessionId, requestId, messageId, content, onDelta }) {
+    if (!evt || typeof evt !== 'object') return;
+    const type = evt.type || evt.event;
+    if (type === 'status') {
+      if (evt.mood === 'speaking') {
+        jarvisSpeaking.value = true;
+      } else if (evt.mood === 'thinking') {
+        jarvisSpeaking.value = false;
+      }
+    } else if (type === 'text_delta') {
+      const delta = evt.text ?? evt.delta ?? '';
+      streamingReplyText.value += delta;
+      jarvisSpeaking.value = true;
+      onDelta?.(streamingReplyText.value);
+    } else if (type === 'task_dispatched') {
+      const taskId = evt.taskId || evt.task_id || evt.task?.task_id || evt.task?.id;
+      if (taskId) {
+        upsertWorkerTask(
+          {
+            task_id: taskId,
+            conversation_id: evt.conversationId || evt.conversation_id || sessionId || null,
+            title: evt.title || evt.task?.title || evt.objective || '',
+            objective: evt.objective || evt.task?.objective || evt.title || '',
+            maker_model: evt.makerModel || evt.maker_model || evt.task?.maker_model || '',
+            status: evt.status || 'running',
+            steps: Array.isArray(evt.steps) ? evt.steps : [],
+          },
+          sessionId,
+        );
+        ensureWorkerPolling(sessionId);
+      }
+    } else if (type === 'followup_batched') {
+      const targetId =
+        evt.taskId ||
+        evt.task_id ||
+        activeWorkerTasks.value.find(t => !sessionId || t.conversation_id === sessionId)
+          ?.task_id ||
+        activeWorkerTasks.value[0]?.task_id;
+      if (targetId) {
+        const existing = workerTasks.value.find(t => t.task_id === targetId);
+        upsertWorkerTask(
+          {
+            task_id: targetId,
+            conversation_id: existing?.conversation_id || sessionId || null,
+            status: existing?.status || 'running',
+            followupBatched: true,
+            followupCount:
+              evt.batchedCount ??
+              evt.batched_count ??
+              Number(existing?.followupCount || 0) + 1,
+            followupSummary: String(evt.summary ?? evt.note ?? content ?? '').trim(),
+          },
+          sessionId,
+        );
+        ensureWorkerPolling(sessionId);
+      }
+    } else if (type === 'card' && evt.card) {
+      const targetKey = requestId || messageId;
+      if (targetKey) {
+        if (!messageCards.value[targetKey]) {
+          messageCards.value[targetKey] = [];
+        }
+        messageCards.value[targetKey].push(evt.card);
+      }
+    } else if (type === 'approval_required' && evt.approval) {
+      const norm = {
+        id: evt.approval.id,
+        kind: 'approval',
+        icon: 'shield',
+        title: evt.approval.title || 'Approval Required',
+        summary: evt.approval.summary || '',
+        riskLevel: evt.approval.risk_level || evt.approval.riskLevel || 'side_effect',
+        fields: evt.approval.fields || [],
+        technicalDetail: evt.approval.technical_detail || evt.approval.technicalDetail || '',
+        status: 'pending',
+      };
+      upsertApproval(norm);
+    } else if (type === 'takeover_required' && evt.takeover) {
+      const norm = {
+        id: evt.takeover.id,
+        kind: 'takeover',
+        icon: 'browser',
+        title: evt.takeover.title || 'Browser Takeover Required',
+        summary: evt.takeover.summary || '',
+        riskLevel: 'side_effect',
+        fields: evt.takeover.url ? [{ label: 'URL', value: evt.takeover.url }] : [],
+        status: 'pending',
+        url: evt.takeover.url,
+      };
+      upsertApproval(norm);
+    } else if (type === 'done') {
+      if (evt.message_id && requestId && messageCards.value[requestId]) {
+        messageCards.value[evt.message_id] = messageCards.value[requestId];
+      }
+    }
+  }
+
   async function runJarvisTurn({ sessionId, requestId, messageId, content, onDelta }) {
     jarvisStreaming.value = true;
     jarvisSpeaking.value = false;
@@ -497,60 +801,7 @@ export function useJarvisHome(ctx = {}) {
         try {
           const res = await streamJarvisTurn(
             { sessionId, requestId, messageId, content },
-            evt => {
-              if (!evt || typeof evt !== 'object') return;
-              const type = evt.type || evt.event;
-              if (type === 'status') {
-                if (evt.mood === 'speaking') {
-                  jarvisSpeaking.value = true;
-                } else if (evt.mood === 'thinking') {
-                  jarvisSpeaking.value = false;
-                }
-              } else if (type === 'text_delta') {
-                const delta = evt.text ?? evt.delta ?? '';
-                streamingReplyText.value += delta;
-                jarvisSpeaking.value = true;
-                onDelta?.(streamingReplyText.value);
-              } else if (type === 'card' && evt.card) {
-                const targetKey = requestId || messageId;
-                if (targetKey) {
-                  if (!messageCards.value[targetKey]) {
-                    messageCards.value[targetKey] = [];
-                  }
-                  messageCards.value[targetKey].push(evt.card);
-                }
-              } else if (type === 'approval_required' && evt.approval) {
-                const norm = {
-                  id: evt.approval.id,
-                  kind: 'approval',
-                  icon: 'shield',
-                  title: evt.approval.title || 'Approval Required',
-                  summary: evt.approval.summary || '',
-                  riskLevel: evt.approval.risk_level || evt.approval.riskLevel || 'side_effect',
-                  fields: evt.approval.fields || [],
-                  technicalDetail: evt.approval.technical_detail || evt.approval.technicalDetail || '',
-                  status: 'pending',
-                };
-                upsertApproval(norm);
-              } else if (type === 'takeover_required' && evt.takeover) {
-                const norm = {
-                  id: evt.takeover.id,
-                  kind: 'takeover',
-                  icon: 'browser',
-                  title: evt.takeover.title || 'Browser Takeover Required',
-                  summary: evt.takeover.summary || '',
-                  riskLevel: 'side_effect',
-                  fields: evt.takeover.url ? [{ label: 'URL', value: evt.takeover.url }] : [],
-                  status: 'pending',
-                  url: evt.takeover.url,
-                };
-                upsertApproval(norm);
-              } else if (type === 'done') {
-                if (evt.message_id && requestId && messageCards.value[requestId]) {
-                  messageCards.value[evt.message_id] = messageCards.value[requestId];
-                }
-              }
-            },
+            evt => handleStreamEvent(evt, { sessionId, requestId, messageId, content, onDelta }),
           );
           return res || { id: requestId, ok: true };
         } catch (streamErr) {
@@ -564,10 +815,28 @@ export function useJarvisHome(ctx = {}) {
       // Fallback 1: kernelBridge.jarvisChat
       if (typeof ctx.kernelBridge?.jarvisChat === 'function') {
         try {
-          return await ctx.kernelBridge.jarvisChat({ sessionId, requestId, messageId, content });
+          const res = await ctx.kernelBridge.jarvisChat({
+            sessionId,
+            requestId,
+            messageId,
+            content,
+          });
+          const taskPayload = res?.dispatched_task || res?.worker_task || null;
+          if (taskPayload && (taskPayload.task_id || taskPayload.taskId)) {
+            upsertWorkerTask(taskPayload, sessionId);
+            ensureWorkerPolling(sessionId);
+          } else if (res?.mode === 'task_dispatched' && (res.task_id || res.taskId)) {
+            upsertWorkerTask(res, sessionId);
+            ensureWorkerPolling(sessionId);
+          }
+          return res;
         } catch (chatErr) {
           const cmsg = String(chatErr?.message || '');
-          if (!cmsg.includes('UNKNOWN_COMMAND') && !cmsg.includes('HTTP_400') && !cmsg.includes('NOT_FOUND')) {
+          if (
+            !cmsg.includes('UNKNOWN_COMMAND') &&
+            !cmsg.includes('HTTP_400') &&
+            !cmsg.includes('NOT_FOUND')
+          ) {
             throw chatErr;
           }
         }
@@ -590,10 +859,12 @@ export function useJarvisHome(ctx = {}) {
     widgets,
     installedFeatures,
     customFeatureWidgets,
+    featureErrors,
     trialFeatures,
     refreshFeatures,
     keepFeature,
     rollbackFeature,
+    reportFeatureError,
     toggleFeature,
     callFeatureRoute,
     saveFeatureStorage,
@@ -608,6 +879,12 @@ export function useJarvisHome(ctx = {}) {
     jarvisSpeaking,
     streamingReplyText,
     streamingSessionId,
+    workerTasks,
+    activeWorkerTasks,
+    refreshWorkerTasks,
+    cancelWorkerTask,
+    ensureWorkerPolling,
+    stopWorkerPolling,
     messageCards,
     pendingApprovals,
     pendingApprovalCount,

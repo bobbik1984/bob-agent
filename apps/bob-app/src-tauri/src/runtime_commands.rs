@@ -515,6 +515,36 @@ pub async fn app_feature_storage_save<R: Runtime>(
     .map_err(|_| "RUNTIME_RPC_FAILED")?
 }
 
+#[tauri::command]
+pub async fn app_feature_report_error<R: Runtime>(
+    host: AppHandle<R>,
+    name: String,
+    error: Option<String>,
+    message: Option<String>,
+) -> Result<Value, &'static str> {
+    tauri::async_runtime::spawn_blocking(move || {
+        execute_rpc(
+            &host,
+            "app_feature_report_error",
+            json!({
+                "name": name,
+                "error": error.or(message).unwrap_or_else(|| "WIDGET_RUNTIME_ERROR".to_string())
+            }),
+        )
+    })
+    .await
+    .map_err(|_| "RUNTIME_RPC_FAILED")?
+}
+
+#[tauri::command]
+pub async fn app_model_presets_list<R: Runtime>(host: AppHandle<R>) -> Result<Value, &'static str> {
+    tauri::async_runtime::spawn_blocking(move || {
+        execute_rpc(&host, "app_model_presets_list", json!({}))
+    })
+    .await
+    .map_err(|_| "RUNTIME_RPC_FAILED")?
+}
+
 // ---------------------------------------------------------------------------
 // 6. Routine & Draft RPCs
 // ---------------------------------------------------------------------------
@@ -692,6 +722,44 @@ pub async fn app_jarvis_budget_set<R: Runtime>(
             &host,
             "app_jarvis_budget_set",
             json!({ "monthlyCapUsd": monthly_cap_usd.or(cap) }),
+        )
+    })
+    .await
+    .map_err(|_| "RUNTIME_RPC_FAILED")?
+}
+
+#[tauri::command]
+pub async fn app_jarvis_worker_tasks<R: Runtime>(
+    host: AppHandle<R>,
+    session_id: Option<String>,
+    conversation_id: Option<String>,
+    after_seq: Option<u64>,
+) -> Result<Value, &'static str> {
+    tauri::async_runtime::spawn_blocking(move || {
+        execute_rpc(
+            &host,
+            "app_jarvis_worker_tasks",
+            json!({
+                "sessionId": session_id.or(conversation_id),
+                "afterSeq": after_seq.unwrap_or(0)
+            }),
+        )
+    })
+    .await
+    .map_err(|_| "RUNTIME_RPC_FAILED")?
+}
+
+#[tauri::command]
+pub async fn app_jarvis_worker_cancel<R: Runtime>(
+    host: AppHandle<R>,
+    task_id: Option<String>,
+    id: Option<String>,
+) -> Result<Value, &'static str> {
+    tauri::async_runtime::spawn_blocking(move || {
+        execute_rpc(
+            &host,
+            "app_jarvis_worker_cancel",
+            json!({ "taskId": task_id.or(id) }),
         )
     })
     .await

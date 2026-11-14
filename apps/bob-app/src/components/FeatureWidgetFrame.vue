@@ -13,16 +13,16 @@ const THEME_VAR_KEYS = [
 ];
 
 const DEFAULT_THEME_FALLBACKS = {
-  '--bg-primary': 'light-dark(oklch(99% 0 0), oklch(18% 0 0))',
-  '--bg-secondary': 'light-dark(oklch(96% 0 0), oklch(22% 0 0))',
-  '--surface': 'light-dark(oklch(98% 0 0), oklch(20% 0 0))',
-  '--line': 'light-dark(oklch(90% 0 0), oklch(28% 0 0))',
-  '--text-primary': 'light-dark(oklch(15% 0 0), oklch(95% 0 0))',
-  '--text-secondary': 'light-dark(oklch(45% 0 0), oklch(75% 0 0))',
-  '--accent-primary': 'light-dark(oklch(55% 0.2 250), oklch(65% 0.2 250))',
-  '--color-success': 'light-dark(oklch(60% 0.18 145), oklch(70% 0.18 145))',
-  '--color-warning': 'light-dark(oklch(65% 0.18 80), oklch(75% 0.18 80))',
-  '--color-error': 'light-dark(oklch(55% 0.22 25), oklch(65% 0.22 25))',
+  '--bg-primary': 'Canvas',
+  '--bg-secondary': 'color-mix(in srgb, CanvasText 4.5%, Canvas)',
+  '--surface': 'Canvas',
+  '--line': 'color-mix(in srgb, CanvasText 12%, Canvas)',
+  '--text-primary': 'CanvasText',
+  '--text-secondary': 'GrayText',
+  '--accent-primary': 'Highlight',
+  '--color-success': 'Highlight',
+  '--color-warning': 'CanvasText',
+  '--color-error': 'CanvasText',
 };
 
 export function extractThemeVars() {
@@ -39,6 +39,10 @@ export function extractThemeVars() {
     } catch {}
   }
   return vars;
+}
+
+export function computeFeatureSrcdocKey(feature = {}) {
+  return `${feature?.name || ''}::${feature?.version ?? 0}::${feature?.widget_html || ''}`;
 }
 
 export function buildFeatureWidgetSrcdoc(feature = {}, themeVars = {}) {
@@ -95,8 +99,30 @@ export function buildFeatureWidgetSrcdoc(feature = {}, themeVars = {}) {
     (function() {
       const PKG_NAME = ${safePkgJson};
       const stateListeners = [];
+      const storageListeners = [];
       const themeListeners = [];
       const pendingCalls = new Map();
+
+      function postRuntimeError(rawMsg) {
+        try {
+          window.parent.postMessage({
+            type: 'bob.error',
+            pkg: PKG_NAME,
+            message: String(rawMsg || 'Widget runtime error')
+          }, '*');
+        } catch (e) {}
+      }
+
+      window.addEventListener('error', function(ev) {
+        const msg = ev && (ev.error && ev.error.message ? ev.error.message : ev.message);
+        postRuntimeError(msg || 'Uncaught widget script error');
+      });
+
+      window.addEventListener('unhandledrejection', function(ev) {
+        const reason = ev && ev.reason;
+        const msg = reason && reason.message ? reason.message : String(reason || 'Unhandled promise rejection');
+        postRuntimeError(msg);
+      });
 
       const bobBridge = {
         state: ${safeStateJson},
@@ -145,6 +171,9 @@ export function buildFeatureWidgetSrcdoc(feature = {}, themeVars = {}) {
         onState: function(fn) {
           if (typeof fn === 'function') stateListeners.push(fn);
         },
+        onStorage: function(fn) {
+          if (typeof fn === 'function') storageListeners.push(fn);
+        },
         onTheme: function(fn) {
           if (typeof fn === 'function') themeListeners.push(fn);
         }
@@ -173,6 +202,11 @@ export function buildFeatureWidgetSrcdoc(feature = {}, themeVars = {}) {
           bobBridge.state = data.state;
           for (let i = 0; i < stateListeners.length; i++) {
             try { stateListeners[i](data.state); } catch (e) {}
+          }
+        } else if (data.type === 'bob.storage') {
+          bobBridge.storage = data.storage && typeof data.storage === 'object' ? data.storage : {};
+          for (let i = 0; i < storageListeners.length; i++) {
+            try { storageListeners[i](bobBridge.storage); } catch (e) {}
           }
         } else if (data.type === 'bob-theme') {
           if (data.vars && typeof data.vars === 'object') {
@@ -236,15 +270,29 @@ const props = defineProps({
 
 const shell = inject('bobAppShell', {});
 const jarvisHome = computed(() => shell.jarvisHome);
+const tr = (key, fallback) => (typeof shell.t === 'function' ? shell.t(key) : fallback);
 
 const iframeRef = ref(null);
 const frameHeight = ref(180);
+const reloadNonce = ref(0);
+const widgetRuntimeError = ref('');
 
 const currentThemeVars = ref(extractThemeVars());
 
-const composedSrcdoc = computed(() => {
-  return buildFeatureWidgetSrcdoc(props.feature, currentThemeVars.value);
-});
+// Zero-flicker srcdoc key: only regenerate iframe HTML when identity, version, HTML template, or manual retry changes.
+const srcdocKey = computed(
+  () => `${props.feature?.name || ''}::${props.feature?.version ?? 0}::${props.feature?.widget_html || ''}`,
+);
+const composedSrcdoc = ref('');
+
+watch(
+  [srcdocKey, reloadNonce],
+  () => {
+    widgetRuntimeError.value = '';
+    composedSrcdoc.value = buildFeatureWidgetSrcdoc(props.feature, currentThemeVars.value);
+  },
+  { immediate: true },
+);
 
 async function handleWindowMessage(event) {
   if (!iframeRef.value?.contentWindow) return;
@@ -307,17 +355,51 @@ async function handleWindowMessage(event) {
   } else if (data.type === 'bob.resize') {
     const h = Number(data.height) || 180;
     frameHeight.value = Math.max(110, Math.min(420, h));
+  } else if (data.type === 'bob.error') {
+    const errMsg = String(data.message || 'Widget runtime error');
+    widgetRuntimeError.value = errMsg;
+    if (typeof jarvisHome.value?.reportFeatureError === 'function') {
+      await jarvisHome.value.reportFeatureError(props.feature.name, errMsg);
+    }
+  }
+}
+
+function handleRetryWidget() {
+  widgetRuntimeError.value = '';
+  reloadNonce.value += 1;
+}
+
+async function handleRollbackWidget() {
+  widgetRuntimeError.value = '';
+  if (typeof jarvisHome.value?.rollbackFeature === 'function') {
+    await jarvisHome.value.rollbackFeature(props.feature.name);
   }
 }
 
 watch(
-  () => props.feature.cached_state,
+  () => props.feature?.cached_state,
   nextState => {
     if (iframeRef.value?.contentWindow) {
       iframeRef.value.contentWindow.postMessage(
         {
           type: 'bob.state',
           state: nextState,
+        },
+        '*',
+      );
+    }
+  },
+  { deep: true },
+);
+
+watch(
+  () => props.feature?.storage,
+  nextStorage => {
+    if (iframeRef.value?.contentWindow) {
+      iframeRef.value.contentWindow.postMessage(
+        {
+          type: 'bob.storage',
+          storage: nextStorage && typeof nextStorage === 'object' ? nextStorage : {},
         },
         '*',
       );
@@ -376,6 +458,41 @@ onUnmounted(() => {
         <span class="trial-label">Trial</span>
       </div>
     </header>
+
+    <div
+      v-if="widgetRuntimeError"
+      class="feature-widget-error-strip"
+      role="alert"
+    >
+      <div class="widget-error-copy">
+        <svg class="inline-svg-xs" viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="12" cy="12" r="10" />
+          <line x1="12" y1="8" x2="12" y2="12" />
+          <line x1="12" y1="16" x2="12.01" y2="16" />
+        </svg>
+        <span class="widget-error-text">
+          {{ tr('featureWidgetRuntimeError', 'Widget encountered a runtime error') }}:
+          {{ widgetRuntimeError }}
+        </span>
+      </div>
+      <div class="widget-error-actions">
+        <button
+          type="button"
+          class="widget-error-btn"
+          @click="handleRetryWidget"
+        >
+          {{ tr('featureWidgetRetryBtn', 'Retry') }}
+        </button>
+        <button
+          type="button"
+          class="widget-error-btn rollback"
+          @click="handleRollbackWidget"
+        >
+          {{ tr('featureWidgetRollbackBtn', 'Rollback') }}
+        </button>
+      </div>
+    </div>
+
     <iframe
       ref="iframeRef"
       class="feature-widget-iframe"
@@ -395,7 +512,7 @@ onUnmounted(() => {
   flex-direction: column;
   width: 100%;
   border-radius: var(--radius-md);
-  background: var(--surface);
+  background: var(--surface, var(--bg-primary));
   border: 1px solid var(--line);
   overflow: hidden;
   transition: border-color var(--transition-fast, 0.15s ease);
@@ -458,6 +575,55 @@ onUnmounted(() => {
   font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.04em;
+}
+
+.feature-widget-error-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--gap-xs);
+  padding: var(--gap-xs) var(--gap-sm);
+  border-bottom: 1px solid var(--line);
+  background: var(--error-soft, var(--bg-secondary));
+  color: var(--error-text, var(--color-error));
+  font-size: var(--text-2xs);
+}
+
+.widget-error-copy {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-2xs);
+  min-width: 0;
+  flex: 1;
+}
+
+.widget-error-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.widget-error-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-2xs);
+  flex-shrink: 0;
+}
+
+.widget-error-btn {
+  min-height: 1.5rem;
+  padding: 0.15rem 0.45rem;
+  font-size: var(--text-2xs);
+  border-radius: var(--radius-xs);
+  border: 1px solid var(--line);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+.widget-error-btn.rollback:hover {
+  border-color: var(--color-error);
+  color: var(--color-error);
 }
 
 .feature-widget-iframe {

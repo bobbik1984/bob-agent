@@ -11,7 +11,7 @@ echo "=== Bob Cloud Node Bootstrap ==="
 # 1. Require root or sudo privileges
 if [[ $EUID -ne 0 ]]; then
     if command -v sudo >/dev/null 2>&1; then
-        exec sudo --preserve-env=BOB_PUBLIC_DOMAIN,BOB_BIND_ADDR,BOB_NODE_LABEL "$0" "$@"
+        exec sudo --preserve-env=BOB_PUBLIC_DOMAIN,BOB_BIND_ADDR,BOB_NODE_LABEL,BOB_DATA_DIR "$0" "$@"
     else
         echo "Error: This script must be run as root or with sudo." >&2
         exit 1
@@ -52,11 +52,37 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-# 5. Prepare private persistent directory (0700 per AEAD vault & Chromium isolation)
+# 5. Preflight CJK fonts & prepare private persistent directories (0700 per AEAD vault & Chromium isolation)
 DATA_DIR="${BOB_DATA_DIR:-/var/lib/bob-node}"
-echo "[*] Ensuring private data directory: ${DATA_DIR}"
-mkdir -p "${DATA_DIR}"
-chmod 700 "${DATA_DIR}"
+BROWSER_PROFILE_DIR="${DATA_DIR}/browser_profile"
+echo "[*] Ensuring private data and Chromium profile directories (mode 0700): ${DATA_DIR}"
+mkdir -p "${DATA_DIR}" "${BROWSER_PROFILE_DIR}"
+chmod 700 "${DATA_DIR}" "${BROWSER_PROFILE_DIR}"
+
+echo "[*] Checking CJK font availability for headless Chromium rendering..."
+HAS_CJK_FONTS=0
+if command -v fc-list >/dev/null 2>&1; then
+    if [[ -n "$(fc-list :lang=zh 2>/dev/null || true)" ]]; then
+        HAS_CJK_FONTS=1
+    fi
+fi
+
+if [[ "$HAS_CJK_FONTS" -eq 0 ]]; then
+    if command -v apt-get >/dev/null 2>&1; then
+        echo "[-] Host CJK fonts missing. Installing fonts-noto-cjk and fontconfig..."
+        DEBIAN_FRONTEND=noninteractive apt-get update -y
+        DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            fontconfig fonts-noto-cjk fonts-noto-color-emoji fonts-liberation
+        if command -v fc-cache >/dev/null 2>&1; then
+            fc-cache -f || true
+        fi
+        echo "[+] CJK fonts installed and font cache refreshed."
+    else
+        echo "[!] Host CJK fonts not detected (fc-list :lang=zh empty). Install fonts-noto-cjk if running Chromium outside Docker."
+    fi
+else
+    echo "[+] CJK fonts verified via fc-list :lang=zh."
+fi
 
 # 6. Configure environment (.env file for docker compose)
 ENV_FILE="${REPO_ROOT}/deploy/.env"

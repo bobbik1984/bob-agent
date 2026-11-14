@@ -96,6 +96,17 @@ fn token(c: &Connection, scope: &str, label: &str, now: i64) -> Result<Value> {
         json!({"access_token":secret,"credential_id":id,"expires_at":expires,"scope":scope,"topology_sync":false}),
     )
 }
+pub fn issue_owner_token(dir: &Path, label: &str, now: i64) -> Result<Value> {
+    let c = open(dir)?;
+    let safe_label = if label.trim().is_empty() {
+        "browser-onboarding"
+    } else if label.len() > 160 {
+        &label[..160]
+    } else {
+        label.trim()
+    };
+    token(&c, "owner", safe_label, now)
+}
 pub fn authorize(dir: &Path, header: Option<&str>, now: i64) -> Result<String> {
     let raw = header
         .and_then(|h| h.strip_prefix("Bearer "))

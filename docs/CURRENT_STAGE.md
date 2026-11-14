@@ -861,9 +861,14 @@ PrimaryChatPane 按历史区 ResizeObserver 实测高度缩放水滴，空态容
 
 ---
 
-### 5.1 第一波次：`WP-E1` 实景闭环、快慢双模分流与 3 步开箱向导（当前最高优先级，待领取）
+### 5.1 第一波次：`WP-E1` 实景闭环、快慢双模分流与 3 步开箱向导（本地源码与四重门禁已完成，待授权部署/真机）
 
-#### 任务卡 `WP-E1.1`：常驻节点无头浏览器实装（CJK 字体 + 隔离卷）与真实办公站点接管验收
+> **2026-11-14 本地验收完成摘要**（详细回执见 [2026-11-14 WP-E1 验证回执](evidence/2026-11-14-wp-e1-systemic-evolution-verification.md)）：
+> - **`WP-E1.1`～`WP-E1.4` 本地全栈落地**：已完成容器/装机 `fonts-noto-cjk` 字体与 `--user-data-dir` `0700` 锁清理及崩溃自动重启、反代 HTTPS/WSS `Origin` 校验、IME 组合输入与 390px 滑块拖拽、接管一键存为 `RoutineStore`（`WP-E1.1`）；10 家服务商严格对齐 `model_providers.json` 的 Clerk/Maker 双模预设、`<1s` `Resident Clerk` + 异步 `Maker Worker` + 持久 `StepLedger` + Thread 订阅直通与追问批处理（`WP-E1.2`）；CSPRNG 一次性 6 位初始配对码（指数退避限流 + 防抢注）与 3 步响应式 `<OnboardingWizard />`（`WP-E1.3`）；沙箱提示词与静态门禁（禁外链 CDN / 硬编码颜色）、`FeatureWidgetFrame.vue` 零闪烁 `srcdoc` 与运行时报错自动回退及双白领小组件闭环验证（`WP-E1.4`）。
+> - **四重门禁全绿**：`cargo test --offline --workspace` **386 项通过 / 0 失败 / 0 警告**（含本地真实无头浏览器 CDP E2E）；`cargo check --offline --manifest-path apps/bob-app/src-tauri/Cargo.toml` **0 错误通过**；`node --test tests/*.test.mjs` **236 / 236 通过**（中英 i18n **1,151 / 1,151 键 100% 对称**，零硬编码色值，零装饰性 emoji）；`pnpm build` **185 模块构建通过**。
+> - **当前边界与下一顺位**：按本轮授权边界，**尚未重启线上常驻生产服务器、尚未打包 Android APK**；下一顺位可进入 **`WP-E2`（纯 Rust 办公文档深度处理与标准化高频 IM 双向通道）** 或按用户指令将 `WP-E1` 发布至常驻节点做线上实测。
+
+#### 任务卡 `WP-E1.1`：常驻节点无头浏览器实装（CJK 字体 + 隔离卷）与真实办公站点接管验收（本地实现与本地真实无头浏览器 E2E 已完成，线上站点待部署后补验）
 - **背景与缺口**：当前 `crates/bob-browser` 仅在本地模拟 CDP 测试通过；生产侧 `deploy/Dockerfile` 缺少中文字体，线上宿主机尚未验证 Chromium + 独立 `--user-data-dir` 的重启保活与 390px 手机接管实操。
 - **允许改动范围**：
   - `deploy/Dockerfile`、`scripts/deploy-vps-oneclick.sh`、`crates/bob-browser/src/*`、`crates/bob-node/src/browser_ws.rs`
@@ -873,7 +878,7 @@ PrimaryChatPane 按历史区 ResizeObserver 实测高度缩放水滴，空态容
   3. 选取 3～5 个真实办公/内容站点（用测试账号），在常驻节点跑通“自动浏览 → 撞登录/滑块弹窗 → 手机 390px `<VirtualBrowserModal />` 完成接管 → 服务重启后验证持久化 Cookie 仍有效 → 一键存为 Routine 复跑”。
 - **验收门禁**：`cargo test --offline -p bob-browser -p bob-node` 全绿 + 写入脱敏真实验收记录至 `docs/evidence/`。
 
-#### 任务卡 `WP-E1.2`：置顶 Jarvis `Resident Clerk + Async Worker` 快慢双模分流
+#### 任务卡 `WP-E1.2`：置顶 Jarvis `Resident Clerk + Async Worker` 快慢双模分流（已完成本地源码与端到端单测）
 - **背景与缺口**：目前 `crates/bob-runtime/src/native_harness.rs` 与 `crates/bob-node/src/jarvis.rs` 采用单条 SSE 执行流响应请求，复杂网页抓取或多步工具调用期间用户体验存在等待阻塞感；配置层面也缺少对“同一 API Key 自动绑定快模型（Clerk）+ 慢模型（Maker）”的一键默认配对逻辑。
 - **允许改动范围**：
   - `crates/bob-runtime/src/{native_harness.rs, model_presets.rs (新增), tool_bus.rs}`
@@ -885,7 +890,7 @@ PrimaryChatPane 按历史区 ResizeObserver 实测高度缩放水滴，空态容
   3. 对齐原型实验室文档（`bob-bot/docs/SUPER_AGENT_NOTES.md`）中的 `Thread 订阅直通` 与 `事件批处理`，同一任务后续追问优先直通当前活跃 Worker 上下文，避免 Clerk 重复路由浪费预算。
 - **验收门禁**：`cargo test --offline -p bob-runtime -p bob-node` 新增快慢分流与后台任务断线恢复单测全绿 + 前端 `node --test tests/*.test.mjs` 全绿。
 
-#### 任务卡 `WP-E1.3`：首次访问 3 步图形化开箱向导与一次性配对码鉴权
+#### 任务卡 `WP-E1.3`：首次访问 3 步图形化开箱向导与一次性配对码鉴权（已完成本地源码与端到端单测）
 - **背景与缺口**：当前首次开箱缺少全屏三步引导 UI，非技术用户面对多 Tab 设置页与模型/URL/Model ID 表单仍有认知障碍；同时未初始化实例缺少面向容器部署的安全首次接管机制。
 - **允许改动范围**：
   - `crates/bob-node/src/{lib.rs, node_access.rs, jarvis.rs}`
@@ -895,7 +900,7 @@ PrimaryChatPane 按历史区 ResizeObserver 实测高度缩放水滴，空态容
   2. 前端实现简洁响应式 `<OnboardingWizard />` 三步流程：**Step 1 验证配对码与设定访问口令 → Step 2 选择服务商卡片并粘贴 1 个 API Key（一键实测连通性并自动配对 Clerk/Maker 双模）→ Step 3（可选）为助理命名 / 跳过直接进入 Jarvis 水滴主屏**。
 - **验收门禁**：支持 390px 手机端与 1280px 桌面端、明暗双模与双语 i18n 全键对称，附带向导流程与抢注拒绝单测；完成并验证零硬编码颜色/emoji。
 
-#### 任务卡 `WP-E1.4`：对话现场生成与迭代桌面小组件真实模型闭环调优
+#### 任务卡 `WP-E1.4`：对话现场生成与迭代桌面小组件真实模型闭环调优（已完成本地源码与沙箱闭环单测，待商业 Key 在线补验）
 - **背景与缺口**：`WP-J3` 已建立 `/api/f/:pkg/*` 安全路由、`FeatureWidgetFrame` 与 3 分钟试用 5 版回退机制，但仍需使用真实商业大模型对生成提示词、主题 CSS 变量注入与错误自动恢复提示做实测打磨。
 - **允许改动范围**：
   - `crates/bob-runtime/src/{features.rs, native_harness.rs}`（提示词规范段）

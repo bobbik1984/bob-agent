@@ -27,6 +27,10 @@ const settingsViewSource = readFileSync(
   new URL('../src/views/SettingsView.vue', import.meta.url),
   'utf8',
 );
+const onboardingWizardSource = readFileSync(
+  new URL('../src/components/OnboardingWizard.vue', import.meta.url),
+  'utf8',
+);
 const manifestSource = readFileSync(
   new URL('../public/manifest.webmanifest', import.meta.url),
   'utf8',
@@ -350,6 +354,7 @@ test('Static design constraints: zero hardcoded hex/rgb colors, zero decorative 
     ['SiteSessionVault.vue', siteSessionVaultSource],
     ['PrimaryChatPane.vue', primaryChatPaneSource],
     ['SettingsView.vue', settingsViewSource],
+    ['OnboardingWizard.vue', onboardingWizardSource],
   ];
 
   for (const [name, source] of vueFiles) {

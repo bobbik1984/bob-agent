@@ -581,8 +581,26 @@ async function forceRefreshActiveConversation() {
   void ctx.loadModelHub?.();
 }
 
-const executionBlocked = computed(() => blocksNewExecution(executions.value));
-const activeExecution = computed(() => executions.value.find(run => canCancelExecution(run)));
+const hasJarvisBackgroundWorker = computed(
+  () =>
+    Boolean(
+      sessionId.value &&
+        sessionId.value === assistantConversationId.value &&
+        ctx.jarvisHome?.activeWorkerTasks?.value?.length > 0,
+    ),
+);
+const executionBlocked = computed(() => {
+  if (hasJarvisBackgroundWorker.value) {
+    return Boolean(ctx.jarvisHome?.jarvisStreaming?.value);
+  }
+  return blocksNewExecution(executions.value);
+});
+const activeExecution = computed(() => {
+  if (hasJarvisBackgroundWorker.value) {
+    return null;
+  }
+  return executions.value.find(run => canCancelExecution(run));
+});
 const canSend = computed(
   () =>
     !!sessionId.value &&
@@ -1155,6 +1173,7 @@ async function startup() {
     await reload();
     await ctx.loadModelHub();
     await ctx.loadPersonalOps();
+    void ctx.jarvisHome?.refreshJarvisState?.(sessionId.value);
     const activeItem = catalog.value?.conversations?.find(c => c.id === sessionId.value);
     if (activeItem?.view_state && !draft.value) {
       draft.value = activeItem.view_state.draft || '';
@@ -1315,7 +1334,10 @@ const statusKeys = {
       poll = setInterval(() => {
         if (typeof document !== 'undefined' && document.hidden) return;
         const isActiveExecution = Boolean(
-          activeExecution.value || dispatchPending.value || saving.value,
+          activeExecution.value ||
+            dispatchPending.value ||
+            saving.value ||
+            ctx.jarvisHome?.activeWorkerTasks?.value?.length,
         );
         if (!isActiveExecution) {
           idleTick = (idleTick + 1) % 40;
@@ -1336,6 +1358,7 @@ const statusKeys = {
     if (historyWheelResetTimer) clearTimeout(historyWheelResetTimer);
     if (mainSyncPulseTimer) clearTimeout(mainSyncPulseTimer);
     if (poll) clearInterval(poll);
+    ctx.jarvisHome?.stopWorkerPolling?.();
   }
 
   return Object.assign(ctx, {

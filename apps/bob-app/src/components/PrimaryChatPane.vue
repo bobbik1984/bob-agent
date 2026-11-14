@@ -135,6 +135,46 @@ onUnmounted(() => { if (rodTimer) clearInterval(rodTimer); });
 const jarvisOrbMood = computed(() => jarvisHome?.orbMood?.value || 'idle');
 const pendingApprovalCount = computed(() => jarvisHome?.pendingApprovalCount?.value || 0);
 const isMainJarvisSession = computed(() => !sessionId.value || sessionId.value === assistantConversationId?.value);
+
+const expandedWorkerTasks = ref({});
+const cancellingWorkerIds = ref({});
+
+const activeSessionWorkerTasks = computed(() => {
+  const list = jarvisHome?.activeWorkerTasks?.value || [];
+  return list.filter(
+    task =>
+      !task.conversation_id ||
+      !sessionId.value ||
+      task.conversation_id === sessionId.value,
+  );
+});
+
+function toggleWorkerSteps(taskId) {
+  expandedWorkerTasks.value = {
+    ...expandedWorkerTasks.value,
+    [taskId]: !expandedWorkerTasks.value[taskId],
+  };
+}
+
+async function handleCancelWorker(taskId) {
+  if (!taskId || cancellingWorkerIds.value[taskId]) return;
+  cancellingWorkerIds.value = { ...cancellingWorkerIds.value, [taskId]: true };
+  try {
+    await jarvisHome?.cancelWorkerTask?.(taskId);
+  } finally {
+    const next = { ...cancellingWorkerIds.value };
+    delete next[taskId];
+    cancellingWorkerIds.value = next;
+  }
+}
+
+function latestWorkerStepSummary(task) {
+  const steps = task?.steps || [];
+  if (steps.length > 0) {
+    return steps[steps.length - 1]?.summary || task?.objective || t('workerPreparingSteps');
+  }
+  return task?.objective || t('workerPreparingSteps');
+}
 </script>
 
 <template>
@@ -142,7 +182,7 @@ const isMainJarvisSession = computed(() => !sessionId.value || sessionId.value =
     <div v-show="remoteConversation && activeDrawer === 'chat' && !settingsOpen" class="remote-session-host"><DshSessions v-if="remoteConversation" :key="remoteConversation.node.id + remoteConversation.session.id" :target="remoteConversation" :nodes="modelHub.state.remote_nodes || []" /></div>
     <main v-show="activeDrawer === 'chat' && !settingsOpen && !remoteConversation" class="main">
       <!-- Jarvis Sticky Bar & Widget Sheet when conversation has messages -->
-      <div v-if="messages?.length && isMainJarvisSession && (pendingApprovalCount || jarvisHome?.widgetSheetOpen?.value)" class="jarvis-sticky-bar">
+      <div v-if="messages?.length && isMainJarvisSession && (pendingApprovalCount || activeSessionWorkerTasks.length || jarvisHome?.widgetSheetOpen?.value)" class="jarvis-sticky-bar">
         <JarvisOrb
           size="compact"
           :mood="jarvisOrbMood"
@@ -319,6 +359,91 @@ const isMainJarvisSession = computed(() => !sessionId.value || sessionId.value =
         </div>
       </section>
       <div v-if="awayFromLatest" class="chat-jump-row"><button type="button" class="chat-jump-latest" @click="jumpLatest" :aria-label="t('chatJumpLatest')" :title="t('chatJumpLatest')"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M12 4v16m-6-6 6 6 6-6"/></svg></button></div>
+
+      <!-- Background Worker Progress Bar & Collapsible Step Ledger (WP-E1.2) -->
+      <section
+        v-if="activeSessionWorkerTasks.length > 0"
+        class="jarvis-worker-banner"
+        role="region"
+        :aria-label="t('workerBannerTitle')"
+      >
+        <div
+          v-for="task in activeSessionWorkerTasks"
+          :key="task.task_id"
+          class="worker-task-card"
+        >
+          <div class="worker-task-header">
+            <div class="worker-task-lead">
+              <span class="worker-spinner-chip" aria-hidden="true">
+                <svg class="inline-svg-xs worker-spin-svg" viewBox="0 0 24 24">
+                  <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+                </svg>
+              </span>
+              <div class="worker-task-meta">
+                <div class="worker-title-row">
+                  <strong class="worker-task-title">{{ task.title || t('workerBannerTitle') }}</strong>
+                  <span v-if="task.maker_model" class="worker-model-pill">{{ task.maker_model }}</span>
+                  <span class="worker-step-count-pill">
+                    {{ t('workerStepCount', { count: (task.steps || []).length }) }}
+                  </span>
+                </div>
+                <p class="worker-latest-summary">{{ latestWorkerStepSummary(task) }}</p>
+                <p v-if="task.followupBatched" class="worker-followup-note">
+                  <svg class="inline-svg-xs" viewBox="0 0 24 24" aria-hidden="true">
+                    <polyline points="9 10 4 15 9 20" />
+                    <path d="M20 4v7a4 4 0 0 1-4 4H4" />
+                  </svg>
+                  <span>{{ t('workerFollowupMerged') }}</span>
+                </p>
+              </div>
+            </div>
+
+            <div class="worker-task-actions">
+              <button
+                v-if="(task.steps || []).length > 0"
+                type="button"
+                class="worker-expand-btn"
+                :aria-expanded="Boolean(expandedWorkerTasks[task.task_id])"
+                :aria-label="t(expandedWorkerTasks[task.task_id] ? 'workerCollapseSteps' : 'workerExpandSteps')"
+                :title="t(expandedWorkerTasks[task.task_id] ? 'workerCollapseSteps' : 'workerExpandSteps')"
+                @click="toggleWorkerSteps(task.task_id)"
+              >
+                <svg class="chevron-svg" viewBox="0 0 24 24" aria-hidden="true">
+                  <path :d="expandedWorkerTasks[task.task_id] ? 'm18 15-6-6-6 6' : 'm6 9 6 6 6-6'" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                class="worker-cancel-btn"
+                :disabled="Boolean(cancellingWorkerIds[task.task_id])"
+                @click="handleCancelWorker(task.task_id)"
+              >
+                <svg class="inline-svg-xs" viewBox="0 0 24 24" aria-hidden="true">
+                  <rect x="6" y="6" width="12" height="12" rx="2" />
+                </svg>
+                <span>{{ t(cancellingWorkerIds[task.task_id] ? 'workerCancellingBtn' : 'workerCancelBtn') }}</span>
+              </button>
+            </div>
+          </div>
+
+          <ol
+            v-if="expandedWorkerTasks[task.task_id] && (task.steps || []).length > 0"
+            class="worker-step-ledger"
+          >
+            <li
+              v-for="(step, sIdx) in task.steps"
+              :key="step.seq || sIdx"
+              class="worker-step-row"
+            >
+              <span class="worker-step-seq">{{ step.seq || sIdx + 1 }}</span>
+              <span v-if="step.tool_name || step.kind" class="worker-step-tool">
+                {{ step.tool_name || step.kind }}
+              </span>
+              <span class="worker-step-text">{{ step.summary }}</span>
+            </li>
+          </ol>
+        </div>
+      </section>
 
       <!-- Persistent 3-Minute Trial Bar above composer during active chat -->
       <FeatureTrialBanner v-if="messages?.length" />
@@ -647,5 +772,206 @@ const isMainJarvisSession = computed(() => !sessionId.value || sessionId.value =
 .jarvis-live-label {
   font-size: var(--text-xs);
   color: var(--text-secondary);
+}
+
+.jarvis-worker-banner {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-xs);
+  width: 100%;
+  flex-shrink: 0;
+}
+
+.worker-task-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-xs);
+  padding: 0.45rem 0.65rem;
+  border-radius: var(--radius-card);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent-primary);
+  background: var(--bg-primary);
+}
+
+.worker-task-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gap-sm);
+}
+
+.worker-task-lead {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--gap-xs);
+  min-width: 0;
+  flex: 1;
+}
+
+.worker-spinner-chip {
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--accent-primary) 12%, transparent);
+  color: var(--accent-primary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+@keyframes worker-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.worker-spin-svg {
+  animation: worker-spin 0.9s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .worker-spin-svg {
+    animation: none;
+  }
+}
+
+.worker-task-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.worker-title-row {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-2xs);
+  flex-wrap: wrap;
+}
+
+.worker-task-title {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.worker-model-pill {
+  font-size: var(--text-2xs);
+  padding: 0.05rem 0.38rem;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--accent-primary) 12%, transparent);
+  color: var(--accent-primary);
+  border: 1px solid color-mix(in srgb, var(--accent-primary) 30%, var(--line));
+  font-weight: 600;
+}
+
+.worker-step-count-pill {
+  font-size: var(--text-2xs);
+  padding: 0.05rem 0.35rem;
+  border-radius: var(--radius-pill);
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  border: 1px solid var(--line);
+}
+
+.worker-latest-summary {
+  margin: 0;
+  font-size: var(--text-2xs);
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.worker-followup-note {
+  margin: 2px 0 0;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--gap-3xs);
+  font-size: var(--text-2xs);
+  color: var(--accent-primary);
+}
+
+.worker-task-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-2xs);
+  flex-shrink: 0;
+}
+
+.worker-expand-btn {
+  min-height: 1.65rem;
+  padding: 0.2rem 0.35rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: var(--bg-secondary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.worker-cancel-btn {
+  min-height: 1.65rem;
+  padding: 0.2rem 0.5rem;
+  font-size: var(--text-2xs);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--gap-3xs);
+}
+
+.worker-cancel-btn:hover {
+  border-color: var(--color-error);
+  color: var(--color-error);
+}
+
+.worker-step-ledger {
+  margin: 0;
+  padding: var(--gap-xs) 0 0;
+  border-top: 1px solid var(--line);
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-3xs);
+  max-height: 9rem;
+  overflow-y: auto;
+}
+
+.worker-step-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--gap-xs);
+  font-size: var(--text-2xs);
+  color: var(--text-secondary);
+}
+
+.worker-step-seq {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  min-width: 1.1rem;
+}
+
+.worker-step-tool {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: var(--text-2xs);
+  padding: 0 0.3rem;
+  border-radius: var(--radius-xs);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  border: 1px solid var(--line);
+  flex-shrink: 0;
+}
+
+.worker-step-text {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 </style>

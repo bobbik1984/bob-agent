@@ -2222,6 +2222,107 @@ impl BobToolBus {
         }
         json!({ "functionDeclarations": decls })
     }
+
+    pub fn is_clerk_fast_tool(name: &str) -> bool {
+        matches!(
+            name,
+            "show_card"
+                | "todo_add"
+                | "ticket_save"
+                | "kb_search"
+                | "morning_brief"
+                | "feature_list"
+                | "skill_list"
+                | "routine_list"
+        ) || name.starts_with("schedule_")
+            || name.starts_with("note_")
+            || name.starts_with("inbox_")
+            || name.starts_with("memory_")
+            || name.starts_with("weather_")
+            || name.starts_with("f_weather")
+    }
+
+    pub fn clerk_dispatch_tool_spec() -> ToolSpec {
+        ToolSpec {
+            name: "dispatch_background_task".to_string(),
+            description: "Dispatches a multi-step, web-research, coding, host-workspace, routine, or widget-building task to the asynchronous background Worker so Clerk can reply immediately.".to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "title": {
+                        "type": "string",
+                        "description": "Concise task title (3-8 words)"
+                    },
+                    "objective": {
+                        "type": "string",
+                        "description": "Complete instructions for what the background Worker should accomplish"
+                    },
+                    "context_summary": {
+                        "type": "string",
+                        "description": "Relevant user context, constraints, or conversation summary"
+                    }
+                },
+                "required": ["title", "objective"]
+            }),
+            risk_level: ActionRiskLevel::ReadOnly,
+        }
+    }
+
+    fn collect_clerk_specs(&self) -> Vec<ToolSpec> {
+        let mut specs: Vec<ToolSpec> = self
+            .specs
+            .values()
+            .filter(|s| Self::is_clerk_fast_tool(&s.name))
+            .cloned()
+            .collect();
+        specs.push(Self::clerk_dispatch_tool_spec());
+        specs.sort_by(|a, b| a.name.cmp(&b.name));
+        specs
+    }
+
+    pub fn export_clerk_openai_tools(&self) -> Vec<Value> {
+        self.collect_clerk_specs()
+            .into_iter()
+            .map(|spec| {
+                json!({
+                    "type": "function",
+                    "function": {
+                        "name": spec.name,
+                        "description": spec.description,
+                        "parameters": spec.input_schema
+                    }
+                })
+            })
+            .collect()
+    }
+
+    pub fn export_clerk_anthropic_tools(&self) -> Vec<Value> {
+        self.collect_clerk_specs()
+            .into_iter()
+            .map(|spec| {
+                json!({
+                    "name": spec.name,
+                    "description": spec.description,
+                    "input_schema": spec.input_schema
+                })
+            })
+            .collect()
+    }
+
+    pub fn export_clerk_gemini_tools(&self) -> Value {
+        let decls: Vec<Value> = self
+            .collect_clerk_specs()
+            .into_iter()
+            .map(|spec| {
+                json!({
+                    "name": spec.name,
+                    "description": spec.description,
+                    "parameters": spec.input_schema
+                })
+            })
+            .collect();
+        json!({ "functionDeclarations": decls })
+    }
 }
 
 #[cfg(test)]

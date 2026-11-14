@@ -93,6 +93,9 @@ fn main() {
     );
 
     if !bob_node::node_access::enabled(&data_dir) {
+    if let Some(boot_code) = server.bootstrap_pairing_code() {
+        println!("  Initial Web Onboarding Code (single-use, 30m): {boot_code}");
+    }
     if let Ok(inv) = server.issue_startup_pairing(public_url.as_deref(), node_label.as_deref()) {
         let qr_uri = inv.encode_qr_code();
         println!("----------------------------------------------------------------");

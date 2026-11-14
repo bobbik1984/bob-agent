@@ -11,9 +11,15 @@
 
 use bob_browser::cdp::CdpClient;
 use bob_browser::error::BrowserError;
-use bob_browser::screencast::{ClientTakeoverCommand, ScreencastBridge, ViewportMeta};
+use bob_browser::launcher::{secure_and_prepare_profile_dir, BrowserConfig, ChromiumManager};
+use bob_browser::screencast::{
+    export_commands_to_routine_steps, ClientTakeoverCommand, ScreencastBridge, ViewportMeta,
+};
 use bob_browser::sessions::{clear_site_session, load_sessions, record_site_visit, save_sessions};
 use bob_browser::url_guard::{validate_navigation_url, BrowserSecurityPolicy};
+use bob_runtime::routines::{
+    capture_walkthrough_to_routine, RecurrenceRule, RoutineRecord, RoutineStep, RoutineStore,
+};
 use bob_runtime::tool_bus::{
     ActionRiskLevel, ApprovalStatus, BobToolBus, CardField, PendingApprovalCard,
     PendingApprovalStore, StructuredCard, ToolSpec,
@@ -23,9 +29,10 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::io::Write;
 use std::net::TcpStream;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+pub use tungstenite::http::{HeaderMap, HeaderName, HeaderValue, StatusCode};
 
 fn now_unix_secs() -> u64 {
     SystemTime::now()
@@ -131,17 +138,362 @@ pub fn complete_takeover_session(data_dir: &Path, id: &str) -> Result<TakeoverSe
 // Helpers
 // ---------------------------------------------------------------------------
 
-pub fn domain_from_url(raw: &str) -> String {
-    let without_scheme = raw.split("://").nth(1).unwrap_or(raw);
-    let host_port = without_scheme
-        .split('/')
+pub fn extract_host_clean(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("null") {
+        return None;
+    }
+
+    let after_scheme = trimmed
+        .split_once("://")
+        .map(|(_, rest)| rest)
+        .unwrap_or(trimmed);
+    let authority = after_scheme
+        .split(&['/', '?', '#'][..])
         .next()
         .unwrap_or("")
-        .split('?')
+        .trim();
+
+    if authority.is_empty() || authority.contains('@') {
+        return None;
+    }
+
+    if authority.starts_with('[') {
+        let close_idx = authority.find(']')?;
+        let suffix = &authority[close_idx + 1..];
+        if !suffix.is_empty() && !suffix.starts_with(':') {
+            return None;
+        }
+        return Some(authority[..=close_idx].to_ascii_lowercase());
+    }
+
+    let colon_count = authority.chars().filter(|&c| c == ':').count();
+    if colon_count > 1 {
+        // Bare IPv6 address without brackets
+        return Some(format!("[{}]", authority.to_ascii_lowercase()));
+    }
+
+    let host = authority
+        .split(':')
         .next()
-        .unwrap_or("");
-    let host = host_port.split(':').next().unwrap_or("");
-    host.to_string()
+        .unwrap_or("")
+        .trim()
+        .trim_end_matches('.');
+    if host.is_empty() {
+        return None;
+    }
+
+    Some(host.to_ascii_lowercase())
+}
+
+pub fn domain_from_url(raw: &str) -> String {
+    extract_host_clean(raw).unwrap_or_default()
+}
+
+fn is_loopback_host(host: &str) -> bool {
+    matches!(host, "localhost" | "127.0.0.1" | "[::1]" | "::1")
+}
+
+fn parse_origin_scheme_and_host(raw: &str) -> Option<(String, String)> {
+    let trimmed = raw.trim();
+    let (scheme_raw, _) = trimmed.split_once("://")?;
+    let scheme = match scheme_raw.to_ascii_lowercase().as_str() {
+        "https" | "wss" => "https",
+        "http" | "ws" => "http",
+        _ => return None,
+    };
+    let host = extract_host_clean(trimmed)?;
+    Some((scheme.to_string(), host))
+}
+
+/// Pure testable WebSocket `Origin` validator supporting reverse proxies (`X-Forwarded-Host`,
+/// `X-Forwarded-Proto`), `Host`, `BOB_NODE_PUBLIC_URL`, and `BOB_PUBLIC_DOMAIN`.
+pub fn validate_ws_origin_with_env(
+    headers: &HeaderMap,
+    public_url: Option<&str>,
+    public_domain: Option<&str>,
+) -> Result<(), StatusCode> {
+    let Some(origin_val) = headers.get("origin") else {
+        return Ok(());
+    };
+    let origin_str = origin_val.to_str().map_err(|_| StatusCode::FORBIDDEN)?;
+    let (origin_scheme, origin_host) =
+        parse_origin_scheme_and_host(origin_str).ok_or(StatusCode::FORBIDDEN)?;
+
+    // Protocol downgrade protection: when behind HTTPS reverse proxy, reject plain http:// non-loopback origins
+    let forwarded_https = headers
+        .get_all("x-forwarded-proto")
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .flat_map(|s| s.split(','))
+        .map(str::trim)
+        .find(|s| !s.is_empty())
+        .map(|proto| proto.eq_ignore_ascii_case("https"))
+        .unwrap_or(false);
+
+    if forwarded_https && origin_scheme == "http" && !is_loopback_host(&origin_host) {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    if let Some(pub_u) = public_url {
+        let pub_trimmed = pub_u.trim();
+        if pub_trimmed.to_ascii_lowercase().starts_with("https://") {
+            if let Some(pub_h) = extract_host_clean(pub_trimmed) {
+                if pub_h == origin_host && origin_scheme == "http" && !is_loopback_host(&origin_host)
+                {
+                    return Err(StatusCode::FORBIDDEN);
+                }
+            }
+        }
+    }
+
+    let host_hosts: Vec<String> = headers
+        .get_all("host")
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .filter_map(extract_host_clean)
+        .collect();
+
+    let xfh_hosts: Vec<String> = headers
+        .get_all("x-forwarded-host")
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .flat_map(|s| s.split(','))
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .filter_map(extract_host_clean)
+        .collect();
+
+    let mut env_hosts: Vec<String> = Vec::new();
+    if let Some(pub_u) = public_url {
+        if let Some(h) = extract_host_clean(pub_u) {
+            env_hosts.push(h);
+        }
+    }
+    if let Some(pub_d) = public_domain {
+        for item in pub_d.split(',') {
+            if let Some(h) = extract_host_clean(item) {
+                env_hosts.push(h);
+            }
+        }
+    }
+
+    if host_hosts
+        .iter()
+        .chain(xfh_hosts.iter())
+        .chain(env_hosts.iter())
+        .any(|allowed| allowed == &origin_host)
+    {
+        return Ok(());
+    }
+
+    // Direct loopback access: both Origin and Host are loopback, and no non-loopback X-Forwarded-Host is present
+    if is_loopback_host(&origin_host)
+        && host_hosts.iter().any(|h| is_loopback_host(h))
+        && xfh_hosts.iter().all(|h| is_loopback_host(h))
+    {
+        return Ok(());
+    }
+
+    Err(StatusCode::FORBIDDEN)
+}
+
+pub fn check_ws_origin(headers: &HeaderMap) -> Result<(), StatusCode> {
+    let pub_url = std::env::var("BOB_NODE_PUBLIC_URL").ok();
+    let pub_domain = std::env::var("BOB_PUBLIC_DOMAIN").ok();
+    validate_ws_origin_with_env(headers, pub_url.as_deref(), pub_domain.as_deref())
+}
+
+pub fn parse_http_headers(header_text: &str) -> HeaderMap {
+    let mut headers = HeaderMap::new();
+    for line in header_text.lines() {
+        if let Some((k, v)) = line.split_once(':') {
+            if let (Ok(name), Ok(val)) = (
+                HeaderName::from_bytes(k.trim().as_bytes()),
+                HeaderValue::from_str(v.trim()),
+            ) {
+                headers.append(name, val);
+            }
+        }
+    }
+    headers
+}
+
+// ---------------------------------------------------------------------------
+// Managed Headless Chromium Registry & Takeover Routine Persistence
+// ---------------------------------------------------------------------------
+
+static MANAGED_CHROMIUM: OnceLock<Mutex<HashMap<PathBuf, ChromiumManager>>> = OnceLock::new();
+
+fn managed_chromium_map() -> &'static Mutex<HashMap<PathBuf, ChromiumManager>> {
+    MANAGED_CHROMIUM.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+pub fn is_browser_auto_launch_enabled() -> bool {
+    std::env::var("BOB_BROWSER_AUTO_LAUNCH")
+        .map(|v| {
+            let t = v.trim();
+            t == "1" || t.eq_ignore_ascii_case("true")
+        })
+        .unwrap_or(false)
+}
+
+/// Ensures a managed headless `ChromiumManager` is running for `data_dir` (using `data_dir/browser_profile`
+/// with `0700` permissions) and returns a page target WebSocket debugger URL.
+pub fn ensure_managed_browser_ws_url(
+    data_dir: &Path,
+    target_url: Option<&str>,
+) -> Result<String, String> {
+    let mut map = managed_chromium_map()
+        .lock()
+        .map_err(|_| "MANAGED_CHROMIUM_LOCK_POISONED".to_string())?;
+    let key = data_dir.to_path_buf();
+    if !map.contains_key(&key) {
+        let profile_dir = data_dir.join("browser_profile");
+        secure_and_prepare_profile_dir(&profile_dir, true)?;
+        let cfg = BrowserConfig {
+            user_data_dir: profile_dir,
+            remote_debugging_port: 0,
+            window_width: 390,
+            window_height: 844,
+            headless: true,
+            ..Default::default()
+        };
+        map.insert(key.clone(), ChromiumManager::new(cfg));
+    }
+
+    let mgr = map.get_mut(&key).expect("ChromiumManager present");
+    if let Some(url) = target_url {
+        let (_tid, ws_url) = mgr.open_page_ws_url(url)?;
+        Ok(ws_url)
+    } else {
+        let (_tid, ws_url) = mgr.get_or_create_page().map_err(|e| e.to_string())?;
+        Ok(ws_url)
+    }
+}
+
+pub fn shutdown_managed_browser(data_dir: &Path) {
+    if let Ok(mut map) = managed_chromium_map().lock() {
+        if let Some(mut mgr) = map.remove(data_dir) {
+            mgr.stop();
+        }
+    }
+}
+
+fn resolve_cdp_ws_url(data_dir: &Path, target_url: Option<&str>) -> Option<String> {
+    if let Ok(cdp_url) = std::env::var("BOB_BROWSER_CDP_WS_URL") {
+        let trimmed = cdp_url.trim();
+        if !trimmed.is_empty() {
+            return Some(trimmed.to_string());
+        }
+    }
+    if is_browser_auto_launch_enabled() {
+        ensure_managed_browser_ws_url(data_dir, target_url).ok()
+    } else {
+        None
+    }
+}
+
+/// Converts a recorded human takeover session into a replayable `RoutineRecord` (excluding masked secrets)
+/// and saves it atomically into `RoutineStore`.
+pub fn save_takeover_as_routine(
+    data_dir: &Path,
+    takeover_id: &str,
+    name: &str,
+) -> Result<RoutineRecord, String> {
+    let session = get_takeover_session(takeover_id)
+        .ok_or_else(|| "TAKEOVER_SESSION_NOT_FOUND".to_string())?;
+
+    let title = if name.trim().is_empty() {
+        format!("Browser Routine ({})", domain_from_url(&session.url))
+    } else {
+        name.trim().to_string()
+    };
+
+    let exported =
+        export_commands_to_routine_steps(&session.recorded_commands, Some(&session.url));
+
+    let routine_steps: Vec<RoutineStep> = exported
+        .into_iter()
+        .enumerate()
+        .map(|(idx, step_val)| {
+            let action = step_val
+                .get("action")
+                .and_then(Value::as_str)
+                .unwrap_or("open");
+            let (tool_name, description) = match action {
+                "open" => {
+                    let target = step_val
+                        .get("url")
+                        .or_else(|| step_val.get("navigation"))
+                        .and_then(Value::as_str)
+                        .unwrap_or(&session.url);
+                    ("browser_open".to_string(), format!("Open {}", target))
+                }
+                "click_xy" => {
+                    let x = step_val.get("x").and_then(Value::as_f64).unwrap_or(0.0);
+                    let y = step_val.get("y").and_then(Value::as_f64).unwrap_or(0.0);
+                    (
+                        "browser_click".to_string(),
+                        format!("Click viewport at ({:.0}, {:.0})", x, y),
+                    )
+                }
+                "drag_xy" => {
+                    let fx = step_val.get("from_x").and_then(Value::as_f64).unwrap_or(0.0);
+                    let fy = step_val.get("from_y").and_then(Value::as_f64).unwrap_or(0.0);
+                    let tx = step_val.get("to_x").and_then(Value::as_f64).unwrap_or(0.0);
+                    let ty = step_val.get("to_y").and_then(Value::as_f64).unwrap_or(0.0);
+                    (
+                        "browser_drag".to_string(),
+                        format!(
+                            "Drag slider from ({:.0}, {:.0}) to ({:.0}, {:.0})",
+                            fx, fy, tx, ty
+                        ),
+                    )
+                }
+                "type_text" => (
+                    "browser_type".to_string(),
+                    "Enter non-sensitive text".to_string(),
+                ),
+                "scroll" => {
+                    let dx = step_val.get("delta_x").and_then(Value::as_f64).unwrap_or(0.0);
+                    let dy = step_val.get("delta_y").and_then(Value::as_f64).unwrap_or(0.0);
+                    (
+                        "browser_scroll".to_string(),
+                        format!("Scroll viewport by ({:.0}, {:.0})", dx, dy),
+                    )
+                }
+                "key" => {
+                    let k = step_val.get("key").and_then(Value::as_str).unwrap_or("");
+                    ("browser_key".to_string(), format!("Press key {}", k))
+                }
+                _ => ("browser_open".to_string(), format!("Browser step {}", action)),
+            };
+
+            RoutineStep {
+                step_index: idx,
+                tool_name,
+                description,
+                args_template: step_val,
+            }
+        })
+        .collect();
+
+    let prompt_instruction = format!(
+        "Replay recorded browser takeover workflow '{}' starting at {}",
+        title, session.url
+    );
+    let record = capture_walkthrough_to_routine(
+        None,
+        &title,
+        &prompt_instruction,
+        RecurrenceRule::Daily { hour: 9, minute: 0 },
+        routine_steps,
+        None,
+    );
+
+    let mut store = RoutineStore::open(data_dir).map_err(|e| e.to_string())?;
+    store.save_routine(record).map_err(|e| e.to_string())
 }
 
 pub fn effective_security_policy() -> BrowserSecurityPolicy {
@@ -187,48 +539,6 @@ pub fn extract_query_param(query: &str, key: &str) -> Option<String> {
         }
     }
     None
-}
-
-pub fn check_ws_origin(origin_header: Option<&str>, host_header: Option<&str>) -> bool {
-    let Some(origin) = origin_header else {
-        return true;
-    };
-    let origin_host = origin
-        .split("://")
-        .nth(1)
-        .unwrap_or(origin)
-        .split('/')
-        .next()
-        .unwrap_or("")
-        .split(':')
-        .next()
-        .unwrap_or("");
-
-    let host = host_header.unwrap_or("").split(':').next().unwrap_or("");
-
-    if (origin_host == "localhost" || origin_host == "127.0.0.1")
-        && (host == "localhost" || host == "127.0.0.1")
-    {
-        return true;
-    }
-
-    if let Ok(pub_url) = std::env::var("BOB_NODE_PUBLIC_URL") {
-        let pub_host = pub_url
-            .split("://")
-            .nth(1)
-            .unwrap_or(&pub_url)
-            .split('/')
-            .next()
-            .unwrap_or("")
-            .split(':')
-            .next()
-            .unwrap_or("");
-        if !pub_host.is_empty() && origin_host.eq_ignore_ascii_case(pub_host) {
-            return true;
-        }
-    }
-
-    origin_host.eq_ignore_ascii_case(host)
 }
 
 // ---------------------------------------------------------------------------
@@ -282,6 +592,7 @@ pub fn register_browser_tools(bus: &mut BobToolBus, data_dir: &Path) {
 
     // 2. browser_snapshot
     {
+        let d = dir.clone();
         let spec = ToolSpec {
             name: "browser_snapshot".to_string(),
             description: "Captures an indexed AXTree snapshot of the active browser tab with password redaction."
@@ -292,8 +603,8 @@ pub fn register_browser_tools(bus: &mut BobToolBus, data_dir: &Path) {
         bus.register_custom_tool(
             spec,
             Arc::new(move |_args, _app| {
-                // If live CDP endpoint is configured
-                if let Ok(cdp_url) = std::env::var("BOB_BROWSER_CDP_WS_URL") {
+                // If live CDP endpoint or managed browser is configured
+                if let Some(cdp_url) = resolve_cdp_ws_url(&d, None) {
                     if let Ok(client) = CdpClient::connect(&cdp_url) {
                         let mut tab = bob_browser::BrowserTab::new(
                             client,
@@ -316,6 +627,7 @@ pub fn register_browser_tools(bus: &mut BobToolBus, data_dir: &Path) {
 
     // 3. browser_click
     {
+        let d = dir.clone();
         let spec = ToolSpec {
             name: "browser_click".to_string(),
             description: "Clicks on an indexed interactive element in the active browser tab."
@@ -337,7 +649,7 @@ pub fn register_browser_tools(bus: &mut BobToolBus, data_dir: &Path) {
                     .and_then(Value::as_u64)
                     .ok_or_else(|| "INDEX_REQUIRED".to_string())? as u32;
 
-                if let Ok(cdp_url) = std::env::var("BOB_BROWSER_CDP_WS_URL") {
+                if let Some(cdp_url) = resolve_cdp_ws_url(&d, None) {
                     if let Ok(client) = CdpClient::connect(&cdp_url) {
                         let mut tab = bob_browser::BrowserTab::new(
                             client,
@@ -392,11 +704,11 @@ pub fn register_browser_tools(bus: &mut BobToolBus, data_dir: &Path) {
 
                 // Try typing via live tab if connected
                 let mut takeover_reason = None;
-                let mut current_url = "https://example.com".to_string();
+                let mut current_url = "https://bob.example.com".to_string();
 
                 if is_sensitive {
                     takeover_reason = Some("Sensitive password or credential surface detected".to_string());
-                } else if let Ok(cdp_url) = std::env::var("BOB_BROWSER_CDP_WS_URL") {
+                } else if let Some(cdp_url) = resolve_cdp_ws_url(&d, None) {
                     if let Ok(client) = CdpClient::connect(&cdp_url) {
                         let mut tab = bob_browser::BrowserTab::new(
                             client,
@@ -430,7 +742,7 @@ pub fn register_browser_tools(bus: &mut BobToolBus, data_dir: &Path) {
                         remote_height: 844,
                         desktop_mode: false,
                         sensitive_input_focused: true,
-                        cdp_ws_url: std::env::var("BOB_BROWSER_CDP_WS_URL").ok(),
+                        cdp_ws_url: resolve_cdp_ws_url(&d, Some(&current_url)),
                         recorded_commands: Vec::new(),
                         completed: false,
                         created_at: now,
@@ -507,6 +819,7 @@ pub fn register_browser_tools(bus: &mut BobToolBus, data_dir: &Path) {
 
     // 5. browser_scroll
     {
+        let d = dir.clone();
         let spec = ToolSpec {
             name: "browser_scroll".to_string(),
             description: "Scrolls the browser viewport by the specified delta_x and delta_y."
@@ -534,7 +847,7 @@ pub fn register_browser_tools(bus: &mut BobToolBus, data_dir: &Path) {
                     .and_then(Value::as_f64)
                     .unwrap_or(0.0);
 
-                if let Ok(cdp_url) = std::env::var("BOB_BROWSER_CDP_WS_URL") {
+                if let Some(cdp_url) = resolve_cdp_ws_url(&d, None) {
                     if let Ok(client) = CdpClient::connect(&cdp_url) {
                         let mut tab = bob_browser::BrowserTab::new(
                             client,
@@ -608,7 +921,7 @@ pub fn register_browser_tools(bus: &mut BobToolBus, data_dir: &Path) {
                     remote_height: 844,
                     desktop_mode: false,
                     sensitive_input_focused: sensitive,
-                    cdp_ws_url: std::env::var("BOB_BROWSER_CDP_WS_URL").ok(),
+                    cdp_ws_url: resolve_cdp_ws_url(&d, Some(&validated_url)),
                     recorded_commands: Vec::new(),
                     completed: false,
                     created_at: now,
@@ -708,6 +1021,7 @@ pub fn handle_browser_rpc(
 
             let now = now_unix_secs();
             let takeover_id = next_takeover_id();
+            let cdp_ws_url = resolve_cdp_ws_url(data_dir, Some(&validated));
 
             let entry = TakeoverSessionEntry {
                 takeover_id: takeover_id.clone(),
@@ -718,7 +1032,7 @@ pub fn handle_browser_rpc(
                 remote_height: 844,
                 desktop_mode: false,
                 sensitive_input_focused: false,
-                cdp_ws_url: std::env::var("BOB_BROWSER_CDP_WS_URL").ok(),
+                cdp_ws_url,
                 recorded_commands: Vec::new(),
                 completed: false,
                 created_at: now,
@@ -752,11 +1066,8 @@ pub fn handle_browser_rpc(
                 .unwrap_or("*");
 
             let session_file = data_dir.join("browser_sessions.json");
-            let cdp_opt = if let Ok(cdp_url) = std::env::var("BOB_BROWSER_CDP_WS_URL") {
-                CdpClient::connect(&cdp_url).ok()
-            } else {
-                None
-            };
+            let cdp_opt = resolve_cdp_ws_url(data_dir, None)
+                .and_then(|cdp_url| CdpClient::connect(&cdp_url).ok());
 
             let _ = clear_site_session(&session_file, cdp_opt.as_ref(), domain);
             Ok(json!({ "cleared": true, "domain": domain }))
@@ -771,6 +1082,23 @@ pub fn handle_browser_rpc(
 
             complete_takeover_session(data_dir, id).map_err(|_| "TAKEOVER_COMPLETE_FAILED")?;
             Ok(json!({ "completed": true, "takeoverId": id, "takeover_id": id }))
+        }
+        "app_browser_takeover_save_routine" => {
+            let id = args
+                .get("takeoverId")
+                .or_else(|| args.get("takeover_id"))
+                .or_else(|| args.get("id"))
+                .and_then(Value::as_str)
+                .ok_or("TAKEOVER_ID_REQUIRED")?;
+            let name = args
+                .get("name")
+                .or_else(|| args.get("title"))
+                .and_then(Value::as_str)
+                .unwrap_or("Recorded Browser Routine");
+
+            let record = save_takeover_as_routine(data_dir, id, name)
+                .map_err(|_| "TAKEOVER_SAVE_ROUTINE_FAILED")?;
+            serde_json::to_value(record).map_err(|_| "BROWSER_SERIALIZE_FAILED")
         }
         _ => Err("COMMAND_UNKNOWN"),
     }
@@ -787,32 +1115,19 @@ pub fn handle_ws_upgrade(
     query: &str,
 ) {
     let mut mut_stream = stream;
+    let headers = parse_http_headers(header_text);
 
-    // Parse headers from header_text
-    let mut host_header: Option<String> = None;
-    let mut origin_header: Option<String> = None;
-    let mut sec_ws_key: Option<String> = None;
-
-    for line in header_text.lines() {
-        if let Some((k, v)) = line.split_once(':') {
-            let trimmed_k = k.trim().to_ascii_lowercase();
-            let trimmed_v = v.trim().to_string();
-            if trimmed_k == "host" {
-                host_header = Some(trimmed_v);
-            } else if trimmed_k == "origin" {
-                origin_header = Some(trimmed_v);
-            } else if trimmed_k == "sec-websocket-key" {
-                sec_ws_key = Some(trimmed_v);
-            }
-        }
-    }
-
-    // Origin Check (Cross-Site WebSocket Hijacking Defense)
-    if !check_ws_origin(origin_header.as_deref(), host_header.as_deref()) {
+    // Origin Check (Cross-Site WebSocket Hijacking & Reverse-Proxy Downgrade Defense)
+    if check_ws_origin(&headers).is_err() {
         let resp = "HTTP/1.1 403 Forbidden\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n{\"error\":\"WS_ORIGIN_FORBIDDEN\"}";
         let _ = mut_stream.write_all(resp.as_bytes());
         return;
     }
+
+    let sec_ws_key = headers
+        .get("sec-websocket-key")
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_string);
 
     let Some(ws_key) = sec_ws_key else {
         let resp = "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n{\"error\":\"SEC_WEBSOCKET_KEY_REQUIRED\"}";
@@ -846,18 +1161,19 @@ pub fn handle_ws_upgrade(
         .unwrap_or_else(|| format!("sess-{}", now_unix_secs()));
 
     // Get or initialize takeover session entry
-    let session_entry = get_takeover_session(&session_id).unwrap_or_else(|| {
+    let mut session_entry = get_takeover_session(&session_id).unwrap_or_else(|| {
         let now = now_unix_secs();
+        let default_url = "https://bob.example.com".to_string();
         let e = TakeoverSessionEntry {
             takeover_id: session_id.clone(),
-            url: "https://example.com".to_string(),
-            title: "example.com".to_string(),
+            url: default_url.clone(),
+            title: "bob.example.com".to_string(),
             reason: None,
             remote_width: 390,
             remote_height: 844,
             desktop_mode: false,
             sensitive_input_focused: false,
-            cdp_ws_url: std::env::var("BOB_BROWSER_CDP_WS_URL").ok(),
+            cdp_ws_url: resolve_cdp_ws_url(data_dir, Some(&default_url)),
             recorded_commands: Vec::new(),
             completed: false,
             created_at: now,
@@ -865,6 +1181,15 @@ pub fn handle_ws_upgrade(
         insert_takeover_session(e.clone());
         e
     });
+
+    if session_entry.cdp_ws_url.is_none() {
+        if let Some(resolved_ws) = resolve_cdp_ws_url(data_dir, Some(&session_entry.url)) {
+            session_entry.cdp_ws_url = Some(resolved_ws.clone());
+            update_takeover_session(&session_id, |e| {
+                e.cdp_ws_url = Some(resolved_ws);
+            });
+        }
+    }
 
     let mut screencast_bridge = ScreencastBridge::new();
     screencast_bridge.remote_width = session_entry.remote_width;
@@ -897,6 +1222,7 @@ pub fn handle_ws_upgrade(
         .and_then(|u| CdpClient::connect(u).ok());
 
     if let Some(ref cdp) = cdp_client {
+        let _ = cdp.enable_default_domains();
         let _ = screencast_bridge.start(cdp, screencast_bridge.remote_width, screencast_bridge.remote_height);
     }
 
@@ -907,20 +1233,10 @@ pub fn handle_ws_upgrade(
             Ok(tungstenite::Message::Text(txt)) => {
                 let cmd_res: Result<ClientTakeoverCommand, _> = serde_json::from_str(&txt);
                 if let Ok(cmd) = cmd_res {
-                    // Record command in session registry (redacting sensitive passwords)
-                    let sensitive = screencast_bridge.sensitive_input_focused;
+                    // Record command in session registry (redacting masked or sensitive inputs)
+                    let sanitized = screencast_bridge.sanitize_for_recording(&cmd);
                     update_takeover_session(&session_id, |entry| {
-                        if sensitive {
-                            if let ClientTakeoverCommand::InsertText { .. } = &cmd {
-                                entry.recorded_commands.push(ClientTakeoverCommand::InsertText {
-                                    text: "[REDACTED]".to_string(),
-                                });
-                            } else {
-                                entry.recorded_commands.push(cmd.clone());
-                            }
-                        } else {
-                            entry.recorded_commands.push(cmd.clone());
-                        }
+                        entry.recorded_commands.push(sanitized);
                     });
 
                     match &cmd {
@@ -1440,5 +1756,495 @@ mod tests {
         assert_eq!(res["error"], "BROWSER_PROFILE_FORBIDDEN");
 
         srv.shutdown();
+    }
+
+    fn make_headers(pairs: &[(&str, &str)]) -> HeaderMap {
+        let mut map = HeaderMap::new();
+        for (k, v) in pairs {
+            map.append(
+                HeaderName::from_bytes(k.as_bytes()).unwrap(),
+                HeaderValue::from_str(v).unwrap(),
+            );
+        }
+        map
+    }
+
+    #[test]
+    fn test_validate_ws_origin_reverse_proxy_and_downgrade_matrix() {
+        // 1. Direct localhost / 127.0.0.1 / IPv6 [::1]
+        let h_local = make_headers(&[
+            ("host", "127.0.0.1:8787"),
+            ("origin", "http://localhost:5173"),
+        ]);
+        assert_eq!(validate_ws_origin_with_env(&h_local, None, None), Ok(()));
+
+        let h_ipv6 = make_headers(&[
+            ("host", "[::1]:8787"),
+            ("origin", "http://[::1]:5173"),
+        ]);
+        assert_eq!(validate_ws_origin_with_env(&h_ipv6, None, None), Ok(()));
+
+        // Native CLI WebSocket client without Origin header
+        let h_no_origin = make_headers(&[("host", "127.0.0.1:8787")]);
+        assert_eq!(validate_ws_origin_with_env(&h_no_origin, None, None), Ok(()));
+
+        // 2. Reverse-proxy HTTPS/WSS with X-Forwarded-Host: bob.example.com + Host: 127.0.0.1:9527 (pure HeaderMap, no socket)
+        let h_rproxy = make_headers(&[
+            ("host", "127.0.0.1:9527"),
+            ("x-forwarded-host", "bob.example.com"),
+            ("x-forwarded-proto", "https"),
+            ("origin", "https://bob.example.com"),
+        ]);
+        assert_eq!(validate_ws_origin_with_env(&h_rproxy, None, None), Ok(()));
+
+        // Comma-separated X-Forwarded-Host list
+        let h_rproxy_chain = make_headers(&[
+            ("host", "127.0.0.1:9527"),
+            ("x-forwarded-host", "bob.example.com, proxy-internal.example.com:8443"),
+            ("x-forwarded-proto", "https, http"),
+            ("origin", "https://bob.example.com:443"),
+        ]);
+        assert_eq!(
+            validate_ws_origin_with_env(&h_rproxy_chain, None, None),
+            Ok(())
+        );
+
+        // 3. BOB_PUBLIC_DOMAIN=bob.example.com and BOB_NODE_PUBLIC_URL=https://bob.example.com
+        let h_env_domain = make_headers(&[
+            ("host", "127.0.0.1:9527"),
+            ("origin", "https://bob.example.com"),
+        ]);
+        assert_eq!(
+            validate_ws_origin_with_env(&h_env_domain, None, Some("bob.example.com")),
+            Ok(())
+        );
+        assert_eq!(
+            validate_ws_origin_with_env(
+                &h_env_domain,
+                Some("https://bob.example.com"),
+                None
+            ),
+            Ok(())
+        );
+
+        // 4. Protocol downgrade attack rejection (http:// Origin when X-Forwarded-Proto is https)
+        let h_downgrade = make_headers(&[
+            ("host", "127.0.0.1:9527"),
+            ("x-forwarded-host", "bob.example.com"),
+            ("x-forwarded-proto", "https"),
+            ("origin", "http://bob.example.com"),
+        ]);
+        assert_eq!(
+            validate_ws_origin_with_env(&h_downgrade, None, Some("bob.example.com")),
+            Err(StatusCode::FORBIDDEN)
+        );
+
+        let h_downgrade_pub_url = make_headers(&[
+            ("host", "127.0.0.1:9527"),
+            ("origin", "http://bob.example.com"),
+        ]);
+        assert_eq!(
+            validate_ws_origin_with_env(
+                &h_downgrade_pub_url,
+                Some("https://bob.example.com"),
+                None
+            ),
+            Err(StatusCode::FORBIDDEN)
+        );
+
+        // 5. Malicious cross-site origins strictly rejected
+        let h_attacker = make_headers(&[
+            ("host", "127.0.0.1:9527"),
+            ("x-forwarded-host", "bob.example.com"),
+            ("x-forwarded-proto", "https"),
+            ("origin", "https://attacker.example.com"),
+        ]);
+        assert_eq!(
+            validate_ws_origin_with_env(
+                &h_attacker,
+                Some("https://bob.example.com"),
+                Some("bob.example.com")
+            ),
+            Err(StatusCode::FORBIDDEN)
+        );
+
+        // Userinfo spoofing attempt (https://bob.example.com@attacker.example.com)
+        let h_userinfo = make_headers(&[
+            ("host", "bob.example.com"),
+            ("origin", "https://bob.example.com@attacker.example.com"),
+        ]);
+        assert_eq!(
+            validate_ws_origin_with_env(&h_userinfo, None, Some("bob.example.com")),
+            Err(StatusCode::FORBIDDEN)
+        );
+
+        // Null origin (sandboxed iframe) rejected
+        let h_null = make_headers(&[("host", "127.0.0.1:8787"), ("origin", "null")]);
+        assert_eq!(
+            validate_ws_origin_with_env(&h_null, None, None),
+            Err(StatusCode::FORBIDDEN)
+        );
+
+        // Localhost origin must NOT bypass non-loopback X-Forwarded-Host
+        let h_local_to_remote = make_headers(&[
+            ("host", "127.0.0.1:9527"),
+            ("x-forwarded-host", "bob.example.com"),
+            ("origin", "http://localhost:3000"),
+        ]);
+        assert_eq!(
+            validate_ws_origin_with_env(&h_local_to_remote, None, Some("bob.example.com")),
+            Err(StatusCode::FORBIDDEN)
+        );
+    }
+
+    #[test]
+    fn test_ws_takeover_real_headless_chromium_ime_slider_and_save_routine_e2e() {
+        if std::path::Path::new("/usr/bin/microsoft-edge").is_file()
+            || std::path::Path::new("/usr/bin/chromium").is_file()
+        {
+            assert!(
+                bob_browser::find_chromium_binary().is_ok(),
+                "Expected Chromium/Edge binary to be found on host"
+            );
+        }
+        if bob_browser::find_chromium_binary().is_err() {
+            eprintln!("Skipping real Chromium WS takeover test: no browser binary installed");
+            return;
+        }
+
+        // 1. Ephemeral local HTTP test page (CJK + slider + IME input + login cookie)
+        let html_listener =
+            std::net::TcpListener::bind("127.0.0.1:0").expect("bind ephemeral HTML server");
+        html_listener.set_nonblocking(true).unwrap();
+        let html_addr = html_listener.local_addr().unwrap();
+        let stop_html = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let stop_html_clone = Arc::clone(&stop_html);
+
+        let html_doc = r#"<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=390, initial-scale=1.0" />
+  <title>WS Takeover CJK Test</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { width: 390px; padding: 16px; background: #fff; font-family: sans-serif; }
+    #slider-track { position: relative; width: 320px; height: 48px; margin-top: 12px; background: #e2e8f0; }
+    #slider-thumb { position: absolute; left: 0; top: 0; width: 48px; height: 48px; background: #2563eb; }
+    #cjk-input { display: block; margin-top: 16px; width: 320px; height: 40px; }
+  </style>
+</head>
+<body>
+  <p id="cjk-text">中文渲染测试 · 日本語テスト · 한국어</p>
+  <div id="slider-track"><div id="slider-thumb"></div></div>
+  <input id="cjk-input" type="text" />
+  <script>
+    window.__sliderUnlocked = false;
+    const thumb = document.getElementById('slider-thumb');
+    let dragging = false, sx = 0;
+    thumb.addEventListener('mousedown', (e) => { dragging = true; sx = e.clientX; });
+    window.addEventListener('mousemove', (e) => {
+      if (dragging && e.buttons === 1) {
+        const dx = Math.max(0, Math.min(260, e.clientX - sx));
+        thumb.style.left = dx + 'px';
+        if (dx >= 200) window.__sliderUnlocked = true;
+      }
+    });
+    window.addEventListener('mouseup', () => { dragging = false; });
+  </script>
+</body>
+</html>"#;
+
+        let html_thread = std::thread::spawn(move || {
+            while !stop_html_clone.load(std::sync::atomic::Ordering::Relaxed) {
+                match html_listener.accept() {
+                    Ok((mut s, _)) => {
+                        let _ = s.set_read_timeout(Some(Duration::from_millis(500)));
+                        let mut buf = [0u8; 2048];
+                        let _ = s.read(&mut buf);
+                        let resp = format!(
+                            "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nSet-Cookie: bob_session=verified_persist_123; Max-Age=3600; Path=/\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                            html_doc.len(),
+                            html_doc
+                        );
+                        let _ = s.write_all(resp.as_bytes());
+                    }
+                    Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                        std::thread::sleep(Duration::from_millis(15));
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+
+        // 2. Spawn bob-node on 127.0.0.1:0 with isolated tempdir
+        let td = tempdir().unwrap();
+        let db_path = td.path().join("kernel.sqlite");
+        let _ = LocalApp::open(&db_path).unwrap();
+
+        let page_url = format!("http://{}/portal", html_addr);
+        let cdp_ws_url = ensure_managed_browser_ws_url(td.path(), Some(&page_url))
+            .expect("launch managed headless Chromium");
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(td.path().join("browser_profile"))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777;
+            assert_eq!(mode, 0o700);
+        }
+
+        // Wait until page finishes loading in headless Chromium and read exact coordinates
+        let (tx, ty, ix, iy) = {
+            let cdp = CdpClient::connect(&cdp_ws_url).expect("connect cdp");
+            let _ = cdp.send_command(
+                "Emulation.setDeviceMetricsOverride",
+                Some(json!({
+                    "width": 390,
+                    "height": 844,
+                    "deviceScaleFactor": 2,
+                    "mobile": true
+                })),
+                Duration::from_secs(3),
+            );
+            let start = std::time::Instant::now();
+            while start.elapsed() < Duration::from_secs(5) {
+                if cdp
+                    .evaluate("document.readyState === 'complete' && !!document.getElementById('slider-thumb')")
+                    .unwrap_or(json!(false))
+                    == json!(true)
+                {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            let coords = cdp
+                .evaluate(
+                    r#"(() => {
+                        const t = document.getElementById('slider-thumb').getBoundingClientRect();
+                        const i = document.getElementById('cjk-input').getBoundingClientRect();
+                        return { tx: t.left + t.width / 2, ty: t.top + t.height / 2, ix: i.left + i.width / 2, iy: i.top + i.height / 2 };
+                    })()"#,
+                )
+                .unwrap();
+            (
+                coords["tx"].as_f64().unwrap(),
+                coords["ty"].as_f64().unwrap(),
+                coords["ix"].as_f64().unwrap(),
+                coords["iy"].as_f64().unwrap(),
+            )
+        };
+        std::thread::sleep(Duration::from_millis(80));
+
+        let takeover_id = next_takeover_id();
+        insert_takeover_session(TakeoverSessionEntry {
+            takeover_id: takeover_id.clone(),
+            url: page_url.clone(),
+            title: "bob.example.com".to_string(),
+            reason: Some("Slider verification and CJK login".to_string()),
+            remote_width: 390,
+            remote_height: 844,
+            desktop_mode: false,
+            sensitive_input_focused: false,
+            cdp_ws_url: Some(cdp_ws_url.clone()),
+            recorded_commands: Vec::new(),
+            completed: false,
+            created_at: now_unix_secs(),
+        });
+
+        let cfg = BobNodeConfig {
+            bind_addr: "127.0.0.1:0".to_string(),
+            data_dir: td.path().to_path_buf(),
+            static_dir: None,
+            legacy_db_path: None,
+        };
+        let srv = spawn_node_server(cfg).expect("spawn node server");
+        let node_addr = srv.local_addr;
+
+        // 3. Connect WebSocket simulating HTTPS reverse proxy headers (X-Forwarded-Host: bob.example.com)
+        let ws_req = tungstenite::http::Request::builder()
+            .uri(format!(
+                "ws://{node_addr}/api/ws/browser-takeover?session_id={takeover_id}"
+            ))
+            .header("Host", node_addr.to_string())
+            .header("X-Forwarded-Host", "bob.example.com")
+            .header("X-Forwarded-Proto", "https")
+            .header("Origin", "https://bob.example.com")
+            .header(
+                "Sec-WebSocket-Key",
+                tungstenite::handshake::client::generate_key(),
+            )
+            .header("Sec-WebSocket-Version", "13")
+            .header("Connection", "Upgrade")
+            .header("Upgrade", "websocket")
+            .body(())
+            .unwrap();
+
+        let (mut ws_socket, _) =
+            tungstenite::connect(ws_req).expect("WS upgrade behind reverse-proxy headers");
+
+        // Read initial viewport_meta
+        let first_msg = ws_socket.read().expect("read initial viewport_meta");
+        if let tungstenite::Message::Text(txt) = first_msg {
+            let meta: Value = serde_json::from_str(&txt).unwrap();
+            assert_eq!(meta["type"], "viewport_meta");
+            assert_eq!(meta["remote_width"], 390);
+        } else {
+            panic!("Expected viewport_meta text frame");
+        }
+
+        // Send smooth slider drag over WebSocket
+        ws_socket
+            .send(tungstenite::Message::Text(
+                json!({ "type": "pointer_down", "x": tx, "y": ty, "button": "left" })
+                    .to_string()
+                    .into(),
+            ))
+            .unwrap();
+        for step in 1..=8 {
+            let cur_x = tx + (230.0 * (step as f64) / 8.0);
+            ws_socket
+                .send(tungstenite::Message::Text(
+                    json!({ "type": "pointer_move", "x": cur_x, "y": ty })
+                        .to_string()
+                        .into(),
+                ))
+                .unwrap();
+        }
+        ws_socket
+            .send(tungstenite::Message::Text(
+                json!({ "type": "pointer_up", "x": tx + 230.0, "y": ty, "button": "left" })
+                    .to_string()
+                    .into(),
+            ))
+            .unwrap();
+
+        // Click #cjk-input and send IME composition + commit + masked secret
+        ws_socket
+            .send(tungstenite::Message::Text(
+                json!({ "type": "pointer_down", "x": ix, "y": iy }).to_string().into(),
+            ))
+            .unwrap();
+        ws_socket
+            .send(tungstenite::Message::Text(
+                json!({ "type": "pointer_up", "x": ix, "y": iy }).to_string().into(),
+            ))
+            .unwrap();
+        ws_socket
+            .send(tungstenite::Message::Text(
+                json!({
+                    "type": "ime_set_composition",
+                    "text": "nihao",
+                    "selectionStart": 0,
+                    "selectionEnd": 5
+                })
+                .to_string()
+                .into(),
+            ))
+            .unwrap();
+        ws_socket
+            .send(tungstenite::Message::Text(
+                json!({
+                    "type": "ime_commit",
+                    "text": "你好世界",
+                    "masked": false
+                })
+                .to_string()
+                .into(),
+            ))
+            .unwrap();
+        ws_socket
+            .send(tungstenite::Message::Text(
+                json!({
+                    "type": "insert_text",
+                    "text": "MaskedOtpSecret999",
+                    "masked": true
+                })
+                .to_string()
+                .into(),
+            ))
+            .unwrap();
+        ws_socket
+            .send(tungstenite::Message::Text(
+                json!({ "type": "complete" }).to_string().into(),
+            ))
+            .unwrap();
+
+        // Read until takeover_ended (screencast JPEG frames may arrive before takeover_ended)
+        let mut saw_ended = false;
+        for _ in 0..30 {
+            if let Ok(tungstenite::Message::Text(txt)) = ws_socket.read() {
+                if let Ok(v) = serde_json::from_str::<Value>(&txt) {
+                    if v["type"] == "takeover_ended" {
+                        saw_ended = true;
+                        break;
+                    }
+                }
+            }
+        }
+        assert!(saw_ended, "Expected takeover_ended over WebSocket");
+        drop(ws_socket);
+        std::thread::sleep(Duration::from_millis(80));
+
+        // Verify slider unlocked and CJK input committed in live Chromium DOM
+        {
+            let cdp = CdpClient::connect(&cdp_ws_url).expect("reconnect cdp to inspect DOM");
+            let state = cdp
+                .evaluate(
+                    "({ unlocked: window.__sliderUnlocked, val: document.getElementById('cjk-input').value })",
+                )
+                .unwrap();
+            assert_eq!(state["unlocked"], json!(true));
+            assert!(
+                state["val"]
+                    .as_str()
+                    .unwrap_or("")
+                    .starts_with("你好世界"),
+                "Expected committed CJK text in input, got {state}"
+            );
+        }
+
+        // 4. Save takeover session into RoutineStore via RPC handler and verify RoutineRecord
+        let saved_val = handle_browser_rpc(
+            td.path(),
+            "app_browser_takeover_save_routine",
+            &json!({
+                "takeover_id": takeover_id,
+                "name": "Portal CJK Walkthrough"
+            }),
+        )
+        .expect("app_browser_takeover_save_routine succeeded");
+
+        let saved_json_str = serde_json::to_string(&saved_val).unwrap();
+        assert!(!saved_json_str.contains("MaskedOtpSecret999"));
+        assert!(!saved_json_str.contains("[REDACTED]"));
+        assert!(saved_json_str.contains("你好世界"));
+
+        let routine_store = RoutineStore::open(td.path()).expect("open RoutineStore");
+        let routines = routine_store.list();
+        assert_eq!(routines.len(), 1);
+        assert_eq!(routines[0].title, "Portal CJK Walkthrough");
+        assert!(
+            routines[0]
+                .routine_steps
+                .iter()
+                .any(|s| s.tool_name == "browser_drag"),
+            "Saved RoutineRecord must include replayable slider drag step"
+        );
+        assert!(
+            routines[0]
+                .routine_steps
+                .iter()
+                .any(|s| s.tool_name == "browser_type" && s.args_template["text"] == "你好世界"),
+            "Saved RoutineRecord must include non-masked CJK type_text step"
+        );
+
+        shutdown_managed_browser(td.path());
+        srv.shutdown();
+        stop_html.store(true, std::sync::atomic::Ordering::Relaxed);
+        let _ = html_thread.join();
     }
 }

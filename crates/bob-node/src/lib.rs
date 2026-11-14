@@ -17,6 +17,7 @@ mod inbox_triage;
 mod context_capsule;
 mod claude_rpc;
 pub mod node_access;
+pub mod onboarding;
 pub mod jarvis;
 pub mod push_channels;
 pub mod browser_ws;
@@ -2926,6 +2927,101 @@ fn handle_connection(mut stream: TcpStream, state: Arc<Mutex<NodeContext>>) {
 
     // A configured standalone node owns its authentication boundary, including RPC.
     let access_dir = match state.lock() { Ok(g) => g.runtime.data_dir.clone(), Err(_) => return };
+
+    if method == "OPTIONS" {
+        let resp = "HTTP/1.1 204 No Content\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type, Authorization, X-Bob-Rpc\r\nConnection: close\r\n\r\n";
+        let _ = stream.write_all(resp.as_bytes());
+        return;
+    }
+
+    if path == "/api/capabilities" && method == "GET" {
+        let mut cap_val = serde_json::to_value(RuntimeCapabilityManifest::headless_node())
+            .unwrap_or_else(|_| json!({}));
+        let needs = {
+            let guard = state.lock().ok();
+            onboarding::needs_onboarding(&access_dir, guard.as_ref().map(|g| &g.runtime))
+        };
+        cap_val["needsOnboarding"] = json!(needs);
+        cap_val["needs_onboarding"] = json!(needs);
+        write_json_response(&mut stream, 200, &cap_val.to_string());
+        return;
+    }
+
+    if path == "/api/node/v1/onboarding/status" {
+        if method != "GET" {
+            write_json_response(&mut stream, 405, r#"{"ok":false,"error":"METHOD_NOT_ALLOWED"}"#);
+            return;
+        }
+        let status_val = {
+            let guard = state.lock().ok();
+            onboarding::status_json(&access_dir, guard.as_ref().map(|g| &g.runtime), now_millis())
+        };
+        write_json_response(&mut stream, 200, &status_val.to_string());
+        return;
+    }
+
+    if path == "/api/node/v1/onboarding/claim" {
+        if method != "POST" {
+            write_json_response(&mut stream, 405, r#"{"ok":false,"error":"METHOD_NOT_ALLOWED"}"#);
+            return;
+        }
+        let parsed: Value = match serde_json::from_str::<Value>(&body_str) {
+            Ok(v) if v.is_object() => v,
+            _ => {
+                write_json_response(&mut stream, 400, r#"{"ok":false,"error":"NODE_BODY_INVALID"}"#);
+                return;
+            }
+        };
+        let (status, val) = onboarding::claim_node(&access_dir, &parsed, now_millis());
+        write_json_response(&mut stream, status, &val.to_string());
+        return;
+    }
+
+    if path == "/api/node/v1/onboarding/provider" {
+        if method != "POST" {
+            write_json_response(&mut stream, 405, r#"{"ok":false,"error":"METHOD_NOT_ALLOWED"}"#);
+            return;
+        }
+        let parsed: Value = match serde_json::from_str::<Value>(&body_str) {
+            Ok(v) if v.is_object() => v,
+            _ => {
+                write_json_response(&mut stream, 400, r#"{"ok":false,"error":"NODE_BODY_INVALID"}"#);
+                return;
+            }
+        };
+        let (status, val) = onboarding::configure_provider(
+            &state,
+            &access_dir,
+            auth_header.as_deref(),
+            &parsed,
+            now_millis(),
+        );
+        write_json_response(&mut stream, status, &val.to_string());
+        return;
+    }
+
+    if path == "/api/node/v1/onboarding/persona" {
+        if method != "POST" {
+            write_json_response(&mut stream, 405, r#"{"ok":false,"error":"METHOD_NOT_ALLOWED"}"#);
+            return;
+        }
+        let parsed: Value = match serde_json::from_str::<Value>(&body_str) {
+            Ok(v) if v.is_object() => v,
+            _ => {
+                write_json_response(&mut stream, 400, r#"{"ok":false,"error":"NODE_BODY_INVALID"}"#);
+                return;
+            }
+        };
+        let (status, val) = onboarding::complete_persona(
+            &access_dir,
+            auth_header.as_deref(),
+            &parsed,
+            now_millis(),
+        );
+        write_json_response(&mut stream, status, &val.to_string());
+        return;
+    }
+
     if node_access::enabled(&access_dir) {
         let mut node_path = path.strip_prefix("/api/node/v1/").map(str::to_owned);
         let mut parsed: Value = serde_json::from_str(&body_str).unwrap_or_else(|_|json!({}));
@@ -2948,11 +3044,11 @@ fn handle_connection(mut stream: TcpStream, state: Arc<Mutex<NodeContext>>) {
                 Ok(_) => path == "/api/ws/browser-takeover" || path.starts_with("/api/f/") || path.strip_prefix("/api/rpc/").is_some_and(|cmd|matches!(cmd,
                     "app_dsh_live"|"app_dsh_create"|"app_dsh_cancel"|"app_native_setup"|"app_native_events"|"app_native_cancel"|"app_native_permission"|"app_dsh_list"|"app_dsh_page"|"app_dsh_history"|"app_dsh_preview"|"app_dsh_prompt"|"app_dsh_receipt"|
                     "app_harness_discover"|"app_harness_check_auth"|"app_harness_verify_capabilities"|
-                    "app_jarvis_chat"|"app_jarvis_approve"|"app_jarvis_reject"|"app_jarvis_approvals_list"|"app_jarvis_budget_get"|"app_jarvis_budget_set"|
-                    "app_features_list"|"app_feature_keep"|"app_feature_rollback"|"app_feature_toggle"|"app_feature_call"|"app_feature_storage_save"|
+                    "app_jarvis_chat"|"app_jarvis_approve"|"app_jarvis_reject"|"app_jarvis_approvals_list"|"app_jarvis_budget_get"|"app_jarvis_budget_set"|"app_jarvis_worker_tasks"|"app_jarvis_worker_cancel"|"app_model_presets_list"|
+                    "app_features_list"|"app_feature_keep"|"app_feature_rollback"|"app_feature_toggle"|"app_feature_call"|"app_feature_storage_save"|"app_feature_report_error"|
                     "app_routines_list"|"app_routine_save"|"app_routine_trial"|"app_routine_toggle"|"app_routine_delete"|"app_routine_drafts_list"|
                     "app_push_vapid_public_key"|"app_push_subscribe"|"app_proactivity_get"|"app_proactivity_set"|"app_morning_brief"|"app_dream_run"|"app_kb_search"|
-                    "app_browser_sessions_list"|"app_browser_session_open"|"app_browser_session_clear"|"app_browser_takeover_complete"|
+                    "app_browser_sessions_list"|"app_browser_session_open"|"app_browser_session_clear"|"app_browser_takeover_complete"|"app_browser_takeover_save_routine"|
                     "app_host_workspaces_list"|"app_host_workspace_grant"|"app_host_workspace_revoke"|"app_host_queue_list"|"app_host_queue_enqueue"|"app_host_queue_reconcile")),
                 Err(_) => false,
             };
@@ -3650,6 +3746,11 @@ impl RunningNodeServer {
         let _ = TcpStream::connect_timeout(&self.local_addr, Duration::from_millis(100));
     }
 
+    pub fn bootstrap_pairing_code(&self) -> Option<String> {
+        let guard = self.state.lock().ok()?;
+        onboarding::peek_bootstrap_code(&guard.runtime.data_dir, now_millis())
+    }
+
     pub fn issue_startup_pairing(
         &self,
         public_url: Option<&str>,
@@ -3735,7 +3836,13 @@ impl RunningNodeServer {
 pub fn spawn_node_server(config: BobNodeConfig) -> Result<RunningNodeServer, &'static str> {
     let listener = TcpListener::bind(&config.bind_addr).map_err(|_| "BIND_FAILED")?;
     let local_addr = listener.local_addr().map_err(|_| "LOCAL_ADDR_FAILED")?;
-    let ctx = Arc::new(Mutex::new(NodeContext::open(&config)?));
+    let node_ctx = NodeContext::open(&config)?;
+    if !node_access::enabled(&config.data_dir)
+        && onboarding::needs_onboarding(&config.data_dir, Some(&node_ctx.runtime))
+    {
+        let _ = onboarding::ensure_bootstrap_code(&config.data_dir, now_millis());
+    }
+    let ctx = Arc::new(Mutex::new(node_ctx));
     let ctx_handle = ctx.clone();
     let stop = Arc::new(AtomicBool::new(false));
     let stop_flag = stop.clone();

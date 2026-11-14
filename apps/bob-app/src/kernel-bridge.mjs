@@ -150,6 +150,7 @@ export function createKernelBridge(invoke, isAvailable) {
     routeGet: sessionId => call('app_route_get', { sessionId }),
     routeSet: (sessionId, route) => call('app_route_set', { sessionId, route }),
     modelHubGet: () => call('app_model_hub_get'),
+    modelPresetsList: () => call('app_model_presets_list', {}),
     providerKeySet: (providerIdOrObj, apiKey, clearKey) => {
       if (typeof providerIdOrObj === 'object' && providerIdOrObj !== null) {
         return call('app_provider_key_set', {
@@ -349,6 +350,9 @@ export function createKernelBridge(invoke, isAvailable) {
     cancel: executionId => call('app_cancel', { executionId }),
     jarvisChat: ({ sessionId, requestId, messageId = null, content = null }) =>
       call('app_jarvis_chat', { sessionId, requestId, messageId, content }),
+    jarvisWorkerTasks: (sessionId = null, afterSeq = 0) =>
+      call('app_jarvis_worker_tasks', { sessionId, afterSeq }),
+    jarvisWorkerCancel: taskId => call('app_jarvis_worker_cancel', { taskId }),
     jarvisApprovalsList: (sessionId = null) => call('app_jarvis_approvals_list', { sessionId }),
     jarvisApprove: approvalId => call('app_jarvis_approve', { approvalId }),
     jarvisReject: approvalId => call('app_jarvis_reject', { approvalId }),
@@ -363,6 +367,7 @@ export function createKernelBridge(invoke, isAvailable) {
       call('app_feature_call', { name, route, payload }),
     featureSaveStorage: (name, storage) =>
       call('app_feature_storage_save', { name, storage }),
+    featureReportError: (name, error) => call('app_feature_report_error', { name, error }),
     browserSessionsList: () => call('app_browser_sessions_list', {}),
     browserSessionOpen: target => call('app_browser_session_open', { target }),
     browserSessionClear: domain => call('app_browser_session_clear', { domain }),
